@@ -20,14 +20,17 @@ export function SidebarCustomizePanel({
 }) {
   const testId =
     testIdPrefix === undefined ? undefined : `${testIdPrefix}-customize-inline`;
+
   const containerRef = useRef<HTMLDivElement>(null);
   const doneButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (variant === "compact") {
       doneButtonRef.current?.focus();
+
       return;
     }
+
     containerRef.current
       ?.querySelector<HTMLElement>("[data-sidebar-customize-launch]")
       ?.focus();

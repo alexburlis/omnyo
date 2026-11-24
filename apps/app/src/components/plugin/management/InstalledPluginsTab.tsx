@@ -1,61 +1,75 @@
 import { usePluginEnabledMutation } from "@/components/plugin/usePluginEnabledMutation";
 import { useState } from "react";
-import { EmptyState } from "@bb/shared-ui/empty-state";
-import { Switch } from "@bb/shared-ui/switch";
-import { ResourceIconFrame } from "@bb/shared-ui/resource-list";
+import { EmptyStateBlock } from "@omnyo/shared-ui/empty-state";
+import { Switch } from "@omnyo/shared-ui/switch";
+import { ResourceIconFrame } from "@omnyo/shared-ui/resource-list";
 import type { PluginListItem } from "@/hooks/queries/plugin-settings-queries";
 import { pluginNeedsAttention } from "@/hooks/usePluginAttention";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   pluginRowSignal,
   pluginRuntimeStatusPresentation,
 } from "./plugin-status";
 import { PluginRowSignalView, PluginSignalLogo } from "./PluginRowSignal";
 import {
+  OmnyoAuthorByline,
   PluginCard,
   PluginCardGrid,
   PluginCardAuthor,
   PluginAuthorByline,
 } from "./PluginCard";
-import { installedPluginCatalogEntry } from "./installed-plugin-catalog";
-import {
-  usePluginCatalogSearch,
-  type PluginCatalogSearchEntry,
-} from "@/hooks/queries/plugin-catalog-queries";
+import { PluginOfficialBadge } from "./PluginOfficialBadge";
+import { pluginIsOfficial } from "./installed-plugin-catalog";
+import type { PluginCatalogSearchEntry } from "@/hooks/queries/plugin-catalog-queries";
 import { UpdatePluginDialog } from "./UpdatePluginDialog";
 import { PluginLogo } from "./plugin-ui";
 
 export function InstalledPluginsTab({
-  plugins,
+  entries,
   onOpenPlugin,
 }: {
-  plugins: readonly PluginListItem[];
+  entries: readonly {
+    plugin: PluginListItem;
+    catalogEntry?: PluginCatalogSearchEntry;
+  }[];
   onOpenPlugin: (pluginId: string, trigger: HTMLButtonElement) => void;
 }) {
-  const catalogQuery = usePluginCatalogSearch("", { enabled: true });
   const [updateTargetId, setUpdateTargetId] = useState<string | null>(null);
+
   const updateTarget =
     updateTargetId === null
       ? null
-      : (plugins.find((plugin) => plugin.id === updateTargetId) ?? null);
+      : (entries.find(({ plugin }) => plugin.id === updateTargetId)?.plugin ??
+        null);
 
-  if (plugins.length === 0) {
+  if (entries.length === 0) {
     return (
-      <EmptyState message="No plugins installed. Browse the catalog, create a plugin, or run bb plugin install <source>." />
+      <div className="rounded-xl border border-dashed border-border">
+        <EmptyStateBlock
+          icon="Puzzle"
+          title="No plugins installed yet"
+          description={
+            <>
+              Browse the catalog or create a plugin. From a terminal, run{" "}
+              <code className="rounded bg-state-hover px-1 py-px font-mono text-xs text-foreground">
+                omnyo plugin install &lt;source&gt;
+              </code>
+              .
+            </>
+          }
+        />
+      </div>
     );
   }
 
   return (
     <>
       <PluginCardGrid>
-        {plugins.map((plugin) => (
+        {entries.map(({ plugin, catalogEntry }) => (
           <InstalledPluginRow
             key={plugin.id}
             plugin={plugin}
-            catalogEntry={installedPluginCatalogEntry(
-              plugin,
-              catalogQuery.data?.entries ?? [],
-            )}
+            catalogEntry={catalogEntry}
             onUpdateClick={() => setUpdateTargetId(plugin.id)}
             onOpenPlugin={onOpenPlugin}
           />
@@ -87,14 +101,17 @@ export function InstalledPluginRow({
 }) {
   const { toggle, enabled } = usePluginEnabledMutation(plugin);
   const isLocal = plugin.source.startsWith("path:");
+  const official = pluginIsOfficial(plugin, catalogEntry);
   const signal = pluginRowSignal(plugin);
   const statusSignal = signal?.kind === "status" ? signal : null;
   const updateSignal = signal?.kind === "update" ? signal : null;
   const runtimeStatus = pluginRuntimeStatusPresentation(plugin);
+
   const notRunning = pluginNeedsAttention({
     enabled: enabled === true,
     status: plugin.status,
   });
+
   const runtimeStatusToneClass =
     runtimeStatus?.tone === "error"
       ? "text-destructive-text"
@@ -104,6 +121,7 @@ export function InstalledPluginRow({
 
   const openDetail = (trigger: HTMLButtonElement) =>
     onOpenPlugin(plugin.id, trigger);
+
   return (
     <div data-testid={`plugin-row-${plugin.id}`}>
       <PluginCard
@@ -116,21 +134,36 @@ export function InstalledPluginRow({
         }
         title={plugin.name ?? plugin.id}
         byline={
-          isLocal ? "Local" : catalogEntry !== undefined ? (
-            <PluginCardAuthor entry={catalogEntry} />
+          catalogEntry !== undefined ? (
+            <PluginCardAuthor
+              entry={{
+                ...catalogEntry,
+                author: plugin.author ?? catalogEntry.author,
+                official,
+              }}
+            />
+          ) : plugin.author != null ? (
+            <PluginAuthorByline
+              name={plugin.author.name}
+              github={plugin.author.github}
+              official={official}
+            >
+              {plugin.author.name}
+            </PluginAuthorByline>
+          ) : isLocal ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 truncate">Local</span>
+              {official ? <PluginOfficialBadge /> : null}
+            </span>
+          ) : plugin.provenance === "builtin" ? (
+            <OmnyoAuthorByline official={official} />
           ) : plugin.publisherLabel !== null ? (
             <PluginAuthorByline
-              name={
-                plugin.provenance === "builtin"
-                  ? "BB Official"
-                  : plugin.publisherLabel
-              }
+              name={plugin.publisherLabel}
               github={null}
-              official={plugin.provenance === "builtin"}
+              official={official}
             >
-              {plugin.provenance === "builtin"
-                ? "BB Official"
-                : plugin.publisherLabel}
+              {plugin.publisherLabel}
             </PluginAuthorByline>
           ) : null
         }
@@ -169,6 +202,14 @@ export function InstalledPluginRow({
                 className={cn("sr-only", runtimeStatusToneClass)}
               >
                 not running
+              </span>
+            ) : null}
+            {enabled === false ? (
+              <span
+                aria-hidden="true"
+                className="text-xs text-muted-foreground"
+              >
+                Off
               </span>
             ) : null}
             <Switch

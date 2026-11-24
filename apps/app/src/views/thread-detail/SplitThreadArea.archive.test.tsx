@@ -17,7 +17,7 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { threadQueryKey } from "@/hooks/queries/query-keys";
 import { useThread } from "@/hooks/queries/thread-queries";
@@ -45,10 +45,12 @@ let pendingArchive: {
 function deferArchive() {
   let resolve!: () => void;
   let reject!: (reason: unknown) => void;
+
   const promise = new Promise<void>((res, rej) => {
     resolve = () => res();
     reject = rej;
   });
+
   pendingArchive = { promise, resolve, reject };
 }
 
@@ -78,6 +80,7 @@ vi.mock("./ThreadDetailView", () => ({
   ThreadDetailView: ({ threadId }: { threadId: string }) => {
     const pane = useContext(PaneContext);
     const { data: thread } = useThread(threadId);
+
     return (
       <div
         data-testid={`pane-${threadId}`}
@@ -90,6 +93,7 @@ vi.mock("./ThreadDetailView", () => ({
 
 function ArchiveHarness({ threadId }: { threadId: string }) {
   const queryClient = useQueryClient();
+
   const mutation = useMutation({
     meta: { lifecycleOperation: "archive_thread" },
     mutationFn: () => pendingArchive!.promise,
@@ -97,10 +101,12 @@ function ArchiveHarness({ threadId }: { threadId: string }) {
       const previous = queryClient.getQueryData<SeedThread>(
         threadQueryKey(threadId),
       );
+
       queryClient.setQueryData<SeedThread>(
         threadQueryKey(threadId),
         (thread) => (thread ? { ...thread, archivedAt: ARCHIVED_AT } : thread),
       );
+
       return { previous };
     },
     onError: (_error, _variables, context) => {
@@ -110,6 +116,7 @@ function ArchiveHarness({ threadId }: { threadId: string }) {
       );
     },
   });
+
   return (
     <button
       type="button"
@@ -123,11 +130,13 @@ function ArchiveHarness({ threadId }: { threadId: string }) {
 
 function LocationProbe() {
   const location = useLocation();
+
   return <div data-testid="location">{location.pathname}</div>;
 }
 
 function UnarchiveHarness() {
   const mutation = useUnarchiveThread();
+
   return (
     <button
       type="button"
@@ -145,6 +154,7 @@ function twoPaneLayout(focusedPaneId: "pane-1" | "pane-2"): SplitLayout {
     projectId: PERSONAL_PROJECT_ID,
     threadId,
   });
+
   return {
     root: {
       type: "split",
@@ -163,6 +173,7 @@ function renderArchiveScenario(initialArchivedAt: number | null = null) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+
   for (const id of ["thr-a", "thr-b"]) {
     queryClient.setQueryData<SeedThread>(threadQueryKey(id), {
       id,
@@ -170,6 +181,7 @@ function renderArchiveScenario(initialArchivedAt: number | null = null) {
       deletedAt: null,
     });
   }
+
   const store = createStore();
   store.set(splitLayoutAtom, twoPaneLayout("pane-2"));
   render(
@@ -186,6 +198,7 @@ function renderArchiveScenario(initialArchivedAt: number | null = null) {
       </QueryClientProvider>
     </JotaiProvider>,
   );
+
   return queryClient;
 }
 
@@ -208,7 +221,9 @@ describe("SplitThreadArea archive pruning", () => {
 
     fireEvent.click(screen.getByTestId("unarchive"));
     await waitFor(() => expect(archivedAtOf(queryClient, "thr-b")).toBeNull());
-    await act(async () => pendingArchive!.reject(new Error("unarchive failed")));
+    await act(async () =>
+      pendingArchive!.reject(new Error("unarchive failed")),
+    );
 
     await waitFor(() =>
       expect(archivedAtOf(queryClient, "thr-b")).toBe(ARCHIVED_AT),

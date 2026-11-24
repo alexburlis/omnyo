@@ -10,6 +10,7 @@ const range = {
   to: z.number().int().nonnegative(),
   label: z.string(),
 };
+
 const mentionSchema = z.discriminatedUnion("kind", [
   z.object({
     ...range,
@@ -48,6 +49,7 @@ const mentionSchema = z.discriminatedUnion("kind", [
     icon: z.string().nullable().optional(),
   }),
 ]);
+
 const attachmentFields = {
   type: z.enum(["localImage", "localFile"]),
   path: z.string().min(1),
@@ -55,6 +57,7 @@ const attachmentFields = {
   mimeType: z.string().optional(),
   sizeBytes: z.number().nonnegative().optional(),
 };
+
 const attachmentsSchema = z.array(
   z.union([
     z.object({
@@ -69,6 +72,7 @@ const attachmentsSchema = z.array(
     }),
   ]),
 );
+
 const replacementSchema = z
   .object({
     text: z.string(),
@@ -77,6 +81,7 @@ const replacementSchema = z
   })
   .superRefine((draft, context) => {
     let end = 0;
+
     for (const mention of [...draft.mentions].sort((a, b) => a.from - b.from)) {
       if (
         mention.from < end ||
@@ -89,6 +94,7 @@ const replacementSchema = z
             "Mention ranges must be non-overlapping and inside the draft text.",
         });
       }
+
       end = mention.to;
     }
   });
@@ -105,9 +111,12 @@ export function createComposerDraftActions(
     content: ComposerDraftSnapshot;
     snapshot: ComposerDraftSnapshot;
   } | null = null;
+
   const snapshotOf = (current: DraftTarget): ComposerDraftSnapshot => {
     const content = current.getDraft();
+
     if (cached?.content === content) return cached.snapshot;
+
     const snapshot = Object.freeze({
       text: content.text,
       mentions: Object.freeze(
@@ -119,13 +128,17 @@ export function createComposerDraftActions(
         ),
       ),
     });
+
     cached = { content, snapshot };
+
     return snapshot;
   };
+
   const requireAvailable = (current: DraftTarget) => {
     if (!current.isAvailable())
       throw new Error("This composer is no longer available.");
   };
+
   return {
     get draft() {
       return snapshotOf(target());
@@ -136,8 +149,10 @@ export function createComposerDraftActions(
       const snapshot = snapshotOf(current);
       const result = typeof next === "function" ? next(snapshot) : next;
       requireAvailable(current);
+
       if (result === snapshot) return;
       const parsed = replacementSchema.safeParse(result);
+
       if (!parsed.success)
         throw new Error(
           "Invalid composer draft: text, mention ranges, or attachments are invalid.",

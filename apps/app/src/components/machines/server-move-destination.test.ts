@@ -19,6 +19,7 @@ describe("fetchServerMoveDestinationHealth", () => {
           { status: 200, headers: { "content-type": "application/json" } },
         ),
     );
+
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
 

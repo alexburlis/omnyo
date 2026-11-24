@@ -30,14 +30,14 @@ describe("PluginReplacementSlot", () => {
     render(
       <PluginReplacementSlot<TestRegistration>
         replacement={{ kind: "owner" }}
-        original={<div>BB owner</div>}
+        original={<div>Omnyo owner</div>}
         slotKind="testReplacement"
       >
         {() => <div>Plugin replacement</div>}
       </PluginReplacementSlot>,
     );
 
-    expect(screen.getByText("BB owner")).toBeDefined();
+    expect(screen.getByText("Omnyo owner")).toBeDefined();
     expect(screen.queryByText("Plugin replacement")).toBeNull();
   });
 
@@ -46,22 +46,24 @@ describe("PluginReplacementSlot", () => {
       kind: "plugin",
       registration: REGISTRATION,
     };
+
     render(
       <PluginReplacementSlot
         replacement={replacement}
-        original={<div>BB owner</div>}
+        original={<div>Omnyo owner</div>}
         slotKind="testReplacement"
       >
         {(_registration, Original) => <Original />}
       </PluginReplacementSlot>,
     );
 
-    expect(screen.getAllByText("BB owner")).toHaveLength(1);
+    expect(screen.getAllByText("Omnyo owner")).toHaveLength(1);
   });
 
   it("restores the bound owner when a replacement crashes", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
+
     function Crash(): never {
       throw new Error("replacement failed");
     }
@@ -69,29 +71,33 @@ describe("PluginReplacementSlot", () => {
     render(
       <PluginReplacementSlot
         replacement={{ kind: "plugin", registration: REGISTRATION }}
-        original={<div>BB owner</div>}
+        original={<div>Omnyo owner</div>}
         slotKind="testReplacement"
       >
         {() => <Crash />}
       </PluginReplacementSlot>,
     );
 
-    expect(screen.getByText("BB owner")).toBeDefined();
+    expect(screen.getByText("Omnyo owner")).toBeDefined();
     expect(screen.queryByText(/plugin demo crashed/u)).toBeNull();
   });
 
   it("keeps the owner mounted while live owner props change", () => {
     let mountCount = 0;
+
     function Owner({ query }: { query: string }) {
       useEffect(() => {
         mountCount += 1;
       }, []);
+
       return <div>Owner query: {query}</div>;
     }
+
     const replacement: ResolvedReplacement<TestRegistration> = {
       kind: "plugin",
       registration: REGISTRATION,
     };
+
     const { rerender } = render(
       <PluginReplacementSlot
         replacement={replacement}

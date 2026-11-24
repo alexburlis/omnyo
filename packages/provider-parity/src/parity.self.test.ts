@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   compareParity,
   type ParityAllowlistEntry,
-} from "@bb/provider-bridge-protocol/testing";
+} from "@omnyo/provider-bridge-protocol/testing";
 import {
   RECORDINGS_ROOT,
   ROW_COUNTS_PATH,
@@ -31,10 +31,12 @@ import {
 } from "./index.js";
 
 const cells = listRecordedCells(RECORDINGS_ROOT);
+
 const checkoutRoot = fileURLToPath(new URL("../../..", import.meta.url));
 
 function readPinned(): Record<string, RowCountsEntry> {
   if (!existsSync(ROW_COUNTS_PATH)) return {};
+
   return JSON.parse(readFileSync(ROW_COUNTS_PATH, "utf8")) as Record<
     string,
     RowCountsEntry
@@ -57,56 +59,70 @@ describe("recorded fixtures", () => {
     const actual: Record<string, RowCountsEntry> = {};
     const problems: string[] = [];
     const skipped: string[] = [];
+
     for (const cell of cells) {
       const key = cellKey(cell);
       const inputs = recordedCellInputs(cell);
+
       if (inputs.invalidDeltas.length > 0 && !isReplayable(cell.provider)) {
         skipped.push(
           `${key}: ${inputs.invalidDeltas.length} recorded thread/delta lines predate the current grammar`,
         );
+
         if (pinned[key] !== undefined) actual[key] = pinned[key];
         continue;
       }
+
       if (inputs.invalidDeltas.length > 0) {
         problems.push(
           `${key}: ${inputs.invalidDeltas.length} thread/delta lines no longer parse: ${inputs.invalidDeltas[0]}`,
         );
       }
+
       const counts = countCellInputs(inputs);
       actual[key] = counts;
       const expected = pinned[key];
+
       if (expected === undefined) {
         problems.push(`${key}: not pinned in row-counts.json`);
         continue;
       }
+
       if (expected.events !== counts.events || expected.rows !== counts.rows) {
         problems.push(
           `${key}: ${counts.events} events/${counts.rows} rows, pinned ${expected.events}/${expected.rows}`,
         );
       }
+
       if (counts.unhandled > expected.unhandled) {
         problems.push(
           `${key}: provider/unhandled rose from ${expected.unhandled} to ${counts.unhandled}`,
         );
       }
+
       if (counts.grammarDrops > expected.grammarDrops) {
         problems.push(
           `${key}: grammar drops rose from ${expected.grammarDrops} to ${counts.grammarDrops}`,
         );
       }
     }
+
     for (const key of Object.keys(pinned)) {
       if (!(key in actual)) problems.push(`${key}: pinned but no recording`);
     }
+
     if (skipped.length > 0) {
       console.warn(
         `recorded lanes awaiting a live re-recording:\n  ${skipped.join("\n  ")}`,
       );
     }
+
     if (process.env.UPDATE_PARITY_ROW_COUNTS === "1") {
       writeFileSync(ROW_COUNTS_PATH, `${JSON.stringify(actual, null, 2)}\n`);
+
       return;
     }
+
     expect(problems).toEqual([]);
   }, 30_000);
 });
@@ -114,6 +130,7 @@ describe("recorded fixtures", () => {
 describe("allowlist", () => {
   it("names a PR and a reason on every entry", () => {
     const allowlist = readAllowlist();
+
     for (const entry of allowlist) {
       expect(entry.pr).toMatch(/^#\d+$/);
       expect(entry.reason.trim().length).toBeGreaterThan(0);
@@ -130,6 +147,7 @@ describe("allowlist", () => {
         item: { type: "agentMessage", id: "i1", text: "old" },
       },
     ];
+
     const changed = [
       {
         type: "item/completed",
@@ -138,6 +156,7 @@ describe("allowlist", () => {
         item: { type: "agentMessage", id: "i1", text: "new" },
       },
     ];
+
     const allowlist: ParityAllowlistEntry[] = [
       {
         provider: "*",
@@ -164,12 +183,14 @@ describe("allowlist", () => {
         reason: "other provider",
       },
     ];
+
     const comparison = compareParity(
       { events: events as never, rows: [] },
       { events: changed as never, rows: [] },
       allowlist,
       { provider: "codex", cell: "turn-tools" },
     );
+
     expect(comparison.events).toEqual({ onlyInOld: [], onlyInNew: [] });
     expect(comparison.staleAllowlist.map((entry) => entry.reason)).toEqual([
       "stale",
@@ -179,14 +200,18 @@ describe("allowlist", () => {
 
   it("lets the root pointer empty one layer of one cell, and reports it stale when the layer is already empty", () => {
     const oldRows = [{ kind: "conversation", id: "#1", text: "answer" }];
+
     const newRows = [
       {
         kind: "turn",
         id: "#1",
-        children: [{ kind: "work", id: "#3", toolName: "bb:AskUserQuestion" }],
+        children: [
+          { kind: "work", id: "#3", toolName: "omnyo:AskUserQuestion" },
+        ],
       },
       { kind: "conversation", id: "#5", text: "answer" },
     ];
+
     const entry: ParityAllowlistEntry = {
       provider: "codex",
       cell: "user-question",
@@ -195,12 +220,14 @@ describe("allowlist", () => {
       pr: "#0",
       reason: "rows are not comparable for this cell",
     };
+
     const masked = compareParity(
       { events: [], rows: oldRows },
       { events: [], rows: newRows },
       [entry],
       { provider: "codex", cell: "user-question" },
     );
+
     expect(masked.rows).toEqual({ onlyInOld: [], onlyInNew: [] });
     expect(masked.staleAllowlist).toEqual([]);
     expect(masked.passed).toBe(true);
@@ -211,6 +238,7 @@ describe("allowlist", () => {
       [],
       { provider: "codex", cell: "user-question" },
     );
+
     expect(unmasked.passed).toBe(false);
 
     const stale = compareParity(
@@ -219,6 +247,7 @@ describe("allowlist", () => {
       [entry],
       { provider: "codex", cell: "user-question" },
     );
+
     expect(stale.staleAllowlist).toEqual([entry]);
   });
 });
@@ -229,13 +258,16 @@ describe("old-leg pre-check", () => {
     for (const dir of created.splice(0))
       rmSync(dir, { recursive: true, force: true });
   });
+
   function fakeCheckout(files: readonly string[]): string {
     const root = mkdtempSync(join(tmpdir(), "parity-old-leg-"));
     created.push(root);
+
     for (const file of files) {
       mkdirSync(join(root, file, ".."), { recursive: true });
       writeFileSync(join(root, file), "");
     }
+
     return root;
   }
 
@@ -255,6 +287,7 @@ describe("old-leg pre-check", () => {
     const root = fakeCheckout([
       "packages/agent-runtime/src/pi/bridge/bridge.ts",
     ]);
+
     expect(missingBridgeModule(root, "pi")).toBe(
       "plugins/provider-pi/src/host.ts",
     );
@@ -272,11 +305,13 @@ describe("replay through the current bridge", () => {
     "%s reproduces its recording",
     async (_key, cell) => {
       const recorded = recordedCellInputs(cell);
+
       const replayed = await replayCell(cell, {
         checkoutRoot,
         timeoutMs: 60_000,
         planFromCurrentLane: true,
       });
+
       expect(replayed.run.stalls).toEqual([]);
       const comparison = compareCell(cell, recorded, replayed, []);
       expect({

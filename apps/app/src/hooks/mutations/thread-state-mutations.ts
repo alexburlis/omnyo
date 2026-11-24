@@ -1,9 +1,14 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
+import type { ThreadListEntry } from "@omnyo/domain";
 import type {
   ThreadArchiveAllResponse,
   ThreadResponse,
   UpdateThreadRequest,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { sdk } from "@/lib/sdk";
 import type { LifecycleErrorOperation } from "@/lib/lifecycle-errors";
 import {
@@ -17,6 +22,7 @@ import {
   beginThreadMetadataTransaction,
   beginUnarchiveThreadTransaction,
   beginUnpinThreadTransaction,
+  getCachedThreadTreeIds,
   rollbackArchiveThreadsTransaction,
   rollbackDeleteThreadTransaction,
   rollbackThreadListMutationTransaction,
@@ -37,6 +43,7 @@ interface ThreadMutationRequest {
 }
 
 type UpdateThreadMutationRequest = ThreadMutationRequest & UpdateThreadRequest;
+
 interface UpdateThreadMutationOptions {
   errorMessage?: string | undefined;
   lifecycleOperation?: LifecycleErrorOperation | undefined;
@@ -46,6 +53,7 @@ interface UpdateThreadMutationOptions {
 interface ArchiveThreadAndChildrenMutationRequest {
   id: string;
   childThreadsConfirmed: boolean;
+  onOptimistic?: (archivedThreadIds: readonly string[]) => void;
 }
 
 export class ArchiveThreadConfirmationRequired extends Error {
@@ -57,6 +65,66 @@ export class ArchiveThreadConfirmationRequired extends Error {
 interface DeleteThreadMutationRequest {
   id: string;
   childThreadsConfirmed: boolean;
+  onOptimistic?: () => void;
+}
+
+interface CachedChildThreadCounts {
+  childThreadCount: number;
+  unarchivedDescendantCount: number;
+}
+
+function readCachedLiveThreadTree(
+  queryClient: QueryClient,
+  matchesRoot: (entry: ThreadListEntry) => boolean,
+): ThreadListEntry[] {
+  const entries = new Map<string, ThreadListEntry>();
+
+  const treeIds = getCachedThreadTreeIds({
+    queryClient,
+    matchesRoot: (entry) => {
+      entries.set(entry.id, entry);
+
+      return matchesRoot(entry);
+    },
+  });
+
+  return [...treeIds].flatMap((id) => {
+    const entry = entries.get(id);
+
+    return entry === undefined || entry.deletedAt !== null ? [] : [entry];
+  });
+}
+
+export function readCachedChildThreadCounts(
+  queryClient: QueryClient,
+  threadId: string,
+): CachedChildThreadCounts {
+  const descendants = readCachedLiveThreadTree(
+    queryClient,
+    (entry) => entry.id === threadId,
+  ).filter((entry) => entry.id !== threadId);
+
+  return {
+    childThreadCount: descendants.filter(
+      (entry) => entry.parentThreadId === threadId,
+    ).length,
+    unarchivedDescendantCount: descendants.filter(
+      (entry) => entry.archivedAt === null,
+    ).length,
+  };
+}
+
+export function readCachedEnvironmentArchiveIds(
+  queryClient: QueryClient,
+  environmentId: string,
+): string[] {
+  return readCachedLiveThreadTree(
+    queryClient,
+    (entry) =>
+      entry.environmentId === environmentId && entry.archivedAt === null,
+  )
+    .filter((entry) => entry.archivedAt === null)
+    .map((entry) => entry.id);
 }
 
 interface ThreadReadMutationInput {
@@ -83,6 +151,7 @@ export function useUpdateThread(options?: UpdateThreadMutationOptions) {
     mutationFn: ({ id, ...request }: UpdateThreadMutationRequest) =>
       sdk.threads.update({ threadId: id, ...request }),
     onMutate: ({
+      groupId,
       parentThreadId,
       sectionId,
       id,
@@ -91,12 +160,14 @@ export function useUpdateThread(options?: UpdateThreadMutationOptions) {
       if (
         title === undefined &&
         sectionId === undefined &&
+        groupId === undefined &&
         parentThreadId === undefined
       ) {
         return undefined;
       }
 
       return beginThreadMetadataTransaction({
+        groupId,
         parentThreadId,
         sectionId,
         queryClient,
@@ -201,19 +272,34 @@ export function useArchiveThreadAndChildren() {
     }: ArchiveThreadAndChildrenMutationRequest): Promise<ThreadArchiveAllResponse> => {
       if (!childThreadsConfirmed) {
         const summary = await sdk.threads.childSummary({ threadId: id });
+
         if (summary.unarchivedDescendantCount > 0) {
           throw new ArchiveThreadConfirmationRequired(
             summary.unarchivedDescendantCount,
           );
         }
       }
+
       return sdk.threads.archiveAll({ threadId: id });
     },
-    onMutate: async ({ id }): Promise<ArchiveThreadsTransaction> =>
-      beginArchiveThreadAndChildrenTransaction({
+    onMutate: async ({
+      id,
+      onOptimistic,
+    }): Promise<ArchiveThreadsTransaction> => {
+      const transaction = await beginArchiveThreadAndChildrenTransaction({
         queryClient,
         threadId: id,
-      }),
+      });
+
+      try {
+        onOptimistic?.(transaction.archivedThreadIds);
+      } catch (error) {
+        rollbackArchiveThreadsTransaction({ queryClient, transaction });
+        throw error;
+      }
+
+      return transaction;
+    },
     onError: (_error, _variables, context) => {
       rollbackArchiveThreadsTransaction({ queryClient, transaction: context });
     },
@@ -257,6 +343,87 @@ export function useUnarchiveThread() {
   });
 }
 
+interface UnarchiveThreadsInOrderArgs {
+  queryClient: QueryClient;
+  threadIds: readonly string[];
+  beforeRequest?: Promise<readonly string[] | null>;
+}
+
+export async function unarchiveThreadsInOrder({
+  queryClient,
+  threadIds,
+  beforeRequest,
+}: UnarchiveThreadsInOrderArgs): Promise<void> {
+  const steps: {
+    threadId: string;
+    transaction: ThreadListMutationTransaction;
+  }[] = [];
+
+  for (const threadId of threadIds) {
+    steps.push({
+      threadId,
+      transaction: await beginUnarchiveThreadTransaction({
+        queryClient,
+        threadId,
+      }),
+    });
+  }
+
+  let sent = 0;
+  let confirmedIds: readonly string[] = threadIds;
+
+  try {
+    if (beforeRequest !== undefined) {
+      const result = await beforeRequest;
+
+      if (result === null) return;
+      confirmedIds = result;
+
+      for (const threadId of confirmedIds) {
+        const transaction = await beginUnarchiveThreadTransaction({
+          queryClient,
+          threadId,
+        });
+
+        if (steps.some((step) => step.threadId === threadId)) {
+          settleThreadPatchTransaction(transaction);
+        } else {
+          steps.push({ threadId, transaction });
+        }
+      }
+
+      steps.sort(
+        (left, right) =>
+          confirmedIds.indexOf(left.threadId) -
+          confirmedIds.indexOf(right.threadId),
+      );
+    }
+
+    for (const { threadId } of steps) {
+      if (!confirmedIds.includes(threadId)) {
+        sent += 1;
+        continue;
+      }
+
+      await sdk.threads.unarchive({ threadId });
+      sent += 1;
+    }
+  } catch (error) {
+    for (const { threadId, transaction } of steps.slice(sent).reverse())
+      rollbackThreadListMutationTransaction({
+        queryClient,
+        threadId,
+        transaction,
+      });
+    throw error;
+  } finally {
+    for (const { threadId, transaction } of steps) {
+      settleThreadPatchTransaction(transaction);
+      settleThreadListMembershipMutation({ queryClient, threadId });
+    }
+  }
+}
+
 export function useRestoreThreadEnvironment() {
   const queryClient = useQueryClient();
 
@@ -285,8 +452,14 @@ export function useDeleteThread() {
     }: DeleteThreadMutationRequest) => {
       await sdk.threads.delete({ childThreadsConfirmed, threadId: id });
     },
-    onMutate: async ({ id }): Promise<DeleteThreadTransaction> =>
-      beginDeleteThreadTransaction({ queryClient, threadId: id }),
+    onMutate: async ({
+      id,
+      onOptimistic,
+    }): Promise<DeleteThreadTransaction> => {
+      onOptimistic?.();
+
+      return beginDeleteThreadTransaction({ queryClient, threadId: id });
+    },
     onError: (_error, _variables, context) => {
       rollbackDeleteThreadTransaction({
         queryClient,
@@ -363,5 +536,20 @@ export function useMarkThreadUnread() {
     onSettled: (_data, _error, _input, transaction) => {
       settleThreadReadStateTransaction({ queryClient, transaction });
     },
+  });
+}
+
+export interface ThreadAutoCompactionMutationInput {
+  threadId: string;
+  enabled: boolean;
+}
+
+export function useSetThreadAutoCompaction() {
+  return useMutation({
+    meta: {
+      errorMessage: "Failed to change automatic compaction.",
+    },
+    mutationFn: (input: ThreadAutoCompactionMutationInput) =>
+      sdk.threads.experimental_setAutoCompaction(input),
   });
 }

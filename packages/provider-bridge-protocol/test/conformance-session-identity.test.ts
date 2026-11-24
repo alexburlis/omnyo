@@ -29,22 +29,29 @@ const requestLineSchema = z
 
 function startWithoutIdentityTransport(): BridgeConformanceTransport {
   const emitted: unknown[] = [];
+
   const reply = (id: string | number, body: Record<string, unknown>): void => {
     emitted.push({ jsonrpc: "2.0", id, ...body });
   };
+
   return {
     send(line) {
       let raw: unknown;
+
       try {
         raw = JSON.parse(line);
       } catch {
         return;
       }
+
       const request = requestLineSchema.safeParse(raw);
+
       if (!request.success) {
         return;
       }
+
       const message = request.data;
+
       switch (message.method) {
         case BRIDGE_REQUEST_METHODS.initialize:
           reply(message.id, {
@@ -53,6 +60,7 @@ function startWithoutIdentityTransport(): BridgeConformanceTransport {
               capabilities: { grammarVersions: ASSEMBLER_GRAMMAR_VERSIONS },
             },
           });
+
           return;
         case BRIDGE_REQUEST_METHODS.threadStop:
           reply(message.id, {
@@ -61,11 +69,13 @@ function startWithoutIdentityTransport(): BridgeConformanceTransport {
               message: "Invalid params for thread/stop",
             },
           });
+
           return;
         case BRIDGE_REQUEST_METHODS.threadStart:
           reply(message.id, {
             result: { threadId: message.params?.threadId },
           });
+
           return;
         default:
           reply(message.id, {
@@ -101,9 +111,11 @@ function stubBridge(options: StubBridgeOptions): StubBridge {
   const stops: StubBridge["stops"] = [];
   let serial = 0;
   let sessions = 0;
+
   const reply = (id: string | number, body: Record<string, unknown>): void => {
     emitted.push({ jsonrpc: "2.0", id, ...body });
   };
+
   const delta = (threadId: string, deltas: unknown[]): void => {
     emitted.push({
       jsonrpc: "2.0",
@@ -111,12 +123,14 @@ function stubBridge(options: StubBridgeOptions): StubBridge {
       params: { threadId, deltas },
     });
   };
+
   const identity = (
     threadId: string | undefined,
   ): { providerThreadId: string } => {
     sessions += 1;
     const providerThreadId = `prov-${sessions}`;
     const announce = options.announceIdentity ?? "match";
+
     if (announce !== "none") {
       emitted.push({
         jsonrpc: "2.0",
@@ -130,25 +144,32 @@ function stubBridge(options: StubBridgeOptions): StubBridge {
         },
       });
     }
+
     return { providerThreadId };
   };
+
   return {
     forks,
     stops,
     transport: {
       send(line) {
         let raw: unknown;
+
         try {
           raw = JSON.parse(line);
         } catch {
           return;
         }
+
         const request = requestLineSchema.safeParse(raw);
+
         if (!request.success) {
           return;
         }
+
         const message = request.data;
         const params = message.params ?? {};
+
         switch (message.method) {
           case BRIDGE_REQUEST_METHODS.initialize:
             reply(message.id, {
@@ -160,18 +181,22 @@ function stubBridge(options: StubBridgeOptions): StubBridge {
                 },
               },
             });
+
             return;
           case BRIDGE_REQUEST_METHODS.threadStart:
             reply(message.id, { result: identity(params.threadId) });
+
             return;
           case BRIDGE_REQUEST_METHODS.threadResume:
             reply(message.id, {
               result:
                 options.blankResume === true ? {} : identity(params.threadId),
             });
+
             return;
           case BRIDGE_REQUEST_METHODS.threadFork:
             forks.push(params);
+
             if (options.fork === "none") {
               reply(message.id, {
                 error: {
@@ -179,12 +204,15 @@ function stubBridge(options: StubBridgeOptions): StubBridge {
                   message: "Method not found: thread/fork",
                 },
               });
+
               return;
             }
+
             reply(message.id, {
               result:
                 options.blankFork === true ? {} : identity(params.threadId),
             });
+
             return;
           case BRIDGE_REQUEST_METHODS.threadStop:
             if (typeof params.threadId !== "string") {
@@ -194,10 +222,13 @@ function stubBridge(options: StubBridgeOptions): StubBridge {
                   message: "Invalid params for thread/stop",
                 },
               });
+
               return;
             }
+
             stops.push(params);
             reply(message.id, { result: {} });
+
             return;
           case BRIDGE_REQUEST_METHODS.turnStart: {
             serial += 1;
@@ -228,8 +259,10 @@ function stubBridge(options: StubBridgeOptions): StubBridge {
               { kind: "turn.boundary", status: "completed" },
             ]);
             reply(message.id, { result: { threadId: params.threadId } });
+
             return;
           }
+
           default:
             reply(message.id, {
               error: {
@@ -250,15 +283,17 @@ async function runStub(
   options: StubBridgeOptions,
 ): Promise<{ report: ConformanceReport; bridge: StubBridge }> {
   const bridge = stubBridge(options);
+
   const report = await runBridgeConformance({
     transport: bridge.transport,
     providerId: "stub",
     session: {
-      cwd: "/tmp/bb-conformance-identity",
+      cwd: "/tmp/omnyo-conformance-identity",
       promptInput: [{ type: "text", text: "hello", mentions: [] }],
     },
     timeoutMs: 500,
   });
+
   return { report, bridge };
 }
 
@@ -278,7 +313,7 @@ describe("conformance session/start-identity", () => {
       transport: startWithoutIdentityTransport(),
       providerId: "stub",
       session: {
-        cwd: "/tmp/bb-conformance-identity",
+        cwd: "/tmp/omnyo-conformance-identity",
         promptInput: [{ type: "text", text: "hello", mentions: [] }],
         interruptiblePromptInput: [
           { type: "text", text: "hold", mentions: [] },
@@ -334,6 +369,7 @@ describe("conformance session/start-identity-announced", () => {
       fork: "none",
       announceIdentity: "other-id",
     });
+
     expect(
       byId(report).get("session/start-identity-announced")?.detail,
     ).toContain('(thread/identity named "prov-1-other")');

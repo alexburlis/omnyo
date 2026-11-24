@@ -1,10 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAtomValue, useStore } from "jotai";
 import {
   experimental_usePluginId,
   useRealtime,
   useRpc,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import type { threadListRpcContract } from "../../server.js";
 import { PREFERENCES_CHANGED_CHANNEL } from "../../shared/preferences.js";
 import {
@@ -13,6 +13,9 @@ import {
   hydratePreferences,
   hydratePreferencesFromMirror,
   preferencesReadyAtom,
+  preferencesErrorAtom,
+  reportPreferencesSyncError,
+  clearPreferencesSyncError,
 } from "./preferences-sync.js";
 
 export function usePreferencesReady(): boolean {
@@ -21,31 +24,50 @@ export function usePreferencesReady(): boolean {
 
 let syncOwnerCount = 0;
 
-export function usePreferencesSync(): void {
+export function usePreferencesSync(retryAfterError: boolean): boolean {
   const rpc = useRpc<typeof threadListRpcContract>();
   const store = useStore();
   const pluginId = experimental_usePluginId();
+  const attempted = useRef(false);
   useEffect(() => {
     attachPreferencesStore(store, pluginId);
     syncOwnerCount += 1;
-    if (syncOwnerCount === 1) {
-      hydratePreferencesFromMirror();
-      void hydratePreferences(rpc).catch((error: unknown) => {
-        console.warn(
-          `${pluginId}: loading preferences failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
+    attempted.current = true;
+
+    if (
+      syncOwnerCount === 1 ||
+      (retryAfterError && store.get(preferencesErrorAtom()) !== null)
+    ) {
+      clearPreferencesSyncError();
+
+      try {
+        hydratePreferencesFromMirror();
+        void hydratePreferences(rpc).catch(reportPreferencesSyncError);
+      } catch (error: unknown) {
+        reportPreferencesSyncError(error);
+      }
     }
+
     return () => {
       syncOwnerCount -= 1;
     };
-  }, [pluginId, rpc, store]);
+  }, [pluginId, retryAfterError, rpc, store]);
   useRealtime(PREFERENCES_CHANGED_CHANNEL, applyRemotePreferenceSignal);
+
+  return attempted.current;
 }
 
 export function PreferencesSync() {
-  usePreferencesSync();
+  const attempted = usePreferencesSync(true);
+  const error = useAtomValue(preferencesErrorAtom());
+
+  if (error !== null && attempted) throw error;
+
+  return null;
+}
+
+export function PreferencesSyncController() {
+  usePreferencesSync(false);
+
   return null;
 }

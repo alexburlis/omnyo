@@ -9,26 +9,32 @@ import { AppRoutes } from "./App";
 vi.mock("./components/layout/AppLayout", () => ({
   AppLayout: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
-vi.mock("./views/SettingsView", () => ({
-  SettingsView: () => <h1>Settings</h1>,
+
+vi.mock("./components/plugin/PluginSettings", () => ({
+  PluginSettingsPage: ({ pluginId }: { pluginId: string }) => (
+    <h1>Settings for {pluginId}</h1>
+  ),
 }));
+
 vi.mock("./views/ToolsView", () => ({
   PluginsView: ({ detailKey }: { detailKey?: string }) => (
     <h1>Plugin detail: {detailKey}</h1>
   ),
-  SkillsView: () => <h1>Skills</h1>,
 }));
+
 vi.mock("./views/SplitWorkspaceRoute", () => ({
   default: () => <h1>App workspace</h1>,
 }));
 
 function HistoryBackButton() {
   const navigate = useNavigate();
+
   return <button onClick={() => navigate(-1)}>Back</button>;
 }
 
 function LocationPath() {
   const location = useLocation();
+
   return (
     <span>
       {location.pathname}
@@ -70,14 +76,16 @@ describe("legacy resource redirects", () => {
       ).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "Back" }));
       expect(
-        await screen.findByRole("heading", { name: "Settings" }),
+        await screen.findByRole("heading", {
+          name: `Settings for ${pluginId}`,
+        }),
       ).toBeTruthy();
       expect(screen.getByText(settingsPath)).toBeTruthy();
     },
   );
 
   it.each([
-    ["/settings/usage", "/settings/plugins/bb--provider-usage"],
+    ["/settings/usage", "/settings/plugins/omnyo--provider-usage"],
     ["/settings/plugins", "/settings/plugins"],
     ["/extensions?view=installed#catalog", "/plugins?view=installed#catalog"],
     ["/extensions/plugins", "/plugins"],
@@ -93,19 +101,27 @@ describe("legacy resource redirects", () => {
       "/extensions/plugins/github?view=installed#configuration",
       "/plugins/github?view=installed#configuration",
     ],
-    ["/extensions/skills", "/skills"],
+    ["/extensions/skills", "/plugins/skill-discovery/browse"],
     [
       "/extensions/skills/library/skill_abc123?source=local#details",
-      "/skills/library/skill_abc123?source=local#details",
+      "/plugins/skill-discovery/browse/installed/skill_abc123?source=local#details",
     ],
     [
       "/extensions/skills/installed/skill_abc123",
-      "/skills/library/skill_abc123",
+      "/plugins/skill-discovery/browse/installed/skill_abc123",
     ],
-    ["/extensions/skills/registry", "/skills/registry"],
+    [
+      "/extensions/skills/registry",
+      "/plugins/skill-discovery/browse/marketplace",
+    ],
     [
       "/extensions/skills/registry/moss-skills%2Fmoss-notes",
-      "/skills/registry/moss-skills%2Fmoss-notes",
+      "/plugins/skill-discovery/browse/marketplace/moss-skills%2Fmoss-notes",
+    ],
+    ["/skills", "/plugins/skill-discovery/browse"],
+    [
+      "/plugins/skill-discovery/marketplace",
+      "/plugins/skill-discovery/browse/marketplace",
     ],
     ["/tools", "/plugins"],
     ["/tools/plugins/browse", "/plugins"],
@@ -116,7 +132,7 @@ describe("legacy resource redirects", () => {
     ],
     [
       "/tools/skills/installed/skill_abc123?source=local#details",
-      "/skills/library/skill_abc123?source=local#details",
+      "/plugins/skill-discovery/browse/installed/skill_abc123?source=local#details",
     ],
     ["/tools/automations", "/plugins/automations/automations"],
     [

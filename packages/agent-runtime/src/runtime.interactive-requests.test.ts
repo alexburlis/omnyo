@@ -8,10 +8,10 @@ import type {
   PendingInteractionCreate,
   PendingInteractionResolution,
   ThreadEvent,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { promptTextInput } from "./test/prompt-input.js";
-import { parseJsonRpcLine } from "@bb/provider-bridge-protocol/bridge-kit";
-import type { JsonRpcMessage } from "@bb/provider-bridge-protocol/bridge-kit";
+import { parseJsonRpcLine } from "@omnyo/provider-bridge-protocol/bridge-kit";
+import type { JsonRpcMessage } from "@omnyo/provider-bridge-protocol/bridge-kit";
 import { createProviderForId } from "./provider-registry.js";
 import { handleRuntimeProviderRequest } from "./runtime-provider-requests.js";
 import {
@@ -30,7 +30,9 @@ function readChildStdoutLine(child: ChildProcess): Promise<string> {
   if (!child.stdout) {
     throw new Error("Expected child stdout to be readable");
   }
+
   const stdout = child.stdout;
+
   return new Promise((resolve) => {
     stdout.once("data", (chunk: ChildStdoutChunk) => {
       resolve(String(chunk));
@@ -90,23 +92,27 @@ async function answerDirectRequest(args: {
     "-e",
     "process.stdin.pipe(process.stdout)",
   ]);
+
   const adapter = createProviderForId("fake", {
     additionalWorkspaceWriteRoots: [],
     bridgeLaunch: createScriptedEchoLaunch(),
   });
+
   const [initialize] = adapter.buildPostInitializeRequests();
   initialize?.onResult({
     protocolVersion: 2,
     capabilities: { grammarVersions: [3, 3], ...args.handshake },
   });
   const id = args.rawRequest.id;
+
   if (typeof id !== "string" && typeof id !== "number") {
     throw new Error("request needs an id");
   }
+
   try {
     handleRuntimeProviderRequest({
       toolCalls: new RuntimeToolCalls(),
-      getActiveTurnId: args.getActiveTurnId ?? (() => "bb-turn-1"),
+      getActiveTurnId: args.getActiveTurnId ?? (() => "omnyo-turn-1"),
       getThreadExecutionOptions:
         args.getThreadExecutionOptions ?? (() => undefined),
       onInteractiveRequest: args.onInteractiveRequest,
@@ -121,9 +127,11 @@ async function answerDirectRequest(args: {
       resolveThreadId: () => "t1",
     });
     const parsed = parseJsonRpcLine((await readChildStdoutLine(child)).trim());
+
     if (parsed.kind !== "response") {
       throw new Error(`Expected JSON-RPC response, got ${parsed.kind}`);
     }
+
     return parsed.parsed;
   } finally {
     child.kill();
@@ -134,7 +142,7 @@ describe("createAgentRuntime interactive requests", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "bb-runtime-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "omnyo-runtime-test-"));
   });
 
   afterEach(() => {
@@ -144,12 +152,14 @@ describe("createAgentRuntime interactive requests", () => {
   it("routes interactive requests through onInteractiveRequest and sends the encoded response back", async () => {
     const requests: PendingInteractionCreate[] = [];
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
         onEvent: (event) => events.push(event),
         onInteractiveRequest: async (request) => {
           requests.push(request);
+
           return { decision: "allow_once", grantedPermissions: null };
         },
       },
@@ -162,18 +172,21 @@ describe("createAgentRuntime interactive requests", () => {
       providerId: "fake",
       options: fullRuntimeOptions,
     });
+
     await runtime.runTurn({
       clientRequestId: "creq_222222224h",
       threadId: "t1",
       input: [promptTextInput({ text: "approve:command ship it" })],
       options: fullRuntimeOptions,
     });
+
     const { turnId } = await waitForThreadTurnStarted({
       events,
       providerId: "fake",
       runtime,
       threadId: "t1",
     });
+
     await waitForThreadAgentMessageText({
       events,
       providerId: "fake",
@@ -208,12 +221,14 @@ describe("createAgentRuntime interactive requests", () => {
   it("completes the turn with Denied when the user denies the approval", async () => {
     const requests: PendingInteractionCreate[] = [];
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
         onEvent: (event) => events.push(event),
         onInteractiveRequest: async (request) => {
           requests.push(request);
+
           return { decision: "deny" };
         },
       },
@@ -266,11 +281,13 @@ describe("createAgentRuntime interactive requests", () => {
         grantedPermissions: null,
       }),
     );
+
     const answer = await answerDirectRequest({
       rawRequest: commandApprovalRequest(77, { turnId: null }),
       getActiveTurnId: () => null,
       onInteractiveRequest,
     });
+
     expect(answer).toMatchObject({
       jsonrpc: "2.0",
       id: 77,
@@ -285,12 +302,14 @@ describe("createAgentRuntime interactive requests", () => {
   it("denies interactive requests when permission escalation is deny", async () => {
     const requests: string[] = [];
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
         onEvent: (event) => events.push(event),
         onInteractiveRequest: async (request) => {
           requests.push(request.providerRequestId);
+
           return { decision: "allow_once", grantedPermissions: null };
         },
       },
@@ -328,12 +347,14 @@ describe("createAgentRuntime interactive requests", () => {
         grantedPermissions: null,
       }),
     );
+
     const answer = await answerDirectRequest({
       rawRequest: commandApprovalRequest(78),
       handshake: { approvalEnforcedBy: "provider" },
       getThreadExecutionOptions: () => deniedEscalationOptions,
       onInteractiveRequest,
     });
+
     expect(answer).toMatchObject({
       jsonrpc: "2.0",
       id: 78,
@@ -362,6 +383,7 @@ describe("createAgentRuntime interactive requests", () => {
   it("reaches the user through a provider-enforcing bridge end to end", async () => {
     const requests: PendingInteractionCreate[] = [];
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -369,10 +391,12 @@ describe("createAgentRuntime interactive requests", () => {
         onEvent: (event) => events.push(event),
         onInteractiveRequest: async (request) => {
           requests.push(request);
+
           return { decision: "allow_once", grantedPermissions: null };
         },
       },
     });
+
     await runtime.startThread({
       environmentId: "env-1",
       threadId: "t1",
@@ -400,19 +424,24 @@ describe("createAgentRuntime interactive requests", () => {
   it("routes user-question interactive requests through the handler when permission escalation is deny", async () => {
     const requests: PendingInteractionCreate[] = [];
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
         onEvent: (event) => events.push(event),
         onInteractiveRequest: async (request) => {
           requests.push(request);
+
           if (request.payload.kind !== "user_question") {
             throw new Error("expected a user question");
           }
+
           const question = request.payload.questions[0];
+
           if (question === undefined) {
             throw new Error("expected one question");
           }
+
           return {
             kind: "user_answer",
             answers: {
@@ -478,6 +507,7 @@ describe("createAgentRuntime interactive requests", () => {
       },
       onInteractiveRequest: undefined,
     });
+
     expect(answer).toMatchObject({
       jsonrpc: "2.0",
       id: 79,
@@ -492,6 +522,7 @@ describe("createAgentRuntime interactive requests", () => {
 
   it("sends JSON-RPC error back when onInteractiveRequest throws", async () => {
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -538,44 +569,54 @@ describe("createAgentRuntime interactive requests", () => {
     await runtime.shutdown();
   });
 
-  it("forwards a plugin-defined request even under a deny escalation and returns its answer", async () => {
-    const onInteractiveRequest = vi.fn(
-      async (): Promise<PendingInteractionResolution> => ({
-        kind: "request_answer",
-        value: { TOKEN: "x" },
-      }),
-    );
-    const answer = await answerDirectRequest({
-      rawRequest: {
-        jsonrpc: "2.0",
-        id: 90,
-        method: "interaction/request",
-        params: {
-          providerThreadId: "prov-1",
-          threadId: "t1",
-          turnId: "turn-1",
-          payload: {
-            kind: "secrets/secret-request",
-            title: "Add a token",
-            data: { fields: ["TOKEN"] },
+  it.each([
+    ["explicit turn", "turn-1", "turn-1"],
+    ["active turn", null, "omnyo-active-turn"],
+  ])(
+    "forwards a plugin-defined request for an %s even under a deny escalation",
+    async (_name, providerTurnId, expectedTurnId) => {
+      const onInteractiveRequest = vi.fn(
+        async (): Promise<PendingInteractionResolution> => ({
+          kind: "request_answer",
+          value: { TOKEN: "x" },
+        }),
+      );
+
+      const answer = await answerDirectRequest({
+        rawRequest: {
+          jsonrpc: "2.0",
+          id: 90,
+          method: "interaction/request",
+          params: {
+            providerThreadId: "prov-1",
+            threadId: "t1",
+            turnId: providerTurnId,
+            payload: {
+              kind: "secrets/secret-request",
+              title: "Add a token",
+              data: { fields: ["TOKEN"] },
+            },
           },
         },
-      },
-      handshake: { approvalEnforcedBy: "runtime" },
-      getThreadExecutionOptions: () => deniedEscalationOptions,
-      onInteractiveRequest,
-    });
-    expect(onInteractiveRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ kind: "secrets/secret-request" }),
-      }),
-    );
-    expect(answer).toMatchObject({
-      jsonrpc: "2.0",
-      id: 90,
-      result: { kind: "request_answer", value: { TOKEN: "x" } },
-    });
-  });
+        handshake: { approvalEnforcedBy: "runtime" },
+        getActiveTurnId: () => "omnyo-active-turn",
+        getThreadExecutionOptions: () => deniedEscalationOptions,
+        onInteractiveRequest,
+      });
+
+      expect(onInteractiveRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          turnId: expectedTurnId,
+          payload: expect.objectContaining({ kind: "secrets/secret-request" }),
+        }),
+      );
+      expect(answer).toMatchObject({
+        jsonrpc: "2.0",
+        id: 90,
+        result: { kind: "request_answer", value: { TOKEN: "x" } },
+      });
+    },
+  );
 
   it("refuses a plugin-defined request whose data exceeds 64 KiB at the wire", async () => {
     const onInteractiveRequest = vi.fn(
@@ -584,6 +625,7 @@ describe("createAgentRuntime interactive requests", () => {
         value: null,
       }),
     );
+
     const answer = await answerDirectRequest({
       rawRequest: {
         jsonrpc: "2.0",
@@ -602,6 +644,7 @@ describe("createAgentRuntime interactive requests", () => {
       },
       onInteractiveRequest,
     });
+
     expect(answer).toMatchObject({
       jsonrpc: "2.0",
       id: 91,
@@ -619,6 +662,7 @@ describe("createAgentRuntime interactive requests", () => {
         params: { providerThreadId: "prov-1", turnId: "turn-1" },
       },
     });
+
     expect(answer).toMatchObject({
       jsonrpc: "2.0",
       id: 80,
@@ -639,6 +683,7 @@ describe("createAgentRuntime interactive requests", () => {
         },
       },
     });
+
     expect(answer).toMatchObject({
       jsonrpc: "2.0",
       id: 81,

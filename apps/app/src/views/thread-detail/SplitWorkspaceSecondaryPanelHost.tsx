@@ -15,12 +15,13 @@ import {
   PanelResizeHandle,
   type ImperativePanelGroupHandle,
 } from "react-resizable-panels";
-import { Button } from "@bb/shared-ui/button";
-import { EmptyStatePanel } from "@bb/shared-ui/empty-state";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { EmptyStatePanel } from "@omnyo/shared-ui/empty-state";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { HEADER_ICON_BUTTON_CLASS } from "@/components/layout/AppPageHeader";
 import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
+import { appCommandTarget } from "@/lib/app-command-targets";
 import {
   useAppCommandHandler,
   useAppCommandShortcut,
@@ -41,11 +42,12 @@ import {
 } from "@/components/layout/WindowRightPanelToggle";
 import {
   getPanelCollapseTransitionStyle,
-  PANEL_COLLAPSE_TRANSITION_CLASS,
   PANEL_RESIZE_HANDLE_LAYER_CLASS,
+  PANEL_RESIZE_HANDLE_TRANSITION_CLASS,
   PANEL_RESIZE_HIT_TARGET_CLASS,
+  usePanelCollapseTransitionsReady,
 } from "@/components/secondary-panel/panelTransitionTokens";
-import { MACOS_APP_REGION_NO_DRAG_CLASS } from "@/lib/bb-desktop";
+import { MACOS_APP_REGION_NO_DRAG_CLASS } from "@/lib/omnyo-desktop";
 import { PluginComposerHostProvider } from "@/components/plugin/plugin-composer-host";
 import { usePanelResizeSnap } from "@/components/secondary-panel/usePanelResizeSnap";
 import {
@@ -70,12 +72,19 @@ export function SplitWorkspaceSecondaryPanelHost({
 }: SplitWorkspaceSecondaryPanelHostProps) {
   const { ref: sizingRef, minimum: minimumSize } = useSecondaryPanelSizing(1);
   const model = usePaneSecondaryPanelModel(registry, focusedPaneId);
+
+  const focusTransitionsReady = usePanelCollapseTransitionsReady(
+    focusedPaneId,
+    true,
+  );
+
   const panelGroupRef = useRef<ImperativePanelGroupHandle | null>(null);
   const panelWidthPercent = useAtomValue(secondaryPanelWidthPercentAtom);
   const shortcut = useAppCommandShortcut("panel.toggle");
 
   const [isPanelVisible, setIsPanelVisible] = useState<boolean | null>(null);
   const isOpen = isPanelVisible ?? model?.isOpen ?? false;
+
   const lastTargetRef = useRef<{
     paneId: string;
     contentKey: string;
@@ -85,18 +94,23 @@ export function SplitWorkspaceSecondaryPanelHost({
   useLayoutEffect(() => {
     if (model === null) {
       lastTargetRef.current = null;
+
       return;
     }
+
     const previousTarget = lastTargetRef.current;
     lastTargetRef.current = {
       paneId: focusedPaneId,
       contentKey: model.contentKey,
       isOpen: model.isOpen,
     };
+
     if (isPanelVisible === null) {
       setIsPanelVisible(model.isOpen);
+
       return;
     }
+
     if (
       previousTarget !== null &&
       previousTarget.paneId === focusedPaneId &&
@@ -105,27 +119,38 @@ export function SplitWorkspaceSecondaryPanelHost({
       if (model.isOpen !== previousTarget.isOpen) {
         setIsPanelVisible(model.isOpen);
       }
+
       return;
     }
+
     if (model.isOpen !== isPanelVisible) model.onToggle();
   }, [focusedPaneId, isPanelVisible, model]);
 
   useEffect(() => {
     const group = panelGroupRef.current;
+
     if (group === null) return;
+
     if (group.getLayout().length !== 2) return;
+
     if (isPaneMaximized) {
       group.setLayout([MAIN_PANEL_OPEN_SIZE_PERCENT, 0]);
+
       return;
     }
+
     if (!isOpen) {
       group.setLayout([MAIN_PANEL_OPEN_SIZE_PERCENT, 0]);
+
       return;
     }
+
     if (model?.isMainCollapsed) {
       group.setLayout([0, MAIN_PANEL_OPEN_SIZE_PERCENT]);
+
       return;
     }
+
     group.setLayout([
       MAIN_PANEL_OPEN_SIZE_PERCENT - panelWidthPercent,
       panelWidthPercent,
@@ -141,21 +166,27 @@ export function SplitWorkspaceSecondaryPanelHost({
   const toggleWindowPanel = () => {
     if (model !== null) {
       model.onToggle();
+
       return;
     }
+
     setIsPanelVisible((current) => !(current ?? false));
   };
+
   useAppCommandHandler("panel.toggle", () => {
     if (model !== null) return false;
     toggleWindowPanel();
+
     return true;
   });
   useWindowRightPanel({ isOpen, enabled: model === null });
+
   const titleBarHostsRightPanelToggle =
     useWindowTitleBarHostsRightPanelToggle();
 
   const setPanelWidthPercent = useSetAtom(secondaryPanelWidthPercentAtom);
   const lastEmptyPanelSizeRef = useRef(0);
+
   const handleEmptyPanelPointerResize = useCallback(
     (leadingFraction: number) => {
       panelGroupRef.current?.setLayout([
@@ -165,18 +196,23 @@ export function SplitWorkspaceSecondaryPanelHost({
     },
     [],
   );
+
   const handleEmptyPanelResize = (size: number) => {
     if (size > 0) lastEmptyPanelSizeRef.current = size;
   };
+
   const handleEmptyPanelDragging = (isDragging: boolean) => {
     if (isDragging) return;
+
     if (lastEmptyPanelSizeRef.current <= 0) return;
     setPanelWidthPercent(lastEmptyPanelSizeRef.current);
   };
+
   const emptyPanelHitTargetRef = usePanelResizeSnap({
     onResize: handleEmptyPanelPointerResize,
     onDragging: handleEmptyPanelDragging,
   });
+
   const handleEmptyPanelCollapse = () => {
     if (lastEmptyPanelSizeRef.current <= 0) return;
     setIsPanelVisible(false);
@@ -184,11 +220,14 @@ export function SplitWorkspaceSecondaryPanelHost({
 
   const toggleLabel = isOpen ? "Hide right panel" : "Show right panel";
   const toggleIconName = RIGHT_PANEL_TOGGLE_ICON_NAME;
+
   const showsCornerToggle =
     !titleBarHostsRightPanelToggle &&
     !isPaneMaximized &&
     !(isOpen && model !== null);
+
   const pinsCornerToggle = showsCornerToggle && !isOpen;
+
   const hostLayout = useMemo<SecondaryPanelHostLayout>(
     () => ({ isOpen, isSuppressed: isPaneMaximized, pinsCornerToggle }),
     [isOpen, isPaneMaximized, pinsCornerToggle],
@@ -199,7 +238,9 @@ export function SplitWorkspaceSecondaryPanelHost({
       <div
         ref={sizingRef}
         className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
-        style={getPanelCollapseTransitionStyle(model?.transitionsReady ?? true)}
+        style={getPanelCollapseTransitionStyle(
+          (model?.transitionsReady ?? true) && focusTransitionsReady,
+        )}
       >
         <div
           data-testid="split-workspace-panel-toggle"
@@ -218,6 +259,7 @@ export function SplitWorkspaceSecondaryPanelHost({
             variant="ghost"
             size="icon"
             className={HEADER_ICON_BUTTON_CLASS}
+            {...appCommandTarget("panel.toggle")}
             aria-label={
               shortcut ? `${toggleLabel} (${shortcut.label})` : toggleLabel
             }
@@ -253,10 +295,7 @@ export function SplitWorkspaceSecondaryPanelHost({
             }
             minSize={minimumSize.min * 100}
             order={1}
-            className={cn(
-              "min-w-0 overflow-clip transition-[flex-grow,flex-basis]",
-              PANEL_COLLAPSE_TRANSITION_CLASS,
-            )}
+            className="min-w-0 overflow-clip"
           >
             <div className="relative flex h-full min-h-0 min-w-0">
               {children}
@@ -272,9 +311,9 @@ export function SplitWorkspaceSecondaryPanelHost({
                   hitAreaMargins={{ coarse: 0, fine: 0 }}
                   tabIndex={-1}
                   className={cn(
-                    "relative shrink-0 overflow-visible bg-border-seam transition-[width,opacity,background-color] hover:bg-ring/40 data-[dragging=true]:bg-ring/40",
+                    "relative shrink-0 overflow-visible bg-border-seam hover:bg-ring/40 data-[dragging=true]:bg-ring/40",
                     PANEL_RESIZE_HANDLE_LAYER_CLASS,
-                    PANEL_COLLAPSE_TRANSITION_CLASS,
+                    PANEL_RESIZE_HANDLE_TRANSITION_CLASS,
                     isOpen
                       ? "w-px cursor-col-resize opacity-100"
                       : "pointer-events-none w-0 opacity-0",
@@ -298,10 +337,7 @@ export function SplitWorkspaceSecondaryPanelHost({
                   onCollapse={handleEmptyPanelCollapse}
                   onResize={handleEmptyPanelResize}
                   order={2}
-                  className={cn(
-                    "min-w-0 overflow-clip transition-[flex-grow,flex-basis]",
-                    PANEL_COLLAPSE_TRANSITION_CLASS,
-                  )}
+                  className="min-w-0 overflow-clip"
                 >
                   <div
                     data-testid="split-workspace-empty-panel-state"

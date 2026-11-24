@@ -1,9 +1,16 @@
-export const BB_DESKTOP_CHECK_FOR_UPDATES_CHANNEL =
-  "bb-desktop:check-for-updates";
-export const BB_DESKTOP_GET_INFO_CHANNEL = "bb-desktop:get-info";
-export const BB_DESKTOP_INFO_CHANGED_CHANNEL = "bb-desktop:info-changed";
-export const BB_DESKTOP_INSTALL_UPDATE_CHANNEL = "bb-desktop:install-update";
-export const BB_DESKTOP_ZOOM_COMMAND_CHANNEL = "bb-desktop:zoom-command";
-export const BB_DESKTOP_SET_THEME_CHANNEL = "bb-desktop:set-theme";
-export const BB_DESKTOP_OPEN_EXTERNAL_URL_CHANNEL =
-  "bb-desktop:open-external-url";
+export const OMNYO_DESKTOP_CHECK_FOR_UPDATES_CHANNEL =
+  "omnyo-desktop:check-for-updates";
+
+export const OMNYO_DESKTOP_GET_INFO_CHANNEL = "omnyo-desktop:get-info";
+
+export const OMNYO_DESKTOP_INFO_CHANGED_CHANNEL = "omnyo-desktop:info-changed";
+
+export const OMNYO_DESKTOP_INSTALL_UPDATE_CHANNEL =
+  "omnyo-desktop:install-update";
+
+export const OMNYO_DESKTOP_ZOOM_COMMAND_CHANNEL = "omnyo-desktop:zoom-command";
+
+export const OMNYO_DESKTOP_SET_THEME_CHANNEL = "omnyo-desktop:set-theme";
+
+export const OMNYO_DESKTOP_OPEN_EXTERNAL_URL_CHANNEL =
+  "omnyo-desktop:open-external-url";

@@ -28,7 +28,7 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
   "relocates a real Pi session with the previous directory %s",
   async (previousState) => {
     harness = await startFakePiBridge({
-      prefix: "bb-pi-relocation-",
+      prefix: "omnyo-pi-relocation-",
       initialize: true,
     });
     const target = realpathSync(harness.workspaceDir);
@@ -36,6 +36,7 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
     mkdirSync(previous);
     mkdirSync(harness.sessionDir, { recursive: true });
     const sessionFile = join(harness.sessionDir, "pi_relocation.jsonl");
+
     const header = {
       type: "session",
       version: 3,
@@ -43,21 +44,47 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
       timestamp: "2026-01-01T00:00:00.000Z",
       cwd: previous,
     };
+
     const history = `${JSON.stringify({ type: "message", id: "user1", parentId: null, timestamp: header.timestamp, message: { role: "user", content: "Keep this conversation", timestamp: 1 } })}\n`;
     writeFileSync(sessionFile, `${JSON.stringify(header)}\n${history}`, {
       mode: 0o600,
     });
+
     if (previousState === "removed before relocation")
       rmSync(previous, { recursive: true });
+
     const cli = join(
       dirname(
         fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")),
       ),
       "cli.js",
     );
-    vi.stubEnv(PI_BRIDGE_ARGS_ENV, JSON.stringify([cli]));
+
+    const lifecycleFile = join(target, "lifecycle.jsonl");
+    const lifecycleExtension = join(target, "lifecycle.mjs");
+    writeFileSync(
+      lifecycleExtension,
+      `import { appendFileSync } from "node:fs";
+import { setTimeout } from "node:timers/promises";
+const record = (event) => appendFileSync(${JSON.stringify(lifecycleFile)}, JSON.stringify({ event, pid: process.pid }) + "\\n");
+export default function (pi) {
+  pi.on("session_start", () => record("start"));
+  pi.on("session_shutdown", async () => {
+    await setTimeout(100);
+    record("shutdown");
+  });
+}
+`,
+    );
+
+    vi.stubEnv(
+      PI_BRIDGE_ARGS_ENV,
+      JSON.stringify([cli, "--extension", lifecycleExtension]),
+    );
     vi.stubEnv("PI_CODING_AGENT_DIR", join(target, "agent"));
+    vi.stubEnv("PI_OFFLINE", "1");
     vi.stubEnv("ANTHROPIC_API_KEY", "unused-local-rpc-test-key");
+
     const resumed = await harness.request(200, "thread/resume", {
       threadId: "thr_relocation",
       providerThreadId: "pi_relocation",
@@ -65,10 +92,28 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
       instructionMode: "append",
       options: FULL_PERMISSION_OPTIONS,
     });
+
     expect(resumed.error).toBeUndefined();
+
+    const lifecycle = z
+      .array(z.object({ event: z.string(), pid: z.number() }))
+      .parse(
+        readFileSync(lifecycleFile, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line)),
+      );
+
+    expect(lifecycle).toEqual([
+      { event: "start", pid: expect.any(Number) },
+      { event: "shutdown", pid: lifecycle[0]?.pid },
+      { event: "start", pid: expect.any(Number) },
+    ]);
+
     const { providerThreadId } = z
       .object({ providerThreadId: z.string() })
       .parse(resumed.result);
+
     expect(providerThreadId).not.toBe("pi_relocation");
     expect(harness.messages).toContainEqual(
       expect.objectContaining({
@@ -80,12 +125,14 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
       }),
     );
     const relocatedFile = join(harness.sessionDir, `${providerThreadId}.jsonl`);
+
     const stopped = await harness.request(201, "thread/stop", {
       threadId: "thr_relocation",
       providerThreadId,
       intent: "release",
       activeTurnId: null,
     });
+
     expect(stopped.error).toBeUndefined();
     const relocatedBytes = readFileSync(relocatedFile, "utf8");
     expect(
@@ -93,8 +140,10 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
         .slice(relocatedBytes.indexOf("\n") + 1)
         .startsWith(history),
     ).toBe(true);
+
     if (previousState === "removed after relocation")
       rmSync(previous, { recursive: true });
+
     const resumedAgain = await harness.request(202, "thread/resume", {
       threadId: "thr_relocation",
       providerThreadId,
@@ -102,6 +151,7 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
       instructionMode: "append",
       options: FULL_PERMISSION_OPTIONS,
     });
+
     expect(resumedAgain.error).toBeUndefined();
     expect(resumedAgain.result).toMatchObject({ providerThreadId });
     await harness.request(203, "thread/stop", {
@@ -110,6 +160,7 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
       intent: "release",
       activeTurnId: null,
     });
+
     const child = new PiRpcChild({
       cwd: target,
       env: process.env,
@@ -126,17 +177,21 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
       onChannelMessage: () => undefined,
       onExit: () => undefined,
     });
+
     try {
       const result = await child.request({
         type: "bash",
         command: process.platform === "win32" ? 'cygpath -w "$PWD"' : "pwd",
       });
+
       expect(result.success).toBe(true);
       expect(result.data).toMatchObject({ output: `${target}\n`, exitCode: 0 });
       const bytes = readFileSync(relocatedFile, "utf8");
+
       const forkHeader = z
         .object({ id: z.string(), cwd: z.string(), parentSession: z.string() })
         .parse(JSON.parse(bytes.split("\n")[0]!));
+
       expect(forkHeader.id).not.toBe(header.id);
       expect(forkHeader.cwd).toBe(target);
       expect(realpathSync(forkHeader.parentSession)).toBe(
@@ -158,11 +213,12 @@ it.each(["retained", "removed before relocation", "removed after relocation"])(
 
 it("keeps the original session and discards an unsuccessful relocation before retrying", async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-relocation-retry-",
+    prefix: "omnyo-pi-relocation-retry-",
     initialize: true,
   });
   mkdirSync(harness.sessionDir, { recursive: true });
   const sessionFile = join(harness.sessionDir, "pi_original.jsonl");
+
   const contents =
     JSON.stringify({
       type: "session",
@@ -171,7 +227,9 @@ it("keeps the original session and discards an unsuccessful relocation before re
       cwd: join(harness.workspaceDir, "removed"),
       timestamp: "2026-01-01T00:00:00.000Z",
     }) + "\n";
+
   writeFileSync(sessionFile, contents);
+
   const params = {
     threadId: "thr_relocation_retry",
     providerThreadId: "pi_original",
@@ -179,6 +237,7 @@ it("keeps the original session and discards an unsuccessful relocation before re
     instructionMode: "append",
     options: { ...FULL_PERMISSION_OPTIONS, model: "missing-model" },
   };
+
   const failed = await harness.request(200, "thread/resume", params);
   expect(failed.error).toMatchObject({
     message: expect.stringContaining("Failed to resolve Pi model"),
@@ -188,10 +247,12 @@ it("keeps the original session and discards an unsuccessful relocation before re
   expect(
     harness.messages.some((message) => message.method === "thread/identity"),
   ).toBe(false);
+
   const retried = await harness.request(201, "thread/resume", {
     ...params,
     options: FULL_PERMISSION_OPTIONS,
   });
+
   expect(retried.error).toBeUndefined();
   expect(retried.result).toMatchObject({
     providerThreadId: expect.stringMatching(/^pi_/),

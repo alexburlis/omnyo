@@ -1,4 +1,4 @@
-import { createDeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { describe, expect, it } from "vitest";
 import {
   withThreadContextClearGuard,
@@ -9,10 +9,12 @@ describe("thread context mutation guard", () => {
   it("rejects sends while a context clear owns the thread", async () => {
     const started = createDeferredPromise<void>();
     const release = createDeferredPromise<void>();
+
     const clear = withThreadContextClearGuard("thread-clear", async () => {
       started.resolve();
       await release.promise;
     });
+
     await started.promise;
 
     await expect(
@@ -27,10 +29,12 @@ describe("thread context mutation guard", () => {
 
   it("allows overlapping sends but excludes clear until both settle", async () => {
     const release = createDeferredPromise<void>();
+
     const send = () =>
       withThreadSendGuard("thread-send", async () => {
         await release.promise;
       });
+
     const sends = [send(), send()];
 
     await expect(

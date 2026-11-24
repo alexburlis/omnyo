@@ -1,22 +1,24 @@
 import { useCallback } from "react";
-import type { AppCommandId } from "@bb/domain";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Button } from "@bb/shared-ui/button";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
+import type { AppCommandId } from "@omnyo/domain";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
-import { COARSE_POINTER_HEADER_ICON_BUTTON_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
+} from "@omnyo/shared-ui/tooltip";
+import { COARSE_POINTER_HEADER_ICON_BUTTON_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
 import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider";
+import { appCommandTarget } from "@/lib/app-command-targets";
 import { useRouteStateHistoryNavigation } from "@/lib/app-route-history";
 import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
 
 interface SidebarHistoryNavigationControlsProps {
   onNavigate?: () => void;
   className?: string;
+  showShortcutHints?: boolean;
 }
 
 interface SidebarHistoryNavButtonProps {
@@ -40,6 +42,7 @@ function SidebarHistoryNavButton({
   onClick,
 }: SidebarHistoryNavButtonProps) {
   const shortcut = useAppCommandShortcut(command);
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -53,6 +56,7 @@ function SidebarHistoryNavButton({
               "cursor-default opacity-50 hover:bg-transparent hover:text-muted-foreground",
           )}
           onClick={onClick}
+          {...appCommandTarget(command)}
           aria-disabled={disabled || undefined}
           aria-label={label}
           aria-keyshortcuts={shortcut?.ariaKeyshortcuts}
@@ -76,6 +80,7 @@ function SidebarHistoryNavButton({
 export function SidebarHistoryNavigationControls({
   onNavigate,
   className,
+  showShortcutHints = true,
 }: SidebarHistoryNavigationControlsProps) {
   const { canGoBack, canGoForward, goBack, goForward } =
     useRouteStateHistoryNavigation();
@@ -84,6 +89,7 @@ export function SidebarHistoryNavigationControls({
     if (!canGoBack) {
       return;
     }
+
     goBack();
     onNavigate?.();
   }, [canGoBack, goBack, onNavigate]);
@@ -92,6 +98,7 @@ export function SidebarHistoryNavigationControls({
     if (!canGoForward) {
       return;
     }
+
     goForward();
     onNavigate?.();
   }, [canGoForward, goForward, onNavigate]);
@@ -100,11 +107,11 @@ export function SidebarHistoryNavigationControls({
     <TooltipProvider delayDuration={300}>
       <div
         className={cn(
-          "relative flex items-center gap-(--bb-chrome-control-gap)",
+          "relative flex items-center gap-(--omnyo-chrome-control-gap)",
           className,
         )}
       >
-        <SidebarHistoryShortcutHints />
+        {showShortcutHints ? <SidebarHistoryShortcutHints /> : null}
         <SidebarHistoryNavButton
           command="history.back"
           icon="ChevronLeft"
@@ -127,6 +134,7 @@ export function SidebarHistoryNavigationControls({
 function SidebarHistoryShortcutHints() {
   const back = useAppCommandShortcut("history.back");
   const forward = useAppCommandShortcut("history.forward");
+
   return (
     <span
       data-sidebar-history-shortcut-hints

@@ -1,13 +1,13 @@
 import { atom } from "jotai";
-import { defaultAppSettings, defaultAppTheme } from "@bb/domain";
-import type { WorkspaceOpenTarget } from "@bb/host-daemon-contract";
+import { defaultAppSettings, defaultAppTheme } from "@omnyo/domain";
+import type { WorkspaceOpenTarget } from "@omnyo/host-daemon-contract";
 import type { HostDaemonStatusSnapshot } from "./api-host-daemon";
-import type { SystemConfigResponse } from "@bb/server-contract";
+import type { SystemConfigResponse } from "@omnyo/server-contract";
 import { systemConfigQueryOptions } from "@/hooks/queries/system-queries";
 import { markSystemConfigStale } from "@/hooks/cache-owners/system-config-cache-owner";
 import { appQueryClient } from "./app-query-client";
 import { fetchHostStatus, fetchWorkspaceOpenTargets } from "./api-host-daemon";
-import { getBbDesktopInfo } from "./bb-desktop";
+import { getOmnyoDesktopInfo } from "./omnyo-desktop";
 import {
   getBrowserLocalNetworkPermissionQuery,
   resolveLocalHostDaemonAccess,
@@ -17,6 +17,7 @@ import {
 import { wsManager } from "./ws";
 
 const unavailableSystemConfig: SystemConfigResponse = {
+  commandDefaultsByProvider: {},
   serverAccess: {
     providers: [],
     defaultProviderId: "direct",
@@ -29,9 +30,9 @@ const unavailableSystemConfig: SystemConfigResponse = {
   keybindingOverrides: [],
   performanceDiagnosticsAvailable: false,
   experiments: {
-    changelogPreview: false,
     serverMove: false,
     performanceDiagnostics: false,
+    autoCompactBeforeCacheExpiry: false,
   },
   appearance: defaultAppTheme,
   customThemes: [],
@@ -47,6 +48,7 @@ const unavailableSystemConfig: SystemConfigResponse = {
 };
 
 type SystemConfigLoadStatus = "failed" | "succeeded" | null;
+
 type Milliseconds = number;
 
 interface LocalHostDaemonConnection {
@@ -82,9 +84,11 @@ async function loadSystemConfig(): Promise<SystemConfigResponse> {
   try {
     const config = await appQueryClient.fetchQuery(systemConfigQueryOptions());
     markSystemConfigLoadSucceeded();
+
     return config;
   } catch {
     markSystemConfigLoadFailed();
+
     return unavailableSystemConfig;
   }
 }
@@ -111,10 +115,12 @@ function selectPreferredLocalHostConnection(
     const currentServerConnection = connections.find(
       ({ status }) => parseOrigin(status.serverUrl) === browserOrigin,
     );
+
     if (currentServerConnection !== undefined) {
       return currentServerConnection;
     }
   }
+
   return connections[0] ?? null;
 }
 
@@ -125,13 +131,16 @@ async function fetchLocalHostConnection(
   const results = await Promise.all(
     ports.map(async (port): Promise<LocalHostDaemonConnection | null> => {
       const status = await fetchHostStatus(port);
+
       return status === null ? null : { port, status };
     }),
   );
+
   const connections = results.filter(
     (connection): connection is LocalHostDaemonConnection =>
       connection !== null,
   );
+
   return selectPreferredLocalHostConnection(connections, browserOrigin);
 }
 
@@ -141,6 +150,7 @@ async function fetchLocalHostConnectionWithRetry({
   retryDelaysMs,
 }: FetchLocalHostConnectionWithRetryArgs): Promise<LocalHostDaemonConnection | null> {
   const firstConnection = await fetchLocalHostConnection(ports, browserOrigin);
+
   if (firstConnection !== null) {
     return firstConnection;
   }
@@ -148,6 +158,7 @@ async function fetchLocalHostConnectionWithRetry({
   for (const delayMs of retryDelaysMs) {
     await sleep(delayMs);
     const connection = await fetchLocalHostConnection(ports, browserOrigin);
+
     if (connection !== null) {
       return connection;
     }
@@ -157,20 +168,26 @@ async function fetchLocalHostConnectionWithRetry({
 }
 
 const systemConfigRefreshTickAtom = atom(0);
+
 systemConfigRefreshTickAtom.onMount = (setRefreshTick) => {
   const queryKey = systemConfigQueryOptions().queryKey;
+
   let observedConfig =
     appQueryClient.getQueryData<SystemConfigResponse>(queryKey);
+
   const invalidateSystemConfig = () => {
     markSystemConfigStale(appQueryClient);
   };
+
   const unsubscribeConnected = wsManager.onConnected(({ reconnected }) => {
     if (!reconnected && !didLastSystemConfigLoadFail()) {
       return;
     }
+
     invalidateSystemConfig();
     setRefreshTick((count) => count + 1);
   });
+
   const unsubscribeChanged = wsManager.onChanged((message) => {
     const hostConnectionChanged =
       message.entity === "host" &&
@@ -178,6 +195,7 @@ systemConfigRefreshTickAtom.onMount = (setRefreshTick) => {
         (change) =>
           change === "host-connected" || change === "host-disconnected",
       );
+
     if (
       hostConnectionChanged ||
       (message.entity === "system" &&
@@ -186,9 +204,11 @@ systemConfigRefreshTickAtom.onMount = (setRefreshTick) => {
       if (hostConnectionChanged) {
         invalidateSystemConfig();
       }
+
       setRefreshTick((count) => count + 1);
     }
   });
+
   const unsubscribeConfig = appQueryClient
     .getQueryCache()
     .subscribe((event) => {
@@ -199,17 +219,22 @@ systemConfigRefreshTickAtom.onMount = (setRefreshTick) => {
       ) {
         const nextConfig =
           appQueryClient.getQueryData<SystemConfigResponse>(queryKey);
+
         if (observedConfig === undefined) {
           observedConfig = nextConfig;
+
           return;
         }
+
         if (nextConfig === observedConfig) {
           return;
         }
+
         observedConfig = nextConfig;
         setRefreshTick((count) => count + 1);
       }
     });
+
   return () => {
     unsubscribeConnected();
     unsubscribeChanged();
@@ -219,12 +244,25 @@ systemConfigRefreshTickAtom.onMount = (setRefreshTick) => {
 
 const systemConfigAtom = atom(async (get) => {
   get(systemConfigRefreshTickAtom);
+
   return loadSystemConfig();
 });
 
 const localHostStatusRefreshTickAtom = atom(0);
 
+localHostStatusRefreshTickAtom.onMount = (setRefreshTick) => {
+  const refresh = () => setRefreshTick((count) => count + 1);
+
+  if (typeof window !== "undefined") window.addEventListener("focus", refresh);
+
+  return () => {
+    if (typeof window !== "undefined")
+      window.removeEventListener("focus", refresh);
+  };
+};
+
 const localHostDaemonAccessRefreshTickAtom = atom(0);
+
 const localHostDaemonSessionAccessGrantedAtom = atom(false);
 
 export const localHostDaemonAccessStateAtom = atom<
@@ -233,10 +271,11 @@ export const localHostDaemonAccessStateAtom = atom<
   get(localHostDaemonAccessRefreshTickAtom);
   const sessionAccessGranted = get(localHostDaemonSessionAccessGrantedAtom);
   const config = await get(systemConfigAtom);
+
   return resolveLocalHostDaemonAccess({
     configuredPorts: config.localHelperPorts,
     hostname: typeof window === "undefined" ? null : window.location.hostname,
-    isDesktop: getBbDesktopInfo() !== null,
+    isDesktop: getOmnyoDesktopInfo() !== null,
     permissions: getBrowserLocalNetworkPermissionQuery(),
     sessionAccessGranted,
   });
@@ -246,6 +285,7 @@ export const requestLocalHostDaemonAccessAtom = atom(
   null,
   async (get, set): Promise<boolean> => {
     const config = await get(systemConfigAtom);
+
     if (config.localHelperPorts.length === 0) {
       return false;
     }
@@ -254,11 +294,14 @@ export const requestLocalHostDaemonAccessAtom = atom(
       config.localHelperPorts,
       typeof window === "undefined" ? null : window.location.origin,
     );
+
     if (connection !== null) {
       set(localHostDaemonSessionAccessGrantedAtom, true);
     }
+
     set(localHostDaemonAccessRefreshTickAtom, (count) => count + 1);
     set(localHostStatusRefreshTickAtom, (count) => count + 1);
+
     return connection !== null;
   },
 );
@@ -267,7 +310,9 @@ const localHostConnectionAtom = atom<Promise<LocalHostDaemonConnection | null>>(
   async (get) => {
     get(localHostStatusRefreshTickAtom);
     const ports = await get(localHostDaemonProbePortsAtom);
+
     if (ports.length === 0) return null;
+
     return fetchLocalHostConnectionWithRetry({
       browserOrigin:
         typeof window === "undefined" ? null : window.location.origin,
@@ -284,6 +329,7 @@ export const localHostStatusAtom = atom<
 export const localHostDaemonReachableAtom = atom<Promise<boolean>>(
   async (get) => {
     const localHostStatus = await get(localHostStatusAtom);
+
     return localHostStatus !== null;
   },
 );
@@ -291,15 +337,18 @@ export const localHostDaemonReachableAtom = atom<Promise<boolean>>(
 export const localHostDaemonHostIdAtom = atom<Promise<string | null>>(
   async (get) => {
     const localHostStatus = await get(localHostStatusAtom);
+
     return localHostStatus?.hostId ?? null;
   },
 );
 
 export const localHostIdAtom = atom<Promise<string | null>>(async (get) => {
   const localHostStatus = await get(localHostStatusAtom);
+
   if (!localHostStatus?.connected) {
     return null;
   }
+
   return localHostStatus.hostId;
 });
 
@@ -307,6 +356,7 @@ export const localWorkspaceOpenTargetsAtom = atom<
   Promise<WorkspaceOpenTarget[]>
 >(async (get) => {
   const connection = await get(localHostConnectionAtom);
+
   if (connection === null) {
     return [];
   }
@@ -318,6 +368,7 @@ const localHostDaemonProbePortsAtom = atom<Promise<readonly number[]>>(
   async (get) => {
     const config = await get(systemConfigAtom);
     const accessState = await get(localHostDaemonAccessStateAtom);
+
     return resolveLocalHostDaemonProbePorts(
       config.localHelperPorts,
       accessState,

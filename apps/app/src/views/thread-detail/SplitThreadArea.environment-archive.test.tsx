@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { ActionHistoryProvider } from "@/components/layout/ActionHistoryProvider";
 import {
   act,
   cleanup,
@@ -11,11 +12,11 @@ import { createStore, Provider as JotaiProvider } from "jotai";
 import { useContext } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import {
   makeThread,
   makeThreadListEntry,
-} from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   sidebarNavigationQueryKey,
@@ -30,10 +31,8 @@ import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import type { SplitLayout } from "@/lib/split-layout";
 import { resetThreadActionRegistryForTest } from "@/lib/thread-actions/thread-action-registry";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
-import {
-  ThreadActionsProvider,
-  useThreadActions,
-} from "@/components/thread/ThreadActionsProvider";
+import { ThreadActionsProvider } from "@/components/thread/ThreadActionsProvider";
+import { useThreadActions } from "@/lib/thread-actions/thread-actions-context";
 import { PaneContext } from "./PaneContext";
 import { SplitThreadArea } from "./SplitThreadArea";
 
@@ -85,6 +84,7 @@ vi.mock("@/components/commands/AppCommandProvider", () => ({
 vi.mock("./ThreadDetailView", () => ({
   ThreadDetailView: ({ threadId }: { threadId: string }) => {
     const pane = useContext(PaneContext);
+
     return (
       <div
         data-testid={`pane-${threadId}`}
@@ -121,6 +121,7 @@ function LocationProbe() {
 
 function ArchiveEnvironmentButton() {
   const { archiveEnvironmentThreads } = useThreadActions();
+
   return (
     <button
       type="button"
@@ -141,19 +142,23 @@ it("keeps an unrelated split pane open and focused when an environment is archiv
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+
   const envThread = makeThread({
     id: "thr-env",
     projectId: PERSONAL_PROJECT_ID,
     environmentId: ENVIRONMENT_ID,
   });
+
   const otherThread = makeThread({
     id: "thr-other",
     projectId: PERSONAL_PROJECT_ID,
     environmentId: "env_other",
   });
+
   for (const thread of [envThread, otherThread]) {
     queryClient.setQueryData(threadQueryKey(thread.id), thread);
   }
+
   queryClient.setQueryData(
     sidebarNavigationQueryKey(),
     makeSidebarBootstrapResponse({
@@ -168,12 +173,16 @@ it("keeps an unrelated split pane open and focused when an environment is archiv
   );
   const store = createStore();
   store.set(splitLayoutAtom, LAYOUT);
+
   const unsubscribe = store.sub(splitLayoutAtom, () => {
     const layout = store.get(splitLayoutAtom);
+
     const envPaneOpen =
       layout !== null && JSON.stringify(layout.root).includes("thr-env");
+
     if (!envPaneOpen) archiveThreads.resolve?.();
   });
+
   render(
     <JotaiProvider store={store}>
       <QueryClientProvider client={queryClient}>
@@ -186,11 +195,13 @@ it("keeps an unrelated split pane open and focused when an environment is archiv
           ]}
         >
           <RouteNavigationProvider>
-            <ThreadActionsProvider>
-              <SplitThreadArea />
-              <LocationProbe />
-              <ArchiveEnvironmentButton />
-            </ThreadActionsProvider>
+            <ActionHistoryProvider>
+              <ThreadActionsProvider>
+                <SplitThreadArea />
+                <LocationProbe />
+                <ArchiveEnvironmentButton />
+              </ThreadActionsProvider>
+            </ActionHistoryProvider>
           </RouteNavigationProvider>
         </MemoryRouter>
       </QueryClientProvider>
@@ -198,21 +209,25 @@ it("keeps an unrelated split pane open and focused when an environment is archiv
   );
 
   fireEvent.click(screen.getByRole("button", { name: "Archive environment" }));
+
   for (let tick = 0; tick < 5; tick += 1) {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   }
+
   expect(archiveThreads.resolve).not.toBeNull();
   await act(async () => {
     archiveThreads.resolve?.();
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
+
   for (let tick = 0; tick < 5; tick += 1) {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   }
+
   unsubscribe();
 
   expect(screen.queryByTestId("pane-thr-env")).toBeNull();

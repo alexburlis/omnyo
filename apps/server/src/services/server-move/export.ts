@@ -1,32 +1,50 @@
 import Database from "better-sqlite3";
-import { mkdir, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { Writable } from "node:stream";
 import {
   countAppliedMigrations,
   getExperiments,
   type DbConnection,
-} from "@bb/db";
-import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
+} from "@omnyo/db";
+import { HOST_DAEMON_PROTOCOL_VERSION } from "@omnyo/host-daemon-contract";
+import type { SecretVault } from "@omnyo/secret-storage";
 import {
-  listServerOwnedEntries,
+  pipeServerArchive,
+  planServerArchive,
+  ServerArchiveError,
+  type ServerArchiveDigest,
+  type ServerArchiveManifestInput,
   writeServerArchive,
-  type ServerArchiveSourceFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import type { ServerLogger } from "../../types.js";
+import {
+  type ServerDataSnapshot,
+  type ServerExportFreeSpace,
+  type SqliteSnapshotSource,
+  withServerDataSnapshot,
+} from "./export-snapshot.js";
 import { listOldCopyEntries } from "./switch.js";
 
-const SERVER_DATABASE_ARCHIVE_PATH = "bb.db";
-const SNAPSHOT_DIR_NAME = "snapshot";
-
-export interface ExportServerArchiveArgs {
+interface ServerExportSourceArgs {
   appVersion: string;
   dataDir: string;
   db: DbConnection;
-  fileName: string;
+  freeSpace: ServerExportFreeSpace;
   logger: Pick<ServerLogger, "warn">;
   now: number;
   sourceServerHostId: string | null;
+  vault: SecretVault;
   workDir: string;
+}
+
+export interface ExportServerArchiveArgs extends ServerExportSourceArgs {
+  fileName: string;
+}
+
+export interface StreamServerExportArgs extends ServerExportSourceArgs {
+  onMeasured(archive: ServerArchiveDigest): void;
+  output: Writable;
+  signal: AbortSignal;
 }
 
 export interface ServerArchiveExport {
@@ -37,84 +55,114 @@ export interface ServerArchiveExport {
   skippedPaths: string[];
 }
 
-async function snapshotPluginDatabase(
-  sourcePath: string,
-  destinationPath: string,
-): Promise<void> {
-  await mkdir(dirname(destinationPath), { recursive: true });
-  const connection = new Database(sourcePath, {
-    fileMustExist: true,
-    readonly: true,
+export interface ServerArchiveStream extends ServerArchiveDigest {
+  skippedPaths: string[];
+}
+
+function openReadonlyDatabase(path: string): SqliteSnapshotSource {
+  return new Database(path, { fileMustExist: true, readonly: true });
+}
+
+function withLiveServerSnapshot<T>(
+  args: ServerExportSourceArgs,
+  signal: AbortSignal | null,
+  run: (snapshot: ServerDataSnapshot) => Promise<T>,
+): Promise<T> {
+  return withServerDataSnapshot(
+    {
+      backupServerDatabase: async (destinationPath, progress) => {
+        await args.db.$client.backup(destinationPath, { progress });
+      },
+      dataDir: args.dataDir,
+      freeSpace: args.freeSpace,
+      logger: args.logger,
+      openDatabase: openReadonlyDatabase,
+      openVault: async () => args.vault,
+      signal,
+      workDir: args.workDir,
+    },
+    run,
+  );
+}
+
+function serverManifestInput(
+  args: ServerExportSourceArgs,
+): ServerArchiveManifestInput {
+  return {
+    createdAt: args.now,
+    appVersion: args.appVersion,
+    protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+    migrationCount: countAppliedMigrations(args.db),
+    sourceDataDir: args.dataDir,
+    sourceServerHostId: args.sourceServerHostId,
+    serverMoveExperiment: getExperiments(args.db).serverMove,
+  };
+}
+
+function discardingWritable(): Writable {
+  return new Writable({
+    write(_chunk: Buffer, _encoding, callback) {
+      callback();
+    },
   });
-  try {
-    await connection.backup(destinationPath);
-  } finally {
-    connection.close();
-  }
 }
 
 export async function exportServerArchive(
   args: ExportServerArchiveArgs,
 ): Promise<ServerArchiveExport> {
-  const snapshotDir = join(args.workDir, SNAPSHOT_DIR_NAME);
-  await rm(snapshotDir, { force: true, recursive: true });
-  await mkdir(snapshotDir, { recursive: true });
-  try {
-    const databaseSnapshotPath = join(
-      snapshotDir,
-      SERVER_DATABASE_ARCHIVE_PATH,
-    );
-    await args.db.$client.backup(databaseSnapshotPath);
-    const migrationCount = countAppliedMigrations(args.db);
-    const inventory = await listServerOwnedEntries(args.dataDir);
-    if (inventory.skippedPaths.length > 0) {
-      args.logger.warn(
-        { dataDir: args.dataDir, skippedPaths: inventory.skippedPaths },
-        "Server export skipped symbolic links and special files",
-      );
-    }
-    const files: ServerArchiveSourceFile[] = [
-      {
-        archivePath: SERVER_DATABASE_ARCHIVE_PATH,
-        sourcePath: databaseSnapshotPath,
-      },
-    ];
-    for (const entry of inventory.entries) {
-      for (const file of entry.files) {
-        if (file.path === SERVER_DATABASE_ARCHIVE_PATH) {
-          continue;
-        }
-        if (!file.sqliteDatabase) {
-          files.push({ archivePath: file.path, sourcePath: file.absolutePath });
-          continue;
-        }
-        const snapshotPath = join(snapshotDir, ...file.path.split("/"));
-        await snapshotPluginDatabase(file.absolutePath, snapshotPath);
-        files.push({ archivePath: file.path, sourcePath: snapshotPath });
-      }
-    }
+  return withLiveServerSnapshot(args, null, async (snapshot) => {
     const outPath = join(args.workDir, args.fileName);
+
     const result = await writeServerArchive({
       outPath,
-      files,
-      manifest: {
-        createdAt: args.now,
-        bbVersion: args.appVersion,
-        protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
-        migrationCount,
-        sourceDataDir: args.dataDir,
-        sourceServerHostId: args.sourceServerHostId,
-        serverMoveExperiment: getExperiments(args.db).serverMove,
-      },
+      files: snapshot.files,
+      manifest: serverManifestInput(args),
     });
+
     return {
-      oldCopyEntries: listOldCopyEntries(inventory.entries),
+      oldCopyEntries: listOldCopyEntries(snapshot.inventory.entries),
       path: outPath,
       sha256: result.sha256,
       sizeBytes: result.sizeBytes,
-      skippedPaths: inventory.skippedPaths,
+      skippedPaths: snapshot.inventory.skippedPaths,
     };
-  } finally {
-    await rm(snapshotDir, { force: true, recursive: true });
-  }
+  });
+}
+
+export async function streamServerExport(
+  args: StreamServerExportArgs,
+): Promise<ServerArchiveStream> {
+  return withLiveServerSnapshot(args, args.signal, async (snapshot) => {
+    const plan = await planServerArchive({
+      files: snapshot.files,
+      manifest: serverManifestInput(args),
+      signal: args.signal,
+    });
+
+    const measured = await pipeServerArchive({
+      plan,
+      output: discardingWritable(),
+      signal: args.signal,
+    });
+
+    args.onMeasured(measured);
+
+    const streamed = await pipeServerArchive({
+      plan,
+      output: args.output,
+      signal: args.signal,
+    });
+
+    if (
+      streamed.sha256 !== measured.sha256 ||
+      streamed.sizeBytes !== measured.sizeBytes
+    ) {
+      throw new ServerArchiveError(
+        "digest_mismatch",
+        "The streamed server export differs from the archive it measured",
+      );
+    }
+
+    return { ...streamed, skippedPaths: snapshot.inventory.skippedPaths };
+  });
 }

@@ -18,7 +18,7 @@ describe("normalizeSidebarSectionOrder", () => {
         legacyEntityAnchor: "projects",
         hasPinnedSection: true,
       }),
-    ).toEqual(["threads", projectA, projectB, "pinned"]);
+    ).toEqual(["threads", projectA, projectB, "pinned", "shelf"]);
   });
 
   it("preserves a free mixed order of built-ins and entities", () => {
@@ -29,7 +29,7 @@ describe("normalizeSidebarSectionOrder", () => {
         legacyEntityAnchor: "projects",
         hasPinnedSection: true,
       }),
-    ).toEqual([projectB, "pinned", "threads", projectA]);
+    ).toEqual([projectB, "pinned", "threads", projectA, "shelf"]);
   });
 
   it("drops removed entities and appends new ones after existing entities", () => {
@@ -41,7 +41,7 @@ describe("normalizeSidebarSectionOrder", () => {
         legacyEntityAnchor: "projects",
         hasPinnedSection: true,
       }),
-    ).toEqual(["pinned", "threads", projectB, projectA, projectC]);
+    ).toEqual(["pinned", "threads", projectB, projectA, projectC, "shelf"]);
   });
 
   it("drops a stored Threads section when it is not available", () => {
@@ -53,7 +53,27 @@ describe("normalizeSidebarSectionOrder", () => {
         hasPinnedSection: true,
         hasThreadsSection: false,
       }),
-    ).toEqual(["pinned", projectA, projectB]);
+    ).toEqual(["pinned", projectA, projectB, "shelf"]);
+  });
+
+  it("ends a stored order without the Shelf with it and keeps a stored Shelf slot", () => {
+    expect(
+      normalizeSidebarSectionOrder({
+        storedOrder: ["pinned", "projects", "threads"],
+        entitySectionIds: [projectA],
+        legacyEntityAnchor: "projects",
+        hasPinnedSection: true,
+      }),
+    ).toEqual(["pinned", projectA, "threads", "shelf"]);
+
+    expect(
+      normalizeSidebarSectionOrder({
+        storedOrder: ["shelf", "pinned", "projects", "threads", "shelf"],
+        entitySectionIds: [projectA],
+        legacyEntityAnchor: "projects",
+        hasPinnedSection: true,
+      }),
+    ).toEqual(["shelf", "pinned", projectA, "threads"]);
   });
 
   it("uses the same reconciliation for sections", () => {
@@ -65,7 +85,7 @@ describe("normalizeSidebarSectionOrder", () => {
         legacyEntityAnchor: "sections",
         hasPinnedSection: true,
       }),
-    ).toEqual(["pinned", section, "threads"]);
+    ).toEqual(["pinned", section, "threads", "shelf"]);
   });
 });
 
@@ -78,6 +98,16 @@ describe("reorderSidebarSectionOrder", () => {
         order: ["pinned", "project:a", "project:b", "threads"],
       }),
     ).toEqual(["pinned", "threads", "project:a", "project:b"]);
+  });
+
+  it("moves the Shelf like any other built-in section", () => {
+    expect(
+      reorderSidebarSectionOrder({
+        activeId: "shelf",
+        overId: "pinned",
+        order: ["pinned", "project:a", "threads", "shelf"],
+      }),
+    ).toEqual(["shelf", "pinned", "project:a", "threads"]);
   });
 
   it("rejects ids outside the top-level section contract", () => {
@@ -105,7 +135,7 @@ describe("insertSidebarSectionAfter", () => {
         anchorSectionId: sectionA,
         sectionId: created,
       }),
-    ).toEqual(["pinned", sectionA, created, sectionB, "threads"]);
+    ).toEqual(["pinned", sectionA, created, sectionB, "threads", "shelf"]);
   });
 
   it("places the created section after a built-in anchor", () => {
@@ -117,7 +147,7 @@ describe("insertSidebarSectionAfter", () => {
         anchorSectionId: "pinned",
         sectionId: created,
       }),
-    ).toEqual(["pinned", created, sectionA, "threads"]);
+    ).toEqual(["pinned", created, sectionA, "threads", "shelf"]);
   });
 
   it("moves an already stored section next to its anchor", () => {
@@ -129,7 +159,7 @@ describe("insertSidebarSectionAfter", () => {
         anchorSectionId: sectionB,
         sectionId: created,
       }),
-    ).toEqual(["pinned", sectionA, sectionB, created, "threads"]);
+    ).toEqual(["pinned", sectionA, sectionB, created, "threads", "shelf"]);
   });
 
   it("keeps the stored order when the anchor is from another mode", () => {

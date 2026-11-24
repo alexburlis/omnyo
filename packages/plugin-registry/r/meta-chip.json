@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "meta-chip",
+  "type": "registry:ui",
+  "title": "meta-chip",
+  "description": "Omnyo ui \"meta-chip\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
+  "registryDependencies": [
+    "@omnyo/focus-ring",
+    "@omnyo/icon",
+    "@omnyo/tooltip",
+    "@omnyo/utils"
+  ],
+  "files": [
+    {
+      "path": "registry/components/ui/meta-chip.tsx",
+      "content": "import type { ReactNode } from \"react\";\nimport { cn } from \"../../lib/utils\";\nimport { FOCUS_RING_CLASS } from \"./focus-ring\";\nimport { Icon, type IconName } from \"./icon\";\nimport {\n  Tooltip,\n  TooltipContent,\n  TooltipProvider,\n  TooltipTrigger,\n} from \"./tooltip\";\n\nexport type MetaChipTone = \"neutral\" | \"attention\" | \"success\" | \"error\";\n\nconst META_CHIP_TONE_CLASS: Record<MetaChipTone, string> = {\n  neutral: \"bg-state-hover text-muted-foreground\",\n  attention: \"bg-surface-attention text-foreground\",\n  success: \"bg-success/12 text-success-foreground\",\n  error: \"bg-destructive/10 text-destructive-text\",\n};\n\nexport function MetaChip({\n  icon,\n  label,\n  description,\n  tone = \"neutral\",\n  className,\n}: {\n  icon?: IconName;\n  label?: ReactNode;\n  description: string;\n  tone?: MetaChipTone;\n  className?: string;\n}) {\n  return (\n    <TooltipProvider delayDuration={300}>\n      <Tooltip>\n        <TooltipTrigger asChild>\n          <span\n            tabIndex={0}\n            role=\"img\"\n            aria-label={description}\n            className={cn(\n              \"inline-flex h-5 shrink-0 cursor-default items-center gap-1 whitespace-nowrap rounded-full px-1.5 text-xs font-medium tabular-nums [&_[data-icon-root]]:size-3.5 [&_[data-icon-root]]:shrink-0\",\n              label === undefined && \"w-5 justify-center px-0\",\n              META_CHIP_TONE_CLASS[tone],\n              FOCUS_RING_CLASS,\n              className,\n            )}\n          >\n            {icon === undefined ? null : (\n              <Icon name={icon} aria-hidden=\"true\" />\n            )}\n            {label === undefined ? null : (\n              <span aria-hidden=\"true\">{label}</span>\n            )}\n          </span>\n        </TooltipTrigger>\n        <TooltipContent side=\"top\">{description}</TooltipContent>\n      </Tooltip>\n    </TooltipProvider>\n  );\n}\n",
+      "type": "registry:ui",
+      "target": "components/ui/meta-chip.tsx"
+    }
+  ]
+}

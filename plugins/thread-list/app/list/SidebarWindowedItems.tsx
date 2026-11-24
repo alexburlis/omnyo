@@ -19,6 +19,7 @@ import {
 } from "./sidebarThreadShortcuts.js";
 
 const WINDOW_VIEWPORT_MARGIN_PX = 240;
+
 const DEFAULT_ROW_HEIGHT_PX = 30;
 
 interface MeasuredItemHeight {
@@ -39,6 +40,10 @@ interface SidebarWindowedItemsProps {
 
 const EMPTY_KEY_SET: ReadonlySet<string> = new Set();
 
+function hasLayoutBox(rect: DOMRectReadOnly): boolean {
+  return rect.width > 0 || rect.height > 0;
+}
+
 function mergeRealizedKeys(
   previous: ReadonlySet<string>,
   {
@@ -53,6 +58,7 @@ function mergeRealizedKeys(
 ): ReadonlySet<string> {
   let next: Set<string> | null = null;
   const current = () => next ?? previous;
+
   if (retain) {
     for (const key of previous) {
       if (!retain.has(key)) {
@@ -61,18 +67,21 @@ function mergeRealizedKeys(
       }
     }
   }
+
   for (const key of remove ?? EMPTY_KEY_SET) {
     if (current().has(key)) {
       next ??= new Set(previous);
       next.delete(key);
     }
   }
+
   for (const key of add ?? EMPTY_KEY_SET) {
     if (!current().has(key)) {
       next ??= new Set(previous);
       next.add(key);
     }
   }
+
   return next ?? previous;
 }
 
@@ -89,13 +98,16 @@ export function SidebarWindowedItems({
 
   const [realizedKeys, setRealizedKeys] =
     useState<ReadonlySet<string>>(EMPTY_KEY_SET);
+
   const measuredHeightsRef = useRef(new Map<string, MeasuredItemHeight>());
   const rowHeightRef = useRef(DEFAULT_ROW_HEIGHT_PX);
   const wrapperByKeyRef = useRef(new Map<string, HTMLDivElement>());
   const keyByWrapperRef = useRef(new Map<Element, string>());
+
   const wrapperRefCallbacksRef = useRef(
     new Map<string, (node: HTMLDivElement | null) => void>(),
   );
+
   const observerRef = useRef<IntersectionObserver | null>(null);
   const alwaysMountedKeysRef = useRef(alwaysMountedKeys);
   alwaysMountedKeysRef.current = alwaysMountedKeys;
@@ -108,22 +120,27 @@ export function SidebarWindowedItems({
   useLayoutEffect(() => {
     if (!focusItemKey) return;
     const wrapper = wrapperByKeyRef.current.get(focusItemKey);
+
     const target = wrapper?.querySelector<HTMLElement>(
       "a[data-sidebar-thread-id], button[aria-expanded]",
     );
+
     target?.focus();
   }, [focusItemKey]);
 
   const getWrapperRefCallback = useCallback((key: string) => {
     const callbacks = wrapperRefCallbacksRef.current;
     let callback = callbacks.get(key);
+
     if (!callback) {
       callback = (node: HTMLDivElement | null) => {
         const previous = wrapperByKeyRef.current.get(key);
+
         if (previous && previous !== node) {
           keyByWrapperRef.current.delete(previous);
           observerRef.current?.unobserve(previous);
         }
+
         if (node) {
           wrapperByKeyRef.current.set(key, node);
           keyByWrapperRef.current.set(node, key);
@@ -132,17 +149,22 @@ export function SidebarWindowedItems({
           wrapperByKeyRef.current.delete(key);
         }
       };
+
       callbacks.set(key, callback);
     }
+
     return callback;
   }, []);
 
   const resolveScrollElement = useCallback((): Element | null => {
     const fromRef = scrollElementRef?.current ?? null;
+
     if (fromRef) {
       return fromRef;
     }
+
     const firstWrapper = wrapperByKeyRef.current.values().next();
+
     return firstWrapper.done
       ? null
       : firstWrapper.value.closest(SIDEBAR_CONTENT_SELECTOR);
@@ -152,10 +174,13 @@ export function SidebarWindowedItems({
     if (height <= 0) {
       return;
     }
+
     const rows = rowsByKeyRef.current.get(key) ?? 0;
     measuredHeightsRef.current.set(key, { height, rows });
+
     if (rows > 0) {
       const perRow = height / rows;
+
       if (perRow >= 20 && perRow <= 80) {
         rowHeightRef.current = perRow;
       }
@@ -167,10 +192,12 @@ export function SidebarWindowedItems({
       setRealizedKeys((previous) =>
         previous.size > 0 ? EMPTY_KEY_SET : previous,
       );
+
       return;
     }
 
     const keySet = new Set(itemKeys);
+
     for (const staleMap of [
       measuredHeightsRef.current,
       rowsByKeyRef.current,
@@ -184,10 +211,12 @@ export function SidebarWindowedItems({
     }
 
     const scrollElement = resolveScrollElement();
+
     const promoteAll =
       !scrollElement || typeof IntersectionObserver === "undefined";
 
     const promoted = new Set<string>();
+
     if (promoteAll) {
       for (const key of itemKeys) {
         promoted.add(key);
@@ -196,11 +225,14 @@ export function SidebarWindowedItems({
       const viewport = scrollElement.getBoundingClientRect();
       const viewportTop = viewport.top - WINDOW_VIEWPORT_MARGIN_PX;
       const viewportBottom = viewport.bottom + WINDOW_VIEWPORT_MARGIN_PX;
+
       for (const [key, element] of wrapperByKeyRef.current) {
         if (realizedKeys.has(key) || !keySet.has(key)) {
           continue;
         }
+
         const rect = element.getBoundingClientRect();
+
         if (rect.bottom >= viewportTop && rect.top <= viewportBottom) {
           promoted.add(key);
         }
@@ -212,6 +244,7 @@ export function SidebarWindowedItems({
     );
 
     const observer = observerRef.current;
+
     if (observer) {
       for (const element of wrapperByKeyRef.current.values()) {
         observer.observe(element);
@@ -224,7 +257,9 @@ export function SidebarWindowedItems({
     if (!windowingEnabled || typeof IntersectionObserver === "undefined") {
       return;
     }
+
     const scrollElement = resolveScrollElement();
+
     if (!scrollElement) {
       return;
     }
@@ -236,29 +271,40 @@ export function SidebarWindowedItems({
       if (observer || scrollElement.clientHeight === 0) {
         return;
       }
+
       observer = new IntersectionObserver(
         (entries) => {
           const intended = new Map<string, boolean>();
+
           for (const entry of entries) {
             const key = keyByWrapperRef.current.get(entry.target);
+
             if (key === undefined) {
               continue;
             }
+
             if (entry.isIntersecting) {
               intended.set(key, true);
-            } else if (!alwaysMountedKeysRef.current.has(key)) {
+            } else if (
+              !alwaysMountedKeysRef.current.has(key) &&
+              hasLayoutBox(entry.boundingClientRect)
+            ) {
               intended.set(key, false);
               recordMeasuredHeight(key, entry.boundingClientRect.height);
             }
           }
+
           if (intended.size === 0) {
             return;
           }
+
           const entering: string[] = [];
           const leaving: string[] = [];
+
           for (const [key, isEntering] of intended) {
             (isEntering ? entering : leaving).push(key);
           }
+
           startTransition(() =>
             setRealizedKeys((previous) =>
               mergeRealizedKeys(previous, { add: entering, remove: leaving }),
@@ -271,14 +317,17 @@ export function SidebarWindowedItems({
         },
       );
       observerRef.current = observer;
+
       for (const element of wrapperByKeyRef.current.values()) {
         observer.observe(element);
       }
+
       resizeObserver?.disconnect();
       resizeObserver = null;
     };
 
     connect();
+
     if (!observer && typeof ResizeObserver !== "undefined") {
       resizeObserver = new ResizeObserver(() => connect());
       resizeObserver.observe(scrollElement);
@@ -299,10 +348,12 @@ export function SidebarWindowedItems({
           realizedKeys.has(key) ||
           alwaysMountedKeys.has(key) ||
           focusItemKey === key;
+
         const rows = Math.max(1, estimateRowsRef.current(index));
         rowsByKeyRef.current.set(key, rows);
         let placeholderHeight: number | undefined;
         let navigationValue: string | undefined;
+
         if (!isRealized) {
           const measured = measuredHeightsRef.current.get(key);
           placeholderHeight =
@@ -315,6 +366,7 @@ export function SidebarWindowedItems({
               ? encodeSidebarWindowedNavigationEntries(entries)
               : undefined;
         }
+
         return (
           <div
             key={key}

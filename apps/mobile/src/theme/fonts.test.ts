@@ -15,6 +15,7 @@ describe("font platform modules", () => {
     expect(Object.keys(iosPlatform).sort()).toEqual(
       Object.keys(defaultPlatform).sort(),
     );
+
     for (const weight of WEIGHTS) {
       expect(typeof iosPlatform.SANS_WEIGHTS[weight]).toBe("string");
       expect(typeof defaultPlatform.SANS_WEIGHTS[weight]).toBe("string");
@@ -41,6 +42,7 @@ describe("font platform modules", () => {
     for (const weight of WEIGHTS) {
       expect(iosPlatform.SANS_FAMILIES[weight]).toBeUndefined();
     }
+
     expect(iosPlatform.SANS_WEIGHTS).toEqual({
       regular: "400",
       medium: "500",

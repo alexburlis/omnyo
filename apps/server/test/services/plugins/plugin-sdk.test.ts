@@ -11,16 +11,19 @@ import {
   insertThreadPluginMetadata,
   migrate,
   type DbConnection,
-} from "@bb/db";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
-import type { Logger } from "@bb/logger";
+} from "@omnyo/db";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
+import type { Logger } from "@omnyo/logger";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
 import {
   createPluginService,
   type PluginServiceDeps,
   type PluginService,
 } from "../../../src/services/plugins/plugin-service.js";
-import type { BbPluginApi } from "../../../src/services/plugins/plugin-api.js";
+import {
+  PluginContextStaleError,
+  type PluginApi,
+} from "../../../src/services/plugins/plugin-api.js";
 import {
   seedHostSession,
   seedEnvironment,
@@ -34,9 +37,10 @@ import {
 } from "../../helpers/commands.js";
 import { PluginHostArtifactRegistry } from "../../../src/services/plugins/plugin-host-artifact-registry.js";
 import { startTestServer, testLogger } from "../../helpers/test-app.js";
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
 
@@ -51,7 +55,7 @@ async function writePlugin(
     JSON.stringify({
       name: options.name,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "SDK fixture",
         description: "Plugin SDK fixture.",
         branding: { icon: "Zap" },
@@ -61,17 +65,30 @@ async function writePlugin(
     }),
   );
   await writeFile(join(rootDir, "server.ts"), options.serverSource);
+
   if (options.hostSource !== undefined) {
     await writeFile(join(rootDir, "host.ts"), options.hostSource);
   }
+
   return rootDir;
 }
 
-function requireApi(service: PluginService, pluginId: string): BbPluginApi {
+function requireApi(service: PluginService, pluginId: string): PluginApi {
   const api = service.getApi(pluginId);
+
   if (!api) throw new Error(`plugin ${pluginId} is not running`);
+
   return api;
 }
+
+const identityHostSource = `
+  const schema = { "~standard": { validate(value) { return { value }; } } };
+  export default {
+    experimental_apiVersion: 1,
+    contract: { ping: { input: schema, output: schema } },
+    handlers: { ping: (input) => input },
+  };
+`;
 
 function agentConfigurationContext(
   threadId: string,
@@ -82,6 +99,7 @@ function agentConfigurationContext(
       title: null,
       parentThreadId: null,
       sourceThreadId: null,
+      experimental_visibility: "visible",
     },
     project: {
       id: "project-configure",
@@ -106,12 +124,14 @@ function agentConfigurationContext(
   };
 }
 
-describe("plugin bb.sdk bind gate", () => {
+describe("plugin api.sdk bind gate", () => {
   let db: DbConnection;
   let workDir: string;
   let service: PluginService;
   let pluginHostArtifacts: PluginHostArtifactRegistry;
+  const serviceInstances: PluginService[] = [];
   let appUrl: string | null;
+
   const sharedPorts = {
     declareSharedPorts: vi.fn(),
     validateSharedPortDeclaration: vi.fn(
@@ -120,22 +140,26 @@ describe("plugin bb.sdk bind gate", () => {
     replaceDeclarationsForOwner: vi.fn(),
     clearDeclarationsForOwner: vi.fn(),
   };
+
   const ensureSharedPortTunnel = vi.fn().mockResolvedValue({
     label: "sawyer-air",
-    baseDomain: "getbb.app",
+    baseDomain: "omnyo.link",
   });
+
   const callPluginHost = vi.fn(
     async (
       _args: Parameters<NonNullable<PluginServiceDeps["callPluginHost"]>>[0],
     ) => ({ pong: true }),
   );
+
   const disposePluginHost = vi.fn(async () => undefined);
   it("discovers only published methods from live implementations and removes them on disable", async () => {
     for (const id of ["usage-a", "usage-b"]) {
       const rootDir = await writePlugin(workDir, {
-        name: `bb-plugin-${id}`,
+        name: `omnyo-plugin-${id}`,
         serverSource: `export default function plugin() {}`,
       });
+
       await service.installPath(rootDir);
       requireApi(service, id).rpc.register(
         defineRpcContract({
@@ -156,6 +180,7 @@ describe("plugin bb.sdk bind gate", () => {
         { internal: () => null },
       );
     }
+
     expect(
       service
         .discoverRpc({ method: "usage.v1.get" })
@@ -172,7 +197,7 @@ describe("plugin bb.sdk bind gate", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-sdk-test-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-sdk-test-"));
     sharedPorts.declareSharedPorts.mockClear();
     sharedPorts.validateSharedPortDeclaration.mockClear();
     sharedPorts.replaceDeclarationsForOwner.mockClear();
@@ -180,13 +205,20 @@ describe("plugin bb.sdk bind gate", () => {
     ensureSharedPortTunnel.mockClear();
     callPluginHost.mockClear();
     disposePluginHost.mockClear();
-    appUrl = "https://bb.example.test";
+    appUrl = "https://omnyo.example.test";
     pluginHostArtifacts = new PluginHostArtifactRegistry();
-    service = createPluginService({
+    service = await createService(pluginHostArtifacts);
+  });
+
+  async function createService(
+    artifacts: PluginHostArtifactRegistry,
+  ): Promise<PluginService> {
+    const instance = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
       db,
-      pluginHostArtifacts,
+      pluginHostArtifacts: artifacts,
+      bundledPlugins: [],
       sharedPorts,
       ensureSharedPortTunnel,
       hub: {
@@ -196,30 +228,40 @@ describe("plugin bb.sdk bind gate", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "0.9.0",
       getAppUrl: () => appUrl,
       loadTimeoutMs: 2000,
       callPluginHost,
       disposePluginHost,
     });
-  });
+
+    serviceInstances.push(instance);
+
+    return instance;
+  }
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    await service.stop();
+
+    for (const instance of serviceInstances.splice(0).reverse()) {
+      await instance.stop();
+    }
+
     await rm(workDir, { recursive: true, force: true });
   });
 
   it("throws a descriptive error before bindSdk and resolves after", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-gate",
+      name: "omnyo-plugin-gate",
       serverSource: `export default function plugin() {}`,
     });
+
     await service.installPath(rootDir);
     const api = requireApi(service, "gate");
 
     expect(() => api.sdk).toThrow(
-      /bb\.sdk is not available until the server is listening/,
+      /api\.sdk is not available until the server is listening/,
     );
 
     service.bindSdk({ baseUrl: "http://127.0.0.1:9" });
@@ -229,13 +271,15 @@ describe("plugin bb.sdk bind gate", () => {
 
   it("rejects unsafe plugin metadata before transport serialization", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-metadata-boundary",
+      name: "omnyo-plugin-metadata-boundary",
       serverSource: `export default function plugin() {}`,
     });
+
     await service.installPath(rootDir);
     service.bindSdk({ baseUrl: "http://127.0.0.1:9" });
     const api = requireApi(service, "metadata-boundary");
     const fetchSpy = vi.spyOn(globalThis, "fetch");
+
     const invalidValues: Array<{
       value: unknown;
       error: Record<string, unknown>;
@@ -246,6 +290,7 @@ describe("plugin bb.sdk bind gate", () => {
       },
       { value: { missing: undefined }, error: { name: "ZodError" } },
     ];
+
     const operations = [
       (pluginMetadata: unknown) =>
         api.sdk.threads.spawn({
@@ -273,20 +318,23 @@ describe("plugin bb.sdk bind gate", () => {
         );
       }
     }
+
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("preserves no-context spawn and fork attribution", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-metadata-attribution",
+      name: "omnyo-plugin-metadata-attribution",
       serverSource: `export default function plugin() {}`,
     });
+
     await service.installPath(rootDir);
-    service.bindSdk({ baseUrl: "https://bb.example.test" });
+    service.bindSdk({ baseUrl: "https://omnyo.example.test" });
     const api = requireApi(service, "metadata-attribution");
     const requests: unknown[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
       requests.push(JSON.parse(String(init?.body)));
+
       return new Response(
         JSON.stringify({
           id: "thread-1",
@@ -297,6 +345,7 @@ describe("plugin bb.sdk bind gate", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     });
+
     const operations = [
       (overrides: Record<string, unknown>) =>
         api.sdk.threads.spawn({
@@ -337,28 +386,30 @@ describe("plugin bb.sdk bind gate", () => {
 
   it("serves the current public app URL without the SDK bind gate", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-app-url",
+      name: "omnyo-plugin-app-url",
       serverSource: `export default function plugin() {}`,
     });
+
     await service.installPath(rootDir);
     const api = requireApi(service, "app-url");
 
-    expect(api.server.experimental_appUrl).toBe("https://bb.example.test");
+    expect(api.server.experimental_appUrl).toBe("https://omnyo.example.test");
     appUrl = null;
     expect(api.server.experimental_appUrl).toBeNull();
   });
 
   it("delivers shared-port declarations through the server control plane", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-shares",
+      name: "omnyo-plugin-shares",
       serverSource: `export default function plugin() {}`,
     });
+
     await service.installPath(rootDir);
     const api = requireApi(service, "shares");
 
     await expect(api.hosts.ensureSharedPortTunnel("host-1")).resolves.toEqual({
       label: "sawyer-air",
-      baseDomain: "getbb.app",
+      baseDomain: "omnyo.link",
     });
     api.hosts.declareSharedPorts("host-1", [8080, 3000]);
 
@@ -378,7 +429,7 @@ describe("plugin bb.sdk bind gate", () => {
 
   it("binds typed host calls and ignores worker exits from stale generations", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-host-client",
+      name: "omnyo-plugin-host-client",
       serverSource: `export default function plugin() {}`,
       hostSource: `
         const schema = { "~standard": { validate(value) { return { value }; } } };
@@ -390,19 +441,23 @@ describe("plugin bb.sdk bind gate", () => {
         };
       `,
     });
+
     await service.installPath(rootDir);
     const api = requireApi(service, "host-client");
+
     const contract = defineRpcContract({
       ping: {
         input: z.object({ value: z.string() }).strict(),
         output: z.object({ pong: z.boolean() }).strict(),
       },
     });
+
     const experimental_signals = {
       changed: {
         payload: z.object({ sequence: z.number().int() }).strict(),
       },
     };
+
     const client = api.hosts.experimental_client({
       contract,
       experimental_signals,
@@ -430,8 +485,10 @@ describe("plugin bb.sdk bind gate", () => {
     client.experimental_onWorkerExit(workerExitHandler);
     client.experimental_onSignal("changed", signalHandler);
     const artifact = callPluginHost.mock.calls[0]?.[0].artifact;
+
     if (artifact === undefined) throw new Error("missing host artifact call");
     const servedArtifact = pluginHostArtifacts.get("host-client");
+
     if (servedArtifact === undefined)
       throw new Error("missing served artifact");
     expect(servedArtifact.digest).toBe(artifact.digest);
@@ -477,15 +534,209 @@ describe("plugin bb.sdk bind gate", () => {
     ]);
   });
 
+  it("preserves accepted host identity when a fresh service loads unchanged artifact bytes", async () => {
+    const rootDir = await writePlugin(workDir, {
+      name: "omnyo-plugin-host-identity",
+      serverSource: "export default function plugin() {}",
+      hostSource: identityHostSource,
+    });
+
+    expect((await service.installPath(rootDir)).status).toBe("running");
+    const before = pluginHostArtifacts.get("host-identity");
+    expect(before).toBeDefined();
+
+    const restartedArtifacts = new PluginHostArtifactRegistry();
+    const restarted = await createService(restartedArtifacts);
+    await restarted.start();
+
+    expect(restartedArtifacts.get("host-identity")).toMatchObject({
+      digest: before?.digest,
+      byteLength: before?.byteLength,
+      generation: before?.generation,
+    });
+    expect(restarted.listHostArtifactGenerations()).toEqual(
+      service.listHostArtifactGenerations(),
+    );
+    expect(disposePluginHost).not.toHaveBeenCalled();
+  });
+
+  it("rotates explicit reload and changed-content identities but keeps a rejected reload's prior identity", async () => {
+    const rootDir = await writePlugin(workDir, {
+      name: "omnyo-plugin-host-identity",
+      serverSource: "export default function plugin() {}",
+      hostSource: identityHostSource,
+    });
+
+    await service.installPath(rootDir);
+    const first = pluginHostArtifacts.get("host-identity");
+    expect(first).toBeDefined();
+    expect((await service.reload("host-identity")).ok).toBe(true);
+    const reloaded = pluginHostArtifacts.get("host-identity");
+    expect(reloaded?.digest).toBe(first?.digest);
+    expect(reloaded?.generation).not.toBe(first?.generation);
+    expect(disposePluginHost).not.toHaveBeenCalledWith({
+      pluginId: "host-identity",
+      generation: first?.generation,
+    });
+
+    await writeFile(
+      join(rootDir, "server.ts"),
+      'export default function plugin() { throw new Error("candidate rejected"); }',
+    );
+    expect((await service.reload("host-identity")).ok).toBe(false);
+    expect(pluginHostArtifacts.get("host-identity")).toEqual(reloaded);
+    const afterRejectedArtifacts = new PluginHostArtifactRegistry();
+    await writeFile(
+      join(rootDir, "server.ts"),
+      "export default function plugin() {}",
+    );
+    await (await createService(afterRejectedArtifacts)).start();
+    expect(afterRejectedArtifacts.get("host-identity")?.generation).toBe(
+      reloaded?.generation,
+    );
+
+    await writeFile(
+      join(rootDir, "host.ts"),
+      identityHostSource.replace(
+        "(input) => input",
+        "(input) => ({ changed: input })",
+      ),
+    );
+    const changedArtifacts = new PluginHostArtifactRegistry();
+    await (await createService(changedArtifacts)).start();
+    expect(changedArtifacts.get("host-identity")?.digest).not.toBe(
+      reloaded?.digest,
+    );
+    expect(changedArtifacts.get("host-identity")?.generation).not.toBe(
+      reloaded?.generation,
+    );
+  });
+
+  it("allocates a fresh identity after a failed initial load publishes an authoritative omission", async () => {
+    const rootDir = await writePlugin(workDir, {
+      name: "omnyo-plugin-host-identity",
+      serverSource: "export default function plugin() {}",
+      hostSource: identityHostSource,
+    });
+
+    await service.installPath(rootDir);
+    const before = pluginHostArtifacts.get("host-identity");
+    expect(before).toBeDefined();
+    await writeFile(
+      join(rootDir, "server.ts"),
+      'export default function plugin() { throw new Error("startup rejected"); }',
+    );
+    const restartedArtifacts = new PluginHostArtifactRegistry();
+    const restarted = await createService(restartedArtifacts);
+    await restarted.start();
+    expect(
+      restarted.list().find((entry) => entry.id === "host-identity"),
+    ).toMatchObject({
+      status: "error",
+      statusDetail: expect.stringContaining("startup rejected"),
+    });
+    expect(restarted.listHostArtifactGenerations()).toEqual([]);
+
+    await writeFile(
+      join(rootDir, "server.ts"),
+      "export default function plugin() {}",
+    );
+    expect((await restarted.reload("host-identity")).ok).toBe(true);
+    expect(restartedArtifacts.get("host-identity")?.digest).toBe(
+      before?.digest,
+    );
+    expect(restartedArtifacts.get("host-identity")?.generation).not.toBe(
+      before?.generation,
+    );
+  });
+
+  it.each(["disable", "remove", "stop", "hold", "safe-mode"])(
+    "revokes persisted host identity on %s even when the service has no loaded instance",
+    async (operation) => {
+      const rootDir = await writePlugin(workDir, {
+        name: "omnyo-plugin-host-identity",
+        serverSource: "export default function plugin() {}",
+        hostSource: identityHostSource,
+      });
+
+      const installed = await service.installPath(rootDir);
+      const before = pluginHostArtifacts.get("host-identity");
+      expect(before).toBeDefined();
+      const restartedArtifacts = new PluginHostArtifactRegistry();
+      const restarted = await createService(restartedArtifacts);
+
+      if (operation === "disable") {
+        await restarted.setEnabled("host-identity", false);
+        await restarted.setEnabled("host-identity", true);
+      } else if (operation === "remove") {
+        expect(await restarted.remove("host-identity")).toBe(true);
+        await restarted.installPath(rootDir);
+      } else if (operation === "stop") {
+        await restarted.stop();
+        await restarted.start();
+      } else if (operation === "hold") {
+        await restarted.start({
+          hold: {
+            sources: [installed.source],
+            detail: "Held by test owner",
+            isActive: async () => true,
+          },
+        });
+        expect(restarted.listHostArtifactGenerations()).toEqual([]);
+        await restarted.start();
+      } else {
+        await restarted.setSafeMode(true);
+        expect(restarted.listHostArtifactGenerations()).toEqual([]);
+        await restarted.setSafeMode(false);
+      }
+
+      expect(restartedArtifacts.get("host-identity")?.digest).toBe(
+        before?.digest,
+      );
+      expect(restartedArtifacts.get("host-identity")?.generation).toBeDefined();
+      expect(restartedArtifacts.get("host-identity")?.generation).not.toBe(
+        before?.generation,
+      );
+    },
+  );
+
+  it("revokes identity when an accepted plugin no longer declares a host entry", async () => {
+    const options = {
+      name: "omnyo-plugin-host-identity",
+      serverSource: "export default function plugin() {}",
+    };
+
+    const rootDir = await writePlugin(workDir, {
+      ...options,
+      hostSource: identityHostSource,
+    });
+
+    await service.installPath(rootDir);
+    const before = pluginHostArtifacts.get("host-identity");
+    expect(before).toBeDefined();
+    await writePlugin(workDir, options);
+    expect((await service.reload("host-identity")).ok).toBe(true);
+    expect(service.listHostArtifactGenerations()).toEqual([]);
+    await writePlugin(workDir, { ...options, hostSource: identityHostSource });
+    const restartedArtifacts = new PluginHostArtifactRegistry();
+    await (await createService(restartedArtifacts)).start();
+    expect(restartedArtifacts.get("host-identity")?.digest).toBe(
+      before?.digest,
+    );
+    expect(restartedArtifacts.get("host-identity")?.generation).not.toBe(
+      before?.generation,
+    );
+  });
+
   it("rejects host calls during candidate factory registration", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-eager-host-client",
+      name: "omnyo-plugin-eager-host-client",
       serverSource: `
-        import { defineRpcContract } from "@get-bb/plugin-sdk";
+        import { defineRpcContract } from "@omnyo/plugin-sdk";
         const schema = { "~standard": { validate(value: unknown) { return { value }; } } };
         const contract = defineRpcContract({ ping: { input: schema, output: schema } });
-        export default async function plugin(bb: any) {
-          await bb.hosts.experimental_client({ contract }).call(
+        export default async function plugin(api: any) {
+          await api.hosts.experimental_client({ contract }).call(
             "ping",
             {},
             { hostId: "host-1" },
@@ -512,13 +763,14 @@ describe("plugin bb.sdk bind gate", () => {
 
   it("does not publish candidate host declarations when reload fails", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-atomic-shares",
+      name: "omnyo-plugin-atomic-shares",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.hosts.declareSharedPorts("host-1", [3000]);
+        export default function plugin(api: any) {
+          api.hosts.declareSharedPorts("host-1", [3000]);
         }
       `,
     });
+
     await service.installPath(rootDir);
     const previousApi = requireApi(service, "atomic-shares");
     expect(sharedPorts.replaceDeclarationsForOwner).toHaveBeenCalledWith(
@@ -530,8 +782,8 @@ describe("plugin bb.sdk bind gate", () => {
     await writeFile(
       join(rootDir, "server.ts"),
       `
-        export default function plugin(bb: any) {
-          bb.hosts.declareSharedPorts("host-1", [4000]);
+        export default function plugin(api: any) {
+          api.hosts.declareSharedPorts("host-1", [4000]);
           throw new Error("candidate failed");
         }
       `,
@@ -543,16 +795,21 @@ describe("plugin bb.sdk bind gate", () => {
   });
 });
 
-describe("plugin bb.sdk against a running server", () => {
+describe("plugin api.sdk against a running server", () => {
   it("returns the server-side Standard Schema output after the host JSON wire", async () => {
     const server = await startTestServer();
-    const workDir = await mkdtemp(join(tmpdir(), "bb-plugin-host-transform-"));
+
+    const workDir = await mkdtemp(
+      join(tmpdir(), "omnyo-plugin-host-transform-"),
+    );
+
     try {
       const { host } = seedHostSession(server.deps, {
         id: "host-plugin-transform",
       });
+
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-host-transform",
+        name: "omnyo-plugin-host-transform",
         serverSource: `export default function plugin() {}`,
         hostSource: `
           const schema = { "~standard": { validate(value) { return { value }; } } };
@@ -563,19 +820,23 @@ describe("plugin bb.sdk against a running server", () => {
           };
         `,
       });
+
       await server.pluginService.installPath(rootDir);
       const inputDate = z.string().transform((value) => new Date(value));
       const outputDate = z.string().transform((value) => new Date(value));
+
       const contract = defineRpcContract({
         parseDate: {
           input: z.object({ when: inputDate }).strict(),
           output: outputDate,
         },
       });
+
       const client = requireApi(
         server.pluginService,
         "host-transform",
       ).hosts.experimental_client({ contract });
+
       const iso = "2026-08-16T12:34:56.000Z";
 
       const resultPromise = client.call(
@@ -583,6 +844,7 @@ describe("plugin bb.sdk against a running server", () => {
         { when: iso },
         { hostId: host.id },
       );
+
       const command = await waitForQueuedCommand(
         server,
         ({ command }) =>
@@ -590,6 +852,7 @@ describe("plugin bb.sdk against a running server", () => {
           command.pluginId === "host-transform" &&
           command.method === "parseDate",
       );
+
       expect(command.command).toMatchObject({
         input: { when: iso },
         timeoutMs: 30_000,
@@ -607,24 +870,34 @@ describe("plugin bb.sdk against a running server", () => {
 
   it("covers live plugin metadata routes, namespace validation, and lifecycle guards", async () => {
     const server = await startTestServer();
-    const workDir = await mkdtemp(join(tmpdir(), "bb-plugin-metadata-live-"));
+
+    const workDir = await mkdtemp(
+      join(tmpdir(), "omnyo-plugin-metadata-live-"),
+    );
+
     try {
       const { host } = seedHostSession(server.deps);
       seedPrimaryHost(server.deps, host.id);
+
       const { project } = seedProjectWithSource(server.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(server.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       server.pluginService.bindSdk({ baseUrl: server.baseUrl });
+
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-meta-owner",
+        name: "omnyo-plugin-meta-owner",
         serverSource: `export default function plugin() {}`,
       });
+
       await server.pluginService.installPath(rootDir);
       const api = requireApi(server.pluginService, "meta-owner");
+
       const thread = createThread(server.db, server.deps.hub, {
         projectId: project.id,
         environmentId: environment.id,
@@ -632,6 +905,7 @@ describe("plugin bb.sdk against a running server", () => {
         status: "idle",
         originPluginId: "meta-owner",
       });
+
       await expect(
         api.sdk.threads.getPluginMetadata({ threadId: thread.id }),
       ).resolves.toEqual({});
@@ -724,11 +998,12 @@ describe("plugin bb.sdk against a running server", () => {
           remove: ["x"],
         }),
       ).rejects.toMatchObject({
-        name: "BbHttpError",
+        name: "OmnyoHttpError",
         status: 400,
         code: "invalid_request",
         message: expect.stringContaining("set and remove overlap"),
       });
+
       for (const status of ["active", "stopping"] as const) {
         const candidate = createThread(server.db, server.deps.hub, {
           projectId: project.id,
@@ -737,6 +1012,7 @@ describe("plugin bb.sdk against a running server", () => {
           status,
           originPluginId: "meta-owner",
         });
+
         await expect(
           api.sdk.threads.updatePluginMetadata({
             threadId: candidate.id,
@@ -744,6 +1020,7 @@ describe("plugin bb.sdk against a running server", () => {
           }),
         ).resolves.toEqual({ status });
       }
+
       const archived = createThread(server.db, server.deps.hub, {
         projectId: project.id,
         environmentId: environment.id,
@@ -751,6 +1028,7 @@ describe("plugin bb.sdk against a running server", () => {
         status: "idle",
         originPluginId: "meta-owner",
       });
+
       archiveThread(server.db, server.deps.hub, archived.id);
       await expect(
         api.sdk.threads.updatePluginMetadata({
@@ -767,65 +1045,79 @@ describe("plugin bb.sdk against a running server", () => {
 
   it("fans out frozen metadata without restarting an active turn", async () => {
     const server = await startTestServer();
+
     const workDir = await mkdtemp(
-      join(tmpdir(), "bb-plugin-metadata-configure-"),
+      join(tmpdir(), "omnyo-plugin-metadata-configure-"),
     );
+
     const observationGlobal = globalThis as typeof globalThis & {
-      __bbMetadataSeen?: Record<string, unknown>[];
+      __omnyoMetadataSeen?: Record<string, unknown>[];
     };
+
     const takeObservations = () => {
-      const observations = observationGlobal.__bbMetadataSeen ?? [];
-      delete observationGlobal.__bbMetadataSeen;
+      const observations = observationGlobal.__omnyoMetadataSeen ?? [];
+      delete observationGlobal.__omnyoMetadataSeen;
+
       return observations;
     };
+
     try {
       const { host } = seedHostSession(server.deps);
+
       const { project } = seedProjectWithSource(server.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(server.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       server.pluginService.bindSdk({ baseUrl: server.baseUrl });
+
       const thread = createThread(server.db, server.deps.hub, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
         status: "active",
       });
+
       const context = agentConfigurationContext(thread.id);
+
       const make = (name: string) =>
         writePlugin(workDir, {
-          name: `bb-plugin-${name}`,
+          name: `omnyo-plugin-${name}`,
           serverSource: `
             function deepFrozen(value) {
               return value === null || typeof value !== "object" || (Object.isFrozen(value) && Object.values(value).every(deepFrozen));
             }
-            export default function plugin(bb) {
-              bb.agents.configure((context) => {
-                globalThis.__bbMetadataSeen = globalThis.__bbMetadataSeen || [];
-                globalThis.__bbMetadataSeen.push({ plugin: "${name}", metadata: context.pluginMetadata, deepFrozen: deepFrozen(context.pluginMetadata) });
+            export default function plugin(api) {
+              api.agents.configure((context) => {
+                globalThis.__omnyoMetadataSeen = globalThis.__omnyoMetadataSeen || [];
+                globalThis.__omnyoMetadataSeen.push({ plugin: "${name}", metadata: context.pluginMetadata, deepFrozen: deepFrozen(context.pluginMetadata) });
                 return { tools: [], skills: [] };
               });
             }
           `,
         });
+
       await server.pluginService.installPath(await make("alpha"));
       await server.pluginService.installPath(await make("beta"));
       await server.pluginService.installPath(await make("gamma"));
       await server.pluginService.installPath(
         await writePlugin(workDir, {
-          name: "bb-plugin-delta",
+          name: "omnyo-plugin-delta",
           serverSource: `export default function plugin() {}`,
         }),
       );
+
       const alphaMetadata = {
         alpha: {
           own: true,
           levels: { deeper: { items: [{ leaf: "value" }, ["nested"]] } },
         },
       };
+
       insertThreadPluginMetadata(server.db, {
         threadId: thread.id,
         pluginId: "alpha",
@@ -836,10 +1128,12 @@ describe("plugin bb.sdk against a running server", () => {
         pluginId: "beta",
         metadata: { beta: { own: true } },
       });
+
       const result = await server.pluginService.resolveAgentConfiguration({
         context,
         skillIdsByPlugin: new Map(),
       });
+
       expect(result.tools).toEqual([]);
       const seen = takeObservations();
       expect(seen).toEqual([
@@ -860,7 +1154,7 @@ describe("plugin bb.sdk against a running server", () => {
           set: { alpha: { own: false }, updated: true },
         }),
       ).resolves.toEqual({ alpha: { own: false }, updated: true });
-      expect(observationGlobal.__bbMetadataSeen).toBeUndefined();
+      expect(observationGlobal.__omnyoMetadataSeen).toBeUndefined();
       expect(getThread(server.db, thread.id)?.status).toBe("active");
       expect(activeTurnSnapshot).toEqual(alphaMetadata);
 
@@ -879,19 +1173,24 @@ describe("plugin bb.sdk against a running server", () => {
       );
 
       const secretMarker = "sk-live-SECRET-token-value";
+
       const writeCorruptRow = server.db.$client.prepare(
         "INSERT INTO thread_plugin_metadata (thread_id, plugin_id, metadata_json) VALUES (?, ?, ?) ON CONFLICT (thread_id, plugin_id) DO UPDATE SET metadata_json = excluded.metadata_json",
       );
+
       for (const pluginId of ["alpha", "delta", "not-loaded"]) {
         writeCorruptRow.run(thread.id, pluginId, secretMarker);
       }
+
       const warn = vi.spyOn(server.deps.logger, "warn");
+
       try {
         const afterCorruption =
           await server.pluginService.resolveAgentConfiguration({
             context,
             skillIdsByPlugin: new Map(),
           });
+
         expect(afterCorruption).toEqual(result);
         expect(takeObservations()).toEqual([
           { plugin: "alpha", metadata: {}, deepFrozen: true },
@@ -922,7 +1221,7 @@ describe("plugin bb.sdk against a running server", () => {
         }),
       ).resolves.toEqual({ repaired: true });
     } finally {
-      delete observationGlobal.__bbMetadataSeen;
+      delete observationGlobal.__omnyoMetadataSeen;
       await server.pluginService.stop();
       await rm(workDir, { recursive: true, force: true });
       await server.close();
@@ -931,35 +1230,42 @@ describe("plugin bb.sdk against a running server", () => {
 
   it("defers a configure provider registered during a pass to the next pass with its stored metadata", async () => {
     const server = await startTestServer();
+
     const workDir = await mkdtemp(
-      join(tmpdir(), "bb-plugin-metadata-late-configure-"),
+      join(tmpdir(), "omnyo-plugin-metadata-late-configure-"),
     );
+
     const lateGlobal = globalThis as typeof globalThis & {
-      __bbLateConfigureSeen?: unknown[];
-      __bbRegisterLateConfigure?: () => void;
+      __omnyoLateConfigureSeen?: unknown[];
+      __omnyoRegisterLateConfigure?: () => void;
     };
+
     try {
       const { host } = seedHostSession(server.deps);
+
       const { project } = seedProjectWithSource(server.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(server.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = createThread(server.db, server.deps.hub, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
         status: "idle",
       });
+
       await server.pluginService.installPath(
         await writePlugin(workDir, {
-          name: "bb-plugin-aaa-trigger",
+          name: "omnyo-plugin-aaa-trigger",
           serverSource: `
-            export default function plugin(bb) {
-              bb.agents.configure(() => {
-                Promise.resolve().then(() => globalThis.__bbRegisterLateConfigure?.());
+            export default function plugin(api) {
+              api.agents.configure(() => {
+                Promise.resolve().then(() => globalThis.__omnyoRegisterLateConfigure?.());
                 return { tools: [], skills: [] };
               });
             }
@@ -968,14 +1274,14 @@ describe("plugin bb.sdk against a running server", () => {
       );
       await server.pluginService.installPath(
         await writePlugin(workDir, {
-          name: "bb-plugin-bbb-late",
+          name: "omnyo-plugin-bbb-late",
           serverSource: `
-            export default function plugin(bb) {
-              globalThis.__bbRegisterLateConfigure = () => {
-                delete globalThis.__bbRegisterLateConfigure;
-                bb.agents.configure((context) => {
-                  globalThis.__bbLateConfigureSeen = globalThis.__bbLateConfigureSeen || [];
-                  globalThis.__bbLateConfigureSeen.push(context.pluginMetadata);
+            export default function plugin(api) {
+              globalThis.__omnyoRegisterLateConfigure = () => {
+                delete globalThis.__omnyoRegisterLateConfigure;
+                api.agents.configure((context) => {
+                  globalThis.__omnyoLateConfigureSeen = globalThis.__omnyoLateConfigureSeen || [];
+                  globalThis.__omnyoLateConfigureSeen.push(context.pluginMetadata);
                   return { tools: [], skills: [] };
                 });
               };
@@ -994,17 +1300,17 @@ describe("plugin bb.sdk against a running server", () => {
         context,
         skillIdsByPlugin: new Map(),
       });
-      expect(lateGlobal.__bbRegisterLateConfigure).toBeUndefined();
-      expect(lateGlobal.__bbLateConfigureSeen).toBeUndefined();
+      expect(lateGlobal.__omnyoRegisterLateConfigure).toBeUndefined();
+      expect(lateGlobal.__omnyoLateConfigureSeen).toBeUndefined();
 
       await server.pluginService.resolveAgentConfiguration({
         context,
         skillIdsByPlugin: new Map(),
       });
-      expect(lateGlobal.__bbLateConfigureSeen).toEqual([{ own: true }]);
+      expect(lateGlobal.__omnyoLateConfigureSeen).toEqual([{ own: true }]);
     } finally {
-      delete lateGlobal.__bbLateConfigureSeen;
-      delete lateGlobal.__bbRegisterLateConfigure;
+      delete lateGlobal.__omnyoLateConfigureSeen;
+      delete lateGlobal.__omnyoRegisterLateConfigure;
       await server.pluginService.stop();
       await rm(workDir, { recursive: true, force: true });
       await server.close();
@@ -1013,28 +1319,34 @@ describe("plugin bb.sdk against a running server", () => {
 
   it("tells rpc handlers which plugin called them and treats every other caller as a client", async () => {
     const server = await startTestServer();
-    const workDir = await mkdtemp(join(tmpdir(), "bb-plugin-rpc-caller-"));
+    const workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-rpc-caller-"));
+
     try {
       server.pluginService.bindSdk({ baseUrl: server.baseUrl });
+
       for (const name of ["callee", "caller"]) {
         const rootDir = await writePlugin(workDir, {
-          name: `bb-plugin-${name}`,
+          name: `omnyo-plugin-${name}`,
           serverSource: `export default function plugin() {}`,
         });
+
         expect((await server.pluginService.installPath(rootDir)).status).toBe(
           "running",
         );
       }
+
       const callerSchema = z.union([
         z.object({ kind: z.literal("plugin"), pluginId: z.string() }),
         z.object({ kind: z.literal("client") }),
       ]);
+
       const whoami = vi.fn(
         (
           _input: null,
           context: { experimental_caller: z.infer<typeof callerSchema> },
         ) => context.experimental_caller,
       );
+
       requireApi(server.pluginService, "callee").rpc.register(
         defineRpcContract({
           whoami: { input: z.null(), output: callerSchema },
@@ -1042,6 +1354,7 @@ describe("plugin bb.sdk against a running server", () => {
         { whoami },
       );
       const callerSdk = requireApi(server.pluginService, "caller").sdk;
+
       const callWhoami = () =>
         callerSdk.plugins.callRpc({
           pluginId: "callee",
@@ -1063,28 +1376,31 @@ describe("plugin bb.sdk against a running server", () => {
           body: "null",
         },
       );
+
       expect(await cli.json()).toEqual({
         ok: true,
         result: { kind: "client" },
       });
 
       const callsBeforeSpoof = whoami.mock.calls.length;
+
       const spoofed = await fetch(
         `${server.baseUrl}/api/v1/plugins/callee/rpc/whoami`,
         {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "x-bb-plugin-caller": "not-a-real-token",
+            "x-omnyo-plugin-caller": "not-a-real-token",
           },
           body: "null",
         },
       );
+
       expect(spoofed.status).toBe(403);
       expect(whoami.mock.calls.length).toBe(callsBeforeSpoof);
 
       await server.pluginService.reload("caller");
-      await expect(callWhoami()).rejects.toMatchObject({ status: 403 });
+      expect(callWhoami).toThrow(PluginContextStaleError);
       await expect(
         requireApi(server.pluginService, "caller").sdk.plugins.callRpc({
           pluginId: "callee",
@@ -1103,14 +1419,17 @@ describe("plugin bb.sdk against a running server", () => {
 
   it("keeps hidden plugin threads attributed and directly operable by id", async () => {
     const server = await startTestServer();
-    const workDir = await mkdtemp(join(tmpdir(), "bb-plugin-sdk-live-"));
+    const workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-sdk-live-"));
+
     try {
       const { host } = seedHostSession(server.deps);
       seedPrimaryHost(server.deps, host.id);
+
       const { project } = seedProjectWithSource(server.deps, {
         hostId: host.id,
         path: "/tmp/plugin-sdk-live-source",
       });
+
       const environment = seedEnvironment(server.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -1118,10 +1437,12 @@ describe("plugin bb.sdk against a running server", () => {
       });
 
       server.pluginService.bindSdk({ baseUrl: server.baseUrl });
+
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-spawner",
+        name: "omnyo-plugin-spawner",
         serverSource: `export default function plugin() {}`,
       });
+
       const entry = await server.pluginService.installPath(rootDir);
       expect(entry.status).toBe("running");
       const api = requireApi(server.pluginService, "spawner");
@@ -1129,14 +1450,17 @@ describe("plugin bb.sdk against a running server", () => {
       const projects = await api.sdk.projects.list();
       expect(projects.map((p) => p.id)).toContain(project.id);
       expect(projects.map((p) => p.id)).not.toContain(PERSONAL_PROJECT_ID);
+
       const projectsWithoutPersonal = await api.sdk.projects.list({
         includePersonal: false,
       });
+
       expect(projectsWithoutPersonal.map((p) => p.id)).toEqual([project.id]);
 
       const projectsWithPersonal = await api.sdk.projects.list({
         includePersonal: true,
       });
+
       expect(projectsWithPersonal.map((p) => p.id)).toEqual([
         PERSONAL_PROJECT_ID,
         project.id,
@@ -1144,10 +1468,12 @@ describe("plugin bb.sdk against a running server", () => {
       expect(
         await api.sdk.projects.get({ projectId: PERSONAL_PROJECT_ID }),
       ).toEqual(projectsWithPersonal[0]);
+
       const projectsWithThreadsAndPersonal = await api.sdk.projects.list({
         include: "threads",
         includePersonal: true,
       });
+
       expect(projectsWithThreadsAndPersonal.map((p) => p.id)).toEqual([
         PERSONAL_PROJECT_ID,
         project.id,
@@ -1160,6 +1486,7 @@ describe("plugin bb.sdk against a running server", () => {
       );
 
       const launchMarker = "plugin-metadata-private-marker";
+
       const thread = await api.sdk.threads.spawn({
         projectId: project.id,
         prompt: "spawned from a plugin",
@@ -1176,6 +1503,7 @@ describe("plugin bb.sdk against a running server", () => {
         },
         visibility: "hidden",
       });
+
       expect(thread.originPluginId).toBe("spawner");
       expect(thread.visibility).toBe("hidden");
       expect(thread).not.toHaveProperty("pluginMetadata");
@@ -1202,10 +1530,12 @@ describe("plugin bb.sdk against a running server", () => {
       await expect(
         api.sdk.threads.list({ projectId: project.id }),
       ).resolves.not.toContainEqual(expect.objectContaining({ id: thread.id }));
+
       const allThreads = await api.sdk.threads.list({
         projectId: project.id,
         includeHidden: true,
       });
+
       expect(allThreads).toContainEqual(
         expect.objectContaining({ id: thread.id }),
       );
@@ -1223,6 +1553,7 @@ describe("plugin bb.sdk against a running server", () => {
         status: "idle",
         visibility: "hidden",
       });
+
       seedThreadRuntimeState(server.deps, {
         environmentId: environment.id,
         inputText: "Initial turn",
@@ -1230,12 +1561,14 @@ describe("plugin bb.sdk against a running server", () => {
         threadId: operable.id,
       });
       const forkMarker = "plugin-fork-context-private-marker";
+
       const fork = await api.sdk.threads.fork({
         sourceThreadId: operable.id,
         origin: "sdk",
         originPluginId: "forged-plugin",
         pluginMetadata: { marker: forkMarker, nested: { attempt: 2 } },
       });
+
       expect(fork).toMatchObject({
         originKind: "fork",
         originPluginId: "spawner",
@@ -1245,9 +1578,11 @@ describe("plugin bb.sdk against a running server", () => {
       await expect(
         api.sdk.threads.getPluginMetadata({ threadId: fork.id }),
       ).resolves.toEqual({ marker: forkMarker, nested: { attempt: 2 } });
+
       const forkWithoutContext = await api.sdk.threads.fork({
         sourceThreadId: operable.id,
       });
+
       await expect(
         api.sdk.threads.getPluginMetadata({ threadId: forkWithoutContext.id }),
       ).resolves.toEqual({});
@@ -1266,11 +1601,13 @@ describe("plugin bb.sdk against a running server", () => {
         }),
       ).resolves.toEqual({ ok: true, delivery: "sent" });
       const stopPromise = api.sdk.threads.stop({ threadId: operable.id });
+
       const stop = await waitForQueuedCommand(
         server,
         ({ command }) =>
           command.type === "thread.stop" && command.threadId === operable.id,
       );
+
       await reportQueuedCommandSuccess(server, stop, {
         providerCheckpointId: null,
       });

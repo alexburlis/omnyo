@@ -1,18 +1,23 @@
-import { Icon } from "@bb/shared-ui/icon";
-import { COARSE_POINTER_TEXT_SM_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { LIST_HOVER_TRANSITION } from "@bb/shared-ui/motion";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { COARSE_POINTER_TEXT_SM_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import type { ReactNode } from "react";
-import { CONTEXT_SELECTION_SURFACE_CLASS } from "@bb/shared-ui/context-selection";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
+import { CONTEXT_SELECTION_SURFACE_CLASS } from "@omnyo/shared-ui/context-selection";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@omnyo/shared-ui/tooltip";
 
 const TAB_PILL_DEFAULT_LABEL_MAX_WIDTH_CLASS = "max-w-[180px]";
+
 const TAB_PILL_AFFORDANCE_BUTTON_BASE_CLASS =
   "inline-flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none max-md:pointer-coarse:size-5";
+
 const TAB_PILL_AFFORDANCE_ICON_CLASS = "size-3.5 max-md:pointer-coarse:size-5";
+
 const TAB_PILL_CLOSE_BUTTON_CLASS = `pointer-events-none absolute left-1.5 top-1/2 z-10 -translate-y-1/2 ${TAB_PILL_AFFORDANCE_BUTTON_BASE_CLASS} opacity-0 hover:opacity-100 group-hover/tab-pill:pointer-events-auto group-hover/tab-pill:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 disabled:opacity-30 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100`;
+
 const TAB_PILL_LARGE_COARSE_POINTER_CLOSE_BUTTON_CLASS =
   "max-md:pointer-coarse:min-h-9 max-md:pointer-coarse:min-w-9";
+
 const TAB_PILL_LEADING_VISUAL_CLASS =
   "inline-flex size-4 shrink-0 items-center justify-center [&_[data-icon-root]]:size-3.5 max-md:pointer-coarse:size-5 max-md:pointer-coarse:[&_[data-icon-root]]:size-5";
 
@@ -59,6 +64,7 @@ export function TabPill({
         if (event.button !== 1 || closeAction === null) {
           return;
         }
+
         event.preventDefault();
         event.stopPropagation();
         closeAction.onClose();
@@ -180,6 +186,7 @@ function TabPillCloseButton({
       <Icon name="X" className={TAB_PILL_AFFORDANCE_ICON_CLASS} />
     </button>
   );
+
   return closeAction.tooltip === undefined ? (
     button
   ) : (

@@ -4,4 +4,5 @@ export type SidebarSectionId =
   | `project:${string}`
   | `section:${string}`
   | `machine:${string}`;
+
 export type CollapsibleSidebarSectionId = "pinned" | "threads";

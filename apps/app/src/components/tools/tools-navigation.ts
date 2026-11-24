@@ -16,6 +16,8 @@ import {
   isSkillsRoutePath,
 } from "@/lib/route-paths";
 
+import { WORKFLOW_GRAPHS_PATH } from "@/lib/workflow-panel-routes";
+
 export type ToolsSectionId = "skills" | "plugins";
 
 export const TOOLS_PAGE_BAND_CLASSES = "mx-auto w-full max-w-5xl px-4 md:px-5";
@@ -70,6 +72,7 @@ function resolvePluginCreateBreadcrumbs(
   ) {
     return null;
   }
+
   return [
     { label: "Plugins", to: getPluginsRoutePath() },
     { label: "Create a plugin" },
@@ -80,19 +83,37 @@ export function resolveAutomationBreadcrumbs(
   pathname: string,
   resourceLabel?: string | null,
 ): ToolsBreadcrumbSegment[] | null {
-  const root = { label: "Automations", to: AUTOMATIONS_ROUTE_PATH };
+  const root = { label: "Workflows", to: AUTOMATIONS_ROUTE_PATH };
+
   if (pathname === AUTOMATIONS_BROWSE_ROUTE_PATH) {
     return [root, { label: "Browse" }];
   }
+
+  if (belongsToRoute(pathname, WORKFLOW_GRAPHS_PATH)) {
+    return [root, { label: "State machines", to: WORKFLOW_GRAPHS_PATH }];
+  }
+
+  const installedPath = `${AUTOMATIONS_ROUTE_PATH}/copies`;
+
+  if (belongsToRoute(pathname, installedPath)) {
+    return [root, { label: "Installed workflows", to: installedPath }];
+  }
+
+  if (belongsToRoute(pathname, `${AUTOMATIONS_ROUTE_PATH}/import`)) {
+    return [root, { label: "Import workflow" }];
+  }
+
   for (const pattern of [
     AUTOMATION_DETAIL_ROUTE_PATH,
     AUTOMATION_EDIT_ROUTE_PATH,
   ]) {
     const match = matchPath(pattern, pathname);
+
     if (!match) continue;
+
     return [
       root,
-      { label: "Installed", to: AUTOMATIONS_ROUTE_PATH },
+      { label: "Automations", to: AUTOMATIONS_ROUTE_PATH },
       {
         label:
           resourceLabel ??
@@ -100,9 +121,11 @@ export function resolveAutomationBreadcrumbs(
       },
     ];
   }
+
   if (pathname === AUTOMATIONS_ROUTE_PATH) {
-    return [root, { label: "Installed" }];
+    return [root];
   }
+
   return null;
 }
 
@@ -112,21 +135,26 @@ function belongsToRoute(pathname: string, route: string): boolean {
 
 export function resolveToolsSection(pathname: string): ToolsSectionId {
   if (belongsToRoute(pathname, TOOLS_SECTIONS.plugins.to)) return "plugins";
+
   return "skills";
 }
 
 function routeResourceLabel(value: string | undefined, fallback: string) {
   if (!value) return fallback;
   let decoded = value;
+
   try {
     decoded = decodeURIComponent(value);
   } catch {}
+
   const segments = decoded.split("/").filter(Boolean);
+
   return segments.at(-1) ?? fallback;
 }
 
 function sectionCrumb(id: ToolsSectionId): ToolsBreadcrumbSegment {
   const section = TOOLS_SECTIONS[id];
+
   return { label: section.label, to: section.to };
 }
 
@@ -172,13 +200,16 @@ export function resolveToolsBreadcrumbs(
   resourceLabel?: string | null,
 ): ToolsBreadcrumbSegment[] | null {
   const view = new URLSearchParams(search).get("view");
+
   const pluginCreateBreadcrumbs = resolvePluginCreateBreadcrumbs(
     pathname,
     search,
   );
+
   if (pluginCreateBreadcrumbs !== null) {
     return pluginCreateBreadcrumbs;
   }
+
   if (pathname === REGISTRY_SKILLS_ROUTE_PATH) {
     return [sectionCrumb("skills"), { label: "Browse" }];
   }
@@ -199,12 +230,15 @@ export function resolveToolsBreadcrumbs(
 
   for (const detail of DETAIL_ROUTES) {
     const match = matchPath(detail.pattern, pathname);
+
     if (!match) continue;
+
     const collection =
       detail.section === "plugins" &&
       view !== TOOLS_OWNED_COLLECTION_VIEW.plugins
         ? collectionCrumb("plugins", "Browse", getPluginsRoutePath())
         : detail.collection;
+
     return [
       sectionCrumb(detail.section),
       collection,
@@ -260,23 +294,29 @@ export function resolveToolsActivePage(
   search = "",
 ): ResourcePageDefinition["id"] {
   const view = new URLSearchParams(search).get("view");
+
   for (const detail of DETAIL_ROUTES) {
     if (matchPath(detail.pattern, pathname) === null) continue;
+
     if (detail.section === "plugins") {
       return view === TOOLS_OWNED_COLLECTION_VIEW.plugins
         ? "plugins-installed"
         : "plugins-browse";
     }
+
     return detail.collection.label === TOOLS_OWNED_COLLECTION_LABEL.skills
       ? "skills-library"
       : "skills-browse";
   }
+
   const section = resolveToolsSection(pathname);
+
   if (section === "plugins") {
     return view === TOOLS_OWNED_COLLECTION_VIEW.plugins
       ? "plugins-installed"
       : "plugins-browse";
   }
+
   return view === TOOLS_OWNED_COLLECTION_VIEW.skills
     ? "skills-library"
     : "skills-browse";
@@ -291,13 +331,16 @@ export function resolvePluginsWorkspaceHeaderMeta(
   search = "",
 ): ResourceWorkspaceHeaderMeta | null {
   if (!isPluginsRoutePath(pathname)) return null;
+
   const pluginCreateBreadcrumbs = resolvePluginCreateBreadcrumbs(
     pathname,
     search,
   );
+
   if (pluginCreateBreadcrumbs !== null) {
     return { kind: "breadcrumbs", breadcrumbs: pluginCreateBreadcrumbs };
   }
+
   return { kind: "section-title", title: "Plugins" };
 }
 
@@ -305,5 +348,6 @@ export function resolveSkillsWorkspaceHeaderMeta(
   pathname: string,
 ): ResourceWorkspaceHeaderMeta | null {
   if (!isSkillsRoutePath(pathname)) return null;
+
   return { kind: "section-title", title: "Skills" };
 }

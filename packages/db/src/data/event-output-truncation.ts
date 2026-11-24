@@ -11,7 +11,7 @@ const INLINE_OUTPUT_JSON_PATHS = Array.from(
   ),
 );
 
-const NOOP_JSON_PATH = "$.__bb_timeline_truncation_noop__";
+const NOOP_JSON_PATH = "$.__omnyo_timeline_truncation_noop__";
 
 function truncationMarkerSql(originalLength: SQL, max: number): SQL {
   return sql`char(10) || '…[' || printf('%,d', ${originalLength} - ${max}) || ' more characters truncated]'`;
@@ -21,6 +21,7 @@ export function truncatedEventDataColumn(
   maxInlineOutputChars: number,
 ): SQL<string> {
   const pairs: SQL[] = [];
+
   for (const path of INLINE_OUTPUT_JSON_PATHS) {
     const value = sql`json_extract(${events.data}, ${path})`;
     const overflows = sql`json_type(${events.data}, ${path}) = 'text' AND length(${value}) > ${maxInlineOutputChars}`;

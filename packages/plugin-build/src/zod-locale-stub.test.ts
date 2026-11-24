@@ -32,14 +32,14 @@ const SERVER_SOURCE = [
 ].join("\n");
 
 async function buildFixture(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "bb-zod-locale-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-zod-locale-"));
   tempDirs.push(dir);
   await writeFile(
     join(dir, "package.json"),
     JSON.stringify({
-      name: "bb-plugin-zod-locale-fixture",
+      name: "omnyo-plugin-zod-locale-fixture",
       version: "0.0.0",
-      bb: {
+      omnyo: {
         name: "Zod locale fixture",
         description: "Server entry that parses with zod.",
         branding: { icon: "Zap" },
@@ -48,18 +48,22 @@ async function buildFixture(): Promise<string> {
     }),
   );
   await writeFile(join(dir, "server.ts"), SERVER_SOURCE);
+
   const zodDir = dirname(
     createRequire(
       resolve(import.meta.dirname, "../../plugin-sdk/package.json"),
     ).resolve("zod/package.json"),
   );
+
   await mkdir(join(dir, "node_modules"), { recursive: true });
   await symlink(zodDir, join(dir, "node_modules", "zod"), "dir");
+
   const { jsPath } = await buildPluginServer(
     dir,
     "0.0.0-test",
     await resolvePluginBuildToolchain(join(process.cwd(), ".unused-toolchain")),
   );
+
   return jsPath;
 }
 
@@ -73,10 +77,12 @@ it("leaves parse results and English messages untouched", async () => {
   const module: { parsed: unknown; localeNames: string[] } = await import(
     pathToFileURL(await buildFixture()).href
   );
+
   const parsed = module.parsed as {
     success: boolean;
     error: { issues: { message: string }[] };
   };
+
   expect(parsed.success).toBe(false);
   expect(parsed.error.issues.map((issue) => issue.message)).toEqual([
     "Invalid input: expected string, received number",

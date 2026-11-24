@@ -1,13 +1,13 @@
 import { ipcMain, type BrowserWindow } from "electron";
-import { escapeHtmlText } from "@bb/text-utils";
+import { escapeHtmlText } from "@omnyo/text-utils";
 import {
   createDesktopDialogWindow,
   DESKTOP_DIALOG_BASE_CSS,
   showDesktopDialogHtml,
 } from "./desktop-dialog-window.js";
 import {
-  BB_DESKTOP_SERVER_URL_DIALOG_CANCEL_CHANNEL,
-  BB_DESKTOP_SERVER_URL_DIALOG_SUBMIT_CHANNEL,
+  OMNYO_DESKTOP_SERVER_URL_DIALOG_CANCEL_CHANNEL,
+  OMNYO_DESKTOP_SERVER_URL_DIALOG_SUBMIT_CHANNEL,
   serverUrlDialogSubmitRequestSchema,
   type ServerUrlDialogSubmitResponse,
 } from "./server-url-dialog-ipc.js";
@@ -69,7 +69,7 @@ ${DESKTOP_DIALOG_BASE_CSS}
 </head>
 <body>
   <h1>${initialUrl === null ? "Add Server" : "Set Server URL"}</h1>
-  <p>${initialUrl === null ? "Save another bb server to the Server menu." : "Edit this saved server. Leave empty to remove it."}</p>
+  <p>${initialUrl === null ? "Save another Omnyo server to the Server menu." : "Edit this saved server. Leave empty to remove it."}</p>
   <form>
     <input name="url" type="text" placeholder="https://example.com:38886" value="${escapeHtmlText(initialUrl ?? "")}" autocomplete="off" spellcheck="false">
     <div data-error></div>
@@ -92,6 +92,7 @@ export function openServerUrlDialog(
 ): Promise<ServerUrlDialogResult> {
   if (openDialog !== null && !openDialog.window.isDestroyed()) {
     openDialog.window.focus();
+
     return openDialog.result;
   }
 
@@ -109,16 +110,19 @@ export function openServerUrlDialog(
       if (settled) {
         return;
       }
+
       settled = true;
-      ipcMain.removeHandler(BB_DESKTOP_SERVER_URL_DIALOG_SUBMIT_CHANNEL);
+      ipcMain.removeHandler(OMNYO_DESKTOP_SERVER_URL_DIALOG_SUBMIT_CHANNEL);
       ipcMain.removeListener(
-        BB_DESKTOP_SERVER_URL_DIALOG_CANCEL_CHANNEL,
+        OMNYO_DESKTOP_SERVER_URL_DIALOG_CANCEL_CHANNEL,
         handleCancel,
       );
       openDialog = null;
+
       if (!dialogWindow.isDestroyed()) {
         dialogWindow.close();
       }
+
       resolvePromise(dialogResult);
     }
 
@@ -129,28 +133,36 @@ export function openServerUrlDialog(
     }
 
     ipcMain.handle(
-      BB_DESKTOP_SERVER_URL_DIALOG_SUBMIT_CHANNEL,
+      OMNYO_DESKTOP_SERVER_URL_DIALOG_SUBMIT_CHANNEL,
       (event, payload): ServerUrlDialogSubmitResponse => {
         if (event.sender.id !== dialogWindow.webContents.id) {
           return { ok: false, message: "Unexpected sender." };
         }
+
         const parsed = serverUrlDialogSubmitRequestSchema.safeParse(payload);
+
         if (!parsed.success) {
           return { ok: false, message: "Enter a valid http(s) URL." };
         }
+
         if (parsed.data.url.trim().length === 0 && args.initialUrl !== null) {
           finish({ kind: "clear" });
+
           return { ok: true };
         }
+
         const normalized = normalizeCustomServerUrl(parsed.data.url);
+
         if (normalized === null) {
           return { ok: false, message: "Enter a valid http(s) URL." };
         }
+
         finish({ kind: "set", url: normalized });
+
         return { ok: true };
       },
     );
-    ipcMain.on(BB_DESKTOP_SERVER_URL_DIALOG_CANCEL_CHANNEL, handleCancel);
+    ipcMain.on(OMNYO_DESKTOP_SERVER_URL_DIALOG_CANCEL_CHANNEL, handleCancel);
     dialogWindow.on("closed", () => {
       finish({ kind: "cancelled" });
     });

@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
-import { loadHostDaemonStartConfig } from "@bb/config/host-daemon";
-import {
-  createHostWatcher,
-  createSubprocessParcelWatcherBackend,
-  setParcelWatcherBackend,
-} from "@bb/host-watcher";
-import { createLogger } from "@bb/logger";
+import { loadHostDaemonStartConfig } from "@omnyo/config/host-daemon";
+import { admitConfiguredOmnyoStateWrites } from "@omnyo/config/omnyo-state-startup";
+import { createLogger } from "@omnyo/logger";
+import { enableProcessLauncherWorker } from "@omnyo/process-utils";
+import type { ProcessErrorReportingStatus } from "@omnyo/process-utils/error-reporting";
 import { createHostDaemonApp } from "./app.js";
 import {
   readHostAuthState,
@@ -22,8 +20,8 @@ import {
   createUserShellPathResolver,
   prepareRuntimeShellEnv,
   resolvePowerShellExecutionPolicyDefault,
-  resolveBbExecutablePathInDirectory,
-  resolveLocalBbExecutablePath,
+  resolveOmnyoExecutablePathInDirectory,
+  resolveLocalOmnyoExecutablePath,
 } from "./runtime-shell-env.js";
 import type { HostDaemonLogger } from "./logger.js";
 import {
@@ -33,22 +31,27 @@ import {
 
 interface StartHostDaemonOptions {
   enrollKey?: string;
+  errorReporting: ProcessErrorReportingStatus;
   hostId?: string;
-  bbExecutableDirectory?: string;
+  cliExecutableDirectory?: string;
   bridgeBundleDir?: string;
   serverHeaders?: Record<string, string>;
   autoUpdate?: boolean;
   supervised?: boolean;
+  windowsServiceInstall?: boolean;
 }
 
 export async function startHostDaemon(
-  options: StartHostDaemonOptions = {},
+  options: StartHostDaemonOptions,
 ): Promise<HostDaemon> {
   const resolvedConfig = loadHostDaemonStartConfig({});
   const dataDir = resolvedConfig.dataDir;
+  await admitConfiguredOmnyoStateWrites(dataDir);
+  enableProcessLauncherWorker();
   const hostDaemonConfig = resolvedConfig.connectionConfig;
   let lockDiagnosticsLogger: HostDaemonLogger | null = null;
   let handleDaemonLockLost: () => void = () => process.exit(1);
+
   const releaseLock = await acquireDaemonLock(dataDir, {
     logger: {
       warn: (fields, message) => {
@@ -71,16 +74,21 @@ export async function startHostDaemon(
 
   let app: Awaited<ReturnType<typeof createHostDaemonApp>> | undefined;
   let machineAuthProxy: MachineAuthProxy | undefined;
+
   try {
     const persistedAuth = await readHostAuthState(dataDir);
+
     const identity = await loadHostIdentity({
       dataDir,
       providedHostId: options.hostId,
     });
+
     const instanceId = randomUUID();
+
     const serverUrl = resolveServerUrl({
-      providedServerUrl: hostDaemonConfig.BB_SERVER_URL,
+      providedServerUrl: hostDaemonConfig.OMNYO_SERVER_URL,
     });
+
     if (!serverUrl) {
       throw new Error("Host daemon server URL is required");
     }
@@ -103,7 +111,7 @@ export async function startHostDaemon(
             options.enrollKey ??
             (() => {
               throw new Error(
-                `Missing host bootstrap material. Provide BB_HOST_ENROLL_KEY or populate ${dataDir}/auth.json first.`,
+                `Missing host bootstrap material. Provide OMNYO_HOST_ENROLL_KEY or populate ${dataDir}/auth.json first.`,
               );
             })(),
         })
@@ -118,50 +126,59 @@ export async function startHostDaemon(
     }
 
     const localApiConfig = resolveHostDaemonLocalApiConfig({
-      hostDaemonPort: hostDaemonConfig.BB_HOST_DAEMON_PORT,
+      hostDaemonPort: hostDaemonConfig.OMNYO_HOST_DAEMON_PORT,
     });
-    const bbExecutablePath =
-      options.bbExecutableDirectory !== undefined
-        ? resolveBbExecutablePathInDirectory(options.bbExecutableDirectory)
-        : await resolveLocalBbExecutablePath();
-    const bbExecutableDirectory = dirname(bbExecutablePath);
+
+    const omnyoExecutablePath =
+      options.cliExecutableDirectory !== undefined
+        ? resolveOmnyoExecutablePathInDirectory(options.cliExecutableDirectory)
+        : await resolveLocalOmnyoExecutablePath();
+
+    const omnyoExecutableDirectory = dirname(omnyoExecutablePath);
+
     const logger = createLogger({
       component: "host-daemon",
       base: { serverUrl },
       dataDir,
     });
+
     lockDiagnosticsLogger = logger;
+
+    const errorReporting = options.errorReporting;
+
+    logger.info(
+      {
+        crashReportsChoice: "awaiting-current-server-policy",
+        crashReportsEnabled: false,
+        sentryErrorReporting: errorReporting.enabled
+          ? "enabled"
+          : errorReporting.reason,
+      },
+      errorReporting.enabled
+        ? "Sentry error reporting enabled"
+        : "Sentry error reporting disabled",
+    );
+
     if (options.serverHeaders !== undefined) {
       machineAuthProxy = await startMachineAuthProxy({
         serverHeaders: options.serverHeaders,
         serverUrl,
       });
     }
-    setParcelWatcherBackend(
-      createSubprocessParcelWatcherBackend({
-        log: (level, message, fields) => {
-          if (level === "error") {
-            logger.error(fields ?? {}, message);
-          } else if (level === "warn") {
-            logger.warn(fields ?? {}, message);
-          } else {
-            logger.info(fields ?? {}, message);
-          }
-        },
-      }),
-    );
-    const hostWatcher = createHostWatcher();
+
     const resolveUserShellPath = createUserShellPathResolver();
+
     const resolveRuntimeShellEnv = async () =>
       prepareRuntimeShellEnv({
-        bbExecutableDirectory,
-        bbExecutablePath,
+        cliExecutableDirectory: omnyoExecutableDirectory,
+        cliExecutablePath: omnyoExecutablePath,
         hostDaemonPort: localApiConfig.port,
         inheritedPath: (await resolveUserShellPath()) ?? process.env.PATH,
         powershellExecutionPolicy:
           await resolvePowerShellExecutionPolicyDefault(),
         serverUrl: machineAuthProxy?.serverUrl ?? serverUrl,
       });
+
     const runtimeShellEnv = await resolveRuntimeShellEnv();
     const runtimeShellEnvResolvedAtMs = Date.now();
     app = await createHostDaemonApp({
@@ -171,22 +188,22 @@ export async function startHostDaemon(
       serverHeaders: options.serverHeaders,
       autoUpdate: options.autoUpdate,
       supervised: options.supervised,
+      windowsServiceInstall: options.windowsServiceInstall,
       bridgeBundleDir: options.bridgeBundleDir,
       hostId: identity.hostId,
       hostName: identity.hostName,
       instanceId,
       appUrl:
-        hostDaemonConfig.BB_APP_URL === ""
+        hostDaemonConfig.OMNYO_APP_URL === ""
           ? undefined
-          : hostDaemonConfig.BB_APP_URL,
-      devAppPort: hostDaemonConfig.BB_DEV_APP_PORT,
+          : hostDaemonConfig.OMNYO_APP_URL,
+      devAppPort: hostDaemonConfig.OMNYO_DEV_APP_PORT,
       logger,
       releaseLock,
       localApiConfig,
       runtimeShellEnv,
       runtimeShellEnvResolvedAtMs,
       resolveRuntimeShellEnv,
-      hostWatcher,
       closeMachineAuthProxy: machineAuthProxy?.close,
       exitProcess: (code) => process.exit(code),
     });
@@ -196,13 +213,16 @@ export async function startHostDaemon(
         .shutdown("daemon-lock-lost", 1)
         .catch(() => process.exit(1));
     };
+
     await app.daemon.start();
+
     return app.daemon;
   } catch (error) {
     if (!app) {
       await machineAuthProxy?.close().catch(() => undefined);
       await releaseLock().catch(() => undefined);
     }
+
     throw error;
   }
 }

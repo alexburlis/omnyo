@@ -1,4 +1,4 @@
-import { Alert } from "react-native";
+import { Alert, type AlertButton } from "react-native";
 import { haptic } from "@/lib/haptics";
 
 export interface ConfirmDestructiveOptions {
@@ -6,6 +6,7 @@ export interface ConfirmDestructiveOptions {
   message?: string;
   actionLabel: string;
   cancelLabel?: string;
+  secondaryAction?: { label: string; onPress: () => void };
   onConfirm: () => void;
   onCancel?: () => void;
 }
@@ -15,17 +16,22 @@ export function confirmDestructive({
   message,
   actionLabel,
   cancelLabel = "Cancel",
+  secondaryAction,
   onConfirm,
   onCancel,
 }: ConfirmDestructiveOptions): void {
   haptic("warning");
-  Alert.alert(
-    title,
-    message,
-    [
-      { text: cancelLabel, style: "cancel", onPress: onCancel },
-      { text: actionLabel, style: "destructive", onPress: onConfirm },
-    ],
-    { cancelable: true, onDismiss: onCancel },
-  );
+
+  const buttons: AlertButton[] = [
+    { text: cancelLabel, style: "cancel", onPress: onCancel },
+    ...(secondaryAction
+      ? [{ text: secondaryAction.label, onPress: secondaryAction.onPress }]
+      : []),
+    { text: actionLabel, style: "destructive", onPress: onConfirm },
+  ];
+
+  Alert.alert(title, message, buttons, {
+    cancelable: true,
+    onDismiss: onCancel,
+  });
 }

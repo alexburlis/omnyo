@@ -7,19 +7,20 @@ import {
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
-import type { DbConnection } from "@bb/db";
+} from "@omnyo/db";
+import type { DbConnection } from "@omnyo/db";
 import {
   encodeClientTurnRequestIdNumber,
   parseStoredThreadEvent,
   threadScope,
   turnScope,
-} from "@bb/domain";
-import type { Thread, ThreadEventScope, ThreadEventType } from "@bb/domain";
+} from "@omnyo/domain";
+import type { Thread, ThreadEventScope, ThreadEventType } from "@omnyo/domain";
 
 type InsertEventInput = Parameters<typeof insertEvents>[2][number];
 
 const PROVIDER_THREAD_ID = "synthetic-provider-thread";
+
 const BASE_CREATED_AT = 1_700_000_000_000;
 
 const execution = {
@@ -47,10 +48,12 @@ function createSyntheticEventBuilder(threadId: string): SyntheticEventBuilder {
     events: [],
     push(args) {
       builder.sequence += 1;
+
       const providerThreadId =
         args.providerThreadId === undefined
           ? PROVIDER_THREAD_ID
           : args.providerThreadId;
+
       const event = parseStoredThreadEvent({
         type: args.type,
         data: args.data,
@@ -58,6 +61,7 @@ function createSyntheticEventBuilder(threadId: string): SyntheticEventBuilder {
         providerThreadId,
         scope: args.scope,
       });
+
       builder.events.push({
         threadId,
         environmentId: null,
@@ -71,11 +75,13 @@ function createSyntheticEventBuilder(threadId: string): SyntheticEventBuilder {
       });
     },
   };
+
   return builder;
 }
 
 function commandOutput(turn: number, item: number): string {
   const line = `turn ${turn} item ${item}: lorem ipsum dolor sit amet consectetur\n`;
+
   return line.repeat(120);
 }
 
@@ -140,6 +146,7 @@ function pushSyntheticTurn(
       },
     },
   });
+
   for (let delta = 0; delta < 3; delta += 1) {
     builder.push({
       type: "item/reasoning/textDelta",
@@ -147,6 +154,7 @@ function pushSyntheticTurn(
       data: { itemId: id("reasoning"), delta: `thinking ${delta} ` },
     });
   }
+
   builder.push({
     type: "item/completed",
     scope,
@@ -165,6 +173,7 @@ function pushSyntheticTurn(
     scope,
     data: { item: { type: "agentMessage", id: id("message"), text: "" } },
   });
+
   for (let delta = 0; delta < 3; delta += 1) {
     builder.push({
       type: "item/agentMessage/delta",
@@ -172,6 +181,7 @@ function pushSyntheticTurn(
       data: { itemId: id("message"), delta: `words ${delta} ` },
     });
   }
+
   builder.push({
     type: "item/completed",
     scope,
@@ -198,6 +208,7 @@ function pushSyntheticTurn(
       },
     },
   });
+
   for (let delta = 0; delta < 4; delta += 1) {
     builder.push({
       type: "item/commandExecution/outputDelta",
@@ -205,6 +216,7 @@ function pushSyntheticTurn(
       data: { itemId: id("command"), delta: commandOutput(turn, delta) },
     });
   }
+
   builder.push({
     type: "item/completed",
     scope,
@@ -256,7 +268,7 @@ function pushSyntheticTurn(
       item: {
         type: "toolCall",
         id: id("tool"),
-        tool: turn % 2 === 0 ? "Read" : "mcp__bb-bridge__bb_thread_list",
+        tool: turn % 2 === 0 ? "Read" : "mcp__omnyo-bridge__omnyo_thread_list",
         arguments: { path: `/workspace/project/src/module-${turn % 7}.ts` },
         status: "pending",
       },
@@ -274,7 +286,7 @@ function pushSyntheticTurn(
       item: {
         type: "toolCall",
         id: id("tool"),
-        tool: turn % 2 === 0 ? "Read" : "mcp__bb-bridge__bb_thread_list",
+        tool: turn % 2 === 0 ? "Read" : "mcp__omnyo-bridge__omnyo_thread_list",
         arguments: { path: `/workspace/project/src/module-${turn % 7}.ts` },
         status: "completed",
         result: { ok: true, lines: 120 + turn },
@@ -362,6 +374,7 @@ function pushSyntheticTurn(
     description: `background build ${turn}`,
     skipTranscript: false,
   };
+
   builder.push({
     type: "item/started",
     scope,
@@ -454,28 +467,36 @@ export interface SyntheticThread {
 export function createSyntheticThread(minimumEvents: number): SyntheticThread {
   const db = createConnection(":memory:");
   migrate(db);
+
   const host = upsertHost(db, noopNotifier, {
     name: "synthetic-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "synthetic-project",
     source: { type: "local_path", hostId: host.id, path: "/workspace/project" },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
     status: "idle",
   });
+
   const builder = createSyntheticEventBuilder(thread.id);
+
   for (let turn = 1; builder.events.length < minimumEvents; turn += 1) {
     pushSyntheticTurn(builder, thread.id, turn);
   }
+
   const inserted = insertEvents(db, noopNotifier, builder.events);
+
   if (inserted.insertedCount !== builder.events.length) {
     throw new Error(
       `Synthetic thread inserted ${inserted.insertedCount} of ${builder.events.length} events`,
     );
   }
+
   return {
     db,
     eventCount: builder.events.length,

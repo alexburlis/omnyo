@@ -13,6 +13,7 @@ import InternetIcon from "@hugeicons/core-free-icons/InternetIcon";
 import LaptopIcon from "@hugeicons/core-free-icons/LaptopIcon";
 import Loading03Icon from "@hugeicons/core-free-icons/Loading03Icon";
 import LockIcon from "@hugeicons/core-free-icons/LockIcon";
+import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
 import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
 import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
@@ -146,6 +147,7 @@ const ICON_MAP = {
   Loading: Loading03Icon,
   Lock: LockIcon,
   Palette: PaletteStrokeRoundedIcon,
+  Pencil: PencilEdit02Icon,
   Plus: PlusSignIcon,
   RotateCcw: Refresh01Icon,
   Settings: Settings01Icon,

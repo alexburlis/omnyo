@@ -18,6 +18,7 @@ vi.mock("react-resizable-panels", async () => {
   const { createRequire } = await import("node:module");
   const { dirname, join } = await import("node:path");
   const require = createRequire(import.meta.url);
+
   return require(
     join(
       dirname(require.resolve("react-resizable-panels/package.json")),
@@ -28,6 +29,7 @@ vi.mock("react-resizable-panels", async () => {
 
 function SecondaryPanelSizingProvider({ children }: { children: ReactNode }) {
   const { ref, minimum } = useSecondaryPanelSizing();
+
   return (
     <div ref={ref}>
       <SecondaryPanelMinimumContext.Provider value={minimum}>
@@ -46,22 +48,40 @@ afterEach(() => {
 it("revalidates pixel minimums on container resize while preserving explicit collapse", () => {
   let width = 2400;
   let notify = () => {};
+
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     () => new DOMRect(0, 0, width, 600),
   );
   vi.stubGlobal(
     "ResizeObserver",
     class {
-      constructor(callback: () => void) {
-        notify = callback;
+      target: Element | null = null;
+
+      constructor(callback: (entries: ResizeObserverEntry[]) => void) {
+        notify = () => {
+          if (this.target === null) throw new Error("Resize target missing");
+          callback([
+            {
+              target: this.target,
+              contentRect: this.target.getBoundingClientRect(),
+              borderBoxSize: [{ inlineSize: width, blockSize: 600 }],
+              contentBoxSize: [],
+              devicePixelContentBoxSize: [],
+            },
+          ]);
+        };
       }
-      observe() {}
+      observe(target: Element) {
+        this.target = target;
+      }
       disconnect() {}
     },
   );
   const group = createRef<ImperativePanelGroupHandle>();
+
   function Panels({ collapsed = false }: { collapsed?: boolean }) {
     const limits = useSecondaryPanelMinimum();
+
     return (
       <PanelGroup direction="horizontal" ref={group}>
         <Panel
@@ -82,13 +102,16 @@ it("revalidates pixel minimums on container resize while preserving explicit col
       </PanelGroup>
     );
   }
+
   const { rerender } = render(
     <SecondaryPanelSizingProvider>
       <Panels />
     </SecondaryPanelSizingProvider>,
   );
+
   const size = (id: string) =>
     Number(screen.getByTestId(id).getAttribute("data-panel-size"));
+
   expect(size("main")).toBeCloseTo(10);
   act(() => {
     width = 800;

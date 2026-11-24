@@ -1,6 +1,6 @@
-import { createThread, getThread } from "@bb/db";
-import { threadScope } from "@bb/domain";
-import { groupHostDaemonEvents } from "@bb/host-daemon-contract";
+import { createThread, getThread, listStoredEventRows } from "@omnyo/db";
+import { threadScope } from "@omnyo/domain";
+import { groupHostDaemonEvents } from "@omnyo/host-daemon-contract";
 import { describe, expect, it } from "vitest";
 import {
   createTestDaemonEventEnvelope,
@@ -15,30 +15,96 @@ import {
 import { withTestHarness } from "../helpers/test-app.js";
 
 describe("internal event envelope threadId regression", () => {
+  it("masks environment diagnostics from older daemons before database persistence", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+      });
+
+      const thread = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+        status: "active",
+      });
+
+      const response = await harness.app.request("/internal/session/events", {
+        method: "POST",
+        headers: internalAuthHeaders(harness, { hostId: host.id }),
+        body: JSON.stringify({
+          sessionId: session.id,
+          eventGroups: groupHostDaemonEvents([
+            createTestDaemonEventEnvelope({
+              threadId: thread.id,
+              event: {
+                type: "provider.env-resolved",
+                threadId: thread.id,
+                providerThreadId: "synthetic-provider",
+                scope: threadScope(),
+                entries: [
+                  {
+                    name: "ANTHROPIC_AUTH_TOKEN",
+                    source: { plugin: "account-pool" },
+                    value: "synthetic-persisted-value",
+                  },
+                ],
+              },
+            }),
+          ]),
+        }),
+      });
+
+      expect(response.status).toBe(200);
+
+      const rows = listStoredEventRows(harness.db, {
+        threadId: thread.id,
+        types: ["provider.env-resolved"],
+      });
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.data.includes("synthetic-persisted-value")).toBe(false);
+      expect(JSON.parse(rows[0]?.data ?? "null")).toMatchObject({
+        entries: [{ name: "ANTHROPIC_AUTH_TOKEN", value: { masked: true } }],
+      });
+    });
+  });
+
   it("uses the validated envelope threadId for side effects instead of the nested event threadId", async () => {
     await withTestHarness(async (harness) => {
       const hostA = seedHostSession(harness.deps, { id: "host-envelope-a" });
       const hostB = seedHostSession(harness.deps, { id: "host-envelope-b" });
+
       const { project: projectA } = seedProjectWithSource(harness.deps, {
         hostId: hostA.host.id,
       });
+
       const { project: projectB } = seedProjectWithSource(harness.deps, {
         hostId: hostB.host.id,
       });
+
       const environmentA = seedEnvironment(harness.deps, {
         hostId: hostA.host.id,
         projectId: projectA.id,
       });
+
       const environmentB = seedEnvironment(harness.deps, {
         hostId: hostB.host.id,
         projectId: projectB.id,
       });
+
       const threadA = seedThread(harness.deps, {
         projectId: projectA.id,
         environmentId: environmentA.id,
         title: "Owned thread",
         titleFallback: "Owned thread",
       });
+
       const threadB = seedThread(harness.deps, {
         projectId: projectB.id,
         environmentId: environmentB.id,
@@ -77,13 +143,16 @@ describe("internal event envelope threadId regression", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-fork-provider-title",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = createThread(harness.db, harness.hub, {
         projectId: project.id,
         environmentId: environment.id,
@@ -126,13 +195,16 @@ describe("internal event envelope threadId regression", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-agent-title",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const untitled = createThread(harness.db, harness.hub, {
         projectId: project.id,
         environmentId: environment.id,
@@ -141,6 +213,7 @@ describe("internal event envelope threadId regression", () => {
         titleFallback: "fix it",
         status: "active",
       });
+
       const titled = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,

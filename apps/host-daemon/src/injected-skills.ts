@@ -2,30 +2,45 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveDataDirSkillsRootPath } from "@bb/config/skill-storage-paths";
-import type { AgentRuntimeSkillRoot } from "@bb/agent-runtime";
-import type { HostDaemonInjectedSkillSource } from "@bb/host-daemon-contract";
-import type { HostDaemonSkillTree } from "@bb/host-daemon-contract";
-import { isPathWithinDirectory } from "@bb/process-utils";
+import { resolveDataDirSkillsRootPath } from "@omnyo/config/skill-storage-paths";
+import type { AgentRuntimeSkillRoot } from "@omnyo/agent-runtime";
+import type { HostDaemonInjectedSkillSource } from "@omnyo/host-daemon-contract";
+import type { HostDaemonSkillTree } from "@omnyo/host-daemon-contract";
+import { isPathWithinDirectory } from "@omnyo/process-utils";
 import { SKILL_FILE_NAME } from "./command-discovery.js";
 import { isFsErrorWithCode } from "./fs-errors.js";
 import { runInSerialLane } from "./serial-lane.js";
 import type { FetchSkillTree } from "./skill-trees.js";
+import type { LocalSkillCollection } from "./workspace-read-protocol.js";
 
 const STAGING_ROOT_SEGMENTS = ["runtime", "global-skills"] as const;
+
 const STORE_ROOT_SEGMENTS = ["runtime", "skill-store"] as const;
+
 const STORE_CONTENT_DIR = "content";
+
 const STORE_COMPLETE_MARKER = ".complete";
+
 const STORE_LAST_USED_MARKER = ".last-used";
+
 export const MAX_SKILL_STORE_TREES = 64;
+
 const STALE_TEMP_STAGING_DIR_AGE_MS = 60 * 60 * 1000;
+
 const STAGE_CATALOG_FILE = "catalog.json";
+
 const WINDOWS_RENAME_RETRY_BUDGET_MS = 5_000;
+
 const WINDOWS_TRANSIENT_RENAME_CODES = ["EPERM", "EACCES", "EBUSY"] as const;
+
 const SKILL_NAME_PATTERN = /^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
+
 const MAX_STAGED_SKILL_FILES = 1_000;
+
 const MAX_STAGED_SKILL_BYTES = 10 * 1024 * 1024;
+
 const MAX_STAGED_SKILL_DEPTH = 24;
+
 export const EMPTY_SKILL_CATALOG_HASH = createHash("sha256")
   .update("bb-global-skills-v1-empty")
   .digest("hex");
@@ -40,7 +55,15 @@ interface StageInjectedSkillSourcesArgs {
   fetchSkillTree?: FetchSkillTree;
   injectedSkillSources: readonly HostDaemonInjectedSkillSource[];
   logger?: InjectedSkillsLogger;
+  collectLocalTree?: (
+    source: LocalInjectedSkillSource,
+  ) => Promise<LocalSkillCollection>;
 }
+
+export type LocalInjectedSkillSource = Exclude<
+  HostDaemonInjectedSkillSource,
+  { kind: "tree" }
+>;
 
 interface CleanupInjectedSkillStagingDirsArgs {
   dataDir: string;
@@ -141,10 +164,15 @@ interface CreateCatalogFileArgs {
 const MAX_COLLECTED_TREE_MEMOS = 256;
 
 const collectedTreeMemos = new Map<string, SkillTreeCollectionState>();
+
 const scheduledSkillStoreGcs = new Set<string>();
+
 const pendingStageRootWrites = new Map<string, Promise<string>>();
+
 const pendingSkillTreePulls = new Map<string, Promise<string>>();
+
 const skillStoreQueues = new Map<string, Promise<void>>();
+
 const activeSkillTreeStages = new Map<string, Map<string, number>>();
 
 function markActiveSkillTreeStages(
@@ -153,9 +181,11 @@ function markActiveSkillTreeStages(
 ): void {
   const counts =
     activeSkillTreeStages.get(dataDir) ?? new Map<string, number>();
+
   for (const treeHash of treeHashes) {
     counts.set(treeHash, (counts.get(treeHash) ?? 0) + 1);
   }
+
   activeSkillTreeStages.set(dataDir, counts);
 }
 
@@ -164,12 +194,16 @@ function unmarkActiveSkillTreeStages(
   treeHashes: readonly string[],
 ): void {
   const counts = activeSkillTreeStages.get(dataDir);
+
   if (!counts) return;
+
   for (const treeHash of treeHashes) {
     const count = counts.get(treeHash) ?? 0;
+
     if (count <= 1) counts.delete(treeHash);
     else counts.set(treeHash, count - 1);
   }
+
   if (counts.size === 0) activeSkillTreeStages.delete(dataDir);
 }
 
@@ -193,6 +227,7 @@ export async function ensureDataDirSkillsRootPath(
 ): Promise<string> {
   const dataDirSkillsRootPath = resolveDataDirSkillsRootPath(dataDir);
   await fs.mkdir(dataDirSkillsRootPath, { recursive: true });
+
   return dataDirSkillsRootPath;
 }
 
@@ -217,24 +252,29 @@ function compareStringsByCodePoint(left: string, right: string): number {
 
 function assertUsableSkillDirectory(args: CollectSkillDirectoryArgs): void {
   const { name, sourceRootPath, skillFilePath } = args;
+
   if (!SKILL_NAME_PATTERN.test(name)) {
     throw new Error(`Invalid injected skill name: ${name}`);
   }
+
   if (!path.isAbsolute(sourceRootPath)) {
     throw new Error(
       `Injected skill source root must be absolute: ${sourceRootPath}`,
     );
   }
+
   if (!path.isAbsolute(skillFilePath)) {
     throw new Error(
       `Injected skill file path must be absolute: ${skillFilePath}`,
     );
   }
+
   if (!isPathWithinDirectory(sourceRootPath, skillFilePath)) {
     throw new Error(
       `Injected skill file path escapes source root: ${skillFilePath}`,
     );
   }
+
   if (path.basename(skillFilePath) !== SKILL_FILE_NAME) {
     throw new Error(
       `Injected skill file path must end with ${SKILL_FILE_NAME}: ${skillFilePath}`,
@@ -257,16 +297,21 @@ async function walkSkillTree(args: WalkSkillTreeArgs): Promise<void> {
 
   for (const entry of entries) {
     const sourcePath = path.join(args.currentPath, entry.name);
+
     if (!isPathWithinDirectory(args.rootPath, sourcePath)) {
       throw new Error(`Skill tree entry escapes source root: ${sourcePath}`);
     }
+
     const relativePath = normalizeRelativePath(
       path.relative(args.rootPath, sourcePath),
     );
+
     const entryStat = await fs.lstat(sourcePath);
+
     if (entryStat.isSymbolicLink()) {
       throw new Error(`Skill tree contains a symlink: ${sourcePath}`);
     }
+
     if (entryStat.isDirectory()) {
       args.state.directories.push({ relativePath });
       await walkSkillTree({
@@ -277,19 +322,23 @@ async function walkSkillTree(args: WalkSkillTreeArgs): Promise<void> {
       });
       continue;
     }
+
     if (!entryStat.isFile()) {
       throw new Error(`Skill tree entry is not a regular file: ${sourcePath}`);
     }
+
     if (args.state.files.length + 1 > MAX_STAGED_SKILL_FILES) {
       throw new Error(
         `Skill tree exceeds max file count ${MAX_STAGED_SKILL_FILES}: ${args.rootPath}`,
       );
     }
+
     if (args.state.totalBytes + entryStat.size > MAX_STAGED_SKILL_BYTES) {
       throw new Error(
         `Skill tree exceeds max byte count ${MAX_STAGED_SKILL_BYTES}: ${args.rootPath}`,
       );
     }
+
     const bytes = await fs.readFile(sourcePath);
     args.state.files.push({
       bytes,
@@ -306,20 +355,25 @@ async function collectSkillDirectory(
 ): Promise<SkillTreeCollectionState> {
   assertUsableSkillDirectory(args);
   const rootStat = await fs.lstat(args.sourceRootPath);
+
   if (rootStat.isSymbolicLink()) {
     throw new Error(
       `Injected skill source root is a symlink: ${args.sourceRootPath}`,
     );
   }
+
   if (!rootStat.isDirectory()) {
     throw new Error(
       `Injected skill source root is not a directory: ${args.sourceRootPath}`,
     );
   }
+
   const skillFileStat = await fs.lstat(args.skillFilePath);
+
   if (skillFileStat.isSymbolicLink()) {
     throw new Error(`Injected skill file is a symlink: ${args.skillFilePath}`);
   }
+
   if (!skillFileStat.isFile()) {
     throw new Error(
       `Injected skill file is not a regular file: ${args.skillFilePath}`,
@@ -331,6 +385,7 @@ async function collectSkillDirectory(
     files: [],
     totalBytes: 0,
   };
+
   await walkSkillTree({
     currentPath: args.sourceRootPath,
     depth: 0,
@@ -351,8 +406,10 @@ function rememberCollectedTree(
 ): void {
   collectedTreeMemos.delete(key);
   collectedTreeMemos.set(key, tree);
+
   if (collectedTreeMemos.size > MAX_COLLECTED_TREE_MEMOS) {
     const oldestKey = collectedTreeMemos.keys().next().value;
+
     if (oldestKey !== undefined) {
       collectedTreeMemos.delete(oldestKey);
     }
@@ -361,10 +418,13 @@ function rememberCollectedTree(
 
 function recallCollectedTree(key: string): SkillTreeCollectionState | null {
   const tree = collectedTreeMemos.get(key);
+
   if (tree === undefined) {
     return null;
   }
+
   rememberCollectedTree(key, tree);
+
   return tree;
 }
 
@@ -393,6 +453,54 @@ async function collectSkillTree(
   );
 }
 
+export async function collectLocalSkillSource(
+  source: LocalInjectedSkillSource,
+): Promise<LocalSkillCollection> {
+  const tree = await collectSkillTree({
+    source,
+    sourceRootPath: source.sourceRootPath,
+    skillFilePath: source.skillFilePath,
+  });
+
+  return {
+    directories: tree.directories,
+    files: tree.files.map(({ bytes, ...file }) => ({
+      ...file,
+      contentBase64: bytes.toString("base64"),
+    })),
+    totalBytes: tree.totalBytes,
+  };
+}
+
+function decodeLocalSkillCollection(
+  collection: LocalSkillCollection,
+): SkillTreeCollectionState {
+  let totalBytes = 0;
+
+  const files = collection.files.map(({ contentBase64, ...file }) => {
+    const bytes = decodeTreeEntryContent(contentBase64, file.relativePath);
+    totalBytes += bytes.length;
+
+    if (sha256Hex(bytes) !== file.contentSha256)
+      throw new Error(
+        `Injected skill content hash mismatch: ${file.relativePath}`,
+      );
+
+    return { ...file, bytes };
+  });
+
+  if (
+    totalBytes !== collection.totalBytes ||
+    totalBytes > MAX_STAGED_SKILL_BYTES ||
+    files.length > MAX_STAGED_SKILL_FILES
+  )
+    throw new Error(
+      "Injected skill collection exceeds its byte or file contract",
+    );
+
+  return { directories: collection.directories, files, totalBytes };
+}
+
 function storedTreeMemoKey(
   dataDir: string,
   source: Extract<HostDaemonInjectedSkillSource, { kind: "tree" }>,
@@ -407,9 +515,11 @@ export function scheduleSkillStoreGc(
   if (scheduledSkillStoreGcs.has(dataDir)) {
     return;
   }
+
   scheduledSkillStoreGcs.add(dataDir);
   void runInSerialLane(skillStoreQueues, dataDir, () => {
     scheduledSkillStoreGcs.delete(dataDir);
+
     return gcSkillStore(dataDir);
   }).catch((error: unknown) => {
     logger.warn(
@@ -427,6 +537,7 @@ export function scheduleSkillStoreGc(
 function hashCollectedTrees(trees: readonly CollectedSkillTree[]): string {
   const hash = createHash("sha256");
   hash.update("bb-global-skills-v1");
+
   for (const tree of trees) {
     hash.update("\0skill\0");
     hash.update(tree.source.name);
@@ -440,6 +551,7 @@ function hashCollectedTrees(trees: readonly CollectedSkillTree[]): string {
         ? tree.source.treeHash
         : tree.source.sourceRootPath,
     );
+
     for (const file of tree.files) {
       hash.update("\0file\0");
       hash.update(file.relativePath);
@@ -449,21 +561,25 @@ function hashCollectedTrees(trees: readonly CollectedSkillTree[]): string {
       hash.update(file.mode.toString(8));
     }
   }
+
   return hash.digest("hex");
 }
 
 async function copyCollectedTree(args: StageTreeArgs): Promise<void> {
   await fs.mkdir(args.skillDirectoryPath, { recursive: true });
+
   for (const directory of args.tree.directories) {
     await fs.mkdir(path.join(args.skillDirectoryPath, directory.relativePath), {
       recursive: true,
     });
   }
+
   for (const file of args.tree.files) {
     const destinationPath = path.join(
       args.skillDirectoryPath,
       file.relativePath,
     );
+
     await fs.mkdir(path.dirname(destinationPath), { recursive: true });
     await fs.writeFile(destinationPath, file.bytes, { mode: file.mode });
     await fs.chmod(destinationPath, file.mode);
@@ -478,6 +594,7 @@ export async function copyInjectedSkillSource(
     sourceRootPath: args.sourceRootPath,
     skillFilePath: args.skillFilePath,
   });
+
   await copyCollectedTree({
     skillDirectoryPath: args.destinationPath,
     tree,
@@ -503,6 +620,7 @@ function createCatalogFile(args: CreateCatalogFileArgs): CatalogFile {
 async function pathExists(targetPath: string): Promise<boolean> {
   try {
     await fs.lstat(targetPath);
+
     return true;
   } catch (error) {
     if (isFsErrorWithCode(error, "ENOENT")) return false;
@@ -524,9 +642,11 @@ async function renameDirectoryIntoPlace(
   destinationPath: string,
 ): Promise<"renamed" | "destination-exists"> {
   const deadline = Date.now() + WINDOWS_RENAME_RETRY_BUDGET_MS;
+
   for (let delayMs = 20; ; delayMs = Math.min(delayMs * 2, 500)) {
     try {
       await fs.rename(sourcePath, destinationPath);
+
       return "renamed";
     } catch (error) {
       if (
@@ -535,8 +655,11 @@ async function renameDirectoryIntoPlace(
       ) {
         return "destination-exists";
       }
+
       if (!isWindowsTransientRenameError(error)) throw error;
+
       if (await pathExists(destinationPath)) return "destination-exists";
+
       if (Date.now() >= deadline) throw error;
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
@@ -557,11 +680,13 @@ async function publishDirectory(args: {
   ) {
     return;
   }
+
   await fs.rm(args.destinationPath, {
     recursive: true,
     force: true,
     maxRetries: 5,
   });
+
   if (
     (await renameDirectoryIntoPlace(
       args.tempRootPath,
@@ -571,6 +696,7 @@ async function publishDirectory(args: {
   ) {
     return;
   }
+
   throw new Error(
     `Unable to replace incomplete directory ${args.destinationPath}`,
   );
@@ -583,11 +709,13 @@ async function isStageRootComplete(stageRootPath: string): Promise<boolean> {
 async function writeStageRoot(args: WriteStageRootArgs): Promise<string> {
   const stagingRootPath = resolveStagingRootPath(args.dataDir);
   const stageRootPath = resolveStageRootPath(args.dataDir, args.catalogHash);
+
   if (await isStageRootComplete(stageRootPath)) {
     return stageRootPath;
   }
 
   await fs.mkdir(stagingRootPath, { recursive: true });
+
   const tempRootPath = path.join(
     stagingRootPath,
     `.tmp-${args.catalogHash}-${process.pid}-${Date.now()}-${randomUUID()}`,
@@ -595,12 +723,14 @@ async function writeStageRoot(args: WriteStageRootArgs): Promise<string> {
 
   try {
     await fs.mkdir(path.join(tempRootPath, "skills"), { recursive: true });
+
     for (const tree of args.trees) {
       await copyCollectedTree({
         skillDirectoryPath: path.join(tempRootPath, "skills", tree.source.name),
         tree,
       });
     }
+
     await fs.writeFile(
       path.join(tempRootPath, STAGE_CATALOG_FILE),
       `${JSON.stringify(
@@ -632,6 +762,7 @@ function stageRootWriteKey(args: WriteStageRootArgs): string {
 async function writeStageRootOnce(args: WriteStageRootArgs): Promise<string> {
   const key = stageRootWriteKey(args);
   const pending = pendingStageRootWrites.get(key);
+
   if (pending) {
     return pending;
   }
@@ -639,7 +770,9 @@ async function writeStageRootOnce(args: WriteStageRootArgs): Promise<string> {
   const write = writeStageRoot(args).finally(() => {
     pendingStageRootWrites.delete(key);
   });
+
   pendingStageRootWrites.set(key, write);
+
   return write;
 }
 
@@ -671,11 +804,13 @@ function decodeTreeEntryContent(
   const bytes = Buffer.from(contentBase64, "base64");
   const normalizedInput = contentBase64.replace(/=+$/u, "");
   const normalizedDecoded = bytes.toString("base64").replace(/=+$/u, "");
+
   if (normalizedInput !== normalizedDecoded) {
     throw new Error(
       `Skill tree entry has invalid base64 content: ${entryPath}`,
     );
   }
+
   return bytes;
 }
 
@@ -683,6 +818,7 @@ function validatedTreeEntries(tree: HostDaemonSkillTree): CollectedSkillFile[] {
   const files: CollectedSkillFile[] = [];
   const paths = new Set<string>();
   let totalBytes = 0;
+
   for (const entry of tree.entries) {
     if (
       entry.path.includes("\\") ||
@@ -693,22 +829,27 @@ function validatedTreeEntries(tree: HostDaemonSkillTree): CollectedSkillFile[] {
     ) {
       throw new Error(`Skill tree entry has unsafe path: ${entry.path}`);
     }
+
     if (paths.has(entry.path)) {
       throw new Error(`Skill tree contains duplicate path: ${entry.path}`);
     }
+
     paths.add(entry.path);
     const bytes = decodeTreeEntryContent(entry.contentBase64, entry.path);
     totalBytes += bytes.length;
+
     if (files.length + 1 > MAX_STAGED_SKILL_FILES) {
       throw new Error(
         `Skill tree exceeds max file count ${MAX_STAGED_SKILL_FILES}`,
       );
     }
+
     if (totalBytes > MAX_STAGED_SKILL_BYTES) {
       throw new Error(
         `Skill tree exceeds max byte count ${MAX_STAGED_SKILL_BYTES}`,
       );
     }
+
     files.push({
       bytes,
       contentSha256: sha256Hex(bytes),
@@ -716,6 +857,7 @@ function validatedTreeEntries(tree: HostDaemonSkillTree): CollectedSkillFile[] {
       relativePath: entry.path,
     });
   }
+
   return files.sort((left, right) =>
     compareStringsByCodePoint(left.relativePath, right.relativePath),
   );
@@ -724,6 +866,7 @@ function validatedTreeEntries(tree: HostDaemonSkillTree): CollectedSkillFile[] {
 function hashStoredTreeFiles(files: readonly CollectedSkillFile[]): string {
   const hash = createHash("sha256");
   hash.update("bb-skill-tree-v1");
+
   for (const file of files) {
     hash.update("\0file\0");
     hash.update(file.relativePath);
@@ -734,6 +877,7 @@ function hashStoredTreeFiles(files: readonly CollectedSkillFile[]): string {
     hash.update("\0");
     hash.update(file.bytes);
   }
+
   return hash.digest("hex");
 }
 
@@ -742,11 +886,14 @@ export async function hashInstalledSkillDirectory(args: {
   skillDirectoryPath: string;
 }): Promise<string | null> {
   try {
+    const sourceRootPath = await fs.realpath(args.skillDirectoryPath);
+
     const tree = await collectSkillDirectory({
       name: args.name,
-      sourceRootPath: args.skillDirectoryPath,
-      skillFilePath: path.join(args.skillDirectoryPath, SKILL_FILE_NAME),
+      sourceRootPath,
+      skillFilePath: path.join(sourceRootPath, SKILL_FILE_NAME),
     });
+
     return hashStoredTreeFiles(
       [...tree.files].sort((left, right) =>
         compareStringsByCodePoint(left.relativePath, right.relativePath),
@@ -760,6 +907,7 @@ export async function hashInstalledSkillDirectory(args: {
 async function isStoredTreeComplete(treeRootPath: string): Promise<boolean> {
   try {
     await fs.access(path.join(treeRootPath, STORE_COMPLETE_MARKER));
+
     return (
       await fs.stat(path.join(treeRootPath, STORE_CONTENT_DIR))
     ).isDirectory();
@@ -777,25 +925,33 @@ async function gcSkillStore(dataDir: string): Promise<void> {
   const exemptTreeHashes = new Set(
     activeSkillTreeStages.get(dataDir)?.keys() ?? [],
   );
+
   const storeRootPath = resolveSkillStoreRootPath(dataDir);
   let entries: Dirent[];
+
   try {
     entries = await fs.readdir(storeRootPath, { withFileTypes: true });
   } catch (error) {
     if (isFsErrorWithCode(error, "ENOENT")) return;
     throw error;
   }
+
   const completeTrees: { name: string; usedAt: number }[] = [];
+
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith(".tmp-")) {
       continue;
     }
+
     const treeRootPath = path.join(storeRootPath, entry.name);
+
     try {
       await fs.access(path.join(treeRootPath, STORE_COMPLETE_MARKER));
+
       const stat = await fs.stat(
         path.join(treeRootPath, STORE_LAST_USED_MARKER),
       );
+
       completeTrees.push({ name: entry.name, usedAt: stat.mtimeMs });
     } catch (error) {
       if (!isFsErrorWithCode(error, "ENOENT")) {
@@ -803,18 +959,22 @@ async function gcSkillStore(dataDir: string): Promise<void> {
       }
     }
   }
+
   completeTrees.sort(
     (left, right) =>
       right.usedAt - left.usedAt ||
       compareStringsByCodePoint(left.name, right.name),
   );
+
   const removalCount = Math.max(
     0,
     completeTrees.length - MAX_SKILL_STORE_TREES,
   );
+
   const evictionCandidates = completeTrees.filter(
     (entry) => !exemptTreeHashes.has(entry.name),
   );
+
   await Promise.all(
     evictionCandidates
       .slice(Math.max(0, evictionCandidates.length - removalCount))
@@ -837,8 +997,10 @@ async function writeFetchedTreeToStore(args: {
       `Fetched skill tree hash mismatch: expected ${args.treeHash}, received ${args.tree.treeHash}`,
     );
   }
+
   const files = validatedTreeEntries(args.tree);
   const actualHash = hashStoredTreeFiles(files);
+
   if (actualHash !== args.treeHash) {
     throw new Error(
       `Fetched skill tree content hash mismatch: expected ${args.treeHash}, computed ${actualHash}`,
@@ -848,19 +1010,24 @@ async function writeFetchedTreeToStore(args: {
   const storeRootPath = resolveSkillStoreRootPath(args.dataDir);
   const treeRootPath = resolveStoredTreeRootPath(args.dataDir, args.treeHash);
   await fs.mkdir(storeRootPath, { recursive: true });
+
   const tempRootPath = path.join(
     storeRootPath,
     `.tmp-${args.treeHash}-${process.pid}-${Date.now()}-${randomUUID()}`,
   );
+
   const contentRootPath = path.join(tempRootPath, STORE_CONTENT_DIR);
+
   try {
     await fs.mkdir(contentRootPath, { recursive: true });
+
     for (const file of files) {
       const destinationPath = path.join(contentRootPath, file.relativePath);
       await fs.mkdir(path.dirname(destinationPath), { recursive: true });
       await fs.writeFile(destinationPath, file.bytes, { mode: file.mode });
       await fs.chmod(destinationPath, file.mode);
     }
+
     await fs.writeFile(path.join(tempRootPath, STORE_LAST_USED_MARKER), "");
     await fs.writeFile(
       path.join(tempRootPath, STORE_COMPLETE_MARKER),
@@ -874,7 +1041,9 @@ async function writeFetchedTreeToStore(args: {
   } finally {
     await fs.rm(tempRootPath, { recursive: true, force: true });
   }
+
   await touchStoredTree(treeRootPath);
+
   return path.join(treeRootPath, STORE_CONTENT_DIR);
 }
 
@@ -885,22 +1054,29 @@ export async function ensureStoredSkillTree(args: {
 }): Promise<string> {
   const key = `${args.dataDir}\0${args.treeHash}`;
   const pending = pendingSkillTreePulls.get(key);
+
   if (pending) {
     return pending;
   }
+
   const pull = runInSerialLane(skillStoreQueues, args.dataDir, async () => {
     const treeRootPath = resolveStoredTreeRootPath(args.dataDir, args.treeHash);
+
     if (await isStoredTreeComplete(treeRootPath)) {
       await touchStoredTree(treeRootPath);
+
       return path.join(treeRootPath, STORE_CONTENT_DIR);
     }
+
     return writeFetchedTreeToStore({
       dataDir: args.dataDir,
       tree: await args.fetchSkillTree(args.treeHash),
       treeHash: args.treeHash,
     });
   }).finally(() => pendingSkillTreePulls.delete(key));
+
   pendingSkillTreePulls.set(key, pull);
+
   return pull;
 }
 
@@ -916,44 +1092,56 @@ export async function stageInjectedSkillSources(
 
   const logger = args.logger ?? createNoopLogger();
   const trees: CollectedSkillTree[] = [];
+
   const sortedSources = [...args.injectedSkillSources].sort((left, right) =>
     compareStringsByCodePoint(left.name, right.name),
   );
+
   const stagedTreeHashes = sortedSources.flatMap((source) =>
     source.kind === "tree" ? [source.treeHash] : [],
   );
+
   let pulledStoredTree = false;
   markActiveSkillTreeStages(args.dataDir, stagedTreeHashes);
+
   try {
     for (const source of sortedSources) {
       if (source.kind === "tree") {
         const memoKey = storedTreeMemoKey(args.dataDir, source);
         const remembered = recallCollectedTree(memoKey);
+
         if (remembered !== null) {
           trees.push(toCollectedSkillTree(source, remembered));
           continue;
         }
+
         try {
           if (args.fetchSkillTree === undefined) {
             throw new Error("Skill tree fetch transport is unavailable");
           }
+
           pulledStoredTree = true;
+
           const sourceRootPath = await ensureStoredSkillTree({
             dataDir: args.dataDir,
             fetchSkillTree: args.fetchSkillTree,
             treeHash: source.treeHash,
           });
+
           const skillFilePath = path.resolve(sourceRootPath, source.entryPath);
+
           if (!isPathWithinDirectory(sourceRootPath, skillFilePath)) {
             throw new Error(
               `Injected skill entry path escapes tree: ${source.entryPath}`,
             );
           }
+
           const tree = await collectSkillTree({
             source,
             sourceRootPath,
             skillFilePath,
           });
+
           rememberCollectedTree(memoKey, tree);
           trees.push(tree);
         } catch (error) {
@@ -971,15 +1159,17 @@ export async function stageInjectedSkillSources(
           );
           throw error;
         }
+
         continue;
       }
+
       try {
+        const collection = await (
+          args.collectLocalTree ?? collectLocalSkillSource
+        )(source);
+
         trees.push(
-          await collectSkillTree({
-            source,
-            sourceRootPath: source.sourceRootPath,
-            skillFilePath: source.skillFilePath,
-          }),
+          toCollectedSkillTree(source, decodeLocalSkillCollection(collection)),
         );
       } catch (error) {
         logger.warn(
@@ -998,12 +1188,14 @@ export async function stageInjectedSkillSources(
     }
   } finally {
     unmarkActiveSkillTreeStages(args.dataDir, stagedTreeHashes);
+
     if (pulledStoredTree) {
       scheduleSkillStoreGc(args.dataDir, logger);
     }
   }
 
   const sortedTrees = trees.sort(sortTreesByName);
+
   if (sortedTrees.length === 0) {
     return {
       catalogHash: EMPTY_SKILL_CATALOG_HASH,
@@ -1012,11 +1204,13 @@ export async function stageInjectedSkillSources(
   }
 
   const catalogHash = hashCollectedTrees(sortedTrees);
+
   const stageRootPath = await writeStageRootOnce({
     catalogHash,
     dataDir: args.dataDir,
     trees: sortedTrees,
   });
+
   return {
     catalogHash,
     skillRoots: buildSkillRoots({
@@ -1033,12 +1227,14 @@ export async function cleanupInjectedSkillStagingDirs(
   const stagingRootPath = resolveStagingRootPath(args.dataDir);
   const keep = new Set(args.keepCatalogHashes);
   let entries: Dirent[];
+
   try {
     entries = await fs.readdir(stagingRootPath, { withFileTypes: true });
   } catch (error) {
     if (isFsErrorWithCode(error, "ENOENT")) {
       return;
     }
+
     throw error;
   }
 
@@ -1046,29 +1242,39 @@ export async function cleanupInjectedSkillStagingDirs(
   await Promise.all(
     entries.map(async (entry) => {
       const entryPath = path.join(stagingRootPath, entry.name);
+
       if (entry.name.startsWith(".tmp-")) {
         let mtimeMs: number;
+
         try {
           mtimeMs = (await fs.stat(entryPath)).mtimeMs;
         } catch (error) {
           if (isFsErrorWithCode(error, "ENOENT")) {
             return;
           }
+
           throw error;
         }
+
         if (Date.now() - mtimeMs < STALE_TEMP_STAGING_DIR_AGE_MS) {
           return;
         }
+
         await fs.rm(entryPath, { recursive: true, force: true });
+
         return;
       }
+
       if (!entry.isDirectory()) {
         await fs.rm(entryPath, { recursive: true, force: true });
+
         return;
       }
+
       if (keep.has(entry.name)) {
         return;
       }
+
       logger.debug(
         {
           catalogHash: entry.name,

@@ -1,3 +1,4 @@
+import { readCliUsageConsent, saveCliUsageConsent } from "../usage-consent.js";
 import { Command } from "commander";
 import {
   AI_TASKS,
@@ -22,14 +23,14 @@ import {
   type ExperimentUpdates,
   type UiPreferenceKey,
   type UiPreferenceValue,
-} from "@bb/domain";
-import { BbHttpError } from "@bb/sdk";
+} from "@omnyo/domain";
+import { OmnyoHttpError } from "@omnyo/sdk";
 import type {
   SystemAiServicesResponse,
   SystemProviderInfo,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { action } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { columnWidths, printBorderlessTable } from "../table.js";
 import { outputJson } from "./helpers.js";
 import { resolveMachineHostId, resolveMachineTargetOption } from "./machine.js";
@@ -44,9 +45,11 @@ interface AiServiceSetOptions extends JsonOptions {
 
 function requireAiTask(input: string): AiTask {
   const task = aiTaskSchema.safeParse(input);
+
   if (!task.success) {
     throw new Error(`Unknown task '${input}'. Tasks: ${AI_TASKS.join(", ")}`);
   }
+
   return task.data;
 }
 
@@ -55,21 +58,27 @@ function resolveAiServiceChoice(
   args: { task: AiTask; choice: string; pluginId: string | undefined },
 ): AiServiceSelection {
   const { task, choice, pluginId } = args;
+
   if (choice === "automatic" || choice === "off") {
     if (pluginId !== undefined) {
       throw new Error(`--plugin applies only to a service id, not ${choice}.`);
     }
+
     return { mode: choice };
   }
+
   const eligible = view.services.filter((candidate) =>
     candidate.tasks.includes(task),
   );
+
   const matches = eligible.filter(
     (candidate) =>
       candidate.id === choice &&
       (pluginId === undefined || candidate.pluginId === pluginId),
   );
+
   const [service] = matches;
+
   if (service === undefined) {
     const ids = [...new Set(eligible.map((candidate) => candidate.id))];
     const from = pluginId === undefined ? "" : ` from plugin '${pluginId}'`;
@@ -77,11 +86,13 @@ function resolveAiServiceChoice(
       `No AI service '${choice}'${from} handles ${task}. Choose automatic, off${ids.length > 0 ? `, or one of: ${ids.join(", ")}` : ""}.`,
     );
   }
+
   if (matches.length > 1) {
     throw new Error(
       `Several plugins register AI service '${choice}': ${matches.map((candidate) => candidate.pluginId).join(", ")}. Pass --plugin <plugin-id>.`,
     );
   }
+
   return { mode: "service", pluginId: service.pluginId, serviceId: service.id };
 }
 
@@ -107,48 +118,61 @@ function describeAiSelection(
   selection: AiServiceSelection,
 ): string {
   if (selection.mode === "off") return "Off";
+
   if (selection.mode === "service") {
     const service = view.services.find(
       (candidate) =>
         candidate.id === selection.serviceId &&
         candidate.pluginId === selection.pluginId,
     );
+
     return service === undefined
       ? `${selection.serviceId} (unavailable plugin ${selection.pluginId})`
       : service.displayName;
   }
+
   return "Automatic";
 }
 
 function printAiServices(view: SystemAiServicesResponse): void {
   for (const task of AI_TASKS) {
     const selection = view.selections[task];
+
     const automatic =
       selection.mode === "automatic" ? automaticAiServiceFor(view, task) : null;
+
     const using =
       selection.mode !== "automatic"
         ? ""
         : automatic === null
           ? " (nothing ready)"
           : ` (using ${automatic.displayName})`;
+
     console.log(
       `${task.padEnd(16)}${describeAiSelection(view, selection)}${using}`,
     );
   }
+
   console.log("");
+
   if (view.services.length === 0) {
     console.log("No plugin registers an AI service.");
+
     return;
   }
+
   console.log("Services:");
+
   for (const service of view.services) {
     const status = service.status.ready
       ? "ready"
       : `not ready: ${service.status.message}`;
+
     const automatic =
       service.automaticRank === null
         ? ""
         : `  Automatic #${service.automaticRank + 1}`;
+
     console.log(
       `  ${service.id}  ${service.displayName}  plugin ${service.pluginId}  [${service.tasks.join(", ")}]${automatic}  ${status}`,
     );
@@ -171,6 +195,7 @@ interface UsageOptions extends JsonOptions {
 
 function parseBoolean(value: string): boolean {
   if (value === "true" || value === "on") return true;
+
   if (value === "false" || value === "off") return false;
   throw new Error("value must be true, false, on, or off.");
 }
@@ -180,9 +205,12 @@ function parseShortcut(value: string): AppShortcut {
     .split("+")
     .map((part) => part.trim())
     .filter(Boolean);
+
   const key = parts.pop();
+
   if (key === undefined) throw new Error("shortcut must include a key.");
   const modifiers = new Set(parts.map((part) => part.toLowerCase()));
+
   for (const modifier of modifiers) {
     if (
       !["mod", "meta", "control", "ctrl", "alt", "shift"].includes(modifier)
@@ -190,6 +218,7 @@ function parseShortcut(value: string): AppShortcut {
       throw new Error(`Unknown shortcut modifier '${modifier}'.`);
     }
   }
+
   return appShortcutSchema.parse({
     key,
     mod: modifiers.has("mod"),
@@ -202,7 +231,9 @@ function parseShortcut(value: string): AppShortcut {
 
 function generalSettingValueCandidates(value: string): unknown[] {
   if (value === "on") return [true, value];
+
   if (value === "off") return [false, value];
+
   try {
     return [JSON.parse(value), value];
   } catch {
@@ -216,6 +247,7 @@ function updateGeneralSetting(
   value: string,
 ): AppSettings {
   const settingKey = appSettingsSchema.keyof().safeParse(key);
+
   if (!settingKey.success) {
     throw new Error(
       `Unknown general setting '${key}'. Known settings: ${appSettingsSchema
@@ -229,6 +261,7 @@ function updateGeneralSetting(
       ...settings,
       [settingKey.data]: candidate,
     });
+
     if (updated.success) return updated.data;
   }
 
@@ -242,6 +275,7 @@ function describeProviderCompletedTurnDisplay(
   provider: SystemProviderInfo,
 ): ProviderCompletedTurnDisplayEntry {
   const override = settings.providerCompletedTurnDisplay[provider.id];
+
   return {
     providerId: provider.id,
     displayName: provider.displayName,
@@ -260,6 +294,7 @@ function printCompletedTurnDisplayTable(
     entry.completedTurnDisplay,
     entry.source === "setting" ? "setting" : "provider default",
   ]);
+
   printBorderlessTable(
     {
       head: ["ID", "Name", "Finished turns", "Source"],
@@ -275,11 +310,13 @@ function parseCompletedTurnDisplayInput(
 ): CompletedTurnDisplay | null {
   if (value === "default") return null;
   const parsed = completedTurnDisplaySchema.safeParse(value);
+
   if (!parsed.success) {
     throw new Error(
       `Invalid finished turn display '${value}'. Use collapse, flat, or default.`,
     );
   }
+
   return parsed.data;
 }
 
@@ -293,6 +330,7 @@ function updateProviderCompletedTurnDisplay(
       ([id]) => id !== providerId,
     ),
   );
+
   return appSettingsSchema.strip().parse({
     ...settings,
     providerCompletedTurnDisplay:
@@ -305,6 +343,7 @@ function requireKnownProvider(
   providerId: string,
 ): SystemProviderInfo {
   const provider = providers.find((candidate) => candidate.id === providerId);
+
   if (provider !== undefined) return provider;
   throw new Error(
     `Unknown provider '${providerId}'. Known providers: ${providers
@@ -316,9 +355,11 @@ function requireKnownProvider(
 function experimentUpdate(key: string, value: string): ExperimentUpdates {
   const enabled = parseBoolean(value);
   const experimentKey = experimentKeySchema.safeParse(key);
+
   if (!experimentKey.success) {
     throw new Error(`Unknown experiment '${key}'.`);
   }
+
   return { [experimentKey.data]: enabled };
 }
 
@@ -342,18 +383,21 @@ function parseUiPreferenceInput<Key extends UiPreferenceKey>(
   value: string,
 ): UiPreferenceValue<Key> {
   let message = "";
+
   for (const candidate of uiPreferenceValueCandidates(value)) {
     const parsed = parseUiPreferenceValue(key, candidate);
+
     if (parsed.success) return parsed.value;
     message = parsed.message;
   }
+
   throw new Error(
-    `Invalid value '${value}' for '${key}': ${message}. Lists and null take JSON; plain strings may be unquoted.`,
+    `Invalid value '${value}' for '${key}': ${message}. Lists, objects, numbers and null take JSON; plain strings may be unquoted.`,
   );
 }
 
 function isUiPreferenceConflict(error: unknown): boolean {
-  return error instanceof BbHttpError && error.status === 409;
+  return error instanceof OmnyoHttpError && error.status === 409;
 }
 
 export function registerSettingsCommands(
@@ -362,7 +406,7 @@ export function registerSettingsCommands(
 ): void {
   const settings = program
     .command("settings")
-    .description("Inspect and update BB settings");
+    .description("Inspect and update Omnyo settings");
 
   settings
     .command("show")
@@ -370,7 +414,8 @@ export function registerSettingsCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: JsonOptions) => {
-        const result = await createCliBbSdk(getUrl()).system.config();
+        const result = await createCliOmnyoSdk(getUrl()).system.config();
+
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));
       }),
@@ -381,13 +426,15 @@ export function registerSettingsCommands(
     .description(
       "Choose which plugin AI service writes thread titles, commit messages, and voice transcripts",
     );
+
   aiServices
     .command("show", { isDefault: true })
     .description("Show each task's selection and every registered AI service")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: JsonOptions) => {
-        const result = await createCliBbSdk(getUrl()).system.aiServices();
+        const result = await createCliOmnyoSdk(getUrl()).system.aiServices();
+
         if (outputJson(opts, result)) return;
         printAiServices(result);
       }),
@@ -410,8 +457,9 @@ export function registerSettingsCommands(
           opts: AiServiceSetOptions,
         ) => {
           const task = requireAiTask(taskInput);
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
           const current = await sdk.system.aiServices();
+
           const result = await sdk.system.setAiServiceSelection({
             task,
             selection: resolveAiServiceChoice(current, {
@@ -420,6 +468,7 @@ export function registerSettingsCommands(
               pluginId: opts.plugin,
             }),
           });
+
           if (outputJson(opts, result)) return;
           console.log(
             `${task}: ${describeAiSelection(result, result.selections[task])}`,
@@ -436,23 +485,157 @@ export function registerSettingsCommands(
     .action(
       action(async (taskInput: string, opts: JsonOptions) => {
         const task = aiTextTaskSchema.safeParse(taskInput);
+
         if (!task.success) {
           throw new Error(
             `Unknown task '${taskInput}'. Testable tasks: ${AI_TEXT_TASKS.join(", ")}`,
           );
         }
-        const result = await createCliBbSdk(getUrl()).system.testAiService({
+
+        const result = await createCliOmnyoSdk(getUrl()).system.testAiService({
           task: task.data,
         });
+
         if (outputJson(opts, result)) return;
+
         if (result.ok) {
           console.log(
             `${result.displayName} (${result.durationMs}ms): ${result.text}`,
           );
+
           return;
         }
+
         console.log(`Failed after ${result.durationMs}ms: ${result.message}`);
         process.exitCode = 1;
+      }),
+    );
+
+  const usage = settings
+    .command("usage")
+    .description(
+      "Manage weekly count and this CLI client’s separate product analytics consent",
+    );
+
+  const usageOutputOptions = (opts: JsonOptions): JsonOptions => ({
+    ...opts,
+    json: opts.json ?? usage.opts<JsonOptions>().json,
+  });
+
+  usage.hook("preAction", (_parent, command) => {
+    if (usage.opts<JsonOptions>().json) command.setOptionValue("json", true);
+  });
+  usage
+    .command("status")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (opts: JsonOptions) => {
+        const result =
+          await createCliOmnyoSdk(getUrl()).system.experimental_usageStatus();
+
+        if (!outputJson(usageOutputOptions(opts), result))
+          console.log(JSON.stringify(result, null, 2));
+      }),
+    );
+
+  for (const purpose of ["count", "analytics"] as const)
+    usage
+      .command(`${purpose} <choice>`)
+      .description(
+        purpose === "count"
+          ? "Set the installation-wide weekly count: on or off"
+          : "Consent to product analytics for interactive use from this CLI: on or off",
+      )
+      .option("--json", "Print machine-readable JSON output")
+      .action(
+        action(async (choice: string, opts: JsonOptions) => {
+          if (choice !== "on" && choice !== "off")
+            throw new Error("Choose on or off");
+          const baseUrl = getUrl();
+          const stored = readCliUsageConsent(baseUrl);
+
+          if (purpose === "analytics" && choice === "off")
+            await saveCliUsageConsent(baseUrl, { ...stored, active: null });
+          const sdk = createCliOmnyoSdk(baseUrl);
+
+          const result = await sdk.system.experimental_usageConsent({
+            purpose: purpose === "analytics" ? "product" : "count",
+            choice: choice === "on" ? "granted" : "declined",
+            source: "cli",
+            ...(stored.active ? { proof: stored.active } : {}),
+          });
+
+          if (result.proof) {
+            try {
+              await saveCliUsageConsent(baseUrl, {
+                active: result.proof,
+                proofs: [...new Set([...stored.proofs, result.proof])].slice(
+                  -64,
+                ),
+              });
+            } catch (error) {
+              await sdk.system.experimental_usageConsent({
+                purpose: "product",
+                choice: "declined",
+                source: "cli",
+                proof: result.proof,
+              });
+              throw error;
+            }
+          }
+
+          if (!outputJson(usageOutputOptions(opts), result.status))
+            console.log(JSON.stringify(result.status, null, 2));
+        }),
+      );
+  usage
+    .command("preview")
+    .description("Preview allowed synthetic payloads without sending a report")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (opts: JsonOptions) => {
+        const result =
+          await createCliOmnyoSdk(getUrl()).system.experimental_usagePreview();
+
+        if (!outputJson(usageOutputOptions(opts), result))
+          console.log(JSON.stringify(result, null, 2));
+      }),
+    );
+  usage
+    .command("erase")
+    .description(
+      "Withdraw this CLI client and erase its recorded analytics; retry pending erasure",
+    )
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (opts: JsonOptions) => {
+        const baseUrl = getUrl();
+        const stored = readCliUsageConsent(baseUrl);
+        await saveCliUsageConsent(baseUrl, { ...stored, active: null });
+        const sdk = createCliOmnyoSdk(baseUrl);
+        let pending = false;
+
+        for (const proof of stored.proofs) {
+          const result =
+            await sdk.system.experimental_eraseUsageAnalytics(proof);
+
+          if (result.product.erasure === "pending") pending = true;
+        }
+
+        if (!pending)
+          await saveCliUsageConsent(
+            baseUrl,
+            { active: null, proofs: [] },
+            stored.proofs,
+          );
+        const result = { erasure: pending ? "pending" : "complete" };
+
+        if (!outputJson(usageOutputOptions(opts), result))
+          console.log(
+            pending
+              ? "Erasure is pending. Run this command again to retry with the saved proof."
+              : "This CLI client’s analytics was erased.",
+          );
       }),
     );
 
@@ -462,11 +645,13 @@ export function registerSettingsCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (key: string, value: string, opts: JsonOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const config = await sdk.system.config();
+
         const result = await sdk.system.updateGeneralSettings(
           updateGeneralSetting(config.generalSettings, key, value),
         );
+
         if (outputJson(opts, result)) return;
         console.log(`${key} updated`);
       }),
@@ -478,12 +663,14 @@ export function registerSettingsCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: JsonOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const config = await sdk.system.config();
+
         const result = await sdk.system.updateGeneralSettings({
           ...config.generalSettings,
           onboardingCompletedAt: null,
         });
+
         if (outputJson(opts, result)) return;
         console.log("The setup guide is showing again");
       }),
@@ -502,11 +689,13 @@ export function registerSettingsCommands(
           display: string | undefined,
           opts: JsonOptions,
         ) => {
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
+
           const [config, providers] = await Promise.all([
             sdk.system.config(),
             sdk.providers.list(),
           ]);
+
           if (providerId === undefined) {
             const entries = providers.map((provider) =>
               describeProviderCompletedTurnDisplay(
@@ -514,24 +703,34 @@ export function registerSettingsCommands(
                 provider,
               ),
             );
+
             if (outputJson(opts, entries)) return;
+
             if (entries.length === 0) {
               console.log("No providers available");
+
               return;
             }
+
             printCompletedTurnDisplayTable(entries);
+
             return;
           }
+
           const provider = requireKnownProvider(providers, providerId);
+
           if (display === undefined) {
             const entry = describeProviderCompletedTurnDisplay(
               config.generalSettings,
               provider,
             );
+
             if (outputJson(opts, entry)) return;
             printCompletedTurnDisplayTable([entry]);
+
             return;
           }
+
           const updated = await sdk.system.updateGeneralSettings(
             updateProviderCompletedTurnDisplay(
               config.generalSettings,
@@ -539,7 +738,9 @@ export function registerSettingsCommands(
               parseCompletedTurnDisplayInput(display),
             ),
           );
+
           const entry = describeProviderCompletedTurnDisplay(updated, provider);
+
           if (outputJson(opts, entry)) return;
           console.log(
             `${provider.id} finished turns: ${entry.completedTurnDisplay} (${
@@ -553,16 +754,19 @@ export function registerSettingsCommands(
   const ui = settings
     .command("ui")
     .description(
-      "Manage server-synced UI preferences such as sidebar layout and navigation",
+      "Manage server-synced UI preferences such as sidebar layout, navigation and model picker favorites",
     );
+
   ui.command("list")
     .description("List every UI preference with its value and revision")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: JsonOptions) => {
         const result =
-          await createCliBbSdk(getUrl()).system.uiPreferences.list();
+          await createCliOmnyoSdk(getUrl()).system.uiPreferences.list();
+
         if (outputJson(opts, result)) return;
+
         for (const key of UI_PREFERENCE_KEYS) {
           const entry = result.preferences[key];
           console.log(
@@ -578,36 +782,46 @@ export function registerSettingsCommands(
     .action(
       action(async (keyInput: string, opts: JsonOptions) => {
         const key = requireUiPreferenceKey(keyInput);
+
         const { preferences } =
-          await createCliBbSdk(getUrl()).system.uiPreferences.list();
+          await createCliOmnyoSdk(getUrl()).system.uiPreferences.list();
+
         const entry = preferences[key];
+
         if (outputJson(opts, { key, ...entry })) return;
         console.log(JSON.stringify(entry.value));
       }),
     );
   ui.command("set <key> <value>")
-    .description("Set a UI preference; lists and null take JSON")
+    .description(
+      "Set a UI preference; lists, objects, numbers and null take JSON",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (keyInput: string, value: string, opts: JsonOptions) => {
         const key = requireUiPreferenceKey(keyInput);
         const parsedValue = parseUiPreferenceInput(key, value);
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const write = async () => {
           const { preferences } = await sdk.system.uiPreferences.list();
+
           return sdk.system.uiPreferences.set({
             expectedRevision: preferences[key].revision,
             key,
             value: parsedValue,
           });
         };
+
         let result;
+
         try {
           result = await write();
         } catch (error) {
           if (!isUiPreferenceConflict(error)) throw error;
           result = await write();
         }
+
         if (outputJson(opts, result)) return;
         console.log(`${key} updated`);
       }),
@@ -618,41 +832,13 @@ export function registerSettingsCommands(
     .action(
       action(async (keyInput: string, opts: JsonOptions) => {
         const key = requireUiPreferenceKey(keyInput);
-        const result = await createCliBbSdk(
+
+        const result = await createCliOmnyoSdk(
           getUrl(),
         ).system.uiPreferences.reset({ key });
+
         if (outputJson(opts, result)) return;
         console.log(`${key} reset`);
-      }),
-    );
-
-  settings
-    .command("mobile-app")
-    .description("Show iOS TestFlight and Android APK download links")
-    .option("--details", "Include available public release metadata")
-    .option("--json", "Print machine-readable JSON output")
-    .action(
-      action(async (opts: JsonOptions & { details?: boolean }) => {
-        const system = createCliBbSdk(getUrl()).system;
-        const links = system.mobileAppDownloads();
-        if (opts.details) {
-          const releases = await system.mobileAppReleases();
-          if (outputJson(opts, { downloads: links, releases })) return;
-          console.log(
-            `iOS TestFlight: ${links.ios}\nAndroid APK: ${links.android}`,
-          );
-          console.log(
-            releases.android
-              ? `Android ${releases.android.version} (build ${releases.android.versionCode}) · Updated ${releases.android.updatedAt} · ${Math.ceil(releases.android.size / 1024 / 1024)} MB`
-              : "Android release details are unavailable.",
-          );
-          console.log("iOS version and release date are shown in TestFlight.");
-          return;
-        }
-        if (outputJson(opts, links)) return;
-        console.log(
-          `iOS TestFlight: ${links.ios}\nAndroid APK: ${links.android}`,
-        );
       }),
     );
 
@@ -662,10 +848,12 @@ export function registerSettingsCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (key: string, value: string, opts: JsonOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const result = await sdk.system.updateExperiments(
           experimentUpdate(key, value),
         );
+
         if (outputJson(opts, result)) return;
         console.log(`${key} updated`);
       }),
@@ -674,14 +862,16 @@ export function registerSettingsCommands(
   const keyboard = settings
     .command("keyboard")
     .description("Manage keyboard settings and shortcut overrides");
+
   keyboard
     .command("hints <value>")
     .description("Show or hide held-modifier shortcut hints")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (value: string, opts: JsonOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const config = await sdk.system.config();
+
         const result = await sdk.system.updateGeneralSettings(
           updateGeneralSetting(
             config.generalSettings,
@@ -689,6 +879,7 @@ export function registerSettingsCommands(
             value,
           ),
         );
+
         if (outputJson(opts, result)) return;
         console.log("Keyboard hint visibility updated");
       }),
@@ -699,11 +890,13 @@ export function registerSettingsCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: JsonOptions) => {
-        const config = await createCliBbSdk(getUrl()).system.config();
+        const config = await createCliOmnyoSdk(getUrl()).system.config();
+
         const result = {
           bindings: config.keybindings,
           overrides: config.keybindingOverrides,
         };
+
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));
       }),
@@ -725,18 +918,21 @@ export function registerSettingsCommands(
           opts: JsonOptions & { platform?: "mac" | "windows" | "linux" },
         ) => {
           const command = keyboardCommandIdSchema.parse(commandInput);
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
           const config = await sdk.system.config();
+
           const next = config.keybindingOverrides.filter(
             (item) =>
               item.command !== command || item.platform !== opts.platform,
           );
+
           next.push({
             command,
             ...(opts.platform === undefined ? {} : { platform: opts.platform }),
             shortcut: shortcut === "disabled" ? null : parseShortcut(shortcut),
           });
           const result = await sdk.system.updateKeyboardSettings(next);
+
           if (outputJson(opts, result)) return;
           console.log(`Shortcut for ${command} updated`);
         },
@@ -757,18 +953,22 @@ export function registerSettingsCommands(
           commandInput: string | undefined,
           opts: JsonOptions & { platform?: "mac" | "windows" | "linux" },
         ) => {
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
           const config = await sdk.system.config();
+
           const command =
             commandInput === undefined
               ? undefined
               : keyboardCommandIdSchema.parse(commandInput);
+
           const next = config.keybindingOverrides.filter(
             (item) =>
               (command !== undefined && item.command !== command) ||
               (opts.platform !== undefined && item.platform !== opts.platform),
           );
+
           const result = await sdk.system.updateKeyboardSettings(next);
+
           if (outputJson(opts, result)) return;
           console.log(
             commandInput
@@ -779,9 +979,8 @@ export function registerSettingsCommands(
       ),
     );
 
-  settings
-    .command("usage")
-    .description("Show provider usage limits")
+  usage
+    .description("Show provider usage limits or manage usage privacy")
     .option("--refresh", "Fetch fresh usage instead of a cached result")
     .option(
       "--machine <id-or-name>",
@@ -792,6 +991,7 @@ export function registerSettingsCommands(
     .action(
       action(async (opts: UsageOptions) => {
         const target = resolveMachineTargetOption(opts);
+
         const hostId =
           target === undefined
             ? undefined
@@ -799,10 +999,12 @@ export function registerSettingsCommands(
                 serverUrl: getUrl(),
                 target,
               });
-        const result = await createCliBbSdk(getUrl()).system.usageLimits({
+
+        const result = await createCliOmnyoSdk(getUrl()).system.usageLimits({
           hostId,
           refresh: opts.refresh,
         });
+
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));
       }),
@@ -810,14 +1012,15 @@ export function registerSettingsCommands(
 
   settings
     .command("version")
-    .description("Check the running and latest BB versions")
+    .description("Check the running and latest Omnyo versions")
     .option("--force", "Bypass the latest-version cache")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: JsonOptions & { force?: boolean }) => {
-        const result = await createCliBbSdk(getUrl()).system.version({
+        const result = await createCliOmnyoSdk(getUrl()).system.version({
           force: opts.force,
         });
+
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));
       }),
@@ -825,11 +1028,12 @@ export function registerSettingsCommands(
 
   settings
     .command("reload")
-    .description("Reload BB's managed configuration")
+    .description("Reload Omnyo's managed configuration")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: JsonOptions) => {
-        const result = await createCliBbSdk(getUrl()).system.reloadConfig();
+        const result = await createCliOmnyoSdk(getUrl()).system.reloadConfig();
+
         if (outputJson(opts, result)) return;
         console.log("Configuration reloaded");
       }),

@@ -1,56 +1,51 @@
-export const REWRITE_LOCALHOST_LINKS_STORAGE_KEY = "bb.rewriteLocalhostLinks";
+export const REWRITE_LOCALHOST_LINKS_STORAGE_KEY =
+  "omnyo.rewriteLocalhostLinks";
 
 export const REWRITE_LOCALHOST_LINKS_DEFAULT = true;
 
 interface RewriteLocalhostLinkHrefArgs {
-  currentHostname: string | undefined;
   enabled: boolean;
   href: string | undefined;
+  sourceHostId?: string | null;
+  viewerHostId?: string | null;
+  remoteBaseUrl?: string;
 }
 
-const LOOPBACK_LINK_HOSTNAMES = new Set(["127.0.0.1", "localhost"]);
-const IGNORED_REWRITE_HOSTNAME_PATTERNS = [
-  /^(?:.+\.)?getbb\.app$/i,
-];
+export function parseLoopbackPreviewUrl(href: string | undefined): URL | null {
+  if (href === undefined) return null;
 
-function isIgnoredRewriteHostname(hostname: string): boolean {
-  return IGNORED_REWRITE_HOSTNAME_PATTERNS.some((pattern) =>
-    pattern.test(hostname),
-  );
-}
+  try {
+    const url = new URL(href);
 
-function isRewriteableLoopbackLink(url: URL): boolean {
-  return (
-    (url.protocol === "http:" || url.protocol === "https:") &&
-    LOOPBACK_LINK_HOSTNAMES.has(url.hostname.toLowerCase())
-  );
+    return (url.protocol === "http:" || url.protocol === "https:") &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(
+        url.hostname.toLowerCase(),
+      ) &&
+      url.username === "" &&
+      url.password === ""
+      ? url
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export function rewriteLocalhostLinkHref({
-  currentHostname,
   enabled,
   href,
+  sourceHostId,
+  viewerHostId,
+  remoteBaseUrl,
 }: RewriteLocalhostLinkHrefArgs): string | undefined {
+  const url = parseLoopbackPreviewUrl(href);
+
   if (
     !enabled ||
-    href === undefined ||
-    currentHostname === undefined ||
-    isIgnoredRewriteHostname(currentHostname)
-  ) {
+    url === null ||
+    (sourceHostId && sourceHostId === viewerHostId) ||
+    remoteBaseUrl === undefined
+  )
     return href;
-  }
 
-  let url: URL;
-  try {
-    url = new URL(href);
-  } catch {
-    return href;
-  }
-
-  if (!isRewriteableLoopbackLink(url) || url.hostname === currentHostname) {
-    return href;
-  }
-
-  url.hostname = currentHostname;
-  return url.toString();
+  return `${remoteBaseUrl}${url.pathname}${url.search}${url.hash}`;
 }

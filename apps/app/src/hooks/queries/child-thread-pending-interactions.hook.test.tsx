@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { PendingInteraction } from "@bb/domain";
+import type { PendingInteraction } from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EMPTY_CHILD_THREAD_PENDING_ATTENTION,
@@ -60,9 +60,11 @@ function renderAttention(
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+
   const wrapper = ({ children: node }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{node}</QueryClientProvider>
   );
+
   return renderHook(
     ({ items }: { items: readonly ChildThreadPendingAttentionSource[] }) =>
       useChildThreadPendingAttention(items),
@@ -85,6 +87,7 @@ describe("useChildThreadPendingAttention", () => {
         hasPendingInteraction: false,
       },
     ];
+
     const { result, rerender } = renderAttention(children);
     expect(result.current).toBe(EMPTY_CHILD_THREAD_PENDING_ATTENTION);
     rerender({ items: children });
@@ -94,6 +97,7 @@ describe("useChildThreadPendingAttention", () => {
 
   it("keeps the same array across re-renders while the child interactions are unchanged", async () => {
     mocks.list.mockResolvedValue([makeApproval("pi_1", 10)]);
+
     const children = [
       {
         id: "thr_blocked",
@@ -102,6 +106,7 @@ describe("useChildThreadPendingAttention", () => {
         hasPendingInteraction: true,
       },
     ];
+
     const { result, rerender } = renderAttention(children);
     await waitFor(() => {
       expect(result.current).toHaveLength(1);
@@ -124,6 +129,7 @@ describe("useChildThreadPendingAttention", () => {
           ? [makeApproval("pi_ignored", 30)]
           : [],
     );
+
     const { result } = renderAttention([
       {
         id: "thr_blocked",

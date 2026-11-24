@@ -181,7 +181,7 @@ describe("every codex lifecycle delta carries a presentation", () => {
         type: "dynamicToolCall",
         id: "d1",
         namespace: null,
-        tool: "bb_workflow_run",
+        tool: "omnyo_workflow_run",
         arguments: {},
         status: "inProgress",
         contentItems: null,
@@ -213,8 +213,8 @@ describe("every codex lifecycle delta carries a presentation", () => {
       item: {
         type: "webSearch",
         id: "ws1",
-        query: "bb",
-        action: { type: "search", query: "bb", queries: null },
+        query: "omnyo",
+        action: { type: "search", query: "omnyo", queries: null },
       },
     },
     {
@@ -261,6 +261,7 @@ describe("every codex lifecycle delta carries a presentation", () => {
       const translator = createCodexEventTranslator({
         additionalWorkspaceWriteRoots: [],
       });
+
       const lifecycle = [
         ...translator.translateEvent({
           jsonrpc: "2.0",
@@ -275,7 +276,9 @@ describe("every codex lifecycle delta carries a presentation", () => {
       ].filter(
         (delta) => delta.kind === "item.open" || delta.kind === "item.close",
       );
+
       expect(lifecycle.length).toBeGreaterThan(0);
+
       for (const delta of lifecycle) {
         expect(delta.presentation).toBeDefined();
         expect(delta.presentation?.label.pending.length).toBeGreaterThan(0);

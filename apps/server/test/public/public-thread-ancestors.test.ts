@@ -1,5 +1,5 @@
-import { markThreadDeleted } from "@bb/db";
-import { threadAncestorsListResponseSchema } from "@bb/server-contract";
+import { markThreadDeleted } from "@omnyo/db";
+import { threadAncestorsListResponseSchema } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { archiveThreadAndReleaseChildren } from "../../src/services/threads/thread-ownership.js";
 import { readJson } from "../helpers/json.js";
@@ -16,12 +16,14 @@ async function listAncestors(harness: TestAppHarness, body: unknown) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+
   return { status: response.status, body: await readJson(response) };
 }
 
 async function ancestorsOf(harness: TestAppHarness, threadIds: string[]) {
   const { status, body } = await listAncestors(harness, { threadIds });
   expect(status).toBe(200);
+
   return Object.fromEntries(
     threadAncestorsListResponseSchema
       .parse(body)
@@ -31,16 +33,20 @@ async function ancestorsOf(harness: TestAppHarness, threadIds: string[]) {
 
 function seedTree(harness: TestAppHarness) {
   const { host } = seedHostSession(harness.deps);
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: "/tmp/public-thread-ancestors",
   });
+
   const seed = (parentThreadId: string | null = null) =>
     seedThread(harness.deps, { projectId: project.id, parentThreadId });
+
   const root = seed();
   const child = seed(root.id);
   const grandchild = seed(child.id);
   const other = seed();
+
   return { root, child, grandchild, other };
 }
 
@@ -53,6 +59,7 @@ describe("POST /threads/ancestors", () => {
       const { body } = await listAncestors(harness, {
         threadIds: [grandchild.id, other.id, "thr_missing", grandchild.id],
       });
+
       expect(threadAncestorsListResponseSchema.parse(body)).toEqual({
         threads: [
           { threadId: grandchild.id, ancestorIds: [child.id, root.id] },
@@ -71,6 +78,7 @@ describe("POST /threads/ancestors", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ parentThreadId: other.id }),
       });
+
       expect(nest.status).toBe(200);
       await expect(ancestorsOf(harness, [grandchild.id])).resolves.toEqual({
         [grandchild.id]: [child.id, other.id],

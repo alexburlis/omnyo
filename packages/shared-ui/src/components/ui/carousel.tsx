@@ -6,10 +6,14 @@ import useEmblaCarousel, {
 import { cn } from "../../lib/utils";
 import { Icon } from "./icon";
 import { Button } from "../../components/ui/button";
+import { usePrefersReducedMotion } from "./motion";
 
 type CarouselApi = UseEmblaCarouselType[1];
+
 type UseCarouselParameters = Parameters<typeof useEmblaCarousel>;
+
 type CarouselOptions = UseCarouselParameters[0];
+
 type CarouselPlugin = UseCarouselParameters[1];
 
 type CarouselProps = {
@@ -56,13 +60,17 @@ const Carousel = React.forwardRef<
     },
     ref,
   ) => {
+    const reducedMotion = usePrefersReducedMotion();
+
     const [carouselRef, api] = useEmblaCarousel(
       {
         ...opts,
+        ...(reducedMotion ? { duration: 0 } : null),
         axis: orientation === "horizontal" ? "x" : "y",
       },
       plugins,
     );
+
     const [canScrollPrev, setCanScrollPrev] = React.useState(false);
     const [canScrollNext, setCanScrollNext] = React.useState(false);
 
@@ -146,6 +154,7 @@ const Carousel = React.forwardRef<
     );
   },
 );
+
 Carousel.displayName = "Carousel";
 
 const CarouselContent = React.forwardRef<
@@ -168,6 +177,7 @@ const CarouselContent = React.forwardRef<
     </div>
   );
 });
+
 CarouselContent.displayName = "CarouselContent";
 
 const CarouselItem = React.forwardRef<
@@ -190,6 +200,7 @@ const CarouselItem = React.forwardRef<
     />
   );
 });
+
 CarouselItem.displayName = "CarouselItem";
 
 const CarouselPrevious = React.forwardRef<
@@ -219,6 +230,7 @@ const CarouselPrevious = React.forwardRef<
     </Button>
   );
 });
+
 CarouselPrevious.displayName = "CarouselPrevious";
 
 const CarouselNext = React.forwardRef<
@@ -248,6 +260,7 @@ const CarouselNext = React.forwardRef<
     </Button>
   );
 });
+
 CarouselNext.displayName = "CarouselNext";
 
 export {

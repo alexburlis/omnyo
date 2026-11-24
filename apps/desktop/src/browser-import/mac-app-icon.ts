@@ -21,21 +21,27 @@ export const runCommand: CommandRunner = (file, args) =>
 
 export function iconFileFromInfoPlist(json: string): string | undefined {
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(json);
   } catch {
     return undefined;
   }
+
   if (typeof parsed !== "object" || parsed === null) return undefined;
   const plist = parsed as Record<string, unknown>;
   const candidates = [plist.CFBundleIconFile, plist.CFBundleIconName];
+
   for (const candidate of candidates) {
     if (typeof candidate !== "string") continue;
     const trimmed = candidate.trim();
+
     if (trimmed.length === 0 || trimmed.includes("/") || trimmed.includes(".."))
       continue;
+
     return trimmed.endsWith(".icns") ? trimmed : `${trimmed}.icns`;
   }
+
   return undefined;
 }
 
@@ -46,13 +52,17 @@ export async function readMacAppIcon(
 ): Promise<string | undefined> {
   const plistPath = join(appPath, "Contents", "Info.plist");
   const plist = await run("plutil", ["-convert", "json", "-o", "-", plistPath]);
+
   if (!plist.ok) return undefined;
   const iconFile = iconFileFromInfoPlist(plist.stdout);
+
   if (iconFile === undefined) return undefined;
   const icnsPath = join(appPath, "Contents", "Resources", iconFile);
+
   if (!(await isRegularFile(icnsPath))) return undefined;
-  const directory = await mkdtemp(join(tmpdir(), "bb-app-icon-"));
+  const directory = await mkdtemp(join(tmpdir(), "omnyo-app-icon-"));
   const pngPath = join(directory, "icon.png");
+
   try {
     const converted = await run("sips", [
       "-s",
@@ -65,9 +75,12 @@ export async function readMacAppIcon(
       "--out",
       pngPath,
     ]);
+
     if (!converted.ok) return undefined;
     const png = await readFile(pngPath);
+
     if (png.length === 0) return undefined;
+
     return `data:image/png;base64,${png.toString("base64")}`;
   } catch {
     return undefined;

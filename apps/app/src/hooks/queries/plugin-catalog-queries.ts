@@ -1,4 +1,4 @@
-import type { PluginMarketplaceCategory } from "@bb/domain";
+import type { PluginMarketplaceCategory } from "@omnyo/domain";
 import type {
   PluginApplyUpdateResult as SdkPluginApplyUpdateResult,
   PluginCatalogAuthor,
@@ -9,7 +9,7 @@ import type {
   PluginMarketplaceRefreshResult,
   PluginSourceDetail as SdkPluginSourceDetail,
   PluginUpdateCheckEntry,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invalidatePluginList } from "../cache-owners/plugin-cache-owner";
 import { createPluginsClient } from "./plugin-client";
@@ -29,7 +29,7 @@ interface PluginSourceDetail {
   resolved: string;
   integrity: string | null;
   registry: string | null;
-  engines: { bb: string | null; bbPluginSdk: string | null };
+  engines: { omnyo: string | null; omnyoPluginSdk: string | null };
   installedAt: number | null;
   history: { version: string; activatedAt: number | null }[];
 }
@@ -43,8 +43,8 @@ function toPluginSourceDetail(
     integrity: source.integrity ?? null,
     registry: source.registry ?? null,
     engines: {
-      bb: source.engines.bb ?? null,
-      bbPluginSdk: source.engines.bbPluginSdk ?? null,
+      omnyo: source.engines.omnyo ?? null,
+      omnyoPluginSdk: source.engines.omnyoPluginSdk ?? null,
     },
     installedAt: toEpochMs(source.installedAt),
     history: source.history.map((entry) => ({
@@ -83,6 +83,7 @@ export function useCatalogInstallPlan(
   args: { entryId: string; marketplace?: string } | null,
 ) {
   const request = args ?? { entryId: "" };
+
   return useQuery({
     queryKey: pluginCatalogInstallPlanQueryKey(request),
     queryFn: () => createPluginsClient(fetch).catalog.installPlan(request),
@@ -170,6 +171,7 @@ export async function checkPluginUpdates(
   const results = await createPluginsClient(fetchImpl).checkUpdates(
     args.id === undefined ? {} : { pluginId: args.id },
   );
+
   return results.map(toUpdatesEntry);
 }
 
@@ -178,6 +180,7 @@ export function usePluginUpdateCheck(
   options: { enabled: boolean },
 ) {
   const queryClient = useQueryClient();
+
   return useQuery({
     queryKey: pluginUpdateCheckQueryKey(pluginId),
     queryFn: async () => {
@@ -185,7 +188,9 @@ export function usePluginUpdateCheck(
         fetch,
         pluginId === null ? {} : { id: pluginId },
       );
+
       await invalidatePluginList({ queryClient });
+
       return results;
     },
     enabled: options.enabled,
@@ -210,6 +215,7 @@ export async function applyPluginUpdate(
   pluginId: string,
 ): Promise<PluginUpdateResult> {
   const result = await createPluginsClient(fetchImpl).applyUpdate({ pluginId });
+
   return {
     applied: result.applied,
     outcome: result.outcome,
@@ -244,7 +250,6 @@ export interface PluginCatalogSearchEntry {
   installed: boolean;
   installedByDefault: boolean;
   conflictingInstallSource: string | null;
-  installs: number | null;
   compatible: boolean;
   incompatibleReason: string | null;
 }
@@ -279,7 +284,6 @@ function toPluginCatalogSearchEntry(
     installed: data.installed,
     installedByDefault: data.installedByDefault,
     conflictingInstallSource: data.conflictingInstallSource,
-    installs: data.installs,
     compatible: data.compatible,
     incompatibleReason: data.incompatibleReason ?? null,
   };
@@ -300,6 +304,7 @@ export async function searchPluginCatalog(
   ).catalog.search({
     query,
   });
+
   return {
     entries: results.map(toPluginCatalogSearchEntry),
     collections,

@@ -9,7 +9,7 @@ import {
   type PromptHistoryPosition,
   type QueuedThreadMessageRow,
   type StoredPromptHistoryEntryRow,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   pathLooksRuntimeReadable,
   promptInputSchema,
@@ -20,7 +20,7 @@ import {
   type Thread,
   type ThreadTurnInitiator,
   type TurnRequestTarget,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { z } from "zod";
 import { toThreadQueuedMessage } from "./threads/thread-queued-messages.js";
 import { threadTargetHostId } from "./threads/dispatch-attempt.js";
@@ -41,8 +41,11 @@ interface ThreadPromptHistoryArgs extends PromptHistoryArgs {
 }
 
 type PromptHistoryServiceDeps = Pick<AppDeps, "db">;
+
 type PromptHistoryEntryInput = PromptHistoryEntry["input"];
+
 type PromptHistoryScopeThread = Pick<Thread, "parentThreadId">;
+
 type PromptHistoryRecordThread = Pick<
   Thread,
   "id" | "parentThreadId" | "projectId"
@@ -84,6 +87,7 @@ function parseStoredPromptHistoryInput(
   row: StoredPromptHistoryEntryRow,
 ): PromptHistoryEntryInput {
   const input = JSON.parse(row.input);
+
   return storedPromptHistoryInputSchema.parse(input);
 }
 
@@ -94,14 +98,17 @@ function portablePromptHistoryInput(
 ): PromptHistoryEntryInput {
   return input.map((chunk) => {
     if (chunk.type !== "localImage" && chunk.type !== "localFile") return chunk;
+
     if (!pathLooksRuntimeReadable(chunk.path))
       return { ...chunk, sourceProjectId: projectId };
+
     return hostId === null ? chunk : { ...chunk, hostId: hostId };
   });
 }
 
 function threadHostLookup(deps: PromptHistoryServiceDeps): ThreadHostLookup {
   const hosts = new Map<string, string | null>();
+
   return (threadId) => {
     if (!hosts.has(threadId)) {
       const thread = getThread(deps.db, threadId);
@@ -110,6 +117,7 @@ function threadHostLookup(deps: PromptHistoryServiceDeps): ThreadHostLookup {
         thread === null ? null : threadTargetHostId(deps, thread),
       );
     }
+
     return hosts.get(threadId) ?? null;
   };
 }
@@ -130,6 +138,7 @@ function buildQueuedPromptHistoryEntry(
   row: QueuedThreadMessageRow,
 ): InternalPromptHistoryEntry {
   const queuedMessage = toThreadQueuedMessage(row);
+
   return {
     id: `queued-message:${queuedMessage.id}`,
     createdAt: queuedMessage.createdAt,
@@ -146,9 +155,11 @@ function comparePromptHistoryEntries(
   if (left.createdAt !== right.createdAt) {
     return right.createdAt - left.createdAt;
   }
+
   if (left.state !== right.state) {
     return left.state === "queued" ? -1 : 1;
   }
+
   return right.id.localeCompare(left.id);
 }
 
@@ -213,6 +224,7 @@ function buildVisibleThreadPromptHistory(
   const mergedEntries = [...queuedEntries, ...acceptedEntries].sort(
     comparePromptHistoryEntries,
   );
+
   return takeVisiblePromptHistoryEntries({
     entries: mergedEntries,
     limit,
@@ -244,11 +256,14 @@ export function listThreadPromptHistory(
   args: ThreadPromptHistoryArgs,
 ): PromptHistoryEntry[] {
   const thread = getThread(deps.db, args.threadId);
+
   if (thread === null) return [];
+
   const queuedEntries = buildPromptHistoryEntries({
     rows: listQueuedThreadMessages(deps.db, args.threadId),
     buildEntry: buildQueuedPromptHistoryEntry,
   });
+
   const acceptedEntries = buildPromptHistoryEntries({
     rows: listStoredThreadPromptHistoryRows(deps.db, {
       threadId: args.threadId,
@@ -285,6 +300,7 @@ export function decodePromptHistoryCursor(
     const [createdAt, requestSequence, id] = promptHistoryCursorSchema.parse(
       JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")),
     );
+
     return { createdAt, requestSequence, id };
   } catch {
     return null;
@@ -299,8 +315,10 @@ export function listPromptHistory(
     before: args.before,
     limit: args.limit + 1,
   });
+
   const pageRows = rows.slice(0, args.limit);
   const hostOf = threadHostLookup(deps);
+
   const entries = buildPromptHistoryEntries({
     rows: pageRows,
     buildEntry: (row): PromptHistoryListEntry => ({
@@ -316,7 +334,9 @@ export function listPromptHistory(
       scope: row.scope,
     }),
   });
+
   const last = pageRows.at(-1);
+
   return {
     entries,
     nextCursor:
@@ -331,14 +351,17 @@ export function recordAcceptedPromptHistoryEntry(
   args: RecordAcceptedPromptHistoryEntryArgs,
 ): boolean {
   const input = args.input.filter((item) => item.visibility !== "agent-only");
+
   if (input.length === 0) {
     return false;
   }
+
   const scope = resolveAcceptedPromptHistoryScope({
     initiator: args.initiator,
     target: args.target,
     thread: args.thread,
   });
+
   if (scope === null) {
     return false;
   }
@@ -350,5 +373,6 @@ export function recordAcceptedPromptHistoryEntry(
     requestSequence: args.requestSequence,
     input,
   });
+
   return true;
 }

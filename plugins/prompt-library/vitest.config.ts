@@ -4,7 +4,7 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
     silent: "passed-only",
-    name: "bb-plugin-bb--prompt-library",
+    name: "omnyo-plugin-omnyo--prompt-library",
     include: ["**/*.test.{ts,tsx}"],
     exclude: ["node_modules/**"],
   },

@@ -2,8 +2,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createThread } from "@bb/db";
-import { encodeClientTurnRequestIdNumber, type JsonObject } from "@bb/domain";
+import { createThread } from "@omnyo/db";
+import {
+  encodeClientTurnRequestIdNumber,
+  type JsonObject,
+} from "@omnyo/domain";
 import {
   buildExecutionOptions,
   buildThreadStartCommand,
@@ -50,15 +53,15 @@ async function installIssueLauncher(
   pluginsDir: string,
 ): Promise<() => Promise<ConfigureObservation[]>> {
   const observationsPath = join(pluginsDir, "configure-observations.jsonl");
-  const rootDir = join(pluginsDir, "bb-plugin-issue-launcher");
+  const rootDir = join(pluginsDir, "omnyo-plugin-issue-launcher");
   await mkdir(rootDir, { recursive: true });
   await writeFile(observationsPath, "");
   await writeFile(
     join(rootDir, "package.json"),
     JSON.stringify({
-      name: "bb-plugin-issue-launcher",
+      name: "omnyo-plugin-issue-launcher",
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Issue launcher fixture",
         description: "Configures agents from launch metadata.",
         branding: { icon: "Zap" },
@@ -70,14 +73,14 @@ async function installIssueLauncher(
     join(rootDir, "server.ts"),
     `
       import { appendFileSync } from "node:fs";
-      export default function plugin(bb: any) {
-        bb.agents.registerTool({
+      export default function plugin(api: any) {
+        api.agents.registerTool({
           name: "issue_lookup",
           description: "Look up the launch issue.",
           parameters: { type: "object" },
           execute: () => "unused",
         });
-        bb.agents.configure((context: any) => {
+        api.agents.configure((context: any) => {
           const metadata = context.pluginMetadata;
           appendFileSync(
             ${JSON.stringify(observationsPath)},
@@ -100,6 +103,7 @@ async function installIssueLauncher(
   );
   const entry = await harness.pluginService.installPath(rootDir);
   expect(entry.status).toBe("running");
+
   return async () =>
     (await readFile(observationsPath, "utf8"))
       .split("\n")
@@ -122,9 +126,11 @@ async function withIssueLauncher(
 ): Promise<void> {
   const server = await startTestServer();
   installDefaultEnvironmentProviders();
+
   const pluginsDir = await mkdtemp(
-    join(tmpdir(), "bb-thread-plugin-metadata-"),
+    join(tmpdir(), "omnyo-thread-plugin-metadata-"),
   );
+
   try {
     const readObservations = await installIssueLauncher(server, pluginsDir);
     await run({ server, readObservations });
@@ -141,15 +147,19 @@ describe("thread plugin metadata in agent configuration", () => {
       const { host } = seedHostSession(server.deps, {
         id: "host-plugin-metadata-configure",
       });
+
       const { project } = seedProjectWithSource(server.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(server.deps, {
         hostId: host.id,
         projectId: project.id,
         path: join(server.config.dataDir, "plugin-metadata-workspace"),
       });
-      const seed = launchSeed("BB-42");
+
+      const seed = launchSeed("OMNYO-42");
+
       const thread = createThread(server.db, server.hub, {
         projectId: project.id,
         environmentId: environment.id,
@@ -157,6 +167,7 @@ describe("thread plugin metadata in agent configuration", () => {
         originPluginId: "issue-launcher",
         pluginMetadata: { pluginId: "issue-launcher", metadata: seed },
       });
+
       const execution = await buildExecutionOptions(
         server.deps,
         { model: "gpt-5" },
@@ -182,13 +193,14 @@ describe("thread plugin metadata in agent configuration", () => {
       expect(startCommand.dynamicTools.map((tool) => tool.name)).toContain(
         "issue_lookup",
       );
-      expectPrivateCommand(startCommand, "BB-42");
+      expectPrivateCommand(startCommand, "OMNYO-42");
 
       seedThreadRuntimeState(server.deps, {
         environmentId: environment.id,
         providerThreadId: "provider-plugin-metadata-configure",
         threadId: thread.id,
       });
+
       const submitCommand = await prepareTurnSubmitCommandPayload(server.deps, {
         environment,
         execution,
@@ -197,33 +209,40 @@ describe("thread plugin metadata in agent configuration", () => {
         target: { mode: "start" },
         thread,
       });
+
       expect(
         submitCommand.resumeContext.dynamicTools.map((tool) => tool.name),
       ).toContain("issue_lookup");
-      expectPrivateCommand(submitCommand, "BB-42");
+      expectPrivateCommand(submitCommand, "OMNYO-42");
     });
   });
 
   it("seeds threads spawned and forked through the plugin SDK before their first queued thread.start", async () => {
     await withIssueLauncher(async ({ server, readObservations }) => {
       const workspacePath = "/tmp/plugin-metadata-spawn-project";
+
       const { host } = seedHostSession(server.deps, {
         id: "host-plugin-metadata-spawn",
       });
+
       const { project } = seedProjectWithSource(server.deps, {
         hostId: host.id,
         path: workspacePath,
       });
+
       const environment = seedEnvironment(server.deps, {
         hostId: host.id,
         projectId: project.id,
         path: workspacePath,
       });
+
       server.pluginService.bindSdk({ baseUrl: server.baseUrl });
       const api = server.pluginService.getApi("issue-launcher");
+
       if (!api) throw new Error("issue-launcher is not running");
 
-      const spawnSeed = launchSeed("BB-42");
+      const spawnSeed = launchSeed("OMNYO-42");
+
       const spawned = await api.sdk.threads.spawn({
         environment: {
           type: "host",
@@ -235,6 +254,7 @@ describe("thread plugin metadata in agent configuration", () => {
         prompt: "Investigate the issue",
         providerId: "codex",
       });
+
       const spawnStart = await waitForQueuedCommand(
         server,
         ({ command }) =>
@@ -245,6 +265,7 @@ describe("thread plugin metadata in agent configuration", () => {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       seedThreadIdentity(server.deps, {
         threadId: source.id,
         environmentId: environment.id,
@@ -255,12 +276,14 @@ describe("thread plugin metadata in agent configuration", () => {
         turnId: "turn-plugin-metadata-fork-source",
         providerThreadId: "provider-plugin-metadata-fork-source",
       });
-      const forkSeed = launchSeed("BB-43");
+      const forkSeed = launchSeed("OMNYO-43");
+
       const fork = await api.sdk.threads.fork({
         input: textInput("Continue the issue"),
         pluginMetadata: forkSeed,
         sourceThreadId: source.id,
       });
+
       const forkStart = await waitForQueuedCommand(
         server,
         ({ command }) =>
@@ -280,13 +303,15 @@ describe("thread plugin metadata in agent configuration", () => {
         pluginMetadata: forkSeed,
         frozen: true,
       });
+
       for (const [queued, issueKey] of [
-        [spawnStart, "BB-42"],
-        [forkStart, "BB-43"],
+        [spawnStart, "OMNYO-42"],
+        [forkStart, "OMNYO-43"],
       ] as const) {
         if (queued.command.type !== "thread.start") {
           throw new Error("Expected a thread.start command");
         }
+
         expect(queued.command.dynamicTools.map((tool) => tool.name)).toContain(
           "issue_lookup",
         );
@@ -298,13 +323,16 @@ describe("thread plugin metadata in agent configuration", () => {
   it("rejects pluginMetadata without a plugin origin before creating a thread", async () => {
     await withTestHarness(async (harness) => {
       const workspacePath = "/tmp/plugin-metadata-orphan-project";
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-plugin-metadata-orphan",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: workspacePath,
       });
+
       seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -320,7 +348,7 @@ describe("thread plugin metadata in agent configuration", () => {
           },
           input: textInput("Orphaned launch"),
           origin: "sdk",
-          pluginMetadata: launchSeed("BB-44"),
+          pluginMetadata: launchSeed("OMNYO-44"),
           projectId: project.id,
           providerId: "codex",
           startedOnBehalfOf: null,

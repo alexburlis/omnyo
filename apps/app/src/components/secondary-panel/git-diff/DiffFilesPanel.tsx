@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAtom } from "jotai";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { DiffFileEntry, DiffPatchEntry } from "@bb/server-contract";
+import type { DiffFileEntry, DiffPatchEntry } from "@omnyo/server-contract";
 import type { DiffPresentation } from "@/components/code/code-rendering";
-import type { WorkspaceDiffTarget } from "@bb/domain";
+import type { WorkspaceDiffTarget } from "@omnyo/domain";
 import type { RequestDiffFileContents } from "@/components/git-diff/GitDiffCardBody";
 import {
   type DiffPatchState,
@@ -11,18 +11,20 @@ import {
   type RetryDiffPatchPath,
   useEnvironmentDiffPatches,
 } from "@/hooks/queries/use-environment-diff-patches";
-import { EmptyStatePanel } from "@bb/shared-ui/empty-state";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { EmptyStateBlock } from "@omnyo/shared-ui/empty-state";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { DiffFileCard } from "./DiffFileCard";
 import {
   diffFileCardStateAtomFamily,
   estimateCardHeight,
   resolveCardCollapsed,
   resolveDiffFileCardInitialState,
+  useDiffFileCardCollapsedStates,
 } from "./diffFilesStore";
 import { filterDiffFilesByPath } from "./gitDiffPanelHelpers";
 
 const DIFF_FILES_OVERSCAN = 4;
+
 const DIFF_FILES_GAP_PX = 8;
 
 interface DiffFilesPanelProps {
@@ -65,6 +67,7 @@ export function DiffFilesPanel({
   onSelectionAddToChat,
 }: DiffFilesPanelProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
   const {
     requestPaths,
     getPatchState,
@@ -89,25 +92,44 @@ export function DiffFilesPanel({
     [files, fileFilter],
   );
 
+  const collapsedByPath = useDiffFileCardCollapsedStates(
+    diffIdentity,
+    visibleFiles,
+    files.length,
+  );
+
+  const isCardCollapsed = (entry: DiffFileEntry) =>
+    collapsedByPath.get(entry.path) ?? false;
+
   const virtualizer = useVirtualizer({
     count: visibleFiles.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => {
       const entry = visibleFiles[index];
+
       if (!entry) {
         return 0;
       }
-      const collapsed = resolveDiffFileCardInitialState({
-        entry,
-        fileCount: files.length,
-      }).collapsed;
-      return estimateCardHeight({ entry, collapsed }) + DIFF_FILES_GAP_PX;
+
+      return (
+        estimateCardHeight({ entry, collapsed: isCardCollapsed(entry) }) +
+        DIFF_FILES_GAP_PX
+      );
     },
-    getItemKey: (index) => visibleFiles[index]?.path ?? index,
+    getItemKey: (index) => {
+      const entry = visibleFiles[index];
+
+      if (!entry) {
+        return index;
+      }
+
+      return `${isCardCollapsed(entry) ? "collapsed" : "expanded"}:${entry.path}`;
+    },
     overscan: DIFF_FILES_OVERSCAN,
   });
 
   const virtualItems = virtualizer.getVirtualItems();
+
   const { startIndex, endIndex } = virtualizer.range ?? {
     startIndex: 0,
     endIndex: -1,
@@ -116,17 +138,21 @@ export function DiffFilesPanel({
   const { visiblePaths, overscanPaths } = useMemo(() => {
     const visible: string[] = [];
     const overscan: string[] = [];
+
     for (const item of virtualItems) {
       const entry = visibleFiles[item.index];
+
       if (!entry || entry.loadMode !== "auto") {
         continue;
       }
+
       if (item.index >= startIndex && item.index <= endIndex) {
         visible.push(entry.path);
       } else {
         overscan.push(entry.path);
       }
     }
+
     return { visiblePaths: visible, overscanPaths: overscan };
   }, [virtualItems, visibleFiles, startIndex, endIndex]);
 
@@ -136,6 +162,7 @@ export function DiffFilesPanel({
     if (!isPanelOpen) {
       return;
     }
+
     requestPaths({ visible: visiblePaths, overscan: overscanPaths });
     // oxlint-disable-next-line react/exhaustive-deps
   }, [isPanelOpen, requestPaths, visibleKey, overscanKey, filesUpdatedAt]);
@@ -144,10 +171,13 @@ export function DiffFilesPanel({
     if (!scrollToPath || isPlaceholderData) {
       return;
     }
+
     const index = visibleFiles.findIndex((file) => file.path === scrollToPath);
+
     if (index < 0) {
       return;
     }
+
     virtualizer.scrollToIndex(index, { align: "start" });
     onScrolledToPath?.();
   }, [
@@ -161,9 +191,12 @@ export function DiffFilesPanel({
   if (visibleFiles.length === 0) {
     return (
       <div className={cn(PANEL_SCROLL_SLOT_CLASS, "px-4 pb-3")}>
-        <EmptyStatePanel className="rounded-lg">
-          No changed files match “{fileFilter.trim()}”.
-        </EmptyStatePanel>
+        <EmptyStateBlock
+          icon="Search"
+          title={`No changed files match “${fileFilter.trim()}”`}
+          description={`${files.length.toLocaleString()} ${files.length === 1 ? "file has" : "files have"} changes. Clear or change the filter to see them.`}
+          className="py-14"
+        />
       </div>
     );
   }
@@ -176,9 +209,11 @@ export function DiffFilesPanel({
       >
         {virtualItems.map((item) => {
           const entry = visibleFiles[item.index];
+
           if (!entry) {
             return null;
           }
+
           return (
             <div
               key={entry.path}
@@ -248,6 +283,7 @@ function DiffFileRow({
     () => diffFileCardStateAtomFamily({ diffIdentity, path: entry.path }),
     [diffIdentity, entry.path],
   );
+
   const [cardState, setCardState] = useAtom(stateAtom);
   const collapsed = resolveCardCollapsed(cardState, entry, fileCount);
 
@@ -255,6 +291,7 @@ function DiffFileRow({
     setCardState((previous) => {
       const current =
         previous ?? resolveDiffFileCardInitialState({ entry, fileCount });
+
       return { ...current, collapsed: !current.collapsed };
     });
   }, [entry, fileCount, setCardState]);

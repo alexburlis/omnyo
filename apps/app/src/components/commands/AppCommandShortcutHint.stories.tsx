@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import type { AppShortcutPresentation } from "@/lib/app-keybindings";
 import {
   SIDEBAR_ROW_BASE_CLASS,
   SIDEBAR_ROW_INTERACTIVE_STATE_CLASS,
   SIDEBAR_STANDARD_ROW_PADDING_CLASS,
-} from "@bb/shared-ui/sidebar-row-classes";
+} from "@omnyo/shared-ui/sidebar-row-classes";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 import { AppCommandShortcutPill } from "./AppCommandShortcutHint";
 

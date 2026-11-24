@@ -4,32 +4,38 @@ import {
   LOCAL_WORKFLOW_TASK_TYPE,
   threadScope,
   turnScope,
-} from "@bb/domain";
-import type { Thread } from "@bb/domain";
+} from "@omnyo/domain";
+import type { Thread } from "@omnyo/domain";
 import {
   createConnection,
   createProject,
   createThread,
   insertEvents,
+  getLatestThreadSequence,
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
-import type { DbConnection } from "@bb/db";
+} from "@omnyo/db";
+import type { DbConnection } from "@omnyo/db";
 import type {
   TimelinePaginationCursor,
   TimelineRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   buildThreadConversationOutline,
   buildThreadTimelineWithProfile,
 } from "../../../src/services/threads/timeline.js";
 
 const LARGE_BUDGET = 1_000_000;
+
 const providerThreadId = "provider-root";
+
 const WORKFLOW_CALL_ID = "call-workflow";
+
 const WORKFLOW_TASK_ID = "task:wf-1";
+
 const SNAPSHOT_BYTES = 300_000;
+
 const SNAPSHOT_COUNT = 45;
 
 const execution = {
@@ -45,17 +51,21 @@ type EventInput = Parameters<typeof insertEvents>[2][number];
 function setup(): { db: DbConnection; thread: Thread } {
   const db = createConnection(":memory:");
   migrate(db);
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "claude-code",
   });
+
   return { db, thread };
 }
 
@@ -104,10 +114,12 @@ function seedWorkflowThread(
 ): void {
   const events: EventInput[] = [];
   let sequence = 0;
+
   const push = (event: Omit<EventInput, "sequence" | "threadId">): void => {
     sequence += 1;
     events.push({ ...event, sequence, threadId: thread.id });
   };
+
   const clientRequestId = encodeClientTurnRequestIdNumber({ value: 1 });
   push({
     type: "client/turn/requested",
@@ -226,6 +238,7 @@ function seedWorkflowThread(
     parentToolCallId: null,
     data: JSON.stringify({}),
   });
+
   for (let index = 0; index < (options.pendingTurnItems ?? 0); index += 1) {
     const itemId = `turn-2-item-${index}`;
     const command = "x".repeat(25_000);
@@ -268,6 +281,7 @@ function seedWorkflowThread(
       }),
     });
   }
+
   for (let index = 0; index < options.snapshotCount; index += 1) {
     push({
       type: "item/backgroundTask/progress",
@@ -279,6 +293,7 @@ function seedWorkflowThread(
       data: workflowTaskData({ status: "pending", padding: SNAPSHOT_BYTES }),
     });
   }
+
   insertEvents(db, noopNotifier, events);
 }
 
@@ -293,9 +308,10 @@ function buildPage(
     eventBudget,
     includeClearedContextHistory: false,
     includeDiagnosticOperations: false,
+    compactionOfferEnabled: false,
     includeNestedRows: false,
     maxInlineOutputChars: 32_000,
-    maxSeq: 0,
+    maxSeq: undefined,
     page: cursor
       ? { kind: "older", beforeCursor: cursor, segmentLimit: 20 }
       : { kind: "latest", segmentLimit: 20 },
@@ -313,18 +329,22 @@ function walkAllPages(db: DbConnection, thread: Thread): WalkResult {
   let cursor: TimelinePaginationCursor | null = null;
   let maxEventDataBytes = 0;
   let pages = 0;
+
   for (;;) {
     const { profile, response } = buildPage(db, thread, cursor);
     pages += 1;
     maxEventDataBytes = Math.max(maxEventDataBytes, profile.eventDataBytes);
     rowsByPage.push(response.rows);
+
     if (!response.timelinePage.hasOlderRows) {
       break;
     }
+
     cursor = response.timelinePage.olderCursor;
     expect(cursor).not.toBeNull();
     expect(pages).toBeLessThan(50);
   }
+
   return { maxEventDataBytes, pages, rows: rowsByPage.reverse().flat() };
 }
 
@@ -335,9 +355,11 @@ describe("workflow progress snapshots across timeline pages", () => {
 
     const walk = walkAllPages(db, thread);
     expect(walk.pages).toBeGreaterThan(1);
+
     const turnOneRows = walk.rows.filter(
       (row) => row.kind === "turn" && row.turnId === "turn-1",
     );
+
     expect(turnOneRows.map((row) => row.id)).toHaveLength(1);
     expect(turnOneRows[0]?.sourceSeqStart).toBeLessThan(10);
     expect(
@@ -368,8 +390,9 @@ describe("workflow progress snapshots across timeline pages", () => {
     const outline = buildThreadConversationOutline(db, thread, {
       completedTurnDisplay: "collapse",
       includeClearedContextHistory: false,
-      maxSeq: 0,
+      maxSeq: getLatestThreadSequence(db, { threadId: thread.id }),
     });
+
     expect(outline.items.map((item) => item.role)).toEqual([
       "user",
       "assistant",

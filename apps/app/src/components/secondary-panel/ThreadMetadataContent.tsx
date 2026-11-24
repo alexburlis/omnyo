@@ -9,12 +9,15 @@ import {
 } from "react";
 import { UncommittedChangesSection } from "./info/ChangesSection";
 import { CommitsSection } from "./info/CommitsSection";
-import { ForksSection, ChildThreadsSection } from "./info/RelatedThreadsSection";
+import {
+  ForksSection,
+  ChildThreadsSection,
+} from "./info/RelatedThreadsSection";
 import {
   ThreadStorageSection,
   type ThreadStorageSectionProps,
 } from "./info/ThreadStorageSection";
-import { Link } from "react-router-dom";
+import { RouteAnchor } from "@/components/ui/app-route-anchor";
 import type {
   Environment,
   GitBranchRefClassification,
@@ -22,13 +25,13 @@ import type {
   ThreadListEntry,
   ThreadPullRequest,
   WorkspaceStatus,
-} from "@bb/domain";
-import type { WorkspaceResolutionFailure } from "@bb/host-daemon-contract";
+} from "@omnyo/domain";
+import type { WorkspaceResolutionFailure } from "@omnyo/host-daemon-contract";
 import {
   formatEnvironmentDisplay,
   type EnvironmentDisplayHostContext,
-} from "@bb/core-ui";
-import { cn, formatHomePathForDisplay } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/core-ui";
+import { cn, formatHomePathForDisplay } from "@omnyo/shared-ui/lib/utils";
 import {
   findEnvironmentDisplayProvider,
   getEnvironmentWorkspaceInfoDisplay,
@@ -39,8 +42,12 @@ import { useHosts } from "@/hooks/queries/host-queries";
 import { useProjectDisplayName } from "@/hooks/queries/sidebar-navigation-query";
 import { MachineIcon } from "@/components/machines/MachineLabel";
 import { formatWorkspaceCheckoutDisplay } from "@/lib/workspace-checkout-display";
-import { Button } from "@bb/shared-ui/button";
-import { COARSE_POINTER_TEXT_SM_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
+import { Button } from "@omnyo/shared-ui/button";
+import {
+  CONTROL_PRESS_FEEDBACK,
+  CONTROL_PRESS_TRANSITION,
+} from "@omnyo/shared-ui/motion";
+import { COARSE_POINTER_TEXT_SM_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
 import { CopyableInlineLabel } from "@/components/ui/copy-button.js";
 import { useFittedPathMiddle } from "@/components/ui/truncate-path-middle";
 import {
@@ -50,8 +57,12 @@ import {
   DETAIL_ROW_ICON_CLASS,
 } from "@/components/ui/detail-card.js";
 import { useCreateThreadInEnvironment } from "@/hooks/useCreateThreadInEnvironment";
-import { Icon } from "@bb/shared-ui/icon";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
+import { Icon } from "@omnyo/shared-ui/icon";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@omnyo/shared-ui/tooltip";
 import {
   BranchPicker,
   getMergeBaseBranchCandidateGroups,
@@ -61,7 +72,10 @@ import {
   selectWorkspaceChangedFilesSections,
   type WorkspaceChangedFileSelection,
 } from "@/components/workspace/workspace-change-summary";
-import { getGitStatusDisplay } from "@/components/workspace/workspace-status";
+import {
+  getGitStatusDisplay,
+  SquashMergeInfo,
+} from "@/components/workspace/workspace-status";
 import { useUnarchiveThread } from "../../hooks/mutations/thread-state-mutations";
 import { buildParentSelectorOptions } from "@/views/thread-detail/threadParentSelectorOptions";
 import { getThreadRoutePath } from "@/lib/route-paths";
@@ -112,6 +126,7 @@ export function ParentSelectorRow({
   defaultOpen,
 }: ParentSelectorRowProps) {
   const parentThreadId = thread.parentThreadId ?? undefined;
+
   const parentSelectorOptions = useMemo(
     () =>
       buildParentSelectorOptions({
@@ -122,7 +137,9 @@ export function ParentSelectorRow({
       }),
     [parentThreads, parentThreadDisplayName, parentThreadId, thread.id],
   );
+
   const parentSelectorValue = parentThreadId ?? "none";
+
   const selectedParentOptionLabel = parentSelectorOptions.find(
     (option) => option.value === parentSelectorValue,
   )?.label;
@@ -143,13 +160,13 @@ export function ParentSelectorRow({
             COARSE_POINTER_TEXT_SM_CLASS,
           )}
         >
-          <Link
-            to={getThreadRoutePath({
+          <RouteAnchor
+            href={getThreadRoutePath({
               projectId: parentThreadProjectId ?? projectId,
               threadId: parentThreadId,
             })}
             className={cn(
-              "block min-w-0 text-foreground no-underline transition-[text-decoration-color] duration-150 hover:underline hover:underline-offset-2",
+              "block min-w-0 text-foreground underline decoration-transparent underline-offset-2 transition-[text-decoration-color] hover:decoration-current",
               COARSE_POINTER_TEXT_SM_CLASS,
             )}
           >
@@ -157,7 +174,7 @@ export function ParentSelectorRow({
               title={selectedParentOptionLabel ?? "Parent thread"}
               tooltip
             />
-          </Link>
+          </RouteAnchor>
           <Button
             type="button"
             variant="ghost"
@@ -208,42 +225,53 @@ export function EnvironmentRow({
     sectionId: thread.sectionId,
     pinned: thread.pinnedAt !== null,
   });
+
   const { providers } = useSystemEnvironmentProviders();
   const { providers: machineProviders } = useSystemMachineProviders();
   const hosts = useHosts();
+
   if (!environment) return null;
+
   const environmentHost = hosts.data?.find(
     (host) => host.id === environment.hostId,
   );
+
   const machineProvider = machineProviders?.find(
     (provider) => provider.id === environmentHost?.machineProviderId,
   );
+
   const providerLookup = findEnvironmentDisplayProvider(
     providers,
     environment.environmentProviderId,
   );
+
   const display = formatEnvironmentDisplay({
     environment,
     host: environmentDisplayHost,
     providerLookup,
   });
+
   const infoDisplay = getEnvironmentWorkspaceInfoDisplay({
     display,
     providerLookup,
     hostName: environmentDisplayHost.identity?.name ?? null,
     locality: environmentDisplayHost.locality,
   });
+
   const displayHost = environmentHost ?? {
     name:
       environmentDisplayHost.identity?.name ?? infoDisplay.machineName ?? "",
     type: "persistent" as const,
     machineProviderId: null,
   };
+
   const showCreateThreadButton =
     environment.hostLifecycle === "active" &&
     isReusableEnvironment(environment);
+
   const machineIdentity =
     infoDisplay.machineName !== null ? environmentDisplayHost.identity : null;
+
   return (
     <>
       <DetailRow
@@ -276,7 +304,11 @@ export function EnvironmentRow({
                   type="button"
                   aria-label="New thread in environment"
                   onClick={createThreadInEnvironment}
-                  className="inline-flex shrink-0 items-center justify-center rounded-md p-0.5 text-subtle-foreground transition-colors hover:bg-state-hover hover:text-foreground"
+                  className={cn(
+                    "inline-flex shrink-0 items-center justify-center rounded-md p-0.5 text-subtle-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    CONTROL_PRESS_TRANSITION,
+                    CONTROL_PRESS_FEEDBACK,
+                  )}
                 >
                   <Icon
                     name="MessageSquarePlus"
@@ -327,6 +359,7 @@ export function EnvironmentRow({
 
 export function ProjectRow({ projectId }: { projectId: string }) {
   const projectName = useProjectDisplayName(projectId);
+
   if (!projectName) return null;
 
   return (
@@ -347,6 +380,7 @@ export function EnvironmentProvisioningFailureRow({
   failed: boolean;
 }) {
   if (!failed) return null;
+
   return (
     <DetailRow
       label={
@@ -377,13 +411,16 @@ function isReusableEnvironment(environment: Environment): boolean {
 function measureCopyIconWidth(container: HTMLElement): number {
   const label = container.querySelector("button");
   const icon = label?.querySelector("svg");
+
   if (!label || !icon) return 0;
   const gap = Number.parseFloat(getComputedStyle(label).columnGap);
+
   return icon.getBoundingClientRect().width + (Number.isNaN(gap) ? 0 : gap);
 }
 
 export function WorkspacePathRow({ environment }: WorkspacePathRowProps) {
   if (!environment?.path) return null;
+
   return <WorkspacePathValue path={environment.path} />;
 }
 
@@ -423,7 +460,9 @@ export function BranchRow({ workspaceStatus }: BranchRowProps) {
   const checkoutDisplay = workspaceStatus
     ? formatWorkspaceCheckoutDisplay({ checkout: workspaceStatus.checkout })
     : null;
+
   if (checkoutDisplay === null) return null;
+
   return (
     <DetailRow
       label={
@@ -460,9 +499,11 @@ interface PullRequestRowProps {
 
 export function PullRequestRow({ pullRequest }: PullRequestRowProps) {
   const handlePullRequestClick = useUrlAnchorClickHandler(pullRequest?.url);
+
   if (!pullRequest) return null;
   const stateDisplay = getPullRequestStateDisplay(pullRequest);
   const nextStep = getPullRequestNextStep(pullRequest);
+
   return (
     <DetailRow
       label={
@@ -572,8 +613,11 @@ export function formatBranchComparison({
   if (aheadCount > 0 && behindCount > 0) {
     return `${aheadCount} ahead, ${behindCount} behind ${baseBranch}`;
   }
+
   if (aheadCount > 0) return `${aheadCount} ahead of ${baseBranch}`;
+
   if (behindCount > 0) return `${behindCount} behind ${baseBranch}`;
+
   return `Even with ${baseBranch}`;
 }
 
@@ -593,6 +637,7 @@ export function MergeBaseRow({
     selectedMergeBaseBranch,
     workspaceStatus,
   );
+
   const mergeBaseCandidateGroups = useMemo(
     () =>
       getMergeBaseBranchCandidateGroups({
@@ -608,17 +653,23 @@ export function MergeBaseRow({
       mergeBaseRemoteBranchOptions,
     ],
   );
+
   const mergeBaseCandidates = mergeBaseCandidateGroups.options;
   const remoteMergeBaseCandidates = mergeBaseCandidateGroups.remoteOptions;
+
   const isOnDefaultBranch =
     workspaceStatus?.branch.currentBranch != null &&
     workspaceStatus.branch.currentBranch ===
       workspaceStatus.branch.defaultBranch;
+
   const showMergeBase = Boolean(mergeBaseBranch) && !isOnDefaultBranch;
+
   if (!showMergeBase) return null;
+
   const canRequestMergeBaseOptions =
     mergeBaseBranchOptions === undefined &&
     onMergeBasePickerOpenChange !== undefined;
+
   const canSelectMergeBase = Boolean(
     mergeBaseBranch &&
     (canRequestMergeBaseOptions ||
@@ -683,9 +734,18 @@ export function GitStatusRow({
   ) {
     return null;
   }
+
   if (workspaceStatus) {
     const mergeBase = workspaceStatus.mergeBase;
+
     if (!mergeBase?.mergeBaseBranch) return null;
+
+    const refreshFailure = workspaceStatusError
+      ? `Couldn't refresh: ${getGitStatusDisplay(undefined, {
+          error: workspaceStatusError,
+        }).summary.replace(/\.$/, "")}. Showing the last known status.`
+      : null;
+
     return (
       <DetailRow
         label={
@@ -693,12 +753,33 @@ export function GitStatusRow({
         }
         valueClassName="min-w-0"
       >
-        <span className="block min-w-0 truncate text-foreground">
-          {formatBranchComparison({
-            aheadCount: mergeBase.aheadCount,
-            behindCount: mergeBase.behindCount,
-            baseBranch: mergeBase.mergeBaseBranch,
-          })}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="block min-w-0 truncate text-foreground">
+            {formatBranchComparison({
+              aheadCount: mergeBase.aheadCount,
+              behindCount: mergeBase.behindCount,
+              baseBranch: mergeBase.mergeBaseBranch,
+            })}
+          </span>
+          {!mergeBase.squashMergeCheckComplete ? <SquashMergeInfo /> : null}
+          {refreshFailure ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  role="img"
+                  aria-label={refreshFailure}
+                  className="flex shrink-0 items-center"
+                >
+                  <Icon
+                    name="AlertTriangle"
+                    className="size-3 text-warning"
+                    aria-hidden
+                  />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{refreshFailure}</TooltipContent>
+            </Tooltip>
+          ) : null}
         </span>
       </DetailRow>
     );
@@ -709,6 +790,7 @@ export function GitStatusRow({
     workspaceUnavailable,
     workspaceDeleted: environment?.status === "destroyed",
   });
+
   return (
     <DetailRow
       label={
@@ -740,12 +822,16 @@ interface ArchivedRowProps {
 
 export function ArchivedRow({ thread }: ArchivedRowProps) {
   const unarchiveThread = useUnarchiveThread();
+
   const isPending =
     unarchiveThread.isPending && unarchiveThread.variables?.id === thread.id;
+
   const onUnarchive = useCallback(() => {
     unarchiveThread.mutate({ id: thread.id });
   }, [thread.id, unarchiveThread]);
+
   if (thread.archivedAt == null) return null;
+
   return (
     <DetailRow
       label={<DetailRowIconLabel icon="Archive">Archived</DetailRowIconLabel>}
@@ -813,6 +899,7 @@ export function hasAnyThreadMetadata(
   hasForks: boolean,
 ): boolean {
   const parentThreadId = thread.parentThreadId ?? undefined;
+
   const showWorkspaceStatus = shouldShowWorkspaceStatus({
     thread,
     environment,
@@ -820,9 +907,12 @@ export function hasAnyThreadMetadata(
     workspaceStatusError,
     workspaceUnavailable,
   });
+
   const branchName = workspaceStatus?.branch.currentBranch ?? null;
+
   const workspaceChangedFilesSections =
     selectWorkspaceChangedFilesSections(workspaceStatus);
+
   const showThreadChangedFiles = workspaceChangedFilesSections.length > 0;
 
   return Boolean(
@@ -858,12 +948,15 @@ export function ThreadMetadataCard({ children }: DetailCardWrapperProps) {
 
   const handleScroll = useCallback((event: UIEvent<HTMLDListElement>) => {
     const scrollArea = event.currentTarget;
+
     if (scrollArea.dataset.scrollbarScrolling !== "true") {
       scrollArea.dataset.scrollbarScrolling = "true";
     }
+
     if (scrollbarIdleTimeoutRef.current !== null) {
       window.clearTimeout(scrollbarIdleTimeoutRef.current);
     }
+
     scrollbarIdleTimeoutRef.current = window.setTimeout(() => {
       scrollbarIdleTimeoutRef.current = null;
       scrollArea.removeAttribute("data-scrollbar-scrolling");

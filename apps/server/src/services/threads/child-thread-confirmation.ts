@@ -1,5 +1,5 @@
-import { countNonDeletedAssignedChildThreads } from "@bb/db";
-import type { Thread } from "@bb/domain";
+import { countNonDeletedAssignedChildThreads } from "@omnyo/db";
+import type { Thread } from "@omnyo/domain";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 
@@ -16,6 +16,7 @@ function childThreadsConfirmationMessage(
   action: ChildThreadsDestructiveAction,
 ): string {
   const actionLabel = action === "archive" ? "Archiving" : "Deleting";
+
   return `${actionLabel} this thread requires confirmation because it has non-deleted child threads.`;
 }
 
@@ -32,6 +33,7 @@ export function requireChildThreadsConfirmation({
   const nonDeletedChildCount = countNonDeletedAssignedChildThreads(deps.db, {
     parentThreadId: thread.id,
   });
+
   if (nonDeletedChildCount === 0) {
     return;
   }

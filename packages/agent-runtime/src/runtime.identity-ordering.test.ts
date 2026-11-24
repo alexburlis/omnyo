@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   createScriptedEchoRuntime,
@@ -12,8 +12,12 @@ import { promptTextInput } from "./test/prompt-input.js";
 
 describe("runtime identity ordering", () => {
   it("preserves resolved fork sessions when native identity deltas arrive in reverse registration order", async () => {
-    const workspacePath = mkdtempSync(join(tmpdir(), "bb-identity-reverse-"));
+    const workspacePath = mkdtempSync(
+      join(tmpdir(), "omnyo-identity-reverse-"),
+    );
+
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: { workspacePath, onEvent: (event) => events.push(event) },
       launch: {
@@ -25,6 +29,7 @@ describe("runtime identity ordering", () => {
         },
       },
     });
+
     try {
       for (const threadId of ["first", "second"]) {
         await runtime.startThread({
@@ -36,6 +41,7 @@ describe("runtime identity ordering", () => {
           fork: { sourceProviderThreadId: "historical-session" },
         });
       }
+
       await runtime.runTurn({
         threadId: "second",
         clientRequestId: "creq_222222222e",
@@ -62,9 +68,11 @@ describe("runtime identity ordering", () => {
     "preserves source/fork ownership with identityAfterResponse=%s and duplicate or unknown notifications",
     async (identityAfterResponse) => {
       const workspacePath = mkdtempSync(
-        join(tmpdir(), "bb-identity-ordering-"),
+        join(tmpdir(), "omnyo-identity-ordering-"),
       );
+
       const events: ThreadEvent[] = [];
+
       const runtime = createScriptedEchoRuntime({
         runtime: { workspacePath, onEvent: (event) => events.push(event) },
         launch: {
@@ -78,22 +86,26 @@ describe("runtime identity ordering", () => {
           },
         },
       });
+
       const args = {
         environmentId: "env",
         projectId: "project",
         providerId: "fake",
         options: fullRuntimeOptions,
       };
+
       try {
         const source = await runtime.startThread({
           ...args,
           threadId: "source",
         });
+
         const fork = await runtime.startThread({
           ...args,
           threadId: "fork",
           fork: { sourceProviderThreadId: source.providerThreadId },
         });
+
         for (const threadId of ["source", "fork"]) {
           await runtime.runTurn({
             threadId,
@@ -104,6 +116,7 @@ describe("runtime identity ordering", () => {
           });
           await waitForThreadTurnCompleted({ events, runtime, threadId });
         }
+
         expect(runtime.getProviderSession("source")?.providerThreadId).toBe(
           source.providerThreadId,
         );
@@ -131,8 +144,9 @@ describe("runtime identity ordering", () => {
   );
 
   it("does not assign a retired thread's late identity to the only remaining thread", async () => {
-    const workspacePath = mkdtempSync(join(tmpdir(), "bb-identity-late-"));
+    const workspacePath = mkdtempSync(join(tmpdir(), "omnyo-identity-late-"));
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: { workspacePath, onEvent: (event) => events.push(event) },
       launch: {
@@ -143,18 +157,22 @@ describe("runtime identity ordering", () => {
         },
       },
     });
+
     const args = {
       environmentId: "env",
       projectId: "project",
       providerId: "fake",
       options: fullRuntimeOptions,
     };
+
     try {
       await runtime.startThread({ ...args, threadId: "retired" });
+
       const remaining = await runtime.startThread({
         ...args,
         threadId: "remaining",
       });
+
       await runtime.stopThread({ threadId: "retired" });
       const start = events.length;
       await runtime.runTurn({
@@ -181,12 +199,14 @@ describe("runtime identity ordering", () => {
   });
 
   it("stamps a completion before applying the following scoped replacement identity in the same batch", async () => {
-    const workspacePath = mkdtempSync(join(tmpdir(), "bb-identity-batch-"));
+    const workspacePath = mkdtempSync(join(tmpdir(), "omnyo-identity-batch-"));
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: { workspacePath, onEvent: (event) => events.push(event) },
       launch: { scripted: { completionIdentity: "replacement-session" } },
     });
+
     try {
       const original = await runtime.startThread({
         environmentId: "env",
@@ -195,6 +215,7 @@ describe("runtime identity ordering", () => {
         options: fullRuntimeOptions,
         threadId: "source",
       });
+
       await runtime.runTurn({
         threadId: "source",
         clientRequestId: "creq_222222222d",

@@ -9,19 +9,23 @@ import { DiffHost } from "./DiffHost";
 import { SourceCodeHost } from "./SourceCodeHost";
 
 const downloads = await vi.hoisted(async () => {
-  const { createDeferredPromise } = await import("@bb/test-helpers");
+  const { createDeferredPromise } = await import("@omnyo/test-helpers");
+
   return {
     diff: createDeferredPromise<void>(),
     source: createDeferredPromise<void>(),
   };
 });
 
-vi.mock("./BbDiff", async () => {
+vi.mock("./OmnyoDiff", async () => {
   await downloads.diff.promise;
+
   return { default: () => <p>Diff ready</p> };
 });
-vi.mock("./BbSourceCode", async () => {
+
+vi.mock("./OmnyoSourceCode", async () => {
   await downloads.source.promise;
+
   return { default: () => <p>Source ready</p> };
 });
 
@@ -37,14 +41,18 @@ it("shows the renderer skeleton until the renderer imports resolve", async () =>
     "+const a = 2;",
     "",
   ].join("\n");
+
   const file = parseGitDiffFiles(patch)[0];
+
   if (!file) throw new Error("fixture patch did not parse");
+
   const hosts = render(
     <>
       <DiffHost file={file} fullFileContents={null} />
       <SourceCodeHost content="const a = 2;" path="app.ts" />
     </>,
   );
+
   const sdk = render(
     <>
       <PluginDiff patch={patch} path="app.ts" />
@@ -57,6 +65,7 @@ it("shows the renderer skeleton until the renderer imports resolve", async () =>
       view.container.querySelectorAll(".animate-pulse").length,
     ).toBeGreaterThan(0);
   }
+
   expect(screen.queryByText("Diff ready")).toBeNull();
   expect(screen.queryByText("Source ready")).toBeNull();
 
@@ -67,6 +76,7 @@ it("shows the renderer skeleton until the renderer imports resolve", async () =>
 
   expect(await screen.findAllByText("Diff ready")).toHaveLength(2);
   expect(await screen.findAllByText("Source ready")).toHaveLength(2);
+
   for (const view of [hosts, sdk]) {
     expect(view.container.querySelectorAll(".animate-pulse")).toHaveLength(0);
   }

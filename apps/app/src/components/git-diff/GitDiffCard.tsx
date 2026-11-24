@@ -1,6 +1,6 @@
 import { memo, useMemo } from "react";
 import { useIntersectionObserver } from "usehooks-ts";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import type { DiffPresentation } from "@/components/code/code-rendering";
 import { GitDiffCardBody, useGitDiffCardBody } from "./GitDiffCardBody";
 import {
@@ -31,6 +31,7 @@ function buildGitDiffCardHeaderModel(
   fileDiff: ParsedGitDiffFile,
 ): GitDiffCardHeaderModel {
   const stats = summarizeGitDiffFile(fileDiff);
+
   return {
     label: formatGitDiffFileLabel(fileDiff),
     path: normalizeGitDiffPath(fileDiff.name) ?? fileDiff.name,
@@ -54,19 +55,23 @@ export const GitDiffCard = memo(function GitDiffCard({
     () => buildGitDiffCardHeaderModel(fileDiff),
     [fileDiff],
   );
+
   const previousPath = normalizeGitDiffPath(fileDiff.prevName) ?? null;
+
   const bodyState = useGitDiffCardBody({
     fileDiff,
     changeKind: headerModel.changeKind,
     onRequestFileContents: undefined,
     patchText,
-    renderBeforeVisible: true,
   });
+
   const hasChanges = fileDiff.hunks.length > 0;
+
   const { ref: stickySentinelRef, isIntersecting } = useIntersectionObserver({
     initialIsIntersecting: true,
     threshold: 1,
   });
+
   const isHeaderStuck = stickyHeader && !isIntersecting;
 
   return (
@@ -98,6 +103,7 @@ export const GitDiffCard = memo(function GitDiffCard({
           presentation={presentation}
           svgDisplayMode="preview"
           reservesCollapseGutter={false}
+          defersOffscreenRendering
         />
       ) : null}
     </div>

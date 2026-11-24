@@ -6,10 +6,10 @@ import {
 } from "./thread-creation-placement";
 import { atom, useAtom, useSetAtom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import { createTabScopedStorage } from "./browser-storage";
 
-const ROOT_COMPOSE_PROJECT_ID_STORAGE_KEY = "bb.root-compose.project-id";
+const ROOT_COMPOSE_PROJECT_ID_STORAGE_KEY = "omnyo.root-compose.project-id";
 
 function parseStoredProjectId(
   storedValue: string | null,
@@ -34,7 +34,7 @@ const rootComposeProjectIdAtom = atomWithStorage<string>(
 );
 
 const rootComposeReuseEnvironmentAtom = atomWithStorage<string | null>(
-  "bb.root-compose.reuse-environment",
+  "omnyo.root-compose.reuse-environment",
   null,
   createTabScopedStorage<string | null>({
     parse: (storedValue) =>
@@ -48,11 +48,12 @@ const rootComposeReuseEnvironmentAtom = atomWithStorage<string | null>(
 );
 
 const rootComposeStoredPlacementAtom = atomWithStorage<ThreadCreationPlacement>(
-  "bb.root-compose.placement",
+  "omnyo.root-compose.placement",
   DEFAULT_THREAD_CREATION_PLACEMENT,
   createTabScopedStorage<ThreadCreationPlacement>({
     parse: (storedValue, initialValue) => {
       if (storedValue === null) return initialValue;
+
       try {
         return (
           readThreadCreationPlacement({ placement: JSON.parse(storedValue) }) ??
@@ -71,6 +72,7 @@ const rootComposePlacementAtom = atom(
   (get) => get(rootComposeStoredPlacementAtom),
   (get, set, next: ThreadCreationPlacement) => {
     const current = get(rootComposeStoredPlacementAtom);
+
     if (current.sectionId === next.sectionId && current.pinned === next.pinned)
       return;
     set(rootComposeStoredPlacementAtom, next);

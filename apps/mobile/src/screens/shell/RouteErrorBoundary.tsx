@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { revealApp } from "@/app-shell";
+import { MOBILE_PRESS_OPACITY } from "@/ui/motion";
 
 const PALETTE = {
   light: {
@@ -34,6 +35,7 @@ export function RouteErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   const insets = useSafeAreaInsets();
   const colors = PALETTE[useColorScheme() === "dark" ? "dark" : "light"];
   useEffect(revealApp, []);
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
@@ -66,7 +68,7 @@ export function RouteErrorBoundary({ error, retry }: ErrorBoundaryProps) {
           onPress={() => void retry()}
           style={({ pressed }) => ({
             backgroundColor: colors.tint,
-            opacity: pressed ? 0.6 : 1,
+            opacity: pressed ? MOBILE_PRESS_OPACITY : 1,
             paddingHorizontal: 20,
             paddingVertical: 11,
             borderRadius: Platform.select({ ios: 22, default: 8 }),

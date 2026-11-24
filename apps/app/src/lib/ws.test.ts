@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clientMessageSchema, type ClientMessage } from "@bb/domain";
-import type { RealtimeSubscriptionTarget } from "@bb/server-contract";
+import { clientMessageSchema, type ClientMessage } from "@omnyo/domain";
+import type { RealtimeSubscriptionTarget } from "@omnyo/server-contract";
 
 const fakeSocketState = vi.hoisted(() => {
   type CloseHandler = () => void;
+
   type MessageHandler = (event: MessageEvent) => void;
+
   type OpenHandler = () => void;
+
   interface ReconnectOptions {
     minReconnectionDelay?: number;
     reconnectionDelayGrowFactor?: number;
@@ -56,7 +59,7 @@ vi.mock("partysocket/ws", () => ({
 }));
 
 vi.mock("./dev-websocket-url", () => ({
-  buildBrowserWebSocketUrl: () => "ws://bb.test/ws",
+  buildBrowserWebSocketUrl: () => "ws://omnyo.test/ws",
 }));
 
 import {
@@ -73,6 +76,7 @@ const THREAD_TARGET = {
   kind: "thread-detail",
   threadId: "thr_1",
 } satisfies RealtimeSubscriptionTarget;
+
 const PROJECT_TARGET = {
   kind: "project-list",
 } satisfies RealtimeSubscriptionTarget;
@@ -108,9 +112,11 @@ function readClientMessages(socket: FakeSocket): readonly ClientMessage[] {
 
 function getOnlySocket(): FakeSocket {
   const socket = fakeSocketState.instances[0];
+
   if (!socket) {
     throw new Error("Expected websocket to be created");
   }
+
   return socket;
 }
 
@@ -119,6 +125,7 @@ function createConnectedManager(): ConnectedManager {
   manager.connect();
   const socket = getOnlySocket();
   socket.open();
+
   return { manager, socket };
 }
 
@@ -213,9 +220,11 @@ describe("WebSocketManager thread-open signals", () => {
 
   function dispatchRaw(payload: unknown): void {
     const instance = fakeSocketState.instances[0];
+
     if (!instance) {
       throw new Error("Expected websocket instance");
     }
+
     instance.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent);
   }
 
@@ -237,6 +246,7 @@ describe("WebSocketManager thread-open signals", () => {
         lineNumber: 7,
       },
     };
+
     dispatchRaw(signal);
 
     expect(threadOpen).toHaveBeenCalledWith(signal);
@@ -276,6 +286,7 @@ describe("WebSocketManager thread-open signals", () => {
       threadId: "thr_1",
       action: "spotlight",
     } as const;
+
     dispatchRaw(signal);
 
     expect(paneAction).toHaveBeenCalledWith(signal);
@@ -292,22 +303,26 @@ function createFakeBrowserEvents(initiallyVisible = true): FakeBrowserEvents {
   let visible = initiallyVisible;
   const visibilityListeners = new Set<() => void>();
   const onlineListeners = new Set<() => void>();
+
   return {
     isDocumentVisible: () => visible,
     subscribeToVisibility: (listener) => {
       visibilityListeners.add(listener);
+
       return () => {
         visibilityListeners.delete(listener);
       };
     },
     subscribeToOnline: (listener) => {
       onlineListeners.add(listener);
+
       return () => {
         onlineListeners.delete(listener);
       };
     },
     setVisible: (nextVisible) => {
       visible = nextVisible;
+
       for (const listener of visibilityListeners) {
         listener();
       }
@@ -325,9 +340,11 @@ function getSocketAt(index: number): FakeSocket & {
   readyState: number;
 } {
   const socket = fakeSocketState.instances[index];
+
   if (!socket) {
     throw new Error(`Expected websocket instance #${index}`);
   }
+
   return socket;
 }
 
@@ -367,6 +384,7 @@ describe("WebSocketManager liveness", () => {
     manager.connect();
     const socket = getSocketAt(0);
     socket.open();
+
     return { browserEvents, connectedEvents, manager, socket };
   }
 
@@ -530,6 +548,7 @@ describe("WebSocketManager liveness", () => {
     const { browserEvents, manager } = createLiveManager(
       createFakeBrowserEvents(false),
     );
+
     const onResumed = vi.fn();
     manager.onResumed(onResumed);
 
@@ -617,5 +636,103 @@ describe("WebSocketManager liveness", () => {
       { type: "subscribe", target: THREAD_TARGET },
     ]);
     expect(manager.getConnectionState()).toBe("connected");
+  });
+});
+
+describe("WebSocketManager connection status", () => {
+  const originalWebSocket = globalThis.WebSocket;
+
+  beforeEach(() => {
+    fakeSocketState.instances.length = 0;
+    installOpenWebSocketConstructor();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: originalWebSocket,
+    });
+  });
+
+  it("reports the server, when trouble started and failed attempts until a socket opens", () => {
+    const manager = new WebSocketManager(createFakeBrowserEvents());
+    const onChange = vi.fn();
+    manager.onConnectionStateChange(onChange);
+
+    expect(manager.getConnectionStatus()).toEqual({
+      state: "connecting",
+      host: null,
+      since: null,
+      failedAttempts: 0,
+    });
+
+    manager.connect();
+    const startedAt = Date.now();
+    vi.advanceTimersByTime(2_000);
+    const socket = getSocketAt(0);
+    socket.close();
+    socket.close();
+
+    expect(manager.getConnectionStatus()).toEqual({
+      state: "connecting",
+      host: "omnyo.test",
+      since: startedAt,
+      failedAttempts: 2,
+    });
+
+    socket.open();
+
+    expect(manager.getConnectionStatus()).toEqual({
+      state: "connected",
+      host: "omnyo.test",
+      since: null,
+      failedAttempts: 0,
+    });
+
+    vi.advanceTimersByTime(5_000);
+    socket.close();
+    const lostAt = Date.now();
+    vi.advanceTimersByTime(1_000);
+    socket.close();
+
+    expect(manager.getConnectionStatus()).toEqual({
+      state: "reconnecting",
+      host: "omnyo.test",
+      since: lostAt,
+      failedAttempts: 1,
+    });
+    expect(manager.getConnectionStatus()).toBe(manager.getConnectionStatus());
+    expect(onChange).toHaveBeenCalledTimes(6);
+  });
+
+  it("dates a silent socket's outage from the unanswered probe while refetching from its last frame", () => {
+    const browserEvents = createFakeBrowserEvents();
+    const manager = new WebSocketManager(browserEvents);
+    const connectedEvents: WebSocketConnectedEvent[] = [];
+    manager.onConnected((event) => connectedEvents.push(event));
+    manager.connect();
+    getSocketAt(0).open();
+    const openedAt = Date.now();
+
+    browserEvents.setVisible(false);
+    vi.advanceTimersByTime(3 * 60 * 60 * 1_000);
+    browserEvents.setVisible(true);
+    vi.advanceTimersByTime(REALTIME_RESUME_PONG_TIMEOUT_MS);
+
+    expect(manager.getConnectionStatus()).toEqual({
+      state: "reconnecting",
+      host: "omnyo.test",
+      since: Date.now(),
+      failedAttempts: 0,
+    });
+
+    getSocketAt(1).open();
+
+    expect(connectedEvents.at(-1)).toEqual({
+      reconnected: true,
+      disconnectedAt: openedAt,
+    });
   });
 });

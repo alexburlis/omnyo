@@ -1,15 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { ResolvedWorkflowExecutionSelection } from "./cache.js";
+import type {
+  ResolvedWorkflowExecutionSelection,
+  WorkflowPlacement,
+} from "./cache.js";
 import type { JsonValue, WorkflowAgentOptions } from "./types.js";
 
 export type Db = Database.Database;
+
 type WorkflowRunStatus =
   | "queued"
   | "running"
   | "succeeded"
   | "failed"
   | "cancelled";
+
 type WorkflowCallStatus = WorkflowRunStatus;
 
 export interface WorkflowRunRow {
@@ -49,6 +54,10 @@ export interface WorkflowCallRow {
   cacheKey: string;
   prompt: string;
   optionsJson: string;
+  requestedEnvironmentId: string | null;
+  resolvedEnvironmentId: string;
+  resolvedHostId: string | null;
+  resolvedWorkspacePath: string | null;
   resolvedProvider: string;
   resolvedModel: string;
   resolvedReasoningLevel: string;
@@ -88,6 +97,7 @@ interface RawRunRow extends Omit<WorkflowRunRow, "notificationSent"> {
 
 function runRow(value: unknown): WorkflowRunRow {
   const row = value as RawRunRow;
+
   return { ...row, notificationSent: row.notificationSent === 1 };
 }
 
@@ -123,6 +133,10 @@ const RUN_SELECT = `
 const CALL_SELECT = `
   SELECT id, run_id AS runId, call_index AS callIndex, cache_key AS cacheKey,
     prompt, options_json AS optionsJson,
+    requested_environment_id AS requestedEnvironmentId,
+    resolved_environment_id AS resolvedEnvironmentId,
+    resolved_host_id AS resolvedHostId,
+    resolved_workspace_path AS resolvedWorkspacePath,
     resolved_provider AS resolvedProvider, resolved_model AS resolvedModel,
     resolved_reasoning_level AS resolvedReasoningLevel,
     resolved_permission_mode AS resolvedPermissionMode, status,
@@ -232,6 +246,13 @@ export const migrations = [
   `CREATE INDEX workflow_runs_expiry_idx
      ON workflow_runs(finished_at + json_extract(settings_json, '$.retentionDays') * 86400000)
      WHERE status IN ('succeeded', 'failed', 'cancelled') AND notification_sent = 1;`,
+  `ALTER TABLE workflow_calls ADD COLUMN requested_environment_id TEXT;
+   ALTER TABLE workflow_calls ADD COLUMN resolved_environment_id TEXT;
+   ALTER TABLE workflow_calls ADD COLUMN resolved_host_id TEXT;
+   ALTER TABLE workflow_calls ADD COLUMN resolved_workspace_path TEXT;
+   UPDATE workflow_calls SET resolved_environment_id = (
+     SELECT environment_id FROM workflow_runs WHERE workflow_runs.id = workflow_calls.run_id
+   );`,
 ];
 
 export function createRun(
@@ -270,6 +291,7 @@ export function createRun(
        @argsJson, @settingsJson, 'queued', @resumedFromRunId, 1, @now
      )`,
   ).run({ id, now, ...input });
+
   return getRunRequired(db, id);
 }
 
@@ -279,7 +301,9 @@ export function getRun(db: Db, id: string): WorkflowRunRow | null {
 
 export function getRunRequired(db: Db, id: string): WorkflowRunRow {
   const row = getRun(db, id);
+
   if (row === null) throw new Error(`Unknown workflow run ${id}`);
+
   return row;
 }
 
@@ -309,6 +333,19 @@ export function listActiveRunsForOriginThread(
     .map(runRow);
 }
 
+export function listActiveWorkflowThreadCounts(db: Db): {
+  threadId: string;
+  count: number;
+}[] {
+  return db
+    .prepare<[], { threadId: string; count: number }>(
+      `SELECT origin_thread_id AS threadId, COUNT(*) AS count
+       FROM workflow_runs WHERE status IN ('queued', 'running')
+       GROUP BY origin_thread_id ORDER BY origin_thread_id`,
+    )
+    .all();
+}
+
 export function listRuns(
   db: Db,
   args: { projectId: string; limit: number },
@@ -331,7 +368,9 @@ export function claimQueuedRun(
         `SELECT COUNT(*) AS count FROM workflow_runs WHERE status = 'running'`,
       )
       .get() as { count: number };
+
     if (active.count >= maxActiveRuns) return null;
+
     const row = optionalRun(
       db
         .prepare(
@@ -339,13 +378,16 @@ export function claimQueuedRun(
         )
         .get(),
     );
+
     if (row === null) return null;
+
     const changed = db
       .prepare(
         `UPDATE workflow_runs SET status = 'running', started_at = COALESCE(started_at, ?)
          WHERE id = ? AND status = 'queued'`,
       )
       .run(Date.now(), row.id).changes;
+
     return changed === 1 ? getRunRequired(db, row.id) : null;
   })();
 }
@@ -366,7 +408,9 @@ export function settleRun(
       )
       .all(args.id)
       .map(callRow);
+
     const now = Date.now();
+
     const changed = db
       .prepare(
         `UPDATE workflow_runs SET status = @status, result_json = @resultJson,
@@ -381,12 +425,14 @@ export function settleRun(
         error: args.error,
         now,
       }).changes;
+
     if (changed === 0) return [];
     db.prepare(
       `UPDATE workflow_calls SET status = 'cancelled',
        error = 'Parent workflow finished before this call', finished_at = ?
        WHERE run_id = ? AND status IN ('queued', 'running')`,
     ).run(now, args.id);
+
     return outstanding;
   })();
 }
@@ -455,6 +501,7 @@ export function recoverInterruptedRuns(db: Db): string[] {
            AND calls.child_thread_id IS NOT NULL`,
       )
       .all() as Array<{ childThreadId: string }>;
+
     const now = Date.now();
     db.prepare(
       `UPDATE workflow_calls SET status = 'succeeded', error = NULL, finished_at = ?
@@ -472,6 +519,7 @@ export function recoverInterruptedRuns(db: Db): string[] {
       `UPDATE workflow_runs SET status = 'queued', error = NULL, finished_at = NULL
        WHERE status = 'running'`,
     ).run();
+
     return childRows.map((row) => row.childThreadId);
   })();
 }
@@ -529,6 +577,7 @@ export function countCallsForRun(db: Db, runId: string): WorkflowCallCounts {
        FROM workflow_calls WHERE run_id = ?`,
     )
     .get(runId) as WorkflowCallCounts;
+
   return row;
 }
 
@@ -566,31 +615,40 @@ export function startCall(
     prompt: string;
     options: WorkflowAgentOptions;
     selection: ResolvedWorkflowExecutionSelection;
+    placement: WorkflowPlacement;
     replay: { callId: string; result: Exclude<JsonValue, null> } | null;
   },
 ): WorkflowCallRow {
   return db.transaction(() => {
     const parent = getRun(db, args.runId);
+
     if (parent?.status !== "running") {
       throw new Error(`Workflow run ${args.runId} is not running`);
     }
+
     const existing = getCall(db, args.runId, args.callIndex);
     const now = Date.now();
     const id = existing?.id ?? `wfc_${randomUUID()}`;
     db.prepare(
       `INSERT INTO workflow_calls (
        id, run_id, call_index, cache_key, prompt, options_json,
+       requested_environment_id, resolved_environment_id, resolved_host_id, resolved_workspace_path,
        resolved_provider, resolved_model, resolved_reasoning_level,
        resolved_permission_mode, status, result_json, replayed_from_call_id,
        replay_source, created_at, started_at, finished_at
      ) VALUES (
        @id, @runId, @callIndex, @cacheKey, @prompt, @optionsJson,
+       @requestedEnvironmentId, @resolvedEnvironmentId, @resolvedHostId, @resolvedWorkspacePath,
        @resolvedProvider, @resolvedModel, @resolvedReasoningLevel,
        @resolvedPermissionMode, @status, @resultJson, @replayedFromCallId,
        @replaySource, @now, @now, @finishedAt
      ) ON CONFLICT(run_id, call_index) DO UPDATE SET
        cache_key = excluded.cache_key, prompt = excluded.prompt,
        options_json = excluded.options_json,
+       requested_environment_id = excluded.requested_environment_id,
+       resolved_environment_id = excluded.resolved_environment_id,
+       resolved_host_id = excluded.resolved_host_id,
+       resolved_workspace_path = excluded.resolved_workspace_path,
        resolved_provider = excluded.resolved_provider,
        resolved_model = excluded.resolved_model,
        resolved_reasoning_level = excluded.resolved_reasoning_level,
@@ -608,6 +666,10 @@ export function startCall(
       cacheKey: args.cacheKey,
       prompt: args.prompt,
       optionsJson: JSON.stringify(args.options),
+      requestedEnvironmentId: args.options.environmentId,
+      resolvedEnvironmentId: args.placement.environmentId,
+      resolvedHostId: args.placement.hostId,
+      resolvedWorkspacePath: args.placement.workspacePath,
       resolvedProvider: args.selection.providerId,
       resolvedModel: args.selection.model,
       resolvedReasoningLevel: args.selection.reasoningLevel,
@@ -620,6 +682,7 @@ export function startCall(
       now,
       finishedAt: args.replay === null ? null : now,
     });
+
     return getCall(db, args.runId, args.callIndex)!;
   })();
 }
@@ -642,6 +705,7 @@ export function attachCallThread(
     threadId,
     callId,
   );
+
   return (
     db
       .prepare(
@@ -671,6 +735,7 @@ export function queueCallProviderRetry(
        WHERE id = ? AND status IN ('queued', 'failed') AND result_json IS NULL`,
     )
     .run(error, Date.now(), callId).changes;
+
   return changed === 0
     ? null
     : optionalCall(db.prepare(`${CALL_SELECT} WHERE id = ?`).get(callId));
@@ -682,6 +747,7 @@ export function storeStructuredResult(
   result: JsonValue,
 ): StoreStructuredResultOutcome {
   const resultJson = JSON.stringify(result);
+
   return db.transaction(() => {
     const changed = db
       .prepare(
@@ -689,12 +755,15 @@ export function storeStructuredResult(
          WHERE id = ? AND status = 'running' AND result_json IS NULL`,
       )
       .run(resultJson, Date.now(), callId).changes;
+
     if (changed === 1) return "accepted";
 
     const row = optionalCall(
       db.prepare(`${CALL_SELECT} WHERE id = ?`).get(callId),
     );
+
     if (row?.resultJson === null || row === null) return "inactive";
+
     try {
       return equalJsonValues(JSON.parse(row.resultJson), result)
         ? "idempotent"
@@ -713,11 +782,15 @@ export function incrementRepairAttempts(db: Db, callId: string): number | null {
        WHERE id = ? AND status = 'running' AND result_json IS NULL`,
     )
     .run(Date.now(), callId).changes;
+
   if (changed === 0) return null;
+
   const row = optionalCall(
     db.prepare(`${CALL_SELECT} WHERE id = ?`).get(callId),
   );
+
   if (row === null) throw new Error(`Unknown workflow call ${callId}`);
+
   return row.repairAttempts;
 }
 
@@ -746,9 +819,11 @@ export function settleCall(
 
 function equalJsonValues(left: JsonValue, right: JsonValue): boolean {
   if (left === right) return true;
+
   if (left === null || right === null || typeof left !== typeof right) {
     return false;
   }
+
   if (Array.isArray(left) || Array.isArray(right)) {
     return (
       Array.isArray(left) &&
@@ -757,9 +832,11 @@ function equalJsonValues(left: JsonValue, right: JsonValue): boolean {
       left.every((value, index) => equalJsonValues(value, right[index]!))
     );
   }
+
   if (typeof left !== "object" || typeof right !== "object") return false;
   const leftKeys = Object.keys(left).sort();
   const rightKeys = Object.keys(right).sort();
+
   return (
     leftKeys.length === rightKeys.length &&
     leftKeys.every(
@@ -772,16 +849,19 @@ function equalJsonValues(left: JsonValue, right: JsonValue): boolean {
 export function cancelRun(db: Db, id: string): boolean {
   return db.transaction(() => {
     const now = Date.now();
+
     const changed = db
       .prepare(
         `UPDATE workflow_runs SET status = 'cancelled', error = 'Cancelled', finished_at = ?
          WHERE id = ? AND status IN ('queued', 'running')`,
       )
       .run(now, id).changes;
+
     db.prepare(
       `UPDATE workflow_calls SET status = 'cancelled', error = 'Cancelled', finished_at = ?
        WHERE run_id = ? AND status IN ('queued', 'running')`,
     ).run(now, id);
+
     return changed === 1;
   })();
 }
@@ -817,6 +897,7 @@ export function listPendingNotificationRuns(
 const EXPIRED_TERMINAL_RUN_IDS_SQL = `WITH RECURSIVE retained(id, resumed_from_run_id) AS (
          SELECT id, resumed_from_run_id FROM workflow_runs
          WHERE status IN ('queued', 'running')
+           OR notification_sent = 0
            OR finished_at + json_extract(settings_json, '$.retentionDays') * 86400000 > ?
          UNION
          SELECT parent.id, parent.resumed_from_run_id
@@ -861,25 +942,31 @@ export function listExpiredTerminalRuns(
     WHERE status IN ('succeeded', 'failed', 'cancelled') AND notification_sent = 1
     AND finished_at + json_extract(settings_json, '$.retentionDays') * 86400000 <= ? LIMIT 1`)
     .get(now);
+
   if (!due) return { runIds: [] };
+
   const runIds = (
     db.prepare(EXPIRED_TERMINAL_RUN_IDS_SQL).all(now, now, limit) as Array<{
       id: string;
     }>
   ).map((row) => row.id);
+
   return { runIds };
 }
 
 export function deleteTerminalRuns(db: Db, runIds: readonly string[]): number {
   if (runIds.length === 0) return 0;
   const placeholders = runIds.map(() => "?").join(", ");
+
   return db.transaction(() => {
     const deleted = db
       .prepare(`DELETE FROM workflow_runs WHERE id IN (${placeholders})`)
       .run(...runIds).changes;
+
     db.prepare(
       `DELETE FROM workflow_workers WHERE archived_at IS NOT NULL AND run_id IN (${placeholders})`,
     ).run(...runIds);
+
     return deleted;
   })();
 }

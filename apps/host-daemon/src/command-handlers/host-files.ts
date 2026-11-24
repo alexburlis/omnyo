@@ -1,23 +1,20 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type {
-  DirectoryEntry,
-  HostDaemonOnlineRpcResult,
-  HostPathEntryKind,
-} from "@bb/host-daemon-contract";
 import {
-  CommandDispatchError,
-  type CommandDispatchOptions,
-  type CommandOf,
+  parseHostDaemonOnlineRpcResultForCommand,
+  type DirectoryEntry,
+  type HostDaemonOnlineRpcResult,
+  type HostPathEntryKind,
+} from "@omnyo/host-daemon-contract";
+import type {
+  CommandDispatchOptions,
+  CommandOf,
 } from "../command-dispatch-support.js";
+import { CommandDispatchError } from "../command-errors.js";
 import { isFsErrorWithCode } from "../fs-errors.js";
 import { userExecutableProcessOptions } from "../user-executable-env.js";
-import {
-  finalizeListedFiles,
-  finalizeListedPaths,
-  listWorkspacePaths,
-} from "./file-list.js";
+import { searchInFileSearchWorker } from "./file-search-client.js";
 import {
   readFileForTransport,
   readFileChunkForTransport,
@@ -26,6 +23,10 @@ import {
   type ReadFileContentForTransportResult,
 } from "./file-read.js";
 import { resolveNonSymlinkDirectoryPath } from "./root-path.js";
+
+type HostFileReadOptions = Partial<
+  Pick<CommandDispatchOptions, "runtimeManager">
+> & { shellPath?: string };
 
 const SAFE_GIT_REF_REGEX = /^[A-Za-z0-9_./~^@-]+$/;
 
@@ -51,6 +52,7 @@ function assertAbsoluteHostDiskPathCommand(command: HostDiskPathCommand): void {
   }
 
   const rootPath = command.rootPath;
+
   if (rootPath !== undefined && !path.isAbsolute(rootPath)) {
     throw new CommandDispatchError("invalid_path", "rootPath must be absolute");
   }
@@ -66,27 +68,30 @@ export async function listHostFiles(
   try {
     const realRootPath = await resolveNonSymlinkDirectoryPath({
       description: "Path",
-      path: command.path,
+      path: command.followRootSymlink
+        ? await fs.realpath(command.path)
+        : command.path,
     });
 
-    return finalizeListedFiles({
-      filePaths: (
-        await listWorkspacePaths({
-          root: realRootPath,
-          includeHidden: command.includeHidden,
-          excludeNames: command.excludeNames,
-          respectGitIgnore: command.respectGitIgnore,
-          includeFiles: true,
-          includeDirectories: false,
-        })
-      ).map((entry) => entry.path),
+    const result = await searchInFileSearchWorker({
+      kind: "files",
+      discovery: command.discovery,
+      root: realRootPath,
+      includeFiles: true,
+      includeDirectories: false,
+      includeHidden: command.includeHidden,
+      excludeNames: command.excludeNames,
+      respectGitIgnore: command.respectGitIgnore,
       limit: command.limit,
       ...(command.query ? { query: command.query } : {}),
     });
+
+    return parseHostDaemonOnlineRpcResultForCommand(command, result);
   } catch (error) {
     if (isFsErrorWithCode(error, "ENOENT")) {
       return { files: [], truncated: false };
     }
+
     throw error;
   }
 }
@@ -104,24 +109,24 @@ export async function listHostPaths(
       path: command.path,
     });
 
-    return finalizeListedPaths({
-      paths: await listWorkspacePaths({
-        root: realRootPath,
-        includeFiles: command.includeFiles,
-        includeDirectories: command.includeDirectories,
-        includeHidden: command.includeHidden,
-        excludeNames: command.excludeNames,
-        respectGitIgnore: command.respectGitIgnore,
-      }),
-      limit: command.limit,
+    const result = await searchInFileSearchWorker({
+      kind: "paths",
+      root: realRootPath,
       includeFiles: command.includeFiles,
       includeDirectories: command.includeDirectories,
+      includeHidden: command.includeHidden,
+      excludeNames: command.excludeNames,
+      respectGitIgnore: command.respectGitIgnore,
+      limit: command.limit,
       ...(command.query ? { query: command.query } : {}),
     });
+
+    return parseHostDaemonOnlineRpcResultForCommand(command, result);
   } catch (error) {
     if (isFsErrorWithCode(error, "ENOENT")) {
       return { paths: [], truncated: false };
     }
+
     throw error;
   }
 }
@@ -132,6 +137,7 @@ function compareDirectoryEntries(a: DirectoryEntry, b: DirectoryEntry): number {
   if (a.kind !== b.kind) {
     return a.kind === "directory" ? -1 : 1;
   }
+
   return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
 }
 
@@ -139,27 +145,33 @@ export async function browseHostDirectory(
   command: CommandOf<"host.browse_directory">,
 ): Promise<HostDaemonOnlineRpcResult<"host.browse_directory">> {
   const requestedPath = command.path ?? os.homedir();
+
   if (!path.isAbsolute(requestedPath)) {
     throw new CommandDispatchError("invalid_path", "Path must be absolute");
   }
 
   const stat = await fs.stat(requestedPath);
+
   if (!stat.isDirectory()) {
     throw new CommandDispatchError(
       "invalid_path",
       `Path "${requestedPath}" is not a directory`,
     );
   }
+
   const directory = await fs.realpath(requestedPath);
 
   const dirents = await fs.readdir(directory, { withFileTypes: true });
   const entries: DirectoryEntry[] = [];
+
   for (const dirent of dirents) {
     if (dirent.name.startsWith(".")) continue;
+
     if (DIRECTORY_BROWSE_SKIP_NAMES.has(dirent.name)) continue;
 
     const fullPath = path.join(directory, dirent.name);
     let kind: HostPathEntryKind;
+
     if (dirent.isSymbolicLink()) {
       try {
         kind = (await fs.stat(fullPath)).isDirectory() ? "directory" : "file";
@@ -180,6 +192,7 @@ export async function browseHostDirectory(
   entries.sort(compareDirectoryEntries);
 
   const parent = path.dirname(directory);
+
   return {
     directory,
     parent: parent === directory ? null : parent,
@@ -193,20 +206,21 @@ export async function checkHostPathsExist(
   const entries = await Promise.all(
     command.paths.map(async (path) => [path, await pathExists(path)] as const),
   );
+
   return { existence: Object.fromEntries(entries) };
 }
 
 export function readHostFile(
   command: CommandOf<"host.read_file"> & { ifNoneMatch?: undefined },
-  options?: Pick<CommandDispatchOptions, "runtimeManager">,
+  options?: HostFileReadOptions,
 ): Promise<ReadFileContentForTransportResult>;
 export function readHostFile(
   command: CommandOf<"host.read_file">,
-  options?: Pick<CommandDispatchOptions, "runtimeManager">,
+  options?: HostFileReadOptions,
 ): Promise<HostDaemonOnlineRpcResult<"host.read_file">>;
 export async function readHostFile(
   command: CommandOf<"host.read_file">,
-  options?: Pick<CommandDispatchOptions, "runtimeManager">,
+  options?: HostFileReadOptions,
 ): Promise<HostDaemonOnlineRpcResult<"host.read_file">> {
   assertAbsoluteHostDiskPathCommand(command);
 
@@ -217,7 +231,9 @@ export async function readHostFile(
         "rootPath is required when ref is set",
       );
     }
+
     assertSafeGitRef(command.ref);
+
     return readFileFromGitRef({
       ...(command.ifNoneMatch !== undefined
         ? { ifNoneMatch: command.ifNoneMatch }
@@ -227,8 +243,11 @@ export async function readHostFile(
       resultPath: command.path,
       ref: command.ref,
       ...userExecutableProcessOptions(
-        options?.runtimeManager.getShellEnv() ?? {},
+        options?.runtimeManager?.getShellEnv() ?? {},
       ),
+      ...(options?.shellPath === undefined
+        ? {}
+        : { shellPath: options.shellPath }),
     });
   }
 
@@ -246,6 +265,7 @@ export async function readHostFileChunk(
   command: CommandOf<"host.read_file_chunk">,
 ): Promise<HostDaemonOnlineRpcResult<"host.read_file_chunk">> {
   assertAbsoluteHostDiskPathCommand(command);
+
   return readFileChunkForTransport({
     resolvedPath: command.path,
     resultPath: command.path,
@@ -260,6 +280,7 @@ export async function readHostRelativeFile(
   command: CommandOf<"host.read_file_relative">,
 ): Promise<HostDaemonOnlineRpcResult<"host.read_file_relative">> {
   return readRootRelativeFileForTransport({
+    followRootSymlink: command.followRootSymlink,
     rootPath: command.rootPath,
     relativePath: command.path,
     dotfiles: command.dotfiles,
@@ -269,6 +290,7 @@ export async function readHostRelativeFile(
 async function pathExists(path: string): Promise<boolean> {
   try {
     await fs.stat(path);
+
     return true;
   } catch (error) {
     if (
@@ -277,6 +299,7 @@ async function pathExists(path: string): Promise<boolean> {
     ) {
       return false;
     }
+
     return true;
   }
 }

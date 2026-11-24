@@ -1,18 +1,12 @@
 import { useCallback, useContext, useMemo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
 import type {
   ThreadChatMessageAction,
   ThreadChatProps,
-} from "@get-bb/plugin-sdk";
-import {
-  formatEnvironmentDisplay,
-  type EnvironmentDisplayHostContext,
-} from "@bb/core-ui";
-import { EmptyStatePanel } from "@bb/shared-ui/empty-state";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/plugin-sdk";
+import { EmptyStatePanel } from "@omnyo/shared-ui/empty-state";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
-import { ThreadEnvironmentSummary } from "@/components/promptbox/ThreadEnvironmentSummary";
 import { EmbeddedThreadChat } from "@/components/thread/embedded-chat";
 import {
   ThreadTimelinePanelContent,
@@ -22,19 +16,9 @@ import { useThreadTimelineNavigation } from "@/components/thread/timeline/Thread
 import { PluginContext } from "@/components/plugin/plugin-context";
 import { ThreadProviderContext } from "@/components/thread/thread-provider-context";
 import { useEnvironment } from "@/hooks/queries/environment-queries";
-import { useProjectDisplayName } from "@/hooks/queries/sidebar-navigation-query";
 import { useSystemProviderInfo } from "@/hooks/queries/system-queries";
 import { useThread } from "@/hooks/queries/thread-queries";
-import { useHostDaemon } from "@/hooks/useHostDaemon";
-import { useHosts } from "@/hooks/queries/host-queries";
-import {
-  findEnvironmentDisplayProvider,
-  getEnvironmentSummaryChrome,
-} from "@/lib/environment-workspace-display";
-import { useSystemEnvironmentProviders } from "@/hooks/queries/environment-provider-queries";
-import { useSystemMachineProviders } from "@/hooks/queries/machine-provider-queries";
-import { formatWorkspaceCheckoutDisplay } from "@/lib/workspace-checkout-display";
-import { BbHttpError } from "@/lib/sdk";
+import { OmnyoHttpError } from "@/lib/sdk";
 import { ThreadChatLoadingBody } from "@/components/thread/timeline/ThreadChatLoading";
 import {
   getProjectComposeRoutePath,
@@ -50,11 +34,14 @@ export function PluginThreadChat({
   className,
   leadingContent,
   messageActions,
+  experimental_conversation,
+  experimental_placeholder,
 }: ThreadChatProps) {
   const containerClassName = cn(
     layout === "contained" ? "flex h-full min-h-0 flex-col" : "flex flex-col",
     className,
   );
+
   return (
     <div className={containerClassName}>
       <PluginThreadChatBody
@@ -65,6 +52,8 @@ export function PluginThreadChat({
         permissionPolicy={permissionPolicy}
         leadingContent={leadingContent}
         messageActions={messageActions}
+        conversation={experimental_conversation}
+        placeholder={experimental_placeholder}
       />
     </div>
   );
@@ -78,6 +67,8 @@ interface PluginThreadChatBodyProps {
   permissionPolicy: "inherit" | "editable";
   leadingContent: ReactNode;
   messageActions: readonly ThreadChatMessageAction[] | undefined;
+  conversation: ThreadChatProps["experimental_conversation"];
+  placeholder: string | undefined;
 }
 
 function PluginThreadChatBody({
@@ -88,12 +79,12 @@ function PluginThreadChatBody({
   permissionPolicy,
   leadingContent,
   messageActions,
+  conversation,
+  placeholder,
 }: PluginThreadChatBodyProps) {
   const threadQuery = useThread(threadId, { enabled: threadId.length > 0 });
   const thread = threadQuery.data;
-  const projectName = useProjectDisplayName(
-    thread?.projectId === PERSONAL_PROJECT_ID ? undefined : thread?.projectId,
-  );
+
   const threadProviderInfo = useSystemProviderInfo(
     thread?.environmentId
       ? {
@@ -106,7 +97,9 @@ function PluginThreadChatBody({
           providerId: thread?.providerId,
         },
   );
+
   const threadProviderPluginId = threadProviderInfo?.pluginId ?? null;
+
   const threadProviderContextValue = useMemo(
     () => ({
       providerId: thread?.providerId ?? null,
@@ -114,34 +107,34 @@ function PluginThreadChatBody({
     }),
     [thread?.providerId, threadProviderPluginId],
   );
+
   const navigate = useNavigate();
-  const { isLocalDaemonHost } = useHostDaemon();
   const environmentQuery = useEnvironment(thread?.environmentId ?? null);
   const environment = environmentQuery.data ?? null;
-  const hostsQuery = useHosts({ enabled: environment !== null });
-  const environmentHost = environment
-    ? (hostsQuery.data?.find((host) => host.id === environment.hostId) ?? null)
-    : null;
-  const hasMultipleMachines = (hostsQuery.data?.length ?? 0) > 1;
-  const { providers: environmentProviders } = useSystemEnvironmentProviders();
-  const { providers: machineProviders } = useSystemMachineProviders();
   const timelineNavigation = useThreadTimelineNavigation();
+
   const canUseHostFileNavigation =
     thread !== undefined &&
     thread.environmentId === timelineNavigation?.environmentId;
+
   const onOpenLink = timelineNavigation?.onOpenLink;
+
   const onOpenLocalFileLink = canUseHostFileNavigation
     ? timelineNavigation.onOpenLocalFileLink
     : undefined;
+
   const resolveHostMentionLink = canUseHostFileNavigation
     ? timelineNavigation.resolveMentionLink
     : undefined;
+
   const workspaceRootPath =
     environment?.path ??
     (canUseHostFileNavigation
       ? timelineNavigation.workspaceRootPath
       : undefined);
+
   const pluginId = useContext(PluginContext);
+
   const consumerMessageActions = useMemo<
     readonly ThreadTimelineConsumerMessageAction[] | undefined
   >(
@@ -163,7 +156,9 @@ function PluginThreadChatBody({
     (resource) => {
       if (resource.kind === "thread") {
         const targetProjectId = resource.projectId ?? thread?.projectId;
+
         if (targetProjectId === undefined) return null;
+
         return () =>
           navigate(
             getThreadRoutePath({
@@ -172,9 +167,11 @@ function PluginThreadChatBody({
             }),
           );
       }
+
       if (resource.kind === "project") {
         return () => navigate(getProjectComposeRoutePath(resource.projectId));
       }
+
       if (
         resource.kind === "path" &&
         resource.entryKind === "file" &&
@@ -182,70 +179,16 @@ function PluginThreadChatBody({
       ) {
         return resolveHostMentionLink?.(resource) ?? null;
       }
+
       return null;
     },
     [navigate, resolveHostMentionLink, thread?.projectId],
   );
 
-  const environmentSummary = useMemo(() => {
-    if (environment === null) {
-      return null;
-    }
-    const host: EnvironmentDisplayHostContext = {
-      locality: isLocalDaemonHost(environment.hostId) ? "local" : "remote",
-      identity: null,
-    };
-    const providerLookup = findEnvironmentDisplayProvider(
-      environmentProviders,
-      environment.environmentProviderId,
-    );
-    const display = formatEnvironmentDisplay({
-      environment,
-      host,
-      providerLookup,
-    });
-    const chrome = getEnvironmentSummaryChrome({
-      display,
-      providerLookup,
-      hasMultipleMachines,
-      host: environmentHost,
-      machineProviders,
-    });
-    return (
-      <ThreadEnvironmentSummary
-        projectName={projectName}
-        environmentLabel={chrome.environmentLabel}
-        environmentCompactLabel={chrome.environmentCompactLabel}
-        environmentHost={chrome.environmentHost}
-        environmentIcon={chrome.environmentIcon}
-        environmentMachineProvider={chrome.environmentMachineProvider}
-        environmentProviderName={chrome.environmentProviderName}
-        environmentCheckout={
-          environment.branchName
-            ? formatWorkspaceCheckoutDisplay({
-                checkout: {
-                  kind: "branch",
-                  branchName: environment.branchName,
-                  headSha: null,
-                },
-              })
-            : undefined
-        }
-      />
-    );
-  }, [
-    environment,
-    environmentHost,
-    environmentProviders,
-    hasMultipleMachines,
-    isLocalDaemonHost,
-    machineProviders,
-    projectName,
-  ]);
-
   const isThreadMissing =
-    threadQuery.error instanceof BbHttpError &&
+    threadQuery.error instanceof OmnyoHttpError &&
     threadQuery.error.status === 404;
+
   if (isThreadMissing) {
     return (
       <EmptyStatePanel className="m-2 rounded-lg">
@@ -253,9 +196,13 @@ function PluginThreadChatBody({
       </EmptyStatePanel>
     );
   }
+
   if (thread === undefined) {
     return (
-      <ThreadChatLoadingBody leadingContent={leadingContent} variant={variant} />
+      <ThreadChatLoadingBody
+        leadingContent={leadingContent}
+        variant={variant}
+      />
     );
   }
 
@@ -269,11 +216,20 @@ function PluginThreadChatBody({
         onOpenLocalFileLink={onOpenLocalFileLink}
         projectId={thread.projectId}
         resolveMentionLink={resolveMentionLink}
+        conversation={
+          conversation && pluginId
+            ? {
+                pluginId,
+                itemId: `${conversation.mention.provider}:${conversation.mention.id}`,
+              }
+            : undefined
+        }
         surfaceKey={`plugin-thread-chat:${threadId}`}
         threadId={threadId}
         workspaceRootPath={workspaceRootPath}
       />
     );
+
     return (
       <ThreadProviderContext.Provider value={threadProviderContextValue}>
         {layout === "contained" ? (
@@ -305,11 +261,24 @@ function PluginThreadChatBody({
         onOpenLink={onOpenLink}
         onOpenLocalFileLink={onOpenLocalFileLink}
         workspaceRootPath={workspaceRootPath}
+        conversation={
+          conversation && pluginId
+            ? {
+                kind: "plugin",
+                pluginId,
+                itemId: `${conversation.mention.provider}:${conversation.mention.id}`,
+                label: conversation.mention.label,
+              }
+            : undefined
+        }
         composer={{
           draftScope: {
             kind: "thread",
             projectId: thread.projectId,
             threadId,
+            ...(conversation && pluginId
+              ? { conversationKey: `${pluginId}:${conversation.id}` }
+              : {}),
           },
           executionDefaultsThreadId: threadId,
           executionResetKey: threadId,
@@ -317,10 +286,10 @@ function PluginThreadChatBody({
           executionEnvironmentHostId: environment?.hostId,
           permissionPolicy:
             permissionPolicy === "editable" ? "editable" : "snapshot",
-          environmentSummary,
           pluginComposerBottomScope: { kind: "thread", threadId },
-          composerIdentity: `plugin-thread-chat:${threadId}`,
+          composerIdentity: `plugin-thread-chat:${threadId}:${pluginId ?? ""}:${conversation?.id ?? ""}`,
           focusRequestKey: focusRequest,
+          ...(placeholder !== undefined ? { placeholder } : {}),
         }}
       />
     </ThreadProviderContext.Provider>

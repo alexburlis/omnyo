@@ -1,6 +1,7 @@
 import type { MarkdownPreviewLinkHandler } from "@/components/ui/markdown-link";
-import type { TerminalCreateTarget } from "@bb/server-contract";
+import type { TerminalCreateTarget } from "@omnyo/server-contract";
 import { ThreadTerminalContent } from "./ThreadTerminalContent";
+import type { TerminalInputInterceptor } from "./ThreadTerminalView";
 import { useThreadTerminalController } from "./useThreadTerminalController";
 
 interface ThreadTerminalPanelProps {
@@ -10,6 +11,7 @@ interface ThreadTerminalPanelProps {
   onAutoFocusHandled?: () => void;
   onOpenLink?: MarkdownPreviewLinkHandler;
   onSelectionAddToChat?: (text: string) => void;
+  interceptInput?: TerminalInputInterceptor;
   terminalId: string;
   target: TerminalCreateTarget;
 }
@@ -21,6 +23,7 @@ export function ThreadTerminalPanel({
   onAutoFocusHandled,
   onOpenLink,
   onSelectionAddToChat,
+  interceptInput,
   terminalId,
   target,
 }: ThreadTerminalPanelProps) {
@@ -44,6 +47,7 @@ export function ThreadTerminalPanel({
           onAutoFocusHandled={onAutoFocusHandled}
           onOpenLink={onOpenLink}
           onSelectionAddToChat={onSelectionAddToChat}
+          interceptInput={interceptInput}
         />
       </div>
     </section>

@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   createFakePluginHost,
   type FakePluginHost,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import memoryPlugin from "./server";
 
 async function loadPlugin(): Promise<FakePluginHost> {
   const host = createFakePluginHost({ pluginId: "memory" });
-  await memoryPlugin(host.bb);
+  await memoryPlugin(host.api);
+
   return host;
 }
 
@@ -40,13 +41,18 @@ async function addMemory(
     input.kind ?? "fact",
     "--json",
   ];
+
   for (const tag of input.tags ?? []) argv.push("--tag", tag);
+
   if (input.pinned) argv.push("--pinned");
+
   const result = await host.harness.runCli(argv, {
     projectId: input.projectId,
     threadId: `thread-${input.projectId}`,
   });
+
   expect(result.exitCode, result.stderr).toBe(0);
+
   return JSON.parse(result.stdout ?? "").memory as {
     id: string;
     version: number;
@@ -56,7 +62,7 @@ async function addMemory(
   };
 }
 
-describe("bb-plugin-memory", () => {
+describe("omnyo-plugin-memory", () => {
   it("registers a CLI and instruction catalog without native agent tools", async () => {
     const host = await loadPlugin();
     expect(host.harness.registrations.cli?.name).toBe("memory");
@@ -66,6 +72,7 @@ describe("bb-plugin-memory", () => {
 
   it("injects global and current-project summaries but not other projects", async () => {
     const host = await loadPlugin();
+
     const global = await addMemory(host, {
       scope: "global",
       projectId: "project-a",
@@ -75,6 +82,7 @@ describe("bb-plugin-memory", () => {
       tags: ["communication"],
       pinned: true,
     });
+
     const projectA = await addMemory(host, {
       scope: "project",
       projectId: "project-a",
@@ -83,6 +91,7 @@ describe("bb-plugin-memory", () => {
       kind: "procedure",
       tags: ["build", "testing"],
     });
+
     await addMemory(host, {
       scope: "project",
       projectId: "project-b",
@@ -92,10 +101,12 @@ describe("bb-plugin-memory", () => {
 
     const provider = host.harness.registrations.instructionProvider;
     expect(provider).not.toBeNull();
+
     const instructions = provider?.({
       threadId: "thread-a",
       projectId: "project-a",
     });
+
     expect(instructions).toContain(global.id);
     expect(instructions).toContain("concise-updates");
     expect(instructions).toContain(projectA.id);
@@ -106,6 +117,7 @@ describe("bb-plugin-memory", () => {
 
   it("keeps a large injected catalog within budget and points to the CLI remainder", async () => {
     const host = await loadPlugin();
+
     for (let index = 0; index < 30; index += 1) {
       await addMemory(host, {
         scope: "global",
@@ -120,14 +132,16 @@ describe("bb-plugin-memory", () => {
       threadId: "thread-a",
       projectId: "project-a",
     });
+
     expect(instructions?.length).toBeLessThanOrEqual(3_900);
     expect(instructions).toContain("Showing");
-    expect(instructions).toContain("bb memory catalog --scope all --json");
+    expect(instructions).toContain("omnyo memory catalog --scope all --json");
     expect(instructions).not.toContain("Private details");
   }, 20_000);
 
   it("searches progressively and returns full details only from get", async () => {
     const host = await loadPlugin();
+
     const memory = await addMemory(host, {
       scope: "project",
       projectId: "project-a",
@@ -143,11 +157,14 @@ describe("bb-plugin-memory", () => {
       ["search", "migrated SQLite", "--scope", "all", "--json"],
       { projectId: "project-a" },
     );
+
     expect(search.exitCode, search.stderr).toBe(0);
+
     const searched = JSON.parse(search.stdout ?? "").memories as Array<{
       id: string;
       details?: string;
     }>;
+
     expect(searched.map((entry) => entry.id)).toContain(memory.id);
     expect(
       searched.find((entry) => entry.id === memory.id)?.details,
@@ -157,6 +174,7 @@ describe("bb-plugin-memory", () => {
       ["get", memory.id, "--scope", "all", "--json"],
       { projectId: "project-a" },
     );
+
     expect(get.exitCode, get.stderr).toBe(0);
     expect(JSON.parse(get.stdout ?? "").memory.details).toContain(
       "never mock the database",
@@ -166,12 +184,14 @@ describe("bb-plugin-memory", () => {
       ["get", memory.id, "--scope", "all", "--json"],
       { projectId: "project-b" },
     );
+
     expect(hidden.exitCode).toBe(1);
     expect(hidden.stderr).toContain("not found in the current scope");
   });
 
   it("requires explicit write scope and a project context for project memories", async () => {
     const host = await loadPlugin();
+
     const missingScope = await host.harness.runCli([
       "add",
       "--name",
@@ -183,6 +203,7 @@ describe("bb-plugin-memory", () => {
       "--reason",
       "reason",
     ]);
+
     expect(missingScope.exitCode).toBe(1);
     expect(missingScope.stderr).toContain("missing required options: --scope");
 
@@ -199,16 +220,21 @@ describe("bb-plugin-memory", () => {
       "--reason",
       "reason",
     ]);
+
     expect(missingProject.exitCode).toBe(1);
-    expect(missingProject.stderr).toContain("requires a BB project context");
+    expect(missingProject.stderr).toContain(
+      "requires an Omnyo project context",
+    );
   });
 
   it("reports every missing write flag at once instead of one per run", async () => {
     const host = await loadPlugin();
+
     const result = await host.harness.runCli(
       ["add", "--scope", "global", "--name", "incomplete"],
       { projectId: "project-a" },
     );
+
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
       "missing required options: --summary, --details, --reason",
@@ -217,6 +243,7 @@ describe("bb-plugin-memory", () => {
 
   it("accepts the flag names agents guess and rejects the ones it cannot map", async () => {
     const host = await loadPlugin();
+
     const guessed = await host.harness.runCli(
       [
         "add",
@@ -240,6 +267,7 @@ describe("bb-plugin-memory", () => {
       ],
       { projectId: "project-a" },
     );
+
     expect(guessed.exitCode, guessed.stderr).toBe(0);
     expect(JSON.parse(guessed.stdout ?? "").memory).toMatchObject({
       name: "guessed-names",
@@ -265,6 +293,7 @@ describe("bb-plugin-memory", () => {
       ],
       { projectId: "project-a" },
     );
+
     expect(unmapped.exitCode).toBe(1);
     expect(unmapped.stderr).toContain("unknown option '--labels'");
 
@@ -283,6 +312,7 @@ describe("bb-plugin-memory", () => {
       ],
       { projectId: "project-a" },
     );
+
     expect(stray.exitCode).toBe(1);
     expect(stray.stderr).toContain("unexpected argument 'the details text'");
     expect(stray.stderr).toContain("--details");
@@ -299,6 +329,7 @@ describe("bb-plugin-memory", () => {
 
   it("uses optimistic versions for updates and forgetting", async () => {
     const host = await loadPlugin();
+
     const memory = await addMemory(host, {
       scope: "global",
       projectId: "project-a",
@@ -306,6 +337,7 @@ describe("bb-plugin-memory", () => {
       summary: "Prefer short answers.",
       kind: "preference",
     });
+
     const updated = await host.harness.runCli(
       [
         "update",
@@ -320,6 +352,7 @@ describe("bb-plugin-memory", () => {
       ],
       { projectId: "project-a", threadId: "thread-a" },
     );
+
     expect(updated.exitCode, updated.stderr).toBe(0);
     expect(JSON.parse(updated.stdout ?? "").memory.version).toBe(2);
 
@@ -336,6 +369,7 @@ describe("bb-plugin-memory", () => {
       ],
       { projectId: "project-a" },
     );
+
     expect(stale.exitCode).toBe(1);
     expect(stale.stderr).toContain("version conflict");
 
@@ -351,6 +385,7 @@ describe("bb-plugin-memory", () => {
       ],
       { projectId: "project-a", threadId: "thread-a" },
     );
+
     expect(forgotten.exitCode, forgotten.stderr).toBe(0);
     expect(JSON.parse(forgotten.stdout ?? "").forgotten.version).toBe(3);
 
@@ -358,14 +393,17 @@ describe("bb-plugin-memory", () => {
       ["get", memory.id, "--scope", "all", "--json"],
       { projectId: "project-a" },
     );
+
     expect(get.exitCode).toBe(1);
 
     const history = await host.harness.runCli(["history", memory.id, "--json"]);
     expect(history.exitCode, history.stderr).toBe(0);
+
     const versions = JSON.parse(history.stdout ?? "").history as Array<{
       version: number;
       action: string;
     }>;
+
     expect(versions.map(({ version, action }) => [version, action])).toEqual([
       [3, "forget"],
       [2, "update"],
@@ -379,6 +417,7 @@ describe("bb-plugin-memory", () => {
       "2",
       "--json",
     ]);
+
     expect(
       JSON.parse(boundedHistory.stdout ?? "").history.map(
         (entry: { version: number }) => entry.version,
@@ -388,12 +427,14 @@ describe("bb-plugin-memory", () => {
 
   it("lists every scope and edits or deletes memories through settings RPC", async () => {
     const host = await loadPlugin();
+
     const projectA = await addMemory(host, {
       scope: "project",
       projectId: "project-a",
       name: "project-a-memory",
       summary: "Original project summary.",
     });
+
     const projectB = await addMemory(host, {
       scope: "project",
       projectId: "project-b",
@@ -404,6 +445,7 @@ describe("bb-plugin-memory", () => {
     const listed = (await host.harness.callRpc("listMemories")) as {
       memories: Array<{ id: string; summary: string; version: number }>;
     };
+
     expect(listed.memories.map((memory) => memory.id)).toEqual(
       expect.arrayContaining([projectA.id, projectB.id]),
     );
@@ -418,6 +460,7 @@ describe("bb-plugin-memory", () => {
       importance: 75,
       pinned: true,
     })) as { memory: { summary: string; version: number; pinned: boolean } };
+
     expect(updated.memory).toMatchObject({
       summary: "Edited from settings.",
       version: 2,
@@ -430,9 +473,11 @@ describe("bb-plugin-memory", () => {
         expectedVersion: 1,
       }),
     ).resolves.toEqual({ deleted: { id: projectA.id, version: 2 } });
+
     const afterDelete = (await host.harness.callRpc("listMemories")) as {
       memories: Array<{ id: string }>;
     };
+
     expect(afterDelete.memories.map((memory) => memory.id)).not.toContain(
       projectA.id,
     );
@@ -440,6 +485,7 @@ describe("bb-plugin-memory", () => {
 
   it("rejects prompt-injection content, secret-like values, and duplicates", async () => {
     const host = await loadPlugin();
+
     const injection = await host.harness.runCli(
       [
         "add",
@@ -456,6 +502,7 @@ describe("bb-plugin-memory", () => {
       ],
       { projectId: "project-a" },
     );
+
     expect(injection.exitCode).toBe(1);
     expect(injection.stderr).toContain("prompt-injection");
 
@@ -475,6 +522,7 @@ describe("bb-plugin-memory", () => {
       ],
       { projectId: "project-a" },
     );
+
     expect(secret.exitCode).toBe(1);
     expect(secret.stderr).toContain("credential assignment");
 
@@ -484,6 +532,7 @@ describe("bb-plugin-memory", () => {
       name: "one-name",
       summary: "First",
     });
+
     const duplicate = await host.harness.runCli(
       [
         "add",
@@ -500,6 +549,7 @@ describe("bb-plugin-memory", () => {
       ],
       { projectId: "project-a" },
     );
+
     expect(duplicate.exitCode).toBe(1);
     expect(duplicate.stderr).toContain("already exists");
   });

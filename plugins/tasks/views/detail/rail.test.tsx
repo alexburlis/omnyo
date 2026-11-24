@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   installTestPluginRuntime,
   renderSlot,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 import { makeTask, rpcInput } from "../../test-fixtures.js";
 
 if (!globalThis.ResizeObserver) {
@@ -34,7 +34,9 @@ if (!window.matchMedia) {
 }
 
 installTestPluginRuntime();
+
 const { PropertiesRail } = await import("./rail");
+
 const { TasksRefreshProvider } = await import("../../shell/refresh");
 
 function RailHarness(props: ComponentProps<typeof PropertiesRail>) {
@@ -48,9 +50,10 @@ function RailHarness(props: ComponentProps<typeof PropertiesRail>) {
 afterEach(cleanup);
 
 const PROJECT_ID = "01HZZZZZZZZZZZZZZZZZZZZZP1";
-const BB_PROJECT_ID = "proj_bb0000000000000000000001";
 
-function projectRow(linkedBbProjectId: string | null) {
+const OMNYO_PROJECT_ID = "proj_omnyo0000000000000000001";
+
+function projectRow(linkedAppProjectId: string | null) {
   return {
     id: PROJECT_ID,
     name: "Tasks Plugin",
@@ -58,7 +61,7 @@ function projectRow(linkedBbProjectId: string | null) {
     nextTaskNumber: 6,
     color: "blue",
     folderId: null,
-    linkedBbProjectId,
+    linkedAppProjectId: linkedAppProjectId,
     createdAt: "2026-07-15T00:00:00.000Z",
   };
 }
@@ -81,10 +84,11 @@ const HOME_PROJECT = {
 };
 
 function railProps(
-  linkedBbProjectId: string | null,
+  linkedAppProjectId: string | null,
   onMoveToProject: (projectId: string) => void = () => {},
 ) {
-  const project = projectRow(linkedBbProjectId);
+  const project = projectRow(linkedAppProjectId);
+
   return {
     task,
     project,
@@ -101,11 +105,13 @@ function railProps(
 describe("project rail control", () => {
   it("moves the task only when a different project is picked", async () => {
     const moves: string[] = [];
+
     const slot = renderSlot(
       { component: RailHarness },
       railProps(null, (projectId) => moves.push(projectId)),
-      { rpc: { listBbProjects: () => ({ bbProjects: [] }) } },
+      { rpc: { listAppProjects: () => ({ appProjects: [] }) } },
     );
+
     fireEvent.click(slot.getByRole("button", { name: "Move to project" }));
     fireEvent.click(await slot.findByRole("option", { name: /Tasks Plugin/ }));
     expect(moves).toEqual([]);
@@ -117,68 +123,79 @@ describe("project rail control", () => {
 });
 
 describe("dispatch target rail control", () => {
-  it("links a discovered bb project", async () => {
+  it("links a discovered Omnyo project", async () => {
     const updateCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderSlot({ component: RailHarness }, railProps(null), {
       rpc: {
-        listBbProjects: () => ({
-          bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }],
+        listAppProjects: () => ({
+          appProjects: [{ id: OMNYO_PROJECT_ID, name: "omnyo monorepo" }],
         }),
         updateProject: (raw: unknown) => {
           const input = rpcInput(raw);
           updateCalls.push(input);
+
           return {
             project: {
-              ...projectRow(input.linkedBbProjectId as string | null),
+              ...projectRow(input.linkedAppProjectId as string | null),
             },
           };
         },
       },
     });
-    fireEvent.click(slot.getByRole("button", { name: "Edit dispatch target" }));
-    fireEvent.click(await slot.findByLabelText("Linked bb project"));
-    fireEvent.click(await slot.findByRole("option", { name: "bb monorepo" }));
+
+    fireEvent.click(
+      slot.getByRole("button", { name: "Change where agents start" }),
+    );
+    fireEvent.click(await slot.findByLabelText("Linked Omnyo project"));
+    fireEvent.click(
+      await slot.findByRole("option", { name: "omnyo monorepo" }),
+    );
     fireEvent.click(slot.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(updateCalls).toHaveLength(1));
     expect(updateCalls[0]).toEqual({
       projectId: PROJECT_ID,
-      linkedBbProjectId: BB_PROJECT_ID,
+      linkedAppProjectId: OMNYO_PROJECT_ID,
     });
   });
 
-  it("shows the linked bb project's name and unlinks it", async () => {
+  it("shows the linked Omnyo project's name and unlinks it", async () => {
     const updateCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderSlot(
       { component: RailHarness },
-      railProps(BB_PROJECT_ID),
+      railProps(OMNYO_PROJECT_ID),
       {
         rpc: {
-          listBbProjects: () => ({
-            bbProjects: [{ id: BB_PROJECT_ID, name: "bb monorepo" }],
+          listAppProjects: () => ({
+            appProjects: [{ id: OMNYO_PROJECT_ID, name: "omnyo monorepo" }],
           }),
           updateProject: (raw: unknown) => {
             const input = rpcInput(raw);
             updateCalls.push(input);
+
             return {
               project: {
-                ...projectRow(input.linkedBbProjectId as string | null),
+                ...projectRow(input.linkedAppProjectId as string | null),
               },
             };
           },
         },
       },
     );
+
     const trigger = slot.getByRole("button", {
-      name: "Edit dispatch target",
+      name: "Change where agents start",
     });
-    await slot.findByText("bb monorepo");
+
+    await slot.findByText("omnyo monorepo");
 
     fireEvent.click(trigger);
     fireEvent.click(await slot.findByRole("button", { name: "Unlink" }));
     await waitFor(() => expect(updateCalls).toHaveLength(1));
     expect(updateCalls[0]).toEqual({
       projectId: PROJECT_ID,
-      linkedBbProjectId: null,
+      linkedAppProjectId: null,
     });
   });
 });

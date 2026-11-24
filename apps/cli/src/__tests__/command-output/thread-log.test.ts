@@ -9,17 +9,59 @@ import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import * as fixtures from "../helpers/command-output-fixtures.js";
 import { registerThreadCommands } from "../../commands/thread/index.js";
 
-describe("bb thread log command output", () => {
+describe("omnyo thread log command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
     registerThreadCommands(program, () => "http://server");
 
-  it("bb thread log renders pending steers for human output", async () => {
+  it("prints opt-in compact JSON with pagination metadata while retaining raw JSON", async () => {
+    const compact = {
+      rows: [{ seq: 4, role: "assistant", text: "Visible answer" }],
+      hasMore: true,
+      nextAfterSeq: 4,
+      maxSeq: 9,
+    };
+
+    const getConversation = vi.fn(async () => compact);
     const getEvents = vi.fn(async () => []);
+    stubServerApi({
+      "v1.threads.:id.conversation.$get": getConversation,
+      "v1.threads.:id.events.$get": getEvents,
+    });
+    await runCommand(
+      [
+        "thread",
+        "log",
+        "thread-log",
+        "--format",
+        "conversation",
+        "--limit",
+        "1",
+        "--after-seq",
+        "2",
+        "--through-seq",
+        "9",
+      ],
+      register,
+    );
+    expect(
+      JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])),
+    ).toEqual(compact);
+    expect(getConversation).toHaveBeenCalledWith({
+      param: { id: "thread-log" },
+      query: { limit: "1", afterSeq: "2", throughSeq: "9" },
+    });
+    expect(getEvents).not.toHaveBeenCalled();
+  });
+
+  it("omnyo thread log renders pending steers for human output", async () => {
+    const getEvents = vi.fn(async () => []);
+
     const getTimeline = vi.fn(async () =>
       fixtures.makeTimelineResponse([fixtures.makePendingSteerTimelineRow()]),
     );
+
     stubServerApi({
       "v1.threads.:id.events.$get": getEvents,
       "v1.threads.:id.timeline.$get": getTimeline,
@@ -40,11 +82,13 @@ describe("bb thread log command output", () => {
     expect(getEvents).not.toHaveBeenCalled();
   });
 
-  it("bb thread log renders pending steers with default formatting", async () => {
+  it("omnyo thread log renders pending steers with default formatting", async () => {
     const getEvents = vi.fn(async () => []);
+
     const getTimeline = vi.fn(async () =>
       fixtures.makeTimelineResponse([fixtures.makePendingSteerTimelineRow()]),
     );
+
     stubServerApi({
       "v1.threads.:id.events.$get": getEvents,
       "v1.threads.:id.timeline.$get": getTimeline,
@@ -62,8 +106,9 @@ describe("bb thread log command output", () => {
     expect(getEvents).not.toHaveBeenCalled();
   });
 
-  it("bb thread log renders approval state on command and file-change rows", async () => {
+  it("omnyo thread log renders approval state on command and file-change rows", async () => {
     const getEvents = vi.fn(async () => []);
+
     const getTimeline = vi.fn(async () =>
       fixtures.makeTimelineResponse([
         {
@@ -106,6 +151,7 @@ describe("bb thread log command output", () => {
         },
       ]),
     );
+
     stubServerApi({
       "v1.threads.:id.events.$get": getEvents,
       "v1.threads.:id.timeline.$get": getTimeline,
@@ -126,7 +172,7 @@ describe("bb thread log command output", () => {
     expect(getEvents).not.toHaveBeenCalled();
   });
 
-  it("bb thread log --json caps at --limit and warns on stderr when more events exist", async () => {
+  it("omnyo thread log --json caps at --limit and warns on stderr when more events exist", async () => {
     const events = Array.from({ length: 4 }, (_, index) => ({
       id: `evt-${index + 1}`,
       scope: { kind: "thread" },
@@ -136,6 +182,7 @@ describe("bb thread log command output", () => {
       createdAt: 20 + index,
       seq: index + 1,
     }));
+
     const getEvents = vi.fn(async () => events);
     stubServerApi({
       "v1.threads.:id.events.$get": getEvents,
@@ -159,7 +206,7 @@ describe("bb thread log command output", () => {
     expect(stderr).toContain("--all");
   });
 
-  it("bb thread log --json detects more events across the server page boundary", async () => {
+  it("omnyo thread log --json detects more events across the server page boundary", async () => {
     const events = Array.from({ length: 101 }, (_, index) => ({
       id: `evt-${index + 1}`,
       scope: { kind: "thread" },
@@ -169,13 +216,16 @@ describe("bb thread log command output", () => {
       createdAt: 20 + index,
       seq: index + 1,
     }));
+
     const getEvents = vi.fn(
       async (input: { query: { afterSeq?: string; limit?: string } }) => {
         const afterSeq = Number(input.query.afterSeq ?? 0);
         const limit = Math.min(Number(input.query.limit), 100);
+
         return events.filter((event) => event.seq > afterSeq).slice(0, limit);
       },
     );
+
     stubServerApi({
       "v1.threads.:id.events.$get": getEvents,
     });
@@ -194,7 +244,7 @@ describe("bb thread log command output", () => {
     );
   });
 
-  it("bb thread log --json retries smaller raw-event pages after the byte limit", async () => {
+  it("omnyo thread log --json retries smaller raw-event pages after the byte limit", async () => {
     const events = Array.from({ length: 5 }, (_, index) => ({
       id: `evt-${index + 1}`,
       scope: { kind: "thread" },
@@ -204,9 +254,11 @@ describe("bb thread log command output", () => {
       createdAt: 20 + index,
       seq: index + 1,
     }));
+
     const getEvents = vi.fn(
       async (input: { query: { afterSeq?: string; limit?: string } }) => {
         const limit = Number(input.query.limit);
+
         if (limit > 2) {
           return new Response(
             JSON.stringify({
@@ -216,10 +268,13 @@ describe("bb thread log command output", () => {
             { status: 413, headers: { "Content-Type": "application/json" } },
           );
         }
+
         const afterSeq = Number(input.query.afterSeq ?? 0);
+
         return events.filter((event) => event.seq > afterSeq).slice(0, limit);
       },
     );
+
     stubServerApi({
       "v1.threads.:id.events.$get": getEvents,
     });
@@ -239,7 +294,7 @@ describe("bb thread log command output", () => {
     ]);
   });
 
-  it("bb thread log --json stays quiet when the page is not full", async () => {
+  it("omnyo thread log --json stays quiet when the page is not full", async () => {
     const events = [
       {
         id: "evt-1",
@@ -251,6 +306,7 @@ describe("bb thread log command output", () => {
         seq: 1,
       },
     ];
+
     stubServerApi({
       "v1.threads.:id.events.$get": vi.fn(async () => events),
     });
@@ -263,7 +319,7 @@ describe("bb thread log command output", () => {
     expect(collectLogLines(vi.mocked(console.error))).toEqual([]);
   });
 
-  it("bb thread log --json --all pages through every event with --after-seq", async () => {
+  it("omnyo thread log --json --all pages through every event with --after-seq", async () => {
     const makeEvent = (seq: number) => ({
       id: `evt-${seq}`,
       scope: { kind: "thread" },
@@ -273,15 +329,18 @@ describe("bb thread log command output", () => {
       createdAt: 20 + seq,
       seq,
     });
+
     const getEvents = vi.fn(
       async (input: { query: { afterSeq?: string; limit?: string } }) => {
         const afterSeq = Number(input.query.afterSeq ?? 0);
         const limit = Number(input.query.limit);
+
         return Array.from({ length: 1203 }, (_, index) => makeEvent(index + 1))
           .filter((event) => event.seq > afterSeq)
           .slice(0, Math.min(limit, 100));
       },
     );
+
     stubServerApi({
       "v1.threads.:id.events.$get": getEvents,
     });
@@ -294,6 +353,7 @@ describe("bb thread log command output", () => {
     const printed = JSON.parse(
       String(vi.mocked(console.log).mock.calls[0]?.[0]),
     ) as Array<{ seq: number }>;
+
     expect(printed).toHaveLength(1203);
     expect(printed[0]?.seq).toBe(1);
     expect(printed[1202]?.seq).toBe(1203);
@@ -318,7 +378,7 @@ describe("bb thread log command output", () => {
     expect(collectLogLines(vi.mocked(console.error))).toEqual([]);
   });
 
-  it("bb thread log --json --all keeps paging after reducing a byte-heavy page", async () => {
+  it("omnyo thread log --json --all keeps paging after reducing a byte-heavy page", async () => {
     const events = Array.from({ length: 5 }, (_, index) => ({
       id: `evt-${index + 1}`,
       scope: { kind: "thread" },
@@ -328,9 +388,11 @@ describe("bb thread log command output", () => {
       createdAt: 20 + index,
       seq: index + 1,
     }));
+
     const getEvents = vi.fn(
       async (input: { query: { afterSeq?: string; limit?: string } }) => {
         const limit = Number(input.query.limit);
+
         if (limit > 2) {
           return new Response(
             JSON.stringify({
@@ -340,10 +402,13 @@ describe("bb thread log command output", () => {
             { status: 413, headers: { "Content-Type": "application/json" } },
           );
         }
+
         const afterSeq = Number(input.query.afterSeq ?? 0);
+
         return events.filter((event) => event.seq > afterSeq).slice(0, limit);
       },
     );
+
     stubServerApi({
       "v1.threads.:id.events.$get": getEvents,
     });
@@ -384,7 +449,7 @@ describe("bb thread log command output", () => {
     ]);
   });
 
-  it("bb thread log --json --all restores large pages after a dense prefix", async () => {
+  it("omnyo thread log --json --all restores large pages after a dense prefix", async () => {
     const events = Array.from({ length: 1202 }, (_, index) => ({
       id: `evt-${index + 1}`,
       scope: { kind: "thread" },
@@ -394,10 +459,12 @@ describe("bb thread log command output", () => {
       createdAt: 20 + index,
       seq: index + 1,
     }));
+
     const getEvents = vi.fn(
       async (input: { query: { afterSeq?: string; limit?: string } }) => {
         const afterSeq = Number(input.query.afterSeq ?? 0);
         const limit = Number(input.query.limit);
+
         if (afterSeq < 2 && limit > 1) {
           return new Response(
             JSON.stringify({
@@ -407,9 +474,11 @@ describe("bb thread log command output", () => {
             { status: 413, headers: { "Content-Type": "application/json" } },
           );
         }
+
         return events.filter((event) => event.seq > afterSeq).slice(0, limit);
       },
     );
+
     stubServerApi({
       "v1.threads.:id.events.$get": getEvents,
     });
@@ -422,12 +491,15 @@ describe("bb thread log command output", () => {
     const printed = JSON.parse(
       String(vi.mocked(console.log).mock.calls[0]?.[0]),
     ) as Array<{ seq: number }>;
+
     expect(printed).toHaveLength(events.length);
     expect(printed[0]?.seq).toBe(1);
     expect(printed.at(-1)?.seq).toBe(events.length);
+
     const tailLimits = getEvents.mock.calls
       .filter((call) => Number(call[0].query.afterSeq ?? 0) >= 2)
       .map((call) => call[0].query.limit);
+
     expect(tailLimits.slice(0, 7)).toEqual([
       "2",
       "4",
@@ -440,7 +512,7 @@ describe("bb thread log command output", () => {
     expect(getEvents.mock.calls.length).toBeLessThan(30);
   });
 
-  it("bb thread log prints an older-history notice when the timeline page is cut", async () => {
+  it("omnyo thread log prints an older-history notice when the timeline page is cut", async () => {
     const getTimeline = vi.fn(async () => ({
       ...fixtures.makeTimelineResponse([
         fixtures.makePendingSteerTimelineRow(),
@@ -453,6 +525,7 @@ describe("bb thread log command output", () => {
         olderCursor: { anchorSeq: 12, anchorId: "pending-steer-1" },
       },
     }));
+
     stubServerApi({
       "v1.threads.:id.timeline.$get": getTimeline,
     });
@@ -466,10 +539,11 @@ describe("bb thread log command output", () => {
     expect(output).toContain("--all");
   });
 
-  it("bb thread log --limit sets the timeline segment limit for human output", async () => {
+  it("omnyo thread log --limit sets the timeline segment limit for human output", async () => {
     const getTimeline = vi.fn(async () =>
       fixtures.makeTimelineResponse([fixtures.makePendingSteerTimelineRow()]),
     );
+
     stubServerApi({
       "v1.threads.:id.timeline.$get": getTimeline,
     });
@@ -488,17 +562,19 @@ describe("bb thread log command output", () => {
     expect(output).not.toContain("older history omitted");
   });
 
-  it("bb thread log --all walks older timeline pages and prints them oldest first", async () => {
+  it("omnyo thread log --all walks older timeline pages and prints them oldest first", async () => {
     const makeUserRow = (id: string, seq: number, text: string) => ({
       ...fixtures.makePendingSteerTimelineRow(),
       ...fixtures.makeTimelineBase({ id, sourceSeqStart: seq }),
       text,
       turnRequest: {
+        clientRequestId: null,
         isGrouped: false,
         kind: "message" as const,
         status: "accepted" as const,
       },
     });
+
     const getTimeline = vi.fn(
       async (input: {
         query: { beforeAnchorSeq?: string; beforeAnchorId?: string };
@@ -517,6 +593,7 @@ describe("bb thread log command output", () => {
             },
           };
         }
+
         if (input.query.beforeAnchorSeq === "30") {
           return {
             ...fixtures.makeTimelineResponse([
@@ -531,6 +608,7 @@ describe("bb thread log command output", () => {
             },
           };
         }
+
         return {
           ...fixtures.makeTimelineResponse([
             makeUserRow("user-1", 10, "first prompt"),
@@ -545,6 +623,7 @@ describe("bb thread log command output", () => {
         };
       },
     );
+
     stubServerApi({
       "v1.threads.:id.timeline.$get": getTimeline,
     });
@@ -567,12 +646,13 @@ describe("bb thread log command output", () => {
     expect(output).not.toContain("older history omitted");
   });
 
-  it("bb thread log --message prints the message with its context", async () => {
+  it("omnyo thread log --message prints the message with its context", async () => {
     const getMessage = vi.fn(async () => ({
       message: fixtures.makePendingSteerTimelineRow(),
       before: [],
       after: [],
     }));
+
     const getTimeline = vi.fn(async () => fixtures.makeTimelineResponse([]));
     stubServerApi({
       "v1.threads.:id.messages.:seq.$get": getMessage,
@@ -598,7 +678,7 @@ describe("bb thread log command output", () => {
     [["--message", "12", "--all"], "--message cannot be combined"],
     [["--context", "2"], "--context requires --message"],
     [["--message", "12", "--context", "21"], "--context must be an integer"],
-  ])("bb thread log rejects %j", async (flags, error) => {
+  ])("omnyo thread log rejects %j", async (flags, error) => {
     stubServerApi({
       "v1.threads.:id.messages.:seq.$get": vi.fn(),
       "v1.threads.:id.timeline.$get": vi.fn(async () =>
@@ -614,7 +694,7 @@ describe("bb thread log command output", () => {
     );
   });
 
-  it("bb thread log rejects --all combined with --limit", async () => {
+  it("omnyo thread log rejects --all combined with --limit", async () => {
     stubServerApi({
       "v1.threads.:id.timeline.$get": vi.fn(async () =>
         fixtures.makeTimelineResponse([]),
@@ -632,8 +712,8 @@ describe("bb thread log command output", () => {
     );
   });
 
-  it("bb thread log --self resolves from BB_THREAD_ID", async () => {
-    vi.stubEnv("BB_THREAD_ID", "thread-log-self");
+  it("omnyo thread log --self resolves from OMNYO_THREAD_ID", async () => {
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-log-self");
     const getEvents = vi.fn(async () => []);
     const getTimeline = vi.fn(async () => fixtures.makeTimelineResponse([]));
     stubServerApi({

@@ -1,10 +1,11 @@
-import { Button } from "@bb/shared-ui/button";
-import { Skeleton } from "@bb/shared-ui/skeleton";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 export type ThreadListPlaceholderState =
   | { kind: "loading" }
-  | { kind: "missing" }
+  | { kind: "missing"; onReload: () => void }
   | { kind: "crashed"; pluginTitle: string; onReload: () => void };
 
 function LoadingRow({ textWidthClassName }: { textWidthClassName: string }) {
@@ -43,33 +44,86 @@ export function ThreadListPlaceholder({
       </div>
     );
   }
+
   if (state.kind === "missing") {
     return (
-      <div
+      <ThreadListProblem
         role="status"
-        data-thread-list-placeholder="missing"
-        className="flex flex-col gap-2 px-3 py-2 text-sm text-muted-foreground"
-      >
-        <span>No thread list plugin is enabled.</span>
-      </div>
+        placeholder="missing"
+        icon="MessageSquare"
+        title="Thread list unavailable."
+        detail="Your threads are safe. The thread list plugin isn’t loaded. Retry, or check that it’s turned on in Plugins."
+        actionLabel="Retry"
+        onAction={state.onReload}
+      />
     );
   }
+
   return (
-    <div
+    <ThreadListProblem
       role="alert"
-      data-thread-list-placeholder="crashed"
-      className="flex flex-col gap-2 px-3 py-2 text-sm text-muted-foreground"
-    >
-      <span>{state.pluginTitle} stopped working.</span>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="self-start"
-        onClick={state.onReload}
+      placeholder="crashed"
+      icon="AlertTriangle"
+      title={`${state.pluginTitle} stopped working.`}
+      detail="Your threads are safe. Reload the list to show them again."
+      actionLabel="Reload"
+      onAction={state.onReload}
+    />
+  );
+}
+
+function ThreadListProblem({
+  role,
+  placeholder,
+  icon,
+  title,
+  detail,
+  actionLabel,
+  onAction,
+}: {
+  role: "status" | "alert";
+  placeholder: "missing" | "crashed";
+  icon: "MessageSquare" | "AlertTriangle";
+  title: string;
+  detail: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="p-2">
+      <div
+        role={role}
+        data-thread-list-placeholder={placeholder}
+        className="flex flex-col gap-2.5 rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3"
       >
-        Reload
-      </Button>
+        <div className="flex items-start gap-2">
+          <Icon
+            name={icon}
+            aria-hidden="true"
+            className={cn(
+              "mt-px size-4 shrink-0",
+              placeholder === "crashed"
+                ? "text-warning-text"
+                : "text-muted-foreground",
+            )}
+          />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-sm font-medium text-sidebar-foreground">
+              {title}
+            </span>
+            <span className="text-xs text-muted-foreground">{detail}</span>
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="soft"
+          size="xs"
+          className="self-start"
+          onClick={onAction}
+        >
+          {actionLabel}
+        </Button>
+      </div>
     </div>
   );
 }

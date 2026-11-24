@@ -42,18 +42,19 @@ export function UsageFeedback({
     <div
       role="status"
       className={cn(
-        "flex min-w-0 items-start text-xs text-muted-foreground",
-        !loading && "gap-2 rounded-md bg-muted/60 px-2.5 py-2",
+        "flex min-w-0 items-start gap-2 text-xs leading-5 text-muted-foreground",
+        !loading && "rounded-lg bg-state-hover px-3 py-2",
         className,
       )}
     >
-      {loading ? null : (
-        <Icon
-          name="Info"
-          aria-hidden="true"
-          className="mt-0.5 size-3.5 shrink-0"
-        />
-      )}
+      <Icon
+        name={loading ? "Spinner" : "Info"}
+        aria-hidden="true"
+        className={cn(
+          "mt-0.5 size-3.5 shrink-0",
+          loading && "animate-spin text-subtle-foreground",
+        )}
+      />
       <span className="min-w-0 flex-1">{message}</span>
     </div>
   );

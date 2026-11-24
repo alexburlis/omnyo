@@ -18,6 +18,7 @@ export function useCreateThreadInEnvironment({
 }: UseCreateThreadInEnvironmentArgs): () => void {
   const navigate = useRouteNavigate();
   const setRootComposeProjectId = useSetRootComposeProjectId();
+
   return useCallback(() => {
     setRootComposeProjectId(projectId);
     navigate(getRootComposeRoutePath(), {

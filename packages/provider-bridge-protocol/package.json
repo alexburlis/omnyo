@@ -1,5 +1,6 @@
 {
-  "name": "@bb/provider-bridge-protocol",
+  "name": "@omnyo/provider-bridge-protocol",
+  "private": true,
   "version": "0.0.1",
   "type": "module",
   "exports": {
@@ -37,6 +38,51 @@
       "source": "./src/bridge-worker-entry.ts",
       "types": "./src/bridge-worker-entry.ts",
       "default": "./src/bridge-worker-entry.ts"
+    },
+    "./acp/launch-spec": {
+      "source": "./src/acp/launch-spec.ts",
+      "types": "./src/acp/launch-spec.ts",
+      "default": "./src/acp/launch-spec.ts"
+    },
+    "./acp/tool-proxy-mcp": {
+      "source": "./src/acp/tool-proxy-mcp.ts",
+      "types": "./src/acp/tool-proxy-mcp.ts",
+      "default": "./src/acp/tool-proxy-mcp.ts"
+    },
+    "./acp/cursor-mcp-approval": {
+      "source": "./src/acp/cursor-mcp-approval.ts",
+      "types": "./src/acp/cursor-mcp-approval.ts",
+      "default": "./src/acp/cursor-mcp-approval.ts"
+    },
+    "./acp/opencode-usage": {
+      "source": "./src/acp/opencode-usage.ts",
+      "types": "./src/acp/opencode-usage.ts",
+      "default": "./src/acp/opencode-usage.ts"
+    },
+    "./acp/provider-maintenance": {
+      "source": "./src/acp/provider-maintenance.ts",
+      "types": "./src/acp/provider-maintenance.ts",
+      "default": "./src/acp/provider-maintenance.ts"
+    },
+    "./acp/tool-classification": {
+      "source": "./src/acp/tool-classification.ts",
+      "types": "./src/acp/tool-classification.ts",
+      "default": "./src/acp/tool-classification.ts"
+    },
+    "./acp/tool-call-operation": {
+      "source": "./src/acp/tool-call-operation.ts",
+      "types": "./src/acp/tool-call-operation.ts",
+      "default": "./src/acp/tool-call-operation.ts"
+    },
+    "./acp/presentation": {
+      "source": "./src/acp/presentation.ts",
+      "types": "./src/acp/presentation.ts",
+      "default": "./src/acp/presentation.ts"
+    },
+    "./acp/tool-call-wire": {
+      "source": "./src/acp/tool-call-wire.ts",
+      "types": "./src/acp/tool-call-wire.ts",
+      "default": "./src/acp/tool-call-wire.ts"
     }
   },
   "types": "./src/index.ts",
@@ -47,14 +93,14 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
-    "@bb/domain": "workspace:*",
-    "@bb/process-utils": "workspace:*",
-    "@bb/text-utils": "workspace:*",
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/process-utils": "workspace:*",
+    "@omnyo/text-utils": "workspace:*",
     "semver": "^7.7.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/semver": "^7.7.1",
     "typescript": "npm:@typescript/typescript6@^6.0.2",

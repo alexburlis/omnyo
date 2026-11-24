@@ -1,3 +1,4 @@
+import { redactCredentialText } from "@omnyo/domain";
 import type {
   AgentRuntimeContributedEnvEntry,
   AgentRuntimeShellEnvironment,
@@ -19,12 +20,12 @@ export function buildThreadShellEnvironment(
 ): Record<string, string> {
   return {
     ...(args.baseShellEnv ?? {}),
-    ...(args.projectId ? { BB_PROJECT_ID: args.projectId } : {}),
+    ...(args.projectId ? { OMNYO_PROJECT_ID: args.projectId } : {}),
     ...(args.threadStoragePath
-      ? { BB_THREAD_STORAGE: args.threadStoragePath }
+      ? { OMNYO_THREAD_STORAGE: args.threadStoragePath }
       : {}),
-    BB_THREAD_ID: args.threadId,
-    BB_ENVIRONMENT_ID: args.environmentId,
+    OMNYO_THREAD_ID: args.threadId,
+    OMNYO_ENVIRONMENT_ID: args.environmentId,
   };
 }
 
@@ -55,21 +56,25 @@ export function resolveThreadEnvironment(args: ResolveThreadEnvironmentArgs): {
 } {
   const envVars = buildThreadShellEnvironment(args);
   const droppedContributions: DroppedThreadEnvironmentContribution[] = [];
+
   const entries: ResolvedThreadEnvironmentEntry[] = Object.entries(envVars).map(
-    ([name, value]) => ({ name, source: "shell", value }),
+    ([name]) => ({ name, source: "shell", value: { masked: true } }),
   );
+
   for (const contribution of args.contributedEnv) {
     let value: string;
+
     if (typeof contribution.value === "string") {
       value = contribution.value;
     } else {
-      const serverUrl = args.baseShellEnv?.BB_SERVER_URL;
+      const serverUrl = args.baseShellEnv?.OMNYO_SERVER_URL;
+
       if (serverUrl === undefined) {
         entries.push({
           name: contribution.name,
           source: contribution.source,
           value: { masked: true },
-          reason: `${contribution.reason} (dropped: no BB_SERVER_URL)`,
+          reason: `${redactCredentialText(contribution.reason, Object.values(envVars))} (dropped: no OMNYO_SERVER_URL)`,
         });
         droppedContributions.push({
           name: contribution.name,
@@ -80,19 +85,24 @@ export function resolveThreadEnvironment(args: ResolveThreadEnvironmentArgs): {
         });
         continue;
       }
+
       value = `${serverUrl}${contribution.value.serverPath}`;
     }
+
     envVars[contribution.name] = value;
+
     const existingIndex = entries.findIndex(
       (entry) => entry.name === contribution.name,
     );
+
     if (existingIndex !== -1) entries.splice(existingIndex, 1);
     entries.push({
       name: contribution.name,
       source: contribution.source,
-      value: "core" in contribution.source ? { masked: true } : value,
-      reason: contribution.reason,
+      value: { masked: true },
+      reason: redactCredentialText(contribution.reason, Object.values(envVars)),
     });
   }
+
   return { droppedContributions, envVars, entries };
 }

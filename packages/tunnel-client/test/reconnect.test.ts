@@ -21,9 +21,11 @@ describe("ReconnectBackoff", () => {
       DEFAULT_RECONNECT_BASE_DELAY_MS * 8,
     );
     let delay = 0;
+
     for (let i = 0; i < 20; i++) {
       delay = backoff.nextDelayAfterClose(0);
     }
+
     expect(delay).toBe(DEFAULT_MAX_RECONNECT_DELAY_MS);
   });
 
@@ -32,6 +34,7 @@ describe("ReconnectBackoff", () => {
       ...AT_CEILING,
       stableConnectionMs: 10_000,
     });
+
     expect(backoff.nextDelayAfterClose(0)).toBe(2_000);
     expect(backoff.nextDelayAfterClose(10_001)).toBe(1_000);
   });
@@ -41,6 +44,7 @@ describe("ReconnectBackoff", () => {
       ...AT_CEILING,
       stableConnectionMs: 10_000,
     });
+
     expect(backoff.nextDelayAfterClose(0)).toBe(2_000);
     expect(backoff.nextDelayAfterClose(10_000)).toBe(4_000);
   });
@@ -57,6 +61,7 @@ describe("ReconnectBackoff", () => {
     const backoff = new ReconnectBackoff({ random: () => 0 });
     expect(backoff.nextDelayAfterClose(20_000)).toBe(500);
     expect(backoff.nextDelayAfterClose(0)).toBe(1_000);
+
     for (let i = 0; i < 20; i++) backoff.nextDelayAfterClose(0);
     expect(backoff.nextDelayAfterClose(0)).toBe(
       DEFAULT_MAX_RECONNECT_DELAY_MS / 2,
@@ -67,10 +72,12 @@ describe("ReconnectBackoff", () => {
     const delays = Array.from({ length: 200 }, () =>
       new ReconnectBackoff().nextDelayAfterClose(20_000),
     );
+
     for (const delay of delays) {
       expect(delay).toBeGreaterThanOrEqual(DEFAULT_RECONNECT_BASE_DELAY_MS / 2);
       expect(delay).toBeLessThanOrEqual(DEFAULT_RECONNECT_BASE_DELAY_MS);
     }
+
     expect(new Set(delays).size).toBeGreaterThan(50);
   });
 });
@@ -80,8 +87,9 @@ describe("humanizeTransportError", () => {
     const refused = Object.assign(new Error("connect ECONNREFUSED"), {
       code: "ECONNREFUSED",
     });
-    expect(humanizeTransportError(refused, "getbb.app")).toBe(
-      "can't reach getbb.app — connection refused",
+
+    expect(humanizeTransportError(refused, "example.test")).toBe(
+      "can't reach example.test — connection refused",
     );
   });
 

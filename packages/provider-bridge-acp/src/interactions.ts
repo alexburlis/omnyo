@@ -1,14 +1,14 @@
 import {
   isApprovalPendingInteractionPayload,
   isApprovalPendingInteractionResolution,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   PendingInteractionApprovalDecision,
   PendingInteractionApprovalSubject,
   PendingInteractionPayload,
   PendingInteractionResolution,
-} from "@bb/domain";
-import { toolKindPresentation } from "./presentation.js";
+} from "@omnyo/domain";
+import { toolKindPresentation } from "@omnyo/provider-bridge-protocol/acp/presentation";
 import {
   type AcpToolCallOperation,
   type AcpToolCallOperationInput,
@@ -16,12 +16,12 @@ import {
   classifyAcpToolCall as classifyAcpToolCallOperation,
   extractAcpToolCallPaths,
   resolveAcpFileChangeWriteScope,
-} from "./tool-call-operation.js";
+} from "@omnyo/provider-bridge-protocol/acp/tool-call-operation";
 import {
   classifyAcpToolCall,
   extractAcpToolCallOutputText,
   type AcpInjectedTool,
-} from "./tool-classification.js";
+} from "@omnyo/provider-bridge-protocol/acp/tool-classification";
 import type {
   AcpPermissionOptionKind,
   AcpToolCallUpdateEvent,
@@ -53,9 +53,11 @@ function classifyAcpPermission(
   options: AcpToolCallPathOptions | undefined,
 ): AcpToolCallOperation {
   const own = classifyAcpToolCallOperation(toolCall, options);
+
   if (own.kind !== "generic" || !toolCall.startedToolCall) {
     return own;
   }
+
   return classifyAcpToolCallOperation(toolCall.startedToolCall, options);
 }
 
@@ -94,16 +96,20 @@ function buildToolUseSubject(
       }),
     };
   }
+
   const classify = (event: AcpToolCallUpdateEvent) =>
     (toolCall.injectedTool === undefined
       ? dialectClassify?.(event)
       : undefined) ??
     classifyAcpToolCall(event, toolCall.injectedTool, options);
+
   const own = classify(permissionToolCallEvent(toolCall));
+
   const described =
     own.presentation.title === undefined && toolCall.startedToolCall
       ? classify(toolCall.startedToolCall)
       : own;
+
   return {
     kind: "tool_use",
     itemId: toolCall.toolCallId,
@@ -123,6 +129,7 @@ function permissionReason(
   if (toolCall === undefined || toolCall.content === undefined) {
     return undefined;
   }
+
   return extractAcpToolCallOutputText({
     sessionUpdate: "tool_call",
     toolCallId: toolCall.toolCallId,
@@ -135,15 +142,19 @@ export function buildAcpApprovalDecisions(
 ): PendingInteractionApprovalDecision[] {
   const kinds = new Set(options.map((option) => option.kind));
   const decisions: PendingInteractionApprovalDecision[] = [];
+
   if (kinds.has("allow_once")) {
     decisions.push("allow_once");
   }
+
   if (kinds.has("allow_always")) {
     decisions.push("allow_for_session");
   }
+
   if (kinds.has("reject_once") || kinds.has("reject_always")) {
     decisions.push("deny");
   }
+
   return decisions.length > 0 ? decisions : ["deny"];
 }
 
@@ -157,11 +168,14 @@ export function buildAcpPermissionInteractionPayload(args: {
   const pathOptions = { cwd: args.cwd };
   const availableDecisions = buildAcpApprovalDecisions(args.options);
   const reason = permissionReason(toolCall) ?? null;
+
   const operation = toolCall
     ? classifyAcpPermission(toolCall, pathOptions)
     : undefined;
+
   if (toolCall && operation?.kind === "file_change") {
     const ownPaths = extractAcpToolCallPaths(toolCall, pathOptions);
+
     return {
       kind: "approval",
       subject: {
@@ -176,6 +190,7 @@ export function buildAcpPermissionInteractionPayload(args: {
       availableDecisions,
     };
   }
+
   if (toolCall && operation?.kind === "command") {
     return {
       kind: "approval",
@@ -191,6 +206,7 @@ export function buildAcpPermissionInteractionPayload(args: {
       availableDecisions,
     };
   }
+
   return {
     kind: "approval",
     subject: buildToolUseSubject(toolCall, pathOptions, args.classifyToolCall),
@@ -209,5 +225,6 @@ export function resolveAcpPermissionDecision(args: {
   ) {
     return null;
   }
+
   return { decision: args.resolution.decision };
 }

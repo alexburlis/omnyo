@@ -16,10 +16,12 @@ describe("reported cache counts", () => {
       cacheReadInputTokens: 31,
       cacheWriteInputTokens: 9,
     };
+
     expect(threadEventTokenUsageBreakdownSchema.parse(usage)).toEqual(usage);
   });
   it("keeps old events absent and reported zero distinct", () => {
     expect(threadEventTokenUsageBreakdownSchema.parse(legacy)).toEqual(legacy);
+
     for (const field of ["cacheReadInputTokens", "cacheWriteInputTokens"]) {
       const usage = { ...legacy, [field]: 0 };
       expect(threadEventTokenUsageBreakdownSchema.parse(usage)).toEqual(usage);

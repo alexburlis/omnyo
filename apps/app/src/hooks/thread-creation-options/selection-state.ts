@@ -3,13 +3,13 @@ import type {
   ReasoningLevel,
   ServiceTier,
   SessionOptionSelections,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   CreateExecutionInputSources,
   ExecutionInputFieldSource,
   ExistingThreadExecutionInputSources,
   SystemProvidersQuery,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type {
   StoredPermissionMode,
   StoredReasoningLevel,
@@ -125,12 +125,15 @@ function resolveCreateExecutionInputSource({
   if (!hasValue) {
     return undefined;
   }
+
   if (touched) {
     return "explicit";
   }
+
   if (hasStoredValue) {
     return "client-preference";
   }
+
   return initialSource;
 }
 
@@ -162,6 +165,7 @@ export function syncUntouchedThreadPromptSelections({
     updatedSelections.selectedProviderId = nextSelections.selectedProviderId;
     changed = true;
   }
+
   if (
     !touchedFields.has("selectedModel") &&
     currentSelections.selectedModel !== nextSelections.selectedModel
@@ -169,6 +173,7 @@ export function syncUntouchedThreadPromptSelections({
     updatedSelections.selectedModel = nextSelections.selectedModel;
     changed = true;
   }
+
   if (
     !touchedFields.has("serviceTier") &&
     currentSelections.serviceTier !== nextSelections.serviceTier
@@ -176,6 +181,7 @@ export function syncUntouchedThreadPromptSelections({
     updatedSelections.serviceTier = nextSelections.serviceTier;
     changed = true;
   }
+
   if (
     !touchedFields.has("reasoningLevel") &&
     currentSelections.reasoningLevel !== nextSelections.reasoningLevel
@@ -183,6 +189,7 @@ export function syncUntouchedThreadPromptSelections({
     updatedSelections.reasoningLevel = nextSelections.reasoningLevel;
     changed = true;
   }
+
   if (
     !touchedFields.has("permissionMode") &&
     currentSelections.permissionMode !== nextSelections.permissionMode
@@ -190,6 +197,7 @@ export function syncUntouchedThreadPromptSelections({
     updatedSelections.permissionMode = nextSelections.permissionMode;
     changed = true;
   }
+
   if (
     !touchedFields.has("environmentSelectionValue") &&
     currentSelections.environmentSelectionValue !==
@@ -227,12 +235,14 @@ export function buildExecutionInputSources({
   touchedFields,
 }: BuildExecutionInputSourcesArgs): ScopedExecutionInputSources {
   const usesStoredValues = scope === "new-thread";
+
   const hasTouchedExecutionField =
     touchedFields.has("selectedProviderId") ||
     touchedFields.has("selectedModel") ||
     touchedFields.has("serviceTier") ||
     touchedFields.has("reasoningLevel") ||
     touchedFields.has("permissionMode");
+
   const forcesExplicitExecutionFields =
     scope === "component-local" && hasTouchedExecutionField;
 
@@ -249,6 +259,7 @@ export function buildExecutionInputSources({
     initialSource: initialProviderSource,
     touched: touchedFields.has("selectedProviderId"),
   });
+
   const modelSource = resolveCreateExecutionInputSource({
     hasStoredValue:
       usesStoredValues &&
@@ -260,6 +271,7 @@ export function buildExecutionInputSources({
       forcesExplicitExecutionFields ||
       touchedFields.has("selectedModel"),
   });
+
   const serviceTierSource = resolveCreateExecutionInputSource({
     hasStoredValue:
       usesStoredValues &&
@@ -268,12 +280,14 @@ export function buildExecutionInputSources({
     hasValue: effectiveValues.serviceTier !== undefined,
     touched: forcesExplicitExecutionFields || touchedFields.has("serviceTier"),
   });
+
   const reasoningLevelSource = resolveCreateExecutionInputSource({
     hasStoredValue: usesStoredValues && storedValues.reasoningLevel !== "",
     hasValue: hasValue(effectiveValues.reasoningLevel),
     touched:
       forcesExplicitExecutionFields || touchedFields.has("reasoningLevel"),
   });
+
   const permissionModeSource = resolveCreateExecutionInputSource({
     hasStoredValue: usesStoredValues && storedValues.permissionMode !== "",
     hasValue: hasValue(effectiveValues.permissionMode),
@@ -306,12 +320,15 @@ export function resolvePermissionModeSelection({
   if (permissionModes.includes(rawPermissionMode)) {
     return rawPermissionMode;
   }
+
   if (permissionModes.includes("auto")) {
     return "auto";
   }
+
   if (permissionModes.includes("full")) {
     return "full";
   }
+
   return permissionModes[0] ?? "auto";
 }
 
@@ -320,10 +337,13 @@ export function formatModelLabel(value: string): string {
     .split("-")
     .map((part) => {
       if (part.toLowerCase() === "gpt") return "GPT";
+
       if (/^\d+(\.\d+)*$/.test(part)) return part;
+
       if (/^[a-z]+$/i.test(part)) {
         return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
       }
+
       return part;
     })
     .join("-");

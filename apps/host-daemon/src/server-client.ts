@@ -13,8 +13,8 @@ import {
   type HostDaemonInteractiveInterruptResponse,
   type HostDaemonInteractiveRequestResponse,
   type HostDaemonActiveThread,
+  type HostDaemonOpenThreadWork,
   type HostDaemonEventBatchRequest,
-  type HostDaemonEventEnvelope,
   groupHostDaemonEvents,
   type HostDaemonInteractiveInterruptRequest,
   type HostDaemonInteractiveRequest,
@@ -25,11 +25,11 @@ import {
   type HostDaemonToolCallRequest,
   type HostDaemonToolCallResponse,
   type HostDaemonSkillTree,
-} from "@bb/host-daemon-contract";
-import { HOST_ARTIFACT_MAX_BYTES } from "@bb/host-daemon-contract/protocol";
-import type { PendingInteractionCreate, ToolCallRequest } from "@bb/domain";
+} from "@omnyo/host-daemon-contract";
+import { HOST_ARTIFACT_MAX_BYTES } from "@omnyo/host-daemon-contract/protocol";
+import type { PendingInteractionCreate, ToolCallRequest } from "@omnyo/domain";
 import type { HostDaemonLogger } from "./logger.js";
-import type { EventPostResult } from "./event-sink.js";
+import type { EventPostBatch, EventPostResult } from "./event-sink.js";
 import { runtimeErrorLogFields } from "./error-utils.js";
 import { resolveHostPlatform } from "./host-platform.js";
 import type {
@@ -113,6 +113,7 @@ function parseApiErrorResponseBody(text: string): ApiErrorResponseBody | null {
   }
 
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(text);
   } catch {
@@ -120,6 +121,7 @@ function parseApiErrorResponseBody(text: string): ApiErrorResponseBody | null {
   }
 
   const record = toJsonRecord(parsed);
+
   if (
     !record ||
     typeof record.code !== "string" ||
@@ -130,6 +132,7 @@ function parseApiErrorResponseBody(text: string): ApiErrorResponseBody | null {
 
   const details = toJsonRecord(record.details);
   const protocolUpdateRetryRequested = details?.retryUpdate === true;
+
   const serverMoved =
     record.code === SERVER_MOVED_ERROR_CODE
       ? (serverMovedResponseDetailsSchema.safeParse(details).data ?? null)
@@ -181,8 +184,16 @@ interface CreateServerClientOptions {
   logger: HostDaemonLogger;
   serverHeaders?: Record<string, string>;
   getSessionId: () => string;
-  beforeInteractiveRequestRegistrationAttempt?: () => Promise<void>;
   fetchFn?: FetchFn;
+  runtimeUpdate?: () => {
+    runtimeVersion: string | null;
+    automaticUpdates: boolean;
+  };
+}
+
+export interface CallToolOptions {
+  eventsThrough: number;
+  signal?: AbortSignal;
 }
 
 interface OpenSessionArgs {
@@ -192,6 +203,7 @@ interface OpenSessionArgs {
   instanceId: string;
   localApiPort: number | null;
   activeThreads: HostDaemonActiveThread[] | Promise<HostDaemonActiveThread[]>;
+  openThreadWork: HostDaemonOpenThreadWork[];
   undeliveredEventThreadIds: string[];
   loadedEnvironments:
     | HostDaemonLoadedEnvironment[]
@@ -209,30 +221,40 @@ export interface ServerClient {
     digest: string;
     expectedByteLength: number;
   }): Promise<Uint8Array>;
-  postEvents(events: HostDaemonEventEnvelope[]): Promise<EventPostResult>;
+  postEvents(
+    batch: EventPostBatch,
+    signal?: AbortSignal,
+  ): Promise<EventPostResult>;
   callTool(
     request: ToolCallRequest,
-    signal?: AbortSignal,
+    options: CallToolOptions,
   ): Promise<HostDaemonToolCallResponse>;
   registerInteractiveRequest(
     request: PendingInteractionCreate,
+    eventsThrough: number,
   ): Promise<HostDaemonInteractiveRequestResponse>;
-  interruptInteractiveRequests(args: {
-    providerId: string;
-    reason: string;
-    threadIds: readonly string[];
-  }): Promise<HostDaemonInteractiveInterruptResponse>;
+  interruptInteractiveRequests(
+    args: {
+      providerId: string;
+      reason: string;
+      threadIds: readonly string[];
+      requests?: HostDaemonInteractiveInterruptRequest["requests"];
+    },
+    signal?: AbortSignal,
+  ): Promise<HostDaemonInteractiveInterruptResponse>;
 }
 
 const INTERACTIVE_REQUEST_REGISTRATION_RETRIES = 5;
 
 export function usesSecureInternalFetchTransport(serverUrl: string): boolean {
   let parsed: URL;
+
   try {
     parsed = new URL(serverUrl);
   } catch {
     return false;
   }
+
   if (parsed.protocol === "https:") {
     return true;
   }
@@ -248,10 +270,13 @@ function parseContentLength(value: string | null): number | null {
   if (!value) {
     return null;
   }
+
   const parsed = Number(value);
+
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
     return null;
   }
+
   return parsed;
 }
 
@@ -267,6 +292,7 @@ function validateProjectAttachmentPartialByteLength(
       `Project attachment size mismatch: expected ${args.expectedSizeBytes} bytes, received more than ${args.expectedSizeBytes}`,
     );
   }
+
   if (byteLength > args.maxBytes) {
     throw new Error(
       `Project attachment exceeds ${args.maxBytes} byte limit: received ${byteLength}`,
@@ -286,6 +312,7 @@ function validateProjectAttachmentFinalByteLength(
       `Project attachment size mismatch: expected ${args.expectedSizeBytes} bytes, received ${byteLength}`,
     );
   }
+
   validateProjectAttachmentPartialByteLength(args, byteLength);
 }
 
@@ -295,17 +322,21 @@ async function readProjectAttachmentBytes(
 ): Promise<Uint8Array> {
   if (!response.body) {
     validateProjectAttachmentFinalByteLength(args, 0);
+
     return new Uint8Array();
   }
 
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
+
   while (true) {
     const result = await reader.read();
+
     if (result.done) {
       break;
     }
+
     totalBytes += result.value.byteLength;
     validateProjectAttachmentPartialByteLength(args, totalBytes);
     chunks.push(result.value);
@@ -314,10 +345,12 @@ async function readProjectAttachmentBytes(
   validateProjectAttachmentFinalByteLength(args, totalBytes);
   const bytes = new Uint8Array(totalBytes);
   let offset = 0;
+
   for (const chunk of chunks) {
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+
   return bytes;
 }
 
@@ -329,6 +362,7 @@ function validateHostArtifactPartialByteLength(
   if (byteLength > maxBytes) {
     throw new Error(`Host artifact exceeds the ${maxBytes} byte limit`);
   }
+
   if (byteLength > expectedByteLength) {
     throw new Error(
       `Host artifact length mismatch: expected ${expectedByteLength}, received more than ${expectedByteLength}`,
@@ -343,14 +377,17 @@ function assertHostArtifactContentLength(
   const contentLength = parseContentLength(
     response.headers.get("content-length"),
   );
+
   if (contentLength === null) {
     return;
   }
+
   if (contentLength > HOST_ARTIFACT_MAX_BYTES) {
     throw new Error(
       `Host artifact exceeds the ${HOST_ARTIFACT_MAX_BYTES} byte limit`,
     );
   }
+
   if (contentLength !== expectedByteLength) {
     throw new Error(
       `Host artifact length mismatch: expected ${expectedByteLength}, received ${contentLength}`,
@@ -372,9 +409,11 @@ export async function readHostArtifactBytes(
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
+
   try {
     while (true) {
       const result = await reader.read();
+
       if (result.done) break;
       totalBytes += result.value.byteLength;
       validateHostArtifactPartialByteLength(
@@ -394,13 +433,48 @@ export async function readHostArtifactBytes(
       `Host artifact length mismatch: expected ${expectedByteLength}, received ${totalBytes}`,
     );
   }
+
   const bytes = new Uint8Array(totalBytes);
   let offset = 0;
+
   for (const chunk of chunks) {
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+
   return bytes;
+}
+
+const OPTIONAL_SESSION_OPEN_FIELDS = ["openThreadWork"] as const;
+
+type OptionalSessionOpenField = (typeof OPTIONAL_SESSION_OPEN_FIELDS)[number];
+
+function isOptionalSessionOpenField(
+  key: string | undefined,
+): key is OptionalSessionOpenField {
+  return OPTIONAL_SESSION_OPEN_FIELDS.some((field) => field === key);
+}
+
+function readUnsupportedOptionalSessionOpenFields(
+  error: ServerResponseError,
+): OptionalSessionOpenField[] {
+  if (
+    error.status !== 400 ||
+    error.code !== "invalid_request" ||
+    error.bodyMessage === null
+  ) {
+    return [];
+  }
+
+  const keyList = /^Unrecognized keys?: (.+)$/.exec(error.bodyMessage)?.[1];
+
+  if (keyList === undefined) {
+    return [];
+  }
+
+  const keys = [...keyList.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+
+  return keys.length > 0 && keys.every(isOptionalSessionOpenField) ? keys : [];
 }
 
 export function createServerClient(
@@ -410,9 +484,11 @@ export function createServerClient(
 
   function requireSessionId(): string {
     const sessionId = options.getSessionId();
+
     if (!sessionId) {
       throw new Error("Server session is not open");
     }
+
     return sessionId;
   }
 
@@ -429,6 +505,7 @@ export function createServerClient(
     query?: Record<string, string | undefined>,
   ): string {
     const url = new URL(`/internal${pathname}`, options.serverUrl);
+
     if (query) {
       for (const [key, value] of Object.entries(query)) {
         if (value !== undefined) {
@@ -436,6 +513,7 @@ export function createServerClient(
         }
       }
     }
+
     return url.toString();
   }
 
@@ -444,6 +522,7 @@ export function createServerClient(
     response: Response,
   ): Promise<ServerResponseError> {
     const body = await readApiErrorResponseBody(response);
+
     return new ServerResponseError({
       action,
       bodyMessage: body?.message ?? null,
@@ -465,24 +544,61 @@ export function createServerClient(
         instanceId: args.instanceId,
         hostName: args.hostName,
         hasMachineCredential: Boolean(
-          options.serverHeaders?.["x-bb-connect-machine"]?.trim(),
+          options.serverHeaders?.["x-omnyo-connect-machine"]?.trim(),
         ),
         platform: resolveHostPlatform(),
         dataDir: args.dataDir,
         localApiPort: args.localApiPort,
         protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
         activeThreads: await args.activeThreads,
+        openThreadWork: args.openThreadWork,
         undeliveredEventThreadIds: args.undeliveredEventThreadIds,
         loadedEnvironments: await args.loadedEnvironments,
+        ...(options.runtimeUpdate?.() ?? {
+          runtimeVersion: null,
+          automaticUpdates: false,
+        }),
       };
-      const response = await fetchFn(buildInternalUrl("/session/open"), {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify(payload),
-      });
+
+      const postSessionOpen = (body: HostDaemonSessionOpenRequest) =>
+        fetchFn(buildInternalUrl("/session/open"), {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify(body),
+        });
+
+      let response = await postSessionOpen(payload);
 
       if (response.status !== 201) {
-        throw await createResponseError("open session", response);
+        const error = await createResponseError("open session", response);
+
+        const unsupportedFields =
+          readUnsupportedOptionalSessionOpenFields(error);
+
+        if (unsupportedFields.length === 0) {
+          throw error;
+        }
+
+        options.logger.warn(
+          {
+            detail: error.bodyMessage,
+            status: error.status,
+            unsupportedFields,
+          },
+          "Server predates optional session-open fields; opening the session without them",
+        );
+
+        const supportedPayload = { ...payload };
+
+        for (const field of unsupportedFields) {
+          supportedPayload[field] = undefined;
+        }
+
+        response = await postSessionOpen(supportedPayload);
+
+        if (response.status !== 201) {
+          throw await createResponseError("open session", response);
+        }
       }
 
       return hostDaemonSessionOpenResponseSchema.parse(await response.json());
@@ -503,6 +619,7 @@ export function createServerClient(
         projectId: args.projectId,
         path: args.path,
       };
+
       const response = await fetchFn(
         buildInternalUrl("/session/project-attachment-content", query),
         {
@@ -518,11 +635,13 @@ export function createServerClient(
       const contentLength = parseContentLength(
         response.headers.get("content-length"),
       );
+
       if (contentLength !== null) {
         validateProjectAttachmentFinalByteLength(args, contentLength);
       }
 
       const bytes = await readProjectAttachmentBytes(response, args);
+
       return {
         bytes,
       };
@@ -533,9 +652,11 @@ export function createServerClient(
         buildInternalUrl(`/skills/tree/${encodeURIComponent(treeHash)}`),
         { method: "GET", headers: headers() },
       );
+
       if (!response.ok) {
         throw await createResponseError("fetch skill tree", response);
       }
+
       return hostDaemonSkillTreeSchema.parse(await response.json());
     },
 
@@ -545,27 +666,41 @@ export function createServerClient(
           `Host artifact exceeds the ${HOST_ARTIFACT_MAX_BYTES} byte limit`,
         );
       }
+
       const response = await fetchFn(
         buildInternalUrl(
           `/plugins/${encodeURIComponent(args.pluginId)}/host/${encodeURIComponent(args.digest)}`,
         ),
         { method: "GET", headers: headers() },
       );
+
       if (!response.ok) {
         throw await createResponseError("fetch plugin host artifact", response);
       }
+
       assertHostArtifactContentLength(response, args.expectedByteLength);
+
       return readHostArtifactBytes(response, args.expectedByteLength);
     },
 
     async postEvents(
-      events: HostDaemonEventEnvelope[],
+      batch: EventPostBatch,
+      signal?: AbortSignal,
     ): Promise<EventPostResult> {
       const payload: HostDaemonEventBatchRequest = {
         sessionId: requireSessionId(),
-        eventGroups: groupHostDaemonEvents(events),
+        eventGroups: groupHostDaemonEvents(batch.events),
+        firstEventIndex: batch.firstEventIndex,
+        ...(batch.sourceInstanceId === undefined
+          ? {}
+          : { sourceInstanceId: batch.sourceInstanceId }),
       };
+
       const response = await fetchFn(buildInternalUrl("/session/events"), {
+        signal:
+          signal === undefined
+            ? AbortSignal.timeout(30_000)
+            : AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
         method: "POST",
         headers: headers(),
         body: JSON.stringify(payload),
@@ -577,15 +712,19 @@ export function createServerClient(
 
       const json = await response.json();
       const parsed = hostDaemonEventBatchResponseSchema.parse(json);
+
       return {
         acceptedEvents: parsed.acceptedEvents,
         rejectedEvents: parsed.rejectedEvents,
+        ...(parsed.duplicateEvents === undefined
+          ? {}
+          : { duplicateEvents: parsed.duplicateEvents }),
       };
     },
 
     async callTool(
       request: ToolCallRequest,
-      signal?: AbortSignal,
+      callOptions: CallToolOptions,
     ): Promise<HostDaemonToolCallResponse> {
       const payload: HostDaemonToolCallRequest = {
         threadId: request.threadId,
@@ -597,9 +736,11 @@ export function createServerClient(
           ? { arguments: request.arguments }
           : {}),
         sessionId: requireSessionId(),
+        eventsThrough: callOptions.eventsThrough,
       };
+
       const response = await fetchFn(buildInternalUrl("/session/tool-call"), {
-        signal,
+        signal: callOptions.signal,
         method: "POST",
         headers: headers(),
         body: JSON.stringify(payload),
@@ -614,14 +755,16 @@ export function createServerClient(
 
     async registerInteractiveRequest(
       request: PendingInteractionCreate,
+      eventsThrough: number,
     ): Promise<HostDaemonInteractiveRequestResponse> {
       return pRetry(
         async () => {
-          await options.beforeInteractiveRequestRegistrationAttempt?.();
           const payload: HostDaemonInteractiveRequest = {
             sessionId: requireSessionId(),
             interaction: request,
+            eventsThrough,
           };
+
           const response = await fetchFn(
             buildInternalUrl("/session/interactive-request"),
             {
@@ -665,16 +808,23 @@ export function createServerClient(
 
     async interruptInteractiveRequests(
       args,
+      signal,
     ): Promise<HostDaemonInteractiveInterruptResponse> {
       const payload: HostDaemonInteractiveInterruptRequest = {
         sessionId: requireSessionId(),
         providerId: args.providerId,
         threadIds: [...args.threadIds],
         reason: args.reason,
+        ...(args.requests === undefined ? {} : { requests: args.requests }),
       };
+
       const response = await fetchFn(
         buildInternalUrl("/session/interactive-request/interrupt"),
         {
+          signal:
+            signal === undefined
+              ? AbortSignal.timeout(30_000)
+              : AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
           method: "POST",
           headers: headers(),
           body: JSON.stringify(payload),

@@ -50,6 +50,7 @@ declare const schema: z$1.ZodEnum<{
     alpha: "alpha";
 }>;
 `;
+
     const second = `type Choice = "alpha" | "zebra";
 declare const objectSchema: z.ZodObject<{
     alpha: z.ZodString;

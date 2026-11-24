@@ -1,12 +1,16 @@
-import { WorkspaceError } from "bb-environment-provider-host/git";
+import { WorkspaceError } from "omnyo-environment-provider-host/git";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
 const REPO_DIR_NAME_PATTERN = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/;
+
 const WINDOWS_RESERVED_NAME_PATTERN =
   /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/iu;
+
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
+
 const MAX_REPO_DIR_NAME_BYTES = 200;
+
 const REPO_DIR_HASH_LENGTH = 16;
 
 function invalidSourcePath(sourcePath: string): WorkspaceError {
@@ -20,15 +24,19 @@ function sourcePathBasename(sourcePath: string): string {
   if (!sourcePath || CONTROL_CHARACTER_PATTERN.test(sourcePath)) {
     throw invalidSourcePath(sourcePath);
   }
+
   const pathApi = path.posix.isAbsolute(sourcePath)
     ? path.posix
     : path.win32.isAbsolute(sourcePath)
       ? path.win32
       : null;
+
   if (pathApi === null) {
     throw invalidSourcePath(sourcePath);
   }
+
   const trailingSeparators = pathApi === path.posix ? /\/+$/u : /[\\/]+$/u;
+
   return pathApi.basename(sourcePath.replace(trailingSeparators, ""));
 }
 
@@ -48,12 +56,15 @@ function slugRepoDirName(candidate: string): string {
     .update(candidate, "utf8")
     .digest("hex")
     .slice(0, REPO_DIR_HASH_LENGTH);
+
   const readableLimit = MAX_REPO_DIR_NAME_BYTES - suffix.length - 1;
+
   const normalizedReadable = candidate
     .normalize("NFKD")
     .replace(/\p{Mark}+/gu, "")
     .replace(/[^A-Za-z0-9._-]+/gu, "-")
     .replace(/^[._-]+|[._-]+$/gu, "");
+
   const readable = (
     WINDOWS_RESERVED_NAME_PATTERN.test(normalizedReadable)
       ? `repo-${normalizedReadable}`
@@ -61,11 +72,13 @@ function slugRepoDirName(candidate: string): string {
   )
     .slice(0, readableLimit)
     .replace(/[._-]+$/u, "");
+
   return `${readable || "repo"}-${suffix}`;
 }
 
 export function deriveRepoDirName(sourcePath: string): string {
   const basename = sourcePathBasename(sourcePath);
+
   const candidate = basename.endsWith(".git")
     ? basename.slice(0, -".git".length)
     : basename;
@@ -73,6 +86,7 @@ export function deriveRepoDirName(sourcePath: string): string {
   if (!candidate || candidate === "." || candidate === "..") {
     throw invalidSourcePath(sourcePath);
   }
+
   return isSafeRepoDirName(candidate) ? candidate : slugRepoDirName(candidate);
 }
 
@@ -97,6 +111,7 @@ export function resolveWorktreeAttemptRoot(args: {
       "A worktree path key must be a single path segment",
     );
   }
+
   return path.join(resolveWorktreesRoot(args.dataDir), args.pathKey);
 }
 
@@ -127,5 +142,6 @@ export function resolveWorktreeChildPath(args: {
       "A managed worktree directory name must be a safe path segment",
     );
   }
+
   return path.join(resolveWorktreeAttemptRoot(args), args.childName);
 }

@@ -15,6 +15,7 @@ import type { AgentRuntime } from "./types.js";
 const acpBridgeModulePath = fileURLToPath(
   new URL("../../provider-bridge-acp/src/bridge/bridge.ts", import.meta.url),
 );
+
 const fakeAgentPath = fileURLToPath(
   new URL(
     "../../provider-bridge-acp/src/bridge/fake-acp-agent.mjs",
@@ -27,7 +28,7 @@ describe("acp process topology", () => {
   const runtimes: AgentRuntime[] = [];
 
   beforeEach(() => {
-    workspaceDir = mkdtempSync(join(tmpdir(), "bb-acp-topology-"));
+    workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-acp-topology-"));
   });
 
   afterEach(async () => {
@@ -38,6 +39,7 @@ describe("acp process topology", () => {
   it("releases the thread on the bridge when a construction times out on the runtime's side", async () => {
     const setTimeoutReal = setTimeout;
     const readyFile = join(workspaceDir, "agent-ready");
+
     const runtime = withBridgeLaunch(
       createAgentRuntime({
         workspacePath: workspaceDir,
@@ -65,10 +67,12 @@ describe("acp process topology", () => {
         },
       }),
     );
+
     runtimes.push(runtime);
 
     await runtime.ensureProvider({ providerId: "acp" });
     const constructionDeadlines: Array<() => void> = [];
+
     const constructionTimeout = vi
       .fn<typeof setTimeout>()
       .mockImplementation((callback, delay, ...args) => {
@@ -78,9 +82,12 @@ describe("acp process topology", () => {
           clearTimeout(timer);
           callback(...args);
         });
+
         return timer;
       });
+
     vi.stubGlobal("setTimeout", constructionTimeout);
+
     try {
       const outcome = runtime
         .startThread({
@@ -94,6 +101,7 @@ describe("acp process topology", () => {
           () => null,
           (error: unknown) => error,
         );
+
       await waitForRuntimeState({
         label: "the agent and its construction deadline are ready",
         predicate: () =>
@@ -102,6 +110,7 @@ describe("acp process topology", () => {
       });
       vi.unstubAllGlobals();
       const expire = constructionDeadlines[0];
+
       if (expire === undefined)
         throw new Error("No construction deadline was armed");
       expire();
@@ -111,6 +120,7 @@ describe("acp process topology", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+
     expect(runtime.hasThread("t1")).toBe(false);
     await waitForRuntimeState({
       label: "the agent spawned for the construction",
@@ -121,8 +131,10 @@ describe("acp process topology", () => {
       label: "the agent under construction was released",
       predicate: () => {
         const pid = Number(readFileSync(readyFile, "utf8"));
+
         try {
           process.kill(pid, 0);
+
           return false;
         } catch {
           return true;

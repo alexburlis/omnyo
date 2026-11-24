@@ -9,12 +9,12 @@ import {
   type WorkspaceOpenTarget,
   type WorkspaceOpenTargetIcon,
   type WorkspaceOpenTargetId,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   execPortableFile,
   pathExists,
   sanitizeInheritedChildProcessEnv,
-} from "@bb/process-utils";
+} from "@omnyo/process-utils";
 import {
   BASIC_FILE_OPEN_CAPABILITIES,
   FILE_MANAGER_OPEN_CAPABILITIES,
@@ -67,6 +67,7 @@ interface ResolvedMacCommandExecutable {
 }
 
 export { WorkspaceOpenTargetError } from "./errors.js";
+
 export type {
   ListWorkspaceOpenTargetsOptions,
   OpenPathInTargetArgs,
@@ -78,11 +79,17 @@ export interface WorkspaceOpenTargetRuntimeOptions {
 }
 
 const execFileAsync = promisify(execFile);
+
 const DESKTOP_APP_TARGET_ID_PREFIX = "desktop-app:";
+
 const MAC_APP_TARGET_ID_PREFIX = "mac-app:";
+
 const MAC_FILE_APPLICATION_DISCOVERY_LIMIT = 5;
+
 const MAC_APPLICATION_ICON_THUMBNAIL_SIZE_PX = 32;
+
 const TERMINAL_EDITOR_CANDIDATES = ["nvim", "vim", "nano", "less"] as const;
+
 const MAC_APPLICATIONS_FOR_FILE_SCRIPT = `
 function run(argv) {
   ObjC.import("AppKit");
@@ -102,6 +109,7 @@ function run(argv) {
   return JSON.stringify(output);
 }
 `;
+
 const macApplicationsForFileResultSchema = z.array(
   z
     .object({
@@ -127,6 +135,7 @@ async function toWorkspaceOpenTarget(
     }),
     capabilities: definition.capabilities,
   };
+
   if (
     definition.macos.openMode !== "default-app" &&
     definition.macos.remoteSshOpenCommand !== undefined &&
@@ -139,6 +148,7 @@ async function toWorkspaceOpenTarget(
     target.remoteSshCapabilities =
       definition.macos.remoteSshOpenCommand.capabilities;
   }
+
   return target;
 }
 
@@ -169,6 +179,7 @@ async function toGenericMacApplicationOpenTarget(
     application.appPath,
     runtime,
   );
+
   return {
     id: encodeMacApplicationTargetId(application.bundleId),
     label: application.label,
@@ -222,6 +233,7 @@ function findLaunchAdapterForMacApplication(
 ): LaunchAdapter | null {
   if (application.bundleId !== null) {
     const bundleIdAdapter = findLaunchAdapterByBundleId(application.bundleId);
+
     if (bundleIdAdapter !== null) {
       return bundleIdAdapter;
     }
@@ -242,6 +254,7 @@ function getCliOpenExecutable(adapter: LaunchAdapter): string | null {
   if (adapter.macos.openMode === "default-app") {
     return null;
   }
+
   return (
     adapter.macos.pathOpenCommand?.executable ??
     adapter.macos.lineOpenCommand?.executable ??
@@ -256,7 +269,9 @@ async function isCliTargetAvailable(
   if (adapter.macos.openMode === "default-app") {
     return false;
   }
+
   const executable = getCliOpenExecutable(adapter);
+
   return executable === null
     ? false
     : isExecutableAvailable(executable, runtime);
@@ -270,9 +285,11 @@ async function listCliWorkspaceOpenTargets(
       if (!(await isCliTargetAvailable(adapter, runtime))) {
         return null;
       }
+
       return toCliWorkspaceOpenTarget(adapter);
     }),
   );
+
   return targets.filter(isWorkspaceOpenTarget);
 }
 
@@ -286,6 +303,7 @@ async function getDefaultOpenExecutable(
     ) {
       return "wslview";
     }
+
     return (await isExecutableAvailable("xdg-open", runtime))
       ? "xdg-open"
       : null;
@@ -304,6 +322,7 @@ async function getFileManagerExecutable(
     ) {
       return "explorer.exe";
     }
+
     return (await isExecutableAvailable("xdg-open", runtime))
       ? "xdg-open"
       : null;
@@ -372,6 +391,7 @@ async function listPlatformWorkspaceOpenTargets(
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<WorkspaceOpenTarget[]> {
   const targets: WorkspaceOpenTarget[] = [];
+
   if (await getDefaultOpenExecutable(runtime)) {
     targets.push({
       id: "default-app",
@@ -393,6 +413,7 @@ async function listPlatformWorkspaceOpenTargets(
   }
 
   const terminalExecutable = await getTerminalExecutable(runtime);
+
   if (terminalExecutable !== null) {
     targets.push({
       id: "terminal",
@@ -408,9 +429,11 @@ async function listPlatformWorkspaceOpenTargets(
 
 function parseDesktopEntryValue(line: string): [string, string] | null {
   const separatorIndex = line.indexOf("=");
+
   if (separatorIndex <= 0) {
     return null;
   }
+
   return [
     line.slice(0, separatorIndex).trim(),
     line.slice(separatorIndex + 1).trim(),
@@ -433,19 +456,25 @@ function parseLinuxDesktopApplication(
 ): LinuxDesktopApplication | null {
   let inDesktopEntry = false;
   const fields = new Map<string, string>();
+
   for (const rawLine of content.split(/\r?\n/u)) {
     const line = rawLine.trim();
+
     if (line === "" || line.startsWith("#")) {
       continue;
     }
+
     if (line.startsWith("[") && line.endsWith("]")) {
       inDesktopEntry = line === "[Desktop Entry]";
       continue;
     }
+
     if (!inDesktopEntry) {
       continue;
     }
+
     const parsed = parseDesktopEntryValue(line);
+
     if (parsed !== null) {
       fields.set(parsed[0], parsed[1]);
     }
@@ -462,6 +491,7 @@ function parseLinuxDesktopApplication(
   const label = fields.get("Name");
   const exec = fields.get("Exec");
   const categories = parseDesktopEntryList(fields.get("Categories"));
+
   if (
     !label ||
     !exec ||
@@ -485,39 +515,50 @@ async function listLinuxDesktopApplications(
 ): Promise<LinuxDesktopApplication[]> {
   const applications: LinuxDesktopApplication[] = [];
   const seenIds = new Set<string>();
+
   for (const directory of runtime.desktopFileDirectories ?? []) {
     let entries: import("node:fs").Dirent[];
+
     try {
       entries = await fs.readdir(directory, { withFileTypes: true });
     } catch {
       continue;
     }
+
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith(".desktop")) {
         continue;
       }
+
       const desktopFilePath = path.join(directory, entry.name);
       const desktopFileId = path.basename(desktopFilePath, ".desktop");
+
       if (seenIds.has(desktopFileId)) {
         continue;
       }
+
       const content = await fs
         .readFile(desktopFilePath, "utf8")
         .catch(() => null);
+
       if (content === null) {
         continue;
       }
+
       const application = parseLinuxDesktopApplication(
         desktopFilePath,
         content,
       );
+
       if (application === null) {
         continue;
       }
+
       seenIds.add(desktopFileId);
       applications.push(application);
     }
   }
+
   return applications.sort((a, b) => a.label.localeCompare(b.label));
 }
 
@@ -543,15 +584,19 @@ async function defaultExecFile(
   const env = sanitizeInheritedChildProcessEnv({
     env: options?.env ?? process.env,
   });
+
   if (process.platform === "win32") {
     const result = await execPortableFile(file, args, {
       cwd: os.homedir(),
       env,
       maxBuffer: WINDOWS_EXEC_MAX_BUFFER_BYTES,
     });
+
     return { stdout: result.stdout };
   }
+
   const result = await execFileAsync(file, args, { env });
+
   return {
     stdout: result.stdout,
   };
@@ -570,10 +615,12 @@ export function createWorkspaceOpenTargetRuntime(
   options: WorkspaceOpenTargetRuntimeOptions = {},
 ): WorkspaceOpenTargetRuntime {
   const homeDirectory = os.homedir();
+
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...(options.shellPath !== undefined ? { PATH: options.shellPath } : {}),
   };
+
   return {
     applicationDirectories: [
       "/Applications",
@@ -603,6 +650,7 @@ function getMacApplicationCandidatePaths(
     definition.macos.appName,
     ...(definition.macos.additionalAppNames ?? []),
   ];
+
   return appNames.flatMap((appName) =>
     runtime.applicationDirectories.map((directory) =>
       path.join(directory, `${appName}.app`),
@@ -632,7 +680,9 @@ async function readMacApplicationInfoPlistValue(
       "-",
       path.join(appPath, "Contents", "Info.plist"),
     ]);
+
     const value = result.stdout.trim();
+
     return value.length === 0 ? null : value;
   } catch {
     return null;
@@ -648,17 +698,22 @@ async function resolveMacApplicationIconDataUrl(
     "CFBundleIconFile",
     runtime,
   );
+
   if (iconFile === null) {
     return null;
   }
 
   const iconFileName =
     path.extname(iconFile) === "" ? `${iconFile}.icns` : iconFile;
+
   const iconPath = path.join(appPath, "Contents", "Resources", iconFileName);
+
   const tempDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "bb-open-target-icon-"),
+    path.join(os.tmpdir(), "omnyo-open-target-icon-"),
   );
+
   const pngPath = path.join(tempDir, `${path.basename(iconPath)}.png`);
+
   try {
     await runtime.execFile("qlmanage", [
       "-t",
@@ -670,6 +725,7 @@ async function resolveMacApplicationIconDataUrl(
     ]);
     const iconBytes = await fs.readFile(pngPath);
     const dataUrl = `data:image/png;base64,${iconBytes.toString("base64")}`;
+
     return dataUrl.length > WORKSPACE_OPEN_TARGET_ICON_DATA_URL_MAX_LENGTH
       ? null
       : dataUrl;
@@ -694,6 +750,7 @@ async function resolveMacTargetIcon({
       appPath,
       runtime,
     );
+
     if (iconDataUrl !== null) {
       return { kind: "data-url", dataUrl: iconDataUrl };
     }
@@ -719,6 +776,7 @@ async function findMacApplicationPathsByBundleId(
     const result = await runtime.execFile("mdfind", [
       `kMDItemCFBundleIdentifier == ${toMdfindStringLiteral(bundleId)}`,
     ]);
+
     return result.stdout
       .split("\n")
       .map((line) => line.trim())
@@ -762,17 +820,20 @@ async function findJetBrainsToolboxApplicationPath(
     "Toolbox",
     "apps",
   );
+
   const pending: Array<{ depth: number; directory: string }> = [
     { directory: toolboxRoot, depth: 0 },
   ];
 
   while (pending.length > 0) {
     const current = pending.shift();
+
     if (current === undefined || current.depth > 5) {
       continue;
     }
 
     let entries: import("node:fs").Dirent[];
+
     try {
       entries = await fs.readdir(current.directory, { withFileTypes: true });
     } catch {
@@ -783,12 +844,14 @@ async function findJetBrainsToolboxApplicationPath(
       entries.map((entry) => entry.name),
     )) {
       const entry = entries.find((candidate) => candidate.name === entryName);
+
       if (entry === undefined || !entry.isDirectory()) {
         continue;
       }
 
       const entryPath = path.join(current.directory, entry.name);
       const lowerName = entry.name.toLowerCase();
+
       if (
         lowerName.endsWith(".app") &&
         definition.macos.jetBrainsToolbox.bundlePrefixes.some((prefix) =>
@@ -801,6 +864,7 @@ async function findJetBrainsToolboxApplicationPath(
           "MacOS",
           definition.macos.jetBrainsToolbox.executable,
         );
+
         if (await pathExists(executablePath)) {
           return entryPath;
         }
@@ -827,6 +891,7 @@ async function findMacApplicationPath(
   for (const bundleId of definition.macos.bundleIds) {
     const paths = await findMacApplicationPathsByBundleId(bundleId, runtime);
     const appPath = paths.find((candidate) => candidate.endsWith(".app"));
+
     if (appPath) {
       return appPath;
     }
@@ -835,6 +900,7 @@ async function findMacApplicationPath(
   const candidatePaths = getMacApplicationCandidatePaths(definition, runtime);
   const results = await Promise.all(candidatePaths.map(pathExists));
   const index = results.findIndex(Boolean);
+
   if (index !== -1) {
     return candidatePaths[index];
   }
@@ -847,6 +913,7 @@ async function findMacApplicationPathByBundleId(
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<string | null> {
   const paths = await findMacApplicationPathsByBundleId(bundleId, runtime);
+
   return paths.find((candidate) => candidate.endsWith(".app")) ?? null;
 }
 
@@ -878,6 +945,7 @@ async function listMacApplicationsForFilePath(
   }
 
   let parsedApplications: z.infer<typeof macApplicationsForFileResultSchema>;
+
   try {
     const result = await runtime.execFile("osascript", [
       "-l",
@@ -887,6 +955,7 @@ async function listMacApplicationsForFilePath(
       "--",
       filePath,
     ]);
+
     parsedApplications = macApplicationsForFileResultSchema.parse(
       JSON.parse(result.stdout.trim()),
     );
@@ -897,16 +966,19 @@ async function listMacApplicationsForFilePath(
   const applications: DiscoveredMacApplication[] = [];
   const seenBundleIds = new Set<string>();
   const seenPaths = new Set<string>();
+
   for (const application of parsedApplications) {
     if (!application.appPath.endsWith(".app")) {
       continue;
     }
+
     if (
       application.bundleId !== null &&
       seenBundleIds.has(application.bundleId)
     ) {
       continue;
     }
+
     if (application.bundleId === null && seenPaths.has(application.appPath)) {
       continue;
     }
@@ -922,6 +994,7 @@ async function listMacApplicationsForFilePath(
       bundleId: application.bundleId,
       label: await readMacApplicationLabel(application.appPath, runtime),
     });
+
     if (applications.length >= MAC_FILE_APPLICATION_DISCOVERY_LIMIT) {
       break;
     }
@@ -957,10 +1030,56 @@ function isWorkspaceOpenTarget(
   return target !== null;
 }
 
-async function listKnownMacWorkspaceOpenTargets(
+interface KnownMacWorkspaceOpenTargetScan {
+  applicationDirectories: string;
+  expiresAt: number;
+  targets: Promise<WorkspaceOpenTarget[]>;
+}
+
+const KNOWN_MAC_WORKSPACE_OPEN_TARGETS_TTL_MS = 5 * 60 * 1000;
+
+const knownMacWorkspaceOpenTargetScans = new WeakMap<
+  WorkspaceOpenTargetRuntime["execFile"],
+  KnownMacWorkspaceOpenTargetScan
+>();
+
+function listKnownMacWorkspaceOpenTargets(
+  runtime: WorkspaceOpenTargetRuntime,
+): Promise<WorkspaceOpenTarget[]> {
+  const applicationDirectories = JSON.stringify(runtime.applicationDirectories);
+  const now = Date.now();
+  const scan = knownMacWorkspaceOpenTargetScans.get(runtime.execFile);
+
+  if (
+    scan !== undefined &&
+    scan.applicationDirectories === applicationDirectories &&
+    scan.expiresAt > now
+  ) {
+    return scan.targets;
+  }
+
+  const targets = scanKnownMacWorkspaceOpenTargets(runtime);
+
+  const entry = {
+    applicationDirectories,
+    expiresAt: now + KNOWN_MAC_WORKSPACE_OPEN_TARGETS_TTL_MS,
+    targets,
+  };
+
+  knownMacWorkspaceOpenTargetScans.set(runtime.execFile, entry);
+  targets.catch(() => {
+    if (knownMacWorkspaceOpenTargetScans.get(runtime.execFile) === entry)
+      knownMacWorkspaceOpenTargetScans.delete(runtime.execFile);
+  });
+
+  return targets;
+}
+
+async function scanKnownMacWorkspaceOpenTargets(
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<WorkspaceOpenTarget[]> {
   const targets: WorkspaceOpenTarget[] = [];
+
   for (const adapter of LAUNCH_ADAPTERS) {
     if (adapter.macos.openMode === "default-app" || adapter.macos.builtIn) {
       targets.push(await toWorkspaceOpenTarget(adapter, runtime, null));
@@ -968,10 +1087,12 @@ async function listKnownMacWorkspaceOpenTargets(
     }
 
     const appPath = await findMacApplicationPath(adapter, runtime);
+
     if (appPath !== null) {
       targets.push(await toWorkspaceOpenTarget(adapter, runtime, appPath));
     }
   }
+
   return targets;
 }
 
@@ -985,10 +1106,12 @@ export async function listWorkspaceOpenTargetsWithRuntime(
       ...(await listWindowsPlatformWorkspaceOpenTargets(runtime)),
     ];
   }
+
   if (runtime.platform !== "darwin") {
     if (runtime.platform !== "linux") {
       return [];
     }
+
     return [
       ...(await listCliWorkspaceOpenTargets(runtime)),
       ...(await listPlatformWorkspaceOpenTargets(runtime)),
@@ -1000,10 +1123,12 @@ export async function listWorkspaceOpenTargetsWithRuntime(
 
   const targets: WorkspaceOpenTarget[] = [];
   const seenTargetIds = new Set<WorkspaceOpenTargetId>();
+
   const pushTarget = (target: WorkspaceOpenTarget): void => {
     if (seenTargetIds.has(target.id)) {
       return;
     }
+
     seenTargetIds.add(target.id);
     targets.push(target);
   };
@@ -1016,14 +1141,17 @@ export async function listWorkspaceOpenTargetsWithRuntime(
     options.path === undefined
       ? []
       : await listMacApplicationsForFilePath(options.path, runtime);
+
   for (const application of pathSpecificApplications) {
     const adapter = findLaunchAdapterForMacApplication(application);
+
     if (adapter !== null) {
       pushTarget(
         await toWorkspaceOpenTarget(adapter, runtime, application.appPath),
       );
       continue;
     }
+
     if (application.bundleId !== null) {
       pushTarget(
         await toGenericMacApplicationOpenTarget(
@@ -1045,17 +1173,20 @@ function findLaunchAdapter(
 
 function requireLaunchAdapter(targetId: WorkspaceOpenTargetId): LaunchAdapter {
   const definition = findLaunchAdapter(targetId);
+
   if (!definition) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
       message: `Workspace open target is unavailable: ${targetId}`,
     });
   }
+
   return definition;
 }
 
 async function requireOpenablePath(targetPath: string): Promise<ExistingPath> {
   const stat = await fs.stat(targetPath).catch(() => null);
+
   if (!stat) {
     throw new WorkspaceOpenTargetError({
       code: "path_not_found",
@@ -1104,6 +1235,7 @@ async function isExecutableAvailable(
       [executable],
       { env: runtime.env },
     );
+
     return true;
   } catch {
     return false;
@@ -1116,6 +1248,7 @@ async function isServiceExecutableAvailable(
 ): Promise<boolean> {
   try {
     await runtime.execFile("which", [executable]);
+
     return true;
   } catch {
     return false;
@@ -1132,6 +1265,7 @@ async function resolveMacBundledExecutable(
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<ResolvedMacCommandExecutable | null> {
   const appPath = await findMacApplicationPath(definition, runtime);
+
   if (appPath === null) {
     return null;
   }
@@ -1140,6 +1274,7 @@ async function resolveMacBundledExecutable(
     appPath,
     ...bundledExecutable.relativeExecutablePath,
   );
+
   if (!(await pathExists(executablePath))) {
     return null;
   }
@@ -1164,9 +1299,11 @@ async function resolveMacCommandExecutable(
 ): Promise<ResolvedMacCommandExecutable | null> {
   for (const candidate of [command, ...(command.fallbackExecutables ?? [])]) {
     const serviceExecutable = isMacServiceExecutable(candidate.executable);
+
     const available = serviceExecutable
       ? await isServiceExecutableAvailable(candidate.executable, runtime)
       : await isExecutableAvailable(candidate.executable, runtime);
+
     if (available) {
       return {
         file: candidate.executable,
@@ -1174,17 +1311,20 @@ async function resolveMacCommandExecutable(
         ...(serviceExecutable ? {} : { env: runtime.env }),
       };
     }
+
     if (candidate.bundledExecutable !== undefined) {
       const resolved = await resolveMacBundledExecutable(
         definition,
         candidate.bundledExecutable,
         runtime,
       );
+
       if (resolved !== null) {
         return resolved;
       }
     }
   }
+
   return null;
 }
 
@@ -1192,11 +1332,13 @@ async function resolveTerminalEditorCommand(
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<string | null> {
   const visual = runtime.env?.VISUAL?.trim();
+
   if (visual) {
     return visual;
   }
 
   const editor = runtime.env?.EDITOR?.trim();
+
   if (editor) {
     return editor;
   }
@@ -1240,6 +1382,7 @@ async function maybeResolveMacLineOpenInvocation(
   }
 
   const lineOpenCommand = args.definition.macos.lineOpenCommand;
+
   if (!lineOpenCommand) {
     return null;
   }
@@ -1249,6 +1392,7 @@ async function maybeResolveMacLineOpenInvocation(
     lineOpenCommand,
     runtime,
   );
+
   if (commandExecutable === null) {
     return null;
   }
@@ -1276,6 +1420,7 @@ async function maybeResolveMacPathOpenInvocation(
   }
 
   const pathOpenCommand = args.definition.macos.pathOpenCommand;
+
   if (!pathOpenCommand) {
     return null;
   }
@@ -1285,6 +1430,7 @@ async function maybeResolveMacPathOpenInvocation(
     pathOpenCommand,
     runtime,
   );
+
   if (commandExecutable === null) {
     return null;
   }
@@ -1293,6 +1439,7 @@ async function maybeResolveMacPathOpenInvocation(
     definition: args.definition,
     existingPath: args.existingPath,
   });
+
   return {
     file: commandExecutable.file,
     args: [
@@ -1315,6 +1462,7 @@ async function maybeResolveMacFileOpenInvocation(
   }
 
   const fileOpenCommand = args.definition.macos.fileOpenCommand;
+
   if (!fileOpenCommand) {
     return null;
   }
@@ -1341,6 +1489,7 @@ async function maybeResolveMacLocalTerminalOpenInvocation(
 
   const localTerminalOpenCommand =
     args.definition.macos.localTerminalOpenCommand;
+
   if (!localTerminalOpenCommand) {
     return null;
   }
@@ -1374,8 +1523,10 @@ async function resolveXcodeXedPath(
   try {
     const result = await runtime.execFile("xcode-select", ["-p"]);
     const developerPath = result.stdout.trim();
+
     if (developerPath.length > 0) {
       const selectedXedPath = path.join(developerPath, "usr", "bin", "xed");
+
       if (await pathExists(selectedXedPath)) {
         return selectedXedPath;
       }
@@ -1383,6 +1534,7 @@ async function resolveXcodeXedPath(
   } catch {}
 
   const appPath = await findMacApplicationPath(definition, runtime);
+
   if (appPath === null) {
     return null;
   }
@@ -1395,6 +1547,7 @@ async function resolveXcodeXedPath(
     "bin",
     "xed",
   );
+
   return (await pathExists(bundledXedPath)) ? bundledXedPath : null;
 }
 
@@ -1405,10 +1558,12 @@ async function findXcodeContainerPath(
     existingPath.type === "directory"
       ? existingPath.path
       : path.dirname(existingPath.path);
+
   let packageDirectory: string | null = null;
 
   for (;;) {
     let entries: string[];
+
     try {
       entries = await fs.readdir(directory);
     } catch {
@@ -1416,11 +1571,13 @@ async function findXcodeContainerPath(
     }
 
     const workspace = entries.find((entry) => entry.endsWith(".xcworkspace"));
+
     if (workspace !== undefined) {
       return path.join(directory, workspace);
     }
 
     const project = entries.find((entry) => entry.endsWith(".xcodeproj"));
+
     if (project !== undefined) {
       return path.join(directory, project);
     }
@@ -1430,9 +1587,11 @@ async function findXcodeContainerPath(
     }
 
     const parentDirectory = path.dirname(directory);
+
     if (parentDirectory === directory) {
       return packageDirectory;
     }
+
     directory = parentDirectory;
   }
 }
@@ -1446,11 +1605,13 @@ async function maybeResolveXcodeOpenInvocation(
   }
 
   const xedPath = await resolveXcodeXedPath(args.definition, runtime);
+
   if (xedPath === null) {
     return null;
   }
 
   const xcodeContainerPath = await findXcodeContainerPath(args.existingPath);
+
   return {
     file: xedPath,
     args: [
@@ -1472,6 +1633,7 @@ async function resolveMacOpenInvocation(
     args,
     runtime,
   );
+
   if (xcodeOpenInvocation) {
     return xcodeOpenInvocation;
   }
@@ -1480,6 +1642,7 @@ async function resolveMacOpenInvocation(
     args,
     runtime,
   );
+
   if (lineOpenInvocation) {
     return lineOpenInvocation;
   }
@@ -1488,6 +1651,7 @@ async function resolveMacOpenInvocation(
     args,
     runtime,
   );
+
   if (fileOpenInvocation) {
     return fileOpenInvocation;
   }
@@ -1496,12 +1660,14 @@ async function resolveMacOpenInvocation(
     args,
     runtime,
   );
+
   if (pathOpenInvocation) {
     return pathOpenInvocation;
   }
 
   const localTerminalOpenInvocation =
     await maybeResolveMacLocalTerminalOpenInvocation(args, runtime);
+
   if (localTerminalOpenInvocation) {
     return localTerminalOpenInvocation;
   }
@@ -1510,6 +1676,7 @@ async function resolveMacOpenInvocation(
     definition: args.definition,
     existingPath: args.existingPath,
   });
+
   if (args.definition.macos.openMode === "default-app") {
     return {
       file: "open",
@@ -1535,6 +1702,7 @@ async function resolveMacRemoteSshOpenInvocation(
   }
 
   const remoteSshOpenCommand = args.definition.macos.remoteSshOpenCommand;
+
   if (remoteSshOpenCommand === undefined) {
     throw new WorkspaceOpenTargetError({
       code: "remote_target_unsupported",
@@ -1547,6 +1715,7 @@ async function resolveMacRemoteSshOpenInvocation(
     remoteSshOpenCommand,
     runtime,
   );
+
   if (unavailableExecutable !== null) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
@@ -1559,6 +1728,7 @@ async function resolveMacRemoteSshOpenInvocation(
     remoteSshOpenCommand,
     runtime,
   );
+
   if (commandExecutable === null) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
@@ -1596,6 +1766,7 @@ async function resolveGenericMacApplicationOpenInvocation(
     args.bundleId,
     runtime,
   );
+
   if (appPath === null) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
@@ -1619,6 +1790,7 @@ async function resolveCliOpenInvocation(
     args,
     runtime,
   );
+
   if (lineOpenInvocation) {
     return lineOpenInvocation;
   }
@@ -1627,6 +1799,7 @@ async function resolveCliOpenInvocation(
     args,
     runtime,
   );
+
   if (pathOpenInvocation) {
     return pathOpenInvocation;
   }
@@ -1642,6 +1815,7 @@ async function resolvePlatformDefaultOpenInvocation(
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<ExecFileInvocation> {
   const executable = await getDefaultOpenExecutable(runtime);
+
   if (executable === null) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
@@ -1661,6 +1835,7 @@ async function resolvePlatformFileManagerOpenInvocation(
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<ExecFileInvocation> {
   const executable = await getFileManagerExecutable(runtime);
+
   if (executable === null) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
@@ -1672,6 +1847,7 @@ async function resolvePlatformFileManagerOpenInvocation(
     args.existingPath.type === "file"
       ? path.dirname(args.existingPath.path)
       : args.existingPath.path;
+
   return {
     file: executable,
     args: [openPath],
@@ -1684,9 +1860,11 @@ function buildLinuxTerminalOpenInvocation(
   args: BuildMacTerminalOpenArgs,
 ): ExecFileInvocation {
   const shellArgs = buildLocalTerminalShellArgs(args);
+
   if (executable === "gnome-terminal") {
     return { file: executable, args: ["--", ...shellArgs] };
   }
+
   return { file: executable, args: ["-e", ...shellArgs] };
 }
 
@@ -1695,9 +1873,11 @@ function buildLinuxTerminalRemoteSshInvocation(
   args: BuildMacRemoteSshOpenArgs,
 ): ExecFileInvocation {
   const shellArgs = buildRemoteTerminalSshArgs(args);
+
   if (executable === "gnome-terminal") {
     return { file: executable, args: ["--", ...shellArgs] };
   }
+
   return { file: executable, args: ["-e", ...shellArgs] };
 }
 
@@ -1706,6 +1886,7 @@ async function resolvePlatformTerminalOpenInvocation(
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<ExecFileInvocation> {
   const executable = await getTerminalExecutable(runtime);
+
   if (executable === null) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
@@ -1729,6 +1910,7 @@ async function resolvePlatformTerminalRemoteSshOpenInvocation(
   runtime: WorkspaceOpenTargetRuntime,
 ): Promise<ExecFileInvocation> {
   const executable = await getTerminalExecutable(runtime);
+
   if (executable === null || !(await isExecutableAvailable("ssh", runtime))) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
@@ -1754,43 +1936,54 @@ function splitDesktopExec(exec: string): string[] {
   let current = "";
   let quote: '"' | "'" | null = null;
   let escaping = false;
+
   for (const char of exec) {
     if (escaping) {
       current += char;
       escaping = false;
       continue;
     }
+
     if (char === "\\") {
       escaping = true;
       continue;
     }
+
     if (quote !== null) {
       if (char === quote) {
         quote = null;
       } else {
         current += char;
       }
+
       continue;
     }
+
     if (char === '"' || char === "'") {
       quote = char;
       continue;
     }
+
     if (/\s/u.test(char)) {
       if (current.length > 0) {
         tokens.push(current);
         current = "";
       }
+
       continue;
     }
+
     current += char;
   }
+
   if (escaping) {
     current += "\\";
   }
+
   if (current.length > 0) {
     tokens.push(current);
   }
+
   return tokens;
 }
 
@@ -1802,6 +1995,7 @@ function expandDesktopExecToken(
   },
 ): { token: string; usedPath: boolean } | null {
   let usedPath = false;
+
   const expanded = token.replaceAll(/%[a-zA-Z%]/gu, (fieldCode) => {
     switch (fieldCode) {
       case "%%":
@@ -1811,6 +2005,7 @@ function expandDesktopExecToken(
       case "%u":
       case "%U":
         usedPath = true;
+
         return args.path;
       case "%c":
         return args.application.label;
@@ -1822,6 +2017,7 @@ function expandDesktopExecToken(
         return "";
     }
   });
+
   return expanded.length === 0 ? null : { token: expanded, usedPath };
 }
 
@@ -1832,26 +2028,32 @@ function buildLinuxDesktopApplicationInvocation(
   const rawTokens = splitDesktopExec(application.exec);
   const tokens: string[] = [];
   let usedPath = false;
+
   for (const rawToken of rawTokens) {
     const expanded = expandDesktopExecToken(rawToken, {
       application,
       path: targetPath,
     });
+
     if (expanded === null) {
       continue;
     }
+
     tokens.push(expanded.token);
     usedPath ||= expanded.usedPath;
   }
+
   if (tokens.length === 0) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
       message: `Desktop app opener is unavailable: ${application.label}`,
     });
   }
+
   if (!usedPath) {
     tokens.push(targetPath);
   }
+
   return {
     file: tokens[0] ?? application.exec,
     args: tokens.slice(1),
@@ -1880,12 +2082,14 @@ async function resolveLinuxDesktopApplicationOpenInvocation(
     args.desktopFileId,
     runtime,
   );
+
   if (application === null) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
       message: `Workspace open target is unavailable: ${args.desktopFileId}`,
     });
   }
+
   return {
     ...buildLinuxDesktopApplicationInvocation(
       application,
@@ -1907,6 +2111,7 @@ async function resolvePlatformOpenInvocation(
   }
 
   const desktopFileId = parseDesktopApplicationTargetId(args.targetId);
+
   if (args.context.kind === "remote-ssh") {
     if (desktopFileId !== null) {
       throw new WorkspaceOpenTargetError({
@@ -1914,6 +2119,7 @@ async function resolvePlatformOpenInvocation(
         message: `${args.targetId} cannot open remote SSH paths`,
       });
     }
+
     if (args.targetId === "terminal") {
       return resolvePlatformTerminalRemoteSshOpenInvocation(
         {
@@ -1927,6 +2133,7 @@ async function resolvePlatformOpenInvocation(
     }
 
     const definition = findLaunchAdapter(args.targetId);
+
     if (
       definition !== null &&
       definition.macos.openMode !== "default-app" &&
@@ -1951,6 +2158,7 @@ async function resolvePlatformOpenInvocation(
   }
 
   const existingPath = await requireOpenablePath(args.path);
+
   if (desktopFileId !== null) {
     return resolveLinuxDesktopApplicationOpenInvocation(
       { desktopFileId, existingPath },
@@ -1963,7 +2171,9 @@ async function resolvePlatformOpenInvocation(
     existingPath,
     lineNumber: args.lineNumber,
   };
+
   const definition = findLaunchAdapter(args.targetId);
+
   if (
     definition !== null &&
     (await isCliTargetAvailable(definition, runtime))
@@ -1979,12 +2189,15 @@ async function resolvePlatformOpenInvocation(
 
   if (runtime.platform === "win32") {
     const windowsArgs = { env: runtime.env, existingPath };
+
     if (args.targetId === "default-app") {
       return buildWindowsDefaultOpenInvocation(windowsArgs);
     }
+
     if (args.targetId === "file-manager") {
       return buildWindowsFileManagerOpenInvocation(windowsArgs);
     }
+
     if (args.targetId === "terminal") {
       return buildWindowsTerminalOpenInvocation({
         ...windowsArgs,
@@ -1996,9 +2209,11 @@ async function resolvePlatformOpenInvocation(
   if (args.targetId === "default-app") {
     return resolvePlatformDefaultOpenInvocation(platformArgs, runtime);
   }
+
   if (args.targetId === "file-manager") {
     return resolvePlatformFileManagerOpenInvocation(platformArgs, runtime);
   }
+
   if (args.targetId === "terminal") {
     return resolvePlatformTerminalOpenInvocation(platformArgs, runtime);
   }
@@ -2016,10 +2231,12 @@ export async function openPathInTargetWithRuntime(
   if (runtime.platform !== "darwin") {
     const invocation = await resolvePlatformOpenInvocation(args, runtime);
     await execInvocation(invocation, runtime);
+
     return;
   }
 
   const genericMacBundleId = parseMacApplicationTargetId(args.targetId);
+
   if (genericMacBundleId !== null) {
     if (args.context.kind === "remote-ssh") {
       throw new WorkspaceOpenTargetError({
@@ -2027,6 +2244,7 @@ export async function openPathInTargetWithRuntime(
         message: `${args.targetId} cannot open remote SSH paths`,
       });
     }
+
     const invocation = await resolveGenericMacApplicationOpenInvocation(
       {
         bundleId: genericMacBundleId,
@@ -2034,11 +2252,14 @@ export async function openPathInTargetWithRuntime(
       },
       runtime,
     );
+
     await execInvocation(invocation, runtime);
+
     return;
   }
 
   const definition = requireLaunchAdapter(args.targetId);
+
   if (!(await isMacTargetAvailable(definition, runtime))) {
     throw new WorkspaceOpenTargetError({
       code: "target_unavailable",
@@ -2057,11 +2278,14 @@ export async function openPathInTargetWithRuntime(
       },
       runtime,
     );
+
     await execInvocation(invocation, runtime);
+
     return;
   }
 
   const existingPath = await requireOpenablePath(args.path);
+
   const invocation = await resolveMacOpenInvocation(
     {
       definition,
@@ -2071,5 +2295,6 @@ export async function openPathInTargetWithRuntime(
     },
     runtime,
   );
+
   await execInvocation(invocation, runtime);
 }

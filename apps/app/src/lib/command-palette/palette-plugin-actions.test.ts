@@ -76,6 +76,7 @@ describe("buildPluginPaletteActions", () => {
 
   it("drops a row whose isAvailable declines or throws", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     const rows = build([
       slot({ id: "listed" }),
       slot({ id: "declined", isAvailable: () => false }),
@@ -86,6 +87,7 @@ describe("buildPluginPaletteActions", () => {
         },
       }),
     ]);
+
     expect(rows.map((row) => row.id)).toEqual(["plugin:linear/listed"]);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();

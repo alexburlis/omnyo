@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import type { Environment, JsonValue } from "@bb/domain";
-import { createBbSdk } from "../src/core.js";
+import type { Environment, JsonValue } from "@omnyo/domain";
+import { createOmnyoSdk } from "../src/core.js";
 import { createHttpTransport } from "../src/transport-http.js";
 import { ThreadWaitTimeoutError } from "../src/areas/threads.js";
 import type { FetchImplementation } from "../src/response.js";
@@ -77,9 +78,11 @@ function bodyText(init: RequestInit | undefined): string | undefined {
 
 function jsonResponse(args: QueuedJsonResponse): Response {
   const status = args.status ?? 200;
+
   if (status === 204) {
     return new Response(null, { status });
   }
+
   return new Response(JSON.stringify(args.body), {
     status,
     headers: { "content-type": "application/json" },
@@ -91,6 +94,7 @@ function createFetchQueue(
 ): FetchQueue {
   const requests: CapturedRequest[] = [];
   const remaining = [...responses];
+
   const fetchMock: FetchImplementation = async (input, init) => {
     requests.push({
       bodyText: bodyText(init),
@@ -98,15 +102,141 @@ function createFetchQueue(
       url: String(input),
     });
     const next = remaining.shift();
+
     if (!next) {
       throw new Error("No queued SDK test response");
     }
+
     return jsonResponse(next);
   };
+
   return { fetch: fetchMock, requests };
 }
 
-describe("@bb/sdk", () => {
+describe("server export names", () => {
+  it.each([
+    { disposition: null, fileName: "omnyo-server-export" },
+    {
+      disposition: 'attachment; filename="opaque-omnyo-archive.sqlite"',
+      fileName: "opaque-omnyo-archive.sqlite",
+    },
+  ])(
+    "uses $fileName while preserving the exported bytes",
+    async ({ disposition, fileName }) => {
+      const bytes = new Uint8Array([0, 255, 1, 9]);
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      const headers = new Headers({ "x-omnyo-archive-sha256": sha256 });
+
+      if (disposition !== null) headers.set("content-disposition", disposition);
+      const fetch = vi.fn(async () => new Response(bytes.buffer, { headers }));
+
+      const sdk = createOmnyoSdk({
+        transport: createHttpTransport({
+          baseUrl: "http://omnyo.test",
+          runtime: "node",
+          fetch,
+        }),
+      });
+
+      const exported = await sdk.server.export();
+
+      expect(exported.fileName).toBe(fileName);
+      expect(exported.sha256).toBe(sha256);
+      expect(
+        new Uint8Array(await new Response(exported.body).arrayBuffer()),
+      ).toEqual(bytes);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+describe("@omnyo/sdk", () => {
+  it("lists exact failure identities and acknowledges only the selected stored turn", async () => {
+    const failure = {
+      id: "failure_1",
+      threadId: "thr_child",
+      turnId: "turn_old",
+      requestId: null,
+      state: "actionable",
+      reason: "Interrupted",
+      resolvedBy: null,
+    };
+
+    const listed = { failures: [failure] };
+
+    const acknowledged = {
+      failure: { ...failure, state: "resolved", resolvedBy: "acknowledged" },
+      acknowledged: true,
+    };
+
+    const queue = createFetchQueue([{ body: listed }, { body: acknowledged }]);
+
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://omnyo.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+
+    await expect(
+      sdk.experimental_inbox.failures({ threadId: "thr_child" }),
+    ).resolves.toEqual(listed);
+    await expect(
+      sdk.experimental_inbox.acknowledgeFailure({
+        threadId: "thr_child",
+        failureId: "failure_1",
+        turnId: "turn_old",
+        reason: "Completed elsewhere",
+      }),
+    ).resolves.toEqual(acknowledged);
+    expect(queue.requests).toEqual([
+      {
+        method: "GET",
+        url: "http://omnyo.test/api/v1/threads/thr_child/failures",
+        bodyText: undefined,
+      },
+      {
+        method: "POST",
+        url: "http://omnyo.test/api/v1/threads/thr_child/failures/failure_1/acknowledge",
+        bodyText: JSON.stringify({
+          turnId: "turn_old",
+          reason: "Completed elsewhere",
+        }),
+      },
+    ]);
+  });
+
+  it("preserves failure acknowledgment refusals without retrying", async () => {
+    const queue = createFetchQueue([
+      {
+        status: 409,
+        body: {
+          code: "inbox_failure_active",
+          message: "Target has active work",
+        },
+      },
+    ]);
+
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://omnyo.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+
+    await expect(
+      sdk.experimental_inbox.acknowledgeFailure({
+        threadId: "thr_child",
+        failureId: "failure_1",
+        turnId: "turn_old",
+        reason: "Completed elsewhere",
+      }),
+    ).rejects.toMatchObject({ status: 409, code: "inbox_failure_active" });
+    expect(queue.requests).toHaveLength(1);
+  });
+
   it("pages prompt history with an opaque cursor", async () => {
     const response = {
       entries: [
@@ -120,10 +250,12 @@ describe("@bb/sdk", () => {
       ],
       nextCursor: "next",
     };
+
     const queue = createFetchQueue([{ body: response }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -136,7 +268,7 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/prompt-history?cursor=abc&limit=25",
+        url: "http://omnyo.test/api/v1/prompt-history?cursor=abc&limit=25",
       },
     ]);
   });
@@ -158,9 +290,11 @@ describe("@bb/sdk", () => {
       maxPermissionMode: "full",
       lastSeenAt: 1,
       lastRejectedProtocolVersion: null,
+      runtimeVersion: null,
       createdAt: 1,
       updatedAt: 1,
     };
+
     const creating = {
       ...host,
       status: "disconnected",
@@ -170,14 +304,17 @@ describe("@bb/sdk", () => {
         message: "Creating DigitalOcean machine…",
       },
     };
+
     const queue = createFetchQueue([{ body: creating }, { body: host }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
     });
+
     expect(
       await sdk.hosts.experimental_create({
         machineProviderId: "digitalocean",
@@ -191,12 +328,12 @@ describe("@bb/sdk", () => {
           inputs: {},
         }),
         method: "POST",
-        url: "http://bb.test/api/v1/hosts",
+        url: "http://omnyo.test/api/v1/hosts",
       },
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/hosts/host_do",
+        url: "http://omnyo.test/api/v1/hosts/host_do",
       },
     ]);
   });
@@ -205,9 +342,10 @@ describe("@bb/sdk", () => {
     const queue = createFetchQueue([
       { body: { joinCode: "one", hostId: "host_1", expiresAt: 1 } },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -219,7 +357,7 @@ describe("@bb/sdk", () => {
       {
         bodyText: JSON.stringify({}),
         method: "POST",
-        url: "http://bb.test/api/v1/hosts/join-codes",
+        url: "http://omnyo.test/api/v1/hosts/join-codes",
       },
     ]);
   });
@@ -239,17 +377,20 @@ describe("@bb/sdk", () => {
         success: true,
       },
     ];
+
     const response = new Response(null, {
       status: 200,
       headers: { "content-type": "application/x-ndjson" },
     });
+
     Object.defineProperty(response, "text", {
       value: async () =>
         events.map((event) => JSON.stringify(event)).join("\n"),
     });
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: async () => response,
         runtime: "node",
       }),
@@ -264,11 +405,105 @@ describe("@bb/sdk", () => {
     ).resolves.toEqual(events);
   });
 
+  it("streams provider update progress and sends the explicit chat pause choice", async () => {
+    const progress = {
+      type: "progress",
+      provider: "codex",
+      phase: "pausing",
+      message: "Pausing chats on this machine.",
+    };
+
+    const completed = {
+      type: "completed",
+      provider: "codex",
+      exitCode: 0,
+      signal: null,
+      success: true,
+    };
+
+    const requests: string[] = [];
+    const onEvent = vi.fn();
+
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://omnyo.test",
+        fetch: async (_input, init) => {
+          requests.push(bodyText(init) ?? "");
+
+          return new Response(
+            `${JSON.stringify(progress)}\n${JSON.stringify(completed)}\n`,
+            { headers: { "content-type": "application/x-ndjson" } },
+          );
+        },
+        runtime: "node",
+      }),
+    });
+
+    await expect(
+      sdk.hosts.installProviderCli({
+        hostId: "host_test",
+        provider: "codex",
+        actionKind: "update",
+        confirmInterruptingThreads: true,
+        onEvent,
+      }),
+    ).resolves.toEqual([progress, completed]);
+    expect(onEvent.mock.calls.map(([event]) => event)).toEqual([
+      progress,
+      completed,
+    ]);
+    expect(JSON.parse(requests[0]!)).toEqual({
+      provider: "codex",
+      actionKind: "update",
+      confirmInterruptingThreads: true,
+    });
+  });
+
+  it("delivers update progress before the installation response finishes", async () => {
+    const stream = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = stream.writable.getWriter();
+    const onEvent = vi.fn();
+
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://omnyo.test",
+        fetch: async () => new Response(stream.readable),
+        runtime: "node",
+      }),
+    });
+
+    const progress = {
+      type: "progress",
+      provider: "codex",
+      phase: "pausing",
+      message: "Pausing chats.",
+    };
+
+    const installation = sdk.hosts.installProviderCli({
+      hostId: "host_test",
+      provider: "codex",
+      actionKind: "update",
+      onEvent,
+    });
+
+    try {
+      await writer.write(
+        new TextEncoder().encode(`${JSON.stringify(progress)}\n`),
+      );
+      await vi.waitFor(() => expect(onEvent).toHaveBeenCalledWith(progress));
+    } finally {
+      await writer.close();
+    }
+
+    await expect(installation).resolves.toEqual([progress]);
+  });
+
   it("sends thread pane presentation actions through the typed transport", async () => {
     const queue = createFetchQueue([{ body: { delivered: 3 } }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -284,16 +519,17 @@ describe("@bb/sdk", () => {
       {
         bodyText: JSON.stringify({ action: "spotlight" }),
         method: "POST",
-        url: "http://bb.test/api/v1/threads/thr_test/pane-action",
+        url: "http://omnyo.test/api/v1/threads/thr_test/pane-action",
       },
     ]);
   });
 
   it("maps thread event filters and reverse pagination onto the public query", async () => {
     const queue = createFetchQueue([{ body: [] }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -312,7 +548,7 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/threads/thr_test/events?beforeSeq=10&limit=2&order=desc&types=system%2Ferror%2Cturn%2Fcompleted",
+        url: "http://omnyo.test/api/v1/threads/thr_test/events?beforeSeq=10&limit=2&order=desc&types=system%2Ferror%2Cturn%2Fcompleted",
       },
     ]);
   });
@@ -320,13 +556,16 @@ describe("@bb/sdk", () => {
   it("forwards read abort signals to fetch", async () => {
     const controller = new AbortController();
     let receivedSignal: AbortSignal | null | undefined;
+
     const fetch: FetchImplementation = async (_input, init) => {
       receivedSignal = init?.signal;
+
       return jsonResponse({ body: [] });
     };
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch,
         runtime: "node",
       }),
@@ -341,13 +580,16 @@ describe("@bb/sdk", () => {
   it("forwards thread read action abort signals to fetch", async () => {
     const controller = new AbortController();
     let receivedSignal: AbortSignal | null | undefined;
+
     const fetch: FetchImplementation = async (_input, init) => {
       receivedSignal = init?.signal;
+
       return jsonResponse({ body: {} });
     };
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch,
         runtime: "node",
       }),
@@ -365,11 +607,13 @@ describe("@bb/sdk", () => {
     const controller = new AbortController();
     let receivedSignal: AbortSignal | null | undefined;
     const queue = createFetchQueue([{ body: [] }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: async (input, init) => {
           receivedSignal = init?.signal;
+
           return queue.fetch(input, init);
         },
         runtime: "node",
@@ -381,7 +625,7 @@ describe("@bb/sdk", () => {
     ).resolves.toEqual([]);
     expect(receivedSignal).toBe(controller.signal);
     expect(queue.requests[0]?.url).toBe(
-      "http://bb.test/api/v1/projects?includePersonal=true",
+      "http://omnyo.test/api/v1/projects?includePersonal=true",
     );
   });
 
@@ -396,10 +640,12 @@ describe("@bb/sdk", () => {
         files: {},
       },
     };
+
     const queue = createFetchQueue([{ body: appearance }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -412,7 +658,7 @@ describe("@bb/sdk", () => {
       {
         bodyText: JSON.stringify({ themeId: "nord", faviconColor: "teal" }),
         method: "PUT",
-        url: "http://bb.test/api/v1/settings/appearance",
+        url: "http://omnyo.test/api/v1/settings/appearance",
       },
     ]);
   });
@@ -430,6 +676,7 @@ describe("@bb/sdk", () => {
         },
       },
     };
+
     const updated = {
       themeId: "nord",
       customCss: null,
@@ -440,10 +687,12 @@ describe("@bb/sdk", () => {
         files: {},
       },
     };
+
     const queue = createFetchQueue([{ body: current }, { body: updated }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -454,12 +703,12 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/system/config",
+        url: "http://omnyo.test/api/v1/system/config",
       },
       {
         bodyText: JSON.stringify({ themeId: "nord", faviconColor: "purple" }),
         method: "PUT",
-        url: "http://bb.test/api/v1/settings/appearance",
+        url: "http://omnyo.test/api/v1/settings/appearance",
       },
     ]);
   });
@@ -475,10 +724,12 @@ describe("@bb/sdk", () => {
         files: {},
       },
     };
+
     const queue = createFetchQueue([{ body: resolved }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -491,7 +742,7 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/settings/themes/plugin:pack:ocean",
+        url: "http://omnyo.test/api/v1/settings/themes/plugin:pack:ocean",
       },
     ]);
   });
@@ -499,24 +750,27 @@ describe("@bb/sdk", () => {
   it("uploads client-local binary attachments as authenticated multipart data", async () => {
     const binary = new Uint8Array([0, 255, 1, 128, 42]);
     let forwardedRequest: Request | undefined;
+
     const authenticatedFetch: FetchImplementation = async (input, init) => {
       const headers = new Headers(init?.headers);
       headers.set("authorization", "Bearer client-token");
       forwardedRequest = new Request(input, { ...init, headers });
+
       return jsonResponse({
         body: {
           type: "localFile",
           path: "payload-uploaded.bin",
           name: "payload.bin",
-          mimeType: "application/x-bb-test",
+          mimeType: "application/x-omnyo-test",
           sizeBytes: binary.byteLength,
         },
         status: 201,
       });
     };
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "https://remote-bb.test/",
+        baseUrl: "https://remote-omnyo.test/",
         fetch: authenticatedFetch,
         runtime: "node",
       }),
@@ -526,19 +780,19 @@ describe("@bb/sdk", () => {
       sdk.projects.attachments.upload({
         clientFile: binary,
         filename: "payload.bin",
-        mimeType: "application/x-bb-test",
+        mimeType: "application/x-omnyo-test",
         projectId: "proj_remote",
       }),
     ).resolves.toEqual({
       type: "localFile",
       path: "payload-uploaded.bin",
       name: "payload.bin",
-      mimeType: "application/x-bb-test",
+      mimeType: "application/x-omnyo-test",
       sizeBytes: binary.byteLength,
     });
 
     expect(forwardedRequest?.url).toBe(
-      "https://remote-bb.test/api/v1/projects/proj_remote/attachments",
+      "https://remote-omnyo.test/api/v1/projects/proj_remote/attachments",
     );
     expect(forwardedRequest?.method).toBe("POST");
     expect(forwardedRequest?.headers.get("authorization")).toBe(
@@ -550,16 +804,53 @@ describe("@bb/sdk", () => {
     const form = await forwardedRequest?.formData();
     const file = form?.get("file");
     expect(file).toBeInstanceOf(File);
+
     if (!(file instanceof File)) {
       throw new Error("Expected multipart attachment file");
     }
+
     expect(file.name).toBe("payload.bin");
-    expect(file.type).toBe("application/x-bb-test");
+    expect(file.type).toBe("application/x-omnyo-test");
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(binary);
+  });
+
+  it("retains attachment references with an explicit source project, owner thread and cancellation signal", async () => {
+    let request: Request | undefined;
+    const controller = new AbortController();
+
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://omnyo.test",
+        fetch: async (input, init) => {
+          request = new Request(input, init);
+
+          return jsonResponse({ body: { ok: true } });
+        },
+        runtime: "node",
+      }),
+    });
+
+    await sdk.projects.attachments.experimental_retain({
+      projectId: "image-project",
+      threadId: "owner-thread",
+      paths: ["result.png"],
+      signal: controller.signal,
+    });
+    expect(request?.url).toBe(
+      "http://omnyo.test/api/v1/projects/image-project/attachments/retain",
+    );
+    expect(request?.method).toBe("POST");
+    expect(await request?.json()).toEqual({
+      threadId: "owner-thread",
+      paths: ["result.png"],
+    });
+    controller.abort();
+    expect(request?.signal.aborted).toBe(true);
   });
 
   it("uses File-like attachment metadata and reads server attachment bytes", async () => {
     const requests: string[] = [];
+
     const responses = [
       jsonResponse({
         body: {
@@ -575,15 +866,19 @@ describe("@bb/sdk", () => {
         headers: { "content-type": "image/png" },
       }),
     ];
+
     const fetch: FetchImplementation = async (input) => {
       requests.push(String(input));
       const response = responses.shift();
+
       if (!response) throw new Error("No queued attachment response");
+
       return response;
     };
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch,
         runtime: "browser",
       }),
@@ -606,15 +901,81 @@ describe("@bb/sdk", () => {
       sizeBytes: 4,
     });
     expect(requests).toEqual([
-      "http://bb.test/api/v1/projects/proj_image/attachments",
-      "http://bb.test/api/v1/projects/proj_image/attachments/content?path=pixel-uploaded.png",
+      "http://omnyo.test/api/v1/projects/proj_image/attachments",
+      "http://omnyo.test/api/v1/projects/proj_image/attachments/content?path=pixel-uploaded.png",
     ]);
   });
 
-  it("preserves project attachment error envelopes", async () => {
-    const sdk = createBbSdk({
+  it("uploads the bytes a dropped File reads, not its unreadable handle", async () => {
+    const bytes = new Uint8Array([137, 80, 78, 71]);
+    const dropped = new File([], "dropped.png", { type: "image/png" });
+    Object.defineProperty(dropped, "size", { value: bytes.byteLength });
+    dropped.arrayBuffer = async () => bytes.slice().buffer;
+    let body: BodyInit | null | undefined;
+
+    const fetch: FetchImplementation = async (_input, init) => {
+      body = init?.body;
+
+      return jsonResponse({
+        body: {
+          type: "localImage",
+          path: "dropped-uploaded.png",
+          name: "dropped.png",
+          mimeType: "image/png",
+          sizeBytes: bytes.byteLength,
+        },
+        status: 201,
+      });
+    };
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
+        fetch,
+        runtime: "browser",
+      }),
+    });
+
+    await sdk.projects.attachments.upload({
+      clientFile: dropped,
+      projectId: "proj_image",
+    });
+
+    if (!(body instanceof FormData)) throw new Error("Expected FormData body");
+    const uploaded = body.get("file");
+
+    if (!(uploaded instanceof File)) throw new Error("Expected uploaded File");
+    expect(uploaded.name).toBe("dropped.png");
+    expect(uploaded.type).toBe("image/png");
+    expect(new Uint8Array(await uploaded.arrayBuffer())).toEqual(bytes);
+  });
+
+  it("rejects an empty attachment before sending it", async () => {
+    const fetch = vi.fn();
+
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://omnyo.test",
+        fetch,
+        runtime: "node",
+      }),
+    });
+
+    await expect(
+      sdk.projects.attachments.upload({
+        clientFile: new Uint8Array([]),
+        filename: "image.png",
+        mimeType: "image/png",
+        projectId: "proj_remote",
+      }),
+    ).rejects.toThrow(new RangeError("image.png is empty"));
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves project attachment error envelopes", async () => {
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://omnyo.test",
         fetch: async () =>
           jsonResponse({
             body: {
@@ -645,9 +1006,10 @@ describe("@bb/sdk", () => {
     const fetch = async (): Promise<Response> => {
       throw new Error("Voice transcription should not reach the transport");
     };
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch,
         runtime: "node",
       }),
@@ -660,6 +1022,7 @@ describe("@bb/sdk", () => {
 
   it("routes project file APIs and returns portable text/binary DTOs", async () => {
     const requests: CapturedRequest[] = [];
+
     const responses = [
       jsonResponse({
         body: {
@@ -674,6 +1037,7 @@ describe("@bb/sdk", () => {
         headers: { "content-type": "application/octet-stream" },
       }),
     ];
+
     const fetch: FetchImplementation = async (input, init) => {
       requests.push({
         bodyText: bodyText(init),
@@ -681,12 +1045,15 @@ describe("@bb/sdk", () => {
         url: String(input),
       });
       const response = responses.shift();
+
       if (!response) throw new Error("No queued project file response");
+
       return response;
     };
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch,
         runtime: "browser",
       }),
@@ -724,9 +1091,9 @@ describe("@bb/sdk", () => {
     });
 
     expect(requests.map((request) => request.url)).toEqual([
-      "http://bb.test/api/v1/projects/proj_remote/files?hostId=host_remote",
-      "http://bb.test/api/v1/environments/env_remote/files/remote.txt",
-      "http://bb.test/api/v1/projects/proj_remote/hosts/host_remote/files/image.bin",
+      "http://omnyo.test/api/v1/projects/proj_remote/files?hostId=host_remote",
+      "http://omnyo.test/api/v1/environments/env_remote/files/remote.txt",
+      "http://omnyo.test/api/v1/projects/proj_remote/hosts/host_remote/files/image.bin",
     ]);
 
     for (const path of ["../../hosts", "docs/./a.md", "/etc/hosts", "a\\b"]) {
@@ -734,6 +1101,7 @@ describe("@bb/sdk", () => {
         sdk.projects.fileContent({ projectId: "proj_remote", path }),
       ).rejects.toThrow(`Invalid file path: ${path}`);
     }
+
     expect(requests).toHaveLength(3);
   });
 
@@ -749,9 +1117,10 @@ describe("@bb/sdk", () => {
         },
       },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -771,12 +1140,12 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/system/providers?capability=usage&hostId=host_remote",
+        url: "http://omnyo.test/api/v1/system/providers?capability=usage&hostId=host_remote",
       },
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/system/execution-options?environmentId=env_remote&providerId=acp-remote",
+        url: "http://omnyo.test/api/v1/system/execution-options?environmentId=env_remote&providerId=acp-remote",
       },
     ]);
   });
@@ -787,10 +1156,12 @@ describe("@bb/sdk", () => {
       "claude-code": { status: "unauthenticated" as const },
       "acp-cursor": { status: "unauthenticated" as const },
     };
+
     const queue = createFetchQueue([{ body: usage }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -806,7 +1177,7 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/system/usage-limits?hostId=host_remote&providerId=codex",
+        url: "http://omnyo.test/api/v1/system/usage-limits?hostId=host_remote&providerId=codex",
       },
     ]);
   });
@@ -832,10 +1203,12 @@ describe("@bb/sdk", () => {
         availability: { status: "available" as const },
       },
     ];
+
     const queue = createFetchQueue([{ body: { providers } }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -851,7 +1224,7 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/system/environment-providers?projectId=proj_test&hostId=host_test",
+        url: "http://omnyo.test/api/v1/system/environment-providers?projectId=proj_test&hostId=host_test",
       },
     ]);
   });
@@ -859,9 +1232,10 @@ describe("@bb/sdk", () => {
   it("routes onboarding agent status through a reused environment", async () => {
     const states = { providers: [] };
     const queue = createFetchQueue([{ body: states }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -874,16 +1248,17 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/system/providers/state?environmentId=env_remote",
+        url: "http://omnyo.test/api/v1/system/providers/state?environmentId=env_remote",
       },
     ]);
   });
 
   it("routes thread list calls through the HTTP transport", async () => {
     const queue = createFetchQueue([{ body: [] }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -897,8 +1272,28 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/threads?projectId=proj_123&archived=true",
+        url: "http://omnyo.test/api/v1/threads?projectId=proj_123&archived=true",
       },
+    ]);
+  });
+
+  it("sends thread ID filters comma-separated, keeping an empty list", async () => {
+    const queue = createFetchQueue([{ body: [] }, { body: [] }]);
+
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://omnyo.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+
+    await sdk.threads.list({ threadIds: ["thr_a", "thr_b"] });
+    await sdk.threads.list({ threadIds: [] });
+
+    expect(queue.requests.map((request) => request.url)).toEqual([
+      "http://omnyo.test/api/v1/threads?threadIds=thr_a%2Cthr_b",
+      "http://omnyo.test/api/v1/threads?threadIds=",
     ]);
   });
 
@@ -910,10 +1305,12 @@ describe("@bb/sdk", () => {
         label: "Target thread",
       },
     ];
+
     const queue = createFetchQueue([{ body: resolved }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -930,13 +1327,14 @@ describe("@bb/sdk", () => {
           threadIds: ["thr_23456789ab", "thr_23456789ab"],
         }),
         method: "POST",
-        url: "http://bb.test/api/v1/threads/resolve-mentions",
+        url: "http://omnyo.test/api/v1/threads/resolve-mentions",
       },
     ]);
   });
 
   it("routes canonical terminal calls across every scope and by terminal ID", async () => {
     const session = makeTerminalSession();
+
     const queue = createFetchQueue([
       { body: { sessions: [session] } },
       { body: { sessions: [session] } },
@@ -951,9 +1349,10 @@ describe("@bb/sdk", () => {
       { body: { chunks: [], nextSeq: 4, truncated: false } },
       { body: { ...session, status: "exited", closeReason: "user" } },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1016,17 +1415,17 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/terminals?threadId=thr_remote",
+        url: "http://omnyo.test/api/v1/terminals?threadId=thr_remote",
       },
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/terminals?environmentId=env_remote",
+        url: "http://omnyo.test/api/v1/terminals?environmentId=env_remote",
       },
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/terminals?hostId=host_remote&cwd=%2Fsrv%2Fapp",
+        url: "http://omnyo.test/api/v1/terminals?hostId=host_remote&cwd=%2Fsrv%2Fapp",
       },
       {
         bodyText: JSON.stringify({
@@ -1035,7 +1434,7 @@ describe("@bb/sdk", () => {
           target: { kind: "thread", threadId: "thr_remote" },
         }),
         method: "POST",
-        url: "http://bb.test/api/v1/terminals",
+        url: "http://omnyo.test/api/v1/terminals",
       },
       {
         bodyText: JSON.stringify({
@@ -1044,7 +1443,7 @@ describe("@bb/sdk", () => {
           target: { kind: "environment", environmentId: "env_remote" },
         }),
         method: "POST",
-        url: "http://bb.test/api/v1/terminals",
+        url: "http://omnyo.test/api/v1/terminals",
       },
       {
         bodyText: JSON.stringify({
@@ -1053,37 +1452,37 @@ describe("@bb/sdk", () => {
           target: { kind: "host_path", hostId: "host_remote", cwd: null },
         }),
         method: "POST",
-        url: "http://bb.test/api/v1/terminals",
+        url: "http://omnyo.test/api/v1/terminals",
       },
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/terminals/term_remote",
+        url: "http://omnyo.test/api/v1/terminals/term_remote",
       },
       {
         bodyText: JSON.stringify({ title: "Dev server" }),
         method: "PATCH",
-        url: "http://bb.test/api/v1/terminals/term_remote",
+        url: "http://omnyo.test/api/v1/terminals/term_remote",
       },
       {
         bodyText: JSON.stringify({ dataBase64: "aGk=" }),
         method: "POST",
-        url: "http://bb.test/api/v1/terminals/term_remote/input",
+        url: "http://omnyo.test/api/v1/terminals/term_remote/input",
       },
       {
         bodyText: JSON.stringify({ cols: 120, rows: 40 }),
         method: "POST",
-        url: "http://bb.test/api/v1/terminals/term_remote/resize",
+        url: "http://omnyo.test/api/v1/terminals/term_remote/resize",
       },
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/terminals/term_remote/output?sinceSeq=2&tailBytes=1024&limitChunks=10",
+        url: "http://omnyo.test/api/v1/terminals/term_remote/output?sinceSeq=2&tailBytes=1024&limitChunks=10",
       },
       {
         bodyText: JSON.stringify({ mode: "force", reason: "user" }),
         method: "POST",
-        url: "http://bb.test/api/v1/terminals/term_remote/close",
+        url: "http://omnyo.test/api/v1/terminals/term_remote/close",
       },
     ]);
   });
@@ -1091,9 +1490,10 @@ describe("@bb/sdk", () => {
   it("restarts a terminal without requiring its scope from the caller", async () => {
     const replacement = makeTerminalSession({ id: "term_new" });
     const queue = createFetchQueue([{ body: replacement, status: 201 }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1106,16 +1506,17 @@ describe("@bb/sdk", () => {
       {
         bodyText: JSON.stringify({}),
         method: "POST",
-        url: "http://bb.test/api/v1/terminals/term_old/restart",
+        url: "http://omnyo.test/api/v1/terminals/term_old/restart",
       },
     ]);
   });
 
   it("rejects mixed terminal scope selectors before transport", async () => {
     const queue = createFetchQueue([]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1141,9 +1542,10 @@ describe("@bb/sdk", () => {
         status: 404,
       },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1157,9 +1559,10 @@ describe("@bb/sdk", () => {
   it("routes environment pull request calls through the HTTP transport", async () => {
     const response = { outcome: "absent" };
     const queue = createFetchQueue([{ body: response }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1173,7 +1576,7 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/environments/env_pr/pull-request",
+        url: "http://omnyo.test/api/v1/environments/env_pr/pull-request",
       },
     ]);
   });
@@ -1184,10 +1587,12 @@ describe("@bb/sdk", () => {
       name: "Review workspace",
       mergeBaseBranch: "release",
     });
+
     const queue = createFetchQueue([{ body: environment }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1208,16 +1613,17 @@ describe("@bb/sdk", () => {
           name: "Review workspace",
         }),
         method: "PATCH",
-        url: "http://bb.test/api/v1/environments/env_update",
+        url: "http://omnyo.test/api/v1/environments/env_update",
       },
     ]);
   });
 
   it("rejects empty environment updates before sending a request", async () => {
     const queue = createFetchQueue([]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1232,9 +1638,10 @@ describe("@bb/sdk", () => {
 
   it("fills thread spawn defaults before sending a request", async () => {
     const queue = createFetchQueue([{ body: { id: "thr_1" }, status: 201 }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1268,9 +1675,10 @@ describe("@bb/sdk", () => {
 
   it("defaults thread forks to source-environment reuse and preserves an agent-only context seed", async () => {
     const queue = createFetchQueue([{ body: { id: "thr_fork" }, status: 201 }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1290,7 +1698,7 @@ describe("@bb/sdk", () => {
 
     expect(queue.requests[0]).toMatchObject({
       method: "POST",
-      url: "http://bb.test/api/v1/threads/fork",
+      url: "http://omnyo.test/api/v1/threads/fork",
     });
     expect(JSON.parse(queue.requests[0]?.bodyText ?? "{}")).toEqual({
       sourceThreadId: "thr_source",
@@ -1312,9 +1720,10 @@ describe("@bb/sdk", () => {
       { body: [] },
       { body: { id: "thr_hidden", visibility: "hidden" } },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1327,11 +1736,53 @@ describe("@bb/sdk", () => {
     });
 
     expect(queue.requests[0]?.url).toBe(
-      "http://bb.test/api/v1/threads?includeHidden=true",
+      "http://omnyo.test/api/v1/threads?includeHidden=true",
     );
     expect(JSON.parse(queue.requests[1]?.bodyText ?? "{}")).toEqual({
       visibility: "hidden",
     });
+  });
+
+  it("attributes programmatic messages while preserving explicit human and named-script sources", async () => {
+    const queue = createFetchQueue([
+      { body: { ok: true, delivery: "sent" } },
+      { body: { ok: true, delivery: "sent" } },
+      { body: { id: "qmsg_script" }, status: 201 },
+    ]);
+
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://omnyo.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+
+    const input = [
+      { type: "text" as const, text: "Result ready", mentions: [] },
+    ];
+
+    await sdk.threads.send({ threadId: "thr_1", input, mode: "auto" });
+    await sdk.threads.send({
+      threadId: "thr_1",
+      input,
+      mode: "auto",
+      messageSource: { kind: "user" },
+    });
+    await sdk.threads.queuedMessages.create({
+      threadId: "thr_1",
+      input,
+      messageSource: { kind: "script", label: "Nightly checks" },
+    });
+    expect(
+      queue.requests.map(
+        (request) => JSON.parse(request.bodyText ?? "{}").messageSource,
+      ),
+    ).toEqual([
+      { kind: "script", label: "SDK" },
+      { kind: "user" },
+      { kind: "script", label: "Nightly checks" },
+    ]);
   });
 
   it("forwards every public permission mode through thread surfaces", async () => {
@@ -1340,9 +1791,10 @@ describe("@bb/sdk", () => {
       { body: { ok: true, delivery: "sent" } },
       { body: { id: "qmsg_full" }, status: 201 },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1360,8 +1812,10 @@ describe("@bb/sdk", () => {
     });
     await sdk.threads.send({
       threadId: "thr_auto",
+      requestId: "creq_2222222222",
       input: [{ type: "text", text: "Accept edits", mentions: [] }],
       mode: "start",
+      sendNow: true,
       permissionMode: "accept-edits",
       pluginSubmission: {
         pluginId: "example-plugin",
@@ -1380,6 +1834,8 @@ describe("@bb/sdk", () => {
       expect.objectContaining({ permissionMode: "auto" }),
       expect.objectContaining({
         permissionMode: "accept-edits",
+        requestId: "creq_2222222222",
+        sendNow: true,
         pluginSubmission: {
           pluginId: "example-plugin",
           data: { action: "hold" },
@@ -1399,9 +1855,10 @@ describe("@bb/sdk", () => {
         },
       },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1424,16 +1881,17 @@ describe("@bb/sdk", () => {
           input: [{ type: "text", text: "Replacement", mentions: [] }],
         }),
         method: "POST",
-        url: "http://bb.test/api/v1/threads/thr_edit/edit-message",
+        url: "http://omnyo.test/api/v1/threads/thr_edit/edit-message",
       },
     ]);
   });
 
   it("preserves explicit thread spawn origin for CLI callers", async () => {
     const queue = createFetchQueue([{ body: { id: "thr_1" }, status: 201 }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1468,9 +1926,10 @@ describe("@bb/sdk", () => {
         },
       },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1484,7 +1943,7 @@ describe("@bb/sdk", () => {
     expect(queue.requests[0]).toEqual({
       bodyText: JSON.stringify({ sectionId: "sec_123" }),
       method: "PATCH",
-      url: "http://bb.test/api/v1/threads/thr_section",
+      url: "http://omnyo.test/api/v1/threads/thr_section",
     });
   });
 
@@ -1499,9 +1958,10 @@ describe("@bb/sdk", () => {
         },
       },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1517,15 +1977,16 @@ describe("@bb/sdk", () => {
         sessionOptions: { mode: "plan", web: true, stale: null },
       }),
       method: "PATCH",
-      url: "http://bb.test/api/v1/threads/thr_section",
+      url: "http://omnyo.test/api/v1/threads/thr_section",
     });
   });
 
   it("sends the queued message version when updating its content", async () => {
     const queue = createFetchQueue([{ body: { id: "qmsg_123" } }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1544,21 +2005,20 @@ describe("@bb/sdk", () => {
         input: [{ type: "text", text: "Edited", mentions: [] }],
       }),
       method: "PATCH",
-      url: "http://bb.test/api/v1/threads/thr_123/queued-messages/qmsg_123",
+      url: "http://omnyo.test/api/v1/threads/thr_123/queued-messages/qmsg_123",
     });
   });
 
-  // The queue list is cross-thread by design: an omitted filter drops out of
-  // the query string entirely rather than narrowing on `undefined`.
   it("routes queued-row reads onto the cross-thread queue route and a row's own operations onto its thread", async () => {
     const queue = createFetchQueue([
       { body: [] },
       { body: { ok: true, delivery: "sent" } },
       { body: null, status: 204 },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1569,6 +2029,7 @@ describe("@bb/sdk", () => {
       threadId: "thr_123",
       queuedMessageId: "qm_1",
       mode: "auto",
+      requestId: "creq_3333333333",
     });
     await sdk.threads.queuedMessages.delete({
       threadId: "thr_123",
@@ -1578,11 +2039,13 @@ describe("@bb/sdk", () => {
     expect(
       queue.requests.map((request) => `${request.method} ${request.url}`),
     ).toEqual([
-      "GET http://bb.test/api/v1/queued-messages?",
-      "POST http://bb.test/api/v1/threads/thr_123/queued-messages/qm_1/send",
-      "DELETE http://bb.test/api/v1/threads/thr_123/queued-messages/qm_1",
+      "GET http://omnyo.test/api/v1/queued-messages",
+      "POST http://omnyo.test/api/v1/threads/thr_123/queued-messages/qm_1/send",
+      "DELETE http://omnyo.test/api/v1/threads/thr_123/queued-messages/qm_1",
     ]);
-    expect(queue.requests[1].bodyText).toBe(JSON.stringify({ mode: "auto" }));
+    expect(queue.requests[1].bodyText).toBe(
+      JSON.stringify({ mode: "auto", requestId: "creq_3333333333" }),
+    );
   });
 
   it("applies both queue list filters and queues a scheduled send on the queue", async () => {
@@ -1600,9 +2063,10 @@ describe("@bb/sdk", () => {
         },
       },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1630,19 +2094,18 @@ describe("@bb/sdk", () => {
     });
 
     expect(queue.requests[0].url).toBe(
-      "http://bb.test/api/v1/queued-messages?threadId=thr_123&waitHolder=plugin%3Aconcurrency-limit",
+      "http://omnyo.test/api/v1/queued-messages?threadId=thr_123&waitHolder=plugin%3Aconcurrency-limit",
     );
     expect(queue.requests[1].bodyText).toBe(
       JSON.stringify({
         input: [{ type: "text", text: "later", mentions: [] }],
         mode: "auto",
+        messageSource: { kind: "script", label: "SDK" },
         sendAt: 1750,
       }),
     );
   });
 
-  // A limiter gate counts on every dispatch, so an omitted filter must drop out
-  // of the query string rather than narrow the count on the string "undefined".
   it("counts threads over the grouped count route with only the given filters", async () => {
     const queue = createFetchQueue([
       { body: { total: 4 } },
@@ -1656,9 +2119,10 @@ describe("@bb/sdk", () => {
         },
       },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1671,7 +2135,7 @@ describe("@bb/sdk", () => {
         hostId: "host_a",
         providerId: "codex",
         projectId: "proj_123",
-        // The root-parent sentinel: "threads with no parent at all".
+
         parentThreadId: "none",
         groupBy: "host",
       }),
@@ -1683,41 +2147,48 @@ describe("@bb/sdk", () => {
       ],
     });
 
-    expect(queue.requests[0].url).toBe("http://bb.test/api/v1/threads/count?");
+    expect(queue.requests[0].url).toBe(
+      "http://omnyo.test/api/v1/threads/count",
+    );
     expect(queue.requests[1].url).toBe(
-      "http://bb.test/api/v1/threads/count?status=active&hostId=host_a&providerId=codex&projectId=proj_123&parentThreadId=none&groupBy=host",
+      "http://omnyo.test/api/v1/threads/count?status=active&hostId=host_a&providerId=codex&projectId=proj_123&parentThreadId=none&groupBy=host",
     );
   });
 
   it("lists the running threads over the running route with no query", async () => {
     const rows = [
       { id: "thr_a", hostId: "host_a" },
-      // Admitted but not yet placed: counts globally, on no host's pool.
+
       { id: "thr_b", hostId: null },
     ];
+
     const queue = createFetchQueue([{ body: rows }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
     });
 
     await expect(sdk.threads.listRunning()).resolves.toEqual(rows);
-    // No filters at all: the occupying set is small, and a caller that needs
-    // more than "which ids, on which hosts" fetches the threads it named.
-    expect(queue.requests[0].url).toBe("http://bb.test/api/v1/threads/running");
+
+    expect(queue.requests[0].url).toBe(
+      "http://omnyo.test/api/v1/threads/running",
+    );
   });
 
   it("lists thread sections without fetching sidebar projects", async () => {
     const sections = [
       { id: "sec_123", name: "Review", createdAt: 1, updatedAt: 2 },
     ];
+
     const queue = createFetchQueue([{ body: sections }]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1728,7 +2199,7 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/thread-sections",
+        url: "http://omnyo.test/api/v1/thread-sections",
       },
     ]);
   });
@@ -1745,9 +2216,10 @@ describe("@bb/sdk", () => {
         status: 201,
       },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1759,7 +2231,7 @@ describe("@bb/sdk", () => {
     expect(queue.requests[0]).toEqual({
       bodyText: JSON.stringify({ name: "Review" }),
       method: "POST",
-      url: "http://bb.test/api/v1/thread-sections",
+      url: "http://omnyo.test/api/v1/thread-sections",
     });
   });
 
@@ -1772,9 +2244,10 @@ describe("@bb/sdk", () => {
         },
       },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test/",
+        baseUrl: "http://omnyo.test/",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1791,21 +2264,22 @@ describe("@bb/sdk", () => {
     expect(queue.requests[0]).toEqual({
       bodyText: "null",
       method: "POST",
-      url: "http://bb.test/api/v1/plugins/custom-instructions/rpc/getInstructions",
+      url: "http://omnyo.test/api/v1/plugins/custom-instructions/rpc/getInstructions",
     });
   });
 
   it("routes every typed plugin administration method through the transport", async () => {
     const plugin = {
       id: "notes",
-      source: "npm:@bb/notes@^1",
+      source: "npm:@example/notes@^1",
       rootDir: "/plugins/notes",
       version: "1.2.0",
       provenance: "catalog" as const,
       isOrphanedBuiltin: false,
+      removable: true,
       catalogEntryId: "notes",
-      publisherLabel: "BB Community",
-      sourceDisplay: "npm · @bb/notes · tracks compatible",
+      publisherLabel: "Acme Plugins",
+      sourceDisplay: "npm · @example/notes · tracks compatible",
       updateState: {},
       enabled: true,
       description: "Notes",
@@ -1828,26 +2302,29 @@ describe("@bb/sdk", () => {
       providerIds: [],
       icons: {},
     };
+
     const catalog = {
       pluginCount: 1,
       includedPluginCount: 1,
       optionalPluginCount: 0,
     };
+
     const checked = {
       id: "notes",
       outcome: "update-available" as const,
       installed: { version: "1.2.0", display: "1.2.0" },
       candidate: { version: "1.3.0", display: "1.3.0" },
     };
+
     const queue = createFetchQueue([
       { body: { plugins: [plugin] } },
       { body: { ok: true, plugin } },
       { body: { ok: true, plugin } },
       {
         body: {
-          requested: "npm:@bb/notes@^1",
+          requested: "npm:@example/notes@^1",
           resolved: "1.2.0",
-          engines: { bb: ">=0.9", bbPluginSdk: "^0.2.0" },
+          engines: { omnyo: ">=0.9", omnyoPluginSdk: "^0.2.0" },
           installedAt: 5,
           history: [{ version: "1.2.0", activatedAt: 5 }],
         },
@@ -1875,7 +2352,7 @@ describe("@bb/sdk", () => {
               icon: null,
               iconUrl: null,
               category: "Productivity",
-              source: "npm:@bb/notes@^1",
+              source: "npm:@example/notes@^1",
               marketplace: "acme-plugins",
               marketplaceDisplayName: "Acme Plugins",
               publisherKey: "acme-plugins",
@@ -1898,9 +2375,10 @@ describe("@bb/sdk", () => {
         },
       },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test/",
+        baseUrl: "http://omnyo.test/",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -1908,7 +2386,7 @@ describe("@bb/sdk", () => {
 
     await expect(sdk.plugins.list()).resolves.toEqual({ plugins: [plugin] });
     await expect(
-      sdk.plugins.install({ source: "npm:@bb/notes@^1" }),
+      sdk.plugins.install({ source: "npm:@example/notes@^1" }),
     ).resolves.toEqual(plugin);
     await expect(
       sdk.plugins.catalog.install({
@@ -1942,64 +2420,66 @@ describe("@bb/sdk", () => {
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/plugins",
+        url: "http://omnyo.test/api/v1/plugins",
       },
       {
         bodyText: JSON.stringify({
-          source: "npm:@bb/notes@^1",
+          source: "npm:@example/notes@^1",
         }),
         method: "POST",
-        url: "http://bb.test/api/v1/plugins/install",
+        url: "http://omnyo.test/api/v1/plugins/install",
       },
       {
         bodyText: JSON.stringify({
           entryId: "notes",
         }),
         method: "POST",
-        url: "http://bb.test/api/v1/plugin-catalog/install",
+        url: "http://omnyo.test/api/v1/plugin-catalog/install",
       },
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/plugins/notes/source",
+        url: "http://omnyo.test/api/v1/plugins/notes/source",
       },
       {
         bodyText: JSON.stringify({ id: "notes" }),
         method: "POST",
-        url: "http://bb.test/api/v1/plugins/updates/check",
+        url: "http://omnyo.test/api/v1/plugins/updates/check",
       },
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/plugins/updates",
+        url: "http://omnyo.test/api/v1/plugins/updates",
       },
       {
         bodyText: "{}",
         method: "POST",
-        url: "http://bb.test/api/v1/plugins/notes/update",
+        url: "http://omnyo.test/api/v1/plugins/notes/update",
       },
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/plugin-catalog",
+        url: "http://omnyo.test/api/v1/plugin-catalog",
       },
       {
         bodyText: undefined,
         method: "GET",
-        url: "http://bb.test/api/v1/plugin-catalog/search?q=notes",
+        url: "http://omnyo.test/api/v1/plugin-catalog/search?q=notes",
       },
     ]);
   });
 
   it("sends a nested-plugin selection and refuses two selectors at once", async () => {
     const plugin = { id: "notes" };
+
     const queue = createFetchQueue([
       { body: { ok: true, plugin } },
       { body: { ok: true, plugin } },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -2038,9 +2518,10 @@ describe("@bb/sdk", () => {
     const queue = createFetchQueue([
       { body: { error: "candidate unavailable" }, status: 422 },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -2053,9 +2534,10 @@ describe("@bb/sdk", () => {
 
   it("rejects thread spawn requests with both prompt and input", async () => {
     const queue = createFetchQueue([]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -2082,9 +2564,10 @@ describe("@bb/sdk", () => {
       { body: { id: "thr_wait", status: "active" } },
       { body: { id: "thr_wait", status: "idle" } },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -2104,8 +2587,8 @@ describe("@bb/sdk", () => {
     });
 
     expect(queue.requests.map((request) => request.url)).toEqual([
-      "http://bb.test/api/v1/threads/thr_wait",
-      "http://bb.test/api/v1/threads/thr_wait",
+      "http://omnyo.test/api/v1/threads/thr_wait",
+      "http://omnyo.test/api/v1/threads/thr_wait",
     ]);
   });
 
@@ -2113,9 +2596,10 @@ describe("@bb/sdk", () => {
     const queue = createFetchQueue([
       { body: { id: "thr_wait", status: "active" } },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -2144,6 +2628,7 @@ describe("@bb/sdk", () => {
       topic: null,
       summary: null,
     };
+
     const queue = createFetchQueue([
       {
         body: {
@@ -2153,7 +2638,7 @@ describe("@bb/sdk", () => {
               name: "local-skill",
               description: null,
               provider: null,
-              scope: "bb-user",
+              scope: "omnyo-user",
               pluginId: null,
               filePath: "/skills/local-skill/SKILL.md",
               manageable: true,
@@ -2172,9 +2657,10 @@ describe("@bb/sdk", () => {
       { body: { stars: 27_053 } },
       { body: { ok: true, filePath: "/skills/useful-skill/SKILL.md" } },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -2201,22 +2687,22 @@ describe("@bb/sdk", () => {
     expect(queue.requests).toEqual([
       {
         method: "GET",
-        url: "http://bb.test/api/v1/projects/proj_123/skills?environmentId=",
+        url: "http://omnyo.test/api/v1/projects/proj_123/skills?environmentId=",
         bodyText: undefined,
       },
       {
         method: "GET",
-        url: "http://bb.test/api/v1/skills-registry?page=0&perPage=24",
+        url: "http://omnyo.test/api/v1/skills-registry?page=0&perPage=24",
         bodyText: undefined,
       },
       {
         method: "GET",
-        url: "http://bb.test/api/v1/skills-registry/repository-stars?source=owner%2Frepo",
+        url: "http://omnyo.test/api/v1/skills-registry/repository-stars?source=owner%2Frepo",
         bodyText: undefined,
       },
       {
         method: "POST",
-        url: "http://bb.test/api/v1/skills-registry/install",
+        url: "http://omnyo.test/api/v1/skills-registry/install",
         bodyText: JSON.stringify({
           registrySkillId: registrySkill.id,
         }),
@@ -2224,9 +2710,73 @@ describe("@bb/sdk", () => {
     ]);
   });
 
+  it("sends search text in the body and commits the exact staged digest", async () => {
+    const registrySkillId = "owner/repo/review";
+    const treeDigest = "a".repeat(64);
+
+    const manifest = {
+      registrySkillId,
+      treeDigest,
+      source: "owner/repo",
+      skillId: "review",
+      destination: "omnyo-user",
+      expiresAt: 1000,
+      files: [],
+      skillMarkdown: "# Reviewed",
+      license: null,
+      conflict: null,
+      licenseFiles: [],
+    };
+
+    const queue = createFetchQueue([
+      {
+        body: {
+          skills: [],
+          coverage: "leaderboard-names",
+          ranking: "all-time",
+          pagination: { page: 0, perPage: 8, total: 0, hasMore: false },
+        },
+      },
+      { body: manifest },
+      { body: { ok: true, filePath: "/skills/review/SKILL.md", treeDigest } },
+    ]);
+
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://omnyo.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+
+    await expect(
+      sdk.skills.registry.search({ query: "  example task  ", perPage: 8 }),
+    ).resolves.toMatchObject({ coverage: "leaderboard-names" });
+    const review = await sdk.skills.registry.stage({ registrySkillId });
+    await expect(sdk.skills.registry.commit(review)).resolves.toMatchObject({
+      treeDigest,
+    });
+    expect(
+      queue.requests.map(({ url, method, bodyText }) => [
+        new URL(url).pathname,
+        method,
+        JSON.parse(String(bodyText)),
+      ]),
+    ).toEqual([
+      ["/api/v1/skills-registry/search", "POST", { query: "example task" }],
+      ["/api/v1/skills-registry/stage", "POST", { registrySkillId }],
+      [
+        "/api/v1/skills-registry/commit",
+        "POST",
+        { registrySkillId, treeDigest },
+      ],
+    ]);
+  });
+
   it("uses opaque skill identities and compare-and-swap revisions", async () => {
     const skillId = `skill_${"a".repeat(64)}`;
     const revision = "b".repeat(64);
+
     const queue = createFetchQueue([
       { body: { content: "# Review", revision } },
       { body: { files: ["SKILL.md"], truncated: false } },
@@ -2238,9 +2788,10 @@ describe("@bb/sdk", () => {
       },
       { body: { deletedPath: "/skills/review" } },
     ]);
-    const sdk = createBbSdk({
+
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         fetch: queue.fetch,
         runtime: "node",
       }),
@@ -2273,17 +2824,17 @@ describe("@bb/sdk", () => {
     expect(queue.requests).toEqual([
       {
         method: "GET",
-        url: `http://bb.test/api/v1/projects/proj_123/skills/content?skillId=${skillId}&path=SKILL.md&environmentId=`,
+        url: `http://omnyo.test/api/v1/projects/proj_123/skills/content?skillId=${skillId}&path=SKILL.md&environmentId=`,
         bodyText: undefined,
       },
       {
         method: "GET",
-        url: `http://bb.test/api/v1/projects/proj_123/skills/files?skillId=${skillId}&environmentId=`,
+        url: `http://omnyo.test/api/v1/projects/proj_123/skills/files?skillId=${skillId}&environmentId=`,
         bodyText: undefined,
       },
       {
         method: "PATCH",
-        url: "http://bb.test/api/v1/projects/proj_123/skills/content",
+        url: "http://omnyo.test/api/v1/projects/proj_123/skills/content",
         bodyText: JSON.stringify({
           skillId,
           environmentId: null,
@@ -2293,9 +2844,84 @@ describe("@bb/sdk", () => {
       },
       {
         method: "DELETE",
-        url: "http://bb.test/api/v1/projects/proj_123/skills",
+        url: "http://omnyo.test/api/v1/projects/proj_123/skills",
         bodyText: JSON.stringify({ skillId, environmentId: null }),
       },
     ]);
+  });
+});
+
+describe("attachment upload admission and cancellation", () => {
+  it.each([1737935253, 1149298456, 253576142, 35 * 1024 * 1024 + 1])(
+    "rejects %i bytes before reading or sending an upload",
+    async (size) => {
+      const arrayBuffer = vi.fn(async () => {
+        throw new Error("Oversized file bytes must not be read");
+      });
+
+      const fetch = vi.fn(async () => jsonResponse({ body: {}, status: 201 }));
+
+      const sdk = createOmnyoSdk({
+        transport: createHttpTransport({
+          baseUrl: "https://remote-omnyo.test",
+          fetch,
+          runtime: "browser",
+        }),
+      });
+
+      await expect(
+        sdk.projects.attachments.upload({
+          projectId: "proj_1",
+          clientFile: {
+            name: "video.mp4",
+            type: "video/mp4",
+            size,
+            arrayBuffer,
+          },
+        }),
+      ).rejects.toThrow(/35.*attachment limit/u);
+      expect(arrayBuffer).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("cancels the actual pending upload request without turning it into success", async () => {
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | null | undefined;
+
+    const fetch = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestSignal = init?.signal;
+
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        });
+      },
+    );
+
+    const sdk = createOmnyoSdk({
+      transport: createHttpTransport({
+        baseUrl: "https://remote-omnyo.test",
+        fetch,
+        runtime: "browser",
+      }),
+    });
+
+    const pending = sdk.projects.attachments.upload({
+      projectId: "proj_1",
+      clientFile: new Blob(["actual bytes"]),
+      filename: "small.txt",
+      signal: controller.signal,
+    });
+
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(requestSignal).toBe(controller.signal);
+    controller.abort(new DOMException("Upload cancelled", "AbortError"));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(requestSignal?.aborted).toBe(true);
   });
 });

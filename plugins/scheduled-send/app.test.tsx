@@ -2,21 +2,29 @@
 
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import type {
   PluginComposerApi,
   PluginComposerScope,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
+
+const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+
+vi.mock("sonner", () => ({ toast: toasts }));
 
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
 const app = await loadPluginApp(() => import("./app"));
-const { openSendLater, resetSendLaterState } = await import("./app");
+
+const { openSendLater, resetSendLaterState, startScheduledSend } =
+  await import("./app");
 
 const customization = app.composerCustomizations[0]!;
+
 const sendMenuItem = customization.sendMenu![0]!;
+
 const picker = customization.banners![0]!;
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -32,11 +40,13 @@ function openPicker(
     kind: "thread",
     threadId: "thr_scope",
   };
+
   const text = options.text ?? "ship the release notes";
   const slot = renderSlot(picker, {}, { composer: { scope, text } });
   act(() => {
     openSendLater(fakeComposer({ isEmpty: false, key: slot.composer.key }));
   });
+
   return slot;
 }
 
@@ -57,6 +67,8 @@ function dateInputValue(date: Date): string {
 }
 
 beforeEach(() => {
+  toasts.success.mockClear();
+  toasts.error.mockClear();
   localStorage.clear();
   resetSendLaterState();
 });
@@ -88,6 +100,7 @@ describe("registration", () => {
     const disabled = sendMenuItem.disabled as (
       composer: PluginComposerApi,
     ) => boolean;
+
     expect(disabled(fakeComposer({ isSubmittingBlocked: true }))).toBe(true);
     expect(disabled(fakeComposer({ isSubmittingBlocked: false }))).toBe(false);
   });
@@ -106,6 +119,7 @@ describe("picker visibility", () => {
       {},
       { composer: { scope: { kind: "thread", threadId: "thr_scope" } } },
     );
+
     expect(slot.queryByRole("dialog")).toBeNull();
   });
 
@@ -115,14 +129,17 @@ describe("picker visibility", () => {
       {},
       { composer: { scope: { kind: "thread", threadId: "thr_a" } } },
     );
+
     const openerKey = opener.composer.key;
     opener.unmount();
     openSendLater(fakeComposer({ isEmpty: false, key: openerKey }));
+
     const slot = renderSlot(
       picker,
       {},
       { composer: { scope: { kind: "thread", threadId: "thr_b" } } },
     );
+
     expect(slot.queryByRole("dialog")).toBeNull();
   });
 
@@ -136,7 +153,72 @@ describe("picker visibility", () => {
   });
 });
 
+describe("remembered schedule selection", () => {
+  const storageKey = "omnyo:scheduled-send:selection:v1";
+  const legacyKey = "bb:scheduled-send:selection:v1";
+
+  it("imports the legacy selection once and removes it", () => {
+    localStorage.setItem(
+      legacyKey,
+      JSON.stringify({ optionId: "tomorrow-morning", date: "", time: "" }),
+    );
+    openPicker();
+    expect(localStorage.getItem(storageKey)).toContain("tomorrow-morning");
+    expect(localStorage.getItem(legacyKey)).toBeNull();
+  });
+
+  it("keeps the canonical selection when both exist", () => {
+    localStorage.setItem(
+      legacyKey,
+      JSON.stringify({ optionId: "tomorrow-morning", date: "", time: "" }),
+    );
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ optionId: "this-evening", date: "", time: "" }),
+    );
+    openPicker();
+    expect(localStorage.getItem(storageKey)).toContain("this-evening");
+    expect(localStorage.getItem(legacyKey)).toBeNull();
+  });
+});
+
 describe("scheduling", () => {
+  it("closes the dialog and confirms before the host accepts the message", async () => {
+    const slot = openPicker();
+    let accept: () => void = () => {};
+
+    const submit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          accept = resolve;
+        }),
+    );
+
+    act(() => {
+      startScheduledSend(fakeComposer({ submit }), Date.now() + HOUR_MS);
+    });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(toasts.success).toHaveBeenCalledTimes(1);
+    expect(slot.queryByRole("dialog")).toBeNull();
+    accept();
+    await Promise.resolve();
+    expect(toasts.error).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected schedule with an error toast", async () => {
+    const submit = vi.fn(() => Promise.reject(new Error("Host offline")));
+
+    startScheduledSend(fakeComposer({ submit }), Date.now() + HOUR_MS);
+
+    await waitFor(() =>
+      expect(toasts.error).toHaveBeenCalledWith(
+        "Could not schedule the message",
+        { description: "Host offline" },
+      ),
+    );
+  });
+
   it("previews a preset, then submits only after confirmation", async () => {
     const before = Date.now();
     const slot = openPicker();
@@ -184,9 +266,11 @@ describe("scheduling", () => {
     fireEvent.click(slot.getByRole("button", { name: "Schedule send" }));
     await waitFor(() => expect(slot.queryByRole("dialog")).toBeNull());
     slot.unmount();
+
     const next = openPicker({
       scope: { kind: "new-thread", projectId: "prj_1" },
     });
+
     expect(
       next.getByRole("combobox", { name: "When to send" }).textContent,
     ).toContain("In 10 minutes");
@@ -246,6 +330,7 @@ describe("scheduling", () => {
 
   it("schedules a new-thread draft through the same composer pipeline", async () => {
     const before = Date.now();
+
     const slot = openPicker({
       scope: { kind: "new-thread", projectId: "prj_1" },
     });

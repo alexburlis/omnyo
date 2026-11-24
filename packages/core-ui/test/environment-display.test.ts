@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Environment } from "@bb/domain";
+import type { Environment } from "@omnyo/domain";
 import {
   formatEnvironmentDisplay,
   resolveEnvironmentDisplayName,
@@ -89,6 +89,7 @@ describe("formatEnvironmentDisplay", () => {
         host: remoteHostContext,
         providerLookup: noProviderLookup,
       });
+
       expect(result.modeLabel).toBe("Working remotely");
       expect(result.compactModeLabel).toBe("Remote");
     });
@@ -96,12 +97,13 @@ describe("formatEnvironmentDisplay", () => {
     it("labels a branch-bearing row by its provider, since the branch is shown beside it", () => {
       const result = formatEnvironmentDisplay({
         environment: makeEnvironment({
-          branchName: "bb/feature",
+          branchName: "omnyo/feature",
           environmentProviderId: "git-worktree",
         }),
         host: localHostContext,
         providerLookup: worktreeProviderLookup,
       });
+
       expect(result.modeLabel).toBe("Worktree");
       expect(result.compactModeLabel).toBe("Worktree");
     });
@@ -110,12 +112,13 @@ describe("formatEnvironmentDisplay", () => {
       const result = formatEnvironmentDisplay({
         environment: makeEnvironment({
           name: "Review workspace",
-          branchName: "bb/feature",
+          branchName: "omnyo/feature",
           environmentProviderId: "git-worktree",
         }),
         host: localHostContext,
         providerLookup: worktreeProviderLookup,
       });
+
       expect(result.modeLabel).toBe("Review workspace");
       expect(result.compactModeLabel).toBe("Review workspace");
     });
@@ -135,6 +138,7 @@ describe("formatEnvironmentDisplay", () => {
           },
         },
       });
+
       expect(result.modeLabel).toBe("Modal sandbox");
       expect(result.compactModeLabel).toBe("Modal sandbox");
     });
@@ -147,6 +151,7 @@ describe("formatEnvironmentDisplay", () => {
         host: remoteHostContext,
         providerLookup: noProviderLookup,
       });
+
       expect(result.modeLabel).toBe("modal-sandbox");
       expect(result.providerLabel).toBe("modal-sandbox");
     });
@@ -159,6 +164,7 @@ describe("formatEnvironmentDisplay", () => {
         host: remoteHostContext,
         providerLookup: loadingProviderLookup,
       });
+
       expect(result.providerLabel).toBeNull();
       expect(result.modeLabel).toBe("Working remotely");
     });
@@ -170,11 +176,12 @@ describe("formatEnvironmentDisplay", () => {
         environment: makeEnvironment({
           status: "provisioning",
           environmentProviderId: "git-worktree",
-          branchName: "bb/feature",
+          branchName: "omnyo/feature",
         }),
         host: remoteHostContext,
         providerLookup: worktreeProviderLookup,
       });
+
       expect(result.modeLabel).toBe("Provisioning");
       expect(result.compactModeLabel).toBe("Provisioning");
       expect(result.lifecycle).toBe("provisioning");
@@ -190,6 +197,7 @@ describe("formatEnvironmentDisplay", () => {
         host: localHostContext,
         providerLookup: worktreeProviderLookup,
       });
+
       expect(result.modeLabel).toBe("Environment unavailable");
       expect(result.compactModeLabel).toBe("Environment unavailable");
       expect(result.lifecycle).toBe("destroyed");
@@ -211,6 +219,7 @@ describe("formatEnvironmentDisplay", () => {
           host: remoteHostContext,
           providerLookup: noProviderLookup,
         });
+
         expect(result.modeLabel).toBe(label);
         expect(result.lifecycle).toBe(hostLifecycle);
       },
@@ -225,6 +234,7 @@ describe("formatEnvironmentDisplay", () => {
         host: localHostContext,
         providerLookup: noProviderLookup,
       });
+
       expect(result.modeLabel).toBe("Review workspace");
       expect(result.lifecycle).toBe("provisioning");
     });
@@ -265,13 +275,13 @@ describe("resolveEnvironmentDisplayName", () => {
       resolveEnvironmentDisplayName(
         {
           name: null,
-          branchName: "bb/feature",
+          branchName: "omnyo/feature",
           path: null,
           environmentProviderId: "modal-sandbox",
         },
         loadingProviderLookup,
       ),
-    ).toBe("bb/feature");
+    ).toBe("omnyo/feature");
   });
 
   it("names a branchless provider row by its provider, not its workspace folder", () => {
@@ -280,7 +290,7 @@ describe("resolveEnvironmentDisplayName", () => {
         {
           name: null,
           branchName: null,
-          path: "/Users/bb/.bb/plugins/environment-personal-workspace/host-data/workspaces/thr_k72wqg7tcs/",
+          path: "/Users/om/.omnyo/plugins/environment-personal-workspace/host-data/workspaces/thr_k72wqg7tcs/",
           environmentProviderId: "personal-workspace",
         },
         {
@@ -301,7 +311,7 @@ describe("resolveEnvironmentDisplayName", () => {
         {
           name: null,
           branchName: null,
-          path: "C:\\bb\\workspaces\\thr_win",
+          path: "C:\\omnyo\\workspaces\\thr_win",
           environmentProviderId: "personal-workspace",
         },
         loadingProviderLookup,
@@ -315,7 +325,7 @@ describe("resolveEnvironmentDisplayName", () => {
         {
           name: null,
           branchName: null,
-          path: "/Users/bb/Projects/notes/",
+          path: "/Users/omnyo/Projects/notes/",
           environmentProviderId: null,
         },
         noProviderLookup,
@@ -326,7 +336,7 @@ describe("resolveEnvironmentDisplayName", () => {
         {
           name: null,
           branchName: null,
-          path: "C:\\Users\\bb\\notes",
+          path: "C:\\Users\\omnyo\\notes",
           environmentProviderId: null,
         },
         noProviderLookup,

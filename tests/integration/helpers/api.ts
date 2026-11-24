@@ -7,7 +7,7 @@ import type {
   ThreadExecutionOptions,
   ThreadEventRow,
   ThreadGitDiffResponse,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   environmentSchema,
   hostSchema,
@@ -15,8 +15,8 @@ import {
   resolveEnvironmentMergeBaseBranch,
   threadEventRowSchema,
   threadSchema,
-} from "@bb/domain";
-import { listPreferredTestModels } from "@bb/test-helpers";
+} from "@omnyo/domain";
+import { listPreferredTestModels } from "@omnyo/test-helpers";
 import type {
   CreateProjectRequest,
   CreateThreadRequest,
@@ -32,9 +32,10 @@ import type {
   ThreadPendingInteractionsResponse,
   ThreadTimelineResponse,
   ThreadResponse,
+  UnmanagedBranchSpec,
   UpdateThreadRequest,
   WorkspaceArgs,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   createPublicApiClient,
   environmentActionResponseSchema,
@@ -49,7 +50,7 @@ import {
   threadResponseSchema,
   threadTimelineResponseSchema,
   THREAD_EVENT_LIST_PAGE_SIZE,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 
 export interface CreateHostThreadOptions {
   execution?: ThreadExecutionRequestOptions;
@@ -62,7 +63,7 @@ export interface CreateHostThreadOptions {
   workspace:
     | { type: "managed-worktree" }
     | { type: "personal" }
-    | { path: string | null; type: "unmanaged" };
+    | { branch?: UnmanagedBranchSpec; path: string | null; type: "unmanaged" };
 }
 
 export interface CreateReuseThreadOptions {
@@ -96,8 +97,10 @@ export interface GetAvailableModelsOptions {
 }
 
 type PublicApiClient = ReturnType<typeof createPublicApiClient>;
+
 const DEFAULT_THREAD_BOOTSTRAP_TEXT =
   "Reply with exactly READY and nothing else.";
+
 const DEFAULT_PUBLIC_TEST_THREAD_ORIGIN = "app";
 
 interface ResolveThreadInteractionArgs {
@@ -134,14 +137,17 @@ function toWorkspaceArgs(
   if (workspace.type === "unmanaged" || workspace.type === "personal") {
     return workspace;
   }
+
   return { ...workspace, baseBranch: { kind: "default" } };
 }
 
 function requireEnvironmentMergeBaseBranch(environment: Environment): string {
   const mergeBaseBranch = resolveEnvironmentMergeBaseBranch(environment);
+
   if (!mergeBaseBranch) {
     throw new Error(`Environment ${environment.id} has no merge base branch`);
   }
+
   return mergeBaseBranch;
 }
 
@@ -150,6 +156,7 @@ async function requireMergeBaseBranch(
   environmentId: string,
 ): Promise<string> {
   const environment = await getEnvironment(api, environmentId);
+
   return requireEnvironmentMergeBaseBranch(environment);
 }
 
@@ -160,6 +167,7 @@ export async function archiveThread(
   const response = await api.threads[":id"]["archive-all"].$post({
     param: { id: threadId },
   });
+
   await expectStatus(response, 200, `archive thread ${threadId}`);
 }
 
@@ -170,7 +178,9 @@ export async function createProject(
   const response = await api.projects.$post({
     json: request,
   });
+
   await expectStatus(response, 201, `create project ${request.name}`);
+
   return projectResponseSchema.parse(await response.json());
 }
 
@@ -182,6 +192,7 @@ async function postThread(
 ): Promise<Thread> {
   const providerId = options.providerId ?? "fake";
   const { model, ...execution } = options.execution ?? {};
+
   const response = await api.threads.$post({
     json: {
       environment,
@@ -197,7 +208,9 @@ async function postThread(
       originKind: null,
     },
   });
+
   await expectStatus(response, 201, label);
+
   return threadSchema.parse(await response.json());
 }
 
@@ -240,6 +253,7 @@ export async function deleteThread(
     param: { id: threadId },
     json: { childThreadsConfirmed: false },
   });
+
   await expectStatus(response, 200, `delete thread ${threadId}`);
 }
 
@@ -250,7 +264,9 @@ export async function getEnvironment(
   const response = await api.environments[":id"].$get({
     param: { id: environmentId },
   });
+
   await expectStatus(response, 200, `get environment ${environmentId}`);
+
   return environmentSchema.parse(await response.json());
 }
 
@@ -262,11 +278,13 @@ export async function getEnvironmentBranches(
     param: { id: environmentId },
     query: {},
   });
+
   await expectStatus(
     response,
     200,
     `get environment branches ${environmentId}`,
   );
+
   return environmentDiffBranchesResponseSchema.parse(await response.json());
 }
 
@@ -275,6 +293,7 @@ export async function getEnvironmentDiff(
   environmentId: string,
 ): Promise<ThreadGitDiffResponse> {
   const mergeBaseBranch = await requireMergeBaseBranch(api, environmentId);
+
   const response = await api.environments[":id"].diff.$get({
     param: { id: environmentId },
     query: {
@@ -282,16 +301,21 @@ export async function getEnvironmentDiff(
       target: "all",
     },
   });
+
   await expectStatus(response, 200, `get environment diff ${environmentId}`);
+
   const diffResponse = environmentDiffResponseSchema.parse(
     await response.json(),
   );
+
   if (diffResponse.outcome === "available") {
     return diffResponse.diff;
   }
+
   if (diffResponse.outcome === "not_applicable") {
     throw new Error(diffResponse.message);
   }
+
   throw new Error(diffResponse.failure.message);
 }
 
@@ -303,11 +327,13 @@ export async function getEnvironmentDiffFiles(
     param: { id: environmentId },
     query: { target: "uncommitted" },
   });
+
   await expectStatus(
     response,
     200,
     `get environment diff files ${environmentId}`,
   );
+
   return environmentDiffFilesResponseSchema.parse(await response.json());
 }
 
@@ -320,11 +346,13 @@ export async function getEnvironmentDiffPatch(
     param: { id: environmentId },
     json: { target: { type: "uncommitted" }, paths },
   });
+
   await expectStatus(
     response,
     200,
     `get environment diff patch ${environmentId}`,
   );
+
   return environmentDiffPatchResponseSchema.parse(await response.json());
 }
 
@@ -333,11 +361,14 @@ export async function getEnvironmentStatus(
   environmentId: string,
 ): Promise<EnvironmentStatusResponse> {
   const mergeBaseBranch = await requireMergeBaseBranch(api, environmentId);
+
   const response = await api.environments[":id"].status.$get({
     param: { id: environmentId },
     query: { mergeBaseBranch },
   });
+
   await expectStatus(response, 200, `get environment status ${environmentId}`);
+
   return environmentStatusResponseSchema.parse(await response.json());
 }
 
@@ -351,7 +382,9 @@ export async function getAvailableModels(
       ...(options.providerId ? { providerId: options.providerId } : {}),
     },
   });
+
   await expectStatus(response, 200, "get available models");
+
   return systemExecutionOptionsResponseSchema.parse(await response.json())
     .models;
 }
@@ -359,6 +392,7 @@ export async function getAvailableModels(
 export async function getHosts(api: PublicApiClient): Promise<Host[]> {
   const response = await api.hosts.$get({});
   await expectStatus(response, 200, "get hosts");
+
   return hostSchema.array().parse(await response.json());
 }
 
@@ -369,7 +403,9 @@ export async function getThread(
   const response = await api.threads[":id"].$get({
     param: { id: threadId },
   });
+
   await expectStatus(response, 200, `get thread ${threadId}`);
+
   return threadSchema.parse(await response.json());
 }
 
@@ -380,7 +416,9 @@ export async function getThreadResponse(
   const response = await api.threads[":id"].$get({
     param: { id: threadId },
   });
+
   await expectStatus(response, 200, `get thread ${threadId}`);
+
   return threadResponseSchema.parse(await response.json());
 }
 
@@ -390,6 +428,7 @@ export async function getThreadEvents(
 ): Promise<ThreadEventRow[]> {
   const rows: ThreadEventRow[] = [];
   let afterSeq: string | undefined;
+
   for (;;) {
     const response = await api.threads[":id"].events.$get({
       param: { id: threadId },
@@ -399,13 +438,16 @@ export async function getThreadEvents(
         order: "asc",
       },
     });
+
     await expectStatus(response, 200, `get thread events ${threadId}`);
     const page = threadEventRowSchema.array().parse(await response.json());
     rows.push(...page);
     const last = page.at(-1);
+
     if (last === undefined || page.length < THREAD_EVENT_LIST_PAGE_SIZE) {
       return rows;
     }
+
     afterSeq = String(last.seq);
   }
 }
@@ -417,8 +459,10 @@ export async function getThreadOutput(
   const response = await api.threads[":id"].output.$get({
     param: { id: threadId },
   });
+
   await expectStatus(response, 200, `get thread output ${threadId}`);
   const payload = await response.json();
+
   return payload.output;
 }
 
@@ -434,7 +478,9 @@ export async function getThreadTimeline(
         ? {}
         : { includeNestedRows: options.includeNestedRows ? "true" : "false" },
   });
+
   await expectStatus(response, 200, `get thread timeline ${threadId}`);
+
   return threadTimelineResponseSchema.parse(await response.json());
 }
 
@@ -445,7 +491,9 @@ export async function listThreadInteractions(
   const response = await api.threads[":id"].interactions.$get({
     param: { id: threadId },
   });
+
   await expectStatus(response, 200, `list thread interactions ${threadId}`);
+
   return threadPendingInteractionsResponseSchema.parse(await response.json());
 }
 
@@ -458,11 +506,13 @@ export async function resolveThreadInteraction(
     param: { id: args.threadId, interactionId: args.interactionId },
     json: args.resolution,
   });
+
   await expectStatus(
     response,
     200,
     `resolve thread interaction ${args.interactionId}`,
   );
+
   return pendingInteractionSchema.parse(await response.json());
 }
 
@@ -475,7 +525,9 @@ export async function runEnvironmentAction(
     param: { id: environmentId },
     json: request,
   });
+
   await expectStatus(response, 200, `run environment action ${request.action}`);
+
   return environmentActionResponseSchema.parse(await response.json());
 }
 
@@ -489,10 +541,12 @@ export async function sendTextMessage(
     mode: options.mode ?? "auto",
     ...(options.execution ?? {}),
   };
+
   const response = await api.threads[":id"].send.$post({
     param: { id: threadId },
     json: request,
   });
+
   await expectStatus(response, 200, `send message to thread ${threadId}`);
 }
 
@@ -503,6 +557,7 @@ export async function stopThread(
   const response = await api.threads[":id"].stop.$post({
     param: { id: threadId },
   });
+
   await expectStatus(response, 200, `stop thread ${threadId}`);
 }
 
@@ -513,6 +568,7 @@ export async function unarchiveThread(
   const response = await api.threads[":id"].unarchive.$post({
     param: { id: threadId },
   });
+
   await expectStatus(response, 200, `unarchive thread ${threadId}`);
 }
 
@@ -523,6 +579,7 @@ export async function restoreThreadEnvironment(
   const response = await api.threads[":id"]["restore-environment"].$post({
     param: { id: threadId },
   });
+
   await expectStatus(response, 200, `restore thread ${threadId} environment`);
 }
 
@@ -535,6 +592,8 @@ export async function updateThread(
     param: { id: threadId },
     json: request,
   });
+
   await expectStatus(response, 200, `update thread ${threadId}`);
+
   return threadSchema.parse(await response.json());
 }

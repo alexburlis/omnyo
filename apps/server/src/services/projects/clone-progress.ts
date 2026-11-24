@@ -1,4 +1,4 @@
-import type { PluginEnvironmentProviderProgress } from "@get-bb/plugin-sdk/environment-provider";
+import type { PluginEnvironmentProviderProgress } from "@omnyo/plugin-sdk/environment-provider";
 
 export function createCloneProgressReporter(
   target: PluginEnvironmentProviderProgress,
@@ -12,9 +12,11 @@ export function createCloneProgressReporter(
   function flush() {
     if (timer !== null) clearTimeout(timer);
     timer = null;
+
     if (pending === null) return;
     const text = pending;
     pending = null;
+
     if (text === lastText) return;
     lastText = text;
     lastEmittedAt = Date.now();
@@ -25,6 +27,7 @@ export function createCloneProgressReporter(
     if (disposed) return;
     pending = text;
     const delay = Math.max(0, 1_000 - (Date.now() - lastEmittedAt));
+
     if (delay === 0) flush();
     else if (timer === null) {
       timer = setTimeout(flush, delay);

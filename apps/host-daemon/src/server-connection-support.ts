@@ -1,16 +1,20 @@
 import ReconnectingWebSocket from "partysocket/ws";
 import {
+  type DaemonWirePayload,
   type HostDaemonActiveThread,
+  type HostDaemonInteractiveRequestKey,
+  type HostDaemonOpenThreadWork,
   type HostDaemonLoadedEnvironment,
   type HostDaemonConnectSharesReplaceMessage,
   type HostDaemonOnlineRpcRequestMessage,
   type HostDaemonServerWsMessage,
   type HostDaemonSessionOpenResponse,
   type HostDaemonWatchSetReplaceMessage,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { HostDaemonLogger } from "./logger.js";
 import type { ServerClient } from "./server-client.js";
 import type { ProtocolSelfUpdater } from "./protocol-self-update.js";
+import type { WebSocket as NodeWebSocket } from "ws";
 import { createNodeWebSocketConstructor } from "./websocket-constructor.js";
 
 export interface ReconnectingWebSocketLike {
@@ -20,7 +24,7 @@ export interface ReconnectingWebSocketLike {
   onmessage: ((event: any) => void) | null;
   onclose: ((event: any) => void) | null;
   onerror: ((event: any) => void) | null;
-  send(data: string): void;
+  send(data: DaemonWirePayload, onWritten?: (error?: Error) => void): void;
   close(code?: number, reason?: string): void;
   reconnect(code?: number, reason?: string): void;
 }
@@ -42,11 +46,15 @@ export type CreateReconnectingWebSocket = (
 
 export type HostDaemonServerTerminalMessage = Exclude<
   HostDaemonServerWsMessage,
+  | { type: "command-catalog-retain" }
   | { type: "machine.shutdown" }
+  | { type: "interactive-requests.end" }
   | { type: "server.moved" }
   | { type: "session-close" }
   | { type: "heartbeat-ack" }
+  | { type: "transport.bulk-ack" }
   | { type: "machine-environment.replace" }
+  | { type: "diagnostics-policy.replace" }
   | HostDaemonOnlineRpcRequestMessage
   | HostDaemonWatchSetReplaceMessage
   | HostDaemonConnectSharesReplaceMessage
@@ -84,6 +92,7 @@ export interface ServerConnectionOptions {
     | HostDaemonActiveThread[]
     | Promise<HostDaemonActiveThread[]>;
   getUndeliveredEventThreadIds?: () => string[];
+  getOpenThreadWork?: () => HostDaemonOpenThreadWork[];
   getLoadedEnvironments?: () =>
     | HostDaemonLoadedEnvironment[]
     | Promise<HostDaemonLoadedEnvironment[]>;
@@ -93,6 +102,12 @@ export interface ServerConnectionOptions {
   onHostRpcRequest?: (
     message: HostDaemonOnlineRpcRequestMessage,
   ) => void | Promise<void>;
+  onCatalogRetain?: (
+    scopes: Extract<
+      HostDaemonServerWsMessage,
+      { type: "command-catalog-retain" }
+    >["scopes"],
+  ) => Promise<void>;
   onWatchSetReplace?: (
     message: HostDaemonWatchSetReplaceMessage,
   ) => void | Promise<void>;
@@ -105,17 +120,27 @@ export interface ServerConnectionOptions {
   onMachineEnvironment?: (
     environment: HostDaemonSessionOpenResponse["machineEnvironment"],
   ) => void;
+  onDiagnosticsPolicy?: (enabled: boolean) => void;
   onMachineShutdown?: () => void | Promise<void>;
+  onInteractiveRequestsEnded?: (args: {
+    reason: string;
+    requests: HostDaemonInteractiveRequestKey[];
+  }) => void;
   onServerMoved?: (move: ServerMovedNotice) => Promise<void>;
   createWebSocket?: CreateReconnectingWebSocket;
   startupTimeoutMs?: number;
 }
 
 export const DEFAULT_MIN_RECONNECTION_DELAY = 1_000;
+
 export const DEFAULT_MAX_RECONNECTION_DELAY = 10_000;
+
 export const DEFAULT_RECONNECTION_DELAY_GROW_FACTOR = 2;
+
 export const DEFAULT_CONNECTION_TIMEOUT_MS = 10_000;
+
 export const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
+
 export const OPEN_READY_STATE = 1;
 
 export function createDefaultReconnectingWebSocket(
@@ -123,9 +148,26 @@ export function createDefaultReconnectingWebSocket(
   options: ReconnectingWebSocketOptions,
 ): ReconnectingWebSocketLike {
   const { headers, protocols, ...reconnectionOptions } = options;
-  return new ReconnectingWebSocket(urlProvider, protocols ?? [], {
+
+  let currentSocket: NodeWebSocket | undefined;
+
+  const socket = new ReconnectingWebSocket(urlProvider, protocols ?? [], {
     ...reconnectionOptions,
-    WebSocket: createNodeWebSocketConstructor(headers),
+    WebSocket: createNodeWebSocketConstructor(headers, (socket) => {
+      currentSocket = socket;
+    }),
+  });
+
+  return Object.assign(socket, {
+    send(data: DaemonWirePayload, onWritten?: (error?: Error) => void) {
+      if (currentSocket?.readyState !== OPEN_READY_STATE)
+        throw new Error("WebSocket is not open");
+      currentSocket.send(
+        data,
+        { compress: typeof data === "string" },
+        onWritten,
+      );
+    },
   });
 }
 
@@ -133,11 +175,14 @@ export function decodeWebSocketMessageData(data: unknown): string {
   if (typeof data === "string") {
     return data;
   }
+
   if (Array.isArray(data)) {
     return Buffer.concat(data).toString("utf8");
   }
+
   if (Buffer.isBuffer(data)) {
     return data.toString("utf8");
   }
+
   return String(data);
 }

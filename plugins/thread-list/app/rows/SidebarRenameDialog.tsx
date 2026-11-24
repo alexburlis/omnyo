@@ -21,6 +21,7 @@ export function SidebarRenameDialog({
   controller: RenameController;
 }) {
   const open = session?.presentation === "dialog";
+
   return (
     <RenameDialog
       open={open}
@@ -54,6 +55,7 @@ function SidebarRenameDialogContent({
   const inputId = useId();
   const errorId = useId();
   const isPending = Boolean(session.pending);
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     void controller.save();

@@ -16,15 +16,28 @@ export default {
 };
 
 const noop = () => {};
+
 const CONNECTED_HOST = makeHost({
   id: "host_new",
   name: "build-box",
   status: "connected",
 });
+
 const WINDOWS_ENROLLMENT_COMMAND =
-  "irm -Headers @{ 'X-BB-Enrollment' = 'bbde_TZpKWsJpWiPulVIRKNENmEVtvNwnEwDobjPFlnlsyCUUzorssgdxmgxUblRIWAUA' } 'https://bb.example.com/install.ps1' | iex";
+  "irm -MaximumRedirection 0 -Headers @{ 'X-Omnyo-Enrollment' = 'omnyode_TZpKWsJpWiPulVIRKNENmEVtvNwnEwDobjPFlnlsyCUUzorssgdxmgxUblRIWAUA' } 'https://omnyo.example.com/install.ps1' | iex";
+
 const ENROLLMENT_COMMAND =
-  "curl -fsSL -H 'X-BB-Enrollment: bbde_TZpKWsJpWiPulVIRKNENmEVtvNwnEwDobjPFlnlsyCUUzorssgdxmgxUblRIWAUA' 'https://bb.example.com/install.sh' | sh";
+  "curl -sS --fail-with-body -L --max-redirs 0 -H 'X-Omnyo-Enrollment: omnyode_TZpKWsJpWiPulVIRKNENmEVtvNwnEwDobjPFlnlsyCUUzorssgdxmgxUblRIWAUA' 'https://omnyo.example.com/install.sh' | sh";
+
+function shortCommand(expiresAt: number) {
+  return {
+    code: "7KQ4-M2XD",
+    command: "curl -fsSL https://omnyo.example.com/m/7KQ4-M2XD | sh",
+    windowsCommand: "irm https://omnyo.example.com/m/7KQ4-M2XD.ps1 | iex",
+    pageUrl: "https://omnyo.example.com/m/7KQ4-M2XD",
+    expiresAt,
+  };
+}
 
 export function AccessGate() {
   return (
@@ -40,7 +53,7 @@ export function AccessGate() {
         </DialogStage>
       </StoryRow>
       <StoryRow
-        label="bb connect unpaired"
+        label="Omnyo connect unpaired"
         hint="default provider is setup-required — the primary action leaves for plugin settings"
       >
         <DialogStage>
@@ -52,7 +65,7 @@ export function AccessGate() {
         </DialogStage>
       </StoryRow>
       <StoryRow
-        label="bb connect unavailable"
+        label="Omnyo connect unavailable"
         hint="paired once, now refused — a status line appears because there is a verdict to report"
       >
         <DialogStage>
@@ -107,6 +120,7 @@ export function AccessGate() {
 
 export function EnrollmentCommandState() {
   const [issuedAt] = useState(() => Date.now());
+
   return (
     <StoryCard labelWidth="200px">
       <StoryRow
@@ -135,6 +149,7 @@ export function EnrollmentCommandState() {
               value: ENROLLMENT_COMMAND,
               windowsValue: WINDOWS_ENROLLMENT_COMMAND,
               expiresAt: issuedAt + 15 * 60_000,
+              shortCommand: shortCommand(issuedAt + 10 * 60_000),
               unavailable: false,
             }}
             errorMessage={null}
@@ -155,7 +170,30 @@ export function EnrollmentCommandState() {
             command={{
               value: ENROLLMENT_COMMAND,
               windowsValue: WINDOWS_ENROLLMENT_COMMAND,
-              expiresAt: issuedAt + 40_000,
+              expiresAt: issuedAt + 5 * 60_000 + 40_000,
+              shortCommand: shortCommand(issuedAt + 40_000),
+              unavailable: false,
+            }}
+            errorMessage={null}
+            onRetry={noop}
+            onRegenerate={noop}
+            connectedHost={null}
+            serverMachineName="Mac mini"
+            onOpenMachine={noop}
+          />
+        </DialogStage>
+      </StoryRow>
+      <StoryRow
+        label="setup code lapsed"
+        hint="the short code lives ten minutes; the full command stays usable until the enrollment itself expires"
+      >
+        <DialogStage>
+          <ManualMachineSetupView
+            command={{
+              value: ENROLLMENT_COMMAND,
+              windowsValue: WINDOWS_ENROLLMENT_COMMAND,
+              expiresAt: issuedAt + 4 * 60_000,
+              shortCommand: null,
               unavailable: false,
             }}
             errorMessage={null}
@@ -177,6 +215,7 @@ export function EnrollmentCommandState() {
               value: ENROLLMENT_COMMAND,
               windowsValue: WINDOWS_ENROLLMENT_COMMAND,
               expiresAt: issuedAt - 1_000,
+              shortCommand: shortCommand(issuedAt - 1_000),
               unavailable: false,
             }}
             errorMessage={null}
@@ -198,6 +237,7 @@ export function EnrollmentCommandState() {
               value: ENROLLMENT_COMMAND,
               windowsValue: WINDOWS_ENROLLMENT_COMMAND,
               expiresAt: issuedAt + 15 * 60_000,
+              shortCommand: shortCommand(issuedAt + 10 * 60_000),
               unavailable: false,
             }}
             connectedHost={CONNECTED_HOST}
@@ -216,7 +256,7 @@ export function EnrollmentCommandState() {
         <DialogStage>
           <ManualMachineSetupView
             command={null}
-            errorMessage="The gate rejected this bb's credential (HTTP 401)"
+            errorMessage="The gate rejected this Omnyo's credential (HTTP 401)"
             onRetry={noop}
             onRegenerate={noop}
             connectedHost={null}

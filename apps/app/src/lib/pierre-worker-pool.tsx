@@ -20,6 +20,7 @@ export function acquirePierreWorkerPool(
   theme: CodeThemePair,
 ): WorkerPoolManager {
   registerResolvedCodeThemeFiles(registerCustomTheme);
+
   return getOrCreateWorkerPoolSingleton({
     poolOptions: WORKER_POOL_OPTIONS,
     highlighterOptions: { theme },
@@ -38,5 +39,6 @@ export function PierreWorkerPoolThemeSync({
   constructedTheme: CodeThemePair;
 }) {
   useSyncPierreWorkerPoolTheme(pool, constructedTheme);
+
   return null;
 }

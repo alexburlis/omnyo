@@ -30,15 +30,17 @@ const displayWorkAreas: DisplayWorkArea[] = [
 const tempDirs: TempDir[] = [];
 
 async function createTempDir(): Promise<TempDir> {
-  const path = await mkdtemp(join(tmpdir(), "bb-desktop-window-state-"));
+  const path = await mkdtemp(join(tmpdir(), "omnyo-desktop-window-state-"));
   const tempDir = { path };
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 
 afterEach(async () => {
   while (tempDirs.length > 0) {
     const tempDir = tempDirs.pop();
+
     if (tempDir !== undefined) {
       await rm(tempDir.path, { force: true, recursive: true });
     }
@@ -106,6 +108,7 @@ describe("window state helpers", () => {
 
   it("persists and reads multiple window states across restart", async () => {
     const tempDir = await createTempDir();
+
     const persistedStates: PersistedWindowStateEntry[] = [
       {
         bounds: {

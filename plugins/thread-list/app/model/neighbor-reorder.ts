@@ -32,12 +32,14 @@ export function buildNeighborReorderRequest<Item extends NeighborReorderItem>({
 
   const oldIndex = items.findIndex((item) => item.id === activeId);
   const newIndex = items.findIndex((item) => item.id === overId);
+
   if (oldIndex === -1 || newIndex === -1) {
     return null;
   }
 
   const reorderedItems = arrayMove(items, oldIndex, newIndex);
   const movedIndex = reorderedItems.findIndex((item) => item.id === activeId);
+
   if (movedIndex === -1) {
     return null;
   }
@@ -54,14 +56,17 @@ export function applyNeighborReorder<Item extends NeighborReorderItem>({
   request,
 }: ApplyNeighborReorderArgs<Item>): Item[] {
   const movedIndex = items.findIndex((item) => item.id === request.itemId);
+
   if (movedIndex === -1) {
     return [...items];
   }
 
   const movedItem = items[movedIndex];
+
   if (!movedItem) {
     return [...items];
   }
+
   const remainingItems = items.filter((item) => item.id !== request.itemId);
   let insertIndex = 0;
 
@@ -69,17 +74,21 @@ export function applyNeighborReorder<Item extends NeighborReorderItem>({
     const previousIndex = remainingItems.findIndex(
       (item) => item.id === request.previousItemId,
     );
+
     if (previousIndex === -1) {
       return [...items];
     }
+
     insertIndex = previousIndex + 1;
   } else if (request.nextItemId !== null) {
     const nextIndex = remainingItems.findIndex(
       (item) => item.id === request.nextItemId,
     );
+
     if (nextIndex === -1) {
       return [...items];
     }
+
     insertIndex = nextIndex;
   }
 

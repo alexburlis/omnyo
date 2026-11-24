@@ -1,22 +1,65 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   definePluginApp,
   useRpc,
   type PluginRpcResult,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import type { memoryRpcContract } from "./server.js";
 import { isMemoryKind, MEMORY_KINDS } from "./memory-kinds.js";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { EmptyStateBlock } from "@/components/ui/empty-state";
+import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
-type MemoryRecord = PluginRpcResult<
+export type MemoryRecord = PluginRpcResult<
   (typeof memoryRpcContract)["listMemories"]
 >["memories"][number];
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const MEMORY_KIND_LABELS: Record<MemoryRecord["kind"], string> = {
+  decision: "Decision",
+  episode: "Episode",
+  fact: "Fact",
+  preference: "Preference",
+  procedure: "Procedure",
+  reference: "Reference",
+};
+
+const MEMORY_SCOPE_LABELS: Record<MemoryRecord["scope"], string> = {
+  global: "Global",
+  project: "Project",
+};
+
+function MemoryChip({
+  children,
+  title,
+}: {
+  children: ReactNode;
+  title?: string;
+}) {
+  return (
+    <span
+      title={title}
+      className="inline-flex h-5 max-w-48 shrink-0 items-center gap-1 truncate rounded-full bg-state-hover px-2 text-xs text-muted-foreground"
+    >
+      {children}
+    </span>
+  );
 }
 
 function MemoryEditor({
@@ -35,7 +78,7 @@ function MemoryEditor({
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <div className="@container/memory-editor space-y-3 rounded-md border border-border bg-muted/20 p-3">
+    <div className="@container/memory-editor space-y-3 border-t border-border pt-3">
       <div className="grid gap-3 @min-[36rem]/memory-editor:grid-cols-2">
         <label className="space-y-1 text-xs text-muted-foreground">
           Summary
@@ -73,22 +116,25 @@ function MemoryEditor({
       <div className="grid gap-3 @min-[32rem]/memory-editor:grid-cols-3">
         <label className="space-y-1 text-xs text-muted-foreground">
           Kind
-          <select
-            aria-label="Memory kind"
+          <Select
             value={draft.kind}
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
-            onChange={(event) => {
-              if (isMemoryKind(event.target.value)) {
-                setDraft({ ...draft, kind: event.target.value });
+            onValueChange={(kind) => {
+              if (isMemoryKind(kind)) {
+                setDraft({ ...draft, kind });
               }
             }}
           >
-            {MEMORY_KINDS.map((kind) => (
-              <option key={kind} value={kind}>
-                {kind}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger aria-label="Memory kind" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MEMORY_KINDS.map((kind) => (
+                <SelectItem key={kind} value={kind}>
+                  {MEMORY_KIND_LABELS[kind]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
         <label className="space-y-1 text-xs text-muted-foreground">
           Importance
@@ -113,7 +159,7 @@ function MemoryEditor({
         </label>
       </div>
       {error ? (
-        <p className="text-xs text-destructive" role="alert">
+        <p className="text-xs text-destructive-text" role="alert">
           {error}
         </p>
       ) : null}
@@ -154,6 +200,121 @@ function MemoryEditor({
   );
 }
 
+function MemoryRow({
+  memory,
+  editing,
+  deleting,
+  onToggleEdit,
+  onDelete,
+  onSaved,
+}: {
+  memory: MemoryRecord;
+  editing: boolean;
+  deleting: boolean;
+  onToggleEdit: () => void;
+  onDelete: () => void;
+  onSaved: (memory: MemoryRecord) => void;
+}) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  return (
+    <li
+      className={cn(
+        "space-y-3 rounded-lg border bg-card px-3.5 py-3",
+        editing ? "border-ring/50" : "border-border",
+      )}
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {memory.pinned ? (
+              <Icon
+                name="Pin"
+                aria-label="Pinned"
+                className="size-3.5 shrink-0 text-warning-text"
+              />
+            ) : null}
+            <span className="min-w-0 truncate text-sm font-medium text-foreground">
+              {memory.name}
+            </span>
+          </div>
+          <p className="mt-0.5 line-clamp-2 break-words text-sm leading-snug text-muted-foreground">
+            {memory.summary}
+          </p>
+        </div>
+        {confirmingDelete ? (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Delete?</span>
+            <Button
+              size="xs"
+              variant="destructive"
+              disabled={deleting}
+              onClick={onDelete}
+            >
+              {deleting ? "Deleting…" : "Delete memory"}
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={deleting}
+              onClick={() => setConfirmingDelete(false)}
+            >
+              Keep
+            </Button>
+          </div>
+        ) : (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              size="xs"
+              variant="soft"
+              aria-expanded={editing}
+              onClick={onToggleEdit}
+            >
+              Edit
+            </Button>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label={`Delete ${memory.name}`}
+              className="text-muted-foreground hover:text-destructive-text"
+              onClick={() => setConfirmingDelete(true)}
+            >
+              <Icon name="Trash2" />
+            </Button>
+          </div>
+        )}
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <MemoryChip>{MEMORY_KIND_LABELS[memory.kind]}</MemoryChip>
+        <MemoryChip title={memory.projectId ?? undefined}>
+          <Icon
+            name={memory.scope === "global" ? "Globe" : "Folder"}
+            aria-hidden
+            className="size-3 shrink-0"
+          />
+          {MEMORY_SCOPE_LABELS[memory.scope]}
+        </MemoryChip>
+        <MemoryChip title="From 0 to 100. Agents see higher-importance memories first; pinned memories always come first.">
+          Importance {memory.importance}
+        </MemoryChip>
+        {memory.tags.map((tag) => (
+          <MemoryChip key={tag}>#{tag}</MemoryChip>
+        ))}
+        <span className="ml-auto shrink-0 text-xs text-subtle-foreground">
+          Updated {new Date(memory.updatedAt).toLocaleDateString()}
+        </span>
+      </div>
+      {editing ? (
+        <MemoryEditor
+          memory={memory}
+          onCancel={onToggleEdit}
+          onSaved={onSaved}
+        />
+      ) : null}
+    </li>
+  );
+}
+
 function MemorySettings() {
   const rpc = useRpc<typeof memoryRpcContract>();
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
@@ -165,6 +326,7 @@ function MemorySettings() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+
     try {
       setMemories((await rpc.call("listMemories")).memories);
     } catch (loadError) {
@@ -178,145 +340,113 @@ function MemorySettings() {
     void load();
   }, [load]);
 
+  const deleteMemory = (memory: MemoryRecord) => {
+    setDeletingId(memory.id);
+    setError(null);
+    void rpc
+      .call("deleteMemory", {
+        id: memory.id,
+        expectedVersion: memory.version,
+      })
+      .then(() => {
+        setMemories((current) =>
+          current.filter((entry) => entry.id !== memory.id),
+        );
+        setEditingId((current) => (current === memory.id ? null : current));
+      })
+      .catch((deleteError: unknown) => setError(errorMessage(deleteError)))
+      .finally(() => setDeletingId(null));
+  };
+
+  return (
+    <MemorySettingsView
+      memories={memories}
+      loading={loading}
+      error={error}
+      editingId={editingId}
+      deletingId={deletingId}
+      onToggleEdit={(memory) =>
+        setEditingId((current) => (current === memory.id ? null : memory.id))
+      }
+      onDelete={deleteMemory}
+      onSaved={(updated) => {
+        setMemories((current) =>
+          current.map((entry) => (entry.id === updated.id ? updated : entry)),
+        );
+        setEditingId(null);
+      }}
+    />
+  );
+}
+
+export interface MemorySettingsViewProps {
+  memories: readonly MemoryRecord[];
+  loading: boolean;
+  error: string | null;
+  editingId: string | null;
+  deletingId: string | null;
+  onToggleEdit: (memory: MemoryRecord) => void;
+  onDelete: (memory: MemoryRecord) => void;
+  onSaved: (memory: MemoryRecord) => void;
+}
+
+export function MemorySettingsView({
+  memories,
+  loading,
+  error,
+  editingId,
+  deletingId,
+  onToggleEdit,
+  onDelete,
+  onSaved,
+}: MemorySettingsViewProps) {
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading memories…</p>;
+    return (
+      <div role="status" aria-label="Loading memories" className="space-y-2">
+        <Skeleton aria-hidden className="h-16 w-full rounded-lg" />
+        <Skeleton aria-hidden className="h-16 w-full rounded-lg" />
+      </div>
+    );
   }
 
   return (
     <div className="space-y-4">
-      <div className="rounded-md border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-        This plugin shares memory across providers. We recommend disabling
-        provider-native memory under Settings → Providers to avoid duplicate or
-        conflicting stores.
-      </div>
+      <Alert>
+        <Icon name="Info" />
+        <AlertDescription className="text-muted-foreground">
+          Every provider reads and writes these memories. Turn off each
+          provider’s own memory under Settings → Providers so the two stores
+          don’t disagree.
+        </AlertDescription>
+      </Alert>
       {error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <Icon name="AlertCircle" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       ) : null}
       {memories.length === 0 ? (
-        <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          No memories stored yet.
+        <div className="rounded-lg border border-dashed border-border">
+          <EmptyStateBlock
+            icon="Brain"
+            title="No memories yet"
+            description="When an agent learns a fact, preference or decision worth keeping, it saves it here so later chats can recall it."
+          />
         </div>
       ) : (
-        <div className="overflow-hidden rounded-md border border-border">
-          <table className="w-full table-fixed text-sm">
-            <thead className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-              <tr>
-                <th className="w-auto px-3 py-2 font-medium">Memory</th>
-                <th className="w-24 px-3 py-2 font-medium">Scope</th>
-                <th className="w-28 px-3 py-2 text-right font-medium">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {memories.map((memory) => (
-                <Fragment key={memory.id}>
-                  <tr className="align-top">
-                    <td className="min-w-0 px-3 py-3">
-                      <div className="truncate font-medium text-foreground">
-                        {memory.pinned ? "📌 " : ""}
-                        {memory.name}
-                      </div>
-                      <div className="mt-1 line-clamp-2 break-words text-muted-foreground">
-                        {memory.summary}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                        <span>{memory.kind}</span>
-                        <span>importance {memory.importance}</span>
-                        <span>
-                          updated{" "}
-                          {new Date(memory.updatedAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-muted-foreground">
-                      <div>{memory.scope}</div>
-                      {memory.projectId ? (
-                        <div
-                          className="mt-1 max-w-36 truncate text-xs"
-                          title={memory.projectId}
-                        >
-                          {memory.projectId}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-col items-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() =>
-                            setEditingId((current) =>
-                              current === memory.id ? null : memory.id,
-                            )
-                          }
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={deletingId === memory.id}
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => {
-                            if (
-                              !window.confirm(`Delete memory “${memory.name}”?`)
-                            ) {
-                              return;
-                            }
-                            setDeletingId(memory.id);
-                            setError(null);
-                            void rpc
-                              .call("deleteMemory", {
-                                id: memory.id,
-                                expectedVersion: memory.version,
-                              })
-                              .then(() => {
-                                setMemories((current) =>
-                                  current.filter(
-                                    (entry) => entry.id !== memory.id,
-                                  ),
-                                );
-                                setEditingId((current) =>
-                                  current === memory.id ? null : current,
-                                );
-                              })
-                              .catch((deleteError: unknown) =>
-                                setError(errorMessage(deleteError)),
-                              )
-                              .finally(() => setDeletingId(null));
-                          }}
-                        >
-                          {deletingId === memory.id ? "Deleting…" : "Delete"}
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                  {editingId === memory.id ? (
-                    <tr>
-                      <td colSpan={3} className="bg-muted/10 p-3">
-                        <MemoryEditor
-                          memory={memory}
-                          onCancel={() => setEditingId(null)}
-                          onSaved={(updated) => {
-                            setMemories((current) =>
-                              current.map((entry) =>
-                                entry.id === updated.id ? updated : entry,
-                              ),
-                            );
-                            setEditingId(null);
-                          }}
-                        />
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ul aria-label="Memories" className="space-y-2">
+          {memories.map((memory) => (
+            <MemoryRow
+              key={memory.id}
+              memory={memory}
+              editing={editingId === memory.id}
+              deleting={deletingId === memory.id}
+              onToggleEdit={() => onToggleEdit(memory)}
+              onDelete={() => onDelete(memory)}
+              onSaved={onSaved}
+            />
+          ))}
+        </ul>
       )}
     </div>
   );

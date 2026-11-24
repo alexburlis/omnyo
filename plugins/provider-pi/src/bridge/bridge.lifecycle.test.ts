@@ -21,7 +21,7 @@ let harness: FakePiBridgeHarness;
 
 beforeEach(async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-lifecycle-",
+    prefix: "omnyo-pi-lifecycle-",
     initialize: true,
     processLog: true,
   });
@@ -36,9 +36,12 @@ let nextId = 1000;
 function resultProviderThreadId(result: unknown): string {
   const providerThreadId = (result as { providerThreadId?: unknown })
     .providerThreadId;
+
   expect(typeof providerThreadId).toBe("string");
+
   if (typeof providerThreadId !== "string")
     throw new Error("missing providerThreadId");
+
   return providerThreadId;
 }
 
@@ -50,26 +53,33 @@ function providerThreadIdFor(threadId: string): string {
         message.method === "thread/identity" &&
         (message.params as { threadId?: unknown }).threadId === threadId,
     );
+
   return resultProviderThreadId(identity?.params);
 }
 
 async function expectEveryChildGone(expectedSpawns: number): Promise<void> {
   const deadline = Date.now() + 30_000;
+
   for (;;) {
     const log = harness.readProcessLog();
+
     const allExited =
       log.spawned.length >= expectedSpawns &&
       log.spawned.every((pid) => log.exited.includes(pid)) &&
       harness.runningChildPids().length === 0;
+
     if (allExited) {
       expect(log.spawned.length).toBe(expectedSpawns);
+
       return;
     }
+
     if (Date.now() > deadline) {
       throw new Error(
         `pi children still running: spawned ${JSON.stringify(log.spawned)}, exited ${JSON.stringify(log.exited)}, alive ${JSON.stringify(harness.runningChildPids())}`,
       );
     }
+
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
@@ -78,8 +88,8 @@ async function startThread(threadId: string): Promise<string> {
   const response = await harness.startThread(threadId, {
     dynamicTools: [
       {
-        name: "bb_probe",
-        description: "A bb tool.",
+        name: "omnyo_probe",
+        description: "An Omnyo tool.",
         inputSchema: {
           type: "object",
           properties: { value: { type: "string" } },
@@ -87,9 +97,11 @@ async function startThread(threadId: string): Promise<string> {
       },
     ],
   });
+
   const providerThreadId = resultProviderThreadId(response.result);
   expect(providerThreadId).toMatch(/^pi_/u);
   expect(response.result).toMatchObject({ providerThreadId });
+
   return providerThreadId;
 }
 
@@ -97,6 +109,7 @@ it("stop{release} ends the child after a local-file-only turn", async () => {
   const threadId = "thr_lc_release";
   const filePath = join(harness.workspaceDir, "notes.md");
   const providerThreadId = await startThread(threadId);
+
   const turn = await harness.request((nextId += 1), "turn/start", {
     threadId,
     providerThreadId,
@@ -112,6 +125,7 @@ it("stop{release} ends the child after a local-file-only turn", async () => {
     ],
     options: FULL_PERMISSION_OPTIONS,
   });
+
   expect(turn.result).toEqual({ threadId });
   await harness.waitForTurnBoundary(threadId, 0);
   expect(
@@ -125,12 +139,14 @@ it("stop{release} ends the child after a local-file-only turn", async () => {
           ),
       ),
   ).toBe(true);
+
   const stop = await harness.request((nextId += 1), "thread/stop", {
     threadId,
     providerThreadId,
     intent: "release",
     activeTurnId: null,
   });
+
   expect(stop.result).toMatchObject({
     ok: true,
     providerCheckpointId: "leaf-1",
@@ -147,28 +163,34 @@ it("stop{interrupt} of a live run ends the child, and the turn settled before th
     input: [{ type: "text", text: "/hold", mentions: [] }],
     options: FULL_PERMISSION_OPTIONS,
   });
+
   const stop = await harness.request((nextId += 1), "thread/stop", {
     threadId: "thr_lc_interrupt",
     providerThreadId: providerThreadIdFor("thr_lc_interrupt"),
     intent: "interrupt",
     activeTurnId: "turn-1",
   });
+
   expect(stop.result).toMatchObject({ ok: true });
   await expectEveryChildGone(1);
 }, 90_000);
 
 it("discard ends the child and removes the session file", async () => {
   await startThread("thr_lc_discard");
+
   const sessionFile = join(
     harness.workspaceDir,
     "sessions",
     `${providerThreadIdFor("thr_lc_discard")}.jsonl`,
   );
+
   expect(existsSync(sessionFile)).toBe(true);
+
   const discard = await harness.request((nextId += 1), "thread/discard", {
     threadId: "thr_lc_discard",
     providerThreadId: providerThreadIdFor("thr_lc_discard"),
   });
+
   expect(discard.result).toEqual({ ok: true });
   expect(existsSync(sessionFile)).toBe(false);
   await expectEveryChildGone(1);
@@ -200,6 +222,7 @@ it("the fork helper child exits once the fork is done", async () => {
   const sourceBefore = readFileSync(sourceFile, "utf8");
   mkdirSync(sessionDir, { recursive: true });
   copyFileSync(sourceFile, join(sessionDir, "thr_lc_src.jsonl"));
+
   const forkResponse = await harness.request((nextId += 1), "thread/fork", {
     threadId: "thr_lc_fork",
     cwd: harness.workspaceDir,
@@ -207,6 +230,7 @@ it("the fork helper child exits once the fork is done", async () => {
     options: FULL_PERMISSION_OPTIONS,
     instructionMode: "append",
   });
+
   expect(forkResponse.result).toMatchObject({
     providerThreadId: "thr_lc_fork",
   });
@@ -225,18 +249,20 @@ it("the fork helper child exits once the fork is done", async () => {
 
 function scratchFiles(): string[] {
   return readdirSync(experimental_scratchDirForTests())
-    .filter((name) => name !== "bb-pi-extension.mjs")
+    .filter((name) => name !== "omnyo-pi-extension.mjs")
     .sort();
 }
 
 async function expectScratchFilesGone(): Promise<void> {
   const deadline = Date.now() + 10_000;
+
   while (scratchFiles().length > 0) {
     if (Date.now() > deadline) {
       throw new Error(
         `scratch files left behind: ${scratchFiles().join(", ")}`,
       );
     }
+
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
@@ -246,10 +272,12 @@ it("start_after_release_selects_fresh_pi_session", async () => {
   const sentinel = "legacy session sentinel";
   const first = await harness.startThread(threadId);
   const oldProviderThreadId = resultProviderThreadId(first.result);
+
   const oldSessionFile = join(
     harness.sessionDir,
     `${oldProviderThreadId}.jsonl`,
   );
+
   expect(existsSync(oldSessionFile)).toBe(true);
 
   const released = await harness.request((nextId += 1), "thread/stop", {
@@ -258,22 +286,27 @@ it("start_after_release_selects_fresh_pi_session", async () => {
     intent: "release",
     activeTurnId: null,
   });
+
   expect(released.result).toMatchObject({ ok: true });
   await expectEveryChildGone(1);
   await expectScratchFilesGone();
 
   const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+
   const session = SessionManager.open(
     oldSessionFile,
     harness.sessionDir,
     harness.workspaceDir,
   );
+
   session.appendMessage({ role: "user", content: sentinel, timestamp: 3 });
+
   const reopened = SessionManager.open(
     oldSessionFile,
     harness.sessionDir,
     harness.workspaceDir,
   );
+
   expect(
     reopened
       .getEntries()
@@ -284,6 +317,7 @@ it("start_after_release_selects_fresh_pi_session", async () => {
   const second = await harness.startThread(threadId, {
     options: { ...FULL_PERMISSION_OPTIONS, instructions: "fresh instructions" },
   });
+
   const newProviderThreadId = resultProviderThreadId(second.result);
   expect(newProviderThreadId).not.toBe(oldProviderThreadId);
   expect(oldProviderThreadId).toMatch(
@@ -293,19 +327,24 @@ it("start_after_release_selects_fresh_pi_session", async () => {
     /^pi_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
   );
   expect(readFileSync(oldSessionFile, "utf8")).toBe(oldBytes);
+
   const freshSessionFile = join(
     harness.sessionDir,
     `${newProviderThreadId}.jsonl`,
   );
+
   expect(freshSessionFile).not.toBe(oldSessionFile);
   expect(existsSync(freshSessionFile)).toBe(true);
+
   const freshSession = SessionManager.open(
     freshSessionFile,
     harness.sessionDir,
     harness.workspaceDir,
   );
+
   const freshContext = freshSession.buildSessionContext();
   expect(freshContext.messages).toEqual([]);
+
   const identities = harness.messages
     .filter((message) => message.method === "thread/identity")
     .map(
@@ -313,6 +352,7 @@ it("start_after_release_selects_fresh_pi_session", async () => {
         message.params as { threadId?: unknown; providerThreadId?: unknown },
     )
     .filter((params) => params.threadId === threadId);
+
   expect(identities).toHaveLength(2);
   expect(identities.map((params) => params.providerThreadId)).toEqual([
     oldProviderThreadId,
@@ -331,13 +371,16 @@ it("start_after_release_selects_fresh_pi_session", async () => {
 it("release_resume_preserves_pi_session_and_replaces_configuration", async () => {
   const threadId = "thr_lc_facet_switch";
   const oldInstructions = "planner instructions: only plan the work";
+
   const newInstructions =
     "orchestrator instructions: implement the approved plan";
+
   const oldTool = {
     name: "planner_only_tool",
     description: "Only available to the planner facet.",
     inputSchema: { type: "object", properties: { plan: { type: "string" } } },
   };
+
   const newTool = {
     name: "orchestrator_only_tool",
     description: "Only available to the orchestrator facet.",
@@ -348,13 +391,16 @@ it("release_resume_preserves_pi_session_and_replaces_configuration", async () =>
     options: { ...FULL_PERMISSION_OPTIONS, instructions: oldInstructions },
     dynamicTools: [oldTool],
   });
+
   const providerThreadId = resultProviderThreadId(started.result);
   expect(providerThreadId).toMatch(/^pi_/u);
   const sessionFile = join(harness.sessionDir, `${providerThreadId}.jsonl`);
   expect(existsSync(sessionFile)).toBe(true);
+
   const initialHeader = JSON.parse(
     readFileSync(sessionFile, "utf8").split("\n", 1)[0]!,
   );
+
   const initialFiles = scratchFiles();
   expect(initialFiles).toHaveLength(2);
   expect(
@@ -385,31 +431,38 @@ it("release_resume_preserves_pi_session_and_replaces_configuration", async () =>
     input: [{ type: "text", text: "plan this change", mentions: [] }],
     options: FULL_PERMISSION_OPTIONS,
   });
+
   expect(turn.error).toBeUndefined();
   await harness.waitForTurnBoundary(threadId);
+
   const released = await harness.request((nextId += 1), "thread/stop", {
     threadId,
     providerThreadId,
     intent: "release",
     activeTurnId: null,
   });
+
   expect(released.result).toMatchObject({ ok: true });
   await expectEveryChildGone(1);
   await expectScratchFilesGone();
   expect(existsSync(sessionFile)).toBe(true);
   const { SessionManager } = await import("@earendil-works/pi-coding-agent");
   const sentinel = "facet switch persisted sentinel";
+
   const seeded = SessionManager.open(
     sessionFile,
     harness.sessionDir,
     harness.workspaceDir,
   );
+
   seeded.appendMessage({ role: "user", content: sentinel, timestamp: 10 });
+
   const independentlySeeded = SessionManager.open(
     sessionFile,
     harness.sessionDir,
     harness.workspaceDir,
   );
+
   expect(
     JSON.stringify(independentlySeeded.buildSessionContext().messages),
   ).toContain(sentinel);
@@ -422,21 +475,25 @@ it("release_resume_preserves_pi_session_and_replaces_configuration", async () =>
     options: { ...FULL_PERMISSION_OPTIONS, instructions: newInstructions },
     dynamicTools: [newTool],
   });
+
   expect(resumed.result).toMatchObject({ providerThreadId });
   expect(existsSync(sessionFile)).toBe(true);
   const resumedBytes = readFileSync(sessionFile, "utf8");
   const resumedHeader = JSON.parse(resumedBytes.split("\n", 1)[0]!);
   expect(resumedHeader).toEqual(initialHeader);
+
   const independentlyResumed = SessionManager.open(
     sessionFile,
     harness.sessionDir,
     harness.workspaceDir,
   );
+
   expect(
     JSON.stringify(independentlyResumed.buildSessionContext().messages),
   ).toContain(sentinel);
   const resumedFiles = scratchFiles();
   expect(resumedFiles).toHaveLength(2);
+
   const resumedPrompt = readFileSync(
     join(
       experimental_scratchDirForTests(),
@@ -444,6 +501,7 @@ it("release_resume_preserves_pi_session_and_replaces_configuration", async () =>
     ),
     "utf8",
   );
+
   const resumedTools = JSON.parse(
     readFileSync(
       join(
@@ -453,6 +511,7 @@ it("release_resume_preserves_pi_session_and_replaces_configuration", async () =>
       "utf8",
     ),
   );
+
   expect(resumedPrompt).toContain(newInstructions);
   expect(resumedPrompt).not.toContain(oldInstructions);
   expect(resumedTools.map((tool: { name: string }) => tool.name)).toContain(
@@ -469,6 +528,7 @@ it("release_resume_preserves_pi_session_and_replaces_configuration", async () =>
     input: [{ type: "text", text: "implement the change", mentions: [] }],
     options: FULL_PERMISSION_OPTIONS,
   });
+
   expect(resumedTurn.error).toBeUndefined();
   await harness.waitForTurnBoundary(threadId);
   await harness.request((nextId += 1), "thread/stop", {
@@ -486,10 +546,12 @@ it("resume_legacy_pi_session", async () => {
   const legacyProviderThreadId = "thr_lc_legacy_file";
   const sentinel = "legacy resume sentinel";
   const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+
   const source = SessionManager.create(
     harness.workspaceDir,
     harness.sessionDir,
   );
+
   source.appendMessage({ role: "user", content: sentinel, timestamp: 1 });
   source.appendMessage({
     role: "assistant",
@@ -508,17 +570,21 @@ it("resume_legacy_pi_session", async () => {
     stopReason: "stop",
     timestamp: 2,
   });
+
   const legacyFile = join(
     harness.sessionDir,
     `${legacyProviderThreadId}.jsonl`,
   );
+
   copyFileSync(source.getSessionFile()!, legacyFile);
   const before = readFileSync(legacyFile, "utf8");
+
   const reopened = SessionManager.open(
     legacyFile,
     harness.sessionDir,
     harness.workspaceDir,
   );
+
   expect(JSON.stringify(reopened.buildSessionContext().messages)).toContain(
     sentinel,
   );
@@ -530,6 +596,7 @@ it("resume_legacy_pi_session", async () => {
     instructionMode: "append",
     options: FULL_PERMISSION_OPTIONS,
   });
+
   expect(resumed.result).toMatchObject({
     providerThreadId: legacyProviderThreadId,
   });
@@ -539,19 +606,23 @@ it("resume_legacy_pi_session", async () => {
     JSON.parse(before.split("\n", 1)[0]!),
   );
   expect(after).toContain(sentinel);
+
   const afterReopen = SessionManager.open(
     legacyFile,
     harness.sessionDir,
     harness.workspaceDir,
   );
+
   expect(JSON.stringify(afterReopen.buildSessionContext().messages)).toContain(
     sentinel,
   );
+
   const identity = harness.messages.find(
     (message) =>
       message.method === "thread/identity" &&
       (message.params as { threadId?: unknown }).threadId === threadId,
   );
+
   expect(identity?.params).toMatchObject({
     threadId,
     providerThreadId: legacyProviderThreadId,
@@ -570,8 +641,8 @@ it("a child's tool and prompt files go with the child after release and failed c
     options: { ...FULL_PERMISSION_OPTIONS, instructions: "be brief" },
     dynamicTools: [
       {
-        name: "bb_probe",
-        description: "A bb tool.",
+        name: "omnyo_probe",
+        description: "An Omnyo tool.",
         inputSchema: { type: "object" },
       },
     ],
@@ -590,12 +661,14 @@ it("a child's tool and prompt files go with the child after release and failed c
   await expectScratchFilesGone();
 
   vi.stubEnv("FAKE_PI_EXIT_BEFORE_FIRST_RESPONSE", "1");
+
   const failed = await harness.request((nextId += 1), "thread/start", {
     threadId: "thr_lc_scratch_failed",
     cwd: harness.workspaceDir,
     instructionMode: "append",
     options: { ...FULL_PERMISSION_OPTIONS, instructions: "be brief" },
   });
+
   expect(failed.error).toMatchObject({
     message: expect.stringContaining("pi exited"),
   });
@@ -609,6 +682,7 @@ it("closing the catalog waits for its child to exit", async () => {
   const models = await harness.request((nextId += 1), "model/list", {
     cwd: harness.workspaceDir,
   });
+
   expect(models.result).toMatchObject({ models: expect.any(Array) });
   await experimental_closeAllForTests();
   const log = harness.readProcessLog();
@@ -622,17 +696,21 @@ it("a child that ignores EOF and SIGTERM is SIGKILLed", async () => {
   await startThread("thr_lc_kill");
   const { spawned } = harness.readProcessLog();
   const pid = spawned[0]!;
+
   const stop = await harness.request((nextId += 1), "thread/stop", {
     threadId: "thr_lc_kill",
     providerThreadId: providerThreadIdFor("thr_lc_kill"),
     intent: "release",
     activeTurnId: null,
   });
+
   expect(stop.result).toMatchObject({ ok: true });
   expect(harness.runningChildPids()).toContain(pid);
   const deadline = Date.now() + 15_000;
+
   while (harness.runningChildPids().includes(pid) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
+
   expect(harness.runningChildPids()).not.toContain(pid);
 }, 90_000);

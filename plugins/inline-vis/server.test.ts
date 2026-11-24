@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import plugin, {
   MAX_PREVIEW_BYTES,
   requireRelativePreviewFile,
@@ -8,6 +8,7 @@ import plugin, {
 } from "./server";
 
 const ROOT = "/workspace/project";
+
 const HOST_ID = "host_1";
 
 function threadWithEnv(overrides?: { path?: string | null; hostId?: string }) {
@@ -32,11 +33,22 @@ async function load(sdk: {
     pluginId: "inline-vis",
     sdk,
   });
-  await plugin(host.bb);
+
+  await plugin(host.api);
+
   return host;
 }
 
 describe("requireRelativePreviewFile", () => {
+  it.each([
+    "C:\\outside.html",
+    "C:outside.html",
+    "\\outside.html",
+    "\\\\server\\share\\outside.html",
+  ])("rejects Windows non-relative path %s", (file) => {
+    expect(() => requireRelativePreviewFile(file)).toThrow(/source-relative/);
+  });
+
   it("accepts nested preview paths", () => {
     expect(requireRelativePreviewFile("demo.html")).toBe("demo.html");
     expect(requireRelativePreviewFile("charts/out.HTML")).toBe(
@@ -66,6 +78,33 @@ describe("requireRelativePreviewFile", () => {
 });
 
 describe("resolveContainedPreviewPath", () => {
+  it.each([
+    [
+      "C:\\Users\\pc\\workspace",
+      "charts/demo.html",
+      "C:\\Users\\pc\\workspace\\charts\\demo.html",
+    ],
+    ["D:/workspace", "charts\\demo.html", "D:\\workspace\\charts\\demo.html"],
+    [
+      "\\\\server\\share\\workspace",
+      "charts/demo.html",
+      "\\\\server\\share\\workspace\\charts\\demo.html",
+    ],
+  ])("resolves %s using target path rules", (root, file, expected) => {
+    expect(resolveContainedPreviewPath(root, file)).toBe(expected);
+  });
+
+  it.each([
+    "../outside.html",
+    "..\\outside.html",
+    "D:\\outside.html",
+    "\\outside.html",
+  ])("rejects Windows escape %s", (file) => {
+    expect(() => resolveContainedPreviewPath("C:\\workspace", file)).toThrow(
+      /escape/,
+    );
+  });
+
   it("resolves under the root", () => {
     expect(resolveContainedPreviewPath(ROOT, "demo.html")).toBe(
       path.resolve(ROOT, "demo.html"),
@@ -80,6 +119,50 @@ describe("resolveContainedPreviewPath", () => {
 });
 
 describe("preparePreview rpc", () => {
+  it.each(["workspace", "thread-storage"])(
+    "reads Windows %s previews with normalized asset URLs",
+    async (source) => {
+      const root = "C:\\Users\\pc\\preview";
+
+      const { harness } = await load({
+        threads: {
+          get: () => threadWithEnv({ path: root }),
+          storageLocation: () => ({ hostId: HOST_ID, storageRootPath: root }),
+        },
+        files: {
+          read: (args) => {
+            expect(args).toEqual({
+              path: "C:\\Users\\pc\\preview\\player\\listen.html",
+              rootPath: root,
+              hostId: HOST_ID,
+            });
+
+            return {
+              content: '<script src="sounds.js"></script>',
+              contentEncoding: "utf8",
+              sizeBytes: 33,
+            };
+          },
+        },
+      });
+
+      await expect(
+        harness.callRpc("preparePreview", {
+          threadId: "thr_1",
+          file: "player\\listen.html",
+          source,
+        }),
+      ).resolves.toMatchObject({
+        kind: "html",
+        file: "player/listen.html",
+        url:
+          source === "workspace"
+            ? "/api/v1/environments/env_1/files/player/listen.html"
+            : "/api/v1/threads/thr_1/thread-storage/files/player/listen.html",
+      });
+    },
+  );
+
   it("returns Markdown content for a workspace document", async () => {
     const { harness } = await load({
       threads: { get: () => threadWithEnv() },
@@ -90,6 +173,7 @@ describe("preparePreview rpc", () => {
             rootPath: ROOT,
             hostId: HOST_ID,
           });
+
           return {
             content: "# Notes\n\nReady for review.",
             contentEncoding: "utf8",
@@ -117,6 +201,7 @@ describe("preparePreview rpc", () => {
 
   it("returns Markdown content for a thread-storage document", async () => {
     const storageRootPath = "/thread-storage/thr_1";
+
     const { harness } = await load({
       threads: {
         storageLocation: () => ({ hostId: HOST_ID, storageRootPath }),
@@ -128,6 +213,7 @@ describe("preparePreview rpc", () => {
             rootPath: storageRootPath,
             hostId: HOST_ID,
           });
+
           return {
             content: "# Report",
             contentEncoding: "utf8",
@@ -164,6 +250,7 @@ describe("preparePreview rpc", () => {
       threads: { get: () => threadWithEnv() },
       files: { read: () => ({ content: "", contentEncoding: "utf8" }) },
     });
+
     await expect(
       harness.callRpc("preparePreview", {
         threadId: "thr_1",
@@ -181,6 +268,7 @@ describe("preparePreview rpc", () => {
       threads: { get: () => threadWithEnv() },
       files: { read: () => ({ content: "", contentEncoding: "utf8" }) },
     });
+
     await expect(
       harness.callRpc("preparePreview", {
         threadId: "thr_1",
@@ -199,6 +287,7 @@ describe("preparePreview rpc", () => {
       threads: { get: () => threadWithEnv() },
       files: { read: () => ({ content: "", contentEncoding: "utf8" }) },
     });
+
     await expect(harness.callRpc("preparePreview", null)).rejects.toMatchObject(
       {
         code: "invalid_input",
@@ -226,6 +315,7 @@ describe("preparePreview rpc", () => {
       },
       files: { read: () => ({ content: "<p>x</p>", contentEncoding: "utf8" }) },
     });
+
     await expect(
       harness.callRpc("preparePreview", {
         threadId: "thr_1",
@@ -234,7 +324,7 @@ describe("preparePreview rpc", () => {
     ).rejects.toThrow(/no workspace path/);
   });
 
-  it("reads through bb.sdk.files with hostId + rootPath confinement and returns the page with its content hash", async () => {
+  it("reads through api.sdk.files with hostId + rootPath confinement and returns the page with its content hash", async () => {
     const { harness } = await load({
       threads: {
         get: (args) => {
@@ -242,6 +332,7 @@ describe("preparePreview rpc", () => {
             threadId: "thr_1",
             include: "environment",
           });
+
           return threadWithEnv();
         },
       },
@@ -252,6 +343,7 @@ describe("preparePreview rpc", () => {
             rootPath: ROOT,
             hostId: HOST_ID,
           });
+
           return {
             content: "<html><body>ok</body></html>",
             contentEncoding: "utf8",
@@ -267,6 +359,7 @@ describe("preparePreview rpc", () => {
       file: "charts/demo.html",
       source: "workspace",
     });
+
     expect(result).toEqual({
       kind: "html",
       file: "charts/demo.html",
@@ -286,10 +379,12 @@ describe("preparePreview rpc", () => {
 
   it("reads thread storage without resolving the workspace", async () => {
     const storageRootPath = "/thread-storage/thr_1";
+
     const { harness } = await load({
       threads: {
         storageLocation: (args) => {
           expect(args).toEqual({ threadId: "thr_1" });
+
           return { hostId: HOST_ID, storageRootPath };
         },
       },
@@ -300,6 +395,7 @@ describe("preparePreview rpc", () => {
             rootPath: storageRootPath,
             hostId: HOST_ID,
           });
+
           return {
             content: "<p>héllo ✓</p>",
             contentEncoding: "utf8",
@@ -315,6 +411,7 @@ describe("preparePreview rpc", () => {
       file: "reports/result.html",
       source: "thread-storage",
     });
+
     expect(result).toEqual({
       kind: "html",
       file: "reports/result.html",
@@ -343,6 +440,7 @@ describe("preparePreview rpc", () => {
         },
       },
     });
+
     await expect(
       harness.callRpc("preparePreview", {
         threadId: "thr_1",
@@ -373,6 +471,7 @@ describe("preparePreview rpc", () => {
         },
       },
     });
+
     await expect(
       missingHost.harness.callRpc("preparePreview", {
         threadId: "thr_1",
@@ -390,6 +489,7 @@ describe("preparePreview rpc", () => {
         }),
       },
     });
+
     await expect(
       binaryHost.harness.callRpc("preparePreview", {
         threadId: "thr_1",
@@ -407,6 +507,7 @@ describe("preparePreview rpc", () => {
         }),
       },
     });
+
     await expect(
       hugeHost.harness.callRpc("preparePreview", {
         threadId: "thr_1",

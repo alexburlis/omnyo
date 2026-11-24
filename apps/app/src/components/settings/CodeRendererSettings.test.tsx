@@ -38,7 +38,7 @@ describe("CodeRendererSettings", () => {
     expect(screen.queryByRole("button", { name: "Diffs" })).toBeNull();
   });
 
-  it("pins BB's diff renderer without touching the source-code choice", async () => {
+  it("pins Omnyo's diff renderer without touching the source-code choice", async () => {
     setPluginSlotRegistrations("inkwell", {
       ...EMPTY_REGISTRATIONS,
       sourceCodeRenderers: [
@@ -100,11 +100,13 @@ describe("CodeRendererSettings", () => {
     expect(
       screen.getByRole("menuitem", { name: /Chooses Inkwell diffs/u }),
     ).toBeTruthy();
+
     const items = screen
       .getAllByRole("menuitem")
       .map((item) => item.textContent ?? "");
+
     expect(items).toHaveLength(4);
-    expect(items[3]).toContain("bb (built-in)");
+    expect(items[3]).toContain("Omnyo (built-in)");
     expect(items.some((text) => text.includes("From the inkwell plugin"))).toBe(
       true,
     );

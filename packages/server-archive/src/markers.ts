@@ -1,19 +1,30 @@
 import { rm, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { lastServerMoveSchema, serverMoveModeSchema } from "@bb/domain";
+import { lastServerMoveSchema, serverMoveModeSchema } from "@omnyo/domain";
 import { z } from "zod";
 import { hasErrorCode } from "./errors.js";
 import { readJsonFile, writeJsonFileAtomically } from "./json-file.js";
 import { isServerOwnedPath } from "./server-owned-paths.js";
+import {
+  assertLegacyStateMarkerDatabaseV1,
+  legacyStateMarkerPathV1Schema,
+  legacyStateMarkerHasDatabaseCollisionV1,
+} from "./legacy-state-marker-path-v1.js";
 
 export const SERVER_MOVED_FILE_NAME = "server-moved.json";
+
 export const SERVER_IMPORT_FILE_NAME = "server-import.json";
+
 export const SERVER_IMPORT_JOURNAL_FILE_NAME = "server-import-journal.json";
+
 export const LAST_SERVER_MOVE_FILE_NAME = "last-server-move.json";
+
 export const SERVER_CONNECT_HOLD_FILE_NAME = "server-connect-hold.json";
 
 const identifierSchema = z.string().min(1);
+
 const timestampSchema = z.number().int().nonnegative();
+
 const serverOwnedPathSchema = z.string().refine(isServerOwnedPath, {
   message: "Expected a server-owned path relative to the data directory",
 });
@@ -32,6 +43,7 @@ export const serverMovedFileSchema = z
     oldCopyEntries: z.array(serverOwnedPathSchema),
   })
   .strict();
+
 export type ServerMovedFile = z.infer<typeof serverMovedFileSchema>;
 
 export const serverImportKindSchema = z.enum(["move", "manual"]);
@@ -55,6 +67,7 @@ export const serverImportFileSchema = z
     if (file.kind !== "move") {
       return;
     }
+
     if (file.moveId === null) {
       context.addIssue({
         code: "custom",
@@ -62,6 +75,7 @@ export const serverImportFileSchema = z
         path: ["moveId"],
       });
     }
+
     if (file.activationToken === null) {
       context.addIssue({
         code: "custom",
@@ -70,6 +84,7 @@ export const serverImportFileSchema = z
       });
     }
   });
+
 export type ServerImportFile = z.infer<typeof serverImportFileSchema>;
 
 export const serverImportJournalFileSchema = z
@@ -79,13 +94,39 @@ export const serverImportJournalFileSchema = z
     preexistingEntries: z.array(serverOwnedPathSchema),
   })
   .strict();
+
 export type ServerImportJournalFile = z.infer<
   typeof serverImportJournalFileSchema
 >;
 
+const movedFileReadSchemaV1 = serverMovedFileSchema
+  .safeExtend({ oldCopyEntries: z.array(legacyStateMarkerPathV1Schema) })
+  .superRefine((file, context) =>
+    assertLegacyStateMarkerDatabaseV1(file.oldCopyEntries, context),
+  );
+
+const importFileReadSchemaV1 = serverImportFileSchema
+  .safeExtend({ importedEntries: z.array(legacyStateMarkerPathV1Schema) })
+  .superRefine((file, context) =>
+    assertLegacyStateMarkerDatabaseV1(file.importedEntries, context),
+  );
+
+const importJournalReadSchemaV1 = serverImportJournalFileSchema
+  .safeExtend({
+    entries: z.array(legacyStateMarkerPathV1Schema),
+    preexistingEntries: z.array(legacyStateMarkerPathV1Schema),
+  })
+  .superRefine((file, context) =>
+    assertLegacyStateMarkerDatabaseV1(
+      [...file.entries, ...file.preexistingEntries],
+      context,
+    ),
+  );
+
 export const lastServerMoveFileSchema = lastServerMoveSchema
   .extend({ version: z.literal(1) })
   .strict();
+
 export type LastServerMoveFile = z.infer<typeof lastServerMoveFileSchema>;
 
 export const serverConnectHoldFileSchema = z
@@ -95,6 +136,7 @@ export const serverConnectHoldFileSchema = z
     createdAt: timestampSchema,
   })
   .strict();
+
 export type ServerConnectHoldFile = z.infer<typeof serverConnectHoldFileSchema>;
 
 export function readServerMovedFile(
@@ -102,7 +144,7 @@ export function readServerMovedFile(
 ): Promise<ServerMovedFile | null> {
   return readJsonFile(
     join(dataDir, SERVER_MOVED_FILE_NAME),
-    serverMovedFileSchema,
+    movedFileReadSchemaV1,
   );
 }
 
@@ -121,7 +163,7 @@ export function readServerImportFile(
 ): Promise<ServerImportFile | null> {
   return readJsonFile(
     join(dataDir, SERVER_IMPORT_FILE_NAME),
-    serverImportFileSchema,
+    importFileReadSchemaV1,
   );
 }
 
@@ -140,7 +182,7 @@ export function readServerImportJournalFile(
 ): Promise<ServerImportJournalFile | null> {
   return readJsonFile(
     join(dataDir, SERVER_IMPORT_JOURNAL_FILE_NAME),
-    serverImportJournalFileSchema,
+    importJournalReadSchemaV1,
   );
 }
 
@@ -169,14 +211,30 @@ export async function readServerImportJournalStatus(
   dataDir: string,
 ): Promise<ServerImportJournalStatus> {
   const journal = await readServerImportJournalFile(dataDir);
+
   if (journal === null) {
     return { kind: "none" };
   }
+
   const marker = await readServerImportFile(dataDir);
+
   if (marker === null) {
     return { kind: "interrupted", journal };
   }
+
+  const combined = [
+    ...journal.entries,
+    ...journal.preexistingEntries,
+    ...marker.importedEntries,
+  ];
+
+  if (legacyStateMarkerHasDatabaseCollisionV1(combined))
+    throw new Error(
+      "Import markers contain conflicting version1 legacy and current core databases",
+    );
+
   const recorded = new Set(marker.importedEntries);
+
   return journal.entries.every((entry) => recorded.has(entry))
     ? { kind: "committed", journal }
     : { kind: "interrupted", journal };
@@ -225,11 +283,13 @@ export async function removeServerConnectHoldFile(
 ): Promise<boolean> {
   try {
     await unlink(join(dataDir, SERVER_CONNECT_HOLD_FILE_NAME));
+
     return true;
   } catch (error) {
     if (hasErrorCode(error, "ENOENT")) {
       return false;
     }
+
     throw error;
   }
 }

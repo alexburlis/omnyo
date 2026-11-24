@@ -1,9 +1,13 @@
-import { validatePluginMachineProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
+import { validatePluginMachineProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
 import type { MachineEnrollments } from "./enrollments.js";
 import type { MachineEnrollmentService } from "./machine-services.js";
+import type { HostEnrollmentCommandResponse } from "@omnyo/server-contract";
 import {
   manualEnrollmentCommand,
   manualEnrollmentPowerShellCommand,
+  shortEnrollmentCommand,
+  shortEnrollmentUrl,
+  shortEnrollmentPowerShellCommand,
 } from "./manual-enrollment-command.js";
 import type {
   PluginMachineProviderBridge,
@@ -30,11 +34,13 @@ export function createManualMachineProviderRecord(
         await context.checkpoint(resource);
         context.report.step("Preparing machine enrollment");
         let hostName: string;
+
         try {
           const enrollment = await enrollments.prepare({
             key: context.key,
             signal: context.signal,
           });
+
           context.report.step("Run the enrollment command shown below");
           ({ hostName } = await enrollments.waitForConnection({
             enrollmentId: enrollment.id,
@@ -45,7 +51,9 @@ export function createManualMachineProviderRecord(
           enrollments.clearPending(context.key);
           throw error;
         }
+
         context.report.step("Machine connected");
+
         return {
           status: "created",
           name: hostName,
@@ -57,8 +65,9 @@ export function createManualMachineProviderRecord(
       },
       async remove(context) {
         context.report.step(
-          `Uninstall the machine service with its original installer: install-machine.sh --uninstall --host-id ${context.hostId} (on Windows: node "%USERPROFILE%\\.bb-machines\\<server>\\install-machine-windows.mjs" --uninstall --host-id ${context.hostId})`,
+          `Uninstall the machine service with its original installer: install-machine.sh --uninstall --host-id ${context.hostId} (on Windows: node "%USERPROFILE%\\.omnyo-machines\\<server>\\install-machine-windows.mjs" --uninstall --host-id ${context.hostId})`,
         );
+
         return { status: "removed" };
       },
     }),
@@ -72,6 +81,7 @@ export function withManualMachineProvider(
   const manual = createManualMachineProviderRecord(
     enrollments.forOwner(MANUAL_PROVIDER_OWNER),
   );
+
   return {
     decisionTimeoutMs: bridge.decisionTimeoutMs,
     listMachineProviders: () => [
@@ -82,9 +92,10 @@ export function withManualMachineProvider(
     ],
     getMachineProvider: (id) =>
       id === manual.provider.id ? manual : bridge.getMachineProvider(id),
-    async invokeProvider(pluginId, label, run) {
-      if (pluginId !== MANUAL_PROVIDER_OWNER)
-        return bridge.invokeProvider(pluginId, label, run);
+    async invokeProvider(record, label, run) {
+      if (record.pluginId !== MANUAL_PROVIDER_OWNER)
+        return bridge.invokeProvider(record, label, run);
+
       return invokePluginInline(run);
     },
   };
@@ -93,20 +104,39 @@ export function withManualMachineProvider(
 export async function manualHostCommand(
   enrollments: MachineEnrollmentService,
   hostId: string,
-): Promise<{
-  command: string;
-  windowsCommand: string;
-  expiresAt: number;
-} | null> {
+): Promise<HostEnrollmentCommandResponse> {
   const bootstrap = await enrollments.pendingBootstrapForHost({
     hostId,
     owner: MANUAL_PROVIDER_OWNER,
   });
-  return bootstrap === null
-    ? null
-    : {
-        command: manualEnrollmentCommand(bootstrap),
-        windowsCommand: manualEnrollmentPowerShellCommand(bootstrap),
-        expiresAt: bootstrap.expiresAt,
-      };
+
+  if (bootstrap === null) return null;
+  const shortCode = enrollments.shortCodeForBootstrap(bootstrap);
+
+  return {
+    command: manualEnrollmentCommand(bootstrap),
+    windowsCommand: manualEnrollmentPowerShellCommand(bootstrap),
+    expiresAt: bootstrap.expiresAt,
+    ...(shortCode === null
+      ? {}
+      : {
+          shortCommand: {
+            code: shortCode.code,
+            command: shortEnrollmentCommand(
+              bootstrap.serverUrl,
+              shortCode.code,
+            ),
+            windowsCommand: shortEnrollmentPowerShellCommand(
+              bootstrap.serverUrl,
+              shortCode.code,
+            ),
+            pageUrl: shortEnrollmentUrl(
+              bootstrap.serverUrl,
+              shortCode.code,
+              "posix",
+            ),
+            expiresAt: shortCode.expiresAt,
+          },
+        }),
+  };
 }

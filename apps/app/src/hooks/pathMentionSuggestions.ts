@@ -1,5 +1,5 @@
 import type { PathSuggestion } from "./usePathSuggestions";
-import type { PromptMentionSuggestion } from "@bb/client-core";
+import type { PromptMentionSuggestion } from "@omnyo/client-core";
 
 export type PathMentionSuggestion = Extract<
   PromptMentionSuggestion,
@@ -17,6 +17,7 @@ function getDirectoryPath(path: string): string {
 function getPathMentionReplacement(path: PathSuggestion): string {
   const mentionPath =
     path.entryKind === "directory" ? getDirectoryPath(path.path) : path.path;
+
   return path.source === "thread-storage"
     ? `thread-storage:${mentionPath}`
     : mentionPath;

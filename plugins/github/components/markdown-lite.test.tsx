@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 
 await loadPluginApp(() => import("../app"));
+
 const { Markdown } = await import("./markdown-lite");
 
 describe("Markdown", () => {
@@ -22,6 +23,7 @@ describe("Markdown", () => {
       },
       {},
     );
+
     const markup = slot.container.innerHTML;
 
     expect(markup).toContain("<table");
@@ -49,6 +51,7 @@ After the table.`}
       },
       {},
     );
+
     const markup = slot.container.innerHTML;
 
     expect(markup.match(/<th(?:\s|>)/g)).toHaveLength(3);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { TimelineRow, TimelineWorkRow } from "@bb/server-contract";
+import type { TimelineRow, TimelineWorkRow } from "@omnyo/server-contract";
 import type { ThreadTimelineViewRow } from "../src/index.js";
-import type { ThreadEventItemPresentation } from "@bb/domain";
+import type { ThreadEventItemPresentation } from "@omnyo/domain";
 import {
   buildTimelineActivityIntentTitles,
   buildTimelineRowTitle,
@@ -31,9 +31,11 @@ function workRow<K extends TimelineWorkRow["workKind"]>(
       "callId" in candidate &&
       candidate.callId === callId,
   );
+
   if (!row) {
     throw new Error(`no ${workKind} row for ${callId}`);
   }
+
   return row;
 }
 
@@ -104,6 +106,70 @@ const SUBAGENT_PRESENTATION: ThreadEventItemPresentation = {
 
 describe("v3 item projection", () => {
   it.each([
+    [
+      "node build.mjs 2>&1 | grep -v warning | tail -n 5",
+      "Ran node build.mjs 2>&1 | grep -v warning | tail -n 5",
+    ],
+    [
+      "node build.mjs && grep warning build.log",
+      "Ran node build.mjs && grep warning build.log",
+    ],
+    [
+      "node build.mjs; grep warning build.log",
+      "Ran node build.mjs; grep warning build.log",
+    ],
+    ["grep warning build.log | tail -n 5", "Searched for warning in build.log"],
+    [
+      "cd packages/app && grep warning build.log",
+      "Searched for warning in build.log",
+    ],
+    [
+      "cd packages/app && node build.mjs | grep warning",
+      "Ran cd packages/app && node build.mjs | grep warning",
+    ],
+  ])(
+    "anchors compound command titles to the first command after cd: %s",
+    (command, expectedTitle) => {
+      const event = createTimelineEventFactory({
+        threadId: "thread-1",
+        turnId: "turn-1",
+      });
+
+      const rendered = renderTimelineFixture({
+        completedTurnDisplay: "flat",
+        events: [
+          event.turnStarted({ createdAt: 0 }),
+          event.commandStarted({
+            itemId: "command-1",
+            command,
+            createdAt: 1_000,
+          }),
+          event.commandCompleted({
+            itemId: "command-1",
+            command,
+            exitCode: 0,
+            createdAt: 2_000,
+          }),
+          event.assistantCompleted({
+            itemId: "answer",
+            text: "Done.",
+            createdAt: 3_000,
+          }),
+          event.turnCompleted({ createdAt: 4_000 }),
+        ],
+        projectionOptions: { turnMessageDetail: "full" },
+      });
+
+      const [viewRow] = buildTimelineViewRows([
+        workRow(rendered.rows, "command", "command-1"),
+      ]);
+
+      expect(viewRow && plainTitle(viewRow)).toBe(expectedTitle);
+      expect(rendered.text).toContain(expectedTitle);
+    },
+  );
+
+  it.each([
     { decision: "allow_once", interleaved: false },
     { decision: "allow_for_session", interleaved: true },
   ] as const)(
@@ -113,13 +179,16 @@ describe("v3 item projection", () => {
         threadId: "thread-1",
         turnId: "turn-1",
       });
+
       const command = { itemId: "command-1", command: "mkdir -p build" };
+
       const approval = event.permissionGrantLifecycle({
         status: "resolved",
         providerId: "claude-code",
         resolution: { decision, grantedPermissions: null },
         createdAt: 145_000,
       });
+
       approval.data.interaction.payload = {
         kind: "approval",
         reason: null,
@@ -131,6 +200,7 @@ describe("v3 item projection", () => {
           sessionGrant: null,
         },
       };
+
       const events = [
         event.turnStarted({ createdAt: 0, seq: 0 }),
         event.commandStarted({ ...command, createdAt: 1_000, seq: 1 }),
@@ -152,16 +222,19 @@ describe("v3 item projection", () => {
           : []),
         { ...approval, seq: 4 },
       ];
+
       const running = renderTimelineFixture({
         events,
         projectionOptions: { turnMessageDetail: "full" },
       });
+
       expect(workRow(running.rows, "command", command.itemId)).toMatchObject({
         startedAt: 145_000,
         sourceSeqStart: 1,
         approvalStatus: null,
         completedAt: null,
       });
+
       const completed = renderTimelineFixture({
         events: [
           ...events,
@@ -174,6 +247,7 @@ describe("v3 item projection", () => {
         ],
         projectionOptions: { turnMessageDetail: "full" },
       });
+
       expect(workRow(completed.rows, "command", command.itemId)).toMatchObject({
         startedAt: 145_000,
         completedAt: 145_100,
@@ -184,15 +258,18 @@ describe("v3 item projection", () => {
           (row) => "callId" in row && row.callId === command.itemId,
         ),
       ).toHaveLength(1);
+
       const [viewRow] = buildTimelineViewRows([
         workRow(completed.rows, "command", command.itemId),
       ]);
+
       expect(viewRow && plainTitle(viewRow)).toBe("Ran mkdir -p build");
     },
   );
 
   it("projects fileRead and search items to file-read and search rows; bare tool calls derive no intent", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const v3 = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
@@ -248,6 +325,7 @@ describe("v3 item projection", () => {
       ],
       projectionOptions: { threadStatus: "idle", turnMessageDetail: "full" },
     });
+
     const legacy = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
@@ -325,6 +403,7 @@ describe("v3 item projection", () => {
             )
           : [],
       );
+
     expect(intents(workRows(v3.rows))).toEqual([
       { type: "read", name: "", path: "src/index.ts" },
       { type: "search", query: "TODO", path: "src" },
@@ -351,6 +430,7 @@ describe("v3 item projection", () => {
 
   it("carries a command item's presentation through projection into its title", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const rendered = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
@@ -380,6 +460,7 @@ describe("v3 item projection", () => {
 
   it("groups v3 exploration rows into one exploration bundle like legacy reads", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const rendered = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
@@ -412,6 +493,7 @@ describe("v3 item projection", () => {
       ],
       projectionOptions: { threadStatus: "idle", turnMessageDetail: "full" },
     });
+
     const turn = rendered.rows.find((row) => row.kind === "turn");
     const viewRows = buildTimelineViewRows(turn?.children ?? []);
     const bundle = viewRows.find((row) => row.kind === "bundle-summary");
@@ -421,6 +503,7 @@ describe("v3 item projection", () => {
 
   it("labels a generic tool row from its presentation and keeps the headline", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const rendered = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
@@ -463,6 +546,7 @@ describe("v3 item projection", () => {
       ],
       projectionOptions: { threadStatus: "idle", turnMessageDetail: "full" },
     });
+
     const ok = workRow(rendered.rows, "tool", "js-1");
     expect(ok.presentation).toEqual(JS_PRESENTATION);
     expect(plainTitle(ok)).toBe("Ran JavaScript Compute primes (2s)");
@@ -474,13 +558,14 @@ describe("v3 item projection", () => {
 
   it("prefers presentation over server-enriched statusLabels on the same row", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const rendered = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
         event.toolCallCompleted({
           turnId: "turn-1",
           itemId: "plugin-1",
-          tool: "bb_task_update",
+          tool: "omnyo_task_update",
           presentation: {
             label: { pending: "Updating task", completed: "Updated task" },
             icon: { glyph: "ListTodo" },
@@ -491,17 +576,20 @@ describe("v3 item projection", () => {
       ],
       projectionOptions: { threadStatus: "idle", turnMessageDetail: "full" },
     });
+
     const row = workRow(rendered.rows, "tool", "plugin-1");
     expect(plainTitle(row)).toBe("Updated task");
   });
 
   it("projects a planSteps snapshot to a plan-steps row that also feeds the todo banner", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const steps = [
       { step: "Read the spec", status: "completed" as const },
       { step: "Wire the renderer", status: "active" as const },
       { step: "Write tests", status: "pending" as const },
     ];
+
     const rendered = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
@@ -516,6 +604,7 @@ describe("v3 item projection", () => {
       ],
       projectionOptions: { threadStatus: "active", turnMessageDetail: "full" },
     });
+
     const row = workRow(rendered.rows, "plan-steps", "plan-1");
     expect(row).toMatchObject({
       steps,
@@ -533,6 +622,7 @@ describe("v3 item projection", () => {
 
   it("projects an extension item to an extension row carrying kind, payload and presentation", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const rendered = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
@@ -556,6 +646,7 @@ describe("v3 item projection", () => {
       ],
       projectionOptions: { threadStatus: "idle", turnMessageDetail: "full" },
     });
+
     const row = workRow(rendered.rows, "extension", "echo-1");
     expect(row).toMatchObject({
       extensionKind: "provider-echo/echo",
@@ -570,6 +661,7 @@ describe("v3 item projection", () => {
 
   it("renders a pending extension row with the present-tense label while the turn runs", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const rendered = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
@@ -587,6 +679,7 @@ describe("v3 item projection", () => {
         turnMessageDetail: "full",
       },
     });
+
     const row = workRow(rendered.rows, "extension", "echo-1");
     expect(row.status).toBe("pending");
     expect(plainTitle(row)).toMatch(/^Echoing hello/);
@@ -594,6 +687,7 @@ describe("v3 item projection", () => {
 
   it("carries childRef, background and presentation on a v3 delegation row", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const rendered = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
@@ -620,6 +714,7 @@ describe("v3 item projection", () => {
       ],
       projectionOptions: { threadStatus: "idle", turnMessageDetail: "full" },
     });
+
     const row = workRow(rendered.rows, "delegation", "agent-1");
     expect(row).toMatchObject({
       childRef: "subagent-7",
@@ -633,6 +728,7 @@ describe("v3 item projection", () => {
 
   it("hides items the bridge marked suppress, whatever their kind, unless they failed", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const rendered = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "turn-1", createdAt: 0 }),
@@ -679,9 +775,11 @@ describe("v3 item projection", () => {
         turnMessageDetail: "full",
       },
     });
+
     const callIds = workRows(rendered.rows).map((row) =>
       "callId" in row ? row.callId : null,
     );
+
     expect(callIds).toEqual(["echo-failed", "keep-1"]);
     expect(rendered.pendingTodos?.items.map((item) => item.text)).toEqual([
       "Do it",

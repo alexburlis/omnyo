@@ -1,8 +1,8 @@
 import { resolveHostEnvironment } from "../hosts/host-environment.js";
-import { environmentHookOperations } from "@bb/db";
-import { eq } from "drizzle-orm";
-import type { EnvironmentHookProgressMessage } from "@bb/host-daemon-contract";
-import type { PluginEnvironmentProviderProgress } from "@get-bb/plugin-sdk/environment-provider";
+import { environmentHookOperations } from "@omnyo/db";
+import { and, eq, isNull } from "drizzle-orm";
+import type { EnvironmentHookProgressMessage } from "@omnyo/host-daemon-contract";
+import type { PluginEnvironmentProviderProgress } from "@omnyo/plugin-sdk/environment-provider";
 import type { WorkSessionDeps } from "../../types.js";
 import {
   callHostOnlineRpc,
@@ -10,7 +10,18 @@ import {
 } from "../hosts/online-rpc.js";
 
 export const ENVIRONMENT_HOOK_TIMEOUT_MS = 15 * 60 * 1000;
+
+export class UnknownEnvironmentHookOutcomeError extends Error {
+  constructor() {
+    super(
+      "Environment hook outcome is unknown after interruption. Automatic cleanup is blocked; inspect the workspace before recovering it.",
+    );
+    this.name = "UnknownEnvironmentHookOutcomeError";
+  }
+}
+
 const TRANSPORT_GRACE_MS = 6_000;
+
 const reports = new WeakMap<
   object,
   Map<
@@ -31,14 +42,17 @@ export function registerEnvironmentProgressReport(
   },
 ): () => void {
   let active = reports.get(deps.db);
+
   if (active === undefined) {
     active = new Map();
     reports.set(deps.db, active);
   }
+
   active.set(args.operationId, {
     hostId: args.hostId,
     report: args.report,
   });
+
   return () => {
     if (active.get(args.operationId)?.report === args.report)
       active.delete(args.operationId);
@@ -51,7 +65,9 @@ export function reportEnvironmentHookProgress(
   progress: EnvironmentHookProgressMessage,
 ): void {
   const active = reports.get(deps.db)?.get(progress.operationId);
+
   if (active === undefined || active.hostId !== hostId) return;
+
   if (progress.entry.type === "output")
     active.report.log(progress.entry.text + "\n");
   else if (progress.entry.status !== "failed")
@@ -72,13 +88,16 @@ export async function runEnvironmentHook(
   },
 ): Promise<void> {
   args.signal.throwIfAborted();
+
   const existing = deps.db
     .select()
     .from(environmentHookOperations)
     .where(eq(environmentHookOperations.id, args.id))
     .get();
+
   if (existing?.finishedAt != null) return;
   const operationId = args.id;
+
   if (existing === undefined)
     deps.db
       .insert(environmentHookOperations)
@@ -91,11 +110,13 @@ export async function runEnvironmentHook(
         startedAt: Date.now(),
       })
       .run();
+
   const unregister = registerEnvironmentProgressReport(deps, {
     operationId,
     hostId: args.hostId,
     report: args.report,
   });
+
   const abort = (): void => {
     void callHostOnlineRpc(deps, {
       hostId: args.hostId,
@@ -108,7 +129,9 @@ export async function runEnvironmentHook(
       ),
     );
   };
+
   args.signal.addEventListener("abort", abort, { once: true });
+
   try {
     args.signal.throwIfAborted();
     await callHostOnlineRpcForWork(deps, {
@@ -155,12 +178,15 @@ export async function cancelPendingEnvironmentHook(
   args: { id: string; hostId: string },
 ): Promise<void> {
   const id = args.id;
+
   const operation = deps.db
     .select()
     .from(environmentHookOperations)
     .where(eq(environmentHookOperations.id, id))
     .get();
+
   if (operation?.finishedAt != null) return;
+
   const result = await callHostOnlineRpc(deps, {
     hostId: args.hostId,
     timeoutMs: TRANSPORT_GRACE_MS,
@@ -169,10 +195,9 @@ export async function cancelPendingEnvironmentHook(
       operationId: args.id,
     },
   });
+
   if (result.status === "unknown")
-    throw new Error(
-      "Environment hook outcome is unknown after interruption. Automatic cleanup is blocked; inspect the workspace before recovering it.",
-    );
+    throw new UnknownEnvironmentHookOutcomeError();
   deps.db
     .update(environmentHookOperations)
     .set({
@@ -180,5 +205,58 @@ export async function cancelPendingEnvironmentHook(
       error: "Environment hook cancelled",
     })
     .where(eq(environmentHookOperations.id, id))
+    .run();
+}
+
+export function hasUnfinishedEnvironmentHook(
+  deps: Pick<WorkSessionDeps, "db">,
+  id: string,
+): boolean {
+  return (
+    deps.db
+      .select({ id: environmentHookOperations.id })
+      .from(environmentHookOperations)
+      .where(
+        and(
+          eq(environmentHookOperations.id, id),
+          isNull(environmentHookOperations.finishedAt),
+        ),
+      )
+      .get() !== undefined
+  );
+}
+
+export function abandonHostEnvironmentHooks(
+  deps: Pick<WorkSessionDeps, "db">,
+  args: { hostId: string; reason: string },
+): void {
+  deps.db
+    .update(environmentHookOperations)
+    .set({ finishedAt: Date.now(), error: args.reason })
+    .where(
+      and(
+        eq(environmentHookOperations.hostId, args.hostId),
+        isNull(environmentHookOperations.finishedAt),
+      ),
+    )
+    .run();
+}
+
+export function abandonUnknownEnvironmentHook(
+  deps: Pick<WorkSessionDeps, "db">,
+  id: string,
+): void {
+  deps.db
+    .update(environmentHookOperations)
+    .set({
+      finishedAt: Date.now(),
+      error: "Outcome unknown after interruption; owner confirmed stopped",
+    })
+    .where(
+      and(
+        eq(environmentHookOperations.id, id),
+        isNull(environmentHookOperations.finishedAt),
+      ),
+    )
     .run();
 }

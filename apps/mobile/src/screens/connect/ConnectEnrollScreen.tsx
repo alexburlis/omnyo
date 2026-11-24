@@ -1,4 +1,5 @@
-import type { ConnectCredential } from "@bb/connect-client";
+import { iosHaptic } from "@/lib/haptics";
+import type { ConnectCredential } from "@omnyo/connect-client";
 import {
   Stack,
   useLocalSearchParams,
@@ -18,10 +19,13 @@ import {
   type EnrollmentTargetInput,
 } from "@/data/connect";
 import { describeThisDevice } from "@/lib/device-label";
+import { isSupportedRelayServer } from "@/lib/profiles/supported-relay";
 import type { SessionState } from "@/lib/session";
 import { useTheme } from "@/theme";
 import { Button, GroupedRow, Icon, Input, Spinner, Text, toast } from "@/ui";
 import { GroupedScreen } from "../settings/GroupedScreen";
+import { dismissToShell } from "../shell/dismiss-to-shell";
+import { webViewShellHref } from "../shell/hrefs";
 import { useBadgeColors } from "../settings/settings-badges";
 import { SettingsSection } from "../settings/SettingsRows";
 import { AccountServersList } from "./AccountServersList";
@@ -50,14 +54,17 @@ export function ConnectEnrollScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const colors = useBadgeColors();
+
   const params = useLocalSearchParams<{
     code?: string;
     serverUrl?: string;
     apex?: string;
     profileId?: string;
   }>();
+
   const { profiles, connection, addProfile, updateProfile, setActiveProfile } =
     useProfiles();
+
   const reauthProfile =
     params.profileId !== undefined
       ? (profiles.find(
@@ -65,12 +72,20 @@ export function ConnectEnrollScreen() {
             profile.id === params.profileId && profile.mode === "connect",
         ) ?? null)
       : null;
+
   const reauth = reauthProfile?.mode === "connect" ? reauthProfile : null;
 
+  const fixedServerUrl =
+    reauth !== null && isSupportedRelayServer(reauth.serverUrl)
+      ? reauth.serverUrl
+      : null;
+
   const [code, setCode] = useState(params.code ?? "");
+
   const [server, setServer] = useState(
-    params.serverUrl ?? reauth?.serverUrl ?? "",
+    params.serverUrl ?? fixedServerUrl ?? "",
   );
+
   const [apexUrl, setApexUrl] = useState(params.apex ?? "");
   const [showAdvanced, setShowAdvanced] = useState(Boolean(params.apex));
   const [scanning, setScanning] = useState(false);
@@ -79,19 +94,28 @@ export function ConnectEnrollScreen() {
 
   const busy = phase.kind === "redeeming" || phase.kind === "saving";
   const firstRun = profiles.length === 0;
+
   const session: SessionState | null =
-    phase.kind === "enrolled" && connection?.profile.id === phase.profileId
+    connection !== null &&
+    connection.client !== null &&
+    phase.kind === "enrolled" &&
+    connection.profile.id === phase.profileId
       ? connection.session
       : null;
 
   const submitTarget = async (input: EnrollmentTargetInput) => {
     setFieldError(null);
     const target = resolveEnrollmentTarget(input);
+
     if (!target.ok) {
+      iosHaptic("error");
       setFieldError({ field: target.field, message: target.message });
+
       return;
     }
+
     setPhase({ kind: "redeeming" });
+
     try {
       const redeemed = await redeemEnrollment({
         apexUrl: target.apexUrl,
@@ -99,19 +123,23 @@ export function ConnectEnrollScreen() {
         deviceName: describeThisDevice(),
         label: reauth?.label,
       });
+
       setPhase({ kind: "saving" });
       let profileId: string;
+
       if (reauth) {
         const updated = await updateProfile(reauth.id, {
           serverUrl: redeemed.profile.serverUrl,
           handle: redeemed.profile.handle,
           credential: redeemed.profile.credential,
         });
+
         profileId = updated.id;
       } else {
         const added = await addProfile(redeemed.profile);
         profileId = added.id;
       }
+
       await setActiveProfile(profileId);
       setPhase({
         kind: "enrolled",
@@ -119,12 +147,14 @@ export function ConnectEnrollScreen() {
         label: reauth?.label ?? redeemed.profile.label,
         credential: redeemed.credential,
       });
+      iosHaptic("success");
       toast.success(
         reauth
           ? `Paired ${reauth.label} again`
           : `Paired with ${redeemed.profile.label}`,
       );
     } catch (error) {
+      iosHaptic("error");
       setPhase({ kind: "failed", failure: describeEnrollmentError(error) });
     }
   };
@@ -134,11 +164,14 @@ export function ConnectEnrollScreen() {
   const onScanned = (input: ConnectPairingInput) => {
     setScanning(false);
     setCode(input.code);
+
     if (input.serverUrl) setServer(input.serverUrl);
+
     if (input.apexUrl) {
       setApexUrl(input.apexUrl);
       setShowAdvanced(true);
     }
+
     void submitTarget({
       code: input.code,
       server: input.serverUrl ?? server,
@@ -146,11 +179,12 @@ export function ConnectEnrollScreen() {
     });
   };
 
-  const done = () => router.dismissTo("/");
+  const done = () => dismissToShell(router, navigation, webViewShellHref());
 
   const openDirectUrlForm = () => {
     const state = navigation.getState();
     const below = state ? state.routes[state.index - 1] : undefined;
+
     if (below?.name === "settings/servers/add") router.back();
     else router.replace("/settings/servers/add");
   };
@@ -160,7 +194,7 @@ export function ConnectEnrollScreen() {
       <>
         <Stack.Screen
           options={{
-            title: reauth ? "Paired again" : "Paired with bb connect",
+            title: reauth ? "Paired again" : "Paired with Omnyo connect",
           }}
         />
         {IS_IOS ? (
@@ -175,7 +209,7 @@ export function ConnectEnrollScreen() {
           </Stack.Toolbar>
         ) : null}
         <GroupedScreen testID="connect-enrolled-screen">
-          <SettingsSection footnote="Manage this phone’s access in getbb.app → Machines.">
+          <SettingsSection footnote="Manage this phone’s access in the Omnyo connect dashboard → Machines.">
             <View
               className="flex-row items-center gap-3 px-4 py-3"
               testID="connect-enrolled-card"
@@ -220,8 +254,8 @@ export function ConnectEnrollScreen() {
           title: reauth
             ? `Sign in again to ${reauth.label}`
             : firstRun
-              ? "Connect to getbb.app"
-              : "Pair with bb connect",
+              ? "Connect to Omnyo"
+              : "Pair with Omnyo connect",
         }}
       />
       {IS_IOS ? (
@@ -240,7 +274,7 @@ export function ConnectEnrollScreen() {
           footnote={
             reauth
               ? "Generate a new pairing code on the server to reconnect this phone. Your saved server keeps its place."
-              : "Pair this phone with your bb server through getbb.app. Generate a code in bb Settings → Mobile → Add mobile device, or run `bb connect machine-code`."
+              : "Pair this phone with your Omnyo server through Omnyo connect. Generate a code in Omnyo Settings → Mobile → Add mobile device, or run `omnyo connect machine-code`."
           }
         >
           <GroupedRow
@@ -274,6 +308,7 @@ export function ConnectEnrollScreen() {
               value={code}
               onChangeText={(next) => {
                 setCode(next);
+
                 if (phase.kind === "failed") setPhase({ kind: "form" });
               }}
               placeholder="ABCD-EFGH"
@@ -296,10 +331,10 @@ export function ConnectEnrollScreen() {
               <Text variant="footnote" tone="destructive">
                 {fieldError.message}
               </Text>
-            ) : reauth ? (
+            ) : fixedServerUrl !== null ? (
               "The server is fixed when signing in again."
             ) : (
-              "Optional: the code already names the server. A URL also sets the bb connect address for self-hosted gates."
+              "Optional: the code already names the server. A URL also sets the Omnyo connect address for self-hosted gates."
             )
           }
         >
@@ -307,7 +342,7 @@ export function ConnectEnrollScreen() {
             <Input
               value={server}
               onChangeText={setServer}
-              placeholder="bee or https://bee.getbb.app"
+              placeholder="bee or https://bee.example.com"
               keyboardType="url"
               autoCapitalize="none"
               autoCorrect={false}
@@ -316,7 +351,7 @@ export function ConnectEnrollScreen() {
               invalid={fieldError?.field === "server"}
               mono
               grouped
-              editable={!busy && reauth === null}
+              editable={!busy && fixedServerUrl === null}
               testID="connect-server-input"
             />
           </View>
@@ -324,14 +359,14 @@ export function ConnectEnrollScreen() {
 
         {showAdvanced ? (
           <SettingsSection
-            title="bb connect address"
+            title="Omnyo connect address"
             footnote={
               fieldError?.field === "apexUrl" ? (
                 <Text variant="footnote" tone="destructive">
                   {fieldError.message}
                 </Text>
               ) : (
-                "The self-hosted bb connect gate this phone pairs through."
+                "The self-hosted Omnyo connect gate this phone pairs through."
               )
             }
           >
@@ -359,7 +394,7 @@ export function ConnectEnrollScreen() {
             onPress={() => setShowAdvanced(true)}
             testID="connect-advanced-toggle"
           >
-            Self-hosted bb connect…
+            Self-hosted Omnyo connect…
           </Button>
         )}
 
@@ -413,6 +448,7 @@ export function ConnectEnrollScreen() {
 
 function SessionStatusLine({ session }: { session: SessionState | null }) {
   const { tokens } = useTheme();
+
   if (session === null || session.status === "idle") {
     return (
       <View className="flex-row items-center gap-2 pt-1">
@@ -421,6 +457,7 @@ function SessionStatusLine({ session }: { session: SessionState | null }) {
       </View>
     );
   }
+
   switch (session.status) {
     case "authenticating":
       return (
@@ -457,7 +494,8 @@ function SessionStatusLine({ session }: { session: SessionState | null }) {
           selectable
           testID="connect-session-auth-required"
         >
-          bb connect could not sign this phone in. Try pairing with a new code.
+          Omnyo connect could not sign this phone in. Try pairing with a new
+          code.
         </Text>
       );
     case "error":

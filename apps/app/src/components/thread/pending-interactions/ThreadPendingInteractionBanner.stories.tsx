@@ -1,7 +1,7 @@
 import type {
   PendingInteraction,
   ProviderPendingInteraction,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { ThreadPendingInteractionBanners } from "@/components/thread/pending-interactions/ThreadPendingInteractionBanner";
 import { ThreadPromptContextBanner } from "@/components/promptbox/banner/ThreadPromptContextBanner";
 import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
@@ -40,8 +40,8 @@ const commandApproval: PendingInteraction = {
     subject: {
       kind: "command",
       itemId: "item_cmd",
-      command: "git push origin bb/promptbox-stories",
-      cwd: "/workspace/bb",
+      command: "git push origin omnyo/promptbox-stories",
+      cwd: "/workspace/omnyo",
       actions: [],
       sessionGrant: null,
     },
@@ -60,8 +60,8 @@ const longCommandApproval: PendingInteraction = {
       kind: "command",
       itemId: "item_cmd_long",
       command:
-        "pnpm exec turbo run typecheck --filter=@bb/app --filter=@bb/server --filter=@bb/domain --filter=@bb/server-contract --force",
-      cwd: "/workspace/bb",
+        "pnpm exec turbo run typecheck --filter=@omnyo/app --filter=@omnyo/server --filter=@omnyo/domain --filter=@omnyo/server-contract --force",
+      cwd: "/workspace/omnyo",
       actions: [],
       sessionGrant: null,
     },
@@ -137,8 +137,8 @@ const permissionGrant: PendingInteraction = {
       permissions: {
         network: null,
         fileSystem: {
-          read: ["/workspace/bb/apps/app", "/workspace/bb/packages"],
-          write: ["/workspace/bb/apps/app/src/components/promptbox"],
+          read: ["/workspace/omnyo/apps/app", "/workspace/omnyo/packages"],
+          write: ["/workspace/omnyo/apps/app/src/components/promptbox"],
         },
       },
     },
@@ -189,11 +189,10 @@ export function Overview() {
             threadId={commandApproval.threadId}
           />
           <ThreadPromptContextBanner
-            gitSection={null}
-            gitSectionPending={false}
             archivedSection={null}
             environmentGoneSection={null}
             parentThreadSection={null}
+            continuedInSection={null}
             childThreadsSection={{
               items: [
                 {
@@ -204,7 +203,6 @@ export function Overview() {
                 },
               ],
             }}
-            pullRequestSection={null}
             expandedSection={null}
             onToggleSection={() => {}}
           />
@@ -311,6 +309,25 @@ export function Overview() {
           <ThreadPendingInteractionBanners
             interactions={[toolUse]}
             threadId={toolUse.threadId}
+          />
+        </PromptStage>
+      </StoryRow>
+    </StoryCard>
+  );
+}
+
+export function QueuedRequests() {
+  return (
+    <StoryCard className="m-0 p-4">
+      <StoryRow
+        className="grid-cols-1 gap-y-2 px-0 md:grid-cols-[210px_minmax(0,1fr)]"
+        label="several requests at once"
+        hint="the first request opens; the others stay folded but still say what they ask for"
+      >
+        <PromptStage>
+          <ThreadPendingInteractionBanners
+            interactions={[commandApproval, fileChange, toolUse]}
+            threadId={commandApproval.threadId}
           />
         </PromptStage>
       </StoryRow>

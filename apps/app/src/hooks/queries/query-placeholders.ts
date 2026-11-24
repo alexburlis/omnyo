@@ -6,7 +6,7 @@ import type {
   ProjectBranchesResponse,
   ThreadResponse,
   ThreadTimelineResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   ENVIRONMENT_DIFF_FILES_QUERY_KEY,
   ENVIRONMENT_MERGE_BASE_BRANCHES_QUERY_KEY,
@@ -48,6 +48,7 @@ function extractThreadIdFromThreadScopedQueryKey(
   }
 
   const threadId = queryKey[1];
+
   return typeof threadId === "string" ? threadId : undefined;
 }
 

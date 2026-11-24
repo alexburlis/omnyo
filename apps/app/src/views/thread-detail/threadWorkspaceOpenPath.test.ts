@@ -2,9 +2,9 @@ import type {
   Environment,
   WorkspaceFileStatus,
   WorkspaceFileStatusKind,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { WorkspaceChangedFilesSection } from "@/components/workspace/workspace-change-summary";
-import { makeEnvironment } from "@bb/test-helpers/domain-fixtures";
+import { makeEnvironment } from "@omnyo/test-helpers/domain-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   resolveWorkspaceChangedFileOpenTarget,
@@ -44,6 +44,7 @@ function makeWorkspaceChangedFilesSection(
   overrides: Partial<WorkspaceChangedFilesSection> = {},
 ): WorkspaceChangedFilesSection {
   const file = makeWorkspaceFileStatus("M");
+
   return {
     kind: "uncommitted",
     label: "Uncommitted files",
@@ -54,6 +55,7 @@ function makeWorkspaceChangedFilesSection(
       insertions: 1,
       deletions: 1,
       lineStatsComplete: true,
+      fileCount: 1,
     },
     ...overrides,
   };
@@ -64,19 +66,19 @@ describe("resolveThreadWorkspaceOpenPath", () => {
     expect(
       resolveEnvironmentOpenContext({
         environment: makeWorkspaceEnvironment({ hostId: "host-local" }),
-        serverOrigin: "https://bb.example.test",
+        serverOrigin: "https://omnyo.example.test",
         threadEnvironmentIsLocal: true,
       }),
     ).toEqual({ kind: "local" });
     expect(
       resolveEnvironmentOpenContext({
         environment: makeWorkspaceEnvironment({ hostId: "host-remote" }),
-        serverOrigin: "https://bb.example.test",
+        serverOrigin: "https://omnyo.example.test",
         threadEnvironmentIsLocal: false,
       }),
     ).toEqual({
       kind: "remote-ssh",
-      serverOrigin: "https://bb.example.test",
+      serverOrigin: "https://omnyo.example.test",
       hostId: "host-remote",
     });
   });

@@ -1,7 +1,7 @@
 export interface DesktopAboutFacts {
   applicationName: string;
   buildDate: string;
-  channel: "latest" | "nightly";
+  channel: "latest" | "nightly" | "public-beta";
   commit: string;
   electronVersion: string;
   osArch: string;
@@ -29,12 +29,16 @@ export interface DesktopAboutDialogOptions {
 }
 
 export const ABOUT_DIALOG_COPY_BUTTON_LABEL = "Copy";
+
 const ABOUT_DIALOG_DISMISS_BUTTON_LABEL = "OK";
+
 const UNKNOWN_VALUE = "unknown";
+
 const MILLISECONDS_PER_DAY = 86_400_000;
 
 function displayValue(value: string): string {
   const trimmed = value.trim();
+
   return trimmed.length === 0 ? UNKNOWN_VALUE : trimmed;
 }
 
@@ -43,28 +47,36 @@ export function formatBuildAge(
   nowMs: number,
 ): string | null {
   const buildMs = Date.parse(buildDate);
+
   if (Number.isNaN(buildMs)) {
     return null;
   }
+
   const days = Math.max(
     0,
     Math.floor((nowMs - buildMs) / MILLISECONDS_PER_DAY),
   );
+
   if (days === 0) {
     return "today";
   }
+
   return days === 1 ? "1 day old" : `${days} days old`;
 }
 
 function formatBuildDate(buildDate: string, nowMs: number | null): string {
   const trimmed = buildDate.trim();
+
   if (trimmed.length === 0) {
     return UNKNOWN_VALUE;
   }
+
   if (nowMs === null) {
     return trimmed;
   }
+
   const age = formatBuildAge(trimmed, nowMs);
+
   return age === null ? trimmed : `${trimmed} (${age})`;
 }
 
@@ -81,6 +93,7 @@ export function buildDesktopAboutDetails(
     ["Electron", facts.electronVersion],
     ["OS", `${facts.osType} ${facts.osArch} ${facts.osRelease}`],
   ];
+
   return lines
     .map(([label, value]) => `${label}: ${displayValue(value)}`)
     .join("\n");

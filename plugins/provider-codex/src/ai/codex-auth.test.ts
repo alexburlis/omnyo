@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 it("reads auth.json from CODEX_HOME when configured", async () => {
-  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-codex-home-"));
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-codex-home-"));
   tempDirs.push(homeDir);
   const configuredCodexHome = path.join(homeDir, "custom-codex-home");
   await writeApiKeyAuth(path.join(homeDir, ".codex"), "default-api-key");
@@ -47,7 +47,7 @@ it("reads auth.json from CODEX_HOME when configured", async () => {
 });
 
 it("reports a missing auth.json as codex_auth_missing and an unparsable one as codex_auth_invalid", async () => {
-  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-codex-home-"));
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-codex-home-"));
   tempDirs.push(homeDir);
   vi.stubEnv("HOME", homeDir);
   vi.stubEnv("USERPROFILE", homeDir);
@@ -68,13 +68,15 @@ it("reports a missing auth.json as codex_auth_missing and an unparsable one as c
 });
 
 it("reads ChatGPT credentials with the account id from the access token claims", async () => {
-  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-codex-home-"));
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-codex-home-"));
   tempDirs.push(homeDir);
   vi.stubEnv("HOME", homeDir);
   vi.stubEnv("USERPROFILE", homeDir);
   vi.stubEnv("CODEX_HOME", "");
+
   const base64UrlJson = (value: object) =>
     Buffer.from(JSON.stringify(value)).toString("base64url");
+
   const accessToken = `${base64UrlJson({ alg: "none" })}.${base64UrlJson({
     exp: Math.floor(Date.now() / 1000) + 3600,
     email: "codex@example.com",
@@ -83,6 +85,7 @@ it("reads ChatGPT credentials with the account id from the access token claims",
       chatgpt_account_is_fedramp: true,
     },
   })}.sig`;
+
   const codexHome = path.join(homeDir, ".codex");
   await fs.mkdir(codexHome, { recursive: true });
   await fs.writeFile(

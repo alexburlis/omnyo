@@ -4,7 +4,7 @@ import { useEffect, type ReactNode } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { emptyPromptDraftState } from "@bb/client-core";
+import { emptyPromptDraftState } from "@omnyo/client-core";
 import {
   resolveSerializedPromptMentions,
   type ThreadTitleMentionResources,
@@ -69,6 +69,7 @@ describe("initial prompt mentions", () => {
   it("keeps UTF-16 offsets and resolves repeated tokens, titles, names and fallback titles", () => {
     const text =
       "😀 Hand off @thread:thr_known,\n@project:proj_app @section:sec_work @thread:thr_fallback @thread:thr_known.";
+
     const result = draft(text);
     expect(result.text).toBe(text);
     expect(
@@ -115,6 +116,7 @@ describe("initial prompt mentions", () => {
           label: "Remote title",
         },
       ]);
+
     const result = await resolveInitialPromptDraft(
       draft(
         "@thread:thr_abcdefghij @thread:thr_abcdefghij @thread:thr_23456789ab @project:missing @section:missing",
@@ -122,6 +124,7 @@ describe("initial prompt mentions", () => {
       lookup,
       new AbortController().signal,
     );
+
     expect(lookup).toHaveBeenCalledWith({
       threadIds: ["thr_abcdefghij", "thr_23456789ab"],
       signal: expect.any(AbortSignal),
@@ -142,11 +145,13 @@ describe("initial prompt mentions", () => {
     const lookup = vi
       .fn<typeof sdk.threads.resolveMentions>()
       .mockRejectedValue(new Error("offline"));
+
     const result = await resolveInitialPromptDraft(
       draft("@thread:thr_23456789ab"),
       lookup,
       new AbortController().signal,
     );
+
     expect(result.mentions[0]?.resource.label).toBe("Thread");
   });
 
@@ -156,37 +161,46 @@ describe("initial prompt mentions", () => {
       let finish: (
         value: Awaited<ReturnType<typeof sdk.threads.resolveMentions>>,
       ) => void = () => {};
+
       vi.spyOn(sdk.threads, "resolveMentions").mockImplementation(
         () =>
           new Promise((resolve) => {
             finish = resolve;
           }),
       );
+
       const client = new QueryClient({
         defaultOptions: { queries: { retry: false } },
       });
+
       const wrapper = ({ children }: { children: ReactNode }) => (
         <QueryClientProvider client={client}>{children}</QueryClientProvider>
       );
+
       const scope = {
         kind: "thread" as const,
         projectId: "proj_seed",
         threadId: `thr_seed_${existing}`,
       };
+
       const { result, rerender } = renderHook(
         ({ seedPrompt }) => {
           const storage = usePromptDraftStorage(scope);
+
           const seed = useInitialPromptDraft(
             seedPrompt ? "@thread:thr_abcdefghij " : null,
           );
+
           const restore = storage.restoreIfEmpty;
           useEffect(() => {
             if (seed) restore(seed);
           }, [restore, seed]);
+
           return { storage, seed };
         },
         { wrapper, initialProps: { seedPrompt: !existing } },
       );
+
       act(() => {
         result.current.storage.setDraft({
           ...emptyPromptDraftState(),
@@ -214,19 +228,24 @@ describe("initial prompt mentions", () => {
 
   it("waits for sidebar metadata and discards a replaced seed's late lookup", async () => {
     navigationState.pending = true;
+
     let finish: (
       value: Awaited<ReturnType<typeof sdk.threads.resolveMentions>>,
     ) => void = () => {};
+
     const lookup = vi.spyOn(sdk.threads, "resolveMentions").mockImplementation(
       () =>
         new Promise((resolve) => {
           finish = resolve;
         }),
     );
+
     const client = new QueryClient();
+
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
+
     const { result, rerender } = renderHook(
       ({ text }) => useInitialPromptDraft(text),
       {
@@ -234,6 +253,7 @@ describe("initial prompt mentions", () => {
         initialProps: { text: "@thread:thr_abcdefghij" },
       },
     );
+
     expect(result.current).toBeUndefined();
     expect(lookup).not.toHaveBeenCalled();
     navigationState.pending = false;
@@ -264,9 +284,11 @@ describe("initial prompt mentions", () => {
       },
     ]);
     const client = new QueryClient();
+
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
+
     const { result } = renderHook(
       () => {
         const storage = usePromptDraftStorage({
@@ -274,15 +296,18 @@ describe("initial prompt mentions", () => {
           projectId: "proj_seed",
           threadId: "thr_empty",
         });
+
         const seed = useInitialPromptDraft("@thread:thr_abcdefghij ");
         const restore = storage.restoreIfEmpty;
         useEffect(() => {
           if (seed) restore(seed);
         }, [restore, seed]);
+
         return storage;
       },
       { wrapper },
     );
+
     await waitFor(() => expect(result.current.mentions).toHaveLength(1));
     expect(result.current.mentions[0]).toMatchObject({
       start: 0,

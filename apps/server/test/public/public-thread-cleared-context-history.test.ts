@@ -1,14 +1,14 @@
 import { expect, it } from "vitest";
-import { getAppSettings } from "@bb/db";
+import { getAppSettings } from "@omnyo/db";
 import {
   defaultAppSettings,
   THREAD_CONTEXT_CLEAR_OPERATION,
   threadScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   threadConversationOutlineResponseSchema,
   threadTimelineResponseSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { readJson } from "../helpers/json.js";
 import { seedEvent, seedThreadFixture } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
@@ -40,12 +40,14 @@ it("follows keepHistoryAfterContextClear across cached timeline, outline, and me
       type: "system/manager/user_message",
       data: { text: "Fresh task" },
     });
+
     const read = async () => {
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(
           await harness.app.request(`/api/v1/threads/${thread.id}/timeline`),
         ),
       );
+
       const outline = threadConversationOutlineResponseSchema.parse(
         await readJson(
           await harness.app.request(
@@ -53,9 +55,11 @@ it("follows keepHistoryAfterContextClear across cached timeline, outline, and me
           ),
         ),
       );
+
       const message = await harness.app.request(
         `/api/v1/threads/${thread.id}/messages/1`,
       );
+
       return {
         contextBoundarySeq: timeline.contextBoundarySeq,
         rows: timeline.rows.map((row) =>
@@ -69,12 +73,14 @@ it("follows keepHistoryAfterContextClear across cached timeline, outline, and me
         messageStatus: message.status,
       };
     };
+
     const put = (settings: object) =>
       harness.app.request("/api/v1/settings/general", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(settings),
       });
+
     const hidden = {
       contextBoundarySeq: 2,
       rows: ["Context cleared", "Fresh task"],
@@ -91,16 +97,19 @@ it("follows keepHistoryAfterContextClear across cached timeline, outline, and me
         })
       ).status,
     ).toBe(200);
+
     const kept = {
       contextBoundarySeq: 2,
       rows: ["Earlier task", "Context cleared", "Fresh task"],
       outline: ["Earlier task", "Fresh task"],
       messageStatus: 200,
     };
+
     expect(await read()).toEqual(kept);
 
     const { keepHistoryAfterContextClear: omitted, ...legacy } =
       defaultAppSettings;
+
     expect(omitted).toBe(false);
     expect((await put({ ...legacy, showKeyboardHints: false })).status).toBe(
       200,

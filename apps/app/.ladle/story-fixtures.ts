@@ -1,31 +1,35 @@
 import { useState } from "react";
-import { reconcileReasoningLevel } from "@bb/domain";
+import { reconcileReasoningLevel } from "@omnyo/domain";
 import type {
   Host,
   ProjectSource,
   ProviderInfo,
+  ProviderOptionDescriptor,
   ReasoningLevel,
   Thread,
   WorkspaceStatus,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   ProviderCliKey,
   ProviderCliStatus,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type {
   ProjectResponse,
   SystemEnvironmentProvider,
-} from "@bb/server-contract";
-import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@bb/client-core";
+} from "@omnyo/server-contract";
+import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@omnyo/client-core";
 import {
   makeEnvironment as makeEnvironmentFixture,
   makeHost as makeHostFixture,
   makeProviderInfo,
   makeThread as makeThreadFixture,
   makeThreadListEntry as makeThreadListEntryFixture,
-} from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/test-helpers/domain-fixtures";
 import { makeProjectResponse } from "../src/test/fixtures/projects";
 import { getProviderIconInfo } from "../src/lib/provider-icon";
+import codexLogoUrl from "../../../plugins/provider-codex/icons/codex.svg";
+import claudeCodeLogoUrl from "../../../plugins/provider-claude-code/icons/claude-code.svg";
+import piLogoUrl from "../../../plugins/provider-pi/icons/pi.svg";
 import type { PickerOption } from "../src/components/pickers/OptionPicker";
 import type { ModelPickerOption } from "../src/components/pickers/model-picker-option";
 import type { ProjectSelectorOption } from "../src/components/pickers/ProjectSelector";
@@ -52,13 +56,13 @@ export const HOST_NAMES = {
 } as const;
 
 export const PROJECT_IDS = {
-  bb: "proj_bb",
+  omnyo: "proj_omnyo",
   pierre: "proj_pierre",
   ingest: "proj_ingest_pipeline",
 } as const;
 
 export const PROJECT_NAMES = {
-  bb: "bb",
+  omnyo: "omnyo",
   pierre: "pierre",
   ingest: "ingest-pipeline",
 } as const;
@@ -75,10 +79,12 @@ export function makeTypeaheadConfig(
   const mention: TypeaheadMentionConfig = {
     results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
     isLoading: false,
+    isRefreshing: false,
     isError: false,
     onQueryChange: noop,
     ...mentionOverrides,
   };
+
   return {
     mention,
     command: {
@@ -93,156 +99,38 @@ export function makeAttachmentsConfig(
 ): AttachmentsConfig {
   const base: AttachmentsConfig = {
     items: [],
-    projectId: PROJECT_IDS.bb,
+    projectId: PROJECT_IDS.omnyo,
     onAttachFiles: async () => [],
     onUpdate: noop,
     isAttaching: false,
     error: null,
   };
+
   return { ...base, ...overrides };
 }
 
-function storyProviderIcon(providerId: string, glyph: string) {
-  return getProviderIconInfo("agent", providerId, {
-    logoUrl: null,
-    icon: { glyph },
-  })?.icon;
+function storyProviderIcon(providerId: string, logoUrl: string) {
+  return getProviderIconInfo("agent", providerId, { logoUrl }).icon;
 }
 
-function makeStoryProvider(
-  id: string,
-  displayName: string,
-  glyph: string,
-): ProviderInfo {
-  return makeProviderInfo({
-    id,
-    displayName,
-    logoUrl: null,
-    icon: { glyph },
-  });
-}
-
-const storyCodexProvider = makeStoryProvider("codex", "Codex", "Code");
-const storyClaudeCodeProvider = makeStoryProvider(
-  "claude-code",
-  "Claude Code",
-  "Brain",
-);
-const storyCursorProvider = makeStoryProvider("acp-cursor", "Cursor", "Zap");
-export const STORY_CLAUDE_CODE_PROVIDER_ID = storyClaudeCodeProvider.id;
-export const STORY_CURSOR_PROVIDER_ID = storyCursorProvider.id;
-
-export const STORY_PROVIDERS_BY_ID: ReadonlyMap<string, ProviderInfo> = new Map(
-  [storyCodexProvider, storyClaudeCodeProvider, storyCursorProvider].map(
-    (provider) => [provider.id, provider],
-  ),
-);
+const STORY_PROVIDER_LOGO_URLS: Readonly<Record<string, string>> = {
+  codex: codexLogoUrl,
+  "claude-code": claudeCodeLogoUrl,
+  pi: piLogoUrl,
+};
 
 export const STORY_PROVIDER_OPTIONS: readonly PickerOption<string>[] = [
-  { value: "codex", label: "Codex", icon: storyProviderIcon("codex", "Code") },
+  {
+    value: "codex",
+    label: "Codex",
+    icon: storyProviderIcon("codex", codexLogoUrl),
+  },
   {
     value: "claude-code",
     label: "Claude Code",
-    icon: storyProviderIcon("claude-code", "Sparkles"),
+    icon: storyProviderIcon("claude-code", claudeCodeLogoUrl),
   },
-  { value: "pi", label: "Pi", icon: storyProviderIcon("pi", "Zap") },
-];
-
-export const STORY_CODEX_MODELS: readonly PickerOption<string>[] = [
-  { value: "gpt-5.5", label: "GPT-5.5" },
-  { value: "gpt-5.4", label: "GPT-5.4" },
-  { value: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
-  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
-  { value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
-  { value: "gpt-5.2", label: "GPT-5.2" },
-];
-
-export const STORY_CLAUDE_CODE_MODELS: readonly PickerOption<string>[] = [
-  { value: "claude-fable-5", label: "Claude Fable 5" },
-  { value: "claude-opus-4-8[1m]", label: "Claude Opus 4.8 (1M)" },
-  { value: "claude-sonnet-5", label: "Claude Sonnet 5" },
-];
-
-export const STORY_CLAUDE_CODE_MORE_MODELS: readonly PickerOption<string>[] = [
-  { value: "claude-sonnet-4-6[1m]", label: "Claude Sonnet 4.6 (1M)" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-];
-
-export const STORY_PI_REASONING: readonly PickerOption<ReasoningLevel>[] = [
-  { value: "none", label: "None" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "Extra High" },
-];
-
-const STORY_PI_OPUS_REASONING: readonly PickerOption<ReasoningLevel>[] = [
-  ...STORY_PI_REASONING,
-  { value: "max", label: "Max" },
-];
-
-export const STORY_PI_MODELS: readonly (ModelPickerOption & {
-  reasoningOptions: readonly PickerOption<ReasoningLevel>[];
-})[] = [
-  {
-    value: "openai-codex/gpt-5.5",
-    label: "GPT-5.5",
-    routeProviderId: "openai-codex",
-    reasoningOptions: STORY_PI_REASONING,
-  },
-  {
-    value: "openai-codex/gpt-5.4",
-    label: "GPT-5.4",
-    routeProviderId: "openai-codex",
-    reasoningOptions: STORY_PI_REASONING,
-  },
-  {
-    value: "openai-codex/gpt-5.4-mini",
-    label: "GPT-5.4 Mini",
-    routeProviderId: "openai-codex",
-    reasoningOptions: STORY_PI_REASONING,
-  },
-  {
-    value: "openai/gpt-5.3-codex",
-    label: "GPT-5.3 Codex",
-    routeProviderId: "openai",
-    reasoningOptions: STORY_PI_REASONING,
-  },
-  {
-    value: "openai/gpt-5.3-codex-spark",
-    label: "GPT-5.3 Codex Spark",
-    routeProviderId: "openai",
-    reasoningOptions: STORY_PI_REASONING.filter(
-      ({ value }) => value !== "none",
-    ),
-  },
-  {
-    value: "openai-codex/gpt-5.3-codex-spark",
-    label: "GPT-5.3 Codex Spark",
-    routeProviderId: "openai-codex",
-    reasoningOptions: STORY_PI_REASONING,
-  },
-  {
-    value: "anthropic/claude-haiku-4-5",
-    label: "Claude Haiku 4.5",
-    routeProviderId: "anthropic",
-    reasoningOptions: STORY_PI_REASONING.filter(
-      ({ value }) => value !== "xhigh",
-    ),
-  },
-  {
-    value: "anthropic/claude-opus-4-8",
-    label: "Claude Opus 4.8",
-    routeProviderId: "anthropic",
-    reasoningOptions: STORY_PI_OPUS_REASONING,
-  },
-  {
-    value: "anthropic/claude-opus-4-7",
-    label: "Claude Opus 4.7",
-    routeProviderId: "anthropic",
-    reasoningOptions: STORY_PI_OPUS_REASONING,
-  },
+  { value: "pi", label: "Pi", icon: storyProviderIcon("pi", piLogoUrl) },
 ];
 
 export const STORY_CODEX_REASONING: readonly PickerOption<ReasoningLevel>[] = [
@@ -263,29 +151,174 @@ export const STORY_CLAUDE_REASONING: readonly PickerOption<ReasoningLevel>[] = [
   { value: "max", label: "Max" },
 ];
 
+export const STORY_PI_REASONING: readonly PickerOption<ReasoningLevel>[] = [
+  { value: "none", label: "None" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra High" },
+];
+
+const STORY_PI_OPUS_REASONING: readonly PickerOption<ReasoningLevel>[] = [
+  ...STORY_PI_REASONING,
+  { value: "max", label: "Max" },
+];
+
+export const STORY_FAST_SERVICE_TIERS: readonly ProviderOptionDescriptor[] = [
+  { id: "fast", label: "Fast" },
+];
+
+export function storyModelOption(
+  value: string,
+  label: string,
+  reasoningOptions: readonly PickerOption<ReasoningLevel>[],
+  extra: Partial<ModelPickerOption> = {},
+): ModelPickerOption {
+  return {
+    value,
+    label,
+    reasoningOptions,
+    defaultReasoningLevel:
+      reasoningOptions.find((option) => option.value === "medium")?.value ??
+      reasoningOptions[0]?.value ??
+      "medium",
+    serviceTierOptions: [],
+    ...extra,
+  };
+}
+
+function codexModel(value: string, label: string): ModelPickerOption {
+  return storyModelOption(value, label, STORY_CODEX_REASONING, {
+    serviceTierOptions: STORY_FAST_SERVICE_TIERS,
+  });
+}
+
+function claudeModel(value: string, label: string): ModelPickerOption {
+  return storyModelOption(value, label, STORY_CLAUDE_REASONING);
+}
+
+function piModel(
+  value: string,
+  label: string,
+  routeProviderId: string,
+  reasoningOptions: readonly PickerOption<ReasoningLevel>[],
+): ModelPickerOption {
+  return storyModelOption(value, label, reasoningOptions, { routeProviderId });
+}
+
+export const STORY_CODEX_MODELS: readonly ModelPickerOption[] = [
+  codexModel("gpt-5.5", "GPT-5.5"),
+  codexModel("gpt-5.4", "GPT-5.4"),
+  codexModel("gpt-5.4-mini", "GPT-5.4 Mini"),
+  codexModel("gpt-5.3-codex", "GPT-5.3 Codex"),
+  codexModel("gpt-5.3-codex-spark", "GPT-5.3 Codex Spark"),
+  codexModel("gpt-5.2", "GPT-5.2"),
+];
+
+export const STORY_CLAUDE_CODE_MODELS: readonly ModelPickerOption[] = [
+  claudeModel("claude-fable-5", "Claude Fable 5"),
+  claudeModel("claude-opus-4-8[1m]", "Claude Opus 4.8 (1M)"),
+  claudeModel("claude-sonnet-5", "Claude Sonnet 5"),
+];
+
+export const STORY_CLAUDE_CODE_MORE_MODELS: readonly ModelPickerOption[] = [
+  claudeModel("claude-sonnet-4-6[1m]", "Claude Sonnet 4.6 (1M)"),
+  claudeModel("claude-sonnet-4-6", "Claude Sonnet 4.6"),
+  claudeModel("claude-haiku-4-5", "Claude Haiku 4.5"),
+];
+
+export const STORY_PI_MODELS: readonly ModelPickerOption[] = [
+  piModel(
+    "openai-codex/gpt-5.5",
+    "GPT-5.5",
+    "openai-codex",
+    STORY_PI_REASONING,
+  ),
+  piModel(
+    "openai-codex/gpt-5.4",
+    "GPT-5.4",
+    "openai-codex",
+    STORY_PI_REASONING,
+  ),
+  piModel(
+    "openai-codex/gpt-5.4-mini",
+    "GPT-5.4 Mini",
+    "openai-codex",
+    STORY_PI_REASONING,
+  ),
+  piModel(
+    "openai/gpt-5.3-codex",
+    "GPT-5.3 Codex",
+    "openai",
+    STORY_PI_REASONING,
+  ),
+  piModel(
+    "openai/gpt-5.3-codex-spark",
+    "GPT-5.3 Codex Spark",
+    "openai",
+    STORY_PI_REASONING.filter(({ value }) => value !== "none"),
+  ),
+  piModel(
+    "openai-codex/gpt-5.3-codex-spark",
+    "GPT-5.3 Codex Spark",
+    "openai-codex",
+    STORY_PI_REASONING,
+  ),
+  piModel(
+    "anthropic/claude-haiku-4-5",
+    "Claude Haiku 4.5",
+    "anthropic",
+    STORY_PI_REASONING.filter(({ value }) => value !== "xhigh"),
+  ),
+  piModel(
+    "anthropic/claude-opus-4-8",
+    "Claude Opus 4.8",
+    "anthropic",
+    STORY_PI_OPUS_REASONING,
+  ),
+  piModel(
+    "anthropic/claude-opus-4-7",
+    "Claude Opus 4.7",
+    "anthropic",
+    STORY_PI_OPUS_REASONING,
+  ),
+];
+
 export const STORY_SERVICE_TIER_SUPPORT: Record<string, boolean> = {
   codex: true,
   "claude-code": false,
   pi: false,
 };
 
+export const STORY_PROVIDER_INFOS: readonly ProviderInfo[] =
+  STORY_PROVIDER_OPTIONS.map((option) =>
+    makeProviderInfo({
+      id: option.value,
+      displayName: option.label,
+      logoUrl: STORY_PROVIDER_LOGO_URLS[option.value] ?? null,
+      capabilities: {
+        supportsServiceTier: STORY_SERVICE_TIER_SUPPORT[option.value] ?? false,
+      },
+    }),
+  );
+
 export const STORY_PROJECT_SOURCES: readonly ProjectSource[] = [
   {
     id: "src_local",
-    projectId: PROJECT_IDS.bb,
+    projectId: PROJECT_IDS.omnyo,
     type: "local_path",
     hostId: HOST_IDS.local,
-    path: "/Users/michael/Projects/bb",
+    path: "/Users/michael/Projects/omnyo",
     isDefault: true,
     createdAt: 0,
     updatedAt: 0,
   },
   {
     id: "src_remote",
-    projectId: PROJECT_IDS.bb,
+    projectId: PROJECT_IDS.omnyo,
     type: "local_path",
     hostId: HOST_IDS.remote,
-    path: "/home/michael/bb",
+    path: "/home/michael/omnyo",
     isDefault: false,
     createdAt: 0,
     updatedAt: 0,
@@ -297,13 +330,13 @@ export const STORY_BRANCH_OPTIONS: readonly string[] = [
   "release/1.2",
   "feat/sidebar-rail",
   "fix/timeline-pagination",
-  "bb/refactor-project-creation-thr_jj65bdsiwa",
+  "omnyo/refactor-project-creation-thr_jj65bdsiwa",
 ];
 
 export const STORY_WORKTREE_OPTIONS: readonly ReuseThreadOption[] = [
   {
     environmentId: "env_review_flow",
-    branchName: "bb/review-flow-thr_4hge9xn14m",
+    branchName: "omnyo/review-flow-thr_4hge9xn14m",
     name: null,
     path: null,
     environmentProviderId: "git-worktree",
@@ -314,7 +347,7 @@ export const STORY_WORKTREE_OPTIONS: readonly ReuseThreadOption[] = [
   },
   {
     environmentId: "env_timeline",
-    branchName: "bb/timeline-pagination-thr_qfk8ksbxkk",
+    branchName: "omnyo/timeline-pagination-thr_qfk8ksbxkk",
     name: "Timeline workspace",
     path: null,
     environmentProviderId: "git-worktree",
@@ -384,7 +417,7 @@ export const STORY_ENVIRONMENT_PROVIDERS: readonly SystemEnvironmentProvider[] =
   ];
 
 export const STORY_PROJECTS: readonly ProjectSelectorOption[] = [
-  { id: PROJECT_IDS.bb, name: PROJECT_NAMES.bb },
+  { id: PROJECT_IDS.omnyo, name: PROJECT_NAMES.omnyo },
   { id: PROJECT_IDS.pierre, name: PROJECT_NAMES.pierre },
 ];
 
@@ -392,6 +425,11 @@ export function makeExecutionControlsProps(
   overrides: Partial<ExecutionControlsProps> = {},
 ): ExecutionControlsProps {
   const base: ExecutionControlsProps = {
+    catalog: {
+      providers: STORY_PROVIDER_INFOS,
+      verified: true,
+      modelOptions: STORY_CODEX_MODELS,
+    },
     provider: {
       options: STORY_PROVIDER_OPTIONS,
       selectedId: "codex",
@@ -411,7 +449,6 @@ export function makeExecutionControlsProps(
       value: undefined,
       onChange: noop,
       supported: true,
-      supportByProvider: STORY_SERVICE_TIER_SUPPORT,
       options: [{ id: "fast", label: "Fast" }],
     },
     reasoning: {
@@ -419,7 +456,9 @@ export function makeExecutionControlsProps(
       options: STORY_CODEX_REASONING,
       onChange: noop,
     },
+    selection: { onChange: noop },
   };
+
   return { ...base, ...overrides };
 }
 
@@ -429,9 +468,11 @@ export function useInteractiveExecutionControls(
   const [providerId, setProviderId] = useState(
     base.provider.selectedId ?? "codex",
   );
+
   const [model, setModel] = useState(base.model.selected);
   const [reasoning, setReasoning] = useState(base.reasoning.value);
   const [serviceTier, setServiceTier] = useState(base.serviceTier?.value);
+
   const catalogForProvider = (id: string, selectedModel = model) => {
     if (id === base.provider.selectedId) {
       return {
@@ -440,6 +481,7 @@ export function useInteractiveExecutionControls(
         reasoning: base.reasoning.options,
       };
     }
+
     return {
       models:
         id === "claude-code"
@@ -457,9 +499,12 @@ export function useInteractiveExecutionControls(
             : STORY_CODEX_REASONING,
     };
   };
+
   const catalog = catalogForProvider(providerId);
+
   return {
     ...base,
+    catalog: { ...base.catalog, modelOptions: catalog.models },
     provider: {
       ...base.provider,
       selectedId: providerId,
@@ -467,6 +512,7 @@ export function useInteractiveExecutionControls(
         const next = catalogForProvider(id, "");
         setProviderId(id);
         setModel(next.models[0]?.value ?? "");
+
         if (next.reasoning.length > 0) {
           setReasoning((current) =>
             reconcileReasoningLevel(
@@ -475,6 +521,7 @@ export function useInteractiveExecutionControls(
             ),
           );
         }
+
         setServiceTier(undefined);
       },
     },
@@ -487,6 +534,7 @@ export function useInteractiveExecutionControls(
       onChange: (value) => {
         setModel(value);
         const next = catalogForProvider(providerId, value);
+
         if (next.reasoning.length > 0) {
           setReasoning((current) =>
             reconcileReasoningLevel(
@@ -501,6 +549,15 @@ export function useInteractiveExecutionControls(
       value: reasoning,
       options: catalog.reasoning,
       onChange: setReasoning,
+    },
+    selection: {
+      onChange: (next) => {
+        setProviderId(next.providerId);
+        setModel(next.model);
+        setReasoning(next.reasoningLevel);
+
+        if (next.serviceTier !== undefined) setServiceTier(next.serviceTier);
+      },
     },
     ...(base.serviceTier
       ? {
@@ -518,7 +575,7 @@ export function useInteractiveExecutionControls(
 export function makeThread(overrides: Partial<Thread> = {}): Thread {
   return makeThreadFixture({
     id: "thr_demo",
-    projectId: PROJECT_IDS.bb,
+    projectId: PROJECT_IDS.omnyo,
     environmentId: "env_demo",
     title: "Audit recurring permission failures",
     titleFallback: "Audit recurring permission failures",
@@ -531,7 +588,7 @@ export function makeThreadListEntry(
 ) {
   return makeThreadListEntryFixture({
     id: "thr_demo",
-    projectId: PROJECT_IDS.bb,
+    projectId: PROJECT_IDS.omnyo,
     title: "Audit recurring permission failures",
     titleFallback: "Audit recurring permission failures",
     ...overrides,
@@ -542,8 +599,8 @@ export function makeProject(
   overrides: Partial<ProjectResponse> = {},
 ): ProjectResponse {
   return makeProjectResponse({
-    id: PROJECT_IDS.bb,
-    name: PROJECT_NAMES.bb,
+    id: PROJECT_IDS.omnyo,
+    name: PROJECT_NAMES.omnyo,
     createdAt: 1,
     updatedAt: 2,
     ...overrides,
@@ -570,6 +627,7 @@ export function makeProviderCliStatus(
       : provider === "claude-code"
         ? { displayName: "Claude Code", executableName: "claude" }
         : { displayName: "Cursor", executableName: "agent" };
+
   return {
     displayName: identity.displayName,
     executableName: identity.executableName,
@@ -593,9 +651,9 @@ export function makeEnvironment(
 ) {
   return makeEnvironmentFixture({
     id: "env_demo",
-    projectId: PROJECT_IDS.bb,
+    projectId: PROJECT_IDS.omnyo,
     hostId: HOST_IDS.local,
-    path: "/Users/michael/Projects/bb",
+    path: "/Users/michael/Projects/omnyo",
     branchName: BRANCH_NAMES.feature,
     baseBranch: BRANCH_NAMES.default,
     defaultBranch: BRANCH_NAMES.default,
@@ -614,6 +672,7 @@ export function makeWorkspaceStatus(
       insertions: 0,
       deletions: 0,
       lineStatsComplete: true,
+      fileCount: 0,
       files: [],
     },
     branch: {
@@ -630,13 +689,16 @@ export function makeWorkspaceStatus(
       baseRef: null,
       aheadCount: 0,
       behindCount: 0,
+      squashMergeCheckComplete: true,
       hasCommittedUnmergedChanges: false,
       commits: [],
       insertions: 0,
       deletions: 0,
       lineStatsComplete: true,
+      fileCount: 0,
       files: [],
     },
   };
+
   return { ...base, ...overrides };
 }

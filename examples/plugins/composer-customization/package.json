@@ -1,13 +1,13 @@
 {
-  "name": "bb-plugin-composer-customization",
+  "name": "omnyo-plugin-composer-customization",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "engines": {
-    "bb": ">=0.0",
-    "bbPluginSdk": ">=0.6.0"
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.6.0 >=0.6.44"
   },
-  "bb": {
+  "omnyo": {
     "name": "Composer customization",
     "description": "Reference implementation for every composer customization region.",
     "branding": {
@@ -17,13 +17,13 @@
     "app": "./app.tsx"
   },
   "keywords": [
-    "bb-plugin"
+    "omnyo-plugin"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@get-bb/plugin-sdk": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
     "@types/react": "^19.0.0",
     "react": "^19.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2"

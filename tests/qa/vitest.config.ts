@@ -1,9 +1,15 @@
-import { defineWorkspaceTestConfig } from "../../vitest.shared.js";
+import {
+  defineWorkspaceTestConfig,
+  sharedWorkerProjects,
+} from "../../vitest.shared.js";
 
 export default defineWorkspaceTestConfig({
   test: {
-    include: ["test/**/*.test.ts"],
-    name: "@bb/qa",
     testTimeout: 15_000,
+    projects: sharedWorkerProjects({
+      pkgDir: __dirname,
+      name: "@omnyo/qa",
+      include: ["test/**/*.test.ts"],
+    }),
   },
 });

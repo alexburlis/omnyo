@@ -8,29 +8,34 @@ import {
   screen,
 } from "@testing-library/react";
 import { useState } from "react";
+import { PluginResponsiveDrawerShell } from "@/components/plugin/PluginResponsiveDrawerShell";
+import { PluginContext } from "@/components/plugin/plugin-context";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { POINTER_COARSE_QUERY } from "@bb/shared-ui/hooks/use-pointer-coarse";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { POINTER_COARSE_QUERY } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Popover, PopoverContent } from "@bb/shared-ui/popover";
-import { DropdownMenu, DropdownMenuContent } from "@bb/shared-ui/dropdown-menu";
+} from "@omnyo/shared-ui/dialog";
+import { Popover, PopoverContent } from "@omnyo/shared-ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+} from "@omnyo/shared-ui/dropdown-menu";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@bb/shared-ui/select";
+} from "@omnyo/shared-ui/select";
 import {
   measureDrawerKeyboardOverlap,
   PersistentResponsiveDrawerShell,
   ResponsiveDrawerShell,
-} from "@bb/shared-ui/responsive-overlay";
+} from "@omnyo/shared-ui/responsive-overlay";
 
 afterEach(() => {
   cleanup();
@@ -52,6 +57,42 @@ function mockPointerCoarse(matches: boolean) {
 }
 
 describe("ResponsiveDrawerShell", () => {
+  it("slides the first open in from off-screen once content is realized", () => {
+    mockPointerCoarse(true);
+    const frames: FrameRequestCallback[] = [];
+
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+
+      return frames.length;
+    });
+
+    render(
+      <ResponsiveDrawerShell open onOpenChange={() => {}} srLabel="Models">
+        <button type="button">Choose model</button>
+      </ResponsiveDrawerShell>,
+    );
+
+    const content = document.querySelector<HTMLElement>(
+      "[data-persistent-drawer-content]",
+    );
+
+    const backdrop = document.querySelector<HTMLElement>(
+      "[data-persistent-drawer-backdrop]",
+    );
+
+    expect(content?.getAttribute("data-state")).toBe("open");
+    expect(content?.style.transform).toBe("translate3d(0, 100%, 0)");
+    expect(backdrop?.style.opacity).toBe("0");
+
+    act(() => frames.shift()?.(0));
+    act(() => frames.shift()?.(16));
+
+    expect(screen.getByRole("button", { name: "Choose model" })).toBeTruthy();
+    expect(content?.style.transform).toBe("translate3d(0, 0, 0)");
+    expect(backdrop?.style.opacity).toBe("1");
+  });
+
   it("does not create portal nodes before its first open", () => {
     mockPointerCoarse(true);
     render(
@@ -73,6 +114,7 @@ describe("ResponsiveDrawerShell", () => {
     const frames: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       frames.push(callback);
+
       return frames.length;
     });
     const appTree = document.createElement("main");
@@ -92,7 +134,14 @@ describe("ResponsiveDrawerShell", () => {
       const content = document.querySelector<HTMLElement>(
         "[data-persistent-drawer-content]",
       );
+
+      const backdrop = document.querySelector<HTMLElement>(
+        "[data-persistent-drawer-backdrop]",
+      );
+
       expect(content?.getAttribute("data-state")).toBe("open");
+      expect(content?.style.transform).toBe("translate3d(0, 100%, 0)");
+      expect(backdrop?.style.opacity).toBe("0");
       expect(
         document.querySelector("[data-responsive-drawer-placeholder]"),
       ).not.toBeNull();
@@ -104,6 +153,8 @@ describe("ResponsiveDrawerShell", () => {
       expect(screen.queryByRole("button", { name: "Choose model" })).toBeNull();
       act(() => frames.shift()?.(16));
       expect(screen.getByRole("button", { name: "Choose model" })).toBeTruthy();
+      expect(content?.style.transform).toBe("translate3d(0, 0, 0)");
+      expect(backdrop?.style.opacity).toBe("1");
     } finally {
       appTree.remove();
     }
@@ -112,10 +163,12 @@ describe("ResponsiveDrawerShell", () => {
   it("retains realized content across close and reopen", () => {
     mockPointerCoarse(true);
     const frames: FrameRequestCallback[] = [];
+
     const requestAnimationFrame = vi
       .spyOn(window, "requestAnimationFrame")
       .mockImplementation((callback) => {
         frames.push(callback);
+
         return frames.length;
       });
 
@@ -124,6 +177,7 @@ describe("ResponsiveDrawerShell", () => {
         <input aria-label="Search models" />
       </ResponsiveDrawerShell>,
     );
+
     act(() => frames.shift()?.(0));
     act(() => frames.shift()?.(16));
     const input = screen.getByRole("textbox", { name: "Search models" });
@@ -159,6 +213,78 @@ describe("ResponsiveDrawerShell", () => {
   });
 });
 
+describe("plugin responsive drawer", () => {
+  it("scopes the portaled backdrop and panel to the rendering plugin", () => {
+    vi.useFakeTimers();
+    mockPointerCoarse(true);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+
+    render(
+      <PluginContext.Provider value="scope-example">
+        <PluginResponsiveDrawerShell
+          open
+          onOpenChange={() => {}}
+          srLabel="Plugin settings"
+        >
+          <button type="button">Save settings</button>
+        </PluginResponsiveDrawerShell>
+      </PluginContext.Provider>,
+    );
+
+    act(() => vi.advanceTimersByTime(120));
+
+    const panel = screen.getByRole("dialog", { name: "Plugin settings" });
+
+    const backdrop = document.querySelector(
+      "[data-persistent-drawer-backdrop]",
+    );
+
+    expect(panel.parentElement).toBe(document.body);
+    expect(panel.getAttribute("data-omnyo-plugin")).toBe("scope-example");
+    expect(panel.hasAttribute("data-omnyo-plugin-root")).toBe(true);
+
+    expect(backdrop?.getAttribute("data-omnyo-plugin")).toBe("scope-example");
+    expect(backdrop?.hasAttribute("data-omnyo-plugin-root")).toBe(true);
+  });
+
+  it("closes immediately when requested without disabling open motion", () => {
+    vi.useFakeTimers();
+    mockPointerCoarse(true);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+
+    const drawer = (open: boolean) => (
+      <ResponsiveDrawerShell
+        open={open}
+        animateClose={false}
+        motionDurationMs={220}
+        onOpenChange={() => {}}
+        srLabel="Archive review"
+      >
+        <button type="button">Archive all</button>
+      </ResponsiveDrawerShell>
+    );
+
+    const view = render(drawer(true));
+    act(() => vi.advanceTimersByTime(120));
+
+    const panel = screen.getByRole("dialog", { name: "Archive review" });
+
+    const backdrop = document.querySelector<HTMLElement>(
+      "[data-persistent-drawer-backdrop]",
+    );
+
+    expect(panel.style.transition).toContain("transform 220ms");
+
+    view.rerender(drawer(false));
+
+    expect(panel.style.transition).toBe("none");
+    expect(panel.style.transform).toBe("translate3d(0, 100%, 0)");
+    expect(panel.hasAttribute("inert")).toBe(true);
+    expect(backdrop?.style.transition).toBe("none");
+    expect(backdrop?.style.opacity).toBe("0");
+  });
+});
+
 describe("responsive Popover", () => {
   it.each([
     ["compact viewports", true, false, false],
@@ -168,6 +294,7 @@ describe("responsive Popover", () => {
     vi.useFakeTimers();
     mockPointerCoarse(coarse);
     const focusRef = { current: null as HTMLInputElement | null };
+
     const content = (ref?: typeof focusRef) => (
       <CompactViewportOverrideProvider isCompactViewport={compact}>
         <Popover defaultOpen>
@@ -190,6 +317,7 @@ describe("responsive Popover", () => {
   it("cancels caller widths on the compact sheet and keeps them on desktop", () => {
     vi.useFakeTimers();
     mockPointerCoarse(true);
+
     const renderAt = (compact: boolean) =>
       render(
         <CompactViewportOverrideProvider isCompactViewport={compact}>
@@ -322,14 +450,17 @@ describe("compact overlay dismissal callbacks", () => {
       mockPointerCoarse(true);
       const onOpenChange = vi.fn();
       let vetoed = true;
+
       const guard = vi.fn((event: Event) => {
         if (vetoed) event.preventDefault();
       });
+
       render(
         <CompactViewportOverrideProvider isCompactViewport>
           {renderOverlay({ onOpenChange, guard })}
         </CompactViewportOverrideProvider>,
       );
+
       const backdrop = document.querySelector<HTMLElement>(
         '[data-persistent-drawer-backdrop][data-state="open"]',
       ) as HTMLElement;
@@ -341,6 +472,7 @@ describe("compact overlay dismissal callbacks", () => {
       const [escape, ...outside] = guard.mock.calls.map(([event]) => event);
       expect(escape).toBeInstanceOf(KeyboardEvent);
       expect(outside.length).toBeGreaterThan(0);
+
       for (const event of outside) {
         expect(event).toBeInstanceOf(CustomEvent);
         expect(
@@ -364,6 +496,7 @@ describe("responsive Dialog", () => {
     vi.useFakeTimers();
     mockPointerCoarse(true);
     vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+
     const renderAt = (target: string | null) => (
       <CompactViewportOverrideProvider isCompactViewport>
         <Dialog open={target !== null}>
@@ -394,6 +527,7 @@ describe("responsive Dialog", () => {
     const frames: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       frames.push(callback);
+
       return frames.length;
     });
 
@@ -422,6 +556,7 @@ describe("responsive Dialog", () => {
     const frames: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       frames.push(callback);
+
       return frames.length;
     });
 
@@ -455,6 +590,7 @@ describe("PersistentResponsiveDrawerShell", () => {
   it("opens without applying modal state to the app tree", () => {
     mockPointerCoarse(true);
     const onContentAnimationEnd = vi.fn();
+
     const view = render(
       <>
         <main data-testid="large-app-tree" />
@@ -470,16 +606,20 @@ describe("PersistentResponsiveDrawerShell", () => {
     );
 
     const appTree = screen.getByTestId("large-app-tree");
+
     const content = document.querySelector<HTMLElement>(
       "[data-persistent-drawer-content]",
     );
+
     expect(content).not.toBeNull();
     expect(content?.getAttribute("aria-hidden")).toBe("true");
     expect(appTree.getAttribute("aria-hidden")).toBeNull();
     expect(appTree.hasAttribute("inert")).toBe(false);
+
     const backdrop = document.querySelector<HTMLElement>(
       "[data-persistent-drawer-backdrop]",
     );
+
     expect(backdrop?.className).not.toContain("backdrop-blur");
 
     view.rerender(
@@ -543,7 +683,7 @@ describe("PersistentResponsiveDrawerShell", () => {
     );
 
     const nestedAction = document.createElement("button");
-    nestedAction.setAttribute("data-bb-portaled-overlay", "");
+    nestedAction.setAttribute("data-omnyo-portaled-overlay", "");
     nestedAction.addEventListener("keydown", (event) => {
       event.preventDefault();
     });
@@ -570,7 +710,7 @@ describe("PersistentResponsiveDrawerShell", () => {
     );
 
     const nestedAction = document.createElement("button");
-    nestedAction.setAttribute("data-bb-portaled-overlay", "");
+    nestedAction.setAttribute("data-omnyo-portaled-overlay", "");
     document.body.appendChild(nestedAction);
     nestedAction.focus();
 
@@ -590,6 +730,7 @@ describe("PersistentResponsiveDrawerShell", () => {
     function NestedDrawers() {
       const [parentOpen, setParentOpen] = useState(true);
       const [childOpen, setChildOpen] = useState(false);
+
       return (
         <>
           <output data-testid="parent-state">{String(parentOpen)}</output>
@@ -628,13 +769,14 @@ describe("PersistentResponsiveDrawerShell", () => {
   it("closes the top drawer first when it comes from a separately bundled copy", async () => {
     mockPointerCoarse(true);
     vi.resetModules();
-    const pluginCopy = await import("@bb/shared-ui/responsive-overlay");
+    const pluginCopy = await import("@omnyo/shared-ui/responsive-overlay");
     const PluginDrawerShell = pluginCopy.PersistentResponsiveDrawerShell;
     expect(PluginDrawerShell).not.toBe(PersistentResponsiveDrawerShell);
 
     function HostShelfWithPluginDialog() {
       const [shelfOpen, setShelfOpen] = useState(true);
       const [dialogOpen, setDialogOpen] = useState(false);
+
       return (
         <>
           <output data-testid="shelf-state">{String(shelfOpen)}</output>
@@ -685,6 +827,7 @@ describe("PersistentResponsiveDrawerShell", () => {
 
     function FocusDrawer() {
       const [open, setOpen] = useState(false);
+
       return (
         <>
           <button type="button" onClick={() => setOpen(true)}>
@@ -733,12 +876,14 @@ describe("PersistentResponsiveDrawerShell", () => {
     let frameCallback: FrameRequestCallback | undefined;
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       frameCallback = callback;
+
       return 1;
     });
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
 
     function FocusDrawer() {
       const [open, setOpen] = useState(false);
+
       return (
         <>
           <button type="button" onClick={() => setOpen(true)}>
@@ -764,6 +909,7 @@ describe("PersistentResponsiveDrawerShell", () => {
     let restoreAttempts = 0;
     vi.spyOn(trigger, "focus").mockImplementation((options) => {
       restoreAttempts += 1;
+
       if (restoreAttempts > 1) nativeFocus(options);
     });
 
@@ -777,14 +923,18 @@ describe("PersistentResponsiveDrawerShell", () => {
 
   it("keeps panel focus and uses the latest close callback after a parent rerender", () => {
     mockPointerCoarse(false);
+
     const requestAnimationFrame = vi
       .spyOn(window, "requestAnimationFrame")
       .mockImplementation((callback) => {
         callback(performance.now());
+
         return 1;
       });
+
     const firstOnOpenChange = vi.fn();
     const nextOnOpenChange = vi.fn();
+
     const view = render(
       <PersistentResponsiveDrawerShell
         open={true}
@@ -794,6 +944,7 @@ describe("PersistentResponsiveDrawerShell", () => {
         <input aria-label="Panel input" />
       </PersistentResponsiveDrawerShell>,
     );
+
     const input = screen.getByRole("textbox", { name: "Panel input" });
     input.focus();
 
@@ -835,9 +986,11 @@ describe("PersistentResponsiveDrawerShell", () => {
     const content = document.querySelector<HTMLElement>(
       "[data-persistent-drawer-content]",
     ) as HTMLElement;
+
     const handle = document.querySelector<HTMLElement>(
       "[data-persistent-drawer-handle]",
     ) as HTMLElement;
+
     const readHeight = vi.fn(() => 400);
     Object.defineProperty(content, "clientHeight", {
       configurable: true,
@@ -856,6 +1009,64 @@ describe("PersistentResponsiveDrawerShell", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(readHeight).toHaveBeenCalledTimes(1);
   });
+
+  it.each([true, false])(
+    "settles a released drag over the distance it has left with animateClose=%s",
+    (animateClose) => {
+      mockPointerCoarse(true);
+      let nowMs = 1_000;
+      vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+      const onOpenChange = vi.fn();
+
+      const drawer = (open: boolean) => (
+        <PersistentResponsiveDrawerShell
+          open={open}
+          animateClose={animateClose}
+          onOpenChange={onOpenChange}
+          srLabel="Details"
+        >
+          <button type="button">Panel action</button>
+        </PersistentResponsiveDrawerShell>
+      );
+
+      const view = render(drawer(true));
+
+      const content = document.querySelector<HTMLElement>(
+        "[data-persistent-drawer-content]",
+      ) as HTMLElement;
+
+      const handle = document.querySelector<HTMLElement>(
+        "[data-persistent-drawer-handle]",
+      ) as HTMLElement;
+
+      Object.defineProperty(content, "clientHeight", {
+        configurable: true,
+        get: () => 400,
+      });
+      handle.setPointerCapture = vi.fn();
+
+      fireEvent.pointerDown(handle, { button: 0, clientY: 200, pointerId: 1 });
+      nowMs += 500;
+      fireEvent.pointerMove(handle, { clientY: 280, pointerId: 1 });
+      fireEvent.pointerUp(handle, { clientY: 280, pointerId: 1 });
+
+      expect(onOpenChange).not.toHaveBeenCalled();
+      expect(content.style.transition).toBe(
+        "transform 150ms var(--motion-ease-sheet)",
+      );
+
+      fireEvent.pointerDown(handle, { button: 0, clientY: 200, pointerId: 2 });
+      nowMs += 500;
+      fireEvent.pointerMove(handle, { clientY: 300, pointerId: 2 });
+      fireEvent.pointerUp(handle, { clientY: 300, pointerId: 2 });
+
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+      view.rerender(drawer(false));
+      expect(content.style.transition).toBe(
+        "transform 300ms var(--motion-ease-sheet)",
+      );
+    },
+  );
 });
 
 describe("measureDrawerKeyboardOverlap", () => {
@@ -891,6 +1102,7 @@ describe("measureDrawerKeyboardOverlap", () => {
 describe("drawer software keyboard inset", () => {
   function mockVisualViewport(height: number) {
     const listeners = new Map<string, Set<() => void>>();
+
     const visualViewport = {
       height,
       offsetTop: 0,
@@ -904,11 +1116,13 @@ describe("drawer software keyboard inset", () => {
         listeners.get(type)?.delete(listener);
       },
     };
+
     const original = Object.getOwnPropertyDescriptor(window, "visualViewport");
     Object.defineProperty(window, "visualViewport", {
       configurable: true,
       value: visualViewport,
     });
+
     return {
       visualViewport,
       emit: (type: string) => {
@@ -917,8 +1131,10 @@ describe("drawer software keyboard inset", () => {
       restore: () => {
         if (original === undefined) {
           Reflect.deleteProperty(window, "visualViewport");
+
           return;
         }
+
         Object.defineProperty(window, "visualViewport", original);
       },
     };
@@ -934,6 +1150,7 @@ describe("drawer software keyboard inset", () => {
     const frames: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       frames.push(callback);
+
       return frames.length;
     });
 
@@ -947,30 +1164,34 @@ describe("drawer software keyboard inset", () => {
           <button type="button">Panel action</button>
         </PersistentResponsiveDrawerShell>,
       );
+
       const panel = document.querySelector<HTMLElement>(
         "[data-persistent-drawer-content]",
       ) as HTMLElement;
+
       expect(panel.style.bottom).toBe("");
 
       act(() => {
         viewport.visualViewport.height = 508;
         viewport.emit("resize");
+
         for (const frame of frames.splice(0)) frame(0);
       });
       expect(panel.style.bottom).toBe("336px");
-      expect(panel.style.getPropertyValue("--bb-drawer-keyboard-inset")).toBe(
-        "336px",
-      );
+      expect(
+        panel.style.getPropertyValue("--omnyo-drawer-keyboard-inset"),
+      ).toBe("336px");
 
       act(() => {
         viewport.visualViewport.height = 844;
         viewport.emit("resize");
+
         for (const frame of frames.splice(0)) frame(0);
       });
       expect(panel.style.bottom).toBe("");
-      expect(panel.style.getPropertyValue("--bb-drawer-keyboard-inset")).toBe(
-        "",
-      );
+      expect(
+        panel.style.getPropertyValue("--omnyo-drawer-keyboard-inset"),
+      ).toBe("");
     } finally {
       viewport.restore();
     }
@@ -986,6 +1207,7 @@ describe("drawer software keyboard inset", () => {
     const frames: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       frames.push(callback);
+
       return frames.length;
     });
 
@@ -999,6 +1221,7 @@ describe("drawer software keyboard inset", () => {
           <img src="/preview.png" alt="Preview" />
         </PersistentResponsiveDrawerShell>,
       );
+
       const panel = document.querySelector<HTMLElement>(
         "[data-persistent-drawer-content]",
       ) as HTMLElement;
@@ -1009,13 +1232,14 @@ describe("drawer software keyboard inset", () => {
         viewport.visualViewport.scale = 2;
         viewport.emit("resize");
         viewport.emit("scroll");
+
         for (const frame of frames.splice(0)) frame(0);
       });
 
       expect(panel.style.bottom).toBe("");
-      expect(panel.style.getPropertyValue("--bb-drawer-keyboard-inset")).toBe(
-        "",
-      );
+      expect(
+        panel.style.getPropertyValue("--omnyo-drawer-keyboard-inset"),
+      ).toBe("");
     } finally {
       viewport.restore();
     }

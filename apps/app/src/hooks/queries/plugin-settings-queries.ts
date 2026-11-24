@@ -4,8 +4,8 @@ import type {
   PluginSafeModeUpdateResponse,
   PluginSettingDescriptor,
   PluginSettingsResponse,
-} from "@bb/server-contract";
-import { pluginSettingsUpdateRequestSchema } from "@bb/server-contract";
+} from "@omnyo/server-contract";
+import { pluginSettingsUpdateRequestSchema } from "@omnyo/server-contract";
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { createPluginsClient } from "./plugin-client";
 import {
@@ -43,6 +43,7 @@ export interface PluginListItem {
   statusDetail: string | null;
   description: string | null;
   name: string | null;
+  shortName: string | null;
   icon: string | null;
   compactIconUrl: string | null;
   logoUrl: string | null;
@@ -55,6 +56,7 @@ export interface PluginListItem {
   capabilities: InstalledPlugin["capabilities"];
   app: InstalledPlugin["app"];
   provenance: PluginProvenance;
+  removable: boolean;
   source: string;
   isOrphanedBuiltin: boolean;
   catalogEntryId: string | null;
@@ -62,6 +64,9 @@ export interface PluginListItem {
   categoryId?: InstalledPlugin["categoryId"];
   category?: string;
   publisherLabel: string | null;
+  official: boolean;
+  author?: InstalledPlugin["author"];
+  repositoryUrl: string | null;
   sourceDisplay: string;
   updateState: PluginUpdateState;
 }
@@ -74,10 +79,13 @@ export function toEpochMs(
   value: number | string | null | undefined,
 ): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
+
   if (typeof value === "string") {
     const parsed = Date.parse(value);
+
     return Number.isNaN(parsed) ? null : parsed;
   }
+
   return null;
 }
 
@@ -93,6 +101,7 @@ export const EMPTY_PLUGIN_UPDATE_STATE: PluginUpdateState = {
 
 export function toPluginListItem(plugin: InstalledPlugin): PluginListItem {
   const state = plugin.updateState;
+
   return {
     id: plugin.id,
     rootDir: plugin.rootDir,
@@ -102,6 +111,7 @@ export function toPluginListItem(plugin: InstalledPlugin): PluginListItem {
     statusDetail: plugin.statusDetail,
     description: plugin.description,
     name: plugin.name,
+    shortName: plugin.shortName,
     icon: plugin.icon,
     compactIconUrl: plugin.iconUrl,
     logoUrl: plugin.logoUrl,
@@ -114,6 +124,7 @@ export function toPluginListItem(plugin: InstalledPlugin): PluginListItem {
     capabilities: plugin.capabilities,
     app: plugin.app,
     provenance: plugin.provenance,
+    removable: plugin.removable,
     source: plugin.source,
     isOrphanedBuiltin: plugin.isOrphanedBuiltin,
     catalogEntryId: plugin.catalogEntryId ?? null,
@@ -121,6 +132,9 @@ export function toPluginListItem(plugin: InstalledPlugin): PluginListItem {
     categoryId: plugin.categoryId,
     category: plugin.category,
     publisherLabel: plugin.publisherLabel,
+    official: plugin.official,
+    author: plugin.author ?? null,
+    repositoryUrl: plugin.repositoryUrl,
     sourceDisplay: plugin.sourceDisplay,
     updateState: {
       outcome: state.outcome ?? null,
@@ -163,6 +177,7 @@ async function fetchPluginSettingsView(
     const result = await createPluginsClient(fetchImpl).getSettings({
       pluginId,
     });
+
     return { schema: result.schema, values: result.values };
   } catch {
     return null;
@@ -175,10 +190,12 @@ export async function updatePluginSettings(
   values: Record<string, unknown>,
 ): Promise<PluginSettingsView> {
   const request = pluginSettingsUpdateRequestSchema.parse({ values });
+
   const result = await createPluginsClient(fetchImpl).updateSettings({
     pluginId,
     values: request.values,
   });
+
   return { schema: result.schema, values: result.values };
 }
 
@@ -188,6 +205,7 @@ export async function setPluginEnabled(
   enabled: boolean,
 ): Promise<void> {
   const plugins = createPluginsClient(fetchImpl);
+
   if (enabled) await plugins.enable({ pluginId });
   else await plugins.disable({ pluginId });
 }

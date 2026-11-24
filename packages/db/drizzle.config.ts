@@ -1,20 +1,22 @@
 import { defineConfig } from "drizzle-kit";
 import {
-  type BbRuntimeMode,
+  type AppRuntimeMode,
   resolveCurrentDevInstanceConfig,
   resolveDataDirDatabasePath,
   resolveRuntimeDataDir,
   resolveRuntimeMode,
-} from "@bb/config/runtime";
+} from "@omnyo/config/runtime";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = dirname(fileURLToPath(import.meta.url));
+
 const repoRoot = resolve(packageRoot, "..", "..");
+
 const runtimeMode = resolveRuntimeMode();
 
-export function resolveDrizzleDataDir(mode: BbRuntimeMode): string {
+export function resolveDrizzleDataDir(mode: AppRuntimeMode): string {
   if (mode === "dev") {
     return resolveCurrentDevInstanceConfig(repoRoot).dataDir;
   }
@@ -27,6 +29,7 @@ export function resolveDrizzleDataDir(mode: BbRuntimeMode): string {
 }
 
 const dataDir = resolveDrizzleDataDir(runtimeMode);
+
 const dbPath = resolve(resolveDataDirDatabasePath({ dataDir }));
 
 export default defineConfig({

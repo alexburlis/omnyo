@@ -10,7 +10,8 @@ import {
 import { acpProviderDeclaration } from "./declaration.js";
 import { KNOWN_ACP_AGENTS, RESERVED_ACP_PROVIDER_IDS } from "./known-agents.js";
 import { REGISTRY_ICON_AGENT_IDS } from "./registry-icons.js";
-import { experimental_acpLaunchSpecSchema } from "@get-bb/plugin-sdk/provider-bridge/acp-next";
+import { PLUGIN_ID } from "./plugin-id.js";
+import { experimental_acpLaunchSpecSchema } from "@omnyo/plugin-sdk/provider-bridge/acp-next";
 
 const reserved = RESERVED_ACP_PROVIDER_IDS;
 
@@ -100,6 +101,7 @@ describe("parseCustomAcpAgents", () => {
 
     expect(parsed.problems).toEqual([]);
     const [agent] = parsed.agents;
+
     if (agent === undefined) throw new Error("expected the agent to parse");
     const launch = customAcpAgentDefinition(agent).launch;
     expect(experimental_acpLaunchSpecSchema.safeParse(launch).success).toBe(
@@ -145,19 +147,21 @@ describe("custom agent icons", () => {
       entries: [{ id, displayName: id, command: id }],
       reservedProviderIds: reserved,
     }).agents;
+
     if (agent === undefined) throw new Error(`agent ${id} did not parse`);
+
     return customAcpAgentDefinition(agent).icon;
   };
 
   it("gives an agent from the ACP registry its registry icon and any other agent the toolbox", () => {
-    expect(iconFor("pi-acp")).toBe("bb--provider-acp-next/registry-pi-acp");
+    expect(iconFor("pi-acp")).toBe(`${PLUGIN_ID}/registry-pi-acp`);
     expect(iconFor("my-own-agent")).toBe("Toolbox");
   });
 
   it("ships and declares an icon file for every registry agent it names", () => {
     const manifest = z
       .object({
-        bb: z.object({
+        omnyo: z.object({
           branding: z.object({
             experimental_icons: z.record(z.string(), z.string()),
           }),
@@ -168,7 +172,9 @@ describe("custom agent icons", () => {
           readFileSync(new URL("../package.json", import.meta.url), "utf8"),
         ),
       );
-    const declared = manifest.bb.branding.experimental_icons;
+
+    const declared = manifest.omnyo.branding.experimental_icons;
+
     for (const agentId of REGISTRY_ICON_AGENT_IDS) {
       const path = declared[`registry-${agentId}`];
       expect(path).toBe(`./icons/registry-${agentId}.svg`);
@@ -178,6 +184,7 @@ describe("custom agent icons", () => {
         ),
       ).toBe(true);
     }
+
     expect(
       Object.keys(declared).filter((name) => name.startsWith("registry-")),
     ).toHaveLength(REGISTRY_ICON_AGENT_IDS.length);
@@ -201,6 +208,7 @@ describe("customAcpAgentDefinition", () => {
       ],
       reservedProviderIds: reserved,
     }).agents;
+
     if (agent === undefined) throw new Error("expected the agent to parse");
     const definition = customAcpAgentDefinition(agent);
 
@@ -223,7 +231,9 @@ describe("custom agents that report usage", () => {
       entries: [entry],
       reservedProviderIds: reserved,
     }).agents;
+
     if (agent === undefined) throw new Error("expected the agent to parse");
+
     return agent;
   };
 
@@ -346,6 +356,7 @@ describe("acpProviderDeclaration", () => {
     const grok = acpProviderDeclaration(
       KNOWN_ACP_AGENTS.find((agent) => agent.id === "acp-grok")!,
     );
+
     expect(grok.capabilities.reasoningLevels).toEqual([
       "low",
       "medium",
@@ -358,6 +369,7 @@ describe("acpProviderDeclaration", () => {
     const cursor = acpProviderDeclaration(
       KNOWN_ACP_AGENTS.find((agent) => agent.id === "acp-cursor")!,
     );
+
     expect(cursor.capabilities.reasoningLevels).toEqual([
       "low",
       "medium",

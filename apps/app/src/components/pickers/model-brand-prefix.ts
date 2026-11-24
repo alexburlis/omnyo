@@ -13,6 +13,7 @@ export function stripModelBrandPrefix(
   if (brandPrefix === undefined || brandPrefix.length === 0) {
     return label;
   }
+
   return label.toLowerCase().startsWith(brandPrefix.toLowerCase())
     ? label.slice(brandPrefix.length).trimStart()
     : label;

@@ -4,8 +4,8 @@ import type {
   HostDaemonRpcCommand,
   TurnSubmitTrace,
   TurnSubmitTraceSpanName,
-} from "@bb/host-daemon-contract";
-import { roundDurationMs } from "@bb/process-utils";
+} from "@omnyo/host-daemon-contract";
+import { roundDurationMs } from "@omnyo/process-utils";
 
 interface TurnSubmitTraceRecorder {
   receivedAt: number;
@@ -21,6 +21,7 @@ export function runWithTurnSubmitTrace<T>(
   if (command.type !== "turn.submit") {
     return work();
   }
+
   return currentRecorder.run(
     { receivedAt: performance.now(), trace: { spans: [] } },
     work,
@@ -29,9 +30,11 @@ export function runWithTurnSubmitTrace<T>(
 
 export function markTurnSubmitTraceSpan(name: TurnSubmitTraceSpanName): void {
   const recorder = currentRecorder.getStore();
+
   if (recorder === undefined) {
     return;
   }
+
   recorder.trace.spans.push({
     name,
     atMs: roundDurationMs(performance.now() - recorder.receivedAt),

@@ -13,6 +13,7 @@ vi.mock("../../src/environment-lifecycle-script.js", async (importOriginal) => {
     await importOriginal<
       typeof import("../../src/environment-lifecycle-script.js")
     >();
+
   return {
     ...actual,
     runSetupScript: (args: { signal?: AbortSignal }) =>
@@ -20,7 +21,7 @@ vi.mock("../../src/environment-lifecycle-script.js", async (importOriginal) => {
         args.signal?.addEventListener("abort", () =>
           reject(
             new actual.LifecycleScriptTerminationUnverifiedError(
-              ".bb-env-setup.sh",
+              ".omnyo-env-setup.sh",
             ),
           ),
         );
@@ -31,9 +32,10 @@ vi.mock("../../src/environment-lifecycle-script.js", async (importOriginal) => {
 afterEach(cleanupTempDirs);
 
 it("answers unknown when a cancelled hook's processes could not be confirmed stopped", async () => {
-  const path = await makeTempDir("bb-hook-unverified-");
-  await writeFile(join(path, ".bb-env-setup.sh"), "sleep 120\n");
+  const path = await makeTempDir("omnyo-hook-unverified-");
+  await writeFile(join(path, ".omnyo-env-setup.sh"), "sleep 120\n");
   const options = createHarness().dispatchOptions({ dataDir: path });
+
   const run = dispatchOnlineRpcCommand(
     {
       type: "environment.hook.run",
@@ -46,9 +48,11 @@ it("answers unknown when a cancelled hook's processes could not be confirmed sto
     },
     options,
   );
+
   const runFailure = expect(run).rejects.toThrow(
     "could not confirm that all of its processes exited",
   );
+
   await Promise.resolve();
   await expect(
     dispatchOnlineRpcCommand(

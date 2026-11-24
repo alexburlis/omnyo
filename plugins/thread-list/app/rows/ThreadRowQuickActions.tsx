@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   experimental_Icon as RegisteredIcon,
   type PluginThreadActionEntry,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,6 +30,7 @@ function ThreadQuickActionButton({
 }) {
   const [isRunning, setIsRunning] = useState(false);
   const { action } = entry;
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -70,7 +71,9 @@ function ThreadQuickActionChoices({
 }) {
   const { action } = entry;
   const choices = action.choices;
+
   if (choices === undefined) return null;
+
   return (
     <DropdownMenu onOpenChange={onOpenChange}>
       <Tooltip>

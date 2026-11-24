@@ -1,3 +1,4 @@
+import { resolvePrivateSdkArtifact } from "../src/plugin-scaffold.js";
 import { readFileSync } from "node:fs";
 import {
   access,
@@ -23,10 +24,11 @@ import {
   expect,
   it,
 } from "vitest";
-import { PLUGIN_SDK_VERSION } from "@bb/domain";
+import { PLUGIN_SDK_VERSION } from "@omnyo/domain";
 import { scaffoldPlugin } from "../src/plugin-scaffold.js";
 
 const execFileAsync = promisify(execFile);
+
 const npmCommand =
   process.platform === "win32"
     ? {
@@ -42,7 +44,9 @@ const npmCommand =
         ],
       }
     : { file: "npm", args: [] };
+
 const pluginSdkRoot = resolve(process.cwd(), "../plugin-sdk");
+
 const dependencyRequire = createRequire(join(pluginSdkRoot, "package.json"));
 
 const EXTERNAL_DEPENDENCIES = [
@@ -72,13 +76,13 @@ const EXTERNAL_DEPENDENCIES = [
 
 const BACKEND_TEST = `
 import { describe, expect, it } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import plugin from "./server";
 
 describe("scaffold backend", () => {
   it("loads, inspects, and atomically reloads through the packed harness", async () => {
     const host = createFakePluginHost({ pluginId: "external-backend" });
-    await plugin(host.bb);
+    await plugin(host.api);
     await expect(host.harness.behavior.callRpc("todos_list")).resolves.toEqual({
       todos: [],
     });
@@ -93,7 +97,7 @@ describe("scaffold backend", () => {
       "todos_remove",
     ]);
 
-    // The todo store lives in bb.storage.kv, so it survives a reload.
+    // The todo store lives in api.storage.kv, so it survives a reload.
     const next = await host.harness.lifecycle.reload(plugin);
     await expect(next.harness.behavior.callRpc("todos_list")).resolves.toEqual({
       todos: [added],
@@ -107,7 +111,7 @@ const FRONTEND_TEST = `
 // @vitest-environment jsdom
 import { fireEvent } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 
 describe("scaffold frontend", () => {
   it("loads and renders the Example todos page through the packed harness", async () => {
@@ -143,7 +147,7 @@ describe("scaffold frontend", () => {
       "todos_list",
     ]);
 
-    // A server-side write (bb <id> remove …) reaches the page as a signal.
+    // A server-side write (omnyo <id> remove …) reaches the page as a signal.
     todos = [];
     await slot.behavior.emitRealtime("todos-changed", { count: 0 });
     await slot.findByText(/Nothing to do/);
@@ -162,7 +166,7 @@ export default defineConfig({
 `;
 
 const REPRESENTATIVE_SERVER = `
-import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
+import { defineRpcContract, type PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 export const rpcContract = defineRpcContract({
@@ -172,21 +176,21 @@ export const rpcContract = defineRpcContract({
   },
 });
 
-async function verifyFullSdk(bb: BbPluginApi) {
-  const thread = await bb.sdk.threads.spawn({
+async function verifyFullSdk(api: PluginApi) {
+  const thread = await api.sdk.threads.spawn({
     projectId: "proj_fixture",
     environment: { type: "project-default" },
     prompt: "Verify the portable SDK contract",
   });
   const threadId: string = thread.id;
 
-  const file = await bb.sdk.files.read({ path: "/tmp/fixture.txt" });
+  const file = await api.sdk.files.read({ path: "/tmp/fixture.txt" });
   const sha256: string = file.sha256;
 
-  const project = await bb.sdk.projects.get({ projectId: "proj_fixture" });
+  const project = await api.sdk.projects.get({ projectId: "proj_fixture" });
   const projectName: string = project.name;
   const sourceId: string | undefined = project.sources[0]?.id;
-  const attachment = await bb.sdk.projects.attachments.upload({
+  const attachment = await api.sdk.projects.attachments.upload({
     projectId: "proj_fixture",
     clientFile: new Uint8Array([0, 1, 255]),
     filename: "fixture.bin",
@@ -194,7 +198,7 @@ async function verifyFullSdk(bb: BbPluginApi) {
   });
   const attachmentPath: string = attachment.path;
 
-  const environment = await bb.sdk.environments.status({
+  const environment = await api.sdk.environments.status({
     environmentId: "env_fixture",
   });
   const outcome: "available" | "not_applicable" | "unavailable" =
@@ -203,20 +207,20 @@ async function verifyFullSdk(bb: BbPluginApi) {
   return { attachmentPath, outcome, projectName, sha256, sourceId, threadId };
 }
 
-export default function plugin(bb: BbPluginApi) {
+export default function plugin(api: PluginApi) {
   void verifyFullSdk;
-  bb.rpc.register(rpcContract, {
+  api.rpc.register(rpcContract, {
     async projectName({ projectId }) {
-      const project = await bb.sdk.projects.get({ projectId });
+      const project = await api.sdk.projects.get({ projectId });
       return { name: project.name };
     },
   });
-  bb.log.info("portable SDK fixture loaded");
+  api.log.info("portable SDK fixture loaded");
 }
 `;
 
 const REPRESENTATIVE_APP = `
-import { definePluginApp, useRpc } from "@get-bb/plugin-sdk/app";
+import { definePluginApp, useRpc } from "@omnyo/plugin-sdk/app";
 import type { rpcContract } from "./server";
 
 function Panel() {
@@ -238,14 +242,18 @@ function packageRoot(name: string): string {
     return dirname(dependencyRequire.resolve(`${name}/package.json`));
   } catch {
     let current = dirname(dependencyRequire.resolve(name));
+
     while (true) {
       try {
         const manifest = JSON.parse(
           readFileSync(join(current, "package.json"), "utf8"),
         ) as { name?: string };
+
         if (manifest.name === name) return current;
       } catch {}
+
       const parent = dirname(current);
+
       if (parent === current)
         throw new Error(`package root not found: ${name}`);
       current = parent;
@@ -278,10 +286,13 @@ async function packPluginSdk(packDir: string): Promise<string> {
       cwd: pluginSdkRoot,
     },
   );
+
   const tarballs = (await readdir(packDir)).filter((name) =>
     name.endsWith(".tgz"),
   );
+
   expect(tarballs).toHaveLength(1);
+
   return join(packDir, tarballs[0]!);
 }
 
@@ -292,6 +303,7 @@ async function installPackedSdk(
   const manifest: unknown = JSON.parse(
     await readFile(join(pluginSdkRoot, "package.json"), "utf8"),
   );
+
   if (
     typeof manifest !== "object" ||
     manifest === null ||
@@ -301,6 +313,7 @@ async function installPackedSdk(
   ) {
     throw new Error("SDK manifest is missing runtime dependencies");
   }
+
   await execFileAsync(
     npmCommand.file,
     [
@@ -326,20 +339,24 @@ async function scaffoldSdkPin(targetDir: string): Promise<string | undefined> {
   const manifest = JSON.parse(
     await readFile(join(targetDir, "package.json"), "utf8"),
   ) as { devDependencies?: Record<string, string> };
-  return manifest.devDependencies?.["@get-bb/plugin-sdk"];
+
+  return manifest.devDependencies?.["@omnyo/plugin-sdk"];
 }
 
 async function includeTestsInTypecheck(targetDir: string): Promise<void> {
   const tsconfigPath = join(targetDir, "tsconfig.json");
+
   const tsconfig = JSON.parse(await readFile(tsconfigPath, "utf8")) as {
     include: string[];
   };
+
   tsconfig.include.push("*.test.ts", "*.test.tsx");
   await writeFile(tsconfigPath, `${JSON.stringify(tsconfig, null, 2)}\n`);
 }
 
 async function runTypecheck(targetDir: string): Promise<void> {
   const typescriptRoot = packageRoot("typescript");
+
   try {
     await execFileAsync(
       process.execPath,
@@ -356,6 +373,7 @@ async function runTypecheck(targetDir: string): Promise<void> {
 
 async function runVitest(targetDir: string): Promise<void> {
   const vitestRoot = packageRoot("vitest");
+
   try {
     await execFileAsync(
       process.execPath,
@@ -381,13 +399,13 @@ describe("external plugin scaffold types", () => {
   }
 
   beforeAll(async () => {
-    packRoot = await mkdtemp(join(tmpdir(), "bb-external-pack-"));
+    packRoot = await mkdtemp(join(tmpdir(), "omnyo-external-pack-"));
     tarball = await packPluginSdk(join(packRoot, "pack"));
     const templateDir = join(packRoot, "installed");
     await mkdir(templateDir);
     await writeFile(
       join(templateDir, "package.json"),
-      JSON.stringify({ name: "bb-plugin-external-fixture", private: true }),
+      JSON.stringify({ name: "omnyo-plugin-external-fixture", private: true }),
     );
     await installPackedSdk(templateDir, tarball);
     await linkExternalDependencies(templateDir);
@@ -399,7 +417,7 @@ describe("external plugin scaffold types", () => {
   });
 
   beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), "bb-external-scaffold-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-external-scaffold-"));
   });
 
   afterEach(async () => {
@@ -407,15 +425,23 @@ describe("external plugin scaffold types", () => {
   });
 
   it("typechecks full SDK results against the installed package, with library checks enabled", async () => {
-    const targetDir = join(workDir, "bb-plugin-external");
+    const targetDir = join(workDir, "omnyo-plugin-external");
+
+    const sdkArtifact = await resolvePrivateSdkArtifact({
+      sourceUrl: import.meta.url,
+    });
+
     await scaffoldPlugin({
       targetDir,
-      packageName: "bb-plugin-external",
-      bbVersion: "0.9.0",
+      packageName: "omnyo-plugin-external",
+      appVersion: "0.9.0",
+      sdkArtifact,
     });
     await writeFile(join(targetDir, "server.ts"), REPRESENTATIVE_SERVER);
     await writeFile(join(targetDir, "app.tsx"), REPRESENTATIVE_APP);
-    expect(await scaffoldSdkPin(targetDir)).toBe(PLUGIN_SDK_VERSION);
+    expect(await scaffoldSdkPin(targetDir)).toBe(
+      `file:./vendor/${sdkArtifact.file}`,
+    );
     await useInstalledNodeModules(targetDir);
 
     const tsconfig = JSON.parse(
@@ -426,6 +452,7 @@ describe("external plugin scaffold types", () => {
         paths?: Record<string, string[]>;
       };
     };
+
     expect(tsconfig.compilerOptions.skipLibCheck).toBe(false);
     expect(Object.keys(tsconfig.compilerOptions.paths ?? {})).toEqual(["@/*"]);
     await expect(
@@ -436,10 +463,10 @@ describe("external plugin scaffold types", () => {
         join(
           targetDir,
           "node_modules",
-          "@get-bb",
+          "@omnyo",
           "plugin-sdk",
           "bundled-types",
-          "bb-plugin-sdk.d.ts",
+          "omnyo-plugin-sdk.d.ts",
         ),
       ),
     ).resolves.toBeUndefined();
@@ -451,13 +478,14 @@ describe("external plugin scaffold types", () => {
     const packedListing = (
       await execFileAsync("tar", ["-tzf", tarball])
     ).stdout.split(/\r?\n/);
+
     expect(packedListing).toContain("package/dist/testing/index.js");
     expect(packedListing).toContain("package/dist/testing/app.js");
     expect(packedListing).toContain(
-      "package/bundled-types/bb-plugin-sdk-testing.d.ts",
+      "package/bundled-types/omnyo-plugin-sdk-testing.d.ts",
     );
     expect(packedListing).toContain(
-      "package/bundled-types/bb-plugin-sdk-testing-app.d.ts",
+      "package/bundled-types/omnyo-plugin-sdk-testing-app.d.ts",
     );
     expect(
       packedListing.some((entry) => entry.startsWith("package/src/")),
@@ -466,25 +494,28 @@ describe("external plugin scaffold types", () => {
       packedListing.some((entry) => entry.startsWith("package/scripts/")),
     ).toBe(false);
 
-    const backendDir = join(workDir, "bb-plugin-external-backend");
+    const backendDir = join(workDir, "omnyo-plugin-external-backend");
     await scaffoldPlugin({
       targetDir: backendDir,
-      packageName: "bb-plugin-external-backend",
-      bbVersion: "0.9.0",
+      packageName: "omnyo-plugin-external-backend",
+      appVersion: "0.9.0",
+      sdkArtifact: await resolvePrivateSdkArtifact({ sourceUrl: import.meta.url }),
     });
     await useInstalledNodeModules(backendDir);
     await writeFile(join(backendDir, "server.test.ts"), BACKEND_TEST);
     await includeTestsInTypecheck(backendDir);
 
-    expect(await readdir(join(backendDir, "node_modules", "@get-bb"))).toEqual([
+    expect(await readdir(join(backendDir, "node_modules", "@omnyo"))).toEqual([
       "plugin-sdk",
     ]);
+
     const installedSdk = join(
       backendDir,
       "node_modules",
-      "@get-bb",
+      "@omnyo",
       "plugin-sdk",
     );
+
     const installedManifest = JSON.parse(
       await readFile(join(installedSdk, "package.json"), "utf8"),
     ) as {
@@ -495,8 +526,9 @@ describe("external plugin scaffold types", () => {
       peerDependencies?: Record<string, string>;
       exports: Record<string, { import: string; types: string }>;
     };
+
     expect(installedManifest.version).toBe(PLUGIN_SDK_VERSION);
-    expect(installedManifest.private).not.toBe(true);
+    expect(installedManifest.private).toBe(true);
     expect(JSON.stringify(installedManifest.dependencies ?? {})).not.toContain(
       "workspace:",
     );
@@ -506,30 +538,39 @@ describe("external plugin scaffold types", () => {
     expect(
       JSON.stringify(installedManifest.peerDependencies ?? {}),
     ).not.toContain("workspace:");
+
     for (const subpath of ["./testing", "./testing/app"] as const) {
       const entry = installedManifest.exports[subpath];
       await expect(
         access(join(installedSdk, entry.import.replace(/^\.\//u, ""))),
       ).resolves.toBeUndefined();
+
       const declarations = await readFile(
         join(installedSdk, entry.types.replace(/^\.\//u, "")),
         "utf8",
       );
-      const bbImports = [
-        ...declarations.matchAll(/from ['"](@(?:get-)?bb\/[^'"]+)['"]/gu),
+
+      const omnyoImports = [
+        ...declarations.matchAll(/from ['"](@(?:omnyo|get-bb|bb)\/[^'"]+)['"]/gu),
       ].map((match) => match[1]);
-      expect(new Set(bbImports)).toEqual(new Set(["@get-bb/plugin-sdk"]));
+
+      expect(new Set(omnyoImports)).toEqual(new Set(["@omnyo/plugin-sdk"]));
+      expect(declarations).not.toContain("@omnyo/sdk");
       expect(declarations).not.toContain("@bb/sdk");
+      expect(declarations).not.toContain("@omnyo/server-contract");
       expect(declarations).not.toContain("@bb/server-contract");
     }
+
     for (const runtimePath of [
       "dist/testing/index.js",
       "dist/testing/app.js",
     ]) {
       const runtime = await readFile(join(installedSdk, runtimePath), "utf8");
-      expect(runtime).not.toMatch(/from ['"]@bb\//u);
+      expect(runtime).not.toMatch(/from ['"]@(?:omnyo|bb)\/(?!plugin-sdk(?:['"/]))/u);
     }
+
     await expect(access(join(installedSdk, "src"))).rejects.toThrow();
+
     const backendTsconfig = JSON.parse(
       await readFile(join(backendDir, "tsconfig.json"), "utf8"),
     ) as {
@@ -538,14 +579,16 @@ describe("external plugin scaffold types", () => {
         paths?: Record<string, string[]>;
       };
     };
+
     expect(backendTsconfig.compilerOptions.skipLibCheck).toBe(false);
     expect(backendTsconfig.compilerOptions.paths).toEqual({ "@/*": ["./*"] });
 
-    const frontendDir = join(workDir, "bb-plugin-external-frontend");
+    const frontendDir = join(workDir, "omnyo-plugin-external-frontend");
     await scaffoldPlugin({
       targetDir: frontendDir,
-      packageName: "bb-plugin-external-frontend",
-      bbVersion: "0.9.0",
+      packageName: "omnyo-plugin-external-frontend",
+      appVersion: "0.9.0",
+      sdkArtifact: await resolvePrivateSdkArtifact({ sourceUrl: import.meta.url }),
     });
     await useInstalledNodeModules(frontendDir);
     await writeFile(join(frontendDir, "app.test.tsx"), FRONTEND_TEST);

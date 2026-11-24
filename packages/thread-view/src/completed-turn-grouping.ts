@@ -4,9 +4,11 @@ import type {
 } from "./event-projection-types.js";
 import { getProjectionSummaryCount } from "./apply-turn-message-detail.js";
 import { getMessageStartedAt } from "./format-helpers.js";
+import { isHumanThreadInput } from "./user-message-source.js";
 import {
   findLastTerminalTimelineMessage,
   isSingletonContextManagementOperation,
+  isTimelineTerminalMessage,
   isTimelineUngroupableMessage,
 } from "./timeline-message-helpers.js";
 
@@ -62,9 +64,11 @@ function unwrapSingletonContextManagementGroups(
     }
 
     const onlyMessage = item.sourceMessages[0];
+
     if (!onlyMessage) {
       throw new Error("Singleton context-management group has no message");
     }
+
     return { kind: "ungrouped-message", message: onlyMessage };
   });
 }
@@ -73,14 +77,17 @@ function getSummaryMessageBounds(
   sourceMessages: readonly EventProjectionMessage[],
 ): SummaryMessageBounds {
   const firstMessage = sourceMessages[0];
+
   if (!firstMessage) {
     throw new Error("Cannot derive summary message bounds from no messages");
   }
 
   let startedAt = getMessageStartedAt(firstMessage);
+
   for (const message of sourceMessages.slice(1)) {
     startedAt = Math.min(startedAt, getMessageStartedAt(message));
   }
+
   return { startedAt };
 }
 
@@ -89,11 +96,13 @@ function applySingleSummaryTurnBounds(
   items: readonly CompletedTurnSummaryItem[],
 ): CompletedTurnSummaryItem[] {
   const summaryGroups = items.filter(isCompletedTurnSummaryGroup);
+
   if (summaryGroups.length !== 1) {
     return [...items];
   }
 
   const onlySummaryGroup = summaryGroups[0];
+
   return items.map((item) =>
     item === onlySummaryGroup
       ? {
@@ -120,6 +129,7 @@ function splitCompletedTurnMessages(
   const terminalIndex = messages.findIndex(
     (message) => message.id === terminalMessage.id,
   );
+
   if (terminalIndex === -1) {
     return {
       summaryMessages: [...messages],
@@ -129,6 +139,7 @@ function splitCompletedTurnMessages(
   }
 
   const terminalMessageAtIndex = messages[terminalIndex];
+
   if (!terminalMessageAtIndex) {
     throw new Error(
       `Cannot split completed turn messages at index ${terminalIndex}`,
@@ -155,9 +166,11 @@ function findVisibleResponseMessageIds(
   terminalMessage: EventProjectionMessage | undefined,
 ): Set<string> {
   const visibleIds = new Set<string>();
+
   for (let index = 0; index < summaryMessages.length; index += 1) {
     const message = summaryMessages[index];
     const nextMessage = summaryMessages[index + 1] ?? terminalMessage;
+
     if (
       isAssistantResponseMessage(message) &&
       isAssistantResponseMessage(nextMessage)
@@ -165,6 +178,7 @@ function findVisibleResponseMessageIds(
       visibleIds.add(message.id);
     }
   }
+
   return visibleIds;
 }
 
@@ -174,10 +188,12 @@ function groupCompletedTurnSummaryMessages(
   terminalMessage: EventProjectionMessage | undefined,
 ): CompletedTurnSummaryItem[] {
   const externalBoundarySeqs = turn.externalUserBoundarySeqs ?? [];
+
   const visibleResponseIds = findVisibleResponseMessageIds(
     summaryMessages,
     terminalMessage,
   );
+
   if (
     externalBoundarySeqs.length === 0 &&
     visibleResponseIds.size === 0 &&
@@ -224,11 +240,14 @@ function groupCompletedTurnSummaryMessages(
 
     const sourceMessages = groupedMessages;
     groupedMessages = [];
+
     const terminalMessage = preserveLastTerminalMessage
       ? findLastTerminalTimelineMessage(sourceMessages)
       : undefined;
+
     if (!terminalMessage) {
       appendSummaryGroup(sourceMessages);
+
       return;
     }
 
@@ -256,6 +275,7 @@ function groupCompletedTurnSummaryMessages(
 
   for (const message of summaryMessages) {
     flushExternalBoundariesBefore(message);
+
     if (visibleResponseIds.has(message.id)) {
       flushGroupedMessages();
       items.push({
@@ -264,9 +284,10 @@ function groupCompletedTurnSummaryMessages(
       });
       continue;
     }
+
     if (isTimelineUngroupableMessage(message)) {
       flushGroupedMessages(
-        message.kind === "user" && message.initiator === "user",
+        message.kind === "user" && isHumanThreadInput(message),
       );
       items.push({
         kind: "ungrouped-message",
@@ -274,6 +295,7 @@ function groupCompletedTurnSummaryMessages(
       });
       continue;
     }
+
     groupedMessages.push(message);
   }
 
@@ -281,25 +303,117 @@ function groupCompletedTurnSummaryMessages(
     flushGroupedMessages(true);
     externalBoundaryIndex += 1;
   }
+
   flushGroupedMessages();
-  return applySingleSummaryTurnBounds(turn, items);
+
+  return items;
+}
+
+function isTrailingMachinery(message: EventProjectionMessage): boolean {
+  return (
+    !isTimelineUngroupableMessage(message) &&
+    !isTimelineTerminalMessage(message)
+  );
+}
+
+function splitLeadingMachinery(
+  trailingMessages: readonly EventProjectionMessage[],
+): {
+  machinery: EventProjectionMessage[];
+  rest: EventProjectionMessage[];
+} {
+  const firstKeptIndex = trailingMessages.findIndex(
+    (message) => !isTrailingMachinery(message),
+  );
+
+  if (firstKeptIndex === -1) {
+    return { machinery: [...trailingMessages], rest: [] };
+  }
+
+  return {
+    machinery: trailingMessages.slice(0, firstKeptIndex),
+    rest: trailingMessages.slice(firstKeptIndex),
+  };
+}
+
+function foldTrailingMachinery(
+  turn: EventProjectionTurn,
+  items: readonly CompletedTurnSummaryItem[],
+  machinery: EventProjectionMessage[],
+): CompletedTurnSummaryItem[] {
+  if (machinery.length === 0) {
+    return [...items];
+  }
+
+  const summaryCount = getProjectionSummaryCount(machinery, undefined);
+  const groupCount = items.filter(isCompletedTurnSummaryGroup).length;
+
+  if (groupCount === 0) {
+    return [
+      ...items,
+      {
+        kind: "summary",
+        startedAt: turn.startedAt,
+        completedAt: turn.completedAt,
+        segmentIndex: null,
+        sourceMessages: machinery,
+        summaryCount,
+      },
+    ];
+  }
+
+  const lastItem = items.at(-1);
+
+  if (lastItem?.kind === "summary") {
+    return [
+      ...items.slice(0, -1),
+      {
+        ...lastItem,
+        sourceMessages: [...lastItem.sourceMessages, ...machinery],
+        summaryCount: lastItem.summaryCount + summaryCount,
+      },
+    ];
+  }
+
+  return [
+    ...items,
+    {
+      kind: "summary",
+      startedAt: getSummaryMessageBounds(machinery).startedAt,
+      completedAt: null,
+      segmentIndex: groupCount,
+      sourceMessages: machinery,
+      summaryCount,
+    },
+  ];
 }
 
 export function groupCompletedTurnMessages(
   turn: EventProjectionTurn,
 ): CompletedTurnMessageGroups {
   const messages = turn.messages ?? [];
+
   const { summaryMessages, terminalMessages, trailingMessages } =
     splitCompletedTurnMessages(messages, turn.terminalMessage);
+
+  const { machinery, rest } = splitLeadingMachinery(trailingMessages);
+
   return {
     summaryItems: unwrapSingletonContextManagementGroups(
-      groupCompletedTurnSummaryMessages(
+      applySingleSummaryTurnBounds(
         turn,
-        summaryMessages,
-        terminalMessages[0],
+        foldTrailingMachinery(
+          turn,
+          groupCompletedTurnSummaryMessages(
+            turn,
+            summaryMessages,
+            terminalMessages[0],
+          ),
+          machinery,
+        ),
       ),
     ),
     terminalMessages,
-    trailingMessages,
+    trailingMessages: rest,
   };
 }

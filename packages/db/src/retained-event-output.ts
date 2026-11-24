@@ -1,8 +1,11 @@
-import type { ThreadEventItemType } from "@bb/domain";
+import type { ThreadEventItemType } from "@omnyo/domain";
 
 export const COMPLETED_EVENT_OUTPUT_RETENTION_MS = 7 * 24 * 60 * 60_000;
+
 export const COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS = 32 * 1024;
+
 export const COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS = 2 * 1024;
+
 export const COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS = 2 * 1024;
 
 export type RetainedEventOutputItemKind = Extract<

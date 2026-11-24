@@ -1,7 +1,7 @@
 import type {
   TimelineConversationAttachments,
   TimelineRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { ThreadTimelineSurface } from "@/components/thread/timeline/ThreadTimelineSurface";
 import { ThreadTableOfContents } from "@/components/thread/toc/ThreadTableOfContents";
 import { BottomAnchoredScrollBody } from "@/components/ui/bottom-anchored-scroll-body";
@@ -38,6 +38,7 @@ function conversationRow({
     text,
     attachments,
   };
+
   if (role === "user") {
     return {
       ...base,
@@ -47,6 +48,7 @@ function conversationRow({
       systemMessageKind: "unlabeled",
       systemMessageSubject: null,
       turnRequest: {
+        clientRequestId: null,
         isGrouped: false,
         kind: "message",
         status: "accepted",
@@ -54,10 +56,12 @@ function conversationRow({
       mentions: [],
     };
   }
+
   return {
     ...base,
     role: "assistant",
     turnRequest: null,
+    turnGit: null,
   };
 }
 
@@ -71,7 +75,7 @@ const timelineRows: TimelineRow[] = Array.from(
       text:
         turnIndex === 2
           ? ""
-          : `User checkpoint ${turnIndex + 1}: audit the queued-message drawer, thread table of contents rail, scroll spy behavior, and click-to-jump target for this section. This preview should clamp inside the panel while the full message remains visible in the timeline.`,
+          : `User checkpoint ${turnIndex + 1}: review the chat position markers, message excerpts, and direct jumps for this section. The excerpt should stay beside its marker while the full message remains in the conversation.`,
       attachments:
         turnIndex === 2
           ? {
@@ -89,14 +93,21 @@ const timelineRows: TimelineRow[] = Array.from(
       id: `row_agent_${turnIndex + 1}`,
       role: "assistant",
       index: turnIndex * 2 + 1,
-      text: `Agent response ${turnIndex + 1}: keep the active item synced to the timeline viewport, preserve the locked segmented tabs, and leave enough repeated content in the story for the bottom-only fade to appear when the panel list overflows.`,
+      text:
+        turnIndex === 4
+          ? Array.from(
+              { length: 16 },
+              (_, paragraph) =>
+                `Response detail ${paragraph + 1}. The current marker stays on this message while you scroll through a long answer. Hover or focus another marker to read its excerpt, then select it to return to that part of the conversation.`,
+            ).join("\n\n")
+          : `Agent response ${turnIndex + 1}: the current marker follows the conversation as you scroll. Select a marker to jump to its message, or open the full outline for both your messages and agent replies.`,
     }),
   ],
 ).flat();
 
 export function Default() {
   return (
-    <div className="flex h-[640px] min-h-0 overflow-hidden rounded-lg border border-border bg-background">
+    <div className="flex h-[640px] max-h-[calc(100dvh-2rem)] min-h-0 overflow-hidden rounded-lg border border-border bg-background">
       <BottomAnchoredScrollBody
         footer={null}
         maxWidthClassName="max-w-3xl"

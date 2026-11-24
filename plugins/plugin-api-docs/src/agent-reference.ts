@@ -1,4 +1,4 @@
-import { experimental_copyToClipboard } from "@get-bb/plugin-sdk/app";
+import { experimental_copyToClipboard } from "@omnyo/plugin-sdk/app";
 import { escapeHtmlText } from "./html-escape";
 import { SURFACES_BY_ID, type PluginSurface } from "./surfaces";
 
@@ -33,6 +33,7 @@ export interface PluginSurfaceAgentReference {
 }
 
 const AGENT_REFERENCE_PREFIX = "Build a plugin that uses ";
+
 const AGENT_REFERENCE_SUFFIX = " ";
 
 export function createPluginSurfaceAgentReference(
@@ -43,7 +44,9 @@ export function createPluginSurfaceAgentReference(
     id: surface.id,
     label: surface.title,
   };
+
   const serializedText = `@${identity.label}`;
+
   const resource: PluginSurfaceAgentResource = {
     kind: "plugin",
     pluginId: PLUGIN_GUIDE_PLUGIN_ID,
@@ -51,15 +54,18 @@ export function createPluginSurfaceAgentReference(
     itemId: `${identity.provider}:${identity.id}`,
     label: identity.label,
   };
+
   const clipboard = {
     text: `${AGENT_REFERENCE_PREFIX}${serializedText}${AGENT_REFERENCE_SUFFIX}`,
     html: `${escapeHtmlText(AGENT_REFERENCE_PREFIX)}<span data-prompt-mention="true" data-prompt-mention-resource="${escapeHtmlText(JSON.stringify(resource))}" data-prompt-mention-serialized-text="${escapeHtmlText(serializedText)}">${escapeHtmlText(serializedText)}</span>${escapeHtmlText(AGENT_REFERENCE_SUFFIX)}`,
   };
+
   const context = [
     `Plugin Guide surface: ${surface.title} (${surface.id}).`,
-    `Relevant @get-bb/plugin-sdk symbols: ${surface.apiSymbols.join(", ")}.`,
-    "Use the bb-plugin-authoring skill and the authoritative @get-bb/plugin-sdk declarations to build a similar plugin capability.",
+    `Relevant @omnyo/plugin-sdk symbols: ${surface.apiSymbols.join(", ")}.`,
+    "Use the omnyo-plugin-authoring skill and the authoritative @omnyo/plugin-sdk declarations to build a similar plugin capability.",
   ].join("\n");
+
   return { identity, resource, clipboard, context };
 }
 
@@ -79,6 +85,8 @@ export function copyPluginSurfaceAgentReference(
 
 export function pluginSurfaceAgentContext(surfaceId: string): string | null {
   const surface = SURFACES_BY_ID.get(surfaceId);
+
   if (!surface) return null;
+
   return createPluginSurfaceAgentReference(surface).context;
 }

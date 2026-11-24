@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MOTION_DURATION_MS } from "@omnyo/shared-ui/motion";
 import { beginSplitDrag, type SplitDragConfig } from "./splitDragSession";
 import { decideThreadDrop, shouldEngageSidebarSplitDrag } from "./zones";
 
@@ -35,6 +36,7 @@ function fireWindowPointer(type: string, x: number, y: number): void {
 }
 
 const SIDEBAR_RIGHT = 248;
+
 const PANE_RECT = fakeRect(300, 0, 900, 800);
 
 describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
@@ -44,6 +46,7 @@ describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
   let originalElementsFromPoint: typeof document.elementsFromPoint;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     paneEl = document.createElement("div");
     paneEl.setAttribute("data-split-pane-id", "pane-1");
     Object.defineProperty(paneEl, "getBoundingClientRect", {
@@ -67,10 +70,13 @@ describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
         escapeKeydowns += 1;
       }
     };
+
     document.addEventListener("keydown", escapeListener);
   });
 
   afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
     document.removeEventListener("keydown", escapeListener);
     paneEl.remove();
     document.elementsFromPoint = originalElementsFromPoint;
@@ -104,6 +110,7 @@ describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
   it("prioritizes a composer target over splitting and reports a completed drop", () => {
     const drop = vi.fn();
     const onEnd = vi.fn();
+
     const config = baseConfig({
       onEnd,
       resolveAuxiliaryTarget: () => ({
@@ -112,6 +119,7 @@ describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
         drop,
       }),
     });
+
     beginSplitDrag(config);
     fireWindowPointer("pointermove", 900, 400);
     expect(document.querySelector("[data-split-drag-label]")?.textContent).toBe(
@@ -125,10 +133,12 @@ describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
 
   it("clears a composer target when moving away and cancels without inserting", () => {
     const drop = vi.fn();
+
     const config = baseConfig({
       resolveAuxiliaryTarget: (x) =>
         x < 1000 ? { element: paneEl, label: "Mention thread", drop } : null,
     });
+
     beginSplitDrag(config);
     fireWindowPointer("pointermove", 900, 400);
     fireWindowPointer("pointermove", 1150, 400);
@@ -170,12 +180,14 @@ describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
   it("can leave the active reorder feedback in place during a split drag", () => {
     const sourceEl = document.createElement("div");
     document.body.append(sourceEl);
+
     const config = baseConfig({
       cancelSidebarReorderOnEngage: false,
       fadeSourceOnEngage: false,
       renderGhost: false,
       sourceEl,
     });
+
     beginSplitDrag(config);
 
     fireWindowPointer("pointermove", 900, 400);
@@ -232,6 +244,14 @@ describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
     );
     fireWindowPointer("pointerup", 900, 400);
 
+    const leavingOverlay = document.querySelector<HTMLElement>(
+      "[data-split-drag-overlay-visible]",
+    );
+
+    expect(leavingOverlay?.dataset.splitDragOverlayVisible).toBe("false");
+    expect(leavingOverlay?.style.opacity).toBe("0");
+
+    vi.advanceTimersByTime(MOTION_DURATION_MS.fast);
     expect(document.querySelector("[data-split-drag-label]")).toBeNull();
     expect(config.onDrop).not.toHaveBeenCalled();
     expect(onEnd).toHaveBeenCalledOnce();
@@ -271,6 +291,7 @@ describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
     const config = baseConfig({
       fallback: { paneId: "pane-1", container },
     });
+
     beginSplitDrag(config);
     fireWindowPointer("pointermove", 900, 400);
     fireWindowPointer("pointermove", 1150, 400);
@@ -325,6 +346,7 @@ describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
     });
     boundary.append(container);
     document.body.append(boundary);
+
     const config = baseConfig({
       targetBoundary: boundary,
       fallback: { paneId: "pane-1", container },
@@ -353,6 +375,7 @@ describe("beginSplitDrag — sidebar gesture arbitration and fallback", () => {
       configurable: true,
     });
     document.body.append(boundary, container);
+
     const config = baseConfig({
       targetBoundary: boundary,
       fallback: { paneId: "pane-1", container },

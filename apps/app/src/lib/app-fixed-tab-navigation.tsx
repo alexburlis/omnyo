@@ -1,5 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
-import type { JsonValue } from "@get-bb/plugin-sdk";
+import type { JsonValue } from "@omnyo/plugin-sdk";
 import type {
   AppFixedTabOpenIntent,
   AppFixedTabReference,
@@ -26,6 +26,7 @@ export function openAppFixedTabFromDestinations(
       candidate.tab.ownerId === intent.tab.ownerId &&
       candidate.tab.tabId === intent.tab.tabId,
   );
+
   return destination?.open(intent.target) ?? false;
 }
 
@@ -63,5 +64,6 @@ export function useAppFixedTabTarget(
   tabId: string,
 ): AppFixedTabTargetState | null {
   const state = useContext(AppFixedTabTargetContext);
+
   return state?.ownerId === ownerId && state.tabId === tabId ? state : null;
 }

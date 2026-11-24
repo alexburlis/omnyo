@@ -31,7 +31,7 @@ vi.mock("@/lib/sdk", () => ({
     environments: { get: vi.fn() },
     providers: { list: vi.fn(async () => []) },
   },
-  BbHttpError: class BbHttpError extends Error {
+  OmnyoHttpError: class OmnyoHttpError extends Error {
     status: number;
     constructor(status: number) {
       super(`http ${status}`);
@@ -55,6 +55,7 @@ vi.mock("@/hooks/useHostDaemon", () => ({
 vi.mock("@/components/thread/embedded-chat", () => ({
   EmbeddedThreadChat: (props: Record<string, unknown>) => {
     mocks.embeddedChatProps.push(props);
+
     return <div data-testid="embedded-thread-chat" />;
   },
 }));
@@ -62,6 +63,7 @@ vi.mock("@/components/thread/embedded-chat", () => ({
 vi.mock("@/components/thread/timeline", () => ({
   ThreadTimelinePanelContent: (props: Record<string, unknown>) => {
     mocks.timelinePanelProps.push(props);
+
     return <div data-testid="timeline-panel-content" />;
   },
 }));
@@ -77,6 +79,7 @@ const THREAD_FIXTURE = {
 
 function DemoPluginPage({ threadId }: { threadId: string }) {
   const ThreadChat = pluginSdkAppImplementation.ThreadChat;
+
   return <ThreadChat threadId={threadId} variant="compact" />;
 }
 
@@ -88,6 +91,7 @@ function DemoPluginPageWithExtensions({
   run: () => void;
 }) {
   const ThreadChat = pluginSdkAppImplementation.ThreadChat;
+
   return (
     <ThreadChat
       threadId={threadId}
@@ -118,6 +122,50 @@ beforeEach(() => {
 });
 
 describe("PluginThreadChat", () => {
+  it("scopes native conversation input and drafts to the owning plugin region", async () => {
+    const { wrapper: Wrapper } = createQueryClientTestHarness();
+    const ThreadChat = pluginSdkAppImplementation.ThreadChat;
+    render(
+      <Wrapper>
+        <MemoryRouter>
+          <PluginSlotMount pluginId="canvas" slotKind="navPanel" slotId="board">
+            <ThreadChat
+              threadId="thr_demo"
+              experimental_conversation={{
+                id: "region-one",
+                mention: {
+                  provider: "conversation",
+                  id: "thr_demo.region-one",
+                  label: "Canvas conversation",
+                },
+              }}
+            />
+          </PluginSlotMount>
+        </MemoryRouter>
+      </Wrapper>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("embedded-thread-chat")).toBeTruthy(),
+    );
+    const props = mocks.embeddedChatProps.at(-1);
+    expect(props?.conversation).toEqual({
+      kind: "plugin",
+      pluginId: "canvas",
+      itemId: "conversation:thr_demo.region-one",
+      label: "Canvas conversation",
+    });
+    expect(props?.composer).toEqual(
+      expect.objectContaining({
+        draftScope: {
+          kind: "thread",
+          projectId: "proj_demo",
+          threadId: "thr_demo",
+          conversationKey: "canvas:region-one",
+        },
+      }),
+    );
+  });
+
   it("gives a plugin page a working query client and sdk-backed thread context", async () => {
     const { wrapper: Wrapper } = createQueryClientTestHarness();
     render(
@@ -215,6 +263,7 @@ describe("PluginThreadChat", () => {
       path: string;
       label: string;
     }) => (() => void) | null;
+
     const workspaceMention = {
       kind: "path" as const,
       source: "workspace" as const,
@@ -222,6 +271,7 @@ describe("PluginThreadChat", () => {
       path: "README.md",
       label: "README.md",
     };
+
     expect(embeddedResolveMentionLink(workspaceMention)).toBe(
       workspaceMentionHandler,
     );
@@ -266,9 +316,11 @@ describe("PluginThreadChat", () => {
     );
     const props = mocks.embeddedChatProps.at(-1)!;
     expect(props.leadingContent).toBeTruthy();
+
     const actions = props.consumerMessageActions as Array<
       Record<string, unknown>
     >;
+
     expect(actions).toHaveLength(1);
     expect(actions[0]).toEqual(
       expect.objectContaining({

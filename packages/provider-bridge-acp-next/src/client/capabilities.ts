@@ -44,7 +44,7 @@ export class AcpUnsupportedProtocolVersionError extends Error {
     super(
       agentProtocolVersion === null
         ? "The ACP agent did not report a protocol version."
-        : `The ACP agent speaks protocol version ${agentProtocolVersion}; bb speaks version ${ACP_CLIENT_PROTOCOL_VERSION}.`,
+        : `The ACP agent speaks protocol version ${agentProtocolVersion}; Omnyo speaks version ${ACP_CLIENT_PROTOCOL_VERSION}.`,
     );
     this.name = "AcpUnsupportedProtocolVersionError";
     this.agentProtocolVersion = agentProtocolVersion;
@@ -53,6 +53,7 @@ export class AcpUnsupportedProtocolVersionError extends Error {
 
 function objectAt(source: AcpJsonObject, key: string): AcpJsonObject {
   const value = source[key];
+
   return isJsonObject(value) ? value : {};
 }
 
@@ -62,6 +63,7 @@ function isTrue(source: AcpJsonObject, key: string): boolean {
 
 function isPresent(source: AcpJsonObject, key: string): boolean {
   const value = source[key];
+
   return value !== undefined && value !== null && value !== false;
 }
 
@@ -69,19 +71,25 @@ function decodeAuthMethods(value: unknown): AcpAuthMethod[] {
   if (!Array.isArray(value)) {
     return [];
   }
+
   const methods: AcpAuthMethod[] = [];
+
   for (const entry of value) {
     if (!isJsonObject(entry)) {
       continue;
     }
+
     const id = readString(entry, "id") ?? readString(entry, "methodId");
+
     if (id === undefined) {
       continue;
     }
+
     const description = readString(entry, "description");
     const rawArgs = entry["args"];
     const rawEnv = entry["env"];
     const env: Record<string, string> = {};
+
     if (isJsonObject(rawEnv)) {
       for (const [name, envValue] of Object.entries(rawEnv)) {
         if (typeof envValue === "string") {
@@ -89,6 +97,7 @@ function decodeAuthMethods(value: unknown): AcpAuthMethod[] {
         }
       }
     }
+
     methods.push({
       id,
       name: readString(entry, "name") ?? id,
@@ -100,6 +109,7 @@ function decodeAuthMethods(value: unknown): AcpAuthMethod[] {
       env,
     });
   }
+
   return methods;
 }
 
@@ -107,13 +117,17 @@ function decodeImplementation(value: unknown): AcpAgentImplementation | null {
   if (!isJsonObject(value)) {
     return null;
   }
+
   const implementation: AcpAgentImplementation = {};
+
   for (const field of ["name", "title", "version"] as const) {
     const fieldValue = readString(value, field);
+
     if (fieldValue !== undefined) {
       implementation[field] = fieldValue;
     }
   }
+
   return implementation;
 }
 
@@ -123,24 +137,30 @@ export function readAcpAgentCapabilities(
   if (!isJsonObject(initializeResult)) {
     throw new AcpUnsupportedProtocolVersionError(null);
   }
+
   const protocolVersion = initializeResult["protocolVersion"];
+
   if (typeof protocolVersion !== "number") {
     throw new AcpUnsupportedProtocolVersionError(null);
   }
+
   const answersInAnotherGeneration =
     isJsonObject(initializeResult["capabilities"]) &&
     !("agentCapabilities" in initializeResult);
+
   if (
     protocolVersion !== ACP_CLIENT_PROTOCOL_VERSION &&
     answersInAnotherGeneration
   ) {
     throw new AcpUnsupportedProtocolVersionError(protocolVersion);
   }
+
   const agent = objectAt(initializeResult, "agentCapabilities");
   const prompt = objectAt(agent, "promptCapabilities");
   const mcp = objectAt(agent, "mcpCapabilities");
   const session = objectAt(agent, "sessionCapabilities");
   const auth = objectAt(agent, "auth");
+
   return {
     protocolVersion,
     agentInfo: decodeImplementation(initializeResult["agentInfo"]),

@@ -10,16 +10,19 @@ export function terminateWindowsProcessTrees(
   pids: readonly number[],
 ): Promise<boolean> {
   if (pids.length === 0) return Promise.resolve(true);
+
   return new Promise((resolve) => {
     let timer: NodeJS.Timeout | undefined;
     let killer: ChildProcess | undefined;
     let settled = false;
+
     const finish = (terminated: boolean): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       resolve(terminated);
     };
+
     try {
       killer = execFile(
         path.join(
@@ -33,6 +36,7 @@ export function terminateWindowsProcessTrees(
       );
       timer = setTimeout(() => {
         finish(false);
+
         try {
           killer?.kill("SIGKILL");
         } catch {}
@@ -45,15 +49,18 @@ export function terminateWindowsProcessTrees(
 
 function waitForRootExit(child: ChildProcess): Promise<void> {
   if (hasExited(child)) return Promise.resolve();
+
   return new Promise((resolve, reject) => {
     const onExit = (): void => {
       clearTimeout(timer);
       resolve();
     };
+
     const timer = setTimeout(() => {
       child.off("exit", onExit);
       reject(new Error(`Process did not exit after termination: ${child.pid}`));
     }, 1_000);
+
     child.once("exit", onExit);
   });
 }
@@ -64,8 +71,11 @@ export async function stopWindowsProcessTree(
   if (child.pid === undefined || hasExited(child)) {
     return { treeTermination: "unverified" };
   }
+
   const terminated = await terminateWindowsProcessTrees([child.pid]);
+
   if (!hasExited(child)) child.kill("SIGKILL");
   await waitForRootExit(child);
+
   return { treeTermination: terminated ? "confirmed" : "unverified" };
 }

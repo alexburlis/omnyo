@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { formatFileSize, formatRelativeTime, splitSystemBody } from "./time.js";
 
 const NOW = Date.parse("2026-07-15T12:00:00.000Z");
+
 const at = (offsetMs: number) => new Date(NOW - offsetMs).toISOString();
 
 describe("formatRelativeTime", () => {

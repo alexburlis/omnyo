@@ -1,10 +1,10 @@
-import { getAiServiceSelections, setAiServiceSelection } from "@bb/db";
-import { promptInputSchema, type AiTextTask } from "@bb/domain";
+import { getAiServiceSelections, setAiServiceSelection } from "@omnyo/db";
+import { promptInputSchema, type AiTextTask } from "@omnyo/domain";
 import type {
   SetAiServiceSelectionRequest,
   SystemAiServicesResponse,
   TestAiServiceResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import { buildThreadTitlePrompt } from "../threads/title-generation.js";
@@ -52,9 +52,11 @@ export async function buildAiServicesView(
   deps: AiServicesViewDeps,
 ): Promise<SystemAiServicesResponse> {
   const services = orderedAiServices(deps);
+
   const statuses = await Promise.all(
     services.map((service) => deps.aiServices.status(aiServiceKey(service))),
   );
+
   return {
     selections: getAiServiceSelections(deps.db),
     services: services.map((service, index) => ({
@@ -73,8 +75,10 @@ export async function updateAiServiceSelection(
   request: SetAiServiceSelectionRequest,
 ): Promise<SystemAiServicesResponse> {
   const { selection, task } = request;
+
   if (selection.mode === "service") {
     const service = deps.aiServices.get(selection);
+
     if (service === null) {
       throw new ApiError(
         400,
@@ -82,6 +86,7 @@ export async function updateAiServiceSelection(
         `No loaded plugin "${selection.pluginId}" serves AI service "${selection.serviceId}"`,
       );
     }
+
     if (!aiServiceSupportsTask(service, task)) {
       throw new ApiError(
         400,
@@ -90,8 +95,10 @@ export async function updateAiServiceSelection(
       );
     }
   }
+
   setAiServiceSelection(deps.db, task, selection);
   deps.hub.notifySystem(["config-changed"]);
+
   return buildAiServicesView(deps);
 }
 
@@ -105,10 +112,13 @@ function sampleFor(task: AiTextTask): {
       sanitize: sanitizeGeneratedCommitMessage,
     };
   }
+
   const prompt = buildThreadTitlePrompt(SAMPLE_TITLE_INPUT);
+
   if (prompt === null) {
     throw new Error("The sample title prompt is empty");
   }
+
   return { prompt, sanitize: sanitizeGeneratedTitle };
 }
 
@@ -117,12 +127,14 @@ export async function testAiService(
   args: { task: AiTextTask; signal: AbortSignal },
 ): Promise<TestAiServiceResponse> {
   const sample = sampleFor(args.task);
+
   const outcome = await runTextAiTask(deps, {
     task: args.task,
     label: "AI service test",
     prompt: sample.prompt,
     signal: args.signal,
   });
+
   if (!outcome.ok) {
     return {
       ok: false,
@@ -130,7 +142,9 @@ export async function testAiService(
       durationMs: outcome.durationMs,
     };
   }
+
   const text = sample.sanitize(outcome.value);
+
   if (text === null) {
     return {
       ok: false,
@@ -138,6 +152,7 @@ export async function testAiService(
       durationMs: outcome.durationMs,
     };
   }
+
   return {
     ok: true,
     pluginId: outcome.service.pluginId,

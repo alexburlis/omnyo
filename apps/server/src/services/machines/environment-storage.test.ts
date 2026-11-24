@@ -9,7 +9,12 @@ import {
   environmentVariables,
   createConnection,
   migrate,
-} from "@bb/db";
+} from "@omnyo/db";
+import {
+  isSealed,
+  openSecretVault,
+  type SecretVault,
+} from "@omnyo/secret-storage";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   setMachineEnvironmentVariable,
@@ -20,18 +25,25 @@ import {
 } from "./environment-storage.js";
 
 let db: ReturnType<typeof createConnection>;
+
 let dataDir: string;
+
+let vault: SecretVault;
+
 beforeEach(async () => {
   db = createConnection(":memory:");
   migrate(db);
-  dataDir = await mkdtemp(join(tmpdir(), "bb-env-encryption-"));
+  dataDir = await mkdtemp(join(tmpdir(), "omnyo-env-encryption-"));
+  vault = await openSecretVault(dataDir);
 });
+
 afterEach(async () => {
   db.$client.close();
   await rm(dataDir, { recursive: true, force: true });
 });
+
 it("stores encrypted values that survive a database reopen", async () => {
-  await replaceMachineEnvironment(db, dataDir, {
+  await replaceMachineEnvironment(db, vault, {
     variables: ["REGION", "TOKEN"].map((name) => ({
       name,
       value: "private-" + name,
@@ -41,30 +53,40 @@ it("stores encrypted values that survive a database reopen", async () => {
   const rows = readMachineEnvironment(db);
   const persisted = db.select().from(environmentVariables).all();
   expect(JSON.stringify(persisted)).not.toContain("private-");
+
+  const keyText = await readFile(
+    join(dataDir, "machine-environment-key"),
+    "utf8",
+  );
+
+  expect(isSealed(keyText)).toBe(true);
+  expect(keyText).not.toMatch(/[a-f0-9]{64}/u);
+
   if (process.platform !== "win32") {
     expect(
       (await stat(join(dataDir, "machine-environment-key"))).mode & 0o777,
     ).toBe(0o600);
   }
+
   db.$client.close();
   db = createConnection(":memory:");
   migrate(db);
   db.insert(environmentVariables).values(persisted).run();
   expect(readMachineEnvironment(db)).toEqual(rows);
-  expect(await decryptMachineEnvironment(dataDir, rows[1]!)).toBe(
+  expect(await decryptMachineEnvironment(vault, rows[1]!)).toBe(
     "private-TOKEN",
   );
 });
 
 it("replaces the whole list while retaining unchanged ciphertext", async () => {
-  await replaceMachineEnvironment(db, dataDir, {
+  await replaceMachineEnvironment(db, vault, {
     variables: [
       { name: "REMOVE", value: "old", note: null },
       { name: "TOKEN", value: "private", note: null },
     ],
   });
   const token = readMachineEnvironment(db).find((row) => row.name === "TOKEN");
-  await replaceMachineEnvironment(db, dataDir, {
+  await replaceMachineEnvironment(db, vault, {
     variables: [
       { name: "TOKEN", value: null, note: "Retained" },
       { name: "ADDED", value: "new", note: null },
@@ -73,21 +95,21 @@ it("replaces the whole list while retaining unchanged ciphertext", async () => {
   const rows = readMachineEnvironment(db);
   expect(rows.map((row) => row.name)).toEqual(["ADDED", "TOKEN"]);
   expect(rows[1]).toEqual({ ...token, note: "Retained" });
-  expect(await decryptMachineEnvironment(dataDir, rows[1]!)).toBe("private");
+  expect(await decryptMachineEnvironment(vault, rows[1]!)).toBe("private");
 });
 
 it("authenticates ciphertext and its variable name", async () => {
-  await replaceMachineEnvironment(db, dataDir, {
+  await replaceMachineEnvironment(db, vault, {
     variables: [{ name: "TOKEN", value: "private", note: null }],
   });
   const [row] = readMachineEnvironment(db);
   await expect(
-    decryptMachineEnvironment(dataDir, { ...row!, name: "OTHER" }),
+    decryptMachineEnvironment(vault, { ...row!, name: "OTHER" }),
   ).rejects.toThrow("cannot be decrypted");
   const bytes = Buffer.from(row!.ciphertext, "base64");
   bytes[28] = bytes[28]! ^ 1;
   await expect(
-    decryptMachineEnvironment(dataDir, {
+    decryptMachineEnvironment(vault, {
       ...row!,
       ciphertext: bytes.toString("base64"),
     }),
@@ -95,13 +117,13 @@ it("authenticates ciphertext and its variable name", async () => {
 });
 
 it("does not replace a missing encryption key or overwrite existing ciphertext", async () => {
-  await replaceMachineEnvironment(db, dataDir, {
+  await replaceMachineEnvironment(db, vault, {
     variables: [{ name: "TOKEN", value: "private", note: null }],
   });
   const before = db.select().from(environmentVariables).all();
   await rm(join(dataDir, "machine-environment-key"));
   await expect(
-    replaceMachineEnvironment(db, dataDir, {
+    replaceMachineEnvironment(db, vault, {
       variables: [
         { name: "TOKEN", value: null, note: null },
         { name: "OTHER", value: "new", note: null },
@@ -115,15 +137,15 @@ it("does not replace a missing encryption key or overwrite existing ciphertext",
 });
 
 it("serializes replacement and removal without resurrecting values", async () => {
-  await replaceMachineEnvironment(db, dataDir, {
+  await replaceMachineEnvironment(db, vault, {
     variables: [{ name: "TOKEN", value: "old", note: null }],
   });
   await Promise.all([
     readMachineEnvironment(db),
-    replaceMachineEnvironment(db, dataDir, {
+    replaceMachineEnvironment(db, vault, {
       variables: [{ name: "TOKEN", value: "new", note: null }],
     }),
-    replaceMachineEnvironment(db, dataDir, { variables: [] }),
+    replaceMachineEnvironment(db, vault, { variables: [] }),
   ]);
   expect(readMachineEnvironment(db)).toEqual([]);
 });
@@ -136,48 +158,45 @@ it("isolates scopes, authenticates scope, and preserves concurrent edits", async
     .run();
   await setMachineEnvironmentVariable(
     db,
-    dataDir,
+    vault,
     { name: "TOKEN", value: "global", note: null },
     null,
   );
   await Promise.all([
     setMachineEnvironmentVariable(
       db,
-      dataDir,
+      vault,
       { name: "TOKEN", value: "project-a", note: null },
       "a",
     ),
     setMachineEnvironmentVariable(
       db,
-      dataDir,
+      vault,
       { name: "OTHER", value: "other", note: null },
       "a",
     ),
     setMachineEnvironmentVariable(
       db,
-      dataDir,
+      vault,
       { name: "TOKEN", value: "", note: null },
       "b",
     ),
   ]);
   const a = readMachineEnvironment(db, "a");
   expect(a.map((row) => row.name)).toEqual(["OTHER", "TOKEN"]);
-  expect(await decryptMachineEnvironment(dataDir, a[1]!)).toBe("project-a");
+  expect(await decryptMachineEnvironment(vault, a[1]!)).toBe("project-a");
   expect(
-    await decryptMachineEnvironment(
-      dataDir,
-      readMachineEnvironment(db, "b")[0]!,
-    ),
+    await decryptMachineEnvironment(vault, readMachineEnvironment(db, "b")[0]!),
   ).toBe("");
   await expect(
-    decryptMachineEnvironment(dataDir, { ...a[1]!, projectId: "b" }),
+    decryptMachineEnvironment(vault, { ...a[1]!, projectId: "b" }),
   ).rejects.toThrow("cannot be decrypted");
   await deleteMachineEnvironmentVariable(db, "TOKEN", "a");
   expect(readMachineEnvironment(db, "a").map((row) => row.name)).toEqual([
     "OTHER",
   ]);
   expect(
-    await decryptMachineEnvironment(dataDir, readMachineEnvironment(db)[0]!),
+    await decryptMachineEnvironment(vault, readMachineEnvironment(db)[0]!),
   ).toBe("global");
   db.delete(projects).where(eq(projects.id, "a")).run();
   expect(readMachineEnvironment(db, "a")).toEqual([]);
@@ -197,7 +216,7 @@ it("does not create a new key for an empty scope when another scope still has ci
     .run();
   await setMachineEnvironmentVariable(
     db,
-    dataDir,
+    vault,
     { name: "TOKEN", value: "secret", note: null },
     "a",
   );
@@ -205,7 +224,7 @@ it("does not create a new key for an empty scope when another scope still has ci
   await expect(
     setMachineEnvironmentVariable(
       db,
-      dataDir,
+      vault,
       { name: "GLOBAL", value: "value", note: null },
       null,
     ),
@@ -218,15 +237,18 @@ it("migrates legacy settings without changing ciphertext or requiring its key", 
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   cipher.setAAD(Buffer.from("TOKEN"));
+
   const encrypted = Buffer.concat([
     cipher.update("legacy-secret", "utf8"),
     cipher.final(),
   ]);
+
   const ciphertext = Buffer.concat([
     iv,
     cipher.getAuthTag(),
     encrypted,
   ]).toString("base64");
+
   db.insert(appSettingsValues)
     .values({
       key: "machineEnvironment:TOKEN",
@@ -240,6 +262,7 @@ it("migrates legacy settings without changing ciphertext or requiring its key", 
     })
     .run();
   db.$client.exec("DROP TABLE environment_variables");
+
   const sql = await readFile(
     new URL(
       "../../../../../packages/db/drizzle/0123_cheerful_tomorrow_man.sql",
@@ -247,6 +270,7 @@ it("migrates legacy settings without changing ciphertext or requiring its key", 
     ),
     "utf8",
   );
+
   db.$client.exec(sql);
   expect(
     db
@@ -267,17 +291,57 @@ it("migrates legacy settings without changing ciphertext or requiring its key", 
     { mode: 0o600 },
   );
   expect(
-    await decryptMachineEnvironment(dataDir, readMachineEnvironment(db)[0]!),
+    await decryptMachineEnvironment(vault, readMachineEnvironment(db)[0]!),
   ).toBe("legacy-secret");
-  await replaceMachineEnvironment(db, dataDir, {
+
+  const migratedKey = await readFile(
+    join(dataDir, "machine-environment-key"),
+    "utf8",
+  );
+
+  expect(isSealed(migratedKey)).toBe(true);
+  expect(migratedKey).not.toContain(key.toString("hex"));
+  expect(vault.open(migratedKey)).toBe(key.toString("hex"));
+  await replaceMachineEnvironment(db, vault, {
     variables: [{ name: "TOKEN", value: null, note: "Retained" }],
   });
   expect(readMachineEnvironment(db)[0]?.ciphertext).toBe(ciphertext);
   await setMachineEnvironmentVariable(
     db,
-    dataDir,
+    vault,
     { name: "TOKEN", value: "updated", note: null },
     null,
   );
   expect(readMachineEnvironment(db)[0]?.encryptionVersion).toBe(2);
+});
+
+it("refuses a key sealed by another data directory's vault without replacing it", async () => {
+  await replaceMachineEnvironment(db, vault, {
+    variables: [{ name: "TOKEN", value: "private", note: null }],
+  });
+  const before = db.select().from(environmentVariables).all();
+
+  const otherVault = await openSecretVault(
+    await mkdtemp(join(tmpdir(), "omnyo-env-other-vault-")),
+  );
+
+  const foreignKey = otherVault.seal(randomBytes(32).toString("hex"));
+  await writeFile(join(dataDir, "machine-environment-key"), foreignKey);
+
+  await expect(
+    setMachineEnvironmentVariable(
+      db,
+      vault,
+      { name: "OTHER", value: "new", note: null },
+      null,
+    ),
+  ).rejects.toThrow("encryption key is unavailable");
+  await expect(
+    decryptMachineEnvironment(vault, readMachineEnvironment(db)[0]!),
+  ).rejects.toThrow("encryption key is unavailable");
+  expect(db.select().from(environmentVariables).all()).toEqual(before);
+  expect(await readFile(join(dataDir, "machine-environment-key"), "utf8")).toBe(
+    foreignKey,
+  );
+  await rm(otherVault.dataDir, { recursive: true, force: true });
 });

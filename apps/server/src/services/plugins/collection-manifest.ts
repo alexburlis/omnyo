@@ -1,16 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import type { PluginSourceSelection } from "@bb/server-contract";
+import type { PluginSourceSelection } from "@omnyo/server-contract";
 import {
   normalizePluginSubdirectory,
   realPathInside,
 } from "./install-sources.js";
 import { readPluginManifest } from "./manifest.js";
 
-const COLLECTION_MANIFEST_PATH = ".bb/plugins.json";
+const COLLECTION_MANIFEST_PATH = ".omnyo/plugins.json";
+
 export const COLLECTION_SCHEMA_URL =
-  "https://getbb.app/schemas/plugins.schema.json";
+  "https://app.example.invalid/schemas/plugins.schema.json";
 
 const COLLECTION_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -18,6 +19,7 @@ function subdirectoryFromCollectionSource(source: string): string {
   if (!source.startsWith("./")) {
     throw new Error(`source "${source}" must start with "./"`);
   }
+
   return normalizePluginSubdirectory(source);
 }
 
@@ -41,7 +43,12 @@ const collectionEntrySchema = z
 
 const pluginCollectionManifestSchema = z
   .object({
-    $schema: z.literal(COLLECTION_SCHEMA_URL).optional(),
+    $schema: z
+      .enum([
+        COLLECTION_SCHEMA_URL,
+        "https://app.example.invalid/schemas/plugins.schema.json",
+      ])
+      .optional(),
     schemaVersion: z.literal(1),
     name: z.string().regex(COLLECTION_NAME_PATTERN),
     plugins: z.array(collectionEntrySchema).min(1),
@@ -57,6 +64,7 @@ const pluginCollectionManifestSchema = z
           message: `duplicate plugin name "${entry.name}"`,
         });
       }
+
       seen.add(entry.name);
     });
   });
@@ -67,6 +75,7 @@ export function formatIssues(error: z.ZodError): string {
   return error.issues
     .map((issue) => {
       const path = issue.path.join(".");
+
       return path.length === 0 ? issue.message : `${path}: ${issue.message}`;
     })
     .join("; ");
@@ -88,36 +97,82 @@ export function parsePluginCollectionManifest(
 ): PluginCollectionManifest {
   const json = parseJsonDocument(raw, location);
   const parsed = pluginCollectionManifestSchema.safeParse(json);
+
   if (!parsed.success) {
     throw new Error(`invalid ${location}: ${formatIssues(parsed.error)}`);
   }
+
   return parsed.data;
 }
 
-export async function readPluginCollectionManifest(
+function parseLegacyPluginCollectionManifestV1(
+  raw: string,
+): PluginCollectionManifest {
+  const location = ".bb/plugins.json";
+  const input = parseJsonDocument(raw, location);
+
+  const normalized =
+    typeof input === "object" &&
+    input !== null &&
+    !Array.isArray(input) &&
+    "$schema" in input &&
+    input.$schema === "https://getbb.app/schemas/plugins.schema.json"
+      ? { ...input, $schema: COLLECTION_SCHEMA_URL }
+      : input;
+
+  const parsed = pluginCollectionManifestSchema.safeParse(normalized);
+
+  if (!parsed.success)
+    throw new Error(`invalid ${location}: ${formatIssues(parsed.error)}`);
+
+  return parsed.data;
+}
+
+async function readCollectionFile(
   checkoutDir: string,
-): Promise<PluginCollectionManifest | null> {
+  location: string,
+): Promise<string | null> {
   let realPath: string;
+
   try {
     realPath = await realPathInside(
       checkoutDir,
-      join(checkoutDir, ".bb", "plugins.json"),
-      COLLECTION_MANIFEST_PATH,
+      join(checkoutDir, location),
+      location,
     );
   } catch (error) {
     if (
       error instanceof Error &&
       "code" in error &&
       (error.code === "ENOENT" || error.code === "ENOTDIR")
-    ) {
+    )
       return null;
-    }
+
     throw error;
   }
-  return parsePluginCollectionManifest(
-    await readFile(realPath, "utf8"),
-    COLLECTION_MANIFEST_PATH,
-  );
+
+  return readFile(realPath, "utf8");
+}
+
+export async function readPluginCollectionManifest(
+  checkoutDir: string,
+): Promise<PluginCollectionManifest | null> {
+  const [canonical, legacy] = await Promise.all([
+    readCollectionFile(checkoutDir, COLLECTION_MANIFEST_PATH),
+    readCollectionFile(checkoutDir, ".bb/plugins.json"),
+  ]);
+
+  if (canonical !== null && legacy !== null)
+    throw new Error(
+      "Plugin collection collision: both .omnyo/plugins.json and legacy .bb/plugins.json exist; select and preserve the intended manifest before installing.",
+    );
+
+  if (canonical !== null)
+    return parsePluginCollectionManifest(canonical, COLLECTION_MANIFEST_PATH);
+
+  if (legacy !== null) return parseLegacyPluginCollectionManifestV1(legacy);
+
+  return null;
 }
 
 export function subdirectoryForCollectionEntry(
@@ -125,6 +180,7 @@ export function subdirectoryForCollectionEntry(
   name: string,
 ): string {
   const entry = manifest.plugins.find((plugin) => plugin.name === name);
+
   if (entry === undefined) {
     throw new Error(
       `${COLLECTION_MANIFEST_PATH} has no plugin "${name}" — available: ${manifest.plugins
@@ -132,6 +188,7 @@ export function subdirectoryForCollectionEntry(
         .join(", ")}`,
     );
   }
+
   return subdirectoryFromCollectionSource(entry.source);
 }
 
@@ -143,19 +200,25 @@ export async function resolveSelectedSubdirectory(args: {
   if (args.selection.kind === "subdirectory") {
     return normalizePluginSubdirectory(args.selection.path);
   }
+
   const manifest = await readPluginCollectionManifest(args.checkoutDir);
+
   if (args.selection.kind === "entry") {
     if (manifest === null) {
       throw new Error(
         `${args.sourceLabel} has no ${COLLECTION_MANIFEST_PATH} collection manifest — install it with --subdirectory instead`,
       );
     }
+
     return subdirectoryForCollectionEntry(manifest, args.selection.name);
   }
+
   if (manifest === null) return null;
+
   const rootIsPlugin = await readPluginManifest(args.checkoutDir)
     .then(() => true)
     .catch(() => false);
+
   if (rootIsPlugin) return null;
   throw new Error(
     `${args.sourceLabel} contains several plugins — select one with --plugin <name> (${manifest.plugins

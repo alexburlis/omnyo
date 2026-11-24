@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { WorkspaceFile } from "@bb/server-contract";
+import type { WorkspaceFile } from "@omnyo/server-contract";
 import {
   ThreadMetadataContent,
   type ThreadMetadataContentProps,
@@ -37,12 +37,14 @@ const STORAGE_FILES: WorkspaceFile[] = [
 
 function WorkInProgressPanel() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
   const controller = useThreadStorageBrowser({
     files: STORAGE_FILES,
     onSelectPath: setSelectedPath,
     selectedPath,
     threadId: "thr_story",
   });
+
   return render({
     pullRequest: makePullRequest(),
     workspaceStatus: makeWorkspaceStatus({
@@ -55,11 +57,13 @@ function WorkInProgressPanel() {
         baseRef: "main",
         aheadCount: STORY_AHEAD_COMMITS.length,
         behindCount: 0,
+        squashMergeCheckComplete: true,
         hasCommittedUnmergedChanges: true,
         commits: STORY_AHEAD_COMMITS,
         insertions: 0,
         deletions: 0,
         lineStatsComplete: true,
+        fileCount: 0,
         files: [],
       },
     }),

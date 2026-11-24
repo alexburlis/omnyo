@@ -29,7 +29,7 @@ const providers = ["codex", "claude-code", "pi"];
 function createCaptureCommand(fileName: string): string {
   return (
     `printf '%s\\n%s\\n%s\\n' ` +
-    `"$BB_THREAD_ID" "$BB_PROJECT_ID" "$BB_ENVIRONMENT_ID" > ${fileName}`
+    `"$OMNYO_THREAD_ID" "$OMNYO_PROJECT_ID" "$OMNYO_ENVIRONMENT_ID" > ${fileName}`
   );
 }
 
@@ -53,12 +53,15 @@ for (const providerId of providers) {
       const ctx = createTestRuntime(providerId, {
         onInteractiveRequest: createApprovalResolution,
       });
+
       const sharedEnvironmentId = `env-isolation-${randomUUID()}`;
+
       const firstCapture: ThreadEnvCapture = {
         fileName: `env-first-${randomUUID()}.txt`,
         projectId: `project-first-${randomUUID()}`,
         threadId: newThreadId(),
       };
+
       const secondCapture: ThreadEnvCapture = {
         fileName: `env-second-${randomUUID()}.txt`,
         projectId: `project-second-${randomUUID()}`,
@@ -135,15 +138,18 @@ for (const providerId of providers) {
 
         const firstFileExists = existsSync(firstFilePath);
         const secondFileExists = existsSync(secondFilePath);
+
         if (!firstFileExists || !secondFileExists) {
           const firstTurnCompletedCount = turnCompletedCountForThread(
             ctx.events,
             firstCapture.threadId,
           );
+
           const secondTurnCompletedCount = turnCompletedCountForThread(
             ctx.events,
             secondCapture.threadId,
           );
+
           throw new Error(
             [
               `${providerId} turns completed without writing env capture files`,
@@ -163,6 +169,7 @@ for (const providerId of providers) {
           ctxTmpDir: ctx.tmpDir,
           fileName: firstCapture.fileName,
         });
+
         const secondCapturedEnv = readCapturedEnv({
           ctxTmpDir: ctx.tmpDir,
           fileName: secondCapture.fileName,
@@ -190,21 +197,25 @@ it("codex provider applies rotated and removed contributions on the next turn", 
   const ctx = createTestRuntime("codex", {
     onInteractiveRequest: createApprovalResolution,
   });
+
   const threadId = newThreadId();
+
   const contribution = (value: string) => [
     {
-      name: "BB_MACHINE_ROTATION_TEST",
+      name: "OMNYO_MACHINE_ROTATION_TEST",
       value,
       reason: "Verify next-turn rotation",
       source: { core: "machine-git" as const },
     },
   ];
+
   try {
     const options = await resolveRuntimeOptions({
       ctx,
       providerId: "codex",
       preset: "full",
     });
+
     await ctx.runtime.startThread({
       environmentId: `env-rotation-${randomUUID()}`,
       threadId,
@@ -213,6 +224,7 @@ it("codex provider applies rotated and removed contributions on the next turn", 
       options,
       contributedEnv: contribution("original"),
     });
+
     for (const [index, value] of ["original", "rotated", ""].entries()) {
       const fileName = `rotation-${randomUUID()}.txt`;
       await ctx.runtime.runTurn({
@@ -223,7 +235,7 @@ it("codex provider applies rotated and removed contributions on the next turn", 
         input: [
           promptTextInput({
             text: createCapturePrompt(
-              `if [ "\${BB_MACHINE_ROTATION_TEST-}" = '${value}' ]; then printf PASS; else printf FAIL; fi > ${fileName}`,
+              `if [ "\${OMNYO_MACHINE_ROTATION_TEST-}" = '${value}' ]; then printf PASS; else printf FAIL; fi > ${fileName}`,
             ),
           }),
         ],

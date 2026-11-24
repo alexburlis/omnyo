@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DbConnection } from "../connection.js";
 import {
   environments,
@@ -7,19 +7,15 @@ import {
   threads,
 } from "../schema.js";
 
-export const DATABASE_COMPACTION_MIN_RECLAIMABLE_BYTES = 128 * 1024 * 1024;
-export const DATABASE_COMPACTION_MIN_RECLAIMABLE_RATIO = 0.15;
-
 export const DATABASE_INCREMENTAL_VACUUM_MIN_FREELIST_PAGES = 1_024;
+
 export const DATABASE_INCREMENTAL_VACUUM_MAX_PAGES = 20_000;
+
 export const DATABASE_MAINTENANCE_BUSY_TIMEOUT_MS = 100;
 
 const ACTIVE_THREAD_STATUSES = ["active", "starting"] as const;
-const ACTIVE_PENDING_INTERACTION_STATUSES = ["pending", "resolving"] as const;
 
-interface CountRow {
-  value: number;
-}
+const ACTIVE_PENDING_INTERACTION_STATUSES = ["pending", "resolving"] as const;
 
 interface PageCountRow {
   page_count: number;
@@ -35,10 +31,6 @@ interface FreelistCountRow {
 
 interface BusyTimeoutRow {
   timeout: number;
-}
-
-interface DbstatUnusedRow {
-  unusedBytes: number;
 }
 
 interface ForeignKeysRow {
@@ -57,22 +49,6 @@ export interface DatabaseMaintenanceActivity {
   activeThreadProvisioningCount: number;
 }
 
-export interface DatabaseCompactionStats {
-  databaseBytes: number;
-  freelistBytes: number;
-  freelistCount: number;
-  pageCount: number;
-  pageSize: number;
-  reclaimableBytes: number;
-  unusedBytes: number;
-}
-
-export interface DatabaseCompactionDecisionArgs {
-  minReclaimableBytes: number;
-  minReclaimableRatio: number;
-  stats: DatabaseCompactionStats;
-}
-
 export interface DatabaseFreelistStats {
   databaseBytes: number;
   freelistBytes: number;
@@ -84,11 +60,6 @@ export interface DatabaseFreelistStats {
 export interface DatabaseIncrementalVacuumDecisionArgs {
   minFreelistPages: number;
   stats: DatabaseFreelistStats;
-}
-
-export interface CompactDatabaseResult {
-  after: DatabaseCompactionStats;
-  before: DatabaseCompactionStats;
 }
 
 export interface IncrementalVacuumResult {
@@ -117,12 +88,13 @@ const DEFERRED_LEGACY_TABLE_NAMES = [
   "project_operations",
   "thread_operations",
 ] as const;
+
 const DEFERRED_LEGACY_TABLE_NAME_SET = new Set<string>(
   DEFERRED_LEGACY_TABLE_NAMES,
 );
-const DEFERRED_LEGACY_TABLE_NAME_LIST_SQL = DEFERRED_LEGACY_TABLE_NAMES.map(
-  quoteSqlString,
-).join(", ");
+
+const DEFERRED_LEGACY_TABLE_NAME_LIST_SQL =
+  DEFERRED_LEGACY_TABLE_NAMES.map(quoteSqlString).join(", ");
 
 function quoteSqlString(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
@@ -130,10 +102,6 @@ function quoteSqlString(value: string): string {
 
 function quoteSqlIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
-}
-
-function countValue(row: CountRow | undefined): number {
-  return row?.value ?? 0;
 }
 
 function readPageCount(db: DbConnection): number {
@@ -152,9 +120,8 @@ function readPageSize(db: DbConnection): number {
 
 function readFreelistCount(db: DbConnection): number {
   return (
-    db.$client
-      .prepare<[], FreelistCountRow>("PRAGMA freelist_count")
-      .get()?.freelist_count ?? 0
+    db.$client.prepare<[], FreelistCountRow>("PRAGMA freelist_count").get()
+      ?.freelist_count ?? 0
   );
 }
 
@@ -172,20 +139,6 @@ function readForeignKeysEnabled(db: DbConnection): boolean {
   );
 }
 
-function readDbstatUnusedBytes(db: DbConnection): number {
-  try {
-    return (
-      db.$client
-        .prepare<[], DbstatUnusedRow>(
-          "SELECT COALESCE(SUM(unused), 0) AS unusedBytes FROM dbstat WHERE name NOT LIKE 'sqlite_%'",
-        )
-        .get()?.unusedBytes ?? 0
-    );
-  } catch {
-    return 0;
-  }
-}
-
 function runWithMaintenanceBusyTimeout<TValue>(
   args: RunWithMaintenanceBusyTimeoutArgs<TValue>,
 ): TValue {
@@ -193,6 +146,7 @@ function runWithMaintenanceBusyTimeout<TValue>(
   args.db.$client.exec(
     `PRAGMA busy_timeout = ${DATABASE_MAINTENANCE_BUSY_TIMEOUT_MS}`,
   );
+
   try {
     return args.work();
   } finally {
@@ -203,58 +157,24 @@ function runWithMaintenanceBusyTimeout<TValue>(
 export function getDatabaseMaintenanceActivity(
   db: DbConnection,
 ): DatabaseMaintenanceActivity {
-  const activeThreadCount = countValue(
-    db
-      .select({ value: count() })
-      .from(threads)
-      .where(
-        and(
-          inArray(threads.status, [...ACTIVE_THREAD_STATUSES]),
-          isNull(threads.deletedAt),
-        ),
-      )
-      .get(),
-  );
-  const activeProjectDeletionCount = countValue(
-    db
-      .select({ value: count() })
-      .from(projects)
-      .where(isNotNull(projects.deletedAt))
-      .get(),
-  );
-  const activeEnvironmentProvisioningCount = countValue(
-    db
-      .select({ value: count() })
-      .from(environments)
-      .where(eq(environments.status, "provisioning"))
-      .get(),
-  );
-  const activeThreadProvisioningCount = countValue(
-    db
-      .select({ value: count() })
-      .from(threads)
-      .where(eq(threads.status, "starting"))
-      .get(),
-  );
-  const activePendingInteractionCount = countValue(
-    db
-      .select({ value: count() })
-      .from(pendingInteractions)
-      .where(
-        inArray(pendingInteractions.status, [
-          ...ACTIVE_PENDING_INTERACTION_STATUSES,
-        ]),
-      )
-      .get(),
-  );
+  const activity = db.get<DatabaseMaintenanceActivity>(sql`
+    select
+      (select count(*) from ${environments}
+        where ${eq(environments.status, "provisioning")}) as activeEnvironmentProvisioningCount,
+      (select count(*) from ${pendingInteractions}
+        where ${inArray(pendingInteractions.status, [...ACTIVE_PENDING_INTERACTION_STATUSES])}) as activePendingInteractionCount,
+      (select count(*) from ${projects}
+        where ${isNotNull(projects.deletedAt)}) as activeProjectDeletionCount,
+      (select count(*) from ${threads} indexed by threads_active_maintenance_idx
+        where ${and(inArray(threads.status, [...ACTIVE_THREAD_STATUSES]), isNull(threads.deletedAt))}) as activeThreadCount,
+      (select count(*) from ${threads}
+        where ${eq(threads.status, "starting")}) as activeThreadProvisioningCount
+  `);
 
-  return {
-    activeEnvironmentProvisioningCount,
-    activePendingInteractionCount,
-    activeProjectDeletionCount,
-    activeThreadCount,
-    activeThreadProvisioningCount,
-  };
+  if (activity === undefined)
+    throw new Error("Database maintenance activity query returned no row");
+
+  return activity;
 }
 
 export function isDatabaseMaintenanceIdle(
@@ -292,17 +212,19 @@ export function dropDeferredLegacyTables(
     db,
     work: () => {
       const droppedTables = listDeferredLegacyTables(db);
+
       if (droppedTables.length === 0) {
         return { droppedTables };
       }
 
       const foreignKeysEnabled = readForeignKeysEnabled(db);
       db.$client.pragma("foreign_keys = OFF");
+
       try {
         for (const tableName of droppedTables) {
-          db.$client.prepare(
-            `DROP TABLE IF EXISTS ${quoteSqlIdentifier(tableName)}`,
-          ).run();
+          db.$client
+            .prepare(`DROP TABLE IF EXISTS ${quoteSqlIdentifier(tableName)}`)
+            .run();
         }
       } finally {
         db.$client.pragma(
@@ -333,33 +255,6 @@ export function getDatabaseFreelistStats(
   };
 }
 
-export function getDatabaseCompactionStats(
-  db: DbConnection,
-): DatabaseCompactionStats {
-  const freelistStats = getDatabaseFreelistStats(db);
-  const unusedBytes = readDbstatUnusedBytes(db);
-
-  return {
-    ...freelistStats,
-    reclaimableBytes: freelistStats.freelistBytes + unusedBytes,
-    unusedBytes,
-  };
-}
-
-export function shouldCompactDatabase(
-  args: DatabaseCompactionDecisionArgs,
-): boolean {
-  if (args.stats.databaseBytes <= 0) {
-    return false;
-  }
-
-  return (
-    args.stats.reclaimableBytes >= args.minReclaimableBytes &&
-    args.stats.reclaimableBytes / args.stats.databaseBytes >=
-      args.minReclaimableRatio
-  );
-}
-
 export function shouldRunIncrementalVacuum(
   args: DatabaseIncrementalVacuumDecisionArgs,
 ): boolean {
@@ -376,9 +271,9 @@ export function getDatabaseAutoVacuumMode(
   db: DbConnection,
 ): DatabaseAutoVacuumMode {
   const mode =
-    db.$client
-      .prepare<[], AutoVacuumModeRow>("PRAGMA auto_vacuum")
-      .get()?.auto_vacuum ?? 0;
+    db.$client.prepare<[], AutoVacuumModeRow>("PRAGMA auto_vacuum").get()
+      ?.auto_vacuum ?? 0;
+
   switch (mode) {
     case 1:
       return "full";
@@ -387,25 +282,6 @@ export function getDatabaseAutoVacuumMode(
     default:
       return "none";
   }
-}
-
-export function compactDatabase(db: DbConnection): CompactDatabaseResult {
-  return runWithMaintenanceBusyTimeout({
-    db,
-    work: () => {
-      const before = getDatabaseCompactionStats(db);
-
-      db.$client.exec("PRAGMA auto_vacuum = INCREMENTAL");
-      db.$client.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-      db.$client.exec("VACUUM");
-      db.$client.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-
-      return {
-        after: getDatabaseCompactionStats(db),
-        before,
-      };
-    },
-  });
 }
 
 export function runIncrementalVacuum(
@@ -417,9 +293,7 @@ export function runIncrementalVacuum(
     work: () => {
       const before = getDatabaseFreelistStats(db);
 
-      db.$client.exec("PRAGMA wal_checkpoint(PASSIVE)");
       db.$client.exec(`PRAGMA incremental_vacuum(${args.maxPages})`);
-      db.$client.exec("PRAGMA wal_checkpoint(PASSIVE)");
 
       return {
         after: getDatabaseFreelistStats(db),

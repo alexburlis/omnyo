@@ -7,7 +7,7 @@ import {
   hostDaemonSessions,
   hosts,
   environments as environmentRows,
-} from "@bb/db";
+} from "@omnyo/db";
 import { handleHostRemoved } from "../../internal/session-owner-side-effects.js";
 import type { WorkSessionDeps } from "../../types.js";
 import { maintainMachine } from "./lifecycle.js";
@@ -29,17 +29,17 @@ import {
   machineHasLiveThreads,
   machineHasPendingThreads,
   updateHost,
-} from "@bb/db";
-import { jsonValueSchema, type Host, type JsonValue } from "@bb/domain";
+} from "@omnyo/db";
+import { jsonValueSchema, type Host, type JsonValue } from "@omnyo/domain";
 import type {
   PluginMachineProviderCreateResult,
   PluginMachineProviderResource,
   PluginMachineProviderProgress,
-} from "@get-bb/plugin-sdk/machine-provider";
-import { summarizeStandardIssues } from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/plugin-sdk/machine-provider";
+import { summarizeStandardIssues } from "@omnyo/plugin-sdk/internal/host-policy";
 import { ApiError } from "../../errors.js";
 import type { ThreadProvisioningDeps } from "../threads/thread-provisioning-environment.js";
-import { decideWithinBox } from "../threads/dispatch-hooks.js";
+import { decideWithinBox } from "../lib/decision-timeout.js";
 import {
   getMachineProvider,
   invokeMachineProvider,
@@ -48,17 +48,19 @@ import {
   type PluginMachineProviderRecord,
 } from "../plugins/plugin-machine-provider-registry.js";
 import {
+  leaveEnvironmentsOnOfflineMachine,
   requestEnvironmentRemoval,
   sweepProviderEnvironment,
 } from "../environments/environment-engine.js";
 import { hasPendingProjectSourceSetupOnHost } from "../projects/project-source-setup.js";
 import { machineProviderUnavailableReason } from "./provider-availability.js";
 import { errorMessage } from "../lib/error-log-fields.js";
-import { toHostWithStatus } from "../lib/entity-lookup.js";
+import { isHostConnected, toHostWithStatus } from "../lib/entity-lookup.js";
 import { perDbRegistry } from "../lib/per-db-registry.js";
 import { emitPluginHostDeleted } from "../plugins/plugin-thread-events.js";
 
 type Deps = ThreadProvisioningDeps;
+
 type MachineLifecycleDeps = Pick<Deps, "db" | "hub" | "logger">;
 
 function expireMachineSessions(deps: Deps, hostId: string): void {
@@ -90,6 +92,7 @@ const resourceSchema = jsonValueSchema
     (value) => Buffer.byteLength(JSON.stringify(value)) <= 16_384,
     "Resource exceeds 16 KiB",
   );
+
 const createResultSchema = z.discriminatedUnion("status", [
   z
     .object({
@@ -102,13 +105,16 @@ const createResultSchema = z.discriminatedUnion("status", [
     .object({ status: z.literal("failed"), message: z.string().min(1) })
     .strict(),
 ]);
+
 const resourceResultSchema = z.object({ resource: resourceSchema }).strict();
+
 const removeResultSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("removed") }).strict(),
   z
     .object({ status: z.literal("failed"), message: z.string().min(1) })
     .strict(),
 ]);
+
 const validateDecisionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("accept") }).strict(),
   z
@@ -120,9 +126,13 @@ const validateDecisionSchema = z.discriminatedUnion("action", [
 ]);
 
 const createOperations = new WeakMap<object, Map<string, ActiveOperation>>();
+
 const suspendOperations = new WeakMap<object, Map<string, ActiveOperation>>();
+
 const resumeOperations = new WeakMap<object, Map<string, ActiveOperation>>();
+
 const removeOperations = new WeakMap<object, Map<string, ActiveOperation>>();
+
 const machineSweepOperations = new WeakMap<
   object,
   Map<string, ActiveOperation>
@@ -136,16 +146,20 @@ function runTrackedOperation(args: {
   run: (signal: AbortSignal) => Promise<void>;
 }): ActiveOperation {
   const existing = args.map.get(args.key);
+
   if (existing !== undefined) return existing;
   const controller = new AbortController();
+
   const operation: ActiveOperation = {
     controller,
     done: Promise.resolve(),
   };
+
   operation.done = args.run(controller.signal).finally(() => {
     if (args.map.get(args.key) === operation) args.map.delete(args.key);
   });
   args.map.set(args.key, operation);
+
   return operation;
 }
 
@@ -182,6 +196,7 @@ function createReporter(
   return {
     step: (text) => {
       const current = getHost(deps.db, owner.id);
+
       if (!createOwns(current, owner) || current.phase !== "creating") return;
       updateHost(deps.db, deps.hub, owner.id, {
         statusMessage: text.slice(0, 500),
@@ -190,6 +205,7 @@ function createReporter(
     },
     log: (text) => {
       const current = getHost(deps.db, owner.id);
+
       if (!createOwns(current, owner) || current.phase !== "creating") return;
       updateHost(deps.db, deps.hub, owner.id, {
         pendingLog: (
@@ -206,9 +222,11 @@ function lifecycleReporter(
   hostId: string,
 ): PluginMachineProviderProgress {
   const owner = getHost(deps.db, hostId);
+
   return {
     step: (text) => {
       const current = getHost(deps.db, hostId);
+
       if (
         current === null ||
         current.destroyedAt !== null ||
@@ -243,6 +261,7 @@ async function invokeCreate(
       checkpoint: async (resource) => {
         const parsed = resourceSchema.parse(resource);
         const current = getHost(deps.db, host.id);
+
         if (!createOwns(current, host))
           throw new Error(
             "Machine creation attempt no longer owns this resource",
@@ -253,7 +272,9 @@ async function invokeCreate(
       signal,
     }),
   );
+
   if (!invocation.ok) throw new Error(invocation.error);
+
   return createResultSchema.parse(invocation.value);
 }
 
@@ -274,8 +295,10 @@ async function removeResource(
       signal: args.signal,
     }),
   );
+
   if (!invocation.ok) throw new Error(invocation.error);
   const result = removeResultSchema.parse(invocation.value);
+
   if (result.status === "failed") throw new Error(result.message);
 }
 
@@ -287,8 +310,10 @@ async function runCreate(
 ): Promise<void> {
   try {
     const result = await invokeCreate(record, host, deps, signal);
+
     if (result.status === "failed") {
       const current = getHost(deps.db, host.id);
+
       if (createOwns(current, host)) {
         updateHost(deps.db, deps.hub, host.id, {
           phase: "removing",
@@ -297,24 +322,31 @@ async function runCreate(
           teardownStatus: "failed",
         });
       }
+
       return;
     }
+
     const current = getHost(deps.db, host.id);
+
     if (!createOwns(current, host)) {
       await removeResource(deps, record, {
         hostId: host.id,
         resource: result.resource,
         signal: new AbortController().signal,
       });
+
       return;
     }
+
     if (current.phase === "removing") {
       updateHost(deps.db, deps.hub, host.id, {
         resource: result.resource,
         removeRetryAt: Date.now(),
       });
+
       return;
     }
+
     updateHost(deps.db, deps.hub, host.id, {
       name: result.name,
       phase: "active",
@@ -331,7 +363,9 @@ async function runCreate(
     deps.hub.notifyHost(host.id, ["host-connected"]);
   } catch (error) {
     const current = getHost(deps.db, host.id);
+
     if (signal.aborted && current?.phase === "removing") return;
+
     if (createOwns(current, host)) {
       updateHost(deps.db, deps.hub, host.id, {
         phase: "removing",
@@ -353,6 +387,7 @@ function startCreate(
     key: host.id,
     run: (signal) => runCreate(deps, record, host, signal),
   });
+
   void operation.done
     .then(async () => {
       await sweepProviderMachine(deps, host.id);
@@ -363,6 +398,7 @@ function startCreate(
         "Machine creation cleanup failed",
       );
     });
+
   return operation;
 }
 
@@ -371,6 +407,7 @@ export async function parseMachineProviderInputs(
   inputs: JsonValue | null,
 ): Promise<JsonValue | null> {
   const schema = record.provider.inputs;
+
   if (schema === null) {
     if (inputs !== null) {
       throw new ApiError(
@@ -379,13 +416,16 @@ export async function parseMachineProviderInputs(
         `The "${record.provider.id}" machine provider takes no inputs, but the request carried some`,
       );
     }
+
     return null;
   }
+
   const invocation = await invokeMachineProvider(
     record,
     `"${record.provider.id}" machine provider inputs`,
     async () => schema["~standard"].validate(inputs ?? {}),
   );
+
   if (!invocation.ok) {
     throw new ApiError(
       502,
@@ -393,6 +433,7 @@ export async function parseMachineProviderInputs(
       `The "${record.provider.id}" machine provider (plugin "${record.pluginId}") failed to validate its inputs: ${invocation.error}`,
     );
   }
+
   if (invocation.value.issues !== undefined) {
     throw new ApiError(
       400,
@@ -400,7 +441,9 @@ export async function parseMachineProviderInputs(
       `The "${record.provider.id}" machine provider refused the inputs: ${summarizeStandardIssues(invocation.value.issues)}`,
     );
   }
+
   const parsed = jsonValueSchema.safeParse(invocation.value.value);
+
   if (!parsed.success) {
     throw new ApiError(
       502,
@@ -408,6 +451,7 @@ export async function parseMachineProviderInputs(
       `The "${record.provider.id}" machine provider parsed its inputs into a value that is not JSON`,
     );
   }
+
   return parsed.data;
 }
 
@@ -416,6 +460,7 @@ export async function prepareMachineProviderSelection(args: {
   inputs: JsonValue | null;
 }): Promise<{ record: PluginMachineProviderRecord; inputs: JsonValue | null }> {
   const record = getMachineProvider(args.machineProviderId);
+
   if (record === undefined) {
     throw new ApiError(
       400,
@@ -423,11 +468,15 @@ export async function prepareMachineProviderSelection(args: {
       `Unknown machine provider "${args.machineProviderId}"`,
     );
   }
+
   const unavailableReason = await machineProviderUnavailableReason(record);
+
   if (unavailableReason !== null) {
     throw new ApiError(409, "machine_provider_rejected", unavailableReason);
   }
+
   const inputs = await parseMachineProviderInputs(record, args.inputs);
+
   if (record.provider.validate !== null) {
     const invocation = await invokeMachineProvider(
       record,
@@ -438,6 +487,7 @@ export async function prepareMachineProviderSelection(args: {
           machineProviderDecisionTimeoutMs(),
         ),
     );
+
     if (!invocation.ok) {
       throw new ApiError(
         502,
@@ -445,6 +495,7 @@ export async function prepareMachineProviderSelection(args: {
         `The "${record.provider.id}" machine provider failed to validate the request: ${invocation.error}`,
       );
     }
+
     if (!invocation.value.ok) {
       throw new ApiError(
         502,
@@ -452,7 +503,9 @@ export async function prepareMachineProviderSelection(args: {
         `The "${record.provider.id}" machine provider failed to validate the request: ${invocation.value.error}`,
       );
     }
+
     const decision = validateDecisionSchema.safeParse(invocation.value.value);
+
     if (!decision.success) {
       throw new ApiError(
         502,
@@ -460,6 +513,7 @@ export async function prepareMachineProviderSelection(args: {
         `The "${record.provider.id}" machine provider returned an invalid validate decision`,
       );
     }
+
     if (decision.data.action === "refuse") {
       throw new ApiError(
         409,
@@ -468,6 +522,7 @@ export async function prepareMachineProviderSelection(args: {
       );
     }
   }
+
   return { record, inputs };
 }
 
@@ -487,6 +542,7 @@ export function askMachineLaunch(
 ): MachineLaunchDecision {
   const now = Date.now();
   let row = getNonDestroyedHostByLaunchKey(deps.db, args.key);
+
   if (
     row !== null &&
     (row.machineProviderId !== args.record.provider.id ||
@@ -499,12 +555,14 @@ export function askMachineLaunch(
       `Machine launch key "${args.key}" is already in use`,
     );
   }
+
   if (row !== null && row.phase === "removing") {
     const decision: MachineLaunchDecision = {
       action: "reject",
       message: row.statusMessage ?? "Machine creation was cancelled",
       log: takeCreateLog(deps, row),
     };
+
     if (
       row.teardownAttempt === 0 &&
       row.teardownStatus === "failed" &&
@@ -520,10 +578,13 @@ export function askMachineLaunch(
         );
       });
     }
+
     return decision;
   }
+
   if (row === null) {
     const id = createHostId();
+
     const attempt =
       (deps.db
         .select({ attempt: hosts.attempt })
@@ -532,6 +593,7 @@ export function askMachineLaunch(
         .orderBy(desc(hosts.attempt))
         .limit(1)
         .get()?.attempt ?? 0) + 1;
+
     const suffix = id.replace(/[^a-z0-9]/giu, "").slice(-6);
     const operationId = `${args.record.pluginId}:${randomUUID()}`;
     deps.db
@@ -568,6 +630,7 @@ export function askMachineLaunch(
       log: takeCreateLog(deps, row),
     };
   }
+
   return {
     action: "wait",
     reason: row.statusMessage ?? "Creating machine…",
@@ -578,9 +641,11 @@ export function askMachineLaunch(
 
 function takeCreateLog(deps: Deps, row: MachineHostRow): string {
   const log = row.pendingLog;
+
   if (log.length > 0) {
     updateHost(deps.db, deps.hub, row.id, { pendingLog: "" });
   }
+
   return log;
 }
 
@@ -594,18 +659,33 @@ export async function submitMachine(
 ): Promise<Host> {
   const key = args.key ?? `machine-${randomUUID()}`;
   const prepared = await prepareMachineProviderSelection(args);
+
   const decision = askMachineLaunch(deps, {
     key,
     lifetime: "standalone",
     record: prepared.record,
     inputs: prepared.inputs,
   });
+
   if (decision.action === "reject")
     throw new ApiError(409, "machine_provider_rejected", decision.message);
   const host = getNonDestroyedHostByLaunchKey(deps.db, key);
+
   if (host === null)
     throw new ApiError(409, "machine_provider_rejected", "Machine was removed");
+
   return toHostWithStatus(deps, host);
+}
+
+export async function waitForMachineCreation(
+  deps: Deps,
+  hostId: string,
+): Promise<void> {
+  const operation = perDbRegistry(createOperations, deps.db).get(hostId);
+
+  if (operation === undefined) return;
+  await operation.done;
+  await sweepProviderMachine(deps, hostId);
 }
 
 export async function removeCreatingMachine(
@@ -613,6 +693,7 @@ export async function removeCreatingMachine(
   launchKey: string,
 ): Promise<void> {
   const host = getNonDestroyedHostByLaunchKey(deps.db, launchKey);
+
   if (host?.phase !== "creating") return;
   requestMachineRemoval(deps, host.id);
   await sweepProviderMachine(deps, host.id);
@@ -646,15 +727,21 @@ async function suspendMachine(
 ): Promise<void> {
   const daemonShutdownTimeoutMs = 30_000;
   const removing = perDbRegistry(removeOperations, deps.db).get(hostId);
+
   if (removing !== undefined) {
     await removing.done.catch(() => {});
+
     return;
   }
+
   const resuming = perDbRegistry(resumeOperations, deps.db).get(hostId);
+
   if (resuming !== undefined) {
     await resuming.done.catch(() => {});
   }
+
   const suspending = perDbRegistry(suspendOperations, deps.db).get(hostId);
+
   if (suspending !== undefined) {
     if (coordinateMaintenance)
       throw new ApiError(
@@ -663,10 +750,14 @@ async function suspendMachine(
         "Machine already has a lifecycle operation or is waiting for retry.",
       );
     await suspending.done;
+
     return;
   }
+
   const row = getHost(deps.db, hostId);
+
   if (reconcile && row?.phase !== "suspended") return;
+
   if (
     row === null ||
     row.machineProviderId === null ||
@@ -677,15 +768,20 @@ async function suspendMachine(
   ) {
     return;
   }
+
   const record = getMachineProvider(row.machineProviderId);
+
   if (record === undefined || record.provider.suspend === null) return;
+
   if (row.resource === null) {
     throw new Error(`Machine "${hostId}" has no provider resource`);
   }
+
   const operationId = `${record.pluginId}:${randomUUID()}`;
   const suspend = record.provider.suspend;
   const resource = row.resource;
   const removalRequested = row.phase === "removing";
+
   const operation = runTrackedOperation({
     map: perDbRegistry(suspendOperations, deps.db),
     key: hostId,
@@ -698,12 +794,15 @@ async function suspendMachine(
           teardownStatus: null,
         });
         const daemonSessionId = deps.hub.getDaemonSessionIdForHost(hostId);
+
         if (daemonSessionId !== null) {
           deps.hub.requestDaemonShutdown(daemonSessionId);
+
           const closed = await deps.hub.waitForDaemonSessionClose(
             daemonSessionId,
             daemonShutdownTimeoutMs,
           );
+
           if (!closed || deps.hub.hasDaemonForHost(hostId)) {
             if (!coordinateMaintenance) {
               updateHost(deps.db, deps.hub, hostId, {
@@ -711,12 +810,15 @@ async function suspendMachine(
                 machineOperationId: null,
               });
             }
+
             throw new Error(
               `Machine "${hostId}" daemon did not shut down cleanly within ${daemonShutdownTimeoutMs}ms; suspend was cancelled`,
             );
           }
         }
+
         updateHost(deps.db, deps.hub, hostId, { suspendedAt: Date.now() });
+
         const invocation = await invokeMachineProvider(
           record,
           "machine suspend",
@@ -729,6 +831,7 @@ async function suspendMachine(
               checkpoint: async (checkpoint) => {
                 const parsed = resourceSchema.parse(checkpoint);
                 const current = getHost(deps.db, hostId);
+
                 if (
                   !lifecycleOwns(current, record.provider.id, operationId, [
                     "suspending",
@@ -737,17 +840,21 @@ async function suspendMachine(
                 ) {
                   throw new Error(`Machine "${hostId}" is no longer active`);
                 }
+
                 updateHost(deps.db, deps.hub, hostId, {
                   resource: parsed,
                 });
               },
             }),
         );
+
         if (!invocation.ok) {
           throw new Error(invocation.error);
         }
+
         const result = resourceResultSchema.parse(invocation.value);
         const current = getHost(deps.db, hostId);
+
         if (
           !lifecycleOwns(current, record.provider.id, operationId, [
             "suspending",
@@ -756,6 +863,7 @@ async function suspendMachine(
         ) {
           return;
         }
+
         updateHost(deps.db, deps.hub, hostId, {
           phase:
             removalRequested || current.phase === "removing"
@@ -768,6 +876,7 @@ async function suspendMachine(
         });
         deps.hub.notifyHost(hostId, ["host-disconnected"]);
       };
+
       if (coordinateMaintenance) {
         await maintainMachine(deps, hostId, operationId, run);
       } else {
@@ -775,14 +884,17 @@ async function suspendMachine(
       }
     },
   });
+
   await operation.done;
 }
 
 function requireSuspendableMachine(deps: Deps, hostId: string) {
   const row = getHost(deps.db, hostId);
+
   if (row === null || row.destroyedAt !== null) {
     throw new ApiError(404, "host_not_found", "Host not found");
   }
+
   if (row.machineProviderId === null) {
     throw new ApiError(
       409,
@@ -790,7 +902,9 @@ function requireSuspendableMachine(deps: Deps, hostId: string) {
       "This machine is not managed by a machine provider",
     );
   }
+
   const record = getMachineProvider(row.machineProviderId);
+
   if (
     record === undefined ||
     record.provider.suspend === null ||
@@ -802,6 +916,7 @@ function requireSuspendableMachine(deps: Deps, hostId: string) {
       `Machine provider "${row.machineProviderId}" does not support suspend and resume`,
     );
   }
+
   return row;
 }
 
@@ -821,6 +936,7 @@ function assertMachineProvisioningComplete(deps: Deps, hostId: string): void {
 
 function requireActiveSuspendableMachine(deps: Deps, hostId: string): void {
   const row = requireSuspendableMachine(deps, hostId);
+
   if (row.phase !== "active" && row.phase !== "suspending") {
     throw new ApiError(
       409,
@@ -828,6 +944,7 @@ function requireActiveSuspendableMachine(deps: Deps, hostId: string): void {
       "Only an active machine can be suspended",
     );
   }
+
   assertMachineProvisioningComplete(deps, hostId);
 }
 
@@ -837,6 +954,7 @@ export async function requestMachineSuspension(
 ): Promise<void> {
   requireActiveSuspendableMachine(deps, hostId);
   await suspendMachine(deps, hostId, true);
+
   if (listThreadIdsWithHostOfflineQueueWaits(deps.db, hostId).length > 0) {
     requestQueuedMachineReadiness(deps, hostId);
   }
@@ -857,7 +975,9 @@ export async function reconcileMachine(
   hostId: string,
 ): Promise<void> {
   const row = requireSuspendableMachine(deps, hostId);
+
   if (row.phase !== "suspended") return;
+
   if (
     perDbRegistry(resumeOperations, deps.db).has(hostId) ||
     perDbRegistry(removeOperations, deps.db).has(hostId) ||
@@ -870,6 +990,7 @@ export async function reconcileMachine(
 
 export function startMachineReconciliation(deps: Deps, hostId: string): void {
   const row = requireSuspendableMachine(deps, hostId);
+
   if (row.phase !== "suspended") return;
   assertMachineProvisioningComplete(deps, hostId);
   void reconcileMachine(deps, hostId).catch((error: unknown) => {
@@ -885,6 +1006,7 @@ export async function waitForMachineMaintenance(
   hostId: string,
 ): Promise<void> {
   const suspending = perDbRegistry(suspendOperations, deps.db).get(hostId);
+
   if (suspending !== undefined) {
     await suspending.done;
   }
@@ -892,6 +1014,7 @@ export async function waitForMachineMaintenance(
 
 export function startMachineResume(deps: Deps, hostId: string): void {
   const row = requireSuspendableMachine(deps, hostId);
+
   if (
     row.phase !== "active" &&
     row.phase !== "suspended" &&
@@ -904,6 +1027,7 @@ export function startMachineResume(deps: Deps, hostId: string): void {
       "Only an active or suspended machine can be resumed",
     );
   }
+
   void resumeMachine(deps, hostId).catch((error: unknown) => {
     deps.logger.warn(
       { hostId, error: errorMessage(error) },
@@ -917,14 +1041,19 @@ export async function resumeMachine(
   hostId: string,
 ): Promise<void> {
   const removing = perDbRegistry(removeOperations, deps.db).get(hostId);
+
   if (removing !== undefined) {
     await removing.done.catch(() => {});
+
     return;
   }
+
   const suspending = perDbRegistry(suspendOperations, deps.db).get(hostId);
+
   if (suspending !== undefined) {
     await suspending.done.catch(() => {});
   }
+
   await resumeMachineWithIntent(deps, hostId, false);
 }
 
@@ -934,12 +1063,14 @@ async function resumeMachineWithIntent(
   preserveRemoval: boolean,
 ): Promise<void> {
   let row = getHost(deps.db, hostId);
+
   if (
     row === null ||
     row.machineProviderId === null ||
     (row.phase === "removing" && !preserveRemoval)
   )
     return;
+
   if (
     row.phase !== "suspended" &&
     row.phase !== "suspending" &&
@@ -948,8 +1079,10 @@ async function resumeMachineWithIntent(
   ) {
     return;
   }
+
   const machineProviderId = row.machineProviderId;
   const record = getMachineProvider(machineProviderId);
+
   if (record === undefined || record.provider.resume === null) {
     throw new ApiError(
       409,
@@ -957,14 +1090,17 @@ async function resumeMachineWithIntent(
       `Machine provider "${machineProviderId}" is not installed`,
     );
   }
+
   if (row.resource === null) {
     throw new Error(`Machine "${hostId}" has no provider resource`);
   }
+
   const operationId = `${record.pluginId}:${randomUUID()}`;
   const initialPhase = row.phase;
   const resumePhase = preserveRemoval ? "removing" : "resuming";
   const resume = record.provider.resume;
   const resource = row.resource;
+
   const operation = runTrackedOperation({
     map: perDbRegistry(resumeOperations, deps.db),
     key: hostId,
@@ -975,6 +1111,7 @@ async function resumeMachineWithIntent(
         statusMessage: "Resuming…",
       });
       deps.hub.notifyHost(hostId, ["host-disconnected"]);
+
       const invocation = await invokeMachineProvider(
         record,
         "machine resume",
@@ -985,6 +1122,7 @@ async function resumeMachineWithIntent(
             checkpoint: async (checkpoint) => {
               const parsed = resourceSchema.parse(checkpoint);
               const current = getHost(deps.db, hostId);
+
               if (
                 !lifecycleOwns(
                   current,
@@ -997,20 +1135,24 @@ async function resumeMachineWithIntent(
                   `Machine "${hostId}" resume no longer owns this resource`,
                 );
               }
+
               updateHost(deps.db, deps.hub, hostId, { resource: parsed });
             },
             report: lifecycleReporter(deps, hostId),
             signal,
           }),
       );
+
       if (!invocation.ok) throw new Error(invocation.error);
       const result = resourceResultSchema.parse(invocation.value);
       const current = getHost(deps.db, hostId);
+
       if (
         !lifecycleOwns(current, record.provider.id, operationId, resumePhase)
       ) {
         return;
       }
+
       const keepRemoving = current.phase === "removing";
       updateHost(deps.db, deps.hub, hostId, {
         phase: keepRemoving ? "removing" : "active",
@@ -1023,6 +1165,7 @@ async function resumeMachineWithIntent(
       deps.hub.notifyHost(hostId, ["host-connected"]);
     },
   });
+
   try {
     await operation.done;
     updateHost(deps.db, deps.hub, hostId, {
@@ -1031,12 +1174,14 @@ async function resumeMachineWithIntent(
     });
   } catch (error) {
     const current = getHost(deps.db, hostId);
+
     const ownsResume = lifecycleOwns(
       current,
       record.provider.id,
       operationId,
       resumePhase,
     );
+
     updateHost(deps.db, deps.hub, hostId, {
       ...(ownsResume && !preserveRemoval
         ? {
@@ -1060,7 +1205,9 @@ async function resumeRemovingMachine(
 
 export function requestMachineRemoval(deps: Deps, hostId: string): boolean {
   const row = getHost(deps.db, hostId);
+
   if (row === null || row.destroyedAt !== null) return false;
+
   if (row.machineProviderId === null) return false;
   updateHost(deps.db, deps.hub, hostId, {
     phase: "removing",
@@ -1073,6 +1220,7 @@ export function requestMachineRemoval(deps: Deps, hostId: string): boolean {
     statusMessage: null,
   });
   deps.hub.notifyHost(hostId, ["host-disconnected"]);
+
   return true;
 }
 
@@ -1081,6 +1229,7 @@ export function requestAutomaticMachineRemoval(
   hostId: string,
 ): boolean {
   const row = getHost(deps.db, hostId);
+
   if (
     row === null ||
     row.machineProviderId === null ||
@@ -1090,7 +1239,9 @@ export function requestAutomaticMachineRemoval(
   ) {
     return false;
   }
+
   if (row.type !== "ephemeral") return false;
+
   if (
     machineHasPendingThreads(deps.db, hostId) ||
     machineHasLiveThreadLaunch(deps.db, hostId) ||
@@ -1098,6 +1249,7 @@ export function requestAutomaticMachineRemoval(
   ) {
     return false;
   }
+
   return requestMachineRemoval(deps, hostId);
 }
 
@@ -1106,9 +1258,11 @@ export async function retryMachineCleanup(
   hostId: string,
 ): Promise<void> {
   const row = getHost(deps.db, hostId);
+
   if (row === null || row.destroyedAt !== null) {
     throw new ApiError(404, "host_not_found", "Host not found");
   }
+
   if (
     row.machineProviderId === null ||
     row.phase !== "removing" ||
@@ -1120,6 +1274,7 @@ export async function retryMachineCleanup(
       "Cleanup can only be retried after machine teardown fails",
     );
   }
+
   for (const environment of deps.db
     .update(environmentRows)
     .set({ retireAt: Date.now() })
@@ -1133,6 +1288,7 @@ export async function retryMachineCleanup(
     .all()) {
     deps.hub.notifyEnvironment(environment.id, ["metadata-changed"]);
   }
+
   updateHost(deps.db, deps.hub, hostId, {
     removeRetryAt: Date.now(),
     teardownStatus: "running",
@@ -1144,15 +1300,20 @@ export async function retryMachineCleanup(
 
 async function removeMachine(deps: Deps, hostId: string): Promise<void> {
   let removing = perDbRegistry(removeOperations, deps.db).get(hostId);
+
   if (removing !== undefined) {
     await removing.done;
+
     return;
   }
+
   const creating = perDbRegistry(createOperations, deps.db).get(hostId);
+
   if (creating !== undefined) {
     creating.controller.abort();
     await creating.done.catch(() => {});
   }
+
   const suspending = perDbRegistry(suspendOperations, deps.db).get(hostId);
   const resuming = perDbRegistry(resumeOperations, deps.db).get(hostId);
   await Promise.all([
@@ -1160,11 +1321,15 @@ async function removeMachine(deps: Deps, hostId: string): Promise<void> {
     resuming?.done.catch(() => {}),
   ]);
   removing = perDbRegistry(removeOperations, deps.db).get(hostId);
+
   if (removing !== undefined) {
     await removing.done;
+
     return;
   }
+
   const row = getHost(deps.db, hostId);
+
   if (
     row === null ||
     row.machineProviderId === null ||
@@ -1173,21 +1338,26 @@ async function removeMachine(deps: Deps, hostId: string): Promise<void> {
   ) {
     return;
   }
+
   const record = getMachineProvider(row.machineProviderId);
+
   if (record === undefined) return;
   const resource = row.resource;
   const operationId = `${record.pluginId}:${randomUUID()}`;
   const attempt = row.teardownAttempt + 1;
+
   const creationFailureMessage =
     row.teardownAttempt === 0 && row.teardownStatus === "failed"
       ? row.statusMessage
       : null;
+
   updateHost(deps.db, deps.hub, hostId, {
     machineOperationId: operationId,
     teardownAttempt: attempt,
     teardownStatus: "running",
     statusMessage: creationFailureMessage,
   });
+
   const operation = runTrackedOperation({
     map: perDbRegistry(removeOperations, deps.db),
     key: hostId,
@@ -1204,28 +1374,36 @@ async function removeMachine(deps: Deps, hostId: string): Promise<void> {
                 signal,
               }),
           );
+
           if (!invocation.ok) throw new Error(invocation.error);
           const result = removeResultSchema.parse(invocation.value);
+
           if (result.status === "failed") throw new Error(result.message);
         } else {
           await removeResource(deps, record, { hostId, resource, signal });
         }
+
         const current = getHost(deps.db, hostId);
+
         if (
           !lifecycleOwns(current, record.provider.id, operationId, "removing")
         )
           return;
+
         if (current.type === "ephemeral") {
           markHostEnvironmentsDestroyed(deps.db, deps.hub, hostId);
         }
+
         await deps.machineAuth.revokeHostEnrollKeys({ hostId });
         await serverAccess.release(deps, { key: hostId, hostId });
         deleteMachineProjectSources(deps, hostId);
         await deps.machineAuth.revokeHostAuthKeys({ hostId });
         expireMachineSessions(deps, hostId);
         const latest = getHost(deps.db, hostId);
+
         if (!lifecycleOwns(latest, record.provider.id, operationId, "removing"))
           return;
+
         const destroyed = updateHost(deps.db, deps.hub, hostId, {
           destroyedAt: Date.now(),
           phase: "destroyed",
@@ -1235,11 +1413,14 @@ async function removeMachine(deps: Deps, hostId: string): Promise<void> {
           teardownStatus: "removed",
           statusMessage: creationFailureMessage,
         });
+
         deps.lifecycleDedupers.providerModelCatalogs.forgetHost(deps, hostId);
         deps.hub.notifyHost(hostId, ["host-disconnected"]);
+
         if (destroyed !== null) emitPluginHostDeleted(destroyed);
       } catch (error) {
         const current = getHost(deps.db, hostId);
+
         if (
           !lifecycleOwns(current, record.provider.id, operationId, "removing")
         )
@@ -1253,8 +1434,13 @@ async function removeMachine(deps: Deps, hostId: string): Promise<void> {
       }
     },
   });
+
   await operation.done;
 }
+
+const OFFLINE_REMOVAL_GRACE_MS = 2 * 60_000;
+
+const MAX_REMOVAL_RESUME_FAILURES = 5;
 
 export async function sweepProviderMachine(
   deps: Deps,
@@ -1262,6 +1448,7 @@ export async function sweepProviderMachine(
 ): Promise<void> {
   requestAutomaticMachineRemoval(deps, hostId);
   let row = getHost(deps.db, hostId);
+
   if (
     row === null ||
     row.machineProviderId === null ||
@@ -1269,30 +1456,42 @@ export async function sweepProviderMachine(
   ) {
     return;
   }
+
   const record = getMachineProvider(row.machineProviderId);
+
   if (record === undefined) return;
+
   if (row.phase === "creating") {
     await startCreate(deps, record, row).done;
+
     return;
   }
+
   if (row.phase === "resuming") {
     await resumeMachine(deps, hostId);
+
     return;
   }
+
   if (
     row.phase !== "removing" &&
     row.suspendedAt !== null &&
     listThreadIdsWithHostOfflineQueueWaits(deps.db, hostId).length > 0
   ) {
     await resumeMachine(deps, hostId);
+
     return;
   }
+
   if (row.phase === "suspending") {
     const suspending = perDbRegistry(suspendOperations, deps.db).get(hostId);
+
     if (suspending !== undefined) {
       await suspending.done;
+
       return;
     }
+
     updateHost(deps.db, deps.hub, hostId, {
       statusMessage:
         row.suspendedAt !== null
@@ -1301,15 +1500,21 @@ export async function sweepProviderMachine(
       suspendRetryAt: row.suspendedAt !== null ? null : Date.now(),
     });
     await resumeMachine(deps, hostId);
+
     return;
   }
+
   const now = Date.now();
   const removing = perDbRegistry(removeOperations, deps.db).get(hostId);
+
   if (removing !== undefined) {
     await removing.done;
+
     return;
   }
+
   if (perDbRegistry(resumeOperations, deps.db).has(hostId)) return;
+
   if (
     row.phase !== "removing" ||
     row.removeRetryAt === null ||
@@ -1317,6 +1522,7 @@ export async function sweepProviderMachine(
   ) {
     return;
   }
+
   const suspending = perDbRegistry(suspendOperations, deps.db).get(hostId);
   const resuming = perDbRegistry(resumeOperations, deps.db).get(hostId);
   await Promise.all([
@@ -1324,6 +1530,7 @@ export async function sweepProviderMachine(
     resuming?.done.catch(() => {}),
   ]);
   row = getHost(deps.db, hostId);
+
   if (
     row === null ||
     row.destroyedAt !== null ||
@@ -1333,33 +1540,77 @@ export async function sweepProviderMachine(
   ) {
     return;
   }
+
   const environments = listEnvironments(deps.db, { hostId }).filter(
     (environment) =>
       environment.status !== "destroyed" ||
       environment.teardownStatus !== "removed",
   );
+
   if (row.type === "persistent") {
     if (
       environments.some((environment) => environment.providerOwnsPath) &&
       row.suspendedAt !== null
     ) {
-      await withHostCleanup(deps, hostId, () =>
-        resumeRemovingMachine(deps, hostId),
-      );
+      const failedAttempts = row.teardownAttempt;
+
+      try {
+        await withHostCleanup(deps, hostId, () =>
+          resumeRemovingMachine(deps, hostId),
+        );
+      } catch (error) {
+        if (failedAttempts < MAX_REMOVAL_RESUME_FAILURES) throw error;
+        deps.logger.warn(
+          { hostId, error: errorMessage(error) },
+          "Machine could not resume for removal; removing it without workspace cleanup",
+        );
+      }
+
       row = getHost(deps.db, hostId);
+
       if (row === null || row.phase !== "removing") return;
     }
+
     let pendingEnvironment = false;
-    for (const environment of environments) {
-      requestEnvironmentRemoval(deps, environment.id);
-      await sweepProviderEnvironment(deps, environment.id);
-      const current = listEnvironments(deps.db, {
+
+    const uncleaned = environments.some(
+      (environment) =>
+        environment.status !== "destroyed" ||
+        environment.teardownStatus === "running" ||
+        environment.teardownStatus === "failed",
+    );
+
+    if (uncleaned && !isHostConnected(deps, hostId)) {
+      const offlineFor =
+        Date.now() - Math.max(row.lastSeenAt ?? 0, deps.hub.startedAt);
+
+      if (offlineFor < OFFLINE_REMOVAL_GRACE_MS) {
+        updateHost(deps.db, deps.hub, hostId, {
+          removeRetryAt: Date.now() + OFFLINE_REMOVAL_GRACE_MS - offlineFor,
+        });
+
+        return;
+      }
+
+      await leaveEnvironmentsOnOfflineMachine(deps, {
         hostId,
-        limit: 1,
-        statuses: ["provisioning", "ready", "error"],
+        machineName: row.name,
       });
-      if (current.length > 0) pendingEnvironment = true;
+    } else {
+      for (const environment of environments) {
+        requestEnvironmentRemoval(deps, environment.id);
+        await sweepProviderEnvironment(deps, environment.id);
+
+        const current = listEnvironments(deps.db, {
+          hostId,
+          limit: 1,
+          statuses: ["provisioning", "ready", "error"],
+        });
+
+        if (current.length > 0) pendingEnvironment = true;
+      }
     }
+
     if (pendingEnvironment) {
       const failed = deps.db
         .select()
@@ -1372,6 +1623,7 @@ export async function sweepProviderMachine(
         )
         .limit(1)
         .get();
+
       if (failed) {
         updateHost(deps.db, deps.hub, hostId, {
           teardownStatus: "failed",
@@ -1380,9 +1632,11 @@ export async function sweepProviderMachine(
         });
         deps.hub.notifyHost(hostId, ["host-disconnected"]);
       }
+
       return;
     }
   }
+
   if (
     row.teardownStatus === "failed" &&
     row.removeRetryAt !== null &&
@@ -1390,6 +1644,7 @@ export async function sweepProviderMachine(
   ) {
     return;
   }
+
   await removeMachine(deps, hostId);
 }
 
@@ -1398,22 +1653,29 @@ export async function sweepMachineLifecycles(
   options?: { background: true },
 ): Promise<void> {
   const pending: Promise<void>[] = [];
+
   const primaryHostId = readPrimaryHostIdFromDataDir({
     dataDir: deps.config.dataDir,
   });
+
   const operations = perDbRegistry(machineSweepOperations, deps.db);
+
   for (const record of listMachineProviders()) {
     for (const machine of listProviderMachines(deps.db, record.provider.id)) {
       if (machine.id === primaryHostId) continue;
+
       if (operations.has(machine.id))
         requestAutomaticMachineRemoval(deps, machine.id);
+
       const sweeping = runTrackedOperation({
         map: operations,
         key: machine.id,
         run: async () => sweepProviderMachine(deps, machine.id),
       }).done;
+
       const settled = sweeping.catch((error: unknown) => {
         const current = getHost(deps.db, machine.id);
+
         if (current !== null && current.destroyedAt === null) {
           updateHost(deps.db, deps.hub, machine.id, {
             teardownAttempt: current.teardownAttempt + 1,
@@ -1426,13 +1688,16 @@ export async function sweepMachineLifecycles(
               : {}),
           });
         }
+
         deps.logger.warn(
           { hostId: machine.id, error: errorMessage(error) },
           "Machine lifecycle sweep will retry",
         );
       });
+
       if (options?.background !== true) pending.push(settled);
     }
   }
+
   await Promise.all(pending);
 }

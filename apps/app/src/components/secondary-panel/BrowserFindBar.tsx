@@ -1,12 +1,18 @@
 import type { KeyboardEvent, RefObject } from "react";
-import { BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH } from "@bb/desktop-contract";
+import { OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH } from "@omnyo/desktop-contract";
 import {
   COARSE_POINTER_HEADER_ICON_BUTTON_CLASS,
   COARSE_POINTER_TEXT_SM_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@bb/shared-ui/chrome-style-tokens";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  CONTROL_PRESS_FEEDBACK,
+  CONTROL_PRESS_TRANSITION,
+} from "@omnyo/shared-ui/motion";
+import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@omnyo/shared-ui/chrome-style-tokens";
+import type { KeyboardCommandId } from "@omnyo/domain";
+import { appCommandTarget } from "@/lib/app-command-targets";
 import type { AppShortcutPresentation } from "@/lib/app-keybindings";
 import { SECONDARY_PANEL_TOP_CHROME_BACKGROUND_CLASS } from "./panelChromeClasses";
 
@@ -39,6 +45,7 @@ interface BrowserChromeIconButtonProps {
   disabled?: boolean;
   onClick: () => void;
   shortcut?: AppShortcutPresentation | null;
+  command?: KeyboardCommandId;
 }
 
 function formatBrowserFindMatches(
@@ -47,6 +54,7 @@ function formatBrowserFindMatches(
   if (matches === null) {
     return null;
   }
+
   return `${matches.activeMatchOrdinal}/${matches.matches}`;
 }
 
@@ -56,17 +64,22 @@ export function BrowserChromeIconButton({
   disabled,
   onClick,
   shortcut,
+  command,
 }: BrowserChromeIconButtonProps) {
   const accessibleLabel = shortcut ? `${label} (${shortcut.label})` : label;
+
   return (
     <button
       type="button"
       onClick={onClick}
+      {...(command ? appCommandTarget(command) : {})}
       disabled={disabled}
       aria-label={accessibleLabel}
       aria-keyshortcuts={shortcut?.ariaKeyshortcuts}
       className={cn(
-        "flex shrink-0 items-center justify-center transition-colors hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40",
+        CONTROL_PRESS_TRANSITION,
+        CONTROL_PRESS_FEEDBACK,
+        "flex shrink-0 items-center justify-center hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40",
         COARSE_POINTER_HEADER_ICON_BUTTON_CLASS,
         CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS,
       )}
@@ -94,15 +107,19 @@ export function BrowserFindBar({
     if (event.nativeEvent.isComposing) {
       return;
     }
+
     if (event.key === "Enter") {
       event.preventDefault();
+
       if (event.shiftKey) {
         onFindPrevious();
       } else {
         onFindNext();
       }
+
       return;
     }
+
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -120,7 +137,10 @@ export function BrowserFindBar({
         SECONDARY_PANEL_TOP_CHROME_BACKGROUND_CLASS,
       )}
     >
-      <div className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border border-border/70 bg-background/70 px-2">
+      <div
+        {...appCommandTarget("browser.find")}
+        className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border border-border/70 bg-background/70 px-2"
+      >
         <input
           ref={inputRef}
           type="text"
@@ -134,7 +154,7 @@ export function BrowserFindBar({
           aria-keyshortcuts={shortcut?.ariaKeyshortcuts}
           autoComplete="off"
           spellCheck={false}
-          maxLength={BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH}
+          maxLength={OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH}
           className={cn(
             "min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground",
             COARSE_POINTER_TEXT_SM_CLASS,

@@ -19,6 +19,7 @@ import {
 } from "../../../src/services/plugin-catalog/marketplace-manifest.js";
 
 const MANIFEST_URL = "https://getbb.app/marketplace/v1/marketplace.json";
+
 const MANIFEST_V2_URL = "https://getbb.app/marketplace/v2/marketplace.json";
 
 const publishedSchemaShape = z.object({
@@ -39,10 +40,7 @@ const publishedTagPrefixPattern = new RegExp(
   publishedSchemaShape.parse(
     JSON.parse(
       readFileSync(
-        new URL(
-          "../../../../web/public/schemas/marketplace.schema.json",
-          import.meta.url,
-        ),
+        new URL("./schemas/marketplace.schema.json", import.meta.url),
         "utf8",
       ),
     ),
@@ -92,7 +90,9 @@ function parse(plugins: unknown[]) {
 
 function firstEntry(plugins: unknown[]): MarketplaceEntry {
   const parsed = parse(plugins).plugins[0];
+
   if (parsed === undefined) throw new Error("entry missing");
+
   return parsed;
 }
 
@@ -109,6 +109,7 @@ describe("marketplace manifest schema", () => {
         },
       }),
     ]);
+
     expect(parseMarketplaceManifest(fixture, "manifest")).toEqual(fixture);
   });
 
@@ -152,7 +153,9 @@ describe("marketplace manifest schema", () => {
         ),
         "manifest",
       );
+
       const parsedEntry = parsed.plugins[0];
+
       if (parsedEntry === undefined) throw new Error("entry missing");
       expect(marketplaceEntryCategory(parsed, parsedEntry)).toMatchObject({
         id: "thread-content",
@@ -182,6 +185,7 @@ describe("marketplace manifest schema", () => {
     it("keeps an overview text at the cap and drops a longer one with a warning", () => {
       const warnings: string[] = [];
       const atCap = `${"é".repeat(4000)}\n`;
+
       const parsed = parseMarketplaceManifest(
         manifestV2([
           entry({ overview: atCap }),
@@ -189,10 +193,13 @@ describe("marketplace manifest schema", () => {
         ]),
         "manifest",
       );
+
       const [capped, long] = parsed.plugins;
+
       if (capped === undefined || long === undefined) {
         throw new Error("entries missing");
       }
+
       expect(entryOverview(capped, (message) => warnings.push(message))).toBe(
         atCap,
       );
@@ -218,6 +225,7 @@ describe("marketplace manifest schema", () => {
         ),
         "manifest",
       );
+
       expect(parsed).not.toHaveProperty("futureManifestField");
       expect(parsed).not.toHaveProperty("categories");
       expect(parsed).not.toHaveProperty("collections");
@@ -233,7 +241,7 @@ describe("marketplace manifest schema", () => {
             entry({
               source: {
                 npm: {
-                  package: "bb-plugin-widgets",
+                  package: "omnyo-plugin-widgets",
                   regsitry: "https://npm.test/",
                 },
               },
@@ -246,12 +254,13 @@ describe("marketplace manifest schema", () => {
 
     it("skips an invalid semver entry with a warning", () => {
       const warnings: string[] = [];
+
       const parsed = parseMarketplaceManifest(
         manifestV2([
           entry({
             id: "invalid-range",
             source: {
-              npm: { package: "bb-plugin-invalid", range: "not-semver" },
+              npm: { package: "omnyo-plugin-invalid", range: "not-semver" },
             },
           }),
           entry(),
@@ -268,6 +277,7 @@ describe("marketplace manifest schema", () => {
 
     it("skips a relative screenshot for a git or path marketplace", () => {
       const warnings: string[] = [];
+
       const parsed = parseMarketplaceManifest(
         manifestV2([
           entry({
@@ -276,7 +286,9 @@ describe("marketplace manifest schema", () => {
         ]),
         "manifest",
       );
+
       const parsedEntry = parsed.plugins[0];
+
       if (parsedEntry === undefined) throw new Error("entry missing");
 
       expect(
@@ -296,7 +308,9 @@ describe("marketplace manifest schema", () => {
         manifestV2([entry({ category: "unknown-category" })]),
         "manifest",
       );
+
       const parsedEntry = parsed.plugins[0];
+
       if (parsedEntry === undefined) throw new Error("entry missing");
       expect(marketplaceEntryCategory(parsed, parsedEntry)).toBeUndefined();
     });
@@ -306,7 +320,9 @@ describe("marketplace manifest schema", () => {
         manifestV2([entry({ category: "security" })], { categories: [] }),
         "manifest",
       );
+
       const parsedEntry = parsed.plugins[0];
+
       if (parsedEntry === undefined) throw new Error("entry missing");
       expect(marketplaceEntryCategory(parsed, parsedEntry)).toMatchObject({
         id: "security",
@@ -318,9 +334,10 @@ describe("marketplace manifest schema", () => {
       const bundled = {
         schemaVersion: 2,
         name: BUNDLED_MARKETPLACE_NAME,
-        displayName: "BB Official",
+        displayName: "Omnyo Official",
         plugins: [entry({ source: { bundled: { plugin: "docs" } } })],
       };
+
       expect(() =>
         parseMarketplaceManifest(bundled, "fetched marketplace"),
       ).toThrow(/not allowed in fetched or third-party documents/u);
@@ -461,7 +478,7 @@ describe("marketplace manifest schema", () => {
           entry({
             source: {
               npm: {
-                package: "bb-plugin-widgets",
+                package: "omnyo-plugin-widgets",
                 range: "^1.0.0",
                 tag: "beta",
               },
@@ -519,6 +536,7 @@ describe("marketplace manifest schema", () => {
           },
         }),
       ]);
+
       expect(resolvedEntrySource(ranged)).toEqual({
         source:
           "git:https://github.com/acme/plugins.git@semver:widgets/:^1.0.0",
@@ -559,6 +577,7 @@ describe("marketplace manifest schema", () => {
       ]) {
         expect(() => parse([entry({ source: { git } })])).toThrow();
       }
+
       expect(publishedTagPrefixPattern.test("widgets/.hidden/")).toBe(false);
       expect(publishedTagPrefixPattern.test("widgets.lock/")).toBe(false);
       expect(publishedTagPrefixPattern.test("widgets./")).toBe(true);
@@ -576,6 +595,7 @@ describe("marketplace manifest schema", () => {
           },
         }),
       ]);
+
       expect(resolvedEntrySource(git)).toEqual({
         source: "git:https://github.com/acme/plugins.git@v1.0.0",
         selection: { kind: "subdirectory", path: "plugins/widgets" },
@@ -588,15 +608,16 @@ describe("marketplace manifest schema", () => {
         entry({
           source: {
             npm: {
-              package: "bb-plugin-widgets",
+              package: "omnyo-plugin-widgets",
               range: "^1.0.0",
               registry: "https://npm.acme.test",
             },
           },
         }),
       ]);
+
       expect(resolvedEntrySource(npm)).toEqual({
-        source: "npm:bb-plugin-widgets@^1.0.0",
+        source: "npm:omnyo-plugin-widgets@^1.0.0",
         selection: { kind: "root" },
         npmRegistry: "https://npm.acme.test",
       });
@@ -622,9 +643,11 @@ describe("marketplace manifest schema", () => {
           },
         }),
       ]);
+
       expect(entryRepositoryUrl(github)).toBe(
         "https://github.com/acme/plugins/tree/HEAD/plugins/widgets",
       );
+
       const gitlab = firstEntry([
         entry({
           source: {
@@ -636,9 +659,11 @@ describe("marketplace manifest schema", () => {
           },
         }),
       ]);
+
       expect(entryRepositoryUrl(gitlab)).toBe(
         "https://gitlab.com/acme/plugins",
       );
+
       const reserved = firstEntry([
         entry({
           source: {
@@ -650,6 +675,7 @@ describe("marketplace manifest schema", () => {
           },
         }),
       ]);
+
       expect(entryRepositoryUrl(reserved)).toBe(
         "https://github.com/acme/plugins/tree/HEAD/plugins/c%23/what%3F",
       );
@@ -661,20 +687,23 @@ describe("marketplace manifest schema", () => {
           source: { npm: { package: "@acme/widgets", range: "^1.0.0" } },
         }),
       ]);
+
       expect(entryRepositoryUrl(publicPackage)).toBe(
         "https://www.npmjs.com/package/@acme/widgets",
       );
+
       const privatePackage = firstEntry([
         entry({
           source: {
             npm: {
-              package: "bb-plugin-widgets",
+              package: "omnyo-plugin-widgets",
               range: "^1.0.0",
               registry: "https://npm.acme.test",
             },
           },
         }),
       ]);
+
       expect(entryRepositoryUrl(privatePackage)).toBeNull();
     });
   });

@@ -1,11 +1,11 @@
 import { Command } from "commander";
-import type { ThreadTimelinePendingTodos } from "@bb/domain";
+import type { ThreadTimelinePendingTodos } from "@omnyo/domain";
 import { action } from "../action.js";
 import {
   resolveContextSnapshot,
   type ContextSnapshot,
 } from "../context-env.js";
-import { cliFetch, createCliBbSdk } from "../client.js";
+import { cliFetch, createCliOmnyoSdk } from "../client.js";
 import { outputJson } from "./helpers.js";
 import {
   type ThreadEnvironmentInfo,
@@ -22,6 +22,7 @@ interface StatusPayload {
     status: string;
     title: string | null;
     pinnedAt: number | null;
+    shelvedAt: number | null;
     parentThreadId: string | null;
     environment: ThreadEnvironmentInfo | null;
   } | null;
@@ -39,6 +40,7 @@ interface StatusCommandOptions {
 }
 
 type ResolveServerUrl = () => string;
+
 type ResolveStatusContext = () => ContextSnapshot;
 
 export function registerStatusCommand(
@@ -67,8 +69,10 @@ export function registerStatusCommand(
 
         try {
           const response = await cliFetch(`${getUrl()}/api/v1/system/config`);
+
           if (response.ok) {
             const config = (await response.json()) as { dataDir?: unknown };
+
             if (typeof config.dataDir === "string") {
               payload.dataDir = config.dataDir;
               serverAvailable = true;
@@ -77,7 +81,7 @@ export function registerStatusCommand(
         } catch {}
 
         if (serverAvailable) {
-          const { plugins } = await createCliBbSdk(getUrl()).plugins.list();
+          const { plugins } = await createCliOmnyoSdk(getUrl()).plugins.list();
           payload.pluginsNeedingAttention = plugins
             .filter(
               (p) =>
@@ -88,7 +92,8 @@ export function registerStatusCommand(
         }
 
         if (context.projectId || context.threadId) {
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
+
           const status = await sdk.status.get({
             projectId: context.projectId,
             threadId: context.threadId,
@@ -104,6 +109,7 @@ export function registerStatusCommand(
 
           if (status.thread) {
             let environmentInfo: ThreadEnvironmentInfo | null = null;
+
             if (status.thread.environmentId) {
               environmentInfo = await fetchEnvironmentInfo({
                 environmentId: status.thread.environmentId,
@@ -117,6 +123,7 @@ export function registerStatusCommand(
               status: status.thread.status,
               title: status.thread.title ?? null,
               pinnedAt: status.thread.pinnedAt,
+              shelvedAt: status.thread.shelvedAt,
               parentThreadId: status.thread.parentThreadId ?? null,
               environment: environmentInfo,
             };
@@ -149,17 +156,27 @@ export function registerStatusCommand(
         if (serverAvailable && payload.thread) {
           console.log(`Thread: ${payload.thread.id}`);
           console.log(`  Status: ${payload.thread.status}`);
+
           if (payload.thread.title) {
             console.log(`  Title: ${payload.thread.title}`);
           }
+
           if (payload.thread.pinnedAt !== null) {
             console.log(
               `  Pinned: ${new Date(payload.thread.pinnedAt).toLocaleString()}`,
             );
           }
+
+          if (payload.thread.shelvedAt !== null) {
+            console.log(
+              `  Shelved: ${new Date(payload.thread.shelvedAt).toLocaleString()}`,
+            );
+          }
+
           if (payload.thread.parentThreadId) {
             console.log(`  Parent: ${payload.thread.parentThreadId}`);
           }
+
           if (payload.thread.environment) {
             printEnvironmentInfo(payload.thread.environment);
           }
@@ -167,6 +184,7 @@ export function registerStatusCommand(
           if (payload.childThreads && payload.childThreads.length > 0) {
             console.log("");
             console.log(`Child threads: ${payload.childThreads.length}`);
+
             for (const mt of payload.childThreads) {
               const title = mt.title ? `"${mt.title}"` : "";
               console.log(`  ${mt.id}  ${mt.status}  ${title}`);
@@ -186,16 +204,17 @@ export function registerStatusCommand(
         }
 
         const attention = payload.pluginsNeedingAttention;
+
         if (attention.length > 0) {
           console.log("");
           console.log(
-            `${attention.length} plugin${attention.length === 1 ? "" : "s"} not running (${attention.map((p) => `${p.id}: ${p.status}`).join(", ")}). Run bb plugin list.`,
+            `${attention.length} plugin${attention.length === 1 ? "" : "s"} not running (${attention.map((p) => `${p.id}: ${p.status}`).join(", ")}). Run omnyo plugin list.`,
           );
         }
 
         if (!context.projectId && !context.threadId) {
           console.log("");
-          console.log("Tip: run bb guide for help getting started.");
+          console.log("Tip: run omnyo guide for help getting started.");
         }
       }),
     );

@@ -1,4 +1,5 @@
 export const LINUX_FRAMELESS_WINDOW_ARGUMENT = "--no-window-frame";
+
 export const LINUX_TRANSPARENT_WINDOW_ARGUMENT = "--transparent-window";
 
 interface HasLinuxWindowArgumentArgs {

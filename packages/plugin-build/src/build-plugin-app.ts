@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
-import { derivePluginId } from "@bb/domain";
+import { derivePluginId } from "@omnyo/domain";
 import type { Metafile, Plugin } from "esbuild";
 import {
   PLUGIN_THEME_CSS,
@@ -26,7 +26,6 @@ import {
   validatePluginBuildManifest,
 } from "./plugin-manifest.js";
 import {
-  LEGACY_PLUGIN_SDK_APP_SPECIFIER,
   PLUGIN_SDK_APP_SPECIFIER,
   RUNTIME_SLOT_BY_SPECIFIER,
   SHARED_UI_ICON_SPECIFIER,
@@ -48,6 +47,7 @@ export {
 } from "./runtime-shims.mjs";
 
 const SHARED_UI_SOURCE_IMPORTER = /[\\/]shared-ui[\\/]src[\\/]/;
+
 const SHARED_UI_RUNTIME_MODULES: ReadonlyMap<string, string> = new Map([
   ["/shared-ui/src/components/ui/icon", SHARED_UI_ICON_SPECIFIER],
   [
@@ -65,12 +65,15 @@ export function sharedUiRuntimeModuleFor(
   importer: string,
 ): string | null {
   if (!SHARED_UI_SOURCE_IMPORTER.test(importer)) return null;
+
   const resolved = resolve(dirname(importer), importPath)
     .replace(/\\/g, "/")
     .replace(/\.(?:tsx?|jsx?)$/, "");
+
   for (const [suffix, specifier] of SHARED_UI_RUNTIME_MODULES) {
     if (resolved.endsWith(suffix)) return specifier;
   }
+
   return null;
 }
 
@@ -79,41 +82,46 @@ let freshFacadeImportSequence = 0;
 async function freshModuleExports(moduleUrl: string): Promise<string[]> {
   const freshUrl = new URL(moduleUrl);
   freshUrl.searchParams.set(
-    "bb-plugin-build",
+    "omnyo-plugin-build",
     String(++freshFacadeImportSequence),
   );
   const moduleNamespace = await import(freshUrl.href);
+
   return Object.keys(moduleNamespace).sort();
 }
 
 async function shimExportsOf(
-  requestedSpecifier: string,
+  specifier: string,
   pluginSdkAppModuleUrl: string | undefined,
 ): Promise<readonly string[]> {
-  const specifier =
-    requestedSpecifier === LEGACY_PLUGIN_SDK_APP_SPECIFIER
-      ? PLUGIN_SDK_APP_SPECIFIER
-      : requestedSpecifier;
   if (specifier === PLUGIN_SDK_APP_SPECIFIER) {
     if (pluginSdkAppModuleUrl !== undefined) {
       return freshModuleExports(pluginSdkAppModuleUrl);
     }
+
     let resolvedModuleUrl: string;
+
     try {
       resolvedModuleUrl = import.meta.resolve(PLUGIN_SDK_APP_SPECIFIER);
     } catch {
       const names = RUNTIME_EXPORT_MANIFEST[specifier];
+
       if (!names) {
         throw new Error(`no runtime export manifest entry for "${specifier}"`);
       }
+
       return names;
     }
+
     return freshModuleExports(resolvedModuleUrl);
   }
+
   const names = RUNTIME_EXPORT_MANIFEST[specifier];
+
   if (!names) {
     throw new Error(`no runtime export manifest entry for "${specifier}"`);
   }
+
   return names;
 }
 
@@ -123,11 +131,12 @@ async function shimModuleSource(
   pluginSdkAppModuleUrl: string | undefined,
 ): Promise<string> {
   const names = await shimExportsOf(specifier, pluginSdkAppModuleUrl);
+
   return [
-    `const runtime = globalThis.__bbPluginRuntime;`,
+    `const runtime = globalThis.__omnyoPluginRuntime;`,
     `if (runtime == null || runtime.${slot} == null) {`,
     `  throw new Error(${JSON.stringify(
-      `Cannot load "${specifier}": this bundle must be loaded by the BB app, which provides the shared plugin runtime (globalThis.__bbPluginRuntime).`,
+      `Cannot load "${specifier}": this bundle must be loaded by the Omnyo app, which provides the shared plugin runtime (globalThis.__omnyoPluginRuntime).`,
     )});`,
     `}`,
     `const mod = runtime.${slot};`,
@@ -139,7 +148,8 @@ async function shimModuleSource(
   ].join("\n");
 }
 
-const SHIM_NAMESPACE = "bb-plugin-runtime-shim";
+const SHIM_NAMESPACE = "omnyo-plugin-runtime-shim";
+
 const SHIM_FILTER = new RegExp(
   `^(${Object.keys(RUNTIME_SLOT_BY_SPECIFIER)
     .map((specifier) => specifier.replace(/[/@.-]/g, "\\$&"))
@@ -148,19 +158,24 @@ const SHIM_FILTER = new RegExp(
 
 export function runtimeShimPlugin(pluginSdkAppModuleUrl?: string): Plugin {
   return {
-    name: "bb-plugin-runtime-shims",
+    name: "omnyo-plugin-runtime-shims",
     setup(build) {
       build.onResolve({ filter: SHIM_FILTER }, (args) => ({
         path: args.path,
         namespace: SHIM_NAMESPACE,
       }));
       build.onResolve(
-        { filter: /(^|\/)(icon|question-form-host|voice-input-textarea)(\.[jt]sx?)?$/ },
+        {
+          filter:
+            /(^|\/)(icon|question-form-host|voice-input-textarea)(\.[jt]sx?)?$/,
+        },
         (args) => {
           if (args.namespace !== "file" || !args.path.startsWith(".")) {
             return undefined;
           }
+
           const specifier = sharedUiRuntimeModuleFor(args.path, args.importer);
+
           return specifier === null
             ? undefined
             : { path: specifier, namespace: SHIM_NAMESPACE };
@@ -195,13 +210,17 @@ type ScannerSource = {
 
 function readDependencyNames(pkg: Record<string, unknown>): string[] {
   const names = new Set<string>();
+
   for (const field of ["dependencies", "devDependencies"] as const) {
     const dependencies = pkg[field];
+
     if (!isRecord(dependencies)) continue;
+
     for (const name of Object.keys(dependencies)) {
       names.add(name);
     }
   }
+
   return [...names].sort();
 }
 
@@ -209,29 +228,51 @@ async function readPackageJson(
   filePath: string,
 ): Promise<Record<string, unknown>> {
   const json = await readPluginPackageJsonFile(filePath);
+
   if (!isRecord(json)) {
     throw new Error(`package.json must contain an object at ${filePath}`);
   }
+
   return json;
 }
 
-function readTailwindContentPatterns(
+function importLegacyTailwindContentPatternsV1(
   pkg: Record<string, unknown>,
   packageJsonPath: string,
 ): string[] {
-  const bb = pkg.bb;
-  if (!isRecord(bb) || bb.pluginTailwindContent === undefined) {
+  const legacy = isRecord(pkg.bb) ? pkg.bb.pluginTailwindContent : undefined;
+
+  const canonical = isRecord(pkg.omnyo)
+    ? pkg.omnyo.pluginTailwindContent
+    : undefined;
+
+  if (
+    legacy !== undefined &&
+    canonical !== undefined &&
+    JSON.stringify(legacy) !== JSON.stringify(canonical)
+  ) {
+    throw new Error(
+      "Conflicting legacy and canonical Tailwind content patterns",
+    );
+  }
+
+  const selected = canonical ?? legacy;
+
+  if (selected === undefined) {
     return [];
   }
-  const patterns = bb.pluginTailwindContent;
+
+  const patterns = selected;
+
   if (
     !Array.isArray(patterns) ||
     !patterns.every((pattern) => typeof pattern === "string")
   ) {
     throw new Error(
-      `bb.pluginTailwindContent must be an array of strings in ${packageJsonPath}`,
+      `omnyo.pluginTailwindContent must be an array of strings in ${packageJsonPath}`,
     );
   }
+
   return patterns;
 }
 
@@ -245,8 +286,10 @@ async function packageJsonPathForDirectDependency(
     packageName,
     "package.json",
   );
+
   try {
     await stat(packageJsonPath);
+
     return packageJsonPath;
   } catch {
     return null;
@@ -265,12 +308,19 @@ async function readDependencyTailwindSources(
       rootDir,
       packageName,
     );
+
     if (packageJsonPath === null) continue;
 
     const packageJson = await readPackageJson(packageJsonPath);
-    const patterns = readTailwindContentPatterns(packageJson, packageJsonPath);
+
+    const patterns = importLegacyTailwindContentPatternsV1(
+      packageJson,
+      packageJsonPath,
+    );
+
     if (patterns.length === 0) continue;
     const base = await realpath(dirname(packageJsonPath));
+
     for (const rawPattern of patterns) {
       const negated = rawPattern.startsWith("!");
       const pattern = negated ? rawPattern.slice(1) : rawPattern;
@@ -284,18 +334,23 @@ async function readDependencyTailwindSources(
 async function readPluginAppConfig(rootDir: string): Promise<PluginAppConfig> {
   const packageJsonPath = join(rootDir, "package.json");
   const pkg = await readPackageJson(packageJsonPath);
+
   const manifest = await validatePluginBuildManifest(
     pkg,
     rootDir,
     packageJsonPath,
   );
-  const app = manifest.bb.app;
+
+  const app = manifest.omnyo.app;
+
   if (app === undefined) {
     throw new Error(
-      `no frontend entry: ${packageJsonPath} has no "bb": { "app": "./app.tsx" } field (only plugins with an app entry can be built)`,
+      `no frontend entry: ${packageJsonPath} has no "omnyo": { "app": "./app.tsx" } field (only plugins with an app entry can be built)`,
     );
   }
-  const appEntry = await resolveManifestEntryFile(rootDir, app, "bb.app");
+
+  const appEntry = await resolveManifestEntryFile(rootDir, app, "omnyo.app");
+
   return {
     appEntry,
     packageName: manifest.name,
@@ -318,6 +373,7 @@ async function buildTailwindCss(
       typeof import("@tailwindcss/oxide")
     >,
   ]);
+
   const input = [
     `@layer theme, utilities;`,
     `@import "tailwindcss/theme.css" layer(theme);`,
@@ -328,6 +384,7 @@ async function buildTailwindCss(
     `}`,
     ``,
   ].join("\n");
+
   const compiler = await compile(input, {
     base: rootDir,
     onDependency: () => {},
@@ -335,12 +392,16 @@ async function buildTailwindCss(
       if (id !== "tailwindcss" && !id.startsWith("tailwindcss/")) {
         return undefined;
       }
+
       const subpath =
         id === "tailwindcss" ? "index.css" : id.slice("tailwindcss/".length);
+
       const candidate = join(toolchain.tailwindCssDir, subpath);
+
       return existsSync(candidate) ? candidate : undefined;
     },
   });
+
   const ownScanner = new Scanner({
     sources: [
       { base: rootDir, pattern: "**/*", negated: false },
@@ -348,6 +409,7 @@ async function buildTailwindCss(
       { base: join(rootDir, "node_modules"), pattern: "**/*", negated: true },
     ],
   });
+
   const candidates = new Set(ownScanner.scan());
 
   if (dependencySources.length > 0) {
@@ -356,21 +418,25 @@ async function buildTailwindCss(
         realpath(file),
       ),
     );
+
     const bundledDependencyFiles = [
       ...new Set(
         dependencyFileIdentities.filter((file) => bundledInputs.has(file)),
       ),
     ];
+
     const contents = await Promise.all(
       bundledDependencyFiles.map(async (file) => ({
         content: await readFile(file, "utf8"),
         extension: extname(file).slice(1),
       })),
     );
+
     for (const candidate of new Scanner({ sources: [] }).scanFiles(contents)) {
       candidates.add(candidate);
     }
   }
+
   return scopePluginUtilities(
     compiler.build([...candidates]),
     pluginScopeRoots(pluginId),
@@ -391,9 +457,11 @@ async function bundledInputPaths(
       ) {
         return;
       }
+
       paths.add(await realpath(resolve(absWorkingDir, input)));
     }),
   );
+
   return paths;
 }
 
@@ -409,12 +477,13 @@ interface PluginAppBuildOptions {
 
 export async function buildPluginApp(
   rootDir: string,
-  bbVersion: string,
+  coreVersion: string,
   toolchain: PluginBuildToolchain,
   options: PluginAppBuildOptions = { minify: true },
 ): Promise<PluginAppBuildResult> {
   const { appEntry, packageName, pluginVersion } =
     await readPluginAppConfig(rootDir);
+
   const pluginId = derivePluginId(packageName);
   const dependencySources = await readDependencyTailwindSources(rootDir);
   const distDir = join(rootDir, "dist");
@@ -424,6 +493,7 @@ export async function buildPluginApp(
   const metaPath = join(distDir, "app.meta.json");
 
   const stageDir = await mkdtemp(join(distDir, ".stage-"));
+
   try {
     const stagedJsPath = join(stageDir, "app.js");
     const stagedCssPath = join(stageDir, "app.css");
@@ -432,6 +502,7 @@ export async function buildPluginApp(
     const esbuild = (await import(
       toolchain.esbuild
     )) as typeof import("esbuild");
+
     const bundle = await esbuild.build({
       entryPoints: [appEntry],
       outfile: stagedJsPath,
@@ -447,27 +518,32 @@ export async function buildPluginApp(
       jsxDev: false,
       define: {
         "process.env.NODE_ENV": '"production"',
-        __BB_PLUGIN_ID__: JSON.stringify(pluginId),
+        __OMNYO_PLUGIN_ID__: JSON.stringify(pluginId),
       },
       logLevel: "error",
       plugins: [zodLocaleStubPlugin(), runtimeShimPlugin()],
     });
 
     let authoredCss = "";
+
     try {
       authoredCss = await readFile(stagedCssPath, "utf8");
     } catch (error) {
       if (!isRecord(error) || error.code !== "ENOENT") throw error;
     }
+
     let bundledInputs: ReadonlySet<string> = new Set();
+
     if (dependencySources.length > 0) {
       if (bundle.metafile === undefined) {
         throw new Error(
           "esbuild did not return the metafile required for dependency Tailwind scanning",
         );
       }
+
       bundledInputs = await bundledInputPaths(bundle.metafile, rootDir);
     }
+
     const tailwindCss = (
       await buildTailwindCss(
         rootDir,
@@ -477,17 +553,24 @@ export async function buildPluginApp(
         bundledInputs,
       )
     ).trimEnd();
+
     const { optimize } = (await import(
       toolchain.tailwindNode
     )) as typeof import("@tailwindcss/node");
+
     const css = optimize(`${tailwindCss}\n${authoredCss}`, {
       minify: options.minify,
     }).code;
+
     await writeFile(stagedCssPath, css);
     await writeFile(
       stagedMetaPath,
       JSON.stringify(
-        createPluginArtifactMeta({ packageName, pluginVersion, bbVersion }),
+        createPluginArtifactMeta({
+          packageName,
+          pluginVersion,
+          coreVersion: coreVersion,
+        }),
         null,
         2,
       ) + "\n",
@@ -499,5 +582,6 @@ export async function buildPluginApp(
   } finally {
     await rm(stageDir, { recursive: true, force: true });
   }
+
   return { jsPath, cssPath, metaPath };
 }

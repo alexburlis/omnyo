@@ -3,7 +3,7 @@ import type {
   ProjectResponse,
   ProjectWithThreadsResponse,
   SidebarBootstrapResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   projectsQueryKey,
   sidebarNavigationQueryKey,
@@ -34,6 +34,9 @@ function removeProjectFromSidebarNavigation(
 ): SidebarBootstrapResponse {
   return {
     ...currentNavigation,
+    orderedProjectIds: currentNavigation.orderedProjectIds.filter(
+      (id) => id !== projectId,
+    ),
     projects: currentNavigation.projects.filter(
       (project) => project.id !== projectId,
     ),
@@ -82,9 +85,11 @@ function applyProjectToSidebarNavigation(
   const existingProject = currentNavigation.projects.find(
     (currentProject) => currentProject.id === project.id,
   );
+
   if (!existingProject) {
     return {
       ...currentNavigation,
+      orderedProjectIds: [...currentNavigation.orderedProjectIds, project.id],
       projects: [
         ...currentNavigation.projects,
         projectToSidebarProject(project),

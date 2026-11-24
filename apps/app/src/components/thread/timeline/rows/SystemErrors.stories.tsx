@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type {
   TimelineNonOperationSystemRow,
   TimelineRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   ThreadTimelineRows,
   type ThreadTimelineRowsProps,
@@ -167,7 +167,7 @@ const systemThreadStartModuleMissing: TimelineNonOperationSystemRow = systemRow(
       "    throw new ERR_MODULE_NOT_FOUND(\n" +
       "          ^\n" +
       "\n" +
-      "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/michael/Projects/bb/packages/domain/src/shared-types.js' imported from /Users/michael/Projects/bb/packages/domain/src/index.ts\n" +
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/michael/Projects/omnyo/packages/domain/src/shared-types.js' imported from /Users/michael/Projects/omnyo/packages/domain/src/index.ts\n" +
       "    at finalizeResolution (node:internal/modules/esm/resolve:274:11)\n" +
       "    at moduleResolve (node:internal/modules/esm/resolve:859:10)\n" +
       "    at defaultResolve (node:internal/modules/esm/resolve:983:11)\n" +
@@ -184,15 +184,19 @@ const providerStreamDisconnectRows: TimelineRow[] = [
 const providerStreamFinalFailureExpanded = new Set<string>([
   providerStreamFinalFailure.id,
 ]);
+
 const providerChildProcessTimeoutExpanded = new Set<string>([
   providerChildProcessTimeout.id,
 ]);
+
 const providerModelUnavailableExpanded = new Set<string>([
   providerModelUnavailable.id,
 ]);
+
 const systemTurnSubmitTooLargeExpanded = new Set<string>([
   systemTurnSubmitTooLarge.id,
 ]);
+
 const systemThreadStartModuleMissingExpanded = new Set<string>([
   systemThreadStartModuleMissing.id,
 ]);

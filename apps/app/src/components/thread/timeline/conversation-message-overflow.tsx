@@ -4,7 +4,8 @@ import {
   type MouseEvent,
   type RefObject,
 } from "react";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import { useBottomAnchoredScroll } from "@/components/ui/bottom-anchored-scroll-body";
 
 interface UseOverflowMeasurementArgs {
@@ -23,6 +24,7 @@ const overflowListenersByElement = new Map<
   HTMLElement,
   Set<OverflowMeasurementListener>
 >();
+
 let sharedOverflowResizeObserver: ResizeObserver | null = null;
 
 function readOverflowMeasurement(
@@ -39,6 +41,7 @@ function measureOverflowElements(elements: readonly HTMLElement[]): void {
     element,
     measurement: readOverflowMeasurement(element),
   }));
+
   for (const { element, measurement } of results) {
     for (const listener of overflowListenersByElement.get(element) ?? []) {
       listener(measurement);
@@ -49,13 +52,16 @@ function measureOverflowElements(elements: readonly HTMLElement[]): void {
 function getSharedOverflowResizeObserver(): ResizeObserver {
   sharedOverflowResizeObserver ??= new ResizeObserver((entries) => {
     const connectedElements: HTMLElement[] = [];
+
     for (const entry of entries) {
       if (entry.target instanceof HTMLElement && entry.target.isConnected) {
         connectedElements.push(entry.target);
       }
     }
+
     measureOverflowElements(connectedElements);
   });
+
   return sharedOverflowResizeObserver;
 }
 
@@ -64,19 +70,23 @@ function observeOverflow(
   listener: OverflowMeasurementListener,
 ): () => void {
   let listeners = overflowListenersByElement.get(element);
+
   if (!listeners) {
     listeners = new Set();
     overflowListenersByElement.set(element, listeners);
     getSharedOverflowResizeObserver().observe(element);
   }
+
   listeners.add(listener);
 
   return () => {
     const currentListeners = overflowListenersByElement.get(element);
     currentListeners?.delete(listener);
+
     if (currentListeners?.size === 0) {
       overflowListenersByElement.delete(element);
       sharedOverflowResizeObserver?.unobserve?.(element);
+
       if (overflowListenersByElement.size === 0) {
         sharedOverflowResizeObserver?.disconnect?.();
         sharedOverflowResizeObserver = null;
@@ -86,6 +96,7 @@ function observeOverflow(
 }
 
 interface ConversationMessageOverflowToggleProps {
+  collapsedLabel?: string;
   expanded: boolean;
   onToggle: () => void;
 }
@@ -108,12 +119,15 @@ export function useOverflowMeasurement({
   useLayoutEffect(() => {
     if (!enabled) {
       setMeasurement("fits");
+
       return;
     }
 
     const element = elementRef.current;
+
     if (!element) {
       setMeasurement("unmeasured");
+
       return;
     }
 
@@ -121,8 +135,10 @@ export function useOverflowMeasurement({
       if (!element.isConnected) return;
       setMeasurement(nextMeasurement);
     };
+
     if (typeof ResizeObserver === "undefined") {
       applyMeasurement(readOverflowMeasurement(element));
+
       return;
     }
 
@@ -141,17 +157,23 @@ function useContentHoldingToggle(
   onToggle: () => void,
 ): (event: MouseEvent<HTMLButtonElement>) => void {
   const bottomAnchor = useBottomAnchoredScroll();
+
   return (event) => {
     const scrollArea = bottomAnchor?.getScrollElement();
+
     const row = event.currentTarget.closest<HTMLElement>(
       "[data-timeline-row-id]",
     );
+
     if (!bottomAnchor || !scrollArea || !row) {
       onToggle();
+
       return;
     }
+
     const rowTopVisible =
       row.getBoundingClientRect().top >= scrollArea.getBoundingClientRect().top;
+
     bottomAnchor.holdContentPosition({
       edge: expanding || rowTopVisible ? "top" : "bottom",
       element: row,
@@ -161,19 +183,24 @@ function useContentHoldingToggle(
 }
 
 export function ConversationMessageOverflowToggle({
+  collapsedLabel = "Show more",
   expanded,
   onToggle,
 }: ConversationMessageOverflowToggleProps) {
   const handleClick = useContentHoldingToggle(!expanded, onToggle);
+
   return (
     <div className="mt-1 flex justify-end">
       <button
         type="button"
         onClick={handleClick}
-        className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground"
+        className={cn(
+          "cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground",
+          CONTROL_HOVER_TRANSITION,
+        )}
         aria-expanded={expanded}
       >
-        {expanded ? "Show less" : "Show more"}
+        {expanded ? "Show less" : collapsedLabel}
       </button>
     </div>
   );
@@ -186,6 +213,7 @@ export function ConversationMessageInlineOverflowToggle({
   onToggle,
 }: ConversationMessageInlineOverflowToggleProps) {
   const handleClick = useContentHoldingToggle(true, onToggle);
+
   return (
     <span className="pointer-events-none absolute inset-x-0 bottom-0 flex h-[1lh] items-stretch justify-end">
       <span
@@ -199,6 +227,7 @@ export function ConversationMessageInlineOverflowToggle({
         onClick={handleClick}
         className={cn(
           "pointer-events-auto cursor-pointer whitespace-nowrap pl-1.5 text-xs font-medium text-muted-foreground hover:text-foreground",
+          CONTROL_HOVER_TRANSITION,
           buttonBackgroundClassName,
         )}
         aria-expanded={false}

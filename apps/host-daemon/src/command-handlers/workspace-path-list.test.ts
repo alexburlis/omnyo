@@ -1,17 +1,20 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { runGit } from "@bb/host-workspace";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { runGit } from "@omnyo/host-workspace";
 import { listWorkspacePaths } from "./file-list.js";
-import { listHostPaths } from "./host-files.js";
+import { listHostFiles, listHostPaths } from "./host-files.js";
 
 const roots: string[] = [];
-const largeTreeTimeoutMs = process.platform === "win32" ? 240_000 : 60_000;
 
 async function createRoot() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bb-workspace-paths-"));
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "omnyo-workspace-paths-"),
+  );
+
   roots.push(root);
+
   return root;
 }
 
@@ -32,11 +35,12 @@ function listingArgs(root: string) {
     includeHidden: true,
     respectGitIgnore: true,
     excludeNames: [],
+    maxEntries: 1_000,
   };
 }
 
 async function paths(root: string) {
-  return (await listWorkspacePaths(listingArgs(root)))
+  return (await listWorkspacePaths(listingArgs(root))).paths
     .map((entry) => entry.path)
     .sort();
 }
@@ -47,7 +51,7 @@ afterEach(async () => {
       .splice(0)
       .map((root) => fs.rm(root, { recursive: true, force: true })),
   );
-}, largeTreeTimeoutMs);
+});
 
 describe("workspace path discovery", () => {
   it("includes tracked and non-ignored untracked files while pruning Git-ignored trees", async () => {
@@ -132,51 +136,83 @@ describe("workspace path discovery", () => {
     await write(root, ".claude/worktrees/worker/README.md");
     await write(root, "src/worktrees/index.ts");
     const args = { ...listingArgs(root), excludeNames: [".claude/worktrees"] };
-    expect((await listWorkspacePaths(args)).map((entry) => entry.path)).toEqual(
-      [
-        ".claude",
-        ".claude/settings.json",
-        ".gitignore",
-        "output",
-        "output/result.txt",
-        "src",
-        "src/worktrees",
-        "src/worktrees/index.ts",
-      ],
-    );
+    expect(
+      (await listWorkspacePaths(args)).paths.map((entry) => entry.path),
+    ).toEqual([
+      ".claude",
+      ".claude/settings.json",
+      ".gitignore",
+      "output",
+      "output/result.txt",
+      "src",
+      "src/worktrees",
+      "src/worktrees/index.ts",
+    ]);
     await initRepo(root);
     expect(await paths(root)).not.toContain("output/result.txt");
     expect(
-      (await listWorkspacePaths({ ...args, respectGitIgnore: false })).map(
-        (entry) => entry.path,
-      ),
+      (
+        await listWorkspacePaths({ ...args, respectGitIgnore: false })
+      ).paths.map((entry) => entry.path),
     ).toContain("output/result.txt");
     expect(
-      (await listWorkspacePaths({ ...args, includeHidden: false })).map(
+      (await listWorkspacePaths({ ...args, includeHidden: false })).paths.map(
         (entry) => entry.path,
       ),
     ).toEqual(["src", "src/worktrees", "src/worktrees/index.ts"]);
   });
 
-  it("shares pending discovery but refreshes completed results and ignore rules", async () => {
-    const root = await createRoot();
-    await initRepo(root);
-    await write(root, "first.txt");
-    const args = listingArgs(root);
-    const first = listWorkspacePaths(args);
-    const second = listWorkspacePaths({ ...args, excludeNames: [] });
-    expect(second).toBe(first);
-    await first;
-    await write(root, "second.txt");
-    await write(root, ".gitignore", "first.txt\n");
-    expect(await paths(root)).toEqual([".gitignore", "second.txt"]);
+  it("reuses discovery for five seconds after it completes, then refreshes results and ignore rules", async () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout"],
+      shouldAdvanceTime: true,
+    });
 
-    const hidden = listWorkspacePaths(args);
-    const visible = listWorkspacePaths({ ...args, includeHidden: false });
-    expect((await hidden).map((entry) => entry.path)).toContain(".gitignore");
-    expect((await visible).map((entry) => entry.path)).not.toContain(
-      ".gitignore",
-    );
+    try {
+      const root = await createRoot();
+      await initRepo(root);
+      await write(root, "first.txt");
+      const args = listingArgs(root);
+      const first = listWorkspacePaths(args);
+      const second = listWorkspacePaths({ ...args, excludeNames: [] });
+      expect(second).toBe(first);
+      await first;
+      await write(root, "second.txt");
+      await write(root, ".gitignore", "first.txt\n");
+      expect(await paths(root)).toEqual(["first.txt"]);
+
+      vi.advanceTimersByTime(5_000);
+      expect(await paths(root)).toEqual([".gitignore", "second.txt"]);
+
+      const hidden = listWorkspacePaths(args);
+      const visible = listWorkspacePaths({ ...args, includeHidden: false });
+      expect((await hidden).paths.map((entry) => entry.path)).toContain(
+        ".gitignore",
+      );
+      expect((await visible).paths.map((entry) => entry.path)).not.toContain(
+        ".gitignore",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops walking at the entry limit and reports truncation", async () => {
+    const root = await createRoot();
+
+    for (const name of ["a", "b", "c"])
+      for (const file of ["1.txt", "2.txt"])
+        await write(root, `${name}/${file}`);
+
+    const args = { ...listingArgs(root), includeDirectories: false };
+
+    const capped = await listWorkspacePaths({ ...args, maxEntries: 4 });
+    expect(capped.paths).toHaveLength(4);
+    expect(capped.truncated).toBe(true);
+
+    const exact = await listWorkspacePaths({ ...args, maxEntries: 6 });
+    expect(exact.paths).toHaveLength(6);
+    expect(exact.truncated).toBe(false);
   });
 
   it("does not retain failed discovery", async () => {
@@ -193,6 +229,7 @@ describe("workspace path discovery", () => {
     await initRepo(root);
     await write(root, "alpha.md");
     await write(root, "beta.md");
+
     const command = {
       type: "host.list_paths" as const,
       path: root,
@@ -203,12 +240,76 @@ describe("workspace path discovery", () => {
       excludeNames: [],
       limit: 1,
     };
+
     const [alpha, beta] = await Promise.all([
       listHostPaths({ ...command, query: "alpha" }),
       listHostPaths({ ...command, query: "beta" }),
     ]);
+
     expect(alpha.paths.map((entry) => entry.path)).toEqual(["alpha.md"]);
     expect(beta.paths.map((entry) => entry.path)).toEqual(["beta.md"]);
+  });
+
+  it("keeps the event loop responsive while ranking a large workspace", async () => {
+    const root = await createRoot();
+
+    const directories = Array.from(
+      { length: 60 },
+      (_, index) => `src/components/feature-${index}`,
+    );
+
+    await Promise.all(
+      directories.map((directory) =>
+        fs.mkdir(path.join(root, directory), { recursive: true }),
+      ),
+    );
+
+    for (let batch = 0; batch < 6_000; batch += 500) {
+      await Promise.all(
+        Array.from({ length: 500 }, (_, offset) => {
+          const index = batch + offset;
+
+          return fs.writeFile(
+            path.join(
+              root,
+              directories[index % directories.length]!,
+              `component-${index}-application-footer.tsx`,
+            ),
+            "",
+          );
+        }),
+      );
+    }
+
+    let lastTick = performance.now();
+    let longestGap = 0;
+
+    const ticker = setInterval(() => {
+      const now = performance.now();
+      longestGap = Math.max(longestGap, now - lastTick);
+      lastTick = now;
+    }, 5);
+
+    const startedAt = performance.now();
+
+    const result = await listHostFiles({
+      type: "host.list_files",
+      followRootSymlink: false,
+      path: root,
+      query: "src/comp",
+      limit: 50,
+      includeHidden: false,
+      respectGitIgnore: false,
+      excludeNames: [],
+    }).finally(() => clearInterval(ticker));
+
+    const finishedAt = performance.now();
+    longestGap = Math.max(longestGap, finishedAt - lastTick);
+    const elapsed = finishedAt - startedAt;
+
+    expect(result.files).toHaveLength(50);
+    expect(result.truncated).toBe(true);
+    expect(longestGap).toBeLessThan(elapsed / 4);
   });
 
   it("skips excluded names at any depth and never lists .git", async () => {
@@ -218,6 +319,7 @@ describe("workspace path discovery", () => {
     await write(root, "apps/web/.turbo/log");
     await write(root, "apps/web/.DS_Store");
     await write(root, "apps/web/index.ts");
+
     const listPaths = async (excludeNames: string[]) =>
       (
         await listWorkspacePaths({
@@ -225,7 +327,7 @@ describe("workspace path discovery", () => {
           respectGitIgnore: false,
           excludeNames,
         })
-      )
+      ).paths
         .map((entry) => entry.path)
         .sort();
 
@@ -246,33 +348,4 @@ describe("workspace path discovery", () => {
       "node_modules/pkg/index.js",
     ]);
   });
-
-  it(
-    "does not overflow the call stack merging a large subdirectory",
-    async () => {
-      const root = await createRoot();
-      const nested = path.join(root, "many");
-      await fs.mkdir(nested, { recursive: true });
-      const fileCount = 150_000;
-      const batchSize = 500;
-      for (let start = 0; start < fileCount; start += batchSize) {
-        const end = Math.min(start + batchSize, fileCount);
-        await Promise.all(
-          Array.from({ length: end - start }, (_, offset) =>
-            fs.writeFile(path.join(nested, `f${start + offset}.txt`), ""),
-          ),
-        );
-      }
-
-      const result = await listWorkspacePaths({
-        ...listingArgs(root),
-        includeDirectories: false,
-        includeHidden: false,
-        respectGitIgnore: false,
-      });
-
-      expect(result).toHaveLength(fileCount);
-    },
-    largeTreeTimeoutMs,
-  );
 });

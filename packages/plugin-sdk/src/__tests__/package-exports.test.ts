@@ -1,5 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { pluginPackageJsonSchema } from "@omnyo/domain";
+import * as sdk from "../index.js";
 
 interface PackageExport {
   source: string;
@@ -11,6 +13,7 @@ interface PackageExport {
 describe("packed plugin SDK exports", () => {
   it("maps every packed subpath to runtime JavaScript and portable declarations", async () => {
     const packageRoot = new URL("../../", import.meta.url);
+
     const packageJson = JSON.parse(
       await readFile(new URL("package.json", packageRoot), "utf8"),
     ) as {
@@ -21,10 +24,14 @@ describe("packed plugin SDK exports", () => {
       exports: Record<string, PackageExport>;
     };
 
-    expect(packageJson.private).not.toBe(true);
+    expect(packageJson.private).toBe(true);
     expect(packageJson.dependencies.zod).toBe("^4.6.5");
     expect(packageJson.peerDependencies.zod).toBeUndefined();
-    expect(packageJson.files).toEqual(["bundled-types", "dist", "README.md"]);
+    expect(packageJson.files).toEqual([
+      "bundled-types/omnyo-plugin-sdk*.d.ts",
+      "dist",
+      "README.md",
+    ]);
     expect(Object.keys(packageJson.exports)).toEqual([
       ".",
       "./provider-bridge",
@@ -55,5 +62,11 @@ describe("packed plugin SDK exports", () => {
       ).resolves.toBeUndefined();
       expect(entry.source).toMatch(/^\.\/src\//u);
     }
+  });
+
+  it("exposes the existing V1 manifest boundary through the root SDK", () => {
+    expect(Reflect.get(sdk, "experimental_pluginPackageJsonSchemaV1")).toBe(
+      pluginPackageJsonSchema,
+    );
   });
 });

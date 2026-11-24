@@ -1,3 +1,3 @@
-import { installTestPluginRuntime } from "@get-bb/plugin-sdk/testing/app";
+import { installTestPluginRuntime } from "@omnyo/plugin-sdk/testing/app";
 
 installTestPluginRuntime();

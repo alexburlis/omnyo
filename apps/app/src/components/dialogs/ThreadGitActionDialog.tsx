@@ -4,10 +4,13 @@ import {
   DetailRow,
   DetailRowIconLabel,
 } from "@/components/ui/detail-card.js";
-import type { ThreadGitStatusDisplay } from "@/components/workspace/workspace-status";
+import {
+  SquashMergeInfo,
+  type ThreadGitStatusDisplay,
+} from "@/components/workspace/workspace-status";
 import { ChangedFilesDetailRow } from "@/components/workspace/ChangedFilesDetailRow";
 import type { WorkspaceChangedFilesSection } from "@/components/workspace/workspace-change-summary";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +18,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
+} from "@omnyo/shared-ui/dialog";
 
 export type ThreadGitActionDialogTarget = { kind: "commit" };
 
@@ -120,6 +123,7 @@ export function ThreadGitActionDialogContent({
                   <span className="min-w-0 truncate text-muted-foreground">
                     {gitStatusDisplay.summary}
                   </span>
+                  {gitStatusDisplay.warning ? <SquashMergeInfo /> : null}
                 </div>
               </DetailRow>
             ) : null}

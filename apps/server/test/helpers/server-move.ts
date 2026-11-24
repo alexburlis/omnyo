@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   hostDaemonOnlineRpcResponseMessageSchema,
   hostDaemonServerWsMessageSchema,
@@ -5,13 +8,14 @@ import {
   type HostDaemonOnlineRpcResponseMessage,
   type ServerMovedMessage,
   type ServerMoveInspectResult,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type {
   ServerMoveEnvironment,
   ServerMoveTimings,
 } from "../../src/services/server-move/coordinator.js";
-import { createDeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { exportServerArchive } from "../../src/services/server-move/export.js";
+import { SERVER_EXPORT_FREE_SPACE } from "../../src/services/server-move/export-snapshot.js";
 import type { TestAppHarness } from "./test-app.js";
 
 export type FakeDaemonReply =
@@ -53,10 +57,10 @@ export function inspectResult(
   overrides: Partial<ServerMoveInspectResult> = {},
 ): ServerMoveInspectResult {
   return {
-    dataDir: "/home/me/.bb-machines/laptop",
+    dataDir: "/home/me/.omnyo-machines/laptop",
     platform: "linux",
     timeZone: "UTC",
-    bbAppVersion: "0.0.0-test",
+    coreVersion: "0.0.0-test",
     serverEntryAvailable: true,
     existingServerData: null,
     dataDirHasServerData: false,
@@ -82,6 +86,7 @@ function toResponse(
       result: reply.result,
     });
   }
+
   return {
     type: "host-rpc.response",
     requestId: request.requestId,
@@ -102,18 +107,23 @@ export function registerFakeDaemon(
     requests: [],
     sessionId: `session-${args.hostId}`,
   };
+
   harness.hub.registerDaemon(daemon.sessionId, args.hostId, {
     close() {},
     send(data) {
       const message = hostDaemonServerWsMessageSchema.parse(JSON.parse(data));
+
       if (message.type === "server.moved") {
         args.events.push(`server.moved:${args.hostId}`);
         daemon.movedMessages.push(message);
+
         return;
       }
+
       if (message.type !== "host-rpc.request") {
         return;
       }
+
       daemon.requests.push(message);
       args.events.push(`${args.hostId}:${message.command.type}`);
       void Promise.resolve()
@@ -131,6 +141,7 @@ export function registerFakeDaemon(
         });
     },
   });
+
   return daemon;
 }
 
@@ -148,44 +159,72 @@ export interface TestServerMoveEnvironment {
   retired: Promise<void>;
 }
 
+export function createTestFullOmnyoAppArtifact(
+  dataDir: string,
+  version: string,
+) {
+  const bytes = Buffer.from("inert lower-layer artifact transport");
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+
+  return {
+    availability: async () => ({
+      available: true as const,
+      unpackedSizeBytes: bytes.length,
+      version,
+    }),
+    build: async () => {
+      const path = join(dataDir, "inert-full-omnyo-app.tgz");
+      await writeFile(path, bytes);
+
+      return {
+        path,
+        sha256,
+        runtimeSha256: sha256,
+        sizeBytes: bytes.length,
+        version,
+      };
+    },
+  };
+}
+
 export function createTestServerMoveEnvironment(
   harness: TestAppHarness,
   overrides: Partial<ServerMoveEnvironment> = {},
 ): TestServerMoveEnvironment {
   const events: string[] = [];
   const retired = createDeferredPromise<void>();
+
   const plugins: TestServerMovePlugins = {
     paused: false,
     resumes: 0,
     stops: 0,
     suspends: 0,
   };
+
   const environment: ServerMoveEnvironment = {
     allowLoopbackServerUrl: false,
     bindHost: null,
     deps: harness.deps,
     exportArchive: (args) => {
       events.push("export");
+
       return exportServerArchive({
         appVersion: harness.config.appVersion,
         dataDir: harness.config.dataDir,
         db: harness.db,
         fileName: "server.tar.gz",
+        freeSpace: SERVER_EXPORT_FREE_SPACE,
         logger: harness.deps.logger,
         now: Date.now(),
         sourceServerHostId: args.sourceServerHostId,
+        vault: harness.deps.vault,
         workDir: args.workDir,
       });
     },
-    fullArtifact: {
-      availability: async () => ({
-        available: false,
-        reason: "The test server has no packaged bb-app.",
-      }),
-      build: async () => {
-        throw new Error("The test server has no packaged bb-app.");
-      },
-    },
+    fullArtifact: createTestFullOmnyoAppArtifact(
+      harness.config.dataDir,
+      harness.config.appVersion,
+    ),
     now: Date.now,
     plugins: {
       async resumeSuspended() {
@@ -226,5 +265,6 @@ export function createTestServerMoveEnvironment(
     timings: TEST_SERVER_MOVE_TIMINGS,
     ...overrides,
   };
+
   return { environment, events, plugins, retired: retired.promise };
 }

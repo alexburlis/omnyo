@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createConnection } from "../../src/connection.js";
 import { noopNotifier } from "../../src/notifier.js";
 import {
+  countTerminalSessions,
   createTerminalSession,
   listTerminalSessions,
   updateTerminalSession,
@@ -15,9 +16,13 @@ import { createThread } from "../../src/data/threads.js";
 import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 type TestDb = ReturnType<typeof createConnection>;
+
 type TestHost = ReturnType<typeof upsertHost>;
+
 type TestSession = ReturnType<typeof openSession>;
+
 type TestEnvironment = ReturnType<typeof createEnvironment>;
+
 type TestThread = ReturnType<typeof createThread>;
 
 interface TerminalSessionFixture {
@@ -148,14 +153,18 @@ function openTestSession(db: TestDb, hostId: string): TestSession {
 
 function setup(): TerminalSessionFixture {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const session = openTestSession(db, host.id);
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/project" },
   });
+
   const environment = createEnvironment(db, noopNotifier, {
     providerOwnsPath: false,
     projectId: project.id,
@@ -168,12 +177,14 @@ function setup(): TerminalSessionFixture {
     defaultBranch: "main",
     mergeBaseBranch: null,
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     environmentId: environment.id,
     providerId: "codex",
     status: "idle",
   });
+
   return {
     db,
     environment,
@@ -290,6 +301,7 @@ describe("terminal sessions", () => {
       threadId: fixture.thread.id,
       now: 10,
     });
+
     const secondInput = markTerminalSessionUserInput(fixture.db, {
       terminalId: terminal.id,
       threadId: fixture.thread.id,
@@ -372,6 +384,7 @@ describe("terminal sessions", () => {
 
   it("lists starting, running, and disconnected terminals as visible", () => {
     const fixture = setup();
+
     const starting = createTerminalSession(fixture.db, {
       cols: 80,
       daemonSessionId: fixture.session.id,
@@ -384,6 +397,7 @@ describe("terminal sessions", () => {
       threadId: fixture.thread.id,
       title: "Starting terminal",
     });
+
     const running = createTerminalSession(fixture.db, {
       cols: 80,
       daemonSessionId: fixture.session.id,
@@ -396,6 +410,7 @@ describe("terminal sessions", () => {
       threadId: fixture.thread.id,
       title: "Running terminal",
     });
+
     const disconnected = createTerminalSession(fixture.db, {
       cols: 80,
       daemonSessionId: null,
@@ -408,6 +423,7 @@ describe("terminal sessions", () => {
       threadId: fixture.thread.id,
       title: "Disconnected terminal",
     });
+
     const exited = createTerminalSession(fixture.db, {
       cols: 80,
       daemonSessionId: null,
@@ -464,5 +480,123 @@ describe("terminal sessions", () => {
         }),
       ],
     );
+  });
+});
+
+describe("countTerminalSessions", () => {
+  it("preserves historical scoped counts and live standalone host/path counts", () => {
+    const { db, host, environment, thread } = setup();
+
+    try {
+      const otherHost = upsertHost(db, noopNotifier, { name: "other-host" });
+
+      const rows = [
+        {
+          hostId: host.id,
+          threadId: thread.id,
+          environmentId: environment.id,
+          status: "running",
+          initialCwd: "/a",
+        },
+        {
+          hostId: host.id,
+          threadId: null,
+          environmentId: environment.id,
+          status: "running",
+          initialCwd: "/a",
+        },
+        {
+          hostId: host.id,
+          threadId: thread.id,
+          environmentId: environment.id,
+          status: "exited",
+          initialCwd: "/a",
+        },
+        {
+          hostId: host.id,
+          threadId: null,
+          environmentId: environment.id,
+          status: "exited",
+          initialCwd: "/a",
+        },
+        {
+          hostId: host.id,
+          threadId: null,
+          environmentId: null,
+          status: "running",
+          initialCwd: "/a",
+        },
+        {
+          hostId: host.id,
+          threadId: null,
+          environmentId: null,
+          status: "starting",
+          initialCwd: "/b",
+        },
+        {
+          hostId: host.id,
+          threadId: null,
+          environmentId: null,
+          status: "disconnected",
+          initialCwd: "/a",
+        },
+        {
+          hostId: host.id,
+          threadId: null,
+          environmentId: null,
+          status: "exited",
+          initialCwd: "/a",
+        },
+        {
+          hostId: otherHost.id,
+          threadId: null,
+          environmentId: null,
+          status: "running",
+          initialCwd: "/a",
+        },
+      ] as const;
+
+      for (const row of rows) {
+        createTerminalSession(db, {
+          ...row,
+          cols: 80,
+          rows: 24,
+          daemonSessionId: null,
+          title: "Terminal",
+        });
+      }
+
+      expect(
+        countTerminalSessions(db, {
+          scope: { kind: "thread", threadId: thread.id },
+          visible: false,
+        }),
+      ).toBe(2);
+      expect(
+        countTerminalSessions(db, {
+          scope: {
+            kind: "threadless-environment",
+            environmentId: environment.id,
+          },
+          visible: false,
+        }),
+      ).toBe(2);
+
+      for (const [cwd, expected] of [
+        [null, 3],
+        ["/a", 2],
+        ["/b", 1],
+        ["/missing", 0],
+      ] as const) {
+        expect(
+          countTerminalSessions(db, {
+            scope: { kind: "host-path", hostId: host.id, cwd },
+            visible: true,
+          }),
+        ).toBe(expected);
+      }
+    } finally {
+      db.$client.close();
+    }
   });
 });

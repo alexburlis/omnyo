@@ -24,8 +24,9 @@ for (const shim of [false, true]) {
     `preserves cwd, arguments, stdin, output, and exit status through ${shim ? "a Windows .cmd shim on PATH" : "a native executable"}`,
     async () => {
       const directory = realpathSync(
-        mkdtempSync(join(tmpdir(), "bb process é-")),
+        mkdtempSync(join(tmpdir(), "omnyo process é-")),
       );
+
       onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
       const scriptPath = join(directory, "probe.cjs");
       writeFileSync(
@@ -40,12 +41,14 @@ for (const shim of [false, true]) {
       );
       const binDirectory = join(directory, "node_modules", ".bin");
       mkdirSync(binDirectory, { recursive: true });
+
       if (shim) {
         writeFileSync(
-          join(binDirectory, "bb-process-probe.cmd"),
+          join(binDirectory, "omnyo-process-probe.cmd"),
           `@echo off\r\n"${process.execPath}" "%~dp0..\\..\\probe.cjs" %*\r\n`,
         );
       }
+
       const args = [
         "hello world",
         "",
@@ -55,13 +58,17 @@ for (const shim of [false, true]) {
         "日本語",
         "trailing\\",
       ];
+
       const inheritedEnv: NodeJS.ProcessEnv = { ...process.env };
+
       for (const key of Object.keys(inheritedEnv)) {
         if (key.toUpperCase() === "PATH") delete inheritedEnv[key];
       }
+
       inheritedEnv.Path = directory;
+
       const child = spawnPortablePipedProcess({
-        command: shim ? "bb-process-probe" : process.execPath,
+        command: shim ? "omnyo-process-probe" : process.execPath,
         args: shim ? args : [scriptPath, ...args],
         cwd: directory,
         env: sanitizeInheritedChildProcessEnv({
@@ -69,6 +76,7 @@ for (const shim of [false, true]) {
           shellPath: binDirectory,
         }),
       });
+
       onTestFinished(() => {
         child.kill();
       });
@@ -88,7 +96,7 @@ for (const shim of [false, true]) {
       expect(Buffer.concat(stderr).toString("utf8")).toBe("provider stderr");
       await expect(
         execPortableFile(
-          shim ? "bb-process-probe" : process.execPath,
+          shim ? "omnyo-process-probe" : process.execPath,
           shim ? args : [scriptPath, ...args],
           {
             cwd: directory,
@@ -115,15 +123,16 @@ for (const shim of [false, true]) {
 
 it("reports ENOENT and finishes cleanup when a command cannot be resolved", async () => {
   const managed = spawnManagedProcess({
-    command: "bb-process-utils-command-that-does-not-exist",
+    command: "omnyo-process-utils-command-that-does-not-exist",
     args: [],
   });
+
   await expect(once(managed.child, "close")).rejects.toMatchObject({
     code: "ENOENT",
   });
   await managed.stop();
   await expect(
-    execPortableFile("bb-process-utils-command-that-does-not-exist", [], {
+    execPortableFile("omnyo-process-utils-command-that-does-not-exist", [], {
       cwd: process.cwd(),
       env: process.env,
       maxBuffer: 1024,
@@ -142,20 +151,22 @@ it.runIf(process.platform === "win32")(
     const env = sanitizeInheritedChildProcessEnv({
       env: {
         ...process.env,
-        bb_data_dir: "parent-data",
-        Bb_HOST_DAEMON_PORT: "12345",
+        omnyo_data_dir: "parent-data",
+        Omnyo_HOST_DAEMON_PORT: "12345",
         Node_Env: "development",
         PROVIDER_TOKEN: "preserved-token",
       },
     });
+
     const child = spawnPortablePipedProcess({
       command: process.execPath,
       args: [
         "-e",
-        "process.stdout.write(JSON.stringify([process.env.BB_DATA_DIR ?? null, process.env.BB_HOST_DAEMON_PORT ?? null, process.env.NODE_ENV ?? null, process.env.PROVIDER_TOKEN]));",
+        "process.stdout.write(JSON.stringify([process.env.OMNYO_DATA_DIR ?? null, process.env.OMNYO_HOST_DAEMON_PORT ?? null, process.env.NODE_ENV ?? null, process.env.PROVIDER_TOKEN]));",
       ],
       env,
     });
+
     onTestFinished(() => {
       child.kill();
     });
@@ -176,6 +187,7 @@ it.runIf(process.platform === "win32")(
 function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -186,8 +198,9 @@ it.runIf(process.platform === "win32")(
   "ends the process behind a Windows .cmd shim when the portable child is killed",
   async () => {
     const directory = realpathSync(
-      mkdtempSync(join(tmpdir(), "bb-portable-kill-")),
+      mkdtempSync(join(tmpdir(), "omnyo-portable-kill-")),
     );
+
     onTestFinished(() => rmSync(directory, { force: true, recursive: true }));
     const pidFile = join(directory, "pid.txt");
     writeFileSync(
@@ -198,15 +211,18 @@ it.runIf(process.platform === "win32")(
       join(directory, "sleeper.cmd"),
       `@echo off\r\n"${process.execPath}" "%~dp0sleeper.cjs" %*\r\n`,
     );
+
     const child = spawnPortableProcess({
       command: join(directory, "sleeper.cmd"),
       args: [pidFile],
       stdio: "ignore",
     });
+
     const sleeperPid = await vi.waitFor(
       () => Number.parseInt(readFileSync(pidFile, "utf8"), 10),
       { timeout: 10_000 },
     );
+
     onTestFinished(() => {
       if (isProcessRunning(sleeperPid)) process.kill(sleeperPid);
     });
@@ -229,6 +245,7 @@ it.skipIf(process.platform === "win32")(
       args: ["-e", "setInterval(() => {}, 1000)"],
       stdio: "ignore",
     });
+
     const exited = once(child, "exit");
 
     killPortableProcess(child, "SIGTERM");

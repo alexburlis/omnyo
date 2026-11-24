@@ -6,13 +6,16 @@ import {
 
 function recordingFetch(body: unknown) {
   const calls: { url: string; init: RequestInit | undefined }[] = [];
+
   const fetchImpl: typeof fetch = async (input, init) => {
     calls.push({ url: String(input), init });
+
     return new Response(JSON.stringify(body), {
       status: 202,
       headers: { "content-type": "application/json" },
     });
   };
+
   return { fetchImpl, calls };
 }
 
@@ -28,6 +31,7 @@ describe("starting plugin installs", () => {
       displayName: "./plugins/local",
       state: "queued",
     };
+
     const { fetchImpl, calls } = recordingFetch({ ok: true, job });
     await expect(
       startPluginInstall(fetchImpl, "./plugins/local"),
@@ -47,11 +51,12 @@ describe("starting plugin installs", () => {
       target: {
         kind: "catalog",
         entryId: "linear",
-        marketplace: "bb-official",
+        marketplace: "omnyo-official",
       },
       displayName: "Linear",
       state: "running",
     };
+
     const { fetchImpl, calls } = recordingFetch({ ok: true, job });
     await expect(
       startCatalogPluginInstall(fetchImpl, { entryId: "linear" }),

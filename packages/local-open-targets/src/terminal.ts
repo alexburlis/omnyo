@@ -16,6 +16,7 @@ function quoteShellArg(value: string): string {
   if (value === "") {
     return "''";
   }
+
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
@@ -26,6 +27,7 @@ function escapeAppleScriptString(value: string): string {
 function buildTerminalShellScript(args: TerminalShellScriptArgs): string {
   const line = args.lineNumber === null ? "" : String(args.lineNumber);
   const column = args.columnNumber === null ? "" : String(args.columnNumber);
+
   const editorScript = [
     "editor=''",
     'if [ -n "${VISUAL:-}" ]; then editor=$VISUAL; elif [ -n "${EDITOR:-}" ]; then editor=$EDITOR; elif command -v nvim >/dev/null 2>&1; then editor=nvim; elif command -v vim >/dev/null 2>&1; then editor=vim; elif command -v vi >/dev/null 2>&1; then editor=vi; elif command -v nano >/dev/null 2>&1; then editor=nano; elif command -v less >/dev/null 2>&1; then editor=less; fi',
@@ -52,6 +54,7 @@ function buildTerminalDirectoryCommand(path: string): string {
 
 function getEditorExecutableName(editorCommand: string): string {
   const executable = editorCommand.trim().split(/\s+/u)[0] ?? "";
+
   return path
     .basename(executable)
     .replace(/\.exe$/iu, "")
@@ -63,44 +66,54 @@ function splitShellCommand(command: string): string[] | null {
   let current = "";
   let quote: "'" | '"' | null = null;
   let escaping = false;
+
   for (const char of command.trim()) {
     if (escaping) {
       current += char;
       escaping = false;
       continue;
     }
+
     if (char === "\\" && quote !== "'") {
       escaping = true;
       continue;
     }
+
     if (quote !== null) {
       if (char === quote) {
         quote = null;
       } else {
         current += char;
       }
+
       continue;
     }
+
     if (char === "'" || char === '"') {
       quote = char;
       continue;
     }
+
     if (/\s/u.test(char)) {
       if (current.length > 0) {
         tokens.push(current);
         current = "";
       }
+
       continue;
     }
+
     current += char;
   }
 
   if (escaping || quote !== null) {
     return null;
   }
+
   if (current.length > 0) {
     tokens.push(current);
   }
+
   return tokens.length > 0 ? tokens : null;
 }
 
@@ -135,22 +148,27 @@ function buildTerminalEditorFileCommand(
   args: BuildMacLocalTerminalOpenArgs,
 ): string {
   const directory = path.dirname(args.path);
+
   if (args.editorCommand === null) {
     return buildTerminalDirectoryCommand(directory);
   }
 
   const parsedEditorCommand = splitShellCommand(args.editorCommand);
+
   if (parsedEditorCommand === null) {
     return `cd ${quoteShellArg(directory)} && ${args.editorCommand} ${quoteShellArg(args.path)}`;
   }
 
   const editorExecutableName = getEditorExecutableName(parsedEditorCommand[0]);
+
   const locationArgs = buildTerminalEditorLocationArgs(
     editorExecutableName,
     args.lineNumber,
     args.columnNumber,
   );
+
   const explicitArgsIndex = parsedEditorCommand.indexOf("--");
+
   const editorArgs =
     explicitArgsIndex < 0
       ? [...parsedEditorCommand, ...locationArgs, args.path]

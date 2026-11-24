@@ -1,16 +1,25 @@
 import type { ChildProcess } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 import {
+  bridgeErrorDataSchema,
+  type ProviderErrorInfo,
+  type ProviderRateLimitState,
   experimental_killPortableProcess,
   experimental_recordProviderChildIo,
   experimental_spawnPortableProcess,
-} from "@get-bb/plugin-sdk/provider-bridge";
-import type { z } from "zod";
+} from "@omnyo/plugin-sdk/provider-bridge";
+import { z } from "zod";
+import { codexKnownErrorInfoSchema } from "../schemas.js";
+import { toProviderErrorInfo } from "../delta-translation.js";
 
 const STDERR_TAIL_MAX_CHUNKS = 40;
+
 const CLOSE_AFTER_EXIT_GRACE_MS = 1_000;
+
 const TERMINATE_ESCALATION_MS = 1_000;
+
 const KILL_ESCALATION_MS = 4_000;
+
 const CLOSED_STDIN_ERROR_CODES = new Set([
   "EPIPE",
   "EOF",
@@ -67,13 +76,53 @@ export class CodexAppServerExitedError extends Error {
   }
 }
 
+const nativeFailureSchema = z.object({
+  codexErrorInfo: codexKnownErrorInfoSchema.optional().catch(undefined),
+  httpStatusCode: z
+    .number()
+    .int()
+    .min(100)
+    .max(599)
+    .optional()
+    .catch(undefined),
+});
+
 export class CodexAppServerRpcError extends Error {
+  readonly errorInfo?: ProviderErrorInfo;
+  readonly rateLimits?: ProviderRateLimitState;
   constructor(
     message: string,
     readonly code: number | undefined,
+    data?: unknown,
   ) {
     super(message);
     this.name = "CodexAppServerRpcError";
+
+    const suppliedInfo = bridgeErrorDataSchema
+      .pick({ errorInfo: true })
+      .safeParse(data).data?.errorInfo;
+
+    const suppliedLimits = bridgeErrorDataSchema
+      .pick({ rateLimits: true })
+      .safeParse(data).data?.rateLimits;
+
+    const native = nativeFailureSchema.safeParse(data).data;
+    const translated = toProviderErrorInfo(native?.codexErrorInfo);
+    this.errorInfo =
+      suppliedInfo ??
+      (translated === null
+        ? native?.httpStatusCode === undefined
+          ? undefined
+          : {
+              category: "unknown",
+              providerCode: null,
+              httpStatusCode: native.httpStatusCode,
+            }
+        : {
+            ...translated,
+            httpStatusCode: native?.httpStatusCode ?? translated.httpStatusCode,
+          });
+    this.rateLimits = suppliedLimits;
   }
 }
 
@@ -87,24 +136,29 @@ interface ParsedChildMessage {
   id?: string | number;
   method?: string;
   result?: unknown;
-  error?: { code?: number; message?: string };
+  error?: { code?: number; message?: string; data?: unknown };
   params?: unknown;
 }
 
 function parseChildLine(line: string): ParsedChildMessage | null {
   const trimmed = line.trim();
+
   if (!trimmed) {
     return null;
   }
+
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(trimmed);
   } catch {
     return null;
   }
+
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return null;
   }
+
   return parsed as ParsedChildMessage;
 }
 
@@ -126,6 +180,7 @@ export function createCodexAppServerConnection(
     env: options.env,
     stdio: ["pipe", "pipe", "pipe"],
   });
+
   experimental_recordProviderChildIo(child, {
     threadId: options.recordThreadId,
   });
@@ -135,21 +190,25 @@ export function createCodexAppServerConnection(
   let nextRequestId = 1;
   let finalized = false;
   let spawnFailed = false;
+
   let exitStatus: {
     code: number | null;
     signal: NodeJS.Signals | null;
   } | null = null;
+
   let killStarted = false;
   let stdinFailure: CodexAppServerExitedError | null = null;
   let closeGraceTimer: NodeJS.Timeout | null = null;
   let stdoutLines: Interface | null = null;
   let resolveExit!: () => void;
+
   const exitPromise = new Promise<void>((resolve) => {
     resolveExit = resolve;
   });
 
   function pushStderrChunk(chunk: string): void {
     stderrChunks.push(chunk);
+
     if (stderrChunks.length > STDERR_TAIL_MAX_CHUNKS) {
       stderrChunks.shift();
     }
@@ -160,8 +219,10 @@ export function createCodexAppServerConnection(
       if (request.timeout !== null) {
         clearTimeout(request.timeout);
       }
+
       request.reject(error);
     }
+
     pending.clear();
   }
 
@@ -169,20 +230,26 @@ export function createCodexAppServerConnection(
     if (finalized || killStarted) {
       return exitPromise;
     }
+
     killStarted = true;
+
     const termination = setTimeout(() => {
       if (!finalized && exitStatus === null) {
         experimental_killPortableProcess(child, "SIGTERM");
       }
     }, TERMINATE_ESCALATION_MS);
+
     termination.unref?.();
+
     const escalation = setTimeout(() => {
       if (!finalized) {
         experimental_killPortableProcess(child, "SIGKILL");
       }
     }, KILL_ESCALATION_MS);
+
     escalation.unref?.();
     child.stdin?.end();
+
     return exitPromise;
   }
 
@@ -195,10 +262,12 @@ export function createCodexAppServerConnection(
     ) {
       return;
     }
+
     const code =
       "code" in error && typeof error.code === "string"
         ? ` (${error.code})`
         : "";
+
     const detail = `stdin failed${code}: ${error.message}`;
     stdinFailure = new CodexAppServerExitedError(`codex app-server ${detail}`);
     pushStderrChunk(detail);
@@ -210,13 +279,17 @@ export function createCodexAppServerConnection(
     if (killStarted || finalized || stdinFailure !== null) {
       return;
     }
+
     const stdin = child.stdin;
+
     if (!stdin || stdin.destroyed || !stdin.writable) {
       if (exitStatus === null) {
         handleBrokenStdin(new Error("stdin is not writable"));
       }
+
       return;
     }
+
     stdin.write(JSON.stringify(message) + "\n");
   }
 
@@ -227,11 +300,14 @@ export function createCodexAppServerConnection(
     if (finalized) {
       return;
     }
+
     finalized = true;
+
     if (closeGraceTimer !== null) {
       clearTimeout(closeGraceTimer);
       closeGraceTimer = null;
     }
+
     stdoutLines?.close();
     child.stdout?.destroy();
     child.stderr?.destroy();
@@ -244,6 +320,7 @@ export function createCodexAppServerConnection(
         { spawnFailed },
       ),
     );
+
     try {
       options.onExit({ ...status, stderrTail, spawnFailed });
     } finally {
@@ -257,36 +334,45 @@ export function createCodexAppServerConnection(
       if (finalized) {
         return;
       }
+
       const message = parseChildLine(line);
+
       if (!message) {
         return;
       }
 
       const id = message.id;
+
       if (
         (typeof id === "string" || typeof id === "number") &&
         message.method === undefined
       ) {
         const numericId = typeof id === "number" ? id : Number(id);
         const request = pending.get(numericId);
+
         if (!request) {
           return;
         }
+
         pending.delete(numericId);
+
         if (request.timeout !== null) {
           clearTimeout(request.timeout);
         }
+
         if (message.error) {
           request.reject(
             new CodexAppServerRpcError(
               message.error.message ??
                 `codex app-server returned error code ${message.error.code ?? "unknown"}`,
               message.error.code,
+              message.error.data,
             ),
           );
         } else {
           request.resolve(message.result);
         }
+
         return;
       }
 
@@ -312,6 +398,7 @@ export function createCodexAppServerConnection(
             });
           },
         });
+
         return;
       }
 
@@ -324,6 +411,7 @@ export function createCodexAppServerConnection(
       input: child.stderr,
       terminal: false,
     });
+
     stderrLines.on("line", (line) => {
       pushStderrChunk(line);
     });
@@ -339,6 +427,7 @@ export function createCodexAppServerConnection(
     if (!isClosedChildStdinError(error)) {
       throw error;
     }
+
     handleBrokenStdin(error);
   });
 
@@ -367,15 +456,19 @@ export function createCodexAppServerConnection(
           }),
         );
       }
+
       if (stdinFailure !== null) {
         return Promise.reject(stdinFailure);
       }
+
       const id = nextRequestId;
       nextRequestId += 1;
+
       return new Promise((resolve, reject) => {
         const entry: PendingChildRequest = {
           resolve: (value) => {
             const parsed = resultSchema.safeParse(value);
+
             if (parsed.success) {
               resolve(parsed.data);
             } else {
@@ -389,6 +482,7 @@ export function createCodexAppServerConnection(
           reject,
           timeout: null,
         };
+
         if (timeoutMs !== undefined) {
           entry.timeout = setTimeout(() => {
             pending.delete(id);
@@ -400,6 +494,7 @@ export function createCodexAppServerConnection(
           }, timeoutMs);
           entry.timeout.unref?.();
         }
+
         pending.set(id, entry);
         writeLine({ jsonrpc: "2.0", id, method, params });
       });

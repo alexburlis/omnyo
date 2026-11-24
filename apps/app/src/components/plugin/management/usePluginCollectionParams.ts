@@ -9,19 +9,20 @@ export function usePluginCollectionParams() {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("query") ?? "";
   const rawSort = searchParams.get("sort");
+
   const requestedSort: PluginBrowseSort | null =
-    rawSort === "name" ||
-    rawSort === "recently-added" ||
-    rawSort === "most-installed"
-      ? rawSort
+    rawSort === "name" || rawSort === "recently-added" ? rawSort
       : null;
+
   const rawDirection = searchParams.get("direction");
+
   const sortDirection: PluginBrowseSortDirection =
     rawDirection === "asc" || rawDirection === "desc"
       ? rawDirection
       : requestedSort === "name"
         ? "asc"
         : "desc";
+
   const selectedCategories = useMemo(
     () =>
       searchParams.get("shelf")?.startsWith("category:")
@@ -29,12 +30,14 @@ export function usePluginCollectionParams() {
         : searchParams.getAll("category"),
     [searchParams],
   );
+
   const changeSearchParams = useCallback(
     (change: (next: URLSearchParams) => void, replace = true) => {
       setSearchParams(
         (current) => {
           const next = new URLSearchParams(current);
           change(next);
+
           return next;
         },
         { replace },
@@ -42,6 +45,7 @@ export function usePluginCollectionParams() {
     },
     [setSearchParams],
   );
+
   return {
     searchParams,
     query,

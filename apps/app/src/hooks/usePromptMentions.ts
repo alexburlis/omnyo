@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import type { SidebarBootstrapResponse } from "@bb/server-contract";
+import type { SidebarBootstrapResponse } from "@omnyo/server-contract";
 import {
   buildProjectMentionSuggestions,
   buildSectionMentionSuggestions,
@@ -25,7 +25,7 @@ import {
   PLUGIN_MENTION_TRIGGER_VALUES,
   type OrderedMentionSuggestions,
   type PluginMentionTrigger,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import { buildPromptMentionResults } from "./promptMentionCandidates";
 
 const PROMPT_MENTION_SOURCE_LIMIT = 8;
@@ -46,6 +46,7 @@ interface UsePromptMentionsResult {
   ) => void;
   results: OrderedMentionSuggestions;
   isLoading: boolean;
+  isRefreshing: boolean;
   isError: boolean;
 }
 
@@ -53,6 +54,7 @@ function buildProjectNamesById(
   sidebarNavigation: SidebarBootstrapResponse | undefined,
 ): ReadonlyMap<string, string> {
   const projectNamesById = new Map<string, string>();
+
   if (!sidebarNavigation) {
     return projectNamesById;
   }
@@ -60,6 +62,7 @@ function buildProjectNamesById(
   for (const project of sidebarNavigation.projects) {
     projectNamesById.set(project.id, project.name);
   }
+
   return projectNamesById;
 }
 
@@ -92,11 +95,13 @@ function buildPluginMentionTriggers(
   const enabled = new Set<PluginMentionTrigger>([
     DEFAULT_PLUGIN_MENTION_TRIGGER,
   ]);
+
   for (const provider of providers) {
     for (const trigger of provider.triggers) {
       enabled.add(trigger);
     }
   }
+
   return PLUGIN_MENTION_TRIGGER_VALUES.filter((trigger) =>
     enabled.has(trigger),
   );
@@ -110,12 +115,15 @@ export function usePromptMentions(
     query: string;
     trigger: PluginMentionTrigger;
   } | null>(null);
+
   const setQuery = useCallback(
     (query: string | null, trigger: PluginMentionTrigger | null) => {
       if (query === null) {
         setActiveMention(null);
+
         return;
       }
+
       setActiveMention({
         query,
         trigger: trigger ?? DEFAULT_PLUGIN_MENTION_TRIGGER,
@@ -123,6 +131,7 @@ export function usePromptMentions(
     },
     [],
   );
+
   const query = activeMention?.query ?? null;
   const trigger = activeMention?.trigger ?? DEFAULT_PLUGIN_MENTION_TRIGGER;
   const includeBuiltInSources = trigger === DEFAULT_PLUGIN_MENTION_TRIGGER;
@@ -138,17 +147,22 @@ export function usePromptMentions(
     currentThreadId: options.threadStorageThreadId,
     includeDirectories: true,
   });
+
   const projectNamesQuery = useSidebarNavigation({
     enabled: includeBuiltInSources && hasQuery,
   });
+
   const threadsQuery = useThreadMentionCandidates({
     enabled: includeBuiltInSources && hasQuery,
   });
+
   const pluginContributions = usePluginContributions();
+
   const hasMentionProviders =
     pluginContributions.data?.mentionProviders.some((provider) =>
       provider.triggers.includes(trigger),
     ) ?? false;
+
   const mentionTriggers = useMemo(
     () =>
       buildPluginMentionTriggers(
@@ -156,11 +170,14 @@ export function usePromptMentions(
       ),
     [pluginContributions.data?.mentionProviders],
   );
+
   const debouncedQuery = useDebouncedValue(
     trimmedQuery,
     PATH_SUGGESTION_DEBOUNCE_MS,
   );
+
   const pluginSearchMatchesInput = debouncedQuery === trimmedQuery;
+
   const pluginSearch = usePluginMentionSearch(
     {
       trigger,
@@ -175,14 +192,17 @@ export function usePromptMentions(
         debouncedQuery.length > 0,
     },
   );
+
   const projectNamesById = useMemo(
     () => buildProjectNamesById(projectNamesQuery.data),
     [projectNamesQuery.data],
   );
+
   const projectCandidates = useMemo(
     () => buildProjectMentionCandidates(projectNamesQuery.data),
     [projectNamesQuery.data],
   );
+
   const sectionCandidates = useMemo(
     () => buildSectionMentionCandidates(projectNamesQuery.data),
     [projectNamesQuery.data],
@@ -190,6 +210,7 @@ export function usePromptMentions(
 
   const currentThreadId = options.currentThreadId;
   const resolveTitle = useResolveThreadTitle();
+
   const pathSuggestions = useMemo(
     () =>
       includeBuiltInSources
@@ -199,8 +220,10 @@ export function usePromptMentions(
         : [],
     [includeBuiltInSources, pathSearch.suggestions],
   );
+
   const threadSuggestions = useMemo(() => {
     if (!includeBuiltInSources) return [];
+
     return buildThreadMentionSuggestions({
       threads: threadsQuery.data ?? [],
       query: trimmedQuery,
@@ -221,22 +244,27 @@ export function usePromptMentions(
     threadsQuery.data,
     trimmedQuery,
   ]);
+
   const projectSuggestions = useMemo(() => {
     if (!includeBuiltInSources) return [];
+
     return buildProjectMentionSuggestions({
       projects: projectCandidates,
       query: trimmedQuery,
       limit: PROMPT_MENTION_SOURCE_LIMIT,
     });
   }, [includeBuiltInSources, projectCandidates, trimmedQuery]);
+
   const sectionSuggestions = useMemo(() => {
     if (!includeBuiltInSources) return [];
+
     return buildSectionMentionSuggestions({
       sections: sectionCandidates,
       query: trimmedQuery,
       limit: PROMPT_MENTION_SOURCE_LIMIT,
     });
   }, [sectionCandidates, includeBuiltInSources, trimmedQuery]);
+
   const pluginSuggestions = useMemo(
     () =>
       hasMentionProviders && pluginSearchMatchesInput
@@ -244,6 +272,7 @@ export function usePromptMentions(
         : [],
     [hasMentionProviders, pluginSearch.data, pluginSearchMatchesInput],
   );
+
   const results = useMemo(
     () =>
       buildPromptMentionResults({
@@ -265,24 +294,30 @@ export function usePromptMentions(
     ],
   );
 
-  const isLoading =
-    hasQuery &&
-    results.suggestions.length === 0 &&
-    ((includeBuiltInSources &&
+  const isSearching =
+    (includeBuiltInSources &&
       (pathSearch.isDebouncing ||
         pathSearch.isLoading ||
+        pathSearch.isRefreshing ||
         threadsQuery.isLoading ||
         threadsQuery.isFetching)) ||
-      (hasMentionProviders &&
-        (!pluginSearchMatchesInput ||
-          pluginSearch.isLoading ||
-          pluginSearch.isFetching)));
+    (hasMentionProviders &&
+      (!pluginSearchMatchesInput ||
+        pluginSearch.isLoading ||
+        pluginSearch.isFetching));
+
+  const isLoading = hasQuery && results.suggestions.length === 0 && isSearching;
+
+  const isRefreshing =
+    hasQuery && results.suggestions.length > 0 && isSearching;
+
   const isThreadError =
     includeBuiltInSources &&
     hasQuery &&
     threadsQuery.isError &&
     !threadsQuery.isLoading &&
     !threadsQuery.isFetching;
+
   const isError =
     (includeBuiltInSources && pathSearch.isError) || isThreadError;
 
@@ -292,6 +327,7 @@ export function usePromptMentions(
     setQuery,
     results,
     isLoading,
+    isRefreshing,
     isError,
   };
 }

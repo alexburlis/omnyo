@@ -17,11 +17,14 @@ describe("public project source remote refresh", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-source-remote-refresh",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project, source } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/project-source-remote-refresh",
       });
+
       expect(project.gitRemoteUrl).toBeNull();
 
       const updatePromise = harness.app.request(
@@ -35,11 +38,13 @@ describe("public project source remote refresh", () => {
           }),
         },
       );
+
       const inspection = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "project.inspect" && command.path === source.path,
       );
+
       await reportQueuedCommandSuccess(harness, inspection, {
         path: source.path,
         gitRemoteUrl: "ssh://git.example.test/team/project.git",
@@ -47,9 +52,11 @@ describe("public project source remote refresh", () => {
 
       const updateResponse = await updatePromise;
       expect(updateResponse.status).toBe(200);
+
       const projectResponse = await harness.app.request(
         `/api/v1/projects/${project.id}`,
       );
+
       await expect(readJson(projectResponse)).resolves.toMatchObject({
         gitRemoteUrl: "ssh://git.example.test/team/project.git",
       });

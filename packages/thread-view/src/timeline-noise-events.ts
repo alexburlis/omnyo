@@ -1,4 +1,4 @@
-import type { ThreadEventType } from "@bb/domain";
+import type { ThreadEventType } from "@omnyo/domain";
 
 export const THREAD_TIMELINE_EXCLUDED_EVENT_TYPES = [
   "thread/started",
@@ -6,4 +6,5 @@ export const THREAD_TIMELINE_EXCLUDED_EVENT_TYPES = [
   "thread/contextWindowUsage/updated",
   "thread/tokenUsage/updated",
   "turn/diff/updated",
+  "turn/mainRun/updated",
 ] as const satisfies readonly ThreadEventType[];

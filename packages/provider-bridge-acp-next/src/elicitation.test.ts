@@ -14,6 +14,7 @@ function questions(plan: ReturnType<typeof planAcpElicitation>) {
   if (plan.kind !== "questions") {
     throw new Error(`expected questions, got ${JSON.stringify(plan)}`);
   }
+
   return plan;
 }
 
@@ -112,6 +113,7 @@ describe("planAcpElicitation", () => {
     const plan = questions(
       planAcpElicitation(form({ retries: { type: "integer" } })),
     );
+
     for (const freeText of ["many", "2.5"]) {
       expect(
         plan.toResponse({
@@ -120,6 +122,7 @@ describe("planAcpElicitation", () => {
         }),
       ).toEqual({ action: "decline" });
     }
+
     expect(plan.toResponse({ kind: "user_answer", answers: {} })).toEqual({
       action: "decline",
     });
@@ -138,6 +141,7 @@ describe("planAcpElicitation", () => {
         }),
       ),
     );
+
     expect(plan.payload.questions[0]).toMatchObject({
       allowFreeText: true,
       prompt: "Pick a plan\n\nbranch\nOne of: MAIN, DEV, RELEASE, HOTFIX, NEXT",
@@ -184,7 +188,7 @@ describe("planAcpElicitation", () => {
       planAcpElicitation({ mode: "url", url: "https://example.com" }),
     ).toEqual({
       kind: "unsupported",
-      reason: 'bb does not offer the "url" elicitation mode',
+      reason: 'Omnyo does not offer the "url" elicitation mode',
     });
     expect(
       planAcpElicitation(
@@ -196,11 +200,11 @@ describe("planAcpElicitation", () => {
       ),
     ).toEqual({
       kind: "unsupported",
-      reason: "the form has 5 fields and bb shows at most 4",
+      reason: "the form has 5 fields and Omnyo shows at most 4",
     });
     expect(planAcpElicitation(form({ nested: { type: "object" } }))).toEqual({
       kind: "unsupported",
-      reason: 'bb cannot show the field "nested"',
+      reason: 'Omnyo cannot show the field "nested"',
     });
   });
 });

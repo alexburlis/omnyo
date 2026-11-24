@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { KeyboardCommandId } from "@bb/domain";
+import type { KeyboardCommandId } from "@omnyo/domain";
 import { useAppCommandHandler } from "@/components/commands/AppCommandProvider";
 
 type OwnsCommandTarget = (target: EventTarget | null) => boolean;
@@ -20,6 +20,7 @@ export function useComposerCommand(
     command,
     () => {
       run();
+
       return true;
     },
     0,
@@ -36,5 +37,6 @@ export function ComposerCommand({
   run: () => void;
 }) {
   useComposerCommand(command, run);
+
   return null;
 }

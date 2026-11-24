@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import type { ThreadQueuedMessage } from "@bb/domain";
+import type { ThreadQueuedMessage } from "@omnyo/domain";
 import {
   runCommand,
   setupCommandOutputTestEnvironment,
@@ -39,7 +39,7 @@ function queuedMessage(
   };
 }
 
-describe("bb thread organization commands", () => {
+describe("omnyo thread organization commands", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -52,6 +52,7 @@ describe("bb thread organization commands", () => {
       createdAt: 1,
       updatedAt: 1,
     }));
+
     stubServerApi({ "v1.thread-sections.$post": create });
 
     await runCommand(["thread", "section", "create", "Review"], register);
@@ -71,6 +72,7 @@ describe("bb thread organization commands", () => {
       createdAt: 1,
       updatedAt: 1,
     }));
+
     stubServerApi({ "v1.threads.:id.queued-messages.$post": create });
 
     await runCommand(
@@ -81,6 +83,7 @@ describe("bb thread organization commands", () => {
     expect(create).toHaveBeenCalledWith({
       param: { id: "thread-1" },
       json: {
+        messageSource: { kind: "script", label: "CLI" },
         input: [{ type: "text", text: "next task", mentions: [] }],
       },
     });
@@ -113,6 +116,7 @@ describe("bb thread organization commands", () => {
     expect(create).toHaveBeenCalledExactlyOnceWith({
       param: { id: "thread-1" },
       json: {
+        messageSource: { kind: "script", label: "CLI" },
         model: "gpt-5",
         input: [
           { type: "text", text: "review both", mentions: [] },
@@ -130,7 +134,8 @@ describe("bb thread organization commands", () => {
   ] as const)(
     "uploads CLI-local %s bytes to the thread project before queueing",
     async (flag, type, filename, mimeType) => {
-      const dir = await mkdtemp(join(tmpdir(), "bb-queue-attachment-"));
+      const dir = await mkdtemp(join(tmpdir(), "omnyo-queue-attachment-"));
+
       try {
         const path = join(dir, filename);
         const bytes = new Uint8Array([137, 80, 78, 71]);
@@ -180,8 +185,10 @@ describe("bb thread organization commands", () => {
           }),
         );
         const body = vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.body;
+
         if (!(body instanceof FormData)) throw new Error("Missing upload body");
         const file = body.get("file");
+
         if (!(file instanceof File)) throw new Error("Missing uploaded file");
         expect(file.name).toBe(filename);
         expect(file.type).toBe(mimeType);
@@ -189,6 +196,7 @@ describe("bb thread organization commands", () => {
         expect(create).toHaveBeenCalledExactlyOnceWith({
           param: { id: "thread-1" },
           json: {
+            messageSource: { kind: "script", label: "CLI" },
             input: [
               { type: "text", text: "review this", mentions: [] },
               { type, path: "durable-token" },
@@ -203,7 +211,8 @@ describe("bb thread organization commands", () => {
   );
 
   it("does not enqueue the text when an attachment upload fails", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-queue-rejected-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-queue-rejected-"));
+
     try {
       const path = join(dir, "blue.png");
       await writeFile(path, new Uint8Array([137, 80, 78, 71]));
@@ -252,6 +261,7 @@ describe("bb thread organization commands", () => {
       }),
       queuedMessage({ id: "queued-system", initiator: "system" }),
     ]);
+
     stubServerApi({ "v1.queued-messages.$get": list });
 
     await runCommand(["thread", "queue", "list"], register);
@@ -260,6 +270,7 @@ describe("bb thread organization commands", () => {
       .mocked(console.log)
       .mock.calls.map((args) => args.join(" "))
       .join("\n");
+
     expect(output).toContain("Sender");
     expect(output).toContain("thr_sender");
     expect(output).toContain("System");
@@ -270,12 +281,14 @@ describe("bb thread organization commands", () => {
     async (scoped) => {
       const failureReason =
         "The provider bridge is unavailable while the plugin is still building";
+
       const list = vi.fn(async () => [
         queuedMessage({
           waitingOn: { kind: "host-offline", hostName: "Michael-M4" },
           failureReason,
         }),
       ]);
+
       stubServerApi({
         [scoped
           ? "v1.threads.:id.queued-messages.$get"
@@ -285,12 +298,14 @@ describe("bb thread organization commands", () => {
         ["thread", "queue", "list", ...(scoped ? ["thread-1"] : [])],
         register,
       );
+
       const output = vi
         .mocked(console.log)
         .mock.calls.map((args) => args.join(" "))
         .join("\n");
+
       expect(output).toContain(`Failed queued-1: ${failureReason}`);
-      expect(output).toContain("bb thread queue send thread-1 queued-1");
+      expect(output).toContain("omnyo thread queue send thread-1 queued-1");
       expect(output).not.toContain("waiting for Michael-M4 to reconnect");
     },
   );
@@ -300,6 +315,7 @@ describe("bb thread organization commands", () => {
       { id: "queued-1", updatedAt: 42 },
       { id: "queued-2", updatedAt: 43 },
     ]);
+
     const update = vi.fn(async () => ({ id: "queued-1" }));
     stubServerApi({
       "v1.threads.:id.queued-messages.$get": list,
@@ -375,6 +391,7 @@ describe("bb thread organization commands", () => {
         sendAt: null,
       },
     }));
+
     stubServerApi({
       "v1.threads.:id.queued-messages.:queuedMessageId.send.$post": send,
     });
@@ -417,5 +434,21 @@ describe("bb thread organization commands", () => {
         nextThreadId: "thread-3",
       },
     });
+  });
+
+  it("moves a Shelf chat to the top when only --before is given", async () => {
+    const reorder = vi.fn(async () => []);
+    stubServerApi({ "v1.threads.:id.shelf-order.$patch": reorder });
+
+    await runCommand(
+      ["thread", "reorder-shelved", "thread-2", "--before", "thread-1"],
+      register,
+    );
+
+    expect(reorder).toHaveBeenCalledWith({
+      param: { id: "thread-2" },
+      json: { previousThreadId: null, nextThreadId: "thread-1" },
+    });
+    expect(console.log).toHaveBeenCalledWith("Shelf chat thread-2 reordered");
   });
 });

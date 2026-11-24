@@ -1,4 +1,4 @@
-import { PLUGIN_METADATA_MAX_BYTES } from "@bb/domain";
+import { PLUGIN_METADATA_MAX_BYTES } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
@@ -27,8 +27,10 @@ const forkBase = {
 };
 
 const ORIGIN_MESSAGE = 'pluginMetadata requires origin "plugin"';
+
 const ORIGIN_PLUGIN_ID_MESSAGE =
   "pluginMetadata requires originPluginId to be a valid plugin id";
+
 const PLUGIN_ID_MESSAGE =
   "Invalid string: must match pattern /^[a-z0-9][a-z0-9-]*$/u";
 

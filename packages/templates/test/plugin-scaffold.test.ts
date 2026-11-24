@@ -1,3 +1,4 @@
+import { resolvePrivateSdkArtifact } from "../src/plugin-scaffold.js";
 import {
   access,
   mkdir,
@@ -8,10 +9,11 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PLUGIN_SDK_VERSION } from "@bb/domain";
+import { PLUGIN_SDK_VERSION } from "@omnyo/domain";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resolvePluginSdkLayout,
+  scaffoldEventSourcePlugin,
   scaffoldPlugin,
 } from "../src/plugin-scaffold.js";
 
@@ -19,19 +21,22 @@ describe("scaffoldPlugin SDK dependency", () => {
   let workDir: string;
 
   beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), "bb-scaffold-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-scaffold-"));
   });
 
   afterEach(async () => {
     await rm(workDir, { recursive: true, force: true });
   });
 
-  it("pins @get-bb/plugin-sdk exactly and vendors no declarations", async () => {
-    const targetDir = join(workDir, "bb-plugin-todo");
+  it("pins the selected private SDK archive and vendors no declarations", async () => {
+    const targetDir = join(workDir, "omnyo-plugin-todo");
     await scaffoldPlugin({
       targetDir,
-      packageName: "bb-plugin-todo",
-      bbVersion: "0.9.0",
+      packageName: "omnyo-plugin-todo",
+      appVersion: "0.9.0",
+      sdkArtifact: await resolvePrivateSdkArtifact({
+        sourceUrl: import.meta.url,
+      }),
     });
 
     await expect(access(join(targetDir, "types"))).rejects.toThrow();
@@ -39,6 +44,7 @@ describe("scaffoldPlugin SDK dependency", () => {
     const tsconfig = JSON.parse(
       await readFile(join(targetDir, "tsconfig.json"), "utf8"),
     );
+
     expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./*"] });
     expect(tsconfig.compilerOptions.skipLibCheck).toBe(false);
     expect(tsconfig.include).toEqual([
@@ -52,13 +58,17 @@ describe("scaffoldPlugin SDK dependency", () => {
     const pkg = JSON.parse(
       await readFile(join(targetDir, "package.json"), "utf8"),
     );
-    expect(pkg.devDependencies["@get-bb/plugin-sdk"]).toBe(PLUGIN_SDK_VERSION);
-    expect(pkg.dependencies["@get-bb/plugin-sdk"]).toBeUndefined();
+
+    expect(pkg.devDependencies["@omnyo/plugin-sdk"]).toBe(
+      `file:./vendor/${(await resolvePrivateSdkArtifact({ sourceUrl: import.meta.url })).file}`,
+    );
+    expect(pkg.devDependencies["@get-bb/plugin-sdk"]).toBeUndefined();
+    expect(pkg.dependencies["@omnyo/plugin-sdk"]).toBeUndefined();
     expect(pkg.engines).toEqual({
-      bb: ">=0.9",
-      bbPluginSdk: `>=${PLUGIN_SDK_VERSION}`,
+      omnyo: ">=0.9",
+      omnyoPluginSdk: `>=${PLUGIN_SDK_VERSION}`,
     });
-    expect(pkg.bb).toMatchObject({
+    expect(pkg.omnyo).toMatchObject({
       name: "Todo",
       branding: { icon: "ListTodo" },
       server: "./server.ts",
@@ -70,10 +80,10 @@ describe("scaffoldPlugin SDK dependency", () => {
 
     const readme = await readFile(join(targetDir, "README.md"), "utf8");
     expect(readme).toContain(
-      "node_modules/@get-bb/plugin-sdk/bundled-types/bb-plugin-sdk.d.ts",
+      "node_modules/@omnyo/plugin-sdk/bundled-types/omnyo-plugin-sdk.d.ts",
     );
     expect(readme).toContain(
-      "sync this plugin's SDK surface to the running BB",
+      "sync this plugin's SDK surface to the running Omnyo",
     );
     expect(readme).not.toContain("rewrite types/");
     expect(readme).toContain("https://github.com/get-bb/bb");
@@ -81,70 +91,190 @@ describe("scaffoldPlugin SDK dependency", () => {
     const components = JSON.parse(
       await readFile(join(targetDir, "components.json"), "utf8"),
     );
-    expect(components.registries["@bb"]).toBe(
-      "https://raw.githubusercontent.com/get-bb/bb/desktop-v0.9.0/packages/plugin-registry/r/{name}.json",
+
+    expect(components.registries).toBeUndefined();
+
+    const select = JSON.parse(
+      await readFile(join(targetDir, "vendor/omnyo-ui/select.json"), "utf8"),
     );
+
+    expect(select.name).toBe("select");
+    expect(select.registryDependencies).toContain(
+      "./vendor/omnyo-ui/icon.json",
+    );
+
+    for (const dependency of select.registryDependencies) {
+      expect(dependency).toMatch(/^\.\/vendor\/omnyo-ui\/[a-z0-9-]+\.json$/);
+      await access(join(targetDir, dependency));
+    }
+
     expect(pkg.dependencies["@radix-ui/react-checkbox"]).toBeDefined();
     await access(join(targetDir, "components", "ui", "checkbox.tsx"));
   });
 
   it("writes a store overview that follows the marketplace content rules", async () => {
-    const targetDir = join(workDir, "bb-plugin-todo");
+    const targetDir = join(workDir, "omnyo-plugin-todo");
     await scaffoldPlugin({
       targetDir,
-      packageName: "bb-plugin-todo",
-      bbVersion: "0.9.0",
+      packageName: "omnyo-plugin-todo",
+      appVersion: "0.9.0",
+      sdkArtifact: await resolvePrivateSdkArtifact({
+        sourceUrl: import.meta.url,
+      }),
     });
 
     const overview = await readFile(
       join(targetDir, "PLUGIN_OVERVIEW.md"),
       "utf8",
     );
-    expect(overview).toContain("bb todo list");
+
+    expect(overview).toContain("omnyo todo list");
     expect(overview).toMatch(/^[^#]/u);
     expect([...overview].length).toBeGreaterThan(700);
     expect([...overview].length).toBeLessThanOrEqual(4000);
+
     const prose = overview
       .replace(/```[\s\S]*?```/gu, "")
       .replace(/`[^`]*`/gu, "");
+
     expect(prose).not.toMatch(/<[A-Za-z!/?]|!\[/u);
 
     const readme = await readFile(join(targetDir, "README.md"), "utf8");
     expect(readme).toContain("## Store listing");
-    expect(readme).toContain("marketplace requires the file");
+    expect(readme).toContain("private plugin catalog uses the file");
   });
 
   it("uses the canonical id in a scoped package scaffold", async () => {
-    const targetDir = join(workDir, "bb-plugin-scoped");
+    const targetDir = join(workDir, "omnyo-plugin-scoped");
     await scaffoldPlugin({
       targetDir,
-      packageName: "@acme/bb-plugin-scoped",
-      bbVersion: "0.9.0",
+      packageName: "@acme/omnyo-plugin-scoped",
+      appVersion: "0.9.0",
+      sdkArtifact: await resolvePrivateSdkArtifact({
+        sourceUrl: import.meta.url,
+      }),
     });
 
     const pkg = JSON.parse(
       await readFile(join(targetDir, "package.json"), "utf8"),
     );
-    expect(pkg.name).toBe("@acme/bb-plugin-scoped");
-    expect(pkg.bb.name).toBe("Scoped");
+
+    expect(pkg.name).toBe("@acme/omnyo-plugin-scoped");
+    expect(pkg.omnyo.name).toBe("Scoped");
 
     const readme = await readFile(join(targetDir, "README.md"), "utf8");
-    expect(readme).toContain("bb plugin reload scoped");
-    expect(readme).toContain("bb plugin config scoped");
+    expect(readme).toContain("omnyo plugin reload scoped");
+    expect(readme).toContain("omnyo plugin config scoped");
 
     const server = await readFile(join(targetDir, "server.ts"), "utf8");
-    expect(server).toContain("bb plugin config scoped");
-    expect(server).not.toContain("bb plugin config @acme/");
+    expect(server).not.toContain("omnyo plugin config @acme/");
     expect(server).toContain('name: "scoped"');
-    expect(server).toContain("bb scoped list");
+    expect(server).toContain("omnyo scoped list");
     const app = await readFile(join(targetDir, "app.tsx"), "utf8");
-    expect(app).toContain("bb scoped add");
+    expect(app).toContain("omnyo scoped add");
+
     const skill = await readFile(
       join(targetDir, "skills", "example-todos", "SKILL.md"),
       "utf8",
     );
-    expect(skill).toContain("bb scoped list");
+
+    expect(skill).toContain("omnyo scoped list");
     expect(skill).not.toContain("@acme/");
+  });
+});
+
+describe("scaffoldEventSourcePlugin", () => {
+  let workDir: string;
+
+  beforeEach(async () => {
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-scaffold-events-"));
+  });
+
+  afterEach(async () => {
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  it("writes a headless event source whose family is the plugin id", async () => {
+    const targetDir = join(workDir, "omnyo-plugin-npm-watch");
+
+    await scaffoldEventSourcePlugin({
+      targetDir,
+      packageName: "omnyo-plugin-npm-watch",
+      appVersion: "0.9.0",
+      sdkArtifact: await resolvePrivateSdkArtifact({
+        sourceUrl: import.meta.url,
+      }),
+    });
+
+    const pkg = JSON.parse(
+      await readFile(join(targetDir, "package.json"), "utf8"),
+    );
+
+    expect(pkg.omnyo).toEqual({
+      name: "Npm Watch",
+      description:
+        "Wakes waiting chats when an npm package publishes a version.",
+      branding: { icon: "Eye" },
+      server: "./server.ts",
+    });
+    expect(pkg.devDependencies["@omnyo/plugin-sdk"]).toBe(
+      `file:./vendor/${(await resolvePrivateSdkArtifact({ sourceUrl: import.meta.url })).file}`,
+    );
+    expect(pkg.scripts.test).toBe("vitest run");
+    await expect(access(join(targetDir, "app.tsx"))).rejects.toThrow();
+
+    const server = await readFile(join(targetDir, "server.ts"), "utf8");
+
+    expect(server).toContain('family: "npm-watch"');
+    expect(server).toContain('examples: ["npm-watch:left-pad@1.3.0"]');
+    expect(server).toContain("/^((?:@[a-z0-9-~][a-z0-9-._~]*\\/)?");
+    expect(server).toContain("describe: (target) => `npm publishes ${target}`");
+
+    const skill = await readFile(
+      join(targetDir, "skills", "npm-watch", "SKILL.md"),
+      "utf8",
+    );
+
+    expect(skill).toMatch(/^---\nname: npm-watch\n/u);
+    expect(skill).toContain("omnyo wait check npm-watch:<package>@<version>");
+
+    const readme = await readFile(join(targetDir, "README.md"), "utf8");
+
+    expect(readme).toContain("omnyo wait check npm-watch:left-pad@1.3.0");
+    expect(readme).toContain("omnyo plugin reload npm-watch");
+
+    const overview = await readFile(
+      join(targetDir, "PLUGIN_OVERVIEW.md"),
+      "utf8",
+    );
+
+    expect(overview).toMatch(/^[^#]/u);
+    expect([...overview].length).toBeGreaterThan(700);
+    expect([...overview].length).toBeLessThanOrEqual(4000);
+    expect(
+      overview.replace(/```[\s\S]*?```/gu, "").replace(/`[^`]*`/gu, ""),
+    ).not.toMatch(/<[A-Za-z!/?]|!\[/u);
+  });
+
+  it("refuses a plugin name that cannot name a family before writing files", async () => {
+    for (const packageName of [
+      "omnyo-plugin-3d",
+      "omnyo-plugin-host-reconnect",
+    ]) {
+      const targetDir = join(workDir, packageName);
+
+      await expect(
+        scaffoldEventSourcePlugin({
+          targetDir,
+          packageName,
+          appVersion: "0.9.0",
+          sdkArtifact: await resolvePrivateSdkArtifact({
+            sourceUrl: import.meta.url,
+          }),
+        }),
+      ).rejects.toThrow("cannot name an event family");
+      await expect(access(targetDir)).rejects.toThrow();
+    }
   });
 });
 
@@ -152,7 +282,7 @@ describe("resolvePluginSdkLayout", () => {
   let workDir: string;
 
   beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), "bb-layout-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-layout-"));
   });
 
   afterEach(async () => {
@@ -160,16 +290,22 @@ describe("resolvePluginSdkLayout", () => {
   });
 
   it("reports the npm layout with its exact pin for a fresh scaffold", async () => {
-    const targetDir = join(workDir, "bb-plugin-new-style");
+    const targetDir = join(workDir, "omnyo-plugin-new-style");
+
+    const sdkArtifact = await resolvePrivateSdkArtifact({
+      sourceUrl: import.meta.url,
+    });
+
     await scaffoldPlugin({
       targetDir,
-      packageName: "bb-plugin-new-style",
-      bbVersion: "0.9.0",
+      packageName: "omnyo-plugin-new-style",
+      appVersion: "0.9.0",
+      sdkArtifact,
     });
 
     await expect(resolvePluginSdkLayout(targetDir)).resolves.toEqual({
       kind: "package",
-      pin: PLUGIN_SDK_VERSION,
+      pin: `file:./vendor/${sdkArtifact.file}`,
     });
   });
 
@@ -178,11 +314,14 @@ describe("resolvePluginSdkLayout", () => {
     await scaffoldPlugin({
       targetDir,
       packageName: "bb-plugin-legacy",
-      bbVersion: "0.9.0",
+      appVersion: "0.9.0",
+      sdkArtifact: await resolvePrivateSdkArtifact({
+        sourceUrl: import.meta.url,
+      }),
     });
     const pkgPath = join(targetDir, "package.json");
     const pkg = JSON.parse(await readFile(pkgPath, "utf8"));
-    delete pkg.devDependencies["@get-bb/plugin-sdk"];
+    delete pkg.devDependencies["@omnyo/plugin-sdk"];
     await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     const tsconfigPath = join(targetDir, "tsconfig.json");
     const tsconfig = JSON.parse(await readFile(tsconfigPath, "utf8"));
@@ -198,17 +337,23 @@ describe("resolvePluginSdkLayout", () => {
   });
 
   it("stays vendored while declarations exist but the path map is gone", async () => {
-    const targetDir = join(workDir, "bb-plugin-half-migrated");
+    const targetDir = join(workDir, "omnyo-plugin-half-migrated");
+
+    const sdkArtifact = await resolvePrivateSdkArtifact({
+      sourceUrl: import.meta.url,
+    });
+
     await scaffoldPlugin({
       targetDir,
-      packageName: "bb-plugin-half-migrated",
-      bbVersion: "0.9.0",
+      packageName: "omnyo-plugin-half-migrated",
+      appVersion: "0.9.0",
+      sdkArtifact,
     });
     await mkdir(join(targetDir, "types"));
     await writeFile(join(targetDir, "types", "bb-plugin-sdk.d.ts"), "legacy\n");
 
     const layout = await resolvePluginSdkLayout(targetDir);
     expect(layout.kind).toBe("vendored");
-    expect(layout.pin).toBe(PLUGIN_SDK_VERSION);
+    expect(layout.pin).toBe(`file:./vendor/${sdkArtifact.file}`);
   });
 });

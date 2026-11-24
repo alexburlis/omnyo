@@ -1,8 +1,12 @@
 import type {
   PendingInteractionCreate,
   PendingInteractionResolution,
-} from "@bb/domain";
-import type { HostDaemonInteractiveRequestResponse } from "@bb/host-daemon-contract";
+} from "@omnyo/domain";
+import type {
+  HostDaemonInteractiveInterruptRequest,
+  HostDaemonInteractiveRequestKey,
+  HostDaemonInteractiveRequestResponse,
+} from "@omnyo/host-daemon-contract";
 import { normalizeCaughtError } from "./error-utils.js";
 
 const DELIVERED_INTERACTIVE_REQUEST_TOMBSTONE_TTL_MS = 5 * 60 * 1000;
@@ -92,6 +96,15 @@ function buildDeliveredTombstoneKey(
 }
 
 export class InteractiveRequestRegistry {
+  hasPendingForThread(threadId: string): boolean {
+    return [...this.pendingEntries.values()].some(
+      (entry) => entry.request.threadId === threadId,
+    );
+  }
+
+  getDirectAccessActivityCount(): number {
+    return this.pendingEntries.size;
+  }
   private readonly deliveredTombstones = new Map<
     string,
     DeliveredInteractiveRequestTombstone
@@ -108,6 +121,7 @@ export class InteractiveRequestRegistry {
   ): Promise<PendingInteractionResolution> {
     const key = buildInteractiveRequestKey(request);
     const existing = this.pendingEntries.get(key);
+
     if (existing) {
       return existing.promise;
     }
@@ -115,13 +129,18 @@ export class InteractiveRequestRegistry {
     let resolveEntry: (
       resolution: PendingInteractionResolution,
     ) => void = () => {};
+
     let rejectEntry: (error: Error) => void = () => {};
+
     const promise = new Promise<PendingInteractionResolution>(
       (resolve, reject) => {
         resolveEntry = resolve;
         rejectEntry = reject;
       },
     );
+
+    promise.catch(() => undefined);
+
     const entry: PendingInteractiveRequestEntry = {
       interactionId: null,
       promise,
@@ -129,10 +148,16 @@ export class InteractiveRequestRegistry {
       resolve: (resolution) => resolveEntry(resolution),
       request,
     };
+
     this.pendingEntries.set(key, entry);
 
     try {
       const response = await this.options.registerRequest(request);
+
+      if (this.pendingEntries.get(key) !== entry) {
+        return promise;
+      }
+
       if (response.outcome === "rejected") {
         this.pendingEntries.delete(key);
         entry.reject(
@@ -141,10 +166,12 @@ export class InteractiveRequestRegistry {
             response.reason,
           ),
         );
+
         return promise;
       }
 
       entry.interactionId = response.interactionId;
+
       if (response.status !== "pending" && response.status !== "resolving") {
         this.pendingEntries.delete(key);
         entry.reject(
@@ -154,7 +181,10 @@ export class InteractiveRequestRegistry {
         );
       }
     } catch (error) {
-      this.pendingEntries.delete(key);
+      if (this.pendingEntries.get(key) === entry) {
+        this.pendingEntries.delete(key);
+      }
+
       const registrationError = normalizeCaughtError(error);
       this.options.onRegistrationFailure?.({
         error: registrationError,
@@ -169,17 +199,20 @@ export class InteractiveRequestRegistry {
   resolve(request: InteractiveResolveCommandInput): void {
     const key = buildInteractiveRequestKey(request);
     const tombstoneKey = buildDeliveredTombstoneKey(request);
+
     if (this.deliveredTombstones.has(tombstoneKey)) {
       return;
     }
 
     const entry = this.pendingEntries.get(key);
+
     if (!entry) {
       throw new InteractiveRequestRegistryError(
         "stale_interactive_request",
         `Interactive request ${request.interactionId} is no longer awaiting a provider response`,
       );
     }
+
     if (
       entry.interactionId !== null &&
       entry.interactionId !== request.interactionId
@@ -195,8 +228,44 @@ export class InteractiveRequestRegistry {
     entry.resolve(request.resolution);
   }
 
-  interruptThreads(args: InterruptInteractiveThreadsArgs): void {
+  listOpenRequests(): HostDaemonInteractiveRequestKey[] {
+    return [...this.pendingEntries.values()].map((entry) => ({
+      threadId: entry.request.threadId,
+      providerId: entry.request.providerId,
+      providerThreadId: entry.request.providerThreadId,
+      providerRequestId: entry.request.providerRequestId,
+    }));
+  }
+
+  endRequests(
+    requests: readonly HostDaemonInteractiveRequestKey[],
+    reason: string,
+  ): void {
+    for (const request of requests) {
+      const key = buildInteractiveRequestKey(request);
+      const entry = this.pendingEntries.get(key);
+
+      if (!entry) continue;
+
+      this.pendingEntries.delete(key);
+      entry.reject(
+        new InteractiveRequestRegistryError(
+          "interactive_request_ended",
+          reason,
+        ),
+      );
+    }
+  }
+
+  interruptThreads(
+    args: InterruptInteractiveThreadsArgs,
+  ): NonNullable<HostDaemonInteractiveInterruptRequest["requests"]> {
+    const interrupted: NonNullable<
+      HostDaemonInteractiveInterruptRequest["requests"]
+    > = [];
+
     const threadIds = new Set(args.threadIds);
+
     for (const [key, entry] of this.pendingEntries) {
       if (
         entry.request.providerId !== args.providerId ||
@@ -205,13 +274,23 @@ export class InteractiveRequestRegistry {
         continue;
       }
 
+      interrupted.push({
+        interactionId: entry.interactionId,
+        threadId: entry.request.threadId,
+        turnId: entry.request.turnId ?? null,
+        providerThreadId: entry.request.providerThreadId,
+        providerRequestId: entry.request.providerRequestId,
+      });
       this.pendingEntries.delete(key);
       entry.reject(new Error(args.reason));
     }
+
+    return interrupted;
   }
 
   private addDeliveredTombstone(key: string): void {
     const existing = this.deliveredTombstones.get(key);
+
     if (existing) {
       clearTimeout(existing.timeout);
     }
@@ -219,6 +298,7 @@ export class InteractiveRequestRegistry {
     const timeout = setTimeout(() => {
       this.deliveredTombstones.delete(key);
     }, DELIVERED_INTERACTIVE_REQUEST_TOMBSTONE_TTL_MS);
+
     timeout.unref();
     this.deliveredTombstones.set(key, { timeout });
   }

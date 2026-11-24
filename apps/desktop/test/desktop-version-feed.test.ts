@@ -22,22 +22,30 @@ describe("desktop release compatibility metadata", () => {
   ])(
     "publishes the OS requirement for $platform $channel without losing update fields",
     async ({ platform, channel, suffix, minimum }) => {
-      const root = await mkdtemp(join(tmpdir(), "bb-version-feed-test-"));
+      const root = await mkdtemp(join(tmpdir(), "omnyo-version-feed-test-"));
+
       try {
         const release = join(root, "release");
         await mkdir(release);
         await writeFile(join(root, "package.json"), '{"version":"0.43.1"}');
+
         const metadata = {
           version: "0.43.1",
           files: [
-            { url: "bb.zip", sha512: "checksum", size: 123, blockMapSize: 42 },
+            {
+              url: "omnyo.zip",
+              sha512: "checksum",
+              size: 123,
+              blockMapSize: 42,
+            },
           ],
-          path: "bb.zip",
+          path: "omnyo.zip",
           sha512: "checksum",
           releaseDate: "2026-09-15T00:00:00.000Z",
           stagingPercentage: 25,
           releaseNotes: "Preserve the upstream release notes",
         };
+
         const metadataPath = join(release, `${channel}-${suffix}.yml`);
         await writeFile(metadataPath, stringify(metadata));
         const script = join(root, "generate.mjs");
@@ -54,7 +62,7 @@ describe("desktop release compatibility metadata", () => {
         });
         await execFileAsync(process.execPath, [script], {
           cwd: root,
-          env: { ...process.env, BB_DESKTOP_RELEASE_CHANNEL: channel },
+          env: { ...process.env, OMNYO_DESKTOP_RELEASE_CHANNEL: channel },
         });
         const updated: unknown = parse(await readFile(metadataPath, "utf8"));
         expect(updated).toEqual(
@@ -62,23 +70,28 @@ describe("desktop release compatibility metadata", () => {
             ? metadata
             : { ...metadata, minimumSystemVersion: minimum },
         );
+
         const feedName =
           platform === "darwin"
             ? "desktop-version.json"
             : "desktop-version-linux.json";
+
         const feed: unknown = JSON.parse(
           await readFile(join(release, feedName), "utf8"),
         );
+
         expect(feed).toMatchObject({
           channel,
           minimumSystemVersion: minimum,
-          files: [{ url: "bb.zip", sha512: "checksum", size: 123 }],
+          files: [{ url: "omnyo.zip", sha512: "checksum", size: 123 }],
           version: metadata.version,
         });
+
         if (platform === "darwin") {
           const config: unknown = JSON.parse(
             await readFile(resolve("electron-builder.config.json"), "utf8"),
           );
+
           expect(config).toMatchObject({
             mac: { minimumSystemVersion: "13.0.0" },
           });

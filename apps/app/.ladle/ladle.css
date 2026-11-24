@@ -9,6 +9,15 @@
 @source "../../../plugins/workflows";
 @source "../../../plugins/provider-usage";
 @source "../../../plugins/secrets";
+@source "../../../plugins/account-usage";
+@source "../../../plugins/provider-codex";
+@source "../../../plugins/thread-list";
+@source "../../../plugins/tasks";
+@source "../../../plugins/provider-acp-next";
+@source "../../../plugins/provider-pi";
+@source "../../../plugins/keep-awake";
+@source "../../../plugins/memory";
+@source "../../../plugins/push-notifications";
 
 .ladle-main {
   padding: 0;

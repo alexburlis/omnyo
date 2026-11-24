@@ -8,7 +8,9 @@ const e2eRoot = fileURLToPath(new URL("../../../e2e", import.meta.url));
 function yamlFiles(root: string): string[] {
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const path = join(root, entry.name);
+
     if (entry.isDirectory()) return yamlFiles(path);
+
     return entry.name.endsWith(".yaml") ? [path] : [];
   });
 }
@@ -18,10 +20,10 @@ function flowSource(path: string): string {
 }
 
 describe("Mobile E2E flow boundaries", () => {
-  it("routes every bb scheme link through the native-confirmation helper", () => {
+  it("routes every omnyo scheme link through the native-confirmation helper", () => {
     for (const path of yamlFiles(e2eRoot)) {
       expect(readFileSync(path, "utf8"), path).not.toMatch(
-        /^\s*- openLink: "bb:\/\//mu,
+        /^\s*- openLink: "omnyo:\/\//mu,
       );
     }
   });

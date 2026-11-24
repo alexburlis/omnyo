@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { app, BrowserWindow, nativeImage } from "electron";
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
-import { desktopBrowserResultSchemas } from "@bb/host-daemon-contract";
+import { desktopBrowserResultSchemas } from "@omnyo/host-daemon-contract";
 import {
   createDesktopBrowserCdpBridge,
   desktopBrowserCdpTargetId,
@@ -20,21 +20,28 @@ import { createDesktopBrowserViewManager } from "../../src/desktop-browser-view.
 import { createDesktopBrowserBroker } from "../../src/desktop-browser-broker.js";
 
 const execute = promisify(execFile);
+
 const keepAlive = setInterval(() => {}, 1000);
+
 app.once("quit", () => clearInterval(keepAlive));
+
 const objectSchema = z.record(z.string(), z.json());
+
 type CdpObject = z.infer<typeof objectSchema>;
+
 const configSchema = z.object({
   artifacts: z.string().min(1),
   devBrowser: z.string().min(1),
   devBrowserSource: z.enum(["release", "local"]),
   agentBrowser: z.string().min(1),
 });
+
 const targetListSchema = z.object({
   targetInfos: z.array(
     z.object({ targetId: z.string(), type: z.string(), url: z.string() }),
   ),
 });
+
 const responseSchema = z.object({
   id: z.number().optional(),
   result: objectSchema.optional(),
@@ -49,18 +56,23 @@ async function connectRaw(endpoint: string) {
     socket.once("error", reject);
   });
   let id = 0;
+
   return {
     socket,
     command(method: string, params: CdpObject = {}, sessionId?: string) {
       const requestId = ++id;
+
       return new Promise<CdpObject>((resolve, reject) => {
         const timer = setTimeout(
           () => finish(new Error(`Timed out: ${method}`)),
           10_000,
         );
+
         const onClose = () => finish(new Error(`Connection closed: ${method}`));
+
         const onMessage = (data: Buffer) => {
           const response = responseSchema.parse(JSON.parse(data.toString()));
+
           if (response.id !== requestId) return;
           finish(
             response.error
@@ -69,13 +81,16 @@ async function connectRaw(endpoint: string) {
             response.result,
           );
         };
+
         function finish(error: Error | null, result: CdpObject = {}) {
           clearTimeout(timer);
           socket.off("message", onMessage);
           socket.off("close", onClose);
+
           if (error) reject(error);
           else resolve(result);
         }
+
         socket.on("message", onMessage);
         socket.once("close", onClose);
         socket.send(
@@ -95,9 +110,11 @@ async function connectRaw(endpoint: string) {
 
 async function main() {
   const configPath = z.string().parse(process.argv.at(-1));
+
   const config = configSchema.parse(
     JSON.parse(readFileSync(configPath, "utf8")),
   );
+
   app.setPath("userData", join(config.artifacts, "electron-profile"));
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch("site-per-process");
@@ -106,6 +123,7 @@ async function main() {
   const tracePath = join(config.artifacts, "cdp.jsonl");
   const methods = new Set<string>();
   let sawIframeTarget = false;
+
   function trace(direction: string, method: string, detail: CdpObject = {}) {
     if (direction === "command") methods.add(method);
     appendFileSync(
@@ -113,38 +131,50 @@ async function main() {
       JSON.stringify({ direction, method, ...detail }) + "\n",
     );
   }
+
   const fixtureServer = createServer((request, response) => {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+
     if (request.url === "/private") {
       response.end(
         '<title>Other thread sentinel</title><h1>PRIVATE_THREAD_SENTINEL</h1><iframe src="/child" width="800" height="500"></iframe>',
       );
+
       return;
     }
+
     if (request.url === "/frames") {
       response.end(
         '<title>Frame fixture</title><iframe src="/child" width="800" height="500"></iframe>',
       );
+
       return;
     }
+
     if (request.url === "/nested") {
       response.end(
         '<title>Nested frame fixture</title><iframe src="/frames" style="margin:900px 0 0 120px;border:7px solid" width="800" height="500"></iframe>',
       );
+
       return;
     }
+
     if (request.url === "/cross") {
       response.end(
         `<title>Cross-origin frame fixture</title><iframe src="http://localhost:${fixturePort}/child" style="margin:80px;border:5px solid" width="650" height="400"></iframe>`,
       );
+
       return;
     }
+
     if (request.url === "/child") {
       response.end(
         "<button onclick=\"this.dataset.clicks=String(Number(this.dataset.clicks||0)+1);this.dataset.trusted=String(event.isTrusted);document.querySelector('#frame-result').textContent='Frame clicked'\">Frame action</button><p id=\"frame-result\">Waiting</p>",
       );
+
       return;
     }
+
     response.end(`<!doctype html><title>Browser CDP smoke</title>
       <style>body{font:20px sans-serif;padding:24px}input,button{font:inherit;margin:12px}</style>
       <h1>CDP fixture</h1><label>Name <input id="name"></label>
@@ -153,6 +183,7 @@ async function main() {
         document.querySelector('#result').textContent='Hello '+document.querySelector('#name').value;
       };</script>`);
   });
+
   await new Promise<void>((resolve) =>
     fixtureServer.listen(0, "127.0.0.1", resolve),
   );
@@ -164,6 +195,7 @@ async function main() {
   await window.loadURL(
     "data:text/html,<title>Trusted app sentinel</title>TRUSTED_APP_SENTINEL",
   );
+
   const manager = createDesktopBrowserViewManager({
     partition: `smoke-${randomBytes(12).toString("hex")}`,
     dispatchAppCommand: () => {},
@@ -171,15 +203,19 @@ async function main() {
     pagePreloadPath: null,
     resolveAppCommand: () => null,
   });
+
   const scopeA = {
     hostWebContentsId: window.webContents.id,
     threadId: "smoke-thread-a",
   };
+
   const scopeB = {
     hostWebContentsId: window.webContents.id,
     threadId: "smoke-thread-b",
   };
+
   const bounds = { x: 0, y: 0, width: 960, height: 720 };
+
   function addTab(scope: DesktopBrowserCdpScope, targetUrl: string) {
     assert.equal(scope.hostWebContentsId, window.webContents.id);
     const tabId = `browser-smoke-${randomBytes(8).toString("hex")}`;
@@ -193,16 +229,20 @@ async function main() {
         visible: scope.threadId === scopeA.threadId,
       },
     });
+
     return tabId;
   }
+
   const originalTab = addTab(scopeA, `${url}/existing`);
   const privateTab = addTab(scopeB, `${url}/private`);
   const originalTarget = desktopBrowserCdpTargetId(scopeA, originalTab);
   const privateTarget = desktopBrowserCdpTargetId(scopeB, privateTab);
+
   const adapter = createDesktopBrowserCdpAdapter({
     manager,
     async createTab(scope, targetUrl, signal) {
       signal.throwIfAborted();
+
       return addTab(scope, targetUrl);
     },
     async closeTab(scope, tabId, signal) {
@@ -220,17 +260,21 @@ async function main() {
       manager.focus({ hostWindow: window, tabId });
     },
   });
+
   const bridge = await createDesktopBrowserCdpBridge({
     adapter,
     product: `Chrome/${process.versions.chrome}`,
   });
+
   const grant = bridge.grant(scopeA, Date.now() + 180_000);
   const privateGrant = bridge.grant(scopeB, Date.now() + 180_000);
+
   const proxy = new WebSocketServer({
     port: 0,
     host: "127.0.0.1",
     maxPayload: 16 * 1024 * 1024,
   });
+
   await new Promise<void>((resolve) => proxy.once("listening", resolve));
   const proxyAddress = proxy.address();
   assert(proxyAddress !== null && typeof proxyAddress !== "string");
@@ -239,6 +283,7 @@ async function main() {
   const upstreams = new Set<WebSocket>();
   let proxyUpstreamEndpoint = grant.endpoint;
   const disconnectListeners = new Set<() => void>();
+
   async function waitForDisconnect() {
     if (upstreams.size === 0) return;
     await new Promise<void>((resolve, reject) => {
@@ -246,21 +291,26 @@ async function main() {
         disconnectListeners.delete(check);
         reject(new Error("Controller did not disconnect within 5 seconds"));
       }, 5000);
+
       function check() {
         if (upstreams.size !== 0) return;
         clearTimeout(timer);
         disconnectListeners.delete(check);
         resolve();
       }
+
       disconnectListeners.add(check);
       check();
     });
   }
+
   proxy.on("connection", (client, request) => {
     if (request.url !== `/${proxyToken}`) {
       client.close();
+
       return;
     }
+
     const upstream = new WebSocket(proxyUpstreamEndpoint);
     upstreams.add(upstream);
     const requests = new Map<number, string>();
@@ -271,6 +321,7 @@ async function main() {
     });
     client.on("message", (data) => {
       const bytes = Buffer.from(data.toString());
+
       const command = z
         .object({
           id: z.number(),
@@ -279,6 +330,7 @@ async function main() {
           sessionId: z.string().optional(),
         })
         .parse(JSON.parse(bytes.toString()));
+
       requests.set(command.id, command.method);
       trace("command", command.method, {
         id: command.id,
@@ -291,27 +343,32 @@ async function main() {
           ? { function: command.params.functionDeclaration.slice(0, 1200) }
           : {}),
       });
+
       if (upstream.readyState === WebSocket.OPEN)
         upstream.send(bytes, { binary: false });
       else queued.push(bytes);
     });
     upstream.on("message", (data) => {
       const message = objectSchema.parse(JSON.parse(data.toString()));
+
       if (message.method === "Target.attachedToTarget") {
         const info = z
           .object({
             params: z.object({ targetInfo: z.object({ type: z.string() }) }),
           })
           .safeParse(message);
+
         if (info.success && info.data.params.targetInfo.type === "iframe")
           sawIframeTarget = true;
       }
+
       const method =
         typeof message.method === "string"
           ? message.method
           : typeof message.id === "number"
             ? (requests.get(message.id) ?? "reply")
             : "reply";
+
       if (typeof message.id === "number") requests.delete(message.id);
       trace("response", method, {
         id: message.id ?? null,
@@ -321,17 +378,20 @@ async function main() {
           ? { result: message.result ?? null, params: message.params ?? null }
           : {}),
       });
+
       if (client.readyState === WebSocket.OPEN) client.send(data.toString());
     });
     upstream.on("error", () => client.close());
     upstream.on("close", () => {
       upstreams.delete(upstream);
       client.close();
+
       for (const listener of disconnectListeners) listener();
     });
     client.on("close", () => upstream.close());
     client.on("error", () => upstream.close());
   });
+
   const clientEnvironment: NodeJS.ProcessEnv = {
     PATH: process.env.PATH,
     DEV_BROWSER_HOME: join(config.artifacts, "dev-state"),
@@ -339,25 +399,33 @@ async function main() {
     AGENT_BROWSER_IDLE_TIMEOUT_MS: "60000",
     AGENT_BROWSER_DEFAULT_TIMEOUT: "10000",
   };
+
   const agentArgs = [
     "--session",
     "cdp-smoke",
     "--config",
     join(config.artifacts, "agent-config.json"),
   ];
+
   const sensitiveEndpoints = new Set([endpoint, grant.endpoint]);
+
   function redact(value: string) {
     for (const sensitive of sensitiveEndpoints)
       value = value.replaceAll(sensitive, "<scoped-cdp>");
+
     return value;
   }
+
   let devRunning = false;
   let agentRunning = false;
+
   async function run(binary: string, args: string[]) {
     if (binary === config.devBrowser && args.includes("--connect"))
       devRunning = true;
+
     if (binary === config.agentBrowser && args.includes("--cdp"))
       agentRunning = true;
+
     try {
       const result = await execute(binary, args, {
         env: clientEnvironment,
@@ -365,10 +433,13 @@ async function main() {
         timeout: 30_000,
         maxBuffer: 1024 * 1024,
       });
+
       if (binary === config.devBrowser && args[0] === "stop")
         devRunning = false;
+
       if (binary === config.agentBrowser && args.at(-1) === "close")
         agentRunning = false;
+
       return result.stdout;
     } catch (error) {
       const output = z.object({ stderr: z.string() }).safeParse(error);
@@ -383,15 +454,19 @@ async function main() {
       );
     }
   }
+
   const checks: string[] = [];
+
   function passed(name: string) {
     checks.push(name);
     console.log(`PASS ${name}`);
   }
+
   const broker = createDesktopBrowserBroker({
     manager,
     product: `Chrome/${process.versions.chrome}`,
   });
+
   try {
     assert.match(
       await run(config.devBrowser, ["--version"]),
@@ -406,9 +481,11 @@ async function main() {
         : "local DevBrowser version and pinned agent-browser version",
     );
     const privateClient = await connectRaw(privateGrant.endpoint);
+
     const privateTargets = targetListSchema.parse(
       await privateClient.command("Target.getTargets"),
     );
+
     assert(
       privateTargets.targetInfos.some(
         (target) => target.targetId === privateTarget,
@@ -427,9 +504,11 @@ async function main() {
     );
     await privateClient.close();
     const raw = await connectRaw(endpoint);
+
     const targets = targetListSchema.parse(
       await raw.command("Target.getTargets"),
     );
+
     assert(
       targets.targetInfos.some((target) => target.targetId === originalTarget),
     );
@@ -448,6 +527,7 @@ async function main() {
     passed(
       "two thread scopes exclude each other and trusted renderer; forbidden close rejected",
     );
+
     const devScript = `
       const pages = await browser.listPages();
       if (pages.length !== 1 || pages[0].id !== ${JSON.stringify(originalTarget)}) throw new Error('Unexpected discovery: '+JSON.stringify(pages));
@@ -541,6 +621,7 @@ async function main() {
       if ((await browser.listPages()).length !== 1) throw new Error('Close did not remove target');
       'DEV_BROWSER_OK';
     `;
+
     assert.match(
       await run(config.devBrowser, [
         "--connect",
@@ -556,14 +637,17 @@ async function main() {
       sawIframeTarget,
       "Cross-origin frame must exercise a native child CDP session",
     );
+
     const devImage = nativeImage.createFromPath(
       join(config.artifacts, "dev-state/tmp/dev-browser.png"),
     );
+
     assert(!devImage.isEmpty());
     assert(devImage.getSize().width > 100);
     passed(
       "DevBrowser discovery, navigation, snapshot refs, fill, click, screenshot, same-origin/nested trusted ref clicks, cross-origin frame click, create and close",
     );
+
     if (config.devBrowserSource === "local")
       passed(
         "cross-origin snapshot ref clicks and stale refs across reload, origin swaps, removal, and parent navigation",
@@ -574,6 +658,7 @@ async function main() {
         .some((tab) => tab.webContents.debugger.isAttached()),
     );
     const hiddenClient = await connectRaw(privateGrant.endpoint);
+
     const { sessionId: hiddenSession } = z
       .object({ sessionId: z.string() })
       .parse(
@@ -582,7 +667,9 @@ async function main() {
           flatten: true,
         }),
       );
+
     await hiddenClient.command("Runtime.enable", {}, hiddenSession);
+
     const hiddenResult = await hiddenClient.command(
       "Runtime.evaluate",
       {
@@ -592,6 +679,7 @@ async function main() {
       },
       hiddenSession,
     );
+
     assert.deepEqual(
       z
         .object({ result: z.object({ value: objectSchema }) })
@@ -601,6 +689,7 @@ async function main() {
         text: "PRIVATE_THREAD_SENTINEL_CONTROLLED",
       },
     );
+
     const hiddenPoint = z
       .object({
         result: z.object({ value: z.object({ x: z.number(), y: z.number() }) }),
@@ -622,6 +711,7 @@ async function main() {
           hiddenSession,
         ),
       ).result.value;
+
     for (const type of ["mousePressed", "mouseReleased"]) {
       await hiddenClient.command(
         "Input.dispatchMouseEvent",
@@ -629,6 +719,7 @@ async function main() {
         hiddenSession,
       );
     }
+
     const hiddenClicked = await hiddenClient.command(
       "Runtime.evaluate",
       {
@@ -638,11 +729,13 @@ async function main() {
       },
       hiddenSession,
     );
+
     assert.equal(
       z.object({ result: z.object({ value: z.string() }) }).parse(hiddenClicked)
         .result.value,
       "true",
     );
+
     const hiddenScreenshot = z
       .object({ data: z.string() })
       .parse(
@@ -652,6 +745,7 @@ async function main() {
           hiddenSession,
         ),
       );
+
     const hiddenBytes = Buffer.from(hiddenScreenshot.data, "base64");
     assert(!nativeImage.createFromBuffer(hiddenBytes).isEmpty());
     await writeFile(join(config.artifacts, "hidden-thread.png"), hiddenBytes);
@@ -685,8 +779,10 @@ async function main() {
     await run(config.devBrowser, ["stop"]);
     await waitForDisconnect();
     passed("DevBrowser disconnect and reconnect preserve user tab and state");
+
     const agent = (args: string[]) =>
       run(config.agentBrowser, [...agentArgs, "--cdp", endpoint, ...args]);
+
     await agent(["open", `${url}/agent-browser`]);
     const snapshot = await agent(["snapshot", "-i"]);
     const button = snapshot.split("\n").find((line) => line.includes("Submit"));
@@ -717,9 +813,11 @@ async function main() {
     );
     const revocable = await connectRaw(endpoint);
     await revocable.command("Target.getTargets");
+
     const disconnected = new Promise<void>((resolve) =>
       revocable.socket.once("close", resolve),
     );
+
     grant.revoke();
     await disconnected;
     assert.equal(manager.getAutomationTabs(scopeA).length, 1);
@@ -731,12 +829,15 @@ async function main() {
     broker.setHostId("smoke-host");
     const instance = broker.listInstances()[0];
     assert(instance);
+
     const target = {
       instanceId: instance.instanceId,
       generation: instance.generation,
       threadId: "smoke-broker-thread",
     };
+
     const brokerTabId = "browser:smoke-broker:none";
+
     const { tab: brokerTab } = desktopBrowserResultSchemas[
       "desktop.browser.create_tab"
     ].parse(
@@ -748,19 +849,24 @@ async function main() {
         presentation: "hidden",
       }),
     );
+
     assert.equal(brokerTab.presentation, "hidden");
+
     const brokerScope = {
       hostWebContentsId: window.webContents.id,
       threadId: target.threadId,
     };
+
     const brokerPage = manager
       .getAutomationTabs(brokerScope)
       .find((tab) => tab.tabId === brokerTabId);
+
     assert(brokerPage);
     assert.equal(
       brokerPage.webContents.session,
       manager.getAutomationTabs(scopeA)[0]?.webContents.session,
     );
+
     if (
       brokerPage.webContents.isLoading() ||
       brokerPage.webContents.getURL() !== `${url}/broker`
@@ -770,14 +876,18 @@ async function main() {
           brokerPage.webContents.off("did-finish-load", loaded);
           reject(new Error("Broker hidden tab did not load within 5 seconds"));
         }, 5000);
+
         function loaded() {
           clearTimeout(timer);
           resolve();
         }
+
         brokerPage.webContents.once("did-finish-load", loaded);
       });
     }
+
     let hiddenCaptureError: Error | null = null;
+
     try {
       const capture = desktopBrowserResultSchemas[
         "desktop.browser.capture_tab"
@@ -788,6 +898,7 @@ async function main() {
           tabId: brokerTabId,
         }),
       );
+
       const captureBytes = Buffer.from(capture.base64, "base64");
       const captureImage = nativeImage.createFromBuffer(captureBytes);
       assert(!captureImage.isEmpty());
@@ -805,6 +916,7 @@ async function main() {
       );
       console.error(hiddenCaptureError.message);
     }
+
     await assert.rejects(
       broker.execute({
         type: "desktop.browser.capture_tab",
@@ -823,6 +935,7 @@ async function main() {
     passed(
       "broker creates hidden automation tab in the browser session; rejects wrong thread and stale instance",
     );
+
     async function acquireBroker(leaseId: string) {
       await broker.execute({
         type: "desktop.browser.acquire_control",
@@ -832,6 +945,7 @@ async function main() {
         controllerLabel: "Electron smoke",
         expiresAt: Date.now() + 60_000,
       });
+
       const connection = desktopBrowserResultSchemas[
         "desktop.browser.open_connection"
       ].parse(
@@ -842,9 +956,12 @@ async function main() {
           tabIds: [brokerTabId],
         }),
       );
+
       sensitiveEndpoints.add(connection.wsEndpoint);
+
       return connection;
     }
+
     const firstLease = "smoke-broker-control-first";
     const firstConnection = await acquireBroker(firstLease);
     await waitForDisconnect();
@@ -854,6 +971,7 @@ async function main() {
       firstLease,
     );
     const brokerTargetId = desktopBrowserCdpTargetId(brokerScope, brokerTabId);
+
     const brokerScript = `
       const pages = await browser.listPages();
       if (pages.length !== 1 || pages[0].id !== ${JSON.stringify(brokerTargetId)}) throw new Error('Broker leaked targets');
@@ -870,6 +988,7 @@ async function main() {
       if ((await browser.listPages()).length !== 1) throw new Error('Broker page close failed');
       'BROKER_CDP_OK';
     `;
+
     assert.match(
       await run(config.devBrowser, [
         "--connect",
@@ -933,18 +1052,23 @@ async function main() {
     passed(
       "broker lease connects RC2, creates and closes pages, revokes on takeover, reacquires preserved state, releases and closes tab",
     );
+
     if (hiddenCaptureError) throw hiddenCaptureError;
     passed(
       "broker captures newly loaded hidden automation tab before any CDP attachment",
     );
   } finally {
     trace("cleanup", "clients");
+
     if (devRunning) await run(config.devBrowser, ["stop"]).catch(() => {});
+
     if (agentRunning)
       await run(config.agentBrowser, [...agentArgs, "close"]).catch(() => {});
     grant.revoke();
     privateGrant.revoke();
+
     for (const upstream of upstreams) upstream.terminate();
+
     for (const client of proxy.clients) client.terminate();
     await new Promise<void>((resolve) => proxy.close(() => resolve()));
     trace("cleanup", "bridge");
@@ -958,6 +1082,7 @@ async function main() {
     await new Promise<void>((resolve) => fixtureServer.close(() => resolve()));
     trace("cleanup", "complete");
   }
+
   writeFileSync(
     join(config.artifacts, "result.json"),
     JSON.stringify(
@@ -980,12 +1105,12 @@ async function main() {
       2,
     ),
   );
-  console.log("BB_CDP_SMOKE_COMPLETE");
+  console.log("OMNYO_CDP_SMOKE_COMPLETE");
   app.quit();
 }
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.stack : String(error));
-  console.log("BB_CDP_SMOKE_FAILED");
+  console.log("OMNYO_CDP_SMOKE_FAILED");
   app.exit(1);
 });

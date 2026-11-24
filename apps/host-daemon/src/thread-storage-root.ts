@@ -10,5 +10,6 @@ export async function ensureThreadStorageRoot(
 ): Promise<string> {
   const rootPath = threadStorageRootPath(dataDir);
   await fs.mkdir(rootPath, { recursive: true });
+
   return rootPath;
 }

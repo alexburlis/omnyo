@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import {
   createConnection,
   migrate,
@@ -18,8 +18,22 @@ import {
 
 const SIDEBAR_INSTALLATION_DEFAULTS_MIGRATION_TIMESTAMP = 1790009314673;
 
+function projectsIgnoringPersonalOrder(
+  db: ReturnType<typeof createConnection>,
+): Record<string, unknown>[] {
+  return db.$client
+    .prepare<[], Record<string, unknown>>("SELECT * FROM projects")
+    .all()
+    .map((project) =>
+      project.id === PERSONAL_PROJECT_ID
+        ? { ...project, sort_key: null }
+        : project,
+    );
+}
+
 it("leaves a fresh migrated database without an installation override", () => {
   const db = createConnection(":memory:");
+
   try {
     migrate(db);
     expect(
@@ -47,8 +61,10 @@ describe.each(["project", "thread", "preference"] as const)(
       "keeps saved choice %s separate from the fallback",
       (choice) => {
         const db = createConnection(":memory:");
+
         try {
           migrate(db);
+
           if (kind === "preference") {
             db.$client.exec(
               `INSERT INTO ui_preferences VALUES ('sidebar.chronologicalSort', '"alpha"', 1, 1)`,
@@ -63,6 +79,7 @@ describe.each(["project", "thread", "preference"] as const)(
               id: "host-sidebar",
               name: "Sidebar test",
             });
+
             createProject(db, noopNotifier, {
               name: "Existing project",
               source: {
@@ -72,6 +89,7 @@ describe.each(["project", "thread", "preference"] as const)(
               },
             });
           }
+
           if (choice !== null) {
             db.$client
               .prepare(
@@ -79,10 +97,12 @@ describe.each(["project", "thread", "preference"] as const)(
               )
               .run(JSON.stringify(choice));
           }
+
           const before = db.$client
             .prepare("SELECT * FROM ui_preferences")
             .all();
-          const projects = db.$client.prepare("SELECT * FROM projects").all();
+
+          const projects = projectsIgnoringPersonalOrder(db);
           const threads = db.$client.prepare("SELECT * FROM threads").all();
           db.$client.exec("DROP TABLE ui_preference_defaults");
           dropIdleLifecycleIndexes(db);
@@ -102,9 +122,7 @@ describe.each(["project", "thread", "preference"] as const)(
           expect(
             db.$client.prepare("SELECT * FROM ui_preferences").all(),
           ).toEqual(before);
-          expect(db.$client.prepare("SELECT * FROM projects").all()).toEqual(
-            projects,
-          );
+          expect(projectsIgnoringPersonalOrder(db)).toEqual(projects);
           expect(db.$client.prepare("SELECT * FROM threads").all()).toEqual(
             threads,
           );

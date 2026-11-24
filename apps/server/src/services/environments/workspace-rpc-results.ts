@@ -1,12 +1,13 @@
-import type { ThreadGitDiffResponse, WorkspaceStatus } from "@bb/domain";
+import type { ThreadGitDiffResponse, WorkspaceStatus } from "@omnyo/domain";
 import type {
   HostDaemonOnlineRpcResult,
   WorkspaceResolutionFailure,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { ApiError } from "../../errors.js";
 
 type WorkspaceStatusCommandResult =
   HostDaemonOnlineRpcResult<"workspace.status">;
+
 type WorkspaceDiffCommandResult = HostDaemonOnlineRpcResult<"workspace.diff">;
 
 function throwWorkspaceUnavailable(failure: WorkspaceResolutionFailure): never {
@@ -21,6 +22,7 @@ export function requireAvailableWorkspaceStatus(
   if (result.outcome === "available") {
     return result.workspaceStatus;
   }
+
   throwWorkspaceUnavailable(result.failure);
 }
 
@@ -30,5 +32,6 @@ export function requireAvailableWorkspaceDiff(
   if (result.outcome === "available") {
     return result.diff;
   }
+
   throwWorkspaceUnavailable(result.failure);
 }

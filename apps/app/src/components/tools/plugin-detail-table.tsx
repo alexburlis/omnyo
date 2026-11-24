@@ -1,13 +1,13 @@
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/tooltip";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 export const PLUGIN_DETAIL_PRIMARY_COLUMN_CLASS =
   "w-40 @min-[40rem]/plugin-detail:w-48";
@@ -74,6 +74,7 @@ export function PluginDetailRow({
   const detailId = useId();
   const [expanded, setExpanded] = useState(false);
   const isLongDescription = typeof detail === "string" && detail.length > 180;
+
   return (
     <tr className={hasDetail ? DETAIL_ROW_GRID : "grid grid-cols-1"}>
       <th

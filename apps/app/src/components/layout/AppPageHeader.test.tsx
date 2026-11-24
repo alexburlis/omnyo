@@ -2,17 +2,17 @@
 
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { BbDesktopInfo } from "@bb/desktop-contract";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import type { OmnyoDesktopInfo } from "@omnyo/desktop-contract";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import {
   BROWSER_COLLAPSED_HEADER_RESERVE_CLASS,
   MACOS_COLLAPSED_TOP_LEFT_RESERVE_CLASS,
-} from "@/lib/bb-desktop";
-import { createBbDesktopApi } from "@/test/bb-desktop-test-utils";
+} from "@/lib/omnyo-desktop";
+import { createOmnyoDesktopApi } from "@/test/omnyo-desktop-test-utils";
 import { AppPageHeader } from "./AppPageHeader";
 
-const macosDesktopInfo: BbDesktopInfo = {
+const macosDesktopInfo: OmnyoDesktopInfo = {
   lastCheckedAt: null,
   latestVersion: null,
   pendingVersion: null,
@@ -43,9 +43,11 @@ function renderHeaderReserve({
       </SidebarProvider>
     </CompactViewportOverrideProvider>,
   );
+
   const classNames = screen
     .getByTestId("app-page-header-content-row")
     .className.split(" ");
+
   return RESERVE_CLASSES.filter((reserve) =>
     reserve.split(" ").every((token) => classNames.includes(token)),
   );
@@ -53,7 +55,7 @@ function renderHeaderReserve({
 
 afterEach(() => {
   cleanup();
-  delete window.bbDesktop;
+  delete window.omnyoDesktop;
 });
 
 describe("AppPageHeader window top-left reserve", () => {
@@ -68,13 +70,13 @@ describe("AppPageHeader window top-left reserve", () => {
   });
 
   it("reserves nothing beside a collapsed rail on macOS, where the title bar hosts the lights", () => {
-    window.bbDesktop = createBbDesktopApi(macosDesktopInfo);
+    window.omnyoDesktop = createOmnyoDesktopApi(macosDesktopInfo);
 
     expect(renderHeaderReserve({ collapsedRailWidth: "52px" })).toEqual([]);
   });
 
   it("keeps the full macOS reserve when no rail stays behind", () => {
-    window.bbDesktop = createBbDesktopApi(macosDesktopInfo);
+    window.omnyoDesktop = createOmnyoDesktopApi(macosDesktopInfo);
 
     expect(renderHeaderReserve({})).toEqual([
       MACOS_COLLAPSED_TOP_LEFT_RESERVE_CLASS,

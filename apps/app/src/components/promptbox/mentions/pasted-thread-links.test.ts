@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { findPastedThreadLinks } from "./pasted-thread-links";
 
-const origin = "https://bb.test";
+const origin = "https://omnyo.test";
+
 const threadId = "thr_86mb5jjzi9";
+
 const projectId = "proj_khiw2za95v";
+
 const projectLink = `${origin}/projects/${projectId}/threads/${threadId}`;
+
 const projectlessLink = `${origin}/threads/thr_dcwivn5n8w/`;
 
 describe("findPastedThreadLinks", () => {
@@ -12,10 +16,11 @@ describe("findPastedThreadLinks", () => {
     const text =
       `🧭 Use (**${projectLink}**), then ${projectlessLink}!\r\n` +
       `Keep https://example.com/threads/${threadId} and '${projectLink}'.`;
+
     const secondFrom = text.indexOf(projectlessLink);
     const repeatedFrom = text.lastIndexOf(projectLink);
 
-    expect(findPastedThreadLinks({ text, origin })).toEqual([
+    expect(findPastedThreadLinks({ text, origins: [origin] })).toEqual([
       {
         from: 10,
         to: 10 + projectLink.length,
@@ -58,7 +63,7 @@ describe("findPastedThreadLinks", () => {
   ])("preserves %s while recognizing adjacent prose", (_name, literal) => {
     const text = `${projectlessLink}\n\n${literal}`;
 
-    expect(findPastedThreadLinks({ text, origin })).toEqual([
+    expect(findPastedThreadLinks({ text, origins: [origin] })).toEqual([
       {
         from: 0,
         to: projectlessLink.length,
@@ -71,13 +76,13 @@ describe("findPastedThreadLinks", () => {
 
   it("preserves foreign destinations and noncanonical thread routes", () => {
     const text = [
-      `https://bb.test.example/threads/${threadId}`,
-      `https://other.bb.test/threads/${threadId}`,
-      `http://bb.test/threads/${threadId}`,
-      `https://bb.test:444/threads/${threadId}`,
-      `https://user:password@bb.test/threads/${threadId}`,
-      `https://@bb.test/threads/${threadId}`,
-      `ftp://bb.test/threads/${threadId}`,
+      `https://omnyo.test.example/threads/${threadId}`,
+      `https://other.omnyo.test/threads/${threadId}`,
+      `http://omnyo.test/threads/${threadId}`,
+      `https://omnyo.test:444/threads/${threadId}`,
+      `https://user:password@omnyo.test/threads/${threadId}`,
+      `https://@omnyo.test/threads/${threadId}`,
+      `ftp://omnyo.test/threads/${threadId}`,
       `/projects/${projectId}/threads/${threadId}`,
       `${projectLink}?view=detail`,
       `${projectLink}?`,
@@ -97,7 +102,25 @@ describe("findPastedThreadLinks", () => {
       `ftp:${projectLink}`,
     ].join("\n\n");
 
-    expect(findPastedThreadLinks({ text, origin })).toEqual([]);
+    expect(findPastedThreadLinks({ text, origins: [origin] })).toEqual([]);
+  });
+
+  it("accepts canonical links pasted into an app loaded from an alias origin", () => {
+    const canonicalOrigin = "https://o.omnyo.test";
+    const canonicalLink = `${canonicalOrigin}/projects/${projectId}/threads/${threadId}`;
+    const text = `${canonicalLink} https://other.test/threads/${threadId}`;
+
+    expect(
+      findPastedThreadLinks({ text, origins: [canonicalOrigin, origin] }),
+    ).toEqual([
+      {
+        from: 0,
+        to: canonicalLink.length,
+        text: canonicalLink,
+        threadId,
+        projectId,
+      },
+    ]);
   });
 
   it("accepts the active HTTP development origin while keeping other ports literal", () => {
@@ -105,7 +128,7 @@ describe("findPastedThreadLinks", () => {
     const localLink = `${localOrigin}/threads/${threadId}`;
     const text = `${localLink} http://localhost:3101/threads/${threadId}`;
 
-    expect(findPastedThreadLinks({ text, origin: localOrigin })).toEqual([
+    expect(findPastedThreadLinks({ text, origins: [localOrigin] })).toEqual([
       {
         from: 0,
         to: localLink.length,

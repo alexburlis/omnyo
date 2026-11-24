@@ -2,12 +2,12 @@
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeEnvironment, makeHost } from "@bb/test-helpers/domain-fixtures";
+import { makeEnvironment, makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { HttpError } from "@/lib/api";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { makeThreadResponse } from "@/test/fixtures/thread-responses";
-import type { PendingInteraction } from "@bb/domain";
+import type { PendingInteraction } from "@omnyo/domain";
 import {
   hostsQueryKey,
   threadPendingInteractionsQueryKey,
@@ -56,6 +56,7 @@ describe("useResolveThreadPendingInteraction", () => {
       id: "thr_1",
       environmentId: "env_1",
     };
+
     const offlineHost = makeHost({ id: "host_1", status: "disconnected" });
     vi.mocked(sdk.threads.get).mockResolvedValue(thread);
     vi.mocked(sdk.environments.get).mockResolvedValue(
@@ -66,10 +67,12 @@ describe("useResolveThreadPendingInteraction", () => {
       hostOfflineError,
     );
     const { queryClient, wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useResolveThreadPendingInteraction("thr_1"),
       { wrapper },
     );
+
     await waitFor(() => expect(sdk.hosts.list).toHaveBeenCalled());
 
     await act(async () => {
@@ -91,7 +94,7 @@ describe("useResolveThreadPendingInteraction", () => {
     await waitFor(() => expect(result.current.error).toBeNull());
   });
 
-  it("shows the server's resolving interaction before the pending list refetches", async () => {
+  it("removes the answered card before the server replies and keeps it hidden while it resolves", async () => {
     const approval: PendingInteraction = {
       id: "pint_plan",
       threadId: "thr_1",
@@ -116,43 +119,112 @@ describe("useResolveThreadPendingInteraction", () => {
         },
       },
     };
+
     const other: PendingInteraction = { ...approval, id: "pint_other" };
+
     const resolution = {
       decision: "allow_once" as const,
       grantedPermissions: null,
     };
+
     vi.mocked(sdk.threads.get).mockReturnValue(new Promise(() => {}));
     const { queryClient, wrapper } = createQueryClientTestHarness();
     queryClient.setQueryData(threadPendingInteractionsQueryKey("thr_1"), [
       approval,
       other,
     ]);
+
     const { result } = renderHook(
       () => useResolveThreadPendingInteraction("thr_1"),
       { wrapper },
     );
-    const resolve = (status: PendingInteraction["status"]) =>
-      act(async () => {
-        vi.mocked(sdk.threads.interactions.resolve).mockResolvedValueOnce({
-          ...approval,
-          status,
-          resolution,
-        });
-        await result.current.mutateAsync({
-          threadId: "thr_1",
-          interactionId: "pint_plan",
-          resolution,
-        });
+
+    let finishResolve!: (interaction: PendingInteraction) => void;
+    vi.mocked(sdk.threads.interactions.resolve).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishResolve = resolve;
+        }),
+    );
+
+    let submission!: Promise<PendingInteraction>;
+    act(() => {
+      submission = result.current.mutateAsync({
+        threadId: "thr_1",
+        interactionId: "pint_plan",
+        resolution,
       });
+    });
 
-    await resolve("resolving");
-    expect(
-      queryClient.getQueryData(threadPendingInteractionsQueryKey("thr_1")),
-    ).toEqual([{ ...approval, status: "resolving", resolution }, other]);
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData(threadPendingInteractionsQueryKey("thr_1")),
+      ).toEqual([other]),
+    );
+    expect(sdk.threads.interactions.resolve).toHaveBeenCalledTimes(1);
 
-    await resolve("resolved");
+    await act(async () => {
+      finishResolve({ ...approval, status: "resolving", resolution });
+      await submission;
+    });
     expect(
       queryClient.getQueryData(threadPendingInteractionsQueryKey("thr_1")),
     ).toEqual([other]);
+  });
+
+  it("brings the card back when the answer cannot be delivered", async () => {
+    const question: PendingInteraction = {
+      id: "pint_question",
+      threadId: "thr_1",
+      turnId: "turn_1",
+      providerId: "claude-code",
+      providerThreadId: "pt_1",
+      providerRequestId: "req_1",
+      status: "pending",
+      statusReason: null,
+      createdAt: 1,
+      resolvedAt: null,
+      resolution: null,
+      payload: {
+        kind: "approval",
+        reason: null,
+        availableDecisions: ["allow_once", "deny"],
+        subject: {
+          kind: "plan",
+          itemId: "plan-1",
+          plan: "# Plan",
+          planFilePath: null,
+        },
+      },
+    };
+
+    vi.mocked(sdk.threads.get).mockReturnValue(new Promise(() => {}));
+    vi.mocked(sdk.threads.interactions.resolve).mockRejectedValueOnce(
+      new Error("Provider unavailable"),
+    );
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+    queryClient.setQueryData(threadPendingInteractionsQueryKey("thr_1"), [
+      question,
+    ]);
+
+    const { result } = renderHook(
+      () => useResolveThreadPendingInteraction("thr_1", "pint_question"),
+      { wrapper },
+    );
+
+    await act(async () => {
+      await result.current
+        .mutateAsync({
+          threadId: "thr_1",
+          interactionId: "pint_question",
+          resolution: { decision: "deny" },
+        })
+        .catch(() => {});
+    });
+
+    expect(
+      queryClient.getQueryData(threadPendingInteractionsQueryKey("thr_1")),
+    ).toEqual([question]);
+    await vi.waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
   });
 });

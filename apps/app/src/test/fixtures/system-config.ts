@@ -3,13 +3,14 @@ import {
   defaultAppTheme,
   defaultExperiments,
   defaultFeatureFlags,
-} from "@bb/domain";
-import type { SystemConfigResponse } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { SystemConfigResponse } from "@omnyo/server-contract";
 
 export function makeSystemConfig(
   overrides: Partial<SystemConfigResponse> = {},
 ): SystemConfigResponse {
   return {
+    commandDefaultsByProvider: {},
     serverAccess: {
       providers: [],
       defaultProviderId: "direct",
@@ -32,7 +33,7 @@ export function makeSystemConfig(
     primaryHostId: null,
     primaryHostPlatform: null,
     voiceTranscriptionEnabled: false,
-    dataDir: "/tmp/bb-test",
+    dataDir: "/tmp/omnyo-test",
     ...overrides,
   };
 }

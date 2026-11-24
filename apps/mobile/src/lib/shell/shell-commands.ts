@@ -8,6 +8,7 @@ export function subscribeToShellCommands(
   listener: ShellCommandListener,
 ): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };
@@ -15,6 +16,8 @@ export function subscribeToShellCommands(
 
 export function sendShellCommand(command: ShellCommand): boolean {
   if (listeners.size === 0) return false;
+
   for (const listener of listeners) listener(command);
+
   return true;
 }

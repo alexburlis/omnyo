@@ -5,24 +5,24 @@ import {
   type TextFilePreviewKind,
 } from "./FilePreview";
 import { useEffect } from "react";
-import { BbSourceCodeSplit } from "@/components/code/SourceCodeHost";
+import { OmnyoSourceCodeSplit } from "@/components/code/SourceCodeHost";
 import { hashSourceContents } from "@/components/code/source-code-budget";
 import { useRequestPierreWorkerPool } from "@/lib/pierre-worker-pool-gate";
 import type { MarkdownLinkRouting } from "@/components/ui/markdown-link-routing.js";
 import { asHttpError, getHttpErrorMessage } from "@/lib/http-error";
-import { extractErrorMessage } from "@bb/core-ui";
+import { extractErrorMessage } from "@omnyo/core-ui";
 import type {
   FilePreview,
   FilePreviewLineRange,
   TextFilePreview,
   WorkspaceFilePreviewStatusLabel,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import {
   FILE_PREVIEW_HTML_MAX_BYTES,
   isCsvFilePreview,
   isHtmlFilePreviewPath,
   isMarkdownFilePreview,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 
 const GENERIC_HTML_IFRAME_SANDBOX = "allow-scripts";
 
@@ -78,14 +78,17 @@ function getTextPreviewKind(
   if (isCsvFilePreview(filePreview)) {
     return "csv";
   }
+
   if (isMarkdownFilePreview(filePreview)) {
     return "markdown";
   }
+
   return null;
 }
 
 function resolveFilePreviewErrorMessage(error: Error): string | null {
   const httpError = asHttpError(error);
+
   return httpError === null
     ? extractErrorMessage(error.message)
     : getHttpErrorMessage(httpError);
@@ -109,11 +112,14 @@ function resolveSecondaryPanelFilePreviewState({
   lineRange,
 }: ResolveSecondaryPanelFilePreviewStateArgs): FilePreviewState {
   const hasCurrentPreview = filePreview?.path === activePath;
+
   if (asHttpError(error)?.status === 404) {
     return { kind: "not-found" };
   }
+
   if (error && !hasCurrentPreview) {
     const message = resolveFilePreviewErrorMessage(error);
+
     return message === null ? { kind: "error" } : { kind: "error", message };
   }
 
@@ -144,6 +150,7 @@ function resolveSecondaryPanelFilePreviewState({
     if (filePreview.content.length === 0) {
       return { kind: "empty" };
     }
+
     return {
       kind: "ready",
       lineRange,
@@ -189,9 +196,10 @@ export function SecondaryPanelFilePreview({
 }: SecondaryPanelFilePreviewProps) {
   const requestCodeWorkers = useRequestPierreWorkerPool();
   useEffect(() => {
-    void BbSourceCodeSplit.preload();
+    void OmnyoSourceCodeSplit.preload();
     requestCodeWorkers();
   }, [requestCodeWorkers]);
+
   const state = resolveSecondaryPanelFilePreviewState({
     activePath,
     error,
@@ -200,6 +208,7 @@ export function SecondaryPanelFilePreview({
     isLoading,
     lineRange,
   });
+
   return (
     <FilePreviewSurface
       path={activePath}

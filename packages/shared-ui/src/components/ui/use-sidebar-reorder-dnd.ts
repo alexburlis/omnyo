@@ -14,8 +14,10 @@ import {
 function setSidebarDraggingCursor(active: boolean): void {
   if (active) {
     document.body.dataset.sidebarDragging = "true";
+
     return;
   }
+
   delete document.body.dataset.sidebarDragging;
 }
 
@@ -41,10 +43,12 @@ export function useSidebarReorderDnd({
     },
     [onDragStart],
   );
+
   const handleDragCancel = useCallback(() => {
     setSidebarDraggingCursor(false);
     onDragCancel?.();
   }, [onDragCancel]);
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       setSidebarDraggingCursor(false);

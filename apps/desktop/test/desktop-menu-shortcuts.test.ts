@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AppKeybindings } from "@bb/domain";
+import type { AppKeybindings } from "@omnyo/domain";
 import {
   DEFAULT_APPLICATION_MENU_ACCELERATORS,
   formatElectronAccelerator,
@@ -58,6 +58,7 @@ describe("desktop menu shortcuts", () => {
       binding("settings.open", ",", { mod: true }),
       binding("panel.reopenClosedTab", "t", { mod: true, shift: true }),
     ]);
+
     expect(accelerators.openNewThread).toBe("CommandOrControl+Shift+U");
     expect(accelerators.openSettings).toBe("CommandOrControl+,");
     expect(accelerators.reopenClosedTab).toBe("CommandOrControl+Shift+T");

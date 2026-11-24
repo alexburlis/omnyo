@@ -50,17 +50,19 @@ describe("createPushStore", () => {
     expect(store.getRegistration("p1")).toBeNull();
     expect(storage.dump()).toEqual({});
 
-    storage.set("bb.push.registrations", JSON.stringify(["bad"]));
-    storage.set("bb.push.registration.bad", "{not json");
+    storage.set("omnyo.push.registrations", JSON.stringify(["bad"]));
+    storage.set("omnyo.push.registration.bad", "{not json");
     expect(createPushStore(storage).registeredProfileIds()).toEqual([]);
   });
 
   it("notifies subscribers on every write", () => {
     const store = createPushStore(createMemoryPushStorage());
     let calls = 0;
+
     const unsubscribe = store.subscribe(() => {
       calls += 1;
     });
+
     store.setEnabled("p1", true);
     store.markPrompted();
     unsubscribe();

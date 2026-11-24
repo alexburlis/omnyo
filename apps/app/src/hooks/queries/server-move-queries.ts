@@ -8,6 +8,7 @@ import { FOCUS_OWNED_LIVE_QUERY_POLICY } from "./query-policies";
 export function useServerMoveStatus(options?: QueryOptions) {
   const enabled = options?.enabled ?? true;
   useSystemRealtimeSubscription({ enabled });
+
   return useQuery({
     queryKey: serverMoveStatusQueryKey(),
     queryFn: ({ signal }) => sdk.experimental_server.moveStatus({ signal }),

@@ -12,5 +12,6 @@ export function sectionKeyForThreadSection(
   if (!sectionId) {
     return null;
   }
+
   return buildSectionKey(containerId, sectionId);
 }

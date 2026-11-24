@@ -1,17 +1,18 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { performance } from "node:perf_hooks";
-import { getExperiments } from "@bb/db";
-import type { ThreadEvent } from "@bb/domain";
+import { getExperiments } from "@omnyo/db";
+import type { ThreadEvent } from "@omnyo/domain";
 import {
   parseHostDaemonCommandResultForCommand,
   type HostDaemonCommand,
   type HostDaemonRpcCommand,
   type TurnSubmitTrace,
-} from "@bb/host-daemon-contract";
-import { roundDurationMs } from "@bb/process-utils";
+} from "@omnyo/host-daemon-contract";
+import { roundDurationMs } from "@omnyo/process-utils";
 import type { AppDeps, ServerLogger } from "../../types.js";
 
 const TURN_TRACE_OUTPUT_WAIT_MS = 120_000;
+
 const FIRST_OUTPUT_EVENT_TYPES: ReadonlySet<ThreadEvent["type"]> = new Set([
   "item/agentMessage/delta",
   "item/reasoning/summaryTextDelta",
@@ -62,6 +63,7 @@ interface TurnTraceEventBatch {
 }
 
 const currentTrace = new AsyncLocalStorage<TurnTrace>();
+
 const tracesAwaitingOutput = new Map<string, TurnTrace>();
 
 function isTurnTraceEnabled(deps: Pick<AppDeps, "config" | "db">): boolean {
@@ -85,13 +87,17 @@ function logTurnTrace(trace: TurnTrace, outcome: string): void {
   if (trace.logged) {
     return;
   }
+
   trace.logged = true;
+
   if (trace.outputTimer !== null) {
     clearTimeout(trace.outputTimer);
   }
+
   if (tracesAwaitingOutput.get(trace.threadId) === trace) {
     tracesAwaitingOutput.delete(trace.threadId);
   }
+
   trace.logger.info(
     {
       turnTrace: {
@@ -126,6 +132,7 @@ export async function runWithTurnTrace<T>(
   if (!isTurnTraceEnabled(deps)) {
     return work();
   }
+
   const trace: TurnTrace = {
     commandType: null,
     daemon: null,
@@ -138,11 +145,14 @@ export async function runWithTurnTrace<T>(
     startedAt: performance.now(),
     threadId: args.threadId,
   };
+
   setSpan(trace, "send.received", trace.startedAt);
+
   try {
     return await currentTrace.run(trace, work);
   } finally {
     setSpan(trace, "send.responded", performance.now());
+
     if (trace.commandType === null) {
       logTurnTrace(trace, "not-sent");
     } else {
@@ -153,6 +163,7 @@ export async function runWithTurnTrace<T>(
 
 export function markTurnTraceSpan(name: TurnTraceSpanName): void {
   const trace = currentTrace.getStore();
+
   if (trace !== undefined) {
     setSpan(trace, name, performance.now());
   }
@@ -163,14 +174,18 @@ export async function traceTurnRpc<T>(
   call: () => Promise<T>,
 ): Promise<T> {
   const trace = currentTrace.getStore();
+
   if (trace === undefined) {
     return call();
   }
+
   const startedAt = performance.now();
   let ok = false;
+
   try {
     const result = await call();
     ok = true;
+
     return result;
   } finally {
     trace.rpcs.push({
@@ -187,6 +202,7 @@ export function noteTurnTraceCommandSent(args: {
   hostId: string;
 }): void {
   const trace = currentTrace.getStore();
+
   if (
     trace === undefined ||
     trace.commandType !== null ||
@@ -195,13 +211,16 @@ export function noteTurnTraceCommandSent(args: {
   ) {
     return;
   }
+
   trace.commandType = args.command.type;
   trace.hostId = args.hostId;
   setSpan(trace, "command.sent", performance.now());
   const previous = tracesAwaitingOutput.get(trace.threadId);
+
   if (previous !== undefined) {
     logTurnTrace(previous, "superseded");
   }
+
   tracesAwaitingOutput.set(trace.threadId, trace);
   trace.outputTimer = setTimeout(
     () => logTurnTrace(trace, "no-output"),
@@ -215,21 +234,26 @@ export function noteTurnTraceCommandSettled(args: {
   result: unknown;
 }): void {
   const trace = currentTrace.getStore();
+
   if (trace === undefined || trace.commandType !== args.command.type) {
     return;
   }
+
   setSpan(trace, "command.settled", performance.now());
+
   if (args.command.type === "turn.submit") {
     trace.daemon = parseHostDaemonCommandResultForCommand(
       args.command,
       args.result,
     ).trace;
   }
+
   logWhenComplete(trace);
 }
 
 export function noteTurnTraceCommandFailed(command: HostDaemonCommand): void {
   const trace = currentTrace.getStore();
+
   if (trace !== undefined && trace.commandType === command.type) {
     logTurnTrace(trace, "command-failed");
   }
@@ -239,11 +263,14 @@ export function observeTurnTraceEventBatch(batch: TurnTraceEventBatch): void {
   if (tracesAwaitingOutput.size === 0) {
     return;
   }
+
   for (const { event, threadId } of batch.events) {
     const trace = tracesAwaitingOutput.get(threadId);
+
     if (trace === undefined || trace.spans.has("firstOutput.notified")) {
       continue;
     }
+
     if (FIRST_OUTPUT_EVENT_TYPES.has(event.type)) {
       setSpan(trace, "firstOutput.batchReceived", batch.receivedAt);
       setSpan(trace, "firstOutput.committed", batch.committedAt);

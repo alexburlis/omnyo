@@ -3,7 +3,7 @@
 import { Provider, createStore } from "jotai";
 import type { ReactNode } from "react";
 import { renderHook, waitFor } from "@testing-library/react";
-import type { WorkspaceOpenTarget } from "@bb/host-daemon-contract";
+import type { WorkspaceOpenTarget } from "@omnyo/host-daemon-contract";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FILE_OPEN_TARGET_STORAGE_KEY,
@@ -46,6 +46,7 @@ describe("workspace open target preference override", () => {
     const store = createStore();
     store.set(workspaceOpenTargetPreferenceAtom, "removed-editor");
     store.set(fileOpenTargetPreferenceAtom, "removed-editor");
+
     const wrapper = ({ children }: { children: ReactNode }) => (
       <Provider store={store}>{children}</Provider>
     );
@@ -73,6 +74,7 @@ describe("workspace open target preference override", () => {
   it("does not override preferences before available targets load", () => {
     const store = createStore();
     store.set(workspaceOpenTargetPreferenceAtom, "removed-editor");
+
     const wrapper = ({ children }: { children: ReactNode }) => (
       <Provider store={store}>{children}</Provider>
     );

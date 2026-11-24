@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-export const BB_DESKTOP_EXISTING_SERVER_DIALOG_CHOOSE_CHANNEL =
-  "bb-desktop:existing-server-dialog:choose";
+export const OMNYO_DESKTOP_EXISTING_SERVER_DIALOG_CHOOSE_CHANNEL =
+  "omnyo-desktop:existing-server-dialog:choose";
 
 export const EXISTING_SERVER_DIALOG_CHOICES = [
   "connect",
@@ -14,6 +14,7 @@ export const existingServerDialogChooseRequestSchema = z
     choice: z.enum(EXISTING_SERVER_DIALOG_CHOICES),
   })
   .strict();
+
 export type ExistingServerDialogChooseRequest = z.infer<
   typeof existingServerDialogChooseRequestSchema
 >;

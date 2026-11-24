@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Paragraph, PhrasingContent, Root } from "mdast";
-import type { PromptMentionResource } from "@bb/domain";
+import type { PromptMentionResource } from "@omnyo/domain";
 import {
   remarkPromptMentions,
   substitutePromptMentions,
@@ -33,9 +33,11 @@ const COMMAND_RESOURCE: PromptMentionResource = {
 
 function spanAt(text: string, token: string, resource: PromptMentionResource) {
   const start = text.indexOf(token);
+
   if (start < 0) {
     throw new Error(`token ${token} not found in ${text}`);
   }
+
   return { start, end: start + token.length, resource };
 }
 
@@ -48,6 +50,7 @@ describe("substitutePromptMentions", () => {
 
   it("replaces a mention span with a sentinel and records its resource", () => {
     const text = "See @thread:thr_child here.";
+
     const result = substitutePromptMentions(text, [
       spanAt(text, "@thread:thr_child", THREAD_RESOURCE),
     ]);
@@ -62,6 +65,7 @@ describe("substitutePromptMentions", () => {
 
   it("substitutes every mention kind in source order", () => {
     const text = "Ask @thread:thr_child about @src/foo_bar.ts then /deploy.";
+
     const result = substitutePromptMentions(text, [
       spanAt(text, "@thread:thr_child", THREAD_RESOURCE),
       spanAt(text, "@src/foo_bar.ts", PATH_RESOURCE),
@@ -84,10 +88,12 @@ describe("substitutePromptMentions", () => {
 
   it("preserves the index ordering even when mentions arrive unsorted", () => {
     const text = "Ask @thread:thr_child about @src/foo_bar.ts.";
+
     const result = substitutePromptMentions(text, [
       spanAt(text, "@src/foo_bar.ts", PATH_RESOURCE),
       spanAt(text, "@thread:thr_child", THREAD_RESOURCE),
     ]);
+
     expect(result.mentions.map((mention) => mention.resource.kind)).toEqual([
       "thread",
       "path",
@@ -96,19 +102,23 @@ describe("substitutePromptMentions", () => {
 
   it("drops an overlapping mention so each sentinel maps to one resource", () => {
     const text = "@src/foo_bar.ts";
+
     const result = substitutePromptMentions(text, [
       spanAt(text, "@src/foo_bar.ts", PATH_RESOURCE),
       { start: 1, end: 5, resource: THREAD_RESOURCE },
     ]);
+
     expect(result.mentions).toHaveLength(1);
     expect(result.mentions[0]?.resource.kind).toBe("path");
   });
 
   it("drops a mention whose range falls outside the text", () => {
     const text = "short";
+
     const result = substitutePromptMentions(text, [
       { start: 0, end: 99, resource: THREAD_RESOURCE },
     ]);
+
     expect(result.content).toBe("short");
     expect(result.mentions).toEqual([]);
   });
@@ -117,20 +127,23 @@ describe("substitutePromptMentions", () => {
 describe("remarkPromptMentions", () => {
   function mentionNodes(children: readonly PhrasingContent[]) {
     return children.filter(
-      (child) => child.data?.hName === "bb-prompt-mention",
+      (child) => child.data?.hName === "omnyo-prompt-mention",
     );
   }
 
   it("rewrites each sentinel into an indexed mention node", () => {
     const text = "Ask @thread:thr_child and @src/foo_bar.ts.";
+
     const { content } = substitutePromptMentions(text, [
       spanAt(text, "@thread:thr_child", THREAD_RESOURCE),
       spanAt(text, "@src/foo_bar.ts", PATH_RESOURCE),
     ]);
+
     const paragraph: Paragraph = {
       type: "paragraph",
       children: [{ type: "text", value: content }],
     };
+
     const tree: Root = { type: "root", children: [paragraph] };
 
     remarkPromptMentions()(tree);
@@ -147,6 +160,7 @@ describe("remarkPromptMentions", () => {
       type: "paragraph",
       children: [{ type: "text", value: "no mentions here" }],
     };
+
     const tree: Root = { type: "root", children: [paragraph] };
 
     remarkPromptMentions()(tree);

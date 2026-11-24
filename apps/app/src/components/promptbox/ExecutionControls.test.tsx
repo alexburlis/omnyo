@@ -1,18 +1,40 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { makeProviderInfo } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
+import { makeSystemConfig } from "@/test/fixtures/system-config";
+import { systemConfigQueryKey } from "@/hooks/queries/query-keys";
 import {
   ExecutionControls,
   type ExecutionControlsProps,
 } from "./ExecutionControls";
 import { ModelReasoningMenu } from "@/components/pickers/ModelReasoningMenuSplit";
+import type { ModelPickerOption } from "@/components/pickers/model-picker-option";
+
+const MEDIUM_ONLY = [{ value: "medium", label: "Medium" }];
+
+const gpt5: ModelPickerOption = {
+  value: "gpt-5",
+  label: "GPT-5",
+  reasoningOptions: MEDIUM_ONLY,
+  defaultReasoningLevel: "medium",
+  serviceTierOptions: [],
+};
 
 function makeExecutionControlsProps(
   providerOnChange?: (value: string) => void,
 ): ExecutionControlsProps {
   return {
+    catalog: {
+      providers: [
+        makeProviderInfo({ id: "codex", displayName: "Codex" }),
+        makeProviderInfo({ id: "claude", displayName: "Claude Code" }),
+      ],
+      verified: true,
+      modelOptions: [gpt5],
+    },
     provider: {
       options: [
         { value: "codex", label: "Codex" },
@@ -25,7 +47,7 @@ function makeExecutionControlsProps(
     model: {
       active: null,
       selected: "gpt-5",
-      options: [{ value: "gpt-5", label: "GPT-5" }],
+      options: [gpt5],
       moreOptions: [],
       isLoading: false,
       loadFailed: false,
@@ -34,14 +56,21 @@ function makeExecutionControlsProps(
     },
     reasoning: {
       value: "medium",
-      options: [{ value: "medium", label: "Medium" }],
+      options: MEDIUM_ONLY,
       onChange: vi.fn(),
     },
+    selection: { onChange: vi.fn() },
   };
 }
 
 function renderExecutionControls(props: ExecutionControlsProps) {
-  const { wrapper } = createQueryClientTestHarness();
+  const { queryClient, wrapper } = createQueryClientTestHarness();
+  const config = makeSystemConfig();
+  queryClient.setQueryData(systemConfigQueryKey(), {
+    ...config,
+    generalSettings: { ...config.generalSettings, streamerMode: false },
+  });
+
   return render(<ExecutionControls {...props} />, { wrapper });
 }
 
@@ -53,7 +82,7 @@ afterEach(() => {
 });
 
 describe("ExecutionControls", () => {
-  it("hides provider tabs when the provider is locked", () => {
+  it("shows only the locked provider's group when provider changes are locked", () => {
     renderExecutionControls(makeExecutionControlsProps());
 
     fireEvent.click(
@@ -62,11 +91,11 @@ describe("ExecutionControls", () => {
       }),
     );
 
-    expect(screen.queryByText("Model")).not.toBeNull();
-    expect(screen.queryByTitle("Claude Code")).toBeNull();
+    expect(screen.getByRole("rowheader", { name: "Codex" })).not.toBeNull();
+    expect(screen.queryByRole("rowheader", { name: "Claude Code" })).toBeNull();
   });
 
-  it("shows provider tabs when provider changes are allowed", () => {
+  it("lists every provider as a labelled group when provider changes are allowed", () => {
     renderExecutionControls(makeExecutionControlsProps(vi.fn()));
 
     fireEvent.click(
@@ -75,7 +104,32 @@ describe("ExecutionControls", () => {
       }),
     );
 
-    expect(screen.queryByTitle("Claude Code")).not.toBeNull();
+    expect(screen.getByRole("rowheader", { name: "Codex" })).not.toBeNull();
+    expect(
+      screen.getByRole("rowheader", { name: "Claude Code" }),
+    ).not.toBeNull();
+  });
+
+  it("sends a cell click to the selection handler as one tuple", () => {
+    const props = makeExecutionControlsProps();
+    renderExecutionControls(props);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Provider, model and reasoning",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "GPT-5, Medium reasoning" }),
+    );
+
+    expect(props.selection.onChange).toHaveBeenCalledExactlyOnceWith({
+      providerId: "codex",
+      model: "gpt-5",
+      reasoningLevel: "medium",
+    });
+    expect(props.model.onChange).not.toHaveBeenCalled();
+    expect(props.reasoning.onChange).not.toHaveBeenCalled();
   });
 
   it("keeps showing the known model when model options fail to load", () => {
@@ -111,12 +165,12 @@ describe("ExecutionControls", () => {
       },
     });
 
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Provider, model and reasoning",
-      }),
-    );
-    fireEvent.click(screen.getByRole("switch", { name: "Fast mode" }));
+    const speed = screen.getByRole("button", {
+      name: "Fast mode, faster responses",
+    });
+
+    expect(speed.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(speed);
 
     expect(onServiceTierChange).toHaveBeenCalledWith("default");
   });

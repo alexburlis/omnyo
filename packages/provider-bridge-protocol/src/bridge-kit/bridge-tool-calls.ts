@@ -59,9 +59,11 @@ export function decodeBridgeJsonRpcResponse(
   if (isJsonRpcRequest(input)) return null;
 
   const error = jsonRpcErrorResponseSchema.safeParse(input);
+
   if (error.success) return error.data;
 
   const success = jsonRpcSuccessResponseSchema.safeParse(input);
+
   return success.success ? success.data : null;
 }
 
@@ -78,13 +80,17 @@ const IMAGE_DATA_URL = /^data:(.+);base64,(.+)$/s;
 
 function decodeImageDataUrl(imageUrl: string): BridgeToolCallImage | null {
   const match = IMAGE_DATA_URL.exec(imageUrl);
+
   if (match === null) {
     return null;
   }
+
   const [, mimeType, data] = match;
+
   if (data.length === 0) {
     return null;
   }
+
   return { data, mimeType };
 }
 
@@ -95,6 +101,7 @@ export function decodeToolCallResponsePayload(result: unknown): {
   isError: boolean;
 } {
   const parsed = toolCallResultSchema.safeParse(result);
+
   if (!parsed.success) {
     return {
       content: "Invalid tool call response",
@@ -107,28 +114,36 @@ export function decodeToolCallResponsePayload(result: unknown): {
   const texts: string[] = [];
   const contentBlocks: BridgeToolCallContent[] = [];
   const images: BridgeToolCallImage[] = [];
+
   for (const item of parsed.data.contentItems) {
     if (item.type === "inputText") {
       texts.push(item.text);
+
       if (item.text !== "") {
         contentBlocks.push({ type: "text", text: item.text });
       }
+
       continue;
     }
+
     const image = decodeImageDataUrl(item.imageUrl);
+
     if (image === null) {
       texts.push(item.imageUrl);
       contentBlocks.push({ type: "text", text: item.imageUrl });
       continue;
     }
+
     images.push(image);
     contentBlocks.push({ type: "image", ...image });
   }
 
   const text = texts.join("\n");
   const isError = !parsed.data.success;
+
   if (contentBlocks.length === 0) {
     const fallback = isError ? "Tool call failed" : "OK";
+
     return {
       content: fallback,
       contentBlocks: [{ type: "text", text: fallback }],
@@ -136,6 +151,7 @@ export function decodeToolCallResponsePayload(result: unknown): {
       isError,
     };
   }
+
   return {
     content: text,
     contentBlocks,
@@ -152,12 +168,16 @@ export function buildBridgeToolCallContent(result: {
   if (result.contentBlocks !== undefined) {
     return result.contentBlocks;
   }
+
   const blocks: BridgeToolCallContent[] = [];
+
   if (result.content !== "") {
     blocks.push({ type: "text", text: result.content });
   }
+
   for (const image of result.images ?? []) {
     blocks.push({ type: "image", data: image.data, mimeType: image.mimeType });
   }
+
   return blocks;
 }

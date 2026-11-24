@@ -35,6 +35,7 @@ describe("SecondaryPanelTabStrip touch sensor scoping", () => {
   it("installs dnd-kit's window touchmove listener only while the panel is open with tabs to reorder, and removes it on close", () => {
     const addSpy = vi.spyOn(window, "addEventListener");
     const removeSpy = vi.spyOn(window, "removeEventListener");
+
     const baseProps: SecondaryPanelTabStripProps = {
       activeTabId: "tab-0",
       tabs: makeTabs(2),

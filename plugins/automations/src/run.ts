@@ -1,12 +1,15 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import {
+  automationRunOwnsLatestRequest,
+  recoverAutomationAgentRun,
+} from "./agent-retry.js";
+import {
   closeAutomationRun,
-  disableAutomationsForDeletedThread,
+  disableAutomationsForTargetThread,
   getAutomation,
   listRunningAutomationRuns,
   listRunningAutomationRunsByThread,
-  markAutomationThread,
   setAutomationEnabled,
   setAutomationRunThread,
   type AutomationRow,
@@ -15,6 +18,7 @@ import {
 } from "./data.js";
 import { publishAutomationChange } from "./realtime.js";
 import { executeStoredScript, mapScriptResultToRun } from "./script-runner.js";
+import type { ScriptHostRouting } from "./script-host.js";
 import type { AutomationExecution } from "./rpc-types.js";
 import type {
   ProjectsSdk,
@@ -22,22 +26,37 @@ import type {
 } from "./working-directory.js";
 
 type RunFailureHandler = (error: unknown) => void;
+
 type AgentThreadsSdk = {
+  events: Pick<PluginApi["sdk"]["threads"]["events"], "list">;
   get(
-    args: Parameters<BbPluginApi["sdk"]["threads"]["get"]>[0],
+    args: Parameters<PluginApi["sdk"]["threads"]["get"]>[0],
   ): Promise<unknown>;
   send(
-    args: Parameters<BbPluginApi["sdk"]["threads"]["send"]>[0],
+    args: Parameters<PluginApi["sdk"]["threads"]["send"]>[0],
   ): Promise<unknown>;
   spawn(
-    args: Parameters<BbPluginApi["sdk"]["threads"]["spawn"]>[0],
+    args: Parameters<PluginApi["sdk"]["threads"]["spawn"]>[0],
   ): Promise<unknown>;
+  retry: PluginApi["sdk"]["threads"]["retry"];
 };
-export type AgentRunApi = Pick<BbPluginApi, "realtime" | "log"> & {
-  sdk: { threads: AgentThreadsSdk };
+
+type AgentInboxSdk = Pick<
+  PluginApi["sdk"]["experimental_inbox"],
+  "waits" | "cancelWait" | "registerWait"
+>;
+
+export type AgentRunApi = Pick<PluginApi, "realtime" | "log"> & {
+  sdk: { threads: AgentThreadsSdk; experimental_inbox: AgentInboxSdk };
 };
-export type ScriptRunApi = Pick<BbPluginApi, "realtime" | "log"> & {
+
+const TARGET_CONTINUATION_GRACE_MS = 60 * 60 * 1_000;
+
+const WAIT_FOR_MAX = 60;
+
+export type ScriptRunApi = Pick<PluginApi, "realtime" | "log"> & {
   sdk: { projects: ProjectsSdk };
+  server: Pick<PluginApi["server"], "loopbackBaseUrl">;
 };
 
 const sdkThreadSchema = z
@@ -55,6 +74,7 @@ const sdkThreadSchema = z
     ]),
   })
   .passthrough();
+
 type SdkThread = z.infer<typeof sdkThreadSchema>;
 
 const projectGoneErrorSchema = z
@@ -70,6 +90,7 @@ const threadGoneErrorSchema = z
 
 function isThreadGoneError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+
   return threadGoneErrorSchema.safeParse(error).success;
 }
 
@@ -79,6 +100,7 @@ export function errorMessage(error: unknown): string {
 
 function isProjectGoneError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+
   return projectGoneErrorSchema.safeParse(error).success;
 }
 
@@ -86,15 +108,24 @@ function renderAutomationDueMessage(args: {
   automationId: string;
   prompt: string;
 }): string {
-  return `[bb automation due:${args.automationId}]\n\n${args.prompt}`;
+  return `[omnyo automation due:${args.automationId}]\n\n${args.prompt}`;
 }
 
-function isThreadReusable(thread: SdkThread): boolean {
-  return (
-    thread.deletedAt === null &&
-    thread.archivedAt === null &&
-    (thread.status === "idle" || thread.status === "active")
-  );
+function unusableThreadReason(thread: SdkThread): string | null {
+  if (thread.deletedAt !== null) return "was deleted";
+
+  if (thread.archivedAt !== null) return "was archived";
+
+  switch (thread.status) {
+    case "idle":
+    case "active":
+    case "error":
+      return null;
+    case "pending":
+    case "starting":
+    case "stopping":
+      return `is ${thread.status}`;
+  }
 }
 
 interface AgentRunArgs {
@@ -102,23 +133,36 @@ interface AgentRunArgs {
   run: AutomationRunRow;
   execution: Extract<AutomationExecution, { mode: "agent" }>;
   onFailure: RunFailureHandler;
+  retryRun?: AutomationRunRow;
 }
 
 export async function executeAgentRun(
-  bb: AgentRunApi,
+  api: AgentRunApi,
   db: Db,
   args: AgentRunArgs,
 ): Promise<void> {
   try {
+    if (args.retryRun !== undefined) {
+      await recoverAutomationAgentRun(api, db, {
+        automation: args.automation,
+        run: args.run,
+        failedRun: args.retryRun,
+      });
+
+      return;
+    }
+
     if (args.automation.targetThreadId !== null) {
-      await reuseTargetThreadForRun(bb, db, {
+      await reuseTargetThreadForRun(api, db, {
         ...args,
         targetThreadId: args.automation.targetThreadId,
       });
+
       return;
     }
+
     const thread = sdkThreadSchema.parse(
-      await bb.sdk.threads.spawn({
+      await api.sdk.threads.spawn({
         projectId: args.automation.projectId,
         environment: args.execution.environment,
         prompt: renderAutomationDueMessage({
@@ -126,6 +170,10 @@ export async function executeAgentRun(
           prompt: args.execution.prompt,
         }),
         title: args.automation.name,
+        pluginMetadata: {
+          automationId: args.automation.id,
+          runId: args.run.id,
+        },
         providerId: args.execution.providerId,
         model: args.execution.model,
         reasoningLevel: args.execution.reasoningLevel,
@@ -135,17 +183,12 @@ export async function executeAgentRun(
         permissionMode: args.execution.permissionMode,
       }),
     );
+
     setAutomationRunThread(db, { runId: args.run.id, threadId: thread.id });
-    markAutomationThread(db, {
-      automationId: args.automation.id,
-      runId: args.run.id,
-      threadId: thread.id,
-      now: Date.now(),
-    });
   } catch (error) {
-    settleDispatchFailure(bb, db, args, error);
+    settleDispatchFailure(api, db, args, error);
   } finally {
-    publishAutomationChange(bb, args.automation.projectId, [
+    publishAutomationChange(api, args.automation.projectId, [
       "automations-changed",
       "automation-runs-changed",
     ]);
@@ -153,12 +196,13 @@ export async function executeAgentRun(
 }
 
 function settleDispatchFailure(
-  bb: Pick<BbPluginApi, "log">,
+  api: Pick<PluginApi, "log">,
   db: Db,
   args: AgentRunArgs,
   error: unknown,
 ): void {
   const message = errorMessage(error);
+
   if (isProjectGoneError(error)) {
     setAutomationEnabled(db, {
       projectId: args.automation.projectId,
@@ -176,35 +220,41 @@ function settleDispatchFailure(
   } else {
     args.onFailure(error);
   }
-  bb.log.error(
+
+  api.log.error(
     `Failed to dispatch automation ${args.automation.id}: ${message}`,
   );
 }
 
 async function reuseTargetThreadForRun(
-  bb: AgentRunApi,
+  api: AgentRunApi,
   db: Db,
   args: AgentRunArgs & { targetThreadId: string },
 ): Promise<void> {
   let thread: SdkThread;
+
   try {
     thread = sdkThreadSchema.parse(
-      await bb.sdk.threads.get({ threadId: args.targetThreadId }),
+      await api.sdk.threads.get({ threadId: args.targetThreadId }),
     );
   } catch (error) {
     if (!isThreadGoneError(error)) throw error;
-    closeRunForUnusableTargetThread(bb, db, {
+    closeRunForUnusableTargetThread(api, db, {
       ...args,
-      detail: errorMessage(error),
+      reason: "no longer exists",
     });
+
     return;
   }
 
-  if (!isThreadReusable(thread)) {
-    closeRunForUnusableTargetThread(bb, db, {
+  const unusableReason = unusableThreadReason(thread);
+
+  if (unusableReason !== null) {
+    closeRunForUnusableTargetThread(api, db, {
       ...args,
-      detail: "missing, deleted, archived, or not runnable",
+      reason: unusableReason,
     });
+
     return;
   }
 
@@ -212,13 +262,7 @@ async function reuseTargetThreadForRun(
     runId: args.run.id,
     threadId: args.targetThreadId,
   });
-  markAutomationThread(db, {
-    automationId: args.automation.id,
-    runId: args.run.id,
-    threadId: args.targetThreadId,
-    now: Date.now(),
-  });
-  await bb.sdk.threads.send({
+  await api.sdk.threads.send({
     threadId: args.targetThreadId,
     mode: "steer-if-active",
     input: [
@@ -233,31 +277,78 @@ async function reuseTargetThreadForRun(
     ],
     permissionMode: args.execution.permissionMode,
   });
+  await renewTargetContinuation(api, db, {
+    automationId: args.automation.id,
+    name: args.automation.name,
+    targetThreadId: args.targetThreadId,
+  });
+}
+
+async function renewTargetContinuation(
+  api: AgentRunApi,
+  db: Db,
+  args: { automationId: string; name: string; targetThreadId: string },
+): Promise<void> {
+  const key = `automation-run:${args.automationId}`;
+  const nextRunAt = getAutomation(db, args.automationId)?.nextRunAt ?? null;
+  const label = `${args.name} runs again`;
+
+  try {
+    const { waits } = await api.sdk.experimental_inbox.waits({
+      threadId: args.targetThreadId,
+    });
+
+    for (const wait of waits)
+      if (wait.key === key)
+        await api.sdk.experimental_inbox.cancelWait({
+          threadId: args.targetThreadId,
+          waitId: wait.id,
+        });
+
+    if (nextRunAt === null) return;
+
+    await api.sdk.experimental_inbox.registerWait({
+      threadId: args.targetThreadId,
+      wait: {
+        key,
+        for:
+          label.length <= WAIT_FOR_MAX
+            ? label
+            : `${label.slice(0, WAIT_FOR_MAX - 1)}…`,
+        events: [key],
+        by: nextRunAt + TARGET_CONTINUATION_GRACE_MS,
+      },
+    });
+  } catch (error) {
+    api.log.warn(
+      `Automation ${args.automationId} kept no wait on ${args.targetThreadId}: ${errorMessage(error)}`,
+    );
+  }
 }
 
 function closeRunForUnusableTargetThread(
-  bb: Pick<BbPluginApi, "log">,
+  api: Pick<PluginApi, "log">,
   db: Db,
-  args: AgentRunArgs & { targetThreadId: string; detail: string },
+  args: AgentRunArgs & { targetThreadId: string; reason: string },
 ): void {
   const now = Date.now();
-  disableAutomationsForDeletedThread(db, {
+  const error = `Target thread ${args.targetThreadId} ${args.reason}`;
+  disableAutomationsForTargetThread(db, {
     threadId: args.targetThreadId,
+    error,
     now,
   });
   closeAutomationRun(db, {
     runId: args.run.id,
     status: "failed",
-    error: `Target thread ${args.targetThreadId} is unavailable: ${args.detail}`,
+    error,
     now,
   });
-  bb.log.error(
-    `Automation ${args.automation.id} target thread ${args.targetThreadId} is unavailable: ${args.detail}`,
-  );
+  api.log.error(`Automation ${args.automation.id} paused: ${error}`);
 }
 
 export async function executeScriptRun(
-  bb: ScriptRunApi,
+  api: ScriptRunApi,
   db: Db,
   args: {
     pluginDataDir: string;
@@ -265,12 +356,13 @@ export async function executeScriptRun(
     run: AutomationRunRow;
     execution: Extract<AutomationExecution, { mode: "script" }>;
     onFailure: RunFailureHandler;
-    serverUrl: string;
     resolveWorkingDirectory: ScriptWorkingDirectoryResolver;
+    scriptHostRouting?: ScriptHostRouting;
   },
 ): Promise<void> {
   try {
     const scriptFile = args.execution.scriptFile;
+
     if (scriptFile === undefined) {
       closeAutomationRun(db, {
         runId: args.run.id,
@@ -278,18 +370,22 @@ export async function executeScriptRun(
         error: "Script automation is missing a stored script file",
         now: Date.now(),
       });
+
       return;
     }
+
     const workingDir = await args.resolveWorkingDirectory(
       args.automation.projectId,
       args.execution.workingDirectory,
     );
+
     if (workingDir === null) {
       throw new Error(
-        `Project ${args.automation.projectId} has no source on the bb server host`,
+        `Project ${args.automation.projectId} has no source on the Omnyo server host`,
       );
     }
-    const result = await executeStoredScript({
+
+    const runArgs = {
       pluginDataDir: args.pluginDataDir,
       automationId: args.automation.id,
       runId: args.run.id,
@@ -298,9 +394,17 @@ export async function executeScriptRun(
       interpreter: args.execution.interpreter,
       timeoutMs: args.execution.timeoutMs,
       env: args.execution.env,
-      serverUrl: args.serverUrl,
+      serverUrl: api.server.loopbackBaseUrl,
       workingDir,
-    });
+    };
+
+    const result = args.scriptHostRouting
+      ? await args.scriptHostRouting.execute(
+          runArgs,
+          args.execution.workingDirectory,
+        )
+      : await executeStoredScript(runArgs);
+
     const mapped = mapScriptResultToRun(result);
     closeAutomationRun(db, {
       runId: args.run.id,
@@ -312,40 +416,88 @@ export async function executeScriptRun(
       now: Date.now(),
     });
   } catch (error) {
+    if (isScriptHostOffline(error)) {
+      closeAutomationRun(db, {
+        runId: args.run.id,
+        status: "skipped",
+        skipReason: `script host offline: ${errorMessage(error)}`,
+        now: Date.now(),
+      });
+      api.log.warn(
+        `Skipped automation ${args.automation.id}: its script host is offline`,
+      );
+
+      return;
+    }
+
     args.onFailure(error);
-    bb.log.error(
+    api.log.error(
       `Failed to run script for automation ${args.automation.id}: ${errorMessage(error)}`,
     );
   } finally {
-    publishAutomationChange(bb, args.automation.projectId, [
+    publishAutomationChange(api, args.automation.projectId, [
       "automations-changed",
       "automation-runs-changed",
     ]);
   }
 }
 
-export function closeAutomationRunForSettledThread(
-  bb: Pick<BbPluginApi, "realtime">,
+function isScriptHostOffline(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const body: unknown = Reflect.get(error, "body");
+
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    ["host_unavailable", "host_disconnected"].includes(
+      String(Reflect.get(body, "code")),
+    )
+  );
+}
+
+export async function closeAutomationRunForSettledThread(
+  api: AgentRunApi,
   db: Db,
-  args: { threadId: string; status: "idle" | "failed"; error?: string | null },
-): void {
+  args:
+    | { threadId: string; status: "idle" }
+    | {
+        threadId: string;
+        status: "failed";
+        error: string | null;
+        transientFailure: boolean;
+      },
+): Promise<void> {
   const runs = listRunningAutomationRunsByThread(db, args.threadId);
   const now = Date.now();
   const changedProjects = new Set<string>();
+
   for (const run of runs) {
+    const ownsRequest = await automationRunOwnsLatestRequest(api, run);
+
     const closed = closeAutomationRun(db, {
       runId: run.id,
-      status: args.status === "idle" ? "succeeded" : "failed",
+      status: !ownsRequest
+        ? "skipped"
+        : args.status === "idle"
+          ? "succeeded"
+          : "failed",
+      skipReason: ownsRequest
+        ? null
+        : "superseded: the original thread has a different turn request",
       error: args.status === "idle" ? null : (args.error ?? "Turn failed"),
+      transientFailure: args.status === "failed" && args.transientFailure,
       threadId: args.threadId,
       now,
     });
+
     if (!closed) continue;
     const automation = getAutomation(db, closed.automationId);
+
     if (automation) changedProjects.add(automation.projectId);
   }
+
   for (const projectId of changedProjects) {
-    publishAutomationChange(bb, projectId, [
+    publishAutomationChange(api, projectId, [
       "automations-changed",
       "automation-runs-changed",
     ]);
@@ -353,38 +505,41 @@ export function closeAutomationRunForSettledThread(
 }
 
 type ReconcileOutcome =
-  | { status: "succeeded" }
-  | { status: "failed"; error: string }
+  | { status: "succeeded"; skipReason: string }
+  | { status: "failed"; error: string; transientFailure: true }
   | { status: "skipped"; skipReason: string };
 
 export async function reconcileRunningAutomationRuns(
-  bb: AgentRunApi,
+  api: AgentRunApi,
   db: Db,
 ): Promise<void> {
   const changedProjects = new Set<string>();
+
   for (const run of listRunningAutomationRuns(db)) {
-    const outcome = await reconcileOutcome(bb, run);
+    if (run.runMode === "workflow") continue;
+    const outcome = await reconcileOutcome(api, run);
+
     if (outcome === null) continue;
+
     const closed = closeAutomationRun(db, {
       runId: run.id,
       ...outcome,
       now: Date.now(),
     });
+
     if (!closed) continue;
     const automation = getAutomation(db, closed.automationId);
+
     if (automation) changedProjects.add(automation.projectId);
-    bb.log.info(
+    api.log.info(
       `Automation run ${run.id} settled as ${outcome.status} on startup: ${
-        outcome.status === "succeeded"
-          ? "its thread is idle"
-          : outcome.status === "failed"
-            ? outcome.error
-            : outcome.skipReason
+        outcome.status === "failed" ? outcome.error : outcome.skipReason
       }`,
     );
   }
+
   for (const projectId of changedProjects) {
-    publishAutomationChange(bb, projectId, [
+    publishAutomationChange(api, projectId, [
       "automations-changed",
       "automation-runs-changed",
     ]);
@@ -392,7 +547,7 @@ export async function reconcileRunningAutomationRuns(
 }
 
 async function reconcileOutcome(
-  bb: AgentRunApi,
+  api: AgentRunApi,
   run: AutomationRunRow,
 ): Promise<ReconcileOutcome | null> {
   if (run.runMode === "script") {
@@ -402,6 +557,7 @@ async function reconcileOutcome(
         "interrupted: the server restarted while the script was running",
     };
   }
+
   if (run.threadId === null) {
     return {
       status: "skipped",
@@ -409,10 +565,12 @@ async function reconcileOutcome(
         "interrupted: the server restarted before a thread was attached",
     };
   }
+
   let thread: SdkThread;
+
   try {
     thread = sdkThreadSchema.parse(
-      await bb.sdk.threads.get({ threadId: run.threadId }),
+      await api.sdk.threads.get({ threadId: run.threadId }),
     );
   } catch (error) {
     if (isThreadGoneError(error)) {
@@ -421,11 +579,14 @@ async function reconcileOutcome(
         skipReason: `interrupted: thread ${run.threadId} no longer exists`,
       };
     }
-    bb.log.warn(
+
+    api.log.warn(
       `Could not check thread ${run.threadId} for running automation run ${run.id}; leaving it running: ${errorMessage(error)}`,
     );
+
     return null;
   }
+
   if (thread.deletedAt !== null || thread.archivedAt !== null) {
     return {
       status: "skipped",
@@ -434,13 +595,27 @@ async function reconcileOutcome(
       }`,
     };
   }
+
+  if (!(await automationRunOwnsLatestRequest(api, run))) {
+    return {
+      status: "skipped",
+      skipReason:
+        "superseded: the original thread has a different turn request",
+    };
+  }
+
   switch (thread.status) {
     case "idle":
-      return { status: "succeeded" };
+      return {
+        status: "succeeded",
+        skipReason:
+          "interrupted: the server restarted before the agent run was observed to finish",
+      };
     case "error":
       return {
         status: "failed",
         error: "Turn failed while the automations plugin was not running",
+        transientFailure: true,
       };
     case "pending":
     case "starting":
@@ -451,15 +626,17 @@ async function reconcileOutcome(
 }
 
 export function disableAutomationsForDeletedThreadEvent(
-  bb: Pick<BbPluginApi, "realtime">,
+  api: Pick<PluginApi, "realtime">,
   db: Db,
   threadId: string,
 ): void {
-  const disabled = disableAutomationsForDeletedThread(db, {
+  const disabled = disableAutomationsForTargetThread(db, {
     threadId,
+    error: `Target thread ${threadId} was deleted`,
     now: Date.now(),
   });
+
   for (const automation of disabled) {
-    publishAutomationChange(bb, automation.projectId, "automations-changed");
+    publishAutomationChange(api, automation.projectId, "automations-changed");
   }
 }

@@ -2,9 +2,9 @@ import type {
   ComposerCustomization,
   ComposerDraftReplacement,
   ComposerDraftSnapshot,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 
-export const CREATE_AUTOMATION_PROMPT = "Create a new bb automation to ";
+export const CREATE_AUTOMATION_PROMPT = "Create a new Omnyo automation to ";
 
 export function withCreateAutomationPrompt(
   draft: ComposerDraftSnapshot,
@@ -12,12 +12,16 @@ export function withCreateAutomationPrompt(
   const leadingCommand = draft.mentions.find(
     (mention) => mention.kind === "command" && mention.from === 0,
   );
+
   const rest = draft.text.slice(leadingCommand?.to ?? 0).trimStart();
+
   const body = rest.startsWith(CREATE_AUTOMATION_PROMPT)
     ? rest.slice(CREATE_AUTOMATION_PROMPT.length)
     : rest;
+
   const removed = draft.text.length - body.length;
   const shift = CREATE_AUTOMATION_PROMPT.length - removed;
+
   return {
     text: `${CREATE_AUTOMATION_PROMPT}${body}`,
     mentions: draft.mentions

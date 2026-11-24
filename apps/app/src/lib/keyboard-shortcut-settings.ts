@@ -12,9 +12,10 @@ import {
   type AppKeybindingOverrides,
   type AppShortcut,
   type AppShortcutInput,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 const MODIFIER_KEYS = new Set(["Alt", "Control", "Meta", "OS", "Shift"]);
+
 const QUESTION_COMMANDS = new Set<KeyboardCommandId>(
   QUESTION_SELECT_APP_COMMAND_IDS,
 );
@@ -30,12 +31,16 @@ export function appShortcutFromInput(
   ) {
     return null;
   }
+
   const normalizedKey = normalizeAppShortcutInputKey(input);
+
   if (normalizedKey.length === 0 || normalizedKey.length > 32) {
     return null;
   }
+
   const useMetaForMod = isMacKeyboardPlatform(platform);
   const mod = useMetaForMod ? input.metaKey : input.ctrlKey;
+
   return {
     key:
       normalizedKey.length === 1 ? normalizedKey.toLowerCase() : normalizedKey,
@@ -75,6 +80,33 @@ export function canAssignAppShortcut(
   );
 }
 
+export type RecordedShortcut =
+  | { kind: "cancel" }
+  | { kind: "error"; message: string }
+  | { kind: "shortcut"; shortcut: AppShortcut };
+
+export function readRecordedShortcut(
+  input: AppShortcutInput,
+  command: KeyboardCommandId,
+  platform: string,
+): RecordedShortcut {
+  if (input.key === "Escape") return { kind: "cancel" };
+  const shortcut = appShortcutFromInput(input, platform);
+
+  if (shortcut === null) {
+    return { kind: "error", message: "Press a non-modifier key." };
+  }
+
+  if (!canAssignAppShortcut(command, shortcut)) {
+    return {
+      kind: "error",
+      message: "Use Command, Control, or Alt with a key.",
+    };
+  }
+
+  return { kind: "shortcut", shortcut };
+}
+
 export function getCommandShortcut(
   defaults: AppDefaultKeybindings,
   overrides: AppKeybindingOverrides,
@@ -84,8 +116,10 @@ export function getCommandShortcut(
 ): AppShortcut | null {
   let defaultShortcut: AppShortcut | null = null;
   let available = false;
+
   for (let index = defaults.length - 1; index >= 0; index -= 1) {
     const binding = defaults[index];
+
     if (
       binding?.command === command &&
       isAppKeybindingAvailableForClient(binding, { isDesktop, platform })
@@ -95,12 +129,15 @@ export function getCommandShortcut(
       break;
     }
   }
+
   if (!available) return null;
+
   const override = findAppKeybindingOverride(
     overrides,
     command,
     keyboardPlatform(platform),
   );
+
   return override === undefined ? defaultShortcut : override.shortcut;
 }
 
@@ -124,6 +161,7 @@ export function setCommandShortcutOverride(
   platform: string,
 ): AppKeybindingOverrides {
   const scope = keyboardPlatform(platform);
+
   return [
     ...overrides.filter(
       (override) => override.command !== command || override.platform !== scope,
@@ -138,16 +176,20 @@ export function resetCommandShortcutOverride(
   platform: string,
 ): AppKeybindingOverrides {
   const scope = keyboardPlatform(platform);
+
   const remaining = overrides.filter(
     (override) =>
       override.command !== command ||
       (override.platform !== undefined && override.platform !== scope),
   );
+
   const general = overrides.find(
     (override) =>
       override.command === command && override.platform === undefined,
   );
+
   if (general === undefined) return remaining;
+
   return [
     ...remaining,
     ...keyboardPlatformSchema.options
@@ -177,10 +219,13 @@ export function getShortcutConflicts(
     isDesktop,
     platform,
   );
+
   if (shortcut === null) return [];
+
   return [...new Set(defaults.map((binding) => binding.command))].filter(
     (candidate) => {
       if (candidate === command) return false;
+
       const candidateShortcut = getCommandShortcut(
         defaults,
         overrides,
@@ -188,6 +233,7 @@ export function getShortcutConflicts(
         isDesktop,
         platform,
       );
+
       return (
         candidateShortcut !== null &&
         shortcutsConflict(shortcut, candidateShortcut, platform)

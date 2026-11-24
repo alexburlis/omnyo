@@ -1,7 +1,7 @@
-import type { JsonValue } from "@bb/domain";
-import type { HostDaemonOnlineRpcRequestMessage } from "@bb/host-daemon-contract";
-import type { PluginProviderDeclaration } from "@get-bb/plugin-sdk";
-import type { ExperimentalNativeRootsResolveAnswer } from "@get-bb/plugin-sdk/host";
+import type { JsonValue } from "@omnyo/domain";
+import type { HostDaemonOnlineRpcRequestMessage } from "@omnyo/host-daemon-contract";
+import type { PluginProviderDeclaration } from "@omnyo/plugin-sdk";
+import type { ExperimentalNativeRootsResolveAnswer } from "@omnyo/plugin-sdk/host";
 import { describe, expect, it, vi } from "vitest";
 import { COMMAND_TIMEOUT_MS } from "../../../src/constants.js";
 import { ApiError } from "../../../src/errors.js";
@@ -77,18 +77,23 @@ function registerResolverHost(
   hostId: string,
 ): ResolverStub {
   const { host, session } = seedHostSession(harness.deps, { id: hostId });
+
   const stub: ResolverStub = {
     calls: [],
     answer: { skills: [{ path: USER_SKILLS.path, origin: "user" }] },
     holdUntil: null,
   };
+
   const answer = (): HostRpcHandlerResult => {
     if (stub.answer instanceof Error) throw stub.answer;
+
     if ("raw" in stub.answer) {
       return { ok: true, result: { output: stub.answer.raw } };
     }
+
     return { ok: true, result: { output: stub.answer } };
   };
+
   registerHostRpcResponder(harness, {
     hostId: host.id,
     sessionId: session.id,
@@ -99,10 +104,13 @@ function registerResolverHost(
       ) {
         throw new Error(`Unexpected RPC ${request.command.type}`);
       }
+
       stub.calls.push(request);
+
       return stub.holdUntil === null ? answer() : stub.holdUntil.then(answer);
     },
   });
+
   return stub;
 }
 
@@ -111,7 +119,9 @@ function registration(
   id: string,
 ): ProviderRegistration {
   const found = harness.deps.providerRegistry.get(id);
+
   if (found === null) throw new Error(`provider ${id} not registered`);
+
   return found;
 }
 
@@ -135,6 +145,7 @@ describe("resolveProviderNativeRootSet", () => {
           cwd: "/work/one",
           timeoutMs: 4_500,
         });
+
         expect(first).toEqual({
           skills: {
             user: [],
@@ -222,6 +233,7 @@ describe("resolveProviderNativeRootSet", () => {
         );
         const stub = registerResolverHost(harness, "host-a");
         const reg = registration(harness, "resolving");
+
         const resolve = () =>
           resolveProviderNativeRootSet(harness.deps, {
             registration: reg,
@@ -229,7 +241,9 @@ describe("resolveProviderNativeRootSet", () => {
             cwd: "/work/one",
             timeoutMs: COMMAND_TIMEOUT_MS,
           });
+
         let land = (): void => {};
+
         stub.holdUntil = new Promise<void>((settle) => {
           land = settle;
         });
@@ -281,6 +295,7 @@ describe("resolveProviderNativeRootSet", () => {
       );
 
       expect(stub.calls).toHaveLength(1);
+
       for (const result of results) {
         expect(result.resolved.skills).toEqual([USER_SKILLS]);
       }
@@ -295,6 +310,7 @@ describe("resolveProviderNativeRootSet", () => {
       );
       const stub = registerResolverHost(harness, "host-a");
       const reg = registration(harness, "resolving");
+
       const resolve = () =>
         resolveProviderNativeRootSet(harness.deps, {
           registration: reg,
@@ -319,6 +335,7 @@ describe("resolveProviderNativeRootSet", () => {
         info: { ...reg.info, id: "resolving-twin" },
         pluginId: PLUGIN_ID,
       });
+
       await resolve();
       expect(stub.calls).toHaveLength(3);
       other.dispose();
@@ -342,6 +359,7 @@ describe("resolveProviderNativeRootSet", () => {
         const reg = registration(harness, "resolving");
         const warn = vi.fn();
         const deps = { ...harness.deps, logger: { ...testLogger, warn } };
+
         const resolve = (cwd: string) =>
           resolveProviderNativeRootSet(deps, {
             registration: reg,
@@ -393,6 +411,7 @@ describe("resolveProviderNativeRootSet", () => {
         experimental_nativeSkillRoots: { user: [".declared/skills"] },
       }),
     };
+
     await withTestHarness(
       { extraProviders: [RESOLVING, declared] },
       async (harness) => {
@@ -406,9 +425,12 @@ describe("resolveProviderNativeRootSet", () => {
           cwd: "/work/one",
           timeoutMs: COMMAND_TIMEOUT_MS,
         });
+
         expect(withoutArtifact.resolved).toEqual({ skills: [], commands: [] });
         expect(warn).toHaveBeenCalledTimes(1);
-        expect(warn.mock.calls[0]?.[1]).toContain("no live bb.host artifact");
+        expect(warn.mock.calls[0]?.[1]).toContain(
+          "no live omnyo.host artifact",
+        );
 
         const declaredOnly = await resolveProviderNativeRootSet(deps, {
           registration: registration(harness, "declared"),
@@ -416,6 +438,7 @@ describe("resolveProviderNativeRootSet", () => {
           cwd: "/work/one",
           timeoutMs: COMMAND_TIMEOUT_MS,
         });
+
         expect(declaredOnly).toEqual({
           skills: {
             user: [
@@ -451,11 +474,13 @@ describe("createProviderListingBudget", () => {
     expect(budget.remainingMs()).toBe(PROVIDER_LISTING_BUDGET_FLOOR_MS);
     clock += 1;
     let thrown: unknown;
+
     try {
       budget.remainingMs();
     } catch (error) {
       thrown = error;
     }
+
     expect(thrown).toBeInstanceOf(ApiError);
     expect(thrown).toMatchObject({
       status: 504,

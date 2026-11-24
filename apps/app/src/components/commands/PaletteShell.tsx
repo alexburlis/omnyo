@@ -4,10 +4,10 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { useComposedRefs } from "@radix-ui/react-compose-refs";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { useScrollOverflowState } from "@/components/thread/timeline/useScrollOverflowState";
 import { PaletteModeChip, type PaletteModeChipProps } from "./PaletteModeChip";
 import { PALETTE_INPUT_CLASS, PaletteInputBand } from "./PaletteInputBand";
@@ -61,10 +61,13 @@ export function PaletteShell({
 }: PaletteShellProps) {
   const isCompact = useIsCompactViewport();
   const inputDescriptionId = useId();
+
   const overflow = useScrollOverflowState<HTMLDivElement>({
     measureOverflow: true,
   });
+
   const composedListRef = useComposedRefs(listRef, overflow.scrollRef);
+
   const resultsMask =
     overflow.aboveOverflow && overflow.belowOverflow
       ? "linear-gradient(to bottom, transparent 0, black 1.5rem, black calc(100% - 1.5rem), transparent 100%)"

@@ -8,26 +8,53 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { makeProviderInfo } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, expect, it, vi } from "vitest";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { ModelReasoningPicker } from "./ModelReasoningPicker";
+import type { ModelPickerOption } from "./model-picker-option";
+
+const MEDIUM = [{ value: "medium", label: "Medium" }];
+
+function modelRow(value: string, label: string): ModelPickerOption {
+  return {
+    value,
+    label,
+    reasoningOptions: MEDIUM,
+    defaultReasoningLevel: "medium",
+    serviceTierOptions: [],
+  };
+}
 
 const menu = vi.hoisted(() => ({ imports: 0, release: () => {} }));
+
 vi.mock("./ModelReasoningMenu", async (importOriginal) => {
   menu.imports += 1;
   await new Promise<void>((resolve) => {
     menu.release = resolve;
   });
+
   return importOriginal();
 });
 
 afterEach(cleanup);
 
 it("keeps search typing and keyboard selection across the first menu download", async () => {
-  const onModelChange = vi.fn();
+  const onSelectionChange = vi.fn(() => true);
   const { wrapper } = createQueryClientTestHarness();
+
+  const modelOptions = [
+    modelRow("gpt-5.5", "GPT-5.5"),
+    modelRow("gpt-5.2", "GPT-5.2"),
+    modelRow("gpt-4.1", "GPT-4.1"),
+    modelRow("o3", "o3"),
+    modelRow("o4-mini", "o4-mini"),
+    modelRow("sonnet-in-codex", "Sonnet"),
+  ];
+
   render(
     <ModelReasoningPicker
+      providers={[makeProviderInfo({ id: "codex", displayName: "Codex" })]}
       providerOptions={[
         { value: "codex", label: "Codex", brandPrefix: "GPT-" },
       ]}
@@ -35,21 +62,17 @@ it("keeps search typing and keyboard selection across the first menu download", 
       onSelectedProviderChange={() => {}}
       hasMultipleProviders={false}
       modelValue="gpt-5.5"
-      modelOptions={[
-        { value: "gpt-5.5", label: "GPT-5.5" },
-        { value: "gpt-5.2", label: "GPT-5.2" },
-        { value: "gpt-4.1", label: "GPT-4.1" },
-        { value: "o3", label: "o3" },
-        { value: "o4-mini", label: "o4-mini" },
-        { value: "sonnet-in-codex", label: "Sonnet" },
-      ]}
+      modelOptions={modelOptions}
       moreModelOptions={[]}
+      catalogModelOptions={modelOptions}
+      modelCatalogIsVerified
       modelIsLoading={false}
       modelLoadError={null}
-      onModelChange={onModelChange}
+      onModelChange={() => {}}
       reasoningValue="medium"
-      reasoningOptions={[{ value: "medium", label: "Medium" }]}
+      reasoningOptions={MEDIUM}
       onReasoningChange={() => {}}
+      onSelectionChange={onSelectionChange}
       serviceTierValue={undefined}
       serviceTierOptions={[]}
       onServiceTierChange={() => {}}
@@ -78,5 +101,9 @@ it("keeps search typing and keyboard selection across the first menu download", 
   expect(search).toHaveProperty("value", "o4m");
   expect(document.activeElement).toBe(search);
   fireEvent.keyDown(search, { key: "Enter" });
-  expect(onModelChange).toHaveBeenCalledWith("o4-mini");
+  expect(onSelectionChange).toHaveBeenCalledExactlyOnceWith({
+    providerId: "codex",
+    model: "o4-mini",
+    reasoningLevel: "medium",
+  });
 });

@@ -1,16 +1,20 @@
 import type {
-  BbPluginApi,
+  PluginApi,
   MessageDispatchHookContext,
   PluginAgentConfigurationContext,
   PluginThreadEventPayloads,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 
 type HostResponse = Awaited<
-  ReturnType<BbPluginApi["sdk"]["hosts"]["list"]>
+  ReturnType<PluginApi["sdk"]["hosts"]["list"]>
 >[number];
+
 type ThreadResponse = PluginThreadEventPayloads["thread.created"]["thread"];
+
 type QueueEntry = PluginThreadEventPayloads["message.queued"]["entry"];
+
 type TurnFailedEvent = PluginThreadEventPayloads["turn.failed"];
+
 type PluginAgentConfigurationContextOverrides = {
   pluginMetadata?: PluginAgentConfigurationContext["pluginMetadata"];
   thread?: Partial<PluginAgentConfigurationContext["thread"]>;
@@ -27,6 +31,7 @@ type PluginAgentConfigurationContextOverrides = {
   };
   origin?: Partial<PluginAgentConfigurationContext["origin"]>;
 };
+
 type MessageDispatchHookContextOverrides = Omit<
   Partial<MessageDispatchHookContext>,
   | "thread"
@@ -55,7 +60,7 @@ type MessageDispatchHookContextOverrides = Omit<
 };
 
 /**
- * A complete, deterministic host response for faking `bb.sdk.hosts.list()`
+ * A complete, deterministic host response for faking `api.sdk.hosts.list()`
  * and environment-provider contexts. Override only the fields the test cares
  * about. If the contract grows a required field, this builder fails
  * typecheck — update the default here.
@@ -77,8 +82,10 @@ export function makeHostResponse(
       teardown: null,
     },
     maxPermissionMode: "full",
+    availability: "available",
     lastSeenAt: null,
     lastRejectedProtocolVersion: null,
+    runtimeVersion: null,
     createdAt: 0,
     updatedAt: 0,
     ...overrides,
@@ -102,6 +109,7 @@ export function makeThreadResponse(
     title: null,
     titleFallback: null,
     sectionId: null,
+    groupId: null,
     status: "idle",
     parentThreadId: null,
     lifecycleOwnerThreadId: null,
@@ -109,18 +117,24 @@ export function makeThreadResponse(
     originKind: null,
     originPluginId: null,
     visibility: "visible",
+    pluginHome: false,
+    quiet: false,
     archivedAt: null,
     pinnedAt: null,
+    shelvedAt: null,
     deletedAt: null,
     lastReadAt: null,
     latestAttentionAt: 0,
+    lastMessageAt: null,
     createdAt: 0,
     updatedAt: 0,
     runtime: { displayStatus: "idle" },
+    work: null,
     activeBackgroundAgentCount: 0,
     canRestoreEnvironment: false,
     canSpawnChild: true,
     queuedMessageCount: 0,
+    experimental_maintenance: null,
     ...overrides,
   };
 }
@@ -141,6 +155,7 @@ export function makePluginAgentConfigurationContext(
       title: null,
       parentThreadId: null,
       sourceThreadId: null,
+      experimental_visibility: "visible",
     },
     project: {
       id: "project-test",
@@ -163,6 +178,7 @@ export function makePluginAgentConfigurationContext(
     },
     origin: { kind: null, pluginId: null },
   };
+
   return {
     pluginMetadata: overrides.pluginMetadata ?? context.pluginMetadata,
     thread: { ...context.thread, ...overrides.thread },
@@ -227,6 +243,7 @@ export function makeMessageDispatchHookContext(
     parentThreadId: null,
     environmentIntent: null,
   };
+
   const environmentDefaults: NonNullable<
     MessageDispatchHookContext["environment"]
   > = {
@@ -252,14 +269,17 @@ export function makeMessageDispatchHookContext(
     createdAt: 0,
     updatedAt: 0,
   };
+
   const hostDefaults = makeHostResponse();
   const project = { ...context.project, ...overrides.project };
+
   const host =
     overrides.host === undefined
       ? context.host
       : overrides.host === null
         ? null
         : { ...hostDefaults, ...overrides.host };
+
   const environment =
     overrides.environment === undefined
       ? context.environment
@@ -271,12 +291,14 @@ export function makeMessageDispatchHookContext(
             hostId: host?.id ?? environmentDefaults.hostId,
             ...overrides.environment,
           };
+
   const thread = {
     ...context.thread,
     projectId: project.id,
     environmentId: environment?.id ?? null,
     ...overrides.thread,
   };
+
   return {
     ...context,
     ...overrides,

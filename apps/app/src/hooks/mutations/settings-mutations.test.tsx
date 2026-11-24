@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 
 import { useQuery } from "@tanstack/react-query";
-import { createDeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { SystemConfigResponse } from "@bb/server-contract";
+import type { SystemConfigResponse } from "@omnyo/server-contract";
 import {
   defaultAppSettings,
   type AppKeybindingOverrides,
   type AppKeybindings,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   modelCatalogCacheKey,
@@ -75,6 +75,7 @@ describe("general settings mutation", () => {
     const { queryClient, wrapper } = createQueryClientTestHarness();
     const configKey = systemConfigQueryKey();
     const timelineKey = threadTimelineQueryKey("thread-1");
+
     const summaryKey = threadTimelineTurnSummaryDetailsQueryKey({
       itemId: null,
       threadId: "thread-1",
@@ -82,22 +83,27 @@ describe("general settings mutation", () => {
       sourceSeqStart: 1,
       sourceSeqEnd: 2,
     });
+
     const executionOptionsKey = systemExecutionOptionsQueryKey({
       environmentId: null,
       hostId: "host-1",
       providerId: "claude-code",
     });
+
     const providersKey = systemProvidersQueryKey();
     queryClient.setQueryData(configKey, systemConfig());
     queryClient.setQueryData(timelineKey, {});
     queryClient.setQueryData(summaryKey, {});
     queryClient.setQueryData(executionOptionsKey, { models: ["cached"] });
     queryClient.setQueryData(providersKey, [{ id: "claude-code" }]);
+
     const nextSettings = {
       ...defaultAppSettings,
       showDiagnosticEvents: true,
     };
+
     vi.mocked(sdk.system.updateGeneralSettings).mockResolvedValue(nextSettings);
+
     const { result } = renderHook(() => useUpdateGeneralSettings(), {
       wrapper,
     });
@@ -122,10 +128,12 @@ describe("general settings mutation", () => {
     async (outcome) => {
       const { queryClient, wrapper } = createQueryClientTestHarness();
       const providersKey = systemProvidersQueryKey();
+
       const nextSettings = {
         ...defaultAppSettings,
         providerOrder: ["beta", "alpha"],
       };
+
       queryClient.setQueryData(systemConfigQueryKey(), systemConfig());
       queryClient.setQueryData(providersKey, ["alpha", "beta"]);
       const refetch = createDeferredPromise<string[]>();
@@ -133,6 +141,7 @@ describe("general settings mutation", () => {
       vi.mocked(sdk.system.updateGeneralSettings).mockResolvedValue(
         nextSettings,
       );
+
       const { result } = renderHook(
         () => ({
           providers: useQuery({
@@ -144,6 +153,7 @@ describe("general settings mutation", () => {
         }),
         { wrapper },
       );
+
       const settled = vi.fn();
       act(() => {
         void result.current.save.mutateAsync(nextSettings).then(settled);
@@ -177,6 +187,7 @@ describe("general settings mutation", () => {
     vi.mocked(sdk.system.updateGeneralSettings)
       .mockReturnValueOnce(firstWrite.promise)
       .mockReturnValueOnce(secondWrite.promise);
+
     const { result } = renderHook(() => useUpdateGeneralSettings(), {
       wrapper,
     });
@@ -224,6 +235,7 @@ describe("general settings mutation", () => {
     vi.mocked(sdk.system.updateGeneralSettings)
       .mockReturnValueOnce(firstWrite.promise)
       .mockReturnValueOnce(new Promise(() => {}));
+
     const { result } = renderHook(() => useUpdateGeneralSettings(), {
       wrapper,
     });
@@ -256,16 +268,19 @@ describe("general settings mutation", () => {
 
   it("drops cached model catalogs when streamer mode flips", async () => {
     const { queryClient, wrapper } = createQueryClientTestHarness();
+
     const executionOptionsKey = systemExecutionOptionsQueryKey({
       environmentId: null,
       hostId: "host-1",
       providerId: "claude-code",
     });
+
     const catalogCacheKey = modelCatalogCacheKey({
       environmentId: null,
       hostId: "host-1",
       providerId: "claude-code",
     });
+
     queryClient.setQueryData(systemConfigQueryKey(), systemConfig());
     queryClient.setQueryData(executionOptionsKey, { models: ["secret"] });
     writeCachedModelCatalog(catalogCacheKey, {
@@ -275,6 +290,7 @@ describe("general settings mutation", () => {
     expect(readCachedModelCatalog(catalogCacheKey)).not.toBeNull();
     const nextSettings = { ...defaultAppSettings, streamerMode: true };
     vi.mocked(sdk.system.updateGeneralSettings).mockResolvedValue(nextSettings);
+
     const { result } = renderHook(() => useUpdateGeneralSettings(), {
       wrapper,
     });
@@ -294,12 +310,14 @@ describe("keyboard settings mutation", () => {
     const { queryClient, wrapper } = createQueryClientTestHarness();
     queryClient.setQueryData(systemConfigQueryKey(), systemConfig());
     let resolveRequest: (overrides: AppKeybindingOverrides) => void = () => {};
+
     vi.mocked(sdk.system.updateKeyboardSettings).mockImplementation(
       () =>
         new Promise((resolve) => {
           resolveRequest = resolve;
         }),
     );
+
     const overrides: AppKeybindingOverrides = [
       {
         command: "thread.new",
@@ -313,6 +331,7 @@ describe("keyboard settings mutation", () => {
         },
       },
     ];
+
     const { result } = renderHook(() => useUpdateKeyboardSettings(), {
       wrapper,
     });
@@ -335,6 +354,7 @@ describe("keyboard settings mutation", () => {
     vi.mocked(sdk.system.updateKeyboardSettings).mockRejectedValue(
       new Error("write failed"),
     );
+
     const { result } = renderHook(() => useUpdateKeyboardSettings(), {
       wrapper,
     });
@@ -347,6 +367,7 @@ describe("keyboard settings mutation", () => {
     const restored = queryClient.getQueryData<SystemConfigResponse>(
       systemConfigQueryKey(),
     );
+
     expect(restored?.keybindingOverrides).toEqual([]);
     expect(restored?.keybindings).toEqual(defaultKeybindings);
   });

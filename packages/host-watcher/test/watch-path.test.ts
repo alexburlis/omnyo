@@ -7,10 +7,15 @@ import * as pathExistsModule from "../src/path-exists.js";
 import { watchPathChanges as watchPathChangesImpl } from "../src/watch-path.js";
 
 type WatchPathChanges = typeof watchPathChangesImpl;
+
 type ParcelWatcherSubscribe = (typeof import("@parcel/watcher"))["subscribe"];
+
 type ParcelWatcherCallback = Parameters<ParcelWatcherSubscribe>[1];
+
 type ParcelWatcherSubscribeArgs = Parameters<ParcelWatcherSubscribe>;
+
 type ParcelWatcherEventBatch = Parameters<ParcelWatcherCallback>[1];
+
 type ParcelWatcherSubscribeResult = Awaited<ReturnType<ParcelWatcherSubscribe>>;
 
 interface MockWatchPathImport {
@@ -31,6 +36,7 @@ interface ImportWatchPathOptions {
 type Sleep = (durationMs: number) => Promise<void>;
 
 const tempDirs: string[] = [];
+
 const sleep: Sleep = (durationMs) =>
   new Promise((resolve) => {
     setTimeout(() => {
@@ -47,6 +53,7 @@ async function settleAsyncWatchWork(): Promise<void> {
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -56,23 +63,29 @@ async function waitFor<T>(
   timeoutMs = 1_000,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
+
   while (Date.now() < deadline) {
     const value = getValue();
+
     if (predicate(value)) {
       return value;
     }
+
     await sleep(20);
   }
+
   throw new Error("Timed out waiting for watcher state");
 }
 
 function createDeferredPromise<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
+
   const promise = new Promise<T>((innerResolve, innerReject) => {
     resolve = innerResolve;
     reject = innerReject;
   });
+
   return { promise, reject, resolve };
 }
 
@@ -89,17 +102,21 @@ async function importWatchPathWithMockedWatcher(
       options.pathExistsImplementation,
     );
   }
+
   const subscribe = async (
     ...args: ParcelWatcherSubscribeArgs
   ): Promise<ParcelWatcherSubscribeResult> => {
     subscribeCallCount += 1;
     rootPaths.push(args[0]);
     callbacks.push(args[1]);
+
     if (options.subscribeImplementation) {
       return options.subscribeImplementation(args);
     }
+
     return { unsubscribe };
   };
+
   vi.spyOn(parcelWatcher, "subscribe").mockImplementation(subscribe);
 
   return {
@@ -130,11 +147,12 @@ afterEach(async () => {
 
 describe.sequential("watchPathChanges", () => {
   it("watches the target path and reports changed paths within that subtree", async () => {
-    const dataDir = await makeTempDir("bb-watch-path-");
+    const dataDir = await makeTempDir("omnyo-watch-path-");
     const threadStorageRoot = path.join(dataDir, "thread-storage");
     await fs.mkdir(threadStorageRoot, { recursive: true });
     const onChange = vi.fn();
     const onWatchError = vi.fn();
+
     const { callbacks, rootPaths, watchPathChanges } =
       await importWatchPathWithMockedWatcher();
 
@@ -176,13 +194,19 @@ describe.sequential("watchPathChanges", () => {
   });
 
   it("reports a missing watched path once and retries until it appears", async () => {
-    const threadStorageRoot = path.join(os.tmpdir(), "bb-watch-path-missing");
+    const threadStorageRoot = path.join(
+      os.tmpdir(),
+      "omnyo-watch-path-missing",
+    );
+
     let pathExistsCallCount = 0;
     const onWatchError = vi.fn();
+
     const { rootPaths, watchPathChanges } =
       await importWatchPathWithMockedWatcher({
         pathExistsImplementation: async () => {
           pathExistsCallCount += 1;
+
           return pathExistsCallCount >= 2;
         },
       });
@@ -216,9 +240,10 @@ describe.sequential("watchPathChanges", () => {
   });
 
   it("retries path subscriptions after a startup failure", async () => {
-    const threadStorageRoot = path.join(os.tmpdir(), "bb-watch-path-retry");
+    const threadStorageRoot = path.join(os.tmpdir(), "omnyo-watch-path-retry");
     const onWatchError = vi.fn();
     let shouldFail = true;
+
     const { rootPaths, subscribeCallCount, watchPathChanges } =
       await importWatchPathWithMockedWatcher({
         pathExistsImplementation: async () => true,
@@ -227,6 +252,7 @@ describe.sequential("watchPathChanges", () => {
             shouldFail = false;
             throw new Error("path subscription unavailable");
           }
+
           return {
             unsubscribe: async () => undefined,
           };
@@ -254,8 +280,9 @@ describe.sequential("watchPathChanges", () => {
   });
 
   it("does not retry or unsubscribe after Parcel inotify poll interruptions", async () => {
-    const threadStorageRoot = path.join(os.tmpdir(), "bb-watch-path-poll");
+    const threadStorageRoot = path.join(os.tmpdir(), "omnyo-watch-path-poll");
     const onWatchError = vi.fn();
+
     const { callbacks, subscribeCallCount, unsubscribe, watchPathChanges } =
       await importWatchPathWithMockedWatcher({
         pathExistsImplementation: async () => true,
@@ -294,13 +321,17 @@ describe.sequential("watchPathChanges", () => {
   });
 
   it("settles disposal and cleans up a late startup subscription", async () => {
-    const threadStorageRoot = path.join(os.tmpdir(), "bb-watch-path-late");
+    const threadStorageRoot = path.join(os.tmpdir(), "omnyo-watch-path-late");
+
     const subscriptionDeferred =
       createDeferredPromise<ParcelWatcherSubscribeResult>();
+
     const unsubscribeDeferred = createDeferredPromise<void>();
+
     const unsubscribe = vi.fn<() => Promise<void>>(
       async () => unsubscribeDeferred.promise,
     );
+
     const { rootPaths, watchPathChanges } =
       await importWatchPathWithMockedWatcher({
         pathExistsImplementation: async () => true,
@@ -317,9 +348,11 @@ describe.sequential("watchPathChanges", () => {
       (count) => count === 1,
     );
     let stopResolved = false;
+
     const stopPromise = stopWatching().then(() => {
       stopResolved = true;
     });
+
     await stopPromise;
     expect(stopResolved).toBe(true);
 
@@ -336,10 +369,11 @@ describe.sequential("watchPathChanges", () => {
   });
 
   it("coalesces repeated batches before flushing", async () => {
-    const dataDir = await makeTempDir("bb-watch-path-");
+    const dataDir = await makeTempDir("omnyo-watch-path-");
     const threadStorageRoot = path.join(dataDir, "thread-storage");
     await fs.mkdir(threadStorageRoot, { recursive: true });
     const onChange = vi.fn();
+
     const { callbacks, watchPathChanges } =
       await importWatchPathWithMockedWatcher();
 
@@ -381,7 +415,7 @@ describe.sequential("watchPathChanges", () => {
   });
 
   it("rescans children without warning when FSEvents drops events", async () => {
-    const dataDir = await makeTempDir("bb-watch-path-dropped-");
+    const dataDir = await makeTempDir("omnyo-watch-path-dropped-");
     const threadStorageRoot = path.join(dataDir, "thread-storage");
     await fs.mkdir(path.join(threadStorageRoot, "thread-1"), {
       recursive: true,
@@ -391,6 +425,7 @@ describe.sequential("watchPathChanges", () => {
     });
     const onChange = vi.fn();
     const onWatchError = vi.fn();
+
     const { callbacks, subscribeCallCount, watchPathChanges } =
       await importWatchPathWithMockedWatcher();
 

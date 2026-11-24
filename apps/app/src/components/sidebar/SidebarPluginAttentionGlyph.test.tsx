@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Provider } from "jotai";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SidebarProvider } from "@/components/ui/sidebar.js";
@@ -26,13 +26,14 @@ function plugin(overrides: Partial<PluginListItem>): PluginListItem {
     id: "notify",
     name: "Notify",
     status: "incompatible",
-    statusDetail: "requires bb >=0.38.0 <0.39.0, this is 0.39.0",
+    statusDetail: "requires Omnyo >=0.38.0 <0.39.0, this is 0.39.0",
     ...overrides,
   });
 }
 
 function renderGlyph(plugins: PluginListItem[]) {
   usePluginListMock.mockReturnValue({ data: { plugins } });
+
   return render(
     <Provider>
       <MemoryRouter>
@@ -61,7 +62,7 @@ describe("SidebarPluginAttentionGlyph", () => {
     renderGlyph([plugin({})]);
     const el = glyph()!;
     expect(el.getAttribute("aria-label")).toBe(
-      "Notify is incompatible: requires bb >=0.38.0 <0.39.0, this is 0.39.0",
+      "Notify is incompatible: requires Omnyo >=0.38.0 <0.39.0, this is 0.39.0",
     );
     expect(el.getAttribute("href")).toBe("/settings/plugins");
     expect(el.className).toContain("text-warning-text");

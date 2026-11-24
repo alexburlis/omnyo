@@ -54,6 +54,7 @@ function hydrateLayoutOnLoad(): SplitLayout | null {
   const unsubscribe = store.sub(splitLayoutAtom, () => {});
   const layout = store.get(splitLayoutAtom);
   unsubscribe();
+
   return layout;
 }
 

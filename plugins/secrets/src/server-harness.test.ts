@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import plugin from "./server.js";
 
 describe("secrets plugin server", () => {
   it("requests multiple values once and writes them without returning them", async () => {
     let writtenContent = "";
+
     const host = createFakePluginHost({
       pluginId: "secrets",
       sdk: {
@@ -25,12 +26,14 @@ describe("secrets plugin server", () => {
           },
           async write(args) {
             writtenContent = args.content;
+
             return { outcome: "written", sha256: "after", sizeBytes: 1 };
           },
         },
       },
     });
-    plugin(host.bb as unknown as Parameters<typeof plugin>[0]);
+
+    plugin(host.api as unknown as Parameters<typeof plugin>[0]);
 
     const command = host.harness.runCli(
       [
@@ -47,6 +50,7 @@ describe("secrets plugin server", () => {
       ],
       { threadId: "thr-test", cwd: "/outside/workspace/plugin" },
     );
+
     await vi.waitFor(() =>
       expect(host.harness.pendingInteractions).toHaveLength(1),
     );
@@ -103,12 +107,14 @@ describe("secrets plugin server", () => {
         },
       },
     });
-    plugin(host.bb as unknown as Parameters<typeof plugin>[0]);
+
+    plugin(host.api as unknown as Parameters<typeof plugin>[0]);
 
     const command = host.harness.runCli(
       ["request", "API_KEY", "--write-env", "/var/plugin/.env"],
       { threadId: "thr-test", cwd: "/workspace" },
     );
+
     await vi.waitFor(() =>
       expect(host.harness.pendingInteractions).toHaveLength(1),
     );
@@ -127,6 +133,7 @@ describe("secrets plugin server", () => {
   it("requests secrets from a working directory with a long absolute path", async () => {
     const cwd = `/${"deep-directory/".repeat(20)}workspace`;
     const destinationPath = `${cwd}/.env.local`;
+
     const host = createFakePluginHost({
       pluginId: "secrets",
       sdk: {
@@ -146,12 +153,14 @@ describe("secrets plugin server", () => {
         },
       },
     });
-    plugin(host.bb as unknown as Parameters<typeof plugin>[0]);
+
+    plugin(host.api as unknown as Parameters<typeof plugin>[0]);
 
     const command = host.harness.runCli(
       ["request", "API_KEY", "--write-env", ".env.local"],
       { threadId: "thr-test", cwd },
     );
+
     await vi.waitFor(() =>
       expect(host.harness.pendingInteractions).toHaveLength(1),
     );
@@ -176,6 +185,7 @@ describe("secrets plugin server", () => {
       { length: 12 },
       (_unused, index) => `A_VERY_LONG_SECRET_NAME_NUMBER_${index}`,
     );
+
     const host = createFakePluginHost({
       pluginId: "secrets",
       sdk: {
@@ -191,12 +201,14 @@ describe("secrets plugin server", () => {
         },
       },
     });
-    plugin(host.bb as unknown as Parameters<typeof plugin>[0]);
+
+    plugin(host.api as unknown as Parameters<typeof plugin>[0]);
 
     const command = host.harness.runCli(
       ["request", ...names, "--write-env", ".env"],
       { threadId: "thr-test", cwd: "/workspace" },
     );
+
     await vi.waitFor(() =>
       expect(host.harness.pendingInteractions).toHaveLength(1),
     );
@@ -255,7 +267,7 @@ describe("secrets plugin server", () => {
     "reports a usage error for malformed invocation $argv",
     async ({ argv, message }) => {
       const host = createFakePluginHost({ pluginId: "secrets" });
-      plugin(host.bb as unknown as Parameters<typeof plugin>[0]);
+      plugin(host.api as unknown as Parameters<typeof plugin>[0]);
 
       const result = await host.harness.runCli(argv, {
         threadId: "thr-test",
@@ -270,7 +282,7 @@ describe("secrets plugin server", () => {
 
   it("accepts --describe NAME=TEXT and reports failures as JSON with --json", async () => {
     const host = createFakePluginHost({ pluginId: "secrets" });
-    plugin(host.bb as unknown as Parameters<typeof plugin>[0]);
+    plugin(host.api as unknown as Parameters<typeof plugin>[0]);
 
     const result = await host.harness.runCli(
       [
@@ -290,11 +302,11 @@ describe("secrets plugin server", () => {
       ok: false,
       error: {
         code: "missing_thread",
-        message: "bb secret request must run from a bb thread.",
+        message: "omnyo secret request must run from an Omnyo thread.",
       },
     });
     expect(result.stderr).toBe(
-      "bb secret request must run from a bb thread.\n",
+      "omnyo secret request must run from an Omnyo thread.\n",
     );
     expect(host.harness.pendingInteractions).toEqual([]);
   });
@@ -303,7 +315,7 @@ describe("secrets plugin server", () => {
     "documents %s without running the command",
     async (...argv) => {
       const host = createFakePluginHost({ pluginId: "secrets" });
-      plugin(host.bb as unknown as Parameters<typeof plugin>[0]);
+      plugin(host.api as unknown as Parameters<typeof plugin>[0]);
 
       const result = await host.harness.runCli(argv, {
         threadId: "thr-test",
@@ -311,7 +323,7 @@ describe("secrets plugin server", () => {
       });
 
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("bb secret request");
+      expect(result.stdout).toContain("omnyo secret request");
       expect(host.harness.pendingInteractions).toEqual([]);
     },
   );

@@ -1,4 +1,4 @@
-import type { PluginFileOpenerSource } from "@get-bb/plugin-sdk/app";
+import type { PluginFileOpenerSource } from "@omnyo/plugin-sdk/app";
 
 const PDF_MIME_TYPE = "application/pdf";
 
@@ -11,17 +11,21 @@ export function resolvePdfUrl(
   source: PluginFileOpenerSource,
 ): string | null {
   const filePath = encodePathSegments(path.replace(/^\/+/u, ""));
+
   switch (source.kind) {
     case "workspace":
       if (source.environmentId !== null) {
         return `/api/v1/environments/${encodeURIComponent(source.environmentId)}/files/${filePath}`;
       }
+
       if (source.projectId !== null) {
         const projectPath = `/api/v1/projects/${encodeURIComponent(source.projectId)}`;
+
         return source.experimental_hostId
           ? `${projectPath}/hosts/${encodeURIComponent(source.experimental_hostId)}/files/${filePath}`
           : `${projectPath}/files/${filePath}`;
       }
+
       return null;
     case "host":
       return source.threadId === null
@@ -49,9 +53,12 @@ export async function loadPdfBlob(
   signal: AbortSignal,
 ): Promise<Blob> {
   const response = await fetch(url, { credentials: "same-origin", signal });
+
   if (!response.ok) {
     throw new Error(`PDF request failed with status ${response.status}.`);
   }
+
   requirePdfMimeType(response.headers.get("content-type"));
+
   return response.blob();
 }

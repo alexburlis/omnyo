@@ -1,14 +1,17 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useAtomValue } from "jotai";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import type {
   PluginSidebarSplitLayout,
   PluginSidebarSplitPane,
   PluginSidebarThreadSplit,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { usePaneContentSplitIndicator } from "@/components/sidebar/paneContentSplitIndicator";
 import { useThreadRowSplitDrag } from "@/components/sidebar/useThreadRowSplitDrag";
-import { useThreadTitleDisplayText } from "@/components/thread/ThreadTitleMentions";
+import {
+  resolveThreadTitleDisplayText,
+  useThreadTitleMentionResourcesRef,
+} from "@/components/thread/ThreadTitleMentions";
 import { getThreadDisplayTitle } from "./thread-title";
 import { useSidebarThreadEntry } from "./plugin-sidebar-hooks";
 import {
@@ -25,9 +28,11 @@ export function toPluginSidebarSplitLayout(
 ): PluginSidebarSplitLayout | null {
   if (layout === null || countPanes(layout.root) < 2) return null;
   const rects = computePaneRects(layout.root);
+
   return {
     panes: listPanes(layout.root).flatMap((pane) => {
       const rect = rects.get(pane.paneId);
+
       return rect === undefined
         ? []
         : [
@@ -46,6 +51,7 @@ export function toPluginSidebarSplitLayout(
 export function useSidebarSplitLayout(): PluginSidebarSplitLayout | null {
   const isCompact = useIsCompactViewport();
   const layout = useAtomValue(splitLayoutAtom);
+
   return useMemo(
     () => (isCompact ? null : toPluginSidebarSplitLayout(layout)),
     [isCompact, layout],
@@ -63,22 +69,36 @@ export function useSidebarThreadSplit(
 ): PluginSidebarThreadSplit {
   const entry = useSidebarThreadEntry(threadId);
   const projectId = entry?.projectId ?? "";
-  const title = useThreadTitleDisplayText(
-    entry ? getThreadDisplayTitle(entry) : "",
+
+  const titleResources = useThreadTitleMentionResourcesRef();
+
+  const getTitle = useCallback(
+    () =>
+      entry === null
+        ? ""
+        : resolveThreadTitleDisplayText(
+            getThreadDisplayTitle(entry),
+            titleResources.current,
+          ),
+    [entry, titleResources],
   );
+
   const { onPointerDown } = useThreadRowSplitDrag({
     projectId,
     threadId,
-    title,
+    getTitle,
   });
+
   const content = useMemo<PaneContent>(
     () => ({ kind: "thread", projectId, threadId }),
     [projectId, threadId],
   );
+
   const indicator = usePaneContentSplitIndicator(content, entry !== null);
 
   return useMemo<PluginSidebarThreadSplit>(() => {
     if (entry === null) return NO_SPLIT;
+
     const panes: PluginSidebarSplitPane[] | null =
       indicator.miniMap === null
         ? null
@@ -93,6 +113,7 @@ export function useSidebarThreadSplit(
             isMe: slot.isMe,
             isFocused: slot.isFocused,
           }));
+
     return {
       splitProps: onPointerDown ? { onPointerDown } : {},
       isAvailable: onPointerDown !== undefined,

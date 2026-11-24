@@ -11,8 +11,8 @@ import {
   noopNotifier,
   promptHistoryEntries,
   upsertHost,
-} from "@bb/db";
-import type { PromptHistoryScope, PromptInput } from "@bb/domain";
+} from "@omnyo/db";
+import type { PromptHistoryScope, PromptInput } from "@omnyo/domain";
 import {
   listProjectPromptHistory,
   listThreadPromptHistory,
@@ -35,17 +35,21 @@ interface InsertPromptHistoryEntryArgs {
 function setup() {
   const db = createConnection(":memory:");
   migrate(db);
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const firstProject = createProject(db, noopNotifier, {
     name: "Project A",
     source: { type: "local_path", hostId: host.id, path: "/tmp/project-a" },
   }).project;
+
   const secondProject = createProject(db, noopNotifier, {
     name: "Project B",
     source: { type: "local_path", hostId: host.id, path: "/tmp/project-b" },
   }).project;
+
   return { db, firstProject, secondProject };
 }
 
@@ -63,14 +67,17 @@ function insertPromptHistoryEntry(args: InsertPromptHistoryEntryArgs) {
 describe("prompt history service", () => {
   it("returns project create history scoped to one project", () => {
     const { db, firstProject, secondProject } = setup();
+
     const firstThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
     });
+
     const secondThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
     });
+
     const otherProjectThread = createThread(db, noopNotifier, {
       projectId: secondProject.id,
       providerId: "codex",
@@ -146,10 +153,12 @@ describe("prompt history service", () => {
 
   it("includes archived thread starter prompts in project history", () => {
     const { db, firstProject } = setup();
+
     const liveThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
     });
+
     const archivedThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
@@ -199,10 +208,12 @@ describe("prompt history service", () => {
 
   it("includes hidden root prompts in ordinary project history", () => {
     const { db, firstProject } = setup();
+
     const visibleThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
     });
+
     const hiddenRootThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
@@ -252,10 +263,12 @@ describe("prompt history service", () => {
 
   it("excludes deleted thread starter prompts from project history", () => {
     const { db, firstProject } = setup();
+
     const liveThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
     });
+
     const deletedThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
@@ -300,14 +313,17 @@ describe("prompt history service", () => {
 
   it("does not record project history for child thread starts", () => {
     const { db, firstProject } = setup();
+
     const parentThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
     });
+
     const directThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
     });
+
     const childThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
@@ -358,6 +374,7 @@ describe("prompt history service", () => {
 
   it("returns thread follow-up history with queued messages merged in", () => {
     const { db, firstProject } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
@@ -427,10 +444,12 @@ describe("prompt history service", () => {
 
   it("silently skips malformed stored prompt history rows", () => {
     const { db, firstProject } = setup();
+
     const validThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
     });
+
     const malformedThread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
@@ -475,6 +494,7 @@ describe("prompt history service", () => {
   });
   it("does not persist empty-input turns as prompt history rows", () => {
     const { db, firstProject } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
@@ -507,10 +527,12 @@ describe("prompt history service", () => {
 
   it("excludes agent-only context from recalled prompt history", () => {
     const { db, firstProject } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: firstProject.id,
       providerId: "codex",
     });
+
     const visibleInput = textInput("Explain the selected message");
 
     expect(

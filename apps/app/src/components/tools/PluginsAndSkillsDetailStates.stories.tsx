@@ -1,12 +1,12 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { SkillProvider } from "@bb/server-contract";
+import type { SkillProvider } from "@omnyo/server-contract";
 import {
   ResourceInstallControl,
   ResourceListState,
   ResourceOverflowMenu,
-} from "@bb/shared-ui/resource-list";
-import { Switch } from "@bb/shared-ui/switch";
+} from "@omnyo/shared-ui/resource-list";
+import { Switch } from "@omnyo/shared-ui/switch";
 import { AddPluginDialog } from "@/components/plugin/management/AddPluginDialog";
 import { PluginDetailReleaseControl } from "@/components/plugin/management/PluginUpdatesCard";
 import type { PluginCatalogSearchEntry } from "@/hooks/queries/plugin-catalog-queries";
@@ -29,7 +29,7 @@ import {
   ProviderLogo,
   SkillProvenanceTooltip,
 } from "@/components/tools/SkillsCollection";
-import { BbLogo } from "@/components/ui/bb-logo";
+import { OmnyoLogo } from "@/components/ui/omnyo-logo";
 import { ProvenancePill } from "@/components/tools/ProvenancePill";
 import { SkillDetailView } from "@/components/tools/SkillDetailView";
 import {
@@ -55,6 +55,7 @@ function PluginStoryQueryBoundary({ children }: { children: ReactNode }) {
         },
       },
     });
+
     for (const pluginId of [
       "github",
       "github-official",
@@ -69,13 +70,15 @@ function PluginStoryQueryBoundary({ children }: { children: ReactNode }) {
         resolved: "1.4.0",
         integrity: null,
         registry: "npm",
-        engines: { bb: null, bbPluginSdk: null },
+        engines: { omnyo: null, omnyoPluginSdk: null },
         installedAt: new Date(2026, 6, 8).getTime(),
         history: [],
       });
     }
+
     return client;
   });
+
   return (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
@@ -154,12 +157,13 @@ function State({
   );
 }
 
-const SKILL_PATH = "/Users/you/.bb/skills/writing-voice/SKILL.md";
+const SKILL_PATH = "/Users/you/.omnyo/skills/writing-voice/SKILL.md";
 
 function SkillLeading({ provider }: { provider: SkillProvider | null }) {
   if (provider === null) {
-    return <BbLogo />;
+    return <OmnyoLogo />;
   }
+
   return <ProviderLogo providerId={provider} className="size-4" />;
 }
 
@@ -213,13 +217,13 @@ export function SkillDetailStates() {
         note="Files appears above Definition and never below it."
       >
         <Skill
-          files={[SKILL_PATH, "/Users/you/.bb/skills/writing-voice/tone.md"]}
+          files={[SKILL_PATH, "/Users/you/.omnyo/skills/writing-voice/tone.md"]}
         />
       </State>
 
       <State
         name="Provider-owned"
-        note="A skill discovered under Claude Code or Codex carries that provider's logo where a bb-owned skill carries the bb mark."
+        note="A skill discovered under Claude Code or Codex carries that provider's logo where an Omnyo-owned skill carries the Omnyo mark."
       >
         <Skill provider="claude-code" />
       </State>
@@ -245,13 +249,13 @@ export function SkillDetailStates() {
       </State>
 
       <State
-        name="BB Official"
-        note="A skill that ships with bb uses the same publisher badge as a BB Official plugin. Its read-only behavior remains a separate permission fact."
+        name="Omnyo Official"
+        note="A skill that ships with Omnyo uses the same publisher badge as an Omnyo Official plugin. Its read-only behavior remains a separate permission fact."
       >
         <Skill
           titleBadge={{
-            label: "BB Official",
-            tooltip: "Ships with bb",
+            label: "Omnyo Official",
+            tooltip: "Ships with Omnyo",
           }}
         />
       </State>
@@ -276,7 +280,7 @@ export function SkillDetailStates() {
 
       <State
         name="Imported"
-        note="Ownership is passive: a skill bb cannot write shows its origin as a status, with no edit or acquisition control."
+        note="Ownership is passive: a skill Omnyo cannot write shows its origin as a status, with no edit or acquisition control."
       >
         <Skill
           provider="claude-code"
@@ -300,7 +304,7 @@ export function SkillDetailStates() {
         <Skill
           headerActions={
             <ResourceInstallControl
-              accessibleLabel="Fork writing-voice into a new bb skill"
+              accessibleLabel="Fork writing-voice into a new Omnyo skill"
               label="Fork"
               icon="Fork"
               onAction={noop}
@@ -346,9 +350,9 @@ export function SkillDetailStates() {
 const PLUGIN: PluginListItem = makePluginListItem({
   id: "github",
   source: "npm:@bb-plugins/github",
-  rootDir: "/Users/you/.bb/plugins/github",
+  rootDir: "/Users/you/.omnyo/plugins/github",
   version: "1.4.0",
-  description: "Browse GitHub issues and pull requests without leaving bb.",
+  description: "Browse GitHub issues and pull requests without leaving Omnyo.",
   name: "GitHub",
   icon: "Github",
   sourceDisplay: "npm · @bb-plugins/github",
@@ -425,9 +429,9 @@ const AWKWARD_PLUGIN: PluginListItem = {
   id: "enterprise-issue-tracker-synchronization",
   name: "Enterprise Issue Tracker Synchronization",
   rootDir:
-    "/Users/you/.bb/plugins/enterprise-issue-tracker-synchronization/packages/runtime",
+    "/Users/you/.omnyo/plugins/enterprise-issue-tracker-synchronization/packages/runtime",
   description:
-    "Keeps issues, pull requests, review comments, and release checklists synchronized between bb threads and your issue tracker, including bidirectional status mapping, attachment mirroring, and per-project field translation.",
+    "Keeps issues, pull requests, review comments, and release checklists synchronized between Omnyo threads and your issue tracker, including bidirectional status mapping, attachment mirroring, and per-project field translation.",
   cliCommand: {
     name: "enterprise-issue-tracker-sync",
     summary:
@@ -481,16 +485,17 @@ const BUNDLED_PLUGIN: PluginListItem = {
   source: "builtin:github",
   rootDir: "/managed/plugins/github",
   provenance: "builtin",
-  sourceDisplay: "Ships with bb",
+  removable: false,
+  sourceDisplay: "Ships with Omnyo",
   capabilities: STATIC_CAPABILITIES,
 };
 
 const UNINSTALLED_CATALOG_PLUGIN = {
   entryId: "github",
-  marketplace: "bb-official",
+  marketplace: "omnyo-official",
   pluginId: "github",
   displayName: "GitHub",
-  description: "Browse GitHub issues and pull requests without leaving bb.",
+  description: "Browse GitHub issues and pull requests without leaving Omnyo.",
   icon: "Github",
   iconUrl: null,
   iconTinted: false,
@@ -502,7 +507,7 @@ const UNINSTALLED_CATALOG_PLUGIN = {
 
 - A pull request panel with checks, reviews, and the diff for the current branch.
 - Issue search that attaches an issue to the thread as context.
-- A \`bb github\` command for agents to open, update, and comment on pull requests.
+- An \`omnyo github\` command for agents to open, update, and comment on pull requests.
 
 ## How it works
 
@@ -511,15 +516,14 @@ Sign in once with \`gh auth login\`. The plugin reuses your GitHub CLI session a
   collections: [],
   source: "builtin:github",
   repositoryUrl: null,
-  marketplaceDisplayName: "BB Official",
-  publisherKey: "bb-official",
-  publisherLabel: "BB Official",
+  marketplaceDisplayName: "Omnyo Official",
+  publisherKey: "omnyo-official",
+  publisherLabel: "Omnyo Official",
   official: true,
   author: null,
   installed: false,
   conflictingInstallSource: null,
   installedByDefault: false,
-  installs: null,
   compatible: true,
   incompatibleReason: null,
 } satisfies PluginCatalogSearchEntry;
@@ -530,7 +534,7 @@ const COMPATIBILITY_BLOCKED_PLUGIN: PluginListItem = {
   updateState: {
     ...EMPTY_PLUGIN_UPDATE_STATE,
     blockedVersion: "2.0.0",
-    blockedReasons: ["Requires bb 0.20 or newer, and this bb is 0.18."],
+    blockedReasons: ["Requires Omnyo 0.20 or newer, and this Omnyo is 0.18."],
   },
 };
 
@@ -547,11 +551,13 @@ function FailedReleaseLifecycle() {
           : input instanceof URL
             ? input.href
             : input.url;
+
       if (!url.endsWith(`/plugins/${UPDATE_FAILED_PLUGIN.id}/update`)) {
         return originalFetch.call(globalThis, input, init);
       }
 
       await new Promise((resolve) => window.setTimeout(resolve, 8_000));
+
       if (!cancelled) {
         setPlugin((current) => ({
           ...current,
@@ -563,6 +569,7 @@ function FailedReleaseLifecycle() {
           },
         }));
       }
+
       return new Response(
         JSON.stringify({
           applied: true,
@@ -573,6 +580,7 @@ function FailedReleaseLifecycle() {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     };
+
     return () => {
       cancelled = true;
       globalThis.fetch = originalFetch;
@@ -624,6 +632,7 @@ function CatalogPlugin({
   entry?: PluginCatalogSearchEntry;
 }) {
   const [installOpen, setInstallOpen] = useState(false);
+
   return (
     <>
       <div className="-mx-4 md:-mx-5">
@@ -642,8 +651,8 @@ function CatalogPlugin({
         initial={{
           entryId: entry.entryId,
           pluginId: entry.pluginId,
-          marketplace: "bb-official",
-          publisherLabel: "BB Official",
+          marketplace: "omnyo-official",
+          publisherLabel: "Omnyo Official",
           displayName: entry.displayName,
           icon: entry.icon,
           iconUrl: entry.iconUrl,
@@ -682,8 +691,10 @@ function PluginWithAppSurfaces() {
         fileOpeners: [],
       }),
     );
+
     return () => removePluginSlotRegistrations(APP_SURFACE_PLUGIN.id);
   }, []);
+
   return <Plugin plugin={APP_SURFACE_PLUGIN} />;
 }
 
@@ -692,11 +703,11 @@ export function PluginDetailStates() {
     <PluginStoryQueryBoundary>
       <Story
         title="Plugin detail states"
-        description="An uninstalled BB Official plugin shows the catalog facts bb can verify and offers Install. Once installed, the page adds runtime capabilities, settings, services, and schedules when they apply."
+        description="An uninstalled Omnyo Official plugin shows the catalog facts Omnyo can verify and offers Install. Once installed, the page adds runtime capabilities, settings, services, and schedules when they apply."
       >
         <State
           name="Before ownership"
-          note="An uninstalled BB Official plugin opens as a real detail page. Install is the primary header action; the full-trust confirmation is the commit step."
+          note="An uninstalled Omnyo Official plugin opens as a real detail page. Install is the primary header action; the full-trust confirmation is the commit step."
         >
           <CatalogPlugin />
         </State>
@@ -709,7 +720,7 @@ export function PluginDetailStates() {
             entry={{
               ...UNINSTALLED_CATALOG_PLUGIN,
               compatible: false,
-              incompatibleReason: "Requires bb 0.20 or newer.",
+              incompatibleReason: "Requires Omnyo 0.20 or newer.",
             }}
           />
         </State>
@@ -776,15 +787,15 @@ export function PluginDetailStates() {
         </State>
 
         <State
-          name="BB Official · catalog"
-          note="Installed from bb's catalog. It shares the BB Official badge with built-in plugins, while its install date and ownership menu preserve the lifecycle difference."
+          name="Omnyo Official · catalog"
+          note="Installed from Omnyo's catalog. It shares the Omnyo Official badge with built-in plugins, while its install date and ownership menu preserve the lifecycle difference."
         >
           <Plugin plugin={CATALOG_PLUGIN} />
         </State>
 
         <State
-          name="BB Official · built-in"
-          note="Ships with bb. The badge matches catalog-installed official plugins; the missing install date and ownership menu show that it cannot be uninstalled separately."
+          name="Omnyo Official · built-in"
+          note="Ships with Omnyo. The badge matches catalog-installed official plugins; the missing install date and ownership menu show that it cannot be uninstalled separately."
         >
           <Plugin plugin={BUNDLED_PLUGIN} />
         </State>
@@ -805,7 +816,7 @@ export function PluginDetailStates() {
 
         <State
           name="Compatibility blocked"
-          note="A newer release requires a newer bb. A dedicated Update row explains the requirement and preserved version; there is no unavailable action or modal."
+          note="A newer release requires a newer Omnyo. A dedicated Update row explains the requirement and preserved version; there is no unavailable action or modal."
         >
           <Plugin plugin={COMPATIBILITY_BLOCKED_PLUGIN} />
         </State>
@@ -884,13 +895,13 @@ export function PluginBannerStates() {
 
         <State
           name="Health · Incompatible"
-          note="The installed plugin cannot run with this version of bb. The banner directs the user to install a compatible version without repeating the server's raw compatibility string."
+          note="The installed plugin cannot run with this version of Omnyo. The banner directs the user to install a compatible version without repeating the server's raw compatibility string."
         >
           <Plugin
             plugin={{
               ...PLUGIN,
               status: "incompatible",
-              statusDetail: "requires bb 0.20 or newer",
+              statusDetail: "requires Omnyo 0.20 or newer",
             }}
           />
         </State>
@@ -972,7 +983,7 @@ export function PluginReleaseStates() {
 
         <State
           name="Release · update blocked"
-          note="Not a banner and not a failed attempt. The Update row names the bb-version requirement and preserved installed version; there is no unavailable action or dialog to dismiss."
+          note="Not a banner and not a failed attempt. The Update row names the Omnyo version requirement and preserved installed version; there is no unavailable action or dialog to dismiss."
         >
           <Plugin plugin={COMPATIBILITY_BLOCKED_PLUGIN} />
         </State>
@@ -1049,7 +1060,7 @@ const CATALOG_PLUGIN = {
   id: "github-official",
   provenance: "catalog",
   catalogEntryId: "github",
-  publisherLabel: "BB Community",
+  publisherLabel: "Acme Plugins",
 } satisfies PluginListItem;
 
 const pluginUninstallItems = [
@@ -1074,7 +1085,7 @@ const pluginLocalItems = [
   { label: "Edit", icon: "Edit" as const, onSelect: noop },
   { label: "Open source", icon: "ExternalLink" as const, onSelect: noop },
   {
-    label: "Remove from bb",
+    label: "Remove from Omnyo",
     icon: "Trash2" as const,
     tone: "destructive" as const,
     onSelect: noop,
@@ -1120,7 +1131,7 @@ export function ResourceControlStates() {
                 onAction={noop}
               />
             }
-            meaning="Canonical BB Official plugin acquisition action on both Browse and the pre-ownership detail page."
+            meaning="Canonical Omnyo Official plugin acquisition action on both Browse and the pre-ownership detail page."
           />
           <ControlRow
             state="Plugin · installing"
@@ -1137,19 +1148,19 @@ export function ResourceControlStates() {
             state="Skill · Fork"
             control={
               <ResourceInstallControl
-                accessibleLabel="Fork example skill into a new bb skill"
+                accessibleLabel="Fork example skill into a new Omnyo skill"
                 label="Fork"
                 icon="Fork"
                 onAction={noop}
               />
             }
-            meaning="Creates a new bb-owned skill from a registry source on the skill detail page."
+            meaning="Creates a new Omnyo-owned skill from a registry source on the skill detail page."
           />
           <ControlRow
             state="Skill · forking"
             control={
               <ResourceInstallControl
-                accessibleLabel="Fork example skill into a new bb skill"
+                accessibleLabel="Fork example skill into a new Omnyo skill"
                 label="Fork"
                 icon="Fork"
                 pending
@@ -1166,11 +1177,14 @@ export function ResourceControlStates() {
           description="Badges appear only when provenance changes how the resource should be understood. Ordinary owned resources stay unlabelled in their detail-page stories."
         >
           <ControlRow
-            state="Skill · BB Official"
+            state="Skill · Omnyo Official"
             control={
-              <ProvenancePill label="BB Official" tooltip="Ships with bb" />
+              <ProvenancePill
+                label="Omnyo Official"
+                tooltip="Ships with Omnyo"
+              />
             }
-            meaning="A skill that ships with bb."
+            meaning="A skill that ships with Omnyo."
           />
           <ControlRow
             state="Skill · Included"
@@ -1272,10 +1286,10 @@ export function ResourceControlStates() {
                 items={pluginLocalItems}
               />
             }
-            meaning="Local sources can be edited, opened, submitted to the marketplace, or removed from bb without deleting the source directory."
+            meaning="Local sources can be edited, opened, submitted to the marketplace, or removed from Omnyo without deleting the source directory."
           />
           <ControlRow
-            state="BB Official built-in actions"
+            state="Omnyo Official built-in actions"
             control={<NoControl>No ownership menu</NoControl>}
             meaning="Built-in plugins cannot be uninstalled or source-edited here."
           />
@@ -1309,7 +1323,7 @@ export function ResourceControlStates() {
             state="Fork · browse card"
             control={
               <ResourceInstallControl
-                accessibleLabel="Fork example skill into a new bb skill"
+                accessibleLabel="Fork example skill into a new Omnyo skill"
                 label="Fork"
                 icon="Fork"
                 presentation="icon"
@@ -1327,12 +1341,12 @@ export function ResourceControlStates() {
                 items={skillLocalItems}
               />
             }
-            meaning="A bb-owned skill can be edited, opened, or deleted."
+            meaning="An Omnyo-owned skill can be edited, opened, or deleted."
           />
           <ControlRow
             state="Read-only actions"
             control={<NoControl>No ownership menu</NoControl>}
-            meaning="BB Official, Included, and Imported skills expose provenance without pretending they are mutable."
+            meaning="Omnyo Official, Included, and Imported skills expose provenance without pretending they are mutable."
           />
         </ControlTable>
       </main>

@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { PluginProviderDeclaration } from "@get-bb/plugin-sdk";
+import type { PluginProviderDeclaration } from "@omnyo/plugin-sdk";
 import {
   experimental_filterResolvedNativeRoots,
   type ExperimentalNativeRootsResolveAnswer,
-} from "@get-bb/plugin-sdk/host";
+} from "@omnyo/plugin-sdk/host";
 import { z } from "zod";
 
 export const PI_NATIVE_ROOTS_DECLARATION: Pick<
@@ -31,6 +31,7 @@ export interface ResolvePiNativeRootsArgs {
 
 function resolvePiAgentDir(args: ResolvePiNativeRootsArgs): string {
   const configured = args.env.PI_CODING_AGENT_DIR?.trim();
+
   return configured
     ? resolveStoredPath(args.homeDir, configured, args.homeDir)
     : path.join(args.homeDir, ...DEFAULT_AGENT_DIR_SEGMENTS);
@@ -42,7 +43,9 @@ function resolveStoredPath(
   baseDir: string,
 ): string {
   if (value === "~") return homeDir;
+
   if (value.startsWith("~/")) return path.join(homeDir, value.slice(2));
+
   return path.isAbsolute(value) ? value : path.resolve(baseDir, value);
 }
 
@@ -55,10 +58,13 @@ export async function resolvePiNativeRoots(
 ): Promise<ExperimentalNativeRootsResolveAnswer> {
   const agentDir = resolvePiAgentDir(args);
   const roots = new Set<string>();
+
   if (agentDir !== path.join(args.homeDir, ...DEFAULT_AGENT_DIR_SEGMENTS)) {
     roots.add(path.resolve(agentDir, "skills"));
   }
+
   let settings: z.infer<typeof piSettingsSchema> | null = null;
+
   try {
     settings = piSettingsSchema.parse(
       JSON.parse(await readFile(path.join(agentDir, "settings.json"), "utf8")),
@@ -66,8 +72,10 @@ export async function resolvePiNativeRoots(
   } catch {
     settings = null;
   }
+
   for (const raw of settings?.skills ?? []) {
     const value = raw.trim();
+
     if (
       value.length === 0 ||
       value.startsWith("!") ||
@@ -75,11 +83,14 @@ export async function resolvePiNativeRoots(
     ) {
       continue;
     }
+
     if (path.extname(value).toLowerCase() === ".md") {
       continue;
     }
+
     roots.add(path.resolve(resolveStoredPath(args.homeDir, value, agentDir)));
   }
+
   return {
     skills: experimental_filterResolvedNativeRoots(
       {

@@ -7,8 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { watchPathChanges } from "../src/watch-path.js";
 
 const EVENT_TIMEOUT_MS = 10_000;
+
 const TEST_TIMEOUT_MS = 60_000;
+
 const HEAVY_PACKAGES = 80;
+
 const VISIBLE_DIRECTORIES = [
   "thr_a",
   "thr_a/worktrees",
@@ -19,6 +22,7 @@ const VISIBLE_DIRECTORIES = [
   "thr_b/clone/src",
   "thr_c",
 ];
+
 const tempDirs: string[] = [];
 
 function range(count: number): number[] {
@@ -30,9 +34,11 @@ async function buildThreadStorageFixture(): Promise<{
   root: string;
 }> {
   const root = fsSync.realpathSync(
-    await fs.mkdtemp(path.join(os.tmpdir(), "bb-path-watch-bounds-")),
+    await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-path-watch-bounds-")),
   );
+
   tempDirs.push(root);
+
   const heavyDirectories = [
     ...range(HEAVY_PACKAGES).map(
       (index) => `thr_a/worktrees/fix-1/node_modules/pkg-${index}/lib`,
@@ -47,6 +53,7 @@ async function buildThreadStorageFixture(): Promise<{
       (index) => `thr_c/.venv/lib/site-packages/pkg-${index}`,
     ),
   ];
+
   await Promise.all(
     [...VISIBLE_DIRECTORIES, ...heavyDirectories].map((relativePath) =>
       fs.mkdir(path.join(root, relativePath), { recursive: true }),
@@ -57,12 +64,14 @@ async function buildThreadStorageFixture(): Promise<{
     "gitdir: /nonexistent/.git/worktrees/fix-1\n",
   );
   await fs.writeFile(path.join(root, "thr_a", "report.md"), "report\n");
+
   return { heavyDirectoryCount: heavyDirectories.length * 2, root };
 }
 
 function countInotifyWatches(): number {
   const fdinfoDir = "/proc/self/fdinfo";
   let count = 0;
+
   for (const fd of fsSync.readdirSync(fdinfoDir)) {
     try {
       const info = fsSync.readFileSync(path.join(fdinfoDir, fd), "utf8");
@@ -71,6 +80,7 @@ function countInotifyWatches(): number {
         .filter((line) => line.startsWith("inotify wd:")).length;
     } catch {}
   }
+
   return count;
 }
 
@@ -83,6 +93,7 @@ interface StartedPathWatch {
 function startPathWatch(root: string): StartedPathWatch {
   const changedPaths = new Set<string>();
   const watchErrors: string[] = [];
+
   const stop = watchPathChanges(root, {
     onChange: (event) => {
       for (const changedPath of event.changedPaths) {
@@ -93,6 +104,7 @@ function startPathWatch(root: string): StartedPathWatch {
       watchErrors.push(error.message);
     },
   });
+
   return { changedPaths, stop, watchErrors };
 }
 
@@ -112,6 +124,7 @@ async function waitForChange(
 
 afterEach(async () => {
   vi.restoreAllMocks();
+
   for (const dir of tempDirs.splice(0)) {
     await fs.rm(dir, { force: true, recursive: true });
   }
@@ -124,10 +137,12 @@ describe("path watch ignores", () => {
     vi.spyOn(parcelWatcher, "subscribe").mockImplementation(
       async (_dir, _callback, options) => {
         ignoreLists.push([...(options?.ignore ?? [])]);
+
         return { unsubscribe: async () => undefined };
       },
     );
     const watch = startPathWatch(root);
+
     try {
       await vi.waitFor(() => {
         expect(ignoreLists).toHaveLength(1);
@@ -151,11 +166,13 @@ describe.skipIf(process.platform !== "linux")(
         const { heavyDirectoryCount, root } = await buildThreadStorageFixture();
         const baselineWatches = countInotifyWatches();
         const watch = startPathWatch(root);
+
         try {
           await waitForChange(
             watch,
             path.join(root, "thr_a", "worktrees", "fix-1", "src", "probe.ts"),
           );
+
           const heavyFile = path.join(
             root,
             "thr_b",
@@ -165,6 +182,7 @@ describe.skipIf(process.platform !== "linux")(
             "lib",
             "index.js",
           );
+
           await fs.writeFile(heavyFile, "changed\n");
           await waitForChange(watch, path.join(root, "thr_c", "probe.md"));
 

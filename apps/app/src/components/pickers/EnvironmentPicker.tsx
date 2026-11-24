@@ -1,13 +1,14 @@
 import { PICKER_MOBILE_CLASS_NAME } from "./picker-layout";
+import { PickerEmptyState, pickerNoMatchMessage } from "./PickerEmptyState";
 import { EnvironmentProviderIcon } from "@/components/plugin/EnvironmentProviderIcon";
 import { useMemo, useRef, useState } from "react";
-import type { Host, ProjectSource } from "@bb/domain";
-import type { SystemEnvironmentProvider } from "@bb/server-contract";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { findLocalPathProjectSourceForHost } from "@bb/domain";
+import type { Host, ProjectSource } from "@omnyo/domain";
+import type { SystemEnvironmentProvider } from "@omnyo/server-contract";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { findLocalPathProjectSourceForHost } from "@omnyo/domain";
 import { pluginIconName } from "@/components/plugin/PluginIcon";
-import { Button } from "@bb/shared-ui/button";
-import { Skeleton } from "@bb/shared-ui/skeleton";
+import { Button } from "@omnyo/shared-ui/button";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
 import {
   Command,
   CommandGroup,
@@ -15,37 +16,49 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
-} from "@bb/shared-ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
+} from "@omnyo/shared-ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@omnyo/shared-ui/popover";
 import {
   COARSE_POINTER_COMPACT_ICON_SIZE_CLASS,
   COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
   COARSE_POINTER_DOT_SIZE_CLASS,
   COARSE_POINTER_ICON_SIZE_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { LIST_HOVER_TRANSITION } from "@bb/shared-ui/motion";
-import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import { REUSE_ENVIRONMENT_ICON_NAME } from "@/lib/environment-workspace-display";
-import { formatRelativeTime } from "@/lib/relative-time";
 import { formatHostUpdateStatus } from "@/lib/host-update-status";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   OPTION_BASE_CLASS_NAME,
   OPTION_INTERACTIVE_CLASS_NAME,
   OPTION_MUTED_CLASS_NAME,
   OPTION_TRIGGER_CONTENT_CLASS_NAME,
-} from "@bb/shared-ui/option-display";
-import {
-  encodeProviderValue,
-  parseEnvironmentValue,
-} from "./environment-picker-value";
+} from "@omnyo/shared-ui/option-display";
+import { parseEnvironmentValue } from "./environment-picker-value";
 import { selectHosts } from "@/hooks/queries/host-queries";
-import { providerInputsControlRequired } from "./environment-provider-inputs";
-import { MACHINE_BADGE_CLASS_NAME, orderLocalHostFirst } from "./MachinePicker";
+import {
+  type EnvironmentProvidersByHostId,
+  providerDescription,
+  providerDisabledReason,
+  providerValueSelected,
+  scopedProviders,
+} from "./environment-provider-scope";
+import {
+  formatOfflineMachineStatus,
+  MACHINE_BADGE_CLASS_NAME,
+  TitledMachineStatusDot,
+  orderLocalHostFirst,
+} from "./MachinePicker";
 import { ListLoadingPlaceholder } from "@/components/ui/ListLoadingPlaceholder";
 import { MachineIcon } from "@/components/machines/MachineLabel";
 import { searchMachineHosts } from "./machine-picker-search";
 import { useResetPickerScroll } from "./useResetPickerScroll";
+
+export { PROVIDER_INPUTS_CONTROL_MISSING_REASON } from "./environment-provider-scope";
 
 interface SelectedEnvironment {
   modeLabel: string;
@@ -54,6 +67,7 @@ interface SelectedEnvironment {
 }
 
 const MACHINE_CONTEXTUAL_MENU_MIN_OPTIONS = 3;
+
 const MACHINE_TARGET_CONTENT_CLASS_NAME =
   "grid min-w-0 flex-1 grid-cols-[0.375rem_0.875rem_minmax(0,1fr)] gap-x-2 max-md:pointer-coarse:grid-cols-[0.5rem_1.25rem_minmax(0,1fr)]";
 
@@ -80,10 +94,7 @@ export interface EnvironmentPickerUIProps {
   onRequestMachineSetup?: (host: Host) => void;
   providers?: readonly SystemEnvironmentProvider[];
   projectless?: boolean;
-  providersByHostId?: ReadonlyMap<
-    string,
-    readonly SystemEnvironmentProvider[] | undefined
-  >;
+  providersByHostId?: EnvironmentProvidersByHostId;
   selectedProviderHostId?: string | null;
   inputsControlProviderIds?: ReadonlySet<string>;
   onSelectProvider?: (
@@ -94,76 +105,7 @@ export interface EnvironmentPickerUIProps {
   onSelectReuse?: () => void;
 }
 
-export const PROVIDER_INPUTS_CONTROL_MISSING_REASON =
-  "Needs its plugin's control";
-
 const NO_INPUTS_CONTROL_PROVIDER_IDS: ReadonlySet<string> = new Set();
-
-function providerValueSelected(
-  value: string,
-  provider: SystemEnvironmentProvider,
-): boolean {
-  return value === encodeProviderValue(provider.id);
-}
-
-function providerDisabledReason(
-  provider: SystemEnvironmentProvider,
-  inputsControlProviderIds: ReadonlySet<string>,
-): string | null {
-  if (provider.availability?.status === "unavailable") {
-    return provider.availability.message;
-  }
-  if (
-    !inputsControlProviderIds.has(provider.id) &&
-    providerInputsControlRequired(provider)
-  ) {
-    return PROVIDER_INPUTS_CONTROL_MISSING_REASON;
-  }
-  return null;
-}
-
-function providerDescription(
-  provider: SystemEnvironmentProvider,
-  inputsControlProviderIds: ReadonlySet<string>,
-): string | undefined {
-  if (provider.availability?.status === "setup-required") {
-    return provider.availability.message;
-  }
-  return (
-    providerDisabledReason(provider, inputsControlProviderIds) ?? undefined
-  );
-}
-
-function scopedProviders(
-  providers: readonly SystemEnvironmentProvider[],
-  providersByHostId: EnvironmentPickerUIProps["providersByHostId"],
-  hostId: string | null,
-  selection: { value: string; selectedProviderHostId: string | null },
-): readonly SystemEnvironmentProvider[] {
-  const hostProviders =
-    hostId === null || providersByHostId === undefined
-      ? providers
-      : mergeHostProviders(providers, providersByHostId.get(hostId) ?? []);
-  return hostProviders.filter(
-    (provider) =>
-      provider.availability?.status !== "unavailable" ||
-      (providerValueSelected(selection.value, provider) &&
-        selection.selectedProviderHostId === hostId),
-  );
-}
-
-function mergeHostProviders(
-  providers: readonly SystemEnvironmentProvider[],
-  resolved: readonly SystemEnvironmentProvider[],
-): readonly SystemEnvironmentProvider[] {
-  const hostProviders = new Map(
-    resolved.map((provider) => [provider.id, provider]),
-  );
-  return providers.flatMap((provider) => {
-    const hostProvider = hostProviders.get(provider.id);
-    return hostProvider === undefined ? [] : [hostProvider];
-  });
-}
 
 function contextualActiveHost({
   machines,
@@ -218,14 +160,18 @@ export function EnvironmentPickerUI({
   const [uncontrolledOpen, setUncontrolledOpen] = useState(
     defaultOpen ?? false,
   );
+
   const [searchQuery, setSearchQuery] = useState("");
   const [previewHostId, setPreviewHostId] = useState<string | null>(null);
+
   const [commandValueOverride, setCommandValueOverride] = useState<
     string | null
   >(null);
+
   const commandRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRef = useResetPickerScroll<HTMLDivElement>(searchQuery);
+
   const availableMachines = useMemo(
     () =>
       machines === null || machines === undefined
@@ -236,13 +182,16 @@ export function EnvironmentPickerUI({
           },
     [machines],
   );
+
   const availableHost = host?.type === "ephemeral" ? null : host;
   const hostId = availableHost?.id ?? null;
   const hasMultipleMachines = (availableMachines?.hosts.length ?? 0) > 1;
+
   const showSearch =
     hasMultipleMachines &&
     (availableMachines?.hosts.length ?? 0) >=
       MACHINE_CONTEXTUAL_MENU_MIN_OPTIONS;
+
   const environmentProviders = useMemo(
     () =>
       providers.filter(
@@ -252,20 +201,26 @@ export function EnvironmentPickerUI({
       ),
     [projectless, providers],
   );
+
   const isMachineMenu = hasMultipleMachines;
   const hostConnected = availableHost?.status === "connected";
+
   const hostUnavailableReason = !availableHost
     ? "No host connected"
     : !hostConnected
       ? "Host is offline"
       : null;
+
   const parsed = useMemo(() => parseEnvironmentValue(value), [value]);
 
   const selectedMachineName = useMemo(() => {
     if (!hasMultipleMachines || !availableMachines) return null;
+
     const machineHostId =
       parsed?.type === "provider" ? selectedProviderHostId : null;
+
     if (machineHostId === null) return null;
+
     return (
       availableMachines.hosts.find(
         (machineHost) => machineHost.id === machineHostId,
@@ -282,16 +237,20 @@ export function EnvironmentPickerUI({
         : undefined,
     [providers, parsed],
   );
+
   const hostlessProviders = providers.filter(
     (provider) =>
       provider.machineProviderId &&
       provider.requires.projectless === projectless,
   );
+
   const selectedHostlessProvider = hostlessProviders.find((provider) =>
     providerValueSelected(value, provider),
   );
+
   const contextualSelectedHostId =
     parsed?.type === "provider" ? selectedProviderHostId : hostId;
+
   const contextualHost =
     showSearch && availableMachines
       ? contextualActiveHost({
@@ -301,6 +260,7 @@ export function EnvironmentPickerUI({
           hasSelectedHostlessProvider: selectedHostlessProvider !== undefined,
         })
       : undefined;
+
   const selectedCommandValue = contextualHost
     ? `machine:${contextualHost.id}`
     : selectedHostlessProvider
@@ -310,6 +270,7 @@ export function EnvironmentPickerUI({
         : selectedProvider !== undefined && selectedProviderHostId !== null
           ? `provider:${selectedProviderHostId}:${selectedProvider.id}`
           : "";
+
   const selected = useMemo((): SelectedEnvironment => {
     if (
       selectedProvider !== undefined &&
@@ -317,6 +278,7 @@ export function EnvironmentPickerUI({
     ) {
       const showsHost =
         !selectedProvider.machineProviderId && selectedMachineName !== null;
+
       return {
         modeLabel: showsHost
           ? `${selectedMachineName} · ${selectedProvider.displayName}`
@@ -325,6 +287,7 @@ export function EnvironmentPickerUI({
         icon: pluginIconName(selectedProvider.icon),
       };
     }
+
     if (hostUnavailableReason !== null) {
       return {
         modeLabel: selectedMachineName
@@ -334,6 +297,7 @@ export function EnvironmentPickerUI({
         icon: "AlertTriangle" as const,
       };
     }
+
     if (parsed?.type === "reuse") {
       return {
         modeLabel: "Reuse",
@@ -341,6 +305,7 @@ export function EnvironmentPickerUI({
         icon: REUSE_ENVIRONMENT_ICON_NAME,
       };
     }
+
     return {
       modeLabel: "Environment",
       compactModeLabel: "Env",
@@ -353,16 +318,20 @@ export function EnvironmentPickerUI({
     selectedMachineName,
     selectedProvider,
   ]);
+
   const pickerOpen = open ?? uncontrolledOpen;
+
   const handleOpenChange = (nextOpen: boolean) => {
     setUncontrolledOpen(nextOpen);
     onOpenChange?.(nextOpen);
     setCommandValueOverride(null);
+
     if (!nextOpen) {
       setSearchQuery("");
       setPreviewHostId(null);
     }
   };
+
   const selectProvider = (
     provider: SystemEnvironmentProvider,
     providerHostId: string | null,
@@ -370,10 +339,12 @@ export function EnvironmentPickerUI({
     onSelectProvider?.(provider, providerHostId);
     handleOpenChange(false);
   };
+
   const requestMachineSetup = (machineHost: Host) => {
     onRequestMachineSetup?.(machineHost);
     handleOpenChange(false);
   };
+
   const selectReuse = () => {
     onSelectReuse?.();
     handleOpenChange(false);
@@ -393,7 +364,6 @@ export function EnvironmentPickerUI({
           className={cn(
             OPTION_BASE_CLASS_NAME,
             !disabled && OPTION_INTERACTIVE_CLASS_NAME,
-            !disabled && LIST_HOVER_TRANSITION,
             muted && OPTION_MUTED_CLASS_NAME,
             disabled && "cursor-default disabled:opacity-100",
             className,
@@ -699,6 +669,7 @@ function EnvironmentOptionsSection({
             provider,
             inputsControlProviderIds,
           );
+
           return (
             <EnvironmentMenuItem
               key={provider.id}
@@ -750,10 +721,12 @@ function MachineGroupedEnvironmentOptions({
   onSelectProvider,
 }: MachineGroupedEnvironmentOptionsProps) {
   const now = Date.now();
+
   const orderedHosts = useMemo(
     () => orderLocalHostFirst(machines.hosts, machines.localDaemonHostId),
     [machines.hosts, machines.localDaemonHostId],
   );
+
   return (
     <>
       {orderedHosts.map((machineHost) => (
@@ -810,6 +783,7 @@ function MachineContextualEnvironmentOptions({
 }: MachineContextualEnvironmentOptionsProps) {
   const machineListRef = useResetPickerScroll<HTMLDivElement>(searchQuery);
   const now = Date.now();
+
   const orderedHosts = useMemo(
     () =>
       [...machines.hosts].sort(
@@ -819,13 +793,16 @@ function MachineContextualEnvironmentOptions({
       ),
     [machines.hosts, machines.localDaemonHostId],
   );
+
   const filteredHosts = useMemo(
     () => searchMachineHosts(orderedHosts, searchQuery),
     [orderedHosts, searchQuery],
   );
+
   const selectedHostlessProvider = hostlessProviders.find((provider) =>
     providerValueSelected(value, provider),
   );
+
   const activeHost = contextualActiveHost({
     machines: { ...machines, hosts: orderedHosts },
     previewHostId,
@@ -854,9 +831,11 @@ function MachineContextualEnvironmentOptions({
             />
           ))}
           {filteredHosts.length === 0 ? (
-            <div className="px-2 py-[0.3125rem] text-xs text-muted-foreground max-md:pointer-coarse:py-2">
-              No machines found
-            </div>
+            <PickerEmptyState
+              icon="Search"
+              message={pickerNoMatchMessage("machines", searchQuery)}
+              className="py-3"
+            />
           ) : null}
           {onSelectProvider
             ? hostlessProviders.map((provider) => (
@@ -948,7 +927,7 @@ function MachineChoiceItem({
         data-machine-target-content=""
         className={cn(MACHINE_TARGET_CONTENT_CLASS_NAME, "items-center")}
       >
-        <MachineStatusDot
+        <TitledMachineStatusDot
           connected={host.status === "connected"}
           className={COARSE_POINTER_DOT_SIZE_CLASS}
         />
@@ -963,6 +942,9 @@ function MachineChoiceItem({
       {isThisMachine ? (
         <span className={MACHINE_BADGE_CLASS_NAME}>this machine</span>
       ) : null}
+      {host.status === "connected" ? null : (
+        <span className="shrink-0 text-2xs text-muted-foreground">Offline</span>
+      )}
       <Icon
         name="Check"
         className={cn(
@@ -1008,16 +990,16 @@ function MachineSection({
   const hostProviders = environmentProviders;
   const selectable = connected && host.lifecycle.phase === "active";
   const updateStatus = formatHostUpdateStatus(host);
+
   const statusLabel =
     updateStatus ??
-    (!connected && host.lastSeenAt !== null
-      ? `last seen ${formatRelativeTime({ timestamp: host.lastSeenAt, now })}`
-      : null);
+    (connected ? null : formatOfflineMachineStatus(host.lastSeenAt, now));
+
   return (
     <CommandGroup
       heading={
         <span className="flex items-center gap-1.5">
-          {contextual ? null : <MachineStatusDot connected={connected} />}
+          {contextual ? null : <TitledMachineStatusDot connected={connected} />}
           <span className="min-w-0 truncate">
             {contextual ? `On ${host.name}` : host.name}
           </span>
@@ -1043,6 +1025,7 @@ function MachineSection({
               provider,
               inputsControlProviderIds,
             );
+
             return (
               <EnvironmentMenuItem
                 key={provider.id}
@@ -1133,6 +1116,7 @@ function EnvironmentMenuItem({
         )}
       />
     );
+
   return (
     <CommandItem
       value={value}

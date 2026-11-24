@@ -1,3 +1,4 @@
+import { purgeHistoryCacheThread } from "../threads/history-cache-writer.js";
 import {
   requestEnvironmentRemoval,
   sweepProviderEnvironment,
@@ -15,8 +16,8 @@ import {
   projects,
   threads,
   type DbQueryConnection,
-} from "@bb/db";
-import type { Thread, ThreadStatus } from "@bb/domain";
+} from "@omnyo/db";
+import type { Thread, ThreadStatus } from "@omnyo/domain";
 import type {
   AppDeps,
   LoggedPendingInteractionWorkSessionDeps,
@@ -36,6 +37,7 @@ interface ProjectDeletionThread {
   environmentId: string | null;
   id: string;
   status: ThreadStatus;
+  storageDeletedAt: number | null;
 }
 
 type ProjectDeletionDeps = LoggedPendingInteractionWorkSessionDeps &
@@ -58,6 +60,7 @@ function listProjectDeletionThreads(
       environmentId: threads.environmentId,
       id: threads.id,
       status: threads.status,
+      storageDeletedAt: threads.storageDeletedAt,
     })
     .from(threads)
     .where(
@@ -71,6 +74,7 @@ function tombstoneProjectThreadsForDeletion(
   args: ProjectDeletionArgs,
 ): { deletedThreads: Thread[]; projectThreads: ProjectDeletionThread[] } {
   const notificationBuffer = new NotificationBuffer();
+
   const result = deps.db.transaction(
     (tx) => {
       markProjectDeleted(tx, notificationBuffer, {
@@ -79,23 +83,29 @@ function tombstoneProjectThreadsForDeletion(
 
       const deletedThreads: Thread[] = [];
       const threadsForDeletion = listProjectDeletionThreads(tx, args);
+
       for (const thread of threadsForDeletion) {
         if (thread.deletedAt === null) {
           const deletedThread = markThreadDeleted(tx, notificationBuffer, {
             threadId: thread.id,
           });
+
           if (deletedThread) deletedThreads.push(deletedThread);
         }
       }
+
       return { deletedThreads, projectThreads: threadsForDeletion };
     },
     { behavior: "immediate" },
   );
+
   notificationBuffer.flushInto(deps.hub);
+
   for (const thread of result.deletedThreads) {
     emitPluginThreadDeleted(thread);
     cancelAbandonedProviderCreations(deps, thread.id);
   }
+
   return result;
 }
 
@@ -123,17 +133,30 @@ export function beginProjectDeletion(
   const projectEnvironments = listEnvironments(deps.db, {
     projectId: args.projectId,
   });
+
   const environmentsById = new Map(
     projectEnvironments.map((environment) => [environment.id, environment]),
   );
+
   const { projectThreads } = tombstoneProjectThreadsForDeletion(deps, args);
+
   for (const thread of projectThreads) {
     const environment = thread.environmentId
       ? (environmentsById.get(thread.environmentId) ??
         getEnvironment(deps.db, thread.environmentId))
       : null;
-    requestThreadStorageDeletion(deps, thread, environment);
+
+    requestUnfinishedThreadStorageDeletion(deps, thread, environment);
   }
+}
+
+function requestUnfinishedThreadStorageDeletion(
+  deps: ProjectDeletionDeps,
+  thread: ProjectDeletionThread,
+  environment: { hostId: string; id: string } | null,
+): void {
+  if (thread.storageDeletedAt !== null) return;
+  requestThreadStorageDeletion(deps, thread, environment);
 }
 
 export function requestProjectDeletionAdvance(
@@ -168,12 +191,15 @@ export async function advanceProjectDeletion(
   const projectEnvironments = listEnvironments(deps.db, {
     projectId: args.projectId,
   });
+
   const environmentsById = new Map(
     projectEnvironments.map((environment) => [environment.id, environment]),
   );
+
   const projectThreads = listProjectDeletionThreads(deps.db, {
     projectId: args.projectId,
   });
+
   for (const thread of projectThreads) {
     const environment = thread.environmentId
       ? (environmentsById.get(thread.environmentId) ??
@@ -184,11 +210,14 @@ export async function advanceProjectDeletion(
       const deletedThread = markThreadDeleted(deps.db, deps.hub, {
         threadId: thread.id,
       });
+
       if (deletedThread) emitPluginThreadDeleted(deletedThread);
     }
+
+    await purgeHistoryCacheThread(deps.db, thread.id);
     cancelAbandonedProviderCreations(deps, thread.id);
     deps.terminalSessions.closeDeletedThreadTerminals({ threadId: thread.id });
-    requestThreadStorageDeletion(deps, thread, environment);
+    requestUnfinishedThreadStorageDeletion(deps, thread, environment);
   }
 
   if (hasRemainingProjectThreads(deps, args.projectId)) {
@@ -197,13 +226,17 @@ export async function advanceProjectDeletion(
 
   for (const environment of projectEnvironments) {
     if (environment.environmentProviderId === null) continue;
+
     if (!requestEnvironmentRemoval(deps, environment.id)) return false;
     await sweepProviderEnvironment(deps, environment.id);
     const current = getEnvironment(deps.db, environment.id);
+
     if (current !== null && current.teardownStatus !== "removed") return false;
   }
+
   deleteProject(deps.db, deps.hub, args.projectId);
   await deleteProjectAttachments(deps.config.dataDir, args.projectId);
+
   return true;
 }
 

@@ -41,10 +41,12 @@ describe("internal skill tree routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-unknown-skill-tree",
       });
+
       const response = await harness.app.request(
         `/internal/skills/tree/${"0".repeat(64)}`,
         { headers: internalAuthHeaders(harness, { hostId: host.id }) },
       );
+
       expect(response.status).toBe(404);
     });
   });

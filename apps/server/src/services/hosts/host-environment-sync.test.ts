@@ -5,8 +5,8 @@ import {
   setAppSettings,
   updateHost,
   upsertHost,
-} from "@bb/db";
-import { defaultAppSettings } from "@bb/domain";
+} from "@omnyo/db";
+import { defaultAppSettings } from "@omnyo/domain";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,31 +14,39 @@ import { expect, it, vi } from "vitest";
 import { NotificationHub } from "../../ws/hub.js";
 import { replaceMachineEnvironment } from "../machines/environment-settings.js";
 import { HostEnvironmentSync } from "./host-environment-sync.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 it("synchronizes configured variables to every connected host", async () => {
   const db = createConnection(":memory:");
-  const dataDir = await mkdtemp(join(tmpdir(), "bb-machine-env-sync-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "omnyo-machine-env-sync-"));
+  const vault = await openSecretVault(dataDir);
   const hub = new NotificationHub();
+
   try {
     migrate(db);
     setAppSettings(db, {
       ...defaultAppSettings,
       machineGitCredentialsEnabled: false,
     });
+
     for (const id of ["remote", "local"]) {
       upsertHost(db, noopNotifier, { id, name: id });
       updateHost(db, noopNotifier, id, { machineProviderId: "manual" });
     }
+
     await writeFile(join(dataDir, "host-id"), "local");
-    await replaceMachineEnvironment(db, dataDir, {
+    await replaceMachineEnvironment(db, vault, {
       variables: [{ name: "MACHINE_VALUE", value: "first", note: null }],
     });
+
     const sync = new HostEnvironmentSync({
       db,
       config: { dataDir },
       hub,
+      vault,
       logger: { warn: vi.fn() },
     });
+
     expect((await sync.snapshot("remote")).entries).toContainEqual(
       expect.objectContaining({ name: "MACHINE_VALUE", value: "first" }),
     );
@@ -61,7 +69,7 @@ it("synchronizes configured variables to every connected host", async () => {
         ],
       },
     });
-    await replaceMachineEnvironment(db, dataDir, {
+    await replaceMachineEnvironment(db, vault, {
       variables: [{ name: "MACHINE_VALUE", value: "second", note: null }],
     });
     hub.notifySystem(["config-changed"]);
@@ -69,7 +77,7 @@ it("synchronizes configured variables to every connected host", async () => {
     expect(JSON.parse(sent[1]!)).toMatchObject({
       environment: { entries: [expect.objectContaining({ value: "second" })] },
     });
-    await replaceMachineEnvironment(db, dataDir, { variables: [] });
+    await replaceMachineEnvironment(db, vault, { variables: [] });
     hub.notifySystem(["config-changed"]);
     await vi.waitFor(() => expect(sent).toHaveLength(3));
     expect(JSON.parse(sent[2]!)).toMatchObject({

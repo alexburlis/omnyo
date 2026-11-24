@@ -1,11 +1,11 @@
-import type { TimelineConversationAttachments } from "@bb/server-contract";
+import type { TimelineConversationAttachments } from "@omnyo/server-contract";
 import type { ThreadTimelinePluginMessageAction } from "@/components/thread/timeline/types";
-import type { PromptMentionResource, PromptTextMention } from "@bb/domain";
-import { renderTemplate } from "@bb/templates";
+import type { PromptMentionResource, PromptTextMention } from "@omnyo/domain";
+import { renderTemplate } from "@omnyo/templates";
 import type { ReactNode } from "react";
 import { ConversationMessageContent } from "@/components/thread/timeline/ConversationMessageContent";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import {
   StoryDraftPromptBox,
   useStoryPromptDraft,
@@ -15,6 +15,8 @@ import { StoryCard, StoryRow } from "../../../../../.ladle/story-card";
 export default {
   title: "thread/timeline/rows/User Message",
 };
+
+const STORY_TIMESTAMP = Date.UTC(2026, 8, 30, 16, 5);
 
 interface TimelineStageProps {
   children: ReactNode;
@@ -39,27 +41,35 @@ function TimelineStage({
 const resolveImageSrc = (path: string) => path;
 
 const acceptedMessage = {
+  clientRequestId: null,
   isGrouped: false,
   kind: "message" as const,
   status: "accepted" as const,
 };
+
 const RAW_THREAD_ID = "thr_dcwivn5n8w";
+
 const rawThreadIdTarget = makeThreadListEntry({
   id: RAW_THREAD_ID,
   projectId: "proj_demo",
   title: "Raw thread ID mention target",
   titleFallback: "Raw thread ID mention target",
 });
+
 const pendingSteer = {
+  clientRequestId: null,
   isGrouped: false,
   kind: "steer" as const,
   status: "pending" as const,
 };
+
 const acceptedSteer = {
+  clientRequestId: null,
   isGrouped: false,
   kind: "steer" as const,
   status: "accepted" as const,
 };
+
 const handleStoryMessageEdit = () => undefined;
 
 interface StoryMentionArgs {
@@ -74,9 +84,11 @@ function storyMention({
   token,
 }: StoryMentionArgs): PromptTextMention {
   const start = text.indexOf(token);
+
   if (start < 0) {
     throw new Error(`Missing story mention token: ${token}`);
   }
+
   return {
     start,
     end: start + token.length,
@@ -141,7 +153,7 @@ function threadMentionResource(
 
 const agentInitiatedMessage = buildMessage(
   [
-    '[bb message from thread:thr_ux3h8sxg65; reply with `bb thread tell thr_ux3h8sxg65 "<your response>"`]',
+    '[Omnyo message from thread:thr_ux3h8sxg65; reply with `omnyo thread tell thr_ux3h8sxg65 "<your response>"`]',
     "",
     "Fixed both blockers on @apps/server/src/services/manager/manager-system-messages.ts. No merge or push.",
     "",
@@ -177,7 +189,7 @@ const agentInitiatedMessage = buildMessage(
 
 const agentSteerMessage = buildMessage(
   [
-    '[bb message from thread:thr_h4u3fgr6be; reply with `bb thread tell thr_h4u3fgr6be "<your response>"`]',
+    '[Omnyo message from thread:thr_h4u3fgr6be; reply with `omnyo thread tell thr_h4u3fgr6be "<your response>"`]',
     "",
     "Committed the two scoped fixes touching @apps/app/src/components/thread/timeline/ConversationMessageContent.tsx. Worktree is clean.",
   ].join("\n"),
@@ -290,7 +302,7 @@ const parentChildSystemMessageFixtures = [
       renderTemplate("systemMessageChildThreadNeedsAttention", {
         blockerSummary: [
           "Blocked on command approval:",
-          "Command: git push origin bb/child-thread-parent-message-plan",
+          "Command: git push origin omnyo/child-thread-parent-message-plan",
         ].join("\n"),
         threadMention: "@thread:thr_deployer",
       }),
@@ -313,7 +325,7 @@ const parentChildSystemMessageFixtures = [
         updates: [
           "@thread:thr_schema completed:",
           "",
-          "Migrated the thread ownership queries to targeted joins and added regression coverage. Validation passed for @bb/server.",
+          "Migrated the thread ownership queries to targeted joins and added regression coverage. Validation passed for @omnyo/server.",
         ].join("\n"),
       }),
       [
@@ -413,7 +425,7 @@ const parentChildSystemMessageFixtures = [
 
 const longSystemMessage = buildMessage(
   [
-    "[bb system]",
+    "[Omnyo system]",
     "",
     "@thread:thr_cpf5sq7pyr completed:",
     "",
@@ -430,8 +442,8 @@ const longSystemMessage = buildMessage(
     "- Sweep does not queue duplicate stop RPCs while one is already in flight.",
     "",
     "Validation:",
-    "- `pnpm exec turbo run test --filter=@bb/server -- test/threads/thread-stop-retry.test.ts` passed, 2 tests.",
-    "- `pnpm exec turbo run typecheck --filter=@bb/server` passed.",
+    "- `pnpm exec turbo run test --filter=@omnyo/server -- test/threads/thread-stop-retry.test.ts` passed, 2 tests.",
+    "- `pnpm exec turbo run typecheck --filter=@omnyo/server` passed.",
     "",
     "Blockers: none. Worktree status: clean.",
   ].join("\n"),
@@ -493,6 +505,7 @@ const mixedAttachments: TimelineConversationAttachments = {
 
 const mentionedMessageText =
   "Ask @thread:thr_parent and @apps/app/src/components/promptbox/PromptBoxInternal.tsx to review the prompt mention flow.";
+
 const mentionedMessageMentions: PromptTextMention[] = [
   storyMention({
     text: mentionedMessageText,
@@ -500,7 +513,7 @@ const mentionedMessageMentions: PromptTextMention[] = [
     resource: {
       kind: "thread",
       threadId: "thr_parent",
-      projectId: "proj_bb",
+      projectId: "proj_omnyo",
       label: "Prompt UX thread",
     },
   }),
@@ -530,6 +543,9 @@ export function Overview() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_1"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -537,7 +553,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="hi"
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             turnRequest={acceptedMessage}
@@ -558,6 +574,9 @@ export function Overview() {
           <TimelineStage>
             <ConversationMessageContent
               role="user"
+              id="user_message_2"
+              threadId="thr_user_messages"
+              turnId={null}
               initiator="user"
               senderThreadId={null}
               senderThreadTitle={null}
@@ -565,7 +584,7 @@ export function Overview() {
               systemMessageKind="unlabeled"
               systemMessageSubject={null}
               text={`Continue in ${RAW_THREAD_ID}; exact inline-code reference \`${RAW_THREAD_ID}\`.`}
-              timestamp={0}
+              timestamp={STORY_TIMESTAMP}
               attachments={null}
               mentions={[]}
               turnRequest={acceptedMessage}
@@ -580,6 +599,9 @@ export function Overview() {
         <TimelineStage>
           <ConversationMessageContent
             role="user"
+            id="user_message_3"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -587,7 +609,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="Walk me through how ThreadDetailView wires the prompt context banner."
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             turnRequest={acceptedMessage}
@@ -599,6 +621,9 @@ export function Overview() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_4"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -606,7 +631,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="Walk me through how ThreadDetailView wires the prompt context banner."
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             turnRequest={acceptedMessage}
@@ -621,6 +646,9 @@ export function Overview() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_5"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -628,10 +656,10 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text={mentionedMessageText}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={mentionedMessageMentions}
-            projectId="proj_bb"
+            projectId="proj_omnyo"
             turnRequest={acceptedMessage}
             onAddToChat={handleAddToChat}
           />
@@ -644,6 +672,9 @@ export function Overview() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_6"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -651,7 +682,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text={longMarkdownText}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             turnRequest={acceptedMessage}
@@ -666,6 +697,9 @@ export function Overview() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_7"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -673,7 +707,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="Hold on — also include the queue API in that audit, please."
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             turnRequest={pendingSteer}
@@ -688,6 +722,9 @@ export function Overview() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_8"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -695,7 +732,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="Hold on — also include the queue API in that audit, please."
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             turnRequest={acceptedSteer}
@@ -707,6 +744,9 @@ export function Overview() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_9"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -714,7 +754,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="Repro of the layout regression in the prompt context banner."
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={singleImageAttachments}
             mentions={[]}
             turnRequest={acceptedMessage}
@@ -730,6 +770,9 @@ export function Overview() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_10"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -737,7 +780,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="Three screenshots from the design review and the spec doc."
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={mixedAttachments}
             mentions={[]}
             turnRequest={acceptedMessage}
@@ -760,6 +803,9 @@ export function Overview() {
         <TimelineStage>
           <ConversationMessageContent
             role="user"
+            id="user_message_11"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="agent"
             senderThreadId="thr_ux3h8sxg65"
             senderThreadTitle="Render Rich Thread Names"
@@ -767,7 +813,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text={agentInitiatedMessage.text}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={agentInitiatedMessage.mentions}
             projectId="proj_demo"
@@ -782,6 +828,9 @@ export function Overview() {
         <TimelineStage>
           <ConversationMessageContent
             role="user"
+            id="user_message_12"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="agent"
             onTitleAction={() => () => undefined}
             senderThreadId="thr_side_chat"
@@ -790,7 +839,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text={agentInitiatedMessage.text}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={agentInitiatedMessage.mentions}
             projectId="proj_demo"
@@ -805,6 +854,9 @@ export function Overview() {
         <div className="flex w-full max-w-[760px] flex-col gap-3">
           <ConversationMessageContent
             role="user"
+            id="user_message_13"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="agent"
             senderThreadId="thr_h4u3fgr6be"
             senderThreadTitle="Full QA post-rebase: prompt timeline app data voice"
@@ -812,7 +864,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text={agentSteerMessage.text}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={agentSteerMessage.mentions}
             projectId="proj_demo"
@@ -820,6 +872,9 @@ export function Overview() {
           />
           <ConversationMessageContent
             role="user"
+            id="user_message_14"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="system"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -827,7 +882,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text={systemAssignedMessage.text}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={systemAssignedMessage.mentions}
             projectId="proj_demo"
@@ -842,6 +897,9 @@ export function Overview() {
         <TimelineStage>
           <ConversationMessageContent
             role="user"
+            id="user_message_15"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="system"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -849,7 +907,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text={systemAssignedMessage.text}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={systemAssignedMessage.mentions}
             projectId="proj_demo"
@@ -864,6 +922,9 @@ export function Overview() {
         <TimelineStage>
           <ConversationMessageContent
             role="user"
+            id="user_message_16"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="system"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -871,7 +932,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text={systemChildOutcomeBatchMessage.text}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={systemChildOutcomeBatchMessage.mentions}
             projectId="proj_demo"
@@ -886,6 +947,9 @@ export function Overview() {
         <TimelineStage>
           <ConversationMessageContent
             role="user"
+            id="user_message_17"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="system"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -893,7 +957,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text={longSystemMessage.text}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={longSystemMessage.mentions}
             projectId="proj_demo"
@@ -941,6 +1005,9 @@ export function ActionOverflow() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_18"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -948,7 +1015,7 @@ export function ActionOverflow() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="Sounds good"
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             turnRequest={acceptedMessage}
@@ -962,6 +1029,9 @@ export function ActionOverflow() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_19"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -969,7 +1039,7 @@ export function ActionOverflow() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="Ok"
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             turnRequest={acceptedMessage}
@@ -985,6 +1055,9 @@ export function ActionOverflow() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_20"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -992,7 +1065,7 @@ export function ActionOverflow() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="Ok"
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             turnRequest={acceptedMessage}
@@ -1009,6 +1082,9 @@ export function ActionOverflow() {
         <TimelineStage revealMessageActions>
           <ConversationMessageContent
             role="user"
+            id="user_message_21"
+            threadId="thr_user_messages"
+            turnId={null}
             initiator="user"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -1016,7 +1092,7 @@ export function ActionOverflow() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text={longMarkdownText}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             turnRequest={acceptedMessage}
@@ -1038,6 +1114,9 @@ export function ParentChildSystemMessages() {
           <TimelineStage>
             <ConversationMessageContent
               role="user"
+              id="user_message_22"
+              threadId="thr_user_messages"
+              turnId={null}
               initiator="system"
               senderThreadId={null}
               senderThreadTitle={null}
@@ -1045,7 +1124,7 @@ export function ParentChildSystemMessages() {
               systemMessageKind="unlabeled"
               systemMessageSubject={null}
               text={fixture.message.text}
-              timestamp={0}
+              timestamp={STORY_TIMESTAMP}
               attachments={null}
               mentions={fixture.message.mentions}
               projectId="proj_demo"

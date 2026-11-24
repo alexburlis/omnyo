@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { z } from "zod";
 import { experimental_killAllChildrenForTests, handleLine } from "./bridge.js";
 import {
@@ -43,9 +43,13 @@ const STANDARD_CATALOG = {
 };
 
 let harness: ReturnType<typeof createBridgeJsonRpcTestHarness>;
+
 let workspaceDir: string;
+
 let requestLogPath: string;
+
 let nextRequestId = 1;
+
 let turnCount = 0;
 
 function useScript(script: Record<string, unknown>): void {
@@ -77,11 +81,12 @@ function publishedDaybreakValues(): unknown[] {
           }[];
         }
       | undefined;
+
     return (params?.deltas ?? [])
       .filter(
         (delta) =>
           delta.kind === "extension.state" &&
-          delta.extensionKind === "bb/session-options",
+          delta.extensionKind === "core/session-options",
       )
       .map((delta) => delta.payload);
   });
@@ -96,6 +101,7 @@ async function request(
   harness.sendRequest(id, method, params);
   const response = await harness.waitForResponse(id);
   expect(response.error).toBeUndefined();
+
   return response.result;
 }
 
@@ -111,6 +117,7 @@ async function startThread(
       ...(sessionOptions === undefined ? {} : { sessionOptions }),
     },
   });
+
   return z.object({ providerThreadId: z.string() }).parse(result)
     .providerThreadId;
 }
@@ -134,7 +141,7 @@ async function startTurn(
 }
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-daybreak-ws-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-daybreak-ws-"));
   requestLogPath = join(workspaceDir, "requests.jsonl");
   harness = createBridgeJsonRpcTestHarness(handleLine);
 });
@@ -154,52 +161,47 @@ afterEach(async () => {
   rmSync(workspaceDir, { recursive: true, force: true });
 });
 
-it("declares the Daybreak switch per model and moves the alias out of the main list", async () => {
+it("lists Daybreak as a selectable model without a switch", async () => {
   useScript({ modelList: DAYBREAK_CATALOG });
 
   const result = z
     .object({
       models: z.array(
-        z.object({ model: z.string(), sessionOptions: z.unknown() }),
+        z.object({ model: z.string(), sessionOptions: z.unknown().optional() }),
       ),
       selectedOnlyModels: z.array(z.object({ model: z.string() })),
     })
     .parse(await request("model/list", {}));
 
-  expect(
-    result.models.map((model) => [model.model, model.sessionOptions]),
-  ).toEqual([
-    [
-      "gpt-6-astra",
-      [expect.objectContaining({ id: "daybreak", value: false, fixed: true })],
-    ],
-    ["gpt-6-sol", [expect.not.objectContaining({ fixed: true })]],
-    ["gpt-6-red", [expect.not.objectContaining({ fixed: true })]],
-  ]);
-  expect(result.selectedOnlyModels.map((model) => model.model)).toEqual([
+  expect(result.models.map((model) => model.model)).toEqual([
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-red",
     "gpt-daybreak-blue-latest",
   ]);
+  expect(
+    result.models.every((model) => model.sessionOptions === undefined),
+  ).toBe(true);
+  expect(result.selectedOnlyModels).toEqual([]);
 }, 30_000);
 
-it("starts a thread with Daybreak on, asks for the model's Daybreak program each turn, and reports the switch", async () => {
+it("chooses the cyber program from the selected model", async () => {
   useScript({ modelList: DAYBREAK_CATALOG });
 
-  const providerThreadId = await startThread({ daybreak: true });
-  await startTurn(providerThreadId, "gpt-6-sol", { daybreak: true });
+  const providerThreadId = await startThread();
+  await startTurn(providerThreadId, "gpt-daybreak-blue-latest");
+  await startTurn(providerThreadId, "gpt-6-sol");
   await startTurn(providerThreadId, "gpt-6-red");
   await startTurn(providerThreadId, "gpt-6-astra");
 
-  expect(childRequests("thread/start")[0]?.daybreakEnabled).toBe(true);
   expect(childRequests("thread/metadata/update")).toEqual([]);
   expect(
     childRequests("turn/start").map((params) => params.cyberAccessProgram),
-  ).toEqual(["daybreakBlue", "daybreakRed", undefined]);
-  expect(publishedDaybreakValues()).toEqual([
-    { options: [expect.objectContaining({ id: "daybreak", value: true })] },
-  ]);
+  ).toEqual(["daybreakBlue", undefined, undefined, undefined]);
+  expect(publishedDaybreakValues()).toEqual([{ options: [] }]);
 }, 30_000);
 
-it("leaves the program to Codex until the thread has a Daybreak choice, then saves each change and asks for the matching program", async () => {
+it("preserves old Daybreak choices but uses the selected model for the program", async () => {
   useScript({ modelList: DAYBREAK_CATALOG });
 
   const providerThreadId = await startThread();
@@ -218,13 +220,8 @@ it("leaves the program to Codex until the thread has a Daybreak choice, then sav
   ).toEqual([true, false]);
   expect(
     childRequests("turn/start").map((params) => params.cyberAccessProgram),
-  ).toEqual([undefined, "daybreakBlue", "standard"]);
-  expect(
-    publishedDaybreakValues().map(
-      (payload) =>
-        (payload as { options: { value: boolean }[] }).options[0]?.value,
-    ),
-  ).toEqual([false, true, false]);
+  ).toEqual([undefined, "standard", "standard"]);
+  expect(publishedDaybreakValues()).toEqual([{ options: [] }]);
 }, 30_000);
 
 it("still runs the turn with the new choice when Codex cannot save it", async () => {
@@ -235,7 +232,7 @@ it("still runs the turn with the new choice when Codex cannot save it", async ()
 
   expect(
     childRequests("turn/start").map((params) => params.cyberAccessProgram),
-  ).toEqual(["daybreakBlue"]);
+  ).toEqual(["standard"]);
 }, 30_000);
 
 it("restores the choice Codex stored when a thread resumes", async () => {
@@ -248,21 +245,21 @@ it("restores the choice Codex stored when a thread resumes", async () => {
     instructionMode: "append",
     options: { ...FULL_ACCESS_SESSION_OPTIONS },
   });
+
   const { providerThreadId } = z
     .object({ providerThreadId: z.string() })
     .parse(result);
+
   await startTurn(providerThreadId, "gpt-6-sol");
 
   expect(childRequests("thread/metadata/update")).toEqual([]);
   expect(
     childRequests("turn/start").map((params) => params.cyberAccessProgram),
-  ).toEqual(["daybreakBlue"]);
-  expect(publishedDaybreakValues()).toEqual([
-    { options: [expect.objectContaining({ value: true })] },
-  ]);
+  ).toEqual(["standard"]);
+  expect(publishedDaybreakValues()).toEqual([{ options: [] }]);
 }, 30_000);
 
-it("sends no program and reports no switch for an account without Daybreak", async () => {
+it("sends no program and clears the old switch for an account without Daybreak", async () => {
   useScript({ modelList: STANDARD_CATALOG });
 
   const providerThreadId = await startThread({ daybreak: true });
@@ -271,7 +268,7 @@ it("sends no program and reports no switch for an account without Daybreak", asy
   expect(childRequests("turn/start")[0]).not.toHaveProperty(
     "cyberAccessProgram",
   );
-  expect(publishedDaybreakValues()).toEqual([]);
+  expect(publishedDaybreakValues()).toEqual([{ options: [] }]);
 }, 30_000);
 
 it("does not hold a turn for the model list on a thread with no Daybreak choice", async () => {

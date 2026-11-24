@@ -5,6 +5,7 @@ export function registerPaneComposerFocus(
   focus: () => void,
 ): () => void {
   composerFocusTargets.set(element, focus);
+
   return () => {
     composerFocusTargets.delete(element);
   };
@@ -12,6 +13,7 @@ export function registerPaneComposerFocus(
 
 export function focusPaneComposer(element: HTMLElement): void {
   const focus = composerFocusTargets.get(element);
+
   if (focus) focus();
   else element.focus({ preventScroll: true });
 }

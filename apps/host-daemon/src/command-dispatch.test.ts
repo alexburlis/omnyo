@@ -1,14 +1,14 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentRuntime } from "@bb/agent-runtime";
+import type { AgentRuntime } from "@omnyo/agent-runtime";
 import type {
   HostDaemonInjectedSkillSource,
   ProviderCliInstallEvent,
   ProviderCliStatus,
-} from "@bb/host-daemon-contract";
-import type { HostWorkspace } from "@bb/host-workspace";
-import { createDeferredPromise } from "@bb/test-helpers";
+} from "@omnyo/host-daemon-contract";
+import type { HostWorkspace } from "@omnyo/host-workspace";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   dispatchCommand,
@@ -17,6 +17,7 @@ import {
 import {
   DISPATCH_TEST_BRIDGE_LAUNCH,
   dispatchTestRuntimeBridgeLaunch,
+  createTestWorkspaceReads,
   makeDispatchOptions,
   silentLogger,
   fetchDispatchTestArtifact,
@@ -25,9 +26,27 @@ import {
 import type { CommandOf } from "./command-dispatch-support.js";
 import { PROVIDER_INSTALLATION_GATE_TTL_MS } from "./provider-installation-gate.js";
 import { RuntimeManager } from "./runtime-manager.js";
+import {
+  createFixture as createServerMoveFixture,
+  registerServerMoveFixtureCleanup,
+} from "./server-move/test-fixture.js";
 import { stageInjectedSkillSources } from "./injected-skills.js";
 
-const WORKSPACE_PATH = "/tmp/bb-command-dispatch-test";
+const WORKSPACE_PATH = "/tmp/omnyo-command-dispatch-test";
+
+registerServerMoveFixtureCleanup();
+
+async function createUpdateAdmission() {
+  return (await createServerMoveFixture()).createService({
+    getRuntimeUpdateActivity: () => ({
+      commands: 0,
+      runtimes: 0,
+      terminals: 0,
+      pluginHosts: 0,
+      interactions: 0,
+    }),
+  });
+}
 
 interface WriteInjectedSkillSourceArgs {
   dataDir: string;
@@ -48,6 +67,7 @@ const tempDirs: string[] = [];
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -77,6 +97,7 @@ async function writeInjectedSkillSource(
     ].join("\n"),
     "utf8",
   );
+
   return {
     kind: "workspace-path",
     sourceType: "project",
@@ -90,25 +111,31 @@ async function writeInjectedSkillSource(
 async function setupBusySkillCatalogEnvironment(args: {
   activeThreadId: string;
 }): Promise<BusySkillCatalogFixture> {
-  const dataDir = await makeTempDir("bb-command-dispatch-skills-");
+  const dataDir = await makeTempDir("omnyo-command-dispatch-skills-");
+
   const source = await writeInjectedSkillSource({
     dataDir,
     token: "first-token",
   });
+
   const runtime = createRuntime();
   const createRuntimeSpy = vi.fn(() => runtime);
+
   const manager = new RuntimeManager({
     dataDir,
     createRuntime: createRuntimeSpy,
     provisionWorkspace: async () => createWorkspace(),
   });
+
   const entry = await manager.ensureEnvironment({
     environmentId: "env-1",
     injectedSkillSources: [source],
     workspacePath: WORKSPACE_PATH,
   });
+
   runtime.setActiveTurn(args.activeThreadId, "turn-busy-1");
   await writeInjectedSkillSource({ dataDir, token: "second-token" });
+
   return {
     createRuntimeSpy,
     dataDir,
@@ -152,10 +179,12 @@ interface FakeDispatchRuntime extends AgentRuntime {
 function createRuntime(): FakeDispatchRuntime {
   const activeTurnsByThreadId = new Map<string, string>();
   const hostedThreadIds = new Set<string>();
+
   return {
     ensureProvider: vi.fn(async () => undefined),
     startThread: vi.fn(async (args: { threadId: string }) => {
       hostedThreadIds.add(args.threadId);
+
       return { providerThreadId: "provider-thread-1" };
     }),
     prepareThreadRewind: vi.fn(async () => ({
@@ -164,15 +193,18 @@ function createRuntime(): FakeDispatchRuntime {
     discardThreadRewind: vi.fn(async () => undefined),
     resumeThread: vi.fn(async (args: { threadId: string }) => {
       hostedThreadIds.add(args.threadId);
+
       return { providerThreadId: "provider-thread-1" };
     }),
-    runTurn: vi.fn(async () => undefined),
+    runTurn: vi.fn(async () => ({ status: "started" as const })),
     steerTurn: vi.fn(async () => ({ status: "steered" as const })),
     stopThread: vi.fn(async (args: { threadId: string }) => {
       activeTurnsByThreadId.delete(args.threadId);
       hostedThreadIds.delete(args.threadId);
+
       return { providerCheckpointId: null };
     }),
+    setThreadSpeed: vi.fn(async () => undefined),
     clearThreadGoal: vi.fn(async () => ({ cleared: true })),
     renameThread: vi.fn(async () => undefined),
     archiveThread: vi.fn(async () => undefined),
@@ -198,10 +230,14 @@ function createRuntime(): FakeDispatchRuntime {
       hostedThreadIds.has(threadId)
         ? { providerId: "fake", providerThreadId: "provider-thread-1" }
         : null,
-    reapIdleProviderSessions: vi.fn(async () => ({ reapedSessions: [] })),
+    reapIdleProviderSessions: vi.fn(async () => ({
+      reapedSessions: [],
+      retainedSessions: [],
+    })),
     hasThread: (threadId) => hostedThreadIds.has(threadId),
     getLiveThreadIds: vi.fn(() => [...activeTurnsByThreadId.keys()]),
     hasOpenBackgroundWork: () => false,
+    listOpenBackgroundWork: () => [],
     shutdown: vi.fn(async () => undefined),
     setActiveTurn: (threadId, turnId) => {
       hostedThreadIds.add(threadId);
@@ -256,11 +292,13 @@ function createProviderCliInstallEventStream(
   events: readonly ProviderCliInstallEvent[],
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
+
   return new ReadableStream({
     start(controller) {
       for (const event of events) {
         controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
       }
+
       controller.close();
     },
   });
@@ -354,13 +392,16 @@ async function runSuccessfulClaudeCodeUpdateVerification(args: {
   before: ProviderCliStatus;
   after: ProviderCliStatus;
 }) {
-  const dataDir = await makeTempDir("bb-command-dispatch-provider-cli-");
+  const dataDir = await makeTempDir("omnyo-command-dispatch-provider-cli-");
+
   const manager = new RuntimeManager({
     dataDir,
     createRuntime,
     provisionWorkspace: async () => createWorkspace(),
   });
+
   const providerInstallationStatus = vi.fn().mockResolvedValueOnce(args.after);
+
   const events: ProviderCliInstallEvent[] = [
     {
       type: "started",
@@ -375,6 +416,7 @@ async function runSuccessfulClaudeCodeUpdateVerification(args: {
       success: true,
     },
   ];
+
   const result = await dispatchOnlineRpcCommand(
     {
       type: "provider.installation.run",
@@ -414,21 +456,26 @@ async function runSuccessfulClaudeCodeUpdateVerification(args: {
               },
       }),
       runtimeManager: manager,
+      workspaceReads: createTestWorkspaceReads(manager),
+      serverMove: await createUpdateAdmission(),
       streamProviderInstallation: () =>
         createProviderCliInstallEventStream(events),
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     },
   );
+
   return { events, providerInstallationStatus, result };
 }
 
 describe("dispatchCommand", () => {
   it("steers an auto submit when the active turn appears after the server snapshot", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-1",
       workspacePath: WORKSPACE_PATH,
@@ -438,6 +485,7 @@ describe("dispatchCommand", () => {
     vi.mocked(runtime.waitForActiveTurn).mockImplementationOnce(
       async (threadId) => {
         runtime.setActiveTurn(threadId, "turn-starting");
+
         return "turn-starting";
       },
     );
@@ -445,7 +493,7 @@ describe("dispatchCommand", () => {
     const result = await dispatchCommand(
       createTurnSubmitCommand({ mode: "auto", expectedTurnId: null }),
       {
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         logger: silentLogger,
         eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
         fetchProjectAttachment: async () => {
@@ -453,7 +501,8 @@ describe("dispatchCommand", () => {
         },
         ...unexpectedProviderMaintenance,
         runtimeManager: manager,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        workspaceReads: createTestWorkspaceReads(manager),
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       },
     );
 
@@ -473,10 +522,12 @@ describe("dispatchCommand", () => {
 
   it("rebases auto input onto the daemon's newer active turn", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-1",
       workspacePath: WORKSPACE_PATH,
@@ -489,7 +540,7 @@ describe("dispatchCommand", () => {
         expectedTurnId: "turn-old",
       }),
       {
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         logger: silentLogger,
         eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
         fetchProjectAttachment: async () => {
@@ -497,7 +548,8 @@ describe("dispatchCommand", () => {
         },
         ...unexpectedProviderMaintenance,
         runtimeManager: manager,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        workspaceReads: createTestWorkspaceReads(manager),
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       },
     );
 
@@ -510,10 +562,12 @@ describe("dispatchCommand", () => {
 
   it("starts auto input immediately when the prior turn already completed", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-1",
       workspacePath: WORKSPACE_PATH,
@@ -523,7 +577,7 @@ describe("dispatchCommand", () => {
     const result = await dispatchCommand(
       createTurnSubmitCommand({ mode: "auto", expectedTurnId: null }),
       {
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         logger: silentLogger,
         eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
         fetchProjectAttachment: async () => {
@@ -531,7 +585,8 @@ describe("dispatchCommand", () => {
         },
         ...unexpectedProviderMaintenance,
         runtimeManager: manager,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        workspaceReads: createTestWorkspaceReads(manager),
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       },
     );
 
@@ -542,10 +597,12 @@ describe("dispatchCommand", () => {
 
   it("rejects auto input when a pending turn still has no id after the wait", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-1",
       workspacePath: WORKSPACE_PATH,
@@ -558,7 +615,7 @@ describe("dispatchCommand", () => {
       dispatchCommand(
         createTurnSubmitCommand({ mode: "auto", expectedTurnId: null }),
         {
-          dataDir: "/tmp/bb-data",
+          dataDir: "/tmp/omnyo-data",
           logger: silentLogger,
           eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
           fetchProjectAttachment: async () => {
@@ -566,7 +623,8 @@ describe("dispatchCommand", () => {
           },
           ...unexpectedProviderMaintenance,
           runtimeManager: manager,
-          threadStorageRootPath: "/tmp/bb-thread-storage",
+          workspaceReads: createTestWorkspaceReads(manager),
+          threadStorageRootPath: "/tmp/omnyo-thread-storage",
         },
       ),
     ).rejects.toThrow(
@@ -578,27 +636,32 @@ describe("dispatchCommand", () => {
 
   it("flushes buffered events before reporting thread.stop success", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-1",
-      workspacePath: "/tmp/bb-command-dispatch-test",
+      workspacePath: "/tmp/omnyo-command-dispatch-test",
     });
     runtime.setActiveTurn("thread-1", "turn-1");
 
     const flushDeferred = createDeferredPromise<void>();
     const flush = vi.fn(async () => flushDeferred.promise);
+
     const command: CommandOf<"thread.stop"> = {
       type: "thread.stop",
       intent: "interrupt",
       environmentId: "env-1",
       threadId: "thread-1",
     };
+
     let resolved = false;
+
     const dispatchPromise = dispatchCommand(command, {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: {
         emit: vi.fn(),
@@ -610,9 +673,11 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     }).then((result) => {
       resolved = true;
+
       return result;
     });
 
@@ -633,10 +698,12 @@ describe("dispatchCommand", () => {
 
   it("cancels Plan through the active provider runtime before flushing events", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-1",
       workspacePath: WORKSPACE_PATH,
@@ -652,7 +719,7 @@ describe("dispatchCommand", () => {
         expectedTurnId: "turn-1",
       },
       {
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         logger: silentLogger,
         eventSink: { emit: vi.fn(), flush },
         fetchProjectAttachment: async () => {
@@ -661,7 +728,8 @@ describe("dispatchCommand", () => {
         fetchPluginHostArtifact: fetchDispatchTestArtifact,
         ...unexpectedProviderMaintenance,
         runtimeManager: manager,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        workspaceReads: createTestWorkspaceReads(manager),
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       },
     );
 
@@ -672,10 +740,12 @@ describe("dispatchCommand", () => {
 
   it("does not cancel Plan after its turn has already ended", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-1",
       workspacePath: WORKSPACE_PATH,
@@ -691,7 +761,7 @@ describe("dispatchCommand", () => {
         expectedTurnId: "turn-plan-1",
       },
       {
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         logger: silentLogger,
         eventSink: { emit: vi.fn(), flush },
         fetchProjectAttachment: async () => {
@@ -700,7 +770,8 @@ describe("dispatchCommand", () => {
         fetchPluginHostArtifact: fetchDispatchTestArtifact,
         ...unexpectedProviderMaintenance,
         runtimeManager: manager,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        workspaceReads: createTestWorkspaceReads(manager),
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       },
     );
 
@@ -711,10 +782,12 @@ describe("dispatchCommand", () => {
 
   it("does not cancel a newer turn when the Plan cancellation is stale", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-1",
       workspacePath: WORKSPACE_PATH,
@@ -730,7 +803,7 @@ describe("dispatchCommand", () => {
         expectedTurnId: "turn-plan-1",
       },
       {
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         logger: silentLogger,
         eventSink: { emit: vi.fn(), flush },
         fetchProjectAttachment: async () => {
@@ -739,7 +812,8 @@ describe("dispatchCommand", () => {
         fetchPluginHostArtifact: fetchDispatchTestArtifact,
         ...unexpectedProviderMaintenance,
         runtimeManager: manager,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        workspaceReads: createTestWorkspaceReads(manager),
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       },
     );
 
@@ -751,11 +825,14 @@ describe("dispatchCommand", () => {
 
   it("resumes a reaped Codex runtime before clearing its Goal", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const flush = vi.fn(async () => undefined);
+
     const command: CommandOf<"thread.goal.clear"> = {
       bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
       type: "thread.goal.clear",
@@ -788,7 +865,7 @@ describe("dispatchCommand", () => {
     };
 
     const result = await dispatchCommand(command, {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: { emit: vi.fn(), flush },
       fetchProjectAttachment: async () => {
@@ -797,7 +874,8 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result).toEqual({ cleared: true });
@@ -817,17 +895,20 @@ describe("dispatchCommand", () => {
   it("releases a moved thread from its old environment before resuming it", async () => {
     const oldRuntime = createRuntime();
     const newRuntime = createRuntime();
+
     const createRuntimeSpy = vi
       .fn<() => AgentRuntime>()
       .mockReturnValueOnce(oldRuntime)
       .mockReturnValueOnce(newRuntime);
+
     const manager = new RuntimeManager({
       createRuntime: createRuntimeSpy,
       provisionWorkspace: async (args) => createWorkspace(args.path),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-old",
-      workspacePath: "/tmp/bb-command-dispatch-old",
+      workspacePath: "/tmp/omnyo-command-dispatch-old",
     });
     oldRuntime.setIdle("thread-1");
 
@@ -851,7 +932,7 @@ describe("dispatchCommand", () => {
       resumeContext: {
         bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
         workspaceContext: {
-          workspacePath: "/tmp/bb-command-dispatch-new",
+          workspacePath: "/tmp/omnyo-command-dispatch-new",
         },
         projectId: "proj_1",
         providerId: "codex",
@@ -866,7 +947,7 @@ describe("dispatchCommand", () => {
     };
 
     const result = await dispatchCommand(command, {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: {
         emit: vi.fn(),
@@ -878,7 +959,8 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result).toEqual({ trace: { spans: [] } });
@@ -888,7 +970,7 @@ describe("dispatchCommand", () => {
     expect(createRuntimeSpy).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        workspacePath: "/tmp/bb-command-dispatch-new",
+        workspacePath: "/tmp/omnyo-command-dispatch-new",
       }),
     );
     expect(newRuntime.resumeThread).toHaveBeenCalledWith(
@@ -907,13 +989,15 @@ describe("dispatchCommand", () => {
 
   it("stops the old owner when the moved thread has no runtime yet", async () => {
     const oldRuntime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => oldRuntime,
-      provisionWorkspace: async () => createWorkspace("/tmp/bb-stop-old"),
+      provisionWorkspace: async () => createWorkspace("/tmp/omnyo-stop-old"),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-old",
-      workspacePath: "/tmp/bb-stop-old",
+      workspacePath: "/tmp/omnyo-stop-old",
     });
     oldRuntime.setActiveTurn("thread-1", "turn-old");
     (oldRuntime.stopThread as Mock).mockResolvedValueOnce({
@@ -926,10 +1010,11 @@ describe("dispatchCommand", () => {
       environmentId: "env-new",
       threadId: "thread-1",
     };
+
     const flush = vi.fn(async () => undefined);
 
     const result = await dispatchCommand(command, {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: { emit: vi.fn(), flush },
       fetchProjectAttachment: async () => {
@@ -938,7 +1023,8 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result).toEqual({ providerCheckpointId: "pi-entry-at-stop" });
@@ -950,18 +1036,20 @@ describe("dispatchCommand", () => {
 
   it("releases an idle runtime without the active-turn wait", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
-      provisionWorkspace: async () => createWorkspace("/tmp/bb-release"),
+      provisionWorkspace: async () => createWorkspace("/tmp/omnyo-release"),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-release",
-      workspacePath: "/tmp/bb-release",
+      workspacePath: "/tmp/omnyo-release",
     });
     runtime.setIdle("thread-1");
 
     const options = {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
       fetchProjectAttachment: async () => {
@@ -970,7 +1058,8 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     };
 
     await dispatchCommand(
@@ -1002,17 +1091,21 @@ describe("dispatchCommand", () => {
 
   it("reports a retained turn instead of releasing a turn that started after the server read the thread", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
-      provisionWorkspace: async () => createWorkspace("/tmp/bb-release-race"),
+      provisionWorkspace: async () =>
+        createWorkspace("/tmp/omnyo-release-race"),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-release-race",
-      workspacePath: "/tmp/bb-release-race",
+      workspacePath: "/tmp/omnyo-release-race",
     });
     runtime.setActiveTurn("thread-1", "turn-new");
+
     const options = {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
       fetchProjectAttachment: async () => {
@@ -1021,7 +1114,8 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     };
 
     const result = await dispatchCommand(
@@ -1061,6 +1155,7 @@ describe("dispatchCommand", () => {
       createRuntime: () => createRuntime(),
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const command: CommandOf<"thread.stop"> = {
       type: "thread.stop",
       intent: "interrupt",
@@ -1070,7 +1165,7 @@ describe("dispatchCommand", () => {
 
     await expect(
       dispatchCommand(command, {
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         logger: silentLogger,
         eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
         fetchProjectAttachment: async () => {
@@ -1079,20 +1174,23 @@ describe("dispatchCommand", () => {
         fetchPluginHostArtifact: fetchDispatchTestArtifact,
         ...unexpectedProviderMaintenance,
         runtimeManager: manager,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        workspaceReads: createTestWorkspaceReads(manager),
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       }),
     ).resolves.toEqual({ providerCheckpointId: null });
   });
 
   it("cancels a plan in the environment the thread moved away from", async () => {
     const oldRuntime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => oldRuntime,
-      provisionWorkspace: async () => createWorkspace("/tmp/bb-plan-old"),
+      provisionWorkspace: async () => createWorkspace("/tmp/omnyo-plan-old"),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-old",
-      workspacePath: "/tmp/bb-plan-old",
+      workspacePath: "/tmp/omnyo-plan-old",
     });
     oldRuntime.setActiveTurn("thread-1", "turn-old");
 
@@ -1104,7 +1202,7 @@ describe("dispatchCommand", () => {
     };
 
     const result = await dispatchCommand(command, {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
       fetchProjectAttachment: async () => {
@@ -1113,7 +1211,8 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result).toEqual({ cancelled: true });
@@ -1124,13 +1223,15 @@ describe("dispatchCommand", () => {
 
   it("leaves a plan alone when no runtime runs the expected turn", async () => {
     const oldRuntime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => oldRuntime,
-      provisionWorkspace: async () => createWorkspace("/tmp/bb-plan-old"),
+      provisionWorkspace: async () => createWorkspace("/tmp/omnyo-plan-old"),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-old",
-      workspacePath: "/tmp/bb-plan-old",
+      workspacePath: "/tmp/omnyo-plan-old",
     });
     oldRuntime.setActiveTurn("thread-1", "turn-other");
 
@@ -1142,7 +1243,7 @@ describe("dispatchCommand", () => {
     };
 
     const result = await dispatchCommand(command, {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
       fetchProjectAttachment: async () => {
@@ -1151,7 +1252,8 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result).toEqual({ cancelled: false });
@@ -1161,21 +1263,24 @@ describe("dispatchCommand", () => {
   it("keeps an old-environment turn alive through a rename", async () => {
     const oldRuntime = createRuntime();
     const newRuntime = createRuntime();
+
     const createRuntimeSpy = vi
       .fn<() => AgentRuntime>()
       .mockReturnValueOnce(oldRuntime)
       .mockReturnValueOnce(newRuntime);
+
     const manager = new RuntimeManager({
       createRuntime: createRuntimeSpy,
       provisionWorkspace: async (args) => createWorkspace(args.path),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-old",
-      workspacePath: "/tmp/bb-rename-old",
+      workspacePath: "/tmp/omnyo-rename-old",
     });
     await manager.ensureEnvironment({
       environmentId: "env-new",
-      workspacePath: "/tmp/bb-rename-new",
+      workspacePath: "/tmp/omnyo-rename-new",
     });
     oldRuntime.setActiveTurn("thread-1", "turn-old");
 
@@ -1187,7 +1292,7 @@ describe("dispatchCommand", () => {
     };
 
     const result = await dispatchCommand(command, {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
       fetchProjectAttachment: async () => {
@@ -1196,7 +1301,8 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result).toEqual({});
@@ -1211,17 +1317,20 @@ describe("dispatchCommand", () => {
   it("refuses a goal clear while the old environment still runs the turn", async () => {
     const oldRuntime = createRuntime();
     const newRuntime = createRuntime();
+
     const createRuntimeSpy = vi
       .fn<() => AgentRuntime>()
       .mockReturnValueOnce(oldRuntime)
       .mockReturnValueOnce(newRuntime);
+
     const manager = new RuntimeManager({
       createRuntime: createRuntimeSpy,
       provisionWorkspace: async (args) => createWorkspace(args.path),
     });
+
     await manager.ensureEnvironment({
       environmentId: "env-old",
-      workspacePath: "/tmp/bb-goal-old",
+      workspacePath: "/tmp/omnyo-goal-old",
     });
     oldRuntime.setActiveTurn("thread-1", "turn-old");
 
@@ -1243,7 +1352,7 @@ describe("dispatchCommand", () => {
       resumeContext: {
         bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
         workspaceContext: {
-          workspacePath: "/tmp/bb-goal-new",
+          workspacePath: "/tmp/omnyo-goal-new",
         },
         projectId: "proj_1",
         providerId: "codex",
@@ -1258,7 +1367,7 @@ describe("dispatchCommand", () => {
 
     await expect(
       dispatchCommand(command, {
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         logger: silentLogger,
         eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
         fetchProjectAttachment: async () => {
@@ -1267,7 +1376,8 @@ describe("dispatchCommand", () => {
         fetchPluginHostArtifact: fetchDispatchTestArtifact,
         ...unexpectedProviderMaintenance,
         runtimeManager: manager,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        workspaceReads: createTestWorkspaceReads(manager),
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       }),
     ).rejects.toMatchObject({ code: "thread_busy_in_other_environment" });
     expect(oldRuntime.stopThread).not.toHaveBeenCalled();
@@ -1276,10 +1386,12 @@ describe("dispatchCommand", () => {
 
   it("treats thread.rename as best-effort when the runtime is not loaded", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const command: CommandOf<"thread.rename"> = {
       type: "thread.rename",
       environmentId: "env-missing-runtime",
@@ -1288,7 +1400,7 @@ describe("dispatchCommand", () => {
     };
 
     const result = await dispatchCommand(command, {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: {
         emit: vi.fn(),
@@ -1300,7 +1412,8 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result).toEqual({});
@@ -1309,10 +1422,12 @@ describe("dispatchCommand", () => {
 
   it("blocks any installation-managed provider whose bridge reports an unsupported version", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const command: CommandOf<"thread.start"> = {
       bridgeLaunch: {
         ...DISPATCH_TEST_BRIDGE_LAUNCH,
@@ -1370,7 +1485,7 @@ describe("dispatchCommand", () => {
 
     await expect(
       dispatchCommand(command, {
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         logger: silentLogger,
         eventSink: {
           emit: vi.fn(),
@@ -1383,7 +1498,8 @@ describe("dispatchCommand", () => {
         ...unexpectedProviderMaintenance,
         providerInstallationStatus: async () => unsupportedCodexStatus,
         runtimeManager: manager,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        workspaceReads: createTestWorkspaceReads(manager),
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       }),
     ).rejects.toMatchObject({
       code: "provider_cli_unsupported_version",
@@ -1394,10 +1510,12 @@ describe("dispatchCommand", () => {
 
   it("skips version checks when the provider declaration does not support installation", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const command: CommandOf<"thread.start"> = {
       bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
       type: "thread.start",
@@ -1426,12 +1544,13 @@ describe("dispatchCommand", () => {
       injectedSkillSources: [],
       instructionMode: "append",
     };
+
     const providerInstallationStatus = vi.fn(async () => {
       throw new Error("Provider installation status should not be checked");
     });
 
     const result = await dispatchCommand(command, {
-      dataDir: "/tmp/bb-data",
+      dataDir: "/tmp/omnyo-data",
       logger: silentLogger,
       eventSink: {
         emit: vi.fn(),
@@ -1444,7 +1563,8 @@ describe("dispatchCommand", () => {
       ...unexpectedProviderMaintenance,
       providerInstallationStatus,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result).toEqual({ providerThreadId: "provider-thread-1" });
@@ -1454,10 +1574,12 @@ describe("dispatchCommand", () => {
 
   it("prepares a Codex rewind through the requested retained turn", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const command: CommandOf<"thread.rewind.prepare"> = {
       bridgeLaunch: {
         ...DISPATCH_TEST_BRIDGE_LAUNCH,
@@ -1493,6 +1615,7 @@ describe("dispatchCommand", () => {
       injectedSkillSources: [],
       instructionMode: "append",
     };
+
     const supportedCodexStatus: ProviderCliStatus = {
       displayName: "Codex",
       executableName: "codex",
@@ -1512,7 +1635,7 @@ describe("dispatchCommand", () => {
     const providerInstallationStatus = vi.fn(async () => supportedCodexStatus);
     await expect(
       dispatchCommand(command, {
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         logger: silentLogger,
         eventSink: {
           emit: vi.fn(),
@@ -1525,7 +1648,8 @@ describe("dispatchCommand", () => {
         ...unexpectedProviderMaintenance,
         providerInstallationStatus,
         runtimeManager: manager,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        workspaceReads: createTestWorkspaceReads(manager),
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       }),
     ).resolves.toEqual({ providerThreadId: "provider-thread-rewind-1" });
     expect(providerInstallationStatus).toHaveBeenCalledWith(
@@ -1547,7 +1671,7 @@ describe("dispatchCommand", () => {
       dispatchCommand(
         { ...command, leaseId: "lease-old-codex" },
         {
-          dataDir: "/tmp/bb-data",
+          dataDir: "/tmp/omnyo-data",
           logger: silentLogger,
           eventSink: {
             emit: vi.fn(),
@@ -1566,7 +1690,8 @@ describe("dispatchCommand", () => {
             versionUnsupported: true,
           }),
           runtimeManager: manager,
-          threadStorageRootPath: "/tmp/bb-thread-storage",
+          workspaceReads: createTestWorkspaceReads(manager),
+          threadStorageRootPath: "/tmp/omnyo-thread-storage",
         },
       ),
     ).rejects.toMatchObject({ code: "provider_cli_unsupported_version" });
@@ -1581,7 +1706,7 @@ describe("dispatchCommand", () => {
           leaseId: "lease-1",
         },
         {
-          dataDir: "/tmp/bb-data",
+          dataDir: "/tmp/omnyo-data",
           logger: silentLogger,
           eventSink: {
             emit: vi.fn(),
@@ -1593,7 +1718,8 @@ describe("dispatchCommand", () => {
           fetchPluginHostArtifact: fetchDispatchTestArtifact,
           ...unexpectedProviderMaintenance,
           runtimeManager: manager,
-          threadStorageRootPath: "/tmp/bb-thread-storage",
+          workspaceReads: createTestWorkspaceReads(manager),
+          threadStorageRootPath: "/tmp/omnyo-thread-storage",
         },
       ),
     ).resolves.toEqual({});
@@ -1604,13 +1730,16 @@ describe("dispatchCommand", () => {
 
   it("reuses a supported installation probe across thread starts", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const providerInstallationStatus = vi.fn(async () =>
       supportedCodexInstallationStatus(),
     );
+
     const options = makeDispatchOptions({
       runtimeManager: manager,
       providerInstallationStatus,
@@ -1632,16 +1761,20 @@ describe("dispatchCommand", () => {
 
   it("retries concurrent thread starts when a shell env refresh interrupts their shared probe", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
       shellEnv: { PATH: "/old/bin" },
     });
+
     const staleProbe = createDeferredPromise<ProviderCliStatus>();
+
     const providerInstallationStatus = vi
       .fn<() => Promise<ProviderCliStatus>>()
       .mockReturnValueOnce(staleProbe.promise)
       .mockResolvedValueOnce(supportedCodexInstallationStatus());
+
     const options = makeDispatchOptions({
       runtimeManager: manager,
       providerInstallationStatus,
@@ -1651,6 +1784,7 @@ describe("dispatchCommand", () => {
       dispatchCommand(createInstallationGatedThreadStart("thread-1"), options),
       dispatchCommand(createInstallationGatedThreadStart("thread-2"), options),
     ]);
+
     await vi.waitFor(() =>
       expect(providerInstallationStatus).toHaveBeenCalledOnce(),
     );
@@ -1668,18 +1802,23 @@ describe("dispatchCommand", () => {
 
   it("keys the rewind requirement separately from thread start", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const providerInstallationStatus = vi.fn(async () =>
       supportedCodexInstallationStatus(),
     );
+
     const options = makeDispatchOptions({
       runtimeManager: manager,
       providerInstallationStatus,
     });
+
     const start = createInstallationGatedThreadStart("thread-1");
+
     const rewind: CommandOf<"thread.rewind.prepare"> = {
       bridgeLaunch: start.bridgeLaunch,
       type: "thread.rewind.prepare",
@@ -1715,21 +1854,27 @@ describe("dispatchCommand", () => {
     const newPath = "/home/u/.local/bin:/usr/bin:/bin";
     const runtime = createRuntime();
     const createdRuntimeShellPaths: (string | undefined)[] = [];
+
     const manager = new RuntimeManager({
       createRuntime: (runtimeOptions) => {
         createdRuntimeShellPaths.push(runtimeOptions.shellEnv?.PATH);
+
         return runtime;
       },
       provisionWorkspace: async () => createWorkspace(),
       shellEnv: { PATH: oldPath },
     });
+
     let loginShellPath = oldPath;
+
     const refreshShellEnv = vi.fn(async () => {
       await manager.replaceBaseShellEnv({ PATH: loginShellPath });
     });
+
     const providerInstallationStatus = vi.fn(async () =>
       supportedCodexInstallationStatus(),
     );
+
     const options = makeDispatchOptions({
       runtimeManager: manager,
       providerInstallationStatus,
@@ -1760,18 +1905,23 @@ describe("dispatchCommand", () => {
 
   it("remembers the first probe after a shell env change", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
       shellEnv: { PATH: "/old/bin" },
     });
+
     const refreshShellEnv = async () => {
       await manager.replaceBaseShellEnv({ PATH: "/new/bin" });
     };
+
     const providerInstallationStatus = vi.fn(async () => {
       await refreshShellEnv();
+
       return supportedCodexInstallationStatus();
     });
+
     const options = makeDispatchOptions({
       runtimeManager: manager,
       providerInstallationStatus,
@@ -1793,10 +1943,12 @@ describe("dispatchCommand", () => {
 
   it("does not remember a not-installed provider that enforces a minimum version", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const providerInstallationStatus = vi
       .fn<() => Promise<ProviderCliStatus>>()
       .mockResolvedValueOnce({
@@ -1817,6 +1969,7 @@ describe("dispatchCommand", () => {
         npmGlobalPackageVersion: "0.135.0",
         versionUnsupported: true,
       });
+
     const options = makeDispatchOptions({
       runtimeManager: manager,
       providerInstallationStatus,
@@ -1835,15 +1988,19 @@ describe("dispatchCommand", () => {
 
   it("expires the remembered probe after the gate TTL", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(0);
+
     try {
       const runtime = createRuntime();
+
       const manager = new RuntimeManager({
         createRuntime: () => runtime,
         provisionWorkspace: async () => createWorkspace(),
       });
+
       const providerInstallationStatus = vi.fn(async () =>
         supportedCodexInstallationStatus(),
       );
+
       const options = makeDispatchOptions({
         runtimeManager: manager,
         providerInstallationStatus,
@@ -1874,17 +2031,20 @@ describe("dispatchCommand", () => {
   });
 
   it("invalidates the provider maintenance runtime after a verified provider update", async () => {
-    const dataDir = await makeTempDir("bb-command-dispatch-provider-cli-");
+    const dataDir = await makeTempDir("omnyo-command-dispatch-provider-cli-");
+    const admission = await createUpdateAdmission();
     const staleRuntime = createRuntime();
     const freshRuntime = createRuntime();
     const createRuntimeSpy = vi.fn(() => staleRuntime);
     createRuntimeSpy.mockReturnValueOnce(staleRuntime);
     createRuntimeSpy.mockReturnValueOnce(freshRuntime);
+
     const manager = new RuntimeManager({
       createRuntime: createRuntimeSpy,
       dataDir,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     await manager.ensureProviderMaintenanceRuntime({ dataDir });
 
     const events: ProviderCliInstallEvent[] = [
@@ -1901,9 +2061,15 @@ describe("dispatchCommand", () => {
         success: true,
       },
     ];
-    const streamProviderInstallation = vi.fn(() =>
-      createProviderCliInstallEventStream(events),
-    );
+
+    const streamProviderInstallation = vi.fn(() => {
+      expect(() =>
+        admission.assertDirectAccessAdmission("terminal.create"),
+      ).toThrow();
+
+      return createProviderCliInstallEventStream(events);
+    });
+
     const command: CommandOf<"provider.installation.run"> = {
       type: "provider.installation.run",
       bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
@@ -1924,6 +2090,7 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: manager,
+      workspaceReads: createTestWorkspaceReads(manager),
       providerInstallationRun: async () => ({
         available: true,
         command: {
@@ -1933,25 +2100,35 @@ describe("dispatchCommand", () => {
         },
         verification: { kind: "version_changed", previousVersion: "0.1.0" },
       }),
-      providerInstallationStatus: async () => ({
-        executableName: "codex",
-        executablePath: "/usr/local/bin/codex",
-        installed: true,
-        installSource: "external",
-        currentVersion: "0.2.0",
-        latestVersion: "0.2.0",
-        minimumSupportedVersion: null,
-        npmPackageName: null,
-        npmGlobalPackageVersion: null,
-        installAction: null,
-        needsUpdate: false,
-        versionUnsupported: false,
-      }),
+      providerInstallationStatus: async () => {
+        expect(() =>
+          admission.assertDirectAccessAdmission("thread.start"),
+        ).toThrow();
+
+        return {
+          executableName: "codex",
+          executablePath: "/usr/local/bin/codex",
+          installed: true,
+          installSource: "external",
+          currentVersion: "0.2.0",
+          latestVersion: "0.2.0",
+          minimumSupportedVersion: null,
+          npmPackageName: null,
+          npmGlobalPackageVersion: null,
+          installAction: null,
+          needsUpdate: false,
+          versionUnsupported: false,
+        };
+      },
+      serverMove: admission,
       streamProviderInstallation,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result).toEqual({ events });
+    expect(() =>
+      admission.assertDirectAccessAdmission("thread.start"),
+    ).not.toThrow();
     expect(streamProviderInstallation).toHaveBeenCalledWith(
       expect.objectContaining({
         providerId: "codex",
@@ -1991,18 +2168,22 @@ describe("dispatchCommand", () => {
     ];
 
     for (const testCase of cases) {
-      const dataDir = await makeTempDir("bb-command-dispatch-provider-cli-");
+      const dataDir = await makeTempDir("omnyo-command-dispatch-provider-cli-");
       const runtime = createRuntime();
       const createRuntimeSpy = vi.fn(() => runtime);
+
       const manager = new RuntimeManager({
         createRuntime: createRuntimeSpy,
         dataDir,
         provisionWorkspace: async () => createWorkspace(),
       });
+
       await manager.ensureProviderMaintenanceRuntime({ dataDir });
+
       const streamProviderInstallation = vi.fn(() =>
         createProviderCliInstallEventStream(testCase.events),
       );
+
       const result = await dispatchOnlineRpcCommand(
         {
           type: "provider.installation.run",
@@ -2035,8 +2216,10 @@ describe("dispatchCommand", () => {
             },
           }),
           runtimeManager: manager,
+          workspaceReads: createTestWorkspaceReads(manager),
+          serverMove: await createUpdateAdmission(),
           streamProviderInstallation,
-          threadStorageRootPath: "/tmp/bb-thread-storage",
+          threadStorageRootPath: "/tmp/omnyo-thread-storage",
         },
       );
 
@@ -2050,13 +2233,15 @@ describe("dispatchCommand", () => {
   });
 
   it("reports a successful Claude update command as failed when the active executable stays old", async () => {
-    const dataDir = await makeTempDir("bb-command-dispatch-provider-cli-");
+    const dataDir = await makeTempDir("omnyo-command-dispatch-provider-cli-");
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       dataDir,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const providerInstallationStatus = vi.fn().mockResolvedValueOnce(
       claudeCodeStatus({
         currentVersion: "2.1.220",
@@ -2094,6 +2279,8 @@ describe("dispatchCommand", () => {
           verification: { kind: "version_at_least", version: "2.1.227" },
         }),
         runtimeManager: manager,
+        workspaceReads: createTestWorkspaceReads(manager),
+        serverMove: await createUpdateAdmission(),
         streamProviderInstallation: () =>
           createProviderCliInstallEventStream([
             {
@@ -2115,7 +2302,7 @@ describe("dispatchCommand", () => {
               success: true,
             },
           ]),
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       },
     );
 
@@ -2141,12 +2328,14 @@ describe("dispatchCommand", () => {
   });
 
   it("does not spawn when the provider withdraws a stale installation action", async () => {
-    const dataDir = await makeTempDir("bb-command-dispatch-provider-cli-");
+    const dataDir = await makeTempDir("omnyo-command-dispatch-provider-cli-");
+
     const manager = new RuntimeManager({
       createRuntime,
       dataDir,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const providerInstallationStatus = vi.fn();
     const streamProviderInstallation = vi.fn();
 
@@ -2175,8 +2364,10 @@ describe("dispatchCommand", () => {
           message: "Claude Code update is no longer available on this host.",
         }),
         runtimeManager: manager,
+        workspaceReads: createTestWorkspaceReads(manager),
+        serverMove: await createUpdateAdmission(),
         streamProviderInstallation,
-        threadStorageRootPath: "/tmp/bb-thread-storage",
+        threadStorageRootPath: "/tmp/omnyo-thread-storage",
       },
     );
 
@@ -2186,6 +2377,7 @@ describe("dispatchCommand", () => {
       {
         type: "error",
         provider: "claude-code",
+        code: "provider_installation_unavailable",
         message: "Claude Code update is no longer available on this host.",
       },
     ]);
@@ -2242,6 +2434,7 @@ describe("dispatchCommand", () => {
     const fixture = await setupBusySkillCatalogEnvironment({
       activeThreadId: "sibling-thread",
     });
+
     const command: CommandOf<"thread.start"> = {
       bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
       type: "thread.start",
@@ -2286,15 +2479,18 @@ describe("dispatchCommand", () => {
       providerInstallationStatus: async () =>
         supportedCodexInstallationStatus(),
       runtimeManager: fixture.manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(fixture.manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result.providerThreadId).toBe("provider-thread-1");
     expect(fixture.runtime.startThread).toHaveBeenCalledTimes(1);
+
     const currentCatalog = await stageInjectedSkillSources({
       dataDir: fixture.dataDir,
       injectedSkillSources: [fixture.source],
     });
+
     expect(currentCatalog.catalogHash).not.toBe(fixture.originalCatalogHash);
     await expect(
       fs.readFile(
@@ -2320,6 +2516,7 @@ describe("dispatchCommand", () => {
     const fixture = await setupBusySkillCatalogEnvironment({
       activeThreadId: "thread-1",
     });
+
     const command: CommandOf<"turn.submit"> = {
       bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
       type: "turn.submit",
@@ -2367,7 +2564,8 @@ describe("dispatchCommand", () => {
       fetchPluginHostArtifact: fetchDispatchTestArtifact,
       ...unexpectedProviderMaintenance,
       runtimeManager: fixture.manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(fixture.manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     });
 
     expect(result).toEqual({ trace: { spans: [] } });
@@ -2382,14 +2580,17 @@ describe("dispatchCommand", () => {
 
   it("routes provider health and usage to the targeted bridge runtime", async () => {
     const runtime = createRuntime();
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async () => createWorkspace(),
     });
+
     const providerHealth = vi.fn(async () => ({ supported: false as const }));
     const providerUsage = vi.fn(async () => ({ supported: false as const }));
+
     const options = {
-      dataDir: "/tmp/bb-test-data",
+      dataDir: "/tmp/omnyo-test-data",
       logger: silentLogger,
       eventSink: { emit: vi.fn(), flush: vi.fn(async () => undefined) },
       fetchProjectAttachment: async () => {
@@ -2400,7 +2601,8 @@ describe("dispatchCommand", () => {
       providerHealth,
       providerUsage,
       runtimeManager: manager,
-      threadStorageRootPath: "/tmp/bb-thread-storage",
+      workspaceReads: createTestWorkspaceReads(manager),
+      threadStorageRootPath: "/tmp/omnyo-thread-storage",
     };
 
     await expect(

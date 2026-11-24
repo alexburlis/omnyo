@@ -11,25 +11,30 @@ const MOVED = {
 async function setup() {
   const storage = createMemorySecureStorage();
   let counter = 0;
+
   const store = createProfileStore({
     storage,
     now: () => 1_700_000_000_000,
     generateId: () => `id-${++counter}`,
   });
+
   const direct = await store.addProfile({
     mode: "direct",
     serverUrl: "http://192.168.1.20:38886",
     label: "Laptop",
   });
+
   const connect = await store.addProfile({
     mode: "connect",
-    serverUrl: "https://laptop.getbb.app",
+    serverUrl: "https://laptop.example.test",
     label: "laptop",
     handle: "laptop",
     credential: "bbcm_secret",
   });
+
   const notify = vi.fn<(message: string) => void>();
   const handler = createServerMovedProfileHandler({ store, notify });
+
   return { connect, direct, handler, notify, storage, store };
 }
 

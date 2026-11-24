@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { Command } from "commander";
-import { createApiClient, type ApiClient } from "@bb/server-contract";
+import { createApiClient, type ApiClient } from "@omnyo/server-contract";
 
 const readlineState = vi.hoisted(() => ({
   question: vi.fn(),
@@ -11,13 +11,15 @@ const serverClientState = vi.hoisted(() => ({
   createClient: vi.fn(),
 }));
 
-vi.mock("../../client.js", async () => {
-  const { cliFetch } =
-    await vi.importActual<typeof import("../../client.js")>("../../client.js");
-  const { createBbSdk } =
-    await vi.importActual<typeof import("@bb/sdk/core")>("@bb/sdk/core");
-  const { createHttpTransport } =
-    await vi.importActual<typeof import("@bb/sdk/node")>("@bb/sdk/node");
+vi.mock("@omnyo/sdk/node", async () => {
+  const nodeSdk =
+    await vi.importActual<typeof import("@omnyo/sdk/node")>("@omnyo/sdk/node");
+
+  const { createOmnyoSdk } =
+    await vi.importActual<typeof import("@omnyo/sdk/core")>("@omnyo/sdk/core");
+
+  const { createHttpTransport } = nodeSdk;
+
   const toResponse = (resolved: MockTransportResolved): Response =>
     resolved instanceof Response
       ? resolved
@@ -25,9 +27,11 @@ vi.mock("../../client.js", async () => {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
-  const createCliBbSdk = vi.fn((baseUrl: string) => {
+
+  const createNodeOmnyoSdk = vi.fn(({ baseUrl }: { baseUrl: string }) => {
     const realTransport = createHttpTransport({ baseUrl, runtime: "node" });
-    return createBbSdk({
+
+    return createOmnyoSdk({
       transport: {
         ...realTransport,
         api: serverClientState.createClient(baseUrl)?.api ?? {},
@@ -38,7 +42,8 @@ vi.mock("../../client.js", async () => {
       },
     });
   });
-  return { cliFetch, createCliBbSdk };
+
+  return { ...nodeSdk, createNodeOmnyoSdk };
 });
 
 vi.mock("node:readline/promises", () => ({
@@ -55,6 +60,7 @@ vi.mock("../../daemon.js", () => ({
 import { resolveLocalHostId } from "../../daemon.js";
 
 type ServerClient = ApiClient;
+
 type MockTransportResolved =
   | Response
   | object
@@ -63,8 +69,11 @@ type MockTransportResolved =
   | boolean
   | null
   | undefined;
+
 type MockTransportPromise = Promise<MockTransportResolved>;
+
 type ConsoleLogArgs = Parameters<typeof console.log>;
+
 export type CommandRegistrar = (program: Command) => void;
 
 interface ServerClientOverride {
@@ -72,7 +81,9 @@ interface ServerClientOverride {
 }
 
 export const createClientMock = serverClientState.createClient;
+
 export const readlineMocks = readlineState;
+
 export const resolveLocalHostIdMock = vi.mocked(resolveLocalHostId);
 
 export function setupCommandOutputTestEnvironment(): void {
@@ -108,15 +119,17 @@ export function setupCommandOutputTestEnvironment(): void {
     readlineState.question.mockReset();
     readlineState.close.mockReset();
 
-    vi.stubEnv("BB_PROJECT_ID", undefined);
-    vi.stubEnv("BB_THREAD_ID", undefined);
+    vi.stubEnv("OMNYO_PROJECT_ID", undefined);
+    vi.stubEnv("OMNYO_THREAD_ID", undefined);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+
     if (stdinTty === undefined) Reflect.deleteProperty(process.stdin, "isTTY");
     else Object.defineProperty(process.stdin, "isTTY", stdinTty);
+
     if (stdoutTty === undefined)
       Reflect.deleteProperty(process.stdout, "isTTY");
     else Object.defineProperty(process.stdout, "isTTY", stdoutTty);
@@ -130,15 +143,18 @@ function asServerClient(value: ServerClientOverride): ServerClient {
 type ApiStubHandler = (
   ...args: never[]
 ) => MockTransportResolved | MockTransportPromise;
+
 interface ApiStubNode {
   [segment: string]: ApiStubNode | ApiStubHandler;
 }
 
 export function stubServerApi(handlers: Record<string, ApiStubHandler>): void {
   const api: ApiStubNode = {};
+
   for (const [path, handler] of Object.entries(handlers)) {
     const segments = path.split(".");
     let node = api;
+
     for (let i = 0; i < segments.length - 1; i += 1) {
       const segment = segments[i];
       const existing = node[segment];
@@ -146,8 +162,10 @@ export function stubServerApi(handlers: Record<string, ApiStubHandler>): void {
       node[segment] = child;
       node = child;
     }
+
     node[segments[segments.length - 1]] = handler;
   }
+
   createClientMock.mockReturnValue(asServerClient({ api }));
 }
 
@@ -167,7 +185,7 @@ export async function runCommand(
 ): Promise<void> {
   const program = new Command();
   register(program);
-  await program.parseAsync(["node", "bb", ...args]);
+  await program.parseAsync(["node", "omnyo", ...args]);
 }
 
 export async function getHelpOutput(
@@ -184,7 +202,7 @@ export async function getHelpOutput(
   register(program);
 
   await expect(
-    program.parseAsync(["node", "bb", ...args, "--help"]),
+    program.parseAsync(["node", "omnyo", ...args, "--help"]),
   ).rejects.toMatchObject({
     code: "commander.helpDisplayed",
   });

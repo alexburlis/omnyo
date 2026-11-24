@@ -2,7 +2,7 @@ import {
   normalizeUsageMeasurement,
   selectUsageResources,
 } from "./usage-normalization.js";
-import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
+import { defineRpcContract, type PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod/mini";
 import {
   usageSnapshotSchema,
@@ -12,14 +12,21 @@ import {
   type UsageSnapshot,
 } from "./usage-schema.js";
 
-import {
+import { experimental_providerUsageSourceV1 } from "@omnyo/plugin-sdk/provider-usage";
+
+const {
   usageListMethod,
   usageFetchMethod,
-  type UsageResourceList,
-  type UsageMeasurement,
   usageSourceRpcContract,
-  type UsageResource as Resource,
-} from "./usage-source-contract.js";
+  usageMeasurementSchema,
+  usageResourceListSchema,
+} = experimental_providerUsageSourceV1;
+
+type UsageMeasurement = z.infer<typeof usageMeasurementSchema>;
+
+type UsageResourceList = z.infer<typeof usageResourceListSchema>;
+
+type Resource = UsageResourceList["resources"][number] & UsageMeasurement;
 
 interface SourceResult {
   pluginId: string;
@@ -44,6 +51,7 @@ export const providerUsageRpcContract = defineRpcContract({
 });
 
 type UsageRequest = z.infer<typeof providerUsageRpcContract.getUsage.input>;
+
 function normalizedTint(
   tint: { light: string; dark: string } | undefined,
 ): { light: string; dark: string } | null {
@@ -54,6 +62,7 @@ function normalizedTint(
   ) {
     return null;
   }
+
   return { light: tint.light.trim(), dark: tint.dark.trim() };
 }
 
@@ -61,6 +70,7 @@ function normalizedUsage(
   usage: Resource["usage"] | undefined,
 ): ProviderUsage | null {
   if (usage === undefined) return null;
+
   switch (usage.status) {
     case "ok":
       return {
@@ -89,7 +99,7 @@ function normalizedUsage(
 }
 
 type Provider = Awaited<
-  ReturnType<BbPluginApi["sdk"]["providers"]["list"]>
+  ReturnType<PluginApi["sdk"]["providers"]["list"]>
 >[number];
 
 function normalizedProvider(
@@ -128,6 +138,7 @@ function resourceProvider(
   const metadata = providers.find(
     (provider) => provider.id === resource.providerId,
   );
+
   return {
     ...normalizedProvider(
       metadata ?? {
@@ -153,19 +164,24 @@ function resourceProvider(
   };
 }
 
-export default function providerUsagePlugin(bb: BbPluginApi): void {
+export default function providerUsagePlugin(api: PluginApi): void {
   const inventories = new Map<string, SourceResult>();
+
   const measurements = new Map<
     string,
     { value: UsageMeasurement; loadedAt: number }
   >();
+
   const failures = new Set<string>();
+
   const pending = new Map<
     string,
     { force: boolean; promise: Promise<UsageMeasurement> }
   >();
+
   const keyOf = (pluginId: string, resourceId: string) =>
     JSON.stringify([pluginId, resourceId]);
+
   const fetchResource = async (
     pluginId: string,
     resourceId: string,
@@ -173,12 +189,15 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
   ): Promise<UsageMeasurement> => {
     const key = keyOf(pluginId, resourceId);
     const running = pending.get(key);
+
     if (running) {
       if (!force || running.force) return running.promise;
       await running.promise.catch(() => undefined);
+
       return fetchResource(pluginId, resourceId, force);
     }
-    const promise = bb.sdk.plugins
+
+    const promise = api.sdk.plugins
       .callRpc({
         pluginId,
         method: usageFetchMethod,
@@ -188,51 +207,61 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
       })
       .then((raw) => {
         const value = normalizeUsageMeasurement(raw);
+
         if (value.usage.status === "error")
           throw new Error("Usage could not be refreshed.");
         measurements.set(key, { value, loadedAt: Date.now() });
         failures.delete(key);
+
         return value;
       })
       .finally(() => pending.delete(key));
+
     pending.set(key, { force, promise });
+
     return promise;
   };
+
   const readUsage = async (request: UsageRequest): Promise<UsageSnapshot> => {
     const hostId = request.machineIds?.find((id) => !id.startsWith("source:"));
+
     const [hosts, sources, providers, config] = await Promise.all([
-      bb.sdk.hosts
+      api.sdk.hosts
         .list()
         .then((hosts) => hosts.filter((host) => host.type !== "ephemeral")),
-      bb.sdk.plugins.experimental_discoverRpc({ method: usageListMethod }),
-      bb.sdk.providers
+      api.sdk.plugins.experimental_discoverRpc({ method: usageListMethod }),
+      api.sdk.providers
         .list(
           hostId === undefined
             ? { capability: "usage" }
             : { capability: "usage", hostId },
         )
         .catch(() => []),
-      bb.sdk.system.config().catch(() => null),
+      api.sdk.system.config().catch(() => null),
     ]);
+
     hosts.sort(
       (a, b) =>
         Number(b.id === config?.primaryHostId) -
         Number(a.id === config?.primaryHostId),
     );
+
     for (const id of inventories.keys())
       if (!sources.some((source) => source.pluginId === id))
         inventories.delete(id);
+
     for (let offset = 0; offset < sources.length; offset += 3) {
       await Promise.all(
         sources.slice(offset, offset + 3).map(async (source) => {
           try {
-            const inventory = await bb.sdk.plugins.callRpc({
+            const inventory = await api.sdk.plugins.callRpc({
               pluginId: source.pluginId,
               method: usageListMethod,
               input: {},
               outputSchema: usageSourceRpcContract[usageListMethod].output,
               signal: AbortSignal.timeout(45_000),
             });
+
             inventories.set(source.pluginId, {
               pluginId: source.pluginId,
               label: inventory.label ?? null,
@@ -251,16 +280,19 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
         }),
       );
     }
+
     const keys = new Set(
       [...inventories.values()].flatMap((source) =>
         source.resources.map((resource) => keyOf(source.pluginId, resource.id)),
       ),
     );
+
     for (const key of measurements.keys())
       if (!keys.has(key)) {
         measurements.delete(key);
         failures.delete(key);
       }
+
     const selected = [...inventories.values()].flatMap((source) =>
       source.resources
         .filter((resource) => {
@@ -268,6 +300,7 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
             resource.scope.kind === "shared"
               ? `source:${source.pluginId}`
               : resource.scope.hostId;
+
           return (
             request.providerIds.includes(resource.providerId) &&
             (request.machineIds === null ||
@@ -283,17 +316,20 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
         })
         .map((resource) => ({ source, resource })),
     );
+
     for (let offset = 0; offset < selected.length; offset += 3) {
       await Promise.all(
         selected.slice(offset, offset + 3).map(async ({ source, resource }) => {
           const key = keyOf(source.pluginId, resource.id);
           const cached = measurements.get(key);
+
           if (
             !request.force &&
             cached &&
             Date.now() - cached.loadedAt < request.maxAgeMs
           )
             return;
+
           try {
             await fetchResource(source.pluginId, resource.id, request.force);
           } catch {
@@ -302,6 +338,7 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
         }),
       );
     }
+
     const machines: UsageMachine[] = hosts.map((host) => ({
       id: host.id,
       displayName: host.name,
@@ -309,15 +346,18 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
       providers: [],
       error: null,
     }));
+
     const candidates: Array<{
       source: SourceResult;
       resource: UsageResourceList["resources"][number];
       machineId: string;
     }> = [];
+
     for (const source of inventories.values()) {
       const hasShared =
         source.label !== null ||
         source.resources.some((resource) => resource.scope.kind === "shared");
+
       if (hasShared || (source.error !== null && source.resources.length === 0))
         machines.push({
           id: `source:${source.pluginId}`,
@@ -330,14 +370,17 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
           providers: [],
           error: source.error,
         });
+
       for (const resource of source.resources) {
         const machineId =
           resource.scope.kind === "shared"
             ? `source:${source.pluginId}`
             : resource.scope.hostId;
+
         candidates.push({ source, resource, machineId });
       }
     }
+
     for (const machine of machines) {
       const visible = selectUsageResources(
         candidates.filter((candidate) => candidate.machineId === machine.id),
@@ -349,31 +392,39 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
             : resource.accountKey,
         }),
       );
+
       for (const { source, resource } of visible) {
         const key = keyOf(source.pluginId, resource.id);
         const cached = measurements.get(key);
         machine.providers.push(
           resourceProvider(resource, cached?.value, source.pluginId, providers),
         );
+
         if (source.error !== null || failures.has(key))
           machine.error = "Some usage could not be refreshed.";
       }
     }
+
     const providerOrder = new Map(
       providers.map((provider, index) => [provider.id, index]),
     );
+
     for (const machine of machines)
       machine.providers.sort(
         (a, b) =>
           (providerOrder.get(a.providerId) ?? Number.MAX_SAFE_INTEGER) -
           (providerOrder.get(b.providerId) ?? Number.MAX_SAFE_INTEGER),
       );
+
     return { machines };
   };
-  bb.rpc.register(providerUsageRpcContract, { getUsage: readUsage });
+
+  api.rpc.register(providerUsageRpcContract, { getUsage: readUsage });
+
   const markDirty = () => {
     for (const value of measurements.values()) value.loadedAt = 0;
   };
-  bb.events.on("thread.idle", markDirty);
-  bb.events.on("thread.failed", markDirty);
+
+  api.events.on("thread.idle", markDirty);
+  api.events.on("thread.failed", markDirty);
 }

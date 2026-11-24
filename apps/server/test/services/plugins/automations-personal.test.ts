@@ -1,4 +1,4 @@
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { startTestServer } from "../../helpers/test-app.js";
@@ -6,11 +6,14 @@ import { startTestServer } from "../../helpers/test-app.js";
 describe("Personal automations", () => {
   it("creates and updates an hourly script through the real project SDK", async () => {
     const server = await startTestServer();
+
     try {
       server.pluginService.bindSdk({ baseUrl: server.baseUrl });
+
       const entry = await server.pluginService.install("builtin:automations", {
         kind: "root",
       });
+
       expect(entry.status, entry.statusDetail ?? undefined).toBe("running");
 
       const created = await server.app.request(
@@ -36,11 +39,14 @@ describe("Personal automations", () => {
           }),
         },
       );
+
       const createdBody: unknown = await created.json();
       expect(created.status, JSON.stringify(createdBody)).toBe(200);
+
       const { result } = z
         .object({ result: z.object({ id: z.string() }) })
         .parse(createdBody);
+
       expect(createdBody).toMatchObject({
         result: {
           projectId: PERSONAL_PROJECT_ID,
@@ -62,6 +68,7 @@ describe("Personal automations", () => {
           }),
         },
       );
+
       expect(updated.status).toBe(200);
       expect(await updated.json()).toMatchObject({
         result: { id: result.id, name: "Hourly greeting" },

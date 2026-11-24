@@ -3,28 +3,35 @@
 import { createInterface } from "node:readline";
 
 const listMode = process.argv.includes("--list-models");
+
 if (listMode) {
-  console.log("bb-dynamic-smoke-medium - Dynamic Smoke Medium");
-  console.log("bb-dynamic-smoke-high - Dynamic Smoke High");
+  console.log("omnyo-dynamic-smoke-medium - Dynamic Smoke Medium");
+  console.log("omnyo-dynamic-smoke-high - Dynamic Smoke High");
   process.exit(0);
 }
 
 const selectedModelFlagIndex = process.argv.indexOf("--model");
+
 const launchSelectedModel =
   selectedModelFlagIndex >= 0
     ? process.argv[selectedModelFlagIndex + 1]
     : "acp-default";
 
 let nextSession = 1;
+
 const loadedSessions = new Map();
 
 const acpModels = [
   {
-    value: "bb-dynamic-acp-native-default",
+    value: "omnyo-dynamic-acp-native-default",
     name: "Dynamic ACP Native Default",
   },
-  { value: "bb-dynamic-acp-native-strong", name: "Dynamic ACP Native Strong" },
+  {
+    value: "omnyo-dynamic-acp-native-strong",
+    name: "Dynamic ACP Native Strong",
+  },
 ];
+
 const defaultAcpModel = acpModels[0].value;
 
 function initialSessionModel() {
@@ -58,6 +65,7 @@ function promptText(prompt) {
   if (!Array.isArray(prompt)) {
     return "";
   }
+
   return prompt
     .map((entry) => (entry?.type === "text" ? entry.text : ""))
     .filter((text) => text && !text.startsWith("<system_instructions>"))
@@ -65,8 +73,10 @@ function promptText(prompt) {
 }
 
 const lines = createInterface({ input: process.stdin, terminal: false });
+
 lines.on("line", (line) => {
   let message;
+
   try {
     message = JSON.parse(line);
   } catch {
@@ -74,6 +84,7 @@ lines.on("line", (line) => {
   }
 
   const { id, method, params } = message;
+
   if (id === undefined || typeof method !== "string") {
     return;
   }
@@ -87,6 +98,7 @@ lines.on("line", (line) => {
           promptCapabilities: { image: false },
         },
       });
+
       return;
 
     case "session/new": {
@@ -106,33 +118,41 @@ lines.on("line", (line) => {
           },
         ],
       });
+
       return;
     }
 
     case "session/load": {
       const sessionId = params?.sessionId;
+
       if (typeof sessionId === "string") {
         loadedSessions.set(sessionId, initialSessionModel());
         result(id, null);
+
         return;
       }
+
       write({
         id,
         error: { code: -32602, message: "sessionId is required" },
       });
+
       return;
     }
 
     case "session/set_model": {
       const sessionId = params?.sessionId;
       const modelId = params?.modelId;
+
       if (typeof sessionId !== "string" || !loadedSessions.has(sessionId)) {
         write({
           id,
           error: { code: -32000, message: "unknown session" },
         });
+
         return;
       }
+
       if (
         typeof modelId !== "string" ||
         !acpModels.some((model) => model.value === modelId)
@@ -141,27 +161,34 @@ lines.on("line", (line) => {
           id,
           error: { code: -32602, message: `model not found: ${modelId}` },
         });
+
         return;
       }
+
       loadedSessions.set(sessionId, modelId);
       result(id, {});
+
       return;
     }
 
     case "session/prompt": {
       const sessionId = params?.sessionId;
+
       if (typeof sessionId !== "string" || !loadedSessions.has(sessionId)) {
         write({
           id,
           error: { code: -32000, message: "unknown session" },
         });
+
         return;
       }
+
       sessionUpdate(
         sessionId,
         `dynamic-acp:model=${loadedSessions.get(sessionId)}:${promptText(params?.prompt)}`,
       );
       result(id, { stopReason: "end_turn" });
+
       return;
     }
 

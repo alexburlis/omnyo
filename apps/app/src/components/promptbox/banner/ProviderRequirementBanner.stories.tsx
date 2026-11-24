@@ -1,4 +1,4 @@
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
 import { ResponsiveStage } from "./banner-story-stages";
 import { ProviderCliBanner } from "./ProviderCliBanner";
@@ -44,7 +44,7 @@ export function Requirements() {
         </ResponsiveStage>
       </StoryRow>
       <StoryRow
-        label="machines cannot reach bb"
+        label="machines cannot reach Omnyo"
         hint="the environment would create a machine, but nothing tells that machine how to reach this server"
       >
         <ResponsiveStage>
@@ -66,7 +66,7 @@ export function Requirements() {
       </StoryRow>
       <StoryRow
         label="provider CLI not installed"
-        hint="the selected provider has no CLI on this machine, and bb can install it"
+        hint="the selected provider has no CLI on this machine, and Omnyo can install it"
       >
         <ResponsiveStage>
           <ProviderCliBanner
@@ -98,7 +98,7 @@ export function Requirements() {
       </StoryRow>
       <StoryRow
         label="provider CLI too old"
-        hint="both versions are known, and bb can run the update itself"
+        hint="both versions are known, and Omnyo can run the update itself"
       >
         <ResponsiveStage>
           <ProviderCliBanner
@@ -129,7 +129,7 @@ export function Requirements() {
         </ResponsiveStage>
       </StoryRow>
       <StoryRow
-        label="bb cannot update it"
+        label="Omnyo cannot update it"
         hint="the machine installs this CLI itself, so the banner explains without offering an action"
       >
         <ResponsiveStage>
@@ -162,7 +162,7 @@ export function Requirements() {
       </StoryRow>
       <StoryRow
         label="required version unknown"
-        hint="bb knows the installed version is too old but not what it needs"
+        hint="Omnyo knows the installed version is too old but not what it needs"
       >
         <ResponsiveStage>
           <ProviderCliBanner

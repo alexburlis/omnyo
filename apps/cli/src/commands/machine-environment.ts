@@ -1,7 +1,7 @@
 import type { Command } from "commander";
-import type { MachineEnvironmentList } from "@bb/server-contract";
+import type { MachineEnvironmentList } from "@omnyo/server-contract";
 import { action } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { outputJson } from "./helpers.js";
 
 function printEnvironment(
@@ -12,6 +12,7 @@ function printEnvironment(
   console.log(
     `Built-in GitHub: ${result.builtInGit.status} — ${result.builtInGit.statusMessage}`,
   );
+
   for (const row of result.variables)
     console.log(
       `${row.name}=${row.secret ? "[secret]" : row.value}${row.note ? ` (${row.note})` : ""}`,
@@ -25,13 +26,16 @@ async function readValue(): Promise<string> {
     );
   const chunks: Buffer[] = [];
   let bytes = 0;
+
   for await (const chunk of process.stdin) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.byteLength;
+
     if (bytes > 65536)
       throw new Error("Environment value exceeds 65536 bytes.");
     chunks.push(buffer);
   }
+
   return Buffer.concat(chunks)
     .toString("utf8")
     .replace(/\r?\n$/u, "");
@@ -44,6 +48,7 @@ export function registerMachineEnvironmentCommands(
   const env = machine
     .command("env")
     .description("Configure global or project machine environment variables");
+
   env
     .command("list")
     .option(
@@ -53,7 +58,8 @@ export function registerMachineEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (options: { project?: string; json?: boolean }) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const result = options.project
           ? await sdk.projects.machineEnvironment({
               projectId: options.project,
@@ -62,12 +68,15 @@ export function registerMachineEnvironmentCommands(
               ...(await sdk.system.machineEnvironment()),
               inheritedVariables: [],
             };
+
         printEnvironment(result, options);
+
         if (!options.json && options.project) {
           for (const row of result.inheritedVariables) {
             const overridden = result.variables.some(
               (variable) => variable.name === row.name,
             );
+
             console.log(
               `${row.name}=[secret] (Global${overridden ? "; overridden by project" : "; inherited"})`,
             );
@@ -87,12 +96,14 @@ export function registerMachineEnvironmentCommands(
           name: string,
           options: { project?: string; note?: string; json?: boolean },
         ) => {
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
+
           const input = {
             name,
             value: await readValue(),
             note: options.note ?? null,
           };
+
           printEnvironment(
             options.project
               ? await sdk.projects.setMachineEnvironmentVariable({
@@ -115,7 +126,7 @@ export function registerMachineEnvironmentCommands(
     .action(
       action(
         async (name: string, options: { project?: string; json?: boolean }) => {
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
           printEnvironment(
             options.project
               ? await sdk.projects.deleteMachineEnvironmentVariable({

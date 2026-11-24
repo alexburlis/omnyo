@@ -56,7 +56,7 @@ export function SidebarChildToggleChevron({
       <Icon
         name="ChevronRight"
         className={cn(
-          "size-3 transition-transform duration-150",
+          "size-3 transition-transform duration-(--motion-duration-base) ease-in-out",
           !isCollapsed && "rotate-90",
         )}
         aria-hidden="true"

@@ -7,7 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -31,7 +31,9 @@ const TABS: readonly SidebarSplitTabDescriptor[] = [
   { id: "tab-a", label: "A", restoresPlacementAfterRemoval: true },
   { id: "tab-b", label: "B", restoresPlacementAfterRemoval: true },
 ];
+
 const PANEL_STATE_ID = "sidebar-split-container-test";
+
 let nextPaneInstance = 0;
 
 function listPaneIds(): string[] {
@@ -46,6 +48,7 @@ function createTwoPaneState(): SidebarSplitState {
     TABS.map((tab) => tab.id),
     "tab-a",
   );
+
   return moveSidebarTab(
     initial,
     initial.layout.focusedPaneId,
@@ -60,6 +63,7 @@ function createStackedPaneState(): SidebarSplitState {
     TABS.map((tab) => tab.id),
     "tab-a",
   );
+
   return moveSidebarTab(
     initial,
     initial.layout.focusedPaneId,
@@ -119,6 +123,7 @@ function StatefulPane({
   paneId: string;
 }) {
   const [instanceId] = useState(() => `${paneId}-${nextPaneInstance++}`);
+
   return (
     <div data-testid={`pane-content-${paneId}`}>
       <span data-testid={`pane-instance-${paneId}`}>{instanceId}</span>
@@ -143,6 +148,7 @@ function MultiTabStatefulPane({
   side: "left" | "right" | "top" | "bottom";
 }) {
   const [instance] = useState(() => `${paneId}-${nextPaneInstance++}`);
+
   return (
     <div>
       <span data-testid={`multi-instance-${paneId}`}>{instance}</span>
@@ -170,30 +176,36 @@ describe("SidebarSplitContainer", () => {
 
   it("activates a pane before a descendant stops pointer propagation", async () => {
     const split = createTwoPaneState();
+
     const firstPaneId =
       split.layout.root.type === "split"
         ? split.layout.root.children[0]?.type === "pane"
           ? split.layout.root.children[0].paneId
           : null
         : null;
+
     const secondPaneId =
       split.layout.root.type === "split"
         ? split.layout.root.children[1]?.type === "pane"
           ? split.layout.root.children[1].paneId
           : null
         : null;
+
     expect(firstPaneId).not.toBeNull();
     expect(secondPaneId).not.toBeNull();
+
     if (firstPaneId === null || secondPaneId === null) return;
     persistState(focusSidebarPane(split, firstPaneId));
 
     const activate = vi.fn();
+
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});
 
     function Harness() {
       const [activeTabId, setActiveTabId] = useState("tab-a");
+
       return (
         <SidebarSplitContainer
           activeTabId={activeTabId}
@@ -243,14 +255,17 @@ describe("SidebarSplitContainer", () => {
 
   it("activates a pane when keyboard focus enters it", async () => {
     const split = createTwoPaneState();
+
     const paneIds =
       split.layout.root.type === "split"
         ? split.layout.root.children.flatMap((child) =>
             child.type === "pane" ? [child.paneId] : [],
           )
         : [];
+
     expect(paneIds).toHaveLength(2);
     const [firstPaneId, secondPaneId] = paneIds;
+
     if (firstPaneId === undefined || secondPaneId === undefined) return;
     persistState(focusSidebarPane(split, firstPaneId));
     const activate = vi.fn();
@@ -277,11 +292,13 @@ describe("SidebarSplitContainer", () => {
 
   it("assigns focus and outer controls to the appropriate panes", () => {
     const split = createTwoPaneState();
+
     const focusedPaneId =
       split.layout.root.type === "split" &&
       split.layout.root.children[0]?.type === "pane"
         ? split.layout.root.children[0].paneId
         : split.layout.focusedPaneId;
+
     persistState(focusSidebarPane(split, focusedPaneId));
 
     renderContainer({
@@ -318,6 +335,7 @@ describe("SidebarSplitContainer", () => {
 
     function Harness() {
       const [terminalOpen, setTerminalOpen] = useState(false);
+
       const tabs = terminalOpen
         ? [
             TABS[0] as SidebarSplitTabDescriptor,
@@ -328,6 +346,7 @@ describe("SidebarSplitContainer", () => {
             },
           ]
         : TABS;
+
       return (
         <>
           <button type="button" onClick={() => setTerminalOpen(true)}>
@@ -374,6 +393,7 @@ describe("SidebarSplitContainer", () => {
       label: "New tab",
       restoresPlacementAfterRemoval: false,
     };
+
     const file: SidebarSplitTabDescriptor = {
       id: "file-a",
       label: "File A",
@@ -384,12 +404,14 @@ describe("SidebarSplitContainer", () => {
       const [phase, setPhase] = useState<"launcher" | "file" | "both">(
         "launcher",
       );
+
       const tabs =
         phase === "launcher"
           ? [launcher]
           : phase === "file"
             ? [file]
             : [file, launcher];
+
       return (
         <>
           <button type="button" onClick={() => setPhase("file")}>
@@ -458,6 +480,7 @@ describe("SidebarSplitContainer", () => {
       const panes = Array.from(
         document.querySelectorAll<HTMLElement>("[data-split-pane-id]"),
       );
+
       expect(panes).toHaveLength(2);
       expect(
         document.querySelector<HTMLElement>("[data-sidebar-split-container]")
@@ -482,10 +505,12 @@ describe("SidebarSplitContainer", () => {
         ...TABS,
         { id: "tab-c", label: "C", restoresPlacementAfterRemoval: true },
       ];
+
       const initial = createSidebarSplitState(
         tabs.map((tab) => tab.id),
         "tab-a",
       );
+
       const split = moveSidebarTab(
         initial,
         initial.layout.focusedPaneId,
@@ -493,6 +518,7 @@ describe("SidebarSplitContainer", () => {
         { paneId: initial.layout.focusedPaneId, zone: "right" },
         { groupId: "group-c" },
       );
+
       persistState(split);
 
       renderContainer({
@@ -508,6 +534,7 @@ describe("SidebarSplitContainer", () => {
         ),
       });
       const originalPaneIds = listPaneIds();
+
       const instancesBefore = new Map(
         originalPaneIds.map((paneId) => [
           paneId,
@@ -520,6 +547,7 @@ describe("SidebarSplitContainer", () => {
       );
 
       expect(listPaneIds()).toHaveLength(3);
+
       for (const paneId of originalPaneIds) {
         expect(screen.getByTestId(`multi-instance-${paneId}`).textContent).toBe(
           instancesBefore.get(paneId),
@@ -537,18 +565,22 @@ describe("SidebarSplitContainer", () => {
     "moves the unfocused Info pane %s from its own control",
     (side, expectedDirection, expectedOrder) => {
       const split = createTwoPaneState();
+
       const infoPane =
         split.layout.root.type === "split" &&
         split.layout.root.children[0]?.type === "pane"
           ? split.layout.root.children[0]
           : null;
+
       const diffPane =
         split.layout.root.type === "split" &&
         split.layout.root.children[1]?.type === "pane"
           ? split.layout.root.children[1]
           : null;
+
       expect(infoPane).not.toBeNull();
       expect(diffPane).not.toBeNull();
+
       if (infoPane === null || diffPane === null) return;
       persistState(focusSidebarPane(split, diffPane.paneId));
 
@@ -602,15 +634,19 @@ describe("SidebarSplitContainer", () => {
       document.querySelectorAll<HTMLElement>("[data-split-pane-id]"),
       (pane) => pane.dataset.splitPaneId,
     ).filter((paneId): paneId is string => paneId !== undefined);
+
     expect(paneIds).toHaveLength(2);
+
     const before = new Map(
       paneIds.map((paneId) => [
         paneId,
         screen.getByTestId(`pane-instance-${paneId}`).textContent,
       ]),
     );
+
     const paneToMove = paneIds[1];
     expect(paneToMove).toBeDefined();
+
     if (paneToMove === undefined) return;
 
     fireEvent.click(
@@ -626,14 +662,17 @@ describe("SidebarSplitContainer", () => {
 
   it("maximizes one pane while preserving the mounted split for restoration", async () => {
     const split = createStackedPaneState();
+
     const paneIds =
       split.layout.root.type === "split"
         ? split.layout.root.children.flatMap((child) =>
             child.type === "pane" ? [child.paneId] : [],
           )
         : [];
+
     const paneToMaximize = paneIds[0];
     expect(paneToMaximize).toBeDefined();
+
     if (paneToMaximize === undefined) return;
     persistState(split);
 
@@ -646,6 +685,7 @@ describe("SidebarSplitContainer", () => {
       "isMaximized" | "onToggleMaximize" | "paneId"
     >) {
       const [instance] = useState(() => `${paneId}-${nextPaneInstance++}`);
+
       return (
         <div>
           <span data-testid={`max-instance-${paneId}`}>{instance}</span>
@@ -658,6 +698,7 @@ describe("SidebarSplitContainer", () => {
 
     function Harness() {
       const [isFullScreen, setIsFullScreen] = useState(false);
+
       return (
         <SidebarSplitContainer
           activeTabId="tab-b"
@@ -679,6 +720,7 @@ describe("SidebarSplitContainer", () => {
         </TooltipProvider>
       </SidebarProvider>,
     );
+
     const instancesBefore = new Map(
       paneIds.map((paneId) => [
         paneId,
@@ -699,13 +741,17 @@ describe("SidebarSplitContainer", () => {
     );
     const hiddenPaneId = paneIds.find((paneId) => paneId !== paneToMaximize);
     expect(hiddenPaneId).toBeDefined();
+
     if (hiddenPaneId === undefined) return;
+
     const hiddenPane = document.querySelector(
       `[data-split-pane-id="${hiddenPaneId}"]`,
     );
+
     if (!(hiddenPane instanceof HTMLElement)) {
       throw new Error("Expected the preserved hidden split pane");
     }
+
     expect(hiddenPane.getAttribute("aria-hidden")).toBe("true");
     expect(hiddenPane.style.contentVisibility).toBe("hidden");
     expect(hiddenPane.className).toContain("invisible");
@@ -713,6 +759,7 @@ describe("SidebarSplitContainer", () => {
     expect(document.querySelector('[role="separator"]')?.className).toContain(
       "invisible",
     );
+
     for (const paneId of paneIds) {
       expect(screen.getByTestId(`max-instance-${paneId}`).textContent).toBe(
         instancesBefore.get(paneId),
@@ -730,6 +777,7 @@ describe("SidebarSplitContainer", () => {
     expect(hiddenPane.getAttribute("aria-hidden")).toBeNull();
     expect(hiddenPane.style.contentVisibility).toBe("");
     expect(screen.getByRole("separator")).not.toBeNull();
+
     for (const paneId of paneIds) {
       expect(screen.getByTestId(`max-instance-${paneId}`).textContent).toBe(
         instancesBefore.get(paneId),
@@ -754,6 +802,7 @@ describe("SidebarSplitContainer", () => {
     const panes = Array.from(
       document.querySelectorAll<HTMLElement>("[data-split-pane-id]"),
     );
+
     expect(panes).toHaveLength(2);
     expect(
       panes.filter((pane) => pane.dataset.maximized === "true"),
@@ -793,7 +842,9 @@ describe("SidebarSplitContainer", () => {
       const panes = Array.from(
         document.querySelectorAll<HTMLElement>("[data-split-pane-id]"),
       );
+
       expect(panes).toHaveLength(2);
+
       for (const pane of panes) {
         const paneId = pane.dataset.splitPaneId;
         expect(
@@ -803,9 +854,11 @@ describe("SidebarSplitContainer", () => {
           pane.querySelector(`[data-testid='body-${paneId}']`),
         ).not.toBeNull();
       }
+
       const separator = screen.getByRole("separator", {
         name: separatorName,
       });
+
       expect(screen.getAllByRole("separator")).toHaveLength(1);
       expect(separator.getAttribute("aria-orientation")).toBe(orientation);
       expect(separator.className).toContain("bg-border-seam");
@@ -821,9 +874,11 @@ describe("SidebarSplitContainer", () => {
     const separator = screen.getByRole("separator", {
       name: "Resize stacked right panel panes",
     });
+
     const hitTarget = separator.firstElementChild;
     const previous = separator.previousElementSibling;
     const next = separator.nextElementSibling;
+
     if (
       !(hitTarget instanceof HTMLElement) ||
       !(previous instanceof HTMLElement) ||
@@ -831,6 +886,7 @@ describe("SidebarSplitContainer", () => {
     ) {
       throw new Error("Expected one stacked-pane resize pair");
     }
+
     Object.defineProperty(hitTarget, "setPointerCapture", { value: vi.fn() });
     vi.spyOn(previous, "getBoundingClientRect").mockReturnValue({
       bottom: 400,
@@ -875,9 +931,11 @@ describe("SidebarSplitContainer", () => {
     });
     expect(Number.parseFloat(previous.style.flex)).toBeCloseTo(0.749, 3);
     expect(Number.parseFloat(next.style.flex)).toBeCloseTo(0.251, 3);
+
     const panes = Array.from(
       document.querySelectorAll<HTMLElement>("[data-split-pane-id]"),
     );
+
     expect(Number.parseFloat(panes[0]?.style.height ?? "0")).toBeCloseTo(
       74.9,
       1,
@@ -902,6 +960,7 @@ describe("SidebarSplitContainer", () => {
     const hitTarget = separator.firstElementChild;
     const previous = separator.previousElementSibling;
     const next = separator.nextElementSibling;
+
     if (
       !(hitTarget instanceof HTMLElement) ||
       !(previous instanceof HTMLElement) ||
@@ -909,7 +968,9 @@ describe("SidebarSplitContainer", () => {
     ) {
       throw new Error("Expected adjacent right-panel split items");
     }
+
     const grid = separator.parentElement;
+
     if (grid === null) throw new Error("Expected a right-panel split grid");
     expect(separator.dataset.splitResizeGridBoundary).toBe("1");
     expect(separator.dataset.splitResizeGridCount).toBe("2");
@@ -980,11 +1041,14 @@ describe("SidebarSplitContainer", () => {
       TABS.map((tab) => tab.id),
       "tab-a",
     );
+
     expect(persisted.layout.root.type).toBe("split");
+
     if (persisted.layout.root.type === "split") {
       expect(persisted.layout.root.sizes[0]).toBeCloseTo(199.5 / 599, 5);
       expect(persisted.layout.root.sizes[1]).toBeCloseTo(399.5 / 599, 5);
     }
+
     expect(document.querySelector("[data-split-resize-snap-guide]")).toBeNull();
   });
 
@@ -997,6 +1061,7 @@ describe("SidebarSplitContainer", () => {
     const hitTarget = separator.firstElementChild;
     const previous = separator.previousElementSibling;
     const next = separator.nextElementSibling;
+
     if (
       !(hitTarget instanceof HTMLElement) ||
       !(previous instanceof HTMLElement) ||
@@ -1004,6 +1069,7 @@ describe("SidebarSplitContainer", () => {
     ) {
       throw new Error("Expected adjacent right-panel split items");
     }
+
     Object.defineProperties(hitTarget, {
       releasePointerCapture: { configurable: true, value: vi.fn() },
       setPointerCapture: { configurable: true, value: vi.fn() },
@@ -1066,6 +1132,7 @@ describe("SidebarSplitContainer", () => {
     const hitTarget = separator.firstElementChild;
     const previous = separator.previousElementSibling;
     const next = separator.nextElementSibling;
+
     if (
       !(hitTarget instanceof HTMLElement) ||
       !(previous instanceof HTMLElement) ||
@@ -1073,6 +1140,7 @@ describe("SidebarSplitContainer", () => {
     ) {
       throw new Error("Expected a resize pair");
     }
+
     Object.defineProperty(hitTarget, "setPointerCapture", { value: vi.fn() });
     vi.spyOn(previous, "getBoundingClientRect").mockReturnValue({
       bottom: 600,
@@ -1123,6 +1191,7 @@ describe("SidebarSplitContainer", () => {
     expect(hitTarget).toBeInstanceOf(HTMLElement);
     expect(previous).toBeInstanceOf(HTMLElement);
     expect(next).toBeInstanceOf(HTMLElement);
+
     if (
       !(hitTarget instanceof HTMLElement) ||
       !(previous instanceof HTMLElement) ||
@@ -1130,6 +1199,7 @@ describe("SidebarSplitContainer", () => {
     ) {
       return;
     }
+
     Object.defineProperty(hitTarget, "setPointerCapture", { value: vi.fn() });
     Object.defineProperty(previous, "getBoundingClientRect", {
       value: () => ({ left: 0, right: 400, top: 0, bottom: 600 }),
@@ -1161,6 +1231,7 @@ describe("SidebarSplitContainer", () => {
     const hitTarget = separator.firstElementChild;
     const previous = separator.previousElementSibling;
     const next = separator.nextElementSibling;
+
     if (
       !(hitTarget instanceof HTMLElement) ||
       !(previous instanceof HTMLElement) ||
@@ -1168,6 +1239,7 @@ describe("SidebarSplitContainer", () => {
     ) {
       throw new Error("Expected a split divider and adjacent panes");
     }
+
     Object.defineProperty(hitTarget, "setPointerCapture", { value: vi.fn() });
     Object.defineProperty(previous, "getBoundingClientRect", {
       value: () => ({ left: 0, right: 400, top: 0, bottom: 600 }),
@@ -1208,9 +1280,11 @@ describe("SidebarSplitContainer", () => {
     const separator = screen.getByRole("separator", {
       name: "Resize stacked right panel panes",
     });
+
     const hitTarget = separator.firstElementChild;
     const previous = separator.previousElementSibling;
     const next = separator.nextElementSibling;
+
     if (
       !(hitTarget instanceof HTMLElement) ||
       !(previous instanceof HTMLElement) ||
@@ -1218,6 +1292,7 @@ describe("SidebarSplitContainer", () => {
     ) {
       throw new Error("Expected a stacked split divider and adjacent panes");
     }
+
     Object.defineProperty(hitTarget, "setPointerCapture", { value: vi.fn() });
     Object.defineProperty(previous, "getBoundingClientRect", {
       value: () => ({ left: 0, right: 800, top: 0, bottom: 400 }),
@@ -1237,6 +1312,7 @@ describe("SidebarSplitContainer", () => {
 
   it("cancels an in-flight divider resize when the split tree unmounts", () => {
     persistState(createTwoPaneState());
+
     const view = renderContainer({
       renderPane: ({ paneId }) => <div>{paneId}</div>,
     });
@@ -1245,6 +1321,7 @@ describe("SidebarSplitContainer", () => {
     const hitTarget = separator.firstElementChild;
     const previous = separator.previousElementSibling;
     const next = separator.nextElementSibling;
+
     if (
       !(hitTarget instanceof HTMLElement) ||
       !(previous instanceof HTMLElement) ||
@@ -1252,6 +1329,7 @@ describe("SidebarSplitContainer", () => {
     ) {
       throw new Error("Expected a split divider and adjacent panes");
     }
+
     Object.defineProperty(hitTarget, "setPointerCapture", { value: vi.fn() });
     Object.defineProperty(previous, "getBoundingClientRect", {
       value: () => ({ left: 0, right: 400, top: 0, bottom: 600 }),
@@ -1316,12 +1394,14 @@ describe("SidebarSplitContainer", () => {
 
   it("uses the canonical layout when localStorage rejects the read", () => {
     const storageKey = sidebarSplitStorageKey(PANEL_STATE_ID);
+
     const getItem = vi
       .spyOn(Storage.prototype, "getItem")
       .mockImplementation((key) => {
         if (key === storageKey) {
           throw new DOMException("blocked", "SecurityError");
         }
+
         return null;
       });
 

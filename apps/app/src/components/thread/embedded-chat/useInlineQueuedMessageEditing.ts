@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ThreadQueuedMessage } from "@bb/domain";
+import type { ThreadQueuedMessage } from "@omnyo/domain";
 import type { QueuedMessageEditRequest } from "@/components/promptbox/banner/LazyQueuedMessagesList";
-import type { PromptDraftState } from "@bb/client-core";
-import { queuedInputToDraft } from "@bb/client-core";
+import type { PromptDraftState } from "@omnyo/client-core";
+import { queuedInputToDraft } from "@omnyo/client-core";
 import type { InlineComposerDraftSession } from "./useActiveComposerDraft";
 import { useQueuedMessageEditHold } from "./useQueuedMessageEditHold";
 
@@ -48,18 +48,23 @@ export function useInlineQueuedMessageEditing({
 }: UseInlineQueuedMessageEditingArgs): UseInlineQueuedMessageEditingResult {
   const [inlineEditingQueuedMessageState, setInlineEditingQueuedMessage] =
     useState<InlineQueuedMessageEditState | null>(null);
+
   const inlineEditingQueuedMessageRef =
     useRef<InlineQueuedMessageEditState | null>(null);
+
   const inlineEditSessionIdRef = useRef(0);
 
   const queuedMessagesByIdRef = useRef<
     ReadonlyMap<string, ThreadQueuedMessage>
   >(new Map());
+
   queuedMessagesByIdRef.current = useMemo(() => {
     const next = new Map<string, ThreadQueuedMessage>();
+
     for (const message of queuedMessages) {
       next.set(message.id, message);
     }
+
     return next;
   }, [queuedMessages]);
 
@@ -70,6 +75,7 @@ export function useInlineQueuedMessageEditing({
     },
     [],
   );
+
   const updateInlineQueuedMessage = useCallback(
     (
       updater: (
@@ -79,11 +85,13 @@ export function useInlineQueuedMessageEditing({
       setInlineEditingQueuedMessage((current) => {
         const next = updater(current);
         inlineEditingQueuedMessageRef.current = next;
+
         return next;
       });
     },
     [],
   );
+
   const dismissInlineQueuedMessageEditor = useCallback(() => {
     commitInlineQueuedMessage(null);
   }, [commitInlineQueuedMessage]);
@@ -100,6 +108,7 @@ export function useInlineQueuedMessageEditing({
         : null,
     [inlineEditingQueuedMessageState, ownerThreadId, queuedMessages],
   );
+
   useEffect(() => {
     if (
       inlineEditingQueuedMessageState !== null &&
@@ -121,9 +130,11 @@ export function useInlineQueuedMessageEditing({
   const beginEditQueuedMessage = useCallback(
     ({ queuedMessageId, queuedMessageIndex }: QueuedMessageEditRequest) => {
       const queuedMessage = queuedMessagesByIdRef.current.get(queuedMessageId);
+
       if (!queuedMessage) {
         return;
       }
+
       commitInlineQueuedMessage({
         draft: queuedInputToDraft(queuedMessage.content),
         editSessionId: (inlineEditSessionIdRef.current += 1),
@@ -142,16 +153,20 @@ export function useInlineQueuedMessageEditing({
   );
 
   const editSessionId = inlineEditingQueuedMessage?.editSessionId ?? null;
+
   const queuedMessageDraftSession =
     useMemo<InlineComposerDraftSession | null>(() => {
       if (editSessionId === null) {
         return null;
       }
+
       return {
         editSessionId,
         setDraft: (update) => {
           const current = inlineEditingQueuedMessageRef.current;
-          if (current === null) return;
+
+          if (current === null || current.editSessionId !== editSessionId)
+            return;
           commitInlineQueuedMessage({
             ...current,
             draft: update(current.draft),

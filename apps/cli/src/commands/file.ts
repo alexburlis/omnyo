@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { action } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { confirmDestructiveAction, outputJson } from "./helpers.js";
 
 interface FileTargetOptions {
@@ -14,6 +14,7 @@ interface FileListOptions extends FileTargetOptions {
   exclude?: string[];
   files?: boolean;
   hidden?: boolean;
+  icons?: boolean;
   limit?: string;
   query?: string;
 }
@@ -42,18 +43,22 @@ interface FileRemoveOptions extends FileTargetOptions {
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
+
   for await (const chunk of process.stdin) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
+
   return Buffer.concat(chunks).toString("utf8");
 }
 
 function parseLimit(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
+
   if (!Number.isInteger(parsed) || parsed < 1) {
     throw new Error("--limit must be a positive integer.");
   }
+
   return parsed;
 }
 
@@ -70,7 +75,7 @@ export function registerFileCommands(
 ): void {
   const file = program
     .command("file")
-    .description("Read and manage files on BB machines");
+    .description("Read and manage files on Omnyo machines");
 
   file
     .command("read <path>")
@@ -80,11 +85,13 @@ export function registerFileCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (path: string, opts: FileTargetOptions) => {
-        const result = await createCliBbSdk(getUrl()).files.read({
+        const result = await createCliOmnyoSdk(getUrl()).files.read({
           path,
           ...commonTarget(opts),
         });
+
         if (outputJson(opts, result)) return;
+
         if (result.contentEncoding === "utf8")
           process.stdout.write(result.content);
         else process.stdout.write(`${result.content}\n`);
@@ -109,8 +116,10 @@ export function registerFileCommands(
         if ((opts.content === undefined) === (opts.stdin !== true)) {
           throw new Error("Provide exactly one of --content or --stdin.");
         }
+
         const content = opts.stdin ? await readStdin() : (opts.content ?? "");
-        const result = await createCliBbSdk(getUrl()).files.write({
+
+        const result = await createCliOmnyoSdk(getUrl()).files.write({
           path,
           content,
           ...commonTarget(opts),
@@ -119,6 +128,7 @@ export function registerFileCommands(
             ? { expectedSha256: opts.expectedSha256 }
             : {}),
         });
+
         if (outputJson(opts, result)) return;
         console.log(
           result.outcome === "written"
@@ -131,6 +141,7 @@ export function registerFileCommands(
   file
     .command("list <path>")
     .description("Recursively list files")
+    .option("--icons", "Discover project icons without crawling build outputs")
     .option("--query <query>", "Fuzzy path query")
     .option("--limit <count>", "Maximum entries")
     .option("--no-hidden", "Skip dot-prefixed files and directories")
@@ -142,14 +153,17 @@ export function registerFileCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (path: string, opts: FileListOptions) => {
-        const result = await createCliBbSdk(getUrl()).files.list({
+        const result = await createCliOmnyoSdk(getUrl()).files.list({
           path,
           ...listFilterArgs(opts),
+          ...(opts.icons ? { discovery: "icons" as const } : {}),
           ...(opts.host ? { hostId: opts.host } : {}),
           ...(opts.query ? { query: opts.query } : {}),
           ...(parseLimit(opts.limit) ? { limit: parseLimit(opts.limit) } : {}),
         });
+
         if (outputJson(opts, result)) return;
+
         for (const entry of result.files) console.log(entry.path);
       }),
     );
@@ -173,7 +187,8 @@ export function registerFileCommands(
         const includeFiles = opts.files || !opts.directories;
         const includeDirectories = opts.directories || !opts.files;
         const limit = parseLimit(opts.limit);
-        const result = await createCliBbSdk(getUrl()).files.listPaths({
+
+        const result = await createCliOmnyoSdk(getUrl()).files.listPaths({
           path,
           includeFiles,
           includeDirectories,
@@ -182,7 +197,9 @@ export function registerFileCommands(
           ...(opts.query ? { query: opts.query } : {}),
           ...(limit ? { limit } : {}),
         });
+
         if (outputJson(opts, result)) return;
+
         for (const entry of result.paths)
           console.log(`${entry.kind}\t${entry.path}`);
       }),
@@ -201,11 +218,12 @@ export function registerFileCommands(
           path: string,
           opts: FileTargetOptions & { recursive?: boolean },
         ) => {
-          const result = await createCliBbSdk(getUrl()).files.mkdir({
+          const result = await createCliOmnyoSdk(getUrl()).files.mkdir({
             path,
             ...commonTarget(opts),
             recursive: opts.recursive,
           });
+
           if (outputJson(opts, result)) return;
           console.log(`Created directory ${path}`);
         },
@@ -225,11 +243,12 @@ export function registerFileCommands(
           destination: string,
           opts: FileTargetOptions,
         ) => {
-          const result = await createCliBbSdk(getUrl()).files.move({
+          const result = await createCliOmnyoSdk(getUrl()).files.move({
             sourcePath: source,
             destinationPath: destination,
             ...commonTarget(opts),
           });
+
           if (outputJson(opts, result)) return;
           console.log(`Moved ${source} to ${destination}`);
         },
@@ -248,11 +267,13 @@ export function registerFileCommands(
       action(async (path: string, opts: FileRemoveOptions) => {
         if (!opts.yes && !(await confirmDestructiveAction(`Remove ${path}?`)))
           return;
-        const result = await createCliBbSdk(getUrl()).files.remove({
+
+        const result = await createCliOmnyoSdk(getUrl()).files.remove({
           path,
           ...commonTarget(opts),
           recursive: opts.recursive,
         });
+
         if (outputJson(opts, result)) return;
         console.log(`Removed ${path}`);
       }),

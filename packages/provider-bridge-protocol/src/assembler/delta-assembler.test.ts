@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ClientTurnRequestId, ThreadEvent } from "@bb/domain";
-import { threadScope, turnScope } from "@bb/domain";
+import type { ClientTurnRequestId, ThreadEvent } from "@omnyo/domain";
+import { threadScope, turnScope } from "@omnyo/domain";
 import type { DeltaItemShape, ThreadDelta } from "../thread-delta.js";
 import {
   createDeltaAssembler,
@@ -9,7 +9,9 @@ import {
 import { createBridgeDeltaEventCollector } from "../testing/bridge-delta-assembly.js";
 
 const THREAD_ID = "thr_1";
+
 const CREQ = "creq_abcdefghjk" as ClientTurnRequestId;
+
 const CREQ_2 = "creq_bcdefghjkm" as ClientTurnRequestId;
 
 function createAssembler(): DeltaAssembler {
@@ -58,10 +60,12 @@ describe("delta assembler", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
     const turnId = assembler.getOpenTurnId(THREAD_ID);
+
     const events = assemble(assembler, {
       kind: "input.accepted",
       clientRequestId: CREQ_2,
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "turn/input/accepted",
@@ -82,11 +86,13 @@ describe("delta assembler", () => {
     ).toEqual([]);
 
     assemble(assembler, { kind: "input.accepted", clientRequestId: CREQ });
+
     const events = assemble(assembler, {
       kind: "turn.boundary",
       status: "completed",
       claimIfIdle: true,
     });
+
     expect(events.map((event) => event.type)).toEqual([
       "turn/started",
       "turn/input/accepted",
@@ -105,12 +111,14 @@ describe("delta assembler", () => {
   it("boundary carries error and providerCheckpointId onto turn/completed", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const events = assemble(assembler, {
       kind: "turn.boundary",
       status: "failed",
       error: { message: "boom" },
       providerCheckpointId: "ckpt-1",
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "turn/completed",
@@ -122,15 +130,51 @@ describe("delta assembler", () => {
     expect(assembler.getOpenTurnId(THREAD_ID)).toBeUndefined();
   });
 
+  it("records main-run state only on an open turn", () => {
+    const assembler = createAssembler();
+    expect(
+      assemble(assembler, { kind: "turn.mainRun", state: "idle" }),
+    ).toEqual([]);
+    expect(assembler.getOpenTurnId(THREAD_ID)).toBeUndefined();
+
+    assemble(assembler, { kind: "turn.open" });
+    const turnId = assembler.getOpenTurnId(THREAD_ID) ?? "";
+    expect(
+      assemble(
+        assembler,
+        { kind: "turn.mainRun", state: "idle" },
+        { kind: "turn.mainRun", state: "running" },
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        type: "turn/mainRun/updated",
+        scope: turnScope(turnId),
+        state: "idle",
+      }),
+      expect.objectContaining({
+        type: "turn/mainRun/updated",
+        scope: turnScope(turnId),
+        state: "running",
+      }),
+    ]);
+
+    assemble(assembler, { kind: "turn.boundary", status: "completed" });
+    expect(
+      assemble(assembler, { kind: "turn.mainRun", state: "running" }),
+    ).toEqual([]);
+  });
+
   it("mints a fresh turn id for every turn (never reuses across boundaries)", () => {
     const assembler = createAssembler();
     const first = assemble(assembler, { kind: "turn.open" });
     assemble(assembler, { kind: "turn.boundary", status: "completed" });
     const second = assemble(assembler, { kind: "turn.open" });
+
     const turnIdOf = (event: ThreadEvent | undefined): string =>
       event !== undefined && "scope" in event && event.scope.kind === "turn"
         ? event.scope.turnId
         : "";
+
     expect(turnIdOf(first[0])).toMatch(/^as-test-t\d+$/);
     expect(turnIdOf(second[0])).toMatch(/^as-test-t\d+$/);
     expect(turnIdOf(first[0])).not.toBe(turnIdOf(second[0]));
@@ -160,6 +204,7 @@ describe("delta assembler", () => {
       aggregatedOutput: "tests failed",
       item: { type: "command", command: "npm test", cwd: "/repo" },
     });
+
     expect(closed).toEqual([
       expect.objectContaining({
         type: "item/completed",
@@ -173,16 +218,20 @@ describe("delta assembler", () => {
         }),
       }),
     ]);
+
     const startedItem =
       started[0]?.type === "item/started" ? started[0].item : undefined;
+
     const closedItem =
       closed[0]?.type === "item/completed" ? closed[0].item : undefined;
+
     expect(closedItem?.id).toBe(startedItem?.id);
   });
 
   it("builds the bare completed item on close-without-open", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const events = assemble(assembler, {
       kind: "item.close",
       key: { providerItemId: "tc-late" },
@@ -191,6 +240,7 @@ describe("delta assembler", () => {
       aggregatedOutput: "late output",
       item: { type: "command", command: "", cwd: "" },
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "item/completed",
@@ -208,11 +258,13 @@ describe("delta assembler", () => {
   it("settles both shapes when the terminal shape differs from the opened one", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const started = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "tc-re" },
       item: { type: "tool", tool: "Read file" },
     });
+
     const events = assemble(assembler, {
       kind: "item.close",
       key: { providerItemId: "tc-re" },
@@ -224,19 +276,24 @@ describe("delta assembler", () => {
         ],
       },
     });
+
     expect(events.map((event) => event.type)).toEqual([
       "item/completed",
       "item/completed",
     ]);
+
     const settled = events.flatMap((event) =>
       event.type === "item/completed" ? [event.item] : [],
     );
+
     expect(settled.map((item) => item.type)).toEqual([
       "toolCall",
       "fileChange",
     ]);
+
     const startedId =
       started[0]?.type === "item/started" ? started[0].item.id : "";
+
     for (const item of settled) {
       expect(item.id).toBe(startedId);
       expect("status" in item && item.status).toBe("completed");
@@ -248,6 +305,7 @@ describe("delta assembler", () => {
     icon: { glyph: "FileText" },
     title: "src/index.ts",
   };
+
   const closePresentation = {
     ...openPresentation,
     detail: "12 lines",
@@ -274,9 +332,11 @@ describe("delta assembler", () => {
   it("persists the open presentation and echoes it onto a close that carries none", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const started = itemOf(
       assemble(assembler, toolOpen("tc-1", openPresentation))[0],
     );
+
     expect(started).toMatchObject({
       type: "toolCall",
       presentation: openPresentation,
@@ -290,6 +350,7 @@ describe("delta assembler", () => {
         item: { type: "tool", tool: "Read", result: "…" },
       })[0],
     );
+
     expect(closed).toMatchObject({
       type: "toolCall",
       status: "completed",
@@ -301,6 +362,7 @@ describe("delta assembler", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
     assemble(assembler, toolOpen("tc-1", openPresentation));
+
     const closed = itemOf(
       assemble(assembler, {
         kind: "item.close",
@@ -310,6 +372,7 @@ describe("delta assembler", () => {
         presentation: closePresentation,
       })[0],
     );
+
     expect(closed).toMatchObject({ presentation: closePresentation });
   });
 
@@ -317,6 +380,7 @@ describe("delta assembler", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
     assemble(assembler, toolOpen("tc-re", openPresentation));
+
     const events = assemble(assembler, {
       kind: "item.close",
       key: { providerItemId: "tc-re" },
@@ -327,6 +391,7 @@ describe("delta assembler", () => {
       },
       presentation: closePresentation,
     });
+
     const settled = events.map(itemOf);
     expect(settled.map((item) => item?.type)).toEqual([
       "toolCall",
@@ -340,6 +405,7 @@ describe("delta assembler", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
     const started = itemOf(assemble(assembler, toolOpen("tc-1"))[0]);
+
     const closed = itemOf(
       assemble(assembler, {
         kind: "item.close",
@@ -348,6 +414,7 @@ describe("delta assembler", () => {
         item: { type: "tool", tool: "Read" },
       })[0],
     );
+
     expect(started).not.toHaveProperty("presentation");
     expect(closed).not.toHaveProperty("presentation");
   });
@@ -357,6 +424,7 @@ describe("delta assembler", () => {
     assemble(assembler, { kind: "turn.open" }, bashOpen("tc-1"));
     assemble(assembler, { kind: "turn.boundary", status: "completed" });
     assemble(assembler, { kind: "turn.open" });
+
     const events = assemble(assembler, {
       kind: "item.close",
       key: { providerItemId: "tc-1" },
@@ -364,6 +432,7 @@ describe("delta assembler", () => {
       aggregatedOutput: "late output",
       item: { type: "command", command: "", cwd: "" },
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "item/completed",
@@ -380,6 +449,7 @@ describe("delta assembler", () => {
   it("builds file-change items with diffs from the carried changes", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const editShape: DeltaItemShape = {
       type: "fileChange",
       changes: [
@@ -391,11 +461,13 @@ describe("delta assembler", () => {
         },
       ],
     };
+
     const started = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "tc-edit" },
       item: editShape,
     });
+
     expect(started[0]).toMatchObject({
       type: "item/started",
       item: {
@@ -410,12 +482,14 @@ describe("delta assembler", () => {
         ],
       },
     });
+
     const closed = assemble(assembler, {
       kind: "item.close",
       key: { providerItemId: "tc-edit" },
       status: "completed",
       item: editShape,
     });
+
     expect(closed[0]).toMatchObject({
       type: "item/completed",
       item: {
@@ -426,46 +500,99 @@ describe("delta assembler", () => {
     });
   });
 
-  it("maps parentRef through the provider→bb id map for nested items", () => {
+  it("keeps result text as the error only on failed file changes", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
+    const editShape: DeltaItemShape = {
+      type: "fileChange",
+      changes: [{ path: "src/app.ts", kind: "update" }],
+    };
+
+    const settle = (
+      providerItemId: string,
+      status: "completed" | "failed",
+      resultText: string,
+    ) => {
+      assemble(assembler, {
+        kind: "item.open",
+        key: { providerItemId },
+        item: editShape,
+      });
+
+      return itemOf(
+        assemble(assembler, {
+          kind: "item.close",
+          key: { providerItemId },
+          status,
+          resultText,
+          item: editShape,
+        })[0],
+      );
+    };
+
+    expect(
+      settle("tc-failed", "failed", "Could not find the exact text"),
+    ).toMatchObject({
+      type: "fileChange",
+      status: "failed",
+      error: "Could not find the exact text",
+    });
+    expect(
+      settle("tc-ok", "completed", "Successfully replaced text"),
+    ).not.toHaveProperty("error");
+    expect(settle("tc-blank", "failed", "  \n")).not.toHaveProperty("error");
+  });
+
+  it("maps parentRef through the provider→app id map for nested items", () => {
+    const assembler = createAssembler();
+    assemble(assembler, { kind: "turn.open" });
+
     const parentStarted = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "agent-parent-1" },
       item: { type: "tool", tool: "task", args: {} },
     });
-    const parentBbId =
+
+    const parentOmnyoId =
       parentStarted[0]?.type === "item/started" ? parentStarted[0].item.id : "";
+
     const childStarted = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "tc-child", parentRef: "agent-parent-1" },
       item: { type: "command", command: "ls", cwd: "/repo" },
     });
+
     expect(childStarted[0]).toMatchObject({
       type: "item/started",
-      item: { parentToolCallId: parentBbId },
+      item: { parentToolCallId: parentOmnyoId },
     });
   });
 
   it("a child-first parentRef mints the parent id instead of leaking the raw provider id", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const childStarted = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "tc-child", parentRef: "agent-parent-1" },
       item: { type: "command", command: "ls", cwd: "/repo" },
     });
+
     const childParentId =
       childStarted[0]?.type === "item/started"
         ? childStarted[0].item.parentToolCallId
         : undefined;
+
     expect(childParentId).toBeDefined();
     expect(childParentId).not.toBe("agent-parent-1");
+
     const parentStarted = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "agent-parent-1" },
       item: { type: "tool", tool: "task", args: {} },
     });
+
     expect(parentStarted[0]).toMatchObject({
       type: "item/started",
       item: { id: childParentId },
@@ -475,11 +602,13 @@ describe("delta assembler", () => {
   it("diffs cumulative snapshots into append deltas and resets", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" }, bashOpen("tc-1"));
+
     const first = assemble(assembler, {
       kind: "command.outputSnapshot",
       key: { providerItemId: "tc-1" },
       text: "FIRST\n",
     });
+
     expect(first).toEqual([
       expect.objectContaining({
         type: "item/commandExecution/outputDelta",
@@ -501,38 +630,45 @@ describe("delta assembler", () => {
         text: "",
       }),
     ).toEqual([]);
+
     const appended = assemble(assembler, {
       kind: "command.outputSnapshot",
       key: { providerItemId: "tc-1" },
       text: "FIRST\nSECOND\n",
     });
+
     expect(appended).toEqual([expect.objectContaining({ delta: "SECOND\n" })]);
+
     const reset = assemble(assembler, {
       kind: "command.outputSnapshot",
       key: { providerItemId: "tc-1" },
       text: "RESET\n",
     });
+
     expect(reset).toEqual([
       expect.objectContaining({ delta: "RESET\n", reset: true }),
     ]);
   });
 
-  it("addresses output deltas by the minted bb item id", () => {
+  it("addresses output deltas by the minted app item id", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
     const started = assemble(assembler, bashOpen("tc-1"));
-    const bbItemId =
+
+    const appItemId =
       started[0]?.type === "item/started" ? started[0].item.id : "";
+
     const events = assemble(assembler, {
       kind: "command.outputSnapshot",
       key: { providerItemId: "tc-1" },
       text: "OUT\n",
     });
+
     expect(events).toEqual([
-      expect.objectContaining({ itemId: bbItemId, delta: "OUT\n" }),
+      expect.objectContaining({ itemId: appItemId, delta: "OUT\n" }),
     ]);
-    expect(assembler.getBbItemId(THREAD_ID, "tc-1")).toBe(bbItemId);
-    expect(assembler.getProviderItemId(THREAD_ID, bbItemId)).toBe("tc-1");
+    expect(assembler.getAppItemId(THREAD_ID, "tc-1")).toBe(appItemId);
+    expect(assembler.getProviderItemId(THREAD_ID, appItemId)).toBe("tc-1");
   });
 
   it("drops snapshots for items it never saw open", () => {
@@ -556,11 +692,13 @@ describe("delta assembler", () => {
     });
     assemble(assembler, { kind: "turn.boundary", status: "completed" });
     assemble(assembler, { kind: "turn.open" }, bashOpen("tc-1"));
+
     const events = assemble(assembler, {
       kind: "command.outputSnapshot",
       key: { providerItemId: "tc-1" },
       text: "FIRST\nSECOND\n",
     });
+
     expect(events).toEqual([
       expect.objectContaining({ delta: "FIRST\nSECOND\n" }),
     ]);
@@ -571,6 +709,7 @@ describe("delta assembler", () => {
     assemble(assembler, { kind: "turn.open" });
     const turnId = assembler.getOpenTurnId(THREAD_ID) ?? "";
     assemble(assembler, { kind: "turn.boundary", status: "completed" });
+
     const events = assemble(assembler, {
       kind: "contextWindow",
       used: 54_321,
@@ -578,6 +717,7 @@ describe("delta assembler", () => {
       estimated: true,
       attach: "currentOrLast",
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "thread/contextWindowUsage/updated",
@@ -593,12 +733,14 @@ describe("delta assembler", () => {
 
   it("falls back to thread scope when no turn ever opened for a context-window update", () => {
     const assembler = createAssembler();
+
     const events = assemble(assembler, {
       kind: "contextWindow",
       used: 10,
       estimated: true,
       attach: "currentOrLast",
     });
+
     expect(events).toEqual([expect.objectContaining({ scope: threadScope() })]);
   });
 
@@ -620,12 +762,14 @@ describe("delta assembler", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
     const turnId = assembler.getOpenTurnId(THREAD_ID) ?? "";
+
     const events = assemble(assembler, {
       kind: "provider.error",
       message: "Provider error",
       detail: "quota exhausted",
       settlesTurn: true,
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "provider/error",
@@ -645,11 +789,13 @@ describe("delta assembler", () => {
   it("a settling error claims a turn through pending accepted input", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "input.accepted", clientRequestId: CREQ });
+
     const events = assemble(assembler, {
       kind: "provider.error",
       message: "Provider error",
       settlesTurn: true,
     });
+
     expect(events.map((event) => event.type)).toEqual([
       "turn/started",
       "turn/input/accepted",
@@ -660,11 +806,13 @@ describe("delta assembler", () => {
 
   it("an idle settling error stays a thread-scoped diagnostic and fabricates no turn", () => {
     const assembler = createAssembler();
+
     const events = assemble(assembler, {
       kind: "provider.error",
       message: "Provider error",
       settlesTurn: true,
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "provider/error",
@@ -676,12 +824,14 @@ describe("delta assembler", () => {
   it("a retry error keeps the turn open", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const events = assemble(assembler, {
       kind: "provider.error",
       message: "Provider error",
       detail: "temporary failure",
       willRetry: true,
     });
+
     expect(events).toEqual([
       expect.objectContaining({ type: "provider/error", willRetry: true }),
     ]);
@@ -690,19 +840,23 @@ describe("delta assembler", () => {
 
   it("scopes unhandled events to the open turn only when vouched", () => {
     const assembler = createAssembler();
+
     const raw = {
       jsonrpc: "2.0" as const,
       method: "sdk/message",
       params: { future: true },
     };
+
     assemble(assembler, { kind: "turn.open" });
     const turnId = assembler.getOpenTurnId(THREAD_ID) ?? "";
+
     const vouched = assemble(assembler, {
       kind: "unhandled",
       raw,
       rawType: "sdk/unknown",
       vouchedTurn: true,
     });
+
     expect(vouched).toEqual([
       expect.objectContaining({
         type: "provider/unhandled",
@@ -712,32 +866,38 @@ describe("delta assembler", () => {
         scope: turnScope(turnId),
       }),
     ]);
+
     const unvouched = assemble(assembler, {
       kind: "unhandled",
       raw,
       rawType: "sdk/unknown",
       vouchedTurn: false,
     });
+
     expect(unvouched).toEqual([
       expect.objectContaining({ scope: threadScope() }),
     ]);
     assemble(assembler, { kind: "turn.boundary", status: "completed" });
+
     const late = assemble(assembler, {
       kind: "unhandled",
       raw,
       rawType: "sdk/unknown",
       vouchedTurn: true,
     });
+
     expect(late).toEqual([expect.objectContaining({ scope: threadScope() })]);
   });
 
   it("drops onlyIfNoTurn unhandled events while a turn is open", () => {
     const assembler = createAssembler();
+
     const raw = {
       jsonrpc: "2.0" as const,
       method: "acp/update",
       params: { update: { sessionUpdate: "tool_call_update" } },
     };
+
     assemble(assembler, { kind: "turn.open" });
     expect(
       assemble(assembler, {
@@ -794,17 +954,20 @@ describe("delta assembler", () => {
 
   it("never fabricates a turn for turnless item deltas: fallback surfaces, no fallback drops", () => {
     const assembler = createAssembler();
+
     const raw = {
       jsonrpc: "2.0" as const,
       method: "sdk/message",
       params: { message: { type: "tool_execution_start" } },
     };
+
     const surfaced = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "tc-1" },
       item: { type: "command", command: "npm test", cwd: "/repo" },
       noTurnFallback: { raw, rawType: "sdk/tool_execution_start" },
     });
+
     expect(surfaced).toEqual([
       expect.objectContaining({
         type: "provider/unhandled",
@@ -836,11 +999,13 @@ describe("delta assembler", () => {
         item: { type: "command", command: "", cwd: "" },
       }),
     ).toEqual([]);
+
     const events = assemble(assembler, {
       kind: "turn.boundary",
       status: "completed",
       claimIfIdle: true,
     });
+
     expect(events.map((event) => event.type)).toEqual([
       "turn/started",
       "turn/input/accepted",
@@ -889,18 +1054,22 @@ describe("delta assembler", () => {
 
   it("keeps threads isolated and ids unique across threads", () => {
     const assembler = createAssembler();
+
     const a = assembler.assemble({
       threadId: "thr_a",
       deltas: [{ kind: "turn.open" }],
     });
+
     const b = assembler.assemble({
       threadId: "thr_b",
       deltas: [{ kind: "turn.open" }],
     });
+
     const turnIdOf = (event: ThreadEvent | undefined): string =>
       event !== undefined && "scope" in event && event.scope.kind === "turn"
         ? event.scope.turnId
         : "";
+
     expect(turnIdOf(a[0])).not.toBe(turnIdOf(b[0]));
     expect(assembler.getOpenTurnId("thr_a")).toBe(turnIdOf(a[0]));
     expect(assembler.getOpenTurnId("thr_b")).toBe(turnIdOf(b[0]));
@@ -910,6 +1079,7 @@ describe("delta assembler", () => {
 describe("delta assembler (keyed provider turns)", () => {
   it("keeps several keyed turns open at once and settles only the named one", () => {
     const assembler = createAssembler();
+
     const events = assemble(
       assembler,
       { kind: "turn.open", providerTurnId: "parent-turn" },
@@ -927,8 +1097,9 @@ describe("delta assembler (keyed provider turns)", () => {
         providerTurnId: "parent-turn",
       },
     );
-    const parentTurnId = assembler.getBbTurnId(THREAD_ID, "parent-turn") ?? "";
-    const childTurnId = assembler.getBbTurnId(THREAD_ID, "child-turn") ?? "";
+
+    const parentTurnId = assembler.getAppTurnId(THREAD_ID, "parent-turn") ?? "";
+    const childTurnId = assembler.getAppTurnId(THREAD_ID, "child-turn") ?? "";
     expect(parentTurnId).not.toBe(childTurnId);
     expect(events.map((event) => event.type)).toEqual([
       "turn/started",
@@ -944,17 +1115,20 @@ describe("delta assembler (keyed provider turns)", () => {
 
   it("scopes a delta for a never-opened vouched turn without fabricating turn/started", () => {
     const assembler = createAssembler();
+
     const events = assemble(assembler, {
       kind: "context.compacted",
       providerTurnId: "turn-x",
     });
+
     expect(events.map((event) => event.type)).toEqual(["thread/compacted"]);
-    const turnId = assembler.getBbTurnId(THREAD_ID, "turn-x") ?? "";
+    const turnId = assembler.getAppTurnId(THREAD_ID, "turn-x") ?? "";
     expect(events[0]).toMatchObject({ scope: turnScope(turnId) });
   });
 
   it("acknowledges vouched accepted input against the named turn, not a queue", () => {
     const assembler = createAssembler();
+
     const events = assemble(
       assembler,
       { kind: "turn.open", providerTurnId: "turn-1" },
@@ -964,6 +1138,7 @@ describe("delta assembler (keyed provider turns)", () => {
         providerTurnId: "turn-1",
       },
     );
+
     expect(events.map((event) => event.type)).toEqual([
       "turn/started",
       "turn/input/accepted",
@@ -976,6 +1151,7 @@ describe("delta assembler (keyed provider turns)", () => {
 
   it("synthesizes item/started for a delta-first textDelta and reuses the id on close", () => {
     const assembler = createAssembler();
+
     const events = assemble(
       assembler,
       { kind: "turn.open", providerTurnId: "turn-1" },
@@ -1001,6 +1177,7 @@ describe("delta assembler (keyed provider turns)", () => {
         providerTurnId: "turn-1",
       },
     );
+
     expect(events.map((event) => event.type)).toEqual([
       "turn/started",
       "item/started",
@@ -1008,8 +1185,10 @@ describe("delta assembler (keyed provider turns)", () => {
       "item/agentMessage/delta",
       "item/completed",
     ]);
+
     const startedId =
       events[1]?.type === "item/started" ? events[1].item.id : "";
+
     expect(startedId).not.toBe("");
     expect(events[4]).toMatchObject({
       item: { type: "agentMessage", id: startedId, text: "hello" },
@@ -1018,6 +1197,7 @@ describe("delta assembler (keyed provider turns)", () => {
 
   it("never synthesizes an open for output deltas", () => {
     const assembler = createAssembler();
+
     const events = assemble(
       assembler,
       { kind: "turn.open", providerTurnId: "turn-1" },
@@ -1029,16 +1209,18 @@ describe("delta assembler (keyed provider turns)", () => {
         providerTurnId: "turn-1",
       },
     );
+
     expect(events.map((event) => event.type)).toEqual([
       "turn/started",
       "item/commandExecution/outputDelta",
     ]);
-    const itemId = assembler.getBbItemId(THREAD_ID, "cmd-1") ?? "";
+    const itemId = assembler.getAppItemId(THREAD_ID, "cmd-1") ?? "";
     expect(events[1]).toMatchObject({ itemId, delta: "line\n" });
   });
 
   it("drops a repeated provider-identified close and reopens on explicit open", () => {
     const assembler = createAssembler();
+
     const close: ThreadDelta = {
       kind: "item.close",
       key: { providerItemId: "cmd-1" },
@@ -1046,12 +1228,14 @@ describe("delta assembler (keyed provider turns)", () => {
       item: { type: "command", command: "git status", cwd: "/repo" },
       providerTurnId: "turn-1",
     };
+
     const open: ThreadDelta = {
       kind: "item.open",
       key: { providerItemId: "cmd-1" },
       item: { type: "command", command: "git status", cwd: "/repo" },
       providerTurnId: "turn-1",
     };
+
     const events = assemble(
       assembler,
       { kind: "turn.open", providerTurnId: "turn-1" },
@@ -1061,11 +1245,13 @@ describe("delta assembler (keyed provider turns)", () => {
       open,
       close,
     );
+
     const completions = events.filter(
       (event) => event.type === "item/completed",
     );
+
     expect(completions).toHaveLength(2);
-    const itemId = assembler.getBbItemId(THREAD_ID, "cmd-1") ?? "";
+    const itemId = assembler.getAppItemId(THREAD_ID, "cmd-1") ?? "";
     expect(
       events
         .filter((event) => event.type === "item/started")
@@ -1076,6 +1262,7 @@ describe("delta assembler (keyed provider turns)", () => {
   it("does not dedup channel-keyed closes (bridge-local item families)", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const write: ThreadDelta = {
       kind: "item.close",
       key: { channel: "fs-write" },
@@ -1085,6 +1272,7 @@ describe("delta assembler (keyed provider turns)", () => {
         changes: [{ path: "a.txt", kind: "add", newText: "hi\n" }],
       },
     };
+
     const events = assemble(assembler, write, write);
     expect(
       events.filter((event) => event.type === "item/completed"),
@@ -1098,9 +1286,10 @@ describe("delta assembler (keyed provider turns)", () => {
       { kind: "turn.open", providerTurnId: "turn-1" },
       bashOpen("cmd-1"),
     );
-    const firstItemId = assembler.getBbItemId(THREAD_ID, "cmd-1") ?? "";
+    const firstItemId = assembler.getAppItemId(THREAD_ID, "cmd-1") ?? "";
     assemble(assembler, { kind: "session.reset" });
-    expect(assembler.getBbTurnId(THREAD_ID, "turn-1")).toBeUndefined();
+    expect(assembler.getAppTurnId(THREAD_ID, "turn-1")).toBeUndefined();
+
     const events = assemble(
       assembler,
       { kind: "turn.open", providerTurnId: "turn-1" },
@@ -1111,8 +1300,10 @@ describe("delta assembler (keyed provider turns)", () => {
         providerTurnId: "turn-1",
       },
     );
+
     const reopenedId =
       events[1]?.type === "item/started" ? events[1].item.id : "";
+
     expect(reopenedId).not.toBe("");
     expect(reopenedId).not.toBe(firstItemId);
   });
@@ -1120,14 +1311,17 @@ describe("delta assembler (keyed provider turns)", () => {
   it("threadScoped errors never adopt the open turn; vouched errors scope to it", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open", providerTurnId: "turn-1" });
-    const turnId = assembler.getBbTurnId(THREAD_ID, "turn-1") ?? "";
+    const turnId = assembler.getAppTurnId(THREAD_ID, "turn-1") ?? "";
+
     const [threadScoped] = assemble(assembler, {
       kind: "provider.error",
       message: "Provider error",
       detail: "boom",
       threadScoped: true,
     });
+
     expect(threadScoped).toMatchObject({ scope: threadScope() });
+
     const [vouched] = assemble(assembler, {
       kind: "provider.error",
       message: "Provider error",
@@ -1139,6 +1333,7 @@ describe("delta assembler (keyed provider turns)", () => {
         httpStatusCode: 502,
       },
     });
+
     expect(vouched).toMatchObject({
       scope: turnScope(turnId),
       errorInfo: { category: "stream-disconnected", httpStatusCode: 502 },
@@ -1166,31 +1361,37 @@ describe("delta assembler unified streaming dialect", () => {
   it("synthesizes item/started for an anonymous stream and settles it from the accumulated text", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const first = assemble(
       assembler,
       textDelta(assistantKey, "agentMessage", "Hel"),
     );
+
     expect(first.map((event) => event.type)).toEqual([
       "item/started",
       "item/agentMessage/delta",
     ]);
     const itemId = itemOf(first[0])?.id ?? "";
     assemble(assembler, textDelta(assistantKey, "agentMessage", "lo"));
+
     const closed = assemble(assembler, {
       kind: "item.textClose",
       key: assistantKey,
       channel: "agentMessage",
     });
+
     expect(closed).toEqual([
       expect.objectContaining({
         type: "item/completed",
         item: { type: "agentMessage", id: itemId, text: "Hello" },
       }),
     ]);
+
     const next = assemble(
       assembler,
       textDelta(assistantKey, "agentMessage", "again"),
     );
+
     expect(next[0]?.type).toBe("item/started");
     expect(itemOf(next[0])?.id).not.toBe(itemId);
   });
@@ -1198,28 +1399,34 @@ describe("delta assembler unified streaming dialect", () => {
   it("prefers provider-final text on close, and a bare close with text completes a fresh item", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const first = assemble(
       assembler,
       textDelta(assistantKey, "agentMessage", "partial"),
     );
+
     const itemId = itemOf(first[0])?.id ?? "";
+
     const closed = assemble(assembler, {
       kind: "item.textClose",
       key: assistantKey,
       channel: "agentMessage",
       text: "final text",
     });
+
     expect(itemOf(closed[0])).toEqual({
       type: "agentMessage",
       id: itemId,
       text: "final text",
     });
+
     const bare = assemble(assembler, {
       kind: "item.textClose",
       key: { channel: "thinking-0" },
       channel: "reasoningText",
       text: "thought it through",
     });
+
     expect(bare.map((event) => event.type)).toEqual(["item/completed"]);
     expect(itemOf(bare[0])).toMatchObject({
       type: "reasoning",
@@ -1246,10 +1453,12 @@ describe("delta assembler unified streaming dialect", () => {
         channel: "reasoningText",
       }),
     ).toEqual([]);
+
     const next = assemble(
       assembler,
       textDelta(assistantKey, "agentMessage", "real"),
     );
+
     expect(next[0]?.type).toBe("item/started");
   });
 
@@ -1257,20 +1466,24 @@ describe("delta assembler unified streaming dialect", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
     const key = { providerItemId: "rs-1" };
+
     const first = assemble(
       assembler,
       textDelta(key, "reasoningSummary", "Sum"),
     );
+
     expect(first.map((event) => event.type)).toEqual([
       "item/started",
       "item/reasoning/summaryTextDelta",
     ]);
     assemble(assembler, textDelta(key, "reasoningText", "Body"));
+
     const closed = assemble(assembler, {
       kind: "item.textClose",
       key,
       channel: "reasoningText",
     });
+
     expect(itemOf(closed[0])).toMatchObject({
       type: "reasoning",
       summary: ["Sum"],
@@ -1289,6 +1502,7 @@ describe("delta assembler unified streaming dialect", () => {
   it("a tool item.open releases anonymous assistant streams in its scope but not provider-named items", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const anonymous = assemble(
       assembler,
       textDelta(
@@ -1297,10 +1511,12 @@ describe("delta assembler unified streaming dialect", () => {
         "a",
       ),
     );
+
     const named = assemble(
       assembler,
       textDelta({ providerItemId: "msg-1" }, "agentMessage", "b"),
     );
+
     const anonymousId = itemOf(anonymous[0])?.id;
     const namedId = itemOf(named[0])?.id;
     assemble(assembler, {
@@ -1325,6 +1541,7 @@ describe("delta assembler unified streaming dialect", () => {
       key: { providerItemId: "tc-child", parentRef: "agent-1" },
       item: { type: "tool", tool: "Read" },
     });
+
     const afterAnonymous = assemble(
       assembler,
       textDelta(
@@ -1333,12 +1550,15 @@ describe("delta assembler unified streaming dialect", () => {
         "a3",
       ),
     );
+
     expect(afterAnonymous[0]?.type).toBe("item/started");
     expect(itemOf(afterAnonymous[0])?.id).not.toBe(anonymousId);
+
     const afterNamed = assemble(
       assembler,
       textDelta({ providerItemId: "msg-1" }, "agentMessage", "b2"),
     );
+
     expect(afterNamed).toEqual([
       expect.objectContaining({
         type: "item/agentMessage/delta",
@@ -1389,12 +1609,14 @@ describe("delta assembler unified usage dialect", () => {
     assemble(assembler, { kind: "turn.open" });
     const turnId = assembler.getOpenTurnId(THREAD_ID) ?? "";
     assemble(assembler, { kind: "turn.boundary", status: "completed" });
+
     const events = assemble(assembler, {
       kind: "usage",
       total: { ...usage, totalTokens: 100 },
       last: usage,
       modelContextWindow: 128_000,
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "thread/tokenUsage/updated",
@@ -1406,12 +1628,14 @@ describe("delta assembler unified usage dialect", () => {
         },
       }),
     ]);
+
     const again = assemble(assembler, {
       kind: "usage",
       total: { ...usage, totalTokens: 100 },
       last: usage,
       modelContextWindow: 128_000,
     });
+
     expect(again[0]).toMatchObject({
       tokenUsage: { total: { totalTokens: 100 } },
     });
@@ -1419,6 +1643,7 @@ describe("delta assembler unified usage dialect", () => {
 
   it("scopes usage and a contextWindow reading to a vouched provider turn", () => {
     const assembler = createAssembler();
+
     const events = assemble(
       assembler,
       { kind: "turn.open", providerTurnId: "turn-1" },
@@ -1438,7 +1663,8 @@ describe("delta assembler unified usage dialect", () => {
         providerTurnId: "turn-1",
       },
     );
-    const turnId = assembler.getBbTurnId(THREAD_ID, "turn-1") ?? "";
+
+    const turnId = assembler.getAppTurnId(THREAD_ID, "turn-1") ?? "";
     expect(events.map((event) => event.type)).toEqual([
       "turn/started",
       "thread/tokenUsage/updated",
@@ -1530,11 +1756,13 @@ describe("delta assembler grammar v3 core kinds", () => {
       const assembler = createAssembler();
       assemble(assembler, { kind: "turn.open" });
       const turnId = assembler.getOpenTurnId(THREAD_ID) ?? "";
+
       const [open] = assemble(assembler, {
         kind: "item.open",
         key: { providerItemId: "v3-1", parentRef: "agent-1" },
         item: shape,
       });
+
       expect(open).toMatchObject({
         type: "item/started",
         scope: turnScope(turnId),
@@ -1551,6 +1779,7 @@ describe("delta assembler grammar v3 core kinds", () => {
         status: "failed",
         item: shape,
       });
+
       expect(closed?.type).toBe("item/completed");
       expect(itemOf(closed)).toMatchObject({
         ...started,
@@ -1564,17 +1793,21 @@ describe("delta assembler grammar v3 core kinds", () => {
   it("omits optional fileRead/search fields the shape never carried", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const [read] = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "r-1" },
       item: { type: "fileRead", path: "README.md" },
     });
+
     expect(itemOf(read)).not.toHaveProperty("cmd");
+
     const [search] = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "s-1" },
       item: { type: "search", mode: "list", query: "" },
     });
+
     expect(itemOf(search)).not.toHaveProperty("path");
     expect(itemOf(search)).not.toHaveProperty("cmd");
   });
@@ -1587,12 +1820,14 @@ describe("delta assembler grammar v3 core kinds", () => {
       key: { providerItemId: "tc-1" },
       item: { type: "tool", tool: "Read", args: { path: "a.ts" } },
     });
+
     const events = assemble(assembler, {
       kind: "item.close",
       key: { providerItemId: "tc-1" },
       status: "completed",
       item: { type: "fileRead", path: "a.ts" },
     });
+
     expect(events.map((event) => itemOf(event)?.type)).toEqual([
       "toolCall",
       "fileRead",
@@ -1653,6 +1888,7 @@ describe("delta assembler grammar v3 core kinds", () => {
         background: false,
       },
     });
+
     const [closed] = assemble(assembler, {
       kind: "item.close",
       key: { providerItemId: "d-1" },
@@ -1665,6 +1901,7 @@ describe("delta assembler grammar v3 core kinds", () => {
         summary: "Found three call sites.",
       },
     });
+
     expect(closed).toMatchObject({
       type: "item/completed",
       scope: turnScope(turnId),
@@ -1683,24 +1920,29 @@ describe("delta assembler grammar v3 core kinds", () => {
       textDeltaFlushMs: 0,
       progressThrottleMs: 0,
     });
+
     const presentation = {
       label: { pending: "Delegating", completed: "Delegated" },
       icon: { glyph: "Bot" },
     };
+
     assemble(assembler, { kind: "turn.open" });
     const spawningTurnId = assembler.getOpenTurnId(THREAD_ID) ?? "";
+
     const shape: DeltaItemShape = {
       type: "delegation",
       childRef: "agent-7",
       label: "Audit the tests",
       background: true,
     };
+
     const [started] = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "d-bg" },
       item: shape,
       presentation,
     });
+
     expect(started).toMatchObject({
       type: "item/started",
       scope: turnScope(spawningTurnId),
@@ -1712,6 +1954,7 @@ describe("delta assembler grammar v3 core kinds", () => {
       kind: "turn.boundary",
       status: "completed",
     });
+
     expect(boundary.map((event) => event.type)).toEqual(["turn/completed"]);
 
     const [progress] = assemble(assembler, {
@@ -1719,6 +1962,7 @@ describe("delta assembler grammar v3 core kinds", () => {
       key: { providerItemId: "d-bg" },
       snapshot: { ...shape, summary: "Halfway through." },
     });
+
     expect(progress).toMatchObject({
       type: "item/delegation/progress",
       scope: threadScope(),
@@ -1736,6 +1980,7 @@ describe("delta assembler grammar v3 core kinds", () => {
       status: "completed",
       item: shape,
     });
+
     expect(completed).toMatchObject({
       type: "item/delegation/completed",
       scope: threadScope(),
@@ -1751,6 +1996,7 @@ describe("delta assembler grammar v3 core kinds", () => {
 
   it("a background delegation close without an open builds the bare terminal item", () => {
     const assembler = createAssembler();
+
     const events = assemble(assembler, {
       kind: "item.close",
       key: { providerItemId: "d-late" },
@@ -1763,6 +2009,7 @@ describe("delta assembler grammar v3 core kinds", () => {
         summary: "Crashed.",
       },
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "item/delegation/completed",
@@ -1810,6 +2057,7 @@ describe("delta assembler extension kinds", () => {
   it("opens and settles an extension item with its opaque payload and the delta's presentation", () => {
     const assembler = createAssembler();
     assemble(assembler, { kind: "turn.open" });
+
     const [started] = assemble(assembler, {
       kind: "item.open",
       key: { providerItemId: "x-1", parentRef: "agent-1" },
@@ -1820,6 +2068,7 @@ describe("delta assembler extension kinds", () => {
       },
       presentation,
     });
+
     const startedItem = itemOf(started);
     expect(startedItem).toMatchObject({
       type: "extension",
@@ -1840,6 +2089,7 @@ describe("delta assembler extension kinds", () => {
         payload: { objective: "Ship WS1a", tokensUsed: 40 },
       },
     });
+
     expect(itemOf(closed)).toEqual({
       ...startedItem,
       payload: { objective: "Ship WS1a", tokensUsed: 40 },
@@ -1856,6 +2106,7 @@ describe("delta assembler extension kinds", () => {
       item: { type: "extension", kind: "plugin-a/one", payload: 1 },
       presentation,
     });
+
     const events = assemble(assembler, {
       kind: "item.close",
       key: { providerItemId: "x-1" },
@@ -1863,9 +2114,11 @@ describe("delta assembler extension kinds", () => {
       item: { type: "extension", kind: "plugin-a/two", payload: 2 },
       presentation,
     });
+
     expect(
       events.map((event) => {
         const item = itemOf(event);
+
         return item?.type === "extension" ? item.kind : item?.type;
       }),
     ).toEqual(["plugin-a/one", "plugin-a/two"]);
@@ -1891,11 +2144,13 @@ describe("delta assembler extension kinds", () => {
 
   it("emits plugin thread state as a thread-scoped extensionState event", () => {
     const assembler = createAssembler();
+
     const events = assemble(assembler, {
       kind: "extension.state",
       extensionKind: "provider-codex/goal",
       payload: { objective: "Ship WS1a", status: "active" },
     });
+
     expect(events).toEqual([
       {
         type: "thread/extensionState/updated",
@@ -1912,6 +2167,7 @@ describe("delta assembler extension kinds", () => {
 describe("delta assembler background tasks and progress policy", () => {
   function createClockedAssembler(progressThrottleMs?: number) {
     let nowMs = 0;
+
     const assembler = createDeltaAssembler({
       providerId: "claude-code",
       entropyPrefix: "as-test",
@@ -1919,6 +2175,7 @@ describe("delta assembler background tasks and progress policy", () => {
       textDeltaFlushMs: 0,
       ...(progressThrottleMs === undefined ? {} : { progressThrottleMs }),
     });
+
     return {
       assembler,
       advance(ms: number) {
@@ -1956,6 +2213,7 @@ describe("delta assembler background tasks and progress policy", () => {
       key: TASK_KEY,
       item: taskShape(),
     });
+
     expect(started).toEqual([
       expect.objectContaining({
         type: "item/started",
@@ -1968,7 +2226,7 @@ describe("delta assembler background tasks and progress policy", () => {
         }),
       }),
     ]);
-    const itemId = assembler.getBbItemId(THREAD_ID, "task:wf-1") ?? "";
+    const itemId = assembler.getAppItemId(THREAD_ID, "task:wf-1") ?? "";
     expect(itemId).not.toBe("");
 
     advance(100);
@@ -1981,11 +2239,13 @@ describe("delta assembler background tasks and progress policy", () => {
     ).toEqual([]);
 
     advance(500);
+
     const progress = assemble(assembler, {
       kind: "item.progress",
       key: TASK_KEY,
       snapshot: taskShape({ summary: "still going" }),
     });
+
     expect(progress).toEqual([
       expect.objectContaining({
         type: "item/backgroundTask/progress",
@@ -1999,12 +2259,14 @@ describe("delta assembler background tasks and progress policy", () => {
     ]);
 
     assemble(assembler, { kind: "turn.boundary", status: "completed" });
+
     const completed = assemble(assembler, {
       kind: "item.close",
       key: TASK_KEY,
       status: "completed",
       item: taskShape({ status: "completed", taskStatus: "completed" }),
     });
+
     expect(completed).toEqual([
       expect.objectContaining({
         type: "item/backgroundTask/completed",
@@ -2028,12 +2290,14 @@ describe("delta assembler background tasks and progress policy", () => {
     );
 
     advance(100);
+
     const flushed = assemble(assembler, {
       kind: "item.progress",
       key: TASK_KEY,
       snapshot: taskShape({ taskStatus: "paused" }),
       flush: true,
     });
+
     expect(flushed).toHaveLength(1);
 
     advance(100);
@@ -2064,10 +2328,12 @@ describe("delta assembler background tasks and progress policy", () => {
     ).toEqual([]);
 
     advance(600);
+
     const events = assemble(assembler, {
       kind: "turn.boundary",
       status: "completed",
     });
+
     expect(events[0]).toMatchObject({
       type: "item/backgroundTask/progress",
       item: expect.objectContaining({ summary: "suppressed" }),
@@ -2112,12 +2378,14 @@ describe("delta assembler background tasks and progress policy", () => {
       snapshot: taskShape({ summary: "suppressed" }),
     });
     advance(600);
+
     const events = assemble(assembler, {
       kind: "item.close",
       key: TASK_KEY,
       status: "completed",
       item: taskShape({ status: "completed", taskStatus: "completed" }),
     });
+
     expect(events.map((event) => event.type)).toEqual([
       "item/backgroundTask/progress",
       "item/backgroundTask/completed",
@@ -2171,11 +2439,13 @@ describe("delta assembler background tasks and progress policy", () => {
       }),
     ).toEqual([]);
     advance(500);
+
     const events = assemble(assembler, {
       kind: "item.progress",
       key: { providerItemId: "tool-1" },
       message: "later",
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "item/toolCall/progress",
@@ -2192,7 +2462,8 @@ describe("delta assembler background tasks and progress policy", () => {
       { kind: "item.open", key: TASK_KEY, item: taskShape() },
       { kind: "turn.boundary", status: "completed" },
     );
-    const itemId = assembler.getBbItemId(THREAD_ID, "task:wf-1") ?? "";
+    const itemId = assembler.getAppItemId(THREAD_ID, "task:wf-1") ?? "";
+
     for (let index = 0; index < 300; index += 1) {
       assembler.assemble({
         threadId: `filler-${index}`,
@@ -2202,12 +2473,14 @@ describe("delta assembler background tasks and progress policy", () => {
         ],
       });
     }
-    expect(assembler.getBbItemId(THREAD_ID, "task:wf-1")).toBe(itemId);
+
+    expect(assembler.getAppItemId(THREAD_ID, "task:wf-1")).toBe(itemId);
   });
 
   it("keeps queued accepted input across LRU pressure (pending input pins the thread)", () => {
     const { assembler } = createClockedAssembler();
     assemble(assembler, { kind: "input.accepted", clientRequestId: CREQ });
+
     for (let index = 0; index < 300; index += 1) {
       assembler.assemble({
         threadId: `filler-${index}`,
@@ -2217,6 +2490,7 @@ describe("delta assembler background tasks and progress policy", () => {
         ],
       });
     }
+
     const events = assemble(assembler, { kind: "turn.open" });
     expect(events.map((event) => event.type)).toEqual([
       "turn/started",
@@ -2226,6 +2500,7 @@ describe("delta assembler background tasks and progress policy", () => {
 
   it("scopes provider.modelFallback to the current-or-last turn, thread when idle", () => {
     const assembler = createAssembler();
+
     const fallback = {
       kind: "provider.modelFallback",
       originalModel: "claude-fable-5",
@@ -2336,12 +2611,14 @@ describe("bridge delta assembly helper", () => {
 describe("delta assembler text-delta batching", () => {
   function createBatchingAssembler(textDeltaFlushMs = 100) {
     let nowMs = 0;
+
     const assembler = createDeltaAssembler({
       providerId: "pi",
       entropyPrefix: "as-test",
       now: () => nowMs,
       textDeltaFlushMs,
     });
+
     return {
       assembler,
       advance(ms: number) {
@@ -2424,6 +2701,7 @@ describe("delta assembler text-delta batching", () => {
     expect(assemble(assembler, assistantDelta("b"))).toEqual([]);
 
     advance(200);
+
     const events = assemble(assembler, {
       kind: "contextWindow",
       used: 10,
@@ -2431,6 +2709,7 @@ describe("delta assembler text-delta batching", () => {
       estimated: true,
       attach: "open",
     });
+
     expect(events.map((event) => event.type)).toEqual([
       "item/agentMessage/delta",
       "thread/contextWindowUsage/updated",
@@ -2443,11 +2722,13 @@ describe("delta assembler text-delta batching", () => {
     assemble(assembler, { kind: "turn.open" });
     assemble(assembler, assistantDelta("first"));
     advance(10);
+
     const events = assemble(
       assembler,
       assistantDelta(" second"),
       bashOpen("cmd-1"),
     );
+
     expect(events.map((event) => event.type)).toEqual([
       "item/agentMessage/delta",
       "item/started",
@@ -2467,6 +2748,7 @@ describe("delta assembler text-delta batching", () => {
       key: { channel: "assistant" },
       channel: "agentMessage",
     });
+
     expect(events.map((event) => event.type)).toEqual([
       "item/agentMessage/delta",
       "item/completed",
@@ -2482,11 +2764,13 @@ describe("delta assembler text-delta batching", () => {
     assemble(assembler, { kind: "turn.open" });
     assemble(assembler, assistantDelta("a"));
     advance(1);
+
     const events = assemble(
       assembler,
       assistantDelta("b"),
       assistantDelta("c"),
     );
+
     expect(events.map((event) => event.type)).toEqual([
       "item/agentMessage/delta",
       "item/agentMessage/delta",
@@ -2506,13 +2790,16 @@ describe("delta assembler text-delta batching", () => {
     expect(assemble(assembler, assistantDelta("B2", "tool-b"))).toEqual([]);
 
     advance(200);
+
     const events = assemble(assembler, {
       kind: "turn.boundary",
       status: "completed",
     });
+
     const deltas = events.filter(
       (event) => event.type === "item/agentMessage/delta",
     );
+
     expect(deltas.map((event) => event.delta)).toEqual(["A2", "B2"]);
     expect(new Set(deltas.map((event) => event.itemId)).size).toBe(2);
   });
@@ -2527,10 +2814,12 @@ describe("delta assembler text-delta batching", () => {
     expect(assemble(assembler, reasoningDelta("mm"))).toEqual([]);
 
     advance(200);
+
     const events = assemble(assembler, {
       kind: "turn.boundary",
       status: "completed",
     });
+
     expect(events.map((event) => event.type)).toEqual([
       "item/agentMessage/delta",
       "item/reasoning/textDelta",
@@ -2541,12 +2830,14 @@ describe("delta assembler text-delta batching", () => {
   it("coalesces command output deltas and flushes before the close", () => {
     const { assembler, advance } = createBatchingAssembler();
     assemble(assembler, { kind: "turn.open" }, bashOpen("cmd-1"));
+
     const first = assemble(assembler, {
       kind: "item.outputDelta",
       key: { providerItemId: "cmd-1" },
       channel: "command",
       text: "line 1\n",
     });
+
     expect(first).toEqual([
       expect.objectContaining({
         type: "item/commandExecution/outputDelta",
@@ -2571,6 +2862,7 @@ describe("delta assembler text-delta batching", () => {
       aggregatedOutput: "line 1\nline 2\n",
       item: { type: "command", command: "npm test", cwd: "/repo" },
     });
+
     expect(events.map((event) => event.type)).toEqual([
       "item/commandExecution/outputDelta",
       "item/completed",
@@ -2585,6 +2877,7 @@ describe("delta assembler text-delta batching", () => {
     const { assembler, advance } = createBatchingAssembler();
     assemble(assembler, { kind: "turn.open" }, bashOpen("cmd-1"));
     const key = { providerItemId: "cmd-1" };
+
     const snapshot = (text: string): ThreadDelta => ({
       kind: "command.outputSnapshot",
       key,

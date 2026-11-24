@@ -9,26 +9,33 @@ function acceptedEncodingQuality(
   if (acceptEncodingHeader === undefined) {
     return 0;
   }
+
   let wildcardQuality = 0;
+
   for (const part of acceptEncodingHeader.split(",")) {
     const [rawName, ...rawParams] = part.trim().split(";");
     const name = rawName?.trim().toLowerCase();
+
     const qParam = rawParams
       .map((param) => param.trim().toLowerCase())
       .find((param) => param.startsWith("q="));
+
     const quality =
       qParam === undefined
         ? 1
         : Number.isNaN(Number(qParam.slice(2)))
           ? 1
           : Number(qParam.slice(2));
+
     if (name === encoding) {
       return quality;
     }
+
     if (name === "*") {
       wildcardQuality = quality;
     }
   }
+
   return wildcardQuality;
 }
 

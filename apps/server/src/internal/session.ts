@@ -1,11 +1,12 @@
 import {
+  deleteDaemonEventReceiptsForOtherInstances,
   getLatestSessionForHost,
   getHost,
   listRetiredLoadedEnvironmentIdsOnHost,
   openSession,
   upsertHost,
   updateHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   HOST_DAEMON_PROTOCOL_VERSION,
   hostDaemonProjectAttachmentContentQuerySchema,
@@ -14,7 +15,7 @@ import {
   typedRoutes,
   type HostDaemonInternalSchema,
   type ServerMovedErrorDetails,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { Hono } from "hono";
 import { z } from "zod";
 import type { AppDeps } from "../types.js";
@@ -30,7 +31,9 @@ import { readAttachment } from "../services/projects/attachments.js";
 import { handleHostSessionOpened } from "./session-owner-side-effects.js";
 import { resolveReportedConnectMachineId } from "./hosts.js";
 import type { PluginService } from "../services/plugins/plugin-service.js";
+import { HostDiagnosticsPolicySync } from "../services/hosts/host-diagnostics-policy-sync.js";
 import { HostEnvironmentSync } from "../services/hosts/host-environment-sync.js";
+import { forgetDaemonEventReceiptsForOtherInstances } from "../services/hosts/event-receipt-watermarks.js";
 
 const sessionOpenCompatibilitySchema = z
   .object({
@@ -51,9 +54,11 @@ function invalidSessionOpenRequest(message: string): ApiError {
 
 function sessionOpenValidationMessage(error: z.ZodError): string {
   const issue = error.issues[0];
+
   if (issue?.code === "invalid_type" && issue.input === undefined) {
     return "Required";
   }
+
   return issue?.message ?? "Invalid request";
 }
 
@@ -64,12 +69,15 @@ export function registerInternalSessionRoutes(
   serverMove: ServerMoveSessionGate,
 ): void {
   const machineEnvironment = new HostEnvironmentSync(deps);
+  const diagnosticsPolicy = new HostDiagnosticsPolicySync(deps);
+
   const { get } = typedRoutes<HostDaemonInternalSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
 
   app.post("/session/open", async (context) => {
     const pendingMoveId = serverMove.pendingMoveId();
+
     if (pendingMoveId !== null) {
       throw new ApiError(
         503,
@@ -78,24 +86,30 @@ export function registerInternalSessionRoutes(
         { details: { moveId: pendingMoveId }, retryable: true },
       );
     }
+
     const movedTo = serverMove.movedTo();
+
     if (movedTo !== null) {
       throw new ApiError(
         410,
         SERVER_MOVED_ERROR_CODE,
-        `This bb server moved to ${movedTo.toHostName} (${movedTo.serverUrl})`,
+        `This Omnyo server moved to ${movedTo.toHostName} (${movedTo.serverUrl})`,
         { details: movedTo, retryable: false },
       );
     }
+
     const input: unknown = await context.req.json().catch(() => {
       throw invalidSessionOpenRequest("Invalid JSON request body");
     });
+
     const compatibility = sessionOpenCompatibilitySchema.safeParse(input);
+
     if (!compatibility.success) {
       throw invalidSessionOpenRequest(
         sessionOpenValidationMessage(compatibility.error),
       );
     }
+
     const daemon = getAuthenticatedDaemon(context);
     assertAuthenticatedHostMatches(daemon, {
       hostId: compatibility.data.hostId,
@@ -113,7 +127,7 @@ export function registerInternalSessionRoutes(
           daemonProtocolVersion: compatibility.data.protocolVersion,
           serverProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
         },
-        "Rejecting daemon session: protocol version mismatch. An older auto-update-enabled daemon will install this server's bb-app; a newer daemon requires the server to be updated.",
+        "Rejecting daemon session: protocol version mismatch",
       );
       throw new ApiError(
         400,
@@ -129,14 +143,17 @@ export function registerInternalSessionRoutes(
     }
 
     const parsed = hostDaemonSessionOpenRequestSchema.safeParse(input);
+
     if (!parsed.success) {
       throw invalidSessionOpenRequest(
         sessionOpenValidationMessage(parsed.error),
       );
     }
+
     const payload = parsed.data;
 
     const host = getHost(deps.db, daemon.hostId);
+
     if (host?.phase === "suspending" || host?.phase === "suspended") {
       throw new ApiError(
         409,
@@ -145,9 +162,19 @@ export function registerInternalSessionRoutes(
       );
     }
 
+    if (!plugins.isHostArtifactReconciliationReady()) {
+      throw new ApiError(
+        503,
+        "plugin_generations_initializing",
+        "Plugin generation reconciliation is still initializing",
+        { retryable: true },
+      );
+    }
+
     const previousSession = getLatestSessionForHost(deps.db, {
       hostId: daemon.hostId,
     });
+
     const connectMachineId = resolveReportedConnectMachineId(context);
     upsertHost(deps.db, deps.hub, {
       ...(connectMachineId !== undefined ? { connectMachineId } : {}),
@@ -157,6 +184,7 @@ export function registerInternalSessionRoutes(
     updateHost(deps.db, deps.hub, daemon.hostId, {
       lastRejectedProtocolVersion: null,
     });
+
     const session = openSession(deps.db, {
       hostId: daemon.hostId,
       instanceId: payload.instanceId,
@@ -166,21 +194,43 @@ export function registerInternalSessionRoutes(
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       leaseTimeoutMs: LEASE_TIMEOUT_MS,
     });
+
+    const receiptKey = {
+      hostId: daemon.hostId,
+      instanceId: payload.instanceId,
+    };
+
+    if (payload.undeliveredEventThreadIds.length === 0) {
+      deleteDaemonEventReceiptsForOtherInstances(deps.db, receiptKey);
+    }
+
+    forgetDaemonEventReceiptsForOtherInstances(deps.db, receiptKey);
+
     deps.hub.recordDaemonSessionPlatform(session.id, payload.platform);
     deps.hub.recordDaemonSessionLocalApiPort(session.id, payload.localApiPort);
+    deps.hub.recordDaemonSessionRuntimeUpdate(session.id, {
+      runtimeVersion: payload.runtimeVersion,
+      automaticUpdates: payload.automaticUpdates,
+    });
+    deps.hub.recordDaemonSessionReportsOpenWork(
+      session.id,
+      payload.openThreadWork !== undefined,
+    );
     deps.sharedPorts.recordHostConnectCapability({
       hostId: daemon.hostId,
       sessionId: session.id,
       hasMachineCredential: payload.hasMachineCredential,
     });
 
-    await handleHostSessionOpened(deps, {
+    const { endedInteractiveRequests } = await handleHostSessionOpened(deps, {
       activeThreads: payload.activeThreads,
+      openThreadWork: payload.openThreadWork ?? null,
       hostId: daemon.hostId,
       undeliveredEventThreadIds: payload.undeliveredEventThreadIds,
       openedSession: session,
       previousSession,
     });
+
     await serverMove.sessionOpened(daemon.hostId);
 
     const retiredEnvironmentIds = listRetiredLoadedEnvironmentIdsOnHost(
@@ -204,7 +254,11 @@ export function registerInternalSessionRoutes(
         ),
         pluginHostGenerations: plugins.listHostArtifactGenerations(),
         retiredEnvironmentIds,
+        ...(payload.openThreadWork === undefined
+          ? {}
+          : { endedInteractiveRequests }),
         machineEnvironment: await machineEnvironment.snapshot(daemon.hostId),
+        diagnosticsPolicy: diagnosticsPolicy.snapshot(),
       },
       201,
     );
@@ -224,6 +278,7 @@ export function registerInternalSessionRoutes(
         deps.db,
         query.threadId,
       );
+
       if (thread.projectId !== query.projectId) {
         throw new ApiError(
           403,
@@ -231,6 +286,7 @@ export function registerInternalSessionRoutes(
           "Thread does not belong to project",
         );
       }
+
       if (environment.hostId !== session.hostId) {
         throw new ApiError(
           403,
@@ -244,6 +300,7 @@ export function registerInternalSessionRoutes(
         query.projectId,
         query.path,
       );
+
       return new Response(new Uint8Array(attachment.content), {
         status: 200,
         headers: {

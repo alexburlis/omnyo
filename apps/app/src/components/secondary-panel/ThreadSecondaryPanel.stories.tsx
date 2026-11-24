@@ -12,8 +12,8 @@ import {
   type SecondaryPanelRenderableTab,
 } from "./ThreadSecondaryPanel";
 import type { ThreadSecondaryPanel as ThreadSecondaryPanelTab } from "@/lib/thread-secondary-panel";
-import { Icon } from "@bb/shared-ui/icon";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import {
@@ -30,7 +30,7 @@ import {
   serializeSidebarSplitState,
   sidebarSplitStorageKey,
 } from "./sidebarSplitLayout";
-import type { WorkspaceFile } from "@bb/server-contract";
+import type { WorkspaceFile } from "@omnyo/server-contract";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 import {
   ThreadMetadataContent,
@@ -133,6 +133,7 @@ function PanelHarness({ initialPanel, children }: PanelHarnessProps) {
   useEffect(() => {
     setPanel(initialPanel);
   }, [initialPanel]);
+
   return children(panel, setPanel);
 }
 
@@ -166,6 +167,7 @@ const representativeWorkspaceStatus = makeWorkspaceStatus({
     insertions: 41,
     deletions: 12,
     lineStatsComplete: true,
+    fileCount: 2,
     files: [
       {
         path: "apps/app/src/components/secondary-panel/ThreadSecondaryPanel.stories.tsx",
@@ -186,11 +188,13 @@ const representativeWorkspaceStatus = makeWorkspaceStatus({
     baseRef: "main",
     aheadCount: INFO_COMMITS.length,
     behindCount: 0,
+    squashMergeCheckComplete: true,
     hasCommittedUnmergedChanges: true,
     commits: INFO_COMMITS,
     insertions: 86,
     deletions: 19,
     lineStatsComplete: true,
+    fileCount: 2,
     files: [
       {
         path: "apps/app/src/components/secondary-panel/ThreadSecondaryPanel.tsx",
@@ -212,12 +216,14 @@ function RepresentativeInfoContent() {
   const [selectedStoragePath, setSelectedStoragePath] = useState<string | null>(
     null,
   );
+
   const storageController = useThreadStorageBrowser({
     files: INFO_STORAGE_FILES,
     onSelectPath: setSelectedStoragePath,
     selectedPath: selectedStoragePath,
     threadId: "thr_story",
   });
+
   const props: ThreadMetadataContentProps = {
     ...baseMetadataProps,
     pullRequest: makePullRequest({
@@ -232,10 +238,12 @@ function RepresentativeInfoContent() {
     },
     onCommitClick: noop,
   };
+
   const [queryClient] = useState(() => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
+
     client.setQueryData(
       threadListQueryKey({
         projectId: props.thread.projectId,
@@ -245,6 +253,7 @@ function RepresentativeInfoContent() {
       }),
       [],
     );
+
     return client;
   });
 
@@ -356,7 +365,7 @@ const MANY_TAB_FILENAMES: string[] = [
   "api.ts",
   "ThreadDetailHeader.tsx",
   "ThreadStorageBrowser.tsx",
-  "RootComposeMobileRecents.tsx",
+  "RootComposeCompactHome.tsx",
   "sidebar.tsx",
   "theme.css",
   "app.css",
@@ -387,10 +396,13 @@ function FileTabsShellInner({
   const [activeFixedTab, setActiveFixedTab] = useState<SecondaryFixedPanelTab>(
     createThreadInfoFixedPanelTab(),
   );
+
   const [openFiles, setOpenFiles] = useState<string[]>(filenames);
+
   const [activeFilename, setActiveFilename] = useState<string | null>(
     initialActiveFilename,
   );
+
   const activeTab =
     activeFilename === null
       ? activeFixedTab
@@ -409,6 +421,7 @@ function FileTabsShellInner({
     () =>
       openFiles.map((filename) => {
         const tab = createStoryFileTab(filename);
+
         return {
           label: filename,
           isPinned: filename === pinnedFilename,
@@ -473,20 +486,25 @@ function TerminalTabsShellInner({
 }: TerminalTabsShellRowProps) {
   const [openTerminals, setOpenTerminals] =
     useState<readonly TerminalTabFixture[]>(terminals);
+
   const [activeFixedTab, setActiveFixedTab] = useState<SecondaryFixedPanelTab>(
     createThreadInfoFixedPanelTab(),
   );
+
   const [activeTerminalId, setActiveTerminalId] = useState(
     initialActiveTerminalId,
   );
+
   useEffect(() => {
     setOpenTerminals(terminals);
     setActiveTerminalId(initialActiveTerminalId);
   }, [initialActiveTerminalId, terminals]);
+
   const activeTerminal =
     openTerminals.find(
       (terminal) => terminal.terminalId === activeTerminalId,
     ) ?? null;
+
   const activeTab =
     activeTerminal === null
       ? activeFixedTab
@@ -503,6 +521,7 @@ function TerminalTabsShellInner({
         if (prev !== terminalId) {
           return prev;
         }
+
         return (
           openTerminals.find((terminal) => terminal.terminalId !== terminalId)
             ?.terminalId ?? ""
@@ -518,6 +537,7 @@ function TerminalTabsShellInner({
         const tab = createTerminalFixedPanelTab({
           terminalId: terminal.terminalId,
         });
+
         return {
           contentFillsRegion: true,
           label: terminal.title,
@@ -570,14 +590,18 @@ function TerminalTabsShellRow(props: TerminalTabsShellRowProps) {
 }
 
 const SPLIT_STORY_PANEL_STATE_ID = "ladle-production-split-panes";
+
 const SPLIT_STORY_FILE = createStoryFileTab("ThreadSecondaryPanel.tsx");
+
 const SPLIT_STORY_TERMINAL = createTerminalFixedPanelTab({
   terminalId: "term_story_running",
 });
+
 const SPLIT_STORY_FILE_TABS: readonly SecondaryFileFixedPanelTab[] = [
   SPLIT_STORY_FILE,
   SPLIT_STORY_TERMINAL,
 ];
+
 const SPLIT_STORY_TABS: readonly SecondaryFixedPanelTab[] = [
   createThreadInfoFixedPanelTab(),
   createGitDiffFixedPanelTab(),
@@ -589,6 +613,7 @@ function createSplitStoryState() {
     SPLIT_STORY_TABS.map((tab) => tab.id),
     createThreadInfoFixedPanelTab().id,
   );
+
   state = moveSidebarTab(
     state,
     "pane-primary",
@@ -596,6 +621,7 @@ function createSplitStoryState() {
     { paneId: "pane-primary", zone: "bottom" },
     { groupId: "group-file" },
   );
+
   return moveSidebarTab(
     state,
     "pane-primary",
@@ -611,6 +637,7 @@ function ProductionSplitPanesStory() {
       sidebarSplitStorageKey(SPLIT_STORY_PANEL_STATE_ID),
       serializeSidebarSplitState(createSplitStoryState()),
     );
+
     return SPLIT_STORY_TERMINAL;
   });
 
@@ -692,7 +719,7 @@ export function PhoneWidthTabs() {
     <StoryCard>
       <StoryRow
         label="phone-width panel — many tabs"
-        hint="the panel body at 299px, the --secondary-panel-width-mobile value at a 393px viewport. Shelf and full-page geometry live in right-panel/Compact shelf; this row isolates the tab strip, which scrolls horizontally while Info and Diff stay fixed"
+        hint="the panel body at 299px. Shelf and full-page geometry live in right-panel/Compact shelf; this row isolates the tab strip, which scrolls horizontally while Info and Diff stay fixed"
       >
         <FileTabsShellRow
           filenames={MANY_TAB_FILENAMES}

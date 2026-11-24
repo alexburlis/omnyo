@@ -116,11 +116,13 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
 const PROVIDER_IDS = FIRST_PARTY_PROVIDER_DECLARATIONS.map(
   (plugin) => plugin.providerId,
 );
+
 const ALWAYS_VISIBLE_PROVIDER_IDS = FIRST_PARTY_PROVIDER_DECLARATIONS.filter(
   (plugin) => plugin.visibility === "always",
 ).map((plugin) => plugin.providerId);
 
-const NEW_ACP_PLUGIN_ID = "bb--provider-acp-next";
+const NEW_ACP_PLUGIN_ID = "omnyo--provider-acp-next";
+
 const ACP_PROVIDER_IDS = FIRST_PARTY_PROVIDER_DECLARATIONS.filter(
   (plugin) => plugin.builtinName === "provider-acp",
 ).map((plugin) => plugin.providerId);
@@ -130,9 +132,11 @@ function expectedLogoUrl(
   providerId: string,
 ): string {
   const hash = registry.get(providerId)?.icon?.hash;
+
   if (hash === undefined) {
     throw new Error(`${providerId} registered no icon hash`);
   }
+
   return `/api/v1/system/providers/${providerId}/logo?h=${hash}`;
 }
 
@@ -146,6 +150,7 @@ async function installFirstPartyProviderPlugins(
       `builtin:${builtinName}`,
       { kind: "root" },
     );
+
     expect(entry.status, `${builtinName}: ${entry.statusDetail ?? ""}`).toBe(
       "running",
     );
@@ -167,9 +172,11 @@ describe("first-party provider plugins", () => {
 
         for (const [index, registration] of after.entries()) {
           const plugin = FIRST_PARTY_PROVIDER_DECLARATIONS[index];
+
           if (plugin === undefined) {
             throw new Error(`missing expectation at index ${index}`);
           }
+
           const label = plugin.providerId;
           expect(registration.pluginId, label).toBe(plugin.pluginId);
           expect(registration.info.displayName, label).toBe(plugin.displayName);
@@ -226,9 +233,12 @@ describe("first-party provider plugins", () => {
       { seedFirstPartyProviders: false },
       async (harness) => {
         await installFirstPartyProviderPlugins(harness);
+
         const clientFields = (providerId: string) => {
           const info = harness.deps.providerRegistry.get(providerId)?.info;
+
           if (info === undefined) throw new Error(`${providerId} missing`);
+
           const {
             id,
             displayName,
@@ -238,6 +248,7 @@ describe("first-party provider plugins", () => {
             capabilities,
             composerActions,
           } = info;
+
           return {
             id,
             displayName,
@@ -248,12 +259,15 @@ describe("first-party provider plugins", () => {
             composerActions,
           };
         };
+
         const skills = { kind: "skills", trigger: "/" } as const;
         const explicitSkills = { kind: "skills", trigger: "$" } as const;
+
         const plan = {
           kind: "plan",
           command: { trigger: "/", name: "plan", trailingText: " " },
         } as const;
+
         const goal = {
           kind: "goal",
           command: { trigger: "/", name: "goal", trailingText: " " },
@@ -290,7 +304,7 @@ describe("first-party provider plugins", () => {
             supportsThreadArchive: false,
             supportsThreadRename: false,
             supportsServiceTier: true,
-            supportsNativeUserQuestion: true,
+            supportsNativeUserQuestion: false,
             permissionModes: ["accept-edits", "auto", "full"],
             supportsFork: true,
             supportsSessionRewind: true,
@@ -351,7 +365,7 @@ describe("first-party provider plugins", () => {
           "fast",
         ]);
         expect(claude?.envPassthrough).toEqual([
-          "BB_CLAUDE_CODE_EXECUTABLE",
+          "OMNYO_CLAUDE_CODE_EXECUTABLE",
           "CLAUDE_CODE_OAUTH_TOKEN",
         ]);
         expect(
@@ -403,6 +417,7 @@ describe("first-party provider plugins", () => {
       { seedFirstPartyProviders: false },
       async (harness) => {
         const registry = harness.deps.providerRegistry;
+
         const acpOwners = () =>
           Object.fromEntries(
             registry
@@ -410,13 +425,16 @@ describe("first-party provider plugins", () => {
               .filter((entry) => entry.info.id.startsWith("acp-"))
               .map((entry) => [entry.info.id, entry.pluginId]),
           );
+
         const owners = (pluginId: string) =>
           Object.fromEntries(
             ACP_PROVIDER_IDS.map((providerId) => [providerId, pluginId]),
           );
+
         const enabled = (pluginId: string) =>
           harness.pluginService.list().find((plugin) => plugin.id === pluginId)
             ?.enabled;
+
         const settingsCatalog = () =>
           providerManagementCatalog(harness.deps, harness.pluginService)
             .filter((entry) => entry.id.startsWith("acp-"))

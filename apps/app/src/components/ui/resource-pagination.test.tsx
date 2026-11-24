@@ -12,10 +12,11 @@ import {
   useResourceInfiniteItems,
   useResourcePagination,
   useResourceViewportPageSize,
-} from "@bb/shared-ui/resource-pagination";
+} from "@omnyo/shared-ui/resource-pagination";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ROWS = Array.from({ length: 30 }, (_, index) => index + 1);
+
 const SELECTABLE_PAGES = [0, 1, 2];
 
 function Probe({
@@ -31,6 +32,7 @@ function Probe({
     pageSize,
     resetKey,
   });
+
   return (
     <>
       <span data-testid="page">{pagination.page}</span>
@@ -56,6 +58,7 @@ function InfiniteProbe({
   resetKey?: string;
 }) {
   const infinite = useResourceInfiniteItems(ROWS, { pageSize, resetKey });
+
   return (
     <>
       <span data-testid="rows">{infinite.items.join(",")}</span>
@@ -72,6 +75,7 @@ function selectedPage(): number {
 
 function visibleRows(): number[] {
   const rows = screen.getByTestId("rows").textContent ?? "";
+
   return rows === "" ? [] : rows.split(",").map(Number);
 }
 
@@ -149,13 +153,21 @@ describe("useResourceInfiniteItems", () => {
 });
 
 const VIEWPORT_HEIGHT = 220;
+
 const NARROW_VIEWPORT_WIDTH = 600;
+
 const WIDE_VIEWPORT_WIDTH = 900;
+
 const SHORT_ROW_HEIGHT = 40;
+
 const TALL_ROW_HEIGHT = 110;
+
 const TALL_ROW_INDEX = 3;
+
 const SHORT_ROW_PAGE_SIZE = Math.floor(VIEWPORT_HEIGHT / SHORT_ROW_HEIGHT);
+
 const TALL_ROW_PAGE_SIZE = Math.floor(VIEWPORT_HEIGHT / TALL_ROW_HEIGHT);
+
 const MEASUREMENT_LIMIT = 12;
 
 let rowMeasurements = 0;
@@ -171,6 +183,7 @@ function stubSize(node: HTMLElement, height: number, width: number): void {
   });
   node.getBoundingClientRect = () => {
     rowMeasurements += 1;
+
     return {
       height,
       width,
@@ -212,10 +225,12 @@ function ViewportProbe({
   viewportWidth?: number;
 }) {
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
+
   const pageSize = useResourceViewportPageSize(viewport, {
     fallbackPageSize: SHORT_ROW_PAGE_SIZE,
     resetKey,
   });
+
   measured.push(pageSize);
   const rowCount = measured.length > MEASUREMENT_LIMIT ? 1 : pageSize;
 
@@ -275,15 +290,18 @@ describe("useResourceViewportPageSize", () => {
     const changes = measured.filter(
       (value, index) => index > 0 && value !== measured[index - 1],
     );
+
     expect(changes.length).toBeLessThanOrEqual(1);
     expect(measured.at(-1)).toBe(TALL_ROW_PAGE_SIZE);
   });
 
   it("measures a new projection from its own rows", async () => {
     const measured: number[] = [];
+
     const { rerender } = render(
       <ViewportProbe measured={measured} resetKey="all" />,
     );
+
     await settle();
     expect(measured.at(-1)).toBe(TALL_ROW_PAGE_SIZE);
 

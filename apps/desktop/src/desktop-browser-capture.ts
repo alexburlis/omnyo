@@ -2,6 +2,22 @@ import { nativeImage, type NativeImage, type WebContents } from "electron";
 import { z } from "zod";
 import type { DesktopBrowserCdpPage } from "./desktop-browser-cdp.js";
 
+type CaptureContents = Pick<
+  WebContents,
+  | "capturePage"
+  | "isDestroyed"
+  | "getBackgroundThrottling"
+  | "setBackgroundThrottling"
+> & {
+  debugger: Pick<
+    WebContents["debugger"],
+    "attach" | "detach" | "isAttached" | "sendCommand"
+  > & {
+    on(event: "detach", listener: () => void): void;
+    off(event: "detach", listener: () => void): void;
+  };
+};
+
 const screenshotSchema = z.object({
   data: z
     .string()
@@ -10,17 +26,20 @@ const screenshotSchema = z.object({
 });
 
 export async function captureDesktopBrowserCdpScreenshot(
-  contents: WebContents,
+  contents: CaptureContents,
   params: Parameters<DesktopBrowserCdpPage["send"]>[1],
   sessionId?: string,
 ) {
   let finished = false;
   let finish: () => void = () => {};
+
   const stopped = new Promise<void>((resolve) => {
     finish = resolve;
   });
+
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let frameTimer: ReturnType<typeof setTimeout> | undefined;
+
   const command = contents.debugger
     .sendCommand("Page.captureScreenshot", params, sessionId)
     .then((result) => z.record(z.string(), z.json()).parse(result))
@@ -28,6 +47,7 @@ export async function captureDesktopBrowserCdpScreenshot(
       finished = true;
       finish();
     });
+
   const frames = async () => {
     while (!finished) {
       await Promise.race([
@@ -38,6 +58,7 @@ export async function captureDesktopBrowserCdpScreenshot(
             if (contents.isDestroyed()) throw error;
           }),
       ]);
+
       if (finished) break;
       await Promise.race([
         stopped,
@@ -45,10 +66,13 @@ export async function captureDesktopBrowserCdpScreenshot(
           frameTimer = setTimeout(resolve, 16);
         }),
       ]);
+
       if (frameTimer !== undefined) clearTimeout(frameTimer);
     }
+
     return command;
   };
+
   try {
     return await Promise.race([
       command,
@@ -63,43 +87,68 @@ export async function captureDesktopBrowserCdpScreenshot(
   } finally {
     finished = true;
     finish();
+
     if (timeout !== undefined) clearTimeout(timeout);
+
     if (frameTimer !== undefined) clearTimeout(frameTimer);
   }
 }
 
 export async function captureDesktopBrowserPage(
-  contents: WebContents,
+  contents: CaptureContents,
 ): Promise<NativeImage> {
+  if (contents.isDestroyed())
+    throw new Error("Native browser tab is unavailable");
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let ownsAttachment = false;
   let active = true;
   let previousBackgroundThrottling: boolean | null = null;
   const debuggerApi = contents.debugger;
+
   const restoreBackgroundThrottling = () => {
     if (previousBackgroundThrottling !== null && !contents.isDestroyed())
       contents.setBackgroundThrottling(previousBackgroundThrottling);
     previousBackgroundThrottling = null;
   };
+
   const detached = () => {
     ownsAttachment = false;
     restoreBackgroundThrottling();
   };
+
+  const captureCdp = async () => {
+    const result = screenshotSchema.parse(
+      await captureDesktopBrowserCdpScreenshot(contents, {
+        format: "jpeg",
+        quality: 80,
+        captureBeyondViewport: false,
+      }),
+    );
+
+    return nativeImage.createFromBuffer(Buffer.from(result.data, "base64"));
+  };
+
   try {
     return await Promise.race([
       (async () => {
+        if (debuggerApi.isAttached()) return captureCdp();
+
         try {
           const image = await contents.capturePage(undefined, {
             stayHidden: true,
             stayAwake: true,
           });
+
           if (image.isEmpty())
             throw new Error("Native browser capture is empty");
+
           return image;
         } catch {
           if (!active) throw new Error("Native browser capture timed out");
+
           if (contents.isDestroyed())
             throw new Error("Native browser tab is unavailable");
+
           if (!debuggerApi.isAttached()) {
             debuggerApi.attach("1.3");
             ownsAttachment = true;
@@ -112,19 +161,12 @@ export async function captureDesktopBrowserPage(
                 { enabled: true },
               ),
             );
+
             if (!active || !ownsAttachment || contents.isDestroyed())
               throw new Error("Native browser capture was interrupted");
           }
-          const result = screenshotSchema.parse(
-            await captureDesktopBrowserCdpScreenshot(contents, {
-              format: "jpeg",
-              quality: 80,
-              captureBeyondViewport: false,
-            }),
-          );
-          return nativeImage.createFromBuffer(
-            Buffer.from(result.data, "base64"),
-          );
+
+          return captureCdp();
         }
       })(),
       new Promise<never>((_resolve, reject) => {
@@ -137,9 +179,11 @@ export async function captureDesktopBrowserPage(
     ]);
   } finally {
     active = false;
+
     if (timeout !== undefined) clearTimeout(timeout);
     debuggerApi.off("detach", detached);
     restoreBackgroundThrottling();
+
     if (ownsAttachment && !contents.isDestroyed() && debuggerApi.isAttached())
       debuggerApi.detach();
   }

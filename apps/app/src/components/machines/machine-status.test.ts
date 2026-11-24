@@ -1,4 +1,4 @@
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   machinePhaseLabel,
@@ -25,4 +25,24 @@ describe("resuming machine status", () => {
     );
     expect(machineStatusTone(host)).toBe("attention");
   });
+});
+
+it("distinguishes a rejected worker protocol from a network-offline machine", () => {
+  const rejected = makeHost({
+    status: "disconnected",
+    lastRejectedProtocolVersion: 238,
+    lastSeenAt: null,
+  });
+
+  expect(machineStatusLabel({ host: rejected, now: 1 })).toBe("Needs update");
+  expect(machineStatusTone(rejected)).toBe("attention");
+
+  const offline = makeHost({
+    status: "disconnected",
+    lastRejectedProtocolVersion: null,
+    lastSeenAt: null,
+  });
+
+  expect(machineStatusLabel({ host: offline, now: 1 })).toBe("Offline");
+  expect(machineStatusTone(offline)).toBe("offline");
 });

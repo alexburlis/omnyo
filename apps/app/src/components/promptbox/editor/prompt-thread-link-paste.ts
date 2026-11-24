@@ -1,8 +1,8 @@
-import { isProjectlessProjectId } from "@bb/client-core";
+import { isProjectlessProjectId } from "@omnyo/client-core";
 import {
   THREAD_MENTION_RESOLVE_MAX_IDS,
   type ResolveThreadMentionsResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { Extension, getChangedRanges, type Editor } from "@tiptap/core";
 import { closeHistory, isHistoryTransaction } from "@tiptap/pm/history";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
@@ -16,7 +16,7 @@ import { promptEditorSerializationFromDoc } from "./prompt-editor-serialization"
 type ThreadMentionResolution = ResolveThreadMentionsResponse[number];
 
 interface PromptThreadLinkPasteOptions {
-  getOrigin: () => string;
+  getOrigins: () => readonly string[];
   getCachedThread: (threadId: string) => ThreadMentionResolution | null;
   resolveThreads: (
     threadIds: string[],
@@ -56,42 +56,51 @@ function isConvertibleText(
   if (doc.textBetween(occurrence.from, occurrence.to) !== occurrence.text) {
     return false;
   }
+
   let convertible = true;
   doc.nodesBetween(occurrence.from, occurrence.to, (node) => {
     if (node.type.name === "mention" || node.type.name === "blockquote") {
       convertible = false;
+
       return false;
     }
+
     return convertible;
   });
+
   return convertible;
 }
 
 function documentLinks(
   doc: ProseMirrorNode,
-  origin: string,
+  origins: readonly string[],
   findLinks = findPastedThreadLinkCandidates,
 ): PastedThreadLink[] {
   const { text, offsetMapping } = promptEditorSerializationFromDoc(doc);
-  return findLinks({ text, origin }).flatMap((link) => {
+
+  return findLinks({ text, origins }).flatMap((link) => {
     const first = offsetMapping.find(
       (segment) =>
         segment.kind === "text" &&
         segment.textFrom <= link.from &&
         segment.textTo > link.from,
     );
+
     const last = offsetMapping.find(
       (segment) =>
         segment.kind === "text" &&
         segment.textFrom < link.to &&
         segment.textTo >= link.to,
     );
+
     if (!first || !last) return [];
+
     const occurrence = {
       ...link,
       from: first.docFrom + link.from - first.textFrom,
       to: last.docFrom + link.to - last.textFrom,
     };
+
     return occurrence.to - occurrence.from === link.text.length
       ? [occurrence]
       : [];
@@ -100,13 +109,14 @@ function documentLinks(
 
 function pastedOccurrences(
   transaction: Transaction,
-  origin: string,
+  origins: readonly string[],
   literalLinkIndexes: number[],
 ): PastedThreadLink[] {
   const inserted = getChangedRanges(transaction).map(
     ({ newRange }) => newRange,
   );
-  return documentLinks(transaction.doc, origin)
+
+  return documentLinks(transaction.doc, origins)
     .filter((link) =>
       inserted.some((range) => link.from >= range.from && link.to <= range.to),
     )
@@ -120,10 +130,10 @@ function pastedOccurrences(
 function eligibleOccurrences(
   doc: ProseMirrorNode,
   paste: PendingPaste,
-  origin: string,
+  origins: readonly string[],
   findLinks: typeof findPastedThreadLinkCandidates,
 ): PastedThreadLink[] {
-  return documentLinks(doc, origin, findLinks).filter((link) =>
+  return documentLinks(doc, origins, findLinks).filter((link) =>
     paste.occurrences.some(
       (occurrence) =>
         link.from === occurrence.from &&
@@ -138,6 +148,7 @@ function mapOccurrence(
   transaction: Transaction,
 ): PastedThreadLink | null {
   let { from, to } = occurrence;
+
   for (const map of transaction.mapping.maps) {
     let changed = false;
     map.forEach((start, end) => {
@@ -147,10 +158,12 @@ function mapOccurrence(
         changed = true;
       }
     });
+
     if (changed) return null;
     from = map.map(from, 1);
     to = map.map(to, -1);
   }
+
   return from < to ? { ...occurrence, from, to } : null;
 }
 
@@ -158,6 +171,7 @@ export function createPromptThreadLinkPasteExtension(
   options: PromptThreadLinkPasteOptions,
 ) {
   const pending = new Set<PendingPaste>();
+
   const cancel = (paste: PendingPaste) => {
     pending.delete(paste);
     paste.controller.abort();
@@ -167,19 +181,25 @@ export function createPromptThreadLinkPasteExtension(
     const { signal } = paste.controller;
     const resolved = new Map<string, ThreadMentionResolution>();
     let findLinks: typeof findPastedThreadLinkCandidates | undefined;
+
     const finish = () => {
       if (!pending.has(paste)) return;
       cancel(paste);
+
       if (editor.isDestroyed || !findLinks) return;
+
       const eligible = eligibleOccurrences(
         editor.state.doc,
         paste,
-        options.getOrigin(),
+        options.getOrigins(),
         findLinks,
       );
+
       const transaction = editor.state.tr;
+
       for (const occurrence of eligible.reverse()) {
         const thread = resolved.get(occurrence.threadId);
+
         if (
           !thread ||
           (occurrence.projectId === null
@@ -204,6 +224,7 @@ export function createPromptThreadLinkPasteExtension(
           ),
         );
       }
+
       if (transaction.docChanged) {
         editor.view.dispatch(
           closeHistory(transaction).setMeta(promptThreadLinkPasteKey, {
@@ -212,28 +233,35 @@ export function createPromptThreadLinkPasteExtension(
         );
       }
     };
+
     const timeout = setTimeout(finish, 2_000);
     signal.addEventListener("abort", () => clearTimeout(timeout), {
       once: true,
     });
+
     try {
       findLinks = (await import("../mentions/pasted-thread-links"))
         .findPastedThreadLinks;
+
       if (signal.aborted) return;
       const missing: string[] = [];
+
       for (const id of new Set(
         eligibleOccurrences(
           editor.state.doc,
           paste,
-          options.getOrigin(),
+          options.getOrigins(),
           findLinks,
         ).map((link) => link.threadId),
       )) {
         const cached = options.getCachedThread(id);
+
         if (cached?.threadId === id) resolved.set(id, cached);
         else missing.push(id);
       }
+
       const batches: Promise<void>[] = [];
+
       for (
         let index = 0;
         index < missing.length;
@@ -243,10 +271,13 @@ export function createPromptThreadLinkPasteExtension(
           index,
           index + THREAD_MENTION_RESOLVE_MAX_IDS,
         );
+
         batches.push(
           (async () => {
             const threads = await options.resolveThreads(ids, signal);
+
             if (signal.aborted) return;
+
             for (const thread of threads) {
               if (ids.includes(thread.threadId))
                 resolved.set(thread.threadId, thread);
@@ -254,6 +285,7 @@ export function createPromptThreadLinkPasteExtension(
           })(),
         );
       }
+
       await Promise.allSettled(batches);
     } catch {
       return;
@@ -267,18 +299,23 @@ export function createPromptThreadLinkPasteExtension(
     priority: 50,
     onTransaction({ editor, transaction, appendedTransactions }) {
       const added: PendingPaste[] = [];
+
       for (const current of [transaction, ...appendedTransactions]) {
         const metadata = pasteMetadata(current);
+
         for (const paste of pending) {
           paste.occurrences =
             metadata.cancel || isHistoryTransaction(current)
               ? []
               : paste.occurrences.flatMap((occurrence) => {
                   const mapped = mapOccurrence(occurrence, current);
+
                   return mapped ? [mapped] : [];
                 });
+
           if (paste.occurrences.length === 0) cancel(paste);
         }
+
         if (
           current.docChanged &&
           current.getMeta("uiEvent") === "paste" &&
@@ -286,15 +323,17 @@ export function createPromptThreadLinkPasteExtension(
         ) {
           const occurrences = pastedOccurrences(
             current,
-            options.getOrigin(),
+            options.getOrigins(),
             metadata.literalLinkIndexes ?? [],
           );
+
           if (occurrences.length === 0) continue;
           const paste = { occurrences, controller: new AbortController() };
           pending.add(paste);
           added.push(paste);
         }
       }
+
       for (const paste of added) {
         if (pending.has(paste)) void resolve(editor, paste);
       }
@@ -313,11 +352,13 @@ export function createPromptThreadLinkPasteExtension(
               !pasteMetadata(transaction).skip
             )
               closeHistory(transaction);
+
             return true;
           },
           appendTransaction(transactions, _oldState, newState) {
             return transactions.some((transaction) => {
               const metadata = pasteMetadata(transaction);
+
               return (
                 transaction.docChanged &&
                 !isHistoryTransaction(transaction) &&

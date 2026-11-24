@@ -12,6 +12,7 @@ const MODES: readonly { value: ThemeModePreference; label: string }[] = [
 
 export function AppearanceSettingsScreen() {
   const theme = useTheme();
+
   return (
     <GroupedScreen testID="appearance-settings-screen">
       <SettingsSection

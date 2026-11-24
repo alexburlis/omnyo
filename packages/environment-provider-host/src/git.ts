@@ -1,10 +1,20 @@
 import {
+  experimental_runVcsProcess as runVcsProcess,
   experimental_sanitizeInheritedChildProcessEnv as sanitizeInheritedChildProcessEnv,
   experimental_spawnPortableOutputProcess as spawnPortableOutputProcess,
-} from "@get-bb/plugin-sdk/host";
-import path from "node:path";
+} from "@omnyo/plugin-sdk/host";
+import {
+  createGitQueries,
+  type GitCommandResult,
+  type GitProcessOptions,
+  type GitTimeoutOptions,
+} from "./git-queries.js";
+
+export type { GitCommandResult, GitProcessOptions } from "./git-queries.js";
 
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+
+const USES_PROCESS_GROUPS = process.platform !== "win32";
 
 export class WorkspaceError extends Error {
   readonly code: string;
@@ -15,26 +25,12 @@ export class WorkspaceError extends Error {
   }
 }
 
-export interface GitProcessOptions {
-  shellPath?: string;
-}
-
-interface GitTimeoutOptions extends GitProcessOptions {
-  timeoutMs?: number;
-}
-
 export interface RunGitOptions extends GitProcessOptions {
   cwd: string;
   timeoutMs?: number;
   allowFailure?: boolean;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
-}
-
-export interface GitCommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
 }
 
 export type GitRepositoryState = "not_git" | "no_commits" | "has_commits";
@@ -51,8 +47,6 @@ export interface DefaultBranchRefs {
   defaultBranchRelation: DefaultBranchRelation | undefined;
   originDefaultBranch: string | undefined;
 }
-
-type GitRepoKind = "work-tree" | "bare" | "none";
 
 interface GitOutputBuffer {
   append: (chunk: Buffer) => boolean;
@@ -84,6 +78,7 @@ function createGitCommandFailedError(
   cause?: unknown,
 ): WorkspaceError {
   const detail = stderr ? `: ${stderr}` : "";
+
   return new WorkspaceError(
     "git_command_failed",
     `${describeCommand(args)} failed${detail}`,
@@ -106,13 +101,17 @@ function resolveGitProcessEnv(options: RunGitOptions): NodeJS.ProcessEnv {
 function createGitOutputBuffer(): GitOutputBuffer {
   const chunks: Buffer[] = [];
   let size = 0;
+
   return {
     append(chunk: Buffer): boolean {
       size += chunk.length;
+
       if (size > MAX_OUTPUT_BYTES) {
         return false;
       }
+
       chunks.push(chunk);
+
       return true;
     },
     read(): string {
@@ -131,6 +130,20 @@ export function runGit(
     );
   }
 
+  return runVcsProcess("git", args, () => runGitAdmitted(args, options), {
+    signal: options.signal,
+    priority: "background",
+  }).catch((error: unknown) => {
+    if (options.signal?.aborted)
+      throw createGitCommandCancelledError(args, error);
+    throw error;
+  });
+}
+
+function runGitAdmitted(
+  args: string[],
+  options: RunGitOptions,
+): Promise<GitCommandResult> {
   return new Promise<GitCommandResult>((resolve, reject) => {
     const stdout = createGitOutputBuffer();
     const stderr = createGitOutputBuffer();
@@ -143,11 +156,24 @@ export function runGit(
       command: "git",
       args,
       cwd: options.cwd,
+      detached: USES_PROCESS_GROUPS,
       env: resolveGitProcessEnv(options),
     });
 
+    const signalGit = (signal: NodeJS.Signals): void => {
+      if (USES_PROCESS_GROUPS && child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, signal);
+
+          return;
+        } catch {}
+      }
+
+      child.kill(signal);
+    };
+
     const onAbort = (): void => {
-      child.kill("SIGTERM");
+      signalGit("SIGTERM");
     };
 
     const release = (): void => {
@@ -155,6 +181,7 @@ export function runGit(
         clearTimeout(timer);
         timer = undefined;
       }
+
       options.signal?.removeEventListener("abort", onAbort);
     };
 
@@ -162,6 +189,7 @@ export function runGit(
       if (settled) {
         return;
       }
+
       settled = true;
       release();
       reject(error);
@@ -171,6 +199,7 @@ export function runGit(
       if (settled) {
         return;
       }
+
       settled = true;
       release();
       resolve(result);
@@ -180,7 +209,7 @@ export function runGit(
       return (chunk: Buffer): void => {
         if (!buffer.append(chunk)) {
           overflowed = true;
-          child.kill("SIGKILL");
+          signalGit("SIGKILL");
         }
       };
     };
@@ -191,20 +220,26 @@ export function runGit(
     child.on("error", (error) => {
       if (options.signal?.aborted) {
         fail(createGitCommandCancelledError(args, error));
+
         return;
       }
+
       if (options.allowFailure === true) {
         succeed({ stdout: "", stderr: "", exitCode: 1 });
+
         return;
       }
+
       fail(createGitCommandFailedError(args, "", error));
     });
 
     child.on("close", (code) => {
       if (options.signal?.aborted) {
         fail(createGitCommandCancelledError(args, options.signal.reason));
+
         return;
       }
+
       if (timedOut) {
         fail(
           new WorkspaceError(
@@ -212,8 +247,10 @@ export function runGit(
             `${describeCommand(args)} timed out after ${options.timeoutMs}ms`,
           ),
         );
+
         return;
       }
+
       if (overflowed) {
         fail(
           new WorkspaceError(
@@ -221,96 +258,41 @@ export function runGit(
             `${describeCommand(args)} produced more than ${MAX_OUTPUT_BYTES} bytes of output`,
           ),
         );
+
         return;
       }
+
       const result: GitCommandResult = {
         stdout: stdout.read(),
         stderr: stderr.read(),
         exitCode: code ?? 1,
       };
+
       if (result.exitCode === 0 || options.allowFailure === true) {
         succeed(result);
+
         return;
       }
+
       fail(createGitCommandFailedError(args, trimOutput(result.stderr)));
     });
 
     if (options.timeoutMs !== undefined) {
       timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
+        signalGit("SIGTERM");
       }, options.timeoutMs);
     }
+
     options.signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
-export async function getGitCommonDir(
-  cwd: string,
-  options: GitProcessOptions & { signal?: AbortSignal } = {},
-): Promise<string> {
-  const result = await runGit(["rev-parse", "--git-common-dir"], {
-    cwd,
-    ...options,
-  });
-  const commonDir = result.stdout.trim();
-  if (!commonDir) {
-    throw new WorkspaceError(
-      "git_command_failed",
-      `git rev-parse --git-common-dir returned no path for ${cwd}`,
-    );
-  }
-  return path.resolve(cwd, commonDir);
-}
+const gitQueries = createGitQueries(runGit, WorkspaceError);
 
-async function detectGitRepoKind(
-  cwd: string,
-  options: GitTimeoutOptions = {},
-): Promise<GitRepoKind> {
-  const result = await runGit(
-    ["rev-parse", "--is-inside-work-tree", "--is-bare-repository"],
-    { cwd, ...options, allowFailure: true },
-  );
-  if (result.exitCode !== 0) {
-    return "none";
-  }
-  const [insideWorkTree, bare] = trimOutput(result.stdout).split("\n");
-  if (insideWorkTree === "true") {
-    return "work-tree";
-  }
-  if (bare === "true") {
-    return "bare";
-  }
-  return "none";
-}
+export const { getGitCommonDir, detectGitRepo, getCurrentBranch } = gitQueries;
 
-export async function detectGitRepo(
-  cwd: string,
-  options: GitTimeoutOptions = {},
-): Promise<boolean> {
-  return (await detectGitRepoKind(cwd, options)) === "work-tree";
-}
-
-async function detectGitSource(
-  cwd: string,
-  options: GitTimeoutOptions = {},
-): Promise<boolean> {
-  return (await detectGitRepoKind(cwd, options)) !== "none";
-}
-
-async function ensureGitRepo(
-  cwd: string,
-  options: GitTimeoutOptions = {},
-): Promise<void> {
-  if (await detectGitSource(cwd, options)) {
-    return;
-  }
-
-  throw new WorkspaceError(
-    "not_git_repo",
-    `Path is not a git repository: ${cwd}`,
-  );
-}
+const { detectGitSource, ensureGitRepo } = gitQueries;
 
 export async function readGitRepositoryState(
   cwd: string,
@@ -319,32 +301,13 @@ export async function readGitRepositoryState(
   if (!(await detectGitSource(cwd, options))) {
     return "not_git";
   }
+
   const result = await runGit(["rev-list", "--all", "--max-count=1"], {
     cwd,
     ...options,
   });
+
   return trimOutput(result.stdout).length > 0 ? "has_commits" : "no_commits";
-}
-
-export async function getCurrentBranch(
-  cwd: string,
-  options: GitTimeoutOptions = {},
-): Promise<string | undefined> {
-  if (!(await detectGitRepo(cwd, options))) {
-    return undefined;
-  }
-
-  const result = await runGit(["symbolic-ref", "--quiet", "--short", "HEAD"], {
-    cwd,
-    ...options,
-    allowFailure: true,
-  });
-  if (result.exitCode !== 0) {
-    return undefined;
-  }
-
-  const branchName = trimOutput(result.stdout);
-  return branchName || undefined;
 }
 
 async function readLocalBranches(
@@ -355,6 +318,7 @@ async function readLocalBranches(
     ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
     { cwd, ...options },
   );
+
   return branches.stdout
     .split("\n")
     .map((value) => value.trim())
@@ -367,9 +331,11 @@ export async function readDefaultBranch(
 ): Promise<string | undefined> {
   await ensureGitRepo(cwd, options);
   const originHeadBranch = await readOriginHeadBranchName(cwd, options);
+
   if (originHeadBranch !== undefined) {
     return originHeadBranch;
   }
+
   return resolvePreferredLocalDefaultBranch(
     await readLocalBranches(cwd, options),
     undefined,
@@ -382,11 +348,13 @@ export async function hasRef(
   options: GitTimeoutOptions = {},
 ): Promise<boolean> {
   await ensureGitRepo(cwd, options);
+
   const result = await runGit(["show-ref", "--verify", "--quiet", ref], {
     cwd,
     ...options,
     allowFailure: true,
   });
+
   return result.exitCode === 0;
 }
 
@@ -396,11 +364,14 @@ export async function findWorktreeForBranch(
   options: GitTimeoutOptions = {},
 ): Promise<string | null> {
   await ensureGitRepo(cwd, options);
+
   const result = await runGit(["worktree", "list", "--porcelain"], {
     cwd,
     ...options,
   });
+
   let worktreePath: string | null = null;
+
   for (const line of result.stdout.split("\n")) {
     if (line.startsWith("worktree ")) {
       worktreePath = line.slice("worktree ".length);
@@ -411,6 +382,7 @@ export async function findWorktreeForBranch(
       return worktreePath;
     }
   }
+
   return null;
 }
 
@@ -424,12 +396,15 @@ function resolvePreferredLocalDefaultBranch(
   ) {
     return originDefaultBranchName;
   }
+
   if (localBranches.includes("main")) {
     return "main";
   }
+
   if (localBranches.includes("master")) {
     return "master";
   }
+
   return localBranches[0];
 }
 
@@ -441,10 +416,13 @@ async function readOriginHeadBranchName(
     ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
     { cwd, ...options, allowFailure: true },
   );
+
   const remoteHead = trimOutput(originHead.stdout);
+
   if (remoteHead.startsWith("refs/remotes/origin/")) {
     return remoteHead.replace("refs/remotes/origin/", "");
   }
+
   return undefined;
 }
 
@@ -454,6 +432,7 @@ async function readOriginDefaultBranch(
   options: GitTimeoutOptions = {},
 ): Promise<string | undefined> {
   const originHeadBranch = await readOriginHeadBranchName(cwd, options);
+
   if (
     originHeadBranch &&
     (await hasRef(cwd, `refs/remotes/origin/${originHeadBranch}`, options))
@@ -481,9 +460,11 @@ async function revParseRef(
     ...options,
     allowFailure: true,
   });
+
   if (result.exitCode !== 0) {
     return undefined;
   }
+
   return trimOutput(result.stdout) || undefined;
 }
 
@@ -497,16 +478,19 @@ async function isAncestorRef(
     ["merge-base", "--is-ancestor", ancestorRef, descendantRef],
     { cwd, ...options, allowFailure: true },
   );
+
   if (result.exitCode === 0) {
     return true;
   }
+
   if (result.exitCode === 1) {
     return false;
   }
+
   return undefined;
 }
 
-async function readDefaultBranchRelation(
+export async function readBranchRelation(
   cwd: string,
   localDefaultBranch: string | undefined,
   originDefaultBranch: string | undefined,
@@ -518,13 +502,16 @@ async function readDefaultBranchRelation(
 
   const localRef = `refs/heads/${localDefaultBranch}`;
   const originRef = `refs/remotes/${originDefaultBranch}`;
+
   const [localSha, originSha] = await Promise.all([
     revParseRef(cwd, localRef, options),
     revParseRef(cwd, originRef, options),
   ]);
+
   if (!localSha || !originSha) {
     return "unknown";
   }
+
   if (localSha === originSha) {
     return "equal";
   }
@@ -535,9 +522,11 @@ async function readDefaultBranchRelation(
     originRef,
     options,
   );
+
   if (localIsAncestor === true) {
     return "local-behind";
   }
+
   if (localIsAncestor === undefined) {
     return "unknown";
   }
@@ -548,14 +537,43 @@ async function readDefaultBranchRelation(
     localRef,
     options,
   );
+
   if (originIsAncestor === true) {
     return "local-ahead";
   }
+
   if (originIsAncestor === undefined) {
     return "unknown";
   }
 
   return "diverged";
+}
+
+export interface ResolveDefaultBaseBranchArgs {
+  defaultBranch: string | null;
+  defaultBranchRelation: DefaultBranchRelation | null;
+  originDefaultBranch: string | null;
+}
+
+export function resolveDefaultBaseBranch(
+  args: ResolveDefaultBaseBranchArgs,
+): string | null {
+  if (!args.originDefaultBranch) {
+    return args.defaultBranch;
+  }
+
+  if (!args.defaultBranch) {
+    return args.originDefaultBranch;
+  }
+
+  if (
+    args.defaultBranchRelation === "equal" ||
+    args.defaultBranchRelation === "local-behind"
+  ) {
+    return args.originDefaultBranch;
+  }
+
+  return args.defaultBranch;
 }
 
 export async function readDefaultBranchRefs(
@@ -565,16 +583,19 @@ export async function readDefaultBranchRefs(
   await ensureGitRepo(cwd, options);
   const originHeadBranch = await readOriginHeadBranchName(cwd, options);
   const localBranches = await readLocalBranches(cwd, options);
+
   const defaultBranch = resolvePreferredLocalDefaultBranch(
     localBranches,
     originHeadBranch,
   );
+
   const originDefaultBranch = await readOriginDefaultBranch(
     cwd,
     defaultBranch,
     options,
   );
-  const defaultBranchRelation = await readDefaultBranchRelation(
+
+  const defaultBranchRelation = await readBranchRelation(
     cwd,
     defaultBranch,
     originDefaultBranch,

@@ -10,6 +10,7 @@ describe("mobile terminal input", () => {
     const terminal = new Terminal({ allowProposedApi: true });
     const input: string[] = [];
     terminal.onData((data) => input.push(data));
+
     try {
       terminal.input(
         encodeTerminalArrow("down", terminal.modes.applicationCursorKeysMode),

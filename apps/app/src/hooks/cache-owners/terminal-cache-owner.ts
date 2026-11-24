@@ -2,7 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type {
   TerminalListResponse,
   TerminalSession,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   allTerminalsQueryKeyPrefix,
   terminalsQueryKey,
@@ -29,6 +29,7 @@ function upsertTerminalSession(
   const existingIndex = current.sessions.findIndex(
     (existingSession) => existingSession.id === session.id,
   );
+
   if (existingIndex === -1) {
     return { sessions: [...current.sessions, session] };
   }
@@ -51,6 +52,7 @@ function removeTerminalSession(
   const sessions = current.sessions.filter((session) => {
     return session.id !== terminalId;
   });
+
   if (sessions.length === current.sessions.length) {
     return current;
   }
@@ -64,9 +66,11 @@ function terminalScopesForSession(
   if (session.threadId !== null) {
     return [{ kind: "thread", threadId: session.threadId }];
   }
+
   if (session.environmentId !== null) {
     return [{ kind: "environment", environmentId: session.environmentId }];
   }
+
   return [
     { kind: "host_path", hostId: session.hostId },
     { kind: "host_path", hostId: session.hostId, cwd: session.initialCwd },
@@ -83,6 +87,7 @@ export function applyTerminalSessionUpsert({
       (current) => upsertTerminalSession(current, session),
     );
   }
+
   queryClient.invalidateQueries({
     queryKey: allTerminalsQueryKeyPrefix(),
   });
@@ -118,6 +123,7 @@ export function applyTerminalSessionClose({
           : upsertTerminalSession(current, session),
     );
   }
+
   queryClient.invalidateQueries({
     queryKey: allTerminalsQueryKeyPrefix(),
   });

@@ -17,6 +17,7 @@ export type ViewProviderExecutionMessage =
   | EventProjectionCommandMessage
   | EventProjectionToolCallMessage
   | EventProjectionDelegationMessage;
+
 export type ViewWebActivityMessage =
   | EventProjectionWebSearchMessage
   | EventProjectionWebFetchMessage
@@ -26,9 +27,11 @@ export type ViewWebActivityMessage =
   | EventProjectionSearchMessage
   | EventProjectionPlanStepsMessage
   | EventProjectionExtensionMessage;
+
 export type ToolActivityCell =
   | ViewProviderExecutionMessage
   | ViewWebActivityMessage;
+
 export type WebActivityKind = ViewWebActivityMessage["kind"];
 
 interface ToolActivityCellStateOwner {
@@ -89,9 +92,11 @@ export function findExecMessageInActiveCell(
   callId: string,
 ): ViewProviderExecutionMessage | null {
   if (!activeCell) return null;
+
   if (isProviderExecutionMessage(activeCell) && activeCell.callId === callId) {
     return activeCell;
   }
+
   return null;
 }
 
@@ -101,12 +106,15 @@ export function findExecMessageInHistoryCells(
 ): FindExecMessageInHistoryCellsResult | null {
   const historyIndex =
     state.toolActivity.execHistoryCellIndexByCallId.get(callId);
+
   if (historyIndex === undefined) return null;
 
   const cell = state.toolActivity.historyCells[historyIndex];
+
   if (!isProviderExecutionMessage(cell)) return null;
 
   const call = findExecMessageInActiveCell(cell, callId);
+
   if (!call) return null;
 
   return {
@@ -125,9 +133,13 @@ export function findWebActivityInHistoryCells(
     index -= 1
   ) {
     const cell = state.toolActivity.historyCells[index];
+
     if (!isWebActivityMessage(cell)) continue;
+
     if (cell.callId !== args.callId) continue;
+
     if (args.itemKind && cell.kind !== args.itemKind) continue;
+
     return cell;
   }
 
@@ -146,6 +158,7 @@ export function interruptWebActivityMessage(
 
 export function flushActiveToolCell(state: ToolActivityCellStateOwner): void {
   const active = state.toolActivity.activeCell;
+
   if (!active) return;
 
   const historyIndex = state.toolActivity.historyCells.length;
@@ -156,6 +169,7 @@ export function flushActiveToolCell(state: ToolActivityCellStateOwner): void {
       active.callId,
       historyIndex,
     );
+
     if (active.status !== "pending") {
       state.toolActivity.finalizedExecCallIds.add(active.callId);
     }

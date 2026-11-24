@@ -10,15 +10,19 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useAtom, useAtomValue, useStore } from "jotai";
-import { isMacKeyboardPlatform } from "@bb/domain";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { Icon } from "@bb/shared-ui/icon";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { isMacKeyboardPlatform } from "@omnyo/domain";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import { Icon } from "@omnyo/shared-ui/icon";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@omnyo/shared-ui/tooltip";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   resolveThreadListIndicator,
   threadListIndicatorStateForThread,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import { usePromptDraftHasInput } from "@/hooks/usePromptDraftStorage";
 import {
   highlightedText,
@@ -45,14 +49,22 @@ import {
   hasThreadSearchableQuery,
   useThreadSearch,
 } from "@/hooks/queries/thread-queries";
-import { useRouteNavigate } from "@/components/ui/app-route-anchor";
+import {
+  useActivatedRouteNavigate,
+  useRouteNavigate,
+} from "@/components/ui/app-route-anchor";
 import {
   NO_THREADS_MESSAGE,
   ThreadListEmptyState,
-} from "@bb/shared-ui/thread-list-empty-state";
+} from "@omnyo/shared-ui/thread-list-empty-state";
 import { getThreadRoutePath } from "@/lib/route-paths";
+import {
+  keepThreadView,
+  THREAD_VIEW_INTENT_DELAY_MS,
+} from "@/lib/kept-thread-views";
 import { openThreadInSplit } from "@/lib/split-layout/openThreadInSplit";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
+import { useChatOpenHaptic } from "@/lib/visible-chat-haptics";
 import { countPanes, findPaneByContent, MAX_PANES } from "@/lib/split-layout";
 import {
   buildPaletteThreadSearchRows,
@@ -72,6 +84,7 @@ import {
 } from "./PaletteShell";
 
 const GROUP_LIMIT = 6;
+
 const ARCHIVED_BESIDE_ACTIVE_LIMIT = 3;
 
 const NO_MATCHING_THREADS_MESSAGE = "No matching threads";
@@ -89,56 +102,71 @@ export function ThreadSearchPaletteMode({
   query,
   onQueryChange: setQuery,
   onExit,
-  runAfterClose,
+  runAndClose,
 }: {
   query: string;
   onQueryChange: (query: string) => void;
   onExit: () => void;
-  runAfterClose: (run: () => void) => void;
+  runAndClose: (run: () => void) => void;
 }) {
   const listId = useId();
   const optionIdPrefix = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const navigate = useRouteNavigate();
+  const activate = useActivatedRouteNavigate();
+  const playChatOpenHaptic = useChatOpenHaptic();
   const store = useStore();
   const splitLayout = useAtomValue(splitLayoutAtom);
   const isCompact = useIsCompactViewport();
+
   const [selectedLifecycles, setLifecycles] = useAtom(
     paletteThreadLifecyclesAtom,
   );
+
   const lifecycles = useMemo(
     () => normalizeThreadLifecycleFilter(selectedLifecycles),
     [selectedLifecycles],
   );
+
   const [sort, setSort] = useAtom(paletteThreadSortAtom);
+
   const [sortDirection, setSortDirection] = useAtom(
     paletteThreadSortDirectionAtom,
   );
+
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
+
   const [expandedGroups, setExpandedGroups] = useState<ThreadArchiveFilter[]>(
     [],
   );
+
   const [shownCounts, setShownCounts] = useState<
     Partial<Record<ThreadArchiveFilter, number>>
   >({});
+
   const filterKey = `${lifecycles.join(",")}:${sort}:${sortDirection}`;
   const [previousFilterKey, setPreviousFilterKey] = useState(filterKey);
+
   if (previousFilterKey !== filterKey) {
     setPreviousFilterKey(filterKey);
     setExpandedGroups([]);
     setShownCounts({});
     setHighlightedKey(null);
   }
+
   const [now] = useState(() => Date.now());
   const navigation = useSidebarNavigation();
   const threadSearch = useThreadSearch({ active: true, query });
   const trimmedQuery = query.trim();
+
   const archived = usePaletteRecentArchivedThreads({
     enabled: trimmedQuery.length === 0 && lifecycles.includes("archived"),
   });
+
   const searchable = hasThreadSearchableQuery(trimmedQuery);
+
   const searchResultsAreCurrent =
     !searchable || threadSearch.debouncedQuery === trimmedQuery;
 
@@ -149,8 +177,10 @@ export function ThreadSearchPaletteMode({
         ? []
         : [navigation.data.personalProject]),
     ].map((project) => [project.id, project.name] as const);
+
     return new Map(entries);
   }, [navigation.data]);
+
   const recentThreads = useMemo(
     () => [
       ...[
@@ -162,6 +192,7 @@ export function ThreadSearchPaletteMode({
     ],
     [archived.data, lifecycles, navigation.data],
   );
+
   const result = useMemo(
     () =>
       buildPaletteThreadSearchRows({
@@ -187,13 +218,16 @@ export function ThreadSearchPaletteMode({
       threadSearch.data,
     ],
   );
+
   const options = useMemo(() => {
     return lifecycles.flatMap((lifecycle) => {
       const rows = result.rows.filter((row) => row.lifecycle === lifecycle);
+
       const limit =
         lifecycle === "archived" && lifecycles.includes("active")
           ? ARCHIVED_BESIDE_ACTIVE_LIMIT
           : GROUP_LIMIT;
+
       const visible = expandedGroups.includes(lifecycle)
         ? rows
         : rows.slice(
@@ -204,41 +238,52 @@ export function ThreadSearchPaletteMode({
               rows.findIndex((row) => row.id === highlightedKey) + 1,
             ),
           );
+
       const groupOptions: ThreadSearchOption[] = visible.map((row) => ({
         lifecycle,
         row,
       }));
+
       if (visible.length < rows.length)
         groupOptions.push({ row: null, lifecycle });
+
       return groupOptions;
     });
   }, [expandedGroups, highlightedKey, lifecycles, result, shownCounts]);
+
   useLayoutEffect(() => {
     setShownCounts((current) => {
       let next = current;
+
       for (const lifecycle of lifecycles) {
         const shown = options.filter(
           (option) => option.lifecycle === lifecycle && option.row !== null,
         ).length;
+
         if (shown > (next[lifecycle] ?? 0))
           next = { ...next, [lifecycle]: shown };
       }
+
       return next;
     });
   }, [lifecycles, options]);
+
   const retainedIndex = options.findIndex(
     (option) => optionKey(option) === highlightedKey,
   );
+
   const activeIndex =
     retainedIndex >= 0
       ? retainedIndex
       : options.length === 0
         ? -1
         : Math.min(highlightedIndex, options.length - 1);
+
   useLayoutEffect(() => {
     setHighlightedIndex(Math.max(activeIndex, 0));
     setHighlightedKey(activeIndex < 0 ? null : optionKey(options[activeIndex]));
   }, [activeIndex, options]);
+
   const highlightOption = useCallback(
     (index: number) => {
       setHighlightedIndex(index);
@@ -248,26 +293,55 @@ export function ThreadSearchPaletteMode({
     },
     [options],
   );
+
   const recentQueries = lifecycles.map((lifecycle) =>
     lifecycle === "active" ? navigation : archived,
   );
+
   const isRecentLoading =
     result.isRecent && recentQueries.some((result) => result.isLoading);
+
   const hasLoadError = result.isRecent
     ? recentQueries.some((result) => result.isError)
     : searchable && searchResultsAreCurrent && threadSearch.isError;
+
   const showThreadListEmptyState =
     result.rows.length === 0 &&
     result.isRecent &&
     !isRecentLoading &&
     !hasLoadError;
+
   const activeDescendantId =
     activeIndex < 0 ? undefined : `${optionIdPrefix}-${activeIndex}`;
+
   const activeRow = options[activeIndex]?.row;
+
+  const intentProjectId =
+    activeRow?.lifecycle === "active" ? activeRow.projectId : null;
+
+  const intentThreadId =
+    activeRow?.lifecycle === "active" ? activeRow.threadId : null;
+
+  useEffect(() => {
+    if (intentProjectId === null || intentThreadId === null) return;
+
+    const timer = setTimeout(
+      () =>
+        keepThreadView({
+          projectId: intentProjectId,
+          threadId: intentThreadId,
+        }),
+      THREAD_VIEW_INTENT_DELAY_MS,
+    );
+
+    return () => clearTimeout(timer);
+  }, [intentProjectId, intentThreadId]);
+
   const splitAvailable =
     !isCompact &&
     splitLayout !== null &&
     countPanes(splitLayout.root) < MAX_PANES;
+
   const canSplit =
     activeRow != null &&
     splitAvailable &&
@@ -277,9 +351,11 @@ export function ThreadSearchPaletteMode({
       projectId: activeRow.projectId,
       threadId: activeRow.threadId,
     }) === null;
+
   const splitModifier = isMacKeyboardPlatform(navigator.platform)
     ? "⌘"
     : "Ctrl";
+
   const scrollOnNextHighlightRef = useRef(false);
   useEffect(() => {
     if (!scrollOnNextHighlightRef.current) return;
@@ -297,9 +373,11 @@ export function ThreadSearchPaletteMode({
         setHighlightedIndex(index);
         setHighlightedKey(null);
         inputRef.current?.focus();
+
         return;
       }
-      runAfterClose(() => {
+
+      runAndClose(() => {
         const state =
           row.messageSeq === null
             ? undefined
@@ -307,7 +385,9 @@ export function ThreadSearchPaletteMode({
                 searchMessageSeq: row.messageSeq,
                 searchThreadId: row.threadId,
               };
+
         if (split) {
+          playChatOpenHaptic(row.threadId);
           openThreadInSplit({
             store,
             navigate,
@@ -316,9 +396,11 @@ export function ThreadSearchPaletteMode({
             isCompact,
             state,
           });
+
           return;
         }
-        navigate(
+
+        activate(
           getThreadRoutePath({
             projectId: row.projectId,
             threadId: row.threadId,
@@ -327,25 +409,31 @@ export function ThreadSearchPaletteMode({
         );
       });
     },
-    [isCompact, navigate, runAfterClose, store],
+    [activate, isCompact, navigate, playChatOpenHaptic, runAndClose, store],
   );
 
   const handleInputKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
       if (event.nativeEvent.isComposing) return;
+
       if (event.key === "Backspace" && query.length === 0) {
         event.preventDefault();
         event.stopPropagation();
         onExit();
+
         return;
       }
+
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
         onExit();
+
         return;
       }
+
       if (options.length === 0) return;
+
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
         scrollOnNextHighlightRef.current = true;
@@ -356,16 +444,21 @@ export function ThreadSearchPaletteMode({
               ? options.length - 1
               : activeIndex - 1,
         );
+
         return;
       }
+
       if (event.key === "Home" || event.key === "End") {
         event.preventDefault();
         scrollOnNextHighlightRef.current = true;
         highlightOption(event.key === "Home" ? 0 : options.length - 1);
+
         return;
       }
+
       if (event.key === "Enter") {
         const option = options[activeIndex];
+
         if (option === undefined) return;
         event.preventDefault();
         selectOption(option, activeIndex, event.metaKey || event.ctrlKey);
@@ -384,7 +477,9 @@ export function ThreadSearchPaletteMode({
     (!searchResultsAreCurrent ||
       threadSearch.isDebouncing ||
       threadSearch.isLoading);
+
   let emptyMessage: string | null = null;
+
   if (result.rows.length === 0) {
     emptyMessage =
       isLoading || isRecentLoading
@@ -435,6 +530,7 @@ export function ThreadSearchPaletteMode({
         setHighlightedKey(null);
         setExpandedGroups([]);
         setShownCounts({});
+
         if (listRef.current !== null) listRef.current.scrollTop = 0;
       }}
       onInputKeyDown={handleInputKeyDown}
@@ -446,7 +542,9 @@ export function ThreadSearchPaletteMode({
           if (!result.rows.some((row) => row.lifecycle === lifecycle)) {
             return null;
           }
+
           const labelId = `${optionIdPrefix}-${lifecycle}-label`;
+
           return (
             <div
               key={lifecycle}
@@ -546,6 +644,7 @@ function ThreadSearchPaletteRow({ row }: { row: PaletteThreadSearchRow }) {
   const metadata = [row.projectName, row.relativeTime]
     .filter(Boolean)
     .join(" · ");
+
   return (
     <span className="min-w-0 flex-1">
       <PaletteMatchText
@@ -605,11 +704,14 @@ function PaletteMatchText({
   className: string;
 } & Omit<ComponentPropsWithoutRef<"span">, "children" | "title">) {
   const ref = useRef<HTMLSpanElement | null>(null);
+
   const matchKey = `${text}\u0000${highlightRanges
     .map((range) => `${range.start}:${range.end}`)
     .join(",")}`;
+
   const [windowedMatchKey, setWindowedMatchKey] = useState<string | null>(null);
   const shouldWindowMatch = windowedMatchKey === matchKey;
+
   const shown = shouldWindowMatch
     ? windowPaletteThreadSearchText({ text, highlightRanges })
     : { text, highlightRanges };
@@ -617,11 +719,14 @@ function PaletteMatchText({
   useLayoutEffect(() => {
     if (shouldWindowMatch || highlightRanges.length === 0) return;
     const container = ref.current;
+
     if (container === null) return;
     const firstMatch = container.querySelector("mark");
+
     if (firstMatch === null) return;
     const containerRect = container.getBoundingClientRect();
     const matchRect = firstMatch.getBoundingClientRect();
+
     if (
       matchRect.left < containerRect.left ||
       matchRect.right > containerRect.right
@@ -647,12 +752,16 @@ function ThreadSearchPaletteStatus({ row }: { row: PaletteThreadSearchRow }) {
     projectId: row.projectId,
     threadId: row.threadId,
   });
+
   const indicator = resolveThreadListIndicator(
     threadListIndicatorStateForThread(row.thread, hasUnsubmittedDraft),
   );
+
   const rowStatus = usePluginThreadRowStatus(row.threadId);
   const { accessibleLabel: label } = resolveThreadStatus(indicator, rowStatus);
+
   if (label === null) return null;
+
   return (
     <>
       <span
@@ -670,11 +779,13 @@ function ThreadSearchPaletteStatus({ row }: { row: PaletteThreadSearchRow }) {
             className="inline-flex size-3.5 shrink-0 cursor-default items-center justify-center text-subtle-foreground"
             data-palette-thread-status
           >
-            <ThreadStatusGlyph
-              indicator={indicator}
-              rowStatus={rowStatus}
-              size="compact"
-            />
+            <span aria-hidden="true" className="inline-flex">
+              <ThreadStatusGlyph
+                indicator={indicator}
+                rowStatus={rowStatus}
+                size="compact"
+              />
+            </span>
           </span>
         </TooltipTrigger>
         <TooltipContent side="left">{label}</TooltipContent>

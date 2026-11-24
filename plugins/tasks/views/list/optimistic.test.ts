@@ -161,9 +161,11 @@ describe("reconcileEntries", () => {
       1,
       task({ id: "T1", status: "done", position: 50 }),
     );
+
     const server = [
       task({ id: "T1", status: "done", priority: "low", position: 50 }),
     ];
+
     expect(reconcileEntries(e, server).get("T1")?.edit).toEqual({
       priority: "high",
     });

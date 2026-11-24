@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import {
   mimeTypeFromExtension,
   type PromptInput,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import type { ImageContent } from "@earendil-works/pi-ai";
 
 interface ExtractedPiPromptInput {
@@ -23,11 +23,14 @@ export function extractPiPromptInput(
   const chunks: string[] = [];
   const images: ImageContent[] = [];
   const skills: SelectedPiSkill[] = [];
+
   for (const item of input) {
     if (item.type === "text") {
       const chunkIndex = chunks.push(item.text) - 1;
+
       for (const mention of item.mentions) {
         const resource = mention.resource;
+
         if (
           resource.kind === "command" &&
           resource.source === "skill" &&
@@ -53,7 +56,11 @@ export function extractPiPromptInput(
           data,
           mimeType: mimeTypeFromExtension(item.path),
         });
-      } catch {}
+      } catch {
+        chunks.push(`[Attached image: ${item.path}]`);
+      }
+    } else if (item.type === "image") {
+      chunks.push(`[Attached image: ${item.url}]`);
     } else if (item.type === "localFile") {
       chunks.push(
         item.name
@@ -62,21 +69,28 @@ export function extractPiPromptInput(
       );
     }
   }
+
   const [skill] = skills;
+
   if (skills.length === 1 && skill) {
     const chunk = chunks[skill.chunkIndex];
+
     if (chunk !== undefined) {
       chunks[skill.chunkIndex] =
         `${chunk.slice(0, skill.start)}${chunk.slice(skill.end)}`;
       const argumentsText = chunks.join("\n");
       const separator = argumentsText.startsWith(" ") ? "" : " ";
+
       return {
         text: `/skill:${skill.name}${argumentsText ? `${separator}${argumentsText}` : ""}`,
         images,
       };
     }
   }
+
   const text = chunks.length > 0 ? chunks.join("\n") : null;
+
   if (!text && images.length === 0) return null;
+
   return { text: text ?? "", images };
 }

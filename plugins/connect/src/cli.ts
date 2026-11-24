@@ -2,14 +2,14 @@ import {
   PluginCliError,
   cliCommand,
   defineCli,
-  type BbPluginApi,
+  type PluginApi,
   type PluginCliResult,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import {
   deriveConnectBaseUrl,
   mobilePairingPayload,
   type MobilePairingPayload,
-} from "@bb/connect-client";
+} from "@omnyo/connect-client";
 import {
   accountErrorCode,
   AccountUnavailableError,
@@ -24,17 +24,18 @@ import type { ConnectTunnel } from "./tunnel.js";
 import type { ConnectStatus } from "./types.js";
 
 const DESCRIPTION = [
-  "Remote access via getbb.app — this bb becomes reachable at https://<handle>.getbb.app.",
+  "Remote access via the Omnyo relay at omnyo.link — this Omnyo becomes reachable at https://<handle>.omnyo.link.",
   "Share HTTP ports from any enrolled host (owner session only).",
+  "Use omnyo connect devices to list devices paired with this server.",
   "",
-  "  1. Sign this bb in to your bb account:",
-  "       bb account login",
-  "     (or paste a dashboard code: bb connect --code <code>, which also turns",
+  "  1. Sign this Omnyo in to your Omnyo account:",
+  "       omnyo account login",
+  "     (or paste a dashboard code: omnyo connect --code <code>, which also turns",
   "     remote access back on)",
-  "  2. Remote access starts on its own and stays up while bb is running.",
+  "  2. Remote access starts on its own and stays up while Omnyo is running.",
   "",
-  "`bb connect off` turns remote access off and keeps the account signed in;",
-  "`bb connect on` turns it back on; `bb account logout` forgets the pairing.",
+  "`omnyo connect off` turns remote access off and keeps the account signed in;",
+  "`omnyo connect on` turns it back on; `omnyo account logout` forgets the pairing.",
 ].join("\n");
 
 const HOST_OPTION = {
@@ -50,39 +51,45 @@ const JSON_OPTION = {
 
 const PAIR_ERROR_TEXT: Record<string, string> = {
   invalid_code:
-    "that code is invalid or has expired — get a new one from the getbb.app dashboard",
+    "that code is invalid or has expired — get a new one from the omnyo.link dashboard",
   expired_code:
-    "that code has expired — get a new one from the getbb.app dashboard",
+    "that code has expired — get a new one from the omnyo.link dashboard",
   already_used:
-    "that code was already used — get a new one from the getbb.app dashboard",
-  network: "couldn't reach getbb.app — check the connection and try again",
+    "that code was already used — get a new one from the omnyo.link dashboard",
+  network: "couldn't reach omnyo.link — check the connection and try again",
   unauthorized:
-    "getbb.app rejected the new pairing — get a new code from the getbb.app dashboard and try again",
+    "omnyo.link rejected the new pairing — get a new code from the omnyo.link dashboard and try again",
   profile_unavailable:
-    "this bb saved the pairing, but getbb.app didn't return your account yet — bb keeps retrying, and remote access starts once it does (see `bb account status`)",
+    "this Omnyo saved the pairing, but omnyo.link didn't return your account yet — Omnyo keeps retrying, and remote access starts once it does (see `omnyo account status`)",
   superseded:
-    "another sign-in or a sign-out replaced this one — run `bb account status` to see which account this bb uses",
+    "another sign-in or a sign-out replaced this one — run `omnyo account status` to see which account this Omnyo uses",
 };
 
 function formatStatus(status: ConnectStatus): string {
   if (!status.paired) {
-    return "Not signed in to a bb account\nRun `bb account status` to see why, or `bb account login` to sign in; remote access starts once the account is ready.";
+    return "Not signed in to an Omnyo account\nRun `omnyo account status` to see why, or `omnyo account login` to sign in; remote access starts once the account is ready.";
   }
+
   if (!status.enabled) {
-    return `${status.handle}  ${status.url}  off\nRemote access is off. Run \`bb connect on\` to turn it back on.`;
+    return `${status.handle}  ${status.url}  off\nRemote access is off. Run \`omnyo connect on\` to turn it back on.`;
   }
+
   const lines = [`${status.handle}  ${status.url}  ${status.state}`];
+
   if (status.lastError !== null && status.state !== "connected") {
     lines.push(`  last error: ${status.lastError}`);
   }
+
   if (status.shares.length > 0) {
     lines.push("  shares:");
+
     for (const share of status.shares) {
       lines.push(
         `    ${share.hostName} (${share.hostId})  ${share.port}  ${share.url || `unavailable: ${share.unavailableReason ?? "unknown reason"}`}`,
       );
     }
   }
+
   return lines.join("\n");
 }
 
@@ -92,7 +99,7 @@ function asJson(value: unknown): string {
 
 function notPairedError(): PluginCliError {
   return new PluginCliError(
-    "this bb isn't signed in to a bb account — run `bb account login`",
+    "this Omnyo isn't signed in to an Omnyo account — run `omnyo account login`",
     { code: "not_paired" },
   );
 }
@@ -100,11 +107,13 @@ function notPairedError(): PluginCliError {
 function pairError(error: unknown): PluginCliError {
   if (error instanceof AccountUnavailableError) {
     return new PluginCliError(
-      "the bb account plugin isn't running — enable it in Settings → Plugins, then try again",
+      "the Omnyo account plugin isn't running — enable it in Settings → Plugins, then try again",
       { code: "account_unavailable" },
     );
   }
+
   const code = accountErrorCode(error);
+
   return new PluginCliError(PAIR_ERROR_TEXT[code] ?? code, { code });
 }
 
@@ -133,15 +142,16 @@ function formatMachineCode(payload: MobilePairingPayload): string {
     0,
     Math.round((payload.expiresAt - Date.now()) / 60_000),
   );
+
   return [
     `Code:       ${payload.code}`,
     `Server:     ${payload.serverUrl}`,
     `Apex:       ${payload.apex}`,
     `Expires:    ${new Date(payload.expiresAt).toISOString()} (in about ${minutes} min)`,
     "",
-    "Enter the code in the bb mobile app when it asks to pair over bb connect (or",
+    "Enter the code in the Omnyo mobile app when it asks to pair over Omnyo connect (or",
     "scan the QR code from Settings → Mobile → Add mobile device). The phone",
-    "enrolls as a connect machine on this account — it appears in the getbb.app",
+    "enrolls as a connect machine on this account — it appears in the omnyo.link",
     "dashboard's machine list, where you can revoke it. The code works once.",
   ].join("\n");
 }
@@ -161,41 +171,49 @@ async function attempt(
 }
 
 export function registerConnectCli(args: {
-  bb: Pick<BbPluginApi, "cli">;
+  api: Pick<PluginApi, "cli">;
   tunnel: ConnectTunnel;
   account: AccountClient;
   hosted: HostedConnectApi;
   hostResolver: ShareHostResolver;
   remoteAccess: RemoteAccessSwitch;
 }): void {
-  const { bb, tunnel, account, hosted, hostResolver, remoteAccess } = args;
-  bb.cli.register(
+  const {
+    api: api,
+    tunnel,
+    account,
+    hosted,
+    hostResolver,
+    remoteAccess,
+  } = args;
+
+  api.cli.register(
     defineCli({
       name: "connect",
       summary:
-        "Expose this bb at https://<handle>.getbb.app once it is signed in to your bb account",
+        "Expose this Omnyo at https://<handle>.omnyo.link once it is signed in to your Omnyo account",
       description: DESCRIPTION,
       root: cliCommand({
         summary:
-          "Sign in with a dashboard code (bb account login --code) and turn remote access on",
+          "Sign in with a dashboard code (omnyo account login --code) and turn remote access on",
         options: {
           code: {
             type: "string",
             placeholder: "code",
             description:
-              "One-time pairing code from the getbb.app dashboard; signs this bb in to your bb account",
+              "One-time pairing code from the omnyo.link dashboard; signs this Omnyo in to your Omnyo account",
           },
           server: {
             type: "string",
             placeholder: "url",
             description:
-              "Server URL the dashboard printed, https://<handle>.getbb.app or https://<handle>.vibecodethis.site; only its apex origin is used",
+              "Server URL the dashboard printed, https://<handle>.omnyo.link or https://<handle>.stg.omnyo.link; only its apex origin is used",
           },
           "base-url": {
             type: "string",
             placeholder: "url",
             description:
-              "getbb.app origin: https://getbb.app or https://vibecodethis.site (development builds also accept http://bb.localhost:<port>)",
+              "Relay origin: https://omnyo.link or https://stg.omnyo.link (development builds also accept http://omnyo.localhost:<port>)",
           },
           json: JSON_OPTION,
         },
@@ -206,14 +224,19 @@ export function registerConnectCli(args: {
         run: (input) =>
           attempt(async () => {
             const code = input.options.code;
+
             if (code === undefined) {
               return { exitCode: 0, stdout: input.help };
             }
+
             const server = input.options.server;
+
             const baseUrl =
               input.options["base-url"] ??
               (server === undefined ? null : deriveConnectBaseUrl(server));
+
             let status: ConnectStatus;
+
             try {
               status = await tunnel.signIn(
                 async () =>
@@ -222,20 +245,25 @@ export function registerConnectCli(args: {
               );
             } catch (error) {
               const failure = pairError(error);
+
               if (failure.code === "profile_unavailable") {
                 await remoteAccess.set(true);
               }
+
               throw failure;
             }
+
             if (!status.enabled) status = await remoteAccess.set(true);
+
             if (input.options.json) {
               return { exitCode: 0, stdout: asJson(status) };
             }
+
             return {
               exitCode: 0,
               stdout:
                 `Paired as ${status.handle} — reachable at ${status.url}\n` +
-                "This bb is signed in to your bb account (see `bb account status`); the server holds the tunnel while bb is running.\n",
+                "This Omnyo is signed in to your Omnyo account (see `omnyo account status`); the server holds the tunnel while Omnyo is running.\n",
             };
           }),
       }),
@@ -246,6 +274,7 @@ export function registerConnectCli(args: {
           run: (input) =>
             attempt(async () => {
               const status = await tunnel.refreshStatus();
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -257,16 +286,17 @@ export function registerConnectCli(args: {
         off: cliCommand({
           summary: "Turn remote access off and stay signed in",
           description:
-            "Closes the tunnel until `bb connect on`. This bb stays signed in to your bb account; `bb account logout` forgets the pairing.",
+            "Closes the tunnel until `omnyo connect on`. This Omnyo stays signed in to your Omnyo account; `omnyo account logout` forgets the pairing.",
           options: { json: JSON_OPTION },
           run: (input) =>
             attempt(async () => {
               const status = await remoteAccess.set(false);
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
                   ? asJson(status)
-                  : "Remote access is off. This bb stays signed in to your bb account; run `bb connect on` to turn it back on, or `bb account logout` to forget the pairing.\n",
+                  : "Remote access is off. This Omnyo stays signed in to your Omnyo account; run `omnyo connect on` to turn it back on, or `omnyo account logout` to forget the pairing.\n",
               };
             }),
         }),
@@ -276,14 +306,16 @@ export function registerConnectCli(args: {
           run: (input) =>
             attempt(async () => {
               const status = await remoteAccess.set(true);
+
               if (input.options.json) {
                 return { exitCode: 0, stdout: asJson(status) };
               }
+
               return {
                 exitCode: 0,
                 stdout: status.paired
                   ? `Remote access is on — reachable at ${status.url}\n`
-                  : "Remote access is on. Run `bb account login` to sign in; the tunnel starts once you do.\n",
+                  : "Remote access is on. Run `omnyo account login` to sign in; the tunnel starts once you do.\n",
               };
             }),
         }),
@@ -300,17 +332,21 @@ export function registerConnectCli(args: {
           run: (input, ctx) =>
             attempt(async () => {
               if (!tunnel.status().paired) throw notPairedError();
+
               const targetHost = await hostResolver.resolve(
                 ctx,
                 input.options.host,
               );
+
               const listing = await tunnel.expose(
                 parseSharePort(input.positionals.port),
                 targetHost,
               );
+
               if (input.options.json) {
                 return { exitCode: 0, stdout: asJson(listing) };
               }
+
               return { exitCode: 0, stdout: `${listing.url}\n` };
             }),
         }),
@@ -328,19 +364,23 @@ export function registerConnectCli(args: {
             attempt(async () => {
               const targetHost =
                 input.options.host ?? (await hostResolver.resolveId(ctx));
+
               const result = await tunnel.unexpose(
                 parseSharePort(input.positionals.port),
                 targetHost,
               );
+
               if (input.options.json) {
                 return { exitCode: 0, stdout: asJson(result) };
               }
+
               if (!result.removed) {
                 return {
                   exitCode: 0,
                   stdout: `Port ${result.port} was not shared on ${result.hostName} (${result.hostId}) (idempotent).\n`,
                 };
               }
+
               return {
                 exitCode: 0,
                 stdout: `Stopped sharing port ${result.port} on ${result.hostName} (${result.hostId})\n`,
@@ -361,7 +401,9 @@ export function registerConnectCli(args: {
             attempt(async () => {
               const hostId =
                 input.options.host ?? (await hostResolver.resolveId(ctx));
+
               const result = await tunnel.unexposeAll(hostId);
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -380,68 +422,108 @@ export function registerConnectCli(args: {
                 ctx,
                 input.options.host,
               );
+
               const shares = await tunnel.listShares(targetHost.id);
+
               if (input.options.json) {
                 return {
                   exitCode: 0,
                   stdout: asJson({ host: targetHost, shares }),
                 };
               }
+
               if (shares.length === 0) {
                 return { exitCode: 0, stdout: "No shared ports\n" };
               }
+
               const lines = shares.map(
                 (share) =>
                   `${share.hostName} (${share.hostId})  ${share.port}  ${share.url || `unavailable: ${share.unavailableReason ?? "unknown reason"}`}`,
               );
+
               return { exitCode: 0, stdout: `${lines.join("\n")}\n` };
             }),
         }),
         servers: cliCommand({
-          summary: "List every bb server on this account",
+          summary: "List every Omnyo server on this account",
           options: { json: JSON_OPTION },
           run: (input) =>
             attempt(async () => {
               const identity = tunnel.getIdentity();
+
               if (identity === null) throw notPairedError();
               const result = await hosted.listAccountServers(identity);
+
               if (input.options.json) {
                 return { exitCode: 0, stdout: asJson(result) };
               }
+
               if (result.servers.length === 0) {
                 return { exitCode: 0, stdout: "No servers on this account\n" };
               }
+
               const handleWidth = Math.max(
                 "HANDLE".length,
                 ...result.servers.map((server) => server.handle.length),
               );
+
               const nameWidth = Math.max(
                 "NAME".length,
                 ...result.servers.map((server) => server.name.length),
               );
+
               const urlWidth = Math.max(
                 "URL".length,
                 ...result.servers.map((server) => server.url.length),
               );
+
               const lines = [
                 `${"HANDLE".padEnd(handleWidth)}  ${"NAME".padEnd(nameWidth)}  ${"URL".padEnd(urlWidth)}  LIVE  SELF`,
                 ...result.servers.map((server) => {
                   const live = server.live ? "yes" : "no";
                   const self = server.handle === result.selfHandle ? "*" : "";
+
                   return `${server.handle.padEnd(handleWidth)}  ${server.name.padEnd(nameWidth)}  ${server.url.padEnd(urlWidth)}  ${live.padEnd(4)}  ${self}`;
                 }),
               ];
+
               return { exitCode: 0, stdout: `${lines.join("\n")}\n` };
+            }),
+        }),
+        devices: cliCommand({
+          summary: "List devices paired with this Omnyo server",
+          options: { json: JSON_OPTION },
+          run: (input) =>
+            attempt(async () => {
+              if (tunnel.getIdentity() === null) throw notPairedError();
+              const result = await hosted.listPairedDevices();
+
+              if (input.options.json)
+                return { exitCode: 0, stdout: asJson(result) };
+
+              return {
+                exitCode: 0,
+                stdout:
+                  result.devices.length === 0
+                    ? "No devices paired with this server\n"
+                    : result.devices
+                        .map(
+                          (device) =>
+                            `${device.name ?? "Unnamed device"}  ${device.id}  Last active: ${device.lastSeenAt === null ? "Never" : new Date(device.lastSeenAt).toISOString()}`,
+                        )
+                        .join("\n") + "\n",
+              };
             }),
         }),
         "machine-code": cliCommand({
           summary:
-            "Mint a one-time code that enrolls the bb mobile app as a connect machine",
+            "Mint a one-time code that enrolls the Omnyo mobile app as a connect machine",
           options: { json: JSON_OPTION },
           run: (input) =>
             attempt(async () => {
               if (tunnel.getIdentity() === null) throw notPairedError();
               let payload: MobilePairingPayload;
+
               try {
                 payload = mobilePairingPayload(
                   await hosted.createMachineCode(AbortSignal.timeout(10_000)),
@@ -450,11 +532,14 @@ export function registerConnectCli(args: {
                 if (error instanceof MachineCodeError) {
                   throw machineCodeError(error, tunnel.status().dashboardUrl);
                 }
+
                 throw error;
               }
+
               if (input.options.json) {
                 return { exitCode: 0, stdout: asJson(payload) };
               }
+
               return { exitCode: 0, stdout: `${formatMachineCode(payload)}\n` };
             }),
         }),

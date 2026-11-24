@@ -8,8 +8,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { ThreadQueuedMessage } from "@bb/domain";
-import { makeThreadQueuedMessage } from "@bb/test-helpers/domain-fixtures";
+import type { ThreadQueuedMessage } from "@omnyo/domain";
+import { makeThreadQueuedMessage } from "@omnyo/test-helpers/domain-fixtures";
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({ imported: vi.fn() }));
 
 vi.mock("./QueuedMessagesList", async (importOriginal) => {
   mocks.imported();
+
   return importOriginal();
 });
 
@@ -36,6 +37,7 @@ function Queue({
   queuedMessages: readonly ThreadQueuedMessage[];
 }) {
   const [expanded, setExpanded] = useState(false);
+
   return (
     <LazyQueuedMessagesList
       attachedToComposer
@@ -63,7 +65,11 @@ it("downloads the queue only for queued work, warming it from the pending summar
   expect(mocks.imported).not.toHaveBeenCalled();
 
   view.rerender(
-    <QueuedMessagesPendingCard expanded={false} queuedMessageCount={2} />,
+    <QueuedMessagesPendingCard
+      attachedToComposer
+      expanded={false}
+      queuedMessageCount={2}
+    />,
   );
   await waitFor(() => expect(mocks.imported).toHaveBeenCalledOnce());
   await act(() => LazyQueuedMessagesList.preload());
@@ -85,7 +91,7 @@ it("downloads the queue only for queued work, warming it from the pending summar
     screen.queryByRole("status", { name: "Loading queued messages" }),
   ).toBeNull();
   fireEvent.click(
-    screen.getByRole("button", { name: "Toggle queued messages" }),
+    screen.getByRole("button", { name: /(?:Toggle|Show).*queued messages/ }),
   );
   screen.getByRole("button", { name: "Send queued message 1 now" });
   screen.getByRole("button", { name: "Reorder queued message 2" });

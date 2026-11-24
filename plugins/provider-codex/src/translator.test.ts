@@ -8,12 +8,12 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { RuntimePermissionPolicy } from "@get-bb/plugin-sdk/provider-bridge";
-import { experimental_createDeltaAssembler as createDeltaAssembler } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import type { RuntimePermissionPolicy } from "@omnyo/plugin-sdk/provider-bridge";
+import { experimental_createDeltaAssembler as createDeltaAssembler } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import type {
   DeltaAssembler,
   ThreadEvent,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import type { ServerNotification as CodexServerNotification } from "./generated/codex-app-server/schema/ServerNotification.js";
 import type { Turn } from "./generated/codex-app-server/schema/v2/Turn.js";
 import {
@@ -23,6 +23,7 @@ import {
 import { turnScope } from "./event-scope.test-support.js";
 
 const THREAD_ID = "t-codex-translator";
+
 const ENTROPY = "cxt-test";
 
 function codexEvent<M extends CodexServerNotification["method"]>(
@@ -69,6 +70,7 @@ function createHarness(
     entropyPrefix: ENTROPY,
     textDeltaFlushMs: 0,
   });
+
   return {
     assembler,
     translator,
@@ -79,10 +81,10 @@ function createHarness(
       });
     },
     turnId(codexTurnId) {
-      return assembler.getBbTurnId(THREAD_ID, codexTurnId) ?? "";
+      return assembler.getAppTurnId(THREAD_ID, codexTurnId) ?? "";
     },
     itemId(codexItemId) {
-      return assembler.getBbItemId(THREAD_ID, codexItemId) ?? "";
+      return assembler.getAppItemId(THREAD_ID, codexItemId) ?? "";
     },
   };
 }
@@ -108,14 +110,15 @@ interface LinkedWorktreeFixture {
 
 function createLinkedWorktreeFixture(): LinkedWorktreeFixture {
   const rootPath = realpathSync.native(
-    mkdtempSync(path.join(tmpdir(), "bb-codex-worktree-")),
+    mkdtempSync(path.join(tmpdir(), "omnyo-codex-worktree-")),
   );
+
   const workspacePath = path.join(rootPath, "worktree");
   const commonDir = path.join(rootPath, "repo.git");
   const gitDir = path.join(commonDir, "worktrees", "bb1");
-  const headRef = "refs/heads/bb/probe";
-  const headRefParent = path.join(commonDir, "refs", "heads", "bb");
-  const headLogParent = path.join(commonDir, "logs", "refs", "heads", "bb");
+  const headRef = "refs/heads/omnyo/probe";
+  const headRefParent = path.join(commonDir, "refs", "heads", "omnyo");
+  const headLogParent = path.join(commonDir, "logs", "refs", "heads", "omnyo");
 
   mkdirSync(workspacePath, { recursive: true });
   mkdirSync(gitDir, { recursive: true });
@@ -158,27 +161,32 @@ describe("codex workspace-write git-root staging", () => {
   it("hands staged roots to the thread only once the construction is accepted", () => {
     const fixture = createLinkedWorktreeFixture();
     const translator = createTranslator();
+
     try {
       const prepared = translator.prepareWorkspaceWriteGitRoots({
+        supportsAgentsEnabled: true,
         command: {
-          threadId: "bb-thread-1",
+          threadId: "omnyo-thread-1",
           cwd: fixture.workspacePath,
           options: WORKSPACE_ASK_OPTIONS,
         },
       });
+
       expect(prepared.config).toMatchObject({
         "sandbox_workspace_write.writable_roots": fixture.expectedWritableRoots,
       });
 
-      expect(translator.getThreadGitWritableRoots("bb-thread-1")).toEqual([]);
+      expect(translator.getThreadGitWritableRoots("omnyo-thread-1")).toEqual(
+        [],
+      );
 
       translator.activateThreadGitWritableRoots({
         providerThreadId: "codex-thread-1",
-        threadId: "bb-thread-1",
+        threadId: "omnyo-thread-1",
       });
       unlinkWorkspaceGitDir(fixture);
 
-      expect(translator.getThreadGitWritableRoots("bb-thread-1")).toEqual(
+      expect(translator.getThreadGitWritableRoots("omnyo-thread-1")).toEqual(
         fixture.expectedWritableRoots,
       );
     } finally {
@@ -188,21 +196,26 @@ describe("codex workspace-write git-root staging", () => {
 
   it("merges the host's additional workspace roots into the construction config", () => {
     const fixture = createLinkedWorktreeFixture();
+
     const additionalWorkspaceWriteRoots = [
       path.join(fixture.rootPath, "host-extra-root"),
       fixture.gitDir,
     ];
+
     const translator = createCodexEventTranslator({
       additionalWorkspaceWriteRoots,
     });
+
     try {
       const prepared = translator.prepareWorkspaceWriteGitRoots({
+        supportsAgentsEnabled: true,
         command: {
-          threadId: "bb-thread-1",
+          threadId: "omnyo-thread-1",
           cwd: fixture.workspacePath,
           options: WORKSPACE_ASK_OPTIONS,
         },
       });
+
       expect(prepared.config).toMatchObject({
         "sandbox_workspace_write.writable_roots": dedupeRoots([
           ...additionalWorkspaceWriteRoots,
@@ -212,10 +225,10 @@ describe("codex workspace-write git-root staging", () => {
 
       translator.activateThreadGitWritableRoots({
         providerThreadId: "codex-thread-1",
-        threadId: "bb-thread-1",
+        threadId: "omnyo-thread-1",
       });
 
-      expect(translator.getThreadGitWritableRoots("bb-thread-1")).toEqual(
+      expect(translator.getThreadGitWritableRoots("omnyo-thread-1")).toEqual(
         fixture.expectedWritableRoots,
       );
     } finally {
@@ -227,12 +240,14 @@ describe("codex workspace-write git-root staging", () => {
     const firstFixture = createLinkedWorktreeFixture();
     const secondFixture = createLinkedWorktreeFixture();
     const translator = createTranslator();
+
     try {
       for (const [threadId, fixture] of [
-        ["bb-thread-1", firstFixture],
-        ["bb-thread-2", secondFixture],
+        ["omnyo-thread-1", firstFixture],
+        ["omnyo-thread-2", secondFixture],
       ] as const) {
         translator.prepareWorkspaceWriteGitRoots({
+          supportsAgentsEnabled: true,
           command: {
             threadId,
             cwd: fixture.workspacePath,
@@ -243,19 +258,21 @@ describe("codex workspace-write git-root staging", () => {
 
       translator.activateThreadGitWritableRoots({
         providerThreadId: "codex-thread-2",
-        threadId: "bb-thread-2",
+        threadId: "omnyo-thread-2",
       });
       translator.activateThreadGitWritableRoots({
         providerThreadId: "codex-thread-1",
-        threadId: "bb-thread-1",
+        threadId: "omnyo-thread-1",
       });
 
       translator.translateEvent(
         codexEvent("thread/closed", { threadId: "codex-thread-1" }),
       );
 
-      expect(translator.getThreadGitWritableRoots("bb-thread-1")).toEqual([]);
-      expect(translator.getThreadGitWritableRoots("bb-thread-2")).toEqual(
+      expect(translator.getThreadGitWritableRoots("omnyo-thread-1")).toEqual(
+        [],
+      );
+      expect(translator.getThreadGitWritableRoots("omnyo-thread-2")).toEqual(
         secondFixture.expectedWritableRoots,
       );
     } finally {
@@ -334,32 +351,39 @@ function publishedCommandOutput(args: {
   toolName?: string;
 }): string | undefined {
   const harness = createHarness();
+
   const call = {
     callId: "cmd-1",
     providerThreadId: "t1",
     turnId: "turn-1",
     toolName: args.toolName,
   };
+
   harness.translate(rawShellCall(call));
   harness.translate(rawShellOutput({ ...call, output: args.rawOutput }));
+
   const events = harness.translate(
     completedCommand({
       ...call,
       aggregatedOutput: args.providerAggregatedOutput,
     }),
   );
+
   const completed = events.find(
     (event) =>
       event.type === "item/completed" &&
       event.item.type === "commandExecution" &&
       event.item.id === harness.itemId("cmd-1"),
   );
+
   if (completed?.type !== "item/completed") {
     throw new Error("Expected a completed commandExecution event");
   }
+
   if (completed.item.type !== "commandExecution") {
     throw new Error("Expected a commandExecution item");
   }
+
   return completed.item.aggregatedOutput;
 }
 
@@ -436,6 +460,7 @@ describe("codex raw shell command-output recovery", () => {
 
   it("repairs concurrent command executions independently", () => {
     const harness = createHarness();
+
     const commands = [
       { callId: "cmd-a", output: "A-1\nA-2\nA-3\n", truncated: "A-2\nA-3\n" },
       { callId: "cmd-b", output: "B-1\nB-2\nB-3\n", truncated: "B-2\nB-3\n" },
@@ -450,6 +475,7 @@ describe("codex raw shell command-output recovery", () => {
         }),
       );
     }
+
     for (const command of commands) {
       harness.translate(
         rawShellOutput({
@@ -487,6 +513,7 @@ describe("codex raw shell command-output recovery", () => {
 
   it("keeps a thread's captured output when a different thread completes a turn", () => {
     const harness = createHarness();
+
     for (const suffix of ["a", "b"]) {
       harness.translate(
         rawShellCall({
@@ -651,10 +678,11 @@ describe("codex subagent activity correlation", () => {
   function rawCollaborationCall(args: {
     callId: string;
     name: "followup_task" | "send_message";
+    turnId?: string;
   }) {
     return codexEvent("rawResponseItem/completed", {
       threadId: rootProviderThreadId,
-      turnId: "parent-turn",
+      turnId: args.turnId ?? "parent-turn",
       item: {
         type: "function_call",
         name: args.name,
@@ -672,6 +700,7 @@ describe("codex subagent activity correlation", () => {
     turnId?: string;
   }) {
     const agentThreadId = args.agentThreadId ?? "agent-thread-1";
+
     return {
       jsonrpc: "2.0" as const,
       method: "item/completed",
@@ -717,10 +746,12 @@ describe("codex subagent activity correlation", () => {
         }),
       }),
     );
+
     const completion = subAgentActivity({
       id: "subagent-completed-1",
       kind: "completed",
     });
+
     expect(
       harness.translate({ ...completion, method: "item/started" }),
     ).toEqual([]);
@@ -859,6 +890,7 @@ describe("codex subagent activity correlation", () => {
     const resumedTurnCompleted = harness.translate(
       childTurnCompleted("child-turn-2"),
     );
+
     expect(resumedTurnCompleted).toEqual([
       expect.objectContaining({
         type: "turn/completed",
@@ -875,6 +907,70 @@ describe("codex subagent activity correlation", () => {
       }),
     ]);
   });
+
+  it.each(["before", "after"] as const)(
+    "keeps a resumed child nested when follow-up activity arrives %s its turn start",
+    (activityOrder) => {
+      const harness = createHarness();
+      const childThreadId = "agent-thread-1";
+      harness.translate(childTurnStarted("parent-turn"));
+      harness.translate(
+        subAgentActivity({ id: "subagent-call-1", kind: "started" }),
+      );
+      harness.translate(childTurnStarted("child-turn-1", childThreadId));
+      harness.translate(childTurnCompleted("child-turn-1", childThreadId));
+      harness.translate(
+        rawCollaborationCall({ callId: "resume-call", name: "followup_task" }),
+      );
+
+      const activity = subAgentActivity({
+        id: "resume-call",
+        kind: "interacted",
+      });
+
+      if (activityOrder === "before") {
+        harness.translate(activity);
+      }
+
+      const started = harness.translate(
+        childTurnStarted("child-turn-2", childThreadId),
+      );
+
+      const activityEvents =
+        activityOrder === "after" ? harness.translate(activity) : [];
+
+      const completed = harness.translate(
+        childTurnCompleted("child-turn-2", childThreadId),
+      );
+
+      expect(started).toContainEqual(
+        expect.objectContaining({
+          type: "turn/started",
+          scope: turnScope(harness.turnId("child-turn-2")),
+          parentToolCallId: expect.any(String),
+        }),
+      );
+      expect(completed).toEqual([
+        expect.objectContaining({
+          type: "turn/completed",
+          scope: turnScope(harness.turnId("child-turn-2")),
+        }),
+        expect.objectContaining({
+          type: "item/completed",
+          item: expect.objectContaining({
+            type: "delegation",
+            id: harness.itemId("resume-call"),
+            status: "completed",
+          }),
+        }),
+      ]);
+      expect(
+        [...started, ...activityEvents, ...completed].filter(
+          (event) => event.type === "turn/started" && !event.parentToolCallId,
+        ),
+      ).toEqual([]);
+    },
+  );
 
   it("links an unknown resumed subagent from the raw followup intent after translator restart", () => {
     const harness = createHarness();
@@ -952,9 +1048,11 @@ describe("codex subagent activity correlation", () => {
         providerThreadId: rootProviderThreadId,
       }),
     ).not.toBeNull();
+
     const nextRootTurn = harness
       .translate(childTurnStarted("next-root-turn"))
       .find((event) => event.type === "turn/started");
+
     expect(nextRootTurn).not.toHaveProperty("parentToolCallId");
   });
 
@@ -970,6 +1068,7 @@ describe("codex subagent activity correlation", () => {
     const resumedEvents = harness.translate(
       childTurnStarted("rawless-child-turn"),
     );
+
     expect(resumedEvents).toEqual([
       expect.objectContaining({
         type: "item/started",
@@ -1066,9 +1165,11 @@ describe("codex subagent activity correlation", () => {
       clientRequestId: "creq_after_rawless_message",
       providerThreadId: rootProviderThreadId,
     });
+
     const nextRootTurn = harness
       .translate(childTurnStarted("next-root-after-message"))
       .find((event) => event.type === "turn/started");
+
     expect(nextRootTurn).not.toHaveProperty("parentToolCallId");
   });
 
@@ -1091,9 +1192,11 @@ describe("codex subagent activity correlation", () => {
         kind: "started",
       }),
     );
+
     const unrelatedChild = harness
       .translate(childTurnStarted("unrelated-child-turn"))
       .find((event) => event.type === "turn/started");
+
     expect(unrelatedChild).toEqual(
       expect.objectContaining({
         type: "turn/started",
@@ -1113,9 +1216,11 @@ describe("codex subagent activity correlation", () => {
         providerThreadId: rootProviderThreadId,
       }),
     ).not.toBeNull();
+
     const nextRootTurn = harness
       .translate(childTurnStarted("next-root-after-unrelated-child"))
       .find((event) => event.type === "turn/started");
+
     expect(nextRootTurn).not.toHaveProperty("parentToolCallId");
   });
 
@@ -1141,12 +1246,15 @@ describe("codex subagent activity correlation", () => {
     ).toEqual([]);
 
     const roundIds: string[] = [];
+
     for (const index of [2, 3]) {
       const started = harness.translate(
         childTurnStarted(`child-turn-${index}`),
       );
+
       const roundId =
         started[0]?.type === "item/started" ? started[0].item.id : "";
+
       expect(started).toEqual([
         expect.objectContaining({
           type: "item/started",
@@ -1165,6 +1273,7 @@ describe("codex subagent activity correlation", () => {
           .map((event) => event.type),
       ).toEqual(["turn/completed", "item/completed"]);
     }
+
     expect(roundIds.sort()).toEqual(
       [harness.itemId("interaction-1"), harness.itemId("interaction-2")].sort(),
     );
@@ -1191,6 +1300,7 @@ describe("codex subagent activity correlation", () => {
     const humanTurnStarted = harness
       .translate(childTurnStarted("human-turn"))
       .find((event) => event.type === "turn/started");
+
     expect(humanTurnStarted).toEqual(
       expect.objectContaining({
         type: "turn/started",
@@ -1218,6 +1328,7 @@ describe("codex subagent activity correlation", () => {
     const closes = harness.translator.clearExitedChildThreadState({
       providerThreadId: rootProviderThreadId,
     });
+
     expect(
       harness.assembler.assemble({ threadId: THREAD_ID, deltas: closes }),
     ).toEqual([
@@ -1235,6 +1346,103 @@ describe("codex subagent activity correlation", () => {
       harness.translator.clearExitedChildThreadState({
         providerThreadId: rootProviderThreadId,
       }),
+    ).toEqual([]);
+  });
+
+  it("settles an open delegation as failed when its subagent thread closes", () => {
+    const harness = createHarness();
+    const childThreadId = "agent-thread-1";
+    harness.translate(childTurnStarted("parent-turn"));
+    harness.translate(
+      subAgentActivity({ id: "subagent-call-1", kind: "started" }),
+    );
+    harness.translate(childTurnStarted("child-turn-1", childThreadId));
+
+    expect(
+      harness.translate(
+        codexEvent("thread/closed", { threadId: childThreadId }),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        type: "item/completed",
+        scope: turnScope(harness.turnId("parent-turn")),
+        item: expect.objectContaining({
+          type: "delegation",
+          id: harness.itemId("subagent-call-1"),
+          status: "failed",
+        }),
+      }),
+    ]);
+  });
+
+  it("keeps a finished subagent resumable after its thread closes", () => {
+    const harness = createHarness();
+    const childThreadId = "agent-thread-1";
+    harness.translate(childTurnStarted("parent-turn"));
+    harness.translate(
+      subAgentActivity({ id: "subagent-call-1", kind: "started" }),
+    );
+    harness.translate(childTurnStarted("child-turn-1", childThreadId));
+    harness.translate(childTurnCompleted("child-turn-1", childThreadId));
+
+    expect(
+      harness.translate(
+        codexEvent("thread/closed", { threadId: childThreadId }),
+      ),
+    ).toEqual([]);
+
+    harness.translate(childTurnCompleted("parent-turn"));
+    harness.translate(childTurnStarted("parent-turn-2"));
+    harness.translate(
+      rawCollaborationCall({
+        callId: "resume-call",
+        name: "followup_task",
+        turnId: "parent-turn-2",
+      }),
+    );
+
+    const started = harness.translate(
+      childTurnStarted("child-turn-2", childThreadId),
+    );
+
+    const activityEvents = harness.translate(
+      subAgentActivity({
+        id: "resume-call",
+        kind: "interacted",
+        turnId: "parent-turn-2",
+      }),
+    );
+
+    const completed = harness.translate(
+      childTurnCompleted("child-turn-2", childThreadId),
+    );
+
+    expect(started).toContainEqual(
+      expect.objectContaining({
+        type: "turn/started",
+        scope: turnScope(harness.turnId("child-turn-2")),
+        parentToolCallId: expect.any(String),
+      }),
+    );
+    expect(completed).toEqual([
+      expect.objectContaining({
+        type: "turn/completed",
+        scope: turnScope(harness.turnId("child-turn-2")),
+      }),
+      expect.objectContaining({
+        type: "item/completed",
+        scope: turnScope(harness.turnId("parent-turn-2")),
+        item: expect.objectContaining({
+          type: "delegation",
+          id: harness.itemId("resume-call"),
+          status: "completed",
+        }),
+      }),
+    ]);
+    expect(
+      [...started, ...activityEvents, ...completed].filter(
+        (event) => event.type === "turn/started" && !event.parentToolCallId,
+      ),
     ).toEqual([]);
   });
 
@@ -1268,14 +1476,17 @@ describe("codex subagent activity correlation", () => {
         providerThreadId: rootProviderThreadId,
       }),
     ).not.toBeNull();
+
     const laterHumanTurn = harness
       .translate(childTurnStarted("human-turn"))
       .find((event) => event.type === "turn/started");
+
     expect(laterHumanTurn).not.toHaveProperty("parentToolCallId");
   });
 
   it("does not FIFO-cross-link concurrently resumed subagents", () => {
     const harness = createHarness();
+
     for (const index of [1, 2]) {
       harness.translate(
         subAgentActivity({
@@ -1287,6 +1498,7 @@ describe("codex subagent activity correlation", () => {
       harness.translate(childTurnStarted(`child-turn-${index}`));
       harness.translate(childTurnCompleted(`child-turn-${index}`));
     }
+
     for (const index of [1, 2]) {
       harness.translate(
         subAgentActivity({
@@ -1380,6 +1592,7 @@ describe("codex subagent activity correlation", () => {
 
   it("links concurrent subagents to child turns in activity order", () => {
     const harness = createHarness();
+
     for (const index of [1, 2]) {
       harness.translate(
         subAgentActivity({
@@ -1455,6 +1668,7 @@ function codexReconnectError(turnId: string) {
       message: "Reconnecting... 5/5",
       codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } },
       additionalDetails: STREAM_DISCONNECT_MESSAGE,
+      misalignment: null,
     },
     willRetry: true,
   });
@@ -1464,7 +1678,12 @@ function codexTerminalOtherError(turnId: string, message: string) {
   return codexEvent("error", {
     threadId: "t1",
     turnId,
-    error: { message, codexErrorInfo: "other", additionalDetails: null },
+    error: {
+      message,
+      codexErrorInfo: "other",
+      additionalDetails: null,
+      misalignment: null,
+    },
     willRetry: false,
   });
 }
@@ -1496,6 +1715,60 @@ describe("codex terminal retry-error classification", () => {
       expect.objectContaining({
         type: "provider/error",
         errorInfo: UNKNOWN_ERROR_INFO,
+      }),
+    );
+  });
+
+  it("matches the terminal error to an earlier reconnect with the same text", () => {
+    const harness = createHarness();
+    harness.translate(
+      codexEvent("error", {
+        threadId: "t1",
+        turnId: "turn-1",
+        error: {
+          message: "Reconnecting... 1/5",
+          codexErrorInfo: {
+            responseStreamDisconnected: { httpStatusCode: null },
+          },
+          additionalDetails: STREAM_DISCONNECT_MESSAGE,
+          misalignment: null,
+        },
+        willRetry: true,
+      }),
+    );
+
+    for (const attempt of [2, 3, 4, 5]) {
+      harness.translate(
+        codexEvent("error", {
+          threadId: "t1",
+          turnId: "turn-1",
+          error: {
+            message: `Reconnecting... ${attempt}/5`,
+            codexErrorInfo: {
+              responseStreamDisconnected: { httpStatusCode: 502 },
+            },
+            additionalDetails:
+              "unexpected status 502 Bad Gateway: Bad Gateway, url: https://omnyo.example.test/v1/responses",
+            misalignment: null,
+          },
+          willRetry: true,
+        }),
+      );
+    }
+
+    expect(
+      harness.translate(
+        codexTerminalOtherError("turn-1", STREAM_DISCONNECT_MESSAGE),
+      ),
+    ).toContainEqual(
+      expect.objectContaining({
+        type: "provider/error",
+        willRetry: false,
+        errorInfo: {
+          category: "stream-disconnected",
+          providerCode: "responseStreamDisconnected",
+          httpStatusCode: null,
+        },
       }),
     );
   });
@@ -1581,6 +1854,7 @@ describe("codex accepted-input correlation", () => {
         turn: codexTurn({ id: "turn-1", status: "inProgress", error: null }),
       }),
     );
+
     expect(events).toEqual([
       {
         type: "turn/started",
@@ -1616,13 +1890,16 @@ describe("codex accepted-input correlation", () => {
 
   it("drops the queued ack when the dispatch is rolled back", () => {
     const harness = createHarness();
+
     const prepared = harness.translator.prepareTurnStart({
       clientRequestId: "creq_23456789ag",
       providerThreadId: "provider-thread-1",
     });
+
     if (!prepared) {
       throw new Error("Expected prepared turn/start state");
     }
+
     prepared.rollback();
 
     expect(
@@ -1781,6 +2058,7 @@ describe("codex delegation-turn nesting", () => {
         }),
       )
       .find((event) => event.type === "turn/started");
+
     expect(followUpTurnStarted).toEqual(
       expect.objectContaining({
         type: "turn/started",
@@ -1810,6 +2088,7 @@ describe("codex delegation-turn nesting", () => {
         (event) =>
           event.type === "item/completed" && event.item.type === "agentMessage",
       );
+
     expect(followUpAssistant).toEqual(
       expect.objectContaining({
         type: "item/completed",

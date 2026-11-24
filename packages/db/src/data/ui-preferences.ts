@@ -71,16 +71,20 @@ export function replaceStoredUiPreference(
       .from(uiPreferences)
       .where(eq(uiPreferences.key, args.key))
       .get();
+
     const currentRevision = current?.revision ?? 0;
+
     if (currentRevision !== args.expectedRevision) {
       return { outcome: "conflict", revision: currentRevision };
     }
+
     const revision = currentRevision + 1;
     upsertStoredUiPreference(tx, {
       key: args.key,
       revision,
       valueJson: args.valueJson,
     });
+
     return { outcome: "updated", revision };
   });
 }
@@ -95,12 +99,14 @@ export function overwriteStoredUiPreference(
       .from(uiPreferences)
       .where(eq(uiPreferences.key, args.key))
       .get();
+
     const revision = (current?.revision ?? 0) + 1;
     upsertStoredUiPreference(tx, {
       key: args.key,
       revision,
       valueJson: args.valueJson,
     });
+
     return { revision };
   });
 }

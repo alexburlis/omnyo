@@ -1,17 +1,21 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { threadsQueryKey } from "@/hooks/queries/query-keys";
-import type { ThreadQueuedMessage } from "@bb/domain";
+import type { ThreadQueuedMessage } from "@omnyo/domain";
 import {
   makeThreadListEntry,
   makeThreadQueuedMessage,
-} from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/test-helpers/domain-fixtures";
 import {
   applyQueuedMessageReorder,
   type QueuedMessageReorderRequest,
 } from "@/lib/queued-message-reorder";
 import type { QueuedMessageGroupBoundaryRequest } from "@/components/promptbox/banner/LazyQueuedMessagesList";
 import { QueuedMessagesList } from "@/components/promptbox/banner/QueuedMessagesList";
+import {
+  resetPluginLogoStoreForTest,
+  setPluginLogoUrls,
+} from "@/lib/plugin-logos";
 import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
 
 export default {
@@ -50,6 +54,7 @@ function ResponsivePromptStage({ children }: { children: ReactNode }) {
 }
 
 const MINUTE_MS = 60 * 1000;
+
 const HOUR_MS = 60 * MINUTE_MS;
 
 const STORY_NOW = Date.now();
@@ -73,6 +78,7 @@ function makeQueuedMessage({
     mimeType: "image/png",
     sizeBytes: 100_000 + index * 10_000,
   }));
+
   return makeThreadQueuedMessage({
     id,
     threadId: "thr_queue",
@@ -106,7 +112,7 @@ const multipleMessages: readonly ThreadQueuedMessage[] = [
   }),
   makeQueuedMessage({
     id: "q_c",
-    text: "And run the tests for @bb/thread-view.",
+    text: "And run the tests for @omnyo/thread-view.",
     waitingOn: threadBusy,
   }),
 ];
@@ -195,7 +201,7 @@ const mixedMessages: readonly ThreadQueuedMessage[] = [
   }),
   makeQueuedMessage({
     id: "mix_plain_2",
-    text: "And run the tests for @bb/thread-view.",
+    text: "And run the tests for @omnyo/thread-view.",
   }),
   makeQueuedMessage({
     id: "mix_quote_2",
@@ -324,6 +330,7 @@ const inFlightMessage = makeQueuedMessage({
   text: "Also audit the empty queue handoff before wrapping up.",
   waitingOn: threadBusy,
 });
+
 const inFlight: readonly ThreadQueuedMessage[] = [inFlightMessage];
 
 const failed: readonly ThreadQueuedMessage[] = [
@@ -343,6 +350,34 @@ interface StaticQueuedMessagesListProps {
   processingAction?: "send" | "edit" | "delete";
 }
 
+const STORY_PLUGIN_NAMES = [
+  ["concurrency-limit", "Concurrency Limit"],
+  ["mobile-lab", "Mobile Lab"],
+  ["provider-retry", "Provider Retry"],
+] as const;
+
+function useStoryPluginNames(): void {
+  useEffect(() => {
+    setPluginLogoUrls(
+      new Map(
+        STORY_PLUGIN_NAMES.map(([pluginId, displayName]) => [
+          pluginId,
+          {
+            displayName,
+            icon: null,
+            compactIconUrl: null,
+            logoUrl: null,
+            logoDarkUrl: null,
+            icons: new Map<string, string>(),
+          },
+        ]),
+      ),
+    );
+
+    return () => resetPluginLogoStoreForTest();
+  }, []);
+}
+
 function StaticQueuedMessagesList({
   queuedMessages,
   sendDisabled = false,
@@ -351,6 +386,8 @@ function StaticQueuedMessagesList({
   processingAction,
 }: StaticQueuedMessagesListProps) {
   const [expanded, setExpanded] = useState(true);
+  useStoryPluginNames();
+
   return (
     <QueuedMessagesList
       attachedToComposer={true}
@@ -374,12 +411,15 @@ function StaticQueuedMessagesList({
 function ReorderableQueuedMessagesList() {
   const [queuedMessages, setQueuedMessages] =
     useState<readonly ThreadQueuedMessage[]>(multipleMessages);
+
   const [expanded, setExpanded] = useState(true);
+
   const handleReorder = useCallback((request: QueuedMessageReorderRequest) => {
     setQueuedMessages((currentQueuedMessages) =>
       applyStoryReorder(currentQueuedMessages, request),
     );
   }, []);
+
   const handleSetGroupBoundary = useCallback(
     (request: QueuedMessageGroupBoundaryRequest) => {
       setQueuedMessages((currentQueuedMessages) =>
@@ -416,10 +456,13 @@ function collectStoryLeadGroupIds(
   queuedMessages: readonly ThreadQueuedMessage[],
 ): string[] {
   const ids: string[] = [];
+
   for (const queuedMessage of queuedMessages) {
     ids.push(queuedMessage.id);
+
     if (!queuedMessage.groupWithNext) break;
   }
+
   return ids;
 }
 
@@ -438,6 +481,7 @@ function preserveStoryLeadGroupAfterReorder({
   }
 
   const originalLeadGroupIdSet = new Set(originalLeadGroupIds);
+
   const preservesLeadGroup = queuedMessages
     .slice(0, originalLeadGroupIds.length)
     .every((queuedMessage) => originalLeadGroupIdSet.has(queuedMessage.id));
@@ -478,7 +522,9 @@ function applyStoryGroupBoundary(
   const boundaryIndex = queuedMessages.findIndex(
     (queuedMessage) => queuedMessage.id === boundaryId,
   );
+
   if (boundaryIndex === -1) return [...queuedMessages];
+
   return queuedMessages.map((queuedMessage, index) => ({
     ...queuedMessage,
     groupWithNext: index < boundaryIndex,
@@ -495,7 +541,7 @@ export function Overview() {
       </StoryRow>
       <StoryRow
         label="multiple messages"
-        hint="a few messages fit the drawer; toggle from the header or collapse with the row below. Drag a row's grip to reorder, and the divider to move the send-together boundary"
+        hint="a few messages fit the tray; the count toggles between the next message and the whole queue. Drag a row's grip to reorder, and the divider to move the send-together boundary"
       >
         <ResponsivePromptStage>
           <ReorderableQueuedMessagesList />
@@ -503,7 +549,7 @@ export function Overview() {
       </StoryRow>
       <StoryRow
         label="overflowing queue"
-        hint="long queues scroll within the drawer; toggle from the header or collapse below the messages"
+        hint="long queues scroll within the tray under a pinned count; the peeking row shows there is more"
       >
         <ResponsivePromptStage>
           <StaticQueuedMessagesList queuedMessages={manyMessages} />
@@ -511,7 +557,7 @@ export function Overview() {
       </StoryRow>
       <StoryRow
         label="with attachments"
-        hint="attachment count stays flush right, then crossfades into actions over a short edge fade"
+        hint="attachment count stays flush right; hovering the row swaps it for the actions behind a short edge fade"
       >
         <ResponsivePromptStage>
           <StaticQueuedMessagesList queuedMessages={withAttachments} />
@@ -837,8 +883,10 @@ export function SenderMetadata() {
     client.setQueryData(threadsQueryKey(), [
       makeThreadListEntry({ id: "thr_review", title: "Code review" }),
     ]);
+
     return client;
   });
+
   const messages = [
     makeQueuedMessage({
       id: "q_user",
@@ -857,6 +905,7 @@ export function SenderMetadata() {
       waitingOn: { kind: "provisioning" },
     }),
   ];
+
   return (
     <QueryClientProvider client={queryClient}>
       <StoryCard>

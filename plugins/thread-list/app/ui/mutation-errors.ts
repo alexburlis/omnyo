@@ -9,21 +9,30 @@ function toRecord(value: unknown): Record<string, unknown> | null {
 function extractErrorMessage(value: unknown): string | null {
   if (typeof value === "string") {
     const normalized = value.replace(/\s+/g, " ").trim();
+
     return normalized.length === 0 ? null : normalized;
   }
+
   if (Array.isArray(value)) {
     for (const item of value) {
       const message = extractErrorMessage(item);
+
       if (message) return message;
     }
+
     return null;
   }
+
   const record = toRecord(value);
+
   if (!record) return null;
+
   if (typeof record.message === "string") {
     const message = extractErrorMessage(record.message);
+
     if (message) return message;
   }
+
   return extractErrorMessage(record.detail);
 }
 
@@ -41,6 +50,7 @@ function normalizeMessage(message: string): string {
 
 export function getErrorCode(error: unknown): string | null {
   const record = toRecord(error);
+
   return record !== null && typeof record.code === "string"
     ? record.code
     : null;
@@ -48,6 +58,7 @@ export function getErrorCode(error: unknown): string | null {
 
 function isHttpError(error: unknown): boolean {
   const record = toRecord(error);
+
   return record !== null && typeof record.status === "number";
 }
 
@@ -55,11 +66,15 @@ function isNetworkTransportError(error: unknown): boolean {
   if (isHttpError(error) || toRecord(error)?.name === "AbortError") {
     return false;
   }
+
   const record = toRecord(error);
+
   if (!record || typeof record.message !== "string") {
     return false;
   }
+
   const normalizedMessage = normalizeMessage(record.message).toLowerCase();
+
   return (
     normalizedMessage.includes("failed to fetch") ||
     normalizedMessage.includes("load failed") ||
@@ -74,10 +89,14 @@ export function getMutationErrorMessage({
   if (isNetworkTransportError(error)) {
     return NETWORK_TRANSPORT_ERROR_MESSAGE;
   }
+
   const extractedMessage = extractErrorMessage(error);
+
   if (!extractedMessage) {
     return fallbackMessage;
   }
+
   const normalizedMessage = normalizeMessage(extractedMessage);
+
   return normalizedMessage.length > 0 ? normalizedMessage : fallbackMessage;
 }

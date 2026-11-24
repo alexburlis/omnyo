@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { UPDATE_ACTION_ICON } from "@bb/domain/update-state";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
+import { UPDATE_ACTION_ICON } from "@omnyo/domain/update-state";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { usePluginNotificationAction } from "@/components/plugin/PluginNotificationDescription";
 import { appToast } from "@/components/ui/app-toast";
 import { applyPluginUpdateJob } from "@/hooks/cache-owners/plugin-cache-owner";
@@ -15,6 +15,7 @@ import { UpdatePluginDialog } from "./UpdatePluginDialog";
 export function pluginHasUpdateSurfaces(plugin: PluginListItem): boolean {
   if (plugin.source.startsWith("builtin:") || plugin.source.startsWith("path:"))
     return false;
+
   return plugin.provenance === "direct" || plugin.provenance === "catalog";
 }
 
@@ -22,6 +23,7 @@ function pluginCompatibilityBlockedVersion(
   plugin: PluginListItem,
 ): string | null {
   if (!pluginHasUpdateSurfaces(plugin)) return null;
+
   return plugin.updateState.availableVersion === null
     ? plugin.updateState.blockedVersion
     : null;
@@ -30,6 +32,7 @@ function pluginCompatibilityBlockedVersion(
 function sentence(value: string): string {
   const trimmed = value.trim();
   const capitalized = `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+
   return /[.!?]$/u.test(capitalized) ? capitalized : `${capitalized}.`;
 }
 
@@ -43,6 +46,7 @@ export function PluginDetailReleaseControl({
   const notificationAction = usePluginNotificationAction();
   const availableVersion = plugin.updateState.availableVersion;
   const failure = plugin.updateState.lastFailure;
+
   const retry = useMutation({
     meta: { showErrorToast: false },
     mutationFn: () => startPluginUpdate(plugin.id),
@@ -58,15 +62,15 @@ export function PluginDetailReleaseControl({
   });
 
   if (!pluginHasUpdateSurfaces(plugin)) return null;
+
   if (availableVersion === null) return null;
 
   if (failure !== null) {
     return (
       <Button
         type="button"
-        variant="outline"
-        size="sm"
-        className="h-6 px-2 text-xs"
+        variant="soft"
+        size="xs"
         disabled={retry.isPending}
         aria-busy={retry.isPending}
         aria-label={`Retry update to ${displayPluginVersion(availableVersion)}`}
@@ -77,7 +81,7 @@ export function PluginDetailReleaseControl({
         ) : (
           <Icon name="RotateCcw" className="size-3.5" aria-hidden />
         )}
-        Retry
+        Retry update
       </Button>
     );
   }
@@ -86,9 +90,8 @@ export function PluginDetailReleaseControl({
     <>
       <Button
         type="button"
-        variant="outline"
-        size="sm"
-        className="h-6 px-2 text-xs"
+        variant="default"
+        size="xs"
         aria-label={`Update ${plugin.name ?? plugin.id} to ${displayPluginVersion(availableVersion)}`}
         onClick={() => setDetailsOpen(true)}
       >
@@ -128,8 +131,8 @@ export function PluginDetailReleaseStatus({
           aria-hidden
         />
         <p className="min-w-0 text-xs leading-relaxed text-muted-foreground">
-          bb couldn&rsquo;t activate {displayPluginVersion(failure.version)}. It
-          restored {displayPluginVersion(plugin.version)} and its data.
+          Omnyo couldn&rsquo;t activate {displayPluginVersion(failure.version)}.
+          It restored {displayPluginVersion(plugin.version)} and its data.
         </p>
       </div>
     );
@@ -169,6 +172,7 @@ export function PluginDetailReleaseStatus({
   }
 
   if (blockedVersion === null) return null;
+
   return (
     <div
       role="status"
@@ -183,7 +187,7 @@ export function PluginDetailReleaseStatus({
       <div className="min-w-0">
         <p className="text-xs leading-relaxed text-muted-foreground">
           {blockedReasons[0] === undefined
-            ? `${displayPluginVersion(blockedVersion)} isn’t compatible with this bb.`
+            ? `${displayPluginVersion(blockedVersion)} isn’t compatible with this Omnyo.`
             : sentence(blockedReasons[0])}{" "}
           {displayPluginVersion(plugin.version)} remains installed. Keep using
           it and check again when a compatible plugin version is available.

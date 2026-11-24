@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { afterEach, expect, it, vi } from "vitest";
 import { VoiceInputButton } from "./VoiceInputButton";
 
@@ -14,6 +14,7 @@ it.each(["warning", "context menu", "keyboard"])(
   "opens microphone preferences from %s without recording or hiding the app",
   async (method) => {
     const record = vi.fn();
+
     const content = (warning: string | null) => (
       <TooltipProvider>
         <VoiceInputButton
@@ -25,18 +26,24 @@ it.each(["warning", "context menu", "keyboard"])(
         </VoiceInputButton>
       </TooltipProvider>
     );
+
     const { container, rerender } = render(
       content(method === "warning" ? "Microphone unavailable" : null),
     );
+
     const mic = screen.getByRole("button", {
       name:
         method === "warning"
           ? "Microphone warning: open voice preferences"
           : "Start voice input",
     });
+
     expect(container.querySelectorAll("button")).toHaveLength(1);
+
     if (method === "warning") fireEvent.click(mic);
+
     if (method === "context menu") fireEvent.contextMenu(mic);
+
     if (method === "keyboard")
       fireEvent.keyDown(mic, { key: "F10", shiftKey: true });
     expect(
@@ -65,12 +72,10 @@ it("shows a recurring capture error after preview recovery and another recording
         .mockResolvedValue([
           { kind: "audioinput", deviceId: "mic", label: "Microphone" },
         ]),
-      getUserMedia: vi
-        .fn()
-        .mockResolvedValue({
-          getTracks: () => [{ stop }],
-          getAudioTracks: () => [{ label: "Microphone" }],
-        }),
+      getUserMedia: vi.fn().mockResolvedValue({
+        getTracks: () => [{ stop }],
+        getAudioTracks: () => [{ label: "Microphone" }],
+      }),
     }),
   });
   const record = vi.fn();

@@ -77,6 +77,7 @@ function TaskFieldPicker<Value extends string>({
     if (!dialogOpen) setPickerOpen(false);
   }, [dialogOpen]);
   const selected = options.find((option) => option.value === value);
+
   return (
     <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
       <PopoverTrigger asChild>
@@ -162,6 +163,7 @@ export function NewTaskDialog({
   const [draft, setDraft] = useState(() =>
     blankDraft(projectId, defaultStatus),
   );
+
   const [createMore, setCreateMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -185,8 +187,10 @@ export function NewTaskDialog({
             )
           : current.labelIds,
       };
+
       const next = { ...resolved, ...change(resolved) };
       storeNewTaskDraft(next);
+
       return next;
     });
 
@@ -203,11 +207,13 @@ export function NewTaskDialog({
 
   const { title, description, status, priority, dueDate } = draft;
   const projectList = projects.data ?? [];
+
   const project =
     projectList.find((entry) => entry.id === draft.projectId) ??
     projectList.find((entry) => entry.id === projectId) ??
     projectList[0] ??
     null;
+
   const effectiveProjectId = project?.id ?? null;
 
   useEffect(() => {
@@ -217,6 +223,7 @@ export function NewTaskDialog({
       if (current.projectId !== null) return current;
       const next = { ...current, projectId: effectiveProjectId };
       storeNewTaskDraft(next);
+
       return next;
     });
   }, [open, draft.projectId, effectiveProjectId]);
@@ -232,6 +239,7 @@ export function NewTaskDialog({
     ["projects:changed"],
     [effectiveProjectId],
   );
+
   const labels = {
     ...labelsQuery,
     data:
@@ -239,6 +247,7 @@ export function NewTaskDialog({
         ? labelsQuery.data.labels
         : undefined,
   };
+
   const labelIds = draft.labelIds.filter((id) =>
     labels.data?.some((label) => label.id === id),
   );
@@ -263,14 +272,17 @@ export function NewTaskDialog({
 
   const createLabelFromQuery = async () => {
     const name = labelQuery.trim();
+
     if (!name || effectiveProjectId === null || creatingLabel) return;
     setCreatingLabel(true);
+
     try {
       const { label } = await rpc.call("createLabel", {
         projectId: effectiveProjectId,
         name,
         color: DEFAULT_COLOR,
       });
+
       labels.refresh();
       updateDraft((current) => ({
         labelIds: [...current.labelIds, label.id],
@@ -313,6 +325,7 @@ export function NewTaskDialog({
   const hasOversized = pendingFiles.some(
     (entry) => entry.status === "oversized",
   );
+
   const canSubmit =
     effectiveProjectId !== null &&
     title.trim().length > 0 &&
@@ -327,6 +340,7 @@ export function NewTaskDialog({
     if (!canSubmit || effectiveProjectId === null) return;
     setSubmitting(true);
     setError(null);
+
     try {
       const result = await rpc.call("createTask", {
         projectId: effectiveProjectId,
@@ -338,20 +352,27 @@ export function NewTaskDialog({
         parentTaskId: null,
         labelIds,
       });
+
       if (!result.ok) {
         setError(result.error.message);
+
         return;
       }
+
       clearNewTaskDraft();
       const staged = pendingFiles.filter((entry) => entry.status === "staged");
+
       const failed = await uploadStagedAttachments(staged, {
         taskId: result.task.id,
       });
+
       if (failed.length > 0) {
         setPendingFiles((files) => settleStagedUploads(files, staged, failed));
         setCreatedTask(result.task);
+
         return;
       }
+
       if (createMore) {
         setDraft((current) => ({
           ...current,
@@ -376,6 +397,7 @@ export function NewTaskDialog({
     () => (labels.data ?? []).filter((label) => labelIds.includes(label.id)),
     [labels.data, labelIds],
   );
+
   const failedCount = pendingFiles.filter(
     (entry) => entry.status === "failed",
   ).length;
@@ -394,6 +416,7 @@ export function NewTaskDialog({
           if (event.defaultPrevented || submitting || createdTask !== null)
             return;
           const files = [...(event.clipboardData?.files ?? [])];
+
           if (files.length === 0) return;
           event.preventDefault();
           stageMore(files);

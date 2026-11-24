@@ -1,13 +1,14 @@
-import type { WorkspaceCommitSummary, WorkspaceFileStatus } from "@bb/domain";
+import type { WorkspaceCommitSummary, WorkspaceFileStatus } from "@omnyo/domain";
 import {
   makeWorkspaceMergeBase,
   makeWorkspaceStatus,
   makeWorkspaceWorkingTree,
-} from "@bb/test-helpers";
+} from "@omnyo/test-helpers";
 import { describe, expect, it } from "vitest";
 import {
   formatChangeSummary,
   formatWorkspaceFileStatus,
+  selectUntrackedWorkspaceFilesSection,
   selectWorkspaceAheadCommits,
   selectWorkspaceChangedFilesSection,
   selectWorkspaceChangedFilesSections,
@@ -66,6 +67,7 @@ describe("workspace-change-summary", () => {
 
   it("selects uncommitted working-tree files with no merge-base ref", () => {
     const file = makeWorkspaceFileStatus("M");
+
     const section = selectWorkspaceChangedFilesSection(
       makeWorkspaceStatus({
         workingTree: makeWorkspaceWorkingTree({
@@ -93,6 +95,7 @@ describe("workspace-change-summary", () => {
 
   it("selects untracked working-tree files with no merge-base ref", () => {
     const file = makeWorkspaceFileStatus("??");
+
     const section = selectWorkspaceChangedFilesSection(
       makeWorkspaceStatus({
         workingTree: makeWorkspaceWorkingTree({
@@ -122,6 +125,7 @@ describe("workspace-change-summary", () => {
           deletions: 1,
           baseRef: "abc1234",
           aheadCount: 1,
+          squashMergeCheckComplete: true,
           hasCommittedUnmergedChanges: true,
         }),
       }),
@@ -136,6 +140,7 @@ describe("workspace-change-summary", () => {
   it("returns both buckets when working tree is dirty and commits are unmerged", () => {
     const uncommittedFile = makeWorkspaceFileStatus("M");
     const committedFile = makeWorkspaceFileStatus("A");
+
     const sections = selectWorkspaceChangedFilesSections(
       makeWorkspaceStatus({
         workingTree: makeWorkspaceWorkingTree({
@@ -151,6 +156,7 @@ describe("workspace-change-summary", () => {
           deletions: 10,
           baseRef: "abc1234",
           aheadCount: 2,
+          squashMergeCheckComplete: true,
           hasCommittedUnmergedChanges: true,
         }),
       }),
@@ -181,10 +187,12 @@ describe("workspace-change-summary", () => {
         mergeBase: makeWorkspaceMergeBase({
           files: [makeWorkspaceFileStatus("A")],
           aheadCount: 1,
+          squashMergeCheckComplete: true,
           hasCommittedUnmergedChanges: true,
         }),
       }),
     );
+
     const section = selectWorkspaceChangedFilesSection(
       makeWorkspaceStatus({
         workingTree: makeWorkspaceWorkingTree({
@@ -195,6 +203,7 @@ describe("workspace-change-summary", () => {
         mergeBase: makeWorkspaceMergeBase({
           files: [makeWorkspaceFileStatus("A")],
           aheadCount: 1,
+          squashMergeCheckComplete: true,
           hasCommittedUnmergedChanges: true,
         }),
       }),
@@ -202,6 +211,62 @@ describe("workspace-change-summary", () => {
 
     expect(sections[0]?.kind).toBe("uncommitted");
     expect(section?.kind).toBe("uncommitted");
+  });
+
+  it("collects untracked files into their own section", () => {
+    const modified = { ...makeWorkspaceFileStatus("M"), path: "src/a.ts" };
+
+    const untracked = {
+      ...makeWorkspaceFileStatus("??"),
+      path: "notes.md",
+      insertions: 4,
+      deletions: 0,
+    };
+
+    const committed = makeWorkspaceFileStatus("A");
+
+    const untrackedOnly = makeWorkspaceStatus({
+      workingTree: makeWorkspaceWorkingTree({
+        files: [untracked],
+        hasUncommittedChanges: true,
+        state: "untracked",
+      }),
+      mergeBase: makeWorkspaceMergeBase({
+        files: [committed],
+        aheadCount: 1,
+        hasCommittedUnmergedChanges: true,
+      }),
+    });
+
+    expect(selectUntrackedWorkspaceFilesSection(untrackedOnly)).toMatchObject({
+      kind: "untracked",
+      files: [untracked],
+      stats: { insertions: 4, deletions: 0, lineStatsComplete: true },
+    });
+
+    const mixed = makeWorkspaceStatus({
+      workingTree: makeWorkspaceWorkingTree({
+        files: [modified, untracked],
+        hasUncommittedChanges: true,
+        state: "dirty_uncommitted",
+      }),
+    });
+
+    expect(selectUntrackedWorkspaceFilesSection(mixed)?.files).toEqual([
+      untracked,
+    ]);
+    expect(
+      selectUntrackedWorkspaceFilesSection(
+        makeWorkspaceStatus({
+          workingTree: makeWorkspaceWorkingTree({
+            files: [modified],
+            hasUncommittedChanges: true,
+            state: "dirty_uncommitted",
+          }),
+        }),
+      ),
+    ).toBeNull();
+    expect(selectUntrackedWorkspaceFilesSection(undefined)).toBeNull();
   });
 
   it("selectWorkspaceAheadCommits returns [] when there is no merge base", () => {

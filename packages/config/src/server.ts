@@ -1,4 +1,4 @@
-import type { FeatureFlags } from "@bb/domain";
+import type { FeatureFlags } from "@omnyo/domain";
 import type { AppInstallKind, AppSourceOrigin } from "./app-install.js";
 import type { AppSurface } from "./app-surface.js";
 import type { AppUpdateMode } from "./app-update.js";
@@ -15,29 +15,33 @@ import {
   resolveEnvLoader,
 } from "./env.js";
 import {
-  BB_APP_INSTALL_KIND_ENV,
-  BB_APP_SOURCE_COMMIT_ENV,
-  BB_APP_SOURCE_ORIGIN_ENV,
-  BB_APP_URL_ENV,
-  BB_APP_SURFACE_ENV,
-  BB_APP_VERSION_ENV,
-  BB_EXTERNAL_URL_ENV,
-  BB_INHERITED_SKILLS_ROOTS_ENV,
-  BB_MARKETPLACE_URL_ENV,
-  BB_POSTHOG_API_KEY_ENV,
-  BB_SERVER_BIND_HOST_ENV,
-  BB_SERVER_LAUNCH_ID_ENV,
-  BB_APP_UPDATE_MODE_ENV,
-  BB_TELEMETRY_ENV,
-  BB_PERF_DIAGNOSTICS_ENV,
-  DEFAULT_BB_APP_URL,
-  DEFAULT_BB_APP_SURFACE,
-  DEFAULT_BB_APP_VERSION,
-  DEFAULT_BB_EXTERNAL_URL,
-  DEFAULT_BB_MARKETPLACE_URL,
-  DEFAULT_BB_POSTHOG_API_KEY,
-  DEFAULT_BB_SERVER_BIND_HOST,
-  DEFAULT_BB_TELEMETRY,
+  OMNYO_APP_INSTALL_KIND_ENV,
+  OMNYO_APP_SOURCE_COMMIT_ENV,
+  OMNYO_APP_SOURCE_ORIGIN_ENV,
+  OMNYO_APP_ALIAS_URLS_ENV,
+  OMNYO_APP_URL_ENV,
+  OMNYO_APP_SURFACE_ENV,
+  OMNYO_APP_VERSION_ENV,
+  OMNYO_EXTERNAL_URL_ENV,
+  OMNYO_INHERITED_SKILLS_ROOTS_ENV,
+  OMNYO_USAGE_COLLECTOR_URL_ENV,
+  OMNYO_USAGE_COUNT_REGION_ENV,
+  OMNYO_SENTRY_DSN_ENV,
+  OMNYO_SERVER_BIND_HOST_ENV,
+  OMNYO_SERVER_LAUNCH_ID_ENV,
+  OMNYO_SERVER_STARTUP_HOLD_ENV,
+  type ServerStartupHold,
+  OMNYO_APP_UPDATE_MODE_ENV,
+  OMNYO_TELEMETRY_ENV,
+  OMNYO_PERF_DIAGNOSTICS_ENV,
+  DEFAULT_OMNYO_APP_URL,
+  DEFAULT_OMNYO_APP_SURFACE,
+  DEFAULT_OMNYO_APP_VERSION,
+  DEFAULT_OMNYO_EXTERNAL_URL,
+  DEFAULT_OMNYO_SENTRY_DSN,
+  PUBLIC_BETA_COLLECTION_DISABLED,
+  DEFAULT_OMNYO_SERVER_BIND_HOST,
+  DEFAULT_OMNYO_TELEMETRY,
   parseServerBindHost,
   type ServerBindHost,
 } from "./env-vars.js";
@@ -48,41 +52,47 @@ import { loadServerPortConfig, type ServerPortConfig } from "./server-port.js";
 
 export interface ServerConfig
   extends CommonConfig, DatabaseConfig, ServerPortConfig {
-  BB_APP_INSTALL_KIND?: AppInstallKind;
-  BB_APP_SOURCE_COMMIT?: string;
-  BB_APP_SOURCE_ORIGIN?: AppSourceOrigin;
-  BB_APP_URL: string;
-  BB_APP_SURFACE: AppSurface;
-  BB_APP_VERSION: string;
-  BB_DEV_APP_PORT?: number;
-  BB_EXTERNAL_URL: string;
-  BB_HOST_DAEMON_PORT: number;
-  BB_INHERITED_SKILLS_ROOTS: string[];
-  BB_POSTHOG_API_KEY: string;
-  BB_MARKETPLACE_URL: string;
-  BB_SERVER_BIND_HOST: ServerBindHost;
-  BB_SERVER_LAUNCH_ID?: string;
-  BB_APP_UPDATE_MODE?: AppUpdateMode;
-  BB_TELEMETRY: boolean;
-  BB_PERF_DIAGNOSTICS: boolean;
+  OMNYO_APP_INSTALL_KIND?: AppInstallKind;
+  OMNYO_APP_SOURCE_COMMIT?: string;
+  OMNYO_APP_SOURCE_ORIGIN?: AppSourceOrigin;
+  OMNYO_APP_URL: string;
+  OMNYO_APP_ALIAS_URLS: string[];
+  OMNYO_APP_SURFACE: AppSurface;
+  OMNYO_APP_VERSION: string;
+  OMNYO_DEV_APP_PORT?: number;
+  OMNYO_EXTERNAL_URL: string;
+  OMNYO_HOST_DAEMON_PORT: number;
+  OMNYO_INHERITED_SKILLS_ROOTS: string[];
+  OMNYO_USAGE_COLLECTOR_URL?: string;
+  OMNYO_USAGE_COUNT_REGION?: string;
+  OMNYO_SENTRY_DSN: string;
+  OMNYO_SERVER_BIND_HOST: ServerBindHost;
+  OMNYO_SERVER_LAUNCH_ID?: string;
+  OMNYO_SERVER_STARTUP_HOLD?: ServerStartupHold;
+  OMNYO_APP_UPDATE_MODE?: AppUpdateMode;
+  OMNYO_TELEMETRY: boolean;
+  OMNYO_PERF_DIAGNOSTICS: boolean;
   featureFlags: FeatureFlags;
 }
 
 type LoadServerConfigArgs = LoadCommonConfigArgs;
 
 export { parseServerBindHost };
+
 export type { ServerBindHost };
 
 export function loadServerConfig(
   args: LoadServerConfigArgs = {},
 ): ServerConfig {
   const loader = resolveEnvLoader(args);
+
   const commonConfig = loadCommonConfig({
     env: loader.env,
     homeDir: loader.context.homeDir,
     mode: loader.mode,
     repoRoot: args.repoRoot,
   });
+
   const databaseConfig = loadDatabaseConfig({
     commonConfig,
     env: loader.env,
@@ -90,87 +100,99 @@ export function loadServerConfig(
     mode: loader.mode,
     repoRoot: args.repoRoot,
   });
+
   const serverPortConfig = loadServerPortConfig({
     env: loader.env,
     homeDir: loader.context.homeDir,
     mode: loader.mode,
     repoRoot: args.repoRoot,
   });
+
   const devAppConfig = loadDevAppConfig({
     env: loader.env,
     homeDir: loader.context.homeDir,
     mode: loader.mode,
   });
+
   const config: ServerConfig = {
     ...commonConfig,
     ...databaseConfig,
     ...serverPortConfig,
-    BB_APP_URL: readEnvVarWithDefault({
+    OMNYO_APP_URL: readEnvVarWithDefault({
       context: loader.context,
-      defaultValue: DEFAULT_BB_APP_URL,
-      definition: BB_APP_URL_ENV,
+      defaultValue: DEFAULT_OMNYO_APP_URL,
+      definition: OMNYO_APP_URL_ENV,
       env: loader.env,
     }),
-    BB_APP_SURFACE: readEnvVarWithDefault({
+    OMNYO_APP_ALIAS_URLS: readEnvVarWithDefault({
       context: loader.context,
-      defaultValue: DEFAULT_BB_APP_SURFACE,
-      definition: BB_APP_SURFACE_ENV,
+      defaultValue: [],
+      definition: OMNYO_APP_ALIAS_URLS_ENV,
       env: loader.env,
     }),
-    BB_APP_VERSION: readEnvVarWithDefault({
+    OMNYO_APP_SURFACE: readEnvVarWithDefault({
       context: loader.context,
-      defaultValue: DEFAULT_BB_APP_VERSION,
-      definition: BB_APP_VERSION_ENV,
+      defaultValue: DEFAULT_OMNYO_APP_SURFACE,
+      definition: OMNYO_APP_SURFACE_ENV,
       env: loader.env,
     }),
-    BB_EXTERNAL_URL: readEnvVarWithDefault({
+    OMNYO_APP_VERSION: readEnvVarWithDefault({
       context: loader.context,
-      defaultValue: DEFAULT_BB_EXTERNAL_URL,
-      definition: BB_EXTERNAL_URL_ENV,
+      defaultValue: DEFAULT_OMNYO_APP_VERSION,
+      definition: OMNYO_APP_VERSION_ENV,
       env: loader.env,
     }),
-    BB_HOST_DAEMON_PORT: loadHostDaemonPortValue({
+    OMNYO_EXTERNAL_URL: readEnvVarWithDefault({
+      context: loader.context,
+      defaultValue: DEFAULT_OMNYO_EXTERNAL_URL,
+      definition: OMNYO_EXTERNAL_URL_ENV,
+      env: loader.env,
+    }),
+    OMNYO_HOST_DAEMON_PORT: loadHostDaemonPortValue({
       env: loader.env,
       homeDir: loader.context.homeDir,
       mode: loader.mode,
       repoRoot: args.repoRoot,
     }),
-    BB_INHERITED_SKILLS_ROOTS: readEnvVarWithDefault({
+    OMNYO_INHERITED_SKILLS_ROOTS: readEnvVarWithDefault({
       context: loader.context,
       defaultValue: [],
-      definition: BB_INHERITED_SKILLS_ROOTS_ENV,
+      definition: OMNYO_INHERITED_SKILLS_ROOTS_ENV,
       env: loader.env,
     }),
-    BB_MARKETPLACE_URL: readEnvVarWithDefault({
+    OMNYO_SENTRY_DSN:
+      PUBLIC_BETA_COLLECTION_DISABLED ||
+      loader.env.OMNYO_DESKTOP_RELEASE_CHANNEL === "public-beta"
+        ? ""
+        : readEnvVarWithDefault({
+            context: loader.context,
+            defaultValue: DEFAULT_OMNYO_SENTRY_DSN,
+            definition: OMNYO_SENTRY_DSN_ENV,
+            env: loader.env,
+          }),
+    OMNYO_SERVER_BIND_HOST: readEnvVarWithDefault({
       context: loader.context,
-      defaultValue: DEFAULT_BB_MARKETPLACE_URL,
-      definition: BB_MARKETPLACE_URL_ENV,
+      defaultValue: DEFAULT_OMNYO_SERVER_BIND_HOST,
+      definition: OMNYO_SERVER_BIND_HOST_ENV,
       env: loader.env,
     }),
-    BB_POSTHOG_API_KEY: readEnvVarWithDefault({
+    OMNYO_PERF_DIAGNOSTICS: readEnvVarWithDefault({
       context: loader.context,
-      defaultValue: DEFAULT_BB_POSTHOG_API_KEY,
-      definition: BB_POSTHOG_API_KEY_ENV,
-      env: loader.env,
-    }),
-    BB_SERVER_BIND_HOST: readEnvVarWithDefault({
-      context: loader.context,
-      defaultValue: DEFAULT_BB_SERVER_BIND_HOST,
-      definition: BB_SERVER_BIND_HOST_ENV,
-      env: loader.env,
-    }),
-    BB_PERF_DIAGNOSTICS: readEnvVarWithDefault({
-      context: loader.context,
-      definition: BB_PERF_DIAGNOSTICS_ENV,
+      definition: OMNYO_PERF_DIAGNOSTICS_ENV,
       env: loader.env,
       defaultValue: false,
     }),
-    BB_TELEMETRY: readEnvVarWithDefault({
-      context: loader.context,
-      defaultValue: DEFAULT_BB_TELEMETRY,
-      definition: BB_TELEMETRY_ENV,
-      env: loader.env,
-    }),
+    OMNYO_TELEMETRY:
+      !PUBLIC_BETA_COLLECTION_DISABLED &&
+      loader.env.OMNYO_DESKTOP_RELEASE_CHANNEL !== "public-beta" &&
+      loader.env.OMNYO_POSTHOG_API_KEY !== "" &&
+      loader.env.BB_POSTHOG_API_KEY !== "" &&
+      readEnvVarWithDefault({
+        context: loader.context,
+        defaultValue: DEFAULT_OMNYO_TELEMETRY,
+        definition: OMNYO_TELEMETRY_ENV,
+        env: loader.env,
+      }),
     featureFlags: loadFeatureFlags({
       env: loader.env,
       homeDir: loader.context.homeDir,
@@ -179,52 +201,79 @@ export function loadServerConfig(
   };
 
   assignIfDefined({
-    key: "BB_DEV_APP_PORT",
-    target: config,
-    value: devAppConfig.BB_DEV_APP_PORT,
-  });
-  assignIfDefined({
-    key: "BB_APP_UPDATE_MODE",
+    key: "OMNYO_USAGE_COLLECTOR_URL",
     target: config,
     value: readOptionalEnvVar({
       context: loader.context,
-      definition: BB_APP_UPDATE_MODE_ENV,
+      definition: OMNYO_USAGE_COLLECTOR_URL_ENV,
       env: loader.env,
     }),
   });
   assignIfDefined({
-    key: "BB_APP_INSTALL_KIND",
+    key: "OMNYO_USAGE_COUNT_REGION",
     target: config,
     value: readOptionalEnvVar({
       context: loader.context,
-      definition: BB_APP_INSTALL_KIND_ENV,
+      definition: OMNYO_USAGE_COUNT_REGION_ENV,
       env: loader.env,
     }),
   });
   assignIfDefined({
-    key: "BB_APP_SOURCE_ORIGIN",
+    key: "OMNYO_DEV_APP_PORT",
+    target: config,
+    value: devAppConfig.OMNYO_DEV_APP_PORT,
+  });
+  assignIfDefined({
+    key: "OMNYO_APP_UPDATE_MODE",
     target: config,
     value: readOptionalEnvVar({
       context: loader.context,
-      definition: BB_APP_SOURCE_ORIGIN_ENV,
+      definition: OMNYO_APP_UPDATE_MODE_ENV,
       env: loader.env,
     }),
   });
   assignIfDefined({
-    key: "BB_APP_SOURCE_COMMIT",
+    key: "OMNYO_APP_INSTALL_KIND",
     target: config,
     value: readOptionalEnvVar({
       context: loader.context,
-      definition: BB_APP_SOURCE_COMMIT_ENV,
+      definition: OMNYO_APP_INSTALL_KIND_ENV,
       env: loader.env,
     }),
   });
   assignIfDefined({
-    key: "BB_SERVER_LAUNCH_ID",
+    key: "OMNYO_APP_SOURCE_ORIGIN",
     target: config,
     value: readOptionalEnvVar({
       context: loader.context,
-      definition: BB_SERVER_LAUNCH_ID_ENV,
+      definition: OMNYO_APP_SOURCE_ORIGIN_ENV,
+      env: loader.env,
+    }),
+  });
+  assignIfDefined({
+    key: "OMNYO_APP_SOURCE_COMMIT",
+    target: config,
+    value: readOptionalEnvVar({
+      context: loader.context,
+      definition: OMNYO_APP_SOURCE_COMMIT_ENV,
+      env: loader.env,
+    }),
+  });
+  assignIfDefined({
+    key: "OMNYO_SERVER_LAUNCH_ID",
+    target: config,
+    value: readOptionalEnvVar({
+      context: loader.context,
+      definition: OMNYO_SERVER_LAUNCH_ID_ENV,
+      env: loader.env,
+    }),
+  });
+  assignIfDefined({
+    key: "OMNYO_SERVER_STARTUP_HOLD",
+    target: config,
+    value: readOptionalEnvVar({
+      context: loader.context,
+      definition: OMNYO_SERVER_STARTUP_HOLD_ENV,
       env: loader.env,
     }),
   });

@@ -1,6 +1,7 @@
 import { useState, type ReactNode, type RefObject } from "react";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { PromptStackCollapseRow } from "@bb/shared-ui/prompt-stack-disclosure";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { getDisclosureRevealClass } from "@omnyo/shared-ui/motion";
+import { PromptStackCollapseRow } from "@omnyo/shared-ui/prompt-stack-disclosure";
 
 interface AnimatedBodyProps {
   id: string;
@@ -18,9 +19,11 @@ export function AnimatedBody({
   children,
 }: AnimatedBodyProps) {
   const [hasRealizedBody, setHasRealizedBody] = useState(isExpanded);
+
   if (isExpanded && !hasRealizedBody) {
     setHasRealizedBody(true);
   }
+
   const isBodyRealized = hasRealizedBody || isExpanded;
 
   return (
@@ -31,13 +34,11 @@ export function AnimatedBody({
       aria-hidden={!isExpanded}
       inert={!isExpanded}
       className={cn(
-        "grid overflow-hidden transition-[grid-template-rows,opacity,border-color] duration-200 ease-out",
+        getDisclosureRevealClass(isExpanded),
+        "overflow-hidden",
         isExpanded
-          ? "grid-rows-[1fr] border-t border-border opacity-100"
-          : cn(
-              "pointer-events-none grid-rows-[0fr] opacity-0",
-              collapsedBorder === "reserve" && "border-t border-transparent",
-            ),
+          ? "border-t border-border"
+          : collapsedBorder === "reserve" && "border-t border-transparent",
       )}
     >
       <div className="overflow-hidden bg-popover">

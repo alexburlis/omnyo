@@ -22,7 +22,9 @@ export function parseNamespacedGlyph(
   if (!isNamespacedGlyph(glyph)) {
     return null;
   }
+
   const separator = glyph.indexOf("/");
+
   return {
     pluginId: glyph.slice(0, separator),
     name: glyph.slice(separator + 1),

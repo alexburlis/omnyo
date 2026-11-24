@@ -18,20 +18,23 @@ import type {
   SessionOptionSelections,
   SessionOptionValue,
   ThreadSessionOption,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   CreateExecutionInputSources,
   ExecutionInputFieldSource,
   ExistingThreadExecutionInputSources,
   SystemExecutionOptionsModelLoadError,
+  SystemExecutionOptionsModelNotice,
   SystemProvidersQuery,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID,
   GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import type { PickerOption } from "@/components/pickers/OptionPicker";
 import type { ModelPickerOption } from "@/components/pickers/model-picker-option";
+import type { ModelPickerSelection } from "@/components/pickers/model-picker-selection";
+import { useModelPickerHiddenModelIds } from "@/components/pickers/modelPickerPreferences";
 import type { ProviderPickerOption } from "@/components/pickers/model-brand-prefix";
 import {
   encodeProviderValue,
@@ -42,11 +45,13 @@ import { useRootComposeReuseEnvironment } from "@/lib/root-compose-selection";
 import { getProviderIconInfo } from "@/lib/provider-icon";
 import {
   DEFAULT_SERVICE_TIER,
+  allowsFastServiceTier,
+  newThreadPermissionMode,
   permissionModeRank,
   providerModelCatalogDependsOnWorkspace,
   reconcileServiceTier,
   resolveServiceTierOptions,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { selectPrimaryHost, useHosts } from "./queries/host-queries";
 import {
   useKnownProviderModelCatalogScope,
@@ -61,6 +66,7 @@ import {
   usePromptBoxProviderPreference,
   usePromptBoxReasoningLevelPreference,
   usePromptBoxSessionOptionsPreference,
+  usePromptBoxSessionOptionsPreferences,
   usePromptBoxServiceTierPreference,
   useSetPromptBoxProviderModelReasoningPreference,
 } from "./thread-creation-options/persisted-selection-fields";
@@ -86,9 +92,14 @@ import {
 export { formatModelLabel };
 
 const EMPTY_PROVIDERS: ProviderInfo[] = [];
+
 const NO_SESSION_OPTION_SELECTIONS: SessionOptionSelections = {};
+
 const EMPTY_COMPOSER_ACTIONS: ProviderComposerAction[] = [];
+
 const EMPTY_SERVICE_TIER_OPTIONS: readonly ProviderOptionDescriptor[] = [];
+
+const NO_PROVIDER_IDS: readonly string[] = [];
 
 const DEFAULT_SUPPORTED_PERMISSION_MODES: readonly PermissionMode[] = ["full"];
 
@@ -96,9 +107,13 @@ const PERMISSION_CEILING_REASON =
   "Above the selected machine's permission limit. Change it in Settings → Machines.";
 
 type StringSelectionSetter = (value: string) => void;
+
 type ServiceTierSelectionSetter = (value: ServiceTier | undefined) => void;
+
 type ReasoningLevelSelectionSetter = (value: ReasoningLevel) => void;
+
 type PermissionModeSelectionSetter = (value: PermissionMode) => void;
+
 type ClearSelectionHandler = () => void;
 
 interface ModelReasoningSelection {
@@ -106,13 +121,13 @@ interface ModelReasoningSelection {
   reasoningLevel: ReasoningLevel;
 }
 
-interface ProviderModelReasoningSelection extends ModelReasoningSelection {
-  providerId: string;
-}
-
 type ProviderModelReasoningSelectionSetter = (
-  selection: ProviderModelReasoningSelection,
+  selection: ModelPickerSelection,
 ) => void;
+
+type SessionOptionSelectionsForProvider = (
+  providerId: string,
+) => SessionOptionSelections;
 
 interface UseThreadCreationOptionsResult<TExecutionInputSources> {
   executionOptionsRouting: SystemProvidersQuery;
@@ -138,14 +153,17 @@ interface UseThreadCreationOptionsResult<TExecutionInputSources> {
   activeModel: AvailableModel | undefined;
   modelOptions: ModelPickerOption[];
   moreModelOptions: ModelPickerOption[];
+  catalogModelOptions: ModelPickerOption[];
   isLoadingModels: boolean;
   modelLoadFailed: boolean;
   modelLoadError: SystemExecutionOptionsModelLoadError | null;
+  modelNotice: SystemExecutionOptionsModelNotice | null;
   modelCatalogIsVerified: boolean;
   modelCatalogIsSettled: boolean;
   reasoningOptions: PickerOption<ReasoningLevel>[];
   declaredSessionOptions: ThreadSessionOption[];
   sessionOptionSelections: SessionOptionSelections;
+  sessionOptionSelectionsForProvider: SessionOptionSelectionsForProvider;
   setSessionOption: (optionId: string, value: SessionOptionValue) => void;
   permissionModeOptions: PickerOption<PermissionMode>[];
   supportsPermissionModeSelection: boolean;
@@ -175,18 +193,23 @@ function resolveThreadCreationProviderRouting({
     if (environmentId === undefined) {
       return {};
     }
+
     if (
       environmentHostId !== undefined &&
       !providerModelCatalogDependsOnWorkspace(modelCatalogScope)
     ) {
       return { hostId: environmentHostId };
     }
+
     return { environmentId };
   }
+
   const parsed = parseEnvironmentValue(environmentSelectionValue);
+
   if (parsed?.type === "reuse" && parsed.environmentId !== null) {
     return { environmentId: parsed.environmentId };
   }
+
   return {};
 }
 
@@ -197,15 +220,18 @@ type InitialReadyProviderResolution =
   | { status: "resolved"; providerId: string | null };
 
 const LEGACY_MANAGED_WORKTREE_VALUE = /^host:[^:]+:worktree$/;
+
 const LEGACY_HOST_LOCAL_VALUE = /^host:[^:]+:local$/;
 
 function migrateLegacyStoredEnvironmentValue(stored: string): string {
   if (LEGACY_MANAGED_WORKTREE_VALUE.test(stored)) {
     return encodeProviderValue(GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID);
   }
+
   if (LEGACY_HOST_LOCAL_VALUE.test(stored)) {
     return encodeProviderValue(PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID);
   }
+
   return stored;
 }
 
@@ -213,7 +239,9 @@ export function sanitizeStoredEnvironmentValue(stored: string): string {
   if (!stored) return "";
   const migrated = migrateLegacyStoredEnvironmentValue(stored);
   const parsed = parseEnvironmentValue(migrated);
+
   if (parsed?.type === "reuse") return "";
+
   return migrated;
 }
 
@@ -246,20 +274,27 @@ export function useThreadCreationOptions(
     scope = "new-thread",
     sessionOptionSelections: sessionOptionSelectionsOverride,
   } = options ?? {};
+
   const { setValue: setStoredProviderId, value: storedProviderId } =
     usePromptBoxProviderPreference();
+
   const setStoredProviderModelReasoning =
     useSetPromptBoxProviderModelReasoningPreference();
+
   const { setValue: setStoredServiceTier, value: storedServiceTier } =
     usePromptBoxServiceTierPreference();
+
   const { setValue: setStoredPermissionMode, value: storedPermissionMode } =
     usePromptBoxPermissionModePreference();
+
   const {
     setValue: setStoredEnvironmentSelectionValue,
     value: storedEnvironmentSelectionValue,
   } = usePromptBoxEnvironmentPreference(preferenceProjectId);
+
   const [rootComposeReuseValue, setRootComposeReuseValue] =
     useRootComposeReuseEnvironment();
+
   const [threadSelections, setThreadSelections] =
     useState<ThreadPromptSelections>(() =>
       getInitialThreadPromptSelections({
@@ -271,19 +306,29 @@ export function useThreadCreationOptions(
         initialServiceTier,
       }),
     );
+
   const [initialReadyProvider, setInitialReadyProvider] =
     useState<InitialReadyProviderResolution>({ status: "unresolved" });
+
   const localProviderSelectionsRef = useRef<
     Map<string, ModelReasoningSelection>
   >(new Map());
+
   const [localProvidersUsingDefaults, setLocalProvidersUsingDefaults] =
     useState<ReadonlySet<string>>(() => new Set());
+
   const touchedThreadFieldsRef = useRef<Set<ThreadPromptField>>(new Set());
+
   const threadResetKeyRef = useRef<string | number | null | undefined>(
     resetKey,
   );
+
   const usesLocalThreadSelections = scope !== "new-thread";
   const usesStoredCreateSelections = scope === "new-thread";
+
+  const [newThreadPermissionSelection, setNewThreadPermissionSelection] =
+    useState<{ key: string; value: PermissionMode } | null>(null);
+
   const nextThreadSelections = useMemo(
     () =>
       getInitialThreadPromptSelections({
@@ -303,13 +348,16 @@ export function useThreadCreationOptions(
       initialServiceTier,
     ],
   );
+
   const renderedThreadSelections = useMemo(() => {
     if (!usesLocalThreadSelections) {
       return nextThreadSelections;
     }
+
     if (threadResetKeyRef.current !== resetKey) {
       return nextThreadSelections;
     }
+
     return syncUntouchedThreadPromptSelections({
       currentSelections: threadSelections,
       nextSelections: nextThreadSelections,
@@ -325,12 +373,15 @@ export function useThreadCreationOptions(
   const selectedProviderIdBeforeReadyFallback = usesStoredCreateSelections
     ? storedProviderId || renderedThreadSelections.selectedProviderId
     : renderedThreadSelections.selectedProviderId;
+
   const rawServiceTier = usesStoredCreateSelections
     ? storedServiceTier || renderedThreadSelections.serviceTier
     : renderedThreadSelections.serviceTier;
+
   const rawPermissionMode = usesStoredCreateSelections
     ? storedPermissionMode || renderedThreadSelections.permissionMode
     : renderedThreadSelections.permissionMode;
+
   const rawEnvironmentSelectionValue =
     scope === "new-thread"
       ? (rootComposeReuseValue ??
@@ -340,7 +391,9 @@ export function useThreadCreationOptions(
   const knownModelCatalogScope = useKnownProviderModelCatalogScope(
     selectedProviderIdBeforeReadyFallback,
   );
+
   const executionOptionsQueryEnabled = enabled;
+
   const routingSelectionKey = JSON.stringify([
     scope,
     resetKey,
@@ -348,6 +401,7 @@ export function useThreadCreationOptions(
     rawEnvironmentSelectionValue,
     selectedProviderIdBeforeReadyFallback,
   ]);
+
   const [catalogRouting, setCatalogRouting] = useState(() => ({
     selectionKey: routingSelectionKey,
     routing: resolveThreadCreationProviderRouting({
@@ -358,7 +412,9 @@ export function useThreadCreationOptions(
       scope,
     }),
   }));
+
   let defaultCatalogRouting = catalogRouting.routing;
+
   if (catalogRouting.selectionKey !== routingSelectionKey) {
     defaultCatalogRouting = resolveThreadCreationProviderRouting({
       environmentId,
@@ -372,34 +428,42 @@ export function useThreadCreationOptions(
       routing: defaultCatalogRouting,
     });
   }
+
   const executionOptionsRouting = resolveProviderRouting
     ? resolveProviderRouting(rawEnvironmentSelectionValue)
     : defaultCatalogRouting;
+
   const canResolveReadyProvider =
     executionOptionsQueryEnabled &&
     scope === "new-thread" &&
     preferReadyProviderWhenUnset &&
     selectedProviderIdBeforeReadyFallback.length === 0;
+
   const shouldResolveReadyProvider =
     canResolveReadyProvider && initialReadyProvider.status === "unresolved";
+
   const providerStatesQuery = useSystemProviderStates({
     enabled: shouldResolveReadyProvider,
     ...executionOptionsRouting,
     poll: false,
   });
+
   const queriedReadyProviderId = shouldResolveReadyProvider
     ? providerStatesQuery.data?.providers.find(
         (provider) => provider.status === "ready",
       )?.providerId
     : undefined;
+
   const readyProviderId =
     initialReadyProvider.status === "resolved"
       ? (initialReadyProvider.providerId ?? undefined)
       : queriedReadyProviderId;
+
   useEffect(() => {
     if (!shouldResolveReadyProvider || providerStatesQuery.isPending) {
       return;
     }
+
     setInitialReadyProvider((current) =>
       current.status === "resolved"
         ? current
@@ -413,85 +477,154 @@ export function useThreadCreationOptions(
     queriedReadyProviderId,
     shouldResolveReadyProvider,
   ]);
+
   const rawSelectedProviderId =
     selectedProviderIdBeforeReadyFallback || readyProviderId || "";
+
   const executionOptionsProviderId = executionOptionsQueryEnabled
     ? rawSelectedProviderId || undefined
     : undefined;
+
   const executionOptionsQuery = useSystemExecutionOptions({
     enabled: executionOptionsQueryEnabled,
     ...executionOptionsRouting,
     providerId: executionOptionsProviderId,
   });
+
   const hostsQuery = useHosts();
   const systemConfig = useSystemConfig();
   const providers = executionOptionsQuery.data?.providers ?? EMPTY_PROVIDERS;
+
   const isLoadingModels =
     executionOptionsQueryEnabled &&
     (executionOptionsQuery.isLoading ||
       (executionOptionsQuery.isPlaceholderData &&
         (executionOptionsQuery.data?.models.length ?? 0) === 0));
+
   const modelLoadError =
     executionOptionsQuery.data?.modelLoadError ?? NO_MODEL_LOAD_ERROR;
+
+  const modelNotice = executionOptionsQuery.data?.modelNotice ?? null;
+
   const modelLoadFailed =
     executionOptionsQuery.isError || modelLoadError !== null;
+
   const modelCatalogIsVerified =
     executionOptionsQuery.data !== undefined &&
     !executionOptionsQuery.isPlaceholderData &&
     !executionOptionsQuery.isError &&
     modelLoadError === null;
+
   const modelCatalogIsSettled =
     !executionOptionsQueryEnabled ||
     executionOptionsQuery.isError ||
     (executionOptionsQuery.data !== undefined &&
       !executionOptionsQuery.isPlaceholderData);
+
   const permissionModeIsVerified =
     executionOptionsQuery.data !== undefined &&
     !executionOptionsQuery.isPlaceholderData &&
     !executionOptionsQuery.isError;
+
   const hasMultipleProviders = providers.length >= 2;
 
   const effectiveProviderId = useMemo(() => {
+    if (!modelCatalogIsSettled && providers.length === 0) {
+      return rawSelectedProviderId;
+    }
+
     if (
       rawSelectedProviderId &&
       providers.some((provider) => provider.id === rawSelectedProviderId)
     ) {
       return rawSelectedProviderId;
     }
+
     return providers[0]?.id ?? "";
-  }, [providers, rawSelectedProviderId]);
+  }, [modelCatalogIsSettled, providers, rawSelectedProviderId]);
 
   const { setValue: setStoredSelectedModel, value: storedSelectedModel } =
     usePromptBoxModelPreference(effectiveProviderId);
+
   const { setValue: setStoredReasoningLevel, value: storedReasoningLevel } =
     usePromptBoxReasoningLevelPreference(effectiveProviderId);
+
   const {
     setValue: setStoredSessionOptions,
     value: storedSessionOptionSelections,
   } = usePromptBoxSessionOptionsPreference(effectiveProviderId);
+
   const [localSessionOptions, setLocalSessionOptions] = useState<{
     key: string;
     selections: SessionOptionSelections;
   }>({ key: "", selections: NO_SESSION_OPTION_SELECTIONS });
+
   const localSessionOptionsKey = `${String(resetKey ?? "")}:${effectiveProviderId}`;
+
   const localSessionOptionSelections =
     localSessionOptions.key === localSessionOptionsKey
       ? localSessionOptions.selections
       : NO_SESSION_OPTION_SELECTIONS;
+
   const requestedSessionOptionSelections =
     sessionOptionSelectionsOverride ??
     (usesStoredCreateSelections
       ? storedSessionOptionSelections
       : localSessionOptionSelections);
+
+  const providerIds = useMemo(
+    () => providers.map((provider) => provider.id),
+    [providers],
+  );
+
+  const storedSessionOptionSelectionsByProvider =
+    usePromptBoxSessionOptionsPreferences(
+      usesStoredCreateSelections &&
+        sessionOptionSelectionsOverride === undefined
+        ? providerIds
+        : NO_PROVIDER_IDS,
+    );
+
+  const sessionOptionSelectionsForProvider = useCallback(
+    (providerId: string): SessionOptionSelections => {
+      if (sessionOptionSelectionsOverride !== undefined) {
+        return sessionOptionSelectionsOverride;
+      }
+
+      if (usesStoredCreateSelections) {
+        return (
+          storedSessionOptionSelectionsByProvider.get(providerId) ??
+          NO_SESSION_OPTION_SELECTIONS
+        );
+      }
+
+      return localSessionOptions.key ===
+        `${String(resetKey ?? "")}:${providerId}`
+        ? localSessionOptions.selections
+        : NO_SESSION_OPTION_SELECTIONS;
+    },
+    [
+      localSessionOptions,
+      resetKey,
+      sessionOptionSelectionsOverride,
+      storedSessionOptionSelectionsByProvider,
+      usesStoredCreateSelections,
+    ],
+  );
+
+  const hiddenModels = useModelPickerHiddenModelIds(effectiveProviderId);
+
   const effectiveProviderMatchesInitialProvider =
     effectiveProviderId.length > 0 &&
     effectiveProviderId === renderedThreadSelections.selectedProviderId;
+
   const rawSelectedModel = usesStoredCreateSelections
     ? storedSelectedModel ||
       (effectiveProviderMatchesInitialProvider
         ? renderedThreadSelections.selectedModel
         : "")
     : renderedThreadSelections.selectedModel;
+
   const preferredReasoningLevel: ReasoningLevel | undefined =
     usesStoredCreateSelections
       ? storedReasoningLevel ||
@@ -527,26 +660,40 @@ export function useThreadCreationOptions(
   );
 
   const activeProviderCapabilities = selectedProviderInfo?.capabilities;
+
   const selectedProviderComposerActions =
     selectedProviderInfo?.composerActions ?? EMPTY_COMPOSER_ACTIONS;
 
-  const allowFastServiceTier =
-    systemConfig.data?.generalSettings?.allowFastServiceTier ?? true;
+  const serviceTierSettings = systemConfig.data?.generalSettings;
+
+  const allowFastServiceTier = allowsFastServiceTier(
+    serviceTierSettings,
+    selectedProviderInfo?.id ?? "",
+  );
+
   const supportsServiceTier =
     allowFastServiceTier &&
     (activeProviderCapabilities?.supportsServiceTier ?? false);
+
   const permissionModes: readonly PermissionMode[] =
     activeProviderCapabilities?.permissionModes ??
     DEFAULT_SUPPORTED_PERMISSION_MODES;
-  const supportsPermissionModeSelection = permissionModes.length > 1;
+
+  const supportsPermissionModeSelection =
+    usesStoredCreateSelections || permissionModes.length > 1;
+
   const routedHostCeiling = useMemo(() => {
     const hosts = hostsQuery.data;
+
     if (!hosts) return null;
+
     const routedHostId =
       executionOptionsRouting.hostId ??
       selectPrimaryHost(hosts, systemConfig.data?.primaryHostId ?? null)?.id ??
       null;
+
     if (routedHostId === null) return null;
+
     return (
       hosts.find((host) => host.id === routedHostId)?.maxPermissionMode ?? null
     );
@@ -555,11 +702,14 @@ export function useThreadCreationOptions(
     hostsQuery.data,
     systemConfig.data?.primaryHostId,
   ]);
+
   const routedCeiling = executionOptionsQuery.isPlaceholderData
     ? undefined
     : executionOptionsQuery.data?.permissionCeiling;
+
   const permissionCeiling: PermissionMode =
     routedCeiling ?? routedHostCeiling ?? "full";
+
   const allowedPermissionModes = useMemo(
     () =>
       permissionModes.filter(
@@ -568,41 +718,55 @@ export function useThreadCreationOptions(
       ),
     [permissionCeiling, permissionModes],
   );
+
   const permissionModeOptions = useMemo(
     () =>
-      PERMISSION_MODE_OPTIONS.filter((option) =>
-        permissionModes.includes(option.value),
+      PERMISSION_MODE_OPTIONS.filter(
+        (option) =>
+          usesStoredCreateSelections || permissionModes.includes(option.value),
       ).map((option) =>
-        permissionModeRank(option.value) > permissionModeRank(permissionCeiling)
+        !permissionModes.includes(option.value)
           ? {
               ...option,
               disabled: true,
-              disabledReason: PERMISSION_CEILING_REASON,
+              disabledReason:
+                "This provider does not support this approval mode",
             }
-          : option,
+          : permissionModeRank(option.value) >
+              permissionModeRank(permissionCeiling)
+            ? {
+                ...option,
+                disabled: true,
+                disabledReason: PERMISSION_CEILING_REASON,
+              }
+            : option,
       ),
-    [permissionCeiling, permissionModes],
+    [permissionCeiling, permissionModes, usesStoredCreateSelections],
   );
 
   const serviceTierSupportByProvider = useMemo(() => {
     const supportByProvider: Record<string, boolean> = {};
+
     for (const provider of providers) {
       supportByProvider[provider.id] =
-        allowFastServiceTier && provider.capabilities.supportsServiceTier;
+        allowsFastServiceTier(serviceTierSettings, provider.id) &&
+        provider.capabilities.supportsServiceTier;
     }
+
     return supportByProvider;
-  }, [allowFastServiceTier, providers]);
+  }, [serviceTierSettings, providers]);
 
   const {
     selectedModel,
     activeModel,
     modelOptions,
     moreModelOptions,
+    catalogModelOptions,
     reasoningLevel,
     reasoningOptions,
     declaredSessionOptions,
     sessionOptionSelections,
-    isUnavailableModelRecovery,
+    requiresExplicitModel,
     isSessionOptionModelSwitch,
   } = useMemo(
     () =>
@@ -613,6 +777,7 @@ export function useThreadCreationOptions(
         selectedModel: rawSelectedModel,
         preferredReasoningLevel,
         sessionOptionSelections: requestedSessionOptionSelections,
+        hiddenModels,
         provider: selectedProviderInfo,
         catalogIsVerified: modelCatalogIsVerified,
         formatModelLabel,
@@ -620,6 +785,7 @@ export function useThreadCreationOptions(
     [
       executionOptionsQuery.data?.models,
       executionOptionsQuery.data?.selectedOnlyModels,
+      hiddenModels,
       modelCatalogIsVerified,
       preferredReasoningLevel,
       rawSelectedModel,
@@ -627,6 +793,7 @@ export function useThreadCreationOptions(
       selectedProviderInfo,
     ],
   );
+
   const setSessionOption = useCallback(
     (optionId: string, value: SessionOptionValue) => {
       if (usesStoredCreateSelections) {
@@ -634,8 +801,10 @@ export function useThreadCreationOptions(
           ...storedSessionOptionSelections,
           [optionId]: value,
         });
+
         return;
       }
+
       setLocalSessionOptions({
         key: localSessionOptionsKey,
         selections: { ...localSessionOptionSelections, [optionId]: value },
@@ -649,6 +818,7 @@ export function useThreadCreationOptions(
       usesStoredCreateSelections,
     ],
   );
+
   const serviceTierOptions = useMemo(
     () =>
       allowFastServiceTier
@@ -659,13 +829,16 @@ export function useThreadCreationOptions(
         : EMPTY_SERVICE_TIER_OPTIONS,
     [activeModel, allowFastServiceTier, selectedProviderInfo],
   );
+
   const serviceTier = useMemo(() => {
     if (!activeProviderCapabilities?.supportsServiceTier) {
       return undefined;
     }
+
     if (serviceTierOptions.length === 0) {
       return DEFAULT_SERVICE_TIER;
     }
+
     return rawServiceTier === undefined
       ? undefined
       : reconcileServiceTier(rawServiceTier, serviceTierOptions);
@@ -675,22 +848,55 @@ export function useThreadCreationOptions(
     serviceTierOptions,
   ]);
 
-  const permissionMode = resolvePermissionModeSelection({
-    rawPermissionMode,
-    permissionModes:
-      allowedPermissionModes.length > 0
-        ? allowedPermissionModes
-        : permissionModes,
-  });
+  const permissionSelectionKey = `${effectiveProviderId}\0${selectedModel}`;
+
+  const usesExplicitNewPermission =
+    newThreadPermissionSelection?.key === permissionSelectionKey;
+
+  const newPermissionDefault =
+    !usesStoredCreateSelections ||
+    systemConfig.data?.generalSettings === undefined
+      ? rawPermissionMode
+      : initialPermissionMode !== undefined &&
+          (initialProviderId === undefined ||
+            initialProviderId === effectiveProviderId)
+        ? initialPermissionMode
+        : newThreadPermissionMode(
+            systemConfig.data?.generalSettings,
+            effectiveProviderId,
+            selectedModel,
+          );
+
+  const permissionMode = usesStoredCreateSelections
+    ? usesExplicitNewPermission
+      ? newThreadPermissionSelection.value
+      : newPermissionDefault
+    : resolvePermissionModeSelection({
+        rawPermissionMode,
+        permissionModes:
+          allowedPermissionModes.length > 0
+            ? allowedPermissionModes
+            : permissionModes,
+      });
+
   const environmentSelectionValue = rawEnvironmentSelectionValue;
+
   const touchedFieldsPendingReset =
     usesLocalThreadSelections && threadResetKeyRef.current !== resetKey;
+
+  const fellBackFromUnofferedProvider =
+    rawSelectedProviderId.length > 0 &&
+    effectiveProviderId.length > 0 &&
+    effectiveProviderId !== rawSelectedProviderId;
+
   const effectiveInitialProviderSource: ExecutionInputFieldSource | undefined =
-    canResolveReadyProvider &&
-    readyProviderId !== undefined &&
-    effectiveProviderId === readyProviderId
+    fellBackFromUnofferedProvider ||
+    (canResolveReadyProvider &&
+      readyProviderId !== undefined &&
+      effectiveProviderId === readyProviderId)
       ? "client-preference"
       : undefined;
+
   const executionInputSources = useMemo(
     () =>
       buildExecutionInputSources({
@@ -701,8 +907,7 @@ export function useThreadCreationOptions(
           reasoningLevel,
           permissionMode,
         },
-        forceExplicitModel:
-          isUnavailableModelRecovery || isSessionOptionModelSwitch,
+        forceExplicitModel: requiresExplicitModel || isSessionOptionModelSwitch,
         initialProviderSource: effectiveInitialProviderSource,
         scope,
         storedValues: {
@@ -720,7 +925,7 @@ export function useThreadCreationOptions(
       effectiveProviderId,
       effectiveInitialProviderSource,
       isSessionOptionModelSwitch,
-      isUnavailableModelRecovery,
+      requiresExplicitModel,
       permissionMode,
       reasoningLevel,
       scope,
@@ -737,14 +942,17 @@ export function useThreadCreationOptions(
 
   useLayoutEffect(() => {
     if (!usesLocalThreadSelections) return;
+
     if (threadResetKeyRef.current !== resetKey) {
       threadResetKeyRef.current = resetKey;
       touchedThreadFieldsRef.current = new Set();
       localProviderSelectionsRef.current = new Map();
       setLocalProvidersUsingDefaults(new Set());
       setThreadSelections(nextThreadSelections);
+
       return;
     }
+
     setThreadSelections((currentSelections) =>
       syncUntouchedThreadPromptSelections({
         currentSelections,
@@ -757,30 +965,38 @@ export function useThreadCreationOptions(
   const setSelectedProviderId = useCallback(
     (value: string) => {
       touchedThreadFieldsRef.current.add("selectedProviderId");
+
       if (usesStoredCreateSelections) {
         if (effectiveProviderId.length > 0) {
           setStoredSelectedModel(selectedModel);
           setStoredReasoningLevel(reasoningLevel);
         }
+
         setStoredProviderId(value);
+
         return;
       }
+
       touchedThreadFieldsRef.current.add("selectedModel");
       touchedThreadFieldsRef.current.add("reasoningLevel");
+
       if (effectiveProviderId.length > 0) {
         localProviderSelectionsRef.current.set(effectiveProviderId, {
           model: selectedModel,
           reasoningLevel,
         });
       }
+
       const rememberedSelection = localProviderSelectionsRef.current.get(value);
       setLocalProvidersUsingDefaults((current) => {
         const next = new Set(current);
+
         if (rememberedSelection) {
           next.delete(value);
         } else {
           next.add(value);
         }
+
         return next;
       });
       setThreadSelections((currentSelections) => ({
@@ -808,10 +1024,20 @@ export function useThreadCreationOptions(
       providerId,
       model,
       reasoningLevel: nextReasoningLevel,
-    }: ProviderModelReasoningSelection) => {
+      serviceTier: nextServiceTier,
+    }: ModelPickerSelection) => {
+      const writesServiceTier =
+        nextServiceTier !== undefined &&
+        serviceTierSupportByProvider[providerId] === true;
+
       touchedThreadFieldsRef.current.add("selectedProviderId");
       touchedThreadFieldsRef.current.add("selectedModel");
       touchedThreadFieldsRef.current.add("reasoningLevel");
+
+      if (writesServiceTier) {
+        touchedThreadFieldsRef.current.add("serviceTier");
+      }
+
       if (usesStoredCreateSelections) {
         if (
           effectiveProviderId.length > 0 &&
@@ -820,14 +1046,19 @@ export function useThreadCreationOptions(
           setStoredSelectedModel(selectedModel);
           setStoredReasoningLevel(reasoningLevel);
         }
+
         setStoredProviderModelReasoning({
           providerId,
           model,
           reasoningLevel: nextReasoningLevel,
         });
         setStoredProviderId(providerId);
+
+        if (writesServiceTier) setStoredServiceTier(nextServiceTier);
+
         return;
       }
+
       if (
         effectiveProviderId.length > 0 &&
         effectiveProviderId !== providerId
@@ -837,6 +1068,7 @@ export function useThreadCreationOptions(
           reasoningLevel,
         });
       }
+
       localProviderSelectionsRef.current.set(providerId, {
         model,
         reasoningLevel: nextReasoningLevel,
@@ -845,6 +1077,7 @@ export function useThreadCreationOptions(
         if (!current.has(providerId)) return current;
         const next = new Set(current);
         next.delete(providerId);
+
         return next;
       });
       setThreadSelections((currentSelections) => ({
@@ -852,16 +1085,19 @@ export function useThreadCreationOptions(
         selectedProviderId: providerId,
         selectedModel: model,
         reasoningLevel: nextReasoningLevel,
+        ...(writesServiceTier ? { serviceTier: nextServiceTier } : {}),
       }));
     },
     [
       effectiveProviderId,
       reasoningLevel,
       selectedModel,
+      serviceTierSupportByProvider,
       setStoredProviderId,
       setStoredProviderModelReasoning,
       setStoredReasoningLevel,
       setStoredSelectedModel,
+      setStoredServiceTier,
       usesStoredCreateSelections,
     ],
   );
@@ -869,6 +1105,7 @@ export function useThreadCreationOptions(
   const setSelectedModel = useCallback(
     (value: string) => {
       touchedThreadFieldsRef.current.add("selectedModel");
+
       const nextModel =
         executionOptionsQuery.data?.models.find(
           (model) => model.model === value,
@@ -876,22 +1113,27 @@ export function useThreadCreationOptions(
         executionOptionsQuery.data?.selectedOnlyModels.find(
           (model) => model.model === value,
         );
+
       const nextReasoningLevel = resolveModelReasoningLevel(
         nextModel,
         reasoningLevel,
       );
+
       if (usesStoredCreateSelections) {
         setStoredProviderModelReasoning({
           providerId: effectiveProviderId,
           model: value,
           reasoningLevel: nextReasoningLevel,
         });
+
         return;
       }
+
       setLocalProvidersUsingDefaults((current) => {
         if (!current.has(effectiveProviderId)) return current;
         const next = new Set(current);
         next.delete(effectiveProviderId);
+
         return next;
       });
       localProviderSelectionsRef.current.set(effectiveProviderId, {
@@ -913,13 +1155,17 @@ export function useThreadCreationOptions(
       usesStoredCreateSelections,
     ],
   );
+
   const setServiceTier = useCallback(
     (value: ServiceTier | undefined) => {
       touchedThreadFieldsRef.current.add("serviceTier");
+
       if (usesStoredCreateSelections) {
         setStoredServiceTier(value ?? "");
+
         return;
       }
+
       setThreadSelections((currentSelections) =>
         updateThreadPromptSelections({
           currentSelections,
@@ -930,17 +1176,22 @@ export function useThreadCreationOptions(
     },
     [setStoredServiceTier, usesStoredCreateSelections],
   );
+
   const setReasoningLevel = useCallback(
     (value: ReasoningLevel) => {
       touchedThreadFieldsRef.current.add("reasoningLevel");
+
       if (usesStoredCreateSelections) {
         setStoredReasoningLevel(value);
+
         return;
       }
+
       setLocalProvidersUsingDefaults((current) => {
         if (!current.has(effectiveProviderId)) return current;
         const next = new Set(current);
         next.delete(effectiveProviderId);
+
         return next;
       });
       localProviderSelectionsRef.current.set(effectiveProviderId, {
@@ -962,13 +1213,18 @@ export function useThreadCreationOptions(
       usesStoredCreateSelections,
     ],
   );
+
   const setPermissionMode = useCallback(
     (value: PermissionMode) => {
       touchedThreadFieldsRef.current.add("permissionMode");
+
       if (usesStoredCreateSelections) {
+        setNewThreadPermissionSelection({ key: permissionSelectionKey, value });
         setStoredPermissionMode(value);
+
         return;
       }
+
       setThreadSelections((currentSelections) =>
         updateThreadPromptSelections({
           currentSelections,
@@ -977,20 +1233,30 @@ export function useThreadCreationOptions(
         }),
       );
     },
-    [setStoredPermissionMode, usesStoredCreateSelections],
+    [
+      permissionSelectionKey,
+      setStoredPermissionMode,
+      usesStoredCreateSelections,
+    ],
   );
+
   const setEnvironmentSelectionValue = useCallback(
     (value: string) => {
       if (scope === "new-thread") {
         const parsed = parseEnvironmentValue(value);
+
         if (parsed?.type === "reuse") {
           setRootComposeReuseValue(value);
+
           return;
         }
+
         setRootComposeReuseValue(null);
         setStoredEnvironmentSelectionValue(value);
+
         return;
       }
+
       touchedThreadFieldsRef.current.add("environmentSelectionValue");
       setThreadSelections((currentSelections) =>
         updateThreadPromptSelections({
@@ -1002,6 +1268,7 @@ export function useThreadCreationOptions(
     },
     [scope, setRootComposeReuseValue, setStoredEnvironmentSelectionValue],
   );
+
   const clearReuseEnvironment = useCallback(() => {
     if (scope !== "new-thread") return;
     setRootComposeReuseValue(null);
@@ -1032,14 +1299,17 @@ export function useThreadCreationOptions(
     activeModel,
     modelOptions,
     moreModelOptions,
+    catalogModelOptions,
     isLoadingModels,
     modelLoadFailed,
     modelLoadError,
+    modelNotice,
     modelCatalogIsVerified,
     modelCatalogIsSettled,
     reasoningOptions,
     declaredSessionOptions,
     sessionOptionSelections,
+    sessionOptionSelectionsForProvider,
     setSessionOption,
     permissionModeOptions,
     supportsPermissionModeSelection,

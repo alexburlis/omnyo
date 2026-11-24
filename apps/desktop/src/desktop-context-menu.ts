@@ -12,6 +12,9 @@ export interface DesktopContextMenuWebContents {
     eventName: "context-menu",
     listener: (event: Event, params: ContextMenuParams) => void,
   ): void;
+  downloadURL(url: string): void;
+  copyImageAt(x: number, y: number): void;
+  isDestroyed(): boolean;
   replaceMisspelling(text: string): void;
   session: Pick<
     Session,
@@ -28,7 +31,11 @@ interface BuildDesktopContextMenuTemplateArgs {
   params: ContextMenuParams;
   webContents: Pick<
     DesktopContextMenuWebContents,
-    "replaceMisspelling" | "session"
+    | "replaceMisspelling"
+    | "session"
+    | "downloadURL"
+    | "copyImageAt"
+    | "isDestroyed"
   >;
 }
 
@@ -40,9 +47,11 @@ function pushSeparatorIfNeeded(template: MenuItemConstructorOptions[]): void {
   if (template.length === 0) {
     return;
   }
+
   if (template.at(-1)?.type === "separator") {
     return;
   }
+
   template.push({ type: "separator" });
 }
 
@@ -52,6 +61,7 @@ function trimTrailingSeparator(
   if (template.at(-1)?.type !== "separator") {
     return template;
   }
+
   return template.slice(0, -1);
 }
 
@@ -61,10 +71,27 @@ function getSpellcheckContextFromParams(
   if (!params.isEditable || params.misspelledWord.length === 0) {
     return null;
   }
+
   return {
     dictionarySuggestions: params.dictionarySuggestions,
     misspelledWord: params.misspelledWord,
   };
+}
+
+function canDownloadContextUrl(url: string, isImage: boolean): boolean {
+  try {
+    const { protocol } = new URL(url);
+
+    return (
+      protocol === "http:" ||
+      protocol === "https:" ||
+      (isImage &&
+        (protocol === "blob:" ||
+          (protocol === "data:" && /^data:image\//iu.test(url))))
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function buildDesktopContextMenuTemplate({
@@ -90,12 +117,40 @@ export function buildDesktopContextMenuTemplate({
         enabled: false,
       });
     }
+
     template.push({
       label: `Add "${spellcheckContext.misspelledWord}" to Dictionary`,
       click: () => {
         webContents.session.addWordToSpellCheckerDictionary(
           spellcheckContext.misspelledWord,
         );
+      },
+    });
+    pushSeparatorIfNeeded(template);
+  }
+
+  if (
+    params.mediaType === "image" &&
+    params.hasImageContents &&
+    params.srcURL.length > 0
+  ) {
+    if (canDownloadContextUrl(params.srcURL, true)) {
+      template.push({
+        label: "Save Image As…",
+        click: () => {
+          if (!webContents.isDestroyed()) {
+            webContents.downloadURL(params.srcURL);
+          }
+        },
+      });
+    }
+
+    template.push({
+      label: "Copy Image",
+      click: () => {
+        if (!webContents.isDestroyed()) {
+          webContents.copyImageAt(params.x, params.y);
+        }
       },
     });
     pushSeparatorIfNeeded(template);
@@ -108,6 +163,18 @@ export function buildDesktopContextMenuTemplate({
         clipboard.writeText(params.linkURL);
       },
     });
+
+    if (canDownloadContextUrl(params.linkURL, false)) {
+      template.push({
+        label: "Save Link As…",
+        click: () => {
+          if (!webContents.isDestroyed()) {
+            webContents.downloadURL(params.linkURL);
+          }
+        },
+      });
+    }
+
     pushSeparatorIfNeeded(template);
   }
 
@@ -124,12 +191,14 @@ export function buildDesktopContextMenuTemplate({
       { type: "separator" },
       { role: "selectAll", enabled: editFlags.canSelectAll },
     );
+
     return trimTrailingSeparator(template);
   }
 
   if (params.selectionText.length > 0 && params.editFlags.canCopy) {
     template.push({ role: "copy", enabled: true });
   }
+
   if (params.editFlags.canSelectAll) {
     template.push({ role: "selectAll", enabled: true });
   }
@@ -147,9 +216,11 @@ function showDesktopContextMenu({
     params,
     webContents,
   });
+
   if (template.length === 0) {
     return;
   }
+
   Menu.buildFromTemplate(template).popup();
 }
 

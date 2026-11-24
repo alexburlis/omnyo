@@ -11,8 +11,12 @@ import {
 const roots: string[] = [];
 
 async function makeRoot(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bb-path-mutations-"));
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "omnyo-path-mutations-"),
+  );
+
   roots.push(root);
+
   return root;
 }
 

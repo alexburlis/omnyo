@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import {
-  formatBbAppConfigPath,
-  parseBbAppManagedConfig,
-} from "@bb/config/bb-app-managed-config";
-import { mutateManagedJsonFile } from "@bb/config/managed-json-file";
+  formatAppConfigPath,
+  parseAppManagedConfig,
+} from "@omnyo/config/managed-app-config";
+import { mutateManagedJsonFile } from "@omnyo/config/managed-json-file";
 import { isFileNotFoundError } from "./fs.js";
 
 const MACHINE_CONNECTION_KEYS = [
@@ -33,19 +33,24 @@ async function readManagedConfigObject(
   path: string,
 ): Promise<Record<string, unknown>> {
   let raw: string;
+
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
     if (isFileNotFoundError(error)) {
       return {};
     }
+
     throw error;
   }
+
   const parsed: unknown = JSON.parse(raw);
-  parseBbAppManagedConfig(parsed);
+  parseAppManagedConfig(parsed);
+
   if (!isJsonObject(parsed)) {
-    throw new Error(`Invalid bb-app config at ${path}`);
+    throw new Error(`Invalid omnyo-app config at ${path}`);
   }
+
   return parsed;
 }
 
@@ -53,13 +58,14 @@ async function updateManagedConfig(
   dataDir: string,
   update: (current: Record<string, unknown>) => Record<string, unknown>,
 ): Promise<void> {
-  const path = formatBbAppConfigPath(dataDir);
+  const path = formatAppConfigPath(dataDir);
   await mutateManagedJsonFile({
     path,
     read: () => readManagedConfigObject(path),
     mutate: (current) => {
       const next = update(current);
-      parseBbAppManagedConfig(next);
+      parseAppManagedConfig(next);
+
       return next;
     },
   });
@@ -73,15 +79,19 @@ export async function rewriteManagedConfigServer(
       ...current,
       serverUrl: args.serverUrl,
     };
+
     if (args.headers === null) {
       return next;
     }
+
     for (const key of MACHINE_CREDENTIAL_KEYS) {
       delete next[key];
     }
+
     if (Object.keys(args.headers).length > 0) {
       next.serverHeaders = { ...args.headers };
     }
+
     return next;
   });
 }
@@ -93,6 +103,7 @@ export async function restoreMachineConnectionConfig(args: {
   const backup = await readManagedConfigObject(args.backupConfigPath);
   await updateManagedConfig(args.dataDir, (current) => {
     const next: Record<string, unknown> = { ...current };
+
     for (const key of MACHINE_CONNECTION_KEYS) {
       if (key in backup) {
         next[key] = backup[key];
@@ -100,6 +111,7 @@ export async function restoreMachineConnectionConfig(args: {
         delete next[key];
       }
     }
+
     return next;
   });
 }
@@ -113,9 +125,11 @@ export async function switchConfigToLocalServer(args: {
       ...current,
       serverUrl: args.serverUrl,
     };
+
     for (const key of MACHINE_CREDENTIAL_KEYS) {
       delete next[key];
     }
+
     return next;
   });
 }

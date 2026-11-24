@@ -13,6 +13,7 @@ interface BuildWindowsTerminalOpenInvocationArgs extends BuildWindowsOpenInvocat
 }
 
 const OPEN_PATH_VARIABLE = "WORKSPACE_OPEN_TARGET_PATH";
+
 const OPEN_PATH = `$env:${OPEN_PATH_VARIABLE}`;
 
 function environmentValue(
@@ -22,9 +23,11 @@ function environmentValue(
   if (env === undefined) {
     return undefined;
   }
+
   const key = Object.keys(env).find(
     (candidate) => candidate.toUpperCase() === name.toUpperCase(),
   );
+
   return key === undefined ? undefined : env[key];
 }
 
@@ -32,6 +35,7 @@ export function resolveWindowsPowerShellPath(
   env: NodeJS.ProcessEnv | undefined,
 ): string {
   const systemRoot = environmentValue(env, "SystemRoot");
+
   return systemRoot === undefined || systemRoot.length === 0
     ? "powershell.exe"
     : path.win32.join(
@@ -70,7 +74,7 @@ export function buildWindowsFileManagerOpenInvocation(
 ): ExecFileInvocation {
   return buildPowerShellInvocation(
     args,
-    args.existingPath.path,
+    path.win32.normalize(args.existingPath.path),
     args.existingPath.type === "file"
       ? `Start-Process -FilePath explorer.exe -ArgumentList ('/select,"' + ${OPEN_PATH} + '"')`
       : `Invoke-Item -LiteralPath ${OPEN_PATH}`,
@@ -84,6 +88,7 @@ export function buildWindowsTerminalOpenInvocation(
     args.existingPath.type === "file"
       ? path.win32.dirname(args.existingPath.path)
       : args.existingPath.path;
+
   return buildPowerShellInvocation(
     args,
     directory,

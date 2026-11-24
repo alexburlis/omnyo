@@ -15,7 +15,7 @@ import {
   type PendingInteractionApprovalDecision,
   type PendingInteractionApprovalSubject,
   type PendingInteractionCreate,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   cleanup,
   createApprovalResolution,
@@ -39,6 +39,7 @@ function describePendingInteractionPayload(
   if (isApprovalPendingInteractionPayload(request.payload)) {
     return request.payload.subject.kind;
   }
+
   return request.payload.kind;
 }
 
@@ -73,11 +74,13 @@ describe("interactive request scenarios", () => {
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "claude-code",
         preset: "full",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -113,13 +116,16 @@ describe("interactive request scenarios", () => {
   }, 60_000);
 
   it.concurrent("routes Claude Read prompts as semantic permission-grant approvals", async () => {
-    const outsideDir = mkdtempSync(join(tmpdir(), "bb-claude-read-"));
+    const outsideDir = mkdtempSync(join(tmpdir(), "omnyo-claude-read-"));
+
     const filePath = join(
       outsideDir,
       createTempFileName("claude-read-approval"),
     );
+
     const firstLineToken = createToken("CLAUDE_READ_APPROVED");
     writeFileSync(filePath, `${firstLineToken}\nsecond line\n`);
+
     const ctx = createTestRuntime("claude-code", {
       onInteractiveRequest: async (request) => {
         if (
@@ -140,11 +146,13 @@ describe("interactive request scenarios", () => {
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "claude-code",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -208,11 +216,13 @@ describe("interactive request scenarios", () => {
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "claude-code",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -260,11 +270,13 @@ describe("interactive request scenarios", () => {
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "claude-code",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -305,20 +317,24 @@ describe("interactive request scenarios", () => {
 
   it.concurrent("blocks Claude workspace-write outside-workspace Bash without interactive requests when escalation is deny", async () => {
     const ctx = createTestRuntime("claude-code");
-    const outsideDir = mkdtempSync(join(tmpdir(), "bb-claude-outside-"));
+    const outsideDir = mkdtempSync(join(tmpdir(), "omnyo-claude-outside-"));
+
     const filePath = join(
       outsideDir,
       createTempFileName("claude-outside-bash-denied"),
     );
+
     const token = createToken("CLAUDE_WORKSPACE_BASH_DENIED");
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "claude-code",
         preset: "accept-edits-deny",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -366,11 +382,13 @@ describe("interactive request scenarios", () => {
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "codex",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -413,20 +431,27 @@ describe("interactive request scenarios", () => {
     const ctx = createTestRuntime("codex", {
       onInteractiveRequest: createApprovalResolution,
     });
-    const outsideDir = mkdtempSync(join(process.cwd(), ".bb-codex-outside-"));
+
+    const outsideDir = mkdtempSync(
+      join(process.cwd(), ".omnyo-codex-outside-"),
+    );
+
     const filePath = join(
       outsideDir,
       createTempFileName("codex-outside-write"),
     );
+
     const token = createToken("CODEX_WORKSPACE_WRITE_ESCALATED");
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "codex",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -481,11 +506,13 @@ describe("interactive request scenarios", () => {
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "codex",
         preset: "auto-deny",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -528,20 +555,24 @@ describe("interactive request scenarios", () => {
     const ctx = createTestRuntime("codex", {
       onInteractiveRequest: createApprovalResolution,
     });
+
     const outsideDir = mkdtempSync(
-      join(process.cwd(), ".bb-codex-file-change-"),
+      join(process.cwd(), ".omnyo-codex-file-change-"),
     );
+
     const fileName = createTempFileName("codex-outside-file-change");
     const filePath = join(outsideDir, fileName);
     const token = createToken("CODEX_FILE_CHANGE_APPROVED");
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "codex",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -586,21 +617,25 @@ describe("interactive request scenarios", () => {
             hasApprovalSubjectKind(request, "command")) &&
           hasAvailableApprovalDecision(request, "allow_once"),
       );
+
       expect(
         editApproval,
         `Expected a Codex edit approval; got ${JSON.stringify(
           ctx.interactiveRequests.map((request) => request.payload),
         )}`,
       ).toBeDefined();
+
       if (
         !editApproval ||
         !isApprovalPendingInteractionPayload(editApproval.payload)
       ) {
         throw new Error("Expected a semantic edit approval");
       }
+
       const subject = editApproval.payload.subject;
       expect(subject.itemId).toEqual(expect.any(String));
       expect(editApproval.payload.availableDecisions).toContain("allow_once");
+
       if (subject.kind === "file_change") {
         expect(subject.writeScope).not.toBeUndefined();
         expect(subject.sessionGrant).not.toBeUndefined();
@@ -616,6 +651,7 @@ describe("interactive request scenarios", () => {
       } else {
         throw new Error("Unexpected edit approval kind");
       }
+
       expect(readFileSync(filePath, "utf8").trimEnd()).toBe(token);
     } finally {
       await ctx.runtime.shutdown();
@@ -635,28 +671,34 @@ describe("interactive request scenarios", () => {
             `Expected command approval, got ${describePendingInteractionPayload(request)}`,
           );
         }
+
         if (!request.payload.availableDecisions.includes("deny")) {
           throw new Error("Codex command approval did not offer deny");
         }
+
         return {
           decision: "deny",
         };
       },
     });
+
     const outsideDir = mkdtempSync(
-      join(process.cwd(), ".bb-codex-user-denied-"),
+      join(process.cwd(), ".omnyo-codex-user-denied-"),
     );
+
     const fileName = createTempFileName("codex-user-denied");
     const filePath = join(outsideDir, fileName);
     const token = createToken("CODEX_OUTSIDE_USER_DENIED");
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "codex",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -720,18 +762,21 @@ describe("interactive request scenarios", () => {
     const ctx = createTestRuntime("claude-code", {
       onInteractiveRequest: createApprovalResolution,
     });
-    const outsideDir = mkdtempSync(join(process.cwd(), ".bb-claude-bash-"));
+
+    const outsideDir = mkdtempSync(join(process.cwd(), ".omnyo-claude-bash-"));
     const fileName = "note.txt";
     const filePath = join(outsideDir, fileName);
     const token = "sample text";
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "claude-code",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -775,7 +820,9 @@ describe("interactive request scenarios", () => {
           hasAvailableApprovalDecision(request, "allow_once") &&
           hasAvailableApprovalDecision(request, "deny"),
       );
+
       expect(commandApproval).toBeDefined();
+
       if (
         !commandApproval ||
         !isApprovalPendingInteractionPayload(commandApproval.payload) ||
@@ -783,6 +830,7 @@ describe("interactive request scenarios", () => {
       ) {
         throw new Error("Expected a semantic command approval");
       }
+
       expect(commandApproval.payload.subject.actions).toContainEqual({
         type: "unknown",
         command: expect.stringContaining("printf"),
@@ -800,18 +848,21 @@ describe("interactive request scenarios", () => {
     const ctx = createTestRuntime("claude-code", {
       onInteractiveRequest: createApprovalResolution,
     });
-    const outsideDir = mkdtempSync(join(process.cwd(), ".bb-claude-write-"));
+
+    const outsideDir = mkdtempSync(join(process.cwd(), ".omnyo-claude-write-"));
     const fileName = createTempFileName("claude-write-tool");
     const filePath = join(outsideDir, fileName);
     const token = createToken("CLAUDE_OUTSIDE_WRITE_TOOL_APPROVED");
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "claude-code",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -856,7 +907,9 @@ describe("interactive request scenarios", () => {
           hasAvailableApprovalDecision(request, "allow_once") &&
           hasAvailableApprovalDecision(request, "deny"),
       );
+
       expect(fileChangeApproval).toBeDefined();
+
       if (
         !fileChangeApproval ||
         !isApprovalPendingInteractionPayload(fileChangeApproval.payload) ||
@@ -864,6 +917,7 @@ describe("interactive request scenarios", () => {
       ) {
         throw new Error("Expected a semantic file-change approval");
       }
+
       expect(fileChangeApproval.payload.subject.sessionGrant).toEqual({
         network: null,
         fileSystem: {
@@ -883,15 +937,18 @@ describe("interactive request scenarios", () => {
     const ctx = createTestRuntime("claude-code", {
       onInteractiveRequest: createApprovalResolution,
     });
+
     const fetchUrl = "https://example.com";
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "claude-code",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -938,6 +995,7 @@ describe("interactive request scenarios", () => {
           ) {
             return false;
           }
+
           return (
             request.payload.subject.toolName === "WebFetch" &&
             request.payload.availableDecisions.includes("allow_for_session")
@@ -989,18 +1047,24 @@ describe("interactive request scenarios", () => {
         };
       },
     });
-    const outsideDir = mkdtempSync(join(process.cwd(), ".bb-claude-denied-"));
+
+    const outsideDir = mkdtempSync(
+      join(process.cwd(), ".omnyo-claude-denied-"),
+    );
+
     const fileName = createTempFileName("claude-user-denied");
     const filePath = join(outsideDir, fileName);
     const token = createToken("CLAUDE_OUTSIDE_USER_DENIED");
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "claude-code",
         preset: "accept-edits-ask",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -1061,11 +1125,13 @@ describe("interactive request scenarios", () => {
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx,
         providerId: "claude-code",
         preset: "auto-deny",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,

@@ -27,6 +27,7 @@ export const providerNativeSkillRootsSchema = z
     project: uniqueProviderSkillRootPathsSchema.default([]),
   })
   .strict();
+
 export type ProviderNativeSkillRoots = z.infer<
   typeof providerNativeSkillRootsSchema
 >;
@@ -46,6 +47,7 @@ export const acpReasoningCliSchema = z
   .strict()
   .superRefine((reasoningCli, context) => {
     const supportedLevels = new Set(reasoningCli.supportedLevels);
+
     if (supportedLevels.size !== reasoningCli.supportedLevels.length) {
       context.addIssue({
         code: "custom",
@@ -53,6 +55,7 @@ export const acpReasoningCliSchema = z
         path: ["supportedLevels"],
       });
     }
+
     if (
       reasoningCli.defaultLevel !== undefined &&
       !supportedLevels.has(reasoningCli.defaultLevel)
@@ -75,6 +78,7 @@ export const acpNativeReasoningSchema = z
   .strict()
   .superRefine((nativeReasoning, context) => {
     const supportedLevels = new Set(nativeReasoning.supportedLevels);
+
     if (supportedLevels.size !== nativeReasoning.supportedLevels.length) {
       context.addIssue({
         code: "custom",
@@ -82,6 +86,7 @@ export const acpNativeReasoningSchema = z
         path: ["supportedLevels"],
       });
     }
+
     if (
       nativeReasoning.defaultLevel !== undefined &&
       !supportedLevels.has(nativeReasoning.defaultLevel)

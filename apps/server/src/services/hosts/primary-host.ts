@@ -1,19 +1,15 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { getHost } from "@bb/db";
-import { HOST_ID_FILE_NAME } from "@bb/host-daemon-contract";
+import { getHost } from "@omnyo/db";
 import { ApiError } from "../../errors.js";
 import type { AppDeps } from "../../types.js";
 import {
   requireConnectedHostSession,
   requireNonDestroyedHostWithStatus,
 } from "../lib/entity-lookup.js";
+import { readPrimaryHostIdFromDataDir } from "./primary-host-id.js";
+
+export { readPrimaryHostIdFromDataDir };
 
 type PrimaryHostDeps = Pick<AppDeps, "config" | "db" | "hub">;
-
-interface ReadPrimaryHostIdArgs {
-  dataDir: string;
-}
 
 interface AssertUsableHostIdArgs {
   hostId: string;
@@ -25,20 +21,6 @@ function primaryHostUnavailableError(): ApiError {
     "host_unavailable",
     "Local host daemon is not initialized",
   );
-}
-
-export function readPrimaryHostIdFromDataDir(
-  args: ReadPrimaryHostIdArgs,
-): string | null {
-  try {
-    const value = readFileSync(
-      join(args.dataDir, HOST_ID_FILE_NAME),
-      "utf8",
-    ).trim();
-    return value.length > 0 ? value : null;
-  } catch {
-    return null;
-  }
 }
 
 export function isServerMachineHost(
@@ -54,16 +36,20 @@ export function resolvePrimaryHostId(deps: PrimaryHostDeps): string | null {
   const configured = readPrimaryHostIdFromDataDir({
     dataDir: deps.config.dataDir,
   });
+
   const configuredHost =
     configured === null ? null : getHost(deps.db, configured);
+
   return configuredHost?.destroyedAt === null ? configuredHost.id : null;
 }
 
 export function requirePrimaryHostId(deps: PrimaryHostDeps): string {
   const hostId = resolvePrimaryHostId(deps);
+
   if (!hostId) {
     throw primaryHostUnavailableError();
   }
+
   return hostId;
 }
 
@@ -78,5 +64,6 @@ export function requireConnectedPrimaryHostId(deps: PrimaryHostDeps): string {
   const hostId = requirePrimaryHostId(deps);
   requireNonDestroyedHostWithStatus(deps, hostId);
   requireConnectedHostSession(deps, hostId);
+
   return hostId;
 }

@@ -1,10 +1,14 @@
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { ShowcaseExampleCard } from "@/components/showcase-hero/ShowcaseArchetypeCards";
 import {
   BROWSE_ARCHETYPES,
   UTILITY_EXAMPLES,
   briefPrompt,
 } from "./browse-hero-archetypes";
+
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 export function BrowseArchetypeCards({
   onCreate,
@@ -29,16 +33,16 @@ export function BrowseArchetypeCards({
             />
           ))}
         </div>
-        <h4 className="mt-5 text-2xs font-medium text-subtle-foreground">
+        <h3 className="mt-5 text-xs font-medium text-subtle-foreground">
           Explore plugin capabilities
-        </h4>
+        </h3>
         <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-2">
           {UTILITY_EXAMPLES.map((example) => (
             <ShowcaseExampleCard
               key={example.id}
               icon={example.icon}
               title={example.label}
-              description={example.brief}
+              description={sentenceCase(example.brief)}
               tooltip={briefPrompt(example)}
               onClick={() => onCreate(briefPrompt(example))}
             />

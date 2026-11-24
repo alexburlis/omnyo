@@ -1,7 +1,7 @@
 import { Command } from "commander";
-import { threadPaneActionSchema } from "@bb/server-contract";
+import { threadPaneActionSchema } from "@omnyo/server-contract";
 import { action } from "../../action.js";
-import { createCliBbSdk } from "../../client.js";
+import { createCliOmnyoSdk } from "../../client.js";
 import {
   resolveContextThreadId,
   resolveExplicitIdFlag,
@@ -21,15 +21,19 @@ function resolveThreadPaneTarget(id: string | undefined): ResolvedId {
     flagName: "<threadId> argument",
     value: id,
   });
+
   if (explicit !== undefined) {
     return { id: explicit, source: "arg" };
   }
+
   const context = resolveContextThreadId();
+
   if (context !== undefined) {
     return { id: context, source: "env" };
   }
+
   throw new Error(
-    "Missing thread ID. Pass <threadId> or run inside a BB thread.",
+    "Missing thread ID. Pass <threadId> or run inside an Omnyo thread.",
   );
 }
 
@@ -39,13 +43,13 @@ export function registerPaneCommand(
 ): void {
   parent
     .command("pane")
-    .description("Control an open thread pane in connected BB apps")
+    .description("Control an open thread pane in connected Omnyo apps")
     .usage("<maximize|restore|toggle|spotlight|clear-spotlight> [id] [options]")
     .argument(
       "<action>",
       "Pane action: maximize, restore, toggle, spotlight, or clear-spotlight",
     )
-    .argument("[id]", "Thread ID. Omit inside a BB thread.")
+    .argument("[id]", "Thread ID. Omit inside an Omnyo thread.")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(
@@ -56,10 +60,12 @@ export function registerPaneCommand(
         ) => {
           const paneAction = threadPaneActionSchema.parse(actionInput);
           const target = resolveThreadPaneTarget(id);
-          const result = await createCliBbSdk(getUrl()).threads.paneAction({
+
+          const result = await createCliOmnyoSdk(getUrl()).threads.paneAction({
             action: paneAction,
             threadId: target.id,
           });
+
           if (
             outputJson(opts, {
               threadId: target.id,
@@ -69,6 +75,7 @@ export function registerPaneCommand(
           ) {
             return;
           }
+
           printThreadContextLabel(target);
           console.log(`Thread: ${target.id}`);
           console.log(`Pane action: ${paneAction}`);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ThreadTimelinePendingTodos } from "@bb/domain";
+import type { ThreadTimelinePendingTodos } from "@omnyo/domain";
 import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
 import { ResponsiveStage } from "./banner-story-stages";
 import { ThreadTodoCard } from "./ThreadTodoCard";
@@ -29,7 +29,7 @@ const mixedTodos: ThreadTimelinePendingTodos = {
     },
     {
       id: "todo:4",
-      text: "Surface pendingTodos in `bb thread show` and `bb status`",
+      text: "Surface pendingTodos in `omnyo thread show` and `omnyo status`",
       status: "pending",
     },
     {
@@ -65,6 +65,7 @@ function ToggleableTodoCard({
   initiallyExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(initiallyExpanded);
+
   return (
     <ThreadTodoCard
       pendingTodos={pendingTodos}

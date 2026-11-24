@@ -7,6 +7,7 @@ export function splitWidthLimits(
 ) {
   const total = leadingMinimum + trailingMinimum;
   const available = Math.max(width, total);
+
   return {
     min: leadingMinimum / available,
     max: 1 - trailingMinimum / available,

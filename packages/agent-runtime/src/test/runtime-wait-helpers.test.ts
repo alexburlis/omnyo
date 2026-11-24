@@ -10,6 +10,7 @@ describe("waitForRuntimeConditionUnsafe", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     let ready = false;
+
     const waiting = expect(
       waitForRuntimeConditionUnsafe(() => ready, {
         label: "ready state",

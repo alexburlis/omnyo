@@ -4,16 +4,19 @@ import type {
   ThreadSectionMutationResponse,
   ThreadSectionResponse,
   UpdateThreadSectionRequest,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   threadSectionMutationResponseSchema,
   threadSectionSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 export type ThreadSectionCreateResult = ThreadSectionResponse;
+
 export type ThreadSectionUpdateResult = ThreadSectionMutationResponse;
+
 export type ThreadSectionDeleteResult = ThreadSectionMutationResponse;
+
 export type ThreadSectionListResult = ThreadSectionResponse[];
 
 export interface ThreadSectionListArgs {
@@ -31,17 +34,20 @@ export function createThreadSectionsArea(
   args: CreateSdkAreaArgs,
 ): ThreadSectionsArea {
   const { transport } = args;
+
   return {
     async create(input) {
       const body = await transport.readJson(
         transport.api.v1["thread-sections"].$post({ json: input }),
       );
+
       return threadSectionSchema.parse(body);
     },
     async delete(input) {
       const body = await transport.readJson(
         transport.api.v1["thread-sections"].$delete({ json: input }),
       );
+
       return threadSectionMutationResponseSchema.parse(body);
     },
     async list(input) {
@@ -51,12 +57,14 @@ export function createThreadSectionsArea(
           ...signalRequestArgs(input?.signal),
         ),
       );
+
       return threadSectionSchema.array().parse(body);
     },
     async update(input) {
       const body = await transport.readJson(
         transport.api.v1["thread-sections"].$patch({ json: input }),
       );
+
       return threadSectionMutationResponseSchema.parse(body);
     },
   };

@@ -18,9 +18,13 @@ export function resolveSectionDropTargetState(
   parentKey: string | undefined,
 ): SidebarSectionDropState | null {
   if (parentKey === undefined || !sectionDnd) return null;
+
   if (sectionDnd.activeThread === null) return null;
+
   if (sectionDnd.dragOverParentKey === parentKey) return "active";
+
   if (sectionDnd.unchangedParentKey === parentKey) return "unchanged";
+
   return null;
 }
 
@@ -42,7 +46,7 @@ export function SectionDropTargetOverlay({
     <span
       aria-hidden="true"
       data-sidebar-drop-target-overlay=""
-      className={SECTION_DROP_TARGET_STATE_CLASS[state]}
+      className={`${SECTION_DROP_TARGET_STATE_CLASS[state]} animate-in duration-(--motion-duration-fast) fade-in-0`}
     />
   );
 }

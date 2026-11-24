@@ -1,4 +1,4 @@
-import { HOST_DAEMON_RESTART_EXIT_CODE } from "@bb/config/machine-service";
+import { HOST_DAEMON_RESTART_EXIT_CODE } from "@omnyo/config/machine-service";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +7,7 @@ import { createDaemon } from "./daemon.js";
 import { acquireDaemonLock, DAEMON_LOCK_FILE_NAME } from "./lock.js";
 
 const tempDirs: string[] = [];
+
 type SignalListener = () => void;
 
 class FakeSignalSource {
@@ -32,6 +33,7 @@ class FakeSignalSource {
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -54,7 +56,7 @@ afterEach(async () => {
 
 describe("daemon lifecycle", () => {
   it("prevents a second instance from acquiring the lock", async () => {
-    const dataDir = await makeTempDir("bb-host-daemon-lock-");
+    const dataDir = await makeTempDir("omnyo-host-daemon-lock-");
     const releaseLock = await acquireDaemonLock(dataDir);
 
     await expect(acquireDaemonLock(dataDir, { retries: 0 })).rejects.toThrow();
@@ -63,7 +65,7 @@ describe("daemon lifecycle", () => {
   });
 
   it("reclaims a stale lock left behind by a crashed instance", async () => {
-    const dataDir = await makeTempDir("bb-host-daemon-stale-lock-");
+    const dataDir = await makeTempDir("omnyo-host-daemon-stale-lock-");
     await fs.mkdir(dataDir, { recursive: true });
 
     const lockDirPath = path.join(dataDir, `${DAEMON_LOCK_FILE_NAME}.lock`);
@@ -75,11 +77,12 @@ describe("daemon lifecycle", () => {
       staleMs: 5_000,
       retries: 0,
     });
+
     await releaseLock();
   });
 
   it("releases the lock during clean shutdown", async () => {
-    const dataDir = await makeTempDir("bb-host-daemon-shutdown-");
+    const dataDir = await makeTempDir("omnyo-host-daemon-shutdown-");
     const logger = createLogger();
     const releaseLock = await acquireDaemonLock(dataDir);
 
@@ -109,6 +112,7 @@ describe("daemon lifecycle", () => {
     const shutdownRuntimes = vi.fn(async () => undefined);
     const releaseLock = vi.fn(async () => undefined);
     const exitProcess = vi.fn();
+
     const daemon = createDaemon({
       identity: {
         hostId: "host-1",
@@ -140,6 +144,7 @@ describe("daemon lifecycle", () => {
     const logger = createLogger();
     const startupFailure = new Error("server unavailable");
     const cleanupFailure = new Error("cleanup failed");
+
     const daemon = createDaemon({
       identity: {
         hostId: "host-1",
@@ -162,6 +167,7 @@ describe("daemon lifecycle", () => {
   it("rejects direct shutdown and waitUntilStopped when shutdown cleanup fails", async () => {
     const logger = createLogger();
     const shutdownFailure = new Error("release failed");
+
     const daemon = createDaemon({
       identity: {
         hostId: "host-1",
@@ -191,6 +197,7 @@ describe("daemon lifecycle", () => {
     const logger = createLogger();
     const signalSource = new FakeSignalSource();
     const shutdownFailure = new Error("release failed");
+
     const daemon = createDaemon({
       identity: {
         hostId: "host-1",
@@ -221,6 +228,7 @@ describe("daemon lifecycle", () => {
   it("forces the requested exit status when a shutdown step never finishes", async () => {
     const logger = createLogger();
     const exitProcess = vi.fn();
+
     const daemon = createDaemon({
       identity: {
         hostId: "host-1",
@@ -249,6 +257,7 @@ describe("daemon lifecycle", () => {
     const logger = createLogger();
     const lifecycle: string[] = [];
     const exitProcess = vi.fn(() => lifecycle.push("exitProcess"));
+
     const daemon = createDaemon({
       identity: {
         hostId: "host-1",
@@ -285,10 +294,13 @@ describe("daemon lifecycle", () => {
     const logger = createLogger();
     const exitProcess = vi.fn();
     let finishRelease: () => void = () => undefined;
+
     const releaseBlocked = new Promise<void>((resolve) => {
       finishRelease = resolve;
     });
+
     const releaseLock = vi.fn(async () => releaseBlocked);
+
     const daemon = createDaemon({
       identity: {
         hostId: "host-1",
@@ -319,9 +331,11 @@ describe("daemon lifecycle", () => {
     const signalSource = new FakeSignalSource();
     const exitProcess = vi.fn();
     let resolveStartup: () => void = () => undefined;
+
     const startup = new Promise<void>((resolve) => {
       resolveStartup = resolve;
     });
+
     const daemon = createDaemon({
       identity: {
         hostId: "host-1",

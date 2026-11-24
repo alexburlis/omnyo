@@ -13,6 +13,7 @@ import { SURFACES_BY_ID } from "../src/surfaces";
 describe("Plugin Guide agent references", () => {
   it("derives the complete reference from canonical surface data", () => {
     const surface = SURFACES_BY_ID.get("code-renderers");
+
     if (!surface) throw new Error("code-renderers surface missing");
 
     const reference = createPluginSurfaceAgentReference(surface);
@@ -39,13 +40,14 @@ describe("Plugin Guide agent references", () => {
     const context = pluginSurfaceAgentContext("composer-actions");
     expect(context).toContain("Inline actions (composer-actions)");
     expect(context).toContain("PluginComposerApi");
-    expect(context).toContain("bb-plugin-authoring skill");
+    expect(context).toContain("omnyo-plugin-authoring skill");
     expect(context?.split("\n")).toHaveLength(3);
     expect(pluginSurfaceAgentContext("missing-surface")).toBeNull();
   });
 
-  it("serializes one surface as bb's existing structured composer pill", () => {
+  it("serializes one surface as Omnyo's existing structured composer pill", () => {
     const surface = SURFACES_BY_ID.get("composer-actions");
+
     if (!surface) throw new Error("composer-actions surface missing");
 
     const content = pluginSurfaceAgentClipboardContent(surface);
@@ -72,6 +74,7 @@ describe("Plugin Guide agent references", () => {
   it("keeps multiple copied surfaces distinct and composable", () => {
     const actions = SURFACES_BY_ID.get("composer-actions");
     const panels = SURFACES_BY_ID.get("thread-panel");
+
     if (!actions || !panels) throw new Error("reference surfaces missing");
 
     const document = new DOMParser().parseFromString(
@@ -80,6 +83,7 @@ describe("Plugin Guide agent references", () => {
         .join(""),
       "text/html",
     );
+
     const resources = [...document.querySelectorAll("[data-prompt-mention]")]
       .map((pill) => pill.getAttribute("data-prompt-mention-resource"))
       .map((value) => JSON.parse(value ?? ""));
@@ -100,9 +104,11 @@ describe("Plugin Guide agent references", () => {
       const second = createPluginSurfaceAgentReference(surface);
       expect(first).toEqual(second);
       expect(first.clipboard.html).not.toContain(surface.summary);
+
       for (const bullet of surface.bullets) {
         expect(first.clipboard.html).not.toContain(bullet);
       }
+
       return first.resource.itemId;
     });
 

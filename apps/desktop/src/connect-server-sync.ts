@@ -3,7 +3,7 @@ import {
   ConnectListError,
   listAccountServers,
   type ConnectCredential,
-} from "@bb/connect-client";
+} from "@omnyo/connect-client";
 
 const connectAccountServerSchema = z
   .object({
@@ -13,6 +13,7 @@ const connectAccountServerSchema = z
     url: z.string().min(1),
   })
   .strict();
+
 export type ConnectAccountServer = z.infer<typeof connectAccountServerSchema>;
 
 const connectListAccountServersResultSchema = z
@@ -55,8 +56,11 @@ export type FetchConnectAccountServersResult =
   | { ok: false; reason: ConnectServerSyncSkipReason };
 
 const CONNECT_PLUGIN_ID = "connect";
+
 const LIST_ACCOUNT_SERVERS_RPC = "listAccountServers";
+
 const CONNECT_SERVER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+
 const CONNECT_SERVER_SYNC_MIN_INTERVAL_MS = 60 * 1000;
 
 type ConnectServerSyncFetch = (
@@ -79,6 +83,7 @@ export async function fetchConnectAccountServers(
   const url = `${base}/api/v1/plugins/${encodeURIComponent(CONNECT_PLUGIN_ID)}/rpc/${encodeURIComponent(LIST_ACCOUNT_SERVERS_RPC)}`;
 
   let response: Pick<Response, "ok" | "status" | "json" | "text">;
+
   try {
     response = await fetchImpl(url, {
       method: "POST",
@@ -90,6 +95,7 @@ export async function fetchConnectAccountServers(
   }
 
   let body: unknown;
+
   try {
     body = await response.json();
   } catch {
@@ -97,6 +103,7 @@ export async function fetchConnectAccountServers(
   }
 
   const success = rpcSuccessSchema.safeParse(body);
+
   if (success.success) {
     return { ok: true, result: success.data.result };
   }
@@ -104,7 +111,9 @@ export async function fetchConnectAccountServers(
   if (response.status === 503) {
     return { ok: false, reason: "plugin-disabled" };
   }
+
   const failure = rpcFailureSchema.safeParse(body);
+
   if (
     failure.success &&
     typeof failure.data.error === "object" &&
@@ -113,6 +122,7 @@ export async function fetchConnectAccountServers(
   ) {
     return { ok: false, reason: "not-paired" };
   }
+
   return { ok: false, reason: "unavailable" };
 }
 
@@ -147,9 +157,11 @@ export function createConnectServerSync(
 ): ConnectServerSync {
   const intervalMs = CONNECT_SERVER_SYNC_INTERVAL_MS;
   const now = args.now ?? Date.now;
+
   const setIntervalFn =
     args.setIntervalFn ??
     ((handler: () => void, timeout: number) => setInterval(handler, timeout));
+
   const log = args.log;
 
   let timer: unknown = null;
@@ -159,24 +171,31 @@ export function createConnectServerSync(
 
   async function fetchServers(): Promise<FetchConnectAccountServersResult> {
     const serverUrl = args.getLocalServerUrl();
+
     if (serverUrl !== null) {
       return fetchConnectAccountServers({
         serverUrl,
         fetchImpl: args.fetchImpl,
       });
     }
+
     const credential = args.getCredential();
+
     if (credential === null) {
       return { ok: false, reason: "no-credential" };
     }
+
     try {
       const result = await listAccountServers(credential, args.gateFetchImpl);
+
       return { ok: true, result };
     } catch (error) {
       if (error instanceof ConnectListError && error.code === "unauthorized") {
         args.onUnauthorized();
+
         return { ok: false, reason: "unauthorized" };
       }
+
       return { ok: false, reason: "unavailable" };
     }
   }
@@ -184,12 +203,15 @@ export function createConnectServerSync(
   async function runSync(): Promise<void> {
     lastSyncAttemptAt = now();
     const outcome = await fetchServers();
+
     if (!outcome.ok) {
       if (loggedSkipReason !== outcome.reason) {
         loggedSkipReason = outcome.reason;
         log?.(`connect server sync skipped (${outcome.reason})`);
       }
+
       args.onSkipped(outcome.reason);
+
       return;
     }
 
@@ -201,9 +223,11 @@ export function createConnectServerSync(
     if (inFlight !== null) {
       return inFlight;
     }
+
     inFlight = runSync().finally(() => {
       inFlight = null;
     });
+
     return inFlight;
   }
 
@@ -215,6 +239,7 @@ export function createConnectServerSync(
     if (now() - lastSyncAttemptAt < CONNECT_SERVER_SYNC_MIN_INTERVAL_MS) {
       return;
     }
+
     void syncNow();
   }
 
@@ -222,9 +247,11 @@ export function createConnectServerSync(
     if (timer !== null) {
       return;
     }
+
     const handle = setIntervalFn(() => {
       void syncNow();
     }, intervalMs);
+
     if (
       typeof handle === "object" &&
       handle !== null &&
@@ -233,6 +260,7 @@ export function createConnectServerSync(
     ) {
       handle.unref();
     }
+
     timer = handle;
   }
 

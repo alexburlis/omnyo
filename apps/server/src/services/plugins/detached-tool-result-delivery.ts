@@ -1,10 +1,10 @@
-import { getThread } from "@bb/db";
+import { getThread } from "@omnyo/db";
 import type {
   PromptInput,
   SystemMessageSubject,
   ToolCallResponse,
-} from "@bb/domain";
-import type { PluginRowPresentation } from "@get-bb/plugin-sdk";
+} from "@omnyo/domain";
+import type { PluginRowPresentation } from "@omnyo/plugin-sdk";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { queueParentSystemMessage } from "../threads/parent-system-messages.js";
 
@@ -22,14 +22,17 @@ function buildDetachedToolResultInput(args: {
   const lead = args.response.success
     ? `Your earlier ${args.toolName} tool call has finished. Its result:`
     : `Your earlier ${args.toolName} tool call failed:`;
+
   const text = args.response.contentItems
     .flatMap((item) => (item.type === "inputText" ? [item.text] : []))
     .join("\n");
+
   const images = args.response.contentItems.flatMap((item) =>
     item.type === "inputImage"
       ? [{ type: "image" as const, url: item.imageUrl }]
       : [],
   );
+
   return [
     {
       type: "text",
@@ -56,12 +59,15 @@ export async function deliverDetachedToolResult(
   args: DeliverDetachedToolResultArgs,
 ): Promise<void> {
   const thread = getThread(deps.db, args.threadId);
+
   if (!thread || thread.deletedAt !== null || thread.archivedAt !== null) {
     return;
   }
+
   if (!args.response.success && thread.status !== "active") {
     return;
   }
+
   await queueParentSystemMessage(deps, {
     input: buildDetachedToolResultInput({
       toolName: args.toolName,

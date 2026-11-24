@@ -1,19 +1,19 @@
 import { watch as watchDirectory } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { readBbAppRuntimeFile } from "@bb/config/app-runtime-file";
+import { readAppRuntimeFile } from "@omnyo/config/app-runtime-file";
 import {
-  formatBbAppConfigPath,
-  parseBbAppManagedConfig,
-} from "@bb/config/bb-app-managed-config";
-import { isProcessRunning } from "@bb/config/verified-process-stop";
-import type { ConnectCredential } from "@bb/connect-client";
-import { SERVER_MOVED_ERROR_CODE } from "@bb/host-daemon-contract";
+  formatAppConfigPath,
+  parseAppManagedConfig,
+} from "@omnyo/config/managed-app-config";
+import { isProcessRunning } from "@omnyo/config/verified-process-stop";
+import type { ConnectCredential } from "@omnyo/connect-client";
+import { SERVER_MOVED_ERROR_CODE } from "@omnyo/host-daemon-contract";
 import {
   readServerMovedFile,
   SERVER_MOVED_FILE_NAME,
   type ServerMovedFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import { z } from "zod";
 import type { ServerProbeFetch } from "./server-probe.js";
 import {
@@ -24,15 +24,23 @@ import {
 } from "./server-target.js";
 
 export const SERVER_MOVE_NOTICE_FILE_NAME = "server-move-notice.json";
+
 export const SERVER_MOVED_WATCH_DEBOUNCE_MS = 500;
+
 export const SERVER_MOVED_POLL_INTERVAL_MS = 2_000;
+
 export const SERVER_MOVE_DESTINATION_TIMEOUT_MS = 60_000;
+
 export const SERVER_MOVE_DESTINATION_INTERVAL_MS = 1_000;
+
 export const SERVER_MOVE_COMMIT_TIMEOUT_MS = 120_000;
+
 export const SERVER_MOVE_COMMIT_INTERVAL_MS = 1_000;
 
-const CONNECT_MACHINE_CREDENTIAL_HEADER = "x-bb-connect-machine";
+const CONNECT_MACHINE_CREDENTIAL_HEADER = "x-omnyo-connect-machine";
+
 const SERVER_MOVED_STATUS = 410;
+
 const DESTINATION_REQUEST_TIMEOUT_MS = 1_000;
 
 export type ServerMovedTarget =
@@ -87,13 +95,18 @@ interface ApplyServerMoveResult {
 
 interface EnsureServerMovedRuntimeArgs {
   hasLocalRuntime(): boolean;
+  machineServiceConnected: boolean;
   isLocalAddressFree(): Promise<boolean>;
   logInfo(message: string): void;
   localServerUrl: string;
   startLocalRuntime(): Promise<void>;
 }
 
-type EnsureServerMovedRuntimeResult = "external" | "kept" | "started";
+type EnsureServerMovedRuntimeResult =
+  | "external"
+  | "kept"
+  | "service"
+  | "started";
 
 interface ServerMovedWatcherHandle {
   close(): void;
@@ -141,7 +154,7 @@ interface ProbeLocalServerMoveArgs {
   timeoutMs: number;
 }
 
-interface HasLiveBbAppLauncherArgs {
+interface HasLiveOmnyoAppLauncherArgs {
   dataDir: string;
   isRunning?: (pid: number) => boolean;
 }
@@ -220,6 +233,7 @@ const defaultNoticeFs: ServerTargetFs = {
 
 const scheduleWithTimer: ScheduleServerMovedCheck = (callback, delayMs) => {
   const timer = setTimeout(callback, delayMs);
+
   return () => {
     clearTimeout(timer);
   };
@@ -233,6 +247,7 @@ function isConnectionRefused(error: unknown): boolean {
   if (connectionRefusedErrorSchema.safeParse(error).success) {
     return true;
   }
+
   return (
     error instanceof Error &&
     (connectionRefusedErrorSchema.safeParse(error.cause).success ||
@@ -250,18 +265,22 @@ export function resolveServerMovedTarget(
   file: ServerMovedFile,
 ): ResolveServerMovedTargetResult {
   const url = normalizeCustomServerUrl(file.serverUrl);
+
   if (url === null) {
     return {
       ok: false,
       reason: `serverUrl ${JSON.stringify(file.serverUrl)} is not an http(s) URL`,
     };
   }
+
   if (file.mode === "direct") {
     return { ok: true, target: { kind: "custom", url } };
   }
+
   if (file.connectHandle === null) {
-    return { ok: false, reason: "a bb Connect move has no connectHandle" };
+    return { ok: false, reason: "an Omnyo Connect move has no connectHandle" };
   }
+
   return {
     ok: true,
     target: {
@@ -276,20 +295,27 @@ export async function readServerMovedLock(
 ): Promise<DesktopServerMove | null> {
   const lockPath = join(args.dataDir, SERVER_MOVED_FILE_NAME);
   let file: ServerMovedFile | null;
+
   try {
     file = await readServerMovedFile(args.dataDir);
   } catch (error) {
     args.logWarning(`[desktop] ignoring ${lockPath}: ${errorMessage(error)}`);
+
     return null;
   }
+
   if (file === null) {
     return null;
   }
+
   const resolved = resolveServerMovedTarget(file);
+
   if (!resolved.ok) {
     args.logWarning(`[desktop] ignoring ${lockPath}: ${resolved.reason}`);
+
     return null;
   }
+
   return {
     moveId: file.moveId,
     oldCopyKept: file.oldCopyEntries.length > 0,
@@ -302,8 +328,8 @@ export function formatServerMovedNotice(
   move: DesktopServerMove,
 ): ServerMovedNotice {
   return {
-    detail: "bb now opens there. This computer stays connected.",
-    message: `Your bb server moved to ${move.toHostName}`,
+    detail: "Omnyo now opens there. This computer stays connected.",
+    message: `Your Omnyo server moved to ${move.toHostName}`,
   };
 }
 
@@ -314,13 +340,16 @@ export function createServerMoveNoticeStore(
 
   async function readShownMoveId(): Promise<string | null> {
     let raw: string;
+
     try {
       raw = await fsImpl.readFile(args.storagePath, "utf8");
     } catch {
       return null;
     }
+
     try {
       const parsed = serverMoveNoticeFileSchema.safeParse(JSON.parse(raw));
+
       return parsed.success ? parsed.data.moveId : null;
     } catch {
       return null;
@@ -360,19 +389,24 @@ export async function applyServerMove(
   args: ApplyServerMoveArgs,
 ): Promise<ApplyServerMoveResult> {
   const alreadyNoticed = await args.noticeStore.hasShown(args.move.moveId);
+
   const switched =
     !alreadyNoticed || args.targetStore.getTarget().kind === "builtin";
+
   if (switched) {
     await openServerMoveTarget({
       move: args.move,
       targetStore: args.targetStore,
     });
   }
+
   if (alreadyNoticed) {
     return { noticeShown: false, switched };
   }
+
   await args.noticeStore.markShown(args.move.moveId);
   args.showNotice(formatServerMovedNotice(args.move));
+
   return { noticeShown: true, switched };
 }
 
@@ -382,13 +416,21 @@ export async function ensureServerMovedRuntime(
   if (args.hasLocalRuntime()) {
     return "kept";
   }
+
+  if (args.machineServiceConnected) {
+    return "service";
+  }
+
   if (!(await args.isLocalAddressFree())) {
     args.logInfo(
-      `[desktop] another bb process answers at ${args.localServerUrl}; not starting a machine runtime from this app`,
+      `[desktop] another Omnyo process answers at ${args.localServerUrl}; not starting a machine runtime from this app`,
     );
+
     return "external";
   }
+
   await args.startLocalRuntime();
+
   return "started";
 }
 
@@ -397,6 +439,7 @@ export function createServerMovedWatcher(
 ): ServerMovedWatcher {
   const watch: WatchServerMovedDirectory =
     args.watch ?? ((dataDir, listener) => watchDirectory(dataDir, listener));
+
   const schedule = args.schedule ?? scheduleWithTimer;
   let active = false;
   let watcher: ServerMovedWatcherHandle | null = null;
@@ -420,6 +463,7 @@ export function createServerMovedWatcher(
       dataDir: args.dataDir,
       logWarning: args.logWarning,
     });
+
     if (
       checkGeneration !== generation ||
       move === null ||
@@ -427,31 +471,39 @@ export function createServerMovedWatcher(
     ) {
       return null;
     }
+
     const committed = await args.confirmMove(
       move,
       () => checkGeneration !== generation,
     );
+
     return committed && checkGeneration === generation ? move : null;
   }
 
   async function checkLock(): Promise<void> {
     if (checking) {
       recheckRequested = true;
+
       return;
     }
+
     checking = true;
     recheckRequested = false;
     let move: DesktopServerMove | null;
+
     try {
       move = await readCommittedMove(generation);
     } finally {
       checking = false;
     }
+
     if (move !== null) {
       deliveredMoveId = move.moveId;
       args.onMove(move);
+
       return;
     }
+
     if (recheckRequested && active) {
       recheckRequested = false;
       scheduleCheck();
@@ -489,23 +541,28 @@ export function createServerMovedWatcher(
 
   function startWatching(): void {
     const startGeneration = generation;
+
     try {
       watcher = watch(args.dataDir, (_eventType, filename) => {
         if (filename !== null && filename !== SERVER_MOVED_FILE_NAME) {
           return;
         }
+
         scheduleCheck();
       });
     } catch (error) {
       fallBackToPolling(
         `could not watch ${args.dataDir} for a server move: ${errorMessage(error)}`,
       );
+
       return;
     }
+
     watcher.on("error", (error) => {
       if (startGeneration !== generation) {
         return;
       }
+
       fallBackToPolling(
         `stopped watching ${args.dataDir} for a server move: ${errorMessage(error)}`,
       );
@@ -517,6 +574,7 @@ export function createServerMovedWatcher(
       if (active) {
         return;
       }
+
       active = true;
       generation += 1;
       startWatching();
@@ -539,6 +597,7 @@ export async function probeLocalServerMove(
 ): Promise<LocalServerMoveProbe> {
   const fetchImpl = args.fetchImpl ?? globalThis.fetch;
   let response: Response;
+
   try {
     response = await fetchImpl(new URL("/health", args.serverUrl).toString(), {
       signal: AbortSignal.timeout(args.timeoutMs),
@@ -546,10 +605,13 @@ export async function probeLocalServerMove(
   } catch (error) {
     return isConnectionRefused(error) ? "refused" : "unanswered";
   }
+
   if (response.status !== SERVER_MOVED_STATUS) {
     await response.body?.cancel().catch(() => undefined);
+
     return "answered";
   }
+
   try {
     return serverMovedResponseSchema.safeParse(await response.json()).success
       ? "moved"
@@ -559,11 +621,12 @@ export async function probeLocalServerMove(
   }
 }
 
-export async function hasLiveBbAppLauncher(
-  args: HasLiveBbAppLauncherArgs,
+export async function hasLiveOmnyoAppLauncher(
+  args: HasLiveOmnyoAppLauncherArgs,
 ): Promise<boolean> {
-  const runtimeFile = await readBbAppRuntimeFile(args.dataDir);
+  const runtimeFile = await readAppRuntimeFile(args.dataDir);
   const isRunning = args.isRunning ?? isProcessRunning;
+
   return runtimeFile !== null && isRunning(runtimeFile.pid);
 }
 
@@ -573,26 +636,33 @@ export async function waitForCommittedServerMove(
   const now = args.now ?? Date.now;
   const sleep = args.sleep ?? sleepFor;
   const deadline = now() + args.timeoutMs;
+
   while (!args.isCancelled()) {
     const current = await readServerMovedLock({
       dataDir: args.dataDir,
       logWarning: args.logWarning,
     });
+
     if (current === null || current.moveId !== args.move.moveId) {
       return "withdrawn";
     }
+
     const probe = await args.probeLocalServer();
+
     if (
       probe === "moved" ||
       (probe === "refused" && !(await args.hasLiveLocalLauncher()))
     ) {
       return "committed";
     }
+
     if (now() >= deadline) {
       return "timed-out";
     }
+
     await sleep(args.intervalMs);
   }
+
   return "cancelled";
 }
 
@@ -606,27 +676,35 @@ export async function readServerMovedConnectCredential(
   ) {
     return null;
   }
-  const configPath = formatBbAppConfigPath(args.dataDir);
+
+  const configPath = formatAppConfigPath(args.dataDir);
   let raw: string;
+
   try {
     raw = await readFile(configPath, "utf8");
   } catch (error) {
     args.logWarning(
-      `[desktop] could not read ${configPath} for this computer's bb Connect access: ${errorMessage(error)}`,
+      `[desktop] could not read ${configPath} for this computer's Omnyo Connect access: ${errorMessage(error)}`,
     );
+
     return null;
   }
-  let config: ReturnType<typeof parseBbAppManagedConfig>;
+
+  let config: ReturnType<typeof parseAppManagedConfig>;
+
   try {
-    config = parseBbAppManagedConfig(JSON.parse(raw));
+    config = parseAppManagedConfig(JSON.parse(raw));
   } catch (error) {
     args.logWarning(
-      `[desktop] ignoring ${configPath} for bb Connect access: ${errorMessage(error)}`,
+      `[desktop] ignoring ${configPath} for Omnyo Connect access: ${errorMessage(error)}`,
     );
+
     return null;
   }
+
   const credential =
     config.serverHeaders?.[CONNECT_MACHINE_CREDENTIAL_HEADER]?.trim() ?? "";
+
   if (
     credential.length === 0 ||
     config.serverUrl === undefined ||
@@ -634,6 +712,7 @@ export async function readServerMovedConnectCredential(
   ) {
     return null;
   }
+
   return {
     credential,
     handle: args.move.target.server.handle,
@@ -649,12 +728,15 @@ async function isServerMoveDestinationReady(
     const response = await fetchImpl(healthUrl, {
       signal: AbortSignal.timeout(DESTINATION_REQUEST_TIMEOUT_MS),
     });
+
     if (!response.ok) {
       return false;
     }
+
     const parsed = serverMoveDestinationHealthSchema.safeParse(
       await response.json(),
     );
+
     return parsed.success && parsed.data.serverMove?.state !== "pending";
   } catch {
     return false;
@@ -668,14 +750,18 @@ export async function waitForServerMoveDestination(
   const sleep = args.sleep ?? sleepFor;
   const deadline = now() + args.timeoutMs;
   const healthUrl = new URL("/health", args.serverUrl).toString();
+
   while (!args.isCancelled()) {
     if (await isServerMoveDestinationReady(args.fetchImpl, healthUrl)) {
       return true;
     }
+
     if (now() >= deadline) {
       return false;
     }
+
     await sleep(args.intervalMs);
   }
+
   return false;
 }

@@ -15,7 +15,7 @@ import type {} from "mdast-util-to-hast";
 import type {
   ExperimentalCodeFenceRendererProps,
   ExperimentalCodeFenceStatus,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { visit } from "unist-util-visit";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount.js";
 import { PluginThreadPanelNavigationProvider } from "@/components/plugin/plugin-thread-panel-navigation.js";
@@ -28,7 +28,9 @@ import {
 } from "./markdown-prompt-blockquote-boundaries.js";
 
 const CODE_FENCE_OFFSET_PROPERTY = "dataCodeFenceOffset";
+
 const CODE_FENCE_CLOSED_PROPERTY = "dataCodeFenceClosed";
+
 const MARKDOWN_CONTAINER_PREFIX_PATTERN = /^[ \t>]*/u;
 
 export type CodeFenceRendererRegistry = ReadonlyMap<
@@ -51,30 +53,37 @@ export function buildCodeFenceRendererRegistry(
 ): CodeFenceRendererRegistry {
   const warn = options?.warn ?? ((message: string) => console.warn(message));
   const registry = new Map<string, PluginCodeFenceRendererSlot>();
+
   for (const [language, resolved] of resolveCodeFenceRendererRegistry(slots)) {
     if (resolved.status === "collision") {
       warn(
-        `[plugin] code fence language "${language}" claimed by multiple plugins (${resolved.pluginIds.join(", ")}); rendering BB's code block`,
+        `[plugin] code fence language "${language}" claimed by multiple plugins (${resolved.pluginIds.join(", ")}); rendering Omnyo's code block`,
       );
       continue;
     }
+
     registry.set(language, resolved.slot);
   }
+
   return registry;
 }
 
 function isClosedCodeFence(node: Code, markdownSource: string): boolean {
   const start = node.position?.start.offset;
   const end = node.position?.end.offset;
+
   if (start === undefined || end === undefined) {
     return false;
   }
+
   const lines = markdownSource.slice(start, end).split("\n");
   const fence = parseMarkdownFenceStart(lines[0] ?? "");
   const closingLine = lines.at(-1);
+
   if (fence === null || lines.length < 2 || closingLine === undefined) {
     return false;
   }
+
   return (
     closesAnyIndentMarkdownFence(
       closingLine.replace(MARKDOWN_CONTAINER_PREFIX_PATTERN, ""),
@@ -89,12 +98,15 @@ export function remarkCodeFenceRenderers(args: {
   sourceOffset: number;
 }) {
   const { registry, sourceOffset } = args;
+
   return (tree: Root, file: RemarkCodeFenceRenderersFile): void => {
     const markdownSource =
       typeof file.value === "string" ? file.value : String(file.value ?? "");
+
     visit(tree, "code", (node) => {
       const language = node.lang?.toLowerCase();
       const offset = node.position?.start.offset;
+
       if (
         language === undefined ||
         offset === undefined ||
@@ -102,6 +114,7 @@ export function remarkCodeFenceRenderers(args: {
       ) {
         return;
       }
+
       node.data ??= {};
       node.data.hProperties = {
         ...node.data.hProperties,
@@ -150,6 +163,7 @@ function placeCodeFenceContainer(
   if (container.parentNode === parent) {
     return;
   }
+
   if (
     container.isConnected &&
     parent.isConnected &&
@@ -157,17 +171,21 @@ function placeCodeFenceContainer(
   ) {
     try {
       parent.moveBefore(container, null);
+
       return;
     } catch {
       parent.appendChild(container);
+
       return;
     }
   }
+
   parent.appendChild(container);
 }
 
 export function useCodeFenceLanguages(): CodeFenceRendererRegistry | null {
   const registry = useContext(CodeFenceHostContext)?.registry;
+
   return registry === undefined || registry.size === 0 ? null : registry;
 }
 
@@ -195,6 +213,7 @@ export function CodeFenceRendererHost({
       registry,
       attach(offset, placeholder) {
         let entry = entries.get(offset);
+
         if (entry === undefined) {
           entry = {
             block: null,
@@ -206,21 +225,27 @@ export function CodeFenceRendererHost({
         } else {
           entry.placeholder = placeholder;
         }
+
         placeCodeFenceContainer(placeholder, entry.container);
       },
       detach(offset, placeholder) {
         const entry = entries.get(offset);
+
         if (entry === undefined || entry.placeholder !== placeholder) {
           return;
         }
+
         entry.placeholder = null;
+
         if (parkingRef.current !== null) {
           placeCodeFenceContainer(parkingRef.current, entry.container);
         }
+
         queueMicrotask(() => {
           if (entry.placeholder !== null || entries.get(offset) !== entry) {
             return;
           }
+
           entry.container.remove();
           entries.delete(offset);
           rerender();
@@ -228,11 +253,14 @@ export function CodeFenceRendererHost({
       },
       update(offset, block) {
         const entry = entries.get(offset);
+
         if (entry === undefined) {
           return;
         }
+
         const previous = entry.block;
         entry.block = block;
+
         if (
           previous === null ||
           previous.code !== block.code ||
@@ -249,13 +277,17 @@ export function CodeFenceRendererHost({
   const ordered = [...entries.values()].sort(
     (left, right) => left.offset - right.offset,
   );
+
   const ordinals = new Map<string, number>();
   const mounts: ReactNode[] = [];
+
   for (const entry of ordered) {
     const { block } = entry;
+
     if (block === null) {
       continue;
     }
+
     const index = ordinals.get(block.language) ?? 0;
     ordinals.set(block.language, index + 1);
     const slot = registry.get(block.language);
@@ -315,6 +347,7 @@ const CodeFenceMount = memo(function CodeFenceMount({
   status,
 }: CodeFenceMountProps) {
   const Component = slot.component;
+
   const element = (
     <Component
       code={code}
@@ -325,6 +358,7 @@ const CodeFenceMount = memo(function CodeFenceMount({
       Original={CodeFenceOriginal}
     />
   );
+
   return (
     <PluginSlotMount
       key={`${slot.pluginId}/${slot.id}/${slot.generation}`}
@@ -367,10 +401,13 @@ export function CodeFencePlaceholder({
 
   useLayoutEffect(() => {
     const element = elementRef.current;
+
     if (host === null || !claimed || element === null) {
       return;
     }
+
     host.attach(offset, element);
+
     return () => {
       host.detach(offset, element);
     };
@@ -385,6 +422,7 @@ export function CodeFencePlaceholder({
   if (!claimed) {
     return original;
   }
+
   return <div ref={elementRef} data-code-fence-placeholder="" />;
 }
 

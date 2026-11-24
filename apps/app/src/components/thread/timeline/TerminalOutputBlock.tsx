@@ -1,7 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Convert from "ansi-to-html";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { getDetailScrollMaxHeightClass } from "../../ui/detail-scroll-size.js";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
+import {
+  TimelineCodeBlock,
+  TimelineDetailHeader,
+  TimelineRunningIndicator,
+  structuredOutputLanguage,
+} from "./TimelineCodeBlock.js";
 import { TimelineDetailScroll } from "./TimelineDetailScroll.js";
 
 export interface TerminalOutputBlockProps {
@@ -37,12 +43,16 @@ const ANSI_THEME_COLORS: Record<number, string> = {
   14: "var(--ansi-14)",
   15: "var(--ansi-15)",
 };
+
 const ANSI_COLOR_INDEXES = Object.keys(ANSI_THEME_COLORS).map(Number);
+
 const BACKGROUND_RESET_STYLE = "background-color:var(--background)";
+
 const BACKGROUND_RESET_CONTRAST_STYLE = `${BACKGROUND_RESET_STYLE};color:var(--foreground)`;
 
 function addBackgroundContrastColors(html: string): string {
   let out = html;
+
   for (const colorIndex of ANSI_COLOR_INDEXES) {
     const backgroundStyle = `background-color:var(--ansi-${colorIndex})`;
     out = out.replaceAll(
@@ -50,6 +60,7 @@ function addBackgroundContrastColors(html: string): string {
       `${backgroundStyle};color:var(--ansi-bg-fg-${colorIndex})`,
     );
   }
+
   return out.replaceAll(
     BACKGROUND_RESET_STYLE,
     BACKGROUND_RESET_CONTRAST_STYLE,
@@ -67,9 +78,11 @@ const ANSI_TO_HTML = new Convert({
 
 function stringLengthSum(values: readonly string[]): number {
   let length = 0;
+
   for (const value of values) {
     length += value.length;
   }
+
   return length;
 }
 
@@ -102,7 +115,14 @@ export function TerminalOutputBlock({
     [output],
   );
 
-  const showExitCode = exitCode !== null;
+  const [expandedCommand, setExpandedCommand] = useState(false);
+  const isLongCommand = commandLine.split("\n").length > 6;
+
+  const outputLanguage = useMemo(
+    () => structuredOutputLanguage(output),
+    [output],
+  );
+
   const outputContentKey = terminalScrollContentKey({
     commandLine,
     exitCode,
@@ -112,39 +132,78 @@ export function TerminalOutputBlock({
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <div className="px-4 py-3 font-mono text-xs leading-tight text-foreground opacity-70">
-        {commandLine ? (
+      {commandLine ? (
+        <div className="border-b border-border-hairline bg-surface-recessed pb-2">
+          <TimelineDetailHeader
+            label="Command"
+            copyText={commandLine.replace(/^\$ /u, "")}
+          >
+            {streaming ? <TimelineRunningIndicator /> : null}
+          </TimelineDetailHeader>
           <div
             className={cn(
-              "overflow-auto whitespace-pre-wrap break-words",
-              getDetailScrollMaxHeightClass("base"),
+              "overflow-auto px-3 font-mono text-xs leading-relaxed",
+              expandedCommand ? "max-h-[16lh]" : "max-h-[7lh]",
             )}
           >
-            {commandLine}
+            <TimelineCodeBlock code={commandLine} language="command" />
           </div>
-        ) : null}
-        {metadataLines.map((line, index) => (
-          <div key={`${index}:${line}`} className="mt-1 text-muted-foreground">
-            {line}
-          </div>
-        ))}
-        {renderedOutputHtml ? (
-          <TimelineDetailScroll
-            size="base"
-            streaming={streaming}
-            contentKey={outputContentKey}
-            className="mt-1.5"
-            scrollClassName="whitespace-pre leading-tight text-muted-foreground"
+          {isLongCommand ? (
+            <button
+              type="button"
+              aria-expanded={expandedCommand}
+              onClick={() => setExpandedCommand(!expandedCommand)}
+              className={cn(
+                "cursor-pointer px-3 py-1.5 text-2xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                CONTROL_HOVER_TRANSITION,
+              )}
+            >
+              {expandedCommand ? "Show less" : "Show full command"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      <TimelineDetailHeader label="Output" copyText={output}>
+        {commandLine === "" && streaming ? <TimelineRunningIndicator /> : null}
+        {exitCode !== null ? (
+          <span
+            className={
+              exitCode === 0 ? "text-success" : "text-destructive-text"
+            }
           >
-            <div dangerouslySetInnerHTML={{ __html: renderedOutputHtml }} />
-          </TimelineDetailScroll>
-        ) : null}
-        {showExitCode ? (
-          <div className="mt-1.5 font-mono text-xs leading-tight text-muted-foreground">
             exit code {exitCode}
-          </div>
+          </span>
         ) : null}
-      </div>
+      </TimelineDetailHeader>
+      {metadataLines.map((line, index) => (
+        <div
+          key={`${index}:${line}`}
+          className="px-3 pb-1 font-mono text-2xs text-muted-foreground"
+        >
+          {line}
+        </div>
+      ))}
+      {renderedOutputHtml ? (
+        <TimelineDetailScroll
+          size="base"
+          streaming={streaming}
+          contentKey={outputContentKey}
+          scrollClassName="px-3 pb-3 font-mono text-xs leading-relaxed text-muted-foreground"
+        >
+          {outputLanguage === null ? (
+            <div
+              className="whitespace-pre"
+              dangerouslySetInnerHTML={{ __html: renderedOutputHtml }}
+            />
+          ) : (
+            <TimelineCodeBlock code={output} language={outputLanguage} />
+          )}
+        </TimelineDetailScroll>
+      ) : (
+        <div className="px-3 pb-3 text-xs text-subtle-foreground">
+          {streaming ? "Waiting for output…" : "No output"}
+        </div>
+      )}
     </div>
   );
 }

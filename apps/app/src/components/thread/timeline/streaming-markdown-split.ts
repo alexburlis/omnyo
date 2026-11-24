@@ -1,5 +1,5 @@
 import remend from "remend";
-import { closeUnterminatedMarkdownCodeSpan } from "@bb/client-core";
+import { closeUnterminatedMarkdownCodeSpan } from "@omnyo/client-core";
 import {
   closesAnyIndentMarkdownFence,
   isMarkdownListLikeLine,
@@ -17,10 +17,19 @@ interface StreamingMarkdownSplit {
 const STREAMING_MARKDOWN_BYPASS_PATTERN =
   /^(?:[ \t]*(?:>|[-+*]|\d{1,9}[.)]))*[ \t]*::[a-zA-Z]|`{3}|~{3}/mu;
 
+const STREAMING_MARKDOWN_REPAIR_MARKER_PATTERN = /[*_`~\[]/u;
+
 export function repairStreamingMarkdownTail(tail: string): string {
   if (STREAMING_MARKDOWN_BYPASS_PATTERN.test(tail)) {
     return tail;
   }
+
+  if (!STREAMING_MARKDOWN_REPAIR_MARKER_PATTERN.test(tail)) {
+    return tail.endsWith(" ") && !tail.endsWith("  ")
+      ? tail.slice(0, -1)
+      : tail;
+  }
+
   return remend(closeUnterminatedMarkdownCodeSpan(tail), {
     linkMode: "text-only",
     comparisonOperators: false,
@@ -36,10 +45,12 @@ const MATH_DELIMITER = "$$";
 function countOccurrences(line: string, needle: string): number {
   let count = 0;
   let index = line.indexOf(needle);
+
   while (index !== -1) {
     count += 1;
     index = line.indexOf(needle, index + needle.length);
   }
+
   return count;
 }
 
@@ -59,28 +70,36 @@ export function splitStreamingMarkdown(
 
   for (let index = 0; index <= lastCompleteLineIndex; index += 1) {
     const line = lines[index] ?? "";
+
     if (openFence !== null) {
       if (closesAnyIndentMarkdownFence(line, openFence)) {
         openFence = null;
       }
+
       lastNonBlankLine = line;
       continue;
     }
+
     if (mathOpen) {
       if (countOccurrences(line, MATH_DELIMITER) % 2 === 1) {
         mathOpen = false;
       }
+
       lastNonBlankLine = line;
       continue;
     }
+
     if (isBlankLine(line)) {
       if (index + 1 > lastCompleteLineIndex) {
         continue;
       }
+
       const nextLine = lines[index + 1] ?? "";
+
       if (MARKDOWN_INDENTED_CONTINUATION_PATTERN.test(nextLine)) {
         continue;
       }
+
       if (
         lastNonBlankLine !== null &&
         isMarkdownListLikeLine(lastNonBlankLine) &&
@@ -88,18 +107,23 @@ export function splitStreamingMarkdown(
       ) {
         continue;
       }
+
       if (lastNonBlankLine === null) {
         continue;
       }
+
       boundaryLineIndex = index;
       continue;
     }
+
     lastNonBlankLine = line;
     const fence = parseAnyIndentMarkdownFenceStart(line);
+
     if (fence !== null) {
       openFence = fence;
       continue;
     }
+
     if (countOccurrences(line, MATH_DELIMITER) % 2 === 1) {
       mathOpen = true;
     }
@@ -108,12 +132,39 @@ export function splitStreamingMarkdown(
   if (boundaryLineIndex === -1) {
     return null;
   }
+
   let settledLength = 0;
+
   for (let index = 0; index <= boundaryLineIndex; index += 1) {
     settledLength += (lines[index] ?? "").length + 1;
   }
+
   return {
     settled: text.slice(0, settledLength),
     tail: text.slice(settledLength),
+  };
+}
+
+export function createStreamingMarkdownSplitter(): (
+  text: string,
+) => StreamingMarkdownSplit | null {
+  let previousText = "";
+  let settledLength = 0;
+
+  return (text) => {
+    if (settledLength > 0 && !text.startsWith(previousText)) settledLength = 0;
+
+    const split = splitStreamingMarkdown(text.slice(settledLength));
+
+    if (split !== null) settledLength += split.settled.length;
+
+    previousText = text;
+
+    return settledLength === 0
+      ? null
+      : {
+          settled: text.slice(0, settledLength),
+          tail: text.slice(settledLength),
+        };
   };
 }

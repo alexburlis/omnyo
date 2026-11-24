@@ -92,31 +92,38 @@ function SidebarSectionRowComponent({
   stickyLevel,
 }: SidebarSectionRowProps) {
   const [isActionsOpen, setIsActionsOpen] = useState(false);
+
   const collapsedSplitIndicator = useThreadGroupSplitIndicator(
     collapsedThreads,
     isCollapsed,
   );
+
   const pluginStatus = usePluginThreadRowStatusForThreads(collapsedThreads);
   const hasMenuActions = Boolean(onRename || onRemove);
   const hasActions = Boolean(onCreateThread || hasMenuActions);
+
   const hiddenThreadsHaveDraft = useThreadsHaveDraft(
     isCollapsed ? activity.threadIds : NO_THREAD_IDS,
   );
+
   const showRollupIndicator =
     isCollapsed &&
     (collapsedSplitIndicator.miniMap !== null ||
-      activity.pending ||
-      activity.working ||
+      activity.work !== null ||
       hiddenThreadsHaveDraft ||
       activity.unread ||
       activity.unreadError ||
       pluginStatus !== null);
+
   const renderRollupIndicator = () =>
     collapsedSplitIndicator.miniMap ? (
       <SplitPaneMiniMap
         slots={collapsedSplitIndicator.miniMap}
         label={`${label} — contains a thread open in split`}
-        isWorking={activity.working || pluginStatus?.tone === "running"}
+        isWorking={
+          activity.summaries.some((work) => work.activity.length > 0) ||
+          pluginStatus?.tone === "running"
+        }
       />
     ) : (
       <CollapsedThreadStatusGlyph
@@ -124,29 +131,34 @@ function SidebarSectionRowComponent({
         pluginStatus={pluginStatus}
       />
     );
+
   const className = cn(
     SIDEBAR_HOVER_ACTIONS_ROW_CLASS,
     stickyLevel === undefined && "relative",
     SIDEBAR_ROW_BASE_CLASS,
-    LIST_HOVER_TRANSITION,
+    isDropTargetActive ? "transition-colors" : LIST_HOVER_TRANSITION,
     SIDEBAR_GROUP_TEXT_CLASS,
     COARSE_POINTER_COMPACT_ROW_HEIGHT_CLASS,
     dragBindings && !dragBindings.disabled && "select-none",
     isDropTargetActive && "bg-sidebar-accent text-sidebar-accent-foreground",
   );
+
   const style: CSSProperties = {
     paddingLeft: getSidebarThreadRowPaddingLeft(depth),
   };
+
   const handleClickCapture = useCallback<MouseEventHandler<HTMLElement>>(
     (event) => {
       if (labelEditor || !consumeClickSuppression?.()) {
         return;
       }
+
       event.preventDefault();
       event.stopPropagation();
     },
     [consumeClickSuppression, labelEditor],
   );
+
   const content = (
     <>
       <button

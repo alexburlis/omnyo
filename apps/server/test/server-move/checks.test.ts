@@ -8,13 +8,13 @@ import {
   upsertHost,
   upsertInstalledPlugin,
   upsertPluginSchedule,
-} from "@bb/db";
-import type { ServerMoveInspectResult } from "@bb/host-daemon-contract";
+} from "@omnyo/db";
+import type { ServerMoveInspectResult } from "@omnyo/host-daemon-contract";
 import {
   listServerOwnedEntries,
   writeLastServerMoveFile,
-} from "@bb/server-archive";
-import type { ServerMoveCheckRequest } from "@bb/server-contract";
+} from "@omnyo/server-archive";
+import type { ServerMoveCheckRequest } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
   runServerMoveCheck,
@@ -39,8 +39,11 @@ import {
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
 const OLD = "host-old";
+
 const NEW = "host-new";
+
 const DIRECT_URL = "https://desktop.example.test";
+
 const GIB = 1024 ** 3;
 
 function availableArtifact(
@@ -63,6 +66,7 @@ function checkEnvironment(
   overrides: Partial<ServerMoveCheckEnvironment> = {},
 ): ServerMoveCheckEnvironment {
   const { environment } = createTestServerMoveEnvironment(harness);
+
   return {
     allowLoopbackServerUrl: environment.allowLoopbackServerUrl,
     deps: harness.deps,
@@ -97,6 +101,7 @@ function registerInspectingDaemon(
       if (message.command.type !== "server_move.inspect") {
         throw new Error(`Unexpected ${message.command.type}`);
       }
+
       return "ok" in result ? result : { ok: true, result };
     },
   });
@@ -118,7 +123,7 @@ function builtinPlugin(id: string): UpsertInstalledPluginInput {
       statusDetail: null,
     },
     activeArtifactId: null,
-    rootDir: `/opt/bb-app/plugins/${id}`,
+    rootDir: `/opt/omnyo-app/plugins/${id}`,
     version: "1.0.0",
     enabled: true,
     enabledFollowsDefault: false,
@@ -162,6 +167,7 @@ describe("server move checks", () => {
         moveInProgress: true,
         request: request({ targetHostId: "host-missing" }),
       });
+
       expect(missing.response).toMatchObject({
         targetHostId: "host-missing",
         targetHostName: "host-missing",
@@ -178,6 +184,7 @@ describe("server move checks", () => {
         moveInProgress: false,
         request: request({ targetHostId: "host-sandbox" }),
       });
+
       expect(itemIds(sandbox.response.items)).toEqual(
         expect.arrayContaining([
           "blocker:target-ephemeral",
@@ -189,6 +196,7 @@ describe("server move checks", () => {
         moveInProgress: false,
         request: request(),
       });
+
       expect(itemIds(suspended.response.items)).toEqual(
         expect.arrayContaining([
           "blocker:target-not-active",
@@ -200,6 +208,7 @@ describe("server move checks", () => {
         moveInProgress: false,
         request: request({ targetHostId: OLD }),
       });
+
       expect(itemIds(self.response.items)).toContain(
         "blocker:target-is-server",
       );
@@ -236,6 +245,7 @@ describe("server move checks", () => {
         checkEnvironment(harness, { serverAppSurface: "desktop" }),
         { moveInProgress: false, request: request() },
       );
+
       const web = await runServerMoveCheck(checkEnvironment(harness), {
         moveInProgress: false,
         request: request(),
@@ -250,7 +260,7 @@ describe("server move checks", () => {
         severity: "info",
         title: "Laptop will keep running as a machine in the background",
         detail:
-          "This server runs in the bb desktop app. After the move, the app installs a background service that keeps this computer connected to the new server and updates it with the server, even while the app is closed. The service needs Node.js 22.19 or newer on this computer; without it, the computer stays connected only while the app is open.",
+          "This server runs in the Omnyo desktop app. After the move, the app installs a background service that keeps this computer connected to the new server and updates it with the server, even while the app is closed. The service needs Node.js 22.19 or newer on this computer; without it, the computer stays connected only while the app is open.",
       });
       expect(desktop.response.canMove).toBe(web.response.canMove);
       expect(itemIds(web.response.items)).not.toContain(
@@ -284,6 +294,7 @@ describe("server move checks", () => {
         moveInProgress: false,
         request: request(),
       });
+
       expect(
         withOldCopy.response.items.find(
           (item) => item.id === "target-has-server-data",
@@ -303,15 +314,17 @@ describe("server move checks", () => {
         completedAt: 1_000,
         oldCopyDeletedAt: 2_000,
       });
+
       const afterDelete = await runServerMoveCheck(checkEnvironment(harness), {
         moveInProgress: false,
         request: request(),
       });
+
       expect(
         afterDelete.response.items.find(
           (item) => item.id === "target-has-server-data",
         )?.title,
-      ).toBe("Desktop already has bb server data");
+      ).toBe("Desktop already has Omnyo server data");
     }));
 
   it("requires an address other machines can reach in direct mode", () => {
@@ -350,10 +363,12 @@ describe("server move checks", () => {
       seedHost(harness.deps, { id: NEW, name: "Desktop" });
       seedHost(harness.deps, { id: "host-offline", name: "Studio" });
       const { project } = seedProjectWithSource(harness.deps, { hostId: NEW });
+
       const environmentRow = seedEnvironment(harness.deps, {
         hostId: NEW,
         projectId: project.id,
       });
+
       seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environmentRow.id,
@@ -382,16 +397,17 @@ describe("server move checks", () => {
         OLD,
         inspectResult({ ghAuthenticated: true, codexCredentialsPresent: true }),
       );
+
       const target = registerInspectingDaemon(
         harness,
         NEW,
         inspectResult({
           platform: "unknown",
-          dataDir: "/home/me/.bb-machines/laptop",
+          dataDir: "/home/me/.omnyo-machines/laptop",
           dataDirHasServerData: true,
           portAvailable: false,
           serverEntryAvailable: false,
-          existingServerData: { path: "/home/me/.bb", sizeBytes: 2_048 },
+          existingServerData: { path: "/home/me/.omnyo", sizeBytes: 2_048 },
           pathsExist: { "/home/me/code/local-plugin": false },
           ghAuthenticated: false,
           codexCredentialsPresent: false,
@@ -413,16 +429,16 @@ describe("server move checks", () => {
         mode: "direct",
         requiresServerUrl: true,
         serverUrl: DIRECT_URL,
-        targetDataDir: "/home/me/.bb-machines/laptop",
-        existingTargetServerData: { path: "/home/me/.bb", sizeBytes: 2_048 },
+        targetDataDir: "/home/me/.omnyo-machines/laptop",
+        existingTargetServerData: { path: "/home/me/.omnyo", sizeBytes: 2_048 },
         canMove: false,
       });
       expect(itemIds(result.response.items)).toEqual([
         "blocker:port-unavailable",
-        "blocker:server-entry-unavailable",
         "blocker:target-has-server-data",
         "blocker:unsupported-platform",
         "info:managed-config-replaced",
+        "info:target-update",
         "warning:codex-login",
         "warning:docs-vaults",
         "warning:existing-target-server-data",
@@ -447,7 +463,7 @@ describe("server move checks", () => {
       ).toContain("Studio");
     }));
 
-  it("offers the full bb-app artifact to an out-of-date target and blocks without one", () =>
+  it("offers the full omnyo-app artifact to an out-of-date target and blocks without one", () =>
     withTestHarness(async (harness) => {
       seedHost(harness.deps, { id: OLD, name: "Laptop" });
       seedPrimaryHost(harness.deps, OLD);
@@ -455,46 +471,60 @@ describe("server move checks", () => {
       registerInspectingDaemon(
         harness,
         NEW,
-        inspectResult({ bbAppVersion: "0.0.0-alpha.1" }),
+        inspectResult({ coreVersion: "0.0.0-alpha.1" }),
       );
 
       const withArtifact = await runServerMoveCheck(
         checkEnvironment(harness, { fullArtifact: availableArtifact(1_024) }),
         { moveInProgress: false, request: request() },
       );
+
       expect(withArtifact.response.canMove).toBe(true);
       expect(itemIds(withArtifact.response.items)).toEqual([
         "info:managed-config-replaced",
         "info:target-update",
       ]);
+
       const byId = new Map(
         withArtifact.response.items.map((item) => [item.id, item]),
       );
+
       expect(byId.get("target-update")).toEqual({
         id: "target-update",
         severity: "info",
-        title: "bb 0.0.0-test will be installed on Desktop",
+        title: "Omnyo 0.0.0-test will be installed on Desktop",
         detail: "The update stays on Desktop even if the move is cancelled.",
       });
       expect(byId.get("managed-config-replaced")).toEqual({
         id: "managed-config-replaced",
         severity: "info",
         title:
-          "This server's bb skill settings and other configuration will replace matching settings on Desktop",
+          "This server's Omnyo skill settings and other configuration will replace matching settings on Desktop",
         detail: null,
       });
 
       const withoutArtifact = await runServerMoveCheck(
-        checkEnvironment(harness),
+        checkEnvironment(harness, {
+          fullArtifact: {
+            availability: async () => ({
+              available: false,
+              reason: "Inert artifact unavailable",
+            }),
+            build: async () => {
+              throw new Error("Unavailable artifact must not build");
+            },
+          },
+        }),
         { moveInProgress: false, request: request() },
       );
+
       expect(itemIds(withoutArtifact.response.items)).toEqual([
         "blocker:target-version",
         "info:managed-config-replaced",
       ]);
     }));
 
-  it("blocks a target that runs a newer bb than this server", () =>
+  it("blocks a target that runs a newer Omnyo than this server", () =>
     withTestHarness(async (harness) => {
       seedHost(harness.deps, { id: OLD, name: "Laptop" });
       seedPrimaryHost(harness.deps, OLD);
@@ -502,7 +532,7 @@ describe("server move checks", () => {
       registerInspectingDaemon(
         harness,
         NEW,
-        inspectResult({ bbAppVersion: "0.0.1" }),
+        inspectResult({ coreVersion: "0.0.1" }),
       );
 
       const result = await runServerMoveCheck(
@@ -522,9 +552,9 @@ describe("server move checks", () => {
       ).toEqual({
         id: "target-newer-version",
         severity: "blocker",
-        title: "Desktop runs a newer bb than this server",
+        title: "Desktop runs a newer Omnyo than this server",
         detail:
-          "Desktop runs bb 0.0.1 and this server runs bb 0.0.0-test. Update the server to bb 0.0.1 first, then check again.",
+          "Desktop runs Omnyo 0.0.1 and this server runs Omnyo 0.0.0-test. Update the server to Omnyo 0.0.1 first, then check again.",
       });
     }));
 
@@ -533,24 +563,30 @@ describe("server move checks", () => {
       seedHost(harness.deps, { id: OLD, name: "Laptop" });
       seedPrimaryHost(harness.deps, OLD);
       seedHost(harness.deps, { id: NEW, name: "Desktop" });
+
       const attachmentDir = join(
         harness.config.dataDir,
         "attachments",
         "thr_1",
       );
+
       await mkdir(attachmentDir, { recursive: true });
       await writeFile(join(attachmentDir, "video.mp4"), Buffer.alloc(4_096));
       const inventory = await listServerOwnedEntries(harness.config.dataDir);
+
       const serverDataBytes = inventory.entries
         .flatMap((entry) => entry.files)
         .reduce((total, file) => total + file.sizeBytes, 0);
-      const required = 2 * serverDataBytes + GIB;
+
+      const base = 2 * (serverDataBytes + 5 * GIB);
+      const required = base + Math.max(GIB, Math.ceil(base * 0.1));
       let inspect = inspectResult({ diskFreeBytes: required - 1 });
       registerFakeDaemon(harness, {
         events: [],
         hostId: NEW,
         handle: () => ({ ok: true, result: inspect }),
       });
+
       const diskItems = async () => {
         const result = await runServerMoveCheck(
           checkEnvironment(harness, {
@@ -558,6 +594,7 @@ describe("server move checks", () => {
           }),
           { moveInProgress: false, request: request() },
         );
+
         return {
           canMove: result.response.canMove,
           items: result.response.items.filter((item) =>
@@ -574,7 +611,7 @@ describe("server move checks", () => {
             severity: "blocker",
             title: "Desktop doesn't have room for the server data",
             detail:
-              "The move needs about 1.0 GB free in /home/me/.bb-machines/laptop, but only 1.0 GB is available. Free up space on Desktop, then check again.",
+              "The move needs about 11 GB free in /home/me/.omnyo-machines/laptop, but only 11 GB is available. Free up space on Desktop, then check again.",
           },
         ],
       });
@@ -588,7 +625,7 @@ describe("server move checks", () => {
             severity: "warning",
             title: "Space is tight on Desktop",
             detail:
-              "The move needs about 1.0 GB of the 1.0 GB free in /home/me/.bb-machines/laptop, which leaves little room for the server to grow.",
+              "The move needs about 11 GB of the 11 GB free in /home/me/.omnyo-machines/laptop, which leaves little room for the server to grow.",
           },
         ],
       });
@@ -600,7 +637,7 @@ describe("server move checks", () => {
       expect(await diskItems()).toEqual({ canMove: true, items: [] });
 
       inspect = inspectResult({
-        bbAppVersion: "0.0.0-alpha.1",
+        coreVersion: "0.0.0-alpha.1",
         diskFreeBytes: 10 * GIB,
       });
       expect(await diskItems()).toMatchObject({
@@ -622,10 +659,11 @@ describe("server move checks", () => {
       registerInspectingDaemon(
         harness,
         NEW,
-        inspectResult({ bbAppVersion: "0.0.0-alpha.1" }),
+        inspectResult({ coreVersion: "0.0.0-alpha.1" }),
       );
       const dataDir = harness.config.dataDir;
       let serverDiskFreeBytes: number | null = 4 * GIB;
+
       const serverDiskItems = async () => {
         const result = await runServerMoveCheck(
           checkEnvironment(harness, {
@@ -634,6 +672,7 @@ describe("server move checks", () => {
           }),
           { moveInProgress: false, request: request() },
         );
+
         return {
           canMove: result.response.canMove,
           items: result.response.items.filter((item) =>
@@ -713,24 +752,26 @@ describe("server move checks", () => {
       await writeFile(
         join(dataDir, "config.json"),
         JSON.stringify({
-          config: { BB_APP_URL: "http://laptop.lan.test:38887" },
+          config: { OMNYO_APP_URL: "http://laptop.lan.test:38887" },
         }),
       );
       await writeFile(
         join(dataDir, "env.json"),
         JSON.stringify({
           env: {
-            BB_EXTERNAL_URL: "http://127.0.0.1:5173",
+            OMNYO_EXTERNAL_URL: "http://127.0.0.1:5173",
             CACHE_DIR: "~/tool-cache",
             NAME: "plain value",
             TOOL_HOME: "/opt/tools",
           },
         }),
       );
-      const outside = await mkdtemp(join(tmpdir(), "bb-server-move-link-"));
+      const outside = await mkdtemp(join(tmpdir(), "omnyo-server-move-link-"));
+
       try {
         await mkdir(join(dataDir, "skills"), { recursive: true });
         await symlink(outside, join(dataDir, "skills", "linked-skill"));
+
         const target = registerInspectingDaemon(
           harness,
           NEW,
@@ -755,9 +796,11 @@ describe("server move checks", () => {
           "warning:skipped-server-files",
           "warning:unencrypted-transfer",
         ]);
+
         const byId = new Map(
           direct.response.items.map((item) => [item.id, item]),
         );
+
         expect(byId.get("unencrypted-transfer")?.detail).toContain(
           "http://laptop.lan.test:38887",
         );
@@ -768,10 +811,10 @@ describe("server move checks", () => {
           "skills/linked-skill",
         );
         expect(byId.get("app-url-rewrite")?.title).toBe(
-          `BB_APP_URL in config.json will change to ${DIRECT_URL}`,
+          `OMNYO_APP_URL in config.json will change to ${DIRECT_URL}`,
         );
         expect(byId.get("external-url-address")?.title).toBe(
-          "BB_EXTERNAL_URL in env.json points at http://127.0.0.1:5173",
+          "OMNYO_EXTERNAL_URL in env.json points at http://127.0.0.1:5173",
         );
         expect(byId.get("env-paths-missing")?.detail).toContain(
           "TOOL_HOME (/opt/tools)",
@@ -782,10 +825,12 @@ describe("server move checks", () => {
           ...getAppSettings(harness.db),
           machineServerUrl: "https://laptop.lan.test",
         });
+
         const https = await runServerMoveCheck(checkEnvironment(harness), {
           moveInProgress: false,
           request: request(),
         });
+
         expect(itemIds(https.response.items)).not.toContain(
           "warning:unencrypted-transfer",
         );
@@ -794,16 +839,18 @@ describe("server move checks", () => {
           ...getAppSettings(harness.db),
           machineServerUrl: "http://laptop.lan.test:38887",
         });
+
         const connect = await runServerMoveCheck(
           checkEnvironment(harness, {
             resolveMode: async () => ({
               mode: "connect",
               connectHandle: "laptop",
-              serverUrl: "https://laptop.getbb.test",
+              serverUrl: "https://laptop.example.test",
             }),
           }),
           { moveInProgress: false, request: request({ serverUrl: null }) },
         );
+
         expect(itemIds(connect.response.items)).toEqual([
           "info:connect-address",
           "info:managed-config-replaced",
@@ -815,7 +862,7 @@ describe("server move checks", () => {
       }
     }));
 
-  it("keeps the bb connect address and blocks when connect status is unavailable", () =>
+  it("keeps the Omnyo connect address and blocks when connect status is unavailable", () =>
     withTestHarness(async (harness) => {
       seedHost(harness.deps, { id: OLD, name: "Laptop" });
       seedPrimaryHost(harness.deps, OLD);
@@ -828,15 +875,16 @@ describe("server move checks", () => {
           resolveMode: async () => ({
             mode: "connect",
             connectHandle: "laptop",
-            serverUrl: "https://laptop.getbb.test",
+            serverUrl: "https://laptop.example.test",
           }),
         }),
         { moveInProgress: false, request: request({ serverUrl: null }) },
       );
+
       expect(connect.response).toMatchObject({
         mode: "connect",
         requiresServerUrl: false,
-        serverUrl: "https://laptop.getbb.test",
+        serverUrl: "https://laptop.example.test",
         canMove: true,
       });
       expect(itemIds(connect.response.items)).toEqual([
@@ -847,17 +895,18 @@ describe("server move checks", () => {
       expect(
         connect.response.items.find((item) => item.id === "offline-machines")
           ?.detail,
-      ).toContain("bb connect");
+      ).toContain("Omnyo connect");
 
       const unavailable = await runServerMoveCheck(
         checkEnvironment(harness, {
           resolveMode: async () => ({
             mode: "unavailable",
-            message: "bb connect isn't running",
+            message: "Omnyo connect isn't running",
           }),
         }),
         { moveInProgress: false, request: request({ serverUrl: null }) },
       );
+
       expect(itemIds(unavailable.response.items)).toContain(
         "blocker:connect-unavailable",
       );

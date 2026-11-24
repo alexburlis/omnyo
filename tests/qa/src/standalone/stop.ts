@@ -8,11 +8,13 @@ import {
 
 function parseStatePath() {
   const stateFlagIndex = process.argv.indexOf("--state");
+
   if (stateFlagIndex < 0 || !process.argv[stateFlagIndex + 1]) {
     throw new Error(
-      "Usage: pnpm --filter @bb/qa standalone:stop --state <path>",
+      "Usage: pnpm --filter @omnyo/qa standalone:stop --state <path>",
     );
   }
+
   return process.argv[stateFlagIndex + 1];
 }
 
@@ -34,6 +36,7 @@ async function main() {
 void main().catch((error) => {
   const message =
     error instanceof Error ? (error.stack ?? error.message) : String(error);
+
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

@@ -25,6 +25,7 @@ function formatNetworkUrls(serverUrl) {
   addresses.sort((left, right) => {
     const leftIsTailscale = left.name.startsWith("tailscale") ? 0 : 1;
     const rightIsTailscale = right.name.startsWith("tailscale") ? 0 : 1;
+
     return leftIsTailscale - rightIsTailscale;
   });
 
@@ -37,20 +38,22 @@ function formatNetworkUrls(serverUrl) {
   ];
 }
 
-/** @type {import("@ladle/react").UserConfig} */
 export default {
   stories: [
     "src/**/*.stories.tsx",
     "../../plugins/automations/*.stories.tsx",
     ".ladle/workflows.stories.tsx",
+    ".ladle/workflow-setup.stories.tsx",
     "../../plugins/provider-usage/*.stories.tsx",
+    "../../plugins/tasks/*.stories.tsx",
+    "../../plugins/keep-awake/*.stories.tsx",
+    "../../plugins/memory/*.stories.tsx",
+    "../../plugins/push-notifications/*.stories.tsx",
   ],
   defaultStory: "",
   viteConfig: "./.ladle/vite.config.ts",
   host: "0.0.0.0",
-  // Ladle defaults Vite HMR to localhost independently of `host`.
-  // Empty string keeps Vite's websocket listener non-loopback and lets
-  // the browser use the page hostname for the websocket URL.
+
   hmrHost: "",
   addons: {
     theme: {

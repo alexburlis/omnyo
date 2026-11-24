@@ -35,6 +35,7 @@ export function ActionMenuItem({
       {children}
     </>
   );
+
   const body = href === undefined ? content : <a href={href}>{content}</a>;
 
   if (surface === "context") {

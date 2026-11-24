@@ -1,4 +1,4 @@
-import { Skeleton } from "@bb/shared-ui/skeleton";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
 
 export function DiffLoadingSkeleton() {
   return (

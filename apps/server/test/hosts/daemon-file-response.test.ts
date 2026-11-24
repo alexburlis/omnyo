@@ -2,11 +2,13 @@ import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import {
   createDaemonFileContentResponse,
+  parseDaemonIfNoneMatch,
   requestMatchesEntityTag,
   type DaemonFileReadResult,
 } from "../../src/services/hosts/daemon-file-response.js";
 
 const IMAGE_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]);
+
 const IMAGE_RESULT: DaemonFileReadResult = {
   path: "/tmp/screenshot.png",
   content: IMAGE_BYTES.toString("base64"),
@@ -37,6 +39,7 @@ describe("createDaemonFileContentResponse", () => {
     const response = createDaemonFileContentResponse(IMAGE_RESULT, {
       headers: { "cache-control": "no-store", "content-type": "text/html" },
     });
+
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("content-type")).toBe("text/html");
     expect(response.headers.get("etag")).toBe('"abc123"');
@@ -46,6 +49,7 @@ describe("createDaemonFileContentResponse", () => {
     const response = createDaemonFileContentResponse(IMAGE_RESULT, {
       ifNoneMatch: 'W/"other", "abc123"',
     });
+
     expect(response.status).toBe(304);
     expect(response.headers.get("etag")).toBe('"abc123"');
     expect(response.headers.has("content-length")).toBe(false);
@@ -54,6 +58,7 @@ describe("createDaemonFileContentResponse", () => {
     const changed = createDaemonFileContentResponse(IMAGE_RESULT, {
       ifNoneMatch: '"stale"',
     });
+
     expect(changed.status).toBe(200);
   });
 
@@ -66,6 +71,7 @@ describe("createDaemonFileContentResponse", () => {
       sha256: IMAGE_RESULT.sha256,
       notModified: true,
     });
+
     expect(response.status).toBe(304);
     expect(response.headers.get("etag")).toBe('"abc123"');
     expect((await response.arrayBuffer()).byteLength).toBe(0);
@@ -80,6 +86,7 @@ describe("createDaemonFileContentResponse", () => {
       sizeBytes: IMAGE_RESULT.sizeBytes,
       sha256: IMAGE_RESULT.sha256,
     });
+
     expect(response.headers.has("last-modified")).toBe(false);
   });
 });
@@ -95,5 +102,25 @@ describe("requestMatchesEntityTag", () => {
     expect(requestMatchesEntityTag('"b", "c"', '"a"')).toBe(false);
     expect(requestMatchesEntityTag('W/"b"', 'W/"a"')).toBe(false);
     expect(requestMatchesEntityTag('"ab"', 'W/"a"')).toBe(false);
+  });
+});
+
+describe("parseDaemonIfNoneMatch", () => {
+  const hex = "a".repeat(64);
+  const hex2 = "0123456789abcdef".repeat(4);
+
+  it.each([
+    { header: undefined, expected: undefined },
+    { header: "  *  ", expected: { kind: "any" } },
+    {
+      header: `W/"${hex}", "${hex2}"`,
+      expected: { kind: "sha256", values: [hex, hex2] },
+    },
+    { header: '"stale"', expected: undefined },
+    { header: `"${hex.toUpperCase()}"`, expected: undefined },
+    { header: ` ${hex} `, expected: undefined },
+    { header: `*, "${hex}"`, expected: { kind: "sha256", values: [hex] } },
+  ])("parses $header into a daemon condition", ({ header, expected }) => {
+    expect(parseDaemonIfNoneMatch(header)).toStrictEqual(expected);
   });
 });

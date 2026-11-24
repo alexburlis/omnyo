@@ -168,6 +168,7 @@ function searchWords(text: string): string[] {
 
 function hasEveryWord(texts: readonly string[], query: string): boolean {
   const textWords = texts.flatMap(searchWords);
+
   return searchWords(query).every((queryWord) =>
     textWords.some((word) => word.startsWith(queryWord)),
   );
@@ -180,13 +181,16 @@ function displayTitle(fixture: FixtureThread): string {
 function seedWorkspace(): ReturnType<typeof createConnection> {
   const db = createMigratedConnection();
   const host = upsertHost(db, noopNotifier, { name: "test-host" });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   const setUpdatedAt = db.$client.prepare(
     "UPDATE threads SET updated_at = ? WHERE id = ?",
   );
+
   for (const fixture of workspace) {
     const created = createThread(db, noopNotifier, {
       projectId: project.id,
@@ -194,6 +198,7 @@ function seedWorkspace(): ReturnType<typeof createConnection> {
       title: fixture.title,
       titleFallback: fixture.titleFallback,
     });
+
     upsertThreadSearchSegments(db, {
       segments: fixture.messages.map((text, index) => ({
         threadId: created.id,
@@ -203,23 +208,28 @@ function seedWorkspace(): ReturnType<typeof createConnection> {
         text,
       })),
     });
+
     if (fixture.archived) archiveThread(db, noopNotifier, created.id);
     setUpdatedAt.run(fixture.updatedAt, created.id);
   }
+
   return db;
 }
 
 describe("thread search ranking evals", () => {
   it.each(cases)("ranks $query", ({ query, group, titleMatches }) => {
     const db = seedWorkspace();
+
     try {
       const results = searchThreadsWithPendingInteractionState(db, {
         query,
         limitPerGroup: 20,
       })[group];
+
       const titles = results.results.map(
         (result) => result.thread.title ?? result.thread.titleFallback ?? "",
       );
+
       const expectedMatches = workspace.filter(
         (fixture) =>
           fixture.archived === (group === "archived") &&
@@ -251,13 +261,16 @@ describe("thread search ranking evals", () => {
         expectedMatches.map(displayTitle).sort(),
       );
       const queryWords = searchWords(query);
+
       for (const result of results.results) {
         for (const match of result.matches) {
           expect(match.highlightRanges.length).toBeGreaterThan(0);
+
           for (const range of match.highlightRanges) {
             const [highlighted = ""] = searchWords(
               match.text.slice(range.start, range.end),
             );
+
             expect(
               queryWords.some((word) => highlighted.startsWith(word)),
             ).toBe(true);

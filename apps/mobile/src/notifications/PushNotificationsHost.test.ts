@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("expo-notifications", () => ({
   addNotificationResponseReceivedListener: vi.fn((listener) => {
     mocks.responseListener.mockImplementation(listener);
+
     return { remove: vi.fn() };
   }),
   clearLastNotificationResponse: mocks.clearLastNotificationResponse,
@@ -35,6 +36,7 @@ vi.mock("expo-router", () => ({
 
 vi.mock("react", async (importOriginal) => {
   const react = await importOriginal<typeof import("react")>();
+
   return {
     ...react,
     useCallback: (callback: unknown) => callback,
@@ -55,8 +57,9 @@ vi.mock("@/app-shell", () => {
     id: "profile-1",
     label: "Profile",
     mode: "connect",
-    serverUrl: "https://bb.example.test",
+    serverUrl: "https://omnyo.example.test",
   };
+
   return {
     useProfiles: () => ({
       activeProfile: profile,
@@ -76,6 +79,7 @@ vi.mock("@/ui", () => ({
 }));
 
 vi.mock("./AppBadgeSync", () => ({ AppBadgeSync: () => null }));
+
 vi.mock("./expo-push-module", () => ({
   getPushNotificationsModule: () => ({
     addTokenListener: mocks.addTokenListener,
@@ -83,6 +87,7 @@ vi.mock("./expo-push-module", () => ({
     projectId: null,
   }),
 }));
+
 vi.mock("./push-controller", () => ({
   getPushRegistrationController: () => ({
     handleTokenRolled: vi.fn(),
@@ -92,9 +97,11 @@ vi.mock("./push-controller", () => ({
     sync: vi.fn(),
   }),
 }));
+
 vi.mock("./push-storage", () => ({
   getPushStore: () => ({ hasPrompted: vi.fn(() => true) }),
 }));
+
 vi.mock("./use-push-store", () => ({
   usePushStoreSnapshot: () => ({
     enabledProfileIds: [],
@@ -129,7 +136,7 @@ describe("PushNotificationsHost", () => {
           content: {
             data: {
               projectId: "proj_1",
-              serverUrl: "https://bb.example.test",
+              serverUrl: "https://omnyo.example.test",
               threadId: "thr_1",
             },
           },

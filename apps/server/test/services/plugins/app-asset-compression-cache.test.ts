@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { createAppAssetCompressionCache } from "../../../src/services/plugins/app-asset-compression-cache.js";
+import {
+  createAppAssetCompressionCache,
+  createPluginAppAssetCompressionCache,
+} from "../../../src/services/plugins/app-asset-compression-cache.js";
 
 describe("plugin app asset compression cache", () => {
   it("deduplicates variants, resets changed hashes, and evicts old assets", async () => {
     const cache = createAppAssetCompressionCache(1);
     let compressionCount = 0;
+
     const get = (assetKey: string, hash: string, encoding = "br") =>
       cache.getOrCreate({
         assetKey,
         compress: async () => {
           compressionCount += 1;
+
           return Buffer.from(`compressed-${compressionCount}`);
         },
         encoding,
@@ -20,6 +25,7 @@ describe("plugin app asset compression cache", () => {
       get("plugin:js", "hash-1"),
       get("plugin:js", "hash-1"),
     ]);
+
     expect(concurrent).toEqual(first);
     expect(await get("plugin:js", "hash-1")).toEqual(first);
     expect(compressionCount).toBe(1);
@@ -37,17 +43,46 @@ describe("plugin app asset compression cache", () => {
     expect(compressionCount).toBe(5);
   });
 
+  it("a second cold client reuses every compressed asset of 45 plugin frontends", async () => {
+    const cache = createPluginAppAssetCompressionCache();
+    let compressionCount = 0;
+
+    const counting = async () => {
+      compressionCount += 1;
+
+      return Buffer.from(`compressed-${compressionCount}`);
+    };
+
+    for (let pass = 0; pass < 2; pass += 1) {
+      for (let i = 0; i < 45; i += 1) {
+        for (const kind of ["js", "css"]) {
+          await cache.getOrCreate({
+            assetKey: `plugin-${i}:${kind}`,
+            compress: counting,
+            encoding: "br",
+            hash: "h",
+          });
+        }
+      }
+    }
+
+    expect(compressionCount).toBe(90);
+  });
+
   it("retries a failed compression instead of caching its rejection", async () => {
     const cache = createAppAssetCompressionCache(1);
     let attempts = 0;
+
     const get = () =>
       cache.getOrCreate({
         assetKey: "plugin:js",
         compress: async () => {
           attempts += 1;
+
           if (attempts === 1) {
             throw new Error("compression failed");
           }
+
           return Buffer.from("compressed");
         },
         encoding: "br",

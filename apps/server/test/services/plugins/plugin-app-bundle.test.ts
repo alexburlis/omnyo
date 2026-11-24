@@ -7,8 +7,13 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { upsertInstalledPlugin } from "@bb/db";
-import { PLUGIN_SDK_MAJOR, PLUGIN_SDK_VERSION } from "@bb/domain";
+import { upsertInstalledPlugin } from "@omnyo/db";
+import {
+  PLUGIN_RUNTIME_ABI,
+  PLUGIN_SDK_MAJOR,
+  PLUGIN_SDK_PACKAGE_NAME,
+  PLUGIN_SDK_VERSION,
+} from "@omnyo/domain";
 import {
   createTestAppHarness,
   type TestAppHarness,
@@ -18,9 +23,26 @@ const BASE = "http://127.0.0.1:3334";
 
 const run = promisify(execFile);
 
+function compatibleArtifactMeta(pluginId: string): string {
+  return JSON.stringify({
+    sdkMajor: PLUGIN_SDK_MAJOR,
+    sdkVersion: PLUGIN_SDK_VERSION,
+    artifactFormatVersion: 2,
+    sdkPackage: PLUGIN_SDK_PACKAGE_NAME,
+    runtimeAbi: PLUGIN_RUNTIME_ABI,
+    pluginId,
+    pluginVersion: "0.1.0",
+    builtWith: {
+      coreVersion: "0.0.0-test",
+      pluginSdkVersion: PLUGIN_SDK_VERSION,
+    },
+  });
+}
+
 async function hasBinary(command: string): Promise<boolean> {
   try {
     await run(command, ["--version"]);
+
     return true;
   } catch {
     return false;
@@ -54,8 +76,10 @@ function npmPersistence(packageName: string, version: string) {
   };
 }
 
-const SERVER_SOURCE = `export default function plugin(bb: any) { bb.log.info("loaded"); }`;
+const SERVER_SOURCE = `export default function plugin(api: any) { api.log.info("loaded"); }`;
+
 const APP_SOURCE = `export default function App() {\n  return <div className="line-clamp-2">hi</div>;\n}\n`;
+
 const COMPRESSIBLE_APP_SOURCE = `const payload = ${JSON.stringify(
   "compressible plugin bundle payload ".repeat(200),
 )};\nexport default function App() {\n  return <div className="line-clamp-2" data-payload={payload}>hi</div>;\n}\n`;
@@ -75,7 +99,7 @@ async function writeAppPluginFixture(
     JSON.stringify({
       name: options.name,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "App bundle fixture",
         description: "Plugin app bundle fixture.",
         branding: { icon: "Zap" },
@@ -88,6 +112,7 @@ async function writeAppPluginFixture(
     join(rootDir, "server.ts"),
     options.serverSource ?? SERVER_SOURCE,
   );
+
   if (options.app !== false) {
     await writeFile(join(rootDir, "app.tsx"), options.appSource ?? APP_SOURCE);
   }
@@ -106,9 +131,14 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
   });
 
   it("builds path installs at install time and serves hash-cached assets", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-appy");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-appy",
+    );
+
     await writeAppPluginFixture(rootDir, {
-      name: "bb-plugin-appy",
+      name: "omnyo-plugin-appy",
       appSource: COMPRESSIBLE_APP_SOURCE,
     });
 
@@ -117,6 +147,7 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     expect(entry.app.hasApp).toBe(true);
     const bundle = entry.app.bundle;
     expect(bundle).not.toBeNull();
+
     if (bundle === null) throw new Error("unreachable");
     expect(bundle.compatible).toBe(true);
     expect(bundle.sdkMajor).toBe(PLUGIN_SDK_MAJOR);
@@ -138,7 +169,7 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
       "public, max-age=31536000, immutable",
     );
     const jsText = await js.text();
-    expect(jsText).toContain("__bbPluginRuntime");
+    expect(jsText).toContain("__omnyoPluginRuntime");
     expect(js.headers.get("content-encoding")).toBeNull();
     expect(js.headers.get("content-length")).toBe(
       String(Buffer.byteLength(jsText)),
@@ -147,6 +178,7 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const brotliJs = await harness.app.request(`${BASE}${bundle.jsUrl}`, {
       headers: { "accept-encoding": "br, gzip" },
     });
+
     expect(brotliJs.headers.get("content-encoding")).toBe("br");
     expect(
       brotliJs.headers
@@ -165,6 +197,7 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
       `${BASE}${bundle.jsUrl}`,
       { headers: { "accept-encoding": "br;q=0, gzip;q=0" } },
     );
+
     expect(rejectedCompression.headers.get("content-encoding")).toBeNull();
     expect(await rejectedCompression.text()).toBe(jsText);
 
@@ -172,6 +205,7 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
       method: "HEAD",
       headers: { "accept-encoding": "br, gzip" },
     });
+
     expect(brotliJsHead.headers.get("content-encoding")).toBe("br");
     expect(brotliJsHead.headers.get("content-length")).toBe(
       String(brotliJsBytes.length),
@@ -183,8 +217,10 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     expect(css.headers.get("content-type")).toContain("text/css");
     const cssText = await css.text();
     expect(cssText).toContain("line-clamp-2");
+
     const scope =
-      ":where([data-bb-plugin=appy],[data-bb-plugin-root]:not([data-bb-plugin]))";
+      ":where([data-omnyo-plugin=appy],[data-omnyo-plugin-root]:not([data-omnyo-plugin]))";
+
     expect(cssText).toContain(`${scope} .line-clamp-2`);
     expect(cssText).toContain(`${scope}.line-clamp-2`);
     expect(cssText).not.toMatch(/@layer utilities\{\./);
@@ -192,6 +228,7 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const gzipCss = await harness.app.request(`${BASE}${bundle.cssUrl}`, {
       headers: { "accept-encoding": "br;q=0, gzip;q=1" },
     });
+
     expect(gzipCss.headers.get("content-encoding")).toBe("gzip");
     const gzipCssBytes = Buffer.from(await gzipCss.arrayBuffer());
     expect(gzipCssBytes.length).toBeLessThan(Buffer.byteLength(cssText));
@@ -200,25 +237,33 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const staleHash = await harness.app.request(
       `${BASE}/api/v1/plugins/appy/assets/app.js?h=deadbeefdeadbeef`,
     );
+
     expect(staleHash.status).toBe(200);
     expect(staleHash.headers.get("cache-control")).toBe("no-store");
+
     const noHash = await harness.app.request(
       `${BASE}/api/v1/plugins/appy/assets/app.js`,
     );
+
     expect(noHash.status).toBe(200);
     expect(noHash.headers.get("cache-control")).toBe("no-store");
 
     const unknownPlugin = await harness.app.request(
       `${BASE}/api/v1/plugins/nope/assets/app.js`,
     );
+
     expect(unknownPlugin.status).toBe(404);
+
     const unknownHash = await harness.app.request(
       `${BASE}/api/v1/plugin-app-assets/0000000000000000/app.js`,
     );
+
     expect(unknownHash.status).toBe(404);
+
     const unknownFile = await harness.app.request(
       `${BASE}/api/v1/plugins/appy/assets/evil.js`,
     );
+
     expect(unknownFile.status).toBe(404);
   }, 60_000);
 
@@ -226,10 +271,11 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-headless",
+      "omnyo-plugin-headless",
     );
+
     await writeAppPluginFixture(rootDir, {
-      name: "bb-plugin-headless",
+      name: "omnyo-plugin-headless",
       app: false,
     });
     const entry = await harness.pluginService.installPath(rootDir);
@@ -239,6 +285,7 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/headless/assets/app.js`,
     );
+
     expect(response.status).toBe(404);
   });
 
@@ -246,12 +293,13 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-typed-rpc",
+      "omnyo-plugin-typed-rpc",
     );
+
     await writeAppPluginFixture(rootDir, {
-      name: "bb-plugin-typed-rpc",
+      name: "omnyo-plugin-typed-rpc",
       serverSource: `
-        import { defineRpcContract } from "@get-bb/plugin-sdk";
+        import { defineRpcContract } from "@omnyo/plugin-sdk";
         import { z } from "zod";
         const BACKEND_ONLY_SENTINEL = "backend-contract-must-not-bundle";
         export const rpcContract = defineRpcContract({
@@ -260,13 +308,13 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
             output: z.object({ value: z.string() }),
           },
         });
-        export default function plugin(bb: any) {
+        export default function plugin(api: any) {
           void BACKEND_ONLY_SENTINEL;
-          bb.rpc.register(rpcContract, { echo: (input: any) => input });
+          api.rpc.register(rpcContract, { echo: (input: any) => input });
         }
       `,
       appSource: `
-        import { definePluginApp, useRpc } from "@get-bb/plugin-sdk/app";
+        import { definePluginApp, useRpc } from "@omnyo/plugin-sdk/app";
         import type { rpcContract } from "./server";
         function Panel() {
           const rpc = useRpc<typeof rpcContract>();
@@ -288,20 +336,42 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
   }, 60_000);
 
   it("fails the install when the frontend build fails", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-bad");
+    const initialPluginIds = harness.pluginService
+      .list()
+      .map((plugin) => plugin.id)
+      .sort();
+
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-bad",
+    );
+
     await writeAppPluginFixture(rootDir, {
-      name: "bb-plugin-bad",
+      name: "omnyo-plugin-bad",
       appSource: "export default function App( {\n",
     });
     await expect(
       harness.pluginService.installPath(rootDir),
     ).rejects.toThrowError(/frontend bundle build for "bad" failed/);
-    expect(harness.pluginService.list()).toHaveLength(0);
+
+    const pluginIds = harness.pluginService
+      .list()
+      .map((plugin) => plugin.id)
+      .sort();
+
+    expect(pluginIds).toEqual(initialPluginIds);
+    expect(pluginIds).not.toContain("bad");
   }, 60_000);
 
   it("rebuilds a path plugin at load when the recorded SDK version is stale", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-aged");
-    await writeAppPluginFixture(rootDir, { name: "bb-plugin-aged" });
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-aged",
+    );
+
+    await writeAppPluginFixture(rootDir, { name: "omnyo-plugin-aged" });
     await harness.pluginService.installPath(rootDir);
 
     const metaPath = join(rootDir, "dist", "app.meta.json");
@@ -313,16 +383,23 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
 
     const meta = JSON.parse(await readFile(metaPath, "utf8"));
     expect(meta.sdkVersion).toBe(PLUGIN_SDK_VERSION);
+
     const entry = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "aged");
+
     expect(entry?.app.bundle?.sdkVersion).toBe(PLUGIN_SDK_VERSION);
     expect(entry?.app.bundle?.compatible).toBe(true);
   }, 120_000);
 
   it("keeps an npm plugin's backend running with compatible:false on a major mismatch (no rebuild)", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-oldie");
-    await writeAppPluginFixture(rootDir, { name: "bb-plugin-oldie" });
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-oldie",
+    );
+
+    await writeAppPluginFixture(rootDir, { name: "omnyo-plugin-oldie" });
     const staleMajor = PLUGIN_SDK_MAJOR + 1;
     await mkdir(join(rootDir, "dist"), { recursive: true });
     await writeFile(join(rootDir, "dist", "app.js"), "export default {};\n");
@@ -331,9 +408,9 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
       JSON.stringify({ sdkMajor: staleMajor, sdkVersion: `${staleMajor}.0.0` }),
     );
     upsertInstalledPlugin(harness.db, {
-      ...npmPersistence("bb-plugin-oldie", "0.1.0"),
+      ...npmPersistence("omnyo-plugin-oldie", "0.1.0"),
       id: "oldie",
-      source: "npm:bb-plugin-oldie@0.1.0",
+      source: "npm:omnyo-plugin-oldie@0.1.0",
       rootDir,
       version: "0.1.0",
       enabled: true,
@@ -344,6 +421,7 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const entry = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "oldie");
+
     expect(entry?.status).toBe("running");
     expect(entry?.app.hasApp).toBe(true);
     expect(entry?.app.bundle).toMatchObject({
@@ -351,53 +429,87 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
       sdkVersion: `${staleMajor}.0.0`,
       compatible: false,
     });
+
     const meta = JSON.parse(
       await readFile(join(rootDir, "dist", "app.meta.json"), "utf8"),
     );
+
     expect(meta.sdkVersion).toBe(`${staleMajor}.0.0`);
+
     const js = await harness.app.request(
       `${BASE}${entry?.app.bundle?.jsUrl ?? ""}`,
     );
-    expect(js.status).toBe(200);
+
+    expect(js.status).toBe(404);
   });
 
-  it("refreshes the served bundle hash on reload-by-id after dist changes (bb plugin dev cycle)", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-devy");
-    await writeAppPluginFixture(rootDir, { name: "bb-plugin-devy" });
+  it("refreshes the served bundle hash on reload-by-id after dist changes (omnyo plugin dev cycle)", async () => {
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-devy",
+    );
+
+    await writeAppPluginFixture(rootDir, { name: "omnyo-plugin-devy" });
     await mkdir(join(rootDir, "dist"), { recursive: true });
-    await writeFile(join(rootDir, "dist", "app.js"), "export default 1;\n");
+
+    const filler = `export const filler = ${JSON.stringify(
+      "reloadable plugin bundle payload ".repeat(64),
+    )};\n`;
+
+    await writeFile(
+      join(rootDir, "dist", "app.js"),
+      `${filler}export default 1;\n`,
+    );
     await writeFile(
       join(rootDir, "dist", "app.meta.json"),
-      JSON.stringify({
-        sdkMajor: PLUGIN_SDK_MAJOR,
-        sdkVersion: PLUGIN_SDK_VERSION,
-      }),
+      compatibleArtifactMeta("devy"),
     );
     upsertInstalledPlugin(harness.db, {
-      ...npmPersistence("bb-plugin-devy", "0.1.0"),
+      ...npmPersistence("omnyo-plugin-devy", "0.1.0"),
       id: "devy",
-      source: "npm:bb-plugin-devy@0.1.0",
+      source: "npm:omnyo-plugin-devy@0.1.0",
       rootDir,
       version: "0.1.0",
       enabled: true,
       enabledFollowsDefault: false,
     });
     await harness.pluginService.reload("devy");
+
     const before = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "devy")?.app.bundle;
+
     expect(before).not.toBeNull();
 
-    await writeFile(join(rootDir, "dist", "app.js"), "export default 2;\n");
+    const brotliBefore = await harness.app.request(
+      `${BASE}${before?.jsUrl ?? ""}`,
+      { headers: { "accept-encoding": "br" } },
+    );
+
+    expect(brotliBefore.headers.get("content-encoding")).toBe("br");
+    expect(
+      brotliDecompressSync(
+        Buffer.from(await brotliBefore.arrayBuffer()),
+      ).toString(),
+    ).toContain("export default 1");
+
+    await writeFile(
+      join(rootDir, "dist", "app.js"),
+      `${filler}export default 2;\n`,
+    );
+
     const reload = await harness.app.request(
       `${BASE}/api/v1/plugins/reload?id=devy`,
       { method: "POST" },
     );
+
     expect(reload.status).toBe(200);
 
     const after = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "devy")?.app.bundle;
+
     expect(after).not.toBeNull();
     expect(after?.hash).not.toBe(before?.hash);
     expect(after?.jsUrl).toBe(
@@ -406,19 +518,36 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const js = await harness.app.request(`${BASE}${after?.jsUrl ?? ""}`);
     expect(js.status).toBe(200);
     expect(await js.text()).toContain("export default 2");
+
+    const brotliAfter = await harness.app.request(
+      `${BASE}${after?.jsUrl ?? ""}`,
+      { headers: { "accept-encoding": "br" } },
+    );
+
+    expect(brotliAfter.headers.get("content-encoding")).toBe("br");
+
+    const brotliAfterText = brotliDecompressSync(
+      Buffer.from(await brotliAfter.arrayBuffer()),
+    ).toString();
+
+    expect(brotliAfterText).toContain("export default 2");
+    expect(brotliAfterText).not.toContain("export default 1");
   });
 
   it("clears the served bundle and sets a status detail when a required rebuild fails", async () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-brittle",
+      "omnyo-plugin-brittle",
     );
-    await writeAppPluginFixture(rootDir, { name: "bb-plugin-brittle" });
+
+    await writeAppPluginFixture(rootDir, { name: "omnyo-plugin-brittle" });
     await harness.pluginService.installPath(rootDir);
+
     const before = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "brittle");
+
     expect(before?.app.bundle).not.toBeNull();
 
     await writeFile(
@@ -434,40 +563,47 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const entry = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "brittle");
+
     expect(entry?.status).toBe("running");
     expect(entry?.statusDetail).toContain("frontend bundle rebuild failed");
     expect(entry?.app).toEqual({ hasApp: true, bundle: null });
+
     const js = await harness.app.request(
       `${BASE}/api/v1/plugins/brittle/assets/app.js`,
     );
+
     expect(js.status).toBe(404);
   }, 120_000);
 
   it("re-keys the bundle hash when only the meta changes (same js/css)", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-meta");
-    await writeAppPluginFixture(rootDir, { name: "bb-plugin-meta" });
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-meta",
+    );
+
+    await writeAppPluginFixture(rootDir, { name: "omnyo-plugin-meta" });
     await mkdir(join(rootDir, "dist"), { recursive: true });
     await writeFile(join(rootDir, "dist", "app.js"), "export default 1;\n");
     await writeFile(
       join(rootDir, "dist", "app.meta.json"),
-      JSON.stringify({
-        sdkMajor: PLUGIN_SDK_MAJOR,
-        sdkVersion: PLUGIN_SDK_VERSION,
-      }),
+      compatibleArtifactMeta("meta"),
     );
     upsertInstalledPlugin(harness.db, {
-      ...npmPersistence("bb-plugin-meta", "0.1.0"),
+      ...npmPersistence("omnyo-plugin-meta", "0.1.0"),
       id: "meta",
-      source: "npm:bb-plugin-meta@0.1.0",
+      source: "npm:omnyo-plugin-meta@0.1.0",
       rootDir,
       version: "0.1.0",
       enabled: true,
       enabledFollowsDefault: false,
     });
     await harness.pluginService.reload("meta");
+
     const before = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "meta")?.app.bundle;
+
     expect(before?.compatible).toBe(true);
 
     const staleMajor = PLUGIN_SDK_MAJOR + 1;
@@ -476,9 +612,11 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
       JSON.stringify({ sdkMajor: staleMajor, sdkVersion: `${staleMajor}.0.0` }),
     );
     await harness.pluginService.reload("meta");
+
     const after = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "meta")?.app.bundle;
+
     expect(after?.compatible).toBe(false);
     expect(after?.hash).not.toBe(before?.hash);
   });
@@ -487,35 +625,40 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-malformed",
+      "omnyo-plugin-malformed",
     );
-    await writeAppPluginFixture(rootDir, { name: "bb-plugin-malformed" });
+
+    await writeAppPluginFixture(rootDir, { name: "omnyo-plugin-malformed" });
     await mkdir(join(rootDir, "dist"), { recursive: true });
     await writeFile(join(rootDir, "dist", "app.js"), "export default 1;\n");
     upsertInstalledPlugin(harness.db, {
-      ...npmPersistence("bb-plugin-malformed", "0.1.0"),
+      ...npmPersistence("omnyo-plugin-malformed", "0.1.0"),
       id: "malformed",
-      source: "npm:bb-plugin-malformed@0.1.0",
+      source: "npm:omnyo-plugin-malformed@0.1.0",
       rootDir,
       version: "0.1.0",
       enabled: true,
       enabledFollowsDefault: false,
     });
+
     const badMetas = [
       { sdkMajor: -1, sdkVersion: "0.0.0" },
       { sdkMajor: 0.5, sdkVersion: "0.5.0" },
       { sdkMajor: PLUGIN_SDK_MAJOR, sdkVersion: "banana" },
       { sdkMajor: PLUGIN_SDK_MAJOR, sdkVersion: `${PLUGIN_SDK_MAJOR + 1}.0.0` },
     ];
+
     for (const badMeta of badMetas) {
       await writeFile(
         join(rootDir, "dist", "app.meta.json"),
         JSON.stringify(badMeta),
       );
       await harness.pluginService.reload("malformed");
+
       const entry = harness.pluginService
         .list()
         .find((plugin) => plugin.id === "malformed");
+
       expect(entry?.app, JSON.stringify(badMeta)).toEqual({
         hasApp: true,
         bundle: null,
@@ -524,30 +667,34 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
   });
 
   it("stops serving assets when the plugin is disabled", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-gated");
-    await writeAppPluginFixture(rootDir, { name: "bb-plugin-gated" });
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-gated",
+    );
+
+    await writeAppPluginFixture(rootDir, { name: "omnyo-plugin-gated" });
     await mkdir(join(rootDir, "dist"), { recursive: true });
     await writeFile(join(rootDir, "dist", "app.js"), "export default 1;\n");
     await writeFile(
       join(rootDir, "dist", "app.meta.json"),
-      JSON.stringify({
-        sdkMajor: PLUGIN_SDK_MAJOR,
-        sdkVersion: PLUGIN_SDK_VERSION,
-      }),
+      compatibleArtifactMeta("gated"),
     );
     upsertInstalledPlugin(harness.db, {
-      ...npmPersistence("bb-plugin-gated", "0.1.0"),
+      ...npmPersistence("omnyo-plugin-gated", "0.1.0"),
       id: "gated",
-      source: "npm:bb-plugin-gated@0.1.0",
+      source: "npm:omnyo-plugin-gated@0.1.0",
       rootDir,
       version: "0.1.0",
       enabled: true,
       enabledFollowsDefault: false,
     });
     await harness.pluginService.reload("gated");
+
     const bundle = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "gated")?.app.bundle;
+
     expect(bundle).not.toBeNull();
     const url = `${BASE}${bundle?.jsUrl ?? ""}`;
     expect((await harness.app.request(url)).status).toBe(200);
@@ -560,12 +707,17 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
   });
 
   it("reports bundle:null when an npm plugin's dist is missing at load", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-bare");
-    await writeAppPluginFixture(rootDir, { name: "bb-plugin-bare" });
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-bare",
+    );
+
+    await writeAppPluginFixture(rootDir, { name: "omnyo-plugin-bare" });
     upsertInstalledPlugin(harness.db, {
-      ...npmPersistence("bb-plugin-bare", "0.1.0"),
+      ...npmPersistence("omnyo-plugin-bare", "0.1.0"),
       id: "bare",
-      source: "npm:bb-plugin-bare@0.1.0",
+      source: "npm:omnyo-plugin-bare@0.1.0",
       rootDir,
       version: "0.1.0",
       enabled: true,
@@ -576,11 +728,14 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
     const entry = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "bare");
+
     expect(entry?.status).toBe("running");
     expect(entry?.app).toEqual({ hasApp: true, bundle: null });
+
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/bare/assets/app.js`,
     );
+
     expect(response.status).toBe(404);
   });
 
@@ -589,14 +744,19 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
       "refuses npm installs without a prebuilt bundle and accepts prebuilt ones",
       { timeout: 180_000 },
       async () => {
+        const initialPluginIds = harness.pluginService
+          .list()
+          .map((plugin) => plugin.id)
+          .sort();
+
         const workDir = join(harness.config.dataDir, "npm-work");
 
         const noDistDir = join(workDir, "no-dist");
-        await writeAppPluginFixture(noDistDir, { name: "bb-plugin-nodist" });
+        await writeAppPluginFixture(noDistDir, { name: "omnyo-plugin-nodist" });
 
         const prebuiltDir = join(workDir, "prebuilt");
         await writeAppPluginFixture(prebuiltDir, {
-          name: "bb-plugin-prebuilt",
+          name: "omnyo-plugin-prebuilt",
         });
         await mkdir(join(prebuiltDir, "dist"), { recursive: true });
         await writeFile(
@@ -605,23 +765,17 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
         );
         await writeFile(
           join(prebuiltDir, "dist", "app.meta.json"),
-          JSON.stringify({
-            sdkMajor: PLUGIN_SDK_MAJOR,
-            sdkVersion: PLUGIN_SDK_VERSION,
-          }),
+          compatibleArtifactMeta("prebuilt"),
         );
 
         const partialDir = join(workDir, "partial");
         await writeAppPluginFixture(partialDir, {
-          name: "bb-plugin-partial",
+          name: "omnyo-plugin-partial",
         });
         await mkdir(join(partialDir, "dist"), { recursive: true });
         await writeFile(
           join(partialDir, "dist", "server.meta.json"),
-          JSON.stringify({
-            sdkMajor: PLUGIN_SDK_MAJOR,
-            sdkVersion: PLUGIN_SDK_VERSION,
-          }),
+          compatibleArtifactMeta("partial"),
         );
         await writeFile(
           join(partialDir, "dist", "app.js"),
@@ -639,10 +793,11 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
         const packDir = join(workDir, "pack");
         await mkdir(packDir, { recursive: true });
         const tarballs = new Map<string, Buffer>();
+
         for (const [name, dir] of [
-          ["bb-plugin-nodist", noDistDir],
-          ["bb-plugin-prebuilt", prebuiltDir],
-          ["bb-plugin-partial", partialDir],
+          ["omnyo-plugin-nodist", noDistDir],
+          ["omnyo-plugin-prebuilt", prebuiltDir],
+          ["omnyo-plugin-partial", partialDir],
         ] as const) {
           await run("npm", ["pack", "--pack-destination", packDir], {
             cwd: dir,
@@ -656,14 +811,17 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
         const registry = await new Promise<Server>((resolvePromise) => {
           const server = createServer((request, response) => {
             const url = request.url ?? "";
+
             for (const [name, tarball] of tarballs) {
               if (url === `/${name}/-/${name}-0.1.0.tgz`) {
                 response.writeHead(200, {
                   "content-type": "application/octet-stream",
                 });
                 response.end(tarball);
+
                 return;
               }
+
               if (url === `/${name}`) {
                 const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
                 response.writeHead(200, {
@@ -690,55 +848,79 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
                     },
                   }),
                 );
+
                 return;
               }
             }
+
             response.writeHead(404);
             response.end();
           });
+
           server.listen(0, "127.0.0.1", () => resolvePromise(server));
         });
+
         const port = (registry.address() as AddressInfo).port;
         const previousRegistry = process.env.npm_config_registry;
         const previousCache = process.env.npm_config_cache;
         process.env.npm_config_registry = `http://127.0.0.1:${port}`;
         process.env.npm_config_cache = join(workDir, "npm-cache");
+
         try {
           await expect(
-            harness.pluginService.install("npm:bb-plugin-nodist@0.1.0", {
+            harness.pluginService.install("npm:omnyo-plugin-nodist@0.1.0", {
               kind: "root",
             }),
           ).rejects.toThrowError(/must publish a prebuilt bundle/);
-          expect(harness.pluginService.list()).toHaveLength(0);
+
+          const afterNoDistPluginIds = harness.pluginService
+            .list()
+            .map((plugin) => plugin.id)
+            .sort();
+
+          expect(afterNoDistPluginIds).toEqual(initialPluginIds);
+          expect(afterNoDistPluginIds).not.toContain("nodist");
+
           const prefix = join(
             harness.config.dataDir,
             "plugins",
             "npm",
-            "bb-plugin-nodist@0.1.0",
+            "omnyo-plugin-nodist@0.1.0",
           );
+
           await expect(stat(prefix)).rejects.toThrowError();
 
           await expect(
-            harness.pluginService.install("npm:bb-plugin-partial@0.1.0", {
+            harness.pluginService.install("npm:omnyo-plugin-partial@0.1.0", {
               kind: "root",
             }),
           ).rejects.toThrowError(
             /app artifact.*SDK major.*rebuild the app artifact/,
           );
+
           const partialPrefix = join(
             harness.config.dataDir,
             "plugins",
             "npm",
-            "bb-plugin-partial@0.1.0",
+            "omnyo-plugin-partial@0.1.0",
           );
+
           await expect(stat(partialPrefix)).rejects.toThrowError();
           await expect(stat(`${partialPrefix}.staging`)).rejects.toThrowError();
-          expect(harness.pluginService.list()).toHaveLength(0);
+
+          const afterPartialPluginIds = harness.pluginService
+            .list()
+            .map((plugin) => plugin.id)
+            .sort();
+
+          expect(afterPartialPluginIds).toEqual(initialPluginIds);
+          expect(afterPartialPluginIds).not.toContain("partial");
 
           const entry = await harness.pluginService.install(
-            "npm:bb-plugin-prebuilt@0.1.0",
+            "npm:omnyo-plugin-prebuilt@0.1.0",
             { kind: "root" },
           );
+
           expect(entry.status).toBe("running");
           expect(entry.app.hasApp).toBe(true);
           expect(entry.app.bundle).toMatchObject({
@@ -752,11 +934,13 @@ describe("plugin app bundles (build policy, inventory, asset routes)", () => {
           } else {
             process.env.npm_config_registry = previousRegistry;
           }
+
           if (previousCache === undefined) {
             delete process.env.npm_config_cache;
           } else {
             process.env.npm_config_cache = previousCache;
           }
+
           await new Promise<void>((resolvePromise) =>
             registry.close(() => resolvePromise()),
           );

@@ -1,11 +1,12 @@
 import { cn } from "@/lib/utils";
-import { UrlLink } from "@get-bb/plugin-sdk/app";
+import { UrlLink } from "@omnyo/plugin-sdk/app";
 
 const INLINE_PATTERN =
   /(!\[[^\]]*\]\([^)\s]+\))|(<img\s[^>]*?\/?>)|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[[^\]]+\]\([^)\s]+\))/g;
 
 function imgAttribute(tag: string, name: string): string | undefined {
   const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`));
+
   return match?.[1];
 }
 
@@ -18,6 +19,7 @@ function renderImage(
   height?: string,
 ): React.ReactNode {
   if (!src || !/^https?:\/\//.test(src)) return raw;
+
   return (
     <img
       key={key}
@@ -35,10 +37,13 @@ function renderInline(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   let last = 0;
   let key = 0;
+
   for (const match of text.matchAll(INLINE_PATTERN)) {
     const index = match.index ?? 0;
+
     if (index > last) nodes.push(text.slice(last, index));
     const token = match[0];
+
     if (token.startsWith("![")) {
       const closeBracket = token.indexOf("](");
       nodes.push(
@@ -89,9 +94,12 @@ function renderInline(text: string): React.ReactNode[] {
         </UrlLink>,
       );
     }
+
     last = index + token.length;
   }
+
   if (last < text.length) nodes.push(text.slice(last));
+
   return nodes;
 }
 
@@ -106,9 +114,11 @@ interface ParsedTable {
 
 function isEscaped(text: string, index: number): boolean {
   let backslashes = 0;
+
   for (let i = index - 1; i >= 0 && text[i] === "\\"; i--) {
     backslashes++;
   }
+
   return backslashes % 2 === 1;
 }
 
@@ -116,30 +126,38 @@ function hasUnescapedPipe(line: string): boolean {
   for (let i = 0; i < line.length; i++) {
     if (line[i] === "|" && !isEscaped(line, i)) return true;
   }
+
   return false;
 }
 
 function splitTableRow(line: string): string[] {
   let row = line.trim();
+
   if (row.startsWith("|")) row = row.slice(1);
+
   if (row.endsWith("|") && !isEscaped(row, row.length - 1)) {
     row = row.slice(0, -1);
   }
 
   const cells: string[] = [];
   let cell = "";
+
   for (let i = 0; i < row.length; i++) {
     if (row[i] === "|" && !isEscaped(row, i)) {
       cells.push(cell.trim());
       cell = "";
       continue;
     }
+
     if (row[i] === "|" && cell.endsWith("\\")) {
       cell = cell.slice(0, -1);
     }
+
     cell += row[i];
   }
+
   cells.push(cell.trim());
+
   return cells;
 }
 
@@ -147,9 +165,13 @@ function parseTableAlignment(cell: string): TableAlignment | undefined {
   if (!/^:?-+:?$/.test(cell)) return undefined;
   const left = cell.startsWith(":");
   const right = cell.endsWith(":");
+
   if (left && right) return "center";
+
   if (right) return "right";
+
   if (left) return "left";
+
   return null;
 }
 
@@ -157,29 +179,35 @@ function parseTable(lines: string[], startLine: number): ParsedTable | null {
   if (startLine + 1 >= lines.length) return null;
   const headerLine = lines[startLine];
   const delimiterLine = lines[startLine + 1];
+
   if (!hasUnescapedPipe(headerLine) || !hasUnescapedPipe(delimiterLine)) {
     return null;
   }
 
   const header = splitTableRow(headerLine);
   const delimiterCells = splitTableRow(delimiterLine);
+
   if (header.length !== delimiterCells.length) return null;
 
   const alignments: TableAlignment[] = [];
+
   for (const cell of delimiterCells) {
     const alignment = parseTableAlignment(cell);
+
     if (alignment === undefined) return null;
     alignments.push(alignment);
   }
 
   const rows: string[][] = [];
   let nextLine = startLine + 2;
+
   while (
     nextLine < lines.length &&
     lines[nextLine].trim() !== "" &&
     hasUnescapedPipe(lines[nextLine])
   ) {
     const cells = splitTableRow(lines[nextLine]).slice(0, header.length);
+
     while (cells.length < header.length) cells.push("");
     rows.push(cells);
     nextLine++;
@@ -216,20 +244,26 @@ export function Markdown({
   const blocks: React.ReactNode[] = [];
   let i = 0;
   let key = 0;
+
   while (i < lines.length) {
     const line = lines[i];
+
     if (line.trim() === "") {
       i++;
       continue;
     }
+
     const fence = line.match(/^```/);
+
     if (fence) {
       const code: string[] = [];
       i++;
+
       while (i < lines.length && !lines[i].startsWith("```")) {
         code.push(lines[i]);
         i++;
       }
+
       i++;
       blocks.push(
         <pre
@@ -241,14 +275,18 @@ export function Markdown({
       );
       continue;
     }
+
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
+
     if (heading) {
       const level = Math.min(heading[1].length, 3);
+
       const Tag = `h${heading[1].length <= 3 ? heading[1].length : 4}` as
         | "h1"
         | "h2"
         | "h3"
         | "h4";
+
       blocks.push(
         <Tag key={key++} className={HEADING_CLASSES[level - 1]}>
           {renderInline(heading[2])}
@@ -257,7 +295,9 @@ export function Markdown({
       i++;
       continue;
     }
+
     const table = parseTable(lines, i);
+
     if (table) {
       blocks.push(
         <div key={key++} className="overflow-x-auto">
@@ -300,14 +340,17 @@ export function Markdown({
       i = table.nextLine;
       continue;
     }
+
     if (/^\s*-\s+/.test(line)) {
       const items: React.ReactNode[] = [];
+
       while (i < lines.length && /^\s*-\s+/.test(lines[i])) {
         items.push(
           <li key={key++}>{renderInline(lines[i].replace(/^\s*-\s+/, ""))}</li>,
         );
         i++;
       }
+
       blocks.push(
         <ul key={key++} className="list-disc space-y-1 pl-5">
           {items}
@@ -315,7 +358,9 @@ export function Markdown({
       );
       continue;
     }
+
     const para: string[] = [];
+
     while (
       i < lines.length &&
       lines[i].trim() !== "" &&
@@ -327,11 +372,13 @@ export function Markdown({
       para.push(lines[i]);
       i++;
     }
+
     blocks.push(
       <p key={key++} className="whitespace-pre-wrap break-words">
         {renderInline(para.join("\n"))}
       </p>,
     );
   }
+
   return <div className={cn("space-y-3", className)}>{blocks}</div>;
 }

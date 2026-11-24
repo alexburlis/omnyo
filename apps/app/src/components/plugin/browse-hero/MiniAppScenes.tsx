@@ -20,6 +20,7 @@ function KanbanScene({ accentToken }: SceneProps) {
     { label: "In progress", cards: 2, active: true },
     { label: "Review", cards: 2 },
   ];
+
   return (
     <div className="grid h-full grid-cols-3 gap-1.5 p-2">
       {columns.map((column) => (
@@ -35,6 +36,7 @@ function KanbanScene({ accentToken }: SceneProps) {
           </div>
           {Array.from({ length: column.cards }, (_, index) => {
             const highlighted = column.active === true && index === 0;
+
             return (
               <SceneCard
                 key={index}
@@ -71,11 +73,13 @@ function KanbanScene({ accentToken }: SceneProps) {
 
 function DashboardScene({ accentToken }: SceneProps) {
   const bars = [42, 61, 38, 78, 55, 88, 70];
+
   const stats = [
     { label: "Deploys", value: "18" },
     { label: "Open PRs", value: "7" },
     { label: "CI pass", value: "96%" },
   ];
+
   return (
     <div className="flex h-full flex-col gap-2 p-2">
       <div className="grid grid-cols-3 gap-1.5">
@@ -157,6 +161,7 @@ function VideoEditorScene({ accentToken }: SceneProps) {
       ],
     },
   ];
+
   return (
     <div className="flex h-full flex-col gap-1.5 p-2">
       <div className="flex items-center gap-1">
@@ -232,6 +237,7 @@ function ChiefOfStaffScene({ accentToken }: SceneProps) {
     { worktree: "fix/auth", agents: 3, progress: 45, blocked: true },
     { worktree: "chore/deps", agents: 5, progress: 88, blocked: false },
   ];
+
   return (
     <div className="flex h-full flex-col gap-1.5 p-2">
       <div className="flex items-center justify-between">
@@ -303,6 +309,7 @@ function PrototypingLabScene({ accentToken }: SceneProps) {
     { name: "One page", state: "ready" },
     { name: "Express", state: "building" },
   ];
+
   return (
     <div className="flex h-full flex-col gap-1.5 p-2">
       <div className="flex items-center gap-1.5">
@@ -320,6 +327,7 @@ function PrototypingLabScene({ accentToken }: SceneProps) {
       <div className="grid min-h-0 flex-1 grid-cols-3 gap-1">
         {prototypes.map((prototype, index) => {
           const ready = prototype.state === "ready";
+
           return (
             <SceneCard
               key={prototype.name}
@@ -399,6 +407,7 @@ function InboxScene({ accentToken }: SceneProps) {
     { width: "58%", kind: "question", cluster: null, active: false },
     { width: "68%", kind: "bug", cluster: "×2", active: false },
   ];
+
   return (
     <div className="flex h-full flex-col gap-1.5 p-2">
       <div className="flex items-center gap-1">

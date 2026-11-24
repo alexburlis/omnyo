@@ -4,7 +4,7 @@ import {
   experimental_useCodeTheme,
   useRpc,
   type PluginFileOpenerProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import type * as MonacoNs from "monaco-editor";
 import { Icon } from "@/components/ui/icon";
 import type { rpcContract } from "./server.js";
@@ -44,18 +44,23 @@ function revealLineRange(
   lineRange: PluginFileOpenerProps["experimental_lineRange"],
 ) {
   const model = editor.getModel();
+
   if (lineRange == null || model === null) return;
+
   const startLineNumber = Math.min(
     lineRange.startLineNumber,
     model.getLineCount(),
   );
+
   const endLineNumber = Math.min(lineRange.endLineNumber, model.getLineCount());
+
   const selection = {
     startLineNumber,
     startColumn: 1,
     endLineNumber,
     endColumn: model.getLineMaxColumn(endLineNumber),
   };
+
   editor.setSelection(selection);
   editor.revealRangeInCenter(selection);
 }
@@ -88,6 +93,7 @@ function MonacoFileOpener({
   const [pendingDiscard, setPendingDiscard] = useState(false);
   const [isFilesOpen, setIsFilesOpen] = useState(false);
   const [pendingOpen, setPendingOpen] = useState<string | null>(null);
+
   const [tree, setTree] = useState<{
     entries: readonly FlatEntry[];
     root: string;
@@ -101,6 +107,7 @@ function MonacoFileOpener({
     isLoading: false,
     error: null,
   });
+
   const [status, setStatus] = useState<
     | { kind: "loading" }
     | { kind: "ready" }
@@ -116,8 +123,10 @@ function MonacoFileOpener({
   const writeEditorContent = useCallback(
     async (expectedSha256: string | null) => {
       const editor = editorRef.current;
+
       if (!editor) return;
       setSaveState({ kind: "saving" });
+
       try {
         const result = await rpc.call("write", {
           path: activePath,
@@ -125,13 +134,16 @@ function MonacoFileOpener({
           content: editor.getValue(),
           expectedSha256,
         });
+
         if (result.outcome === "conflict") {
           setSaveState({
             kind: "conflict",
             currentSha256: result.currentSha256,
           });
+
           return;
         }
+
         sha256Ref.current = result.sha256;
         setSaveState({ kind: "clean" });
       } catch (error) {
@@ -146,10 +158,13 @@ function MonacoFileOpener({
 
   const save = useCallback(async () => {
     if (saveStateRef.current.kind === "saving") return;
+
     if (saveStateRef.current.kind === "conflict") {
       conflictNoticeRef.current?.focus();
+
       return;
     }
+
     await writeEditorContent(sha256Ref.current);
   }, [writeEditorContent]);
 
@@ -158,13 +173,18 @@ function MonacoFileOpener({
 
   const reloadFromDisk = useCallback(async () => {
     const editor = editorRef.current;
+
     if (!editor) return;
     setIsRefreshing(true);
+
     try {
       const file = await rpc.call("read", { path: activePath, source });
+
       if (file.kind !== "text" || editorRef.current !== editor) return;
+
       const discardedContent =
         saveStateRef.current.kind === "conflict" ? editor.getValue() : null;
+
       const discardedSha256 = sha256Ref.current;
       sha256Ref.current = file.sha256;
       editor.setValue(file.content);
@@ -187,6 +207,7 @@ function MonacoFileOpener({
   const undoReload = useCallback(() => {
     const current = saveStateRef.current;
     const editor = editorRef.current;
+
     if (current.kind !== "reloaded" || !editor) return;
     const currentSha256 = sha256Ref.current;
     sha256Ref.current = current.discardedSha256;
@@ -229,6 +250,7 @@ function MonacoFileOpener({
             error instanceof Error ? error.message : "Could not list files",
         });
       });
+
     return () => {
       cancelled = true;
     };
@@ -237,10 +259,13 @@ function MonacoFileOpener({
   const openFromTree = useCallback(
     (next: string) => {
       if (next === activePath) return;
+
       if (saveStateRef.current.kind === "dirty") {
         setPendingOpen(next);
+
         return;
       }
+
       setActivePath(next);
     },
     [activePath],
@@ -249,13 +274,16 @@ function MonacoFileOpener({
   const requestRefresh = useCallback(() => {
     if (saveStateRef.current.kind === "dirty") {
       setPendingDiscard(true);
+
       return;
     }
+
     void reloadFromDisk();
   }, [reloadFromDisk]);
 
   const overwrite = useCallback(async () => {
     const current = saveStateRef.current;
+
     if (current.kind !== "conflict") return;
     await writeEditorContent(current.currentSha256);
   }, [writeEditorContent]);
@@ -264,6 +292,7 @@ function MonacoFileOpener({
     let disposed = false;
     setStatus({ kind: "loading" });
     setIsRefreshing(false);
+
     if (saveStateRef.current.kind === "reloaded") {
       setSaveState({ kind: "clean" });
     }
@@ -274,21 +303,27 @@ function MonacoFileOpener({
           rpc.call("assets"),
           rpc.call("read", { path: activePath, source }),
         ]);
+
         if (disposed) return;
+
         if (file.kind === "unsupported") {
           setStatus({ kind: "delegate", reason: file.reason });
+
           return;
         }
 
         const monaco = await loadMonaco(baseUrl);
+
         if (disposed) return;
         const container = containerRef.current;
+
         if (!container) return;
         monacoRef.current = monaco;
 
         sha256Ref.current = file.sha256;
         const applied = applyCodeTheme(monaco, codeThemeRef.current);
         setOverflowWidgetsTheme(applied.base);
+
         const editor = monaco.editor.create(container, {
           value: file.content,
           language: languageForPath(activePath),
@@ -306,15 +341,19 @@ function MonacoFileOpener({
           fixedOverflowWidgets: true,
           overflowWidgetsDomNode: overflowWidgetsNode(),
         });
+
         editorRef.current = editor;
+
         if (activePath === navigationRef.current.path) {
           revealLineRange(editor, navigationRef.current.lineRange);
         }
+
         const active = {
           editor,
           absolutePath: file.absolutePath,
           relativePath: file.relativePath,
         };
+
         markEditorActive(active);
         editor.onDidFocusEditorWidget(() => markEditorActive(active));
         setStatus({ kind: "ready" });
@@ -343,6 +382,7 @@ function MonacoFileOpener({
 
     return () => {
       disposed = true;
+
       if (editorRef.current) forgetEditor(editorRef.current);
       editorRef.current?.getModel()?.dispose();
       editorRef.current?.dispose();
@@ -353,6 +393,7 @@ function MonacoFileOpener({
   useEffect(() => {
     navigationRef.current = { path, lineRange: experimental_lineRange };
     const editor = editorRef.current;
+
     if (editor !== null && activePath === path) {
       revealLineRange(editor, experimental_lineRange);
     }
@@ -360,6 +401,7 @@ function MonacoFileOpener({
 
   useEffect(() => {
     const monaco = monacoRef.current;
+
     if (monaco === null) return;
     const applied = applyCodeTheme(monaco, codeTheme);
     editorRef.current?.updateOptions({ theme: applied.name });
@@ -408,6 +450,7 @@ function MonacoFileOpener({
         onOpenConfirm={() => {
           const next = pendingOpen;
           setPendingOpen(null);
+
           if (next !== null) setActivePath(next);
         }}
         onOverwrite={() => void overwrite()}
@@ -428,6 +471,7 @@ function indicatorFor(
   status: { kind: string },
 ): SaveIndicator {
   if (status.kind === "error") return "error";
+
   switch (saveState.kind) {
     case "saving":
       return "saving";
@@ -473,6 +517,7 @@ function Notice({
   if (status.kind === "error") {
     return <NoticeRow tone="error">{status.message}</NoticeRow>;
   }
+
   if (saveState.kind === "conflict") {
     return (
       <NoticeRow
@@ -512,6 +557,7 @@ function Notice({
       </NoticeRow>
     );
   }
+
   if (pendingOpen !== null) {
     return (
       <NoticeRow tone="neutral">
@@ -521,6 +567,7 @@ function Notice({
       </NoticeRow>
     );
   }
+
   if (pendingDiscard) {
     return (
       <NoticeRow tone="neutral">
@@ -530,9 +577,11 @@ function Notice({
       </NoticeRow>
     );
   }
+
   if (saveState.kind === "error") {
     return <NoticeRow tone="error">{saveState.message}</NoticeRow>;
   }
+
   if (saveState.kind === "reloaded") {
     return (
       <NoticeRow
@@ -550,6 +599,7 @@ function Notice({
       </NoticeRow>
     );
   }
+
   return null;
 }
 

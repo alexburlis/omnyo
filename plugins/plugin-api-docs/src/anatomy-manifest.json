@@ -1,8 +1,8 @@
 {
-  "$comment": "Shared UI-anatomy contract between the Plugin Guide surface fixtures (wireframes.tsx) and the real app. Ordered regions are rendered by both sides. surfaceFixtures records authoritative source anchors plus the minimum deterministic fidelity and states for interaction-heavy fixtures.",
+  "$comment": "Shared UI-anatomy contract between the Plugin Guide surface fixtures (wireframes.tsx) and the real app. Ordered regions are rendered by both sides. On desktop the appSidebar footer region is the app footer that spans the window below the sidebar and content (AppFooter); on compact viewports it stays inside the sidebar drawer. surfaceFixtures records authoritative source anchors plus the minimum deterministic fidelity and states for interaction-heavy fixtures.",
   "appSidebar": ["top-reserve", "thread-list", "footer"],
-  "sidebarFooter": ["plugin-footer-items", "bug-report"],
-  "messageActionBar": ["copy", "edit", "plugin-actions", "message-menu"],
+  "sidebarFooter": ["plugin-footer-items"],
+  "messageActionBar": ["copy", "edit", "plugin-actions"],
   "mobileLayout": {
     "sources": [
       {
@@ -115,6 +115,65 @@
         }
       ]
     },
+    "title-bar-center": {
+      "groupId": "app-shell",
+      "fidelity": "anchor",
+      "responsiveStrategy": "scale-together",
+      "requiredStates": ["anchor"],
+      "labels": {
+        "anchor": ["2 agents running"]
+      },
+      "fixtureClassAnchors": [
+        "rounded-full border border-border",
+        "bg-surface-raised-solid"
+      ],
+      "sources": [
+        {
+          "path": "apps/app/src/components/plugin/PluginTitleBarCenter.tsx",
+          "anchors": [
+            "data-omnyo-plugin-title-bar-center=\"\"",
+            "slotKind=\"titleBarCenter\"",
+            "crashFallback={null}",
+            "MACOS_APP_REGION_NO_DRAG_CLASS"
+          ]
+        },
+        {
+          "path": "apps/app/src/components/plugin/PluginTitleBarCenter.test.tsx",
+          "anchors": [
+            "mounts every registration in plugin load order inside its plugin root",
+            "hides only the registration that crashes",
+            "renders nothing when no plugin registers center content"
+          ]
+        }
+      ]
+    },
+    "sidebar-entry": {
+      "groupId": "app-shell",
+      "fidelity": "anchor",
+      "responsiveStrategy": "scale-together",
+      "requiredStates": ["anchor"],
+      "labels": {
+        "anchor": ["Your page"]
+      },
+      "fixtureClassAnchors": [
+        "h-8 items-center gap-2",
+        "rounded-full bg-warning"
+      ],
+      "sources": [
+        {
+          "path": "apps/app/src/components/plugin/PluginSidebarEntry.tsx",
+          "anchors": [
+            "data-testid=\"sidebar-entry\"",
+            "data-sidebar-entry=",
+            "data-testid=\"sidebar-entry-dot\""
+          ]
+        },
+        {
+          "path": "apps/app/src/components/sidebar/AppSidebar.tsx",
+          "anchors": ["<PluginSidebarEntry />"]
+        }
+      ]
+    },
     "app-overlay": {
       "groupId": "app-shell",
       "fidelity": "anchor",
@@ -132,7 +191,7 @@
         {
           "path": "apps/app/src/components/plugin/PluginAppOverlays.tsx",
           "anchors": [
-            "data-bb-plugin-app-overlays=\"\"",
+            "data-omnyo-plugin-app-overlays=\"\"",
             "slotKind=\"appOverlay\"",
             "crashFallback={null}"
           ]
@@ -187,6 +246,15 @@
             "toggles and dismisses a disclosure accessibly",
             "lets the host coordinate disclosures from multiple plugins"
           ]
+        },
+        {
+          "path": "apps/app/src/components/layout/AppFooter.tsx",
+          "anchors": [
+            "<PluginSidebarFooterCards placement=\"footer\" />",
+            "<PluginSidebarFooterItems",
+            "<PluginSidebarFooterDisclosure",
+            "side=\"top\""
+          ]
         }
       ]
     },
@@ -196,7 +264,11 @@
       "responsiveStrategy": "scale-together",
       "requiredStates": ["anchor"],
       "labels": {
-        "anchor": ["Configuration", "[set]", "Case-sensitive search"]
+        "anchor": [
+          "Configuration",
+          "Saved · type to replace",
+          "Case-sensitive search"
+        ]
       },
       "fixtureClassAnchors": ["bg-surface-recessed-solid p-3"],
       "sources": [
@@ -204,7 +276,7 @@
           "path": "apps/app/src/components/plugin/PluginSettings.tsx",
           "anchors": [
             "<Switch",
-            "placeholder={isSecret ? (secretIsSet ? \"[set]\" : \"[not set]\") : undefined}",
+            "Saved · type to replace",
             "<ResourceDetailConfigurationSection label=\"Configuration\">"
           ]
         }
@@ -241,9 +313,50 @@
           "path": "apps/app/src/components/tools/PluginDetail.tsx",
           "anchors": [
             "label=\"Details\"",
-            "label={updatesWithBb ? \"Delivery\" : \"Installed\"}",
+            "label={updatesWithOmnyo ? \"Delivery\" : \"Installed\"}",
             "<PluginIncludes plugin={plugin} configurationPath={configurationPath} />"
           ]
+        }
+      ]
+    },
+    "responsive-drawer": {
+      "groupId": "compact-drawers",
+      "fidelity": "flow",
+      "responsiveStrategy": "scale-together",
+      "requiredStates": ["anchor", "triggered", "outcome"],
+      "labels": {
+        "anchor": ["Open drawer"],
+        "triggered": ["Plugin drawer", "Draft note", "Close drawer"],
+        "outcome": ["Drawer closed. Reopen it to continue your draft."]
+      },
+      "fixtureClassAnchors": ["bg-background", "border-border", "rounded-md"],
+      "sources": [
+        {
+          "path": "apps/app/src/components/plugin/PluginResponsiveDrawerShell.tsx",
+          "anchors": [
+            "usePluginId()",
+            "<ResponsiveDrawerShell {...props} portalPluginId={pluginId} />"
+          ]
+        },
+        {
+          "path": "packages/shared-ui/src/components/ui/responsive-overlay.tsx",
+          "anchors": [
+            "export function ResponsiveDrawerShell",
+            "useResponsiveDrawerRealization({ open })",
+            "data-persistent-drawer-content=\"\""
+          ]
+        },
+        {
+          "path": "apps/app/src/components/promptbox/ComposerPopupHost.tsx",
+          "anchors": ["<ResponsiveDrawerShell", "onAfterCloseAutoFocus"]
+        },
+        {
+          "path": "apps/app/src/components/thread/pending-interactions/PendingInteractionShell.tsx",
+          "anchors": ["ResponsiveDrawerShell"]
+        },
+        {
+          "path": "apps/app/src/components/thread/toc/ThreadTableOfContents.tsx",
+          "anchors": ["ResponsiveDrawerShell"]
         }
       ]
     }

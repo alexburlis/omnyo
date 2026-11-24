@@ -5,7 +5,7 @@ import {
   experimental_presentationTitle as presentationTitle,
   experimental_toolPresentation as toolPresentation,
   experimental_withTitle as withTitle,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 
 const SHELL_WRAPPER_PATTERN =
   /^(?:\S*\/)?(?:sh|bash|zsh)\s+(?:-lc|-c)\s+([\s\S]+)$/;
@@ -13,11 +13,14 @@ const SHELL_WRAPPER_PATTERN =
 function unwrapShellCommand(command: string): string {
   const trimmed = command.trim();
   const match = SHELL_WRAPPER_PATTERN.exec(trimmed);
+
   if (!match?.[1]) {
     return trimmed;
   }
+
   const inner = match[1].trim();
   const quote = inner[0];
+
   if (
     inner.length >= 2 &&
     (quote === '"' || quote === "'") &&
@@ -25,6 +28,7 @@ function unwrapShellCommand(command: string): string {
   ) {
     return inner.slice(1, -1);
   }
+
   return inner;
 }
 
@@ -63,6 +67,7 @@ export function fileChangePresentation(
 ): DeltaPresentation {
   const names = [...new Set(paths.map(presentationFileName))];
   const plural = names.length > 1;
+
   return withTitle(
     {
       label: {
@@ -91,6 +96,7 @@ export function imageGenerationPresentation(args: {
     : args.prompt
       ? presentationTitle(args.prompt)
       : undefined;
+
   return withTitle(IMAGE_GENERATION_PRESENTATION, title);
 }
 
@@ -100,6 +106,7 @@ export function planStepsPresentation(args: {
 }): DeltaPresentation {
   const active = args.steps.find((step) => step.status === "active");
   const headline = active?.step ?? args.explanation ?? undefined;
+
   return withTitle(
     {
       label: { pending: "Updating plan", completed: "Updated plan" },
@@ -124,9 +131,11 @@ function nodeReplPresentation(
       icon: { glyph: "Code" },
     };
   }
+
   if (tool !== "js") {
     return null;
   }
+
   const title =
     args !== null &&
     typeof args === "object" &&
@@ -134,6 +143,7 @@ function nodeReplPresentation(
     typeof args.title === "string"
       ? presentationTitle(args.title)
       : undefined;
+
   return withTitle(
     {
       label: { pending: "Running JavaScript", completed: "Ran JavaScript" },
@@ -150,10 +160,12 @@ export function mcpToolPresentation(args: {
 }): DeltaPresentation {
   if (args.server === NODE_REPL_SERVER) {
     const nodeRepl = nodeReplPresentation(args.tool, args.args);
+
     if (nodeRepl !== null) {
       return nodeRepl;
     }
   }
+
   return withTitle(toolPresentation(args.tool), args.server);
 }
 
@@ -167,10 +179,12 @@ export function macOsPermissionPresentation(
     },
     icon: { glyph: "Lock" },
   };
+
   const detail =
     requested.length === 0
       ? "No macOS capability was requested."
-      : `Requested: ${requested.join(", ")}. bb cannot grant macOS permissions; the approval covers the command only.`;
+      : `Requested: ${requested.join(", ")}. Omnyo cannot grant macOS permissions; the approval covers the command only.`;
+
   return { ...presentation, detail: presentationDetail(detail) };
 }
 
@@ -192,6 +206,7 @@ export function collabAgentPresentation(args: {
     pending: `Running ${args.tool}`,
     completed: `Ran ${args.tool}`,
   };
+
   return withTitle(
     { label, icon: { glyph: "UserRound" } },
     args.prompt === null ? undefined : presentationTitle(args.prompt),

@@ -3,8 +3,8 @@ import {
   getProjectPathValidationMessage,
   normalizeProjectPathInput,
   type ProjectSource,
-} from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
+} from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
@@ -12,10 +12,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Icon } from "@bb/shared-ui/icon";
-import { Input } from "@bb/shared-ui/input";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/dialog";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Input } from "@omnyo/shared-ui/input";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { RemotePathBrowser } from "@/components/dialogs/RemotePathBrowser";
 import { useAddProjectSource } from "@/hooks/mutations/project-mutations";
 import {
@@ -23,7 +23,7 @@ import {
   useHostPathExistence,
 } from "@/hooks/queries/host-path-queries";
 import { useHostCloneDefaultPath } from "@/hooks/queries/host-queries";
-import { BbHttpError } from "@bb/sdk/browser";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
 
 export interface ProjectMachineSetupDialogTarget {
@@ -56,6 +56,7 @@ export function ProjectMachineSetupDialog({
   useEffect(() => {
     resetAddSource();
   }, [resetAddSource, targetKey]);
+
   return (
     <Dialog
       open={target !== null}
@@ -95,13 +96,16 @@ function ProjectMachineSetupDialogContent({
   onComplete,
 }: ProjectMachineSetupDialogContentProps) {
   const hasRemote = target.gitRemoteUrl !== null;
+
   const [option, setOption] = useState<SetupOption>(
     hasRemote ? "clone" : "folder",
   );
+
   const [customClonePath, setCustomClonePath] = useState<string | null>(null);
   const [isEditingClonePath, setIsEditingClonePath] = useState(false);
   const [clonePathDraft, setClonePathDraft] = useState("");
   const [folderPath, setFolderPath] = useState<string | null>(null);
+
   const [validationMessage, setValidationMessage] = useState<string | null>(
     null,
   );
@@ -111,6 +115,7 @@ function ProjectMachineSetupDialogContent({
     target.projectId,
     { enabled: hasRemote },
   );
+
   const clonePath = customClonePath ?? defaultClonePathQuery.data ?? null;
 
   const folderExistence = useHostPathExistence(
@@ -131,6 +136,7 @@ function ProjectMachineSetupDialogContent({
   const commitClonePathEdit = () => {
     setIsEditingClonePath(false);
     const normalized = normalizeProjectPathInput(clonePathDraft);
+
     if (!normalized) return;
     setCustomClonePath(normalized);
     setValidationMessage(null);
@@ -147,6 +153,7 @@ function ProjectMachineSetupDialogContent({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
     if (pending) return;
     setValidationMessage(null);
 
@@ -154,11 +161,14 @@ function ProjectMachineSetupDialogContent({
       if (customClonePath !== null) {
         const pathValidationMessage =
           getProjectPathValidationMessage(customClonePath);
+
         if (pathValidationMessage) {
           setValidationMessage(pathValidationMessage);
+
           return;
         }
       }
+
       submit({
         projectId: target.projectId,
         request: {
@@ -167,19 +177,24 @@ function ProjectMachineSetupDialogContent({
           ...(customClonePath !== null ? { targetPath: customClonePath } : {}),
         },
       });
+
       return;
     }
 
     if (folderPath === null) {
       setValidationMessage("Choose a folder.");
+
       return;
     }
+
     if (isHostPathMissing(folderExistence, folderPath)) {
       setValidationMessage(
         `That folder no longer exists on ${target.hostName}.`,
       );
+
       return;
     }
+
     submit({
       projectId: target.projectId,
       request: { type: "local_path", hostId: target.hostId, path: folderPath },
@@ -192,8 +207,9 @@ function ProjectMachineSetupDialogContent({
         fallbackMessage: `Couldn't set up ${target.projectName} on ${target.hostName}.`,
       })
     : null;
+
   const isTargetNotEmptyError =
-    addSource.error instanceof BbHttpError &&
+    addSource.error instanceof OmnyoHttpError &&
     addSource.error.code === "target_not_empty";
 
   const submitDisabled =
@@ -373,6 +389,7 @@ function SetupOptionCard({
       }}
       onKeyDown={(event) => {
         if (disabled) return;
+
         if (event.key === " " || event.key === "Enter") {
           event.preventDefault();
           onSelect();

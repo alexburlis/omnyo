@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { GitBranchRefClassification } from "@bb/domain";
+import type { GitBranchRefClassification } from "@omnyo/domain";
 import { useEnvironmentMergeBaseBranches } from "../../../hooks/queries/environment-queries";
 import type { SecondaryFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 import type { ThreadSecondaryPanel as ThreadSecondaryPanelTab } from "@/lib/thread-secondary-panel";
@@ -62,32 +62,39 @@ export function useGitDiffPanel({
 }: UseGitDiffPanelParams) {
   const [selectedMergeBaseBranchState, setSelectedMergeBaseBranchState] =
     useState<SelectedMergeBaseBranchState>({ environmentId });
+
   const selectedMergeBaseBranch =
     selectedMergeBaseBranchState.environmentId === environmentId
       ? selectedMergeBaseBranchState.branch
       : undefined;
+
   const setSelectedMergeBaseBranch = useCallback(
     (branch: string | undefined) => {
       setSelectedMergeBaseBranchState({ branch, environmentId });
     },
     [environmentId],
   );
+
   const [pendingGitDiffIntent, setPendingGitDiffIntent] =
     useState<PendingGitDiffIntent | null>(null);
+
   const currentPendingGitDiffIntent =
     pendingGitDiffIntent !== null &&
     pendingGitDiffIntent.environmentId === environmentId &&
     pendingGitDiffIntent.threadId === threadId
       ? pendingGitDiffIntent
       : null;
+
   const pendingGitDiffCommitSha =
     currentPendingGitDiffIntent?.kind === "commit"
       ? currentPendingGitDiffIntent.sha
       : null;
+
   const pendingGitDiffScrollPath =
     currentPendingGitDiffIntent?.kind === "file"
       ? currentPendingGitDiffIntent.path
       : null;
+
   const clearPendingGitDiffIntent = useCallback(() => {
     setPendingGitDiffIntent((current) =>
       current !== null &&
@@ -97,8 +104,10 @@ export function useGitDiffPanel({
         : current,
     );
   }, [environmentId, threadId]);
+
   const [mergeBaseBranchSearchQuery, setMergeBaseBranchSearchQuery] =
     useState("");
+
   const requestedMergeBaseBranch =
     selectedMergeBaseBranch ?? defaultMergeBaseBranch;
 
@@ -113,9 +122,11 @@ export function useGitDiffPanel({
     query: mergeBaseBranchSearchQuery,
     selectedBranch: requestedMergeBaseBranch,
   });
+
   const selectedMergeBaseBranchRef = mergeBaseBranches?.selectedBranch;
   const mergeBaseBranchList = mergeBaseBranches?.branches;
   const mergeBaseRemoteBranchList = mergeBaseBranches?.remoteBranches;
+
   const mergeBaseBranchOptions = useMemo(
     () =>
       prependSelectedBranch(
@@ -125,6 +136,7 @@ export function useGitDiffPanel({
       ),
     [mergeBaseBranchList, selectedMergeBaseBranchRef],
   );
+
   const mergeBaseRemoteBranchOptions = useMemo(
     () =>
       prependSelectedBranch(
@@ -134,6 +146,7 @@ export function useGitDiffPanel({
       ),
     [mergeBaseRemoteBranchList, selectedMergeBaseBranchRef],
   );
+
   useEffect(() => {
     setMergeBaseBranchSearchQuery("");
     setPendingGitDiffIntent(null);

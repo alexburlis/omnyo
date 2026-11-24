@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { runGit } from "@bb/host-workspace";
+import { runGit } from "@omnyo/host-workspace";
 import { afterEach, describe, expect, it } from "vitest";
 import { isExpectedCommandDispatchError } from "../command-dispatch-support.js";
 import { cloneProject, resolveProjectCloneDefaultPath } from "./project.js";
@@ -10,8 +10,9 @@ import { cloneProject, resolveProjectCloneDefaultPath } from "./project.js";
 const tempDirs: string[] = [];
 
 async function tempDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-project-clone-"));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-project-clone-"));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -26,9 +27,9 @@ async function createRemoteRepo(root: string): Promise<string> {
   await runGit(
     [
       "-c",
-      "user.name=BB Test",
+      "user.name=Omnyo Test",
       "-c",
-      "user.email=bb@example.test",
+      "user.email=omnyo@example.test",
       "commit",
       "-m",
       "initial",
@@ -36,6 +37,7 @@ async function createRemoteRepo(root: string): Promise<string> {
     { cwd: source },
   );
   await runGit(["clone", "--bare", source, remote], { cwd: root });
+
   return remote;
 }
 
@@ -53,6 +55,7 @@ describe("project.clone", () => {
     const remoteUrl = await createRemoteRepo(root);
     const cloneUrl = pathToFileURL(remoteUrl).href;
     const progress: string[] = [];
+
     const result = await cloneProject({
       dataDir: path.join(root, "data"),
       projectSlug: "My Project",
@@ -83,6 +86,7 @@ describe("project.clone", () => {
       remoteUrl: path.join(root, "remote.git"),
       targetPath,
     }).catch((caught) => caught);
+
     expect(isExpectedCommandDispatchError(error)).toBe(true);
     expect(error).toMatchObject({ code: "target_not_empty" });
   });
@@ -90,6 +94,7 @@ describe("project.clone", () => {
   it("preserves git stderr in a structured clone failure", async () => {
     const root = await tempDir();
     const missingRemote = path.join(root, "missing.git");
+
     const error = await cloneProject({
       dataDir: path.join(root, "data"),
       projectSlug: "project",

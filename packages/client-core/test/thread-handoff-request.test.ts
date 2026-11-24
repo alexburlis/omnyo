@@ -155,7 +155,7 @@ describe("stripThreadHandoffPrefix", () => {
 });
 
 describe("buildThreadHandoffCreateRequest", () => {
-  it("creates a thread on the selected provider from the draft as typed", () => {
+  it("creates a handoff linked to its source on the selected provider from the draft as typed", () => {
     const request = buildThreadHandoffCreateRequest({
       draft: {
         text: "Continue from @thread:thr_source\n\nRefactor the tests",
@@ -183,11 +183,13 @@ describe("buildThreadHandoffCreateRequest", () => {
         },
       ],
       model: "claude-opus-5",
+      originKind: "handoff",
       permissionMode: "auto",
       projectId: "proj_source",
       providerId: "claude-code",
       reasoningLevel: "high",
       serviceTier: "fast",
+      sourceThreadId: "thr_source",
       startedOnBehalfOf: null,
     });
   });

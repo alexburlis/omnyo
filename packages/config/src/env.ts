@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { resolveRuntimeMode, type BbRuntimeMode } from "./runtime.js";
+import { resolveRuntimeMode, type AppRuntimeMode } from "./runtime.js";
+import { readEnvironmentValue } from "./omnyo-environment.js";
 
 interface EnvReaderContext {
   homeDir: string;
@@ -20,13 +21,13 @@ export interface EnvVarDefinition<TValue> {
 export interface EnvLoaderArgs {
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
-  mode?: BbRuntimeMode;
+  mode?: AppRuntimeMode;
 }
 
 interface ResolvedEnvLoader {
   context: EnvReaderContext;
   env: NodeJS.ProcessEnv;
-  mode: BbRuntimeMode;
+  mode: AppRuntimeMode;
 }
 
 interface ReadEnvVarArgs<TValue> {
@@ -46,7 +47,8 @@ export function defineEnvVar<TValue>(
 }
 
 export function resolveEnvLoader(args: EnvLoaderArgs = {}): ResolvedEnvLoader {
-  const env = args.env ?? process.env;
+  const env = { ...(args.env ?? process.env) };
+
   return {
     context: {
       homeDir: args.homeDir ?? homedir(),
@@ -59,7 +61,11 @@ export function resolveEnvLoader(args: EnvLoaderArgs = {}): ResolvedEnvLoader {
 export function readRequiredEnvVar<TValue>(
   args: ReadEnvVarArgs<TValue>,
 ): TValue {
-  const rawValue = args.env[args.definition.name];
+  const rawValue = readEnvironmentValue({
+    env: args.env,
+    name: args.definition.name,
+  });
+
   if (rawValue === undefined) {
     throw new Error(`${args.definition.name} is required`);
   }
@@ -74,7 +80,11 @@ export function readRequiredEnvVar<TValue>(
 export function readOptionalEnvVar<TValue>(
   args: ReadEnvVarArgs<TValue>,
 ): TValue | undefined {
-  const rawValue = args.env[args.definition.name];
+  const rawValue = readEnvironmentValue({
+    env: args.env,
+    name: args.definition.name,
+  });
+
   if (rawValue === undefined) {
     return undefined;
   }
@@ -89,7 +99,11 @@ export function readOptionalEnvVar<TValue>(
 export function readEnvVarWithDefault<TValue>(
   args: ReadEnvVarWithDefaultArgs<TValue>,
 ): TValue {
-  const rawValue = args.env[args.definition.name];
+  const rawValue = readEnvironmentValue({
+    env: args.env,
+    name: args.definition.name,
+  });
+
   if (rawValue === undefined) {
     return args.defaultValue;
   }

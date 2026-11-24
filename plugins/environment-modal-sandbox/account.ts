@@ -11,10 +11,10 @@ import {
   PluginCliError,
   cliCommand,
   defineCli,
-  type BbPluginApi,
+  type PluginApi,
   type PluginCliContext,
   type PluginCliResult,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import path from "node:path";
 import { z } from "zod";
 import { dockerfileSchema, type ImageDefinition } from "./image-definition.js";
@@ -25,6 +25,7 @@ import {
 } from "./launch-options.js";
 
 const machineInput = z.object({ hostId: z.string().min(1) }).strict();
+
 const machineOutput = z.object({
   summary: z.string(),
   values: z.object({
@@ -38,6 +39,7 @@ const definitionSchema = z.object({
   dockerfile: z.string(),
   customized: z.boolean(),
 });
+
 export const modalRpcContract = defineRpcContract({
   "machine.inspect": { input: machineInput, output: machineOutput },
   "image.build": { input: z.object({}).strict(), output: buildOutput },
@@ -68,7 +70,7 @@ export const modalRpcContract = defineRpcContract({
 });
 
 export function registerRpcAndCli(
-  bb: BbPluginApi,
+  api: PluginApi,
   image: ImageDefinition,
   launchOptions: ModalLaunchOptionsStore,
   inspect: () => Promise<{ available: boolean; message: string }>,
@@ -77,7 +79,7 @@ export function registerRpcAndCli(
     input: z.infer<typeof machineInput>,
   ) => Promise<z.infer<typeof machineOutput>>,
 ) {
-  bb.rpc.register(modalRpcContract, {
+  api.rpc.register(modalRpcContract, {
     "machine.inspect": inspectMachine,
     "image.build": () => debug.build(),
     "sandbox.run": () => debug.run(),
@@ -90,30 +92,40 @@ export function registerRpcAndCli(
     "launch.options": launchOptions.get,
     "launch.options.set": launchOptions.set,
   });
+
   async function readDockerfile(file: string, context: PluginCliContext) {
     let hostId: string | undefined;
+
     if (context.threadId) {
-      const thread = await bb.sdk.threads.get({ threadId: context.threadId });
+      const thread = await api.sdk.threads.get({ threadId: context.threadId });
+
       if (!thread.environmentId)
         throw new Error("The current thread has no machine workspace");
-      const environment = await bb.sdk.environments.get({
+
+      const environment = await api.sdk.environments.get({
         environmentId: thread.environmentId,
       });
+
       if (!environment.hostId)
         throw new Error("The current thread has no machine workspace");
       hostId = environment.hostId;
     }
+
     if (!path.isAbsolute(file) && !context.cwd)
       throw new Error("A relative --file requires the CLI working directory");
-    const result = await bb.sdk.files.read({
+
+    const result = await api.sdk.files.read({
       hostId,
       path: path.resolve(context.cwd ?? "/", file),
       signal: context.signal,
     });
+
     if (result.contentEncoding !== "utf8")
       throw new Error("Dockerfile must be UTF-8 text");
+
     return dockerfileSchema.parse(result.content);
   }
+
   async function guarded(
     run: () => Promise<PluginCliResult>,
   ): Promise<PluginCliResult> {
@@ -124,13 +136,15 @@ export function registerRpcAndCli(
       throw new PluginCliError(errorMessage(error));
     }
   }
+
   const jsonOption = {
     json: {
       type: "boolean",
       description: "Emit the raw result as JSON instead of readable text",
     },
   } as const;
-  bb.cli.register(
+
+  api.cli.register(
     defineCli({
       name: "modal",
       summary: "Configure, build and debug Modal images",
@@ -142,7 +156,7 @@ export function registerRpcAndCli(
           positionals: [
             {
               name: "host-id",
-              description: "BB host whose Modal machine is inspected",
+              description: "Omnyo host whose Modal machine is inspected",
               required: true,
             },
           ],
@@ -152,6 +166,7 @@ export function registerRpcAndCli(
               const result = await inspectMachine(
                 machineInput.parse({ hostId: input.positionals["host-id"] }),
               );
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -167,6 +182,7 @@ export function registerRpcAndCli(
           run(input, context) {
             return guarded(async () => {
               const result = await debug.build(context.signal);
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -182,6 +198,7 @@ export function registerRpcAndCli(
           run(input, context) {
             return guarded(async () => {
               const result = await debug.run(context.signal);
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -199,7 +216,7 @@ export function registerRpcAndCli(
           positionals: [
             {
               name: "sandbox-id",
-              description: "Debug sandbox started by bb modal sandbox run",
+              description: "Debug sandbox started by omnyo modal sandbox run",
               required: true,
             },
           ],
@@ -209,13 +226,14 @@ export function registerRpcAndCli(
             return guarded(async () => {
               if (input.passthrough.length === 0) {
                 throw new PluginCliError(
-                  "bb modal sandbox exec requires a command after --",
+                  "omnyo modal sandbox exec requires a command after --",
                   {
                     code: "missing_command",
-                    hint: "Write bb modal sandbox exec <sandbox-id> -- bash -lc 'echo hi'.",
+                    hint: "Write omnyo modal sandbox exec <sandbox-id> -- bash -lc 'echo hi'.",
                   },
                 );
               }
+
               const result = await debug.exec(
                 execInput.parse({
                   sandboxId: input.positionals["sandbox-id"],
@@ -223,6 +241,7 @@ export function registerRpcAndCli(
                 }),
                 context.signal,
               );
+
               return {
                 exitCode: result.exitCode,
                 stdout: input.options.json
@@ -238,7 +257,7 @@ export function registerRpcAndCli(
           positionals: [
             {
               name: "sandbox-id",
-              description: "Debug sandbox started by bb modal sandbox run",
+              description: "Debug sandbox started by omnyo modal sandbox run",
               required: true,
             },
           ],
@@ -250,6 +269,7 @@ export function registerRpcAndCli(
                   sandboxId: input.positionals["sandbox-id"],
                 }),
               );
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -265,6 +285,7 @@ export function registerRpcAndCli(
           run(input) {
             return guarded(async () => {
               const result = await image.get();
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -292,6 +313,7 @@ export function registerRpcAndCli(
               const result = await image.set(
                 await readDockerfile(input.options.file, context),
               );
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -307,6 +329,7 @@ export function registerRpcAndCli(
           run(input) {
             return guarded(async () => {
               const result = await image.reset();
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -322,6 +345,7 @@ export function registerRpcAndCli(
           run(input) {
             return guarded(async () => {
               const result = await inspect();
+
               return {
                 exitCode: result.available ? 0 : 1,
                 stdout: input.options.json

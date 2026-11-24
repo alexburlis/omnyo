@@ -18,6 +18,7 @@ function getMediaDevices(): MediaDevices | null {
   ) {
     return null;
   }
+
   return navigator.mediaDevices;
 }
 
@@ -34,9 +35,11 @@ function resolveAudioInputDeviceErrorMessage(error: unknown): string {
         return "Microphone devices unavailable";
     }
   }
+
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message.trim();
   }
+
   return "Microphone devices unavailable";
 }
 
@@ -45,6 +48,7 @@ function audioInputDeviceLabel(
   index: number,
 ): string {
   const label = device.label.trim();
+
   return label.length > 0 ? label : `Microphone ${index + 1}`;
 }
 
@@ -83,6 +87,7 @@ export function useAudioInputDevices() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [hasDeviceAccess, setHasDeviceAccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
   const [isSupported, setIsSupported] = useState(
     () => getMediaDevices() !== null,
   );
@@ -91,19 +96,24 @@ export function useAudioInputDevices() {
     async (options: RefreshAudioInputDevicesOptions = {}) => {
       const mediaDevices = getMediaDevices();
       setIsSupported(mediaDevices !== null);
+
       if (mediaDevices === null) {
         setDevices([]);
         setErrorMessage(null);
+
         return;
       }
 
       setIsLoading(true);
       let permissionStream: MediaStream | null = null;
+
       try {
         if (options.requestPermission) {
           permissionStream = await mediaDevices.getUserMedia({ audio: true });
         }
+
         const availableDevices = await mediaDevices.enumerateDevices();
+
         if (
           permissionStream ||
           availableDevices.some(
@@ -112,6 +122,7 @@ export function useAudioInputDevices() {
         ) {
           setHasDeviceAccess(true);
         }
+
         setDevices(audioInputDeviceOptions(availableDevices));
         setErrorMessage(null);
       } catch (error) {
@@ -127,6 +138,7 @@ export function useAudioInputDevices() {
   useEffect(() => {
     const mediaDevices = getMediaDevices();
     setIsSupported(mediaDevices !== null);
+
     if (mediaDevices === null) {
       return;
     }
@@ -136,12 +148,15 @@ export function useAudioInputDevices() {
     const handleDeviceChange = () => {
       void refresh();
     };
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") void refresh();
     };
+
     window.addEventListener("focus", handleDeviceChange);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     mediaDevices.addEventListener("devicechange", handleDeviceChange);
+
     return () => {
       mediaDevices.removeEventListener("devicechange", handleDeviceChange);
       window.removeEventListener("focus", handleDeviceChange);

@@ -1,7 +1,7 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PLUGIN_CLI_OUTPUT_MAX_BYTES } from "@get-bb/plugin-sdk";
+import { PLUGIN_CLI_OUTPUT_MAX_BYTES } from "@omnyo/plugin-sdk";
 import {
   generatedSkillsRootPath,
   pluginCommandsSkillDir,
@@ -16,13 +16,13 @@ import {
 const BASE = "http://127.0.0.1:3334";
 
 const CLI_SOURCE = `
-  export default function plugin(bb: any) {
-    bb.log.info("cli plugin loaded");
-    bb.cli.register({
+  export default function plugin(api: any) {
+    api.log.info("cli plugin loaded");
+    api.cli.register({
       name: "acme",
       summary: "Acme tools",
       commands: [
-        { name: "issues", summary: "List issues", usage: "bb acme issues [--json]" },
+        { name: "issues", summary: "List issues", usage: "omnyo acme issues [--json]" },
       ],
       async run(argv: string[], ctx: any) {
         if (argv[0] === "fail") return { exitCode: 3, stderr: "acme failed" };
@@ -65,7 +65,7 @@ async function writePlugin(
     JSON.stringify({
       name: options.name,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "CLI fixture",
         description: "Plugin CLI fixture.",
         branding: { icon: "Zap" },
@@ -74,6 +74,7 @@ async function writePlugin(
     }),
   );
   await writeFile(join(rootDir, "server.ts"), options.serverSource);
+
   return rootDir;
 }
 
@@ -89,14 +90,14 @@ async function runCli(
   });
 }
 
-describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () => {
+describe("plugin CLI commands (api.cli.register + endpoints + skill + logs)", () => {
   let harness: TestAppHarness;
   let rootDir: string;
 
   beforeEach(async () => {
     harness = await createTestAppHarness();
     rootDir = await writePlugin(join(harness.config.dataDir, "fixtures"), {
-      name: "bb-plugin-acme",
+      name: "omnyo-plugin-acme",
       serverSource: CLI_SOURCE,
     });
     const entry = await harness.pluginService.installPath(rootDir);
@@ -112,6 +113,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/contributions`,
     );
+
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       cliCommands: [
@@ -123,7 +125,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
             {
               name: "issues",
               summary: "List issues",
-              usage: "bb acme issues [--json]",
+              usage: "omnyo acme issues [--json]",
             },
           ],
           rendersHelp: false,
@@ -142,12 +144,15 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
       threadId: "thr_123",
       projectId: "proj_456",
     });
+
     expect(response.status).toBe(200);
+
     const result = (await response.json()) as {
       exitCode: number;
       stdout: string;
       stderr: string;
     };
+
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(JSON.parse(result.stdout)).toEqual({
@@ -172,6 +177,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
           String(bytes),
           ...(jsonOutput ? ["--json"] : []),
         ];
+
         const result = (await (
           await runCli(harness, "acme", { argv })
         ).json()) as {
@@ -180,10 +186,12 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
           stderr: string;
           error?: unknown;
         };
+
         expect(result.exitCode).toBe(0);
         expect(Buffer.byteLength(result.stdout, "utf8")).toBe(bytes);
         expect(result.stderr).toBe("");
         expect(result.error).toBeUndefined();
+
         if (jsonOutput) expect(() => JSON.parse(result.stdout)).not.toThrow();
       }
 
@@ -192,6 +200,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
         String(PLUGIN_CLI_OUTPUT_MAX_BYTES + 1),
         ...(jsonOutput ? ["--json"] : []),
       ];
+
       const result = (await (
         await runCli(harness, "acme", { argv })
       ).json()) as {
@@ -204,6 +213,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
           totalBytes: number;
         };
       };
+
       expect(result).toMatchObject({
         exitCode: 1,
         error: {
@@ -212,6 +222,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
           totalBytes: PLUGIN_CLI_OUTPUT_MAX_BYTES + 1,
         },
       });
+
       if (jsonOutput) {
         expect(result.stderr).toBe("");
         expect(JSON.parse(result.stdout)).toEqual({ error: result.error });
@@ -226,6 +237,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
     const result = await (
       await runCli(harness, "acme", { argv: ["fail"] })
     ).json();
+
     expect(result).toEqual({ exitCode: 3, stdout: "", stderr: "acme failed" });
   });
 
@@ -233,11 +245,14 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
     const result = (await (
       await runCli(harness, "acme", { argv: ["throw"] })
     ).json()) as { exitCode: number; stderr: string };
+
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("kaboom");
+
     const stats = harness.pluginService
       .list()
       .find((p) => p.id === "acme")?.handlerStats;
+
     expect(stats?.errorCount).toBe(1);
   });
 
@@ -245,6 +260,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
     const result = (await (
       await runCli(harness, "acme", { argv: ["malformed"] })
     ).json()) as { exitCode: number; stderr: string };
+
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("must return { exitCode: number");
   });
@@ -256,15 +272,18 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
 
   it("not-running and unknown plugins fail with helpful stderr", async () => {
     await harness.pluginService.setEnabled("acme", false);
+
     const disabled = (await (
       await runCli(harness, "acme", { argv: [] })
     ).json()) as { exitCode: number; stderr: string };
+
     expect(disabled.exitCode).toBe(1);
     expect(disabled.stderr).toContain('plugin "acme" is not running');
 
     const unknown = (await (
       await runCli(harness, "nope", { argv: [] })
     ).json()) as { exitCode: number; stderr: string };
+
     expect(unknown.exitCode).toBe(1);
     expect(unknown.stderr).toContain('unknown plugin "nope"');
   });
@@ -273,47 +292,53 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
     const reserved = await writePlugin(
       join(harness.config.dataDir, "fixtures"),
       {
-        name: "bb-plugin-shadower",
+        name: "omnyo-plugin-shadower",
         serverSource: `
-          export default function plugin(bb: any) {
-            bb.cli.register({ name: "thread", summary: "s", commands: [{ name: "inspect", summary: "Inspect", usage: "bb thread inspect" }], run: async () => ({ exitCode: 0, stdout: "thread" }) });
+          export default function plugin(api: any) {
+            api.cli.register({ name: "thread", summary: "s", commands: [{ name: "inspect", summary: "Inspect", usage: "omnyo thread inspect" }], run: async () => ({ exitCode: 0, stdout: "thread" }) });
           }
         `,
       },
     );
+
     const entry = await harness.pluginService.installPath(reserved);
     expect(entry.status).toBe("running");
+
     const warnings = (await harness.pluginService.readLogTail("shadower", 10))
       ?.map((line) => JSON.parse(line) as { level: string; message: string })
       .filter((line) => line.level === "warn")
       .map(({ level, message }) => ({ level, message }));
+
     expect(warnings).toEqual([
       {
         level: "warn",
         message:
-          'CLI command "thread" collides with core command "bb thread"; core keeps the short form. Use "bb plugin run shadower" to invoke this plugin.',
+          'CLI command "thread" collides with core command "omnyo thread"; core keeps the short form. Use "omnyo plugin run shadower" to invoke this plugin.',
       },
     ]);
     expect(
       await (await runCli(harness, "shadower", { argv: [] })).json(),
     ).toMatchObject({ exitCode: 0, stdout: "thread" });
+
     const skill = await readFile(
       join(pluginCommandsSkillDir(harness.config.dataDir), "SKILL.md"),
       "utf8",
     );
-    expect(skill).toContain("bb plugin run shadower inspect");
+
+    expect(skill).toContain("omnyo plugin run shadower inspect");
 
     const invalid = await writePlugin(
       join(harness.config.dataDir, "fixtures"),
       {
-        name: "bb-plugin-badname",
+        name: "omnyo-plugin-badname",
         serverSource: `
-        export default function plugin(bb: any) {
-          bb.cli.register({ name: "Bad Name", summary: "s", run: async () => ({ exitCode: 0 }) });
+        export default function plugin(api: any) {
+          api.cli.register({ name: "Bad Name", summary: "s", run: async () => ({ exitCode: 0 }) });
         }
       `,
       },
     );
+
     const badEntry = await harness.pluginService.installPath(invalid);
     expect(badEntry.status).toBe("error");
     expect(badEntry.statusDetail).toContain("invalid cli command name");
@@ -323,15 +348,16 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
     const replacer = await writePlugin(
       join(harness.config.dataDir, "fixtures"),
       {
-        name: "bb-plugin-replacer",
+        name: "omnyo-plugin-replacer",
         serverSource: `
-        export default function plugin(bb: any) {
-          bb.cli.register({ name: "first", summary: "old", run: async () => ({ exitCode: 0 }) });
-          bb.cli.register({ name: "second", summary: "new", run: async () => ({ exitCode: 0 }) });
+        export default function plugin(api: any) {
+          api.cli.register({ name: "first", summary: "old", run: async () => ({ exitCode: 0 }) });
+          api.cli.register({ name: "second", summary: "new", run: async () => ({ exitCode: 0 }) });
         }
       `,
       },
     );
+
     const entry = await harness.pluginService.installPath(replacer);
     expect(entry.status).toBe("error");
     expect(entry.statusDetail).toContain("cli command is already registered");
@@ -347,12 +373,13 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
       pluginCommandsSkillDir(harness.config.dataDir),
       "SKILL.md",
     );
+
     const content = await readFile(skillFile, "utf8");
     expect(content).toContain("name: plugin-commands");
     expect(content).toContain("capped at 1048576 UTF-8 bytes");
     expect(content).toContain("plugin_cli_output_too_large");
-    expect(content).toContain("## bb acme — Acme tools");
-    expect(content).toContain("bb acme issues [--json]");
+    expect(content).toContain("## omnyo acme — Acme tools");
+    expect(content).toContain("omnyo acme issues [--json]");
 
     const sources = resolveSkillCatalogEntries(testLogger, {
       additionalSkillsRootPaths: [
@@ -361,6 +388,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
       dataDir: harness.config.dataDir,
       skillTreeRegistry: harness.deps.skillTreeRegistry,
     }).map((entry) => entry.runtimeSource);
+
     const skill = sources.find((source) => source.name === "plugin-commands");
     expect(skill?.sourceType).toBe("data-dir");
     expect(skill).toMatchObject({ kind: "tree", entryPath: "SKILL.md" });
@@ -368,18 +396,18 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
     await writeFile(
       join(rootDir, "server.ts"),
       `
-        export default function plugin(bb: any) {
-          bb.cli.register({ name: "acme2", summary: "Acme v2", run: async () => ({ exitCode: 0 }) });
+        export default function plugin(api: any) {
+          api.cli.register({ name: "acme2", summary: "Acme v2", run: async () => ({ exitCode: 0 }) });
         }
       `,
     );
     await harness.pluginService.reload("acme");
     const reloaded = await readFile(skillFile, "utf8");
-    expect(reloaded).toContain("## bb acme2 — Acme v2");
-    expect(reloaded).not.toContain("## bb acme —");
+    expect(reloaded).toContain("## omnyo acme2 — Acme v2");
+    expect(reloaded).not.toContain("## omnyo acme —");
   });
 
-  it("bb.log writes JSONL to the plugin log file and the tail endpoint serves it", async () => {
+  it("api.log writes JSONL to the plugin log file and the tail endpoint serves it", async () => {
     const logFile = join(
       harness.config.dataDir,
       "plugins",
@@ -387,13 +415,16 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
       "logs",
       "plugin.log",
     );
+
     const raw = await readFile(logFile, "utf8");
     const lines = raw.split("\n").filter((line) => line.length > 0);
+
     const parsed = JSON.parse(lines.at(-1) ?? "") as {
       ts: number;
       level: string;
       message: string;
     };
+
     expect(parsed.level).toBe("info");
     expect(parsed.message).toBe("cli plugin loaded");
     expect(typeof parsed.ts).toBe("number");
@@ -401,6 +432,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/acme/logs?tail=1`,
     );
+
     expect(response.status).toBe(200);
     const body = (await response.json()) as { ok: boolean; lines: string[] };
     expect(body.ok).toBe(true);
@@ -412,6 +444,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
     const missing = await harness.app.request(
       `${BASE}/api/v1/plugins/nope/logs`,
     );
+
     expect(missing.status).toBe(404);
   });
 });

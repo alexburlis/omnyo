@@ -27,6 +27,7 @@ describe("legacy thread event conversion", () => {
         timeUsedSeconds: 1_200,
       },
     });
+
     expect(event).toEqual({
       type: "thread/extensionState/updated",
       threadId: "thread-1",
@@ -53,6 +54,7 @@ describe("legacy thread event conversion", () => {
       data: { providerThreadId: "provider-1" },
       createdAt: 2,
     });
+
     expect(row.type).toBe("thread/extensionState/updated");
     expect(row.data).toEqual({
       providerThreadId: "provider-1",
@@ -80,6 +82,7 @@ describe("legacy thread event conversion", () => {
       toolName: "WebFetch",
       permissions: { network: { enabled: true }, fileSystem: null },
     };
+
     const converted = convertLegacyStoredThreadEvent({
       type: "system/permissionGrant/lifecycle",
       data: {
@@ -91,6 +94,7 @@ describe("legacy thread event conversion", () => {
         subject,
       },
     });
+
     expect(converted).toEqual({
       type: "system/interaction/lifecycle",
       data: {
@@ -134,6 +138,7 @@ describe("legacy thread event conversion", () => {
         },
       ],
     };
+
     const converted = convertLegacyStoredThreadEvent({
       type: "system/userQuestion/lifecycle",
       data: {
@@ -145,13 +150,16 @@ describe("legacy thread event conversion", () => {
         payload,
       },
     });
+
     expect(converted.type).toBe("system/interaction/lifecycle");
+
     const parsed = threadEventSchema.parse({
       ...converted.data,
       type: converted.type,
       threadId: "thr_1",
       scope: turnScope("turn_1"),
     });
+
     expect(
       parsed.type === "system/interaction/lifecycle" && parsed.interaction,
     ).toEqual({
@@ -173,6 +181,7 @@ describe("legacy thread event conversion", () => {
       type: "thread/name/updated" as const,
       data: { name: "A thread", providerThreadId: "provider-1" },
     };
+
     expect(convertLegacyStoredThreadEvent(stored)).toBe(stored);
   });
 });
@@ -212,8 +221,10 @@ describe("legacy tool-item adapter", () => {
         presentation: presented,
         result: "agentId: 1\nreal output",
       });
+
       expect(upgradeLegacyToolItem(item)).toBe(item);
     }
+
     for (const providerThreadId of ["claude-1", "codex-1", "acp-1", "pi-1"]) {
       const event = parseStoredThreadEvent({
         type: "item/completed",
@@ -228,6 +239,7 @@ describe("legacy tool-item adapter", () => {
           ),
         },
       });
+
       expect(event.type === "item/completed" && event.item.type).toBe(
         "toolCall",
       );
@@ -298,6 +310,7 @@ describe("legacy tool-item adapter", () => {
       { query: "fetch" },
       { status: "pending" },
     );
+
     expect(upgradeLegacyToolItem(pending)).toEqual({
       ...pending,
       presentation: {
@@ -306,6 +319,7 @@ describe("legacy tool-item adapter", () => {
         suppress: true,
       },
     });
+
     for (const tool of [
       "TodoWrite",
       "TodoRead",
@@ -317,6 +331,7 @@ describe("legacy tool-item adapter", () => {
         presentation: { suppress: true },
       });
     }
+
     for (const status of ["failed", "interrupted"]) {
       const item = toolItem("AskUserQuestion", {}, { status });
       expect(upgradeLegacyToolItem(item)).toBe(item);
@@ -331,6 +346,7 @@ describe("legacy tool-item adapter", () => {
         result: "agentId: abc\n<usage>tokens</usage>\nFound 3 issues.  \nDone.",
       },
     );
+
     expect(upgradeLegacyToolItem(item)).toEqual({
       ...item,
       result: "Found 3 issues.\nDone.",
@@ -351,6 +367,7 @@ describe("legacy tool-item adapter", () => {
     ]) {
       expect(isLegacyDelegationToolCall({ tool }), tool).toBe(true);
     }
+
     for (const tool of [
       "TaskCreate",
       "TaskOutput",
@@ -360,6 +377,7 @@ describe("legacy tool-item adapter", () => {
     ]) {
       expect(isLegacyDelegationToolCall({ tool }), tool).toBe(false);
     }
+
     expect(
       isLegacyDelegationToolCall({ tool: "Agent", presentation: presented }),
     ).toBe(false);
@@ -379,6 +397,7 @@ describe("legacy tool-item adapter", () => {
         ),
       },
     });
+
     expect(started.type === "item/started" && started.item).toEqual({
       type: "fileRead",
       id: "call-Read",
@@ -386,6 +405,7 @@ describe("legacy tool-item adapter", () => {
       path: "/repo/a.ts",
       cmd: "Read { file_path: /repo/a.ts }",
     });
+
     const stored = {
       type: "item/completed" as const,
       data: {
@@ -393,6 +413,7 @@ describe("legacy tool-item adapter", () => {
         item: toolItem("Bash", { command: "ls" }),
       },
     };
+
     expect(convertLegacyStoredThreadEvent(stored)).toBe(stored);
   });
 });

@@ -18,9 +18,11 @@ export function buildMachineThreadGroups(
   hosts: readonly MachineHost[],
 ): MachineThreadGroup[] {
   const threadsByKey = new Map<string, SidebarThread[]>();
+
   for (const thread of threads) {
     const key = thread.host?.id ?? NO_MACHINE_GROUP_KEY;
     const existing = threadsByKey.get(key);
+
     if (existing) {
       existing.push(thread);
     } else {
@@ -29,6 +31,7 @@ export function buildMachineThreadGroups(
   }
 
   const groups: MachineThreadGroup[] = [];
+
   for (const host of hosts) {
     const hostThreads = threadsByKey.get(host.id) ?? [];
     threadsByKey.delete(host.id);
@@ -41,6 +44,7 @@ export function buildMachineThreadGroups(
   const unknownHostIds = Array.from(threadsByKey.keys()).sort((left, right) =>
     left.localeCompare(right),
   );
+
   for (const hostId of unknownHostIds) {
     groups.push({
       key: hostId,

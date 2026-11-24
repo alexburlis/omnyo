@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import {
   definePluginApp,
   type PluginPendingInteractionProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,11 +26,14 @@ function SecretRequestInteraction({
     () => secretRequestPayloadSchema.safeParse(interaction.payload),
     [interaction.payload],
   );
+
   const [values, setValues] = useState<Record<string, string>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+
   const [pendingAction, setPendingAction] = useState<
     "submit" | "cancel" | null
   >(null);
+
   const busy = pendingAction !== null;
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -49,33 +52,43 @@ function SecretRequestInteraction({
       </div>
     );
   }
+
   const payload = parsed.data;
+
   const submitValues = async () => {
     const validated = secretRequestResponseSchema.safeParse({ values });
+
     if (!validated.success) {
       setFormError(
         "Every secret must be a non-empty single-line value no larger than 16 KiB.",
       );
+
       return;
     }
+
     try {
       reconcileDotenv("", validated.data.values);
     } catch {
       setFormError(
         "One value cannot be represented safely in a dotenv assignment.",
       );
+
       return;
     }
+
     setFormError(null);
     setPendingAction("submit");
+
     try {
       await submit({ values });
     } catch {
       setPendingAction(null);
     }
   };
+
   const cancelRequest = async () => {
     setPendingAction("cancel");
+
     try {
       await cancel();
     } catch {
@@ -109,6 +122,7 @@ function SecretRequestInteraction({
         {payload.fields.map((field) => {
           const inputId = `secret-${interaction.id}-${field.name}`;
           const isRevealed = revealed[field.name] ?? false;
+
           return (
             <div key={field.name} className="min-w-0 space-y-1.5">
               <div className="space-y-0.5">

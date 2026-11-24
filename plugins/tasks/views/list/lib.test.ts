@@ -10,7 +10,9 @@ import {
 import { makeTask } from "../../test-fixtures.js";
 
 const ULID_A = "01ARZ3NDEKTSV4RRFFQ69G5FAA";
+
 const ULID_B = "01ARZ3NDEKTSV4RRFFQ69G5FAB";
+
 const ULID_C = "01ARZ3NDEKTSV4RRFFQ69G5FAC";
 
 function task(overrides: Partial<Task> & Pick<Task, "id" | "status">): Task {
@@ -29,6 +31,7 @@ describe("groupTasksByStatus", () => {
       task({ id: ULID_B, status: "todo" }),
       task({ id: ULID_C, status: "todo" }),
     ]);
+
     expect(groups.map((g) => g.status)).toEqual(["todo", "done"]);
     expect(groups[0]?.tasks.map((t) => t.id)).toEqual([ULID_B, ULID_C]);
   });
@@ -52,6 +55,7 @@ describe("label filter options", () => {
       label(ULID_B, ULID_B, "Bug"),
       label(ULID_C, ULID_A, "Feature"),
     ]);
+
     expect(options.map((o) => o.name)).toEqual(["Bug", "Feature"]);
     expect(selectedLabelIds(options, ["Bug"])).toEqual([ULID_A, ULID_B]);
     expect(selectedLabelIds(options, [])).toEqual([]);

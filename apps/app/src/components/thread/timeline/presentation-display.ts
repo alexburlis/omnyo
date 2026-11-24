@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
-import { isPresentationTintColor } from "@bb/domain";
-import type { TimelineRowPresentation } from "@bb/server-contract";
-import { type IconName } from "@bb/shared-ui/icon";
+import { isPresentationTintColor } from "@omnyo/domain";
+import type { TimelineRowPresentation } from "@omnyo/server-contract";
+import { type IconName } from "@omnyo/shared-ui/icon";
 
 export function presentationIconName(
   presentation: { icon: TimelineRowPresentation["icon"] } | undefined,
@@ -15,6 +15,7 @@ export function presentationTintStyle(
     | undefined,
 ): CSSProperties | undefined {
   const tint = presentation?.tint;
+
   if (
     tint === undefined ||
     tint === null ||
@@ -23,5 +24,6 @@ export function presentationTintStyle(
   ) {
     return undefined;
   }
+
   return { color: `light-dark(${tint.light.trim()}, ${tint.dark.trim()})` };
 }

@@ -1,9 +1,9 @@
 import { useMemo } from "react";
-import type { ExperimentalDiffFullFileContents } from "@get-bb/plugin-sdk";
+import type { ExperimentalDiffFullFileContents } from "@omnyo/plugin-sdk";
 import { PluginReplacementSlot } from "@/components/plugin/PluginReplacementSlot";
 import type { ParsedGitDiffFile } from "@/components/git-diff/git-diff-parsing";
 import { buildFileDiffPatchText } from "@/components/git-diff/git-diff-patch-text";
-import { BbDiffSplit } from "./BbDiffSplit";
+import { OmnyoDiffSplit } from "./OmnyoDiffSplit";
 import { useDiffRendererReplacement } from "./codeRendererProvider";
 import {
   DEFAULT_CODE_OVERFLOW,
@@ -33,13 +33,14 @@ export function DiffHost({
 }: DiffHostProps) {
   const replacement = useDiffRendererReplacement();
   const isReplaced = replacement.kind === "plugin";
+
   const semanticPatch = useMemo(
     () => (isReplaced ? (patchText ?? buildFileDiffPatchText(file)) : ""),
     [file, isReplaced, patchText],
   );
 
   const original = (
-    <BbDiffSplit
+    <OmnyoDiffSplit
       file={file}
       patchText={patchText}
       fullFileContents={fullFileContents}

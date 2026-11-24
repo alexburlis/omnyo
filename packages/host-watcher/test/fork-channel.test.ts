@@ -13,6 +13,7 @@ class FakeChild extends EventEmitter {
 
   kill(signal?: string): boolean {
     this.killedWith = signal ?? "SIGTERM";
+
     return true;
   }
 
@@ -27,6 +28,7 @@ class FakeChild extends EventEmitter {
     this.send = (_message, callback) => {
       this.sendCount += 1;
       callback?.(error);
+
       return false;
     };
   }
@@ -35,6 +37,7 @@ class FakeChild extends EventEmitter {
 function epipe(): NodeJS.ErrnoException {
   const error: NodeJS.ErrnoException = new Error("write EPIPE");
   error.code = "EPIPE";
+
   return error;
 }
 
@@ -49,6 +52,7 @@ function setup(): {
   channel.onExit(() => {
     state.exits += 1;
   });
+
   return state;
 }
 

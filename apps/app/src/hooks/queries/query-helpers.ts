@@ -1,9 +1,11 @@
-import { toRecord } from "@bb/core-ui";
+import { toRecord } from "@omnyo/core-ui";
 import { HttpError } from "@/lib/api";
-import { BbHttpError } from "@/lib/sdk";
+import { OmnyoHttpError } from "@/lib/sdk";
 
 export const PROMPT_HISTORY_STALE_TIME_MS = 10_000;
+
 const TRANSIENT_READ_RETRY_COUNT = 2;
+
 export const TRANSIENT_READ_RETRY_DELAY_MS = 250;
 
 export interface QueryOptions {
@@ -26,6 +28,7 @@ export function requireEnabledQueryArg<T>({
       `${hookName}: ${argName} is required when query is enabled`,
     );
   }
+
   return value;
 }
 
@@ -52,16 +55,19 @@ export function isTransientReadError(error: unknown): boolean {
   if (toRecord(error)?.name === "AbortError") {
     return true;
   }
-  if (error instanceof HttpError || error instanceof BbHttpError) {
+
+  if (error instanceof HttpError || error instanceof OmnyoHttpError) {
     return false;
   }
 
   const record = toRecord(error);
+
   if (!record || typeof record.message !== "string") {
     return false;
   }
 
   const message = normalizeErrorMessage(record.message);
+
   return (
     message.includes("failed to fetch") ||
     message.includes("load failed") ||
@@ -77,5 +83,9 @@ export function shouldRetryTransientReadQuery(
     return false;
   }
 
-  return isTransientReadError(error);
+  return (
+    isTransientReadError(error) ||
+    ((error instanceof HttpError || error instanceof OmnyoHttpError) &&
+      toRecord(error.body)?.retryable === true)
+  );
 }

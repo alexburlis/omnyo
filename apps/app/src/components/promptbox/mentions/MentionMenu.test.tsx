@@ -1,15 +1,51 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PromptMentionSuggestion } from "@bb/client-core";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import type {
+  PromptMentionSuggestion,
+  ProviderCommandSuggestion,
+} from "@omnyo/client-core";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
 import { MentionMenu } from "./MentionMenu";
 
 afterEach(cleanup);
 
 describe("MentionMenu", () => {
+  it("bounds initial command rows and realizes a keyboard-selected result beyond the first page", () => {
+    const suggestions: ProviderCommandSuggestion[] = Array.from(
+      { length: 85 },
+      (_, index) => ({
+        kind: "command",
+        name: `skill-${index}`,
+        source: "skill",
+        origin: "user",
+        description: null,
+        argumentHint: null,
+      }),
+    );
+
+    const onApply = vi.fn();
+
+    const state = {
+      trigger: "command" as const,
+      state: { kind: "results" as const, suggestions },
+    };
+
+    const view = render(
+      <MentionMenu state={state} selectedIndex={0} onApply={onApply} />,
+    );
+
+    expect(screen.getAllByRole("button")).toHaveLength(40);
+    view.rerender(
+      <MentionMenu state={state} selectedIndex={80} onApply={onApply} />,
+    );
+    const selected = screen.getByText("skill-80").closest("button")!;
+    fireEvent.mouseDown(selected);
+    expect(onApply).toHaveBeenCalledWith(suggestions[80]);
+  });
+
   it("renders serialized thread mentions in thread titles as non-interactive pills", () => {
     const mentionedThread = makeThreadListEntry({
       id: "thr_mentioned",
@@ -17,6 +53,7 @@ describe("MentionMenu", () => {
       title: "Mention target",
       titleFallback: "Mention target",
     });
+
     const suggestion: PromptMentionSuggestion = {
       kind: "thread",
       path: "thr_source",
@@ -26,6 +63,7 @@ describe("MentionMenu", () => {
       title: "Continue from @thread:thr_mentioned",
       relation: null,
     };
+
     const onApply = vi.fn();
 
     render(
@@ -39,6 +77,7 @@ describe("MentionMenu", () => {
             trigger: "mention",
             state: {
               kind: "results",
+              refreshing: false,
               results: {
                 groups: [
                   {
@@ -63,5 +102,57 @@ describe("MentionMenu", () => {
     expect(pill.closest("a")).toBeNull();
     expect(pill.closest("[role='link']")).toBeNull();
     expect(screen.getByTitle("Continue from Mention target")).not.toBeNull();
+  });
+
+  it("shows a refresh spinner over current results without changing their layout", () => {
+    const suggestion: PromptMentionSuggestion = {
+      kind: "path",
+      source: "workspace",
+      entryKind: "file",
+      path: "src/index.ts",
+      name: "index.ts",
+      replacement: "@src/index.ts",
+    };
+
+    const renderMenu = (refreshing: boolean) =>
+      render(
+        <MentionMenu
+          state={{
+            trigger: "mention",
+            state: {
+              kind: "results",
+              refreshing,
+              results: {
+                groups: [
+                  {
+                    key: "workspace",
+                    label: "Workspace",
+                    startIndex: 0,
+                    suggestions: [suggestion],
+                  },
+                ],
+                suggestions: [suggestion],
+              },
+            },
+          }}
+          selectedIndex={0}
+          onApply={vi.fn()}
+        />,
+      );
+
+    const idle = renderMenu(false);
+    const idleStatus = idle.container.querySelector("[role='status']");
+    expect(idleStatus?.classList.contains("invisible")).toBe(true);
+    expect(screen.queryByLabelText("Updating results")).toBeNull();
+    idle.unmount();
+
+    const refreshing = renderMenu(true);
+
+    const refreshingStatus =
+      refreshing.container.querySelector("[role='status']");
+
+    expect(refreshingStatus?.classList.contains("invisible")).toBe(false);
+    expect(screen.getByLabelText("Updating results")).toBe(refreshingStatus);
+    expect(screen.getByText("index.ts")).not.toBeNull();
   });
 });

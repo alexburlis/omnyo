@@ -1,7 +1,10 @@
+import semverGte from "semver/functions/gte.js";
+import semverValid from "semver/functions/valid.js";
+import { sdk } from "@/lib/sdk";
 import { useMemo } from "react";
-import type { ExperimentalPluginBrowserPage } from "@get-bb/plugin-sdk";
-import type { BbDesktopBrowserApi } from "@bb/desktop-contract";
-import { getDesktopBrowserApi } from "@/lib/bb-desktop";
+import type { ExperimentalPluginBrowserPage } from "@omnyo/plugin-sdk";
+import type { OmnyoDesktopBrowserApi } from "@omnyo/desktop-contract";
+import { getDesktopBrowserApi, getOmnyoDesktopInfo } from "@/lib/omnyo-desktop";
 import {
   usePluginSlots,
   type PluginBrowserToolbarActionSlot,
@@ -9,33 +12,60 @@ import {
 import { PluginSlotMount } from "./PluginSlotMount";
 
 interface CreatePluginBrowserPageArgs {
-  desktopBrowser: BbDesktopBrowserApi | null;
+  desktopBrowser: OmnyoDesktopBrowserApi | null;
+  desktopVersion: string | null;
   pluginId: string;
   tabId: string;
+  threadId: string;
 }
 
 export function createPluginBrowserPage({
   desktopBrowser,
+  desktopVersion,
   pluginId,
   tabId,
+  threadId,
 }: CreatePluginBrowserPageArgs): ExperimentalPluginBrowserPage | null {
   const evaluate = desktopBrowser?.evaluate;
   const onPageMessage = desktopBrowser?.onPageMessage;
+
   if (evaluate === undefined || onPageMessage === undefined) {
     return null;
   }
+
   return {
     async evaluate(expression, options) {
+      const version = semverValid(desktopVersion ?? "");
+
+      if (version === null || !semverGte(version, "0.46.246"))
+        throw new Error(
+          "Update Omnyo desktop to 0.46.246 or newer to evaluate browser pages.",
+        );
+
       const result = await evaluate({
         tabId,
         expression,
         world: options?.world ?? "isolated",
         channel: pluginId,
       });
+
       if (!result.ok) {
         throw new Error(result.error);
       }
+
       return result.value;
+    },
+    async experimental_capture() {
+      const target = await desktopBrowser?.getTarget?.();
+
+      if (target === undefined || target === null)
+        throw new Error("Desktop browser capture is unavailable");
+
+      return sdk.experimental_desktopBrowsers.captureTab({
+        ...target,
+        tabId,
+        threadId,
+      });
     },
     onMessage(listener) {
       return onPageMessage((message) => {
@@ -66,12 +96,16 @@ function PluginBrowserToolbarAction({
     () =>
       createPluginBrowserPage({
         desktopBrowser: getDesktopBrowserApi(),
+        desktopVersion: getOmnyoDesktopInfo()?.version ?? null,
         pluginId: slot.pluginId,
         tabId,
+        threadId,
       }),
-    [slot.pluginId, tabId],
+    [slot.pluginId, tabId, threadId],
   );
+
   const Component = slot.component;
+
   return (
     <PluginSlotMount
       pluginId={slot.pluginId}

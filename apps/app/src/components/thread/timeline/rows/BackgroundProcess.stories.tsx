@@ -1,4 +1,4 @@
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import { ThreadTimelineRows } from "@/components/thread/timeline";
 import { backgroundCommandRow } from "@/test/fixtures/thread-timeline-rows";
 import { StoryCard, StoryRow } from "../../../../../.ladle/story-card";
@@ -30,6 +30,8 @@ const baseArgs = {
 const running: TimelineRow = backgroundCommandRow({
   ...baseArgs,
   id: "thr_fixture:bg:task:bmn5wv33k:running",
+  startedAt: Date.now() - 9_000,
+  createdAt: Date.now() - 9_000,
   status: "pending",
   taskStatus: "running",
   summary: null,

@@ -21,6 +21,7 @@ function show(
     duration: options?.duration,
     action: options?.action,
   };
+
   switch (kind) {
     case "success":
       return sonnerToast.success(message, data);
@@ -45,10 +46,12 @@ export const toast = {
 };
 
 const TOAST_RADIUS = 14;
+
 const ICON_SIZE = 20;
 
 export function Toaster() {
   const { tokens, mode, radii } = useTheme();
+
   const icons = useMemo(
     () => ({
       success: (
@@ -68,6 +71,7 @@ export function Toaster() {
     }),
     [tokens],
   );
+
   return (
     <SonnerToaster
       theme={mode}

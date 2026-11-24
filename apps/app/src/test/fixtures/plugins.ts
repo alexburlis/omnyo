@@ -1,4 +1,4 @@
-import type { InstalledPlugin } from "@bb/server-contract";
+import type { InstalledPlugin } from "@omnyo/server-contract";
 import type { PluginListItem } from "@/hooks/queries/plugin-settings-queries";
 import type { PluginRegistrationSet } from "@/lib/plugin-slots";
 
@@ -10,6 +10,7 @@ type PluginListItemOverrides = Omit<
   handlerStats?: Partial<PluginListItem["handlerStats"]>;
   updateState?: Partial<PluginListItem["updateState"]>;
 };
+
 type InstalledPluginOverrides = Omit<
   Partial<InstalledPlugin>,
   "app" | "handlerStats"
@@ -25,6 +26,9 @@ export function makePluginRegistrationSet(
     homepageSections: [],
     settingsSections: [],
     appOverlays: [],
+    sidebarFooterCards: [],
+    titleBarCenters: [],
+    sidebarEntries: [],
     navPanels: [],
     threadPanelActions: [],
     newThreadPanelActions: [],
@@ -33,6 +37,7 @@ export function makePluginRegistrationSet(
     sidebarFooterActions: [],
     threadLists: [],
     threadHeaderActions: [],
+    threadViews: [],
     threadActions: [],
     browserToolbarActions: [],
     fileOpeners: [],
@@ -61,16 +66,20 @@ export function makePluginListItem(
     statusDetail: null,
     description: null,
     name: "Test plugin",
+    shortName: null,
     icon: null,
     compactIconUrl: null,
     logoUrl: null,
     logoDarkUrl: null,
     hasSettings: false,
     provenance: "direct",
+    removable: true,
     isOrphanedBuiltin: false,
     catalogEntryId: null,
     catalogMarketplaceName: null,
     publisherLabel: null,
+    official: false,
+    repositoryUrl: null,
     sourceDisplay: "path · /plugins/plugin-test",
     updateState: {
       outcome: null,
@@ -88,6 +97,7 @@ export function makePluginListItem(
     capabilities: [],
     app: { hasApp: false, bundle: null },
   };
+
   return {
     ...plugin,
     ...overrides,
@@ -106,13 +116,17 @@ export function makeInstalledPlugin(
     rootDir: "/plugins/plugin-test",
     version: "0.1.0",
     provenance: "direct",
+    removable: true,
     isOrphanedBuiltin: false,
     publisherLabel: null,
+    official: false,
+    repositoryUrl: null,
     sourceDisplay: "path · /plugins/plugin-test",
     updateState: {},
     enabled: true,
     description: null,
     name: "Test plugin",
+    shortName: null,
     screenshots: [],
     collections: [],
     icon: null,
@@ -131,6 +145,7 @@ export function makeInstalledPlugin(
     providerIds: [],
     icons: {},
   };
+
   return {
     ...plugin,
     ...overrides,

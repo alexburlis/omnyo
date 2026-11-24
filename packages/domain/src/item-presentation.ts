@@ -6,6 +6,7 @@ export const threadEventItemPresentationLabelSchema = z.object({
   pending: z.string().min(1),
   completed: z.string().min(1),
 });
+
 export type ThreadEventItemPresentationLabel = z.infer<
   typeof threadEventItemPresentationLabelSchema
 >;
@@ -13,6 +14,7 @@ export type ThreadEventItemPresentationLabel = z.infer<
 export const threadEventItemPresentationIconSchema = z.object({
   glyph: z.string().min(1),
 });
+
 export type ThreadEventItemPresentationIcon = z.infer<
   typeof threadEventItemPresentationIconSchema
 >;
@@ -21,6 +23,7 @@ export const threadEventItemPresentationTintSchema = z.object({
   light: z.string().min(1),
   dark: z.string().min(1),
 });
+
 export type ThreadEventItemPresentationTint = z.infer<
   typeof threadEventItemPresentationTintSchema
 >;
@@ -59,6 +62,7 @@ export const threadEventItemPresentationSchema = z.object({
   tint: threadEventItemPresentationTintSchema.optional(),
   badge: threadEventItemPresentationBadgeSchema.optional(),
 });
+
 export type ThreadEventItemPresentation = z.infer<
   typeof threadEventItemPresentationSchema
 >;

@@ -1,9 +1,13 @@
 import { useMemo, useState } from "react";
-import { COARSE_POINTER_TEXT_SM_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
-import { EmptyState } from "@bb/shared-ui/empty-state";
-import { Icon } from "@bb/shared-ui/icon";
-import { Input } from "@bb/shared-ui/input";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { COARSE_POINTER_TEXT_SM_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { EmptyState } from "@omnyo/shared-ui/empty-state";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Input } from "@omnyo/shared-ui/input";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  CONTROL_PRESS_FEEDBACK,
+  CONTROL_PRESS_TRANSITION,
+} from "@omnyo/shared-ui/motion";
 import {
   describeLifecycleError,
   formatLifecycleErrorDescription,
@@ -49,6 +53,7 @@ function describeStorageError(error: Error): string {
     error,
     operation: "load_thread_storage",
   });
+
   return (
     (lifecycleErrorDescription
       ? formatLifecycleErrorDescription(lifecycleErrorDescription)
@@ -61,8 +66,11 @@ function describeStorageError(error: Error): string {
   );
 }
 
-const STORAGE_SEARCH_BUTTON_CLASS =
-  "flex size-5 shrink-0 items-center justify-center rounded text-subtle-foreground transition-colors hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:pointer-coarse:-my-2 max-md:pointer-coarse:size-9";
+const STORAGE_SEARCH_BUTTON_CLASS = cn(
+  CONTROL_PRESS_TRANSITION,
+  CONTROL_PRESS_FEEDBACK,
+  "flex size-5 shrink-0 items-center justify-center rounded text-subtle-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:pointer-coarse:-my-2 max-md:pointer-coarse:size-9",
+);
 
 export function ThreadStorageSection({
   controller,
@@ -81,13 +89,17 @@ export function ThreadStorageSection({
     showAllInFolder,
     toggleFolder,
   } = controller;
+
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const collapse = useInfoSectionCollapse("threadStorage");
+
   const tree = useMemo(
     () => buildThreadStorageTree(filteredFiles),
     [filteredFiles],
   );
+
   const isSearching = searchQuery.trim() !== "";
+
   const searchRows = useMemo(
     () =>
       isSearching
@@ -97,6 +109,7 @@ export function ThreadStorageSection({
         : [],
     [isSearching, tree],
   );
+
   const revealIndex =
     lastSelectedPath === null
       ? null
@@ -105,14 +118,18 @@ export function ThreadStorageSection({
             node.path === lastSelectedPath ||
             lastSelectedPath.startsWith(`${node.path}/`),
         );
+
   if (loadedFiles.length === 0 && filesError == null) return null;
+
   const isFolderExpanded = (folderPath: string) =>
     isSearching || expandedFolders.has(folderPath);
+
   const flattenOptions: ThreadStorageFlattenOptions = {
     isExpanded: isFolderExpanded,
     showsAllChildren: (folderPath) => foldersShowingAll.has(folderPath),
     childLimit: THREAD_STORAGE_FOLDER_CHILD_LIMIT,
   };
+
   const renderRow = (row: ThreadStorageTreeRow) => {
     if (row.kind === "more") {
       return (
@@ -125,9 +142,12 @@ export function ThreadStorageSection({
         />
       );
     }
+
     const { node, depth } = row;
+
     if (node.kind === "folder") {
       const expanded = isFolderExpanded(node.path);
+
       return (
         <InfoListRow
           key={node.path}
@@ -143,7 +163,16 @@ export function ThreadStorageSection({
               aria-hidden
             />
           }
-          name={<span className="text-subtle-foreground">{node.name}</span>}
+          name={
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Icon
+                name={expanded ? "FolderOpen" : "Folder"}
+                className="size-3 shrink-0 text-muted-foreground"
+                aria-hidden
+              />
+              <span className="truncate text-foreground">{node.name}</span>
+            </span>
+          }
           title={node.path}
           expanded={expanded}
           target={
@@ -157,6 +186,7 @@ export function ThreadStorageSection({
         />
       );
     }
+
     return (
       <InfoListRow
         key={node.path}
@@ -182,15 +212,18 @@ export function ThreadStorageSection({
       />
     );
   };
+
   const closeSearch = () => {
     setIsSearchOpen(false);
     setSearchQuery("");
   };
+
   const searchable = infoListCollapses(loadedFiles.length);
+
   return (
     <InfoSection
       label="Thread storage"
-      count={loadedFiles.length}
+      count={filesError ? undefined : loadedFiles.length}
       collapse={collapse}
       trailing={
         !searchable ? null : isSearchOpen ? (
@@ -237,12 +270,29 @@ export function ThreadStorageSection({
       }
     >
       {filesError ? (
-        <EmptyState
-          message={describeStorageError(filesError)}
-          messageClassName="text-destructive"
-        />
+        <div
+          role="alert"
+          className="mt-1 flex items-start gap-2 rounded-md border border-surface-destructive-border bg-surface-destructive px-2.5 py-2"
+        >
+          <Icon
+            name="AlertTriangle"
+            className="mt-0.5 size-3.5 shrink-0 text-destructive-text"
+            aria-hidden
+          />
+          <div className="min-w-0">
+            <p className="text-xs font-medium leading-5 text-destructive-text">
+              Couldn’t list this chat’s files
+            </p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {describeStorageError(filesError)}
+            </p>
+          </div>
+        </div>
       ) : filteredFiles.length === 0 ? (
-        <EmptyState message="No files match search." />
+        <EmptyState
+          icon="Search"
+          message={`No files match “${searchQuery.trim()}”.`}
+        />
       ) : isSearching ? (
         <InfoList
           items={searchRows}

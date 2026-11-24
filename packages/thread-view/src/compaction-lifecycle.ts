@@ -1,5 +1,5 @@
-import type { ThreadEvent } from "@bb/domain";
-import { requireThreadEventScopeTurnId } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
+import { requireThreadEventScopeTurnId } from "@omnyo/domain";
 import type { EventMeta } from "./event-decode.js";
 import { getEventTurnId } from "./event-decode.js";
 
@@ -20,10 +20,13 @@ export function getCompactionKey(
       scope: decoded.scope,
     });
   }
+
   const turnId = getEventTurnId(decoded);
+
   if (decoded.type === "item/started" || decoded.type === "item/completed") {
     return turnId ?? decoded.item.id;
   }
+
   return turnId ?? `seq-${meta.seq}`;
 }
 

@@ -130,6 +130,17 @@ export interface ExperimentalHostRpcContext<
    * Keep this worker alive after the current call finishes. Active calls and
    * filesystem watches already retain it; use this only for other background
    * work. The daemon may stop an unretained worker after an idle period.
+   *
+   * When the plugin is updated, a machine whose worker holds a lease keeps that
+   * worker running until its own work releases every lease, for at most 25
+   * hours, and starts the new version afterwards; other machines switch at
+   * once. Methods with a matching `experimental_hostReplacementKey` in both
+   * caller and retained worker contracts can continue controlling existing
+   * work. Other calls fail with code `plugin_host_replacing`; old-generation
+   * signals are dropped. The version key promises compatible input, output
+   * and behavior, and must change when that promise no longer holds. Missing
+   * keys never permit forwarding. Disabling, removing or safe mode still
+   * stops the worker at once.
    */
   experimental_retainWorker(): ExperimentalHostWorkerLease;
 }
@@ -157,7 +168,7 @@ export interface ExperimentalHostEntry<
   readonly dispose?: () => void | Promise<void>;
 }
 
-/** Define the single host executable exported by `bb.host`. */
+/** Define the single host executable exported by `omnyo.host`. */
 export function experimental_defineHostEntry<
   const Contract extends PluginRpcContract,
   const Signals extends ExperimentalHostSignals = {},

@@ -1,13 +1,13 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 
 type AutomationSignalKind = "automations-changed" | "automation-runs-changed";
 
 export function publishAutomationChange(
-  bb: Pick<BbPluginApi, "realtime">,
+  api: Pick<PluginApi, "realtime">,
   projectId: string,
   kinds: AutomationSignalKind | AutomationSignalKind[],
 ): void {
   for (const kind of Array.isArray(kinds) ? kinds : [kinds]) {
-    bb.realtime.publish("automations", { projectId, kind });
+    api.realtime.publish("automations", { projectId, kind });
   }
 }

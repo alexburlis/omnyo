@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { installTestPluginRuntime } from "@get-bb/plugin-sdk/testing/app";
+import { installTestPluginRuntime } from "@omnyo/plugin-sdk/testing/app";
 import { collectPluginAppRegistrations } from "@/lib/plugin-app-definition";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 import {
@@ -21,6 +21,7 @@ import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
 import { loadPluginAppDefinition } from "../../../../.ladle/plugin-app-module";
 
 installTestPluginRuntime();
+
 const secretsApp = await loadPluginAppDefinition(
   import.meta.glob<unknown>("../../../../../../plugins/secrets/app.tsx"),
 );
@@ -37,11 +38,13 @@ export function Overview() {
       }),
     );
     markPluginFrontendsSettled();
+
     return () => {
       removePluginSlotRegistrations("secrets");
       resetPluginFrontendBootStateForTest();
     };
   }, []);
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
       <ThreadPendingInteractionBanners
@@ -150,6 +153,7 @@ function usePluginBranding(): void {
         ["ask-user-question", brandingFor("Ask User Question")],
       ]),
     );
+
     return () => resetPluginLogoStoreForTest();
   }, []);
 }
@@ -163,6 +167,7 @@ function useSecretsFormRegistered(): void {
           collectPluginAppRegistrations(secretsApp).pendingInteractions,
       }),
     );
+
     return () => removePluginSlotRegistrations("secrets");
   }, []);
 }
@@ -170,6 +175,7 @@ function useSecretsFormRegistered(): void {
 function useSettledPluginFrontends(settled: boolean): void {
   useEffect(() => {
     if (settled) markPluginFrontendsSettled();
+
     return () => resetPluginFrontendBootStateForTest();
   }, [settled]);
 }
@@ -200,6 +206,7 @@ export function PluginFormBooting() {
   usePluginBranding();
   useSecretsFormRegistered();
   useSettledPluginFrontends(false);
+
   return (
     <StoryCard className="m-0 p-4">
       <StoryRow
@@ -238,6 +245,7 @@ export function PluginFormSettled() {
   usePluginBranding();
   useSecretsFormRegistered();
   useSettledPluginFrontends(true);
+
   return (
     <StoryCard className="m-0 p-4">
       <StoryRow
@@ -290,6 +298,7 @@ export function ManySecretsInThread() {
   usePluginBranding();
   useSecretsFormRegistered();
   useSettledPluginFrontends(true);
+
   return (
     <div className="mx-auto flex h-dvh max-w-3xl flex-col overflow-hidden p-4">
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">

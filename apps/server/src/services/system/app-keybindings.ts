@@ -6,12 +6,13 @@ import type {
   AppKeybinding,
   AppKeybindings,
   AppShortcut,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   QUESTION_SELECT_APP_COMMAND_IDS,
+  RAIL_JUMP_APP_COMMAND_IDS,
   PANE_FOCUS_APP_COMMAND_IDS,
   THREAD_JUMP_APP_COMMAND_IDS,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 interface ShortcutModifiers {
   mod?: boolean;
@@ -88,7 +89,7 @@ function macArrowBindings(
   ];
 }
 
-function numberedChatBindings(
+function numberedNavigationBindings(
   commands: readonly AppCommandId[],
   options: BindingOptions,
 ): AppKeybindings {
@@ -149,6 +150,11 @@ const mainWithoutModalOrBrowser = {
   none: ["modalOpen", "browserFocus"],
 } as const;
 
+const mainWithoutModalOrFocusedInput = {
+  all: ["mainSurface"],
+  none: ["modalOpen", "editableFocus", "terminalFocus", "browserFocus"],
+} as const;
+
 const splitWithoutModal = {
   all: ["mainSurface", "splitActive"],
   none: ["modalOpen"],
@@ -157,6 +163,31 @@ const splitWithoutModal = {
 export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
   binding("history.back", "[", { mod: true }, mainWithoutModalOrBrowser),
   binding("history.forward", "]", { mod: true }, mainWithoutModalOrBrowser),
+  binding("edit.undo", "z", { mod: true }, mainWithoutModalOrFocusedInput),
+  binding(
+    "edit.redo",
+    "z",
+    { mod: true, shift: true },
+    mainWithoutModalOrFocusedInput,
+  ),
+  binding(
+    "edit.redo",
+    "y",
+    { control: true },
+    {
+      ...mainWithoutModalOrFocusedInput,
+      none: [...mainWithoutModalOrFocusedInput.none, "macPlatform"],
+    },
+  ),
+  binding(
+    "edit.redo",
+    "y",
+    { mod: true },
+    {
+      ...mainWithoutModalOrFocusedInput,
+      all: [...mainWithoutModalOrFocusedInput.all, "macPlatform"],
+    },
+  ),
   binding("palette.open", "p", { mod: true, shift: true }, mainWithoutModal),
   binding("thread.new", "o", { mod: true, shift: true }, mainWithoutModal),
   binding(
@@ -171,10 +202,28 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
   binding("thread.search", "k", { mod: true }, mainWithoutModal),
   unassignedBinding("thread.rename", mainWithoutModal),
   unassignedBinding("thread.archive", mainWithoutModal),
+  binding("thread.shelve", "f", { mod: true, shift: true }, mainWithoutModal),
+  binding(
+    "thread.copyLink",
+    "c",
+    { mod: true, shift: true },
+    {
+      all: ["mainSurface"],
+      none: ["modalOpen", "terminalFocus", "browserFocus"],
+    },
+  ),
+  binding(
+    "thread.group",
+    "g",
+    { mod: true },
+    { all: ["mainSurface", "chatSelection"], none: ["modalOpen"] },
+  ),
   binding("app.back", "Escape", {}, mainWithoutModal),
   binding("settings.open", ",", { mod: true }, mainWithoutModal),
   binding("sidebar.toggle", "\\", { mod: true }, mainWithoutModal),
   unassignedBinding("notifications.open", mainWithoutModal),
+  unassignedBinding("thread.unreadAbove", mainWithoutModal),
+  unassignedBinding("thread.unreadBelow", mainWithoutModal),
   unassignedBinding("plugins.enterSafeMode", mainWithoutModal),
   unassignedBinding("plugins.exitSafeMode", mainWithoutModal),
   unassignedBinding("plugins.pruneCache", mainWithoutModal),
@@ -182,7 +231,7 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
     "thread.previous",
     "[",
     { control: true, shift: true },
-    webMainWithoutModal,
+    { ...webMainWithoutModal, none: ["modalOpen", "macPlatform"] },
   ),
   binding(
     "thread.previous",
@@ -191,13 +240,14 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
     {
       ...mainWithoutModal,
       desktopOnly: true,
+      none: ["modalOpen", "macPlatform"],
     },
   ),
   binding(
     "thread.next",
     "]",
     { control: true, shift: true },
-    webMainWithoutModal,
+    { ...webMainWithoutModal, none: ["modalOpen", "macPlatform"] },
   ),
   binding(
     "thread.next",
@@ -206,9 +256,25 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
     {
       ...mainWithoutModal,
       desktopOnly: true,
+      none: ["modalOpen", "macPlatform"],
     },
   ),
-  ...numberedChatBindings(THREAD_JUMP_APP_COMMAND_IDS, mainWithoutModal),
+  binding(
+    "thread.previous",
+    "ArrowUp",
+    { mod: true },
+    { ...mainWithoutModal, all: ["mainSurface", "macPlatform"] },
+  ),
+  binding(
+    "thread.next",
+    "ArrowDown",
+    { mod: true },
+    { ...mainWithoutModal, all: ["mainSurface", "macPlatform"] },
+  ),
+  ...numberedNavigationBindings(RAIL_JUMP_APP_COMMAND_IDS, mainWithoutModal),
+  ...THREAD_JUMP_APP_COMMAND_IDS.map((command) =>
+    unassignedBinding(command, mainWithoutModal),
+  ),
   ...(
     [
       ["pane.focus.left", "ArrowLeft"],
@@ -226,7 +292,9 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
   ),
   unassignedBinding("pane.focus.previous", splitWithoutModal),
   unassignedBinding("pane.focus.next", splitWithoutModal),
-  ...numberedChatBindings(PANE_FOCUS_APP_COMMAND_IDS, splitWithoutModal),
+  ...PANE_FOCUS_APP_COMMAND_IDS.map((command) =>
+    unassignedBinding(command, splitWithoutModal),
+  ),
   binding(
     "pane.maximize.toggle",
     "e",
@@ -269,7 +337,7 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
     },
   ),
   binding("panel.close", "w", { mod: true }, mainWithoutModal),
-  binding("panel.toggle", "j", { mod: true }, mainWithoutModal),
+  binding("panel.toggle", "j", { mod: true, shift: true }, mainWithoutModal),
   unassignedBinding("panel.fullScreen.toggle", mainWithoutModal),
   binding("file.quickOpen", "p", { mod: true }, mainWithoutModal),
   binding(
@@ -287,11 +355,15 @@ export const DEFAULT_APP_KEYBINDINGS: AppDefaultKeybindings = [
     { mod: true, shift: true },
     mainWithoutModal,
   ),
+  unassignedBinding("composer.focus", composerWithoutModal),
   binding(
-    "composer.focus",
-    "c",
-    { mod: true, shift: true },
-    composerWithoutModal,
+    "composer.terminal.toggle",
+    "j",
+    { mod: true },
+    {
+      all: ["mainSurface", "promptAvailable"],
+      none: ["modalOpen"],
+    },
   ),
   binding(
     "modelPicker.toggle",

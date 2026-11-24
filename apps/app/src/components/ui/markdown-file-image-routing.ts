@@ -9,7 +9,7 @@ import {
   buildThreadHostFileContentUrl,
 } from "@/lib/file-content-urls";
 
-const ROUTE_ROOT = "/__bb_markdown_file_root__";
+const ROUTE_ROOT = "/__omnyo_markdown_file_root__";
 
 export function buildMarkdownFileImageRouting({
   path,
@@ -29,11 +29,14 @@ export function buildMarkdownFileImageRouting({
 }): MarkdownLinkRouting | undefined {
   if (linkRouting?.localImage !== undefined) return linkRouting;
   const root = normalizeAbsoluteFilePath({ path: rootPath ?? ROUTE_ROOT });
+
   if (root === null) return linkRouting;
+
   const filePath = buildAbsoluteFilePath({
     path: rootPath === null ? path.replace(/^\/+/, "") : path,
     rootPath: root,
   });
+
   return {
     ...linkRouting,
     localImage: {
@@ -49,6 +52,7 @@ export function buildMarkdownFileImageRouting({
         if (sourceKind === "absolute" && threadId !== null) {
           return buildThreadHostFileContentUrl(threadId, image.path);
         }
+
         return resolveRelativeSrc(
           image.path.slice(root === "/" ? 1 : root.length + 1),
           image.path,
@@ -68,6 +72,7 @@ export function buildMarkdownHostFileImageRouting({
   hostId: string | null;
 }): MarkdownLinkRouting | undefined {
   if (hostId === null) return undefined;
+
   return buildMarkdownFileImageRouting({
     path,
     rootPath,

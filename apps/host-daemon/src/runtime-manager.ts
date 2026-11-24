@@ -1,4 +1,5 @@
-import { mkdir } from "node:fs/promises";
+import { ExpectedCommandDispatchError } from "./command-errors.js";
+import { mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import {
   createAgentRuntime,
@@ -7,32 +8,34 @@ import {
   type AgentRuntimeSkillRoot,
   type AgentRuntimeProcessExitInfo,
   type ReapedIdleProviderSession,
-} from "@bb/agent-runtime";
-import type { Logger } from "@bb/logger";
-import { sliceUtf16Tail } from "@bb/text-utils";
+  type RuntimeOpenBackgroundWork,
+} from "@omnyo/agent-runtime";
+import type { Logger } from "@omnyo/logger";
+import { sliceUtf16Tail } from "@omnyo/text-utils";
 import type {
+  RetainedProviderSession,
   PendingInteractionCreate,
   PendingInteractionResolution,
   ThreadEvent,
-} from "@bb/domain";
-import { threadScope, turnScope } from "@bb/domain";
+} from "@omnyo/domain";
+import { threadScope, turnScope } from "@omnyo/domain";
 import type {
+  HostHousekeepingStatus,
   HostDaemonActiveThread,
   HostDaemonContributedEnvEntry,
   HostDaemonLoadedEnvironment,
   HostDaemonInjectedSkillSource,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type {
   DataDirSkillsWatchError,
   HostWatcher,
   InjectedSkillsObservedChange,
-} from "@bb/host-watcher";
+} from "@omnyo/host-watcher";
 import {
-  provisionWorkspace,
   WorkspaceError,
   type HostWorkspace,
   type ProvisionWorkspaceArgs,
-} from "@bb/host-workspace";
+} from "@omnyo/host-workspace";
 import {
   cleanupInjectedSkillStagingDirs,
   EMPTY_SKILL_CATALOG_HASH,
@@ -46,15 +49,25 @@ import {
 } from "./provider-installation-gate.js";
 import type { FetchSkillTree } from "./skill-trees.js";
 import { userExecutableProcessOptions } from "./user-executable-env.js";
+import type { WorkerUpdateScope } from "./server-move/service.js";
 import { runSetupScript } from "./environment-lifecycle-script.js";
 import { runInSerialLane } from "./serial-lane.js";
+import {
+  collectIsolatedLocalSkillSource,
+  provisionIsolatedWorkspace,
+} from "./workspace-read-client.js";
 
 type StopWatching = () => void | Promise<void>;
 
 const STOP_WATCHING: StopWatching = () => undefined;
+
 const PROVIDER_MAINTENANCE_WORKSPACE_DIR = "provider-maintenance-workspace";
+
 const PROVIDER_MAINTENANCE_IDLE_TIMEOUT_MS = 60_000;
+
 const PROVIDER_PROCESS_EXIT_DETAIL_MAX_LENGTH = 4000;
+
+const WORKSPACE_IDENTITY_DRAIN_TIMEOUT_MS = 10_000;
 
 interface RuntimeSkillConfig {
   catalogHash: string;
@@ -102,9 +115,11 @@ function formatProviderProcessExitStatus(
   if (info.signal) {
     return `signal ${info.signal}`;
   }
+
   if (info.code !== null) {
     return `code ${info.code}`;
   }
+
   return "unknown status";
 }
 
@@ -120,6 +135,7 @@ function buildProviderProcessExitDetail(
   if (!info.stderr) {
     return undefined;
   }
+
   return `stderr:\n${sliceUtf16Tail(info.stderr, PROVIDER_PROCESS_EXIT_DETAIL_MAX_LENGTH)}`;
 }
 
@@ -165,7 +181,11 @@ interface RefreshEnvironmentWorkspaceArgs {
 }
 
 export interface RuntimeManagerOptions {
+  hasPendingInteractiveRequest?: (threadId: string) => boolean;
+  workspaceUnscopedWriterActivity?: () => number;
+  workspaceIdentityDrainTimeoutMs?: number;
   bridgeBundleDir?: AgentRuntimeOptions["bridgeBundleDir"];
+  containProviderProcess?: AgentRuntimeOptions["containProviderProcess"];
   createRuntime?: (options: AgentRuntimeOptions) => AgentRuntime;
   dataDir?: string;
   dataDirSkillsRootPath?: string | null;
@@ -192,6 +212,7 @@ export interface RuntimeManagerOptions {
   onToolCall?: AgentRuntimeOptions["onToolCall"];
   onStderr?: AgentRuntimeOptions["onStderr"];
   onProcessExit?: AgentRuntimeOptions["onProcessExit"];
+  onThreadDetached?: AgentRuntimeOptions["onThreadDetached"];
 }
 
 export interface RuntimeManagerReapIdleProviderSessionsArgs {
@@ -205,6 +226,7 @@ interface RuntimeManagerReapedIdleProviderSession extends ReapedIdleProviderSess
 
 export interface RuntimeManagerReapIdleProviderSessionsResult {
   reapedSessions: RuntimeManagerReapedIdleProviderSession[];
+  retainedSessions: Array<RetainedProviderSession & { environmentId: string }>;
 }
 
 type ReleaseThreadActiveTurnPolicy = "interrupt" | "keep";
@@ -236,9 +258,11 @@ function shellEnvEquals(
 ): boolean {
   const leftEntries = Object.entries(left);
   const rightEntries = Object.entries(right);
+
   if (leftEntries.length !== rightEntries.length) {
     return false;
   }
+
   return leftEntries.every(([key, value]) => right[key] === value);
 }
 
@@ -246,22 +270,78 @@ function providerProcessEnvFromShellEnv(
   shellEnv: NonNullable<AgentRuntimeOptions["shellEnv"]>,
 ): Record<string, string> | null {
   const env: Record<string, string> = {};
+
   if (shellEnv.PATH) {
     env.PATH = shellEnv.PATH;
   }
-  const recordDir = process.env.BB_PROVIDER_BRIDGE_RECORD_DIR;
+
+  const recordDir = process.env.OMNYO_PROVIDER_BRIDGE_RECORD_DIR;
+
   if (recordDir) {
-    env.BB_PROVIDER_BRIDGE_RECORD_DIR = recordDir;
+    env.OMNYO_PROVIDER_BRIDGE_RECORD_DIR = recordDir;
   }
+
   return Object.keys(env).length > 0 ? env : null;
 }
 
 export class RuntimeManager {
+  private housekeepingStatus: HostHousekeepingStatus = { status: "not-run" };
+
+  getHousekeepingStatus(): HostHousekeepingStatus {
+    return this.housekeepingStatus;
+  }
+
+  recordHousekeepingStatus(status: HostHousekeepingStatus): void {
+    this.housekeepingStatus = status;
+  }
+
   private readonly createRuntime;
   private readonly hostWatcher;
   private readonly provisionWorkspace;
   private baseShellEnv;
   private shellEnvGeneration = 0;
+  getDirectAccessActivityCount(): number {
+    return (
+      this.entries.size +
+      this.pendingEntries.size +
+      this.pendingEnvironmentEnsures.size +
+      this.pendingEnvironmentProvisions.size +
+      this.pendingWorkspaceRefreshes.size +
+      this.threadControlTails.size
+    );
+  }
+  getRuntimeUpdateActivityCount(scope: WorkerUpdateScope = "runtime"): number {
+    const maintenance = this.providerMaintenanceRuntime;
+
+    return (
+      [...this.entries.values()].filter((entry) =>
+        this.entryHasActiveRuntimeWork(entry, scope),
+      ).length +
+      this.pendingEntries.size +
+      this.pendingEnvironmentEnsures.size +
+      this.pendingEnvironmentProvisions.size +
+      this.pendingWorkspaceRefreshes.size +
+      this.threadControlTails.size +
+      this.inFlightThreadCommandsByEnvironmentId.size +
+      this.providerMaintenanceActiveRequests +
+      Number(this.pendingProviderMaintenanceRuntime !== null) +
+      Number(
+        maintenance !== null &&
+          (maintenance.getLiveThreadIds().length > 0 ||
+            maintenance.hasOpenBackgroundWork()),
+      )
+    );
+  }
+  private readonly workspaceIdentityAdmissions = new Set<string>();
+  private readonly workspaceCommands = new Map<
+    symbol,
+    {
+      paths: readonly string[];
+      unscopedWriter: boolean;
+      admitted: boolean;
+      done: Promise<void>;
+    }
+  >();
   private readonly entries = new Map<string, RuntimeEntry>();
   private readonly pendingEntries = new Map<string, Promise<RuntimeEntry>>();
   private readonly pendingEnvironmentEnsures = new Map<
@@ -299,7 +379,8 @@ export class RuntimeManager {
   constructor(private readonly options: RuntimeManagerOptions = {}) {
     this.createRuntime = options.createRuntime ?? createAgentRuntime;
     this.hostWatcher = options.hostWatcher;
-    this.provisionWorkspace = options.provisionWorkspace ?? provisionWorkspace;
+    this.provisionWorkspace =
+      options.provisionWorkspace ?? provisionIsolatedWorkspace;
     this.baseShellEnv = { ...(options.shellEnv ?? {}) };
     this.providerInstallationGate = createProviderInstallationGate({
       ttlMs: PROVIDER_INSTALLATION_GATE_TTL_MS,
@@ -311,10 +392,238 @@ export class RuntimeManager {
     args: RuntimeWorkspaceWriteRootsArgs,
   ): string[] {
     const roots = [...args.workspaceRoots];
+
     if (args.threadStorageRootPath) {
       roots.push(args.threadStorageRootPath);
     }
+
     return [...new Set(roots)];
+  }
+
+  private workspacePathsOverlap(left: string, right: string): boolean {
+    const normalize = (value: string) =>
+      process.platform === "win32"
+        ? path.resolve(value).toLowerCase()
+        : path.resolve(value);
+
+    const first = normalize(left);
+    const second = normalize(right);
+
+    const contained = (relative: string) =>
+      relative === "" ||
+      (!path.isAbsolute(relative) &&
+        relative !== ".." &&
+        !relative.startsWith(".." + path.sep));
+
+    return (
+      contained(path.relative(first, second)) ||
+      contained(path.relative(second, first))
+    );
+  }
+
+  private async workspaceCommandRealPath(target: string): Promise<string> {
+    try {
+      return await realpath(target);
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        error.code !== "ENOENT"
+      )
+        throw error;
+      const parent = path.dirname(target);
+
+      if (parent === target) throw error;
+
+      return path.join(
+        await this.workspaceCommandRealPath(parent),
+        path.basename(target),
+      );
+    }
+  }
+
+  async runWorkspaceCommand<T>(
+    args: { paths: readonly string[]; unscopedWriter: boolean },
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const token = Symbol();
+    let finish!: () => void;
+
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+
+    const activity = { ...args, admitted: false, done };
+    this.workspaceCommands.set(token, activity);
+
+    try {
+      if (this.workspaceIdentityAdmissions.size > 0) {
+        const targets = await Promise.all(
+          args.paths.map((target) => this.workspaceCommandRealPath(target)),
+        );
+
+        if (
+          args.unscopedWriter ||
+          [...this.workspaceIdentityAdmissions].some((root) =>
+            targets.some((target) => this.workspacePathsOverlap(root, target)),
+          )
+        )
+          throw new ExpectedCommandDispatchError(
+            "workspace_identity_busy",
+            "Workspace identity preparation has closed writer admission",
+          );
+      }
+
+      activity.admitted = true;
+
+      return await work();
+    } finally {
+      this.workspaceCommands.delete(token);
+      finish();
+    }
+  }
+
+  private workspaceIdentityDrainableWork(): Promise<unknown>[] {
+    return [
+      ...this.pendingEntries.values(),
+      ...this.pendingEnvironmentEnsures.values(),
+      ...[...this.pendingEnvironmentProvisions.values()].map(
+        (pending) => pending.done,
+      ),
+      ...this.pendingWorkspaceRefreshes.values(),
+      ...[...this.workspaceCommands.values()]
+        .filter((activity) => activity.admitted && activity.unscopedWriter)
+        .map((activity) => activity.done),
+    ];
+  }
+
+  private async drainWorkspaceIdentityBlockers(): Promise<void> {
+    const awaited = new Set<Promise<unknown>>();
+    let timedOut = false;
+    let expire!: () => void;
+
+    const expired = new Promise<void>((resolve) => {
+      expire = resolve;
+    });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      expire();
+    }, this.options.workspaceIdentityDrainTimeoutMs ?? WORKSPACE_IDENTITY_DRAIN_TIMEOUT_MS);
+
+    try {
+      while (!timedOut) {
+        const work = this.workspaceIdentityDrainableWork().filter(
+          (pending) => !awaited.has(pending),
+        );
+
+        if (work.length === 0) return;
+
+        for (const pending of work) awaited.add(pending);
+        await Promise.race([Promise.allSettled(work), expired]);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private assertNoOverlappingWorkspaceIdentityAdmission(root: string): void {
+    if (
+      [...this.workspaceIdentityAdmissions].some((held) =>
+        this.workspacePathsOverlap(held, root),
+      )
+    )
+      throw new ExpectedCommandDispatchError(
+        "workspace_identity_busy",
+        "Workspace identity preparation is already active",
+      );
+  }
+
+  async withWorkspaceIdentityAdmission<T>(
+    workspacePath: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const root = await realpath(workspacePath);
+
+    this.assertNoOverlappingWorkspaceIdentityAdmission(root);
+    await this.drainWorkspaceIdentityBlockers();
+    this.assertNoOverlappingWorkspaceIdentityAdmission(root);
+    this.workspaceIdentityAdmissions.add(root);
+
+    try {
+      if ((this.options.workspaceUnscopedWriterActivity?.() ?? 0) > 0)
+        throw new ExpectedCommandDispatchError(
+          "workspace_identity_busy",
+          "Terminal work prevents workspace identity preparation",
+        );
+
+      if (
+        this.pendingEntries.size > 0 ||
+        this.pendingEnvironmentEnsures.size > 0 ||
+        this.pendingEnvironmentProvisions.size > 0 ||
+        this.pendingWorkspaceRefreshes.size > 0
+      )
+        throw new ExpectedCommandDispatchError(
+          "workspace_identity_busy",
+          "Pending workspace provisioning prevents identity preparation",
+        );
+
+      const entries = [...this.entries.values()].filter((entry) =>
+        this.entryHasActiveEnvironmentWork(entry),
+      );
+
+      for (let start = 0; start < entries.length; start += 8) {
+        const targets = await Promise.all(
+          entries
+            .slice(start, start + 8)
+            .map((entry) => this.workspaceCommandRealPath(entry.path)),
+        );
+
+        if (targets.some((target) => this.workspacePathsOverlap(root, target)))
+          throw new ExpectedCommandDispatchError(
+            "workspace_identity_busy",
+            "Workspace identity preparation requires its runtime and terminals to be idle",
+          );
+      }
+
+      const commands = [...this.workspaceCommands.values()].filter(
+        (activity) => activity.admitted,
+      );
+
+      if (commands.some((activity) => activity.unscopedWriter))
+        throw new ExpectedCommandDispatchError(
+          "workspace_identity_busy",
+          "Unscoped plugin work prevents workspace identity preparation",
+        );
+
+      for (let start = 0; start < commands.length; start += 8) {
+        const targets = await Promise.all(
+          commands
+            .slice(start, start + 8)
+            .map((activity) =>
+              Promise.all(
+                activity.paths.map((target) =>
+                  this.workspaceCommandRealPath(target),
+                ),
+              ),
+            ),
+        );
+
+        if (
+          targets
+            .flat()
+            .some((target) => this.workspacePathsOverlap(root, target))
+        )
+          throw new ExpectedCommandDispatchError(
+            "workspace_identity_busy",
+            "Workspace commands are still active",
+          );
+      }
+
+      return await work();
+    } finally {
+      this.workspaceIdentityAdmissions.delete(root);
+    }
   }
 
   get(environmentId: string): RuntimeEntry | undefined {
@@ -323,11 +632,13 @@ export class RuntimeManager {
 
   async getOrAwait(environmentId: string): Promise<RuntimeEntry | undefined> {
     const existing = this.entries.get(environmentId);
+
     if (existing) {
       return existing;
     }
 
     const pending = this.pendingEntries.get(environmentId);
+
     if (pending) {
       return pending;
     }
@@ -348,6 +659,7 @@ export class RuntimeManager {
     threadId: string;
   }): Promise<ReleaseThreadFromOtherEnvironmentsResult> {
     await this.waitForThreadCommandsInOtherEnvironments(args);
+
     return this.enqueueThreadControl(args.threadId, () =>
       this.releaseThreadFromOtherEnvironmentsOnce(args),
     );
@@ -365,9 +677,11 @@ export class RuntimeManager {
           ? []
           : [...(commandsByThreadId.get(args.threadId) ?? [])],
       );
+
       if (inFlightOldCommands.length === 0) {
         return;
       }
+
       await Promise.all(inFlightOldCommands);
     }
   }
@@ -382,12 +696,14 @@ export class RuntimeManager {
         entry.environmentId !== args.environmentId &&
         entry.runtime.hasThread(args.threadId),
     );
+
     const keptEntries =
       args.activeTurn === "interrupt"
         ? []
         : staleEntries.filter(
             (entry) => entry.runtime.getActiveTurnId(args.threadId) !== null,
           );
+
     const releasedEntries = staleEntries.filter(
       (entry) => !keptEntries.includes(entry),
     );
@@ -397,6 +713,7 @@ export class RuntimeManager {
         entry.runtime.stopThread({ threadId: args.threadId }),
       ),
     );
+
     const providerCheckpointIds = new Set(
       stopResults.flatMap((result) =>
         result.providerCheckpointId === null
@@ -404,6 +721,7 @@ export class RuntimeManager {
           : [result.providerCheckpointId],
       ),
     );
+
     return {
       activeTurnEnvironmentIds: keptEntries.map((entry) => entry.environmentId),
       providerCheckpointId:
@@ -438,6 +756,7 @@ export class RuntimeManager {
       const commandsByThreadId =
         this.inFlightThreadCommandsByEnvironmentId.get(environmentId) ??
         new Map<string, number>();
+
       commandsByThreadId.set(
         threadId,
         (commandsByThreadId.get(threadId) ?? 0) + 1,
@@ -448,15 +767,19 @@ export class RuntimeManager {
       );
 
       let resolveCompletion!: () => void;
+
       const completion = new Promise<void>((resolve) => {
         resolveCompletion = resolve;
       });
+
       const completionsByThreadId =
         this.inFlightThreadCommandCompletionsByEnvironmentId.get(
           environmentId,
         ) ?? new Map<string, Set<Promise<void>>>();
+
       const completions =
         completionsByThreadId.get(threadId) ?? new Set<Promise<void>>();
+
       completions.add(completion);
       completionsByThreadId.set(threadId, completions);
       this.inFlightThreadCommandCompletionsByEnvironmentId.set(
@@ -465,21 +788,26 @@ export class RuntimeManager {
       );
 
       let released = false;
+
       return () => {
         if (released) {
           return;
         }
+
         released = true;
 
         const activeCommands =
           this.inFlightThreadCommandsByEnvironmentId.get(environmentId);
+
         if (activeCommands) {
           const count = activeCommands.get(threadId) ?? 0;
+
           if (count <= 1) {
             activeCommands.delete(threadId);
           } else {
             activeCommands.set(threadId, count - 1);
           }
+
           if (activeCommands.size === 0) {
             this.inFlightThreadCommandsByEnvironmentId.delete(environmentId);
           }
@@ -489,16 +817,20 @@ export class RuntimeManager {
           this.inFlightThreadCommandCompletionsByEnvironmentId.get(
             environmentId,
           );
+
         const threadCompletions = activeCompletions?.get(threadId);
         threadCompletions?.delete(completion);
+
         if (threadCompletions?.size === 0) {
           activeCompletions?.delete(threadId);
         }
+
         if (activeCompletions?.size === 0) {
           this.inFlightThreadCommandCompletionsByEnvironmentId.delete(
             environmentId,
           );
         }
+
         resolveCompletion();
       };
     });
@@ -506,6 +838,7 @@ export class RuntimeManager {
 
   listActiveThreads(): HostDaemonActiveThread[] {
     const activeThreads: HostDaemonActiveThread[] = [];
+
     for (const entry of this.entries.values()) {
       for (const threadId of entry.runtime.getLiveThreadIds()) {
         activeThreads.push({
@@ -513,7 +846,14 @@ export class RuntimeManager {
         });
       }
     }
+
     return activeThreads;
+  }
+
+  listOpenBackgroundWork(): RuntimeOpenBackgroundWork[] {
+    return [...this.entries.values()].flatMap((entry) =>
+      entry.runtime.listOpenBackgroundWork(),
+    );
   }
 
   listLoadedEnvironments(): HostDaemonLoadedEnvironment[] {
@@ -526,17 +866,52 @@ export class RuntimeManager {
     args: RuntimeManagerReapIdleProviderSessionsArgs,
   ): Promise<RuntimeManagerReapIdleProviderSessionsResult> {
     const reapedSessions: RuntimeManagerReapedIdleProviderSession[] = [];
+
+    const retainedSessions: RuntimeManagerReapIdleProviderSessionsResult["retainedSessions"] =
+      [];
+
     for (const entry of this.entries.values()) {
       const result = await entry.runtime.reapIdleProviderSessions({
         ...args,
         runThreadExclusive: (threadId, work) =>
           this.enqueueThreadControl(threadId, () => {
-            if (this.entryHasInFlightThreadCommand(entry, threadId)) {
+            if (this.options.hasPendingInteractiveRequest?.(threadId)) {
+              retainedSessions.push({
+                environmentId: entry.environmentId,
+                threadId,
+                providerId: null,
+                processId: null,
+                reason: "pending-answer",
+                idleForMs: null,
+              });
+
               return null;
             }
+
+            if (this.entryHasInFlightThreadCommand(entry, threadId)) {
+              retainedSessions.push({
+                environmentId: entry.environmentId,
+                threadId,
+                providerId: null,
+                processId: null,
+                reason: "command-in-flight",
+                idleForMs: null,
+              });
+
+              return null;
+            }
+
             return work();
           }),
       });
+
+      for (const session of result.retainedSessions) {
+        retainedSessions.push({
+          ...session,
+          environmentId: entry.environmentId,
+        });
+      }
+
       for (const session of result.reapedSessions) {
         reapedSessions.push({
           ...session,
@@ -544,7 +919,8 @@ export class RuntimeManager {
         });
       }
     }
-    return { reapedSessions };
+
+    return { reapedSessions, retainedSessions };
   }
 
   getShellEnv(): NonNullable<AgentRuntimeOptions["shellEnv"]> {
@@ -579,17 +955,21 @@ export class RuntimeManager {
     if (args.injectedSkillSources === undefined) {
       return null;
     }
+
     if (args.injectedSkillSources.length === 0) {
       return {
         catalogHash: EMPTY_SKILL_CATALOG_HASH,
         skillRoots: [],
       };
     }
+
     if (!this.options.dataDir) {
       throw new Error("Runtime skill staging requires a host dataDir");
     }
+
     return stageInjectedSkillSources({
       dataDir: this.options.dataDir,
+      collectLocalTree: collectIsolatedLocalSkillSource,
       injectedSkillSources: args.injectedSkillSources,
       ...(this.options.fetchSkillTree !== undefined
         ? { fetchSkillTree: this.options.fetchSkillTree }
@@ -598,9 +978,12 @@ export class RuntimeManager {
     });
   }
 
-  private entryHasActiveRuntimeWork(entry: RuntimeEntry): boolean {
+  private entryHasActiveRuntimeWork(
+    entry: RuntimeEntry,
+    scope: WorkerUpdateScope = "runtime",
+  ): boolean {
     return (
-      entry.terminals.size > 0 ||
+      (scope === "runtime" && entry.terminals.size > 0) ||
       entry.runtime.getLiveThreadIds().length > 0 ||
       entry.runtime.hasOpenBackgroundWork()
     );
@@ -613,9 +996,11 @@ export class RuntimeManager {
     const commandsByThreadId = this.inFlightThreadCommandsByEnvironmentId.get(
       entry.environmentId,
     );
+
     if (!commandsByThreadId) {
       return false;
     }
+
     return [...commandsByThreadId.keys()].some(
       (threadId) => threadId !== excludingThreadId,
     );
@@ -645,6 +1030,7 @@ export class RuntimeManager {
     if (!this.options.dataDir) {
       return;
     }
+
     try {
       await cleanupInjectedSkillStagingDirs({
         dataDir: this.options.dataDir,
@@ -704,6 +1090,7 @@ export class RuntimeManager {
       await this.cleanupUnusedInjectedSkillStagingDirs(
         args.skillConfig ? [args.skillConfig.catalogHash] : [],
       );
+
       return null;
     }
 
@@ -722,6 +1109,7 @@ export class RuntimeManager {
         this.hasInFlightThreadCommand(args.entry, args.targetThreadId))
     ) {
       args.entry.retainedSkillCatalogHashes.add(args.skillConfig.catalogHash);
+
       return {
         ...args.entry,
         skillCatalogHash: args.skillConfig.catalogHash,
@@ -736,11 +1124,13 @@ export class RuntimeManager {
         ? { targetThreadId: args.targetThreadId }
         : {}),
     });
+
     return null;
   }
 
   async invalidateProviderMaintenanceRuntime(): Promise<void> {
     this.providerInstallationGate.clear();
+
     try {
       await this.shutdownProviderMaintenanceRuntime();
     } catch (error) {
@@ -757,6 +1147,7 @@ export class RuntimeManager {
     const pendingRuntime = this.pendingProviderMaintenanceRuntime;
     this.providerMaintenanceRuntimeGeneration += 1;
     this.providerMaintenanceRuntime = null;
+
     if (this.pendingProviderMaintenanceRuntime === pendingRuntime) {
       this.pendingProviderMaintenanceRuntime = null;
     }
@@ -764,6 +1155,7 @@ export class RuntimeManager {
     const resolvedPendingRuntime = pendingRuntime
       ? await pendingRuntime.promise.catch(() => null)
       : null;
+
     if (
       resolvedPendingRuntime &&
       this.providerMaintenanceRuntime === resolvedPendingRuntime
@@ -785,6 +1177,7 @@ export class RuntimeManager {
 
   private scheduleProviderMaintenanceIdleShutdown(): void {
     this.clearProviderMaintenanceIdleTimer();
+
     if (
       this.providerMaintenanceActiveRequests > 0 ||
       (this.providerMaintenanceRuntime === null &&
@@ -796,8 +1189,10 @@ export class RuntimeManager {
     const timeoutMs =
       this.options.providerMaintenanceIdleTimeoutMs ??
       PROVIDER_MAINTENANCE_IDLE_TIMEOUT_MS;
+
     this.providerMaintenanceIdleTimer = setTimeout(() => {
       this.providerMaintenanceIdleTimer = null;
+
       if (this.providerMaintenanceActiveRequests > 0) return;
       void this.shutdownProviderMaintenanceRuntime().catch((error) => {
         this.options.logger?.warn(
@@ -828,12 +1223,14 @@ export class RuntimeManager {
     if (this.providerMaintenanceRuntime) {
       return this.providerMaintenanceRuntime;
     }
+
     if (this.pendingProviderMaintenanceRuntime) {
       return this.pendingProviderMaintenanceRuntime.promise;
     }
 
     const generation = this.providerMaintenanceRuntimeGeneration;
     let pendingRuntime!: PendingProviderMaintenanceRuntime;
+
     const promise = Promise.resolve()
       .then(() => this.createProviderMaintenanceRuntime(args))
       .then((runtime) => {
@@ -843,6 +1240,7 @@ export class RuntimeManager {
         ) {
           this.providerMaintenanceRuntime = runtime;
         }
+
         return runtime;
       })
       .finally(() => {
@@ -850,11 +1248,13 @@ export class RuntimeManager {
           this.pendingProviderMaintenanceRuntime = null;
         }
       });
+
     pendingRuntime = {
       generation,
       promise,
     };
     this.pendingProviderMaintenanceRuntime = pendingRuntime;
+
     return promise;
   }
 
@@ -864,11 +1264,14 @@ export class RuntimeManager {
   ): Promise<TResult> {
     this.clearProviderMaintenanceIdleTimer();
     this.providerMaintenanceActiveRequests += 1;
+
     try {
       const runtime = await this.ensureProviderMaintenanceRuntime(args);
+
       return await request(runtime);
     } finally {
       this.providerMaintenanceActiveRequests -= 1;
+
       if (this.providerMaintenanceActiveRequests === 0) {
         this.scheduleProviderMaintenanceIdleShutdown();
       }
@@ -877,8 +1280,10 @@ export class RuntimeManager {
 
   async ensureEnvironment(args: EnsureEnvironmentArgs): Promise<RuntimeEntry> {
     const pending = this.pendingEnvironmentEnsures.get(args.environmentId);
+
     if (pending) {
       await pending;
+
       return this.ensureEnvironment(args);
     }
 
@@ -887,7 +1292,9 @@ export class RuntimeManager {
         this.pendingEnvironmentEnsures.delete(args.environmentId);
       }
     });
+
     this.pendingEnvironmentEnsures.set(args.environmentId, ensure);
+
     return ensure;
   }
 
@@ -896,6 +1303,7 @@ export class RuntimeManager {
   ): Promise<RuntimeEntry> {
     const skillConfig = await this.resolveRuntimeSkillConfig(args);
     const existing = this.entries.get(args.environmentId);
+
     if (existing) {
       const compatible = await this.ensureCompatibleEntry({
         entry: existing,
@@ -904,14 +1312,17 @@ export class RuntimeManager {
           ? { targetThreadId: args.targetThreadId }
           : {}),
       });
+
       if (compatible) {
         return compatible;
       }
     }
 
     const pending = this.pendingEntries.get(args.environmentId);
+
     if (pending) {
       const entry = await pending;
+
       const compatible = await this.ensureCompatibleEntry({
         entry,
         skillConfig,
@@ -919,6 +1330,7 @@ export class RuntimeManager {
           ? { targetThreadId: args.targetThreadId }
           : {}),
       });
+
       if (compatible) {
         return compatible;
       }
@@ -927,6 +1339,7 @@ export class RuntimeManager {
     const pendingProvision = this.createPendingEnvironmentProvision(
       args.environmentId,
     );
+
     const creation = Promise.resolve()
       .then(() =>
         this.createEntry({
@@ -937,6 +1350,7 @@ export class RuntimeManager {
       )
       .then((entry) => {
         this.entries.set(args.environmentId, entry);
+
         return entry;
       })
       .finally(() => {
@@ -947,8 +1361,10 @@ export class RuntimeManager {
           pendingProvision,
         );
       });
+
     pendingProvision.done = creation;
     this.pendingEntries.set(args.environmentId, creation);
+
     if (skillConfig !== null) {
       this.pendingCatalogHashes.set(
         args.environmentId,
@@ -963,6 +1379,7 @@ export class RuntimeManager {
     args: RefreshEnvironmentWorkspaceArgs,
   ): Promise<HostWorkspace> {
     const pending = this.pendingWorkspaceRefreshes.get(args.environmentId);
+
     if (pending) {
       return pending;
     }
@@ -972,7 +1389,9 @@ export class RuntimeManager {
         this.pendingWorkspaceRefreshes.delete(args.environmentId);
       }
     });
+
     this.pendingWorkspaceRefreshes.set(args.environmentId, refresh);
+
     return refresh;
   }
 
@@ -980,6 +1399,7 @@ export class RuntimeManager {
     args: RefreshEnvironmentWorkspaceArgs,
   ): Promise<HostWorkspace> {
     const entry = await this.getOrAwait(args.environmentId);
+
     if (entry && entry.path !== args.workspacePath) {
       throw new Error(
         `Cannot refresh environment ${args.environmentId} at ${args.workspacePath}; it is bound to ${entry.path}`,
@@ -987,14 +1407,17 @@ export class RuntimeManager {
     }
 
     const workspace = await this.provisionHostWorkspace(args.provision);
+
     if (workspace.path !== args.workspacePath) {
       throw new Error(
         `Workspace refresh for ${args.environmentId} returned ${workspace.path}, not ${args.workspacePath}`,
       );
     }
+
     if (entry) {
       entry.workspace = workspace;
     }
+
     return workspace;
   }
 
@@ -1002,6 +1425,7 @@ export class RuntimeManager {
     args: CancelEnvironmentProvisionArgs,
   ): Promise<CancelEnvironmentProvisionResult> {
     const pending = this.pendingEnvironmentProvisions.get(args.environmentId);
+
     if (!pending) {
       return { aborted: false };
     }
@@ -1012,6 +1436,7 @@ export class RuntimeManager {
         "Environment provisioning was cancelled",
       ),
     );
+
     return { aborted: true };
   }
 
@@ -1022,7 +1447,9 @@ export class RuntimeManager {
       abortController: new AbortController(),
       done: Promise.resolve(),
     };
+
     this.pendingEnvironmentProvisions.set(environmentId, pending);
+
     return pending;
   }
 
@@ -1041,6 +1468,7 @@ export class RuntimeManager {
     const existing = this.entries.get(environmentId);
     const pending = this.pendingEntries.get(environmentId);
     let entry = existing;
+
     if (!entry && pending) {
       try {
         entry = await pending;
@@ -1055,30 +1483,36 @@ export class RuntimeManager {
 
     this.entries.delete(environmentId);
     await entry.runtime.shutdown();
+
     return entry;
   }
 
   async forgetEnvironment(environmentId: string): Promise<void> {
     const entry = await this.shutDownEntry(environmentId);
+
     if (!entry) {
       return;
     }
+
     await this.cleanupUnusedInjectedSkillStagingDirs([]);
   }
 
   async shutdownAll(): Promise<void> {
     const entries = [...this.entries.values()];
+
     for (const pending of this.pendingEntries.values()) {
       try {
         entries.push(await pending);
       } catch {}
     }
+
     this.entries.clear();
     this.pendingEntries.clear();
 
     for (const entry of entries) {
       await entry.runtime.shutdown();
     }
+
     await this.shutdownProviderMaintenanceRuntime();
     await this.stopWatchingDataDirSkillsRoot();
     this.stopWatchingDataDirSkillsRoot = STOP_WATCHING;
@@ -1101,9 +1535,13 @@ export class RuntimeManager {
             scope: threadScope(),
             code: "provider_process_exited",
             message,
+            ...(thread.pendingRequestId === undefined
+              ? {}
+              : { requestId: thread.pendingRequestId }),
             ...(detail ? { detail } : {}),
           });
         }
+
         continue;
       }
 
@@ -1139,6 +1577,7 @@ export class RuntimeManager {
       args.dataDir,
       PROVIDER_MAINTENANCE_WORKSPACE_DIR,
     );
+
     await mkdir(workspacePath, { recursive: true });
 
     let runtime: AgentRuntime | null = null;
@@ -1151,6 +1590,7 @@ export class RuntimeManager {
       shellEnv,
       threadStorageRootPath: this.options.threadStorageRootPath ?? undefined,
       bridgeBundleDir: this.options.bridgeBundleDir,
+      containProviderProcess: this.options.containProviderProcess,
       onEvent: (event) => {
         this.options.onStderr?.(
           `Dropping provider maintenance event ${event.type}; no environment owns provider-only maintenance commands.`,
@@ -1164,6 +1604,7 @@ export class RuntimeManager {
           success: true,
         })),
       onInteractiveRequest: this.options.onInteractiveRequest,
+      onThreadDetached: this.options.onThreadDetached,
       onStderr: this.options.onStderr,
       onProcessExit: (info) => {
         if (
@@ -1173,9 +1614,11 @@ export class RuntimeManager {
         ) {
           this.providerMaintenanceRuntime = null;
         }
+
         this.options.onProcessExit?.(info);
       },
     });
+
     return runtime;
   }
 
@@ -1205,12 +1648,15 @@ export class RuntimeManager {
       ...provision,
       signal: args.provisionSignal,
     });
+
     const workspaceWriteRoots =
       await workspace.getAdditionalWorkspaceWriteRoots();
+
     const additionalWorkspaceWriteRoots = this.runtimeWorkspaceWriteRoots({
       threadStorageRootPath: this.options.threadStorageRootPath,
       workspaceRoots: workspaceWriteRoots,
     });
+
     let runtime: AgentRuntime | null = null;
     const shellEnv = this.getShellEnv();
     const shellEnvGeneration = this.shellEnvGeneration;
@@ -1223,6 +1669,7 @@ export class RuntimeManager {
       shellEnv,
       threadStorageRootPath: this.options.threadStorageRootPath ?? undefined,
       bridgeBundleDir: this.options.bridgeBundleDir,
+      containProviderProcess: this.options.containProviderProcess,
       onEvent: (event) => {
         this.options.onEvent?.({
           environmentId: args.environmentId,
@@ -1236,6 +1683,7 @@ export class RuntimeManager {
           success: true,
         })),
       onInteractiveRequest: this.options.onInteractiveRequest,
+      onThreadDetached: this.options.onThreadDetached,
       onStderr: this.options.onStderr,
       onProviderRecovery: (hint) => {
         this.options.logger?.debug(
@@ -1259,7 +1707,9 @@ export class RuntimeManager {
             });
           }
         }
+
         const current = this.entries.get(args.environmentId);
+
         if (
           !info.expected &&
           current?.runtime === runtime &&
@@ -1267,6 +1717,7 @@ export class RuntimeManager {
         ) {
           this.entries.delete(args.environmentId);
         }
+
         this.options.onProcessExit?.(info);
       },
     });
@@ -1304,6 +1755,7 @@ export class RuntimeManager {
     }
 
     const dataDirSkillsRootPath = this.options.dataDirSkillsRootPath;
+
     if (!dataDirSkillsRootPath) {
       return;
     }

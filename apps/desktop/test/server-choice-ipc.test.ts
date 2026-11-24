@@ -7,14 +7,16 @@ import {
 } from "../src/server-target.js";
 import { createConnectServerSync } from "../src/connect-server-sync.js";
 import {
-  BB_DESKTOP_GET_SERVER_CHOICES_CHANNEL,
-  BB_DESKTOP_SELECT_SERVER_CHANNEL,
+  OMNYO_DESKTOP_GET_SERVER_CHOICES_CHANNEL,
+  OMNYO_DESKTOP_SELECT_SERVER_CHANNEL,
 } from "../src/desktop-window-command-ipc.js";
 
 const ipc = vi.hoisted(() => ({ handle: vi.fn(), on: vi.fn() }));
+
 vi.mock("electron", () => ({ ipcMain: ipc }));
 
 const frame = {};
+
 const event = { sender: { id: 7, mainFrame: frame }, senderFrame: frame };
 
 beforeEach(() => vi.clearAllMocks());
@@ -23,6 +25,7 @@ describe("server choice IPC", () => {
   it("uses the native discovery policy for list requests and keeps custom URLs private", async () => {
     let now = 100_000;
     let servers: ConnectServerRef[] = [];
+
     const store = createServerTargetStore({
       storagePath: "/test/server-target.json",
       fs: {
@@ -31,9 +34,11 @@ describe("server choice IPC", () => {
         writeFile: async () => undefined,
       },
     });
+
     await store.setCustomServerUrl(
       "https://user:password@custom.example/private",
     );
+
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -53,6 +58,7 @@ describe("server choice IPC", () => {
         },
       }),
     }));
+
     const sync = createConnectServerSync({
       getCredential: () => null,
       getLocalServerUrl: () => "http://127.0.0.1:1234",
@@ -64,6 +70,7 @@ describe("server choice IPC", () => {
       fetchImpl,
       now: () => now,
     });
+
     registerServerChoiceIpc({
       applicationWindowWebContentsIds: new Set([7]),
       onListRequested: sync.onListRequested,
@@ -71,9 +78,11 @@ describe("server choice IPC", () => {
       select: async () => undefined,
       onError: () => undefined,
     });
+
     const list = ipc.handle.mock.calls.find(
-      ([channel]) => channel === BB_DESKTOP_GET_SERVER_CHOICES_CHANNEL,
+      ([channel]) => channel === OMNYO_DESKTOP_GET_SERVER_CHOICES_CHANNEL,
     )?.[1];
+
     if (!list) throw new Error("Missing list handler");
     const initial = list(event);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -99,11 +108,11 @@ describe("server choice IPC", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     await sync.syncNow();
     expect(() => list({ ...event, senderFrame: {} })).toThrow(
-      "limited to bb windows",
+      "limited to Omnyo windows",
     );
     expect(() =>
       list({ ...event, sender: { id: 99, mainFrame: frame } }),
-    ).toThrow("limited to bb windows");
+    ).toThrow("limited to Omnyo windows");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -120,10 +129,13 @@ describe("server choice IPC", () => {
       select,
       onError,
     });
+
     const request = ipc.on.mock.calls.find(
-      ([channel]) => channel === BB_DESKTOP_SELECT_SERVER_CHANNEL,
+      ([channel]) => channel === OMNYO_DESKTOP_SELECT_SERVER_CHANNEL,
     )?.[1];
+
     if (!request) throw new Error("Missing select handler");
+
     for (const id of ["builtin", "unknown", "https://injected.example", {}, ""])
       request(event, id);
     request({ ...event, senderFrame: {} }, "remote");

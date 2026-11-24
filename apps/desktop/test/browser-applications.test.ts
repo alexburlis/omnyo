@@ -16,9 +16,11 @@ describe("browser application registration", () => {
         { CFBundleURLSchemes: ["https"] },
       ],
     };
+
     expect(
       parseMacBrowserApplication(JSON.stringify(info), "Unlisted Browser"),
     ).toEqual(["unlisted browser", "unlisted", "org.example.unlisted"]);
+
     for (const schemes of [["mailto"], ["unlisted"], ["http"]]) {
       expect(
         parseMacBrowserApplication(
@@ -30,6 +32,7 @@ describe("browser application registration", () => {
         ),
       ).toBeUndefined();
     }
+
     expect(parseMacBrowserApplication("not json", "Browser")).toBeUndefined();
     expect(
       parseMacBrowserApplication('{"CFBundleURLTypes":42}', "Browser"),
@@ -39,9 +42,11 @@ describe("browser application registration", () => {
   it("requires a Linux web-browser registration rather than an application name or action", () => {
     const entry =
       "[Desktop Entry]\nType=Application\nName=Unlisted Browser\nCategories=Network;WebBrowser;\nMimeType=x-scheme-handler/http;x-scheme-handler/https;\nStartupWMClass=unlisted\nX-Flatpak=org.example.unlisted\nX-SnapInstanceName=unlisted\n";
+
     expect(parseLinuxBrowserApplication(entry, "org.example.unlisted")).toEqual(
       ["org.example.unlisted", "unlisted browser", "unlisted"],
     );
+
     for (const invalid of [
       entry.replace("WebBrowser;", "Email;"),
       entry.replace("x-scheme-handler/https;", ""),

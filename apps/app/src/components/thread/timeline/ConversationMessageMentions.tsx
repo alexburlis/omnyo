@@ -1,9 +1,9 @@
 import type { KeyboardEvent, MouseEvent } from "react";
 import { Link } from "react-router-dom";
-import type { PromptMentionResource, PromptTextMention } from "@bb/domain";
+import type { PromptMentionResource, PromptTextMention } from "@omnyo/domain";
 import { RouteAnchor } from "@/components/ui/app-route-anchor.js";
 import { getProjectComposeRoutePath } from "@/lib/route-paths";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   PROMPT_MENTION_PILL_CLASS,
   promptMentionTooltipLabel,
@@ -47,6 +47,7 @@ export function shiftMentionsToTextRange({
     if (mention.start < rangeStart || mention.end > rangeEnd) {
       return [];
     }
+
     return [
       {
         ...mention,
@@ -63,11 +64,13 @@ export function clipMentionTextToVisibleRange({
   text,
 }: ClipMentionTextToVisibleRangeArgs): ClipMentionTextToVisibleRangeResult {
   const rangeEnd = rangeStart + text.length;
+
   const clippedRangeEnd = mentions.reduce<number>((currentEnd, mention) => {
     const crossesVisibleEnd =
       mention.start >= rangeStart &&
       mention.start < currentEnd &&
       mention.end > currentEnd;
+
     return crossesVisibleEnd ? mention.start : currentEnd;
   }, rangeEnd);
 
@@ -90,12 +93,14 @@ function mentionPillClassName(interactive: boolean): string {
 }
 
 interface MessageMentionPillProps {
+  interactive?: boolean;
   messageSeq: number;
   resource: PromptMentionResource;
   threadId: string;
 }
 
 export function MessageMentionPill({
+  interactive = true,
   messageSeq,
   resource,
   threadId,
@@ -103,6 +108,7 @@ export function MessageMentionPill({
   const threadRoutePath = useThreadRoutePath();
   const projectId = resource.kind === "thread" ? resource.projectId : undefined;
   const title = `${promptMentionTooltipLabel(resource)} · message`;
+
   const labelNode = (
     <>
       <PromptMentionIcon
@@ -113,6 +119,15 @@ export function MessageMentionPill({
       <span className="shrink-0 text-muted-foreground">· message</span>
     </>
   );
+
+  if (!interactive) {
+    return (
+      <span className={mentionPillClassName(false)} title={title}>
+        {labelNode}
+      </span>
+    );
+  }
+
   return (
     <RouteAnchor
       className={mentionPillClassName(true)}
@@ -133,11 +148,14 @@ export function PromptMentionPill({
 }: PromptMentionPillProps) {
   const threadRoutePath = useThreadRoutePath();
   const title = promptMentionTooltipLabel(resource);
+
   const clipboardAttributes = promptMentionClipboardDataAttributes({
     resource,
     serializedText,
   });
+
   const iconClassName = "size-3.5 shrink-0 self-center text-muted-foreground";
+
   const labelNode = (
     <>
       <PromptMentionIcon resource={resource} className={iconClassName} />
@@ -210,6 +228,7 @@ export function PromptMentionPill({
 
   if (resource.kind === "path" || resource.kind === "attachment") {
     const activate = resolveMentionLink?.(resource) ?? null;
+
     if (activate) {
       return (
         <button
@@ -248,5 +267,6 @@ export function resolveThreadMentionResource(
       return mention.resource;
     }
   }
+
   return { kind: "thread", threadId, label: threadId };
 }

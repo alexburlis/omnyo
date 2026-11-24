@@ -12,6 +12,7 @@ export async function raceTimeout<T>(
   message: string,
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
+
   try {
     return await Promise.race([
       promise,
@@ -30,6 +31,7 @@ export async function settledWithin(
   timeoutMs: number,
 ): Promise<boolean> {
   let timer: NodeJS.Timeout | undefined;
+
   try {
     return await Promise.race([
       promise.then(

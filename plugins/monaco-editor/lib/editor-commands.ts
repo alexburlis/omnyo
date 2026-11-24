@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { experimental_copyToClipboard } from "@get-bb/plugin-sdk/app";
+import { experimental_copyToClipboard } from "@omnyo/plugin-sdk/app";
 import type * as MonacoNs from "monaco-editor";
 
 type Editor = MonacoNs.editor.IStandaloneCodeEditor;
@@ -22,7 +22,9 @@ export function forgetEditor(editor: Editor): void {
 
 function targetEditor(): ActiveEditor | null {
   const node = lastFocused?.editor.getDomNode();
+
   if (!node || !node.isConnected || node.offsetParent === null) return null;
+
   return lastFocused;
 }
 
@@ -62,7 +64,10 @@ function monacoAction(
   };
 }
 
-export async function copy(text: string, successMessage: string): Promise<void> {
+export async function copy(
+  text: string,
+  successMessage: string,
+): Promise<void> {
   if (await experimental_copyToClipboard({ text })) {
     toast.success(successMessage);
   } else {
@@ -116,12 +121,15 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
 
 export function isCommandAvailable(command: EditorCommand): boolean {
   const active = targetEditor();
+
   if (!active) return false;
+
   return command.precondition?.(active) ?? true;
 }
 
 export async function runEditorCommand(command: EditorCommand): Promise<void> {
   const active = targetEditor();
+
   if (!active || !(command.precondition?.(active) ?? true)) return;
   await command.run(active);
 }

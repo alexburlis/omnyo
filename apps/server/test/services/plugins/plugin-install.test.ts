@@ -28,12 +28,21 @@ import {
   getInstalledPluginRegistration,
   listPluginArtifacts,
   migrate,
+  upsertInstalledPlugin,
   type DbConnection,
-} from "@bb/db";
-import { ROOT_PLUGIN_SOURCE_SELECTION } from "@bb/server-contract";
-import type { Logger } from "@bb/logger";
-import { scaffoldPlugin } from "@bb/templates/plugin-scaffold";
-import { PLUGIN_SDK_MAJOR, PLUGIN_SDK_VERSION } from "@bb/domain";
+} from "@omnyo/db";
+import { ROOT_PLUGIN_SOURCE_SELECTION } from "@omnyo/server-contract";
+import type { Logger } from "@omnyo/logger";
+import {
+  resolvePrivateSdkArtifact,
+  scaffoldPlugin,
+} from "@omnyo/templates/plugin-scaffold";
+import {
+  PLUGIN_RUNTIME_ABI,
+  PLUGIN_SDK_MAJOR,
+  PLUGIN_SDK_PACKAGE_NAME,
+  PLUGIN_SDK_VERSION,
+} from "@omnyo/domain";
 import { validatePluginArtifactMeta } from "../../../src/services/plugins/app-bundle.js";
 import {
   gitArtifactCacheDir,
@@ -50,34 +59,46 @@ import {
 } from "../../../src/services/plugins/plugin-service.js";
 import { testLogger } from "../../helpers/test-app.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
+
 const run = promisify(execFile);
 
 async function linkScaffoldDependencies(targetDir: string): Promise<void> {
   const manifest = JSON.parse(
     await readFile(join(targetDir, "package.json"), "utf8"),
   ) as { dependencies: Record<string, string> };
+
   const testDir = dirname(fileURLToPath(import.meta.url));
+
   const appRequire = createRequire(
     join(testDir, "..", "..", "..", "..", "app", "package.json"),
   );
+
   for (const name of Object.keys(manifest.dependencies)) {
     let packageRoot = dirname(appRequire.resolve(name));
+
     while (true) {
       const candidate = join(packageRoot, "package.json");
+
       if (existsSync(candidate)) {
         const parsed = JSON.parse(readFileSync(candidate, "utf8")) as {
           name?: string;
         };
+
         if (parsed.name === name) break;
       }
+
       const parent = dirname(packageRoot);
+
       if (parent === packageRoot) {
         throw new Error(`could not find package root for ${name}`);
       }
+
       packageRoot = parent;
     }
+
     const linkPath = join(targetDir, "node_modules", name);
     await mkdir(dirname(linkPath), { recursive: true });
     await symlink(packageRoot, linkPath, "dir");
@@ -87,6 +108,7 @@ async function linkScaffoldDependencies(targetDir: string): Promise<void> {
 async function hasBinary(command: string): Promise<boolean> {
   try {
     await run(command, ["--version"]);
+
     return true;
   } catch {
     return false;
@@ -122,14 +144,14 @@ async function writePluginFixture(
       ...(options.engines || options.pluginSdkRange
         ? {
             engines: {
-              ...(options.engines ? { bb: options.engines } : {}),
+              ...(options.engines ? { omnyo: options.engines } : {}),
               ...(options.pluginSdkRange
-                ? { bbPluginSdk: options.pluginSdkRange }
+                ? { omnyoPluginSdk: options.pluginSdkRange }
                 : {}),
             },
           }
         : {}),
-      bb: {
+      omnyo: {
         name: "Install fixture",
         description: "Plugin installation fixture.",
         branding: { icon: "Zap" },
@@ -141,11 +163,13 @@ async function writePluginFixture(
   );
   await writeFile(
     join(rootDir, "server.ts"),
-    `export default function plugin(bb: any) { bb.log.info("loaded"); }`,
+    `export default function plugin(api: any) { api.log.info("loaded"); }`,
   );
+
   if (options.appSource !== undefined) {
     await writeFile(join(rootDir, "app.tsx"), options.appSource);
   }
+
   if (options.hostSource !== undefined) {
     await writeFile(join(rootDir, "host.ts"), options.hostSource);
   }
@@ -153,6 +177,7 @@ async function writePluginFixture(
 
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await run("git", args, { cwd });
+
   return stdout.trim();
 }
 
@@ -165,6 +190,7 @@ async function initGitRepo(repoDir: string): Promise<void> {
 async function commitAll(repoDir: string, message: string): Promise<string> {
   await git(repoDir, ["add", "-A"]);
   await git(repoDir, ["commit", "-qm", message]);
+
   return git(repoDir, ["rev-parse", "HEAD"]);
 }
 
@@ -177,14 +203,17 @@ function artifactMeta(args: {
 }): string {
   const sdkMajor = args.sdkMajor ?? PLUGIN_SDK_MAJOR;
   const sdkVersion = args.sdkVersion ?? PLUGIN_SDK_VERSION;
+
   return JSON.stringify({
     sdkMajor,
     sdkVersion,
-    artifactFormatVersion: args.artifactFormatVersion ?? 1,
+    artifactFormatVersion: args.artifactFormatVersion ?? 2,
+    sdkPackage: PLUGIN_SDK_PACKAGE_NAME,
+    runtimeAbi: PLUGIN_RUNTIME_ABI,
     pluginId: args.pluginId,
     pluginVersion: args.pluginVersion ?? "0.1.0",
     builtWith: {
-      bbVersion: "0.9.0-test",
+      coreVersion: "0.9.0-test",
       pluginSdkVersion: sdkVersion,
     },
   });
@@ -192,24 +221,28 @@ function artifactMeta(args: {
 
 function localGitCachePath(repoDir: string): string {
   const parsed = parsePluginSource(`git:${repoDir}`);
+
   if (parsed.kind !== "git") {
     throw new Error(`Expected a git source for ${repoDir}`);
   }
+
   return parsed.cachePath;
 }
 
 describe("plugin install sources", () => {
   it("reads a Windows folder as a local git source", () => {
     expect(
-      parsePluginSource("git:C:\\Users\\me\\plugins\\bb-plugin-foo@v1"),
+      parsePluginSource("git:C:\\Users\\me\\plugins\\omnyo-plugin-foo@v1"),
     ).toMatchObject({
       kind: "git",
-      url: "C:\\Users\\me\\plugins\\bb-plugin-foo",
+      url: "C:\\Users\\me\\plugins\\omnyo-plugin-foo",
       spec: "v1",
-      cachePath: expect.stringMatching(/^local\/bb-plugin-foo-[a-f0-9]{12}$/u),
+      cachePath: expect.stringMatching(
+        /^local\/omnyo-plugin-foo-[a-f0-9]{12}$/u,
+      ),
     });
-    expect(localGitCachePath("c:/users/ME/plugins/bb-plugin-foo/")).toBe(
-      localGitCachePath("C:\\Users\\me\\plugins\\bb-plugin-foo"),
+    expect(localGitCachePath("c:/users/ME/plugins/omnyo-plugin-foo/")).toBe(
+      localGitCachePath("C:\\Users\\me\\plugins\\omnyo-plugin-foo"),
     );
     expect(() => parsePluginSource("git:C:\\Users\\me\\..\\other")).toThrow(
       "invalid git repository path",
@@ -217,34 +250,38 @@ describe("plugin install sources", () => {
   });
 
   it("parses git URLs, tracks HEAD by default, and rejects traversal", () => {
-    expect(parsePluginSource("git:github.com/acme/bb-plugin-foo@v1")).toEqual({
+    expect(
+      parsePluginSource("git:github.com/acme/omnyo-plugin-foo@v1"),
+    ).toEqual({
       kind: "git",
-      url: "https://github.com/acme/bb-plugin-foo",
+      url: "https://github.com/acme/omnyo-plugin-foo",
       spec: "v1",
       selector: { kind: "ref", ref: "v1" },
-      cachePath: "github.com/acme/bb-plugin-foo",
+      cachePath: "github.com/acme/omnyo-plugin-foo",
     });
     expect(
       parsePluginSource(
-        "git:https://github.com/acme/bb-plugin-foo.git@abc1234",
+        "git:https://github.com/acme/omnyo-plugin-foo.git@abc1234",
       ),
     ).toMatchObject({
       kind: "git",
-      url: "https://github.com/acme/bb-plugin-foo.git",
-    });
-    expect(parsePluginSource("https://github.com/acme/bb-plugin-foo")).toEqual({
-      kind: "git",
-      url: "https://github.com/acme/bb-plugin-foo",
-      spec: "HEAD",
-      selector: { kind: "ref", ref: "HEAD" },
-      cachePath: "github.com/acme/bb-plugin-foo",
+      url: "https://github.com/acme/omnyo-plugin-foo.git",
     });
     expect(
-      parsePluginSource("https://github.com/acme/bb-plugin-foo/"),
+      parsePluginSource("https://github.com/acme/omnyo-plugin-foo"),
+    ).toEqual({
+      kind: "git",
+      url: "https://github.com/acme/omnyo-plugin-foo",
+      spec: "HEAD",
+      selector: { kind: "ref", ref: "HEAD" },
+      cachePath: "github.com/acme/omnyo-plugin-foo",
+    });
+    expect(
+      parsePluginSource("https://github.com/acme/omnyo-plugin-foo/"),
     ).toMatchObject({
       kind: "git",
       spec: "HEAD",
-      cachePath: "github.com/acme/bb-plugin-foo",
+      cachePath: "github.com/acme/omnyo-plugin-foo",
     });
     expect(parsePluginSource("git:github.com/acme/repo")).toMatchObject({
       kind: "git",
@@ -275,11 +312,13 @@ describe("plugin install sources", () => {
         selector: { kind: "ref-or-range", ref: spec, range: spec },
       });
     }
+
     for (const spec of ["v1", "v1.2", "1.2.3", "main", "release/next"]) {
       expect(
         parsePluginSource(`git:github.com/acme/repo@${spec}`),
       ).toMatchObject({ selector: { kind: "ref", ref: spec } });
     }
+
     expect(
       parsePluginSource("git:github.com/acme/repo@semver:^1.2.0"),
     ).toMatchObject({
@@ -301,6 +340,7 @@ describe("plugin install sources", () => {
         tagPrefix: "notes/",
       }),
     ).toBe("git:https://github.com/acme/repo.git@semver:notes/:^1.2.0");
+
     for (const spec of [
       "semver:not a range",
       "semver:a:b:^1.0.0",
@@ -315,32 +355,32 @@ describe("plugin install sources", () => {
   });
 
   it("classifies omitted, exact, range, and dist-tag npm specs", () => {
-    expect(parsePluginSource("npm:bb-plugin-linear@0.3.0")).toEqual({
+    expect(parsePluginSource("npm:omnyo-plugin-linear@0.3.0")).toEqual({
       kind: "npm",
-      name: "bb-plugin-linear",
+      name: "omnyo-plugin-linear",
       spec: "0.3.0",
       specKind: "exact",
     });
-    expect(parsePluginSource("npm:@acme/bb-plugin-x@1.2.3")).toEqual({
+    expect(parsePluginSource("npm:@acme/omnyo-plugin-x@1.2.3")).toEqual({
       kind: "npm",
-      name: "@acme/bb-plugin-x",
+      name: "@acme/omnyo-plugin-x",
       spec: "1.2.3",
       specKind: "exact",
     });
-    expect(parsePluginSource("npm:bb-plugin-x@^1.0.0")).toMatchObject({
+    expect(parsePluginSource("npm:omnyo-plugin-x@^1.0.0")).toMatchObject({
       spec: "^1.0.0",
       specKind: "range",
     });
-    expect(parsePluginSource("npm:bb-plugin-x@next")).toMatchObject({
+    expect(parsePluginSource("npm:omnyo-plugin-x@next")).toMatchObject({
       spec: "next",
       specKind: "tag",
     });
-    expect(parsePluginSource("npm:bb-plugin-x")).toMatchObject({
+    expect(parsePluginSource("npm:omnyo-plugin-x")).toMatchObject({
       spec: "",
       specKind: "default",
     });
-    expect(parsePluginSource("npm:@acme/bb-plugin-x")).toMatchObject({
-      name: "@acme/bb-plugin-x",
+    expect(parsePluginSource("npm:@acme/omnyo-plugin-x")).toMatchObject({
+      name: "@acme/omnyo-plugin-x",
       spec: "",
       specKind: "default",
     });
@@ -377,16 +417,20 @@ describe("plugin install sources", () => {
       NPM_CONFIG_FOREGROUND_SCRIPTS: "true",
       npm_config_registry: "https://registry.example.invalid/",
     };
+
     const previous = new Map<string, string | undefined>();
+
     for (const [key, value] of Object.entries(overrides)) {
       previous.set(key, process.env[key]);
       process.env[key] = value;
     }
+
     try {
       const seen = await runInstallCommand(process.execPath, [
         "-e",
         "process.stdout.write(['npm_config_allow_scripts', 'npm_config_ignore_scripts', 'NPM_CONFIG_FOREGROUND_SCRIPTS', 'npm_config_registry'].map((k) => process.env[k] ?? '-').concat(process.env.PATH === undefined ? 'no-path' : 'path').join('|'))",
       ]);
+
       expect(seen).toBe("-|-|-|https://registry.example.invalid/|path");
     } finally {
       for (const [key, value] of previous) {
@@ -425,6 +469,7 @@ describe("plugin install flows", () => {
   let workDir: string;
   let dataDir: string;
   let service: PluginService;
+
   let afterArtifactPromoted:
     | ((args: {
         pluginId: string;
@@ -432,12 +477,13 @@ describe("plugin install flows", () => {
         path: string;
       }) => Promise<void>)
     | undefined;
+
   let materializationCount: number;
 
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-install-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-install-"));
     dataDir = join(workDir, "data");
     afterArtifactPromoted = undefined;
     materializationCount = 0;
@@ -452,6 +498,7 @@ describe("plugin install flows", () => {
       },
       logger,
       dataDir,
+      vault: await openSecretVault(dataDir),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
       afterArtifactPromoted: async (args) => afterArtifactPromoted?.(args),
@@ -470,7 +517,9 @@ describe("plugin install flows", () => {
   describe.skipIf(!hasGit)("git sources", { timeout: 30_000 }, () => {
     it("installs and tracks the default branch when the ref is omitted", async () => {
       const repoDir = join(workDir, "repo-default-branch");
-      await writePluginFixture(repoDir, { name: "bb-plugin-default-branch" });
+      await writePluginFixture(repoDir, {
+        name: "omnyo-plugin-default-branch",
+      });
       await initGitRepo(repoDir);
       const commit = await commitAll(repoDir, "init");
 
@@ -495,14 +544,15 @@ describe("plugin install flows", () => {
 
     it("stamps catalog provenance for a git official catalog entry", async () => {
       const repoDir = join(workDir, "repo-catalog");
-      await writePluginFixture(repoDir, { name: "bb-plugin-catalog-git" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-catalog-git" });
       await initGitRepo(repoDir);
       const commit = await commitAll(repoDir, "init");
       await git(repoDir, ["branch", "plugin/catalog-git"]);
 
       const source = `git:${repoDir}@plugin/catalog-git`;
+
       const entry = await service.installCatalogPlugin({
-        marketplace: "bb-community",
+        marketplace: "acme-plugins",
         entryId: "catalog-git-entry",
         pluginId: "catalog-git",
         source,
@@ -514,13 +564,13 @@ describe("plugin install flows", () => {
         source,
         provenance: "catalog",
         catalogEntryId: "catalog-git-entry",
-        catalogMarketplaceName: "bb-community",
+        catalogMarketplaceName: "acme-plugins",
         status: "running",
       });
       expect(getInstalledPluginRegistration(db, "catalog-git")).toMatchObject({
         provenance: "catalog",
         catalogEntryId: "catalog-git-entry",
-        catalogMarketplaceName: "bb-community",
+        catalogMarketplaceName: "acme-plugins",
         sourceKind: "git",
         sourceGitUrl: repoDir,
         sourceGitRequestedRef: "plugin/catalog-git",
@@ -531,7 +581,7 @@ describe("plugin install flows", () => {
 
     it("refuses a git commit that changed after marketplace confirmation", async () => {
       const repoDir = join(workDir, "repo-catalog-confirmed");
-      await writePluginFixture(repoDir, { name: "bb-plugin-confirmed" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-confirmed" });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "initial");
 
@@ -551,7 +601,7 @@ describe("plugin install flows", () => {
     it("refuses a catalog entry whose plugin requires another plugin SDK", async () => {
       const repoDir = join(workDir, "repo-catalog-sdk-too-new");
       await writePluginFixture(repoDir, {
-        name: "bb-plugin-sdk-listed",
+        name: "omnyo-plugin-sdk-listed",
         pluginSdkRange: ">=99.0.0",
       });
       await initGitRepo(repoDir);
@@ -560,7 +610,7 @@ describe("plugin install flows", () => {
 
       await expect(
         service.installCatalogPlugin({
-          marketplace: "bb-community",
+          marketplace: "acme-plugins",
           entryId: "sdk-listed",
           pluginId: "sdk-listed",
           source: `git:${repoDir}@plugin/listed`,
@@ -568,7 +618,7 @@ describe("plugin install flows", () => {
         }),
       ).rejects.toThrow(
         new RegExp(
-          `install refused.*requires bb plugin SDK >=99\\.0\\.0, running SDK is ${PLUGIN_SDK_VERSION.replaceAll(".", "\\.")}`,
+          `install refused.*requires Omnyo plugin SDK >=99\\.0\\.0, running SDK is ${PLUGIN_SDK_VERSION.replaceAll(".", "\\.")}`,
           "u",
         ),
       );
@@ -584,22 +634,23 @@ describe("plugin install flows", () => {
       ]) {
         await expect(
           service.installCatalogPlugin({
-            marketplace: "bb-community",
+            marketplace: "acme-plugins",
             entryId: "catalog-npm-entry",
             pluginId: "registry",
-            source: "npm:bb-plugin-registry@^1.0.0",
+            source: "npm:omnyo-plugin-registry@^1.0.0",
             selection: ROOT_PLUGIN_SOURCE_SELECTION,
             npmRegistry: registry,
           }),
         ).rejects.toThrow(/marketplace/);
       }
+
       expect(getInstalledPluginRegistration(db, "registry")).toBeUndefined();
     });
 
     it("guards a listed npm registry while it resolves an install plan", async () => {
       await expect(
         service.resolveCatalogNpmSource({
-          packageName: "bb-plugin-registry",
+          packageName: "omnyo-plugin-registry",
           registry: "https://localhost/registry",
           requestedSpec: "latest",
           specKind: "tag",
@@ -609,14 +660,14 @@ describe("plugin install flows", () => {
 
     it("refuses a git catalog install whose manifest id differs from the entry", async () => {
       const repoDir = join(workDir, "repo-catalog-mismatch");
-      await writePluginFixture(repoDir, { name: "bb-plugin-imposter" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-imposter" });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "init");
       await git(repoDir, ["branch", "plugin/imposter"]);
 
       await expect(
         service.installCatalogPlugin({
-          marketplace: "bb-community",
+          marketplace: "acme-plugins",
           entryId: "catalog-git-entry",
           pluginId: "expected-id",
           source: `git:${repoDir}@plugin/imposter`,
@@ -627,7 +678,7 @@ describe("plugin install flows", () => {
 
     it("clones a pinned tag into its exact immutable cache dir and loads it", async () => {
       const repoDir = join(workDir, "repo");
-      await writePluginFixture(repoDir, { name: "bb-plugin-gitty" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-gitty" });
       await initGitRepo(repoDir);
       const commit = await commitAll(repoDir, "init");
       await git(repoDir, ["tag", "v1"]);
@@ -653,7 +704,7 @@ describe("plugin install flows", () => {
 
     it("resolves a semver range over release tags and tracks compatible", async () => {
       const repoDir = join(workDir, "repo-range");
-      await writePluginFixture(repoDir, { name: "bb-plugin-ranger" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-ranger" });
       await initGitRepo(repoDir);
       const first = await commitAll(repoDir, "init");
       await git(repoDir, ["tag", "v1.0.0"]);
@@ -689,7 +740,7 @@ describe("plugin install flows", () => {
 
     it("refuses a range spec that is also a ref, and honors the explicit forms", async () => {
       const repoDir = join(workDir, "repo-ambiguous");
-      await writePluginFixture(repoDir, { name: "bb-plugin-ambiguous" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-ambiguous" });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "init");
       await git(repoDir, ["tag", "v1.0.0"]);
@@ -717,7 +768,7 @@ describe("plugin install flows", () => {
 
     it("resolves a prefixed range and reports one with no matching tag", async () => {
       const repoDir = join(workDir, "repo-prefixed");
-      await writePluginFixture(repoDir, { name: "bb-plugin-prefixed" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-prefixed" });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "init");
       await git(repoDir, ["tag", "v9.0.0"]);
@@ -744,13 +795,13 @@ describe("plugin install flows", () => {
 
     it("installs a catalog entry that lists a semver range", async () => {
       const repoDir = join(workDir, "repo-catalog-range");
-      await writePluginFixture(repoDir, { name: "bb-plugin-catalog-range" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-catalog-range" });
       await initGitRepo(repoDir);
       const commit = await commitAll(repoDir, "init");
       await git(repoDir, ["tag", "v1.3.0"]);
 
       const entry = await service.installCatalogPlugin({
-        marketplace: "bb-community",
+        marketplace: "acme-plugins",
         entryId: "catalog-range",
         pluginId: "catalog-range",
         source: `git:${repoDir}@semver:^1.0.0`,
@@ -774,7 +825,7 @@ describe("plugin install flows", () => {
 
     it("refuses a git plugin that shadows a builtin after materialization", async () => {
       const repoDir = join(workDir, "repo-connect");
-      await writePluginFixture(repoDir, { name: "bb-plugin-connect" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-connect" });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "init");
 
@@ -786,11 +837,11 @@ describe("plugin install flows", () => {
 
     it("installs a pinned commit sha via clone + checkout", async () => {
       const repoDir = join(workDir, "repo-sha");
-      await writePluginFixture(repoDir, { name: "bb-plugin-shaman" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-shaman" });
       await initGitRepo(repoDir);
       const sha = await commitAll(repoDir, "init");
       await writePluginFixture(repoDir, {
-        name: "bb-plugin-shaman",
+        name: "omnyo-plugin-shaman",
         version: "9.9.9",
       });
       await commitAll(repoDir, "later");
@@ -798,19 +849,21 @@ describe("plugin install flows", () => {
       const entry = await service.install(`git:${repoDir}@${sha}`, {
         kind: "root",
       });
+
       expect(entry.status).toBe("running");
       expect(entry.version).toBe("0.1.0");
     });
 
     it("never reuses an exact-resolution artifact owned by another plugin", async () => {
       const repoDir = join(workDir, "repo-owner");
-      await writePluginFixture(repoDir, { name: "bb-plugin-owner" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-owner" });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "init");
       await git(repoDir, ["tag", "v1"]);
       const source = `git:${repoDir}@v1`;
       await service.install(source, { kind: "root" });
       const original = listPluginArtifacts(db, "owner")[0];
+
       if (original === undefined) throw new Error("missing owner artifact");
       await service.remove("owner");
       db.$client
@@ -818,10 +871,12 @@ describe("plugin install flows", () => {
         .run("different-plugin", original.id);
 
       const reinstalled = await service.install(source, { kind: "root" });
+
       const activeId = getInstalledPluginRegistration(
         db,
         "owner",
       )?.activeArtifactId;
+
       expect(activeId).not.toBe(original.id);
       expect(reinstalled.status).toBe("running");
       expect(listPluginArtifacts(db, "owner")).toMatchObject([
@@ -831,7 +886,7 @@ describe("plugin install flows", () => {
 
     it("serializes concurrent installs of the same exact resolution", async () => {
       const repoDir = join(workDir, "repo-concurrent");
-      await writePluginFixture(repoDir, { name: "bb-plugin-concurrent" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-concurrent" });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "init");
       await git(repoDir, ["tag", "v1"]);
@@ -841,13 +896,16 @@ describe("plugin install flows", () => {
         service.install(source, { kind: "root" }),
         service.install(source, { kind: "root" }),
       ]);
+
       expect(results).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ status: "fulfilled" }),
           expect.objectContaining({
             status: "rejected",
             reason: expect.objectContaining({
-              message: expect.stringContaining("bb plugin update concurrent"),
+              message: expect.stringContaining(
+                "omnyo plugin update concurrent",
+              ),
             }),
           }),
         ]),
@@ -858,7 +916,7 @@ describe("plugin install flows", () => {
 
     it("refuses a managed reinstall and points to the update command", async () => {
       const repoDir = join(workDir, "repo-refresh");
-      await writePluginFixture(repoDir, { name: "bb-plugin-fresh" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-fresh" });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "v0.1.0");
       const source = `git:${repoDir}@main`;
@@ -866,12 +924,12 @@ describe("plugin install flows", () => {
       expect(first.version).toBe("0.1.0");
 
       await writePluginFixture(repoDir, {
-        name: "bb-plugin-fresh",
+        name: "omnyo-plugin-fresh",
         version: "0.2.0",
       });
       await commitAll(repoDir, "v0.2.0");
       await expect(service.install(source, { kind: "root" })).rejects.toThrow(
-        "bb plugin update fresh",
+        "omnyo plugin update fresh",
       );
       expect(
         service.list().find((plugin) => plugin.id === "fresh"),
@@ -881,7 +939,7 @@ describe("plugin install flows", () => {
     it("refuses a managed frontend reinstall before validating a broken new tip or creating an artifact", async () => {
       const repoDir = join(workDir, "repo-managed-frontend");
       await writePluginFixture(repoDir, {
-        name: "bb-plugin-managed-frontend",
+        name: "omnyo-plugin-managed-frontend",
         appSource:
           'export default function App() { return <div className="line-clamp-2">working</div>; }\n',
       });
@@ -894,22 +952,24 @@ describe("plugin install flows", () => {
         version: "0.1.0",
         status: "running",
       });
+
       const registrationBefore = getInstalledPluginRegistration(
         db,
         "managed-frontend",
       );
+
       const artifactsBefore = listPluginArtifacts(db, "managed-frontend");
       expect(artifactsBefore).toHaveLength(1);
 
       await writePluginFixture(repoDir, {
-        name: "bb-plugin-managed-frontend",
+        name: "omnyo-plugin-managed-frontend",
         version: "0.2.0",
         appSource: "export default function App( {\n",
       });
       await commitAll(repoDir, "broken frontend");
 
       await expect(service.install(source, { kind: "root" })).rejects.toThrow(
-        "bb plugin update managed-frontend",
+        "omnyo plugin update managed-frontend",
       );
       expect(getInstalledPluginRegistration(db, "managed-frontend")).toEqual(
         registrationBefore,
@@ -924,7 +984,7 @@ describe("plugin install flows", () => {
 
     it("keeps the previous install intact when a reinstall fails validation", async () => {
       const repoDir = join(workDir, "repo-sturdy");
-      await writePluginFixture(repoDir, { name: "bb-plugin-sturdy" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-sturdy" });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "v1");
       const source = `git:${repoDir}@main`;
@@ -947,7 +1007,7 @@ describe("plugin install flows", () => {
     it("rebuilds a git plugin's server bundle over any committed dist", async () => {
       const identityRepo = join(workDir, "repo-artifact-identity");
       await writePluginFixture(identityRepo, {
-        name: "bb-plugin-artifact-identity",
+        name: "omnyo-plugin-artifact-identity",
       });
       await mkdir(join(identityRepo, "dist"), { recursive: true });
       await writeFile(
@@ -960,21 +1020,24 @@ describe("plugin install flows", () => {
       const entry = await service.install(`git:${identityRepo}@main`, {
         kind: "root",
       });
+
       expect(entry.status).toBe("running");
+
       const meta: unknown = JSON.parse(
         await readFile(join(entry.rootDir, "dist", "server.meta.json"), "utf8"),
       );
+
       expect(meta).toMatchObject({
         pluginId: "artifact-identity",
         sdkVersion: PLUGIN_SDK_VERSION,
-        artifactFormatVersion: 1,
+        artifactFormatVersion: 2,
       });
     });
 
-    it("hard-fails install on an engines.bb mismatch and cleans up the clone", async () => {
+    it("hard-fails install on an engines.omnyo mismatch and cleans up the clone", async () => {
       const repoDir = join(workDir, "repo-too-new");
       await writePluginFixture(repoDir, {
-        name: "bb-plugin-too-new",
+        name: "omnyo-plugin-too-new",
         engines: ">=99.0.0",
       });
       await initGitRepo(repoDir);
@@ -983,28 +1046,31 @@ describe("plugin install flows", () => {
       const source = `git:${repoDir}@main`;
       await expect(
         service.install(source, { kind: "root" }),
-      ).rejects.toThrowError(/install refused.*requires bb >=99\.0\.0/);
+      ).rejects.toThrowError(/install refused.*requires Omnyo >=99\.0\.0/);
       expect(service.list()).toHaveLength(0);
+
       const managed = join(
         dataDir,
         "plugins",
         "git",
         ...localGitCachePath(repoDir).split("/"),
       );
+
       await expect(stat(`${managed}@main`)).rejects.toThrowError();
     });
 
     it("remove deletes cached git artifacts and never touches a path source", async () => {
       const repoDir = join(workDir, "repo-rm");
-      await writePluginFixture(repoDir, { name: "bb-plugin-managed" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-managed" });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "init");
+
       const managedEntry = await service.install(`git:${repoDir}@main`, {
         kind: "root",
       });
 
       const pathDir = join(workDir, "local-plugin");
-      await writePluginFixture(pathDir, { name: "bb-plugin-localdir" });
+      await writePluginFixture(pathDir, { name: "omnyo-plugin-localdir" });
       await service.install(pathDir, { kind: "root" });
 
       expect(await service.remove("managed")).toBe(true);
@@ -1020,7 +1086,7 @@ describe("plugin install flows", () => {
     it("refuses a cached artifact whose engine range no longer matches", async () => {
       const repoDir = join(workDir, "repo-cached-engine");
       await writePluginFixture(repoDir, {
-        name: "bb-plugin-cached-engine",
+        name: "omnyo-plugin-cached-engine",
         engines: ">=0.9.0",
       });
       await initGitRepo(repoDir);
@@ -1043,6 +1109,7 @@ describe("plugin install flows", () => {
         },
         logger,
         dataDir,
+        vault: await openSecretVault(dataDir),
         appVersion: "0.5.0",
         loadTimeoutMs: 2000,
         onArtifactMaterialize: () => {
@@ -1052,7 +1119,7 @@ describe("plugin install flows", () => {
 
       await expect(
         service.install(source, { kind: "root" }),
-      ).rejects.toThrowError(/install refused.*requires bb >=0\.9\.0/u);
+      ).rejects.toThrowError(/install refused.*requires Omnyo >=0\.9\.0/u);
       expect(materializationCount).toBe(clonesBefore);
       expect(
         getInstalledPluginRegistration(db, "cached-engine"),
@@ -1064,13 +1131,13 @@ describe("plugin install flows", () => {
       async () => {
         const repoDir = join(workDir, "repo-host-with-dev-sdk-omitted");
         await writePluginFixture(repoDir, {
-          name: "bb-plugin-host-with-dev-sdk-omitted",
+          name: "omnyo-plugin-host-with-dev-sdk-omitted",
           devDependencies: {
-            "@get-bb/plugin-sdk": "file:./sdk-type-fixture",
+            "@omnyo/plugin-sdk": "file:./sdk-type-fixture",
           },
           hostSource: `
-            import { defineRpcContract } from "@get-bb/plugin-sdk";
-            import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
+            import { defineRpcContract } from "@omnyo/plugin-sdk";
+            import { experimental_defineHostEntry } from "@omnyo/plugin-sdk/host";
             const schema = { "~standard": { validate(value) { return { value }; } } };
             const contract = defineRpcContract({ echo: { input: schema, output: schema } });
             export default experimental_defineHostEntry({
@@ -1083,7 +1150,7 @@ describe("plugin install flows", () => {
         await writeFile(
           join(repoDir, "sdk-type-fixture", "package.json"),
           JSON.stringify({
-            name: "@get-bb/plugin-sdk",
+            name: "@omnyo/plugin-sdk",
             version: "0.0.0-test",
             private: true,
           }),
@@ -1096,14 +1163,16 @@ describe("plugin install flows", () => {
         });
 
         expect(entry.status).toBe("running");
+
         const bundle = await readFile(
           join(entry.rootDir, "dist", "host.js"),
           "utf8",
         );
-        expect(bundle).not.toMatch(/from\s+["']@get-bb\/plugin-sdk/u);
+
+        expect(bundle).not.toMatch(/from\s+["']@omnyo\/plugin-sdk/u);
         await stat(join(entry.rootDir, "dist", "host.meta.json"));
         await expect(
-          stat(join(entry.rootDir, "node_modules", "@get-bb", "plugin-sdk")),
+          stat(join(entry.rootDir, "node_modules", "@omnyo", "plugin-sdk")),
         ).rejects.toMatchObject({ code: "ENOENT" });
       },
     );
@@ -1111,14 +1180,17 @@ describe("plugin install flows", () => {
     it("restores a target moved aside by an interrupted promotion", async () => {
       const repoDir = join(workDir, "repo-interrupted-promotion");
       await writePluginFixture(repoDir, {
-        name: "bb-plugin-interrupted-promotion",
+        name: "omnyo-plugin-interrupted-promotion",
       });
       await initGitRepo(repoDir);
       await commitAll(repoDir, "init");
+
       const entry = await service.install(`git:${repoDir}@main`, {
         kind: "root",
       });
+
       const artifact = listPluginArtifacts(db, entry.id)[0];
+
       if (artifact === undefined) throw new Error("missing plugin artifact");
 
       await service.stop();
@@ -1141,6 +1213,7 @@ describe("plugin install flows", () => {
         },
         logger,
         dataDir,
+        vault: await openSecretVault(dataDir),
         appVersion: "0.9.0",
         loadTimeoutMs: 2000,
       });
@@ -1161,7 +1234,7 @@ describe("plugin install flows", () => {
 
     it("ignores a repository .npmrc when installing dependencies", async () => {
       const repoDir = join(workDir, "repo-npmrc");
-      await writePluginFixture(repoDir, { name: "bb-plugin-npmrc" });
+      await writePluginFixture(repoDir, { name: "omnyo-plugin-npmrc" });
       await writeFile(
         join(repoDir, ".npmrc"),
         "registry=http://127.0.0.1:1/evil\nstrict-ssl=false\n",
@@ -1185,7 +1258,7 @@ describe("plugin install flows", () => {
         await writeFile(
           join(depDir, "package.json"),
           JSON.stringify({
-            name: "bb-test-greeter",
+            name: "omnyo-test-greeter",
             version: "1.0.0",
             main: "index.js",
           }),
@@ -1196,22 +1269,24 @@ describe("plugin install flows", () => {
         );
 
         const repoDir = join(workDir, "repo-with-deps");
-        await writePluginFixture(repoDir, { name: "bb-plugin-withdeps" });
+        await writePluginFixture(repoDir, { name: "omnyo-plugin-withdeps" });
         const manifestPath = join(repoDir, "package.json");
+
         const manifest: unknown = JSON.parse(
           await readFile(manifestPath, "utf8"),
         );
+
         await writeFile(
           manifestPath,
           JSON.stringify({
             ...(manifest as Record<string, unknown>),
-            dependencies: { "bb-test-greeter": `file:${depDir}` },
+            dependencies: { "omnyo-test-greeter": `file:${depDir}` },
           }),
         );
         await writeFile(
           join(repoDir, "server.ts"),
-          `import { greet } from "bb-test-greeter";\n` +
-            `export default function plugin(bb: any) { bb.log.info(greet()); }`,
+          `import { greet } from "omnyo-test-greeter";\n` +
+            `export default function plugin(api: any) { api.log.info(greet()); }`,
         );
         await initGitRepo(repoDir);
         await commitAll(repoDir, "init");
@@ -1219,11 +1294,14 @@ describe("plugin install flows", () => {
         const entry = await service.install(`git:${repoDir}@main`, {
           kind: "root",
         });
+
         expect(entry.status).toBe("running");
+
         const bundle = await readFile(
           join(entry.rootDir, "dist", "server.js"),
           "utf8",
         );
+
         expect(bundle).toContain("hello from the dependency");
         await stat(join(entry.rootDir, "node_modules"));
       },
@@ -1236,14 +1314,14 @@ describe("plugin install flows", () => {
     () => {
       async function writeCollectionRepo(repoDir: string): Promise<string> {
         await writePluginFixture(join(repoDir, "plugins", "alpha"), {
-          name: "bb-plugin-collection-alpha",
+          name: "omnyo-plugin-collection-alpha",
         });
         await writePluginFixture(join(repoDir, "plugins", "beta"), {
-          name: "bb-plugin-collection-beta",
+          name: "omnyo-plugin-collection-beta",
         });
-        await mkdir(join(repoDir, ".bb"), { recursive: true });
+        await mkdir(join(repoDir, ".omnyo"), { recursive: true });
         await writeFile(
-          join(repoDir, ".bb", "plugins.json"),
+          join(repoDir, ".omnyo", "plugins.json"),
           JSON.stringify({
             schemaVersion: 1,
             name: "collection",
@@ -1254,6 +1332,7 @@ describe("plugin install flows", () => {
           }),
         );
         await initGitRepo(repoDir);
+
         return commitAll(repoDir, "init");
       }
 
@@ -1265,10 +1344,12 @@ describe("plugin install flows", () => {
           kind: "entry",
           name: "alpha",
         });
+
         const alphaBundle = await readFile(
           join(alpha.rootDir, "dist", "server.js"),
           "utf8",
         );
+
         const beta = await service.install(`git:${repoDir}@main`, {
           kind: "subdirectory",
           path: "./plugins/beta",
@@ -1276,11 +1357,13 @@ describe("plugin install flows", () => {
 
         expect(alpha.status).toBe("running");
         expect(beta.status).toBe("running");
+
         const checkout = gitArtifactCacheDir(
           dataDir,
           localGitCachePath(repoDir),
           commit,
         );
+
         expect(alpha.rootDir).toBe(join(checkout, "plugins", "alpha"));
         expect(beta.rootDir).toBe(join(checkout, "plugins", "beta"));
         expect(
@@ -1305,15 +1388,15 @@ describe("plugin install flows", () => {
         async () => {
           const repoDir = join(workDir, "repo-collection-symlinked-entry");
           await writePluginFixture(join(repoDir, "plugins", "actual"), {
-            name: "bb-plugin-collection-linked",
+            name: "omnyo-plugin-collection-linked",
           });
           await writePluginFixture(join(repoDir, "plugins", "sibling"), {
-            name: "bb-plugin-collection-sibling",
+            name: "omnyo-plugin-collection-sibling",
           });
           await symlink("actual", join(repoDir, "plugins", "linked"));
-          await mkdir(join(repoDir, ".bb"), { recursive: true });
+          await mkdir(join(repoDir, ".omnyo"), { recursive: true });
           await writeFile(
-            join(repoDir, ".bb", "plugins.json"),
+            join(repoDir, ".omnyo", "plugins.json"),
             JSON.stringify({
               schemaVersion: 1,
               name: "collection",
@@ -1330,6 +1413,7 @@ describe("plugin install flows", () => {
             kind: "entry",
             name: "sibling",
           });
+
           const linked = await service.install(`git:${repoDir}@main`, {
             kind: "entry",
             name: "linked",
@@ -1343,9 +1427,11 @@ describe("plugin install flows", () => {
       it("keeps a nested sibling intact when the repository root installs too", async () => {
         const repoDir = join(workDir, "repo-collection-root");
         await writePluginFixture(join(repoDir, "plugins", "alpha"), {
-          name: "bb-plugin-collection-alpha",
+          name: "omnyo-plugin-collection-alpha",
         });
-        await writePluginFixture(repoDir, { name: "bb-plugin-collection-top" });
+        await writePluginFixture(repoDir, {
+          name: "omnyo-plugin-collection-top",
+        });
         await initGitRepo(repoDir);
         await commitAll(repoDir, "init");
 
@@ -1353,10 +1439,12 @@ describe("plugin install flows", () => {
           kind: "subdirectory",
           path: "./plugins/alpha",
         });
+
         const alphaBundle = await readFile(
           join(alpha.rootDir, "dist", "server.js"),
           "utf8",
         );
+
         const top = await service.install(`git:${repoDir}@main`, {
           kind: "root",
         });
@@ -1377,10 +1465,10 @@ describe("plugin install flows", () => {
       it("refreshes a root artifact hash after a nested install", async () => {
         const repoDir = join(workDir, "repo-collection-root-first");
         await writePluginFixture(join(repoDir, "plugins", "alpha"), {
-          name: "bb-plugin-collection-root-first-alpha",
+          name: "omnyo-plugin-collection-root-first-alpha",
         });
         await writePluginFixture(repoDir, {
-          name: "bb-plugin-collection-root-first-top",
+          name: "omnyo-plugin-collection-root-first-top",
         });
         await initGitRepo(repoDir);
         await commitAll(repoDir, "init");
@@ -1388,6 +1476,7 @@ describe("plugin install flows", () => {
         const top = await service.install(`git:${repoDir}@main`, {
           kind: "root",
         });
+
         await service.install(`git:${repoDir}@main`, {
           kind: "subdirectory",
           path: "plugins/alpha",
@@ -1403,11 +1492,11 @@ describe("plugin install flows", () => {
         async () => {
           const repoDir = join(workDir, "repo-collection-root-symlink");
           await writePluginFixture(join(repoDir, "plugins", "actual"), {
-            name: "bb-plugin-collection-linked-root",
+            name: "omnyo-plugin-collection-linked-root",
           });
           await symlink("actual", join(repoDir, "plugins", "linked"));
           await writePluginFixture(repoDir, {
-            name: "bb-plugin-collection-top-linked",
+            name: "omnyo-plugin-collection-top-linked",
           });
           await initGitRepo(repoDir);
           await commitAll(repoDir, "init");
@@ -1416,7 +1505,9 @@ describe("plugin install flows", () => {
             kind: "subdirectory",
             path: "plugins/linked",
           });
+
           await stat(join(linked.rootDir, "dist", "server.js"));
+
           const top = await service.install(`git:${repoDir}@main`, {
             kind: "root",
           });
@@ -1435,22 +1526,27 @@ describe("plugin install flows", () => {
       it("reinstalls a nested plugin whose directory was collected", async () => {
         const repoDir = join(workDir, "repo-collection-recollected");
         const commit = await writeCollectionRepo(repoDir);
+
         const alpha = await service.install(`git:${repoDir}@main`, {
           kind: "entry",
           name: "alpha",
         });
+
         expect(await service.remove("collection-alpha")).toBe(true);
+
         const checkout = gitArtifactCacheDir(
           dataDir,
           localGitCachePath(repoDir),
           commit,
         );
+
         await rm(join(checkout, "plugins"), { recursive: true, force: true });
 
         const again = await service.install(`git:${repoDir}@main`, {
           kind: "entry",
           name: "alpha",
         });
+
         expect(again.status).toBe("running");
         expect(again.rootDir).toBe(alpha.rootDir);
         await stat(join(again.rootDir, "dist", "server.js"));
@@ -1504,12 +1600,12 @@ describe("plugin install flows", () => {
 
       it("refuses a collection entry whose directory leaves the repository", async () => {
         const outsideDir = join(workDir, "outside-plugin");
-        await writePluginFixture(outsideDir, { name: "bb-plugin-outside" });
+        await writePluginFixture(outsideDir, { name: "omnyo-plugin-outside" });
         const repoDir = join(workDir, "repo-collection-symlink");
         await mkdir(join(repoDir, "plugins"), { recursive: true });
-        await mkdir(join(repoDir, ".bb"), { recursive: true });
+        await mkdir(join(repoDir, ".omnyo"), { recursive: true });
         await writeFile(
-          join(repoDir, ".bb", "plugins.json"),
+          join(repoDir, ".omnyo", "plugins.json"),
           JSON.stringify({
             schemaVersion: 1,
             name: "collection",
@@ -1526,12 +1622,12 @@ describe("plugin install flows", () => {
       it("refuses a collection entry symlinked to the repository root", async () => {
         const repoDir = join(workDir, "repo-collection-root-link");
         await writePluginFixture(repoDir, {
-          name: "bb-plugin-collection-root-link",
+          name: "omnyo-plugin-collection-root-link",
         });
         await mkdir(join(repoDir, "plugins"), { recursive: true });
-        await mkdir(join(repoDir, ".bb"), { recursive: true });
+        await mkdir(join(repoDir, ".omnyo"), { recursive: true });
         await writeFile(
-          join(repoDir, ".bb", "plugins.json"),
+          join(repoDir, ".omnyo", "plugins.json"),
           JSON.stringify({
             schemaVersion: 1,
             name: "collection",
@@ -1569,27 +1665,29 @@ describe("plugin install flows", () => {
         validatePluginArtifactMeta({
           artifact: "server",
           raw: artifactMeta({
-            artifactFormatVersion: 2,
+            artifactFormatVersion: 3,
             pluginId: "artifact-format",
           }),
           pluginId: "artifact-format",
           pluginVersion: "0.1.0",
         }),
-      ).toMatch(/unknown artifactFormatVersion 2.*supported value is 1/);
+      ).toMatch(
+        /unknown artifactFormatVersion 3; supported values are 1 and 2/,
+      );
     });
   });
 
   it("keeps path installs developer-friendly while surfacing SDK incompatibility", async () => {
     const rootDir = join(workDir, "local-sdk-mismatch");
     await writePluginFixture(rootDir, {
-      name: "bb-plugin-local-sdk-mismatch",
+      name: "omnyo-plugin-local-sdk-mismatch",
       pluginSdkRange: ">=99.0.0",
     });
 
     const entry = await service.installPath(rootDir);
     expect(entry.status).toBe("incompatible");
     expect(entry.statusDetail).toContain(
-      `requires bb plugin SDK >=99.0.0, running SDK is ${PLUGIN_SDK_VERSION}`,
+      `requires Omnyo plugin SDK >=99.0.0, running SDK is ${PLUGIN_SDK_VERSION}`,
     );
   });
 
@@ -1597,7 +1695,7 @@ describe("plugin install flows", () => {
     const rootDir = join(workDir, "local-stale-server-meta");
     const incompatibleMajor = PLUGIN_SDK_MAJOR + 1;
     await writePluginFixture(rootDir, {
-      name: "bb-plugin-local-stale-server-meta",
+      name: "omnyo-plugin-local-stale-server-meta",
     });
     await mkdir(join(rootDir, "dist"), { recursive: true });
     await writeFile(
@@ -1622,7 +1720,7 @@ describe("plugin install flows", () => {
       "installs a scoped package into the immutable cache and deletes it on removal",
       { timeout: 120_000 },
       async () => {
-        const name = "@acme/bb-plugin-npmhero";
+        const name = "@acme/omnyo-plugin-npmhero";
         const version = "0.1.0";
         const fixtureDir = join(workDir, "npm-fixture");
         await writePluginFixture(fixtureDir, { name, version });
@@ -1632,6 +1730,7 @@ describe("plugin install flows", () => {
           cwd: fixtureDir,
         });
         const [tarballName] = await readdir(packDir);
+
         if (tarballName === undefined)
           throw new Error("npm pack produced no tarball");
         const tarball = await readFile(join(packDir, tarballName));
@@ -1640,14 +1739,17 @@ describe("plugin install flows", () => {
         const registry = await new Promise<Server>((resolvePromise) => {
           const server = createServer((request, response) => {
             const url = request.url ?? "";
+
             if (url === "/package.tgz") {
               tarballRequests += 1;
               response.writeHead(200, {
                 "content-type": "application/octet-stream",
               });
               response.end(tarball);
+
               return;
             }
+
             if (decodeURIComponent(url) === `/${name}`) {
               const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
               response.writeHead(200, { "content-type": "application/json" });
@@ -1670,13 +1772,17 @@ describe("plugin install flows", () => {
                   },
                 }),
               );
+
               return;
             }
+
             response.writeHead(404);
             response.end();
           });
+
           server.listen(0, "127.0.0.1", () => resolvePromise(server));
         });
+
         const port = (registry.address() as AddressInfo).port;
         const previousCache = process.env.npm_config_cache;
         const previousPackageLock = process.env.npm_config_package_lock;
@@ -1689,6 +1795,7 @@ describe("plugin install flows", () => {
         process.env.NPM_CONFIG_USERCONFIG = userConfig;
         process.env.npm_config_cache = join(workDir, "npm-cache");
         process.env.npm_config_package_lock = "false";
+
         try {
           const source = `npm:${name}@${version}`;
           const entry = await service.install(source, { kind: "root" });
@@ -1696,6 +1803,7 @@ describe("plugin install flows", () => {
           expect(entry.id).toBe("npmhero");
           expect(entry.status).toBe("running");
           expect(entry.source).toBe(source);
+
           const prefix = join(
             dataDir,
             "plugins",
@@ -1704,6 +1812,7 @@ describe("plugin install flows", () => {
             ...name.split("/"),
             version,
           );
+
           expect(entry.rootDir).toBe(join(prefix, "node_modules", name));
           await expect(
             stat(join(prefix, "package-lock.json")),
@@ -1744,16 +1853,19 @@ describe("plugin install flows", () => {
           } else {
             process.env.npm_config_cache = previousCache;
           }
+
           if (previousPackageLock === undefined) {
             delete process.env.npm_config_package_lock;
           } else {
             process.env.npm_config_package_lock = previousPackageLock;
           }
+
           if (previousUserConfig === undefined) {
             delete process.env.NPM_CONFIG_USERCONFIG;
           } else {
             process.env.NPM_CONFIG_USERCONFIG = previousUserConfig;
           }
+
           await new Promise<void>((resolvePromise) =>
             registry.close(() => resolvePromise()),
           );
@@ -1764,41 +1876,83 @@ describe("plugin install flows", () => {
 
   it("refuses an npm package whose derived id shadows a builtin before install", async () => {
     await expect(
-      service.install("npm:bb-plugin-connect@1.2.3", { kind: "root" }),
+      service.install("npm:omnyo-plugin-connect@1.2.3", { kind: "root" }),
     ).rejects.toThrowError(/reserved by the bundled plugin.*builtin:connect/);
     expect(getInstalledPluginRegistration(db, "connect")).toBeUndefined();
   });
 
   it("refuses a path plugin whose manifest id shadows a builtin", async () => {
-    const rootDir = join(workDir, "bb-plugin-connect");
-    await writePluginFixture(rootDir, { name: "bb-plugin-connect" });
+    const rootDir = join(workDir, "omnyo-plugin-connect");
+    await writePluginFixture(rootDir, { name: "omnyo-plugin-connect" });
     await expect(service.installPath(rootDir)).rejects.toThrowError(
       /reserved by the bundled plugin.*builtin:connect/,
     );
     expect(getInstalledPluginRegistration(db, "connect")).toBeUndefined();
   });
 
-  it("refuses a path plugin whose id uses the reserved bb-- prefix", async () => {
-    const rootDir = join(workDir, "bb-plugin-bb--notes");
-    await writePluginFixture(rootDir, { name: "bb-plugin-bb--notes" });
+  it("moves the owner's existing path install of an id that became bundled", async () => {
+    const firstDir = join(workDir, "connect-first");
+    const nextDir = join(workDir, "connect-next");
+    await writePluginFixture(firstDir, { name: "omnyo-plugin-connect" });
+    await writePluginFixture(nextDir, {
+      name: "omnyo-plugin-connect",
+      version: "1.0.1",
+    });
+    upsertInstalledPlugin(db, {
+      id: "connect",
+      source: `path:${firstDir}`,
+      provenance: { kind: "direct" },
+      sourceIntent: { kind: "path", canonicalPath: firstDir },
+      exactResolution: { kind: "path" },
+      updateState: {
+        lastCheckAt: null,
+        availableCompatibleVersion: null,
+        newestIncompatibleVersion: null,
+        statusDetail: null,
+      },
+      activeArtifactId: null,
+      rootDir: firstDir,
+      version: "1.0.0",
+      enabled: true,
+      enabledFollowsDefault: false,
+    });
+
+    await service.installPath(nextDir);
+
+    expect(getInstalledPluginRegistration(db, "connect")).toMatchObject({
+      source: `path:${nextDir}`,
+      rootDir: nextDir,
+      version: "1.0.1",
+      provenance: "direct",
+    });
+  });
+
+  it("refuses a path plugin whose id uses the reserved omnyo-- prefix", async () => {
+    const rootDir = join(workDir, "omnyo-plugin-omnyo--notes");
+    await writePluginFixture(rootDir, { name: "omnyo-plugin-omnyo--notes" });
     await expect(service.installPath(rootDir)).rejects.toThrowError(
-      /ids starting with "bb--" are reserved/,
+      /ids starting with "omnyo--" are reserved/,
     );
-    expect(getInstalledPluginRegistration(db, "bb--notes")).toBeUndefined();
+    expect(getInstalledPluginRegistration(db, "omnyo--notes")).toBeUndefined();
   });
 
-  it("refuses an npm package whose derived id uses the reserved bb-- prefix before install", async () => {
+  it("refuses an npm package whose derived id uses the reserved omnyo-- prefix before install", async () => {
     await expect(
-      service.install("npm:@acme/bb-plugin-bb--notes@1.2.3", { kind: "root" }),
-    ).rejects.toThrowError(/ids starting with "bb--" are reserved/);
+      service.install("npm:@acme/omnyo-plugin-omnyo--notes@1.2.3", {
+        kind: "root",
+      }),
+    ).rejects.toThrowError(/ids starting with "omnyo--" are reserved/);
   });
 
-  it("the bb plugin new scaffold installs and loads through the plugin service", async () => {
-    const targetDir = join(workDir, "bb-plugin-scaffolded");
+  it("the omnyo plugin new scaffold installs and loads through the plugin service", async () => {
+    const targetDir = join(workDir, "omnyo-plugin-scaffolded");
     await scaffoldPlugin({
       targetDir,
-      packageName: "bb-plugin-scaffolded",
-      bbVersion: "0.9.0",
+      packageName: "omnyo-plugin-scaffolded",
+      appVersion: "0.9.0",
+      sdkArtifact: await resolvePrivateSdkArtifact({
+        sourceUrl: import.meta.url,
+      }),
     });
     await stat(join(targetDir, "skills", "example-todos", "SKILL.md"));
     await stat(join(targetDir, ".gitignore"));
@@ -1813,8 +1967,11 @@ describe("plugin install flows", () => {
     await expect(
       scaffoldPlugin({
         targetDir,
-        packageName: "bb-plugin-scaffolded",
-        bbVersion: "0.9.0",
+        packageName: "omnyo-plugin-scaffolded",
+        appVersion: "0.9.0",
+        sdkArtifact: await resolvePrivateSdkArtifact({
+          sourceUrl: import.meta.url,
+        }),
       }),
     ).rejects.toThrowError(/already exists/);
   });

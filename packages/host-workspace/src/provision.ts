@@ -1,5 +1,5 @@
-import type { ProvisioningTranscriptEntry, WorkspaceStatus } from "@bb/domain";
-import { pathExists } from "@bb/process-utils";
+import type { ProvisioningTranscriptEntry, WorkspaceStatus } from "@omnyo/domain";
+import { pathExists } from "@omnyo/process-utils";
 import type {
   CommitOptions,
   CommitResult,
@@ -89,16 +89,19 @@ class ProvisionedHostWorkspace implements HostWorkspace {
 
   private readonly ws: Workspace;
   private readonly gitProcessOptions: GitProcessOptions;
+  private readonly additionalWorkspaceWriteRoots: readonly string[] | undefined;
 
   constructor(opts: {
     path: string;
     isGitRepo: boolean;
     isWorktree: boolean;
     shellPath?: string;
+    additionalWorkspaceWriteRoots?: readonly string[];
   }) {
     this.path = opts.path;
     this.isGitRepo = opts.isGitRepo;
     this.isWorktree = opts.isWorktree;
+    this.additionalWorkspaceWriteRoots = opts.additionalWorkspaceWriteRoots;
     this.gitProcessOptions = {
       ...(opts.shellPath !== undefined ? { shellPath: opts.shellPath } : {}),
     };
@@ -113,6 +116,7 @@ class ProvisionedHostWorkspace implements HostWorkspace {
     if (!this.isGitRepo) {
       return null;
     }
+
     return (
       (await readDefaultBranch(this.path, {
         timeoutMs: WORKSPACE_BRANCH_GIT_TIMEOUT_MS,
@@ -134,9 +138,14 @@ class ProvisionedHostWorkspace implements HostWorkspace {
   }
 
   getAdditionalWorkspaceWriteRoots(): Promise<string[]> {
+    if (this.additionalWorkspaceWriteRoots !== undefined) {
+      return Promise.resolve([...this.additionalWorkspaceWriteRoots]);
+    }
+
     if (!this.isGitRepo || !this.isWorktree) {
       return Promise.resolve([]);
     }
+
     return resolveAdditionalWorkspaceWriteRoots(
       this.path,
       this.gitProcessOptions,
@@ -177,6 +186,20 @@ class ProvisionedHostWorkspace implements HostWorkspace {
   }
 }
 
+export interface ProvisionedWorkspaceSnapshot {
+  path: string;
+  isGitRepo: boolean;
+  isWorktree: boolean;
+  additionalWorkspaceWriteRoots: string[];
+}
+
+export function createProvisionedWorkspace(
+  snapshot: ProvisionedWorkspaceSnapshot,
+  options: Pick<ProvisionWorkspaceArgs, "shellPath">,
+): HostWorkspace {
+  return new ProvisionedHostWorkspace({ ...snapshot, ...options });
+}
+
 export function provisionWorkspace(
   opts: ProvisionWorkspaceArgs,
 ): Promise<HostWorkspace> {
@@ -187,17 +210,21 @@ async function provisionUnmanaged(
   opts: UnmanagedWorkspaceOpts,
 ): Promise<HostWorkspace> {
   throwIfProvisionAborted(opts.signal);
+
   if (!(await pathExists(opts.path))) {
     throw new WorkspaceError(
       "path_not_found",
       `Unmanaged workspace path does not exist: ${opts.path}`,
     );
   }
+
   const isGitRepo = await detectGitRepo(opts.path, {
     ...(opts.shellPath !== undefined ? { shellPath: opts.shellPath } : {}),
   });
+
   const gitProcessOptions =
     opts.shellPath === undefined ? {} : { shellPath: opts.shellPath };
+
   const isWorktree = isGitRepo
     ? await detectLinkedWorktree(opts.path, gitProcessOptions)
     : false;

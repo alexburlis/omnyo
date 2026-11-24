@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RuntimePermissionPolicy } from "@get-bb/plugin-sdk/provider-bridge";
+import type { RuntimePermissionPolicy } from "@omnyo/plugin-sdk/provider-bridge";
 import {
   buildClaudeSessionParams,
   buildClaudeTurnParams,
@@ -13,11 +13,13 @@ const EXECUTION_CONTEXT = {
   workflowsEnabled: true,
   chromeEnabled: true,
   disable1MContext: false,
+  allowModelFallback: true,
   sandboxEnabled: false,
+  fullAccessApprovalsEnabled: true,
   memoryEnabled: false,
   providerSubagentsEnabled: false,
   instructions: "Session instructions",
-  envVars: { BB_TEST: "1" },
+  envVars: { TEST_ENV_FLAG: "1" },
   permissionMode: "accept-edits",
   permissionScope: "workspace",
   approvalReviewer: "user",
@@ -30,11 +32,14 @@ function toCanonicalWireOptions(options: typeof EXECUTION_CONTEXT) {
     workflowsEnabled,
     chromeEnabled,
     disable1MContext,
+    allowModelFallback,
     sandboxEnabled,
+    fullAccessApprovalsEnabled,
     memoryEnabled,
     providerSubagentsEnabled,
     ...core
   } = options;
+
   return {
     ...core,
     providerOptions: {
@@ -42,7 +47,9 @@ function toCanonicalWireOptions(options: typeof EXECUTION_CONTEXT) {
       workflowsEnabled,
       chromeEnabled,
       disable1MContext,
+      allowModelFallback,
       sandboxEnabled,
+      fullAccessApprovalsEnabled,
       memoryEnabled,
       providerSubagentsEnabled,
     },
@@ -88,13 +95,15 @@ describe("buildClaudeSessionParams", () => {
       permissionMode: "plan",
       workflowsEnabled: true,
       chromeEnabled: true,
+      allowModelFallback: true,
       sandboxEnabled: false,
+      fullAccessApprovalsEnabled: true,
       memoryEnabled: false,
       providerSubagentsEnabled: false,
       model: "claude-sonnet-5",
       reasoningLevel: "high",
       serviceTier: "default",
-      config: { envVars: { BB_TEST: "1" } },
+      config: { envVars: { TEST_ENV_FLAG: "1" } },
     });
     expect(params.baseInstructions).toContain("Session instructions");
   });
@@ -106,10 +115,13 @@ describe("buildClaudeSessionParams", () => {
       instructionMode: "append",
       options: FULL_POLICY,
     });
+
     expect(params).toMatchObject({
       workflowsEnabled: false,
       chromeEnabled: false,
+      allowModelFallback: false,
       sandboxEnabled: true,
+      fullAccessApprovalsEnabled: false,
       permissionMode: "bypassPermissions",
       approvedPlanPermissionMode: "bypassPermissions",
       permissionEscalation: null,
@@ -162,7 +174,7 @@ describe("claude session workspace-write roots", () => {
   it("omits empty workspace-write roots", () => {
     expect(
       buildClaudeSessionParams({
-        threadId: "bb-thread-1",
+        threadId: "omnyo-thread-1",
         cwd: "/tmp/worktree",
         instructionMode: "append",
         options: toWireOptionsWithRoots({
@@ -178,17 +190,19 @@ describe("claude session workspace-write roots", () => {
       cwd: "/tmp/worktree",
       instructionMode: "append" as const,
     };
+
     const autoParams = buildClaudeSessionParams({
       ...shared,
-      threadId: "bb-thread-readonly",
+      threadId: "omnyo-thread-readonly",
       options: toWireOptionsWithRoots({
         policy: WORKSPACE_AUTO_POLICY,
         additionalWorkspaceWriteRoots: EXTRA_WORKSPACE_WRITE_ROOTS,
       }),
     });
+
     const fullParams = buildClaudeSessionParams({
       ...shared,
-      threadId: "bb-thread-full",
+      threadId: "omnyo-thread-full",
       options: toWireOptionsWithRoots({
         policy: FULL_POLICY,
         additionalWorkspaceWriteRoots: EXTRA_WORKSPACE_WRITE_ROOTS,
@@ -206,7 +220,7 @@ describe("claude session workspace-write roots", () => {
 describe("claude session option passthrough", () => {
   it("passes through model, env vars, instructions, max reasoning level, and dynamic tools", () => {
     const params = buildClaudeSessionParams({
-      threadId: "bb-thread-1",
+      threadId: "omnyo-thread-1",
       cwd: "/tmp/worktree",
       instructionMode: "append",
       options: {
@@ -225,7 +239,7 @@ describe("claude session option passthrough", () => {
       },
       dynamicTools: [
         {
-          name: "bb_test_ping",
+          name: "omnyo_test_ping",
           description: "Ping the host",
           inputSchema: {
             type: "object",
@@ -239,7 +253,7 @@ describe("claude session option passthrough", () => {
     });
 
     expect(params).toMatchObject({
-      threadId: "bb-thread-1",
+      threadId: "omnyo-thread-1",
       model: "claude-opus-4-7",
       reasoningLevel: "max",
       permissionMode: "acceptEdits",
@@ -249,7 +263,7 @@ describe("claude session option passthrough", () => {
       ),
       dynamicTools: [
         {
-          name: "bb_test_ping",
+          name: "omnyo_test_ping",
           description: "Ping the host",
           inputSchema: {
             type: "object",
@@ -274,7 +288,7 @@ describe("claude session option passthrough", () => {
 });
 
 describe("buildClaudeTurnParams", () => {
-  it("leaves live-setting knobs undefined when providerOptions omits them, so the session keeps its current values", () => {
+  it("defaults model fallback off while preserving omitted live settings", () => {
     const params = buildClaudeTurnParams({
       threadId: "thread-1",
       providerThreadId: "provider-1",
@@ -286,9 +300,12 @@ describe("buildClaudeTurnParams", () => {
         permissionEscalation: null,
       },
     });
+
+    expect(params.allowModelFallback).toBe(false);
     expect(params.workflowsEnabled).toBeUndefined();
     expect(params.chromeEnabled).toBeUndefined();
     expect(params.sandboxEnabled).toBeUndefined();
+    expect(params.fullAccessApprovalsEnabled).toBeUndefined();
     expect(params.memoryEnabled).toBeUndefined();
     expect(params.providerSubagentsEnabled).toBeUndefined();
     expect(params.permissionEscalation).toBeNull();
@@ -306,6 +323,7 @@ describe("buildClaudeTurnParams", () => {
         serviceTier: "fast",
       },
     });
+
     expect(params.serviceTier).toBe("fast");
   });
 
@@ -362,6 +380,7 @@ describe("buildClaudeTurnParams", () => {
         providerOptions: { workflowsEnabled: true },
       },
     });
+
     expect(params).not.toHaveProperty("claudeCodePermissionMode");
   });
 });

@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
-import type { BbDesktopWindowState } from "@bb/desktop-contract";
+import type { OmnyoDesktopWindowState } from "@omnyo/desktop-contract";
 import {
   DEFAULT_DESKTOP_WINDOW_STATE,
-  getBbDesktopInfo,
-} from "@/lib/bb-desktop";
+  getOmnyoDesktopInfo,
+} from "@/lib/omnyo-desktop";
 
-export function useDesktopWindowState(): BbDesktopWindowState {
-  const [windowState, setWindowState] = useState<BbDesktopWindowState>(
+export function useDesktopWindowState(): OmnyoDesktopWindowState {
+  const [windowState, setWindowState] = useState<OmnyoDesktopWindowState>(
     DEFAULT_DESKTOP_WINDOW_STATE,
   );
 
   useEffect(() => {
-    const desktopApi = getBbDesktopInfo();
+    const desktopApi = getOmnyoDesktopInfo();
     let cancelled = false;
 
     const unsubscribe = desktopApi?.onWindowStateChange?.((nextState) => {

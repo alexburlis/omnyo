@@ -6,15 +6,15 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("@bb/sdk/node entry", () => {
+describe("@omnyo/sdk/node entry", () => {
   it(
-    "imports and builds explicit SDKs without BB server configuration",
+    "imports and builds explicit SDKs without Omnyo server configuration",
     async () => {
-      vi.stubEnv("BB_SERVER_URL", undefined);
-      vi.stubEnv("BB_HOST_DAEMON_PORT", undefined);
+      vi.stubEnv("OMNYO_SERVER_URL", undefined);
+      vi.stubEnv("OMNYO_HOST_DAEMON_PORT", undefined);
 
       const nodeEntry = await import("../src/node.js");
-      const sdk = nodeEntry.createNodeBbSdk({ baseUrl: "http://server" });
+      const sdk = nodeEntry.createNodeOmnyoSdk({ baseUrl: "http://server" });
 
       expect(typeof sdk.threads.list).toBe("function");
     },

@@ -1,5 +1,5 @@
 {
-  "$comment": "BB plugin component registry index. Install via: npx shadcn add @bb/<name> (see the bb-plugin-authoring skill).",
+  "$comment": "Omnyo plugin component registry index. Install via: npx shadcn add ./vendor/omnyo-ui/<name>.json (see the omnyo-plugin-authoring skill).",
   "items": [
     {
       "name": "accordion",
@@ -118,6 +118,14 @@
       "type": "registry:ui"
     },
     {
+      "name": "file-drop-zone",
+      "type": "registry:ui"
+    },
+    {
+      "name": "focus-ring",
+      "type": "registry:ui"
+    },
+    {
       "name": "form",
       "type": "registry:ui"
     },
@@ -154,11 +162,19 @@
       "type": "registry:ui"
     },
     {
+      "name": "long-press-guards",
+      "type": "registry:ui"
+    },
+    {
       "name": "menu-item-hover",
       "type": "registry:ui"
     },
     {
       "name": "menubar",
+      "type": "registry:ui"
+    },
+    {
+      "name": "meta-chip",
       "type": "registry:ui"
     },
     {
@@ -278,6 +294,14 @@
       "type": "registry:ui"
     },
     {
+      "name": "section-header",
+      "type": "registry:ui"
+    },
+    {
+      "name": "segmented-control",
+      "type": "registry:ui"
+    },
+    {
       "name": "select",
       "type": "registry:ui"
     },
@@ -315,6 +339,22 @@
     },
     {
       "name": "sortable-motion",
+      "type": "registry:ui"
+    },
+    {
+      "name": "status-row",
+      "type": "registry:ui"
+    },
+    {
+      "name": "step-indicator",
+      "type": "registry:ui"
+    },
+    {
+      "name": "step-transition",
+      "type": "registry:ui"
+    },
+    {
+      "name": "success-check",
       "type": "registry:ui"
     },
     {
@@ -367,6 +407,10 @@
     },
     {
       "name": "use-media-query",
+      "type": "registry:hook"
+    },
+    {
+      "name": "use-minute-now",
       "type": "registry:hook"
     },
     {

@@ -12,7 +12,7 @@ function quote(value: string): string {
 }
 
 async function initRepo(): Promise<string> {
-  const repo = await fs.mkdtemp(path.join(os.tmpdir(), "bb-git-fetch-"));
+  const repo = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-git-fetch-"));
   tempDirs.push(repo);
   await runGit(["init", "-b", "main"], { cwd: repo });
   await runGit(
@@ -28,12 +28,14 @@ async function initRepo(): Promise<string> {
     ],
     { cwd: repo },
   );
+
   return repo;
 }
 
 async function writeScript(repo: string, name: string, body: string) {
   const script = path.join(repo, name);
   await fs.writeFile(script, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+
   return script;
 }
 
@@ -49,11 +51,13 @@ afterEach(async () => {
 describe("background Git authentication", () => {
   it("preserves a working GIT_SSH wrapper, including paths with spaces", async () => {
     const repo = await initRepo();
+
     const wrapper = await writeScript(
       repo,
       "ssh wrapper.sh",
       `if [ "$1" = "-G" ]; then exit 0; fi\nexec git-upload-pack ${quote(repo)}`,
     );
+
     vi.stubEnv("GIT_SSH_COMMAND", undefined);
     vi.stubEnv("GIT_SSH", wrapper);
     await runGit(["remote", "add", "origin", "ssh://git.invalid/repo.git"], {
@@ -73,34 +77,43 @@ describe("background Git authentication", () => {
     async (setting) => {
       const repo = await initRepo();
       const log = path.join(repo, "prompts.log");
+
       const askpass = await writeScript(
         repo,
         "askpass.sh",
         `printf '%s\\n' "$*" >> ${quote(log)}\nprintf '%s\\n' fixture`,
       );
+
       await fs.writeFile(log, "");
       vi.stubEnv("GIT_ASKPASS", undefined);
       vi.stubEnv("SSH_ASKPASS", undefined);
+
       if (setting === "core.askPass") {
         await runGit(["config", "core.askPass", askpass], { cwd: repo });
       } else {
         vi.stubEnv(setting, askpass);
       }
+
       await runGit(["config", "credential.helper", ""], { cwd: repo });
+
       const server = http.createServer((_request, response) => {
         response.writeHead(401, {
           "WWW-Authenticate": 'Basic realm="fixture"',
         });
         response.end();
       });
+
       await new Promise<void>((resolve) => {
         server.listen(0, "127.0.0.1", resolve);
       });
+
       try {
         const address = server.address();
+
         if (!address || typeof address === "string") {
           throw new Error("Expected an HTTP listener address");
         }
+
         await runGit(
           [
             "remote",
@@ -133,11 +146,13 @@ describe("background Git authentication", () => {
     async () => {
       const repo = await initRepo();
       const marker = path.join(repo, "late-side-effect");
+
       const wrapper = await writeScript(
         repo,
         "slow-ssh.sh",
         `if [ "$1" = "-G" ]; then exit 0; fi\n(sleep 0.5; touch ${quote(marker)}) &\nwait`,
       );
+
       await runGit(["config", "core.sshCommand", quote(wrapper)], {
         cwd: repo,
       });

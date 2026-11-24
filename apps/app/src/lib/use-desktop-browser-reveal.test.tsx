@@ -2,17 +2,20 @@
 
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BbDesktopBrowserRevealRequest } from "@bb/desktop-contract";
+import type { OmnyoDesktopBrowserRevealRequest } from "@omnyo/desktop-contract";
 import { useDesktopBrowserReveal } from "./use-desktop-browser-reveal";
 
 const listeners = vi.hoisted(
-  () => new Set<(request: BbDesktopBrowserRevealRequest) => void>(),
+  () => new Set<(request: OmnyoDesktopBrowserRevealRequest) => void>(),
 );
 
-vi.mock("./bb-desktop", () => ({
+vi.mock("./omnyo-desktop", () => ({
   getDesktopBrowserApi: () => ({
-    onReveal: (listener: (request: BbDesktopBrowserRevealRequest) => void) => {
+    onReveal: (
+      listener: (request: OmnyoDesktopBrowserRevealRequest) => void,
+    ) => {
       listeners.add(listener);
+
       return () => listeners.delete(listener);
     },
   }),
@@ -41,6 +44,7 @@ function reveal(threadId = "thread-a") {
 describe("desktop browser reveal focus", () => {
   it("selects the focused thread's tab once it arrives", () => {
     const activateTab = vi.fn();
+
     const { rerender } = renderHook(
       ({ browserTabs }) =>
         useDesktopBrowserReveal({
@@ -51,6 +55,7 @@ describe("desktop browser reveal focus", () => {
         }),
       { initialProps: { browserTabs: [] as { id: string }[] } },
     );
+
     reveal();
     expect(activateTab).not.toHaveBeenCalled();
     rerender({ browserTabs: [{ id: "browser-a" }] });
@@ -59,6 +64,7 @@ describe("desktop browser reveal focus", () => {
 
   it("ignores other threads and does not replay background requests on focus", () => {
     const activateTab = vi.fn();
+
     const { rerender } = renderHook(
       ({ isFocused }) =>
         useDesktopBrowserReveal({
@@ -69,6 +75,7 @@ describe("desktop browser reveal focus", () => {
         }),
       { initialProps: { isFocused: false } },
     );
+
     reveal();
     rerender({ isFocused: true });
     reveal("thread-b");
@@ -79,6 +86,7 @@ describe("desktop browser reveal focus", () => {
 
   it("discards a pending reveal when focus leaves before the tab arrives", () => {
     const activateTab = vi.fn();
+
     const { rerender } = renderHook(
       ({ isFocused, browserTabs }) =>
         useDesktopBrowserReveal({
@@ -91,6 +99,7 @@ describe("desktop browser reveal focus", () => {
         initialProps: { isFocused: true, browserTabs: [] as { id: string }[] },
       },
     );
+
     reveal();
     rerender({ isFocused: false, browserTabs: [] });
     rerender({ isFocused: true, browserTabs: [{ id: "browser-a" }] });

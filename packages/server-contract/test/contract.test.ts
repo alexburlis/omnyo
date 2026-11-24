@@ -1,8 +1,8 @@
 import {
   collectOptionalFieldPaths,
   makeWorkspaceStatus,
-} from "@bb/test-helpers";
-import type { WorkspaceResolutionFailure } from "@bb/host-daemon-contract";
+} from "@omnyo/test-helpers";
+import type { WorkspaceResolutionFailure } from "@omnyo/host-daemon-contract";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -12,7 +12,7 @@ import {
   TERMINAL_DATA_MAX_BASE64_LENGTH,
   TERMINAL_DATA_MAX_BYTES,
   TERMINAL_ROWS_MAX,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import * as contract from "../src/index.js";
 import {
@@ -69,7 +69,7 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "A submitted plugin form leaves on its row only what the plugin's describeSubmission returned, and the whole description is absent when the plugin declares no describeSubmission or when that call throws or times out. Within one, an absent title means the presentation's completed label stands, an absent detail means the title is the whole row, and an absent payload means the row renders without handing anything to the plugin's own timeline renderer. bb never stores the form's payload or the submitted value, so these fields are the entire record of what happened.",
+      "A submitted plugin form leaves on its row only what the plugin's describeSubmission returned, and the whole description is absent when the plugin declares no describeSubmission or when that call throws or times out. Within one, an absent title means the presentation's completed label stands, an absent detail means the title is the whole row, and an absent payload means the row renders without handing anything to the plugin's own timeline renderer. Omnyo never stores the form's payload or the submitted value, so these fields are the entire record of what happened.",
     fields: [
       "threadPendingInteractionsResponseSchema.resolution.description",
       "threadPendingInteractionsResponseSchema.resolution.description.detail",
@@ -125,7 +125,7 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "A row carries a declarative presentation only when a bridge or plugin attached one; rows persisted before grammar v2, and rows from a bridge that declares none, have no presentation and clients fall back to bb's own rendering for the row kind.",
+      "A row carries a declarative presentation only when a bridge or plugin attached one; rows persisted before grammar v2, and rows from a bridge that declares none, have no presentation and clients fall back to Omnyo's own rendering for the row kind.",
     fields: [
       "threadPendingInteractionsResponseSchema.payload.presentation",
       "threadTimelineResponseSchema.activeBackgroundCommands.presentation",
@@ -283,8 +283,11 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "A command row carries an output preview only when its output was truncated and the full text may still be fetchable, and a row is marked contentDeferred only when its expandable content was left out to be loaded on expand; absence means the row's fields hold the whole content.",
+      "A command row carries an output preview only when its output was truncated and the full text may still be fetchable, and a row is marked contentDeferred only when its expandable content was left out to be loaded on expand; absence means the row's fields hold the whole content. A user conversation row carries maintenance only when core, not the owner, requested the turn as a maintenance run such as compacting an idle chat before its prompt cache expires; absence means an ordinary turn.",
     fields: [
+      "threadTimelineResponseSchema.delta.upsertRows.maintenance",
+      "threadTimelineResponseSchema.rows.maintenance",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.maintenance",
       "threadTimelineResponseSchema.delta.upsertRows.contentDeferred",
       "threadTimelineResponseSchema.rows.contentDeferred",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.contentDeferred",
@@ -304,11 +307,14 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "A plan step carries a status only once the provider reports progress on it; absence means the step is listed but not yet started, which is not the same as pending.",
+      "A plan step carries a status only once the provider reports progress on it; absence means the step is listed but not yet started, which is not the same as pending. Legacy assistant rows may omit status, so rendering derives streaming from the active assistant message identity.",
     fields: [
       "threadTimelineResponseSchema.delta.upsertRows.steps.status",
       "threadTimelineResponseSchema.rows.steps.status",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates.steps.status",
+      "threadTimelineResponseSchema.delta.upsertRows.status",
+      "threadTimelineResponseSchema.rows.status",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.status",
     ],
   },
   {
@@ -318,13 +324,16 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "A provider interaction carries an explicit origin only since bb began recording which provider raised it; absence means an older row whose provider is still readable from the providerId, providerThreadId, and providerRequestId beside it.",
+      "A provider interaction carries an explicit origin only since Omnyo began recording which provider raised it; absence means an older row whose provider is still readable from the providerId, providerThreadId, and providerRequestId beside it.",
     fields: ["threadPendingInteractionsResponseSchema.origin"],
   },
   {
     reason:
-      "Timeline snapshot fields are absent on older servers; content metadata and detail continuation inputs only apply to paginated content; older row updates only appear when a latest page omits rows that changed inside its window; a detail item scope is absent when the whole turn is requested, and content stays inline unless deferral is requested.",
+      "Timeline snapshot fields and finished-turn activity counts are absent on older servers, and the app then shows the turn's activity line without counts; content metadata and detail continuation inputs only apply to paginated content; older row updates only appear when a latest page omits rows that changed inside its window; a detail item scope is absent when the whole turn is requested, and content stays inline unless deferral is requested.",
     fields: [
+      "threadTimelineResponseSchema.delta.upsertRows.activity",
+      "threadTimelineResponseSchema.rows.activity",
+      "threadTimelineResponseSchema.timelinePage.olderRowUpdates.activity",
       "threadTimelineResponseSchema.timelinePage.contentPage",
       "threadTimelineResponseSchema.timelinePage.historySnapshot",
       "threadTimelineResponseSchema.timelinePage.olderRowUpdates",
@@ -362,10 +371,12 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "Composed environment providers choose their declared machine provider; concrete providers require an explicit machine selection.",
+      "Composed environment providers choose their declared machine provider; concrete providers require an explicit machine selection. Older clients omit machineChoice, so the server treats a named host or machine as an explicit choice and records machinePinned at the creation boundary.",
     fields: [
       "createThreadRequestSchema.environment.machine",
       "forkThreadRequestSchema.environment.machine",
+      "createThreadRequestSchema.environment.machineChoice",
+      "forkThreadRequestSchema.environment.machineChoice",
     ],
   },
   {
@@ -429,7 +440,7 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "Follow-up and queued messages may omit execution fields so the thread's current/default execution settings are reused.",
+      "Follow-up and queued messages may omit requestId so the server supplies a request identity, and execution fields so the thread's current/default execution settings are reused.",
     fields: [
       "createQueuedMessageRequestSchema.model",
       "createQueuedMessageRequestSchema.reasoningLevel",
@@ -439,6 +450,8 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "sendMessageRequestSchema.permissionMode",
       "sendMessageRequestSchema.reasoningLevel",
       "sendMessageRequestSchema.serviceTier",
+      "sendMessageRequestSchema.requestId",
+      "sendQueuedMessageRequestSchema.requestId",
     ],
   },
   {
@@ -465,10 +478,13 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "Queued and follow-up messages omit senderThreadId unless the request originates from another thread.",
+      "Queued and follow-up messages omit senderThreadId unless the request originates from another thread. messageSource is absent when no structured source notice was supplied or stored; existing author metadata still identifies the sender.",
     fields: [
+      "createQueuedMessageRequestSchema.messageSource",
       "createQueuedMessageRequestSchema.senderThreadId",
+      "sendMessageRequestSchema.messageSource",
       "sendMessageRequestSchema.senderThreadId",
+      "sendQueuedMessageResponseSchema.queuedMessage.messageSource",
     ],
   },
   {
@@ -481,8 +497,9 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "Project and project-source PATCH requests omit fields that should be left unchanged.",
+      "Project and project-source PATCH requests omit fields that should be left unchanged; null explicitly clears a custom project icon.",
     fields: [
+      "updateProjectRequestSchema.customIcon",
       "updateProjectRequestSchema.name",
       "updateProjectSourceRequestSchema.isDefault",
       "updateProjectSourceRequestSchema.path",
@@ -498,6 +515,7 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "updateThreadRequestSchema.reasoningLevel",
       "updateThreadRequestSchema.sessionOptions",
       "updateThreadRequestSchema.title",
+      "updateThreadRequestSchema.experimental_titleIfUntitled",
       "updateThreadRequestSchema.visibility",
     ],
   },
@@ -563,20 +581,27 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "threadListQuerySchema.originPluginId",
       "threadListQuerySchema.parentThreadId",
       "threadListQuerySchema.projectId",
+      "threadListQuerySchema.shelved",
       "threadListQuerySchema.sourceThreadId",
+      "threadListQuerySchema.threadIds",
       "threadListQuerySchema.unsectioned",
     ],
   },
   {
     reason:
-      "Timeline queries may omit pagination and rendering flags to request the latest full timeline page with server defaults.",
+      "Timeline queries may omit pagination and rendering flags to request the latest full timeline page with server defaults. Background preloads opt into background priority; omitted priority reserves foreground capacity. Append deltas and runtime identity are opt-in capabilities; their base revision and runtime id are supplied only when requesting changes from a previously delivered snapshot.",
     fields: [
+      "threadTimelineQuerySchema.priority",
       "threadTimelineQuerySchema.includeNestedRows",
       "threadTimelineQuerySchema.segmentLimit",
       "threadTimelineQuerySchema.beforeAnchorSeq",
       "threadTimelineQuerySchema.beforeAnchorId",
       "threadTimelineQuerySchema.summaryOnly",
       "threadTimelineQuerySchema.afterSequence",
+      "threadTimelineQuerySchema.deltaFormat",
+      "threadTimelineQuerySchema.afterRevision",
+      "threadTimelineQuerySchema.runtimeIdentity",
+      "threadTimelineQuerySchema.afterRuntimeId",
       "threadTimelineQuerySchema.deferContent",
     ],
   },
@@ -587,18 +612,25 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "Context snapshots are omitted when the latest measurement has no breakdown, and session cost when the provider reports none.",
+      "Context snapshots are omitted when the latest measurement has no breakdown, session cost when the provider reports none, and the compaction offer time unless the compactExpiredCache setting is on and the provider reported a prompt-cache lifetime for a context of at least 100k tokens. Usage carries the automatic compaction time only while core would compact the chat before the prompt cache expires; absence means none is scheduled. The opt-out marker appears only with that time, when the owner chose Keep full history for the chat.",
     fields: [
       "threadTimelineResponseSchema.contextWindowUsage.snapshot",
       "threadTimelineResponseSchema.contextWindowUsage.cost",
+      "threadTimelineResponseSchema.contextWindowUsage.compactionOfferAt",
+      "threadTimelineResponseSchema.contextWindowUsage.autoCompactionAt",
+      "threadTimelineResponseSchema.contextWindowUsage.autoCompactionOptedOut",
     ],
   },
   {
     reason:
-      "Timeline responses carry a row-patch delta only for a usable afterSequence, and that delta carries rowOrder only when membership or ordering changed.",
+      "Timeline responses carry a row-patch delta only for a usable afterSequence, and that delta carries rowOrder only when membership or ordering changed. Negotiated append deltas identify their delivered base revision and include text suffixes only for eligible assistant growth. Revision and runtime id appear only for their respective opt-in capabilities; older servers omit these extensions.",
     fields: [
       "threadTimelineResponseSchema.delta",
       "threadTimelineResponseSchema.delta.rowOrder",
+      "threadTimelineResponseSchema.delta.baseRevision",
+      "threadTimelineResponseSchema.delta.assistantTextAppends",
+      "threadTimelineResponseSchema.revision",
+      "threadTimelineResponseSchema.runtimeId",
     ],
   },
   {
@@ -623,10 +655,12 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "sendAt is present only when the caller is scheduling the dispatch; omission means attempt the dispatch now, which allocates no queued row at all when nothing blocks it.",
+      "sendAt is present only when the caller schedules dispatch, compactFirst only when it asks to compact first, and sendNow only when it asks to bypass scheduling and dispatch hooks; omission preserves ordinary dispatch, which allocates no queued row when nothing blocks it.",
     fields: [
       "createThreadRequestSchema.sendAt",
       "sendMessageRequestSchema.sendAt",
+      "sendMessageRequestSchema.compactFirst",
+      "sendMessageRequestSchema.sendNow",
     ],
   },
   {
@@ -658,11 +692,13 @@ function buildIntentionalOptionalServerFields(
   groups: readonly OptionalServerFieldGroup[],
 ): Record<string, string> {
   const fields: Record<string, string> = {};
+
   for (const group of groups) {
     for (const field of group.fields) {
       fields[field] = group.reason;
     }
   }
+
   return fields;
 }
 
@@ -764,7 +800,7 @@ describe("git branch name contract", () => {
       "release/1.2",
       "feature.foo",
       "user_name",
-      "bb/thread-123",
+      "omnyo/thread-123",
     ];
 
     for (const name of validNames) {
@@ -977,9 +1013,11 @@ describe("public terminal contracts", () => {
 
   it("bounds and validates terminal data payloads", () => {
     const maxPayload = terminalDataBase64(TERMINAL_DATA_MAX_BYTES);
+
     const oversizedDecodedPayload = terminalDataBase64(
       TERMINAL_DATA_MAX_BYTES + 1,
     );
+
     const oversizedEncodedPayload = "A".repeat(
       TERMINAL_DATA_MAX_BASE64_LENGTH + 4,
     );
@@ -1279,9 +1317,12 @@ describe("server-contract canonical schemas", () => {
           archivedAt: null,
           pinnedAt: null,
           pinSortKey: null,
+          shelfSortKey: null,
+          shelvedAt: null,
           deletedAt: null,
           lastReadAt: null,
           latestAttentionAt: 2,
+          lastMessageAt: null,
           createdAt: 1,
           updatedAt: 2,
           runtime: {
@@ -1293,11 +1334,12 @@ describe("server-contract canonical schemas", () => {
             activeBackgroundCommandCount: 0,
             activePlanModeCount: 0,
             activeGoalCount: 0,
+            activeSubagentCount: 0,
           },
           hasPendingInteraction: true,
           environmentHostId: "host_123",
           environmentName: null,
-          environmentBranchName: "bb/test",
+          environmentBranchName: "omnyo/test",
           environmentPath: null,
           environmentProviderId: "git-worktree",
           environmentIsWorktree: true,
@@ -1312,7 +1354,7 @@ describe("server-contract canonical schemas", () => {
         hasPendingInteraction: true,
         environmentHostId: "host_123",
         environmentName: null,
-        environmentBranchName: "bb/test",
+        environmentBranchName: "omnyo/test",
         environmentPath: null,
         environmentProviderId: "git-worktree",
         environmentIsWorktree: true,
@@ -1504,14 +1546,14 @@ describe("server-contract canonical schemas", () => {
     expect(
       contract.updateProjectSourceRequestSchema.parse({
         type: "local_path",
-        path: " c:/Users/michael/bb/ ",
+        path: " c:/Users/michael/omnyo/ ",
       }),
-    ).toMatchObject({ path: "C:\\Users\\michael\\bb" });
+    ).toMatchObject({ path: "C:\\Users\\michael\\omnyo" });
 
     expect(() =>
       contract.updateProjectSourceRequestSchema.parse({
         type: "local_path",
-        path: "\\\\server\\share\\bb",
+        path: "\\\\server\\share\\omnyo",
       }),
     ).toThrow("Windows network paths are not supported");
 
@@ -1675,6 +1717,7 @@ describe("server-contract canonical schemas", () => {
         label: "Fix login bug",
       },
     };
+
     const parsed = sendMessageRequestSchema.parse({
       input: [
         {
@@ -1685,6 +1728,7 @@ describe("server-contract canonical schemas", () => {
       ],
       mode: "start",
     });
+
     expect(parsed.input[0]).toMatchObject({ mentions: [pluginMention] });
 
     expect(() =>
@@ -1719,6 +1763,7 @@ describe("server-contract canonical schemas", () => {
         workspace: { type: "unmanaged", path: null },
       },
     });
+
     expect(parsed.startedOnBehalfOf).toBeNull();
     expect(parsed.originKind).toBeNull();
   });
@@ -1735,6 +1780,7 @@ describe("server-contract canonical schemas", () => {
         workspace: { type: "unmanaged", path: null },
       },
     });
+
     expect(parsed.origin).toBe("sdk");
   });
 
@@ -1808,6 +1854,7 @@ describe("server-contract canonical schemas", () => {
       sourceThreadId: "thr_source",
       startedOnBehalfOf: null,
     });
+
     expect(parsed.input).toEqual([]);
   });
 
@@ -1825,7 +1872,39 @@ describe("server-contract canonical schemas", () => {
         },
         sourceSeqEnd: 12,
       }),
-    ).toThrow("sourceSeqEnd requires an originKind");
+    ).toThrow("sourceSeqEnd requires originKind fork");
+  });
+
+  it("requires a first message and no fork point for a handoff", () => {
+    const handoff = {
+      projectId: "proj_123",
+      providerId: "codex",
+      origin: "app",
+      environment: {
+        type: "host",
+        hostId: "host_abc",
+        workspace: { type: "unmanaged", path: null },
+      },
+      originKind: "handoff",
+      sourceThreadId: "thr_source",
+    };
+
+    expect(
+      createThreadRequestSchema.parse({
+        ...handoff,
+        input: [{ type: "text", text: "Continue", mentions: [] }],
+      }).originKind,
+    ).toBe("handoff");
+    expect(() =>
+      createThreadRequestSchema.parse({ ...handoff, input: [] }),
+    ).toThrow("input must contain at least one entry");
+    expect(() =>
+      createThreadRequestSchema.parse({
+        ...handoff,
+        input: [{ type: "text", text: "Continue", mentions: [] }],
+        sourceSeqEnd: 12,
+      }),
+    ).toThrow("sourceSeqEnd requires originKind fork");
   });
 
   it("accepts an agent startedOnBehalfOf with a sender thread", () => {
@@ -1842,6 +1921,7 @@ describe("server-contract canonical schemas", () => {
       startedOnBehalfOf: { initiator: "agent", senderThreadId: "thr_source" },
       originKind: "fork",
     });
+
     expect(parsed.startedOnBehalfOf).toEqual({
       initiator: "agent",
       senderThreadId: "thr_source",
@@ -1861,6 +1941,7 @@ describe("server-contract canonical schemas", () => {
         workspace: { type: "unmanaged" as const, path: null },
       },
     };
+
     expect(() =>
       createThreadRequestSchema.parse({
         ...baseRequest,
@@ -1913,6 +1994,7 @@ describe("server-contract canonical schemas", () => {
         workspace: { type: "unmanaged", path: null },
       },
     });
+
     expect(parsed.input).toHaveLength(2);
     expect(parsed.input[1]).toMatchObject({ visibility: "agent-only" });
   });
@@ -1924,6 +2006,7 @@ describe("server-contract clients", () => {
       fileURLToPath(new URL("../src/api-client.ts", import.meta.url)),
       "utf8",
     );
+
     const file = ts.createSourceFile(
       "api-client.ts",
       source,
@@ -1931,6 +2014,7 @@ describe("server-contract clients", () => {
       true,
       ts.ScriptKind.TS,
     );
+
     const edges = file.statements.flatMap((statement) => {
       if (
         ts.isImportDeclaration(statement) &&
@@ -1945,6 +2029,7 @@ describe("server-contract clients", () => {
           },
         ];
       }
+
       if (
         ts.isExportDeclaration(statement) &&
         statement.moduleSpecifier !== undefined &&
@@ -1957,12 +2042,14 @@ describe("server-contract clients", () => {
           },
         ];
       }
+
       return [];
     });
 
     const valueSpecifiers = edges
       .filter((edge) => !edge.typeOnly)
       .map((edge) => edge.specifier);
+
     expect(new Set(valueSpecifiers)).toEqual(new Set(["hono/client"]));
     expect(
       edges.filter((edge) => edge.specifier === "./public-api.js"),
@@ -1974,6 +2061,7 @@ describe("server-contract clients", () => {
       fileURLToPath(new URL("../package.json", import.meta.url)),
       "utf8",
     );
+
     expect(JSON.parse(manifest)).toHaveProperty("sideEffects", false);
   });
 
@@ -2123,6 +2211,7 @@ describe("server-contract clients", () => {
         beforeAnchorId: "timeline-window:0",
       }),
     ).toMatchObject({ beforeAnchorSeq: "0" });
+
     for (const anchorSeq of [-1, 0.5]) {
       expect(() =>
         contract.timelinePaginationCursorSchema.parse({
@@ -2131,6 +2220,7 @@ describe("server-contract clients", () => {
         }),
       ).toThrow();
     }
+
     for (const beforeAnchorSeq of ["-1", "0.5", "00", "01"]) {
       expect(() =>
         contract.threadTimelineQuerySchema.parse({
@@ -2154,6 +2244,7 @@ describe("server-contract clients", () => {
       title: "Thread assigned to parent",
       detail: null,
     };
+
     const parentChangeRow = {
       ...baseRow,
       systemKind: "operation",
@@ -2234,6 +2325,7 @@ describe("server-contract clients", () => {
       updateThreadRequestSchema: contract.updateThreadRequestSchema,
       uploadedPromptAttachmentSchema: contract.uploadedPromptAttachmentSchema,
     });
+
     const groupedFieldCount = OPTIONAL_SERVER_FIELD_GROUPS.reduce(
       (count, group) => count + group.fields.length,
       0,
@@ -2327,6 +2419,7 @@ describe("environment provider contracts", () => {
         projectless: false,
       },
     };
+
     expect(
       systemEnvironmentProviderSchema.parse({
         ...base,

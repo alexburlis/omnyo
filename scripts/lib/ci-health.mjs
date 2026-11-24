@@ -1,7 +1,9 @@
 export function distribution(values) {
   const sorted = values.toSorted((a, b) => a - b);
+
   if (sorted.length === 0) return { count: 0, median: null, p90: null };
   const middle = Math.floor(sorted.length / 2);
+
   return {
     count: sorted.length,
     median:
@@ -22,23 +24,30 @@ export function summarizeCiHealth(runs) {
   const failedSteps = new Map();
   const recoveries = [];
   const events = new Map();
+
   for (const run of runs) {
     const outcome = run.conclusion ?? "pending";
     outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
+
     if (!events.has(run.event))
       events.set(run.event, { runs: 0, durations: [] });
     const event = events.get(run.event);
     event.runs++;
+
     const first = run.jobs.filter(
       (job) => job.run_attempt === 1 && job.conclusion !== "skipped",
     );
+
     if (!run.jobsComplete) continue;
+
     const timed =
       run.run_attempt === 1 && run.conclusion === "success" && first.length > 0;
+
     if (timed) {
       const last = first.reduce((a, b) =>
         a.completed_at > b.completed_at ? a : b,
       );
+
       const duration = seconds(run.created_at, last.completed_at);
       durations.push(duration);
       event.durations.push(duration);
@@ -48,6 +57,7 @@ export function summarizeCiHealth(runs) {
           0,
         ) / 60,
       );
+
       for (const job of first) {
         if (!jobs.has(job.name))
           jobs.set(job.name, {
@@ -60,13 +70,16 @@ export function summarizeCiHealth(runs) {
         group.durations.push(seconds(job.started_at, job.completed_at));
         group.last += Number(job.id === last.id);
         const plan = first.find((entry) => entry.name === "Select CI checks");
+
         const ready =
           !plan ||
           job.id === plan.id ||
           job.name.startsWith("Node Compatibility Smoke")
             ? run.created_at
             : plan.completed_at;
+
         group.startDelays.push(Math.max(0, seconds(ready, job.started_at)));
+
         for (const step of job.steps) {
           if (
             step.name === "Restore workspace caches" &&
@@ -77,7 +90,9 @@ export function summarizeCiHealth(runs) {
         }
       }
     }
+
     const recovered = new Set();
+
     for (const job of run.jobs.filter((job) => job.conclusion === "failure")) {
       for (const step of job.steps.filter(
         (step) => step.conclusion === "failure",
@@ -85,6 +100,7 @@ export function summarizeCiHealth(runs) {
         if (!failedSteps.has(step.name)) failedSteps.set(step.name, new Set());
         failedSteps.get(step.name).add(run.id);
       }
+
       if (
         run.jobs.some(
           (later) =>
@@ -95,9 +111,11 @@ export function summarizeCiHealth(runs) {
       )
         recovered.add(job.name);
     }
+
     if (recovered.size)
       recoveries.push({ run: run.id, url: run.html_url, jobs: [...recovered] });
   }
+
   return {
     runs: runs.length,
     outcomes,
@@ -133,11 +151,13 @@ export async function collectCiHealth(api, since, until, checkpoint) {
   const runs = [];
   const errors = [];
   const evidence = { runs, errors, inventoryComplete: false };
+
   try {
     for (let page = 1; ; page++) {
       const data = await api(
         `actions/workflows/ci.yml/runs?created=${encodeURIComponent(`${since}..${until}`)}&per_page=100&page=${page}`,
       );
+
       if (
         !Array.isArray(data?.workflow_runs) ||
         !Number.isSafeInteger(data.total_count) ||
@@ -146,6 +166,7 @@ export async function collectCiHealth(api, since, until, checkpoint) {
         throw new Error(
           "Invalid or truncated CI run inventory; narrow the reporting window",
         );
+
       for (const run of data.workflow_runs) {
         if (
           !Number.isSafeInteger(run.id) ||
@@ -168,11 +189,15 @@ export async function collectCiHealth(api, since, until, checkpoint) {
           jobs: [],
         });
       }
+
       await checkpoint(evidence);
+
       if (data.workflow_runs.length < 100) break;
+
       if (page === 10)
         throw new Error("CI run inventory reached the API search limit");
     }
+
     evidence.inventoryComplete = true;
   } catch (error) {
     errors.push({
@@ -180,18 +205,23 @@ export async function collectCiHealth(api, since, until, checkpoint) {
       message: error instanceof Error ? error.message : String(error),
     });
   }
+
   await checkpoint(evidence);
+
   for (let offset = 0; offset < runs.length; offset += 6) {
     await Promise.all(
       runs.slice(offset, offset + 6).map(async (run) => {
         if (run.conclusion === null) return;
+
         try {
           for (let page = 1; ; page++) {
             const data = await api(
               `actions/runs/${run.id}/jobs?filter=all&per_page=100&page=${page}`,
             );
+
             if (!Array.isArray(data?.jobs))
               throw new Error("Invalid CI job inventory");
+
             for (const job of data.jobs) {
               if (
                 !Number.isSafeInteger(job.id) ||
@@ -201,6 +231,7 @@ export async function collectCiHealth(api, since, until, checkpoint) {
                 !(job.conclusion === null || typeof job.conclusion === "string")
               )
                 throw new Error("Invalid CI job");
+
               for (const entry of [job, ...job.steps]) {
                 if (
                   typeof entry.name !== "string" ||
@@ -217,6 +248,7 @@ export async function collectCiHealth(api, since, until, checkpoint) {
                 )
                   throw new Error("Invalid CI job or step timestamps");
               }
+
               run.jobs.push({
                 id: job.id,
                 name: job.name,
@@ -234,10 +266,13 @@ export async function collectCiHealth(api, since, until, checkpoint) {
                 ),
               });
             }
+
             if (data.jobs.length < 100) break;
+
             if (page === 100)
               throw new Error("CI job inventory exceeded the report limit");
           }
+
           run.jobsComplete = true;
         } catch (error) {
           errors.push({
@@ -249,13 +284,16 @@ export async function collectCiHealth(api, since, until, checkpoint) {
     );
     await checkpoint(evidence);
   }
+
   return evidence;
 }
 
 export function ciHealthMarkdown(report) {
   const escape = (value) =>
     String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
+
   const number = (value) => (value === null ? "—" : value.toFixed(1));
+
   return [
     "# CI health",
     `Window: ${report.since} through ${report.until} (UTC).`,

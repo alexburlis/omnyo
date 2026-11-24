@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import type {
   WorkspaceOpenTarget,
   WorkspaceOpenTargetId,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   SplitButton,
   type SplitButtonAction,
@@ -10,8 +10,8 @@ import {
 import { WorkspaceOpenTargetIcon } from "@/components/workspace-open-target/WorkspaceOpenTargetIcon";
 import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider";
 import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
-import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@bb/shared-ui/chrome-style-tokens";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@omnyo/shared-ui/chrome-style-tokens";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 interface ThreadWorkspaceOpenButtonProps {
   onOpenPreferredTarget: () => Promise<void>;
@@ -28,6 +28,7 @@ export function ThreadWorkspaceOpenButton({
 }: ThreadWorkspaceOpenButtonProps) {
   const [pendingTargetId, setPendingTargetId] =
     useState<WorkspaceOpenTargetId | null>(null);
+
   const shortcut = useAppCommandShortcut("workspace.openPreferred");
   const isPending = pendingTargetId !== null;
 
@@ -38,6 +39,7 @@ export function ThreadWorkspaceOpenButton({
       }
 
       setPendingTargetId(target.id);
+
       try {
         await action();
       } finally {
@@ -53,6 +55,7 @@ export function ThreadWorkspaceOpenButton({
 
   const primaryAction: SplitButtonAction = {
     ariaKeyshortcuts: shortcut?.ariaKeyshortcuts,
+    command: "workspace.openPreferred",
     label: shortcut
       ? `Open workspace in ${preferredTarget.label} (${shortcut.label})`
       : `Open workspace in ${preferredTarget.label}`,
@@ -66,6 +69,7 @@ export function ThreadWorkspaceOpenButton({
       />
     ),
   };
+
   const secondaryActions: SplitButtonAction[] = targets.map((target) => ({
     label: target.label,
     onSelect: () => {
@@ -85,7 +89,7 @@ export function ThreadWorkspaceOpenButton({
       <SplitButton
         disabled={isPending}
         className={cn(
-          "border-border/70 bg-transparent px-1 shadow-none",
+          "border-transparent bg-transparent px-1 shadow-none hover:bg-state-hover",
           CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS,
         )}
         primaryAction={primaryAction}

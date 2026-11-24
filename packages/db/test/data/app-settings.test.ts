@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { defaultAppSettings } from "@bb/domain";
+import { defaultAppSettings } from "@omnyo/domain";
 import {
   getAppKeybindingOverrides,
   getAppSettings,
@@ -47,9 +47,8 @@ describe("app settings data", () => {
   });
 
   it("persists keyboard overrides without clobbering general settings", () => {
-    const overrides = [
-      { command: "thread.new" as const, shortcut: null },
-    ];
+    const overrides = [{ command: "thread.new" as const, shortcut: null }];
+
     setAppSettings(db, {
       ...defaultAppSettings,
       showKeyboardHints: false,

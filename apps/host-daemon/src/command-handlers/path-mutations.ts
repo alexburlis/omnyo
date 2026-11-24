@@ -1,11 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { HostDaemonOnlineRpcResult } from "@bb/host-daemon-contract";
+import type { HostDaemonOnlineRpcResult } from "@omnyo/host-daemon-contract";
 import {
   isPathWithinDirectory,
   killProcessesWithCwdUnder,
-} from "@bb/process-utils";
-import { CommandDispatchError } from "../command-dispatch-support.js";
+} from "@omnyo/process-utils";
+import { CommandDispatchError } from "../command-errors.js";
 import type { CommandOf } from "../command-dispatch-support.js";
 import { resolveNonSymlinkDirectoryPath } from "./root-path.js";
 import { resolveWriteTarget } from "./file-write.js";
@@ -21,6 +21,7 @@ async function requireRoot(
 ): Promise<string | null> {
   if (rootPath === undefined) return null;
   assertAbsolute(rootPath, "rootPath");
+
   return resolveNonSymlinkDirectoryPath({
     description: "Root path",
     path: rootPath,
@@ -33,22 +34,26 @@ async function requireExistingWithin(
 ): Promise<{ target: string; root: string | null }> {
   assertAbsolute(targetPath, "Path");
   const targetInfo = await fs.lstat(targetPath);
+
   if (targetInfo.isSymbolicLink()) {
     throw new CommandDispatchError(
       "invalid_path",
       `Path "${targetPath}" must not be a symbolic link`,
     );
   }
+
   const [target, root] = await Promise.all([
     fs.realpath(targetPath),
     requireRoot(rootPath),
   ]);
+
   if (root !== null && !isPathWithinDirectory(root, target)) {
     throw new CommandDispatchError(
       "invalid_path",
       `Path "${targetPath}" escapes root`,
     );
   }
+
   return { target, root };
 }
 
@@ -57,17 +62,21 @@ async function requireDestinationWithin(
   rootPath: string | undefined,
 ): Promise<string> {
   assertAbsolute(destinationPath, "destinationPath");
+
   const [parent, root] = await Promise.all([
     fs.realpath(path.dirname(destinationPath)),
     requireRoot(rootPath),
   ]);
+
   const target = path.join(parent, path.basename(destinationPath));
+
   if (root !== null && !isPathWithinDirectory(root, target)) {
     throw new CommandDispatchError(
       "invalid_path",
       `Path "${destinationPath}" escapes root`,
     );
   }
+
   return target;
 }
 
@@ -77,13 +86,16 @@ export async function mkdirHostPath(
   assertAbsolute(command.path, "Path");
   const root = await requireRoot(command.rootPath);
   const target = await resolveWriteTarget(command.path, command.path);
+
   if (root !== null && !isPathWithinDirectory(root, target.writePath)) {
     throw new CommandDispatchError(
       "invalid_path",
       `Path "${command.path}" escapes root`,
     );
   }
+
   await fs.mkdir(target.writePath, { recursive: command.recursive });
+
   return { ok: true };
 }
 
@@ -94,10 +106,12 @@ export async function moveHostPath(
     command.sourcePath,
     command.rootPath,
   );
+
   const destination = await requireDestinationWithin(
     command.destinationPath,
     command.rootPath,
   );
+
   try {
     await fs.lstat(destination);
     throw new CommandDispatchError(
@@ -113,7 +127,9 @@ export async function moveHostPath(
       throw error;
     }
   }
+
   await fs.rename(source, destination);
+
   return { ok: true };
 }
 
@@ -124,20 +140,25 @@ export async function removeHostPath(
     command.path,
     command.rootPath,
   );
+
   if (root !== null && target === root) {
     throw new CommandDispatchError(
       "invalid_path",
       "Cannot remove the declared root",
     );
   }
+
   const targetInfo = await fs.lstat(target);
+
   if (targetInfo.isDirectory() && command.recursive) {
     await killProcessesWithCwdUnder({ directories: [target] });
   }
+
   if (targetInfo.isDirectory() && !command.recursive) {
     await fs.rmdir(target);
   } else {
     await fs.rm(target, { recursive: command.recursive, force: false });
   }
+
   return { ok: true };
 }

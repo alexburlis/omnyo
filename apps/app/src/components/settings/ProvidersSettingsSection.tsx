@@ -1,28 +1,28 @@
 import { useState } from "react";
+import { generatePath, Link } from "react-router-dom";
 import { arrayMove } from "@dnd-kit/sortable";
 import type {
   AppSettings,
   CompletedTurnDisplay,
   ProviderInfo,
-} from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
-import { COARSE_POINTER_ICON_SIZE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
+} from "@omnyo/domain";
+import { allowsFastServiceTier } from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
+import { COARSE_POINTER_ICON_SIZE_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@bb/shared-ui/dropdown-menu";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Switch } from "@bb/shared-ui/switch";
+} from "@omnyo/shared-ui/dropdown-menu";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Switch } from "@omnyo/shared-ui/switch";
 import {
   SettingsBadge,
   SettingsRow,
   SettingsRowList,
   SettingsSection,
-  SettingsWithControl,
 } from "@/components/ui/settings-section";
 import { ProviderIcon } from "@/components/plugin/ProviderIcon";
 import { useSetProviderEnabled } from "@/hooks/mutations/provider-mutations";
@@ -30,6 +30,9 @@ import {
   useSystemProviderCatalog,
   useSystemProviders,
 } from "@/hooks/queries/system-queries";
+import { SETTINGS_PLUGIN_ROUTE_PATH } from "@/lib/route-paths";
+import { ModelPickerSettings } from "./ModelPickerSettings";
+import { ApprovalDefaultsSettings } from "./ApprovalDefaultsSettings";
 import {
   SortableSettingsRowList,
   useSortableSettingsRow,
@@ -54,11 +57,14 @@ function applyProviderOrder(
   ) {
     return providers;
   }
+
   const providersById = new Map(
     providers.map((provider) => [provider.id, provider]),
   );
+
   return ids.flatMap((id) => {
     const provider = providersById.get(id);
+
     return provider === undefined ? [] : [provider];
   });
 }
@@ -70,9 +76,11 @@ export function reorderProviderIds(
 ): string[] | null {
   const activeIndex = ids.indexOf(activeId);
   const overIndex = ids.indexOf(overId);
+
   if (activeIndex === -1 || overIndex === -1 || activeIndex === overIndex) {
     return null;
   }
+
   return arrayMove([...ids], activeIndex, overIndex);
 }
 
@@ -86,6 +94,7 @@ function withProviderCompletedTurnDisplay(
       ([providerId]) => providerId !== provider.id,
     ),
   );
+
   return {
     providerCompletedTurnDisplay:
       display === provider.completedTurnDisplay
@@ -113,17 +122,15 @@ function ProviderRowIcon({
 
 function ProviderActionsMenu({
   provider,
-  enabled,
   isDefault,
   disabled,
-  onToggle,
+  onDisable,
   onMakeDefault,
 }: {
   provider: Pick<ProviderInfo, "displayName">;
-  enabled: boolean;
   isDefault: boolean;
   disabled: boolean;
-  onToggle: () => void;
+  onDisable: () => void;
   onMakeDefault: (() => void) | null;
 }) {
   return (
@@ -139,26 +146,32 @@ function ProviderActionsMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" mobileTitle={provider.displayName}>
-        {enabled ? (
-          <DropdownMenuCheckboxItem
-            checked={isDefault}
-            disabled={disabled || onMakeDefault === null}
-            onCheckedChange={(checked) => {
-              if (checked) onMakeDefault?.();
-            }}
-          >
-            Default
-          </DropdownMenuCheckboxItem>
-        ) : null}
+        <DropdownMenuItem
+          disabled={disabled || isDefault || onMakeDefault === null}
+          onSelect={() => onMakeDefault?.()}
+        >
+          Make default
+        </DropdownMenuItem>
         <DropdownMenuItem
           disabled={disabled}
-          onSelect={onToggle}
-          variant={enabled ? "destructive" : "default"}
+          onSelect={onDisable}
+          variant="destructive"
         >
-          {enabled ? "Disable" : "Enable"}
+          Disable
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function ProviderUnavailableLink({ pluginId }: { pluginId: string }) {
+  return (
+    <Link
+      to={generatePath(SETTINGS_PLUGIN_ROUTE_PATH, { pluginId })}
+      className="shrink-0 text-xs text-subtle-foreground underline-offset-2 hover:text-foreground hover:underline"
+    >
+      Plugin didn't load
+    </Link>
   );
 }
 
@@ -179,11 +192,12 @@ function SortableProviderRow({
   provider,
   onDisable,
 }: SortableProviderRowProps) {
-  const { setNodeRef, style, isDragging, handle } = useSortableSettingsRow({
+  const { setNodeRef, style, handle, liftClassName } = useSortableSettingsRow({
     id: provider.id,
     disabled,
     label: provider.displayName,
   });
+
   const isDefault =
     generalSettings.defaultProviderId === provider.id ||
     (generalSettings.defaultProviderId === null && index === 0);
@@ -192,10 +206,7 @@ function SortableProviderRow({
     <SettingsRow
       ref={setNodeRef}
       style={style}
-      className={cn(
-        "group/provider-row",
-        isDragging && "relative z-10 rounded-md bg-card opacity-90 shadow-lift",
-      )}
+      className={cn("group/provider-row", liftClassName)}
     >
       {handle}
       <ProviderRowIcon provider={provider} />
@@ -203,16 +214,15 @@ function SortableProviderRow({
         {provider.displayName}
       </span>
       {!provider.available ? (
-        <SettingsBadge>Unavailable</SettingsBadge>
+        <ProviderUnavailableLink pluginId={provider.pluginId} />
       ) : isDefault ? (
         <SettingsBadge>Default</SettingsBadge>
       ) : null}
       <ProviderActionsMenu
         provider={provider}
-        enabled
         isDefault={isDefault}
         disabled={disabled}
-        onToggle={onDisable}
+        onDisable={onDisable}
         onMakeDefault={
           provider.available
             ? () => {
@@ -243,6 +253,7 @@ function CompletedTurnDisplayRow({
   const display =
     generalSettings.providerCompletedTurnDisplay[provider.id] ??
     provider.completedTurnDisplay;
+
   return (
     <SettingsRow>
       <ProviderRowIcon provider={provider} />
@@ -276,9 +287,11 @@ export function ProvidersSettingsSection({
   const catalogQuery = useSystemProviderCatalog();
   const setEnabled = useSetProviderEnabled();
   const catalog = catalogQuery.data ?? [];
+
   const disabledProviders = catalog.filter(
     (provider) => !provider.enabled || !provider.pluginEnabled,
   );
+
   const controlsDisabled = disabled || setEnabled.isPending;
   const serverProviders: ProviderInfo[] = providersQuery.data ?? [];
   const [optimisticOrder, setOptimisticOrder] = useState<string[] | null>(null);
@@ -287,27 +300,41 @@ export function ProvidersSettingsSection({
 
   const handleReorder = (activeId: string, overId: string): void => {
     const next = reorderProviderIds(ids, activeId, overId);
+
     if (next === null) return;
     setOptimisticOrder(next);
     let write: Promise<unknown> | void;
+
     try {
       write = onGeneralSettingsChange({
         providerOrder: next,
       });
     } catch {
       setOptimisticOrder(null);
+
       return;
     }
+
     void Promise.resolve(write)
       .catch(() => undefined)
       .finally(() => setOptimisticOrder(null));
   };
 
+  const fastModeProviders = providers.filter(
+    (provider) => provider.capabilities.supportsServiceTier,
+  );
+
   return (
     <>
+      <ApprovalDefaultsSettings
+        disabled={disabled}
+        providers={providers}
+        settings={generalSettings}
+        onChange={onGeneralSettingsChange}
+      />
       <SettingsSection
         title="Providers"
-        description="Choose which agents you use in BB. Drag to reorder them in provider pickers."
+        description="New chats start with the default provider unless their project last used another. Drag to set the order of providers in the model picker and its favorites."
       >
         {providersQuery.isPending ? (
           <p className="text-sm text-muted-foreground">Loading providers…</p>
@@ -317,94 +344,130 @@ export function ProvidersSettingsSection({
             Plugins.
           </p>
         ) : (
-          <SortableSettingsRowList
-            ids={ids}
-            disabled={disabled}
-            onReorder={handleReorder}
-          >
-            {providers.map((provider, index) => (
-              <SortableProviderRow
-                key={provider.id}
-                disabled={controlsDisabled}
-                onDisable={() =>
-                  setEnabled.mutate({ providerId: provider.id, enabled: false })
-                }
-                generalSettings={generalSettings}
-                index={index}
-                onGeneralSettingsChange={onGeneralSettingsChange}
-                provider={provider}
-              />
-            ))}
-            {disabledProviders.map((provider) => (
-              <SettingsRow key={provider.id} className="text-muted-foreground">
-                <span className="-ml-2 w-7 shrink-0" aria-hidden="true" />
-                <span className="shrink-0 opacity-60 grayscale">
-                  <ProviderRowIcon provider={provider.info ?? provider} />
-                </span>
-                <span className="min-w-0 flex-1 truncate font-medium">
-                  {provider.displayName}
-                </span>
-                <SettingsBadge>Disabled</SettingsBadge>
-                <ProviderActionsMenu
-                  provider={provider}
-                  enabled={false}
-                  isDefault={false}
+          <>
+            <SortableSettingsRowList
+              ids={ids}
+              disabled={disabled}
+              onReorder={handleReorder}
+            >
+              {providers.map((provider, index) => (
+                <SortableProviderRow
+                  key={provider.id}
                   disabled={controlsDisabled}
-                  onToggle={() =>
+                  onDisable={() =>
                     setEnabled.mutate({
                       providerId: provider.id,
-                      enabled: true,
+                      enabled: false,
                     })
                   }
-                  onMakeDefault={null}
-                />
-              </SettingsRow>
-            ))}
-          </SortableSettingsRowList>
-        )}
-      </SettingsSection>
-      <SettingsSection title="Configuration">
-        <SettingsWithControl
-          label="Allow faster service tiers"
-          description="Turn this off to use the default service tier for all new turns, including those from queued messages and automations."
-        >
-          <Switch
-            checked={generalSettings.allowFastServiceTier}
-            disabled={disabled}
-            onCheckedChange={(enabled) =>
-              onGeneralSettingsChange({
-                allowFastServiceTier: enabled,
-              })
-            }
-            aria-label="Allow faster service tiers"
-          />
-        </SettingsWithControl>
-        {providers.length === 0 ? null : (
-          <div className="mt-4 space-y-3 border-t border-border pt-4">
-            <div>
-              <h3 className="text-sm font-medium text-foreground">
-                Collapse finished turns
-              </h3>
-              <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
-                When a turn finishes, fold its work into one Worked for row and
-                keep the final answer visible. Turn off collapsing to keep every
-                step of a finished turn visible.
-              </p>
-            </div>
-            <SettingsRowList>
-              {providers.map((provider) => (
-                <CompletedTurnDisplayRow
-                  key={provider.id}
-                  disabled={disabled}
                   generalSettings={generalSettings}
+                  index={index}
                   onGeneralSettingsChange={onGeneralSettingsChange}
                   provider={provider}
                 />
               ))}
-            </SettingsRowList>
-          </div>
+            </SortableSettingsRowList>
+            {disabledProviders.length === 0 ? null : (
+              <div
+                role="group"
+                aria-label="Disabled providers"
+                className={cn(
+                  providers.length > 0 && "mt-3 border-t border-border pt-3",
+                )}
+              >
+                <p className="pb-1 text-xs font-medium text-muted-foreground">
+                  Disabled
+                </p>
+                <SettingsRowList>
+                  {disabledProviders.map((provider) => (
+                    <SettingsRow
+                      key={provider.id}
+                      className="text-muted-foreground"
+                    >
+                      <span className="-ml-2 w-7 shrink-0" aria-hidden="true" />
+                      <span className="shrink-0 opacity-60 grayscale">
+                        <ProviderRowIcon provider={provider.info ?? provider} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate font-medium">
+                        {provider.displayName}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={controlsDisabled}
+                        aria-label={`Enable ${provider.displayName}`}
+                        onClick={() =>
+                          setEnabled.mutate({
+                            providerId: provider.id,
+                            enabled: true,
+                          })
+                        }
+                      >
+                        Enable
+                      </Button>
+                    </SettingsRow>
+                  ))}
+                </SettingsRowList>
+              </div>
+            )}
+          </>
         )}
       </SettingsSection>
+      {providers.length === 0 ? null : (
+        <ModelPickerSettings
+          providers={providers}
+          generalSettings={generalSettings}
+        />
+      )}
+      {fastModeProviders.length === 0 ? null : (
+        <SettingsSection
+          title="Fast mode"
+          description="Shows ⚡ beside the model so you can switch to a faster tier. Off keeps every new turn on the standard tier, including queued messages and automations."
+        >
+          <SettingsRowList>
+            {fastModeProviders.map((provider) => (
+              <SettingsRow key={provider.id}>
+                <ProviderRowIcon provider={provider} />
+                <span className="min-w-0 flex-1 truncate font-medium">
+                  {provider.displayName}
+                </span>
+                <Switch
+                  checked={allowsFastServiceTier(generalSettings, provider.id)}
+                  disabled={disabled}
+                  onCheckedChange={(enabled) =>
+                    onGeneralSettingsChange({
+                      providerAllowFastServiceTier: {
+                        ...generalSettings.providerAllowFastServiceTier,
+                        [provider.id]: enabled,
+                      },
+                    })
+                  }
+                  aria-label={`Allow faster ${provider.displayName} service tiers`}
+                />
+              </SettingsRow>
+            ))}
+          </SettingsRowList>
+        </SettingsSection>
+      )}
+      {providers.length === 0 ? null : (
+        <SettingsSection
+          title="Collapse finished turns"
+          description="Folds a finished turn's steps into one activity line and keeps the final answer visible. Off shows every step."
+        >
+          <SettingsRowList>
+            {providers.map((provider) => (
+              <CompletedTurnDisplayRow
+                key={provider.id}
+                disabled={disabled}
+                generalSettings={generalSettings}
+                onGeneralSettingsChange={onGeneralSettingsChange}
+                provider={provider}
+              />
+            ))}
+          </SettingsRowList>
+        </SettingsSection>
+      )}
     </>
   );
 }

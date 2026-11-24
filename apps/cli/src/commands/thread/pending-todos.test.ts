@@ -1,22 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ThreadTimelinePendingTodos } from "@bb/domain";
-import type { ThreadTimelineResponse } from "@bb/server-contract";
+import type { ThreadTimelinePendingTodos } from "@omnyo/domain";
+import type { ThreadTimelineResponse } from "@omnyo/server-contract";
 import {
-  createNodeBbSdk,
-  type BbSdk,
+  createNodeOmnyoSdk,
+  type OmnyoSdk,
   type FetchImplementation,
-} from "@bb/sdk/node";
+} from "@omnyo/sdk/node";
 
 import { fetchThreadPendingTodos, printPendingTodos } from "./pending-todos.js";
 
 function captureLogLines(fn: () => void): { lines: string[] } {
   const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
   try {
     fn();
     const lines: string[] = [];
+
     for (const call of spy.mock.calls) {
       lines.push(String(call[0] ?? ""));
     }
+
     return { lines };
   } finally {
     spy.mockRestore();
@@ -35,6 +38,7 @@ describe("printPendingTodos", () => {
       updatedAt: 1,
       items: [],
     };
+
     const { lines } = captureLogLines(() => printPendingTodos(snapshot));
     expect(lines).toEqual([]);
   });
@@ -49,6 +53,7 @@ describe("printPendingTodos", () => {
         { id: "c", text: "Add regression test", status: "pending" },
       ],
     };
+
     const { lines } = captureLogLines(() => printPendingTodos(snapshot));
     expect(lines).toEqual([
       "",
@@ -70,6 +75,7 @@ describe("printPendingTodos", () => {
         { id: "d", text: "Second done", status: "completed" },
       ],
     };
+
     const { lines } = captureLogLines(() => printPendingTodos(snapshot));
     expect(lines).toEqual([
       "",
@@ -90,6 +96,7 @@ describe("printPendingTodos", () => {
         { id: "b", text: "Build banner", status: "completed" },
       ],
     };
+
     const { lines } = captureLogLines(() => printPendingTodos(snapshot));
     expect(lines).toEqual([
       "",
@@ -130,21 +137,27 @@ describe("fetchThreadPendingTodos", () => {
 
   interface SdkOverHttpBoundary {
     requestUrls: string[];
-    sdk: BbSdk;
+    sdk: OmnyoSdk;
   }
 
   function makeSdkOverHttpBoundary(
     fetchImpl: (url: string) => Promise<Response>,
   ): SdkOverHttpBoundary {
     const requestUrls: string[] = [];
+
     const fetchMock: FetchImplementation = async (input) => {
       const url = String(input);
       requestUrls.push(url);
+
       return fetchImpl(url);
     };
+
     return {
       requestUrls,
-      sdk: createNodeBbSdk({ baseUrl: "http://bb.test", fetch: fetchMock }),
+      sdk: createNodeOmnyoSdk({
+        baseUrl: "http://omnyo.test",
+        fetch: fetchMock,
+      }),
     };
   }
 
@@ -154,16 +167,19 @@ describe("fetchThreadPendingTodos", () => {
       updatedAt: 7,
       items: [{ id: "a", text: "Work", status: "in_progress" }],
     };
+
     const { requestUrls, sdk } = makeSdkOverHttpBoundary(async () =>
       Response.json(makeTimelineResponse(snapshot)),
     );
+
     const result = await fetchThreadPendingTodos({
       sdk,
       threadId: "thread-1",
     });
+
     expect(result).toEqual(snapshot);
     expect(requestUrls).toEqual([
-      "http://bb.test/api/v1/threads/thread-1/timeline?summaryOnly=true",
+      "http://omnyo.test/api/v1/threads/thread-1/timeline?summaryOnly=true",
     ]);
   });
 
@@ -171,10 +187,12 @@ describe("fetchThreadPendingTodos", () => {
     const { sdk } = makeSdkOverHttpBoundary(async () => {
       throw new Error("network down");
     });
+
     const result = await fetchThreadPendingTodos({
       sdk,
       threadId: "thread-1",
     });
+
     expect(result).toBeNull();
   });
 
@@ -182,10 +200,12 @@ describe("fetchThreadPendingTodos", () => {
     const { sdk } = makeSdkOverHttpBoundary(async () =>
       Response.json({ message: "Thread not found" }, { status: 404 }),
     );
+
     const result = await fetchThreadPendingTodos({
       sdk,
       threadId: "thread-1",
     });
+
     expect(result).toBeNull();
   });
 });

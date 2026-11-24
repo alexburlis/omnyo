@@ -15,6 +15,7 @@ export const hapticKindSchema = z.enum(HAPTIC_KINDS);
 const httpUrlSchema = z.string().refine((value) => {
   try {
     const protocol = new URL(value).protocol;
+
     return protocol === "http:" || protocol === "https:";
   } catch {
     return false;
@@ -56,7 +57,9 @@ const bridgeRequestSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const NATIVE_SCREENS = ["device-settings"] as const;
+
 export const nativeScreenSchema = z.enum(NATIVE_SCREENS);
+
 export type NativeScreen = z.infer<typeof nativeScreenSchema>;
 
 export const pageToShellMessageSchema = z.discriminatedUnion("type", [
@@ -95,15 +98,20 @@ export function parsePageToShellMessage(raw: unknown): ParsedPageMessage {
   if (typeof raw !== "string") {
     return { ok: false, reason: "message was not a string" };
   }
+
   let json: unknown;
+
   try {
     json = JSON.parse(raw);
   } catch {
     return { ok: false, reason: "message was not JSON" };
   }
+
   const parsed = pageToShellMessageSchema.safeParse(json);
+
   if (!parsed.success) {
     return { ok: false, reason: parsed.error.issues[0]?.message ?? "unknown" };
   }
+
   return { ok: true, message: parsed.data };
 }

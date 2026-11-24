@@ -2,28 +2,41 @@ import { z } from "zod";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const HOST_WORKER_PROTOCOL_VERSION = 2;
+const HOST_WORKER_PROTOCOL_VERSION = 3;
+
+const abandonMessageSchema = z.object({
+  type: z.literal("abandon"),
+  callId: z.string(),
+});
+
 function createOperationEnvironmentScope(target: NodeJS.ProcessEnv) {
   let active = 0;
   let current: Record<string, string> = {};
   let previous: NodeJS.ProcessEnv = {};
+
   return (env: Record<string, string>): (() => void) => {
     if (active === 0) {
       current = env;
       previous = {};
+
       for (const [name, value] of Object.entries(env)) {
         previous[name] = target[name];
         target[name] = value;
       }
     }
+
     active += 1;
+
     return () => {
       active -= 1;
+
       if (active !== 0) return;
+
       for (const name of Object.keys(current)) {
         if (previous[name] === undefined) delete target[name];
         else target[name] = previous[name];
       }
+
       current = {};
       previous = {};
     };
@@ -31,7 +44,9 @@ function createOperationEnvironmentScope(target: NodeJS.ProcessEnv) {
 }
 
 const acquireEnvironment = createOperationEnvironmentScope(process.env);
+
 const RESULT_MAX_BYTES = 8 * 1024 * 1024;
+
 const DEFAULT_DISPOSE_TIMEOUT_MS = 5_000;
 
 interface StandardSchema {
@@ -49,6 +64,7 @@ interface StandardSchema {
 }
 
 interface HostMethod {
+  readonly experimental_hostReplacementKey?: string;
   readonly input: StandardSchema;
   readonly output: StandardSchema;
 }
@@ -135,6 +151,7 @@ type ParentMessage =
       readonly envVars: Record<string, string>;
     }
   | { readonly type: "cancel"; readonly callId: string }
+  | { readonly type: "abandon"; readonly callId: string }
   | { readonly type: "dispose" }
   | { readonly type: "watch-ready"; readonly watchId: string }
   | {
@@ -150,9 +167,13 @@ type ParentMessage =
     };
 
 const MAX_WATCH_IGNORE_ENTRIES = 4_096;
+
 const MAX_WATCH_PATH_BYTES = 16 * 1024;
+
 const MIN_WATCH_DEBOUNCE_MS = 10;
+
 const MAX_WATCH_DEBOUNCE_MS = 5_000;
+
 const MAX_WATCH_WAIT_MS = 30_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -177,42 +198,57 @@ function parseEntry(value: unknown): HostEntry {
   ) {
     throw new Error("host artifact does not export a valid host entry");
   }
+
   for (const [name, method] of Object.entries(value.contract)) {
     if (
       !isRecord(method) ||
       !isSchema(method.input) ||
       !isSchema(method.output) ||
+      (method.experimental_hostReplacementKey !== undefined &&
+        (typeof method.experimental_hostReplacementKey !== "string" ||
+          method.experimental_hostReplacementKey.length === 0 ||
+          method.experimental_hostReplacementKey.length > 128)) ||
       typeof value.handlers[name] !== "function"
     ) {
       throw new Error(`host artifact has an invalid method "${name}"`);
     }
   }
+
   if (value.experimental_signals !== undefined) {
     if (!isRecord(value.experimental_signals)) {
       throw new Error("host artifact signals must be an object");
     }
+
     for (const [name, signal] of Object.entries(value.experimental_signals)) {
       if (!isRecord(signal) || !isSchema(signal.payload)) {
         throw new Error(`host artifact has an invalid signal "${name}"`);
       }
     }
   }
+
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions
   return value as unknown as HostEntry;
 }
 
 function parseHostWatchEvent(value: unknown): HostWatchEvent | null {
   if (!isRecord(value) || typeof value.kind !== "string") return null;
+
   if (value.kind === "rescan-required") return { kind: value.kind };
+
   if (value.kind === "watch-error" && typeof value.message === "string") {
     return { kind: value.kind, message: value.message };
   }
+
   if (value.kind !== "changed" || !Array.isArray(value.changes)) return null;
+
   const changes: Array<{
     path: string;
     type: "create" | "update" | "delete";
   }> = [];
+
   for (const change of value.changes) {
     if (!isRecord(change) || typeof change.path !== "string") return null;
+
     if (
       change.type !== "create" &&
       change.type !== "update" &&
@@ -220,17 +256,22 @@ function parseHostWatchEvent(value: unknown): HostWatchEvent | null {
     ) {
       return null;
     }
+
     changes.push({ path: change.path, type: change.type });
   }
+
   return { kind: value.kind, changes };
 }
 
 function parseParentMessage(value: unknown): ParentMessage | null {
   if (!isRecord(value) || typeof value.type !== "string") return null;
+
   if (value.type === "dispose") return { type: "dispose" };
+
   if (value.type === "watch-ready" && typeof value.watchId === "string") {
     return { type: "watch-ready", watchId: value.watchId };
   }
+
   if (
     value.type === "watch-start-error" &&
     typeof value.watchId === "string" &&
@@ -242,6 +283,7 @@ function parseParentMessage(value: unknown): ParentMessage | null {
       error: value.error,
     };
   }
+
   if (
     value.type === "watch-event" &&
     typeof value.watchId === "string" &&
@@ -249,6 +291,7 @@ function parseParentMessage(value: unknown): ParentMessage | null {
     Number.isSafeInteger(value.sequence)
   ) {
     const event = parseHostWatchEvent(value.event);
+
     if (event !== null) {
       return {
         type: "watch-event",
@@ -258,9 +301,17 @@ function parseParentMessage(value: unknown): ParentMessage | null {
       };
     }
   }
+
   if (value.type === "cancel" && typeof value.callId === "string") {
     return { type: "cancel", callId: value.callId };
   }
+
+  if (value.type === "abandon") {
+    const parsed = abandonMessageSchema.safeParse(value);
+
+    return parsed.success ? parsed.data : null;
+  }
+
   if (
     value.type === "call" &&
     typeof value.callId === "string" &&
@@ -269,7 +320,9 @@ function parseParentMessage(value: unknown): ParentMessage | null {
     const envVars = z
       .record(z.string().regex(/^[^=\x00]+$/u), z.string())
       .safeParse(value.envVars ?? {});
+
     if (!envVars.success) return null;
+
     return {
       type: "call",
       callId: value.callId,
@@ -278,6 +331,7 @@ function parseParentMessage(value: unknown): ParentMessage | null {
       envVars: envVars.data,
     };
   }
+
   return null;
 }
 
@@ -288,6 +342,7 @@ function validateWatchOptions(
   const ignoredPaths = value.ignoredPaths ?? [];
   const debounceMs = value.debounceMs ?? 75;
   const maxWaitMs = value.maxWaitMs ?? 500;
+
   if (
     typeof value.rootPath !== "string" ||
     !isAbsolute(value.rootPath) ||
@@ -308,6 +363,7 @@ function validateWatchOptions(
   ) {
     throw new Error("invalid host watch options");
   }
+
   return { rootPath: value.rootPath, ignoredPaths, debounceMs, maxWaitMs };
 }
 
@@ -316,30 +372,37 @@ async function validate(
   value: unknown,
 ): Promise<unknown> {
   const result = await schema["~standard"].validate(value);
+
   if (result.issues !== undefined) {
     throw new Error(result.issues.map((issue) => issue.message).join("; "));
   }
+
   return result.value;
 }
 
 function normalizeJson(value: unknown, label: string): unknown {
   let serialized: string | undefined;
+
   try {
     serialized = JSON.stringify(value);
   } catch {
     serialized = undefined;
   }
+
   if (serialized === undefined) {
     throw new Error(`${label} is not JSON-serializable`);
   }
+
   if (Buffer.byteLength(serialized) > RESULT_MAX_BYTES) {
     throw new Error(`${label} exceeds ${RESULT_MAX_BYTES} bytes`);
   }
+
   return JSON.parse(serialized);
 }
 
 function send(message: object): void {
   if (!process.connected) return;
+
   try {
     process.send?.(message);
   } catch {}
@@ -357,10 +420,12 @@ const [
   tempDir,
   disposeTimeoutArg,
 ] = process.argv.slice(2);
+
 const disposeTimeoutMs =
   disposeTimeoutArg === undefined
     ? DEFAULT_DISPOSE_TIMEOUT_MS
     : Number(disposeTimeoutArg);
+
 if (
   artifactPath === undefined ||
   !isAbsolute(artifactPath) ||
@@ -377,11 +442,19 @@ if (
 }
 
 const lifecycleController = new AbortController();
+
 const activeCalls = new Map<string, AbortController>();
+
+const callEnvironmentReleases = new Map<string, () => void>();
+
 const watches = new Map<string, WorkerWatchState>();
+
 let nextWatchId = 1;
+
 let nextLeaseId = 1;
+
 let entry: HostEntry | null = null;
+
 let disposing = false;
 
 function startWatch(
@@ -390,29 +463,37 @@ function startWatch(
   requestSignal: AbortSignal,
 ): Promise<HostWatchSubscription> {
   const validated = validateWatchOptions(options);
+
   if (typeof listener !== "function") {
     throw new Error("host watch listener must be a function");
   }
+
   if (disposing || lifecycleController.signal.aborted) {
     throw new Error("host worker is disposing");
   }
+
   const watchId = String(nextWatchId++);
   let resolve!: (subscription: HostWatchSubscription) => void;
   let reject!: (error: Error) => void;
+
   const pending = new Promise<HostWatchSubscription>((res, rej) => {
     resolve = res;
     reject = rej;
   });
+
   const subscription: HostWatchSubscription = {
     async dispose() {
       const state = watches.get(watchId);
+
       if (state === undefined || state.disposed) return;
       state.disposed = true;
       watches.delete(watchId);
       send({ type: "watch-stop", watchId });
+
       if (!state.ready) state.reject(new Error("host watch was disposed"));
     },
   };
+
   const state: WorkerWatchState = {
     listener,
     subscription,
@@ -421,19 +502,25 @@ function startWatch(
     ready: false,
     disposed: false,
   };
+
   watches.set(watchId, state);
   const abort = (): void => void subscription.dispose();
   requestSignal.addEventListener("abort", abort, { once: true });
   lifecycleController.signal.addEventListener("abort", abort, { once: true });
+
   const cleanup = (): void => {
     requestSignal.removeEventListener("abort", abort);
     lifecycleController.signal.removeEventListener("abort", abort);
   };
+
   void pending.then(cleanup, cleanup);
+
   if (requestSignal.aborted || lifecycleController.signal.aborted) {
     void subscription.dispose();
+
     return pending;
   }
+
   send({
     type: "watch-start",
     watchId,
@@ -442,11 +529,13 @@ function startWatch(
     debounceMs: validated.debounceMs,
     maxWaitMs: validated.maxWaitMs,
   });
+
   return pending;
 }
 
 function handleWatchReady(watchId: string): void {
   const state = watches.get(watchId);
+
   if (state === undefined || state.disposed || state.ready) return;
   state.ready = true;
   state.resolve(state.subscription);
@@ -454,6 +543,7 @@ function handleWatchReady(watchId: string): void {
 
 function handleWatchStartError(watchId: string, error: string): void {
   const state = watches.get(watchId);
+
   if (state === undefined || state.disposed || state.ready) return;
   state.disposed = true;
   watches.delete(watchId);
@@ -466,10 +556,13 @@ function handleWatchEvent(
   event: HostWatchEvent,
 ): void {
   const state = watches.get(watchId);
+
   if (state === undefined || state.disposed) {
     send({ type: "watch-ack", watchId, sequence });
+
     return;
   }
+
   void Promise.resolve()
     .then(() => state.listener(event))
     .catch((error) => {
@@ -485,8 +578,10 @@ async function dispose(): Promise<void> {
   disposing = true;
   setTimeout(() => process.exit(1), disposeTimeoutMs);
   lifecycleController.abort();
+
   for (const controller of activeCalls.values()) controller.abort();
   activeCalls.clear();
+
   try {
     await Promise.all(
       [...watches.values()].map((watch) => watch.subscription.dispose()),
@@ -503,7 +598,9 @@ async function handleCall(
 ): Promise<void> {
   if (disposing) return;
   const currentEntry = entry;
+
   if (currentEntry === null) return;
+
   if (activeCalls.has(message.callId)) {
     send({
       type: "result",
@@ -511,10 +608,13 @@ async function handleCall(
       ok: false,
       error: `duplicate host plugin call ${message.callId}`,
     });
+
     return;
   }
+
   const method = currentEntry.contract[message.method];
   const handler = currentEntry.handlers[message.method];
+
   if (method === undefined || handler === undefined) {
     send({
       type: "result",
@@ -522,25 +622,39 @@ async function handleCall(
       ok: false,
       error: `unknown host method "${message.method}"`,
     });
+
     return;
   }
+
   const controller = new AbortController();
   activeCalls.set(message.callId, controller);
   let contextOpen = true;
   let releaseEnvironment: (() => void) | undefined;
+
+  const releaseCallEnvironment = (): void => {
+    callEnvironmentReleases.delete(message.callId);
+    const release = releaseEnvironment;
+    releaseEnvironment = undefined;
+    release?.();
+  };
+
   try {
     releaseEnvironment = acquireEnvironment(message.envVars);
+    callEnvironmentReleases.set(message.callId, releaseCallEnvironment);
     controller.signal.throwIfAborted();
     const input = await validate(method.input, message.input);
+
     const result = await handler(input, {
       signal: controller.signal,
       lifecycle: { signal: lifecycleController.signal },
       experimental_paths: { dataDir, tempDir },
       async experimental_emitSignal(signalName, payload) {
         const signal = currentEntry.experimental_signals?.[signalName];
+
         if (signal === undefined) {
           throw new Error(`unknown host signal "${signalName}"`);
         }
+
         const validated = await validate(signal.payload, payload);
         send({
           type: "signal",
@@ -559,9 +673,11 @@ async function handleCall(
         ) {
           throw new Error("host call context is no longer active");
         }
+
         const leaseId = String(nextLeaseId++);
         let released = false;
         send({ type: "lease-acquire", leaseId });
+
         return {
           async dispose() {
             if (released) return;
@@ -571,10 +687,12 @@ async function handleCall(
         };
       },
     });
+
     const output = normalizeJson(
       await validate(method.output, result),
       `host output for ${message.method}`,
     );
+
     send({ type: "result", callId: message.callId, ok: true, output });
   } catch (error) {
     send({
@@ -586,24 +704,31 @@ async function handleCall(
   } finally {
     contextOpen = false;
     activeCalls.delete(message.callId);
-    releaseEnvironment?.();
+    releaseCallEnvironment();
   }
 }
 
 process.once("disconnect", () => void dispose());
+
 if (!process.connected) void dispose();
 
 try {
   const imported = await import(pathToFileURL(artifactPath).href);
+
   if (disposing) process.exit(0);
   entry = parseEntry(imported.default);
   process.on("message", (raw: unknown) => {
     const message = parseParentMessage(raw);
+
     if (message === null) return;
+
     if (message.type === "call") {
       void handleCall(message);
     } else if (message.type === "cancel") {
       activeCalls.get(message.callId)?.abort();
+    } else if (message.type === "abandon") {
+      activeCalls.get(message.callId)?.abort();
+      callEnvironmentReleases.get(message.callId)?.();
     } else if (message.type === "watch-ready") {
       handleWatchReady(message.watchId);
     } else if (message.type === "watch-start-error") {
@@ -619,6 +744,13 @@ try {
     protocolVersion: HOST_WORKER_PROTOCOL_VERSION,
     pluginId,
     generation,
+    replacementMethods: Object.fromEntries(
+      Object.entries(entry.contract).flatMap(([name, method]) =>
+        method.experimental_hostReplacementKey === undefined
+          ? []
+          : [[name, method.experimental_hostReplacementKey]],
+      ),
+    ),
   });
 } catch (error) {
   if (disposing) process.exit(1);

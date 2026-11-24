@@ -32,8 +32,8 @@ export const TEST_ACCOUNT: Account = {
   handle: "sawyer",
   serverId: "srv_1",
   serverLabel: "sawyer",
-  serverUrl: "https://sawyer.getbb.app",
-  baseUrl: "https://getbb.app",
+  serverUrl: "https://sawyer.omnyo.link",
+  baseUrl: "https://omnyo.link",
 };
 
 export class FakeAccount {
@@ -68,6 +68,7 @@ export class FakeAccount {
       account,
     };
     this.wake();
+
     return account;
   }
 
@@ -90,12 +91,13 @@ export class FakeAccount {
   }
 
   readonly callRpc = async (args: FakeRpcArgs): Promise<unknown> => {
-    if (args.pluginId !== "bb-account" || !this.available) {
+    if (args.pluginId !== "omnyo-account" || !this.available) {
       throw Object.assign(
         new Error(`HTTP 503: plugin "${args.pluginId}" is not running`),
         { status: 503 },
       );
     }
+
     return args.outputSchema.parse(
       await this.handle(args.method, args.input, args.signal),
     );
@@ -112,6 +114,7 @@ export class FakeAccount {
     if (this.current.revision > afterRevision) {
       return Promise.resolve(this.current);
     }
+
     return new Promise((resolve, reject) => {
       const finish = () => {
         clearTimeout(timer);
@@ -119,14 +122,17 @@ export class FakeAccount {
         signal?.removeEventListener("abort", abort);
         resolve(this.current);
       };
+
       const abort = () => {
         clearTimeout(timer);
         this.waiters.delete(finish);
         reject(signal?.reason ?? new Error("aborted"));
       };
+
       const timer = setTimeout(finish, 25_000);
       timer.unref?.();
       this.waiters.add(finish);
+
       if (signal?.aborted) abort();
       signal?.addEventListener("abort", abort, { once: true });
     });
@@ -138,40 +144,49 @@ export class FakeAccount {
     signal: AbortSignal | undefined,
   ): Promise<unknown> {
     switch (method) {
-      case "bb-account.v1.status":
+      case "omnyo-account.v1.status":
         return this.current;
-      case "bb-account.v1.waitForStatusChange":
+      case "omnyo-account.v1.waitForStatusChange":
         return this.waitForChange(
           (input as { afterRevision: number }).afterRevision,
           signal,
         );
-      case "bb-account.v1.fetch": {
+      case "omnyo-account.v1.fetch": {
         const request = input as AccountFetchRequest;
         this.fetches.push(request);
+
         if (this.current.state !== "signed-in") {
           return { status: 401, body: { error: "signed-out" } };
         }
+
         const route = this.routes.get(
           `${request.target} ${request.method} ${request.path}`,
         );
+
         if (route === undefined) {
           return { status: 404, body: { error: "not-found" } };
         }
+
         return route(request);
       }
-      case "bb-account.v1.adoptConnectCredential": {
+
+      case "omnyo-account.v1.adoptConnectCredential": {
         const request = input as AdoptRequest;
         this.adoptions.push(request);
         const result = this.adopt(request);
+
         if (result === "adopted") {
           this.serverCredential = request.credential;
           this.signIn();
         }
+
         return { result };
       }
-      case "bb-account.v1.connectCredential": {
+
+      case "omnyo-account.v1.connectCredential": {
         this.credentialReads += 1;
         const account = this.current.account;
+
         return {
           credential:
             account === null || this.serverCredential === null
@@ -184,19 +199,28 @@ export class FakeAccount {
                 },
         };
       }
-      case "bb-account.v1.confirmRefusedCredential": {
-        this.refusedCredentials.push((input as { credential: string }).credential);
+
+      case "omnyo-account.v1.confirmRefusedCredential": {
+        this.refusedCredentials.push(
+          (input as { credential: string }).credential,
+        );
+
         return this.current;
       }
+
       case "redeemCode": {
         this.redemptions.push(input);
+
         const account = this.redeem(
           input as { code: string; baseUrl: string | null },
         );
+
         this.signIn(account);
+
         return this.current;
       }
     }
-    throw new Error(`unknown bb-account method ${method}`);
+
+    throw new Error(`unknown omnyo-account method ${method}`);
   }
 }

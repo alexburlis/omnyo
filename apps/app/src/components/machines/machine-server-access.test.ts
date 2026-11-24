@@ -3,7 +3,7 @@ import {
   machineServerAccessBlockedReason,
   machineServerAccessReady,
 } from "./machine-server-access";
-import type { ServerAccessStatus } from "@bb/server-contract";
+import type { ServerAccessStatus } from "@omnyo/server-contract";
 
 function status(
   overrides: Partial<ServerAccessStatus> = {},
@@ -63,9 +63,10 @@ describe("machine server access readiness", () => {
           availability: null,
         },
       ],
-      effectiveUrl: "https://bb.example.com",
+      effectiveUrl: "https://omnyo.example.com",
       urlSource: "setting",
     });
+
     expect(machineServerAccessReady(direct)).toBe(true);
     expect(
       machineServerAccessReady({
@@ -78,7 +79,7 @@ describe("machine server access readiness", () => {
   it("explains blocked configuration and clears the reason when ready", () => {
     const blocked = status({ providers: [] });
     expect(machineServerAccessBlockedReason(blocked)).toBe(
-      "Configure how machines should connect to this bb server.",
+      "Configure how machines should connect to this Omnyo server.",
     );
     expect(machineServerAccessBlockedReason(status())).toBeNull();
   });

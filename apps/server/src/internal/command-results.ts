@@ -1,7 +1,7 @@
 import type {
   HostDaemonCommand,
   HostDaemonSettledCommandType,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   emptyCommandResultSideEffects,
   type CommandResultReportForType,
@@ -23,6 +23,7 @@ import {
 import { notifyWorkspaceMutationResult } from "./environment-changes.js";
 
 type ParsedCommandType = HostDaemonSettledCommandType;
+
 type ParsedCommandForType<TType extends ParsedCommandType> = Extract<
   HostDaemonCommand,
   { type: TType }
@@ -83,6 +84,7 @@ export function handleLiveCommandResultSideEffects<
   },
 ): CommandResultSideEffectsResult {
   const handler = commandResultSideEffectHandlers[args.command.type];
+
   if (!handler) {
     return emptyCommandResultSideEffects();
   }

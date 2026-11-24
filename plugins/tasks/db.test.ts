@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import { describe, expect, it } from "vitest";
 import {
   createTasksStore,
@@ -8,8 +8,12 @@ import {
 } from "./db";
 
 function setup() {
-  const { bb, harness } = createFakePluginHost({ pluginId: "tasks-db-test" });
-  const db = bb.storage.database();
+  const { api, harness } = createFakePluginHost({
+    pluginId: "tasks-db-test",
+  });
+
+  const db = api.storage.database();
+
   return { db, harness, store: createTasksStore(db) };
 }
 
@@ -32,9 +36,11 @@ function cursorForEmptyArrayFilter(
   const decoded: unknown = JSON.parse(
     Buffer.from(cursor, "base64url").toString("utf8"),
   );
+
   if (typeof decoded !== "object" || decoded === null) {
     throw new Error("expected an object cursor fixture");
   }
+
   const normalized = JSON.stringify({
     projectId,
     statuses: filter === "statuses" ? [] : null,
@@ -45,7 +51,9 @@ function cursorForEmptyArrayFilter(
     search: null,
     sort: "manual",
   });
+
   const query = createHash("sha256").update(normalized).digest("base64url");
+
   return Buffer.from(JSON.stringify({ ...decoded, query }), "utf8").toString(
     "base64url",
   );
@@ -54,6 +62,7 @@ function cursorForEmptyArrayFilter(
 describe("tasks storage", () => {
   it("initializes its versioned schema idempotently", async () => {
     const { db, harness } = setup();
+
     try {
       createTasksStore(db);
       expect(
@@ -62,7 +71,7 @@ describe("tasks storage", () => {
             "SELECT COUNT(*) AS count FROM schema_version",
           )
           .get()?.count,
-      ).toBe(8);
+      ).toBe(9);
     } finally {
       await harness.dispose();
     }
@@ -70,6 +79,7 @@ describe("tasks storage", () => {
 
   it("migrates existing presets to the project-default environment", async () => {
     const { db, harness } = setup();
+
     try {
       db.exec(`
         DELETE FROM schema_version WHERE version IN (3, 6);
@@ -111,6 +121,7 @@ describe("tasks storage", () => {
 
   it("keeps a preset's fast tier and accepts other provider tiers after opening the tier column", async () => {
     const { db, harness } = setup();
+
     try {
       db.exec(`
         DELETE FROM schema_version WHERE version = 8;
@@ -143,6 +154,7 @@ describe("tasks storage", () => {
 
   it("migrates retired preset permission modes to Accept Edits", async () => {
     const { db, harness } = setup();
+
     try {
       db.exec(`
         DELETE FROM schema_version WHERE version = 5;
@@ -175,25 +187,31 @@ describe("tasks storage", () => {
 
   it("reports what a folder delete unfiled and nothing for a missing folder", async () => {
     const { harness, store } = setup();
+
     try {
       const parent = store.createFolder({ name: "Parent" });
+
       const child = store.createFolder({
         name: "Child",
         parentFolderId: parent.id,
       });
+
       const other = store.createFolder({ name: "Other" });
+
       const filed = store.createProject({
         name: "Filed",
         prefix: "FIL",
         color: "blue",
         folderId: parent.id,
       });
+
       const elsewhere = store.createProject({
         name: "Elsewhere",
         prefix: "ELS",
         color: "blue",
         folderId: other.id,
       });
+
       const task = store.createTask({
         projectId: filed.id,
         title: "Survives",
@@ -221,9 +239,11 @@ describe("tasks storage", () => {
 
   it("allocates sequential per-project task keys transactionally", async () => {
     const { harness, store } = setup();
+
     try {
       const project = createProject(store, "TSK");
       const first = store.createTask({ projectId: project.id, title: "First" });
+
       const second = store.createTask({
         projectId: project.id,
         title: "Second",
@@ -238,9 +258,11 @@ describe("tasks storage", () => {
 
   it("enforces one level of sub-tasks in both directions", async () => {
     const { harness, store } = setup();
+
     try {
       const project = createProject(store, "SUB");
       const root = store.createTask({ projectId: project.id, title: "Root" });
+
       const child = store.createTask({
         projectId: project.id,
         title: "Child",
@@ -259,6 +281,7 @@ describe("tasks storage", () => {
         projectId: project.id,
         title: "Second root",
       });
+
       store.createTask({
         projectId: project.id,
         title: "Second child",
@@ -274,34 +297,41 @@ describe("tasks storage", () => {
 
   it("combines status, label, and active-thread filters in SQL", async () => {
     const { harness, store } = setup();
+
     try {
       const project = createProject(store, "FLT");
+
       const label = store.createLabel({
         projectId: project.id,
         name: "Bug",
         color: "red",
       });
+
       const active = store.createTask({
         projectId: project.id,
         title: "Active match",
         status: "todo",
         priority: "high",
       });
+
       const inactive = store.createTask({
         projectId: project.id,
         title: "Inactive",
         status: "todo",
         priority: "high",
       });
+
       const wrongStatus = store.createTask({
         projectId: project.id,
         title: "Done active",
         status: "done",
         priority: "high",
       });
+
       for (const task of [active, inactive, wrongStatus]) {
         store.addTaskLabel(task.id, label.id);
       }
+
       for (const task of [active, wrongStatus]) {
         store.upsertTaskThread({
           taskId: task.id,
@@ -328,12 +358,15 @@ describe("tasks storage", () => {
 
   it("finds all search terms without requiring their input order", async () => {
     const { harness, store } = setup();
+
     try {
       const project = createProject(store, "SRC");
+
       const matching = store.createTask({
         projectId: project.id,
         title: "Deployment readiness review",
       });
+
       store.createTask({
         projectId: project.id,
         title: "Deployment schedule",
@@ -357,13 +390,16 @@ describe("tasks storage", () => {
 
   it("traverses deterministic filtered and sorted keyset pages without gaps", async () => {
     const { harness, store } = setup();
+
     try {
       const project = createProject(store, "PAG");
+
       const bug = store.createLabel({
         projectId: project.id,
         name: "Bug",
         color: "red",
       });
+
       const fixtures = [
         { title: "Low later", priority: "low" as const, dueDate: "2026-08-03" },
         { title: "Urgent undated", priority: "urgent" as const, dueDate: null },
@@ -391,6 +427,7 @@ describe("tasks storage", () => {
           dueDate: fixture.dueDate,
         }),
       );
+
       for (const task of fixtures.slice(0, 4)) {
         store.addTaskLabel(task.id, bug.id);
       }
@@ -398,6 +435,7 @@ describe("tasks storage", () => {
       const collect = (sort: "manual" | "priority" | "due") => {
         const keys: string[] = [];
         let cursor: string | undefined;
+
         do {
           const page = store.listTasksPage({
             projectId: project.id,
@@ -409,9 +447,11 @@ describe("tasks storage", () => {
             limit: 1,
             ...(cursor === undefined ? {} : { cursor }),
           });
+
           keys.push(...page.tasks.map((task) => task.key));
           cursor = page.nextCursor ?? undefined;
         } while (cursor !== undefined);
+
         return keys;
       };
 
@@ -425,8 +465,10 @@ describe("tasks storage", () => {
 
   it("invalidates cursors after tasks are added, removed, reordered, or updated", async () => {
     const { harness, store } = setup();
+
     try {
       const project = createProject(store, "MUT");
+
       const tasks = Array.from({ length: 5 }, (_, index) =>
         store.createTask({
           projectId: project.id,
@@ -434,15 +476,20 @@ describe("tasks storage", () => {
           status: "todo",
         }),
       );
+
       const firstCursor = () => {
         const cursor = store.listTasksPage({
           projectId: project.id,
           limit: 2,
         }).nextCursor;
+
         expect(cursor).not.toBeNull();
+
         if (cursor === null) throw new Error("expected another task page");
+
         return cursor;
       };
+
       const expectStale = (cursor: string) => {
         try {
           store.listTasksPage({ projectId: project.id, limit: 2, cursor });
@@ -483,8 +530,10 @@ describe("tasks storage", () => {
 
   it("rejects cursors reused with different filters or sorting", async () => {
     const { harness, store } = setup();
+
     try {
       const project = createProject(store, "CUR");
+
       for (let index = 0; index < 3; index += 1) {
         store.createTask({
           projectId: project.id,
@@ -492,11 +541,13 @@ describe("tasks storage", () => {
           status: "todo",
         });
       }
+
       const cursor = store.listTasksPage({
         projectId: project.id,
         statuses: ["todo"],
         limit: 1,
       }).nextCursor;
+
       if (cursor === null) throw new Error("expected another task page");
 
       expect(() =>
@@ -523,8 +574,10 @@ describe("tasks storage", () => {
 
   it("validates invalid, mismatched, and stale cursors for empty array filters", async () => {
     const { harness, store } = setup();
+
     try {
       const project = createProject(store, "EMP");
+
       for (let index = 0; index < 3; index += 1) {
         store.createTask({
           projectId: project.id,
@@ -532,20 +585,24 @@ describe("tasks storage", () => {
           status: "todo",
         });
       }
+
       const cursor = store.listTasksPage({
         projectId: project.id,
         statuses: ["todo"],
         limit: 1,
       }).nextCursor;
+
       if (cursor === null) throw new Error("expected another task page");
 
       const filters = ["statuses", "priorities", "labelIds"] as const;
+
       const matchingCursors = new Map(
         filters.map((filter) => [
           filter,
           cursorForEmptyArrayFilter(cursor, project.id, filter),
         ]),
       );
+
       for (const filter of filters) {
         const emptyFilter = { [filter]: [] };
         expect(
@@ -570,6 +627,7 @@ describe("tasks storage", () => {
           }),
         ).toThrow("does not match the current filters");
       }
+
       expect(() =>
         store.listTasksPage({
           projectId: project.id,
@@ -583,6 +641,7 @@ describe("tasks storage", () => {
         title: "Mutation",
         status: "todo",
       });
+
       for (const filter of filters) {
         expect(() =>
           store.listTasksPage({
@@ -599,26 +658,32 @@ describe("tasks storage", () => {
 
   it("uses fractional midpoints and renormalizes exhausted gaps", async () => {
     const { db, harness, store } = setup();
+
     try {
       const project = createProject(store, "ORD");
+
       const first = store.createTask({
         projectId: project.id,
         title: "First",
         status: "todo",
       });
+
       const second = store.createTask({
         projectId: project.id,
         title: "Second",
         status: "todo",
       });
+
       const moved = store.createTask({
         projectId: project.id,
         title: "Moved",
         status: "todo",
       });
+
       const setPosition = db.prepare<[number, string]>(
         "UPDATE tasks SET position = ? WHERE id = ?",
       );
+
       setPosition.run(1, first.id);
       setPosition.run(1 + 1e-12, second.id);
 
@@ -627,6 +692,7 @@ describe("tasks storage", () => {
         beforeTaskId: first.id,
         afterTaskId: second.id,
       });
+
       const tasks = store.listTasks({
         projectId: project.id,
         statuses: ["todo"],
@@ -646,13 +712,16 @@ describe("tasks storage", () => {
 
   it("lists every comment attachment of one task and nothing from its own files or other tasks", async () => {
     const { harness, store } = setup();
+
     try {
       const project = createProject(store, "ATT");
       const task = store.createTask({ projectId: project.id, title: "Task" });
+
       const otherTask = store.createTask({
         projectId: project.id,
         title: "Other",
       });
+
       const attach = (
         owner: { taskId: string } | { commentId: string },
         fileName: string,
@@ -665,6 +734,7 @@ describe("tasks storage", () => {
           blobPath: `blobs/${fileName}`,
           isImage: false,
         });
+
       const comment = (taskId: string, body: string) =>
         store.createComment({
           taskId,
@@ -672,6 +742,7 @@ describe("tasks storage", () => {
           authorName: "Sawyer",
           body,
         });
+
       const first = comment(task.id, "First");
       const second = comment(task.id, "Second");
       const elsewhere = comment(otherTask.id, "Elsewhere");
@@ -693,24 +764,29 @@ describe("tasks storage", () => {
 
   it("lists task comments in chronological order", async () => {
     const { db, harness, store } = setup();
+
     try {
       const project = createProject(store, "CMT");
       const task = store.createTask({ projectId: project.id, title: "Task" });
+
       const later = store.createComment({
         taskId: task.id,
         kind: "agent",
         authorName: "Agent",
         body: "Later",
       });
+
       const earlier = store.createComment({
         taskId: task.id,
         kind: "user",
         authorName: "Sawyer",
         body: "Earlier",
       });
+
       const setCreatedAt = db.prepare<[string, string]>(
         "UPDATE comments SET created_at = ? WHERE id = ?",
       );
+
       setCreatedAt.run("2026-07-15T10:00:00.000Z", later.id);
       setCreatedAt.run("2026-07-15T09:00:00.000Z", earlier.id);
 
@@ -724,12 +800,15 @@ describe("tasks storage", () => {
 
   it("lists live task threads before terminal ones, newest first", async () => {
     const { db, harness, store } = setup();
+
     try {
       const project = createProject(store, "THR");
       const task = store.createTask({ projectId: project.id, title: "Work" });
+
       const setAttachedAt = db.prepare<[string, string]>(
         "UPDATE task_threads SET attached_at = ? WHERE id = ?",
       );
+
       const attach = (
         threadId: string,
         liveStatus: "idle" | "working" | "failed" | "completed",
@@ -742,8 +821,10 @@ describe("tasks storage", () => {
           title: threadId,
           liveStatus,
         });
+
         setAttachedAt.run(attachedAt, row.id);
       };
+
       attach("thr_dead_first", "failed", "2026-07-15T09:00:00.000Z");
       attach("thr_live_old", "idle", "2026-07-15T10:00:00.000Z");
       attach("thr_dead_later", "completed", "2026-07-15T11:00:00.000Z");
@@ -770,9 +851,11 @@ describe("tasks storage", () => {
 
   it("finds the latest agent comment by reply time and ignores other activity", async () => {
     const { db, harness, store } = setup();
+
     try {
       const project = createProject(store, "LAR");
       const task = store.createTask({ projectId: project.id, title: "Task" });
+
       const latest = store.createComment({
         taskId: task.id,
         kind: "agent",
@@ -780,6 +863,7 @@ describe("tasks storage", () => {
         threadId: "thr_latest",
         body: "Latest agent reply",
       });
+
       const older = store.createComment({
         taskId: task.id,
         kind: "agent",
@@ -787,15 +871,18 @@ describe("tasks storage", () => {
         threadId: "thr_older",
         body: "Older agent reply",
       });
+
       const userComment = store.createComment({
         taskId: task.id,
         kind: "user",
         authorName: "Sawyer",
         body: "Newer user activity",
       });
+
       const setCreatedAt = db.prepare<[string, string]>(
         "UPDATE comments SET created_at = ? WHERE id = ?",
       );
+
       setCreatedAt.run("2026-07-15T10:00:00.000Z", older.id);
       setCreatedAt.run("2026-07-15T11:00:00.000Z", latest.id);
 
@@ -812,9 +899,11 @@ describe("tasks storage", () => {
 
   it("uses insertion order when agent replies share a timestamp", async () => {
     const { db, harness, store } = setup();
+
     try {
       const project = createProject(store, "TIE");
       const task = store.createTask({ projectId: project.id, title: "Task" });
+
       const earlier = store.createComment({
         taskId: task.id,
         kind: "agent",
@@ -822,6 +911,7 @@ describe("tasks storage", () => {
         threadId: "thr_earlier",
         body: "Earlier reply",
       });
+
       const later = store.createComment({
         taskId: task.id,
         kind: "agent",
@@ -829,16 +919,21 @@ describe("tasks storage", () => {
         threadId: "thr_later",
         body: "Later reply",
       });
+
       const earlierId = "01H00000000000000000000002";
       const laterId = "01H00000000000000000000001";
+
       const setId = db.prepare<[string, string]>(
         "UPDATE comments SET id = ? WHERE id = ?",
       );
+
       setId.run(earlierId, earlier.id);
       setId.run(laterId, later.id);
+
       const setCreatedAt = db.prepare<[string, string]>(
         "UPDATE comments SET created_at = ? WHERE id = ?",
       );
+
       const sharedTime = "2026-07-15T10:00:00.000Z";
       setCreatedAt.run(sharedTime, earlierId);
       setCreatedAt.run(sharedTime, laterId);
@@ -860,6 +955,7 @@ describe("tasks storage", () => {
 
   it("rejects duplicate preset names", async () => {
     const { harness, store } = setup();
+
     try {
       const preset: CreatePresetInput = {
         name: "Default",
@@ -873,6 +969,7 @@ describe("tasks storage", () => {
         machineId: null,
         instructions: "Work the task.",
       };
+
       store.createPreset(preset);
       expect(() => store.createPreset(preset)).toThrow(
         /UNIQUE constraint failed: presets.name/,

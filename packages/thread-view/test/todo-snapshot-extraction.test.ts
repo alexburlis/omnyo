@@ -1,5 +1,5 @@
-import { jsonObjectSchema, turnScope } from "@bb/domain";
-import type { Thread, ThreadEventPlanStep } from "@bb/domain";
+import { jsonObjectSchema, turnScope } from "@omnyo/domain";
+import type { Thread, ThreadEventPlanStep } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { extractThreadTimelinePendingTodos } from "../src/todo-snapshot-extraction.js";
 import type { ThreadEventWithMeta } from "../src/build-event-projection.js";
@@ -75,6 +75,7 @@ describe("extractThreadTimelinePendingTodos", () => {
         ],
       }),
     ]);
+
     expect(result).toEqual({
       sourceSeq: 2,
       updatedAt: 2,
@@ -97,18 +98,21 @@ describe("extractThreadTimelinePendingTodos", () => {
         steps: [{ step: "second", status: "active" }],
       }),
     ]);
+
     expect(result?.sourceSeq).toBe(30);
     expect(result?.items.map((item) => item.text)).toEqual(["third"]);
   });
 
   it("does not split an astral character at the todo text limit", () => {
     const prefix = "x".repeat(239);
+
     const result = extractThreadTimelinePendingTodos(ACTIVE, [
       planStepsEvent({
         seq: 1,
         steps: [{ step: `${prefix}𠮷tail`, status: "active" }],
       }),
     ]);
+
     expect(result?.items[0]?.text).toBe(prefix);
   });
 
@@ -136,6 +140,7 @@ describe("extractThreadTimelinePendingTodos", () => {
         legacyTodoWriteToolCallEvent(41),
       ]),
     ).toBeNull();
+
     const result = extractThreadTimelinePendingTodos(ACTIVE, [
       planStepsEvent({
         seq: 42,
@@ -143,6 +148,7 @@ describe("extractThreadTimelinePendingTodos", () => {
       }),
       legacyTodoWriteToolCallEvent(43),
     ]);
+
     expect(result?.sourceSeq).toBe(42);
   });
 
@@ -150,6 +156,7 @@ describe("extractThreadTimelinePendingTodos", () => {
     const events = [
       planStepsEvent({ seq: 1, steps: [{ step: "x", status: "active" }] }),
     ];
+
     expect(extractThreadTimelinePendingTodos("idle", events)).toBeNull();
     expect(extractThreadTimelinePendingTodos("error", events)).toBeNull();
     expect(extractThreadTimelinePendingTodos(ACTIVE, events)).not.toBeNull();

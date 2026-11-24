@@ -18,10 +18,12 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 function setup() {
   const db = createMigratedConnection();
   const host = upsertHost(db, hub, { name: "host" });
+
   const { project } = createProject(db, hub, {
     name: "project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/ownership" },
   });
+
   const spawn = (lifecycleOwnerThreadId?: string) =>
     createThread(db, hub, {
       projectId: project.id,
@@ -29,6 +31,7 @@ function setup() {
       lifecycleOwnerThreadId,
       status: "idle",
     });
+
   return { db, project, host, spawn };
 }
 
@@ -42,6 +45,7 @@ describe("lifecycle ownership", () => {
     archiveThread(db, hub, child.id);
     expect(getThread(db, owner.id)?.archivedAt).toBeNull();
     archiveThread(db, hub, owner.id);
+
     for (const thread of [owner, child, leaf])
       expect(getThread(db, thread.id)?.archivedAt).toEqual(expect.any(Number));
     expect(unarchiveThread(db, hub, leaf.id)).toBeNull();
@@ -72,16 +76,20 @@ describe("lifecycle ownership", () => {
     markThreadDeleted(db, hub, { threadId: owner.id });
     expect(() => spawn(owner.id)).toThrow(/lifecycleOwner/);
     const live = spawn();
+
     const other = createProject(db, hub, {
       name: "other",
       source: { type: "local_path", hostId: host.id, path: "/tmp/other" },
     }).project;
+
     expect(other.id).not.toBe(project.id);
+
     const dependent = createThread(db, hub, {
       projectId: other.id,
       providerId: "test",
       lifecycleOwnerThreadId: live.id,
     });
+
     archiveThread(db, hub, live.id);
     expect(getThread(db, dependent.id)?.archivedAt).toEqual(expect.any(Number));
     markThreadDeleted(db, hub, { threadId: live.id });
@@ -110,6 +118,7 @@ describe("lifecycle ownership", () => {
 it("leaves existing helpers unowned and preserves their state during migration", () => {
   const { db, spawn, project } = setup();
   const owner = spawn();
+
   const side = createThread(db, hub, {
     projectId: project.id,
     providerId: "test",
@@ -118,6 +127,7 @@ it("leaves existing helpers unowned and preserves their state during migration",
     originPluginId: "side-chat",
     visibility: "hidden",
   });
+
   const unknown = createThread(db, hub, {
     projectId: project.id,
     providerId: "test",
@@ -126,6 +136,7 @@ it("leaves existing helpers unowned and preserves their state during migration",
     visibility: "hidden",
     title: "side-chat",
   });
+
   const worker = createThread(db, hub, {
     projectId: project.id,
     providerId: "test",
@@ -140,14 +151,17 @@ it("leaves existing helpers unowned and preserves their state during migration",
       },
     },
   });
+
   db.update(threads)
     .set({ createdAt: 1, deletedAt: 2, archivedAt: 2 })
     .where(eq(threads.id, owner.id))
     .run();
+
   const migration = readFileSync(
     new URL("../../drizzle/0121_fluffy_major_mapleleaf.sql", import.meta.url),
     "utf8",
   );
+
   const before = db.$client.prepare("SELECT * FROM threads ORDER BY id").all();
   db.$client.exec(`
     DROP INDEX threads_lifecycle_owner_idx;
@@ -157,6 +171,7 @@ it("leaves existing helpers unowned and preserves their state during migration",
   expect(db.$client.prepare("SELECT * FROM threads ORDER BY id").all()).toEqual(
     before,
   );
+
   for (const child of [side, worker, unknown])
     expect(getThread(db, child.id)).toMatchObject({
       lifecycleOwnerThreadId: null,

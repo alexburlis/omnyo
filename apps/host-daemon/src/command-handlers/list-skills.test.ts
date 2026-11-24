@@ -16,8 +16,8 @@ import type {
   ProviderNativeRoot,
   ProviderNativeRootSet,
   ProviderNativeRoots,
-} from "@bb/domain";
-import type { DiscoveredSkill } from "@bb/host-daemon-contract";
+} from "@omnyo/domain";
+import type { DiscoveredSkill } from "@omnyo/host-daemon-contract";
 import { discoverSkills, type SkillScanRoot } from "../command-discovery.js";
 import { CommandDispatchError } from "../command-dispatch-support.js";
 import {
@@ -45,11 +45,12 @@ async function writeSkill(filePath: string, name: string): Promise<void> {
 
 async function makeWorkspaceFixture(): Promise<WorkspaceFixture> {
   const cwd = path.join(tempRoot, "workspace");
-  const dataDir = path.join(tempRoot, "bb-data");
+  const dataDir = path.join(tempRoot, "omnyo-data");
   const homeDir = path.join(tempRoot, "home");
   await mkdir(cwd, { recursive: true });
   await mkdir(dataDir, { recursive: true });
   await mkdir(homeDir, { recursive: true });
+
   return { cwd, dataDir, homeDir };
 }
 
@@ -105,7 +106,7 @@ function byName(
 }
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), "bb-list-skills-"));
+  tempRoot = await mkdtemp(path.join(tmpdir(), "omnyo-list-skills-"));
 });
 
 afterEach(async () => {
@@ -113,11 +114,23 @@ afterEach(async () => {
 });
 
 describe("resolveSkillScanRoots + discoverSkills", () => {
-  it("classifies the host-owned bb project root and the declared provider roots only", async () => {
+  it("classifies the host-owned Omnyo project root and the declared provider roots only", async () => {
     const fixture = await makeWorkspaceFixture();
+
     const files = {
-      "proj-bb": path.join(fixture.cwd, ".bb", "skills", "proj-bb", "SKILL.md"),
-      "data-bb": path.join(fixture.dataDir, "skills", "data-bb", "SKILL.md"),
+      "proj-omnyo": path.join(
+        fixture.cwd,
+        ".omnyo",
+        "skills",
+        "proj-omnyo",
+        "SKILL.md",
+      ),
+      "data-omnyo": path.join(
+        fixture.dataDir,
+        "skills",
+        "data-omnyo",
+        "SKILL.md",
+      ),
       "proj-agent": path.join(
         fixture.cwd,
         ".agent",
@@ -133,21 +146,22 @@ describe("resolveSkillScanRoots + discoverSkills", () => {
         "SKILL.md",
       ),
     };
+
     for (const [name, filePath] of Object.entries(files)) {
       await writeSkill(filePath, name);
     }
 
     const skills = await listSkills(fixture, fixture.cwd, AGENT_SKILL_ROOTS);
 
-    expect(byName(skills, "proj-bb")).toEqual({
+    expect(byName(skills, "proj-omnyo")).toEqual({
       id: expect.stringMatching(/^skill_[a-f0-9]{64}$/u),
-      name: "proj-bb",
-      description: "proj-bb skill",
-      filePath: files["proj-bb"],
-      rootKind: "bb-project",
+      name: "proj-omnyo",
+      description: "proj-omnyo skill",
+      filePath: files["proj-omnyo"],
+      rootKind: "omnyo-project",
       linked: false,
     });
-    expect(byName(skills, "data-bb")).toBeUndefined();
+    expect(byName(skills, "data-omnyo")).toBeUndefined();
     expect(byName(skills, "proj-agent")?.rootKind).toBe("provider-project");
     expect(byName(skills, "user-agent")?.rootKind).toBe("provider-user");
     expect(byName(skills, "user-agent")?.filePath).toBe(files["user-agent"]);
@@ -156,19 +170,23 @@ describe("resolveSkillScanRoots + discoverSkills", () => {
   it("keeps a declared provider skill's ID stable when the workspace root moves", async () => {
     const roots = skillRoots({ project: [declared(".agent/skills")] });
     const ids: string[] = [];
+
     for (const checkout of ["checkout-a", "checkout-b"]) {
       const cwd = path.join(tempRoot, checkout);
       await writeSkill(
         path.join(cwd, ".agent", "skills", "review", "SKILL.md"),
         "review",
       );
+
       const skills = await listSkills(
         { cwd, dataDir: "", homeDir: path.join(tempRoot, "home") },
         cwd,
         roots,
       );
+
       ids.push(byName(skills, "review")?.id ?? "");
     }
+
     expect(ids[0]).toMatch(/^skill_/u);
     expect(ids[0]).toBe(ids[1]);
   });
@@ -176,8 +194,8 @@ describe("resolveSkillScanRoots + discoverSkills", () => {
   it("drops project roots when cwd is null", async () => {
     const fixture = await makeWorkspaceFixture();
     await writeSkill(
-      path.join(fixture.cwd, ".bb", "skills", "proj-bb", "SKILL.md"),
-      "proj-bb",
+      path.join(fixture.cwd, ".omnyo", "skills", "proj-omnyo", "SKILL.md"),
+      "proj-omnyo",
     );
     await writeSkill(
       path.join(fixture.cwd, ".agent", "skills", "proj-agent", "SKILL.md"),
@@ -291,11 +309,17 @@ describe("resolveSkillScanRoots + discoverSkills", () => {
     });
   });
 
-  it("classifies configured shared user and project roots without the bb project root", async () => {
+  it("classifies configured shared user and project roots without the Omnyo project root", async () => {
     const fixture = await makeWorkspaceFixture();
     await writeSkill(
-      path.join(fixture.cwd, ".bb", "skills", "bb-project-skill", "SKILL.md"),
-      "bb-project-skill",
+      path.join(
+        fixture.cwd,
+        ".omnyo",
+        "skills",
+        "omnyo-project-skill",
+        "SKILL.md",
+      ),
+      "omnyo-project-skill",
     );
     await writeSkill(
       path.join(
@@ -319,12 +343,12 @@ describe("resolveSkillScanRoots + discoverSkills", () => {
         user: [declared(".agents/skills")],
         project: [declared(".agents/skills")],
       }),
-      "bb-shared",
+      "omnyo-shared",
     );
 
     expect(byName(skills, "project-shared")?.rootKind).toBe("shared-project");
     expect(byName(skills, "user-shared")?.rootKind).toBe("shared-user");
-    expect(byName(skills, "bb-project-skill")).toBeUndefined();
+    expect(byName(skills, "omnyo-project-skill")).toBeUndefined();
   });
 
   it("discovers a project skill through a symlinked shared root", async () => {
@@ -344,7 +368,7 @@ describe("resolveSkillScanRoots + discoverSkills", () => {
       fixture,
       fixture.cwd,
       skillRoots({ project: [declared(".shared/skills")] }),
-      "bb-shared",
+      "omnyo-shared",
     );
 
     expect(byName(skills, "linked-root")).toMatchObject({
@@ -403,6 +427,7 @@ describe("discoverSkills marks the linked flag per root shape", () => {
   async function writeSkillTarget(name: string): Promise<string> {
     const target = path.join(tempRoot, "targets", `${name}.md`);
     await writeSkill(target, name);
+
     return target;
   }
 
@@ -410,6 +435,7 @@ describe("discoverSkills marks the linked flag per root shape", () => {
     root: SkillScanRoot,
   ): Promise<[name: string, linked: boolean, filePath: string][]> {
     const skills = await discoverSkills({ roots: [root] });
+
     return skills.map((skill) => [skill.name, skill.linked, skill.filePath]);
   }
 
@@ -546,7 +572,7 @@ describe("discoverSkills marks the linked flag per root shape", () => {
 });
 
 describe("deleteHostSkill", () => {
-  it("deletes a bb-user skill directory", async () => {
+  it("deletes an omnyo-user skill directory", async () => {
     const fixture = await makeWorkspaceFixture();
     const skillDir = path.join(fixture.dataDir, "skills", "doomed");
     await writeSkill(path.join(skillDir, "SKILL.md"), "doomed");
@@ -554,7 +580,7 @@ describe("deleteHostSkill", () => {
     const result = await deleteHostSkill(
       {
         type: "host.delete_skill",
-        scope: "bb-user",
+        scope: "omnyo-user",
         name: "doomed",
         cwd: null,
         rootPath: null,
@@ -566,15 +592,15 @@ describe("deleteHostSkill", () => {
     expect(result.deletedPath).toContain("doomed");
   });
 
-  it("deletes a bb-project skill directory under cwd/.bb/skills", async () => {
+  it("deletes an omnyo-project skill directory under cwd/.omnyo/skills", async () => {
     const fixture = await makeWorkspaceFixture();
-    const skillDir = path.join(fixture.cwd, ".bb", "skills", "proj-doomed");
+    const skillDir = path.join(fixture.cwd, ".omnyo", "skills", "proj-doomed");
     await writeSkill(path.join(skillDir, "SKILL.md"), "proj-doomed");
 
     await deleteHostSkill(
       {
         type: "host.delete_skill",
-        scope: "bb-project",
+        scope: "omnyo-project",
         name: "proj-doomed",
         cwd: fixture.cwd,
         rootPath: null,
@@ -611,7 +637,7 @@ describe("deleteHostSkill", () => {
       deleteHostSkill(
         {
           type: "host.delete_skill",
-          scope: "bb-user",
+          scope: "omnyo-user",
           name: "../evil",
           cwd: null,
           rootPath: null,
@@ -621,7 +647,7 @@ describe("deleteHostSkill", () => {
     ).rejects.toMatchObject({ code: "invalid_skill_name" });
   });
 
-  it("refuses a skill symlinked outside the bb root after realpath", async () => {
+  it("refuses a skill symlinked outside the Omnyo root after realpath", async () => {
     const fixture = await makeWorkspaceFixture();
     const outside = path.join(tempRoot, "outside", "secret");
     await writeSkill(path.join(outside, "SKILL.md"), "secret");
@@ -633,7 +659,7 @@ describe("deleteHostSkill", () => {
       deleteHostSkill(
         {
           type: "host.delete_skill",
-          scope: "bb-user",
+          scope: "omnyo-user",
           name: "link",
           cwd: null,
           rootPath: null,
@@ -659,7 +685,7 @@ describe("deleteHostSkill", () => {
       deleteHostSkill(
         {
           type: "host.delete_skill",
-          scope: "bb-user",
+          scope: "omnyo-user",
           name: "alias",
           cwd: null,
           rootPath: null,
@@ -679,7 +705,7 @@ describe("deleteHostSkill", () => {
       deleteHostSkill(
         {
           type: "host.delete_skill",
-          scope: "bb-user",
+          scope: "omnyo-user",
           name: "ghost",
           cwd: null,
           rootPath: null,
@@ -699,7 +725,7 @@ describe("deleteHostSkill", () => {
       deleteHostSkill(
         {
           type: "host.delete_skill",
-          scope: "bb-user",
+          scope: "omnyo-user",
           name: "plain",
           cwd: null,
           rootPath: null,
@@ -712,7 +738,7 @@ describe("deleteHostSkill", () => {
 });
 
 describe("writeHostSkill", () => {
-  it("atomically replaces a bb skill only at the expected revision", async () => {
+  it("atomically replaces an Omnyo skill only at the expected revision", async () => {
     const fixture = await makeWorkspaceFixture();
     const filePath = path.join(fixture.dataDir, "skills", "review", "SKILL.md");
     const original = "---\nname: review\ndescription: Review\n---\n";
@@ -723,7 +749,7 @@ describe("writeHostSkill", () => {
     const written = await writeHostSkill(
       {
         type: "host.write_skill",
-        scope: "bb-user",
+        scope: "omnyo-user",
         name: "review",
         cwd: null,
         content: "# Updated",
@@ -742,7 +768,7 @@ describe("writeHostSkill", () => {
     const stale = await writeHostSkill(
       {
         type: "host.write_skill",
-        scope: "bb-user",
+        scope: "omnyo-user",
         name: "review",
         cwd: null,
         content: "# Stale overwrite",
@@ -750,6 +776,7 @@ describe("writeHostSkill", () => {
       },
       { dataDir: fixture.dataDir },
     );
+
     expect(stale).toMatchObject({ outcome: "conflict" });
     expect(await readFile(filePath, "utf8")).toBe("# Updated");
   });

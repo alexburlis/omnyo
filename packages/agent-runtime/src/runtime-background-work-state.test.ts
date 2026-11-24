@@ -3,8 +3,8 @@ import type {
   ThreadEvent,
   ThreadEventBackgroundTaskItem,
   ThreadEventDelegationItem,
-} from "@bb/domain";
-import { threadScope, turnScope } from "@bb/domain";
+} from "@omnyo/domain";
+import { threadScope, turnScope } from "@omnyo/domain";
 import { RuntimeBackgroundWorkState } from "./runtime-background-work-state.js";
 
 interface TaskOptions {
@@ -70,6 +70,38 @@ function delegation(
 }
 
 describe("RuntimeBackgroundWorkState", () => {
+  it("provider session ended closes only its reporting while independent Omnyo work stays open", () => {
+    const state = new RuntimeBackgroundWorkState();
+    state.observe(taskStarted("provider-shell"));
+    state.observe(taskStarted("omnyo-workflow", { threadId: "omnyo-owned" }));
+    state.observe({
+      type: "turn/completed",
+      threadId: "t1",
+      providerThreadId: "p1",
+      scope: turnScope("turn-1"),
+      status: "failed",
+      error: {
+        message: "Provider reporting ended; execution outcome is unknown",
+      },
+    });
+    expect(state.hasOpenThreadWork("t1")).toBe(true);
+    state.observe({
+      type: "item/backgroundTask/completed",
+      threadId: "t1",
+      providerThreadId: "p1",
+      scope: threadScope(),
+      item: {
+        ...task("provider-shell"),
+        status: "interrupted",
+        taskStatus: "stopped",
+        summary: "Provider reporting ended; execution outcome is unknown",
+      },
+    });
+    expect(state.hasOpenThreadWork("t1")).toBe(false);
+    expect(state.hasOpenThreadWork("omnyo-owned")).toBe(true);
+    expect(state.hasOpenWork()).toBe(true);
+  });
+
   it("counts an open delegation as open work until it settles", () => {
     const state = new RuntimeBackgroundWorkState();
     state.observe({
@@ -102,6 +134,7 @@ describe("RuntimeBackgroundWorkState", () => {
 
   it("re-opens a settled delegation the provider reopened for a followup", () => {
     const state = new RuntimeBackgroundWorkState();
+
     const started: ThreadEvent = {
       type: "item/started",
       threadId: "t1",
@@ -109,6 +142,7 @@ describe("RuntimeBackgroundWorkState", () => {
       scope: turnScope("turn-1"),
       item: delegation("d1"),
     };
+
     state.observe(started);
     state.observe({
       type: "item/completed",
@@ -216,5 +250,45 @@ describe("RuntimeBackgroundWorkState", () => {
     });
 
     expect(state.hasOpenWork()).toBe(false);
+  });
+
+  it("returns a stopped completion carrying the latest report of each background task it drops", () => {
+    const state = new RuntimeBackgroundWorkState();
+    state.observe(taskStarted("task-open"));
+    state.observe({
+      type: "item/backgroundTask/progress",
+      threadId: "t1",
+      providerThreadId: "p1",
+      scope: threadScope(),
+      item: { ...task("task-open"), summary: "halfway" },
+    });
+    state.observe(taskStarted("task-done"));
+    state.observe(taskCompleted("task-done"));
+    state.observe({
+      type: "item/started",
+      threadId: "t1",
+      providerThreadId: "p1",
+      scope: turnScope("turn-1"),
+      item: delegation("d1", "pending", true),
+    });
+    state.observe(taskStarted("task-other", { threadId: "t2" }));
+
+    expect(state.clearThread("t1")).toEqual([
+      {
+        type: "item/backgroundTask/completed",
+        threadId: "t1",
+        providerThreadId: "p1",
+        scope: threadScope(),
+        item: {
+          ...task("task-open"),
+          summary: "halfway",
+          status: "interrupted",
+          taskStatus: "stopped",
+        },
+      },
+    ]);
+    expect(state.hasOpenThreadWork("t1")).toBe(false);
+    expect(state.hasOpenThreadWork("t2")).toBe(true);
+    expect(state.clearThread("t1")).toEqual([]);
   });
 });

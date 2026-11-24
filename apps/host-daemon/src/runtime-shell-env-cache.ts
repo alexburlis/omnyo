@@ -1,4 +1,4 @@
-import type { AgentRuntimeOptions } from "@bb/agent-runtime";
+import type { AgentRuntimeOptions } from "@omnyo/agent-runtime";
 
 export type RuntimeShellEnv = NonNullable<AgentRuntimeOptions["shellEnv"]>;
 
@@ -30,6 +30,7 @@ export function createRuntimeShellEnvCache(
 ): RuntimeShellEnvCache {
   const resolveShellEnv = options.resolveShellEnv;
   let hasResolvedEnv = options.resolvedAtMs !== undefined;
+
   let entry: CacheEntry | null =
     options.resolvedAtMs === undefined
       ? null
@@ -43,7 +44,9 @@ export function createRuntimeShellEnvCache(
       if (!resolveShellEnv) {
         return options.readShellEnv();
       }
+
       const now = options.now();
+
       if (entry && entry.expiresAtMs > now) {
         return allowStale && hasResolvedEnv
           ? options.readShellEnv()
@@ -53,23 +56,31 @@ export function createRuntimeShellEnvCache(
       const promise = (async () => {
         await options.applyShellEnv(await resolveShellEnv());
         hasResolvedEnv = true;
+
         return options.readShellEnv();
       })();
+
       const started: CacheEntry = {
         expiresAtMs: now + options.ttlMs,
         promise,
       };
+
       entry = started;
+
       const resolved = promise.catch((error: unknown) => {
         if (entry === started) {
           entry = null;
         }
+
         throw error;
       });
+
       if (allowStale && hasResolvedEnv) {
         resolved.catch(options.onRefreshError);
+
         return options.readShellEnv();
       }
+
       return resolved;
     },
   };

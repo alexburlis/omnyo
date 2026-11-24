@@ -1,4 +1,4 @@
-import type { TimelineRow, TimelineRowStatus } from "@bb/server-contract";
+import type { TimelineRow, TimelineRowStatus } from "@omnyo/server-contract";
 import { ThreadTimelineRows } from "@/components/thread/timeline";
 import {
   commandRow,
@@ -15,6 +15,7 @@ export default {
 };
 
 const THREAD_ID = "thr_ramp";
+
 const TURN_ID = "turn_ramp_1";
 
 function TimelineStage({ children }: { children: React.ReactNode }) {
@@ -76,7 +77,7 @@ const doneCommand: TimelineRow = commandRow({
   createdAt: 1777944004000,
   status: "completed",
   callId: "call_ramp_done_cmd",
-  command: "pnpm exec turbo run typecheck --filter=@bb/host-daemon",
+  command: "pnpm exec turbo run typecheck --filter=@omnyo/host-daemon",
   source: null,
   output: "",
   exitCode: 0,
@@ -119,6 +120,7 @@ function bundleCommand(
   status: TimelineRowStatus = "completed",
 ): TimelineRow {
   const pending = status === "pending";
+
   return commandRow({
     id: `${THREAD_ID}:command:bundle_${seq}`,
     threadId: THREAD_ID,
@@ -139,17 +141,20 @@ function bundleCommand(
 }
 
 const commandBundleRows: TimelineRow[] = [
-  bundleCommand(20, "pnpm exec turbo run build --filter=@bb/host-daemon"),
-  bundleCommand(21, "pnpm exec turbo run test --filter=@bb/host-daemon"),
-  bundleCommand(22, "pnpm exec turbo run typecheck --filter=@bb/host-daemon"),
+  bundleCommand(20, "pnpm exec turbo run build --filter=@omnyo/host-daemon"),
+  bundleCommand(21, "pnpm exec turbo run test --filter=@omnyo/host-daemon"),
+  bundleCommand(
+    22,
+    "pnpm exec turbo run typecheck --filter=@omnyo/host-daemon",
+  ),
 ];
 
 const activeCommandBundleRows: TimelineRow[] = [
-  bundleCommand(23, "pnpm exec turbo run build --filter=@bb/host-daemon"),
-  bundleCommand(24, "pnpm exec turbo run test --filter=@bb/host-daemon"),
+  bundleCommand(23, "pnpm exec turbo run build --filter=@omnyo/host-daemon"),
+  bundleCommand(24, "pnpm exec turbo run test --filter=@omnyo/host-daemon"),
   bundleCommand(
     25,
-    "pnpm exec turbo run typecheck --filter=@bb/host-daemon",
+    "pnpm exec turbo run typecheck --filter=@omnyo/host-daemon",
     "pending",
   ),
 ];
@@ -160,6 +165,7 @@ function explorationRead(
   status: TimelineRowStatus = "completed",
 ): TimelineRow {
   const pending = status === "pending";
+
   return fileReadRow({
     id: `${THREAD_ID}:file-read:explore_${seq}`,
     threadId: THREAD_ID,

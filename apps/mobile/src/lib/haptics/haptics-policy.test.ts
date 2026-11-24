@@ -20,19 +20,20 @@ const EVERY_KIND: HapticKind[] = [
 describe("resolveHapticCall", () => {
   it("returns null for every kind when haptics are off", () => {
     for (const kind of EVERY_KIND) {
-      expect(resolveHapticCall(false, kind)).toBeNull();
+      expect(resolveHapticCall(false, kind, true)).toBeNull();
+      expect(resolveHapticCall(false, kind, false)).toBeNull();
     }
   });
 
   it("maps semantic kinds onto the three expo-haptics methods", () => {
-    expect(resolveHapticCall(true, "selection")).toEqual({
+    expect(resolveHapticCall(true, "selection", true)).toEqual({
       method: "selection",
     });
-    expect(resolveHapticCall(true, "impact-medium")).toEqual({
+    expect(resolveHapticCall(true, "impact-medium", false)).toEqual({
       method: "impact",
       style: "medium",
     });
-    expect(resolveHapticCall(true, "warning")).toEqual({
+    expect(resolveHapticCall(true, "warning", true)).toEqual({
       method: "notification",
       type: "warning",
     });
@@ -53,15 +54,19 @@ describe("createHapticsPreferenceStore", () => {
     const backing = new Map<string, string>([
       [HAPTICS_ENABLED_STORAGE_KEY, "false"],
     ]);
+
     const store = createHapticsPreferenceStore({
       getString: (key) => backing.get(key),
       set: (key, value) => backing.set(key, value),
     });
+
     expect(store.isEnabled()).toBe(false);
     let notified = 0;
+
     const unsubscribe = store.subscribe(() => {
       notified += 1;
     });
+
     store.setEnabled(false);
     expect(notified).toBe(0);
     store.setEnabled(true);

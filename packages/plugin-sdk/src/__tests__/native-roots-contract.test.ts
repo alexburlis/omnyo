@@ -1,7 +1,7 @@
 import {
   PROVIDER_RESOLVED_NATIVE_ROOTS_MAX,
   type ProviderResolvedNativeRootInput,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   experimental_filterResolvedNativeRoots,
@@ -21,6 +21,7 @@ function roots(count: number, side: string) {
 describe("experimental_filterResolvedNativeRoots", () => {
   it("drops a root with an unknown key so the kept answer passes the strict output schema", () => {
     const warn = vi.fn();
+
     const result = experimental_filterResolvedNativeRoots(
       {
         skills: [
@@ -30,6 +31,7 @@ describe("experimental_filterResolvedNativeRoots", () => {
       },
       { warn, warned: new Set() },
     );
+
     expect(result.answer.skills.map((root) => root.path)).toEqual([
       "/home/u/.claude/skills",
     ]);
@@ -49,12 +51,14 @@ describe("experimental_filterResolvedNativeRoots", () => {
   it("warns once per (side, path, reason) across calls that share a warned set", () => {
     const warn = vi.fn();
     const warned = new Set<string>();
+
     const answer = {
       skills: [
         { path: "/p/spaced", origin: "user" as const, namePrefix: "bad name:" },
         ...roots(PROVIDER_RESOLVED_NATIVE_ROOTS_MAX + 1, "skills"),
       ],
     };
+
     experimental_filterResolvedNativeRoots(answer, { warn, warned });
     experimental_filterResolvedNativeRoots(answer, { warn, warned });
     expect(warn).toHaveBeenCalledTimes(2);
@@ -160,17 +164,21 @@ describe("experimental_filterResolvedNativeRoots", () => {
     expect(warn).toHaveBeenLastCalledWith(
       'resolveNativeRoots: dropped the commands root "/p/skill": A commands root needs a command shape',
     );
+
     const parsed = experimental_nativeRootsResolveOutputSchema.safeParse(
       result.answer,
     );
+
     expect(parsed.success).toBe(true);
   });
 
   it("names the reason classes a root with more than one defect reports", () => {
     const PATH_REASON =
       "path: Absolute roots must be absolute paths without dot segments";
+
     const MARKER_REASON =
       "skipIfManifest: A manifest marker is a relative path without dot segments";
+
     const wrongTyped: ProviderResolvedNativeRootInput = {
       path: "rel/typed",
       origin: "user",
@@ -262,6 +270,41 @@ describe("experimental_filterResolvedNativeRoots", () => {
 });
 
 describe("experimental_nativeRootsResolveOutputSchema", () => {
+  it("preserves exact dependency paths and rejects relative or unbounded dependencies", () => {
+    const watchPaths = [
+      "/home/u/.codex/config.toml",
+      "/home/u/.codex/plugins/cache",
+    ];
+
+    const filtered = experimental_filterResolvedNativeRoots(
+      { watchPaths },
+      { warn: () => undefined },
+    );
+
+    expect(
+      experimental_nativeRootsResolveOutputSchema.parse(filtered.answer)
+        .watchPaths,
+    ).toEqual(watchPaths);
+    expect(
+      experimental_nativeRootsResolveOutputSchema.parse({ watchPaths: [] })
+        .watchPaths,
+    ).toEqual([]);
+    expect(
+      experimental_nativeRootsResolveOutputSchema.parse({}).watchPaths,
+    ).toBeUndefined();
+
+    for (const invalid of [
+      ["relative/config.toml"],
+      Array(257).fill("/config.toml"),
+    ]) {
+      expect(
+        experimental_nativeRootsResolveOutputSchema.safeParse({
+          watchPaths: invalid,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it("fills each side's defaults and drops a commands root's manifest marker instead of refusing it", () => {
     const parsed = experimental_nativeRootsResolveOutputSchema.parse({
       skills: [
@@ -279,6 +322,7 @@ describe("experimental_nativeRootsResolveOutputSchema", () => {
         },
       ],
     });
+
     expect(parsed).toEqual({
       skills: [
         {
@@ -319,6 +363,7 @@ describe("experimental_nativeRootsResolveOutputSchema", () => {
     const parsed = experimental_nativeRootsResolveOutputSchema.parse({
       skills: roots(300, "s"),
     });
+
     expect(parsed.skills).toHaveLength(PROVIDER_RESOLVED_NATIVE_ROOTS_MAX);
     expect(parsed.skills[255]?.path).toBe("/s/255");
     expect(parsed.commands).toEqual([]);

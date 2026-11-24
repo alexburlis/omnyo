@@ -14,8 +14,11 @@ import {
 } from "node:perf_hooks";
 
 const PROFILE_INTERVAL_MS = 30_000;
+
 const PROFILE_RETENTION_MS = 12 * 60 * 60 * 1_000;
+
 const MAX_RETAINED_PROFILE_BYTES = 1_000_000_000;
+
 const MAX_PROFILE_BYTES = 12 * 1024 * 1024;
 
 export async function startPerformanceDiagnostics(options: {
@@ -29,33 +32,43 @@ export async function startPerformanceDiagnostics(options: {
   const runSynchronousWork =
     options.runSynchronousWork ??
     (<T>(_label: string, work: () => T): T => work());
+
   const directory = join(options.dataDir, "logs", "performance");
   const session = new Session();
   let profiling = false;
-  let profileTitle = `bb-performance-${randomUUID()}`;
+  let profileTitle = `omnyo-performance-${randomUUID()}`;
+
   const finishProfile = (title: string): Profiler.Profile => {
     let profile: Profiler.Profile | undefined;
+
     const finished = (
       message: InspectorNotification<Profiler.ConsoleProfileFinishedEventDataType>,
     ) => {
       if (message.params.title === title) profile = message.params.profile;
     };
+
     session.on("Profiler.consoleProfileFinished", finished);
+
     try {
       inspectorConsole.profileEnd(title);
     } finally {
       session.off("Profiler.consoleProfileFinished", finished);
     }
+
     if (!profile) throw new Error("CPU profile completion was not received");
+
     return profile;
   };
+
   let stopped = false;
   let profileStartedAt = new Date().toISOString();
   let rotation: Promise<void> = Promise.resolve();
   const pendingPath = join(directory, "profile.pending");
+
   const pruneProfiles = async (reservedBytes: number): Promise<void> => {
     const cutoff = Date.now() - PROFILE_RETENTION_MS;
     const files = await readdir(directory, { withFileTypes: true });
+
     const profiles = await Promise.all(
       files
         .filter(
@@ -66,17 +79,21 @@ export async function startPerformanceDiagnostics(options: {
         .map(async (file) => {
           const path = join(directory, file.name);
           const details = await stat(path);
+
           return { path, bytes: details.size, savedAt: details.mtimeMs };
         }),
     );
+
     profiles.sort(
       (left, right) =>
         left.savedAt - right.savedAt || left.path.localeCompare(right.path),
     );
+
     let bytes = profiles.reduce(
       (total, profile) => total + profile.bytes,
       reservedBytes,
     );
+
     for (const profile of profiles) {
       if (profile.savedAt <= cutoff || bytes > MAX_RETAINED_PROFILE_BYTES) {
         await rm(profile.path, { force: true });
@@ -84,10 +101,12 @@ export async function startPerformanceDiagnostics(options: {
       }
     }
   };
+
   const histogram = monitorEventLoopDelay({ resolution: 10 });
   let gcDurationMs = 0;
   let gcCount = 0;
   let gcMaxDurationMs = 0;
+
   const observer = new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
       gcDurationMs += entry.duration;
@@ -95,12 +114,14 @@ export async function startPerformanceDiagnostics(options: {
       gcMaxDurationMs = Math.max(gcMaxDurationMs, entry.duration);
     }
   });
+
   observer.observe({ entryTypes: ["gc"] });
   histogram.enable();
   let previousCpu = process.cpuUsage();
   let previousThreadCpu = process.threadCpuUsage();
   let previousTime = performance.now();
   let previousUtilization = performance.eventLoopUtilization();
+
   const summaryTimer = setInterval(() => {
     const now = performance.now();
     const cpu = process.cpuUsage();
@@ -141,6 +162,7 @@ export async function startPerformanceDiagnostics(options: {
     gcMaxDurationMs = 0;
     histogram.reset();
   }, 5_000);
+
   summaryTimer.unref();
 
   try {
@@ -175,11 +197,13 @@ export async function startPerformanceDiagnostics(options: {
 
   const capture = async (restart: boolean): Promise<void> => {
     if (!profiling) return;
+
     try {
       const title = profileTitle;
       const startedAt = profileStartedAt;
+
       if (restart && !stopped) {
-        profileTitle = `bb-performance-${randomUUID()}`;
+        profileTitle = `omnyo-performance-${randomUUID()}`;
         runSynchronousWork("cpu-profile:start", () =>
           inspectorConsole.profile(profileTitle),
         );
@@ -187,26 +211,34 @@ export async function startPerformanceDiagnostics(options: {
       } else {
         profiling = false;
       }
+
       const profile = runSynchronousWork("cpu-profile:finish", () =>
         finishProfile(title),
       );
+
       const endedAt = new Date().toISOString();
+
       const contents = runSynchronousWork("cpu-profile:serialize", () =>
         JSON.stringify(profile),
       );
+
       const bytes = Buffer.byteLength(contents);
       await pruneProfiles(bytes > MAX_PROFILE_BYTES ? 0 : bytes);
+
       if (bytes > MAX_PROFILE_BYTES) {
         options.logger.warn(
           { bytes, startedAt, endedAt },
           "CPU profile exceeded size limit; discarded",
         );
+
         return;
       }
+
       const path = join(
         directory,
         `profile-${Date.now()}-${randomUUID()}.cpuprofile`,
       );
+
       await writeFile(pendingPath, contents, { mode: 0o600 });
       await rename(pendingPath, path);
       options.logger.info(
@@ -231,11 +263,14 @@ export async function startPerformanceDiagnostics(options: {
       );
     }
   };
+
   const profileTimer = setInterval(() => {
     rotation = rotation.then(() => capture(true));
   }, PROFILE_INTERVAL_MS);
+
   profileTimer.unref();
   let stopPromise: Promise<void> | undefined;
+
   return {
     stop: () => {
       stopPromise ??= (async () => {
@@ -248,6 +283,7 @@ export async function startPerformanceDiagnostics(options: {
         await capture(false);
         session.disconnect();
       })();
+
       return stopPromise;
     },
   };

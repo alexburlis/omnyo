@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CREATE_PLUGIN_PROMPT } from "@bb/client-core";
+import { CREATE_PLUGIN_PROMPT } from "@omnyo/client-core";
 import {
   BROWSE_ARCHETYPES,
   UTILITY_EXAMPLES,
@@ -10,7 +10,7 @@ import {
 } from "./browse-hero-archetypes";
 import { BrowseArchetypeCards } from "./BrowseArchetypeCards";
 import { BrowseHeroCarousel } from "./BrowseHeroCarousel";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { MINI_APP_SCENES } from "./MiniAppScenes";
 
 const openComposer = vi.fn<(seed: string | undefined) => void>();
@@ -18,12 +18,15 @@ const openComposer = vi.fn<(seed: string | undefined) => void>();
 vi.mock("@/components/plugin/PluginNewThreadComposer", () => ({
   PluginNewThreadComposer: ({ initialPrompt }: { initialPrompt?: string }) => {
     openComposer(initialPrompt);
+
     return <div data-testid="real-composer">{initialPrompt}</div>;
   },
 }));
+
 vi.mock("@/hooks/mutations/thread-runtime-mutations", () => ({
   useCreateThread: () => ({ mutateAsync: vi.fn() }),
 }));
+
 vi.mock("react-router-dom", () => ({ useNavigate: () => vi.fn() }));
 
 afterEach(() => {
@@ -42,7 +45,7 @@ describe("BrowseHeroCarousel", () => {
     render(<BrowseHeroCarousel autoplay={false} />);
 
     const heading = screen.getByRole("heading", { level: 2 });
-    expect(heading.textContent).toContain("Turn bb into");
+    expect(heading.textContent).toContain("Turn Omnyo into");
     expect(heading.textContent).toContain(BROWSE_ARCHETYPES[0]?.noun);
     expect(screen.getByText("Plugin")).toBeTruthy();
     expect(
@@ -78,6 +81,7 @@ describe("BrowseHeroCarousel", () => {
     const { rerender } = render(
       <BrowseHeroCarousel autoplay={false} openRequest={null} />,
     );
+
     expect(screen.queryByTestId("real-composer")).toBeNull();
 
     rerender(
@@ -102,6 +106,7 @@ describe("BrowseHeroCarousel", () => {
 
   it("reports composing transitions exactly once each", () => {
     const onComposingChange = vi.fn();
+
     const { rerender } = render(
       <BrowseHeroCarousel
         autoplay={false}
@@ -134,9 +139,11 @@ describe("BrowseHeroCarousel", () => {
   it("opens and re-seeds from external requests, ignoring stale nonces", () => {
     const first = BROWSE_ARCHETYPES[0]!;
     const second = BROWSE_ARCHETYPES[1]!;
+
     const { rerender } = render(
       <BrowseHeroCarousel autoplay={false} openRequest={null} />,
     );
+
     expect(screen.queryByTestId("real-composer")).toBeNull();
 
     rerender(
@@ -205,6 +212,7 @@ describe("BrowseArchetypeCards", () => {
     for (const archetype of BROWSE_ARCHETYPES) {
       expect(screen.getByText(archetype.title)).toBeTruthy();
     }
+
     for (const example of UTILITY_EXAMPLES) {
       expect(screen.getByText(example.label)).toBeTruthy();
     }

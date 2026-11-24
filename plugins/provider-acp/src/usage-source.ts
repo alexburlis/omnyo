@@ -1,42 +1,52 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
-import {
+import { experimental_providerUsageSourceV1 } from "@omnyo/plugin-sdk/provider-usage";
+
+const {
   usageSourceRpcContract,
   usageListMethod,
   usageFetchMethod,
   usageMeasurementSchema,
   usagePlanSchema,
   usageWindowKindSchema,
-  type UsageMeasurement,
-} from "./usage-contract.js";
+} = experimental_providerUsageSourceV1;
+
+type UsageMeasurement = z.infer<typeof usageMeasurementSchema>;
 
 const locatorSchema = z.tuple([z.string().min(1), z.string().min(1)]);
+
 const metadataSchema = z.object({
   accountKey: z.string().min(1).nullable().catch(null),
   plan: usagePlanSchema.nullable().catch(null),
 });
+
 const windowMetadataSchema = z.object({
   kind: usageWindowKindSchema.catch("custom"),
   model: z.string().nullable().catch(null),
 });
 
-export function registerUsageSource(bb: BbPluginApi) {
+export function registerUsageSource(api: PluginApi) {
   const cache = new Map<string, UsageMeasurement>();
+
   const pending = new Map<
     string,
     { refresh: boolean; promise: Promise<UsageMeasurement> }
   >();
+
   const load = async (
     resourceId: string,
     refresh: boolean,
   ): Promise<UsageMeasurement> => {
     const [hostId, providerId] = locatorSchema.parse(JSON.parse(resourceId));
-    const host = await bb.sdk.hosts.get({ hostId }).catch((error: unknown) => {
+
+    const host = await api.sdk.hosts.get({ hostId }).catch((error: unknown) => {
       if (error instanceof Error && "status" in error && error.status === 404)
         throw new Error("Usage resource no longer exists.");
       throw error;
     });
+
     const previous = cache.get(resourceId);
+
     const unavailable = (message: string) =>
       usageMeasurementSchema.parse({
         accountKey: previous?.accountKey ?? null,
@@ -48,12 +58,15 @@ export function registerUsageSource(bb: BbPluginApi) {
           message,
         },
       });
+
     if (host.status === "disconnected")
       return unavailable("Machine is disconnected.");
-    const providers = await bb.sdk.providers.list({
+
+    const providers = await api.sdk.providers.list({
       hostId,
       capability: "usage",
     });
+
     if (
       !providers.some(
         (provider) =>
@@ -61,6 +74,7 @@ export function registerUsageSource(bb: BbPluginApi) {
       )
     )
       throw new Error("Usage resource no longer exists.");
+
     if (
       !refresh &&
       previous?.usage.status === "ok" &&
@@ -68,16 +82,20 @@ export function registerUsageSource(bb: BbPluginApi) {
       Date.now() - previous.observedAt < 60_000
     )
       return previous;
+
     const promise = (async () => {
       try {
-        const result = await bb.sdk.system.usageLimits({
+        const result = await api.sdk.system.usageLimits({
           hostId,
           providerId,
           refresh,
         });
+
         const usage = result[providerId];
+
         if (!usage) throw new Error("Provider returned no usage information.");
         const metadata = metadataSchema.parse(usage);
+
         const value = usageMeasurementSchema.parse({
           accountKey: metadata.accountKey,
           observedAt:
@@ -99,46 +117,59 @@ export function registerUsageSource(bb: BbPluginApi) {
               : {}),
           },
         });
+
         cache.set(resourceId, value);
+
         return value;
       } catch {
         return unavailable("Usage could not be collected from this machine.");
       }
     })();
+
     return promise;
   };
+
   const collect = async (
     resourceId: string,
     refresh: boolean,
   ): Promise<UsageMeasurement> => {
     const running = pending.get(resourceId);
+
     if (running) {
       if (!refresh || running.refresh) return running.promise;
       await running.promise.catch(() => undefined);
+
       return collect(resourceId, refresh);
     }
+
     const promise = load(resourceId, refresh).finally(() =>
       pending.delete(resourceId),
     );
+
     pending.set(resourceId, { refresh, promise });
+
     return promise;
   };
-  bb.rpc.register(
+
+  api.rpc.register(
     usageSourceRpcContract,
     {
       async [usageListMethod]() {
-        const hosts = await bb.sdk.hosts.list();
+        const hosts = await api.sdk.hosts.list();
+
         const resources = (
           await Promise.all(
             hosts.map(async (host) => {
-              const providers = await bb.sdk.providers.list({
+              const providers = await api.sdk.providers.list({
                 hostId: host.id,
                 capability: "usage",
               });
+
               return providers
                 .filter((provider) => provider.pluginId === "provider-acp")
                 .map((provider) => {
                   const id = JSON.stringify([host.id, provider.id]);
+
                   return {
                     id,
                     accountKey: cache.get(id)?.accountKey ?? null,
@@ -154,8 +185,11 @@ export function registerUsageSource(bb: BbPluginApi) {
             }),
           )
         ).flat();
+
         const ids = new Set(resources.map((resource) => resource.id));
+
         for (const id of cache.keys()) if (!ids.has(id)) cache.delete(id);
+
         return { resources };
       },
       [usageFetchMethod]: ({ resourceId, refresh }) =>

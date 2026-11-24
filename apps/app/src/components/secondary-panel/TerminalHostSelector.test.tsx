@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   resolveTerminalHost,
@@ -12,6 +12,7 @@ const studio = makeHost({
   id: "host-studio",
   name: "Studio",
 });
+
 const laptop = makeHost({
   ...studio,
   id: "host-laptop",

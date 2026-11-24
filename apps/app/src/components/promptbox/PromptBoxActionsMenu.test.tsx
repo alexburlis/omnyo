@@ -5,7 +5,7 @@ import type {
   ComposerView,
   PluginComposerApi,
   PluginComposerScope,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import {
   act,
   cleanup,
@@ -33,14 +33,22 @@ import {
   type PluginComposerHost,
 } from "@/components/plugin/plugin-composer-host";
 import type { PluginComposerPlusMenuContribution } from "@/components/plugin/PluginComposerActions";
-import { emptyPromptDraftState } from "@bb/client-core";
+import { emptyPromptDraftState } from "@omnyo/client-core";
+import { OFF_SCREEN_EDITOR_STATE } from "@omnyo/plugin-sdk/internal/composer-handle";
+import {
+  clearComposerEditorBridge,
+  publishComposerEditorBridge,
+  type ComposerEditorBridge,
+} from "@/lib/composer-editor-registry";
 import {
   resetPluginLogoStoreForTest,
   setPluginLogoUrls,
 } from "@/lib/plugin-logos";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   ComposerPlusMenuSlot,
   PromptBoxActionsMenu,
+  type PromptBoxChatMenu,
 } from "./PromptBoxActionsMenu";
 
 afterEach(() => {
@@ -55,6 +63,7 @@ function composerHost(
   subscribeSelection: PluginComposerHost["subscribeSelection"] = () => () => {},
 ): { host: PluginComposerHost; view: ComposerView } {
   const draft = { ...emptyPromptDraftState(), text: "Draft" };
+
   return {
     view: {
       scope,
@@ -87,13 +96,16 @@ describe("PromptBoxActionsMenu", () => {
     render(<PromptBoxActionsMenu onAction={() => {}} onAttach={onAttach} />);
 
     const trigger = screen.getByRole("button", { name: "Prompt actions" });
-    expect(trigger.classList).toContain("text-subtle-foreground/75");
+    expect(trigger.classList).toContain("text-muted-foreground");
+    expect(trigger.classList).toContain("size-7");
     expect(trigger.querySelector('[data-icon="Plus"]')).not.toBeNull();
     expect(trigger.querySelector('[data-icon="Spinner"]')).toBeNull();
     fireEvent.pointerDown(trigger, { button: 0 });
+
     const attach = await screen.findByRole("menuitem", {
       name: "Attach files",
     });
+
     expect(attach.getAttribute("aria-disabled")).not.toBe("true");
     expect(attach.querySelector('[data-icon="Paperclip"]')).not.toBeNull();
     expect(attach.querySelector('[data-icon="Loading"]')).toBeNull();
@@ -163,20 +175,24 @@ describe("PromptBoxActionsMenu", () => {
           ],
         }),
       );
+
       setPluginSlotRegistrations(
         "conditional",
         makePluginRegistrationSet(collectPluginAppRegistrations(definition)),
       );
       let selection: ComposerSelection = { providerId: "codex" };
       const listeners = new Set<() => void>();
+
       const { host, view } = composerHost(
         { kind: "new-thread", projectId: null },
         () => selection,
         (listener) => {
           listeners.add(listener);
+
           return () => listeners.delete(listener);
         },
       );
+
       render(
         <MemoryRouter>
           <PluginComposerHostProvider value={host}>
@@ -190,6 +206,7 @@ describe("PromptBoxActionsMenu", () => {
                   queue={false}
                   hasInput
                   canSubmit
+                  canSend
                   onSubmit={undefined}
                 >
                   <button>Send</button>
@@ -210,6 +227,7 @@ describe("PromptBoxActionsMenu", () => {
 
       act(() => {
         selection = { providerId: "claude-code" };
+
         for (const listener of listeners) listener();
       });
 
@@ -223,6 +241,118 @@ describe("PromptBoxActionsMenu", () => {
     },
   );
 
+  async function openConditionalPlusRow(
+    disabled: (composer: PluginComposerApi) => boolean,
+    { host, view }: { host: PluginComposerHost; view: ComposerView },
+  ) {
+    const definition = definePluginApp((app) =>
+      app.composer.customize({
+        id: "conditional",
+        plusMenu: [
+          {
+            id: "conditional-row",
+            label: "Conditional",
+            disabled,
+            run: () => {},
+          },
+        ],
+      }),
+    );
+
+    setPluginSlotRegistrations(
+      "conditional",
+      makePluginRegistrationSet(collectPluginAppRegistrations(definition)),
+    );
+    render(
+      <MemoryRouter>
+        <PluginComposerHostProvider value={host}>
+          <PluginComposerViewProvider value={view}>
+            <ComposerPlusMenuSlot onAction={() => {}} />
+          </PluginComposerViewProvider>
+        </PluginComposerHostProvider>
+      </MemoryRouter>,
+    );
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Prompt actions" }),
+      { button: 0 },
+    );
+    await screen.findByRole("menuitem", { name: "Conditional" });
+  }
+
+  function conditionalRowDisabled() {
+    return screen
+      .getByRole("menuitem", { name: "Conditional" })
+      .getAttribute("aria-disabled");
+  }
+
+  it("re-renders plus-menu rows when the composer draft changes", async () => {
+    let draft = { ...emptyPromptDraftState(), text: "Draft" };
+    const listeners = new Set<() => void>();
+
+    const composer = composerHost(
+      { kind: "new-thread", projectId: null },
+      () => ({}),
+    );
+
+    await openConditionalPlusRow((current) => current.isEmpty, {
+      view: composer.view,
+      host: {
+        ...composer.host,
+        getCurrent: () => draft,
+        subscribeDraft: (listener) => {
+          listeners.add(listener);
+
+          return () => listeners.delete(listener);
+        },
+      },
+    });
+    expect(conditionalRowDisabled()).not.toBe("true");
+
+    act(() => {
+      draft = emptyPromptDraftState();
+
+      for (const listener of listeners) listener();
+    });
+
+    await waitFor(() => expect(conditionalRowDisabled()).toBe("true"));
+  });
+
+  it("re-renders plus-menu rows when the composer editor state changes", async () => {
+    const { host, view } = composerHost(
+      { kind: "new-thread", projectId: null },
+      () => ({}),
+    );
+
+    const bridge = (isSubmittingBlocked: boolean): ComposerEditorBridge => ({
+      host,
+      pluginCustomizable: true,
+      state: { ...OFF_SCREEN_EDITOR_STATE, isSubmittingBlocked },
+      insertAtCursor: () => false,
+      openPopup: () => false,
+      closePopup: () => false,
+      isPopupOpen: () => false,
+    });
+
+    const available = bridge(false);
+    const blocked = bridge(true);
+    publishComposerEditorBridge(host.textEffectKey, available);
+
+    try {
+      await openConditionalPlusRow((current) => current.isSubmittingBlocked, {
+        host,
+        view,
+      });
+      expect(conditionalRowDisabled()).not.toBe("true");
+
+      act(() => publishComposerEditorBridge(host.textEffectKey, blocked));
+
+      await waitFor(() => expect(conditionalRowDisabled()).toBe("true"));
+    } finally {
+      clearComposerEditorBridge(host.textEffectKey, available);
+      clearComposerEditorBridge(host.textEffectKey, blocked);
+    }
+  });
+
   it("restores composer focus after an update-only plugin item", async () => {
     const view: ComposerView = {
       scope: { kind: "new-thread", projectId: null },
@@ -230,8 +360,10 @@ describe("PromptBoxActionsMenu", () => {
       draft: { text: "draft", isEmpty: false, attachmentCount: 0 },
       run: { isRunning: false, isSubmitting: false },
     };
+
     const draft = { ...emptyPromptDraftState(), text: "draft" };
     const setDraft = vi.fn();
+
     const host: PluginComposerHost = {
       scope: view.scope,
       textEffectKey: "plus-menu-update-test",
@@ -240,6 +372,7 @@ describe("PromptBoxActionsMenu", () => {
       setDraft,
       focus: () => document.getElementById("composer-focus-target")?.focus(),
     };
+
     const pluginItems: readonly PluginComposerPlusMenuContribution[] = [
       {
         key: "update-plugin/1/tools/update",
@@ -254,6 +387,7 @@ describe("PromptBoxActionsMenu", () => {
         },
       },
     ];
+
     render(
       <MemoryRouter>
         <PluginComposerHostProvider value={host}>
@@ -286,13 +420,16 @@ describe("PromptBoxActionsMenu", () => {
 
   it("renders plugin rows without a header and preserves focus deliberately moved by a plugin", async () => {
     const focusedByPlugin = vi.fn();
+
     const view: ComposerView = {
       scope: { kind: "new-thread", projectId: null },
       layout: "expanded",
       draft: { text: "draft", isEmpty: false, attachmentCount: 0 },
       run: { isRunning: false, isSubmitting: false },
     };
+
     const draft = emptyPromptDraftState();
+
     const host: PluginComposerHost = {
       scope: view.scope,
       textEffectKey: "plus-menu-test",
@@ -301,6 +438,7 @@ describe("PromptBoxActionsMenu", () => {
       setDraft: vi.fn(),
       focus: vi.fn(),
     };
+
     const pluginItems: readonly PluginComposerPlusMenuContribution[] = [
       {
         key: "alpha/1/tools/improve",
@@ -329,6 +467,7 @@ describe("PromptBoxActionsMenu", () => {
         },
       },
     ];
+
     setPluginLogoUrls(
       new Map([
         [
@@ -389,5 +528,142 @@ describe("PromptBoxActionsMenu", () => {
       expect(focusedByPlugin).toHaveBeenCalledWith("plus-menu-test");
       expect(document.activeElement?.id).toBe("plugin-focus-target");
     });
+  });
+});
+
+describe("PromptBoxActionsMenu approvals", () => {
+  it("lists approvals with the current mode checked and changes it in one pick", async () => {
+    const onChange = vi.fn();
+
+    render(
+      <PromptBoxActionsMenu
+        onAction={() => {}}
+        approvals={{
+          value: "accept-edits",
+          options: [
+            { value: "accept-edits", label: "Accept Edits" },
+            { value: "auto", label: "Approve for me" },
+            { value: "full", label: "Full Access" },
+          ],
+          onChange,
+        }}
+      />,
+    );
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Prompt actions" }),
+      { button: 0 },
+    );
+
+    const current = await screen.findByRole("menuitemradio", {
+      name: "Accept Edits",
+    });
+
+    expect(current.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("Approvals")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Full Access" }));
+
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("full");
+  });
+});
+
+describe("PromptBoxActionsMenu on a phone", () => {
+  function renderPhoneMenu(chat: PromptBoxChatMenu) {
+    render(
+      <CompactViewportOverrideProvider isCompactViewport>
+        <PromptBoxActionsMenu onAction={() => {}} chat={chat} />
+      </CompactViewportOverrideProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Prompt actions" }));
+  }
+
+  it("lists approvals as labelled choices and changes them in one tap", async () => {
+    const onChange = vi.fn();
+    renderPhoneMenu({
+      approvals: {
+        value: "auto",
+        options: [
+          { value: "accept-edits", label: "Accept Edits" },
+          { value: "auto", label: "Approve for me" },
+        ],
+        onChange,
+      },
+      compactBeforeSend: null,
+      autoCompaction: null,
+      onShowTerminal: null,
+    });
+
+    const current = await screen.findByRole("menuitemradio", {
+      name: "Approve for me",
+    });
+
+    expect(current.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("Approvals")).not.toBeNull();
+    fireEvent.click(
+      screen.getByRole("menuitemradio", { name: "Accept Edits" }),
+    );
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("accept-edits");
+  });
+
+  it("gives this chat's compaction and terminal labelled rows", async () => {
+    const onCompactFirstChange = vi.fn();
+    const onShowTerminal = vi.fn();
+    renderPhoneMenu({
+      approvals: null,
+      compactBeforeSend: {
+        compactFirst: true,
+        tokens: 182_000,
+        onCompactFirstChange,
+      },
+      autoCompaction: {
+        at: 0,
+        keepFullHistory: false,
+        pending: false,
+        onKeepFullHistoryChange: vi.fn(),
+      },
+      onShowTerminal,
+    });
+
+    const compact = await screen.findByRole("switch", {
+      name: /Compact before sending/,
+    });
+
+    expect(compact.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("This chat")).not.toBeNull();
+    expect(
+      screen.getByText("Prompt cache expired · 182k tokens"),
+    ).not.toBeNull();
+    expect(
+      screen.queryByRole("switch", { name: /Keep full history/ }),
+    ).toBeNull();
+    fireEvent.click(compact);
+    expect(onCompactFirstChange).toHaveBeenCalledExactlyOnceWith(false);
+    expect(
+      screen.getByRole("switch", { name: /Compact before sending/ }),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show terminal" }));
+    expect(onShowTerminal).toHaveBeenCalledOnce();
+  });
+
+  it("offers the automatic compaction opt-out when no send would compact", async () => {
+    const onKeepFullHistoryChange = vi.fn();
+    renderPhoneMenu({
+      approvals: null,
+      compactBeforeSend: null,
+      autoCompaction: {
+        at: 0,
+        keepFullHistory: false,
+        pending: false,
+        onKeepFullHistoryChange,
+      },
+      onShowTerminal: null,
+    });
+
+    fireEvent.click(
+      await screen.findByRole("switch", { name: /Keep full history/ }),
+    );
+    expect(onKeepFullHistoryChange).toHaveBeenCalledExactlyOnceWith(true);
   });
 });

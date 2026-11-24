@@ -1,5 +1,5 @@
-import { closeSecondaryPanelTabInState } from "@bb/client-core";
-import type { TerminalSession } from "@bb/server-contract";
+import { closeSecondaryPanelTabInState } from "@omnyo/client-core";
+import type { TerminalSession } from "@omnyo/server-contract";
 import {
   createTerminalFixedPanelTab,
   type FixedPanelTabsState,
@@ -45,9 +45,11 @@ export function pruneTerminalTabsForSessions({
   terminalSessions,
 }: PruneTerminalTabsForSessionsArgs): readonly FixedPanelTab[] {
   const terminalSessionIds = getTerminalSessionTabIds(terminalSessions);
+
   const nextTabs = tabs.filter(
     (tab) => tab.kind !== "terminal" || terminalSessionIds.has(tab.terminalId),
   );
+
   return nextTabs.length === tabs.length ? tabs : nextTabs;
 }
 
@@ -59,14 +61,17 @@ export function pruneTerminalTabsInFixedPanelState({
     tabs: state.secondary.tabs,
     terminalSessions,
   });
+
   if (tabs === state.secondary.tabs) return state;
   const retainedIds = new Set(tabs.map((tab) => tab.id));
   let next = state;
+
   for (const tab of state.secondary.tabs) {
     if (!retainedIds.has(tab.id)) {
       next = closeSecondaryPanelTabInState(next, tab.id);
     }
   }
+
   return next;
 }
 
@@ -91,8 +96,10 @@ function syncTerminalTabsWithSessions<T extends SecondaryFixedPanelTab>({
         changed = true;
         continue;
       }
+
       seenTerminalIds.add(tab.terminalId);
     }
+
     syncedTabs.push(tab);
   }
 
@@ -100,9 +107,11 @@ function syncTerminalTabsWithSessions<T extends SecondaryFixedPanelTab>({
     if (!isVisibleTerminalSession(session)) {
       continue;
     }
+
     if (seenTerminalIds.has(session.id)) {
       continue;
     }
+
     seenTerminalIds.add(session.id);
     syncedTabs.push(createTerminalFixedPanelTab({ terminalId: session.id }));
     changed = true;
@@ -129,6 +138,7 @@ export function syncTerminalTabsInFixedPanelState({
     state,
     terminalSessions,
   });
+
   const { tabs, changed } = syncTerminalTabsWithSessions({
     tabs: state.secondary.tabs,
     terminalSessions,

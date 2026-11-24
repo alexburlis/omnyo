@@ -5,17 +5,17 @@ set -eu
 usage() {
   cat >&2 <<'EOF'
 Usage: install.sh --bootstrap-env <NAME> [--host-daemon-port <port>]
-       install.sh --adopt --data-dir <path> [--host-daemon-port <port>]
+       install.sh --adopt --data-dir <path> [--host-daemon-port <port>] [--artifact-path <tgz> --artifact-sha256 <sha256>]
        install.sh --start|--stop|--uninstall --host-id <host-id> [--server-url <url>] [--data-dir <path>]
 
 Machines enroll from a private bootstrap bundle. Get the one-line command that
 carries it from Settings -> Machines -> Add a machine, or from
-`bb machine create --provider manual`. That command works through bb connect,
-Tailscale, and any other address machines can reach.
+`omnyo machine create --provider manual`. Use the existing private coordinator address.
 --adopt installs the service for a data directory that is already enrolled,
 such as the one a server move leaves behind, reading its machine ID from
 auth.json and its server address and credentials from config.json.
 By default, the installer assigns this enrolled daemon its own local API port.
+The paired artifact options install only the verified local package, without a download fallback.
 EOF
   exit 2
 }
@@ -30,6 +30,8 @@ adopt=no
 adopted_identity=
 reconnect=no
 recorded_data_dir=
+artifact_path=
+artifact_sha256=
 
 CURL_CONNECT_TIMEOUT_SECONDS=10
 PACKAGE_DOWNLOAD_TIMEOUT_SECONDS=300
@@ -109,21 +111,33 @@ ready_row() {
   log " " "$(dim "$ready_label") $2"
 }
 
+legacy_installation_owners_v1() {
+  node -e '
+    function importLegacyInstallationOwnersV1() {
+      return { machineRoot: ".bb-machines", darwinPrefix: "app.getbb.host-daemon.", linuxPrefix: "bb-host-daemon-", dataEnv: "BB_DATA_DIR", runtimeBin: "bb-app" };
+    }
+    process.stdout.write(JSON.stringify(importLegacyInstallationOwnersV1()));
+  '
+}
+
 run_lifecycle() {
   case "$host_id" in *[!A-Za-z0-9_-]*|'') fail_step "Invalid machine host ID."; exit 2 ;; esac
-  lifecycle_data_dir=${requested_data_dir:-${BB_DATA_DIR:-}}
+  lifecycle_data_dir=${requested_data_dir:-${OMNYO_DATA_DIR:-}}
+  legacy_owners=$(legacy_installation_owners_v1)
   installation=$(node -e '
     const fs = require("node:fs");
     const path = require("node:path");
-    const [home, requested, hostId, expectedServer] = process.argv.slice(1);
-    const root = path.join(home, ".bb-machines");
+    const [home, requested, hostId, expectedServer, oldJson] = process.argv.slice(1);
+    const old = JSON.parse(oldJson);
+    const root = path.join(home, ".omnyo-machines");
+    const roots = [root, path.join(home, old.machineRoot)].filter((candidate) => fs.existsSync(candidate));
     let candidates;
     if (requested) candidates = [path.resolve(requested)];
     else {
-      try { candidates = fs.readdirSync(root).map((name) => path.join(root, name)); }
-      catch (error) { if (error.code === "ENOENT") process.exit(3); throw error; }
+      candidates = roots.flatMap((directory) => fs.readdirSync(directory).map((name) => path.join(directory, name)));
     }
-    const canonicalRoot = fs.realpathSync(root);
+    if (roots.some((directory) => fs.lstatSync(directory).isSymbolicLink())) throw new Error("Refusing a symlinked installer-owned root");
+    const canonicalRoots = roots.map((directory) => fs.realpathSync(directory));
     const matches = [];
     for (const candidate of candidates) {
       let auth;
@@ -134,7 +148,7 @@ run_lifecycle() {
         continue;
       }
       const dataDir = fs.realpathSync(candidate);
-      if (path.dirname(dataDir) !== canonicalRoot || fs.lstatSync(candidate).isSymbolicLink()) {
+      if (!canonicalRoots.includes(path.dirname(dataDir)) || fs.lstatSync(candidate).isSymbolicLink()) {
         throw new Error("Refusing a machine data directory outside its installer-owned root.");
       }
       const config = JSON.parse(fs.readFileSync(path.join(dataDir, "config.json"), "utf8"));
@@ -142,12 +156,12 @@ run_lifecycle() {
       if (expectedServer && serverUrl !== new URL(expectedServer).href.replace(/\/+$/u, "")) {
         throw new Error("Machine data directory belongs to another server.");
       }
-      matches.push({ dataDir, serverUrl });
+      matches.push({ dataDir, serverUrl, legacyOwner: !fs.existsSync(root) || path.dirname(dataDir) !== fs.realpathSync(root) });
     }
     if (matches.length > 1) throw new Error("Host identity matches multiple machine installations; specify --data-dir.");
     if (matches.length === 0) process.exit(3);
     process.stdout.write(JSON.stringify(matches[0]));
-  ' "$HOME" "$lifecycle_data_dir" "$host_id" "$server_url") || {
+  ' "$HOME" "$lifecycle_data_dir" "$host_id" "$server_url" "$legacy_owners") || {
     lifecycle_status=$?
     if [ "$lifecycle_status" -eq 3 ]; then
       if [ "$lifecycle_action" = start ]; then fail_step "Machine installation was not found."; exit 1; fi
@@ -156,6 +170,11 @@ run_lifecycle() {
     exit "$lifecycle_status"
   }
   data_dir=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).dataDir)' "$installation")
+  legacy_owner=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).legacyOwner ? "yes" : "no")' "$installation")
+  if [ "$lifecycle_action" = start ] && [ "$legacy_owner" = yes ]; then
+    fail_step "This old installation cannot start. Remove it with --uninstall, then enroll this machine again."
+    exit 1
+  fi
   server_url=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).serverUrl)' "$installation")
   host_daemon_port=$(sed -n '1p' "$data_dir/host-daemon-port")
   case "$host_daemon_port" in *[!0-9]*|'') fail_step "Refusing an invalid daemon port."; exit 1 ;; esac
@@ -167,25 +186,26 @@ run_lifecycle() {
   lifecycle_slug=$(printf '%s-%s' "$lifecycle_server_host" "$host_id" | tr '.' '-')
   systemd_scope=--user
   if [ "$platform" = darwin ]; then
-    service_name="app.getbb.host-daemon.$lifecycle_slug"
+    service_name="app.omnyo.host-daemon.$lifecycle_slug"
     service_file="$HOME/Library/LaunchAgents/$service_name.plist"
     system_service_file=
   else
-    service_name="bb-host-daemon-$lifecycle_slug.service"
+    service_name="omnyo-host-daemon-$lifecycle_slug.service"
     service_file="$HOME/.config/systemd/user/$service_name"
     system_service_file="$data_dir/systemd/$service_name"
   fi
   if [ ! -e "$service_file" ] && { [ -z "$system_service_file" ] || [ ! -e "$system_service_file" ]; }; then
-    discovered_service_file=$(BB_LIFECYCLE_DATA_DIR="$data_dir" node -e '
+    discovered_service_file=$(OMNYO_LIFECYCLE_DATA_DIR="$data_dir" node -e '
       const fs = require("node:fs");
       const path = require("node:path");
-      const [platform, home] = process.argv.slice(1);
-      const dataDir = process.env.BB_LIFECYCLE_DATA_DIR;
+      const [platform, home, oldJson] = process.argv.slice(1);
+      const old = JSON.parse(oldJson);
+      const dataDir = process.env.OMNYO_LIFECYCLE_DATA_DIR;
       const escaped = dataDir.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll("'"'"'", "&apos;");
       const systemd = dataDir.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"").replaceAll("%", "%%");
       const directories = platform === "darwin"
-        ? [[path.join(home, "Library", "LaunchAgents"), "app.getbb.host-daemon.", ".plist"]]
-        : [[path.join(home, ".config", "systemd", "user"), "bb-host-daemon-", ".service"], [path.join(dataDir, "systemd"), "bb-host-daemon-", ".service"]];
+        ? ["app.omnyo.host-daemon.", old.darwinPrefix].map((prefix) => [path.join(home, "Library", "LaunchAgents"), prefix, ".plist"])
+        : [path.join(home, ".config", "systemd", "user"), path.join(dataDir, "systemd")].flatMap((directory) => ["omnyo-host-daemon-", old.linuxPrefix].map((prefix) => [directory, prefix, ".service"]));
       const matches = [];
       for (const [directory, prefix, suffix] of directories) {
         let names;
@@ -196,7 +216,7 @@ run_lifecycle() {
           const candidate = path.join(directory, name);
           if (!fs.statSync(candidate, { throwIfNoEntry: false })?.isFile()) continue;
           const service = fs.readFileSync(candidate, "utf8");
-          if (service.includes(`<key>BB_DATA_DIR</key><string>${escaped}</string>`) || service.includes(`Environment="BB_DATA_DIR=${systemd}"`)) matches.push(candidate);
+          if (["OMNYO_DATA_DIR", old.dataEnv].some((name) => service.includes(`<key>${name}</key><string>${escaped}</string>`) || service.includes(`Environment="${name}=${systemd}"`))) matches.push(candidate);
         }
       }
       if (matches.length > 1) {
@@ -204,7 +224,7 @@ run_lifecycle() {
         process.exit(1);
       }
       if (matches.length === 1) process.stdout.write(matches[0]);
-    ' "$platform" "$HOME") || { fail_step "Machine data directory is referenced by several services."; exit 1; }
+    ' "$platform" "$HOME" "$legacy_owners") || { fail_step "Machine data directory is referenced by several services."; exit 1; }
     if [ -n "$discovered_service_file" ]; then
       service_name=${discovered_service_file##*/}
       if [ "$platform" = darwin ]; then
@@ -225,17 +245,18 @@ run_lifecycle() {
   fi
   if [ -e "$service_file" ]; then
     [ ! -L "$service_file" ] || { fail_step "Machine service belongs to another installation."; exit 1; }
-    BB_LIFECYCLE_DATA_DIR="$data_dir" node -e '
+    OMNYO_LIFECYCLE_DATA_DIR="$data_dir" node -e '
       const fs = require("node:fs");
       const service = fs.readFileSync(process.argv[1], "utf8");
-      const dataDir = process.env.BB_LIFECYCLE_DATA_DIR;
+      const old = JSON.parse(process.argv[2]);
+      const dataDir = process.env.OMNYO_LIFECYCLE_DATA_DIR;
       const escaped = dataDir.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll("'"'"'", "&apos;");
       const systemd = dataDir.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"").replaceAll("%", "%%");
-      if (!service.includes(`<key>BB_DATA_DIR</key><string>${escaped}</string>`) && !service.includes(`Environment="BB_DATA_DIR=${systemd}"`)) {
+      if (!["OMNYO_DATA_DIR", old.dataEnv].some((name) => service.includes(`<key>${name}</key><string>${escaped}</string>`) || service.includes(`Environment="${name}=${systemd}"`))) {
         process.stderr.write(`Machine service does not reference ${dataDir}.\n`);
         process.exit(1);
       }
-    ' "$service_file" || { fail_step "Machine service belongs to another installation."; exit 1; }
+    ' "$service_file" "$legacy_owners" || { fail_step "Machine service belongs to another installation."; exit 1; }
   fi
   daemon_matches() {
     node -e '
@@ -255,12 +276,24 @@ run_lifecycle() {
     [ -n "$daemon_pid" ] || return 1
     case "$daemon_pid" in *[!0-9]*|'0'|'1') fail_step "Invalid installed daemon PID."; exit 1 ;; esac
     daemon_command=$(ps -p "$daemon_pid" -o command= 2>/dev/null) || return 1
-    launcher="$data_dir/npm/bin/bb-app"
+    launcher="$data_dir/npm/bin/omnyo-app"
+    if [ "$legacy_owner" = yes ]; then
+      legacy_runtime_bin=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).runtimeBin)' "$legacy_owners")
+      launcher="$data_dir/npm/bin/$legacy_runtime_bin"
+    fi
     case " $daemon_command " in *" $launcher "*" host-daemon "*" --host-daemon-port $host_daemon_port "*" --server-url $server_url "*) return 0 ;; esac
     fail_step "Recorded daemon PID belongs to another process."
     exit 1
   }
   if [ "$lifecycle_action" = start ]; then
+    if ! node --input-type=module -e '
+      const { pathToFileURL } = await import("node:url");
+      const { assertInstallationStateForStart } = await import(pathToFileURL(process.argv[1]));
+      assertInstallationStateForStart(process.argv[2]);
+    ' "$data_dir/npm/lib/node_modules/omnyo-app/dist/state-admission.mjs" "$data_dir"; then
+      fail_step "The installed state owner refused startup before profile writes."
+      exit 1
+    fi
     rm -f "$data_dir/machine-suspended"
     if daemon_matches; then return 0; fi
     if [ -f "$service_file" ]; then
@@ -271,7 +304,7 @@ run_lifecycle() {
         systemctl "$systemd_scope" start "$service_name"
       fi
     elif ! owned_pid; then
-      BB_APP_NPM_PREFIX="$data_dir/npm" BB_DATA_DIR="$data_dir" nohup "$data_dir/npm/bin/bb-app" host-daemon --auto-update --supervise --host-daemon-port "$host_daemon_port" --server-url "$server_url" >"$data_dir/install-daemon.log" 2>&1 &
+      OMNYO_APP_NPM_PREFIX="$data_dir/npm" OMNYO_DATA_DIR="$data_dir" nohup "$data_dir/npm/bin/omnyo-app" host-daemon --auto-update --supervise --host-daemon-port "$host_daemon_port" --server-url "$server_url" >"$data_dir/install-daemon.log" 2>&1 &
       daemon_pid=$!
       (umask 077 && printf '%s\n' "$daemon_pid" >"$pid_file")
     fi
@@ -311,7 +344,7 @@ run_lifecycle() {
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --bootstrap-env|--host-id|--server-url|--host-daemon-port|--data-dir)
+    --bootstrap-env|--host-id|--server-url|--host-daemon-port|--data-dir|--artifact-path|--artifact-sha256)
       [ "$#" -ge 2 ] || usage
       [ -n "$2" ] || usage
       case "$1" in
@@ -320,6 +353,8 @@ while [ "$#" -gt 0 ]; do
         --server-url) server_url=$2 ;;
         --host-daemon-port) requested_host_daemon_port=$2 ;;
         --data-dir) requested_data_dir=$2 ;;
+        --artifact-path) [ -z "$artifact_path" ] || usage; artifact_path=$2 ;;
+        --artifact-sha256) [ -z "$artifact_sha256" ] || usage; artifact_sha256=$2 ;;
       esac
       shift 2
       ;;
@@ -340,6 +375,13 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+if [ -n "$artifact_path$artifact_sha256" ]; then
+  if [ "$adopt" != yes ] || [ -z "$artifact_path" ] || [ -z "$artifact_sha256" ] || [ -n "$lifecycle_action" ]; then
+    fail_step "Local artifact installation requires --adopt, --artifact-path and --artifact-sha256 together."
+    exit 2
+  fi
+fi
 
 if [ -n "$lifecycle_action" ]; then
   [ -z "$bootstrap_env$requested_host_daemon_port" ] || usage
@@ -376,7 +418,7 @@ if [ "$adopt" = no ]; then
   [ -n "$host_id" ] || usage
   if [ -z "$lifecycle_action" ]; then [ -n "$server_url" ] || usage; fi
 fi
-printf '\n  %s\n\n' "$(bold "bb machine setup")"
+printf '\n  %s\n\n' "$(bold "Omnyo machine setup")"
 if [ "$adopt" = no ]; then
   active_step "Setting up this machine as $host_id for $server_url"
 fi
@@ -385,13 +427,13 @@ case "$(uname -s)" in
   Darwin) platform=darwin ;;
   Linux) platform=linux ;;
   *)
-    fail_step "bb machine installation supports macOS and Linux only."
+    fail_step "Omnyo machine installation supports macOS and Linux only."
     exit 1
     ;;
 esac
 
 if ! command -v node >/dev/null 2>&1; then
-  fail_step "bb-app requires Node.js 22.19 or newer (22.19, 24, and 26 are tested), but node is not on PATH."
+  fail_step "omnyo-app requires Node.js 22.19 or newer (22.19, 24, and 26 are tested), but node is not on PATH."
   exit 1
 fi
 node_version=$(node -p 'process.versions.node')
@@ -404,10 +446,28 @@ node_supported=$(node -e '
   process.exit(supported ? 0 : 1);
 ' && echo yes || echo no)
 if [ "$node_supported" != yes ]; then
-  fail_step "Node.js $node_version is too old; bb-app requires Node.js 22.19 or newer (22.19, 24, and 26 are tested)."
+  fail_step "Node.js $node_version is too old; omnyo-app requires Node.js 22.19 or newer (22.19, 24, and 26 are tested)."
   exit 1
 fi
-node_bin=$(command -v node)
+node_bin=$(node -p 'process.execPath')
+
+if [ -n "$artifact_path" ]; then
+  if ! node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const crypto = require("node:crypto");
+    const [file, expected] = process.argv.slice(1);
+    try {
+      const info = fs.lstatSync(file);
+      if (!path.isAbsolute(file) || !info.isFile() || info.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(expected)) process.exit(1);
+      const actual = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+      process.exit(actual === expected ? 0 : 1);
+    } catch { process.exit(1); }
+  ' "$artifact_path" "$artifact_sha256"; then
+    fail_step "The local artifact path or SHA-256 verification failed before installation."
+    exit 1
+  fi
+fi
 
 if [ -z "${HOME:-}" ]; then
   HOME=$(node -e 'const home = require("node:os").homedir(); if (!require("node:path").isAbsolute(home)) process.exit(1); process.stdout.write(home);')
@@ -429,7 +489,7 @@ systemd_scope=--user
 if [ "$systemd_host" = yes ] && [ "$(id -u)" = 0 ]; then
   systemd_scope=--system
 fi
-if [ "${BB_INSTALL_SKIP_SERVICE:-0}" != 1 ] && [ "$platform" = linux ] &&
+if [ "${OMNYO_INSTALL_SKIP_SERVICE:-0}" != 1 ] && [ "$platform" = linux ] &&
    [ "$systemd_scope" = --user ] && ! systemctl --user show-environment >/dev/null 2>&1; then
   user_runtime_dir=$(loginctl show-user "$(id -u)" --property=RuntimePath --value 2>/dev/null || true)
   case "$user_runtime_dir" in
@@ -441,11 +501,11 @@ if [ "${BB_INSTALL_SKIP_SERVICE:-0}" != 1 ] && [ "$platform" = linux ] &&
   esac
   if ! systemctl --user show-environment >/dev/null 2>&1; then
     if [ "$systemd_host" = yes ]; then
-      fail_step "The systemd user bus is unavailable; the bb host-daemon service was not installed."
-      detail "Run the installer from a systemd user session, then retry. To run without a persistent service, set BB_INSTALL_SKIP_SERVICE=1; the daemon will not start after a reboot." >&2
+      fail_step "The systemd user bus is unavailable; the Omnyo host-daemon service was not installed."
+      detail "Run the installer from a systemd user session, then retry. To run without a persistent service, set OMNYO_INSTALL_SKIP_SERVICE=1; the daemon will not start after a reboot." >&2
       exit 1
     fi
-    BB_INSTALL_SKIP_SERVICE=1
+    OMNYO_INSTALL_SKIP_SERVICE=1
   fi
 fi
 
@@ -474,22 +534,22 @@ if [ "$adopt" = yes ]; then
     try { url = new URL(config?.serverUrl); }
     catch { fail(`${configFile} has no server address.`); }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) fail(`${configFile} has an unusable server address.`);
-    const headers = config.serverHeaders ?? (typeof config.machineCredential === "string" ? { "x-bb-connect-machine": config.machineCredential } : {});
+    const headers = config.serverHeaders ?? (typeof config.machineCredential === "string" ? { "x-omnyo-connect-machine": config.machineCredential } : {});
     if (typeof headers !== "object" || headers === null || Array.isArray(headers) || !Object.values(headers).every((value) => typeof value === "string")) fail(`${configFile} has invalid server headers.`);
     process.stdout.write(JSON.stringify({ dataDir, hostId: auth.hostId, serverUrl: url.href.replace(/\/$/u, ""), headers }));
   ' "$requested_data_dir"); then
     fail_step "$adopted_identity"
     exit 1
   fi
-  host_id=$(BB_ADOPTED_IDENTITY="$adopted_identity" node -e 'process.stdout.write(JSON.parse(process.env.BB_ADOPTED_IDENTITY).hostId)')
-  server_url=$(BB_ADOPTED_IDENTITY="$adopted_identity" node -e 'process.stdout.write(JSON.parse(process.env.BB_ADOPTED_IDENTITY).serverUrl)')
-  adopted_data_dir=$(BB_ADOPTED_IDENTITY="$adopted_identity" node -e 'process.stdout.write(JSON.parse(process.env.BB_ADOPTED_IDENTITY).dataDir)')
+  host_id=$(OMNYO_ADOPTED_IDENTITY="$adopted_identity" node -e 'process.stdout.write(JSON.parse(process.env.OMNYO_ADOPTED_IDENTITY).hostId)')
+  server_url=$(OMNYO_ADOPTED_IDENTITY="$adopted_identity" node -e 'process.stdout.write(JSON.parse(process.env.OMNYO_ADOPTED_IDENTITY).serverUrl)')
+  adopted_data_dir=$(OMNYO_ADOPTED_IDENTITY="$adopted_identity" node -e 'process.stdout.write(JSON.parse(process.env.OMNYO_ADOPTED_IDENTITY).dataDir)')
   active_step "Setting up this machine as $host_id for $server_url"
 fi
 
 require_npm() {
   if ! command -v npm >/dev/null 2>&1; then
-    fail_step "bb-app installation requires npm."
+    fail_step "omnyo-app installation requires npm."
     exit 1
   fi
 }
@@ -503,14 +563,11 @@ server_host=$(node -e '
 }
 host_slug=$(printf '%s' "$host_id" | tr -c 'a-zA-Z0-9_.-' '-')
 service_slug=$(printf '%s-%s' "$server_host" "$host_slug" | tr '.' '-')
-legacy_service_slug=$(printf '%s' "$server_host" | tr '.' '-')
 
-# Each server gets its own data dir and daemon instance, so one machine can
-# serve several bb servers and a full local bb install keeps ~/.bb to itself.
 if [ "$adopt" = yes ]; then
   data_dir=$adopted_data_dir
 else
-  data_dir=${BB_DATA_DIR:-${recorded_data_dir:-"$HOME/.bb-machines/$server_host"}}
+  data_dir=${OMNYO_DATA_DIR:-${recorded_data_dir:-"$HOME/.omnyo-machines/$server_host"}}
   installed_host_id=$(node -e '
     const fs = require("node:fs");
     const path = require("node:path");
@@ -530,7 +587,7 @@ else
     if [ "$reconnect" = yes ]; then
       detail "Run this command on the computer where machine $host_id runs." >&2
     else
-      detail "To add another machine on this computer, rerun the command with BB_DATA_DIR set to a new directory." >&2
+      detail "To add another machine on this computer, rerun the command with OMNYO_DATA_DIR set to a new directory." >&2
     fi
     exit 1
   fi
@@ -540,55 +597,121 @@ else
     exit 1
   fi
 fi
-mkdir -p "$HOME/.local/bin"
-if [ ! -e "$HOME/.local/bin/bb" ] && [ ! -L "$HOME/.local/bin/bb" ]; then
-  shim_file=$(mktemp "$HOME/.local/bin/.bb-machine.XXXXXX")
-  node_path_quoted=$(printf '%s' "${node_bin%/*}" | sed "s/'/'\\''/g")
-  printf '#!/bin/sh\nPATH=\047%s\047:"$PATH"\nexport PATH\n' "$node_path_quoted" > "$shim_file"
-  cli_path_quoted=$(printf '%s' "$data_dir/npm/bin/bb" | sed "s/'/'\\''/g")
-  cat >> "$shim_file" <<'BB_MACHINE_EXPLICIT_DATA'
-if [ -n "${BB_DATA_DIR:-}" ] && [ -x "$BB_DATA_DIR/npm/bin/bb" ]; then
-  exec "$BB_DATA_DIR/npm/bin/bb" "$@"
-fi
-BB_MACHINE_EXPLICIT_DATA
-  printf 'if [ -x \047%s\047 ]; then exec \047%s\047 "$@"; fi\n' "$cli_path_quoted" "$cli_path_quoted" >> "$shim_file"
-  cat >> "$shim_file" <<'BB_MACHINE_CLI'
-unset BB_DATA_DIR
-for candidate in "$HOME"/.bb-machines/*/npm/bin/bb; do
-  if [ -x "$candidate" ]; then exec "$candidate" "$@"; fi
-done
-if [ "${1:-}" = machine ] && [ "${2:-}" = uninstall ]; then exit 0; fi
-printf '%s\n' 'No installed bb machine CLI is available.' >&2
-exit 1
-BB_MACHINE_CLI
-  chmod 755 "$shim_file"
-  if ! ln "$shim_file" "$HOME/.local/bin/bb" 2>/dev/null; then
-    if [ ! -e "$HOME/.local/bin/bb" ] && [ ! -L "$HOME/.local/bin/bb" ]; then
-      rm -f "$shim_file"
-      fail_step "Could not publish the machine CLI shim."
-      exit 1
-    fi
-  fi
-  rm -f "$shim_file"
-fi
+data_dir=$(node -e '
+  const fs = require("node:fs"), path = require("node:path");
+  const requested = path.resolve(process.argv[1]);
+  if (/[\x00-\x1f\x7f]/u.test(requested)) throw new Error("The installation profile contains control characters");
+  let existing = requested;
+  const missing = [];
+  while (!fs.existsSync(existing)) {
+    missing.unshift(path.basename(existing));
+    const parent = path.dirname(existing);
+    if (parent === existing) throw new Error("The installation parent cannot be resolved");
+    existing = parent;
+  }
+  if (existing === requested && fs.lstatSync(existing).isSymbolicLink()) throw new Error("Refusing a symlinked installation profile");
+  process.stdout.write(path.join(fs.realpathSync(existing), ...missing));
+' "$data_dir") || { fail_step "The installation profile cannot be resolved before writes."; exit 1; }
 
-mkdir -p "$data_dir"
-mkdir -p "$data_dir/logs"
-rm -f "$data_dir/machine-suspended"
-canonical_data_dir=$(node -e '
-  const fs = require("node:fs");
-  process.stdout.write(fs.realpathSync(process.argv[1]));
-' "$data_dir")
-# Keep the package private to this enrollment. Besides avoiding system-prefix
-# permissions, this lets one machine follow servers running different builds.
-machine_npm_prefix="$canonical_data_dir/npm"
-# bb-app depends on native add-ons whose binaries are fetched or built by npm
-# lifecycle scripts. npm >= 12 blocks dependency install scripts by default
-# for global installs unless they are named in --allow-scripts (the installed
-# package's own package.json#allowScripts is not consulted for -g / npx).
-# npm 10 ignores the unknown flag; npm 11 accepts it.
-bb_app_native_modules="better-sqlite3,node-pty,@parcel/watcher"
-bb_app_allow_scripts="--allow-scripts=$bb_app_native_modules"
+assert_installer_state() {
+if ! node --input-type=module -e '
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const net = await import("node:net");
+  const [requested, home] = process.argv.slice(1);
+  const dataDir = path.resolve(requested);
+  function assertLegacyInstallerStateV1() {
+    const legacyRoots = [".bb", ".bb-dev", ".bb-machines"];
+    if (dataDir.split(path.sep).some((part) => legacyRoots.includes(part))) throw new Error("An old worker profile cannot be reused. Remove it with --uninstall, then enroll this machine again");
+    const oldDefault = path.join(home, ".bb-machines", path.basename(dataDir));
+    if (process.env.OMNYO_DATA_DIR === undefined && fs.existsSync(oldDefault)) throw new Error("An old worker profile still exists. Remove it with --uninstall, then enroll this machine again");
+    for (const name of ["bb.db", "bb.db-wal", "bb.db-shm"]) if (fs.existsSync(path.join(dataDir, name))) throw new Error("The existing database is from an old worker. Remove it with --uninstall, then enroll this machine again");
+  }
+  function assertLegacyInstallerEnvironmentV1() {
+    const oldDataDir = process.env.BB_DATA_DIR;
+    if (oldDataDir !== undefined && oldDataDir !== process.env.OMNYO_DATA_DIR) throw new Error("BB_DATA_DIR names an old worker profile. Unset it, remove that profile with --uninstall, then enroll this machine again");
+  }
+  assertLegacyInstallerEnvironmentV1();
+  assertLegacyInstallerStateV1();
+  let cursor = path.parse(dataDir).root;
+  for (const part of dataDir.slice(cursor.length).split(path.sep)) {
+    cursor = path.join(cursor, part);
+    const info = fs.lstatSync(cursor, { throwIfNoEntry: false });
+    if (info && (info.isSymbolicLink() || !info.isDirectory())) throw new Error("The installation profile path is not an owned directory");
+  }
+  const read = (name) => {
+    try { return fs.readFileSync(path.join(dataDir, name), "utf8"); }
+    catch (error) { if (error.code === "ENOENT") return undefined; throw error; }
+  };
+  const config = read("config.json");
+  if (config !== undefined && Object.hasOwn(JSON.parse(config), "stateMigration")) throw new Error("This profile came from a state migration and cannot be reused. Remove it with --uninstall, then enroll this machine again");
+  for (const name of ["server-maintenance-hold.json", "machine-suspended", "daemon.lock", "daemon.lock.lock"]) if (fs.existsSync(path.join(dataDir, name))) throw new Error("An existing profile owner or maintenance hold blocks installation");
+  const recordedPid = read("install-daemon.pid");
+  if (recordedPid !== undefined) {
+    const pid = Number(recordedPid.trim());
+    if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error("The existing daemon owner is uncertain");
+    try { process.kill(pid, 0); throw new Error("An existing daemon requires its maintenance owner before installation"); }
+    catch (error) { if (error.code !== "ESRCH") throw error; }
+  }
+  const xml = dataDir.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll("'"'"'", "&apos;");
+  const systemd = dataDir.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"").replaceAll("%", "%%");
+  function importLegacyServiceDataDirsV1(text) {
+    return [...text.matchAll(/<key>BB_DATA_DIR<\/key>\s*<string>([^<]*)<\/string>|Environment="BB_DATA_DIR=((?:\\.|[^"])*)"/gu)].map((match) => match[1] ?? match[2]);
+  }
+  function isLegacyServiceOwnerV1(name) {
+    return name.startsWith("app.getbb.host-daemon.") || name.startsWith("bb-host-daemon-");
+  }
+  const matchesProfile = (text) => {
+    if ([dataDir, xml, systemd].some((value) => text.includes(value))) return true;
+    const current = [...text.matchAll(/<key>OMNYO_DATA_DIR<\/key>\s*<string>([^<]*)<\/string>|Environment="OMNYO_DATA_DIR=((?:\\.|[^"])*)"/gu)].map((match) => match[1] ?? match[2]);
+    return [...current, ...importLegacyServiceDataDirsV1(text)].some((value) => {
+      const decoded = value.replaceAll("&quot;", "\"").replaceAll("&apos;", "'"'"'").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&").replaceAll("%%", "%").replaceAll("\\\"", "\"").replaceAll("\\\\", "\\");
+      try { return path.isAbsolute(decoded) && fs.realpathSync(decoded) === dataDir; }
+      catch (error) { if (error.code === "ENOENT") return false; throw error; }
+    });
+  };
+  for (const directory of [path.join(home, "Library", "LaunchAgents"), path.join(home, ".config", "systemd", "user"), path.join(dataDir, "systemd")]) {
+    const info = fs.lstatSync(directory, { throwIfNoEntry: false });
+    if (!info) continue;
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("The existing service owner directory is uncertain");
+    for (const name of fs.readdirSync(directory)) {
+      if (!/\.(?:plist|service)$/u.test(name)) continue;
+      const file = path.join(directory, name);
+      const knownOwner = name.startsWith("app.omnyo.host-daemon.") || name.startsWith("omnyo-host-daemon-") || isLegacyServiceOwnerV1(name);
+      let info;
+      try { info = fs.statSync(file); }
+      catch (error) { if (error.code === "ENOENT" && !knownOwner) continue; throw error; }
+      if (!info.isFile() || info.size > 1048576) {
+        if (knownOwner) throw new Error("The existing service owner is uncertain");
+        continue;
+      }
+      const text = fs.readFileSync(file, "utf8");
+      if (matchesProfile(text)) throw new Error("The machine service already has an owner. Remove it with --uninstall, then enroll this machine again");
+    }
+  }
+  const recordedPort = read("host-daemon-port");
+  if (recordedPort !== undefined) {
+    const port = Number(recordedPort.trim());
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("The existing daemon port owner is uncertain");
+    const busy = await new Promise((resolve, reject) => {
+      const socket = net.createConnection({host:"127.0.0.1",port});
+      socket.setTimeout(750);
+      socket.once("connect", () => { socket.destroy(); resolve(true); });
+      socket.once("timeout", () => { socket.destroy(); reject(new Error("The existing daemon port owner is uncertain")); });
+      socket.once("error", (error) => { socket.destroy(); if (error.code === "ECONNREFUSED") resolve(false); else reject(error); });
+    });
+    if (busy) throw new Error("An existing daemon requires its maintenance owner before installation");
+  }
+' "$data_dir" "$HOME"; then
+  fail_step "Installation refused before profile writes; use the existing maintenance owner."
+  exit 1
+fi
+}
+assert_installer_state
+
+machine_npm_prefix="$data_dir/npm"
+app_runtime_native_modules="better-sqlite3,node-pty,@parcel/watcher"
+app_runtime_allow_scripts="--allow-scripts=$app_runtime_native_modules"
 
 valid_port() {
   node -e '
@@ -697,58 +820,54 @@ fi
 if [ -z "$host_daemon_port" ]; then
   host_daemon_port=$(find_available_host_daemon_port)
 fi
-host_daemon_port_temp="$host_daemon_port_file.$$.tmp"
-(umask 077 && printf '%s\n' "$host_daemon_port" >"$host_daemon_port_temp")
-mv "$host_daemon_port_temp" "$host_daemon_port_file"
 complete_step "Using local host-daemon port $host_daemon_port"
 
-# The server's own build is always installed when it offers one: version
-# strings cannot distinguish unpublished builds, so an existing bb-app is
-# trusted only when the server provides no package (404) or is unreachable.
-package_url="${server_url%/}/install/bb-app.tgz"
-package_dir=$(mktemp -d "${TMPDIR:-/tmp}/bb-app.XXXXXX")
-package_file="$package_dir/bb-app.tgz"
+package_url="${server_url%/}/install/omnyo-app.tgz"
+package_dir=$(mktemp -d "${TMPDIR:-/tmp}/omnyo-app.XXXXXX")
+trap 'rm -rf "$package_dir"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+package_file="$package_dir/omnyo-app.tgz"
 access_config="$package_dir/access.curl"
 : > "$access_config"
 chmod 600 "$access_config"
 if [ -n "$bootstrap_env" ]; then
-  BB_ENROLLMENT="$bootstrap_payload" node -e 'for (const [name,value] of Object.entries(JSON.parse(process.env.BB_ENROLLMENT).headers ?? {})) console.log("header = " + JSON.stringify(name + ": " + value))' > "$access_config"
+  OMNYO_ENROLLMENT="$bootstrap_payload" node -e 'for (const [name,value] of Object.entries(JSON.parse(process.env.OMNYO_ENROLLMENT).headers ?? {})) console.log("header = " + JSON.stringify(name + ": " + value))' > "$access_config"
 elif [ "$adopt" = yes ]; then
-  BB_ADOPTED_IDENTITY="$adopted_identity" node -e 'for (const [name,value] of Object.entries(JSON.parse(process.env.BB_ADOPTED_IDENTITY).headers)) console.log("header = " + JSON.stringify(name + ": " + value))' > "$access_config"
+  OMNYO_ADOPTED_IDENTITY="$adopted_identity" node -e 'for (const [name,value] of Object.entries(JSON.parse(process.env.OMNYO_ADOPTED_IDENTITY).headers)) console.log("header = " + JSON.stringify(name + ": " + value))' > "$access_config"
 fi
 package_headers="$package_dir/headers"
 host_artifact_digest_file="$data_dir/host-artifact.sha256"
-installed_artifact_digest=
-if [ -x "$machine_npm_prefix/bin/bb-app" ] && \
-   [ -x "$machine_npm_prefix/bin/bb" ] && \
-   [ -f "$machine_npm_prefix/lib/node_modules/bb-app/host-daemon/dist/daemon-bundle.mjs" ]; then
-  installed_artifact_digest=$(node -e '
-    const fs = require("node:fs");
-    try {
-      const digest = fs.readFileSync(process.argv[1], "utf8").trim();
-      if (/^[a-f0-9]{64}$/u.test(digest)) process.stdout.write(digest);
-    } catch {}
-  ' "$host_artifact_digest_file")
-fi
 # curl's numeric meter shows bytes, rate, percentage, and ETA without the
 # animated ASCII bar. Keep redirected installs quiet while preserving errors.
 curl_output_mode=--progress-meter
 if [ ! -t 2 ]; then
   curl_output_mode=--silent
 fi
-active_step "Downloading the server's bb-app package (timeout: 5 minutes)"
-if [ -n "$installed_artifact_digest" ]; then
-  package_status=$(curl --config "$access_config" "$curl_output_mode" --show-error --location \
-    --connect-timeout "$CURL_CONNECT_TIMEOUT_SECONDS" \
-    --max-time "$PACKAGE_DOWNLOAD_TIMEOUT_SECONDS" \
-    --retry "$PACKAGE_DOWNLOAD_RETRIES" \
-    --header "If-None-Match: \"sha256-$installed_artifact_digest\"" \
-    --dump-header "$package_headers" \
-    --output "$package_file" \
-    --write-out '%{http_code}' \
-    "$package_url") || package_status=000
+if [ -n "$artifact_path" ]; then
+  if ! node -e '
+    const fs = require("node:fs");
+    const crypto = require("node:crypto");
+    const [source, target, expected] = process.argv.slice(1);
+    try {
+      const info = fs.lstatSync(source);
+      if (!info.isFile() || info.isSymbolicLink()) process.exit(1);
+      const bytes = fs.readFileSync(source);
+      if (crypto.createHash("sha256").update(bytes).digest("hex") !== expected) process.exit(1);
+      fs.writeFileSync(target, bytes, { flag: "wx", mode: 0o600 });
+    } catch { process.exit(1); }
+  ' "$artifact_path" "$package_file" "$artifact_sha256"; then
+    rm -rf "$package_dir"
+    fail_step "The local artifact changed before installation."
+    exit 1
+  fi
+  printf 'x-omnyo-artifact-sha256: %s\n' "$artifact_sha256" >"$package_headers"
+  package_status=200
+  complete_step "Using the verified local omnyo-app package"
 else
-  package_status=$(curl --config "$access_config" "$curl_output_mode" --show-error --location \
+  active_step "Downloading the server's omnyo-app package (timeout: 5 minutes)"
+  package_status=$(curl --config "$access_config" "$curl_output_mode" --show-error \
+    --max-redirs 0 \
     --connect-timeout "$CURL_CONNECT_TIMEOUT_SECONDS" \
     --max-time "$PACKAGE_DOWNLOAD_TIMEOUT_SECONDS" \
     --retry "$PACKAGE_DOWNLOAD_RETRIES" \
@@ -762,7 +881,7 @@ package_digest=$(node -e '
   const fs = require("node:fs");
   try {
     const headers = fs.readFileSync(process.argv[1], "utf8");
-    const matches = [...headers.matchAll(/^x-bb-artifact-sha256:\s*([a-f0-9]{64})\s*$/gimu)];
+    const matches = [...headers.matchAll(/^x-omnyo-artifact-sha256:\s*([a-f0-9]{64})\s*$/gimu)];
     const digest = matches.at(-1)?.[1];
     if (digest) process.stdout.write(digest);
   } catch {}
@@ -784,12 +903,13 @@ if [ "$package_status" -ge 400 ] && [ "$package_status" -le 599 ]; then
   fi
 fi
 
-bb_app=
-bb_app_npm_prefix=
-if [ "$package_status" = 304 ] && [ -n "$installed_artifact_digest" ]; then
-  bb_app_npm_prefix=$machine_npm_prefix
-  complete_step "The identical server host artifact is already installed"
-elif [ "$package_status" -ge 200 ] && [ "$package_status" -lt 300 ]; then
+app_runtime=
+app_runtime_npm_prefix=
+if [ "$package_status" -ge 200 ] && [ "$package_status" -lt 300 ]; then
+  if [ -z "$package_digest" ]; then
+    fail_step "The private host artifact has no valid SHA-256 binding."
+    exit 1
+  fi
   if [ -n "$package_digest" ]; then
     downloaded_digest=$(node -e '
       const crypto = require("node:crypto");
@@ -798,66 +918,81 @@ elif [ "$package_status" -ge 200 ] && [ "$package_status" -lt 300 ]; then
     ' "$package_file")
     if [ "$downloaded_digest" != "$package_digest" ]; then
       rm -rf "$package_dir"
-      fail_step "The downloaded bb host artifact failed SHA-256 verification."
+      fail_step "The downloaded Omnyo host artifact failed SHA-256 verification."
       detail "Expected $package_digest but received $downloaded_digest." >&2
       exit 1
     fi
   fi
-  require_npm
-  complete_step "Downloaded the server's bb-app package"
-  active_step "Installing the server's bb-app build"
-  rm -f "$host_artifact_digest_file"
-  if ! npm install -g "$bb_app_allow_scripts" --prefix "$machine_npm_prefix" "$package_file"; then
-    rm -rf "$package_dir"
-    fail_step "Could not install bb-app for this machine. Check the npm error above, then rerun this command."
+  admission_dir="$package_dir/admission"
+  mkdir -p "$admission_dir"
+  if ! tar -xzf "$package_file" -C "$admission_dir" package/dist/state-admission.mjs package/package.json; then
+    fail_step "The verified runtime does not contain installer state admission."
     exit 1
   fi
-  bb_app_npm_prefix=$machine_npm_prefix
-  complete_step "Installed the server's bb-app build"
-elif command -v bb-app >/dev/null 2>&1; then
-  rm -f "$host_artifact_digest_file"
-  bb_app=$(command -v bb-app)
-  if [ "$package_status" = 404 ]; then
-    warning_step "The server does not provide its bb-app package; using bb-app at $bb_app"
-  else
-    warning_step "Could not download the server's bb-app package (HTTP $package_status); using bb-app at $bb_app"
-  fi
-elif [ "$package_status" = 404 ]; then
-  require_npm
-  rm -f "$host_artifact_digest_file"
-  warning_step "The server does not provide its bb-app package"
-  active_step "Installing bb-app from the npm registry"
-  if ! npm install -g "$bb_app_allow_scripts" --prefix "$machine_npm_prefix" bb-app; then
-    rm -rf "$package_dir"
-    fail_step "Could not install bb-app for this machine. Check the npm error above, then rerun this command."
+  if [ -L "$admission_dir/package/dist/state-admission.mjs" ] || [ ! -f "$admission_dir/package/dist/state-admission.mjs" ]; then
+    fail_step "The installer state admission entry is not a regular file."
     exit 1
   fi
-  bb_app_npm_prefix=$machine_npm_prefix
-  complete_step "Installed bb-app from the npm registry"
+  if ! node --input-type=module -e '
+    const { pathToFileURL } = await import("node:url");
+    const { lstatSync, readFileSync } = await import("node:fs");
+    const packageInfo = lstatSync(process.argv[3]);
+    if (!packageInfo.isFile() || packageInfo.isSymbolicLink() || packageInfo.nlink !== 1 || packageInfo.size > 65536) throw new Error("The runtime package manifest is not a regular bounded file");
+    const metadata = JSON.parse(readFileSync(process.argv[3], "utf8"));
+    if (metadata.name !== "omnyo-app" || typeof metadata.version !== "string" || !metadata.version) throw new Error("The runtime artifact does not identify the selected Omnyo package");
+    const info = lstatSync(process.argv[1]);
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) throw new Error("Installer state admission requires a regular private file");
+    const { assertInstallationState } = await import(pathToFileURL(process.argv[1]));
+    assertInstallationState(process.argv[2]);
+  ' "$admission_dir/package/dist/state-admission.mjs" "$data_dir" "$admission_dir/package/package.json"; then
+    fail_step "Installation state admission refused before profile writes."
+    exit 1
+  fi
+  assert_installer_state
+(umask 077; mkdir -p "$data_dir/logs")
+canonical_data_dir=$(node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' "$data_dir")
+machine_npm_prefix="$canonical_data_dir/npm"
+app_runtime_native_modules="better-sqlite3,node-pty,@parcel/watcher"
+app_runtime_allow_scripts="--allow-scripts=$app_runtime_native_modules"
+host_daemon_port_temp="$host_daemon_port_file.$$.tmp"
+(umask 077 && printf '%s\n' "$host_daemon_port" >"$host_daemon_port_temp")
+mv "$host_daemon_port_temp" "$host_daemon_port_file"
+  require_npm
+  complete_step "Downloaded the server's omnyo-app package"
+  active_step "Installing the server's omnyo-app build"
+  rm -f "$host_artifact_digest_file"
+  if ! npm install -g "$app_runtime_allow_scripts" --prefix "$machine_npm_prefix" "$package_file"; then
+    rm -rf "$package_dir"
+    fail_step "Could not install omnyo-app for this machine. Check the npm error above, then rerun this command."
+    exit 1
+  fi
+  app_runtime_npm_prefix=$machine_npm_prefix
+  complete_step "Installed the server's omnyo-app build"
+
 else
   rm -rf "$package_dir"
-  fail_step "Could not download the server's bb-app package from $package_url (HTTP $package_status)."
+  fail_step "Could not download the server's omnyo-app package from $package_url (HTTP $package_status)."
   exit 1
 fi
 rm -rf "$package_dir"
 
-if [ -n "$bb_app_npm_prefix" ]; then
-  bb_app="$bb_app_npm_prefix/bin/bb-app"
-  if [ ! -x "$bb_app" ]; then
-    fail_step "npm installed bb-app, but did not create the expected executable at $bb_app."
+if [ -n "$app_runtime_npm_prefix" ]; then
+  app_runtime="$app_runtime_npm_prefix/bin/omnyo-app"
+  if [ ! -x "$app_runtime" ]; then
+    fail_step "npm installed omnyo-app, but did not create the expected executable at $app_runtime."
     exit 1
   fi
   # Fail loudly if npm skipped the native add-on install scripts (npm >= 12
   # allowScripts policy, or ignore-scripts=true in an npmrc). Without this
   # check the join only fails later, in the daemon, with a raw stack trace.
-  bb_app_root="$bb_app_npm_prefix/lib/node_modules/bb-app"
+  app_runtime_root="$app_runtime_npm_prefix/lib/node_modules/omnyo-app"
   if ! node -e '
     const root = process.argv[1];
     require(root + "/node_modules/node-pty");
     require(root + "/node_modules/@parcel/watcher");
-  ' "$bb_app_root" >/dev/null 2>&1; then
-    fail_step "npm installed bb-app, but its host native add-ons (node-pty, @parcel/watcher) did not load."
-    detail "npm did not run their install scripts. Check the npm warnings above. If they mention allowScripts or ignore-scripts, rerun this command with: npm_config_allow_scripts=$bb_app_native_modules npm_config_ignore_scripts=false" >&2
+  ' "$app_runtime_root" >/dev/null 2>&1; then
+    fail_step "npm installed omnyo-app, but its host native add-ons (node-pty, @parcel/watcher) did not load."
+    detail "npm did not run their install scripts. Check the npm warnings above. If they mention allowScripts or ignore-scripts, rerun this command with: npm_config_allow_scripts=$app_runtime_native_modules npm_config_ignore_scripts=false" >&2
     exit 1
   fi
   if [ "$package_status" -ge 200 ] && [ "$package_status" -lt 300 ] && [ -n "$package_digest" ]; then
@@ -867,14 +1002,38 @@ if [ -n "$bb_app_npm_prefix" ]; then
   fi
 fi
 
-if [ "$adopt" = no ]; then
-  bb_cli="${bb_app%/*}/bb"
-  if [ ! -x "$bb_cli" ]; then bb_cli=$(command -v bb || true); fi
-  if [ -z "$bb_cli" ]; then
-    fail_step "The installed build does not provide the machine enrollment CLI."
+cli="${app_runtime%/*}/omnyo"
+if [ ! -x "$cli" ]; then
+  fail_step "The installed build does not provide the machine enrollment CLI."
+  exit 1
+fi
+mkdir -p "$HOME/.local/bin"
+if [ ! -e "$HOME/.local/bin/omnyo" ] && [ ! -L "$HOME/.local/bin/omnyo" ]; then
+  shim_file=$(mktemp "$HOME/.local/bin/.omnyo-machine.XXXXXX")
+  node -e '
+    const fs = require("node:fs");
+    const [file, nodeDir, cli, dataDir] = process.argv.slice(1);
+    const apostrophe = String.fromCharCode(39);
+    const quote = (value) => apostrophe + value.replaceAll(apostrophe, apostrophe + "\\" + apostrophe + apostrophe) + apostrophe;
+    const code = "#!/bin/sh\nPATH=" + quote(nodeDir) + ":\"$PATH\"\nexport PATH\n" +
+      "if [ -n \"${OMNYO_DATA_DIR:-}\" ]; then\n" +
+      "  if [ ! -x \"$OMNYO_DATA_DIR/npm/bin/omnyo\" ]; then\n" +
+      "    printf \"The selected profile has no verified Omnyo CLI.\\n\" >&2\n    exit 1\n  fi\n" +
+      "  exec \"$OMNYO_DATA_DIR/npm/bin/omnyo\" \"$@\"\nfi\n" +
+      "OMNYO_DATA_DIR=" + quote(dataDir) + "\nexport OMNYO_DATA_DIR\nexec " + quote(cli) + " \"$@\"\n";
+    fs.writeFileSync(file, code);
+    fs.chmodSync(file, 0o755);
+  ' "$shim_file" "${node_bin%/*}" "$cli" "$data_dir"
+  if ! ln "$shim_file" "$HOME/.local/bin/omnyo" 2>/dev/null; then
+    rm -f "$shim_file"
+    fail_step "The machine CLI binding changed during installation."
     exit 1
   fi
-  BB_ENROLLMENT="$bootstrap_payload" BB_DATA_DIR="$data_dir" "$bb_cli" machine enroll --bootstrap-env BB_ENROLLMENT
+  rm -f "$shim_file"
+fi
+
+if [ "$adopt" = no ]; then
+  OMNYO_ENROLLMENT="$bootstrap_payload" OMNYO_DATA_DIR="$data_dir" "$cli" machine enroll --bootstrap-env OMNYO_ENROLLMENT
   bootstrap_payload=
 fi
 
@@ -898,7 +1057,11 @@ if [ -f "$data_dir/auth.json" ]; then
     const fs = require("node:fs");
     const [dataDir, expectedServer] = process.argv.slice(1);
     const config = JSON.parse(fs.readFileSync(`${dataDir}/config.json`, "utf8"));
-    const normalize = (value) => String(value).replace(/\/+$/, "");
+    const normalize = (value) => {
+      const url = new URL(String(value));
+      if (url.hostname === "localhost") url.hostname = "127.0.0.1";
+      return url.href.replace(/\/+$/, "");
+    };
     process.exit(normalize(config.serverUrl) === normalize(expectedServer) ? 0 : 1);
   ' "$data_dir" "$server_url" 2>/dev/null; then
     already_joined=yes
@@ -906,119 +1069,40 @@ if [ -f "$data_dir/auth.json" ]; then
   fi
 fi
 
-join_pid=
-if [ "$already_joined" = no ]; then
-  join_log="$data_dir/install-join.log"
-  active_step "Joining $server_url as $host_id"
-  detail "Join progress is logged to $join_log"
-  # The daemon passes this prefix back to npm during protocol self-updates.
-  BB_APP_NPM_PREFIX="$bb_app_npm_prefix" BB_DATA_DIR="$data_dir" nohup "$bb_app" host-daemon join \
-    --auto-update \
-    --host-daemon-port "$host_daemon_port" \
-    --host-id "$host_id" \
-    --server-url "$server_url" >"$join_log" 2>&1 &
-  join_pid=$!
-  echo "$join_pid" >"$data_dir/install-daemon.pid"
+if [ "$already_joined" != yes ]; then
+  fail_step "The verified enrollment CLI did not establish this machine identity."
+  exit 1
+fi
 
-  joined=no
-  attempts=0
-  active_step "Waiting for the temporary host daemon to connect (up to about 2 minutes)"
-  while [ "$attempts" -lt "$DAEMON_WAIT_ATTEMPTS" ]; do
-    if [ -f "$data_dir/auth.json" ] && auth_matches_host && \
-       daemon_status_matches "$host_daemon_port" yes; then
-      joined=yes
-      break
-    fi
-    if ! kill -0 "$join_pid" 2>/dev/null; then
-      wait "$join_pid" || true
-      fail_step "bb host daemon exited before it connected to $server_url."
-      detail "See $join_log" >&2
-      exit 1
-    fi
-    attempts=$((attempts + 1))
-    report_wait_progress "$attempts" "the temporary host daemon"
-    sleep 1
-  done
-  if [ "$joined" != yes ]; then
-    kill "$join_pid" 2>/dev/null || true
-    wait "$join_pid" 2>/dev/null || true
-    fail_step "Timed out waiting for host daemon $host_id to connect to $server_url."
-    detail "See $join_log" >&2
+if [ "${OMNYO_INSTALL_SKIP_SERVICE:-0}" = 1 ]; then
+  if daemon_status_matches "$host_daemon_port" no; then
+    fail_step "An existing daemon requires its maintenance owner before installation."
     exit 1
   fi
-  complete_step "Joined successfully"
-fi
-
-stop_recorded_daemon() {
-  recorded_pid=
-  recorded_command=
-  if [ -f "$data_dir/install-daemon.pid" ]; then recorded_pid=$(sed -n '1p' "$data_dir/install-daemon.pid"); fi
-  case "$recorded_pid" in
-    ''|*[!0-9]*|0|1) ;;
-    *) recorded_command=$(ps -p "$recorded_pid" -o command= 2>/dev/null || true) ;;
-  esac
-  case " $recorded_command " in
-    *" host-daemon "*" --host-daemon-port $host_daemon_port "*) ;;
-    *)
-      fail_step "A bb host daemon that this installer did not start is running on port $host_daemon_port."
-      detail "Stop it, then run this command again so the daemon uses the new credentials." >&2
-      exit 1
-      ;;
-  esac
-  active_step "Stopping the host daemon so it uses the new credentials"
-  kill "$recorded_pid" 2>/dev/null || true
-  stop_attempts=0
-  while kill -0 "$recorded_pid" 2>/dev/null || daemon_status_matches "$host_daemon_port" no; do
-    stop_attempts=$((stop_attempts + 1))
-    if [ "$stop_attempts" -ge "$DAEMON_WAIT_ATTEMPTS" ]; then
-      fail_step "The bb host daemon did not stop."
-      exit 1
-    fi
-    sleep 1
-  done
-  rm -f "$data_dir/install-daemon.pid"
-  complete_step "Stopped the host daemon"
-}
-
-if [ "${BB_INSTALL_SKIP_SERVICE:-0}" = 1 ]; then
-  if [ "$reconnect" = yes ] && [ -z "$join_pid" ] && daemon_status_matches "$host_daemon_port" no; then
-    stop_recorded_daemon
+  daemon_log="$data_dir/install-daemon.log"
+  active_step "Starting the host daemon"
+  detail "Host daemon output is logged to $daemon_log"
+  OMNYO_APP_NPM_PREFIX="$app_runtime_npm_prefix" OMNYO_DATA_DIR="$data_dir" nohup "$app_runtime" host-daemon \
+    --auto-update \
+    --supervise \
+    --host-daemon-port "$host_daemon_port" \
+    --server-url "$server_url" >"$daemon_log" 2>&1 &
+  daemon_pid=$!
+  echo "$daemon_pid" >"$data_dir/install-daemon.pid"
+  if ! wait_for_daemon_connection "the host daemon"; then
+    kill "$daemon_pid" 2>/dev/null || true
+    wait "$daemon_pid" 2>/dev/null || true
+    fail_step "The Omnyo host daemon did not connect to $server_url."
+    detail "See $daemon_log" >&2
+    exit 1
   fi
-  if [ -z "$join_pid" ] && ! daemon_status_matches "$host_daemon_port" no; then
-    daemon_log="$data_dir/install-daemon.log"
-    active_step "Starting the host daemon"
-    detail "Host daemon output is logged to $daemon_log"
-    BB_APP_NPM_PREFIX="$bb_app_npm_prefix" BB_DATA_DIR="$data_dir" nohup "$bb_app" host-daemon \
-      --auto-update \
-      --supervise \
-      --host-daemon-port "$host_daemon_port" \
-      --server-url "$server_url" >"$daemon_log" 2>&1 &
-    join_pid=$!
-    echo "$join_pid" >"$data_dir/install-daemon.pid"
-    if ! wait_for_daemon_connection "the host daemon"; then
-      kill "$join_pid" 2>/dev/null || true
-      wait "$join_pid" 2>/dev/null || true
-      fail_step "The bb host daemon did not connect to $server_url."
-      detail "See $daemon_log" >&2
-      exit 1
-    fi
-    complete_step "Host daemon connected"
-  fi
-  if [ -n "$join_pid" ]; then
-    warning_step "Service installation skipped; temporary join daemon PID $join_pid is still running and will not restart if it exits or after a reboot."
-  else
-    warning_step "Service installation skipped; the daemon is already running but will not start after a reboot."
-  fi
+  complete_step "Host daemon connected"
+  warning_step "Service installation skipped; supervised daemon PID $daemon_pid will not start after a reboot."
   exit 0
-fi
-
-if [ -n "$join_pid" ]; then
-  kill "$join_pid" 2>/dev/null || true
-  wait "$join_pid" 2>/dev/null || true
 fi
 rm -f "$data_dir/install-daemon.pid"
 
-active_step "Installing the persistent bb host daemon service"
+active_step "Installing the persistent Omnyo host daemon service"
 
 xml_escape() {
   printf '%s' "$1" | sed \
@@ -1035,42 +1119,19 @@ systemd_escape() {
 
 if [ "$platform" = darwin ]; then
   service_dir="$HOME/Library/LaunchAgents"
-  service_label="app.getbb.host-daemon.$service_slug"
+  service_label="app.omnyo.host-daemon.$service_slug"
   service_file="$service_dir/$service_label.plist"
   mkdir -p "$service_dir"
   escaped_node_bin=$(xml_escape "$node_bin")
-  escaped_bb_app=$(xml_escape "$bb_app")
-  escaped_bb_app_npm_prefix=$(xml_escape "$bb_app_npm_prefix")
+  escaped_app_runtime=$(xml_escape "$app_runtime")
+  escaped_app_runtime_npm_prefix=$(xml_escape "$app_runtime_npm_prefix")
   escaped_server=$(xml_escape "$server_url")
   escaped_data_dir=$(xml_escape "$data_dir")
-  for existing_service_file in "$service_dir"/app.getbb.host-daemon.*.plist; do
-    [ -e "$existing_service_file" ] || continue
-    [ "$existing_service_file" != "$service_file" ] || continue
-    if grep -F -- "<key>BB_DATA_DIR</key><string>$escaped_data_dir</string>" "$existing_service_file" >/dev/null 2>&1; then
-      if [ -L "$existing_service_file" ]; then
-        fail_step "Refusing to replace a symlinked bb launch agent: $existing_service_file"
-        exit 1
-      fi
-      existing_service_label=${existing_service_file##*/}
-      existing_service_label=${existing_service_label%.plist}
-      if ! grep -F -- "<key>Label</key><string>$existing_service_label</string>" "$existing_service_file" >/dev/null 2>&1; then
-        fail_step "Refusing to replace a bb launch agent with an unexpected label: $existing_service_file"
-        exit 1
-      fi
-      launchctl bootout "gui/$(id -u)" "$existing_service_file" >/dev/null 2>&1 || true
-      if launchctl print "gui/$(id -u)/$existing_service_label" >/dev/null 2>&1; then
-        fail_step "Could not stop the existing bb launch agent $existing_service_label."
-        detail "The agent file was kept at $existing_service_file." >&2
-        exit 1
-      fi
-      rm -f "$existing_service_file"
-    fi
-  done
-  if [ -L "$service_file" ]; then
-    fail_step "Refusing to replace a symlinked bb launch agent: $service_file"
+  if [ -e "$service_file" ] || [ -L "$service_file" ]; then
+    fail_step "The machine service already has an owner. Remove it with --uninstall, then enroll this machine again."
     exit 1
   fi
-  cat >"$service_file" <<EOF
+  (set -C; cat >"$service_file" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -1079,7 +1140,7 @@ if [ "$platform" = darwin ]; then
   <key>ProgramArguments</key>
   <array>
     <string>$escaped_node_bin</string>
-    <string>$escaped_bb_app</string>
+    <string>$escaped_app_runtime</string>
     <string>host-daemon</string>
     <string>--auto-update</string>
     <string>--host-daemon-port</string>
@@ -1089,8 +1150,8 @@ if [ "$platform" = darwin ]; then
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>BB_APP_NPM_PREFIX</key><string>$escaped_bb_app_npm_prefix</string>
-    <key>BB_DATA_DIR</key><string>$escaped_data_dir</string>
+    <key>OMNYO_APP_NPM_PREFIX</key><string>$escaped_app_runtime_npm_prefix</string>
+    <key>OMNYO_DATA_DIR</key><string>$escaped_data_dir</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -1099,23 +1160,23 @@ if [ "$platform" = darwin ]; then
 </dict>
 </plist>
 EOF
-  launchctl bootout "gui/$(id -u)" "$service_file" >/dev/null 2>&1 || true
+  )
   if ! launchctl_error=$(launchctl bootstrap "gui/$(id -u)" "$service_file" 2>&1); then
-    fail_step "Could not register the bb host-daemon launch agent $service_label."
+    fail_step "Could not register the Omnyo host-daemon launch agent $service_label."
     [ -z "$launchctl_error" ] || detail "launchctl: $launchctl_error" >&2
     exit 1
   fi
   if ! wait_for_daemon_connection "the launch agent"; then
-    fail_step "The bb host-daemon launch agent started but did not connect to $server_url."
+    fail_step "The Omnyo host-daemon launch agent started but did not connect to $server_url."
     if [ -d "$data_dir/daemon.lock.lock" ]; then
-      detail "Another daemon may be using $data_dir. Check for another bb launch agent using this data directory." >&2
+      detail "Another daemon may be using $data_dir. Check for another Omnyo launch agent using this data directory." >&2
     fi
     detail "See $data_dir/logs/host-daemon-stdio.log for the startup error and $data_dir/logs/launchd.log for launch agent output." >&2
     exit 1
   fi
   complete_step "Installed and started the launch agent"
   printf '\n'
-  log "$(green "●")" "$(bold "bb machine is ready")"
+  log "$(green "●")" "$(bold "Omnyo machine is ready")"
   printf '\n'
   ready_row "server" "$(cyan "$server_url")"
   ready_row "daemon" "http://127.0.0.1:$host_daemon_port"
@@ -1129,68 +1190,64 @@ else
   if [ "$systemd_scope" = --system ]; then
     service_dir="$canonical_data_dir/systemd"
     service_target=multi-user.target
-    owned_launcher="$canonical_data_dir/npm/bin/bb-app"
-    if [ "$bb_app" != "$owned_launcher" ]; then
-      mkdir -p "$data_dir/npm/bin"
-      ln -sf "$bb_app" "$owned_launcher"
-      bb_app="$owned_launcher"
+    owned_launcher="$canonical_data_dir/npm/bin/omnyo-app"
+    if [ "$app_runtime" != "$owned_launcher" ]; then
+      fail_step "The verified runtime is outside this installation owner."
+      exit 1
     fi
   fi
-  service_name="bb-host-daemon-$service_slug"
+  service_name="omnyo-host-daemon-$service_slug"
   service_file="$service_dir/$service_name.service"
   mkdir -p "$service_dir"
   escaped_node_bin=$(systemd_escape "$node_bin")
-  escaped_bb_app=$(systemd_escape "$bb_app")
-  escaped_bb_app_npm_prefix=$(systemd_escape "$bb_app_npm_prefix")
+  escaped_app_runtime=$(systemd_escape "$app_runtime")
+  escaped_app_runtime_npm_prefix=$(systemd_escape "$app_runtime_npm_prefix")
   escaped_server=$(systemd_escape "$server_url")
   escaped_data_dir=$(systemd_escape "$data_dir")
-  legacy_service_name="bb-host-daemon-$legacy_service_slug"
-  legacy_service_file="$service_dir/$legacy_service_name.service"
-  if [ -f "$legacy_service_file" ] && \
-     grep -F -- "--host-daemon-port \"$host_daemon_port\"" "$legacy_service_file" >/dev/null 2>&1 && \
-     grep -F -- "Environment=\"BB_DATA_DIR=$escaped_data_dir\"" "$legacy_service_file" >/dev/null 2>&1; then
-    systemctl "$systemd_scope" disable --now "$legacy_service_name.service" >/dev/null 2>&1 || true
-    rm -f "$legacy_service_file"
+  if [ -e "$service_file" ] || [ -L "$service_file" ]; then
+    fail_step "The machine service already has an owner. Remove it with --uninstall, then enroll this machine again."
+    exit 1
   fi
-  cat >"$service_file" <<EOF
+  (set -C; cat >"$service_file" <<EOF
 [Unit]
-Description=bb host daemon for $server_host
+Description=Omnyo host daemon for $server_host
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart="$escaped_node_bin" "$escaped_bb_app" host-daemon --auto-update --host-daemon-port "$host_daemon_port" --server-url "$escaped_server"
-Environment="BB_APP_NPM_PREFIX=$escaped_bb_app_npm_prefix"
-Environment="BB_DATA_DIR=$escaped_data_dir"
+ExecStart="$escaped_node_bin" "$escaped_app_runtime" host-daemon --auto-update --host-daemon-port "$host_daemon_port" --server-url "$escaped_server"
+Environment="OMNYO_APP_NPM_PREFIX=$escaped_app_runtime_npm_prefix"
+Environment="OMNYO_DATA_DIR=$escaped_data_dir"
 Restart=always
 RestartSec=2
 
 [Install]
 WantedBy=$service_target
 EOF
+  )
   systemctl "$systemd_scope" daemon-reload
   enable_unit="$service_name.service"
   if [ "$systemd_scope" = --system ]; then enable_unit="$service_file"; fi
   if ! systemctl_error=$(systemctl "$systemd_scope" enable "$enable_unit" 2>&1); then
-    fail_step "The bb host-daemon systemd service could not be enabled."
+    fail_step "The Omnyo host-daemon systemd service could not be enabled."
     [ -z "$systemctl_error" ] || detail "systemctl: $systemctl_error" >&2
     detail "Inspect it with: journalctl $systemd_scope -u $service_name.service" >&2
     exit 1
   fi
-  if ! systemctl_error=$(systemctl "$systemd_scope" restart "$service_name.service" 2>&1); then
-    fail_step "The bb host-daemon systemd service was enabled, but it could not be restarted."
+  if ! systemctl_error=$(systemctl "$systemd_scope" start "$service_name.service" 2>&1); then
+    fail_step "The Omnyo host-daemon systemd service was enabled, but it could not be restarted."
     [ -z "$systemctl_error" ] || detail "systemctl: $systemctl_error" >&2
     detail "Inspect it with: journalctl $systemd_scope -u $service_name.service" >&2
     exit 1
   fi
   if ! wait_for_daemon_connection "the systemd service"; then
-    fail_step "The bb host-daemon systemd service started but did not connect to $server_url."
+    fail_step "The Omnyo host-daemon systemd service started but did not connect to $server_url."
     detail "Inspect it with: journalctl $systemd_scope -u $service_name.service" >&2
     exit 1
   fi
   complete_step "Installed and started the systemd service ($systemd_scope)"
   printf '\n'
-  log "$(green "●")" "$(bold "bb machine is ready")"
+  log "$(green "●")" "$(bold "Omnyo machine is ready")"
   printf '\n'
   ready_row "server" "$(cyan "$server_url")"
   ready_row "daemon" "http://127.0.0.1:$host_daemon_port"

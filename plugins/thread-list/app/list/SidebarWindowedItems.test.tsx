@@ -12,11 +12,13 @@ import {
 import { SidebarWindowedItems } from "./SidebarWindowedItems.js";
 
 const selectorMatch = SIDEBAR_CONTENT_SELECTOR.match(/^\[([\w-]+)="(.+)"\]$/);
+
 if (!selectorMatch) {
   throw new Error(
     `Unparseable SIDEBAR_CONTENT_SELECTOR: ${SIDEBAR_CONTENT_SELECTOR}`,
   );
 }
+
 const [, SIDEBAR_CONTENT_ATTR, SIDEBAR_CONTENT_VALUE] = selectorMatch;
 
 const VIEWPORT_RECT = new DOMRect(0, 0, 300, 500);
@@ -24,6 +26,7 @@ const VIEWPORT_RECT = new DOMRect(0, 0, 300, 500);
 const OFFSCREEN_ROW_RECT = new DOMRect(0, 1_000, 300, 30);
 
 let scrollElement: HTMLDivElement;
+
 interface FakeIntersectionObserver {
   callback: IntersectionObserverCallback;
   observed: Set<Element>;
@@ -35,26 +38,34 @@ function wrapperAt(index: number): Element {
   const wrapper = document.querySelectorAll("[data-sidebar-windowed-item]")[
     index
   ];
+
   if (!wrapper) {
     throw new Error(`No windowed wrapper at index ${index}`);
   }
+
   return wrapper;
 }
 
 function emitIntersections(
-  entries: readonly { target: Element; isIntersecting: boolean }[],
+  entries: readonly {
+    target: Element;
+    isIntersecting: boolean;
+    boundingClientRect?: DOMRectReadOnly;
+  }[],
 ) {
   const observer = observerInstances.at(-1);
+
   if (!observer) {
     throw new Error("No IntersectionObserver was created");
   }
+
   observer.callback(
     entries.map(
       (entry) =>
         ({
           target: entry.target,
           isIntersecting: entry.isIntersecting,
-          boundingClientRect: OFFSCREEN_ROW_RECT,
+          boundingClientRect: entry.boundingClientRect ?? OFFSCREEN_ROW_RECT,
         }) as unknown as IntersectionObserverEntry,
     ),
     observer as unknown as IntersectionObserver,
@@ -69,6 +80,7 @@ function mountSidebarContentContainer(clientHeight: number) {
     value: clientHeight,
   });
   document.body.appendChild(container);
+
   return container;
 }
 
@@ -142,9 +154,11 @@ beforeEach(() => {
       if (this === scrollElement || this.matches(SIDEBAR_CONTENT_SELECTOR)) {
         return VIEWPORT_RECT;
       }
+
       if (this.hasAttribute("data-sidebar-windowed-item")) {
         return OFFSCREEN_ROW_RECT;
       }
+
       return new DOMRect();
     },
   );
@@ -172,6 +186,7 @@ describe("SidebarWindowedItems", () => {
           )}
         />,
       );
+
     const { rerender } = render(tree());
     expect(screen.queryByText("Thread 1")).toBeNull();
     rerender(tree("second"));
@@ -298,19 +313,23 @@ describe("SidebarWindowedItems", () => {
         if (this === scrollElement || this.matches(SIDEBAR_CONTENT_SELECTOR)) {
           return VIEWPORT_RECT;
         }
+
         if (this.hasAttribute("data-sidebar-windowed-item")) {
           const wrappers = [
             ...document.querySelectorAll("[data-sidebar-windowed-item]"),
           ];
+
           return wrappers.indexOf(this) < 2
             ? ONSCREEN_ROW_RECT
             : OFFSCREEN_ROW_RECT;
         }
+
         return new DOMRect();
       },
     );
 
     const scrollRef = { current: scrollElement };
+
     const tree = (itemKeys: readonly string[]) =>
       withScrollRef(
         scrollRef,
@@ -324,6 +343,7 @@ describe("SidebarWindowedItems", () => {
           )}
         />,
       );
+
     const { rerender } = render(tree(["a", "b", "c", "d"]));
     expect(screen.queryByTestId("real-a")).not.toBeNull();
     expect(screen.queryByTestId("real-d")).toBeNull();
@@ -337,8 +357,37 @@ describe("SidebarWindowedItems", () => {
     expect(screen.queryByTestId("real-d")).not.toBeNull();
   });
 
+  it("keeps realized rows mounted while the sidebar is hidden and unmounts them once scrolled away", () => {
+    const realizeAll = () =>
+      emitIntersections(
+        Array.from(
+          document.querySelectorAll("[data-sidebar-windowed-item]"),
+          (target) => ({ target, isIntersecting: true }),
+        ),
+      );
+
+    const leaveAll = (boundingClientRect: DOMRectReadOnly) =>
+      emitIntersections(
+        Array.from(
+          document.querySelectorAll("[data-sidebar-windowed-item]"),
+          (target) => ({ target, isIntersecting: false, boundingClientRect }),
+        ),
+      );
+
+    renderList({ current: scrollElement });
+    act(realizeAll);
+    expect(screen.getAllByTestId(/^real-item-/)).toHaveLength(3);
+
+    act(() => leaveAll(new DOMRect()));
+    expect(screen.getAllByTestId(/^real-item-/)).toHaveLength(3);
+
+    act(() => leaveAll(OFFSCREEN_ROW_RECT));
+    expect(screen.queryAllByTestId(/^real-item-/)).toHaveLength(0);
+  });
+
   it("re-observes wrappers on list changes so a stuck placeholder self-heals", () => {
     const scrollRef = { current: scrollElement };
+
     const tree = (itemKeys: readonly string[]) =>
       withScrollRef(
         scrollRef,
@@ -352,6 +401,7 @@ describe("SidebarWindowedItems", () => {
           )}
         />,
       );
+
     const { rerender } = render(tree(["a", "b", "c"]));
     const observer = observerInstances.at(-1);
     expect(observer?.observed.size).toBe(3);

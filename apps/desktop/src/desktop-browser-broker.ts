@@ -1,25 +1,26 @@
 import { randomUUID } from "node:crypto";
 import type {
-  BbDesktopBrowserControlState,
-  BbDesktopBrowserTarget,
-} from "@bb/desktop-contract";
-import { isRawThreadId } from "@bb/domain";
+  OmnyoDesktopBrowserControlState,
+  OmnyoDesktopBrowserTarget,
+} from "@omnyo/desktop-contract";
+import { isRawThreadId } from "@omnyo/domain";
 import type {
+  DesktopBrowserBrokerCommand,
+  DesktopBrowserBrokerResult,
   DesktopBrowserChanged,
-  DesktopBrowserCommand,
   DesktopBrowserInstance,
   DesktopBrowserLease,
-  DesktopBrowserResult,
   DesktopBrowserTab,
-} from "@bb/host-daemon-contract";
+  DesktopRendererProfile,
+} from "@omnyo/host-daemon-contract";
 import {
   createDesktopBrowserCdpBridge,
   type DesktopBrowserCdpAdapter,
 } from "./desktop-browser-cdp.js";
 import { createDesktopBrowserCdpAdapter } from "./desktop-browser-cdp-adapter.js";
 import {
-  BB_DESKTOP_BROWSER_CONTROL_CHANNEL,
-  BB_DESKTOP_BROWSER_REVEAL_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_CONTROL_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_REVEAL_CHANNEL,
 } from "./desktop-browser-ipc.js";
 import type {
   DesktopBrowserHostWindow,
@@ -27,6 +28,11 @@ import type {
   DesktopBrowserViewManager,
 } from "./desktop-browser-view.js";
 import type { BrowserImportService } from "./browser-import/browser-import.js";
+import { createBrowserCookieSync } from "./browser-import/cookie-sync.js";
+import {
+  electronBrowserCookieSyncHost,
+  type BrowserCookieSyncHost,
+} from "./browser-cookie-sync-ipc.js";
 
 interface InstanceEntry {
   webContentsId: number;
@@ -49,6 +55,11 @@ export function createDesktopBrowserBroker(args: {
   manager: DesktopBrowserViewManager;
   product: string;
   browserImport?: BrowserImportService;
+  cookieSyncHost?: BrowserCookieSyncHost;
+  profileRenderer?: (input: {
+    webContentsId: number;
+    durationMs: number;
+  }) => Promise<DesktopRendererProfile>;
 }) {
   const instances = new Map<string, InstanceEntry>();
   const leases = new Map<string, ControlLease>();
@@ -103,9 +114,11 @@ export function createDesktopBrowserBroker(args: {
     )
       return;
     instance.threads.add(threadId);
+
     const tabs = tabsFor(instance, threadId).map((tab) =>
       wireTab(instance, tab),
     );
+
     const event: DesktopBrowserChanged = {
       type: "desktop-browser.changed",
       instanceId: instance.descriptor.instanceId,
@@ -113,14 +126,18 @@ export function createDesktopBrowserBroker(args: {
       threadId,
       tabs,
     };
+
     const key = `${instance.descriptor.instanceId}:${threadId}`;
     const serialized = JSON.stringify(event);
+
     if (snapshots.get(key) === serialized) return;
     snapshots.set(key, serialized);
+
     if (isRawThreadId(threadId))
       for (const listener of listeners) listener(event);
+
     for (const tab of tabs) {
-      instance.window.webContents.send(BB_DESKTOP_BROWSER_CONTROL_CHANNEL, {
+      instance.window.webContents.send(OMNYO_DESKTOP_BROWSER_CONTROL_CHANNEL, {
         tabId: tab.tabId,
         threadId,
         control: tab.control,
@@ -138,6 +155,7 @@ export function createDesktopBrowserBroker(args: {
   function changed(): void {
     for (const lease of [...leases.values()]) {
       const tabs = tabsFor(lease.instance, lease.threadId);
+
       if (
         [...lease.tabs].some(
           ([id, generation]) =>
@@ -148,28 +166,57 @@ export function createDesktopBrowserBroker(args: {
       )
         revoke(lease);
     }
+
     for (const instance of instances.values()) {
       for (const tab of args.manager.listTabs({
         hostWebContentsId: instance.webContentsId,
         threadId: null,
       }))
         instance.threads.add(tab.threadId);
+
       for (const threadId of instance.threads) publish(instance, threadId);
     }
   }
+
   const unsubscribeManager = args.manager.subscribeAutomationTabs(changed);
+
+  const cookieSyncHost = args.cookieSyncHost ?? electronBrowserCookieSyncHost;
+
+  const cookieSync = args.browserImport
+    ? createBrowserCookieSync({
+        browserImport: args.browserImport,
+        session: () => args.manager.session(),
+        statePath: cookieSyncHost.statePath(),
+        ...(cookieSyncHost.log ? { log: cookieSyncHost.log } : {}),
+      })
+    : null;
+
+  const unbindCookieSync = cookieSync
+    ? cookieSyncHost.bind(
+        cookieSync,
+        (webContentsId) => instanceForWindow(webContentsId) !== undefined,
+      )
+    : () => undefined;
+
+  function requireCookieSync() {
+    if (!cookieSync) throw new Error("Browser cookie import is unavailable");
+
+    return cookieSync;
+  }
 
   function requireInstance(target: {
     instanceId: string;
     generation: string;
   }): InstanceEntry {
     const instance = instances.get(target.instanceId);
+
     if (
       !instance ||
       instance.descriptor.generation !== target.generation ||
       instance.window.isDestroyed()
     )
       throw new Error("Desktop instance is unavailable or has reconnected");
+
     return instance;
   }
 
@@ -179,7 +226,9 @@ export function createDesktopBrowserBroker(args: {
     tabId: string,
   ): DesktopBrowserNativeTab {
     const tab = tabsFor(instance, threadId).find((tab) => tab.tabId === tabId);
+
     if (!tab) throw new Error("Browser tab is outside the requested thread");
+
     return tab;
   }
 
@@ -189,9 +238,10 @@ export function createDesktopBrowserBroker(args: {
     tabId: string,
   ): void {
     requireTab(instance, threadId, tabId);
+
     if (hostId === null)
       throw new Error("Desktop is not connected to its host daemon");
-    instance.window.webContents.send(BB_DESKTOP_BROWSER_REVEAL_CHANNEL, {
+    instance.window.webContents.send(OMNYO_DESKTOP_BROWSER_REVEAL_CHANNEL, {
       tabId,
       threadId,
       desktopTarget: {
@@ -204,10 +254,12 @@ export function createDesktopBrowserBroker(args: {
 
   async function openConnection(lease: ControlLease) {
     if (lease.connection !== null) return lease.connection;
+
     const scope = {
       hostWebContentsId: lease.instance.webContentsId,
       threadId: lease.threadId,
     };
+
     const ensureLease = () => {
       if (
         leases.get(lease.metadata.leaseId) !== lease ||
@@ -215,13 +267,16 @@ export function createDesktopBrowserBroker(args: {
       )
         throw new Error("Browser control lease has expired");
     };
+
     const nativeAdapter = createDesktopBrowserCdpAdapter({
       manager: args.manager,
       async createTab(_scope, url, signal) {
         signal.throwIfAborted();
         ensureLease();
+
         if (lease.tabs.size >= 100)
           throw new Error("Browser lease tab limit reached");
+
         const tab = args.manager.createTab({
           hostWindow: lease.instance.window,
           threadId: lease.threadId,
@@ -229,14 +284,17 @@ export function createDesktopBrowserBroker(args: {
           url,
           viewport: { width: 1280, height: 720 },
         });
+
         lease.tabs.set(tab.tabId, tab.generation);
         publish(lease.instance, lease.threadId);
         reveal(lease.instance, lease.threadId, tab.tabId);
+
         return tab.tabId;
       },
       async activateTab(_scope, tabId, signal) {
         signal.throwIfAborted();
         ensureLease();
+
         if (!lease.tabs.has(tabId))
           throw new Error("Tab is outside this lease");
         reveal(lease.instance, lease.threadId, tabId);
@@ -245,25 +303,30 @@ export function createDesktopBrowserBroker(args: {
         signal.throwIfAborted();
         ensureLease();
         const generation = lease.tabs.get(tabId);
+
         if (generation === undefined)
           throw new Error("Tab is outside this lease");
         lease.tabs.delete(tabId);
         args.manager.closeTab({ ...scope, tabId, generation });
       },
     });
+
     const adapter: DesktopBrowserCdpAdapter = {
       ...nativeAdapter,
       listTabs(requestedScope) {
         if (leases.get(lease.metadata.leaseId) !== lease) return [];
+
         return nativeAdapter
           .listTabs(requestedScope)
           .filter((tab) => lease.tabs.has(tab.tabId));
       },
     };
+
     const bridge = await createDesktopBrowserCdpBridge({
       adapter,
       product: args.product,
     });
+
     try {
       ensureLease();
       const grant = bridge.grant(scope, lease.metadata.expiresAt);
@@ -272,6 +335,7 @@ export function createDesktopBrowserBroker(args: {
         wsEndpoint: grant.endpoint,
         expiresAt: grant.expiresAt,
       };
+
       return lease.connection;
     } catch (error) {
       await bridge.close();
@@ -282,26 +346,36 @@ export function createDesktopBrowserBroker(args: {
   return {
     registerWindow(window: DesktopBrowserHostWindow) {
       if (instanceForWindow(window.webContents.id)) return;
-      const descriptor = {
+
+      const descriptor: DesktopBrowserInstance = {
         instanceId: randomUUID(),
         generation: randomUUID(),
-        label: `BB window ${window.webContents.id}`,
+        label: `Omnyo window ${window.webContents.id}`,
+        ...(args.profileRenderer === undefined
+          ? {}
+          : { rendererProfiling: true }),
       };
+
       instances.set(descriptor.instanceId, {
         window,
         webContentsId: window.webContents.id,
         descriptor,
         threads: new Set(),
       });
+
       for (const listener of registryListeners) listener();
       changed();
+      cookieSync?.noteBrowserActivity();
     },
     releaseWindow(webContentsId: number) {
       const instance = instanceForWindow(webContentsId);
+
       if (!instance) return;
+
       for (const lease of [...leases.values()])
         if (lease.instance === instance) revoke(lease);
       instances.delete(instance.descriptor.instanceId);
+
       for (const listener of registryListeners) listener();
     },
     listInstances(): DesktopBrowserInstance[] {
@@ -310,24 +384,30 @@ export function createDesktopBrowserBroker(args: {
     setHostId(value: string | null) {
       hostId = value;
       snapshots.clear();
+
       if (value === null) {
         for (const lease of [...leases.values()]) revoke(lease);
+
         for (const instance of instances.values())
           instance.descriptor.generation = randomUUID();
       } else changed();
     },
     resetServer() {
       hostId = null;
+
       for (const lease of [...leases.values()]) revoke(lease);
       args.manager.destroyAll();
+
       for (const instance of instances.values()) {
         instance.threads.clear();
         instance.descriptor.generation = randomUUID();
       }
+
       snapshots.clear();
     },
-    getTarget(webContentsId: number): BbDesktopBrowserTarget | null {
+    getTarget(webContentsId: number): OmnyoDesktopBrowserTarget | null {
       const instance = instanceForWindow(webContentsId);
+
       return instance && hostId !== null
         ? {
             hostId,
@@ -339,13 +419,15 @@ export function createDesktopBrowserBroker(args: {
     getControl(
       webContentsId: number,
       tabId: string,
-    ): BbDesktopBrowserControlState | null {
+    ): OmnyoDesktopBrowserControlState | null {
       const instance = instanceForWindow(webContentsId);
+
       const tab =
         instance &&
         args.manager
           .listTabs({ hostWebContentsId: webContentsId, threadId: null })
           .find((tab) => tab.tabId === tabId);
+
       return instance && tab
         ? {
             threadId: tab.threadId,
@@ -357,34 +439,61 @@ export function createDesktopBrowserBroker(args: {
     takeOver(webContentsId: number, tabId: string) {
       const instance = instanceForWindow(webContentsId);
       const lease = instance && controlFor(instance, tabId);
+
       if (lease) revoke(lease);
     },
     subscribe(listener: (event: DesktopBrowserChanged) => void) {
       listeners.add(listener);
+
       return () => {
         listeners.delete(listener);
       };
     },
     subscribeInstances(listener: () => void) {
       registryListeners.add(listener);
+
       return () => {
         registryListeners.delete(listener);
       };
     },
     async execute(
-      command: DesktopBrowserCommand,
-    ): Promise<DesktopBrowserResult> {
+      command: DesktopBrowserBrokerCommand,
+    ): Promise<DesktopBrowserBrokerResult> {
       if (command.type === "desktop.browser.list_instances")
         return { instances: this.listInstances() };
       const instance = requireInstance(command);
+
+      if (command.type === "desktop.browser.profile_renderer") {
+        if (args.profileRenderer === undefined)
+          throw new Error(
+            "Desktop renderer profiling is unavailable on this client",
+          );
+
+        const result = await args.profileRenderer({
+          webContentsId: instance.webContentsId,
+          durationMs: command.durationMs,
+        });
+
+        if (
+          requireInstance(command) !== instance ||
+          instance.window.webContents.isDestroyed()
+        )
+          throw new Error("Desktop instance changed during renderer profiling");
+
+        return result;
+      }
+
       if (command.type === "desktop.browser.list_import_sources") {
         if (!args.browserImport)
           throw new Error("Browser cookie import is unavailable");
-        return { sources: await args.browserImport.listSources() };
+
+        return args.browserImport.listImportSources();
       }
+
       if (command.type === "desktop.browser.import_cookies") {
         if (!args.browserImport)
           throw new Error("Browser cookie import is unavailable");
+
         return args.browserImport.importCookies(
           {
             sourceId: command.sourceId,
@@ -393,10 +502,21 @@ export function createDesktopBrowserBroker(args: {
           args.manager.session(),
         );
       }
+
+      if (command.type === "desktop.browser.cookie_sync_status")
+        return requireCookieSync().status();
+
+      if (command.type === "desktop.browser.cookie_sync_configure")
+        return requireCookieSync().configure(command.source);
+
+      if (command.type === "desktop.browser.cookie_sync_run")
+        return requireCookieSync().run();
+
       const scope = {
         hostWebContentsId: instance.webContentsId,
         threadId: command.threadId,
       };
+
       switch (command.type) {
         case "desktop.browser.list_tabs":
           return {
@@ -410,12 +530,16 @@ export function createDesktopBrowserBroker(args: {
             ...command,
             viewport: { width: 1280, height: 720 },
           });
+
           if (command.presentation === "reveal")
             reveal(instance, command.threadId, tab.tabId);
+
           return { tab: wireTab(instance, tab) };
         }
+
         case "desktop.browser.reveal_tab":
           reveal(instance, command.threadId, command.tabId);
+
           return { ok: true };
         case "desktop.browser.close_tab": {
           const tab = requireTab(instance, command.threadId, command.tabId);
@@ -424,10 +548,13 @@ export function createDesktopBrowserBroker(args: {
             tabId: tab.tabId,
             generation: tab.generation,
           });
+
           return { ok: true };
         }
+
         case "desktop.browser.capture_tab": {
           const tab = requireTab(instance, command.threadId, command.tabId);
+
           const capture = await args.manager.captureTab({
             ...scope,
             tabId: tab.tabId,
@@ -436,6 +563,7 @@ export function createDesktopBrowserBroker(args: {
             maxHeight: 1080,
             quality: 80,
           });
+
           return {
             mimeType: "image/jpeg",
             base64: capture.data.toString("base64"),
@@ -443,30 +571,38 @@ export function createDesktopBrowserBroker(args: {
             height: capture.height,
           };
         }
+
         case "desktop.browser.acquire_control": {
           if (leases.size >= 100 || leases.has(command.leaseId))
             throw new Error("Browser lease limit or duplicate lease");
+
           if (
             command.expiresAt <= Date.now() ||
             command.expiresAt - Date.now() > 3_600_000
           )
             throw new Error("Browser lease must expire within one hour");
           const tabs = new Map<string, string>();
+
           for (const tabId of command.tabIds) {
             const tab = requireTab(instance, command.threadId, tabId);
+
             if (controlFor(instance, tabId))
               throw new Error("Browser tab already has a controller");
             tabs.set(tabId, tab.generation);
           }
+
           const metadata = {
             leaseId: command.leaseId,
             controllerLabel: command.controllerLabel,
             expiresAt: command.expiresAt,
           };
+
           const timer = setTimeout(() => {
             const lease = leases.get(command.leaseId);
+
             if (lease) revoke(lease);
           }, command.expiresAt - Date.now());
+
           timer.unref();
           leases.set(command.leaseId, {
             instance,
@@ -478,32 +614,42 @@ export function createDesktopBrowserBroker(args: {
             connection: null,
           });
           publish(instance, command.threadId);
+
           return { lease: metadata };
         }
+
         case "desktop.browser.open_connection":
         case "desktop.browser.release_control": {
           const lease = leases.get(command.leaseId);
+
           if (
             !lease ||
             lease.instance !== instance ||
             lease.threadId !== command.threadId
           )
             throw new Error("Browser lease is unavailable");
+
           if (command.type === "desktop.browser.release_control") {
             revoke(lease);
+
             return { ok: true };
           }
+
           if (
             command.tabIds.length !== lease.tabs.size ||
             command.tabIds.some((id) => !lease.tabs.has(id))
           )
             throw new Error("Connection tab set does not match the lease");
+
           return openConnection(lease);
         }
       }
     },
     dispose() {
       unsubscribeManager();
+      cookieSync?.stop();
+      unbindCookieSync();
+
       for (const lease of [...leases.values()]) revoke(lease);
       listeners.clear();
       registryListeners.clear();

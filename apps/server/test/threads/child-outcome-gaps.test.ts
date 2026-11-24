@@ -1,10 +1,16 @@
 import {
   getQueuedThreadMessage,
+  threads,
   listEvents,
   listQueuedThreadMessages,
-} from "@bb/db";
-import { threadScope, turnScope, turnRequestEventDataSchema } from "@bb/domain";
-import { groupHostDaemonEvents } from "@bb/host-daemon-contract";
+} from "@omnyo/db";
+import {
+  threadScope,
+  turnScope,
+  turnRequestEventDataSchema,
+} from "@omnyo/domain";
+import { eq } from "drizzle-orm";
+import { groupHostDaemonEvents } from "@omnyo/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { finalizeStoppedThread } from "../../src/services/threads/thread-lifecycle.js";
 import { queueChildThreadTurnNotificationBestEffort } from "../../src/services/threads/child-thread-notifications.js";
@@ -35,11 +41,13 @@ function seedParentAndChild(
     session,
     thread: parent,
   } = seedThreadFixture(harness);
+
   seedThreadRuntimeState(harness.deps, {
     threadId: parent.id,
     environmentId: environment.id,
     providerThreadId: "parent-provider-thread",
   });
+
   const child = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
@@ -47,6 +55,7 @@ function seedParentAndChild(
     status: childStatus,
     title: "Worker child",
   });
+
   return { parent, child, environment, session };
 }
 
@@ -60,12 +69,55 @@ function parentSystemRequests(harness: TestAppHarness, parentThreadId: string) {
 afterEach(() => vi.useRealTimers());
 
 describe("child outcomes without provider completion", () => {
+  it("delivers a child outcome to the surviving owner when its recorded parent is archived", async () => {
+    await withTestHarness(async (harness) => {
+      const {
+        parent: owner,
+        child: recordedParent,
+        environment,
+      } = seedParentAndChild(harness, "idle");
+
+      const child = seedThread(harness.deps, {
+        projectId: owner.projectId,
+        environmentId: environment.id,
+        parentThreadId: recordedParent.id,
+        status: "error",
+        title: "Blocked child",
+      });
+
+      harness.db
+        .update(threads)
+        .set({ archivedAt: Date.now() })
+        .where(eq(threads.id, recordedParent.id))
+        .run();
+
+      vi.useFakeTimers();
+      await queueChildThreadTurnNotificationBestEffort(harness.deps, {
+        childThread: child,
+        parentThreadId: recordedParent.id,
+        turnStatus: "failed",
+      });
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(parentSystemRequests(harness, recordedParent.id)).toHaveLength(0);
+      await vi.waitFor(() =>
+        expect(parentSystemRequests(harness, owner.id)).toHaveLength(1),
+      );
+      expect(
+        parentSystemRequests(harness, owner.id)[0]?.systemMessageSubject,
+      ).toMatchObject({
+        outcomes: [{ threadId: child.id, status: "failed" }],
+      });
+    });
+  });
+
   it("keeps a manual Stop silent when it synthesizes an open turn interruption", async () => {
     await withTestHarness(async (harness) => {
       const { parent, child, environment } = seedParentAndChild(
         harness,
         "active",
       );
+
       seedTurnStarted(harness.deps, {
         environmentId: environment.id,
         threadId: child.id,
@@ -99,6 +151,7 @@ describe("child outcomes without provider completion", () => {
           harness,
           "active",
         );
+
         seedTurnStarted(harness.deps, {
           environmentId: environment.id,
           threadId: child.id,
@@ -115,6 +168,7 @@ describe("child outcomes without provider completion", () => {
         });
 
         vi.useFakeTimers();
+
         const response = await harness.app.request("/internal/session/events", {
           method: "POST",
           headers: internalAuthHeaders(harness),
@@ -134,8 +188,10 @@ describe("child outcomes without provider completion", () => {
             ]),
           }),
         });
+
         expect(response.status).toBe(200);
         await vi.advanceTimersByTimeAsync(2_000);
+
         if (expectedNotices === 1) {
           await vi.waitFor(() =>
             expect(parentSystemRequests(harness, parent.id)).toHaveLength(1),
@@ -161,6 +217,7 @@ describe("child outcomes without provider completion", () => {
   it("keeps each interruption cause attached to its child in a batch", async () => {
     await withTestHarness(async (harness) => {
       const { parent, child } = seedParentAndChild(harness, "idle");
+
       const sibling = seedThread(harness.deps, {
         projectId: parent.projectId,
         environmentId: child.environmentId,
@@ -255,11 +312,13 @@ describe("child outcomes without provider completion", () => {
     await withTestHarness(async (harness) => {
       const { parent } = seedParentAndChild(harness, "idle");
       const host = seedHost(harness.deps);
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: parent.projectId,
         status: "provisioning",
       });
+
       seedThread(harness.deps, {
         projectId: parent.projectId,
         environmentId: environment.id,
@@ -285,6 +344,7 @@ describe("child outcomes without provider completion", () => {
   it("notifies the parent only after a queued send exhausts retries", async () => {
     await withTestHarness(async (harness) => {
       const { parent, child } = seedParentAndChild(harness, "idle");
+
       const row = seedQueuedMessage(harness.deps, {
         threadId: child.id,
         content: textInput("Continue the child work"),
@@ -292,6 +352,7 @@ describe("child outcomes without provider completion", () => {
       });
 
       vi.useFakeTimers();
+
       for (let attempt = 0; attempt < 3; attempt += 1) {
         recordQueuedMessageDrainFailure(harness.deps, {
           error: new Error("dispatch failed"),
@@ -300,6 +361,7 @@ describe("child outcomes without provider completion", () => {
           thread: child,
         });
       }
+
       expect(
         getQueuedThreadMessage(harness.db, row.id)?.nextAttemptAt,
       ).not.toBeNull();

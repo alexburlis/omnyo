@@ -66,6 +66,7 @@ export function useFileSearchSuggestions(
     currentThreadId: args.currentThreadId,
     includeDirectories: false,
   });
+
   const suggestions = useMemo<FilePathSearchSuggestion[]>(
     () =>
       pathSuggestions.suggestions
@@ -73,6 +74,7 @@ export function useFileSearchSuggestions(
         .map(toFileSearchSuggestion),
     [pathSuggestions.suggestions],
   );
+
   const canSearchWorkspace = Boolean(args.projectId);
   const canSearchThreadStorage = Boolean(args.currentThreadId);
 

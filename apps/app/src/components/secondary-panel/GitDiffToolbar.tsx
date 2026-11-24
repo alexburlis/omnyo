@@ -1,22 +1,22 @@
 import { useEffect, useRef } from "react";
 import { useResizeObserver } from "usehooks-ts";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS,
   COARSE_POINTER_COMPACT_ICON_SIZE_CLASS,
   COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
   COARSE_POINTER_TEXT_SM_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@bb/shared-ui/dropdown-menu";
-import { Icon } from "@bb/shared-ui/icon";
-import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
-import { Input } from "@bb/shared-ui/input";
-import { Skeleton } from "@bb/shared-ui/skeleton";
+} from "@omnyo/shared-ui/dropdown-menu";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
+import { Input } from "@omnyo/shared-ui/input";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
 import { DiffStatsTally } from "@/components/ui/diff-stats-tally.js";
 import {
   formatChangeSummary,
@@ -27,12 +27,17 @@ import {
   type CodeOverflowMode,
   type CodeOverflowModeChangeHandler,
 } from "@/lib/code-overflow-mode";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import type { GitDiffStats } from "../git-diff/git-diff-parsing";
+import {
+  PANEL_SEGMENTED_SEGMENT_CLASS,
+  panelSegmentedIndicatorClass,
+} from "./panelSegmentedControl";
 
 const GIT_DIFF_SELECTOR_MENU_MIN_WIDTH = "20rem";
 
 export type GitDiffDisplayMode = "unified" | "split";
+
 export type GitDiffDisplayModeChangeHandler = (
   mode: GitDiffDisplayMode,
 ) => void;
@@ -239,10 +244,12 @@ export function GitDiffToolbar({
   onLineOverflowModeChange,
 }: GitDiffToolbarProps) {
   const rootRef = useRef<HTMLDivElement>(null!);
+
   const { width: rootWidth = 0 } = useResizeObserver({
     ref: rootRef,
     box: "content-box",
   });
+
   const changeTally = { ...stats, lineStatsComplete: true };
   const completeSummary = formatChangeSummary(changeTally);
   const truncatedFilesLabel = `${stats.filesCount}+ file${stats.filesCount === 1 ? "" : "s"}`;
@@ -387,10 +394,19 @@ export function GitDiffToolbar({
               <Icon name="TextWrap" />
             </Button>
             <div
-              className="inline-flex items-center gap-1 rounded-lg border border-border p-0.5"
+              className="relative inline-grid grid-cols-2 items-center gap-1 rounded-lg border border-border p-0.5"
               role="tablist"
               aria-label="Diff view mode"
             >
+              <span
+                aria-hidden
+                className={panelSegmentedIndicatorClass({
+                  geometry:
+                    "inset-y-0.5 left-0.5 w-[calc(50%-0.25rem)] rounded-md",
+                  secondSelected: displayMode === "split",
+                  secondOffset: "translate-x-[calc(100%+0.25rem)]",
+                })}
+              />
               <Button
                 type="button"
                 variant="ghost"
@@ -398,6 +414,7 @@ export function GitDiffToolbar({
                 className={cn(
                   COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS,
                   "text-muted-foreground",
+                  PANEL_SEGMENTED_SEGMENT_CLASS,
                 )}
                 onClick={() => onDisplayModeChange("unified")}
                 aria-label="Stacked diff view"
@@ -412,6 +429,7 @@ export function GitDiffToolbar({
                 className={cn(
                   COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS,
                   "text-muted-foreground",
+                  PANEL_SEGMENTED_SEGMENT_CLASS,
                 )}
                 onClick={() => onDisplayModeChange("split")}
                 aria-label="Split diff view"

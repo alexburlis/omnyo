@@ -1,26 +1,26 @@
-import { providerRawEventSchema, threadUsageCostSchema } from "@bb/domain";
-import type { ProviderRawEvent, ThreadUsageCost } from "@bb/domain";
+import { providerRawEventSchema, threadUsageCostSchema } from "@omnyo/domain";
+import type { ProviderRawEvent, ThreadUsageCost } from "@omnyo/domain";
 import {
   COMPACTION_PRESENTATION,
   errorEnvelopeSchema,
   jsonRpcEnvelopeSchema,
   planStepsPresentation,
   presentationTitle,
-} from "@bb/provider-bridge-protocol/bridge-kit";
+} from "@omnyo/provider-bridge-protocol/bridge-kit";
 import type {
   JsonRpcMessage,
   ProviderRuntimeEvent,
-} from "@bb/provider-bridge-protocol/bridge-kit";
+} from "@omnyo/provider-bridge-protocol/bridge-kit";
 import type {
   ThreadEventItemStatus,
   ThreadEventPlanStep,
   ThreadEventTurnStatus,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   DeltaItemShape,
   DeltaNoTurnFallback,
   ThreadDelta,
-} from "@bb/provider-bridge-protocol";
+} from "@omnyo/provider-bridge-protocol";
 import {
   ACP_COMPACTION_COMPLETED_METHOD,
   ACP_COMPACTION_STARTED_METHOD,
@@ -44,7 +44,7 @@ import {
 import {
   delegationPresentation,
   fileChangePresentation,
-} from "./presentation.js";
+} from "@omnyo/provider-bridge-protocol/acp/presentation";
 import {
   classifyAcpToolCall,
   extractAcpCommandResult,
@@ -53,8 +53,8 @@ import {
   isInjectedToolCandidate,
   type AcpClassifiedToolCall,
   type AcpInjectedTool,
-} from "./tool-classification.js";
-import { resolveAcpToolCallPath } from "./tool-call-operation.js";
+} from "@omnyo/provider-bridge-protocol/acp/tool-classification";
+import { resolveAcpToolCallPath } from "@omnyo/provider-bridge-protocol/acp/tool-call-operation";
 import { isJsonObject } from "./session/decode.js";
 import { acpVisibilityMetadata } from "./visibility.js";
 import {
@@ -96,7 +96,9 @@ export interface AcpBoundPermissionToolCall {
 }
 
 const ASSISTANT_STREAM_KEY = "assistant";
+
 const THOUGHT_STREAM_KEY = "thought";
+
 const ACP_PLAN_STEP_STATUS_BY_ENTRY_STATUS = {
   pending: "pending",
   in_progress: "active",
@@ -135,7 +137,9 @@ function mergeAcpToolCallEvents(
   if (!started) {
     return update;
   }
+
   const { rawKind: startedRawKind, ...startedRest } = started;
+
   const kindFields =
     update.kind !== undefined
       ? {
@@ -145,6 +149,7 @@ function mergeAcpToolCallEvents(
       : startedRawKind !== undefined
         ? { rawKind: startedRawKind }
         : {};
+
   return {
     ...startedRest,
     ...kindFields,
@@ -191,6 +196,7 @@ export function createAcpDeltaTranslator(
     context: AcpDeltaTranslationContext | undefined,
   ): [string, AcpOpenToolCall][] {
     const prefix = `${context?.threadId ?? ""} `;
+
     return [...mergedToolCalls.entries()].filter(([key]) =>
       key.startsWith(prefix),
     );
@@ -202,10 +208,13 @@ export function createAcpDeltaTranslator(
     if (dialect.toolIdentity === undefined) {
       return event;
     }
+
     const identity = dialect.toolIdentity(event);
+
     if (identity === undefined) {
       return event;
     }
+
     return {
       ...event,
       ...(event.kind === undefined && identity.kind !== undefined
@@ -224,6 +233,7 @@ export function createAcpDeltaTranslator(
       mergedToolCalls.delete(key);
       injectedToolBindings.delete(key);
     }
+
     pendingInjectedCalls.delete(context?.threadId ?? "");
   }
 
@@ -235,14 +245,17 @@ export function createAcpDeltaTranslator(
     event: AcpToolCallUpdateEvent,
   ): AcpInjectedTool | undefined {
     const title = event.title;
+
     if (title === undefined || injectedToolsByName.size === 0) {
       return undefined;
     }
+
     for (const tool of injectedToolsByName.values()) {
       if (title.includes(tool.name)) {
         return tool;
       }
     }
+
     return undefined;
   }
 
@@ -253,27 +266,35 @@ export function createAcpDeltaTranslator(
     if (!isInjectedToolCandidate(event)) {
       return undefined;
     }
+
     const named = injectedToolNamedBy(event);
+
     if (named !== undefined) {
       return named;
     }
+
     return pendingInjectedCalls.get(context?.threadId ?? "")?.shift();
   }
 
   function noteInjectedToolCall(threadId: string, toolName: string): void {
     const tool = injectedToolsByName.get(toolName) ?? { name: toolName };
+
     const candidates = threadCallEntries({ threadId }).filter(
       ([key, open]) =>
         !injectedToolBindings.has(key) && isInjectedToolCandidate(open.event),
     );
+
     const chosen =
       candidates.find(([, open]) => open.event.title?.includes(tool.name)) ??
       candidates.find(([, open]) => /\bmcp\b/i.test(open.event.title ?? "")) ??
       candidates[0];
+
     if (chosen !== undefined) {
       injectedToolBindings.set(chosen[0], tool);
+
       return;
     }
+
     const queue = pendingInjectedCalls.get(threadId) ?? [];
     queue.push(tool);
     pendingInjectedCalls.set(threadId, queue);
@@ -286,12 +307,15 @@ export function createAcpDeltaTranslator(
     const injected = injectedToolBindings.get(
       callKey(context, event.toolCallId),
     );
+
     if (injected === undefined) {
       const dialectShape = dialect.classifyToolCall?.(event);
+
       if (dialectShape !== undefined) {
         return dialectShape;
       }
     }
+
     return classifyAcpToolCall(event, injected, pathOptions);
   }
 
@@ -308,9 +332,11 @@ export function createAcpDeltaTranslator(
     if (writes.length === 0) {
       return event;
     }
+
     const paths = new Set(
       writes.map((write) => resolveAcpToolCallPath(write.path, pathOptions)),
     );
+
     return {
       ...event,
       content: [
@@ -329,12 +355,15 @@ export function createAcpDeltaTranslator(
     write: AcpFsWriteSnapshot,
   ): boolean {
     const writePath = resolveAcpToolCallPath(write.path, pathOptions);
+
     const fileChangeCalls = threadCallEntries(context).flatMap(
       ([key, open]) => {
         if (open.openedType !== "fileChange") {
           return [];
         }
+
         const classified = classifyCall(context, open.event);
+
         return classified.item.type === "fileChange"
           ? [
               {
@@ -346,18 +375,22 @@ export function createAcpDeltaTranslator(
           : [];
       },
     );
+
     const exactMatches = fileChangeCalls.filter(({ paths }) =>
       paths.includes(writePath),
     );
+
     const pathPendingMatches = fileChangeCalls.filter(
       ({ paths }) => paths.length === 0,
     );
+
     const matching =
       exactMatches.length === 1
         ? exactMatches[0]
         : exactMatches.length === 0 && pathPendingMatches.length === 1
           ? pathPendingMatches[0]
           : undefined;
+
     if (matching === undefined) {
       return false;
     }
@@ -365,13 +398,16 @@ export function createAcpDeltaTranslator(
     const previous = matching.open.clientFileWrites?.find(
       (entry) => resolveAcpToolCallPath(entry.path, pathOptions) === writePath,
     );
+
     const oldText = previous === undefined ? write.oldText : previous.oldText;
+
     const diff: Extract<AcpToolCallContent, { type: "diff" }> = {
       type: "diff",
       path: write.path,
       ...(oldText === undefined ? {} : { oldText }),
       newText: write.content,
     };
+
     const clientFileWrites = [
       ...(matching.open.clientFileWrites ?? []).filter(
         (entry) =>
@@ -379,19 +415,23 @@ export function createAcpDeltaTranslator(
       ),
       diff,
     ];
+
     mergedToolCalls.set(matching.key, {
       ...matching.open,
       clientFileWrites,
       event: withClientFileWrites(matching.open.event, clientFileWrites),
     });
+
     return true;
   }
 
   function toRawEvent(rawEvent: JsonRpcMessage): ProviderRawEvent {
     const parsed = providerRawEventSchema.safeParse(rawEvent);
+
     if (parsed.success) {
       return parsed.data;
     }
+
     return {
       jsonrpc: "2.0",
       ...(rawEvent.id !== undefined ? { id: rawEvent.id } : {}),
@@ -426,6 +466,7 @@ export function createAcpDeltaTranslator(
 
   function suppressedUnhandled(rawEvent: JsonRpcMessage): ThreadDelta[] {
     const fallback = noTurnFallbackFor(rawEvent);
+
     return [
       {
         kind: "unhandled",
@@ -439,9 +480,11 @@ export function createAcpDeltaTranslator(
 
   function unhandledDeltas(rawEvent: JsonRpcMessage): ThreadDelta[] {
     const description = acpVisibilityMetadata.describeRawEvent(rawEvent);
+
     if (description.coverage !== "unknown") {
       return [];
     }
+
     return [
       {
         kind: "unhandled",
@@ -484,6 +527,7 @@ export function createAcpDeltaTranslator(
     if (report === undefined || classified.item.type !== "delegation") {
       return classified;
     }
+
     return {
       item: {
         ...classified.item,
@@ -505,6 +549,7 @@ export function createAcpDeltaTranslator(
       permissionTitle === undefined
         ? undefined
         : presentationTitle(permissionTitle);
+
     return title === undefined
       ? classified
       : {
@@ -521,11 +566,14 @@ export function createAcpDeltaTranslator(
       ),
       args.permissionTitle,
     );
+
     injectedToolBindings.delete(callKey(args.context, args.event.toolCallId));
+
     const closeFields =
       classified.item.type === "command"
         ? commandCloseFields(args.event, args.status)
         : genericCloseFields(args.event);
+
     return {
       kind: "item.close",
       key: {
@@ -547,10 +595,13 @@ export function createAcpDeltaTranslator(
     "aggregatedOutput" | "exitCode" | "resultText"
   > {
     const normalizedEvent = dialect.normalizeCommandEvent?.(event) ?? event;
+
     const result =
       dialect.commandResult?.(normalizedEvent) ??
       extractAcpCommandResult(normalizedEvent);
+
     const exitCode = result.exitCode ?? (status === "failed" ? 1 : undefined);
+
     return {
       ...(result.output === undefined
         ? {}
@@ -563,6 +614,7 @@ export function createAcpDeltaTranslator(
     event: AcpToolCallUpdateEvent,
   ): Pick<Extract<ThreadDelta, { kind: "item.close" }>, "resultText"> {
     const outputText = extractAcpToolCallOutputText(event);
+
     return outputText === undefined ? {} : { resultText: outputText };
   }
 
@@ -571,6 +623,7 @@ export function createAcpDeltaTranslator(
     status: ThreadEventItemStatus,
   ): ThreadDelta[] {
     const deltas: ThreadDelta[] = [];
+
     for (const [key, open] of threadCallEntries(context)) {
       mergedToolCalls.delete(key);
       deltas.push(
@@ -583,6 +636,7 @@ export function createAcpDeltaTranslator(
         }),
       );
     }
+
     return deltas;
   }
 
@@ -606,12 +660,15 @@ export function createAcpDeltaTranslator(
     switch (update.sessionUpdate) {
       case "agent_message_chunk": {
         const parsed = acpAgentMessageChunkUpdateSchema.safeParse(update);
+
         const text = parsed.success
           ? extractAcpContentText(parsed.data.content)
           : undefined;
+
         if (text === undefined) {
           return suppressedUnhandled(rawEvent);
         }
+
         return [
           closeThoughtStream(),
           {
@@ -626,12 +683,15 @@ export function createAcpDeltaTranslator(
 
       case "agent_thought_chunk": {
         const parsed = acpAgentThoughtChunkUpdateSchema.safeParse(update);
+
         const text = parsed.success
           ? extractAcpContentText(parsed.data.content)
           : undefined;
+
         if (text === undefined) {
           return suppressedUnhandled(rawEvent);
         }
+
         return [
           {
             kind: "item.textDelta",
@@ -645,16 +705,20 @@ export function createAcpDeltaTranslator(
 
       case "tool_call": {
         const parsed = acpToolCallUpdateEventSchema.safeParse(update);
+
         if (!parsed.success) {
           return suppressedUnhandled(rawEvent);
         }
+
         const event = withDialectIdentity(parsed.data);
         const flush = [closeThoughtStream(), closeAssistantStream()];
         const announcedKey = callKey(context, event.toolCallId);
         const bound = bindAnnouncedCall(context, event);
+
         if (bound !== undefined) {
           injectedToolBindings.set(announcedKey, bound);
         }
+
         if (isTerminalAcpStatus(event.status)) {
           return [
             ...flush,
@@ -666,11 +730,13 @@ export function createAcpDeltaTranslator(
             }),
           ];
         }
+
         const classified = classifyCall(context, event);
         mergedToolCalls.set(announcedKey, {
           event,
           openedType: classified.item.type,
         });
+
         return [
           ...flush,
           {
@@ -687,18 +753,23 @@ export function createAcpDeltaTranslator(
 
       case "tool_call_update": {
         const parsed = acpToolCallUpdateEventSchema.safeParse(update);
+
         if (!parsed.success) {
           return suppressedUnhandled(rawEvent);
         }
+
         const event = withDialectIdentity(parsed.data);
         const key = callKey(context, event.toolCallId);
         const open = mergedToolCalls.get(key);
+
         const merged = withClientFileWrites(
           mergeAcpToolCallEvents(open?.event, event),
           open?.clientFileWrites ?? [],
         );
+
         if (isTerminalAcpStatus(merged.status)) {
           mergedToolCalls.delete(key);
+
           return [
             toolCallClose({
               context,
@@ -710,6 +781,7 @@ export function createAcpDeltaTranslator(
             }),
           ];
         }
+
         const mergedType = classifyCall(context, merged).item.type;
         mergedToolCalls.set(key, {
           event: merged,
@@ -724,6 +796,7 @@ export function createAcpDeltaTranslator(
             ? {}
             : { clientFileWrites: open.clientFileWrites }),
         });
+
         if (
           event.status === "in_progress" &&
           mergedType === "command" &&
@@ -731,7 +804,9 @@ export function createAcpDeltaTranslator(
         ) {
           const normalizedEvent =
             dialect.normalizeCommandEvent?.(event) ?? event;
+
           const streamed = extractAcpStreamedCommandOutput(normalizedEvent);
+
           return streamed === undefined
             ? suppressedUnhandled(rawEvent)
             : [
@@ -742,10 +817,13 @@ export function createAcpDeltaTranslator(
                 },
               ];
         }
+
         const progressText = extractAcpToolCallOutputText(event);
+
         if (progressText === undefined) {
           return suppressedUnhandled(rawEvent);
         }
+
         if (mergedType !== "command" && mergedType !== "fileChange") {
           return [
             {
@@ -758,14 +836,17 @@ export function createAcpDeltaTranslator(
             },
           ];
         }
+
         return suppressedUnhandled(rawEvent);
       }
 
       case "plan": {
         const parsed = acpPlanUpdateSchema.safeParse(update);
+
         if (!parsed.success) {
           return suppressedUnhandled(rawEvent);
         }
+
         const steps: ThreadEventPlanStep[] = parsed.data.entries.map(
           (entry) => ({
             step: entry.content,
@@ -774,6 +855,7 @@ export function createAcpDeltaTranslator(
               : {}),
           }),
         );
+
         return [
           {
             kind: "item.close",
@@ -788,13 +870,17 @@ export function createAcpDeltaTranslator(
 
       case "usage_update": {
         const parsed = acpUsageUpdateSchema.safeParse(update);
+
         if (!parsed.success) {
           return [];
         }
+
         const cost = threadUsageCostSchema.safeParse(parsed.data["cost"]);
+
         if (cost.success) {
           lastUsageCost = cost.data;
         }
+
         return [
           {
             kind: "contextWindow",
@@ -809,6 +895,7 @@ export function createAcpDeltaTranslator(
 
       case "session_info_update": {
         const title = isJsonObject(update) ? update["title"] : undefined;
+
         if (
           typeof title !== "string" ||
           title.trim() === "" ||
@@ -816,7 +903,9 @@ export function createAcpDeltaTranslator(
         ) {
           return [];
         }
+
         lastAgentTitle = title;
+
         return [{ kind: "thread.name", name: title, source: "agent" }];
       }
 
@@ -876,6 +965,7 @@ export function createAcpDeltaTranslator(
   ): ThreadDelta[] {
     const status = turnStatusForStopReason(stopReason);
     const notice = stopReasonNotice(stopReason);
+
     return [
       ...flushOpenTurnWork(context, itemStatusForTurnStatus(status)),
       ...(notice === undefined
@@ -899,8 +989,10 @@ export function createAcpDeltaTranslator(
     context?: AcpDeltaTranslationContext,
   ): ThreadDelta[] {
     const errorEnvelope = errorEnvelopeSchema.safeParse(event);
+
     if (errorEnvelope.success) {
       clearThreadCalls(context);
+
       return [
         {
           kind: "provider.error",
@@ -912,6 +1004,7 @@ export function createAcpDeltaTranslator(
     }
 
     const envelope = jsonRpcEnvelopeSchema.safeParse(event);
+
     if (!envelope.success) {
       return [];
     }
@@ -921,10 +1014,13 @@ export function createAcpDeltaTranslator(
         const params = acpTurnStartedNotificationParamsSchema.safeParse(
           envelope.data.params,
         );
+
         if (!params.success) {
           return [];
         }
+
         clearThreadCalls(context);
+
         return [{ kind: "turn.open" }];
       }
 
@@ -932,9 +1028,11 @@ export function createAcpDeltaTranslator(
         const params = acpTurnCompletedNotificationParamsSchema.safeParse(
           envelope.data.params,
         );
+
         if (!params.success) {
           return [];
         }
+
         return translateTurnCompleted(params.data.stopReason, context);
       }
 
@@ -942,10 +1040,13 @@ export function createAcpDeltaTranslator(
         const params = acpTurnStartedNotificationParamsSchema.safeParse(
           envelope.data.params,
         );
+
         if (!params.success) {
           return [];
         }
+
         clearThreadCalls(context);
+
         return [
           { kind: "turn.open" },
           {
@@ -961,12 +1062,16 @@ export function createAcpDeltaTranslator(
         const params = acpCompactionCompletedNotificationParamsSchema.safeParse(
           envelope.data.params,
         );
+
         if (!params.success) {
           return [];
         }
+
         const status = params.data.status;
+
         const turnStatus: ThreadEventTurnStatus =
           status === "skipped" ? "completed" : status;
+
         return [
           ...flushOpenTurnWork(context, itemStatusForTurnStatus(turnStatus)),
           ...(status === "completed"
@@ -997,9 +1102,11 @@ export function createAcpDeltaTranslator(
         const params = acpUpdateNotificationParamsSchema.safeParse(
           envelope.data.params,
         );
+
         if (!params.success) {
           return [];
         }
+
         return translateUpdate(params.data.update, context);
       }
 
@@ -1007,17 +1114,21 @@ export function createAcpDeltaTranslator(
         const params = acpFsWriteNotificationParamsSchema.safeParse(
           envelope.data.params,
         );
+
         if (!params.success) {
           return [];
         }
+
         if (mergeFsWriteIntoOpenToolCall(context, params.data)) {
           return [];
         }
+
         const rawEvent: JsonRpcMessage = {
           jsonrpc: "2.0",
           method: ACP_FS_WRITE_METHOD,
           params: params.data,
         };
+
         return [
           {
             kind: "item.close",
@@ -1049,9 +1160,11 @@ export function createAcpDeltaTranslator(
         const params = acpWarningNotificationParamsSchema.safeParse(
           envelope.data.params,
         );
+
         if (!params.success) {
           return [];
         }
+
         return [
           {
             kind: "provider.warning",
@@ -1077,29 +1190,37 @@ export function createAcpDeltaTranslator(
   ): AcpBoundPermissionToolCall {
     const context = { threadId };
     const ownKey = callKey(context, toolCall.toolCallId);
+
     let boundKey: string | undefined = mergedToolCalls.has(ownKey)
       ? ownKey
       : undefined;
+
     if (boundKey === undefined) {
       const sameKind = threadCallEntries(context).filter(
         ([, open]) =>
           toolCall.kind !== undefined && open.event.kind === toolCall.kind,
       );
+
       boundKey = sameKind.length === 1 ? sameKind[0]?.[0] : undefined;
     }
+
     const open =
       boundKey === undefined ? undefined : mergedToolCalls.get(boundKey);
+
     if (boundKey === undefined || open === undefined) {
       return { toolCallId: toolCall.toolCallId, event: undefined };
     }
+
     if (classifyCall(context, open.event).item.type !== "tool") {
       return { toolCallId: open.event.toolCallId, event: open.event };
     }
+
     const kind =
       toolCall.kind !== undefined &&
       (toolCall.kind !== "other" || open.event.kind === undefined)
         ? toolCall.kind
         : undefined;
+
     const merged = mergeAcpToolCallEvents(open.event, {
       sessionUpdate: "tool_call_update",
       toolCallId: open.event.toolCallId,
@@ -1118,16 +1239,20 @@ export function createAcpDeltaTranslator(
         ? { rawOutput: toolCall.rawOutput }
         : {}),
     });
+
     if (classifyCall(context, merged).item.type === open.openedType) {
       mergedToolCalls.set(boundKey, { ...open, event: merged });
+
       return { toolCallId: merged.toolCallId, event: merged };
     }
+
     mergedToolCalls.set(boundKey, {
       ...open,
       ...(toolCall.title === undefined
         ? {}
         : { permissionTitle: toolCall.title }),
     });
+
     return { toolCallId: open.event.toolCallId, event: merged };
   }
 
@@ -1138,19 +1263,25 @@ export function createAcpDeltaTranslator(
     const context = { threadId };
     const key = callKey(context, report.toolCallId);
     const open = mergedToolCalls.get(key);
+
     if (open === undefined) {
       return [];
     }
+
     const classified = classifyCall(context, open.event);
+
     if (classified.item.type !== "delegation") {
       return [];
     }
+
     const item: DeltaItemShape = {
       ...classified.item,
       childRef: report.childRef,
       label: report.label,
     };
+
     mergedToolCalls.set(key, { ...open, delegation: report });
+
     return [
       {
         kind: "item.open",

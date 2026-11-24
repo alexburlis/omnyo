@@ -4,27 +4,27 @@ import {
   PROMPT_STACK_CARD_ROW_HEIGHT,
   PromptStackCard,
 } from "@/components/promptbox/banner/PromptStackCard";
+import { PromptBannerActionButton } from "@/components/promptbox/banner/prompt-banner-actions";
+import { PromptStackDisclosureChevron } from "@/components/promptbox/banner/prompt-stack-header";
 import {
   activityIconClass,
   activityRowClass,
   activityTextClass,
-} from "@bb/shared-ui/activity-row-styles";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/activity-row-styles";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
-  PromptStackHoverChevron,
   useDisclosureFocusHandoff,
-} from "@bb/shared-ui/prompt-stack-disclosure";
+} from "@omnyo/shared-ui/prompt-stack-disclosure";
 
 const HEADER_GROUP_CLASS = activityRowClass(
   "active",
-  "flex w-full items-stretch rounded-none px-0 py-0",
+  "flex w-full items-center rounded-none px-0 py-0",
 );
+
 const HEADER_BUTTON_CLASS =
   "flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-none bg-transparent px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-background/80";
-const DISMISS_BUTTON_CLASS =
-  "flex min-h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-none border-l border-border/35 bg-transparent text-muted-foreground transition-colors hover:text-foreground disabled:cursor-wait disabled:text-muted-foreground/60";
 
 interface CollapsibleActiveStackCardProps {
   cardAriaLabel: string;
@@ -34,10 +34,13 @@ interface CollapsibleActiveStackCardProps {
   toggleAriaLabel: string;
   iconName: IconName;
   title: string;
+  description?: string;
   isExpanded: boolean;
   onToggle: () => void;
   dismiss: {
     ariaLabel: string;
+    label: string;
+    pendingLabel: string;
     isPending: boolean;
     onDismiss: () => void;
   } | null;
@@ -52,12 +55,14 @@ export function CollapsibleActiveStackCard({
   toggleAriaLabel,
   iconName,
   title,
+  description,
   isExpanded,
   onToggle,
   dismiss,
   children,
 }: CollapsibleActiveStackCardProps) {
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
+
   return (
     <PromptStackCard
       ariaLabel={cardAriaLabel}
@@ -90,27 +95,39 @@ export function CollapsibleActiveStackCard({
           <span
             className={activityTextClass(
               "active",
-              "min-w-0 flex-1 truncate text-left",
+              "shrink-0 text-left font-medium",
             )}
           >
             {title}
           </span>
-          <PromptStackHoverChevron isExpanded={isExpanded} />
+          {description ? (
+            <span
+              data-promptbox-hide-tiny=""
+              className="min-w-0 truncate text-left text-muted-foreground"
+            >
+              {description}
+            </span>
+          ) : null}
+          <span className="ml-auto flex shrink-0 items-center pl-1">
+            <PromptStackDisclosureChevron isExpanded={isExpanded} />
+          </span>
         </button>
         {dismiss ? (
-          <button
-            type="button"
+          <PromptBannerActionButton
             aria-label={dismiss.ariaLabel}
             onClick={dismiss.onDismiss}
             disabled={dismiss.isPending}
-            className={DISMISS_BUTTON_CLASS}
+            className="mr-1.5 disabled:cursor-wait"
           >
-            <Icon
-              name={dismiss.isPending ? "Loading" : "X"}
-              className={cn("size-3.5", dismiss.isPending && "animate-spin")}
-              aria-hidden="true"
-            />
-          </button>
+            {dismiss.isPending ? (
+              <Icon
+                name="Loading"
+                className="size-3.5 animate-spin"
+                aria-hidden="true"
+              />
+            ) : null}
+            {dismiss.isPending ? dismiss.pendingLabel : dismiss.label}
+          </PromptBannerActionButton>
         ) : null}
       </div>
       <AnimatedDisclosureBody

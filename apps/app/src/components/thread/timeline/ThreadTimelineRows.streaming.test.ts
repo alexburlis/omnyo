@@ -1,4 +1,4 @@
-import { buildTimelineViewRows } from "@bb/thread-view";
+import { buildTimelineViewRows } from "@omnyo/thread-view";
 import { describe, expect, it } from "vitest";
 import {
   commandRow,
@@ -19,6 +19,7 @@ describe("findStreamingAssistantMessageId", () => {
         seq: 2,
       }),
     ]);
+
     expect(findStreamingAssistantMessageId(rows)).toBe("assistant_1");
   });
 
@@ -32,6 +33,7 @@ describe("findStreamingAssistantMessageId", () => {
       }),
       commandRow({ id: "cmd_1", command: "ls", seq: 2, status: "pending" }),
     ]);
+
     expect(findStreamingAssistantMessageId(rows)).toBeNull();
     expect(
       findStreamingAssistantMessageId(
@@ -59,6 +61,7 @@ describe("findStreamingAssistantMessageId", () => {
         ],
       }),
     ]);
+
     expect(findStreamingAssistantMessageId(pendingTurn)).toBe(
       "assistant_nested",
     );
@@ -77,6 +80,7 @@ describe("findStreamingAssistantMessageId", () => {
         ],
       }),
     ]);
+
     expect(findStreamingAssistantMessageId(completedTurn)).toBeNull();
 
     const pendingDelegation = buildTimelineViewRows([
@@ -94,6 +98,7 @@ describe("findStreamingAssistantMessageId", () => {
         ],
       }),
     ]);
+
     expect(findStreamingAssistantMessageId(pendingDelegation)).toBe(
       "assistant_child",
     );

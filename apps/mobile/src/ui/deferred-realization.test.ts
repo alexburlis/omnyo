@@ -9,30 +9,38 @@ function fakeScheduler() {
   const timers = new Map<ReturnType<typeof setTimeout>, () => void>();
   let nextFrame = 1;
   let nextTimer = 1;
+
   const scheduler: FrameScheduler = {
     requestAnimationFrame: (cb) => {
       const id = nextFrame++;
       frames.set(id, cb);
+
       return id;
     },
     cancelAnimationFrame: (id) => void frames.delete(id),
     setTimeout: (cb) => {
       const id = nextTimer++ as unknown as ReturnType<typeof setTimeout>;
       timers.set(id, cb);
+
       return id;
     },
     clearTimeout: (id) => void timers.delete(id),
   };
+
   const flushFrame = () => {
     const pending = [...frames.entries()];
     frames.clear();
+
     for (const [, cb] of pending) cb();
   };
+
   const fireTimers = () => {
     const pending = [...timers.values()];
     timers.clear();
+
     for (const cb of pending) cb();
   };
+
   return { scheduler, flushFrame, fireTimers, frames, timers };
 }
 

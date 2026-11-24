@@ -11,7 +11,7 @@ import Image from "@tiptap/extension-image";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
-import Table from "@tiptap/extension-table";
+import { Table } from "@tiptap/extension-table";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
 import TableRow from "@tiptap/extension-table-row";
@@ -30,8 +30,16 @@ export type MentionItem =
   | { type: "task"; id: string; key: string; title: string }
   | { type: "thread"; id: string; title: string };
 
-const MENTION_SCHEME = "bbtask://";
-const THREAD_MENTION_SCHEME = "bbthread://";
+const MENTION_SCHEME = "omnyotask://";
+
+const THREAD_MENTION_SCHEME = "omnyothread://";
+
+function legacyMentionSchemeV1(scheme: string): string {
+  if (scheme === MENTION_SCHEME) return "bbtask://";
+
+  if (scheme === THREAD_MENTION_SCHEME) return "bbthread://";
+  throw new Error("Unknown mention scheme");
+}
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -39,11 +47,13 @@ function svgSpecAttributes(
   attrs: Record<string, string | number>,
 ): Record<string, string> {
   const out: Record<string, string> = {};
+
   for (const [key, value] of Object.entries(attrs)) {
     if (key === "key") continue;
     out[key.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`)] =
       String(value);
   }
+
   return out;
 }
 
@@ -53,7 +63,7 @@ function mentionIconSpec(icon: IconSvgElement): DOMOutputSpec {
     {
       viewBox: "0 0 24 24",
       fill: "none",
-      class: "bb-tasks-mention-icon",
+      class: "omnyo-tasks-mention-icon",
       "aria-hidden": "true",
     },
     ...icon.map(([tag, attrs]): DOMOutputSpec => [
@@ -89,6 +99,7 @@ const MarkdownTaskInput = Extension.create({
         find: /^\s*\[([ xX]?)\]\s$/,
         handler: ({ range, match, chain }) => {
           const commands = chain().deleteRange(range).toggleTaskList();
+
           if (/[xX]/.test(match[1] ?? ""))
             commands.updateAttributes("taskItem", { checked: true });
           commands.run();
@@ -118,7 +129,9 @@ function hasMergedCell(node: ProseMirrorNode): boolean {
 
 function isMarkdownTable(node: ProseMirrorNode): boolean {
   const [header, ...body] = tableChildren(node);
+
   if (!header) return false;
+
   if (
     tableChildren(header).some(
       (cell) =>
@@ -129,6 +142,7 @@ function isMarkdownTable(node: ProseMirrorNode): boolean {
   ) {
     return false;
   }
+
   return !body.some((row) =>
     tableChildren(row).some(
       (cell) =>
@@ -144,8 +158,10 @@ function renderTableCell(
   cell: ProseMirrorNode,
 ): void {
   const content = cell.firstChild;
+
   if (!content) return;
   const start = state.out.length;
+
   if (content.type.name === "image") state.render(content, cell, 0);
   else if (content.childCount > 0) state.renderInline(content);
   state.out =
@@ -162,6 +178,7 @@ const MarkdownTable = Table.extend({
               getHTMLFromFragment(Fragment.from(node), node.type.schema),
             );
             state.closeBlock(node);
+
             return;
           }
 
@@ -174,6 +191,7 @@ const MarkdownTable = Table.extend({
             });
             state.write(" |");
             state.ensureNewLine();
+
             if (rowIndex === 0) {
               state.write(
                 `| ${Array.from({ length: row.childCount }, () => "---").join(" | ")} |`,
@@ -225,26 +243,29 @@ function createMentionNode({
           tag: `span[${dataAttribute}]`,
           getAttrs: (element) => {
             const id = element.getAttribute(dataAttribute) ?? "";
+
             return id
               ? { [idAttribute]: id, label: element.textContent || id }
               : false;
           },
         },
-        {
-          tag: `a[href^="${scheme}"]`,
+        ...[scheme, legacyMentionSchemeV1(scheme)].map((inputScheme) => ({
+          tag: `a[href^="${inputScheme}"]`,
           priority: 100,
-          getAttrs: (element) => {
+          getAttrs: (element: HTMLElement) => {
             const href = element.getAttribute("href") ?? "";
-            const id = href.slice(scheme.length);
+            const id = href.slice(inputScheme.length);
+
             return id
               ? { [idAttribute]: id, label: element.textContent || id }
               : false;
           },
-        },
+        })),
       ];
     },
     renderHTML({ node }) {
       const id = String(node.attrs[idAttribute]);
+
       return [
         "span",
         { [dataAttribute]: id, class: className, ...(role ? { role } : {}) },
@@ -276,7 +297,7 @@ const TaskMention = createMentionNode({
   idAttribute: "key",
   dataAttribute: "data-task-mention",
   scheme: MENTION_SCHEME,
-  className: "bb-tasks-mention",
+  className: "omnyo-tasks-mention",
 });
 
 const ThreadMention = createMentionNode({
@@ -284,7 +305,7 @@ const ThreadMention = createMentionNode({
   idAttribute: "threadId",
   dataAttribute: "data-thread-mention",
   scheme: THREAD_MENTION_SCHEME,
-  className: "bb-tasks-mention bb-tasks-thread-mention",
+  className: "omnyo-tasks-mention omnyo-tasks-thread-mention",
   role: "link",
   icon: BubbleChatIcon,
 });
@@ -293,6 +314,7 @@ const TrailingParagraph = Extension.create({
   name: "trailingParagraph",
   addProseMirrorPlugins() {
     const editor = this.editor;
+
     return [
       new Plugin({
         key: new PluginKey("trailingParagraph"),
@@ -300,7 +322,9 @@ const TrailingParagraph = Extension.create({
           if (!editor.isEditable) return null;
           const last = newState.doc.lastChild;
           const paragraph = newState.schema.nodes.paragraph;
+
           if (!paragraph || !last || !last.type.isLeaf) return null;
+
           return newState.tr.insert(
             newState.doc.content.size,
             paragraph.create(),
@@ -327,7 +351,9 @@ const MentionSuggestion = Extension.create<{
   },
   addProseMirrorPlugins() {
     const handle = this.options.handle;
+
     if (!handle) return [];
+
     return [
       Suggestion<MentionItem, MentionItem>({
         editor: this.editor,
@@ -345,6 +371,7 @@ const MentionSuggestion = Extension.create<{
                   type: TaskMention.name,
                   attrs: { key: props.key, label: props.key },
                 };
+
           editor
             .chain()
             .focus()

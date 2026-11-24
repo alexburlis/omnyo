@@ -19,6 +19,7 @@ function localTime(
   const date = new Date(from);
   date.setDate(date.getDate() + dayOffset);
   date.setHours(hour, minute, 0, 0);
+
   return date.getTime();
 }
 

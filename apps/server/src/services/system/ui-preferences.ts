@@ -5,7 +5,7 @@ import {
   overwriteStoredUiPreference,
   replaceStoredUiPreference,
   type StoredUiPreference,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   UI_PREFERENCE_KEYS,
   getUiPreferenceDefault,
@@ -15,7 +15,7 @@ import {
   type UiPreferenceEntry,
   type UiPreferenceKey,
   type UiPreferenceValue,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { AppDeps } from "../../types.js";
 
 function parseStoredJson(text: string): unknown {
@@ -32,8 +32,10 @@ function installationDefault<Key extends UiPreferenceKey>(
 ): UiPreferenceValue<Key> {
   if (stored !== undefined) {
     const parsed = parseUiPreferenceValue(key, parseStoredJson(stored));
+
     if (parsed.success) return parsed.value;
   }
+
   return getUiPreferenceDefault(key);
 }
 
@@ -46,8 +48,10 @@ function toEntry<Key extends UiPreferenceKey>(
     revision: stored?.revision ?? 0,
     value: defaultValue,
   };
+
   if (stored === undefined) return defaultEntry;
   const parsed = parseUiPreferenceValue(key, parseStoredJson(stored.valueJson));
+
   return parsed.success
     ? { revision: stored.revision, value: parsed.value }
     : defaultEntry;
@@ -60,10 +64,13 @@ export function readUiPreferences(deps: AppDeps): UiPreferenceEntries {
       row.valueJson,
     ]),
   );
+
   const stored = new Map<string, StoredUiPreference>();
+
   for (const row of listStoredUiPreferences(deps.db)) {
     if (isUiPreferenceKey(row.key)) stored.set(row.key, row);
   }
+
   return Object.fromEntries(
     UI_PREFERENCE_KEYS.map((key) => [
       key,
@@ -89,10 +96,13 @@ export function writeUiPreference<Key extends UiPreferenceKey>(
     key: args.key,
     valueJson: JSON.stringify(args.value),
   });
+
   if (result.outcome === "conflict") {
     return { outcome: "conflict", revision: result.revision };
   }
+
   deps.hub.notifySystem(["ui-preferences-changed"]);
+
   return {
     outcome: "updated",
     entry: { revision: result.revision, value: args.value },
@@ -107,10 +117,13 @@ export function resetUiPreference<Key extends UiPreferenceKey>(
     key,
     getStoredUiPreferenceDefault(deps.db, key),
   );
+
   const { revision } = overwriteStoredUiPreference(deps.db, {
     key,
     valueJson: JSON.stringify(value),
   });
+
   deps.hub.notifySystem(["ui-preferences-changed"]);
+
   return { revision, value };
 }

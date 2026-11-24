@@ -28,6 +28,7 @@ const SURFACES: readonly SurfaceCase[] = [
 function renderSurface(surface: SurfaceCase, isFocused = true) {
   const openPluginPanel = vi.fn();
   const reveal = vi.fn();
+
   const { result } = renderHook(() =>
     usePanelPluginPanels({
       actions: surface.actions,
@@ -37,6 +38,7 @@ function renderSurface(surface: SurfaceCase, isFocused = true) {
       slot: surface.slot,
     }),
   );
+
   return { openPluginPanel, result, reveal };
 }
 

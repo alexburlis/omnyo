@@ -23,6 +23,7 @@ export async function withWorktreeMetadataLock<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   const resolvedCommonDir = path.resolve(commonDir);
+
   return withProcessLocalQueuedLocks({
     locks: [{ key: resolvedCommonDir }],
     signal,
@@ -35,6 +36,7 @@ export async function runGitWithWorktreeMetadataLock(
   options: RunGitOptions,
 ): Promise<GitCommandResult> {
   const commonDir = await getGitCommonDir(options.cwd, options);
+
   return withWorktreeMetadataLock(
     commonDir,
     () => runGit(args, options),
@@ -73,11 +75,13 @@ async function tryResolveCheckoutMutationLockSpec(
     ...options,
     allowFailure: true,
   });
+
   if (result.exitCode !== 0) {
     return null;
   }
 
   const gitDir = result.stdout.trim();
+
   return gitDir ? { key: path.resolve(gitDir) } : null;
 }
 
@@ -94,6 +98,7 @@ export async function tryWithCheckoutMutationLock<T>(
         checkoutPath,
         options,
       );
+
       if (!lock) {
         return null;
       }

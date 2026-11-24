@@ -1,6 +1,6 @@
-import type { ThreadPullRequest } from "@bb/domain";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import type { ThreadPullRequest } from "@omnyo/domain";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   describePullRequestStatus,
   getPullRequestStateDisplay,
@@ -9,6 +9,7 @@ import {
 import { GithubFaviconIcon } from "./GithubFaviconIcon";
 
 const CHECKED_PULL_REQUEST_STATUS_MIN_WIDTH_CLASS = "min-w-9";
+
 const SINGLE_PULL_REQUEST_STATUS_MIN_WIDTH_CLASS = "min-w-4";
 
 export function PullRequestStateIcon({
@@ -19,6 +20,7 @@ export function PullRequestStateIcon({
   className?: string;
 }) {
   const statusIcon = getPullRequestStateDisplay(pullRequest);
+
   return (
     <Icon
       name={statusIcon.icon}
@@ -36,6 +38,7 @@ export function PullRequestStatusPill({
   className?: string;
 }) {
   const checkStatus = getPullRequestGithubCheckStatus(pullRequest);
+
   return (
     <span
       title={describePullRequestStatus(pullRequest)}

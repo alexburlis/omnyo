@@ -33,7 +33,9 @@ export const runtimePlatforms = [
   "darwin-x64",
   "darwin-arm64",
 ] as const;
+
 export type RuntimePlatform = (typeof runtimePlatforms)[number];
+
 const platformSchema = z.enum(runtimePlatforms);
 
 export interface RuntimeRelease {
@@ -64,6 +66,7 @@ export function currentPlatform(): RuntimePlatform | null {
   const parsed = platformSchema.safeParse(
     `${process.platform}-${process.arch}`,
   );
+
   return parsed.success ? parsed.data : null;
 }
 
@@ -79,6 +82,7 @@ const verifiedSchema = z
   .strict();
 
 const maxBinaryBytes = 400 * 1024 * 1024;
+
 const lockStaleMs = 20 * 60_000;
 
 export function installRoot(dataDir: string): string {
@@ -102,7 +106,9 @@ export function releaseDownloadBase(release: RuntimeRelease): string {
 
 export async function sha256File(path: string): Promise<string> {
   const hash = createHash("sha256");
+
   for await (const chunk of createReadStream(path)) hash.update(chunk);
+
   return hash.digest("hex");
 }
 
@@ -112,9 +118,11 @@ export async function verifyInstalled(
   platform: RuntimePlatform,
 ): Promise<InstalledRuntime | null> {
   const expected = release.artifacts[platform];
+
   if (expected === undefined) return null;
   const dir = installDir(dataDir, release);
   let record: z.infer<typeof verifiedSchema>;
+
   try {
     record = verifiedSchema.parse(
       JSON.parse(await readFile(join(dir, "verified.json"), "utf8")),
@@ -122,6 +130,7 @@ export async function verifyInstalled(
   } catch {
     return null;
   }
+
   if (
     record.package !== release.package ||
     record.version !== release.version ||
@@ -131,12 +140,15 @@ export async function verifyInstalled(
   )
     return null;
   const binary = join(dir, record.binary);
+
   try {
     await access(binary, constants.X_OK);
   } catch {
     return null;
   }
+
   if ((await sha256File(binary)) !== expected) return null;
+
   return { binary, version: release.version, sha256: expected };
 }
 
@@ -146,6 +158,7 @@ function installEnvironment(
   registry: string,
 ) {
   const env: NodeJS.ProcessEnv = {};
+
   for (const key of [
     "PATH",
     "HOME",
@@ -163,6 +176,7 @@ function installEnvironment(
   ]) {
     if (base[key]) env[key] = base[key];
   }
+
   env.npm_config_cache = cache;
   env.npm_config_registry = registry;
   env.npm_config_update_notifier = "false";
@@ -172,17 +186,21 @@ function installEnvironment(
   env.npm_config_audit = "false";
   env.npm_config_fund = "false";
   env.npm_config_loglevel = "error";
+
   return env;
 }
 
 export async function findNpm(env: NodeJS.ProcessEnv): Promise<string> {
   for (const dir of (env.PATH ?? "").split(delimiter).filter(Boolean)) {
     const candidate = join(dir, "npm");
+
     try {
       await access(candidate, constants.X_OK);
+
       return candidate;
     } catch {}
   }
+
   throw new Error(
     "npm is not available on this browser host's PATH; install Node.js with npm on the selected host so the DevBrowser runtime can be installed there.",
   );
@@ -197,21 +215,25 @@ async function runCommand(
   timeoutMs: number,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   signal.throwIfAborted();
+
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
+
     let stdout = "";
     let stderr = "";
     let aborted = false;
     const deadline = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+
     const abort = () => {
       aborted = true;
       child.kill("SIGTERM");
       setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
     };
+
     deadline.addEventListener("abort", abort, { once: true });
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -227,6 +249,7 @@ async function runCommand(
     });
     child.once("close", (code) => {
       deadline.removeEventListener("abort", abort);
+
       if (aborted)
         reject(
           signal.aborted
@@ -242,6 +265,7 @@ async function runCommand(
 
 function tail(text: string): string {
   const trimmed = text.trim();
+
   return trimmed.length > 1_500 ? `…${trimmed.slice(-1_500)}` : trimmed;
 }
 
@@ -251,6 +275,7 @@ const signaturesSchema = z
     missing: z.array(z.unknown()),
   })
   .loose();
+
 const installedLockSchema = z
   .object({
     packages: z.record(
@@ -265,6 +290,7 @@ const installedLockSchema = z
     ),
   })
   .loose();
+
 const attestationsSchema = z
   .object({
     attestations: z.array(
@@ -281,6 +307,7 @@ const attestationsSchema = z
     ),
   })
   .loose();
+
 const provenanceSchema = z
   .object({
     subject: z
@@ -316,10 +343,12 @@ export function checkSignatures(
   release: RuntimeRelease,
 ): void {
   const parsed = signaturesSchema.safeParse(report);
+
   if (!parsed.success)
     throw new Error(
       "npm audit signatures returned an unexpected report; npm 9.5 or newer is required on the browser host.",
     );
+
   if (parsed.data.invalid.length > 0 || parsed.data.missing.length > 0)
     throw new Error(
       `npm could not verify the registry signature or attestation of ${release.package}@${release.version}; refusing to install it.`,
@@ -328,8 +357,10 @@ export function checkSignatures(
 
 export function integrityToHex(integrity: string): string {
   const match = integrity.match(/^sha512-([A-Za-z0-9+/=]+)$/);
+
   if (!match)
     throw new Error("Installed package integrity is not a sha512 digest");
+
   return Buffer.from(match[1]!, "base64").toString("hex");
 }
 
@@ -339,17 +370,21 @@ export function checkProvenance(
   integrity: string,
 ): void {
   const parsed = attestationsSchema.safeParse(document);
+
   if (!parsed.success)
     throw new Error(
       `The registry returned no attestations for ${release.package}@${release.version}; refusing to install it.`,
     );
+
   const attestation = parsed.data.attestations.find(
     (item) => item.predicateType === "https://slsa.dev/provenance/v1",
   );
+
   if (!attestation)
     throw new Error(
       `${release.package}@${release.version} has no SLSA provenance attestation on the registry; refusing to install it.`,
     );
+
   const statement = provenanceSchema.parse(
     JSON.parse(
       Buffer.from(attestation.bundle.dsseEnvelope.payload, "base64").toString(
@@ -357,10 +392,13 @@ export function checkProvenance(
       ),
     ),
   );
+
   const workflow =
     statement.predicate.buildDefinition.externalParameters.workflow;
+
   const subject = `pkg:npm/${release.package}@${release.version}`;
   const digest = integrityToHex(integrity);
+
   if (
     !statement.subject.some(
       (item) => item.name === subject && item.digest.sha512 === digest,
@@ -369,6 +407,7 @@ export function checkProvenance(
     throw new Error(
       `${release.package}@${release.version} provenance does not cover the installed tarball; refusing to install it.`,
     );
+
   if (
     workflow.repository !== `https://github.com/${release.repository}` ||
     workflow.ref !== `refs/tags/v${release.version}`
@@ -381,8 +420,10 @@ export function checkProvenance(
 export function findChecksum(sums: string, asset: string): string | null {
   for (const line of sums.split("\n")) {
     const match = line.trim().match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
+
     if (match && match[2] === asset) return match[1]!.toLowerCase();
   }
+
   return null;
 }
 
@@ -395,12 +436,14 @@ async function downloadTo(
   const response = await fetch(url, {
     signal,
     redirect: "follow",
-    headers: { "user-agent": "bb-plugin-browser-automation" },
+    headers: { "user-agent": "omnyo-plugin-browser-automation" },
   });
+
   if (!response.ok || !response.body)
     throw new Error(`HTTP ${response.status} while downloading ${url}`);
   const length = Number(response.headers.get("content-length"));
   const total = Number.isFinite(length) && length > 0 ? length : null;
+
   if (total !== null && total > maxBinaryBytes)
     throw new Error(`Release asset ${url} is larger than the allowed size`);
   const hash = createHash("sha256");
@@ -410,8 +453,10 @@ async function downloadTo(
     (async function* () {
       while (true) {
         const { done, value } = await reader.read();
+
         if (done) return;
         received += value.byteLength;
+
         if (received > maxBinaryBytes)
           throw new Error(`Release asset ${url} exceeded the allowed size`);
         hash.update(value);
@@ -422,6 +467,7 @@ async function downloadTo(
     createWriteStream(destination, { mode: 0o755 }),
     { signal },
   );
+
   return hash.digest("hex");
 }
 
@@ -429,12 +475,15 @@ async function fetchText(url: string, signal: AbortSignal): Promise<string> {
   const response = await fetch(url, {
     signal,
     redirect: "follow",
-    headers: { "user-agent": "bb-plugin-browser-automation" },
+    headers: { "user-agent": "omnyo-plugin-browser-automation" },
   });
+
   if (!response.ok)
     throw new Error(`HTTP ${response.status} while downloading ${url}`);
   const text = await response.text();
+
   if (text.length > 64_000) throw new Error(`${url} is unexpectedly large`);
+
   return text;
 }
 
@@ -444,6 +493,7 @@ function lockOwner(path: string): number | null {
   const match = readFileSync(path, "utf8")
     .trim()
     .match(/^([0-9]+)(?: |$)/);
+
   return match ? Number(match[1]) : null;
 }
 
@@ -454,13 +504,16 @@ export async function acquireLock(
   const token = randomBytes(8).toString("hex");
   const claim = `${path}.claim-${process.pid}-${token}`;
   const content = `${process.pid} ${token}`;
+
   while (true) {
     signal.throwIfAborted();
     await writeFile(claim, content);
+
     try {
       await link(claim, path);
       const acquired = (await stat(claim, { bigint: true })).ino;
       await unlink(claim);
+
       return async () => {
         try {
           if (
@@ -472,19 +525,23 @@ export async function acquireLock(
       };
     } catch (error) {
       await unlink(claim).catch(() => {});
+
       if (
         !(error instanceof Error && "code" in error && error.code === "EEXIST")
       )
         throw error;
     }
+
     let stale = false;
     let holder: number | null = null;
     let seen: { ino: bigint; mtimeMs: number } | null = null;
+
     try {
       const info = statSync(path, { bigint: true });
       seen = { ino: info.ino, mtimeMs: Number(info.mtimeMs) };
       const age = Date.now() - seen.mtimeMs;
       holder = lockOwner(path);
+
       if (age > lockStaleMs) stale = true;
       else if (holder === null) stale = age > lockInitGraceMs;
       else if (holder !== process.pid) {
@@ -502,9 +559,11 @@ export async function acquireLock(
     } catch {
       continue;
     }
+
     if (stale && seen) {
       try {
         const current = statSync(path, { bigint: true });
+
         if (
           current.ino === seen.ino &&
           Number(current.mtimeMs) === seen.mtimeMs &&
@@ -525,11 +584,13 @@ async function sweepStaging(
   release: RuntimeRelease,
 ): Promise<void> {
   let entries: string[];
+
   try {
     entries = await readdir(root);
   } catch {
     return;
   }
+
   await Promise.all(
     entries
       .filter((entry) => entry.startsWith(stagingPrefix(release)))
@@ -542,41 +603,50 @@ export async function installRuntime(
 ): Promise<InstalledRuntime> {
   const { release, dataDir, platform, signal } = options;
   let lastDetail = "";
+
   const progress = (detail: string) => {
     if (detail === lastDetail) return;
     lastDetail = detail;
     options.onProgress?.(detail);
   };
+
   const expected = release.artifacts[platform];
+
   if (expected === undefined)
     throw new Error(
       `DevBrowser ${release.version} has no verified release artifact recorded for ${platform}; see the plugin README before using this host.`,
     );
   const cached = await verifyInstalled(release, dataDir, platform);
+
   if (cached) return cached;
   const root = installRoot(dataDir);
   await mkdir(root, { recursive: true, mode: 0o700 });
   const finalDir = installDir(dataDir, release);
   const unlock = await acquireLock(`${finalDir}.lock`, signal);
+
   try {
     const raced = await verifyInstalled(release, dataDir, platform);
+
     if (raced) return raced;
     await rm(finalDir, { recursive: true, force: true });
     await sweepStaging(root, release);
+
     const env = installEnvironment(
       options.env ?? process.env,
       join(root, "cache"),
       release.registry,
     );
+
     progress("locating npm on the browser host");
     const npm = await findNpm(env);
     const staging = await mkdtemp(join(root, stagingPrefix(release)));
+
     try {
       await writeFile(
         join(staging, "package.json"),
         JSON.stringify(
           {
-            name: "bb-dev-browser-runtime",
+            name: "omnyo-dev-browser-runtime",
             private: true,
             dependencies: { [release.package]: release.version },
           },
@@ -585,6 +655,7 @@ export async function installRuntime(
         ),
       );
       progress(`installing ${release.package}@${release.version} with npm`);
+
       const install = await runCommand(
         npm,
         [
@@ -602,11 +673,13 @@ export async function installRuntime(
         signal,
         10 * 60_000,
       );
+
       if (install.code !== 0)
         throw new Error(
           `npm install of ${release.package}@${release.version} failed on the browser host (exit ${install.code}). ${tail(install.stderr || install.stdout)}`,
         );
       progress("verifying npm registry signature and provenance");
+
       const audit = await runCommand(
         npm,
         ["audit", "signatures", "--json", `--registry=${release.registry}`],
@@ -615,7 +688,9 @@ export async function installRuntime(
         signal,
         2 * 60_000,
       );
+
       let report: unknown;
+
       try {
         report = JSON.parse(audit.stdout);
       } catch {
@@ -623,11 +698,13 @@ export async function installRuntime(
           `npm audit signatures did not produce a report on the browser host (exit ${audit.code}). ${tail(audit.stderr)}`,
         );
       }
+
       if (audit.code !== 0)
         throw new Error(
           `npm audit signatures failed on the browser host (exit ${audit.code}) for ${release.package}@${release.version}. ${tail(audit.stderr || audit.stdout)}`,
         );
       checkSignatures(report, release);
+
       const lock = installedLockSchema.parse(
         JSON.parse(
           await readFile(
@@ -636,11 +713,14 @@ export async function installRuntime(
           ),
         ),
       );
+
       const installedEntry = lock.packages[`node_modules/${release.package}`];
+
       if (!installedEntry || installedEntry.version !== release.version)
         throw new Error(
           `npm installed ${installedEntry?.version ?? "nothing"} instead of ${release.package}@${release.version}.`,
         );
+
       if (!installedEntry.resolved.startsWith(`${release.registry}/`))
         throw new Error(
           `npm resolved ${release.package} from ${installedEntry.resolved}, not the pinned registry ${release.registry}.`,
@@ -656,12 +736,14 @@ export async function installRuntime(
         installedEntry.integrity,
       );
       const packageDir = join(staging, "node_modules", release.package);
+
       const manifest = z
         .object({ name: z.string(), version: z.string() })
         .loose()
         .parse(
           JSON.parse(await readFile(join(packageDir, "package.json"), "utf8")),
         );
+
       if (
         manifest.name !== release.package ||
         manifest.version !== release.version
@@ -675,12 +757,14 @@ export async function installRuntime(
       progress(`downloading ${asset} for ${release.version}`);
       const sums = await fetchText(`${base}/SHA256SUMS`, signal);
       const published = findChecksum(sums, asset);
+
       if (published !== expected)
         throw new Error(
           `Release v${release.version} lists ${asset} as ${published ?? "absent"}, which does not match the pinned digest ${expected}.`,
         );
       const binary = join(packageDir, "bin", `${release.package}-bin`);
       const partial = `${binary}.partial`;
+
       const digest = await downloadTo(
         `${base}/${asset}`,
         partial,
@@ -692,6 +776,7 @@ export async function installRuntime(
               : `downloading ${asset}: ${Math.floor((received / total) * 10) * 10}%`,
           ),
       );
+
       if (digest !== expected)
         throw new Error(
           `Downloaded ${asset} has digest ${digest}, not the pinned ${expected}; refusing to use it.`,
@@ -699,6 +784,7 @@ export async function installRuntime(
       await chmod(partial, 0o755);
       await rename(partial, binary);
       progress("checking the installed binary");
+
       const probe = await runCommand(
         binary,
         ["--version"],
@@ -707,6 +793,7 @@ export async function installRuntime(
         signal,
         60_000,
       );
+
       if (probe.code !== 0 || !probe.stdout.includes(release.version))
         throw new Error(
           `${asset} did not report version ${release.version} on this host (exit ${probe.code}). ${tail(probe.stderr || probe.stdout)}`,
@@ -731,9 +818,12 @@ export async function installRuntime(
       await rm(staging, { recursive: true, force: true });
       throw error;
     }
+
     const installed = await verifyInstalled(release, dataDir, platform);
+
     if (!installed)
       throw new Error("DevBrowser runtime failed verification after install");
+
     return installed;
   } finally {
     await unlock();

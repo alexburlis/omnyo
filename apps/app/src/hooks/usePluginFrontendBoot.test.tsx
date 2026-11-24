@@ -80,6 +80,17 @@ describe("usePluginFrontendBoot", () => {
     expect(mocks.bootPluginFrontends).toHaveBeenCalledTimes(1);
   });
 
+  it("boots immediately on a chat route before conversation paint", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/projects/project-1/threads/thread-1",
+    );
+    renderHook(() => usePluginFrontendBoot());
+    await flushMicrotasks();
+    expect(mocks.bootPluginFrontends).toHaveBeenCalledTimes(1);
+  });
+
   it("does nothing until system config resolves", async () => {
     mocks.systemConfigData = undefined;
     renderHook(() => usePluginFrontendBoot());
@@ -92,10 +103,13 @@ describe("usePluginFrontendBoot", () => {
 
   it("settles after the floor even when system config never resolves", () => {
     mocks.systemConfigData = undefined;
+
     const { result } = renderHook(() => {
       usePluginFrontendBoot();
+
       return usePluginFrontendsSettled();
     });
+
     expect(result.current).toBe(false);
     act(() => vi.advanceTimersByTime(PLUGIN_FRONTEND_SETTLE_FLOOR_MS - 1));
     expect(result.current).toBe(false);
@@ -105,8 +119,10 @@ describe("usePluginFrontendBoot", () => {
 
   it("never settles a boot that is still in flight when the floor elapses", async () => {
     let finishBoot: () => void = () => {};
+
     mocks.bootPluginFrontends.mockImplementation(() => {
       markPluginFrontendBootStarted();
+
       return new Promise<void>((resolve) => {
         finishBoot = () => {
           markPluginFrontendsSettled();
@@ -115,10 +131,13 @@ describe("usePluginFrontendBoot", () => {
       });
     });
     window.history.replaceState(null, "", "/plugins/tasks/board");
+
     const { result } = renderHook(() => {
       usePluginFrontendBoot();
+
       return usePluginFrontendsSettled();
     });
+
     await flushMicrotasks();
     expect(mocks.bootPluginFrontends).toHaveBeenCalledTimes(1);
 

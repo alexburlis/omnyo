@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { Pill } from "@bb/shared-ui/pill";
+import { Pill } from "@omnyo/shared-ui/pill";
 import { useRouteAnchorDelegate } from "@/components/ui/app-route-anchor";
-import { usePluginCss } from "@/lib/plugin-css";
+import { usePluginCss, usePluginCssReady } from "@/lib/plugin-css";
 import {
   PluginContext,
   PluginSlotOwnershipContext,
@@ -19,6 +19,7 @@ function isSlotInstanceCrashed(
     crashedSlotInstances.get(instanceKey) === resetKey
   );
 }
+
 const ownedStateReleasesBySlotInstance = new Map<
   string,
   Map<symbol, () => void>
@@ -30,16 +31,19 @@ function registerSlotOwnedState(
   release: () => void,
 ): void {
   let releases = ownedStateReleasesBySlotInstance.get(instanceKey);
+
   if (!releases) {
     releases = new Map();
     ownedStateReleasesBySlotInstance.set(instanceKey, releases);
   }
+
   releases.set(owner, release);
 }
 
 function unregisterSlotOwnedState(instanceKey: string, owner: symbol): void {
   const releases = ownedStateReleasesBySlotInstance.get(instanceKey);
   releases?.delete(owner);
+
   if (releases?.size === 0) {
     ownedStateReleasesBySlotInstance.delete(instanceKey);
   }
@@ -49,7 +53,9 @@ function releaseSlotInstanceOwnedState(instanceKey: string): void {
   const releases = [
     ...(ownedStateReleasesBySlotInstance.get(instanceKey)?.values() ?? []),
   ];
+
   ownedStateReleasesBySlotInstance.delete(instanceKey);
+
   for (const release of releases) release();
 }
 
@@ -60,11 +66,13 @@ function pluginSlotInstanceKey(
   instanceId?: string,
 ): string {
   const base = `${pluginId}/${slotKind}/${slotId}`;
+
   return instanceId === undefined ? base : `${base}/${instanceId}`;
 }
 
 export function resetCrashedPluginSlots(pluginId: string): void {
   const prefix = `${pluginId}/`;
+
   for (const key of [...crashedSlotInstances.keys()]) {
     if (key.startsWith(prefix)) crashedSlotInstances.delete(key);
   }
@@ -84,6 +92,7 @@ function CrashedPluginChip({ pluginId }: { pluginId: string }) {
 
 interface PluginSlotBoundaryProps {
   pluginId: string;
+  appOverlay?: { slotId: string; bundleHash: string | undefined };
   instanceKey: string;
   children: ReactNode;
   fallback?: ReactNode;
@@ -132,6 +141,7 @@ class PluginSlotBoundary extends Component<
     if (props.resetKey === state.resetKey) {
       return null;
     }
+
     return {
       crashed: isSlotInstanceCrashed(props.instanceKey, props.resetKey),
       resetKey: props.resetKey,
@@ -148,6 +158,7 @@ class PluginSlotBoundary extends Component<
         : `[plugin:${this.props.pluginId}] slot "${this.props.instanceKey}" crashed and is disabled until its input changes: ${error.message}`,
       info.componentStack,
     );
+
     try {
       this.props.onCrash?.(this.props.pluginId);
     } catch (notifyError) {
@@ -165,6 +176,7 @@ class PluginSlotBoundary extends Component<
   private releaseOwnedState(): void {
     const entries = [...this.ownedStateReleases.entries()];
     this.ownedStateReleases.clear();
+
     for (const [owner, release] of entries) {
       unregisterSlotOwnedState(this.props.instanceKey, owner);
       release();
@@ -182,6 +194,7 @@ class PluginSlotBoundary extends Component<
         this.props.fallback
       );
     }
+
     return (
       <PluginSlotOwnershipContext.Provider value={this.ownershipRegistry}>
         {this.props.children}
@@ -190,33 +203,50 @@ class PluginSlotBoundary extends Component<
   }
 }
 
+export function readAppOverlayCrashContext(boundary: unknown) {
+  if (!(boundary instanceof PluginSlotBoundary)) return undefined;
+
+  const { pluginId, appOverlay } = boundary.props;
+
+  return appOverlay === undefined ? undefined : { pluginId, ...appOverlay };
+}
+
 interface PluginSlotMountProps {
   pluginId: string;
   slotKind: string;
   slotId: string;
+  appOverlayBundleHash?: string | undefined;
   children: ReactNode;
   crashFallback?: ReactNode;
   crashResetKey?: string;
   instanceId?: string;
   onCrash?: (pluginId: string) => void;
+  pendingFallback?: ReactNode;
 }
 
 export function PluginSlotMount({
   pluginId,
   slotKind,
   slotId,
+  appOverlayBundleHash,
   children,
   crashFallback,
   crashResetKey,
   instanceId,
   onCrash,
+  pendingFallback = null,
 }: PluginSlotMountProps) {
   const onRouteAnchorClick = useRouteAnchorDelegate();
   usePluginCss(pluginId);
+  const cssReady = usePluginCssReady(pluginId);
+
   return (
     <PluginContext.Provider value={pluginId}>
       <PluginSlotBoundary
         pluginId={pluginId}
+        {...(slotKind === "appOverlay"
+          ? { appOverlay: { slotId, bundleHash: appOverlayBundleHash } }
+          : {})}
         instanceKey={pluginSlotInstanceKey(
           pluginId,
           slotKind,
@@ -228,12 +258,13 @@ export function PluginSlotMount({
         {...(onCrash ? { onCrash } : {})}
       >
         <div
-          data-bb-plugin-root=""
-          data-bb-plugin={pluginId}
+          data-omnyo-plugin-root=""
+          data-omnyo-plugin={pluginId}
+          data-omnyo-plugin-slot-id={slotId}
           className="contents"
           onClick={onRouteAnchorClick}
         >
-          {children}
+          {cssReady ? children : pendingFallback}
         </div>
       </PluginSlotBoundary>
     </PluginContext.Provider>

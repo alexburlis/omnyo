@@ -7,7 +7,7 @@ import {
   type PendingInteraction,
   type PendingInteractionApprovalSubject,
   type PendingInteractionUserQuestionQuestion,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 export type InteractionRequestView =
   | {
@@ -40,10 +40,17 @@ interface RequestBearingInteraction {
   origin?: PendingInteraction["origin"];
 }
 
+export function blocksTurn(
+  interaction: Pick<PendingInteraction, "turnId">,
+): boolean {
+  return interaction.turnId !== null;
+}
+
 export function classifyInteractionRequest(
   interaction: RequestBearingInteraction,
 ): InteractionRequestView {
   const { payload } = interaction;
+
   switch (payload.kind) {
     case "user_question":
       return {
@@ -53,9 +60,11 @@ export function classifyInteractionRequest(
       };
     case "plugin": {
       const origin = interaction.origin;
+
       if (origin === undefined || origin.kind !== "plugin") {
         throw new Error("a plugin pending interaction carries a plugin origin");
       }
+
       return {
         family: "request",
         kind: `${origin.pluginId}/${origin.rendererId}`,
@@ -65,8 +74,10 @@ export function classifyInteractionRequest(
         data: payload.data,
       };
     }
+
     case "approval": {
       const { subject } = payload;
+
       if (subject.kind === "plan") {
         return {
           family: "request",
@@ -75,11 +86,14 @@ export function classifyInteractionRequest(
           approval: payload,
         };
       }
+
       return { family: "approval", payload, subject };
     }
+
     default: {
       if (isExtensionKind(payload.kind)) {
         const { pluginId, name } = parseExtensionKind(payload.kind);
+
         return {
           family: "request",
           kind: payload.kind,
@@ -89,6 +103,7 @@ export function classifyInteractionRequest(
           data: payload.data,
         };
       }
+
       throw new Error(
         `unknown interaction payload kind ${JSON.stringify(payload.kind)}`,
       );

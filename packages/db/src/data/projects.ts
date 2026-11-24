@@ -1,7 +1,7 @@
 import { prepareCachedQuery } from "../connection.js";
 import { hostPathEquals } from "./host-path-sql.js";
-import { and, asc, desc, eq, isNull, placeholder } from "drizzle-orm";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { and, asc, desc, eq, isNull, placeholder, sql } from "drizzle-orm";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import type {
   DbConnection,
   DbQueryConnection,
@@ -83,19 +83,28 @@ export function listPublicProjects(db: DbQueryConnection): ProjectRow[] {
     .all();
 }
 
-function getLastPublicProject(db: DbQueryConnection): ProjectRow | null {
+export function listActiveProjects(db: DbQueryConnection): ProjectRow[] {
+  return db
+    .select()
+    .from(projects)
+    .where(isNull(projects.deletedAt))
+    .orderBy(asc(projects.sortKey), asc(projects.id))
+    .all();
+}
+
+function getLastActiveProject(db: DbQueryConnection): ProjectRow | null {
   return (
     db
       .select()
       .from(projects)
-      .where(publicProjectFilter())
+      .where(isNull(projects.deletedAt))
       .orderBy(desc(projects.sortKey), desc(projects.id))
       .limit(1)
       .get() ?? null
   );
 }
 
-function getPublicProjectForMutation(
+function getActiveProjectForReorder(
   db: DbQueryConnection,
   id: string,
 ): ProjectRow | null {
@@ -103,7 +112,7 @@ function getPublicProjectForMutation(
     db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, id), publicProjectFilter()))
+      .where(and(eq(projects.id, id), isNull(projects.deletedAt)))
       .get() ?? null
   );
 }
@@ -142,10 +151,12 @@ function insertProject(tx: DbTransaction, input: CreateProjectInput) {
   const now = Date.now();
   const projectId = createProjectId();
   const sourceId = createProjectSourceId();
-  const lastProject = getLastPublicProject(tx);
+  const lastProject = getLastActiveProject(tx);
+
   const sortKey = lastProject
     ? createOrderKeyAfter({ previousKey: lastProject.sortKey })
     : createOrderKeyBetween({ previousKey: null, nextKey: null });
+
   const project = tx
     .insert(projects)
     .values({
@@ -157,6 +168,7 @@ function insertProject(tx: DbTransaction, input: CreateProjectInput) {
     })
     .returning()
     .get();
+
   const source = tx
     .insert(projectSources)
     .values({
@@ -171,6 +183,7 @@ function insertProject(tx: DbTransaction, input: CreateProjectInput) {
     })
     .returning()
     .get();
+
   return { project, source };
 }
 
@@ -186,11 +199,12 @@ function resolveProjectNeighbor(
   if (args.neighborProjectId === null) {
     return null;
   }
+
   if (args.neighborProjectId === args.movedProjectId) {
     return false;
   }
 
-  return getPublicProjectForMutation(db, args.neighborProjectId) ?? false;
+  return getActiveProjectForReorder(db, args.neighborProjectId) ?? false;
 }
 
 export function createProject(
@@ -200,6 +214,7 @@ export function createProject(
 ) {
   const { project, source } = db.transaction((tx) => insertProject(tx, input));
   notifyProjectCreated(notifier, project.id);
+
   return { project, source: toProjectSource(source) };
 }
 
@@ -211,9 +226,11 @@ export function findOrCreateProjectByLocalPathSource(
   const { created, project, source } = db.transaction(
     (tx) => {
       const existing = getPublicProjectWithLocalPathSource(tx, input.source);
+
       if (existing) {
         return { created: false, ...existing };
       }
+
       return { created: true, ...insertProject(tx, input) };
     },
     { behavior: "immediate" },
@@ -222,6 +239,7 @@ export function findOrCreateProjectByLocalPathSource(
   if (created) {
     notifyProjectCreated(notifier, project.id);
   }
+
   return { project, source: toProjectSource(source) };
 }
 
@@ -241,20 +259,27 @@ export function getPersonalProject(db: DbConnection) {
     db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, PERSONAL_PROJECT_ID), eq(projects.kind, "personal")))
+      .where(
+        and(
+          eq(projects.id, PERSONAL_PROJECT_ID),
+          eq(projects.kind, "personal"),
+        ),
+      )
       .get() ?? null
   );
 }
 
 export function ensurePersonalProject(db: DbConnection) {
   const now = Date.now();
-  db
-    .insert(projects)
+  const lastProject = getLastActiveProject(db);
+  db.insert(projects)
     .values({
       id: PERSONAL_PROJECT_ID,
       kind: "personal",
       name: "Personal",
-      sortKey: "V",
+      sortKey: lastProject
+        ? createOrderKeyAfter({ previousKey: lastProject.sortKey })
+        : createOrderKeyBetween({ previousKey: null, nextKey: null }),
       createdAt: now,
       updatedAt: now,
     })
@@ -262,14 +287,17 @@ export function ensurePersonalProject(db: DbConnection) {
     .run();
 
   const project = getPersonalProject(db);
+
   if (!project) {
     throw new Error("Personal project row was not created");
   }
+
   return project;
 }
 
 export interface UpdateProjectInput {
   name?: string;
+  customIcon?: string | null;
 }
 
 export function setProjectGitRemoteUrlIfMissing(
@@ -284,10 +312,72 @@ export function setProjectGitRemoteUrlIfMissing(
     .where(and(eq(projects.id, id), isNull(projects.gitRemoteUrl)))
     .returning()
     .get();
+
   if (updated) {
     notifier.notifyProject(id, ["project-updated"]);
   }
+
   return updated ?? null;
+}
+
+export function setProjectGitRemoteUrl(
+  db: DbConnection,
+  notifier: DbNotifier,
+  id: string,
+  gitRemoteUrl: string,
+) {
+  const updated = db
+    .update(projects)
+    .set({ gitRemoteUrl, updatedAt: Date.now() })
+    .where(
+      and(
+        eq(projects.id, id),
+        sql`${projects.gitRemoteUrl} is not ${gitRemoteUrl}`,
+      ),
+    )
+    .returning()
+    .get();
+
+  if (updated) {
+    notifier.notifyProject(id, ["project-updated"]);
+  }
+
+  return updated ?? null;
+}
+
+export function listDefaultLocalProjectSourcesOnHost(
+  db: DbConnection,
+  hostId: string,
+) {
+  return db
+    .select({
+      projectId: projects.id,
+      path: projectSources.path,
+      gitRemoteUrl: projects.gitRemoteUrl,
+    })
+    .from(projectSources)
+    .innerJoin(projects, eq(projects.id, projectSources.projectId))
+    .where(
+      and(
+        eq(projectSources.hostId, hostId),
+        eq(projectSources.type, "local_path"),
+        eq(projectSources.isDefault, true),
+        eq(projects.kind, "standard"),
+        isNull(projects.deletedAt),
+      ),
+    )
+    .all()
+    .flatMap((row) =>
+      row.path === null
+        ? []
+        : [
+            {
+              projectId: row.projectId,
+              path: row.path,
+              gitRemoteUrl: row.gitRemoteUrl,
+            },
+          ],
+    );
 }
 
 export interface MarkProjectDeletedArgs {
@@ -302,15 +392,18 @@ export function updateProject(
   input: UpdateProjectInput,
 ) {
   const now = Date.now();
+
   const updated = db
     .update(projects)
     .set({ ...input, updatedAt: now })
     .where(eq(projects.id, id))
     .returning()
     .get();
+
   if (updated) {
     notifier.notifyProject(id, ["project-updated"]);
   }
+
   return updated ?? null;
 }
 
@@ -320,6 +413,7 @@ export function markProjectDeleted(
   args: MarkProjectDeletedArgs,
 ) {
   const deletedAt = args.deletedAt ?? Date.now();
+
   const updated =
     db
       .update(projects)
@@ -347,7 +441,8 @@ export function reorderProject({
 }: ReorderProjectArgs): ReorderProjectResult {
   const result = db.transaction(
     (tx): ReorderProjectResult => {
-      const movedProject = getPublicProjectForMutation(tx, projectId);
+      const movedProject = getActiveProjectForReorder(tx, projectId);
+
       if (!movedProject) {
         return { kind: "not_found" };
       }
@@ -356,13 +451,16 @@ export function reorderProject({
         movedProjectId: projectId,
         neighborProjectId: previousProjectId,
       });
+
       const nextProject = resolveProjectNeighbor(tx, {
         movedProjectId: projectId,
         neighborProjectId: nextProjectId,
       });
+
       if (previousProject === false || nextProject === false) {
         return { kind: "stale_neighbor" };
       }
+
       if (
         previousProject !== null &&
         nextProject !== null &&
@@ -371,13 +469,18 @@ export function reorderProject({
         return { kind: "invalid_neighbor_order" };
       }
 
-      const currentProjects = listPublicProjects(tx);
+      const currentProjects = listActiveProjects(tx);
+
       const currentIndex = currentProjects.findIndex(
         (project) => project.id === projectId,
       );
+
       const currentPreviousProjectId =
         currentProjects[currentIndex - 1]?.id ?? null;
-      const currentNextProjectId = currentProjects[currentIndex + 1]?.id ?? null;
+
+      const currentNextProjectId =
+        currentProjects[currentIndex + 1]?.id ?? null;
+
       if (
         currentPreviousProjectId === previousProjectId &&
         currentNextProjectId === nextProjectId
@@ -392,19 +495,21 @@ export function reorderProject({
         previousKey: previousProject?.sortKey ?? null,
         nextKey: nextProject?.sortKey ?? null,
       });
+
       const updated = tx
         .update(projects)
         .set({ sortKey, updatedAt: Date.now() })
         .where(eq(projects.id, projectId))
         .returning({ id: projects.id })
         .get();
+
       if (!updated) {
         return { kind: "stale_neighbor" };
       }
 
       return {
         kind: "reordered",
-        projects: listPublicProjects(tx),
+        projects: listActiveProjects(tx),
       };
     },
     { behavior: "immediate" },
@@ -413,6 +518,7 @@ export function reorderProject({
   if (result.kind === "reordered") {
     notifier.notifyProject(projectId, ["project-order-changed"]);
   }
+
   return result;
 }
 
@@ -422,8 +528,10 @@ export function deleteProject(
   id: string,
 ) {
   const existing = db.select().from(projects).where(eq(projects.id, id)).get();
+
   if (!existing) return false;
   db.delete(projects).where(eq(projects.id, id)).run();
   notifier.notifyProject(id, ["project-deleted"]);
+
   return true;
 }

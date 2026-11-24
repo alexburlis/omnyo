@@ -2,16 +2,16 @@ import {
   corpusAvailable,
   listCorpusThreads,
   loadCorpusThread,
-} from "@bb/test-helpers";
+} from "@omnyo/test-helpers";
 import {
   createConnection,
   getLatestThreadSequence,
   insertEvents,
   noopNotifier,
-} from "@bb/db";
-import type { DbConnection } from "@bb/db";
-import type { Thread, ThreadEventType } from "@bb/domain";
-import { turnScope } from "@bb/domain";
+} from "@omnyo/db";
+import type { DbConnection } from "@omnyo/db";
+import type { Thread, ThreadEventType } from "@omnyo/domain";
+import { turnScope } from "@omnyo/domain";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ProviderRegistryService } from "../../src/services/providers/provider-registry.js";
 import { clearTimelineOrderingContextCache } from "../../src/services/threads/timeline-context-order.js";
@@ -27,6 +27,7 @@ import {
 } from "./corpus-harness.js";
 
 const PER_THREAD_TIMEOUT_MS = 5 * 60_000;
+
 const PROBE_ITEM_ID = "corpus-memo-probe-message";
 
 interface TickSpec {
@@ -105,6 +106,7 @@ function listLatestRootTurns(db: DbConnection, threadId: string): RootTurn[] {
 }
 
 const available = corpusAvailable();
+
 const corpusThreads = available ? listCorpusThreads() : [];
 
 describe.skipIf(!available)("provider corpus streaming selection memo", () => {
@@ -133,22 +135,27 @@ describe.skipIf(!available)("provider corpus streaming selection memo", () => {
       if (registry === null) {
         throw new Error("provider registry did not load");
       }
+
       const corpusThread = loadCorpusThread(threadId);
       const loaded = loadCorpusThreadIntoDb(corpusThread);
+
       try {
         const [latestRootTurn, earlierRootTurn] = listLatestRootTurns(
           loaded.db,
           loaded.thread.id,
         );
+
         if (latestRootTurn === undefined) return;
         const thread: Thread = { ...loaded.thread, status: "active" };
         totals.threads += 1;
+
         for (const tick of [null, ...TICKS]) {
           if (tick !== null) {
             const rootTurn =
               tick.target === "latest-root-turn"
                 ? latestRootTurn
                 : earlierRootTurn;
+
             if (rootTurn === undefined) continue;
             insertEvents(loaded.db, noopNotifier, [
               {
@@ -168,7 +175,9 @@ describe.skipIf(!available)("provider corpus streaming selection memo", () => {
               },
             ]);
           }
+
           const clone = createConnection(loaded.db.$client.serialize());
+
           try {
             for (const variant of TIMELINE_VARIANTS) {
               const args = {
@@ -177,6 +186,7 @@ describe.skipIf(!available)("provider corpus streaming selection memo", () => {
                 thread,
                 variant,
               };
+
               const warm = buildRouteTimelinePage({ ...args, db: loaded.db });
               clearCrossBuildTimelineCaches(clone);
               clearTimelineOrderingContextCache(clone);
@@ -185,8 +195,10 @@ describe.skipIf(!available)("provider corpus streaming selection memo", () => {
                 JSON.stringify(cold.response),
               );
               totals.comparisons += 1;
+
               if (selectionWasReused(warm.profile)) {
                 totals.reused += 1;
+
                 if (variant === "default") {
                   warmTickMs.push(warm.profile.totalDurationMs);
                   coldTickMs.push(cold.profile.totalDurationMs);

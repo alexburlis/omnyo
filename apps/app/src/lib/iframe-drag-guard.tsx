@@ -1,4 +1,4 @@
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 interface IframeDragGuardOverlayProps {
   active: boolean;
@@ -12,6 +12,7 @@ export function IframeDragGuardOverlay({
   if (!active) {
     return null;
   }
+
   return (
     <div
       aria-hidden

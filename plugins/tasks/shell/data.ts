@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import { useRealtime, useRpc } from "@omnyo/plugin-sdk/app";
 import type { z } from "zod";
 import {
   TASK_STATUSES,
@@ -40,15 +40,18 @@ export async function listAllTasks(
 ): Promise<Task[]> {
   const tasks: Task[] = [];
   let cursor: string | undefined;
+
   do {
     const page = await rpc.call("listTasks", {
       ...input,
       limit: TASKS_PAGE_MAX_LIMIT,
       ...(cursor === undefined ? {} : { cursor }),
     });
+
     tasks.push(...page.tasks);
     cursor = page.nextCursor ?? undefined;
   } while (cursor !== undefined);
+
   return tasks;
 }
 
@@ -68,16 +71,22 @@ export async function listTasksOpenFirst(
     statuses: [...OPEN_TASK_STATUSES],
   }).then((open) => {
     publish(open);
+
     return open;
   });
+
   const closedRequest = listAllTasks(rpc, {
     ...input,
     statuses: [...CLOSED_TASK_STATUSES],
   });
+
   const [open, closed] = await Promise.all([openRequest, closedRequest]);
   const byId = new Map<string, Task>();
+
   for (const task of open) byId.set(task.id, task);
+
   for (const task of closed) byId.set(task.id, task);
+
   return [...byId.values()];
 }
 
@@ -88,26 +97,34 @@ export async function patchTasks(
   belongs: (task: Task) => boolean,
 ): Promise<Task[]> {
   if (taskIds.length === 0) return [...current];
+
   const fetched = await Promise.all(
     taskIds.map(async (taskId) => {
       const { task } = await rpc.call("getTask", { taskId });
+
       return [taskId, task] as const;
     }),
   );
+
   const updates = new Map(fetched);
   const next: Task[] = [];
+
   for (const task of current) {
     if (!updates.has(task.id)) {
       next.push(task);
       continue;
     }
+
     const updated = updates.get(task.id) ?? null;
     updates.delete(task.id);
+
     if (updated !== null && belongs(updated)) next.push(updated);
   }
+
   for (const task of updates.values()) {
     if (task !== null && belongs(task)) next.push(task);
   }
+
   return next;
 }
 
@@ -130,6 +147,7 @@ const SIGNAL_BATCH_MS = 50;
 function signalTaskId(payload: unknown): string | null {
   if (typeof payload !== "object" || payload === null) return null;
   const taskId: unknown = Reflect.get(payload, "taskId");
+
   return typeof taskId === "string" ? taskId : null;
 }
 
@@ -138,11 +156,13 @@ export function signalTaskIds(
   channel: InvalidationChannel,
 ): string[] {
   const ids = new Set<string>();
+
   for (const signal of signals) {
     if (signal.channel === channel && signal.taskId !== null) {
       ids.add(signal.taskId);
     }
   }
+
   return [...ids];
 }
 
@@ -155,28 +175,36 @@ function useSignalBatches(
   ref.current = { channels, relevantTaskIds, onBatch };
   const pending = useRef(new Map<string, TaskSignal>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const flush = useCallback(() => {
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
+
     if (document.visibilityState === "hidden") return;
     const batch = [...pending.current.values()];
     pending.current = new Map();
+
     if (batch.length > 0) ref.current.onBatch(batch);
   }, []);
+
   useEffect(() => {
     document.addEventListener("visibilitychange", flush);
+
     return () => {
       document.removeEventListener("visibilitychange", flush);
+
       if (timer.current !== null) clearTimeout(timer.current);
       timer.current = null;
       pending.current = new Map();
     };
   }, [flush]);
+
   const push = useCallback(
     (channel: InvalidationChannel, payload: unknown) => {
       if (!ref.current.channels.includes(channel)) return;
       const taskId = signalTaskId(payload);
       const relevant = ref.current.relevantTaskIds;
+
       if (
         relevant !== undefined &&
         taskId !== null &&
@@ -184,12 +212,15 @@ function useSignalBatches(
       ) {
         return;
       }
+
       pending.current.set(`${channel}\n${taskId ?? ""}`, { channel, taskId });
+
       if (timer.current !== null) return;
       timer.current = setTimeout(flush, SIGNAL_BATCH_MS);
     },
     [flush],
   );
+
   useRealtime("tasks:changed", (payload) => push("tasks:changed", payload));
   useRealtime("projects:changed", (payload) =>
     push("projects:changed", payload),
@@ -229,14 +260,17 @@ export function useTasksQuery<T>(
   } = {},
 ): TasksQuery<T> {
   const rpc = useTasksRpc();
+
   const { generation, beginGenerationWork, endGenerationWork } =
     useTasksRefresh();
+
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
   const snapshotRef = useRef(options.snapshot);
   snapshotRef.current = options.snapshot;
   const applySignalsRef = useRef(options.applySignals);
   applySignalsRef.current = options.applySignals;
+
   const [state, setState] = useState<{
     data: T | undefined;
     error: string | null;
@@ -249,6 +283,7 @@ export function useTasksQuery<T>(
     error: null,
     isLoading: true,
   }));
+
   const seqRef = useRef(0);
   const dataRef = useRef(state.data);
   const inFlightRef = useRef(0);
@@ -260,18 +295,23 @@ export function useTasksQuery<T>(
   const previousGenerationRef = useRef(generation);
   const depsKey = JSON.stringify(deps);
   const dataDepsKeyRef = useRef(depsKey);
+
   const refresh = useCallback(() => {
     const seq = ++seqRef.current;
     const snapshot = snapshotRef.current;
+
     const snapshotRevision =
       snapshot === undefined ? 0 : claimQuerySnapshotRevision(snapshot.name);
+
     const publish = (partial: T) => {
       if (seq !== seqRef.current) return;
       dataDepsKeyRef.current = depsKey;
       dataRef.current = partial;
       setState({ data: partial, error: null, isLoading: true });
     };
+
     inFlightRef.current += 1;
+
     const fetching = fetcherRef
       .current(rpc, publish)
       .then(
@@ -279,6 +319,7 @@ export function useTasksQuery<T>(
           if (snapshot !== undefined) {
             writeQuerySnapshot(snapshot.name, data, snapshotRevision);
           }
+
           if (seq !== seqRef.current) return;
           dataDepsKeyRef.current = depsKey;
           dataRef.current = data;
@@ -287,6 +328,7 @@ export function useTasksQuery<T>(
         (error: unknown) => {
           if (seq !== seqRef.current) return;
           const keepsData = dataDepsKeyRef.current === depsKey;
+
           if (!keepsData) dataRef.current = undefined;
           setState((current) => ({
             data: keepsData ? current.data : undefined,
@@ -297,18 +339,24 @@ export function useTasksQuery<T>(
       )
       .finally(() => {
         inFlightRef.current -= 1;
+
         if (inFlightRef.current > 0 || !refetchQueuedRef.current) return;
         refetchQueuedRef.current = false;
+
         if (mountedRef.current) void refreshRef.current();
       });
+
     latestFetchRef.current = fetching;
+
     return fetching;
   }, [rpc, depsKey]);
+
   useEffect(() => {
     refreshRef.current = refresh;
   }, [refresh]);
   useEffect(() => {
     mountedRef.current = true;
+
     return () => {
       mountedRef.current = false;
     };
@@ -317,21 +365,27 @@ export function useTasksQuery<T>(
     const generationBumped = previousGenerationRef.current !== generation;
     previousGenerationRef.current = generation;
     setState((current) => ({ ...current, isLoading: true }));
+
     if (generationBumped) beginGenerationWork();
     let settled = false;
+
     const finish = () => {
       if (!generationBumped || settled) return;
       settled = true;
       endGenerationWork();
     };
+
     void refresh().finally(finish);
+
     return () => {
       finish();
     };
   }, [refresh, generation, beginGenerationWork, endGenerationWork]);
+
   const onSignals = useCallback(
     (signals: TaskSignal[]) => {
       const apply = applySignalsRef.current;
+
       if (
         apply === undefined ||
         signals.some((signal) => signal.taskId === null)
@@ -341,25 +395,33 @@ export function useTasksQuery<T>(
         } else {
           void refresh();
         }
+
         return;
       }
+
       const seq = seqRef.current;
       const fetchInFlight = latestFetchRef.current;
       patchChainRef.current = patchChainRef.current.then(async () => {
         await fetchInFlight.catch(() => undefined);
         const current = dataRef.current;
+
         if (seq !== seqRef.current || current === undefined) return;
         let next: T | null;
+
         try {
           next = await apply(rpc, current, signals);
         } catch {
           next = null;
         }
+
         if (seq !== seqRef.current) return;
+
         if (next === null) {
           void refresh();
+
           return;
         }
+
         if (next === current) return;
         dataRef.current = next;
         setState((previous) => ({ ...previous, data: next }));
@@ -367,7 +429,9 @@ export function useTasksQuery<T>(
     },
     [refresh, rpc],
   );
+
   useSignalBatches(channels, options.relevantTaskIds, onSignals);
+
   return { ...state, refresh };
 }
 
@@ -422,9 +486,11 @@ export function useSidebarSummary() {
 
 export function useMentionItems() {
   const rpc = useTasksRpc();
+
   return useCallback(
     async (query: string): Promise<MentionItem[]> => {
       const trimmed = query.trim();
+
       const [taskResult, threadResult] = await Promise.all([
         rpc.call("listTasks", {
           ...(trimmed ? { search: trimmed } : {}),
@@ -434,6 +500,7 @@ export function useMentionItems() {
           .call("searchThreads", { query: trimmed, limit: 5 })
           .catch(() => ({ threads: [] })),
       ]);
+
       return [
         ...taskResult.tasks.slice(0, 8).map((task) => ({
           type: "task" as const,

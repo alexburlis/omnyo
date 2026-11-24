@@ -3,6 +3,7 @@ import { Button } from "./button";
 import { Icon } from "./icon";
 
 export const RESOURCE_LIST_PAGE_SIZE = 10;
+
 export const RESOURCE_GRID_PAGE_SIZE = 12;
 
 interface ResourcePaginationOptions {
@@ -26,6 +27,7 @@ interface ResourceViewportPageSizeOptions {
 
 function cssPixelValue(value: string): number {
   const parsed = Number.parseFloat(value);
+
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -40,9 +42,11 @@ function measureResourceViewportPageSize(
   tallestRowHeight: number,
 ): ResourceViewportMeasurement {
   const availableHeight = viewport.clientHeight;
+
   const panel = viewport.querySelector<HTMLElement>(
     "[data-resource-list-panel]",
   );
+
   if (availableHeight <= 0 || panel === null) {
     return { pageSize: fallbackPageSize, rowHeight: tallestRowHeight };
   }
@@ -51,18 +55,22 @@ function measureResourceViewportPageSize(
     panel.querySelectorAll<HTMLElement>("[data-resource-row]"),
     (row) => row.getBoundingClientRect().height,
   ).filter((height) => Number.isFinite(height) && height > 0);
+
   if (rowHeights.length === 0) {
     return { pageSize: fallbackPageSize, rowHeight: tallestRowHeight };
   }
 
   const panelStyle = panel.ownerDocument.defaultView?.getComputedStyle(panel);
+
   const panelChromeHeight = panelStyle
     ? cssPixelValue(panelStyle.paddingTop) +
       cssPixelValue(panelStyle.paddingBottom) +
       cssPixelValue(panelStyle.borderTopWidth) +
       cssPixelValue(panelStyle.borderBottomWidth)
     : 0;
+
   const rowHeight = Math.max(tallestRowHeight, ...rowHeights);
+
   return {
     pageSize: Math.max(
       1,
@@ -80,6 +88,7 @@ export function useResourceViewportPageSize(
     1,
     Math.floor(options.fallbackPageSize ?? RESOURCE_LIST_PAGE_SIZE),
   );
+
   const resetKey = options.resetKey ?? "";
   const [pageSize, setPageSize] = useState(fallbackPageSize);
 
@@ -97,24 +106,30 @@ export function useResourceViewportPageSize(
       const panel = viewportElement.querySelector<HTMLElement>(
         "[data-resource-list-panel]",
       );
+
       if (panel === observedPanel) return;
+
       if (observedPanel !== null) resizeObserver?.unobserve(observedPanel);
       observedPanel = panel;
+
       if (observedPanel !== null) resizeObserver?.observe(observedPanel);
     }
 
     function measure() {
       observeCurrentPanel();
       const width = viewportElement.clientWidth;
+
       if (width !== measuredWidth) {
         measuredWidth = width;
         tallestRowHeight = 0;
       }
+
       const measurement = measureResourceViewportPageSize(
         viewportElement,
         fallbackPageSize,
         tallestRowHeight,
       );
+
       tallestRowHeight = measurement.rowHeight;
       setPageSize((current) =>
         current === measurement.pageSize ? current : measurement.pageSize,
@@ -124,8 +139,10 @@ export function useResourceViewportPageSize(
     function scheduleMeasure() {
       if (typeof requestAnimationFrame !== "function") {
         measure();
+
         return;
       }
+
       if (scheduledFrame !== null) return;
       scheduledFrame = requestAnimationFrame(() => {
         scheduledFrame = null;
@@ -137,10 +154,12 @@ export function useResourceViewportPageSize(
       resizeObserver = new ResizeObserver(scheduleMeasure);
       resizeObserver.observe(viewportElement);
     }
+
     const mutationObserver =
       typeof MutationObserver === "undefined"
         ? null
         : new MutationObserver(scheduleMeasure);
+
     mutationObserver?.observe(viewportElement, {
       childList: true,
       subtree: true,
@@ -150,6 +169,7 @@ export function useResourceViewportPageSize(
     return () => {
       mutationObserver?.disconnect();
       resizeObserver?.disconnect();
+
       if (
         scheduledFrame !== null &&
         typeof cancelAnimationFrame === "function"
@@ -170,6 +190,7 @@ export function useResourcePagination<Item>(
     1,
     Math.floor(options.pageSize ?? RESOURCE_LIST_PAGE_SIZE),
   );
+
   const resetKey = options.resetKey ?? "";
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const [anchor, setAnchor] = useState({ resetKey, page: 0, pageSize });
@@ -184,6 +205,7 @@ export function useResourcePagination<Item>(
       : anchor.pageSize === pageSize
         ? anchor.page
         : Math.floor((anchor.page * anchor.pageSize) / pageSize);
+
   const page = Math.min(requestedPage, pageCount - 1);
 
   const setPage = useCallback(
@@ -196,8 +218,10 @@ export function useResourcePagination<Item>(
     },
     [pageCount, pageSize, resetKey],
   );
+
   const paginatedItems = useMemo(() => {
     const start = page * pageSize;
+
     return items.slice(start, start + pageSize);
   }, [items, page, pageSize]);
 
@@ -226,18 +250,24 @@ export function useResourceInfiniteItems<Item>(
     1,
     Math.floor(options.pageSize ?? RESOURCE_LIST_PAGE_SIZE),
   );
+
   const resetKey = options.resetKey ?? "";
   const [anchor, setAnchor] = useState({ resetKey, loadedCount: 0 });
+
   if (anchor.resetKey !== resetKey) {
     setAnchor({ resetKey, loadedCount: 0 });
   }
+
   const loadedCount = anchor.resetKey === resetKey ? anchor.loadedCount : 0;
   const visibleCount = Math.max(pageSize, loadedCount);
+
   const visibleItems = useMemo(
     () => items.slice(0, visibleCount),
     [items, visibleCount],
   );
+
   const hasMore = items.length > visibleItems.length;
+
   const loadMore = useCallback(() => {
     setAnchor((current) => ({
       resetKey,
@@ -247,6 +277,7 @@ export function useResourceInfiniteItems<Item>(
           : pageSize) + pageSize,
     }));
   }, [pageSize, resetKey]);
+
   return { items: visibleItems, total: items.length, hasMore, loadMore };
 }
 
@@ -267,6 +298,7 @@ export function ResourceInfiniteScrollSentinel({
 
   useEffect(() => {
     const element = ref.current;
+
     if (
       element === null ||
       !hasMore ||
@@ -275,9 +307,11 @@ export function ResourceInfiniteScrollSentinel({
     ) {
       return;
     }
+
     const root = element.closest(
       "[data-resource-collection-scroll], [data-infinite-scroll-root]",
     );
+
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
@@ -289,11 +323,14 @@ export function ResourceInfiniteScrollSentinel({
         rootMargin: "240px 0px",
       },
     );
+
     observer.observe(element);
+
     return () => observer.disconnect();
   }, [hasMore, itemCount, loading]);
 
   if (!hasMore && !loading) return null;
+
   return (
     <div
       ref={ref}
@@ -320,8 +357,10 @@ function scrollToResults(scrollTargetId: string | undefined): void {
   ) {
     return;
   }
+
   requestAnimationFrame(() => {
     const target = document.getElementById(scrollTargetId);
+
     if (target === null) return;
     target.scrollTo?.({ top: 0, behavior: "instant" });
   });
@@ -343,11 +382,13 @@ export function ResourcePagination({
   scrollTargetId?: string;
 }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
   if (total <= pageSize) return null;
 
   const safePage = Math.min(Math.max(0, page), pageCount - 1);
   const firstItem = safePage * pageSize + 1;
   const lastItem = Math.min(firstItem + visibleCount - 1, total);
+
   const changePage = (nextPage: number) => {
     onPageChange(nextPage);
     scrollToResults(scrollTargetId);

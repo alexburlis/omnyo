@@ -1,7 +1,7 @@
-import type { JsonValue } from "@bb/domain";
-import { threadSchema, type GitSourceInspection } from "@bb/domain";
-import type { HostDaemonRpcCommand } from "@bb/host-daemon-contract";
-import { threadResponseSchema } from "@bb/server-contract";
+import type { JsonValue } from "@omnyo/domain";
+import { threadSchema, type GitSourceInspection } from "@omnyo/domain";
+import type { HostDaemonRpcCommand } from "@omnyo/host-daemon-contract";
+import { threadResponseSchema } from "@omnyo/server-contract";
 import { describe, expect, it, vi } from "vitest";
 import { registerTestHostRpcCapture } from "../helpers/commands.js";
 import { readJson } from "../helpers/json.js";
@@ -68,6 +68,7 @@ async function createNamedBaseBranchThread(
       ? { onInspectGitSource: args.onInspectGitSource }
       : {}),
   });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: SOURCE_PATH,
@@ -91,9 +92,11 @@ async function createNamedBaseBranchThread(
       },
     }),
   });
+
   expect(response.status).toBe(201);
   threadSchema.parse(await readJson(response));
   const context = await provider.waitForProvision();
+
   return context.inputs;
 }
 
@@ -108,6 +111,7 @@ describe("named managed-worktree base branch", () => {
         sessionId: session.id,
         gitSourceInspectionResult: buildDetachedSingleBranchCheckout(),
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: SOURCE_PATH,
@@ -131,6 +135,7 @@ describe("named managed-worktree base branch", () => {
           },
         }),
       });
+
       expect(response.status).toBe(201);
       threadSchema.parse(await readJson(response));
       const context = await provider.waitForProvision();
@@ -143,10 +148,12 @@ describe("named managed-worktree base branch", () => {
   it("checks checkout eligibility before handing the named branch to the worktree provider", async () => {
     await withTestHarness(async (harness) => {
       const onInspectGitSource = vi.fn();
+
       const inputs = await createNamedBaseBranchThread(harness, {
         baseBranch: "main",
         onInspectGitSource,
       });
+
       expect(inputs).toEqual({ branch: { kind: "named", name: "main" } });
       expect(onInspectGitSource).toHaveBeenCalledWith({
         type: "host.inspect_git_source",
@@ -159,10 +166,12 @@ describe("named managed-worktree base branch", () => {
   it("does not reinterpret an origin-qualified branch", async () => {
     await withTestHarness(async (harness) => {
       const onInspectGitSource = vi.fn();
+
       const inputs = await createNamedBaseBranchThread(harness, {
         baseBranch: "origin/main",
         onInspectGitSource,
       });
+
       expect(inputs).toEqual({
         branch: { kind: "named", name: "origin/main" },
       });
@@ -183,20 +192,24 @@ describe("named managed-worktree base branch", () => {
         sessionId: session.id,
         gitSourceInspectionResult: buildCheckout("local-behind"),
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: SOURCE_PATH,
       });
+
       const environment = seedEnvironment(harness.deps, {
         branchName: "feature/source",
         hostId: host.id,
         path: SOURCE_PATH,
         projectId: project.id,
       });
+
       const sourceThread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
       });
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: environment.id,
         permissionMode: "full",
@@ -226,6 +239,7 @@ describe("named managed-worktree base branch", () => {
           },
         }),
       });
+
       expect(response.status).toBe(201);
       const fork = threadResponseSchema.parse(await readJson(response));
       const context = await provider.waitForProvision();

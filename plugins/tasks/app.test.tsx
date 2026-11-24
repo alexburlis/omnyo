@@ -2,7 +2,7 @@
 
 import { act, cleanup, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 
 const app = await loadPluginApp(() => import("./app"));
 
@@ -85,12 +85,15 @@ describe("Tasks nav panel sidebar accessory", () => {
 
   it("coalesces a burst of task changes into one trailing count refresh", async () => {
     let calls = 0;
+
     let resolveFirstRequest:
       | ((result: { openTaskCount: number }) => void)
       | undefined;
+
     const firstRequest = new Promise<{ openTaskCount: number }>((resolve) => {
       resolveFirstRequest = resolve;
     });
+
     const Accessory = app.navPanels[0]?.experimental_sidebarAccessory;
 
     const slot = renderSlot(
@@ -100,6 +103,7 @@ describe("Tasks nav panel sidebar accessory", () => {
         rpc: {
           sidebarOpenTaskCount: () => {
             calls += 1;
+
             return calls === 1 ? firstRequest : { openTaskCount: 13 };
           },
         },

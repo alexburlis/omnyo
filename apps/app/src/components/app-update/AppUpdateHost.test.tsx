@@ -11,8 +11,9 @@ import {
 import type {
   SystemAppUpdateResult,
   SystemAppUpdateStatus,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { focusManager } from "@tanstack/react-query";
 import { appToast } from "@/components/ui/app-toast";
 import { systemAppUpdateQueryKey } from "@/hooks/queries/query-keys";
 import { sdk } from "@/lib/sdk";
@@ -42,7 +43,7 @@ vi.mock("@/lib/ws", () => ({
 }));
 
 vi.mock("@/components/ui/app-toast", () => ({
-  appToast: { error: vi.fn(), success: vi.fn() },
+  appToast: { error: vi.fn(), success: vi.fn(), message: vi.fn() },
 }));
 
 function status(
@@ -53,7 +54,9 @@ function status(
     available: null,
     blocked: null,
     current: { commit: null, version: "1.1.0" },
+    installsWhenIdle: false,
     lastResult: null,
+    newTurnsPausedForUpdate: false,
     runningThreadCount: 0,
     support: { kind: "supported", mode: "npm" },
     ...overrides,
@@ -80,6 +83,7 @@ function result(
 function renderHost(props: Parameters<typeof AppUpdateHost>[0] = {}) {
   const harness = createQueryClientTestHarness();
   render(<AppUpdateHost {...props} />, { wrapper: harness.wrapper });
+
   return harness;
 }
 
@@ -90,34 +94,70 @@ afterEach(() => {
 });
 
 describe("AppUpdateHost", () => {
-  it("announces a successful update once and marks it seen", async () => {
-    vi.mocked(sdk.system.appUpdate).mockResolvedValue(
-      status({ lastResult: result() }),
-    );
-    vi.mocked(sdk.system.acknowledgeAppUpdate).mockResolvedValue(
-      status({ lastResult: result({ acknowledged: true }) }),
-    );
+  it("keeps checking an idle recovery pause until new turns are admitted", async () => {
+    vi.useFakeTimers();
+    focusManager.setFocused(true);
+    vi.mocked(sdk.system.appUpdate)
+      .mockResolvedValueOnce(status({ newTurnsPausedForUpdate: true }))
+      .mockResolvedValue(status());
 
-    renderHost();
-
-    await waitFor(() => {
-      expect(appToast.success).toHaveBeenCalledWith("Updated bb to 1.1.0");
-    });
-    await waitFor(() => {
-      expect(sdk.system.acknowledgeAppUpdate).toHaveBeenCalledWith({
-        id: "update-1",
-      });
-    });
-    expect(appToast.success).toHaveBeenCalledOnce();
+    try {
+      renderHost();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(sdk.system.appUpdate).toHaveBeenCalledOnce();
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
+      expect(sdk.system.appUpdate).toHaveBeenCalledTimes(2);
+      await act(() => vi.advanceTimersByTimeAsync(2_000));
+      expect(sdk.system.appUpdate).toHaveBeenCalledTimes(2);
+    } finally {
+      cleanup();
+      focusManager.setFocused(undefined);
+      vi.useRealTimers();
+    }
   });
+
+  it.each(["updated", "cancelled"] as const)(
+    "announces a %s result once without an error and marks it seen",
+    async (outcome) => {
+      const completed = result({ outcome });
+      vi.mocked(sdk.system.appUpdate).mockResolvedValue(
+        status({ lastResult: completed }),
+      );
+      vi.mocked(sdk.system.acknowledgeAppUpdate).mockResolvedValue(
+        status({ lastResult: { ...completed, acknowledged: true } }),
+      );
+
+      renderHost();
+
+      await waitFor(() => {
+        expect(
+          outcome === "updated" ? appToast.success : appToast.message,
+        ).toHaveBeenCalledWith(
+          outcome === "updated" ? "Updated Omnyo to 1.1.0" : "Update cancelled",
+          { badge: true },
+        );
+      });
+      await waitFor(() => {
+        expect(sdk.system.acknowledgeAppUpdate).toHaveBeenCalledWith({
+          id: "update-1",
+        });
+      });
+      expect(
+        outcome === "updated" ? appToast.success : appToast.message,
+      ).toHaveBeenCalledOnce();
+      expect(appToast.error).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps a failure visible until dismissed from its details", async () => {
     const failed = result({
+      errorCode: "runtime_update_busy",
       logTail: ["npm error code E404"],
       message: "npm install failed",
       outcome: "failed",
       phase: "install",
     });
+
     vi.mocked(sdk.system.appUpdate).mockResolvedValue(
       status({
         current: { commit: null, version: "1.0.0" },
@@ -143,6 +183,7 @@ describe("AppUpdateHost", () => {
     });
     act(() => openAppUpdateResultDetails(failed));
     expect(await screen.findByText("npm error code E404")).toBeDefined();
+    expect(screen.getByText("runtime_update_busy")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 
     await waitFor(() => {
@@ -152,7 +193,7 @@ describe("AppUpdateHost", () => {
     });
   });
 
-  it("covers the app while bb restarts into the new version", async () => {
+  it("covers the app while Omnyo restarts into the new version", async () => {
     vi.mocked(sdk.system.appUpdate).mockResolvedValue(
       status({
         activity: {
@@ -166,7 +207,7 @@ describe("AppUpdateHost", () => {
 
     renderHost();
 
-    expect(await screen.findByText("Updating bb to 1.2.0")).toBeDefined();
+    expect(await screen.findByText("Updating Omnyo to 1.2.0")).toBeDefined();
     expect(
       document.querySelector("[data-app-update-overlay]")?.getAttribute("role"),
     ).toBe("dialog");
@@ -201,8 +242,8 @@ describe("AppUpdateHost", () => {
 
     renderHost();
 
-    expect(await screen.findByText("Updating bb to 9f4ee4d")).toBeDefined();
-    expect(screen.queryByText("Updating bb to 0.45.0")).toBeNull();
+    expect(await screen.findByText("Updating Omnyo to 9f4ee4d")).toBeDefined();
+    expect(screen.queryByText("Updating Omnyo to 0.45.0")).toBeNull();
   });
 
   it("reloads the page once the server comes back on a new revision", async () => {
@@ -248,11 +289,12 @@ describe("AppUpdateHost", () => {
       message: "Server failed to start",
       outcome: "failed",
     });
+
     vi.mocked(sdk.system.appUpdate).mockResolvedValue(
       status({ lastResult: failed }),
     );
     vi.mocked(sdk.system.acknowledgeAppUpdate).mockRejectedValue(
-      new Error("The bb-app launcher did not respond."),
+      new Error("The omnyo-app launcher did not respond."),
     );
     renderHost();
     await waitFor(() => expect(appToast.error).toHaveBeenCalled());
@@ -264,7 +306,7 @@ describe("AppUpdateHost", () => {
       expect(appToast.error).toHaveBeenCalledWith(
         "Couldn't dismiss the update result",
         expect.objectContaining({
-          description: "The bb-app launcher did not respond.",
+          description: "The omnyo-app launcher did not respond.",
         }),
       );
     });

@@ -1,8 +1,9 @@
 import { useCallback, useSyncExternalStore } from "react";
-import type { PluginComposerThreadRowStatus } from "@get-bb/plugin-sdk";
+import type { PluginComposerThreadRowStatus } from "@omnyo/plugin-sdk";
 import { createKeyedListeners } from "./keyed-listeners";
 
 type ThreadRowStatusListener = () => void;
+
 type ThreadRowStatusOwner = string | symbol;
 
 const statusesByThreadId = new Map<
@@ -12,7 +13,9 @@ const statusesByThreadId = new Map<
     { pluginId: string; status: PluginComposerThreadRowStatus }
   >
 >();
+
 const threadRowStatusListeners = createKeyedListeners<string>();
+
 const groupListeners = new Set<ThreadRowStatusListener>();
 
 let statusSnapshot: ReadonlyMap<string, PluginComposerThreadRowStatus> | null =
@@ -21,6 +24,7 @@ let statusSnapshot: ReadonlyMap<string, PluginComposerThreadRowStatus> | null =
 function notify(threadId: string): void {
   statusSnapshot = null;
   threadRowStatusListeners.notify(threadId);
+
   for (const listener of [...groupListeners]) {
     listener();
   }
@@ -37,11 +41,15 @@ export function getPluginThreadRowStatuses(): ReadonlyMap<
 > {
   if (statusSnapshot !== null) return statusSnapshot;
   const next = new Map<string, PluginComposerThreadRowStatus>();
+
   for (const threadId of statusesByThreadId.keys()) {
     const status = getPluginThreadRowStatus(threadId);
+
     if (status !== null) next.set(threadId, status);
   }
+
   statusSnapshot = next.size === 0 ? EMPTY_STATUS_SNAPSHOT : next;
+
   return statusSnapshot;
 }
 
@@ -49,7 +57,9 @@ export function getPluginThreadRowStatus(
   threadId: string,
 ): PluginComposerThreadRowStatus | null {
   const statuses = statusesByThreadId.get(threadId);
+
   if (!statuses || statuses.size === 0) return null;
+
   return statuses.values().next().value?.status ?? null;
 }
 
@@ -65,6 +75,7 @@ export function setPluginThreadRowStatus(
 
   if (status === null) {
     statuses?.delete(owner);
+
     if (statuses?.size === 0) {
       statusesByThreadId.delete(threadId);
     }
@@ -73,6 +84,7 @@ export function setPluginThreadRowStatus(
       statuses = new Map();
       statusesByThreadId.set(threadId, statuses);
     }
+
     statuses.set(owner, { pluginId, status: { ...status } });
   }
 
@@ -84,10 +96,13 @@ export function setPluginThreadRowStatus(
 export function clearPluginThreadRowStatuses(pluginId: string): void {
   for (const [threadId, statuses] of statusesByThreadId) {
     const previous = getPluginThreadRowStatus(threadId);
+
     for (const [owner, entry] of statuses) {
       if (entry.pluginId === pluginId) statuses.delete(owner);
     }
+
     if (statuses.size === 0) statusesByThreadId.delete(threadId);
+
     if (getPluginThreadRowStatus(threadId) !== previous) notify(threadId);
   }
 }
@@ -98,7 +113,9 @@ export function clearPluginThreadRowStatusesByOwner(
   for (const [threadId, statuses] of statusesByThreadId) {
     const previous = getPluginThreadRowStatus(threadId);
     statuses.delete(owner);
+
     if (statuses.size === 0) statusesByThreadId.delete(threadId);
+
     if (getPluginThreadRowStatus(threadId) !== previous) notify(threadId);
   }
 }
@@ -114,6 +131,7 @@ function subscribePluginThreadRowStatusGroup(
   listener: ThreadRowStatusListener,
 ): () => void {
   groupListeners.add(listener);
+
   return () => groupListeners.delete(listener);
 }
 
@@ -125,10 +143,12 @@ export function usePluginThreadRowStatus(
       subscribePluginThreadRowStatus(threadId, listener),
     [threadId],
   );
+
   const getSnapshot = useCallback(
     () => getPluginThreadRowStatus(threadId),
     [threadId],
   );
+
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
@@ -147,6 +167,7 @@ export function resetPluginThreadRowStatusesForTest(): void {
   statusSnapshot = null;
   statusesByThreadId.clear();
   threadRowStatusListeners.notifyAll();
+
   for (const listener of [...groupListeners]) {
     listener();
   }

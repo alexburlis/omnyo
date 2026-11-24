@@ -4,10 +4,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
 import { systemRow } from "@/test/fixtures/thread-timeline-rows";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import { ThreadTimelineRows } from "./ThreadTimelineRows";
 
 function renderRow(row: TimelineRow) {
@@ -53,6 +53,7 @@ const summary =
 function preview() {
   const title = screen.getByTitle((title) => title.startsWith(summary));
   expect(title.classList.contains("whitespace-pre-wrap")).toBe(true);
+
   return title.parentElement;
 }
 
@@ -64,6 +65,7 @@ describe("system summary overflow", () => {
       title: "Target thread",
       titleFallback: "Target thread",
     });
+
     render(
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>

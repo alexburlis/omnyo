@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import { COMPACT_VIEWPORT_QUERY } from "@/components/ui/hooks/use-compact-viewport";
 import type { Task } from "../../shared/contract.js";
 import { makeTask } from "../../test-fixtures.js";
@@ -16,11 +16,13 @@ window.matchMedia = (query: string) => ({
   removeEventListener: () => {},
   dispatchEvent: () => false,
 });
+
 window.ResizeObserver ??= class {
   observe() {}
   unobserve() {}
   disconnect() {}
 };
+
 Element.prototype.scrollIntoView ??= () => {};
 
 const app = await loadPluginApp(() => import("../../app"));
@@ -40,7 +42,7 @@ const project = {
   nextTaskNumber: 5,
   color: "blue",
   folderId: null,
-  linkedBbProjectId: null,
+  linkedAppProjectId: null,
   createdAt: "2026-07-15T00:00:00.000Z",
 };
 
@@ -92,10 +94,13 @@ function renderList() {
 
 async function rowOrder(slot: ReturnType<typeof renderList>) {
   await slot.findByText("TSK-1");
+
   const keys = Array.from(
     slot.container.querySelectorAll("[data-task-key]"),
   ).map((row) => row.getAttribute("data-task-key"));
+
   expect(keys).toHaveLength(tasks.length);
+
   return keys;
 }
 

@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { dispatchBrowserViewBoundsSync } from "@/lib/browser-view-bounds-sync";
 import { setCompactSidebarDrawerShowing } from "@/components/ui/sidebar-mobile-drawer-visibility";
 import {
@@ -22,6 +22,7 @@ const panelGroupState = vi.hoisted(() => ({
   getLayout: vi.fn(() => [60, 40]),
   setLayout: vi.fn(),
 }));
+
 const drawerShellState = vi.hoisted(() => ({
   onContentAnimationEnd: undefined as DrawerShellCallback | undefined,
 }));
@@ -53,12 +54,14 @@ vi.mock("react-resizable-panels", async () => {
       }),
       [],
     );
+
     return React.createElement(
       "div",
       { ...props, "data-testid": "panel-group" },
       children,
     );
   });
+
   PanelGroup.displayName = "MockPanelGroup";
 
   const Panel = ({ children }: { children?: ReactNode }) =>
@@ -80,6 +83,7 @@ vi.mock("./CompactSecondaryPanelShelf", async () => {
     open: boolean;
   }) => {
     drawerShellState.onContentAnimationEnd = onContentAnimationEnd;
+
     return React.createElement(
       "div",
       {
@@ -112,7 +116,9 @@ interface RenderLayoutArgs {
 }
 
 const noop = () => {};
+
 let publishedHostedPanel: PaneSecondaryPanelViewModel | null = null;
+
 const hostedPaneRegistration = {
   clear: () => {
     publishedHostedPanel = null;
@@ -129,6 +135,7 @@ function withHostedPane(
   if (isFocusedHosted === undefined) {
     return children;
   }
+
   const value: PaneContextValue = {
     paneId: "pane-test",
     isFocused: isFocusedHosted,
@@ -143,11 +150,13 @@ function withHostedPane(
     ownsWindowTopLeft: true,
     navigateInPane: noop,
   };
+
   return <PaneContext.Provider value={value}>{children}</PaneContext.Provider>;
 }
 
 function renderLayout(args: RenderLayoutArgs) {
   let renderArgs = args;
+
   const renderContent = () =>
     withHostedPane(
       <CompactViewportOverrideProvider
@@ -175,6 +184,7 @@ function renderLayout(args: RenderLayoutArgs) {
       </CompactViewportOverrideProvider>,
       renderArgs.isFocusedHosted,
     );
+
   const view = render(renderContent());
 
   return {
@@ -189,6 +199,7 @@ function renderLayout(args: RenderLayoutArgs) {
 function createPanelRenderer(order?: string[]) {
   return vi.fn((args: SecondaryPanelRenderArgs) => {
     order?.push(`render:${String(args.canShowNativeBrowserView)}`);
+
     return (
       <section
         data-can-show-native-browser-view={String(
@@ -224,8 +235,10 @@ function installAnimationFrameQueue(order?: string[]): QueuedAnimationFrames {
       nextFrameId += 1;
       callbacks.set(frameId, callback);
       order?.push("requestAnimationFrame");
+
       return frameId;
     });
+
   const cancelAnimationFrame = vi
     .spyOn(window, "cancelAnimationFrame")
     .mockImplementation((frameId) => {
@@ -237,6 +250,7 @@ function installAnimationFrameQueue(order?: string[]): QueuedAnimationFrames {
     flushAll() {
       const pendingCallbacks = [...callbacks.values()];
       callbacks.clear();
+
       for (const callback of pendingCallbacks) {
         callback(performance.now());
       }
@@ -255,9 +269,11 @@ function realizeDrawerPanel(frames: QueuedAnimationFrames) {
 
 function scheduleCompactDrawerSettleFrame(open = true) {
   const callback = drawerShellState.onContentAnimationEnd;
+
   if (callback === undefined) {
     throw new Error("Drawer shell did not receive its animation callback");
   }
+
   act(() => {
     callback(open);
   });
@@ -272,6 +288,7 @@ function expectNativeBrowserVisibility(visible: boolean) {
 }
 
 const PRISTINE_REQUEST_ANIMATION_FRAME = window.requestAnimationFrame;
+
 const PRISTINE_CANCEL_ANIMATION_FRAME = window.cancelAnimationFrame;
 
 afterEach(() => {
@@ -314,6 +331,7 @@ describe("SecondaryPanelLayout", () => {
 
   it("preserves routed main content when the panel state identity changes", () => {
     const frames = installAnimationFrameQueue();
+
     const view = renderLayout({
       isCompactViewport: false,
       open: true,
@@ -329,7 +347,7 @@ describe("SecondaryPanelLayout", () => {
     const panelGroup = screen.getByTestId("panel-group");
     const mainContent = screen.getByTestId("main-content");
     expect(panelGroup.style.getPropertyValue("--panel-collapse-duration")).toBe(
-      "220ms",
+      "var(--motion-duration-panel)",
     );
     expect(mainContent.parentElement?.className).toContain(
       "motion-reduce:transition-none",
@@ -346,6 +364,7 @@ describe("SecondaryPanelLayout", () => {
 
   it("settles mount-time panel state before enabling layout transitions", () => {
     const frames = installAnimationFrameQueue();
+
     const view = renderLayout({
       isCompactViewport: false,
       open: true,
@@ -366,12 +385,13 @@ describe("SecondaryPanelLayout", () => {
 
     act(() => frames.flushAll());
     expect(panelGroup.style.getPropertyValue("--panel-collapse-duration")).toBe(
-      "220ms",
+      "var(--motion-duration-panel)",
     );
   });
 
   it("waits for a secondary panel before applying a two-panel layout", () => {
     panelGroupState.getLayout.mockReturnValue([100]);
+
     const view = renderLayout({
       isCompactViewport: false,
       open: false,
@@ -391,6 +411,7 @@ describe("SecondaryPanelLayout", () => {
 
   it("owns the desktop open, closed, and conversation-collapse layouts", () => {
     const renderPanel = createPanelRenderer();
+
     const view = renderLayout({
       collapseActive: false,
       isCompactViewport: false,
@@ -437,6 +458,7 @@ describe("SecondaryPanelLayout", () => {
   it("publishes one hosted panel model and gates native content on pane focus", () => {
     const frames = installAnimationFrameQueue();
     const renderPanel = createPanelRenderer();
+
     const view = renderLayout({
       collapseActive: true,
       isCompactViewport: false,
@@ -543,6 +565,7 @@ describe("SecondaryPanelLayout", () => {
       writable: true,
       value: vi.fn(),
     });
+
     try {
       renderLayout({
         isCompactViewport: true,
@@ -565,6 +588,7 @@ describe("SecondaryPanelLayout", () => {
 
   it("ignores close animation completion and stale callbacks after close", () => {
     const frames = installAnimationFrameQueue();
+
     const view = renderLayout({
       isCompactViewport: true,
       open: true,
@@ -583,12 +607,14 @@ describe("SecondaryPanelLayout", () => {
 
   it("cancels a pending settle frame when the content identity changes", () => {
     const frames = installAnimationFrameQueue();
+
     const view = renderLayout({
       isCompactViewport: true,
       open: true,
       renderPanel: createPanelRenderer(),
       resetKey: "thread-1",
     });
+
     realizeDrawerPanel(frames);
     scheduleCompactDrawerSettleFrame();
 
@@ -601,12 +627,14 @@ describe("SecondaryPanelLayout", () => {
 
   it("revokes native readiness when the drawer content identity changes", () => {
     const frames = installAnimationFrameQueue();
+
     const view = renderLayout({
       isCompactViewport: true,
       open: true,
       renderPanel: createPanelRenderer(),
       resetKey: "thread-1",
     });
+
     realizeDrawerPanel(frames);
     scheduleCompactDrawerSettleFrame();
     act(() => {
@@ -620,12 +648,14 @@ describe("SecondaryPanelLayout", () => {
 
   it("cancels a pending settle frame when the drawer closes", () => {
     const frames = installAnimationFrameQueue();
+
     const view = renderLayout({
       isCompactViewport: true,
       open: true,
       renderPanel: createPanelRenderer(),
       resetKey: "thread-1",
     });
+
     realizeDrawerPanel(frames);
     scheduleCompactDrawerSettleFrame();
 
@@ -639,12 +669,14 @@ describe("SecondaryPanelLayout", () => {
   it("cancels compact settling when switching wide or unmounting", () => {
     const frames = installAnimationFrameQueue();
     const renderPanel = createPanelRenderer();
+
     const view = renderLayout({
       isCompactViewport: true,
       open: true,
       renderPanel,
       resetKey: "thread-1",
     });
+
     realizeDrawerPanel(frames);
     scheduleCompactDrawerSettleFrame();
 
@@ -659,12 +691,14 @@ describe("SecondaryPanelLayout", () => {
     cleanup();
     vi.clearAllMocks();
     const unmountFrames = installAnimationFrameQueue();
+
     const mounted = renderLayout({
       isCompactViewport: true,
       open: true,
       renderPanel,
       resetKey: "thread-2",
     });
+
     realizeDrawerPanel(unmountFrames);
     scheduleCompactDrawerSettleFrame();
     mounted.unmount();
@@ -677,6 +711,7 @@ describe("SecondaryPanelLayout", () => {
 describe("compact sidebar and right panel", () => {
   it("keeps a newly requested panel open while the sidebar is dismissing", () => {
     const onClose = vi.fn();
+
     const view = renderLayout({
       isCompactViewport: true,
       onClose,
@@ -684,6 +719,7 @@ describe("compact sidebar and right panel", () => {
       renderPanel: createPanelRenderer(),
       resetKey: "thread-1",
     });
+
     act(() => setCompactSidebarDrawerShowing(true));
     view.rerenderWith({ open: true });
     act(() => setCompactSidebarDrawerShowing(false));

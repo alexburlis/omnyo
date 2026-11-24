@@ -5,13 +5,14 @@ import { StrictMode, type ReactNode } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import type { PromptTextMention } from "@bb/domain";
-import type { ThreadResponse } from "@bb/server-contract";
+import type { PromptTextMention } from "@omnyo/domain";
+import type { ThreadResponse } from "@omnyo/server-contract";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import {
   ThreadTitleMentionResourcesProvider,
   ThreadTitleMentions,
   useRawThreadMentionResources,
+  useThreadTitleDisplayText,
 } from "@/components/thread/ThreadTitleMentions";
 import {
   type MarkdownMessageDirectives,
@@ -23,11 +24,12 @@ import { threadQueryKey } from "@/hooks/queries/query-keys";
 import { sdk } from "@/lib/sdk";
 import { setPreferredTheme } from "@/hooks/useTheme";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import { makeThreadResponse } from "@/test/fixtures/thread-responses";
 
 vi.mock("@/lib/sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sdk")>();
+
   return {
     ...actual,
     sdk: {
@@ -46,6 +48,7 @@ vi.mock("@/components/thread/ThreadTitleMentions", async (importOriginal) => {
     await importOriginal<
       typeof import("@/components/thread/ThreadTitleMentions")
     >();
+
   return {
     ...actual,
     useRawThreadMentionResources: vi.fn(actual.useRawThreadMentionResources),
@@ -82,9 +85,11 @@ function renderMarkdown(
   cachedThreads: readonly ThreadResponse[] = [threadResponse()],
 ) {
   const { queryClient, wrapper } = createQueryClientTestHarness();
+
   for (const thread of cachedThreads) {
     queryClient.setQueryData(threadQueryKey(thread.id), thread);
   }
+
   const threadById = new Map(
     cachedThreads.map((thread) => [
       thread.id,
@@ -96,6 +101,7 @@ function renderMarkdown(
       }),
     ]),
   );
+
   return {
     ...render(
       markdownTree(
@@ -111,6 +117,10 @@ function renderMarkdown(
     ),
     queryClient,
   };
+}
+
+function TitleDisplayText({ title }: { title: string }) {
+  return <span>{useThreadTitleDisplayText(title)}</span>;
 }
 
 const THREAD_MENTION: PromptTextMention = {
@@ -176,12 +186,16 @@ describe("MarkdownPreview thread mentions", () => {
 
   it("resolves many unknown raw ids in one bounded request", async () => {
     const alphabet = "23456789abcdefghijkmnpqrstuvwxyz";
+
     const threadIds = Array.from({ length: 40 }, (_, index) => {
       const high = alphabet[Math.floor(index / alphabet.length)] ?? "2";
       const low = alphabet[index % alphabet.length] ?? "2";
+
       return `thr_22222222${high}${low}`;
     });
+
     const content = [...threadIds, threadIds[0]].join(" ");
+
     const { container } = renderMarkdown(
       <MarkdownPreview
         content={content}
@@ -267,7 +281,7 @@ describe("MarkdownPreview thread mentions", () => {
     const { container } = renderMarkdown(
       <MarkdownPreview
         content={[
-          "Run `bb thread show thr_dcwivn5n8w`.",
+          "Run `omnyo thread show thr_dcwivn5n8w`.",
           "",
           "```text",
           "thr_dcwivn5n8w",
@@ -310,6 +324,7 @@ describe("MarkdownPreview thread mentions", () => {
       "docs\\thr_dcwivn5n8w",
       "thr_dcwivn5n8w\\logs",
     ].join(" ");
+
     const { container } = renderMarkdown(
       <MarkdownPreview
         content={untouched}
@@ -326,6 +341,7 @@ describe("MarkdownPreview thread mentions", () => {
 
   it("checks raw-id boundaries across formatting and Markdown link labels", () => {
     const id = "thr_dcwivn5n8w";
+
     const content = [
       `prefix**${id}**`,
       `/tmp/**${id}**`,
@@ -339,6 +355,7 @@ describe("MarkdownPreview thread mentions", () => {
       `[**${id}**/logs](https://example.com/continuation)`,
       String.raw`[C:\\tmp\\**${id}**](https://example.com/windows)`,
     ].join("\n\n");
+
     const { container } = renderMarkdown(
       <MarkdownPreview
         content={content}
@@ -447,6 +464,7 @@ describe("MarkdownPreview thread mentions", () => {
     const pill = await screen.findByRole("link", {
       name: "Queried cross-project target",
     });
+
     expect(pill.getAttribute("href")).toBe(
       "/projects/proj_target/threads/thr_dcwivn5n8w",
     );
@@ -476,6 +494,7 @@ describe("MarkdownPreview thread mentions", () => {
         },
       ]);
     const { wrapper } = createQueryClientTestHarness();
+
     const renderTree = (content: string) =>
       markdownTree(
         <ThreadTitleMentionResourcesProvider
@@ -489,6 +508,7 @@ describe("MarkdownPreview thread mentions", () => {
           />
         </ThreadTitleMentionResourcesProvider>,
       );
+
     const view = render(renderTree(`First ${firstId}`), { wrapper });
 
     expect(
@@ -544,6 +564,7 @@ describe("MarkdownPreview thread mentions", () => {
 
   it("retries a failed title mention batch once", async () => {
     vi.useFakeTimers();
+
     try {
       const threadId = "thr_2222222222";
       vi.mocked(sdk.threads.resolveMentions)
@@ -561,6 +582,48 @@ describe("MarkdownPreview thread mentions", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("resolves a title mention again after its cached thread is removed", async () => {
+    const cached = threadResponse({
+      id: "thr_2222222222",
+      title: "Cached target",
+      titleFallback: "Cached target",
+    });
+
+    vi.mocked(sdk.threads.resolveMentions).mockResolvedValueOnce([
+      {
+        threadId: cached.id,
+        projectId: "proj_target",
+        label: "Resolved target",
+      },
+    ]);
+
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+    queryClient.setQueryData(threadQueryKey(cached.id), cached);
+
+    render(
+      markdownTree(
+        <ThreadTitleMentionResourcesProvider
+          sectionNamesById={new Map()}
+          projectNamesById={new Map()}
+          threadById={new Map()}
+        >
+          <TitleDisplayText title={`Review @thread:${cached.id}`} />
+        </ThreadTitleMentionResourcesProvider>,
+      ),
+      { wrapper },
+    );
+
+    expect(await screen.findByText("Review Cached target")).not.toBeNull();
+    expect(sdk.threads.resolveMentions).not.toHaveBeenCalled();
+
+    act(() => {
+      queryClient.removeQueries({ queryKey: threadQueryKey(cached.id) });
+    });
+
+    expect(await screen.findByText("Review Resolved target")).not.toBeNull();
+    expect(sdk.threads.resolveMentions).toHaveBeenCalledTimes(1);
   });
 
   it("marks an omitted title mention unavailable", async () => {
@@ -585,6 +648,7 @@ describe("MarkdownPreview thread mentions", () => {
       },
     ]);
     const { wrapper } = createQueryClientTestHarness();
+
     const tree = markdownTree(
       <ThreadTitleMentionResourcesProvider
         sectionNamesById={new Map()}
@@ -608,6 +672,7 @@ describe("MarkdownPreview thread mentions", () => {
         />
       </ThreadTitleMentionResourcesProvider>,
     );
+
     const view = render(tree, { wrapper });
 
     await waitFor(() => {
@@ -631,6 +696,7 @@ describe("MarkdownPreview thread mentions", () => {
       titleFallback: "Archived investigation",
       archivedAt: 10,
     });
+
     renderMarkdown(
       <MarkdownPreview
         content="See @thread:thr_archived for the report."
@@ -948,6 +1014,7 @@ describe("MarkdownPreview thread mentions", () => {
     const link = screen.getByRole("link", {
       name: "Open thr_2222222222 details",
     });
+
     expect(link.getAttribute("href")).toBe("https://example.com");
     expect(screen.getAllByRole("link")).toHaveLength(1);
   });
@@ -969,6 +1036,7 @@ describe("MarkdownPreview thread mentions", () => {
   ])("uses complete token boundaries %s", (_label, messageDirectives) => {
     const content =
       "foo@thread:thr_embedded @thread:thr_continued/path @thread:thr_child";
+
     const { container } = renderMarkdown(
       <MarkdownPreview
         content={content}
@@ -995,6 +1063,7 @@ describe("MarkdownPreview thread mentions", () => {
       const sectionNamesById = new Map<string, string>();
       const projectNamesById = new Map<string, string>();
       const threadById = new Map();
+
       const renderTree = (content: string) =>
         markdownTree(
           <ThreadTitleMentionResourcesProvider
@@ -1008,6 +1077,7 @@ describe("MarkdownPreview thread mentions", () => {
             />
           </ThreadTitleMentionResourcesProvider>,
         );
+
       const link = "Read [the **docs**](https://example.com).";
       const view = render(renderTree(`${link}\n\nFirst`), { wrapper });
       const resources = vi.mocked(useRawThreadMentionResources);
@@ -1046,6 +1116,7 @@ describe("MarkdownPreview thread mentions", () => {
           titleFallback: "Encoded target",
         }),
       ];
+
       const renderedHtml = (
         content: string,
         messageDirectives: MarkdownMessageDirectives | undefined,
@@ -1061,9 +1132,11 @@ describe("MarkdownPreview thread mentions", () => {
           />,
           cachedThreads,
         );
+
         const html = view.container.innerHTML;
         expect(view.container.querySelector("a")).not.toBeNull();
         view.unmount();
+
         return html;
       };
 
@@ -1078,6 +1151,7 @@ describe("MarkdownPreview thread mentions", () => {
   it("renders prose without a thread mention candidate like the walked plugin", () => {
     const prose =
       "Plain **bold** prose, `inline code`, [a link](https://example.com), thread:thr_child, thr_short, and THR_DCWIVN5N8W.";
+
     const paragraphHtml = (content: string) => {
       const view = renderMarkdown(
         <MarkdownPreview
@@ -1085,8 +1159,10 @@ describe("MarkdownPreview thread mentions", () => {
           threadMentions={{ mentions: [], preserveSoftBreaks: true }}
         />,
       );
+
       const html = view.container.querySelector("p")?.outerHTML ?? "";
       view.unmount();
+
       return html;
     };
 
@@ -1100,6 +1176,7 @@ describe("MarkdownPreview thread mentions", () => {
   it("returns before reading the markdown tree when the source has no thread mention candidate", () => {
     const transform = remarkThreadMentions();
     const readChildren = vi.fn((): RootContent[] => []);
+
     const tree: Root = {
       type: "root",
       get children() {

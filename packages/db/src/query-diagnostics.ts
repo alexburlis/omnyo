@@ -21,11 +21,13 @@ export function finishQueryDiagnostics(
   walPath: string | null,
 ): QueryDiagnosticsLogFields {
   let sizeBytes: number | null = null;
+
   if (walPath !== null) {
     try {
       sizeBytes = statSync(walPath).size;
     } catch {}
   }
+
   return {
     resourceUsage: {
       minorPageFault:

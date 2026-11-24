@@ -8,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
 import {
   cleanupBridgeProcessTest,
@@ -22,6 +22,7 @@ import {
 } from "./fake-codex-app-server-harness.js";
 
 const THREAD_ID = "thr_writer_lock_1";
+
 const PROVIDER_THREAD_ID = "codex-writer-lock-1";
 
 const sessionOptions = {
@@ -35,12 +36,15 @@ const changedSessionOptions = {
 } as const;
 
 let harness: ReturnType<typeof createBridgeJsonRpcTestHarness>;
+
 let workspaceDir = "";
+
 let processLogPath = "";
+
 let writerLockPath = "";
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-writer-lock-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-writer-lock-"));
   processLogPath = join(workspaceDir, "app-server-processes.log");
   writerLockPath = join(workspaceDir, "writer.lock");
   const scriptPath = join(workspaceDir, "fake-codex-script.json");
@@ -168,6 +172,7 @@ it("does not install a replacement after concurrent discard maintenance settles"
 
 it("retries a resume while another Codex process is releasing the writer", async () => {
   writeFileSync(writerLockPath, String(process.pid));
+
   const stderrWrite = vi
     .spyOn(process.stderr, "write")
     .mockImplementation(() => true);

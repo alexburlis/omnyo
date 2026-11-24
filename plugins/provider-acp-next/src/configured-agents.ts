@@ -22,8 +22,10 @@ export function resolveConfiguredAcpAgents(
   const warnings: string[] = [];
   const entries: unknown[] = [];
   const trimmed = args.settingValue?.trim() ?? "";
+
   if (trimmed.length > 0) {
     let parsed: unknown;
+
     try {
       parsed = JSON.parse(trimmed);
     } catch (error) {
@@ -32,6 +34,7 @@ export function resolveConfiguredAcpAgents(
         `The ACP "customAgents" setting is not valid JSON; ignoring it: ${String(error)}`,
       );
     }
+
     if (parsed !== undefined) {
       if (Array.isArray(parsed)) {
         entries.push(...parsed);
@@ -47,6 +50,7 @@ export function resolveConfiguredAcpAgents(
     entries,
     reservedProviderIds: args.reservedProviderIds,
   });
+
   for (const problem of configured.problems) {
     warnings.push(`ACP custom agent setting: ${problem}`);
   }
@@ -54,6 +58,7 @@ export function resolveConfiguredAcpAgents(
   const shippedById = new Map(
     args.shippedAgents.map((agent) => [agent.id, agent]),
   );
+
   return {
     agents: configured.agents.map((agent) =>
       customAcpAgentDefinition(

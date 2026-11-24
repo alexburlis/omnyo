@@ -17,9 +17,11 @@ describe("host daemon startup diagnostics", () => {
   it("installs safe diagnostics before loading the daemon module", async () => {
     const source = await readHostDaemonEntrypoint();
     const installCallIndex = source.indexOf("installSafeProcessDiagnostics({");
+
     const startupImportIndex = source.indexOf(
       'import("./start-host-daemon.js")',
     );
+
     const runCallIndex = source.indexOf("runHostDaemonEntrypoint().catch");
 
     expect(installCallIndex).toBeGreaterThanOrEqual(0);
@@ -41,8 +43,8 @@ describe("host daemon startup diagnostics", () => {
   it("flushes a fatal startup failure before exiting with active resources", async () => {
     const source = await readHostDaemonEntrypoint();
 
-    expect(source).toContain(
-      "process.stderr.write(`${message}\\n`, () => process.exit(1));",
+    expect(source).toMatch(
+      /process\.stderr\.write\(`\$\{message\}\\n`, \(\) =>\s*exitAfterFlushingProcessErrorReports\(1\),?\s*\);/u,
     );
     expect(source).not.toContain("process.exitCode = 1");
   });

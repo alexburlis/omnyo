@@ -1,27 +1,30 @@
 import { getEventListeners } from "node:events";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import { z } from "zod";
 import { KNOWN_ACP_AGENTS } from "./src/known-agents.js";
 import acpProvidersPlugin from "./server.js";
 
-const PLUGIN_ID = "bb--provider-acp-next";
+const MANIFEST = z
+  .object({
+    name: z.string(),
+    omnyo: z.object({
+      branding: z.object({
+        experimental_icons: z.record(z.string(), z.string()),
+      }),
+    }),
+  })
+  .parse(
+    JSON.parse(
+      readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+    ),
+  );
+
+const PLUGIN_ID = MANIFEST.name.replace(/^omnyo-plugin-/u, "");
 
 const DECLARED_ICON_NAMES = Object.keys(
-  z
-    .object({
-      bb: z.object({
-        branding: z.object({
-          experimental_icons: z.record(z.string(), z.string()),
-        }),
-      }),
-    })
-    .parse(
-      JSON.parse(
-        readFileSync(new URL("./package.json", import.meta.url), "utf8"),
-      ),
-    ).bb.branding.experimental_icons,
+  MANIFEST.omnyo.branding.experimental_icons,
 );
 
 function customAgents(...agents: unknown[]): string {
@@ -65,11 +68,13 @@ async function loadPlugin(options: {
             ) as never,
         }),
   });
+
   host.harness.sdk.stub("hosts.list", () =>
     Promise.resolve(options.hosts ?? []),
   );
   host.harness.sdk.stub("providers.catalog", () => Promise.resolve([]));
-  await acpProvidersPlugin(host.bb);
+  await acpProvidersPlugin(host.api);
+
   return host;
 }
 
@@ -87,6 +92,22 @@ describe("the ACP plugin's registrations", () => {
     expect(registeredIds(host)).toContain("acp-amp");
   });
 
+  it("gives a configured agent from the ACP registry the registry logo it declares", async () => {
+    const host = await loadPlugin({
+      customAgents: customAgents({
+        id: "pi-acp",
+        displayName: "Pi",
+        command: "pi-acp",
+      }),
+    });
+
+    expect(
+      host.harness.registrations.providerRegistrations.find(
+        (declaration) => declaration.id === "acp-pi-acp",
+      )?.icon,
+    ).toBe(`${PLUGIN_ID}/registry-pi-acp`);
+  });
+
   it("removes a configured agent the setting no longer lists", async () => {
     const host = await loadPlugin({
       customAgents: customAgents({
@@ -95,6 +116,7 @@ describe("the ACP plugin's registrations", () => {
         command: "amp",
       }),
     });
+
     expect(registeredIds(host)).toContain("acp-amp");
 
     await host.harness.setSettings({ customAgents: "[]" });
@@ -128,9 +150,10 @@ describe("the ACP plugin's registration bookkeeping", () => {
       pluginId: PLUGIN_ID,
       experimental_declaredIconNames: DECLARED_ICON_NAMES,
     });
+
     host.harness.sdk.stub("hosts.list", () => Promise.resolve([]));
 
-    const loading = acpProvidersPlugin(host.bb);
+    const loading = acpProvidersPlugin(host.api);
     expect(registeredIds(host)).toContain("acp-cursor");
     await loading;
   });
@@ -143,9 +166,11 @@ describe("the ACP plugin's registration bookkeeping", () => {
         command: "/opt/opencode",
       }),
     });
+
     const override = host.harness.registrations.providerRegistrations.find(
       (declaration) => declaration.id === "acp-opencode",
     );
+
     expect(override?.displayName).toBe("My opencode");
     expect(override?.experimental_nativeSkillRoots?.project).toHaveLength(3);
     expect(override?.experimental_resolvesNativeRoots).toBe(true);
@@ -156,6 +181,7 @@ describe("the ACP plugin's registration bookkeeping", () => {
       const opencode = host.harness.registrations.providerRegistrations.filter(
         (declaration) => declaration.id === "acp-opencode",
       );
+
       expect(opencode).toHaveLength(1);
       expect(opencode[0]?.displayName).toBe("opencode");
     });
@@ -164,6 +190,7 @@ describe("the ACP plugin's registration bookkeeping", () => {
   it("keeps an untouched agent's registration identical across a save", async () => {
     const host = await loadPlugin({ customAgents: "[]" });
     const idsBefore = registeredIds(host);
+
     const before = host.harness.registrations.providerRegistrations.find(
       (declaration) => declaration.id === "acp-cursor",
     );
@@ -188,6 +215,7 @@ describe("the ACP plugin's registration bookkeeping", () => {
 
   it("serializes overlapping settings changes into one consistent state", async () => {
     const host = await loadPlugin({ customAgents: "[]" });
+
     const cursorBefore = host.harness.registrations.providerRegistrations.find(
       (declaration) => declaration.id === "acp-cursor",
     );
@@ -227,6 +255,7 @@ describe("the ACP plugin's capability probe", () => {
       hosts: [{ id: "host_1", status: "connected" }],
       probe: () => ({ reachable: true, fork: false }),
     });
+
     expect(forkOf(host, "acp-opencode")).toBe("tip");
 
     const run = host.harness.runService("acp-capability-probe");
@@ -237,10 +266,12 @@ describe("the ACP plugin's capability probe", () => {
 
   it("never widens a fork on an agent whose probe reports more", async () => {
     const probed: string[] = [];
+
     const host = await loadPlugin({
       hosts: [{ id: "host_1", status: "connected" }],
       probe: (command) => {
         probed.push(command);
+
         return { reachable: true, fork: true };
       },
     });
@@ -257,6 +288,7 @@ describe("the ACP plugin's capability probe", () => {
 
   it("only spawns the agents a probe answer could change", async () => {
     const probed: string[] = [];
+
     const host = await loadPlugin({
       customAgents: customAgents({
         id: "amp",
@@ -266,6 +298,7 @@ describe("the ACP plugin's capability probe", () => {
       hosts: [{ id: "host_1", status: "connected" }],
       probe: (command) => {
         probed.push(command);
+
         return { reachable: false, reason: "not installed" };
       },
     });
@@ -308,10 +341,12 @@ describe("the ACP plugin's capability probe", () => {
     const run = host.harness.runService("acp-capability-probe");
     const { signal } = run.controller;
     vi.useFakeTimers();
+
     try {
       for (let poll = 0; poll < 5; poll += 1) {
         await vi.advanceTimersByTimeAsync(5_000);
       }
+
       expect(host.harness.sdk.callsTo("hosts.list").length).toBeGreaterThan(2);
       expect(getEventListeners(signal, "abort").length).toBeLessThanOrEqual(1);
     } finally {
@@ -356,10 +391,12 @@ describe("the ACP plugin's capability probe", () => {
 
   it("probes nothing while every host is disconnected", async () => {
     const probed: string[] = [];
+
     const host = await loadPlugin({
       hosts: [{ id: "host_1", status: "disconnected" }],
       probe: (command) => {
         probed.push(command);
+
         return { reachable: false, reason: "not installed" };
       },
     });
@@ -422,6 +459,7 @@ describe("the ACP registry", () => {
   function stubRegistry(respond: () => Response | Promise<Response>) {
     const fetchMock = vi.fn(respond);
     vi.stubGlobal("fetch", fetchMock);
+
     return fetchMock;
   }
 
@@ -444,6 +482,7 @@ describe("the ACP registry", () => {
     const listed = await host.harness.callRpc("listRegistry", {
       refresh: false,
     });
+
     expect(statuses(listed)).toEqual({
       "claude-acp": "available",
       cursor: "built-in",
@@ -453,6 +492,7 @@ describe("the ACP registry", () => {
     const added = await host.harness.callRpc("addRegistryAgent", {
       id: "claude-acp",
     });
+
     expect(statuses(added)["claude-acp"]).toBe("added");
     await vi.waitFor(() =>
       expect(registeredIds(host)).toContain("acp-claude-acp"),
@@ -486,7 +526,7 @@ describe("the ACP registry", () => {
 
     await expect(
       host.harness.callRpc("addRegistryAgent", { id: "cursor" }),
-    ).rejects.toThrow("already built into bb");
+    ).rejects.toThrow("already built into Omnyo");
     await expect(
       host.harness.callRpc("addRegistryAgent", { id: "native-only" }),
     ).rejects.toThrow("only as a downloadable binary");
@@ -502,15 +542,18 @@ describe("the ACP registry", () => {
 
   it("serves the saved copy with the reason when the registry cannot be reached, and says so when there is none", async () => {
     let online = true;
+
     const fetchMock = stubRegistry(() =>
       online
         ? Response.json(REGISTRY_DOCUMENT)
         : new Response("down", { status: 503 }),
     );
+
     const host = await loadPlugin({});
     await host.harness.callRpc("listRegistry", { refresh: false });
 
     online = false;
+
     const stale = (await host.harness.callRpc("listRegistry", {
       refresh: true,
     })) as {
@@ -518,6 +561,7 @@ describe("the ACP registry", () => {
       fetchedAt: number | null;
       agents: unknown[];
     };
+
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(stale.error).toBe("The ACP registry answered 503.");
     expect(stale.fetchedAt).not.toBeNull();

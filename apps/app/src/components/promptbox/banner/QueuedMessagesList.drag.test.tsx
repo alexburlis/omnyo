@@ -2,8 +2,8 @@
 
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ThreadQueuedMessage } from "@bb/domain";
-import { makeThreadQueuedMessage } from "@bb/test-helpers/domain-fixtures";
+import type { ThreadQueuedMessage } from "@omnyo/domain";
+import { makeThreadQueuedMessage } from "@omnyo/test-helpers/domain-fixtures";
 import { QueuedMessagesList } from "./QueuedMessagesList";
 
 const noop = () => {};
@@ -28,11 +28,13 @@ afterEach(() => {
 describe("QueuedMessagesList group-handle drag", () => {
   it("drags the zero-height group handle to a measured row stroke", async () => {
     const onSetGroupBoundary = vi.fn();
+
     const queuedMessages = [
       makeQueuedMessage("q_one", "First queued message"),
       makeQueuedMessage("q_two", "Second queued message"),
       makeQueuedMessage("q_three", "Third queued message"),
     ];
+
     const { container, getByLabelText } = render(
       <QueuedMessagesList
         attachedToComposer={true}
@@ -51,16 +53,21 @@ describe("QueuedMessagesList group-handle drag", () => {
         onExpandedChange={noop}
       />,
     );
+
     const rows = container.querySelectorAll<HTMLElement>(
       "[data-queued-message-row]",
     );
+
     const divider = container.querySelector<HTMLElement>(
       "[data-queued-message-group-divider]",
     );
+
     const list = container.querySelector<HTMLElement>("ul");
+
     const scroll = container.querySelector<HTMLElement>(
       "[data-queued-messages-scroll]",
     );
+
     expect(divider).not.toBeNull();
     expect(list).not.toBeNull();
     expect(scroll).not.toBeNull();
@@ -70,6 +77,7 @@ describe("QueuedMessagesList group-handle drag", () => {
       rect({ top: 40, bottom: 72 }),
       rect({ top: 72, bottom: 112 }),
     ];
+
     rows.forEach((row, index) => {
       row.getBoundingClientRect = () => measuredRects[index]!;
     });

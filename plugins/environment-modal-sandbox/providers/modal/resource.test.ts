@@ -14,10 +14,12 @@ it("drops obsolete expiration metadata while retaining current snapshot recovery
     cpu: 2,
     memoryMiB: 8192,
   };
+
   expect(readModalMachineResource({ ...resource, expiresAt: 123 })).toEqual(
     resource,
   );
   expect(readModalMachineResource(resource)).toEqual(resource);
+
   for (const field of [
     "imageId",
     "accountIdentity",
@@ -30,6 +32,7 @@ it("drops obsolete expiration metadata while retaining current snapshot recovery
     delete incomplete[field as keyof typeof incomplete];
     expect(() => readModalMachineResource(incomplete)).toThrow();
   }
+
   expect(readModalMachineResource({ ...resource, version: 5 })).toEqual(
     resource,
   );

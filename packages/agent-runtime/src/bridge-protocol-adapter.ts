@@ -3,8 +3,8 @@ import type {
   ProviderCapabilities,
   ProviderFork,
   ThreadEvent,
-} from "@bb/domain";
-import { PROVIDER_FORK_VALUES } from "@bb/domain";
+} from "@omnyo/domain";
+import { PROVIDER_FORK_VALUES } from "@omnyo/domain";
 import {
   BRIDGE_INBOUND_REQUEST_METHODS,
   BRIDGE_NOTIFICATION_METHODS,
@@ -21,12 +21,11 @@ import {
   threadDeltaNotificationParamsSchema,
   threadIdentityNotificationSchema,
   type BridgeCapabilities,
-} from "@bb/provider-bridge-protocol";
+} from "@omnyo/provider-bridge-protocol";
 import {
   ASSEMBLER_GRAMMAR_VERSIONS,
   createDeltaAssembler,
-} from "@bb/provider-bridge-protocol/assembler";
-import { z } from "zod";
+} from "@omnyo/provider-bridge-protocol/assembler";
 import type {
   AdapterCommand,
   ProviderExecutionContext,
@@ -40,8 +39,8 @@ import type {
   ProviderPostInitializeRequest,
   ProviderRuntimeEvent,
   BuildInteractiveResponseArgs,
-} from "@bb/provider-bridge-protocol/bridge-kit";
-import { decodeNormalizedProviderToolCallRequest } from "@bb/provider-bridge-protocol/bridge-kit";
+} from "@omnyo/provider-bridge-protocol/bridge-kit";
+import { decodeNormalizedProviderToolCallRequest } from "@omnyo/provider-bridge-protocol/bridge-kit";
 import { parseAvailableModelList } from "./shared/available-models.js";
 import type { AgentRuntimeProviderRecoveryHint } from "./types.js";
 
@@ -97,10 +96,6 @@ interface BridgeProtocolAdapterOptions {
   staticProviderOptions?: Record<string, unknown>;
 }
 
-const providerNativeIdsParamsSchema = z
-  .object({ providerNativeIds: z.boolean().optional() })
-  .passthrough();
-
 function toBridgeWireOptions(
   options: ProviderExecutionContext,
   staticProviderOptions?: Record<string, unknown>,
@@ -118,10 +113,12 @@ function toBridgeWireOptions(
     approvalReviewer,
     permissionEscalation,
   } = options;
+
   const providerOptions = {
     ...staticProviderOptions,
     ...options.providerOptions,
   };
+
   return {
     ...(model !== undefined ? { model } : {}),
     ...(serviceTier !== undefined ? { serviceTier } : {}),
@@ -143,16 +140,19 @@ export function createBridgeProtocolAdapter(
 ): BridgeProtocolAdapter {
   let handshake: BridgeCapabilities = bridgeCapabilitiesSchema.parse({});
   const { fork: declaredFork, ...declaredCapabilities } = options.capabilities;
+
   const capabilities: BridgeEnforcedCapabilities = {
     ...declaredCapabilities,
     supportsFork: declaredFork !== "none",
   };
+
   function effectiveFork(): ProviderFork {
     return PROVIDER_FORK_VALUES.indexOf(handshake.fork) <
       PROVIDER_FORK_VALUES.indexOf(declaredFork)
       ? handshake.fork
       : declaredFork;
   }
+
   const deltaAssembler = createDeltaAssembler({ providerId: options.id });
 
   function gate(
@@ -162,6 +162,7 @@ export function createBridgeProtocolAdapter(
     if (handshake[capability] === true) {
       return plan;
     }
+
     return { kind: "noop", reason: `${capability} not advertised` };
   }
 
@@ -206,7 +207,12 @@ export function createBridgeProtocolAdapter(
           return {
             kind: "request",
             method: BRIDGE_REQUEST_METHODS.modelList,
-            params: cwdAndStaticProviderOptions(command.cwd),
+            params: {
+              ...cwdAndStaticProviderOptions(command.cwd),
+              ...(command.envVars !== undefined
+                ? { envVars: command.envVars }
+                : {}),
+            },
           };
         case "provider/health":
           return {
@@ -253,6 +259,7 @@ export function createBridgeProtocolAdapter(
           if (!handshake.skills.configure) {
             return { kind: "noop", reason: "skills.configure not advertised" };
           }
+
           return {
             kind: "request",
             method: BRIDGE_REQUEST_METHODS.skillsConfigure,
@@ -281,11 +288,13 @@ export function createBridgeProtocolAdapter(
           };
         case "thread/fork": {
           const fork = effectiveFork();
+
           if (fork === "none") {
             throw new Error(
               `Provider "${options.id}" does not support forking a thread`,
             );
           }
+
           if (
             fork === "tip" &&
             command.sourceProviderCheckpointId !== undefined
@@ -294,6 +303,7 @@ export function createBridgeProtocolAdapter(
               `Provider "${options.id}" can only fork at the end of a session, not from an earlier point in it`,
             );
           }
+
           return {
             kind: "request",
             method: BRIDGE_REQUEST_METHODS.threadFork,
@@ -311,6 +321,7 @@ export function createBridgeProtocolAdapter(
             },
           };
         }
+
         case "turn/start":
           return {
             kind: "request",
@@ -400,6 +411,16 @@ export function createBridgeProtocolAdapter(
               providerThreadId: command.providerThreadId,
             },
           });
+        case "thread/speed/set":
+          return {
+            kind: "request",
+            method: BRIDGE_REQUEST_METHODS.threadSpeedSet,
+            params: {
+              threadId: command.threadId,
+              providerThreadId: command.providerThreadId,
+              serviceTier: command.serviceTier,
+            },
+          };
         case "thread/goal/clear":
           return gate("threadGoalClear", {
             kind: "request",
@@ -421,12 +442,13 @@ export function createBridgeProtocolAdapter(
             method: BRIDGE_REQUEST_METHODS.initialize,
             params: {
               protocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
-              client: { name: "bb", version: "1.0.0" },
+              client: { name: "omnyo", version: "1.0.0" },
               grammarVersions: ASSEMBLER_GRAMMAR_VERSIONS,
             },
           },
           onResult(result) {
             const parsed = initializeResultSchema.safeParse(result);
+
             if (!parsed.success) {
               throw new Error(
                 `Provider bridge "${options.id}" answered initialize with a malformed result (${parsed.error.issues
@@ -436,6 +458,7 @@ export function createBridgeProtocolAdapter(
                   )}). The bridge and this runtime cannot negotiate a handshake; update or fix the "${options.id}" provider plugin.`,
               );
             }
+
             if (
               parsed.data.protocolVersion !== PROVIDER_BRIDGE_PROTOCOL_VERSION
             ) {
@@ -443,18 +466,22 @@ export function createBridgeProtocolAdapter(
                 `Provider bridge "${options.id}" speaks Provider Bridge Protocol version ${parsed.data.protocolVersion}, but this runtime requires version ${PROVIDER_BRIDGE_PROTOCOL_VERSION}. Update the "${options.id}" provider plugin to a build published for protocol version ${PROVIDER_BRIDGE_PROTOCOL_VERSION}.`,
               );
             }
+
             const grammarVersion = negotiateGrammarVersion(
               ASSEMBLER_GRAMMAR_VERSIONS,
               parsed.data.capabilities.grammarVersions,
             );
+
             if (grammarVersion === null) {
               const [bridgeMin, bridgeMax] =
                 parsed.data.capabilities.grammarVersions;
+
               const [runtimeMin, runtimeMax] = ASSEMBLER_GRAMMAR_VERSIONS;
               throw new Error(
-                `Provider bridge "${options.id}" speaks thread/delta grammar versions ${bridgeMin}-${bridgeMax}, but this runtime assembles versions ${runtimeMin}-${runtimeMax}. Update the "${options.id}" provider plugin or bb so the two ranges overlap.`,
+                `Provider bridge "${options.id}" speaks thread/delta grammar versions ${bridgeMin}-${bridgeMax}, but this runtime assembles versions ${runtimeMin}-${runtimeMax}. Update the "${options.id}" provider plugin or Omnyo so the two ranges overlap.`,
               );
             }
+
             handshake = parsed.data.capabilities;
           },
         },
@@ -465,23 +492,29 @@ export function createBridgeProtocolAdapter(
 
     translateEvent(event: ProviderRuntimeEvent): ThreadEvent[] {
       const method = event.method;
+
       if (method === THREAD_DELTA_NOTIFICATION_METHOD) {
         const parsed = threadDeltaNotificationParamsSchema.safeParse(
           event.params,
         );
+
         if (!parsed.success) {
           return [];
         }
+
         return deltaAssembler.assemble({
           threadId: parsed.data.threadId,
           deltas: parsed.data.deltas,
         });
       }
+
       if (method === BRIDGE_NOTIFICATION_METHODS.threadIdentity) {
         const parsed = threadIdentityNotificationSchema.safeParse(event.params);
+
         if (!parsed.success) {
           return [];
         }
+
         return [
           {
             type: "thread/identity",
@@ -491,10 +524,12 @@ export function createBridgeProtocolAdapter(
           },
         ];
       }
+
       if (method === BRIDGE_NOTIFICATION_METHODS.sessionReplaced) {
         const parsed = sessionReplacedNotificationSchema.safeParse(
           event.params,
         );
+
         if (
           !parsed.success ||
           parsed.data.providerThreadId === null ||
@@ -502,6 +537,7 @@ export function createBridgeProtocolAdapter(
         ) {
           return [];
         }
+
         if (!parsed.data.contextLost) {
           return [
             {
@@ -514,6 +550,7 @@ export function createBridgeProtocolAdapter(
             },
           ];
         }
+
         return [
           {
             type: "provider/warning",
@@ -527,8 +564,10 @@ export function createBridgeProtocolAdapter(
           },
         ];
       }
+
       if (method === BRIDGE_NOTIFICATION_METHODS.error) {
         const parsed = errorNotificationSchema.safeParse(event.params);
+
         if (
           !parsed.success ||
           parsed.data.threadId === undefined ||
@@ -536,6 +575,7 @@ export function createBridgeProtocolAdapter(
         ) {
           return [];
         }
+
         return [
           {
             type: "provider/warning",
@@ -547,6 +587,7 @@ export function createBridgeProtocolAdapter(
           },
         ];
       }
+
       return [];
     },
 
@@ -556,10 +597,13 @@ export function createBridgeProtocolAdapter(
       if (event.method !== BRIDGE_NOTIFICATION_METHODS.providerRecovery) {
         return null;
       }
+
       const parsed = providerRecoveryNotificationSchema.safeParse(event.params);
+
       if (!parsed.success) {
         return null;
       }
+
       return {
         ...(parsed.data.threadId === undefined
           ? {}
@@ -576,31 +620,26 @@ export function createBridgeProtocolAdapter(
       if (typeof request.id !== "string" && typeof request.id !== "number") {
         return null;
       }
+
       const decoded = decodeNormalizedProviderToolCallRequest(
         request.id,
         request.method,
         request.params,
       );
-      if (decoded === null) {
+
+      if (decoded === null || decoded.threadId === undefined) {
         return decoded;
       }
-      const marker = providerNativeIdsParamsSchema.safeParse(request.params);
-      if (
-        marker.success !== true ||
-        marker.data.providerNativeIds !== true ||
-        decoded.threadId === undefined
-      ) {
-        return decoded;
-      }
+
       return {
         ...decoded,
         turnId:
           decoded.turnId === null
             ? null
-            : (deltaAssembler.getBbTurnId(decoded.threadId, decoded.turnId) ??
+            : (deltaAssembler.getAppTurnId(decoded.threadId, decoded.turnId) ??
               decoded.turnId),
         callId:
-          deltaAssembler.getBbItemId(decoded.threadId, decoded.callId) ??
+          deltaAssembler.getAppItemId(decoded.threadId, decoded.callId) ??
           decoded.callId,
       };
     },
@@ -614,30 +653,36 @@ export function createBridgeProtocolAdapter(
       ) {
         return null;
       }
+
       const parsed = interactionRequestParamsSchema.safeParse(request.params);
+
       if (!parsed.success) {
         return null;
       }
-      const { providerNativeIds, threadId, ...decoded } = parsed.data;
+
+      const { threadId, ...decoded } = parsed.data;
       let turnId = decoded.turnId;
       let payload = decoded.payload;
-      if (providerNativeIds === true && threadId !== undefined) {
+
+      if (threadId !== undefined) {
         turnId =
           turnId === null
             ? null
-            : (deltaAssembler.getBbTurnId(threadId, turnId) ?? turnId);
+            : (deltaAssembler.getAppTurnId(threadId, turnId) ?? turnId);
+
         if (payload.kind === "approval") {
           payload = {
             ...payload,
             subject: {
               ...payload.subject,
               itemId:
-                deltaAssembler.getBbItemId(threadId, payload.subject.itemId) ??
+                deltaAssembler.getAppItemId(threadId, payload.subject.itemId) ??
                 payload.subject.itemId,
             },
           };
         }
       }
+
       return {
         requestId: request.id,
         method: request.method,
@@ -651,7 +696,7 @@ export function createBridgeProtocolAdapter(
     buildInteractiveResponse(
       args: BuildInteractiveResponseArgs,
     ): ProviderInteractiveResponse {
-      return args.resolution as unknown as ProviderInteractiveResponse;
+      return args.resolution as ProviderInteractiveResponse;
     },
   };
 

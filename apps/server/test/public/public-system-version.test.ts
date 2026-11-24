@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SystemVersionResponse } from "@bb/server-contract";
+import type { SystemVersionResponse } from "@omnyo/server-contract";
 import { readJson } from "../helpers/json.js";
 import { withTestHarness } from "../helpers/test-app.js";
 
@@ -24,7 +24,7 @@ describe("GET /api/v1/system/version", () => {
           source: "npm",
           updateAvailable: false,
           isDevelopment: true,
-          upgradeCommand: "npx bb-app@latest",
+          upgradeCommand: "npx omnyo-app@latest",
         }),
         isDevelopment: true,
       },

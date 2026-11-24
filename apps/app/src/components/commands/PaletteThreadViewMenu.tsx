@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
-import { Button } from "@bb/shared-ui/button";
-import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
-import { Icon } from "@bb/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
+import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
+import { Icon } from "@omnyo/shared-ui/icon";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,7 +10,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@bb/shared-ui/dropdown-menu";
+} from "@omnyo/shared-ui/dropdown-menu";
 import {
   ThreadLifecycleFilterItems,
   threadLifecycleFilterLabel,
@@ -54,12 +54,14 @@ export function PaletteThreadViewMenu({
   const isPointerCoarse = usePointerCoarse();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [sideOffset, setSideOffset] = useState(MENU_GAP_PX);
+
   return (
     <DropdownMenu
       modal={false}
       onOpenChange={(open) => {
         const trigger = triggerRef.current;
         const palette = trigger?.closest("[role=dialog]");
+
         if (!open || isPointerCoarse || !trigger || !palette) return;
         setSideOffset(
           palette.getBoundingClientRect().right -
@@ -110,12 +112,14 @@ export function PaletteThreadViewMenu({
             const selected = option.value === sort;
             const reversible = option.value !== "relevance";
             const direction = selected ? sortDirection : "descending";
+
             const nextDirection =
               selected && reversible
                 ? direction === "ascending"
                   ? "descending"
                   : "ascending"
                 : "descending";
+
             return (
               <DropdownMenuItem
                 key={option.value}

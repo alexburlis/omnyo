@@ -14,14 +14,44 @@ import {
 import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import { registerProjectCommands } from "../../commands/project.js";
 
-describe("bb project command output", () => {
+describe("omnyo project command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
     registerProjectCommands(program, () => "http://server");
 
+  it("prints prepared command state without requesting a complete discovery", async () => {
+    const snapshot = { state: "preparing", commands: [] };
+    const get = vi.fn(async () => snapshot);
+    stubServerApi({ "v1.projects.:id.command-catalog.$get": get });
+
+    await runCommand(
+      [
+        "project",
+        "commands",
+        "project-1",
+        "--provider",
+        "pi",
+        "--environment",
+        "environment-1",
+        "--snapshot",
+        "--json",
+      ],
+      register,
+    );
+
+    expect(get).toHaveBeenCalledWith({
+      param: { id: "project-1" },
+      query: { provider: "pi", environmentId: "environment-1" },
+    });
+    expect(
+      JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])),
+    ).toEqual(snapshot);
+  });
+
   it("lists recently used repos on the local machine and notes a partial scan", async () => {
     resolveLocalHostIdMock.mockResolvedValue("host-local");
+
     const get = vi.fn(async () => ({
       repos: [
         {
@@ -41,6 +71,7 @@ describe("bb project command output", () => {
       ],
       truncated: true,
     }));
+
     stubServerApi({ "v1.hosts.:id.discovered-repos.$get": get });
 
     await runCommand(["project", "discover"], register);
@@ -74,8 +105,41 @@ describe("bb project command output", () => {
     ]);
   });
 
+  it("retains explicit source-project attachments for another project's thread", async () => {
+    const retain = vi.fn(async () => ({ ok: true }));
+    stubServerApi({ "v1.projects.:id.attachments.retain.$post": retain });
+
+    await runCommand(
+      [
+        "project",
+        "attachment",
+        "retain",
+        "image-project",
+        "owner-thread",
+        "result.png",
+        "before.png",
+        "--json",
+      ],
+      register,
+    );
+
+    expect(retain).toHaveBeenCalledWith({
+      param: { id: "image-project" },
+      json: { threadId: "owner-thread", paths: ["result.png", "before.png"] },
+    });
+    expect(
+      JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])),
+    ).toEqual({
+      ok: true,
+      projectId: "image-project",
+      threadId: "owner-thread",
+      paths: ["result.png", "before.png"],
+    });
+  });
+
   it("uploads binary bytes read on a remote CLI machine with explicit metadata", async () => {
-    const clientDir = await mkdtemp(join(tmpdir(), "bb-cli-attachment-"));
+    const clientDir = await mkdtemp(join(tmpdir(), "omnyo-cli-attachment-"));
+
     try {
       const clientPath = join(clientDir, "payload.bin");
       const bytes = new Uint8Array([0, 255, 1, 128, 42]);
@@ -83,12 +147,13 @@ describe("bb project command output", () => {
       let request: Request | undefined;
       vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
         request = new Request(input, init);
+
         return new Response(
           JSON.stringify({
             type: "localFile",
             path: "payload-uploaded.bin",
             name: "renamed.bin",
-            mimeType: "application/x-bb-test",
+            mimeType: "application/x-omnyo-test",
             sizeBytes: bytes.byteLength,
           }),
           {
@@ -109,7 +174,7 @@ describe("bb project command output", () => {
           "--filename",
           "renamed.bin",
           "--mime-type",
-          "application/x-bb-test",
+          "application/x-omnyo-test",
           "--json",
         ],
         register,
@@ -121,11 +186,13 @@ describe("bb project command output", () => {
       const form = await request?.formData();
       const file = form?.get("file");
       expect(file).toBeInstanceOf(File);
+
       if (!(file instanceof File)) {
         throw new Error("Expected multipart attachment file");
       }
+
       expect(file.name).toBe("renamed.bin");
-      expect(file.type).toBe("application/x-bb-test");
+      expect(file.type).toBe("application/x-omnyo-test");
       expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes);
       expect(
         JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])),
@@ -133,7 +200,7 @@ describe("bb project command output", () => {
         type: "localFile",
         path: "payload-uploaded.bin",
         name: "renamed.bin",
-        mimeType: "application/x-bb-test",
+        mimeType: "application/x-omnyo-test",
         sizeBytes: bytes.byteLength,
       });
     } finally {
@@ -142,16 +209,19 @@ describe("bb project command output", () => {
   });
 
   it("downloads attachment bytes to an explicit client-local path", async () => {
-    const clientDir = await mkdtemp(join(tmpdir(), "bb-cli-attachment-"));
+    const clientDir = await mkdtemp(join(tmpdir(), "omnyo-cli-attachment-"));
+
     try {
       const outputPath = join(clientDir, "downloaded.bin");
       const bytes = new Uint8Array([3, 2, 1, 0, 255]);
+
       const get = vi.fn(
         async () =>
           new Response(bytes, {
             headers: { "content-type": "application/octet-stream" },
           }),
       );
+
       stubServerApi({ "v1.projects.:id.attachments.content.$get": get });
 
       await runCommand(
@@ -187,7 +257,8 @@ describe("bb project command output", () => {
   });
 
   it("prints the server attachment limit envelope without rewriting it", async () => {
-    const clientDir = await mkdtemp(join(tmpdir(), "bb-cli-attachment-"));
+    const clientDir = await mkdtemp(join(tmpdir(), "omnyo-cli-attachment-"));
+
     try {
       const clientPath = join(clientDir, "huge.png");
       await writeFile(clientPath, new Uint8Array([1]));
@@ -225,7 +296,7 @@ describe("bb project command output", () => {
     }
   });
 
-  it("bb project list --json prints raw projects", async () => {
+  it("omnyo project list --json prints raw projects", async () => {
     const projects = [
       {
         id: "proj-1",
@@ -234,6 +305,7 @@ describe("bb project command output", () => {
         updatedAt: 2,
       },
     ];
+
     const get = vi.fn(async () => projects);
     stubServerApi({ "v1.projects.$get": get });
 
@@ -245,7 +317,7 @@ describe("bb project command output", () => {
     expect(get).toHaveBeenCalledWith({ query: {} });
   });
 
-  it("bb project list can include the personal project", async () => {
+  it("omnyo project list can include the personal project", async () => {
     const projects = [{ id: "proj_personal", name: "Personal" }];
     const get = vi.fn(async () => projects);
     stubServerApi({ "v1.projects.$get": get });
@@ -263,7 +335,7 @@ describe("bb project command output", () => {
     ).toEqual(projects);
   });
 
-  it("bb project branches waits for remote refs implicitly", async () => {
+  it("omnyo project branches waits for remote refs implicitly", async () => {
     const branches = { branches: ["main"], remoteBranches: ["origin/main"] };
     const get = vi.fn(async () => branches);
     stubServerApi({ "v1.projects.:id.branches.$get": get });
@@ -282,7 +354,7 @@ describe("bb project command output", () => {
     ).toEqual(branches);
   });
 
-  it("bb project list renders the shared borderless table", async () => {
+  it("omnyo project list renders the shared borderless table", async () => {
     const projects = [
       {
         id: "proj-1",
@@ -294,6 +366,7 @@ describe("bb project command output", () => {
         updatedAt: 2,
       },
     ];
+
     const get = vi.fn(async () => projects);
     stubServerApi({ "v1.projects.$get": get });
 
@@ -306,11 +379,12 @@ describe("bb project command output", () => {
     ]);
   });
 
-  it("bb project files resolves a machine name and prints JSON", async () => {
+  it("omnyo project files resolves a machine name and prints JSON", async () => {
     const getFiles = vi.fn(async () => ({
       files: [{ name: "remote.txt", path: "remote.txt" }],
       truncated: false,
     }));
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [
         {
@@ -342,7 +416,7 @@ describe("bb project command output", () => {
     });
   });
 
-  it("bb project content routes by environment and prints the portable DTO as JSON", async () => {
+  it("omnyo project content routes by environment and prints the portable DTO as JSON", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response("environment text", {
         headers: { "content-type": "text/plain" },
@@ -375,7 +449,7 @@ describe("bb project command output", () => {
     });
   });
 
-  it("bb project discovery rejects simultaneous machine and environment selectors", async () => {
+  it("omnyo project discovery rejects simultaneous machine and environment selectors", async () => {
     await expect(
       runCommand(
         [
@@ -396,13 +470,14 @@ describe("bb project command output", () => {
     );
   });
 
-  it("bb project create --json prints the created project", async () => {
+  it("omnyo project create --json prints the created project", async () => {
     const created = {
       id: "proj-created",
       name: "Alpha",
       createdAt: 1,
       updatedAt: 2,
     };
+
     const post = vi.fn(async () => created);
     stubServerApi({ "v1.projects.$post": post });
 
@@ -439,7 +514,7 @@ describe("bb project command output", () => {
     ["machine name", "--machine", "builder"],
     ["host alias", "--host", "host-remote"],
   ])(
-    "bb project create binds a local path through an explicit %s",
+    "omnyo project create binds a local path through an explicit %s",
     async (_selectorKind, selectorFlag, selector) => {
       const post = vi.fn(async () => ({
         id: "proj-created",
@@ -447,6 +522,7 @@ describe("bb project command output", () => {
         createdAt: 1,
         updatedAt: 2,
       }));
+
       stubServerApi({
         "v1.hosts.$get": vi.fn(async () => [
           {
@@ -490,7 +566,7 @@ describe("bb project command output", () => {
     },
   );
 
-  it("bb project create rejects simultaneous machine and host selectors", async () => {
+  it("omnyo project create rejects simultaneous machine and host selectors", async () => {
     await expect(
       runCommand(
         [
@@ -526,6 +602,7 @@ describe("bb project command output", () => {
         updatedAt: 1,
       },
     ];
+
     stubServerApi({ "v1.hosts.$get": vi.fn(async () => hosts) });
 
     await expect(
@@ -568,7 +645,7 @@ describe("bb project command output", () => {
     );
   });
 
-  it("bb project source add targets an unambiguous machine name", async () => {
+  it("omnyo project source add targets an unambiguous machine name", async () => {
     const post = vi.fn(async () => ({
       id: "source-remote",
       projectId: "proj-1",
@@ -579,6 +656,7 @@ describe("bb project command output", () => {
       createdAt: 1,
       updatedAt: 1,
     }));
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [
         {
@@ -618,7 +696,7 @@ describe("bb project command output", () => {
     });
   });
 
-  it("bb project source add supports clone options through the --host alias", async () => {
+  it("omnyo project source add supports clone options through the --host alias", async () => {
     const post = vi.fn(async () => ({
       id: "source-clone",
       projectId: "proj-1",
@@ -629,6 +707,7 @@ describe("bb project command output", () => {
       createdAt: 1,
       updatedAt: 1,
     }));
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [
         {
@@ -671,7 +750,7 @@ describe("bb project command output", () => {
     });
   });
 
-  it("bb project source add rejects clone-only options without --clone", async () => {
+  it("omnyo project source add rejects clone-only options without --clone", async () => {
     await expect(
       runCommand(
         [
@@ -692,7 +771,7 @@ describe("bb project command output", () => {
     expect(resolveLocalHostIdMock).not.toHaveBeenCalled();
   });
 
-  it("bb project source update patches the existing source type", async () => {
+  it("omnyo project source update patches the existing source type", async () => {
     const get = vi.fn(async () => ({
       createdAt: 1,
       id: "proj-1",
@@ -711,6 +790,7 @@ describe("bb project command output", () => {
       ],
       updatedAt: 2,
     }));
+
     const patch = vi.fn(async () => ({
       createdAt: 1,
       hostId: "host-test-001",
@@ -721,6 +801,7 @@ describe("bb project command output", () => {
       type: "local_path",
       updatedAt: 3,
     }));
+
     stubServerApi({
       "v1.projects.:id.$get": get,
       "v1.projects.:id.sources.:sourceId.$patch": patch,
@@ -758,7 +839,7 @@ describe("bb project command output", () => {
     );
   });
 
-  it("bb project source delete deletes without prompting when --yes is passed", async () => {
+  it("omnyo project source delete deletes without prompting when --yes is passed", async () => {
     const del = vi.fn(async () => ({ ok: true }));
     stubServerApi({ "v1.projects.:id.sources.:sourceId.$delete": del });
 

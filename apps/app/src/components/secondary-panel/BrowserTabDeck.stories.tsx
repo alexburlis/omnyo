@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { BbDesktopBrowserState } from "@bb/desktop-contract";
+import type { OmnyoDesktopBrowserState } from "@omnyo/desktop-contract";
 import {
   getBrowserHistoryStorageKey,
   type BrowserHistoryEntry,
@@ -7,7 +7,7 @@ import {
 import type { BrowserFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 import { WithDesktopBrowser } from "../../../.ladle/story-desktop";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { BrowserTabDeck } from "./BrowserTabDeck";
 import {
   ThreadSecondaryPanel,
@@ -21,8 +21,11 @@ export default {
 const noop = () => {};
 
 const EMPTY_TAB_THREAD_ID = "thr_browser_tab_empty_story";
+
 const NARROW_TAB_THREAD_ID = "thr_browser_tab_narrow_story";
+
 const RECENTS_TAB_THREAD_ID = "thr_browser_tab_recents_story";
+
 const LOADING_TAB_THREAD_ID = "thr_browser_tab_loading_story";
 
 function makeBrowserTab(id: string): BrowserFixedPanelTab {
@@ -30,8 +33,11 @@ function makeBrowserTab(id: string): BrowserFixedPanelTab {
 }
 
 const EMPTY_TAB = makeBrowserTab("browser:empty");
+
 const NARROW_TAB = makeBrowserTab("browser:narrow");
+
 const RECENTS_TAB = makeBrowserTab("browser:recents");
+
 const LOADING_TAB: BrowserFixedPanelTab = {
   environmentId: null,
   id: "browser:loading",
@@ -39,7 +45,8 @@ const LOADING_TAB: BrowserFixedPanelTab = {
   title: "Example Docs",
   url: "https://example.com/docs",
 };
-const LOADING_BROWSER_STATE: BbDesktopBrowserState = {
+
+const LOADING_BROWSER_STATE: OmnyoDesktopBrowserState = {
   tabId: LOADING_TAB.id,
   url: LOADING_TAB.url,
   title: LOADING_TAB.title,
@@ -79,11 +86,15 @@ function seedBrowserHistory(
   if (typeof window === "undefined") {
     return;
   }
+
   const storageKey = getBrowserHistoryStorageKey(threadId);
+
   if (entries.length === 0) {
     window.localStorage.removeItem(storageKey);
+
     return;
   }
+
   window.localStorage.setItem(storageKey, JSON.stringify(entries));
 }
 
@@ -115,6 +126,7 @@ interface BrowserTabStageProps {
 
 function BrowserTabStage({ tab, threadId, width }: BrowserTabStageProps) {
   const label = tab.title ?? "Browser";
+
   const panelTabs: SecondaryPanelRenderableTab[] = [
     {
       label: label,
@@ -165,6 +177,7 @@ export function Overview() {
   seedBrowserHistory(EMPTY_TAB_THREAD_ID, []);
   seedBrowserHistory(NARROW_TAB_THREAD_ID, []);
   seedBrowserHistory(RECENTS_TAB_THREAD_ID, RECENT_VISITS);
+
   return (
     <WithDesktopBrowser browserState={LOADING_BROWSER_STATE}>
       <StoryCard>
@@ -195,6 +208,43 @@ export function Overview() {
           hint="the persistent navigation toolbar replaces Reload with Stop while the page is loading"
         >
           <BrowserTabStage tab={LOADING_TAB} threadId={LOADING_TAB_THREAD_ID} />
+        </StoryRow>
+      </StoryCard>
+    </WithDesktopBrowser>
+  );
+}
+
+const ERROR_TAB_THREAD_ID = "thr_browser_tab_error_story";
+
+const ERROR_TAB: BrowserFixedPanelTab = {
+  environmentId: null,
+  id: "browser:error",
+  kind: "browser",
+  title: null,
+  url: "http://localhost:5173/",
+};
+
+const ERROR_BROWSER_STATE: OmnyoDesktopBrowserState = {
+  tabId: ERROR_TAB.id,
+  url: ERROR_TAB.url,
+  title: null,
+  isLoading: false,
+  canGoBack: false,
+  canGoForward: false,
+  errorText: "net::ERR_CONNECTION_REFUSED",
+};
+
+export function PageLoadError() {
+  seedBrowserHistory(ERROR_TAB_THREAD_ID, []);
+
+  return (
+    <WithDesktopBrowser browserState={ERROR_BROWSER_STATE}>
+      <StoryCard>
+        <StoryRow
+          label="local server unreachable"
+          hint="press Reload or Open externally to see the button press; Tab to see their focus rings"
+        >
+          <BrowserTabStage tab={ERROR_TAB} threadId={ERROR_TAB_THREAD_ID} />
         </StoryRow>
       </StoryCard>
     </WithDesktopBrowser>

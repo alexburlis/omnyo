@@ -1,15 +1,19 @@
 import { eq } from "drizzle-orm";
 import {
   closeSession,
+  getHost,
+  getSessionById,
   hostDaemonSessions,
   listActiveHostThreads,
   listHostThreadIds,
   type HostDaemonSessionRow,
-} from "@bb/db";
+} from "@omnyo/db";
 import type {
   HostDaemonActiveThread,
+  HostDaemonInteractiveRequestKey,
+  HostDaemonOpenThreadWork,
   HostDaemonSessionCloseReason,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { HOST_RECONNECT_GRACE_MS, LEASE_TIMEOUT_MS } from "../constants.js";
 import type {
   AppDeps,
@@ -18,27 +22,39 @@ import type {
 import {
   interruptActiveThreadsForHost,
   reconcileDaemonReportedThreads,
+  resendStopsAwaitingDaemon,
 } from "../services/threads/thread-lifecycle.js";
 import { buildThreadStatusChangeMetadataByThreadId } from "../services/threads/thread-runtime-display.js";
 import { settleDanglingBackgroundTasks } from "../services/threads/background-task-reconciliation.js";
+import {
+  reconcileDaemonReportedOpenWork,
+  redeliverSavedAnswersToUnreportingDaemon,
+} from "../services/threads/open-work-reconciliation.js";
 import { interruptEnvironmentProvisioningForHost } from "../services/environments/environment-engine.js";
+import { enforceHostAway } from "../services/hosts/availability.js";
 
 const DAEMON_RESTARTED_PENDING_INTERACTION_REASON =
   "Host daemon restarted while awaiting user interaction; retry the thread to continue";
+
 const DAEMON_DISCONNECTED_PENDING_INTERACTION_REASON =
   "Host daemon disconnected while awaiting user interaction; retry the thread to continue";
+
 const DAEMON_RESTARTED_ENVIRONMENT_PROVISIONING_REASON =
   "Host daemon restarted while preparing the workspace. Retry provisioning to continue.";
+
 const DAEMON_DISCONNECTED_ENVIRONMENT_PROVISIONING_REASON =
   "The connection to the host was lost while preparing the workspace. Retry provisioning to continue.";
 
 type HostSessionOpenedDeps = LoggedPendingInteractionWorkSessionDeps;
+
 type DaemonSocketClosedDeps = LoggedPendingInteractionWorkSessionDeps &
   Pick<AppDeps, "sharedPorts">;
+
 type LostHostWorkDeps = LoggedPendingInteractionWorkSessionDeps;
 
 interface HandleHostSessionOpenedArgs {
   activeThreads: HostDaemonActiveThread[];
+  openThreadWork: HostDaemonOpenThreadWork[] | null;
   hostId: string;
   openedSession: HostDaemonSessionRow;
   previousSession: HostDaemonSessionRow | null;
@@ -65,7 +81,7 @@ interface HandleHostRemovedArgs {
 export async function handleHostSessionOpened(
   deps: HostSessionOpenedDeps,
   args: HandleHostSessionOpenedArgs,
-): Promise<void> {
+): Promise<{ endedInteractiveRequests: HostDaemonInteractiveRequestKey[] }> {
   deps.logger.info(
     {
       sessionId: args.openedSession.id,
@@ -77,6 +93,7 @@ export async function handleHostSessionOpened(
 
   const sameDaemonInstance =
     args.previousSession?.instanceId === args.openedSession.instanceId;
+
   if (
     args.previousSession &&
     args.previousSession.id !== args.openedSession.id
@@ -89,24 +106,17 @@ export async function handleHostSessionOpened(
       } else {
         deps.hub.closeDaemonSession(args.previousSession.id, "replaced");
       }
+
       deps.terminalSessions.handleDaemonSessionClosed({
         sessionId: args.previousSession.id,
       });
     }
 
     if (!sameDaemonInstance) {
+      deps.hub.forgetOutstandingHostRpcs(args.hostId);
       interruptEnvironmentProvisioningForHost(deps, {
         hostId: args.hostId,
         reason: DAEMON_RESTARTED_ENVIRONMENT_PROVISIONING_REASON,
-      });
-      interruptPendingInteractionsForHostThreads(deps, {
-        hostId: args.hostId,
-        reason: DAEMON_RESTARTED_PENDING_INTERACTION_REASON,
-      });
-      interruptActiveThreadsForHost(deps, {
-        includeStopping: false,
-        hostId: args.hostId,
-        reason: "host-daemon-restarted",
       });
       settleDanglingBackgroundTasks(deps, { hostId: args.hostId });
     }
@@ -118,6 +128,40 @@ export async function handleHostSessionOpened(
     sameDaemonInstance,
     undeliveredEventThreadIds: args.undeliveredEventThreadIds,
   });
+
+  if (getHost(deps.db, args.hostId)?.availability === "away") {
+    void enforceHostAway(deps, args.hostId).catch((error: unknown) => {
+      deps.logger.warn(
+        { error, hostId: args.hostId },
+        "Could not keep a reconnected machine Away",
+      );
+    });
+  }
+
+  const daemonRestarted = args.previousSession !== null && !sameDaemonInstance;
+
+  if (daemonRestarted) {
+    interruptPendingInteractionsForHostThreads(deps, {
+      hostId: args.hostId,
+      reason: DAEMON_RESTARTED_PENDING_INTERACTION_REASON,
+    });
+  }
+
+  const openThreadWork = args.openThreadWork ?? (daemonRestarted ? [] : null);
+
+  if (openThreadWork === null) {
+    redeliverSavedAnswersToUnreportingDaemon(deps, { hostId: args.hostId });
+
+    return { endedInteractiveRequests: [] };
+  }
+
+  return {
+    endedInteractiveRequests: reconcileDaemonReportedOpenWork(deps, {
+      hostId: args.hostId,
+      openThreadWork,
+      undeliveredEventThreadIds: args.undeliveredEventThreadIds,
+    }),
+  };
 }
 
 export function handleDaemonSocketClosed(
@@ -132,18 +176,40 @@ export function handleDaemonSocketClosed(
 }
 
 export function handleDaemonSocketOpened(
-  deps: Pick<AppDeps, "db" | "hub" | "providerRegistry">,
+  deps: LoggedPendingInteractionWorkSessionDeps,
   args: { hostId: string },
 ): void {
   notifyHostThreadRuntimeStatusChanged(deps, args.hostId);
+  deps.pendingInteractions.redeliverAnswersAwaitingDaemon(args.hostId);
+  resendStopsAwaitingDaemon(deps, args.hostId);
 }
 
 export function handleDaemonSessionSilent(
   deps: DaemonSocketClosedDeps,
   args: HandleDaemonSocketClosedArgs,
 ): void {
+  const session = getSessionById(deps.db, { sessionId: args.sessionId });
+  const lastHeardAt = deps.hub.getDaemonLastHeardAt(args.sessionId);
+  const now = Date.now();
+
   deps.logger.warn(
-    { leaseTimeoutMs: LEASE_TIMEOUT_MS, sessionId: args.sessionId },
+    {
+      leaseTimeoutMs: session?.leaseTimeoutMs ?? LEASE_TIMEOUT_MS,
+      sessionId: args.sessionId,
+      hostId: session?.hostId ?? null,
+      instanceId: session?.instanceId ?? null,
+      runtimeVersion: deps.hub.getDaemonSessionRuntimeVersion(args.sessionId),
+      automaticUpdates: deps.hub.getDaemonSessionAutomaticUpdates(
+        args.sessionId,
+      ),
+      lastSessionActivityAt: lastHeardAt,
+      sessionActivityAgeMs:
+        lastHeardAt === null ? null : Math.max(0, now - lastHeardAt),
+      leaseExpiresAt: session?.leaseExpiresAt ?? null,
+      leaseStaleByMs:
+        session === null ? null : Math.max(0, now - session.leaseExpiresAt),
+      reason: "no-session-traffic",
+    },
     "Daemon sent nothing within its lease; closing its socket",
   );
   deps.hub.closeDaemonSession(args.sessionId, "expired");
@@ -165,9 +231,11 @@ function handleDaemonSessionLost(
     .from(hostDaemonSessions)
     .where(eq(hostDaemonSessions.id, args.sessionId))
     .get();
+
   if (!session || session.status !== "active") {
     return;
   }
+
   deps.terminalSessions.handleDaemonSessionClosed({
     sessionId: args.sessionId,
   });
@@ -175,9 +243,11 @@ function handleDaemonSessionLost(
   closeSession(deps.db, deps.hub, args.sessionId, args.reason);
 
   notifyHostThreadRuntimeStatusChanged(deps, session.hostId);
+
   if (args.reason === "expired") {
     return;
   }
+
   deps.hub.scheduleDaemonDisconnect(
     args.sessionId,
     HOST_RECONNECT_GRACE_MS,
@@ -185,6 +255,7 @@ function handleDaemonSessionLost(
       if (deps.hub.hasDaemonForHost(session.hostId)) {
         return;
       }
+
       deps.hub.notifyHost(session.hostId, ["host-disconnected"]);
       notifyHostThreadRuntimeStatusChanged(deps, session.hostId);
     },
@@ -200,6 +271,7 @@ export function handleHostRemoved(
     .from(hostDaemonSessions)
     .where(eq(hostDaemonSessions.id, args.sessionId))
     .get();
+
   if (
     !session ||
     session.status !== "active" ||
@@ -220,6 +292,7 @@ export function settleRemovedHostWork(
   deps: Omit<DaemonSocketClosedDeps, "sharedPorts">,
   args: { hostId: string },
 ): void {
+  deps.hub.forgetOutstandingHostRpcs(args.hostId);
   interruptPendingInteractionsForHostThreads(deps, {
     hostId: args.hostId,
     reason: "The machine was removed",
@@ -234,7 +307,10 @@ export function settleRemovedHostWork(
     reason: "host-removed",
   });
   settleDanglingBackgroundTasks(deps, { hostId: args.hostId });
-  notifyHostThreadRuntimeStatusChanged(deps, args.hostId);
+
+  for (const threadId of listHostThreadIds(deps.db, { hostId: args.hostId })) {
+    deps.hub.notifyThread(threadId, ["environment-changed"]);
+  }
 }
 
 interface DisconnectImportedDaemonSessionsArgs {
@@ -248,15 +324,19 @@ export function disconnectImportedDaemonSessions(
   if (args.sessions.length === 0) {
     return;
   }
+
   const hostIds = new Set<string>();
+
   for (const session of args.sessions) {
     deps.terminalSessions.handleDaemonSessionClosed({ sessionId: session.id });
     closeSession(deps.db, deps.hub, session.id, "daemon-disconnect");
     hostIds.add(session.hostId);
   }
+
   for (const hostId of hostIds) {
     settleLostHostWork(deps, { hostId });
   }
+
   deps.logger.info(
     { hosts: hostIds.size, sessions: args.sessions.length },
     "Closed the daemon sessions an imported server snapshot left active",
@@ -289,17 +369,18 @@ function notifyHostThreadRuntimeStatusChanged(
   deps: Pick<AppDeps, "db" | "hub" | "providerRegistry">,
   hostId: string,
 ): void {
+  const activeThreads = listActiveHostThreads(deps.db, { hostId });
+
   const metadataByThreadId = buildThreadStatusChangeMetadataByThreadId(deps, {
     environmentHostId: hostId,
-    threads: listActiveHostThreads(deps.db, { hostId }),
+    threads: activeThreads,
   });
-  for (const threadId of listHostThreadIds(deps.db, { hostId })) {
-    deps.hub.notifyThread(
-      threadId,
-      ["status-changed"],
-      metadataByThreadId.get(threadId),
-    );
+
+  for (const [threadId, metadata] of metadataByThreadId) {
+    deps.hub.notifyThread(threadId, ["status-changed"], metadata);
   }
+
+  deps.hub.notifySystem(["app-update-changed"]);
 }
 
 function interruptPendingInteractionsForHostThreads(

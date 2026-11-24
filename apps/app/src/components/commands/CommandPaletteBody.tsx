@@ -9,8 +9,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   PALETTE_ACTION_BUCKETS,
   type PaletteAction,
@@ -61,6 +62,7 @@ export function CommandPaletteBody({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const pluginSlots = usePluginSlots();
   const settingsSections = useSettingsNavSections(pluginSlots.fileOpeners);
+
   const pluginSettingsEntries = useMemo(
     () =>
       buildPluginSettingsEntries({
@@ -69,6 +71,7 @@ export function CommandPaletteBody({
       }),
     [installedPlugins, pluginSlots.settingsSections],
   );
+
   const settingsActions = useMemo(
     () =>
       buildSettingsPaletteActions({
@@ -78,6 +81,7 @@ export function CommandPaletteBody({
       }),
     [navigate, pluginSettingsEntries, settingsSections],
   );
+
   const pluginPageActions = useMemo(
     () =>
       buildPluginPagePaletteActions({
@@ -88,6 +92,7 @@ export function CommandPaletteBody({
   );
 
   const { choices, select } = useServerChoices();
+
   const serverActions = useMemo<PaletteAction[]>(
     () =>
       select === undefined
@@ -114,7 +119,9 @@ export function CommandPaletteBody({
     ],
     [actions, pluginPageActions, settingsActions, serverActions],
   );
+
   const commandQuery = query.startsWith(">") ? query.slice(1) : query;
+
   const ranked = useMemo(
     () =>
       rankPaletteActions({
@@ -124,12 +131,15 @@ export function CommandPaletteBody({
       }),
     [availableActions, commandQuery, recents],
   );
+
   const isGroupedRoot = commandQuery.trim() === "";
+
   const rootGroups = useMemo(() => {
     const groups = PALETTE_ACTION_BUCKETS.map((bucket) => ({
       bucket,
       entries: ranked.filter((entry) => entry.action.bucket === bucket),
     })).filter((group) => group.entries.length > 0);
+
     return groups.map((group, index) => ({
       ...group,
       startIndex: groups
@@ -137,11 +147,13 @@ export function CommandPaletteBody({
         .reduce((total, prior) => total + prior.entries.length, 0),
     }));
   }, [ranked]);
+
   const visibleEntries = useMemo(
     () =>
       isGroupedRoot ? rootGroups.flatMap((group) => group.entries) : ranked,
     [isGroupedRoot, ranked, rootGroups],
   );
+
   const activeIndex =
     visibleEntries.length === 0
       ? -1
@@ -160,37 +172,48 @@ export function CommandPaletteBody({
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
       if (event.nativeEvent.isComposing) return;
+
       if (visibleEntries.length === 0) return;
+
       if (event.key === "ArrowDown") {
         event.preventDefault();
         scrollOnNextHighlightRef.current = true;
         setHighlightedIndex((current) =>
           current + 1 >= visibleEntries.length ? 0 : current + 1,
         );
+
         return;
       }
+
       if (event.key === "ArrowUp") {
         event.preventDefault();
         scrollOnNextHighlightRef.current = true;
         setHighlightedIndex((current) =>
           current <= 0 ? visibleEntries.length - 1 : current - 1,
         );
+
         return;
       }
+
       if (event.key === "Home") {
         event.preventDefault();
         scrollOnNextHighlightRef.current = true;
         setHighlightedIndex(0);
+
         return;
       }
+
       if (event.key === "End") {
         event.preventDefault();
         scrollOnNextHighlightRef.current = true;
         setHighlightedIndex(visibleEntries.length - 1);
+
         return;
       }
+
       if (event.key === "Enter") {
         const choice = visibleEntries[activeIndex];
+
         if (choice === undefined) return;
         event.preventDefault();
         onChoose(choice.action);
@@ -212,6 +235,7 @@ export function CommandPaletteBody({
       onInputChange={(value) => {
         onQueryChange(value);
         setHighlightedIndex(0);
+
         if (listRef.current !== null) listRef.current.scrollTop = 0;
       }}
       onInputKeyDown={handleKeyDown}
@@ -219,12 +243,11 @@ export function CommandPaletteBody({
       value={query}
     >
       {!isGroupedRoot && visibleEntries.length === 0 ? (
-        <p className="px-3 py-4 text-center text-sm text-muted-foreground">
-          No matching commands
-        </p>
+        <PaletteNoMatches query={commandQuery.trim()} />
       ) : isGroupedRoot ? (
         rootGroups.map((group) => {
           const labelId = `${optionIdPrefix}-${group.bucket.toLowerCase()}-label`;
+
           return (
             <div
               key={group.bucket}
@@ -237,6 +260,7 @@ export function CommandPaletteBody({
               </div>
               {group.entries.map((entry, index) => {
                 const visibleIndex = group.startIndex + index;
+
                 return (
                   <PaletteRow
                     key={entry.action.id}
@@ -296,9 +320,11 @@ function PaletteRow({
     entry.action.group === "Browser" || entry.action.id.startsWith("plugin:")
       ? entry.action.group
       : null;
+
   const title = isDrillIn ? `${entry.action.title}…` : entry.action.title;
   const shortcut = showShortcut ? entry.action.shortcut : null;
   const hasTrailing = metadataGroup !== null || shortcut !== null || isDrillIn;
+
   return (
     <div
       id={id}
@@ -334,6 +360,29 @@ function PaletteRow({
   );
 }
 
+function PaletteNoMatches({ query }: { query: string }) {
+  return (
+    <div
+      role="status"
+      className="flex flex-col items-center gap-1 px-3 py-8 text-center"
+      data-palette-no-matches
+    >
+      <span
+        aria-hidden
+        className="mb-2 flex size-9 items-center justify-center rounded-full bg-state-hover text-muted-foreground"
+      >
+        <Icon name="Search" className="size-4" />
+      </span>
+      <p className="max-w-full truncate text-sm font-medium text-foreground">
+        No commands match “{query}”
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Try a shorter or different word.
+      </p>
+    </div>
+  );
+}
+
 function HighlightedTitle({
   title,
   positions,
@@ -343,8 +392,9 @@ function HighlightedTitle({
 }) {
   if (positions.length === 0) return <>{title}</>;
   const emphasized = new Set(positions);
+
   return (
-    <>
+    <span className="text-muted-foreground" data-palette-match-title>
       {[...title].map((character, index) =>
         emphasized.has(index) ? (
           <span key={index} className="font-semibold text-foreground">
@@ -354,6 +404,6 @@ function HighlightedTitle({
           <span key={index}>{character}</span>
         ),
       )}
-    </>
+    </span>
   );
 }

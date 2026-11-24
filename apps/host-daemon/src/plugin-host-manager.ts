@@ -1,7 +1,6 @@
 import { operationEnvironment } from "./operation-environment.js";
 import { fork, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
@@ -9,15 +8,17 @@ import type { Readable } from "node:stream";
 import type {
   HostDaemonOnlineRpcCommand,
   HostDaemonOnlineRpcResult,
-} from "@bb/host-daemon-contract";
-import type { HostPathWatchChange, HostWatcher } from "@bb/host-watcher";
-import { jsonValueSchema, type JsonValue } from "@bb/domain";
+} from "@omnyo/host-daemon-contract";
+import type { HostPathWatchChange, HostWatcher } from "@omnyo/host-watcher";
+import { jsonValueSchema, type JsonValue } from "@omnyo/domain";
+import { z } from "zod";
 import {
-  createPluginProcessTempDir,
+  createPluginProcessTempAllocation,
   ensurePluginProcessDataDir,
   sanitizeInheritedChildProcessEnv,
-} from "@bb/process-utils";
+} from "@omnyo/process-utils";
 import type { HostDaemonLogger } from "./logger.js";
+import { ExpectedCommandDispatchError } from "./command-dispatch-support.js";
 import { ensureCachedPluginHostArtifact } from "./plugin-host-artifact-cache.js";
 import { runInSerialLane } from "./serial-lane.js";
 
@@ -25,14 +26,17 @@ type PluginHostCallCommand = Extract<
   HostDaemonOnlineRpcCommand,
   { type: "plugin.host.call" }
 >;
+
 type PluginHostCancelCommand = Extract<
   HostDaemonOnlineRpcCommand,
   { type: "plugin.host.cancel" }
 >;
+
 type PluginHostDisposeCommand = Extract<
   HostDaemonOnlineRpcCommand,
   { type: "plugin.host.dispose" }
 >;
+
 type PluginHostCallResult = HostDaemonOnlineRpcResult<"plugin.host.call">;
 
 interface PendingCall {
@@ -59,7 +63,11 @@ interface WorkerState {
   disposing: boolean;
   activeCallCount: number;
   retainedLeaseIds: Set<string>;
+  replacementMethods: Map<string, string>;
   idleTimer: NodeJS.Timeout | null;
+  superseded: boolean;
+  successorGeneration: string | null;
+  supersededTimer: NodeJS.Timeout | null;
   watches: Map<string, WorkerWatchState>;
 }
 
@@ -82,6 +90,7 @@ interface WorkerWatchState {
 interface ActiveCallState {
   cancelled: boolean;
   inputByteLength: number;
+  worker: WorkerState | null;
 }
 
 interface ActiveCallAdmission {
@@ -89,8 +98,21 @@ interface ActiveCallAdmission {
   inputByteLength: number;
 }
 
+export interface PluginRuntimeUpdateBlocker {
+  pluginId: string;
+  generation: string | null;
+  activeCallCount: number;
+  pendingCallCount: number;
+  retainedLeaseCount: number;
+  watchCount: number;
+  mutationPending: boolean;
+  starting: boolean;
+  disposing: boolean;
+}
+
 interface PluginHostManagerOptions {
   dataDir: string;
+  processPrivateTempRegistryDirectory?: string;
   logger: Pick<HostDaemonLogger, "debug" | "info" | "warn">;
   fetchArtifact: (args: {
     pluginId: string;
@@ -108,25 +130,50 @@ interface PluginHostManagerOptions {
   hostWatcher?: Pick<HostWatcher, "watchPathRoot">;
   workerIdleTimeoutMs?: number;
   workerStopGraceMs?: number;
+  supersededLimitMs?: number;
   maxActiveCallsPerPlugin?: number;
   maxActiveCallInputBytesPerPlugin?: number;
 }
 
 const START_TIMEOUT_MS = 10_000;
+
 const CANCEL_GRACE_MS = 5_000;
-const HOST_WORKER_PROTOCOL_VERSION = 2;
+
+const HOST_WORKER_PROTOCOL_VERSION = 3;
+
+const replacementMethodsSchema = z.record(
+  z.string().min(1),
+  z.string().min(1).max(128),
+);
+
+const SUPERSEDED_LEASE_LIMIT_MS = 25 * 60 * 60_000;
+
+export const PLUGIN_HOST_REPLACING_ERROR_CODE = "plugin_host_replacing";
+
 const DEFAULT_WORKER_IDLE_TIMEOUT_MS = 5 * 60_000;
+
 const MAX_ACTIVE_CALLS_PER_PLUGIN = 256;
+
 const MAX_ACTIVE_CALL_INPUT_BYTES_PER_PLUGIN = 32 * 1024 * 1024;
+
 const MAX_WATCHES_PER_WORKER = 256;
+
 const MAX_WATCH_CHANGED_PATHS = 4_096;
+
 const MAX_WATCH_BATCH_BYTES = 1024 * 1024;
+
 const MAX_WATCH_IGNORE_ENTRIES = 4_096;
+
 const MAX_WATCH_PATH_BYTES = 16 * 1024;
+
 const MIN_WATCH_DEBOUNCE_MS = 10;
+
 const MAX_WATCH_DEBOUNCE_MS = 5_000;
+
 const MAX_WATCH_WAIT_MS = 30_000;
+
 const HOST_DIAGNOSTIC_LINE_MAX_BYTES = 16 * 1024;
+
 const HOST_DIAGNOSTIC_MAX_LINES = 1_000;
 
 function elapsedMs(startedAtMs: number): number {
@@ -148,16 +195,30 @@ function workerLogContext(worker: WorkerState): Record<string, unknown> {
   };
 }
 
+function workerBlocksRuntimeUpdate(worker: WorkerState): boolean {
+  return (
+    worker.readyAtMs === null ||
+    worker.disposing ||
+    worker.activeCallCount > 0 ||
+    worker.pending.size > 0 ||
+    worker.retainedLeaseIds.size > 0 ||
+    worker.watches.size > 0
+  );
+}
+
 function defaultWorkerEntryPath(): string {
   const candidates = [
-    "./bb-plugin-host-worker.mjs",
+    "./omnyo-plugin-host-worker.mjs",
     "./plugin-host-worker.js",
     "./plugin-host-worker.ts",
   ];
+
   for (const candidate of candidates) {
     const candidatePath = fileURLToPath(new URL(candidate, import.meta.url));
+
     if (existsSync(candidatePath)) return candidatePath;
   }
+
   throw new Error(
     `host plugin worker entry not found beside ${fileURLToPath(import.meta.url)} (looked for ${candidates.join(", ")})`,
   );
@@ -174,40 +235,53 @@ function observeBoundedStderr(
   let tail = Buffer.alloc(0);
   let emittedLines = 0;
   let truncated = false;
+
   const append = (chunk: Buffer): void => {
     if (chunk.length >= HOST_DIAGNOSTIC_LINE_MAX_BYTES) {
       tail = Buffer.from(
         chunk.subarray(chunk.length - HOST_DIAGNOSTIC_LINE_MAX_BYTES),
       );
+
       return;
     }
+
     const retained = Math.min(
       tail.length,
       HOST_DIAGNOSTIC_LINE_MAX_BYTES - chunk.length,
     );
+
     tail = Buffer.concat([tail.subarray(tail.length - retained), chunk]);
   };
+
   const emit = (): void => {
     if (truncated || tail.length === 0) return;
+
     if (emittedLines >= HOST_DIAGNOSTIC_MAX_LINES) {
       truncated = true;
       onLine("[host plugin stderr truncated]");
       tail = Buffer.alloc(0);
+
       return;
     }
+
     emittedLines += 1;
     onLine(tail.toString("utf8").replace(/\r$/u, ""));
     tail = Buffer.alloc(0);
   };
+
   source.on("data", (chunk: Buffer) => {
     if (truncated) return;
     let remaining = chunk;
+
     while (remaining.length > 0 && !truncated) {
       const newline = remaining.indexOf(0x0a);
+
       if (newline === -1) {
         append(remaining);
+
         return;
       }
+
       append(remaining.subarray(0, newline));
       emit();
       remaining = remaining.subarray(newline + 1);
@@ -218,8 +292,10 @@ function observeBoundedStderr(
 
 function sendToWorker(child: ChildProcess, message: object): boolean {
   if (!child.connected) return false;
+
   try {
     child.send(message, () => {});
+
     return true;
   } catch {
     return false;
@@ -227,6 +303,89 @@ function sendToWorker(child: ChildProcess, message: object): boolean {
 }
 
 export class PluginHostManager {
+  getDirectAccessActivityCount(): number {
+    return (
+      this.workers.size +
+      this.activeCalls.size +
+      this.activeCallAdmissions.size +
+      this.workerMutationTails.size
+    );
+  }
+  getRuntimeUpdateActivityCount(): number {
+    return (
+      this.activeCalls.size +
+      this.activeCallAdmissions.size +
+      this.workerMutationTails.size +
+      [...this.workers.values()].filter(workerBlocksRuntimeUpdate).length
+    );
+  }
+
+  getRuntimeUpdateBlockers(): PluginRuntimeUpdateBlocker[] {
+    const pluginIds = new Set([
+      ...this.workers.keys(),
+      ...this.activeCallAdmissions.keys(),
+      ...this.workerMutationTails.keys(),
+    ]);
+
+    return [...pluginIds].flatMap((pluginId) => {
+      const worker = this.workers.get(pluginId);
+
+      const activeCallCount =
+        this.activeCallAdmissions.get(pluginId)?.count ?? 0;
+
+      const mutationPending = this.workerMutationTails.has(pluginId);
+
+      if (
+        activeCallCount === 0 &&
+        !mutationPending &&
+        (worker === undefined || !workerBlocksRuntimeUpdate(worker))
+      )
+        return [];
+
+      return [
+        {
+          pluginId,
+          generation: worker?.generation ?? null,
+          activeCallCount,
+          pendingCallCount: worker?.pending.size ?? 0,
+          retainedLeaseCount: worker?.retainedLeaseIds.size ?? 0,
+          watchCount: worker?.watches.size ?? 0,
+          mutationPending,
+          starting: worker !== undefined && worker.readyAtMs === null,
+          disposing: worker?.disposing ?? false,
+        },
+      ];
+    });
+  }
+
+  async closeLeasedWorkers(pluginIds: readonly string[]): Promise<string[]> {
+    const closed: string[] = [];
+
+    await Promise.all(
+      pluginIds.map((pluginId) =>
+        this.enqueueWorkerMutation(pluginId, async () => {
+          const worker = this.workers.get(pluginId);
+
+          if (
+            worker === undefined ||
+            worker.disposing ||
+            worker.retainedLeaseIds.size === 0 ||
+            worker.activeCallCount > 0 ||
+            worker.pending.size > 0
+          )
+            return;
+
+          await this.stopWorker(worker, "runtime update closed its leases");
+          closed.push(pluginId);
+        }),
+      ),
+    );
+    await Promise.all(
+      pluginIds.map((pluginId) => this.workerMutationTails.get(pluginId)),
+    );
+
+    return closed;
+  }
   private readonly workers = new Map<string, WorkerState>();
   private readonly activeCalls = new Map<string, ActiveCallState>();
   private readonly activeCallAdmissions = new Map<
@@ -243,34 +402,43 @@ export class PluginHostManager {
     if (this.shuttingDown) {
       throw new Error("host plugin manager is shutting down");
     }
+
     const { callKey, callState } = this.admitCall(command);
     const deadlineMonotonicMs = performance.now() + command.timeoutMs;
     const workerStartup = this.ensureWorker(command);
     let activeWorker: WorkerState | undefined;
+
     try {
       const worker = await this.awaitBeforeDeadline(
         workerStartup,
         deadlineMonotonicMs,
         `host plugin call ${command.callId} reached its deadline before dispatch`,
       );
+
       activeWorker = worker;
+      callState.worker = worker;
       worker.activeCallCount += 1;
       await worker.ready;
+
       if (callState.cancelled) throw this.cancelledCallError(command.callId);
       const remainingMs = deadlineMonotonicMs - performance.now();
+
       if (remainingMs <= 0) {
         throw new Error(
           `host plugin call ${command.callId} reached its deadline before dispatch`,
         );
       }
+
       if (worker.pending.has(command.callId)) {
         throw new Error(`duplicate host plugin call ${command.callId}`);
       }
+
       if (worker.pending.size >= MAX_ACTIVE_CALLS_PER_PLUGIN) {
         throw new Error(
           `host plugin ${command.pluginId} has too many pending calls`,
         );
       }
+
       return await new Promise<PluginHostCallResult>((resolve, reject) => {
         const deadlineTimer = setTimeout(
           () =>
@@ -283,6 +451,7 @@ export class PluginHostManager {
             ),
           Math.max(1, remainingMs),
         );
+
         deadlineTimer.unref?.();
         worker.pending.set(command.callId, {
           resolve,
@@ -291,6 +460,7 @@ export class PluginHostManager {
           forceTimer: null,
           cancellationError: null,
         });
+
         if (
           !sendToWorker(worker.child, {
             type: "call",
@@ -315,7 +485,9 @@ export class PluginHostManager {
         activeWorker.activeCallCount -= 1;
         this.scheduleWorkerIdle(activeWorker);
       }
+
       const release = (): void => this.releaseCall(command, callKey, callState);
+
       if (activeWorker === undefined) {
         void workerStartup.then((worker) => {
           release();
@@ -329,20 +501,19 @@ export class PluginHostManager {
 
   cancel(command: PluginHostCancelCommand): { cancelled: boolean } {
     const callState = this.activeCalls.get(this.callKey(command));
+
     if (callState === undefined) return { cancelled: false };
     callState.cancelled = true;
-    const worker = this.workers.get(command.pluginId);
-    if (
-      worker !== undefined &&
-      worker.generation === command.generation &&
-      worker.pending.has(command.callId)
-    ) {
+    const worker = callState.worker;
+
+    if (worker !== null && worker.pending.has(command.callId)) {
       this.cancelPendingCall(
         worker,
         command.callId,
         this.cancelledCallError(command.callId),
       );
     }
+
     return { cancelled: true };
   }
 
@@ -350,12 +521,28 @@ export class PluginHostManager {
     command: PluginHostDisposeCommand,
   ): Promise<{ disposed: boolean }> {
     return this.enqueueWorkerMutation(command.pluginId, async () => {
+      const disposerRetired =
+        this.retiredGenerations
+          .get(command.pluginId)
+          ?.has(command.generation) === true;
+
       this.retireGeneration(command.pluginId, command.generation);
       const worker = this.workers.get(command.pluginId);
-      if (worker === undefined || worker.generation !== command.generation) {
+
+      if (
+        worker === undefined ||
+        (worker.generation !== command.generation &&
+          !(
+            command.includeRetained &&
+            !disposerRetired &&
+            (worker.superseded || worker.retainedLeaseIds.size > 0)
+          ))
+      ) {
         return { disposed: false };
       }
+
       await this.stopWorker(worker, "plugin disposed");
+
       return { disposed: true };
     });
   }
@@ -379,16 +566,27 @@ export class PluginHostManager {
     const activeByPlugin = new Map(
       activeGenerations.map((entry) => [entry.pluginId, entry.generation]),
     );
+
     await Promise.all(
       [...this.workers.keys()].map((pluginId) =>
         this.enqueueWorkerMutation(pluginId, async () => {
           const worker = this.workers.get(pluginId);
-          if (
-            worker === undefined ||
-            activeByPlugin.get(pluginId) === worker.generation
-          ) {
+          const activeGeneration = activeByPlugin.get(pluginId);
+
+          if (worker === undefined || activeGeneration === worker.generation) {
             return;
           }
+
+          if (
+            activeGeneration !== undefined &&
+            !worker.disposing &&
+            worker.retainedLeaseIds.size > 0
+          ) {
+            this.supersede(worker, activeGeneration);
+
+            return;
+          }
+
           this.retireGeneration(pluginId, worker.generation);
           await this.stopWorker(
             worker,
@@ -415,7 +613,9 @@ export class PluginHostManager {
         `host plugin ${command.pluginId} generation ${command.generation} is retired`,
       );
     }
+
     const current = this.workers.get(command.pluginId);
+
     if (
       current !== undefined &&
       current.generation === command.generation &&
@@ -423,8 +623,10 @@ export class PluginHostManager {
       !current.disposing
     ) {
       this.cancelWorkerIdleTimer(current);
+
       return current;
     }
+
     if (
       current !== undefined &&
       current.generation === command.generation &&
@@ -434,24 +636,57 @@ export class PluginHostManager {
         `host plugin ${command.pluginId} generation ${command.generation} changed artifact digest`,
       );
     }
+
+    if (
+      current !== undefined &&
+      !current.disposing &&
+      current.retainedLeaseIds.size > 0
+    ) {
+      this.supersede(current, command.generation);
+      const replacementKey = current.replacementMethods.get(command.method);
+
+      if (
+        replacementKey !== undefined &&
+        replacementKey === command.replacementKey
+      )
+        return current;
+      throw new ExpectedCommandDispatchError(
+        PLUGIN_HOST_REPLACING_ERROR_CODE,
+        `Plugin ${command.pluginId} is finishing work from its previous version on this machine`,
+      );
+    }
+
     if (current !== undefined) {
       this.retireGeneration(command.pluginId, current.generation);
       await this.stopWorker(current, "host artifact generation replaced");
     }
 
     const artifactPath = await this.materializeArtifact(command);
+
     const dataDir = await ensurePluginProcessDataDir({
       daemonDataDir: this.options.dataDir,
       pluginId: command.pluginId,
       kind: "host-data",
     });
-    const tempDir = await createPluginProcessTempDir({
+
+    const tempAllocation = await createPluginProcessTempAllocation({
       pluginId: command.pluginId,
-      prefix: "bb-host",
+      prefix: "omnyo-host",
+      origin: "host-worker",
+      owner: "child",
+      ...(this.options.processPrivateTempRegistryDirectory === undefined
+        ? {}
+        : {
+            registryDirectory: this.options.processPrivateTempRegistryDirectory,
+          }),
     });
+
+    const { tempDir } = tempAllocation;
+
     const shellPath = this.options.shellEnv?.().PATH;
     const startedAtMs = performance.now();
     let child: ChildProcess;
+
     try {
       child = fork(
         defaultWorkerEntryPath(),
@@ -474,25 +709,27 @@ export class PluginHostManager {
         },
         "Failed to start host plugin worker",
       );
-      await rm(tempDir, { recursive: true, force: true });
+      tempAllocation.closeUnstarted();
       throw error;
     }
+
     const closed = new Promise<void>((resolve) => child.once("close", resolve));
-    const cleanup = closed.then(() =>
-      rm(tempDir, { recursive: true, force: true }),
-    );
-    void cleanup.catch((error) => {
+
+    const cleanup = tempAllocation.attachChild(child).catch((error) => {
       this.options.logger.warn(
         { pluginId: command.pluginId, err: error },
-        "Failed to remove host plugin temporary directory",
+        "Host plugin temporary directory cleanup was held or failed",
       );
     });
+
     let resolveReady!: () => void;
     let rejectReady!: (error: Error) => void;
+
     const ready = new Promise<void>((resolve, reject) => {
       resolveReady = resolve;
       rejectReady = reject;
     });
+
     const worker: WorkerState = {
       pluginId: command.pluginId,
       generation: command.generation,
@@ -509,15 +746,22 @@ export class PluginHostManager {
       disposing: false,
       activeCallCount: 0,
       retainedLeaseIds: new Set(),
+      replacementMethods: new Map(),
       idleTimer: null,
+      superseded: false,
+      successorGeneration: null,
+      supersededTimer: null,
       watches: new Map(),
     };
+
     let unexpectedExitReported = false;
+
     const failWorker = (
       reason: string,
       details: Record<string, unknown> = {},
     ): void => {
       this.cancelWorkerIdleTimer(worker);
+
       if (!worker.disposing && !unexpectedExitReported) {
         unexpectedExitReported = true;
         this.options.logger.warn(
@@ -531,20 +775,25 @@ export class PluginHostManager {
           generation: worker.generation,
         });
       }
+
       worker.rejectReady(new Error(reason));
       this.rejectPendingCalls(worker, reason);
       void this.stopAllWorkerWatches(worker);
+
       if (this.workers.get(worker.pluginId) === worker) {
         this.workers.delete(worker.pluginId);
       }
     };
 
     this.workers.set(command.pluginId, worker);
+
     const startTimer = setTimeout(() => {
       failWorker(`host plugin ${command.pluginId} startup timed out`);
       child.kill("SIGKILL");
     }, START_TIMEOUT_MS);
+
     startTimer.unref?.();
+
     if (child.stderr !== null) {
       observeBoundedStderr(child.stderr, (line) => {
         this.options.logger.warn(
@@ -557,6 +806,7 @@ export class PluginHostManager {
         );
       });
     }
+
     child.once("error", (error) => {
       clearTimeout(startTimer);
       failWorker(`host plugin worker failed: ${errorMessage(error)}`, {
@@ -566,12 +816,30 @@ export class PluginHostManager {
     child.on("message", (message: unknown) => {
       if (typeof message !== "object" || message === null) return;
       const record = Object.fromEntries(Object.entries(message));
+
       if (
         record.type === "ready" &&
         record.protocolVersion === HOST_WORKER_PROTOCOL_VERSION &&
         record.pluginId === worker.pluginId &&
         record.generation === worker.generation
       ) {
+        const replacementMethods = replacementMethodsSchema.safeParse(
+          record.replacementMethods,
+        );
+
+        if (!replacementMethods.success) {
+          clearTimeout(startTimer);
+          failWorker(
+            `host plugin ${worker.pluginId} replacement methods are invalid`,
+          );
+          worker.child.kill("SIGKILL");
+
+          return;
+        }
+
+        worker.replacementMethods = new Map(
+          Object.entries(replacementMethods.data),
+        );
         clearTimeout(startTimer);
         worker.readyAtMs = performance.now();
         this.options.logger.info(
@@ -582,29 +850,38 @@ export class PluginHostManager {
           "Host plugin worker ready",
         );
         worker.resolveReady();
+
         return;
       }
+
       if (record.type === "ready") {
         clearTimeout(startTimer);
         failWorker(`host plugin ${worker.pluginId} worker identity mismatch`);
         worker.child.kill("SIGKILL");
+
         return;
       }
+
       if (record.type === "startup-error" && typeof record.error === "string") {
         clearTimeout(startTimer);
         failWorker(record.error);
+
         return;
       }
+
       if (
         record.type === "result" &&
         typeof record.callId === "string" &&
         typeof record.ok === "boolean"
       ) {
         this.finishPendingCall(worker, record.callId, record);
+
         return;
       }
+
       if (record.type === "signal" && typeof record.signal === "string") {
         const payload = jsonValueSchema.safeParse(record.payload);
+
         if (!payload.success) return;
         this.options.onSignal?.({
           pluginId: worker.pluginId,
@@ -612,8 +889,10 @@ export class PluginHostManager {
           signal: record.signal,
           payload: payload.data,
         });
+
         return;
       }
+
       if (
         record.type === "lease-acquire" &&
         typeof record.leaseId === "string" &&
@@ -623,24 +902,32 @@ export class PluginHostManager {
           worker.retainedLeaseIds.add(record.leaseId);
           this.cancelWorkerIdleTimer(worker);
         }
+
         return;
       }
+
       if (
         record.type === "lease-release" &&
         typeof record.leaseId === "string"
       ) {
         worker.retainedLeaseIds.delete(record.leaseId);
         this.scheduleWorkerIdle(worker);
+
         return;
       }
+
       if (record.type === "watch-start") {
         void this.startWorkerWatch(worker, record);
+
         return;
       }
+
       if (record.type === "watch-stop" && typeof record.watchId === "string") {
         void this.stopWorkerWatch(worker, record.watchId);
+
         return;
       }
+
       if (
         record.type === "watch-ack" &&
         typeof record.watchId === "string" &&
@@ -656,8 +943,10 @@ export class PluginHostManager {
         signal,
       });
     });
+
     try {
       await ready;
+
       return worker;
     } catch (error) {
       await this.stopWorker(worker, errorMessage(error));
@@ -674,6 +963,7 @@ export class PluginHostManager {
     const ignoredPaths = message.ignoredPaths;
     const debounceMs = message.debounceMs;
     const maxWaitMs = message.maxWaitMs;
+
     const invalid =
       typeof watchId !== "string" ||
       watchId.length === 0 ||
@@ -695,50 +985,63 @@ export class PluginHostManager {
       !Number.isInteger(maxWaitMs) ||
       maxWaitMs < debounceMs ||
       maxWaitMs > MAX_WATCH_WAIT_MS;
+
     if (invalid) {
       this.sendWorkerWatchStartError(
         worker,
         typeof watchId === "string" ? watchId : "",
         "invalid host watch options",
       );
+
       return;
     }
+
     if (worker.disposing || this.workers.get(worker.pluginId) !== worker) {
       this.sendWorkerWatchStartError(
         worker,
         watchId,
         "host worker is disposing",
       );
+
       return;
     }
+
     if (worker.watches.has(watchId)) {
       this.sendWorkerWatchStartError(
         worker,
         watchId,
         "duplicate host watch id",
       );
+
       return;
     }
+
     if (worker.watches.size >= MAX_WATCHES_PER_WORKER) {
       this.sendWorkerWatchStartError(
         worker,
         watchId,
         `host plugin has too many watches (maximum ${MAX_WATCHES_PER_WORKER})`,
       );
+
       return;
     }
+
     const watchPathRoot = this.options.hostWatcher?.watchPathRoot;
+
     if (watchPathRoot === undefined) {
       this.sendWorkerWatchStartError(
         worker,
         watchId,
         "host filesystem watch service is unavailable",
       );
+
       return;
     }
+
     const validIgnoredPaths = ignoredPaths.filter(
       (entry): entry is string => typeof entry === "string",
     );
+
     const state: WorkerWatchState = {
       watchId,
       worker,
@@ -754,8 +1057,10 @@ export class PluginHostManager {
       debounceTimer: null,
       maxWaitTimer: null,
     };
+
     worker.watches.set(watchId, state);
     this.cancelWorkerIdleTimer(worker);
+
     try {
       state.stop = watchPathRoot({
         rootPath,
@@ -799,26 +1104,32 @@ export class PluginHostManager {
     changes: readonly HostPathWatchChange[],
   ): void {
     if (state.stopped) return;
+
     for (const change of changes) {
       if (Buffer.byteLength(change.path) > MAX_WATCH_PATH_BYTES) {
         state.pendingChanges.clear();
         state.pendingRescan = true;
         break;
       }
+
       state.pendingChanges.set(change.path, change.type);
+
       if (state.pendingChanges.size > MAX_WATCH_CHANGED_PATHS) {
         state.pendingChanges.clear();
         state.pendingRescan = true;
         break;
       }
     }
+
     if (state.inFlightSequence !== null) return;
+
     if (state.debounceTimer !== null) clearTimeout(state.debounceTimer);
     state.debounceTimer = setTimeout(
       () => this.flushWorkerWatch(state),
       state.debounceMs,
     );
     state.debounceTimer.unref?.();
+
     if (state.maxWaitTimer === null) {
       state.maxWaitTimer = setTimeout(
         () => this.flushWorkerWatch(state),
@@ -830,6 +1141,7 @@ export class PluginHostManager {
 
   private clearWorkerWatchTimers(state: WorkerWatchState): void {
     if (state.debounceTimer !== null) clearTimeout(state.debounceTimer);
+
     if (state.maxWaitTimer !== null) clearTimeout(state.maxWaitTimer);
     state.debounceTimer = null;
     state.maxWaitTimer = null;
@@ -839,6 +1151,7 @@ export class PluginHostManager {
     if (state.stopped || state.inFlightSequence !== null) return;
     this.clearWorkerWatchTimers(state);
     let event: object | null = null;
+
     if (state.pendingError !== null) {
       event = { kind: "watch-error", message: state.pendingError };
       state.pendingError = null;
@@ -849,24 +1162,30 @@ export class PluginHostManager {
     } else if (state.pendingChanges.size > 0) {
       const changes: HostPathWatchChange[] = [];
       let batchBytes = 0;
+
       for (const [path, type] of state.pendingChanges) {
         const nextBytes = Buffer.byteLength(path) + 32;
+
         if (
           changes.length > 0 &&
           batchBytes + nextBytes > MAX_WATCH_BATCH_BYTES
         ) {
           break;
         }
+
         batchBytes += nextBytes;
         changes.push({ path, type });
         state.pendingChanges.delete(path);
       }
+
       event = { kind: "changed", changes };
     }
+
     if (event === null) return;
     const sequence = state.nextSequence;
     state.nextSequence += 1;
     state.inFlightSequence = sequence;
+
     if (
       !sendToWorker(state.worker.child, {
         type: "watch-event",
@@ -885,6 +1204,7 @@ export class PluginHostManager {
     sequence: number,
   ): void {
     const state = worker.watches.get(watchId);
+
     if (state === undefined || state.inFlightSequence !== sequence) return;
     state.inFlightSequence = null;
     this.flushWorkerWatch(state);
@@ -895,11 +1215,13 @@ export class PluginHostManager {
     watchId: string,
   ): Promise<void> {
     const state = worker.watches.get(watchId);
+
     if (state === undefined) return;
     worker.watches.delete(watchId);
     state.stopped = true;
     this.clearWorkerWatchTimers(state);
     state.pendingChanges.clear();
+
     try {
       await state.stop();
     } catch (error) {
@@ -926,14 +1248,18 @@ export class PluginHostManager {
     result: Record<string, unknown>,
   ): void {
     const pending = worker.pending.get(callId);
+
     if (pending === undefined) return;
     worker.pending.delete(callId);
     clearTimeout(pending.deadlineTimer);
+
     if (pending.forceTimer !== null) clearTimeout(pending.forceTimer);
+
     if (pending.cancellationError !== null) {
       pending.reject(pending.cancellationError);
     } else if (result.ok) {
       const output = jsonValueSchema.safeParse(result.output);
+
       if (output.success) pending.resolve({ output: output.data });
       else pending.reject(new Error("host handler returned invalid JSON"));
     } else {
@@ -950,9 +1276,11 @@ export class PluginHostManager {
   private rejectPendingCalls(worker: WorkerState, reason: string): void {
     for (const pending of worker.pending.values()) {
       clearTimeout(pending.deadlineTimer);
+
       if (pending.forceTimer !== null) clearTimeout(pending.forceTimer);
       pending.reject(pending.cancellationError ?? new Error(reason));
     }
+
     worker.pending.clear();
   }
 
@@ -973,12 +1301,20 @@ export class PluginHostManager {
     if (worker.disposing) return worker.cleanup;
     worker.disposing = true;
     this.cancelWorkerIdleTimer(worker);
+
+    if (worker.supersededTimer !== null) {
+      clearTimeout(worker.supersededTimer);
+      worker.supersededTimer = null;
+    }
+
     if (this.workers.get(worker.pluginId) === worker) {
       this.workers.delete(worker.pluginId);
     }
+
     await this.stopAllWorkerWatches(worker);
     sendToWorker(worker.child, { type: "dispose" });
     let forceKilled = false;
+
     const forceTimer = setTimeout(() => {
       forceKilled = true;
       this.options.logger.warn(
@@ -987,6 +1323,7 @@ export class PluginHostManager {
       );
       worker.child.kill("SIGKILL");
     }, this.options.workerStopGraceMs ?? CANCEL_GRACE_MS);
+
     forceTimer.unref?.();
     await worker.closed;
     clearTimeout(forceTimer);
@@ -1011,6 +1348,41 @@ export class PluginHostManager {
     worker.idleTimer = null;
   }
 
+  private supersede(worker: WorkerState, generation: string): void {
+    if (worker.successorGeneration !== generation) {
+      if (worker.successorGeneration !== null)
+        this.retireGeneration(worker.pluginId, worker.successorGeneration);
+      worker.successorGeneration = generation;
+    }
+
+    if (worker.superseded) return;
+    worker.superseded = true;
+    this.retireGeneration(worker.pluginId, worker.generation);
+    this.cancelWorkerIdleTimer(worker);
+    this.options.logger.info(
+      workerLogContext(worker),
+      "Host plugin worker finishes its leased work before replacement",
+    );
+    worker.supersededTimer = setTimeout(() => {
+      worker.supersededTimer = null;
+      void this.enqueueWorkerMutation(worker.pluginId, async () => {
+        if (worker.disposing || this.workers.get(worker.pluginId) !== worker) {
+          return;
+        }
+
+        this.options.logger.warn(
+          workerLogContext(worker),
+          "Host plugin worker exceeded its replacement lease limit",
+        );
+        await this.stopWorker(
+          worker,
+          "superseded worker exceeded its lease limit",
+        );
+      });
+    }, this.options.supersededLimitMs ?? SUPERSEDED_LEASE_LIMIT_MS);
+    worker.supersededTimer.unref?.();
+  }
+
   private scheduleWorkerIdle(worker: WorkerState): void {
     if (
       worker.disposing ||
@@ -1023,6 +1395,28 @@ export class PluginHostManager {
     ) {
       return;
     }
+
+    if (worker.superseded) {
+      void this.enqueueWorkerMutation(worker.pluginId, async () => {
+        if (
+          worker.disposing ||
+          this.workers.get(worker.pluginId) !== worker ||
+          worker.activeCallCount > 0 ||
+          worker.watches.size > 0 ||
+          worker.retainedLeaseIds.size > 0
+        ) {
+          return;
+        }
+
+        await this.stopWorker(
+          worker,
+          "superseded worker finished its leased work",
+        );
+      });
+
+      return;
+    }
+
     worker.idleTimer = setTimeout(() => {
       worker.idleTimer = null;
       void this.enqueueWorkerMutation(worker.pluginId, async () => {
@@ -1035,6 +1429,7 @@ export class PluginHostManager {
         ) {
           return;
         }
+
         await this.stopWorker(worker, "host plugin worker became idle");
       });
     }, this.options.workerIdleTimeoutMs ?? DEFAULT_WORKER_IDLE_TIMEOUT_MS);
@@ -1054,39 +1449,55 @@ export class PluginHostManager {
     callState: ActiveCallState;
   } {
     const callKey = this.callKey(command);
+
     if (this.activeCalls.has(callKey)) {
       throw new Error(`duplicate host plugin call ${command.callId}`);
     }
+
     const serializedInput = JSON.stringify(command.input);
+
     if (serializedInput === undefined) {
       throw new Error(`host plugin call ${command.callId} has invalid input`);
     }
+
     const inputByteLength = Buffer.byteLength(serializedInput);
+
     const admission = this.activeCallAdmissions.get(command.pluginId) ?? {
       count: 0,
       inputByteLength: 0,
     };
+
     const maxCalls =
       this.options.maxActiveCallsPerPlugin ?? MAX_ACTIVE_CALLS_PER_PLUGIN;
+
     if (admission.count >= maxCalls) {
       throw new Error(
         `host plugin ${command.pluginId} has too many active calls (maximum ${maxCalls})`,
       );
     }
+
     const maxInputBytes =
       this.options.maxActiveCallInputBytesPerPlugin ??
       MAX_ACTIVE_CALL_INPUT_BYTES_PER_PLUGIN;
+
     if (admission.inputByteLength + inputByteLength > maxInputBytes) {
       throw new Error(
         `host plugin ${command.pluginId} active call inputs exceed the ${maxInputBytes} byte budget`,
       );
     }
-    const callState = { cancelled: false, inputByteLength };
+
+    const callState: ActiveCallState = {
+      cancelled: false,
+      inputByteLength,
+      worker: null,
+    };
+
     this.activeCalls.set(callKey, callState);
     this.activeCallAdmissions.set(command.pluginId, {
       count: admission.count + 1,
       inputByteLength: admission.inputByteLength + inputByteLength,
     });
+
     return { callKey, callState };
   }
 
@@ -1098,14 +1509,19 @@ export class PluginHostManager {
     if (this.activeCalls.get(callKey) !== callState) return;
     this.activeCalls.delete(callKey);
     const admission = this.activeCallAdmissions.get(command.pluginId);
+
     if (admission === undefined) return;
     const count = admission.count - 1;
+
     const inputByteLength =
       admission.inputByteLength - callState.inputByteLength;
+
     if (count === 0) {
       this.activeCallAdmissions.delete(command.pluginId);
+
       return;
     }
+
     this.activeCallAdmissions.set(command.pluginId, {
       count,
       inputByteLength,
@@ -1118,19 +1534,24 @@ export class PluginHostManager {
     message: string,
   ): Promise<T> {
     const remainingMs = deadlineMonotonicMs - performance.now();
+
     if (remainingMs <= 0) return Promise.reject(new Error(message));
+
     return new Promise<T>((resolve, reject) => {
       let settled = false;
+
       const finish = (callback: () => void): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         callback();
       };
+
       const timer = setTimeout(
         () => finish(() => reject(new Error(message))),
         Math.max(1, remainingMs),
       );
+
       timer.unref?.();
       promise.then(
         (value) => finish(() => resolve(value)),
@@ -1149,10 +1570,13 @@ export class PluginHostManager {
   private retireGeneration(pluginId: string, generation: string): void {
     const generations = this.retiredGenerations.get(pluginId) ?? new Set();
     generations.add(generation);
+
     if (generations.size > 32) {
       const oldest = generations.values().next().value;
+
       if (oldest !== undefined) generations.delete(oldest);
     }
+
     this.retiredGenerations.set(pluginId, generations);
   }
 
@@ -1162,12 +1586,33 @@ export class PluginHostManager {
     error: Error,
   ): void {
     const pending = worker.pending.get(callId);
+
     if (pending === undefined) return;
     sendToWorker(worker.child, { type: "cancel", callId });
     pending.cancellationError ??= error;
+
     if (pending.forceTimer === null) {
       pending.forceTimer = setTimeout(() => {
-        if (worker.pending.has(callId)) worker.child.kill("SIGKILL");
+        if (!worker.pending.has(callId)) return;
+
+        if (
+          worker.activeCallCount > 1 ||
+          worker.watches.size > 0 ||
+          worker.retainedLeaseIds.size > 0
+        ) {
+          this.options.logger.warn(
+            { ...workerLogContext(worker), callId },
+            "Abandoning host plugin call that ignored cancellation; the worker has other work",
+          );
+          worker.pending.delete(callId);
+          clearTimeout(pending.deadlineTimer);
+          sendToWorker(worker.child, { type: "abandon", callId });
+          pending.reject(pending.cancellationError ?? error);
+
+          return;
+        }
+
+        worker.child.kill("SIGKILL");
       }, CANCEL_GRACE_MS);
       pending.forceTimer.unref?.();
     }

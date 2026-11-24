@@ -3,12 +3,12 @@ import {
   getHost,
   type DbConnection,
   type EnvironmentRow,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   resolveEnvironmentHostLifecycle,
   type EnvironmentProviderSelection,
   type Thread,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { ApiError } from "../../errors.js";
 import {
   threadEnvironmentUnavailableDetails,
@@ -52,30 +52,37 @@ export function resolveThreadEnvironmentRestore(
   args: { thread: RestoreCandidateThread },
 ): ThreadEnvironmentRestoreResolution {
   const { thread } = args;
+
   if (thread.deletedAt !== null || thread.archivedAt !== null) {
     return { restorable: false, refusal: "thread_busy" };
   }
+
   if (!isRestoreReadyThreadStatus(thread.status)) {
     return { restorable: false, refusal: "thread_busy" };
   }
+
   if (thread.environmentId === null) {
     return { restorable: false, refusal: "never_attached" };
   }
+
   const environment = getEnvironment(deps.db, thread.environmentId);
+
   if (environment === null) {
     return { restorable: false, refusal: "never_attached" };
   }
+
   if (environment.status !== "destroyed") {
     return { restorable: false, refusal: "not_destroyed" };
   }
+
   const { environmentProviderId, environmentProviderSelection } = environment;
-  if (
-    environmentProviderId === null ||
-    environmentProviderSelection === null
-  ) {
+
+  if (environmentProviderId === null || environmentProviderSelection === null) {
     return { restorable: false, refusal: "unrecoverable" };
   }
+
   const record = getEnvironmentProvider(environmentProviderId);
+
   if (
     record === undefined ||
     record.pluginId !== environment.environmentProviderPluginId ||
@@ -83,12 +90,14 @@ export function resolveThreadEnvironmentRestore(
   ) {
     return { restorable: false, refusal: "unrecoverable" };
   }
+
   if (
     resolveEnvironmentHostLifecycle(getHost(deps.db, environment.hostId)) !==
     "active"
   ) {
     return { restorable: false, refusal: "unrecoverable" };
   }
+
   return {
     restorable: true,
     target: {

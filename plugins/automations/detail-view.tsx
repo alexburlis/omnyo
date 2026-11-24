@@ -15,7 +15,7 @@ import {
   experimental_ProviderModelPicker as ProviderModelPicker,
   type ExperimentalProviderModelPickerRouting,
   type ExperimentalProviderModelPickerValue,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@/components/ui/hover-reveal";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
@@ -52,7 +52,7 @@ import {
   oneShotLifecycleAllowsToggle,
   PERSONAL_PROJECT_ID,
 } from "./lib/format-schedule";
-import { AutomationMetadataItem } from "./metadata";
+import { AutomationMetadataItem, automationErrorMessage } from "./metadata";
 import { AutomationActionsMenu } from "./actions-menu";
 
 interface AutomationRunsViewState {
@@ -100,13 +100,16 @@ function providerModelRouting(
   if (environment.type === "reuse") {
     return { kind: "environment", environmentId: environment.environmentId };
   }
+
   if (environment.type === "host" && environment.hostId !== undefined) {
     return { kind: "host", hostId: environment.hostId };
   }
+
   return undefined;
 }
 
 function ignoreProviderModelChange(): void {}
+
 function ignorePermissionModeChange(): void {}
 
 interface AutomationLifecycleControlProps {
@@ -155,7 +158,9 @@ export function AutomationLifecycleControl({
   );
 }
 
-export function automationIconName(automation: AutomationResponse): IconName {
+export function automationIconName(automation: {
+  execution: Pick<AutomationResponse["execution"], "mode">;
+}): IconName {
   return automation.execution.mode === "script"
     ? "ComputerTerminal01"
     : "Calendar";
@@ -165,8 +170,11 @@ function automationDetailNextRun(
   automation: AutomationResponse,
 ): ReactNode | null {
   const label = formatDetailScheduleStatusLabel(automation);
+
   if (label === null) return null;
+
   if (!label.startsWith("Next ")) return label;
+
   return (
     <AutomationMetadataItem icon="CalendarCheckOut02" iconLabel="Next run">
       {label.slice("Next ".length)}
@@ -176,6 +184,9 @@ function automationDetailNextRun(
 
 function automationBodyLabel(execution: AutomationExecution): string {
   if (execution.mode === "agent") return "Prompt";
+
+  if (execution.mode === "workflow") return "Workflow";
+
   return "Script";
 }
 
@@ -188,6 +199,7 @@ export function AutomationScriptContent({ content }: { content: string }) {
 
   useLayoutEffect(() => {
     const scrollArea = scrollRef.current;
+
     if (!scrollArea) return;
 
     const updateOverflow = () => {
@@ -196,16 +208,19 @@ export function AutomationScriptContent({ content }: { content: string }) {
           scrollArea.scrollHeight - 1,
       );
     };
+
     updateOverflow();
 
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(updateOverflow);
+
     resizeObserver?.observe(scrollArea);
 
     return () => {
       resizeObserver?.disconnect();
+
       if (scrollbarIdleTimeoutRef.current !== null) {
         window.clearTimeout(scrollbarIdleTimeoutRef.current);
       }
@@ -219,9 +234,11 @@ export function AutomationScriptContent({ content }: { content: string }) {
         scrollArea.scrollHeight - 1,
     );
     scrollArea.dataset.scrollbarScrolling = "true";
+
     if (scrollbarIdleTimeoutRef.current !== null) {
       window.clearTimeout(scrollbarIdleTimeoutRef.current);
     }
+
     scrollbarIdleTimeoutRef.current = window.setTimeout(() => {
       scrollbarIdleTimeoutRef.current = null;
       scrollArea.removeAttribute("data-scrollbar-scrolling");
@@ -260,6 +277,7 @@ function AutomationEnvironmentVariables({
   environment: Record<string, string>;
 }) {
   const names = Object.keys(environment).sort();
+
   if (names.length === 0) return null;
   const label = `${names.length} env ${names.length === 1 ? "var" : "vars"}`;
 
@@ -288,10 +306,15 @@ function automationEnvironmentLabel(
   execution: Extract<AutomationExecution, { mode: "agent" }>,
 ): string {
   const environment = execution.environment;
+
   if (environment.type === "reuse") return "Reuse environment";
+
   if (environment.type === "project-default") return "Project default";
+
   if (environment.workspace.type === "managed-worktree") return "New worktree";
+
   if (environment.workspace.type === "personal") return "Personal workspace";
+
   return environment.workspace.path == null
     ? "Workspace"
     : formatHomePathForDisplay(environment.workspace.path);
@@ -302,10 +325,15 @@ function automationEnvironmentCompactLabel(
 ): string {
   if (execution.targetThreadId !== undefined) return "Thread";
   const environment = execution.environment;
+
   if (environment.type === "reuse") return "Reuse environment";
+
   if (environment.type === "project-default") return "Default";
+
   if (environment.workspace.type === "managed-worktree") return "Worktree";
+
   if (environment.workspace.type === "personal") return "Personal workspace";
+
   return environment.workspace.path === null
     ? "Workspace"
     : formatHomePathForDisplay(environment.workspace.path);
@@ -317,22 +345,29 @@ function AutomationEnvironmentIcon({
   execution: Extract<AutomationExecution, { mode: "agent" }>;
 }) {
   const className = "size-3.5 shrink-0";
+
   if (execution.targetThreadId !== undefined) {
     return <Icon name="MessageSquare" className={className} aria-hidden />;
   }
+
   const environment = execution.environment;
+
   if (environment.type === "reuse") {
     return <Icon name="Folder02" className={className} aria-hidden />;
   }
+
   if (environment.type === "project-default") {
     return <Icon name="Folder" className={className} aria-hidden />;
   }
+
   const providers = {
     personal: { id: "personal-workspace", fallback: "Folder" },
     "managed-worktree": { id: "git-worktree", fallback: "FolderGit" },
     unmanaged: { id: "project-checkout", fallback: "Laptop" },
   } as const;
+
   const provider = providers[environment.workspace.type];
+
   return (
     <ProviderIcon
       providerKind="environment"
@@ -346,7 +381,9 @@ function AutomationEnvironmentIcon({
 function formatRunDuration(run: AutomationRunResponse): string | null {
   if (run.finishedAt === null) return null;
   const seconds = (run.finishedAt - run.startedAt) / 1000;
+
   if (seconds < 0) return null;
+
   return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
 }
 
@@ -386,6 +423,11 @@ const AUTOMATION_RUN_STATUS_VISUALS: Record<
     icon: "CircleCheck",
     className: "text-success",
   },
+  recovered: {
+    label: "Recovered",
+    icon: "RotateCcw",
+    className: "text-subtle-foreground",
+  },
 };
 
 export function RunRow({
@@ -397,13 +439,16 @@ export function RunRow({
 }) {
   const duration = formatRunDuration(run);
   const silent = isSilentRun(run);
+
   const showOutput =
-    run.runMode === "script" &&
-    (run.output !== null || run.error !== null || silent);
+    run.error !== null ||
+    (run.runMode === "script" && (run.output !== null || silent));
+
   const visual = AUTOMATION_RUN_STATUS_VISUALS[run.status];
   const running = run.status === "running";
   const openable = run.runMode === "agent" && run.threadId !== null;
   const RowTag = openable ? "button" : "div";
+
   const line = (
     <RowTag
       {...(openable
@@ -426,11 +471,7 @@ export function RunRow({
       >
         <Icon
           name={visual.icon}
-          className={cn(
-            "size-3.5",
-            visual.className,
-            running && "animate-shine-icon",
-          )}
+          className={cn("size-3.5", visual.className)}
           aria-hidden
         />
       </span>
@@ -457,7 +498,7 @@ export function RunRow({
         <Icon
           name="ChevronRight"
           className={cn(
-            "size-3.5 shrink-0 text-subtle-foreground opacity-0 transition-opacity group-hover/run:opacity-100 group-focus-visible/run:opacity-100",
+            "size-3.5 shrink-0 text-subtle-foreground opacity-0 group-hover/run:opacity-100 group-focus-visible/run:opacity-100",
             HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS,
           )}
           aria-hidden
@@ -465,6 +506,7 @@ export function RunRow({
       ) : null}
     </RowTag>
   );
+
   return (
     <div className="overflow-hidden rounded-sm">
       {line}
@@ -504,12 +546,15 @@ export function AgentAutomationDefinition({
   onUpdate: (update: AgentExecutionUpdate) => Promise<void>;
 }) {
   const [prompt, setPrompt] = useState(execution.prompt);
+
   const [providerModel, setProviderModel] = useState(() =>
     providerModelValue(execution),
   );
+
   const [permissionMode, setPermissionMode] = useState(
     execution.permissionMode,
   );
+
   useEffect(() => {
     setPrompt(execution.prompt);
     setProviderModel(providerModelValue(execution));
@@ -525,6 +570,7 @@ export function AgentAutomationDefinition({
   ]);
   const pickerRouting = providerModelRouting(execution.environment);
   const trimmedPrompt = prompt.trim();
+
   const dirty =
     prompt !== execution.prompt ||
     providerModel.providerId !== execution.providerId ||
@@ -532,6 +578,7 @@ export function AgentAutomationDefinition({
     providerModel.reasoningLevel !== execution.reasoningLevel ||
     providerModel.serviceTier !== execution.serviceTier ||
     permissionMode !== execution.permissionMode;
+
   const promptFooter = (
     <div
       data-automation-prompt-footer=""
@@ -587,6 +634,7 @@ export function AgentAutomationDefinition({
       className="overflow-hidden rounded-xl border border-border bg-background shadow-lift"
       onSubmit={(event) => {
         event.preventDefault();
+
         if (!dirty || trimmedPrompt.length === 0) return;
         void onUpdate({
           prompt: trimmedPrompt,
@@ -688,14 +736,17 @@ export function ScriptAutomationDefinition({
   execution: Extract<AutomationDetailResponse["execution"], { mode: "script" }>;
 }) {
   const { resolvedWorkingDirectory } = execution;
+
   const workingDirectoryLabel =
     resolvedWorkingDirectory === null
       ? "Working directory unavailable"
       : formatHomePathForDisplay(resolvedWorkingDirectory);
+
   const workingDirectoryAriaLabel =
     resolvedWorkingDirectory === null
       ? workingDirectoryLabel
       : `Working directory: ${workingDirectoryLabel}`;
+
   return (
     <ResourceDetailPanel
       surface="flat"
@@ -749,16 +800,20 @@ export function AutomationDetailView({
   footer,
 }: AutomationDetailViewProps) {
   useResourceRouteLabel(automation.name);
+
   const oneShotLifecycle = getOneShotLifecycle({
     enabled: automation.enabled,
     trigger: automation.trigger,
     runCount: automation.runCount,
     lastRunStatus: automation.lastRunStatus,
   });
+
   const requiresPrompt =
     automation.execution.mode === "agent" && automation.execution.prompt === "";
+
   const lifecycleLocked =
     requiresPrompt || !oneShotLifecycleAllowsToggle(oneShotLifecycle);
+
   const lifecycleDisabledReason = requiresPrompt
     ? "Add a prompt before changing this automation."
     : lifecycleLocked
@@ -766,10 +821,12 @@ export function AutomationDetailView({
         ? "Missed its run time. Edit to reschedule."
         : "Already ran. Edit to reschedule."
       : undefined;
+
   const bodyLabel = automationBodyLabel(automation.execution);
   const execution = automation.execution;
   const projectContextLabel = projectLabel;
   const personalProject = automation.projectId === PERSONAL_PROJECT_ID;
+  const errorMessage = automationErrorMessage(automation);
 
   return (
     <ResourceDetailPage
@@ -782,23 +839,45 @@ export function AutomationDetailView({
       }
       title={automation.name}
       metadata={
-        <ResourceMeta
-          items={[
-            <AutomationMetadataItem
-              icon="Folder"
-              iconLabel={
-                personalProject ? `Project: ${projectContextLabel}` : "Project"
-              }
-              title={projectContextLabel}
+        <>
+          <ResourceMeta
+            items={[
+              <AutomationMetadataItem
+                icon="Folder"
+                iconLabel={
+                  personalProject
+                    ? `Project: ${projectContextLabel}`
+                    : "Project"
+                }
+                title={projectContextLabel}
+              >
+                {projectContextLabel}
+              </AutomationMetadataItem>,
+              <AutomationMetadataItem icon="DateTime" iconLabel="Schedule">
+                {formatAutomationTrigger(automation.trigger)}
+              </AutomationMetadataItem>,
+              automationDetailNextRun(automation),
+            ]}
+          />
+          {errorMessage !== null ? (
+            <p
+              data-automation-error=""
+              className="mt-1.5 flex min-w-0 items-start gap-1.5 text-destructive-text"
             >
-              {projectContextLabel}
-            </AutomationMetadataItem>,
-            <AutomationMetadataItem icon="DateTime" iconLabel="Schedule">
-              {formatAutomationTrigger(automation.trigger)}
-            </AutomationMetadataItem>,
-            automationDetailNextRun(automation),
-          ]}
-        />
+              <Icon
+                name="CircleX"
+                className="mt-px size-3.5 shrink-0"
+                aria-hidden
+              />
+              <span
+                className="min-w-0 break-words line-clamp-3"
+                title={errorMessage}
+              >
+                {errorMessage}
+              </span>
+            </p>
+          ) : null}
+        </>
       }
       lifecycleControl={
         <AutomationLifecycleControl
@@ -860,8 +939,12 @@ export function AutomationDetailView({
               onCancel={onCancelEdit}
               onUpdate={onUpdateAgent}
             />
-          ) : (
+          ) : execution.mode === "script" ? (
             <ScriptAutomationDefinition execution={execution} />
+          ) : (
+            <p className="break-all p-2">
+              Graph {execution.graphId}, version {execution.graphVersion}
+            </p>
           )}
         </ResourceDefinitionSection>
 

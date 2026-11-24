@@ -1,13 +1,17 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { nanoid } from "nanoid";
 import type {
+  ClientTurnRequestId,
   Environment,
+  Host,
   PromptHistoryEntry,
   ResolvedThreadExecutionOptions,
   ThreadListEntry,
   ThreadQueuedMessage,
+  ThreadRuntimeState,
+  ThreadStatus,
   ThreadWithRuntime,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   CreateQueuedMessageRequest,
   PromptHistoryResponse,
@@ -18,39 +22,76 @@ import type {
   ThreadResponse,
   ThreadSearchResponse,
   ThreadTimelineResponse,
+  SystemAppUpdateStatus,
   TimelineConversationAttachments,
   TimelineRow,
+  TimelineUserConversationRow,
   UpdateQueuedMessageRequest,
-} from "@bb/server-contract";
-import type { AppCreateThreadRequest } from "@bb/client-core";
-import { OPTIMISTIC_TIMELINE_ROW_ID_PREFIX } from "@bb/client-core";
+} from "@omnyo/server-contract";
+import type { AppCreateThreadRequest } from "@omnyo/client-core";
 import { collectPromptAttachments } from "@/lib/prompt-attachments";
+import {
+  confirmPendingQueuedMessageRemoval,
+  mergePendingComposerQueuedMessages,
+  releasePendingComposerQueuedMessage,
+  releasePendingQueuedMessageRemoval,
+  retainPendingComposerQueuedMessage,
+  retainPendingComposerThreadState,
+  retainPendingQueuedMessageRemoval,
+  settlePendingComposerThreadState,
+} from "./pending-composer-cache-owner";
+import {
+  acceptPendingSentMessage,
+  addPendingSentMessage,
+  removePendingSentMessage,
+} from "./pending-sent-messages";
 import { prependPromptHistoryEntry } from "@/lib/prompt-history";
+import { readCachedThreadDispatchWait } from "./dispatch-readiness-cache-owner";
+import {
+  localQueuedMessageWork,
+  withLocalThreadWork,
+  type LocalQueuedMessage,
+} from "./local-thread-work";
+import { carryQueuedMessageRenderKey } from "./queued-message-render-keys";
 import {
   applyQueuedMessageReorder,
   collectLeadQueuedMessageGroupIds,
   preserveLeadQueuedMessageGroupAfterReorder,
   type QueuedMessageReorderRequest,
 } from "@/lib/queued-message-reorder";
-import type { SendThreadMessageMutationRequest } from "../mutations/mutation-request-types";
+import type {
+  EditMessageMutationRequest,
+  SendThreadMessageMutationRequest,
+} from "../mutations/mutation-request-types";
 import {
-  insertOptimisticTimelineRow,
   optimisticallyInsertThread,
-  removeOptimisticTimelineRow,
   applyToCachedThreadListsAndSidebarNavigation,
+  getCachedSidebarNavigationThreads,
   updateCachedThread,
 } from "./query-cache";
 import {
-  applyToCachedThreadLists,
+  predictInboxSnapshot,
+  type InboxPrediction,
+} from "./inbox-snapshot-cache-owner";
+import {
+  scheduleInboxSend,
+  startInboxTurn,
+  stopInboxTurn,
+} from "@/lib/inbox-predictions";
+import {
   getCachedThreadLists,
-  type ThreadListCacheData,
+  iterateThreadListCacheEntries,
 } from "./thread-list-cache-data";
 import {
   environmentQueryKey,
+  hostsQueryKey,
   projectPromptHistoryQueryKey,
   projectSourceBranchesQueryKeyPrefix,
   threadPromptHistoryQueryKey,
   threadQueryKey,
+  sidebarNavigationQueryKey,
+  threadDetailBootstrapQueryKey,
+  systemAppUpdateQueryKey,
   threadQueuedMessagesQueryKey,
   threadSearchQueryKeyPrefix,
   threadsQueryKey,
@@ -127,6 +168,7 @@ interface RemoveQueuedMessageRequest {
 
 interface SendQueuedMessageRequest extends RemoveQueuedMessageRequest {
   mode: SendQueuedMessageMode;
+  requestId?: ClientTurnRequestId;
 }
 
 interface RemoveQueuedMessageTransactionArgs {
@@ -160,7 +202,7 @@ interface RollbackRemoveQueuedMessageTransactionArgs {
 interface ApplyQueuedMessageSendResultArgs {
   queryClient: QueryClient;
   request: SendQueuedMessageRequest;
-  result: SendQueuedMessageResponse;
+  result: Exclude<SendQueuedMessageResponse, { delivery: "already-sent" }>;
   transaction: RemoveQueuedMessageTransaction | undefined;
 }
 
@@ -210,20 +252,9 @@ interface ApplyQueuedMessagesResultArgs {
   request: Pick<ReorderQueuedMessageRequest, "id">;
 }
 
-interface StopThreadTransactionArgs extends ThreadIdCacheArgs {
-  requestedAt: number;
-}
-
 interface RollbackStopThreadTransactionArgs extends ThreadIdCacheArgs {
   transaction: StopThreadTransaction | undefined;
 }
-
-interface ThreadListSnapshotEntry {
-  data: ThreadListCacheData;
-  queryKey: QueryKey;
-}
-
-type ThreadListSnapshot = ThreadListSnapshotEntry[];
 
 interface BuildAcceptedPromptHistoryEntryArgs {
   createdAt: number;
@@ -232,6 +263,7 @@ interface BuildAcceptedPromptHistoryEntryArgs {
 
 interface BuildOptimisticUserMessageRowParams {
   createdAt: number;
+  clientRequestId: ClientTurnRequestId | null;
   input: SendThreadMessageMutationRequest["input"];
   mode: SendThreadMessageMutationRequest["mode"];
   threadId: string;
@@ -242,6 +274,7 @@ interface BuildOptimisticQueuedMessageParams {
   createdAt: number;
   queryClient: QueryClient;
   request: CreateQueuedMessageRequestWithThreadId & { sendAt?: number };
+  waitingOn?: NonNullable<ThreadQueuedMessage["waitingOn"]>;
 }
 
 type OptimisticTurnRequestKind = "message" | "steer";
@@ -257,13 +290,17 @@ interface SendThreadMessageAcceptedTurnTransaction {
   optimisticRowId: string;
   optimisticThreadDataUpdateCount: number | null;
   previousThread: ThreadResponse | undefined;
+  listRollback: ReadonlyMap<ThreadListEntry, ThreadListEntry>;
+  inboxPrediction: InboxPrediction;
 }
 
 interface SendThreadMessageQueuedTransaction {
   kind: "queued-message";
+  inboxPrediction: InboxPrediction | null;
   optimisticCreatedAt: number;
   optimisticQueuedMessageId: string;
-  previousThreadStatus: ThreadWithRuntime["status"] | null;
+  previousThreadDataUpdateCount: number | null;
+  listRollback: ReadonlyMap<ThreadListEntry, ThreadListEntry>;
 }
 
 export type SendThreadMessageTransaction =
@@ -277,6 +314,7 @@ export interface ReorderQueuedMessageTransaction {
 export interface CreateQueuedMessageTransaction {
   optimisticCreatedAt: number;
   optimisticQueuedMessageId: string;
+  listRollback: ReadonlyMap<ThreadListEntry, ThreadListEntry>;
 }
 
 export interface UpdateQueuedMessageTransaction {
@@ -285,17 +323,49 @@ export interface UpdateQueuedMessageTransaction {
 }
 
 export interface RemoveQueuedMessageTransaction {
+  pendingStatusToken: string | null;
+  inboxPrediction: InboxPrediction | null;
+  listRollback: ReadonlyMap<ThreadListEntry, ThreadListEntry>;
   optimisticCreatedAt: number | null;
   optimisticQueueDataUpdateCount: number;
-  optimisticRowId: string | null;
+  optimisticRowIds: readonly string[];
   optimisticThreadDataUpdateCount: number | null;
   previousQueuedMessages: ThreadQueuedMessageListResponse | undefined;
   previousThread: ThreadResponse | undefined;
+  removedQueuedMessageIds: readonly string[];
 }
 
 export interface StopThreadTransaction {
   previousThread: ThreadResponse | undefined;
-  previousThreadLists: ThreadListSnapshot;
+  listRollback: ReadonlyMap<ThreadListEntry, ThreadListEntry>;
+  inboxPrediction: InboxPrediction;
+  optimisticThreadDataUpdateCount: number | null;
+}
+
+interface TimelineSnapshot {
+  queryKey: QueryKey;
+  previous: ThreadTimelineResponse;
+  optimisticDataUpdateCount: number;
+}
+
+export interface EditMessageTransaction {
+  inboxPrediction: InboxPrediction | null;
+  listRollback: ReadonlyMap<ThreadListEntry, ThreadListEntry>;
+  optimisticThreadDataUpdateCount: number | null;
+  pendingStatusToken: string | null;
+  previousThread: ThreadResponse | undefined;
+  timelineSnapshots: readonly TimelineSnapshot[];
+}
+
+interface EditMessageTransactionArgs {
+  queryClient: QueryClient;
+  request: EditMessageMutationRequest & { messageId: string };
+}
+
+interface SettleEditMessageTransactionArgs {
+  queryClient: QueryClient;
+  threadId: string;
+  transaction: EditMessageTransaction | undefined;
 }
 
 function buildAcceptedPromptHistoryEntry({
@@ -329,7 +399,9 @@ function applyQueuedMessageGroupBoundary({
   const boundaryIndex = queuedMessages.findIndex(
     (queuedMessage) => queuedMessage.id === groupBoundaryQueuedMessageId,
   );
+
   if (boundaryIndex === -1) return [...queuedMessages];
+
   return queuedMessages.map((queuedMessage, index) => ({
     ...queuedMessage,
     groupWithNext: index < boundaryIndex,
@@ -341,27 +413,24 @@ function queuedMessageSendGroup(
   queuedMessageId: string,
 ): ThreadQueuedMessage[] {
   if (!queuedMessages) return [];
+
   const queuedMessageIndex = queuedMessages.findIndex(
     (queuedMessage) => queuedMessage.id === queuedMessageId,
   );
+
   if (queuedMessageIndex === -1) return [];
+
   if (queuedMessageIndex !== 0) return [queuedMessages[queuedMessageIndex]!];
 
   const group: ThreadQueuedMessage[] = [];
+
   for (const queuedMessage of queuedMessages) {
     group.push(queuedMessage);
+
     if (!queuedMessage.groupWithNext) break;
   }
-  return group;
-}
 
-function queuedMessageSendIds(
-  queuedMessages: readonly ThreadQueuedMessage[] | undefined,
-  queuedMessageId: string,
-): Set<string> {
-  const group = queuedMessageSendGroup(queuedMessages, queuedMessageId);
-  if (group.length === 0) return new Set([queuedMessageId]);
-  return new Set(group.map((queuedMessage) => queuedMessage.id));
+  return group;
 }
 
 function removeQueuedMessagesAndRepairGroupEdges(
@@ -369,9 +438,11 @@ function removeQueuedMessagesAndRepairGroupEdges(
   removeIds: ReadonlySet<string>,
 ): ThreadQueuedMessageListResponse | undefined {
   if (!queuedMessages) return queuedMessages;
+
   return queuedMessages.flatMap((queuedMessage, index) => {
     if (removeIds.has(queuedMessage.id)) return [];
     const nextQueuedMessage = queuedMessages[index + 1];
+
     if (
       nextQueuedMessage &&
       removeIds.has(nextQueuedMessage.id) &&
@@ -379,6 +450,7 @@ function removeQueuedMessagesAndRepairGroupEdges(
     ) {
       return [{ ...queuedMessage, groupWithNext: false }];
     }
+
     return [queuedMessage];
   });
 }
@@ -396,11 +468,13 @@ function buildOptimisticQueuedMessage({
   createdAt,
   queryClient,
   request,
+  waitingOn,
 }: BuildOptimisticQueuedMessageParams): ThreadQueuedMessage {
   const defaultExecutionOptions = getCachedDefaultExecutionOptions(
     queryClient,
     request.id,
   );
+
   const scheduledSendAt =
     request.sendAt !== undefined && request.sendAt > createdAt
       ? request.sendAt
@@ -427,7 +501,8 @@ function buildOptimisticQueuedMessage({
       request.serviceTier ?? defaultExecutionOptions?.serviceTier ?? "default",
     groupWithNext: false,
     sendAt: scheduledSendAt,
-    waitingOn: scheduledSendAt === null ? null : { kind: "time" },
+    waitingOn:
+      waitingOn ?? (scheduledSendAt === null ? null : { kind: "time" }),
     failureReason: null,
     payload: { kind: "inline" },
     editable: true,
@@ -439,17 +514,35 @@ function buildOptimisticQueuedMessage({
 function insertOptimisticQueuedMessage({
   queryClient,
   request,
+  waitingOn,
 }: {
   queryClient: QueryClient;
   request: CreateQueuedMessageRequestWithThreadId & { sendAt?: number };
+  waitingOn?: NonNullable<ThreadQueuedMessage["waitingOn"]>;
 }): CreateQueuedMessageTransaction {
   const queryKey = threadQueuedMessagesQueryKey(request.id);
   const optimisticCreatedAt = Date.now();
+
   const optimisticQueuedMessage = buildOptimisticQueuedMessage({
     createdAt: optimisticCreatedAt,
     queryClient,
     request,
+    waitingOn,
   });
+
+  beginComposerThreadState(
+    queryClient,
+    request.id,
+    optimisticQueuedMessage.id,
+    "queued",
+    optimisticQueuedMessage,
+  );
+
+  retainPendingComposerQueuedMessage(
+    queryClient,
+    request.id,
+    optimisticQueuedMessage,
+  );
 
   queryClient.setQueryData<ThreadQueuedMessageListResponse>(
     queryKey,
@@ -462,7 +555,153 @@ function insertOptimisticQueuedMessage({
   return {
     optimisticCreatedAt,
     optimisticQueuedMessageId: optimisticQueuedMessage.id,
+    listRollback: applyOptimisticThreadListState(
+      queryClient,
+      request.id,
+      (thread) =>
+        withLocalThreadWork({ ...thread, queuedWork: "waiting" }, [
+          localQueuedMessageWork(thread, optimisticQueuedMessage),
+        ]),
+    ),
   };
+}
+
+function cancelComposerThreadStateReads(
+  queryClient: QueryClient,
+  threadId: string,
+): void {
+  for (const queryKey of [
+    sidebarNavigationQueryKey(),
+    threadsQueryKey(),
+    threadQueryKey(threadId),
+    threadDetailBootstrapQueryKey(threadId),
+  ])
+    void queryClient.cancelQueries({ queryKey });
+}
+
+function beginComposerThreadState(
+  queryClient: QueryClient,
+  threadId: string,
+  token: string,
+  kind: "active" | "queued",
+  queuedMessage: LocalQueuedMessage | null = null,
+): void {
+  cancelComposerThreadStateReads(queryClient, threadId);
+  retainPendingComposerThreadState(
+    queryClient,
+    threadId,
+    token,
+    kind,
+    queryClient.getQueryData<ThreadResponse>(threadQueryKey(threadId)) ??
+      getCachedSidebarNavigationThreads(queryClient).find(
+        (thread) => thread.id === threadId,
+      ),
+    queuedMessage,
+  );
+}
+
+function settleComposerThreadState(
+  queryClient: QueryClient,
+  threadId: string,
+  token: string,
+  outcome: "sent" | "queued" | "failed",
+): void {
+  cancelComposerThreadStateReads(queryClient, threadId);
+
+  const restore = settlePendingComposerThreadState(
+    queryClient,
+    threadId,
+    token,
+    outcome,
+  );
+
+  if (restore !== null) {
+    applyToCachedThreadListsAndSidebarNavigation(queryClient, (threads) =>
+      threads.map((thread) =>
+        thread.id === threadId && thread.updatedAt <= restore.updatedAt
+          ? { ...thread, ...restore }
+          : thread,
+      ),
+    );
+    updateCachedThread(queryClient, threadId, (thread) =>
+      thread.updatedAt <= restore.updatedAt
+        ? { ...thread, ...restore }
+        : thread,
+    );
+  }
+
+  for (const queryKey of [
+    sidebarNavigationQueryKey(),
+    threadsQueryKey(),
+    threadQueryKey(threadId),
+  ]) {
+    void queryClient.invalidateQueries({ queryKey });
+  }
+}
+
+function applyOptimisticThreadListState(
+  queryClient: QueryClient,
+  threadId: string,
+  update: (thread: ThreadListEntry) => ThreadListEntry,
+): ReadonlyMap<ThreadListEntry, ThreadListEntry> {
+  const lists = getCachedThreadLists(queryClient, {
+    queryKey: threadsQueryKey(),
+  });
+
+  const previous = lists.map(({ queryKey, data }) => ({
+    queryKey,
+    thread: [...iterateThreadListCacheEntries(data)].find(
+      (thread) => thread.id === threadId,
+    ),
+  }));
+
+  const previousSidebar = getCachedSidebarNavigationThreads(queryClient).find(
+    (thread) => thread.id === threadId,
+  );
+
+  applyToCachedThreadListsAndSidebarNavigation(queryClient, (threads) =>
+    threads.map((thread) => (thread.id === threadId ? update(thread) : thread)),
+  );
+  const rollback = new Map<ThreadListEntry, ThreadListEntry>();
+
+  for (const snapshot of previous) {
+    const current = getCachedThreadLists(queryClient, {
+      queryKey: snapshot.queryKey,
+    }).find((entry) => entry.queryKey === snapshot.queryKey);
+
+    const thread =
+      current === undefined
+        ? undefined
+        : [...iterateThreadListCacheEntries(current.data)].find(
+            (entry) => entry.id === threadId,
+          );
+
+    if (thread !== undefined && snapshot.thread !== undefined)
+      rollback.set(thread, snapshot.thread);
+  }
+
+  const currentSidebar = getCachedSidebarNavigationThreads(queryClient).find(
+    (thread) => thread.id === threadId,
+  );
+
+  if (currentSidebar !== undefined && previousSidebar !== undefined)
+    rollback.set(currentSidebar, previousSidebar);
+
+  return rollback;
+}
+
+function restoreOptimisticThreadLists(
+  queryClient: QueryClient,
+  rollback: ReadonlyMap<ThreadListEntry, ThreadListEntry>,
+  project: (thread: ThreadListEntry) => ThreadListEntry = (thread) => thread,
+): void {
+  applyToCachedThreadListsAndSidebarNavigation(queryClient, (threads) =>
+    threads.map((thread) => {
+      const previous = rollback.get(thread);
+
+      return previous === undefined ? thread : project(previous);
+    }),
+  );
 }
 
 function restoreQueuedMessageSnapshotIfUnchanged({
@@ -477,17 +716,90 @@ function restoreQueuedMessageSnapshotIfUnchanged({
   threadId: string;
 }): boolean {
   const queryKey = threadQueuedMessagesQueryKey(threadId);
+
   if (
     queryClient.getQueryState(queryKey)?.dataUpdateCount !==
     optimisticQueueDataUpdateCount
   ) {
     return false;
   }
-  queryClient.setQueryData<ThreadQueuedMessageListResponse>(
-    queryKey,
-    previousQueuedMessages ?? [],
-  );
+
+  const restored = previousQueuedMessages ?? [];
+  queryClient.setQueryData<ThreadQueuedMessageListResponse>(queryKey, restored);
+
+  updateCachedQueuedWork(queryClient, threadId);
+
   return true;
+}
+
+function queuedWorkOf(
+  messages: readonly ThreadQueuedMessage[],
+): ThreadListEntry["queuedWork"] {
+  return messages.some((message) => message.failureReason !== null)
+    ? "failed"
+    : messages.length > 0
+      ? "waiting"
+      : "none";
+}
+
+function workMentions(
+  thread: ThreadListEntry,
+  ids: ReadonlySet<string>,
+): boolean {
+  return (
+    thread.work !== null &&
+    (thread.work.activity.some((activity) => ids.has(activity.id)) ||
+      thread.work.waits.some((wait) => ids.has(wait.id)))
+  );
+}
+
+function withQueuedMessageWork(
+  thread: ThreadListEntry,
+  messages: readonly ThreadQueuedMessage[],
+  removedIds: ReadonlySet<string>,
+): ThreadListEntry {
+  const next: ThreadListEntry = {
+    ...thread,
+    queuedWork: queuedWorkOf(messages),
+    work:
+      thread.work === null
+        ? null
+        : {
+            ...thread.work,
+            activity: thread.work.activity.filter(
+              (activity) => !removedIds.has(activity.id),
+            ),
+            waits: thread.work.waits.filter((wait) => !removedIds.has(wait.id)),
+          },
+  };
+
+  return withLocalThreadWork(
+    next,
+    messages.map((message) => localQueuedMessageWork(next, message)),
+  );
+}
+
+function updateCachedQueuedWork(
+  queryClient: QueryClient,
+  threadId: string,
+  removedIds: ReadonlySet<string> = new Set(),
+): void {
+  const messages = queryClient.getQueryData<ThreadQueuedMessageListResponse>(
+    threadQueuedMessagesQueryKey(threadId),
+  );
+
+  if (messages === undefined) return;
+
+  const queuedWork = queuedWorkOf(messages);
+
+  applyToCachedThreadListsAndSidebarNavigation(queryClient, (threads) =>
+    threads.map((thread) =>
+      thread.id === threadId &&
+      (thread.queuedWork !== queuedWork || workMentions(thread, removedIds))
+        ? withQueuedMessageWork(thread, messages, removedIds)
+        : thread,
+    ),
+  );
 }
 
 function removeOptimisticQueuedMessage(
@@ -495,18 +807,34 @@ function removeOptimisticQueuedMessage(
   threadId: string,
   optimisticQueuedMessageId: string,
 ): boolean {
+  releasePendingComposerQueuedMessage(
+    queryClient,
+    threadId,
+    optimisticQueuedMessageId,
+  );
   let removed = false;
   queryClient.setQueryData<ThreadQueuedMessageListResponse>(
     threadQueuedMessagesQueryKey(threadId),
     (currentQueuedMessages) => {
       if (!currentQueuedMessages) return currentQueuedMessages;
+
       const nextQueuedMessages = currentQueuedMessages.filter(
         (queuedMessage) => queuedMessage.id !== optimisticQueuedMessageId,
       );
+
       removed = nextQueuedMessages.length !== currentQueuedMessages.length;
+
       return removed ? nextQueuedMessages : currentQueuedMessages;
     },
   );
+
+  if (removed)
+    updateCachedQueuedWork(
+      queryClient,
+      threadId,
+      new Set([optimisticQueuedMessageId]),
+    );
+
   return removed;
 }
 
@@ -523,20 +851,37 @@ function reconcileAuthoritativeQueuedMessage({
   queuedMessage: ThreadQueuedMessage;
   threadId: string;
 }): void {
+  if (optimisticQueuedMessageId !== null)
+    releasePendingComposerQueuedMessage(
+      queryClient,
+      threadId,
+      optimisticQueuedMessageId,
+    );
   queryClient.setQueryData<ThreadQueuedMessageListResponse>(
     threadQueuedMessagesQueryKey(threadId),
     (currentQueuedMessages) => {
       if (!currentQueuedMessages) {
         return insertWhenMissing ? [queuedMessage] : currentQueuedMessages;
       }
+
       const authoritativeIndex = currentQueuedMessages.findIndex(
         (currentQueuedMessage) => currentQueuedMessage.id === queuedMessage.id,
       );
+
       if (authoritativeIndex !== -1) {
-        const nextQueuedMessages = [...currentQueuedMessages];
-        nextQueuedMessages[authoritativeIndex] = queuedMessage;
+        const nextQueuedMessages = currentQueuedMessages.filter(
+          (message) => message.id !== optimisticQueuedMessageId,
+        );
+
+        const index = nextQueuedMessages.findIndex(
+          (message) => message.id === queuedMessage.id,
+        );
+
+        nextQueuedMessages[index] = queuedMessage;
+
         return nextQueuedMessages;
       }
+
       const optimisticIndex =
         optimisticQueuedMessageId === null
           ? -1
@@ -544,11 +889,19 @@ function reconcileAuthoritativeQueuedMessage({
               (currentQueuedMessage) =>
                 currentQueuedMessage.id === optimisticQueuedMessageId,
             );
-      if (optimisticIndex !== -1) {
+
+      if (optimisticIndex !== -1 && optimisticQueuedMessageId !== null) {
+        carryQueuedMessageRenderKey(
+          queryClient,
+          optimisticQueuedMessageId,
+          queuedMessage.id,
+        );
         const nextQueuedMessages = [...currentQueuedMessages];
         nextQueuedMessages[optimisticIndex] = queuedMessage;
+
         return nextQueuedMessages;
       }
+
       return insertWhenMissing
         ? [...currentQueuedMessages, queuedMessage]
         : currentQueuedMessages;
@@ -561,26 +914,41 @@ function removeCachedQueuedMessage({
   request,
 }: RemoveQueuedMessageTransactionArgs): RemoveQueuedMessageTransaction {
   const queryKey = threadQueuedMessagesQueryKey(request.id);
+
   const previousQueuedMessages =
     queryClient.getQueryData<ThreadQueuedMessageListResponse>(queryKey);
+
+  const removedIds = new Set([request.queuedMessageId]);
 
   queryClient.setQueryData<ThreadQueuedMessageListResponse>(
     queryKey,
     (currentQueuedMessages) =>
       removeQueuedMessagesAndRepairGroupEdges(
         currentQueuedMessages,
-        new Set([request.queuedMessageId]),
+        removedIds,
       ),
   );
 
+  const remaining =
+    queryClient.getQueryData<ThreadQueuedMessageListResponse>(queryKey);
+
   return {
+    pendingStatusToken: null,
+    inboxPrediction: null,
+    listRollback:
+      remaining === undefined
+        ? new Map()
+        : applyOptimisticThreadListState(queryClient, request.id, (thread) =>
+            withQueuedMessageWork(thread, remaining, removedIds),
+          ),
     optimisticCreatedAt: null,
     optimisticQueueDataUpdateCount:
       queryClient.getQueryState(queryKey)?.dataUpdateCount ?? 0,
-    optimisticRowId: null,
+    optimisticRowIds: [],
     optimisticThreadDataUpdateCount: null,
     previousQueuedMessages,
     previousThread: undefined,
+    removedQueuedMessageIds: [],
   };
 }
 
@@ -614,19 +982,6 @@ function hasUnmanagedCheckoutIntent(request: AppCreateThreadRequest): boolean {
   );
 }
 
-function snapshotThreadLists(queryClient: QueryClient): ThreadListSnapshot {
-  return getCachedThreadLists(queryClient, { queryKey: threadsQueryKey() });
-}
-
-function restoreThreadLists(
-  queryClient: QueryClient,
-  threadLists: ThreadListSnapshot,
-): void {
-  for (const { queryKey, data } of threadLists) {
-    queryClient.setQueryData(queryKey, data);
-  }
-}
-
 function optimisticTurnRequestKind({
   mode,
   threadStatus,
@@ -634,30 +989,116 @@ function optimisticTurnRequestKind({
   if (mode === "steer" || mode === "steer-if-active") {
     return "steer";
   }
+
   if (mode === "auto" && threadStatus === "active") {
     return "steer";
   }
+
   return "message";
 }
 
-function requestWillOptimisticallyQueue(
-  request: SendThreadMessageMutationRequest,
-  thread: ThreadWithRuntime | undefined,
-): boolean {
-  return (
-    (request.sendAt !== undefined && request.sendAt > Date.now()) ||
-    (request.mode === "queue-if-active" && thread?.status === "active")
+export function predictCachedThreadSendWait(
+  queryClient: QueryClient,
+  request: Pick<SendThreadMessageMutationRequest, "id" | "mode" | "sendAt">,
+): NonNullable<ThreadQueuedMessage["waitingOn"]> | undefined {
+  return optimisticSendWait(
+    queryClient,
+    request,
+    queryClient.getQueryData<ThreadResponse>(threadQueryKey(request.id)),
   );
 }
 
+function cachedThreadHost(
+  queryClient: QueryClient,
+  thread: ThreadWithRuntime | undefined,
+): Host | undefined {
+  if (thread?.environmentId == null) return undefined;
+
+  const hostId = queryClient.getQueryData<Pick<Environment, "hostId">>(
+    environmentQueryKey(thread.environmentId),
+  )?.hostId;
+
+  if (hostId === undefined) return undefined;
+
+  return queryClient
+    .getQueryData<Host[]>(hostsQueryKey())
+    ?.find((host) => host.id === hostId);
+}
+
+function isMachineWaitingForExecution(host: Host): boolean {
+  return (
+    host.lifecycle.suspendedAt !== null ||
+    host.lifecycle.phase === "suspending" ||
+    host.lifecycle.phase === "suspended" ||
+    host.lifecycle.phase === "resuming"
+  );
+}
+
+function optimisticSendWait(
+  queryClient: QueryClient,
+  request: Pick<
+    SendThreadMessageMutationRequest,
+    "id" | "mode" | "sendAt" | "sendNow" | "expectedPluginWait"
+  >,
+  thread: ThreadWithRuntime | undefined,
+): NonNullable<ThreadQueuedMessage["waitingOn"]> | undefined {
+  const sendNow = request.sendNow === true;
+
+  if (!sendNow && request.expectedPluginWait !== undefined)
+    return request.expectedPluginWait;
+
+  const resting =
+    thread === undefined ||
+    thread.status === "idle" ||
+    thread.status === "pending" ||
+    thread.status === "error";
+
+  if (
+    resting &&
+    queryClient.getQueryData<SystemAppUpdateStatus>(systemAppUpdateQueryKey())
+      ?.newTurnsPausedForUpdate === true
+  )
+    return { kind: "server-update" };
+
+  if (!sendNow && request.sendAt !== undefined && request.sendAt > Date.now())
+    return { kind: "time" };
+
+  if (thread?.status === "stopping") return { kind: "stopping" };
+
+  const host = cachedThreadHost(queryClient, thread);
+
+  if (host !== undefined && isMachineWaitingForExecution(host))
+    return { kind: "host-offline", hostName: host.name };
+
+  if (resting && host?.availability === "away")
+    return { kind: "host-away", hostName: host.name };
+
+  if (
+    host?.status === "disconnected" &&
+    (resting || request.mode === "queue-if-active")
+  )
+    return { kind: "host-offline", hostName: host.name };
+
+  if (thread?.status === "active" || thread?.status === "starting")
+    return request.mode === "queue-if-active"
+      ? { kind: "thread-busy" }
+      : undefined;
+
+  if (sendNow) return undefined;
+
+  return readCachedThreadDispatchWait({ queryClient, threadId: request.id });
+}
+
 function buildOptimisticUserMessageRow({
+  clientRequestId,
   createdAt,
   input,
   mode,
   threadId,
   threadStatus,
-}: BuildOptimisticUserMessageRowParams): TimelineRow {
-  const id = `${OPTIMISTIC_TIMELINE_ROW_ID_PREFIX}${nanoid()}`;
+}: BuildOptimisticUserMessageRowParams): TimelineUserConversationRow {
+  const id = `optimistic-user-${nanoid()}`;
+
   const text = input
     .filter(
       (entry): entry is Extract<typeof entry, { type: "text" }> =>
@@ -665,7 +1106,9 @@ function buildOptimisticUserMessageRow({
     )
     .map((entry) => entry.text)
     .join("\n\n");
+
   const attachments = collectPromptAttachments(input);
+
   const timelineAttachments: TimelineConversationAttachments | null =
     attachments
       ? {
@@ -678,6 +1121,7 @@ function buildOptimisticUserMessageRow({
           localFileDetails: attachments.localFileDetails ?? [],
         }
       : null;
+
   return {
     id,
     kind: "conversation",
@@ -697,6 +1141,7 @@ function buildOptimisticUserMessageRow({
     systemMessageKind: "unlabeled",
     systemMessageSubject: null,
     turnRequest: {
+      clientRequestId,
       isGrouped: false,
       kind: optimisticTurnRequestKind({ mode, threadStatus }),
       status: "pending",
@@ -705,42 +1150,60 @@ function buildOptimisticUserMessageRow({
 }
 
 function applyOptimisticAcceptedTurnThreadState({
-  createdAt,
   queryClient,
   threadId,
 }: {
-  createdAt: number;
   queryClient: QueryClient;
   threadId: string;
-}): void {
-  updateCachedThread(queryClient, threadId, (thread) => ({
+}): ReadonlyMap<ThreadListEntry, ThreadListEntry> {
+  applyOptimisticAcceptedTurnDetailState({ queryClient, threadId });
+
+  return applyOptimisticAcceptedTurnListState({ queryClient, threadId });
+}
+
+function withAcceptedTurnStatus<
+  T extends { status: ThreadStatus; runtime: ThreadRuntimeState },
+>(thread: T): T {
+  return {
     ...thread,
     status: "active",
-    updatedAt: Math.max(thread.updatedAt, createdAt),
     runtime: {
       ...thread.runtime,
       displayStatus:
         thread.runtime.displayStatus === "waiting-for-host"
-          ? thread.runtime.displayStatus
+          ? "waiting-for-host"
           : "active",
     },
-  }));
+  };
 }
 
-function removeOptimisticTimelineRowIfPresent(
-  queryClient: QueryClient,
-  threadId: string,
-  optimisticRowId: string,
-): boolean {
-  const wasPresent = queryClient
-    .getQueriesData<ThreadTimelineResponse>({
-      queryKey: threadTimelineQueryKeyPrefix(threadId),
-    })
-    .some(([, timeline]) =>
-      timeline?.rows.some((row) => row.id === optimisticRowId),
-    );
-  removeOptimisticTimelineRow(queryClient, threadId, optimisticRowId);
-  return wasPresent;
+function applyOptimisticAcceptedTurnDetailState({
+  queryClient,
+  threadId,
+}: ThreadIdCacheArgs): void {
+  updateCachedThread(queryClient, threadId, (thread) =>
+    withLocalThreadWork(withAcceptedTurnStatus(thread)),
+  );
+}
+
+function applyOptimisticAcceptedTurnListState({
+  queryClient,
+  threadId,
+}: ThreadIdCacheArgs): ReadonlyMap<ThreadListEntry, ThreadListEntry> {
+  const queuedWork =
+    (queryClient.getQueryData<ThreadQueuedMessageListResponse>(
+      threadQueuedMessagesQueryKey(threadId),
+    )?.length ?? 0) > 0
+      ? "waiting"
+      : "none";
+
+  return applyOptimisticThreadListState(queryClient, threadId, (thread) =>
+    withLocalThreadWork({ ...withAcceptedTurnStatus(thread), queuedWork }),
+  );
+}
+
+function isRestingThreadStatus(status: ThreadStatus): boolean {
+  return status === "idle" || status === "pending" || status === "error";
 }
 
 function restoreOptimisticThreadSnapshotIfUnchanged({
@@ -753,47 +1216,52 @@ function restoreOptimisticThreadSnapshotIfUnchanged({
   previousThread: ThreadResponse | undefined;
   queryClient: QueryClient;
   threadId: string;
-}): void {
+}): boolean {
   if (
     optimisticThreadDataUpdateCount === null ||
     previousThread === undefined ||
     queryClient.getQueryState(threadQueryKey(threadId))?.dataUpdateCount !==
       optimisticThreadDataUpdateCount
   ) {
-    return;
+    return false;
   }
+
   queryClient.setQueryData<ThreadResponse>(
     threadQueryKey(threadId),
     previousThread,
   );
+
+  return true;
+}
+
+function removePendingSentMessages(
+  queryClient: QueryClient,
+  threadId: string,
+  rowIds: readonly string[],
+): void {
+  for (const rowId of rowIds)
+    removePendingSentMessage(queryClient, threadId, rowId);
 }
 
 function applyOptimisticStopRequest({
   queryClient,
-  requestedAt,
   threadId,
-}: StopThreadTransactionArgs): void {
-  updateCachedThread(queryClient, threadId, (thread) => ({
-    ...thread,
-    status: "stopping",
-    runtime: { ...thread.runtime, displayStatus: "stopping" },
-    updatedAt: Math.max(thread.updatedAt, requestedAt),
-  }));
+}: ThreadIdCacheArgs): ReadonlyMap<ThreadListEntry, ThreadListEntry> {
+  updateCachedThread(queryClient, threadId, (thread) =>
+    withLocalThreadWork({
+      ...thread,
+      status: "stopping",
+      runtime: { ...thread.runtime, displayStatus: "stopping" },
+    }),
+  );
 
-  applyToCachedThreadLists(queryClient, {
-    queryKey: threadsQueryKey(),
-    mapper: (list) =>
-      list.map((thread) =>
-        thread.id === threadId
-          ? {
-              ...thread,
-              status: "stopping",
-              runtime: { ...thread.runtime, displayStatus: "stopping" },
-              updatedAt: Math.max(thread.updatedAt, requestedAt),
-            }
-          : thread,
-      ),
-  });
+  return applyOptimisticThreadListState(queryClient, threadId, (thread) =>
+    withLocalThreadWork({
+      ...thread,
+      status: "stopping",
+      runtime: { ...thread.runtime, displayStatus: "stopping" },
+    }),
+  );
 }
 
 function clearThreadBannerActivity(
@@ -804,6 +1272,7 @@ function clearThreadBannerActivity(
   if (thread.id !== threadId) {
     return thread;
   }
+
   return {
     ...thread,
     activity: {
@@ -829,6 +1298,7 @@ function applyAuthoritativeThreadBannerCancellation({
     if (!timeline) {
       continue;
     }
+
     queryClient.setQueryData<ThreadTimelineResponse>(queryKey, {
       ...timeline,
       ...(kind === "plan" ? { activePromptMode: null } : { goal: null }),
@@ -845,6 +1315,7 @@ function applyAuthoritativeThreadBannerCancellation({
       if (!response) {
         return response;
       }
+
       const mapGroup = (group: ThreadSearchResponse["active"]) => ({
         ...group,
         results: group.results.map((result) => ({
@@ -852,6 +1323,7 @@ function applyAuthoritativeThreadBannerCancellation({
           thread: clearThreadBannerActivity(result.thread, threadId, kind),
         })),
       });
+
       return {
         active: mapGroup(response.active),
         archived: mapGroup(response.archived),
@@ -883,7 +1355,12 @@ export function prefetchThreadQueuedMessages({
 }: PrefetchThreadQueuedMessagesArgs): Promise<void> {
   return queryClient.prefetchQuery<ThreadQueuedMessageListResponse>({
     queryKey: threadQueuedMessagesQueryKey(threadId),
-    queryFn: ({ signal }) => load(signal),
+    queryFn: async ({ signal }) =>
+      mergePendingComposerQueuedMessages(
+        queryClient,
+        threadId,
+        await load(signal),
+      ),
   });
 }
 
@@ -893,15 +1370,19 @@ export function applyCreateThreadResult({
   thread,
 }: CreateThreadSuccessArgs): void {
   queryClient.setQueryData<ThreadResponse>(threadQueryKey(thread.id), thread);
+
   const environmentId =
     request.environment.type === "reuse"
       ? request.environment.environmentId
       : thread.environmentId;
+
   const cachedHostId =
     environmentId === null
       ? null
-      : (queryClient.getQueryData<Environment>(environmentQueryKey(environmentId))
-          ?.hostId ?? null);
+      : (queryClient.getQueryData<Environment>(
+          environmentQueryKey(environmentId),
+        )?.hostId ?? null);
+
   const selectedHostId =
     request.environment.type === "provider" &&
     request.environment.machine?.type === "existing"
@@ -909,11 +1390,13 @@ export function applyCreateThreadResult({
       : request.environment.type === "host"
         ? (request.environment.hostId ?? null)
         : null;
+
   optimisticallyInsertThread(
     queryClient,
     thread,
     cachedHostId ?? selectedHostId,
   );
+
   if (request.input.length > 0) {
     prependProjectPromptHistory(
       queryClient,
@@ -924,15 +1407,18 @@ export function applyCreateThreadResult({
       }),
     );
   }
+
   invalidateProjectPromptHistoryQueries({
     queryClient,
     projectId: request.projectId,
   });
+
   if (hasUnmanagedCheckoutIntent(request)) {
     queryClient.invalidateQueries({
       queryKey: projectSourceBranchesQueryKeyPrefix(request.projectId),
     });
   }
+
   refetchThreadListsAfterComposerThreadCreate({ queryClient });
 }
 
@@ -940,7 +1426,7 @@ export async function beginSendThreadMessageTransaction({
   queryClient,
   request,
 }: SendThreadMessageTransactionArgs): Promise<SendThreadMessageTransaction> {
-  await Promise.all([
+  const readsCancelled = Promise.all([
     queryClient.cancelQueries({ queryKey: threadQueryKey(request.id) }),
     queryClient.cancelQueries({
       queryKey: threadQueuedMessagesQueryKey(request.id),
@@ -956,38 +1442,64 @@ export async function beginSendThreadMessageTransaction({
   const previousThread = queryClient.getQueryData<ThreadResponse>(
     threadQueryKey(request.id),
   );
-  if (requestWillOptimisticallyQueue(request, previousThread)) {
+
+  const waitingOn = optimisticSendWait(queryClient, request, previousThread);
+
+  if (waitingOn !== undefined) {
+    await readsCancelled;
+
     const transaction = insertOptimisticQueuedMessage({
       queryClient,
       request,
+      waitingOn,
     });
+
+    const { sendAt } = request;
+
     return {
       kind: "queued-message",
-      previousThreadStatus: previousThread?.status ?? null,
+      inboxPrediction:
+        waitingOn.kind === "time" && sendAt !== undefined
+          ? predictInboxSnapshot(queryClient, (snapshot) =>
+              scheduleInboxSend(snapshot, request.id, sendAt),
+            )
+          : null,
+      previousThreadDataUpdateCount:
+        queryClient.getQueryState(threadQueryKey(request.id))
+          ?.dataUpdateCount ?? null,
       ...transaction,
     };
   }
 
   const optimisticCreatedAt = Date.now();
 
-  applyOptimisticAcceptedTurnThreadState({
-    createdAt: optimisticCreatedAt,
-    queryClient,
-    threadId: request.id,
-  });
-
   const optimisticRow = buildOptimisticUserMessageRow({
+    clientRequestId: request.requestId ?? null,
     createdAt: optimisticCreatedAt,
     input: request.input,
     mode: request.mode,
     threadId: request.id,
     threadStatus: previousThread?.status ?? null,
   });
-  insertOptimisticTimelineRow(queryClient, request.id, optimisticRow);
+
+  beginComposerThreadState(queryClient, request.id, optimisticRow.id, "active");
+
+  const listRollback = applyOptimisticAcceptedTurnListState({
+    queryClient,
+    threadId: request.id,
+  });
+
+  await readsCancelled;
+  applyOptimisticAcceptedTurnDetailState({ queryClient, threadId: request.id });
+  addPendingSentMessage(queryClient, request.id, optimisticRow);
 
   return {
     kind: "accepted-turn",
+    inboxPrediction: predictInboxSnapshot(queryClient, (snapshot) =>
+      startInboxTurn(snapshot, request.id),
+    ),
     previousThread,
+    listRollback,
     optimisticCreatedAt,
     optimisticRowId: optimisticRow.id,
     optimisticThreadDataUpdateCount:
@@ -1001,18 +1513,46 @@ export function rollbackSendThreadMessageTransaction({
   request,
   transaction,
 }: RollbackSendThreadMessageTransactionArgs): void {
+  transaction?.inboxPrediction?.discard();
+
   if (transaction?.kind === "queued-message") {
     removeOptimisticQueuedMessage(
       queryClient,
       request.id,
       transaction.optimisticQueuedMessageId,
     );
+
+    const hasQueuedMessages =
+      (queryClient.getQueryData<ThreadQueuedMessageListResponse>(
+        threadQueuedMessagesQueryKey(request.id),
+      )?.length ?? 0) > 0;
+
+    restoreOptimisticThreadLists(
+      queryClient,
+      transaction.listRollback,
+      (thread) => ({
+        ...thread,
+        queuedWork: hasQueuedMessages ? "waiting" : "none",
+      }),
+    );
+
+    settleComposerThreadState(
+      queryClient,
+      request.id,
+      transaction.optimisticQueuedMessageId,
+      "failed",
+    );
+
     return;
   }
+
   if (transaction?.kind !== "accepted-turn") {
     return;
   }
-  removeOptimisticTimelineRow(
+
+  restoreOptimisticThreadLists(queryClient, transaction.listRollback);
+
+  removePendingSentMessage(
     queryClient,
     request.id,
     transaction.optimisticRowId,
@@ -1024,6 +1564,12 @@ export function rollbackSendThreadMessageTransaction({
     queryClient,
     threadId: request.id,
   });
+  settleComposerThreadState(
+    queryClient,
+    request.id,
+    transaction.optimisticRowId,
+    "failed",
+  );
 }
 
 export function applySendThreadMessageSuccess({
@@ -1033,16 +1579,28 @@ export function applySendThreadMessageSuccess({
   result,
   transaction,
 }: ApplySendThreadMessageSuccessArgs): void {
+  if (transaction?.kind === "accepted-turn")
+    acceptPendingSentMessage(
+      queryClient,
+      request.id,
+      transaction.optimisticRowId,
+    );
   const optimisticCreatedAt = transaction?.optimisticCreatedAt ?? Date.now();
+
+  if (result.delivery === "queued" && transaction?.kind === "accepted-turn")
+    transaction.inboxPrediction.discard();
+  else transaction?.inboxPrediction?.settle();
+
   if (result.delivery === "queued") {
     const optimisticTimelineRowRemoved =
       transaction?.kind === "accepted-turn"
-        ? removeOptimisticTimelineRowIfPresent(
+        ? removePendingSentMessage(
             queryClient,
             request.id,
             transaction.optimisticRowId,
           )
         : false;
+
     reconcileAuthoritativeQueuedMessage({
       insertWhenMissing:
         transaction === undefined || optimisticTimelineRowRemoved,
@@ -1054,7 +1612,13 @@ export function applySendThreadMessageSuccess({
       queuedMessage: result.queuedMessage,
       threadId: request.id,
     });
+
     if (transaction?.kind === "accepted-turn" && optimisticTimelineRowRemoved) {
+      restoreOptimisticThreadLists(
+        queryClient,
+        transaction.listRollback,
+        (thread) => ({ ...thread, queuedWork: "waiting" }),
+      );
       restoreOptimisticThreadSnapshotIfUnchanged({
         optimisticThreadDataUpdateCount:
           transaction.optimisticThreadDataUpdateCount,
@@ -1063,6 +1627,7 @@ export function applySendThreadMessageSuccess({
         threadId: request.id,
       });
     }
+
     prependThreadPromptHistory(
       queryClient,
       request.id,
@@ -1072,6 +1637,17 @@ export function applySendThreadMessageSuccess({
       }),
     );
     invalidateThreadQueueQueries({ queryClient, threadId: request.id });
+
+    if (transaction !== undefined)
+      settleComposerThreadState(
+        queryClient,
+        request.id,
+        transaction.kind === "accepted-turn"
+          ? transaction.optimisticRowId
+          : transaction.optimisticQueuedMessageId,
+        result.delivery,
+      );
+
     return;
   }
 
@@ -1081,27 +1657,24 @@ export function applySendThreadMessageSuccess({
       request.id,
       transaction.optimisticQueuedMessageId,
     );
+
     if (optimisticQueuedMessageRemoved) {
-      applyOptimisticAcceptedTurnThreadState({
-        createdAt: optimisticCreatedAt,
-        queryClient,
-        threadId: request.id,
-      });
-      insertOptimisticTimelineRow(
-        queryClient,
-        request.id,
-        buildOptimisticUserMessageRow({
-          createdAt: optimisticCreatedAt,
-          input: request.input,
-          mode: request.mode,
+      if (
+        queryClient.getQueryState(threadQueryKey(request.id))
+          ?.dataUpdateCount === transaction.previousThreadDataUpdateCount
+      )
+        applyOptimisticAcceptedTurnThreadState({
+          queryClient,
           threadId: request.id,
-          threadStatus: transaction.previousThreadStatus,
-        }),
-      );
+        });
     }
+
     invalidateThreadQueuedMessageListQuery({
       queryClient,
       threadId: request.id,
+    });
+    void queryClient.invalidateQueries({
+      queryKey: threadTimelineQueryKeyPrefix(request.id),
     });
   }
 
@@ -1113,6 +1686,7 @@ export function applySendThreadMessageSuccess({
       input: request.input,
     }),
   );
+
   const applyAcceptedMessageQueries = realtimeConnected
     ? markThreadAcceptedMessageQueriesStale
     : invalidateThreadAcceptedMessageQueriesWithoutRealtime;
@@ -1121,6 +1695,18 @@ export function applySendThreadMessageSuccess({
     queryClient,
     threadId: request.id,
   });
+
+  if (transaction !== undefined)
+    settleComposerThreadState(
+      queryClient,
+      request.id,
+      transaction.kind === "accepted-turn"
+        ? transaction.optimisticRowId
+        : transaction.optimisticQueuedMessageId,
+      result.delivery === "stored" || result.delivery === "waiting"
+        ? "sent"
+        : result.delivery,
+    );
 }
 
 export async function beginCreateQueuedMessageTransaction({
@@ -1130,6 +1716,7 @@ export async function beginCreateQueuedMessageTransaction({
   await queryClient.cancelQueries({
     queryKey: threadQueuedMessagesQueryKey(request.id),
   });
+
   return insertOptimisticQueuedMessage({ queryClient, request });
 }
 
@@ -1141,10 +1728,19 @@ export function rollbackCreateQueuedMessageTransaction({
   if (!transaction) {
     return;
   }
+
+  restoreOptimisticThreadLists(queryClient, transaction.listRollback);
+
   removeOptimisticQueuedMessage(
     queryClient,
     request.id,
     transaction.optimisticQueuedMessageId,
+  );
+  settleComposerThreadState(
+    queryClient,
+    request.id,
+    transaction.optimisticQueuedMessageId,
+    "failed",
   );
 }
 
@@ -1154,31 +1750,50 @@ export function applyQueuedMessageCreateResult({
   threadId,
   transaction,
 }: QueuedMessageSuccessArgs): void {
+  if (transaction !== undefined)
+    releasePendingComposerQueuedMessage(
+      queryClient,
+      threadId,
+      transaction.optimisticQueuedMessageId,
+    );
   queryClient.setQueryData<ThreadQueuedMessageListResponse>(
     threadQueuedMessagesQueryKey(threadId),
     (currentQueuedMessages) => {
       if (!currentQueuedMessages) {
         return [queuedMessage];
       }
+
       if (
         currentQueuedMessages.some(
           (currentQueuedMessage) =>
             currentQueuedMessage.id === queuedMessage.id,
         )
       ) {
-        return currentQueuedMessages;
+        return transaction === undefined
+          ? currentQueuedMessages
+          : currentQueuedMessages.filter(
+              (message) => message.id !== transaction.optimisticQueuedMessageId,
+            );
       }
 
       const optimisticQueuedMessageId =
         transaction?.optimisticQueuedMessageId ?? null;
+
       if (optimisticQueuedMessageId !== null) {
         const optimisticIndex = currentQueuedMessages.findIndex(
           (currentQueuedMessage) =>
             currentQueuedMessage.id === optimisticQueuedMessageId,
         );
+
         if (optimisticIndex !== -1) {
+          carryQueuedMessageRenderKey(
+            queryClient,
+            optimisticQueuedMessageId,
+            queuedMessage.id,
+          );
           const nextQueuedMessages = [...currentQueuedMessages];
           nextQueuedMessages[optimisticIndex] = queuedMessage;
+
           return nextQueuedMessages;
         }
       }
@@ -1192,6 +1807,14 @@ export function applyQueuedMessageCreateResult({
     buildQueuedPromptHistoryEntry(queuedMessage),
   );
   invalidateThreadQueueQueries({ queryClient, threadId });
+
+  if (transaction !== undefined)
+    settleComposerThreadState(
+      queryClient,
+      threadId,
+      transaction.optimisticQueuedMessageId,
+      "queued",
+    );
 }
 
 export async function beginUpdateQueuedMessageTransaction({
@@ -1200,12 +1823,15 @@ export async function beginUpdateQueuedMessageTransaction({
 }: UpdateQueuedMessageTransactionArgs): Promise<UpdateQueuedMessageTransaction> {
   const queryKey = threadQueuedMessagesQueryKey(request.id);
   await queryClient.cancelQueries({ queryKey });
+
   const previousQueuedMessage = queryClient
     .getQueryData<ThreadQueuedMessageListResponse>(queryKey)
     ?.find((queuedMessage) => queuedMessage.id === request.queuedMessageId);
+
   const optimisticUpdatedAt = previousQueuedMessage
     ? Math.max(Date.now(), previousQueuedMessage.updatedAt + 1)
     : null;
+
   queryClient.setQueryData<ThreadQueuedMessageListResponse>(
     queryKey,
     (currentQueuedMessages) =>
@@ -1214,11 +1840,18 @@ export async function beginUpdateQueuedMessageTransaction({
           ? {
               ...queuedMessage,
               content: request.input,
+              model: request.model ?? queuedMessage.model,
+              serviceTier: request.serviceTier ?? queuedMessage.serviceTier,
+              reasoningLevel:
+                request.reasoningLevel ?? queuedMessage.reasoningLevel,
+              permissionMode:
+                request.permissionMode ?? queuedMessage.permissionMode,
               updatedAt: optimisticUpdatedAt ?? queuedMessage.updatedAt,
             }
           : queuedMessage,
       ),
   );
+
   return { optimisticUpdatedAt, previousQueuedMessage };
 }
 
@@ -1229,6 +1862,7 @@ export function rollbackUpdateQueuedMessageTransaction({
 }: RollbackUpdateQueuedMessageTransactionArgs): void {
   const previousQueuedMessage = transaction?.previousQueuedMessage;
   const optimisticUpdatedAt = transaction?.optimisticUpdatedAt;
+
   if (
     previousQueuedMessage !== undefined &&
     optimisticUpdatedAt !== null &&
@@ -1249,6 +1883,7 @@ export function rollbackUpdateQueuedMessageTransaction({
         ),
     );
   }
+
   invalidateThreadQueueQueries({ queryClient, threadId: request.id });
 }
 
@@ -1276,14 +1911,129 @@ export async function beginRemoveQueuedMessageTransaction({
   await queryClient.cancelQueries({
     queryKey: threadQueuedMessagesQueryKey(request.id),
   });
+
   return removeCachedQueuedMessage({ queryClient, request });
+}
+
+function isPlainUserQueuedMessage(message: ThreadQueuedMessage): boolean {
+  return (
+    message.payload.kind === "inline" &&
+    message.initiator === "user" &&
+    message.senderThreadId === null &&
+    message.messageSource === undefined
+  );
+}
+
+function beginAcceptedQueuedMessageSend({
+  previousQueuedMessages,
+  previousThread,
+  queryClient,
+  request,
+  sentGroup,
+}: {
+  previousQueuedMessages: ThreadQueuedMessageListResponse | undefined;
+  previousThread: ThreadResponse;
+  queryClient: QueryClient;
+  request: SendQueuedMessageRequest;
+  sentGroup: readonly ThreadQueuedMessage[];
+}): RemoveQueuedMessageTransaction {
+  const queueKey = threadQueuedMessagesQueryKey(request.id);
+  const removedIds = new Set(sentGroup.map((message) => message.id));
+  const resting = isRestingThreadStatus(previousThread.status);
+  const pendingStatusToken = nanoid();
+  const optimisticCreatedAt = Date.now();
+
+  retainPendingQueuedMessageRemoval(queryClient, request.id, removedIds);
+  queryClient.setQueryData<ThreadQueuedMessageListResponse>(
+    queueKey,
+    (currentQueuedMessages) =>
+      removeQueuedMessagesAndRepairGroupEdges(
+        currentQueuedMessages,
+        removedIds,
+      ),
+  );
+
+  const remaining =
+    queryClient.getQueryData<ThreadQueuedMessageListResponse>(queueKey) ?? [];
+
+  beginComposerThreadState(
+    queryClient,
+    request.id,
+    pendingStatusToken,
+    "active",
+  );
+
+  const listRollback = applyOptimisticThreadListState(
+    queryClient,
+    request.id,
+    (thread) =>
+      withQueuedMessageWork(
+        resting ? withAcceptedTurnStatus(thread) : thread,
+        remaining,
+        removedIds,
+      ),
+  );
+
+  if (resting)
+    applyOptimisticAcceptedTurnDetailState({
+      queryClient,
+      threadId: request.id,
+    });
+
+  const { requestId } = request;
+
+  const optimisticRows =
+    requestId !== undefined && sentGroup.every(isPlainUserQueuedMessage)
+      ? sentGroup.map((message): TimelineUserConversationRow => {
+          const row = buildOptimisticUserMessageRow({
+            clientRequestId: requestId,
+            createdAt: optimisticCreatedAt,
+            input: message.content,
+            mode: request.mode,
+            threadId: request.id,
+            threadStatus: previousThread.status,
+          });
+
+          return {
+            ...row,
+            turnRequest: {
+              ...row.turnRequest,
+              isGrouped: sentGroup.length > 1,
+            },
+          };
+        })
+      : [];
+
+  for (const row of optimisticRows) {
+    addPendingSentMessage(queryClient, request.id, row);
+  }
+
+  return {
+    pendingStatusToken,
+    inboxPrediction: resting
+      ? predictInboxSnapshot(queryClient, (snapshot) =>
+          startInboxTurn(snapshot, request.id),
+        )
+      : null,
+    listRollback,
+    optimisticCreatedAt,
+    optimisticQueueDataUpdateCount:
+      queryClient.getQueryState(queueKey)?.dataUpdateCount ?? 0,
+    optimisticRowIds: optimisticRows.map((row) => row.id),
+    optimisticThreadDataUpdateCount:
+      queryClient.getQueryState(threadQueryKey(request.id))?.dataUpdateCount ??
+      null,
+    previousQueuedMessages,
+    previousThread,
+    removedQueuedMessageIds: [...removedIds],
+  };
 }
 
 export async function beginSendQueuedMessageTransaction({
   queryClient,
   request,
 }: SendQueuedMessageTransactionArgs): Promise<RemoveQueuedMessageTransaction> {
-  await Promise.all([
+  const readsCancelled = Promise.all([
     queryClient.cancelQueries({
       queryKey: threadQueuedMessagesQueryKey(request.id),
     }),
@@ -1300,74 +2050,83 @@ export async function beginSendQueuedMessageTransaction({
     queryClient.getQueryData<ThreadQueuedMessageListResponse>(
       threadQueuedMessagesQueryKey(request.id),
     );
-  const queuedMessageGroup = queuedMessageSendGroup(
-    previousQueuedMessages,
-    request.queuedMessageId,
-  );
-  const queuedMessage = queuedMessageGroup[0] ?? null;
-  const sendIds = queuedMessageSendIds(
-    previousQueuedMessages,
-    request.queuedMessageId,
-  );
+
   const previousThread = queryClient.getQueryData<ThreadResponse>(
     threadQueryKey(request.id),
   );
 
-  queryClient.setQueryData<ThreadQueuedMessageListResponse>(
-    threadQueuedMessagesQueryKey(request.id),
-    (currentQueuedMessages) =>
-      removeQueuedMessagesAndRepairGroupEdges(currentQueuedMessages, sendIds),
+  const sentGroup = queuedMessageSendGroup(
+    previousQueuedMessages,
+    request.queuedMessageId,
   );
-  const optimisticQueueDataUpdateCount =
-    queryClient.getQueryState(threadQueuedMessagesQueryKey(request.id))
-      ?.dataUpdateCount ?? 0;
 
-  if (!queuedMessage) {
-    return {
-      optimisticCreatedAt: null,
-      optimisticQueueDataUpdateCount,
-      optimisticRowId: null,
-      optimisticThreadDataUpdateCount: null,
+  if (
+    previousThread !== undefined &&
+    sentGroup.length > 0 &&
+    optimisticSendWait(
+      queryClient,
+      { id: request.id, mode: request.mode, sendNow: true },
+      previousThread,
+    ) === undefined
+  ) {
+    const transaction = beginAcceptedQueuedMessageSend({
       previousQueuedMessages,
       previousThread,
-    };
+      queryClient,
+      request,
+      sentGroup,
+    });
+
+    await readsCancelled;
+
+    return transaction;
   }
 
-  const optimisticCreatedAt = Date.now();
-  applyOptimisticAcceptedTurnThreadState({
-    createdAt: optimisticCreatedAt,
+  await readsCancelled;
+
+  const pendingStatusToken = nanoid();
+
+  const dispatchingMessage = {
+    id: request.queuedMessageId,
+    sendAt: null,
+    waitingOn: null,
+  };
+
+  beginComposerThreadState(
     queryClient,
-    threadId: request.id,
-  });
-  const optimisticThreadDataUpdateCount =
-    queryClient.getQueryState(threadQueryKey(request.id))?.dataUpdateCount ??
-    null;
-  if (queuedMessageGroup.length > 1) {
-    return {
-      optimisticCreatedAt,
-      optimisticQueueDataUpdateCount,
-      optimisticRowId: null,
-      optimisticThreadDataUpdateCount,
-      previousQueuedMessages,
-      previousThread,
-    };
-  }
-  const optimisticRow = buildOptimisticUserMessageRow({
-    createdAt: optimisticCreatedAt,
-    input: queuedMessage.content,
-    mode: request.mode,
-    threadId: request.id,
-    threadStatus: previousThread?.status ?? null,
-  });
-  insertOptimisticTimelineRow(queryClient, request.id, optimisticRow);
+    request.id,
+    pendingStatusToken,
+    "queued",
+    dispatchingMessage,
+  );
+
+  const listRollback = applyOptimisticThreadListState(
+    queryClient,
+    request.id,
+    (thread) =>
+      withLocalThreadWork({ ...thread, queuedWork: "waiting" }, [
+        localQueuedMessageWork(thread, dispatchingMessage),
+      ]),
+  );
 
   return {
-    optimisticCreatedAt,
-    optimisticQueueDataUpdateCount,
-    optimisticRowId: optimisticRow.id,
-    optimisticThreadDataUpdateCount,
-    previousQueuedMessages,
+    pendingStatusToken,
+    inboxPrediction: null,
+    listRollback,
+    optimisticCreatedAt: Date.now(),
+    optimisticQueueDataUpdateCount:
+      queryClient.getQueryState(threadQueuedMessagesQueryKey(request.id))
+        ?.dataUpdateCount ?? 0,
+    optimisticRowIds: [],
+    optimisticThreadDataUpdateCount:
+      queryClient.getQueryState(threadQueryKey(request.id))?.dataUpdateCount ??
+      null,
+    previousQueuedMessages:
+      queryClient.getQueryData<ThreadQueuedMessageListResponse>(
+        threadQueuedMessagesQueryKey(request.id),
+      ),
     previousThread,
+    removedQueuedMessageIds: [],
   };
 }
 
@@ -1379,29 +2138,67 @@ export function rollbackRemoveQueuedMessageTransaction({
   if (!transaction) {
     return;
   }
-  if (transaction.optimisticRowId !== null) {
-    removeOptimisticTimelineRow(
-      queryClient,
-      request.id,
-      transaction.optimisticRowId,
-    );
-  }
-  restoreOptimisticThreadSnapshotIfUnchanged({
-    optimisticThreadDataUpdateCount:
-      transaction.optimisticThreadDataUpdateCount,
-    previousThread: transaction.previousThread,
+
+  transaction.inboxPrediction?.discard();
+  releasePendingQueuedMessageRemoval(
     queryClient,
-    threadId: request.id,
-  });
+    request.id,
+    transaction.removedQueuedMessageIds,
+  );
+  removePendingSentMessages(
+    queryClient,
+    request.id,
+    transaction.optimisticRowIds,
+  );
+  restoreOptimisticThreadLists(queryClient, transaction.listRollback);
+
   const queueRestored = restoreQueuedMessageSnapshotIfUnchanged({
     optimisticQueueDataUpdateCount: transaction.optimisticQueueDataUpdateCount,
     previousQueuedMessages: transaction.previousQueuedMessages,
     queryClient,
     threadId: request.id,
   });
+
   if (!queueRestored) {
     invalidateThreadQueueQueries({ queryClient, threadId: request.id });
   }
+
+  if (transaction.removedQueuedMessageIds.length > 0)
+    restoreOptimisticThreadSnapshotIfUnchanged({
+      optimisticThreadDataUpdateCount:
+        transaction.optimisticThreadDataUpdateCount,
+      previousThread: transaction.previousThread,
+      queryClient,
+      threadId: request.id,
+    });
+
+  if (transaction.pendingStatusToken !== null)
+    settleComposerThreadState(
+      queryClient,
+      request.id,
+      transaction.pendingStatusToken,
+      "failed",
+    );
+}
+
+export function settleQueuedMessageAlreadySent({
+  queryClient,
+  request,
+  transaction,
+}: RollbackRemoveQueuedMessageTransactionArgs): void {
+  rollbackRemoveQueuedMessageTransaction({ queryClient, request, transaction });
+  queryClient.setQueryData<ThreadQueuedMessageListResponse>(
+    threadQueuedMessagesQueryKey(request.id),
+    (messages) =>
+      removeQueuedMessagesAndRepairGroupEdges(
+        messages,
+        new Set([request.queuedMessageId]),
+      ),
+  );
+  invalidateThreadQueuedMessageSendQueries({
+    queryClient,
+    threadId: request.id,
+  });
 }
 
 export function applyQueuedMessageSendResult({
@@ -1410,12 +2207,26 @@ export function applyQueuedMessageSendResult({
   result,
   transaction,
 }: ApplyQueuedMessageSendResultArgs): void {
+  const accepted =
+    transaction !== undefined && transaction.removedQueuedMessageIds.length > 0;
+
   if (result.delivery === "queued") {
-    const optimisticQueueUnchanged =
-      transaction !== undefined &&
-      queryClient.getQueryState(threadQueuedMessagesQueryKey(request.id))
-        ?.dataUpdateCount === transaction.optimisticQueueDataUpdateCount;
-    if (optimisticQueueUnchanged && transaction !== undefined) {
+    if (transaction !== undefined) {
+      restoreOptimisticThreadLists(queryClient, transaction.listRollback);
+    }
+
+    if (accepted) {
+      transaction.inboxPrediction?.discard();
+      releasePendingQueuedMessageRemoval(
+        queryClient,
+        request.id,
+        transaction.removedQueuedMessageIds,
+      );
+      removePendingSentMessages(
+        queryClient,
+        request.id,
+        transaction.optimisticRowIds,
+      );
       restoreQueuedMessageSnapshotIfUnchanged({
         optimisticQueueDataUpdateCount:
           transaction.optimisticQueueDataUpdateCount,
@@ -1423,22 +2234,6 @@ export function applyQueuedMessageSendResult({
         queryClient,
         threadId: request.id,
       });
-    }
-    reconcileAuthoritativeQueuedMessage({
-      insertWhenMissing: transaction === undefined || optimisticQueueUnchanged,
-      optimisticQueuedMessageId: null,
-      queryClient,
-      queuedMessage: result.queuedMessage,
-      threadId: request.id,
-    });
-    if (transaction !== undefined && transaction.optimisticRowId !== null) {
-      removeOptimisticTimelineRow(
-        queryClient,
-        request.id,
-        transaction.optimisticRowId,
-      );
-    }
-    if (transaction !== undefined) {
       restoreOptimisticThreadSnapshotIfUnchanged({
         optimisticThreadDataUpdateCount:
           transaction.optimisticThreadDataUpdateCount,
@@ -1447,11 +2242,72 @@ export function applyQueuedMessageSendResult({
         threadId: request.id,
       });
     }
+
+    reconcileAuthoritativeQueuedMessage({
+      insertWhenMissing:
+        transaction === undefined ||
+        accepted ||
+        queryClient.getQueryState(threadQueuedMessagesQueryKey(request.id))
+          ?.dataUpdateCount === transaction.optimisticQueueDataUpdateCount,
+      optimisticQueuedMessageId: null,
+      queryClient,
+      queuedMessage: result.queuedMessage,
+      threadId: request.id,
+    });
+  } else if (transaction !== undefined) {
+    const sendIds = new Set([request.queuedMessageId]);
+
+    releasePendingQueuedMessageRemoval(
+      queryClient,
+      request.id,
+      transaction.removedQueuedMessageIds,
+    );
+    transaction.inboxPrediction?.settle();
+    confirmPendingQueuedMessageRemoval(queryClient, request.id, sendIds);
+
+    for (const rowId of transaction.optimisticRowIds)
+      acceptPendingSentMessage(queryClient, request.id, rowId);
+
+    const currentQueue =
+      queryClient.getQueryData<ThreadQueuedMessageListResponse>(
+        threadQueuedMessagesQueryKey(request.id),
+      );
+
+    const hasPendingMessage = currentQueue?.some((message) =>
+      sendIds.has(message.id),
+    );
+
+    queryClient.setQueryData<ThreadQueuedMessageListResponse>(
+      threadQueuedMessagesQueryKey(request.id),
+      (messages) => removeQueuedMessagesAndRepairGroupEdges(messages, sendIds),
+    );
+
+    if (hasPendingMessage) {
+      if (
+        queryClient.getQueryState(threadQueryKey(request.id))
+          ?.dataUpdateCount === transaction.optimisticThreadDataUpdateCount
+      )
+        applyOptimisticAcceptedTurnThreadState({
+          queryClient,
+          threadId: request.id,
+        });
+    }
   }
+
   invalidateThreadQueuedMessageSendQueries({
     queryClient,
     threadId: request.id,
   });
+
+  if (transaction?.pendingStatusToken)
+    settleComposerThreadState(
+      queryClient,
+      request.id,
+      transaction.pendingStatusToken,
+      result.delivery === "stored" || result.delivery === "waiting"
+        ? "sent"
+        : result.delivery,
+    );
 }
 
 export async function beginReorderQueuedMessageTransaction({
@@ -1459,6 +2315,7 @@ export async function beginReorderQueuedMessageTransaction({
   request,
 }: ReorderQueuedMessageTransactionArgs): Promise<ReorderQueuedMessageTransaction> {
   const queryKey = threadQueuedMessagesQueryKey(request.id);
+
   const previousQueuedMessages =
     queryClient.getQueryData<ThreadQueuedMessageListResponse>(queryKey);
 
@@ -1466,13 +2323,16 @@ export async function beginReorderQueuedMessageTransaction({
     queryKey,
     (currentQueuedMessages) => {
       if (!currentQueuedMessages) return currentQueuedMessages;
+
       const originalLeadGroupIds = collectLeadQueuedMessageGroupIds(
         currentQueuedMessages,
       );
+
       const reordered = applyQueuedMessageReorder({
         queuedMessages: currentQueuedMessages,
         request,
       });
+
       return request.groupBoundaryQueuedMessageId !== undefined
         ? applyQueuedMessageGroupBoundary({
             queuedMessages: reordered,
@@ -1501,6 +2361,7 @@ export function rollbackReorderQueuedMessageTransaction({
       transaction.previousQueuedMessages,
     );
   }
+
   invalidateThreadQueueQueries({
     queryClient,
     threadId: request.id,
@@ -1527,6 +2388,7 @@ export async function beginSetQueuedMessageGroupBoundaryTransaction({
   request,
 }: SetQueuedMessageGroupBoundaryTransactionArgs): Promise<ReorderQueuedMessageTransaction> {
   const queryKey = threadQueuedMessagesQueryKey(request.id);
+
   const previousQueuedMessages =
     queryClient.getQueryData<ThreadQueuedMessageListResponse>(queryKey);
 
@@ -1555,9 +2417,9 @@ export function applyQueuedMessageDeleteResult({
 
 export async function beginStopThreadTransaction({
   queryClient,
-  requestedAt,
   threadId,
-}: StopThreadTransactionArgs): Promise<StopThreadTransaction> {
+}: ThreadIdCacheArgs): Promise<StopThreadTransaction> {
+  cancelComposerThreadStateReads(queryClient, threadId);
   await Promise.all([
     queryClient.cancelQueries({ queryKey: threadQueryKey(threadId) }),
     queryClient.cancelQueries({ queryKey: threadsQueryKey() }),
@@ -1566,17 +2428,21 @@ export async function beginStopThreadTransaction({
   const previousThread = queryClient.getQueryData<ThreadResponse>(
     threadQueryKey(threadId),
   );
-  const previousThreadLists = snapshotThreadLists(queryClient);
 
-  applyOptimisticStopRequest({
+  const listRollback = applyOptimisticStopRequest({
     queryClient,
-    requestedAt,
     threadId,
   });
 
   return {
     previousThread,
-    previousThreadLists,
+    listRollback,
+    inboxPrediction: predictInboxSnapshot(queryClient, (snapshot) =>
+      stopInboxTurn(snapshot, threadId),
+    ),
+    optimisticThreadDataUpdateCount:
+      queryClient.getQueryState(threadQueryKey(threadId))?.dataUpdateCount ??
+      null,
   };
 }
 
@@ -1589,16 +2455,230 @@ export function rollbackStopThreadTransaction({
     return;
   }
 
-  queryClient.setQueryData(
-    threadQueryKey(threadId),
-    transaction.previousThread,
-  );
-  restoreThreadLists(queryClient, transaction.previousThreadLists);
+  transaction.inboxPrediction.discard();
+
+  if (
+    !restoreOptimisticThreadSnapshotIfUnchanged({
+      optimisticThreadDataUpdateCount:
+        transaction.optimisticThreadDataUpdateCount,
+      previousThread: transaction.previousThread,
+      queryClient,
+      threadId,
+    })
+  )
+    void queryClient.invalidateQueries({ queryKey: threadQueryKey(threadId) });
+
+  restoreOptimisticThreadLists(queryClient, transaction.listRollback);
 }
 
 export function settleStopThreadTransaction({
   queryClient,
   threadId,
-}: ThreadIdCacheArgs): void {
+  transaction,
+}: ThreadIdCacheArgs & {
+  transaction: StopThreadTransaction | undefined;
+}): void {
+  transaction?.inboxPrediction.settle();
   invalidateThreadListMembershipQueries({ queryClient, threadId });
+}
+
+function replaceTimelineMessage(
+  rows: readonly TimelineRow[],
+  messageId: string,
+  replacement: Pick<
+    TimelineUserConversationRow,
+    "attachments" | "mentions" | "text"
+  >,
+): TimelineRow[] | null {
+  let changed = false;
+
+  const next = rows.map((row): TimelineRow => {
+    if (
+      row.id === messageId &&
+      row.kind === "conversation" &&
+      row.role === "user"
+    ) {
+      changed = true;
+
+      return { ...row, ...replacement };
+    }
+
+    if (row.kind === "turn" && row.children !== null) {
+      const children = replaceTimelineMessage(
+        row.children,
+        messageId,
+        replacement,
+      );
+
+      if (children !== null) {
+        changed = true;
+
+        return { ...row, children };
+      }
+    }
+
+    return row;
+  });
+
+  return changed ? next : null;
+}
+
+export function beginEditMessageTransaction({
+  queryClient,
+  request,
+}: EditMessageTransactionArgs): EditMessageTransaction {
+  for (const queryKey of [
+    threadTimelineQueryKeyPrefix(request.id),
+    threadTimelineTurnSummaryDetailsQueryKeyPrefix(request.id),
+  ])
+    void queryClient.cancelQueries({ queryKey });
+
+  const previousThread = queryClient.getQueryData<ThreadResponse>(
+    threadQueryKey(request.id),
+  );
+
+  const edited = buildOptimisticUserMessageRow({
+    clientRequestId: null,
+    createdAt: Date.now(),
+    input: request.input,
+    mode: "start",
+    threadId: request.id,
+    threadStatus: previousThread?.status ?? null,
+  });
+
+  const timelineSnapshots: TimelineSnapshot[] = [];
+
+  for (const [
+    queryKey,
+    timeline,
+  ] of queryClient.getQueriesData<ThreadTimelineResponse>({
+    queryKey: threadTimelineQueryKeyPrefix(request.id),
+  })) {
+    const rows =
+      timeline === undefined
+        ? null
+        : replaceTimelineMessage(timeline.rows, request.messageId, {
+            attachments: edited.attachments,
+            mentions: edited.mentions,
+            text: edited.text,
+          });
+
+    if (timeline === undefined || rows === null) continue;
+
+    queryClient.setQueryData<ThreadTimelineResponse>(queryKey, {
+      ...timeline,
+      rows,
+    });
+    timelineSnapshots.push({
+      queryKey,
+      previous: timeline,
+      optimisticDataUpdateCount:
+        queryClient.getQueryState(queryKey)?.dataUpdateCount ?? 0,
+    });
+  }
+
+  const startsTurn =
+    previousThread !== undefined &&
+    optimisticSendWait(
+      queryClient,
+      { id: request.id, mode: "start", sendNow: true },
+      previousThread,
+    ) === undefined;
+
+  if (!startsTurn)
+    return {
+      inboxPrediction: null,
+      listRollback: new Map(),
+      optimisticThreadDataUpdateCount: null,
+      pendingStatusToken: null,
+      previousThread,
+      timelineSnapshots,
+    };
+
+  const pendingStatusToken = nanoid();
+  beginComposerThreadState(
+    queryClient,
+    request.id,
+    pendingStatusToken,
+    "active",
+  );
+
+  const listRollback = applyOptimisticAcceptedTurnThreadState({
+    queryClient,
+    threadId: request.id,
+  });
+
+  return {
+    inboxPrediction: isRestingThreadStatus(previousThread.status)
+      ? predictInboxSnapshot(queryClient, (snapshot) =>
+          startInboxTurn(snapshot, request.id),
+        )
+      : null,
+    listRollback,
+    optimisticThreadDataUpdateCount:
+      queryClient.getQueryState(threadQueryKey(request.id))?.dataUpdateCount ??
+      null,
+    pendingStatusToken,
+    previousThread,
+    timelineSnapshots,
+  };
+}
+
+export function rollbackEditMessageTransaction({
+  queryClient,
+  threadId,
+  transaction,
+}: SettleEditMessageTransactionArgs): void {
+  if (transaction === undefined) return;
+
+  transaction.inboxPrediction?.discard();
+
+  let timelineRestored = true;
+
+  for (const snapshot of transaction.timelineSnapshots) {
+    if (
+      queryClient.getQueryState(snapshot.queryKey)?.dataUpdateCount ===
+      snapshot.optimisticDataUpdateCount
+    )
+      queryClient.setQueryData(snapshot.queryKey, snapshot.previous);
+    else timelineRestored = false;
+  }
+
+  if (!timelineRestored)
+    void queryClient.invalidateQueries({
+      queryKey: threadTimelineQueryKeyPrefix(threadId),
+    });
+
+  if (transaction.pendingStatusToken === null) return;
+
+  restoreOptimisticThreadLists(queryClient, transaction.listRollback);
+  restoreOptimisticThreadSnapshotIfUnchanged({
+    optimisticThreadDataUpdateCount:
+      transaction.optimisticThreadDataUpdateCount,
+    previousThread: transaction.previousThread,
+    queryClient,
+    threadId,
+  });
+  settleComposerThreadState(
+    queryClient,
+    threadId,
+    transaction.pendingStatusToken,
+    "failed",
+  );
+}
+
+export function applyEditMessageResult({
+  queryClient,
+  threadId,
+  transaction,
+}: SettleEditMessageTransactionArgs): void {
+  transaction?.inboxPrediction?.settle();
+
+  if (transaction?.pendingStatusToken)
+    settleComposerThreadState(
+      queryClient,
+      threadId,
+      transaction.pendingStatusToken,
+      "sent",
+    );
 }

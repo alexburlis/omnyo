@@ -10,6 +10,7 @@ export function usePluginEnabledMutation(
 ) {
   const queryClient = useQueryClient();
   const setEnabled = useSetPluginEnabled();
+
   const toggle = useMutation({
     meta: { showErrorToast: false },
     mutationFn: (enabled: boolean) => setEnabled(plugin.id, enabled),
@@ -26,6 +27,7 @@ export function usePluginEnabledMutation(
       await onSettled?.();
     },
   });
+
   return {
     toggle,
     enabled: toggle.isPending ? toggle.variables : plugin.enabled,

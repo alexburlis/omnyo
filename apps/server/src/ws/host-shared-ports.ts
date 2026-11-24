@@ -1,15 +1,19 @@
-import { getNonDestroyedHost, getSessionById, type DbConnection } from "@bb/db";
+import {
+  getNonDestroyedHost,
+  getSessionById,
+  type DbConnection,
+} from "@omnyo/db";
 import {
   hostDaemonConnectTunnelIdentitySchema,
   type HostDaemonConnectShares,
   type HostDaemonConnectTunnelIdentity,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { ApiError } from "../errors.js";
 import type { NotificationHub } from "./hub.js";
 
 interface HostSharedPortCoordinatorDeps {
   db: DbConnection;
-  hub: Pick<NotificationHub, "sendDaemonMessage">;
+  hub: Pick<NotificationHub, "getDaemonSessionIdForHost" | "sendDaemonMessage">;
 }
 
 interface SharedPortDeclaration {
@@ -23,19 +27,21 @@ interface HostConnectCapability {
 
 interface HostConnectCapabilityState {
   capability: HostConnectCapability;
-  leaseExpiresAt: number;
 }
 
 function normalizePorts(ports: readonly number[]): number[] {
   const normalized = new Set<number>();
+
   for (const port of ports) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error(
         `shared port ${String(port)} must be an integer between 1 and 65535`,
       );
     }
+
     normalized.add(port);
   }
+
   return [...normalized].sort((a, b) => a - b);
 }
 
@@ -92,14 +98,18 @@ export class HostSharedPortCoordinator {
     if (hostId.trim().length === 0) {
       throw new Error("shared-port declaration hostId must be non-empty");
     }
+
     const normalized = normalizePorts(ports);
+
     if (normalized.length > 0) {
       const host = this.requireDurablyEnrolledHost(hostId);
       const state = this.connectCapabilityState(hostId);
+
       if (state !== null && !state.capability.hasMachineCredential) {
         this.throwMissingMachineCredential(host);
       }
     }
+
     return normalized;
   }
 
@@ -111,6 +121,7 @@ export class HostSharedPortCoordinator {
     if (args.ownerId.trim().length === 0) {
       throw new Error("shared-port declaration ownerId must be non-empty");
     }
+
     const ports = this.validateSharedPortDeclaration(args.hostId, args.ports);
     const current = this.declarationsByHost.get(args.hostId);
     const candidate = new Map(current ?? []);
@@ -131,23 +142,28 @@ export class HostSharedPortCoordinator {
     }
 
     const normalizedByHost = new Map<string, number[]>();
+
     for (const declaration of declarations) {
       const ports = this.validateSharedPortDeclaration(
         declaration.hostId,
         declaration.ports,
       );
+
       normalizedByHost.set(declaration.hostId, ports);
     }
 
     const affectedHostIds = new Set(normalizedByHost.keys());
+
     for (const [hostId, current] of this.declarationsByHost) {
       if (current.has(ownerId)) affectedHostIds.add(hostId);
     }
 
     const replacements = new Map<string, Map<string, SharedPortDeclaration>>();
+
     for (const hostId of affectedHostIds) {
       const replacement = new Map(this.declarationsByHost.get(hostId) ?? []);
       const ports = normalizedByHost.get(hostId);
+
       if (ports === undefined) replacement.delete(ownerId);
       else replacement.set(ownerId, { ports });
       replacements.set(hostId, replacement);
@@ -157,6 +173,7 @@ export class HostSharedPortCoordinator {
       if (replacement.size === 0) this.declarationsByHost.delete(hostId);
       else this.declarationsByHost.set(hostId, replacement);
     }
+
     for (const hostId of affectedHostIds) this.publishIfChanged(hostId);
   }
 
@@ -165,9 +182,11 @@ export class HostSharedPortCoordinator {
       if (!declarations.delete(ownerId)) {
         continue;
       }
+
       if (declarations.size === 0) {
         this.declarationsByHost.delete(hostId);
       }
+
       this.publishIfChanged(hostId);
     }
   }
@@ -179,11 +198,13 @@ export class HostSharedPortCoordinator {
     this.requireConnectedEnrolledHost(hostId);
     const parsed = hostDaemonConnectTunnelIdentitySchema.parse(identity);
     this.tunnelIdentityByHost.set(hostId, parsed);
+
     return parsed;
   }
 
   getTunnelIdentity(hostId: string): HostDaemonConnectTunnelIdentity | null {
     this.requireConnectedEnrolledHost(hostId);
+
     return this.tunnelIdentityByHost.get(hostId) ?? null;
   }
 
@@ -192,13 +213,17 @@ export class HostSharedPortCoordinator {
     ensure: () => Promise<HostDaemonConnectTunnelIdentity>,
   ): Promise<HostDaemonConnectTunnelIdentity> {
     const current = this.getTunnelIdentity(hostId);
+
     if (current !== null) {
       return Promise.resolve(current);
     }
+
     const existing = this.tunnelIdentityPromiseByHost.get(hostId);
+
     if (existing) {
       return existing;
     }
+
     let pending: Promise<HostDaemonConnectTunnelIdentity>;
     pending = ensure()
       .then((identity) => this.recordTunnelIdentity(hostId, identity))
@@ -208,14 +233,17 @@ export class HostSharedPortCoordinator {
         }
       });
     this.tunnelIdentityPromiseByHost.set(hostId, pending);
+
     return pending;
   }
 
   reconcileSharedPortsForHost(hostId: string): HostDaemonConnectShares {
     const generation = this.generationByHost.get(hostId) ?? 0;
+
     if (!this.canReceiveSharedPorts(hostId)) {
       return { generation, ports: [] };
     }
+
     return this.resolveDeclarations(
       this.declarationsByHost.get(hostId) ?? new Map(),
       generation,
@@ -228,6 +256,7 @@ export class HostSharedPortCoordinator {
       type: "connect-shares.replace",
       ...shares,
     });
+
     return shares;
   }
 
@@ -235,23 +264,28 @@ export class HostSharedPortCoordinator {
     if (hostId.trim().length === 0) {
       throw new Error("shared-port declaration hostId must be non-empty");
     }
+
     const host = getNonDestroyedHost(this.deps.db, hostId);
+
     if (!host) {
       throw new Error(`cannot declare shared ports for unknown host ${hostId}`);
     }
+
     return host;
   }
 
   private requireDurablyEnrolledHost(hostId: string) {
     const host = this.requireShareCapableHost(hostId);
+
     if (host.connectMachineId === null) {
       throw new ApiError(
         409,
         "connect_host_unenrolled",
-        `cannot share ports from host "${host.name}" (${host.id}) because it has no bb connect machine credential; enroll it via Connect in Settings > Machines`,
+        `cannot share ports from host "${host.name}" (${host.id}) because it has no Omnyo connect machine credential; enroll it via Connect in Settings > Machines`,
         false,
       );
     }
+
     return host;
   }
 
@@ -259,9 +293,11 @@ export class HostSharedPortCoordinator {
     hostId: string,
   ): HostConnectCapabilityState | null {
     const capability = this.connectCapabilityByHost.get(hostId);
+
     const session = capability
       ? getSessionById(this.deps.db, { sessionId: capability.sessionId })
       : null;
+
     if (
       capability === undefined ||
       session?.hostId !== hostId ||
@@ -269,12 +305,15 @@ export class HostSharedPortCoordinator {
     ) {
       return null;
     }
-    return { capability, leaseExpiresAt: session.leaseExpiresAt };
+
+    return { capability };
   }
 
   private canReceiveSharedPorts(hostId: string): boolean {
     const host = getNonDestroyedHost(this.deps.db, hostId);
+
     if (!host || host.connectMachineId === null) return false;
+
     return (
       this.connectCapabilityState(hostId)?.capability.hasMachineCredential ===
       true
@@ -284,7 +323,12 @@ export class HostSharedPortCoordinator {
   private requireConnectedEnrolledHost(hostId: string) {
     const host = this.requireDurablyEnrolledHost(hostId);
     const state = this.connectCapabilityState(hostId);
-    if (state === null || state.leaseExpiresAt <= Date.now()) {
+
+    if (
+      state === null ||
+      this.deps.hub.getDaemonSessionIdForHost(hostId) !==
+        state.capability.sessionId
+    ) {
       throw new ApiError(
         503,
         "connect_host_offline",
@@ -292,9 +336,11 @@ export class HostSharedPortCoordinator {
         true,
       );
     }
+
     if (!state.capability.hasMachineCredential) {
       this.throwMissingMachineCredential(host);
     }
+
     return host;
   }
 
@@ -305,7 +351,7 @@ export class HostSharedPortCoordinator {
     throw new ApiError(
       409,
       "connect_host_unenrolled",
-      `cannot share ports from host "${host.name}" (${host.id}) because it has no bb connect machine credential; enroll it via Connect in Settings > Machines`,
+      `cannot share ports from host "${host.name}" (${host.id}) because it has no Omnyo connect machine credential; enroll it via Connect in Settings > Machines`,
       false,
     );
   }
@@ -313,20 +359,25 @@ export class HostSharedPortCoordinator {
   private publishIfChanged(hostId: string): void {
     const currentGeneration = this.generationByHost.get(hostId) ?? 0;
     const nextGeneration = currentGeneration + 1;
+
     const shares = this.resolveDeclarations(
       this.declarationsByHost.get(hostId) ?? new Map(),
       nextGeneration,
     );
+
     const nextFingerprint = fingerprint(shares);
+
     const previousFingerprint =
       this.fingerprintByHost.get(hostId) ??
       fingerprint({ generation: currentGeneration, ports: [] });
+
     if (nextFingerprint === previousFingerprint) {
       return;
     }
 
     this.fingerprintByHost.set(hostId, nextFingerprint);
     this.generationByHost.set(hostId, nextGeneration);
+
     if (this.canReceiveSharedPorts(hostId)) {
       this.deps.hub.sendDaemonMessage(hostId, {
         type: "connect-shares.replace",
@@ -340,11 +391,13 @@ export class HostSharedPortCoordinator {
     generation: number,
   ): HostDaemonConnectShares {
     const ports = new Set<number>();
+
     for (const declaration of declarations.values()) {
       for (const port of declaration.ports) {
         ports.add(port);
       }
     }
+
     return {
       generation,
       ports: [...ports].sort((a, b) => a - b),

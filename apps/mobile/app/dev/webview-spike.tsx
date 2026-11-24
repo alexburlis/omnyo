@@ -4,5 +4,6 @@ import { WebViewSpikeScreen } from "@/screens/dev/WebViewSpikeScreen";
 
 export default function WebViewSpikeRoute() {
   if (!e2eModeEnabled) return <Redirect href="/" />;
+
   return <WebViewSpikeScreen />;
 }

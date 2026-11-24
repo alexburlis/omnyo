@@ -14,7 +14,9 @@ interface CreateLogFileFollowerArgs {
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 250;
+
 const INITIAL_READ_MAX_BYTES = 1024 * 1024;
+
 const READ_BUFFER_BYTES = 64 * 1024;
 
 async function readRange(
@@ -24,9 +26,11 @@ async function readRange(
   onBytes: (bytes: Buffer) => void,
 ): Promise<void> {
   const file = await open(filePath, "r");
+
   try {
     const buffer = Buffer.alloc(READ_BUFFER_BYTES);
     let position = start;
+
     while (position < end) {
       const { bytesRead } = await file.read(
         buffer,
@@ -34,9 +38,11 @@ async function readRange(
         Math.min(buffer.length, end - position),
         position,
       );
+
       if (bytesRead === 0) {
         return;
       }
+
       onBytes(Buffer.from(buffer.subarray(0, bytesRead)));
       position += bytesRead;
     }
@@ -47,12 +53,15 @@ async function readRange(
 
 function lastLines(text: string, count: number): string {
   let index = text.endsWith("\n") ? text.length - 1 : text.length;
+
   for (let found = 0; found < count; found += 1) {
     index = text.lastIndexOf("\n", index - 1);
+
     if (index < 0) {
       return text;
     }
   }
+
   return text.slice(index + 1);
 }
 
@@ -88,13 +97,16 @@ export function createLogFileFollower(
 
   async function readAppended(): Promise<void> {
     const { size } = await stat(args.filePath);
+
     if (size < offset) {
       offset = 0;
       decoder = new StringDecoder("utf8");
     }
+
     if (size === offset) {
       return;
     }
+
     const start = offset;
     await readRange(args.filePath, start, size, (bytes) => {
       offset += bytes.length;
@@ -115,6 +127,7 @@ export function createLogFileFollower(
         if (stopped) {
           return;
         }
+
         timer = setTimeout(
           () => schedule(readAppended),
           args.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
@@ -127,6 +140,7 @@ export function createLogFileFollower(
   return {
     stop() {
       stopped = true;
+
       if (timer !== null) {
         clearTimeout(timer);
         timer = null;

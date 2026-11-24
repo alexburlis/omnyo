@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import { ShareHostResolver } from "./hosts.js";
 import { ShareRegistry } from "./shares.js";
 import { TEST_ACCOUNT } from "./testing/fake-account.js";
-import { HEARTBEAT_RESPONSE } from "@bb/tunnel-contract";
+import { HEARTBEAT_RESPONSE } from "@omnyo/tunnel-contract";
 
 interface FakeWebSocketOptions {
   handshakeTimeout?: number;
@@ -75,22 +75,25 @@ function createTunnelFixture(
       },
     },
   });
-  const pluginBb = fakeHost.bb;
+
+  const pluginOmnyo = fakeHost.api;
   const read = vi.fn(readCredential);
   const confirmRefused = vi.fn(async (_credential: string) => undefined);
   const onStatusChange = vi.fn();
+
   const shares = new ShareRegistry({
     kv: {
       get: async () => undefined,
       set: async () => {},
       delete: async () => {},
     },
-    hosts: pluginBb.hosts,
-    hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+    hosts: pluginOmnyo.hosts,
+    hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
     getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
     getIdentity: () => tunnel.getIdentity(),
-    log: pluginBb.log,
+    log: pluginOmnyo.log,
   });
+
   const tunnel: ConnectTunnel = new ConnectTunnel({
     shares,
     readCredential: read,
@@ -98,10 +101,12 @@ function createTunnelFixture(
     defaultBaseUrl: DEFAULT_CONNECT_BASE_URL,
     enabled: true,
     getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
-    log: pluginBb.log,
+    log: pluginOmnyo.log,
     onStatusChange,
   });
+
   tunnel.setAccount(TEST_ACCOUNT);
+
   return { fakeHost, read, confirmRefused, onStatusChange, tunnel };
 }
 
@@ -112,14 +117,53 @@ async function socketCount(count: number): Promise<void> {
 }
 
 describe("ConnectTunnel socket lifecycle", () => {
+  it("does not dial an old identity with a credential read after relay rebind", async () => {
+    let resolve!: (value: SharedCredential) => void;
+
+    const pending = new Promise<SharedCredential>((release) => {
+      resolve = release;
+    });
+
+    let reads = 0;
+
+    const { fakeHost, tunnel } = createTunnelFixture(async () => {
+      reads += 1;
+
+      return reads === 1 ? pending : SERVER_CREDENTIAL;
+    });
+
+    tunnel.setAccount({
+      ...TEST_ACCOUNT,
+      baseUrl: "https://slashnew.com",
+      serverUrl: "https://sawyer.slashnew.com",
+    });
+
+    try {
+      await tunnel.start();
+      resolve(SERVER_CREDENTIAL);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(fakeWebSockets.urls).toEqual([]);
+      tunnel.setAccount(TEST_ACCOUNT);
+      await socketCount(1);
+      expect(new URL(fakeWebSockets.urls[0]!).hostname).toBe(
+        "sawyer.omnyo.link",
+      );
+    } finally {
+      await tunnel.stop();
+      await fakeHost.harness.dispose();
+    }
+  });
+
   afterEach(() => {
     fakeWebSockets.instances.length = 0;
     fakeWebSockets.urls.length = 0;
     fakeWebSockets.options.length = 0;
   });
 
-  it("dials the account's tunnel URL with the server credential from bb account", async () => {
+  it("dials the account's tunnel URL with the server credential from Omnyo account", async () => {
     const { fakeHost, read, tunnel } = createTunnelFixture();
+
     try {
       await tunnel.start();
       await socketCount(1);
@@ -129,7 +173,7 @@ describe("ConnectTunnel socket lifecycle", () => {
       });
       const url = new URL(fakeWebSockets.urls[0]!);
       expect(`${url.origin}${url.pathname}`).toBe(
-        "wss://sawyer.getbb.app/__tunnel",
+        "wss://sawyer.omnyo.link/__tunnel",
       );
       expect(url.searchParams.get("v")).toBe("1");
       expect(url.searchParams.size).toBe(1);
@@ -251,7 +295,7 @@ describe("ConnectTunnel socket lifecycle", () => {
 
       tunnel.stop();
 
-      expect(close).toHaveBeenCalledWith(1000, "tunnel closed by bb");
+      expect(close).toHaveBeenCalledWith(1000, "tunnel closed by Omnyo");
       expect(terminate).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1_000);
       expect(terminate).toHaveBeenCalledOnce();
@@ -262,7 +306,7 @@ describe("ConnectTunnel socket lifecycle", () => {
     }
   });
 
-  it("backs off for minutes when another bb takes over the tunnel", async () => {
+  it("backs off for minutes when another Omnyo takes over the tunnel", async () => {
     vi.useFakeTimers();
     const { fakeHost, tunnel } = createTunnelFixture();
 
@@ -279,7 +323,7 @@ describe("ConnectTunnel socket lifecycle", () => {
         Buffer.from("replaced by a new tunnel connection"),
       );
 
-      expect(tunnel.status().lastError).toContain("another bb connected");
+      expect(tunnel.status().lastError).toContain("another Omnyo connected");
       await vi.advanceTimersByTimeAsync(60_000);
       expect(fakeWebSockets.instances).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(4 * 60_000);
@@ -347,9 +391,11 @@ describe("ConnectTunnel socket lifecycle", () => {
 
   it("logs the transport error and heartbeat age for each connection without carrying them across retries", async () => {
     vi.useFakeTimers();
+
     const monotonicClock = vi
       .spyOn(performance, "now")
       .mockImplementation(() => Date.now());
+
     const { fakeHost, tunnel } = createTunnelFixture();
 
     try {
@@ -372,6 +418,7 @@ describe("ConnectTunnel socket lifecycle", () => {
       const disconnect = fakeHost.harness.logEntries.find((entry) =>
         entry.message.startsWith("tunnel closed"),
       );
+
       expect(disconnect).toMatchObject({
         level: "warn",
         message: expect.stringContaining(
@@ -433,7 +480,7 @@ describe("ConnectTunnel socket lifecycle", () => {
     }
   });
 
-  it("asks bb account to check a refused credential and backs off instead of dialing in a loop", async () => {
+  it("asks Omnyo account to check a refused credential and backs off instead of dialing in a loop", async () => {
     vi.useFakeTimers();
     const { fakeHost, confirmRefused, tunnel } = createTunnelFixture();
 
@@ -447,7 +494,7 @@ describe("ConnectTunnel socket lifecycle", () => {
       );
       expect(tunnel.status()).toMatchObject({
         state: "reconnecting",
-        lastError: "the gate refused this bb's server credential (HTTP 401)",
+        lastError: "the gate refused this Omnyo's server credential (HTTP 401)",
       });
       expect(confirmRefused).toHaveBeenCalledExactlyOnceWith("bbcred_server");
       const firstDelay = tunnel.status().nextRetryAt! - Date.now();
@@ -520,14 +567,16 @@ describe("ConnectTunnel socket lifecycle", () => {
     }
   });
 
-  it("backs off while bb account can't hand over the credential, then dials", async () => {
+  it("backs off while Omnyo account can't hand over the credential, then dials", async () => {
     vi.useFakeTimers();
     let failures = 1;
+
     const { fakeHost, read, tunnel } = createTunnelFixture(async () => {
       if (failures > 0) {
         failures -= 1;
-        throw new Error("bb account isn't running (HTTP 503)");
+        throw new Error("Omnyo account isn't running (HTTP 503)");
       }
+
       return SERVER_CREDENTIAL;
     });
 
@@ -536,7 +585,7 @@ describe("ConnectTunnel socket lifecycle", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(fakeWebSockets.instances).toHaveLength(0);
       expect(tunnel.status().lastError).toContain(
-        "can't read this bb's server credential",
+        "can't read this Omnyo's server credential",
       );
       const nextRetryAt = tunnel.status().nextRetryAt;
       expect(nextRetryAt).not.toBeNull();

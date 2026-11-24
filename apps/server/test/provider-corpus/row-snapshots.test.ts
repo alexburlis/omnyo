@@ -5,9 +5,9 @@ import {
   listCorpusThreads,
   loadCorpusThread,
   resolveProviderCorpusDir,
-} from "@bb/test-helpers";
-import type { CorpusThread } from "@bb/test-helpers";
-import type { TimelineRow } from "@bb/server-contract";
+} from "@omnyo/test-helpers";
+import type { CorpusThread } from "@omnyo/test-helpers";
+import type { TimelineRow } from "@omnyo/server-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ProviderRegistryService } from "../../src/services/providers/provider-registry.js";
 import { createTestProviderRegistry } from "../helpers/provider-registry.js";
@@ -41,6 +41,7 @@ import {
 } from "./row-diff-classes.js";
 
 const PER_THREAD_TIMEOUT_MS = 5 * 60_000;
+
 const PRINTED_DIFF_THREAD_LIMIT = 3;
 
 interface RowSnapshot {
@@ -52,12 +53,15 @@ interface RowSnapshot {
 
 function countTimelineRows(rows: readonly TimelineRow[]): number {
   let count = 0;
+
   for (const row of rows) {
     count += 1;
+
     if (row.kind === "turn" && row.children !== null) {
       count += countTimelineRows(row.children);
     }
   }
+
   return count;
 }
 
@@ -68,6 +72,7 @@ function buildRowSnapshot(
 ): { rows: number; snapshot: JsonValue } {
   let rows = 0;
   const variants: RowSnapshot["variants"] = {};
+
   for (const variant of TIMELINE_VARIANTS) {
     const pages = buildAllRouteTimelinePages({
       db: loaded.db,
@@ -75,17 +80,21 @@ function buildRowSnapshot(
       thread: loaded.thread,
       variant,
     });
+
     for (const page of pages) {
       rows += countTimelineRows(page.response.rows);
     }
+
     variants[variant] = { pages: pages.map((page) => page.response) };
   }
+
   const snapshot: RowSnapshot = {
     threadId: corpusThread.id,
     provider: corpusThread.provider,
     eventRows: corpusThread.eventRows.length,
     variants,
   };
+
   return { rows, snapshot: normalizeJson(snapshot) };
 }
 
@@ -95,11 +104,13 @@ function snapshotFilePath(
   threadId: string,
 ): string {
   const filePath = path.resolve(rowsRoot, provider, `${threadId}.json`);
+
   if (!filePath.startsWith(`${rowsRoot}${path.sep}`)) {
     throw new Error(
       `Snapshot path for ${provider}/${threadId} escapes ${rowsRoot}`,
     );
   }
+
   return filePath;
 }
 
@@ -107,15 +118,21 @@ function formatDiffs(diffs: readonly JsonDiff[], limit: number): string {
   const shown = diffs.slice(0, limit).map((diff) => {
     const expected = JSON.stringify(diff.expected)?.slice(0, 200);
     const actual = JSON.stringify(diff.actual)?.slice(0, 200);
+
     return `  ${diff.pointer}\n    snapshot: ${expected}\n    current:  ${actual}`;
   });
+
   const more = diffs.length > limit ? `\n  … ${diffs.length - limit} more` : "";
+
   return `${shown.join("\n")}${more}`;
 }
 
 const available = corpusAvailable();
+
 const mode = resolveSnapshotMode();
+
 const corpusThreads = available ? listCorpusThreads() : [];
+
 const rowClassesPath = resolveRowDiffClassesPath();
 
 describe.skipIf(!available)("provider corpus row snapshots", () => {
@@ -124,12 +141,15 @@ describe.skipIf(!available)("provider corpus row snapshots", () => {
   const rowsDir = resolveSnapshotRowsDir(snapshotsDir);
   const allowlist = available ? readAllowlist(snapshotsDir) : [];
   const usedAllowlistEntries = new Set<number>();
+
   const rowClasses: RowDiffClass[] =
     available && rowClassesPath !== null
       ? readRowDiffClasses(rowClassesPath)
       : [];
+
   const rowClassReport = createRowDiffReport();
   let registry: ProviderRegistryService | null = null;
+
   const totals = {
     bytes: 0,
     diffThreads: [] as string[],
@@ -152,8 +172,10 @@ describe.skipIf(!available)("provider corpus row snapshots", () => {
       if (registry === null) {
         throw new Error("provider registry did not load");
       }
+
       const corpusThread = loadCorpusThread(threadId);
       const loaded = loadCorpusThreadIntoDb(corpusThread);
+
       try {
         const built = buildRowSnapshot(loaded, corpusThread, registry);
         const serialized = `${JSON.stringify(built.snapshot)}\n`;
@@ -169,19 +191,23 @@ describe.skipIf(!available)("provider corpus row snapshots", () => {
           );
           fs.mkdirSync(path.dirname(filePath), { recursive: true });
           fs.writeFileSync(filePath, serialized);
+
           return;
         }
 
         if (!fs.existsSync(filePath)) {
           throw new Error(
-            `No row snapshot for ${threadId} at ${filePath}; run the suite once with BB_PROVIDER_CORPUS_SNAPSHOT=write`,
+            `No row snapshot for ${threadId} at ${filePath}; run the suite once with OMNYO_PROVIDER_CORPUS_SNAPSHOT=write`,
           );
         }
+
         const expected = normalizeJson(
           JSON.parse(fs.readFileSync(filePath, "utf8")),
         );
+
         if (rowClassesPath !== null) {
           const report = createRowDiffReport();
+
           const changes = classifyRowSnapshotDiff(
             `${provider}/${threadId}`,
             expected as RowSnapshotVariants,
@@ -189,10 +215,13 @@ describe.skipIf(!available)("provider corpus row snapshots", () => {
             rowClasses,
             report,
           );
+
           mergeRowDiffReport(rowClassReport, report);
           totals.allowedDiffs += changes - report.unclassified.length;
+
           if (report.unclassified.length > 0) {
             totals.diffThreads.push(threadId);
+
             if (totals.printedDiffThreads < PRINTED_DIFF_THREAD_LIMIT) {
               totals.printedDiffThreads += 1;
               console.log(
@@ -207,25 +236,33 @@ describe.skipIf(!available)("provider corpus row snapshots", () => {
                 ].join("\n"),
               );
             }
+
             const first = report.unclassified[0];
             throw new Error(
               `${threadId} (${provider}) has ${report.unclassified.length} row change(s) no class claims; first: ${first ? describeRowChange(first) : "?"}`,
             );
           }
+
           return;
         }
+
         const diffs = diffJson(expected, built.snapshot);
+
         const matched = applyAllowlist(
           allowlist,
           { provider, threadId },
           diffs,
         );
+
         for (const index of matched.usedEntryIndexes) {
           usedAllowlistEntries.add(index);
         }
+
         totals.allowedDiffs += matched.allowed.length;
+
         if (matched.unallowed.length > 0) {
           totals.diffThreads.push(threadId);
+
           if (totals.printedDiffThreads < PRINTED_DIFF_THREAD_LIMIT) {
             totals.printedDiffThreads += 1;
             console.log(
@@ -240,6 +277,7 @@ describe.skipIf(!available)("provider corpus row snapshots", () => {
               ].join("\n"),
             );
           }
+
           throw new Error(
             `${threadId} (${provider}) has ${matched.unallowed.length} row diff(s) not covered by the allowlist; first: ${matched.unallowed[0]?.pointer}`,
           );
@@ -255,6 +293,7 @@ describe.skipIf(!available)("provider corpus row snapshots", () => {
     if (!available) {
       return;
     }
+
     const wallMs = Math.round(performance.now() - totals.startedAt);
     const megabytes = (totals.bytes / (1024 * 1024)).toFixed(1);
     process.stdout.write(
@@ -287,32 +326,40 @@ describe.skipIf(!available)("provider corpus row snapshots", () => {
         2,
       )}\n`,
     );
+
     if (mode === "write") {
       return;
     }
+
     if (totals.diffThreads.length > 0) {
       console.log(
         `Row snapshot diffs in ${totals.diffThreads.length} thread(s): ${totals.diffThreads.join(", ")}`,
       );
     }
+
     if (rowClassesPath !== null) {
       process.stdout.write(
         `Row change classes (${rowClassesPath}):\n${formatRowDiffReport(rowClasses, rowClassReport)}\n`,
       );
+
       if (totals.threads === corpusThreads.length) {
         expect(
           idleRowDiffClasses(rowClasses, rowClassReport),
           "every class in the row-classes file must claim at least one change",
         ).toEqual([]);
       }
+
       return;
     }
+
     const usedEntries = allowlist.filter((_, index) =>
       usedAllowlistEntries.has(index),
     );
+
     const unusedEntries = allowlist.filter(
       (_, index) => !usedAllowlistEntries.has(index),
     );
+
     if (usedEntries.length > 0) {
       console.log(
         `Allowlist entries used (${totals.allowedDiffs} diff paths):\n${usedEntries
@@ -320,6 +367,7 @@ describe.skipIf(!available)("provider corpus row snapshots", () => {
           .join("\n")}`,
       );
     }
+
     if (unusedEntries.length > 0) {
       console.log(
         `Stale allowlist entries (matched nothing):\n${unusedEntries
@@ -327,6 +375,7 @@ describe.skipIf(!available)("provider corpus row snapshots", () => {
           .join("\n")}`,
       );
     }
+
     if (totals.threads === corpusThreads.length) {
       expect(
         unusedEntries.map((entry) => describeAllowlistEntry(entry)),

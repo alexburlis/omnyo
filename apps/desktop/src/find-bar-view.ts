@@ -1,13 +1,17 @@
-import { BB_DESKTOP_MAX_FIND_TEXT_LENGTH } from "@bb/desktop-contract";
+import { OMNYO_DESKTOP_MAX_FIND_TEXT_LENGTH } from "@omnyo/desktop-contract";
 
 export const FIND_BAR_VIEW_WIDTH = 344;
+
 export const FIND_BAR_VIEW_HEIGHT = 48;
+
 export const FIND_BAR_VIEW_INSET = 8;
 
 const CHEVRON_UP_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 14.5 12 8l7 6.5"/></svg>';
+
 const CHEVRON_DOWN_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9.5 12 16l7-6.5"/></svg>';
+
 const CLOSE_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
 
@@ -126,15 +130,15 @@ function renderFindBarView(): string {
   <div class="bar" role="search" aria-label="Find in window">
     <div class="field">
       <input
-        id="bb-find-input"
+        id="omnyo-find-input"
         type="text"
         placeholder="Find in window"
         aria-label="Find in window"
         autocomplete="off"
         spellcheck="false"
-        maxlength="${BB_DESKTOP_MAX_FIND_TEXT_LENGTH}"
+        maxlength="${OMNYO_DESKTOP_MAX_FIND_TEXT_LENGTH}"
       />
-      <span id="bb-find-count" class="count" role="status" aria-live="polite"></span>
+      <span id="omnyo-find-count" class="count" role="status" aria-live="polite"></span>
     </div>
     <button type="button" data-step="previous" aria-label="Previous match" disabled>
       ${CHEVRON_UP_ICON}

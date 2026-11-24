@@ -2,12 +2,12 @@ import {
   createProviderVisibilityMetadata,
   getStringProperty,
   isRecord,
-} from "@bb/provider-bridge-protocol/bridge-kit";
+} from "@omnyo/provider-bridge-protocol/bridge-kit";
 import type {
   JsonRpcMessage,
   ProviderRawEventDescription,
   ProviderVisibilityMetadata,
-} from "@bb/provider-bridge-protocol/bridge-kit";
+} from "@omnyo/provider-bridge-protocol/bridge-kit";
 import {
   ACP_FS_WRITE_METHOD,
   ACP_TURN_COMPLETED_METHOD,
@@ -65,16 +65,21 @@ function parseAcpRawEvent(event: JsonRpcMessage): AcpRawEvent {
   if (event.method !== ACP_UPDATE_METHOD) {
     return { kind: "method", method: event.method };
   }
+
   if (!isRecord(event.params)) {
     return { kind: "update/unknown" };
   }
+
   const update = event.params["update"];
+
   const updateKind = isRecord(update)
     ? getStringProperty(update, "sessionUpdate")
     : undefined;
+
   if (!updateKind) {
     return { kind: "update/unknown" };
   }
+
   return { kind: "update", updateKind };
 }
 
@@ -96,9 +101,11 @@ function describeParsedAcpRawEvent(
           coverage: "normalized",
         };
       }
+
       if (NOISE_ACP_UPDATE_KINDS.has(event.updateKind)) {
         return { kind: `acp/update:${event.updateKind}`, coverage: "noise" };
       }
+
       return { kind: `acp/update:${event.updateKind}`, coverage: "unknown" };
     case "update/unknown":
       return { kind: "acp/update", coverage: "unknown" };

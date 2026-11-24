@@ -9,8 +9,9 @@ import {
   rewindThreadPruningWork,
   dropMarketplaceSourceGitSubdirectoryColumn,
   dropQueuedMessageEditHeldUntilColumn,
+  dropReplayCreatedTables,
 } from "./helpers/rewind.js";
-import { defaultAppSettings } from "@bb/domain";
+import { defaultAppSettings } from "@omnyo/domain";
 import {
   createQueuedThreadMessage,
   createThread,
@@ -30,11 +31,17 @@ import {
 } from "./helpers/migrated-connection.js";
 
 type InsertMigrationParameters = [string, number];
+
 type DeleteMigrationParameters = [number];
+
 type DeleteMigrationsParameters = [number, number, number, number];
+
 type TableNameParameters = [string];
+
 type QueuedMessageMigrationInsertParameters = [string, string, number, number];
+
 type ProjectSortKeyMigrationInsertParameters = [string, string, number, number];
+
 type ThreadSortKeyMigrationInsertParameters = [string, string, string, number];
 
 interface IndexNameRow {
@@ -257,6 +264,7 @@ function restoreWideExperimentsTable(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(system_experiments)")
     .all();
+
   if (!columns.some((column) => column.name === "key")) return;
 
   db.$client.exec(`
@@ -294,6 +302,7 @@ function dropThreadConversationOutlinesTable(db: DbConnection): void {
 }
 
 function dropRewindAddedTables(db: DbConnection): void {
+  dropReplayCreatedTables(db);
   rewindEnvironmentRowFactsMigration(db);
   rewindEnvironmentProvidersMigration(db);
   dropThreadConversationOutlinesTable(db);
@@ -322,37 +331,44 @@ function dropRewindAddedTables(db: DbConnection): void {
   dropPluginArtifactGitCheckoutRootColumn(db);
   dropThreadSectionSchema(db);
   restoreWideExperimentsTable(db);
+
   const experimentColumns = new Set(
     db.$client
       .prepare<[], TableInfoRow>("PRAGMA table_info(system_experiments)")
       .all()
       .map((column) => column.name),
   );
+
   if (experimentColumns.has("plugins")) {
     db.$client
       .prepare("ALTER TABLE system_experiments DROP COLUMN plugins")
       .run();
   }
+
   if (experimentColumns.has("bb_connect")) {
     db.$client
       .prepare("ALTER TABLE system_experiments DROP COLUMN bb_connect")
       .run();
   }
+
   if (experimentColumns.has("multi_machine")) {
     db.$client
       .prepare("ALTER TABLE system_experiments DROP COLUMN multi_machine")
       .run();
   }
+
   if (experimentColumns.has("thread_splits")) {
     db.$client
       .prepare("ALTER TABLE system_experiments DROP COLUMN thread_splits")
       .run();
   }
+
   dropSideChatPluginExperimentColumn(db);
   dropToolsHubExperimentColumn(db);
   dropNewOnboardingExperimentColumn(db);
   dropSteerActiveThreadOnEnterColumn(db);
   dropOnboardingCompletedAtColumn(db);
+  db.$client.exec("DROP INDEX IF EXISTS `threads_search_rank_idx`");
   db.$client.prepare("ALTER TABLE threads DROP COLUMN visibility").run();
   db.$client.exec("DROP INDEX IF EXISTS `threads_origin_plugin_archived_idx`");
   db.$client.prepare("ALTER TABLE threads DROP COLUMN origin_plugin_id").run();
@@ -361,161 +377,221 @@ function dropRewindAddedTables(db: DbConnection): void {
 
 function requirePublishedMigrationWhen(tag: string): number {
   const when = publishedMigrationWhensByTag.get(tag);
+
   if (when === undefined) {
     throw new Error(`No published migration timestamp for ${tag}`);
   }
 
   return when;
 }
+
 const closedSessionPruneIndexesWhen = requirePublishedMigrationWhen(
   "0002_closed_session_prune_indexes",
 );
+
 const threadPinningMigrationWhen = 1779990051923;
+
 const operationStateBackfillMigrationWhen = 1780687798957;
+
 const eventProducerColumnsMigrationWhen = 1780692763264;
+
 const terminalSessionRuntimeStateHonestyWhen = 1780718665310;
+
 const hostDaemonSessionObservabilityMigrationWhen = 1780719536955;
+
 const threadTypeRemovalMigrationWhen = 1780973302146;
+
 const threadSearchMigrationWhen = 1781660000001;
+
 const threadSearchRowidFtsMigrationWhen = 1781660000002;
+
 const rowidThreadSearchMigrationHash =
   "025358fe89253aec7f5bd970dc3eb88d0e834f0d58fb9d75329a5d39899340f4";
+
 const legacyExperimentsMigrationWhen = 1781299832942;
+
 const environmentProvisioningMigrationWhen = 1789075667774;
+
 const machineProvidersMigrationWhen = 1789081162875;
+
 const eventLargeValuesMigrationWhen = 1781403656069;
+
 const eventLargeValuesRestoreMigrationWhen = 1781557200000;
+
 const cleanupModeDropMigrationWhen = 1781557300000;
+
 const stopRequestedAtDropMigrationWhen = 1781557400000;
+
 const cleanupRequestedAtDropMigrationWhen = 1781557500000;
+
 const threadSourceOriginMigrationWhen = 1781660000000;
+
 const threadSectionsRepairMigrationWhen = 1784257485616;
+
 const permissionModesMigrationWhen = 1784311522462;
+
 const eventParentToolCallMigrationWhen = 1787181956957;
+
 const eventParentToolCallPreJsonValidMigrationHash =
   "79d39e7b68d1db8ba02614fe4cc227cc0c154d77c7183f2e37ed2d8475412993";
+
 const eventLargeValuesPreOptimizationHash =
   "bc111f5134183c37cf135af70231ec5a79823f9868818fdd8377e1ab3c05a23f";
+
 const queuedMessageSortKeyMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0004_wild_justice.sql",
 );
+
 const pluginCatalogMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0072_bizarre_the_liberteens.sql",
 );
+
 const sideChatVisibilityBackfillMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0079_side_chat_plugin.sql",
 );
+
 const sideChatPluginOnlyMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0084_side_chat_plugin_only.sql",
 );
+
 const experimentKeyValueMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0090_equal_reaper.sql",
 );
+
 const appSettingsKeyValueMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0102_app_settings_key_value.sql",
 );
+
 const steerOnEnterDefaultMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0112_steer_on_enter_default.sql",
 );
+
 const stampOnboardingMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0140_stamp_onboarding_existing_installs.sql",
 );
+
 const retainedEventOutputsMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0114_public_iron_lad.sql",
 );
+
 const providerSettingsToPluginsMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0105_provider_settings_to_plugins.sql",
 );
+
 const retireRequestedAtMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0091_daffy_dark_phoenix.sql",
 );
+
 const pluginArtifactCheckoutRootMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0094_mighty_polaris.sql",
 );
+
 const namedMarketplaceCatalogMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0095_normal_elektra.sql",
 );
+
 const curatedMarketplaceRenameMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0098_rename_curated_marketplace.sql",
 );
+
 const providerUsagePluginIdMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0135_rename_provider_usage_plugin_id.sql",
 );
+
 const sidebarOrderingMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0005_strong_exodus.sql",
 );
+
 const threadPinningMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0008_thread_pinning.sql",
 );
+
+const threadShelfMigrationPath = resolve(
+  __dirname,
+  "..",
+  "drizzle",
+  "0155_thread_shelf.sql",
+);
+
+const threadStatusChangedAtMigrationPath = resolve(
+  __dirname,
+  "..",
+  "drizzle",
+  "0169_thread_status_changed_at.sql",
+);
+
 const pendingInteractionSchemaHonestyMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0019_pending_interactions_schema_honesty.sql",
 );
+
 const eventLargeValuesMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0031_mysterious_zaran.sql",
 );
+
 const machineProvidersMigrationPath = resolve(
   __dirname,
   "..",
   "drizzle",
   "0117_machine_providers.sql",
 );
+
 function closeConnection(db: DbConnection): void {
   db.$client.close();
 }
@@ -524,6 +600,7 @@ function restoreSideChatPluginExperimentColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(system_experiments)")
     .all();
+
   if (!columns.some((column) => column.name === "side_chat_plugin")) {
     db.$client.exec(
       "ALTER TABLE `system_experiments` ADD `side_chat_plugin` integer DEFAULT false NOT NULL",
@@ -535,6 +612,7 @@ function dropSideChatPluginExperimentColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(system_experiments)")
     .all();
+
   if (columns.some((column) => column.name === "side_chat_plugin")) {
     db.$client
       .prepare("ALTER TABLE system_experiments DROP COLUMN side_chat_plugin")
@@ -546,6 +624,7 @@ function restoreLegacyThreadOriginColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
     .all();
+
   if (!columns.some((column) => column.name === "child_origin")) {
     db.$client
       .prepare("ALTER TABLE threads ADD COLUMN child_origin text")
@@ -557,6 +636,7 @@ function restorePluginsExperimentColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(system_experiments)")
     .all();
+
   if (!columns.some((column) => column.name === "plugins")) {
     db.$client
       .prepare(
@@ -570,6 +650,7 @@ function dropToolsHubExperimentColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(system_experiments)")
     .all();
+
   if (columns.some((column) => column.name === "tools_hub")) {
     db.$client
       .prepare("ALTER TABLE system_experiments DROP COLUMN tools_hub")
@@ -581,6 +662,7 @@ function dropNewOnboardingExperimentColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(system_experiments)")
     .all();
+
   if (columns.some((column) => column.name === "new_onboarding")) {
     db.$client
       .prepare("ALTER TABLE system_experiments DROP COLUMN new_onboarding")
@@ -592,6 +674,7 @@ function dropHostMaxPermissionModeColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(hosts)")
     .all();
+
   if (columns.some((column) => column.name === "max_permission_mode")) {
     db.$client
       .prepare("ALTER TABLE hosts DROP COLUMN max_permission_mode")
@@ -603,6 +686,7 @@ function dropSteerActiveThreadOnEnterColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(app_settings)")
     .all();
+
   if (
     columns.some((column) => column.name === "steer_active_thread_on_enter")
   ) {
@@ -618,6 +702,7 @@ function dropOnboardingCompletedAtColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(app_settings)")
     .all();
+
   if (columns.some((column) => column.name === "onboarding_completed_at")) {
     db.$client
       .prepare("ALTER TABLE app_settings DROP COLUMN onboarding_completed_at")
@@ -636,12 +721,14 @@ function resetMigrationsAfterThreadSearch(db: DbConnection): void {
 function dropMarketplaceCatalogSchema(db: DbConnection): void {
   db.$client.prepare("DROP TABLE IF EXISTS plugin_marketplace_icons").run();
   db.$client.prepare("DROP TABLE IF EXISTS plugin_marketplaces").run();
+
   const columns = new Set(
     db.$client
       .prepare<[], TableInfoRow>("PRAGMA table_info(plugins)")
       .all()
       .map((column) => column.name),
   );
+
   for (const column of [
     "catalog_marketplace_name",
     "source_git_range",
@@ -662,12 +749,13 @@ function dropEventToolNameColumn(db: DbConnection): void {
   dropThreadConversationOutlinesTable(db);
   db.$client.exec("DROP INDEX IF EXISTS events_delegating_item_lookup_idx");
   db.$client.exec("DROP INDEX IF EXISTS events_plan_steps_thread_sequence_idx");
-  // The same rewind also rewinds the later deferred-message table (0108).
+
   db.$client.prepare("DROP TABLE IF EXISTS deferred_thread_messages").run();
-  // Generated columns are omitted from table_info but included in table_xinfo.
+
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_xinfo(events)")
     .all();
+
   if (columns.some((column) => column.name === "tool_name")) {
     db.$client.exec(
       "DROP INDEX IF EXISTS events_todo_tool_call_thread_tool_sequence_idx",
@@ -678,9 +766,11 @@ function dropEventToolNameColumn(db: DbConnection): void {
 
 function dropEventParentToolCallIdColumn(db: DbConnection): void {
   dropEventToolNameColumn(db);
+
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(events)")
     .all();
+
   if (columns.some((column) => column.name === "parent_tool_call_id")) {
     db.$client.exec(
       "DROP INDEX IF EXISTS events_parent_tool_call_thread_parent_sequence_idx",
@@ -695,6 +785,7 @@ function dropMarketplaceStatsColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(plugin_marketplaces)")
     .all();
+
   if (columns.some((column) => column.name === "stats_json")) {
     db.$client
       .prepare("ALTER TABLE plugin_marketplaces DROP COLUMN stats_json")
@@ -702,20 +793,6 @@ function dropMarketplaceStatsColumn(db: DbConnection): void {
   }
 }
 
-/**
- * Undo migration 0110, the dispatch-queue rework.
- *
- * 0110 adds the queue's wait columns (schedule, typed wait, wait holder,
- * payload kind and its retry reference), the system-notice and failure-reason
- * sidecars, their two partial indexes, and the thread's pending start
- * context.
- * A rewind that clears its journal row must remove all of them before the
- * replay's ADDs hit a table that already has them.
- *
- * The table 0110 DROPs (`deferred_thread_messages`, added by 0108) needs
- * nothing here. Every rewind that clears 0110's journal row also clears
- * 0108's, so the replay recreates the table before 0110 drops it again.
- */
 function rewindEnvironmentProvisioningMigration(db: DbConnection): void {
   dropIdleLifecycleIndexes(db);
   rewindThreadPruningWork(db);
@@ -726,6 +803,7 @@ function rewindEnvironmentProvisioningMigration(db: DbConnection): void {
   db.$client.exec("DROP TRIGGER IF EXISTS threads_lifecycle_owner_immutable");
   db.$client.exec("DROP INDEX IF EXISTS threads_lifecycle_owner_idx");
   db.$client.exec("DROP INDEX IF EXISTS environments_provider_lifecycle_idx");
+
   if (
     db.$client
       .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
@@ -736,14 +814,17 @@ function rewindEnvironmentProvisioningMigration(db: DbConnection): void {
       "ALTER TABLE threads DROP COLUMN lifecycle_owner_thread_id",
     );
   }
+
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(environments)")
     .all();
+
   for (const name of [
     "environments_owner_thread_idx",
     "environments_claim_idx",
   ])
     db.$client.exec(`DROP INDEX IF EXISTS ${name}`);
+
   for (const column of columns) {
     if (
       [
@@ -757,9 +838,11 @@ function rewindEnvironmentProvisioningMigration(db: DbConnection): void {
     )
       db.$client.exec(`ALTER TABLE environments DROP COLUMN ${column.name}`);
   }
+
   const threadColumns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
     .all();
+
   if (threadColumns.some((column) => column.name === "startup_context"))
     db.$client.exec(
       "ALTER TABLE threads RENAME COLUMN startup_context TO pending_start_context",
@@ -770,6 +853,7 @@ function dropQueuedMessageAttemptColumns(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(queued_thread_messages)")
     .all();
+
   for (const name of ["failure_count", "next_attempt_at"]) {
     if (!columns.some((column) => column.name === name)) continue;
     db.$client
@@ -781,16 +865,18 @@ function dropQueuedMessageAttemptColumns(db: DbConnection): void {
 function dropQueueReworkSchema(db: DbConnection): void {
   dropQueuedMessageAttemptColumns(db);
   rewindEnvironmentProvisioningMigration(db);
-  // Indexes first: SQLite refuses to drop a column an existing index names.
+
   for (const index of [
     "queued_thread_messages_due_idx",
     "queued_thread_messages_wait_holder_idx",
   ]) {
     db.$client.prepare(`DROP INDEX IF EXISTS ${index}`).run();
   }
+
   const queuedColumns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(queued_thread_messages)")
     .all();
+
   for (const name of [
     "system_notice",
     "send_at",
@@ -811,9 +897,11 @@ function dropQueueReworkSchema(db: DbConnection): void {
       .prepare(`ALTER TABLE queued_thread_messages DROP COLUMN ${name}`)
       .run();
   }
+
   const threadColumns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
     .all();
+
   if (threadColumns.some((column) => column.name === "pending_start_context")) {
     db.$client
       .prepare("ALTER TABLE threads DROP COLUMN pending_start_context")
@@ -823,17 +911,20 @@ function dropQueueReworkSchema(db: DbConnection): void {
 
 function rewindEnvironmentRowFactsMigration(db: DbConnection): void {
   rewindEnvironmentProvisioningMigration(db);
+
   const columns = new Set(
     db.$client
       .prepare<[], TableInfoRow>("PRAGMA table_info(environments)")
       .all()
       .map((column) => column.name),
   );
+
   if (columns.has("provider_owns_path")) {
     db.$client
       .prepare("ALTER TABLE environments DROP COLUMN provider_owns_path")
       .run();
   }
+
   if (columns.has("is_worktree")) {
     db.$client
       .prepare("ALTER TABLE environments DROP COLUMN is_worktree")
@@ -846,9 +937,11 @@ function rewindMachineProvidersMigration(db: DbConnection): void {
   dropQueuedMessageEditHeldUntilColumn(db);
   dropMarketplaceSourceGitSubdirectoryColumn(db);
   db.$client.exec("DROP TABLE IF EXISTS ui_preference_defaults");
+
   const queuedDispatchOrigin = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(queued_thread_messages)")
     .all();
+
   for (const name of [
     "origin",
     "origin_plugin_id",
@@ -858,6 +951,7 @@ function rewindMachineProvidersMigration(db: DbConnection): void {
     if (!queuedDispatchOrigin.some((column) => column.name === name)) continue;
     db.$client.exec(`ALTER TABLE queued_thread_messages DROP COLUMN ${name}`);
   }
+
   db.$client.exec("DROP TABLE IF EXISTS thread_pruning_cursors");
   db.$client.exec("DROP TABLE IF EXISTS project_attachment_threads");
   db.$client.exec("DROP TABLE IF EXISTS project_attachments");
@@ -867,6 +961,7 @@ function rewindMachineProvidersMigration(db: DbConnection): void {
   db.$client.exec("DROP TABLE IF EXISTS thread_plugin_metadata");
   db.$client.exec("DROP TABLE IF EXISTS provider_model_catalogs");
   db.$client.exec("DROP TABLE IF EXISTS environment_hook_operations");
+
   if (
     db.$client
       .prepare<[], TableInfoRow>("PRAGMA table_info(project_sources)")
@@ -875,8 +970,10 @@ function rewindMachineProvidersMigration(db: DbConnection): void {
   ) {
     db.$client.exec("ALTER TABLE project_sources DROP COLUMN owns_path");
   }
+
   dropIdleLifecycleIndexes(db);
   db.$client.exec("DROP INDEX IF EXISTS hosts_live_launch_key_idx");
+
   for (const column of [
     "machine_provider_id",
     "launch_key",
@@ -899,13 +996,16 @@ function rewindMachineProvidersMigration(db: DbConnection): void {
     const columns = db.$client
       .prepare<[], TableInfoRow>("PRAGMA table_info(hosts)")
       .all();
+
     if (columns.some((entry) => entry.name === column)) {
       db.$client.exec(`ALTER TABLE hosts DROP COLUMN ${column}`);
     }
   }
+
   const sessionColumns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(host_daemon_sessions)")
     .all();
+
   if (!sessionColumns.some((column) => column.name === "host_type")) {
     db.$client
       .prepare(
@@ -913,6 +1013,7 @@ function rewindMachineProvidersMigration(db: DbConnection): void {
       )
       .run();
   }
+
   db.$client
     .prepare<[number]>("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
     .run(machineProvidersMigrationWhen);
@@ -925,12 +1026,14 @@ function rewindEnvironmentProvidersMigration(db: DbConnection): void {
   db.$client.exec("DROP TABLE IF EXISTS environment_setup_outcomes");
   db.$client.exec("DROP TABLE IF EXISTS environment_launches");
   db.$client.exec("DROP INDEX IF EXISTS environments_project_host_path_idx");
+
   const hostColumns = new Set(
     db.$client
       .prepare<[], TableInfoRow>("PRAGMA table_info(hosts)")
       .all()
       .map((column) => column.name),
   );
+
   if (!hostColumns.has("type")) {
     db.$client
       .prepare(
@@ -938,6 +1041,7 @@ function rewindEnvironmentProvidersMigration(db: DbConnection): void {
       )
       .run();
   }
+
   const lifecycleColumns = [
     "environment_provider_plugin_id",
     "canonical_path",
@@ -947,10 +1051,12 @@ function rewindEnvironmentProvidersMigration(db: DbConnection): void {
     "teardown_message",
     "resource",
   ];
+
   for (const column of lifecycleColumns) {
     const columns = db.$client
       .prepare<[], TableInfoRow>("PRAGMA table_info(environments)")
       .all();
+
     if (columns.some((entry) => entry.name === column))
       db.$client.exec(`ALTER TABLE environments DROP COLUMN ${column}`);
   }
@@ -961,6 +1067,7 @@ function rewindEnvironmentProvidersMigration(db: DbConnection): void {
       .all()
       .map((column) => column.name),
   );
+
   if (!columns.has("managed")) {
     db.$client
       .prepare(
@@ -968,11 +1075,13 @@ function rewindEnvironmentProvidersMigration(db: DbConnection): void {
       )
       .run();
   }
+
   if (!columns.has("destroy_attempt_id")) {
     db.$client
       .prepare("ALTER TABLE environments ADD COLUMN destroy_attempt_id text")
       .run();
   }
+
   if (!columns.has("retire_requested_at")) {
     db.$client
       .prepare(
@@ -980,6 +1089,7 @@ function rewindEnvironmentProvidersMigration(db: DbConnection): void {
       )
       .run();
   }
+
   if (!columns.has("workspace_provision_type")) {
     db.$client
       .prepare(
@@ -987,6 +1097,7 @@ function rewindEnvironmentProvidersMigration(db: DbConnection): void {
       )
       .run();
   }
+
   if (!columns.has("is_worktree")) {
     db.$client
       .prepare(
@@ -994,6 +1105,7 @@ function rewindEnvironmentProvidersMigration(db: DbConnection): void {
       )
       .run();
   }
+
   if (!columns.has("environment_provider_id")) return;
   db.$client
     .prepare(
@@ -1038,6 +1150,7 @@ function dropPluginArtifactGitCheckoutRootColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(plugin_artifacts)")
     .all();
+
   if (columns.some((column) => column.name === "git_checkout_root")) {
     db.$client
       .prepare("ALTER TABLE plugin_artifacts DROP COLUMN git_checkout_root")
@@ -1049,6 +1162,7 @@ function dropEnvironmentRetireRequestedAtColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(environments)")
     .all();
+
   if (columns.some((column) => column.name === "retire_requested_at")) {
     db.$client
       .prepare("ALTER TABLE environments DROP COLUMN retire_requested_at")
@@ -1067,6 +1181,7 @@ function restoreEnvironmentCleanupRequestedAtColumn(db: DbConnection): void {
     .prepare<[], TableInfoRow>("PRAGMA table_info(environments)")
     .all()
     .map((row) => row.name);
+
   if (!columns.includes("cleanup_requested_at")) {
     db.$client
       .prepare(
@@ -1074,6 +1189,7 @@ function restoreEnvironmentCleanupRequestedAtColumn(db: DbConnection): void {
       )
       .run();
   }
+
   db.$client
     .prepare(
       "CREATE INDEX IF NOT EXISTS environments_cleanup_requested_idx ON environments (cleanup_requested_at)",
@@ -1120,6 +1236,7 @@ function dropProjectGitRemoteUrlColumn(db: DbConnection): void {
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(projects)")
     .all();
+
   if (columns.some((column) => column.name === "git_remote_url")) {
     db.$client.prepare("ALTER TABLE projects DROP COLUMN git_remote_url").run();
   }
@@ -1128,12 +1245,15 @@ function dropProjectGitRemoteUrlColumn(db: DbConnection): void {
 function dropThreadSectionSchema(db: DbConnection): void {
   db.$client.exec("DROP INDEX IF EXISTS threads_folder_archived_deleted_idx;");
   db.$client.exec("DROP INDEX IF EXISTS threads_section_archived_deleted_idx;");
+
   const threadColumns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
     .all();
+
   if (threadColumns.some((row) => row.name === "section_id")) {
     db.$client.prepare("ALTER TABLE threads DROP COLUMN section_id").run();
   }
+
   db.$client.exec("DROP TABLE IF EXISTS thread_sections;");
 }
 
@@ -1158,9 +1278,11 @@ function restorePre0022ThreadTypeSchema(db: DbConnection): void {
     ALTER TABLE threads DROP COLUMN source_thread_id;
     ALTER TABLE threads DROP COLUMN origin_kind;
   `);
+
   const threadColumns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
     .all();
+
   if (threadColumns.some((row) => row.name === "child_origin")) {
     db.$client.prepare("ALTER TABLE threads DROP COLUMN child_origin").run();
   }
@@ -1204,10 +1326,13 @@ function readLatestAppliedMigrationCreatedAt(db: DbConnection): number {
       `,
     )
     .get();
+
   const createdAt = row?.createdAt;
+
   if (typeof createdAt !== "number") {
     throw new Error("Expected at least one applied migration timestamp");
   }
+
   return createdAt;
 }
 
@@ -1277,12 +1402,15 @@ function markEventLargeValuesMigrationUnapplied(db: DbConnection): void {
     .prepare("ALTER TABLE `threads` DROP COLUMN `source_thread_id`")
     .run();
   db.$client.prepare("ALTER TABLE `threads` DROP COLUMN `origin_kind`").run();
+
   const threadColumns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
     .all();
+
   if (threadColumns.some((row) => row.name === "child_origin")) {
     db.$client.prepare("ALTER TABLE threads DROP COLUMN child_origin").run();
   }
+
   db.$client.exec(`
     DROP TRIGGER IF EXISTS thread_search_segments_after_text_update;
     DROP TRIGGER IF EXISTS thread_search_segments_after_delete;
@@ -1460,9 +1588,11 @@ function readMigratedEventData(db: DbConnection, eventId: string): string {
       `,
     )
     .get(eventId);
+
   if (!row) {
     throw new Error(`Expected migrated event ${eventId}`);
   }
+
   return row.data;
 }
 
@@ -1473,30 +1603,35 @@ function expectEventLargeValuesInline(
   const commandData = JSON.parse(
     readMigratedEventData(db, "evt_large_command_output"),
   );
+
   expect(commandData.item.aggregatedOutput).toBe(values.commandOutput);
   expect(commandData.item.truncation).toBeUndefined();
 
   const toolData = JSON.parse(
     readMigratedEventData(db, "evt_large_tool_result"),
   );
+
   expect(toolData.item.result).toEqual(values.toolResult);
   expect(toolData.item.truncation).toBeUndefined();
 
   const webFetchData = JSON.parse(
     readMigratedEventData(db, "evt_large_web_fetch"),
   );
+
   expect(webFetchData.item.resultText).toBe(values.webFetchResult);
   expect(webFetchData.item.truncation).toBeUndefined();
 
   const webSearchData = JSON.parse(
     readMigratedEventData(db, "evt_large_web_search"),
   );
+
   expect(webSearchData.item.resultText).toBe(values.webSearchResult);
   expect(webSearchData.item.truncation).toBeUndefined();
 
   const fileData = JSON.parse(
     readMigratedEventData(db, "evt_large_file_diffs"),
   );
+
   expect(fileData.item.changes).toEqual([
     { path: "a.ts", diff: values.firstDiff },
     { path: "b.ts", diff: "small diff" },
@@ -1545,6 +1680,7 @@ describe("migrate", () => {
         id: "host-retained-output-migration",
         name: "Migration Host",
       });
+
       const { project } = createProject(db, noopNotifier, {
         name: "Migration Project",
         source: {
@@ -1553,10 +1689,12 @@ describe("migrate", () => {
           path: "/tmp/retained-output-migration",
         },
       });
+
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
       });
+
       const eventData = JSON.stringify({ message: "existing event" });
 
       db.$client.prepare("DROP TABLE provider_model_catalogs").run();
@@ -1615,6 +1753,7 @@ describe("migrate", () => {
   it("backfills the first checkout commit component for every artifact shape", () => {
     const db = createConnection(":memory:");
     const commit = "d".repeat(40);
+
     try {
       db.$client.exec(`
         CREATE TABLE plugin_artifacts (
@@ -1624,11 +1763,13 @@ describe("migrate", () => {
           path text NOT NULL
         );
       `);
+
       const insert = db.$client.prepare<
         [string, string, string | null, string]
       >(
         "INSERT INTO plugin_artifacts (id, source_kind, git_resolved_commit, path) VALUES (?, ?, ?, ?)",
       );
+
       insert.run("root", "git", commit, `/cache/repo/${commit}`);
       insert.run("nested", "git", commit, `/cache/repo/${commit}/plugins/a`);
       insert.run(
@@ -1672,6 +1813,7 @@ describe("migrate", () => {
 
   it("backfills the retirement clock only for environments already retiring", () => {
     const db = createConnection(":memory:");
+
     try {
       db.$client.exec(`
         CREATE TABLE environments (
@@ -1704,6 +1846,40 @@ describe("migrate", () => {
       ).toEqual([
         { id: "env_ready", retireRequestedAt: null },
         { id: "env_retiring", retireRequestedAt: 1234 },
+      ]);
+    } finally {
+      closeConnection(db);
+    }
+  });
+
+  it("backfills each thread's status change time from its last update", () => {
+    const db = createConnection(":memory:");
+
+    try {
+      db.$client.exec(`
+        CREATE TABLE threads (
+          id text PRIMARY KEY NOT NULL,
+          updated_at integer NOT NULL
+        );
+        INSERT INTO threads (id, updated_at) VALUES
+          ('thr_old', 1234),
+          ('thr_new', 2345);
+      `);
+
+      runMigrationFile({
+        db,
+        migrationPath: threadStatusChangedAtMigrationPath,
+      });
+
+      expect(
+        db.$client
+          .prepare<[], { id: string; statusChangedAt: number }>(
+            "SELECT id, status_changed_at AS statusChangedAt FROM threads ORDER BY id",
+          )
+          .all(),
+      ).toEqual([
+        { id: "thr_new", statusChangedAt: 2345 },
+        { id: "thr_old", statusChangedAt: 1234 },
       ]);
     } finally {
       closeConnection(db);
@@ -1779,6 +1955,7 @@ describe("migrate", () => {
 
       expect(getAppSettings(db)).toEqual({
         showKeyboardHints: false,
+        autoUpdateProviderClisOnStartup: true,
         showGitChanges: true,
         steerActiveThreadOnEnter: true,
         confirmThreadArchive: true,
@@ -1786,15 +1963,19 @@ describe("migrate", () => {
         keepHistoryAfterContextClear: false,
         providerOrder: [],
         defaultProviderId: null,
+        defaultThreadMachineId: null,
         providerCompletedTurnDisplay: {},
         machineServerUrl: null,
         defaultMachineAccess: null,
         machineGitCredentialsEnabled: true,
         streamerMode: false,
         allowFastServiceTier: true,
+        providerAllowFastServiceTier: {},
         telemetryEnabled: true,
-        managedBranchPrefix: "bb/",
+        crashReportsEnabled: true,
+        managedBranchPrefix: "omnyo/",
         onboardingCompletedAt: "2026-08-01T00:00:00.000Z",
+        compactExpiredCache: true,
       });
       expect(
         db.$client
@@ -1826,6 +2007,7 @@ describe("migrate", () => {
 
   it("carries the provider knobs into plugin settings and retires the shared rows", () => {
     const db = createConnection(":memory:");
+
     try {
       db.$client.exec(`
         CREATE TABLE app_settings_values (
@@ -2196,9 +2378,11 @@ describe("migrate", () => {
 
     try {
       migrate(db);
+
       const host = upsertHost(db, noopNotifier, {
         name: "side-chat-adoption-host",
       });
+
       const { project } = createProject(db, noopNotifier, {
         name: "side-chat-adoption-project",
         source: {
@@ -2207,20 +2391,24 @@ describe("migrate", () => {
           path: "/tmp/side-chat-adoption",
         },
       });
+
       const source = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
       });
+
       const sideChat = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         originKind: "fork",
         sourceThreadId: source.id,
       });
+
       const orphanSideChat = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
       });
+
       const pluginFork = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
@@ -2228,6 +2416,7 @@ describe("migrate", () => {
         originPluginId: "workflows",
         sourceThreadId: source.id,
       });
+
       db.$client
         .prepare(
           "UPDATE threads SET origin_kind = 'side-chat' WHERE id IN (?, ?)",
@@ -2246,6 +2435,7 @@ describe("migrate", () => {
           "SELECT id, origin_kind AS originKind, origin_plugin_id AS originPluginId, visibility FROM threads",
         )
         .all();
+
       const byId = new Map(rows.map((row) => [row.id, row]));
 
       expect(byId.get(sideChat.id)).toMatchObject({
@@ -2275,9 +2465,11 @@ describe("migrate", () => {
 
     try {
       migrate(db);
+
       const host = upsertHost(db, noopNotifier, {
         name: "permission-migration-host",
       });
+
       const { project } = createProject(db, noopNotifier, {
         name: "permission-migration-project",
         source: {
@@ -2286,16 +2478,19 @@ describe("migrate", () => {
           path: "/tmp/permission-migration-project",
         },
       });
+
       const sourceWithHistory = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         status: "idle",
       });
+
       const sourceWithoutHistory = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         status: "idle",
       });
+
       const sideChatWithHistory = createThread(db, noopNotifier, {
         originKind: "fork",
         projectId: project.id,
@@ -2303,6 +2498,7 @@ describe("migrate", () => {
         sourceThreadId: sourceWithHistory.id,
         status: "idle",
       });
+
       const sideChatWithoutHistory = createThread(db, noopNotifier, {
         originKind: "fork",
         projectId: project.id,
@@ -2310,16 +2506,19 @@ describe("migrate", () => {
         sourceThreadId: sourceWithoutHistory.id,
         status: "idle",
       });
+
       db.$client
         .prepare(
           "UPDATE threads SET origin_kind = 'side-chat' WHERE id IN (?, ?)",
         )
         .run(sideChatWithHistory.id, sideChatWithoutHistory.id);
+
       const regularThread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         status: "idle",
       });
+
       const workspaceWriteQueue = createQueuedThreadMessage(db, noopNotifier, {
         threadId: regularThread.id,
         content: [
@@ -2334,6 +2533,7 @@ describe("migrate", () => {
         payload: { kind: "inline" },
         systemNotice: null,
       });
+
       const inheritedQueue = createQueuedThreadMessage(db, noopNotifier, {
         threadId: sideChatWithHistory.id,
         content: [{ type: "text", text: "legacy side chat", mentions: [] }],
@@ -2346,6 +2546,7 @@ describe("migrate", () => {
         payload: { kind: "inline" },
         systemNotice: null,
       });
+
       const fallbackQueue = createQueuedThreadMessage(db, noopNotifier, {
         threadId: sideChatWithoutHistory.id,
         content: [{ type: "text", text: "legacy fallback", mentions: [] }],
@@ -2358,6 +2559,7 @@ describe("migrate", () => {
         payload: { kind: "inline" },
         systemNotice: null,
       });
+
       db.$client
         .prepare(
           `
@@ -2486,6 +2688,7 @@ describe("migrate", () => {
           `,
         )
         .get();
+
       expect(personalProject?.count).toBe(1);
 
       expect(() =>
@@ -2748,6 +2951,7 @@ describe("migrate", () => {
         .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
         .all()
         .map((row) => row.name);
+
       expect(threadColumns).not.toContain("type");
       expect(threadColumns).not.toContain("sort_key");
 
@@ -2757,6 +2961,7 @@ describe("migrate", () => {
         )
         .all()
         .map((row) => row.name);
+
       expect(defaultsColumns).not.toContain("thread_type");
 
       expect(
@@ -2998,6 +3203,7 @@ describe("migrate", () => {
         .prepare<[], TableInfoRow>("PRAGMA table_info(environments)")
         .all()
         .map((row) => row.name);
+
       expect(environmentColumns).not.toContain("cleanup_mode");
       expect(environmentColumns).not.toContain("cleanup_requested_at");
 
@@ -3005,6 +3211,7 @@ describe("migrate", () => {
         .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
         .all()
         .map((row) => row.name);
+
       expect(threadColumns).not.toContain("stop_requested_at");
 
       const appliedCreatedAts = db.$client
@@ -3022,6 +3229,7 @@ describe("migrate", () => {
           cleanupRequestedAtDropMigrationWhen,
         )
         .map((row) => row.createdAt);
+
       expect(appliedCreatedAts).toEqual([
         cleanupModeDropMigrationWhen,
         stopRequestedAtDropMigrationWhen,
@@ -3190,6 +3398,7 @@ describe("migrate", () => {
           updatedAt: 80,
         },
       ]);
+
       const pendingInteractionColumns = db.$client
         .prepare<[], TableNameRow>(
           `
@@ -3200,6 +3409,7 @@ describe("migrate", () => {
         )
         .all()
         .map((row) => row.name);
+
       expect(pendingInteractionColumns).toEqual([
         "id",
         "thread_id",
@@ -3215,6 +3425,7 @@ describe("migrate", () => {
         "resolved_at",
         "updated_at",
       ]);
+
       const eventRows = db.$client
         .prepare<[], MigratedPendingInteractionEventStatusRow>(
           `
@@ -3227,6 +3438,7 @@ describe("migrate", () => {
           `,
         )
         .all();
+
       expect(eventRows).toEqual([
         {
           id: "evt_expired_permission_grant",
@@ -3256,6 +3468,7 @@ describe("migrate", () => {
 
   it("warns when applied migration timestamps are in the future", () => {
     const db = createConnection(":memory:");
+
     const logger = {
       warn: vi.fn(),
     } satisfies MigrationWarningLogger;
@@ -3619,6 +3832,7 @@ describe("migrate", () => {
         )
         .all()
         .map((row) => row.createdAt);
+
       expect(migrationCreatedAts).toEqual(
         expect.arrayContaining([
           operationStateBackfillMigrationWhen,
@@ -3865,6 +4079,7 @@ describe("migrate", () => {
       db.$client
         .prepare("INSERT INTO threads (id) VALUES (?), (?)")
         .run("thr_a", "thr_b");
+
       const insertQueuedMessage =
         db.$client.prepare<QueuedMessageMigrationInsertParameters>(
           `
@@ -3882,6 +4097,7 @@ describe("migrate", () => {
           VALUES (?, ?, '[]', 'gpt-5', 'medium', 'full', 'default', ?, ?)
         `,
         );
+
       insertQueuedMessage.run("qmsg_b", "thr_a", 1_000, 1_000);
       insertQueuedMessage.run("qmsg_a", "thr_a", 1_000, 1_000);
       insertQueuedMessage.run("qmsg_c", "thr_a", 2_000, 2_000);
@@ -3932,6 +4148,7 @@ describe("migrate", () => {
           created_at integer NOT NULL
         );
       `);
+
       const insertProject =
         db.$client.prepare<ProjectSortKeyMigrationInsertParameters>(
           `
@@ -3939,6 +4156,7 @@ describe("migrate", () => {
             VALUES (?, ?, ?, ?)
           `,
         );
+
       insertProject.run("proj_b", "Project B", 1_000, 1_000);
       insertProject.run("proj_a", "Project A", 1_000, 1_000);
       insertProject.run("proj_c", "Project C", 2_000, 2_000);
@@ -3950,6 +4168,7 @@ describe("migrate", () => {
             VALUES (?, ?, ?, ?)
           `,
         );
+
       insertThread.run("thr_manager_b", "proj_a", "manager", 1_000);
       insertThread.run("thr_manager_a", "proj_a", "manager", 2_000);
       insertThread.run("thr_standard", "proj_a", "standard", 3_000);
@@ -4011,9 +4230,11 @@ describe("migrate", () => {
       const columns = db.$client
         .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
         .all();
+
       const columnsByName = new Map(
         columns.map((column) => [column.name, column]),
       );
+
       expect(columnsByName.get("pinned_at")?.notnull).toBe(0);
       expect(columnsByName.get("pin_sort_key")?.notnull).toBe(0);
       expect(readIndexNames({ db, tableName: "threads" })).toContain(
@@ -4024,8 +4245,46 @@ describe("migrate", () => {
     }
   });
 
+  it("adds an empty nullable thread shelf column and index", () => {
+    const db = createConnection(":memory:");
+
+    try {
+      db.$client.exec(`
+        CREATE TABLE threads (
+          id text PRIMARY KEY NOT NULL,
+          project_id text NOT NULL,
+          archived_at integer,
+          deleted_at integer
+        );
+        INSERT INTO threads (id, project_id) VALUES ('thr_existing', 'proj_a');
+      `);
+
+      runMigrationFile({ db, migrationPath: threadShelfMigrationPath });
+
+      const shelvedAtColumn = db.$client
+        .prepare<[], TableInfoRow>("PRAGMA table_info(threads)")
+        .all()
+        .find((column) => column.name === "shelved_at");
+
+      expect(shelvedAtColumn?.notnull).toBe(0);
+      expect(
+        db.$client
+          .prepare<[], { shelvedAt: number | null }>(
+            "SELECT shelved_at AS shelvedAt FROM threads WHERE id = 'thr_existing'",
+          )
+          .get(),
+      ).toEqual({ shelvedAt: null });
+      expect(readIndexNames({ db, tableName: "threads" })).toContain(
+        "threads_shelf_sort_idx",
+      );
+    } finally {
+      closeConnection(db);
+    }
+  });
+
   it("migrates official marketplace provenance to the singleton catalog without changing direct source data", () => {
     const db = createConnection(":memory:");
+
     try {
       db.$client.exec(`
         CREATE TABLE plugins (
@@ -4109,6 +4368,7 @@ describe("migrate", () => {
 
   it("does not grant catalog provenance to a custom marketplace named bb-official", () => {
     const db = createConnection(":memory:");
+
     try {
       db.$client.exec(`
         CREATE TABLE plugins (
@@ -4181,6 +4441,7 @@ describe("migrate", () => {
 
   it("moves the curated marketplace, its icons, and its installs together", () => {
     const db = createConnection(":memory:");
+
     try {
       db.$client.exec(`
         CREATE TABLE plugin_marketplaces (
@@ -4267,6 +4528,7 @@ describe("migrate", () => {
 
   it("moves the bundled provider usage plugin and its footer preferences to the bb-- id", () => {
     const db = createConnection(":memory:");
+
     try {
       migrate(db);
       db.$client.exec(`
@@ -4329,6 +4591,7 @@ describe("migrate", () => {
 
   it("leaves a user-installed provider-usage plugin under its own id", () => {
     const db = createConnection(":memory:");
+
     try {
       migrate(db);
       db.$client.exec(`
@@ -4351,6 +4614,7 @@ describe("migrate", () => {
 
   it("names only catalog provenance during the marketplace upgrade", () => {
     const db = createConnection(":memory:");
+
     try {
       db.$client.exec(`
         CREATE TABLE plugins (
@@ -4392,6 +4656,7 @@ describe("migrate", () => {
 
   it("seeds the Keep Awake configuration from the legacy preference", () => {
     const db = createConnection(":memory:");
+
     try {
       migrate(db);
       db.$client.exec(`
@@ -4440,12 +4705,15 @@ describe("migrate", () => {
 
   it("backfills legacy side-chat rows to hidden visibility", () => {
     const db = createConnection(":memory:");
+
     try {
       migrate(db);
+
       const host = upsertHost(db, noopNotifier, {
         id: "host-side-chat-visibility",
         name: "Migration Host",
       });
+
       const { project } = createProject(db, noopNotifier, {
         name: "Migration Project",
         source: {
@@ -4454,21 +4722,26 @@ describe("migrate", () => {
           path: "/tmp/side-chat-visibility",
         },
       });
+
       const originKindSideChat = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         originKind: "fork",
       });
+
       restoreLegacyThreadOriginColumn(db);
+
       const legacyOriginSideChat = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
       });
+
       const fork = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         originKind: "fork",
       });
+
       db.$client
         .prepare("UPDATE threads SET origin_kind = 'side-chat' WHERE id = ?")
         .run(originKindSideChat.id);
@@ -4511,9 +4784,11 @@ describe("migrate", () => {
 
     try {
       migrate(db);
+
       const host = upsertHost(db, noopNotifier, {
         name: "event-parent-migration-host",
       });
+
       const { project } = createProject(db, noopNotifier, {
         name: "event-parent-migration-project",
         source: {
@@ -4522,6 +4797,7 @@ describe("migrate", () => {
           path: "/tmp/event-parent-migration",
         },
       });
+
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
@@ -4662,19 +4938,21 @@ describe("environment providers migration", () => {
         ('env_unmanaged', 'proj_ep', 'host_ep', '/w/unmanaged', 0, NULL,
          NULL, NULL, 'unmanaged', 'ready', 1000, 1000);
     `);
+
     const insertPendingThread = db.$client.prepare<[string, string]>(
       `INSERT INTO threads (
          id, project_id, provider_id, status, pending_start_context,
          latest_attention_at, created_at, updated_at
        ) VALUES (?, 'proj_ep', 'codex', 'pending', ?, 1000, 1000, 1000)`,
     );
+
     insertPendingThread.run(
       "thr_worktree_pending",
       JSON.stringify({
         environmentIntent: {
           type: "direct-managed",
           hostId: "host_ep",
-          sourcePath: "/checkouts/bb",
+          sourcePath: "/checkouts/omnyo",
           baseBranch: { kind: "named", name: "release/1.2" },
           workspaceProvisionType: "managed-worktree",
         },
@@ -4699,19 +4977,23 @@ describe("environment providers migration", () => {
            FROM threads WHERE id = ?`,
       )
       .get(threadId);
+
     return JSON.parse(row?.startupContext ?? "null") as unknown;
   }
 
   it("records bundled plugin owners while migrating legacy environments", () => {
     const db = createMigratedConnection();
+
     try {
       seedPreProviderEnvironments(db);
       migrate(db);
+
       const rows = db.$client
         .prepare<[], { provider: string; owner: string | null }>(
           "SELECT DISTINCT environment_provider_id AS provider, environment_provider_plugin_id AS owner FROM environments ORDER BY provider",
         )
         .all();
+
       expect(rows).toEqual([
         { provider: "git-worktree", owner: "environment-git-worktree" },
         {
@@ -4953,6 +5235,7 @@ describe("environment providers migration", () => {
         .prepare<[], TableInfoRow>("PRAGMA table_info(environments)")
         .all()
         .map((column) => column.name);
+
       expect(environmentColumns).not.toContain("managed");
       expect(environmentColumns).not.toContain("retire_requested_at");
       expect(environmentColumns).not.toContain("destroy_attempt_id");
@@ -4997,6 +5280,7 @@ describe("environment providers migration", () => {
 describe("machine providers migration", () => {
   it("backfills server access for machines with a legacy access identity", () => {
     const db = createConnection(":memory:");
+
     try {
       db.$client.exec(`
         CREATE TABLE hosts (
@@ -5040,10 +5324,12 @@ describe("environment and thread startup ownership migration", () => {
     "preserves %s allocation checkpoints and keeps attached environment resources authoritative",
     (phase) => {
       const db = createMigratedConnection();
+
       try {
         rewindMachineProvidersMigration(db);
         rewindEnvironmentProvisioningMigration(db);
         dropQueuedMessageAttemptColumns(db);
+
         const legacySchema = readFileSync(
           resolve(
             dirname(fileURLToPath(import.meta.url)),
@@ -5051,6 +5337,7 @@ describe("environment and thread startup ownership migration", () => {
           ),
           "utf8",
         ).split("--> statement-breakpoint")[0]!;
+
         db.$client.exec(legacySchema);
         db.$client.exec("DROP TABLE IF EXISTS environment_hook_operations");
         db.$client
@@ -5066,6 +5353,7 @@ describe("environment and thread startup ownership migration", () => {
         INSERT INTO environments (id, project_id, host_id, path, status, resource, created_at, updated_at)
           VALUES ('env_attached', 'proj_ownership', 'host_ownership', '/tmp/attached', 'ready', '{"new":"checkpoint"}', 1, 1);
       `);
+
         const request = {
           clientRequestId: "request",
           environmentIntent: {
@@ -5076,13 +5364,16 @@ describe("environment and thread startup ownership migration", () => {
           },
           input: [{ type: "text", text: "original message" }],
         };
+
         const selection = JSON.stringify({
           machine: { type: "existing", hostId: "host_ownership" },
           inputs: null,
         });
+
         const insert = db.$client
           .prepare(`INSERT INTO environment_launches (thread_id, provider_id, provider_plugin_id, path_rejected, attempt, phase, started_at, failed_at, failure, message, transient_failures, path_key, host_id, path, claim_path, owns_path, resource, step_text, pending_log, environment_id, selection, request, cancel_pending)
         VALUES (?, 'test', 'test-plugin', 0, 3, ?, 20, NULL, NULL, NULL, 1, 'stable-key', 'host_ownership', ?, ?, 1, ?, 'Preparing', 'output', ?, ?, ?, 0)`);
+
         insert.run(
           "thr_creating",
           "creating",
@@ -5103,6 +5394,7 @@ describe("environment and thread startup ownership migration", () => {
           selection,
           JSON.stringify(request),
         );
+
         if (phase === "cancelled")
           db.$client.exec(
             "UPDATE environment_launches SET phase = 'cancelled', cancel_pending = 1 WHERE thread_id = 'thr_creating'",
@@ -5117,11 +5409,13 @@ describe("environment and thread startup ownership migration", () => {
         ).toEqual({
           teardown_status: phase === "cancelled" ? "running" : null,
         });
+
         const resource = db.$client
           .prepare(
             "SELECT id, resource, attempt, claim_path FROM environments WHERE owner_thread_id = 'thr_creating'",
           )
           .get();
+
         expect(resource).toEqual({
           id: "env_provision_thr_creating",
           resource: '{"allocated":"resource"}',
@@ -5135,11 +5429,13 @@ describe("environment and thread startup ownership migration", () => {
             )
             .get(),
         ).toEqual({ resource: '{"new":"checkpoint"}' });
+
         const stored = db.$client
           .prepare<[], { startup_context: string }>(
             "SELECT startup_context FROM threads WHERE id = 'thr_creating'",
           )
           .get()!;
+
         expect(JSON.parse(stored.startup_context).state).not.toHaveProperty(
           "stage",
         );

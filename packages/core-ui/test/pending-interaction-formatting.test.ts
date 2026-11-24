@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PendingInteraction, PendingInteractionPayload } from "@bb/domain";
+import type { PendingInteraction, PendingInteractionPayload } from "@omnyo/domain";
 import {
   buildPendingInteractionApprovalResolution,
   formatPendingInteractionApprovalResolutionOutcome,
@@ -23,6 +23,7 @@ function createInteraction(
     createdAt: 1,
     resolvedAt: null,
   };
+
   switch (payload.kind) {
     case "approval":
       return { ...base, payload };

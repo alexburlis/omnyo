@@ -2,10 +2,11 @@ import {
   assertNever,
   findTimelineFrontierRow,
   hasTimelineExplorationIntent,
+  isTimelineActivityRow,
   type ThreadTimelineViewRow,
   type TimelineViewWorkRow,
   type TimelineWorkSummaryChild,
-} from "@bb/thread-view";
+} from "@omnyo/thread-view";
 import { deferredTimelineContentItemId } from "./deferred-content.js";
 
 interface CollectTimelineAutoExpansionRowIdsArgs {
@@ -14,12 +15,7 @@ interface CollectTimelineAutoExpansionRowIdsArgs {
 }
 
 export interface TimelineAutoExpansionRowIds {
-  /**
-   * Rows the timeline opens for as long as the condition holds and closes
-   * again when it stops: the active scope's live frontier.
-   */
   liveExpandedRowIds: ReadonlySet<string>;
-  terminalFrontierRowIds: ReadonlySet<string>;
 }
 
 function isWorkRowExpandable(row: TimelineViewWorkRow): boolean {
@@ -76,8 +72,9 @@ export function isRowExpandable(row: ThreadTimelineViewRow): boolean {
       return false;
     case "system":
       return (
-        deferredTimelineContentItemId(row) !== null ||
-        (row.detail !== null && row.detail.trim().length > 0)
+        !isTimelineActivityRow(row) &&
+        (deferredTimelineContentItemId(row) !== null ||
+          (row.detail !== null && row.detail.trim().length > 0))
       );
     case "bundle-summary":
     case "step-summary":
@@ -103,6 +100,7 @@ function shouldAutoExpandLiveFrontierRow(row: ThreadTimelineViewRow): boolean {
   if (!isRowExpandable(row)) {
     return false;
   }
+
   switch (row.kind) {
     case "system":
       return row.status === "pending";
@@ -123,55 +121,6 @@ function shouldAutoExpandLiveFrontierRow(row: ThreadTimelineViewRow): boolean {
   }
 }
 
-function shouldAutoExpandTerminalFrontierRow(
-  row: ThreadTimelineViewRow,
-): boolean {
-  return (
-    isRowExpandable(row) && row.kind === "system" && row.status === "error"
-  );
-}
-
-function visitForTerminalFrontierAutoExpand(
-  rows: readonly ThreadTimelineViewRow[],
-  ids: Set<string>,
-): void {
-  const tail = rows[rows.length - 1];
-  if (tail && shouldAutoExpandTerminalFrontierRow(tail)) {
-    ids.add(tail.id);
-  }
-
-  for (const row of rows) {
-    if (
-      row.kind === "work" &&
-      row.workKind === "delegation" &&
-      row.status === "pending" &&
-      row.childRows !== null
-    ) {
-      visitForTerminalFrontierAutoExpand(row.childRows, ids);
-    }
-  }
-}
-
-// Auto-expand rule:
-//
-//   1. Terminal frontier: the literal tail row in a scope. Selected terminal
-//      rows, currently system errors with detail, open when they arrive. The
-//      terminal pass descends into pending delegation childRows as nested
-//      scopes. The row component preserves that visible disclosure state after
-//      later appends; the collector does not keep old terminal rows
-//      auto-expanded.
-//
-//   2. Live frontier: only while the scope is active, find the trailing row
-//      that the agent produced (skipping user input rows). Selected live rows
-//      open while they are the current active frontier, then stop being
-//      auto-expanded when newer agent/system/work output supersedes them.
-//
-// Active containers are the timeline's top-level row list (when the thread
-// is active) and the childRows of pending delegations *inside an active
-// container*. A completed delegation closes its scope, so a pending
-// sub-delegation buried inside a completed parent does NOT auto-expand —
-// the active scope must propagate from the top-level thread runtime down
-// through every enclosing container.
 function visitForLiveFrontierAutoExpand(
   rows: readonly ThreadTimelineViewRow[],
   scopeActive: boolean,
@@ -180,10 +129,13 @@ function visitForLiveFrontierAutoExpand(
   if (!scopeActive) {
     return;
   }
+
   const frontier = findTimelineFrontierRow(rows);
+
   if (frontier && shouldAutoExpandLiveFrontierRow(frontier)) {
     ids.add(frontier.id);
   }
+
   for (const row of rows) {
     if (
       row.kind === "work" &&
@@ -196,16 +148,43 @@ function visitForLiveFrontierAutoExpand(
   }
 }
 
+function visitRecentWorkRows(
+  rows: readonly ThreadTimelineViewRow[],
+  work: TimelineViewWorkRow[],
+): void {
+  for (const row of rows) {
+    if (row.kind === "conversation" && row.role === "user") work.length = 0;
+
+    if (
+      row.kind === "work" &&
+      (row.workKind === "command" || row.workKind === "tool")
+    ) {
+      if (isRowExpandable(row)) work.push(row);
+    } else if (
+      row.kind === "bundle-summary" ||
+      row.kind === "step-summary" ||
+      (row.kind === "turn" && row.status === "pending")
+    ) {
+      if (row.children !== null) visitRecentWorkRows(row.children, work);
+    }
+  }
+}
+
 export function collectTimelineAutoExpansionRowIds({
   rows,
   scopeActive,
 }: CollectTimelineAutoExpansionRowIdsArgs): TimelineAutoExpansionRowIds {
-  const terminalFrontierRowIds = new Set<string>();
   const liveExpandedRowIds = new Set<string>();
-  visitForTerminalFrontierAutoExpand(rows, terminalFrontierRowIds);
   visitForLiveFrontierAutoExpand(rows, scopeActive, liveExpandedRowIds);
+
+  if (scopeActive) {
+    const work: TimelineViewWorkRow[] = [];
+    visitRecentWorkRows(rows, work);
+
+    for (const row of work.slice(-2)) liveExpandedRowIds.add(row.id);
+  }
+
   return {
     liveExpandedRowIds,
-    terminalFrontierRowIds,
   };
 }

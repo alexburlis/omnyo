@@ -16,11 +16,12 @@ const OPTIONS = {
 const SETTINGS_PROCESS_TEST_TIMEOUT_MS = 60_000;
 
 let harness: FakePiBridgeHarness;
+
 let commandLogPath: string;
 
 beforeEach(async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-settings-",
+    prefix: "omnyo-pi-settings-",
     initialize: true,
   });
   commandLogPath = join(harness.workspaceDir, "commands.log");
@@ -41,15 +42,21 @@ it(
   "pins model and thinking at spawn and never sends set_model or set_thinking_level",
   async () => {
     const threadId = "thr_settings";
+
     const start = await harness.request(1, "thread/start", {
       threadId,
       cwd: harness.workspaceDir,
       instructionMode: "append",
       options: OPTIONS,
     });
-    const providerThreadId = (start.result as { providerThreadId?: unknown }).providerThreadId;
+
+    const providerThreadId = (start.result as { providerThreadId?: unknown })
+      .providerThreadId;
+
     expect(typeof providerThreadId).toBe("string");
-    if (typeof providerThreadId !== "string") throw new Error("missing providerThreadId");
+
+    if (typeof providerThreadId !== "string")
+      throw new Error("missing providerThreadId");
     expect(providerThreadId).toMatch(/^pi_/u);
     await harness.request(2, "turn/start", {
       threadId,
@@ -77,6 +84,7 @@ it(
       intent: "release",
       activeTurnId: null,
     });
+
     const resume = await harness.request(5, "thread/resume", {
       threadId,
       providerThreadId,
@@ -84,7 +92,9 @@ it(
       instructionMode: "append",
       options: { ...OPTIONS, model: "fake-provider/fake-model" },
     });
+
     expect(resume.result).toMatchObject({ providerThreadId });
+
     const fork = await harness.request(6, "thread/fork", {
       threadId: "thr_settings_fork",
       cwd: harness.workspaceDir,
@@ -92,6 +102,7 @@ it(
       options: OPTIONS,
       instructionMode: "append",
     });
+
     void fork;
 
     const sent = commandsSent();
@@ -99,6 +110,7 @@ it(
     expect(
       sent.filter((c) => c === "set_model" || c === "set_thinking_level"),
     ).toEqual([]);
+
     const contextWindows = harness.messages
       .filter((m) => m.method === "thread/delta")
       .flatMap(
@@ -107,6 +119,7 @@ it(
       )
       .filter((d) => d.kind === "contextWindow")
       .map((d) => d.size);
+
     expect(contextWindows[0]).toBe(32_000);
     expect(contextWindows.at(-1)).toBe(200_000);
   },

@@ -5,6 +5,7 @@ import { SettingsSwitchRow } from "./SettingsRows";
 export function HapticsSettingsRow() {
   const [enabled, setEnabled] = useHapticsEnabled();
   const colors = useBadgeColors();
+
   return (
     <SettingsSwitchRow
       label="Haptics"

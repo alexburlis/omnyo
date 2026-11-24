@@ -1,4 +1,4 @@
-import { availableModelSchema } from "@bb/domain";
+import { availableModelSchema } from "@omnyo/domain";
 import { z } from "zod";
 import { createLastKnownCache } from "@/lib/last-known-cache";
 
@@ -8,11 +8,11 @@ const cachedModelCatalogSchema = z.object({
 });
 
 const modelCatalogCache = createLastKnownCache({
-  prefix: "bb.model-catalog",
+  prefix: "omnyo.model-catalog",
   version: "1",
   schema: cachedModelCatalogSchema,
   maxEntries: 8,
-  obsoletePrefixes: ["bb.claude-model-catalog"],
+  obsoletePrefixes: ["bb.model-catalog"],
 });
 
 export function modelCatalogCacheKey({
@@ -28,5 +28,7 @@ export function modelCatalogCacheKey({
 }
 
 export const readCachedModelCatalog = modelCatalogCache.read;
+
 export const writeCachedModelCatalog = modelCatalogCache.write;
+
 export const clearCachedModelCatalogs = modelCatalogCache.clear;

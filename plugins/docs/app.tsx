@@ -10,7 +10,7 @@ import {
   definePluginApp,
   experimental_FileLink as FileLink,
   experimental_copyToClipboard,
-  useBbNavigate,
+  experimental_useAppNavigate,
   useComposer,
   useRpc,
   useRealtime,
@@ -19,11 +19,8 @@ import {
   type PluginNavPanelProps,
   type PluginThreadPanelProps,
   type ExperimentalLiveFileTarget,
-} from "@get-bb/plugin-sdk/app";
-import {
-  DOMParser as ProseMirrorDOMParser,
-  type Node as ProseMirrorNode,
-} from "@tiptap/pm/model";
+} from "@omnyo/plugin-sdk/app";
+import { type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { createProposalDiff, proposalDiffKey } from "./proposal-diff.js";
 import {
   useDocumentSession,
@@ -47,19 +44,27 @@ import {
   mergeAttributes,
 } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
-import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
-import Table from "@tiptap/extension-table";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
 import TableRow from "@tiptap/extension-table-row";
 import { Markdown } from "tiptap-markdown";
-import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
+import {
+  MarkdownLink,
+  MarkdownTable,
+  TightTaskList,
+} from "./editor-extensions.js";
+import {
+  loadMarkdownBlocks,
+  markdownBlocksDocument,
+  saveMarkdownBlocks,
+  serializeMarkdownNodes,
+  type MarkdownBlocks,
+} from "./markdown-blocks.js";
+import { HtmlBlock, HtmlSource } from "./raw-html.js";
 import { toast } from "sonner";
-import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
 import ArrowUpRight01Icon from "@hugeicons/core-free-icons/ArrowUpRight01Icon";
@@ -75,6 +80,12 @@ import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
 import {
   Dialog,
@@ -94,7 +105,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { usePortalScopeProps } from "@/lib/portal-scope";
+import {
+  DISCLOSURE_CHEVRON_TRANSITION,
+  LIST_HOVER_TRANSITION,
+} from "@/components/ui/motion";
 
 interface Vault {
   id: string;
@@ -147,27 +161,33 @@ function encodePath(value: string): string {
 
 function dirname(value: string): string {
   const index = value.lastIndexOf("/");
+
   return index < 0 ? "" : value.slice(0, index);
 }
 
 function normalizeRelative(base: string, relative: string): string {
   if (!relative.startsWith(".")) return relative.replace(/^\//, "");
   const stack = base ? base.split("/") : [];
+
   for (const part of relative.split("/")) {
     if (!part || part === ".") continue;
+
     if (part === "..") stack.pop();
     else stack.push(part);
   }
+
   return stack.join("/");
 }
 
 function relativeFrom(base: string, target: string): string {
   const from = base ? base.split("/") : [];
   const to = target.split("/");
+
   while (from[0] && from[0] === to[0]) {
     from.shift();
     to.shift();
   }
+
   return (
     `${from.map(() => "..").join("/")}${from.length && to.length ? "/" : ""}${to.join("/")}` ||
     "."
@@ -176,6 +196,7 @@ function relativeFrom(base: string, target: string): string {
 
 function previewUrl(baseUrl: string, notePath: string, source: string): string {
   if (/^(https?:|data:|blob:|#)/i.test(source)) return source;
+
   return `${baseUrl}/${encodePath(normalizeRelative(dirname(notePath), source))}`;
 }
 
@@ -189,6 +210,7 @@ function displayMarkdown(
     (_match, start: string, source: string, end: string) =>
       `${start}${previewUrl(baseUrl, notePath, source)}${end}`,
   );
+
   return withImages.replace(
     /^::html\{src="([^"]+)"(?: height="(\d+)")?\}\s*$/gm,
     (_match, source: string, height: string | undefined) =>
@@ -202,16 +224,20 @@ function storedMarkdown(
   notePath: string,
 ): string {
   const prefix = `${baseUrl}/`;
+
   return content.replace(
     /(!\[[^\]]*\]\()([^\s)]+)([^)]*\))/g,
     (_match, start: string, source: string, end: string) => {
       if (!source.startsWith(prefix)) return `${start}${source}${end}`;
+
       const target = source
         .slice(prefix.length)
         .split("/")
         .map(decodeURIComponent)
         .join("/");
+
       const relative = relativeFrom(dirname(notePath), target);
+
       return `${start}${relative.startsWith(".") ? relative : `./${relative}`}${end}`;
     },
   );
@@ -277,6 +303,7 @@ const HtmlEmbed = Node.create<HtmlEmbedOptions>({
         String(node.attrs.src),
       );
       dom.append(header, iframe);
+
       return { dom };
     };
   },
@@ -309,6 +336,7 @@ const MarkdownTaskInput = Extension.create({
         find: /^\s*\[([ xX]?)\]\s$/,
         handler: ({ range, match, chain }) => {
           const commands = chain().deleteRange(range).toggleTaskList();
+
           if (/[xX]/.test(match[1] ?? ""))
             commands.updateAttributes("taskItem", { checked: true });
           commands.run();
@@ -318,84 +346,89 @@ const MarkdownTaskInput = Extension.create({
   },
 });
 
-const STYLE_MARKER = "data-bb-simple-notes-styles";
+const STYLE_MARKER = "data-omnyo-simple-notes-styles";
+
 const EDITOR_CSS = `
-.bb-simple-notes-editor .tiptap {
+.omnyo-simple-notes-editor .tiptap {
   outline: none; width: 100%; max-width: 48em; margin: 0 auto; padding: 3rem 1.5rem 40vh;
   font-size: 15px; line-height: 1.75; color: var(--foreground); caret-color: var(--foreground);
   overflow-wrap: break-word; -webkit-font-smoothing: antialiased;
 }
-.bb-simple-notes-editor[data-inline="true"] .tiptap { padding: 1.25rem 1.5rem; max-width: none; min-height: 8rem; font-size: inherit; }
-.bb-simple-notes-editor .tiptap > :first-child,
-.bb-simple-notes-editor .tiptap li > :first-child,
-.bb-simple-notes-editor .tiptap blockquote > :first-child { margin-top: 0; }
-.bb-simple-notes-editor .tiptap p { margin: 1.25em 0 0; }
-.bb-simple-notes-editor .tiptap h1,
-.bb-simple-notes-editor .tiptap h2,
-.bb-simple-notes-editor .tiptap h3,
-.bb-simple-notes-editor .tiptap h4,
-.bb-simple-notes-editor .tiptap h5,
-.bb-simple-notes-editor .tiptap h6 { margin-bottom: 0; color: var(--foreground); font-weight: 600; }
-.bb-simple-notes-editor .tiptap h1 { font-size: 1.75em; line-height: 1.3; margin-top: 1.25em; }
-.bb-simple-notes-editor .tiptap h2 { font-size: 1.25em; line-height: 1.4; margin-top: 1.75em; }
-.bb-simple-notes-editor .tiptap h3 { font-size: 1.125em; line-height: 1.45; margin-top: 1.25em; }
-.bb-simple-notes-editor .tiptap h4 { font-size: 1em; line-height: 1.5; margin-top: 1.25em; }
-.bb-simple-notes-editor .tiptap h5 { font-size: 0.875em; line-height: 1.5; font-weight: 500; color: var(--muted-foreground); margin-top: 1.43em; }
-.bb-simple-notes-editor .tiptap h6 { font-size: 0.8125em; line-height: 1.5; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); margin-top: 1.54em; }
-.bb-simple-notes-editor .tiptap :is(h1, h2, h3, h4, h5, h6) + * { margin-top: 1em; }
-.bb-simple-notes-editor .tiptap ul, .bb-simple-notes-editor .tiptap ol { margin: 1.25em 0 0; padding-left: 1.5em; }
-.bb-simple-notes-editor .tiptap ul { list-style: disc; }
-.bb-simple-notes-editor .tiptap ol { list-style: decimal; }
-.bb-simple-notes-editor .tiptap li { margin-top: 0.5em; padding-left: 0.4em; }
-.bb-simple-notes-editor .tiptap li > p, .bb-simple-notes-editor .tiptap li > ul, .bb-simple-notes-editor .tiptap li > ol { margin-top: 0.5em; }
-.bb-simple-notes-editor .tiptap li::marker { color: var(--muted-foreground); }
-.bb-simple-notes-editor .tiptap a { color: inherit; font-weight: 500; text-decoration: underline; text-decoration-color: color-mix(in oklab, currentColor 30%, transparent); cursor: pointer; }
-.bb-simple-notes-editor .tiptap a:hover { text-decoration-color: currentColor; }
-.bb-simple-notes-editor .tiptap a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 0.125em; }
-.bb-simple-notes-editor .tiptap strong { font-weight: 600; }
-.bb-simple-notes-editor .tiptap code { background: var(--muted); border-radius: min(calc(var(--radius) * 0.6), 0.35em); padding: 0.125em 0.3em; font-size: 0.85em; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
-.bb-simple-notes-editor .tiptap pre { background: var(--muted); border-radius: var(--radius); padding: 0.75em 1em; overflow-x: auto; font-size: 0.875em; line-height: 1.5; margin: 1.43em 0 0; tab-size: 2; }
-.bb-simple-notes-editor .tiptap pre code { background: none; padding: 0; font-size: inherit; }
-.bb-simple-notes-editor .tiptap blockquote { border-left: 2px solid var(--border); padding-left: 1em; margin: 1.25em 0 0; }
-.bb-simple-notes-editor .tiptap hr { border: none; border-top: 1px solid var(--border); margin: 3em 0 0; }
-.bb-simple-notes-editor .tiptap hr + :is(h1, h2, h3, h4) { margin-top: 1.25em; }
-.bb-simple-notes-editor .tiptap img { display: block; max-width: 100%; max-height: 38rem; margin: 1.5em auto 0; border-radius: var(--radius); border: 1px solid var(--border); }
-.bb-simple-notes-editor .tiptap .tableWrapper { margin: 1.5em 0 0; overflow-x: auto; }
-.bb-simple-notes-editor .tiptap table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.bb-simple-notes-editor .tiptap th,
-.bb-simple-notes-editor .tiptap td { position: relative; min-width: 6rem; border: 1px solid var(--border); padding: 0.5em 0.65em; text-align: left; vertical-align: top; }
-.bb-simple-notes-editor .tiptap th { background: var(--muted); font-weight: 600; }
-.bb-simple-notes-editor .tiptap :is(th, td) > p { margin-top: 0; }
-.bb-simple-notes-editor .tiptap :is(th, td) > p + p { margin-top: 0.65em; }
-.bb-simple-notes-editor .tiptap .selectedCell::after { position: absolute; inset: 0; z-index: 2; pointer-events: none; content: ""; background: color-mix(in oklab, var(--primary) 14%, transparent); }
-.bb-simple-notes-editor .tiptap .column-resize-handle { position: absolute; top: 0; right: -2px; bottom: -1px; width: 4px; z-index: 3; pointer-events: none; background: var(--primary); }
-.bb-simple-notes-editor .tiptap.resize-cursor { cursor: col-resize; }
-.bb-simple-notes-editor .tiptap ul[data-type="taskList"] { list-style: none; padding-left: 0.25em; }
-.bb-simple-notes-editor .tiptap ul[data-type="taskList"] ul[data-type="taskList"] { margin-top: 0; }
-.bb-simple-notes-editor .tiptap ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.5em; margin-top: 0.5em; padding-left: 0; }
-.bb-simple-notes-editor .tiptap ul[data-type="taskList"] li > label { flex: 0 0 auto; display: inline-flex; align-items: center; height: 1.7em; user-select: none; }
-.bb-simple-notes-editor .tiptap ul[data-type="taskList"] li > div { flex: 1 1 auto; min-width: 0; }
-.bb-simple-notes-editor .tiptap ul[data-type="taskList"] li > div > p { line-height: 1.75; }
-.bb-simple-notes-editor .tiptap ul[data-type="taskList"] li > div > p:first-child { margin-top: 0; }
-.bb-simple-notes-editor .tiptap ul[data-type="taskList"] input[type="checkbox"] { display: block; width: 15px; height: 15px; accent-color: var(--primary); cursor: pointer; margin: 0; }
-.bb-simple-notes-editor .tiptap ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--muted-foreground); text-decoration: line-through; }
-.bb-simple-notes-editor .tiptap p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--muted-foreground); }
-.bb-simple-notes-editor .tiptap ::selection { background: color-mix(in oklab, var(--primary) 22%, transparent); }
+.omnyo-simple-notes-editor[data-inline="true"] .tiptap { padding: 1.25rem 1.5rem; max-width: none; min-height: 8rem; font-size: inherit; }
+.omnyo-simple-notes-editor .tiptap > :first-child,
+.omnyo-simple-notes-editor .tiptap li > :first-child,
+.omnyo-simple-notes-editor .tiptap blockquote > :first-child { margin-top: 0; }
+.omnyo-simple-notes-editor .tiptap p { margin: 1.25em 0 0; }
+.omnyo-simple-notes-editor .tiptap h1,
+.omnyo-simple-notes-editor .tiptap h2,
+.omnyo-simple-notes-editor .tiptap h3,
+.omnyo-simple-notes-editor .tiptap h4,
+.omnyo-simple-notes-editor .tiptap h5,
+.omnyo-simple-notes-editor .tiptap h6 { margin-bottom: 0; color: var(--foreground); font-weight: 600; }
+.omnyo-simple-notes-editor .tiptap h1 { font-size: 1.75em; line-height: 1.3; margin-top: 1.25em; }
+.omnyo-simple-notes-editor .tiptap h2 { font-size: 1.25em; line-height: 1.4; margin-top: 1.75em; }
+.omnyo-simple-notes-editor .tiptap h3 { font-size: 1.125em; line-height: 1.45; margin-top: 1.25em; }
+.omnyo-simple-notes-editor .tiptap h4 { font-size: 1em; line-height: 1.5; margin-top: 1.25em; }
+.omnyo-simple-notes-editor .tiptap h5 { font-size: 0.875em; line-height: 1.5; font-weight: 500; color: var(--muted-foreground); margin-top: 1.43em; }
+.omnyo-simple-notes-editor .tiptap h6 { font-size: 0.8125em; line-height: 1.5; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); margin-top: 1.54em; }
+.omnyo-simple-notes-editor .tiptap :is(h1, h2, h3, h4, h5, h6) + * { margin-top: 1em; }
+.omnyo-simple-notes-editor .tiptap ul, .omnyo-simple-notes-editor .tiptap ol { margin: 1.25em 0 0; padding-left: 1.5em; }
+.omnyo-simple-notes-editor .tiptap ul { list-style: disc; }
+.omnyo-simple-notes-editor .tiptap ol { list-style: decimal; }
+.omnyo-simple-notes-editor .tiptap li { margin-top: 0.5em; padding-left: 0.4em; }
+.omnyo-simple-notes-editor .tiptap li > p, .omnyo-simple-notes-editor .tiptap li > ul, .omnyo-simple-notes-editor .tiptap li > ol { margin-top: 0.5em; }
+.omnyo-simple-notes-editor .tiptap li::marker { color: var(--muted-foreground); }
+.omnyo-simple-notes-editor .tiptap a { color: inherit; font-weight: 500; text-decoration: underline; text-decoration-color: color-mix(in oklab, currentColor 30%, transparent); cursor: pointer; }
+.omnyo-simple-notes-editor .tiptap a:hover { text-decoration-color: currentColor; }
+.omnyo-simple-notes-editor .tiptap a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 0.125em; }
+.omnyo-simple-notes-editor .tiptap strong { font-weight: 600; }
+.omnyo-simple-notes-editor .tiptap code { background: var(--muted); border-radius: min(calc(var(--radius) * 0.6), 0.35em); padding: 0.125em 0.3em; font-size: 0.85em; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.omnyo-simple-notes-editor .tiptap pre { background: var(--muted); border-radius: var(--radius); padding: 0.75em 1em; overflow-x: auto; font-size: 0.875em; line-height: 1.5; margin: 1.43em 0 0; tab-size: 2; }
+.omnyo-simple-notes-editor .tiptap pre code { background: none; padding: 0; font-size: inherit; }
+.omnyo-simple-notes-editor .tiptap pre[data-html-block] { background: none; padding: 0; border-radius: 0; font: inherit; white-space: pre-wrap; }
+.omnyo-simple-notes-editor .tiptap blockquote { border-left: 2px solid var(--border); padding-left: 1em; margin: 1.25em 0 0; }
+.omnyo-simple-notes-editor .tiptap hr { border: none; border-top: 1px solid var(--border); margin: 3em 0 0; }
+.omnyo-simple-notes-editor .tiptap hr + :is(h1, h2, h3, h4) { margin-top: 1.25em; }
+.omnyo-simple-notes-editor .tiptap img { display: block; max-width: 100%; max-height: 38rem; margin: 1.5em auto 0; border-radius: var(--radius); border: 1px solid var(--border); }
+.omnyo-simple-notes-editor .tiptap .tableWrapper { margin: 1.5em 0 0; overflow-x: auto; }
+.omnyo-simple-notes-editor .tiptap table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.omnyo-simple-notes-editor .tiptap th,
+.omnyo-simple-notes-editor .tiptap td { position: relative; min-width: 6rem; border: 1px solid var(--border); padding: 0.5em 0.65em; text-align: left; vertical-align: top; }
+.omnyo-simple-notes-editor .tiptap th { background: var(--muted); font-weight: 600; }
+.omnyo-simple-notes-editor .tiptap :is(th, td) > p { margin-top: 0; }
+.omnyo-simple-notes-editor .tiptap :is(th, td) > p + p { margin-top: 0.65em; }
+.omnyo-simple-notes-editor .tiptap .selectedCell::after { position: absolute; inset: 0; z-index: 2; pointer-events: none; content: ""; background: color-mix(in oklab, var(--primary) 14%, transparent); }
+.omnyo-simple-notes-editor .tiptap .column-resize-handle { position: absolute; top: 0; right: -2px; bottom: -1px; width: 4px; z-index: 3; pointer-events: none; background: var(--primary); }
+.omnyo-simple-notes-editor .tiptap.resize-cursor { cursor: col-resize; }
+.omnyo-simple-notes-editor .tiptap ul[data-type="taskList"] { list-style: none; padding-left: 0.25em; }
+.omnyo-simple-notes-editor .tiptap ul[data-type="taskList"] ul[data-type="taskList"] { margin-top: 0; }
+.omnyo-simple-notes-editor .tiptap ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.5em; margin-top: 0.5em; padding-left: 0; }
+.omnyo-simple-notes-editor .tiptap ul[data-type="taskList"] li > label { flex: 0 0 auto; display: inline-flex; align-items: center; height: 1.7em; user-select: none; }
+.omnyo-simple-notes-editor .tiptap ul[data-type="taskList"] li > div { flex: 1 1 auto; min-width: 0; }
+.omnyo-simple-notes-editor .tiptap ul[data-type="taskList"] li > div > p { line-height: 1.75; }
+.omnyo-simple-notes-editor .tiptap ul[data-type="taskList"] li > div > p:first-child { margin-top: 0; }
+.omnyo-simple-notes-editor .tiptap ul[data-type="taskList"] input[type="checkbox"] { display: block; width: 15px; height: 15px; accent-color: var(--primary); cursor: pointer; margin: 0; }
+.omnyo-simple-notes-editor .tiptap ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--muted-foreground); text-decoration: line-through; }
+.omnyo-simple-notes-editor .tiptap p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--muted-foreground); }
+.omnyo-simple-notes-editor .tiptap ::selection { background: color-mix(in oklab, var(--primary) 22%, transparent); }
 .simple-html-embed { margin:1.5em 0 0; overflow:hidden; border:1px solid var(--border); border-radius:var(--radius); background:var(--background); }
 .simple-html-embed-header { border-bottom:1px solid var(--border); background:var(--muted); padding:.45rem .7rem; color:var(--muted-foreground); font:11px var(--font-mono,monospace); }
 .simple-html-embed iframe { display:block; width:100%; border:0; background:white; }
-.bb-docs-panel .tiptap { max-width: none; padding: 1rem 0 3rem; font-size: 14px; }
-@media (max-width: 47.999rem) { .bb-simple-notes-editor .tiptap { padding-inline: 1.25rem; font-size: 16.875px; } }
+.omnyo-docs-panel .tiptap { max-width: none; padding: 1rem 0 3rem; font-size: 14px; }
+@media (max-width: 47.999rem) { .omnyo-simple-notes-editor .tiptap { padding-inline: 1.25rem; font-size: 16.875px; } }
 `;
 
 function ensureEditorStyles(): void {
   const existing = document.head.querySelector<HTMLStyleElement>(
     `[${STYLE_MARKER}]`,
   );
+
   if (existing) {
     existing.textContent = EDITOR_CSS;
+
     return;
   }
+
   const style = document.createElement("style");
   style.setAttribute(STYLE_MARKER, "");
   style.textContent = EDITOR_CSS;
@@ -411,6 +444,7 @@ function fileToBase64(file: File): Promise<string> {
       const result = String(reader.result ?? "");
       resolve(result.slice(result.indexOf(",") + 1));
     };
+
     reader.readAsDataURL(file);
   });
 }
@@ -437,27 +471,25 @@ function TiptapEditor(props: {
     inline = false,
     disabled = false,
   } = props;
+
   const rootRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Editor | null>(null);
   const baselineRef = useRef<ProseMirrorNode | null>(null);
   const sourceRef = useRef(initialValue);
+  const blocksRef = useRef<MarkdownBlocks | null>(null);
   const latest = useRef(props);
   latest.current = props;
   const serializeRef = useRef<() => string>(() => "");
+
   const setBase = (editor: Editor) => {
     if (latest.current.baseMarkdown == null) baselineRef.current = null;
-    else {
-      const body = parseMarkdownDocument(latest.current.baseMarkdown).body;
-      const root = new window.DOMParser().parseFromString(
-        editor.storage.markdown.parser.parse(
-          displayMarkdown(body, previewBaseUrl, notePath),
-        ),
-        "text/html",
-      ).body;
-      baselineRef.current = ProseMirrorDOMParser.fromSchema(
-        editor.schema,
-      ).parse(root);
-    }
+    else
+      baselineRef.current = markdownBlocksDocument(
+        editor,
+        parseMarkdownDocument(latest.current.baseMarkdown).body,
+        (source) => displayMarkdown(source, previewBaseUrl, notePath),
+      );
+
     editor.view.dispatch(
       editor.state.tr.setMeta(proposalDiffKey, { refresh: true }),
     );
@@ -465,10 +497,12 @@ function TiptapEditor(props: {
 
   useEffect(() => {
     ensureEditorStyles();
+
     if (!rootRef.current) return;
     sourceRef.current = latest.current.value ?? initialValue;
     const markdownDocument = parseMarkdownDocument(sourceRef.current);
     let editor: Editor;
+
     const upload = async (file: File) => {
       if (!file.type.startsWith("image/")) return false;
       const result = await latest.current.onUpload(file);
@@ -480,22 +514,29 @@ function TiptapEditor(props: {
           alt: file.name,
         })
         .run();
+
       return true;
     };
+
     editor = new Editor({
       element: rootRef.current,
       extensions: [
         StarterKit,
         createProposalDiff({ getBaseDocument: () => baselineRef.current }),
-        Link.configure({ openOnClick: false, autolink: true }),
+        MarkdownLink.configure({ openOnClick: false, autolink: true }),
         Image.configure({ allowBase64: false }),
-        TaskList,
+        TightTaskList,
         TaskItem.configure({ nested: true }),
-        Table.configure({ resizable: true, lastColumnResizable: false }),
+        MarkdownTable.configure({
+          resizable: true,
+          lastColumnResizable: false,
+        }),
         TableRow,
         TableHeader,
         TableCell,
         MarkdownTaskInput,
+        HtmlBlock,
+        HtmlSource,
         HtmlEmbed.configure({ baseUrl: previewBaseUrl, notePath }),
         Placeholder.configure({ placeholder: "Start writing…" }),
         Markdown.configure({
@@ -505,7 +546,7 @@ function TiptapEditor(props: {
           linkify: true,
         }),
       ],
-      content: displayMarkdown(markdownDocument.body, previewBaseUrl, notePath),
+      content: "",
       autofocus: inline ? false : "end",
       editable: !disabled,
       onFocus: () => latest.current.onFocusChange?.(true),
@@ -519,47 +560,55 @@ function TiptapEditor(props: {
         handleKeyDown(view, event) {
           if (!inline || event.key !== "Escape") return false;
           view.dom.blur();
+
           return true;
         },
         handlePaste(_view, event) {
           const file = [...(event.clipboardData?.files ?? [])].find(
             (candidate) => candidate.type.startsWith("image/"),
           );
+
           if (!file) return false;
           void upload(file);
+
           return true;
         },
         handleDrop(_view, event) {
           const file = [...(event.dataTransfer?.files ?? [])].find(
             (candidate) => candidate.type.startsWith("image/"),
           );
+
           if (!file) return false;
           event.preventDefault();
           void upload(file);
+
           return true;
         },
       },
     });
     editorRef.current = editor;
+    blocksRef.current = loadMarkdownBlocks(
+      editor,
+      markdownDocument.body,
+      (source) => displayMarkdown(source, previewBaseUrl, notePath),
+      false,
+    );
     setBase(editor);
-    const getMarkdown = () => {
-      const current = parseMarkdownDocument(sourceRef.current);
-      const leadingBreaks = current.frontmatter
-        ? (/^(?:\r?\n)*/.exec(current.body)?.[0] ?? "")
-        : "";
-      return (
-        current.frontmatter +
-        leadingBreaks +
+
+    const getMarkdown = () =>
+      parseMarkdownDocument(sourceRef.current).frontmatter +
+      saveMarkdownBlocks(editor, blocksRef.current!, (nodes) =>
         storedMarkdown(
-          editor.storage.markdown.getMarkdown(),
+          serializeMarkdownNodes(editor, nodes),
           previewBaseUrl,
           notePath,
-        )
+        ),
       );
-    };
+
     serializeRef.current = getMarkdown;
     latest.current.onFirstRender(getMarkdown());
     editor.on("update", () => latest.current.onMarkdownChange(getMarkdown()));
+
     return () => {
       editor.destroy();
       editorRef.current = null;
@@ -569,24 +618,26 @@ function TiptapEditor(props: {
 
   useEffect(() => {
     const editor = editorRef.current;
+
     if (!editor || value === undefined) return;
+
     if (value !== sourceRef.current && value !== serializeRef.current()) {
       const { from, to } = editor.state.selection;
       const focused = editor.isFocused;
-      editor.commands.setContent(
-        displayMarkdown(
-          parseMarkdownDocument(value).body,
-          previewBaseUrl,
-          notePath,
-        ),
-        false,
+      blocksRef.current = loadMarkdownBlocks(
+        editor,
+        parseMarkdownDocument(value).body,
+        (source) => displayMarkdown(source, previewBaseUrl, notePath),
+        true,
       );
+
       if (focused)
         editor.commands.setTextSelection({
           from: Math.min(from, editor.state.doc.content.size),
           to: Math.min(to, editor.state.doc.content.size),
         });
     }
+
     sourceRef.current = value;
   }, [value, notePath, previewBaseUrl]);
   useEffect(() => {
@@ -601,7 +652,7 @@ function TiptapEditor(props: {
     <div
       ref={rootRef}
       data-inline={inline}
-      className="bb-simple-notes-editor min-h-0 flex-1 overflow-y-auto text-sm"
+      className="omnyo-simple-notes-editor min-h-0 flex-1 overflow-y-auto text-sm"
     />
   );
 }
@@ -624,7 +675,9 @@ const notebookStores = new Map<string | null, NotebookStore>();
 
 function getNotebookStore(vaultId: string | null): NotebookStore {
   const existing = notebookStores.get(vaultId);
+
   if (existing) return existing;
+
   const store: NotebookStore = {
     consumers: new Set(),
     data: null,
@@ -636,7 +689,9 @@ function getNotebookStore(vaultId: string | null): NotebookStore {
     requestId: 0,
     vaultId,
   };
+
   notebookStores.set(vaultId, store);
+
   return store;
 }
 
@@ -650,15 +705,20 @@ function refreshNotebookStore(
   { queueIfInFlight = true }: { queueIfInFlight?: boolean } = {},
 ): Promise<void> {
   if (notebookStores.get(store.vaultId) !== store) return Promise.resolve();
+
   if (store.inFlight) {
     if (queueIfInFlight) store.pendingRefreshRpc = rpc;
+
     return store.inFlight;
   }
+
   if (store.error !== null) {
     store.error = null;
     notifyNotebookStore(store);
   }
+
   const requestId = ++store.requestId;
+
   const request = rpc
     .call("listNotes", store.vaultId ? { vaultId: store.vaultId } : {})
     .then((value) => {
@@ -678,6 +738,7 @@ function refreshNotebookStore(
       )
         return;
       const message = errorMessage(error);
+
       if (store.data === null) store.error = message;
       else store.data = { ...store.data, error: message };
       notifyNotebookStore(store);
@@ -687,6 +748,7 @@ function refreshNotebookStore(
       store.inFlight = null;
       const pendingRefreshRpc = store.pendingRefreshRpc;
       store.pendingRefreshRpc = null;
+
       if (
         pendingRefreshRpc !== null &&
         store.consumers.size > 0 &&
@@ -697,7 +759,9 @@ function refreshNotebookStore(
         });
       }
     });
+
   store.inFlight = request;
+
   return request;
 }
 
@@ -708,6 +772,7 @@ function useNotebook(vaultId: string | null) {
   const store = useMemo(() => getNotebookStore(vaultId), [vaultId]);
   const consumerRef = useRef(Symbol("docs-notebook-consumer"));
   const [, rerender] = useState(0);
+
   const refresh = useCallback(() => {
     void refreshNotebookStore(store, rpcRef.current);
   }, [store]);
@@ -718,16 +783,20 @@ function useNotebook(vaultId: string | null) {
     store.consumers.add(consumer);
     store.listeners.add(listener);
     store.owner ??= consumer;
+
     if (store.data === null) {
       void refreshNotebookStore(store, rpcRef.current, {
         queueIfInFlight: false,
       });
     }
+
     return () => {
       store.consumers.delete(consumer);
       store.listeners.delete(listener);
+
       if (store.owner === consumer)
         store.owner = store.consumers.values().next().value ?? null;
+
       if (store.consumers.size === 0) {
         queueMicrotask(() => {
           if (
@@ -754,6 +823,7 @@ function useNotebook(vaultId: string | null) {
     store.data && (vaultId === null || store.data.vault.id === vaultId)
       ? store.data
       : null;
+
   return { data, error: store.error, refresh };
 }
 
@@ -810,17 +880,21 @@ function documentTitle(path: string): string {
 
 function parseDocumentRef(value: unknown): DocumentRef | null {
   if (!isRecord(value)) return null;
+
   const vaultId =
     typeof value.vaultId === "string"
       ? value.vaultId
       : typeof value.vault === "string"
         ? value.vault
         : "";
+
   const path = typeof value.path === "string" ? value.path : "";
+
   const title =
     typeof value.title === "string" && value.title.trim()
       ? value.title.trim()
       : documentTitle(path);
+
   if (
     !vaultId ||
     !path ||
@@ -829,6 +903,7 @@ function parseDocumentRef(value: unknown): DocumentRef | null {
     !/\.(md|html?)$/i.test(path)
   )
     return null;
+
   return { vaultId, path, title };
 }
 
@@ -874,6 +949,7 @@ function InlineDocument({
     document.vaultId,
     document.path,
   );
+
   const rpc = useRpc<typeof docsRpcContract>();
   const composer = useComposer();
   const [editing, setEditing] = useState(false);
@@ -883,25 +959,32 @@ function InlineDocument({
   const [truncated, setTruncated] = useState(false);
   useEffect(() => {
     const content = contentRef.current;
+
     if (!openInTab || !content) return;
+
     const measure = () =>
       setTruncated(content.getBoundingClientRect().height > 400);
+
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(content);
+
     return () => observer.disconnect();
   }, [state.loaded, openInTab]);
   const pending = state.proposal?.status === "pending" ? state.proposal : null;
   const stale = pending !== null && pending.baseSha256 !== state.sha256;
+
   const undo =
     state.proposal &&
     ((state.proposal.status === "accepted" &&
       state.proposal.resolvedSha256 === state.sha256) ||
       (state.proposal.status === "rejected" &&
         state.proposal.baseSha256 === state.sha256));
+
   const redo =
     state.proposal?.status === "undone" &&
     state.proposal.baseSha256 === state.sha256;
+
   const copy = async () => {
     if (await experimental_copyToClipboard({ text: state.draft })) {
       toast.success("Document copied");
@@ -909,9 +992,11 @@ function InlineDocument({
       toast.error("Could not copy the document");
     }
   };
+
   const ask = async () => {
     setAsking(true);
     setAskError(null);
+
     try {
       await session.flush();
       composer.insert(
@@ -933,12 +1018,15 @@ function InlineDocument({
       setAsking(false);
     }
   };
+
   const baseMetadata = pending
     ? parseMarkdownDocument(pending.baseContent).frontmatter
     : "";
+
   const candidateMetadata = pending
     ? parseMarkdownDocument(state.draft).frontmatter
     : "";
+
   return (
     <TooltipProvider delayDuration={200}>
       <section
@@ -1090,6 +1178,7 @@ function InlineDocument({
                       name: file.name,
                       content: await fileToBase64(file),
                     });
+
                     return { markdownPath: result.markdownPath };
                   }}
                 />
@@ -1113,8 +1202,9 @@ function InlineDocument({
 }
 
 function DocsDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const document = parseDocumentRef(attributes);
+
   if (!document) {
     return (
       <div className="my-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
@@ -1122,10 +1212,12 @@ function DocsDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
       </div>
     );
   }
+
   const openInDocs = () =>
     navigate.toPluginPanel("docs", {
       subPath: `${document.vaultId}/${document.path}`,
     });
+
   const openPreview = () => {
     const opened = navigate.openThreadPanel({
       actionId: "document",
@@ -1136,15 +1228,18 @@ function DocsDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
         title: document.title,
       },
     });
+
     if (!opened) openInDocs();
   };
+
   if (!/\.html?$/i.test(document.path))
     return <InlineDocument document={document} openInTab={openPreview} />;
+
   return (
-    <div className="my-3 flex h-11 items-center gap-1 rounded-lg border border-border bg-card px-2 shadow-sm transition-colors hover:bg-state-hover">
+    <div className="relative my-3 flex h-11 select-none items-center gap-1 rounded-lg border border-border bg-card px-2 shadow-sm transition-colors hover:bg-state-hover">
       <button
         type="button"
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         onClick={openPreview}
       >
         <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -1155,7 +1250,7 @@ function DocsDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
         </span>
       </button>
       <Button
-        className="size-8 shrink-0"
+        className="relative size-8 shrink-0"
         size="icon"
         variant="ghost"
         aria-label="Open in Docs"
@@ -1174,9 +1269,11 @@ function HtmlPreview({
   panel = false,
 }: DocumentRef & { panel?: boolean }) {
   const rpc = useRpc<typeof docsRpcContract>();
+
   const [state, setState] = useState<PreviewLease | { error: string } | null>(
     null,
   );
+
   useEffect(() => {
     let active = true;
     setState(null);
@@ -1194,11 +1291,14 @@ function HtmlPreview({
             error: errorMessage(error),
           });
       });
+
     return () => {
       active = false;
     };
   }, [path, vaultId, rpc]);
+
   if (!state) return <DocumentSkeleton />;
+
   if ("error" in state)
     return (
       <div
@@ -1207,6 +1307,7 @@ function HtmlPreview({
         {state.error}
       </div>
     );
+
   return (
     <iframe
       className={`${panel ? "min-h-[32rem]" : "min-h-0"} flex-1 border-0 bg-white`}
@@ -1219,7 +1320,8 @@ function HtmlPreview({
 
 function DocumentPicker() {
   const [subPath, setSubPath] = useState("");
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <p className="text-sm text-muted-foreground">
@@ -1231,11 +1333,13 @@ function DocumentPicker() {
         onNavigate={(next) => {
           const [vaultId, ...parts] = next.split("/");
           const filePath = parts.join("/");
+
           if (vaultId && filePath) {
             const title = (filePath.split("/").pop() ?? filePath).replace(
               /\.(md|html?)$/i,
               "",
             );
+
             navigate.openThreadPanel({
               actionId: "document",
               title,
@@ -1250,10 +1354,13 @@ function DocumentPicker() {
 
 function DocumentPanel({ params }: PluginThreadPanelProps) {
   const document = parseDocumentRef(params);
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   if (!document) return <DocumentPicker />;
+
   if (!/\.html?$/i.test(document.path))
     return <InlineDocument document={document} />;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pb-2">
@@ -1291,6 +1398,7 @@ function SavedDocumentEditor({
   errorHint?: string;
 }) {
   const { state, session } = useSavedDocument(io);
+
   if (!state.loaded)
     return state.error ? (
       <div className="min-w-0 flex-1 p-6 text-sm text-destructive">
@@ -1300,6 +1408,7 @@ function SavedDocumentEditor({
     ) : (
       <DocumentSkeleton />
     );
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {state.conflict && (
@@ -1353,8 +1462,10 @@ function NotePane({
   const rpc = useRpc<typeof docsRpcContract>();
   const callbacks = useRef({ onChanged, onRenamed });
   callbacks.current = { onChanged, onRenamed };
+
   const { io, upload } = useMemo(() => {
     let path = notePath;
+
     const io: DocumentIO = {
       delay: 700,
       read: async () => {
@@ -1362,6 +1473,7 @@ function NotePane({
           rpc.call("readNote", { vaultId, path }),
           rpc.call("preparePreview", { vaultId, path }),
         ]);
+
         return {
           content: file.content,
           sha256: file.sha256,
@@ -1380,12 +1492,14 @@ function NotePane({
       afterSave: async () => {
         callbacks.current.onChanged();
         const renamed = await rpc.call("renameToTitle", { vaultId, path });
+
         if (renamed.path !== path) {
           path = renamed.path;
           callbacks.current.onRenamed(path);
         }
       },
     };
+
     const upload = async (file: File) => {
       const result = await rpc.call("uploadAttachment", {
         vaultId,
@@ -1393,10 +1507,13 @@ function NotePane({
         name: file.name,
         content: await fileToBase64(file),
       });
+
       return { markdownPath: result.markdownPath };
     };
+
     return { io, upload };
   }, [rpc, vaultId, notePath]);
+
   return (
     <SavedDocumentEditor
       io={io}
@@ -1408,7 +1525,8 @@ function NotePane({
 
 function DocsFileOpener({ path: filePath, source }: PluginFileOpenerProps) {
   const rpc = useRpc<typeof docsRpcContract>();
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   const liveFileTarget = useMemo<ExperimentalLiveFileTarget | null>(() => {
     switch (source.kind) {
       case "workspace":
@@ -1433,6 +1551,7 @@ function DocsFileOpener({ path: filePath, source }: PluginFileOpenerProps) {
           : { kind: source.kind, threadId: source.threadId, path: filePath };
     }
   }, [filePath, source]);
+
   const openerSource = useMemo(
     () => ({
       kind: source.kind,
@@ -1451,6 +1570,7 @@ function DocsFileOpener({ path: filePath, source }: PluginFileOpenerProps) {
       source.threadId,
     ],
   );
+
   const io = useMemo<DocumentIO>(
     () => ({
       delay: 700,
@@ -1459,6 +1579,7 @@ function DocsFileOpener({ path: filePath, source }: PluginFileOpenerProps) {
           source: openerSource,
           path: filePath,
         });
+
         return {
           content: file.content,
           sha256: file.sha256,
@@ -1477,6 +1598,7 @@ function DocsFileOpener({ path: filePath, source }: PluginFileOpenerProps) {
     }),
     [rpc, openerSource, filePath],
   );
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {liveFileTarget === null ? null : (
@@ -1521,41 +1643,55 @@ function orderEntries(
   const orderByPath = new Map(
     entryOrder.map((entryPath, index) => [entryPath, index]),
   );
+
   const children = new Map<string, VaultEntry[]>();
+
   for (const entry of entries) {
     const parent = dirname(entry.path);
     const siblings = children.get(parent) ?? [];
     siblings.push(entry);
     children.set(parent, siblings);
   }
+
   for (const siblings of children.values()) {
     siblings.sort((left, right) => {
       if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
+
       if (left.kind === "file") {
         const leftOrder = orderByPath.get(left.path);
         const rightOrder = orderByPath.get(right.path);
+
         if (leftOrder !== undefined || rightOrder !== undefined) {
           if (leftOrder === undefined) return 1;
+
           if (rightOrder === undefined) return -1;
+
           if (leftOrder !== rightOrder) return leftOrder - rightOrder;
         }
       }
+
       const leftName = left.path.split("/").at(-1) ?? left.path;
       const rightName = right.path.split("/").at(-1) ?? right.path;
+
       return leftName.localeCompare(rightName, undefined, {
         numeric: true,
         sensitivity: "base",
       });
     });
   }
+
   const ordered: VaultEntry[] = [];
+
   const visit = (parent: string) => {
     for (const entry of children.get(parent) ?? []) {
       ordered.push(entry);
+
       if (entry.kind === "directory") visit(entry.path);
     }
   };
+
   visit("");
+
   return ordered;
 }
 
@@ -1672,34 +1808,41 @@ function Tree({
   onVaultChange(vaultId: string): void;
   onAddVault(): void;
 }) {
-  const portalScopeProps = usePortalScopeProps();
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [draggingPath, setDraggingPath] = useState<string | null>(null);
   const draggingPathRef = useRef<string | null>(null);
+
   const [dropTarget, setDropTarget] = useState<{
     path: string;
     edge: "before" | "after";
   } | null>(null);
+
   const [folderDropTarget, setFolderDropTarget] = useState<string | null>(null);
+
   const notesByPath = useMemo(
     () => new Map(data.notes.map((note) => [note.path, note])),
     [data.notes],
   );
+
   const selectedHost = data.vault.hostId
     ? data.hosts.find((host) => host.id === data.vault.hostId)
     : null;
+
   const hostUnavailable = Boolean(
     data.vault.hostId && selectedHost?.status !== "connected",
   );
+
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const ordered = orderEntries(data.entries, data.entryOrder);
     const included = new Set<string>();
+
     if (needle) {
       for (const entry of ordered) {
         const note = notesByPath.get(entry.path);
+
         if (
           entry.path.toLowerCase().includes(needle) ||
           note?.title.toLowerCase().includes(needle) ||
@@ -1708,6 +1851,7 @@ function Tree({
           included.add(entry.path);
           const parents = entry.path.split("/").slice(0, -1);
           let parent = "";
+
           for (const part of parents) {
             parent = parent ? `${parent}/${part}` : part;
             included.add(parent);
@@ -1715,12 +1859,15 @@ function Tree({
         }
       }
     }
+
     return ordered.filter((entry) => {
       if (needle) return included.has(entry.path);
       const parents = entry.path.split("/").slice(0, -1);
       let current = "";
+
       return !parents.some((part) => {
         current = current ? `${current}/${part}` : part;
+
         return collapsed.has(current);
       });
     });
@@ -1741,6 +1888,7 @@ function Tree({
     event: ReactDragEvent<HTMLButtonElement>,
   ): "before" | "after" => {
     const targetRect = event.currentTarget.getBoundingClientRect();
+
     return event.clientY < targetRect.top + targetRect.height / 2
       ? "before"
       : "after";
@@ -1762,21 +1910,28 @@ function Tree({
     targetPath: string,
   ) => {
     event.preventDefault();
+
     const sourcePath =
       event.dataTransfer.getData("text/plain") || draggingPathRef.current;
+
     if (!sourcePath || sourcePath === targetPath) {
       setDropTarget(null);
+
       return;
     }
+
     const parent = dirname(targetPath);
     const edge = dropEdge(event);
+
     const siblings = orderEntries(data.entries, data.entryOrder)
       .filter(
         (entry) => entry.kind === "file" && dirname(entry.path) === parent,
       )
       .map((entry) => entry.path)
       .filter((entryPath) => entryPath !== sourcePath);
+
     const targetIndex = siblings.indexOf(targetPath);
+
     if (targetIndex === -1) return;
     const fileName = sourcePath.split("/").at(-1) ?? sourcePath;
     const destinationPath = parent ? `${parent}/${fileName}` : fileName;
@@ -1785,11 +1940,13 @@ function Tree({
       0,
       destinationPath,
     );
+
     if (dirname(sourcePath) === parent) {
       onReorderFiles(parent, siblings);
     } else {
       onMoveFile(sourcePath, parent, siblings);
     }
+
     clearDrag();
   };
 
@@ -1798,8 +1955,10 @@ function Tree({
     targetFolder: string,
   ) => {
     event.preventDefault();
+
     const sourcePath =
       event.dataTransfer.getData("text/plain") || draggingPathRef.current;
+
     if (!sourcePath || dirname(sourcePath) === targetFolder) return;
     onMoveFile(sourcePath, targetFolder);
     clearDrag();
@@ -1847,11 +2006,14 @@ function Tree({
         ) : null}
         {visible.map((entry) => {
           const depth = entry.path.split("/").length - 1;
+
           const label =
             notesByPath.get(entry.path)?.title ??
             entry.path.split("/").at(-1) ??
             entry.path;
+
           const isFolder = entry.kind === "directory";
+
           const row = (
             <button
               type="button"
@@ -1866,8 +2028,10 @@ function Tree({
               onDragOver={(event) => {
                 if (!isFolder) {
                   reorderAtTarget(event, entry.path);
+
                   return;
                 }
+
                 if (acceptsFileDrag(event)) {
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
@@ -1884,14 +2048,17 @@ function Tree({
                 if (isFolder)
                   setCollapsed((current) => {
                     const next = new Set(current);
+
                     if (next.has(entry.path)) next.delete(entry.path);
                     else next.add(entry.path);
+
                     return next;
                   });
                 else onOpen(entry.path);
               }}
               className={cn(
-                "flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-sm text-foreground transition-colors hover:bg-state-hover",
+                "flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-sm text-foreground hover:bg-state-hover",
+                LIST_HOVER_TRANSITION,
                 selectedPath === entry.path && "bg-state-active font-medium",
                 draggingPath === entry.path && "opacity-50",
                 folderDropTarget === entry.path &&
@@ -1907,12 +2074,12 @@ function Tree({
             >
               {isFolder ? (
                 <HugeiconsIcon
-                  icon={
-                    collapsed.has(entry.path)
-                      ? ArrowRight01Icon
-                      : ArrowDown01Icon
-                  }
-                  className="size-3.5 shrink-0 text-muted-foreground"
+                  icon={ArrowRight01Icon}
+                  className={cn(
+                    "size-3.5 shrink-0 text-muted-foreground",
+                    DISCLOSURE_CHEVRON_TRANSITION,
+                    !collapsed.has(entry.path) && "rotate-90",
+                  )}
                 />
               ) : (
                 <span className="size-3.5 shrink-0" />
@@ -1932,29 +2099,24 @@ function Tree({
               <span className="truncate">{label}</span>
             </button>
           );
+
           if (isFolder) {
             return <div key={`${entry.kind}:${entry.path}`}>{row}</div>;
           }
+
           return (
-            <ContextMenuPrimitive.Root key={`${entry.kind}:${entry.path}`}>
-              <ContextMenuPrimitive.Trigger asChild>
-                {row}
-              </ContextMenuPrimitive.Trigger>
-              <ContextMenuPrimitive.Portal>
-                <ContextMenuPrimitive.Content
-                  {...portalScopeProps}
-                  className="z-50 min-w-32 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+            <ContextMenu key={`${entry.kind}:${entry.path}`}>
+              <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+              <ContextMenuContent className="min-w-32">
+                <ContextMenuItem
+                  className="text-destructive focus:bg-destructive/15 focus:text-destructive"
+                  onSelect={() => onDeleteFile(entry.path)}
                 >
-                  <ContextMenuPrimitive.Item
-                    className="flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none focus:bg-destructive/15 focus:text-destructive"
-                    onSelect={() => onDeleteFile(entry.path)}
-                  >
-                    <HugeiconsIcon icon={Delete02Icon} className="size-4" />
-                    Delete
-                  </ContextMenuPrimitive.Item>
-                </ContextMenuPrimitive.Content>
-              </ContextMenuPrimitive.Portal>
-            </ContextMenuPrimitive.Root>
+                  <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+                  Delete
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           );
         })}
         {data.truncated ? (
@@ -2010,9 +2172,11 @@ function parseRoute(subPath: string): {
 } {
   if (!subPath) return { vaultId: null, filePath: null };
   const parts = subPath.split("/").map(decodeURIComponent);
+
   if (parts.length === 1 && /\.(md|html?)$/i.test(parts[0] ?? "")) {
     return { vaultId: null, filePath: parts[0] ?? null };
   }
+
   return {
     vaultId: parts.shift() ?? null,
     filePath: parts.length ? parts.join("/") : null,
@@ -2028,7 +2192,8 @@ function NotesWorkspace({
   onNavigate?(subPath: string, replace?: boolean): void;
 }) {
   const rpc = useRpc<typeof docsRpcContract>();
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   const navigateTo = useCallback(
     (next: string, replace?: boolean) => {
       if (onNavigate) onNavigate(next, replace);
@@ -2040,6 +2205,7 @@ function NotesWorkspace({
     },
     [navigate, onNavigate],
   );
+
   const route = parseRoute(subPath);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
@@ -2054,6 +2220,7 @@ function NotesWorkspace({
   const filePath = route.filePath;
   const currentVaultIdRef = useRef(activeVaultId);
   currentVaultIdRef.current = activeVaultId;
+
   const isCurrentVault = useCallback(
     (vaultId: string) => currentVaultIdRef.current === vaultId,
     [],
@@ -2077,6 +2244,7 @@ function NotesWorkspace({
           </Button>
         </div>
       );
+
     return (
       <DelayedLoading>
         <div
@@ -2090,6 +2258,7 @@ function NotesWorkspace({
   }
 
   const selectedFolder = filePath ? dirname(filePath) : "";
+
   const newNote = () =>
     void rpc
       .call("createNote", {
@@ -2103,13 +2272,17 @@ function NotesWorkspace({
           open(value.path);
         }
       });
+
   const createFolder = async () => {
     const name = folderName.trim();
+
     if (!name) return;
     setFolderError(null);
     const target = selectedFolder ? `${selectedFolder}/${name}` : name;
+
     try {
       await rpc.call("createFolder", { vaultId: activeVaultId, path: target });
+
       if (!isCurrentVault(activeVaultId)) return;
       setFolderName("");
       setFolderDialogOpen(false);
@@ -2122,14 +2295,17 @@ function NotesWorkspace({
   const createVault = async () => {
     const name = vaultName.trim();
     const rootPath = vaultRootPath.trim();
+
     if (!name || !rootPath) return;
     setVaultError(null);
+
     try {
       const value = await rpc.call("createVault", {
         name,
         rootPath,
         ...(vaultHostId === "primary" ? {} : { hostId: vaultHostId }),
       });
+
       if (!isCurrentVault(activeVaultId)) return;
       setVaultName("");
       setVaultRootPath("");
@@ -2147,11 +2323,14 @@ function NotesWorkspace({
         vaultId: activeVaultId,
         path,
       });
+
       if (!isCurrentVault(activeVaultId)) return;
       refresh();
+
       if (filePath === path) {
         navigateTo(activeVaultId, true);
       }
+
       toast.success(`Deleted ${path}`);
     } catch (error) {
       toast.error(`Could not delete ${path}: ${errorMessage(error)}`);
@@ -2165,6 +2344,7 @@ function NotesWorkspace({
         parent,
         paths,
       });
+
       if (!isCurrentVault(activeVaultId)) return;
       refresh();
     } catch (error) {
@@ -2178,9 +2358,11 @@ function NotesWorkspace({
     targetOrder?: string[],
   ) => {
     const fileName = sourcePath.split("/").at(-1) ?? sourcePath;
+
     const destinationPath = targetFolder
       ? `${targetFolder}/${fileName}`
       : fileName;
+
     try {
       let orderPreserved = true;
       await rpc.call("movePath", {
@@ -2188,6 +2370,7 @@ function NotesWorkspace({
         from: sourcePath,
         to: destinationPath,
       });
+
       if (targetOrder) {
         try {
           await rpc.call("reorderFiles", {
@@ -2202,9 +2385,12 @@ function NotesWorkspace({
           );
         }
       }
+
       if (!isCurrentVault(activeVaultId)) return;
       refresh();
+
       if (filePath === sourcePath) open(destinationPath, true);
+
       if (orderPreserved) {
         toast.success(
           targetFolder

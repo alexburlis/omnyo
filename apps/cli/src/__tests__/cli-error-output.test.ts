@@ -10,8 +10,9 @@ describe("isJsonInvocation", () => {
     [["terminal", "create", "--thread", "thr_1", "--", "jq", "--json"], false],
     [["thread", "tell", "thr_1", "please use --json"], false],
   ];
+
   it.each(cases)("%j → %s", (args, expected) => {
-    expect(isJsonInvocation(["node", "bb", ...args])).toBe(expected);
+    expect(isJsonInvocation(["node", "Omnyo", ...args])).toBe(expected);
   });
 });
 

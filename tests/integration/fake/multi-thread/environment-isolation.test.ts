@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { environments } from "@bb/db";
+import { environments } from "@omnyo/db";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -37,6 +37,7 @@ import {
 } from "./shared.js";
 
 const REBUILD_TIMEOUT_MS = scaleTimeoutMs(30_000);
+
 const REBUILD_TEST_TIMEOUT_MS = scaleTimeoutMs(120_000);
 
 describe.sequential("fake provider environment-isolation multi-thread integration", () => {
@@ -49,22 +50,27 @@ describe.sequential("fake provider environment-isolation multi-thread integratio
           const project = await createProjectFixture(harness, {
             name: "Rebuild Managed Worktree",
           });
+
           const worktreeThread = await createReadyHostThread(harness, {
             projectId: project.id,
             timeoutMs: DEFAULT_TIMEOUT_MS,
             workspace: { type: "managed-worktree" },
           });
+
           const siblingThread = await createReadyReuseThread(harness, {
             environmentId: worktreeThread.environment.id,
             projectId: project.id,
             timeoutMs: DEFAULT_TIMEOUT_MS,
           });
+
           const unrelatedThread = await createReadyHostThread(harness, {
             projectId: project.id,
             timeoutMs: DEFAULT_TIMEOUT_MS,
             workspace: { type: "unmanaged", path: harness.repoDir },
           });
+
           const originalWorkspacePath = worktreeThread.environment.path;
+
           if (!originalWorkspacePath) {
             throw new Error("Managed worktree path was not assigned");
           }
@@ -93,6 +99,7 @@ describe.sequential("fake provider environment-isolation multi-thread integratio
             .poll(
               async () => {
                 await harness.server.sweepEnvironments();
+
                 return (
                   await getEnvironment(
                     harness.api,
@@ -113,6 +120,7 @@ describe.sequential("fake provider environment-isolation multi-thread integratio
           );
 
           await unarchiveThread(harness.api, worktreeThread.thread.id);
+
           const refused = await harness.api.threads[":id"].send.$post({
             param: { id: worktreeThread.thread.id },
             json: {
@@ -120,6 +128,7 @@ describe.sequential("fake provider environment-isolation multi-thread integratio
               mode: "auto",
             },
           });
+
           expect(refused.status).toBe(409);
           expect(await refused.json()).toMatchObject({
             code: "thread_environment_unavailable",
@@ -135,6 +144,7 @@ describe.sequential("fake provider environment-isolation multi-thread integratio
           await sendTextMessage(harness.api, worktreeThread.thread.id, {
             text: "rebuild after archive",
           });
+
           const rebuiltThread = await waitForThreadStatus(
             harness.api,
             worktreeThread.thread.id,
@@ -145,13 +155,16 @@ describe.sequential("fake provider environment-isolation multi-thread integratio
           const rebuiltEnvironmentId = rebuiltThread.environmentId;
           expect(rebuiltEnvironmentId).toBeTruthy();
           expect(rebuiltEnvironmentId).not.toBe(worktreeThread.environment.id);
+
           if (!rebuiltEnvironmentId) {
             throw new Error("Rebuilt thread has no environment");
           }
+
           const rebuiltEnvironment = await getEnvironment(
             harness.api,
             rebuiltEnvironmentId,
           );
+
           expect(rebuiltEnvironment.status).toBe("ready");
           expect(rebuiltEnvironment.environmentProviderId).toBe("git-worktree");
           expect(rebuiltEnvironment.path).toBeTruthy();
@@ -170,13 +183,16 @@ describe.sequential("fake provider environment-isolation multi-thread integratio
       const secondRepoDir = await createTestGitRepo({
         repoDir: path.join(path.dirname(harness.repoDir), "second-project"),
       });
+
       const projectA = await createProjectFixture(harness, {
         name: "Environment Isolation A",
       });
+
       const projectB = await createProjectFixture(harness, {
         name: "Environment Isolation B",
         path: secondRepoDir,
       });
+
       const threadA = await createReadyHostThread(harness, {
         projectId: projectA.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,
@@ -185,6 +201,7 @@ describe.sequential("fake provider environment-isolation multi-thread integratio
           path: harness.repoDir,
         },
       });
+
       const threadB = await createReadyHostThread(harness, {
         projectId: projectB.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,
@@ -242,7 +259,7 @@ describe.sequential("fake provider environment-isolation multi-thread integratio
             cwd: harness.repoDir,
           })
         ).trim(),
-      ).toBe("bb: automated commit");
+      ).toBe("omnyo: automated commit");
       expect(
         (
           await runGit({
@@ -250,6 +267,6 @@ describe.sequential("fake provider environment-isolation multi-thread integratio
             cwd: secondRepoDir,
           })
         ).trim(),
-      ).toBe("bb: automated commit");
+      ).toBe("omnyo: automated commit");
     }));
 });

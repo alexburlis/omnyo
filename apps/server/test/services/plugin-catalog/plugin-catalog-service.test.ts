@@ -1,6 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import {
   createConnection,
   getPluginMarketplace,
@@ -11,25 +13,15 @@ import {
   upsertInstalledPlugin,
   type DbConnection,
   type PluginSourceIntent,
-} from "@bb/db";
-import {
-  CURATED_PLUGIN_MARKETPLACE_NAME,
-  ROOT_PLUGIN_SOURCE_SELECTION,
-} from "@bb/server-contract";
-import { PLUGIN_CATALOG_CATEGORIES } from "@bb/domain";
+} from "@omnyo/db";
+import { PLUGIN_CATALOG_CATEGORIES } from "@omnyo/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPluginCatalogService } from "../../../src/services/plugin-catalog/plugin-catalog-service.js";
 import {
   SERVER_MOVE_FROZEN_RETRY_MS,
   setServerMoveFrozen,
 } from "../../../src/services/server-move/freeze-state.js";
-import { refreshCuratedMarketplace } from "../../helpers/plugin-catalog.js";
 import type { MarketplaceFetch } from "../../../src/services/plugin-catalog/marketplace-http.js";
-import {
-  CURATED_MARKETPLACE_V1_URL,
-  CURATED_MARKETPLACE_V2_URL,
-} from "../../../src/services/plugin-catalog/marketplace-manifest.js";
-import { BUNDLED_CURATED_MARKETPLACE } from "../../../src/services/plugin-catalog/curated-marketplace.js";
 import { loadBundledMarketplace } from "../../../src/services/plugin-catalog/bundled-marketplace.js";
 import {
   BUILTIN_PLUGINS,
@@ -39,13 +31,11 @@ import {
 } from "../../../src/services/plugins/builtin-registry.js";
 
 const MANIFEST_URL = "https://marketplace.test/marketplace.json";
+
 const ICON_URL = "https://marketplace.test/icons/widgets.svg";
-const STATS_URL = "https://marketplace.test/stats.json";
-const V1_MANIFEST_URL = CURATED_MARKETPLACE_V1_URL;
-const V2_MANIFEST_URL = CURATED_MARKETPLACE_V2_URL;
-const CUSTOM_V1_MANIFEST_URL =
-  "https://marketplace.test/marketplace/v1/marketplace.json";
-const SEED_ENTRY_COUNT = BUNDLED_CURATED_MARKETPLACE.plugins.length;
+
+const REMOTE = "acme-plugins";
+
 const OFFICIAL_ORDER =
   loadBundledMarketplace(listBundledPluginRegistrations()).catalog
     .collections?.[0]?.pluginIds ?? [];
@@ -73,11 +63,27 @@ function remoteEntry(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const HOVER_CARDS_ENTRY = {
+  id: "thread-hover-cards",
+  displayName: "Thread Hover Cards",
+  description:
+    "Preview thread status, the latest agent update, and repository or PR context from the sidebar.",
+  icon: "ZoomIn",
+  tags: ["interface", "threads", "sidebar"],
+  author: { name: "Bersabel Tadesse", github: "brsbl" },
+  source: {
+    git: {
+      url: "https://github.com/brsbl/bb-plugins.git",
+      ref: "30f91fd977ba1ce60532af27a68534464fb62516",
+    },
+  },
+};
+
 function manifest(plugins: unknown[]): unknown {
   return {
     schemaVersion: 1,
-    name: "bb-community",
-    displayName: "BB Community",
+    name: REMOTE,
+    displayName: "Acme Plugins",
     plugins,
   };
 }
@@ -88,8 +94,8 @@ function manifestV2(
 ): unknown {
   return {
     schemaVersion: 2,
-    name: "bb-community",
-    displayName: "BB Community",
+    name: REMOTE,
+    displayName: "Acme Plugins",
     plugins,
     ...overrides,
   };
@@ -117,7 +123,7 @@ describe("plugin catalog service", () => {
     migrate(db);
     installedNames = [];
     installedCatalogEntries = [];
-    dataDir = await mkdtemp(join(tmpdir(), "bb-catalog-data-"));
+    dataDir = await mkdtemp(join(tmpdir(), "omnyo-catalog-data-"));
   });
 
   afterEach(async () => {
@@ -130,13 +136,11 @@ describe("plugin catalog service", () => {
       typeof createPluginCatalogService
     >[0]["bundledPlugins"];
     fetch?: MarketplaceFetch;
-    marketplaceUrl?: string;
     warn?: (message: string) => void;
   }) {
     return createPluginCatalogService({
       db,
       appVersion: "1.0.0",
-      marketplaceUrl: options?.marketplaceUrl ?? MANIFEST_URL,
       dataDir,
       plugins: {
         installOfficialPlugin: async (name: string) => {
@@ -152,13 +156,63 @@ describe("plugin catalog service", () => {
           detail: "no registry in this test",
         }),
       },
-      ...(options?.bundledPlugins === undefined
-        ? {}
-        : { bundledPlugins: options.bundledPlugins }),
+      bundledPlugins:
+        options?.bundledPlugins ?? listBundledPluginRegistrations(),
       ...(options?.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options?.warn === undefined ? {} : { warn: options.warn }),
     });
   }
+
+  function seedRemote(plugins: unknown[]): void {
+    upsertPluginMarketplace(db, {
+      name: REMOTE,
+      sourceKind: "https",
+      manifestUrl: MANIFEST_URL,
+      sourceGitRef: null,
+      sourceGitSubdirectory: null,
+      sourceGitCommit: null,
+      manifestJson: JSON.stringify(manifest(plugins)),
+      etag: null,
+      lastModified: null,
+      lastSuccessfulRefreshAt: null,
+      lastAttemptedRefreshAt: null,
+      lastError: null,
+    });
+  }
+
+  async function refreshRemote(
+    catalog: ReturnType<typeof service>,
+    attemptedAt: number,
+  ): Promise<void> {
+    if (getPluginMarketplace(db, REMOTE) === undefined) seedRemote([]);
+
+    const [result] = await catalog.refreshMarketplaces({
+      name: REMOTE,
+      attemptedAt,
+    });
+
+    if (result !== undefined && !result.ok) {
+      throw new Error(result.error ?? "marketplace refresh failed");
+    }
+  }
+
+  it("refuses a legacy bundled marketplace before the constructor can seed any catalog", () => {
+    const legacyMarketplaceNameV1 = "bb-official";
+    db.$client
+      .prepare(
+        "INSERT INTO plugin_marketplaces(name,source_kind,manifest_url,manifest_json,created_at,updated_at) VALUES (?,'path','/legacy/source','{}',41,42)",
+      )
+      .run(legacyMarketplaceNameV1);
+
+    const before = db.$client
+      .prepare("SELECT * FROM plugin_marketplaces")
+      .all();
+
+    expect(() => service()).toThrow("stopped Omnyo state migration");
+    expect(
+      db.$client.prepare("SELECT * FROM plugin_marketplaces").all(),
+    ).toEqual(before);
+  });
 
   function registerInstalledOfficial(args: {
     pluginId: string;
@@ -169,7 +223,7 @@ describe("plugin catalog service", () => {
       source: `builtin:${args.name}`,
       provenance: {
         kind: "catalog",
-        marketplace: "bb-official",
+        marketplace: "omnyo-official",
         entryId: args.name,
       },
       sourceIntent: { kind: "builtin", name: args.name },
@@ -191,17 +245,14 @@ describe("plugin catalog service", () => {
   it("lists bundled plugins and the seeded official catalog", async () => {
     const catalog = service();
     expect(catalog.status()).toEqual({
-      pluginCount: BUNDLED_PLUGINS.length + SEED_ENTRY_COUNT,
+      pluginCount: BUNDLED_PLUGINS.length,
       includedPluginCount: BUILTIN_PLUGINS.length,
-      optionalPluginCount: OFFICIAL_PLUGINS.length + SEED_ENTRY_COUNT,
+      optionalPluginCount: OFFICIAL_PLUGINS.length,
     });
 
     const results = await catalog.search("");
     expect(results.map((entry) => entry.entryId).sort()).toEqual(
-      [
-        ...BUNDLED_PLUGINS.map((plugin) => plugin.name),
-        ...BUNDLED_CURATED_MARKETPLACE.plugins.map((entry) => entry.id),
-      ].sort(),
+      [...BUNDLED_PLUGINS.map((plugin) => plugin.name)].sort(),
     );
     const docs = results.find((entry) => entry.entryId === "docs");
     expect(docs).toMatchObject({
@@ -210,23 +261,22 @@ describe("plugin catalog service", () => {
       icon: "FileText",
       iconUrl: null,
       category: "File Viewers & Editors",
-      screenshots: [
-        "https://getbb.app/marketplace/v2/screenshots/docs/docs-21ddb6757-inline-review-desktop.png",
-        "https://getbb.app/marketplace/v2/screenshots/docs/docs-f4957b72f-inline-editing-desktop.png",
-        "https://getbb.app/marketplace/v2/screenshots/docs/docs-f4957b72f-ask-mobile.png",
-        "https://getbb.app/marketplace/v2/screenshots/docs/docs-63b536e70-workspace-desktop.png",
-        "https://getbb.app/marketplace/v2/screenshots/docs/docs-21ddb6757-html-desktop.png",
-        "https://getbb.app/marketplace/v2/screenshots/docs/docs-21ddb6757-vault-desktop.png",
-      ],
+      screenshots: [],
       collections: [
-        { id: "bb-official", rank: OFFICIAL_ORDER.indexOf("simple-notes") },
+        { id: "omnyo-official", rank: OFFICIAL_ORDER.indexOf("simple-notes") },
       ],
       source: "builtin:docs",
-      marketplace: "bb-official",
-      marketplaceDisplayName: "BB Official",
-      publisherKey: "bb-official",
-      publisherLabel: "BB Official",
-      author: { name: "BB", url: null },
+      repositoryUrl: "https://github.com/get-bb/bb/tree/HEAD/plugins/docs",
+      marketplace: "omnyo-official",
+      marketplaceDisplayName: "Omnyo Official",
+      publisherKey: "omnyo-official",
+      publisherLabel: "Omnyo Official",
+      official: true,
+      author: {
+        name: "bb",
+        github: "get-bb",
+        url: "https://github.com/get-bb",
+      },
       installed: false,
       installedByDefault: false,
       compatible: true,
@@ -239,46 +289,29 @@ describe("plugin catalog service", () => {
       ...Object.fromEntries(
         BUNDLED_PLUGINS.map((plugin) => [plugin.name, plugin.autoInstall]),
       ),
-      ...Object.fromEntries(
-        BUNDLED_CURATED_MARKETPLACE.plugins.map((entry) => [entry.id, false]),
-      ),
     });
     expect(catalog.collections()).toEqual([
       {
-        id: "bb-official",
-        displayName: "BB Official",
+        id: "omnyo-official",
+        displayName: "Omnyo Official",
         pluginIds: OFFICIAL_ORDER,
       },
     ]);
+
     for (const category of PLUGIN_CATALOG_CATEGORIES) {
       const categoryNames = results
         .filter((entry) => entry.category === category.displayName)
         .map((entry) => entry.displayName);
+
       expect(categoryNames).toEqual(
         [...categoryNames].sort((a, b) => a.localeCompare(b)),
       );
     }
   });
 
-  it("groups a catalog entry by its curated tag", async () => {
-    const catalog = service();
-    const [hoverCards] = await catalog.search("thread-hover-cards");
-    expect(hoverCards).toMatchObject({
-      entryId: "thread-hover-cards",
-      pluginId: "thread-hover-cards",
-      category: "Interface",
-      icon: "ZoomIn",
-      iconUrl: null,
-      source:
-        "git:https://github.com/brsbl/bb-plugins.git@30f91fd977ba1ce60532af27a68534464fb62516",
-      installed: false,
-      compatible: true,
-      incompatibleReason: null,
-    });
-  });
-
   it("matches queries against entry id, plugin id, manifest text, and tags", async () => {
     const catalog = service();
+    seedRemote([HOVER_CARDS_ENTRY]);
     expect(
       (await catalog.search("docs")).map((entry) => entry.entryId),
     ).toContain("docs");
@@ -309,205 +342,79 @@ describe("plugin catalog service", () => {
   });
 
   it("drops entries whose bundled manifest is unreadable", async () => {
-    const missingRoot = await mkdtemp(join(tmpdir(), "bb-missing-plugin-"));
+    const missingRoot = await mkdtemp(join(tmpdir(), "omnyo-missing-plugin-"));
     await rm(missingRoot, { recursive: true, force: true });
     const warnings: string[] = [];
     const registrations = listBundledPluginRegistrations();
-    const github = registrations.find((plugin) => plugin.name === "github");
+    const docs = registrations.find((plugin) => plugin.name === "docs");
+
     const workflows = registrations.find(
       (plugin) => plugin.name === "workflows",
     );
-    if (github === undefined || workflows === undefined) {
+
+    if (docs === undefined || workflows === undefined) {
       throw new Error("bundled registration missing");
     }
+
     const catalog = service({
       bundledPlugins: [
         {
-          ...github,
+          ...docs,
           rootDir: missingRoot,
         },
         workflows,
       ],
       warn: (message) => warnings.push(message),
     });
+
     const results = await catalog.search("");
-    expect(results.map((entry) => entry.entryId)).not.toContain("github");
+    expect(results.map((entry) => entry.entryId)).not.toContain("docs");
     expect(results.map((entry) => entry.entryId)).toContain("workflows");
-    expect(warnings.some((warning) => warning.includes("github"))).toBe(true);
+    expect(warnings.some((warning) => warning.includes("docs"))).toBe(true);
   });
 
   it("serves a bundled entry's own compact icon from the catalog route", async () => {
     const registrations = listBundledPluginRegistrations();
+
     const withSvg = registrations.find(
       (plugin) => plugin.name === "provider-acp",
     );
+
     const withGlyph = registrations.find(
       (plugin) => plugin.name === "workflows",
     );
+
     if (withSvg === undefined || withGlyph === undefined) {
       throw new Error("expected bundled registrations");
     }
+
     const catalog = service({ bundledPlugins: [withSvg, withGlyph] });
 
     const results = await catalog.search("");
     const svgEntry = results.find((entry) => entry.entryId === withSvg.name);
+
     const glyphEntry = results.find(
       (entry) => entry.entryId === withGlyph.name,
     );
+
     expect(svgEntry?.icon?.startsWith("./")).toBe(true);
-    const icon = await catalog.icon("bb-official", withSvg.name);
+    const icon = await catalog.icon("omnyo-official", withSvg.name);
     expect(icon?.contentType).toBe("image/svg+xml");
     expect(svgEntry?.iconUrl).toBe(
-      `/api/v1/plugin-catalog/icons/bb-official/${withSvg.name}?h=${icon?.hash}`,
+      `/api/v1/plugin-catalog/icons/omnyo-official/${withSvg.name}?h=${icon?.hash}`,
     );
     expect(new TextDecoder().decode(icon?.bytes)).toContain("<svg");
     expect(svgEntry?.iconTinted).toBe(true);
 
     expect(glyphEntry?.iconUrl).toBeNull();
     expect(glyphEntry?.iconTinted).toBe(false);
-    expect(await catalog.icon("bb-official", withGlyph.name)).toBeUndefined();
+    expect(
+      await catalog.icon("omnyo-official", withGlyph.name),
+    ).toBeUndefined();
   });
 
   describe("refresh", () => {
-    it("keeps the saved v1 catalog during an offline v2 URL upgrade", async () => {
-      const savedManifest = manifest([remoteEntry({ icon: "Zap" })]);
-      upsertPluginMarketplace(db, {
-        name: "bb-community",
-        sourceKind: "https",
-        manifestUrl: V1_MANIFEST_URL,
-        sourceGitRef: null,
-        sourceGitSubdirectory: null,
-        sourceGitCommit: null,
-        manifestJson: JSON.stringify(savedManifest),
-        statsJson: null,
-        etag: '"v1"',
-        lastModified: "Wed, 02 Sep 2026 00:00:00 GMT",
-        lastSuccessfulRefreshAt: 1_000,
-        lastAttemptedRefreshAt: 1_000,
-        lastError: null,
-      });
-
-      const catalog = service({
-        marketplaceUrl: V2_MANIFEST_URL,
-        fetch: async () => new Response(null, { status: 503 }),
-      });
-
-      expect(await catalog.search("widgets")).toHaveLength(1);
-      expect(getPluginMarketplace(db, "bb-community")).toMatchObject({
-        manifestUrl: V2_MANIFEST_URL,
-        manifestJson: JSON.stringify(savedManifest),
-        etag: null,
-        lastModified: null,
-        lastSuccessfulRefreshAt: 1_000,
-      });
-      await expect(refreshCuratedMarketplace(catalog, 2_000)).rejects.toThrow(
-        "HTTP 503",
-      );
-      expect(await catalog.search("widgets")).toHaveLength(1);
-    });
-
-    it("requests v2 first and falls back to v1 only after a 404", async () => {
-      const requests: string[] = [];
-      const catalog = service({
-        marketplaceUrl: V2_MANIFEST_URL,
-        fetch: async (url) => {
-          requests.push(url);
-          if (url === V2_MANIFEST_URL) {
-            return new Response(null, { status: 404 });
-          }
-          if (url === V1_MANIFEST_URL) {
-            return jsonResponse(manifest([remoteEntry({ icon: "Zap" })]));
-          }
-          return new Response(null, { status: 404 });
-        },
-      });
-
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect(requests.slice(0, 2)).toEqual([V2_MANIFEST_URL, V1_MANIFEST_URL]);
-      expect(await catalog.search("widgets")).toHaveLength(1);
-    });
-
-    it("keeps a stored v2 catalog after a transient v2 404", async () => {
-      const requests: string[] = [];
-      const warnings: string[] = [];
-      let v2Available = true;
-      const catalog = service({
-        marketplaceUrl: V2_MANIFEST_URL,
-        warn: (message) => warnings.push(message),
-        fetch: async (url) => {
-          requests.push(url);
-          if (url === V2_MANIFEST_URL) {
-            return v2Available
-              ? jsonResponse(
-                  manifestV2([
-                    remoteEntry({ icon: "Zap", category: "security" }),
-                  ]),
-                )
-              : new Response(null, { status: 404 });
-          }
-          if (url === V1_MANIFEST_URL) {
-            return jsonResponse(manifest([remoteEntry({ icon: "Zap" })]));
-          }
-          return new Response(null, { status: 404 });
-        },
-      });
-
-      await refreshCuratedMarketplace(catalog, 1_000);
-      v2Available = false;
-      requests.length = 0;
-      await refreshCuratedMarketplace(catalog, 2_000);
-
-      expect(
-        requests.filter(
-          (url) => url === V1_MANIFEST_URL || url === V2_MANIFEST_URL,
-        ),
-      ).toEqual([V2_MANIFEST_URL]);
-      expect(await catalog.search("widgets")).toMatchObject([
-        { entryId: "widgets", categoryId: "security" },
-      ]);
-      expect(
-        JSON.parse(
-          getPluginMarketplace(db, "bb-community")?.manifestJson ?? "null",
-        ),
-      ).toMatchObject({ schemaVersion: 2 });
-      expect(warnings).toContainEqual(
-        expect.stringContaining("kept the stored v2 catalog"),
-      );
-    });
-
-    it("does not fall back to v1 after a v2 server error", async () => {
-      const requests: string[] = [];
-      const catalog = service({
-        marketplaceUrl: V2_MANIFEST_URL,
-        fetch: async (url) => {
-          requests.push(url);
-          return new Response(null, { status: 500 });
-        },
-      });
-
-      await expect(refreshCuratedMarketplace(catalog, 1_000)).rejects.toThrow(
-        "HTTP 500",
-      );
-      expect(requests).toEqual([V2_MANIFEST_URL]);
-    });
-
-    it("requests a custom configured v1 URL without a v2 rewrite", async () => {
-      const requests: string[] = [];
-      const catalog = service({
-        marketplaceUrl: CUSTOM_V1_MANIFEST_URL,
-        fetch: async (url) => {
-          requests.push(url);
-          return jsonResponse(manifest([remoteEntry({ icon: "Zap" })]));
-        },
-      });
-
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect(requests[0]).toBe(CUSTOM_V1_MANIFEST_URL);
-      expect(requests).toHaveLength(2);
-      expect(await catalog.search("widgets")).toHaveLength(1);
-    });
-
-    it("projects v2 categories, screenshots, dates, and collections", async () => {
+    it("projects v2 categories, screenshots, and dates without third-party collections", async () => {
       const catalog = service({
         fetch: async (url) =>
           url === MANIFEST_URL
@@ -555,10 +462,12 @@ describe("plugin catalog service", () => {
             : new Response(null, { status: 404 }),
       });
 
-      await refreshCuratedMarketplace(catalog, 1_000);
+      await refreshRemote(catalog, 1_000);
+
       const widgets = (await catalog.search("widgets")).find(
         (entry) => entry.entryId === "widgets",
       );
+
       expect(widgets).toMatchObject({
         author: {
           name: "Acme",
@@ -571,7 +480,7 @@ describe("plugin catalog service", () => {
           "https://marketplace.test/screenshots/widgets/widgets.webp",
         ],
         overview: "# Widgets\n\nLong-form text.\n",
-        collections: [{ id: "new-and-notable", rank: 0 }],
+        collections: [],
         publishedAt: "2026-08-20T11:47:04-07:00",
         updatedAt: "2026-08-27T16:12:00Z",
       });
@@ -582,20 +491,14 @@ describe("plugin catalog service", () => {
       expect(uncategorized?.collections).toEqual([]);
       expect(catalog.collections()).toEqual([
         {
-          id: "bb-official",
-          displayName: "BB Official",
+          id: "omnyo-official",
+          displayName: "Omnyo Official",
           pluginIds: OFFICIAL_ORDER,
         },
-        {
-          id: "new-and-notable",
-          displayName: "New & notable",
-          pluginIds: ["widgets"],
-        },
       ]);
-      expect(catalog.categories().map((category) => category.id)).toEqual([
-        "acme-tools",
-        ...PLUGIN_CATALOG_CATEGORIES.map((category) => category.id),
-      ]);
+      expect(catalog.categories().map((category) => category.id)).toEqual(
+        PLUGIN_CATALOG_CATEGORIES.map((category) => category.id),
+      );
     });
 
     it("ignores collections from a third-party marketplace", async () => {
@@ -620,7 +523,6 @@ describe("plugin catalog service", () => {
             ],
           }),
         ),
-        statsJson: null,
         etag: null,
         lastModified: null,
         lastSuccessfulRefreshAt: 1_000,
@@ -631,49 +533,18 @@ describe("plugin catalog service", () => {
       expect((await catalog.search("widgets"))[0]?.collections).toEqual([]);
       expect(catalog.collections()).toEqual([
         {
-          id: "bb-official",
-          displayName: "BB Official",
+          id: "omnyo-official",
+          displayName: "Omnyo Official",
           pluginIds: OFFICIAL_ORDER,
         },
       ]);
-    });
-
-    it("fails at load when reserved marketplace collection ids collide", () => {
-      upsertPluginMarketplace(db, {
-        name: "bb-community",
-        sourceKind: "https",
-        manifestUrl: MANIFEST_URL,
-        sourceGitRef: null,
-        sourceGitSubdirectory: null,
-        sourceGitCommit: null,
-        manifestJson: JSON.stringify(
-          manifestV2([], {
-            collections: [
-              {
-                id: "bb-official",
-                displayName: "Duplicate",
-                pluginIds: [],
-              },
-            ],
-          }),
-        ),
-        statsJson: null,
-        etag: null,
-        lastModified: null,
-        lastSuccessfulRefreshAt: 1_000,
-        lastAttemptedRefreshAt: 1_000,
-        lastError: null,
-      });
-
-      expect(() => service()).toThrow(
-        'duplicate reserved marketplace collection id "bb-official" in "bb-official" and "bb-community"',
-      );
     });
 
     it("tints a catalog SVG but keeps a raster icon's own colors", async () => {
       const PNG = Buffer.from([
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0,
       ]);
+
       const fetchImpl: MarketplaceFetch = async (url) => {
         if (url === MANIFEST_URL) {
           return jsonResponse(
@@ -686,6 +557,7 @@ describe("plugin catalog service", () => {
             ]),
           );
         }
+
         return url.endsWith(".png")
           ? new Response(PNG, {
               status: 200,
@@ -696,15 +568,18 @@ describe("plugin catalog service", () => {
               headers: { "content-type": "image/svg+xml" },
             });
       };
+
       const catalog = service({ fetch: fetchImpl });
 
-      await refreshCuratedMarketplace(catalog, 1_000);
+      await refreshRemote(catalog, 1_000);
+
       const tinted = Object.fromEntries(
         (await catalog.search("")).map((entry) => [
           entry.entryId,
           { iconUrl: entry.iconUrl !== null, iconTinted: entry.iconTinted },
         ]),
       );
+
       expect(tinted).toMatchObject({
         raster: { iconUrl: true, iconTinted: false },
         glyph: { iconUrl: true, iconTinted: true },
@@ -713,22 +588,26 @@ describe("plugin catalog service", () => {
 
     it("replaces the catalog, caches icons, and revalidates with the ETag", async () => {
       const requests: Array<{ url: string; headers: Headers }> = [];
+
       const fetchImpl: MarketplaceFetch = async (url, init) => {
         requests.push({ url, headers: new Headers(init.headers) });
+
         if (url === MANIFEST_URL) {
           return requests.filter((request) => request.url === MANIFEST_URL)
             .length === 1
             ? jsonResponse(manifest([remoteEntry()]), { etag: '"v1"' })
             : new Response(null, { status: 304 });
         }
+
         return new Response(VALID_SVG, {
           status: 200,
           headers: { "content-type": "image/svg+xml", etag: '"icon-1"' },
         });
       };
+
       const catalog = service({ fetch: fetchImpl });
 
-      await refreshCuratedMarketplace(catalog, 1_000);
+      await refreshRemote(catalog, 1_000);
       const results = await catalog.search("widgets");
       expect(results).toHaveLength(1);
       expect(results[0]).toMatchObject({
@@ -740,20 +619,22 @@ describe("plugin catalog service", () => {
           "git:https://github.com/acme/plugins.git@v1.0.0#plugins/widgets",
       });
       expect(results[0]?.iconUrl).toBe(
-        "/api/v1/plugin-catalog/icons/bb-community/widgets?h=" +
-          (await catalog.icon("bb-community", "widgets"))?.hash,
+        "/api/v1/plugin-catalog/icons/acme-plugins/widgets?h=" +
+          (await catalog.icon(REMOTE, "widgets"))?.hash,
       );
-      expect(await catalog.icon("bb-community", "widgets")).toMatchObject({
+      expect(await catalog.icon(REMOTE, "widgets")).toMatchObject({
         contentType: "image/svg+xml",
       });
       expect(results[0]?.iconTinted).toBe(true);
       expect((await catalog.search("thread-hover-cards")).length).toBe(0);
       expect(requests[1]?.url).toBe(ICON_URL);
 
-      await refreshCuratedMarketplace(catalog, 2_000);
+      await refreshRemote(catalog, 2_000);
+
       const conditional = requests.filter(
         (request) => request.url === MANIFEST_URL,
       )[1];
+
       expect(conditional?.headers.get("if-none-match")).toBe('"v1"');
       expect((await catalog.search("widgets"))[0]?.displayName).toBe(
         "Acme Widgets",
@@ -761,7 +642,7 @@ describe("plugin catalog service", () => {
       expect(
         requests.filter((request) => request.url === ICON_URL),
       ).toHaveLength(1);
-      const row = getPluginMarketplace(db, "bb-community");
+      const row = getPluginMarketplace(db, REMOTE);
       expect(row).toMatchObject({
         etag: '"v1"',
         lastSuccessfulRefreshAt: 2_000,
@@ -774,15 +655,18 @@ describe("plugin catalog service", () => {
         fetch: async () =>
           jsonResponse(manifest([remoteEntry({ id: "Not Valid" })])),
       });
-      await expect(refreshCuratedMarketplace(catalog, 5_000)).rejects.toThrow(
+
+      seedRemote([HOVER_CARDS_ENTRY]);
+
+      await expect(refreshRemote(catalog, 5_000)).rejects.toThrow(
         /invalid marketplace manifest/,
       );
       expect((await catalog.search("thread-hover-cards")).length).toBe(1);
-      expect(getPluginMarketplace(db, "bb-community")).toMatchObject({
+      expect(getPluginMarketplace(db, REMOTE)).toMatchObject({
         lastAttemptedRefreshAt: 5_000,
         lastSuccessfulRefreshAt: null,
       });
-      expect(getPluginMarketplace(db, "bb-community")?.lastError).toMatch(
+      expect(getPluginMarketplace(db, REMOTE)?.lastError).toMatch(
         /invalid marketplace manifest/,
       );
     });
@@ -791,15 +675,10 @@ describe("plugin catalog service", () => {
       const catalog = service({
         fetch: async () => new Response("nope", { status: 503 }),
       });
-      await expect(refreshCuratedMarketplace(catalog, 7_000)).rejects.toThrow(
-        "HTTP 503",
-      );
-      expect((await catalog.search("")).length).toBe(
-        BUNDLED_PLUGINS.length + SEED_ENTRY_COUNT,
-      );
-      expect(getPluginMarketplace(db, "bb-community")?.lastError).toContain(
-        "HTTP 503",
-      );
+
+      await expect(refreshRemote(catalog, 7_000)).rejects.toThrow("HTTP 503");
+      expect((await catalog.search("")).length).toBe(BUNDLED_PLUGINS.length);
+      expect(getPluginMarketplace(db, REMOTE)?.lastError).toContain("HTTP 503");
     });
 
     it("refuses a manifest published under another marketplace name", async () => {
@@ -810,29 +689,16 @@ describe("plugin catalog service", () => {
             name: "someone-else",
           }),
       });
-      await expect(refreshCuratedMarketplace(catalog, 9_000)).rejects.toThrow(
+
+      await expect(refreshRemote(catalog, 9_000)).rejects.toThrow(
         /someone-else/,
       );
       expect((await catalog.search("widgets")).length).toBe(0);
     });
 
-    it("falls back to the bundled snapshot when the stored catalog is unreadable", async () => {
-      service();
-      const stored = getPluginMarketplace(db, "bb-community");
-      if (stored === undefined) throw new Error("catalog row missing");
-      db.$client
-        .prepare("UPDATE plugin_marketplaces SET manifest_json = ?")
-        .run("{not json");
-      const warnings: string[] = [];
-      const catalog = service({ warn: (message) => warnings.push(message) });
-      expect((await catalog.search("thread-hover-cards")).length).toBe(1);
-      expect(warnings.some((warning) => warning.includes("bundled"))).toBe(
-        true,
-      );
-    });
-
     it("keeps an entry whose icon fails validation and warns", async () => {
       const warnings: string[] = [];
+
       const catalog = service({
         warn: (message) => warnings.push(message),
         fetch: async (url) =>
@@ -842,10 +708,11 @@ describe("plugin catalog service", () => {
                 status: 200,
               }),
       });
-      await refreshCuratedMarketplace(catalog, 1_000);
+
+      await refreshRemote(catalog, 1_000);
       const [entry] = await catalog.search("widgets");
       expect(entry).toMatchObject({ entryId: "widgets", iconUrl: null });
-      expect(await catalog.icon("bb-community", "widgets")).toBeUndefined();
+      expect(await catalog.icon(REMOTE, "widgets")).toBeUndefined();
       expect(warnings.some((warning) => warning.includes("widgets"))).toBe(
         true,
       );
@@ -853,6 +720,7 @@ describe("plugin catalog service", () => {
 
     it("refuses an icon larger than the cap", async () => {
       const warnings: string[] = [];
+
       const catalog = service({
         warn: (message) => warnings.push(message),
         fetch: async (url) =>
@@ -860,8 +728,9 @@ describe("plugin catalog service", () => {
             ? jsonResponse(manifest([remoteEntry()]))
             : new Response(Buffer.alloc(300 * 1024, 0x41), { status: 200 }),
       });
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect(await catalog.icon("bb-community", "widgets")).toBeUndefined();
+
+      await refreshRemote(catalog, 1_000);
+      expect(await catalog.icon(REMOTE, "widgets")).toBeUndefined();
       expect(
         warnings.some((warning) => warning.includes("exceeds 262144 bytes")),
       ).toBe(true);
@@ -870,6 +739,7 @@ describe("plugin catalog service", () => {
     it("keeps cached icons while retrying a missing one on a 304", async () => {
       let iconRequests = 0;
       let failFirstIcon = true;
+
       const catalog = service({
         warn: () => {},
         fetch: async (url) => {
@@ -887,25 +757,31 @@ describe("plugin catalog service", () => {
                 )
               : new Response(null, { status: 304 });
           }
+
           iconRequests += 1;
+
           if (url.endsWith("gadgets.svg") && failFirstIcon) {
             failFirstIcon = false;
+
             return new Response("boom", { status: 500 });
           }
+
           return new Response(VALID_SVG, { status: 200 });
         },
       });
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect(await catalog.icon("bb-community", "widgets")).toBeDefined();
-      expect(await catalog.icon("bb-community", "gadgets")).toBeUndefined();
 
-      await refreshCuratedMarketplace(catalog, 2_000);
-      expect(await catalog.icon("bb-community", "widgets")).toBeDefined();
-      expect(await catalog.icon("bb-community", "gadgets")).toBeDefined();
+      await refreshRemote(catalog, 1_000);
+      expect(await catalog.icon(REMOTE, "widgets")).toBeDefined();
+      expect(await catalog.icon(REMOTE, "gadgets")).toBeUndefined();
+
+      await refreshRemote(catalog, 2_000);
+      expect(await catalog.icon(REMOTE, "widgets")).toBeDefined();
+      expect(await catalog.icon(REMOTE, "gadgets")).toBeDefined();
     });
 
     it("drops a cached icon the refreshed manifest no longer lists", async () => {
       let listIcon = true;
+
       const catalog = service({
         fetch: async (url) =>
           url === MANIFEST_URL
@@ -916,15 +792,17 @@ describe("plugin catalog service", () => {
               )
             : new Response(VALID_SVG, { status: 200 }),
       });
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect(await catalog.icon("bb-community", "widgets")).toBeDefined();
+
+      await refreshRemote(catalog, 1_000);
+      expect(await catalog.icon(REMOTE, "widgets")).toBeDefined();
       listIcon = false;
-      await refreshCuratedMarketplace(catalog, 2_000);
-      expect(await catalog.icon("bb-community", "widgets")).toBeUndefined();
+      await refreshRemote(catalog, 2_000);
+      expect(await catalog.icon(REMOTE, "widgets")).toBeUndefined();
     });
 
     it("drops a cached icon when its replacement URL fails", async () => {
       let iconUrl = "./icons/widgets.svg";
+
       const catalog = service({
         warn: () => {},
         fetch: async (url) => {
@@ -933,17 +811,19 @@ describe("plugin catalog service", () => {
               manifest([remoteEntry({ icon: { url: iconUrl } })]),
             );
           }
+
           return url.endsWith("widgets.svg")
             ? new Response(VALID_SVG, { status: 200 })
             : new Response("nope", { status: 503 });
         },
       });
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect(await catalog.icon("bb-community", "widgets")).toBeDefined();
+
+      await refreshRemote(catalog, 1_000);
+      expect(await catalog.icon(REMOTE, "widgets")).toBeDefined();
 
       iconUrl = "./icons/replacement.svg";
-      await refreshCuratedMarketplace(catalog, 2_000);
-      expect(await catalog.icon("bb-community", "widgets")).toBeUndefined();
+      await refreshRemote(catalog, 2_000);
+      expect(await catalog.icon(REMOTE, "widgets")).toBeUndefined();
     });
 
     it("keeps the prior snapshot when an icon-table commit fails", async () => {
@@ -954,6 +834,7 @@ describe("plugin catalog service", () => {
           SELECT RAISE(ABORT, 'icon write failed');
         END;
       `);
+
       const catalog = service({
         fetch: async (url) =>
           url === MANIFEST_URL
@@ -961,169 +842,18 @@ describe("plugin catalog service", () => {
             : new Response(VALID_SVG, { status: 200 }),
       });
 
-      await expect(refreshCuratedMarketplace(catalog, 3_000)).rejects.toThrow(
+      seedRemote([HOVER_CARDS_ENTRY]);
+
+      await expect(refreshRemote(catalog, 3_000)).rejects.toThrow(
         "icon write failed",
       );
       expect(await catalog.search("widgets")).toEqual([]);
       expect(await catalog.search("thread-hover-cards")).toHaveLength(1);
-      expect(getPluginMarketplace(db, "bb-community")).toMatchObject({
+      expect(getPluginMarketplace(db, REMOTE)).toMatchObject({
         lastSuccessfulRefreshAt: null,
         lastAttemptedRefreshAt: 3_000,
         lastError: expect.stringContaining("icon write failed"),
       });
-    });
-  });
-
-  describe("install counts", () => {
-    function statsResponse(
-      plugins: Record<string, { installs: number }>,
-      generatedAt = "2026-08-21T00:00:00.000Z",
-    ): Response {
-      return jsonResponse({ schemaVersion: 1, generatedAt, plugins });
-    }
-
-    function fetchWith(
-      stats: () => Response,
-      entries: unknown[] = [remoteEntry()],
-    ): MarketplaceFetch {
-      return async (url) => {
-        if (url === MANIFEST_URL) return jsonResponse(manifest(entries));
-        if (url === STATS_URL) return stats();
-        return new Response(VALID_SVG, {
-          status: 200,
-          headers: { "content-type": "image/svg+xml" },
-        });
-      };
-    }
-
-    it("reports counts for curated entries and bundled plugins", async () => {
-      const bundled = listBundledPluginRegistrations().find(
-        (plugin) =>
-          plugin.name === "docs" && plugin.pluginId === "simple-notes",
-      );
-      if (bundled === undefined) throw new Error("docs registration missing");
-      const catalog = service({
-        fetch: fetchWith(() =>
-          statsResponse({
-            widgets: { installs: 4_210 },
-            [bundled.pluginId]: { installs: 12 },
-          }),
-        ),
-      });
-
-      await refreshCuratedMarketplace(catalog, 1_000);
-      const byId = new Map(
-        (await catalog.search("")).map((entry) => [entry.entryId, entry]),
-      );
-      expect(byId.get("widgets")?.installs).toBe(4_210);
-      expect(byId.get(bundled.name)?.installs).toBe(12);
-    });
-
-    it("leaves an entry the sidecar does not name uncounted", async () => {
-      const catalog = service({
-        fetch: fetchWith(() => statsResponse({ other: { installs: 9 } })),
-      });
-
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect((await catalog.search("widgets"))[0]?.installs).toBeNull();
-    });
-
-    it("re-reads the sidecar when the manifest is unchanged", async () => {
-      let manifestReads = 0;
-      let installs = 5;
-      const catalog = service({
-        fetch: async (url) => {
-          if (url === MANIFEST_URL) {
-            manifestReads += 1;
-            return manifestReads === 1
-              ? jsonResponse(manifest([remoteEntry()]), { etag: '"v1"' })
-              : new Response(null, { status: 304 });
-          }
-          if (url === STATS_URL) {
-            return statsResponse({ widgets: { installs } });
-          }
-          return new Response(VALID_SVG, {
-            status: 200,
-            headers: { "content-type": "image/svg+xml" },
-          });
-        },
-      });
-
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect((await catalog.search("widgets"))[0]?.installs).toBe(5);
-      installs = 40;
-      await refreshCuratedMarketplace(catalog, 2_000);
-      expect((await catalog.search("widgets"))[0]?.installs).toBe(40);
-    });
-
-    it("keeps the stored counts when the sidecar fails, and the refresh still succeeds", async () => {
-      const warnings: string[] = [];
-      let sidecarBroken = false;
-      const catalog = service({
-        warn: (message) => warnings.push(message),
-        fetch: fetchWith(() =>
-          sidecarBroken
-            ? new Response("nope", { status: 500 })
-            : statsResponse({ widgets: { installs: 7 } }),
-        ),
-      });
-
-      await refreshCuratedMarketplace(catalog, 1_000);
-      sidecarBroken = true;
-      await refreshCuratedMarketplace(catalog, 2_000);
-      expect((await catalog.search("widgets"))[0]?.installs).toBe(7);
-      expect(getPluginMarketplace(db, "bb-community")).toMatchObject({
-        lastSuccessfulRefreshAt: 2_000,
-        lastError: null,
-      });
-      expect(warnings.join("\n")).toMatch(/install counts were not refreshed/u);
-    });
-
-    it("rejects a malformed sidecar whole rather than counting part of it", async () => {
-      const catalog = service({
-        fetch: fetchWith(() =>
-          jsonResponse({
-            schemaVersion: 1,
-            generatedAt: "2026-08-21T00:00:00.000Z",
-            plugins: { widgets: { installs: -1 } },
-          }),
-        ),
-      });
-
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect((await catalog.search("widgets"))[0]?.installs).toBeNull();
-    });
-
-    it("does not count entries of a third-party marketplace", async () => {
-      const thirdPartyManifest =
-        "https://acme.test/marketplace/marketplace.json";
-      const statsRequests: string[] = [];
-      const catalog = service({
-        fetch: async (url) => {
-          if (url === MANIFEST_URL) return jsonResponse(manifest([]));
-          if (url.endsWith("/stats.json")) {
-            statsRequests.push(url);
-            return statsResponse({ widgets: { installs: 999 } });
-          }
-          if (url === thirdPartyManifest) {
-            return jsonResponse({
-              schemaVersion: 1,
-              name: "acme",
-              displayName: "Acme",
-              plugins: [remoteEntry({ icon: "ZoomIn" })],
-            });
-          }
-          return new Response(null, { status: 404 });
-        },
-      });
-
-      await catalog.addMarketplace({
-        source: thirdPartyManifest,
-        subdirectory: null,
-      });
-      await catalog.refreshMarketplaces({ attemptedAt: 2_000 });
-      expect((await catalog.search("widgets"))[0]?.installs).toBeNull();
-      expect(statsRequests).toEqual([STATS_URL]);
     });
   });
 
@@ -1135,54 +865,11 @@ describe("plugin catalog service", () => {
             ? jsonResponse(manifest([entry]))
             : new Response(VALID_SVG, { status: 200 }),
       });
-      await refreshCuratedMarketplace(catalog, 1_000);
+
+      await refreshRemote(catalog, 1_000);
+
       return catalog;
     }
-
-    it("routes a subdirectory entry through the install pipeline", async () => {
-      const catalog = await refreshedCatalog(remoteEntry());
-      await expect(catalog.install({ entryId: "widgets" })).rejects.toThrow(
-        "catalog installation stopped by test",
-      );
-      expect(installedCatalogEntries).toEqual([
-        {
-          marketplace: "bb-community",
-          entryId: "widgets",
-          pluginId: "widgets",
-          source: "git:https://github.com/acme/plugins.git@v1.0.0",
-          selection: { kind: "subdirectory", path: "plugins/widgets" },
-        },
-      ]);
-      expect(installedNames).toEqual([]);
-    });
-
-    it("routes an npm entry with its dist-tag and registry", async () => {
-      const catalog = await refreshedCatalog(
-        remoteEntry({
-          icon: "Zap",
-          source: {
-            npm: {
-              package: "bb-plugin-widgets",
-              tag: "beta",
-              registry: "https://npm.acme.test",
-            },
-          },
-        }),
-      );
-      await expect(catalog.install({ entryId: "widgets" })).rejects.toThrow(
-        "catalog installation stopped by test",
-      );
-      expect(installedCatalogEntries).toEqual([
-        {
-          marketplace: "bb-community",
-          entryId: "widgets",
-          pluginId: "widgets",
-          source: "npm:bb-plugin-widgets@beta",
-          selection: ROOT_PLUGIN_SOURCE_SELECTION,
-          npmRegistry: "https://npm.acme.test",
-        },
-      ]);
-    });
 
     it("offers a marketplace entry without judging compatibility", async () => {
       const catalog = await refreshedCatalog(remoteEntry({ icon: "Zap" }));
@@ -1196,20 +883,18 @@ describe("plugin catalog service", () => {
         compatible: true,
         incompatibleReason: null,
       });
-      await expect(catalog.install({ entryId: "widgets" })).rejects.toThrow(
-        "catalog installation stopped by test",
-      );
     });
 
     it("reads the installed flag from catalog provenance", async () => {
       const catalog = service();
+      seedRemote([HOVER_CARDS_ENTRY]);
       upsertInstalledPlugin(db, {
         id: "hover-cards",
         source:
           "git:https://github.com/brsbl/bb-plugins.git@30f91fd977ba1ce60532af27a68534464fb62516",
         provenance: {
           kind: "catalog",
-          marketplace: "bb-community",
+          marketplace: REMOTE,
           entryId: "thread-hover-cards",
         },
         sourceIntent: {
@@ -1284,6 +969,7 @@ describe("plugin catalog service", () => {
       "reports a direct install from $name with the same id as installed: $installed",
       async ({ source, sourceIntent, installed }) => {
         const catalog = service();
+        seedRemote([HOVER_CARDS_ENTRY]);
         upsertInstalledPlugin(db, {
           id: "thread-hover-cards",
           source,
@@ -1320,12 +1006,13 @@ describe("plugin catalog service", () => {
           remoteEntry({ id: `widgets-${index}`, icon: "Zap" }),
         ),
       );
+
       const catalog = service({
         fetch: async () => jsonResponse(largeManifest),
       });
 
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect(getPluginMarketplace(db, "bb-community")?.lastError).toBeNull();
+      await refreshRemote(catalog, 1_000);
+      expect(getPluginMarketplace(db, REMOTE)?.lastError).toBeNull();
       expect(await catalog.search("widgets")).toHaveLength(1025);
       expect(await catalog.search("widgets-1024")).toEqual([
         expect.objectContaining({ entryId: "widgets-1024" }),
@@ -1342,13 +1029,15 @@ describe("plugin catalog service", () => {
           }),
         ),
       );
+
       expect(JSON.stringify(largeManifest).length).toBeGreaterThan(1_048_576);
+
       const catalog = service({
         fetch: async () => jsonResponse(largeManifest),
       });
 
-      await refreshCuratedMarketplace(catalog, 1_000);
-      expect(getPluginMarketplace(db, "bb-community")?.lastError).toBeNull();
+      await refreshRemote(catalog, 1_000);
+      expect(getPluginMarketplace(db, REMOTE)?.lastError).toBeNull();
       expect(await catalog.search("widgets")).toHaveLength(600);
     });
 
@@ -1356,12 +1045,14 @@ describe("plugin catalog service", () => {
       const bigSvg = Buffer.from(
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><title>${"a".repeat(200 * 1024)}</title><path d="M0 0h16v16H0z"/></svg>`,
       );
+
       const entries = Array.from({ length: 64 }, (_unused, index) =>
         remoteEntry({
           id: `widgets-${index}`,
           icon: { url: `./icons/widgets-${index}.svg` },
         }),
       );
+
       const catalog = service({
         fetch: async (url) =>
           url === MANIFEST_URL
@@ -1372,8 +1063,8 @@ describe("plugin catalog service", () => {
               }),
       });
 
-      await refreshCuratedMarketplace(catalog, 1_000);
-      const icons = listPluginMarketplaceIcons(db, "bb-community");
+      await refreshRemote(catalog, 1_000);
+      const icons = listPluginMarketplaceIcons(db, REMOTE);
       expect(icons).toHaveLength(64);
       expect(
         icons.reduce((total, icon) => total + icon.bytes.byteLength, 0),
@@ -1383,12 +1074,14 @@ describe("plugin catalog service", () => {
     it("fetches entry icons concurrently", async () => {
       let inFlight = 0;
       let peak = 0;
+
       const entries = Array.from({ length: 12 }, (_unused, index) =>
         remoteEntry({
           id: `widgets-${index}`,
           icon: { url: `./icons/widgets-${index}.svg` },
         }),
       );
+
       const catalog = service({
         fetch: async (url) => {
           if (url === MANIFEST_URL) return jsonResponse(manifest(entries));
@@ -1396,6 +1089,7 @@ describe("plugin catalog service", () => {
           peak = Math.max(peak, inFlight);
           await new Promise((resolve) => setTimeout(resolve, 5));
           inFlight -= 1;
+
           return new Response(VALID_SVG, {
             status: 200,
             headers: { "content-type": "image/svg+xml" },
@@ -1403,7 +1097,7 @@ describe("plugin catalog service", () => {
         },
       });
 
-      await refreshCuratedMarketplace(catalog, 1_000);
+      await refreshRemote(catalog, 1_000);
       expect(peak).toBeGreaterThan(1);
       expect(await catalog.search("widgets-11")).toHaveLength(1);
     });
@@ -1411,6 +1105,7 @@ describe("plugin catalog service", () => {
     it("drops an icon aimed at a non-public address", async () => {
       const warnings: string[] = [];
       const iconRequests: string[] = [];
+
       const catalog = service({
         warn: (message) => warnings.push(message),
         fetch: async (url) => {
@@ -1421,8 +1116,9 @@ describe("plugin catalog service", () => {
               ]),
             );
           }
-          if (url === STATS_URL) return new Response(null, { status: 404 });
+
           iconRequests.push(url);
+
           return new Response(VALID_SVG, {
             status: 200,
             headers: { "content-type": "image/svg+xml" },
@@ -1430,16 +1126,18 @@ describe("plugin catalog service", () => {
         },
       });
 
-      await refreshCuratedMarketplace(catalog, 1_000);
+      await refreshRemote(catalog, 1_000);
       expect(iconRequests).toEqual([]);
-      expect(await catalog.icon("bb-community", "widgets")).toBeUndefined();
+      expect(await catalog.icon(REMOTE, "widgets")).toBeUndefined();
       expect(warnings.join("\n")).toMatch(/non-public address 127\.0\.0\.1/u);
     });
 
     it("drops a remote entry that claims a bundled plugin id", async () => {
       const bundled = listBundledPluginRegistrations();
       const occupied = bundled[0];
+
       if (occupied === undefined) throw new Error("no bundled plugin");
+
       const catalog = service({
         fetch: async (url) =>
           url === MANIFEST_URL
@@ -1455,7 +1153,7 @@ describe("plugin catalog service", () => {
               }),
       });
 
-      await refreshCuratedMarketplace(catalog, 1_000);
+      await refreshRemote(catalog, 1_000);
       const results = await catalog.search("");
       expect(
         results.filter((entry) => entry.pluginId === occupied.pluginId),
@@ -1464,7 +1162,7 @@ describe("plugin catalog service", () => {
         results.find((entry) => entry.pluginId === occupied.pluginId)?.source,
       ).toBe(`builtin:${occupied.name}`);
       expect(results.some((entry) => entry.entryId === "widgets")).toBe(true);
-      expect(getPluginMarketplace(db, "bb-community")?.lastError).toMatch(
+      expect(getPluginMarketplace(db, REMOTE)?.lastError).toMatch(
         new RegExp(`matches a bundled plugin: ${occupied.pluginId}`, "u"),
       );
     });
@@ -1479,7 +1177,7 @@ describe("plugin catalog service", () => {
                     icon: "ZoomIn",
                     source: {
                       npm: {
-                        package: "bb-plugin-widgets",
+                        package: "omnyo-plugin-widgets",
                         range: "^1.0.0",
                         registry: "https://npm.acme.test",
                       },
@@ -1490,30 +1188,244 @@ describe("plugin catalog service", () => {
             : new Response(null, { status: 404 }),
       });
 
-      await refreshCuratedMarketplace(catalog, 1_000);
+      await refreshRemote(catalog, 1_000);
       expect((await catalog.search("widgets"))[0]?.source).toBe(
-        "npm:bb-plugin-widgets@^1.0.0 (registry https://npm.acme.test)",
+        "npm:omnyo-plugin-widgets@^1.0.0 (registry https://npm.acme.test)",
       );
     });
   });
 
+  it.skipIf(!process.env.OMNYO_CATALOG_MEASUREMENT_OUTPUT)(
+    "records warmed SQLite search costs for a 500-entry catalog",
+    async () => {
+      const output = process.env.OMNYO_CATALOG_MEASUREMENT_OUTPUT;
+
+      if (output === undefined)
+        throw new Error("OMNYO_CATALOG_MEASUREMENT_OUTPUT is required");
+
+      const entryCount = 500;
+      const query = "catalog benchmark";
+
+      const entries = Array.from({ length: entryCount }, (_unused, index) => {
+        const suffix = index.toString().padStart(4, "0");
+
+        return {
+          id: `catalog-benchmark-${suffix}`,
+          displayName: `Catalog Benchmark ${suffix}`,
+        };
+      });
+
+      const fixtureManifest = manifest(
+        entries.map(({ id, displayName }) =>
+          remoteEntry({
+            id,
+            displayName,
+            icon: "Zap",
+            tags: ["catalog-benchmark"],
+          }),
+        ),
+      );
+
+      const fixtureJson = JSON.stringify(fixtureManifest);
+
+      const sha256 = (value: string) =>
+        createHash("sha256").update(value).digest("hex");
+
+      const expectedIdentity = entries.map(({ id, displayName }) => ({
+        entryId: id,
+        pluginId: id,
+        displayName,
+      }));
+
+      const expectedIdentityHash = sha256(
+        JSON.stringify(expectedIdentity) ?? "",
+      );
+
+      const catalog = service({
+        fetch: async (url) =>
+          url === MANIFEST_URL
+            ? jsonResponse(fixtureManifest)
+            : new Response(null, { status: 404 }),
+      });
+
+      await refreshRemote(catalog, 1_000);
+
+      function verifyResults(
+        results: Awaited<ReturnType<typeof catalog.search>>,
+      ): string {
+        expect(results).toHaveLength(entryCount);
+
+        const resultIdentity = results
+          .map(({ entryId, pluginId, displayName }) => ({
+            entryId,
+            pluginId,
+            displayName,
+          }))
+          .sort((left, right) => left.entryId.localeCompare(right.entryId));
+
+        expect(resultIdentity).toEqual(expectedIdentity);
+        expect(sha256(JSON.stringify(resultIdentity) ?? "")).toBe(
+          expectedIdentityHash,
+        );
+
+        return sha256(JSON.stringify(results) ?? "");
+      }
+
+      let resultHash: string | undefined;
+
+      for (let warmup = 0; warmup < 5; warmup += 1) {
+        const hash = verifyResults(await catalog.search(query));
+
+        if (resultHash === undefined) resultHash = hash;
+        else expect(hash).toBe(resultHash);
+      }
+
+      if (resultHash === undefined)
+        throw new Error("The search warm-up did not produce results");
+
+      type LookupKind = "list" | "byId";
+
+      const lookupKind = (sql: string): LookupKind | null => {
+        const normalized = sql.toLowerCase();
+
+        if (!normalized.includes('from "plugins"')) return null;
+
+        return normalized.includes('"plugins"."id" =') ? "byId" : "list";
+      };
+
+      const originalPrepare = db.$client.prepare.bind(db.$client);
+      const prepareSpy = vi.spyOn(db.$client, "prepare");
+      const executions: Record<LookupKind, number> = { list: 0, byId: 0 };
+      prepareSpy.mockImplementation((sql) => {
+        const statement = originalPrepare(sql);
+        const kind = lookupKind(sql);
+
+        if (kind === null) return statement;
+
+        const originalGet = statement.get.bind(statement);
+        statement.get = function (...params: unknown[]) {
+          executions[kind] += 1;
+
+          return originalGet(...params);
+        };
+
+        const originalAll = statement.all.bind(statement);
+        statement.all = function (...params: unknown[]) {
+          executions[kind] += 1;
+
+          return originalAll(...params);
+        };
+
+        return statement;
+      });
+
+      const preparationCounts = (): Record<LookupKind, number> => {
+        const counts: Record<LookupKind, number> = { list: 0, byId: 0 };
+
+        for (const [sql] of prepareSpy.mock.calls) {
+          const kind = lookupKind(sql);
+
+          if (kind !== null) counts[kind] += 1;
+        }
+
+        return counts;
+      };
+
+      const samples: {
+        sample: number;
+        cpuMs: number;
+        wallMs: number;
+        installedLookupSql: Record<
+          LookupKind,
+          { preparations: number; executions: number }
+        >;
+      }[] = [];
+
+      try {
+        for (let sample = 0; sample < 20; sample += 1) {
+          const preparationsBefore = preparationCounts();
+          const executionsBefore = { ...executions };
+          const cpuStart = process.cpuUsage();
+          const wallStart = performance.now();
+          const results = await catalog.search(query);
+          const wallMs = performance.now() - wallStart;
+          const cpu = process.cpuUsage(cpuStart);
+          const hash = verifyResults(results);
+          expect(hash).toBe(resultHash);
+
+          const preparationsAfter = preparationCounts();
+
+          if (preparationsAfter.list === preparationsBefore.list)
+            throw new Error(
+              "Installed-plugin SQL instrumentation did not match the schema",
+            );
+          samples.push({
+            sample: sample + 1,
+            cpuMs: (cpu.user + cpu.system) / 1_000,
+            wallMs,
+            installedLookupSql: {
+              list: {
+                preparations: preparationsAfter.list - preparationsBefore.list,
+                executions: executions.list - executionsBefore.list,
+              },
+              byId: {
+                preparations: preparationsAfter.byId - preparationsBefore.byId,
+                executions: executions.byId - executionsBefore.byId,
+              },
+            },
+          });
+        }
+      } finally {
+        prepareSpy.mockRestore();
+      }
+
+      await writeFile(
+        output,
+        `${JSON.stringify(
+          {
+            case: "plugin-catalog-search-500",
+            fixture: {
+              entryCount,
+              manifestSha256: sha256(fixtureJson),
+              query,
+              resultCount: entryCount,
+              resultIdentitySha256: expectedIdentityHash,
+              resultSha256: resultHash,
+            },
+            warmupIterations: 5,
+            sampleIterations: samples.length,
+            database: "migrated in-memory SQLite",
+            fetch: "synthetic injected marketplace responses",
+            samples,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    },
+  );
+
   it("defers the periodic marketplace refresh while the server is moving", async () => {
     const fetched: string[] = [];
+
     const catalog = service({
       fetch: async (url) => {
         fetched.push(String(url));
+
         return new Response(null, { status: 503 });
       },
     });
+
+    seedRemote([]);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     setServerMoveFrozen(db, true);
+
     try {
       catalog.startPeriodicRefresh();
       await vi.advanceTimersByTimeAsync(0);
       expect(fetched).toEqual([]);
       expect(
-        getPluginMarketplace(db, CURATED_PLUGIN_MARKETPLACE_NAME)
-          ?.lastAttemptedRefreshAt,
+        getPluginMarketplace(db, REMOTE)?.lastAttemptedRefreshAt,
       ).toBeNull();
 
       setServerMoveFrozen(db, false);

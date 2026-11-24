@@ -4,7 +4,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 const ROW_GRID =
   "grid grid-cols-[var(--story-label-width,210px)_minmax(0,1fr)] gap-x-4";
@@ -13,6 +13,7 @@ function labelWidthStyle(
   labelWidth: string | undefined,
 ): CSSProperties | undefined {
   if (!labelWidth) return undefined;
+
   return { "--story-label-width": labelWidth } as CSSProperties;
 }
 
@@ -46,6 +47,7 @@ export function StoryCard({
       "--story-label-width": labelWidth ?? "210px",
       gridTemplateColumns: `var(--story-label-width) repeat(${columns.length}, minmax(max-content, 1fr))`,
     } as CSSProperties;
+
     return (
       <StoryCardContext.Provider value={{ inGrid: true, valueAlign }}>
         <div
@@ -70,6 +72,7 @@ export function StoryCard({
       </StoryCardContext.Provider>
     );
   }
+
   return (
     <StoryCardContext.Provider value={{ inGrid: false, valueAlign }}>
       <div
@@ -111,6 +114,7 @@ export function StoryRow({ label, hint, children, className }: StoryRowProps) {
       </>
     );
   }
+
   return (
     <div className={cn(ROW_GRID, "items-start px-4 py-3", className)}>
       {labelEl}

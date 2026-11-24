@@ -1,17 +1,19 @@
 import {
   findLocalPathProjectSourceForHost,
+  isLocalPathProjectSource,
   type ProjectSource,
   type ThreadListEntry,
-} from "@bb/domain";
-import type { SystemEnvironmentProvider } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { SystemEnvironmentProvider } from "@omnyo/server-contract";
 import {
   PERSONAL_WORKSPACE_ENVIRONMENT_PROVIDER_ID,
   PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import {
   encodeProviderValue,
   parseEnvironmentValue,
 } from "@/components/pickers/environment-picker-value";
+import { providerDisabledReason } from "@/components/pickers/environment-provider-scope";
 import type { ReuseThreadOption } from "@/components/pickers/ReuseEnvironmentPicker";
 import { getThreadDisplayTitle } from "@/lib/thread-title";
 
@@ -23,6 +25,7 @@ export interface SeededReuseEnvironment {
 }
 
 interface ResolveRootComposeEffectiveEnvironmentValueArgs {
+  defaultThreadMachineId?: string | null;
   environmentSelectionValue: string;
   environmentProviders?: readonly SystemEnvironmentProvider[];
   isProjectless: boolean;
@@ -60,31 +63,98 @@ function reuseSelectionSurvives({
   ) {
     return true;
   }
+
   if (reuseThreadOptionsLoading) return true;
+
   if (seededReuseEnvironment?.environmentId === environmentId) {
     return seededReuseEnvironment.status !== "missing";
   }
+
   return false;
 }
 
 interface ResolveHostEnvironmentProviderArgs {
   currentProvider: SystemEnvironmentProvider | null;
   providers: readonly SystemEnvironmentProvider[];
+  inputsControlProviderIds: ReadonlySet<string>;
 }
 
 export function resolveHostEnvironmentProvider({
   currentProvider,
   providers,
+  inputsControlProviderIds,
 }: ResolveHostEnvironmentProviderArgs): SystemEnvironmentProvider | null {
   const candidates = providers.filter(
     (provider) =>
       provider.machineProviderId === null &&
-      provider.availability?.status !== "unavailable",
+      providerDisabledReason(provider, inputsControlProviderIds) === null,
   );
+
   return (
     candidates.find((provider) => provider.id === currentProvider?.id) ??
     candidates[0] ??
     (currentProvider?.machineProviderId === null ? currentProvider : null)
+  );
+}
+
+interface ProjectMachineCandidatesArgs {
+  defaultThreadMachineId: string | null;
+  rememberedHostId: string | null;
+  localHostId: string | null;
+  primaryHostId: string | null;
+  sources: readonly ProjectSource[];
+  hostOrder: readonly string[];
+}
+
+function projectMachineCandidates({
+  defaultThreadMachineId,
+  rememberedHostId,
+  localHostId,
+  primaryHostId,
+  sources,
+  hostOrder,
+}: ProjectMachineCandidatesArgs): readonly string[] {
+  const hostRank = new Map(hostOrder.map((hostId, index) => [hostId, index]));
+
+  const sourceHostIds = sources
+    .filter(isLocalPathProjectSource)
+    .filter((source) => hostRank.has(source.hostId))
+    .sort(
+      (left, right) =>
+        Number(right.isDefault) - Number(left.isDefault) ||
+        (hostRank.get(left.hostId) ?? 0) - (hostRank.get(right.hostId) ?? 0),
+    )
+    .map((source) => source.hostId);
+
+  return [
+    ...new Set(
+      [
+        defaultThreadMachineId,
+        rememberedHostId,
+        localHostId,
+        primaryHostId,
+        ...sourceHostIds,
+      ].filter((hostId): hostId is string => hostId !== null),
+    ),
+  ];
+}
+
+export function resolveProjectMachine({
+  connectedHostIds,
+  isUsable,
+  ...candidateArgs
+}: ProjectMachineCandidatesArgs & {
+  connectedHostIds: ReadonlySet<string>;
+  isUsable: (hostId: string) => boolean;
+}): string | null {
+  const candidates = projectMachineCandidates(candidateArgs);
+
+  return (
+    candidates.find(
+      (hostId) => isUsable(hostId) && connectedHostIds.has(hostId),
+    ) ??
+    candidates.find(isUsable) ??
+    candidateArgs.defaultThreadMachineId
   );
 }
 
@@ -100,6 +170,7 @@ export function resolveNewThreadHostEnvironmentProvider({
       provider.machineProviderId === null &&
       provider.availability?.status !== "unavailable",
   );
+
   return (
     usable.find((provider) => provider.id === currentProviderId) ??
     usable[0] ??
@@ -117,9 +188,11 @@ export function buildReuseThreadOptions(
   const pathByEnvironmentId = new Map<string, string | null>();
   const providerIdByEnvironmentId = new Map<string, string | null>();
   const hostIdByEnvironmentId = new Map<string, string | null>();
+
   for (const thread of threads) {
     if (thread.environmentId === null) continue;
     let bucket = threadsByEnvironmentId.get(thread.environmentId);
+
     if (!bucket) {
       bucket = [];
       threadsByEnvironmentId.set(thread.environmentId, bucket);
@@ -135,9 +208,12 @@ export function buildReuseThreadOptions(
       );
       hostIdByEnvironmentId.set(thread.environmentId, thread.environmentHostId);
     }
+
     bucket.push(thread);
   }
+
   const options: ReuseThreadOption[] = [];
+
   for (const [environmentId, bucket] of threadsByEnvironmentId) {
     bucket.sort(
       (left, right) => right.latestAttentionAt - left.latestAttentionAt,
@@ -150,6 +226,7 @@ export function buildReuseThreadOptions(
       path: pathByEnvironmentId.get(environmentId) ?? null,
       environmentProviderId:
         providerIdByEnvironmentId.get(environmentId) ?? null,
+      hostId,
       hostName:
         hostNameById !== null && hostId !== null
           ? (hostNameById.get(hostId) ?? null)
@@ -160,14 +237,18 @@ export function buildReuseThreadOptions(
       })),
     });
   }
+
   options.sort((left, right) => {
     const leftLabel = left.name ?? left.branchName;
     const rightLabel = right.name ?? right.branchName;
+
     if (leftLabel && rightLabel) {
       return leftLabel.localeCompare(rightLabel);
     }
+
     return left.environmentId.localeCompare(right.environmentId);
   });
+
   return options;
 }
 
@@ -204,29 +285,35 @@ function resolveProjectlessEnvironmentValue({
   ) {
     return environmentSelectionValue;
   }
+
   if (environmentProviders === undefined) {
     return "";
   }
+
   if (
     parsedSelection?.type === "provider" &&
     environmentProviders.some((provider) => {
       if (provider.id !== parsedSelection.environmentProviderId) return false;
+
       return provider.requires.projectless && primaryHostId !== null;
     })
   ) {
     return environmentSelectionValue;
   }
+
   const defaultProvider = resolveProjectlessDefaultEnvironmentProvider(
     environmentProviders.filter(
       (provider) => provider.requires.projectless && primaryHostId !== null,
     ),
   );
+
   return defaultProvider === null
     ? ""
     : encodeProviderValue(defaultProvider.id);
 }
 
 export function resolveRootComposeEffectiveEnvironmentValue({
+  defaultThreadMachineId = null,
   environmentSelectionValue,
   environmentProviders,
   isProjectless,
@@ -238,13 +325,14 @@ export function resolveRootComposeEffectiveEnvironmentValue({
   seededReuseEnvironment,
 }: ResolveRootComposeEffectiveEnvironmentValueArgs): string {
   const parsedSelection = parseEnvironmentValue(environmentSelectionValue);
+  const defaultHostId = defaultThreadMachineId ?? primaryHostId;
 
   if (isProjectless) {
     return resolveProjectlessEnvironmentValue({
       environmentProviders,
       environmentSelectionValue,
       parsedSelection,
-      primaryHostId,
+      primaryHostId: defaultHostId,
       reuseThreadOptions,
       reuseThreadOptionsLoading,
       seededReuseEnvironment,
@@ -254,21 +342,25 @@ export function resolveRootComposeEffectiveEnvironmentValue({
   if (environmentProviders === undefined) {
     return "";
   }
+
   const providerRegistered = (environmentProviderId: string): boolean =>
     environmentProviders.some(
       (provider) => provider.id === environmentProviderId,
     );
+
   const selectedProvider =
     parsedSelection?.type === "provider"
       ? environmentProviders.find(
           (provider) => provider.id === parsedSelection.environmentProviderId,
         )
       : undefined;
+
   const fallbackValue =
-    primaryHostId !== null &&
-    knownHostIds.has(primaryHostId) &&
-    findLocalPathProjectSourceForHost(projectSources, primaryHostId) !==
-      undefined &&
+    defaultHostId !== null &&
+    knownHostIds.has(defaultHostId) &&
+    (defaultThreadMachineId !== null ||
+      findLocalPathProjectSourceForHost(projectSources, defaultHostId) !==
+        undefined) &&
     providerRegistered(PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID)
       ? encodeProviderValue(PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID)
       : "";
@@ -290,7 +382,7 @@ export function resolveRootComposeEffectiveEnvironmentValue({
 
   if (
     selectedProvider !== undefined &&
-    (selectedProvider.machineProviderId !== null || primaryHostId !== null)
+    (selectedProvider.machineProviderId !== null || defaultHostId !== null)
   ) {
     return environmentSelectionValue;
   }

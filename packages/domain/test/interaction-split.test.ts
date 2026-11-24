@@ -31,6 +31,7 @@ describe("tool_use approval subject", () => {
       tool: "mcp__linear__create_issue",
       presentation,
     });
+
     expect(parsed.success).toBe(true);
     expect(
       parsed.data?.kind === "approval" ? parsed.data.subject.kind : undefined,
@@ -70,6 +71,7 @@ describe("interaction request payload family", () => {
         },
       ],
     });
+
     expect(question.kind).toBe("user_question");
 
     const plugin = interactionRequestPayloadSchema.parse({
@@ -77,6 +79,7 @@ describe("interaction request payload family", () => {
       title: "Pick a project",
       data: { projects: ["a", "b"] },
     });
+
     expect(plugin.kind).toBe("linear/pick-project");
   });
 
@@ -100,6 +103,7 @@ describe("interaction request payload family", () => {
         `expected kind ${JSON.stringify(kind)} to be rejected`,
       ).toBe(false);
     }
+
     expect(
       interactionRequestPayloadSchema.safeParse({
         kind: "linear/pick-project",
@@ -124,6 +128,7 @@ describe("interaction lifecycle record", () => {
     reason: null,
     availableDecisions: ["allow_once" as const, "deny" as const],
   };
+
   const userAnswer = {
     kind: "user_answer" as const,
     answers: { q1: { selected: ["staging"] } },
@@ -193,6 +198,7 @@ describe("interaction lifecycle record", () => {
       payload: approvalPayload,
       resolution: { decision: "deny" },
     });
+
     expect(lifecycle).toEqual({
       id: "pint_1",
       status: "resolved",

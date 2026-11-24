@@ -13,7 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { outputSchema, type RunOutput } from "./contracts.js";
 import { createPreview, type PreviewSource } from "./preview.js";
-import { execute, supervise } from "./process.js";
+import { execute, OutputLimitError, supervise } from "./process.js";
 import type { ResolvedRuntime } from "./runtime-pin.js";
 
 const frameSchema = z.discriminatedUnion("type", [
@@ -47,6 +47,7 @@ const frameSchema = z.discriminatedUnion("type", [
 
 export function runtimeEnvironment(home: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
+
   for (const key of [
     "PATH",
     "HOME",
@@ -58,8 +59,10 @@ export function runtimeEnvironment(home: string): NodeJS.ProcessEnv {
   ]) {
     if (process.env[key]) env[key] = process.env[key];
   }
+
   env.DEV_BROWSER_HOME = home;
   env.DEV_BROWSER_SOCKET = join(home, "daemon.sock");
+
   return env;
 }
 
@@ -73,10 +76,12 @@ export async function decodeOutput(
   const images: RunOutput["images"] = [];
   let imageBytes = 0;
   let exitCode: number | null = null;
+
   for (const line of stdout.split("\n").filter(Boolean)) {
     if (exitCode !== null)
       throw new Error("DevBrowser emitted data after completion");
     const frame = frameSchema.parse(JSON.parse(line));
+
     if (frame.type === "done") exitCode = frame.exitCode;
     else if (frame.type === "hello") {
       if (frame.version !== version)
@@ -94,17 +99,22 @@ export async function decodeOutput(
       const root = await realpath(join(home, "tmp"));
       const path = await realpath(frame.path);
       const rel = relative(root, path);
+
       if (!rel || rel.startsWith("..") || isAbsolute(rel))
         throw new Error("Screenshot escaped the session capture directory");
       const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+
       try {
         const stat = await file.stat();
+
         if (!stat.isFile() || stat.size > 500_000)
           throw new Error("Screenshot must be a JPEG smaller than 500 KB");
         const bytes = await file.readFile();
+
         if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff)
           throw new Error("Only JPEG screenshots are supported");
         imageBytes += bytes.length;
+
         if (imageBytes > 500_000)
           throw new Error(
             "Combined screenshots exceed the 500 KB output budget",
@@ -120,18 +130,22 @@ export async function decodeOutput(
       }
     }
   }
+
   if (exitCode === null)
     throw new Error("DevBrowser did not return a completion frame");
   const endpoint = new URL(connectionUrl);
+
   let safeText = text
     .join("\n")
     .split(connectionUrl)
     .join("[browser connection]")
     .split(home)
     .join("[session storage]");
+
   const pathCredential = endpoint.pathname.match(
     /^\/devtools\/browser\/([^/]+)$/,
   )?.[1];
+
   if (pathCredential) {
     safeText = safeText
       .split(endpoint.pathname)
@@ -139,8 +153,10 @@ export async function decodeOutput(
       .split(pathCredential)
       .join("[credential]");
   }
+
   for (const value of endpoint.searchParams.values())
     if (value) safeText = safeText.split(value).join("[credential]");
+
   return outputSchema.parse({
     text: safeText.slice(0, 160_000),
     images,
@@ -153,6 +169,7 @@ async function findChrome(dataDir: string): Promise<string> {
     join(dataDir, "runtime", "chrome"),
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   ];
+
   for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
     for (const name of [
       "google-chrome",
@@ -162,12 +179,15 @@ async function findChrome(dataDir: string): Promise<string> {
     ])
       candidates.push(join(dir, name));
   }
+
   for (const candidate of candidates) {
     try {
       await access(candidate, constants.X_OK);
+
       return await realpath(candidate);
     } catch {}
   }
+
   throw new Error(
     "Install Chrome/Chromium on this host or link its executable at the plugin data runtime/chrome path.",
   );
@@ -200,25 +220,37 @@ export async function createRuntime(args: {
   let preview: PreviewSource | null = null;
   const stopped = new AbortController();
   let queue = Promise.resolve();
+
   const close = (): Promise<void> => {
     if (closing) return closing;
     closed = true;
     stopped.abort();
     preview?.close();
-    closing = (async () => {
+
+    const attempt = (async () => {
       await Promise.all(processes.map((child) => child.close()));
       await rm(home, { recursive: true, force: true });
-    })();
-    return closing;
+    })().catch((error) => {
+      if (closing === attempt) closing = null;
+      throw error;
+    });
+
+    closing = attempt;
+
+    return attempt;
   };
+
   const startup = AbortSignal.any([args.signal, AbortSignal.timeout(30_000)]);
+
   async function waitForFile(path: string): Promise<string> {
     while (true) {
       startup.throwIfAborted();
+
       if (processes.some((child) => !child.alive()))
         throw new Error(
           "Browser runtime exited during startup; check Chrome installation and runtime dependencies.",
         );
+
       try {
         return await readFile(path, "utf8");
       } catch {
@@ -226,8 +258,10 @@ export async function createRuntime(args: {
       }
     }
   }
+
   try {
     let connectionUrl = args.connectionUrl;
+
     if (connectionUrl === undefined) {
       const chrome = await findChrome(args.dataDir);
       const profile = join(home, "profile");
@@ -236,7 +270,6 @@ export async function createRuntime(args: {
           chrome,
           [
             "--headless=new",
-            "--no-sandbox",
             "--remote-debugging-port=0",
             "--remote-debugging-address=127.0.0.1",
             `--user-data-dir=${profile}`,
@@ -248,17 +281,23 @@ export async function createRuntime(args: {
           env,
         ),
       );
+
       const lines = (await waitForFile(join(profile, "DevToolsActivePort")))
         .trim()
         .split("\n");
+
       const port = z.coerce.number().int().min(1).max(65535).parse(lines[0]);
+
       const path = z
         .string()
         .regex(/^\/devtools\/browser\/[a-zA-Z0-9-]+$/)
         .parse(lines[1]);
+
       connectionUrl = `ws://127.0.0.1:${port}${path}`;
     }
+
     const endpoint = new URL(connectionUrl);
+
     if (
       endpoint.protocol !== "ws:" ||
       !["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname)
@@ -269,6 +308,7 @@ export async function createRuntime(args: {
     processes.push(supervise(binary, ["daemon"], env));
     await waitForFile(join(home, "daemon.pid"));
     const url = connectionUrl;
+
     const run = (
       script: string,
       timeoutMs: number,
@@ -280,9 +320,12 @@ export async function createRuntime(args: {
           stopped.signal,
           AbortSignal.timeout(timeoutMs),
         ]);
+
         deadline.throwIfAborted();
+
         if (closed || processes.some((child) => !child.alive()))
           throw new Error("Browser session stopped; open a new session");
+
         try {
           const stdout = await execute(
             binary,
@@ -299,27 +342,42 @@ export async function createRuntime(args: {
             env,
             deadline,
           );
+
           const output = await decodeOutput(
             stdout,
             home,
             url,
             args.runtime.version,
           );
+
           if (output.exitCode === 124) await close();
+
           return output;
         } catch (error) {
+          if (error instanceof OutputLimitError)
+            return {
+              text: `${error.message}, so the run was stopped. The session is still open; return or print less output.`,
+              images: [],
+              exitCode: 1,
+            };
+
           await close();
           throw error;
         }
       });
+
       queue = result.then(
         () => {},
         () => {},
       );
+
       return result;
     };
+
     await run("await browser.listPages()", 30_000, startup);
+
     if (args.connectionUrl === undefined) preview = createPreview(url);
+
     return { run, preview, close };
   } catch (error) {
     await close();

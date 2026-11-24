@@ -13,9 +13,9 @@ export function QuickActionsHandler() {
     QuickActions.setItems([
       {
         id: DEVICE_SETTINGS_ACTION_ID,
-        title: "Device settings",
-        subtitle: "Servers, haptics, and the web interface",
-        icon: "symbol:gearshape",
+        title: "Servers",
+        subtitle: "Switch, add or remove a server",
+        icon: "symbol:server.rack",
       },
     ]).catch(() => undefined);
   }, []);

@@ -6,8 +6,8 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { SystemAppUpdateResult } from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
+import type { SystemAppUpdateResult } from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
@@ -15,8 +15,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/shared-ui/dialog";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { BlockingOverlay } from "@/components/layout/BlockingOverlay";
 import { appToast } from "@/components/ui/app-toast";
 import { CopyButton } from "@/components/ui/copy-button";
 import { useAcknowledgeAppUpdate } from "@/hooks/mutations/app-update-mutations";
@@ -35,6 +36,7 @@ import {
 } from "./app-update-presentation";
 
 const FAILURE_TOAST_DURATION_MS = 60_000;
+
 const RESTART_PATIENCE_MS = 3 * 60 * 1000;
 
 function reloadPage(): void {
@@ -54,22 +56,29 @@ export function AppUpdateHost({
   const loadedRevision = useRef<string | null>(null);
   const reloading = useRef(false);
   const [dismissedRestart, setDismissedRestart] = useState<string | null>(null);
+
   const detailsResult = useSyncExternalStore(
     subscribeAppUpdateResultDetails,
     getAppUpdateResultDetailsSnapshot,
   );
+
   const pendingResult = pendingAppUpdateResult(status.data);
   const restart = restartingActivity(status.data);
+
   const revision =
     status.data === undefined ? null : appUpdateRevisionKey(status.data);
+
   const acknowledgeResult = acknowledge.mutate;
 
   useEffect(() => {
     if (revision === null) return;
+
     if (loadedRevision.current === null) {
       loadedRevision.current = revision;
+
       return;
     }
+
     if (loadedRevision.current !== revision && !reloading.current) {
       reloading.current = true;
       onRevisionChanged();
@@ -78,14 +87,18 @@ export function AppUpdateHost({
 
   useEffect(() => {
     if (pendingResult === null || reloading.current) return;
+
     if (announcedResultIds.current.has(pendingResult.id)) return;
     announcedResultIds.current.add(pendingResult.id);
     const presentation = describeAppUpdateResult(pendingResult);
-    if (presentation.tone === "success") {
-      appToast.success(presentation.title);
+
+    if (presentation.tone !== "error") {
+      appToast[presentation.tone](presentation.title, { badge: true });
       acknowledgeResult({ id: pendingResult.id });
+
       return;
     }
+
     appToast.error(presentation.title, {
       ...(presentation.description === null
         ? {}
@@ -100,14 +113,15 @@ export function AppUpdateHost({
 
   return (
     <>
-      {restart === null || dismissedRestart === restart.startedAt ? null : (
-        <AppUpdateRestartingOverlay
-          key={restart.startedAt}
-          patienceMs={restartPatienceMs}
-          targetRevision={restart.targetRevision}
-          onDismiss={() => setDismissedRestart(restart.startedAt)}
-        />
-      )}
+      <AppUpdateRestartingOverlay
+        restart={
+          restart === null || dismissedRestart === restart.startedAt
+            ? null
+            : restart
+        }
+        patienceMs={restartPatienceMs}
+        onDismiss={setDismissedRestart}
+      />
       <AppUpdateResultDialog
         result={detailsResult}
         dismissPending={acknowledge.isPending}
@@ -134,60 +148,84 @@ export function AppUpdateHost({
 export function AppUpdateRestartingOverlay({
   onDismiss,
   patienceMs,
-  targetRevision,
+  restart,
 }: {
-  onDismiss: () => void;
+  onDismiss: (startedAt: string) => void;
   patienceMs: number;
-  targetRevision: string;
+  restart: { startedAt: string; targetRevision: string } | null;
 }) {
   const titleId = useId();
   const descriptionId = useId();
-  const layerRef = useRef<HTMLDivElement>(null);
-  const [overdue, setOverdue] = useState(false);
-  useEffect(() => {
-    layerRef.current?.focus({ preventScroll: true });
-    const timer = setTimeout(() => setOverdue(true), patienceMs);
-    return () => clearTimeout(timer);
-  }, [patienceMs]);
+
   return (
-    <div
-      ref={layerRef}
-      role="dialog"
-      aria-modal="true"
+    <BlockingOverlay
+      open={restart !== null}
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
-      tabIndex={-1}
-      data-app-update-overlay
-      className="fixed inset-0 z-60 flex items-center justify-center overflow-y-auto bg-surface-scrim p-4 outline-none"
+      data-app-update-overlay=""
     >
-      <div className="grid w-full max-w-md grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-lg border border-border bg-background p-6 shadow-lg">
-        <Icon
-          aria-hidden
-          name="Loading"
-          className="mt-0.5 size-4 animate-spin text-muted-foreground"
+      {restart === null ? null : (
+        <AppUpdateRestartingCard
+          key={restart.startedAt}
+          titleId={titleId}
+          descriptionId={descriptionId}
+          patienceMs={patienceMs}
+          targetRevision={restart.targetRevision}
+          onDismiss={() => onDismiss(restart.startedAt)}
         />
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <h2
-              id={titleId}
-              className="text-base leading-tight font-semibold tracking-tight text-foreground"
-            >
-              Updating bb to {targetRevision}
-            </h2>
-            <p id={descriptionId} className="text-sm text-muted-foreground">
-              {overdue
-                ? "bb hasn't come back yet. A source rebuild can take a few minutes; if it doesn't return, check the terminal running bb."
-                : "bb is restarting into the new version. This page reconnects on its own when it is back."}
-            </p>
-          </div>
-          {overdue ? (
-            <div className="flex justify-end">
-              <Button type="button" variant="outline" onClick={onDismiss}>
-                Dismiss
-              </Button>
-            </div>
-          ) : null}
+      )}
+    </BlockingOverlay>
+  );
+}
+
+function AppUpdateRestartingCard({
+  descriptionId,
+  onDismiss,
+  patienceMs,
+  targetRevision,
+  titleId,
+}: {
+  descriptionId: string;
+  onDismiss: () => void;
+  patienceMs: number;
+  targetRevision: string;
+  titleId: string;
+}) {
+  const [overdue, setOverdue] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setOverdue(true), patienceMs);
+
+    return () => clearTimeout(timer);
+  }, [patienceMs]);
+
+  return (
+    <div className="grid w-full max-w-md grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-lg border border-border bg-background p-6 shadow-lg">
+      <Icon
+        aria-hidden
+        name="Loading"
+        className="mt-0.5 size-4 animate-spin text-muted-foreground"
+      />
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <h2
+            id={titleId}
+            className="text-base leading-tight font-semibold tracking-tight text-foreground"
+          >
+            Updating Omnyo to {targetRevision}
+          </h2>
+          <p id={descriptionId} className="text-sm text-muted-foreground">
+            {overdue
+              ? "Omnyo hasn't come back yet. A source rebuild can take a few minutes; if it doesn't return, check the terminal running Omnyo."
+              : "Omnyo is restarting into the new version. This page reconnects on its own when it is back."}
+          </p>
         </div>
+        {overdue ? (
+          <div className="flex justify-end">
+            <Button type="button" variant="outline" onClick={onDismiss}>
+              Dismiss
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -206,18 +244,24 @@ export function AppUpdateResultDialog({
 }) {
   const [lastShownResult, setLastShownResult] =
     useState<SystemAppUpdateResult | null>(result);
+
   if (result !== null && result !== lastShownResult) {
     setLastShownResult(result);
   }
+
   const current = result ?? lastShownResult;
+
   const presentation =
     current === null ? null : describeAppUpdateResult(current);
+
   const log = current?.logTail.join("\n") ?? "";
   const logRef = useRef<HTMLPreElement>(null);
   useLayoutEffect(() => {
     const element = logRef.current;
+
     if (element !== null) element.scrollTop = element.scrollHeight;
   }, [log, result]);
+
   return (
     <Dialog
       open={result !== null}
@@ -232,9 +276,15 @@ export function AppUpdateResultDialog({
               <DialogTitle>{presentation.title}</DialogTitle>
               <DialogDescription>
                 {presentation.description ??
-                  "bb kept running the version it had before."}
+                  "Omnyo kept running the version it had before."}
               </DialogDescription>
             </DialogHeader>
+            {current.errorCode ? (
+              <p className="text-sm text-muted-foreground">
+                Error code:{" "}
+                <code className="font-mono">{current.errorCode}</code>
+              </p>
+            ) : null}
             {log === "" ? null : (
               <div className="relative overflow-hidden rounded-md border bg-background">
                 <CopyButton

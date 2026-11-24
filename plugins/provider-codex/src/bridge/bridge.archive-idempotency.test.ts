@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
 import {
   FULL_ACCESS_SESSION_OPTIONS,
@@ -10,14 +10,17 @@ import {
 } from "./fake-codex-app-server-harness.js";
 
 const THREAD_ID = "thr_archive_idempotency_1";
+
 const PROVIDER_THREAD_ID = "rollout-archive-idempotency-1";
 
 let harness: ReturnType<typeof createBridgeJsonRpcTestHarness>;
+
 let workspaceDir: string;
+
 let processLogPath: string;
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-archive-ws-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-archive-ws-"));
   processLogPath = join(workspaceDir, "app-server-processes.log");
   const fakeScriptPath = join(workspaceDir, "fake-codex-script.json");
   writeFileSync(
@@ -43,6 +46,7 @@ function request(id: number, method: string) {
     threadId: THREAD_ID,
     providerThreadId: PROVIDER_THREAD_ID,
   });
+
   return harness.waitForResponse(id);
 }
 

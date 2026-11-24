@@ -7,12 +7,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
 import { z } from "zod";
-import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import type {
   BridgeJsonRpcId,
   BridgeJsonRpcObject,
   BridgeJsonRpcOutputMessage,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { experimental_closeAllForTests, handleLine } from "./bridge.js";
 import { PI_BRIDGE_ARGS_ENV, PI_BRIDGE_COMMAND_ENV } from "./rpc-child.js";
 import { PI_BRIDGE_SESSION_DIR_ENV } from "./session-paths.js";
@@ -29,7 +29,9 @@ export const FULL_PERMISSION_OPTIONS = {
 } as const;
 
 const INITIALIZE_ID = 100;
+
 const FIRST_HARNESS_REQUEST_ID = 1_000_000;
+
 const RESPONSE_DEADLINE_MS = 60_000;
 
 const threadDeltaParamsSchema = z.object({
@@ -79,20 +81,25 @@ export async function startFakePiBridge(
   options: StartFakePiBridgeOptions,
 ): Promise<FakePiBridgeHarness> {
   const workspaceDir = mkdtempSync(join(tmpdir(), options.prefix));
+
   const sessionDir =
     options.sessionDir === undefined
       ? join(workspaceDir, "sessions")
       : options.sessionDir(workspaceDir);
+
   const processLogPath = join(workspaceDir, "process.log");
   vi.stubEnv(PI_BRIDGE_COMMAND_ENV, process.execPath);
   vi.stubEnv(PI_BRIDGE_ARGS_ENV, JSON.stringify([fakePiPath]));
   vi.stubEnv(PI_BRIDGE_SESSION_DIR_ENV, sessionDir);
+
   if (options.processLog === true) {
     vi.stubEnv("FAKE_PI_PROCESS_LOG", processLogPath);
   }
+
   const harness = createBridgeJsonRpcTestHarness(handleLine);
   const children: ChildProcess[] = [];
   const childProcessChannel = channel("child_process");
+
   const onChildProcess = (message: unknown): void => {
     if (
       typeof message === "object" &&
@@ -103,7 +110,9 @@ export async function startFakePiBridge(
       children.push(message.process);
     }
   };
+
   let nextHarnessRequestId = FIRST_HARNESS_REQUEST_ID;
+
   const bridge: FakePiBridgeHarness = {
     workspaceDir,
     sessionDir,
@@ -112,15 +121,19 @@ export async function startFakePiBridge(
     async request(id, method, params) {
       harness.sendRequest(id, method, params);
       const deadline = Date.now() + RESPONSE_DEADLINE_MS;
+
       while (Date.now() < deadline) {
         const response = harness.messages.find((message) => message.id === id);
+
         if (response !== undefined) return response;
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
+
       throw new Error(`no response to ${method}`);
     },
     startThread(threadId, extra = {}) {
       nextHarnessRequestId += 1;
+
       return bridge.request(nextHarnessRequestId, "thread/start", {
         threadId,
         cwd: workspaceDir,
@@ -138,10 +151,12 @@ export async function startFakePiBridge(
     },
     async waitFor(predicate, what) {
       const deadline = Date.now() + RESPONSE_DEADLINE_MS;
+
       while (Date.now() < deadline) {
         if (predicate()) return;
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
+
       throw new Error(`timed out waiting for ${what}`);
     },
     waitForDelta(threadId, predicate, since = 0) {
@@ -159,24 +174,30 @@ export async function startFakePiBridge(
             .some((delta) => delta.kind === "turn.boundary"),
         `the turn of ${threadId} to end`,
       );
+
       return bridge.deltasOf(threadId).length;
     },
     async waitForMessage(predicate, what) {
       await bridge.waitFor(() => harness.messages.some(predicate), what);
       const found = harness.messages.find(predicate);
+
       if (found === undefined) throw new Error(`timed out waiting for ${what}`);
+
       return found;
     },
     readProcessLog() {
       const lines = existsSync(processLogPath)
         ? readFileSync(processLogPath, "utf8").split("\n").filter(Boolean)
         : [];
+
       const spawned: number[] = [];
       const exited: number[] = [];
+
       for (const line of lines) {
         const [step, pid] = line.split(":");
         (step === "spawn" ? spawned : exited).push(Number(pid));
       }
+
       return { spawned, exited };
     },
     runningChildPids() {
@@ -209,7 +230,9 @@ export async function startFakePiBridge(
       }
     },
   };
+
   childProcessChannel.subscribe(onChildProcess);
+
   if (options.initialize) {
     try {
       await bridge.request(INITIALIZE_ID, "initialize", {
@@ -222,5 +245,6 @@ export async function startFakePiBridge(
       throw error;
     }
   }
+
   return bridge;
 }

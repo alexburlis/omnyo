@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { ServiceDefinition } from "./service-definition.js";
 
 const execFileAsync = promisify(execFile);
+
 const SERVICE_COMMAND_TIMEOUT_MS = 30_000;
 
 export const LAUNCHD_RESTART_SCRIPT = [
@@ -61,20 +62,25 @@ export const defaultDetachedProcessSpawner: DetachedProcessSpawner = (
 ) => {
   mkdirSync(dirname(request.logPath), { recursive: true });
   const fd = openSync(request.logPath, "a", 0o600);
+
   try {
     const child = spawn(request.command, request.args, {
       detached: true,
       env: request.env,
       stdio: ["ignore", fd, fd],
     });
+
     return new Promise<number>((resolveSpawn, rejectSpawn) => {
       child.once("error", rejectSpawn);
       child.once("spawn", () => {
         child.unref();
+
         if (child.pid === undefined) {
           rejectSpawn(new Error(`${request.command} did not report a pid`));
+
           return;
         }
+
         resolveSpawn(child.pid);
       });
     });
@@ -94,15 +100,17 @@ export async function restartService(args: RestartServiceArgs): Promise<void> {
       args: [
         "-c",
         LAUNCHD_RESTART_SCRIPT,
-        "bb-server-move-restart",
+        "omnyo-server-move-restart",
         `gui/${args.uid}`,
         args.definition.path,
       ],
       env: args.env,
       logPath: args.logPath,
     });
+
     return;
   }
+
   const scope = systemdScopeFlag(args.definition);
   await args.runCommand("systemctl", [scope, "daemon-reload"]);
   await args.runCommand("systemctl", [

@@ -53,5 +53,6 @@ export function Text({
 }: TextProps) {
   const merged = cn(textVariants({ variant, tone }), className);
   const font = resolveFont({ className: merged, weight, mono });
+
   return <RNText className={merged} style={[font, style]} {...props} />;
 }

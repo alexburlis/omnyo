@@ -1,20 +1,21 @@
 import { randomBytes } from "node:crypto";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
-import { isLoopbackHostname } from "@bb/config/loopback";
+import { isLoopbackHostname } from "@omnyo/config/loopback";
 import {
-  bbAppManagedEnvFileSchema,
-  formatBbAppConfigPath,
-  formatBbAppEnvPath,
-  parseBbAppManagedConfig,
-} from "@bb/config/bb-app-managed-config";
-import { mutateManagedJsonFile } from "@bb/config/managed-json-file";
-import { getAppSettings, type DbConnection } from "@bb/db";
+  appManagedEnvFileSchema,
+  formatAppConfigPath,
+  formatAppEnvPath,
+  parseAppManagedConfig,
+} from "@omnyo/config/managed-app-config";
+import { mutateManagedJsonFile } from "@omnyo/config/managed-json-file";
+import { getAppSettings, type DbConnection } from "@omnyo/db";
 import { z } from "zod";
 
 const managedObjectSchema = z.record(z.string(), z.unknown());
+
 const ENV_PATH_VALUE_PATTERN = /^(?:\/|~\/)/u;
 
-export type ManagedAddressKey = "BB_APP_URL" | "BB_EXTERNAL_URL";
+export type ManagedAddressKey = "OMNYO_APP_URL" | "OMNYO_EXTERNAL_URL";
 
 export interface ManagedAddress {
   file: "config.json" | "env.json";
@@ -43,6 +44,7 @@ export async function readOptionalText(path: string): Promise<string | null> {
     if (isMissingFileError(error)) {
       return null;
     }
+
     throw error;
   }
 }
@@ -52,6 +54,7 @@ export async function writeTextAtomically(
   text: string,
 ): Promise<void> {
   const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+
   try {
     await writeFile(tempPath, text, { encoding: "utf8", mode: 0o600 });
     await rename(tempPath, path);
@@ -68,20 +71,25 @@ export function parseManagedConfigObject(
   if (text === null) {
     return {};
   }
+
   let raw: unknown;
+
   try {
     raw = JSON.parse(text);
   } catch (error) {
     throw new Error(`Invalid JSON in ${path}`, { cause: error });
   }
-  parseBbAppManagedConfig(raw);
+
+  parseAppManagedConfig(raw);
+
   return managedObjectSchema.parse(raw);
 }
 
 async function readManagedConfigObject(
   dataDir: string,
 ): Promise<Record<string, unknown> | null> {
-  const path = formatBbAppConfigPath(dataDir);
+  const path = formatAppConfigPath(dataDir);
+
   try {
     return parseManagedConfigObject(path, await readOptionalText(path));
   } catch {
@@ -92,13 +100,16 @@ async function readManagedConfigObject(
 async function readManagedEnv(
   dataDir: string,
 ): Promise<Record<string, string> | null> {
-  const path = formatBbAppEnvPath(dataDir);
+  const path = formatAppEnvPath(dataDir);
+
   try {
     const text = await readOptionalText(path);
+
     if (text === null) {
       return {};
     }
-    return bbAppManagedEnvFileSchema.parse(JSON.parse(text)).env ?? {};
+
+    return appManagedEnvFileSchema.parse(JSON.parse(text)).env ?? {};
   } catch {
     return null;
   }
@@ -106,14 +117,17 @@ async function readManagedEnv(
 
 function configAppUrl(config: Record<string, unknown> | null): string | null {
   const values = config?.config;
+
   if (values === null || typeof values !== "object") {
     return null;
   }
+
   const parsed = z
-    .object({ BB_APP_URL: z.string().min(1).optional() })
+    .object({ OMNYO_APP_URL: z.string().min(1).optional() })
     .passthrough()
     .safeParse(values);
-  return parsed.success ? (parsed.data.BB_APP_URL ?? null) : null;
+
+  return parsed.success ? (parsed.data.OMNYO_APP_URL ?? null) : null;
 }
 
 export async function readServerManagedFiles(
@@ -123,17 +137,25 @@ export async function readServerManagedFiles(
   const env = (await readManagedEnv(dataDir)) ?? {};
   const addresses: ManagedAddress[] = [];
   const appUrl = configAppUrl(config);
+
   if (appUrl !== null) {
-    addresses.push({ file: "config.json", key: "BB_APP_URL", value: appUrl });
+    addresses.push({
+      file: "config.json",
+      key: "OMNYO_APP_URL",
+      value: appUrl,
+    });
   }
-  const externalUrl = env.BB_EXTERNAL_URL;
+
+  const externalUrl = env.OMNYO_EXTERNAL_URL;
+
   if (externalUrl !== undefined && externalUrl.length > 0) {
     addresses.push({
       file: "env.json",
-      key: "BB_EXTERNAL_URL",
+      key: "OMNYO_EXTERNAL_URL",
       value: externalUrl,
     });
   }
+
   return { addresses, env };
 }
 
@@ -148,8 +170,10 @@ export function parseHttpUrl(value: string | null): URL | null {
   if (value === null) {
     return null;
   }
+
   try {
     const url = new URL(value);
+
     return url.protocol === "http:" || url.protocol === "https:" ? url : null;
   } catch {
     return null;
@@ -165,7 +189,9 @@ export function oldServerAddress(
   managed: ServerManagedFiles,
 ): URL | null {
   return parseHttpUrl(
-    getAppSettings(db).machineServerUrl ?? managed.env.BB_EXTERNAL_URL ?? null,
+    getAppSettings(db).machineServerUrl ??
+      managed.env.OMNYO_EXTERNAL_URL ??
+      null,
   );
 }
 
@@ -179,9 +205,11 @@ export async function rewriteManagedAddresses(args: {
   toUrl: string;
 }): Promise<ManagedAddressKey[]> {
   const rewritten: ManagedAddressKey[] = [];
-  const configPath = formatBbAppConfigPath(args.dataDir);
+  const configPath = formatAppConfigPath(args.dataDir);
+
   const readConfig = async () =>
     parseManagedConfigObject(configPath, await readOptionalText(configPath));
+
   if (originMatches(configAppUrl(await readConfig()), args.fromOrigin)) {
     await mutateManagedJsonFile({
       path: configPath,
@@ -190,44 +218,56 @@ export async function rewriteManagedAddresses(args: {
         if (!originMatches(configAppUrl(config), args.fromOrigin)) {
           return config;
         }
+
         const next = {
           ...config,
           config: {
             ...managedObjectSchema.parse(config.config),
-            BB_APP_URL: args.toUrl,
+            OMNYO_APP_URL: args.toUrl,
           },
         };
-        parseBbAppManagedConfig(next);
-        rewritten.push("BB_APP_URL");
+
+        parseAppManagedConfig(next);
+        rewritten.push("OMNYO_APP_URL");
+
         return next;
       },
     });
   }
-  const envPath = formatBbAppEnvPath(args.dataDir);
+
+  const envPath = formatAppEnvPath(args.dataDir);
+
   const readEnvFile = async () => {
     const text = await readOptionalText(envPath);
-    return bbAppManagedEnvFileSchema.parse(
-      text === null ? {} : JSON.parse(text),
-    );
+
+    return appManagedEnvFileSchema.parse(text === null ? {} : JSON.parse(text));
   };
+
   const envFile = await readEnvFile();
-  if (originMatches(envFile.env?.BB_EXTERNAL_URL ?? null, args.fromOrigin)) {
+
+  if (originMatches(envFile.env?.OMNYO_EXTERNAL_URL ?? null, args.fromOrigin)) {
     await mutateManagedJsonFile({
       path: envPath,
       read: readEnvFile,
       mutate: (current) => {
         if (
-          !originMatches(current.env?.BB_EXTERNAL_URL ?? null, args.fromOrigin)
+          !originMatches(
+            current.env?.OMNYO_EXTERNAL_URL ?? null,
+            args.fromOrigin,
+          )
         ) {
           return current;
         }
-        rewritten.push("BB_EXTERNAL_URL");
+
+        rewritten.push("OMNYO_EXTERNAL_URL");
+
         return {
           ...current,
-          env: { ...current.env, BB_EXTERNAL_URL: args.toUrl },
+          env: { ...current.env, OMNYO_EXTERNAL_URL: args.toUrl },
         };
       },
     });
   }
+
   return rewritten;
 }

@@ -3,7 +3,7 @@
 # The add-server probe is the first line of defence: it refuses a URL it cannot
 # reach, so the shell is never pointed at a dead origin in the first place.
 #
-# The shell's own load-failure screen — the one that offers "Device settings"
+# The shell's own load-failure screen — the one that offers "Servers"
 # when a paired server goes away mid-session — is verified by hand (plan
 # section 14.4). Automating it needs a harness that can stop answering on
 # demand, which the mobile e2e backend cannot do yet.
@@ -17,7 +17,7 @@ env:
 ---
 - runFlow: ../subflows/launch-app.yaml
 - extendedWaitUntil:
-    visible: "Connect to a bb server"
+    visible: "Connect to an Omnyo server"
     timeout: 30000
 - tapOn:
     id: "server-url-input"
@@ -29,6 +29,6 @@ env:
 # The add-server probe refuses a server it cannot reach, which is itself the
 # first line of defence.
 - extendedWaitUntil:
-    visible: ".*(could not|cannot|failed|unreachable|Connect to a bb server).*"
+    visible: ".*(could not|cannot|failed|unreachable|Connect to an Omnyo server).*"
     timeout: 30000
 - takeScreenshot: shell-offline-add-server

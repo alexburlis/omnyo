@@ -38,6 +38,7 @@ describe("Composer slot resolvers", () => {
   it("projects applicable contributions in registration order with generation keys", () => {
     const onDraftChange = vi.fn();
     const match = () => [];
+
     const all = composerCustomization({
       id: "all",
       actions: [{ id: "action", component: Component }],
@@ -48,11 +49,13 @@ describe("Composer slot resolvers", () => {
         onDraftChange,
       },
     });
+
     const thread = composerCustomization({
       id: "thread",
       scopes: ["thread"],
       actions: [{ id: "thread-action", component: Component }],
     });
+
     const newThread = composerCustomization({
       id: "new-thread",
       scopes: ["new-thread"],
@@ -88,6 +91,7 @@ describe("Composer slot resolvers", () => {
       id: "all",
       actions: [{ id: "action", component: Component }],
     });
+
     const none = composerCustomization({
       id: "none",
       scopes: [],
@@ -112,6 +116,7 @@ describe("keyed renderer resolvers", () => {
       id: "form",
       component: Component,
     };
+
     const theirs = { ...mine, pluginId: "theirs" };
 
     expect(resolvePendingInteraction([theirs, mine], "mine", "form")).toBe(
@@ -127,6 +132,7 @@ describe("keyed renderer resolvers", () => {
       id: "card",
       component: Component,
     };
+
     const beta = { ...alpha, pluginId: "alpha" };
     const chart = { ...alpha, id: "chart" };
 
@@ -164,7 +170,9 @@ describe("replacement resolvers", () => {
       extensions: ["md"],
       component: Component,
     };
+
     const text = { ...markdown, id: "text", extensions: ["txt"] };
+
     const alternate = {
       ...markdown,
       pluginId: "alternate",
@@ -223,6 +231,7 @@ describe("replacement resolvers", () => {
       extensions: ["md"],
       component: Component,
     };
+
     const second = { ...first, pluginId: "beta", title: "Beta Markdown" };
 
     expect(

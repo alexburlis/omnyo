@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import { makeTask } from "../test-fixtures.js";
 import type { Task } from "../shared/contract.js";
 
@@ -29,7 +29,7 @@ const project = {
   nextTaskNumber: 5,
   color: "blue",
   folderId: null,
-  linkedBbProjectId: null,
+  linkedAppProjectId: null,
   createdAt: "2026-07-15T00:00:00.000Z",
 };
 
@@ -69,7 +69,9 @@ function trackedRpc(store: Map<string, Task>, counters: Counters) {
     getTaskByKey: () => ({ task: null }),
     listTasks: (input: { statuses?: string[]; activeOnly?: boolean }) => {
       counters.listTasks += 1;
+
       if (input.activeOnly === true) return { tasks: [] };
+
       return {
         tasks: [...store.values()].filter(
           (entry) =>
@@ -81,13 +83,16 @@ function trackedRpc(store: Map<string, Task>, counters: Counters) {
     },
     getTask: (input: { taskId: string }) => {
       counters.getTask.push(input.taskId);
+
       return { task: store.get(input.taskId) ?? null };
     },
     listAttachments: (input: { taskId: string }) => {
       counters.listAttachments.push(input.taskId);
+
       return { attachments: [] };
     },
   };
+
   return handlers as never;
 }
 
@@ -100,6 +105,7 @@ function counters(): Counters {
 }
 
 beforeEach(() => window.localStorage.clear());
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -111,22 +117,26 @@ describe("incremental task list updates", () => {
     const second = task("TSK-2", "in_progress", 2);
     const store = seed(first, second);
     const calls = counters();
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "all" },
       { rpc: trackedRpc(store, calls) },
     );
+
     await slot.findByText("TSK-1 title");
     await waitFor(() => expect(calls.listTasks).toBeGreaterThan(0));
     const settled = calls.listTasks;
 
     store.set(first.id, { ...first, title: "TSK-1 renamed" });
+
     for (let index = 0; index < 5; index += 1) {
       await slot.emitRealtime("tasks:changed", {
         taskId: first.id,
         projectId: PROJECT_ID,
       });
     }
+
     await slot.findByText("TSK-1 renamed");
     expect(calls.getTask).toEqual([first.id]);
     expect(calls.listTasks).toBe(settled);
@@ -138,11 +148,13 @@ describe("incremental task list updates", () => {
     const second = task("TSK-2", "todo", 2);
     const store = seed(first, second);
     const calls = counters();
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "all" },
       { rpc: trackedRpc(store, calls) },
     );
+
     await slot.findByText("TSK-2 title");
     await waitFor(() => expect(calls.listTasks).toBeGreaterThan(0));
     const settled = calls.listTasks;
@@ -160,11 +172,13 @@ describe("incremental task list updates", () => {
     const first = task("TSK-1", "todo", 1);
     const store = seed(first);
     const calls = counters();
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "all" },
       { rpc: trackedRpc(store, calls) },
     );
+
     await slot.findByText("TSK-1 title");
     await waitFor(() => expect(calls.listTasks).toBeGreaterThan(0));
     const settled = calls.listTasks;
@@ -183,11 +197,13 @@ describe("incremental board updates", () => {
     const second = task("TSK-2", "done", 2);
     const store = seed(first, second);
     const calls = counters();
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: `${PROJECT_ID}?view=board` },
       { rpc: trackedRpc(store, calls) },
     );
+
     await slot.findByText("TSK-2 title");
     const settledList = calls.listTasks;
     const settledAttachments = calls.listAttachments.length;
@@ -211,11 +227,13 @@ describe("incremental board updates", () => {
     const first = task("TSK-1", "todo", 1);
     const store = seed(first);
     const calls = counters();
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: `${PROJECT_ID}?view=board` },
       { rpc: trackedRpc(store, calls) },
     );
+
     await slot.findByText("TSK-1 title");
     const settledList = calls.listTasks;
 

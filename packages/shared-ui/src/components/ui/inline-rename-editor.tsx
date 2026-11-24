@@ -24,11 +24,13 @@ export function InlineRenameEditor({
     const row = input?.closest("[data-sidebar-rename-row]");
     anchorRef.current =
       row?.querySelector<HTMLElement>("[data-sidebar-rename-anchor]") ?? null;
+
     const frame = requestAnimationFrame(() => {
       input?.focus({ preventScroll: true });
       input?.select();
       openingRef.current = false;
     });
+
     return () => cancelAnimationFrame(frame);
   }, []);
 
@@ -50,12 +52,14 @@ export function InlineRenameEditor({
     const input = inputRef.current;
     input?.setSelectionRange(input.value.length, input.value.length);
     const saved = await controller.save(clear);
+
     if (saved && restoreFocusRef.current) restoreFocus();
   };
 
   const cancel = (restore: boolean) => {
     if (isPending) return;
     controller.cancel();
+
     if (restore) restoreFocus();
   };
 
@@ -72,6 +76,7 @@ export function InlineRenameEditor({
         )
           return;
         restoreFocusRef.current = false;
+
         if (!isPending) void submit(false);
       }}
       onClick={(event) => {
@@ -92,7 +97,9 @@ export function InlineRenameEditor({
       onKeyUp={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         event.stopPropagation();
+
         if (event.nativeEvent.isComposing || composingRef.current) return;
+
         if (event.key === "Escape") {
           event.preventDefault();
           cancel(true);

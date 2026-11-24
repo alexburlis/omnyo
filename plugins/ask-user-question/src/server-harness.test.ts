@@ -1,22 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   createFakePluginHost,
   type FakePluginHost,
   makePluginAgentConfigurationContext,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import plugin, { TOOL_NAME } from "./server.js";
 import { TOO_FEW_OPTIONS_MESSAGE } from "./tool-definition.js";
-import {
-  ASK_USER_QUESTION_RENDERER_ID,
-  toolInputSchema,
-  type InteractionPayload,
-  type ToolResult,
-} from "./contracts.js";
+import { toolInputSchema } from "./contracts.js";
 
 function createHost(): FakePluginHost {
   const host = createFakePluginHost({ pluginId: "ask-user-question" });
-  plugin(host.bb as unknown as Parameters<typeof plugin>[0]);
+  plugin(host.api as unknown as Parameters<typeof plugin>[0]);
+
   return host;
 }
 
@@ -53,29 +49,35 @@ async function resultText(
 ): Promise<string> {
   if (typeof result === "string") return result;
   const [part] = result.content;
+
   if (part?.type !== "text") throw new Error("expected a text result");
+
   return part.text;
 }
 
 describe("provider gating", () => {
-  it.each(["claude-code", "some-plugin-provider"])(
+  it.each(["some-plugin-provider"])(
     "withholds the tool from %s, which declares it natively",
     async (providerId) => {
       const host = createHost();
+
       const resolved = await host.harness.resolveAgentConfiguration(
         configurationContext(providerId, true),
       );
+
       expect(resolved.tools).toEqual([]);
     },
   );
 
-  it.each(["codex", "pi", "acp-cursor"])(
+  it.each(["codex", "claude-code", "pi", "acp-cursor"])(
     "registers the tool for %s with the schema generated from its input parser",
     async (providerId) => {
       const host = createHost();
+
       const resolved = await host.harness.resolveAgentConfiguration(
         configurationContext(providerId),
       );
+
       expect(resolved.tools).toHaveLength(1);
       const [tool] = resolved.tools;
       expect(tool?.name).toBe(TOOL_NAME);
@@ -85,13 +87,67 @@ describe("provider gating", () => {
     },
   );
 
+  it.each([
+    { kind: "root", parentThreadId: null, originKind: null, offered: false },
+    {
+      kind: "side chat",
+      parentThreadId: "thr_parent",
+      originKind: "fork",
+      offered: false,
+    },
+    {
+      kind: "child",
+      parentThreadId: "thr_parent",
+      originKind: null,
+      offered: true,
+    },
+  ] as const)(
+    "offers the tool to a hidden $kind only when its questions reach a parent chat",
+    async ({ parentThreadId, originKind, offered }) => {
+      const host = createHost();
+
+      const resolved = await host.harness.resolveAgentConfiguration(
+        makePluginAgentConfigurationContext({
+          thread: { experimental_visibility: "hidden", parentThreadId },
+          origin: { kind: originKind, pluginId: null },
+          provider: {
+            id: "claude-code",
+            capabilities: { supportsNativeUserQuestion: false },
+          },
+        }),
+      );
+
+      expect(resolved.tools.map((tool) => tool.name)).toEqual(
+        offered ? [TOOL_NAME] : [],
+      );
+    },
+  );
+
+  it("offers the tool to child chats so their questions reach the parent chat", async () => {
+    const host = createHost();
+
+    const resolved = await host.harness.resolveAgentConfiguration(
+      makePluginAgentConfigurationContext({
+        thread: { parentThreadId: "thr_parent" },
+        provider: {
+          id: "claude-code",
+          capabilities: { supportsNativeUserQuestion: false },
+        },
+      }),
+    );
+
+    expect(resolved.tools.map((tool) => tool.name)).toEqual([TOOL_NAME]);
+  });
+
   it.each(["codex", "pi", "acp-cursor"])(
     "does not prescribe provider-specific plan tools to %s",
     async (providerId) => {
       const host = createHost();
+
       const resolved = await host.harness.resolveAgentConfiguration(
         configurationContext(providerId),
       );
+
       expect(resolved.tools).toHaveLength(1);
       expect(resolved.tools[0]?.description).not.toMatch(
         /EnterPlanMode|ExitPlanMode/,
@@ -101,9 +157,11 @@ describe("provider gating", () => {
 
   it("advertises multiSelect as optional and defaults it during execution", async () => {
     const host = createHost();
+
     const resolved = await host.harness.resolveAgentConfiguration(
       configurationContext("codex"),
     );
+
     expect(resolved.tools[0]?.inputSchema).toMatchObject({
       additionalProperties: false,
       required: ["questions"],
@@ -143,18 +201,19 @@ describe("provider gating", () => {
       },
     });
 
-    const answered = host.harness.callAgentTool(TOOL_NAME, {
+    host.harness.sdk.stub("experimental_attention.command", () => ({
+      questions: [],
+      callbacks: [],
+      cleared: false,
+      callbackMarker: null,
+      routedToThreadId: null,
+    }));
+    await host.harness.callAgentTool(TOOL_NAME, {
       questions: [{ ...questions[0], multiSelect: undefined }],
     });
-    await vi.waitFor(() =>
-      expect(host.harness.pendingInteractions).toHaveLength(1),
-    );
-    const pending = host.harness.pendingInteractions[0]!;
-    host.harness.submitInteraction(pending.id, {
-      answers: { q0: { selected: ["q0o1"] } },
-    });
-    const result = JSON.parse(await resultText(await answered)) as ToolResult;
-    expect(result.questions[0]?.multiSelect).toBe(false);
+    expect(
+      host.harness.sdk.callsTo("experimental_attention.command")[0]?.[0],
+    ).toMatchObject({ command: { questions: [{ multiSelect: false }] } });
   });
 });
 
@@ -205,126 +264,118 @@ describe("asking a question", () => {
     },
   );
 
-  it("opens an interaction and returns the answer in Claude's result shape", async () => {
-    const host = createHost();
-    const call = host.harness.callAgentTool(TOOL_NAME, { questions });
+  it.each(["required", "optional"])(
+    "opens %s native questions asynchronously without a second plugin form",
+    async (mode) => {
+      const host = createHost();
+      host.harness.sdk.stub("experimental_attention.command", () => ({
+        questions: [],
+        callbacks: [],
+        cleared: false,
+        callbackMarker: null,
+        routedToThreadId: null,
+      }));
 
-    await vi.waitFor(() =>
-      expect(host.harness.pendingInteractions).toHaveLength(1),
-    );
-    const pending = host.harness.pendingInteractions[0]!;
-    expect(pending.rendererId).toBe(ASK_USER_QUESTION_RENDERER_ID);
-    expect(pending.title).toBe("Database");
-    const payload = pending.payload as InteractionPayload;
-    expect(payload.questions[0]).toMatchObject({
-      id: "q0",
-      prompt: "Which database should we use?",
-      shortLabel: "Database",
-      allowFreeText: true,
-    });
+      const result = await host.harness.callAgentTool(TOOL_NAME, {
+        questions,
+        mode,
+      });
 
-    expect(pending.presentation).toEqual({
-      label: { pending: "Asking a question", completed: "Asked" },
-      icon: { glyph: "MessageQuestion" },
-    });
-    expect(
-      await pending.describeSubmission?.({
-        answers: { q0: { selected: ["q0o0"], freeText: "with pgbouncer" } },
-      }),
-    ).toMatchObject({
-      title:
-        "Answered Which database should we use? — Postgres (Recommended); with pgbouncer",
-      detail:
-        "- Which database should we use? — Postgres (Recommended); with pgbouncer",
-      payload: expect.objectContaining({
-        answers: {
-          "Which database should we use?":
-            "Postgres (Recommended); with pgbouncer",
+      expect(host.harness.pendingInteractions).toHaveLength(0);
+      expect(
+        host.harness.sdk.callsTo("experimental_attention.command")[0]?.[0],
+      ).toMatchObject({
+        command: {
+          action: "open",
+          questions: [
+            { mode, prompt: questions[0]?.question, additiveNotes: true },
+          ],
         },
-      }),
-    });
+      });
+      expect(JSON.parse(await resultText(result))).toMatchObject({
+        delivery: "asynchronous",
+        instruction: expect.stringContaining(
+          "withdraw it with omnyo question command --self",
+        ),
+      });
+    },
+  );
 
-    host.harness.submitInteraction(pending.id, {
-      answers: { q0: { selected: ["q0o0"], freeText: "with pgbouncer" } },
-    });
+  it.each(["required", "optional"])(
+    "tells a routed chat that its %s question went to the chat it reports to, not the owner",
+    async (mode) => {
+      const host = createHost();
+      host.harness.sdk.stub("experimental_attention.command", () => ({
+        questions: [],
+        callbacks: [],
+        cleared: false,
+        callbackMarker: null,
+        routedToThreadId: "thr_parent",
+      }));
 
-    const parsed = JSON.parse(await resultText(await call)) as ToolResult;
-    expect(parsed.answers).toEqual({
-      "Which database should we use?": "Postgres (Recommended); with pgbouncer",
-    });
-    expect(parsed.annotations?.["Which database should we use?"]).toEqual({
-      preview: "CREATE TABLE users (id uuid primary key);",
-      notes: "with pgbouncer",
-    });
-  });
+      const result = await host.harness.callAgentTool(TOOL_NAME, {
+        questions,
+        mode,
+      });
 
-  it("keeps a question open for the configured timeout", async () => {
+      const parsed = JSON.parse(await resultText(result));
+
+      expect(parsed).toMatchObject({
+        questions: [],
+        delivery: "parent-chat",
+        parentThreadId: "thr_parent",
+        instruction: expect.stringContaining(
+          "reports to thr_parent. The question went to that chat, not the owner",
+        ),
+      });
+      expect(parsed.instruction).toContain("arrives as a message in this chat");
+      expect(parsed.instruction).not.toMatch(/withdraw|question command/);
+    },
+  );
+
+  it.each([
+    [true, true],
+    [false, false],
+    [undefined, false],
+  ])(
+    "maps delegable %s to an open command marked %s",
+    async (delegable, expected) => {
+      const host = createHost();
+      host.harness.sdk.stub("experimental_attention.command", () => ({
+        questions: [],
+        callbacks: [],
+        cleared: false,
+        callbackMarker: null,
+        routedToThreadId: null,
+      }));
+
+      await host.harness.callAgentTool(TOOL_NAME, {
+        questions: [{ ...questions[0], delegable }],
+      });
+
+      expect(
+        host.harness.sdk.callsTo("experimental_attention.command")[0]?.[0],
+      ).toMatchObject({
+        command: { action: "open", questions: [{ delegable: expected }] },
+      });
+    },
+  );
+
+  it("surfaces a native service failure instead of claiming a question was shown", async () => {
     const host = createHost();
-    const first = host.harness.callAgentTool(TOOL_NAME, { questions });
-    await vi.waitFor(() =>
-      expect(host.harness.pendingInteractions).toHaveLength(1),
-    );
-    expect(host.harness.pendingInteractions[0]!.timeoutMs).toBe(30 * 60 * 1000);
-    host.harness.cancelInteraction(host.harness.pendingInteractions[0]!.id);
-    await first;
-
-    await host.harness.setSettings({ questionTimeout: "7 days" });
-    const second = host.harness.callAgentTool(TOOL_NAME, { questions });
-    await vi.waitFor(() =>
-      expect(host.harness.pendingInteractions).toHaveLength(1),
-    );
-    expect(host.harness.pendingInteractions[0]!.timeoutMs).toBe(
-      7 * 24 * 60 * 60 * 1000,
-    );
-    host.harness.cancelInteraction(host.harness.pendingInteractions[0]!.id);
-    await second;
-  });
-
-  it("tells the model to carry on when the user dismisses the question", async () => {
-    const host = createHost();
-    const call = host.harness.callAgentTool(TOOL_NAME, { questions });
-    await vi.waitFor(() =>
-      expect(host.harness.pendingInteractions).toHaveLength(1),
-    );
-    host.harness.cancelInteraction(host.harness.pendingInteractions[0]!.id);
-
-    const result = await call;
-    expect(result).toMatchObject({ isError: true });
-    expect(await resultText(result)).toContain("dismissed the question");
-  });
-
-  it("reports an empty submission as an error instead of a blank answer", async () => {
-    const host = createHost();
-    const call = host.harness.callAgentTool(TOOL_NAME, { questions });
-    await vi.waitFor(() =>
-      expect(host.harness.pendingInteractions).toHaveLength(1),
-    );
-    host.harness.submitInteraction(host.harness.pendingInteractions[0]!.id, {
-      answers: { q0: { selected: [] } },
+    host.harness.sdk.stub("experimental_attention.command", () => {
+      throw new Error("Native question service unavailable");
     });
-
-    const result = await call;
-    expect(result).toMatchObject({ isError: true });
-    expect(await resultText(result)).toContain("no answers");
-  });
-
-  it("returns the reason when the question cannot be shown", async () => {
-    const host = createFakePluginHost({ pluginId: "ask-user-question" });
-    host.bb.ui.requestInput = () =>
-      Promise.reject(new Error("Thread does not exist"));
-    plugin(host.bb as unknown as Parameters<typeof plugin>[0]);
-
-    const result = await host.harness.callAgentTool(TOOL_NAME, { questions });
-
-    expect(result).toMatchObject({ isError: true });
-    const text = await resultText(result);
-    expect(text).toContain("Thread does not exist");
-    expect(text).toContain("Continue with your best judgement");
+    await expect(
+      host.harness.callAgentTool(TOOL_NAME, { questions }),
+    ).rejects.toThrow("Native question service unavailable");
+    expect(host.harness.pendingInteractions).toHaveLength(0);
   });
 
   it("rejects oversized previews before opening an interaction", async () => {
     const host = createHost();
     const preview = "x".repeat(4096);
+
     const result = await host.harness.callAgentTool(TOOL_NAME, {
       questions: Array.from({ length: 4 }, (_unused, index) => ({
         question: `Question ${index}?`,

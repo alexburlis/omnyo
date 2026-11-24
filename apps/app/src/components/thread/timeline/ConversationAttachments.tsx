@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
-import type { TimelineConversationAttachments } from "@bb/server-contract";
-import { fileNameFromPath } from "@bb/thread-view";
+import type { TimelineConversationAttachments } from "@omnyo/server-contract";
+import type { PromptTextMention } from "@omnyo/domain";
+import { fileNameFromPath } from "@omnyo/thread-view";
 import {
   ImageLightbox,
   getWrappedImageIndex,
 } from "../../ui/image-lightbox.js";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  CONTROL_PRESS_FEEDBACK,
+  CONTROL_PRESS_TRANSITION,
+} from "@omnyo/shared-ui/motion";
 import {
   buildProjectAttachmentContentUrl,
   isAbsoluteLocalPath,
@@ -17,10 +22,18 @@ import type {
   ThreadTimelineLocalFileLinkHandler,
   UserAttachmentImageSrcResolver,
 } from "./types.js";
+import { IMAGE_ANCHOR_ATTR, pairSentImageAnchors } from "./sent-image-anchors";
+
+import {
+  responsiveThumbnailSources,
+  userAttachmentThumbnailSources,
+} from "@/lib/user-attachment-images";
 
 interface ConversationImageItem {
   alt: string;
   src: string;
+  anchorLabel: string | null;
+  thumbnail?: { src: string; srcSet: string };
 }
 
 export interface ConversationAttachmentItems {
@@ -39,12 +52,16 @@ interface BuildAttachmentItemsArgs {
   attachments: TimelineConversationAttachments | null;
   projectId?: string;
   resolveUserAttachmentImageSrc?: UserAttachmentImageSrcResolver;
+  text: string;
+  mentions: readonly PromptTextMention[];
 }
 
 interface ProjectAttachmentHrefArgs {
   path: string;
   projectId: string | undefined;
 }
+
+const INTERACTIVE_ATTACHMENT_PILL_CLASS = `cursor-pointer hover:bg-state-hover ${CONTROL_PRESS_TRANSITION} ${CONTROL_PRESS_FEEDBACK}`;
 
 function projectAttachmentHref({
   path,
@@ -61,6 +78,8 @@ export function buildAttachmentItems({
   attachments,
   projectId,
   resolveUserAttachmentImageSrc,
+  text,
+  mentions,
 }: BuildAttachmentItemsArgs): ConversationAttachmentItems {
   if (!attachments) {
     return {
@@ -70,17 +89,40 @@ export function buildAttachmentItems({
     };
   }
 
+  const anchorLabels = pairSentImageAnchors({
+    text,
+    mentions,
+    localImagePaths: attachments.localImagePaths,
+  });
+
   const imageItems: ConversationImageItem[] = [
     ...attachments.imageUrls.map((url) => ({
       alt: fileNameFromPath(url),
       src: url,
+      anchorLabel: null,
     })),
-    ...attachments.localImagePaths.map((path) => ({
-      alt: fileNameFromPath(path),
-      src: resolveUserAttachmentImageSrc
+    ...attachments.localImagePaths.map((path, index) => {
+      const src = resolveUserAttachmentImageSrc
         ? resolveUserAttachmentImageSrc(path, projectId)
-        : path,
-    })),
+        : path;
+
+      const thumbnail = /^(blob:|data:)/i.test(src)
+        ? null
+        : resolveUserAttachmentImageSrc
+          ? responsiveThumbnailSources(src, (thumbnailWidth) =>
+              resolveUserAttachmentImageSrc(path, projectId, {
+                thumbnailWidth,
+              }),
+            )
+          : userAttachmentThumbnailSources(path, projectId);
+
+      return {
+        alt: fileNameFromPath(path),
+        src,
+        anchorLabel: anchorLabels[index] ?? null,
+        ...(thumbnail === null ? {} : { thumbnail }),
+      };
+    }),
   ];
 
   return {
@@ -99,13 +141,16 @@ export function ConversationAttachments({
   projectId,
 }: ConversationAttachmentsProps) {
   const openAttachment = useAttachmentOpener();
+
   const [expandedImageIndex, setExpandedImageIndex] = useState<number | null>(
     null,
   );
+
   const currentImageItem =
     expandedImageIndex === null
       ? null
       : (imageItems[expandedImageIndex] ?? null);
+
   const hasMultipleImages = imageItems.length > 1;
   const justifyClassName = align === "end" ? "justify-end" : "justify-start";
 
@@ -113,6 +158,7 @@ export function ConversationAttachments({
     if (expandedImageIndex === null || expandedImageIndex < imageItems.length) {
       return;
     }
+
     setExpandedImageIndex(null);
   }, [expandedImageIndex, imageItems.length]);
 
@@ -129,20 +175,36 @@ export function ConversationAttachments({
               type="button"
               key={`${imageItem.src}-${index}`}
               className={cn(
-                "cursor-zoom-in overflow-hidden rounded-md border",
+                "relative cursor-zoom-in overflow-hidden rounded-md border transition-[box-shadow,scale] [transition-duration:var(--motion-duration-fast),var(--motion-duration-base)] [transition-timing-function:var(--motion-ease-standard),var(--motion-ease-snappy)] active:[transition-duration:var(--motion-duration-fast)]",
+                CONTROL_PRESS_FEEDBACK,
+                "data-[image-anchor-active=true]:ring-2 data-[image-anchor-active=true]:ring-ring",
                 align === "end"
                   ? "border-surface-selected-border bg-surface-raised"
                   : "border-border bg-surface-recessed",
               )}
               onClick={() => setExpandedImageIndex(index)}
-              title={imageItem.alt}
+              {...(imageItem.anchorLabel
+                ? {
+                    "aria-label": `${imageItem.anchorLabel}, ${imageItem.alt}`,
+                    [IMAGE_ANCHOR_ATTR]: imageItem.anchorLabel,
+                  }
+                : { title: imageItem.alt })}
             >
+              {imageItem.anchorLabel ? (
+                <span
+                  aria-hidden="true"
+                  className="absolute bottom-1 left-1 rounded-sm bg-background/85 px-1 text-xs leading-4 font-medium text-foreground"
+                >
+                  {imageItem.anchorLabel}
+                </span>
+              ) : null}
               <img
-                src={imageItem.src}
+                src={imageItem.thumbnail?.src ?? imageItem.src}
+                srcSet={imageItem.thumbnail?.srcSet}
                 alt={imageItem.alt}
                 className={cn(
                   "object-cover",
-                  align === "end" ? "h-20 max-w-36" : "h-16 w-24",
+                  align === "end" ? "h-20 w-36" : "h-16 w-24",
                 )}
                 loading="lazy"
                 decoding="async"
@@ -160,7 +222,9 @@ export function ConversationAttachments({
                 ? "border-surface-selected-border bg-surface-raised"
                 : "border-border bg-surface-recessed",
             );
+
             const detail = fileDetails.find((file) => file.path === path);
+
             const label = (
               <span className="truncate">
                 {detail?.name ?? fileNameFromPath(path)}
@@ -169,6 +233,7 @@ export function ConversationAttachments({
                   : ` · ${formatByteSize(detail.sizeBytes)}`}
               </span>
             );
+
             const attachmentHref = projectAttachmentHref({ path, projectId });
 
             if (attachmentHref && openAttachment && projectId) {
@@ -176,10 +241,7 @@ export function ConversationAttachments({
                 <button
                   key={path}
                   type="button"
-                  className={cn(
-                    className,
-                    "cursor-pointer hover:bg-state-hover",
-                  )}
+                  className={cn(className, INTERACTIVE_ATTACHMENT_PILL_CLASS)}
                   onClick={() =>
                     openAttachment({
                       name: detail?.name ?? fileNameFromPath(path),
@@ -200,10 +262,7 @@ export function ConversationAttachments({
                   href={attachmentHref}
                   target="_blank"
                   rel="noreferrer"
-                  className={cn(
-                    className,
-                    "cursor-pointer hover:bg-state-hover",
-                  )}
+                  className={cn(className, INTERACTIVE_ATTACHMENT_PILL_CLASS)}
                 >
                   {label}
                 </a>
@@ -222,7 +281,7 @@ export function ConversationAttachments({
               <button
                 key={path}
                 type="button"
-                className={cn(className, "cursor-pointer hover:bg-state-hover")}
+                className={cn(className, INTERACTIVE_ATTACHMENT_PILL_CLASS)}
                 onClick={() => {
                   onOpenLocalFileLink({
                     lineRange: null,

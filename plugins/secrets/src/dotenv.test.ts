@@ -6,6 +6,7 @@ describe("dotenv reconciliation", () => {
   it("updates requested assignments and preserves unrelated bytes and CRLF", () => {
     const source =
       "# config\r\nexport API_KEY = old # keep this\r\nOTHER=value\r\n";
+
     const result = reconcileDotenv(source, {
       API_KEY: "new secret",
       TOKEN: "tok\\en",
@@ -30,6 +31,7 @@ describe("dotenv reconciliation", () => {
       BOTH: `both ' and " quotes`,
       SLASH_N: String.raw`it's\\not-a-newline`,
     };
+
     const result = reconcileDotenv("", values);
     expect(parse(result.content)).toEqual(values);
   });

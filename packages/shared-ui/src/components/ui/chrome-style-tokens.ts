@@ -1,5 +1,7 @@
+import { DISCLOSURE_CHEVRON_TRANSITION } from "./motion";
+
 export const CHROME_SECTION_LABEL_CLASS =
-  "text-xs font-normal leading-5 text-subtle-foreground/75";
+  "text-xs font-normal leading-5 text-subtle-foreground";
 
 export const SIDEBAR_DISCLOSURE_ACTION_CLASS =
   "text-sm leading-5 text-subtle-foreground [&>[data-icon-root]]:size-3.5";
@@ -17,5 +19,4 @@ export const CONTEXT_CARD_SEGMENT_CLASS = "min-h-6 px-2 py-1 rounded";
 export const CONTEXT_CARD_TOGGLE_CLASS =
   "flex cursor-pointer items-center text-xs transition-colors hover:bg-state-hover";
 
-export const CONTEXT_CARD_CHEVRON_CLASS =
-  "size-3.5 shrink-0 text-subtle-foreground transition-transform duration-200";
+export const CONTEXT_CARD_CHEVRON_CLASS = `size-3.5 shrink-0 text-subtle-foreground ${DISCLOSURE_CHEVRON_TRANSITION}`;

@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import {
+  constants,
   copyFileSync,
   lstatSync,
   mkdtempSync,
@@ -27,22 +28,27 @@ function formatThrownValue(err) {
 
 function formatChildProcessFailure(err) {
   const details = [formatThrownValue(err).split("\n")[0]];
+
   if (err && typeof err === "object") {
     if ("status" in err && err.status !== null && err.status !== undefined) {
       details.push(`exit status: ${String(err.status)}`);
     }
+
     if ("signal" in err && err.signal !== null && err.signal !== undefined) {
       details.push(`signal: ${String(err.signal)}`);
     }
 
     for (const streamName of ["stdout", "stderr"]) {
       const output = err[streamName];
+
       if (output === undefined || output === null) continue;
 
       const text = Buffer.isBuffer(output)
         ? output.toString("utf8")
         : String(output);
+
       const trimmed = text.trim();
+
       if (trimmed.length > 0) {
         details.push(`${streamName}: ${trimmed}`);
       }
@@ -54,6 +60,7 @@ function formatChildProcessFailure(err) {
 
 export function verifyNativeModule(name, requireModule) {
   const module = requireModule(name);
+
   if (name !== "better-sqlite3") {
     return;
   }
@@ -70,8 +77,6 @@ function shouldRebuildNativeModule(errorMessage) {
 
 function getRepairedNativeModuleError(name, pkgJsonPath) {
   try {
-    // A failed dlopen remains cached for the life of the process. Verify a
-    // replacement binary in a fresh process so the old handle cannot poison it.
     execFileSync(
       process.execPath,
       [
@@ -85,49 +90,65 @@ instance.close();`,
       ],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
+
     return null;
   } catch (err) {
     const message = formatChildProcessFailure(err);
+
     if (!shouldRebuildNativeModule(message)) throw err;
+
     return message;
   }
 }
 
-function detachHardlinkedBinary(binaryPath) {
+function detachNativeBinary(binaryPath, hardlinkedOnly = true) {
   let binaryStat;
+
   try {
     binaryStat = lstatSync(binaryPath);
   } catch (err) {
     if (err && typeof err === "object" && err.code === "ENOENT") {
       return false;
     }
+
     throw err;
   }
 
-  if (!binaryStat.isFile() || binaryStat.nlink <= 1) {
+  if (!binaryStat.isFile() || (hardlinkedOnly && binaryStat.nlink <= 1)) {
     return false;
   }
 
-  // pnpm can hardlink this file across worktrees. An installer writes the new
-  // ABI into the existing inode, so every linked checkout changes with it.
-  // Replace this checkout's link with a private copy before the repair starts.
-  const tempDir = mkdtempSync(join(dirname(binaryPath), ".bb-native-detach-"));
+  const tempDir = mkdtempSync(
+    join(dirname(binaryPath), ".omnyo-native-detach-"),
+  );
+
   const detachedPath = join(tempDir, basename(binaryPath));
   let originalWasUnlinked = false;
+
   try {
-    copyFileSync(binaryPath, detachedPath);
-    unlinkSync(binaryPath);
-    originalWasUnlinked = true;
+    copyFileSync(
+      binaryPath,
+      detachedPath,
+      process.platform === "darwin" ? constants.COPYFILE_FICLONE : 0,
+    );
+
+    if (process.platform !== "darwin") {
+      unlinkSync(binaryPath);
+      originalWasUnlinked = true;
+    }
+
     renameSync(detachedPath, binaryPath);
     originalWasUnlinked = false;
   } catch (err) {
     if (originalWasUnlinked) {
       renameSync(detachedPath, binaryPath);
     }
+
     throw err;
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+
   return true;
 }
 
@@ -145,31 +166,40 @@ export function ensureNativeModules({
     const requireModule = createRequireImpl(resolve(repoRoot, resolveFrom));
     const pkgJsonPath = requireModule.resolve(`${name}/package.json`);
     const pkgDir = dirname(pkgJsonPath);
+
     if (
       !checkOnly &&
       binaryPath !== undefined &&
-      detachHardlinkedBinary(resolve(pkgDir, binaryPath))
+      detachNativeBinary(resolve(pkgDir, binaryPath))
     ) {
       log(
         `[ensure-native-modules] Detached hardlinked ${name} binary before verification`,
       );
     }
+
     try {
       verifyNativeModule(name, requireModule);
     } catch (err) {
       const message = formatThrownValue(err);
+
       if (checkOnly) {
         throw new Error(
           `[ensure-native-modules] ${name} failed validation: ${message}. Run pnpm start --dryrun to repair it before launch.`,
         );
       }
+
       if (!shouldRebuildNativeModule(message)) throw err;
+
+      if (process.platform === "darwin" && binaryPath !== undefined) {
+        detachNativeBinary(resolve(pkgDir, binaryPath), false);
+      }
 
       const pkgRequire = createRequireImpl(pkgJsonPath);
       log(
         `[ensure-native-modules] Installing prebuilt ${name} for Node ${process.versions.node} (ABI ${process.versions.modules})`,
       );
       let prebuildInstalled = false;
+
       try {
         execFileSyncImpl(
           process.execPath,
@@ -193,12 +223,14 @@ export function ensureNativeModules({
         name,
         pkgJsonPath,
       );
+
       if (prebuildVerifyError === null) {
         if (!prebuildInstalled) {
           log(
             `[ensure-native-modules] Prebuilt ${name} loaded despite installer failure`,
           );
         }
+
         continue;
       }
 
@@ -210,6 +242,10 @@ export function ensureNativeModules({
         log(
           `[ensure-native-modules] Prebuilt ${name} still failed to load: ${prebuildVerifyError}`,
         );
+      }
+
+      if (process.platform === "darwin" && binaryPath !== undefined) {
+        detachNativeBinary(resolve(pkgDir, binaryPath), false);
       }
 
       log(
@@ -232,6 +268,7 @@ export function ensureNativeModules({
         name,
         pkgJsonPath,
       );
+
       if (rebuildVerifyError !== null) {
         throw new Error(
           `[ensure-native-modules] ${name} still failed to load after rebuild: ${rebuildVerifyError}`,
@@ -247,8 +284,10 @@ const isMainModule =
 
 if (isMainModule) {
   const args = process.argv.slice(2);
+
   if (args.length > 1 || (args.length === 1 && args[0] !== "--check")) {
     throw new Error("Expected no arguments or --check");
   }
+
   ensureNativeModules({ checkOnly: args[0] === "--check" });
 }

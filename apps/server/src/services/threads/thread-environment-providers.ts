@@ -16,11 +16,14 @@ export function scheduleEnvironmentProvisioning(
   at: number,
 ): void {
   const context = getThreadProvisionContext(deps.db, threadId);
+
   if (context === null || context.request.environmentIntent.type !== "provider")
     return;
+
   const timer = setTimeout(
     () => {
       clearThreadProvisionSchedule(threadId);
+
       if (Date.now() < at)
         return scheduleEnvironmentProvisioning(deps, threadId, at);
       void advanceThreadProvisioning(deps, { threadId }).catch((error) =>
@@ -29,6 +32,7 @@ export function scheduleEnvironmentProvisioning(
     },
     Math.min(Math.max(0, at - Date.now()), 2_147_483_647),
   );
+
   timer.unref?.();
   setThreadProvisionSchedule(threadId, {
     provisioningId: context.state.provisioningId,
@@ -47,6 +51,7 @@ export function recheckEnvironmentProviderCreations(
       .filter((record) => record.pluginId === pluginId)
       .map((record) => record.provider.id),
   );
+
   for (const entry of listThreadProvisionSchedules())
     if (owned.has(entry.environmentProviderId))
       scheduleEnvironmentProvisioning(deps, entry.threadId, Date.now());

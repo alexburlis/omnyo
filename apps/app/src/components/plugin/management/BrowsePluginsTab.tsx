@@ -2,12 +2,13 @@ import type { PluginCatalogSearchEntry } from "@/hooks/queries/plugin-catalog-qu
 import { usePluginCollectionParams } from "./usePluginCollectionParams";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { Icon } from "@bb/shared-ui/icon";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { prefersReducedMotion } from "@omnyo/shared-ui/motion";
 import { appToast } from "@/components/ui/app-toast";
-import bbLogoUrl from "../../../../../../assets/bb-logo.svg";
+import { OmnyoLogo } from "@/components/ui/omnyo-logo";
 import { OpenPluginGuideButton } from "./OpenPluginGuideButton";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   ResourceCollectionViewport,
   ResourceListState,
@@ -15,7 +16,7 @@ import {
   ResourceSourceShelf,
   ResourceTabDescription,
   useResourceRouteLabel,
-} from "@bb/shared-ui/resource-list";
+} from "@omnyo/shared-ui/resource-list";
 import { BrowseArchetypeCards } from "@/components/plugin/browse-hero/BrowseArchetypeCards";
 import { BrowseHeroCarousel } from "@/components/plugin/browse-hero/BrowseHeroCarousel";
 import { nextComposerRequestNonce } from "@/components/plugin/browse-hero/browse-hero-archetypes";
@@ -50,6 +51,7 @@ export function BrowsePluginsTab({
   onInstallFromSource: () => void;
 }) {
   const isCompact = useIsCompactViewport();
+
   const {
     searchParams,
     query,
@@ -58,9 +60,11 @@ export function BrowsePluginsTab({
     selectedCategories,
     changeSearchParams,
   } = usePluginCollectionParams();
+
   const shelfKey = searchParams.get("shelf");
   const isCategoryShelf = shelfKey?.startsWith("category:") ?? false;
   const creationViewActive = searchParams.get("view") === "create";
+
   const [heroRequest, setHeroRequest] = useState<{
     nonce: number;
     seed?: string;
@@ -68,32 +72,40 @@ export function BrowsePluginsTab({
   } | null>(() =>
     creationViewActive ? { nonce: nextComposerRequestNonce() } : null,
   );
+
   const [requestedCreationView, setRequestedCreationView] =
     useState(creationViewActive);
+
   const [composing, setComposing] = useState(false);
   const trimmedQuery = query.trim();
   const searchQuery = usePluginCatalogSearch(trimmedQuery, { enabled: true });
   const catalogQuery = usePluginCatalogSearch("", { enabled: true });
   const activeQuery = shelfKey === null ? searchQuery : catalogQuery;
+
   const catalog = activeQuery.data ?? {
     entries: [],
     collections: [],
     categories: [],
   };
+
   const entries = useMemo(
     () => catalog.entries.filter((entry) => entry.compatible),
     [catalog.entries],
   );
+
   const savedResultsError =
     entries.length > 0 &&
     (activeQuery.isRefetchError || searchQuery.isRefetchError);
+
   const notifiedSavedResultsError = useRef(false);
   useEffect(() => {
     if (savedResultsError && !notifiedSavedResultsError.current) {
       appToast.warning("Couldn’t refresh plugins.");
     }
+
     notifiedSavedResultsError.current = savedResultsError;
   }, [savedResultsError]);
+
   const selectedShelf = useMemo(
     () =>
       shelfKey === null
@@ -105,14 +117,16 @@ export function BrowsePluginsTab({
           }).find((shelf) => shelf.key === shelfKey),
     [catalog.categories, catalog.collections, entries, shelfKey],
   );
+
   useResourceRouteLabel(selectedShelf?.label ?? null);
+
   const shelfEntries = useMemo(
     () => (shelfKey === null ? entries : (selectedShelf?.entries ?? [])),
     [entries, selectedShelf, shelfKey],
   );
-  const installsKnown = shelfEntries.some((entry) => entry.installs !== null);
-  const sort =
-    requestedSort === "most-installed" && !installsKnown ? null : requestedSort;
+
+  const sort = requestedSort;
+
   const categoryOptions = useMemo(
     () =>
       pluginCategoryFilterOptions(
@@ -122,8 +136,10 @@ export function BrowsePluginsTab({
       ),
     [catalog.categories, shelfEntries, selectedCategories],
   );
+
   const filteredEntries = useMemo(() => {
     const selected = new Set(selectedCategories);
+
     const matchingSearch =
       shelfKey !== null && trimmedQuery !== ""
         ? new Set(
@@ -132,6 +148,7 @@ export function BrowsePluginsTab({
             ),
           )
         : null;
+
     return shelfEntries.filter(
       (entry) =>
         (selected.size === 0 || selected.has(pluginCategoryFilterId(entry))) &&
@@ -145,8 +162,10 @@ export function BrowsePluginsTab({
     shelfEntries,
     shelfKey,
   ]);
+
   const shelvesMode =
     sort === null && shelfKey === null && selectedCategories.length === 0;
+
   const shelves = useMemo(
     () =>
       shelvesMode
@@ -160,6 +179,7 @@ export function BrowsePluginsTab({
         : [],
     [catalogQuery.data, shelvesMode],
   );
+
   const flatEntries = useMemo(
     () =>
       sort === null
@@ -167,6 +187,7 @@ export function BrowsePluginsTab({
         : sortPluginEntries(filteredEntries, sort, sortDirection),
     [filteredEntries, sort, sortDirection],
   );
+
   const browseParams = new URLSearchParams(searchParams);
   browseParams.delete("shelf");
   const browseSearch = browseParams.toString();
@@ -176,6 +197,7 @@ export function BrowsePluginsTab({
       nonce: nextComposerRequestNonce(),
       ...(seed === undefined ? {} : { seed }),
     });
+
   const createAction = (
     <PluginCreateButton
       onCreate={(seed) => {
@@ -188,6 +210,7 @@ export function BrowsePluginsTab({
       onInstallFromSource={onInstallFromSource}
     />
   );
+
   if (requestedCreationView !== creationViewActive) {
     setRequestedCreationView(creationViewActive);
     setHeroRequest({
@@ -195,14 +218,13 @@ export function BrowsePluginsTab({
       ...(creationViewActive ? {} : { close: true }),
     });
   }
+
   useEffect(() => {
     if (heroRequest === null) return;
     const viewport = document.getElementById("plugins-browse-results");
     viewport?.scrollTo?.({
       top: 0,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? "auto"
-        : "smooth",
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
     });
   }, [heroRequest]);
 
@@ -273,7 +295,6 @@ export function BrowsePluginsTab({
               showCategoryFilter={!isCategoryShelf}
               sort={sort}
               sortDirection={sortDirection}
-              installsKnown={installsKnown}
               changeSearchParams={changeSearchParams}
               action={isCompact && shelfKey === null ? createAction : undefined}
             />
@@ -355,18 +376,15 @@ function BrowseShelf({
   const shelfParams = new URLSearchParams(searchParams);
   shelfParams.set("shelf", shelf.key);
   const visible = shelf.entries.slice(0, SHELF_ENTRY_LIMIT);
+
   return (
     <ResourceSourceShelf
       label={shelf.label}
       description={shelf.description}
       hideDescriptionWhenNarrow
       leading={
-        shelf.key === "collection:bb-official" ? (
-          <span
-            className="size-4 shrink-0 bg-current text-foreground"
-            style={{ mask: `url(${bbLogoUrl}) center / contain no-repeat` }}
-            aria-hidden
-          />
+        shelf.key === "collection:omnyo-official" ? (
+          <OmnyoLogo className="size-4 shrink-0" />
         ) : shelf.key === "collection:new-and-notable" ? (
           <Icon name="News01" className="size-4 text-foreground" aria-hidden />
         ) : (

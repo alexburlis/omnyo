@@ -25,6 +25,7 @@ export function createTerminalOsc8LinkHandler({
       if (event.button !== 0) {
         return;
       }
+
       onActivate({ source: "osc8", uri });
     },
     hover: (_event, uri) => {
@@ -43,7 +44,9 @@ export function requestTerminalLinkOpen({
 }: RequestTerminalLinkOpenArgs): void {
   if (target.source === "osc8") {
     requestConfirmation(target);
+
     return;
   }
+
   openLink(target.uri);
 }

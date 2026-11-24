@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveBbDesktopPlatform } from "../src/desktop-platform.js";
+import { resolveDesktopPlatform } from "../src/desktop-platform.js";
 
-describe("resolveBbDesktopPlatform", () => {
+describe("resolveDesktopPlatform", () => {
   it("names each supported desktop platform", () => {
-    expect(resolveBbDesktopPlatform("darwin")).toBe("macos");
-    expect(resolveBbDesktopPlatform("linux")).toBe("linux");
-    expect(resolveBbDesktopPlatform("win32")).toBe("windows");
+    expect(resolveDesktopPlatform("darwin")).toBe("macos");
+    expect(resolveDesktopPlatform("linux")).toBe("linux");
+    expect(resolveDesktopPlatform("win32")).toBe("windows");
   });
 });

@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { experimental_createDeltaAssembler as createDeltaAssembler } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { experimental_createDeltaAssembler as createDeltaAssembler } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { createCodexEventTranslator } from "./translator.js";
 
 function createHarness() {
   const translator = createCodexEventTranslator({
     additionalWorkspaceWriteRoots: [],
   });
+
   const assembler = createDeltaAssembler({
     providerId: "codex",
     entropyPrefix: "hooks",
     textDeltaFlushMs: 0,
   });
+
   return (method: string, params: Record<string, unknown>) =>
     assembler.assemble({
       threadId: "thread-test",
@@ -23,6 +25,7 @@ describe("Codex lifecycle notification diagnostics", () => {
     "suppresses routine %s notifications",
     (method) => {
       const translate = createHarness();
+
       const events = translate(method, {
         threadId: "thread-test",
         turnId: null,
@@ -43,6 +46,7 @@ describe("Codex lifecycle notification diagnostics", () => {
           entries: [],
         },
       });
+
       expect(events).toEqual([]);
     },
   );
@@ -51,10 +55,12 @@ describe("Codex lifecycle notification diagnostics", () => {
     "normalizes a warning with threadId %s exactly once",
     (threadId) => {
       const translate = createHarness();
+
       const events = translate("warning", {
         threadId,
         message: "Provider context budget notice",
       });
+
       expect(events).toEqual([
         expect.objectContaining({
           type: "provider/warning",

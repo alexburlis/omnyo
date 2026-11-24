@@ -4,8 +4,8 @@ import {
   runGit,
   WorkspaceError,
   type GitProcessOptions,
-} from "@bb/host-workspace";
-import { ExpectedCommandDispatchError } from "../command-dispatch-support.js";
+} from "@omnyo/host-workspace";
+import { ExpectedCommandDispatchError } from "../command-errors.js";
 
 const PROJECT_CLONE_TIMEOUT_MS = 20 * 60 * 1000;
 
@@ -17,6 +17,7 @@ function normalizeProjectSlug(value: string): string {
     .replace(/^-+|-+$/gu, "")
     .slice(0, 80)
     .replace(/-+$/u, "");
+
   return slug || "project";
 }
 
@@ -30,6 +31,7 @@ export function resolveProjectCloneDefaultPath(
 async function requireEmptyOrMissingTarget(targetPath: string): Promise<void> {
   try {
     const stat = await fs.stat(targetPath);
+
     if (!stat.isDirectory() || (await fs.readdir(targetPath)).length > 0) {
       throw new ExpectedCommandDispatchError(
         "target_not_empty",
@@ -40,9 +42,11 @@ async function requireEmptyOrMissingTarget(targetPath: string): Promise<void> {
     if (error instanceof ExpectedCommandDispatchError) {
       throw error;
     }
+
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return;
     }
+
     throw error;
   }
 }
@@ -55,12 +59,15 @@ export async function inspectProjectPath(
   gitRemoteUrl: string | null;
 }> {
   const resolvedPath = path.resolve(projectPath);
+
   const result = await runGit(["remote", "get-url", "origin"], {
     cwd: resolvedPath,
     ...options,
     allowFailure: true,
   });
+
   const gitRemoteUrl = result.exitCode === 0 ? result.stdout.trim() : "";
+
   return {
     path: resolvedPath,
     gitRemoteUrl: gitRemoteUrl || null,
@@ -80,16 +87,20 @@ export async function cloneProject(args: {
     args.targetPath ??
       resolveProjectCloneDefaultPath(args.dataDir, args.projectSlug),
   );
+
   await requireEmptyOrMissingTarget(targetPath);
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
   let pendingProgress = "";
+
   const onStderr =
     args.onProgress === undefined
       ? undefined
       : (chunk: string): void => {
           pendingProgress += chunk;
+
           for (;;) {
             const match = /\r\n|\r|\n/u.exec(pendingProgress);
+
             if (match === null) return;
             args.onProgress?.(pendingProgress.slice(0, match.index));
             pendingProgress = pendingProgress.slice(
@@ -97,6 +108,7 @@ export async function cloneProject(args: {
             );
           }
         };
+
   try {
     await runGit(["clone", "--progress", args.remoteUrl, targetPath], {
       cwd: path.dirname(targetPath),
@@ -109,10 +121,12 @@ export async function cloneProject(args: {
     if (error instanceof WorkspaceError) {
       throw new ExpectedCommandDispatchError(error.code, error.message);
     }
+
     throw new Error(error instanceof Error ? error.message : String(error));
   } finally {
     if (pendingProgress.length > 0) args.onProgress?.(pendingProgress);
   }
+
   return inspectProjectPath(
     targetPath,
     args.shellPath === undefined ? {} : { shellPath: args.shellPath },

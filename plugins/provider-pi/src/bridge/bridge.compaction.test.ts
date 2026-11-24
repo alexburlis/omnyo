@@ -11,7 +11,7 @@ let harness: FakePiBridgeHarness;
 
 beforeEach(async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-compaction-",
+    prefix: "omnyo-pi-compaction-",
     initialize: true,
   });
 });
@@ -68,9 +68,11 @@ it("reports a refused manual compaction as skipped, after the compaction_end del
         ? `turn.boundary:${String(d.status)}`
         : String(d.kind),
     );
+
   const warning = harness
     .deltasOf(THREAD_ID)
     .find((d) => d.kind === "provider.warning");
+
   expect(warning).toMatchObject({ category: "compaction-skipped" });
   expect(kinds.indexOf("provider.warning")).toBeLessThan(
     kinds.indexOf("turn.boundary:completed"),

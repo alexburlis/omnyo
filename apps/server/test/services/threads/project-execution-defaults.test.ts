@@ -1,7 +1,7 @@
 import {
   getProjectExecutionDefaults,
   upsertProjectExecutionDefaults,
-} from "@bb/db";
+} from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import { createThreadFromRequest } from "../../../src/services/threads/thread-create.js";
 import {
@@ -22,9 +22,11 @@ describe("project execution defaults persistence", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-reuse-defaults",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -72,6 +74,7 @@ describe("project execution defaults persistence", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-non-reuse-defaults",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
@@ -119,21 +122,26 @@ describe("project execution defaults persistence", () => {
   it("does not overwrite project defaults for a fork/side-chat child spawn", async () => {
     await withTestHarness(async (harness) => {
       installFakeGitWorktreeProvider();
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-origin-kind-defaults",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const parentEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/origin-kind-defaults-source",
       });
+
       const parentThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: parentEnvironment.id,
       });
+
       seedThreadIdentity(harness.deps, {
         threadId: parentThread.id,
         providerThreadId: "provider-origin-kind-defaults-source",

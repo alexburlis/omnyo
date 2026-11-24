@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { PromptMentionSuggestion } from "@bb/client-core";
+import type { PromptMentionSuggestion } from "@omnyo/client-core";
 import { buildPromptMentionResults } from "./promptMentionCandidates";
 
 type ProjectMentionSuggestion = Extract<
   PromptMentionSuggestion,
   { kind: "project" }
 >;
+
 type PluginMentionSuggestion = Extract<
   PromptMentionSuggestion,
   { kind: "plugin" }
@@ -57,11 +58,13 @@ describe("buildPromptMentionResults", () => {
 
   it("keeps provider sections distinct when their visible labels collide", () => {
     const first = plugin("First");
+
     const second: PluginMentionSuggestion = {
       ...plugin("Second"),
       pluginId: "other-plugin",
       itemId: "installed:second",
     };
+
     const results = buildPromptMentionResults({
       query: "",
       paths: [],

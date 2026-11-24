@@ -1,22 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import piPlugin from "./server.js";
 
 function registeredDeclaration() {
   const host = createFakePluginHost({ pluginId: "provider-pi" });
-  piPlugin(host.bb);
+  piPlugin(host.api);
+
   const declaration = host.harness.registrations.providerRegistrations.find(
     (entry) => entry.id === "pi",
   );
+
   if (declaration === undefined)
     throw new Error("expected pi to be registered");
+
   return declaration;
 }
 
 describe("the pi plugin's environment passthrough", () => {
   it("declares the bridge command override variables so a host-set value reaches the bridge", () => {
     expect(registeredDeclaration().env).toEqual({
-      passthrough: ["BB_PI_BRIDGE_COMMAND", "BB_PI_BRIDGE_ARGS"],
+      passthrough: ["OMNYO_PI_BRIDGE_COMMAND", "OMNYO_PI_BRIDGE_ARGS"],
     });
   });
 });

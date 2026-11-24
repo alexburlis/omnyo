@@ -2,20 +2,19 @@ import {
   canHydrateRetainedEventOutputRowsWithinDataByteLimit,
   findStoredEventRow as findStoredEventRowRecord,
   getLatestThreadOutputEventRow,
-  getLatestThreadSystemErrorEventRow,
   hydrateRetainedEventOutputRows,
   listStoredEventRows as listStoredEventRowRecords,
-} from "@bb/db";
-import type { DbConnection, StoredEventRow } from "@bb/db";
-import { toRecord } from "@bb/core-ui";
-import { buildThreadEventRow, parseStoredThreadEvent } from "@bb/domain";
-import { threadScope, turnScope } from "@bb/domain";
+} from "@omnyo/db";
+import type { DbConnection, StoredEventRow } from "@omnyo/db";
+import { toRecord } from "@omnyo/core-ui";
+import { buildThreadEventRow, parseStoredThreadEvent } from "@omnyo/domain";
+import { threadScope, turnScope } from "@omnyo/domain";
 import type {
   ThreadEvent,
   ThreadEventRow,
   ThreadEventScope,
   ThreadEventType,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { ApiError } from "../../errors.js";
 
 const THREAD_EVENT_RESPONSE_DATA_BYTE_LIMIT = 8 * 1024 * 1024;
@@ -44,6 +43,7 @@ export function parseStoredEventPayload(
   row: StoredEventPayloadRow,
 ): Record<string, unknown> {
   let data: unknown;
+
   try {
     data = JSON.parse(row.data);
   } catch {
@@ -55,6 +55,7 @@ export function parseStoredEventPayload(
   }
 
   const record = toRecord(data);
+
   if (!record) {
     throw new ApiError(
       500,
@@ -78,6 +79,7 @@ function parseStoredEventScope(row: StoredEventRow): ThreadEventScope {
           `Stored ${row.type} event #${row.sequence} for thread ${row.threadId} has turn scope without turn_id`,
         );
       }
+
       return turnScope(row.turnId);
     default:
       throw new ApiError(
@@ -126,6 +128,7 @@ function hydrateRawThreadEventRows(
       "Event response exceeds the 8 MiB limit",
     );
   }
+
   return hydrateRetainedEventOutputRows(db, rows);
 }
 
@@ -141,6 +144,7 @@ export function listThreadEventRows(
     threadId: args.threadId,
     types: args.types,
   });
+
   return hydrateRawThreadEventRows(db, rows).map((row) =>
     parseStoredEventRow(row),
   );
@@ -155,10 +159,13 @@ export function findThreadEvent(
     threadId: args.threadId,
     type: args.type,
   });
+
   if (!row) {
     return null;
   }
+
   const [hydrated] = hydrateRawThreadEventRows(db, [row]);
+
   return parseStoredEventRow(hydrated ?? row);
 }
 
@@ -185,14 +192,4 @@ export function getLastThreadOutput(
   }
 
   return null;
-}
-
-export function getLastThreadErrorMessage(
-  db: DbConnection,
-  threadId: string,
-): string | null {
-  const row = getLatestThreadSystemErrorEventRow(db, { threadId });
-  if (!row) return null;
-  const eventRow = parseStoredEventRow(row);
-  return eventRow.type === "system/error" ? eventRow.data.message : null;
 }

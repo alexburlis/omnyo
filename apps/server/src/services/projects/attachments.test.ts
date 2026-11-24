@@ -1,10 +1,10 @@
-import type { PromptInput } from "@bb/domain";
+import type { PromptInput } from "@omnyo/domain";
 import {
   createConnection,
   getProjectAttachment,
   migrate,
   projects,
-} from "@bb/db";
+} from "@omnyo/db";
 import { beforeEach } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,10 +18,13 @@ import {
 } from "./attachments.js";
 
 const tempDirs: string[] = [];
+
 let db: ReturnType<typeof createConnection>;
+
 beforeEach(() => {
   db = createConnection(":memory:");
   migrate(db);
+
   for (const id of ["proj_test", "proj_source", "proj_target"])
     db.insert(projects)
       .values({
@@ -36,8 +39,9 @@ beforeEach(() => {
 });
 
 async function makeTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "bb-attachments-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-attachments-"));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -78,11 +82,13 @@ describe("project attachments", () => {
       "proj_target",
       "image-uploaded.png",
     );
+
     expect(copied.content.toString("utf8")).toBe("image bytes");
   });
 
   it("keeps the uploaded name and image type when copying across projects", async () => {
     const dataDir = await makeTempDir();
+
     const uploaded = await storeAttachment(
       db,
       dataDir,
@@ -122,6 +128,7 @@ describe("project attachments", () => {
     const sourceDir = join(dataDir, "attachments", "proj_source");
     await mkdir(sourceDir, { recursive: true });
     await writeFile(join(sourceDir, "present.txt"), "present");
+
     const input = [
       {
         type: "localFile" as const,
@@ -234,6 +241,7 @@ describe("project attachments", () => {
 
   it("binds host file references to the destination machine", async () => {
     const dataDir = await makeTempDir();
+
     const resolve = (input: PromptInput[], hostId: string | null) =>
       resolvePromptAttachmentReferences({
         db,

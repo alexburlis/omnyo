@@ -1,3 +1,4 @@
+import { usePublishVisiblePanel } from "@/lib/visible-app-context";
 import {
   getPanelTabHistoryKey,
   forgetClosedPanelTab,
@@ -15,15 +16,19 @@ import {
 import { createPortal } from "react-dom";
 import { atom, useAtom, useAtomValue, useStore } from "jotai";
 import { atomFamily } from "jotai-family";
-import type { Host, JsonValue } from "@bb/domain";
-import { jsonValueSchema } from "@bb/domain";
-import type { PluginFixedTabDeclaration } from "@get-bb/plugin-sdk";
-import { Button } from "@bb/shared-ui/button";
-import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@bb/shared-ui/chrome-style-tokens";
-import { COARSE_POINTER_HEADER_ICON_BUTTON_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { Icon } from "@bb/shared-ui/icon";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
+import type { Host, JsonValue } from "@omnyo/domain";
+import { jsonValueSchema } from "@omnyo/domain";
+import type { PluginFixedTabDeclaration } from "@omnyo/plugin-sdk";
+import { Button } from "@omnyo/shared-ui/button";
+import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@omnyo/shared-ui/chrome-style-tokens";
+import { COARSE_POINTER_HEADER_ICON_BUTTON_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import { Icon } from "@omnyo/shared-ui/icon";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@omnyo/shared-ui/tooltip";
 import { useAppCommandHandler } from "@/components/commands/AppCommandProvider";
 import { PluginIcon, PluginItemIcon } from "@/components/plugin/PluginIcon";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
@@ -61,7 +66,7 @@ import {
   type TerminalFixedPanelTab,
 } from "@/lib/fixed-panel-tabs-state";
 import { createFileOpenerOriginalTab } from "./file-opener-tabs";
-import { activateSecondaryPanelTabInState } from "@bb/client-core";
+import { activateSecondaryPanelTabInState } from "@omnyo/client-core";
 import {
   terminalQueryScopeForTarget,
   useTerminals,
@@ -71,7 +76,7 @@ import { usePanelFiles } from "@/components/secondary-panel/usePanelFiles";
 import { usePanelTerminals } from "@/components/secondary-panel/usePanelTerminals";
 import { useHosts } from "@/hooks/queries/host-queries";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
-import { isDesktopBrowserAvailable } from "@/lib/bb-desktop";
+import { isDesktopBrowserAvailable } from "@/lib/omnyo-desktop";
 import { getBrowserUrlHost } from "@/lib/browser-url";
 import { UrlOpenRoutingProvider } from "@/lib/url-open-routing";
 import { usePluginSlots } from "@/lib/plugin-slots";
@@ -96,7 +101,9 @@ import { usePluginList } from "@/hooks/queries/plugin-settings-queries";
 import { PluginDetailTabContent } from "./plugin-detail-navigation";
 
 const MARKETPLACE_PLUGIN_DETAIL_TAB_PREFIX = "marketplace-plugin:";
+
 const EMPTY_TERMINAL_HOSTS: readonly Host[] = [];
+
 const RIGHT_PANEL_TOGGLE_CLASS = `${COARSE_POINTER_HEADER_ICON_BUTTON_CLASS} ${CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS}`;
 
 interface PluginDetailTabMetadata {
@@ -107,10 +114,12 @@ interface PluginDetailTabMetadata {
 const compactDrawerOpenAtomFamily = atomFamily((_panelStateId: string) =>
   atom(false),
 );
+
 interface FixedTabSessionTarget {
   sequence: number;
   target: JsonValue;
 }
+
 const fixedTabTargetAtomFamily = atomFamily((_targetId: string) =>
   atom<FixedTabSessionTarget | null>(null),
 );
@@ -142,13 +151,17 @@ function PluginFixedTabContent({
   subPath: string;
 }) {
   const targetStore = useStore();
+
   const targetAtom = fixedTabTargetAtomFamily(
     `${panelStateId}\0${registration.id}`,
   );
+
   const targetSnapshot = useAtomValue(targetAtom);
+
   const targetState = useMemo<AppFixedTabTargetState | null>(() => {
     if (targetSnapshot === null) return null;
     const { sequence } = targetSnapshot;
+
     return {
       ...targetSnapshot,
       ownerId: fixedTabOwnerId,
@@ -166,8 +179,10 @@ function PluginFixedTabContent({
     targetSnapshot,
     targetStore,
   ]);
+
   if (!isOpen) return null;
   const FixedTabComponent = registration.component;
+
   return (
     <PluginSlotMount
       key={`${pluginId}/${panelId}/${registration.id}/${panelGeneration}`}
@@ -196,6 +211,7 @@ function findPluginRightPanelTogglePortal(
       return candidate;
     }
   }
+
   return null;
 }
 
@@ -215,26 +231,31 @@ export function PluginPanelRightPanelHost({
   paneId?: string;
 }) {
   const { navPanels } = usePluginSlots();
+
   const panel =
     navPanels.find(
       (candidate) =>
         candidate.pluginId === pluginId && candidate.path === panelPath,
     ) ?? null;
+
   const paneContext = useOptionalPaneContext();
   const isFocused = paneContext?.isFocused ?? true;
   const isHostedBySplitWorkspace = paneContext?.secondaryPanelHost != null;
   const resolvedPaneId = paneId ?? paneContext?.paneId;
   const panelHostId = resolvedPaneId ?? "standalone";
+
   const panelStateId = getPluginPagePanelStateId({
     panelPath,
     paneId: resolvedPaneId,
     pluginId,
   });
+
   const historyContextKey = getPanelTabHistoryKey({
     panelStateId,
     environmentId: null,
     fileOwnerThreadId: null,
   });
+
   const fixedViewTabs = useMemo<readonly PluginPageFixedPanelTab[]>(
     () =>
       (panel?.fixedTabs ?? []).map((fixedTab) =>
@@ -246,6 +267,7 @@ export function PluginPanelRightPanelHost({
       ),
     [panel, panelPath, pluginId],
   );
+
   const panelState = useReconciledFixedPanelTabsState({
     fixedTabs: fixedViewTabs,
     isAuthoritative: panel !== null,
@@ -253,41 +275,52 @@ export function PluginPanelRightPanelHost({
     panelStateId,
     syncThreadId: null,
   });
+
   const updatePanelState = useUpdateFixedPanelTabsState(panelStateId, null);
   const closePersistedPanel = useCloseFixedSecondaryPanel(panelStateId, null);
   const [openedPluginIds, setOpenedPluginIds] = useState<string[]>([]);
   const openedPluginIdsRef = useRef(openedPluginIds);
+
   const [activePluginDetailId, setActivePluginDetailId] = useState<
     string | null
   >(null);
+
   const [isPluginDetailPanelOpen, setIsPluginDetailPanelOpen] = useState(false);
   const [isPanelFullPage, setIsPanelFullPage] = useState(false);
+
   const [pluginDetailTabMetadata, setPluginDetailTabMetadata] = useState<
     Record<string, PluginDetailTabMetadata>
   >({});
+
   const pluginListQuery = usePluginList({
     enabled: openedPluginIds.length > 0,
   });
+
   const activePluginCatalogQuery = usePluginCatalogSearch(
     activePluginDetailId ?? "",
     {
       enabled: activePluginDetailId !== null,
     },
   );
+
   useEffect(() => {
     if (activePluginDetailId === null) return;
+
     const catalogEntry = activePluginCatalogQuery.data?.entries.find(
       (entry) => entry.pluginId === activePluginDetailId,
     );
+
     if (catalogEntry === undefined) return;
     setPluginDetailTabMetadata((current) => {
       const previous = current[activePluginDetailId];
+
       if (
         previous?.icon === catalogEntry.icon &&
         previous.label === catalogEntry.displayName
       ) {
         return current;
       }
+
       return {
         ...current,
         [activePluginDetailId]: {
@@ -301,43 +334,57 @@ export function PluginPanelRightPanelHost({
     activePluginDetailId,
     setPluginDetailTabMetadata,
   ]);
+
   const [isCompactDrawerOpen, setCompactDrawerOpen] = useAtom(
     compactDrawerOpenAtomFamily(panelStateId),
   );
+
   const closeCompactDrawer = useCallback(() => {
     setCompactDrawerOpen(false);
   }, [setCompactDrawerOpen]);
+
   const isCompactViewport = useIsCompactViewport();
+
   const persistedPanelOpen = isCompactViewport
     ? isCompactDrawerOpen
     : panelState.secondary.isOpen;
+
   const isOpen =
     activePluginDetailId === null
       ? persistedPanelOpen
       : isPluginDetailPanelOpen;
+
   const activeTab =
     activePluginDetailId === null
       ? (panelState.secondary.tabs.find(
           (tab) => tab.id === panelState.secondary.activeTabId,
         ) ?? null)
       : marketplacePluginDetailTab(activePluginDetailId);
+
+  usePublishVisiblePanel({ tab: activeTab, isOpen, isFocused });
+
   const activeTerminalTab: TerminalFixedPanelTab | null =
     activeTab?.kind === "terminal" && activeTab.target !== undefined
       ? activeTab
       : null;
+
   const activeTerminalTarget = activeTerminalTab?.target ?? null;
+
   const activeTerminalQuery = useTerminals(
     activeTerminalTarget === null
       ? null
       : terminalQueryScopeForTarget(activeTerminalTarget),
     { enabled: isOpen },
   );
+
   const terminalSessions = activeTerminalQuery.data?.sessions;
+
   const terminalsById = useMemo(
     () =>
       new Map((terminalSessions ?? []).map((session) => [session.id, session])),
     [terminalSessions],
   );
+
   const {
     activateTab,
     activeBrowserTab,
@@ -358,12 +405,16 @@ export function PluginPanelRightPanelHost({
     storageFiles: undefined,
     terminalSessions: undefined,
   });
+
   const hostsQuery = useHosts();
   const primaryHostId = useSystemConfig().data?.primaryHostId ?? null;
+
   const [preferredTerminalHostId, setPreferredTerminalHostId] = useState<
     string | null
   >(null);
+
   const terminalHosts = hostsQuery.data ?? EMPTY_TERMINAL_HOSTS;
+
   const selectedTerminalHost = useMemo(
     () =>
       resolveTerminalHost({
@@ -384,6 +435,7 @@ export function PluginPanelRightPanelHost({
     ) {
       return;
     }
+
     closeTab(activeTerminalTab.id);
   }, [
     activeTerminalQuery.error,
@@ -400,20 +452,25 @@ export function PluginPanelRightPanelHost({
 
   const revealPanel = useCallback(() => {
     setIsPluginDetailPanelOpen(true);
+
     if (isCompactViewport) {
       setCompactDrawerOpen(true);
+
       return;
     }
+
     updatePanelState((state) => ({
       ...state,
       secondary: { ...state.secondary, isOpen: true },
     }));
   }, [isCompactViewport, setCompactDrawerOpen, updatePanelState]);
+
   const selectPersistedPanelTab = useCallback(() => {
     setActivePluginDetailId(null);
     setIsPluginDetailPanelOpen(false);
     setIsPanelFullPage(false);
   }, []);
+
   const openPluginDetail = useCallback(
     (nextPluginId: string) => {
       if (historyContextKey !== null)
@@ -422,30 +479,38 @@ export function PluginPanelRightPanelHost({
           `marketplace-plugin:${nextPluginId}`,
         );
       const current = openedPluginIdsRef.current;
+
       const next = current.includes(nextPluginId)
         ? current
         : [...current, nextPluginId];
+
       openedPluginIdsRef.current = next;
       setOpenedPluginIds(next);
       setActivePluginDetailId(nextPluginId);
       setIsPluginDetailPanelOpen(true);
       revealPanel();
+
       return true;
     },
     [historyContextKey, revealPanel],
   );
+
   const targetStore = useStore();
+
   const fixedTabOwnerId = getPluginFixedTabOwnerId(
     pluginId,
     panel?.id ?? panelPath,
   );
+
   const fixedTabDestinations = useMemo<readonly AppFixedTabDestination[]>(
     () =>
       (panel?.fixedTabs ?? []).flatMap((registration) => {
         const tab = fixedViewTabs.find(
           (candidate) => candidate.fixedTabId === registration.id,
         );
+
         if (tab === undefined) return [];
+
         return [
           {
             tab: {
@@ -455,12 +520,14 @@ export function PluginPanelRightPanelHost({
             open: (target) => {
               if (target !== undefined) {
                 const result = jsonValueSchema.safeParse(target);
+
                 if (
                   !result.success ||
                   registration.experimental_target === undefined
                 ) {
                   return false;
                 }
+
                 try {
                   if (!registration.experimental_target.validate(result.data)) {
                     return false;
@@ -468,6 +535,7 @@ export function PluginPanelRightPanelHost({
                 } catch {
                   return false;
                 }
+
                 targetStore.set(
                   fixedTabTargetAtomFamily(
                     `${panelStateId}\0${registration.id}`,
@@ -478,11 +546,13 @@ export function PluginPanelRightPanelHost({
                   }),
                 );
               }
+
               selectPersistedPanelTab();
               updatePanelState((state) =>
                 activateSecondaryPanelTabInState(state, tab.id),
               );
               revealPanel();
+
               return true;
             },
           },
@@ -499,23 +569,28 @@ export function PluginPanelRightPanelHost({
       updatePanelState,
     ],
   );
+
   const openFixedTab = useCallback(
     (intent: Parameters<typeof openAppFixedTabFromDestinations>[1]) =>
       openAppFixedTabFromDestinations(fixedTabDestinations, intent),
     [fixedTabDestinations],
   );
+
   const revealPersistedPanel = useCallback(() => {
     selectPersistedPanelTab();
     revealPanel();
   }, [revealPanel, selectPersistedPanelTab]);
+
   const panelFiles = usePanelFiles({
     available: panel !== null,
     openTab,
     reveal: revealPersistedPanel,
     scope: null,
   });
+
   const openLiveFilePreview = panelFiles.openFilePreview;
   const acceptsSession = () => panel !== null;
+
   const terminals = usePanelTerminals({
     panelStateId,
     syncThreadId: null,
@@ -529,6 +604,7 @@ export function PluginPanelRightPanelHost({
     reveal: revealPersistedPanel,
     onCloseLastTab: closeCompactDrawer,
   });
+
   const navigationCapabilities = useMemo(
     () => ({
       openFilePreview: openLiveFilePreview,
@@ -537,25 +613,33 @@ export function PluginPanelRightPanelHost({
     }),
     [openFixedTab, openLiveFilePreview, terminals.open],
   );
+
   const hidePanel = useCallback(() => {
     setIsPluginDetailPanelOpen(false);
     setIsPanelFullPage(false);
+
     if (isCompactViewport) {
       closeCompactDrawer();
+
       return;
     }
+
     closePersistedPanel();
   }, [closeCompactDrawer, closePersistedPanel, isCompactViewport]);
+
   const openNewTab = useCallback(() => {
     selectPersistedPanelTab();
     openTab({ kind: "new-tab" });
     revealPanel();
   }, [openTab, revealPanel, selectPersistedPanelTab]);
+
   const togglePanel = useCallback(() => {
     if (isOpen) {
       hidePanel();
+
       return;
     }
+
     if (activeTab === null) openTab({ kind: "new-tab" });
     revealPanel();
   }, [activeTab, hidePanel, isOpen, openTab, revealPanel]);
@@ -563,14 +647,18 @@ export function PluginPanelRightPanelHost({
   useAppCommandHandler("panel.toggle", () => {
     if (!isFocused || panel === null) return false;
     togglePanel();
+
     return true;
   });
   useWindowRightPanel({ isOpen, enabled: isFocused && panel !== null });
+
   const titleBarHostsRightPanelToggle =
     useWindowTitleBarHostsRightPanelToggle();
+
   useAppCommandHandler("panel.newTab", () => {
     if (!isFocused || panel === null) return false;
     openNewTab();
+
     return true;
   });
   useAppCommandHandler("panel.reopenClosedTab", () => {
@@ -585,9 +673,11 @@ export function PluginPanelRightPanelHost({
         dismiss: selectPersistedPanelTab,
         restore: ({ index, destination }) => {
           openPluginDetail(destination.pluginId);
+
           const next = openedPluginIdsRef.current.filter(
             (id) => id !== destination.pluginId,
           );
+
           next.splice(Math.min(index, next.length), 0, destination.pluginId);
           openedPluginIdsRef.current = next;
           setOpenedPluginIds(next);
@@ -603,14 +693,16 @@ export function PluginPanelRightPanelHost({
     )
       return false;
     revealPanel();
+
     return true;
   });
 
   const [togglePortalTarget, setTogglePortalTarget] =
     useState<HTMLElement | null>(null);
+
   useLayoutEffect(() => {
     setTogglePortalTarget(findPluginRightPanelTogglePortal(panelStateId));
-  }, [panel, panelStateId]);
+  }, [panel, panelStateId, titleBarHostsRightPanelToggle]);
 
   const panelBrowser = usePanelBrowser({
     available: isDesktopBrowserAvailable(),
@@ -619,17 +711,22 @@ export function PluginPanelRightPanelHost({
     openTab,
     reveal: revealPersistedPanel,
   });
+
   const openBrowser = panelBrowser.open;
 
   const closePluginDetailTab = useCallback(
     (closingPluginId: string) => {
       const closingIndex = openedPluginIdsRef.current.indexOf(closingPluginId);
+
       if (closingIndex === -1) return;
+
       const nextPluginIds = openedPluginIdsRef.current.filter(
         (candidate) => candidate !== closingPluginId,
       );
+
       openedPluginIdsRef.current = nextPluginIds;
       setOpenedPluginIds(nextPluginIds);
+
       if (historyContextKey !== null)
         rememberClosedPanelTab(historyContextKey, {
           kind: "plugin-detail",
@@ -641,13 +738,17 @@ export function PluginPanelRightPanelHost({
               closingPluginId,
           },
         });
+
       if (activePluginDetailId !== closingPluginId) return;
+
       const nextActivePluginId =
         nextPluginIds[Math.min(closingIndex, nextPluginIds.length - 1)] ?? null;
+
       setActivePluginDetailId((current) =>
         current === closingPluginId ? nextActivePluginId : current,
       );
       setIsPanelFullPage(false);
+
       if (
         nextActivePluginId === null &&
         fixedViewTabs.length === 0 &&
@@ -670,14 +771,17 @@ export function PluginPanelRightPanelHost({
     () =>
       openedPluginIds.map((tabPluginId) => {
         const catalogEntry = pluginDetailTabMetadata[tabPluginId];
+
         const installedPlugin = pluginListQuery.data?.plugins.find(
           (entry) => entry.id === tabPluginId,
         );
+
         const label =
           catalogEntry?.label ??
           installedPlugin?.name ??
           installedPlugin?.id ??
           tabPluginId;
+
         return {
           contentFillsRegion: true,
           label,
@@ -716,7 +820,9 @@ export function PluginPanelRightPanelHost({
         const tab = fixedViewTabs.find(
           (candidate) => candidate.fixedTabId === registration.id,
         );
+
         if (tab === undefined) return [];
+
         return [
           {
             ariaLabel: registration.title,
@@ -777,6 +883,7 @@ export function PluginPanelRightPanelHost({
           return null;
         case "terminal":
           if (tab.target === undefined) return null;
+
           return (
             <LazyThreadTerminalPanel
               autoFocus={tab.terminalId === terminals.autoFocusTerminalId}
@@ -861,6 +968,7 @@ export function PluginPanelRightPanelHost({
           );
         case "plugin-panel": {
           const originalTab = createFileOpenerOriginalTab(tab);
+
           return (
             <PluginPanelTabContent
               tab={tab}
@@ -884,6 +992,7 @@ export function PluginPanelRightPanelHost({
       terminals,
     ],
   );
+
   const panelTabs = useMemo<readonly SecondaryPanelRenderableTab[]>(
     () =>
       orderedSecondaryFileTabs.flatMap((tab): SecondaryPanelRenderableTab[] => {
@@ -896,11 +1005,13 @@ export function PluginPanelRightPanelHost({
           renderContent: () => renderPanelTabContent(tab),
           tab,
         };
+
         switch (tab.kind) {
           case "browser": {
             const label =
               tab.title ??
               (tab.url.length > 0 ? getBrowserUrlHost(tab.url) : "");
+
             return [
               {
                 ...shared,
@@ -911,9 +1022,11 @@ export function PluginPanelRightPanelHost({
               },
             ];
           }
+
           case "terminal": {
             if (tab.target === undefined) return [];
             const session = terminalsById.get(tab.terminalId);
+
             return [
               {
                 ...shared,
@@ -929,6 +1042,7 @@ export function PluginPanelRightPanelHost({
               },
             ];
           }
+
           case "new-tab":
             return [
               {
@@ -1037,10 +1151,12 @@ export function PluginPanelRightPanelHost({
             onUpdate={updateBrowserTab}
           />
         );
+
       const drawerFallback = renderDeck(
         activeBrowserTab?.id ?? null,
         canShowNativeBrowserView,
       );
+
       return (
         <LazyThreadSecondaryPanel
           drawerFallback={drawerFallback}
@@ -1094,6 +1210,7 @@ export function PluginPanelRightPanelHost({
 
   const toggleLabel = isOpen ? "Hide right panel" : "Show right panel";
   const toggleIconName = RIGHT_PANEL_TOGGLE_ICON_NAME;
+
   const page = (
     <div
       className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${

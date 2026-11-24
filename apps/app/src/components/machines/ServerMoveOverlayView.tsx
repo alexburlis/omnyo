@@ -1,12 +1,13 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useId, useState } from "react";
 import type {
   ServerMoveStatus,
   ServerMoveStep,
   ServerMoveStepStatus,
-} from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { BlockingOverlay } from "@/components/layout/BlockingOverlay";
 import {
   serverMoveStepLabel,
   type ServerMoveOverlayContent,
@@ -48,8 +49,14 @@ const STEP_STATUS_PRESENTATION: Record<
   },
 };
 
+const STOPPED_STEP_PRESENTATION = {
+  icon: "Circle",
+  iconClassName: "text-subtle-foreground/60",
+  label: "Stopped",
+} satisfies { icon: IconName; iconClassName: string; label: string };
+
 export interface ServerMoveOverlayViewProps {
-  content: VisibleServerMoveOverlayContent;
+  content: VisibleServerMoveOverlayContent | null;
   cancelPending: boolean;
   cancelError: string | null;
   onCancel: () => void;
@@ -59,19 +66,60 @@ export interface ServerMoveOverlayViewProps {
 
 export function ServerMoveOverlayView({
   content,
+  presentation = "overlay",
+  ...cardProps
+}: ServerMoveOverlayViewProps) {
+  const titleId = useId();
+  const descriptionId = useId();
+
+  const card =
+    content === null ? null : (
+      <ServerMoveOverlayCard
+        {...cardProps}
+        content={content}
+        titleId={titleId}
+        descriptionId={descriptionId}
+      />
+    );
+
+  if (presentation === "inline") {
+    return card === null ? null : (
+      <div role="group" aria-labelledby={titleId} className="w-full max-w-md">
+        {card}
+      </div>
+    );
+  }
+
+  return (
+    <BlockingOverlay
+      open={content !== null}
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      data-server-move-overlay=""
+    >
+      {card}
+    </BlockingOverlay>
+  );
+}
+
+function ServerMoveOverlayCard({
+  content,
   cancelPending,
   cancelError,
   onCancel,
   onClose,
-  presentation = "overlay",
-}: ServerMoveOverlayViewProps) {
-  const titleId = useId();
-  const descriptionId = useId();
+  titleId,
+  descriptionId,
+}: Omit<ServerMoveOverlayViewProps, "content" | "presentation"> & {
+  content: VisibleServerMoveOverlayContent;
+  titleId: string;
+  descriptionId: string;
+}) {
   const { move } = content;
   const failed = content.kind === "ended" && move.state === "failed";
   const note = overlayNote(content);
 
-  const card = (
+  return (
     <div className="grid w-full max-w-md grid-cols-[minmax(0,1fr)] gap-4 rounded-lg border border-border bg-background p-6 shadow-lg">
       <div className="space-y-1.5">
         <h2
@@ -97,6 +145,7 @@ export function ServerMoveOverlayView({
         <ServerMoveStepList
           steps={move.steps}
           targetHostName={move.targetHostName}
+          stopped={content.kind === "ended" || content.kind === "abandoned"}
         />
       )}
       {cancelError === null ? null : (
@@ -110,49 +159,6 @@ export function ServerMoveOverlayView({
         onCancel={onCancel}
         onClose={onClose}
       />
-    </div>
-  );
-
-  if (presentation === "inline") {
-    return (
-      <div role="group" aria-labelledby={titleId} className="w-full max-w-md">
-        {card}
-      </div>
-    );
-  }
-
-  return (
-    <ServerMoveOverlayLayer titleId={titleId} descriptionId={descriptionId}>
-      {card}
-    </ServerMoveOverlayLayer>
-  );
-}
-
-function ServerMoveOverlayLayer({
-  titleId,
-  descriptionId,
-  children,
-}: {
-  titleId: string;
-  descriptionId: string;
-  children: ReactNode;
-}) {
-  const layerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    layerRef.current?.focus({ preventScroll: true });
-  }, []);
-  return (
-    <div
-      ref={layerRef}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      aria-describedby={descriptionId}
-      tabIndex={-1}
-      data-server-move-overlay
-      className="fixed inset-0 z-60 flex items-center justify-center overflow-y-auto bg-surface-scrim p-4 outline-none"
-    >
-      {children}
     </div>
   );
 }
@@ -170,6 +176,7 @@ function ServerMoveOverlayActions({
 }) {
   if (content.kind === "progress") {
     if (!content.move.cancellable) return null;
+
     return (
       <div className="flex justify-end">
         <Button
@@ -183,6 +190,7 @@ function ServerMoveOverlayActions({
       </div>
     );
   }
+
   if (content.kind === "recovery") {
     return (
       <ServerMoveRecoveryActions
@@ -192,6 +200,7 @@ function ServerMoveOverlayActions({
       />
     );
   }
+
   if (content.kind === "redirecting") {
     return (
       <div className="flex justify-end">
@@ -201,9 +210,11 @@ function ServerMoveOverlayActions({
       </div>
     );
   }
+
   if (content.kind === "reconnecting" || content.kind === "waiting") {
     return null;
   }
+
   return (
     <div className="flex justify-end">
       <Button type="button" onClick={onClose}>
@@ -223,6 +234,7 @@ function ServerMoveRecoveryActions({
   onAbandon: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+
   if (!confirming) {
     return (
       <div className="flex justify-end">
@@ -236,6 +248,7 @@ function ServerMoveRecoveryActions({
       </div>
     );
   }
+
   return (
     <div className="space-y-3">
       <p className="text-sm text-destructive-text">
@@ -269,6 +282,7 @@ function isAbandonedSwitch(move: ServerMoveStatus): boolean {
 
 function overlayTitle(content: VisibleServerMoveOverlayContent): string {
   const name = content.move.targetHostName;
+
   switch (content.kind) {
     case "progress":
       return `Moving server to ${name}`;
@@ -284,6 +298,7 @@ function overlayTitle(content: VisibleServerMoveOverlayContent): string {
       if (isAbandonedSwitch(content.move)) {
         return "Server move abandoned";
       }
+
       return content.move.state === "cancelled"
         ? "Server move cancelled"
         : `Couldn't move the server to ${name}`;
@@ -294,13 +309,14 @@ function overlayTitle(content: VisibleServerMoveOverlayContent): string {
 
 function overlayDescription(content: VisibleServerMoveOverlayContent): string {
   const name = content.move.targetHostName;
+
   switch (content.kind) {
     case "progress":
       return content.move.state === "switching"
         ? `Every machine and app is switching over to ${name}. The move can't be cancelled now.`
-        : `bb is copying the server to ${name}.`;
+        : `Omnyo is copying the server to ${name}.`;
     case "recovery":
-      return `${name} didn't confirm that it took over, so this server stays up but read-only. bb keeps checking and finishes the move as soon as ${name} answers.`;
+      return `${name} didn't confirm that it took over, so this server stays up but read-only. Omnyo keeps checking and finishes the move as soon as ${name} answers.`;
     case "waiting":
       return content.destinationState === "activating"
         ? `${name} is switching over to the new server. This page opens it as soon as it's ready.`
@@ -313,6 +329,7 @@ function overlayDescription(content: VisibleServerMoveOverlayContent): string {
       if (isAbandonedSwitch(content.move)) {
         return `The server keeps running here. If ${name} took over anyway, stop the server there.`;
       }
+
       return content.move.state === "cancelled"
         ? "The server keeps running where it was."
         : (content.move.error?.message ??
@@ -325,8 +342,10 @@ function overlayDescription(content: VisibleServerMoveOverlayContent): string {
 function overlayNote(content: VisibleServerMoveOverlayContent): string | null {
   if (content.kind === "recovery") {
     const name = content.move.targetHostName;
-    return `If ${name} isn't running the server, abandon the move to keep the server here. If this server stops, run bb server unlock on this computer.`;
+
+    return `If ${name} isn't running the server, abandon the move to keep the server here. If this server stops, run omnyo server unlock on this computer.`;
   }
+
   if (
     content.kind === "ended" &&
     content.move.state === "failed" &&
@@ -334,20 +353,28 @@ function overlayNote(content: VisibleServerMoveOverlayContent): string | null {
   ) {
     return "The server keeps running where it was.";
   }
+
   return null;
 }
 
 export function ServerMoveStepList({
   steps,
   targetHostName,
+  stopped = false,
 }: {
   steps: readonly ServerMoveStep[];
   targetHostName: string;
+  stopped?: boolean;
 }) {
   return (
     <ol className="space-y-2" aria-label="Move steps">
       {steps.map((step) => {
-        const presentation = STEP_STATUS_PRESENTATION[step.status];
+        const interrupted = stopped && step.status === "running";
+
+        const presentation = interrupted
+          ? STOPPED_STEP_PRESENTATION
+          : STEP_STATUS_PRESENTATION[step.status];
+
         return (
           <li
             key={step.id}
@@ -369,7 +396,9 @@ export function ServerMoveStepList({
                   "text-sm",
                   step.status === "failed"
                     ? "text-destructive-text"
-                    : step.status === "pending" || step.status === "skipped"
+                    : interrupted ||
+                        step.status === "pending" ||
+                        step.status === "skipped"
                       ? "text-muted-foreground"
                       : "text-foreground",
                 )}
@@ -377,8 +406,10 @@ export function ServerMoveStepList({
                 <span>{serverMoveStepLabel(step.id, targetHostName)}</span>
                 <span className="sr-only">{`, ${presentation.label}`}</span>
               </p>
-              {step.status === "skipped" ? (
-                <p className="text-xs text-subtle-foreground">Skipped</p>
+              {interrupted || step.status === "skipped" ? (
+                <p className="text-xs text-subtle-foreground">
+                  {presentation.label}
+                </p>
               ) : step.message === null ? null : (
                 <p className="text-xs break-words text-subtle-foreground">
                   {step.message}

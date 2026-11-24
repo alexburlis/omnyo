@@ -1,18 +1,16 @@
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
 import {
   getPluginSettingsValues,
   setPluginSettingsValues,
   type DbConnection,
-} from "@bb/db";
+} from "@omnyo/db";
 import type {
   PluginSettingDescriptor,
   PluginSettingDescriptors,
   PluginSettingValue,
-} from "@get-bb/plugin-sdk";
-import { coerceStoredPluginSettingValue } from "@get-bb/plugin-sdk/internal/host-policy";
-import type { PluginSettingDescriptor as PublicPluginSettingDescriptor } from "@bb/server-contract";
-import { deleteSecretFile, writeSecretFile } from "@bb/secret-storage";
+} from "@omnyo/plugin-sdk";
+import { coerceStoredPluginSettingValue } from "@omnyo/plugin-sdk/internal/host-policy";
+import type { PluginSettingDescriptor as PublicPluginSettingDescriptor } from "@omnyo/server-contract";
+import type { PluginSecretStore } from "./plugin-secrets.js";
 
 export class PluginSettingsValidationError extends Error {
   constructor(message: string) {
@@ -21,42 +19,25 @@ export class PluginSettingsValidationError extends Error {
   }
 }
 
-export function pluginSecretsDir(dataDir: string, pluginId: string): string {
-  return join(dataDir, "plugins", pluginId, "secrets");
-}
-
-function secretFilePath(
-  dataDir: string,
-  pluginId: string,
-  key: string,
-): string {
-  return join(pluginSecretsDir(dataDir, pluginId), key);
-}
-
 function isSecret(descriptor: PluginSettingDescriptor): boolean {
   return descriptor.type === "string" && descriptor.secret === true;
 }
 
-export async function readSecret(
-  dataDir: string,
-  pluginId: string,
-  key: string,
-): Promise<string | undefined> {
-  try {
-    return await readFile(secretFilePath(dataDir, pluginId, key), "utf8");
-  } catch (error) {
-    const code =
-      error instanceof Error && "code" in error ? error.code : undefined;
-    if (code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
 interface PluginSettingsStoreArgs {
   db: DbConnection;
-  dataDir: string;
+  secrets: PluginSecretStore;
   pluginId: string;
   descriptors: PluginSettingDescriptors;
+}
+
+export function sealLegacySecretSettings(
+  args: Pick<PluginSettingsStoreArgs, "secrets" | "descriptors">,
+): Promise<void> {
+  return args.secrets.sealLegacy(
+    Object.entries(args.descriptors)
+      .filter(([, descriptor]) => isSecret(descriptor))
+      .map(([key]) => key),
+  );
 }
 
 function parseStoredSettingValue(
@@ -64,6 +45,7 @@ function parseStoredSettingValue(
   raw: string | undefined,
 ): PluginSettingValue | undefined {
   let parsed: unknown;
+
   if (raw !== undefined) {
     try {
       parsed = JSON.parse(raw);
@@ -71,18 +53,24 @@ function parseStoredSettingValue(
       parsed = undefined;
     }
   }
+
   return coerceStoredPluginSettingValue(descriptor, parsed);
 }
 
 export function readPluginSettingsValuesSync(
-  args: Omit<PluginSettingsStoreArgs, "dataDir">,
+  args: Omit<PluginSettingsStoreArgs, "secrets">,
 ): Record<string, PluginSettingValue | undefined> {
   const stored = getPluginSettingsValues(args.db, args.pluginId);
   const values: Record<string, PluginSettingValue | undefined> = {};
+
   for (const [key, descriptor] of Object.entries(args.descriptors)) {
     if (isSecret(descriptor)) continue;
-    values[key] = parseStoredSettingValue(descriptor, stored[key]);
+    values[key] = parseStoredSettingValue(
+      descriptor,
+      Object.hasOwn(stored, key) ? stored[key] : undefined,
+    );
   }
+
   return values;
 }
 
@@ -90,12 +78,12 @@ export async function readPluginSettingsValues(
   args: PluginSettingsStoreArgs,
 ): Promise<Record<string, PluginSettingValue | undefined>> {
   const values = readPluginSettingsValuesSync(args);
+
   for (const [key, descriptor] of Object.entries(args.descriptors)) {
     if (!isSecret(descriptor)) continue;
-    values[key] =
-      (await readSecret(args.dataDir, args.pluginId, key)) ??
-      descriptor.default;
+    values[key] = (await args.secrets.get(key)) ?? descriptor.default;
   }
+
   return values;
 }
 
@@ -103,17 +91,23 @@ export async function writePluginSettingsUpdate(
   args: PluginSettingsStoreArgs & { values: Record<string, unknown> },
 ): Promise<void> {
   const rowUpdates: Record<string, string | null> = {};
+
   for (const [key, value] of Object.entries(args.values)) {
-    const descriptor = args.descriptors[key];
+    const descriptor = Object.hasOwn(args.descriptors, key)
+      ? args.descriptors[key]
+      : undefined;
+
     if (!descriptor) continue;
+
     if (isSecret(descriptor)) {
-      const path = secretFilePath(args.dataDir, args.pluginId, key);
-      if (value === null) await deleteSecretFile(path);
-      else await writeSecretFile(path, value as string);
+      if (value === null) await args.secrets.delete(key);
+      else await args.secrets.set(key, value as string);
       continue;
     }
+
     rowUpdates[key] = value === null ? null : JSON.stringify(value);
   }
+
   if (Object.keys(rowUpdates).length > 0) {
     setPluginSettingsValues(args.db, args.pluginId, rowUpdates);
   }
@@ -129,25 +123,24 @@ function publicSettingDescriptor(
 ): PublicPluginSettingDescriptor {
   const publicDescriptor = { ...descriptor };
   delete publicDescriptor.experimental_schema;
+
   return publicDescriptor;
 }
 
 export async function buildPluginSettingsView(
   args: PluginSettingsStoreArgs,
 ): Promise<PluginSettingsView> {
-  const effective = await readPluginSettingsValues(args);
+  const effective = readPluginSettingsValuesSync(args);
   const values: Record<string, unknown> = {};
+
   for (const [key, descriptor] of Object.entries(args.descriptors)) {
     if (isSecret(descriptor)) {
-      values[key] = {
-        set: await stat(secretFilePath(args.dataDir, args.pluginId, key))
-          .then(() => true)
-          .catch(() => false),
-      };
+      values[key] = { set: await args.secrets.has(key) };
     } else if (effective[key] !== undefined) {
       values[key] = effective[key];
     }
   }
+
   return {
     schema: Object.fromEntries(
       Object.entries(args.descriptors).map(([key, descriptor]) => [

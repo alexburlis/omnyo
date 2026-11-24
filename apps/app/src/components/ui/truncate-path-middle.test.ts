@@ -7,18 +7,18 @@ import {
 describe("splitPathForMiddleTruncation", () => {
   it.each([
     [
-      "~/.bb/plugins/environment-git-worktree/host-data/worktrees/thr_abc-1/bb",
-      "~/.bb/plugins/environment-git-worktree/host-data/worktrees",
-      "/thr_abc-1/bb",
+      "~/.omnyo/plugins/environment-git-worktree/host-data/worktrees/thr_abc-1/omnyo",
+      "~/.omnyo/plugins/environment-git-worktree/host-data/worktrees",
+      "/thr_abc-1/omnyo",
     ],
-    ["~/Code/bb", "~", "/Code/bb"],
+    ["~/Code/omnyo", "~", "/Code/omnyo"],
     ["/tmp/qa/external-root", "/tmp", "/qa/external-root"],
-    ["C:\\Users\\me\\Code\\bb", "C:\\Users\\me", "\\Code\\bb"],
+    ["C:\\Users\\me\\Code\\omnyo", "C:\\Users\\me", "\\Code\\omnyo"],
   ])("keeps the last two segments of %s", (path, head, tail) => {
     expect(splitPathForMiddleTruncation(path)).toEqual({ head, tail });
   });
 
-  it.each(["/workspace", "/repo/bb", "bb", "~"])(
+  it.each(["/workspace", "/repo/omnyo", "Omnyo", "~"])(
     "keeps %s whole when it has no head to shorten",
     (path) => {
       expect(splitPathForMiddleTruncation(path)).toEqual({
@@ -31,21 +31,21 @@ describe("splitPathForMiddleTruncation", () => {
 
 describe("fitPathMiddle", () => {
   const measure = (text: string) => text.length;
-  const path = "~/.bb/plugins/worktrees/thr_abc-1/bb";
+  const path = "~/.omnyo/plugins/worktrees/thr_abc-1/omnyo";
 
   it("keeps a path that fits", () => {
     expect(fitPathMiddle(path, path.length, measure)).toBe(path);
   });
 
   it("replaces whole middle segments with an ellipsis segment", () => {
-    expect(fitPathMiddle(path, 28, measure)).toBe(
-      "~/.bb/plugins/…/thr_abc-1/bb",
+    expect(fitPathMiddle(path, 34, measure)).toBe(
+      "~/.omnyo/plugins/…/thr_abc-1/omnyo",
     );
-    expect(fitPathMiddle(path, 22, measure)).toBe("~/.bb/…/thr_abc-1/bb");
+    expect(fitPathMiddle(path, 28, measure)).toBe("~/.omnyo/…/thr_abc-1/omnyo");
   });
 
   it("keeps only the last segment once only the root is left", () => {
-    expect(fitPathMiddle(path, 10, measure)).toBe("~/…/bb");
+    expect(fitPathMiddle(path, 10, measure)).toBe("~/…/omnyo");
   });
 
   it("cuts the start of the last segment as a final fallback", () => {
@@ -59,8 +59,8 @@ describe("fitPathMiddle", () => {
     expect(fitPathMiddle("/tmp/qa/run/external-root", 20, measure)).toBe(
       "/tmp/…/external-root",
     );
-    expect(fitPathMiddle("C:\\Users\\me\\Code\\bb", 12, measure)).toBe(
-      "C:\\…\\Code\\bb",
+    expect(fitPathMiddle("C:\\Users\\me\\Code\\omnyo", 15, measure)).toBe(
+      "C:\\…\\Code\\omnyo",
     );
   });
 

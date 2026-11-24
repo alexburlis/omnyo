@@ -1,5 +1,5 @@
-import { environments, getThread } from "@bb/db";
-import type { ThreadStatus } from "@bb/domain";
+import { environments, getThread } from "@omnyo/db";
+import type { ThreadStatus } from "@omnyo/domain";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { requestThreadProvision } from "../../src/services/threads/thread-provisioning.js";
@@ -19,22 +19,26 @@ function seedThreadWithPrunedEnvironment(
 ) {
   const { host } = seedHostSession(deps);
   const { project } = seedProjectWithSource(deps, { hostId: host.id });
+
   const environment = seedEnvironment(deps, {
     hostId: host.id,
     projectId: project.id,
     environmentProviderId: "personal-workspace",
     isGitRepo: false,
   });
+
   const thread = seedThread(deps, {
     environmentId: environment.id,
     projectId: project.id,
     status: "idle",
   });
+
   deps.db.delete(environments).where(eq(environments.id, environment.id)).run();
 
   const threadAfterPrune = getThread(deps.db, thread.id);
   expect(threadAfterPrune?.environmentId).toBeNull();
   expect(threadAfterPrune?.archivedAt).toBeNull();
+
   return { thread };
 }
 
@@ -45,8 +49,10 @@ function seedPointerlessThread(
   const { host } = seedHostSession(deps);
   const { project } = seedProjectWithSource(deps, { hostId: host.id });
   const thread = seedThread(deps, { projectId: project.id, status });
+
   if (status === "starting") {
     requestThreadProvision(deps, {
+      author: { initiator: "user", senderThreadId: null },
       thread,
       environmentIntent: {
         type: "provider",
@@ -69,6 +75,7 @@ function seedPointerlessThread(
     });
     expect(getThreadProvisionContext(deps.db, thread.id)).not.toBeNull();
   }
+
   return thread;
 }
 
@@ -76,10 +83,12 @@ describe("archive without an attached environment", () => {
   it("POST /threads/:id/archive-all succeeds for a thread whose environment was pruned", async () => {
     await withTestHarness(async (harness) => {
       const { thread } = seedThreadWithPrunedEnvironment(harness.deps);
+
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/archive-all`,
         { method: "POST" },
       );
+
       expect(response.status).toBe(200);
       expect(await readJson(response)).toEqual({
         ok: true,
@@ -94,10 +103,12 @@ describe("archive without an attached environment", () => {
     async (status) => {
       await withTestHarness(async (harness) => {
         const thread = seedPointerlessThread(harness.deps, status);
+
         const response = await harness.app.request(
           `/api/v1/threads/${thread.id}/archive-all`,
           { method: "POST" },
         );
+
         expect(response.status).toBe(200);
         expect(await readJson(response)).toEqual({
           ok: true,

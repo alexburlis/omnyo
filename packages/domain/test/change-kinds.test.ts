@@ -14,22 +14,27 @@ import {
 import { threadEventTypeValues } from "../src/provider-event.js";
 
 type StrictChangedOption = (typeof changedMessageSchema.options)[number];
+
 type LenientChangedOption =
   (typeof changedMessageLenientSchema.options)[number];
 
 function strictOptionsByEntity(): Map<string, StrictChangedOption> {
   const options = new Map<string, StrictChangedOption>();
+
   for (const option of changedMessageSchema.options) {
     options.set(option.shape.entity.value, option);
   }
+
   return options;
 }
 
 function lenientOptionsByEntity(): Map<string, LenientChangedOption> {
   const options = new Map<string, LenientChangedOption>();
+
   for (const option of changedMessageLenientSchema.options) {
     options.set(option.shape.entity.value, option);
   }
+
   return options;
 }
 
@@ -37,6 +42,7 @@ const maximalThreadMetadata: ThreadChangeMetadata = {
   backgroundActivityChanged: true,
   eventTypes: [...threadEventTypeValues],
   timelineSequence: 42,
+  eventSequenceRange: { from: 40, to: 42 },
   hasPendingInteraction: true,
   projectId: "proj_1",
   statusChange: {
@@ -47,10 +53,71 @@ const maximalThreadMetadata: ThreadChangeMetadata = {
       activeBackgroundCommandCount: 1,
       activeGoalCount: 1,
       activePlanModeCount: 1,
+      activeSubagentCount: 1,
       activeWorkflowCount: 1,
     },
     latestAttentionAt: 1_000,
+    lastMessageAt: null,
     updatedAt: 2_000,
+  },
+  listEntry: {
+    id: "thr_1",
+    projectId: "proj_1",
+    environmentId: "env_1",
+    providerId: "provider_1",
+    title: "Fixture thread",
+    titleFallback: null,
+    sectionId: null,
+    groupId: null,
+    status: "active",
+    parentThreadId: null,
+    lifecycleOwnerThreadId: null,
+    sourceThreadId: null,
+    originKind: null,
+    originPluginId: null,
+    visibility: "visible",
+    pluginHome: false,
+    quiet: false,
+    archivedAt: null,
+    pinnedAt: null,
+    shelvedAt: null,
+    deletedAt: null,
+    lastReadAt: null,
+    latestAttentionAt: 1_000,
+    lastMessageAt: null,
+    createdAt: 1_000,
+    updatedAt: 2_000,
+    runtime: { displayStatus: "active" },
+    work: null,
+    attention: {
+      kind: "none",
+      requiredCount: 0,
+      optionalCount: 0,
+      callback: null,
+    },
+    activity: {
+      activeBackgroundAgentCount: 1,
+      activeBackgroundCommandCount: 1,
+      activeGoalCount: 1,
+      activePlanModeCount: 1,
+      activeSubagentCount: 1,
+      activeWorkflowCount: 1,
+    },
+    queuedWork: "none",
+    pinSortKey: null,
+    shelfSortKey: null,
+    hasPendingInteraction: true,
+    environmentHostId: "host_1",
+    environmentName: "Fixture environment",
+    environmentBranchName: "main",
+    environmentPath: "/fixture",
+    environmentProviderId: null,
+    environmentIsWorktree: false,
+    environmentWorkspaceDisplayKind: "other",
+  },
+  attentionItems: {
+    questions: [],
+    callbacks: [],
   },
 };
 
@@ -95,11 +162,14 @@ describe("lenient changed-message schema parity", () => {
     expect([...lenientOptions.keys()].sort()).toEqual(
       [...strictOptions.keys()].sort(),
     );
+
     for (const [entity, strictOption] of strictOptions) {
       const lenientOption = lenientOptions.get(entity);
+
       if (!lenientOption) {
         throw new Error(`Missing lenient schema for entity ${entity}`);
       }
+
       expect(Object.keys(lenientOption.shape).sort(), entity).toEqual(
         Object.keys(strictOption.shape).sort(),
       );
@@ -131,14 +201,17 @@ describe("lenient changed-message schema parity", () => {
             activeBackgroundCommandCount: 0,
             activeGoalCount: 0,
             activePlanModeCount: 0,
+            activeSubagentCount: 0,
             activeWorkflowCount: 0,
           },
           latestAttentionAt: 1_000,
+          lastMessageAt: null,
           updatedAt: 2_000,
         },
       },
       changes: ["status-changed"],
     });
+
     expect(parsed).toEqual({
       type: "changed",
       entity: "thread",
@@ -153,15 +226,19 @@ describe("lenient changed-message schema parity", () => {
     expect(maximalChangedMessages.map((message) => message.entity)).toEqual([
       ...strictOptions.keys(),
     ]);
+
     for (const message of maximalChangedMessages) {
       const strictOption = strictOptions.get(message.entity);
+
       if (!strictOption) {
         throw new Error(`Missing strict schema for entity ${message.entity}`);
       }
+
       expect(Object.keys(message).sort(), message.entity).toEqual(
         Object.keys(strictOption.shape).sort(),
       );
     }
+
     expect(Object.keys(maximalThreadMetadata).sort()).toEqual(
       Object.keys(threadChangeMetadataSchema.shape).sort(),
     );

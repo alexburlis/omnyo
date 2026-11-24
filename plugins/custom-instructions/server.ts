@@ -2,12 +2,14 @@ import {
   PluginCliError,
   cliCommand,
   defineCli,
-  type BbPluginApi,
-} from "@get-bb/plugin-sdk";
+  type PluginApi,
+} from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 export const MAX_CUSTOM_INSTRUCTIONS_LENGTH = 4096;
+
 const STORAGE_KEY = "customInstructions";
+
 const customInstructionsSchema = z
   .string()
   .max(
@@ -20,13 +22,13 @@ const JSON_OPTION = {
   description: "Emit machine-readable JSON",
 } as const;
 
-export default async function plugin(bb: BbPluginApi) {
-  const settings = bb.settings.define({
+export default async function plugin(api: PluginApi) {
+  const settings = api.settings.define({
     instructions: {
       type: "string",
       label: "Custom instructions",
       description:
-        "Give agents extra instructions and context for tasks on this bb host.",
+        "Give agents extra instructions and context for tasks on this Omnyo host.",
       experimental_multiline: true,
       experimental_schema: customInstructionsSchema,
       default: "",
@@ -34,29 +36,32 @@ export default async function plugin(bb: BbPluginApi) {
   });
 
   let current = await settings.get();
-  const legacy = await bb.storage.kv.get<string>(STORAGE_KEY);
+  const legacy = await api.storage.kv.get<string>(STORAGE_KEY);
+
   if (legacy !== undefined) {
     if (current.instructions.length === 0 && legacy.length > 0) {
       current = await settings.experimental_set({ instructions: legacy });
     }
-    await bb.storage.kv.delete(STORAGE_KEY);
+
+    await api.storage.kv.delete(STORAGE_KEY);
   }
+
   let customInstructions = current.instructions;
 
   settings.onChange((next) => {
     customInstructions = next.instructions;
   });
 
-  bb.agents.contributeInstructions(() =>
+  api.agents.contributeInstructions(() =>
     customInstructions.trim().length > 0 ? customInstructions : null,
   );
 
-  bb.cli.register(
+  api.cli.register(
     defineCli({
       name: "instructions",
       summary: "Read and update the custom instructions injected into agents",
       description:
-        "The text is appended to the instructions bb already gives every agent on this host.",
+        "The text is appended to the instructions Omnyo already gives every agent on this host.",
       commands: {
         get: cliCommand({
           summary: "Print the current custom instructions",
@@ -83,16 +88,20 @@ export default async function plugin(bb: BbPluginApi) {
             const parsed = customInstructionsSchema.safeParse(
               input.positionals.text.join(" "),
             );
+
             if (!parsed.success) {
               throw new PluginCliError(
                 parsed.error.issues[0]?.message ?? "invalid instructions",
                 { code: "invalid_instructions" },
               );
             }
+
             const next = await settings.experimental_set({
               instructions: parsed.data,
             });
+
             customInstructions = next.instructions;
+
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -107,6 +116,7 @@ export default async function plugin(bb: BbPluginApi) {
           async run(input) {
             const next = await settings.experimental_set({ instructions: "" });
             customInstructions = next.instructions;
+
             return {
               exitCode: 0,
               stdout: input.options.json

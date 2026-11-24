@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { loadavg } from "node:os";
 import { threadCpuUsage } from "node:process";
-import { events } from "@bb/db";
+import { events } from "@omnyo/db";
 import { eq, sql } from "drizzle-orm";
 import { buildThreadTimelineWithProfile } from "../../src/services/threads/timeline.js";
 import { clearStoredEventDecodeCache } from "../../src/services/threads/stored-event-decode-cache.js";
@@ -9,8 +9,11 @@ import { clearTimelineSelectionMemo } from "../../src/services/threads/timeline-
 import { createSyntheticThread } from "./synthetic-thread.js";
 
 const WARMUPS = 5;
+
 const SAMPLES = 30;
+
 const payload = "synthetic payload words\n".repeat(4_000);
+
 const cases = [
   { name: "normal", command: "rg value src && cat src/file.ts" },
   {
@@ -31,6 +34,7 @@ const cases = [
 function summary(values: number[]) {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
+
   return {
     median: (sorted[middle - 1]! + sorted[middle]!) / 2,
     min: sorted[0],
@@ -39,6 +43,7 @@ function summary(values: number[]) {
 }
 
 const loadBefore = loadavg();
+
 const results = cases.map(({ name, command }) => {
   const fixture = createSyntheticThread(1_500);
   const { db } = fixture;
@@ -58,24 +63,29 @@ const results = cases.map(({ name, command }) => {
   const thread = { ...fixture.thread, status: "active" as const };
   const samples = [];
   const responseHashes = [];
+
   for (let sample = -WARMUPS; sample < SAMPLES; sample += 1) {
     const maxSeq = fixture.eventCount - 20 + ((sample + WARMUPS) % 21);
     clearStoredEventDecodeCache(db);
     clearTimelineSelectionMemo(db);
     const cpuStart = threadCpuUsage();
     const start = performance.now();
+
     const result = buildThreadTimelineWithProfile(db, thread, {
       completedTurnDisplay: "collapse",
       eventBudget: 1_500,
       includeClearedContextHistory: false,
       includeDiagnosticOperations: false,
+      compactionOfferEnabled: false,
       includeNestedRows: true,
       maxInlineOutputChars: 32_000,
       maxSeq,
       page: { kind: "latest", segmentLimit: 20 },
     });
+
     const wallMs = performance.now() - start;
     const cpu = threadCpuUsage(cpuStart);
+
     if (sample < 0) continue;
     samples.push({
       maxSeq,
@@ -95,7 +105,9 @@ const results = cases.map(({ name, command }) => {
         .digest("hex"),
     );
   }
+
   fixture.close();
+
   return {
     name,
     commandChars: command.length,
@@ -113,6 +125,7 @@ const results = cases.map(({ name, command }) => {
     samples,
   };
 });
+
 console.log(
   JSON.stringify({
     node: process.version,

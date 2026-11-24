@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import {
   cleanup,
   createTestRuntime,
@@ -15,10 +15,13 @@ import {
 import { promptTextInput } from "./test/prompt-input.js";
 
 const providers = ["codex", "claude-code", "pi"];
+
 const CODEX_TOOL_CALL_TIMEOUT_MS = 60_000;
+
 const CODEX_MEMORY_TOOL_TEST_TIMEOUT_MS = 120_000;
+
 const CODEX_PING_REQUIRED_INSTRUCTIONS =
-  "When the user includes PING_REQUIRED, call the bb_test_ping tool before writing assistant text. Do not say you will call it; call it first.";
+  "When the user includes PING_REQUIRED, call the omnyo_test_ping tool before writing assistant text. Do not say you will call it; call it first.";
 
 for (const providerId of providers) {
   describe.concurrent(`${providerId} provider`, () => {
@@ -35,6 +38,7 @@ for (const providerId of providers) {
           providerId,
           preset: "full",
         });
+
         const startResult = await ctx1.runtime.startThread({
           environmentId: "env-1",
           threadId: firstThreadId,
@@ -70,6 +74,7 @@ for (const providerId of providers) {
         const ctx2 = createTestRuntime(providerId, {
           workspacePath: ctx1.tmpDir,
         });
+
         const threadId = newThreadId();
 
         try {
@@ -114,6 +119,7 @@ for (const providerId of providers) {
         if (!ctx1Shutdown) {
           await ctx1.runtime.shutdown();
         }
+
         cleanup(ctx1);
       }
     });
@@ -128,7 +134,7 @@ describe.concurrent("codex resume scenarios", () => {
 
     const dynamicTools = [
       {
-        name: "bb_test_ping",
+        name: "omnyo_test_ping",
         description:
           "Returns a test ping response. Always call this tool when asked to use it.",
         inputSchema: {
@@ -140,13 +146,15 @@ describe.concurrent("codex resume scenarios", () => {
 
     const ctx1 = createTestRuntime(providerId, {
       onToolCall: async (req) => {
-        if (req.tool === "bb_test_ping") {
+        if (req.tool === "omnyo_test_ping") {
           toolCalledInRuntime1 = true;
+
           return {
             contentItems: [{ type: "inputText" as const, text: "PONG_R1" }],
             success: true,
           };
         }
+
         return {
           contentItems: [{ type: "inputText" as const, text: "unknown" }],
           success: false,
@@ -163,6 +171,7 @@ describe.concurrent("codex resume scenarios", () => {
         providerId,
         preset: "full",
       });
+
       const startResult = await ctx1.runtime.startThread({
         environmentId: "env-1",
         threadId: firstThreadId,
@@ -178,7 +187,7 @@ describe.concurrent("codex resume scenarios", () => {
         clientRequestId: "creq_2222222224",
         threadId: firstThreadId,
         input: [
-          promptTextInput({ text: "Call the bb_test_ping tool right now." }),
+          promptTextInput({ text: "Call the omnyo_test_ping tool right now." }),
         ],
         options,
       });
@@ -186,7 +195,7 @@ describe.concurrent("codex resume scenarios", () => {
       await waitForToolCallBeforeTurnCompletion({
         ctx: ctx1,
         threadId: firstThreadId,
-        toolName: "bb_test_ping",
+        toolName: "omnyo_test_ping",
         timeoutMs: 30_000,
         label: "tool call in runtime 1",
       });
@@ -207,13 +216,15 @@ describe.concurrent("codex resume scenarios", () => {
 
     const ctx2 = createTestRuntime(providerId, {
       onToolCall: async (req) => {
-        if (req.tool === "bb_test_ping") {
+        if (req.tool === "omnyo_test_ping") {
           toolCalledInRuntime2 = true;
+
           return {
             contentItems: [{ type: "inputText" as const, text: "PONG_R2" }],
             success: true,
           };
         }
+
         return {
           contentItems: [{ type: "inputText" as const, text: "unknown" }],
           success: false,
@@ -223,11 +234,13 @@ describe.concurrent("codex resume scenarios", () => {
 
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx: ctx2,
         providerId,
         preset: "full",
       });
+
       await ctx2.runtime.resumeThread({
         environmentId: "env-1",
         threadId,
@@ -242,7 +255,7 @@ describe.concurrent("codex resume scenarios", () => {
         threadId,
         input: [
           promptTextInput({
-            text: "Call the bb_test_ping tool again right now.",
+            text: "Call the omnyo_test_ping tool again right now.",
           }),
         ],
         options,
@@ -251,7 +264,7 @@ describe.concurrent("codex resume scenarios", () => {
       await waitForToolCallBeforeTurnCompletion({
         ctx: ctx2,
         threadId,
-        toolName: "bb_test_ping",
+        toolName: "omnyo_test_ping",
         timeoutMs: 30_000,
         label: "tool call in runtime 2",
       });
@@ -276,6 +289,7 @@ describe.concurrent("codex resume scenarios", () => {
         providerId,
         preset: "full",
       });
+
       const startResult = await ctx1.runtime.startThread({
         environmentId: "env-1",
         threadId: firstThreadId,
@@ -310,13 +324,16 @@ describe.concurrent("codex resume scenarios", () => {
     }
 
     const ctx2 = createTestRuntime(providerId);
+
     try {
       const threadId = newThreadId();
+
       const options = await resolveRuntimeOptions({
         ctx: ctx2,
         providerId,
         preset: "full",
       });
+
       await ctx2.runtime.resumeThread({
         environmentId: "env-1",
         threadId,
@@ -360,7 +377,7 @@ describe.concurrent("codex resume scenarios", () => {
 
       const dynamicTools = [
         {
-          name: "bb_test_ping",
+          name: "omnyo_test_ping",
           description:
             "Returns a test ping response. Always call this tool when asked to use it.",
           inputSchema: {
@@ -372,13 +389,15 @@ describe.concurrent("codex resume scenarios", () => {
 
       const ctx1 = createTestRuntime(providerId, {
         onToolCall: async (req) => {
-          if (req.tool === "bb_test_ping") {
+          if (req.tool === "omnyo_test_ping") {
             toolCalledInRuntime1 = true;
+
             return {
               contentItems: [{ type: "inputText" as const, text: "PONG_R1" }],
               success: true,
             };
           }
+
           return {
             contentItems: [{ type: "inputText" as const, text: "unknown" }],
             success: false,
@@ -395,6 +414,7 @@ describe.concurrent("codex resume scenarios", () => {
           providerId,
           preset: "full",
         });
+
         const startResult = await ctx1.runtime.startThread({
           environmentId: "env-1",
           threadId: firstThreadId,
@@ -412,7 +432,7 @@ describe.concurrent("codex resume scenarios", () => {
           threadId: firstThreadId,
           input: [
             promptTextInput({
-              text: "PING_REQUIRED. Call the bb_test_ping tool now before any assistant text. After the tool returns, remember the word BANANA and reply with BANANA_STORED.",
+              text: "PING_REQUIRED. Call the omnyo_test_ping tool now before any assistant text. After the tool returns, remember the word BANANA and reply with BANANA_STORED.",
             }),
           ],
           options,
@@ -422,7 +442,7 @@ describe.concurrent("codex resume scenarios", () => {
         await waitForToolCallBeforeTurnCompletion({
           ctx: ctx1,
           threadId: firstThreadId,
-          toolName: "bb_test_ping",
+          toolName: "omnyo_test_ping",
           timeoutMs: CODEX_TOOL_CALL_TIMEOUT_MS,
           label: "runtime 1 tool call",
         });
@@ -442,13 +462,15 @@ describe.concurrent("codex resume scenarios", () => {
 
       const ctx2 = createTestRuntime(providerId, {
         onToolCall: async (req) => {
-          if (req.tool === "bb_test_ping") {
+          if (req.tool === "omnyo_test_ping") {
             toolCalledInRuntime2 = true;
+
             return {
               contentItems: [{ type: "inputText" as const, text: "PONG_R2" }],
               success: true,
             };
           }
+
           return {
             contentItems: [{ type: "inputText" as const, text: "unknown" }],
             success: false,
@@ -458,11 +480,13 @@ describe.concurrent("codex resume scenarios", () => {
 
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx: ctx2,
           providerId,
           preset: "full",
         });
+
         await ctx2.runtime.resumeThread({
           environmentId: "env-1",
           threadId,
@@ -478,7 +502,7 @@ describe.concurrent("codex resume scenarios", () => {
           threadId,
           input: [
             promptTextInput({
-              text: "PING_REQUIRED. Call the bb_test_ping tool now before any assistant text. After the tool returns, answer with the word I asked you to remember.",
+              text: "PING_REQUIRED. Call the omnyo_test_ping tool now before any assistant text. After the tool returns, answer with the word I asked you to remember.",
             }),
           ],
           options,
@@ -488,7 +512,7 @@ describe.concurrent("codex resume scenarios", () => {
         await waitForToolCallBeforeTurnCompletion({
           ctx: ctx2,
           threadId,
-          toolName: "bb_test_ping",
+          toolName: "omnyo_test_ping",
           timeoutMs: CODEX_TOOL_CALL_TIMEOUT_MS,
           label: "runtime 2 tool call",
         });

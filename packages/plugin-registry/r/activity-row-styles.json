@@ -3,9 +3,9 @@
   "name": "activity-row-styles",
   "type": "registry:ui",
   "title": "activity-row-styles",
-  "description": "BB ui \"activity-row-styles\" — vendored from the BB app's own source (version-matched to this BB release).",
+  "description": "Omnyo ui \"activity-row-styles\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
   "registryDependencies": [
-    "@bb/utils"
+    "@omnyo/utils"
   ],
   "files": [
     {

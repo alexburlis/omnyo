@@ -17,15 +17,19 @@ describe("GET /hosts/:id/discovered-repos", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-repo-discovery",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Known",
         path: "/home/user/code/known",
       });
+
       const { host: otherHost } = seedHostSession(harness.deps, {
         id: "host-repo-discovery-other",
       });
+
       seedProjectWithSource(harness.deps, {
         hostId: otherHost.id,
         name: "Elsewhere",
@@ -35,10 +39,12 @@ describe("GET /hosts/:id/discovered-repos", () => {
       const responsePromise = harness.app.request(
         `/api/v1/hosts/${host.id}/discovered-repos`,
       );
+
       const command = await waitForQueuedCommand(
         harness,
         ({ command }) => command.type === "host.discover_repos",
       );
+
       expect(command.command).toEqual({
         type: "host.discover_repos",
         maxDepth: 5,

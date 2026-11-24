@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   CodexAppServerExitedError,
+  CodexAppServerRpcError,
   createCodexAppServerConnection,
   type CodexAppServerConnection,
   type CodexAppServerExitInfo,
@@ -15,9 +16,11 @@ function deferred<T>(): {
   resolve(value: T): void;
 } {
   let resolvePromise: ((value: T) => void) | undefined;
+
   const promise = new Promise<T>((resolve) => {
     resolvePromise = resolve;
   });
+
   return {
     promise,
     resolve(value) {
@@ -47,6 +50,7 @@ describe("codex app-server connection", () => {
   it("allows stdin shutdown cleanup before terminating the provider", async () => {
     const ready = deferred<void>();
     const exited = deferred<CodexAppServerExitInfo>();
+
     const connection = createCodexAppServerConnection({
       command: process.execPath,
       args: [
@@ -66,6 +70,7 @@ describe("codex app-server connection", () => {
       onRequest: () => undefined,
       onExit: exited.resolve,
     });
+
     try {
       await ready.promise;
       await connection.kill();
@@ -85,6 +90,7 @@ describe("codex app-server connection", () => {
     skip(process.platform === "win32", "Windows has no SIGTERM or SIGKILL");
     const ready = deferred<void>();
     const exited = deferred<CodexAppServerExitInfo>();
+
     const connection = createCodexAppServerConnection({
       command: process.execPath,
       args: [
@@ -103,6 +109,7 @@ describe("codex app-server connection", () => {
       onRequest: () => undefined,
       onExit: exited.resolve,
     });
+
     try {
       await ready.promise;
       await connection.kill();
@@ -118,6 +125,7 @@ describe("codex app-server connection", () => {
   it("ignores late approval replies and rejects new requests during graceful shutdown", async () => {
     const ready = deferred<() => void>();
     const exited = deferred<CodexAppServerExitInfo>();
+
     const connection = createCodexAppServerConnection({
       command: process.execPath,
       args: [
@@ -136,6 +144,7 @@ describe("codex app-server connection", () => {
         ready.resolve(() => responder.result({ decision: "accept" })),
       onExit: exited.resolve,
     });
+
     try {
       const reply = await ready.promise;
       const stopped = connection.kill();
@@ -163,6 +172,7 @@ describe("codex app-server connection", () => {
     skip(process.platform === "win32", "Windows has no SIGTERM handlers");
     const ready = deferred<void>();
     const exited = deferred<CodexAppServerExitInfo>();
+
     const connection = createCodexAppServerConnection({
       command: process.execPath,
       args: [
@@ -181,6 +191,7 @@ describe("codex app-server connection", () => {
       onRequest: () => undefined,
       onExit: exited.resolve,
     });
+
     try {
       await ready.promise;
       await connection.kill();
@@ -196,15 +207,18 @@ describe("codex app-server connection", () => {
 
   it("preserves final output and exit details while stdio drains", async () => {
     const exited = deferred<CodexAppServerExitInfo>();
+
     const lateResponseLine = `${JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
       result: { thread: { id: "thread-from-final-output" } },
     })}\n`;
+
     const descendantScript = [
       `const line = ${JSON.stringify(lateResponseLine)};`,
       "setTimeout(() => process.stdout.write(line, () => process.exit(0)), 250);",
     ].join("");
+
     const childScript = [
       'const { spawn } = require("node:child_process");',
       'process.stdin.once("data", () => {',
@@ -215,6 +229,7 @@ describe("codex app-server connection", () => {
       "});",
       "});",
     ].join("");
+
     const connection = createCodexAppServerConnection({
       command: process.execPath,
       args: ["-e", childScript],
@@ -257,6 +272,7 @@ describe("codex app-server connection", () => {
 
   it("preserves a natural exit status when EPIPE precedes exit", async () => {
     const exited = deferred<CodexAppServerExitInfo>();
+
     const connection = createCodexAppServerConnection({
       command: process.execPath,
       args: [
@@ -297,6 +313,7 @@ describe("codex app-server connection", () => {
     );
     const ready = deferred<void>();
     const exited = deferred<CodexAppServerExitInfo>();
+
     const connection = createCodexAppServerConnection({
       command: process.execPath,
       args: [
@@ -322,11 +339,13 @@ describe("codex app-server connection", () => {
 
     try {
       await ready.promise;
+
       const pendingRequest = connection.request({
         method: "thread/start",
         params: { payload: "x".repeat(EPIPE_PAYLOAD_SIZE) },
         resultSchema: z.unknown(),
       });
+
       await expect(
         Promise.race([
           pendingRequest,
@@ -354,4 +373,41 @@ describe("codex app-server connection", () => {
       await stopConnection(connection, exited.promise);
     }
   }, 30_000);
+});
+
+it("retains supplied native failure status and leaves message-only status unknown", () => {
+  const failure = new CodexAppServerRpcError(
+    "private-provider-message",
+    -32000,
+    {
+      codexErrorInfo: "badRequest",
+      httpStatusCode: 422,
+      arbitrary: "private-marker",
+    },
+  );
+
+  expect(failure.errorInfo).toEqual({
+    category: "bad-request",
+    providerCode: "badRequest",
+    httpStatusCode: 422,
+  });
+  expect(JSON.stringify(failure)).not.toContain("private-marker");
+  expect(
+    new CodexAppServerRpcError("HTTP 400 BadRequest", -32000).errorInfo,
+  ).toBeUndefined();
+  expect(
+    new CodexAppServerRpcError("unclassified", -32000, { httpStatusCode: 502 })
+      .errorInfo,
+  ).toEqual({ category: "unknown", providerCode: null, httpStatusCode: 502 });
+  expect(
+    new CodexAppServerRpcError("unrecognized", -32000, {
+      codexErrorInfo: "futureCode",
+      httpStatusCode: 503,
+    }).errorInfo,
+  ).toEqual({ category: "unknown", providerCode: null, httpStatusCode: 503 });
+  expect(
+    new CodexAppServerRpcError("BadRequest", -32000, {
+      codexErrorInfo: "badRequest",
+    }).errorInfo?.httpStatusCode,
+  ).toBeNull();
 });

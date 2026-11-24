@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { systemConfigResponseSchema } from "@bb/server-contract";
+import { systemConfigResponseSchema } from "@omnyo/server-contract";
 import { readJson } from "../helpers/json.js";
 import {
   type TestAppHarnessConfigOverrides,
@@ -14,6 +14,7 @@ async function readServerUrl(
   return withTestHarness(overrides, async (harness) => {
     const response = await harness.app.request(request, { headers });
     const config = systemConfigResponseSchema.parse(await readJson(response));
+
     return config.serverUrl;
   });
 }
@@ -22,10 +23,10 @@ describe("system config server URL", () => {
   it("prefers the configured app URL", async () => {
     expect(
       await readServerUrl(
-        { appUrl: "https://bb.example.test/" },
+        { appUrl: "https://omnyo.example.test/" },
         "http://localhost:3334/api/v1/system/config",
       ),
-    ).toBe("https://bb.example.test");
+    ).toBe("https://omnyo.example.test");
   });
 
   it("uses the direct request origin when no app URL is configured", async () => {
@@ -61,10 +62,10 @@ describe("system config server URL", () => {
         { appUrl: undefined, isDevelopment: false },
         "http://127.0.0.1:38886/api/v1/system/config",
         {
-          "x-forwarded-host": "bb.example.test",
+          "x-forwarded-host": "omnyo.example.test",
           "x-forwarded-proto": "https",
         },
       ),
-    ).toBe("https://bb.example.test");
+    ).toBe("https://omnyo.example.test");
   });
 });

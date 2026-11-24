@@ -1,18 +1,28 @@
+import { readThreadServiceTier } from "./thread-session-options.js";
+import { getLastExecutionOptions } from "./thread-events.js";
+import {
+  buildThreadWorkSummaries,
+  type ResolveThreadWorkSources,
+} from "./thread-work.js";
 import {
   getEnvironment,
+  readThreadAttentionFacts,
+  summarizeThreadAttention,
   getSessionById,
   listActiveBackgroundTaskCountsByThreadIds,
   listLatestClosedSessionsForHosts,
   listLatestThreadStateEventRowsByThreadIds,
   listOpenTurnInputAcceptedRowsByThreadIds,
   listStoredClientTurnRequestRowsByKeys,
+  listThreadsWithPendingInteractionState,
+  listThreadsWithUpdateActivity,
   type DbConnection,
-  type HostDaemonSessionRow,
+  type RunningThreadRow,
   type StoredEventRow,
   type ThreadClientTurnRequestKey,
   type ThreadWithPendingInteractionState,
-} from "@bb/db";
-import { LEGACY_CODEX_GOAL_EXTENSION_KIND } from "@bb/domain";
+} from "@omnyo/db";
+import { LEGACY_CODEX_GOAL_EXTENSION_KIND } from "@omnyo/domain";
 import type {
   Thread,
   ThreadActivityState,
@@ -22,18 +32,18 @@ import type {
   ThreadRuntimeState,
   ThreadStatus,
   ThreadWithRuntime,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   extractThreadTimelineActivePlanTurn,
   extractThreadTimelineGoal,
   type ThreadEventWithMeta,
-} from "@bb/thread-view";
-import type { ThreadResponse } from "@bb/server-contract";
+} from "@omnyo/thread-view";
+import type { ThreadResponse } from "@omnyo/server-contract";
 import type { NotificationHub } from "../../ws/hub.js";
 import { isHostDisconnectHidden } from "../hosts/host-disconnect-display.js";
 import { resolveProviderPlanCommand } from "../providers/provider-plan-command.js";
 import type { ProviderRegistryService } from "../providers/provider-registry.js";
-import { listQueuedThreadMessageCountsByThreadIds } from "@bb/db";
+import { listQueuedThreadMessageCountsByThreadIds } from "@omnyo/db";
 import { resolveEnvironmentWorkspaceDisplayKind } from "../environments/environment-response.js";
 import { canThreadSpawnChild } from "./thread-parent.js";
 import { canRestoreThreadEnvironment } from "./thread-environment-restore.js";
@@ -48,6 +58,7 @@ type ThreadRuntimeDisplayHub = Pick<
 interface ThreadRuntimeDisplayDeps {
   db: DbConnection;
   hub: ThreadRuntimeDisplayHub;
+  providerRegistry?: ProviderRegistryService;
 }
 
 interface ThreadPromptBannerDeps extends ThreadRuntimeDisplayDeps {
@@ -56,14 +67,6 @@ interface ThreadPromptBannerDeps extends ThreadRuntimeDisplayDeps {
 
 interface ResolveThreadRuntimeStateArgs {
   environmentHostId: string | null;
-  now?: number;
-  status: ThreadStatus;
-}
-
-interface ResolveThreadRuntimeStateFromLatestSessionArgs {
-  environmentHostId: string | null;
-  hostConnected: boolean;
-  latestClosedSession: HostDaemonSessionRow | null;
   now?: number;
   status: ThreadStatus;
 }
@@ -82,11 +85,9 @@ interface ToThreadListEntryResponsesArgs {
   threads: readonly ThreadWithPendingInteractionState[];
 }
 
-interface ToThreadListEntryResponseFromLatestSessionArgs {
+interface ToThreadListEntryResponseArgs {
   activity: ThreadActivityState;
-  hostConnected: boolean;
-  latestClosedSession: HostDaemonSessionRow | null;
-  now?: number;
+  waitingForHost: boolean;
   queuedWork: ThreadQueuedWork;
   thread: ThreadWithPendingInteractionState;
 }
@@ -114,6 +115,7 @@ const EMPTY_THREAD_ACTIVITY: ThreadActivityState = {
   activeBackgroundCommandCount: 0,
   activeGoalCount: 0,
   activePlanModeCount: 0,
+  activeSubagentCount: 0,
   activeWorkflowCount: 0,
 };
 
@@ -134,10 +136,13 @@ function hasOpenDaemonSessionForHost(
   hostId: string,
 ): boolean {
   const sessionId = deps.hub.getDaemonSessionIdForHost(hostId);
+
   if (!sessionId) {
     return false;
   }
+
   const session = getSessionById(deps.db, { sessionId });
+
   return session?.hostId === hostId && session.status === "active";
 }
 
@@ -150,6 +155,7 @@ function toPublicThread(thread: Thread): Thread {
     title: thread.title,
     titleFallback: thread.titleFallback,
     sectionId: thread.sectionId,
+    groupId: thread.groupId,
     status: thread.status,
     parentThreadId: thread.parentThreadId,
     sourceThreadId: thread.sourceThreadId,
@@ -157,11 +163,15 @@ function toPublicThread(thread: Thread): Thread {
     originKind: thread.originKind,
     originPluginId: thread.originPluginId,
     visibility: thread.visibility,
+    pluginHome: thread.pluginHome,
+    quiet: thread.quiet,
     archivedAt: thread.archivedAt,
     pinnedAt: thread.pinnedAt,
+    shelvedAt: thread.shelvedAt,
     deletedAt: thread.deletedAt,
     lastReadAt: thread.lastReadAt,
     latestAttentionAt: thread.latestAttentionAt,
+    lastMessageAt: thread.lastMessageAt,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
   };
@@ -171,64 +181,67 @@ export function resolveThreadRuntimeState(
   deps: ThreadRuntimeDisplayDeps,
   args: ResolveThreadRuntimeStateArgs,
 ): ThreadRuntimeState {
-  if (args.status !== "active" || args.environmentHostId === null) {
-    return resolveThreadRuntimeStateFromLatestSession({
-      environmentHostId: args.environmentHostId,
-      hostConnected: false,
-      latestClosedSession: null,
-      now: args.now,
-      status: args.status,
-    });
-  }
+  const waitingForHost =
+    args.status === "active" &&
+    args.environmentHostId !== null &&
+    waitingThreadHostIds(deps, [args.environmentHostId], args.now).has(
+      args.environmentHostId,
+    );
 
-  const hostConnected = hasOpenDaemonSessionForHost(
-    deps,
-    args.environmentHostId,
-  );
-  return resolveThreadRuntimeStateFromLatestSession({
-    environmentHostId: args.environmentHostId,
-    hostConnected,
-    latestClosedSession: getLatestClosedSessionForHost(deps, {
-      hostConnected,
-      hostId: args.environmentHostId,
-    }),
-    now: args.now,
-    status: args.status,
-  });
+  return threadRuntimeState(args.status, waitingForHost);
 }
 
-function resolveThreadRuntimeStateFromLatestSession(
-  args: ResolveThreadRuntimeStateFromLatestSessionArgs,
+function threadRuntimeState(
+  status: ThreadStatus,
+  waitingForHost: boolean,
 ): ThreadRuntimeState {
-  // A `pending` thread needs no special case: it is never `active`, so it
-  // falls straight through to `threadStatusRuntimeState`, which reports it as
-  // itself. This used to short-circuit to a separate `held` display status
-  // derived from live dispatch holds — the holds are gone and `pending` is the
-  // status, so the derivation and its second vocabulary went with them.
-  if (args.status !== "active" || args.environmentHostId === null) {
-    return threadStatusRuntimeState(args.status);
-  }
-
-  if (
-    args.hostConnected ||
-    isHostDisconnectHidden(args.latestClosedSession, args.now ?? Date.now())
-  ) {
-    return threadStatusRuntimeState("active");
-  }
-  return { displayStatus: "waiting-for-host" };
+  return status === "active" && waitingForHost
+    ? { displayStatus: "waiting-for-host" }
+    : threadStatusRuntimeState(status);
 }
 
-function getLatestClosedSessionForHost(
+function waitingThreadHostIds(
   deps: ThreadRuntimeDisplayDeps,
-  args: { hostConnected: boolean; hostId: string },
-): HostDaemonSessionRow | null {
-  if (args.hostConnected) {
-    return null;
-  }
-  return (
-    listLatestClosedSessionsForHosts(deps.db, { hostIds: [args.hostId] })[0] ??
-    null
+  hostIds: Iterable<string>,
+  now = Date.now(),
+): Set<string> {
+  const disconnected = new Set(
+    [...new Set(hostIds)].filter(
+      (hostId) => !hasOpenDaemonSessionForHost(deps, hostId),
+    ),
   );
+
+  for (const session of listLatestClosedSessionsForHosts(deps.db, {
+    hostIds: [...disconnected],
+  })) {
+    if (isHostDisconnectHidden(session, now))
+      disconnected.delete(session.hostId);
+  }
+
+  return disconnected;
+}
+
+export function filterRunningThreadsByHost(
+  deps: ThreadRuntimeDisplayDeps,
+  rows: readonly RunningThreadRow[],
+): RunningThreadRow[] {
+  const waitingHosts = waitingThreadHostIds(
+    deps,
+    rows.flatMap((row) => (row.hostId === null ? [] : [row.hostId])),
+  );
+
+  return rows.filter(
+    (row) => row.hostId === null || !waitingHosts.has(row.hostId),
+  );
+}
+
+export function countRunningThreadsForAppUpdate(
+  deps: ThreadRuntimeDisplayDeps,
+): number {
+  return filterRunningThreadsByHost(
+    deps,
+    listThreadsWithUpdateActivity(deps.db),
+  ).length;
 }
 
 function resolveThreadEnvironmentHostId(
@@ -238,6 +251,7 @@ function resolveThreadEnvironmentHostId(
   if (thread.environmentId === null) {
     return null;
   }
+
   return getEnvironment(deps.db, thread.environmentId)?.hostId ?? null;
 }
 
@@ -264,29 +278,22 @@ export function buildThreadStatusChangeMetadataByThreadId(
   if (args.threads.length === 0) {
     return new Map();
   }
+
   const activityByThreadId = buildThreadActivityStateByThreadId(
     deps,
     args.threads,
   );
-  const hostConnected = hasOpenDaemonSessionForHost(
-    deps,
+
+  const waitingForHost = waitingThreadHostIds(deps, [
     args.environmentHostId,
-  );
-  const latestClosedSession = getLatestClosedSessionForHost(deps, {
-    hostConnected,
-    hostId: args.environmentHostId,
-  });
+  ]).has(args.environmentHostId);
+
   return new Map(
     args.threads.map((thread) => [
       thread.id,
       toThreadStatusChangeMetadata({
         activity: activityByThreadId.get(thread.id) ?? EMPTY_THREAD_ACTIVITY,
-        runtime: resolveThreadRuntimeStateFromLatestSession({
-          environmentHostId: args.environmentHostId,
-          hostConnected,
-          latestClosedSession,
-          status: thread.status,
-        }),
+        runtime: threadRuntimeState(thread.status, waitingForHost),
         thread,
       }),
     ]),
@@ -303,6 +310,7 @@ function toThreadStatusChangeMetadata(
       runtime: args.runtime,
       activity: args.activity,
       latestAttentionAt: args.thread.latestAttentionAt,
+      lastMessageAt: args.thread.lastMessageAt,
       updatedAt: args.thread.updatedAt,
     },
   };
@@ -313,6 +321,7 @@ function toThreadResponseWithHost(
   args: ToThreadResponseWithHostArgs,
 ): ThreadWithRuntime {
   const thread = toPublicThread(args.thread);
+
   return {
     ...thread,
     runtime: resolveThreadRuntimeState(deps, {
@@ -331,20 +340,69 @@ export function toThreadResponseFromThread(
     ...args,
     environmentHostId: resolveThreadEnvironmentHostId(deps, args.thread),
   });
+
+  const background = listActiveBackgroundTaskCountsByThreadIds(deps.db, {
+    threadIds: [args.thread.id],
+  })[0];
+
+  const banner =
+    deps.providerRegistry === undefined
+      ? EMPTY_THREAD_ACTIVITY
+      : getThreadPromptBannerActivity(
+          { ...deps, providerRegistry: deps.providerRegistry },
+          args.thread,
+        );
+
+  const queue = listQueuedThreadMessageCountsByThreadIds(deps.db, {
+    threadIds: [args.thread.id],
+  })[0];
+
+  const pending = listThreadsWithPendingInteractionState(deps.db, {
+    threadIds: [args.thread.id],
+    includeHidden: true,
+  })[0];
+
+  const work =
+    buildThreadWorkSummaries(
+      deps.db,
+      [
+        {
+          ...threadWithRuntime,
+          activity: {
+            ...EMPTY_THREAD_ACTIVITY,
+            activeGoalCount: banner.activeGoalCount,
+            activePlanModeCount: banner.activePlanModeCount,
+            activeWorkflowCount: background?.activeWorkflowCount ?? 0,
+            activeBackgroundAgentCount:
+              background?.activeBackgroundAgentCount ?? 0,
+            activeBackgroundCommandCount:
+              background?.activeBackgroundCommandCount ?? 0,
+            activeSubagentCount: background?.activeSubagentCount ?? 0,
+          },
+          queuedWork:
+            (queue?.failedQueuedMessageCount ?? 0) > 0
+              ? "failed"
+              : (queue?.queuedMessageCount ?? 0) > 0
+                ? "waiting"
+                : "none",
+          hasPendingInteraction: pending?.hasPendingInteraction ?? false,
+        },
+      ],
+      threadWorkSourceResolver(deps),
+    ).get(args.thread.id) ?? null;
+
   return {
     ...threadWithRuntime,
-    activeBackgroundAgentCount:
-      listActiveBackgroundTaskCountsByThreadIds(deps.db, {
-        threadIds: [args.thread.id],
-      })[0]?.activeBackgroundAgentCount ?? 0,
+    serviceTier:
+      readThreadServiceTier(deps.db, args.thread.id) ??
+      getLastExecutionOptions(deps, args.thread.id)?.serviceTier,
+    work,
+    activeBackgroundAgentCount: background?.activeBackgroundAgentCount ?? 0,
     canRestoreEnvironment: canRestoreThreadEnvironment(deps, {
       thread: args.thread,
     }),
     canSpawnChild: canThreadSpawnChild(deps, { thread: args.thread }),
-    queuedMessageCount:
-      listQueuedThreadMessageCountsByThreadIds(deps.db, {
-        threadIds: [args.thread.id],
-      })[0]?.queuedMessageCount ?? 0,
+    queuedMessageCount: queue?.queuedMessageCount ?? 0,
   };
 }
 
@@ -362,6 +420,7 @@ function getThreadPromptBannerActivityState(
     providerId: thread.providerId,
     threadStatus: thread.status,
   });
+
   const goal = extractThreadTimelineGoal(events);
 
   return {
@@ -390,18 +449,28 @@ function listPromptBannerActivityCandidateRows(
     threadIds: threads.map((thread) => thread.id),
     kind: LEGACY_CODEX_GOAL_EXTENSION_KIND,
   });
+
   const openAcceptedRows = listOpenTurnInputAcceptedRowsByThreadIds(deps.db, {
     threadIds: threads
       .filter((thread) => canThreadShowActivePlanMode(deps, thread))
       .map((thread) => thread.id),
   });
+
   const openAcceptedEvents = openAcceptedRows.map(toThreadEventWithMeta);
+
   const requestKeys: ThreadClientTurnRequestKey[] = openAcceptedEvents.flatMap(
-    ({ event }) =>
+    ({ event, meta }) =>
       event.type === "turn/input/accepted"
-        ? [{ requestId: event.clientRequestId, threadId: event.threadId }]
+        ? [
+            {
+              beforeSequence: meta.seq,
+              requestId: event.clientRequestId,
+              threadId: event.threadId,
+            },
+          ]
         : [],
   );
+
   const requestRows = listStoredClientTurnRequestRowsByKeys(deps.db, {
     keys: requestKeys,
   });
@@ -419,9 +488,11 @@ function buildThreadPromptBannerActivityByThreadId(
 ): Map<string, PromptBannerActivityState> {
   const rows = listPromptBannerActivityCandidateRows(deps, threads);
   const eventsByThreadId = new Map<string, ThreadEventWithMeta[]>();
+
   for (const row of rows) {
     const threadEvents = eventsByThreadId.get(row.threadId);
     const event = toThreadEventWithMeta(row);
+
     if (threadEvents) {
       threadEvents.push(event);
     } else {
@@ -430,16 +501,19 @@ function buildThreadPromptBannerActivityByThreadId(
   }
 
   const result = new Map<string, PromptBannerActivityState>();
+
   for (const thread of threads) {
     const activity = getThreadPromptBannerActivityState(
       deps,
       thread,
       eventsByThreadId.get(thread.id) ?? [],
     );
+
     if (activity.activeGoalCount > 0 || activity.activePlanModeCount > 0) {
       result.set(thread.id, activity);
     }
   }
+
   return result;
 }
 
@@ -459,7 +533,7 @@ export function getThreadPromptBannerActivity(
 }
 
 function buildThreadActivityStateByThreadId(
-  deps: ThreadPromptBannerDeps,
+  deps: ThreadRuntimeDisplayDeps,
   threads: readonly Thread[],
 ): Map<string, ThreadActivityState> {
   const backgroundTaskActivityByThreadId = new Map(
@@ -467,15 +541,27 @@ function buildThreadActivityStateByThreadId(
       threadIds: threads.map((thread) => thread.id),
     }).map((activity) => [activity.threadId, activity]),
   );
+
+  const { providerRegistry } = deps;
+
   const promptBannerActivityByThreadId =
-    buildThreadPromptBannerActivityByThreadId(deps, threads);
+    providerRegistry === undefined
+      ? new Map<string, PromptBannerActivityState>()
+      : buildThreadPromptBannerActivityByThreadId(
+          { ...deps, providerRegistry },
+          threads,
+        );
+
   const result = new Map<string, ThreadActivityState>();
+
   for (const thread of threads) {
     const backgroundActivity = backgroundTaskActivityByThreadId.get(thread.id);
     const promptBannerActivity = promptBannerActivityByThreadId.get(thread.id);
+
     if (!backgroundActivity && !promptBannerActivity) {
       continue;
     }
+
     result.set(thread.id, {
       activeBackgroundAgentCount:
         backgroundActivity?.activeBackgroundAgentCount ??
@@ -489,26 +575,24 @@ function buildThreadActivityStateByThreadId(
       activePlanModeCount:
         promptBannerActivity?.activePlanModeCount ??
         EMPTY_THREAD_ACTIVITY.activePlanModeCount,
+      activeSubagentCount:
+        backgroundActivity?.activeSubagentCount ??
+        EMPTY_THREAD_ACTIVITY.activeSubagentCount,
       activeWorkflowCount:
         backgroundActivity?.activeWorkflowCount ??
         EMPTY_THREAD_ACTIVITY.activeWorkflowCount,
     });
   }
+
   return result;
 }
 
-/**
- * Whether each thread has queued work, from one grouped count over live queued
- * rows. Threads with an empty queue are absent, so the caller fills "none".
- *
- * A failure outranks a plain wait: a row that failed to go out is the one the
- * reader has to do something about, and a thread can easily hold both.
- */
 function buildThreadQueuedWorkByThreadId(
   deps: ThreadRuntimeDisplayDeps,
   threads: readonly Thread[],
 ): Map<string, ThreadQueuedWork> {
   const result = new Map<string, ThreadQueuedWork>();
+
   for (const counts of listQueuedThreadMessageCountsByThreadIds(deps.db, {
     threadIds: threads.map((thread) => thread.id),
   })) {
@@ -518,54 +602,93 @@ function buildThreadQueuedWorkByThreadId(
       counts.failedQueuedMessageCount > 0 ? "failed" : "waiting",
     );
   }
+
   return result;
+}
+
+function threadWorkSourceResolver(
+  deps: ThreadRuntimeDisplayDeps,
+): ResolveThreadWorkSources {
+  return (threadIds) => {
+    const { entries, attentionFacts } = buildThreadListEntriesWithoutWork(
+      deps,
+      {
+        threads: listThreadsWithPendingInteractionState(deps.db, {
+          threadIds: [...threadIds],
+          includeHidden: true,
+        }),
+      },
+    );
+
+    return { sources: entries, attentionFacts };
+  };
 }
 
 export function toThreadListEntryResponses(
   deps: ThreadPromptBannerDeps,
   args: ToThreadListEntryResponsesArgs,
 ): ThreadListEntry[] {
+  const { entries, attentionFacts } = buildThreadListEntriesWithoutWork(
+    deps,
+    args,
+  );
+
+  const summaries = buildThreadWorkSummaries(
+    deps.db,
+    entries,
+    threadWorkSourceResolver(deps),
+    attentionFacts,
+  );
+
+  return entries.map((entry) => ({
+    ...entry,
+    work: summaries.get(entry.id) ?? null,
+  }));
+}
+
+function buildThreadListEntriesWithoutWork(
+  deps: ThreadRuntimeDisplayDeps,
+  args: ToThreadListEntryResponsesArgs,
+): {
+  entries: ThreadListEntry[];
+  attentionFacts: ReturnType<typeof readThreadAttentionFacts>;
+} {
+  const ids = args.threads.map((thread) => thread.id);
+  const attentionFacts = readThreadAttentionFacts(deps.db, ids);
+  const attention = summarizeThreadAttention(attentionFacts);
+
   const activityByThreadId = buildThreadActivityStateByThreadId(
     deps,
     args.threads,
   );
-  const activeHostIds = [
-    ...new Set(
-      args.threads.flatMap((thread) =>
-        thread.status === "active" && thread.environmentHostId !== null
-          ? [thread.environmentHostId]
-          : [],
-      ),
+
+  const waitingHosts = waitingThreadHostIds(
+    deps,
+    args.threads.flatMap((thread) =>
+      thread.status === "active" && thread.environmentHostId !== null
+        ? [thread.environmentHostId]
+        : [],
     ),
-  ];
-  const connectedActiveHostIds = new Set(
-    activeHostIds.filter((hostId) => hasOpenDaemonSessionForHost(deps, hostId)),
+    args.now,
   );
-  const latestClosedSessionByHostId = new Map(
-    listLatestClosedSessionsForHosts(deps.db, {
-      hostIds: activeHostIds.filter(
-        (hostId) => !connectedActiveHostIds.has(hostId),
-      ),
-    }).map((session) => [session.hostId, session]),
-  );
+
   const queuedWorkByThreadId = buildThreadQueuedWorkByThreadId(
     deps,
     args.threads,
   );
-  return args.threads.map((thread) => {
-    const entry = toThreadListEntryResponseFromLatestSession({
+
+  const entries = args.threads.map((thread) => {
+    const entry = toThreadListEntryResponse({
       activity: activityByThreadId.get(thread.id) ?? EMPTY_THREAD_ACTIVITY,
       queuedWork: queuedWorkByThreadId.get(thread.id) ?? "none",
-      hostConnected:
+      waitingForHost:
         thread.environmentHostId !== null &&
-        connectedActiveHostIds.has(thread.environmentHostId),
-      latestClosedSession:
-        thread.environmentHostId === null
-          ? null
-          : (latestClosedSessionByHostId.get(thread.environmentHostId) ?? null),
-      now: args.now,
+        waitingHosts.has(thread.environmentHostId),
       thread,
     });
+
+    entry.attention = attention.get(thread.id);
+
     return thread.environmentHostId === null &&
       (thread.status === "pending" || thread.status === "starting")
       ? {
@@ -574,17 +697,34 @@ export function toThreadListEntryResponses(
         }
       : entry;
   });
+
+  return { entries, attentionFacts };
 }
 
-function toThreadListEntryResponseFromLatestSession(
-  args: ToThreadListEntryResponseFromLatestSessionArgs,
+export function buildThreadListEntry(
+  deps: ThreadPromptBannerDeps,
+  threadId: string,
+): ThreadListEntry | null {
+  const threads = listThreadsWithPendingInteractionState(deps.db, {
+    threadIds: [threadId],
+    includeHidden: true,
+  });
+
+  return toThreadListEntryResponses(deps, { threads })[0] ?? null;
+}
+
+function toThreadListEntryResponse(
+  args: ToThreadListEntryResponseArgs,
 ): ThreadListEntry {
   const thread = toPublicThread(args.thread);
+
   return {
     ...thread,
+    work: null,
     activity: args.activity,
     queuedWork: args.queuedWork,
     pinSortKey: args.thread.pinSortKey,
+    shelfSortKey: args.thread.shelfSortKey,
     environmentBranchName: args.thread.environmentBranchName,
     environmentHostId: args.thread.environmentHostId,
     environmentName: args.thread.environmentName,
@@ -596,12 +736,6 @@ function toThreadListEntryResponseFromLatestSession(
       isWorktree: args.thread.environmentIsWorktree,
     }),
     hasPendingInteraction: args.thread.hasPendingInteraction,
-    runtime: resolveThreadRuntimeStateFromLatestSession({
-      environmentHostId: args.thread.environmentHostId,
-      hostConnected: args.hostConnected,
-      latestClosedSession: args.latestClosedSession,
-      now: args.now,
-      status: thread.status,
-    }),
+    runtime: threadRuntimeState(thread.status, args.waitingForHost),
   };
 }

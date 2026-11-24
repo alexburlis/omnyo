@@ -27,7 +27,7 @@ import {
   threadStopParamsSchema,
   turnStartParamsSchema,
   turnSteerParamsSchema,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -54,6 +54,7 @@ import {
 } from "./vocabulary.js";
 
 const instanceNonce = randomUUID().replaceAll("-", "").slice(0, 12);
+
 let threadCounter = 0;
 
 interface Session {
@@ -93,6 +94,7 @@ function sendRequest(method: string, params: Record<string, unknown>): string {
   outboundRequestCounter += 1;
   const id = `echo-req-${outboundRequestCounter}`;
   io.send({ jsonrpc: "2.0", id, method, params });
+
   return id;
 }
 
@@ -111,9 +113,11 @@ function parseProviderOptions(options: unknown): {
   values: EchoProviderOptions;
 } {
   const parsed = echoProviderOptionsSchema.safeParse(options);
+
   if (parsed.success) {
     return { source: "server", values: parsed.data };
   }
+
   return {
     source: "defaults",
     values: { shout: false, model: ECHO_MODEL_ID, promptMode: null },
@@ -143,6 +147,7 @@ function runEchoTurn(args: {
   const { session } = args;
   const prompt = promptText(args.input);
   const deltas: ThreadDelta[] = [];
+
   if (args.clientRequestId !== undefined) {
     deltas.push({
       kind: "input.accepted",
@@ -157,10 +162,12 @@ function runEchoTurn(args: {
       claimIfIdle: true,
     });
     emitDeltas(session.threadId, deltas);
+
     return;
   }
 
   session.turnsEchoed += 1;
+
   const turn: TurnContext = {
     session,
     ordinal: session.turnsEchoed,
@@ -170,6 +177,7 @@ function runEchoTurn(args: {
     malformedReceipt: /(?:^|\s)malformed-receipt(?:\s|$)/u.test(prompt),
     stamp: null,
   };
+
   deltas.push({ kind: "turn.open" });
   deltas.push(...commandDeltas(turn));
   deltas.push(...fileReadDeltas(turn));
@@ -179,6 +187,7 @@ function runEchoTurn(args: {
   deltas.push(...suppressedToolDeltas(turn));
 
   const stampTool = session.tools.get(ECHO_STAMP_TOOL_NAME);
+
   if (stampTool !== undefined) {
     const id = itemId(turn, "stamp");
     turn.stamp = { itemId: id, presentation: stampTool.presentation };
@@ -189,7 +198,7 @@ function runEchoTurn(args: {
       item: {
         type: "tool",
         tool: ECHO_STAMP_TOOL_NAME,
-        server: "bb",
+        server: "omnyo",
         args: { text: prompt },
       },
       ...(stampTool.presentation === undefined
@@ -197,6 +206,7 @@ function runEchoTurn(args: {
         : { presentation: stampTool.presentation }),
     });
     emitDeltas(session.threadId, deltas);
+
     const requestId = sendRequest(BRIDGE_INBOUND_REQUEST_METHODS.toolCall, {
       providerThreadId: session.providerThreadId,
       threadId: session.threadId,
@@ -204,11 +214,13 @@ function runEchoTurn(args: {
       callId: id,
       tool: ECHO_STAMP_TOOL_NAME,
       arguments: { text: prompt },
-      providerNativeIds: true,
     });
+
     pendingToolCalls.set(requestId, { turn });
+
     return;
   }
+
   emitDeltas(session.threadId, deltas);
   finishEchoTurn(turn, null);
 }
@@ -219,6 +231,7 @@ function commandDeltas(turn: TurnContext): ThreadDelta[] {
   const output = `${turn.prompt}\n`;
   const presentation = commandPresentation(command);
   turn.itemCount += 1;
+
   return [
     {
       kind: "item.open",
@@ -256,6 +269,7 @@ function fileReadDeltas(turn: TurnContext): ThreadDelta[] {
   const path = join(turn.session.cwd, "README.md");
   const presentation = fileReadPresentation(path);
   turn.itemCount += 1;
+
   return [
     {
       kind: "item.open",
@@ -275,14 +289,17 @@ function fileReadDeltas(turn: TurnContext): ThreadDelta[] {
 
 function searchDeltas(turn: TurnContext): ThreadDelta[] {
   const id = itemId(turn, "search");
+
   const item = {
     type: "search",
     mode: "content",
     query: turn.prompt,
     path: turn.session.cwd,
   } as const;
+
   const presentation = searchPresentation(turn.prompt);
   turn.itemCount += 1;
+
   return [
     { kind: "item.open", key: { providerItemId: id }, item, presentation },
     {
@@ -304,6 +321,7 @@ function delegationDeltas(turn: TurnContext): ThreadDelta[] {
   const childText = `child echo: ${turn.prompt}`;
   const presentation = delegationPresentation(label);
   turn.itemCount += 1;
+
   return [
     {
       kind: "item.open",
@@ -352,13 +370,16 @@ function delegationDeltas(turn: TurnContext): ThreadDelta[] {
 
 function planStepsDeltas(turn: TurnContext): ThreadDelta[] {
   const id = itemId(turn, "plan");
+
   const steps = [
     { step: "Hear the prompt", status: "completed" },
     { step: `Echo "${turn.prompt}"`, status: "active" },
     { step: "Write the receipt", status: "pending" },
   ] as const;
+
   const explanation = "The echo agent's three-step plan.";
   turn.itemCount += 1;
+
   return [
     {
       kind: "item.open",
@@ -383,6 +404,7 @@ function planStepsDeltas(turn: TurnContext): ThreadDelta[] {
 function suppressedToolDeltas(turn: TurnContext): ThreadDelta[] {
   const id = itemId(turn, "noop");
   turn.itemCount += 1;
+
   return [
     {
       kind: "item.open",
@@ -415,7 +437,7 @@ function finishEchoTurn(
       item: {
         type: "tool",
         tool: ECHO_STAMP_TOOL_NAME,
-        server: "bb",
+        server: "omnyo",
         args: { text: turn.prompt },
         ...(stamp === null
           ? { error: "no reply" }
@@ -430,14 +452,17 @@ function finishEchoTurn(
   }
 
   const receiptId = itemId(turn, "receipt");
+
   const receipt: EchoReceipt = {
     prompt: turn.prompt,
     itemCount: turn.itemCount,
     shouted: turn.providerOptions.values.shout,
   };
+
   const receiptPayload = turn.malformedReceipt
     ? { prompt: 42, itemCount: "many" }
     : receipt;
+
   const receiptRow = receiptPresentation(receipt);
   deltas.push(
     {
@@ -467,6 +492,7 @@ function finishEchoTurn(
     mood: session.turnsEchoed > 3 ? "bored" : "cheerful",
     turnsEchoed: session.turnsEchoed,
   };
+
   deltas.push({
     kind: "extension.state",
     extensionKind: ECHO_MOOD_KIND,
@@ -476,12 +502,14 @@ function finishEchoTurn(
   const options = turn.providerOptions.values;
   const echoed = options.shout ? turn.prompt.toUpperCase() : turn.prompt;
   const greeting = process.env[ECHO_GREETING_ENV];
+
   const lines = [
     `echo: ${echoed}`,
     `providerOptions (${turn.providerOptions.source}): shout=${String(options.shout)} model=${options.model} promptMode=${options.promptMode ?? "none"}`,
     `${ECHO_GREETING_ENV}=${greeting === undefined ? "<unset>" : greeting}`,
     ...(stamp === null ? [] : [`${ECHO_STAMP_TOOL_NAME}: ${stamp.content}`]),
   ];
+
   const text = lines.join("\n");
   const messageKey = { providerItemId: itemId(turn, "message") };
   deltas.push(
@@ -512,6 +540,7 @@ function finishEchoTurn(
     outputTokens: text.length,
     totalTokens: turn.prompt.length + text.length,
   };
+
   session.usageTotal = addTokenUsage(session.usageTotal, last);
   deltas.push(
     {
@@ -546,12 +575,14 @@ function openSession(args: {
     usageTotal: ZERO_TOKEN_USAGE,
     tools: new Map((args.dynamicTools ?? []).map((tool) => [tool.name, tool])),
   };
+
   sessions.set(args.threadId, session);
   notify(BRIDGE_NOTIFICATION_METHODS.threadIdentity, {
     threadId: args.threadId,
     providerThreadId: args.providerThreadId,
   });
   emitDeltas(args.threadId, [{ kind: "session.reset" }]);
+
   return session;
 }
 
@@ -587,10 +618,13 @@ function invalidParams(id: JsonRpcId, method: string, issues: unknown): void {
 const handlers: Record<string, RequestHandler> = {
   [BRIDGE_REQUEST_METHODS.initialize]: (id, params) => {
     const parsed = initializeParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.initialize, parsed.error.issues);
+
       return;
     }
+
     io.sendResult(id, {
       protocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
       capabilities: {
@@ -608,10 +642,13 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.modelList]: (id, params) => {
     const parsed = modelListParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.modelList, parsed.error.issues);
+
       return;
     }
+
     io.sendResult(id, {
       models: [{ ...ECHO_MODEL, model: ECHO_MODEL_ID }],
       selectedOnlyModels: [],
@@ -620,36 +657,45 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.providerHealth]: (id, params) => {
     const parsed = providerMaintenanceParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.providerHealth,
         parsed.error.issues,
       );
+
       return;
     }
+
     io.sendResult(id, ECHO_HEALTH);
   },
 
   [BRIDGE_REQUEST_METHODS.threadStart]: (id, params) => {
     const parsed = threadStartParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.threadStart,
         parsed.error.issues,
       );
+
       return;
     }
+
     threadCounter += 1;
     const providerThreadId = `echo_${instanceNonce}_${threadCounter}`;
+
     const session = openSession({
       threadId: parsed.data.threadId,
       providerThreadId,
       cwd: parsed.data.cwd,
       dynamicTools: parsed.data.dynamicTools,
     });
+
     io.sendResult(id, { providerThreadId, sessionRestorable: true });
+
     if (parsed.data.input !== undefined && parsed.data.input.length > 0) {
       runEchoTurn({
         session,
@@ -661,14 +707,17 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.threadResume]: (id, params) => {
     const parsed = threadResumeParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.threadResume,
         parsed.error.issues,
       );
+
       return;
     }
+
     openSession({
       threadId: parsed.data.threadId,
       providerThreadId: parsed.data.providerThreadId,
@@ -683,19 +732,25 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.turnStart]: (id, params) => {
     const parsed = turnStartParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.turnStart, parsed.error.issues);
+
       return;
     }
+
     const session = sessions.get(parsed.data.threadId);
+
     if (session === undefined) {
       io.sendError(
         id,
         BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS,
         `No session for thread ${parsed.data.threadId}; send thread/start or thread/resume first`,
       );
+
       return;
     }
+
     io.sendResult(id, {});
     runEchoTurn({
       session,
@@ -707,10 +762,13 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.turnSteer]: (id, params) => {
     const parsed = turnSteerParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.turnSteer, parsed.error.issues);
+
       return;
     }
+
     io.sendError(
       id,
       BRIDGE_JSON_RPC_ERRORS.NO_ACTIVE_TURN,
@@ -720,10 +778,13 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.threadStop]: (id, params) => {
     const parsed = threadStopParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.threadStop, parsed.error.issues);
+
       return;
     }
+
     sessions.delete(parsed.data.threadId);
     io.sendResult(id, {});
   },
@@ -739,27 +800,36 @@ const jsonRpcResponseSchema = z
 
 function handleResponse(message: unknown): void {
   const parsed = jsonRpcResponseSchema.safeParse(message);
+
   if (!parsed.success || typeof parsed.data.id !== "string") {
     return;
   }
+
   const pending = pendingToolCalls.get(parsed.data.id);
+
   if (pending === undefined) {
     return;
   }
+
   pendingToolCalls.delete(parsed.data.id);
+
   if (!sessions.has(pending.turn.session.threadId)) {
     return;
   }
+
   if (parsed.data.error !== undefined) {
     const error = z
       .object({ message: z.string() })
       .safeParse(parsed.data.error);
+
     finishEchoTurn(pending.turn, {
       content: error.success ? error.data.message : "tool call failed",
       isError: true,
     });
+
     return;
   }
+
   const decoded = decodeToolCallResponsePayload(parsed.data.result);
   finishEchoTurn(pending.turn, {
     content: decoded.content,
@@ -769,11 +839,13 @@ function handleResponse(message: unknown): void {
 
 export function handleLine(line: string): void {
   let message: unknown;
+
   try {
     message = JSON.parse(line);
   } catch {
     return;
   }
+
   if (
     typeof message !== "object" ||
     message === null ||
@@ -781,27 +853,35 @@ export function handleLine(line: string): void {
   ) {
     return;
   }
+
   const { id, method, params } = message as {
     id?: unknown;
     method?: unknown;
     params?: unknown;
   };
+
   if (typeof method !== "string") {
     handleResponse(message);
+
     return;
   }
+
   if (typeof id !== "string" && typeof id !== "number") {
     return;
   }
+
   const handler = handlers[method];
+
   if (handler === undefined) {
     io.sendError(
       id,
       BRIDGE_JSON_RPC_ERRORS.METHOD_NOT_FOUND,
       `Method not found: ${method}`,
     );
+
     return;
   }
+
   runBridgeRequest({
     request: { id, method, params },
     sendError: io.sendError,

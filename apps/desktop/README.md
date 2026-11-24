@@ -1,7 +1,7 @@
-# @bb/desktop
+# @omnyo/desktop
 
-macOS, Linux, and Windows Electron shell for bb. The desktop app loads the existing bb
-web UI and uses the packaged `bb-app` launcher for server and host-daemon
+macOS, Linux, and Windows Electron shell for Omnyo. The desktop app loads the existing Omnyo
+web UI and uses the packaged `omnyo-app` launcher for server and host-daemon
 lifecycle.
 
 ## Development
@@ -10,31 +10,31 @@ From the repo root, run `pnpm dev` in one terminal for the source server and
 live UI updates. In a second terminal, start the Electron shell:
 
 ```bash
-pnpm exec turbo run dev --filter=@bb/desktop
+pnpm exec turbo run dev --filter=@omnyo/desktop
 ```
 
-The dev script builds `bb-app`, compiles the Electron main/preload files, and
+The dev script builds `omnyo-app`, compiles the Electron main/preload files, and
 opens Electron directly. By default it uses the same checkout-scoped
-`~/.bb-dev/<checkout-instance>` data directory and deterministic high ports as
+`~/.omnyo-dev/<checkout-instance>` data directory and deterministic high ports as
 `pnpm dev`; it prints the resolved data dir, server URL, and
 Electron user-data dir at startup. It intentionally overwrites inherited
-`BB_DATA_DIR`, `BB_SERVER_PORT`, `BB_SERVER_URL`, and `BB_HOST_DAEMON_PORT` so a
-desktop dev run launched from an existing bb session still targets the current
-checkout. Set `BB_DESKTOP_USER_DATA_DIR` to override only Electron's user-data
+`OMNYO_DATA_DIR`, `OMNYO_SERVER_PORT`, `OMNYO_SERVER_URL`, and `OMNYO_HOST_DAEMON_PORT` so a
+desktop dev run launched from an existing Omnyo session still targets the current
+checkout. Set `OMNYO_DESKTOP_USER_DATA_DIR` to override only Electron's user-data
 directory.
 
 The launcher probes the checkout's Vite app port at startup and adapts:
 
 - **`pnpm dev` is already running** (Vite reachable): the shell loads the Vite
-  dev URL, so you get live source and HMR for `@bb/app` changes — no rebuild
+  dev URL, so you get live source and HMR for `@omnyo/app` changes — no rebuild
   needed. It still attaches to the same running server/daemon for all API/WS
   traffic. The launcher prints `app <url> (Vite dev server — live reload)`. This
   is the fast loop for iterating on the desktop UI.
-- **`pnpm dev` is not running**: the shell starts its own `bb-app` runtime and
+- **`pnpm dev` is not running**: the shell starts its own `omnyo-app` runtime and
   loads the built UI it serves, so you must rebuild (re-run this task) to pick up
-  source changes. The launcher prints `app (own bb-app runtime — …)`.
+  source changes. The launcher prints `app (own omnyo-app runtime — …)`.
 
-The override is plumbed via `BB_DESKTOP_APP_URL`, which the launcher only sets
+The override is plumbed via `OMNYO_DESKTOP_APP_URL`, which the launcher only sets
 when Vite is confirmed reachable; it is never set in packaged builds, so
 production always loads the server's own built UI.
 
@@ -43,11 +43,11 @@ packaged runtime and keeps native dependencies rebuilt for Electron's bundled
 Node runtime:
 
 ```bash
-pnpm exec turbo run start --filter=@bb/desktop
+pnpm exec turbo run start --filter=@omnyo/desktop
 ```
 
 Electron is pinned to `44.3.0`. macOS builds require macOS 13 (Ventura) or
-newer. The bundled `bb-app` runtime uses `better-sqlite3@13.0.3`, whose N-API
+newer. The bundled `omnyo-app` runtime uses `better-sqlite3@13.0.3`, whose N-API
 binaries work with Electron without an ABI-specific rebuild. The packaging
 hook opens an in-memory database with Electron before accepting the packaged
 SQLite module; older ABI-specific modules still use the prebuild fallback.
@@ -81,10 +81,10 @@ Files are saved on the machine running the desktop app, including downloads
 initiated in desktop browser automation tabs.
 
 ```bash
-pnpm exec turbo run typecheck --filter=@bb/desktop --filter=bb-app
-pnpm exec turbo run build --filter=@bb/desktop
-pnpm exec turbo run test --filter=@bb/desktop --filter=bb-app --force
-pnpm exec turbo run dev --filter=@bb/desktop
+pnpm exec turbo run typecheck --filter=@omnyo/desktop --filter=omnyo-app
+pnpm exec turbo run build --filter=@omnyo/desktop
+pnpm exec turbo run test --filter=@omnyo/desktop --filter=omnyo-app --force
+pnpm exec turbo run dev --filter=@omnyo/desktop
 ```
 
 The desktop tests include an Electron startup smoke that opens a real window.
@@ -94,8 +94,8 @@ command in `xvfb-run -a`, as CI does.
 ## Packaging
 
 ```bash
-pnpm exec turbo run desktop:build --filter=@bb/desktop
-pnpm exec turbo run smoke:packaged --filter=@bb/desktop
+pnpm exec turbo run desktop:build --filter=@omnyo/desktop
+pnpm exec turbo run smoke:packaged --filter=@omnyo/desktop
 ```
 
 Artifacts are written under `apps/desktop/release/`. The macOS build is Apple
@@ -108,9 +108,17 @@ machines with no keychain identity (or with `CSC_IDENTITY_AUTO_DISCOVERY=false`,
 as CI sets for workflow-artifact-only builds), artifacts remain unsigned and
 macOS shows the normal Gatekeeper warning on first launch.
 
+`mac.signIgnore` limits per-file `codesign` calls to Mach-O code. electron-builder
+would otherwise sign every file its binary heuristic flags, about 1,900 compressed
+assets, locale paks, fonts and non-Apple prebuilds, one serial timestamped call each
+(about 10 minutes per build). The bundle seal still hashes those files, and
+notarization rejects any unsigned Mach-O, so a new Mach-O file type must never
+match these patterns. The macOS target is the `.zip` only; the private updater
+feed and notarization do not use a DMG.
+
 For local verification without publishing, use
-`pnpm exec turbo run package --filter=@bb/desktop` on macOS, or
-`pnpm exec turbo run package:linux --filter=@bb/desktop` on Linux.
+`pnpm exec turbo run package --filter=@omnyo/desktop` on macOS, or
+`pnpm exec turbo run package:linux --filter=@omnyo/desktop` on Linux.
 
 npm's bundled dependencies are copied through an explicit `files` entry into
 `node_modules/npm/node_modules`, including nested dependency versions. pnpm's
@@ -125,12 +133,12 @@ publishing. This requires a native target host (macOS arm64 or Linux x64).
 verification without opening a desktop window:
 
 ```bash
-pnpm exec turbo run smoke:packaged-npm --filter=@bb/desktop
-pnpm exec turbo run smoke:packaged-npm --filter=@bb/desktop -- /absolute/path/to/bb.app/Contents/MacOS/bb
+pnpm exec turbo run smoke:packaged-npm --filter=@omnyo/desktop
+pnpm exec turbo run smoke:packaged-npm --filter=@omnyo/desktop -- /absolute/path/to/Omnyo.app/Contents/MacOS/Omnyo
 ```
 
 On Linux, the optional argument is the executable inside `linux-unpacked/` or
-an extracted AppImage. The check resolves npm from packaged `bb-app`, audits
+an extracted AppImage. The check resolves npm from packaged `omnyo-app`, audits
 required dependency edges and version ranges in npm's entire bundled tree using
 both CJS and ESM resolution, rejects paths outside packaged resources, imports npm's ESM display
 dependencies, and verifies its version. It then uses bundled Electron and npm
@@ -141,7 +149,7 @@ HOME/cache/config, and disabled lifecycle scripts. No system Node/npm or user
 store is used by the child processes. It also hashes ASAR and unpacked resources
 before and after to reject bundle mutations. Fixtures are removed afterward.
 
-The bb-app tarball smoke covers a different packaging pipeline and cannot
+The omnyo-app tarball smoke covers a different packaging pipeline and cannot
 detect Electron artifact omissions. A source build or `npm --version` alone
 does not verify a desktop plugin dependency install.
 
@@ -153,14 +161,14 @@ root, install with `pnpm install --frozen-lockfile --ignore-scripts`, then build
 an unpacked app, an installer, or smoke test the current packaged output with:
 
 ```powershell
-pnpm exec turbo run package:win --filter=@bb/desktop
-pnpm exec turbo run desktop:build:win --filter=@bb/desktop
-pnpm exec turbo run smoke:packaged --filter=@bb/desktop
+pnpm exec turbo run package:win --filter=@omnyo/desktop
+pnpm exec turbo run desktop:build:win --filter=@omnyo/desktop
+pnpm exec turbo run smoke:packaged --filter=@omnyo/desktop
 ```
 
-`desktop:build:win` writes `release/bb-<version>-x64.exe`, a one-click per-user
-NSIS installer that installs to `%LOCALAPPDATA%\Programs\bb` (`bb-nightly` on
-the nightly channel) without elevation, plus `latest.yml` for electron-updater.
+`desktop:build:win` writes `release/omnyo-private-<version>-x64.exe`, a one-click per-user
+NSIS installer that installs to `%LOCALAPPDATA%\Programs\omnyo-private` (`omnyo-private-nightly` on
+the nightly channel; the private release bootstrap installs to `Programs\Omnyo`) without elevation, plus `latest.yml` for electron-updater.
 Without a signing certificate the installer is unsigned, so Windows SmartScreen
 warns before running it. electron-builder signs it when `WIN_CSC_LINK` (a
 base64 `.pfx`) and `WIN_CSC_KEY_PASSWORD` are set; the release workflows pass
@@ -185,9 +193,9 @@ From the repo root, build an unpacked app, an AppImage distribution, or smoke
 test the current packaged output with:
 
 ```bash
-pnpm exec turbo run package:linux --filter=@bb/desktop
-pnpm exec turbo run desktop:build:linux --filter=@bb/desktop
-pnpm exec turbo run smoke:packaged --filter=@bb/desktop
+pnpm exec turbo run package:linux --filter=@omnyo/desktop
+pnpm exec turbo run desktop:build:linux --filter=@omnyo/desktop
+pnpm exec turbo run smoke:packaged --filter=@omnyo/desktop
 ```
 
 Running an AppImage normally requires FUSE and, on some distributions, the
@@ -198,7 +206,7 @@ Linux users whose window manager supplies all window controls can remove the
 native Electron title bar with `--no-window-frame`:
 
 ```bash
-./bb-x86_64.AppImage --no-window-frame
+./omnyo-private-<version>-x86_64.AppImage --no-window-frame
 ```
 
 The native frame remains the default. Changing this startup option requires a
@@ -208,7 +216,7 @@ Linux users can opt into a transparent Electron window with
 `--transparent-window`:
 
 ```bash
-./bb-x86_64.AppImage --transparent-window
+./omnyo-private-<version>-x86_64.AppImage --transparent-window
 ```
 
 The window remains opaque by default. Transparency also requires a compositor
@@ -244,9 +252,15 @@ push code to Linux clients. Treat the release token accordingly.
 
 ## Releasing
 
-`bb-app` and `@bb/desktop` versions are LOCKED in lockstep. The desktop package
-depends on `bb-app: workspace:*`, and the displayed release version string must
-match `packages/bb-app/package.json`.
+`omnyo-app` and `@omnyo/desktop` versions are LOCKED in lockstep. The desktop package
+depends on `omnyo-app: workspace:*`, and the displayed release version string must
+match `packages/omnyo-app/package.json`.
+
+This repository releases through `pnpm private:ship --version <version>` (see
+[docs/private-ship.md](../../docs/private-ship.md)); its release commit writes both
+versions, and `--mac` or `--windows` adds the desktop builds. The bump script,
+`sawyer-next` flow and `build-desktop.yml` steps below are upstream get-bb/bb's
+public release process.
 
 To bump for a release:
 
@@ -258,7 +272,7 @@ Then commit and ship through the normal `sawyer-next` → `main` flow. You can a
 use `--patch`, `--minor`, or `--major` instead of an explicit version.
 
 CI enforces this lockstep. Direct edits that leave
-`packages/bb-app/package.json` and `apps/desktop/package.json` with different
+`packages/omnyo-app/package.json` and `apps/desktop/package.json` with different
 versions fail the build. Never edit either package version directly for a
 release; use `scripts/bump-version.mjs` so both files move together.
 
@@ -273,7 +287,7 @@ tag:
 
 | Platform | Artifacts              | electron-updater metadata | Version feed                   |
 | -------- | ---------------------- | ------------------------- | ------------------------------ |
-| macOS    | `.dmg`, `.zip` (arm64) | `latest-mac.yml`          | `desktop-version.json`         |
+| macOS    | `.zip` (arm64)         | `latest-mac.yml`          | `desktop-version.json`         |
 | Linux    | `.AppImage` (x64)      | `latest-linux.yml`        | `desktop-version-linux.json`   |
 | Windows  | `.exe` installer (x64) | `latest.yml`              | `desktop-version-windows.json` |
 
@@ -283,6 +297,11 @@ unless the Windows certificate secrets are configured; only the macOS binaries
 wait on the Apple signing secrets.
 
 ## Nightly channel
+
+Upstream get-bb/bb publishes this channel: `publish-bb-app.yml` runs only in
+that repository, and the npm package, installation identities and downloads
+below are upstream's. The coexistence rules and build variable at the end of
+this section also apply to this repository's desktop builds.
 
 The scheduled `publish-bb-app.yml` workflow runs from `main` every day at
 3:00 AM Pacific (`America/Los_Angeles`, including daylight-saving changes). It
@@ -301,11 +320,12 @@ nightly channel stays below `latest` until the next scheduled run.
 
 The nightly desktop is a separate installation:
 
-- product name: `bb Nightly`
-- bundle identifier: `dev.bb.desktop.nightly`
-- Linux binary name: `bb-nightly`, so it never shadows stable `bb` on PATH
+- product name: `Omnyo Nightly`
+- bundle identifier: `dev.omnyo.private.nightly`
+- Linux binary name: `omnyo-private-nightly`, so it never shadows the stable
+  `omnyo-private` binary on PATH
 - app/update release: `desktop-nightly`
-- Windows install directory: `%LOCALAPPDATA%\Programs\bb-nightly`
+- Windows install directory: `%LOCALAPPDATA%\Programs\omnyo-private-nightly`
 - update metadata: `nightly-mac.yml`, `nightly-linux.yml`, and `nightly.yml`
   (Windows)
 - version feeds: `desktop-version.json` (macOS),
@@ -323,14 +343,21 @@ npx bb-app@nightly
 
 Stable and nightly desktop bundles can coexist. Electron-owned preferences,
 window state, and process supervision use separate application data
-directories; the embedded bb runtime still uses the normal `~/.bb` data and
+directories; the embedded Omnyo runtime still uses the normal `~/.omnyo` data and
 default server port unless the corresponding environment variables are
 overridden.
 
-Nightly builds set `BB_DESKTOP_RELEASE_CHANNEL=nightly` at build time. The value
+Nightly builds set `OMNYO_DESKTOP_RELEASE_CHANNEL=nightly` at build time. The value
 is baked into the Electron main/preload bundles and selects the nightly product
 identity, yellow icon, and update URLs. Omit the variable (or set it to
 `latest`) for stable and local builds.
+
+## Dock attention dot
+
+On macOS the Dock shows a badge while any Omnyo window has an unread chat or
+a chat waiting for your answer. Each window reports that state through
+`window.omnyoDesktop.setAttention`. A window that reloads, crashes or closes
+drops its report. The red dot in the app artwork is always visible.
 
 ## About panel
 
@@ -344,10 +371,10 @@ The native About panel is populated too, minus the age, since Electron takes
 those options once at startup. `scripts/build.mjs` bakes the build-time half of
 the facts into the bundles:
 
-| Variable                | Default when unset                                    |
-| ----------------------- | ----------------------------------------------------- |
-| `BB_DESKTOP_COMMIT`     | `GITHUB_SHA`, else `git rev-parse HEAD`, else unknown |
-| `BB_DESKTOP_BUILD_DATE` | The build's own timestamp, ISO 8601                   |
+| Variable                   | Default when unset                                    |
+| -------------------------- | ----------------------------------------------------- |
+| `OMNYO_DESKTOP_COMMIT`     | `GITHUB_SHA`, else `git rev-parse HEAD`, else unknown |
+| `OMNYO_DESKTOP_BUILD_DATE` | The build's own timestamp, ISO 8601                   |
 
 The plugin SDK version is read from `packages/plugin-sdk/package.json` at build
 time. A checkout with no git metadata reports `Commit: unknown` rather than
@@ -383,13 +410,14 @@ produce unsigned or signed-but-not-notarized artifacts.
 The renderer update toast keeps using `desktop-version.json` as the lightweight
 feature surface. The installer path uses `electron-updater` against the same
 `desktop-latest` release asset directory and reads `latest-mac.yml`. These
-checks run in parallel on launch, hourly, and when the app becomes active: the
+checks run in parallel on launch and every minute while enabled. App activation
+also checks when the previous attempt was at least one minute earlier. The
 JSON feed can show "update available" even when CI has published metadata only,
 while the Electron updater only flips the toast to "ready to install" after a
 signed update has actually downloaded. Local dev builds skip Electron auto-update
-unless `BB_DESKTOP_AUTO_UPDATE=1` is set.
+unless `OMNYO_DESKTOP_AUTO_UPDATE=1` is set.
 
-`bb Nightly` follows the equivalent isolated `desktop-nightly` release and
+Upstream `bb Nightly` follows the equivalent isolated `desktop-nightly` release and
 `nightly-mac.yml`; it never reads or moves the stable feed. The scheduled
 workflow requires the complete signing/notarization secret set before
 publishing nightly desktop assets.
@@ -397,40 +425,40 @@ publishing nightly desktop assets.
 To verify a downloaded or unpacked build:
 
 ```bash
-spctl --assess --verbose /path/to/bb.app
-codesign --verify --deep --strict --verbose=2 /path/to/bb.app
+spctl --assess --verbose /path/to/Omnyo.app
+codesign --verify --deep --strict --verbose=2 /path/to/Omnyo.app
 ```
 
 ## Debugging
 
 Use the View menu to toggle DevTools. To open them automatically on launch, set
-`BB_DESKTOP_OPEN_DEVTOOLS=1`:
+`OMNYO_DESKTOP_OPEN_DEVTOOLS=1`:
 
 ```bash
-BB_DESKTOP_OPEN_DEVTOOLS=1 apps/desktop/release/mac-arm64/bb.app/Contents/MacOS/bb
+OMNYO_DESKTOP_OPEN_DEVTOOLS=1 apps/desktop/release/mac-arm64/Omnyo.app/Contents/MacOS/Omnyo
 ```
 
-When the desktop app spawns `bb-app`, server and daemon logs land under
-`~/.bb/logs/` or `$BB_DATA_DIR/logs/` when `BB_DATA_DIR` is set.
+When the desktop app spawns `omnyo-app`, server and daemon logs land under
+`~/.omnyo/logs/` or `$OMNYO_DATA_DIR/logs/` when `OMNYO_DATA_DIR` is set.
 
-To verify attach-if-found manually, start a compatible bb first, then launch the
+To verify attach-if-found manually, start a compatible Omnyo first, then launch the
 desktop app:
 
 ```bash
-npx bb-app@latest
-pnpm exec turbo run dev --filter=@bb/desktop
+omnyo-app
+pnpm exec turbo run dev --filter=@omnyo/desktop
 ```
 
 The desktop supervisor handles normal quits plus `SIGINT` and `SIGTERM`, and it
-writes a PID file so the next launch can reap a stale Electron-owned `bb-app`
+writes a PID file so the next launch can reap a stale Electron-owned `omnyo-app`
 launcher. Hard crashes such as process aborts, segfaults, or kernel-level kills
 cannot run cleanup in the crashing process; the startup PID-file reap is the
 recovery path for those cases.
 
 ### Saved servers
 
-Use **bb → Desktop Settings → Server → Add Server…** to save and switch to
-another machine's HTTP(S) bb server URL. **Window → Server** opens the same
+Use **Omnyo → Desktop Settings → Server → Add Server…** to save and switch to
+another machine's HTTP(S) Omnyo server URL. **Window → Server** opens the same
 menu. Saved URLs remain in the menu across restarts; adding an existing URL
 selects it without creating a duplicate. **This Mac** on macOS or **This
 Computer** on Linux switches back to the built-in server without removing
@@ -444,7 +472,7 @@ loaded automatically into the saved list in `<userData>/server-target.json`.
 The app command palette lists **Switch to <server>** for each inactive choice
 from this same Server menu, including Connect discovery. Palette list requests
 use the menu's discovery refresh policy (at most once per minute, with the
-existing ten-minute background refresh). The optional `window.bbDesktop`
+existing ten-minute background refresh). The optional `window.omnyoDesktop`
 `getServerChoices`, `onServerChoicesChange`, and `selectServer` methods expose
 only `{id, name, active}`; custom server IDs are opaque hashes. Selection is
 validated against native choices and runs the menu's existing authentication,
@@ -452,8 +480,8 @@ window navigation, and runtime lifecycle. Older desktop shells omit these action
 
 ### Server moves
 
-After `bb server move`, the old computer's data dir (`~/.bb` or
-`$BB_DATA_DIR`) contains `server-moved.json`. The desktop app reads it at
+After `omnyo server move`, the old computer's data dir (`~/.omnyo` or
+`$OMNYO_DATA_DIR`) contains `server-moved.json`. The desktop app reads it at
 startup, whenever the built-in server target loads, and while that target is active.
 While the target is active, the app watches the data dir. If `fs.watch` fails,
 for example with `ENOSPC`, the app checks the file every 2 seconds instead
@@ -471,30 +499,112 @@ sees a committed lock for a `moveId`, it switches the server target once:
   the app is open, the app waits up to 60 seconds for the new `/health`
   endpoint before it switches the window.
 
-The app shows "Your bb server moved to <toHostName>" once for each `moveId`
-(`<userData>/server-move-notice.json`). It still starts its own `bb-app`
-launcher unless another bb process answers the local server port. The launcher
+The app shows "Your Omnyo server moved to <toHostName>" once for each `moveId`
+(`<userData>/server-move-notice.json`). It still starts its own `omnyo-app`
+launcher unless another Omnyo process answers the local server port. The launcher
 runs this computer as a regular machine, and quitting the app stops it. If the
-app has no stored bb Connect credential, it signs in to a connect target with
-the `x-bb-connect-machine` header that the move wrote to the data dir's
+app has no stored Omnyo connect credential, it signs in to a connect target with
+the `x-omnyo-connect-machine` header that the move wrote to the data dir's
 `config.json`. The app logs a warning and ignores an invalid lock.
 
 On startup, a saved built-in server choice also switches to the moved server;
 it never starts the old copy automatically. A different saved remote server
 choice remains selected. Explicitly picking the built-in server while the move
-lock exists shows "bb moved to <toHostName>" with **Open <toHostName>** and
+lock exists shows "Omnyo moved to <toHostName>" with **Open <toHostName>** and
 **Choose server…**. The screen explains whether the old copy is locked or was
 deleted. Selecting the built-in server does not unlock the old copy or remove
 its background machine service.
 
 Startup error screens list their actions as buttons. Any screen where
 retrying can help shows **Try again**. **Choose server…** opens the Server menu,
-where the user can select the built-in server if needed. A bb Connect
+where the user can select the built-in server if needed. An Omnyo connect
 `unauthorized` error has no **Try again**, because the same credential fails
 the same way. **Reconnect** opens account sign-in in a desktop
 window. The app clears its old account sign-in, waits for a new session, then
 retries the selected server. A valid account session can mint and renew the
 desktop session when a machine credential is rejected. Closing the sign-in
 window leaves the error screen available. Fatal errors have no buttons. The renderer sends the chosen
-action on `bb-desktop:startup-action`. The main process accepts only actions
+action on `omnyo-desktop:startup-action`. The main process accepts only actions
 from the error page that is currently loaded in an app window's main frame.
+
+## Public macOS app
+
+The macOS-only `public-beta` build selection uses bundle ID `dev.omnyo.beta`,
+application/profile `Omnyo`, artifact `omnyo-${version}-${arch}.${ext}` and the
+selected source package version unchanged. The channel ID and bundle ID are internal
+names; nothing a user sees says beta.
+Set `OMNYO_DESKTOP_RELEASE_CHANNEL=public-beta` for desktop compilation and packaging.
+This is a build-time input, not a user setting or secret overlay.
+Private latest/nightly package versions and feeds remain unchanged.
+
+Inspect the local packaging contract without signing or publishing:
+
+    OMNYO_DESKTOP_RELEASE_CHANNEL=public-beta node apps/desktop/scripts/run-electron-builder.mjs --mac --arm64 --print-config
+
+The public profile owns `local-instance` data beneath its desktop profile and binds
+only to `127.0.0.1:47431`. It refuses an occupied local address and explicit profile
+reuse. Inherited private data paths, ports and diagnostics destinations are
+replaced before child launch. Usage telemetry and crash reporting are disabled
+for this channel. Existing coding-provider connections can send task data to
+the selected provider; optional integrations have their own network behavior.
+No Omnyo account is required to complete setup or use the local server.
+
+The public app bypasses private update configuration and uses only the pinned macOS feed
+`https://github.com/alexburlis/omnyo-releases/releases/download/macos/`
+with `public-beta-mac.yml`. The first public build, 0.46.317, was published on
+11 November 2026 under the `public-beta` tag as `Omnyo Beta`; installs of it follow
+that tag's feed and keep their data in the `Omnyo Beta` profile, which builds from
+this source do not read. The fixed `macos` tag must
+remain mutable; retain uniquely named old ZIPs and upload metadata last. The pin
+covers requested URLs; the existing executor follows CDN redirects. Existing digest,
+signature, team, exact runtime/inventory, idle and ownership checks still admit the
+artifact. Private GitHub rejection remains. The website's Download buttons link
+the stable asset `Omnyo-macOS.zip` on the same release through `MACOS_DOWNLOAD_URL`
+in `apps/web/src/landing/site.ts`. Each publication replaces that asset with the
+bytes of the current versioned ZIP, so the link never changes and the website needs
+no edit or deployment per release.
+
+Publish a public build with one command, from a clean checkout at the release commit
+(`Release private Omnyo <version>`, or `Release private Omnyo <version> (iOS <build>)`
+when that release also shipped an iOS build, with `apps/desktop` and
+`packages/omnyo-app` versions equal):
+
+    pnpm public:mac-release --plan
+    pnpm public:mac-release --prepare [--output-dir PATH]
+    pnpm public:mac-release [--output-dir PATH]
+
+`--plan` runs the checks and prints every step without running any. `--prepare`
+runs steps 1 to 5 and uploads nothing. With no mode it also publishes. An untagged
+`1.x` version publishes only after the public feed already carries a tagged `1.x`
+bridge build, because installed public apps older than 1.0.0 reject untagged updates
+(`public_feed_not_bridge_capable`; see `docs/private-ship.md`). The steps stop at
+the first failure:
+
+1. Build and sign the runtime: `OMNYO_RUNTIME_MAC_SIGNING_TEAM=Z7T4C33A35 pnpm exec turbo run build --filter=omnyo-app`.
+2. Build the app with `OMNYO_DESKTOP_RELEASE_CHANNEL=public-beta pnpm run desktop:build`
+   and require its app and `omnyo-<numeric version>-arm64.zip` to be new.
+3. Notarize and staple with `scripts/private-ship-notary.mjs` under the credential
+   overlay named in `scripts/private-ship.json`, through `redact-stream`. The result
+   must be `complete`, stapled and `Accepted` for this commit and version.
+4. Check `spctl` and `stapler validate` on the app and on an app extracted from the
+   final ZIP.
+5. Write `public-beta-mac.yml` with `desktop:private-update-feed`.
+6. Create the `macos` release if it is missing; upload the versioned ZIP (never
+   overwritten), copy it to `Omnyo-macOS.zip` and upload that with `--clobber`;
+   download both and compare their sha256 with the local ZIP; upload the feed last
+   with `--clobber` and compare its download too.
+
+Logs, the notarization job and result, the alias copy, the extracted app and the feed
+go to `--output-dir` (default `~/scratch/omnyo/public-mac-release/<version>`), which
+must be empty or absent. Each step has its own log; the notarization log passes
+through the credential filter, and no step prints credential material. Remove the
+directory after the release is verified.
+
+The public app uses the exact same internal desktop and bundled runtime version. Runtime inventory/signature checks
+are preserved. Public compilation uses `dist-public-beta`; packaging maps that output to `dist` and
+excludes private migration helpers, entrypoints and qualification receipts. The public channel refuses
+private build-job and migration modes. Latest/nightly retain their qualification unchanged.
+Do not use private:ship. Ordinary macOS app signing still requires Apple timestamps. Notarization-enabled signing environments are refused during
+local public preparation. No installed private profile or human installation is used.
+MIT attribution remains required in distributed artifacts; this preparation does not
+make the private repository public.

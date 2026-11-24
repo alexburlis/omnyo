@@ -1,3 +1,6 @@
+import { ServerCommandMetadata } from "../../src/services/skills/command-metadata.js";
+import { ProjectCommandCatalogs } from "../../src/services/threads/project-command-catalogs.js";
+import { closeThreadTimelinePageBuilders } from "../../src/services/threads/timeline-page-builder.js";
 import { installDefaultEnvironmentProviders } from "./environment-provider.js";
 import { registerTestHarnessWarmup } from "./test-harness-warmup.js";
 import { setPluginEnvironmentProviderBridge } from "../../src/services/plugins/plugin-environment-provider-registry.js";
@@ -11,33 +14,36 @@ import {
   createConnection,
   getAppSettings,
   getDisabledProviderIds,
-  listRunningThreads,
   setAppSettings,
   type DbConnection,
-} from "@bb/db";
-import { defaultFeatureFlags } from "@bb/domain";
+} from "@omnyo/db";
+import { defaultFeatureFlags } from "@omnyo/domain";
 import { initDb } from "../../src/db.js";
 import { createApp } from "../../src/server.js";
 import { PendingInteractionLifecycle } from "../../src/services/interactions/pending-interactions.js";
 import { createMachineAuthService } from "../../src/services/machine-auth.js";
 import { createProviderRegistryService } from "../../src/services/providers/provider-registry.js";
 import { registerFirstPartyProviders } from "./provider-registry.js";
-import { validatePluginProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
-import type { PluginProviderDeclaration } from "@get-bb/plugin-sdk";
+import { validatePluginProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
+import type { PluginProviderDeclaration } from "@omnyo/plugin-sdk";
+import { openSecretVault } from "@omnyo/secret-storage";
 import { buildPluginProviderRegistration } from "../../src/services/providers/plugin-provider-registration.js";
 import { SkillTreeRegistry } from "../../src/services/skills/injected-skills.js";
 import { PluginHostArtifactRegistry } from "../../src/services/plugins/plugin-host-artifact-registry.js";
+import type { PluginService } from "../../src/services/plugins/plugin-service.js";
+import { listBundledPluginRegistrations } from "../../src/services/plugins/builtin-registry.js";
 import { createProviderNativeRootsCache } from "../../src/services/providers/native-roots.js";
 import { createAiServiceRegistry } from "../../src/services/ai/ai-service-registry.js";
 import {
   createAppUpdateService,
   type AppUpdateService,
 } from "../../src/services/system/app-update.js";
+import { countRunningThreadsForAppUpdate } from "../../src/services/threads/thread-runtime-display.js";
 import {
   createAppVersionService,
   type AppVersionService,
 } from "../../src/services/system/app-version.js";
-import { createBbAppManagedConfigReloader } from "../../src/services/system/bb-app-managed-config.js";
+import { createOmnyoAppManagedConfigReloader } from "../../src/services/system/managed-app-config.js";
 import { createNoopTelemetryService } from "../../src/services/system/telemetry.js";
 import { TerminalSessionLifecycle } from "../../src/services/terminals/terminal-session-lifecycle.js";
 import { createLifecycleDedupers } from "../../src/lifecycle-dedupers.js";
@@ -53,7 +59,9 @@ import {
 } from "../../src/services/plugins/plugin-tool-calls.js";
 
 const TEST_MACHINE_KEY_PREFIX = "test-daemon-key";
+
 const TEST_SERVER_HOST = "127.0.0.1";
+
 const TEST_TERMINAL_RPC_TIMEOUT_MS = 10_000;
 
 export interface TestAppHarness {
@@ -80,6 +88,7 @@ export async function installTestBuiltinPlugin(
   const entry = await harness.pluginService.install(`builtin:${name}`, {
     kind: "root",
   });
+
   if (entry.status !== "running") {
     throw new Error(
       `test builtin ${name} did not start: ${entry.statusDetail ?? entry.status}`,
@@ -88,6 +97,7 @@ export async function installTestBuiltinPlugin(
 }
 
 export type TestAppHarnessConfigOverrides = Partial<ServerRuntimeConfig> & {
+  databaseSource?: string;
   appUpdateService?: AppUpdateService;
   appVersionService?: AppVersionService;
   terminalAttachTimeoutMs?: number;
@@ -122,11 +132,13 @@ function encodeTestDaemonKey(args: TestDaemonKeyParts): string {
 
 function decodeTestDaemonKey(token: string): TestDaemonKeyParts | null {
   const parts = token.split(":");
+
   if (parts.length !== 2 || parts[0] !== TEST_MACHINE_KEY_PREFIX) {
     return null;
   }
 
   const hostId = parts[1];
+
   if (hostId.length === 0) {
     return null;
   }
@@ -144,10 +156,31 @@ export function createTestDaemonHostKey(
 
 let migratedTemplate: Buffer | null = null;
 
+async function initializeTestPlugins(
+  pluginService: Pick<PluginService, "start">,
+): Promise<void> {
+  let startupHoldActive = true;
+
+  try {
+    await pluginService.start({
+      hold: {
+        sources: listBundledPluginRegistrations().map(
+          (plugin) => `builtin:${plugin.name}`,
+        ),
+        detail: "Builtin services are not started by the server test fixture",
+        isActive: async () => startupHoldActive,
+      },
+    });
+  } finally {
+    startupHoldActive = false;
+  }
+}
+
 export function createTestDb(): DbConnection {
   if (migratedTemplate === null) {
     migratedTemplate = initDb(":memory:").$client.serialize();
   }
+
   return createConnection(migratedTemplate);
 }
 
@@ -155,6 +188,7 @@ export async function createTestAppHarness(
   overrides: TestAppHarnessConfigOverrides = {},
 ): Promise<TestAppHarness> {
   const {
+    databaseSource,
     appUpdateService,
     appVersionService,
     terminalAttachTimeoutMs = TEST_TERMINAL_RPC_TIMEOUT_MS,
@@ -164,9 +198,14 @@ export async function createTestAppHarness(
     seedFirstPartyProviders = true,
     ...configOverrides
   } = overrides;
+
   const logger = createTestLogger();
-  const dataDir = await mkdtemp(join(tmpdir(), "bb-server-test-"));
-  const db = createTestDb();
+  const dataDir = await mkdtemp(join(tmpdir(), "omnyo-server-test-"));
+  const vault = await openSecretVault(dataDir);
+
+  const db =
+    databaseSource === undefined ? createTestDb() : initDb(databaseSource);
+
   setAppSettings(db, {
     ...getAppSettings(db),
     machineGitCredentialsEnabled: false,
@@ -175,9 +214,11 @@ export async function createTestAppHarness(
   const watchInterests = new WatchInterestCoordinator({ db, hub });
   const sharedPorts = new HostSharedPortCoordinator({ db, hub });
   const workspaceReadCaches = new WorkspaceReadCaches({ hub });
+
   const providerRegistry = createProviderRegistryService({
     readUserProviderPreferences: () => {
       const settings = getAppSettings(db);
+
       return {
         providerOrder: settings.providerOrder,
         disabledProviderIds: getDisabledProviderIds(db),
@@ -185,10 +226,13 @@ export async function createTestAppHarness(
       };
     },
   });
+
   const pluginHostArtifacts = new PluginHostArtifactRegistry();
+
   const providerNativeRoots = createProviderNativeRootsCache(
     nativeRootsClock === undefined ? {} : { now: nativeRootsClock },
   );
+
   for (const extra of overrides.extraProviders ?? []) {
     providerRegistry.register({
       ...buildPluginProviderRegistration({
@@ -202,32 +246,41 @@ export async function createTestAppHarness(
       iconNames: new Set<string>(),
     });
   }
+
   if (seedFirstPartyProviders) {
     await registerFirstPartyProviders(providerRegistry, {
       artifacts: pluginHostArtifacts,
     });
   }
+
   const lifecycleDedupers = createLifecycleDedupers();
+
   const machineAuth = await createMachineAuthService({
-    dataDir,
     db,
     logger,
+    vault,
   });
+
   await machineAuth.ensureReady();
+
   const testMachineAuth = {
     ...machineAuth,
     async verifyDaemonHostKey(token: string) {
       const testKey = decodeTestDaemonKey(token);
+
       if (testKey) {
         return {
           keyId: `test:${testKey.hostId}`,
           metadata: testKey,
         };
       }
+
       return machineAuth.verifyDaemonHostKey(token);
     },
   };
+
   const config: ServerRuntimeConfig = {
+    appAliasOrigins: [],
     appVersion: "0.0.0-test",
     builtinSkillsRootPath: join(dataDir, "builtin-skills"),
     customModels: [],
@@ -235,14 +288,14 @@ export async function createTestAppHarness(
     featureFlags: defaultFeatureFlags,
     performanceDiagnosticsAvailable: false,
     hostDaemonPort: 3001,
-    marketplaceUrl: "https://marketplace.invalid/marketplace.json",
     inheritedSkillsRootPaths: [],
     isDevelopment: true,
     serverPort: 3334,
     sharedSkillRoots: { user: [], project: [] },
-    appUrl: "https://bb.example.test",
+    appUrl: "https://omnyo.example.test",
     ...configOverrides,
   };
+
   const terminalSessions = new TerminalSessionLifecycle({
     attachTimeoutMs: terminalAttachTimeoutMs,
     ...(terminalCloseTimeoutMs === undefined
@@ -253,15 +306,20 @@ export async function createTestAppHarness(
     hub,
     logger,
     openTimeoutMs: terminalOpenTimeoutMs,
+    vault,
   });
-  const bbAppManagedConfig = await createBbAppManagedConfigReloader({
+
+  const omnyoAppManagedConfig = await createOmnyoAppManagedConfigReloader({
     config,
     hub,
     logger,
   });
+
   const telemetry = createNoopTelemetryService();
   const skillTreeRegistry = new SkillTreeRegistry();
+  const commandMetadata = new ServerCommandMetadata({ config, logger });
   const aiServices = createAiServiceRegistry();
+
   const pendingInteractions = new PendingInteractionLifecycle({
     config,
     db,
@@ -275,34 +333,40 @@ export async function createTestAppHarness(
     skillTreeRegistry,
     telemetry,
     terminalSessions,
+    vault,
   });
+
   pendingInteractions.start();
   setPluginToolCallRegistry(new PluginToolCallRegistry({ logger }));
+
   const appVersion =
     appVersionService ??
     createAppVersionService({
       sourceCommit: null,
       installKind: null,
       config,
-      logger,
     });
+
   const appUpdate =
     appUpdateService ??
     createAppUpdateService({
       currentCommit: null,
       appSurface: "web",
-      appVersion,
       config,
-      countRunningThreads: () => listRunningThreads(db).length,
+      countRunningThreads: () => countRunningThreadsForAppUpdate({ db, hub }),
+      dataDir: config.dataDir,
       launcher: null,
       logger,
       mode: null,
       notifyChanged: () => hub.notifySystem(["app-update-changed"]),
+      setDraining: () => undefined,
+      stopRunningThreads: async () => undefined,
     });
-  const deps: ServerAppDeps = {
+
+  const baseDeps: Omit<ServerAppDeps, "commandCatalogs"> = {
     appUpdate,
     appVersion,
-    bbAppManagedConfig,
+    managedAppConfig: omnyoAppManagedConfig,
     config,
     db,
     hub,
@@ -317,12 +381,20 @@ export async function createTestAppHarness(
     skillTreeRegistry,
     telemetry,
     terminalSessions,
+    vault,
     watchInterests,
     sharedPorts,
     workspaceReadCaches,
+    commandMetadata,
   };
+
+  const commandCatalogs = new ProjectCommandCatalogs(baseDeps);
+  const deps: ServerAppDeps = { ...baseDeps, commandCatalogs };
+
   const { app, pluginCatalogService, pluginService, serverMove } =
     createApp(deps);
+
+  await initializeTestPlugins(pluginService);
   installDefaultEnvironmentProviders();
 
   return {
@@ -335,9 +407,12 @@ export async function createTestAppHarness(
     pluginCatalogService,
     serverMove,
     async cleanup(): Promise<void> {
+      await commandCatalogs.dispose();
+      await commandMetadata.dispose();
       clearAllThreadProvisionSchedules();
       setPluginEnvironmentProviderBridge(undefined);
       await pluginService.stop();
+      await closeThreadTimelinePageBuilders(db);
       await rm(dataDir, {
         recursive: true,
         force: true,
@@ -363,11 +438,15 @@ export async function withTestHarness<T>(
 ): Promise<T> {
   const overrides: TestAppHarnessConfigOverrides =
     typeof overridesOrRun === "function" ? {} : overridesOrRun;
+
   const run = typeof overridesOrRun === "function" ? overridesOrRun : maybeRun;
+
   if (!run) {
     throw new Error("withTestHarness requires a run callback");
   }
+
   const harness = await createTestAppHarness(overrides);
+
   try {
     return await run(harness);
   } finally {
@@ -382,8 +461,12 @@ export async function startTestServer(
 ): Promise<RunningTestServer> {
   const harness = await createTestAppHarness(overrides);
   let addressInfo: AddressInfo | null = null;
+
   const { app, closeWebSockets, injectWebSocket, pluginService, serverMove } =
     createApp(harness.deps);
+
+  await initializeTestPlugins(pluginService);
+
   const server = serve(
     {
       hostname: TEST_SERVER_HOST,
@@ -394,11 +477,13 @@ export async function startTestServer(
       addressInfo = info;
     },
   );
+
   injectWebSocket(server);
 
   while (!addressInfo) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+
   const resolvedAddress: AddressInfo = addressInfo;
   harness.config.serverPort = resolvedAddress.port;
 
@@ -409,15 +494,20 @@ export async function startTestServer(
     serverMove,
     baseUrl: `http://${TEST_SERVER_HOST}:${resolvedAddress.port}`,
     async close(): Promise<void> {
+      await pluginService.stop();
+
       const closeServer = new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error) {
             reject(error);
+
             return;
           }
+
           resolve();
         });
       });
+
       await closeWebSockets();
       await closeServer;
       await harness.cleanup();

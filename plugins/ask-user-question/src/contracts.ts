@@ -4,9 +4,13 @@ import { TOO_FEW_OPTIONS_MESSAGE } from "./tool-definition.js";
 export const ASK_USER_QUESTION_RENDERER_ID = "ask-user-question";
 
 const MAX_QUESTIONS = 4;
+
 export const MAX_OPTIONS = 4;
+
 const MAX_SELECTED = MAX_OPTIONS;
+
 const MAX_FREE_TEXT_LENGTH = 4096;
+
 export const MAX_OPTION_PREVIEW_LENGTH = 4096;
 
 const nonBlank = (value: string) => value.trim().length > 0;
@@ -26,11 +30,13 @@ const interactionQuestionSchema = z.object({
   options: z.array(interactionOptionSchema).max(MAX_OPTIONS),
   allowFreeText: z.boolean(),
 });
+
 export type InteractionQuestion = z.infer<typeof interactionQuestionSchema>;
 
 export const interactionPayloadSchema = z.object({
   questions: z.array(interactionQuestionSchema).min(1).max(MAX_QUESTIONS),
 });
+
 export type InteractionPayload = z.infer<typeof interactionPayloadSchema>;
 
 const interactionAnswerSchema = z.object({
@@ -42,11 +48,13 @@ const interactionAnswerSchema = z.object({
     .refine(nonBlank, "Free text cannot be blank")
     .optional(),
 });
+
 export type InteractionAnswer = z.infer<typeof interactionAnswerSchema>;
 
 export const interactionResponseSchema = z.object({
   answers: z.record(z.string().min(1), interactionAnswerSchema),
 });
+
 export type InteractionResponse = z.infer<typeof interactionResponseSchema>;
 
 const toolOptionSchema = z.strictObject({
@@ -69,7 +77,7 @@ const toolOptionSchema = z.strictObject({
     .max(MAX_OPTION_PREVIEW_LENGTH)
     .optional()
     .describe(
-      "Optional preview content rendered when this option is focused. Use for mockups, code snippets, or visual comparisons that help users compare options. See the tool description for the expected content format.",
+      "Visual shown beneath the selected option. Use a Markdown image, a formatted HTML fragment or preformatted text. See the tool description for examples.",
     ),
 });
 
@@ -101,15 +109,28 @@ const toolQuestionSchema = z.strictObject({
     .describe(
       "Set to true to allow the user to select multiple options instead of just one. Use when choices are not mutually exclusive.",
     ),
+  delegable: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Set to true only for a reversible choice within authority you already hold, so a rule the owner adopted may answer it on the owner's behalf. Never set it when the question asks the owner to approve an effect that needs the owner's authorization: pushing, publishing, deploying, releasing, submitting, sending, purchasing, deleting data, changing an external service, creating an account, or saving anything that outlives the chat.",
+    ),
 });
 
 export const toolInputSchema = z.strictObject({
+  mode: z
+    .enum(["required", "optional"])
+    .default("required")
+    .describe(
+      "Required means the dependent action must wait for an answer; optional means continue with the stated reversible default.",
+    ),
   questions: z
     .array(toolQuestionSchema)
     .min(1)
     .max(MAX_QUESTIONS)
     .describe("Questions to ask the user (1-4 questions)"),
 });
+
 export type ToolInput = z.infer<typeof toolInputSchema>;
 
 interface ToolResultQuestion {

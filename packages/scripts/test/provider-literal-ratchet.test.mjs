@@ -11,6 +11,7 @@ import {
 } from "../../../scripts/check-provider-literal-ratchet.mjs";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+
 const SCRIPT = join(ROOT, "scripts", "check-provider-literal-ratchet.mjs");
 
 function run(args = [], env = {}) {
@@ -30,12 +31,14 @@ function run(args = [], env = {}) {
 }
 
 let dir;
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "ratchet-fixture-"));
   mkdirSync(join(dir, "packages", "core"), { recursive: true });
   mkdirSync(join(dir, "plugins", "provider-codex"), { recursive: true });
   mkdirSync(join(dir, "packages", "core", "__fixtures__"), { recursive: true });
 });
+
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 function write(rel, content) {
@@ -50,18 +53,29 @@ describe("scanTree (pure)", () => {
       "apps/cli/.packaged-plugin-build-IZlVup/cli-chunks/server.js",
       "apps/cli/src/server.ts",
     ],
-    [
-      "apps/demo-server/.wrangler/tmp/dev-R0GX8u/worker.js",
-      "apps/demo-server/src/worker.ts",
-    ],
+    ["apps/web/.wrangler/tmp/dev-R0GX8u/worker.js", "apps/web/src/worker.ts"],
     [
       "packages/plugin-sdk/.runtime-test-repro/provider-bridge-testing.js",
       "packages/plugin-sdk/src/provider-bridge.ts",
+    ],
+    [
+      "plugins/.bundled-stage-Nah5FC/src/server.ts",
+      "plugins/unrelated-plugin/src/server.ts",
     ],
   ])(
     "excludes generated artifact %s while scanning source",
     (artifact, source) => {
       write(artifact, 'const id = "codex";\n');
+      write(source, 'const id = "claude-code";\n');
+      expect(scanTree(dir).files).toEqual({ [source]: 1 });
+    },
+  );
+
+  it.each(["account-usage", "composer-predictions"])(
+    "excludes private provider integration %s while scanning its ordinary neighbor",
+    (plugin) => {
+      const source = `plugins/${plugin}-neighbor/server.ts`;
+      write(`plugins/${plugin}/server.ts`, 'const id = "codex";\n');
       write(source, 'const id = "claude-code";\n');
       expect(scanTree(dir).files).toEqual({ [source]: 1 });
     },
@@ -73,7 +87,7 @@ describe("scanTree (pure)", () => {
       'const m = { codexHint: "codex", claudeHint: "claude-code" };\n',
     );
     const { total, files } = scanTree(dir);
-    expect(files["packages/core/a.ts"]).toBe(2); // both ids on one line
+    expect(files["packages/core/a.ts"]).toBe(2);
     expect(total).toBe(2);
   });
 
@@ -110,19 +124,16 @@ describe("scanTree (pure)", () => {
   });
 
   it("excludes provider plugins, tests, and fixtures", () => {
-    write("plugins/provider-codex/server.ts", 'register("codex");\n'); // provider plugin
+    write("plugins/provider-codex/server.ts", 'register("codex");\n');
     write(
       "plugins/environment-modal-sandbox/server.ts",
       'const providerId = "codex";\n',
     );
-    write("packages/core/a.test.ts", 'expect("codex").toBe("codex");\n'); // test
-    write("packages/core/__fixtures__/f.ts", 'const id = "codex";\n'); // fixture
+    write("packages/core/a.test.ts", 'expect("codex").toBe("codex");\n');
+    write("packages/core/__fixtures__/f.ts", 'const id = "codex";\n');
     expect(scanTree(dir).total).toBe(0);
   });
 
-  // The published ACP bridge kit is a provider implementation that lives
-  // under packages/ so the plugin SDK can re-export it; it gets the same
-  // carve-out a provider plugin does. Its neighbours do not.
   it("excludes the published provider bridge kit but not its neighbours", () => {
     write(
       "packages/provider-bridge-acp/src/dialect.ts",
@@ -164,6 +175,7 @@ describe("scanTree (pure)", () => {
 
 describe("checkAllowlist (pure)", () => {
   const scan = { files: { "packages/core/a.ts": 2, "packages/core/b.ts": 1 } };
+
   const entry = (count) => ({
     count,
     reason: "legacy reader",
@@ -192,6 +204,7 @@ describe("checkAllowlist (pure)", () => {
       "packages/core/b.ts": entry(1),
       "packages/core/gone.ts": entry(1),
     });
+
     expect(problems.map((p) => p.trim()[0])).toEqual(["≠", "−"]);
   });
 
@@ -211,6 +224,7 @@ describe("checkAllowlist (pure)", () => {
         },
       },
     );
+
     expect(problems.map((p) => p.trim())).toEqual([
       "! packages/core/a.ts: allowlist entry has no owner",
       "! packages/core/a.ts: allowlist entry has no diesAt",
@@ -226,6 +240,7 @@ describe("ratchet CLI refusal paths (fixture root)", () => {
       allowlist,
     });
   }
+
   const entry = (count) => ({
     count,
     reason: "fixture",
@@ -236,28 +251,36 @@ describe("ratchet CLI refusal paths (fixture root)", () => {
   it("refuses --write when the live total rises above the committed baseline", () => {
     write("packages/core/a.ts", 'const id = "codex";\n');
     write("scripts/provider-literal-baseline.json", baseline({}));
-    const r = run(["--write"], { BB_RATCHET_ROOT: dir });
+    const r = run(["--write"], { OMNYO_RATCHET_ROOT: dir });
     expect(r.code, r.out).toBe(1);
     expect(r.out).toMatch(/Refusing to raise the baseline \(0 → 1\)/);
-    // The override is the documented escape hatch.
+
     expect(
-      run(["--write"], { BB_RATCHET_ROOT: dir, BB_RATCHET_ALLOW_INCREASE: "1" })
-        .code,
+      run(["--write"], {
+        OMNYO_RATCHET_ROOT: dir,
+        OMNYO_RATCHET_ALLOW_INCREASE: "1",
+      }).code,
     ).toBe(0);
   });
 
-  it("fails the exact-match check when a new core file carries a reference", () => {
-    write("packages/core/a.ts", 'const id = "codex";\n');
-    write("packages/core/b.ts", 'const other = "claude-code";\n');
-    write(
-      "scripts/provider-literal-baseline.json",
-      baseline({ "packages/core/a.ts": 1 }, { "packages/core/a.ts": entry(1) }),
-    );
-    const r = run([], { BB_RATCHET_ROOT: dir });
-    expect(r.code, r.out).toBe(1);
-    expect(r.out).toMatch(/core gained provider-id references/);
-    expect(r.out).toMatch(/\+ packages\/core\/b\.ts: 1/);
-  });
+  it.each(["packages/core/b.ts", "plugins/unrelated-plugin/server.ts"])(
+    "fails the exact-match check when new source %s carries a reference",
+    (source) => {
+      write("packages/core/a.ts", 'const id = "codex";\n');
+      write(source, 'const other = "claude-code";\n');
+      write(
+        "scripts/provider-literal-baseline.json",
+        baseline(
+          { "packages/core/a.ts": 1 },
+          { "packages/core/a.ts": entry(1) },
+        ),
+      );
+      const r = run([], { OMNYO_RATCHET_ROOT: dir });
+      expect(r.code, r.out).toBe(1);
+      expect(r.out).toMatch(/core gained provider-id references/);
+      expect(r.out).toContain(`+ ${source}: 1`);
+    },
+  );
 
   it("fails --base when a file's count rose vs the base ref, even with a regenerated baseline", () => {
     const git = (...args) =>
@@ -266,6 +289,7 @@ describe("ratchet CLI refusal paths (fixture root)", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       });
+
     git("init", "-q");
     git("config", "user.email", "ratchet@test");
     git("config", "user.name", "ratchet");
@@ -276,14 +300,14 @@ describe("ratchet CLI refusal paths (fixture root)", () => {
     );
     git("add", "-A");
     git("commit", "-q", "-m", "base");
-    // A second reference, and a baseline regenerated to match it.
+
     write("packages/core/a.ts", 'const id = "codex"; const again = "codex";\n');
     write(
       "scripts/provider-literal-baseline.json",
       baseline({ "packages/core/a.ts": 2 }, { "packages/core/a.ts": entry(2) }),
     );
-    expect(run([], { BB_RATCHET_ROOT: dir }).code).toBe(0); // exact match alone passes
-    const r = run(["--base", "HEAD"], { BB_RATCHET_ROOT: dir });
+    expect(run([], { OMNYO_RATCHET_ROOT: dir }).code).toBe(0);
+    const r = run(["--base", "HEAD"], { OMNYO_RATCHET_ROOT: dir });
     expect(r.code, r.out).toBe(1);
     expect(r.out).toMatch(/FAILED vs HEAD/);
     expect(r.out).toMatch(/↑ packages\/core\/a\.ts: 1 → 2/);
@@ -295,15 +319,13 @@ describe("ratchet CLI refusal paths (fixture root)", () => {
       "scripts/provider-literal-baseline.json",
       baseline({ "packages/core/a.ts": 1 }),
     );
-    const r = run([], { BB_RATCHET_ROOT: dir });
+    const r = run([], { OMNYO_RATCHET_ROOT: dir });
     expect(r.code, r.out).toBe(1);
     expect(r.out).toMatch(/outside the allowlist/);
   });
 });
 
 describe("ratchet CLI (against the real repo baseline)", () => {
-  // These two scan the whole repo tree: ~0.3s locally, ~6s on a slow CI
-  // runner, so vitest's 5s default is not enough headroom.
   it("passes against the committed baseline", () => {
     const r = run();
     expect(r.code, r.out).toBe(0);
@@ -311,11 +333,6 @@ describe("ratchet CLI (against the real repo baseline)", () => {
   }, 30_000);
 
   it("--write refuses to raise the total without the override", () => {
-    // The live tree already matches the baseline, so we cannot force an
-    // increase without editing tracked files. Instead assert the guard exists
-    // by checking the message path via --base against a synthetic higher ref is
-    // out of scope here; the pure fixture tests above cover counting. This
-    // asserts the OK path only.
     const result = run();
     expect(result.code, result.out).toBe(0);
   }, 30_000);

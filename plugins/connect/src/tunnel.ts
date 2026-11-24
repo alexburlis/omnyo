@@ -10,15 +10,15 @@ import {
   PROTOCOL_VERSION,
   TUNNEL_PROTOCOL_QUERY_PARAM,
   TUNNEL_REPLACED_CLOSE_REASON,
-} from "@bb/tunnel-contract";
+} from "@omnyo/tunnel-contract";
 import {
   humanizeTransportError,
   ReconnectBackoff,
   TunnelSession,
   type StreamOriginResult,
-} from "@bb/tunnel-client";
-import type { PluginLogger } from "@get-bb/plugin-sdk";
-import { deriveConnectBaseUrl } from "@bb/connect-client";
+} from "@omnyo/tunnel-client";
+import type { PluginLogger } from "@omnyo/plugin-sdk";
+import { deriveConnectBaseUrl } from "@omnyo/connect-client";
 import type { Account, SharedCredential } from "./account-client.js";
 import {
   ShareRegistry,
@@ -31,8 +31,11 @@ import type { ShareHost } from "./hosts.js";
 import type { ConnectStateName, ConnectStatus, ShareListing } from "./types.js";
 
 const TUNNEL_HANDSHAKE_TIMEOUT_MS = 10_000;
+
 const TUNNEL_CLOSE_GRACE_MS = 1_000;
+
 const TUNNEL_CLEAN_CLOSE_CODE = 1000;
+
 const TUNNEL_REPLACED_RETRY_MS = 5 * 60_000;
 
 export interface ConnectIdentity {
@@ -55,6 +58,7 @@ interface ConnectTunnelOptions {
 
 function identityOf(account: Account | null): ConnectIdentity | null {
   if (account === null) return null;
+
   return {
     serverId: account.serverId,
     serverUrl: account.serverUrl.replace(/\/$/u, ""),
@@ -68,6 +72,7 @@ function sameIdentity(
   right: ConnectIdentity | null,
 ): boolean {
   if (left === null || right === null) return left === right;
+
   return (
     left.serverId === right.serverId &&
     left.serverUrl === right.serverUrl &&
@@ -113,17 +118,20 @@ export class ConnectTunnel {
 
   setAccount(account: Account | null): void {
     const next = identityOf(account);
+
     if (sameIdentity(this.identity, next)) return;
     const running = !this.stopped;
     this.teardown();
     this.options.shares.clearMachineDeclarations();
     this.identity = next;
     this.lastError = null;
+
     if (running) {
       this.stopped = false;
       this.openTunnel();
       this.startShareActivation();
     }
+
     this.publish();
   }
 
@@ -132,31 +140,37 @@ export class ConnectTunnel {
     this.enabled = enabled;
     const running = !this.stopped;
     this.teardown();
+
     if (!enabled) this.options.shares.clearMachineDeclarations();
     this.lastError = null;
+
     if (running) {
       this.stopped = false;
       this.openTunnel();
       this.startShareActivation();
     }
+
     this.publish();
   }
 
   async signIn(work: () => Promise<Account | null>): Promise<ConnectStatus> {
     this.pairing = true;
     this.publish();
+
     try {
       this.setAccount(await work());
     } finally {
       this.pairing = false;
       this.publish();
     }
+
     return this.status();
   }
 
   async expose(port: number, host: ShareHost): Promise<ShareListing> {
     const listing = await this.options.shares.add(port, host);
     this.publish();
+
     return listing;
   }
 
@@ -166,6 +180,7 @@ export class ConnectTunnel {
   ): Promise<ShareRemoval & { port: number }> {
     const result = await this.options.shares.remove(port, hostSelector);
     this.publish();
+
     return { ...result, port };
   }
 
@@ -173,9 +188,11 @@ export class ConnectTunnel {
     const shares = await this.listShares(hostId);
     let removed = 0;
     const failures: string[] = [];
+
     for (const share of shares) {
       try {
         const result = await this.unexpose(share.port, share.hostId);
+
         if (result.removed) removed++;
       } catch (error) {
         failures.push(
@@ -183,11 +200,13 @@ export class ConnectTunnel {
         );
       }
     }
+
     if (failures.length > 0) {
       throw new Error(
         `Revoked ${removed} shared ports; failed to revoke ${failures.length}: ${failures.join("; ")}`,
       );
     }
+
     return { removed };
   }
 
@@ -210,6 +229,7 @@ export class ConnectTunnel {
 
   private statusWithShares(shares: ConnectStatus["shares"]): ConnectStatus {
     const state = this.computeState();
+
     return {
       state,
       paired: this.identity !== null,
@@ -228,21 +248,26 @@ export class ConnectTunnel {
 
   private dashboardUrl(): string {
     const base = this.identity?.baseUrl ?? this.options.defaultBaseUrl;
+
     return `${base.replace(/\/$/u, "")}/dashboard`;
   }
 
   private computeState(): ConnectStateName {
     if (this.pairing) return "pairing";
+
     if (this.identity === null || !this.enabled) return "disconnected";
+
     return this.connected ? "connected" : "reconnecting";
   }
 
   private publish(): void {
     const state = this.computeState();
+
     if (state !== this.lastState) {
       this.lastState = state;
       this.stateSince = Date.now();
     }
+
     this.options.onStatusChange?.(this.status());
   }
 
@@ -250,24 +275,29 @@ export class ConnectTunnel {
     this.shareActivationEpoch += 1;
     this.dialEpoch += 1;
     this.stopped = true;
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
+
     if (this.shareRetryTimer) {
       clearTimeout(this.shareRetryTimer);
       this.shareRetryTimer = undefined;
     }
+
     this.session?.dispose();
     this.session = undefined;
     this.remoteClients = 0;
     const tunnel = this.tunnel;
+
     if (tunnel !== undefined && tunnel.readyState === NodeWebSocket.OPEN) {
-      tunnel.close(TUNNEL_CLEAN_CLOSE_CODE, "tunnel closed by bb");
+      tunnel.close(TUNNEL_CLEAN_CLOSE_CODE, "tunnel closed by Omnyo");
       setTimeout(() => tunnel.terminate(), TUNNEL_CLOSE_GRACE_MS).unref?.();
     } else {
       tunnel?.terminate();
     }
+
     this.tunnel = undefined;
     this.connected = false;
     this.backoff.reset();
@@ -286,22 +316,29 @@ export class ConnectTunnel {
   private async activateShares(epoch: number): Promise<void> {
     try {
       await this.options.shares.load();
+
       if (!this.isShareActivationCurrent(epoch)) return;
+
       if (this.enabled) {
         await this.options.shares.declareMachineShares(() =>
           this.isShareActivationCurrent(epoch),
         );
+
         if (!this.isShareActivationCurrent(epoch)) return;
       }
+
       if (this.identity !== null) {
         await this.options.shares.list();
+
         if (!this.isShareActivationCurrent(epoch)) return;
       }
+
       this.publish();
     } catch (error) {
       this.options.log.warn(
         `shared-port activation failed; retrying: ${error instanceof Error ? error.message : String(error)}`,
       );
+
       if (
         this.identity !== null &&
         this.isShareActivationCurrent(epoch) &&
@@ -327,14 +364,19 @@ export class ConnectTunnel {
         },
       };
     }
+
     const port = Number(target);
+
     if (!Number.isInteger(port) || !this.options.shares.hasServerPort(port)) {
       return { kind: "unregistered" };
     }
+
     const identity = this.identity;
+
     if (identity === null) {
       return { kind: "unregistered" };
     }
+
     return {
       kind: "ok",
       resolved: {
@@ -366,6 +408,7 @@ export class ConnectTunnel {
     this.options.log.warn(`${detail}; reconnecting in ${delay}ms`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
+
       if (!this.isCurrentDial(epoch)) return;
       this.nextRetryAt = null;
       this.publish();
@@ -376,6 +419,7 @@ export class ConnectTunnel {
 
   private openTunnel(): void {
     const identity = this.identity;
+
     if (identity === null || this.stopped || !this.enabled) return;
     const epoch = ++this.dialEpoch;
     void this.dialWithCredential(identity, epoch);
@@ -386,28 +430,46 @@ export class ConnectTunnel {
     epoch: number,
   ): Promise<void> {
     let shared: SharedCredential | null;
+
     try {
       shared = await this.options.readCredential();
     } catch (error) {
       if (!this.isCurrentDial(epoch)) return;
-      this.lastError = `can't read this bb's server credential — ${
+      this.lastError = `can't read this Omnyo's server credential — ${
         error instanceof Error ? error.message : String(error)
       }`;
       this.scheduleRetry(epoch, this.lastError, 0);
+
       return;
     }
+
     if (!this.isCurrentDial(epoch)) return;
+
     if (shared === null) {
       this.signedOut();
+
       return;
     }
+
+    if (
+      shared.serverId !== identity.serverId ||
+      shared.baseUrl !== identity.baseUrl ||
+      shared.serverUrl.replace(/\/$/u, "") !== identity.serverUrl
+    ) {
+      this.lastError =
+        "The account pairing changed before the tunnel opened; waiting for its current address";
+      this.publish();
+
+      return;
+    }
+
     this.dial(identity, shared.credential, epoch);
   }
 
   private confirmRefused(credential: string): void {
     this.options.confirmRefusedCredential(credential).catch((error) => {
       this.options.log.warn(
-        `couldn't ask bb account to check the refused credential: ${
+        `couldn't ask Omnyo account to check the refused credential: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -416,7 +478,7 @@ export class ConnectTunnel {
 
   private signedOut(): void {
     this.lastError =
-      "this bb isn't signed in to a bb account — sign in to turn remote access back on";
+      "this Omnyo isn't signed in to an Omnyo account — sign in to turn remote access back on";
     this.options.log.warn(this.lastError);
     this.publish();
   }
@@ -431,6 +493,7 @@ export class ConnectTunnel {
       `tunnel connecting to ${tunnelUrl} (origin ${this.options.getLoopbackBaseUrl()})`,
     );
     const dialStartedAt = Date.now();
+
     const diagnostics: DialDiagnostics = {
       lookupMs: null,
       connectMs: null,
@@ -439,7 +502,9 @@ export class ConnectTunnel {
       ray: null,
       colo: null,
     };
+
     let tunnel: NodeWebSocket;
+
     try {
       tunnel = new NodeWebSocket(tunnelUrl, {
         headers: { authorization: `Bearer ${credential}` },
@@ -453,16 +518,21 @@ export class ConnectTunnel {
         error instanceof Error ? error.message : String(error)
       }`;
       this.scheduleRetry(epoch, this.lastError, 0);
+
       return;
     }
+
     this.tunnel = tunnel;
     let connectedAt = 0;
+
     let transportError: {
       message: string;
       code: string | number | null;
     } | null = null;
+
     let retryScheduled = false;
     let handshakeDeadline: ReturnType<typeof setTimeout> | undefined;
+
     const isCurrent = () =>
       !retryScheduled && this.isCurrentDial(epoch) && this.tunnel === tunnel;
 
@@ -470,9 +540,11 @@ export class ConnectTunnel {
       if (!isCurrent()) return;
       retryScheduled = true;
       clearTimeout(handshakeDeadline);
+
       if (this.lastError === null) {
         this.lastError = `can't reach ${connectApexHost(identity)} — connection closed`;
       }
+
       this.scheduleRetry(
         epoch,
         detail,
@@ -492,6 +564,7 @@ export class ConnectTunnel {
     tunnel.on("upgrade", (response: IncomingMessage) => {
       diagnostics.upgradeMs = Date.now() - dialStartedAt;
       const ray = response.headers["cf-ray"];
+
       if (typeof ray === "string") {
         diagnostics.ray = ray;
         diagnostics.colo = ray.split("-").at(-1) ?? null;
@@ -526,8 +599,9 @@ export class ConnectTunnel {
       const statusCode = res.statusCode ?? 0;
       const refused = statusCode === 401 || statusCode === 403;
       this.lastError = refused
-        ? `the gate refused this bb's server credential (HTTP ${statusCode})`
+        ? `the gate refused this Omnyo's server credential (HTTP ${statusCode})`
         : `tunnel rejected: HTTP ${statusCode}`;
+
       if (refused) this.confirmRefused(credential);
       retry(this.lastError);
       tunnel.terminate();
@@ -546,6 +620,7 @@ export class ConnectTunnel {
       if (!isCurrent()) return;
       const now = Date.now();
       const lastHeartbeatAckAt = this.session?.lastHeartbeatAckAt ?? null;
+
       const detail = `tunnel closed (code ${code}${reason.length > 0 ? `, ${reason.toString()}` : ""}) ${JSON.stringify(
         {
           transportError,
@@ -561,15 +636,18 @@ export class ConnectTunnel {
           traffic: this.session?.snapshot(now) ?? null,
         },
       )}`;
+
       if (
         code === TUNNEL_CLEAN_CLOSE_CODE &&
         reason.toString() === TUNNEL_REPLACED_CLOSE_REASON
       ) {
         this.lastError =
-          "another bb connected with this server's identity and took over bb connect";
+          "another Omnyo connected with this server's identity and took over Omnyo connect";
         retry(`${detail}; ${this.lastError}`, TUNNEL_REPLACED_RETRY_MS);
+
         return;
       }
+
       retry(detail);
     });
   }
@@ -590,6 +668,7 @@ function timedTlsConnection(
 ): typeof createConnection {
   const connect = (options: ConnectionOptions): TLSSocket => {
     const host = options.host ?? "";
+
     const socket = tlsConnect({
       ...options,
       path: undefined,
@@ -600,6 +679,7 @@ function timedTlsConnection(
             : host
           : options.servername,
     });
+
     socket.once("lookup", () => {
       diagnostics.lookupMs = Date.now() - startedAt;
     });
@@ -609,8 +689,10 @@ function timedTlsConnection(
     socket.once("secureConnect", () => {
       diagnostics.tlsMs = Date.now() - startedAt;
     });
+
     return socket;
   };
+
   return connect as typeof createConnection;
 }
 
@@ -621,7 +703,7 @@ function connectApexHost(identity: ConnectIdentity): string {
     try {
       return new URL(deriveConnectBaseUrl(identity.serverUrl)).host;
     } catch {
-      return "getbb.app";
+      return "omnyo.link";
     }
   }
 }
@@ -629,5 +711,6 @@ function connectApexHost(identity: ConnectIdentity): string {
 function tunnelDialUrl(serverUrl: string): string {
   const url = new URL(`${serverUrl.replace(/^http/u, "ws")}/__tunnel`);
   url.searchParams.set(TUNNEL_PROTOCOL_QUERY_PARAM, String(PROTOCOL_VERSION));
+
   return url.toString();
 }

@@ -15,6 +15,7 @@ describe("CommentProviderAvatar", () => {
       icon: null,
       strings: { iconTint: null },
     };
+
     const { container } = render(<CommentProviderAvatar provider={provider} />);
 
     expect(screen.getByRole("img", { name: "Codex" })).toBeTruthy();
@@ -41,6 +42,7 @@ describe("CommentProviderAvatar", () => {
       icon: { glyph: "Check" },
       strings: { iconTint: { light: "#123456", dark: "#abcdef" } },
     };
+
     const { container } = render(<CommentProviderAvatar provider={provider} />);
 
     expect(screen.getByRole("img", { name: "Unknown Agent" })).toBeTruthy();

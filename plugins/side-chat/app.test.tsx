@@ -1,14 +1,24 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
+
+const toasts = vi.hoisted(() => ({
+  success: vi.fn(() => "toast_1"),
+  error: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({ toast: toasts }));
 
 const app = await loadPluginApp(() => import("./app"));
+
 const { parsePanelParams } = await import("./app");
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  toasts.success.mockClear();
+  toasts.error.mockClear();
 });
 
 function stubRpcFetch(
@@ -18,13 +28,16 @@ function stubRpcFetch(
     const method = String(url).split("/rpc/")[1] ?? "";
     const input: unknown = init?.body ? JSON.parse(String(init.body)) : null;
     const result = handler(decodeURIComponent(method), input);
+
     return {
       ok: true,
       status: 200,
       json: async () => ({ ok: true, result }),
     } as unknown as Response;
   });
+
   vi.stubGlobal("fetch", fetchMock);
+
   return fetchMock;
 }
 
@@ -71,8 +84,10 @@ describe("reply-in-side-chat message action", () => {
   it("creates the fork then opens the panel tab pointing at it", async () => {
     const fetchMock = stubRpcFetch((method) => {
       expect(method).toBe("createSideChat");
+
       return { threadId: "thr_fork" };
     });
+
     const openPanel = vi.fn(() => true);
 
     await app.messageActions[0]!.run({
@@ -93,9 +108,11 @@ describe("reply-in-side-chat message action", () => {
       "/api/v1/plugins/side-chat/rpc/createSideChat",
       expect.objectContaining({ method: "POST" }),
     );
+
     const body = JSON.parse(
       String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
     );
+
     expect(body).toEqual({
       sourceThreadId: "thr_src",
       sourceSeqEnd: 42,
@@ -115,19 +132,24 @@ describe("reply-in-side-chat message action", () => {
 
   it("single-flights a double invocation while the first fork RPC is pending", async () => {
     let resolveRpc!: (value: unknown) => void;
+
     const deferred = new Promise((resolve) => {
       resolveRpc = resolve;
     });
+
     const fetchMock = vi.fn(async () => {
       await deferred;
+
       return {
         ok: true,
         status: 200,
         json: async () => ({ ok: true, result: { threadId: "thr_fork" } }),
       } as unknown as Response;
     });
+
     vi.stubGlobal("fetch", fetchMock);
     const openPanel = vi.fn(() => true);
+
     const context = {
       threadId: "thr_src",
       message: {
@@ -201,31 +223,32 @@ describe("SideChatPanel", () => {
       { rpc: {} },
     );
 
-    const chat = slot.getByTestId("bb-thread-chat");
+    const chat = slot.getByTestId("omnyo-thread-chat");
     expect(chat.getAttribute("data-thread-id")).toBe("thr_fork");
     expect(chat.getAttribute("data-variant")).toBe("compact");
     expect(chat.getAttribute("data-layout")).toBe("contained");
     expect(chat.getAttribute("data-permission-policy")).toBe("editable");
     expect(chat.getAttribute("data-message-actions")).toBe("send-to-main");
 
-    const leading = slot.getByTestId("bb-thread-chat-leading-content");
+    const leading = slot.getByTestId("omnyo-thread-chat-leading-content");
     expect(leading.textContent).toContain("Replying to");
-    const markdown = leading.querySelector("[data-testid='bb-markdown']");
+    const markdown = leading.querySelector("[data-testid='omnyo-markdown']");
     expect(markdown?.textContent).toContain("**anchor**");
 
-    const action = slot.getByTestId("bb-thread-chat-action-send-to-main");
+    const action = slot.getByTestId("omnyo-thread-chat-action-send-to-main");
     expect(action.getAttribute("data-roles")).toBe("assistant");
   });
 
   it("send-to-main queues the message text on the source thread through the public API", async () => {
     const create = vi.fn(async () => ({ id: "qm_1" }) as never);
+
     const slot = renderSlot(
       app.threadPanelActions[0]!,
       { threadId: "thr_src", params },
       { rpc: {}, sdk: { threads: { queuedMessages: { create } } } },
     );
 
-    fireEvent.click(slot.getByTestId("bb-thread-chat-action-send-to-main"));
+    fireEvent.click(slot.getByTestId("omnyo-thread-chat-action-send-to-main"));
 
     await waitFor(() => {
       expect(create).toHaveBeenCalledWith({
@@ -237,12 +260,45 @@ describe("SideChatPanel", () => {
     expect(slot.rpcCalls).toEqual([]);
   });
 
+  it("confirms send-to-main at once and turns the confirmation into the failure", async () => {
+    let fail: (error: Error) => void = () => {};
+
+    const create = vi.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+
+    const slot = renderSlot(
+      app.threadPanelActions[0]!,
+      { threadId: "thr_src", params },
+      { rpc: {}, sdk: { threads: { queuedMessages: { create } } } },
+    );
+
+    fireEvent.click(slot.getByTestId("omnyo-thread-chat-action-send-to-main"));
+
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(toasts.success).toHaveBeenCalledWith("Sent to main thread");
+    expect(toasts.error).not.toHaveBeenCalled();
+
+    fail(new Error("Host offline"));
+
+    await waitFor(() =>
+      expect(toasts.error).toHaveBeenCalledWith(
+        "Failed to send to main thread: Host offline",
+        { id: "toast_1" },
+      ),
+    );
+  });
+
   it("reports a missing thread reference for malformed params", () => {
     const slot = renderSlot(
       app.threadPanelActions[0]!,
       { threadId: "thr_src", params: { bogus: true } },
       { rpc: {} },
     );
+
     expect(slot.getByRole("alert").textContent).toContain(
       "missing its thread reference",
     );

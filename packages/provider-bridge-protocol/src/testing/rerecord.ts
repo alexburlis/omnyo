@@ -31,6 +31,7 @@ interface WireMessage {
 function parseWireLine(line: string): WireMessage | null {
   try {
     const parsed: unknown = JSON.parse(line);
+
     return typeof parsed === "object" && parsed !== null
       ? (parsed as WireMessage)
       : null;
@@ -52,6 +53,7 @@ export async function rerecordCurrentBridgeLane(
 ): Promise<RerecordCurrentBridgeLaneResult> {
   const recording = readBridgeRecording(options.recordingDir);
   const run = await replayRecording({ ...options, planFromCurrentLane: false });
+
   if (run.stalls.length > 0) {
     return {
       file: null,
@@ -60,32 +62,41 @@ export async function rerecordCurrentBridgeLane(
       stalls: run.stalls,
     };
   }
+
   const firstRuntime = recording.entries.find(
     (entry) => entry.dir === "runtime→bridge",
   );
+
   const recordedRequestIds = new Map<string, Array<string | number>>();
+
   for (const entry of recording.entries) {
     if (entry.dir !== BRIDGE_TO_RUNTIME) continue;
     const message = parseWireLine(entry.line);
+
     if (message?.method === undefined || message.id === undefined) continue;
     const queue = recordedRequestIds.get(message.method) ?? [];
     queue.push(message.id);
     recordedRequestIds.set(message.method, queue);
   }
+
   const entries: LaneEntry[] = [];
   const perAnchor = new Map<string, number>();
   run.lines.forEach((rawLine, index) => {
     let line = rawLine;
     const message = parseWireLine(rawLine);
+
     if (message?.id === PARITY_INITIALIZE_ID) {
       return;
     }
+
     if (message?.method !== undefined && message.id !== undefined) {
       const recordedId = recordedRequestIds.get(message.method)?.shift();
+
       if (recordedId !== undefined && recordedId !== message.id) {
         line = JSON.stringify({ ...message, id: recordedId });
       }
     }
+
     const anchor =
       run.lineAfter[index] ??
       (firstRuntime
@@ -95,6 +106,7 @@ export async function rerecordCurrentBridgeLane(
             ts: firstRuntime.ts,
           }
         : { run: 0, seq: 0, ts: 0 });
+
     const anchorKey = `${anchor.run}:${anchor.seq}`;
     const ordinal = (perAnchor.get(anchorKey) ?? 0) + 1;
     perAnchor.set(anchorKey, ordinal);
@@ -112,5 +124,6 @@ export async function rerecordCurrentBridgeLane(
     entries.map((entry) => JSON.stringify(entry)).join("\n") +
       (entries.length > 0 ? "\n" : ""),
   );
+
   return { file, lines: entries.length, events: run.events.length, stalls: [] };
 }

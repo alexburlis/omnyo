@@ -2,7 +2,7 @@ import path from "node:path";
 import type {
   GitBranchRefClassification,
   WorkspaceGitOperation,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   detectGitRepoKind,
   detectLinkedWorktree,
@@ -15,14 +15,19 @@ import {
   readDefaultBranchRefs,
   type GitProcessOptions,
   withGitRefMutationLock,
-} from "@bb/host-workspace";
-import type { HostDaemonOnlineRpcResult } from "@bb/host-daemon-contract";
-import { CommandDispatchError } from "../command-dispatch-support.js";
+} from "@omnyo/host-workspace";
+import type { HostDaemonOnlineRpcResult } from "@omnyo/host-daemon-contract";
+import { CommandDispatchError } from "../command-errors.js";
 import type {
   CommandDispatchOptions,
   CommandOf,
 } from "../command-dispatch-support.js";
 import { userExecutableProcessOptions } from "../user-executable-env.js";
+
+type HostGitReadOptions = Partial<
+  Pick<CommandDispatchOptions, "runtimeManager">
+> &
+  GitProcessOptions;
 
 interface LimitBranchListArgs {
   branches: readonly string[];
@@ -54,10 +59,14 @@ interface ReadBranchOptionsArgs extends GitProcessOptions {
 }
 
 const REMOTE_BRANCH_FETCH_THROTTLE_MS = 30_000;
+
 const REMOTE_BRANCH_FETCH_TIMEOUT_MS = 5_000;
+
 const NO_GIT_OPERATION: WorkspaceGitOperation = { kind: "none" };
 
 type RemoteRefreshMode = "background" | "blocking";
+
+const pendingHostBranchRefreshes = new Set<Promise<void>>();
 
 const remoteBranchFetchStateByCommonDir = new Map<
   string,
@@ -74,12 +83,14 @@ function limitBranchList({
   query,
 }: LimitBranchListArgs): LimitedBranchList {
   const normalizedQuery = query?.trim().toLowerCase();
+
   const filteredBranches =
     normalizedQuery && normalizedQuery.length > 0
       ? branches.filter((branch) =>
           branch.toLowerCase().includes(normalizedQuery),
         )
       : [...branches];
+
   return {
     branches: filteredBranches.slice(0, limit),
     truncated: filteredBranches.length > limit,
@@ -122,27 +133,34 @@ async function refreshRemoteBranches(
   const commonDir = await getGitCommonDir(cwd, options);
   const interactive = mode === "blocking";
   const existingState = remoteBranchFetchStateByCommonDir.get(commonDir);
+
   if (existingState?.inFlight) {
     await existingState.inFlight;
   }
 
   const settledState = remoteBranchFetchStateByCommonDir.get(commonDir);
+
   if (settledState?.inFlight) {
     await settledState.inFlight;
+
     return;
   }
+
   const throttled =
     settledState !== undefined &&
     Date.now() - settledState.fetchedAt < REMOTE_BRANCH_FETCH_THROTTLE_MS;
+
   if (throttled && !(interactive && settledState.needsInteractiveRetry)) {
     return;
   }
 
   const refreshDeadline = Date.now() + REMOTE_BRANCH_FETCH_TIMEOUT_MS;
+
   const inFlight = withGitRefMutationLock(
     commonDir,
     () => {
       const remainingTimeoutMs = Math.max(1, refreshDeadline - Date.now());
+
       return fetchRemoteBranches(cwd, {
         ...options,
         interactive,
@@ -183,11 +201,13 @@ async function readBranchOptions({
 > {
   const { branches, defaultBranch, originDefaultBranch, remoteBranches } =
     await listBranchRefsWithDefaults(cwd, gitProcessOptions);
+
   const limitedBranches = limitBranchList({
     branches: pinBranch({ branches, branch: defaultBranch }),
     limit,
     query,
   });
+
   const limitedRemoteBranches = limitBranchList({
     branches: pinBranch({
       branches: remoteBranches,
@@ -196,6 +216,7 @@ async function readBranchOptions({
     limit,
     query,
   });
+
   return {
     branches: limitedBranches.branches,
     branchesTruncated: limitedBranches.truncated,
@@ -211,15 +232,21 @@ async function readBranchOptions({
 
 export async function listHostBranchOptions(
   command: CommandOf<"host.list_branch_options">,
-  options?: Pick<CommandDispatchOptions, "runtimeManager">,
+  options?: HostGitReadOptions,
 ): Promise<HostDaemonOnlineRpcResult<"host.list_branch_options">> {
   if (!path.isAbsolute(command.path)) {
     throw new CommandDispatchError("invalid_path", "Path must be absolute");
   }
 
-  const gitProcessOptions = userExecutableProcessOptions(
-    options?.runtimeManager.getShellEnv() ?? {},
-  );
+  const gitProcessOptions = {
+    ...userExecutableProcessOptions(
+      options?.runtimeManager?.getShellEnv() ?? {},
+    ),
+    ...(options?.shellPath === undefined
+      ? {}
+      : { shellPath: options.shellPath }),
+  };
+
   if ((await detectGitRepoKind(command.path, gitProcessOptions)) === "none") {
     return {
       branches: [],
@@ -235,11 +262,7 @@ export async function listHostBranchOptions(
   }
 
   if (command.remoteRefresh === "background") {
-    void refreshRemoteBranches(
-      command.path,
-      gitProcessOptions,
-      "background",
-    ).catch(() => undefined);
+    scheduleRemoteBranchRefresh(command.path, gitProcessOptions);
   }
 
   return readBranchOptions({ ...command, ...gitProcessOptions });
@@ -247,16 +270,23 @@ export async function listHostBranchOptions(
 
 export async function inspectHostGitSource(
   command: CommandOf<"host.inspect_git_source">,
-  options?: Pick<CommandDispatchOptions, "runtimeManager">,
+  options?: HostGitReadOptions,
 ): Promise<HostDaemonOnlineRpcResult<"host.inspect_git_source">> {
   if (!path.isAbsolute(command.path)) {
     throw new CommandDispatchError("invalid_path", "Path must be absolute");
   }
 
-  const gitProcessOptions = userExecutableProcessOptions(
-    options?.runtimeManager.getShellEnv() ?? {},
-  );
+  const gitProcessOptions = {
+    ...userExecutableProcessOptions(
+      options?.runtimeManager?.getShellEnv() ?? {},
+    ),
+    ...(options?.shellPath === undefined
+      ? {}
+      : { shellPath: options.shellPath }),
+  };
+
   const repoKind = await detectGitRepoKind(command.path, gitProcessOptions);
+
   if (repoKind === "none") {
     return {
       checkout: { kind: "unknown", reason: "Path is not a git repository" },
@@ -272,11 +302,7 @@ export async function inspectHostGitSource(
   if (command.remoteRefresh === "blocking") {
     await refreshRemoteBranches(command.path, gitProcessOptions, "blocking");
   } else {
-    void refreshRemoteBranches(
-      command.path,
-      gitProcessOptions,
-      "background",
-    ).catch(() => undefined);
+    scheduleRemoteBranchRefresh(command.path, gitProcessOptions);
   }
 
   const [checkout, defaultRefs, dirty, operation, isWorktree] =
@@ -293,8 +319,10 @@ export async function inspectHostGitSource(
         ? detectLinkedWorktree(command.path, gitProcessOptions)
         : false,
     ]);
+
   const defaultBranch = defaultRefs.defaultBranch;
   const originDefaultBranch = defaultRefs.originDefaultBranch;
+
   return {
     checkout,
     defaultBranch: defaultBranch ?? null,
@@ -304,4 +332,20 @@ export async function inspectHostGitSource(
     operation,
     originDefaultBranch: originDefaultBranch ?? null,
   };
+}
+
+function scheduleRemoteBranchRefresh(
+  cwd: string,
+  options: GitProcessOptions,
+): void {
+  const pending = refreshRemoteBranches(cwd, options, "background");
+  pendingHostBranchRefreshes.add(pending);
+  void pending
+    .catch(() => undefined)
+    .finally(() => pendingHostBranchRefreshes.delete(pending));
+}
+
+export async function drainHostBranchRefreshes(): Promise<void> {
+  while (pendingHostBranchRefreshes.size > 0)
+    await Promise.allSettled([...pendingHostBranchRefreshes]);
 }

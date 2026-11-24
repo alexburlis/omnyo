@@ -1,10 +1,19 @@
+import type { GitActivity, GitActivityPush } from "@omnyo/domain";
 import type {
   TimelineCommandWorkRow,
   TimelineRow,
   TimelineRowStatus,
-} from "@bb/server-contract";
-import { displayWidth } from "@bb/text-utils";
+} from "@omnyo/server-contract";
+import { displayWidth } from "@omnyo/text-utils";
 import { assertNever } from "./assert-never.js";
+import { plural } from "./format-helpers.js";
+import {
+  formatGitActivityRemoteLabel,
+  formatTurnGitActivitySentence,
+  shortGitSha,
+  summarizeTurnGitActivity,
+} from "./turn-git-activity.js";
+import { userMessageSourceLabel } from "./user-message-source.js";
 import {
   buildTimelineWorkSummaryLabel,
   buildTimelineViewRows,
@@ -86,6 +95,7 @@ function cyan(text: string, color: boolean): string {
 function separator(label: string, color: boolean): string {
   const pad = Math.max(0, 60 - displayWidth(label) - 4);
   const suffix = "─".repeat(pad);
+
   return dim(
     suffix.length > 0 ? `── ${label} ${suffix}` : `── ${label}`,
     color,
@@ -96,6 +106,7 @@ function rowHeader(label: string, context: TimelineTextFormatContext): string {
   if (context.depth === 0) {
     return separator(label, context.color);
   }
+
   return dim(`── ${label}`, context.color);
 }
 
@@ -143,6 +154,7 @@ function workStatusLabel(row: TimelineViewWorkRow, color: boolean): string {
   ) {
     return red("denied", color);
   }
+
   if (
     (row.workKind === "command" ||
       row.workKind === "tool" ||
@@ -151,6 +163,7 @@ function workStatusLabel(row: TimelineViewWorkRow, color: boolean): string {
   ) {
     return yellow("waiting", color);
   }
+
   return statusLabel(row.status, color);
 }
 
@@ -172,12 +185,15 @@ function formatCommandExitCodeLine(
   if (row.exitCode === null || row.status === "pending") {
     return null;
   }
+
   if (row.exitCode === 0 && row.output.trim().length > 0) {
     return null;
   }
+
   if (row.exitCode === 0) {
     return dim("  exit code 0", color);
   }
+
   return dim(`  exit ${row.exitCode}`, color);
 }
 
@@ -186,9 +202,11 @@ function formatWorkBody(
   context: TimelineTextFormatContext,
 ): string[] {
   const lines: string[] = [];
+
   switch (row.workKind) {
     case "command":
       lines.push(`  $ ${cyan(row.command, context.color)}`);
+
       if (
         context.verbose &&
         row.output.trim() &&
@@ -196,28 +214,39 @@ function formatWorkBody(
       ) {
         lines.push(formatWorkOutput(row.output, context.color));
       }
+
       const exitCodeLine = formatCommandExitCodeLine(row, context.color);
+
       if (exitCodeLine) {
         lines.push(exitCodeLine);
       }
+
       return lines;
     case "tool":
       if (row.approvalStatus !== null) {
         lines.push(`  ${workStatusLabel(row, context.color)}`);
       }
+
       if (context.verbose && row.output.trim()) {
         lines.push(formatWorkOutput(row.output, context.color));
       }
+
       return lines;
     case "file-change":
       if (row.approvalStatus !== null) {
         lines.push(`  ${workStatusLabel(row, context.color)}`);
       }
+
+      if (context.verbose && row.stderr?.trim()) {
+        lines.push(red(indentBlock(row.stderr.trimEnd(), "  "), context.color));
+      }
+
       if (context.verbose && row.change.diff) {
         lines.push(
           dim(indentBlock(row.change.diff.trimEnd(), "  "), context.color),
         );
       }
+
       return lines;
     case "web-search":
       return lines;
@@ -241,9 +270,11 @@ function formatWorkBody(
                 : step.status === "failed"
                   ? "[!]"
                   : "[ ]";
+
           lines.push(dim(`  ${marker} ${step.step}`, context.color));
         }
       }
+
       return lines;
     case "extension":
       if (row.presentation.detail && row.presentation.detail.trim()) {
@@ -251,6 +282,7 @@ function formatWorkBody(
           dim(indentBlock(row.presentation.detail, "  "), context.color),
         );
       }
+
       return lines;
     case "approval":
     case "question":
@@ -266,6 +298,7 @@ function formatWorkBody(
           ),
         );
       }
+
       return lines;
     default:
       return assertNever(row);
@@ -279,6 +312,7 @@ function formatWorkRow(
   const lines = [rowHeader(formatWorkTitle(row, context), context)];
   const bodyLines = formatWorkBody(row, context);
   lines.push(...bodyLines);
+
   return lines.join("\n");
 }
 
@@ -287,14 +321,18 @@ function formatExplorationWorkDetails(
 ): string[] {
   let lastEmittedKey: string | null = null;
   const details: string[] = [];
+
   for (const intent of timelineRowActivityIntents(row)) {
     if (intent.type === "unknown") {
       continue;
     }
+
     const dedupeKey = getTimelineActivityIntentDetailDedupeKey(intent);
+
     if (dedupeKey !== null && dedupeKey === lastEmittedKey) {
       continue;
     }
+
     details.push(
       formatTimelineActivityIntentDetail({
         intent,
@@ -304,6 +342,7 @@ function formatExplorationWorkDetails(
     );
     lastEmittedKey = dedupeKey;
   }
+
   return details;
 }
 
@@ -313,11 +352,13 @@ function formatWorkSummaryDetails(
 ): string[] {
   const lines: string[] = [];
   const childContext = nestedContext(context, null);
+
   for (const child of row.children) {
     if (child.kind === "system") {
       lines.push(formatRow(child, childContext));
       continue;
     }
+
     if (
       (child.workKind === "command" ||
         child.workKind === "file-read" ||
@@ -331,6 +372,7 @@ function formatWorkSummaryDetails(
       );
       continue;
     }
+
     if (
       child.workKind === "web-search" ||
       child.workKind === "web-fetch" ||
@@ -341,8 +383,10 @@ function formatWorkSummaryDetails(
       lines.push(rowHeader(formatWorkTitle(child, childContext), childContext));
       continue;
     }
+
     lines.push(formatWorkRow(child, childContext));
   }
+
   return lines;
 }
 
@@ -352,18 +396,22 @@ function formatWorkSummary(
 ): string {
   const isActive =
     row.kind === "bundle-summary" && row.id === context.activeLatestBundleId;
+
   const lines = [
     rowHeader(
       buildTimelineWorkSummaryLabel(row, { active: isActive }),
       context,
     ),
   ];
+
   if (context.verbose || row.kind === "bundle-summary") {
     const details = formatWorkSummaryDetails(row, context);
+
     if (details.length > 0) {
       lines.push(indentBlock(details.join("\n"), "  "));
     }
   }
+
   return lines.join("\n");
 }
 
@@ -380,9 +428,55 @@ function formatConversationRequestLabel(
   if (row.role !== "user" || row.turnRequest.kind !== "steer") {
     return null;
   }
+
   if (row.turnRequest.status === "pending") return "steer pending";
+
   if (row.turnRequest.status === "rejected") return "steer failed";
+
   return "steer";
+}
+
+function formatGitPushLine(
+  activity: GitActivity,
+  push: GitActivityPush,
+): string {
+  const remoteLabel = formatGitActivityRemoteLabel(activity, push.remote);
+
+  return [
+    `${push.branch} -> ${push.remote}${remoteLabel === null ? "" : ` (${remoteLabel})`}`,
+    ...(push.commitCount === null ? [] : [plural(push.commitCount, "commit")]),
+    ...(push.forced ? ["forced"] : []),
+    ...(push.oldSha === null ? ["new branch"] : []),
+  ].join(", ");
+}
+
+function formatTurnGitLine(
+  row: TimelineConversationViewRow,
+  context: TimelineTextFormatContext,
+): string | null {
+  const activity = row.role === "assistant" ? row.turnGit : null;
+
+  if (!activity) return null;
+
+  const sentence = formatTurnGitActivitySentence(
+    summarizeTurnGitActivity(activity),
+  );
+
+  if (sentence === null) return null;
+
+  const detailLines = context.verbose
+    ? [
+        ...activity.commits.map(
+          (commit) =>
+            `  ${shortGitSha(commit.sha)} ${commit.subject}${commit.branch === null ? "" : ` [${commit.branch}]`}`,
+        ),
+        ...activity.pushes.map(
+          (push) => `  ${formatGitPushLine(activity, push)}`,
+        ),
+      ]
+    : [];
+
+  return dim([`Git: ${sentence}`, ...detailLines].join("\n"), context.color);
 }
 
 function formatRow(
@@ -392,9 +486,13 @@ function formatRow(
   switch (row.kind) {
     case "conversation":
       return [
-        rowHeader(row.role === "user" ? "User" : "Assistant", context),
+        rowHeader(
+          row.role === "user" ? userMessageSourceLabel(row) : "Assistant",
+          context,
+        ),
         row.text,
         formatConversationRequestLabel(row),
+        formatTurnGitLine(row, context),
       ]
         .filter((line): line is string => line !== null)
         .join("\n");
@@ -404,6 +502,7 @@ function formatRow(
       if (row.systemKind === "reconnect") {
         return rowHeader(row.title, context);
       }
+
       if (row.systemKind === "error") {
         return [
           rowHeader("Error", context),
@@ -413,6 +512,7 @@ function formatRow(
           .filter((line) => line.length > 0)
           .join("\n");
       }
+
       return [
         rowHeader(row.title, context),
         row.detail ? dim(indentBlock(row.detail, "  "), context.color) : "",
@@ -424,9 +524,11 @@ function formatRow(
       return formatWorkSummary(row, context);
     case "turn": {
       const label = formatTurnTitle(row, context);
+
       if (!row.children || row.children.length === 0) {
         return rowHeader(label, context);
       }
+
       return [
         rowHeader(label, context),
         indentBlock(
@@ -435,6 +537,7 @@ function formatRow(
         ),
       ].join("\n");
     }
+
     default:
       return assertNever(row);
   }
@@ -452,6 +555,7 @@ export function formatThreadTimelineText(
   options?: ThreadTimelineTextOptions,
 ): string {
   const viewRows = buildTimelineViewRows(rows);
+
   return formatRows(viewRows, {
     verbose: options?.verbose ?? false,
     color: options?.color ?? false,

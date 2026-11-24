@@ -1,18 +1,18 @@
 import { useState } from "react";
-import { Button } from "@bb/shared-ui/button";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
+} from "@omnyo/shared-ui/tooltip";
 import { WaveformVisualizer } from "./WaveformVisualizer.js";
 
 interface VoiceRecordingBarProps {
   isCompact: boolean;
-  state: "recording" | "transcribing";
+  state: "starting" | "recording" | "transcribing";
   stream: MediaStream | null;
   microphoneWarning: string | null;
   submitIcon: IconName;
@@ -23,6 +23,7 @@ interface VoiceRecordingBarProps {
 
 const CONTROL_BUTTON_CLASS =
   "size-8 rounded-full p-0 max-md:pointer-coarse:size-10";
+
 const ACTION_BUTTON_CLASS =
   "size-8 rounded-md p-0 max-md:pointer-coarse:size-10";
 
@@ -39,8 +40,14 @@ export function VoiceRecordingBar({
   const [pressedAction, setPressedAction] = useState<"confirm" | "send">(
     "confirm",
   );
+
+  const isStarting = state === "starting";
   const isTranscribing = state === "transcribing";
-  const isConfirming = isTranscribing && pressedAction === "confirm";
+  const isPending = isStarting || isTranscribing;
+
+  const isConfirming =
+    isStarting || (isTranscribing && pressedAction === "confirm");
+
   const isSending = isTranscribing && pressedAction === "send";
 
   return (
@@ -55,7 +62,11 @@ export function VoiceRecordingBar({
         size="icon"
         variant="ghost"
         aria-label={
-          isTranscribing ? "Cancel transcription" : "Cancel recording"
+          isStarting
+            ? "Cancel voice input"
+            : isTranscribing
+              ? "Cancel transcription"
+              : "Cancel recording"
         }
         onClick={onCancel}
         className={CONTROL_BUTTON_CLASS}
@@ -63,13 +74,15 @@ export function VoiceRecordingBar({
         <Icon name="X" className="size-4" />
       </Button>
       <div className="relative flex min-w-0 flex-1 items-center">
-        <div
-          className={cn("h-7 w-full", isTranscribing && "animate-shine-icon")}
-        >
-          <WaveformVisualizer stream={stream} active={!isTranscribing} />
+        <div className={cn("h-7 w-full", isPending && "animate-shine-icon")}>
+          <WaveformVisualizer stream={stream} active={!isPending} />
         </div>
         <span className="sr-only" aria-live="polite">
-          {isTranscribing ? "Transcribing" : "Recording"}
+          {isStarting
+            ? "Starting microphone"
+            : isTranscribing
+              ? "Transcribing"
+              : "Recording"}
         </span>
       </div>
       {state === "recording" && microphoneWarning ? (
@@ -85,11 +98,13 @@ export function VoiceRecordingBar({
               size="icon"
               variant="secondary"
               aria-label={
-                isConfirming
-                  ? "Transcribing voice input"
-                  : "Stop and add to draft"
+                isStarting
+                  ? "Starting voice input"
+                  : isConfirming
+                    ? "Transcribing voice input"
+                    : "Stop and add to draft"
               }
-              disabled={isTranscribing}
+              disabled={isPending}
               onClick={() => {
                 setPressedAction("confirm");
                 onConfirm();
@@ -120,7 +135,7 @@ export function VoiceRecordingBar({
               aria-label={
                 isSending ? "Transcribing and sending" : "Send voice input"
               }
-              disabled={isTranscribing}
+              disabled={isPending}
               onClick={() => {
                 setPressedAction("send");
                 onSend();

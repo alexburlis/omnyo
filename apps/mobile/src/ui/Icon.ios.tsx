@@ -20,6 +20,7 @@ export function Icon({
 }: IconProps) {
   const { tokens } = useTheme();
   const symbol = symbolOverride ?? sfSymbolFor(name);
+
   if (symbol === undefined) {
     return (
       <HugeIcon
@@ -32,6 +33,7 @@ export function Icon({
       />
     );
   }
+
   return (
     <Image
       source={`sf:${symbol}`}

@@ -1,4 +1,5 @@
 import type {
+  ClientTurnRequestId,
   BackgroundTaskStatus,
   BackgroundTaskUsage,
   ExtensionKind,
@@ -12,14 +13,16 @@ import type {
   SystemMessageKind,
   SystemMessageSubject,
   Thread,
+  ThreadActivity,
   ThreadEventItemPresentation,
   ThreadEventPlanStep,
   ThreadEventScope,
   ThreadEventSearchMode,
+  ThreadMaintenanceKind,
   ThreadTurnInitiator,
   WorkflowProgressSnapshot,
-} from "@bb/domain";
-import type { TimelineConversationAttachments } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { TimelineConversationAttachments } from "@omnyo/server-contract";
 import type { EventProjection } from "./event-projection.js";
 
 const eventProjectionMessageStatusValues = [
@@ -29,6 +32,7 @@ const eventProjectionMessageStatusValues = [
   "error",
   "interrupted",
 ] as const;
+
 type EventProjectionMessageStatus =
   (typeof eventProjectionMessageStatusValues)[number];
 
@@ -36,6 +40,7 @@ const eventProjectionApprovalLifecycleStatusValues = [
   "waiting_for_approval",
   "denied",
 ] as const;
+
 export type EventProjectionApprovalLifecycleStatus =
   (typeof eventProjectionApprovalLifecycleStatusValues)[number];
 
@@ -46,21 +51,26 @@ const eventProjectionPermissionGrantLifecycleValues = [
   "denied",
   "interrupted",
 ] as const;
+
 export type EventProjectionPermissionGrantLifecycle =
   (typeof eventProjectionPermissionGrantLifecycleValues)[number];
+
 const eventProjectionUserQuestionLifecycleValues = [
   "pending",
   "resolving",
   "answered",
   "interrupted",
 ] as const;
+
 export type EventProjectionUserQuestionLifecycle =
   (typeof eventProjectionUserQuestionLifecycleValues)[number];
+
 const eventProjectionPluginFormLifecycleValues = [
   "pending",
   "submitted",
   "cancelled",
 ] as const;
+
 export type EventProjectionPluginFormLifecycle =
   (typeof eventProjectionPluginFormLifecycleValues)[number];
 
@@ -81,6 +91,7 @@ interface EventProjectionPresentedMessage {
 }
 
 const eventProjectionTurnRequestKindValues = ["message", "steer"] as const;
+
 export type EventProjectionTurnRequestKind =
   (typeof eventProjectionTurnRequestKindValues)[number];
 
@@ -89,10 +100,12 @@ const eventProjectionTurnRequestStatusValues = [
   "accepted",
   "rejected",
 ] as const;
+
 type EventProjectionTurnRequestStatus =
   (typeof eventProjectionTurnRequestStatusValues)[number];
 
 export interface EventProjectionTurnRequest {
+  clientRequestId: ClientTurnRequestId | null;
   isGrouped: boolean;
   kind: EventProjectionTurnRequestKind;
   status: EventProjectionTurnRequestStatus;
@@ -105,6 +118,7 @@ export interface EventProjectionUserMessage extends EventProjectionMessageBase {
   senderThreadId: string | null;
   systemMessageKind: SystemMessageKind;
   systemMessageSubject: SystemMessageSubject | null;
+  maintenance?: ThreadMaintenanceKind;
   turnRequest: EventProjectionTurnRequest;
   text: string;
   mentions: PromptTextMention[];
@@ -321,13 +335,16 @@ const eventProjectionOperationTypeValues = [
   "compaction",
   "context-clear",
 ] as const;
+
 type EventProjectionOperationType =
   (typeof eventProjectionOperationTypeValues)[number];
 
 const eventProjectionThreadOperationKindValues = [
   "ownership_change",
+  "activity",
   "other",
 ] as const;
+
 export type EventProjectionThreadOperationKind =
   (typeof eventProjectionThreadOperationKindValues)[number];
 
@@ -341,6 +358,7 @@ const eventProjectionThreadOperationStatusValues = [
   "noop",
   "other",
 ] as const;
+
 export type EventProjectionThreadOperationStatus =
   (typeof eventProjectionThreadOperationStatusValues)[number];
 
@@ -351,6 +369,15 @@ export interface EventProjectionOwnershipChangeThreadOperationMetadata {
   rawStatus: string;
   operationId: string;
   metadata: OwnershipChangeOperationMetadata | null;
+}
+
+export interface EventProjectionActivityThreadOperationMetadata {
+  operation: "activity";
+  rawOperation: string;
+  status: EventProjectionThreadOperationStatus;
+  rawStatus: string;
+  operationId: string;
+  activity: ThreadActivity | null;
 }
 
 interface EventProjectionOtherThreadOperationMetadata {
@@ -364,6 +391,7 @@ interface EventProjectionOtherThreadOperationMetadata {
 
 export type EventProjectionThreadOperationMetadata =
   | EventProjectionOwnershipChangeThreadOperationMetadata
+  | EventProjectionActivityThreadOperationMetadata
   | EventProjectionOtherThreadOperationMetadata;
 
 export interface EventProjectionProvisioningTranscriptEntry {

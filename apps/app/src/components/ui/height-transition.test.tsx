@@ -2,6 +2,7 @@
 
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MOTION_DURATION_MS } from "@omnyo/shared-ui/motion";
 import { AutoHeightContainer, HeightTransition } from "./height-transition";
 
 class ResizeObserverStub implements ResizeObserver {
@@ -51,14 +52,17 @@ describe("HeightTransition", () => {
 
   it("snap-syncs its height after a mobile pageshow restore", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+
     const offsetHeight = vi
       .spyOn(HTMLElement.prototype, "offsetHeight", "get")
       .mockReturnValue(40);
+
     const view = render(
       <HeightTransition visible>
         <span data-testid="restored-child">Restored content</span>
       </HeightTransition>,
     );
+
     const wrapper =
       view.getByTestId("restored-child").parentElement?.parentElement;
 
@@ -70,7 +74,40 @@ describe("HeightTransition", () => {
     });
 
     expect(wrapper?.style.height).toBe("80px");
-    expect(wrapper?.style.transitionDuration).toBe("0s");
+    expect(wrapper?.dataset.snap).toBe("");
+    expect(wrapper?.style.transition).toContain("height 350ms");
+  });
+
+  it("keeps its transition after a snap settles", () => {
+    const frames: FrameRequestCallback[] = [];
+
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+
+      return frames.length;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(40);
+
+    const view = render(
+      <HeightTransition visible>
+        <span data-testid="settled-child">Settled content</span>
+      </HeightTransition>,
+    );
+
+    const wrapper =
+      view.getByTestId("settled-child").parentElement?.parentElement;
+
+    act(() => {
+      window.dispatchEvent(new Event("pageshow"));
+    });
+    expect(wrapper?.dataset.snap).toBe("");
+
+    act(() => {
+      for (const frame of frames.splice(0)) frame(0);
+    });
+
+    expect(wrapper?.dataset.snap).toBeUndefined();
+    expect(wrapper?.style.transition).toContain("height 350ms");
   });
 });
 
@@ -99,9 +136,11 @@ describe("AutoHeightContainer", () => {
         <span>Streaming response</span>
       </AutoHeightContainer>,
     );
+
     const inner = view.getByText("Streaming response").parentElement;
     const wrapper = inner?.parentElement;
     const observer = ResizeObserverStub.instances[0];
+
     if (!inner || !wrapper || !observer) {
       throw new Error("AutoHeightContainer did not render");
     }
@@ -121,6 +160,7 @@ describe("AutoHeightContainer", () => {
         <span>Streaming response</span>
       </AutoHeightContainer>,
     );
+
     const inner = view.getByText("Streaming response").parentElement;
     const wrapper = inner?.parentElement;
     const observer = ResizeObserverStub.instances[0];
@@ -139,7 +179,7 @@ describe("AutoHeightContainer", () => {
     );
 
     expect(wrapper?.style.height).toBe("480px");
-    expect(wrapper?.style.transitionDuration).toBe("0s");
+    expect(wrapper?.dataset.snap).toBe("");
     expect(ResizeObserverStub.instances).toEqual([observer]);
     expect(observer?.disconnect).not.toHaveBeenCalled();
   });
@@ -172,11 +212,14 @@ describe("AutoHeightContainer growth easing", () => {
         <span>Streaming response</span>
       </AutoHeightContainer>,
     );
+
     const wrapper =
       view.getByText("Streaming response").parentElement?.parentElement;
+
     if (!wrapper) {
       throw new Error("AutoHeightContainer wrapper was not rendered");
     }
+
     return wrapper;
   }
 
@@ -185,7 +228,9 @@ describe("AutoHeightContainer growth easing", () => {
     stubMediaQueries(new Set());
     stubScrollAnchoringSupport(true);
 
-    expect(renderWrapper().style.transition).toContain("height 180ms");
+    expect(renderWrapper().style.transition).toContain(
+      `height ${MOTION_DURATION_MS.base}ms`,
+    );
   });
 
   it("snaps growth on a coarse pointer", () => {

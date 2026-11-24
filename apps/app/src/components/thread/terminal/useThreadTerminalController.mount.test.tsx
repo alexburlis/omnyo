@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { TerminalSession } from "@bb/server-contract";
+import type { TerminalSession } from "@omnyo/server-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -49,6 +49,7 @@ describe("useThreadTerminalController terminal view mounting", () => {
   it("does not mount a persisted-open terminal the panel never showed", () => {
     vi.mocked(sdk.terminals.list).mockResolvedValue({ sessions: [session] });
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadTerminalController(
@@ -64,6 +65,7 @@ describe("useThreadTerminalController terminal view mounting", () => {
   it("mounts the view for an open panel that is not persisted open", () => {
     vi.mocked(sdk.terminals.list).mockResolvedValue({ sessions: [session] });
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadTerminalController(
@@ -78,6 +80,7 @@ describe("useThreadTerminalController terminal view mounting", () => {
   it("keeps the view mounted across a compact close and unmounts once persisted state closes", async () => {
     vi.mocked(sdk.terminals.list).mockResolvedValue({ sessions: [session] });
     const { wrapper } = createQueryClientTestHarness();
+
     const { result, rerender } = renderHook(
       (visibility: PanelVisibility) =>
         useThreadTerminalController(controllerArgs(visibility)),
@@ -110,8 +113,10 @@ describe("useThreadTerminalController terminal view mounting", () => {
       id: "term_sibling",
       threadId: "thr_1",
     });
+
     vi.mocked(sdk.terminals.list).mockResolvedValue({ sessions: [sibling] });
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadTerminalController(

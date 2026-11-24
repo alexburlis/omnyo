@@ -1,5 +1,5 @@
-import type { ThreadEvent } from "@bb/domain";
-import { requireThreadEventScopeTurnId } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
+import { requireThreadEventScopeTurnId } from "@omnyo/domain";
 
 interface PendingActiveTurnWaiter {
   resolve: (turnId: string | null) => void;
@@ -20,6 +20,7 @@ export class RuntimeTurnState {
 
   clear(): void {
     this.activeTurnIdByThreadId.clear();
+
     for (const threadId of [...this.activeTurnWaitersByThreadId.keys()]) {
       this.resolveWaiters(threadId, null);
     }
@@ -27,6 +28,24 @@ export class RuntimeTurnState {
 
   clearThread(threadId: string): void {
     this.activeTurnIdByThreadId.delete(threadId);
+    this.resolveWaiters(threadId, null);
+  }
+
+  clearStaleTurn(threadId: string, staleTurnId: string): void {
+    const activeTurnId = this.activeTurnIdByThreadId.get(threadId);
+
+    if (activeTurnId !== undefined && activeTurnId !== staleTurnId) {
+      return;
+    }
+
+    this.clearThread(threadId);
+  }
+
+  resolveWaitersWithoutTurn(threadId: string): void {
+    if (this.activeTurnIdByThreadId.has(threadId)) {
+      return;
+    }
+
     this.resolveWaiters(threadId, null);
   }
 
@@ -40,6 +59,7 @@ export class RuntimeTurnState {
 
   waitForActiveTurn(args: WaitForActiveTurnStateArgs): Promise<string | null> {
     const activeTurnId = this.activeTurnIdByThreadId.get(args.threadId);
+
     if (activeTurnId !== undefined) {
       return Promise.resolve(activeTurnId);
     }
@@ -48,17 +68,22 @@ export class RuntimeTurnState {
       const waiters =
         this.activeTurnWaitersByThreadId.get(args.threadId) ??
         new Set<PendingActiveTurnWaiter>();
+
       this.activeTurnWaitersByThreadId.set(args.threadId, waiters);
+
       const waiter: PendingActiveTurnWaiter = {
         resolve,
         timeout: setTimeout(() => {
           waiters.delete(waiter);
+
           if (waiters.size === 0) {
             this.activeTurnWaitersByThreadId.delete(args.threadId);
           }
+
           resolve(null);
         }, args.timeoutMs),
       };
+
       waiters.add(waiter);
     });
   }
@@ -68,12 +93,15 @@ export class RuntimeTurnState {
       if (event.parentToolCallId) {
         return;
       }
+
       const turnId = requireThreadEventScopeTurnId({
         type: event.type,
         scope: event.scope,
       });
+
       this.activeTurnIdByThreadId.set(event.threadId, turnId);
       this.resolveWaiters(event.threadId, turnId);
+
       return;
     }
 
@@ -82,6 +110,7 @@ export class RuntimeTurnState {
         type: event.type,
         scope: event.scope,
       });
+
       if (this.activeTurnIdByThreadId.get(event.threadId) === turnId) {
         this.activeTurnIdByThreadId.delete(event.threadId);
       }
@@ -90,10 +119,13 @@ export class RuntimeTurnState {
 
   private resolveWaiters(threadId: string, turnId: string | null): void {
     const waiters = this.activeTurnWaitersByThreadId.get(threadId);
+
     if (!waiters) {
       return;
     }
+
     this.activeTurnWaitersByThreadId.delete(threadId);
+
     for (const waiter of waiters) {
       clearTimeout(waiter.timeout);
       waiter.resolve(turnId);

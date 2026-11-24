@@ -1,11 +1,16 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import type { DbConnection, DbTransaction } from "../connection.js";
+import { and, desc, eq, inArray, placeholder, sql } from "drizzle-orm";
+import {
+  prepareCachedQuery,
+  type DbConnection,
+  type DbTransaction,
+} from "../connection.js";
 import type { DbNotifier } from "../notifier.js";
 import { hostDaemonSessions } from "../schema.js";
 import { createHostDaemonSessionId } from "../ids.js";
 import { markHostSeen } from "./hosts.js";
 
 type SessionReadConnection = DbConnection | DbTransaction;
+
 export type HostDaemonSessionRow = typeof hostDaemonSessions.$inferSelect;
 
 export interface GetSessionByIdArgs {
@@ -86,14 +91,17 @@ export function closeSession(
     .from(hostDaemonSessions)
     .where(eq(hostDaemonSessions.id, sessionId))
     .get();
+
   if (!existing) {
     return null;
   }
+
   if (existing.status !== "active") {
     return existing;
   }
 
   const now = Date.now();
+
   const updated = db
     .update(hostDaemonSessions)
     .set({
@@ -138,6 +146,7 @@ export function listLatestClosedSessionsForHosts(
   args: ListLatestClosedSessionsForHostsArgs,
 ): HostDaemonSessionRow[] {
   const hostIds = [...new Set(args.hostIds)];
+
   if (hostIds.length === 0) {
     return [];
   }
@@ -161,16 +170,21 @@ export function listLatestClosedSessionsForHosts(
     .all();
 }
 
+const prepareGetSessionById = (db: SessionReadConnection) =>
+  db
+    .select()
+    .from(hostDaemonSessions)
+    .where(eq(hostDaemonSessions.id, placeholder("sessionId")))
+    .prepare();
+
 export function getSessionById(
   db: SessionReadConnection,
   args: GetSessionByIdArgs,
 ) {
   return (
-    db
-      .select()
-      .from(hostDaemonSessions)
-      .where(eq(hostDaemonSessions.id, args.sessionId))
-      .get() ?? null
+    prepareCachedQuery(db, prepareGetSessionById).get({
+      sessionId: args.sessionId,
+    }) ?? null
   );
 }
 
@@ -181,6 +195,7 @@ export function heartbeatSession(
 ) {
   return db.transaction((tx) => {
     const now = Date.now();
+
     const updated =
       tx
         .update(hostDaemonSessions)
@@ -191,9 +206,11 @@ export function heartbeatSession(
         .where(eq(hostDaemonSessions.id, sessionId))
         .returning()
         .get() ?? null;
+
     if (updated) {
       markHostSeen(tx, updated.hostId, now);
     }
+
     return updated;
   });
 }

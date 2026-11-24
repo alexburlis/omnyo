@@ -10,6 +10,7 @@ describe("automation execution safety documentation", () => {
       ),
       "utf8",
     );
+
     const normalized = documentation.replace(/\s+/g, " ");
 
     expect(normalized).toContain("unavailable target thread");

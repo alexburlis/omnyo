@@ -19,7 +19,7 @@ function settingsResponse(value: number): Response {
   );
 }
 
-describe("bb plugin config", () => {
+describe("omnyo plugin config", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -45,9 +45,11 @@ describe("bb plugin config", () => {
     );
 
     vi.mocked(fetch).mockClear();
+
     const stderr = vi
       .spyOn(process.stderr, "write")
       .mockImplementation(() => true);
+
     await expect(
       runCommand(
         ["plugin", "config", "demo", "set", "retries", "3", "--bogus"],

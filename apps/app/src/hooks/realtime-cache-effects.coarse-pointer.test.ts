@@ -16,8 +16,10 @@ describe("createRealtimeCacheEffects on coarse pointers", () => {
       }),
     });
     vi.resetModules();
+
     try {
       const coarseModule = await import("./realtime-cache-effects");
+
       const queryClient = createAppQueryClient({
         defaultOptions: {
           queries: {
@@ -27,6 +29,7 @@ describe("createRealtimeCacheEffects on coarse pointers", () => {
         },
         showMutationErrorToasts: false,
       });
+
       const effects = coarseModule.createRealtimeCacheEffects({ queryClient });
       const timelineKey = threadTimelineQueryKey("thr_1");
       queryClient.setQueryData(timelineKey, { rows: [] });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_THREAD_WAIT_POLL_INTERVAL_MS } from "@bb/sdk";
+import { DEFAULT_THREAD_WAIT_POLL_INTERVAL_MS } from "@omnyo/sdk";
 import {
   buildSpawnEnvironment,
   looksLikePath,
@@ -106,8 +106,10 @@ describe("buildSpawnEnvironment", () => {
   it("returns unmanaged host with null path when a host is explicit", () => {
     const result = buildSpawnEnvironment({
       defaultPersonalWorkspace: false,
+      machineChoice: "explicit",
       hostId: HOST_ID,
     });
+
     expect(result).toEqual({
       type: "host",
       hostId: HOST_ID,
@@ -118,20 +120,25 @@ describe("buildSpawnEnvironment", () => {
   it("returns project-default when no environment flags are provided", () => {
     const result = buildSpawnEnvironment({
       defaultPersonalWorkspace: true,
+      machineChoice: "explicit",
       hostId: null,
     });
+
     expect(result).toEqual({ type: "project-default" });
   });
 
-  it("returns personal for --new-environment personal with host", () => {
+  it("marks a new personal workspace on the default machine as movable", () => {
     const result = buildSpawnEnvironment({
       defaultPersonalWorkspace: false,
+      machineChoice: "default",
       newEnvironmentKind: "personal",
       hostId: HOST_ID,
     });
+
     expect(result).toEqual({
       type: "host",
       hostId: HOST_ID,
+      machineChoice: "default",
       workspace: { type: "personal" },
     });
   });
@@ -139,13 +146,16 @@ describe("buildSpawnEnvironment", () => {
   it("returns named base branch for --base-branch with managed worktrees", () => {
     const result = buildSpawnEnvironment({
       defaultPersonalWorkspace: false,
+      machineChoice: "explicit",
       newEnvironmentKind: "worktree",
       hostId: HOST_ID,
       baseBranch: "release-1.2",
     });
+
     expect(result).toEqual({
       type: "host",
       hostId: HOST_ID,
+      machineChoice: "explicit",
       workspace: {
         type: "managed-worktree",
         baseBranch: { kind: "named", name: "release-1.2" },
@@ -157,6 +167,7 @@ describe("buildSpawnEnvironment", () => {
     expect(() =>
       buildSpawnEnvironment({
         defaultPersonalWorkspace: false,
+        machineChoice: "explicit",
         newEnvironmentKind: "worktree",
         hostId: null,
       }),
@@ -167,6 +178,7 @@ describe("buildSpawnEnvironment", () => {
     expect(() =>
       buildSpawnEnvironment({
         defaultPersonalWorkspace: false,
+        machineChoice: "explicit",
         newEnvironmentKind: "docker",
         hostId: null,
       }),
@@ -177,6 +189,7 @@ describe("buildSpawnEnvironment", () => {
     expect(() =>
       buildSpawnEnvironment({
         defaultPersonalWorkspace: false,
+        machineChoice: "explicit",
         environmentValue: "some-env-id",
         newEnvironmentKind: "docker",
         hostId: HOST_ID,
@@ -188,6 +201,7 @@ describe("buildSpawnEnvironment", () => {
     expect(() =>
       buildSpawnEnvironment({
         defaultPersonalWorkspace: false,
+        machineChoice: "explicit",
         baseBranch: "main",
         hostId: HOST_ID,
       }),
@@ -197,9 +211,11 @@ describe("buildSpawnEnvironment", () => {
   it("returns unmanaged host with path for path-like --environment", () => {
     const result = buildSpawnEnvironment({
       defaultPersonalWorkspace: false,
+      machineChoice: "explicit",
       environmentValue: "/absolute/workspace",
       hostId: HOST_ID,
     });
+
     expect(result).toEqual({
       type: "host",
       hostId: HOST_ID,
@@ -210,9 +226,11 @@ describe("buildSpawnEnvironment", () => {
   it("returns unmanaged host with path for relative --environment", () => {
     const result = buildSpawnEnvironment({
       defaultPersonalWorkspace: false,
+      machineChoice: "explicit",
       environmentValue: "./my-project",
       hostId: HOST_ID,
     });
+
     expect(result).toEqual({
       type: "host",
       hostId: HOST_ID,
@@ -223,9 +241,11 @@ describe("buildSpawnEnvironment", () => {
   it("returns reuse for non-path --environment (UUID)", () => {
     const result = buildSpawnEnvironment({
       defaultPersonalWorkspace: false,
+      machineChoice: "explicit",
       environmentValue: "env-uuid-123",
       hostId: HOST_ID,
     });
+
     expect(result).toEqual({
       type: "reuse",
       environmentId: "env-uuid-123",
@@ -235,12 +255,15 @@ describe("buildSpawnEnvironment", () => {
   it("trims whitespace from environment values", () => {
     const result = buildSpawnEnvironment({
       defaultPersonalWorkspace: false,
+      machineChoice: "explicit",
       newEnvironmentKind: "  worktree  ",
       hostId: HOST_ID,
     });
+
     expect(result).toEqual({
       type: "host",
       hostId: HOST_ID,
+      machineChoice: "explicit",
       workspace: {
         type: "managed-worktree",
         baseBranch: { kind: "default" },

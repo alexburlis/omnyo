@@ -1,4 +1,4 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 const workflowRunStatusSchema = z.enum([
@@ -16,6 +16,9 @@ const workflowCallViewSchema = z
     label: z.string(),
     phase: z.string().nullable(),
     status: workflowRunStatusSchema,
+    environmentId: z.string(),
+    hostId: z.string().nullable(),
+    workspacePath: z.string().nullable(),
     provider: z.string(),
     model: z.string(),
     reasoningLevel: z.string(),
@@ -67,6 +70,21 @@ const threadLookupInputSchema = z
   .strict();
 
 export const workflowUiRpcContract = defineRpcContract({
+  workflowActiveThreadCounts: {
+    input: z.null(),
+    output: z
+      .object({
+        counts: z.array(
+          z
+            .object({
+              threadId: z.string(),
+              count: z.number().int().positive(),
+            })
+            .strict(),
+        ),
+      })
+      .strict(),
+  },
   workflowActiveRuns: {
     input: threadLookupInputSchema,
     output: z.object({ runs: z.array(workflowRunViewSchema) }).strict(),
@@ -89,5 +107,7 @@ export const workflowUiRpcContract = defineRpcContract({
 });
 
 export type WorkflowCallView = z.infer<typeof workflowCallViewSchema>;
+
 export type WorkflowPhaseView = z.infer<typeof workflowPhaseViewSchema>;
+
 export type WorkflowRunView = z.infer<typeof workflowRunViewSchema>;

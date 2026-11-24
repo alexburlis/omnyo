@@ -1,4 +1,4 @@
-import { TERMINAL_DATA_MAX_BYTES } from "@bb/domain";
+import { TERMINAL_DATA_MAX_BYTES } from "@omnyo/domain";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { Terminal } from "@xterm/xterm";
 import { describe, expect, it, vi } from "vitest";
@@ -7,7 +7,6 @@ import {
   buildTerminalThemeFromCssColors,
   applyTerminalFontFamily,
   captureTerminalContextMenuState,
-  encodeTerminalInputChunks,
   forceTerminalFontMeasurement,
   focusTerminalFromTouchRelease,
   forwardTerminalData,
@@ -22,6 +21,7 @@ import {
   writeTerminalOutput,
   updateTerminalTouchFocusGesture,
 } from "./ThreadTerminalView";
+import { encodeTerminalInputChunks } from "@/lib/terminal-input-encoding";
 import {
   createTerminalOsc8LinkHandler,
   requestTerminalLinkOpen,
@@ -31,11 +31,14 @@ describe("terminal hyperlinks", () => {
   it("preserves OSC-8 provenance through hover and primary activation", () => {
     const onActivate = vi.fn();
     const onHover = vi.fn();
+
     const handler = createTerminalOsc8LinkHandler({
       onActivate,
       onHover,
     });
+
     const event = { button: 0 } as MouseEvent;
+
     const range = {
       start: { x: 1, y: 1 },
       end: { x: 1, y: 1 },
@@ -58,10 +61,12 @@ describe("terminal hyperlinks", () => {
 
   it("does not activate OSC-8 links from a secondary click", () => {
     const onActivate = vi.fn();
+
     const handler = createTerminalOsc8LinkHandler({
       onActivate,
       onHover: vi.fn(),
     });
+
     const range = {
       start: { x: 1, y: 1 },
       end: { x: 1, y: 1 },
@@ -105,6 +110,7 @@ describe("terminal hyperlinks", () => {
 
   it("preserves link actions while copying the exact xterm selection", () => {
     const getSelection = vi.fn(() => "  wrapped terminal selection\n");
+
     const link = {
       source: "detected-url" as const,
       uri: "https://example.com/visible",
@@ -128,9 +134,11 @@ function startTouchFocusGesture() {
     [{ identifier: 1, x: 40, y: 80 }],
     100,
   );
+
   if (gesture === null) {
     throw new Error("Expected one touch to start a focus gesture");
   }
+
   return gesture;
 }
 
@@ -220,6 +228,7 @@ describe("terminal touch focus", () => {
 
   it("does not focus after a drag returns near its start", () => {
     const focus = vi.fn();
+
     const gesture = updateTerminalTouchFocusGesture(startTouchFocusGesture(), [
       { identifier: 1, x: 40, y: 120 },
     ]);
@@ -265,6 +274,7 @@ describe("terminal output encoding", () => {
   it("splits large paste input at the wire limit without losing UTF-8 bytes", () => {
     const input = `${"a".repeat(TERMINAL_DATA_MAX_BYTES - 1)}🙂tail`;
     const chunks = encodeTerminalInputChunks(input);
+
     const decoded = Buffer.concat(
       chunks.map((chunk) => Buffer.from(chunk, "base64")),
     );
@@ -281,12 +291,15 @@ describe("terminal output encoding", () => {
 
   it("keeps UTF-8 bytes intact when a glyph spans output chunks", () => {
     const encoded = new TextEncoder().encode("🙂");
+
     const first = decodeBase64Bytes(
       Buffer.from(encoded.subarray(0, 2)).toString("base64"),
     );
+
     const second = decodeBase64Bytes(
       Buffer.from(encoded.subarray(2)).toString("base64"),
     );
+
     const decoder = new TextDecoder();
 
     expect(
@@ -329,9 +342,11 @@ describe("terminal output encoding", () => {
 
     expect(onInput).toHaveBeenCalledOnce();
     const encodedReply = onInput.mock.calls[0]?.[0];
+
     if (encodedReply === undefined) {
       throw new Error("Expected xterm to emit a cursor-position reply");
     }
+
     expect(Buffer.from(encodedReply, "base64").toString("utf8")).toBe(
       "\u001b[1;1R",
     );
@@ -343,6 +358,7 @@ describe("terminal output encoding", () => {
     const terminal = new Terminal({
       allowProposedApi: TERMINAL_ALLOW_PROPOSED_API,
     });
+
     terminal.loadAddon(new Unicode11Addon());
     terminal.unicode.activeVersion = "11";
     expect(terminal.unicode.activeVersion).toBe("11");
@@ -384,6 +400,7 @@ describe("terminal font family", () => {
     const terminal = { options: { fontFamily: "Old Font" } } as Parameters<
       typeof applyTerminalFontFamily
     >[0];
+
     const scheduleFit = vi.fn();
 
     expect(
@@ -405,6 +422,7 @@ describe("terminal font family", () => {
     const fontFamilyChanges: string[] = [];
     const refresh = vi.fn();
     const clearTextureAtlas = vi.fn();
+
     const terminal = {
       options: {
         get fontFamily() {
@@ -433,16 +451,37 @@ describe("terminal font family", () => {
 function createTerminalFontSet() {
   const events = new EventTarget();
   let finishLoading = () => {};
+
   const ready = new Promise<FontFaceSet>((resolve) => {
     finishLoading = () => resolve(fontSet as FontFaceSet);
   });
+
   const fontSet = Object.assign(events, { ready });
-  return { fontSet, finishLoading };
+
+  const finishLoadingFontFaces = (fontfaces: FontFace[]) => {
+    fontSet.dispatchEvent(
+      Object.assign(new Event("loadingdone"), { fontfaces }),
+    );
+  };
+
+  return { fontSet, finishLoading, finishLoadingFontFaces };
+}
+
+function createFontFace(family: string, weight = "400"): FontFace {
+  return {
+    family,
+    style: "normal",
+    weight,
+    stretch: "normal",
+    unicodeRange: "U+0-10FFFF",
+  } as FontFace;
 }
 
 describe("terminal font loading", () => {
   it("refreshes fonts imported after the initial ready promise resolves", async () => {
-    const { fontSet, finishLoading } = createTerminalFontSet();
+    const { fontSet, finishLoading, finishLoadingFontFaces } =
+      createTerminalFontSet();
+
     finishLoading();
     await fontSet.ready;
     const refresh = vi.fn();
@@ -450,29 +489,75 @@ describe("terminal font loading", () => {
     await fontSet.ready;
     expect(refresh).toHaveBeenCalledOnce();
 
-    fontSet.dispatchEvent(new Event("loadingdone"));
+    finishLoadingFontFaces([createFontFace("Terminal Theme Mono")]);
     expect(refresh).toHaveBeenCalledTimes(2);
 
-    fontSet.dispatchEvent(new Event("loadingdone"));
+    finishLoadingFontFaces([createFontFace("Terminal Theme Mono Bold")]);
+    expect(refresh).toHaveBeenCalledTimes(3);
+    dispose();
+  });
+
+  it("stops when each measurement reports the loaded font faces again", async () => {
+    const { fontSet, finishLoading, finishLoadingFontFaces } =
+      createTerminalFontSet();
+
+    const loadedFontFace = createFontFace("Inter Variable");
+    let measurements = 0;
+
+    const dispose = observeTerminalFontLoading(fontSet, () => {
+      measurements += 1;
+
+      if (measurements < 50) {
+        finishLoadingFontFaces([loadedFontFace]);
+      }
+    });
+
+    finishLoading();
+    await fontSet.ready;
+
+    expect(measurements).toBe(2);
+    dispose();
+  });
+
+  it("does not measure again when the browser reports a loaded font face as a new object", async () => {
+    const { fontSet, finishLoading, finishLoadingFontFaces } =
+      createTerminalFontSet();
+
+    finishLoading();
+    await fontSet.ready;
+    const refresh = vi.fn();
+    const dispose = observeTerminalFontLoading(fontSet, refresh);
+    await fontSet.ready;
+    finishLoadingFontFaces([createFontFace("Inter Variable")]);
+    expect(refresh).toHaveBeenCalledTimes(2);
+
+    finishLoadingFontFaces([createFontFace("Inter Variable")]);
+    expect(refresh).toHaveBeenCalledTimes(2);
+
+    finishLoadingFontFaces([createFontFace("Inter Variable", "700")]);
     expect(refresh).toHaveBeenCalledTimes(3);
     dispose();
   });
 
   it("ignores a pending ready callback after the terminal is disposed", async () => {
-    const { fontSet, finishLoading } = createTerminalFontSet();
+    const { fontSet, finishLoading, finishLoadingFontFaces } =
+      createTerminalFontSet();
+
     const refresh = vi.fn();
     const dispose = observeTerminalFontLoading(fontSet, refresh);
 
     dispose();
     finishLoading();
     await fontSet.ready;
-    fontSet.dispatchEvent(new Event("loadingdone"));
+    finishLoadingFontFaces([createFontFace("Terminal Theme Mono")]);
 
     expect(refresh).not.toHaveBeenCalled();
   });
 
   it("removes the font listener when the terminal is disposed", async () => {
-    const { fontSet, finishLoading } = createTerminalFontSet();
+    const { fontSet, finishLoading, finishLoadingFontFaces } =
+      createTerminalFontSet();
+
     const removeEventListener = vi.spyOn(fontSet, "removeEventListener");
     const refresh = vi.fn();
     const dispose = observeTerminalFontLoading(fontSet, refresh);
@@ -481,7 +566,7 @@ describe("terminal font loading", () => {
     refresh.mockClear();
 
     dispose();
-    fontSet.dispatchEvent(new Event("loadingdone"));
+    finishLoadingFontFaces([createFontFace("Terminal Theme Mono")]);
 
     expect(refresh).not.toHaveBeenCalled();
     expect(removeEventListener).toHaveBeenCalledWith(
@@ -503,14 +588,17 @@ describe("loadTerminalWebglRenderer", () => {
 
   it("loads the accelerated renderer and falls back when its context is lost", () => {
     let onContextLoss = () => {};
+
     const addon = {
       activate: vi.fn(),
       dispose: vi.fn(),
       onContextLoss: vi.fn((listener: () => void) => {
         onContextLoss = listener;
+
         return { dispose: vi.fn() };
       }),
     };
+
     const terminal = { loadAddon: vi.fn() };
 
     expect(loadTerminalWebglRenderer(terminal, () => addon)).toBe(true);
@@ -527,6 +615,7 @@ describe("loadTerminalWebglRenderer", () => {
       dispose: vi.fn(),
       onContextLoss: vi.fn(() => ({ dispose: vi.fn() })),
     };
+
     const terminal = {
       loadAddon: vi.fn(() => {
         throw new Error("WebGL unavailable");

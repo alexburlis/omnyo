@@ -8,7 +8,7 @@ import { runInstallCommand } from "../../../src/services/plugins/install-sources
 let rootDir: string;
 
 beforeEach(async () => {
-  rootDir = await mkdtemp(join(tmpdir(), "bb-git-dependencies-"));
+  rootDir = await mkdtemp(join(tmpdir(), "omnyo-git-dependencies-"));
 });
 
 afterEach(async () => {
@@ -22,9 +22,9 @@ function manifest(
 ): string {
   return JSON.stringify(
     {
-      name: "bb-plugin-runtime-only",
+      name: "omnyo-plugin-runtime-only",
       version: "1.0.0",
-      bb: {
+      omnyo: {
         name: "Runtime only",
         description: "Runtime dependency fixture",
         branding: { icon: "Zap" },
@@ -70,16 +70,19 @@ it("installs runtime dependencies with development dependencies present and life
     rootDir,
     "--ignore-scripts",
   ]);
+
   const devDependencies = {
     "dev-tool": "file:./dev-tool-1.0.0.tgz",
   };
+
   const dependencies = {
     "runtime-fixture": "file:./runtime-fixture-1.0.0.tgz",
   };
+
   await writeFile(
     join(rootDir, "package.json"),
     JSON.stringify({
-      name: "bb-plugin-runtime-only",
+      name: "omnyo-plugin-runtime-only",
       version: "1.0.0",
       dependencies,
       devDependencies,
@@ -115,6 +118,7 @@ it("leaves the source manifest unchanged when a runtime dependency cannot be ins
   const original = manifest({
     "missing-runtime": "file:./missing-runtime.tgz",
   });
+
   await writeFile(join(rootDir, "package.json"), original);
 
   await expect(installGitDependencies(rootDir)).rejects.toThrow(

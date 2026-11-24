@@ -3,7 +3,9 @@ import {
   normalizeUsageMeasurement,
   selectUsageResources,
 } from "./usage-normalization.js";
-import { usageMeasurementSchema } from "./usage-source-contract.js";
+import { experimental_providerUsageSourceV1 } from "@omnyo/plugin-sdk/provider-usage";
+
+const { usageMeasurementSchema } = experimental_providerUsageSourceV1;
 
 it("merges only matching provider-issued identities, preferring shared observations without summing limits", () => {
   const host = {
@@ -13,12 +15,14 @@ it("merges only matching provider-issued identities, preferring shared observati
     scope: { kind: "host" as const },
     percent: 40,
   };
+
   const shared = {
     ...host,
     id: "pool",
     scope: { kind: "shared" as const },
     percent: 50,
   };
+
   const unknown = { ...host, id: "unknown", accountKey: null };
   const other = { ...host, id: "other", accountKey: "issuer:account:2" };
   const differentProvider = { ...shared, providerId: "different" };
@@ -82,6 +86,7 @@ it("normalizes structured plans and windows while retaining custom provider labe
       ],
     },
   });
+
   expect(normalizeUsageMeasurement(raw)).toMatchObject({
     accountKey: null,
     usage: {

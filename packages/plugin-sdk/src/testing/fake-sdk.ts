@@ -1,9 +1,9 @@
-import { validatePluginMetadata } from "@bb/domain";
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { validatePluginMetadata } from "@omnyo/domain";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 
-type BbSdk = BbPluginApi["sdk"];
+type OmnyoSdk = PluginApi["sdk"];
 
-/** One recorded `bb.sdk` call. `path` is dot-joined, e.g. "threads.spawn". */
+/** One recorded `api.sdk` call. `path` is dot-joined, e.g. "threads.spawn". */
 export interface FakeSdkCall {
   path: string;
   args: unknown[];
@@ -19,7 +19,7 @@ type LooseStub<F> = F extends (...args: infer A) => unknown
   : never;
 
 /**
- * Stub implementations keyed like `BbSdk`: an object per area with a subset
+ * Stub implementations keyed like `OmnyoSdk`: an object per area with a subset
  * of its methods, or a function for the root-level members (`on`).
  */
 type FakeSdkOverrideTree<T> = {
@@ -28,11 +28,11 @@ type FakeSdkOverrideTree<T> = {
     : FakeSdkOverrideTree<T[K]>;
 };
 
-export type FakeSdkOverrides = FakeSdkOverrideTree<BbSdk>;
+export type FakeSdkOverrides = FakeSdkOverrideTree<OmnyoSdk>;
 
 export interface FakeSdkHarness {
   /**
-   * Every `bb.sdk` call in order, including ones whose stub threw. Calls
+   * Every `api.sdk` call in order, including ones whose stub threw. Calls
    * rejected by argument validation are not recorded.
    */
   readonly calls: FakeSdkCall[];
@@ -52,12 +52,15 @@ export interface FakeSdkHarness {
  */
 function withThreadAttribution(pluginId: string, args: unknown[]): unknown[] {
   const [first, ...rest] = args;
+
   if (typeof first !== "object" || first === null) return args;
+
   const threadArgs = first as {
     origin?: string;
     originPluginId?: string;
     pluginMetadata?: unknown;
   };
+
   if (threadArgs.pluginMetadata !== undefined) {
     return [
       {
@@ -69,7 +72,9 @@ function withThreadAttribution(pluginId: string, args: unknown[]): unknown[] {
       ...rest,
     ];
   }
+
   const origin = threadArgs.origin ?? "plugin";
+
   return [
     {
       ...threadArgs,
@@ -94,8 +99,10 @@ function withPluginMetadataTarget(
   validateSet: boolean,
 ): unknown[] {
   const [first, ...rest] = args;
+
   if (typeof first !== "object" || first === null) return args;
   const input = first as { pluginId?: string; set?: unknown };
+
   return [
     {
       ...input,
@@ -128,7 +135,7 @@ function normalizeCallArgs(
 }
 
 /**
- * Recordable `bb.sdk` stand-in for {@link createFakePluginHost}. Calls are
+ * Recordable `api.sdk` stand-in for {@link createFakePluginHost}. Calls are
  * recorded after the plugin-bound normalization the server applies, so
  * assertions see what the server would receive. Arguments the real SDK
  * rejects before sending, such as invalid `pluginMetadata`, return a rejected
@@ -138,56 +145,70 @@ function normalizeCallArgs(
 export function createFakeSdk(options: {
   pluginId: string;
   overrides?: FakeSdkOverrides;
-}): { sdk: BbSdk; harness: FakeSdkHarness } {
+}): { sdk: OmnyoSdk; harness: FakeSdkHarness } {
   const calls: FakeSdkCall[] = [];
   const stubs = new Map<string, (...args: unknown[]) => unknown>();
 
   function addOverrides(prefix: string, value: unknown): void {
     if (typeof value === "function") {
       stubs.set(prefix, value as (...args: unknown[]) => unknown);
+
       return;
     }
+
     if (typeof value !== "object" || value === null) return;
+
     for (const [key, child] of Object.entries(value)) {
       addOverrides(prefix.length === 0 ? key : `${prefix}.${key}`, child);
     }
   }
+
   addOverrides("", options.overrides ?? {});
 
   function invoke(path: string, rawArgs: unknown[]): unknown {
     let args: unknown[];
+
     try {
       args = normalizeCallArgs(options.pluginId, path, rawArgs);
     } catch (error) {
       return Promise.reject(error);
     }
+
     calls.push({ path, args });
     const stub = stubs.get(path);
+
     if (!stub) {
       throw new Error(
-        `bb.sdk.${path} is not stubbed — pass an implementation via ` +
+        `api.sdk.${path} is not stubbed — pass an implementation via ` +
           `createFakePluginHost({ sdk: { ... } }) or harness.sdk.stub("${path}", fn)`,
       );
     }
+
     return stub(...args);
   }
 
   const nodes = new Map<string, unknown>();
+
   /** Callable-and-traversable proxy: `sdk.threads.spawn(...)` and `sdk.subscribe(...)` both work. */
   function node(path: string): unknown {
     const cached = nodes.get(path);
+
     if (cached) return cached;
+
     const created = new Proxy(function () {}, {
       get(_target, prop) {
         // Not thenable: an accidentally awaited node must not hang.
         if (typeof prop !== "string" || prop === "then") return undefined;
+
         return node(path === "" ? prop : `${path}.${prop}`);
       },
       apply(_target, _thisArg, args: unknown[]) {
         return invoke(path, args);
       },
     });
+
     nodes.set(path, created);
+
     return created;
   }
 
@@ -203,7 +224,7 @@ export function createFakeSdk(options: {
     },
   };
 
-  // The proxy is the genuinely unknowable boundary: it answers any BbSdk
+  // The proxy is the genuinely unknowable boundary: it answers any OmnyoSdk
   // shape at runtime, and the type is re-imposed here once.
-  return { sdk: node("") as BbSdk, harness };
+  return { sdk: node("") as OmnyoSdk, harness };
 }

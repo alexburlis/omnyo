@@ -1,10 +1,11 @@
 import type {
   DesktopBrowserImportFailureReason,
   DesktopBrowserImportOutcome,
+  DesktopBrowserImportSelection,
   DesktopBrowserImportSource,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 
-export interface BrowserImportRecord {
+interface BrowserImportRecord {
   at: number;
   profileName: string;
   imported: number;
@@ -16,20 +17,25 @@ export type BrowserImportRecords = Readonly<
   Partial<Record<DesktopBrowserImportSource["id"], BrowserImportRecord>>
 >;
 
-export const BROWSER_IMPORT_RECORDS_STORAGE_KEY = "bb:browser-import:records";
+export const BROWSER_IMPORT_RECORDS_STORAGE_KEY =
+  "omnyo:browser-import:records";
 
 export function readBrowserImportRecords(
   storage: Pick<Storage, "getItem"> | null,
 ): BrowserImportRecords {
   try {
     const raw = storage?.getItem(BROWSER_IMPORT_RECORDS_STORAGE_KEY);
+
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
+
     if (typeof parsed !== "object" || parsed === null) return {};
     const records: Partial<Record<string, BrowserImportRecord>> = {};
+
     for (const [id, value] of Object.entries(parsed)) {
       if (typeof value !== "object" || value === null) continue;
       const record = value as Partial<BrowserImportRecord>;
+
       if (
         typeof record.at !== "number" ||
         typeof record.profileName !== "string" ||
@@ -48,6 +54,7 @@ export function readBrowserImportRecords(
         ),
       };
     }
+
     return records as BrowserImportRecords;
   } catch {
     return {};
@@ -66,12 +73,16 @@ export function initialDialogStep(
 ): BrowserImportDialogStep {
   if (source.unavailable === "browserRunning")
     return { step: "blocked", reason: "browserRunning" };
+
   if (source.unavailable === "needsFullDiskAccess")
     return { step: "fullDiskAccess", checked: false };
+
   if (source.unavailable !== undefined)
     return { step: "blocked", reason: source.unavailable };
+
   if (source.profiles.length === 0)
     return { step: "blocked", reason: "unknownSourceProfile" };
+
   return { step: "configure" };
 }
 
@@ -80,6 +91,7 @@ export function failedDialogStep(
 ): BrowserImportDialogStep {
   if (reason === "needsFullDiskAccess")
     return { step: "fullDiskAccess", checked: true };
+
   return { step: "blocked", reason };
 }
 
@@ -104,8 +116,10 @@ export function refreshedDialogStep(
 ): BrowserImportDialogStep {
   if (source === undefined) return { step: "blocked", reason: "unknownSource" };
   const next = initialDialogStep(source);
+
   if (next.step === "fullDiskAccess" && previous.step === "fullDiskAccess")
     return { step: "fullDiskAccess", checked: true };
+
   return next;
 }
 
@@ -128,6 +142,7 @@ export function preferredSourceProfileDirectory(
     source.profiles.some((profile) => profile.directory === current)
   )
     return current;
+
   return source.profiles[0]?.directory ?? null;
 }
 
@@ -151,9 +166,12 @@ export function formatCookieCount(count: number): string {
 
 export function formatSkippedDomains(domains: readonly string[]): string {
   if (domains.length === 0) return "";
+
   if (domains.length === 1) return domains[0];
+
   if (domains.length <= 3)
     return `${domains.slice(0, -1).join(", ")} and ${domains[domains.length - 1]}`;
+
   return `${domains.slice(0, 3).join(", ")} and ${domains.length - 3} more`;
 }
 
@@ -169,7 +187,7 @@ export function listedSources(
 
 export type SourceRowTone = "ready" | "attention" | "idle";
 
-export interface SourceRowPresentation {
+interface SourceRowPresentation {
   status: string;
   tone: SourceRowTone;
   details: string[];
@@ -177,16 +195,16 @@ export interface SourceRowPresentation {
   actionLabel: string;
 }
 
-export function totalCookies(
-  source: DesktopBrowserImportSource,
-): number | undefined {
+function totalCookies(source: DesktopBrowserImportSource): number | undefined {
   let total = 0;
   let known = false;
+
   for (const profile of source.profiles) {
     if (profile.cookieCount === undefined) return undefined;
     total += profile.cookieCount;
     known = true;
   }
+
   return known ? total : undefined;
 }
 
@@ -197,6 +215,7 @@ export function presentSourceRow(
   const profileCount = source.profiles.length;
   const profileLabel = `${profileCount} ${profileCount === 1 ? "profile" : "profiles"}`;
   const cookies = totalCookies(source);
+
   switch (source.unavailable) {
     case "browserRunning":
       return {
@@ -241,6 +260,7 @@ export function presentSourceRow(
         actionLabel: "Import…",
       };
   }
+
   if (profileCount === 0 || cookies === 0) {
     return {
       status: "No cookies yet",
@@ -250,6 +270,7 @@ export function presentSourceRow(
       actionLabel: "Import…",
     };
   }
+
   const details = record
     ? [
         `${record.profileName} · ${formatCookieCount(record.imported)} imported`,
@@ -266,6 +287,7 @@ export function presentSourceRow(
     : cookies === undefined
       ? [profileLabel]
       : [profileLabel, formatCookieCount(cookies)];
+
   return {
     status: "Ready",
     tone: "ready",
@@ -273,4 +295,49 @@ export function presentSourceRow(
     action: "import",
     actionLabel: "Import…",
   };
+}
+
+export interface SyncCandidate {
+  key: string;
+  source: DesktopBrowserImportSelection;
+  browserName: string;
+  profileName: string;
+  icon: string | null;
+}
+
+export function sourceKey(source: DesktopBrowserImportSelection): string {
+  return `${source.sourceId}:${source.sourceProfileDirectory}`;
+}
+
+export function syncCandidates(
+  sources: readonly DesktopBrowserImportSource[],
+): SyncCandidate[] {
+  return sources
+    .filter((source) => source.unavailable === undefined)
+    .flatMap((source) =>
+      source.profiles.map((profile) => {
+        const candidate = {
+          sourceId: source.id,
+          sourceProfileDirectory: profile.directory,
+        };
+
+        return {
+          key: sourceKey(candidate),
+          source: candidate,
+          browserName: source.name,
+          profileName: profile.name,
+          icon: source.icon ?? null,
+        };
+      }),
+    );
+}
+
+export function recommendedCandidate(
+  candidates: readonly SyncCandidate[],
+  recommended: DesktopBrowserImportSelection | null,
+): SyncCandidate | null {
+  if (recommended === null) return null;
+  const key = sourceKey(recommended);
+
+  return candidates.find((candidate) => candidate.key === key) ?? null;
 }

@@ -8,7 +8,7 @@ import {
 } from "../helpers/command-output-harness.js";
 import { registerSkillCommands } from "../../commands/skill.js";
 
-describe("bb skill commands", () => {
+describe("omnyo skill commands", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -33,6 +33,7 @@ describe("bb skill commands", () => {
         },
       ],
     }));
+
     stubServerApi({ "v1.projects.:id.skills.$get": get });
 
     await runCommand(["skill", "list"], register);
@@ -46,12 +47,49 @@ describe("bb skill commands", () => {
     );
   });
 
+  it("lists a skill that several providers read as shared", async () => {
+    const get = vi.fn(async () => ({
+      skills: [
+        {
+          id: `skill_${"b".repeat(64)}`,
+          name: "common",
+          description: null,
+          provider: null,
+          scope: "provider-user",
+          pluginId: null,
+          filePath: "/home/user/.agents/skills/common/SKILL.md",
+          manageable: true,
+          registrySkillId: null,
+        },
+        {
+          id: `skill_${"c".repeat(64)}`,
+          name: "own",
+          description: null,
+          provider: null,
+          scope: "omnyo-user",
+          pluginId: null,
+          filePath: "/home/user/.omnyo/skills/own/SKILL.md",
+          manageable: true,
+          registrySkillId: null,
+        },
+      ],
+    }));
+
+    stubServerApi({ "v1.projects.:id.skills.$get": get });
+
+    await runCommand(["skill", "list"], register);
+
+    const lines = collectLogLines(vi.mocked(console.log));
+    expect(lines.find((line) => line.includes("common"))).toContain("shared");
+    expect(lines.find((line) => line.includes("own"))).toContain("Omnyo");
+  });
+
   it("installs only by canonical registry identity", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(
       new Response(
         JSON.stringify({
           ok: true,
-          filePath: "/home/user/.bb/skills/review/SKILL.md",
+          filePath: "/home/user/.omnyo/skills/review/SKILL.md",
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -69,6 +107,32 @@ describe("bb skill commands", () => {
     });
   });
 
+  it("passes the reviewed digest to the commit route and prints the installed digest", async () => {
+    const treeDigest = "a".repeat(64);
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      Response.json({
+        ok: true,
+        filePath: "/skills/review/SKILL.md",
+        treeDigest,
+      }),
+    );
+
+    await runCommand(
+      ["skill", "install", "owner/repo/review", "--digest", treeDigest],
+      register,
+    );
+
+    const [url, request] = vi.mocked(globalThis.fetch).mock.calls[0] ?? [];
+    expect(String(url)).toBe("http://server/api/v1/skills-registry/commit");
+    expect(JSON.parse(String(request?.body))).toEqual({
+      registrySkillId: "owner/repo/review",
+      treeDigest,
+    });
+    expect(collectLogLines(vi.mocked(console.log))).toContain(
+      `Digest: ${treeDigest}`,
+    );
+  });
+
   it("deduplicates repository stars while printing registry search results", async () => {
     const skill = {
       id: "owner/repo/review",
@@ -82,8 +146,10 @@ describe("bb skill commands", () => {
       topic: null,
       summary: "Review a change",
     };
+
     vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
       const url = String(input);
+
       if (url.startsWith("http://server/api/v1/skills-registry?")) {
         return Response.json({
           skills: [
@@ -99,14 +165,17 @@ describe("bb skill commands", () => {
           ranking: "trending",
         });
       }
+
       if (url.startsWith("http://server/api/v1/skills-registry/entry?")) {
         return Response.json({ ...skill, installs: 881_234 });
       }
+
       if (
         url.startsWith("http://server/api/v1/skills-registry/repository-stars?")
       ) {
         return Response.json({ stars: 27_053 });
       }
+
       return new Response(null, { status: 404 });
     });
 
@@ -118,9 +187,11 @@ describe("bb skill commands", () => {
     expect(output).not.toContain("INSTALLS/24H");
     expect(output).toContain("881234");
     expect(output).not.toContain(" 42 ");
+
     const requested = vi
       .mocked(globalThis.fetch)
       .mock.calls.map(([input]) => String(input));
+
     expect(requested).toContain(
       "http://server/api/v1/skills-registry?page=0&perPage=24",
     );
@@ -144,8 +215,10 @@ describe("bb skill commands", () => {
       topic: null,
       summary: "Review a change",
     };
+
     vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
       const url = String(input);
+
       if (url.startsWith("http://server/api/v1/skills-registry?")) {
         return Response.json({
           skills: [skill],
@@ -153,9 +226,11 @@ describe("bb skill commands", () => {
           ranking: "trending",
         });
       }
+
       if (url.startsWith("http://server/api/v1/skills-registry/entry?")) {
         return Response.json({ ...skill, installs: 881_234 });
       }
+
       return new Response(null, { status: 404 });
     });
 
@@ -167,6 +242,7 @@ describe("bb skill commands", () => {
       ranking: string;
       skills: { id: string; installs: number; lifetimeInstalls: number }[];
     };
+
     expect(payload.ranking).toBe("trending");
     expect(payload.skills).toEqual([
       expect.objectContaining({
@@ -190,15 +266,19 @@ describe("bb skill commands", () => {
       topic: null,
       summary: null,
     };
+
     vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
       const url = String(input);
-      if (url.startsWith("http://server/api/v1/skills-registry?")) {
+
+      if (url.startsWith("http://server/api/v1/skills-registry/search?")) {
         return Response.json({
           skills: [skill],
           pagination: { page: 0, perPage: 24, total: 1, hasMore: false },
           ranking: "all-time",
+          coverage: "catalog-names",
         });
       }
+
       if (url.startsWith("http://server/api/v1/skills-registry/entry?")) {
         return Response.json({
           ...skill,
@@ -206,12 +286,14 @@ describe("bb skill commands", () => {
           summary: "Review a change",
         });
       }
+
       return Response.json({ stars: 7 });
     });
 
     await runCommand(["skill", "search", "review"], register);
 
     const output = collectLogLines(vi.mocked(console.log)).join("\n");
+    expect(output).toContain("Coverage: catalog-names");
     expect(output).toContain("42");
     expect(output).not.toContain("881234");
     expect(output).toContain("Review a change");
@@ -230,8 +312,10 @@ describe("bb skill commands", () => {
       topic: null,
       summary: null,
     };
+
     vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
       const url = String(input);
+
       if (url.startsWith("http://server/api/v1/skills-registry?")) {
         return Response.json({
           skills: [skill],
@@ -239,9 +323,11 @@ describe("bb skill commands", () => {
           ranking: "trending",
         });
       }
+
       if (url.startsWith("http://server/api/v1/skills-registry/entry?")) {
         return new Response(null, { status: 404 });
       }
+
       return Response.json({ stars: 7 });
     });
 
@@ -256,6 +342,7 @@ describe("bb skill commands", () => {
         lifetimeInstalls: number | null;
       }[];
     };
+
     expect(payload.skills).toEqual([
       expect.objectContaining({
         id: "owner/repo/review",
@@ -328,6 +415,7 @@ describe("bb skill commands", () => {
       topic: null,
       summary: null,
     };
+
     const detail = {
       id: entry.id,
       source: entry.source,
@@ -335,6 +423,7 @@ describe("bb skill commands", () => {
       hash: null,
       files: null,
     };
+
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(
         new Response(JSON.stringify(entry), {

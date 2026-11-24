@@ -53,7 +53,9 @@ function isImageFileTab(tab: SecondaryPanelRenderableTab): boolean {
   ) {
     return false;
   }
+
   const extension = tab.tab.path.split(".").pop()?.toLowerCase();
+
   return extension !== undefined && IMAGE_FILE_EXTENSIONS.has(extension);
 }
 
@@ -64,24 +66,30 @@ export function ImageTabLightboxProvider({
 }: ImageTabLightboxProviderProps) {
   const [image, setImage] = useState<ImageTabLightboxImage | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+
   const [imagesByTabId, setImagesByTabId] = useState<
     ReadonlyMap<string, ImageTabLightboxImage>
   >(() => new Map());
+
   const imageTabs = useMemo(() => tabs.filter(isImageFileTab), [tabs]);
+
   const selectImageTab = useCallback(
     (index: number) => {
       const tab = imageTabs[index];
+
       if (tab === undefined) return;
       setImage(imagesByTabId.get(tab.tab.id) ?? null);
       tab.onSelect();
     },
     [imageTabs, imagesByTabId],
   );
+
   const step = useCallback(
     (direction: "previous" | "next") => {
       const currentIndex = imageTabs.findIndex(
         (tab) => tab.tab.id === activeTabId,
       );
+
       if (currentIndex === -1 || imageTabs.length <= 1) return;
       selectImageTab(
         getWrappedImageIndex({
@@ -93,17 +101,21 @@ export function ImageTabLightboxProvider({
     },
     [activeTabId, imageTabs, selectImageTab],
   );
+
   const updateImage = useCallback(
     (nextImage: ImageTabLightboxImage) => {
       setImage(nextImage);
+
       if (activeTabId === null) return;
       setImagesByTabId((current) => {
         if (current.get(activeTabId)?.src === nextImage.src) return current;
+
         return new Map(current).set(activeTabId, nextImage);
       });
     },
     [activeTabId],
   );
+
   const value = useMemo<ImageTabLightboxValue>(
     () => ({
       isOpen,

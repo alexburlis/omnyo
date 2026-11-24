@@ -5,9 +5,9 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import { threadsQueryKey } from "@/hooks/queries/query-keys";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import { conversationRow } from "@/test/fixtures/thread-timeline-rows";
 import { ThreadTimelineRows } from "./ThreadTimelineRows";
 import { sdk } from "@/lib/sdk";
@@ -30,6 +30,7 @@ function timelineRowsFixture() {
       threadId: "thr_main",
     }),
   ];
+
   for (let index = 0; index < 20; index += 1) {
     rows.push(
       conversationRow({
@@ -42,14 +43,17 @@ function timelineRowsFixture() {
       }),
     );
   }
+
   return rows;
 }
 
 function renderProfiledTimeline(queryClient: QueryClient) {
   const commits: { phase: string }[] = [];
+
   const onRender: ProfilerOnRenderCallback = (_id, phase) => {
     commits.push({ phase });
   };
+
   const view = render(
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
@@ -64,6 +68,7 @@ function renderProfiledTimeline(queryClient: QueryClient) {
       </QueryClientProvider>
     </MemoryRouter>,
   );
+
   return { commits, view };
 }
 
@@ -110,6 +115,7 @@ describe("ThreadTimelineRows render stability", () => {
         ]);
       });
     }
+
     await notifications.flush();
 
     expect(commits.length).toBe(settledCommitCount);

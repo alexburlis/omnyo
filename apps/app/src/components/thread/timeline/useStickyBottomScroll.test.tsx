@@ -14,6 +14,7 @@ function StickyScrollProbe({ contentKey }: { contentKey: string }) {
     contentKey,
     streaming: true,
   });
+
   return (
     <div
       ref={sticky.ref}
@@ -29,9 +30,11 @@ function StickyScrollProbe({ contentKey }: { contentKey: string }) {
 describe("useStickyBottomScroll", () => {
   it("uses a cached maximum offset in the scroll handler", () => {
     vi.stubGlobal("ResizeObserver", undefined);
+
     const { getByTestId, rerender } = render(
       <StickyScrollProbe contentKey="first" />,
     );
+
     const scroll = getByTestId("scroll");
     let layoutReads = 0;
     let scrollTop = 0;
@@ -40,6 +43,7 @@ describe("useStickyBottomScroll", () => {
         configurable: true,
         get: () => {
           layoutReads += 1;
+
           return 120;
         },
       },
@@ -47,6 +51,7 @@ describe("useStickyBottomScroll", () => {
         configurable: true,
         get: () => {
           layoutReads += 1;
+
           return 20;
         },
       },
@@ -75,6 +80,7 @@ describe("useStickyBottomScroll", () => {
   it("refreshes the cached maximum when only the content grows", () => {
     const observed: Element[] = [];
     let fireResize: (() => void) | undefined;
+
     class StubResizeObserver {
       constructor(callback: ResizeObserverCallback) {
         fireResize = () => callback([], this as unknown as ResizeObserver);
@@ -85,11 +91,13 @@ describe("useStickyBottomScroll", () => {
       unobserve() {}
       disconnect() {}
     }
+
     vi.stubGlobal("ResizeObserver", StubResizeObserver);
 
     const { getByTestId, rerender } = render(
       <StickyScrollProbe contentKey="first" />,
     );
+
     const scroll = getByTestId("scroll");
     expect(observed).toContain(scroll);
     expect(observed).toContain(getByTestId("content"));

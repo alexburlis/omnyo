@@ -4,11 +4,13 @@ import {
   type PendingInteractionGrantedPermissionProfile,
   type PendingInteractionGrantablePermissionProfile,
   type RuntimePermissionPolicy,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { z } from "zod";
 
 export const CLAUDE_USER_QUESTION_TOOL_NAME = "AskUserQuestion";
+
 export const CLAUDE_EXIT_PLAN_MODE_TOOL_NAME = "ExitPlanMode";
+
 export const CLAUDE_BASH_TOOL_NAME = "Bash";
 
 export const claudeExitPlanModeInputSchema = z.object({
@@ -27,6 +29,7 @@ export const claudePermissionModeSchema = z.enum([
   "bypassPermissions",
   "plan",
 ]);
+
 export type ClaudePermissionMode = z.infer<typeof claudePermissionModeSchema>;
 
 export function toClaudePermissionMode(
@@ -46,6 +49,7 @@ const claudePermissionRuleValueSchema = z.object({
   toolName: z.string(),
   ruleContent: z.string().optional(),
 });
+
 export type ClaudePermissionRule = z.infer<
   typeof claudePermissionRuleValueSchema
 >;
@@ -63,6 +67,7 @@ const claudePermissionUpdateSchema = z.discriminatedUnion("type", [
     destination: z.literal("session"),
   }),
 ]);
+
 type ClaudePermissionUpdate = z.infer<typeof claudePermissionUpdateSchema>;
 
 const claudePermissionUpdateDestinationSchema = z.enum([
@@ -89,6 +94,7 @@ export const claudeSuggestedPermissionUpdateSchema = z.discriminatedUnion(
     }),
   ],
 );
+
 export type ClaudeSuggestedPermissionUpdate = z.infer<
   typeof claudeSuggestedPermissionUpdateSchema
 >;
@@ -153,10 +159,12 @@ export function toPendingInteractionPermissionProfile(
   args: ClaudePermissionRequestProfileArgs,
 ): PendingInteractionGrantablePermissionProfile {
   const hasRuleSuggestion = getSuggestedRules(args.suggestions).length > 0;
+
   const directories = [
     ...getSuggestedDirectories(args.suggestions),
     ...(args.blockedPath === undefined ? [] : [args.blockedPath]),
   ];
+
   const uniqueDirectories = [...new Set(directories)];
   const filePermissionKind = getClaudeFilePermissionKind(args.toolName);
 
@@ -223,6 +231,7 @@ const claudeUserQuestionSchema = z.object({
     .max(USER_QUESTION_MAX_OPTIONS),
   multiSelect: z.boolean(),
 });
+
 export type ClaudeUserQuestion = z.infer<typeof claudeUserQuestionSchema>;
 
 const claudeUserQuestionListSchema = z
@@ -238,8 +247,10 @@ const claudeUserQuestionListSchema = z
           message: "Claude user-question prompts must be unique",
           path: [index, "question"],
         });
+
         return;
       }
+
       prompts.add(question.question);
     });
   });
@@ -247,6 +258,7 @@ const claudeUserQuestionListSchema = z
 export const claudeUserQuestionInputSchema = z.object({
   questions: claudeUserQuestionListSchema,
 });
+
 export type ClaudeUserQuestionInput = z.infer<
   typeof claudeUserQuestionInputSchema
 >;
@@ -271,6 +283,7 @@ const claudeUserQuestionOutputSchema = z.object({
     .record(z.string().min(1), claudeUserQuestionAnnotationSchema)
     .optional(),
 });
+
 export type ClaudeUserQuestionOutput = z.infer<
   typeof claudeUserQuestionOutputSchema
 >;
@@ -312,6 +325,7 @@ const claudeInteractiveResponseSchema = z.union([
   claudePermissionApprovalResponseSchema,
   claudeUserQuestionResponseSchema,
 ]);
+
 export type ClaudeInteractiveResponse = z.infer<
   typeof claudeInteractiveResponseSchema
 >;
@@ -325,10 +339,12 @@ export function buildClaudeSessionPermissionUpdates(
   args: BuildClaudePermissionUpdatesArgs,
 ): ClaudePermissionUpdate[] | undefined {
   const updates: ClaudePermissionUpdate[] = [];
+
   const directories = [
     ...(args.permissions.fileSystem?.read ?? []),
     ...(args.permissions.fileSystem?.write ?? []),
   ];
+
   const uniqueDirectories = [...new Set(directories)];
 
   if (uniqueDirectories.length > 0) {

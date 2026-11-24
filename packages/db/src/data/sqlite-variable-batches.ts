@@ -17,24 +17,30 @@ export function queryInSqliteVariableBatches<TValue, TRow>(
       args.values.map((value) => [args.dedupeKey(value), value]),
     ).values(),
   ];
+
   if (values.length === 0) {
     return [];
   }
+
   const variableBatchSize = Math.floor(
     (SQLITE_MAX_VARIABLE_NUMBER - args.fixedVariableCount) /
       args.variableCountPerValue,
   );
+
   const batchSize = Math.min(
     variableBatchSize,
     args.maximumValueCount ?? variableBatchSize,
   );
+
   if (batchSize < 1) {
     throw new Error("The fixed SQL variables exceed the SQLite limit");
   }
 
   const rows: TRow[] = [];
+
   for (let offset = 0; offset < values.length; offset += batchSize) {
     rows.push(...args.queryBatch(values.slice(offset, offset + batchSize)));
   }
+
   return rows;
 }

@@ -2,9 +2,13 @@ import {
   applyNeighborReorder,
   buildNeighborReorderRequest,
 } from "./neighbor-reorder.js";
-import type { SidebarSectionId } from "./sidebar-section-id.js";
+import {
+  isCollapsibleSidebarSectionId,
+  type SidebarSectionId,
+} from "./sidebar-section-id.js";
 
 type SidebarEntitySectionKind = "project" | "section" | "machine";
+
 export type LegacySidebarEntityAnchor = "projects" | "sections" | "machines";
 
 export function buildSidebarEntitySectionId(
@@ -16,8 +20,7 @@ export function buildSidebarEntitySectionId(
 
 function isSidebarSectionId(value: string): value is SidebarSectionId {
   return (
-    value === "pinned" ||
-    value === "threads" ||
+    isCollapsibleSidebarSectionId(value) ||
     value.startsWith("project:") ||
     value.startsWith("section:") ||
     value.startsWith("machine:")
@@ -38,9 +41,12 @@ export function reorderSidebarSectionOrder({
   if (!isSidebarSectionId(activeId) || !isSidebarSectionId(overId)) {
     return null;
   }
+
   const items = order.map((id) => ({ id }));
   const request = buildNeighborReorderRequest({ activeId, overId, items });
+
   if (!request) return null;
+
   return applyNeighborReorder({ items, request })
     .map((item) => item.id)
     .filter(isSidebarSectionId);
@@ -65,7 +71,9 @@ export function normalizeSidebarSectionOrder({
     ...(hasPinnedSection ? (["pinned"] as const) : []),
     ...entitySectionIds,
     ...(hasThreadsSection ? (["threads"] as const) : []),
+    "shelf",
   ]);
+
   const entitySet = new Set(entitySectionIds);
   const seen = new Set<SidebarSectionId>();
   const normalized: SidebarSectionId[] = [];
@@ -75,6 +83,7 @@ export function normalizeSidebarSectionOrder({
     if (!available.has(sectionId) || seen.has(sectionId)) {
       return;
     }
+
     seen.add(sectionId);
     normalized.push(sectionId);
   };
@@ -82,11 +91,14 @@ export function normalizeSidebarSectionOrder({
   for (const storedId of storedOrder) {
     if (storedId === legacyEntityAnchor) {
       expandedLegacyAnchor = true;
+
       for (const entityId of entitySectionIds) {
         append(entityId);
       }
+
       continue;
     }
+
     if (isSidebarSectionId(storedId)) {
       append(storedId);
     }
@@ -100,20 +112,25 @@ export function normalizeSidebarSectionOrder({
   const missingEntities = entitySectionIds.filter(
     (sectionId) => !seen.has(sectionId),
   );
+
   if (missingEntities.length > 0) {
     const lastEntityIndex = normalized.reduce(
       (lastIndex, sectionId, index) =>
         entitySet.has(sectionId) ? index : lastIndex,
       -1,
     );
+
     const threadsIndex = normalized.indexOf("threads");
+
     const insertionIndex =
       lastEntityIndex >= 0
         ? lastEntityIndex + 1
         : threadsIndex >= 0 || expandedLegacyAnchor
           ? Math.max(threadsIndex, 0)
           : normalized.length;
+
     normalized.splice(insertionIndex, 0, ...missingEntities);
+
     for (const sectionId of missingEntities) {
       seen.add(sectionId);
     }
@@ -121,6 +138,10 @@ export function normalizeSidebarSectionOrder({
 
   if (hasThreadsSection && !seen.has("threads")) {
     normalized.push("threads");
+  }
+
+  if (!seen.has("shelf")) {
+    normalized.push("shelf");
   }
 
   return normalized;
@@ -144,16 +165,21 @@ export function insertSidebarSectionAfter({
   if (anchorSectionId === sectionId) {
     return null;
   }
+
   const normalized = normalizeSidebarSectionOrder({
     storedOrder,
     entitySectionIds: [...entitySectionIds, sectionId],
     legacyEntityAnchor,
     hasPinnedSection: true,
   }).filter((id) => id !== sectionId);
+
   const anchorIndex = normalized.indexOf(anchorSectionId);
+
   if (anchorIndex === -1) {
     return null;
   }
+
   normalized.splice(anchorIndex + 1, 0, sectionId);
+
   return normalized;
 }

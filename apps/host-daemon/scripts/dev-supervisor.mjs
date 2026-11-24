@@ -3,9 +3,10 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_UNEXPECTED_RESTART_BACKOFF,
   runDevSupervisor,
-} from "@bb/scripts/lib/run-dev-supervisor";
+} from "@omnyo/scripts/lib/run-dev-supervisor";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
+
 const packageRoot = resolve(scriptDir, "..");
 
 void runDevSupervisor({
@@ -23,6 +24,7 @@ void runDevSupervisor({
 }).catch((error) => {
   const message =
     error instanceof Error ? (error.stack ?? error.message) : String(error);
+
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

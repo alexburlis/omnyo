@@ -4,7 +4,7 @@ import {
   threads,
   type DbQueryConnection,
   type DbTransaction,
-} from "@bb/db";
+} from "@omnyo/db";
 
 interface EnvironmentProvisionCancellationReadDeps {
   db: DbQueryConnection;
@@ -41,6 +41,7 @@ function hasOtherLiveThreadDependingOnEnvironmentProvision(
     )
     .limit(1)
     .get();
+
   return row !== undefined;
 }
 
@@ -53,6 +54,7 @@ export function cancelEnvironmentProvisioningForThreadStopInTransaction(
   }
 
   const environment = getEnvironment(deps.db, args.environmentId);
+
   if (!environment) {
     return "ready_to_finalize";
   }

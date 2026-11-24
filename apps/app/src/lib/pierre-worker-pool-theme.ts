@@ -30,11 +30,14 @@ export function useSyncPierreWorkerPoolTheme(
   const theme = useResolvedCodeThemePair();
   useEffect(() => {
     registerResolvedCodeThemeFiles(registerCustomTheme);
+
     if (pool == null) return;
     const applied = appliedThemeByPool.get(pool) ?? constructedTheme;
+
     if (!appliedThemeByPool.has(pool)) {
       appliedThemeByPool.set(pool, constructedTheme);
     }
+
     if (areCodeThemePairsEqual(applied, theme)) return;
     appliedThemeByPool.set(pool, theme);
     void pool.setRenderOptions({ theme }).catch((error: unknown) => {

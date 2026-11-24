@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { permissionModeValues } from "@bb/domain";
+import { permissionModeValues } from "@omnyo/domain";
 
 const qaRoot = path.resolve(import.meta.dirname, "../../../qa");
+
 const publicPermissionModes = new Set<string>(permissionModeValues);
 
 async function readRunbook(name: string): Promise<string> {
@@ -15,6 +16,7 @@ describe("QA runbook contracts", () => {
     "%s uses only public CLI permission modes",
     async (name) => {
       const runbook = await readRunbook(name);
+
       const modes = [...runbook.matchAll(/--permission-mode\s+(\S+)/g)].map(
         (match) => match[1],
       );

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { MachineEnvironmentList } from "@bb/server-contract";
+import type { MachineEnvironmentList } from "@omnyo/server-contract";
 import { OptionPicker } from "@/components/pickers/OptionPicker";
 import {
   MachineEnvironmentAutomaticRow,
@@ -14,6 +14,7 @@ export default {
 };
 
 const noop = () => {};
+
 const noopSave = async () => {};
 
 type Variable = MachineEnvironmentList["variables"][number];
@@ -26,15 +27,19 @@ const LOGGED_IN: MachineEnvironmentList["builtInGit"] = {
   status: "logged in",
   statusMessage: "gh is authenticated",
 };
+
 const SIGNED_OUT: MachineEnvironmentList["builtInGit"] = {
   status: "not logged in",
   statusMessage: "gh is signed out",
 };
+
 const GIT_OFF: MachineEnvironmentList["builtInGit"] = {
   status: "disabled",
   statusMessage: "Automatic token is off",
 };
+
 const LONG_NAME = "GOOGLE_APPLICATION_CREDENTIALS_JSON";
+
 const LONG_NOTE =
   "Service account for the analytics export. Rotate it with the infra team before every release; production credentials must never be set here.";
 
@@ -96,8 +101,8 @@ const SCOPES = {
     ]),
     inheritedVariables: GLOBAL_VARIABLES,
   },
-  bb: {
-    label: "bb",
+  omnyo: {
+    label: "Omnyo",
     environment: environment(LOGGED_IN),
     inheritedVariables: GLOBAL_VARIABLES,
   },
@@ -108,6 +113,7 @@ type ScopeId = keyof typeof SCOPES;
 function GlobalSettingsStage() {
   const [scope, setScope] = useState<ScopeId>("global");
   const selected = SCOPES[scope];
+
   return (
     <Stage
       key={scope}
@@ -306,7 +312,7 @@ export function Rows() {
       </StoryRow>
       <StoryRow
         label="saved variable · with a note"
-        hint="notes come from bb machine env set --note; they wrap instead of truncating"
+        hint="notes come from omnyo machine env set --note; they wrap instead of truncating"
       >
         <RowStage>
           <MachineEnvironmentVariableRow

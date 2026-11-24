@@ -16,20 +16,23 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 function fixture() {
   const cwd = mkdtempSync(join(tmpdir(), "ci-selection-"));
   onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
+
   const put = (path, contents) => {
     mkdirSync(dirname(join(cwd, path)), { recursive: true });
     writeFileSync(join(cwd, path), contents);
   };
+
   const git = (...args) =>
     execFileSync("git", args, {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
+
   put(
     "package.json",
     JSON.stringify({
-      name: "bb",
+      name: "omnyo",
       private: true,
       packageManager: "pnpm@9.15.0",
     }),
@@ -37,7 +40,7 @@ function fixture() {
   put("pnpm-workspace.yaml", "packages:\n  - apps/*\n  - packages/*\n");
   put(
     "pnpm-lock.yaml",
-    "lockfileVersion: '9.0'\nimporters:\n  .: {}\n  apps/app:\n    dependencies:\n      '@bb/config':\n        specifier: workspace:*\n        version: link:../../packages/config\n  packages/config: {}\n  packages/text-utils: {}\n",
+    "lockfileVersion: '9.0'\nimporters:\n  .: {}\n  apps/app:\n    dependencies:\n      '@omnyo/config':\n        specifier: workspace:*\n        version: link:../../packages/config\n  packages/config: {}\n  packages/text-utils: {}\n",
   );
   put(
     "turbo.json",
@@ -51,10 +54,11 @@ function fixture() {
       },
     }),
   );
+
   for (const [path, name, dependencies] of [
-    ["apps/app", "@bb/app", { "@bb/config": "workspace:*" }],
-    ["packages/config", "@bb/config", {}],
-    ["packages/text-utils", "@bb/text-utils", {}],
+    ["apps/app", "@omnyo/app", { "@omnyo/config": "workspace:*" }],
+    ["packages/config", "@omnyo/config", {}],
+    ["packages/text-utils", "@omnyo/text-utils", {}],
   ]) {
     put(
       `${path}/package.json`,
@@ -72,6 +76,7 @@ function fixture() {
     );
     put(`${path}/src/index.ts`, "export const value = 1;\n");
   }
+
   put(
     "scripts/ci-test-shards.json",
     readFileSync(join(root, "scripts/ci-test-shards.json"), "utf8"),
@@ -83,6 +88,7 @@ function fixture() {
   git("add", ".");
   git("commit", "-m", "base");
   const base = git("rev-parse", "HEAD");
+
   return {
     cwd,
     put,
@@ -92,6 +98,7 @@ function fixture() {
       put(path, "export const value = 2;\n");
       git("add", ".");
       git("commit", "-m", "change");
+
       const affected = execFileSync(
         process.execPath,
         [
@@ -105,7 +112,9 @@ function fixture() {
         ],
         { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
       );
+
       put("affected.json", affected);
+
       return JSON.parse(
         execFileSync(
           process.execPath,
@@ -139,26 +148,26 @@ it("selects app checks without provisioning unrelated Windows or package smoke j
   expect(plan.packaging).toBe(false);
   expect(plan.foundation).toBe(false);
   expect(plan.forks).toBe(false);
-  expect(plan.staticFilters).toContain("--filter=@bb/app");
-  expect(plan.staticFilters).not.toContain("@bb/text-utils");
+  expect(plan.staticFilters).toContain("--filter=@omnyo/app");
+  expect(plan.staticFilters).not.toContain("@omnyo/text-utils");
 });
 
 it("keeps dependent app tests and Windows foundation checks for shared configuration changes", () => {
   const plan = fixture().plan("packages/config/src/index.ts");
   expect(
     plan.tests.include.some((entry) =>
-      entry.filter.includes("--filter=@bb/app"),
+      entry.filter.includes("--filter=@omnyo/app"),
     ),
   ).toBe(true);
   expect(
     plan["windows-tests"].include.some((entry) =>
-      entry.filter.includes("--filter=@bb/app"),
+      entry.filter.includes("--filter=@omnyo/app"),
     ),
   ).toBe(true);
   expect(plan.foundation).toBe(true);
-  expect(plan.staticFilters).toContain("--filter=@bb/config");
-  expect(plan.staticFilters).toContain("--filter=@bb/app");
-  expect(plan.staticFilters).not.toContain("@bb/text-utils");
+  expect(plan.staticFilters).toContain("--filter=@omnyo/config");
+  expect(plan.staticFilters).toContain("--filter=@omnyo/app");
+  expect(plan.staticFilters).not.toContain("@omnyo/text-utils");
 });
 
 it("retains Windows and package smokes for frontend build configuration", () => {
@@ -202,8 +211,10 @@ it.each(["missing base", "malformed query"])(
   (failure) => {
     const f = fixture();
     f.plan("apps/app/src/index.ts");
+
     if (failure === "malformed query")
       f.put("affected.json", '{"data":{"affectedTasks":{"items":[{}]}}}');
+
     const output = execFileSync(
       process.execPath,
       [
@@ -215,6 +226,7 @@ it.each(["missing base", "malformed query"])(
       ],
       { cwd: f.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
+
     const plan = JSON.parse(output);
     expect(plan.reason).toBe("Full cross-platform coverage");
     expect(plan.foundation).toBe(true);
@@ -237,11 +249,13 @@ it.each([
   f.put(path, "changed\n");
   f.git("add", ".");
   f.git("commit", "-m", "change");
+
   const output = execFileSync(
     process.execPath,
     [join(root, "scripts/ci-dependencies-changed.mjs"), f.base],
     { cwd: f.cwd, encoding: "utf8" },
   );
+
   expect(output.trim()).toBe(String(required));
 });
 
@@ -270,15 +284,18 @@ it("compares a refreshed PR merge against its actual base without treating unrel
   f.git("commit", "-m", "advance main after the PR event");
   const currentBase = f.git("rev-parse", "HEAD");
   f.git("merge", "--no-ff", "feature", "-m", "refreshed merge");
+
   const resolveBase = (eventBase, prHead) =>
     execFileSync(
       process.execPath,
       [join(root, "scripts/ci-comparison-base.mjs"), eventBase, prHead],
       { cwd: f.cwd, encoding: "utf8" },
     ).trim();
+
   expect(resolveBase(f.base, head)).toBe(currentBase);
   expect(resolveBase(f.base, "0".repeat(40))).toBe(f.base);
   expect(resolveBase(f.base, "")).toBe(f.base);
+
   const plan = (base) => {
     f.put(
       "affected.json",
@@ -296,6 +313,7 @@ it("compares a refreshed PR merge against its actual base without treating unrel
         { cwd: f.cwd, encoding: "utf8" },
       ),
     );
+
     return JSON.parse(
       execFileSync(
         process.execPath,
@@ -310,13 +328,14 @@ it("compares a refreshed PR merge against its actual base without treating unrel
       ),
     );
   };
+
   expect(plan(f.base).packaging).toBe(true);
   const selected = plan(resolveBase(f.base, head));
   expect(selected.packaging).toBe(false);
   expect(selected["windows-tests"].include).toEqual([]);
   expect(
     selected.tests.include.every(
-      (entry) => entry.filter === "--filter=@bb/app",
+      (entry) => entry.filter === "--filter=@omnyo/app",
     ),
   ).toBe(true);
 });

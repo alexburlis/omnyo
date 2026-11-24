@@ -15,10 +15,13 @@ import {
 describe("query cache thread list invalidation keys", () => {
   it("includes global archived lists in global invalidation", () => {
     const { queryClient } = createQueryClientTestHarness();
+
     const projectArchivedKey = archivedThreadsListQueryKey({
       projectId: "proj_1",
     });
+
     const globalArchivedKey = archivedThreadsListQueryKey({});
+
     const globalChildArchivedKey = archivedThreadsListQueryKey({
       kind: "child",
     });
@@ -41,11 +44,13 @@ describe("query cache thread list invalidation keys", () => {
 
   it("excludes archived list keys with unsupported scope filters", () => {
     const { queryClient } = createQueryClientTestHarness();
+
     const sectionArchivedKey: QueryKey = [
       THREADS_QUERY_KEY,
       ARCHIVED_THREADS_LIST_KIND,
       { sectionId: "sec_work" },
     ];
+
     const unsectionedArchivedKey: QueryKey = [
       THREADS_QUERY_KEY,
       ARCHIVED_THREADS_LIST_KIND,
@@ -68,13 +73,16 @@ describe("query cache thread list invalidation keys", () => {
 
   it("includes archived project lists in project invalidation", () => {
     const { queryClient } = createQueryClientTestHarness();
+
     const projectArchivedKey = archivedThreadsListQueryKey({
       projectId: "proj_1",
     });
+
     const projectThreadListKey = threadListQueryKey({
       archived: false,
       projectId: "proj_1",
     });
+
     const otherProjectArchivedKey = archivedThreadsListQueryKey({
       projectId: "proj_2",
     });

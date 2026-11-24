@@ -20,9 +20,11 @@ export function createServerMovedProfileHandler(
     moved: ServerMovedResponse,
   ): Promise<boolean> {
     await deps.store.load();
+
     const profile = deps.store
       .listProfiles()
       .find((candidate) => candidate.id === profileId);
+
     if (
       profile === undefined ||
       profile.mode !== "direct" ||
@@ -30,8 +32,10 @@ export function createServerMovedProfileHandler(
     ) {
       return false;
     }
+
     await deps.store.updateProfile(profileId, { serverUrl: moved.serverUrl });
     deps.notify(`Server moved to ${moved.toHostName}`);
+
     return true;
   }
 
@@ -39,6 +43,7 @@ export function createServerMovedProfileHandler(
     handle(profileId, moved) {
       const run = chain.then(() => apply(profileId, moved));
       chain = run.catch(() => undefined);
+
       return run;
     },
   };

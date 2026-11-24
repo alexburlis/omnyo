@@ -27,7 +27,7 @@ function plugin(updateState: Partial<PluginUpdateState>): PluginListItem {
     name: "Linear",
     provenance: "catalog",
     catalogEntryId: "linear",
-    publisherLabel: "BB Community",
+    publisherLabel: "Acme Plugins",
     sourceDisplay: "npm · @bb-plugins/linear · tracks compatible",
     updateState: { ...EMPTY_PLUGIN_UPDATE_STATE, ...updateState },
   });
@@ -46,6 +46,7 @@ function createDialogTestHarness() {
   const harness = createQueryClientTestHarness();
   queryClients.push(harness.queryClient);
   const Wrapper = harness.wrapper;
+
   return {
     ...harness,
     wrapper: ({ children }: { children: import("react").ReactNode }) => (
@@ -58,6 +59,7 @@ function createDialogTestHarness() {
 
 afterEach(async () => {
   cleanup();
+
   try {
     await vi.waitFor(() => {
       expect(queryClients.every((client) => client.isMutating() === 0)).toBe(
@@ -87,7 +89,7 @@ describe("UpdatePluginDialog", () => {
 
     expect(screen.getByText("Update Linear to 1.7.0?")).toBeTruthy();
     expect(screen.getByTestId("rollback-note").textContent).toContain(
-      "if 1.7.0 fails to start, bb restores 1.6.2",
+      "if 1.7.0 fails to start, Omnyo restores 1.6.2",
     );
     expect(
       screen
@@ -103,7 +105,7 @@ describe("UpdatePluginDialog", () => {
       <UpdatePluginDialog
         plugin={plugin({
           blockedVersion: "1.9.0",
-          blockedReasons: ["needs bb >= 0.15 — you have 0.14.1"],
+          blockedReasons: ["needs Omnyo >= 0.15 — you have 0.14.1"],
         })}
         open
         onOpenChange={() => {}}
@@ -112,15 +114,17 @@ describe("UpdatePluginDialog", () => {
     );
 
     expect(
-      screen.getByText("1.9.0 isn’t compatible with this bb"),
+      screen.getByText("1.9.0 isn’t compatible with this Omnyo"),
     ).toBeTruthy();
-    expect(screen.getByText("needs bb >= 0.15 — you have 0.14.1")).toBeTruthy();
+    expect(
+      screen.getByText("needs Omnyo >= 0.15 — you have 0.14.1"),
+    ).toBeTruthy();
     expect(
       screen.getByText(
         "Keep using 1.6.2 and check again when a compatible plugin version is available.",
       ),
     ).toBeTruthy();
-    expect(screen.queryByText(/once this bb meets/i)).toBeNull();
+    expect(screen.queryByText(/once this Omnyo meets/i)).toBeNull();
     expect(
       (screen.getByRole("button", { name: "Update" }) as HTMLButtonElement)
         .disabled,
@@ -142,6 +146,7 @@ describe("UpdatePluginDialog", () => {
         202,
       ),
     );
+
     vi.stubGlobal("fetch", fetchMock);
     const onOpenChange = vi.fn();
     const { wrapper } = createDialogTestHarness();
@@ -166,7 +171,7 @@ describe("UpdatePluginDialog", () => {
     expect(screen.getByText("Failed on Jul 22, 2026.")).toBeTruthy();
     expect(
       screen.getByText(
-        "bb couldn’t activate 1.7.0. It restored 1.6.2 and its data.",
+        "Omnyo couldn’t activate 1.7.0. It restored 1.6.2 and its data.",
       ),
     ).toBeTruthy();
     expect(screen.getByText("factory threw during activation")).toBeTruthy();
@@ -209,6 +214,7 @@ describe("UpdatePluginDialog", () => {
       state: "running",
       phase: "checking",
     };
+
     const fetchMock = vi.fn(async () => jsonResponse({ job }, 202));
     vi.stubGlobal("fetch", fetchMock);
     const { wrapper, queryClient } = createDialogTestHarness();

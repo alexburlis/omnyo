@@ -7,7 +7,7 @@ import type {
   HostMovePathResponse,
   HostPathListResponse,
   HostRemovePathResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 export interface FileReadArgs {
@@ -29,6 +29,7 @@ export interface FileWriteArgs {
 }
 
 export interface FileListArgs {
+  discovery?: "icons";
   hostId?: string;
   path: string;
   query?: string;
@@ -38,7 +39,7 @@ export interface FileListArgs {
   signal?: AbortSignal;
 }
 
-export interface PathListArgs extends FileListArgs {
+export interface PathListArgs extends Omit<FileListArgs, "discovery"> {
   includeFiles: boolean;
   includeDirectories: boolean;
 }
@@ -72,12 +73,19 @@ export interface FilePreviewArgs {
 }
 
 export type FileReadResult = HostFileReadResponse;
+
 export type FileWriteResult = HostFileWriteResponse;
+
 export type FileListResult = HostFileListResponse;
+
 export type PathListResult = HostPathListResponse;
+
 export type FileMkdirResult = HostMkdirResponse;
+
 export type FileMoveResult = HostMovePathResponse;
+
 export type FileRemoveResult = HostRemovePathResponse;
+
 export type FilePreviewResult = CreateFilePreviewResponse;
 
 export interface FilesArea {
@@ -93,6 +101,7 @@ export interface FilesArea {
 
 export function createFilesArea(args: CreateSdkAreaArgs): FilesArea {
   const { transport } = args;
+
   return {
     async read(input) {
       return transport.readJson(
@@ -118,6 +127,7 @@ export function createFilesArea(args: CreateSdkAreaArgs): FilesArea {
         transport.api.v1.files.list.$post(
           {
             json: {
+              discovery: input.discovery,
               excludeNames: input.excludeNames,
               hostId: input.hostId,
               includeHidden: input.includeHidden,

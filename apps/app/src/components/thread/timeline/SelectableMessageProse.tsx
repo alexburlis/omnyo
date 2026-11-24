@@ -1,4 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import type { PromptTextMention } from "@omnyo/domain";
+import { parsePromptMentionClipboardElement } from "@/components/promptbox/mentions/prompt-mention-clipboard";
 
 export interface SelectionAnchorPoint {
   x: number;
@@ -14,6 +16,7 @@ export interface SelectionAnchor {
 
 export interface MessageProseSelection {
   text: string;
+  quote?: { text: string; mentions: PromptTextMention[] };
   rect: DOMRect;
   anchorPoint?: SelectionAnchorPoint;
   anchorSide?: SelectionAnchorSide;
@@ -27,7 +30,9 @@ interface SelectableMessageProseProps {
 }
 
 export const MULTI_CLICK_SELECTION_REPORT_DELAY_MS = 180;
+
 const SELECTION_DRAG_DIRECTION_THRESHOLD_PX = 4;
+
 const CLIPBOARD_REPLACED_CONTENT_SELECTOR =
   "audio, canvas, embed, iframe, img, object, video";
 
@@ -41,9 +46,11 @@ export function isSelectionWithinNode(
   } | null,
 ): boolean {
   if (node === null || selection === null) return false;
+
   if (selection.isCollapsed) return false;
 
   const { anchorNode, focusNode, commonAncestorContainer } = selection;
+
   if (anchorNode === null || focusNode === null) return false;
 
   return (
@@ -55,16 +62,21 @@ export function isSelectionWithinNode(
 
 export function firstClientRect(range: Range): DOMRect | null {
   const rects = range.getClientRects();
+
   for (let index = 0; index < rects.length; index += 1) {
     const rect = rects.item(index);
+
     if (rect === null) {
       continue;
     }
+
     if (rect.width > 0 || rect.height > 0) {
       return rect;
     }
   }
+
   const rect = range.getBoundingClientRect();
+
   return rect.width > 0 || rect.height > 0 ? rect : null;
 }
 
@@ -87,24 +99,31 @@ function createReportRangeFacts(
   let cachedSelectionText: string | null = null;
   let cachedNormalizedSelectionText: string | null = null;
   let cachedFirstClientRect: DOMRect | null | undefined;
+
   const selectionText = (): string => {
     if (cachedSelectionText === null) {
       cachedSelectionText = selection.toString().trim();
     }
+
     return cachedSelectionText;
   };
+
   const normalizedSelectionText = (): string => {
     if (cachedNormalizedSelectionText === null) {
       cachedNormalizedSelectionText = normalizeSelectionText(selectionText());
     }
+
     return cachedNormalizedSelectionText;
   };
+
   const firstClientRectForReport = (): DOMRect | null => {
     if (cachedFirstClientRect === undefined) {
       cachedFirstClientRect = firstClientRect(range);
     }
+
     return cachedFirstClientRect;
   };
+
   return {
     selection,
     range,
@@ -124,6 +143,7 @@ function isSelectionBoundarySpillWithinNode(
   }
 
   const normalizedSelectionText = facts.normalizedSelectionText();
+
   if (normalizedSelectionText.length === 0) {
     return false;
   }
@@ -133,22 +153,69 @@ function isSelectionBoundarySpillWithinNode(
   );
 }
 
-function toMessageProseSelection({
-  anchor,
-  rect,
-  text,
-}: {
-  anchor: SelectionAnchor | null;
-  rect: DOMRect | null;
-  text: string;
-}): MessageProseSelection | null {
-  if (text.length === 0 || rect === null) return null;
-  const selection: MessageProseSelection = { text, rect };
-  if (anchor !== null) {
-    selection.anchorPoint = anchor.point;
-    selection.anchorSide = anchor.side;
+function readSelectionQuote(
+  node: HTMLElement,
+  range: Range,
+  text: string,
+): MessageProseSelection["quote"] {
+  const elements = node.querySelectorAll('[data-prompt-mention="true"]');
+
+  if (elements.length === 0) return undefined;
+
+  const withoutWhitespace = (value: string) => value.replace(/\s/gu, "");
+  const content = withoutWhitespace(text);
+
+  if (content !== withoutWhitespace(range.toString())) return undefined;
+
+  const offsets: number[] = [];
+
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charAt(index).trim() !== "") offsets.push(index);
   }
-  return selection;
+
+  const mentions: PromptTextMention[] = [];
+  let quoteText = "";
+  let cursor = 0;
+
+  for (const element of elements) {
+    if (!range.intersectsNode(element)) continue;
+    const payload = parsePromptMentionClipboardElement({ element });
+    const label = withoutWhitespace(element.textContent ?? "");
+
+    if (!payload || label.length === 0) continue;
+
+    const prefix = range.cloneRange();
+    prefix.setEndBefore(element);
+    const before = withoutWhitespace(prefix.toString()).length;
+    prefix.setStart(range.startContainer, range.startOffset);
+    prefix.setEndAfter(element);
+    const through = withoutWhitespace(prefix.toString()).length;
+    const start = offsets[before];
+    const last = offsets[through - 1];
+
+    if (
+      start === undefined ||
+      last === undefined ||
+      start < cursor ||
+      content.slice(before, through) !== label
+    ) {
+      continue;
+    }
+
+    quoteText += text.slice(cursor, start);
+    const quoteStart = quoteText.length;
+    quoteText += payload.serializedText;
+    mentions.push({
+      start: quoteStart,
+      end: quoteText.length,
+      resource: payload.resource,
+    });
+    cursor = last + 1;
+  }
+
+  return mentions.length > 0
+    ? { text: quoteText + text.slice(cursor), mentions }
+    : undefined;
 }
 
 export function anchorPointFromMouseEvent(
@@ -157,6 +224,7 @@ export function anchorPointFromMouseEvent(
   if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) {
     return null;
   }
+
   return { x: event.clientX, y: event.clientY };
 }
 
@@ -175,7 +243,9 @@ export function selectionAnchorFromPointerRelease(
   if (usesLiveSelectionRange(releaseEvent.pointerType)) {
     return null;
   }
+
   const releasePoint = anchorPointFromMouseEvent(releaseEvent);
+
   if (releasePoint === null) {
     return null;
   }
@@ -199,31 +269,38 @@ function readSelectionWithinNode(
   if (node === null) return null;
 
   const { selection, range } = facts;
+
   const accepted = isSelectionWithinNode(node, {
     isCollapsed: selection.isCollapsed,
     anchorNode: selection.anchorNode,
     focusNode: selection.focusNode,
     commonAncestorContainer: range.commonAncestorContainer,
   });
-  if (accepted) {
-    return toMessageProseSelection({
-      anchor,
-      rect: facts.firstClientRect(),
-      text: facts.selectionText(),
-    });
+
+  if (
+    !accepted &&
+    (selection.isCollapsed ||
+      !isSelectionBoundarySpillWithinNode(node, facts, intersectsNode))
+  ) {
+    return null;
   }
 
-  if (selection.isCollapsed) return null;
+  const text = facts.selectionText();
+  const rect = facts.firstClientRect();
 
-  if (isSelectionBoundarySpillWithinNode(node, facts, intersectsNode)) {
-    return toMessageProseSelection({
-      anchor,
-      rect: facts.firstClientRect(),
-      text: facts.selectionText(),
-    });
+  if (text.length === 0 || rect === null) return null;
+
+  const result: MessageProseSelection = { text, rect };
+  const quote = readSelectionQuote(node, range, text);
+
+  if (quote !== undefined) result.quote = quote;
+
+  if (anchor !== null) {
+    result.anchorPoint = anchor.point;
+    result.anchorSide = anchor.side;
   }
 
-  return null;
+  return result;
 }
 
 function clippedRangeForWhitespaceBoundarySpill(
@@ -238,9 +315,11 @@ function clippedRangeForWhitespaceBoundarySpill(
   }
 
   const clippedRange = range.cloneRange();
+
   if (!node.contains(range.startContainer)) {
     const leadingRange = range.cloneRange();
     leadingRange.setEnd(node, 0);
+
     if (
       leadingRange.toString().trim().length > 0 ||
       leadingRange
@@ -249,11 +328,14 @@ function clippedRangeForWhitespaceBoundarySpill(
     ) {
       return null;
     }
+
     clippedRange.setStart(node, 0);
   }
+
   if (!node.contains(range.endContainer)) {
     const trailingRange = range.cloneRange();
     trailingRange.setStart(node, node.childNodes.length);
+
     if (
       trailingRange.toString().trim().length > 0 ||
       trailingRange
@@ -262,6 +344,7 @@ function clippedRangeForWhitespaceBoundarySpill(
     ) {
       return null;
     }
+
     clippedRange.setEnd(node, node.childNodes.length);
   }
 
@@ -270,15 +353,19 @@ function clippedRangeForWhitespaceBoundarySpill(
 
 function clipWhitespaceOnlyBoundarySpillForCopy(node: HTMLElement): boolean {
   const selection = window.getSelection();
+
   if (selection === null || selection.rangeCount === 0) return false;
   const range = selection.getRangeAt(0);
+
   if (
     node.contains(range.startContainer) &&
     node.contains(range.endContainer)
   ) {
     return false;
   }
+
   const clippedRange = clippedRangeForWhitespaceBoundarySpill(node, range);
+
   if (clippedRange === null) return false;
 
   const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
@@ -296,6 +383,7 @@ function clipWhitespaceOnlyBoundarySpillForCopy(node: HTMLElement): boolean {
       selection.rangeCount > 0
     ) {
       const liveRange = selection.getRangeAt(0);
+
       if (
         liveRange.startContainer !== clippedStartContainer ||
         liveRange.startOffset !== clippedStartOffset ||
@@ -304,6 +392,7 @@ function clipWhitespaceOnlyBoundarySpillForCopy(node: HTMLElement): boolean {
       ) {
         return;
       }
+
       selection.setBaseAndExtent(
         anchorNode,
         anchorOffset,
@@ -312,6 +401,7 @@ function clipWhitespaceOnlyBoundarySpillForCopy(node: HTMLElement): boolean {
       );
     }
   }, 0);
+
   return true;
 }
 
@@ -329,11 +419,17 @@ interface SelectableProseInstance {
 }
 
 const proseInstances = new Set<SelectableProseInstance>();
+
 const instanceByNode = new Map<HTMLElement, SelectableProseInstance>();
+
 let sharedFrame: number | null = null;
+
 let pointerIsDown = false;
+
 let pointerUsesLiveSelectionRange = false;
+
 let pointerActiveInstance: SelectableProseInstance | null = null;
+
 let pointerStartPoint: SelectionAnchorPoint | null = null;
 
 function findInstanceContaining(
@@ -341,11 +437,14 @@ function findInstanceContaining(
 ): SelectableProseInstance | null {
   if (!(target instanceof Node)) return null;
   let element = target instanceof Element ? target : target.parentElement;
+
   while (element !== null) {
     const instance = instanceByNode.get(element as HTMLElement);
+
     if (instance !== undefined) return instance;
     element = element.parentElement;
   }
+
   return null;
 }
 
@@ -356,12 +455,14 @@ function reportInstanceSelection(
 ): void {
   const anchor = instance.pendingReportAnchor;
   instance.pendingReportAnchor = null;
+
   const next = readSelectionWithinNode(
     instance.node,
     anchor,
     facts,
     intersectsNode,
   );
+
   if (next === null && !instance.hadSelection) return;
   instance.hadSelection = next !== null;
   instance.onSelectRef.current?.(next);
@@ -369,6 +470,7 @@ function reportInstanceSelection(
 
 function reportInstanceNull(instance: SelectableProseInstance): void {
   instance.pendingReportAnchor = null;
+
   if (!instance.hadSelection) return;
   instance.hadSelection = false;
   instance.onSelectRef.current?.(null);
@@ -377,29 +479,37 @@ function reportInstanceNull(instance: SelectableProseInstance): void {
 function reportAllInstances(): void {
   sharedFrame = null;
   const selection = window.getSelection();
+
   const range =
     selection !== null && selection.rangeCount > 0
       ? selection.getRangeAt(0)
       : null;
+
   const facts =
     selection !== null && range !== null
       ? createReportRangeFacts(selection, range)
       : null;
+
   const canPreFilter =
     facts !== null && typeof facts.range.intersectsNode === "function";
+
   for (const instance of proseInstances) {
     if (instance.multiClickTimer !== null) continue;
+
     if (facts === null) {
       reportInstanceNull(instance);
       continue;
     }
+
     const intersectsNode = canPreFilter
       ? facts.range.intersectsNode(instance.node)
       : null;
+
     if (intersectsNode === false) {
       reportInstanceNull(instance);
       continue;
     }
+
     reportInstanceSelection(instance, facts, intersectsNode);
   }
 }
@@ -428,6 +538,7 @@ function scheduleInstanceWithAnchor(
   if (anchor !== null) {
     instance.pendingReportAnchor = anchor;
   }
+
   scheduleSharedReport();
 }
 
@@ -449,13 +560,17 @@ function handleInstanceMultiClick(
   if (event.detail < 2) {
     return;
   }
+
   const clickAnchor =
     selectionAnchorFromPointerRelease(null, event) ??
     instance.lastPointerReleaseAnchor;
+
   if (event.detail === 2) {
     scheduleInstanceAfterMultiClickDelay(instance, clickAnchor);
+
     return;
   }
+
   cancelMultiClickTimer(instance);
   scheduleInstanceWithAnchor(instance, clickAnchor);
 }
@@ -471,15 +586,18 @@ function handleSharedSelectionChange(): void {
   if (pointerIsDown && !pointerUsesLiveSelectionRange) {
     return;
   }
+
   scheduleSharedReport();
 }
 
 function handleSharedPointerDown(event: PointerEvent): void {
   cancelSharedFrame();
+
   for (const instance of proseInstances) {
     cancelMultiClickTimer(instance);
     instance.pendingReportAnchor = null;
   }
+
   pointerActiveInstance = findInstanceContaining(event.target);
   pointerStartPoint =
     pointerActiveInstance !== null ? anchorPointFromMouseEvent(event) : null;
@@ -490,13 +608,16 @@ function handleSharedPointerDown(event: PointerEvent): void {
 function handleSharedPointerRelease(event: PointerEvent | MouseEvent): void {
   const instance = pointerActiveInstance;
   pointerActiveInstance = null;
+
   if (instance !== null) {
     const anchor = selectionAnchorFromPointerRelease(pointerStartPoint, event);
+
     if (anchor !== null) {
       instance.lastPointerReleaseAnchor = anchor;
       instance.pendingReportAnchor = anchor;
     }
   }
+
   pointerIsDown = false;
   pointerUsesLiveSelectionRange = false;
   pointerStartPoint = null;
@@ -517,8 +638,10 @@ function handleSharedKeyUp(): void {
 
 function handleSharedCopy(): void {
   const selection = window.getSelection();
+
   if (selection === null || selection.rangeCount !== 1) return;
   const range = selection.getRangeAt(0);
+
   for (const instance of proseInstances) {
     if (
       typeof range.intersectsNode === "function" &&
@@ -562,6 +685,7 @@ function registerSelectableProseInstance(
   if (proseInstances.size === 0) {
     attachSharedDocumentListeners();
   }
+
   proseInstances.add(instance);
   instanceByNode.set(instance.node, instance);
 }
@@ -572,9 +696,11 @@ function unregisterSelectableProseInstance(
   proseInstances.delete(instance);
   instanceByNode.delete(instance.node);
   cancelMultiClickTimer(instance);
+
   if (pointerActiveInstance === instance) {
     pointerActiveInstance = null;
   }
+
   if (proseInstances.size === 0) {
     detachSharedDocumentListeners();
     cancelSharedFrame();
@@ -596,6 +722,7 @@ export function SelectableMessageProse({
   useEffect(() => {
     if (typeof window === "undefined") return;
     const node = nodeRef.current;
+
     if (node === null) return;
 
     const instance: SelectableProseInstance = {
@@ -606,13 +733,16 @@ export function SelectableMessageProse({
       lastPointerReleaseAnchor: null,
       multiClickTimer: null,
     };
+
     const handleMultiClick = (event: MouseEvent) =>
       handleInstanceMultiClick(instance, event);
+
     const handleDoubleClick = () => handleInstanceDoubleClick(instance);
 
     registerSelectableProseInstance(instance);
     node.addEventListener("click", handleMultiClick);
     node.addEventListener("dblclick", handleDoubleClick);
+
     return () => {
       node.removeEventListener("click", handleMultiClick);
       node.removeEventListener("dblclick", handleDoubleClick);

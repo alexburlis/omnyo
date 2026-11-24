@@ -104,6 +104,7 @@ describe("normalizeExperimentalFileOpenOptions", () => {
         environmentId: "env_1",
         path: "src/app.tsx",
       };
+
       for (const location of [
         { kind: "line", line: value, column: null },
         { kind: "range", startLine: value, endLine: 20 },
@@ -123,6 +124,7 @@ describe("normalizeExperimentalFileOpenOptions", () => {
       environmentId: "env_1",
       path: "src/app.tsx",
     };
+
     const location = { kind: "range" as const, startLine: 7, endLine: 9 };
     expect(normalizeExperimentalFileOpenOptions({ target, location })).toEqual({
       target,

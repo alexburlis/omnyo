@@ -20,7 +20,7 @@ vi.mock("react-router-dom", async (importOriginal) => ({
   useNavigate: () => navigateSpy,
 }));
 
-vi.mock("@bb/shared-ui/hooks/use-compact-viewport", () => ({
+vi.mock("@omnyo/shared-ui/hooks/use-compact-viewport", () => ({
   useIsCompactViewport: () => compactState.value,
 }));
 
@@ -65,15 +65,23 @@ function eightPanes(): SplitLayout {
 function renderOpenInSplit(threadId: string, layout: SplitLayout | null) {
   const store = createStore();
   store.set(splitLayoutAtom, layout);
+
   const wrapper = ({ children }: { children: ReactNode }) => (
     <Provider store={store}>
       <RouteNavigationProvider>{children}</RouteNavigationProvider>
     </Provider>
   );
+
   const { result } = renderHook(
-    () => useThreadRowSplitDrag({ projectId: "p1", threadId, title: "Thread" }),
+    () =>
+      useThreadRowSplitDrag({
+        projectId: "p1",
+        threadId,
+        getTitle: () => "Thread",
+      }),
     { wrapper },
   );
+
   return {
     store,
     getOnPointerDown: () => result.current.onPointerDown,

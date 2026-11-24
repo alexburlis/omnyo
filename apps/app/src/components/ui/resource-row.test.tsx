@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { ResourceOverflowMenu, ResourceRow } from "@bb/shared-ui/resource-list";
+import { ResourceOverflowMenu, ResourceRow } from "@omnyo/shared-ui/resource-list";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
@@ -24,6 +24,7 @@ function renderRow() {
       }
     />,
   );
+
   return { onOpen, onRename };
 }
 

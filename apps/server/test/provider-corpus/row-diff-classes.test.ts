@@ -71,6 +71,7 @@ function run(
   classes: RowDiffClass[],
 ) {
   const report = createRowDiffReport();
+
   const changes = classifyRowSnapshotDiff(
     "p/thr",
     before,
@@ -78,6 +79,7 @@ function run(
     classes,
     report,
   );
+
   return { changes, report };
 }
 
@@ -99,6 +101,7 @@ describe("classifyRowSnapshotDiff", () => {
         }),
       ],
     });
+
     const after = snapshot({
       nested: [
         turn("t1", null, [tool("a"), tool("b"), tool("c")], {
@@ -115,6 +118,7 @@ describe("classifyRowSnapshotDiff", () => {
         }),
       ],
     });
+
     const { report } = run(before, after, [
       {
         name: "unhidden",
@@ -122,6 +126,7 @@ describe("classifyRowSnapshotDiff", () => {
         match: { added: { kind: "work", workKind: "tool" } },
       },
     ]);
+
     expect(report.unclassified).toEqual([]);
     expect(report.claims.get("unhidden")).toBe(1);
     expect(report.claims.get(CONTAINER_BOUNDS_CLASS)).toBe(2);
@@ -129,9 +134,11 @@ describe("classifyRowSnapshotDiff", () => {
 
   it("reports a change no class claims, with the changed field set", () => {
     const before = snapshot({ default: [tool("a", { output: "x" })] });
+
     const after = snapshot({
       default: [tool("a", { output: "y", toolName: "Grep" })],
     });
+
     const { report } = run(before, after, [
       {
         name: "output-only",
@@ -139,6 +146,7 @@ describe("classifyRowSnapshotDiff", () => {
         match: { changed: { workKind: "tool", fields: ["output"] } },
       },
     ]);
+
     expect(report.unclassified.map(describeRowChange)).toEqual([
       "changed work/tool [output,toolName]",
     ]);
@@ -158,9 +166,11 @@ describe("classifyRowSnapshotDiff", () => {
 
   it("reports a dead entry even when a sibling entry with the same name fired", () => {
     const before = snapshot({ default: [tool("a")] });
+
     const after = snapshot({
       default: [{ ...tool("a"), workKind: "file-read", id: "t:file-read:a" }],
     });
+
     const classes: RowDiffClass[] = [
       {
         name: "upgraded",
@@ -180,6 +190,7 @@ describe("classifyRowSnapshotDiff", () => {
         },
       },
     ];
+
     const { report } = run(before, after, classes);
     expect(report.claims.get("upgraded")).toBe(1);
     expect(idleRowDiffClasses(classes, report)).toEqual([
@@ -194,6 +205,7 @@ describe("classifyRowSnapshotDiff", () => {
 
   it("treats a turn that lost a segment as re-segmented and the row that folded into it as moved, not removed", () => {
     const text = assistant("m18", "I'll wait for the agent.");
+
     const before = snapshot({
       nested: [
         turn("t1", 0, [tool("a")], {
@@ -222,6 +234,7 @@ describe("classifyRowSnapshotDiff", () => {
         }),
       ],
     });
+
     const after = snapshot({
       nested: [
         turn("t1", null, [tool("a"), text, tool("b")], {
@@ -238,6 +251,7 @@ describe("classifyRowSnapshotDiff", () => {
         }),
       ],
     });
+
     const { report } = run(before, after, [
       {
         name: "rejoined",
@@ -250,6 +264,7 @@ describe("classifyRowSnapshotDiff", () => {
         match: { moved: { kind: "conversation", role: "assistant" } },
       },
     ]);
+
     expect(report.unclassified).toEqual([]);
     expect(report.claims.get("rejoined")).toBe(4);
   });
@@ -261,9 +276,11 @@ describe("classifyRowSnapshotDiff", () => {
       id: `${prefix}:child:t:assistant:c1`,
       text: "hi",
     });
+
     const before = snapshot({
       nested: [{ ...tool("agent"), childRows: undefined }],
     });
+
     const after = snapshot({
       nested: [
         {
@@ -277,6 +294,7 @@ describe("classifyRowSnapshotDiff", () => {
         },
       ],
     });
+
     const { report } = run(before, after, [
       {
         name: "structural",
@@ -294,6 +312,7 @@ describe("classifyRowSnapshotDiff", () => {
         match: { added: { kind: "conversation", nested: true } },
       },
     ]);
+
     expect(report.unclassified).toEqual([]);
     expect(report.claims.get("structural")).toBe(1);
     expect(report.claims.get("surfaced")).toBe(1);
@@ -301,6 +320,7 @@ describe("classifyRowSnapshotDiff", () => {
 
   it("lets a reshaped class restrict the fields the reshape may touch", () => {
     const before = snapshot({ default: [tool("a", { status: "completed" })] });
+
     const after = snapshot({
       default: [
         {
@@ -312,6 +332,7 @@ describe("classifyRowSnapshotDiff", () => {
         },
       ],
     });
+
     const restricted: RowDiffClass = {
       name: "upgraded",
       reason: "r",
@@ -323,6 +344,7 @@ describe("classifyRowSnapshotDiff", () => {
         },
       },
     };
+
     const unrestricted = run(before, after, [
       {
         ...restricted,
@@ -334,6 +356,7 @@ describe("classifyRowSnapshotDiff", () => {
         },
       },
     ]);
+
     expect(unrestricted.report.unclassified).toEqual([]);
     const { report } = run(before, after, [restricted]);
     expect(report.unclassified.map(describeRowChange)).toEqual([
@@ -358,6 +381,7 @@ describe("classifyRowSnapshotDiff", () => {
         }),
       ],
     });
+
     const after = snapshot({
       nested: [
         turn("t1", null, [tool("a"), tool("b")], {
@@ -374,9 +398,11 @@ describe("classifyRowSnapshotDiff", () => {
         }),
       ],
     });
+
     const { report } = run(before, after, [
       { name: "unhidden", reason: "r", match: { added: { workKind: "tool" } } },
     ]);
+
     expect(report.unclassified).toEqual([]);
     expect(Object.fromEntries(report.containerBoundsBy)).toEqual({
       unhidden: 2,
@@ -389,6 +415,7 @@ describe("classifyRowSnapshotDiff", () => {
         default: { pages: [{ rows: [tool("a")], pendingTodos: null }] },
       },
     };
+
     const after = {
       variants: {
         default: {
@@ -396,9 +423,11 @@ describe("classifyRowSnapshotDiff", () => {
         },
       },
     };
+
     expect(
       run(before, after, []).report.unclassified.map(describeRowChange),
     ).toEqual(["changed page.pendingTodos"]);
+
     const claimed = run(before, after, [
       {
         name: "banner",
@@ -406,6 +435,7 @@ describe("classifyRowSnapshotDiff", () => {
         match: { pageField: { field: "pendingTodos" } },
       },
     ]);
+
     expect(claimed.report.unclassified).toEqual([]);
     expect(claimed.report.claims.get("banner")).toBe(1);
   });
@@ -427,6 +457,7 @@ describe("classifyRowSnapshotDiff", () => {
         }),
       ],
     });
+
     const after = snapshot({
       nested: [
         {
@@ -454,6 +485,7 @@ describe("classifyRowSnapshotDiff", () => {
         },
       ],
     });
+
     const { report } = run(before, after, [
       {
         name: "upgraded",
@@ -466,6 +498,7 @@ describe("classifyRowSnapshotDiff", () => {
         },
       },
     ]);
+
     expect(report.claims.get("upgraded")).toBe(1);
     expect(report.claims.get(CONTAINER_BOUNDS_CLASS)).toBeUndefined();
     expect(report.unclassified.map(describeRowChange)).toEqual([
@@ -484,6 +517,7 @@ describe("classifyRowSnapshotDiff", () => {
         }),
       ],
     });
+
     const after = snapshot({
       nested: [
         turn("t1", null, [tool("a")], {
@@ -493,6 +527,7 @@ describe("classifyRowSnapshotDiff", () => {
         }),
       ],
     });
+
     const { report } = run(before, after, []);
     expect(report.unclassified.map(describeRowChange)).toEqual([
       "changed turn [summaryCount]",

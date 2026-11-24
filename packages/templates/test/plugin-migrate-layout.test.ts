@@ -1,3 +1,6 @@
+import { installPrivateSdkArtifact } from "../src/private-sdk-artifact.js";
+import { PLUGIN_SDK_VERSION } from "@omnyo/domain";
+import { resolvePrivateSdkArtifact } from "../src/plugin-scaffold.js";
 import {
   mkdir,
   mkdtemp,
@@ -17,7 +20,13 @@ import {
 } from "../src/plugin-scaffold.js";
 import { PLUGIN_SHIMMED_TYPE_DEPENDENCIES } from "../src/generated/plugin-starter-files.generated.js";
 
-const SDK_VERSION = "0.4.3";
+const SDK_VERSION = PLUGIN_SDK_VERSION;
+
+const SDK_ARTIFACT = await resolvePrivateSdkArtifact({
+  sourceUrl: import.meta.url,
+});
+
+const SDK_PIN = `file:./vendor/${SDK_ARTIFACT.file}`;
 
 async function writeVendoredPlugin(
   rootDir: string,
@@ -60,12 +69,15 @@ async function writeVendoredPlugin(
       2,
     )}\n`,
   );
+
   const declarations = overrides.declarations ?? [
     "bb-plugin-sdk.d.ts",
     "bb-plugin-sdk-app.d.ts",
   ];
+
   if (declarations.length > 0) {
     await mkdir(join(rootDir, "types"), { recursive: true });
+
     for (const name of declarations) {
       await writeFile(join(rootDir, "types", name), "// vendored\n");
     }
@@ -74,6 +86,7 @@ async function writeVendoredPlugin(
 
 async function readJson(path: string): Promise<Record<string, unknown>> {
   const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+
   return parsed as Record<string, unknown>;
 }
 
@@ -87,7 +100,7 @@ describe("migratePluginToPackageLayout", () => {
   let rootDir: string;
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "bb-plugin-migrate-"));
+    rootDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-migrate-"));
   });
 
   afterEach(async () => {
@@ -99,12 +112,12 @@ describe("migratePluginToPackageLayout", () => {
 
     const result = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
     expect(result.changed).toBe(true);
-    expect(result.pin).toEqual({ from: null, to: SDK_VERSION });
-    expect(result.deletedFiles).toEqual([
+    expect(result.pin).toEqual({ from: null, to: SDK_PIN });
+    expect(result.archivedFiles).toEqual([
       "types/bb-plugin-sdk.d.ts",
       "types/bb-plugin-sdk-app.d.ts",
     ]);
@@ -112,7 +125,7 @@ describe("migratePluginToPackageLayout", () => {
 
     const manifest = await readJson(join(rootDir, "package.json"));
     const devDependencies = manifest.devDependencies as Record<string, string>;
-    expect(devDependencies["@get-bb/plugin-sdk"]).toBe(SDK_VERSION);
+    expect(devDependencies["@omnyo/plugin-sdk"]).toBe(SDK_PIN);
     expect(devDependencies.typescript).toBe("^5.7.0");
     expect(manifest.dependencies).toEqual({ zod: "^4.3.6" });
 
@@ -128,20 +141,26 @@ describe("migratePluginToPackageLayout", () => {
 
   it("raises an older engines floor but never lowers a newer one", async () => {
     await writeVendoredPlugin(rootDir);
+
     const raised = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
-    expect(raised.enginesFloor).toEqual({ from: ">=0.2.0", to: ">=0.4.3" });
+
+    expect(raised.enginesFloor).toEqual({
+      from: ">=0.2.0",
+      to: `>=${SDK_VERSION}`,
+    });
     expect(
       (
         (await readJson(join(rootDir, "package.json"))).engines as
           | Record<string, string>
           | undefined
-      )?.bbPluginSdk,
-    ).toBe(">=0.4.3");
+      )?.omnyoPluginSdk,
+    ).toBe(`>=${SDK_VERSION}`);
 
-    const newer = await mkdtemp(join(tmpdir(), "bb-plugin-migrate-newer-"));
+    const newer = await mkdtemp(join(tmpdir(), "omnyo-plugin-migrate-newer-"));
+
     try {
       await writeVendoredPlugin(newer, {
         manifest: {
@@ -150,10 +169,12 @@ describe("migratePluginToPackageLayout", () => {
           bb: { server: "./server.ts" },
         },
       });
+
       const result = await migratePluginToPackageLayout({
         rootDir: newer,
-        sdkVersion: SDK_VERSION,
+        sdkArtifact: SDK_ARTIFACT,
       });
+
       expect(result.enginesFloor).toBeNull();
       expect(
         (
@@ -161,7 +182,7 @@ describe("migratePluginToPackageLayout", () => {
             string,
             string
           >
-        ).bbPluginSdk,
+        ).omnyoPluginSdk,
       ).toBe(">=9.1.0");
     } finally {
       await rm(newer, { recursive: true, force: true });
@@ -169,10 +190,12 @@ describe("migratePluginToPackageLayout", () => {
   });
 
   it.each([
-    [">=0.4.3-beta.9", "0.4.3-beta.10", true],
-    [">=0.4.3-rc.10", "0.4.3-rc.2", false],
-    [">=0.4.3-beta.10", "0.4.3", true],
-    [">=0.4.3+build.1", "0.4.3+build.2", false],
+    [">=0.6.44-beta.9", SDK_VERSION, true],
+    [">=0.6.45-rc.10", SDK_VERSION, true],
+    [">=0.6.44-beta.10", SDK_VERSION, true],
+    [">=0.6.44+build.1", SDK_VERSION, true],
+    [`>=${SDK_VERSION}+build.1`, SDK_VERSION, false],
+    [`>=${SDK_VERSION}-rc.10`, SDK_VERSION, true],
     [">=0.2", SDK_VERSION, true],
     ["^0.2.0", SDK_VERSION, true],
     [">=9.0.0 || >=0.2.0", SDK_VERSION, true],
@@ -189,27 +212,31 @@ describe("migratePluginToPackageLayout", () => {
           bb: { server: "./server.ts" },
         },
       });
+
       const result = await migratePluginToPackageLayout({
         rootDir,
-        sdkVersion,
+        sdkArtifact: SDK_ARTIFACT,
       });
+
       expect(result.enginesFloor).toEqual(
         raises ? { from: range, to: `>=${sdkVersion}` } : null,
       );
       const manifest = await readJson(join(rootDir, "package.json"));
       expect(manifest.engines).toEqual({
-        bbPluginSdk: raises ? `>=${sdkVersion}` : range,
+        omnyoPluginSdk: raises ? `>=${sdkVersion}` : range,
       });
     },
   );
 
   it("is a no-op the second time", async () => {
     await writeVendoredPlugin(rootDir);
-    await migratePluginToPackageLayout({ rootDir, sdkVersion: SDK_VERSION });
+    await migratePluginToPackageLayout({ rootDir, sdkArtifact: SDK_ARTIFACT });
+
     const manifestAfterFirst = await readFile(
       join(rootDir, "package.json"),
       "utf8",
     );
+
     const tsconfigAfterFirst = await readFile(
       join(rootDir, "tsconfig.json"),
       "utf8",
@@ -217,17 +244,17 @@ describe("migratePluginToPackageLayout", () => {
 
     const second = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
-    expect(second).toEqual({
+    expect(second).toMatchObject({
       changed: false,
       pin: null,
       movedFromDependencies: false,
       enginesFloor: null,
       removedPathMaps: [],
       removedIncludes: [],
-      deletedFiles: [],
+      archivedFiles: [],
       removedTypesDir: false,
       rewrittenImports: [],
     });
@@ -251,11 +278,11 @@ describe("migratePluginToPackageLayout", () => {
 
     const result = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
     expect(result.changed).toBe(true);
-    expect(result.pin).toBeNull();
+    expect(result.pin).toEqual({ from: SDK_VERSION, to: SDK_PIN });
     expect(result.enginesFloor).toBeNull();
     expect(result.removedPathMaps).toEqual([
       "@get-bb/plugin-sdk",
@@ -271,7 +298,7 @@ describe("migratePluginToPackageLayout", () => {
 
     const result = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
     expect(result.removedTypesDir).toBe(false);
@@ -300,7 +327,7 @@ describe("migratePluginToPackageLayout", () => {
 
     const result = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
     expect(result.removedPathMaps).toEqual([
@@ -322,14 +349,14 @@ describe("migratePluginToPackageLayout", () => {
         engines: { bbPluginSdk: `>=${SDK_VERSION}` },
         bb: { server: "./server.ts" },
         dependencies: { "@get-bb/plugin-sdk": SDK_VERSION, zod: "^4.3.6" },
-        devDependencies: { "@get-bb/plugin-sdk": "0.2.0" },
+        devDependencies: { "@get-bb/plugin-sdk": SDK_VERSION },
       },
       tsconfig: { compilerOptions: { strict: true }, include: ["server.ts"] },
     });
 
     const result = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
     expect(result.changed).toBe(true);
@@ -337,7 +364,7 @@ describe("migratePluginToPackageLayout", () => {
     const manifest = await readJson(join(rootDir, "package.json"));
     expect(manifest.dependencies).toEqual({ zod: "^4.3.6" });
     expect(manifest.devDependencies).toEqual({
-      "@get-bb/plugin-sdk": SDK_VERSION,
+      "@omnyo/plugin-sdk": SDK_PIN,
     });
   });
 
@@ -354,18 +381,16 @@ describe("migratePluginToPackageLayout", () => {
 
     const result = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
     expect(result.changed).toBe(true);
-    expect(result.pin).toEqual({ from: null, to: SDK_VERSION });
+    expect(result.pin).toEqual({ from: null, to: SDK_PIN });
     expect(result.enginesFloor).toEqual({ from: null, to: `>=${SDK_VERSION}` });
     const manifest = await readJson(join(rootDir, "package.json"));
     expect(
-      (manifest.devDependencies as Record<string, string>)[
-        "@get-bb/plugin-sdk"
-      ],
-    ).toBe(SDK_VERSION);
+      (manifest.devDependencies as Record<string, string>)["@omnyo/plugin-sdk"],
+    ).toBe(SDK_PIN);
   });
 
   it("rewrites pre-rename SDK imports across the plugin's sources", async () => {
@@ -402,26 +427,28 @@ describe("migratePluginToPackageLayout", () => {
 
     const result = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
-    expect(result.rewrittenImports).toEqual([
+    expect(
+      result.rewrittenImports.map(({ path, imports }) => ({ path, imports })),
+    ).toEqual([
       { path: "app.tsx", imports: 1 },
       { path: "lib/rpc.ts", imports: 1 },
-      { path: "server.ts", imports: 2 },
+      { path: "server.ts", imports: 3 },
     ]);
     const server = await readFile(join(rootDir, "server.ts"), "utf8");
     expect(server).toContain(
-      'import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";',
+      'import { defineRpcContract, type PluginApi as BbPluginApi } from "@omnyo/plugin-sdk";',
     );
-    expect(server).toContain("from '@get-bb/plugin-sdk/testing';");
+    expect(server).toContain("from '@omnyo/plugin-sdk/testing';");
     expect(server).toContain('from "@bb/plugin-sdk-extras";');
     expect(server).toContain("// The @bb/plugin-sdk types are unquoted prose");
     expect(await readFile(join(rootDir, "app.tsx"), "utf8")).toBe(
-      'import { definePluginApp } from "@get-bb/plugin-sdk/app";\n',
+      'import { definePluginApp } from "@omnyo/plugin-sdk/app";\n',
     );
     expect(await readFile(join(rootDir, "lib", "rpc.ts"), "utf8")).toBe(
-      'export type { RpcContract } from "@get-bb/plugin-sdk";\n',
+      'export type { RpcContract } from "@omnyo/plugin-sdk";\n',
     );
     expect(await readFile(join(rootDir, "dist", "server.ts"), "utf8")).toBe(
       'import "@bb/plugin-sdk";\n',
@@ -432,8 +459,9 @@ describe("migratePluginToPackageLayout", () => {
 
     const second = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
+
     expect(second.rewrittenImports).toEqual([]);
     expect(second.changed).toBe(false);
   });
@@ -445,15 +473,17 @@ describe("migratePluginToPackageLayout", () => {
 
     const plan = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
       dryRun: true,
     });
 
-    expect(plan.rewrittenImports).toEqual([{ path: "server.ts", imports: 1 }]);
+    expect(
+      plan.rewrittenImports.map(({ path, imports }) => ({ path, imports })),
+    ).toEqual([{ path: "server.ts", imports: 2 }]);
     expect(await readFile(join(rootDir, "server.ts"), "utf8")).toBe(source);
   });
 
-  it("migrates a plugin whose only legacy artifact is its imports", async () => {
+  it("migrates legacy metadata and package pins together with pre-rename imports", async () => {
     await writeVendoredPlugin(rootDir, {
       declarations: [],
       manifest: {
@@ -468,16 +498,61 @@ describe("migratePluginToPackageLayout", () => {
 
     const result = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
     expect(result.changed).toBe(true);
-    expect(result.rewrittenImports).toEqual([
-      { path: "server.ts", imports: 1 },
-    ]);
+    expect(
+      result.rewrittenImports.map(({ path, imports }) => ({ path, imports })),
+    ).toEqual([{ path: "server.ts", imports: 1 }]);
     expect(await readFile(join(rootDir, "server.ts"), "utf8")).toBe(
-      'import "@get-bb/plugin-sdk";\n',
+      'import "@omnyo/plugin-sdk";\n',
     );
+  });
+
+  it("migrates an otherwise-current plugin whose only legacy artifact is its imports", async () => {
+    const manifest = {
+      name: "bb-plugin-imports-only",
+      engines: { omnyoPluginSdk: `>=${SDK_VERSION}` },
+      omnyo: { server: "./server.ts" },
+      devDependencies: { "@omnyo/plugin-sdk": SDK_PIN },
+    };
+
+    await writeVendoredPlugin(rootDir, {
+      declarations: [],
+      manifest,
+      tsconfig: { compilerOptions: { strict: true }, include: ["server.ts"] },
+    });
+    await installPrivateSdkArtifact(rootDir, SDK_ARTIFACT);
+    const before = await readFile(join(rootDir, "package.json"));
+    await writeFile(join(rootDir, "server.ts"), 'import "@bb/plugin-sdk";\n');
+
+    const result = await migratePluginToPackageLayout({
+      rootDir,
+      sdkArtifact: SDK_ARTIFACT,
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.pin).toBeNull();
+    expect(result.enginesFloor).toBeNull();
+    expect(result.archivedFiles).toEqual([]);
+    expect(result.removedPathMaps).toEqual([]);
+    expect(result.artifactCopyRequired).toBe(false);
+    expect(
+      result.rewrittenImports.map(({ path, imports }) => ({ path, imports })),
+    ).toEqual([{ path: "server.ts", imports: 1 }]);
+    expect(await readFile(join(rootDir, "server.ts"), "utf8")).toBe(
+      'import "@omnyo/plugin-sdk";\n',
+    );
+    expect(await readFile(join(rootDir, "package.json"))).toEqual(before);
+    expect(
+      (
+        await migratePluginToPackageLayout({
+          rootDir,
+          sdkArtifact: SDK_ARTIFACT,
+        })
+      ).changed,
+    ).toBe(false);
   });
 
   it("dry runs report the plan and touch nothing", async () => {
@@ -486,12 +561,12 @@ describe("migratePluginToPackageLayout", () => {
 
     const plan = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
       dryRun: true,
     });
 
     expect(plan.changed).toBe(true);
-    expect(plan.deletedFiles.length).toBe(2);
+    expect(plan.archivedFiles.length).toBe(2);
     expect(await readFile(join(rootDir, "package.json"), "utf8")).toBe(before);
     expect(await exists(join(rootDir, "types", "bb-plugin-sdk.d.ts"))).toBe(
       true,
@@ -500,17 +575,19 @@ describe("migratePluginToPackageLayout", () => {
 
   it("refuses a symlinked types/ and changes nothing at all", async () => {
     await writeVendoredPlugin(rootDir, { declarations: [] });
-    const outside = await mkdtemp(join(tmpdir(), "bb-plugin-outside-"));
+    const outside = await mkdtemp(join(tmpdir(), "omnyo-plugin-outside-"));
+
     try {
       await writeFile(join(outside, "bb-plugin-sdk.d.ts"), "PRECIOUS\n");
       await symlink(outside, join(rootDir, "types"));
+
       const manifestBefore = await readFile(
         join(rootDir, "package.json"),
         "utf8",
       );
 
       await expect(
-        migratePluginToPackageLayout({ rootDir, sdkVersion: SDK_VERSION }),
+        migratePluginToPackageLayout({ rootDir, sdkArtifact: SDK_ARTIFACT }),
       ).rejects.toThrow(/symbolic link/);
 
       expect(await readFile(join(outside, "bb-plugin-sdk.d.ts"), "utf8")).toBe(
@@ -530,13 +607,14 @@ describe("migratePluginToPackageLayout", () => {
       join(rootDir, "tsconfig.json"),
       '{\n  // paths\n  "compilerOptions": { "paths": {} }\n}\n',
     );
+
     const manifestBefore = await readFile(
       join(rootDir, "package.json"),
       "utf8",
     );
 
     await expect(
-      migratePluginToPackageLayout({ rootDir, sdkVersion: SDK_VERSION }),
+      migratePluginToPackageLayout({ rootDir, sdkArtifact: SDK_ARTIFACT }),
     ).rejects.toThrow(/tsconfig\.json is not valid JSON/);
 
     expect(await readFile(join(rootDir, "package.json"), "utf8")).toBe(
@@ -552,7 +630,7 @@ describe("setPluginSdkPin", () => {
   let rootDir: string;
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "bb-plugin-pin-"));
+    rootDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-pin-"));
   });
 
   afterEach(async () => {
@@ -579,25 +657,23 @@ describe("setPluginSdkPin", () => {
 
     const result = await setPluginSdkPin({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
-    expect(result).toEqual({
-      pin: { from: "0.2.0", to: SDK_VERSION },
+    expect(result).toMatchObject({
+      pin: { from: "0.2.0", to: SDK_PIN },
       movedFromDependencies: false,
       shimmedTypePins: [],
     });
     const manifest = await readJson(join(rootDir, "package.json"));
     expect(
-      (manifest.devDependencies as Record<string, string>)[
-        "@get-bb/plugin-sdk"
-      ],
-    ).toBe(SDK_VERSION);
-    expect((manifest.engines as Record<string, string>).bbPluginSdk).toBe(
+      (manifest.devDependencies as Record<string, string>)["@omnyo/plugin-sdk"],
+    ).toBe(SDK_PIN);
+    expect((manifest.engines as Record<string, string>).omnyoPluginSdk).toBe(
       ">=0.2.0",
     );
     expect(
-      await setPluginSdkPin({ rootDir, sdkVersion: SDK_VERSION }),
+      await setPluginSdkPin({ rootDir, sdkArtifact: SDK_ARTIFACT }),
     ).toBeNull();
   });
 
@@ -617,21 +693,21 @@ describe("setPluginSdkPin", () => {
 
     const result = await setPluginSdkPin({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
-    expect(result).toEqual({
-      pin: null,
+    expect(result).toMatchObject({
+      pin: { from: SDK_VERSION, to: SDK_PIN },
       movedFromDependencies: true,
       shimmedTypePins: [],
     });
     const manifest = await readJson(join(rootDir, "package.json"));
     expect(manifest.dependencies).toBeUndefined();
     expect(manifest.devDependencies).toEqual({
-      "@get-bb/plugin-sdk": SDK_VERSION,
+      "@omnyo/plugin-sdk": SDK_PIN,
     });
     expect(
-      await setPluginSdkPin({ rootDir, sdkVersion: SDK_VERSION }),
+      await setPluginSdkPin({ rootDir, sdkArtifact: SDK_ARTIFACT }),
     ).toBeNull();
   });
 
@@ -657,22 +733,24 @@ describe("setPluginSdkPin", () => {
     );
 
     const original = await readFile(join(rootDir, "package.json"), "utf8");
+
     const pending = await setPluginSdkPin({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
       dryRun: true,
     });
+
     expect(await readFile(join(rootDir, "package.json"), "utf8")).toBe(
       original,
     );
 
     const result = await setPluginSdkPin({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
     expect(result).toEqual(pending);
-    expect(result?.pin).toBeNull();
+    expect(result?.pin).toEqual({ from: SDK_VERSION, to: SDK_PIN });
     expect(result?.shimmedTypePins).toContainEqual({
       name: "sonner",
       from: "^0.3.0",
@@ -689,13 +767,13 @@ describe("setPluginSdkPin", () => {
     const manifest = await readJson(join(rootDir, "package.json"));
     expect(manifest.dependencies).toEqual({ zod: "^4.3.6" });
     expect(manifest.devDependencies).toEqual({
-      "@get-bb/plugin-sdk": SDK_VERSION,
+      "@omnyo/plugin-sdk": SDK_PIN,
       sonner: hostSonner,
       vaul: hostVaul,
       typescript: "^5.7.0",
     });
     expect(
-      await setPluginSdkPin({ rootDir, sdkVersion: SDK_VERSION }),
+      await setPluginSdkPin({ rootDir, sdkArtifact: SDK_ARTIFACT }),
     ).toBeNull();
   });
 
@@ -704,15 +782,17 @@ describe("setPluginSdkPin", () => {
     async (dryRun) => {
       const original = JSON.stringify({
         name: "bb-plugin-pruned",
-        bb: { server: "./server.ts", app: "./app.tsx" },
-        devDependencies: { "@get-bb/plugin-sdk": SDK_VERSION },
+        omnyo: { server: "./server.ts", app: "./app.tsx" },
+        devDependencies: { "@omnyo/plugin-sdk": SDK_PIN },
       });
+
       await writeFile(join(rootDir, "package.json"), original);
+      await installPrivateSdkArtifact(rootDir, SDK_ARTIFACT);
 
       expect(
         await setPluginSdkPin({
           rootDir,
-          sdkVersion: SDK_VERSION,
+          sdkArtifact: SDK_ARTIFACT,
           dryRun,
         }),
       ).toBeNull();
@@ -741,7 +821,7 @@ describe("setPluginSdkPin", () => {
 
     const result = await setPluginSdkPin({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
     expect(result?.shimmedTypePins).toEqual([
@@ -754,7 +834,7 @@ describe("setPluginSdkPin", () => {
     ]);
     const manifest = await readJson(join(rootDir, "package.json"));
     expect(manifest.devDependencies).toEqual({
-      "@get-bb/plugin-sdk": SDK_VERSION,
+      "@omnyo/plugin-sdk": SDK_PIN,
       clsx: PLUGIN_SHIMMED_TYPE_DEPENDENCIES.clsx,
     });
   });

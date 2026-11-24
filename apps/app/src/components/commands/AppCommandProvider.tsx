@@ -20,10 +20,10 @@ import {
   type AppCommandContextKey,
   type KeyboardCommandId,
   type AppShortcut,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { usePluginCommandBindings } from "@/hooks/usePluginCommandBindings";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
-import { getBbDesktopInfo } from "@/lib/bb-desktop";
+import { getOmnyoDesktopInfo } from "@/lib/omnyo-desktop";
 import {
   browserPlatform,
   isEditableKeyboardTarget,
@@ -52,7 +52,10 @@ interface AppCommandProviderValue {
     event: KeyboardEvent,
     commands: readonly KeyboardCommandId[],
   ) => KeyboardCommandId | null;
-  handleKeyboardEvent: (event: KeyboardEvent) => boolean;
+  handleKeyboardEvent: (
+    event: KeyboardEvent,
+    options?: { allowEditableFocus: boolean },
+  ) => boolean;
   isCommandAvailable: (
     command: KeyboardCommandId,
     target: EventTarget | null,
@@ -66,11 +69,13 @@ interface AppCommandProviderValue {
     command: KeyboardCommandId,
     registration: Omit<AppCommandHandlerRegistration, "sequence">,
   ) => () => void;
+  suspendShortcuts: () => () => void;
 }
 
 const AppCommandContextValue = createContext<AppCommandProviderValue | null>(
   null,
 );
+
 const AppCommandModifierHeldContext = createContext(false);
 
 const SHORTCUT_HINT_HOLD_DELAY_MS = 700;
@@ -85,6 +90,7 @@ const EMPTY_CONTEXT: AppCommandContext = {
   questionOpen: false,
   promptAvailable: false,
   splitActive: false,
+  chatSelection: false,
   webSurface: false,
   macPlatform: false,
   windowsPlatform: false,
@@ -96,82 +102,105 @@ const OPEN_MODAL_SELECTOR = [
   '[role="dialog"][data-state="open"]:not([inert]):not([inert] *)',
 ].join(", ");
 
-function hasOpenModal(): boolean {
+export function hasOpenModal(): boolean {
   return document.querySelector(OPEN_MODAL_SELECTOR) !== null;
 }
 
 export function AppCommandProvider({ children }: { children: ReactNode }) {
   const systemConfig = useSystemConfig();
+
   const { keybindings, defaults: defaultKeybindings } =
     usePluginCommandBindings();
+
   const showKeyboardHints =
     systemConfig.data?.generalSettings?.showKeyboardHints ??
     defaultAppSettings.showKeyboardHints;
-  const isDesktop = getBbDesktopInfo() !== null;
+
+  const isDesktop = getOmnyoDesktopInfo() !== null;
+
   const [isShortcutHintModifierHeld, setIsShortcutHintModifierHeld] =
     useState(false);
+
   const modifierHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+
   const shortcutHintModifierHeldRef = useRef(false);
   const keybindingsRef = useRef(keybindings);
+
   const handlersRef = useRef(
     new Map<KeyboardCommandId, Map<symbol, AppCommandHandlerRegistration>>(),
   );
+
   const activeContextsRef = useRef(
     new Map<AppCommandContextKey, Set<symbol>>(),
   );
+
   const sequenceRef = useRef(0);
+  const shortcutSuspensionsRef = useRef(0);
   const attemptedEventsRef = useRef(new WeakSet<KeyboardEvent>());
 
   useEffect(() => {
     if (!showKeyboardHints) return;
     const isMac = isMacKeyboardPlatform(browserPlatform());
+
     const isShortcutHintModifier = (key: string) =>
       key === "Control" || (isMac && key === "Meta");
+
     const clearModifierHold = () => {
       if (modifierHoldTimerRef.current !== null) {
         clearTimeout(modifierHoldTimerRef.current);
         modifierHoldTimerRef.current = null;
       }
+
       shortcutHintModifierHeldRef.current = false;
       setIsShortcutHintModifierHeld(false);
     };
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!isShortcutHintModifier(event.key)) {
         if (!shortcutHintModifierHeldRef.current) {
           clearModifierHold();
         }
+
         return;
       }
+
       if (
         modifierHoldTimerRef.current !== null ||
         shortcutHintModifierHeldRef.current
       ) {
         return;
       }
+
       const otherModifierHeld =
         event.shiftKey ||
         event.altKey ||
         (event.key === "Meta" ? event.ctrlKey : event.metaKey);
+
       if (otherModifierHeld) {
         clearModifierHold();
+
         return;
       }
+
       modifierHoldTimerRef.current = setTimeout(() => {
         modifierHoldTimerRef.current = null;
         shortcutHintModifierHeldRef.current = true;
         setIsShortcutHintModifierHeld(true);
       }, SHORTCUT_HINT_HOLD_DELAY_MS);
     };
+
     const handleKeyUp = (event: KeyboardEvent) => {
       if (!event.ctrlKey && !(isMac && event.metaKey)) clearModifierHold();
     };
+
     const handleBlur = () => clearModifierHold();
 
     window.addEventListener("keydown", handleKeyDown, true);
     window.addEventListener("keyup", handleKeyUp, true);
     window.addEventListener("blur", handleBlur);
+
     return () => {
       clearModifierHold();
       window.removeEventListener("keydown", handleKeyDown, true);
@@ -195,8 +224,10 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
       sequence: sequenceRef.current,
     });
     handlersRef.current.set(command, registrations);
+
     return () => {
       registrations.delete(token);
+
       if (registrations.size === 0) {
         handlersRef.current.delete(command);
       }
@@ -207,32 +238,40 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
     AppCommandProviderValue["registerContext"]
   >((key, source, active) => {
     const sources = activeContextsRef.current.get(key) ?? new Set<symbol>();
+
     if (active) {
       sources.add(source);
       activeContextsRef.current.set(key, sources);
     } else {
       sources.delete(source);
+
       if (sources.size === 0) {
         activeContextsRef.current.delete(key);
       }
     }
+
     if (key === "splitActive") {
-      getBbDesktopInfo()?.setSplitNavigationEnabled?.(sources.size > 0);
+      getOmnyoDesktopInfo()?.setSplitNavigationEnabled?.(sources.size > 0);
     }
   }, []);
 
   const dispatch = useCallback(
     (command: KeyboardCommandId, target: EventTarget | null): boolean => {
       const registrations = handlersRef.current.get(command);
+
       if (!registrations) return false;
+
       const ordered = [...registrations.values()].sort(
         (left, right) =>
           right.priority - left.priority || right.sequence - left.sequence,
       );
+
       for (const registration of ordered) {
         if (!registration.isAvailable({ target })) continue;
+
         if (registration.handler({ target })) return true;
       }
+
       return false;
     },
     [],
@@ -254,9 +293,11 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
       next.macPlatform = keyboardPlatform(browserPlatform()) === "mac";
       next.windowsPlatform = keyboardPlatform(browserPlatform()) === "windows";
       next.linuxPlatform = keyboardPlatform(browserPlatform()) === "linux";
+
       for (const key of activeContextsRef.current.keys()) {
         next[key] = true;
       }
+
       return next;
     },
     [isDesktop],
@@ -265,6 +306,7 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
   const isCommandAvailable = useCallback(
     (command: KeyboardCommandId, target: EventTarget | null): boolean => {
       const registrations = handlersRef.current.get(command);
+
       if (
         registrations === undefined ||
         ![...registrations.values()].some((registration) =>
@@ -273,6 +315,7 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
       ) {
         return false;
       }
+
       const applicable = defaultKeybindings.filter(
         (binding) =>
           binding.command === command &&
@@ -281,8 +324,10 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
             platform: browserPlatform(),
           }),
       );
+
       if (applicable.length === 0) return false;
       const context = currentContext(target);
+
       return applicable.some((binding) =>
         binding.when.all.every((key) => context[key]),
       );
@@ -293,8 +338,10 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
   const getShortcut = useCallback(
     (command: KeyboardCommandId): AppShortcut | null => {
       let binding;
+
       for (let index = keybindings.length - 1; index >= 0; index -= 1) {
         const candidate = keybindings[index];
+
         if (
           candidate?.command === command &&
           isAppKeybindingAvailableForClient(candidate, {
@@ -306,6 +353,7 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
           break;
         }
       }
+
       return binding?.shortcut ?? null;
     },
     [isDesktop, keybindings],
@@ -319,9 +367,12 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
       if (event.defaultPrevented || event.isComposing || event.repeat) {
         return null;
       }
+
       const isMac = isMacKeyboardPlatform(browserPlatform());
+
       for (let index = keybindings.length - 1; index >= 0; index -= 1) {
         const candidate = keybindings[index];
+
         if (
           candidate &&
           commands.includes(candidate.command) &&
@@ -334,24 +385,34 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
           return candidate.command;
         }
       }
+
       return null;
     },
     [isDesktop, keybindings],
   );
 
   const handleKeyboardEvent = useCallback(
-    (event: KeyboardEvent): boolean => {
+    (
+      event: KeyboardEvent,
+      options?: { allowEditableFocus: boolean },
+    ): boolean => {
       if (event.defaultPrevented || event.isComposing || event.repeat) {
         return false;
       }
+
       if (attemptedEventsRef.current.has(event)) return false;
       attemptedEventsRef.current.add(event);
+
+      if (shortcutSuspensionsRef.current > 0) return false;
       const bindings = keybindingsRef.current;
       let context: AppCommandContext | null = null;
       const isMac = isMacKeyboardPlatform(browserPlatform());
+
       for (let index = bindings.length - 1; index >= 0; index -= 1) {
         const binding = bindings[index];
+
         if (!binding) continue;
+
         if (
           !isAppKeybindingAvailableForClient(binding, {
             isDesktop,
@@ -360,14 +421,25 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
         ) {
           continue;
         }
+
         if (!matchesAppShortcut(event, binding.shortcut, isMac)) continue;
         context ??= currentContext(event.target);
-        if (!matchesAppCommandContext(binding, context)) continue;
+
+        const bindingContext =
+          options?.allowEditableFocus &&
+          (binding.command === "edit.undo" || binding.command === "edit.redo")
+            ? { ...context, editableFocus: false }
+            : context;
+
+        if (!matchesAppCommandContext(binding, bindingContext)) continue;
+
         if (!dispatch(binding.command, event.target)) return false;
         event.preventDefault();
         event.stopPropagation();
+
         return true;
       }
+
       return false;
     },
     [currentContext, dispatch, isDesktop],
@@ -377,6 +449,7 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
     const handleKeyDown = (event: KeyboardEvent) => {
       handleKeyboardEvent(event);
     };
+
     const handlePaneNavigation = (event: KeyboardEvent) => {
       if (
         getShortcutCommand(event, [
@@ -392,8 +465,10 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
         handleKeyboardEvent(event);
       }
     };
+
     window.addEventListener("keydown", handlePaneNavigation, true);
     window.addEventListener("keydown", handleKeyDown);
+
     return () => {
       window.removeEventListener("keydown", handlePaneNavigation, true);
       window.removeEventListener("keydown", handleKeyDown);
@@ -401,12 +476,26 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
   }, [getShortcutCommand, handleKeyboardEvent]);
 
   useEffect(() => {
-    const desktop = getBbDesktopInfo();
+    const desktop = getOmnyoDesktopInfo();
+
     if (!desktop?.onAppCommand) return;
+
     return desktop.onAppCommand((command) => {
+      if (shortcutSuspensionsRef.current > 0) return;
       dispatch(command, null);
     });
   }, [dispatch]);
+
+  const suspendShortcuts = useCallback(() => {
+    shortcutSuspensionsRef.current += 1;
+    let released = false;
+
+    return () => {
+      if (released) return;
+      released = true;
+      shortcutSuspensionsRef.current -= 1;
+    };
+  }, []);
 
   const value = useMemo<AppCommandProviderValue>(
     () => ({
@@ -417,6 +506,7 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
       isCommandAvailable,
       registerContext,
       registerHandler,
+      suspendShortcuts,
     }),
     [
       dispatch,
@@ -426,6 +516,7 @@ export function AppCommandProvider({ children }: { children: ReactNode }) {
       isCommandAvailable,
       registerContext,
       registerHandler,
+      suspendShortcuts,
     ],
   );
 
@@ -475,6 +566,7 @@ export function useIndexedAppCommandHandlers(
   }, [handler, isAvailable]);
   useEffect(() => {
     if (!registerHandler || !enabled) return;
+
     const unregister = commands.map((command, index) =>
       registerHandler(command, {
         handler: (invocation) => handlerRef.current(index, invocation),
@@ -483,18 +575,20 @@ export function useIndexedAppCommandHandlers(
         priority,
       }),
     );
+
     return () => {
       unregister.forEach((dispose) => dispose());
     };
   }, [commands, enabled, priority, registerHandler]);
 }
 
-export function useAppCommandKeyDispatch(): (event: KeyboardEvent) => boolean {
+export function useAppCommandKeyDispatch(): AppCommandProviderValue["handleKeyboardEvent"] {
   const handleKeyboardEvent = useContext(
     AppCommandContextValue,
   )?.handleKeyboardEvent;
+
   return useCallback(
-    (event: KeyboardEvent) => handleKeyboardEvent?.(event) ?? false,
+    (event, options) => handleKeyboardEvent?.(event, options) ?? false,
     [handleKeyboardEvent],
   );
 }
@@ -510,6 +604,7 @@ export interface AppCommandRunner {
 
 export function useAppCommandRunner(): AppCommandRunner {
   const value = useContext(AppCommandContextValue);
+
   return useMemo(
     () => ({
       dispatch: (command, target) => value?.dispatch(command, target) ?? false,
@@ -532,6 +627,7 @@ export function useAppCommandContext(
     if (!registerContext) return;
     const source = sourceRef.current;
     registerContext(key, source, active);
+
     return () => registerContext(key, source, false);
   }, [active, key, registerContext]);
 }
@@ -540,11 +636,23 @@ export function useAppCommandShortcut(
   command: KeyboardCommandId,
 ): AppShortcutPresentation | null {
   const value = useContext(AppCommandContextValue);
+
   return useMemo(() => {
     const shortcut = value?.getShortcut(command);
+
     if (!shortcut) return null;
+
     return presentAppShortcut(shortcut, browserPlatform());
   }, [command, value]);
+}
+
+export function useSuspendAppShortcuts(): AppCommandProviderValue["suspendShortcuts"] {
+  const suspendShortcuts = useContext(AppCommandContextValue)?.suspendShortcuts;
+
+  return useCallback(
+    () => suspendShortcuts?.() ?? (() => {}),
+    [suspendShortcuts],
+  );
 }
 
 export function useIsAppCommandModifierHeld(): boolean {
@@ -555,14 +663,18 @@ export function useAppCommandShortcuts<Command extends KeyboardCommandId>(
   commands: readonly Command[],
 ): ReadonlyMap<Command, AppShortcutPresentation> {
   const value = useContext(AppCommandContextValue);
+
   return useMemo(() => {
     const presentations = new Map<Command, AppShortcutPresentation>();
     const platform = browserPlatform();
+
     for (const command of commands) {
       const shortcut = value?.getShortcut(command);
+
       if (!shortcut) continue;
       presentations.set(command, presentAppShortcut(shortcut, platform));
     }
+
     return presentations;
   }, [commands, value]);
 }

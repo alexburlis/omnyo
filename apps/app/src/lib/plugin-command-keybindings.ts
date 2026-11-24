@@ -8,7 +8,7 @@ import {
   type AppKeybindingOverrides,
   type AppShortcut,
   type KeyboardCommandId,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 export function shortcutsConflict(
   left: AppShortcut,
@@ -16,6 +16,7 @@ export function shortcutsConflict(
   platform: string,
 ): boolean {
   const isMac = isMacKeyboardPlatform(platform);
+
   return matchesAppShortcut(
     {
       key: left.key,
@@ -40,9 +41,11 @@ export function resolvePluginCommandDefaults(
   conflicts: ReadonlyMap<KeyboardCommandId, readonly KeyboardCommandId[]>;
 } {
   const client = { isDesktop, platform };
+
   const effective = applyAppKeybindingOverrides(defaults, overrides).filter(
     (binding) => isAppKeybindingAvailableForClient(binding, client),
   );
+
   const customized = new Set(
     overrides
       .filter(
@@ -52,7 +55,9 @@ export function resolvePluginCommandDefaults(
       )
       .map((override) => override.command),
   );
+
   const conflicts = new Map<KeyboardCommandId, KeyboardCommandId[]>();
+
   const resolved = defaults.map((binding) => {
     if (
       !binding.command.startsWith("plugin:") ||
@@ -61,16 +66,20 @@ export function resolvePluginCommandDefaults(
     )
       return binding;
     const shortcut = binding.shortcut;
+
     const collisions = effective.filter(
       (candidate) =>
         candidate.command !== binding.command &&
         shortcutsConflict(shortcut, candidate.shortcut, platform),
     );
+
     if (collisions.length === 0) return binding;
     conflicts.set(binding.command, [
       ...new Set(collisions.map((candidate) => candidate.command)),
     ]);
+
     return { ...binding, shortcut: null };
   });
+
   return { defaults: resolved, conflicts };
 }

@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -19,7 +27,10 @@ function manifest(plugins: unknown): string {
 }
 
 function parse(plugins: unknown) {
-  return parsePluginCollectionManifest(manifest(plugins), ".bb/plugins.json");
+  return parsePluginCollectionManifest(
+    manifest(plugins),
+    ".omnyo/plugins.json",
+  );
 }
 
 describe("collection manifest schema", () => {
@@ -34,7 +45,7 @@ describe("collection manifest schema", () => {
           { name: "status", source: "./apps/status" },
         ],
       }),
-      ".bb/plugins.json",
+      ".omnyo/plugins.json",
     );
 
     expect(parsed.plugins).toHaveLength(2);
@@ -59,7 +70,7 @@ describe("collection manifest schema", () => {
       "./plugins\\sidebar",
     ]) {
       expect(() => parse([{ name: "sidebar", source }])).toThrowError(
-        /invalid \.bb\/plugins\.json/,
+        /invalid \.omnyo\/plugins\.json/,
       );
     }
   });
@@ -73,12 +84,12 @@ describe("collection manifest schema", () => {
     ).toThrowError(/duplicate plugin name "sidebar"/);
     expect(() =>
       parse([{ name: "sidebar", source: "./a", subdir: "./b" }]),
-    ).toThrowError(/invalid \.bb\/plugins\.json/);
+    ).toThrowError(/invalid \.omnyo\/plugins\.json/);
     expect(() =>
       parse([{ name: "sidebar", source: "./a", description: "Sidebar" }]),
-    ).toThrowError(/invalid \.bb\/plugins\.json/);
+    ).toThrowError(/invalid \.omnyo\/plugins\.json/);
     expect(() => parse([{ name: "Sidebar", source: "./a" }])).toThrowError(
-      /invalid \.bb\/plugins\.json/,
+      /invalid \.omnyo\/plugins\.json/,
     );
     expect(() =>
       parsePluginCollectionManifest(
@@ -87,11 +98,11 @@ describe("collection manifest schema", () => {
           name: "acme-plugins",
           plugins: [{ name: "a", source: "./a" }],
         }),
-        ".bb/plugins.json",
+        ".omnyo/plugins.json",
       ),
-    ).toThrowError(/invalid \.bb\/plugins\.json/);
+    ).toThrowError(/invalid \.omnyo\/plugins\.json/);
     expect(() =>
-      parsePluginCollectionManifest("{ nope", ".bb/plugins.json"),
+      parsePluginCollectionManifest("{ nope", ".omnyo/plugins.json"),
     ).toThrowError(/not valid JSON/);
     expect(() =>
       parsePluginCollectionManifest(
@@ -101,9 +112,9 @@ describe("collection manifest schema", () => {
           name: "acme-plugins",
           plugins: [{ name: "a", source: "./a" }],
         }),
-        ".bb/plugins.json",
+        ".omnyo/plugins.json",
       ),
-    ).toThrowError(/invalid \.bb\/plugins\.json/);
+    ).toThrowError(/invalid \.omnyo\/plugins\.json/);
   });
 
   it("names the available entries when a name is unknown", () => {
@@ -111,6 +122,7 @@ describe("collection manifest schema", () => {
       { name: "sidebar", source: "./a" },
       { name: "status", source: "./b" },
     ]);
+
     expect(() =>
       subdirectoryForCollectionEntry(parsed, "missing"),
     ).toThrowError(/no plugin "missing" — available: sidebar, status/);
@@ -122,7 +134,7 @@ describe("collection manifest in a checkout", () => {
   let repoDir: string;
 
   beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), "bb-collection-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-collection-"));
     repoDir = join(workDir, "repo");
     await mkdir(join(repoDir, ".bb"), { recursive: true });
   });
@@ -139,9 +151,9 @@ describe("collection manifest in a checkout", () => {
     await writeFile(
       join(repoDir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-root",
+        name: "omnyo-plugin-root",
         version: "0.1.0",
-        bb: {
+        omnyo: {
           name: "Root",
           description: "Root plugin.",
           branding: { icon: "Zap" },
@@ -164,6 +176,91 @@ describe("collection manifest in a checkout", () => {
 
     await expect(readPluginCollectionManifest(repoDir)).rejects.toThrowError(
       /resolves outside its root/,
+    );
+  });
+
+  it.each([
+    "https://app.example.invalid/schemas/plugins.schema.json",
+    "https://app.example.invalid/schemas/plugins.schema.json",
+  ])(
+    "reads existing collection manifests with schema identifier %s",
+    async ($schema) => {
+      await mkdir(join(repoDir, ".omnyo"));
+      await writeFile(
+        join(repoDir, ".omnyo", "plugins.json"),
+        JSON.stringify({
+          $schema,
+          schemaVersion: 1,
+          name: "acme-plugins",
+          plugins: [{ name: "sidebar", source: "./plugins/sidebar" }],
+        }),
+      );
+      const selected = await readPluginCollectionManifest(repoDir);
+      expect(selected?.plugins).toEqual([
+        { name: "sidebar", source: "./plugins/sidebar" },
+      ]);
+    },
+  );
+
+  it.each([true, false])(
+    "refuses both collection roots without selecting a winner (equal=%s)",
+    async (equal) => {
+      await writeCollection([{ name: "sidebar", source: "./plugins/sidebar" }]);
+      await mkdir(join(repoDir, ".omnyo"));
+      const legacy = await readFile(join(repoDir, ".bb", "plugins.json"));
+
+      const canonical = equal
+        ? legacy
+        : Buffer.from(manifest([{ name: "other", source: "./other" }]));
+
+      await writeFile(join(repoDir, ".omnyo", "plugins.json"), canonical);
+      await expect(readPluginCollectionManifest(repoDir)).rejects.toThrow(
+        /both.*collection|collection.*collision/i,
+      );
+      expect(await readFile(join(repoDir, ".bb", "plugins.json"))).toEqual(
+        legacy,
+      );
+      expect(await readFile(join(repoDir, ".omnyo", "plugins.json"))).toEqual(
+        canonical,
+      );
+    },
+  );
+
+  it("imports only the finite legacy manifest without changing bytes or mode", async () => {
+    const file = join(repoDir, ".bb", "plugins.json");
+
+    const raw = JSON.stringify({
+      $schema: "https://getbb.app/schemas/plugins.schema.json",
+      schemaVersion: 1,
+      name: "legacy-plugins",
+      plugins: [{ name: "sidebar", source: "./plugins/sidebar" }],
+    });
+
+    await writeFile(file, raw, { mode: 0o640 });
+    expect((await readPluginCollectionManifest(repoDir))?.plugins).toEqual([
+      { name: "sidebar", source: "./plugins/sidebar" },
+    ]);
+    expect(await readFile(file, "utf8")).toBe(raw);
+    expect((await stat(file)).mode & 0o777).toBe(0o640);
+    expect((await readPluginCollectionManifest(repoDir))?.plugins).toEqual([
+      { name: "sidebar", source: "./plugins/sidebar" },
+    ]);
+    expect(await readFile(file, "utf8")).toBe(raw);
+  });
+
+  it("does not accept a legacy schema URL as a new canonical manifest", async () => {
+    await mkdir(join(repoDir, ".omnyo"));
+    await writeFile(
+      join(repoDir, ".omnyo", "plugins.json"),
+      JSON.stringify({
+        $schema: "https://getbb.app/schemas/plugins.schema.json",
+        schemaVersion: 1,
+        name: "canonical-plugins",
+        plugins: [{ name: "sidebar", source: "./plugins/sidebar" }],
+      }),
+    );
+    await expect(readPluginCollectionManifest(repoDir)).rejects.toThrow(
+      /invalid .*omnyo/,
     );
   });
 
@@ -212,7 +309,7 @@ describe("collection manifest in a checkout", () => {
         selection: { kind: "entry", name: "sidebar" },
         sourceLabel: "repo",
       }),
-    ).rejects.toThrowError(/no \.bb\/plugins\.json collection manifest/);
+    ).rejects.toThrowError(/no \.omnyo\/plugins\.json collection manifest/);
   });
 
   it("rejects a --subdirectory that escapes the checkout", async () => {

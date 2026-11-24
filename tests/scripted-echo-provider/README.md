@@ -1,6 +1,6 @@
 # Scripted echo provider (test harness)
 
-The scripted echo bridge is the provider bb's runtime and integration suites
+The scripted echo bridge is the provider Omnyo's runtime and integration suites
 drive. It is the echo example bridge (`examples/plugins/echo-provider`) plus
 the scripted directives a test needs, and it runs through the real
 bridge-protocol adapter and delta assembler — there is no test-only adapter
@@ -16,6 +16,9 @@ Prompt directives:
   with a resolved or an unresolved turn id and answers `Tool called: <name>`.
 - `bg_task` opens a background task that outlives the turn; `bg_task_done`
   settles every task the thread left open.
+- `bg_task_settle_after:<ms>` opens a background task and settles it `<ms>`
+  after the turn started, outside any turn, as a provider does when a
+  background command finishes while the chat is idle.
 - Otherwise the turn answers `Response to: <prompt text>`.
 
 Session- and process-level behaviour (archived sessions, failing commands,

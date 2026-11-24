@@ -8,6 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import File01Icon from "@hugeicons/core-free-icons/File01Icon";
+import { CONTROL_HOVER_TRANSITION } from "@/components/ui/motion";
 import { cn } from "@/lib/utils";
 import { MAX_ATTACHMENT_SIZE_BYTES } from "../shared/attachments.js";
 import { errorMessage } from "../shared/errors.js";
@@ -46,6 +47,7 @@ export async function uploadStagedAttachments(
   owner: AttachmentOwnerRef,
 ): Promise<StagedAttachment[]> {
   const failed: StagedAttachment[] = [];
+
   for (const entry of staged) {
     try {
       await uploadAttachment(entry.file, owner);
@@ -58,6 +60,7 @@ export async function uploadStagedAttachments(
       });
     }
   }
+
   return failed;
 }
 
@@ -68,7 +71,9 @@ export function settleStagedUploads(
 ): StagedAttachment[] {
   return files.flatMap((entry) => {
     const failure = failed.find((candidate) => candidate.id === entry.id);
+
     if (failure) return [failure];
+
     return staged.some((candidate) => candidate.id === entry.id) ? [] : [entry];
   });
 }
@@ -78,6 +83,7 @@ export function useStagedAttachmentRetry(
   onUploaded?: () => void,
 ) {
   const retryingRef = useRef(new Set<number>());
+
   return async (entry: StagedAttachment) => {
     if (entry.owner === undefined || retryingRef.current.has(entry.id)) return;
     retryingRef.current.add(entry.id);
@@ -86,6 +92,7 @@ export function useStagedAttachmentRetry(
         candidate.id === entry.id ? { ...candidate, busy: true } : candidate,
       ),
     );
+
     try {
       await uploadAttachment(entry.file, entry.owner);
       setPendingFiles((files) =>
@@ -115,13 +122,18 @@ function ChipThumbnail({ file }: { file: File }) {
       typeof URL.createObjectURL !== "function"
     ) {
       setPreviewUrl(null);
+
       return;
     }
+
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
+
     return () => URL.revokeObjectURL(url);
   }, [file]);
+
   if (!previewUrl) return null;
+
   return (
     <img
       src={previewUrl}
@@ -145,6 +157,7 @@ export function AttachmentChip({
 }) {
   const broken = entry.status !== "staged";
   const image = entry.file.type.startsWith("image/");
+
   return (
     <span
       className={cn(
@@ -191,6 +204,7 @@ export function AttachmentChip({
         disabled={disabled || entry.busy === true}
         className={cn(
           "disabled:opacity-60",
+          CONTROL_HOVER_TRANSITION,
           !broken && "text-muted-foreground hover:text-foreground",
         )}
         onClick={onRemove}

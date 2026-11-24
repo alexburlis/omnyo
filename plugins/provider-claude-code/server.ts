@@ -1,28 +1,30 @@
+import { registerWorkflowModelService } from "./src/workflow-model-service.js";
 import { registerUsageSource } from "./src/usage-source.js";
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { CLAUDE_NATIVE_ROOTS_DECLARATION } from "./src/native-roots.js";
 
-export default function plugin(bb: BbPluginApi) {
-  registerUsageSource(bb);
-  bb.settings.define({
+export default function plugin(api: PluginApi) {
+  registerUsageSource(api);
+  registerWorkflowModelService(api);
+  api.settings.define({
     memoryEnabled: {
       type: "boolean",
       label: "Claude Code memory",
       description:
-        "Allow Claude Code to read and write its native auto-memory for bb threads.",
+        "Allow Claude Code to read and write its native auto-memory for Omnyo threads.",
       default: true,
     },
     subagentsDisabled: {
       type: "boolean",
       label: "Disable provider subagents",
       description:
-        "Hide Claude Code's native Task tool so agents use bb for delegation.",
+        "Hide Claude Code's native subagent tools so agents use Omnyo for delegation. Changes restart Claude before the next turn, preserving the conversation.",
       default: false,
     },
     workflowsDisabled: {
       type: "boolean",
       label: "Disable Workflow tool",
-      description: "Hide Claude Code's native Workflow tool for bb threads.",
+      description: "Hide Claude Code's native Workflow tool for Omnyo threads.",
       default: false,
     },
     disable1MContext: {
@@ -30,6 +32,13 @@ export default function plugin(bb: BbPluginApi) {
       label: "Disable 1M context",
       description:
         "Disable the 1M-token context window for Claude Code threads. Applies on the next turn.",
+      default: false,
+    },
+    allowModelFallback: {
+      type: "boolean",
+      label: "Allow model fallback",
+      description:
+        "Allow Claude Code to switch to another model automatically. Applies on the next turn.",
       default: false,
     },
     chromeEnabled: {
@@ -46,9 +55,16 @@ export default function plugin(bb: BbPluginApi) {
         "Run Bash commands in Claude Code's sandbox in Accept Edits and Approve for me modes. Turn off to use Claude Code's own command approvals and sandbox settings instead.",
       default: true,
     },
+    fullAccessApprovalsEnabled: {
+      type: "boolean",
+      label: "Approvals in Full Access",
+      description:
+        "Show Claude Code's own approval prompts in Full Access: permissions.ask rules, PreToolUse hooks that answer ask, and Claude Code's built-in safety checks. Off approves every request, so unattended threads never wait. Applies on the next turn.",
+      default: false,
+    },
   });
 
-  bb.providers.register({
+  api.providers.register({
     id: "claude-code",
     displayName: "Claude Code",
     icon: "./icons/claude-code.svg",
@@ -65,7 +81,7 @@ export default function plugin(bb: BbPluginApi) {
     maintenance: { health: true, usage: true, installation: true },
     capabilities: {
       supportsServiceTier: true,
-      supportsNativeUserQuestion: true,
+      supportsNativeUserQuestion: false,
       fork: "checkpoint",
       supportsManualCompaction: true,
       supportsThreadArchive: false,
@@ -77,11 +93,11 @@ export default function plugin(bb: BbPluginApi) {
       { id: "low", label: "Low" },
       { id: "medium", label: "Medium" },
       { id: "high", label: "High" },
-      { id: "xhigh", label: "Extra High" },
+      { id: "xhigh", label: "xHigh" },
       {
         id: "ultracode",
         label: "Ultracode",
-        description: "Extra-high effort plus standing workflow orchestration.",
+        description: "xHigh effort plus standing workflow orchestration.",
       },
       { id: "max", label: "Max" },
     ],
@@ -97,7 +113,7 @@ export default function plugin(bb: BbPluginApi) {
     composerActions: ["plan"],
     completedTurnDisplay: "flat",
     env: {
-      passthrough: ["BB_CLAUDE_CODE_EXECUTABLE", "CLAUDE_CODE_OAUTH_TOKEN"],
+      passthrough: ["OMNYO_CLAUDE_CODE_EXECUTABLE", "CLAUDE_CODE_OAUTH_TOKEN"],
     },
     models: { scope: "host" },
     deriveProviderOptions(context) {
@@ -107,7 +123,10 @@ export default function plugin(bb: BbPluginApi) {
         workflowsEnabled: context.settings.workflowsDisabled !== true,
         chromeEnabled: context.settings.chromeEnabled === true,
         disable1MContext: context.settings.disable1MContext === true,
+        allowModelFallback: context.settings.allowModelFallback === true,
         sandboxEnabled: context.settings.sandboxEnabled !== false,
+        fullAccessApprovalsEnabled:
+          context.settings.fullAccessApprovalsEnabled === true,
         ...(context.promptMode === "plan"
           ? { claudeCodePermissionMode: "plan" }
           : {}),

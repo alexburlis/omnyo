@@ -15,7 +15,7 @@ import {
 import type { AppShortcutPresentation } from "@/lib/app-keybindings";
 import { SecondaryPanelHostLayoutContext } from "./SecondaryPanelHostLayoutContext";
 import { Panel, PanelGroup } from "react-resizable-panels";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import {
   createGitDiffFixedPanelTab,
@@ -56,8 +56,11 @@ afterEach(() => {
 });
 
 const noop = () => {};
+
 const infoFixedTab = createThreadInfoFixedPanelTab();
+
 const diffFixedTab = createGitDiffFixedPanelTab();
+
 const infoFixedTabDescriptor = {
   ariaLabel: "Show thread info panel",
   label: "Info",
@@ -66,6 +69,7 @@ const infoFixedTabDescriptor = {
   tab: infoFixedTab,
   title: "Thread info",
 };
+
 const diffFixedTabDescriptor = {
   ariaLabel: "Show diff panel",
   label: "Diff",
@@ -74,7 +78,9 @@ const diffFixedTabDescriptor = {
   tab: diffFixedTab,
   title: "Diff",
 };
+
 const infoFixedTabs = [infoFixedTabDescriptor] as const;
+
 const infoAndDiffFixedTabs = [
   infoFixedTabDescriptor,
   diffFixedTabDescriptor,
@@ -104,6 +110,7 @@ function renderPanel(args: {
   splitPanelStateId?: string;
 }) {
   const { wrapper: Wrapper } = createQueryClientTestHarness();
+
   return render(
     <Wrapper>
       <TooltipProvider>
@@ -132,10 +139,12 @@ function renderPanel(args: {
 function renderFixedTabSplit() {
   const { wrapper: Wrapper } = createQueryClientTestHarness();
   const panelStateId = "fixed-tab-remove-split";
+
   const initial = createSidebarSplitState(
     [infoFixedTab.id, diffFixedTab.id],
     diffFixedTab.id,
   );
+
   const split = moveSidebarTab(
     initial,
     initial.layout.focusedPaneId,
@@ -143,6 +152,7 @@ function renderFixedTabSplit() {
     { paneId: initial.layout.focusedPaneId, zone: "right" },
     { groupId: "group-diff" },
   );
+
   window.localStorage.setItem(
     sidebarSplitStorageKey(panelStateId),
     serializeSidebarSplitState(split),
@@ -182,6 +192,7 @@ describe("ThreadSecondaryPanel unavailable content", () => {
     "only mounts the unavailable fallback while open (drawer=%s)",
     (renderAsDrawer) => {
       const { wrapper: Wrapper } = createQueryClientTestHarness();
+
       const panel = (isOpen: boolean) => (
         <Wrapper>
           <TooltipProvider>
@@ -209,14 +220,13 @@ describe("ThreadSecondaryPanel unavailable content", () => {
           </TooltipProvider>
         </Wrapper>
       );
+
       const { unmount } = render(panel(false));
-      expect(screen.queryByText("This panel view is unavailable.")).toBeNull();
+      expect(screen.queryByText("This panel view is unavailable")).toBeNull();
 
       unmount();
       render(panel(true));
-      expect(
-        screen.getByText("This panel view is unavailable."),
-      ).not.toBeNull();
+      expect(screen.getByText("This panel view is unavailable")).not.toBeNull();
     },
   );
 });
@@ -224,6 +234,7 @@ describe("ThreadSecondaryPanel unavailable content", () => {
 describe("ThreadSecondaryPanel compact file content", () => {
   it("renders the available tab while persisted active state catches up", () => {
     const { wrapper: Wrapper } = createQueryClientTestHarness();
+
     const fallbackTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: "env-test",
       projectId: "project-test",
@@ -267,6 +278,7 @@ describe("ThreadSecondaryPanel compact file content", () => {
 
   it("renders arbitrary fixed-tab content through the shared surface", () => {
     const { wrapper: Wrapper } = createQueryClientTestHarness();
+
     const fixedTab = createPluginPageFixedPanelTab({
       fixedTabId: "docs",
       pageId: "plugin-page",
@@ -319,21 +331,26 @@ describe("ThreadSecondaryPanel compact file content", () => {
 
   it("renders plugin fixed tabs concurrently when they are split", () => {
     const { wrapper: Wrapper } = createQueryClientTestHarness();
+
     const docsTab = createPluginPageFixedPanelTab({
       fixedTabId: "docs",
       pageId: "plugin-page",
       pluginId: "plugin-test",
     });
+
     const activityTab = createPluginPageFixedPanelTab({
       fixedTabId: "activity",
       pageId: "plugin-page",
       pluginId: "plugin-test",
     });
+
     const panelStateId = "plugin-fixed-tab-split";
+
     const initial = createSidebarSplitState(
       [docsTab.id, activityTab.id],
       activityTab.id,
     );
+
     const split = moveSidebarTab(
       initial,
       initial.layout.focusedPaneId,
@@ -341,6 +358,7 @@ describe("ThreadSecondaryPanel compact file content", () => {
       { paneId: initial.layout.focusedPaneId, zone: "right" },
       { groupId: "group-activity" },
     );
+
     window.localStorage.setItem(
       sidebarSplitStorageKey(panelStateId),
       serializeSidebarSplitState(split),
@@ -400,6 +418,7 @@ describe("ThreadSecondaryPanel compact file content", () => {
 
   it("renders each split pane from the descriptor attached to its tab", () => {
     const { wrapper: Wrapper } = createQueryClientTestHarness();
+
     const firstTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: "env-test",
       projectId: "project-test",
@@ -410,6 +429,7 @@ describe("ThreadSecondaryPanel compact file content", () => {
         statusLabel: null,
       },
     });
+
     const secondTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: "env-test",
       projectId: "project-test",
@@ -420,11 +440,14 @@ describe("ThreadSecondaryPanel compact file content", () => {
         statusLabel: null,
       },
     });
+
     const panelStateId = "renderable-tab-split";
+
     const initial = createSidebarSplitState(
       [firstTab.id, secondTab.id],
       secondTab.id,
     );
+
     const split = moveSidebarTab(
       initial,
       initial.layout.focusedPaneId,
@@ -432,6 +455,7 @@ describe("ThreadSecondaryPanel compact file content", () => {
       { paneId: initial.layout.focusedPaneId, zone: "right" },
       { groupId: "group-second" },
     );
+
     window.localStorage.setItem(
       sidebarSplitStorageKey(panelStateId),
       serializeSidebarSplitState(split),
@@ -497,6 +521,7 @@ describe("ThreadSecondaryPanel compact file content", () => {
 
   it("retains the active file body after the persistent drawer closes", () => {
     const { wrapper: Wrapper } = createQueryClientTestHarness();
+
     const activeTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: "env-test",
       projectId: "project-test",
@@ -507,6 +532,7 @@ describe("ThreadSecondaryPanel compact file content", () => {
         statusLabel: null,
       },
     });
+
     const renderDrawer = (isOpen: boolean) => (
       <Wrapper>
         <TooltipProvider>
@@ -533,7 +559,9 @@ describe("ThreadSecondaryPanel compact file content", () => {
         </TooltipProvider>
       </Wrapper>
     );
+
     const view = render(renderDrawer(true));
+
     const fileContent = screen.getByRole("textbox", {
       name: "Retained file content",
     });
@@ -545,6 +573,7 @@ describe("ThreadSecondaryPanel compact file content", () => {
 
   it("renders one active compact body and restores the saved wide split", () => {
     const { wrapper: Wrapper } = createQueryClientTestHarness();
+
     const activeTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: "env-test",
       projectId: "project-test",
@@ -555,11 +584,14 @@ describe("ThreadSecondaryPanel compact file content", () => {
         statusLabel: null,
       },
     });
+
     const panelStateId = "thread-compact-split";
+
     const initial = createSidebarSplitState(
       [createThreadInfoFixedPanelTab().id, activeTab.id],
       activeTab.id,
     );
+
     const split = moveSidebarTab(
       initial,
       initial.layout.focusedPaneId,
@@ -567,9 +599,11 @@ describe("ThreadSecondaryPanel compact file content", () => {
       { paneId: initial.layout.focusedPaneId, zone: "right" },
       { groupId: "group-file" },
     );
+
     const storedSplit = serializeSidebarSplitState(split);
     const storageKey = sidebarSplitStorageKey(panelStateId);
     window.localStorage.setItem(storageKey, storedSplit);
+
     const renderContent = vi.fn(() => (
       <input aria-label="Compact active body" />
     ));
@@ -599,6 +633,7 @@ describe("ThreadSecondaryPanel compact file content", () => {
         </TooltipProvider>
       </Wrapper>
     );
+
     const view = render(renderPanel(true));
 
     expect(screen.getAllByLabelText("Compact active body")).toHaveLength(1);
@@ -611,9 +646,11 @@ describe("ThreadSecondaryPanel compact file content", () => {
 
     const restoredPanes = document.querySelectorAll("[data-split-pane-id]");
     expect(restoredPanes).toHaveLength(2);
+
     const restoredTabGroups = document.querySelectorAll(
       "[data-sidebar-split-tab-group]",
     );
+
     expect(restoredTabGroups).toHaveLength(2);
     expect(restoredTabGroups[0]?.textContent).toContain("Info");
     expect(restoredTabGroups[1]?.textContent).toContain("index.ts");
@@ -630,6 +667,7 @@ describe("ThreadSecondaryPanel remove-split control", () => {
       isConversationCollapsed: false,
       onToggleConversationCollapse: noop,
     });
+
     expect(unsplit.queryByRole("button", { name: "Remove split" })).toBeNull();
     unsplit.unmount();
 
@@ -638,9 +676,11 @@ describe("ThreadSecondaryPanel remove-split control", () => {
     const panes = Array.from(
       document.querySelectorAll<HTMLElement>("[data-split-pane-id]"),
     );
+
     const removeControls = screen.getAllByRole("button", {
       name: "Remove split",
     });
+
     expect(panes).toHaveLength(2);
     expect(removeControls).toHaveLength(2);
     expect(
@@ -648,7 +688,9 @@ describe("ThreadSecondaryPanel remove-split control", () => {
         const chrome = pane.querySelector(
           '[data-testid="thread-secondary-panel-top-chrome"]',
         );
+
         const removeControl = pane.querySelector('[aria-label="Remove split"]');
+
         return (
           chrome?.lastElementChild instanceof HTMLElement &&
           removeControl instanceof HTMLButtonElement &&
@@ -664,7 +706,9 @@ describe("ThreadSecondaryPanel remove-split control", () => {
     const removeControl = screen.getAllByRole("button", {
       name: "Remove split",
     })[1];
+
     expect(removeControl).toBeInstanceOf(HTMLButtonElement);
+
     if (!(removeControl instanceof HTMLButtonElement)) return;
     removeControl.focus();
     expect(document.activeElement).toBe(removeControl);
@@ -716,7 +760,7 @@ describe("ThreadSecondaryPanel Diff eligibility", () => {
     expect(
       screen.queryByRole("button", { name: "Show diff panel" }),
     ).toBeNull();
-    expect(screen.queryByText("This panel view is unavailable.")).toBeNull();
+    expect(screen.queryByText("This panel view is unavailable")).toBeNull();
   });
 
   it("keeps an active Diff tab visible while Git eligibility loads", () => {
@@ -751,7 +795,7 @@ describe("ThreadSecondaryPanel Diff eligibility", () => {
       screen.getByRole("button", { name: "Show diff panel" }),
     ).toBeTruthy();
     expect(screen.getByRole("status", { name: "Loading diff" })).toBeTruthy();
-    expect(screen.queryByText("This panel view is unavailable.")).toBeNull();
+    expect(screen.queryByText("This panel view is unavailable")).toBeNull();
   });
 });
 
@@ -783,9 +827,11 @@ describe("ThreadSecondaryPanel resize boundary", () => {
     const boundary = view.getByRole("separator", {
       name: "Resize thread and right panel",
     });
+
     const seam = boundary.querySelector(
       "span:not([data-panel-resize-hit-target])",
     );
+
     expect(boundary.tabIndex).toBe(-1);
     expect(seam?.className).toContain("bg-border-seam");
   });
@@ -801,9 +847,11 @@ describe("ThreadSecondaryPanel full-screen control", () => {
     const fullScreenControl = view.getByRole("button", {
       name: "Full Screen",
     });
+
     const hideControl = view.getByRole("button", {
       name: "Hide right panel",
     });
+
     expect(
       fullScreenControl.compareDocumentPosition(hideControl) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -812,6 +860,7 @@ describe("ThreadSecondaryPanel full-screen control", () => {
 
   it("expands the panel while the conversation is shown", () => {
     const onToggleConversationCollapse = vi.fn();
+
     const view = renderPanel({
       isConversationCollapsed: false,
       onToggleConversationCollapse,
@@ -827,6 +876,7 @@ describe("ThreadSecondaryPanel full-screen control", () => {
 
   it("restores the conversation from the same slot while it is collapsed", () => {
     const onToggleConversationCollapse = vi.fn();
+
     const view = renderPanel({
       isConversationCollapsed: true,
       onToggleConversationCollapse,
@@ -844,6 +894,7 @@ describe("ThreadSecondaryPanel full-screen control", () => {
   it("offers every existing split position from the right-panel control and moves the active tab", () => {
     const { wrapper: Wrapper } = createQueryClientTestHarness();
     const onOpenNewTab = vi.fn();
+
     const fileTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: "env-test",
       projectId: "project-test",
@@ -896,6 +947,7 @@ describe("ThreadSecondaryPanel full-screen control", () => {
     expect(
       screen.getByRole("menu", { name: "Pane arrangement" }),
     ).not.toBeNull();
+
     for (const side of ["left", "right", "top", "bottom"] as const) {
       expect(
         screen.getByRole("menuitem", { name: `Move ${side}` }),
@@ -903,13 +955,17 @@ describe("ThreadSecondaryPanel full-screen control", () => {
     }
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Move right" }));
+
     const panes = Array.from(
       document.querySelectorAll<HTMLElement>("[data-split-pane-id]"),
     );
+
     expect(panes).toHaveLength(2);
+
     const tabGroups = Array.from(
       document.querySelectorAll<HTMLElement>("[data-sidebar-split-tab-group]"),
     );
+
     expect(tabGroups).toHaveLength(2);
     expect(tabGroups[0]?.textContent).toContain("Info");
     expect(tabGroups[1]?.textContent).toContain("index.ts");
@@ -933,19 +989,24 @@ describe("ThreadSecondaryPanel full-screen control", () => {
       screen.getAllByRole("button", { name: "Hide right panel" }),
     ).toHaveLength(1);
     expect(document.querySelectorAll("header")).toHaveLength(0);
+
     const newTabControls = screen.getAllByRole("button", {
       name: "Open new tab in this pane",
     });
+
     expect(newTabControls).toHaveLength(1);
     expect(
       document.querySelectorAll("[data-new-tab-control-reserved]"),
     ).toHaveLength(1);
+
     const initiallyFocusedPane = panes.find(
       (pane) => pane.dataset.focused === "true",
     );
+
     const initiallyInactivePane = panes.find(
       (pane) => pane.dataset.focused === "false",
     );
+
     expect(
       initiallyFocusedPane?.querySelector(
         'button[aria-label^="Open new tab in this pane"]',
@@ -956,9 +1017,11 @@ describe("ThreadSecondaryPanel full-screen control", () => {
     ).not.toBeNull();
 
     fireEvent.pointerDown(initiallyInactivePane as HTMLElement);
+
     const focusedPaneNewTabControl = screen.getByRole("button", {
       name: "Open new tab in this pane",
     });
+
     expect(focusedPaneNewTabControl.closest("[data-split-pane-id]")).toBe(
       initiallyInactivePane,
     );
@@ -973,6 +1036,7 @@ describe("ThreadSecondaryPanel full-screen control", () => {
 
   it("maximizes one stacked pane while keeping both tab rows mounted", () => {
     const { wrapper: Wrapper } = createQueryClientTestHarness();
+
     const fileTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: "env-test",
       projectId: "project-test",
@@ -983,11 +1047,14 @@ describe("ThreadSecondaryPanel full-screen control", () => {
         statusLabel: null,
       },
     });
+
     const panelStateId = "thread-fullscreen-split";
+
     const initial = createSidebarSplitState(
       [createThreadInfoFixedPanelTab().id, fileTab.id],
       fileTab.id,
     );
+
     const split = moveSidebarTab(
       initial,
       initial.layout.focusedPaneId,
@@ -995,6 +1062,7 @@ describe("ThreadSecondaryPanel full-screen control", () => {
       { paneId: initial.layout.focusedPaneId, zone: "bottom" },
       { groupId: "group-file" },
     );
+
     window.localStorage.setItem(
       sidebarSplitStorageKey(panelStateId),
       serializeSidebarSplitState(split),
@@ -1032,10 +1100,13 @@ describe("ThreadSecondaryPanel full-screen control", () => {
     const restoreControls = screen.getAllByRole("button", {
       name: "Restore split",
     });
+
     expect(restoreControls).toHaveLength(1);
+
     const panes = Array.from(
       document.querySelectorAll<HTMLElement>("[data-split-pane-id]"),
     );
+
     expect(panes).toHaveLength(2);
     expect(
       panes.map(
@@ -1054,9 +1125,11 @@ describe("ThreadSecondaryPanel full-screen control", () => {
           ).length,
       ),
     ).toEqual([1, 1]);
+
     const separator = document.querySelector<HTMLElement>(
       '[aria-label="Resize stacked right panel panes"]',
     );
+
     expect(separator?.getAttribute("aria-orientation")).toBe("horizontal");
     expect(separator?.getAttribute("aria-hidden")).toBe("true");
     expect(separator?.className).toContain("invisible");
@@ -1069,6 +1142,7 @@ describe("ThreadSecondaryPanel full-screen control", () => {
     expect(panes[0]?.style.contentVisibility).toBe("hidden");
     expect(panes[1]?.dataset.maximized).toBe("true");
     const restoreControl = restoreControls[0];
+
     if (restoreControl === undefined)
       throw new Error("Missing restore control");
     fireEvent.click(restoreControl);
@@ -1100,6 +1174,7 @@ describe("ThreadSecondaryPanel full-screen shortcut", () => {
     const control = screen.getByRole("button", {
       name: `${label} (${shortcut.label})`,
     });
+
     expect(control.getAttribute("aria-keyshortcuts")).toBe(
       shortcut.ariaKeyshortcuts,
     );
@@ -1119,6 +1194,7 @@ describe("ThreadSecondaryPanel full-screen shortcut", () => {
 
 function NextPanelTabButton() {
   const { dispatch } = useAppCommandRunner();
+
   return (
     <button onClick={() => dispatch("panel.nextTab", document.activeElement)}>
       Next panel tab
@@ -1179,6 +1255,7 @@ it("focuses New tab without opening it and resumes cycling from the button", asy
 it("ignores tab navigation while chat maximize suppresses the panel and resumes after restore", () => {
   const { wrapper: Wrapper } = createQueryClientTestHarness();
   const onSelect = vi.fn();
+
   const file = createWorkspaceFilePreviewFixedPanelTab({
     environmentId: "env-test",
     projectId: "proj-test",
@@ -1189,6 +1266,7 @@ it("ignores tab navigation while chat maximize suppresses the panel and resumes 
       lineRange: null,
     },
   });
+
   const view = (isSuppressed: boolean) => (
     <Wrapper>
       <AppCommandProvider>
@@ -1223,6 +1301,7 @@ it("ignores tab navigation while chat maximize suppresses the panel and resumes 
       </AppCommandProvider>
     </Wrapper>
   );
+
   const { rerender } = render(view(true));
   const button = screen.getByRole("button", { name: "Next panel tab" });
   button.focus();

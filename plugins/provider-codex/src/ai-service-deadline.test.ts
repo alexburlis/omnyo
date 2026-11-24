@@ -1,4 +1,4 @@
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import { afterEach, expect, it, vi } from "vitest";
 import { registerCodexAiService } from "./ai-service.js";
 import { transcribeCodexVoice } from "./ai/chatgpt-client.js";
@@ -30,21 +30,26 @@ it("returns a transcript when the endpoint responds after 64 seconds", async () 
     "fetch",
     vi.fn<typeof fetch>(async (_input, init) => {
       const signal = init?.signal;
+
       if (!signal) throw new Error("Missing request cancellation signal");
+
       return new Promise<Response>((resolve, reject) => {
         const abort = () => {
           clearTimeout(responseTimer);
           reject(new DOMException("Request aborted", "AbortError"));
         };
+
         const responseTimer = setTimeout(() => {
           signal.removeEventListener("abort", abort);
           resolve(Response.json({ text: "A completed voice note" }));
         }, responseMs);
+
         signal.addEventListener("abort", abort, { once: true });
       });
     }),
   );
-  const { bb, harness } = createFakePluginHost({
+
+  const { api, harness } = createFakePluginHost({
     sdk: { system: { config: async () => ({ primaryHostId: "host-1" }) } },
     experimental_callHostRpc: async (call) => ({
       ok: true,
@@ -54,8 +59,10 @@ it("returns a transcript when the endpoint responds after 64 seconds", async () 
       ),
     }),
   });
-  registerCodexAiService(bb);
+
+  registerCodexAiService(api);
   const [service] = harness.registrations.aiServiceRegistrations;
+
   if (!service?.transcribe) throw new Error("Missing voice service");
 
   const result = service
@@ -64,6 +71,7 @@ it("returns a transcript when the endpoint responds after 64 seconds", async () 
       { signal: new AbortController().signal, hint: null },
     )
     .catch((error: unknown) => error);
+
   await vi.advanceTimersByTimeAsync(responseMs);
   await expect(result).resolves.toBe("A completed voice note");
 });

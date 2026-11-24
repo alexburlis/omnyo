@@ -23,13 +23,19 @@ import {
   MenuHoverProvider,
   useMenuItemHover,
 } from "./menu-item-hover.js";
-import { LIST_HOVER_TRANSITION } from "./motion.js";
+import {
+  FLOATING_FADE_MOTION,
+  FLOATING_MENU_MOTION,
+  LIST_HOVER_TRANSITION,
+} from "./motion.js";
 import { Icon } from "../../components/ui/icon.js";
 
 const MENU_ITEM_NEUTRAL_STATE_CLASS =
   "focus:bg-state-hover focus:text-foreground data-[last-hovered]:bg-state-hover data-[last-hovered]:text-foreground";
+
 const MENU_ITEM_DESTRUCTIVE_STATE_CLASS =
   "text-destructive focus:bg-destructive/15 focus:text-destructive data-[last-hovered]:bg-destructive/15";
+
 const MENU_ITEM_DESTRUCTIVE_TOUCH_CLASS =
   "text-destructive focus:bg-destructive/15 focus:text-destructive active:bg-destructive/20 active:text-destructive";
 
@@ -109,6 +115,7 @@ const DropdownMenuTrigger = React.forwardRef<
         if (!open) {
           blurActiveKeyboardInputBeforeOverlayOpen();
         }
+
         preventOverlayTriggerSelection(event);
       }}
       {...props}
@@ -117,6 +124,7 @@ const DropdownMenuTrigger = React.forwardRef<
     </DropdownMenuPrimitive.Trigger>
   );
 });
+
 DropdownMenuTrigger.displayName = "DropdownMenuTrigger";
 
 const DropdownMenuContent = React.forwardRef<
@@ -141,6 +149,7 @@ const DropdownMenuContent = React.forwardRef<
 
     if (isCompactViewport) {
       const { style, ...domProps } = stripRadixContentProps(props);
+
       return (
         <ResponsiveDrawerShell
           open={open}
@@ -175,13 +184,16 @@ const DropdownMenuContent = React.forwardRef<
             const focusTaken =
               document.activeElement !== null &&
               document.activeElement !== document.body;
+
             if (!isLastInputKeyboard() || focusTaken) {
               event.preventDefault();
             }
+
             onCloseAutoFocus?.(event);
           }}
           className={cn(
-            "z-50 min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+            "z-50 min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md origin-(--radix-dropdown-menu-content-transform-origin)",
+            FLOATING_MENU_MOTION,
             className,
           )}
           {...props}
@@ -192,6 +204,7 @@ const DropdownMenuContent = React.forwardRef<
     );
   },
 );
+
 DropdownMenuContent.displayName = "DropdownMenuContent";
 
 function createSelectEvent(): Event {
@@ -234,14 +247,17 @@ const DropdownMenuItem = React.forwardRef<
     ref,
   ) => {
     const { isCompactViewport, open, onOpenChange } = useResponsiveMenu();
+
     const { hoverProps } = useMenuItemHover({
       onPointerEnter: callerPointerEnter,
       onKeyDown: callerKeyDown,
     });
+
     const keepFocusWhileClosing =
       (handler: React.PointerEventHandler<HTMLDivElement> | undefined) =>
       (event: React.PointerEvent<HTMLDivElement>) => {
         handler?.(event);
+
         if (!open) event.preventDefault();
       };
 
@@ -255,7 +271,8 @@ const DropdownMenuItem = React.forwardRef<
           aria-disabled={disabled || undefined}
           aria-checked={ariaChecked}
           className={cn(
-            "relative flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-[0.3125rem] max-md:pointer-coarse:py-2 text-left text-xs outline-none transition-colors focus:bg-state-hover focus:text-foreground active:bg-state-active active:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>[data-icon-root]]:size-4 [&>[data-icon-root]]:shrink-0",
+            "relative flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-[0.3125rem] max-md:pointer-coarse:py-2 text-left text-xs outline-none focus:bg-state-hover focus:text-foreground active:bg-state-active active:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>[data-icon-root]]:size-4 [&>[data-icon-root]]:shrink-0",
+            LIST_HOVER_TRANSITION,
             inset && "pl-8",
             variant === "destructive" && MENU_ITEM_DESTRUCTIVE_TOUCH_CLASS,
             className,
@@ -267,6 +284,7 @@ const DropdownMenuItem = React.forwardRef<
             if (disabled) return;
             const event = createSelectEvent();
             onSelect?.(event);
+
             if (!event.defaultPrevented) {
               onOpenChange(false);
             }
@@ -306,6 +324,7 @@ const DropdownMenuItem = React.forwardRef<
     );
   },
 );
+
 DropdownMenuItem.displayName = "DropdownMenuItem";
 
 const DropdownMenuCheckboxItem = React.forwardRef<
@@ -328,6 +347,7 @@ const DropdownMenuCheckboxItem = React.forwardRef<
     ref,
   ) => {
     const { isCompactViewport, onOpenChange } = useResponsiveMenu();
+
     const { hoverProps } = useMenuItemHover({
       onPointerEnter: callerPointerEnter,
       onKeyDown: callerKeyDown,
@@ -345,7 +365,8 @@ const DropdownMenuCheckboxItem = React.forwardRef<
           disabled={disabled}
           aria-disabled={disabled || undefined}
           className={cn(
-            "relative flex w-full cursor-default select-none items-center rounded-sm py-[0.3125rem] max-md:pointer-coarse:py-2 pl-2 pr-8 text-left text-xs outline-none transition-colors focus:bg-state-hover focus:text-foreground active:bg-state-active active:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+            "relative flex w-full cursor-default select-none items-center rounded-sm py-[0.3125rem] max-md:pointer-coarse:py-2 pl-2 pr-8 text-left text-xs outline-none focus:bg-state-hover focus:text-foreground active:bg-state-active active:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+            LIST_HOVER_TRANSITION,
             className,
           )}
           data-disabled={disabled ? "" : undefined}
@@ -354,6 +375,7 @@ const DropdownMenuCheckboxItem = React.forwardRef<
             const event = createSelectEvent();
             onSelect?.(event);
             onCheckedChange?.(checked === "indeterminate" ? true : !checked);
+
             if (!event.defaultPrevented) {
               onOpenChange(false);
             }
@@ -406,6 +428,7 @@ const DropdownMenuCheckboxItem = React.forwardRef<
     );
   },
 );
+
 DropdownMenuCheckboxItem.displayName = "DropdownMenuCheckboxItem";
 
 function DropdownMenuRadioGroup({
@@ -440,6 +463,7 @@ const DropdownMenuRadioItem = React.forwardRef<
     ref,
   ) => {
     const { isCompactViewport } = useResponsiveMenu();
+
     const { hoverProps } = useMenuItemHover({
       onPointerEnter: callerPointerEnter,
       onKeyDown: callerKeyDown,
@@ -471,6 +495,7 @@ const DropdownMenuRadioItem = React.forwardRef<
     );
   },
 );
+
 DropdownMenuRadioItem.displayName = DropdownMenuPrimitive.RadioItem.displayName;
 
 const DropdownMenuLabel = React.forwardRef<
@@ -510,6 +535,7 @@ const DropdownMenuLabel = React.forwardRef<
     </DropdownMenuPrimitive.Label>
   );
 });
+
 DropdownMenuLabel.displayName = "DropdownMenuLabel";
 
 const DropdownMenuSeparator = React.forwardRef<
@@ -535,6 +561,7 @@ const DropdownMenuSeparator = React.forwardRef<
     />
   );
 });
+
 DropdownMenuSeparator.displayName = "DropdownMenuSeparator";
 
 const DropdownMenuGroup = React.forwardRef<
@@ -557,6 +584,7 @@ const DropdownMenuGroup = React.forwardRef<
     </DropdownMenuPrimitive.Group>
   );
 });
+
 DropdownMenuGroup.displayName = "DropdownMenuGroup";
 
 const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
@@ -604,6 +632,7 @@ const DropdownMenuSubTrigger = React.forwardRef<
     );
   },
 );
+
 DropdownMenuSubTrigger.displayName =
   DropdownMenuPrimitive.SubTrigger.displayName;
 
@@ -615,12 +644,14 @@ const DropdownMenuSubContent = React.forwardRef<
     ref={ref}
     {...usePortalScopeProps()}
     className={cn(
-      "z-50 min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+      "z-50 min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md origin-(--radix-dropdown-menu-content-transform-origin)",
+      FLOATING_FADE_MOTION,
       className,
     )}
     {...props}
   />
 ));
+
 DropdownMenuSubContent.displayName =
   DropdownMenuPrimitive.SubContent.displayName;
 
@@ -635,6 +666,7 @@ const DropdownMenuShortcut = ({
     />
   );
 };
+
 DropdownMenuShortcut.displayName = "DropdownMenuShortcut";
 
 export {

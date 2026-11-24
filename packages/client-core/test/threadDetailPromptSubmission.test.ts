@@ -1,4 +1,8 @@
-import type { PromptInput, ThreadRuntimeDisplayStatus } from "@bb/domain";
+import {
+  createStandaloneBuiltinCompactCommandInput,
+  type PromptInput,
+  type ThreadRuntimeDisplayStatus,
+} from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   buildAutoFollowUpRequest,
@@ -103,6 +107,7 @@ describe("threadDetailPromptSubmission", () => {
   it("builds auto follow-up requests with selected execution options", () => {
     expect(
       buildAutoFollowUpRequest({
+        compactFirst: false,
         execution: {
           model: "gpt-5",
           permissionMode: "full",
@@ -126,9 +131,27 @@ describe("threadDetailPromptSubmission", () => {
     });
   });
 
+  it.each([
+    [textInput, true],
+    [createStandaloneBuiltinCompactCommandInput(), false],
+  ])(
+    "asks to compact first only for a message to send after compacting %#",
+    (input, expected) => {
+      const request = buildAutoFollowUpRequest({
+        compactFirst: true,
+        execution: null,
+        input,
+        threadId: "thread-1",
+      });
+
+      expect(request?.compactFirst === true).toBe(expected);
+    },
+  );
+
   it("omits execution overrides when building auto follow-up requests without concrete defaults", () => {
     expect(
       buildAutoFollowUpRequest({
+        compactFirst: false,
         execution: null,
         input: textInput,
         threadId: "thread-1",
@@ -219,6 +242,16 @@ describe("threadDetailPromptSubmission", () => {
   it("gates the follow-up shortcut by runtime state and pending work", () => {
     expect(
       canSubmitFollowUpShortcut({
+        hasPromptDraftInput: true,
+        isFollowUpSubmitting: false,
+        isQueueMutationPending: false,
+        queuedMessageCount: 0,
+        runtimeDisplayStatus: "error",
+        submitModeKind: "ready",
+      }),
+    ).toBe(true);
+    expect(
+      canSubmitFollowUpShortcut({
         hasPromptDraftInput: false,
         isFollowUpSubmitting: false,
         isQueueMutationPending: false,
@@ -227,6 +260,7 @@ describe("threadDetailPromptSubmission", () => {
         submitModeKind: "queue",
       }),
     ).toBe(true);
+
     for (const runtimeDisplayStatus of ["provisioning", "starting"] as const) {
       expect(
         canSubmitFollowUpShortcut({
@@ -239,6 +273,7 @@ describe("threadDetailPromptSubmission", () => {
         }),
       ).toBe(true);
     }
+
     expect(
       canSubmitFollowUpShortcut({
         hasPromptDraftInput: false,
@@ -308,7 +343,7 @@ describe("threadDetailPromptSubmission", () => {
         runtimeDisplayStatus: "idle",
         submitModeKind: "ready",
       }),
-    ).toBe(false);
+    ).toBe(true);
 
     const queueableStatuses: ThreadRuntimeDisplayStatus[] = [
       "active",
@@ -316,11 +351,13 @@ describe("threadDetailPromptSubmission", () => {
       "starting",
       "waiting-for-host",
     ];
+
     const immediateStatuses: ThreadRuntimeDisplayStatus[] = ["error", "idle"];
 
     for (const status of queueableStatuses) {
       expect(shouldQueueFollowUpMessage(status)).toBe(true);
     }
+
     for (const status of immediateStatuses) {
       expect(shouldQueueFollowUpMessage(status)).toBe(false);
     }
@@ -328,6 +365,7 @@ describe("threadDetailPromptSubmission", () => {
 
   it("offers queue mode while a thread is starting", () => {
     const onStop = () => undefined;
+
     const queueableStatuses: ThreadRuntimeDisplayStatus[] = [
       "provisioning",
       "starting",

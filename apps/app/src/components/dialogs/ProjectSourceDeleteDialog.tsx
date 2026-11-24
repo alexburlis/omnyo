@@ -1,7 +1,7 @@
 import {
   ConfirmDeleteDialog,
   ConfirmDeleteDialogContent,
-} from "@bb/shared-ui/confirm-delete-dialog";
+} from "@omnyo/shared-ui/confirm-delete-dialog";
 
 export interface ProjectSourceDeleteDialogTarget {
   id: string;
@@ -28,6 +28,7 @@ export function ProjectSourceDeleteDialog({
           target={target}
           pending={pending}
           onDelete={onDelete}
+          onCancel={() => onOpenChange(false)}
         />
       ) : null}
     </ConfirmDeleteDialog>
@@ -38,12 +39,14 @@ interface ProjectSourceDeleteDialogContentProps {
   target: ProjectSourceDeleteDialogTarget;
   pending: boolean;
   onDelete: (sourceId: string) => void;
+  onCancel: () => void;
 }
 
 export function ProjectSourceDeleteDialogContent({
   target,
   pending,
   onDelete,
+  onCancel,
 }: ProjectSourceDeleteDialogContentProps) {
   return (
     <ConfirmDeleteDialogContent
@@ -51,6 +54,7 @@ export function ProjectSourceDeleteDialogContent({
       description={`Remove "${target.label}" from this project? This cannot be undone.`}
       confirmLabel="Remove source"
       pending={pending}
+      onCancel={onCancel}
       onConfirm={() => onDelete(target.id)}
     />
   );

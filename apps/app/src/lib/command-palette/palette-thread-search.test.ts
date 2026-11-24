@@ -1,5 +1,5 @@
-import { PERSONAL_PROJECT_ID, type ThreadListEntry } from "@bb/domain";
-import type { ThreadSearchResponse } from "@bb/server-contract";
+import { PERSONAL_PROJECT_ID, type ThreadListEntry } from "@omnyo/domain";
+import type { ThreadSearchResponse } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { buildPaletteThreadSearchRows } from "./palette-thread-search";
@@ -12,12 +12,14 @@ function makeThread(
 ): ThreadListEntry {
   return {
     id,
+    work: null,
     projectId: "project-1",
     environmentId: null,
     providerId: "codex",
     title: `Title ${id}`,
     titleFallback: `Fallback ${id}`,
     sectionId: null,
+    groupId: null,
     status: "idle",
     parentThreadId: null,
     lifecycleOwnerThreadId: null,
@@ -25,12 +27,17 @@ function makeThread(
     originKind: null,
     originPluginId: null,
     visibility: "visible",
+    pluginHome: false,
+    quiet: false,
     archivedAt: null,
     pinnedAt: null,
     pinSortKey: null,
+    shelfSortKey: null,
+    shelvedAt: null,
     deletedAt: null,
     lastReadAt: null,
     latestAttentionAt: 1,
+    lastMessageAt: null,
     createdAt: 1,
     updatedAt: NOW,
     activity: {
@@ -39,6 +46,7 @@ function makeThread(
       activeBackgroundCommandCount: 0,
       activePlanModeCount: 0,
       activeGoalCount: 0,
+      activeSubagentCount: 0,
     },
     hasPendingInteraction: false,
     environmentHostId: null,
@@ -84,6 +92,7 @@ describe("buildPaletteThreadSearchRows", () => {
         makeThread("archived-latest", { archivedAt: 2, updatedAt: 1 }),
       ],
     });
+
     expect(result.rows.map((row) => row.threadId)).toEqual([
       "archived-latest",
       "updated-latest",
@@ -93,12 +102,28 @@ describe("buildPaletteThreadSearchRows", () => {
   it("keeps saved-message threads in Active recents", () => {
     const saved = makeThread("saved", { status: "pending", updatedAt: NOW });
     const archived = makeThread("archived", { archivedAt: 1, updatedAt: 2 });
-    const active = Array.from({ length: 25 }, (_, index) => makeThread(`active-${index}`, { updatedAt: 1 }));
+
+    const active = Array.from({ length: 25 }, (_, index) =>
+      makeThread(`active-${index}`, { updatedAt: 1 }),
+    );
+
     const recentThreads = [...active, saved, archived];
-    const result = build({ query: "", recentThreads, lifecycles: ["active", "archived"] });
+
+    const result = build({
+      query: "",
+      recentThreads,
+      lifecycles: ["active", "archived"],
+    });
+
     expect(result.rows).toHaveLength(21);
-    expect(result.rows[0]).toMatchObject({ threadId: "saved", lifecycle: "active" });
-    expect(result.rows[20]).toMatchObject({ threadId: "archived", lifecycle: "archived" });
+    expect(result.rows[0]).toMatchObject({
+      threadId: "saved",
+      lifecycle: "active",
+    });
+    expect(result.rows[20]).toMatchObject({
+      threadId: "archived",
+      lifecycle: "archived",
+    });
   });
 
   it("keeps saved-message snippets in the owning thread result without inventing an event anchor", () => {
@@ -107,21 +132,37 @@ describe("buildPaletteThreadSearchRows", () => {
       searchResponse: {
         active: {
           total: 1,
-          results: [{
-            thread: makeThread("saved", { status: "pending" }),
-            matches: [{ sourceKind: "user_message", text: "matching saved message", highlightRanges: [{ start: 0, end: 5 }], sourceSeq: null }],
-          }],
+          results: [
+            {
+              thread: makeThread("saved", { status: "pending" }),
+              matches: [
+                {
+                  sourceKind: "user_message",
+                  text: "matching saved message",
+                  highlightRanges: [{ start: 0, end: 5 }],
+                  sourceSeq: null,
+                },
+              ],
+            },
+          ],
         },
         archived: { total: 0, results: [] },
       },
     });
+
     expect(result.rows).toHaveLength(1);
-    expect(result.rows[0]).toMatchObject({ threadId: "saved", lifecycle: "active", excerpt: { text: "matching saved message" }, messageSeq: null });
+    expect(result.rows[0]).toMatchObject({
+      threadId: "saved",
+      lifecycle: "active",
+      excerpt: { text: "matching saved message" },
+      messageSeq: null,
+    });
   });
 
   it("preserves active and archived server matches in their ranked order", () => {
     const active = makeThread("active");
     const archived = makeThread("archived", { archivedAt: NOW - 1 });
+
     const searchResponse: ThreadSearchResponse = {
       active: {
         total: 1,
@@ -153,8 +194,51 @@ describe("buildPaletteThreadSearchRows", () => {
     ]);
   });
 
+  it("shows a search result's live sidebar status instead of the searched snapshot", () => {
+    const searched = makeThread("running", {
+      status: "idle",
+      runtime: { displayStatus: "idle" },
+    });
+
+    const live = makeThread("running", {
+      status: "active",
+      runtime: { displayStatus: "active" },
+    });
+
+    const result = build({
+      recentThreads: [live],
+      searchResponse: {
+        active: {
+          total: 1,
+          results: [
+            {
+              thread: searched,
+              matches: [
+                {
+                  sourceKind: "user_message",
+                  text: "match in a message",
+                  highlightRanges: [{ start: 0, end: 5 }],
+                  sourceSeq: 3,
+                },
+              ],
+            },
+          ],
+        },
+        archived: { total: 0, results: [] },
+      },
+    });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.thread).toBe(live);
+    expect(result.rows[0]).toMatchObject({
+      excerpt: { text: "match in a message" },
+      messageSeq: 3,
+    });
+  });
+
   it("keeps the title on top and carries the matched message as the excerpt", () => {
     const thread = makeThread("message", { title: "Original title" });
+
     const result = build({
       searchResponse: {
         active: {
@@ -193,6 +277,7 @@ describe("buildPaletteThreadSearchRows", () => {
   it("uses active recents before typing and only title matches once typing starts", () => {
     const active = makeThread("recent-active");
     const archived = makeThread("recent-archived", { archivedAt: NOW - 1 });
+
     const recents = build({
       query: "",
       searchResponse: {
@@ -201,6 +286,7 @@ describe("buildPaletteThreadSearchRows", () => {
       },
       recentThreads: [active],
     });
+
     expect(recents).toMatchObject({
       isRecent: true,
       rows: [{ id: "active:recent-active" }],
@@ -230,14 +316,17 @@ describe("buildPaletteThreadSearchRows", () => {
         makeThread("unresolved", { projectId: "unknown-project" }),
       ],
     });
+
     expect(result.rows.map((row) => row.projectName)).toEqual([null, null]);
   });
   it("orders active recents by update time across projects without prioritizing pinned threads", () => {
     const older = makeThread("older", { updatedAt: NOW - 100, pinnedAt: NOW });
+
     const newest = makeThread("newest", {
       projectId: "project-2",
       updatedAt: NOW,
     });
+
     const tied = makeThread("tied", { updatedAt: NOW });
     expect(
       build({ query: "", recentThreads: [older, newest, tied] }).rows.map(
@@ -250,6 +339,7 @@ describe("buildPaletteThreadSearchRows", () => {
     const recentThreads = Array.from({ length: 21 }, (_, index) =>
       makeThread(String(index), { updatedAt: NOW + index }),
     );
+
     const rows = build({ query: "", recentThreads }).rows;
     expect(rows).toHaveLength(20);
     expect(rows[0]?.threadId).toBe("20");
@@ -270,6 +360,7 @@ describe("buildPaletteThreadSearchRows", () => {
         ],
         sort: "created",
       });
+
       expect(result.rows.map((row) => row.threadId)).toEqual(["new", "old"]);
       expect(result.rows[1]?.relativeTime).toBe(
         formatRelativeTime({ timestamp: NOW - 3_600_000, now: NOW }),
@@ -289,6 +380,7 @@ describe("buildPaletteThreadSearchRows", () => {
         ],
         sort: "updated",
       });
+
       expect(result.rows.map((row) => row.threadId)).toEqual([
         "updated-last",
         "archived-last",
@@ -300,10 +392,12 @@ describe("buildPaletteThreadSearchRows", () => {
         title: "Import pipeline",
         updatedAt: NOW,
       });
+
       const titleHit = makeThread("title-hit", {
         title: "Fix login",
         updatedAt: NOW - 1,
       });
+
       const searchResponse: ThreadSearchResponse = {
         active: {
           total: 2,
@@ -314,10 +408,9 @@ describe("buildPaletteThreadSearchRows", () => {
         },
         archived: { total: 0, results: [] },
       };
+
       expect(
-        build({ query: "fix", searchResponse }).rows.map(
-          (row) => row.threadId,
-        ),
+        build({ query: "fix", searchResponse }).rows.map((row) => row.threadId),
       ).toEqual(["title-hit", "message-only"]);
       expect(
         build({ query: "fix", searchResponse, sort: "updated" }).rows.map(
@@ -348,6 +441,7 @@ describe("buildPaletteThreadSearchRows", () => {
           titled("other", "Release notes"),
         ],
       });
+
       expect(result.isRecent).toBe(false);
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0]).toMatchObject({
@@ -371,6 +465,7 @@ describe("buildPaletteThreadSearchRows", () => {
           makeThread("elsewhere", { projectId: "project-2", title: "Nothing" }),
         ],
       });
+
       expect(result.rows.map((row) => row.threadId)).toEqual([
         "title-hit",
         "in-project",
@@ -387,6 +482,7 @@ describe("buildPaletteThreadSearchRows", () => {
         query: "proj",
         recentThreads: [titled("in-project", "Unrelated")],
       });
+
       expect(result.rows[0]?.projectHighlightRanges).toEqual([
         { start: 8, end: 12 },
       ]);
@@ -427,6 +523,7 @@ describe("buildPaletteThreadSearchRows", () => {
           ),
         ],
       });
+
       expect(result.rows).toHaveLength(50);
       expect(result.rows.slice(48).map((row) => row.threadId)).toEqual([
         "fixtures-3",
@@ -455,6 +552,7 @@ describe("buildPaletteThreadSearchRows", () => {
           titled("newer", "Fix newer", NOW + 10),
         ],
       });
+
       expect(result.rows.map((row) => row.threadId)).toEqual([
         "newer",
         "older",
@@ -476,7 +574,9 @@ describe("buildPaletteThreadSearchRows", () => {
       const local = Array.from({ length: 6 }, (_, index) =>
         titled(`local-${index}`, `Fix ${index}`, NOW - index),
       );
+
       const messageOnly = titled("message-only", "Weekly sync");
+
       const result = build({
         query: "fix",
         recentThreads: local,
@@ -511,6 +611,7 @@ describe("buildPaletteThreadSearchRows", () => {
           archived: { total: 0, results: [] },
         },
       });
+
       expect(result.rows.map((row) => row.threadId)).toEqual([
         "local-0",
         "local-1",
@@ -528,7 +629,7 @@ describe("buildPaletteThreadSearchRows", () => {
           text: "please fix 4",
           highlightRanges: [{ start: 7, end: 10 }],
         },
-        messageSeq: 12,
+        messageSeq: null,
       });
       expect(result.rows[6]).toMatchObject({
         primaryText: "Weekly sync",
@@ -536,11 +637,12 @@ describe("buildPaletteThreadSearchRows", () => {
       });
     });
 
-    it("leads a server result with its title when both the title and a message matched", () => {
+    it("opens a server result at its latest message when both the title and a message matched", () => {
       const thread = makeThread("archived-both", {
         title: "Fix the importer",
         archivedAt: NOW - 1,
       });
+
       const result = build({
         query: "fix",
         lifecycles: ["archived"],
@@ -570,11 +672,12 @@ describe("buildPaletteThreadSearchRows", () => {
           },
         },
       });
+
       expect(result.rows[0]).toMatchObject({
         primaryText: "Fix the importer",
         excerpt: { text: "the fix landed" },
         highlightRanges: [{ start: 0, end: 3 }],
-        messageSeq: 9,
+        messageSeq: null,
       });
     });
 
@@ -583,10 +686,12 @@ describe("buildPaletteThreadSearchRows", () => {
         title: "Weekly sync",
         archivedAt: NOW - 1,
       });
+
       const titleHit = makeThread("title-hit", {
         title: "Fix the importer",
         archivedAt: NOW - 2,
       });
+
       const result = build({
         query: "fix",
         lifecycles: ["archived"],
@@ -621,6 +726,7 @@ describe("buildPaletteThreadSearchRows", () => {
           },
         },
       });
+
       expect(result.rows.map((row) => row.threadId)).toEqual([
         "title-hit",
         "message-only",
@@ -639,10 +745,12 @@ describe("buildPaletteThreadSearchRows", () => {
           title: "Import pipeline",
           archivedAt: NOW - 1,
         });
+
         const titleHit = makeThread("title-hit", {
           title,
           archivedAt: NOW - 2,
         });
+
         const result = build({
           query,
           lifecycles: ["archived"],
@@ -657,6 +765,7 @@ describe("buildPaletteThreadSearchRows", () => {
             },
           },
         });
+
         expect(result.rows.map((row) => row.threadId)).toEqual([
           "title-hit",
           "message-only",
@@ -677,6 +786,7 @@ describe("buildPaletteThreadSearchRows", () => {
           archived: { total: 0, results: [] },
         },
       });
+
       expect(result.rows.map((row) => row.threadId)).toEqual(["a"]);
     });
   });

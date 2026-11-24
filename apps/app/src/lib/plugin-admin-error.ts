@@ -5,9 +5,11 @@ export function pluginAdminErrorMessage(error: unknown): string {
     typeof error.status === "number"
   ) {
     const prefix = `HTTP ${error.status}: `;
+
     return error.message.startsWith(prefix)
       ? error.message.slice(prefix.length)
       : error.message;
   }
+
   return error instanceof Error ? error.message : String(error);
 }

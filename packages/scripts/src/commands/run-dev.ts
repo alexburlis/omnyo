@@ -5,8 +5,7 @@ import {
   resolveCurrentDevInstanceConfig,
   toDevProcessEnv,
   type DevInstanceConfig,
-} from "@bb/config/runtime";
-import { migrateLegacyDevData } from "../lib/legacy-dev-data-migration.js";
+} from "@omnyo/config/runtime";
 import { runScriptProcess } from "../lib/process-helpers.js";
 import { repoRoot, runMainIfEntrypoint } from "../lib/script-entry.js";
 
@@ -24,7 +23,7 @@ export type DevLaunchMode = "vite" | "worktree";
 
 export type DevCloud = "local" | "staging";
 
-export const STAGING_CLOUD_URL = "https://vibecodethis.site";
+export const STAGING_CLOUD_URL = "https://stg.omnyo.link";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -35,9 +34,9 @@ function createDevTurboCommand(): DevCommand {
       "turbo",
       "run",
       "dev",
-      "--filter=@bb/app",
-      "--filter=@bb/server",
-      "--filter=@bb/host-daemon",
+      "--filter=@omnyo/app",
+      "--filter=@omnyo/server",
+      "--filter=@omnyo/host-daemon",
       "--ui",
       "tui",
       "--concurrency",
@@ -57,7 +56,7 @@ export function createStartWorktreeCommand(
       "--conditions=source",
       "--import",
       "tsx",
-      resolve(repoRoot, "scripts", "start-bb.mjs"),
+      resolve(repoRoot, "scripts", "start-omnyo.mjs"),
       "--worktree-runtime-policy",
       ...(dryRun ? ["--dryrun"] : []),
       ...(performanceDiagnostics ? ["--perf-diagnostics"] : []),
@@ -70,9 +69,11 @@ export function resolveDevLaunchMode(args: string[]): DevLaunchMode {
   if (args.length === 0) {
     return "vite";
   }
+
   if (args.length === 1 && args[0] === "--worktree") {
     return "worktree";
   }
+
   throw new Error(
     `[dev] Unknown arguments: ${args.join(" ")}. Expected no arguments, --staging, or --worktree.`,
   );
@@ -85,9 +86,11 @@ export function resolveDevCloud(args: {
   if (!args.staging) {
     return "local";
   }
+
   if (args.mode !== "vite") {
     throw new Error("[dev] --staging is supported by pnpm dev only.");
   }
+
   return "staging";
 }
 
@@ -101,16 +104,20 @@ export function toDevLaunchProcessEnv(args: {
     baseEnv: args.baseEnv,
     config: args.config,
   });
+
   if (args.cloud === "staging") {
-    env.BB_DEV_CONNECT_BASE_URL = STAGING_CLOUD_URL;
+    env.OMNYO_DEV_CONNECT_BASE_URL = STAGING_CLOUD_URL;
   }
+
   if (args.mode === "vite") {
     return env;
   }
 
-  delete env.BB_DEV_APP_PORT;
-  env.BB_TELEMETRY = "false";
+  delete env.OMNYO_DEV_APP_PORT;
+  env.OMNYO_SENTRY_DSN = "";
+  env.OMNYO_TELEMETRY = "false";
   env.NODE_ENV = "production";
+
   return env;
 }
 
@@ -120,10 +127,12 @@ function formatConfig(
   cloud: DevCloud,
 ): string {
   const prefix = mode === "worktree" ? "[start:worktree]" : "[dev]";
+
   const appUrl =
     mode === "worktree"
       ? config.serverUrl
       : `http://localhost:${config.ports.appPort}`;
+
   return [
     `${prefix} Instance ${config.instanceId}`,
     `${prefix} Data dir ${config.dataDir}`,
@@ -131,7 +140,7 @@ function formatConfig(
     `${prefix} Server ${config.serverUrl}`,
     `${prefix} Host daemon http://127.0.0.1:${config.ports.hostDaemonPort}`,
     ...(cloud === "staging"
-      ? [`${prefix} bb account and Connect use ${STAGING_CLOUD_URL}`]
+      ? [`${prefix} Omnyo account and Connect use ${STAGING_CLOUD_URL}`]
       : []),
   ].join("\n");
 }
@@ -139,6 +148,7 @@ function formatConfig(
 function checkPortAvailable(check: PortAvailabilityCheck): Promise<void> {
   return new Promise<void>((resolvePromise, rejectPromise) => {
     const server = createServer();
+
     const rejectWithPortError = (error: Error) => {
       rejectPromise(
         new Error(
@@ -146,14 +156,17 @@ function checkPortAvailable(check: PortAvailabilityCheck): Promise<void> {
         ),
       );
     };
+
     server.once("error", rejectWithPortError);
     server.listen(check.port, LOOPBACK_HOST, () => {
       server.removeListener("error", rejectWithPortError);
       server.close((error) => {
         if (error) {
           rejectPromise(error);
+
           return;
         }
+
         resolvePromise();
       });
     });
@@ -168,20 +181,24 @@ async function assertPortsAvailable(
     { label: "server", port: config.ports.serverPort },
     { label: "host-daemon", port: config.ports.hostDaemonPort },
   ];
+
   if (mode === "vite") {
     checks.unshift({ label: "app", port: config.ports.appPort });
   }
+
   await Promise.all(checks.map(checkPortAvailable));
 }
 
 async function resolveExistingRepoRoot(): Promise<string> {
   await access(repoRoot);
+
   return repoRoot;
 }
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dryrun");
+
   const mode = resolveDevLaunchMode(
     args.filter(
       (arg) =>
@@ -190,33 +207,29 @@ async function main(): Promise<void> {
         arg !== "--perf-diagnostics",
     ),
   );
+
   if (args.includes("--perf-diagnostics") && mode !== "worktree") {
     throw new Error(
       "--perf-diagnostics is supported by pnpm start and pnpm start:worktree.",
     );
   }
+
   const cloud = resolveDevCloud({ staging: args.includes("--staging"), mode });
+
   if (dryRun && mode !== "worktree") {
     throw new Error(
       "--dryrun is supported by pnpm start and pnpm start:worktree.",
     );
   }
+
   const resolvedRepoRoot = await resolveExistingRepoRoot();
   const config = resolveCurrentDevInstanceConfig(resolvedRepoRoot);
+
   if (!dryRun) {
-    const migration = await migrateLegacyDevData({
-      config,
-      output: process.stdout,
-    });
-    if (migration.skippedReason === "legacy-dev-process-running") {
-      throw new Error(
-        "[dev] Legacy ~/.bb-dev data was found, but an old dev server or host-daemon is still running. Stop the old dev process and rerun pnpm dev to migrate it.",
-      );
-    }
     await assertPortsAvailable(config, mode);
     await mkdir(config.dataDir, { recursive: true });
     await writeFile(
-      resolve(config.dataDir, "bb-dev-instance.json"),
+      resolve(config.dataDir, "dev-instance.json"),
       JSON.stringify({ repoRoot: config.repoRoot }),
       "utf8",
     );
@@ -227,6 +240,7 @@ async function main(): Promise<void> {
     mode === "worktree"
       ? createStartWorktreeCommand(dryRun, args.includes("--perf-diagnostics"))
       : createDevTurboCommand();
+
   process.exitCode = await runScriptProcess({
     args: command.args,
     command: command.command,

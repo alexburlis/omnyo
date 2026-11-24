@@ -8,12 +8,14 @@ import { measureDiskUsage, type DiskUsageOptions } from "./disk-usage.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
+
   return { ...actual, default: { ...actual } };
 });
 
 type MeasureTargets = DiskUsageInput["targets"];
 
 const tempDirs: string[] = [];
+
 const isPosix = process.platform !== "win32";
 
 const duOptions: DiskUsageOptions = {
@@ -22,6 +24,7 @@ const duOptions: DiskUsageOptions = {
   duBatchMaxEntries: 100,
   walkerConcurrency: 8,
 };
+
 const walkerOptions: DiskUsageOptions = {
   duCommand: null,
   duConcurrency: 4,
@@ -31,18 +34,22 @@ const walkerOptions: DiskUsageOptions = {
 
 async function makeTempDir(): Promise<string> {
   const dir = await fs.realpath(
-    await fs.mkdtemp(path.join(os.tmpdir(), "bb-disk-usage-test-")),
+    await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-disk-usage-test-")),
   );
+
   tempDirs.push(dir);
+
   return dir;
 }
 
 async function allocatedBytes(...entryPaths: string[]): Promise<number> {
   let total = 0;
+
   for (const entryPath of entryPaths) {
     const stats = await fs.lstat(entryPath);
     total += process.platform === "win32" ? stats.size : stats.blocks * 512;
   }
+
   return total;
 }
 
@@ -54,6 +61,7 @@ async function writeFile(filePath: string, sizeBytes: number): Promise<void> {
 async function writeFakeDu(dir: string, body: string): Promise<string> {
   const scriptPath = path.join(dir, "fake-du");
   await fs.writeFile(scriptPath, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+
   return scriptPath;
 }
 
@@ -69,6 +77,7 @@ function measure(
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -77,8 +86,10 @@ function isProcessAlive(pid: number): boolean {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
+
     if (dir) await fs.rm(dir, { recursive: true, force: true });
   }
 });
@@ -104,7 +115,7 @@ describe.each([
   },
   {
     strategy: "walker after du is not found",
-    options: { ...duOptions, duCommand: "/nonexistent/bb-test/du" },
+    options: { ...duOptions, duCommand: "/nonexistent/omnyo-test/du" },
     enabled: isPosix,
     hardLinksSpanChildren: true,
   },
@@ -115,11 +126,13 @@ describe.each([
       "reports large files in the same pass without mistaking large directories for files",
       async () => {
         const root = await makeTempDir();
+
         const big = [
           path.join(root, "thread-a", "dump.db"),
           path.join(root, "thread-b", "deep", "build.bin"),
           path.join(root, "stray.bin"),
         ];
+
         for (const file of big) await writeFile(file, 300_000);
         await writeFile(path.join(root, "thread-a", "notes.md"), 150_000);
         await writeFile(path.join(root, "thread-c", "notes.md"), 150_000);
@@ -149,7 +162,7 @@ describe.each([
     );
 
     it.runIf(enabled)(
-      "sums nested directories and breaks a target down per child, including top-level files",
+      "sums nested directories and breaks a target down per child, including top-level files and empty folders",
       async () => {
         const root = await makeTempDir();
         const storage = path.join(root, "thread-storage");
@@ -160,6 +173,7 @@ describe.each([
         );
         await writeFile(path.join(storage, "thread-b", "image.png"), 20_000);
         await writeFile(path.join(storage, "stray.txt"), 3_000);
+        await fs.mkdir(path.join(storage, "thread-c"));
 
         const threadA = await allocatedBytes(
           path.join(storage, "thread-a"),
@@ -168,10 +182,13 @@ describe.each([
           path.join(storage, "thread-a", "deep", "nested"),
           path.join(storage, "thread-a", "deep", "nested", "log.txt"),
         );
+
         const threadB = await allocatedBytes(
           path.join(storage, "thread-b"),
           path.join(storage, "thread-b", "image.png"),
         );
+
+        const threadC = await allocatedBytes(path.join(storage, "thread-c"));
         const stray = await allocatedBytes(path.join(storage, "stray.txt"));
         const own = await allocatedBytes(storage);
 
@@ -190,11 +207,12 @@ describe.each([
             {
               outcome: "measured",
               path: storage,
-              sizeBytes: own + threadA + threadB + stray,
+              sizeBytes: own + threadA + threadB + threadC + stray,
               children: expect.arrayContaining([
-                { name: "thread-a", sizeBytes: threadA },
-                { name: "thread-b", sizeBytes: threadB },
-                { name: "stray.txt", sizeBytes: stray },
+                { name: "thread-a", sizeBytes: threadA, empty: false },
+                { name: "thread-b", sizeBytes: threadB, empty: false },
+                { name: "thread-c", sizeBytes: threadC, empty: true },
+                { name: "stray.txt", sizeBytes: stray, empty: false },
               ]),
             },
             {
@@ -205,7 +223,7 @@ describe.each([
             },
           ],
         });
-        expect(result.targets[0]).toMatchObject({ children: { length: 3 } });
+        expect(result.targets[0]).toMatchObject({ children: { length: 4 } });
       },
     );
 
@@ -265,25 +283,29 @@ describe.each([
         );
 
         const linkedDir = await allocatedBytes(path.join(target, "linked-dir"));
+
         const linkedFile = await allocatedBytes(
           path.join(target, "linked-file"),
         );
+
         const nested = await allocatedBytes(
           path.join(target, "nested"),
           path.join(target, "nested", "small.txt"),
           path.join(target, "nested", "linked-dir"),
         );
+
         const total =
           (await allocatedBytes(target)) + linkedDir + linkedFile + nested;
+
         expect(result.targets).toEqual([
           {
             outcome: "measured",
             path: target,
             sizeBytes: total,
             children: expect.arrayContaining([
-              { name: "linked-dir", sizeBytes: linkedDir },
-              { name: "linked-file", sizeBytes: linkedFile },
-              { name: "nested", sizeBytes: nested },
+              { name: "linked-dir", sizeBytes: linkedDir, empty: false },
+              { name: "linked-file", sizeBytes: linkedFile, empty: false },
+              { name: "nested", sizeBytes: nested, empty: false },
             ]),
           },
           {
@@ -308,6 +330,7 @@ describe.each([
           path.join(root, "b", "blob.bin"),
         );
         const blob = await allocatedBytes(path.join(root, "a", "blob.bin"));
+
         const expected =
           (await allocatedBytes(
             root,
@@ -335,18 +358,23 @@ describe.each([
 
     it.runIf(enabled)("measures wide trees completely", async () => {
       const root = await makeTempDir();
+
       const directoryBytes = await Promise.all(
         Array.from({ length: 20 }, async (_, dirIndex) => {
           const dir = path.join(root, `dir-${dirIndex}`);
           await fs.mkdir(dir);
+
           const files = Array.from({ length: 10 }, (_, fileIndex) =>
             path.join(dir, `file-${fileIndex}.txt`),
           );
+
           for (const file of files)
             await fs.writeFile(file, Buffer.alloc(1_000, 1));
+
           return allocatedBytes(dir, ...files);
         }),
       );
+
       const expected =
         (await allocatedBytes(root)) +
         directoryBytes.reduce((sum, bytes) => sum + bytes, 0);
@@ -371,33 +399,41 @@ describe.each([
 describe("measureDiskUsage", () => {
   it("shares the filesystem budget across targets and simultaneous requests", async () => {
     const root = await makeTempDir();
+
     for (let index = 0; index < 24; index++) {
       await writeFile(path.join(root, `child-${index}`, "file.txt"), 1000);
     }
+
     const originalLstat = fs.lstat;
     const originalReaddir = fs.readdir;
     let active = 0;
     let peak = 0;
+
     async function trackOperation<T>(run: () => Promise<T>): Promise<T> {
       active++;
       peak = Math.max(peak, active);
+
       try {
         await new Promise<void>((resolve) => setTimeout(resolve, 2));
+
         return await run();
       } finally {
         active--;
       }
     }
+
     const stat = vi
       .spyOn(fs, "lstat")
       .mockImplementation((...args) =>
         trackOperation(() => originalLstat(...args)),
       );
+
     const readdir = vi
       .spyOn(fs, "readdir")
       .mockImplementation((...args) =>
         trackOperation(() => originalReaddir(...args)),
       );
+
     await Promise.all(
       Array.from({ length: 3 }, () =>
         measure(
@@ -423,6 +459,7 @@ describe("measureDiskUsage", () => {
       const target = path.join(root, "target");
       await fs.mkdir(target);
       const log = path.join(root, "runs");
+
       const duCommand = await writeFakeDu(
         root,
         [
@@ -432,6 +469,7 @@ describe("measureDiskUsage", () => {
           'printf "1\\t%s\\n" "$4"',
         ].join("\n"),
       );
+
       await Promise.all(
         Array.from({ length: 3 }, () =>
           measure(
@@ -456,22 +494,27 @@ describe("measureDiskUsage", () => {
       const target = path.join(root, "target");
       await fs.mkdir(target);
       const marker = path.join(root, "started");
+
       const duCommand = await writeFakeDu(
         root,
         `echo started > '${marker}'\nsleep 0.3\nprintf '1\\t%s\\n' "$4"`,
       );
+
       const first = measure([{ path: target, perChild: false }], {
         ...duOptions,
         duCommand,
       });
+
       await expect
         .poll(() => fs.readFile(marker, "utf8").catch(() => ""))
         .toBe("started\n");
       const queuedMarker = path.join(root, "queued");
+
       const queuedDu = await writeFakeDu(
         await makeTempDir(),
         `echo unexpected > '${queuedMarker}'`,
       );
+
       await expect(
         measure(
           [{ path: target, perChild: false }],
@@ -481,10 +524,12 @@ describe("measureDiskUsage", () => {
       ).rejects.toMatchObject({ code: "disk_usage_timeout" });
       await first;
       expect(await fs.stat(queuedMarker).catch(() => null)).toBeNull();
+
       const next = await measure(
         [{ path: target, perChild: false }],
         duOptions,
       );
+
       expect(next.targets[0]?.outcome).toBe("measured");
     },
   );
@@ -506,6 +551,7 @@ describe("measureDiskUsage", () => {
       await writeFile(path.join(target, "a", "file.txt"), 2_000);
       await writeFile(path.join(target, "b", "file.txt"), 30_000);
       await writeFile(path.join(target, "top.txt"), 5_000);
+
       const duCommand = await writeFakeDu(
         root,
         [
@@ -533,6 +579,7 @@ describe("measureDiskUsage", () => {
         path.join(target, "b"),
         path.join(target, "b", "file.txt"),
       );
+
       const top = await allocatedBytes(path.join(target, "top.txt"));
       const own = await allocatedBytes(target);
       expect(result).toEqual({
@@ -543,9 +590,9 @@ describe("measureDiskUsage", () => {
             path: target,
             sizeBytes: own + 4 * 1024 + b + top,
             children: [
-              { name: "a", sizeBytes: 4 * 1024 },
-              { name: "b", sizeBytes: b },
-              { name: "top.txt", sizeBytes: top },
+              { name: "a", sizeBytes: 4 * 1024, empty: false },
+              { name: "b", sizeBytes: b, empty: false },
+              { name: "top.txt", sizeBytes: top, empty: false },
             ],
           },
           {
@@ -569,6 +616,7 @@ describe("measureDiskUsage", () => {
   it.runIf(isPosix)("fails when du exits abnormally", async () => {
     const root = await makeTempDir();
     await fs.mkdir(path.join(root, "child"));
+
     const duCommand = await writeFakeDu(
       root,
       "echo 'du: fts_open: Operation not permitted' >&2\nexit 2",
@@ -590,10 +638,13 @@ describe("measureDiskUsage", () => {
     async () => {
       const root = await makeTempDir();
       const target = path.join(root, "target");
+
       for (const name of ["one", "two", "three", "line\nbreak"]) {
         await writeFile(path.join(target, name, "file.txt"), 2_000);
       }
+
       const argsFile = path.join(root, "args");
+
       const duCommand = await writeFakeDu(
         root,
         [
@@ -614,24 +665,33 @@ describe("measureDiskUsage", () => {
         .split("\0\n")
         .filter((invocation) => invocation !== "")
         .map((invocation) => invocation.split("\0"));
+
       const operands = invocations.flatMap((args) => {
         expect(args.slice(0, 3)).toEqual(["-k", "-s", "--"]);
+
         return args.slice(3);
       });
+
       expect(invocations.map((args) => args.length - 3).sort()).toEqual([1, 2]);
       expect(operands.sort()).toEqual(
         ["one", "three", "two"].map((name) => path.join(target, name)),
       );
+
       const childSize = (name: string) =>
         allocatedBytes(
           path.join(target, name),
           path.join(target, name, "file.txt"),
         );
+
       expect(result.targets[0]).toMatchObject({
         outcome: "measured",
         children: expect.arrayContaining([
-          { name: "line\nbreak", sizeBytes: await childSize("line\nbreak") },
-          { name: "one", sizeBytes: await childSize("one") },
+          {
+            name: "line\nbreak",
+            sizeBytes: await childSize("line\nbreak"),
+            empty: false,
+          },
+          { name: "one", sizeBytes: await childSize("one"), empty: false },
         ]),
       });
     },
@@ -642,12 +702,15 @@ describe("measureDiskUsage", () => {
     async () => {
       const root = await makeTempDir();
       const target = path.join(root, "target");
+
       for (let index = 0; index < 6; index++) {
         await fs.mkdir(path.join(target, `child-${index}`), {
           recursive: true,
         });
       }
+
       const pidFile = path.join(root, "du.pid");
+
       const duCommand = await writeFakeDu(
         root,
         `echo $$ >> '${pidFile}'\nexec sleep 30`,
@@ -671,6 +734,7 @@ describe("measureDiskUsage", () => {
         .trim()
         .split("\n")
         .map(Number);
+
       expect(pids).toHaveLength(1);
       await expect
         .poll(() => pids.some(isProcessAlive), { timeout: 2_000 })

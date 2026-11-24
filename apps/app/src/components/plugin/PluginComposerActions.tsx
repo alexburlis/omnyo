@@ -4,14 +4,18 @@ import type {
   ComposerPlusMenuItem,
   ComposerView,
   PluginComposerApi,
-} from "@get-bb/plugin-sdk";
-import { Button } from "@bb/shared-ui/button";
-import { COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
-import { DropdownMenuItem } from "@bb/shared-ui/dropdown-menu";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
+} from "@omnyo/plugin-sdk";
+import { Button } from "@omnyo/shared-ui/button";
+import { DropdownMenuItem } from "@omnyo/shared-ui/dropdown-menu";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@omnyo/shared-ui/popover";
 import { appToast } from "@/components/ui/app-toast";
+import { COMPOSER_TOOL_BUTTON_CLASS } from "@/components/promptbox/composer-tool-button";
 import {
   recordPluginComposerActionUse,
   usePluginComposerActionUsage,
@@ -20,7 +24,10 @@ import type {
   ResolvedComposerAction,
   ResolvedComposerPlusMenuItem,
 } from "@/lib/plugin-slot-resolvers";
-import { useComposer, useComposerView } from "@/lib/plugin-sdk-hooks";
+import {
+  useComposerDerivedValue,
+  useComposerView,
+} from "@/lib/plugin-sdk-hooks";
 import { useResolvedComposerActions } from "./composer-slot-hooks";
 import { PluginIcon } from "./PluginIcon";
 import { PluginSlotMount } from "./PluginSlotMount";
@@ -57,9 +64,11 @@ export function ComposerActionsSlot({
 }) {
   const providedView = useOptionalPluginComposerStaticView();
   const composerView = view ?? providedView;
+
   const actions = useResolvedComposerActions(
     includePluginContributions ? (composerView?.scope.kind ?? null) : null,
   );
+
   const scopeKey =
     composerView === undefined
       ? null
@@ -83,14 +92,18 @@ const PluginComposerActionList = memo(function PluginComposerActionList({
   scopeKey: string;
 }) {
   const usageCounts = usePluginComposerActionUsage();
+
   const orderedGroups = useMemo(
     () => orderActionGroups(actions, usageCounts),
     [actions, usageCounts],
   );
+
   const [overflowOpen, setOverflowOpen] = useState(false);
+
   const [openPluginOrder, setOpenPluginOrder] = useState<
     readonly string[] | null
   >(null);
+
   const presentedGroups = useMemo(
     () =>
       overflowOpen && openPluginOrder !== null
@@ -98,10 +111,12 @@ const PluginComposerActionList = memo(function PluginComposerActionList({
         : orderedGroups,
     [openPluginOrder, orderedGroups, overflowOpen],
   );
+
   const inlineGroups = presentedGroups.slice(
     0,
     PLUGIN_COMPOSER_INLINE_PLUGIN_LIMIT,
   );
+
   const overflowGroups = presentedGroups.slice(
     PLUGIN_COMPOSER_INLINE_PLUGIN_LIMIT,
   );
@@ -133,8 +148,8 @@ const PluginComposerActionList = memo(function PluginComposerActionList({
               variant="ghost"
               aria-label="More plugin actions"
               className={cn(
-                COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS,
-                "shrink-0 data-[state=open]:bg-state-active data-[state=open]:text-foreground",
+                COMPOSER_TOOL_BUTTON_CLASS,
+                "data-[state=open]:bg-state-active data-[state=open]:text-foreground",
               )}
             >
               <Icon name="MoreHorizontal" className="size-4" />
@@ -190,7 +205,11 @@ function PluginComposerActionGroupMount({
         <div
           key={`${key}/${scopeKey}`}
           data-plugin-composer-action=""
-          className="flex h-9 max-h-9 min-w-0 max-w-full shrink-0 items-center overflow-hidden"
+          className={cn(
+            "flex h-8 max-h-8 min-w-0 max-w-full shrink-0 items-center overflow-hidden max-md:pointer-coarse:h-10 max-md:pointer-coarse:max-h-10",
+            placement === "inline" &&
+              "[&>[data-omnyo-plugin-root]>button]:rounded-md [&>[data-omnyo-plugin-root]>button]:border-transparent",
+          )}
         >
           <PluginSlotMount
             pluginId={pluginId}
@@ -213,19 +232,23 @@ function orderActionGroups(
   const groupsByPluginId = new Map<string, PluginComposerActionGroup>();
   actions.forEach((action, registrationIndex) => {
     const existing = groupsByPluginId.get(action.pluginId);
+
     if (existing) {
       groupsByPluginId.set(action.pluginId, {
         ...existing,
         actions: [...existing.actions, action],
       });
+
       return;
     }
+
     groupsByPluginId.set(action.pluginId, {
       pluginId: action.pluginId,
       actions: [action],
       registrationIndex,
     });
   });
+
   return [...groupsByPluginId.values()].sort(
     (left, right) =>
       (usageCounts[right.pluginId] ?? 0) - (usageCounts[left.pluginId] ?? 0) ||
@@ -240,6 +263,7 @@ function preserveOpenPluginOrder(
   const orderByPluginId = new Map(
     pluginOrder.map((pluginId, index) => [pluginId, index]),
   );
+
   return [...groups].sort(
     (left, right) =>
       (orderByPluginId.get(left.pluginId) ?? Number.MAX_SAFE_INTEGER) -
@@ -258,6 +282,7 @@ export function PluginComposerPlusMenuEntry({
   slotKind?: "composerPlusMenuItem" | "composerSendMenuItem";
 }) {
   const { key, pluginId, customizationId, item } = contribution;
+
   return (
     <PluginSlotMount
       key={key}
@@ -284,12 +309,13 @@ function PluginComposerPlusMenuEntryContent({
   item: ComposerPlusMenuItem;
   onSelected?(selection: PluginComposerPlusMenuSelection): void;
 }) {
-  const composer = useComposer();
-  const view = useComposerView();
-  const disabled =
+  const { composer, value: disabled } = useComposerDerivedValue((current) =>
     typeof item.disabled === "function"
-      ? item.disabled(composer)
-      : item.disabled;
+      ? item.disabled(current)
+      : item.disabled,
+  );
+
+  const view = useComposerView();
 
   const run = async () => {
     try {

@@ -9,8 +9,11 @@ export interface ComposerCommandScope {
 
 export function composerOwnsCommand(scope: ComposerCommandScope): boolean {
   if (!scope.isFocusedPane) return false;
+
   if (scope.caretInThisComposer) return true;
+
   if (scope.caretInOtherComposer) return false;
+
   return scope.isPrimaryComposer;
 }
 
@@ -25,6 +28,7 @@ export function resolveComposerCommandScope({
 }): ComposerCommandScope {
   const caretComposer =
     target instanceof Element ? target.closest(APP_COMPOSER_SELECTOR) : null;
+
   return {
     isFocusedPane,
     isPrimaryComposer:

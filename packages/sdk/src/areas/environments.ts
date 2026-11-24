@@ -3,14 +3,14 @@ import {
   environmentSchema,
   type Environment,
   type EnvironmentStatus,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   commitActionResponseSchema,
   pullRequestDraftActionResponseSchema,
   pullRequestMergeActionResponseSchema,
   pullRequestReadyActionResponseSchema,
   updateEnvironmentRequestSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type {
   CommitActionResponse,
   EnvironmentArchiveThreadsResponse,
@@ -34,7 +34,7 @@ import type {
   UpdateEnvironmentRequest,
   WorkspacePathListResponse,
   SystemEnvironmentProvider,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 export interface EnvironmentActionArgs {
@@ -43,6 +43,10 @@ export interface EnvironmentActionArgs {
 
 export interface EnvironmentGetArgs extends EnvironmentActionArgs {
   signal?: AbortSignal;
+}
+
+export interface EnvironmentCleanupArgs extends EnvironmentActionArgs {
+  hookStopped?: boolean;
 }
 
 type EnvironmentMergeBaseBranchUpdateValue = Exclude<
@@ -113,22 +117,37 @@ export interface EnvironmentPathsArgs extends EnvironmentPathsQuery {
 }
 
 export type EnvironmentArchiveThreadsResult = EnvironmentArchiveThreadsResponse;
+
 export type EnvironmentCommitResult = CommitActionResponse;
+
 export type EnvironmentDiffResult = EnvironmentDiffResponse;
+
 export type EnvironmentDiffBranchesResult = EnvironmentDiffBranchesResponse;
+
 export type EnvironmentDiffFileResult = EnvironmentDiffFileResponse;
+
 export type EnvironmentDiffFilesResult = EnvironmentDiffFilesResponse;
+
 export type EnvironmentDiffPatchResult = EnvironmentDiffPatchResponse;
+
 export type EnvironmentGetResult = Environment;
+
 export type EnvironmentMarkPullRequestDraftResult =
   PullRequestDraftActionResponse;
+
 export type EnvironmentMarkPullRequestReadyResult =
   PullRequestReadyActionResponse;
+
 export type EnvironmentMergePullRequestResult = PullRequestMergeActionResponse;
+
 export type EnvironmentPathsResult = WorkspacePathListResponse;
+
 export type EnvironmentPullRequestResult = EnvironmentPullRequestResponse;
+
 export type EnvironmentStatusResult = EnvironmentStatusResponse;
+
 export type EnvironmentUpdateResult = Environment;
+
 export interface EnvironmentListArgs {
   environmentProviderId?: string;
   hostId?: string;
@@ -140,22 +159,27 @@ export interface EnvironmentListArgs {
   signal?: AbortSignal;
   status?: EnvironmentStatus;
 }
+
 export type EnvironmentListResult = Environment[];
+
 export interface EnvironmentDeleteArgs {
   environmentId: string;
 }
+
 export type EnvironmentDeleteResult = { ok: true };
+
 export interface EnvironmentListProvidersArgs {
   projectId?: string;
   hostId?: string;
   signal?: AbortSignal;
 }
+
 export type EnvironmentListProvidersResult = SystemEnvironmentProvider[];
 
 const okResponseSchema = z.object({ ok: z.literal(true) });
 
 export interface EnvironmentsArea {
-  experimental_cleanup(args: EnvironmentActionArgs): Promise<{ ok: true }>;
+  experimental_cleanup(args: EnvironmentCleanupArgs): Promise<{ ok: true }>;
   archiveThreads(
     args: EnvironmentActionArgs,
   ): Promise<EnvironmentArchiveThreadsResult>;
@@ -194,12 +218,15 @@ function environmentUpdateJson(
   args: EnvironmentUpdateArgs,
 ): UpdateEnvironmentRequest {
   const request: UpdateEnvironmentRequest = {};
+
   if (args.mergeBaseBranch !== undefined) {
     request.mergeBaseBranch = args.mergeBaseBranch;
   }
+
   if (args.name !== undefined) {
     request.name = args.name;
   }
+
   return updateEnvironmentRequestSchema.parse(request);
 }
 
@@ -278,6 +305,7 @@ export function createEnvironmentsArea(
   args: CreateSdkAreaArgs,
 ): EnvironmentsArea {
   const { transport } = args;
+
   return {
     async archiveThreads(input) {
       return transport.readJson(
@@ -295,6 +323,7 @@ export function createEnvironmentsArea(
           },
         }),
       );
+
       return commitActionResponseSchema.parse(body);
     },
     async diff(input) {
@@ -398,12 +427,16 @@ export function createEnvironmentsArea(
           ...signalRequestArgs(input?.signal),
         ),
       );
+
       return response.providers;
     },
     async experimental_cleanup(input) {
       return transport.readJson(
         transport.api.v1.environments[":id"]["cleanup"].$post({
           param: { id: input.environmentId },
+          ...(input.hookStopped === true
+            ? { query: { hookStopped: "true" as const } }
+            : {}),
         }),
       );
     },
@@ -413,6 +446,7 @@ export function createEnvironmentsArea(
           param: { id: input.environmentId },
         }),
       );
+
       return okResponseSchema.parse(body);
     },
     async get(input) {
@@ -424,6 +458,7 @@ export function createEnvironmentsArea(
           ...signalRequestArgs(input.signal),
         ),
       );
+
       return environmentSchema.parse(body);
     },
     async pullRequest(input) {
@@ -443,6 +478,7 @@ export function createEnvironmentsArea(
           json: { action: "pull_request_draft" },
         }),
       );
+
       return pullRequestDraftActionResponseSchema.parse(body);
     },
     async markPullRequestReady(input) {
@@ -452,6 +488,7 @@ export function createEnvironmentsArea(
           json: { action: "pull_request_ready" },
         }),
       );
+
       return pullRequestReadyActionResponseSchema.parse(body);
     },
     async mergePullRequest(input) {
@@ -464,6 +501,7 @@ export function createEnvironmentsArea(
           },
         }),
       );
+
       return pullRequestMergeActionResponseSchema.parse(body);
     },
     async paths(input) {

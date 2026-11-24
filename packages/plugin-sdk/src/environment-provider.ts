@@ -1,21 +1,24 @@
-import type { Environment, Host, Project } from "@bb/domain";
-import type { ThreadResponse } from "@bb/server-contract";
+import type { Environment, Host, Project } from "@omnyo/domain";
+import type { ThreadResponse } from "@omnyo/server-contract";
 import type {
   JsonValue,
   PluginEnvironmentProviderRequirements,
   PluginEnvironmentValidateDecision,
   StandardSchemaV1,
   StandardSchemaV1InferOutput,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 
 export type PluginEnvironmentProviderInputsSchema =
   | StandardSchemaV1
   | undefined;
+
 type Fact<R, K extends PropertyKey, T> =
   R extends Record<K, true> ? T : T | null;
+
 type Checkout<R> = R extends { projectCheckout: true } | { gitCheckout: true }
   ? { path: string; experimental_ownsPath: boolean }
   : { path: string; experimental_ownsPath: boolean } | null;
+
 type InputsValue<S> = S extends StandardSchemaV1
   ? StandardSchemaV1InferOutput<S>
   : null;
@@ -88,7 +91,8 @@ export type PluginEnvironmentProviderCreateResult =
       status: "created";
       path: string;
       ownsPath: boolean;
-      mergeBaseBranch?: string;
+      /** Ref the workspace's changes are compared against. Null clears the value recorded on a reused environment; omit to keep it. */
+      mergeBaseBranch?: string | null;
       resource?: JsonValue;
     }
   | { status: "failed"; message: string };

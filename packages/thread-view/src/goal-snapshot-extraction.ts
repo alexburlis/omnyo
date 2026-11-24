@@ -1,8 +1,8 @@
 import {
   LEGACY_CODEX_GOAL_EXTENSION_KIND,
   threadTimelineGoalStatusSchema,
-} from "@bb/domain";
-import type { ThreadEvent, ThreadTimelineGoal } from "@bb/domain";
+} from "@omnyo/domain";
+import type { ThreadEvent, ThreadTimelineGoal } from "@omnyo/domain";
 import { z } from "zod";
 import type { ThreadEventWithMeta } from "./build-event-projection.js";
 import { getOrderedThreadEvents } from "./group-event-projection-turns.js";
@@ -39,13 +39,17 @@ function extractGoalSnapshotCandidate(
   ) {
     return null;
   }
+
   const payload = goalStatePayloadSchema.safeParse(event.payload);
+
   if (!payload.success) {
     return null;
   }
+
   if (payload.data === null) {
     return { kind: "cleared", seq: meta.seq };
   }
+
   return {
     kind: "updated",
     seq: meta.seq,
@@ -65,13 +69,18 @@ export function extractThreadTimelineGoal(
   events: readonly ThreadEventWithMeta[],
 ): ThreadTimelineGoal | null {
   let best: GoalSnapshotCandidate | null = null;
+
   for (const { event, meta } of getOrderedThreadEvents(events)) {
     const candidate = extractGoalSnapshotCandidate(event, meta);
+
     if (!candidate) continue;
+
     if (best === null || candidate.seq > best.seq) {
       best = candidate;
     }
   }
+
   if (best === null || best.kind === "cleared") return null;
+
   return best.goal;
 }

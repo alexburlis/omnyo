@@ -4,9 +4,12 @@ import { useSystemConfig } from "@/hooks/queries/system-queries";
 
 export function useSetupComplete(): boolean {
   const settings = useSystemConfig().data?.generalSettings;
+
   const onboarded =
     settings !== undefined && settings.onboardingCompletedAt !== null;
+
   const navigation = useSidebarNavigation({ enabled: onboarded }).data;
+
   return (
     onboarded &&
     navigation !== undefined &&

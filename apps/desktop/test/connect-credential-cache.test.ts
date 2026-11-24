@@ -8,7 +8,7 @@ import {
 const CREDENTIAL = {
   credential: "bbcm_desktop",
   handle: "laptop",
-  serverUrl: "https://laptop.getbb.app",
+  serverUrl: "https://laptop.example.test",
 };
 
 function createEncryption(
@@ -24,9 +24,11 @@ function createEncryption(
     },
     decryptString(encrypted) {
       const text = encrypted.toString();
+
       if (!text.startsWith("sealed:")) {
         throw new Error("cannot decrypt");
       }
+
       return text.slice("sealed:".length);
     },
   };
@@ -39,8 +41,9 @@ function createFs(seed: Buffer | null = null): ConnectCredentialCacheFs & {
     file: seed,
     async readFile() {
       if (this.file === null) {
-        throw new Error("ENOENT");
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       }
+
       return this.file;
     },
     async rm() {
@@ -55,6 +58,7 @@ function createFs(seed: Buffer | null = null): ConnectCredentialCacheFs & {
 describe("createConnectCredentialCache", () => {
   it("round-trips a credential through the keychain", async () => {
     const fs = createFs();
+
     const cache = createConnectCredentialCache({
       encryption: createEncryption(),
       fs,
@@ -79,6 +83,7 @@ describe("createConnectCredentialCache", () => {
       fs,
       userDataPath: "/data",
     });
+
     await cache.write(CREDENTIAL);
 
     expect(cache.canPersist()).toBe(false);
@@ -87,7 +92,7 @@ describe("createConnectCredentialCache", () => {
     await expect(cache.read()).resolves.toBeNull();
   });
 
-  it("drops bytes it cannot decrypt or parse", async () => {
+  it("preserves protected bytes it cannot decrypt or parse and exposes a recovery error", async () => {
     const undecryptable = createFs(Buffer.from("from-another-machine"));
     await expect(
       createConnectCredentialCache({
@@ -95,19 +100,80 @@ describe("createConnectCredentialCache", () => {
         fs: undecryptable,
         userDataPath: "/data",
       }).read(),
-    ).resolves.toBeNull();
-    expect(undecryptable.file).toBeNull();
+    ).rejects.toThrow("preserved");
+    expect(undecryptable.file).toEqual(Buffer.from("from-another-machine"));
 
     const wrongShape = createFs(
       Buffer.from(`sealed:${JSON.stringify({ handle: "laptop" })}`),
     );
+
     await expect(
       createConnectCredentialCache({
         encryption: createEncryption(),
         fs: wrongShape,
         userDataPath: "/data",
       }).read(),
-    ).resolves.toBeNull();
-    expect(wrongShape.file).toBeNull();
+    ).rejects.toThrow("preserved");
+    expect(wrongShape.file).toEqual(
+      Buffer.from(`sealed:${JSON.stringify({ handle: "laptop" })}`),
+    );
   });
+
+  it("does not hide a protected-store read failure as an absent sign-in", async () => {
+    const fs = createFs(Buffer.from("unchanged encrypted bytes"));
+    fs.readFile = async () => {
+      throw Object.assign(new Error("Access denied"), { code: "EACCES" });
+    };
+
+    const cache = createConnectCredentialCache({
+      encryption: createEncryption(),
+      fs,
+      userDataPath: "/data",
+    });
+
+    await expect(cache.read()).rejects.toThrow("Access denied");
+    expect(fs.file).toEqual(Buffer.from("unchanged encrypted bytes"));
+  });
+});
+
+it("migrates the encrypted saved relay credential once without changing its identity", async () => {
+  const legacy = {
+    ...CREDENTIAL,
+    serverUrl: "https://laptop.stg.slashnew.com",
+  };
+
+  const fs = createFs(Buffer.from(`sealed:${JSON.stringify(legacy)}`));
+  const encryption = createEncryption();
+  const encrypt = vi.spyOn(encryption, "encryptString");
+
+  const cache = createConnectCredentialCache({
+    encryption,
+    fs,
+    userDataPath: "/data",
+  });
+
+  const expected = { ...legacy, serverUrl: "https://laptop.stg.omnyo.link" };
+  await expect(cache.read()).resolves.toEqual(expected);
+  await expect(cache.read()).resolves.toEqual(expected);
+  expect(encrypt).toHaveBeenCalledTimes(1);
+});
+
+it("keeps the saved relay credential when migration persistence fails", async () => {
+  const original = Buffer.from(
+    `sealed:${JSON.stringify({ ...CREDENTIAL, serverUrl: "https://laptop.slashnew.com" })}`,
+  );
+
+  const fs = createFs(original);
+  fs.writeFile = async () => {
+    throw new Error("write failed");
+  };
+
+  const cache = createConnectCredentialCache({
+    encryption: createEncryption(),
+    fs,
+    userDataPath: "/data",
+  });
+
+  await expect(cache.read()).rejects.toThrow("write failed");
+  expect(fs.file).toEqual(original);
 });

@@ -1,10 +1,10 @@
-import { threadScope, turnScope } from "@bb/domain";
+import { threadScope, turnScope } from "@omnyo/domain";
 import type {
   ThreadEvent,
   ThreadEventBackgroundTaskItem,
   WorkflowProgressSnapshot,
-} from "@bb/domain";
-import type { TimelineRow, TimelineWorkflowWorkRow } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { TimelineRow, TimelineWorkflowWorkRow } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
   buildThreadTimelineFromEvents,
@@ -52,14 +52,17 @@ function buildTimelineRows(events: ThreadEventWithMeta[]): TimelineRow[] {
 
 function findWorkflowRows(rows: TimelineRow[]): TimelineWorkflowWorkRow[] {
   const found: TimelineWorkflowWorkRow[] = [];
+
   for (const row of rows) {
     if (row.kind === "work" && row.workKind === "workflow") {
       found.push(row);
     }
+
     if (row.kind === "turn" && row.children) {
       found.push(...findWorkflowRows(row.children));
     }
   }
+
   return found;
 }
 
@@ -317,6 +320,59 @@ describe("background task timeline projection", () => {
     expect(row.completedAt).not.toBeNull();
   });
 
+  it("moves a workflow's completion time through settle, reopen and the provider's close", () => {
+    const taskEvent = (
+      type:
+        | "item/started"
+        | "item/backgroundTask/progress"
+        | "item/backgroundTask/completed",
+      item: ThreadEventBackgroundTaskItem,
+      seq: number,
+    ) =>
+      withMeta(
+        {
+          type,
+          threadId: "thread-1",
+          providerThreadId: "provider-1",
+          scope: type === "item/started" ? turnScope("turn-1") : threadScope(),
+          item,
+        } as ThreadEvent,
+        seq,
+      );
+
+    const events = [
+      turnStarted("turn-1", 1),
+      taskEvent(
+        "item/started",
+        taskItem({ status: "pending", taskStatus: "running" }),
+        2,
+      ),
+      taskEvent(
+        "item/backgroundTask/completed",
+        taskItem({ status: "interrupted", taskStatus: "stopped" }),
+        3,
+      ),
+      taskEvent(
+        "item/backgroundTask/progress",
+        taskItem({ status: "pending", taskStatus: "running" }),
+        4,
+      ),
+      taskEvent(
+        "item/backgroundTask/completed",
+        taskItem({ status: "completed", taskStatus: "completed" }),
+        6,
+      ),
+    ];
+
+    const completedAtAfter = (count: number) =>
+      findWorkflowRows(buildTimelineRows(events.slice(0, count)))[0]
+        ?.completedAt;
+
+    expect(completedAtAfter(3)).toBe(3_000);
+    expect(completedAtAfter(4)).toBeNull();
+    expect(completedAtAfter(5)).toBe(6_000);
+  });
+
   it("keeps one row when completion arrives turns after the spawning turn", () => {
     const rows = buildTimelineRows([
       turnStarted("turn-1", 1),
@@ -393,6 +449,7 @@ describe("background task timeline projection", () => {
     const spawningTurnRow = rows.find(
       (row) => row.kind === "turn" && row.turnId === "turn-1",
     );
+
     expect(spawningTurnRow).toMatchObject({
       sourceSeqStart: 1,
       sourceSeqEnd: 3,

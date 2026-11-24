@@ -9,11 +9,16 @@ import { loadPluginBrandingAssets } from "../../../src/services/plugins/app-bund
 
 const BASE = "http://127.0.0.1:3334";
 
-const SERVER_SOURCE = `export default function plugin(bb: any) { bb.log.info("loaded"); }`;
+const SERVER_SOURCE = `export default function plugin(api: any) { api.log.info("loaded"); }`;
+
 const SVG_LOGO = `<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>`;
+
 const DARK_SVG_LOGO = `<svg xmlns="http://www.w3.org/2000/svg"><rect fill="#fff" width="4" height="4"/></svg>`;
+
 const PNG_STUB = Buffer.from("89504e470d0a1a0a", "hex");
+
 const WEBP_STUB = Buffer.from("52494646", "hex");
+
 const ILLUSTRATOR_LOGO = `<?xml version="1.0" encoding="utf-8"?>
 <!-- Generator: Adobe Illustrator 16.0.0, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
@@ -32,6 +37,7 @@ const ILLUSTRATOR_LOGO = `<?xml version="1.0" encoding="utf-8"?>
 </switch>
 </svg>
 `;
+
 const INKSCAPE_LOGO = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
 <svg xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:svg="http://www.w3.org/2000/svg" xmlns="http://www.w3.org/2000/svg" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="64" height="64" viewBox="0 0 64 64" version="1.1" id="svg8" inkscape:version="1.3 (0e150ed, 2023-07-21)" sodipodi:docname="logo.svg">
@@ -42,6 +48,7 @@ const INKSCAPE_LOGO = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
   </g>
 </svg>
 `;
+
 const UNTRUSTED_IMAGE_HEADERS = {
   "x-content-type-options": "nosniff",
   "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
@@ -70,7 +77,7 @@ async function writeLogoPluginFixture(
     JSON.stringify({
       name: options.name,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: options.pluginName ?? "Logo fixture",
         description: "Plugin branding fixture.",
         branding: {
@@ -95,6 +102,7 @@ async function writeLogoPluginFixture(
     }),
   );
   await writeFile(join(rootDir, "server.ts"), SERVER_SOURCE);
+
   for (const [relative, contents] of Object.entries(options.files ?? {})) {
     const path = join(rootDir, relative);
     await mkdir(join(path, ".."), { recursive: true });
@@ -115,9 +123,14 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
   });
 
   it("serves a path-shaped branding.icon as a hashed compact SVG asset", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-mark");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-mark",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-mark",
+      name: "omnyo-plugin-mark",
       brandingIcon: "./assets/icon.svg",
       files: { "assets/icon.svg": SVG_LOGO },
     });
@@ -140,9 +153,11 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
 
     const disabled = await harness.pluginService.setEnabled("mark", false);
     expect(disabled?.iconUrl).toBe(entry.iconUrl);
+
     const disabledIcon = await harness.app.request(
       `${BASE}${disabled?.iconUrl}`,
     );
+
     expect(disabledIcon.status).toBe(200);
   });
 
@@ -154,17 +169,18 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
       loadPluginBrandingAssets("mutable", {
         branding: { compactIconPath: iconPath, icons: new Map() },
       }),
-    ).rejects.toThrow(/bb\.branding\.icon must have an <svg> root element/);
+    ).rejects.toThrow(/omnyo\.branding\.icon must have an <svg> root element/);
   });
 
   it("installs a plugin whose logos are Illustrator and Inkscape exports, runs it, and serves both with the untrusted-image headers", async () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-logotool",
+      "omnyo-plugin-logotool",
     );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-logotool",
+      name: "omnyo-plugin-logotool",
       logoLight: "./logo.svg",
       logoDark: "./logo-dark.svg",
       files: { "logo.svg": ILLUSTRATOR_LOGO, "logo-dark.svg": INKSCAPE_LOGO },
@@ -187,15 +203,18 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-logoraw",
+      "omnyo-plugin-logoraw",
     );
+
     const scripted = `<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(2)</script><a href="javascript:alert(3)"><rect width="4" height="4"/></a></svg>`;
+
     const latin1 = Buffer.from(
       `<svg xmlns="http://www.w3.org/2000/svg"><title>Café</title><rect fill="#fff" width="4" height="4"/></svg>`,
       "latin1",
     );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-logoraw",
+      name: "omnyo-plugin-logoraw",
       logoLight: "./logo.svg",
       logoDark: "./logo-dark.svg",
       files: { "logo.svg": scripted, "logo-dark.svg": latin1 },
@@ -213,17 +232,24 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
     expect(Buffer.from(await dark.arrayBuffer()).equals(latin1)).toBe(true);
 
     await harness.pluginService.reload("logoraw");
+
     const reloaded = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "logoraw");
+
     expect(reloaded?.status, reloaded?.statusDetail ?? "").toBe("running");
     expect(reloaded?.logoUrl).toBe(entry.logoUrl);
   });
 
   it("serves an explicit light SVG hash-cached as image/svg+xml", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-logoa");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-logoa",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-logoa",
+      name: "omnyo-plugin-logoa",
       logoLight: "./logo.svg",
       files: { "logo.svg": SVG_LOGO, "logo.png": PNG_STUB },
     });
@@ -246,15 +272,21 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
     const noHash = await harness.app.request(
       `${BASE}/api/v1/plugins/logoa/assets/logo`,
     );
+
     expect(noHash.status).toBe(200);
     expect(noHash.headers.get("cache-control")).toBe("no-store");
     expectUntrustedImageHeaders(noHash);
   });
 
   it("serves an explicit PNG as image/png", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-logob");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-logob",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-logob",
+      name: "omnyo-plugin-logob",
       logoLight: "./logo.png",
       files: { "logo.png": PNG_STUB },
     });
@@ -265,10 +297,15 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
     expectUntrustedImageHeaders(logo);
   });
 
-  it("honors a relocated bb.branding.logo.light webp", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-logoc");
+  it("honors a relocated omnyo.branding.logo.light webp", async () => {
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-logoc",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-logoc",
+      name: "omnyo-plugin-logoc",
       logoLight: "./assets/mark.webp",
       files: {
         "logo.svg": SVG_LOGO,
@@ -283,37 +320,54 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
   });
 
   it("rejects a light logo that escapes the plugin directory", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-logod");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-logod",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-logod",
+      name: "omnyo-plugin-logod",
       logoLight: "../outside.svg",
     });
     await expect(
       harness.pluginService.installPath(rootDir),
     ).rejects.toThrowError(
-      /bb\.branding\.logo\.light escapes the plugin directory/,
+      /omnyo\.branding\.logo\.light escapes the plugin directory/,
     );
   });
 
   it("does not auto-detect an undeclared root logo", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-logof");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-logof",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-logof",
+      name: "omnyo-plugin-logof",
       files: { "logo.svg": SVG_LOGO },
     });
     const entry = await harness.pluginService.installPath(rootDir);
     expect(entry.status).toBe("running");
     expect(entry.logoUrl).toBeNull();
+
     const logo = await harness.app.request(
       `${BASE}/api/v1/plugins/logof/assets/logo`,
     );
+
     expect(logo.status).toBe(404);
   });
 
   it("keeps advertising and serving both logos when the plugin is disabled", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-logog");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-logog",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-logog",
+      name: "omnyo-plugin-logog",
       logoLight: "./logo.svg",
       logoDark: "./logo-dark.svg",
       files: { "logo.svg": SVG_LOGO, "logo-dark.svg": DARK_SVG_LOGO },
@@ -341,9 +395,14 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
   });
 
   it("keeps a disabled plugin's manifest name and icon in the inventory", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-ident");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-ident",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-ident",
+      name: "omnyo-plugin-ident",
       pluginName: "Identity Demo",
       brandingIcon: "Brain",
     });
@@ -360,9 +419,14 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
   });
 
   it("drops a removed plugin's identity (logo 404s after uninstall)", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-gone");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-gone",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-gone",
+      name: "omnyo-plugin-gone",
       logoLight: "./logo.svg",
       files: { "logo.svg": SVG_LOGO },
     });
@@ -376,9 +440,14 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
   });
 
   it("serves immutable snapshot bytes until reload refreshes the hash", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-logoh");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-logoh",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-logoh",
+      name: "omnyo-plugin-logoh",
       logoLight: "./logo.svg",
       files: { "logo.svg": SVG_LOGO },
     });
@@ -401,6 +470,7 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
     const reloaded = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "logoh");
+
     expect(reloaded?.logoUrl).not.toBeNull();
     expect(reloaded?.logoUrl).not.toBe(firstUrl);
 
@@ -413,9 +483,14 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
   });
 
   it("serves an explicit dark SVG as image/svg+xml", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-darka");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-darka",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-darka",
+      name: "omnyo-plugin-darka",
       logoLight: "./logo.svg",
       logoDark: "./logo-dark.svg",
       files: {
@@ -445,14 +520,20 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
     const noHash = await harness.app.request(
       `${BASE}/api/v1/plugins/darka/assets/logo-dark`,
     );
+
     expect(noHash.status).toBe(200);
     expect(noHash.headers.get("cache-control")).toBe("no-store");
   });
 
   it("rejects a dark logo with an unsupported extension", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-darke");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-darke",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-darke",
+      name: "omnyo-plugin-darke",
       logoLight: "./logo.svg",
       logoDark: "./logo-dark.gif",
       files: { "logo.svg": SVG_LOGO, "logo-dark.gif": PNG_STUB },
@@ -460,14 +541,19 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
     await expect(
       harness.pluginService.installPath(rootDir),
     ).rejects.toThrowError(
-      /bb\.branding\.logo\.dark must point at a \.svg, \.png, or \.webp file/,
+      /omnyo\.branding\.logo\.dark must point at a \.svg, \.png, or \.webp file/,
     );
   });
 
   it("reports logoDarkUrl null and 404s the dark asset when only a light logo ships", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-darkf");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-darkf",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-darkf",
+      name: "omnyo-plugin-darkf",
       logoLight: "./logo.svg",
       files: { "logo.svg": SVG_LOGO },
     });
@@ -475,16 +561,23 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
     expect(entry.status).toBe("running");
     expect(entry.logoUrl).not.toBeNull();
     expect(entry.logoDarkUrl).toBeNull();
+
     const dark = await harness.app.request(
       `${BASE}/api/v1/plugins/darkf/assets/logo-dark`,
     );
+
     expect(dark.status).toBe(404);
   });
 
   it("refreshes the dark logo hash on reload after the file changes", async () => {
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-darkg");
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-darkg",
+    );
+
     await writeLogoPluginFixture(rootDir, {
-      name: "bb-plugin-darkg",
+      name: "omnyo-plugin-darkg",
       logoLight: "./logo.svg",
       logoDark: "./logo-dark.svg",
       files: { "logo.svg": SVG_LOGO, "logo-dark.svg": DARK_SVG_LOGO },
@@ -501,6 +594,7 @@ describe("plugin branding assets (manifest, asset route, inventory)", () => {
     const reloaded = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "darkg");
+
     expect(reloaded?.logoDarkUrl).not.toBeNull();
     expect(reloaded?.logoDarkUrl).not.toBe(firstUrl);
     expect(reloaded?.logoUrl).toBe(firstLightUrl);

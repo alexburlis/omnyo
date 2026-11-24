@@ -46,10 +46,12 @@ describe.sequential("fake provider active crash recovery integration", () => {
           harness.hostId,
           HOST_OFFLINE_TIMEOUT_MS,
         );
+
         const disconnectedThread = await getThreadResponse(
           harness.api,
           thread.id,
         );
+
         if (disconnectedThread.status === "active") {
           expect(disconnectedThread.runtime.displayStatus).toBe("active");
         } else {

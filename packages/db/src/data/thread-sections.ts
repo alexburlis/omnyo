@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import type {
   DbConnection,
   DbQueryConnection,
@@ -45,6 +45,7 @@ export function normalizeThreadSectionName(
   name: string | null | undefined,
 ): string | null {
   const normalized = (name ?? "").trim();
+
   return normalized.length > 0 ? normalized : null;
 }
 
@@ -57,6 +58,7 @@ function notifyThreadSectionMutationProjects(
   projectIds: ReadonlySet<string>,
 ): void {
   notifyThreadSectionListChanged(notifier);
+
   for (const projectId of projectIds) {
     notifier.notifyProject(projectId, ["threads-changed"]);
   }
@@ -66,8 +68,10 @@ export function getThreadSectionById(
   db: DbQueryConnection,
   id: string,
 ): ThreadSectionRow | null {
-  return db.select().from(threadSections).where(eq(threadSections.id, id)).get()
-    ?? null;
+  return (
+    db.select().from(threadSections).where(eq(threadSections.id, id)).get() ??
+    null
+  );
 }
 
 function getThreadSectionByName(
@@ -75,9 +79,11 @@ function getThreadSectionByName(
   name: string,
 ): ThreadSectionRow | null {
   const normalized = normalizeThreadSectionName(name);
+
   if (!normalized) {
     return null;
   }
+
   return (
     db
       .select()
@@ -101,16 +107,19 @@ export function createThreadSection(
   input: CreateThreadSectionInput,
 ): CreateThreadSectionResult {
   const name = normalizeThreadSectionName(input.name);
+
   if (!name) {
     throw new Error("Thread section name cannot be empty");
   }
 
   const existing = getThreadSectionByName(db, name);
+
   if (existing) {
     return { status: "duplicate", section: existing };
   }
 
   const now = Date.now();
+
   const section = db
     .insert(threadSections)
     .values({
@@ -121,7 +130,9 @@ export function createThreadSection(
     })
     .returning()
     .get();
+
   notifyThreadSectionListChanged(notifier);
+
   return { status: "created", section };
 }
 
@@ -131,6 +142,7 @@ export function renameThreadSection(
   input: RenameThreadSectionInput,
 ): RenameThreadSectionResult {
   const name = normalizeThreadSectionName(input.name);
+
   if (!name) {
     return { status: "not_found" };
   }
@@ -138,6 +150,7 @@ export function renameThreadSection(
   return db.transaction(
     (tx) => {
       const existing = getThreadSectionById(tx, input.id);
+
       if (!existing) {
         return { status: "not_found" };
       }
@@ -154,6 +167,7 @@ export function renameThreadSection(
       }
 
       const duplicate = getThreadSectionByName(tx, name);
+
       if (duplicate && duplicate.id !== input.id) {
         return { status: "duplicate", section: duplicate };
       }
@@ -163,6 +177,7 @@ export function renameThreadSection(
         .where(eq(threadSections.id, input.id))
         .run();
       notifyThreadSectionListChanged(notifier);
+
       return {
         status: "renamed",
         result: {
@@ -184,6 +199,7 @@ export function deleteThreadSection(
   return db.transaction(
     (tx) => {
       const section = getThreadSectionById(tx, input.id);
+
       if (!section) {
         return null;
       }
@@ -203,6 +219,7 @@ export function deleteThreadSection(
         .set({ sectionId: null, updatedAt: now })
         .where(eq(threads.sectionId, input.id))
         .run();
+
       for (const thread of matchingThreads) {
         affectedProjects.add(thread.projectId);
         notifier.notifyThread(thread.id, ["title-changed"], {
@@ -212,6 +229,7 @@ export function deleteThreadSection(
 
       tx.delete(threadSections).where(eq(threadSections.id, input.id)).run();
       notifyThreadSectionMutationProjects(notifier, affectedProjects);
+
       return {
         id: section.id,
         name: section.name,

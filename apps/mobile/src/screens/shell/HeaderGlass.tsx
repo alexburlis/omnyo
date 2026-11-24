@@ -4,6 +4,7 @@ import { GlassSurface } from "@/ui";
 
 export function HeaderGlass() {
   const height = useHeaderHeight();
+
   return (
     <View style={[styles.clip, { height }]} pointerEvents="none">
       <GlassSurface style={styles.glass} />

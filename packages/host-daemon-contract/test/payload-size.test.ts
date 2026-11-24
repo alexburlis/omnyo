@@ -1,5 +1,5 @@
 import { gzipSync } from "node:zlib";
-import { turnScope, type ThreadEvent } from "@bb/domain";
+import { turnScope, type ThreadEvent } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   groupHostDaemonEvents,
@@ -14,6 +14,7 @@ interface PayloadSize {
 
 function payloadSize(value: unknown): PayloadSize {
   const json = JSON.stringify(value);
+
   return {
     gzipBytes: gzipSync(json).byteLength,
     jsonBytes: Buffer.byteLength(json),
@@ -58,14 +59,17 @@ describe("daemon-to-server event payload sizes", () => {
           event: event(index),
         }),
       );
+
       const legacyPayload = {
         sessionId: "session_payload_measurement_123456789",
         events,
       };
+
       const groupedPayload = {
         sessionId: "session_payload_measurement_123456789",
         eventGroups: groupHostDaemonEvents(events),
       };
+
       return {
         eventCount,
         legacyEnvelope: payloadSize(legacyPayload),

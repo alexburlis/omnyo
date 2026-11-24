@@ -12,7 +12,9 @@ function panel(pluginId: string, id: string) {
 }
 
 const github = panel("github", "pulls");
+
 const docs = panel("docs", "vault");
+
 const tasks = panel("tasks", "board");
 
 describe("seedSkillsNavigationPreference", () => {
@@ -65,6 +67,7 @@ describe("seedSkillsNavigationPreference", () => {
 describe("arrangePluginNavPanelPreferences", () => {
   it("shows every ordered panel by default", () => {
     const extra = panel("calendar", "agenda");
+
     const result = arrangePluginNavPanelPreferences({
       panels: [github, docs, tasks, extra],
       storedOrder: ["tasks/board", "github/pulls"],
@@ -169,26 +172,27 @@ describe("arrangePluginNavPanelPreferences", () => {
   });
 
   it("hides only the default-hidden keys before the user customizes", () => {
-    const newThread = panel("__bb__", "new-thread");
-    const searchThreads = panel("__bb__", "search-threads");
+    const newThread = panel("__core__", "new-thread");
+    const searchThreads = panel("__core__", "search-threads");
     const extra = panel("calendar", "agenda");
+
     const result = arrangePluginNavPanelPreferences({
       panels: [newThread, searchThreads, github, docs, tasks, extra],
       storedOrder: [
         "github/pulls",
-        "__bb__/new-thread",
+        "__core__/new-thread",
         "docs/vault",
-        "__bb__/search-threads",
+        "__core__/search-threads",
         "tasks/board",
         "calendar/agenda",
       ],
       storedVisibleKeys: null,
-      defaultHiddenKeys: ["__bb__/search-threads"],
+      defaultHiddenKeys: ["__core__/search-threads"],
     });
 
     expect(result.visibleKeys).toEqual([
       "github/pulls",
-      "__bb__/new-thread",
+      "__core__/new-thread",
       "docs/vault",
       "tasks/board",
       "calendar/agenda",
@@ -196,15 +200,16 @@ describe("arrangePluginNavPanelPreferences", () => {
   });
 
   it("keeps a stored visible list authoritative over the default-hidden keys", () => {
-    const searchThreads = panel("__bb__", "search-threads");
+    const searchThreads = panel("__core__", "search-threads");
+
     const result = arrangePluginNavPanelPreferences({
       panels: [searchThreads, github],
-      storedOrder: ["__bb__/search-threads", "github/pulls"],
-      storedVisibleKeys: ["__bb__/search-threads"],
-      defaultHiddenKeys: ["__bb__/search-threads"],
+      storedOrder: ["__core__/search-threads", "github/pulls"],
+      storedVisibleKeys: ["__core__/search-threads"],
+      defaultHiddenKeys: ["__core__/search-threads"],
     });
 
-    expect(result.visibleKeys).toEqual(["__bb__/search-threads"]);
+    expect(result.visibleKeys).toEqual(["__core__/search-threads"]);
   });
 });
 

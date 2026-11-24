@@ -1,7 +1,8 @@
 import {
   createFakePluginHost,
   makePluginAgentConfigurationContext,
-} from "@get-bb/plugin-sdk/testing";
+  makeQueueEntry,
+} from "@omnyo/plugin-sdk/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { getCall, getRunRequired, migrations } from "./data.js";
 import plugin from "./server.js";
@@ -12,9 +13,11 @@ async function eventually(
   timeoutMs = 3_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+
   while (true) {
     try {
       await assertion();
+
       return;
     } catch (error) {
       if (Date.now() >= deadline) throw error;
@@ -33,13 +36,29 @@ async function workflowStatus(
     threadId: "thread-test",
     projectId: "project-test",
   });
+
   if (result.exitCode !== 0 || result.stdout === undefined) {
     throw new Error(result.stderr ?? `Could not inspect workflow ${runId}`);
   }
+
   return JSON.parse(result.stdout) as Record<string, unknown>;
 }
 
 describe("workflows plugin", () => {
+  it("leaves worker retries to provider-retry instead of answering its consent RPC", async () => {
+    const { api, harness } = createFakePluginHost({ pluginId: "workflows" });
+
+    hosts.push(harness);
+    await plugin(api);
+    await expect(
+      harness.callRpc("provider-retry.v1.consent", {
+        threadId: "thread-1",
+        requestId: "failed-request",
+        reason: "Provider overloaded",
+        sendAt: Date.now(),
+      }),
+    ).rejects.toThrow();
+  });
   const hosts: Array<ReturnType<typeof createFakePluginHost>["harness"]> = [];
   afterEach(async () => {
     await Promise.all(hosts.map((host) => host.dispose()));
@@ -47,13 +66,14 @@ describe("workflows plugin", () => {
   });
 
   it("loads with defaults and needs-configuration when persisted settings are invalid", async () => {
-    const { bb, harness } = createFakePluginHost({
+    const { api, harness } = createFakePluginHost({
       pluginId: "workflows",
       agentSkillIds: ["workflows"],
       settings: { maxActiveRuns: 0 },
     });
+
     hosts.push(harness);
-    await expect(plugin(bb)).resolves.toBeUndefined();
+    await expect(plugin(api)).resolves.toBeUndefined();
     expect(harness.needsConfigurationMessages).toHaveLength(1);
     expect(harness.needsConfigurationMessages[0]).toContain(
       "defaults are active",
@@ -65,24 +85,26 @@ describe("workflows plugin", () => {
   });
 
   it("registers tool schemas without recursive $refs", async () => {
-    const { bb, harness } = createFakePluginHost({
+    const { api, harness } = createFakePluginHost({
       pluginId: "workflows",
       agentSkillIds: ["workflows"],
     });
+
     hosts.push(harness);
-    await plugin(bb);
+    await plugin(api);
 
     const tools = harness.registrations.agentTools;
     expect(tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(["bb_workflow_run", "bb_workflow_result"]),
+      expect.arrayContaining(["omnyo_workflow_run", "omnyo_workflow_result"]),
     );
+
     for (const tool of tools) {
       const schema = JSON.stringify(tool.inputSchema);
       expect(schema, `tool ${tool.name}`).not.toContain("$ref");
       expect(schema, `tool ${tool.name}`).not.toContain("$defs");
     }
 
-    const run = tools.find((tool) => tool.name === "bb_workflow_run");
+    const run = tools.find((tool) => tool.name === "omnyo_workflow_run");
     expect(
       run?.parse({ name: "demo", args: { nested: [1, { deep: null }] } }),
     ).toMatchObject({ ok: true });
@@ -92,7 +114,8 @@ describe("workflows plugin", () => {
     "runs a structured workflow asynchronously and notifies its origin",
     async () => {
       let childCount = 0;
-      const { bb, harness } = createFakePluginHost({
+
+      const { api, harness } = createFakePluginHost({
         pluginId: "workflows",
         agentSkillIds: ["workflows"],
         sdk: {
@@ -112,10 +135,29 @@ describe("workflows plugin", () => {
             }),
             spawn: async () => {
               childCount += 1;
+
               return { id: `child-${childCount}` } as never;
             },
             send: async () => ({ ok: true }),
             stop: async () => ({ ok: true }),
+          },
+          environments: {
+            get: async ({ environmentId }) =>
+              ({
+                id: environmentId,
+                projectId: "project-test",
+                hostId:
+                  environmentId === "environment-target"
+                    ? "host-target"
+                    : "host-1",
+                path:
+                  environmentId === "environment-target"
+                    ? "C:\\workspace"
+                    : "/workspace",
+                status: "ready",
+                lifecycle: { phase: "active" },
+                hostLifecycle: "active",
+              }) as never,
           },
           providers: {
             list: async () => [
@@ -156,8 +198,9 @@ describe("workflows plugin", () => {
           },
         },
       });
+
       hosts.push(harness);
-      await plugin(bb);
+      await plugin(api);
 
       const source = `export const meta = {
       name: "structured-test",
@@ -167,17 +210,22 @@ describe("workflows plugin", () => {
     };
     phase("Solve");
     return await agent("Find the answer", {
+      environmentId: "environment-target",
       title: "Solve the question",
       outputSchema: { type: "object", required: ["answer"], properties: { answer: { type: "number" } } },
     });`;
-      const startedText = await harness.callAgentTool("bb_workflow_run", {
+
+      const startedText = await harness.callAgentTool("omnyo_workflow_run", {
         source,
       });
+
       expect(typeof startedText).toBe("string");
+
       const started = JSON.parse(startedText as string) as {
         runId: string;
         previewDirective: string;
       };
+
       expect(started.previewDirective).toBe(
         `::workflow-preview{run="${started.runId}"}`,
       );
@@ -200,6 +248,9 @@ describe("workflows plugin", () => {
         harness.callRpc("workflowActiveRuns", { threadId: "other-thread" }),
       ).resolves.toEqual({ runs: [] });
       await expect(
+        harness.callRpc("workflowActiveThreadCounts", null),
+      ).resolves.toEqual({ counts: [{ threadId: "thread-test", count: 1 }] });
+      await expect(
         harness.callRpc("workflowRunView", {
           threadId: "thread-test",
           runId: started.runId,
@@ -218,9 +269,10 @@ describe("workflows plugin", () => {
         "sectionId",
       );
       expect(harness.sdk.callsTo("threads.spawn")[0]?.[0]).toMatchObject({
+        environment: { type: "reuse", environmentId: "environment-target" },
         visibility: "hidden",
         prompt: expect.stringContaining(
-          "Use bb_workflow_result to return your final response in the requested structured format. You MUST call this tool exactly once at the end of your response",
+          "Use omnyo_workflow_result to return your final response in the requested structured format. You MUST call this tool exactly once at the end of your response",
         ),
       });
       await expect(
@@ -238,7 +290,13 @@ describe("workflows plugin", () => {
               title: "Solve",
               detail: "Ask a structured worker.",
               calls: [
-                { label: "Solve the question", childThreadId: "child-1" },
+                {
+                  label: "Solve the question",
+                  childThreadId: "child-1",
+                  environmentId: "environment-target",
+                  hostId: "host-target",
+                  workspacePath: "C:\\workspace",
+                },
               ],
             },
           ],
@@ -254,8 +312,9 @@ describe("workflows plugin", () => {
           origin: { pluginId: "workflows" },
         }),
       );
+
       expect(workerConfig.tools.map((tool) => tool.name)).toEqual([
-        "bb_workflow_result",
+        "omnyo_workflow_result",
       ]);
       expect(workerConfig.tools[0]?.inputSchema).toEqual({
         type: "object",
@@ -273,8 +332,9 @@ describe("workflows plugin", () => {
       const authorConfig = await harness.resolveAgentConfiguration(
         makePluginAgentConfigurationContext(),
       );
+
       expect(authorConfig.tools.map((tool) => tool.name)).toEqual([
-        "bb_workflow_run",
+        "omnyo_workflow_run",
       ]);
       expect(authorConfig.skills).toEqual(["workflows"]);
       expect(authorConfig.instructions).toContain(
@@ -283,14 +343,14 @@ describe("workflows plugin", () => {
 
       await expect(
         harness.callAgentTool(
-          "bb_workflow_result",
+          "omnyo_workflow_result",
           { value: { wrong: true } },
           { threadId: "child-1", projectId: "project-test" },
         ),
       ).resolves.toMatchObject({ isError: true });
       await expect(
         harness.callAgentTool(
-          "bb_workflow_result",
+          "omnyo_workflow_result",
           { value: { answer: 42 } },
           { threadId: "child-1", projectId: "project-test" },
         ),
@@ -304,14 +364,14 @@ describe("workflows plugin", () => {
       ).toBe(true);
       await expect(
         harness.callAgentTool(
-          "bb_workflow_result",
+          "omnyo_workflow_result",
           { value: { answer: 42 } },
           { threadId: "child-1", projectId: "project-test" },
         ),
       ).resolves.toBe(JSON.stringify({ accepted: true }, null, 2));
       await expect(
         harness.callAgentTool(
-          "bb_workflow_result",
+          "omnyo_workflow_result",
           { value: { answer: 43 } },
           { threadId: "child-1", projectId: "project-test" },
         ),
@@ -338,7 +398,7 @@ describe("workflows plugin", () => {
           {
             type: "text",
             text: expect.stringContaining(
-              `[BB workflow finished · ${started.runId}]`,
+              `[Omnyo workflow finished · ${started.runId}]`,
             ),
             visibility: "agent-only",
           },
@@ -360,14 +420,18 @@ describe("workflows plugin", () => {
           projectId: "project-test",
         }),
       ).resolves.toMatchObject({ exitCode: 0 });
+
       const listResult = await harness.runCli(["list", "--limit", "1"], {
         threadId: "thread-test",
         projectId: "project-test",
       });
+
       expect(listResult).toMatchObject({ exitCode: 0 });
+
       const listed = JSON.parse(listResult.stdout!) as Array<
         Record<string, unknown>
       >;
+
       expect(listed).toHaveLength(1);
       expect(listed[0]).toMatchObject({
         id: started.runId,
@@ -376,20 +440,25 @@ describe("workflows plugin", () => {
       });
       expect(listed[0]).not.toHaveProperty("source");
       expect(listed[0]).not.toHaveProperty("resultJson");
+
       const historyResult = await harness.runCli(
         ["history", started.runId, "--cursor", "0", "--limit", "1"],
         { threadId: "thread-test", projectId: "project-test" },
       );
+
       expect(historyResult).toMatchObject({ exitCode: 0 });
+
       const records = historyResult
         .stdout!.trimEnd()
         .split("\n")
         .map((line) => JSON.parse(line)) as Array<Record<string, unknown>>;
+
       expect(records).toHaveLength(3);
       expect(records[0]).toMatchObject({
         type: "run",
         logVersion: 1,
         id: started.runId,
+        environmentId: "environment-1",
         result: { answer: 42 },
       });
       expect(records[1]).toMatchObject({
@@ -399,6 +468,10 @@ describe("workflows plugin", () => {
         label: "Solve the question",
         phase: "Solve",
         status: "succeeded",
+        requestedEnvironmentId: "environment-target",
+        resolvedEnvironmentId: "environment-target",
+        resolvedHostId: "host-target",
+        resolvedWorkspacePath: "C:\\workspace",
         result: { answer: 42 },
       });
       expect(records[2]).toMatchObject({
@@ -416,14 +489,16 @@ describe("workflows plugin", () => {
       const oversizedProvider = "🛰".repeat(500_000);
       const oversizedModel = "🚀".repeat(500_000);
       let deeplyNestedResult: unknown = Array.from({ length: 1_200 }, () => 0);
+
       for (let depth = 0; depth < 128; depth += 1) {
         deeplyNestedResult = [deeplyNestedResult];
       }
+
       const deeplyNestedResultJson = JSON.stringify(deeplyNestedResult);
       expect(Buffer.byteLength(deeplyNestedResultJson, "utf8")).toBeLessThan(
         8 * 1_024,
       );
-      bb.storage
+      api.storage
         .database()
         .prepare(
           `UPDATE workflow_runs SET phase = ?, origin_provider = ?,
@@ -436,14 +511,17 @@ describe("workflows plugin", () => {
           deeplyNestedResultJson,
           started.runId,
         );
+
       const boundedStatus = await harness.runCli(["status", started.runId], {
         threadId: "thread-test",
         projectId: "project-test",
       });
+
       expect(boundedStatus).toMatchObject({ exitCode: 0 });
       expect(Buffer.byteLength(boundedStatus.stdout!, "utf8")).toBeLessThan(
         24 * 1_024,
       );
+
       const boundedStatusValue = JSON.parse(boundedStatus.stdout!) as {
         originProvider: string;
         originProviderTruncated: boolean;
@@ -454,6 +532,7 @@ describe("workflows plugin", () => {
         resultAvailable: boolean;
         resultOmitted: boolean;
       };
+
       expect(boundedStatusValue).toMatchObject({
         phaseTruncated: true,
         originProviderTruncated: true,
@@ -475,22 +554,25 @@ describe("workflows plugin", () => {
         threadId: "thread-test",
         projectId: "project-test",
       });
+
       expect(boundedList).toMatchObject({ exitCode: 0 });
       expect(Buffer.byteLength(boundedList.stdout!, "utf8")).toBeLessThan(
         4 * 1_024,
       );
+
       const boundedListValue = JSON.parse(boundedList.stdout!) as Array<{
         id: string;
         phase: string;
         phaseTruncated: boolean;
       }>;
+
       expect(boundedListValue).toMatchObject([
         { id: started.runId, phaseTruncated: true },
       ]);
       expect(
         Buffer.byteLength(boundedListValue[0]!.phase, "utf8"),
       ).toBeLessThanOrEqual(128);
-      bb.storage
+      api.storage
         .database()
         .prepare(
           `UPDATE workflow_runs SET phase = NULL, origin_provider = 'codex',
@@ -498,22 +580,25 @@ describe("workflows plugin", () => {
         )
         .run(started.runId);
 
-      const failedText = await harness.callAgentTool("bb_workflow_run", {
+      const failedText = await harness.callAgentTool("omnyo_workflow_run", {
         source,
       });
+
       const failed = JSON.parse(failedText as string) as { runId: string };
       await eventually(() => {
         expect(harness.sdk.callsTo("threads.spawn")).toHaveLength(2);
       });
+
       for (let attempt = 0; attempt < 3; attempt += 1) {
         await expect(
           harness.callAgentTool(
-            "bb_workflow_result",
+            "omnyo_workflow_result",
             { value: { wrong: attempt } },
             { threadId: "child-2", projectId: "project-test" },
           ),
         ).resolves.toMatchObject({ isError: true });
       }
+
       await eventually(() => {
         expect(
           harness.sdk
@@ -531,18 +616,23 @@ describe("workflows plugin", () => {
         status: "failed",
       });
 
-      const sharedBudgetText = await harness.callAgentTool("bb_workflow_run", {
-        source,
-      });
+      const sharedBudgetText = await harness.callAgentTool(
+        "omnyo_workflow_run",
+        {
+          source,
+        },
+      );
+
       const sharedBudget = JSON.parse(sharedBudgetText as string) as {
         runId: string;
       };
+
       await eventually(() => {
         expect(harness.sdk.callsTo("threads.spawn")).toHaveLength(3);
       });
       await expect(
         harness.callAgentTool(
-          "bb_workflow_result",
+          "omnyo_workflow_result",
           { value: { wrong: "initial tool failure" } },
           { threadId: "child-3", projectId: "project-test" },
         ),
@@ -557,6 +647,7 @@ describe("workflows plugin", () => {
           .filter(
             ([args]) => (args as { threadId?: string }).threadId === "child-3",
           );
+
         expect(correctionCalls).toHaveLength(1);
         expect(correctionCalls[0]?.[0]).toMatchObject({
           threadId: "child-3",
@@ -582,13 +673,15 @@ describe("workflows plugin", () => {
         expect(row).toMatchObject({ status: "failed" });
       });
 
-      const idleOnlyText = await harness.callAgentTool("bb_workflow_run", {
+      const idleOnlyText = await harness.callAgentTool("omnyo_workflow_run", {
         source,
       });
+
       const idleOnly = JSON.parse(idleOnlyText as string) as { runId: string };
       await eventually(() => {
         expect(harness.sdk.callsTo("threads.spawn")).toHaveLength(4);
       });
+
       for (let failure = 1; failure <= 2; failure += 1) {
         await harness.emitThreadEvent("thread.idle", {
           thread: { id: "child-4" } as never,
@@ -605,6 +698,7 @@ describe("workflows plugin", () => {
           ).toHaveLength(failure);
         });
       }
+
       await harness.emitThreadEvent("thread.idle", {
         thread: { id: "child-4" } as never,
         lastAssistantText: null,
@@ -633,16 +727,18 @@ describe("workflows plugin", () => {
       outputSchema: { type: "null" },
     };
     return await agent("Return null", { outputSchema: { type: "null" } });`;
-      const nullRunText = await harness.callAgentTool("bb_workflow_run", {
+
+      const nullRunText = await harness.callAgentTool("omnyo_workflow_run", {
         source: nullSource,
       });
+
       const nullRun = JSON.parse(nullRunText as string) as { runId: string };
       await eventually(() => {
         expect(harness.sdk.callsTo("threads.spawn")).toHaveLength(5);
       });
       await expect(
         harness.callAgentTool(
-          "bb_workflow_result",
+          "omnyo_workflow_result",
           { value: null },
           { threadId: "child-5", projectId: "project-test" },
         ),
@@ -672,13 +768,17 @@ describe("workflows plugin", () => {
           { type: "number" },
         ]),
       );
+
       const oversizedSource = `export const meta = ${JSON.stringify({
         name: "oversized-schema",
         description: "Oversized schema test",
         outputSchema: { type: "object", properties: oversizedProperties },
       })}; return null;`;
+
       await expect(
-        harness.callAgentTool("bb_workflow_run", { source: oversizedSource }),
+        harness.callAgentTool("omnyo_workflow_run", {
+          source: oversizedSource,
+        }),
       ).resolves.toMatchObject({
         isError: true,
         content: [{ text: expect.stringContaining("node limit") }],
@@ -689,8 +789,9 @@ describe("workflows plugin", () => {
         description: "Oversized schema byte test",
         outputSchema: { type: "string", $comment: "x".repeat(65_536) },
       })}; return null;`;
+
       await expect(
-        harness.callAgentTool("bb_workflow_run", {
+        harness.callAgentTool("omnyo_workflow_run", {
           source: oversizedBytesSource,
         }),
       ).resolves.toMatchObject({
@@ -699,16 +800,19 @@ describe("workflows plugin", () => {
       });
 
       let deepSchema: object = { type: "null" };
+
       for (let depth = 0; depth < 40; depth += 1) {
         deepSchema = { allOf: [deepSchema] };
       }
+
       const deepSource = `export const meta = ${JSON.stringify({
         name: "deep-schema",
         description: "Deep schema test",
         outputSchema: deepSchema,
       })}; return null;`;
+
       await expect(
-        harness.callAgentTool("bb_workflow_run", { source: deepSource }),
+        harness.callAgentTool("omnyo_workflow_run", { source: deepSource }),
       ).resolves.toMatchObject({
         isError: true,
         content: [{ text: expect.stringContaining("maximum depth") }],
@@ -721,15 +825,20 @@ describe("workflows plugin", () => {
   );
 
   it("rejects cyclic and unsafe host values before persistence", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "workflows" });
+    const { api, harness } = createFakePluginHost({
+      pluginId: "workflows",
+    });
+
     hosts.push(harness);
-    const db = bb.storage.database();
-    bb.storage.migrate(db, migrations);
-    const service = createWorkflowService(bb, db);
+    const db = api.storage.database();
+    api.storage.migrate(db, migrations);
+    const service = createWorkflowService(api, db);
+
     const source = `export const meta = {
       name: "host-value-test",
       description: "Host value test",
     }; return null;`;
+
     const base = {
       projectId: "project-test",
       originThreadId: "thread-test",
@@ -781,14 +890,19 @@ describe("workflow resume cache integration", () => {
 
   function setup() {
     let childCount = 0;
+    const statuses = new Map<string, "active" | "error">();
+    const retryQueued = new Set<string>();
+
     const execution = {
       model: "model-a",
       reasoningLevel: "medium" as "medium" | "high",
       permissionMode: "accept-edits" as "accept-edits" | "auto",
     };
+
     let activeModels = [availableModel("model-a"), availableModel("model-b")];
     let selectedOnlyModels = [availableModel("retired-model")];
-    const { bb, harness } = createFakePluginHost({
+
+    const { api, harness } = createFakePluginHost({
       pluginId: "workflows",
       sdk: {
         threads: {
@@ -797,8 +911,27 @@ describe("workflow resume cache integration", () => {
               id: threadId,
               environmentId: "environment-1",
               providerId: "codex",
-              status: threadId === "origin" ? "idle" : "working",
+              status:
+                threadId === "origin"
+                  ? "idle"
+                  : (statuses.get(threadId) ?? "working"),
             }) as never,
+          queue: {
+            list: async (args) =>
+              args?.threadId !== undefined && retryQueued.has(args.threadId)
+                ? [
+                    makeQueueEntry({
+                      threadId: args.threadId,
+                      payload: {
+                        kind: "retry",
+                        retryOfTurnRequestId: "creq_failed",
+                        attempt: 2,
+                        reason: "Provider overloaded",
+                      },
+                    }),
+                  ]
+                : [],
+          },
           defaultExecutionOptions: async () => ({
             ...execution,
             serviceTier: "default",
@@ -806,10 +939,23 @@ describe("workflow resume cache integration", () => {
           }),
           spawn: async () => {
             childCount += 1;
+
             return { id: `cache-child-${childCount}` } as never;
           },
           send: async () => ({ ok: true }),
           stop: async () => ({ ok: true }),
+        },
+        environments: {
+          get: async ({ environmentId }) =>
+            ({
+              id: environmentId,
+              projectId: "project-test",
+              hostId: "host-1",
+              path: "/workspace",
+              status: "ready",
+              lifecycle: { phase: "active" },
+              hostLifecycle: "active",
+            }) as never,
         },
         providers: {
           list: async () => [
@@ -838,10 +984,14 @@ describe("workflow resume cache integration", () => {
         },
       },
     });
+
     hosts.push(harness);
-    const db = bb.storage.database();
-    bb.storage.migrate(db, migrations);
-    const service = createWorkflowService(bb, db);
+    const db = api.storage.database();
+    api.storage.migrate(db, migrations);
+
+    const service = createWorkflowService(api, db, undefined, {
+      failedWorkerCheckDelayMs: 20,
+    });
 
     async function start(source: string, resumedFromRunId: string | null) {
       return service.start({
@@ -859,7 +1009,7 @@ describe("workflow resume cache integration", () => {
     }
 
     return {
-      bb,
+      api,
       db,
       service,
       harness,
@@ -867,6 +1017,16 @@ describe("workflow resume cache integration", () => {
       start,
       finish,
       childCount: () => childCount,
+      failWorker(threadId: string, error: string, queued: boolean) {
+        statuses.set(threadId, "error");
+
+        if (queued) retryQueued.add(threadId);
+        service.onThreadFailed(threadId, error);
+      },
+      resumeWorker(threadId: string) {
+        statuses.set(threadId, "active");
+        retryQueued.delete(threadId);
+      },
       setCatalog(models: string[], selectedOnly: string[]) {
         activeModels = models.map(availableModel);
         selectedOnlyModels = selectedOnly.map(availableModel);
@@ -874,39 +1034,64 @@ describe("workflow resume cache integration", () => {
     };
   }
 
-  it("retries a transient provider failure before settling the call", async () => {
+  it("keeps a failed call on its worker while provider-retry has a retry queued", async () => {
     const test = setup();
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     const run = await test.start(
       workflowSource(`return await agent("retry-me");`),
       null,
     );
 
     await eventually(() => expect(test.childCount()).toBe(1));
-    test.service.onThreadFailed(
-      "cache-child-1",
-      "Provider command failed: Provider overload",
+    test.failWorker("cache-child-1", "Provider overloaded", true);
+    await eventually(() =>
+      expect(
+        test.harness.sdk.callsTo("threads.queue.list").length,
+      ).toBeGreaterThanOrEqual(2),
     );
-    await eventually(() => expect(test.childCount()).toBe(2));
     expect(getCall(test.db, run.id, 0)).toMatchObject({
       status: "running",
-      childThreadId: "cache-child-2",
-      providerRetryAttempts: 1,
+      childThreadId: "cache-child-1",
+      providerRetryAttempts: 0,
       error: null,
     });
 
-    await test.finish("cache-child-2", "recovered");
-    await eventually(() => {
+    test.resumeWorker("cache-child-1");
+    await test.finish("cache-child-1", "recovered");
+    await eventually(() =>
       expect(getRunRequired(test.db, run.id)).toMatchObject({
         status: "succeeded",
         resultJson: '"recovered"',
-      });
+      }),
+    );
+    expect(test.childCount()).toBe(1);
+
+    controller.abort();
+    await worker;
+  });
+
+  it("fails the call with the worker's error once no retry is queued", async () => {
+    const test = setup();
+    const controller = new AbortController();
+    const worker = test.service.runWorker(controller.signal);
+
+    const run = await test.start(
+      workflowSource(`return await agent("refused");`),
+      null,
+    );
+
+    await eventually(() => expect(test.childCount()).toBe(1));
+    test.failWorker("cache-child-1", "Policy refusal", false);
+    await eventually(() =>
       expect(getCall(test.db, run.id, 0)).toMatchObject({
-        status: "succeeded",
-        providerRetryAttempts: 1,
-      });
-    });
+        status: "failed",
+        providerRetryAttempts: 0,
+        error: "Policy refusal",
+      }),
+    );
+    expect(test.childCount()).toBe(1);
 
     controller.abort();
     await worker;
@@ -917,6 +1102,7 @@ describe("workflow resume cache integration", () => {
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
     const schema = `{ type: "object", required: ["answer"], properties: { answer: { type: "number" } } }`;
+
     const run = await test.start(
       workflowSource(
         `const a = await agent("structured", { outputSchema: ${schema} });
@@ -925,12 +1111,14 @@ describe("workflow resume cache integration", () => {
       ),
       null,
     );
+
     await eventually(() => expect(test.childCount()).toBe(1));
 
     const invalid = await test.service.submitStructuredResult(
       "cache-child-1",
       JSON.stringify({ answer: "not-a-number" }),
     );
+
     expect(invalid).toMatchObject({ ok: false, terminal: false });
     expect((invalid as { error: string }).error).toContain(
       "JSON-encoded string",
@@ -969,6 +1157,7 @@ describe("workflow resume cache integration", () => {
     const test = setup();
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     const base = await test.start(
       workflowSource(`
         const first = await agent("first");
@@ -976,6 +1165,7 @@ describe("workflow resume cache integration", () => {
         return [first, second];`),
       null,
     );
+
     await eventually(() => expect(test.childCount()).toBe(1));
     await test.finish("cache-child-1", "one");
     await eventually(() => expect(test.childCount()).toBe(2));
@@ -992,13 +1182,14 @@ describe("workflow resume cache integration", () => {
         return { postprocessed: [first, second] };`),
       base.id,
     );
+
     await eventually(() =>
       expect(getRunRequired(test.db, displayOnly.id).status).toBe("succeeded"),
     );
     expect(test.childCount()).toBe(2);
     expect(getCall(test.db, displayOnly.id, 0)).toMatchObject({
       optionsJson:
-        '{"selection":null,"outputSchema":null,"title":"Renamed first","phase":"Display A"}',
+        '{"environmentId":null,"selection":null,"outputSchema":null,"title":"Renamed first","phase":"Display A"}',
       replaySource: "resumed-run",
       replayedFromCallId: getCall(test.db, base.id, 0)?.id,
       resolvedProvider: "codex",
@@ -1015,6 +1206,7 @@ describe("workflow resume cache integration", () => {
         return [first, inserted, second];`),
       base.id,
     );
+
     await eventually(() => expect(test.childCount()).toBe(3));
     await test.finish("cache-child-3", "new");
     await eventually(() => expect(test.childCount()).toBe(4));
@@ -1033,6 +1225,7 @@ describe("workflow resume cache integration", () => {
         return [first, second];`),
       base.id,
     );
+
     await eventually(() => expect(test.childCount()).toBe(5));
     await test.finish("cache-child-5", "edited");
     await eventually(() => expect(test.childCount()).toBe(6));
@@ -1051,6 +1244,7 @@ describe("workflow resume cache integration", () => {
     const test = setup();
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     const source = workflowSource(`
       const prefix = await agent("prefix");
       const pair = await parallel([
@@ -1059,6 +1253,7 @@ describe("workflow resume cache integration", () => {
       ]);
       const after = await agent("after:" + pair.join(","));
       return [prefix, pair, after];`);
+
     const original = await test.start(source, null);
     await eventually(() => expect(test.childCount()).toBe(1));
     await test.finish("cache-child-1", "prefix-value");
@@ -1083,6 +1278,7 @@ describe("workflow resume cache integration", () => {
       }),
     );
     expect(test.childCount()).toBe(4);
+
     for (let index = 0; index < 4; index += 1) {
       expect(getCall(test.db, resumed.id, index)?.replaySource).toBe(
         "resumed-run",
@@ -1100,6 +1296,7 @@ describe("workflow resume cache integration", () => {
         return [inserted, prefix, pair];`),
       original.id,
     );
+
     await eventually(() => expect(test.childCount()).toBe(5));
     expect(getCall(test.db, inserted.id, 0)?.replaySource).toBeNull();
     await test.finish("cache-child-5", "inserted-live");
@@ -1123,6 +1320,7 @@ describe("workflow resume cache integration", () => {
     const test = setup();
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     const original = await test.start(
       workflowSource(`
         const prefix = await agent("prefix");
@@ -1131,6 +1329,7 @@ describe("workflow resume cache integration", () => {
         return [prefix, left, right];`),
       null,
     );
+
     await eventually(() => expect(test.childCount()).toBe(1));
     await test.finish("cache-child-1", "prefix-old");
     await eventually(() => expect(test.childCount()).toBe(2));
@@ -1153,6 +1352,7 @@ describe("workflow resume cache integration", () => {
         return [prefix, suffix];`),
       original.id,
     );
+
     await eventually(() =>
       expect(getRunRequired(test.db, resumed.id)).toMatchObject({
         status: "succeeded",
@@ -1160,6 +1360,7 @@ describe("workflow resume cache integration", () => {
       }),
     );
     expect(test.childCount()).toBe(3);
+
     for (let index = 0; index < 3; index += 1) {
       expect(getCall(test.db, resumed.id, index)?.replaySource).toBe(
         "resumed-run",
@@ -1174,6 +1375,7 @@ describe("workflow resume cache integration", () => {
     const test = setup();
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     const source = workflowSource(`
       const prefix = await agent("pipeline-prefix");
       const values = await pipeline(["zero", "one"],
@@ -1181,6 +1383,7 @@ describe("workflow resume cache integration", () => {
         (value, original, index) => agent("stage2:" + index + ":" + value + ":" + original),
       );
       return [prefix, values];`);
+
     const original = await test.start(source, null);
     await eventually(() => expect(test.childCount()).toBe(1));
     await test.finish("cache-child-1", "prefix");
@@ -1270,12 +1473,14 @@ describe("workflow resume cache integration", () => {
     const worker = test.service.runWorker(controller.signal);
     const firstSchema = `{ type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } }`;
     const reorderedSchema = `{ properties: { ok: { type: "boolean" } }, required: ["ok"], type: "object" }`;
+
     const original = await test.start(
       workflowSource(
         `return await agent("structured", { outputSchema: ${firstSchema} });`,
       ),
       null,
     );
+
     await eventually(() => expect(test.childCount()).toBe(1));
     await expect(
       test.service.submitStructuredResult("cache-child-1", { ok: true }),
@@ -1290,6 +1495,7 @@ describe("workflow resume cache integration", () => {
       ),
       original.id,
     );
+
     await eventually(() =>
       expect(getRunRequired(test.db, reordered.id).status).toBe("succeeded"),
     );
@@ -1298,12 +1504,14 @@ describe("workflow resume cache integration", () => {
     test.execution.model = "model-b";
     test.execution.reasoningLevel = "high";
     test.execution.permissionMode = "auto";
+
     const changedSelection = await test.start(
       workflowSource(
         `return await agent("structured", { outputSchema: ${reorderedSchema} });`,
       ),
       original.id,
     );
+
     await eventually(() => expect(test.childCount()).toBe(2));
     expect(getCall(test.db, changedSelection.id, 0)).toMatchObject({
       resolvedModel: "model-b",
@@ -1328,9 +1536,11 @@ describe("workflow resume cache integration", () => {
     const test = setup();
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     const nullSource = workflowSource(
       `return await agent("nullable", { outputSchema: { type: "null" } });`,
     );
+
     const nullRun = await test.start(nullSource, null);
     await eventually(() => expect(test.childCount()).toBe(1));
     await expect(
@@ -1352,7 +1562,7 @@ describe("workflow resume cache integration", () => {
     const failureSource = workflowSource(`return await agent("fails");`);
     const failed = await test.start(failureSource, null);
     await eventually(() => expect(test.childCount()).toBe(3));
-    test.service.onThreadFailed("cache-child-3", "expected failure");
+    test.failWorker("cache-child-3", "expected failure", false);
     await eventually(() =>
       expect(getRunRequired(test.db, failed.id).status).toBe("failed"),
     );
@@ -1371,6 +1581,7 @@ describe("workflow resume cache integration", () => {
       });`),
       null,
     );
+
     await eventually(() =>
       expect(getRunRequired(test.db, explicitRetired.id).status).toBe("failed"),
     );
@@ -1380,10 +1591,12 @@ describe("workflow resume cache integration", () => {
     expect(test.childCount()).toBe(4);
 
     test.execution.model = "retired-model";
+
     const inheritedRetired = await test.start(
       workflowSource(`return await agent("retired");`),
       null,
     );
+
     await eventually(() => expect(test.childCount()).toBe(5));
     await test.finish("cache-child-5", "preserved");
     await eventually(() =>
@@ -1401,10 +1614,12 @@ describe("workflow resume cache integration", () => {
 
   it("reuses only a matching successful same-run prefix after restart", async () => {
     const test = setup();
+
     const source = workflowSource(`
       const first = await agent("first");
       const second = await agent("second");
       return [first, second];`);
+
     const run = await test.start(source, null);
     const firstController = new AbortController();
     const firstWorker = test.service.runWorker(firstController.signal);
@@ -1414,7 +1629,7 @@ describe("workflow resume cache integration", () => {
     firstController.abort();
     await firstWorker;
 
-    const restarted = createWorkflowService(test.bb, test.db);
+    const restarted = createWorkflowService(test.api, test.db);
     const secondController = new AbortController();
     const secondWorker = restarted.runWorker(secondController.signal);
     await eventually(() => expect(test.childCount()).toBe(3));
@@ -1438,6 +1653,7 @@ describe("workflow resume cache integration", () => {
 
   it("replays only completed same-run calls after interrupting a concurrent suffix", async () => {
     const test = setup();
+
     const source = workflowSource(`
       const prefix = await agent("restart-prefix");
       const suffix = await parallel([
@@ -1445,6 +1661,7 @@ describe("workflow resume cache integration", () => {
         () => agent("restart-right"),
       ]);
       return [prefix, suffix];`);
+
     const run = await test.start(source, null);
     const firstController = new AbortController();
     const firstWorker = test.service.runWorker(firstController.signal);
@@ -1454,7 +1671,7 @@ describe("workflow resume cache integration", () => {
     firstController.abort();
     await firstWorker;
 
-    const restarted = createWorkflowService(test.bb, test.db);
+    const restarted = createWorkflowService(test.api, test.db);
     const secondController = new AbortController();
     const secondWorker = restarted.runWorker(secondController.signal);
     await eventually(() => expect(test.childCount()).toBe(5));

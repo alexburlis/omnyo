@@ -1,30 +1,41 @@
 import { z } from "zod";
-import { threadStatusSchema, type Thread } from "@bb/domain";
-import { getLatestThreadSequence, type DbConnection } from "@bb/db";
-import type { TimelinePaginationCursor } from "@bb/server-contract";
+import { threadStatusSchema, type Thread } from "@omnyo/domain";
+import {
+  getLatestThreadSequence,
+  getThreadHistoryEpoch,
+  type DbConnection,
+} from "@omnyo/db";
+import type { TimelinePaginationCursor } from "@omnyo/server-contract";
 import { ApiError } from "../../errors.js";
 import type { ThreadTimelinePageRequest } from "./timeline-pagination.js";
 
 const snapshotSchema = z.object({
-  version: z.literal(3),
+  version: z.literal(5),
   threadId: z.string(),
   maxSeq: z.number().int().nonnegative(),
   status: threadStatusSchema,
   surface: z.string(),
+  historyEpoch: z.string().regex(/^[a-f0-9]{32}$/u),
 });
+
 export const timelineContentCursorSchema = z.object({
   beforeSequence: z.number().int().positive(),
   beforeLeaf: z.number().int().positive(),
 });
+
 export type TimelineContentCursor = z.infer<typeof timelineContentCursorSchema>;
+
 const cursorSchema = z.object({
   snapshot: snapshotSchema,
   anchorSeq: z.number().int().nonnegative(),
   anchorId: z.string().min(1),
   content: timelineContentCursorSchema.optional(),
+  boundedWindow: z.boolean().optional(),
 });
+
 export type TimelineSnapshot = z.infer<typeof snapshotSchema>;
-const PREFIX = "timeline-v3:";
+
+const PREFIX = "timeline-v5:";
 
 function decodeTimelineCursor(anchorId: string): z.infer<typeof cursorSchema> {
   return cursorSchema.parse(
@@ -43,19 +54,23 @@ export function resolveTimelineSnapshot(
 ): TimelineSnapshot {
   if (page.kind === "latest") {
     const maxSeq = getLatestThreadSequence(db, { threadId: thread.id });
+
     return {
-      version: 3,
+      version: 5,
       threadId: thread.id,
       maxSeq: Math.min(requestedMaxSeq ?? maxSeq, maxSeq),
       status: thread.status,
       surface,
+      historyEpoch: getThreadHistoryEpoch(db, thread.id),
     };
   }
+
   try {
     if (!page.beforeCursor.anchorId.startsWith(PREFIX))
       throw new Error("Legacy cursor");
     const decoded = decodeTimelineCursor(page.beforeCursor.anchorId);
     const { snapshot } = decoded;
+
     if (
       decoded.anchorSeq !== page.beforeCursor.anchorSeq ||
       decoded.anchorSeq > snapshot.maxSeq ||
@@ -64,9 +79,15 @@ export function resolveTimelineSnapshot(
           decoded.content.beforeSequence <= decoded.anchorSeq))
     )
       throw new Error("Cursor sequence mismatch");
-    if (snapshot.threadId !== thread.id || snapshot.surface !== surface) {
+
+    if (
+      snapshot.threadId !== thread.id ||
+      snapshot.surface !== surface ||
+      snapshot.historyEpoch !== getThreadHistoryEpoch(db, thread.id)
+    ) {
       throw new Error("Stale snapshot");
     }
+
     return snapshot;
   } catch {
     throw new ApiError(
@@ -85,13 +106,24 @@ export function readTimelineContentCursor(
   page: ThreadTimelinePageRequest,
 ): TimelineContentCursor | undefined {
   if (page.kind === "latest") return undefined;
+
   return decodeTimelineCursor(page.beforeCursor.anchorId).content;
+}
+
+export function usesBoundedTimelineWindow(
+  page: ThreadTimelinePageRequest,
+): boolean {
+  return (
+    page.kind === "older" &&
+    decodeTimelineCursor(page.beforeCursor.anchorId).boundedWindow === true
+  );
 }
 
 export function bindTimelineCursor(
   cursor: TimelinePaginationCursor | null,
   snapshot: TimelineSnapshot,
   content?: TimelineContentCursor,
+  boundedWindow = false,
 ): TimelinePaginationCursor | null {
   return cursor === null
     ? null
@@ -105,6 +137,7 @@ export function bindTimelineCursor(
               anchorSeq: cursor.anchorSeq,
               anchorId: cursor.anchorId,
               content,
+              boundedWindow: boundedWindow || undefined,
             }),
           ).toString("base64url"),
       };

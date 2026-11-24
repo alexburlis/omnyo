@@ -14,6 +14,7 @@ const schema = getSchema(promptEditorExtensions({ getPlaceholder: () => "" }));
 
 function stateFromJson(docJson: unknown, selectionPosition: number) {
   const doc = Node.fromJSON(schema, docJson);
+
   return EditorState.create({
     schema,
     doc,

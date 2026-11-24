@@ -5,7 +5,7 @@ import {
   getQueuedThreadMessage,
   projectSources,
   threads,
-} from "@bb/db";
+} from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import { readJson } from "../helpers/json.js";
 import { textInput } from "../helpers/prompt-input.js";
@@ -25,10 +25,12 @@ describe("public authorization regressions", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-source-delete",
       });
+
       const { project: projectA } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/source-delete-a",
       });
+
       const { project: projectB, source: sourceB } = seedProjectWithSource(
         harness.deps,
         {
@@ -67,10 +69,12 @@ describe("public authorization regressions", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-source-update",
       });
+
       const { project: projectA } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/source-update-a",
       });
+
       const { source: sourceB } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/original",
@@ -104,10 +108,13 @@ describe("public authorization regressions", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-managed-check",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { host: sourceHost } = seedHostSession(harness.deps, {
         id: "host-managed-check-source",
       });
+
       const { project } = createProject(harness.db, harness.hub, {
         name: "Project Without Matching Host Source",
         source: {
@@ -163,25 +170,31 @@ describe("public authorization regressions", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-queued-message-delete",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const threadA = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       const threadB = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       seedQueuedMessage(harness.deps, {
         threadId: threadA.id,
         content: textInput("Queued message A"),
       });
+
       const queuedMessageB = seedQueuedMessage(harness.deps, {
         threadId: threadB.id,
         content: textInput("Queued message B"),

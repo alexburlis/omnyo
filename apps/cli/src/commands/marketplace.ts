@@ -1,13 +1,14 @@
 import { resolve } from "node:path";
 import { Command } from "commander";
-import type { PluginMarketplace } from "@bb/server-contract";
+import type { PluginMarketplace } from "@omnyo/server-contract";
 import { action } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { renderBorderlessTable } from "../table.js";
 import { outputJson, type JsonOutputOptions } from "./helpers.js";
 
 function normalizeSource(source: string): string {
   const trimmed = source.trim();
+
   return trimmed.startsWith("path:")
     ? `path:${resolve(trimmed.slice("path:".length))}`
     : trimmed;
@@ -16,20 +17,25 @@ function normalizeSource(source: string): string {
 function formatTimestamp(value: number | null): string {
   if (value === null) return "never";
   const date = new Date(value);
+
   return Number.isFinite(date.getTime()) ? date.toISOString() : String(value);
 }
 
 function printMarketplace(marketplace: PluginMarketplace): void {
   console.log(`${marketplace.name}  ${marketplace.displayName}`);
   console.log(`  source: ${marketplace.source}`);
+
   if (marketplace.subdirectory !== null) {
     console.log(`  subdirectory: ${marketplace.subdirectory}`);
   }
+
   if (marketplace.resolvedCommit !== null) {
     console.log(`  commit: ${marketplace.resolvedCommit}`);
   }
+
   console.log(`  entries: ${marketplace.entryCount}`);
   console.log(`  refreshed: ${formatTimestamp(marketplace.lastRefreshAt)}`);
+
   if (marketplace.lastError !== null) {
     console.log(`  last error: ${marketplace.lastError}`);
   }
@@ -41,7 +47,7 @@ export function registerMarketplaceCommands(
 ): void {
   const marketplace = program
     .command("marketplace")
-    .description("Manage the plugin marketplaces bb reads catalogs from");
+    .description("Manage the plugin marketplaces Omnyo reads catalogs from");
 
   marketplace
     .command("add <source>")
@@ -59,22 +65,25 @@ export function registerMarketplaceCommands(
           source: string,
           opts: JsonOutputOptions & { subdirectory?: string },
         ) => {
-          const added = await createCliBbSdk(getUrl()).plugins.marketplaces.add(
-            {
-              source: normalizeSource(source),
-              ...(opts.subdirectory === undefined
-                ? {}
-                : { subdirectory: opts.subdirectory }),
-            },
-          );
+          const added = await createCliOmnyoSdk(
+            getUrl(),
+          ).plugins.marketplaces.add({
+            source: normalizeSource(source),
+            ...(opts.subdirectory === undefined
+              ? {}
+              : { subdirectory: opts.subdirectory }),
+          });
+
           if (opts.json) {
             outputJson(opts, added);
+
             return;
           }
+
           console.log(`Added marketplace ${added.name}:`);
           printMarketplace(added);
           console.log(
-            `Adding a marketplace installs nothing. Install an entry with \`bb plugin install <id>@${added.name}\`.`,
+            `Adding a marketplace installs nothing. Install an entry with \`omnyo plugin install <id>@${added.name}\`.`,
           );
         },
       ),
@@ -82,19 +91,23 @@ export function registerMarketplaceCommands(
 
   marketplace
     .command("list")
-    .description("List the marketplaces bb reads catalogs from")
+    .description("List the marketplaces Omnyo reads catalogs from")
     .option("--json", "Output JSON")
     .action(
       action(async (opts: JsonOutputOptions) => {
         const marketplaces =
-          await createCliBbSdk(getUrl()).plugins.marketplaces.list();
+          await createCliOmnyoSdk(getUrl()).plugins.marketplaces.list();
+
         if (opts.json) {
           outputJson(opts, marketplaces);
+
           return;
         }
+
         const showSubdirectory = marketplaces.some(
           (entry) => entry.subdirectory !== null,
         );
+
         console.log(
           renderBorderlessTable(
             {
@@ -106,7 +119,7 @@ export function registerMarketplaceCommands(
                 "Refreshed",
               ],
               colWidths: [
-                24,
+                26,
                 showSubdirectory ? 42 : 58,
                 ...(showSubdirectory ? [16] : []),
                 9,
@@ -136,13 +149,16 @@ export function registerMarketplaceCommands(
     .option("--json", "Output JSON")
     .action(
       action(async (name: string | undefined, opts: JsonOutputOptions) => {
-        const results = await createCliBbSdk(
+        const results = await createCliOmnyoSdk(
           getUrl(),
         ).plugins.marketplaces.refresh(name === undefined ? {} : { name });
+
         if (opts.json) {
           outputJson(opts, results);
+
           return;
         }
+
         for (const result of results) {
           console.log(
             result.ok
@@ -150,6 +166,7 @@ export function registerMarketplaceCommands(
               : `${result.name}: refresh failed (${result.error ?? "unknown error"}); keeping the last catalog`,
           );
         }
+
         if (results.some((result) => !result.ok)) process.exit(1);
       }),
     );
@@ -157,19 +174,23 @@ export function registerMarketplaceCommands(
   marketplace
     .command("remove <name>")
     .description(
-      "Forget a marketplace. bb-official and bb-community cannot be removed. Installed plugins keep their direct sources",
+      "Forget a marketplace. omnyo-official cannot be removed. Installed plugins keep their direct sources",
     )
     .option("--json", "Output JSON")
     .action(
       action(async (name: string, opts: JsonOutputOptions) => {
-        const removed = await createCliBbSdk(
+        const removed = await createCliOmnyoSdk(
           getUrl(),
         ).plugins.marketplaces.remove({ name });
+
         if (opts.json) {
           outputJson(opts, removed);
+
           return;
         }
+
         console.log(`Removed marketplace ${name}.`);
+
         if (removed.convertedPluginIds.length === 0) return;
         console.log(
           `Kept as direct installs: ${removed.convertedPluginIds.join(", ")}`,

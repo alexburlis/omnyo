@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Icon } from "@bb/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import { WaveformVisualizer } from "./WaveformVisualizer";
 import { useAudioInputDevices } from "@/hooks/useAudioInputDevices";
 import { useMicrophoneSignal } from "@/hooks/useMicrophoneSignal";
@@ -18,8 +19,10 @@ export function MicrophonePreferences({
   onCaptureReady?: () => void;
 }) {
   const [preferred, setPreferred] = useAudioInputDevicePreference();
+
   const { devices, refresh, isSupported, hasDeviceAccess } =
     useAudioInputDevices();
+
   const [testStream, setTestStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,8 +36,10 @@ export function MicrophonePreferences({
       .then((stream) => {
         if (disposed) {
           stream.getTracks().forEach((track) => track.stop());
+
           return;
         }
+
         acquired = stream;
         setTestStream(stream);
         void refresh();
@@ -47,6 +52,7 @@ export function MicrophonePreferences({
             : "Can't open this mic. Choose another.",
         );
       });
+
     return () => {
       disposed = true;
       acquired?.getTracks().forEach((track) => track.stop());
@@ -61,6 +67,7 @@ export function MicrophonePreferences({
   const stream = open ? testStream : null;
   const { silent } = useMicrophoneSignal(stream, false);
   const activeLabel = stream?.getAudioTracks()[0]?.label;
+
   const preferredMissing =
     hasDeviceAccess &&
     preferred !== null &&
@@ -129,7 +136,8 @@ export function MicrophonePreferences({
               disabled={preferredMissing && device.deviceId === preferred}
               onClick={() => setPreferred(device.deviceId)}
               className={cn(
-                "flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors hover:bg-state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-50",
+                "flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm hover:bg-state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-50",
+                LIST_HOVER_TRANSITION,
                 preferred === device.deviceId && "bg-state-active",
               )}
             >

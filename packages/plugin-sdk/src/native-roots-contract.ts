@@ -30,7 +30,7 @@ import {
   providerResolvedNativeRootsSchema,
   type ProviderResolvedNativeRootInput,
   type ProviderResolvedNativeRoots,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { defineRpcContract } from "./rpc-contract.js";
 
 export const experimental_nativeRootsResolveInputSchema = z
@@ -40,24 +40,28 @@ export const experimental_nativeRootsResolveInputSchema = z
      * (the ACP plugin registers one per agent) from one host entry.
      */
     providerId: z.string().min(1),
-    /** The workspace, or null when bb lists without one (user roots only). */
+    /** The workspace, or null when Omnyo lists without one (user roots only). */
     cwd: z.string().min(1).nullable(),
   })
   .strict();
+
 export type ExperimentalNativeRootsResolveInput = z.infer<
   typeof experimental_nativeRootsResolveInputSchema
 >;
 
-type ResolvedRootSide = keyof ProviderResolvedNativeRoots;
+type ResolvedRootSide = "skills" | "commands";
 
 /** What a resolver returns: the normalized roots, defaults filled per side, each side cut to the cap. */
 export const experimental_nativeRootsResolveOutputSchema = z
   .object({
     skills: z.array(providerResolvedNativeRootInputSchema).optional(),
     commands: z.array(providerResolvedNativeRootInputSchema).optional(),
+    /** Exact config files or plugin directories used to resolve roots. Omission preserves legacy parent watching; [] declares no extra inputs. */
+    watchPaths: providerResolvedNativeRootsSchema.shape.watchPaths,
   })
   .strict()
   .transform((value) => ({
+    ...(value.watchPaths === undefined ? {} : { watchPaths: value.watchPaths }),
     skills: (value.skills ?? [])
       .slice(0, PROVIDER_RESOLVED_NATIVE_ROOTS_MAX)
       .map((root) => normalizeProviderResolvedNativeRoot(root, "skills")),
@@ -66,7 +70,9 @@ export const experimental_nativeRootsResolveOutputSchema = z
       .map((root) => normalizeProviderResolvedNativeRoot(root, "commands")),
   }))
   .pipe(providerResolvedNativeRootsSchema);
+
 export type ExperimentalNativeRootsResolveOutput = ProviderResolvedNativeRoots;
+
 /** The input form a handler writes (options optional). */
 export type ExperimentalNativeRootsResolveAnswer = z.input<
   typeof experimental_nativeRootsResolveOutputSchema
@@ -84,7 +90,7 @@ export interface ExperimentalFilteredNativeRoots<
   Command extends ProviderResolvedNativeRootInput,
 > {
   /** The roots that passed, each side cut to the cap, in the order given. */
-  answer: { skills: Skill[]; commands: Command[] };
+  answer: { skills: Skill[]; commands: Command[]; watchPaths?: string[] };
   dropped: ExperimentalDroppedNativeRoot[];
   /** How many roots the cap cut from each side. */
   truncated: { skills: number; commands: number };
@@ -111,19 +117,23 @@ function filterResolvedRootSide<Root extends ProviderResolvedNativeRootInput>(
   // boundary applies them, so what passes here passes there.
   const rootSchema = providerResolvedNativeRootsSchema.shape[side].element;
   const kept: Root[] = [];
+
   for (const root of roots) {
     // The original object is what the answer carries, so the original must
     // pass: the strict input shape first (an unknown key such as `source`
     // would fail the contract's strict output schema and void the whole
     // answer), then the domain's per-root rules on the normalized form.
     const shape = providerResolvedNativeRootInputSchema.safeParse(root);
+
     const result = shape.success
       ? rootSchema.safeParse(normalizeProviderResolvedNativeRoot(root, side))
       : shape;
+
     if (result.success) {
       kept.push(root);
       continue;
     }
+
     const reason = describeIssues(result.error.issues);
     dropped.push({ side, path: root.path, reason });
     warnOnce(
@@ -133,9 +143,11 @@ function filterResolvedRootSide<Root extends ProviderResolvedNativeRootInput>(
       `resolveNativeRoots: dropped the ${side} root "${root.path}": ${reason}`,
     );
   }
+
   if (kept.length <= PROVIDER_RESOLVED_NATIVE_ROOTS_MAX) {
     return { kept, truncated: 0 };
   }
+
   const truncated = kept.length - PROVIDER_RESOLVED_NATIVE_ROOTS_MAX;
   warnOnce(
     warned,
@@ -143,6 +155,7 @@ function filterResolvedRootSide<Root extends ProviderResolvedNativeRootInput>(
     `${side}\u0000truncated\u0000${kept.length}`,
     `resolveNativeRoots: kept the first ${PROVIDER_RESOLVED_NATIVE_ROOTS_MAX} of ${kept.length} ${side} roots; dropped ${truncated} from "${kept[PROVIDER_RESOLVED_NATIVE_ROOTS_MAX]?.path}" on`,
   );
+
   return { kept: kept.slice(0, PROVIDER_RESOLVED_NATIVE_ROOTS_MAX), truncated };
 }
 
@@ -183,6 +196,7 @@ export function experimental_filterResolvedNativeRoots<
   answer: {
     readonly skills?: readonly Skill[];
     readonly commands?: readonly Command[];
+    readonly watchPaths?: readonly string[];
   },
   options: {
     warn: (message: string) => void;
@@ -192,6 +206,7 @@ export function experimental_filterResolvedNativeRoots<
 ): ExperimentalFilteredNativeRoots<Skill, Command> {
   const dropped: ExperimentalDroppedNativeRoot[] = [];
   const warned = options.warned ?? warnedForWorker;
+
   const skills = filterResolvedRootSide(
     "skills",
     answer.skills ?? [],
@@ -199,6 +214,7 @@ export function experimental_filterResolvedNativeRoots<
     options.warn,
     warned,
   );
+
   const commands = filterResolvedRootSide(
     "commands",
     answer.commands ?? [],
@@ -206,8 +222,15 @@ export function experimental_filterResolvedNativeRoots<
     options.warn,
     warned,
   );
+
   return {
-    answer: { skills: skills.kept, commands: commands.kept },
+    answer: {
+      skills: skills.kept,
+      commands: commands.kept,
+      ...(answer.watchPaths === undefined
+        ? {}
+        : { watchPaths: [...answer.watchPaths] }),
+    },
     dropped,
     truncated: { skills: skills.truncated, commands: commands.truncated },
   };
@@ -219,5 +242,6 @@ export const experimental_nativeRootsHostContract = defineRpcContract({
     output: experimental_nativeRootsResolveOutputSchema,
   },
 });
+
 export type ExperimentalNativeRootsHostContract =
   typeof experimental_nativeRootsHostContract;

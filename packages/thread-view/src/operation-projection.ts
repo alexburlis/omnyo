@@ -104,6 +104,7 @@ type LifecycleEventProjectionMessage =
   | EventProjectionPermissionGrantLifecycleMessage
   | EventProjectionUserQuestionLifecycleMessage
   | EventProjectionPluginFormLifecycleMessage;
+
 type EventProjectionMessageScopeFields = ReturnType<
   | typeof eventProjectionMessageThreadScopeFields
   | typeof eventProjectionMessageTurnScopeFields
@@ -135,6 +136,7 @@ function mergeLifecycleStatus(
   if (isTerminalLifecycleStatus(existing)) {
     return existing;
   }
+
   return incoming;
 }
 
@@ -144,9 +146,11 @@ function mergeOperationDetail(
   const details = [args.existing, args.incoming].filter(
     (value): value is string => Boolean(value),
   );
+
   if (details.length === 0) {
     return undefined;
   }
+
   return [...new Set(details)].join("\n");
 }
 
@@ -155,14 +159,17 @@ function upsertKeyedLifecycleMessage<
 >(args: UpsertKeyedLifecycleMessageArgs<TMessage>): void {
   if (!args.key) {
     args.state.messages.push(args.incoming);
+
     return;
   }
 
   const scopedKey = lifecycleMessageKey(args.key, args.incoming);
   const existing = args.index.get(scopedKey);
+
   if (!existing) {
     args.index.set(scopedKey, args.incoming);
     args.state.messages.push(args.incoming);
+
     return;
   }
 
@@ -177,6 +184,7 @@ function lifecycleMessageKey(
   if (message.scope.kind === "thread") {
     return `thread:${key}`;
   }
+
   return `turn:${message.scope.turnId}:${key}`;
 }
 
@@ -190,9 +198,11 @@ function mergeProvisioningOperation(
     incoming.status ?? "pending",
   );
   existing.title = provisioningTitleForStatus(existing.status);
+
   if (wasPending && existing.status !== "pending") {
     existing.completedAt = incoming.completedAt ?? incoming.createdAt;
   }
+
   existing.provisioning = mergeProvisioningMetadata(
     existing.provisioning,
     incoming.provisioning,
@@ -225,6 +235,7 @@ function updateMessageBounds(
       `Cannot merge ${existing.kind} messages with different scopes`,
     );
   }
+
   existing.sourceSeqStart = Math.min(
     existing.sourceSeqStart,
     incoming.sourceSeqStart,
@@ -261,15 +272,19 @@ function mergeThreadOperationMessage(
     existing.status ?? "pending",
     incoming.status ?? "pending",
   );
+
   const shouldUseIncomingLifecycle = existing.status !== mergedStatus;
   existing.status = mergedStatus;
+
   if (shouldUseIncomingLifecycle) {
     existing.title = incoming.title;
     existing.threadOperation = incoming.threadOperation;
+
     if (mergedStatus !== "pending") {
       existing.completedAt = incoming.completedAt ?? incoming.createdAt;
     }
   }
+
   existing.detail = mergeOperationDetail({
     existing: existing.detail,
     incoming: incoming.detail,
@@ -321,9 +336,11 @@ function mergePluginFormLifecycleMessage(
 ): void {
   const wasTerminal = isTerminalLifecycleStatus(existing.status);
   existing.status = mergeLifecycleStatus(existing.status, incoming.status);
+
   if (wasTerminal) {
     return;
   }
+
   existing.lifecycle = incoming.lifecycle;
   existing.title = incoming.title;
   existing.statusReason = incoming.statusReason;
@@ -338,6 +355,7 @@ function mergeUserQuestionLifecycleMessage(
   const wasTerminal = isTerminalLifecycleStatus(existing.status);
   const mergedStatus = mergeLifecycleStatus(existing.status, incoming.status);
   existing.status = mergedStatus;
+
   if (wasTerminal) {
     return;
   }
@@ -355,9 +373,11 @@ function mergePermissionGrantLifecycleMessage(
   const wasTerminal = isTerminalLifecycleStatus(existing.status);
   const mergedStatus = mergeLifecycleStatus(existing.status, incoming.status);
   existing.status = mergedStatus;
+
   if (!wasTerminal) {
     existing.lifecycle = incoming.lifecycle;
   }
+
   existing.approvalTarget = incoming.approvalTarget;
 }
 
@@ -389,6 +409,10 @@ function fileEditPartialChanges(
   return "changes" in partial ? partial.changes : undefined;
 }
 
+function fileEditPartialStderr(partial: FileEditPartial): string | undefined {
+  return "stderr" in partial ? partial.stderr : undefined;
+}
+
 function fileEditPartialHasAppendedStdout(partial: FileEditPartial): boolean {
   return "appendStdout" in partial;
 }
@@ -410,17 +434,21 @@ export function flushPendingFileEditOutput(
     string,
     VisibleTextBuffer | null
   >();
+
   for (const [callId, fileEdits] of state.fileEditsByCallId.entries()) {
     for (const fileEdit of fileEdits) {
       const scopedCallKey = scopedFileEditCallKey(callId, fileEdit);
       let flushedBuffer = flushedBufferByScopedCallKey.get(scopedCallKey);
+
       if (flushedBuffer === undefined) {
         const buffer =
           state.fileEditStdoutBuffersByScopedCallKey.get(scopedCallKey);
+
         flushedBuffer =
           buffer && flushVisibleTextBuffer(buffer) ? buffer : null;
         flushedBufferByScopedCallKey.set(scopedCallKey, flushedBuffer);
       }
+
       if (flushedBuffer !== null) {
         fileEdit.stdout = getVisibleTextBufferText(flushedBuffer);
       }
@@ -470,6 +498,7 @@ function createFileEditMessage({
     callId,
     changes: change ? [{ ...change }] : [],
     stdout,
+    stderr: fileEditPartialStderr(partial),
     approvalStatus: fileEditPartialApprovalStatus(partial) ?? null,
     status: partial.status,
   };
@@ -492,6 +521,7 @@ function fileEditChangeMatchKeys(
   if (change.movePath && change.movePath !== change.path) {
     return [change.path, change.movePath];
   }
+
   return [change.path];
 }
 
@@ -503,6 +533,7 @@ function fileEditMessageKey(
   if (!change) {
     return `${callId}:${changeIndex}`;
   }
+
   return `${callId}:${fileEditChangeIdentity(change)}`;
 }
 
@@ -510,6 +541,7 @@ function fileEditScopeDiscriminator(
   scopeFields: EventProjectionMessageScopeFields,
 ): string {
   const scope = scopeFields.scope;
+
   return scope.kind === "turn" ? scope.turnId : "thread";
 }
 
@@ -538,6 +570,7 @@ function resolveScopedFileEditMessageKey(
   ) {
     return args.baseKey;
   }
+
   return `${fileEditScopeDiscriminator(args.scopeFields)}:${args.baseKey}`;
 }
 
@@ -546,10 +579,12 @@ function buildFileEditChangeEntries(
   changes: readonly EventProjectionFileEditChange[],
 ): FileEditChangeEntry[] {
   const seenIdentityCounts = new Map<string, number>();
+
   return changes.map((change) => {
     const identity = fileEditChangeIdentity(change);
     const seenCount = seenIdentityCounts.get(identity) ?? 0;
     seenIdentityCounts.set(identity, seenCount + 1);
+
     return {
       change,
       identity,
@@ -566,17 +601,21 @@ function groupFileEditRowsByChangeMatchKey(
   rows: readonly EventProjectionFileEditMessage[],
 ): Map<string, EventProjectionFileEditMessage[]> {
   const grouped = new Map<string, EventProjectionFileEditMessage[]>();
+
   for (const row of rows) {
     const change = row.changes[0];
+
     if (!change) {
       continue;
     }
+
     for (const matchKey of fileEditChangeMatchKeys(change)) {
       const rowsForIdentity = grouped.get(matchKey) ?? [];
       rowsForIdentity.push(row);
       grouped.set(matchKey, rowsForIdentity);
     }
   }
+
   return grouped;
 }
 
@@ -599,10 +638,12 @@ function takeFileEditRowForChangeEntry({
       matchKey,
       usedRowIds,
     );
+
     if (row) {
       return row;
     }
   }
+
   return undefined;
 }
 
@@ -612,13 +653,16 @@ function takeUnusedFileEditRowForMatchKey(
   usedRowIds: Set<string>,
 ): EventProjectionFileEditMessage | undefined {
   const rows = groupedRows.get(matchKey);
+
   if (!rows || rows.length === 0) {
     return undefined;
   }
 
   let row: EventProjectionFileEditMessage | undefined;
+
   while (!row && rows.length > 0) {
     const candidate = rows.shift();
+
     if (candidate && !usedRowIds.has(candidate.id)) {
       row = candidate;
     }
@@ -627,9 +671,11 @@ function takeUnusedFileEditRowForMatchKey(
   if (rows.length === 0) {
     groupedRows.delete(matchKey);
   }
+
   if (row) {
     usedRowIds.add(row.id);
   }
+
   return row;
 }
 
@@ -638,17 +684,42 @@ function replaceFileEditMessagesForCall(
   callId: string,
   nextRows: readonly EventProjectionFileEditMessage[],
 ): void {
+  const previousRows = state.fileEditsByCallId.get(callId);
+
+  if (!previousRows || previousRows.length === 0) {
+    state.messages.push(...nextRows);
+
+    return;
+  }
+
+  const firstPreviousRow = previousRows[0];
+
+  if (
+    firstPreviousRow &&
+    previousRows.length === nextRows.length &&
+    previousRows.every(
+      (row, index) =>
+        row === nextRows[index] &&
+        haveCompatibleEventProjectionMessageScope(row, firstPreviousRow),
+    )
+  ) {
+    return;
+  }
+
   const insertionIndex = state.messages.findIndex(
     (message) => message.kind === "file-edit" && message.callId === callId,
   );
+
   const messagesWithoutCallRows = state.messages.filter(
     (message) => message.kind !== "file-edit" || message.callId !== callId,
   );
+
   if (insertionIndex === -1) {
     messagesWithoutCallRows.push(...nextRows);
   } else {
     messagesWithoutCallRows.splice(insertionIndex, 0, ...nextRows);
   }
+
   state.messages = messagesWithoutCallRows;
 }
 
@@ -665,12 +736,14 @@ function updateFileEditMessage(
       `Cannot merge file-edit messages with different scopes for call ${partial.callId}`,
     );
   }
+
   existing.sourceSeqEnd = meta.seq;
   existing.createdAt = meta.createdAt;
 
   if (!existing.parentToolCallId && partial.parentToolCallId) {
     existing.parentToolCallId = partial.parentToolCallId;
   }
+
   if ("presentation" in partial && partial.presentation) {
     existing.presentation = partial.presentation;
   }
@@ -680,6 +753,7 @@ function updateFileEditMessage(
   }
 
   existing.stdout = stdout;
+  existing.stderr = fileEditPartialStderr(partial) ?? existing.stderr;
 
   existing.approvalStatus = applyApprovalStatusDelta(
     existing.approvalStatus,
@@ -711,9 +785,11 @@ export function upsertFileEdit(
   const scopeFields = turnId
     ? eventProjectionMessageTurnScopeFields(turnId)
     : eventProjectionMessageThreadScopeFields();
+
   const existingRows = state.fileEditsByCallId.get(partial.callId) ?? [];
   const compatibleRows: EventProjectionFileEditMessage[] = [];
   const foreignRows: EventProjectionFileEditMessage[] = [];
+
   for (const row of existingRows) {
     if (haveCompatibleEventProjectionMessageScope(row, scopeFields)) {
       compatibleRows.push(row);
@@ -721,14 +797,18 @@ export function upsertFileEdit(
       foreignRows.push(row);
     }
   }
+
   const foreignMessageIds = new Set(foreignRows.map((row) => row.id));
   const scopedCallKey = scopedFileEditCallKey(partial.callId, scopeFields);
+
   const stdoutBuffer =
     state.fileEditStdoutBuffersByScopedCallKey.get(scopedCallKey) ??
     createVisibleTextBuffer();
+
   state.fileEditStdoutBuffersByScopedCallKey.set(scopedCallKey, stdoutBuffer);
 
   const partialStdout = fileEditPartialStdout(partial);
+
   if (partialStdout) {
     if (fileEditPartialHasAppendedStdout(partial)) {
       appendVisibleTextBuffer(stdoutBuffer, partialStdout);
@@ -745,11 +825,14 @@ export function upsertFileEdit(
 
   const stdout = getVisibleTextBufferText(stdoutBuffer);
   const partialChanges = fileEditPartialChanges(partial);
+
   if (partialChanges && partialChanges.length > 0) {
     const existingRowsByMatchKey =
       groupFileEditRowsByChangeMatchKey(compatibleRows);
+
     const usedRowIds = new Set<string>();
     const nextRows: EventProjectionFileEditMessage[] = [];
+
     for (const [sourcePart, entry] of buildFileEditChangeEntries(
       partial.callId,
       partialChanges,
@@ -759,6 +842,7 @@ export function upsertFileEdit(
         groupedRows: existingRowsByMatchKey,
         usedRowIds,
       });
+
       if (existing) {
         updateFileEditMessage(
           existing,
@@ -795,6 +879,7 @@ export function upsertFileEdit(
     const allRows = [...foreignRows, ...nextRows];
     replaceFileEditMessagesForCall(state, partial.callId, allRows);
     state.fileEditsByCallId.set(partial.callId, allRows);
+
     return;
   }
 
@@ -803,6 +888,7 @@ export function upsertFileEdit(
 
   for (const [changeIndex, change] of changes.entries()) {
     const existing = compatibleRows[changeIndex];
+
     if (existing) {
       updateFileEditMessage(
         existing,
@@ -831,6 +917,7 @@ export function upsertFileEdit(
       stdout,
       threadId,
     });
+
     compatibleRows.push(message);
     state.messages.push(message);
   }
@@ -853,6 +940,7 @@ export function onCompactionBegin(
   }
 
   const existing = state.openCompactionsByKey.get(payload.key);
+
   if (existing) {
     existing.sourceSeqEnd = Math.max(existing.sourceSeqEnd, meta.seq);
     existing.createdAt = Math.max(existing.createdAt, meta.createdAt);
@@ -861,6 +949,7 @@ export function onCompactionBegin(
     existing.detail = payload.detail ?? existing.detail;
     existing.parentToolCallId =
       payload.parentToolCallId ?? existing.parentToolCallId;
+
     return;
   }
 
@@ -885,6 +974,7 @@ export function onCompactionBegin(
       : {}),
     status: "pending",
   };
+
   state.openCompactionsByKey.set(payload.key, message);
   state.messages.push(message);
 }
@@ -897,6 +987,7 @@ export function onCompactionEnd(
   payload: CompactionLifecycleEvent,
 ): void {
   const existing = state.openCompactionsByKey.get(payload.key);
+
   if (existing) {
     existing.sourceSeqEnd = Math.max(existing.sourceSeqEnd, meta.seq);
     existing.createdAt = Math.max(existing.createdAt, meta.createdAt);
@@ -908,6 +999,7 @@ export function onCompactionEnd(
       payload.parentToolCallId ?? existing.parentToolCallId;
     state.openCompactionsByKey.delete(payload.key);
     state.finalizedCompactionKeys.add(payload.key);
+
     return;
   }
 
@@ -964,6 +1056,7 @@ export function finalizeOpenCompactionsForTurn(
   if (!args.turnId) return false;
 
   let settledPending = false;
+
   for (const message of args.state.openCompactionsByKey.values()) {
     if (
       message.threadId !== args.threadId ||
@@ -976,8 +1069,10 @@ export function finalizeOpenCompactionsForTurn(
     if (message.status === "pending") {
       settledPending = true;
     }
+
     finalizeOpenCompaction(message, args.meta, args.status, args.detail);
   }
+
   return settledPending;
 }
 

@@ -4,8 +4,8 @@ import { useEffect } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultAppSettings, pluginCommandId } from "@bb/domain";
-import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@bb/client-core";
+import { defaultAppSettings, pluginCommandId } from "@omnyo/domain";
+import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@omnyo/client-core";
 import {
   AppCommandProvider,
   useAppCommandContext,
@@ -34,7 +34,8 @@ const SHORTCUT = {
   control: true,
 };
 
-vi.mock("@/hooks/queries/system-queries", () => ({
+vi.mock("@/hooks/queries/system-queries", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/system-queries")>()),
   useSystemConfig: () => ({
     data: {
       generalSettings: { ...defaultAppSettings },
@@ -53,11 +54,12 @@ vi.mock("@/hooks/queries/system-queries", () => ({
   }),
 }));
 
-vi.mock("@/lib/bb-desktop", () => ({
-  getBbDesktopInfo: () => null,
+vi.mock("@/lib/omnyo-desktop", () => ({
+  getOmnyoDesktopInfo: () => null,
 }));
 
 const PLUGIN_COMMAND = pluginCommandId("saved-prompts", "search");
+
 const EMPTY_DRAFT = { text: "", mentions: [], attachments: [] };
 
 function registerPluginCommand(runs: string[]) {
@@ -96,6 +98,7 @@ function Composer({
     setDraft: () => {},
     focus: () => {},
   };
+
   return (
     <PluginComposerHostProvider value={host}>
       <div
@@ -115,6 +118,7 @@ function Composer({
             mention: {
               results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
               isLoading: false,
+              isRefreshing: false,
               isError: false,
               onQueryChange: vi.fn(),
             },
@@ -128,6 +132,7 @@ function Composer({
 
 function PromptAvailable() {
   useAppCommandContext("promptAvailable", true);
+
   return null;
 }
 
@@ -138,12 +143,14 @@ function RunnerProbe({
 }) {
   const runner = useAppCommandRunner();
   useEffect(() => onRunner(runner), [onRunner, runner]);
+
   return null;
 }
 
 function renderComposers() {
   const focused: string[] = [];
   const runner: { current: AppCommandRunner | null } = { current: null };
+
   const view = render(
     <MemoryRouter>
       <AppCommandProvider>
@@ -170,27 +177,34 @@ function renderComposers() {
       </AppCommandProvider>
     </MemoryRouter>,
   );
+
   const editorIn = (composerKey: string) => {
     const editor = view
       .getByTestId(composerKey)
       .querySelector<HTMLElement>("[contenteditable]");
+
     if (editor === null) throw new Error(`${composerKey} editor is missing`);
+
     return editor;
   };
+
   return { view, runner, focused, editorIn };
 }
 
 function press(target: HTMLElement, key: string): KeyboardEvent {
   target.focus();
+
   const event = new KeyboardEvent("keydown", {
     bubbles: true,
     cancelable: true,
     key,
     ctrlKey: true,
   });
+
   act(() => {
     target.dispatchEvent(event);
   });
+
   return event;
 }
 

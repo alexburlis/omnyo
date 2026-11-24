@@ -15,7 +15,9 @@ import {
 } from "./message-stream.js";
 
 export const ACP_AUTH_REQUIRED_CODE = -32000;
+
 export const ACP_RESOURCE_NOT_FOUND_CODE = -32002;
+
 export const ACP_REQUEST_CANCELLED_CODE = -32800;
 
 export interface AcpSessionUpdateNotification {
@@ -104,36 +106,48 @@ export function decodeAcpPermissionRequest(
   if (!isJsonObject(params)) {
     throw RequestError.invalidParams();
   }
+
   const sessionId = readString(params, "sessionId");
   const rawOptions = params["options"];
+
   if (sessionId === undefined || !Array.isArray(rawOptions)) {
     throw RequestError.invalidParams();
   }
+
   const options: AcpPermissionOption[] = [];
+
   for (const entry of rawOptions) {
     if (!isJsonObject(entry)) {
       continue;
     }
+
     const optionId = readString(entry, "optionId");
+
     if (optionId === undefined) {
       continue;
     }
+
     options.push({
       optionId,
       name: readString(entry, "name") ?? optionId,
       kind: readString(entry, "kind") ?? "",
     });
   }
+
   const subject = params["subject"];
+
   const subjectToolCall =
     isJsonObject(subject) && isJsonObject(subject["toolCall"])
       ? subject["toolCall"]
       : undefined;
+
   const toolCall = isJsonObject(params["toolCall"])
     ? params["toolCall"]
     : (subjectToolCall ?? {});
+
   const title = readString(params, "title");
   const description = readString(params, "description");
+
   return {
     sessionId,
     toolCall,
@@ -158,18 +172,24 @@ export function connectAcpClient(options: AcpClientOptions): AcpClient {
     onSessionUpdate(params) {
       if (!isJsonObject(params)) {
         discarded("malformed-update", JSON.stringify(params ?? null));
+
         return;
       }
+
       const sessionId = readString(params, "sessionId");
+
       if (sessionId === undefined) {
         discarded("malformed-update", JSON.stringify(params));
+
         return;
       }
+
       handlers.sessionUpdate({ sessionId, update: params["update"] });
     },
   });
 
-  const app = client({ name: "bb" });
+  const app = client({ name: "omnyo" });
+
   for (const [method, handler] of Object.entries(handlers.requests ?? {})) {
     app.onRequest(
       method,
@@ -177,6 +197,7 @@ export function connectAcpClient(options: AcpClientOptions): AcpClient {
       async ({ params, signal }) => (await handler(params, { signal })) ?? null,
     );
   }
+
   for (const [method, handler] of Object.entries(
     handlers.notifications ?? {},
   )) {
@@ -198,17 +219,21 @@ export function connectAcpClient(options: AcpClientOptions): AcpClient {
       requestOptions?.timeoutMs === undefined
         ? options.requestTimeoutMs
         : requestOptions.timeoutMs;
+
     if (timeoutMs === null) {
       return send(undefined);
     }
+
     const controller = new AbortController();
     let timer: NodeJS.Timeout | undefined;
+
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         controller.abort();
         reject(new AcpRequestTimeoutError(method, timeoutMs));
       }, timeoutMs);
     });
+
     try {
       return await Promise.race([send(controller.signal), deadline]);
     } finally {

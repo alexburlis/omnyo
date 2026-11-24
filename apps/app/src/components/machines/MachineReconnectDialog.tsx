@@ -1,14 +1,14 @@
 import { useEffect } from "react";
-import type { Host } from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
+import type { Host } from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/shared-ui/dialog";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { MachineLaunchCommand } from "@/components/dialogs/AddMachineDialog";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
 import { useReconnectHost } from "@/hooks/mutations/host-mutations";
@@ -27,13 +27,16 @@ export function MachineReconnectDialog({
   useEffect(() => {
     if (hostId === null) {
       reset();
+
       return;
     }
+
     mutate(hostId);
   }, [hostId, mutate, reset]);
 
   const prepared = reconnectHost.data ?? null;
   const reconnected = target !== null && target.status === "connected";
+
   const errorMessage = reconnectHost.isError
     ? getMutationErrorMessage({
         error: reconnectHost.error,

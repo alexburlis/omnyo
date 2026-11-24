@@ -6,7 +6,7 @@ import {
   getThread,
   listQueuedThreadMessagesWaitingOnKind,
   updateHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import { maintainMachine } from "../../../src/services/machines/lifecycle.js";
 import { requestMachineSuspension } from "../../../src/services/machines/provider-orchestration.js";
 import { setPluginMachineProviderBridge } from "../../../src/services/plugins/plugin-machine-provider-registry.js";
@@ -33,18 +33,22 @@ afterEach(() => {
 it("preserves a machine whose daemon never answers the stop, and frees the queue", async () =>
   withTestHarness(async (harness) => {
     const { host } = seedHostSession(harness.deps, { id: "unanswered-stop" });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const environment = seedEnvironment(harness.deps, {
       hostId: host.id,
       projectId: project.id,
     });
+
     const thread = seedThread(harness.deps, {
       projectId: project.id,
       environmentId: environment.id,
       status: "active",
     });
+
     seedTurnStarted(harness.deps, {
       threadId: thread.id,
       environmentId: environment.id,
@@ -92,18 +96,22 @@ it("preserves a machine whose daemon never answers the stop, and frees the queue
 it("does not snapshot a connected machine whose daemon answers neither the stop nor the shutdown", async () =>
   withTestHarness(async (harness) => {
     const { host } = seedHostSession(harness.deps, { id: "unanswered-save" });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const environment = seedEnvironment(harness.deps, {
       hostId: host.id,
       projectId: project.id,
     });
+
     const thread = seedThread(harness.deps, {
       projectId: project.id,
       environmentId: environment.id,
       status: "active",
     });
+
     seedTurnStarted(harness.deps, {
       threadId: thread.id,
       environmentId: environment.id,
@@ -121,14 +129,17 @@ it("does not snapshot a connected machine whose daemon answers neither the stop 
     vi.spyOn(harness.hub, "requestHostOnlineRpc").mockRejectedValue(
       new HostOnlineRpcTimeoutError(),
     );
+
     const shutdown = vi
       .spyOn(harness.hub, "requestDaemonShutdown")
       .mockReturnValue(true);
+
     vi.useFakeTimers();
 
     const requested = requestMachineSuspension(harness.deps, host.id).catch(
       (error: unknown) => error,
     );
+
     await advanceUntilTrue(
       () =>
         getHost(harness.db, host.id)?.statusMessage?.includes(

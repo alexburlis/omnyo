@@ -52,20 +52,24 @@ describe("SidebarThreadListSetting", () => {
     );
 
     expect(store.get(threadListProviderAtom)).toBe("__automatic__");
+
     const trigger = screen.getByRole("button", {
       name: "Sidebar thread list",
     });
+
     expect(trigger.textContent).toContain("Automatic");
 
     fireEvent.pointerDown(trigger, { button: 0 });
     expect(
       (await screen.findByRole("menuitem", { name: /Automatic/u })).textContent,
     ).toContain("Chooses Inbox (zen).");
+
     const options = screen
       .getAllByRole("menuitem")
       .map((item) => item.textContent ?? "");
+
     expect(options[1]).toContain("InboxFrom the zen plugin.");
-    expect(options[2]).toContain("Thread list (built-in)BB default.");
+    expect(options[2]).toContain("Thread list (built-in)Omnyo default.");
     fireEvent.click(
       screen.getByRole("menuitem", { name: /^Thread list \(built-in\)/u }),
     );

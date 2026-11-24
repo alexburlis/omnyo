@@ -1,8 +1,11 @@
 const MINUTE_MS = 60 * 1000;
+
 const HOUR_MS = 60 * MINUTE_MS;
+
 const DAY_MS = 24 * HOUR_MS;
 
 const EVENING_HOUR = 18;
+
 const MORNING_HOUR = 9;
 
 export const MAX_SCHEDULE_AHEAD_MS = 365 * DAY_MS;
@@ -61,6 +64,7 @@ export function listSchedulePresets(now: number): SchedulePreset[] {
       at: atLocalTime(now, 1, MORNING_HOUR, 0),
     },
   ];
+
   return candidates.filter((preset) => preset.at > now);
 }
 
@@ -73,6 +77,7 @@ function atLocalTime(
   const date = new Date(now);
   date.setDate(date.getDate() + dayOffset);
   date.setHours(hour, minute, 0, 0);
+
   return date.getTime();
 }
 
@@ -94,6 +99,7 @@ export function defaultCustomSchedule(now: number): CustomScheduleFields {
 
 export function formatDateInputValue(at: number): string {
   const date = new Date(at);
+
   return [
     String(date.getFullYear()).padStart(4, "0"),
     String(date.getMonth() + 1).padStart(2, "0"),
@@ -102,6 +108,7 @@ export function formatDateInputValue(at: number): string {
 }
 
 const DATE_INPUT_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
 const TIME_INPUT_PATTERN = /^(\d{2}):(\d{2})$/;
 
 export function parseCustomScheduleTime(
@@ -109,9 +116,11 @@ export function parseCustomScheduleTime(
   now: number,
 ): ScheduleTimeParse {
   const dateMatch = DATE_INPUT_PATTERN.exec(fields.date);
+
   if (dateMatch === null) return { ok: false, message: "Choose a date." };
 
   const timeMatch = TIME_INPUT_PATTERN.exec(fields.time);
+
   if (timeMatch === null) return { ok: false, message: "Choose a time." };
 
   const year = Number.parseInt(dateMatch[1], 10);
@@ -132,10 +141,13 @@ export function parseCustomScheduleTime(
   }
 
   const at = scheduled.getTime();
+
   if (at <= now) return { ok: false, message: "Choose a future time." };
+
   if (at > now + MAX_SCHEDULE_AHEAD_MS) {
     return { ok: false, message: "Pick a time within the next year." };
   }
+
   return { ok: true, at };
 }
 
@@ -144,10 +156,15 @@ export function formatScheduleTime(at: number, now: number): string {
     hour: "numeric",
     minute: "2-digit",
   });
+
   const days = calendarDaysBetween(now, at);
+
   if (days === 0) return `today at ${time}`;
+
   if (days === 1) return `tomorrow at ${time}`;
+
   if (days === -1) return `yesterday at ${time}`;
+
   const date = new Date(at).toLocaleDateString([], {
     month: "short",
     day: "numeric",
@@ -156,16 +173,19 @@ export function formatScheduleTime(at: number, now: number): string {
         ? undefined
         : "numeric",
   });
+
   return `${date} at ${time}`;
 }
 
 export function formatScheduleTimeZone(at: number): string {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
   const timeZoneName = new Intl.DateTimeFormat(undefined, {
     timeZoneName: "short",
   })
     .formatToParts(new Date(at))
     .find((part) => part.type === "timeZoneName")?.value;
+
   return timeZoneName === undefined || timeZoneName === timeZone
     ? `Local time · ${timeZone}`
     : `Local time · ${timeZone} (${timeZoneName})`;
@@ -176,5 +196,6 @@ function calendarDaysBetween(now: number, at: number): number {
   startOfNow.setHours(0, 0, 0, 0);
   const startOfAt = new Date(at);
   startOfAt.setHours(0, 0, 0, 0);
+
   return Math.round((startOfAt.getTime() - startOfNow.getTime()) / DAY_MS);
 }

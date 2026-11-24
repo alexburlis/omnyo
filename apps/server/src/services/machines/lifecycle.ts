@@ -1,3 +1,4 @@
+import { assertDirectAccessAdmission } from "./direct-access-state.js";
 import { cancelPendingEnvironmentHook } from "../environments/environment-hooks.js";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
@@ -7,7 +8,7 @@ import {
   terminalSessions,
   threads,
   updateHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import type {
   WorkSessionDeps,
   LoggedPendingInteractionWorkSessionDeps,
@@ -19,10 +20,11 @@ import {
 } from "../server-move/freeze-state.js";
 
 import { appendSystemErrorEvent } from "../threads/thread-events.js";
-import { threadScope } from "@bb/domain";
+import { threadScope } from "@omnyo/domain";
 import { stopThreadForCurrentState } from "../threads/thread-lifecycle.js";
 
 const RETRY_MS = 10_000;
+
 const preparingPauses = new WeakMap<
   WorkSessionDeps["db"],
   Map<string, { cancelled: boolean }>
@@ -34,7 +36,9 @@ export function assertMachineLifecycleAdmission(
   deps: Deps,
   hostId: string,
 ): void {
+  assertDirectAccessAdmission(deps, hostId);
   const host = getHost(deps.db, hostId);
+
   if (host?.phase === "suspending")
     throw new ApiError(
       409,
@@ -49,6 +53,7 @@ export function cancelPreparingMachinePause(
   hostId: string,
 ): void {
   const pending = preparingPauses.get(deps.db)?.get(hostId);
+
   if (pending !== undefined) pending.cancelled = true;
 }
 
@@ -57,6 +62,7 @@ export function isMachineWaitingForExecution(
   hostId: string,
 ): boolean {
   const host = getHost(deps.db, hostId);
+
   return (
     host?.suspendedAt != null ||
     host?.phase === "suspending" ||
@@ -72,8 +78,10 @@ export async function maintainMachine(
   save: () => Promise<void>,
 ): Promise<void> {
   const host = getHost(deps.db, hostId);
+
   if (host === null)
     throw new ApiError(404, "host_not_found", "Host not found");
+
   if (host.suspendRetryAt !== null && host.suspendRetryAt > Date.now())
     throw new ApiError(
       409,
@@ -81,8 +89,10 @@ export async function maintainMachine(
       "Machine already has a lifecycle operation or is waiting for retry.",
     );
   const pending = { cancelled: false };
+
   const pauses =
     preparingPauses.get(deps.db) ?? new Map<string, { cancelled: boolean }>();
+
   preparingPauses.set(deps.db, pauses);
   pauses.set(hostId, pending);
   const originalPhase = host.phase;
@@ -94,6 +104,7 @@ export async function maintainMachine(
     suspendRetryAt: null,
   });
   deps.hub.notifyHost(hostId, ["host-disconnected"]);
+
   try {
     const drainDeadline = { db: deps.db, timeoutMs: 5 * 60_000 };
     await boundedDrain(async () => {
@@ -107,11 +118,13 @@ export async function maintainMachine(
           ),
         )
         .all();
+
       await Promise.all(
         hooks.map((hook) =>
           cancelPendingEnvironmentHook(deps, { id: hook.id, hostId }),
         ),
       );
+
       const active = deps.db
         .select({
           id: threads.id,
@@ -127,6 +140,7 @@ export async function maintainMachine(
           ),
         )
         .all();
+
       for (const thread of active)
         appendSystemErrorEvent(deps, {
           threadId: thread.id,
@@ -148,6 +162,7 @@ export async function maintainMachine(
           ),
         ),
       );
+
       const stillActive = deps.db
         .select({ id: threads.id })
         .from(threads)
@@ -160,10 +175,12 @@ export async function maintainMachine(
         )
         .limit(1)
         .get();
+
       if (stillActive !== undefined)
         throw new Error(
           "A turn did not stop; refusing to save or terminate live writers",
         );
+
       const terminals = deps.db
         .select({ id: terminalSessions.id })
         .from(terminalSessions)
@@ -178,6 +195,7 @@ export async function maintainMachine(
           ),
         )
         .all();
+
       await Promise.all(
         terminals.map((terminal) =>
           deps.terminalSessions.closeTerminal({
@@ -188,6 +206,7 @@ export async function maintainMachine(
       );
     }, drainDeadline);
     pauses.delete(hostId);
+
     if (pending.cancelled) {
       throw new ApiError(
         409,
@@ -195,6 +214,7 @@ export async function maintainMachine(
         "Pause cancelled because a follow-up was sent.",
       );
     }
+
     updateHost(deps.db, deps.hub, hostId, {
       statusMessage: "Saving the filesystem before terminating compute.",
     });
@@ -208,8 +228,10 @@ export async function maintainMachine(
     const cancelled =
       error instanceof ApiError &&
       error.body.code === "machine_pause_cancelled";
+
     const message = error instanceof Error ? error.message : String(error);
     const current = getHost(deps.db, hostId);
+
     const phase =
       current?.phase === "removing"
         ? current.phase
@@ -218,6 +240,7 @@ export async function maintainMachine(
           : originalPhase === "suspending"
             ? "active"
             : originalPhase;
+
     updateHost(deps.db, deps.hub, hostId, {
       phase,
       statusMessage: cancelled ? null : `Machine suspension failed: ${message}`,
@@ -235,6 +258,7 @@ async function boundedDrain(
   deadline: { db: WorkSessionDeps["db"]; timeoutMs: number },
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   try {
     await Promise.race([
       run(),
@@ -242,14 +266,17 @@ async function boundedDrain(
         const expire = () => {
           if (isServerMoveFrozen(deadline.db)) {
             timer = setTimeout(expire, SERVER_MOVE_FROZEN_RETRY_MS);
+
             return;
           }
+
           reject(
             new Error(
               "Machine drain exceeded its deadline; old compute is retained",
             ),
           );
         };
+
         timer = setTimeout(expire, deadline.timeoutMs);
       }),
     ]);

@@ -18,7 +18,10 @@ export const EXTENDED_ICON_NAMES = [
   "ArrowTurnForward",
   "ArrowUpRight",
   "Beaker",
+  "Bell",
   "BellDot",
+  "BookUpload",
+  "Bookshelf",
   "Browser",
   "Brain",
   "Calendar",
@@ -68,6 +71,7 @@ export const EXTENDED_ICON_NAMES = [
   "FolderMinus",
   "Fork",
   "GitBranch",
+  "GitCommit",
   "GitMerge",
   "GitPullRequest",
   "GitPullRequestArrow",
@@ -75,6 +79,7 @@ export const EXTENDED_ICON_NAMES = [
   "GitPullRequestDraft",
   "Globe",
   "GridView",
+  "Images",
   "Keyboard",
   "Laptop",
   "Layers",
@@ -93,6 +98,7 @@ export const EXTENDED_ICON_NAMES = [
   "NewTab",
   "News01",
   "PackageReceive",
+  "Paintbrush",
   "Palette",
   "PanelBottom",
   "PanelRight",
@@ -109,6 +115,9 @@ export const EXTENDED_ICON_NAMES = [
   "Rows2",
   "SecurityCheck",
   "Sent",
+  "ShieldCheck",
+  "ShieldOff",
+  "ShieldUser",
   "SideChat",
   "Smartphone",
   "Sort",
@@ -116,6 +125,7 @@ export const EXTENDED_ICON_NAMES = [
   "SortingZA01",
   "SortingOneNine",
   "SortingNineOne",
+  "Sparkles",
   "Square",
   "SquareUnlock02",
   "Star",
@@ -133,11 +143,13 @@ export type ExtendedIconMap = Readonly<
 >;
 
 let extendedIcons: ExtendedIconMap | null = null;
+
 const listeners = new Set<() => void>();
 
 export function registerExtendedIcons(map: ExtendedIconMap): void {
   if (extendedIcons === map) return;
   extendedIcons = map;
+
   for (const listener of listeners) listener();
 }
 
@@ -147,6 +159,7 @@ export function getExtendedIcons(): ExtendedIconMap | null {
 
 export function subscribeExtendedIcons(listener: () => void): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };
@@ -158,12 +171,14 @@ interface AppIconDefinition {
 }
 
 let appIcons: ReadonlyMap<string, AppIconDefinition> = new Map();
+
 const appIconListeners = new Set<() => void>();
 
 export function setAppIcons(
   next: ReadonlyMap<string, AppIconDefinition>,
 ): void {
   appIcons = next;
+
   for (const listener of appIconListeners) listener();
 }
 
@@ -173,16 +188,19 @@ export function getAppIcon(name: string): AppIconDefinition | undefined {
 
 export function subscribeAppIcons(listener: () => void): () => void {
   appIconListeners.add(listener);
+
   return () => {
     appIconListeners.delete(listener);
   };
 }
 
 let pluginAssetIcons: ReadonlyMap<string, string> = new Map();
+
 const pluginAssetIconListeners = new Set<() => void>();
 
 export function setPluginAssetIcons(next: ReadonlyMap<string, string>): void {
   pluginAssetIcons = next;
+
   for (const listener of pluginAssetIconListeners) listener();
 }
 
@@ -192,6 +210,7 @@ export function getPluginAssetIcon(glyph: string): string | undefined {
 
 export function subscribePluginAssetIcons(listener: () => void): () => void {
   pluginAssetIconListeners.add(listener);
+
   return () => {
     pluginAssetIconListeners.delete(listener);
   };

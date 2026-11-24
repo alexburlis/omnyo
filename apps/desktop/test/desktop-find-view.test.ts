@@ -1,6 +1,6 @@
 import type { WebContentsView } from "electron";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BB_DESKTOP_FIND_BAR_ACTIVATE_CHANNEL } from "../src/find-bar-ipc.js";
+import { OMNYO_DESKTOP_FIND_BAR_ACTIVATE_CHANNEL } from "../src/find-bar-ipc.js";
 import {
   createDesktopFindViewManager,
   type FindViewBounds,
@@ -16,7 +16,9 @@ const electronMock = vi.hoisted(() => {
   interface FakeIpcEvent {
     sender: { id: number };
   }
+
   type FakeIpcListener = (event: FakeIpcEvent, payload: unknown) => void;
+
   const listeners = new Map<string, FakeIpcListener>();
 
   class FakeWebContentsView {
@@ -88,6 +90,7 @@ class FakeContentView implements FindViewHostContentView {
 
   removeChildView(view: WebContentsView): void {
     const index = this.views.indexOf(view);
+
     if (index >= 0) this.views.splice(index, 1);
   }
 }
@@ -106,11 +109,13 @@ class FakeHostWindow implements FindViewHostWindow {
 
   get contentView(): FakeContentView {
     this.assertAlive();
+
     return this.liveContentView;
   }
 
   get webContents() {
     this.assertAlive();
+
     return this.liveWebContents;
   }
 
@@ -124,6 +129,7 @@ class FakeHostWindow implements FindViewHostWindow {
 
   getContentBounds(): FindViewBounds {
     this.assertAlive();
+
     return { x: 0, y: 0, width: 1200, height: 800 };
   }
 
@@ -142,6 +148,7 @@ describe("createDesktopFindViewManager", () => {
 
   it("opens the find bar clear of the window chrome the renderer reported", () => {
     const host = new FakeHostWindow();
+
     const manager = createDesktopFindViewManager({
       preloadPath: "/tmp/find-bar-preload.cjs",
     });
@@ -159,15 +166,17 @@ describe("createDesktopFindViewManager", () => {
     expect(view?.visible).toBe(true);
     expect(view?.focusCount).toBe(1);
     expect(view?.sendCalls).toEqual([
-      { channel: BB_DESKTOP_FIND_BAR_ACTIVATE_CHANNEL, payload: undefined },
+      { channel: OMNYO_DESKTOP_FIND_BAR_ACTIVATE_CHANNEL, payload: undefined },
     ]);
   });
 
   it("releases a window after Electron has destroyed it", () => {
     const host = new FakeHostWindow();
+
     const manager = createDesktopFindViewManager({
       preloadPath: "/tmp/find-bar-preload.cjs",
     });
+
     manager.open(host, { topOffset: 48 });
     const view = electronMock.createdViews.at(-1);
 

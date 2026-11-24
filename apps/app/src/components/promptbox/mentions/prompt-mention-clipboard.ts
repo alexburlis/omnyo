@@ -2,10 +2,11 @@ import { z } from "zod";
 import {
   promptMentionResourceSchema,
   type PromptMentionResource,
-} from "@bb/domain";
-import { PLUGIN_MENTION_TRIGGER_VALUES } from "@bb/client-core";
+} from "@omnyo/domain";
+import { PLUGIN_MENTION_TRIGGER_VALUES } from "@omnyo/client-core";
 
 const PROMPT_MENTION_CLIPBOARD_RESOURCE_ATTR = "data-prompt-mention-resource";
+
 const PROMPT_MENTION_CLIPBOARD_SERIALIZED_TEXT_ATTR =
   "data-prompt-mention-serialized-text";
 
@@ -57,15 +58,19 @@ export function serializedTextForPromptMentionResource(
   if (resource.kind === "thread") {
     return `@thread:${resource.threadId}`;
   }
+
   if (resource.kind === "project") {
     return `@project:${resource.projectId}`;
   }
+
   if (resource.kind === "section") {
     return `@section:${resource.sectionId}`;
   }
+
   if (resource.kind === "command") {
     return `${resource.trigger}${resource.name}`;
   }
+
   if (resource.kind === "plugin" || resource.kind === "attachment") {
     return `@${resource.label}`;
   }
@@ -74,10 +79,12 @@ export function serializedTextForPromptMentionResource(
     resource.source === "thread-storage"
       ? `thread-storage:${resource.path}`
       : resource.path;
+
   const directorySuffix =
     resource.entryKind === "directory" && !sourceQualifiedPath.endsWith("/")
       ? "/"
       : "";
+
   return `@${sourceQualifiedPath}${directorySuffix}`;
 }
 
@@ -90,6 +97,7 @@ function isSerializedPluginMentionText(
       resource.label.startsWith(trigger),
     );
   }
+
   return PLUGIN_MENTION_TRIGGER_VALUES.some(
     (trigger) => serializedText === `${trigger}${resource.label}`,
   );
@@ -118,24 +126,30 @@ export function parsePromptMentionClipboardElement({
   const serializedText = element.getAttribute(
     PROMPT_MENTION_CLIPBOARD_SERIALIZED_TEXT_ATTR,
   );
+
   const resourceJson = element.getAttribute(
     PROMPT_MENTION_CLIPBOARD_RESOURCE_ATTR,
   );
+
   if (!serializedText || !resourceJson) {
     return null;
   }
 
   const parsedResource = parseJsonAttribute(resourceJson);
+
   const result = promptMentionClipboardResourcePayloadSchema.safeParse({
     resource: parsedResource,
   });
+
   if (!result.success) {
     return null;
   }
+
   const normalizedSerializedText = serializedTextForClipboardPayload(
     result.data.resource,
     serializedText,
   );
+
   if (normalizedSerializedText === null) {
     return null;
   }

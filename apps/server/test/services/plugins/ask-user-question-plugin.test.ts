@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { encodeClientTurnRequestIdNumber } from "@bb/domain";
+import { encodeClientTurnRequestIdNumber } from "@omnyo/domain";
 import { builtinPluginSource } from "../../../src/services/plugins/builtin-registry.js";
 import {
   buildExecutionOptions,
@@ -24,10 +24,12 @@ describe("ask-user-question builtin plugin", () => {
 
   beforeEach(async () => {
     harness = await createTestAppHarness();
+
     const entry = await harness.pluginService.install(
       builtinPluginSource("ask-user-question"),
       { kind: "root" },
     );
+
     expect(entry.statusDetail ?? "").toBe("");
     expect(entry.status).toBe("running");
   });
@@ -46,26 +48,31 @@ describe("ask-user-question builtin plugin", () => {
       id: `host-${args.label}`,
       name: `Host ${args.label}`,
     });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
       name: args.label,
       path: join(harness.config.dataDir, args.label),
     });
+
     const environment = seedEnvironment(harness.deps, {
       hostId: host.id,
       projectId: project.id,
       path: join(harness.config.dataDir, args.label),
     });
+
     const thread = seedThread(harness.deps, {
       projectId: project.id,
       environmentId: environment.id,
       providerId: args.providerId,
     });
+
     const execution = await buildExecutionOptions(
       harness.deps,
       { model: args.model },
       { threadId: thread.id },
     );
+
     const command = await buildThreadStartCommand(harness.deps, {
       environment,
       execution,
@@ -80,6 +87,7 @@ describe("ask-user-question builtin plugin", () => {
       syncGeneratedTitle: false,
       thread,
     });
+
     return command.dynamicTools;
   }
 
@@ -89,6 +97,7 @@ describe("ask-user-question builtin plugin", () => {
       model: "gpt-5.6",
       label: "codex-project",
     });
+
     const tool = tools.find(
       (candidate) => candidate.name === "AskUserQuestion",
     );
@@ -99,13 +108,13 @@ describe("ask-user-question builtin plugin", () => {
     );
   });
 
-  it("withholds the tool from claude-code, which asks natively", async () => {
+  it("advertises the tool to claude-code, whose bridge hides its blocking tool", async () => {
     const tools = await dynamicToolsFor({
       providerId: "claude-code",
       model: "claude-opus-4-6",
       label: "claude-project",
     });
 
-    expect(tools.map((tool) => tool.name)).not.toContain("AskUserQuestion");
+    expect(tools.map((tool) => tool.name)).toContain("AskUserQuestion");
   });
 });

@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createConnection } from "@bb/db";
+import { createConnection } from "@omnyo/db";
 import { exportLegacyAutomationsForPluginImport } from "../../../apps/server/src/legacy-automations-export.js";
 import {
   getAutomation,
@@ -124,14 +124,17 @@ function insertLegacyAutomation(
 
 describe("legacy automation export/import round trip", () => {
   it("exports kernel rows that the automations plugin schema can parse and ingest", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "bb-legacy-roundtrip-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "omnyo-legacy-roundtrip-"));
     const legacyDb = createConnection(":memory:");
     const pluginDb = createConnection(":memory:");
+
     try {
       createLegacyTables(legacyDb);
+
       for (const migration of automationMigrations) {
         pluginDb.$client.exec(migration);
       }
+
       await mkdir(join(dataDir, "automation-scripts", "auto_script"), {
         recursive: true,
       });
@@ -195,21 +198,24 @@ describe("legacy automation export/import round trip", () => {
         logger: testLogger,
       });
       const pluginDataDir = join(dataDir, "plugins", "automations");
+
       const importPath = join(
         pluginDataDir,
         "import",
         "legacy-automations.json",
       );
+
       const exported = legacyImportFileSchema.parse(
         JSON.parse(await readFile(importPath, "utf8")),
       );
+
       expect(exported.automations.map((row) => row.id).sort()).toEqual([
         "auto_agent",
         "auto_script",
       ]);
 
       await ingestLegacyImport({
-        bb: {
+        api: {
           storage: {
             kv: {
               async get(): Promise<undefined> {
@@ -228,13 +234,23 @@ describe("legacy automation export/import round trip", () => {
 
       const agent = getAutomation(pluginDb.$client, "auto_agent");
       expect(agent?.targetThreadId).toBe("thr_target");
-      expect(parseAutomationExecution(agent?.execution ?? "")).toMatchObject({
+      expect(
+        parseAutomationExecution(
+          { id: "auto_agent", execution: agent?.execution ?? "" },
+          { values: () => undefined },
+        ),
+      ).toMatchObject({
         mode: "agent",
         environment: { type: "project-default" },
         targetThreadId: "thr_target",
       });
       const script = getAutomation(pluginDb.$client, "auto_script");
-      expect(parseAutomationExecution(script?.execution ?? "")).toMatchObject({
+      expect(
+        parseAutomationExecution(
+          { id: "auto_script", execution: script?.execution ?? "" },
+          { values: () => undefined },
+        ),
+      ).toMatchObject({
         mode: "script",
         scriptFile: "check.sh",
         timeoutMs: 120_000,

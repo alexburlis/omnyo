@@ -1,10 +1,11 @@
-import { getHost } from "@bb/db";
+import { getHost } from "@omnyo/db";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { runtimeErrorLogFields } from "../lib/error-log-fields.js";
 import { listSystemProviderInfosForHost } from "../system/execution-options.js";
 import { isServerMoveFrozen } from "../server-move/freeze-state.js";
 
 const PER_HOST_CONCURRENCY = 2;
+
 const GLOBAL_CONCURRENCY = 4;
 
 export function installProviderModelCatalogPrewarm(
@@ -20,7 +21,9 @@ export function installProviderModelCatalogPrewarm(
     if (stopped) {
       return;
     }
+
     pendingHosts.add(hostId);
+
     if (!runningHosts.has(hostId)) {
       void runPasses(hostId);
     }
@@ -28,6 +31,7 @@ export function installProviderModelCatalogPrewarm(
 
   async function runPasses(hostId: string): Promise<void> {
     runningHosts.add(hostId);
+
     try {
       while (!stopped && pendingHosts.delete(hostId)) {
         try {
@@ -47,13 +51,16 @@ export function installProviderModelCatalogPrewarm(
   async function acquireGlobalSlot(): Promise<void> {
     if (globalRunning < GLOBAL_CONCURRENCY) {
       globalRunning += 1;
+
       return;
     }
+
     await new Promise<void>((resolve) => globalWaiters.push(resolve));
   }
 
   function releaseGlobalSlot(): void {
     const next = globalWaiters.shift();
+
     if (next === undefined) {
       globalRunning -= 1;
     } else {
@@ -66,6 +73,7 @@ export function installProviderModelCatalogPrewarm(
     await deps.providerRegistry.whenRegistrationsSettled();
     const sessionId = deps.hub.getDaemonSessionIdForHost(hostId);
     const host = getHost(deps.db, hostId);
+
     if (
       stopped ||
       isServerMoveFrozen(deps.db) ||
@@ -77,8 +85,10 @@ export function installProviderModelCatalogPrewarm(
     ) {
       return;
     }
+
     const providers = await listSystemProviderInfosForHost(deps, hostId);
     const defaultProviderId = deps.providerRegistry.getUserDefaultProviderId();
+
     const queue = providers
       .filter((provider) => provider.available)
       .sort(
@@ -86,6 +96,7 @@ export function installProviderModelCatalogPrewarm(
           Number(right.id === defaultProviderId) -
           Number(left.id === defaultProviderId),
       );
+
     const providerCount = queue.length;
     await Promise.all(
       Array.from({ length: PER_HOST_CONCURRENCY }, async () => {
@@ -95,6 +106,7 @@ export function installProviderModelCatalogPrewarm(
           provider = queue.shift()
         ) {
           await acquireGlobalSlot();
+
           try {
             if (
               stopped ||
@@ -103,6 +115,7 @@ export function installProviderModelCatalogPrewarm(
             ) {
               return;
             }
+
             await deps.lifecycleDedupers.providerModelCatalogs.refreshForPrewarm(
               deps,
               { hostId, provider },
@@ -143,6 +156,7 @@ export function installProviderModelCatalogPrewarm(
       }
     }
   });
+
   for (const hostId of deps.hub.listConnectedHostIds()) {
     request(hostId);
   }

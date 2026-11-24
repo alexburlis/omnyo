@@ -6,6 +6,7 @@ interface SqliteUniqueConstraintColumnsArgs {
 
 function getSqliteErrorCode(error: Error): string | null {
   const code = "code" in error ? error.code : null;
+
   return typeof code === "string" ? code : null;
 }
 
@@ -24,6 +25,7 @@ export function isSqliteUniqueConstraintOnColumns(
   const qualifiedColumns = args.columnNames
     .map((columnName) => `${args.tableName}.${columnName}`)
     .join(", ");
+
   return (
     error.message === `UNIQUE constraint failed: ${qualifiedColumns}` ||
     error.message.includes(args.indexName)

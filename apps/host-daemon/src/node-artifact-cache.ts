@@ -9,7 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { HOST_ARTIFACT_MAX_BYTES } from "@bb/host-daemon-contract";
+import { HOST_ARTIFACT_MAX_BYTES } from "@omnyo/host-daemon-contract";
 import type { HostDaemonLogger } from "./logger.js";
 import { sha256Hex } from "./sha256-hex.js";
 
@@ -39,10 +39,13 @@ function describeMismatch(
   if (bytes.byteLength !== byteLength) {
     return `expected ${byteLength} bytes, received ${bytes.byteLength}`;
   }
+
   const actual = sha256Hex(bytes);
+
   if (actual !== digest) {
     return `expected sha256 ${digest}, received ${actual}`;
   }
+
   return null;
 }
 
@@ -52,20 +55,26 @@ export async function ensureCachedNodeArtifact(
   if (!DIGEST_PATTERN.test(args.digest)) {
     throw new Error(`Invalid artifact digest: "${args.digest}"`);
   }
+
   if (args.byteLength > HOST_ARTIFACT_MAX_BYTES) {
     throw new Error(
       `Artifact is too large: ${args.byteLength} bytes exceeds the ${HOST_ARTIFACT_MAX_BYTES}-byte limit`,
     );
   }
+
   const key = `${args.cacheDir}\0${args.digest}`;
   const pending = pendingPulls.get(key);
+
   if (pending !== undefined) {
     return pending;
   }
+
   const pull = ensureCachedNodeArtifactUnlocked(args).finally(() => {
     pendingPulls.delete(key);
   });
+
   pendingPulls.set(key, pull);
+
   return pull;
 }
 
@@ -74,6 +83,7 @@ async function ensureCachedNodeArtifactUnlocked(
 ): Promise<string> {
   const directory = join(args.cacheDir, args.digest);
   const artifactPath = join(directory, args.fileName);
+
   if (await isVerifiedCachedArtifact(artifactPath, args)) {
     args.logger.debug(
       { cacheDir: args.cacheDir, digest: args.digest },
@@ -81,6 +91,7 @@ async function ensureCachedNodeArtifactUnlocked(
     );
     await touchDirectory(directory);
     await pruneStaleDigests(args);
+
     return artifactPath;
   }
 
@@ -90,17 +101,22 @@ async function ensureCachedNodeArtifactUnlocked(
   );
   await mkdir(directory, { recursive: true });
   let lastMismatch = "unknown mismatch";
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const bytes = await args.fetchArtifact({
       digest: args.digest,
       byteLength: args.byteLength,
     });
+
     const mismatch = describeMismatch(args.digest, args.byteLength, bytes);
+
     if (mismatch !== null) {
       lastMismatch = mismatch;
       continue;
     }
+
     const staged = join(directory, `.staged-${randomUUID()}.tmp`);
+
     try {
       await writeFile(staged, bytes, { mode: 0o600 });
       await rename(staged, artifactPath);
@@ -108,9 +124,12 @@ async function ensureCachedNodeArtifactUnlocked(
       await rm(staged, { force: true });
       throw error;
     }
+
     await pruneStaleDigests(args);
+
     return artifactPath;
   }
+
   throw new Error(
     `Host artifact download failed verification after retry: ${lastMismatch}`,
   );
@@ -121,18 +140,22 @@ async function isVerifiedCachedArtifact(
   args: EnsureCachedNodeArtifactArgs,
 ): Promise<boolean> {
   let bytes: Buffer;
+
   try {
     bytes = await readFile(artifactPath);
   } catch {
     return false;
   }
+
   if (
     bytes.byteLength === args.byteLength &&
     sha256Hex(bytes) === args.digest
   ) {
     return true;
   }
+
   await rm(artifactPath, { force: true });
+
   return false;
 }
 
@@ -145,6 +168,7 @@ async function pruneStaleDigests(
   args: EnsureCachedNodeArtifactArgs,
 ): Promise<void> {
   let entries;
+
   try {
     entries = await readdir(args.cacheDir, { withFileTypes: true });
   } catch (error) {
@@ -152,8 +176,10 @@ async function pruneStaleDigests(
       { cacheDir: args.cacheDir, err: error },
       "Failed to inspect host artifact cache",
     );
+
     return;
   }
+
   const stale = entries
     .filter(
       (entry) =>
@@ -162,9 +188,11 @@ async function pruneStaleDigests(
         DIGEST_PATTERN.test(entry.name),
     )
     .map((entry) => join(args.cacheDir, entry.name));
+
   const results = await Promise.allSettled(
     stale.map((directory) => rm(directory, { recursive: true, force: true })),
   );
+
   results.forEach((result, index) => {
     if (result.status === "fulfilled") return;
     args.logger.warn(

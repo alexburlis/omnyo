@@ -5,14 +5,14 @@ import {
   HOST_DAEMON_PROTOCOL_VERSION,
   type HostDaemonOnlineRpcRequestMessage,
   type HostDaemonRpcCommand,
-} from "@bb/host-daemon-contract";
-import { openSession, upsertHost } from "@bb/db";
+} from "@omnyo/host-daemon-contract";
+import { openSession, upsertHost } from "@omnyo/db";
 import {
   listServerOwnedEntries,
   readServerMovedFile,
-} from "@bb/server-archive";
-import type { ServerMoveStatus } from "@bb/server-contract";
-import { createDeferredPromise } from "@bb/test-helpers";
+} from "@omnyo/server-archive";
+import type { ServerMoveStatus } from "@omnyo/server-contract";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { createServerErrorHandler } from "../../src/errors.js";
@@ -42,12 +42,18 @@ import {
 } from "../helpers/test-app.js";
 
 const OLD = "host-old";
+
 const NEW = "host-new";
+
 const WORKER = "host-worker";
+
 const SANDBOX = "host-sandbox";
+
 const OFFLINE = "host-offline";
+
 const DIRECT_URL = "https://desktop.example.test";
-const CONNECT_URL = "https://laptop.getbb.test";
+
+const CONNECT_URL = "https://laptop.example.test";
 
 const START_DIRECT = {
   targetHostId: NEW,
@@ -86,8 +92,9 @@ function targetReply(
     case "server_move.prepare":
       return ok({ localServerUrl: "http://127.0.0.1:39101", pid: 4242 });
     case "server_move.activate":
-    case "server_move.abort":
       return ok({ ok: true });
+    case "server_move.abort":
+      return ok({ ok: true, moveId: request.command.moveId, fenced: true });
     default:
       throw new Error(`Unexpected target command ${request.command.type}`);
   }
@@ -99,9 +106,11 @@ function probeReply(
   if (request.command.type === "server_move.probe") {
     return ok({ reachable: true, message: null, state: "pending" });
   }
+
   if (request.command.type === "server_move.inspect") {
     return ok(inspectResult());
   }
+
   throw new Error(`Unexpected command ${request.command.type}`);
 }
 
@@ -117,18 +126,21 @@ function requireCommand<TType extends HostDaemonRpcCommand["type"]>(
       ): candidate is Extract<HostDaemonRpcCommand, { type: TType }> =>
         candidate.type === type,
     );
+
   if (command === undefined) {
     throw new Error(`Missing ${type} request`);
   }
+
   return command;
 }
 
-function captureError(run: () => unknown): unknown {
+async function captureError(run: () => unknown) {
   try {
-    run();
+    await run();
   } catch (error) {
     return error;
   }
+
   throw new Error("Expected the call to throw");
 }
 
@@ -151,7 +163,9 @@ function dropOnActivation(
     if (request.command.type !== "server_move.activate") {
       return targetReply(request);
     }
+
     harness.hub.unregisterDaemon(`session-${NEW}`);
+
     return createDeferredPromise<FakeDaemonReply>().promise;
   };
 }
@@ -164,6 +178,7 @@ async function writeConfig(harness: TestAppHarness, value: unknown) {
   const path = join(harness.config.dataDir, "config.json");
   const text = `${JSON.stringify(value)}\n`;
   await writeFile(path, text);
+
   return { path, text };
 }
 
@@ -171,27 +186,34 @@ describe("server move coordinator", () => {
   it("runs a direct move in step order and hands the server to the target", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const config = await writeConfig(harness, {
-        config: { BB_LOG_LEVEL: "debug" },
+        config: { OMNYO_LOG_LEVEL: "debug" },
         machineCredential: "stale-credential",
         serverHeaders: { "x-stale": "1" },
       });
-      await writeFile(join(harness.config.dataDir, "bb.db"), "");
+
+      await writeFile(join(harness.config.dataDir, "app.db"), "");
+
       const { environment, events, plugins, retired } =
         createTestServerMoveEnvironment(harness);
+
       const coordinator = createServerMoveCoordinator(environment);
       const notifySystem = vi.spyOn(harness.hub, "notifySystem");
       const progressSnapshots: (ServerMoveStatus | null)[] = [];
+
       const old = registerFakeDaemon(harness, {
         events,
         hostId: OLD,
         handle: probeReply,
       });
+
       const worker = registerFakeDaemon(harness, {
         events,
         hostId: WORKER,
         handle: probeReply,
       });
+
       const sandbox = registerFakeDaemon(harness, {
         events,
         hostId: SANDBOX,
@@ -199,6 +221,7 @@ describe("server move coordinator", () => {
           throw new Error(`The sandbox got ${request.command.type}`);
         },
       });
+
       const target = registerFakeDaemon(harness, {
         events,
         hostId: NEW,
@@ -221,7 +244,7 @@ describe("server move coordinator", () => {
               type: "server_move.progress",
               moveId: request.command.moveId,
               step: "update-target",
-              message: "Installing bb",
+              message: "Installing Omnyo",
             });
             progressSnapshots.push(coordinator.getStatus());
             coordinator.handleProgress(NEW, {
@@ -232,6 +255,7 @@ describe("server move coordinator", () => {
             });
             progressSnapshots.push(coordinator.getStatus());
           }
+
           return targetReply(request);
         },
       });
@@ -285,7 +309,7 @@ describe("server move coordinator", () => {
         ["verify-address", "pending"],
         ["switch", "pending"],
       ]);
-      expect(progressSnapshots[1]?.steps[1]?.message).toBe("Installing bb");
+      expect(progressSnapshots[1]?.steps[1]?.message).toBe("Installing Omnyo");
       expect(progressSnapshots[2]?.steps.slice(3, 5)).toEqual([
         { id: "transfer", status: "done", message: "Downloading the export" },
         {
@@ -299,10 +323,12 @@ describe("server move coordinator", () => {
       const probes = events
         .filter((event) => event.endsWith(":server_move.probe"))
         .sort();
+
       expect(probes).toEqual([
         `${OLD}:server_move.probe`,
         `${WORKER}:server_move.probe`,
       ]);
+
       for (const probe of probes) {
         expect(events.indexOf(probe)).toBeGreaterThan(
           events.indexOf(`${NEW}:server_move.prepare`),
@@ -311,6 +337,7 @@ describe("server move coordinator", () => {
           events.indexOf(`${NEW}:server_move.activate`),
         );
       }
+
       expect(
         events.filter((event) => !event.endsWith(":server_move.probe")),
       ).toEqual([
@@ -336,7 +363,9 @@ describe("server move coordinator", () => {
           downloadPath: `/internal/server-move/${started.moveId}/archive`,
           sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
         },
-        bbApp: null,
+        appRuntime: expect.objectContaining({
+          runtimeSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        }),
         serverPort: 39_101,
         bindHost: null,
         sourceDataDir: harness.config.dataDir,
@@ -380,9 +409,9 @@ describe("server move coordinator", () => {
         mode: "direct",
         connectHandle: null,
       });
-      expect(moved?.oldCopyEntries).toEqual(["auth-secret", "bb.db"]);
+      expect(moved?.oldCopyEntries).toEqual(["app.db", "auth-secret"]);
       expect(JSON.parse(await readFile(config.path, "utf8"))).toEqual({
-        config: { BB_LOG_LEVEL: "debug" },
+        config: { OMNYO_LOG_LEVEL: "debug" },
         serverUrl: DIRECT_URL,
       });
       expect(old.movedMessages).toEqual([
@@ -428,11 +457,14 @@ describe("server move coordinator", () => {
   it("persists the run on each step transition in a file the export leaves out", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const config = await writeConfig(harness, {
-        config: { BB_LOG_LEVEL: "info" },
+        config: { OMNYO_LOG_LEVEL: "info" },
       });
+
       const { environment, events, retired } =
         createTestServerMoveEnvironment(harness);
+
       const coordinator = createServerMoveCoordinator(environment);
       const prepareReply = createDeferredPromise<FakeDaemonReply>();
       const activateReply = createDeferredPromise<FakeDaemonReply>();
@@ -514,8 +546,10 @@ describe("server move coordinator", () => {
   it("returns the move underway for a retry to the same target and refuses a different target", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const { environment, events, retired } =
         createTestServerMoveEnvironment(harness);
+
       const coordinator = createServerMoveCoordinator(environment);
       const prepareReply = createDeferredPromise<FakeDaemonReply>();
       registerFakeDaemon(harness, { events, hostId: OLD, handle: probeReply });
@@ -537,6 +571,7 @@ describe("server move coordinator", () => {
         coordinator.start(START_DIRECT),
         coordinator.start(START_DIRECT),
       ]);
+
       expect(second.moveId).toBe(first.moveId);
       await expect
         .poll(() => events.includes(`${NEW}:server_move.prepare`))
@@ -559,15 +594,17 @@ describe("server move coordinator", () => {
       await retired;
     }));
 
-  it("moves a bb connect server whose source grant requires a writable account RPC", () =>
+  it("moves an Omnyo connect server whose source grant requires a writable account RPC", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
       const base = createTestServerMoveEnvironment(harness);
       const { events, retired } = base;
-      const grantHeaders = { "x-bb-connect-machine": "bbcm_laptop" };
+      const grantHeaders = { "x-omnyo-connect-machine": "bbcm_laptop" };
       const accountRpcStatuses: number[] = [];
+
       const accountRpcPath =
-        "/api/v1/plugins/bb-account/rpc/bb-account.v1.fetch";
+        "/api/v1/plugins/omnyo-account/rpc/omnyo-account.v1.fetch";
+
       const accountRpc = new Hono();
       accountRpc.onError(createServerErrorHandler(testLogger));
       accountRpc.use(
@@ -575,6 +612,7 @@ describe("server move coordinator", () => {
         serverMoveFreezeMiddleware({ isFrozen: () => coordinator.isFrozen() }),
       );
       accountRpc.post(accountRpcPath, (context) => context.json({ ok: true }));
+
       const coordinator = createServerMoveCoordinator({
         ...base.environment,
         resolveMode: async () => ({
@@ -584,26 +622,33 @@ describe("server move coordinator", () => {
         }),
         resolveServerHostGrant: async (hostId) => {
           events.push(`grant:${hostId}`);
+
           const response = await accountRpc.request(accountRpcPath, {
             method: "POST",
           });
+
           accountRpcStatuses.push(response.status);
+
           if (!response.ok) {
             throw new Error(await response.text());
           }
+
           return { serverUrl: CONNECT_URL, headers: grantHeaders };
         },
       });
+
       const old = registerFakeDaemon(harness, {
         events,
         hostId: OLD,
         handle: probeReply,
       });
+
       const worker = registerFakeDaemon(harness, {
         events,
         hostId: WORKER,
         handle: probeReply,
       });
+
       const target = registerFakeDaemon(harness, {
         events,
         hostId: NEW,
@@ -614,6 +659,7 @@ describe("server move coordinator", () => {
         ...START_DIRECT,
         serverUrl: null,
       });
+
       expect(started).toMatchObject({
         mode: "connect",
         serverUrl: CONNECT_URL,
@@ -671,10 +717,12 @@ describe("server move coordinator", () => {
         (request: HostDaemonOnlineRpcRequestMessage): FakeDaemonReply => {
           if (request.command.type === "server_move.inspect") {
             state.inspects += 1;
+
             return state.inspects === 1
               ? ok(inspectResult())
               : fail("inspect exploded");
           }
+
           return targetReply(request);
         },
       workerProbe: probeReply,
@@ -720,22 +768,28 @@ describe("server move coordinator", () => {
   ])("aborts, unfreezes, and resumes schedules when $name fails", (scenario) =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const config = await writeConfig(harness, {
-        config: { BB_LOG_LEVEL: "info" },
+        config: { OMNYO_LOG_LEVEL: "info" },
       });
+
       const { environment, events, plugins } =
         createTestServerMoveEnvironment(harness);
+
       const coordinator = createServerMoveCoordinator(environment);
+
       const old = registerFakeDaemon(harness, {
         events,
         hostId: OLD,
         handle: probeReply,
       });
+
       const worker = registerFakeDaemon(harness, {
         events,
         hostId: WORKER,
         handle: scenario.workerProbe,
       });
+
       const target = registerFakeDaemon(harness, {
         events,
         hostId: NEW,
@@ -743,9 +797,11 @@ describe("server move coordinator", () => {
       });
 
       await coordinator.start(START_DIRECT);
-      await expect
-        .poll(() => events.includes(`${NEW}:server_move.abort`))
-        .toBe(true);
+
+      if (scenario.failedStep !== "update-target")
+        await expect
+          .poll(() => events.includes(`${NEW}:server_move.abort`))
+          .toBe(true);
       await expect
         .poll(() => events.includes("deferred-work:resumed"))
         .toBe(true);
@@ -802,15 +858,18 @@ describe("server move coordinator", () => {
     { hung: "suspendAllButConnect" as const, warning: "suspension" },
     { hung: "stop" as const, warning: "shutdown" },
   ])(
-    "keeps moving when plugin $warning outlives its time box",
+    "handles a plugin $warning timeout without treating suspension as quiescent",
     ({ hung, warning }) =>
       withTestHarness(async (harness) => {
         seedTopology(harness);
+
         const base = createTestServerMoveEnvironment(harness, {
           timings: { ...TEST_SERVER_MOVE_TIMINGS, pluginShutdownTimeoutMs: 50 },
         });
+
         const { events, retired } = base;
         const never = createDeferredPromise<void>();
+
         const coordinator = createServerMoveCoordinator({
           ...base.environment,
           plugins: {
@@ -821,6 +880,7 @@ describe("server move coordinator", () => {
             },
           },
         });
+
         const warn = vi.spyOn(harness.deps.logger, "warn");
         registerFakeDaemon(harness, {
           events,
@@ -839,15 +899,24 @@ describe("server move coordinator", () => {
         });
 
         await coordinator.start(START_DIRECT);
-        await retired;
 
-        expect(coordinator.getStatus()?.state).toBe("completed");
+        if (warning === "suspension") {
+          await expect
+            .poll(() => coordinator.getStatus()?.state)
+            .toBe("failed");
+          expect(events).not.toContain(`${NEW}:server_move.prepare`);
+          expect(events).not.toContain(`server.moved:${OLD}`);
+        } else {
+          await retired;
+          expect(coordinator.getStatus()?.state).toBe("completed");
+          expect(events).toContain(`server.moved:${OLD}`);
+          expect(warn).toHaveBeenCalledWith(
+            expect.objectContaining({ err: expect.any(Error) }),
+            "Server move plugin shutdown failed",
+          );
+        }
+
         expect(events).toContain(`plugins:${hung}:hung`);
-        expect(events).toContain(`server.moved:${OLD}`);
-        expect(warn).toHaveBeenCalledWith(
-          expect.objectContaining({ timeoutMs: 50 }),
-          `Server move plugin ${warning} did not finish in time; continuing`,
-        );
         never.resolve();
       }),
   );
@@ -884,8 +953,10 @@ describe("server move coordinator", () => {
   it("treats an already-activated target as switched and never aborts it", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const { environment, events, plugins, retired } =
         createTestServerMoveEnvironment(harness);
+
       const coordinator = createServerMoveCoordinator(environment);
       registerFakeDaemon(harness, { events, hostId: OLD, handle: probeReply });
       registerFakeDaemon(harness, {
@@ -920,8 +991,10 @@ describe("server move coordinator", () => {
     withTestHarness(async (harness) => {
       seedTopology(harness);
       const config = await writeConfig(harness, { unknownKey: true });
+
       const { environment, events, plugins } =
         createTestServerMoveEnvironment(harness);
+
       const coordinator = createServerMoveCoordinator(environment);
       registerFakeDaemon(harness, { events, hostId: OLD, handle: probeReply });
       registerFakeDaemon(harness, {
@@ -934,6 +1007,9 @@ describe("server move coordinator", () => {
       await coordinator.start(START_DIRECT);
       await expect
         .poll(() => events.includes(`${NEW}:server_move.abort`))
+        .toBe(true);
+      await expect
+        .poll(() => events.includes("deferred-work:resumed"))
         .toBe(true);
 
       expect(coordinator.getStatus()).toMatchObject({
@@ -955,8 +1031,10 @@ describe("server move coordinator", () => {
   it("cancels while the target prepares, ignores its late reply, and allows a new move", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const { environment, events, plugins, retired } =
         createTestServerMoveEnvironment(harness);
+
       const coordinator = createServerMoveCoordinator(environment);
       const prepareReply = createDeferredPromise<FakeDaemonReply>();
       let prepares = 0;
@@ -966,24 +1044,28 @@ describe("server move coordinator", () => {
         hostId: WORKER,
         handle: probeReply,
       });
+
       const target = registerFakeDaemon(harness, {
         events,
         hostId: NEW,
         handle: (request) => {
           if (request.command.type === "server_move.prepare") {
             prepares += 1;
+
             if (prepares === 1) {
               return prepareReply.promise;
             }
           }
+
           return targetReply(request);
         },
       });
+
       const session = openSession(harness.db, {
         hostId: NEW,
         instanceId: "instance-new",
         hostName: "Desktop",
-        dataDir: "/home/me/.bb-machines/laptop",
+        dataDir: "/home/me/.omnyo-machines/laptop",
         protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
         heartbeatIntervalMs: 5_000,
         leaseTimeoutMs: 30_000,
@@ -1018,7 +1100,7 @@ describe("server move coordinator", () => {
       expect(isServerMoveFrozen(harness.db)).toBe(true);
       expect(plugins.suspends).toBe(1);
 
-      const cancelled = coordinator.cancel();
+      const cancelled = await coordinator.cancel();
 
       expect(cancelled).toMatchObject({
         moveId: started.moveId,
@@ -1050,7 +1132,7 @@ describe("server move coordinator", () => {
       expect(events).not.toContain(`${NEW}:server_move.activate`);
       expect(events).not.toContain("plugins:stop");
       expect(plugins).toMatchObject({ resumes: 1, stops: 0, suspends: 1 });
-      expect(captureError(() => coordinator.cancel())).toMatchObject({
+      expect(await captureError(() => coordinator.cancel())).toMatchObject({
         status: 409,
         body: { code: "server_move_not_cancellable" },
       });
@@ -1070,6 +1152,7 @@ describe("server move coordinator", () => {
   it("keeps the tunnel up during activation and retries an unconfirmed activation", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const { environment, events, plugins, retired } =
         createTestServerMoveEnvironment(harness, {
           timings: {
@@ -1078,6 +1161,7 @@ describe("server move coordinator", () => {
             activateRetryWindowMs: 2_000,
           },
         });
+
       const coordinator = createServerMoveCoordinator(environment);
       const lostReply = createDeferredPromise<FakeDaemonReply>();
       let activations = 0;
@@ -1094,8 +1178,10 @@ describe("server move coordinator", () => {
           if (request.command.type !== "server_move.activate") {
             return targetReply(request);
           }
+
           activations += 1;
           expect(plugins.stops).toBe(0);
+
           return activations === 1 ? lostReply.promise : ok({ ok: true });
         },
       });
@@ -1123,11 +1209,14 @@ describe("server move coordinator", () => {
   it("keeps a direct move frozen in recovery_required when activation is unconfirmed, then finishes once the destination is ready", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const config = await writeConfig(harness, {
-        config: { BB_LOG_LEVEL: "info" },
+        config: { OMNYO_LOG_LEVEL: "info" },
       });
+
       const { environment, events, plugins, retired } =
         createTestServerMoveEnvironment(harness, { timings: RECOVERY_TIMINGS });
+
       const coordinator = createServerMoveCoordinator(environment);
       const destination: { state: "pending" | "ready" } = { state: "pending" };
       registerFakeDaemon(harness, {
@@ -1218,14 +1307,17 @@ describe("server move coordinator", () => {
       }
     }));
 
-  it("keeps a bb connect move in recovery_required with the tunnel up and retries activation when the target reconnects", () =>
+  it("keeps an Omnyo connect move in recovery_required with the tunnel up and retries activation when the target reconnects", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const base = createTestServerMoveEnvironment(harness, {
         timings: RECOVERY_TIMINGS,
       });
+
       const { events, plugins, retired } = base;
-      const grantHeaders = { "x-bb-connect-machine": "bbcm_laptop" };
+      const grantHeaders = { "x-omnyo-connect-machine": "bbcm_laptop" };
+
       const coordinator = createServerMoveCoordinator({
         ...base.environment,
         resolveMode: async () => ({
@@ -1238,6 +1330,7 @@ describe("server move coordinator", () => {
           headers: grantHeaders,
         }),
       });
+
       const old = registerFakeDaemon(harness, {
         events,
         hostId: OLD,
@@ -1250,6 +1343,7 @@ describe("server move coordinator", () => {
               })
             : probeReply(request),
       });
+
       registerFakeDaemon(harness, {
         events,
         hostId: WORKER,
@@ -1257,15 +1351,19 @@ describe("server move coordinator", () => {
       });
       let activations = 0;
       const drop = dropOnActivation(harness);
+
       const targetHandler = (
         request: HostDaemonOnlineRpcRequestMessage,
       ): FakeDaemonReply | Promise<FakeDaemonReply> => {
         if (request.command.type !== "server_move.activate") {
           return targetReply(request);
         }
+
         activations += 1;
+
         return activations === 1 ? drop(request) : ok({ ok: true });
       };
+
       registerFakeDaemon(harness, {
         events,
         hostId: NEW,
@@ -1313,13 +1411,16 @@ describe("server move coordinator", () => {
   it("abandons a move in recovery_required on cancel and never finishes it later", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const config = await writeConfig(harness, {
-        config: { BB_LOG_LEVEL: "info" },
+        config: { OMNYO_LOG_LEVEL: "info" },
       });
+
       const { environment, events, plugins } = createTestServerMoveEnvironment(
         harness,
         { timings: RECOVERY_TIMINGS },
       );
+
       const coordinator = createServerMoveCoordinator(environment);
       const destination: { state: "pending" | "ready" } = { state: "pending" };
       registerFakeDaemon(harness, {
@@ -1348,15 +1449,23 @@ describe("server move coordinator", () => {
           .toBe("recovery_required");
         expect(isServerMoveSnapshotFenced(harness.db)).toBe(true);
 
-        const cancelled = coordinator.cancel();
+        const refused = await coordinator.cancel();
+        expect(refused.state).toBe("recovery_required");
+        expect(coordinator.isFrozen()).toBe(true);
+        expect(isServerMoveSnapshotFenced(harness.db)).toBe(true);
+        registerFakeDaemon(harness, {
+          events,
+          hostId: NEW,
+          handle: targetReply,
+        });
+        const cancelled = await coordinator.cancel();
 
         expect(cancelled).toMatchObject({
           state: "cancelled",
           cancellable: false,
           error: {
             step: "switch",
-            message:
-              "The move was abandoned before Desktop confirmed it took over",
+            message: "The move was cancelled",
           },
         });
         expect(coordinator.isFrozen()).toBe(false);
@@ -1392,12 +1501,14 @@ describe("server move coordinator", () => {
       }
     }));
 
-  it("rolls back when the target is gone before activation can be sent", () =>
+  it("retains source authority when the target is gone before activation can be sent", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const config = await writeConfig(harness, {
-        config: { BB_LOG_LEVEL: "info" },
+        config: { OMNYO_LOG_LEVEL: "info" },
       });
+
       const { environment, events, plugins } = createTestServerMoveEnvironment(
         harness,
         {
@@ -1407,10 +1518,13 @@ describe("server move coordinator", () => {
           },
         },
       );
+
       const coordinator = createServerMoveCoordinator(environment);
+
       const handles: { targetSessionId: string | null } = {
         targetSessionId: null,
       };
+
       registerFakeDaemon(harness, { events, hostId: OLD, handle: probeReply });
       registerFakeDaemon(harness, {
         events,
@@ -1422,6 +1536,7 @@ describe("server move coordinator", () => {
           ) {
             harness.hub.unregisterDaemon(handles.targetSessionId);
           }
+
           return probeReply(request);
         },
       });
@@ -1432,12 +1547,14 @@ describe("server move coordinator", () => {
       }).sessionId;
 
       await coordinator.start(START_DIRECT);
-      await expect.poll(() => coordinator.getStatus()?.state).toBe("failed");
-      await expect.poll(() => plugins.resumes).toBe(1);
+      await expect
+        .poll(() => coordinator.getStatus()?.state)
+        .toBe("recovery_required");
+      expect(plugins.resumes).toBe(0);
 
       expect(coordinator.getStatus()?.error).toEqual({
         step: "switch",
-        message: "Desktop disconnected before it could take over",
+        message: "Target fencing is unconfirmed: Host is not connected",
       });
       expect(events).not.toContain(`${NEW}:server_move.activate`);
       expect(events).not.toContain("plugins:stop");
@@ -1445,7 +1562,10 @@ describe("server move coordinator", () => {
       expect(events.some((event) => event.startsWith("server.moved"))).toBe(
         false,
       );
-      expect(await readServerMovedFile(harness.config.dataDir)).toBeNull();
+      expect(await readServerMovedFile(harness.config.dataDir)).not.toBeNull();
+      expect(coordinator.isFrozen()).toBe(true);
+      registerFakeDaemon(harness, { events, hostId: NEW, handle: targetReply });
+      await coordinator.cancel();
       expect(JSON.parse(await readFile(config.path, "utf8"))).toEqual(
         JSON.parse(config.text),
       );
@@ -1458,6 +1578,7 @@ describe("server move coordinator", () => {
       const base = createTestServerMoveEnvironment(harness);
       const { events, plugins, retired } = base;
       const slowResume = createDeferredPromise<void>();
+
       const coordinator = createServerMoveCoordinator({
         ...base.environment,
         plugins: {
@@ -1469,6 +1590,7 @@ describe("server move coordinator", () => {
           },
         },
       });
+
       const secondPrepare = createDeferredPromise<FakeDaemonReply>();
       let prepares = 0;
       registerFakeDaemon(harness, { events, hostId: OLD, handle: probeReply });
@@ -1483,26 +1605,25 @@ describe("server move coordinator", () => {
         handle: (request) => {
           if (request.command.type === "server_move.prepare") {
             prepares += 1;
+
             return prepares === 1
               ? createDeferredPromise<FakeDaemonReply>().promise
               : secondPrepare.promise;
           }
+
           return targetReply(request);
         },
       });
 
-      await coordinator.start(START_DIRECT);
+      const first = await coordinator.start(START_DIRECT);
       await expect.poll(() => prepares).toBe(1);
-      coordinator.cancel();
+      const cancellation = coordinator.cancel();
       await expect.poll(() => plugins.resumes).toBe(1);
-
-      await coordinator.start(START_DIRECT);
-      await expect
-        .poll(() => coordinator.getStatus()?.steps[0]?.message)
-        .toBe("Pausing plugins");
-      await new Promise<void>((resolve) => setTimeout(resolve, 20));
-      expect(plugins.suspends).toBe(1);
+      expect((await coordinator.start(START_DIRECT)).moveId).toBe(first.moveId);
+      expect(isServerMoveFrozen(harness.db)).toBe(true);
       slowResume.resolve();
+      await cancellation;
+      await coordinator.start(START_DIRECT);
       await expect.poll(() => prepares).toBe(2);
 
       expect(coordinator.getStatus()?.state).toBe("preparing");
@@ -1511,7 +1632,7 @@ describe("server move coordinator", () => {
       expect(events.indexOf("plugins:resume:settled")).toBeLessThan(
         events.lastIndexOf("plugins:suspend"),
       );
-      expect(events).not.toContain("deferred-work:resumed");
+      expect(events).toContain("deferred-work:resumed");
 
       secondPrepare.resolve(
         ok({ localServerUrl: "http://127.0.0.1:39101", pid: 4242 }),
@@ -1520,13 +1641,14 @@ describe("server move coordinator", () => {
       expect(coordinator.getStatus()?.state).toBe("completed");
     }));
 
-  it("resumes nothing for a cancelled move whose release runs after a newer move took over", () =>
+  it("retains the cancelling owner until its pending suspension settles before a newer move", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
       const base = createTestServerMoveEnvironment(harness);
       const { events, plugins, retired } = base;
       const firstSuspension = createDeferredPromise<void>();
       let suspensions = 0;
+
       const coordinator = createServerMoveCoordinator({
         ...base.environment,
         plugins: {
@@ -1534,12 +1656,14 @@ describe("server move coordinator", () => {
           suspendAllButConnect: async () => {
             suspensions += 1;
             await base.environment.plugins.suspendAllButConnect();
+
             if (suspensions === 1) {
               await firstSuspension.promise;
             }
           },
         },
       });
+
       registerFakeDaemon(harness, { events, hostId: OLD, handle: probeReply });
       registerFakeDaemon(harness, {
         events,
@@ -1550,29 +1674,32 @@ describe("server move coordinator", () => {
 
       const first = await coordinator.start(START_DIRECT);
       await expect.poll(() => suspensions).toBe(1);
-      coordinator.cancel();
+      const cancellation = coordinator.cancel();
+      expect((await coordinator.start(START_DIRECT)).moveId).toBe(first.moveId);
+      expect(isServerMoveFrozen(harness.db)).toBe(true);
+      firstSuspension.resolve();
+      await cancellation;
       const second = await coordinator.start(START_DIRECT);
       expect(second.moveId).not.toBe(first.moveId);
-      await expect.poll(() => isServerMoveFrozen(harness.db)).toBe(true);
-      firstSuspension.resolve();
       await retired;
 
       expect(coordinator.getStatus()).toMatchObject({
         moveId: second.moveId,
         state: "completed",
       });
-      expect(plugins).toMatchObject({ resumes: 0, suspends: 2, stops: 1 });
-      expect(events).not.toContain("plugins:resume");
-      expect(events).not.toContain("deferred-work:resumed");
+      expect(plugins).toMatchObject({ resumes: 1, suspends: 2, stops: 1 });
+      expect(events).toContain("plugins:resume");
+      expect(events).toContain("deferred-work:resumed");
       expect(isServerMoveFrozen(harness.db)).toBe(true);
     }));
 
-  it("lets queued dispatch run at cancel while a slow plugin resume is still running", () =>
+  it("keeps queued dispatch held at cancel until strict plugin resume completes", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
       const base = createTestServerMoveEnvironment(harness);
       const { events, plugins } = base;
       const slowResume = createDeferredPromise<void>();
+
       const coordinator = createServerMoveCoordinator({
         ...base.environment,
         plugins: {
@@ -1583,6 +1710,7 @@ describe("server move coordinator", () => {
           },
         },
       });
+
       registerFakeDaemon(harness, { events, hostId: OLD, handle: probeReply });
       registerFakeDaemon(harness, {
         events,
@@ -1604,17 +1732,19 @@ describe("server move coordinator", () => {
         .toBe(true);
       expect(isServerMoveFrozen(harness.db)).toBe(true);
 
-      coordinator.cancel();
+      const cancellation = coordinator.cancel();
 
-      expect(coordinator.isFrozen()).toBe(false);
-      expect(isServerMoveFrozen(harness.db)).toBe(false);
+      expect(coordinator.isFrozen()).toBe(true);
+      expect(isServerMoveFrozen(harness.db)).toBe(true);
       await expect.poll(() => plugins.resumes).toBe(1);
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
-      expect(isServerMoveFrozen(harness.db)).toBe(false);
+      expect(isServerMoveFrozen(harness.db)).toBe(true);
       expect(plugins.paused).toBe(true);
       expect(events).not.toContain("deferred-work:resumed");
 
       slowResume.resolve();
+      await cancellation;
+      expect(isServerMoveFrozen(harness.db)).toBe(false);
       await expect
         .poll(() => events.includes("deferred-work:resumed"))
         .toBe(true);
@@ -1624,8 +1754,10 @@ describe("server move coordinator", () => {
   it("refuses to cancel once the switch starts", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const { environment, events, retired } =
         createTestServerMoveEnvironment(harness);
+
       const coordinator = createServerMoveCoordinator(environment);
       const activateReply = createDeferredPromise<FakeDaemonReply>();
       registerFakeDaemon(harness, { events, hostId: OLD, handle: probeReply });
@@ -1652,11 +1784,11 @@ describe("server move coordinator", () => {
         cancellable: false,
       });
 
-      expect(captureError(() => coordinator.cancel())).toMatchObject({
+      expect(await captureError(() => coordinator.cancel())).toMatchObject({
         status: 409,
         body: {
           code: "server_move_not_cancellable",
-          message: "The move can't be cancelled after the switch starts",
+          message: "No cancellable server move is in progress",
         },
       });
       activateReply.resolve(ok({ ok: true }));
@@ -1679,7 +1811,7 @@ describe("server move coordinator", () => {
             ? ok(
                 inspectResult({
                   existingServerData: {
-                    path: "/home/me/.bb",
+                    path: "/home/me/.omnyo",
                     sizeBytes: 1_024,
                   },
                 }),
@@ -1687,11 +1819,11 @@ describe("server move coordinator", () => {
             : targetReply(request),
       });
 
-      expect(captureError(() => coordinator.cancel())).toMatchObject({
+      expect(await captureError(() => coordinator.cancel())).toMatchObject({
         status: 409,
         body: {
           code: "server_move_not_cancellable",
-          message: "No server move is in progress",
+          message: "No cancellable server move is in progress",
         },
       });
       await expect(

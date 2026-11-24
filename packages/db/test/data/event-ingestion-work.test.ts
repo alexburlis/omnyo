@@ -10,8 +10,8 @@ import {
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
-import { threadScope } from "@bb/domain";
+} from "@omnyo/db";
+import { threadScope } from "@omnyo/domain";
 import { expect, it } from "vitest";
 
 it.each(["daemon", "stored", "import", "copy"] as const)(
@@ -20,32 +20,42 @@ it.each(["daemon", "stored", "import", "copy"] as const)(
     const db = createConnection(":memory:");
     migrate(db);
     const host = upsertHost(db, noopNotifier, { name: "ingestion" });
+
     const { project } = createProject(db, noopNotifier, {
       name: "ingestion",
       source: { type: "local_path", hostId: host.id, path: "/tmp/ingestion" },
     });
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "benchmark",
     });
+
     const source = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "benchmark",
     });
+
+    const eventsPerBatch = 128;
+    const epochWritesPerBatch = eventsPerBatch;
+
     const stored = (threadId: string) =>
-      Array.from({ length: 128 }, () => ({
+      Array.from({ length: eventsPerBatch }, () => ({
         threadId,
         scope: threadScope(),
         type: "system/error" as const,
         data: { message: "benchmark" },
       }));
+
     db.transaction((tx) =>
       appendStoredThreadEventsInTransaction(tx, stored(source.id)),
     );
     const copied = listStoredEventRows(db, { threadId: source.id });
     let sequence = 0;
+
     const append = () => {
       const inputs = stored(thread.id);
+
       switch (mode) {
         case "daemon":
           db.transaction((tx) =>
@@ -93,17 +103,30 @@ it.each(["daemon", "stored", "import", "copy"] as const)(
           break;
       }
     };
+
     const changes = () =>
       db.$client.prepare("SELECT total_changes()").pluck().get();
+
+    const historyEpoch = () =>
+      db.$client
+        .prepare(
+          "SELECT epoch, high_water_sequence FROM thread_history_epochs WHERE thread_id = ?",
+        )
+        .get(thread.id);
+
     try {
       const before = changes();
+
       if (typeof before !== "number")
         throw new Error("Invalid SQLite change count");
       append();
       const after = changes();
+
       if (typeof after !== "number")
         throw new Error("Invalid SQLite change count");
-      expect(after - before).toBeLessThanOrEqual(128 + 1);
+      expect(after - before).toBeLessThanOrEqual(
+        eventsPerBatch + epochWritesPerBatch + 1,
+      );
       expect(
         db.$client
           .prepare(
@@ -114,9 +137,14 @@ it.each(["daemon", "stored", "import", "copy"] as const)(
       ).toBe(1);
       append();
       const coalesced = changes();
+
       if (typeof coalesced !== "number")
         throw new Error("Invalid SQLite change count");
-      expect(coalesced - after).toBe(128);
+      expect(coalesced - after).toBe(eventsPerBatch + epochWritesPerBatch);
+      const beforeRollback = historyEpoch();
+      expect(beforeRollback).toMatchObject({
+        high_water_sequence: eventsPerBatch * 2,
+      });
       db.$client
         .prepare("DELETE FROM thread_pruning_work WHERE thread_id = ?")
         .run(thread.id);
@@ -127,8 +155,9 @@ it.each(["daemon", "stored", "import", "copy"] as const)(
         }),
       ).toThrow("rollback ingestion");
       expect(listStoredEventRows(db, { threadId: thread.id })).toHaveLength(
-        256,
+        eventsPerBatch * 2,
       );
+      expect(historyEpoch()).toEqual(beforeRollback);
       expect(
         db.$client
           .prepare(

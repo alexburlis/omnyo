@@ -154,6 +154,32 @@ const SectionMoveStrokeRoundedIcon: IconSvgElement = [
   ],
 ];
 
+const CheckmarkCircleSolidIcon: IconSvgElement = [
+  [
+    "path",
+    {
+      d: "M12 1.1C5.98 1.1 1.1 5.98 1.1 12S5.98 22.9 12 22.9 22.9 18.02 22.9 12 18.02 1.1 12 1.1ZM8.78 11.72 10.47 13.41 15.19 8.26 16.81 9.74 10.53 16.59 7.22 13.28Z",
+      fill: "currentColor",
+      fillRule: "evenodd",
+      stroke: "none",
+      key: "0",
+    },
+  ],
+];
+
+const CircleDashedIcon: IconSvgElement = [
+  [
+    "path",
+    {
+      d: "M21.78 9.92A10 10 0 0 1 21.78 14.08M20.39 17.45A10 10 0 0 1 17.45 20.39M14.08 21.78A10 10 0 0 1 9.92 21.78M6.55 20.39A10 10 0 0 1 3.61 17.45M2.22 14.08A10 10 0 0 1 2.22 9.92M3.61 6.55A10 10 0 0 1 6.55 3.61M9.92 2.22A10 10 0 0 1 14.08 2.22M17.45 3.61A10 10 0 0 1 20.39 6.55",
+      stroke: "currentColor",
+      strokeLinecap: "round",
+      strokeWidth: "1.5",
+      key: "0",
+    },
+  ],
+];
+
 const CORE_ICON_MAP = {
   AlertCircle: AlertCircleIcon,
   AlertTriangle: Alert02Icon,
@@ -166,6 +192,8 @@ const CORE_ICON_MAP = {
   ChevronRight: ArrowRight01Icon,
   Circle: CircleIcon,
   CircleCheck: CheckmarkCircle02Icon,
+  CircleCheckSolid: CheckmarkCircleSolidIcon,
+  CircleDashed: CircleDashedIcon,
   CircleQuestion: HelpCircleIcon,
   CircleX: CancelCircleIcon,
   ClosePluginPane: Cancel01Icon,
@@ -215,6 +243,7 @@ const CORE_ICON_MAP = {
 type CoreIconName = keyof typeof CORE_ICON_MAP;
 
 export type BuiltinIconName = CoreIconName | ExtendedIconName;
+
 export type IconName = string;
 
 const CORE_ICON_NAMES = Object.keys(CORE_ICON_MAP) as readonly CoreIconName[];
@@ -238,6 +267,7 @@ export function preloadExtendedIcons(): Promise<void> {
       throw error;
     },
   );
+
   return extendedIconsLoad;
 }
 
@@ -253,6 +283,7 @@ export interface IconProps {
 }
 
 const ICON_NAME_SET: ReadonlySet<string> = new Set(ICON_NAMES);
+
 const IconAncestors = createContext<readonly string[]>([]);
 
 export function isBuiltinIconName(name: string): name is BuiltinIconName {
@@ -276,32 +307,39 @@ class IconErrorBoundary extends Component<
 
 export function Icon({ name, fallback = "Zap", ...props }: IconProps) {
   const ancestors = useContext(IconAncestors);
+
   const custom = useSyncExternalStore(
     subscribeAppIcons,
     () => getAppIcon(name),
     () => getAppIcon(name),
   );
+
   const fallbackCustom = useSyncExternalStore(
     subscribeAppIcons,
     () => getAppIcon(fallback),
     () => getAppIcon(fallback),
   );
+
   const asset = useSyncExternalStore(
     subscribePluginAssetIcons,
     () => getPluginAssetIcon(name),
     () => getPluginAssetIcon(name),
   );
+
   const fallbackAsset = useSyncExternalStore(
     subscribePluginAssetIcons,
     () => getPluginAssetIcon(fallback),
     () => getPluginAssetIcon(fallback),
   );
+
   const requestedExists =
     custom !== undefined || isBuiltinIconName(name) || asset !== undefined;
+
   const resolved = requestedExists ? name : fallback;
   const definition = requestedExists ? custom : fallbackCustom;
   const resolvedAsset = requestedExists ? asset : fallbackAsset;
   const CustomIcon = definition?.component;
+
   if (ancestors.includes(resolved)) {
     return (
       <BuiltinIcon
@@ -310,6 +348,7 @@ export function Icon({ name, fallback = "Zap", ...props }: IconProps) {
       />
     );
   }
+
   if (CustomIcon !== undefined && definition !== undefined) {
     return (
       <IconAncestors.Provider value={[...ancestors, resolved]}>
@@ -332,11 +371,13 @@ export function Icon({ name, fallback = "Zap", ...props }: IconProps) {
       </IconAncestors.Provider>
     );
   }
+
   if (CustomIcon === undefined && resolvedAsset !== undefined) {
     return (
       <PluginAssetIcon url={resolvedAsset} resolved={resolved} {...props} />
     );
   }
+
   return (
     <BuiltinIcon
       name={isBuiltinIconName(resolved) ? resolved : "Zap"}
@@ -357,6 +398,7 @@ function PluginAssetIcon({
   resolved: string;
 }) {
   const image = `url("${url.replace(/["\\]/gu, "\\$&")}")`;
+
   return (
     <span
       className={cn("inline-block size-6 shrink-0", className)}
@@ -390,6 +432,7 @@ function BuiltinIcon({
   "aria-label": ariaLabel,
 }: IconProps) {
   const coreIcon = CORE_ICON_LOOKUP[name];
+
   if (coreIcon !== undefined) {
     return (
       <HugeiconsIcon
@@ -403,6 +446,7 @@ function BuiltinIcon({
       />
     );
   }
+
   return (
     <ExtendedIcon
       name={name}
@@ -428,10 +472,13 @@ function ExtendedIcon({
     getExtendedIcons,
     getExtendedIcons,
   );
+
   const icon = extendedIcons?.[name];
+
   if (icon === undefined) {
     void preloadExtendedIcons().catch(() => undefined);
   }
+
   return (
     <HugeiconsIcon
       icon={icon ?? EMPTY_ICON}

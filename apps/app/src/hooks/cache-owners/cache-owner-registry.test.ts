@@ -35,17 +35,21 @@ function getSourceRoot(): string {
 
 function collectSourceFilePaths(directoryPath: string): string[] {
   const paths: string[] = [];
+
   for (const entryName of readdirSync(directoryPath)) {
     const entryPath = path.join(directoryPath, entryName);
     const stat = statSync(entryPath);
+
     if (stat.isDirectory()) {
       paths.push(...collectSourceFilePaths(entryPath));
       continue;
     }
+
     if (entryPath.endsWith(".ts") || entryPath.endsWith(".tsx")) {
       paths.push(entryPath);
     }
   }
+
   return paths;
 }
 
@@ -73,10 +77,10 @@ function isCacheBoundarySubject(relativePath: string): boolean {
   );
 }
 
-function parseSourceFile(filePath: string): ts.SourceFile {
+function parseSourceFile(filePath: string, source: string): ts.SourceFile {
   return ts.createSourceFile(
     toAppRelativePath(filePath),
-    readFileSync(filePath, "utf8"),
+    source,
     ts.ScriptTarget.Latest,
     true,
     filePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
@@ -90,6 +94,7 @@ function violationForNode(
   text: string,
 ): SourceFileViolation {
   const position = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+
   return {
     filePath: toAppRelativePath(filePath),
     line: position.line + 1,
@@ -99,12 +104,25 @@ function violationForNode(
 
 function collectRawCacheWriteViolations(): SourceFileViolation[] {
   const violations: SourceFileViolation[] = [];
+
   for (const filePath of collectSourceFilePaths(getSourceRoot())) {
     const relativePath = toAppRelativePath(filePath);
+
     if (isTestOrStoryFile(relativePath) || isCacheOwnerFile(relativePath)) {
       continue;
     }
-    const sourceFile = parseSourceFile(filePath);
+
+    const source = readFileSync(filePath, "utf8");
+
+    if (
+      !source.includes("\\u") &&
+      ![...RAW_CACHE_WRITE_METHODS].some((method) => source.includes(method))
+    ) {
+      continue;
+    }
+
+    const sourceFile = parseSourceFile(filePath, source);
+
     function visit(node: ts.Node): void {
       if (
         ts.isCallExpression(node) &&
@@ -120,24 +138,34 @@ function collectRawCacheWriteViolations(): SourceFileViolation[] {
           ),
         );
       }
+
       ts.forEachChild(node, visit);
     }
+
     visit(sourceFile);
   }
+
   return violations;
 }
 
 function collectCacheImportBoundaryViolations(): SourceFileViolation[] {
   const violations: SourceFileViolation[] = [];
+
   for (const filePath of collectSourceFilePaths(getSourceRoot())) {
     const relativePath = toAppRelativePath(filePath);
+
     if (
       isTestOrStoryFile(relativePath) ||
       !isCacheBoundarySubject(relativePath)
     ) {
       continue;
     }
-    const sourceFile = parseSourceFile(filePath);
+
+    const sourceFile = parseSourceFile(
+      filePath,
+      readFileSync(filePath, "utf8"),
+    );
+
     sourceFile.forEachChild((node) => {
       if (
         !ts.isImportDeclaration(node) ||
@@ -145,7 +173,9 @@ function collectCacheImportBoundaryViolations(): SourceFileViolation[] {
       ) {
         return;
       }
+
       const modulePath = node.moduleSpecifier.text;
+
       if (
         DISALLOWED_CACHE_IMPORT_SUFFIXES.some((suffix) =>
           modulePath.endsWith(suffix),
@@ -157,6 +187,7 @@ function collectCacheImportBoundaryViolations(): SourceFileViolation[] {
       }
     });
   }
+
   return violations;
 }
 

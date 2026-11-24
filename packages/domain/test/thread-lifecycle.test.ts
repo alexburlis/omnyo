@@ -1,25 +1,3 @@
-/**
- * THREAD LIFECYCLE — the designed two-axis model.
- *
- * This is no longer the behavior-neutral inventory of the original migration:
- * stop intent is now the `stopping` *status*, not a `stopRequestedAt`
- * side-field. The two axes are:
- *
- * - Execution status (one column): pending → starting → active → stopping →
- *   idle | error. Both the "working" intent (`active`) and the "stopping"
- *   intent (`stopping`) are real states here. `pending` sits before all of
- *   them: a thread that exists but has never cleared a dispatch attempt.
- * - Record fields (orthogonal): deletedAt, archivedAt — surfaced as the only
- *   supersession predicates (`notDeleted`, `notArchived`).
- *
- * `stop.requested` replaces the old `markThreadStopRequested` field write. A
- * `stopping` row has NO run.started cell: dispatching new work into it is
- * structurally impossible, which is the table form of the old
- * `notStopRequested` guard. A settled stop lands on `idle` (`stop.settled` or
- * `run.succeeded`) or `error` (`run.failed`). THREAD_LIFECYCLE and
- * THREAD_LIFECYCLE_EVENT_PREDICATES in src/thread-lifecycle.ts are the source
- * of truth; these assertions pin them.
- */
 import { describe, expect, it } from "vitest";
 import {
   evaluateThreadLifecycleEvent,
@@ -55,9 +33,11 @@ function statusWithCell(eventType: ThreadLifecycleEventType): ThreadStatus {
   const status = threadStatusValues.find(
     (candidate) => THREAD_LIFECYCLE[candidate][eventType] !== undefined,
   );
+
   if (!status) {
     throw new Error(`No table cell found for event ${eventType}`);
   }
+
   return status;
 }
 
@@ -93,6 +73,7 @@ describe("THREAD_LIFECYCLE table", () => {
         "run.succeeded": "idle",
         "run.failed": "error",
         "stop.requested": "stopping",
+        "stop.settled": "idle",
       },
       stopping: {
         "run.succeeded": "idle",
@@ -131,9 +112,11 @@ describe("evaluateThreadLifecycleEvent", () => {
     for (const status of threadStatusValues) {
       for (const eventType of allEventTypes) {
         const to = THREAD_LIFECYCLE[status][eventType];
+
         if (to === undefined) {
           continue;
         }
+
         expect(
           evaluateThreadLifecycleEvent({
             event: { type: eventType },
@@ -150,6 +133,7 @@ describe("evaluateThreadLifecycleEvent", () => {
         if (THREAD_LIFECYCLE[status][eventType] !== undefined) {
           continue;
         }
+
         expect(
           evaluateThreadLifecycleEvent({
             event: { type: eventType },
@@ -180,11 +164,13 @@ describe("evaluateThreadLifecycleEvent", () => {
     for (const eventType of allEventTypes) {
       const predicates = THREAD_LIFECYCLE_EVENT_PREDICATES[eventType];
       const status = statusWithCell(eventType);
+
       for (const signal of signals) {
         const evaluation = evaluateThreadLifecycleEvent({
           event: { type: eventType },
           thread: rowState(status, signal.overrides),
         });
+
         if (predicates[signal.flag]) {
           expect(evaluation).toEqual({
             noop: "superseded",

@@ -4,7 +4,7 @@ import {
   deriveConnectBaseUrl,
   redeemMachineCredential,
   type ConnectCredential,
-} from "@bb/connect-client";
+} from "@omnyo/connect-client";
 
 const CREATE_MACHINE_CODE_RPC = "createMachineCode";
 
@@ -52,7 +52,9 @@ function redeemFailureCode(
   error: ConnectMachineRedeemError,
 ): EnrollDesktopMachineFailureCode {
   if (error.code === "machine_limit") return "machine_limit";
+
   if (error.code === "network") return "network";
+
   return "invalid_response";
 }
 
@@ -64,6 +66,7 @@ export async function enrollDesktopMachine(
   const rpcUrl = `${base}/api/v1/plugins/connect/rpc/${CREATE_MACHINE_CODE_RPC}`;
 
   let response: Response;
+
   try {
     response = await fetchImpl(rpcUrl, {
       method: "POST",
@@ -78,6 +81,7 @@ export async function enrollDesktopMachine(
   }
 
   let body: unknown;
+
   try {
     body = await response.json();
   } catch {
@@ -85,15 +89,22 @@ export async function enrollDesktopMachine(
   }
 
   const minted = machineCodeRpcSchema.safeParse(body);
+
   if (!minted.success) {
     const rejected = rpcFailureSchema.safeParse(body);
     const wireError = rejected.success ? rejected.data.error.message : "";
+
     if (wireError === "not_paired") {
-      return failure("not_paired", "this bb is not paired with bb Connect");
+      return failure(
+        "not_paired",
+        "this Omnyo is not paired with Omnyo Connect",
+      );
     }
+
     if (wireError === "machine_limit") {
       return failure("machine_limit", "the account is at its machine limit");
     }
+
     return failure(
       "invalid_response",
       wireError.length > 0
@@ -110,11 +121,13 @@ export async function enrollDesktopMachine(
       },
       fetchImpl,
     );
+
     return { credential, ok: true };
   } catch (error) {
     if (error instanceof ConnectMachineRedeemError) {
       return failure(redeemFailureCode(error), error.message);
     }
+
     return failure(
       "network",
       error instanceof Error ? error.message : String(error),

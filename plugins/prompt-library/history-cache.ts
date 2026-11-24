@@ -1,9 +1,10 @@
-import type { BbPluginApi, ComposerDraftReplacement } from "@get-bb/plugin-sdk";
+import type { PluginApi, ComposerDraftReplacement } from "@omnyo/plugin-sdk";
 import { promptFromHistory, type HistoryEntry } from "./history-prompt.js";
 
-type ListHistory = BbPluginApi["sdk"]["experimental_promptHistory"]["list"];
+type ListHistory = PluginApi["sdk"]["experimental_promptHistory"]["list"];
 
 const FULL_PAGE_LIMIT = "1000";
+
 const NEWER_PAGE_LIMIT = "100";
 
 export interface HistoryCandidate {
@@ -36,19 +37,24 @@ export function createHistoryCache(list: ListHistory) {
     const entries: HistoryCandidate[] = [];
     const seen = new Set<string>();
     let cursor: string | null = null;
+
     do {
       const page = await list({
         limit,
         ...(cursor !== null ? { cursor } : {}),
       });
+
       for (const entry of page.entries) {
         if (knownIds.has(entry.id)) return entries;
+
         if (seen.has(entry.id)) continue;
         seen.add(entry.id);
         entries.push(candidate(entry));
       }
+
       cursor = page.nextCursor;
     } while (cursor !== null);
+
     return entries;
   }
 
@@ -60,12 +66,16 @@ export function createHistoryCache(list: ListHistory) {
           const entries = await loadUnknown(
             loaded ? NEWER_PAGE_LIMIT : FULL_PAGE_LIMIT,
           );
+
           for (const entry of entries) knownIds.add(entry.id);
           candidates = [...entries, ...candidates];
           loaded = true;
+
           return candidates;
         });
+
       pending = next;
+
       return next;
     },
   };

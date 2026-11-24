@@ -10,15 +10,16 @@ import {
   threadStatusSchema,
   threadVisibilitySchema,
   turnScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   ThreadEventRow,
   ThreadEventScope,
   ThreadEventScopeKind,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { z } from "zod";
 
 const corpusScopeKindSchema = z.enum(["thread", "turn"]);
+
 const corpusScopeKindCoversDomain: ThreadEventScopeKind extends z.infer<
   typeof corpusScopeKindSchema
 >
@@ -26,9 +27,10 @@ const corpusScopeKindCoversDomain: ThreadEventScopeKind extends z.infer<
     ? true
     : false
   : false = true;
+
 void corpusScopeKindCoversDomain;
 
-export const PROVIDER_CORPUS_DIR_ENV = "BB_PROVIDER_CORPUS_DIR";
+export const PROVIDER_CORPUS_DIR_ENV = "OMNYO_PROVIDER_CORPUS_DIR";
 
 const corpusPathSegmentSchema = z
   .string()
@@ -136,24 +138,29 @@ export function resolveProviderCorpusDir(
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
   const value = env[PROVIDER_CORPUS_DIR_ENV];
+
   if (value === undefined || value.trim().length === 0) {
     return null;
   }
+
   return path.resolve(value);
 }
 
 export function corpusAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
   const dir = resolveProviderCorpusDir(env);
+
   return dir !== null && fs.existsSync(path.join(dir, "manifest.json"));
 }
 
 function requireProviderCorpusDir(): string {
   const dir = resolveProviderCorpusDir();
+
   if (dir === null) {
     throw new Error(
       `${PROVIDER_CORPUS_DIR_ENV} is not set; guard the suite with corpusAvailable()`,
     );
   }
+
   return dir;
 }
 
@@ -165,19 +172,23 @@ export function listCorpusThreads(
   args: ListCorpusThreadsArgs = {},
 ): CorpusManifestThread[] {
   const dir = requireProviderCorpusDir();
+
   const manifest = corpusManifestSchema.parse(
     readJsonFile(path.join(dir, "manifest.json")),
   );
+
   return manifest.threads.filter((thread) => {
     if (args.provider !== undefined && thread.provider !== args.provider) {
       return false;
     }
+
     if (
       args.reasons !== undefined &&
       !args.reasons.some((reason) => thread.reasons.includes(reason))
     ) {
       return false;
     }
+
     return true;
   });
 }
@@ -226,11 +237,13 @@ function toStoredEventScope(row: CorpusStoredEventRow): ThreadEventScope {
   if (row.scopeKind === "thread") {
     return threadScope();
   }
+
   if (row.turnId === null) {
     throw new Error(
       `Corpus event ${row.id} (#${row.sequence}, ${row.type}) has turn scope without turn_id`,
     );
   }
+
   return turnScope(row.turnId);
 }
 
@@ -239,11 +252,13 @@ export function decodeCorpusStoredEventRow(
 ): ThreadEventRow {
   const scope = toStoredEventScope(row);
   const data: unknown = JSON.parse(row.data);
+
   if (data === null || typeof data !== "object" || Array.isArray(data)) {
     throw new Error(
       `Corpus event ${row.id} (#${row.sequence}, ${row.type}) has malformed data`,
     );
   }
+
   const event = parseStoredThreadEvent({
     type: row.type,
     data: z.record(z.string(), z.unknown()).parse(data),
@@ -251,6 +266,7 @@ export function decodeCorpusStoredEventRow(
     providerThreadId: row.providerThreadId,
     scope,
   });
+
   return buildThreadEventRow({
     id: row.id,
     scope,
@@ -274,44 +290,56 @@ function sameStringSet(
 export function loadCorpusThread(threadId: string): CorpusThread {
   const dir = requireProviderCorpusDir();
   const entry = listCorpusThreads().find((thread) => thread.id === threadId);
+
   if (entry === undefined) {
     throw new Error(`Corpus thread ${threadId} is not in manifest.json`);
   }
+
   const threadDir = path.join(dir, "threads", entry.provider, entry.id);
+
   const meta = corpusMetaSchema.parse(
     readJsonFile(path.join(threadDir, "meta.json")),
   );
+
   if (meta.thread.id !== entry.id) {
     throw new Error(
       `Corpus thread ${threadId}: meta.json names thread ${meta.thread.id}`,
     );
   }
+
   if (meta.thread.provider_id !== entry.provider) {
     throw new Error(
       `Corpus thread ${threadId}: meta.json names provider ${meta.thread.provider_id}; manifest says ${entry.provider}`,
     );
   }
+
   if (!sameStringSet(meta.reasons, entry.reasons)) {
     throw new Error(
       `Corpus thread ${threadId}: meta.json reasons [${meta.reasons.join(", ")}] differ from manifest [${entry.reasons.join(", ")}]`,
     );
   }
+
   const ndjson = fs.readFileSync(path.join(threadDir, "events.ndjson"), "utf8");
   const eventRows: CorpusStoredEventRow[] = [];
+
   for (const line of ndjson.split("\n")) {
     if (line.length === 0) {
       continue;
     }
+
     const row = toCorpusStoredEventRow(
       corpusEventRowSchema.parse(JSON.parse(line)),
     );
+
     if (row.threadId !== entry.id) {
       throw new Error(
         `Corpus thread ${threadId}: event ${row.id} (#${row.sequence}) belongs to thread ${row.threadId}`,
       );
     }
+
     eventRows.push(row);
   }
+
   if (
     eventRows.length !== meta.event_rows ||
     eventRows.length !== entry.events
@@ -320,6 +348,7 @@ export function loadCorpusThread(threadId: string): CorpusThread {
       `Corpus thread ${threadId} has ${eventRows.length} event rows; meta.json says ${meta.event_rows}, manifest says ${entry.events}`,
     );
   }
+
   return {
     id: meta.thread.id,
     provider: meta.thread.provider_id,

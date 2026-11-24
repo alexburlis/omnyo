@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { resolveShellIncomingLink } from "./shell-links";
 
 const profiles = [
-  { id: "p_bee", serverUrl: "https://bee.getbb.app" },
+  { id: "p_bee", serverUrl: "https://bee.example.test" },
   { id: "p_lan", serverUrl: "http://10.0.0.7:38886" },
-  { id: "p_prefix", serverUrl: "https://box.example.ts.net/bb" },
+  { id: "p_prefix", serverUrl: "https://box.example.ts.net/omnyo" },
 ];
 
 const context = {
@@ -15,15 +15,17 @@ const context = {
 
 describe("resolveShellIncomingLink", () => {
   it.each([
-    ["bb://", "/webview"],
-    ["bb://threads/thr_1", "/webview?path=%2Fthreads%2Fthr_1"],
-    ["bb://connect?code=ABCD-EFGH", "/connect?code=ABCD-EFGH"],
-    ["bb://settings/servers/add", "/settings/servers/add"],
-    ["bb://settings/device", "/settings/device"],
-    ["bb://settings/notifications", "/settings/notifications"],
-    ["bb://settings", "/webview?path=%2Fsettings"],
-    ["bb://settings/general", "/webview?path=%2Fsettings%2Fgeneral"],
-    ["bb://connections", "/webview?path=%2Fconnections"],
+    ["omnyo://settings/device", "/settings/device"],
+    ["omnyo://settings/notifications", "/settings/notifications"],
+    ["omnyo://settings/general", "/webview?path=%2Fsettings%2Fgeneral"],
+    ["omnyo://connections", "/webview?path=%2Fconnections"],
+    ["omnyo://", "/webview"],
+    ["omnyo://threads/thr_1", "/webview?path=%2Fthreads%2Fthr_1"],
+    ["omnyo://connect?code=ABCD-EFGH", "/connect?code=ABCD-EFGH"],
+    ["omnyo://settings/servers", "/settings/servers"],
+    ["omnyo://settings/servers/add", "/settings/servers/add"],
+    ["omnyo://settings/machines", "/webview?path=%2Fsettings%2Fmachines"],
+    ["omnyo://settings", "/webview?path=%2Fsettings"],
   ])("routes the scheme link %s to %s", (url, path) => {
     expect(resolveShellIncomingLink(url, context)).toEqual({
       kind: "navigate",
@@ -33,11 +35,11 @@ describe("resolveShellIncomingLink", () => {
   });
 
   it("hides developer routes in a release bundle", () => {
-    expect(resolveShellIncomingLink("bb://dev/webview-spike", context)).toEqual(
-      { kind: "navigate", path: "/", profileId: null },
-    );
     expect(
-      resolveShellIncomingLink("bb://dev/webview-spike", {
+      resolveShellIncomingLink("omnyo://dev/webview-spike", context),
+    ).toEqual({ kind: "navigate", path: "/", profileId: null });
+    expect(
+      resolveShellIncomingLink("omnyo://dev/webview-spike", {
         ...context,
         developerRoutesEnabled: true,
       }),
@@ -50,7 +52,10 @@ describe("resolveShellIncomingLink", () => {
 
   it("opens a web link on the profile that owns it", () => {
     expect(
-      resolveShellIncomingLink("https://bee.getbb.app/threads/x?a=1", context),
+      resolveShellIncomingLink(
+        "https://bee.example.test/threads/x?a=1",
+        context,
+      ),
     ).toEqual({
       kind: "navigate",
       path: "/webview?path=%2Fthreads%2Fx%3Fa%3D1",
@@ -63,6 +68,7 @@ describe("resolveShellIncomingLink", () => {
       "http://10.0.0.7:38886/threads/x",
       context,
     );
+
     expect(resolution).toEqual({
       kind: "navigate",
       path: "/webview?profileId=p_lan&path=%2Fthreads%2Fx",
@@ -82,9 +88,10 @@ describe("resolveShellIncomingLink", () => {
 
   it("strips a profile's mount prefix from the page path", () => {
     const resolution = resolveShellIncomingLink(
-      "https://box.example.ts.net/bb/threads/x",
+      "https://box.example.ts.net/omnyo/threads/x",
       context,
     );
+
     expect(resolution).toEqual({
       kind: "navigate",
       path: "/webview?profileId=p_prefix&path=%2Fthreads%2Fx",
@@ -94,12 +101,14 @@ describe("resolveShellIncomingLink", () => {
 
   it("offers to add a server the phone does not know", () => {
     const resolution = resolveShellIncomingLink(
-      "https://other.getbb.app/threads/x",
+      "https://other.example.test/threads/x",
       context,
     );
+
     expect(resolution.kind).toBe("unknown-server");
+
     if (resolution.kind !== "unknown-server") throw new Error("unreachable");
-    expect(resolution.serverUrl).toBe("https://other.getbb.app");
+    expect(resolution.serverUrl).toBe("https://other.example.test");
     expect(resolution.path).toBe("/webview?path=%2Fthreads%2Fx");
   });
 
@@ -107,5 +116,48 @@ describe("resolveShellIncomingLink", () => {
     expect(
       resolveShellIncomingLink("exp+bb-app://expo-development-client", context),
     ).toEqual({ kind: "passthrough" });
+    expect(resolveShellIncomingLink("bb://threads/thr_1", context)).toEqual({
+      kind: "passthrough",
+    });
+  });
+});
+
+describe("workflow import links", () => {
+  const shareId = "a".repeat(32);
+  it.each([`omnyo://workflows/import/${shareId}`])(
+    "requires a recipient server choice for %s",
+    (url) => {
+      expect(resolveShellIncomingLink(url, context)).toEqual({
+        kind: "navigate",
+        path: `/workflows/import?shareId=${shareId}`,
+        profileId: null,
+      });
+      expect(
+        resolveShellIncomingLink(url, {
+          ...context,
+          profiles: [],
+          activeProfileId: null,
+        }),
+      ).toEqual({
+        kind: "navigate",
+        path: `/workflows/import?shareId=${shareId}`,
+        profileId: null,
+      });
+    },
+  );
+  it("leaves the public HTTPS landing in the browser", () => {
+    expect(
+      resolveShellIncomingLink(`https://omnyohq.com/w/${shareId}`, context),
+    ).toEqual({ kind: "passthrough" });
+  });
+  it.each([
+    "omnyo://workflows/import/../secrets",
+    `omnyo://workflows/import/${shareId}?server=https://attacker.invalid`,
+  ])("does not forward destination injection %s", (url) => {
+    expect(resolveShellIncomingLink(url, context)).toEqual({
+      kind: "navigate",
+      path: "/workflows/import",
+      profileId: null,
+    });
   });
 });

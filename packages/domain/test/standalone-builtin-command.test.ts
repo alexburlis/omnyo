@@ -16,9 +16,11 @@ function promptCommandInput(
   const commandText = `/${name}`;
   const text = args?.text ?? commandText;
   const start = text.indexOf(commandText);
+
   if (start === -1) {
     throw new Error(`Missing ${commandText} command text in "${text}".`);
   }
+
   return {
     type: "text",
     text,

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   ANDROID_ASSET_LINKS_PATH,
   APPLE_APP_SITE_ASSOCIATION_PATH,
-  BB_MOBILE_ANDROID_PACKAGE,
-  BB_MOBILE_IOS_APP_ID,
+  OMNYO_MOBILE_ANDROID_PACKAGE,
+  OMNYO_MOBILE_IOS_APP_ID,
   handleAppLinkAssociationRequest,
   parseAssetLinksFingerprints,
 } from "../src/app-links.js";
@@ -13,20 +13,23 @@ describe("app link association files", () => {
     const response = handleAppLinkAssociationRequest(
       {
         method: "GET",
-        url: `https://sawyer.getbb.app${APPLE_APP_SITE_ASSOCIATION_PATH}`,
+        url: `https://sawyer.example.test${APPLE_APP_SITE_ASSOCIATION_PATH}`,
       },
       {},
     );
+
     expect(response?.status).toBe(200);
     expect(response?.headers.get("content-type")).toBe("application/json");
+
     const body = (await response?.json()) as {
       applinks: Record<string, unknown> & {
         details: Record<string, unknown>[];
       };
     };
+
     expect(body.applinks.details).toEqual([
       {
-        appIDs: [BB_MOBILE_IOS_APP_ID],
+        appIDs: [OMNYO_MOBILE_IOS_APP_ID],
         components: [
           { "/": "/threads/*" },
           { "/": "/projects/*" },
@@ -39,22 +42,28 @@ describe("app link association files", () => {
 
   it("serves assetlinks.json with the fingerprints from the env (empty when unset)", async () => {
     const unset = handleAppLinkAssociationRequest(
-      { method: "GET", url: `https://getbb.app${ANDROID_ASSET_LINKS_PATH}` },
+      { method: "GET", url: `https://example.test${ANDROID_ASSET_LINKS_PATH}` },
       {},
     );
+
     const unsetBody = (await unset?.json()) as {
       target: { package_name: string; sha256_cert_fingerprints: string[] };
     }[];
-    expect(unsetBody[0]?.target.package_name).toBe(BB_MOBILE_ANDROID_PACKAGE);
+
+    expect(unsetBody[0]?.target.package_name).toBe(
+      OMNYO_MOBILE_ANDROID_PACKAGE,
+    );
     expect(unsetBody[0]?.target.sha256_cert_fingerprints).toEqual([]);
 
     const set = handleAppLinkAssociationRequest(
-      { method: "GET", url: `https://getbb.app${ANDROID_ASSET_LINKS_PATH}` },
+      { method: "GET", url: `https://example.test${ANDROID_ASSET_LINKS_PATH}` },
       { ASSETLINKS_SHA256_FINGERPRINTS: "aa:bb:cc, dd:ee:ff\n11:22" },
     );
+
     const setBody = (await set?.json()) as {
       target: { sha256_cert_fingerprints: string[] };
     }[];
+
     expect(setBody[0]?.target.sha256_cert_fingerprints).toEqual([
       "AA:BB:CC",
       "DD:EE:FF",
@@ -66,31 +75,35 @@ describe("app link association files", () => {
   it("ignores other paths and refuses non-GET methods", () => {
     expect(
       handleAppLinkAssociationRequest(
-        { method: "GET", url: "https://getbb.app/.well-known/other" },
+        { method: "GET", url: "https://example.test/.well-known/other" },
         {},
       ),
     ).toBeNull();
     expect(
       handleAppLinkAssociationRequest(
-        { method: "GET", url: "https://getbb.app/threads/x" },
+        { method: "GET", url: "https://example.test/threads/x" },
         {},
       ),
     ).toBeNull();
+
     const post = handleAppLinkAssociationRequest(
       {
         method: "POST",
-        url: `https://getbb.app${APPLE_APP_SITE_ASSOCIATION_PATH}`,
+        url: `https://example.test${APPLE_APP_SITE_ASSOCIATION_PATH}`,
       },
       {},
     );
+
     expect(post?.status).toBe(405);
+
     const head = handleAppLinkAssociationRequest(
       {
         method: "HEAD",
-        url: `https://getbb.app${APPLE_APP_SITE_ASSOCIATION_PATH}`,
+        url: `https://example.test${APPLE_APP_SITE_ASSOCIATION_PATH}`,
       },
       {},
     );
+
     expect(head?.status).toBe(200);
     expect(head?.body).toBeNull();
   });

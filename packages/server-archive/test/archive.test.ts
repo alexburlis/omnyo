@@ -18,6 +18,7 @@ import type { EntryTypeName } from "tar/types";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   extractServerArchive,
+  SERVER_ARCHIVE_FORMAT,
   SERVER_ARCHIVE_VERSION,
   ServerArchiveError,
   type ServerArchiveErrorCode,
@@ -29,8 +30,12 @@ import {
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "bb-server-archive-"));
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "omnyo-server-archive-"),
+  );
+
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 
@@ -44,10 +49,10 @@ afterEach(async () => {
 
 const MANIFEST_INPUT: ServerArchiveManifestInput = {
   createdAt: Date.UTC(2026, 8, 15, 12, 0, 0),
-  bbVersion: "0.43.1",
+  appVersion: "0.43.1",
   protocolVersion: 209,
   migrationCount: 142,
-  sourceDataDir: "/home/old/.bb",
+  sourceDataDir: "/home/old/.omnyo",
   sourceServerHostId: "host-old",
   serverMoveExperiment: true,
 };
@@ -61,11 +66,14 @@ interface SourceTree {
 async function createSourceTree(): Promise<SourceTree> {
   const root = await makeTempDir();
   const longSegment = "a-very-long-directory-name-that-forces-pax-headers";
+
   const sources: Array<{ archivePath: string; body: Buffer; mode: number }> = [
-    { archivePath: "bb.db", body: randomBytes(300 * 1024), mode: 0o644 },
+    { archivePath: "app.db", body: randomBytes(300 * 1024), mode: 0o644 },
     {
       archivePath: "config.json",
-      body: Buffer.from(JSON.stringify({ config: { BB_LOG_LEVEL: "debug" } })),
+      body: Buffer.from(
+        JSON.stringify({ config: { OMNYO_LOG_LEVEL: "debug" } }),
+      ),
       mode: 0o600,
     },
     { archivePath: "telemetry-id", body: Buffer.alloc(0), mode: 0o644 },
@@ -85,8 +93,10 @@ async function createSourceTree(): Promise<SourceTree> {
       mode: 0o644,
     },
   ];
+
   const files: ServerArchiveSourceFile[] = [];
   const contents = new Map<string, Buffer>();
+
   for (const [index, source] of sources.entries()) {
     const sourcePath = path.join(root, "source", `${String(index)}.bin`);
     await mkdir(path.dirname(sourcePath), { recursive: true });
@@ -95,6 +105,7 @@ async function createSourceTree(): Promise<SourceTree> {
     files.push({ sourcePath, archivePath: source.archivePath });
     contents.set(source.archivePath, source.body);
   }
+
   return { root, files, contents };
 }
 
@@ -106,16 +117,21 @@ async function expectArchiveError(
     () => null,
     (reason: unknown) => reason,
   );
+
   expect(error).toBeInstanceOf(ServerArchiveError);
+
   if (!(error instanceof ServerArchiveError)) {
     throw new Error("expected a ServerArchiveError");
   }
+
   expect(codes).toContain(error.code);
+
   return error;
 }
 
 async function listFilesRecursively(root: string): Promise<string[]> {
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
+
   return entries
     .filter((entry) => !entry.isDirectory())
     .map((entry) =>
@@ -135,6 +151,7 @@ async function expectExtractedTree(
   expect(await listFilesRecursively(filesDir)).toEqual(
     [...tree.contents.keys()].sort(),
   );
+
   for (const [archivePath, body] of tree.contents) {
     expect(
       await readFile(path.join(filesDir, ...archivePath.split("/"))),
@@ -156,8 +173,10 @@ interface CraftedEntry {
 
 function craftArchive(entries: CraftedEntry[]): Buffer {
   const chunks: Buffer[] = [];
+
   for (const entry of entries) {
     const body = entry.body ?? Buffer.alloc(0);
+
     const header = new Header({
       path: entry.path,
       mode: 0o644,
@@ -168,24 +187,29 @@ function craftArchive(entries: CraftedEntry[]): Buffer {
       type: entry.type ?? "File",
       linkpath: entry.linkpath,
     });
+
     header.encode();
+
     if (header.block === undefined) {
       throw new Error("failed to encode crafted header");
     }
+
     chunks.push(
       header.block,
       body,
       Buffer.alloc((512 - (body.length % 512)) % 512),
     );
   }
+
   chunks.push(Buffer.alloc(1024));
+
   return gzipSync(Buffer.concat(chunks));
 }
 
 function craftedManifest(files: Array<{ path: string; body: Buffer }>): Buffer {
   return Buffer.from(
     JSON.stringify({
-      format: "bb-server-archive",
+      format: SERVER_ARCHIVE_FORMAT,
       version: SERVER_ARCHIVE_VERSION,
       ...MANIFEST_INPUT,
       entries: files.map((file) => ({
@@ -206,6 +230,7 @@ async function extractCrafted(entries: CraftedEntry[]): Promise<{
   const archivePath = path.join(root, "crafted.tar.gz");
   await writeFile(archivePath, craftArchive(entries));
   const destinationDir = path.join(root, "nested", "staging");
+
   return {
     result: extractServerArchive({ archivePath, destinationDir }),
     destinationDir,
@@ -228,13 +253,16 @@ describe("writeServerArchive and extractServerArchive", () => {
     expect(archiveBytes.subarray(0, 2)).toEqual(Buffer.from([0x1f, 0x8b]));
     expect(written.sizeBytes).toBe(archiveBytes.length);
     expect(written.sha256).toBe(sha256(archiveBytes));
+
     if (process.platform !== "win32") {
       expect((await stat(outPath)).mode & 0o777).toBe(0o600);
     }
+
     expect(await readdir(path.dirname(outPath))).toEqual(["server.tar.gz"]);
     expect(written.manifest.entries).toEqual(
       tree.files.map((file) => {
         const body = tree.contents.get(file.archivePath) ?? Buffer.alloc(0);
+
         return {
           path: file.archivePath,
           size: body.length,
@@ -244,6 +272,7 @@ describe("writeServerArchive and extractServerArchive", () => {
     );
 
     const destinationDir = path.join(tree.root, "staging");
+
     const manifest = await extractServerArchive({
       archivePath: outPath,
       destinationDir,
@@ -251,13 +280,62 @@ describe("writeServerArchive and extractServerArchive", () => {
 
     expect(manifest).toEqual(written.manifest);
     await expectExtractedTree(destinationDir, tree);
+
     const toolPath = path.join(
       destinationDir,
       "files",
       ...(tree.files[3]?.archivePath ?? "").split("/"),
     );
+
     if (process.platform !== "win32") {
       expect((await stat(toolPath)).mode & 0o100).toBe(0o100);
+    }
+  });
+
+  it("archives in-memory contents with private permissions instead of reading their source path", async () => {
+    const root = await makeTempDir();
+    const sealedPath = path.join(root, "source", "token");
+    await mkdir(path.dirname(sealedPath), { recursive: true });
+    await writeFile(sealedPath, "omnyo-vault:1:ciphertext-on-disk");
+    const plaintext = Buffer.from("decrypted-token-value\n");
+    const outPath = path.join(root, "out", "server.tar.gz");
+
+    const written = await writeServerArchive({
+      outPath,
+      files: [
+        {
+          archivePath: "plugins/tasks/secrets/token",
+          sourcePath: sealedPath,
+          contents: plaintext,
+        },
+      ],
+      manifest: MANIFEST_INPUT,
+    });
+
+    expect(written.manifest.entries).toEqual([
+      {
+        path: "plugins/tasks/secrets/token",
+        size: plaintext.length,
+        sha256: sha256(plaintext),
+      },
+    ]);
+
+    const destinationDir = path.join(root, "staging");
+    await extractServerArchive({ archivePath: outPath, destinationDir });
+
+    const extractedPath = path.join(
+      destinationDir,
+      "files",
+      "plugins",
+      "tasks",
+      "secrets",
+      "token",
+    );
+
+    expect(await readFile(extractedPath)).toEqual(plaintext);
+
+    if (process.platform !== "win32") {
+      expect((await stat(extractedPath)).mode & 0o777).toBe(0o600);
     }
   });
 
@@ -265,18 +343,21 @@ describe("writeServerArchive and extractServerArchive", () => {
     const tree = await createSourceTree();
     const linkPath = path.join(tree.root, "link");
     await symlink(tree.files[0]?.sourcePath ?? "", linkPath);
+
     const write = (files: ServerArchiveSourceFile[]) =>
       writeServerArchive({
         outPath: path.join(tree.root, "out.tar.gz"),
         files,
         manifest: MANIFEST_INPUT,
       });
+
     const sourcePath = tree.files[0]?.sourcePath ?? "";
 
     await expectArchiveError(
-      write([{ sourcePath: linkPath, archivePath: "bb.db" }]),
+      write([{ sourcePath: linkPath, archivePath: "app.db" }]),
       ["unsafe_entry"],
     );
+
     for (const archivePath of [
       "../escape",
       "/absolute",
@@ -284,13 +365,14 @@ describe("writeServerArchive and extractServerArchive", () => {
       "attachments//b",
       "attachments\\b",
       "auth.json",
-      "systemd/bb-host-daemon.service",
+      "systemd/omnyo-host-daemon.service",
       "plugins/docs/host-data/vault.md",
     ]) {
       await expectArchiveError(write([{ sourcePath, archivePath }]), [
         "unsafe_entry",
       ]);
     }
+
     await expectArchiveError(
       write([
         { sourcePath, archivePath: "attachments/thr_1" },
@@ -344,7 +426,7 @@ describe("writeServerArchive and extractServerArchive", () => {
 });
 
 describe("archive format sniffing", () => {
-  it("tells the user to re-export an archive encrypted by an older bb", async () => {
+  it("tells the user to re-export an archive encrypted by an older version", async () => {
     const root = await makeTempDir();
     const archivePath = path.join(root, "old-export.bbsa");
     await writeFile(
@@ -364,13 +446,14 @@ describe("archive format sniffing", () => {
     );
 
     expect(error.message).toBe(
-      "This export was encrypted by an older bb; re-export it with bb server export",
+      "This export was encrypted by an older version; re-export it with omnyo server export",
     );
     await expect(readdir(destinationDir)).rejects.toThrow(/ENOENT/u);
   });
 
-  it("says a file that is neither gzip nor an old encrypted archive is not a bb server archive", async () => {
+  it("says a file that is neither gzip nor an old encrypted archive is not an Omnyo server archive", async () => {
     const root = await makeTempDir();
+
     for (const [name, bytes] of [
       ["junk.bin", Buffer.from("not an archive at all")],
       ["empty.bin", Buffer.alloc(0)],
@@ -385,7 +468,7 @@ describe("archive format sniffing", () => {
         ["corrupt"],
       );
 
-      expect(error.message).toBe("File is not a bb server archive");
+      expect(error.message).toBe("File is not an Omnyo server archive");
       await expect(readdir(destinationDir)).rejects.toThrow(/ENOENT/u);
     }
   });
@@ -398,10 +481,11 @@ describe("extracting crafted archives", () => {
     const { result, destinationDir } = await extractCrafted([
       {
         path: "manifest.json",
-        body: craftedManifest([{ path: "bb.db", body }]),
+        body: craftedManifest([{ path: "app.db", body }]),
       },
-      { path: "files/bb.db", body: Buffer.from("SERVER DATA") },
+      { path: "files/app.db", body: Buffer.from("SERVER DATA") },
     ]);
+
     await expectArchiveError(result, ["digest_mismatch"]);
     expect(await readdir(destinationDir)).toEqual([]);
   });
@@ -410,10 +494,11 @@ describe("extracting crafted archives", () => {
     const { result, destinationDir } = await extractCrafted([
       {
         path: "manifest.json",
-        body: craftedManifest([{ path: "bb.db", body }]),
+        body: craftedManifest([{ path: "app.db", body }]),
       },
-      { path: "files/bb.db", body: Buffer.alloc(4 * 1024 * 1024) },
+      { path: "files/app.db", body: Buffer.alloc(4 * 1024 * 1024) },
     ]);
+
     const error = await expectArchiveError(result, ["digest_mismatch"]);
     expect(error.message).toMatch(/manifest lists 11/u);
     expect(await readdir(destinationDir)).toEqual([]);
@@ -421,7 +506,7 @@ describe("extracting crafted archives", () => {
 
   it.each([
     ["a parent-directory path", "files/../../escape"],
-    ["an absolute path", "/tmp/bb-server-archive-escape"],
+    ["an absolute path", "/tmp/omnyo-server-archive-escape"],
     ["a path outside files/", "escape"],
   ])(
     "rejects %s without writing outside the destination",
@@ -433,6 +518,7 @@ describe("extracting crafted archives", () => {
         },
         { path: entryPath, body },
       ]);
+
       await expectArchiveError(result, ["unsafe_entry"]);
       expect(await readdir(root)).toEqual(["crafted.tar.gz", "nested"]);
       expect(await readdir(path.join(root, "nested"))).toEqual(["staging"]);
@@ -455,6 +541,7 @@ describe("extracting crafted archives", () => {
       },
       { path: "files/link", ...entry },
     ]);
+
     await expectArchiveError(result, ["unsafe_entry"]);
     expect(await readdir(destinationDir)).toEqual([]);
   });
@@ -463,33 +550,36 @@ describe("extracting crafted archives", () => {
     const extra = await extractCrafted([
       {
         path: "manifest.json",
-        body: craftedManifest([{ path: "bb.db", body }]),
+        body: craftedManifest([{ path: "app.db", body }]),
       },
-      { path: "files/bb.db", body },
+      { path: "files/app.db", body },
       { path: "files/extra", body },
     ]);
+
     await expectArchiveError(extra.result, ["unsafe_entry"]);
 
     const duplicate = await extractCrafted([
       {
         path: "manifest.json",
-        body: craftedManifest([{ path: "bb.db", body }]),
+        body: craftedManifest([{ path: "app.db", body }]),
       },
-      { path: "files/bb.db", body },
-      { path: "files/bb.db", body },
+      { path: "files/app.db", body },
+      { path: "files/app.db", body },
     ]);
+
     await expectArchiveError(duplicate.result, ["unsafe_entry"]);
 
     const missing = await extractCrafted([
       {
         path: "manifest.json",
         body: craftedManifest([
-          { path: "bb.db", body },
+          { path: "app.db", body },
           { path: "env.json", body },
         ]),
       },
-      { path: "files/bb.db", body },
+      { path: "files/app.db", body },
     ]);
+
     await expectArchiveError(missing.result, ["corrupt"]);
   });
 
@@ -497,23 +587,26 @@ describe("extracting crafted archives", () => {
     const misplacedManifest = await extractCrafted([
       { path: "files/manifest.json", body: craftedManifest([]) },
     ]);
+
     await expectArchiveError(misplacedManifest.result, ["corrupt"]);
 
     const notFirst = await extractCrafted([
-      { path: "files/bb.db", body },
+      { path: "files/app.db", body },
       {
         path: "manifest.json",
-        body: craftedManifest([{ path: "bb.db", body }]),
+        body: craftedManifest([{ path: "app.db", body }]),
       },
     ]);
+
     await expectArchiveError(notFirst.result, ["corrupt"]);
 
     const traversingManifest = await extractCrafted([
       {
         path: "manifest.json",
-        body: craftedManifest([{ path: "../bb.db", body }]),
+        body: craftedManifest([{ path: "../app.db", body }]),
       },
     ]);
+
     await expectArchiveError(traversingManifest.result, ["corrupt"]);
 
     const futureManifest = await extractCrafted([
@@ -521,22 +614,23 @@ describe("extracting crafted archives", () => {
         path: "manifest.json",
         body: Buffer.from(
           JSON.stringify({
-            format: "bb-server-archive",
+            format: SERVER_ARCHIVE_FORMAT,
             version: SERVER_ARCHIVE_VERSION + 1,
           }),
         ),
       },
     ]);
+
     await expectArchiveError(futureManifest.result, ["unsupported_version"]);
   });
 
-  it("reports an archive from a bb that didn't record the serverMove experiment as an unsupported version", async () => {
+  it("reports an archive from an older version that didn't record the serverMove experiment as an unsupported version", async () => {
     const olderManifest = Buffer.from(
       JSON.stringify({
         format: "bb-server-archive",
         version: 1,
         createdAt: MANIFEST_INPUT.createdAt,
-        bbVersion: MANIFEST_INPUT.bbVersion,
+        bbVersion: MANIFEST_INPUT.appVersion,
         protocolVersion: MANIFEST_INPUT.protocolVersion,
         migrationCount: MANIFEST_INPUT.migrationCount,
         sourceDataDir: MANIFEST_INPUT.sourceDataDir,
@@ -544,6 +638,7 @@ describe("extracting crafted archives", () => {
         entries: [{ path: "bb.db", size: body.length, sha256: sha256(body) }],
       }),
     );
+
     const older = await extractCrafted([
       { path: "manifest.json", body: olderManifest },
       { path: "files/bb.db", body },
@@ -553,7 +648,7 @@ describe("extracting crafted archives", () => {
       "unsupported_version",
     ]);
 
-    expect(error.message).toBe("Unsupported bb server archive version 1");
+    expect(error.message).toBe("Unsupported server archive version 1");
     expect(await readdir(older.destinationDir)).toEqual([]);
   });
 });

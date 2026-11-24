@@ -1,10 +1,10 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createConnection, migrate, type DbConnection } from "@bb/db";
-import { type PromptInput } from "@bb/domain";
-import type { Logger } from "@bb/logger";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createConnection, migrate, type DbConnection } from "@omnyo/db";
+import { type PromptInput } from "@omnyo/domain";
+import type { Logger } from "@omnyo/logger";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
 import {
   createPluginService,
@@ -30,16 +30,18 @@ import {
   type TestAppHarness,
 } from "../../helpers/test-app.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const BASE = "http://127.0.0.1:3334";
+
 const EVIL_ORIGIN = "https://evil.example";
 
 const logger = testLogger as unknown as Logger;
 
 const MENTION_SOURCE = `
   let resolveCalls = 0;
-  export default function plugin(bb: any) {
-    bb.ui.registerMentionProvider({
+  export default function plugin(api: any) {
+    api.ui.registerMentionProvider({
       id: "issues",
       label: "Linear issues",
       triggers: ["@", "#"],
@@ -73,7 +75,7 @@ const MENTION_SOURCE = `
         };
       },
     });
-    bb.ui.registerMentionProvider({
+    api.ui.registerMentionProvider({
       id: "docs",
       label: "Docs",
       async search() {
@@ -83,7 +85,7 @@ const MENTION_SOURCE = `
         throw new Error("docs resolve boom");
       },
     });
-    bb.ui.registerMentionProvider({
+    api.ui.registerMentionProvider({
       id: "broken",
       label: "Broken",
       async search() {
@@ -107,7 +109,7 @@ async function writePlugin(
     JSON.stringify({
       name: options.name,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Mention provider fixture",
         description: "Mention provider plugin fixture.",
         branding: { icon: "Zap" },
@@ -116,6 +118,7 @@ async function writePlugin(
     }),
   );
   await writeFile(join(rootDir, "server.ts"), options.serverSource);
+
   return rootDir;
 }
 
@@ -145,21 +148,25 @@ function seedColdIdleThreadFixture(harness: TestAppHarness, value: number) {
   const { host } = seedHostSession(harness.deps, {
     id: `host-mentions-${value}`,
   });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: `/tmp/mentions-${value}`,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: `/tmp/mentions-${value}`,
     status: "ready",
   });
+
   const thread = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
     status: "idle",
   });
+
   return { environment, thread };
 }
 
@@ -170,18 +177,21 @@ function seedWarmIdleThreadFixture(harness: TestAppHarness, value: number) {
     providerThreadId: `provider-mentions-${value}`,
     threadId: thread.id,
   });
+
   return { environment, thread };
 }
 
-describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
+describe("plugin mention providers (api.ui.registerMentionProvider)", () => {
   let harness: TestAppHarness;
 
   beforeEach(async () => {
     harness = await createTestAppHarness();
+
     const rootDir = await writePlugin(
       join(harness.config.dataDir, "fixtures"),
-      { name: "bb-plugin-mentions", serverSource: MENTION_SOURCE },
+      { name: "omnyo-plugin-mentions", serverSource: MENTION_SOURCE },
     );
+
     const entry = await harness.pluginService.installPath(rootDir);
     expect(entry.status).toBe("running");
   });
@@ -195,6 +205,7 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/contributions`,
     );
+
     expect(response.status).toBe(200);
     const body = (await response.json()) as { mentionProviders: unknown };
     expect(body.mentionProviders).toEqual([
@@ -218,6 +229,7 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/mentions/search?q=fix&projectId=proj_1&threadId=thr_1`,
     );
+
     expect(response.status).toBe(200);
     const body = (await response.json()) as { ok: boolean; groups: unknown };
     expect(body.ok).toBe(true);
@@ -255,9 +267,11 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
         ],
       },
     ]);
+
     const entry = harness.pluginService
       .list()
       .find((plugin) => plugin.id === "mentions");
+
     expect(entry?.handlerStats.errorCount).toBe(1);
   });
 
@@ -265,6 +279,7 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/mentions/search?q=fix&trigger=%23&projectId=proj_1&threadId=thr_1`,
     );
+
     expect(response.status).toBe(200);
     const body = (await response.json()) as { ok: boolean; groups: unknown };
     expect(body.ok).toBe(true);
@@ -295,6 +310,7 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/mentions/search?q=fix&trigger=%3F`,
     );
+
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
       ok: false,
@@ -306,12 +322,14 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
     const contextual = await harness.app.request(
       `${BASE}/api/v1/plugins/mentions/search?q=login`,
     );
+
     const body = (await contextual.json()) as {
       groups: Array<{
         providerId: string;
         items: Array<{ subtitle: string | null }>;
       }>;
     };
+
     expect(
       body.groups.find((group) => group.providerId === "issues")?.items[0]
         ?.subtitle,
@@ -320,14 +338,17 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
     const empty = await harness.app.request(
       `${BASE}/api/v1/plugins/mentions/search?q=%20%20`,
     );
+
     expect(await empty.json()).toEqual({ ok: true, groups: [] });
 
     const none = await harness.app.request(
       `${BASE}/api/v1/plugins/mentions/search?q=none`,
     );
+
     const noneBody = (await none.json()) as {
       groups: Array<{ providerId: string }>;
     };
+
     expect(noneBody.groups.some((group) => group.providerId === "issues")).toBe(
       false,
     );
@@ -338,6 +359,7 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
       `${BASE}/api/v1/plugins/mentions/search?q=fix`,
       { headers: { origin: EVIL_ORIGIN } },
     );
+
     expect(foreign.status).toBe(403);
   });
 
@@ -371,12 +393,15 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
         candidate.command.type === "thread.start" &&
         candidate.command.threadId === thread.id,
     );
+
     if (queued.command.type !== "thread.start") {
       throw new Error("Expected a thread.start command");
     }
+
     const agentOnly = queued.command.input.filter(
       (item) => item.type === "text" && item.visibility === "agent-only",
     );
+
     expect(agentOnly).toHaveLength(2);
     expect(agentOnly[0]).toMatchObject({
       type: "text",
@@ -423,9 +448,11 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
         candidate.command.type === "thread.start" &&
         candidate.command.threadId === thread.id,
     );
+
     if (queued.command.type !== "thread.start") {
       throw new Error("Expected a thread.start command");
     }
+
     expect(queued.command.input.slice(-3)).toEqual([
       expect.objectContaining({
         type: "text",
@@ -448,6 +475,7 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
 
   it("resolves plugin mentions when a queued message dispatches on the idle-provider fast path", async () => {
     const { thread } = seedWarmIdleThreadFixture(harness, 5);
+
     const queued = seedQueuedMessage(harness.deps, {
       threadId: thread.id,
       content: pluginMentionInput({
@@ -473,12 +501,15 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
         candidate.command.type === "turn.submit" &&
         candidate.command.threadId === thread.id,
     );
+
     if (dispatched.command.type !== "turn.submit") {
       throw new Error("Expected a turn.submit command");
     }
+
     const agentOnly = dispatched.command.input.filter(
       (item) => item.type === "text" && item.visibility === "agent-only",
     );
+
     expect(agentOnly).toHaveLength(1);
     expect(agentOnly[0]).toMatchObject({
       type: "text",
@@ -531,6 +562,7 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
 
   it("blocks the send when the mentioned plugin is not running or the item id is malformed", async () => {
     const { environment, thread } = seedColdIdleThreadFixture(harness, 3);
+
     const basePayload = {
       mode: "start" as const,
       model: "gpt-5",
@@ -603,19 +635,20 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
     const dupeDir = await writePlugin(
       join(harness.config.dataDir, "fixtures"),
       {
-        name: "bb-plugin-dupe-mentions",
+        name: "omnyo-plugin-dupe-mentions",
         serverSource: `
-          export default function plugin(bb: any) {
-            bb.ui.registerMentionProvider({
+          export default function plugin(api: any) {
+            api.ui.registerMentionProvider({
               id: "a", label: "A", search: () => [], resolve: () => ({ context: "x" }),
             });
-            bb.ui.registerMentionProvider({
+            api.ui.registerMentionProvider({
               id: "a", label: "A again", search: () => [], resolve: () => ({ context: "x" }),
             });
           }
         `,
       },
     );
+
     const dupe = await harness.pluginService.installPath(dupeDir);
     expect(dupe.status).toBe("error");
     expect(dupe.statusDetail).toContain(
@@ -625,16 +658,17 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
     const badIdDir = await writePlugin(
       join(harness.config.dataDir, "fixtures"),
       {
-        name: "bb-plugin-bad-mention-id",
+        name: "omnyo-plugin-bad-mention-id",
         serverSource: `
-          export default function plugin(bb: any) {
-            bb.ui.registerMentionProvider({
+          export default function plugin(api: any) {
+            api.ui.registerMentionProvider({
               id: "has:colon", label: "Nope", search: () => [], resolve: () => ({ context: "x" }),
             });
           }
         `,
       },
     );
+
     const badId = await harness.pluginService.installPath(badIdDir);
     expect(badId.status).toBe("error");
     expect(badId.statusDetail).toContain("invalid mention provider id");
@@ -642,16 +676,17 @@ describe("plugin mention providers (bb.ui.registerMentionProvider)", () => {
     const badTriggerDir = await writePlugin(
       join(harness.config.dataDir, "fixtures"),
       {
-        name: "bb-plugin-bad-mention-trigger",
+        name: "omnyo-plugin-bad-mention-trigger",
         serverSource: `
-          export default function plugin(bb: any) {
-            bb.ui.registerMentionProvider({
+          export default function plugin(api: any) {
+            api.ui.registerMentionProvider({
               id: "bad", label: "Nope", triggers: ["?"], search: () => [], resolve: () => ({ context: "x" }),
             });
           }
         `,
       },
     );
+
     const badTrigger = await harness.pluginService.installPath(badTriggerDir);
     expect(badTrigger.status).toBe("error");
     expect(badTrigger.statusDetail).toContain(
@@ -668,7 +703,7 @@ describe("mention search time box", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-mention-timeout-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-mention-timeout-"));
     service = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -680,6 +715,7 @@ describe("mention search time box", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
       mentionSearchTimeoutMs: 100,
@@ -691,18 +727,98 @@ describe("mention search time box", () => {
     await rm(workDir, { recursive: true, force: true });
   });
 
+  it("bounds unfinished searches and admits the newest waiting query when a slot opens", async () => {
+    const calls: string[] = [];
+    const gates = new Map<string, () => void>();
+    vi.stubGlobal(
+      "__limitedMentionSearch",
+      async (context: { query: string }) => {
+        const query = context.query;
+        context.query = "changed by this provider";
+        calls.push(query);
+
+        if (query.startsWith("hold")) {
+          await new Promise<void>((resolve) => gates.set(query, resolve));
+        }
+
+        return [{ id: query, title: query }];
+      },
+    );
+
+    const root = await writePlugin(workDir, {
+      name: "omnyo-plugin-bounded-mentions",
+      serverSource: `
+        export default function plugin(api) {
+          api.ui.registerMentionProvider({
+            id: "limited", label: "Limited", search: globalThis.__limitedMentionSearch,
+            resolve: () => ({ context: "unused" })
+          });
+          api.ui.registerMentionProvider({
+            id: "healthy", label: "Healthy", search: ({ query }) => [{ id: query, title: query }],
+            resolve: () => ({ context: "unused" })
+          });
+        }`,
+    });
+
+    const search = (query: string) =>
+      service.searchMentions({
+        query,
+        trigger: "@",
+        projectId: null,
+        threadId: null,
+      });
+
+    try {
+      expect((await service.installPath(root)).status).toBe("running");
+      const first = await Promise.all([search("hold-1"), search("hold-2")]);
+      expect(
+        first.map((groups) => groups.map((group) => group.providerId)),
+      ).toEqual([["healthy"], ["healthy"]]);
+      const expired = await search("expired");
+      expect(expired.map((group) => group.providerId)).toEqual(["healthy"]);
+      const superseded = search("obsolete");
+      const newest = search("latest");
+      expect((await superseded).map((group) => group.providerId)).toEqual([
+        "healthy",
+      ]);
+      gates.get("hold-1")?.();
+      expect((await newest).map((group) => group.items[0]?.title)).toEqual([
+        "latest",
+        "latest",
+      ]);
+      expect(calls).toEqual(["hold-1", "hold-2", "latest"]);
+
+      await search("hold-3");
+      const retired = search("retired");
+      await service.setEnabled("bounded-mentions", false);
+      gates.get("hold-2")?.();
+      gates.get("hold-3")?.();
+      expect((await retired).map((group) => group.providerId)).toEqual([
+        "healthy",
+      ]);
+      expect(calls).not.toContain("retired");
+      await service.setEnabled("bounded-mentions", true);
+      expect(
+        (await search("reloaded")).map((group) => group.items[0]?.title),
+      ).toEqual(["reloaded", "reloaded"]);
+    } finally {
+      for (const release of gates.values()) release();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("drops a slow provider after the time box and keeps fast providers", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-slow-mentions",
+      name: "omnyo-plugin-slow-mentions",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.ui.registerMentionProvider({
+        export default function plugin(api: any) {
+          api.ui.registerMentionProvider({
             id: "fast",
             label: "Fast",
             search: () => [{ id: "one", title: "One" }],
             resolve: () => ({ context: "one" }),
           });
-          bb.ui.registerMentionProvider({
+          api.ui.registerMentionProvider({
             id: "slow",
             label: "Slow",
             search: () => new Promise((resolve) => {
@@ -713,6 +829,7 @@ describe("mention search time box", () => {
         }
       `,
     });
+
     const entry = await service.installPath(rootDir);
     expect(entry.status).toBe("running");
 
@@ -722,6 +839,7 @@ describe("mention search time box", () => {
       projectId: null,
       threadId: null,
     });
+
     expect(groups).toEqual([
       {
         pluginId: "slow-mentions",
@@ -732,9 +850,11 @@ describe("mention search time box", () => {
         ],
       },
     ]);
+
     const listEntry = service
       .list()
       .find((plugin) => plugin.id === "slow-mentions");
+
     expect(listEntry?.handlerStats.errorCount).toBe(1);
   });
 });
@@ -747,7 +867,7 @@ describe("mention resolve time box", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-resolve-timeout-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-resolve-timeout-"));
     service = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -759,6 +879,7 @@ describe("mention resolve time box", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
       mentionResolveTimeoutMs: 100,
@@ -772,10 +893,10 @@ describe("mention resolve time box", () => {
 
   it("fails the resolve after the time box instead of hanging the send", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-slow-resolve",
+      name: "omnyo-plugin-slow-resolve",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.ui.registerMentionProvider({
+        export default function plugin(api: any) {
+          api.ui.registerMentionProvider({
             id: "stuck",
             label: "Stuck",
             search: () => [{ id: "one", title: "One" }],
@@ -786,6 +907,7 @@ describe("mention resolve time box", () => {
         }
       `,
     });
+
     const entry = await service.installPath(rootDir);
     expect(entry.status).toBe("running");
 
@@ -793,13 +915,16 @@ describe("mention resolve time box", () => {
       pluginId: "slow-resolve",
       itemId: "stuck:one",
     });
+
     expect(result).toEqual({
       ok: false,
       error: expect.stringContaining("timed out after 100ms"),
     });
+
     const listEntry = service
       .list()
       .find((plugin) => plugin.id === "slow-resolve");
+
     expect(listEntry?.handlerStats.errorCount).toBe(1);
   });
 });

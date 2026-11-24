@@ -35,6 +35,7 @@ function Probe({
   const ref = useRef<HTMLDivElement>(null);
   const height = useStickyFooterAvailableHeight(ref);
   onHeight(height);
+
   return <div ref={ref} data-testid={testId} />;
 }
 
@@ -50,6 +51,7 @@ function stubResizeObserver(): Array<() => void> {
       disconnect() {}
     },
   );
+
   return observers;
 }
 
@@ -60,7 +62,6 @@ function scrollBodyContext(scrollElement: HTMLElement) {
     scrollToBottom: () => {},
     scrollElementIntoView: () => {},
     scrollElementIntoViewClampedToMaxScroll: () => {},
-    captureScrollAnchor: () => {},
     holdContentPosition: () => {},
   };
 }
@@ -77,6 +78,7 @@ describe("useStickyFooterAvailableHeight", () => {
     const scrollElement = document.createElement("div");
     setHeight(scrollElement, 600);
     const onHeight = vi.fn();
+
     const { container } = render(
       <BottomAnchorContext.Provider value={scrollBodyContext(scrollElement)}>
         <div {...{ [SCROLL_FOOTER_ATTRIBUTE]: "" }} data-testid="footer">
@@ -84,10 +86,13 @@ describe("useStickyFooterAvailableHeight", () => {
         </div>
       </BottomAnchorContext.Provider>,
     );
+
     const footer = container.querySelector<HTMLElement>(
       `[${SCROLL_FOOTER_ATTRIBUTE}]`,
     );
+
     const form = container.querySelector<HTMLElement>("[data-testid=form]");
+
     if (!footer || !form) throw new Error("missing fixture");
 
     setHeight(footer, 500);
@@ -116,6 +121,7 @@ describe("useStickyFooterAvailableHeight", () => {
     setHeight(scrollElement, 600);
     const onHeightA = vi.fn();
     const onHeightB = vi.fn();
+
     const { container } = render(
       <BottomAnchorContext.Provider value={scrollBodyContext(scrollElement)}>
         <div {...{ [SCROLL_FOOTER_ATTRIBUTE]: "" }}>
@@ -124,11 +130,14 @@ describe("useStickyFooterAvailableHeight", () => {
         </div>
       </BottomAnchorContext.Provider>,
     );
+
     const footer = container.querySelector<HTMLElement>(
       `[${SCROLL_FOOTER_ATTRIBUTE}]`,
     );
+
     const a = container.querySelector<HTMLElement>("[data-testid=a]");
     const b = container.querySelector<HTMLElement>("[data-testid=b]");
+
     if (!footer || !a || !b) throw new Error("missing fixture");
 
     setHeight(a, 500);
@@ -143,6 +152,7 @@ describe("useStickyFooterAvailableHeight", () => {
     setHeight(a, 250);
     setHeight(b, 250);
     setHeight(footer, 600);
+
     for (let pass = 0; pass < 3; pass += 1) {
       act(() => {
         for (const observer of observers) observer();

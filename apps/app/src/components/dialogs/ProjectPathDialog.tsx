@@ -4,16 +4,17 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@bb/shared-ui/dropdown-menu";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/shared-ui/dropdown-menu";
+import { Icon } from "@omnyo/shared-ui/icon";
 import {
   deriveProjectNameFromPath,
   getProjectPathValidationMessage,
   normalizeProjectPathInput,
   type Host,
-} from "@bb/domain";
-import type { HostPlatform } from "@bb/host-daemon-contract";
-import { Button } from "@bb/shared-ui/button";
+} from "@omnyo/domain";
+import type { HostPlatform } from "@omnyo/host-daemon-contract";
+import type { ProjectResponse } from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
@@ -21,17 +22,20 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Input } from "@bb/shared-ui/input";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/dialog";
+import { Input } from "@omnyo/shared-ui/input";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { RemotePathBrowser } from "@/components/dialogs/RemotePathBrowser";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
-import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
+import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import { selectHosts } from "@/hooks/queries/host-queries";
 
 export type ProjectPathDialogTarget =
   | {
       kind: "create";
+      select?: {
+        onCreated?: (project: Pick<ProjectResponse, "id" | "name">) => void;
+      };
     }
   | {
       kind: "update";
@@ -135,18 +139,21 @@ function getPlatformCopy(
 ): PlatformCopy {
   const placeholder = "/path/to/project";
   const hostSuffix = hostName ? ` on ${hostName}` : "";
+
   if (platform === "wsl") {
     return {
       description: `Enter an absolute WSL path${hostSuffix} to the project folder, such as /home/me/repo or /mnt/c/...`,
       placeholder,
     };
   }
+
   if (platform === "win32") {
     return {
       description: `Enter an absolute Windows path${hostSuffix} to the project folder, such as C:\\Users\\me\\repo.`,
       placeholder: "C:\\path\\to\\project",
     };
   }
+
   return {
     description: `Enter an absolute path${hostSuffix} to the project folder.`,
     placeholder,
@@ -164,14 +171,18 @@ export function ProjectPathDialogContent({
 }: ProjectPathDialogContentProps) {
   const inputId = useId();
   const isPointerCoarse = usePointerCoarse();
+
   const machineOptions =
     target.kind === "create" ? selectHosts(hosts, "all") : undefined;
+
   const firstConnectedHostId = machineOptions?.find(
     (host) => host.status === "connected",
   )?.id;
+
   const [selectedHostIdState, setSelectedHostId] = useState(
     hostId ?? firstConnectedHostId ?? null,
   );
+
   const selectedHostId =
     machineOptions === undefined ||
     machineOptions.some(
@@ -179,25 +190,35 @@ export function ProjectPathDialogContent({
     )
       ? selectedHostIdState
       : (firstConnectedHostId ?? null);
+
   const selectedHost = machineOptions?.find(
     (host) => host.id === selectedHostId,
   );
+
   const selectedHostName = selectedHost?.name ?? hostName;
+
   const selectedHostConnected =
     selectedHost === undefined || selectedHost.status === "connected";
+
   const showMachinePicker = (machineOptions?.length ?? 0) > 1;
+
   const noMachineAvailable =
     machineOptions !== undefined && selectedHostId === null;
+
   const [manualPath, setManualPath] = useState(
     target.kind === "update" ? target.currentPath : "",
   );
+
   const [browserDirectory, setBrowserDirectory] = useState<string | null>(
     target.kind === "update" ? target.currentPath : null,
   );
+
   const [validationMessage, setValidationMessage] = useState<string | null>(
     null,
   );
+
   const copy = getPlatformCopy(platform, selectedHostName);
+
   const placeholder =
     target.kind === "update"
       ? target.currentPath || copy.placeholder
@@ -206,6 +227,7 @@ export function ProjectPathDialogContent({
   const selectedPath = selectedHostId
     ? browserDirectory
     : normalizeProjectPathInput(manualPath) || null;
+
   const derivedProjectName = selectedPath
     ? deriveProjectNameFromPath(selectedPath)
     : "";
@@ -216,18 +238,23 @@ export function ProjectPathDialogContent({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
     if (pending) return;
 
     if (!selectedPath) {
       setValidationMessage("Choose a project folder.");
+
       return;
     }
 
     const normalizedPath = normalizeProjectPathInput(selectedPath);
+
     const pathValidationMessage =
       getProjectPathValidationMessage(normalizedPath);
+
     if (pathValidationMessage) {
       setValidationMessage(pathValidationMessage);
+
       return;
     }
 
@@ -236,6 +263,7 @@ export function ProjectPathDialogContent({
       !deriveProjectNameFromPath(normalizedPath)
     ) {
       setValidationMessage("Could not derive a project name from that path.");
+
       return;
     }
 
@@ -269,7 +297,10 @@ export function ProjectPathDialogContent({
               >
                 <span className="flex min-w-0 items-center gap-2">
                   {selectedHost ? (
-                    <MachineStatusDot connected={selectedHostConnected} />
+                    <MachineStatusDot
+                      connected={selectedHostConnected}
+                      label={selectedHostConnected ? "Online" : "Offline"}
+                    />
                   ) : null}
                   <span className="min-w-0 truncate">
                     {selectedHost?.name ?? "Select a machine"}
@@ -288,6 +319,7 @@ export function ProjectPathDialogContent({
             >
               {machineOptions?.map((host) => {
                 const connected = host.status === "connected";
+
                 return (
                   <DropdownMenuItem
                     key={host.id}
@@ -299,7 +331,10 @@ export function ProjectPathDialogContent({
                       setBrowserDirectory(null);
                     }}
                   >
-                    <MachineStatusDot connected={connected} />
+                    <MachineStatusDot
+                      connected={connected}
+                      label={connected ? "Online" : undefined}
+                    />
                     <span className="min-w-0 flex-1 truncate">{host.name}</span>
                     {!connected ? (
                       <span className="shrink-0 text-xs text-subtle-foreground">

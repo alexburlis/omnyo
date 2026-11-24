@@ -36,30 +36,36 @@ describe("real provider control integration", () => {
             harness,
             providerId,
           });
+
           const activeTurn = await sendLongRunningTurnAndWaitStarted({
             providerId,
             harness,
             threadId: thread.id,
           });
+
           const steerBaselineEvents = await getThreadEvents(
             harness.api,
             thread.id,
           );
+
           const steerBaselineSequence = Math.max(
             0,
             ...steerBaselineEvents.map((event) => event.seq),
           );
+
           const steerText = `Steer acknowledgement ${providerId}`;
           await sendTextMessage(harness.api, thread.id, {
             execution,
             mode: "steer",
             text: steerText,
           });
+
           const inputAccepted = await waitForInputAcceptedAfter({
             baselineSequence: steerBaselineSequence,
             harness,
             threadId: thread.id,
           });
+
           expect(inputAccepted.turnId).toBe(activeTurn.turnId);
 
           await stopThread(harness.api, thread.id);
@@ -74,12 +80,14 @@ describe("real provider control integration", () => {
             harness.api,
             thread.id,
           );
+
           const { events, output } = await sendAndWaitForIdle({
             providerId,
             threadId: thread.id,
             text: "Reply with exactly: READY",
             harness,
           });
+
           expect(countTurnEvents(events, "turn/completed")).toBeGreaterThan(
             countTurnEvents(beforeRecoveryEvents, "turn/completed"),
           );

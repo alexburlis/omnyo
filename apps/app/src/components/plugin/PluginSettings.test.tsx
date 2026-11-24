@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { InstalledPlugin } from "@bb/server-contract";
+import type { InstalledPlugin } from "@omnyo/server-contract";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { systemMachineProvidersQueryKey } from "@/hooks/queries/query-keys";
 import {
@@ -50,9 +50,11 @@ function jsonError(message: string): Response {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
   });
+
   return { promise, resolve };
 }
 
@@ -80,15 +82,18 @@ describe("PluginSettingsForm", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+
         if (init?.method === "PUT") {
           const body = JSON.parse(String(init.body)) as {
             values: Record<string, unknown>;
           };
+
           return jsonOk({
             ...SETTINGS_VIEW,
             values: { ...SETTINGS_VIEW.values, ...body.values },
           });
         }
+
         return jsonOk(SETTINGS_VIEW);
       }),
     );
@@ -99,11 +104,12 @@ describe("PluginSettingsForm", () => {
     const greeting = (await screen.findByLabelText(
       "Greeting",
     )) as HTMLInputElement;
+
     expect(greeting.value).toBe("hello");
 
     const apiKey = screen.getByLabelText("API key") as HTMLInputElement;
     expect(apiKey.value).toBe("");
-    expect(apiKey.placeholder).toBe("[not set]");
+    expect(apiKey.placeholder).toBe("Not set");
     expect(screen.queryByRole("button", { name: /save settings/i })).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
 
@@ -115,13 +121,17 @@ describe("PluginSettingsForm", () => {
     );
 
     fireEvent.blur(greeting);
+
     const put = await vi.waitFor(() => {
       const request = requests.find(
         (candidate) => candidate.init?.method === "PUT",
       );
+
       expect(request).toBeDefined();
+
       return request;
     });
+
     expect(put?.url).toBe("/api/v1/plugins/demo/settings");
     expect(JSON.parse(String(put?.init?.body))).toEqual({
       values: { greeting: "hi there" },
@@ -140,11 +150,13 @@ describe("PluginSettingsForm", () => {
           const body = JSON.parse(String(init.body)) as {
             values: Record<string, unknown>;
           };
+
           return jsonOk({
             ...SETTINGS_VIEW,
             values: { ...SETTINGS_VIEW.values, ...body.values },
           });
         }
+
         return jsonOk(SETTINGS_VIEW);
       }),
     );
@@ -173,20 +185,24 @@ describe("PluginSettingsForm", () => {
       },
       values: { retries: 3 },
     };
+
     const requests: RecordedRequest[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+
         if (init?.method === "PUT") {
           const body = JSON.parse(String(init.body)) as {
             values: Record<string, unknown>;
           };
+
           return jsonOk({
             ...view,
             values: { ...view.values, ...body.values },
           });
         }
+
         return jsonOk(view);
       }),
     );
@@ -197,6 +213,7 @@ describe("PluginSettingsForm", () => {
     const retries = (await screen.findByLabelText(
       "Retries",
     )) as HTMLInputElement;
+
     expect(retries.type).toBe("number");
     expect(retries.step).toBe("any");
     expect(retries.value).toBe("3");
@@ -204,6 +221,7 @@ describe("PluginSettingsForm", () => {
     const badInput = vi
       .spyOn(retries.validity, "badInput", "get")
       .mockReturnValue(true);
+
     fireEvent.change(retries, { target: { value: "" } });
     fireEvent.blur(retries);
     expect((await screen.findByRole("alert")).textContent).toContain(
@@ -222,9 +240,12 @@ describe("PluginSettingsForm", () => {
       const request = requests.find(
         (candidate) => candidate.init?.method === "PUT",
       );
+
       expect(request).toBeDefined();
+
       return request;
     });
+
     expect(JSON.parse(String(put?.init?.body))).toEqual({
       values: { retries: 4.5 },
     });
@@ -251,8 +272,10 @@ describe("PluginSettingsForm", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+
         if (init?.method !== "PUT") return jsonOk(SETTINGS_VIEW);
         saveCount += 1;
+
         return saveCount === 1 ? first.promise : second.promise;
       }),
     );
@@ -304,8 +327,10 @@ describe("PluginSettingsForm", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+
         if (init?.method !== "PUT") return jsonOk(SETTINGS_VIEW);
         saveCount += 1;
+
         return saveCount === 1 ? first.promise : second.promise;
       }),
     );
@@ -368,11 +393,13 @@ describe("PluginSettingsForm", () => {
       },
       values: { greeting: "hello", agents: "[]" },
     };
+
     const requests: RecordedRequest[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+
         return jsonOk(view);
       }),
     );
@@ -402,6 +429,7 @@ describe("PluginSettingsForm", () => {
       "  }",
       "]",
     ].join("\n");
+
     fireEvent.change(agents, { target: { value: edited } });
     expect((agents as HTMLTextAreaElement).rows).toBe(9);
     expect(screen.queryByRole("button", { name: /save settings/i })).toBeNull();
@@ -422,6 +450,83 @@ describe("PluginSettingsForm", () => {
     });
   });
 
+  it("groups sectioned fields into collapsed rows that show whether each is set up", async () => {
+    const posthog = {
+      title: "PostHog",
+      description: "Chart product analytics.",
+    };
+
+    const search = { title: "Search Console" };
+
+    const view = {
+      ok: true,
+      schema: {
+        theme: { type: "string", label: "Theme" },
+        posthogHost: {
+          type: "string",
+          label: "API host",
+          default: "https://eu.posthog.com",
+          experimental_section: posthog,
+        },
+        posthogKey: {
+          type: "string",
+          label: "Read API key",
+          secret: true,
+          experimental_placeholder: "phx_…",
+          experimental_section: posthog,
+        },
+        searchCommand: {
+          type: "string",
+          label: "Broker command",
+          default: "",
+          experimental_placeholder: "/usr/local/bin/mcp-call",
+          experimental_section: search,
+        },
+      },
+      values: {
+        theme: "dark",
+        posthogHost: "https://eu.posthog.com",
+        posthogKey: { set: true },
+        searchCommand: "",
+      },
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonOk(view)),
+    );
+
+    const { wrapper } = createQueryClientTestHarness();
+    render(<PluginSettingsForm pluginId="demo" />, { wrapper });
+
+    expect(await screen.findByLabelText("Theme")).toBeDefined();
+    const posthogRow = screen.getByRole("button", { name: /PostHog/u });
+    const searchRow = screen.getByRole("button", { name: /Search Console/u });
+    expect(posthogRow.textContent).toContain("Chart product analytics.");
+    expect(posthogRow.textContent).toContain("Set up");
+    expect(posthogRow.textContent).not.toContain("Not set up");
+    expect(searchRow.textContent).toContain("Not set up");
+    expect(screen.queryByLabelText("API host")).toBeNull();
+    expect(screen.queryByLabelText("Broker command")).toBeNull();
+
+    fireEvent.click(posthogRow);
+
+    const key = (await screen.findByLabelText(
+      "Read API key",
+    )) as HTMLInputElement;
+
+    expect(key.placeholder).toBe("Saved · type to replace");
+    expect(screen.queryByLabelText("Broker command")).toBeNull();
+
+    fireEvent.click(searchRow);
+
+    const command = (await screen.findByLabelText(
+      "Broker command",
+    )) as HTMLInputElement;
+
+    expect(command.placeholder).toBe("/usr/local/bin/mcp-call");
+  });
+
   it("shows a server validator error beneath the field and retries on blur", async () => {
     const view = {
       ok: true,
@@ -434,15 +539,18 @@ describe("PluginSettingsForm", () => {
       },
       values: { agents: "[]" },
     };
+
     const requests: RecordedRequest[] = [];
     let rejectSave = true;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+
         if (init?.method === "PUT" && rejectSave) {
           return jsonError("Custom agents must be a JSON array");
         }
+
         return jsonOk(view);
       }),
     );
@@ -474,6 +582,7 @@ describe("PluginSettingsForm", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+
         return jsonOk(SETTINGS_VIEW);
       }),
     );
@@ -484,14 +593,17 @@ describe("PluginSettingsForm", () => {
     const apiKey = (await screen.findByLabelText(
       "API key",
     )) as HTMLInputElement;
+
     fireEvent.change(apiKey, { target: { value: "sk-123" } });
     fireEvent.blur(apiKey);
 
     const put = await vi.waitFor(() => {
       const found = requests.find((request) => request.init?.method === "PUT");
       expect(found).toBeDefined();
+
       return found;
     });
+
     expect(JSON.parse(String(put?.init?.body))).toEqual({
       values: { apiKey: "sk-123" },
     });
@@ -507,10 +619,14 @@ describe("PluginSettingsForm", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+
         if (init?.method !== "PUT") return jsonOk(SETTINGS_VIEW);
         saveCount += 1;
+
         if (saveCount === 1) return first.promise;
+
         if (saveCount === 2) return second.promise;
+
         return third.promise;
       }),
     );
@@ -608,22 +724,29 @@ describe("PluginSettingsPage", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+
         if (url === "/api/v1/plugins/linear/disable") {
           enabled = false;
+
           return jsonOk({ ok: true, plugin: installedPlugin(enabled) });
         }
+
         if (url === "/api/v1/plugins/linear/enable") {
           enabled = true;
+
           return jsonOk({ ok: true, plugin: installedPlugin(enabled) });
         }
+
         if (url === "/api/v1/plugins/linear/settings") {
           return jsonOk(SETTINGS_VIEW);
         }
+
         return jsonOk({ plugins: [installedPlugin(enabled)] });
       }),
     );
 
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
+
     const { container } = render(
       <MemoryRouter>
         <QueryClientWrapper>
@@ -635,6 +758,7 @@ describe("PluginSettingsPage", () => {
     const disable = await screen.findByRole("switch", {
       name: "Disable linear",
     });
+
     expect(
       screen.getByRole("heading", { name: "Linear" }).closest("header"),
     ).toContain(disable);
@@ -651,9 +775,11 @@ describe("PluginSettingsPage", () => {
         ),
       ).toBe(true);
     });
+
     const enable = await screen.findByRole("switch", {
       name: "Enable linear",
     });
+
     expect(screen.queryByRole("heading", { name: "Configuration" })).toBeNull();
     expect(
       container.querySelector('[data-resource-detail-section="configuration"]'),
@@ -685,11 +811,13 @@ describe("PluginSettingsPage", () => {
     let resolveList: (response: Response) => void = () => {
       throw new Error("Plugin list request did not start");
     };
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         if (url === "/api/v1/plugins/linear/settings")
           return jsonOk(SETTINGS_VIEW);
+
         return new Promise<Response>((resolve) => {
           resolveList = resolve;
         });
@@ -746,16 +874,20 @@ describe("PluginSettingsPage", () => {
         if (url === "/api/v1/plugins/linear/settings") {
           return jsonOk(SETTINGS_VIEW);
         }
+
         pluginListRequests += 1;
+
         if (pluginListRequests === 1) {
           return jsonOk({ plugins: [installedPlugin(true)] });
         }
+
         throw new Error("offline");
       }),
     );
 
     const { queryClient, wrapper: QueryClientWrapper } =
       createQueryClientTestHarness();
+
     render(
       <MemoryRouter>
         <QueryClientWrapper>
@@ -800,6 +932,7 @@ describe("PluginSettingsPage", () => {
     );
 
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
+
     const { container } = render(
       <MemoryRouter>
         <QueryClientWrapper>
@@ -821,6 +954,7 @@ describe("PluginSettingsPage", () => {
     function ConnectSettings() {
       return <div>Custom connect settings</div>;
     }
+
     setPluginSlotRegistrations(
       "connect",
       makePluginRegistrationSet({
@@ -829,6 +963,7 @@ describe("PluginSettingsPage", () => {
         ],
       }),
     );
+
     const connect = makeInstalledPlugin({
       id: "connect",
       name: "Connect",
@@ -837,6 +972,7 @@ describe("PluginSettingsPage", () => {
       hasSettings: false,
       provenance: "builtin",
     });
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => jsonOk({ plugins: [connect] })),
@@ -863,12 +999,14 @@ describe("PluginSettingsPage", () => {
     function ConnectSettings() {
       return <div>Custom connect settings</div>;
     }
+
     setPluginSlotRegistrations(
       "connect",
       makePluginRegistrationSet({
         settingsSections: [{ id: "remote", component: ConnectSettings }],
       }),
     );
+
     const connect = makeInstalledPlugin({
       id: "connect",
       name: "Connect",
@@ -877,6 +1015,7 @@ describe("PluginSettingsPage", () => {
       hasSettings: false,
       provenance: "builtin",
     });
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => jsonOk({ plugins: [connect] })),
@@ -894,6 +1033,7 @@ describe("PluginSettingsPage", () => {
     const hint = await screen.findByText(
       "Settings are unavailable while the plugin is error.",
     );
+
     expect(hint.closest(".overflow-hidden")?.className).toContain(
       "bg-surface-recessed/70",
     );
@@ -907,11 +1047,13 @@ describe("PluginSettingsDetail settings gating", () => {
     let finishAlphaSave: (response: Response) => void = () => {
       throw new Error("Alpha save did not start");
     };
+
     const requests: RecordedRequest[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+
         if (
           url === "/api/v1/plugins/alpha/settings" &&
           init?.method === "PUT"
@@ -920,7 +1062,9 @@ describe("PluginSettingsDetail settings gating", () => {
             finishAlphaSave = resolve;
           });
         }
+
         const greeting = url.includes("/beta/") ? "bonjour" : "hello";
+
         return jsonOk({
           ...SETTINGS_VIEW,
           values: { ...SETTINGS_VIEW.values, greeting },
@@ -928,6 +1072,7 @@ describe("PluginSettingsDetail settings gating", () => {
       }),
     );
     const { wrapper } = createQueryClientTestHarness();
+
     const { rerender } = render(
       <PluginSettingsDetail
         plugin={{ ...rowPlugin("running"), id: "alpha" }}
@@ -938,6 +1083,7 @@ describe("PluginSettingsDetail settings gating", () => {
     const alphaGreeting = (await screen.findByLabelText(
       "Greeting",
     )) as HTMLInputElement;
+
     fireEvent.change(alphaGreeting, { target: { value: "unsaved alpha" } });
     fireEvent.blur(alphaGreeting);
     await vi.waitFor(() => {

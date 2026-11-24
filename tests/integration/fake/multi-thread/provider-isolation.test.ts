@@ -26,6 +26,7 @@ describe.sequential("fake provider provider-isolation multi-thread integration",
       const project = await createProjectFixture(harness, {
         name: "Shared Environment Different Providers",
       });
+
       const threadA = await createReadyHostThread(harness, {
         projectId: project.id,
         providerId: "fake-alpha",
@@ -35,6 +36,7 @@ describe.sequential("fake provider provider-isolation multi-thread integration",
           path: harness.repoDir,
         },
       });
+
       const threadB = await createReadyReuseThread(harness, {
         environmentId: threadA.environment.id,
         projectId: project.id,
@@ -68,8 +70,10 @@ describe.sequential("fake provider provider-isolation multi-thread integration",
       const runtimeEntry = harness.daemonApp.runtimeManager.get(
         threadA.environment.id,
       );
+
       const runningProviders =
         runtimeEntry?.runtime.listRunningProviders().sort() ?? [];
+
       expect(runningProviders).toEqual(["fake-alpha", "fake-beta"]);
 
       const eventsA = await getThreadEvents(harness.api, threadA.thread.id);
@@ -90,13 +94,16 @@ describe.sequential("fake provider provider-isolation multi-thread integration",
       const secondRepoDir = await createTestGitRepo({
         repoDir: path.join(path.dirname(harness.repoDir), "stress-project"),
       });
+
       const projectA = await createProjectFixture(harness, {
         name: "Stress Shared Environment",
       });
+
       const projectB = await createProjectFixture(harness, {
         name: "Stress Isolated Environment",
         path: secondRepoDir,
       });
+
       const threadA = await createReadyHostThread(harness, {
         projectId: projectA.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,
@@ -105,11 +112,13 @@ describe.sequential("fake provider provider-isolation multi-thread integration",
           path: harness.repoDir,
         },
       });
+
       const threadB = await createReadyReuseThread(harness, {
         environmentId: threadA.environment.id,
         projectId: projectA.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,
       });
+
       const threadC = await createReadyHostThread(harness, {
         projectId: projectB.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,

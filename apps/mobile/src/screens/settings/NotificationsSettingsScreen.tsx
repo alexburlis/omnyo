@@ -1,3 +1,4 @@
+import { iosHaptic } from "@/lib/haptics";
 import { useProfiles } from "@/app-shell";
 import { usePushRegistration } from "@/notifications";
 import type { ServerProfile } from "@/lib/profiles";
@@ -11,6 +12,7 @@ import {
 
 export function NotificationsSettingsScreen() {
   const { profiles } = useProfiles();
+
   return (
     <GroupedScreen testID="notifications-settings-screen">
       {profiles.length === 0 ? (
@@ -29,9 +31,11 @@ export function NotificationsSettingsScreen() {
 function PushProfileSection({ profile }: { profile: ServerProfile }) {
   const push = usePushRegistration(profile);
   const permissionSheet = useSheet();
+
   const setEnabled = (enabled: boolean) => {
     void push.setEnabled(enabled).then((outcome) => {
       if (outcome.action !== "failed") return;
+      iosHaptic("error");
       toast.error(
         enabled
           ? "Could not turn on notifications"
@@ -40,6 +44,7 @@ function PushProfileSection({ profile }: { profile: ServerProfile }) {
       );
     });
   };
+
   return (
     <>
       <SettingsSection title={profile.label}>
@@ -51,8 +56,10 @@ function PushProfileSection({ profile }: { profile: ServerProfile }) {
           onCheckedChange={(enabled) => {
             if (enabled && push.permission !== "granted") {
               permissionSheet.present();
+
               return;
             }
+
             setEnabled(enabled);
           }}
           testID={`settings-push-${profile.id}`}
@@ -67,7 +74,7 @@ function PushProfileSection({ profile }: { profile: ServerProfile }) {
         presentation="prompt"
         controller={permissionSheet}
         title="Allow push notifications?"
-        message={`bb will ask this phone for permission, then register it with ${profile.label}.`}
+        message={`Omnyo will ask this phone for permission, then register it with ${profile.label}.`}
         actions={[
           {
             key: "enable",

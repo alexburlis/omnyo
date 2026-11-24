@@ -9,7 +9,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import type { ComposerView } from "@get-bb/plugin-sdk";
+import type { ComposerView } from "@omnyo/plugin-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   resetPluginSlotStoreForTest,
@@ -45,8 +45,10 @@ function registrationSet(
           component: function ComposerAction() {
             useEffect(() => {
               onMount?.(label);
+
               return () => onUnmount?.(label);
             }, []);
+
             return <button type="button">{label}</button>;
           },
         })),
@@ -121,9 +123,11 @@ describe("ComposerActionsSlot overflow", () => {
     const overflow = document.querySelector(
       "[data-plugin-composer-action-overflow]",
     );
+
     if (!(overflow instanceof HTMLElement)) {
       throw new Error("Expected plugin composer action overflow");
     }
+
     expect(
       within(overflow).getByRole("button", { name: "gamma" }),
     ).toBeDefined();
@@ -160,6 +164,7 @@ describe("ComposerActionsSlot overflow", () => {
       '{"alpha":"often"}',
     );
     resetPluginComposerActionUsageForTest();
+
     for (const pluginId of ["alpha", "beta", "gamma", "delta"]) {
       registerPlugin(pluginId);
     }
@@ -168,12 +173,12 @@ describe("ComposerActionsSlot overflow", () => {
     expect(inlinePluginIds()).toEqual(["alpha", "beta", "delta"]);
   });
 
-  it("preserves BB-owned actions after plugin contributions", () => {
+  it("preserves Omnyo-owned actions after plugin contributions", () => {
     registerPlugin("alpha", ["Plugin action"]);
 
     const view = render(
       <ComposerActionsSlot view={VIEW}>
-        <button type="button">BB action</button>
+        <button type="button">Omnyo action</button>
       </ComposerActionsSlot>,
     );
 
@@ -181,6 +186,6 @@ describe("ComposerActionsSlot overflow", () => {
       Array.from(view.container.querySelectorAll("button"), (element) =>
         element.textContent?.trim(),
       ),
-    ).toEqual(["Plugin action", "BB action"]);
+    ).toEqual(["Plugin action", "Omnyo action"]);
   });
 });

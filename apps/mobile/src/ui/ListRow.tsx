@@ -8,6 +8,7 @@ import { Text } from "./Text";
 const IS_IOS = process.env.EXPO_OS === "ios";
 
 export const LIST_ROW_CHEVRON_SIZE = IS_IOS ? 14 : 18;
+
 export const LIST_ROW_ICON_SIZE = 20;
 
 export interface ListRowProps {
@@ -21,6 +22,7 @@ export interface ListRowProps {
 
 export function SelectedCheck() {
   const { tokens } = useTheme();
+
   return (
     <Icon name="Check" size={18} weight="semibold" color={tokens.primary} />
   );
@@ -28,6 +30,7 @@ export function SelectedCheck() {
 
 export function DisclosureChevron() {
   const { tokens } = useTheme();
+
   return (
     <Icon
       name="ChevronRight"
@@ -48,6 +51,7 @@ export function ListRow({
 }: ListRowProps) {
   const { tokens } = useTheme();
   const titleColor = destructive ? tokens.destructiveText : tokens.foreground;
+
   return (
     <Pressable
       accessibilityRole="button"

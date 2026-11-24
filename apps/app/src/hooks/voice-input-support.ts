@@ -17,6 +17,7 @@ export function resolveVoiceSupport(
   if (environment.hasMediaDevices && environment.hasMediaRecorder) {
     return { isSupported: true, reason: null };
   }
+
   return {
     isSupported: false,
     reason: environment.isSecureContext
@@ -41,6 +42,7 @@ export function readVoiceSupportEnvironment(): VoiceSupportEnvironment {
       isSecureContext: true,
     };
   }
+
   return {
     hasMediaDevices: Boolean(navigator.mediaDevices?.getUserMedia),
     hasMediaRecorder: typeof window.MediaRecorder !== "undefined",

@@ -28,6 +28,7 @@ export function useGitDiffPanelState({
 }: UseGitDiffPanelStateParams) {
   const [selectedGitDiffSelection, setSelectedGitDiffSelection] =
     useState<GitDiffSelectionValue>(null);
+
   const [gitDiffFileFilter, setGitDiffFileFilter] = useState<string | null>(
     null,
   );
@@ -37,6 +38,7 @@ export function useGitDiffPanelState({
       buildGitDiffTarget(selectedGitDiffSelection, requestedMergeBaseBranch),
     [requestedMergeBaseBranch, selectedGitDiffSelection],
   );
+
   const { data: gitDiffWorkspaceStatus } = useEnvironmentWorkStatus(
     environmentId ?? "",
     requestedMergeBaseBranch,
@@ -47,6 +49,7 @@ export function useGitDiffPanelState({
         isDiffPanelActive,
     },
   );
+
   const workspaceStatus =
     gitDiffWorkspaceStatus?.outcome === "available"
       ? gitDiffWorkspaceStatus.workspace
@@ -72,7 +75,7 @@ export function useGitDiffPanelState({
   }, [onClearPendingGitDiffIntent, pendingGitDiffCommitSha]);
 
   const hasUncommittedChanges =
-    (workspaceStatus?.workingTree.files.length ?? 0) > 0;
+    (workspaceStatus?.workingTree.fileCount ?? 0) > 0;
 
   useEffect(() => {
     if (
@@ -94,7 +97,9 @@ export function useGitDiffPanelState({
     () => workspaceStatus?.mergeBase?.commits ?? [],
     [workspaceStatus?.mergeBase?.commits],
   );
+
   const gitDiffSelectValue = selectedGitDiffSelection ?? ALL_GIT_DIFF_SELECTION;
+
   const gitDiffSelectOptions: GitDiffSelectionOption[] = useMemo(
     () => buildGitDiffSelectionOptions(diffCommits, { hasUncommittedChanges }),
     [diffCommits, hasUncommittedChanges],

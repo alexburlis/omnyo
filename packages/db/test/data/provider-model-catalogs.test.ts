@@ -70,6 +70,7 @@ describe("provider model catalogs data", () => {
       catalogRow("h1", "claude-code", ""),
       catalogRow("h2", "codex", ""),
     ]);
+
     const replacement: StoredProviderModelCatalog = {
       ...catalogRow("h1", "codex", "", 2_000),
       fingerprint: "fp-2",
@@ -77,6 +78,7 @@ describe("provider model catalogs data", () => {
         { id: "legacy", model: "legacy" },
       ]),
     };
+
     writeRows(db, [replacement]);
 
     const key = { hostId: "h1", providerId: "codex", scopeKey: "" };

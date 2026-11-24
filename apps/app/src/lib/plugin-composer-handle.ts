@@ -5,7 +5,7 @@ import type {
   ComposerMention,
   ComposerSelection,
   PluginComposerApi,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import {
   appendComposerDraft,
   createComposerHandleBinding,
@@ -14,18 +14,20 @@ import {
   type ComposerHandleBinding,
   type ComposerHandleController,
   type ComposerHandleTarget,
-} from "@get-bb/plugin-sdk/internal/composer-handle";
-import type { PromptMentionResource, PromptTextMention } from "@bb/domain";
+} from "@omnyo/plugin-sdk/internal/composer-handle";
+import type { PromptMentionResource, PromptTextMention } from "@omnyo/domain";
 import {
   permissionModeSchema,
   reasoningLevelSchema,
   serviceTierSchema,
-} from "@bb/domain";
-import { createThreadEnvironmentArgsSchema } from "@bb/server-contract";
+} from "@omnyo/domain";
+import { createThreadEnvironmentArgsSchema } from "@omnyo/server-contract";
 import {
   appendQuoteAndAttachmentsToDraft,
+  appendStructuredQuoteToDraft,
+  type PromptDraftAttachment,
   type PromptDraftState,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import type { PluginComposerHost } from "@/components/plugin/plugin-composer-host";
 import { serializedTextForPromptMentionResource } from "@/components/promptbox/mentions/prompt-mention-clipboard";
 import { subscribeComposerSubmitted } from "./composer-submissions";
@@ -50,7 +52,7 @@ export type ComposerSource = Pick<
 
 type ComposerLifecycle = Pick<
   ComposerHandleController,
-  "setTextEffect" | "setInputLock" | "onSubmitted"
+  "setTextEffect" | "setInputLock" | "setSuggestion" | "onSubmitted"
 >;
 
 const composerSelectionSchema = z.object({
@@ -76,16 +78,20 @@ const COMPOSER_SELECTION_FIELD_LABELS: Record<keyof ComposerSelection, string> =
 
 export function parseComposerSelection(selection: unknown): ComposerSelection {
   const parsed = composerSelectionSchema.safeParse(selection);
+
   if (parsed.success) {
     return Object.fromEntries(
       Object.entries(parsed.data).filter(([, value]) => value !== undefined),
     ) as ComposerSelection;
   }
+
   const field = parsed.error.issues[0]?.path[0];
+
   const label =
     typeof field === "string" && field in COMPOSER_SELECTION_FIELD_LABELS
       ? COMPOSER_SELECTION_FIELD_LABELS[field as keyof ComposerSelection]
       : null;
+
   throw new Error(
     label === null
       ? "The selection is not valid."
@@ -98,6 +104,7 @@ function splitPluginItemId(
   itemId: string,
 ): { provider: string; id: string } {
   const separator = itemId.indexOf(":");
+
   return separator === -1
     ? { provider: pluginId, id: itemId }
     : { provider: itemId.slice(0, separator), id: itemId.slice(separator + 1) };
@@ -110,6 +117,7 @@ export function composerMentionFromTextMention({
 }: PromptTextMention): ComposerMention {
   if (resource.kind !== "plugin") return { from: start, to: end, ...resource };
   const { itemId, ...plugin } = resource;
+
   return {
     from: start,
     to: end,
@@ -131,9 +139,12 @@ function textMentionFromComposerMention(
 function resourceOf(mention: ComposerMention): PromptMentionResource {
   if (mention.kind === "plugin") {
     const { from: _from, to: _to, provider, id, ...plugin } = mention;
+
     return { ...plugin, itemId: `${provider}:${id}` };
   }
+
   const { from: _from, to: _to, ...resource } = mention;
+
   return resource;
 }
 
@@ -147,13 +158,17 @@ export function composerDraftFromPromptDraft(
   draft: PromptDraftState,
 ): ComposerDraftSnapshot {
   const cached = composerDrafts.get(draft);
+
   if (cached !== undefined) return cached;
+
   const next: ComposerDraftSnapshot = {
     attachments: draft.attachments,
     text: draft.text,
     mentions: draft.mentions.map(composerMentionFromTextMention),
   };
+
   composerDrafts.set(draft, next);
+
   return next;
 }
 
@@ -165,12 +180,31 @@ type ComposerDraftSource = Pick<
 export function createCoreComposerActions(source: ComposerDraftSource) {
   const target = composerDraftTarget(source);
   const actions = createComposerDraftActions(() => target);
+
   return {
     get draft() {
       return actions.draft;
     },
     replace: actions.replace,
     focus: actions.focus,
+    addQuote: (
+      text: string,
+      attachments: readonly PromptDraftAttachment[] = [],
+      mentions: readonly PromptTextMention[] = [],
+    ) => {
+      if (!target.isAvailable())
+        throw new Error("This composer is no longer available.");
+      const current = source.getCurrent();
+
+      const next = appendStructuredQuoteToDraft(
+        current,
+        text,
+        attachments,
+        mentions,
+      );
+
+      if (next !== current) source.setDraft(next);
+    },
     restoreDraft: (draft: PromptDraftState) =>
       actions.replace(composerDraftFromPromptDraft(draft)),
   };
@@ -201,6 +235,7 @@ function composerHandleTarget(source: ComposerSource): ComposerHandleTarget {
   const draftTarget = composerDraftTarget(source);
   const hostSetSelection = source.setSelection;
   const key = source.textEffectKey;
+
   return {
     ...draftTarget,
     key,
@@ -214,6 +249,7 @@ function composerHandleTarget(source: ComposerSource): ComposerHandleTarget {
     addQuote: (text) => {
       const current = source.getCurrent();
       const next = appendQuoteAndAttachmentsToDraft(current, text, []);
+
       if (next !== current) source.setDraft(next);
     },
     getEditorState: () =>
@@ -222,7 +258,9 @@ function composerHandleTarget(source: ComposerSource): ComposerHandleTarget {
       subscribeComposerEditorBridge(key, listener),
     insertAtCursor: (value, block) => {
       const bridge = getComposerEditorBridge(key);
+
       if (bridge === null) return false;
+
       const inserted = bridge.insertAtCursor(
         {
           text: value.text,
@@ -230,10 +268,12 @@ function composerHandleTarget(source: ComposerSource): ComposerHandleTarget {
         },
         block,
       );
+
       if (!inserted)
         draftTarget.setDraft(
           appendComposerDraft(draftTarget.getDraft(), value, block),
         );
+
       return true;
     },
     ...(source.submit !== undefined ? { submit: source.submit } : {}),
@@ -265,14 +305,17 @@ export function detachedComposerController(
   caller: string,
 ): ComposerHandleController {
   const scope = host.scope;
+
   const warnNoLifecycle = (method: string) => {
     console.warn(
       `[plugin:${pluginId}] ${caller} composer.${method} has no effect; call it from a composer slot's useComposer().`,
     );
   };
+
   return composerHandleController(pluginId, host, {
     setTextEffect: () => warnNoLifecycle("setTextEffect"),
     setInputLock: () => warnNoLifecycle("setInputLock"),
+    setSuggestion: () => warnNoLifecycle("experimental_setSuggestion"),
     onSubmitted: (listener) => subscribeComposerSubmitted(scope, listener),
   });
 }
@@ -288,20 +331,27 @@ export function listedComposerHandles(
 ): readonly PluginComposerApi[] {
   const previous = listedComposerBindings.get(pluginId) ?? new Map();
   const next = new Map<string, ComposerHandleBinding>();
+
   const handles = hosts.map((host) => {
     const controller = detachedComposerController(
       pluginId,
       host,
       "useComposers()",
     );
+
     const existing = previous.get(host.textEffectKey);
+
     const binding =
       existing ?? createComposerHandleBinding(host.textEffectKey, controller);
+
     binding.update(controller);
     next.set(host.textEffectKey, binding);
+
     return binding.handle;
   });
+
   if (next.size === 0) listedComposerBindings.delete(pluginId);
   else listedComposerBindings.set(pluginId, next);
+
   return handles;
 }

@@ -4,8 +4,9 @@ import {
   type ServerResponse,
 } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
-  probeBbServer,
+  probeOmnyoServer,
   type ServerProbeFetch,
   waitForCompatibleServer,
 } from "../src/server-probe.js";
@@ -37,58 +38,162 @@ async function startTestServer(args: StartTestServerArgs): Promise<TestServer> {
   await new Promise<void>((resolvePromise) => {
     server.listen(0, "127.0.0.1", resolvePromise);
   });
-  const address = server.address();
-  if (address === null || typeof address === "string") {
+
+  const address = z
+    .object({ port: z.number().int().min(1).max(65_535) })
+    .safeParse(server.address());
+
+  if (!address.success) {
     throw new Error("Expected test server to listen on a TCP port");
   }
+
   const testServer: TestServer = {
     close: async () => {
       await new Promise<void>((resolvePromise, rejectPromise) => {
         server.close((error) => {
           if (error) {
             rejectPromise(error);
+
             return;
           }
+
           resolvePromise();
         });
       });
     },
-    url: `http://127.0.0.1:${address.port}`,
+    url: `http://127.0.0.1:${address.data.port}`,
   };
+
   testServers.push(testServer);
+
   return testServer;
 }
 
 afterEach(async () => {
   while (testServers.length > 0) {
     const testServer = testServers.pop();
+
     if (testServer !== undefined) {
       await testServer.close();
     }
   }
 });
 
-describe("probeBbServer", () => {
+describe("probeOmnyoServer", () => {
+  it.each([
+    { appVersion: "0.46.0", name: "official release" },
+    { appVersion: undefined, name: "missing runtime identity" },
+    { appVersion: "0.46.0+private.2", name: "different private build" },
+  ])("refuses $name for default private attachment", async ({ appVersion }) => {
+    const testServer = await startTestServer({
+      handler(request, response) {
+        if (request.url === "/health") {
+          writeJson(response, 200, JSON.stringify({ ok: true }));
+
+          return;
+        }
+
+        if (request.url === "/api/v1/system/config") {
+          writeJson(
+            response,
+            200,
+            JSON.stringify({
+              appVersion,
+              hostDaemonPort: 4_242,
+              voiceTranscriptionEnabled: false,
+            }),
+          );
+
+          return;
+        }
+
+        writeJson(response, 404, JSON.stringify({ message: "not found" }));
+      },
+    });
+
+    const result = await probeOmnyoServer({
+      expectedAppVersion: "0.46.0+private.1",
+      serverUrl: testServer.url,
+      timeoutMs: 500,
+    });
+
+    expect(result).toMatchObject({
+      kind: "incompatible",
+      reason: expect.stringMatching(/all chats.*idle.*close.*reopen/i),
+      serverUrl: testServer.url,
+    });
+  });
+
+  it("reuses an exact private runtime without an update lookup", async () => {
+    const requestedPaths: string[] = [];
+
+    const testServer = await startTestServer({
+      handler(request, response) {
+        requestedPaths.push(request.url ?? "");
+
+        if (request.url === "/health") {
+          writeJson(response, 200, JSON.stringify({ ok: true }));
+
+          return;
+        }
+
+        if (request.url === "/api/v1/system/config") {
+          writeJson(
+            response,
+            200,
+            JSON.stringify({
+              appVersion: "0.46.0+private.1",
+              dataDir: "/Users/example/.omnyo",
+              hostDaemonPort: 4_242,
+              voiceTranscriptionEnabled: false,
+            }),
+          );
+
+          return;
+        }
+
+        writeJson(
+          response,
+          500,
+          JSON.stringify({ message: "unexpected lookup" }),
+        );
+      },
+    });
+
+    await expect(
+      probeOmnyoServer({
+        expectedAppVersion: "0.46.0+private.1",
+        serverUrl: testServer.url,
+        timeoutMs: 500,
+      }),
+    ).resolves.toEqual({
+      dataDir: "/Users/example/.omnyo",
+      kind: "compatible",
+      serverUrl: testServer.url,
+    });
+    expect(requestedPaths).toEqual(["/health", "/api/v1/system/config"]);
+  });
+
   it("reports the data directory the probed server declares", async () => {
     const fetchImpl = vi
       .fn<ServerProbeFetch>()
       .mockResolvedValueOnce(Response.json({ ok: true }))
       .mockResolvedValueOnce(
         Response.json({
-          dataDir: "/Users/example/.bb",
+          dataDir: "/Users/example/.omnyo",
           hostDaemonPort: 4_242,
           voiceTranscriptionEnabled: false,
         }),
       );
 
     await expect(
-      probeBbServer({
+      probeOmnyoServer({
         fetchImpl,
         serverUrl: "https://studio.example",
         timeoutMs: 1_000,
       }),
     ).resolves.toEqual({
-      dataDir: "/Users/example/.bb",
+      dataDir: "/Users/example/.omnyo",
       kind: "compatible",
       serverUrl: "https://studio.example",
     });
@@ -99,13 +204,15 @@ describe("probeBbServer", () => {
       handler(request, response) {
         if (request.url === "/health") {
           writeJson(response, 200, JSON.stringify({ ok: true }));
+
           return;
         }
+
         writeJson(response, 404, JSON.stringify({ message: "not found" }));
       },
     });
 
-    const result = await probeBbServer({
+    const result = await probeOmnyoServer({
       serverUrl: testServer.url,
       timeoutMs: 500,
     });
@@ -115,12 +222,15 @@ describe("probeBbServer", () => {
 
   it("does not depend on the production version endpoint for startup compatibility", async () => {
     let versionRequestCount = 0;
+
     const testServer = await startTestServer({
       handler(request, response) {
         if (request.url === "/health") {
           writeJson(response, 200, JSON.stringify({ ok: true }));
+
           return;
         }
+
         if (request.url === "/api/v1/system/config") {
           writeJson(
             response,
@@ -131,19 +241,23 @@ describe("probeBbServer", () => {
               voiceTranscriptionEnabled: false,
             }),
           );
+
           return;
         }
+
         if (request.url === "/api/v1/system/version") {
           versionRequestCount += 1;
           writeJson(response, 500, JSON.stringify({ message: "unexpected" }));
+
           return;
         }
+
         writeJson(response, 404, JSON.stringify({ message: "not found" }));
       },
     });
 
     await expect(
-      probeBbServer({ serverUrl: testServer.url, timeoutMs: 500 }),
+      probeOmnyoServer({ serverUrl: testServer.url, timeoutMs: 500 }),
     ).resolves.toEqual({
       dataDir: null,
       kind: "compatible",
@@ -158,11 +272,12 @@ describe("probeBbServer", () => {
         writeJson(response, 200, JSON.stringify({ ok: true }));
       },
     });
+
     const unavailableUrl = testServer.url;
     await testServer.close();
     testServers.pop();
 
-    const result = await probeBbServer({
+    const result = await probeOmnyoServer({
       serverUrl: unavailableUrl,
       timeoutMs: 500,
     });

@@ -3,10 +3,11 @@ import type {
   DiffViewMode,
   ExperimentalDiffFullFileContents,
   SourceCodeLineRange,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import type { ParsedGitDiffFile } from "@/components/git-diff/git-diff-parsing";
 
 export const DEFAULT_CODE_OVERFLOW: CodeOverflowMode = "scroll";
+
 export const DEFAULT_DIFF_VIEW: DiffViewMode = "unified";
 
 interface SourceCodePresentation {
@@ -20,7 +21,7 @@ export interface DiffPresentation {
   showLineNumbers: boolean;
 }
 
-export interface BbSourceCodeProps extends SourceCodePresentation {
+export interface OmnyoSourceCodeProps extends SourceCodePresentation {
   content: string;
   path: string;
   cacheKey?: string;
@@ -29,7 +30,7 @@ export interface BbSourceCodeProps extends SourceCodePresentation {
   onSelectionAddToChat?: (text: string) => void;
 }
 
-export interface BbDiffProps extends DiffPresentation {
+export interface OmnyoDiffProps extends DiffPresentation {
   file: ParsedGitDiffFile;
   patchText?: string;
   fullFileContents: ExperimentalDiffFullFileContents | null;

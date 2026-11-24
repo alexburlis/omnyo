@@ -5,7 +5,7 @@ import {
   threads,
   type DbConnection,
   type DbTransaction,
-} from "@bb/db";
+} from "@omnyo/db";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import {
   environmentMachineSelectionSchema,
@@ -13,7 +13,8 @@ import {
   promptInputSchema,
   resolvedThreadExecutionOptionsSchema,
   clientTurnRequestIdSchema,
-} from "@bb/domain";
+  threadTurnInitiatorSchema,
+} from "@omnyo/domain";
 
 const reuseIntentSchema = z.object({
   type: z.literal("reuse"),
@@ -36,6 +37,7 @@ export const threadProvisionEnvironmentIntentSchema = z.discriminatedUnion(
 export const threadForkDescriptorSchema = z.object({
   sourceProviderThreadId: z.string().min(1),
   sourceProviderCheckpointId: z.string().min(1).optional(),
+  restoreArchivedSource: z.boolean().default(true),
 });
 
 export const threadProvisionCommonPayloadSchema = z.object({
@@ -47,12 +49,16 @@ export const threadProvisionCommonPayloadSchema = z.object({
   inputGroups: z.array(z.array(promptInputSchema).min(1)).min(1).optional(),
   titleProvided: z.boolean(),
   seedWithoutRun: z.boolean().default(false),
+  silentSettle: z.boolean().default(false),
+  initiator: threadTurnInitiatorSchema.default("user"),
 });
 
 export type ThreadForkDescriptor = z.infer<typeof threadForkDescriptorSchema>;
+
 export type ThreadProvisionEnvironmentIntent = z.infer<
   typeof threadProvisionEnvironmentIntentSchema
 >;
+
 type ThreadProvisionOperationPayload = z.infer<
   typeof threadProvisionCommonPayloadSchema
 >;
@@ -104,6 +110,7 @@ export function saveThreadProvisionContext(entry: {
   )
     return;
   const existing = providerSchedules.get(entry.threadId);
+
   if (
     existing !== undefined &&
     (existing.provisioningId !== entry.context.state.provisioningId ||
@@ -126,6 +133,7 @@ export function setThreadProvisionSchedule(
 
 export function clearThreadProvisionSchedule(threadId: string): void {
   const schedule = providerSchedules.get(threadId);
+
   if (schedule !== undefined) clearTimeout(schedule.timer);
   providerSchedules.delete(threadId);
 }
@@ -144,6 +152,7 @@ export function getThreadProvisionContext(
     .from(threads)
     .where(eq(threads.id, threadId))
     .get();
+
   return thread?.status === "starting" || thread?.status === "stopping"
     ? readThreadProvisionContext(db, threadId)
     : null;
@@ -163,6 +172,7 @@ function persistThreadProvisionContext(
   replace: boolean,
 ): boolean {
   const persisted = persistedThreadProvisionContextSchema.parse(context);
+
   return (
     db
       .update(threads)
@@ -192,12 +202,16 @@ export function readThreadStartupContextOfKind<T>(
   schema: z.ZodType<T>,
 ): T | null {
   const stored = getThreadStartupContext(db, threadId);
+
   if (stored === null) return null;
   const value: unknown = JSON.parse(stored);
+
   const header = z
     .object({ kind: z.enum(["pending", "provisioning", "dispatched"]) })
     .parse(value);
+
   if (header.kind !== kind) return null;
+
   return schema.parse(value);
 }
 
@@ -214,7 +228,7 @@ export function readThreadProvisionContext(
 }
 
 export function createThreadStartup(
-  request: ThreadProvisionContext["request"],
+  request: z.input<typeof threadProvisionCommonPayloadSchema>,
 ): ThreadProvisionContext {
   return {
     request: threadProvisionCommonPayloadSchema.parse(request),

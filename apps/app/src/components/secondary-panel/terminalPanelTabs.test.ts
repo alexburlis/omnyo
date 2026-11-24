@@ -1,4 +1,4 @@
-import { openSecondaryPanelTabInState } from "@bb/client-core";
+import { openSecondaryPanelTabInState } from "@omnyo/client-core";
 import { describe, expect, it } from "vitest";
 import {
   createEmptyFixedPanelTabsState,
@@ -30,15 +30,19 @@ describe("terminalPanelTabs", () => {
       },
       threadId: "thr_1",
     });
+
     const disconnectedTerminal = createTerminalFixedPanelTab({
       terminalId: "term_disconnected",
     });
+
     const exitedTerminal = createTerminalFixedPanelTab({
       terminalId: "term_exited",
     });
+
     const missingTerminal = createTerminalFixedPanelTab({
       terminalId: "term_missing",
     });
+
     const runningTerminal = createTerminalFixedPanelTab({
       terminalId: "term_running",
     });
@@ -83,6 +87,7 @@ describe("terminalPanelTabs", () => {
     const localTerminal2 = createTerminalFixedPanelTab({
       terminalId: "term_2",
     });
+
     const localFile = createHostFilePreviewFixedPanelTab({
       environmentId: "env_1",
       tab: {
@@ -91,9 +96,11 @@ describe("terminalPanelTabs", () => {
       },
       threadId: "thr_1",
     });
+
     const localTerminal1 = createTerminalFixedPanelTab({
       terminalId: "term_1",
     });
+
     const tabs = buildTerminalSyncedSecondaryFileTabs({
       orderedTabs: [localTerminal2, localFile, localTerminal1],
       terminalSessions: [
@@ -127,9 +134,11 @@ describe("terminalPanelTabs", () => {
     const disconnectedTerminal = createTerminalFixedPanelTab({
       terminalId: "term_disconnected",
     });
+
     const runningTerminal = createTerminalFixedPanelTab({
       terminalId: "term_running",
     });
+
     const sessions = [
       terminalSession({
         id: "term_disconnected",
@@ -160,6 +169,7 @@ describe("terminalPanelTabs", () => {
       },
       threadId: "thr_1",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: fileTab.id,
@@ -167,6 +177,7 @@ describe("terminalPanelTabs", () => {
         tabs: [fileTab],
       },
     });
+
     const nextState = syncTerminalTabsInFixedPanelState({
       state,
       terminalSessions: [
@@ -187,9 +198,11 @@ describe("terminalPanelTabs", () => {
     const staleTerminalTab = createTerminalFixedPanelTab({
       terminalId: "term_stale",
     });
+
     const currentTerminalTab = createTerminalFixedPanelTab({
       terminalId: "term_1",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: staleTerminalTab.id,
@@ -197,6 +210,7 @@ describe("terminalPanelTabs", () => {
         tabs: [staleTerminalTab, currentTerminalTab],
       },
     });
+
     const nextState = syncTerminalTabsInFixedPanelState({
       state,
       terminalSessions: [terminalSession({ id: "term_1" })],
@@ -210,6 +224,7 @@ describe("terminalPanelTabs", () => {
     const terminalTab = createTerminalFixedPanelTab({
       terminalId: "term_exited",
     });
+
     const activeFileTab = createHostFilePreviewFixedPanelTab({
       environmentId: "env_1",
       tab: {
@@ -218,6 +233,7 @@ describe("terminalPanelTabs", () => {
       },
       threadId: "thr_1",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: activeFileTab.id,
@@ -243,6 +259,7 @@ describe("terminalPanelTabs", () => {
 
   it("keeps fixed panel state identity when terminal tabs already match", () => {
     const terminalTab = createTerminalFixedPanelTab({ terminalId: "term_1" });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: terminalTab.id,
@@ -263,9 +280,11 @@ describe("terminalPanelTabs", () => {
     const disconnectedTerminal = createTerminalFixedPanelTab({
       terminalId: "term_disconnected",
     });
+
     const otherDisconnectedTerminal = createTerminalFixedPanelTab({
       terminalId: "term_other_disconnected",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: disconnectedTerminal.id,
@@ -273,6 +292,7 @@ describe("terminalPanelTabs", () => {
         tabs: [disconnectedTerminal, otherDisconnectedTerminal],
       },
     });
+
     const nextState = syncTerminalTabsInFixedPanelState({
       state,
       terminalSessions: [
@@ -301,12 +321,15 @@ it("returns to the source if session synchronization removes an active terminal 
     threadId: "thr_1",
     tab: { path: "/source.txt", lineRange: null },
   });
+
   const neighbor = createHostFilePreviewFixedPanelTab({
     environmentId: "env_1",
     threadId: "thr_1",
     tab: { path: "/neighbor.txt", lineRange: null },
   });
+
   const terminal = createTerminalFixedPanelTab({ terminalId: "closing" });
+
   const state = openSecondaryPanelTabInState({
     state: createEmptyFixedPanelTabsState({
       secondary: {
@@ -317,9 +340,11 @@ it("returns to the source if session synchronization removes an active terminal 
     }),
     tab: terminal,
   });
+
   const next = syncTerminalTabsInFixedPanelState({
     state,
     terminalSessions: [],
   });
+
   expect(next.secondary.activeTabId).toBe(source.id);
 });

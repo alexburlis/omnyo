@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BaseWindow, MenuItemConstructorOptions } from "electron";
 
 vi.mock("electron", () => ({
-  app: { name: "bb" },
+  app: { name: "Omnyo" },
   Menu: { sendActionToFirstResponder: vi.fn() },
 }));
 
@@ -46,6 +46,7 @@ function menuArgs(
     servers: [{ checked: true, id: "builtin", name: BUILTIN_SERVER_NAME }],
     setServerUrl: () => {},
     addServer: () => {},
+    version: "1.0.32",
     ...overrides,
   };
 }
@@ -56,6 +57,7 @@ function findServerSubmenu(
   const windowMenu = template.find((item) => item.label === "Window");
   const windowSubmenu = windowMenu?.submenu as MenuItemConstructorOptions[];
   const serverMenu = windowSubmenu.find((item) => item.label === "Server");
+
   return serverMenu?.submenu as MenuItemConstructorOptions[];
 }
 
@@ -63,20 +65,41 @@ function findDesktopSettingsServerSubmenu(
   template: MenuItemConstructorOptions[],
 ): MenuItemConstructorOptions[] {
   const appSubmenu = template[0]?.submenu as MenuItemConstructorOptions[];
+
   const desktopSettingsMenu = appSubmenu.find(
     (item) => item.label === "Desktop Settings",
   );
+
   const desktopSettingsSubmenu =
     desktopSettingsMenu?.submenu as MenuItemConstructorOptions[];
+
   const serverMenu = desktopSettingsSubmenu.find(
     (item) => item.label === "Server",
   );
+
   return serverMenu?.submenu as MenuItemConstructorOptions[];
 }
 
 describe("application menu", () => {
+  it("shows the exact version in Help and opens About from it", () => {
+    const openAbout = vi.fn();
+
+    const template = buildApplicationMenuTemplate(
+      menuArgs(() => {}, { openAbout }),
+    );
+
+    const helpMenu = template.find((item) => item.role === "help");
+    const helpSubmenu = helpMenu?.submenu as MenuItemConstructorOptions[];
+    const versionItem = helpSubmenu[0];
+
+    expect(versionItem?.label).toBe("Version 1.0.32");
+    versionItem?.click?.({} as never, undefined, {} as never);
+    expect(openAbout).toHaveBeenCalledOnce();
+  });
+
   it("reopens the last closed tab from the File menu", () => {
     const reopenClosedTab = vi.fn();
+
     const template = buildApplicationMenuTemplate(
       menuArgs(() => {}, {
         accelerators: {
@@ -90,6 +113,7 @@ describe("application menu", () => {
         reopenClosedTab,
       }),
     );
+
     const fileMenu = template.find((item) => item.label === "File");
     const submenu = fileMenu?.submenu as MenuItemConstructorOptions[];
     const reopen = submenu.find((item) => item.label === "Reopen Closed Tab");
@@ -102,9 +126,11 @@ describe("application menu", () => {
   it("closes a native panel when Electron omits its window", () => {
     vi.mocked(Menu.sendActionToFirstResponder).mockClear();
     const closeWindowOrSideTab = vi.fn();
+
     const template = buildApplicationMenuTemplate(
       menuArgs(() => {}, { closeWindowOrSideTab }),
     );
+
     const fileMenu = template.find((item) => item.label === "File");
     const submenu = fileMenu?.submenu as MenuItemConstructorOptions[];
     const closeWindow = submenu.find((item) => item.label === "Close Window");
@@ -120,9 +146,11 @@ describe("application menu", () => {
   it("forwards an undefined window for detached DevTools", () => {
     vi.mocked(Menu.sendActionToFirstResponder).mockClear();
     const closeWindowOrSideTab = vi.fn();
+
     const template = buildApplicationMenuTemplate(
       menuArgs(() => {}, { closeWindowOrSideTab }),
     );
+
     const fileMenu = template.find((item) => item.label === "File");
     const submenu = fileMenu?.submenu as MenuItemConstructorOptions[];
     const closeWindow = submenu.find((item) => item.label === "Close Window");
@@ -135,9 +163,11 @@ describe("application menu", () => {
 
   it("routes zoom shortcuts to the focused page's clamped zoom", () => {
     const zoomFocusedPage = vi.fn();
+
     const template = buildApplicationMenuTemplate(
       menuArgs(vi.fn(), { zoomFocusedPage }),
     );
+
     const viewMenu = template.find((item) => item.label === "View");
     const submenu = viewMenu?.submenu as MenuItemConstructorOptions[];
 
@@ -150,6 +180,7 @@ describe("application menu", () => {
       expect(item?.accelerator).toBe(accelerator);
       item?.click?.({} as never, undefined, {} as never);
     }
+
     expect(zoomFocusedPage.mock.calls).toEqual([["reset"], ["in"], ["out"]]);
   });
 
@@ -176,6 +207,7 @@ describe("application menu", () => {
     const selectServer = vi.fn();
     const setServerUrl = vi.fn();
     const addServer = vi.fn();
+
     const template = buildApplicationMenuTemplate(
       menuArgs(() => {}, {
         selectServer,
@@ -196,6 +228,7 @@ describe("application menu", () => {
         addServer,
       }),
     );
+
     const serverSubmenu = findServerSubmenu(template);
 
     expect(serverSubmenu).toHaveLength(6);
@@ -228,6 +261,7 @@ describe("application menu", () => {
   it("offers the Server menu under Desktop Settings with Window → Server as an alias", () => {
     const selectServer = vi.fn();
     const addServer = vi.fn();
+
     const template = buildApplicationMenuTemplate(
       menuArgs(() => {}, {
         addServer,
@@ -242,8 +276,10 @@ describe("application menu", () => {
         ],
       }),
     );
+
     const desktopSettingsServerSubmenu =
       findDesktopSettingsServerSubmenu(template);
+
     const labels = (items: MenuItemConstructorOptions[]) =>
       items.map((item) => item.label ?? `<${item.type}>`);
 
@@ -285,6 +321,7 @@ describe("application menu", () => {
         ],
       }),
     );
+
     const serverSubmenu = findServerSubmenu(template);
 
     expect(serverSubmenu.map((item) => item.label ?? `<${item.type}>`)).toEqual(
@@ -301,14 +338,16 @@ describe("application menu", () => {
     expect(note?.enabled).toBe(false);
     expect(note?.type).toBeUndefined();
     expect(note?.click).toBeUndefined();
-    expect(note?.label).toMatch(/sign in to bb Connect/u);
+    expect(note?.label).toMatch(/sign in to Omnyo Connect/u);
   });
 
   it("builds a native Linux menu with the Linux DevTools accelerator", () => {
     vi.mocked(Menu.sendActionToFirstResponder).mockClear();
+
     const template = buildApplicationMenuTemplate(
       menuArgs(() => {}, { isMac: false }),
     );
+
     const appMenu = template[0]?.submenu as MenuItemConstructorOptions[];
     const windowMenu = template.find((item) => item.label === "Window");
     const windowSubmenu = windowMenu?.submenu as MenuItemConstructorOptions[];
@@ -316,6 +355,7 @@ describe("application menu", () => {
     const viewSubmenu = viewMenu?.submenu as MenuItemConstructorOptions[];
     const fileMenu = template.find((item) => item.label === "File");
     const fileSubmenu = fileMenu?.submenu as MenuItemConstructorOptions[];
+
     const closeWindow = fileSubmenu.find(
       (item) => item.label === "Close Window",
     );

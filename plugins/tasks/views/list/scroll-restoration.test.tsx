@@ -32,11 +32,13 @@ describe("listScrollScopeKey", () => {
       priorities: [],
       labelNames: ["b", "a"],
     };
+
     const b: ListFilterState = {
       statuses: ["done", "todo"],
       priorities: [],
       labelNames: ["a", "b"],
     };
+
     expect(listScrollScopeKey({ ...base, filters: a })).toBe(
       listScrollScopeKey({ ...base, filters: b }),
     );
@@ -51,11 +53,13 @@ describe("listScrollScopeKey", () => {
       priorities: [],
       labelNames: ["a,b"],
     };
+
     const twoLabels: ListFilterState = {
       statuses: [],
       priorities: [],
       labelNames: ["a", "b"],
     };
+
     expect(listScrollScopeKey({ ...base, filters: withComma })).not.toBe(
       listScrollScopeKey({ ...base, filters: twoLabels }),
     );
@@ -78,7 +82,7 @@ describe("resolveRestoreTarget", () => {
 });
 
 describe("scroll store", () => {
-  const PREFIX = "bb-tasks:list-scroll:";
+  const PREFIX = "tasks:list-scroll:";
   beforeEach(() => window.sessionStorage.clear());
   afterEach(() => window.sessionStorage.clear());
 
@@ -111,6 +115,7 @@ describe("scroll store", () => {
     Storage.prototype.getItem = () => {
       throw new Error("blocked");
     };
+
     try {
       expect(readListScroll("boom|")).toBeNull();
     } finally {
@@ -157,6 +162,7 @@ function Harness({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useListScrollRestoration(ref, scopeKey, { contentReady, loading, revision });
+
   return (
     <div
       ref={(el) => {
@@ -178,6 +184,7 @@ describe("useListScrollRestoration", () => {
 
   it("persists on scroll and restores on remount, clamped to content", () => {
     let el: HTMLDivElement | null = null;
+
     const capture = (node: HTMLDivElement) => {
       el = node;
     };
@@ -190,6 +197,7 @@ describe("useListScrollRestoration", () => {
         onReady={capture}
       />,
     );
+
     const firstEl = el as unknown as HTMLDivElement;
     act(() => {
       firstEl.scrollTop = 800;
@@ -214,9 +222,11 @@ describe("useListScrollRestoration", () => {
   it("re-applies the target as late-arriving rows grow the scroll height", () => {
     writeListScroll("grow|", 680);
     let el: HTMLDivElement | null = null;
+
     const capture = (node: HTMLDivElement) => {
       el = node;
     };
+
     const view = render(
       <Harness
         scopeKey="grow|"
@@ -227,6 +237,7 @@ describe("useListScrollRestoration", () => {
         onReady={capture}
       />,
     );
+
     const node = el as unknown as HTMLDivElement;
     expect(node.scrollTop).toBe(521);
 
@@ -246,9 +257,11 @@ describe("useListScrollRestoration", () => {
   it("abandons an unreached pending target once the user scrolls", () => {
     writeListScroll("cancel|", 900);
     let el: HTMLDivElement | null = null;
+
     const capture = (node: HTMLDivElement) => {
       el = node;
     };
+
     const view = render(
       <Harness
         scopeKey="cancel|"
@@ -259,6 +272,7 @@ describe("useListScrollRestoration", () => {
         onReady={capture}
       />,
     );
+
     const node = el as unknown as HTMLDivElement;
     expect(node.scrollTop).toBe(500);
 
@@ -282,6 +296,7 @@ describe("useListScrollRestoration", () => {
 
   it("flushes the observed offset, not a detached container's zeroed scrollTop", () => {
     let el: HTMLDivElement | null = null;
+
     const view = render(
       <Harness
         scopeKey="detach|"
@@ -292,6 +307,7 @@ describe("useListScrollRestoration", () => {
         }}
       />,
     );
+
     const node = el as unknown as HTMLDivElement;
     act(() => {
       node.scrollTop = 620;

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { appThemeSchema } from "@bb/domain";
+import { appThemeSchema } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { withHarness } from "../../helpers/harness.js";
 
@@ -14,6 +14,7 @@ describe.sequential("theme resolve integration", () => {
         "theme",
         "preview-me",
       );
+
       await fs.mkdir(themeDir, { recursive: true });
       await fs.writeFile(path.join(themeDir, "theme.css"), CUSTOM_CSS, "utf8");
 
@@ -24,6 +25,7 @@ describe.sequential("theme resolve integration", () => {
           })
         ).json(),
       );
+
       expect(builtIn).toMatchObject({ themeId: "nord", customCss: null });
       expect(builtIn.resolvedCodeTheme.dark).not.toBe(
         appThemeSchema.parse(
@@ -42,6 +44,7 @@ describe.sequential("theme resolve integration", () => {
           })
         ).json(),
       );
+
       expect(custom).toMatchObject({
         themeId: "preview-me",
         customCss: CUSTOM_CSS,
@@ -56,11 +59,13 @@ describe.sequential("theme resolve integration", () => {
       const missing = await harness.api.settings.themes[":id"].$get({
         param: { id: "no-such-theme" },
       });
+
       expect(missing.status).toBe(404);
 
       const malformed = await harness.api.settings.themes[":id"].$get({
         param: { id: "bad id" },
       });
+
       expect(malformed.status).toBe(400);
     }));
 });

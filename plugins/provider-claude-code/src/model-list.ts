@@ -7,7 +7,7 @@ import {
   XHIGH_REASONING_EFFORT,
   type AvailableModel,
   type ModelReasoningEffort,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk";
 
 const CLAUDE_MODEL_ID_PATTERN =
@@ -15,12 +15,15 @@ const CLAUDE_MODEL_ID_PATTERN =
 
 function deriveClaudeModelDisplayName(model: string): string | null {
   const match = CLAUDE_MODEL_ID_PATTERN.exec(model);
+
   if (!match) {
     return null;
   }
+
   const [, family = "", major, minor, oneMillionContext] = match;
   const name = `${family.charAt(0).toUpperCase()}${family.slice(1)}`;
   const version = minor === undefined ? major : `${major}.${minor}`;
+
   return `${name} ${version}${oneMillionContext ? " (1M)" : ""}`;
 }
 
@@ -42,6 +45,7 @@ function buildReasoningEfforts(modelInfo: ModelInfo): ModelReasoningEffort[] {
         }
       })
     : [LOW_REASONING_EFFORT];
+
   return efforts.map((effort) => ({ ...effort }));
 }
 
@@ -51,14 +55,17 @@ function buildModel(
   displayName: string,
 ): AvailableModel {
   const supportedReasoningEfforts = buildReasoningEfforts(modelInfo);
+
   const supportedLevels = supportedReasoningEfforts.map(
     (effort) => effort.reasoningEffort,
   );
+
   const defaultReasoningEffort = supportedLevels.includes("high")
     ? "high"
     : supportedLevels.includes("medium")
       ? "medium"
       : (supportedLevels[0] ?? "low");
+
   return {
     id: model,
     model,
@@ -81,15 +88,19 @@ export function buildClaudeCodeModels(
   const defaultModel =
     discoveredModels.find((modelInfo) => modelInfo.value === "default")
       ?.resolvedModel ?? null;
+
   const models: AvailableModel[] = [];
+
   for (const modelInfo of [
     ...discoveredModels.filter((candidate) => candidate.value !== "default"),
     ...discoveredModels.filter((candidate) => candidate.value === "default"),
   ]) {
     const model = modelInfo.resolvedModel ?? modelInfo.value;
+
     if (models.some((candidate) => candidate.model === model)) {
       continue;
     }
+
     models.push(
       buildModel(
         modelInfo,
@@ -98,9 +109,12 @@ export function buildClaudeCodeModels(
       ),
     );
   }
+
   const selectedOnlyModels: AvailableModel[] = [];
+
   for (const modelInfo of discoveredModels) {
     const alias = modelInfo.value;
+
     if (
       alias === "default" ||
       models.some((candidate) => candidate.model === alias) ||
@@ -108,15 +122,18 @@ export function buildClaudeCodeModels(
     ) {
       continue;
     }
+
     selectedOnlyModels.push(
       buildModel(modelInfo, alias, `${modelInfo.displayName} alias`),
     );
   }
+
   const resolvedDefault =
     defaultModel !== null &&
     models.some((candidate) => candidate.model === defaultModel)
       ? defaultModel
       : models[0]?.model;
+
   return {
     models: models.map((model) =>
       model.model === resolvedDefault ? { ...model, isDefault: true } : model,

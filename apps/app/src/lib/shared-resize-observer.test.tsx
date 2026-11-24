@@ -30,9 +30,11 @@ afterEach(() => {
 
 function lastObserver(): ResizeObserverStub {
   const observer = ResizeObserverStub.instances.at(-1);
+
   if (!observer) {
     throw new Error("No ResizeObserver was installed");
   }
+
   return observer;
 }
 
@@ -52,16 +54,20 @@ describe("observeSharedResize", () => {
     const order: string[] = [];
     const first = document.createElement("div");
     const second = document.createElement("div");
+
     const unobserveFirst = observeSharedResize(first, {
       read: () => {
         order.push("read:first");
+
         return "first";
       },
       write: (value) => order.push(`write:${value}`),
     });
+
     const unobserveSecond = observeSharedResize(second, {
       read: () => {
         order.push("read:second");
+
         return "second";
       },
       write: (value) => order.push(`write:${value}`),
@@ -87,15 +93,18 @@ describe("observeSharedResize", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
     const order: string[] = [];
     const seenEntries: (ResizeObserverEntry | undefined)[] = [];
+
     const targets = [
       document.createElement("div"),
       document.createElement("div"),
     ];
+
     const unobservers = targets.map((target, index) =>
       observeSharedResize(target, {
         read: (entry) => {
           seenEntries.push(entry);
           order.push(`read:${index}`);
+
           return index;
         },
         write: (value) => order.push(`write:${value}`),
@@ -106,6 +115,7 @@ describe("observeSharedResize", () => {
 
     expect(order).toEqual(["read:0", "read:1", "write:0", "write:1"]);
     expect(seenEntries).toEqual([undefined, undefined]);
+
     for (const unobserve of unobservers) unobserve();
   });
 
@@ -162,14 +172,18 @@ describe("ExpandablePanel on the shared observer", () => {
     const regionOf = (text: string) => {
       const region =
         view.getByText(text).parentElement?.parentElement?.parentElement;
+
       if (!region) {
         throw new Error("Panel body region was not rendered");
       }
+
       return region;
     };
+
     const firstRegion = regionOf("First body");
     const secondRegion = regionOf("Second body");
     const [firstTarget, secondTarget] = lastObserver().observedTargets;
+
     if (!firstTarget || !secondTarget) {
       throw new Error("Panel bodies were not observed");
     }

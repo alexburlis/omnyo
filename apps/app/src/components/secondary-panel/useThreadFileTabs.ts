@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import type {
   TerminalSession,
   ThreadStorageFileListResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   useFixedPanelTabsState,
   useUpdateFixedPanelTabsState,
@@ -39,7 +39,7 @@ import type {
   HostFileTabState,
   ThreadStorageFileTabState,
   WorkspaceFileTabState,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import { useRecordThreadRecentItem } from "./threadRecentItems";
 import type {
   SecondaryPanelTabReorderHandler,
@@ -61,7 +61,7 @@ import {
   reorderSecondaryPanelFileTabInState,
   setSecondaryPanelTabsInState,
   updateSecondaryPanelTabInState,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import {
   getPanelTabHistoryKey,
   rememberClosedPanelTab,
@@ -191,8 +191,10 @@ function createTabForOpenRequest({
       ) {
         return null;
       }
+
       const workspaceEnvironmentId =
         request.environmentId ?? resolvedEnvironmentId ?? null;
+
       return createWorkspaceFilePreviewFixedPanelTab({
         environmentId: workspaceEnvironmentId,
         projectId: workspaceEnvironmentId === null ? projectId : null,
@@ -207,7 +209,9 @@ function createTabForOpenRequest({
           threadId: null,
         });
       }
+
       if (!threadId || !resolvedEnvironmentId) return null;
+
       return createHostFilePreviewFixedPanelTab({
         environmentId: resolvedEnvironmentId,
         tab: request.tab,
@@ -215,7 +219,9 @@ function createTabForOpenRequest({
       });
     case "thread-storage-file-preview":
       const storageThreadId = request.threadId ?? threadId;
+
       if (!storageThreadId) return null;
+
       return createThreadStorageFilePreviewFixedPanelTab({
         environmentId: resolvedEnvironmentId ?? null,
         isPinned: false,
@@ -290,23 +296,30 @@ export function useThreadFileTabs({
     panelStateId,
     syncThreadId,
   );
+
   const updateFixedPanelTabsState = useUpdateFixedPanelTabsState(
     panelStateId,
     syncThreadId,
   );
+
   const recordRecentItem = useRecordThreadRecentItem(panelStateId);
+
   const resolvedPanelStateId =
     typeof panelStateId === "string" && panelStateId.length > 0
       ? panelStateId
       : null;
+
   const isPanelStateResolved = resolvedPanelStateId !== null;
+
   const resolvedFileOwnerThreadId =
     fileOwnerThreadId !== undefined
       ? fileOwnerThreadId
       : (syncThreadId ?? null);
+
   const resolvedEnvironmentId = isPanelStateResolved
     ? environmentId
     : undefined;
+
   const storageInventory = useMemo<StorageFileInventory | null>(
     () =>
       storageFiles === undefined
@@ -317,6 +330,7 @@ export function useThreadFileTabs({
           },
     [storageFiles],
   );
+
   const recentlyClosedPanelContextKey = getPanelTabHistoryKey({
     environmentId: resolvedEnvironmentId,
     fileOwnerThreadId: resolvedFileOwnerThreadId,
@@ -332,8 +346,10 @@ export function useThreadFileTabs({
       const tabIdMap = new Map<string, string>();
       const seenTabIds = new Set<string>();
       const tabs: FixedPanelTab[] = [];
+
       for (const tab of state.secondary.tabs) {
         let nextTab = tab;
+
         if (
           tab.kind === "host-file-preview" &&
           tab.threadId === null &&
@@ -366,20 +382,25 @@ export function useThreadFileTabs({
           didChange = true;
           tabIdMap.set(tab.id, nextTab.id);
         }
+
         if (seenTabIds.has(nextTab.id)) {
           didChange = true;
           tabIdMap.set(tab.id, nextTab.id);
           continue;
         }
+
         seenTabIds.add(nextTab.id);
         tabs.push(nextTab);
       }
+
       if (!didChange) return state;
+
       const activeTabId =
         state.secondary.activeTabId === null
           ? null
           : (tabIdMap.get(state.secondary.activeTabId) ??
             state.secondary.activeTabId);
+
       return setSecondaryPanelTabsInState({
         activeTabId,
         isOpen: state.secondary.isOpen,
@@ -395,6 +416,7 @@ export function useThreadFileTabs({
 
   useEffect(() => {
     if (preserveWorkspaceTabsAcrossContexts) return;
+
     if (resolvedEnvironmentId === undefined) return;
     updateFixedPanelTabsState((state) =>
       applyPrunedSecondaryTabs(
@@ -419,6 +441,7 @@ export function useThreadFileTabs({
     ) {
       return;
     }
+
     updateFixedPanelTabsState((state) =>
       applyPrunedSecondaryTabs(
         state,
@@ -465,6 +488,7 @@ export function useThreadFileTabs({
         threadId: resolvedFileOwnerThreadId,
         ...(viewer !== undefined ? { viewer } : {}),
       });
+
       const tab =
         openerTab ??
         createTabForOpenRequest({
@@ -473,6 +497,7 @@ export function useThreadFileTabs({
           resolvedEnvironmentId,
           threadId: resolvedFileOwnerThreadId,
         });
+
       if (tab === null) return null;
 
       if (recentlyClosedPanelContextKey !== null) {
@@ -485,6 +510,7 @@ export function useThreadFileTabs({
       ) {
         recordRecentItem({ source: "workspace", path: request.tab.path });
       }
+
       if (request.kind === "thread-storage-file-preview") {
         recordRecentItem({ source: "thread-storage", path: request.tab.path });
       }
@@ -493,8 +519,10 @@ export function useThreadFileTabs({
         if (behavior === "replace-new-tab") {
           return replaceNewTabWithSecondaryPanelTabInState({ state, tab });
         }
+
         return openSecondaryPanelTabInState({ state, tab });
       });
+
       return tab;
     },
     [
@@ -540,9 +568,11 @@ export function useThreadFileTabs({
         const tabIndex = state.secondary.tabs.findIndex(
           (tab) => tab.id === tabId,
         );
+
         const tab = state.secondary.tabs[tabIndex];
         const next = closeSecondaryPanelTabInState(state, tabId);
         didCloseLastTab = next !== state && next.secondary.tabs.length === 0;
+
         if (
           next !== state &&
           recentlyClosedPanelContextKey !== null &&
@@ -556,8 +586,10 @@ export function useThreadFileTabs({
             tab,
           });
         }
+
         return next;
       });
+
       if (didCloseLastTab) onCloseLastTab?.();
     },
     [onCloseLastTab, recentlyClosedPanelContextKey, updateFixedPanelTabsState],
@@ -576,8 +608,10 @@ export function useThreadFileTabs({
           0,
           Math.min(entry.index, state.secondary.tabs.length),
         );
+
         const tabs = [...state.secondary.tabs];
         tabs.splice(index, 0, entry.tab);
+
         return setSecondaryPanelTabsInState({
           activeTabId: entry.tab.id,
           isOpen: true,
@@ -589,6 +623,7 @@ export function useThreadFileTabs({
       const restoredDetails: Parameters<
         PluginDetailHistoryTarget["restore"]
       >[0][] = [];
+
       let didReopen = false;
       updateFixedPanelTabsState((state) => {
         const entry = takeClosedPanelTab(
@@ -601,19 +636,27 @@ export function useThreadFileTabs({
           ]),
           pluginDetails !== undefined,
         );
+
         if (entry === null) return state;
         didReopen = true;
+
         if (entry.kind === "plugin-detail") {
           restoredDetails.push(entry);
+
           return state;
         }
+
         if (entry.tab.kind === "browser" && entry.tab.desktopTarget) {
           allowBrowserViewRecreation(entry.tab.id, entry.tab.desktopTarget);
         }
+
         return restoreEntry(state, entry);
       });
+
       for (const entry of restoredDetails) pluginDetails?.restore(entry);
+
       if (didReopen && restoredDetails.length === 0) pluginDetails?.dismiss();
+
       return didReopen;
     },
     [recentlyClosedPanelContextKey, updateFixedPanelTabsState],
@@ -627,11 +670,14 @@ export function useThreadFileTabs({
         pluginId,
         title,
       });
+
       if (recentlyClosedPanelContextKey !== null) {
         forgetClosedPanelTab(recentlyClosedPanelContextKey, tab.id);
       }
+
       updateFixedPanelTabsState((state) => {
         const existing = findSecondaryPanelTab(state.secondary.tabs, tab.id);
+
         if (existing !== null && existing.kind === "plugin-panel") {
           const withTitle =
             existing.title === title
@@ -640,8 +686,10 @@ export function useThreadFileTabs({
                   state,
                   tab: { ...existing, title },
                 });
+
           return activateSecondaryPanelTabInState(withTitle, tab.id);
         }
+
         return replaceNewTabWithSecondaryPanelTabInState({ state, tab });
       });
     },
@@ -662,9 +710,11 @@ export function useThreadFileTabs({
     ({ tabId, url, title }: UpdateBrowserTabArgs) => {
       updateFixedPanelTabsState((state) => {
         const tab = findSecondaryPanelTab(state.secondary.tabs, tabId);
+
         if (!tab || !isBrowserTab(tab)) {
           return state;
         }
+
         return updateSecondaryPanelTabInState({
           state,
           tab: {
@@ -692,47 +742,59 @@ export function useThreadFileTabs({
   );
 
   const activeTab = getActiveSecondaryPanelTab(fixedPanelTabsState);
+
   const orderedSecondaryFileTabs = buildOrderedSecondaryPanelFileTabs({
     includeWorkspaceTabsOutsideEnvironment: preserveWorkspaceTabsAcrossContexts,
     tabs: fixedPanelTabsState.secondary.tabs,
     resolvedEnvironmentId,
   });
+
   const browserTabs = useMemo(
     () => fixedPanelTabsState.secondary.tabs.filter(isBrowserTab),
     [fixedPanelTabsState.secondary.tabs],
   );
+
   const activeWorkspaceFileTab =
     activeTab?.kind === "workspace-file-preview" &&
     (preserveWorkspaceTabsAcrossContexts ||
       activeTab.environmentId === resolvedEnvironmentId)
       ? activeTab
       : null;
+
   const activeStorageFileTab =
     activeTab?.kind === "thread-storage-file-preview" ? activeTab : null;
+
   const activeHostFileTab =
     activeTab?.kind === "host-file-preview" ? activeTab : null;
+
   const activeBrowserTab = activeTab?.kind === "browser" ? activeTab : null;
+
   const activePluginPanelTab =
     activeTab?.kind === "plugin-panel" ? activeTab : null;
+
   const activeFileOpenerOwner =
     activePluginPanelTab !== null &&
     fileOpenerIdFromActionId(activePluginPanelTab.actionId) !== null
       ? (activePluginPanelTab.fileOpenerOwner ?? null)
       : null;
+
   const activeFileOpenerFile =
     activeFileOpenerOwner === null || activePluginPanelTab === null
       ? null
       : parseFileOpenerParams(activePluginPanelTab.paramsJson);
+
   const activeWorkspaceFileOpener =
     activeFileOpenerOwner?.kind === "workspace-file-preview" &&
     activeFileOpenerFile?.source.kind === "workspace"
       ? activeFileOpenerFile
       : null;
+
   const activeHostFileOpener =
     activeFileOpenerOwner?.kind === "host-file-preview" &&
     activeFileOpenerFile?.source.kind === "host"
       ? activeFileOpenerFile
       : null;
+
   const activeStorageFileOpener =
     activeFileOpenerOwner?.kind === "thread-storage-file-preview" &&
     activeFileOpenerFile?.source.kind === "thread-storage"

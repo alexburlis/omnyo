@@ -6,10 +6,10 @@ import {
 } from "../helpers/command-output-harness.js";
 import { registerGuideCommand } from "../../commands/guide.js";
 
-describe("bb guide command output", () => {
+describe("omnyo guide command output", () => {
   setupCommandOutputTestEnvironment();
 
-  it("bb guide unknown chapter lists available chapters", async () => {
+  it("omnyo guide unknown chapter lists available chapters", async () => {
     await expect(
       runCommand(["guide", "missing"], registerGuideCommand),
     ).rejects.toThrow("process.exit:1");
@@ -21,49 +21,64 @@ describe("bb guide command output", () => {
     );
   });
 
-  it("bb guide accepts the singular and synonym names agents guess", async () => {
+  it("omnyo guide accepts the singular and synonym names agents guess", async () => {
     await runCommand(["guide", "thread", "--json"], registerGuideCommand);
     await runCommand(["guide", "host", "--json"], registerGuideCommand);
 
     const chapters = collectLogLines(vi.mocked(console.log)).map(
       (line) => JSON.parse(line).chapter,
     );
+
     expect(chapters).toEqual(["threads", "machines"]);
   });
 
-  it("bb guide commands <group> lists each command once with its options and aliases", async () => {
+  it("omnyo guide commands <group> lists each command once with its options and aliases", async () => {
     await runCommand(["guide", "commands", "terminal"], registerGuideCommand);
 
     const output = collectLogLines(vi.mocked(console.log)).join("\n");
     expect(output).toContain(
-      "bb terminal output|read <terminalId>  [--since-seq <n>] [--tail-bytes <n>] [--limit-chunks <n>] [--json]\n    Print terminal output",
+      "omnyo terminal output|read <terminalId>  [--since-seq <n>] [--tail-bytes <n>] [--limit-chunks <n>] [--json]\n    Print terminal output",
     );
-    expect(output).not.toContain("bb thread ");
+    expect(output).not.toContain("omnyo thread ");
   }, 30_000);
 
-  it("bb guide commands without a group leaves options out and says how to get them", async () => {
+  it("omnyo guide commands <group> lists a group command that runs itself before its subcommands", async () => {
+    await runCommand(["guide", "commands", "wait"], registerGuideCommand);
+
+    const output = collectLogLines(vi.mocked(console.log)).join("\n");
+    expect(output).toMatch(
+      /^omnyo wait \[threadId\] {2}\[--self\] \[--key <key>\] \[--for <text>\]/,
+    );
+    expect(output).toContain(
+      "omnyo wait rearm <waitId> [threadId]  [--self] [--json]\n",
+    );
+  }, 30_000);
+
+  it("omnyo guide commands without a group leaves options out and says how to get them", async () => {
     await runCommand(["guide", "commands"], registerGuideCommand);
 
     const output = collectLogLines(vi.mocked(console.log)).join("\n");
-    expect(output).toContain("bb thread tell|message|send <id> [message]\n");
-    expect(output).toContain("bb guide commands <group>");
+    expect(output).toContain("omnyo thread tell|message|send <id> [message]\n");
+    expect(output).toContain("omnyo guide commands <group>");
   }, 30_000);
 
-  it("bb guide commands rejects a group that does not exist", async () => {
+  it("omnyo guide commands rejects a group that does not exist", async () => {
     await expect(
       runCommand(["guide", "commands", "nope"], registerGuideCommand),
     ).rejects.toThrow("process.exit:1");
 
     const errorOutput = collectLogLines(vi.mocked(console.error)).join("\n");
     expect(errorOutput).toContain("Unknown command group 'nope'.");
-    expect(errorOutput).toContain("Command groups: browser, status");
+    expect(errorOutput).toContain(
+      "Command groups: question, callback, inbox, wait, browser, status",
+    );
   }, 30_000);
 
-  it("bb guide terminals renders the terminals chapter", async () => {
+  it("omnyo guide terminals renders the terminals chapter", async () => {
     await runCommand(["guide", "terminals"], registerGuideCommand);
 
     expect(collectLogLines(vi.mocked(console.log)).join("\n")).toContain(
-      "bb terminal list --thread <thread-id>",
+      "omnyo terminal list --thread <thread-id>",
     );
   });
 });

@@ -1,5 +1,5 @@
-import { getProjectSourceByHost } from "@bb/db";
-import type { ProjectWorkspaceRoutingQuery } from "@bb/server-contract";
+import { getProjectSourceByHost } from "@omnyo/db";
+import type { ProjectWorkspaceRoutingQuery } from "@omnyo/server-contract";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import {
@@ -27,9 +27,11 @@ function requireProjectEnvironment(
   const environment = args.ready
     ? requireReadyEnvironment(deps.db, args.environmentId)
     : requireEnvironment(deps.db, args.environmentId);
+
   if (environment.projectId !== args.projectId) {
     throw new ApiError(404, "environment_not_found", "Environment not found");
   }
+
   return environment;
 }
 
@@ -38,9 +40,11 @@ function resolveProjectSourceOnHost(
   args: { hostId: string; projectId: string },
 ): ProjectWorkspaceTarget | null {
   const source = getProjectSourceByHost(deps.db, args.projectId, args.hostId);
+
   if (!source || source.type !== "local_path") {
     return null;
   }
+
   return { hostId: source.hostId, path: source.path };
 }
 
@@ -54,7 +58,9 @@ export function resolveProjectWorkspaceTarget(
       projectId: args.projectId,
       ready: true,
     });
+
     assertUsableHostId(deps, { hostId: environment.hostId });
+
     if (environment.path === null) {
       throw new ApiError(
         409,
@@ -62,18 +68,22 @@ export function resolveProjectWorkspaceTarget(
         "Environment workspace is not ready",
       );
     }
+
     return { hostId: environment.hostId, path: environment.path };
   }
 
   const hostId = args.hostId ?? requirePrimaryHostId(deps);
   assertUsableHostId(deps, { hostId });
+
   const source = resolveProjectSourceOnHost(deps, {
     hostId,
     projectId: args.projectId,
   });
+
   if (source) {
     return source;
   }
+
   throw new ApiError(
     args.hostId !== undefined ? 404 : 409,
     "invalid_request",
@@ -98,10 +108,13 @@ export function resolveProjectCommandWorkspace(
       projectId: args.projectId,
       ready: false,
     });
+
     assertUsableHostId(deps, { hostId: environment.hostId });
+
     if (environment.status === "ready" && environment.path !== null) {
       return { hostId: environment.hostId, cwd: environment.path };
     }
+
     return {
       hostId: environment.hostId,
       cwd:
@@ -114,6 +127,7 @@ export function resolveProjectCommandWorkspace(
 
   const hostId = args.hostId ?? requirePrimaryHostId(deps);
   assertUsableHostId(deps, { hostId });
+
   return {
     hostId,
     cwd:

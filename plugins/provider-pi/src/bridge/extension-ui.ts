@@ -54,6 +54,7 @@ function rawMethod(request: Record<string, unknown>): unknown {
 
 function rawId(request: Record<string, unknown>): string | number | null {
   const id = request.id;
+
   return typeof id === "string" || typeof id === "number" ? id : null;
 }
 
@@ -68,15 +69,21 @@ export function createExtensionUiCoordinator(
       if (FIRE_AND_FORGET_METHODS.has(String(rawMethod(args.request)))) {
         return;
       }
+
       const parsed = piExtensionUiRequestSchema.safeParse(args.request);
+
       if (!parsed.success) {
         const id = rawId(args.request);
+
         if (id !== null) {
           args.respond(id, { cancelled: true });
         }
+
         return;
       }
+
       const request: PiExtensionUiRequest = parsed.data;
+
       const data = piExtensionUiPayloadDataSchema.parse({
         requestId: String(request.id),
         method: request.method,
@@ -87,6 +94,7 @@ export function createExtensionUiCoordinator(
           : {}),
         ...(request.prefill !== undefined ? { prefill: request.prefill } : {}),
       });
+
       nextRequestId += 1;
       const interactionId = `pi-ui-${nextRequestId}`;
       pending.set(interactionId, {
@@ -94,6 +102,7 @@ export function createExtensionUiCoordinator(
         request,
         respond: args.respond,
       });
+
       try {
         options.sendInteractionRequest({
           jsonrpc: "2.0",
@@ -118,9 +127,11 @@ export function createExtensionUiCoordinator(
 
     handleRuntimeResponse(response) {
       const entry = pending.get(String(response.id));
+
       if (!entry) {
         return false;
       }
+
       pending.delete(String(response.id));
       const parsed = piExtensionUiResolutionSchema.safeParse(response.result);
       entry.respond(
@@ -129,6 +140,7 @@ export function createExtensionUiCoordinator(
           ? resolveExtensionUiResponseFields(entry.request, parsed.data)
           : { cancelled: true },
       );
+
       return true;
     },
 
@@ -137,6 +149,7 @@ export function createExtensionUiCoordinator(
         if (entry.scope !== scope) {
           continue;
         }
+
         pending.delete(interactionId);
         entry.respond(entry.request.id, { cancelled: true });
       }

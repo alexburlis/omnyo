@@ -74,17 +74,22 @@ export function FileTreePanel({
 
   useLayoutEffect(() => {
     const parent = panelRef.current?.parentElement;
+
     if (parent === null || parent === undefined) return;
+
     const fit = () => {
       const next = clampTreeHeight(
         requestedHeightRef.current,
         parent.clientHeight,
       );
+
       if (next !== heightRef.current) setHeight(next);
     };
+
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(parent);
+
     return () => observer.disconnect();
   }, []);
 
@@ -124,7 +129,9 @@ export function FileTreePanel({
   useEffect(() => {
     setExpanded((current) => {
       const next = new Set(current);
+
       for (const ancestor of ancestorsOf(activePath)) next.add(ancestor);
+
       return next;
     });
   }, [activePath]);
@@ -135,14 +142,17 @@ export function FileTreePanel({
 
   const effectiveExpanded = useMemo(() => {
     if (filtered.expand.size === 0) return expanded;
+
     return new Set([...expanded, ...filtered.expand]);
   }, [expanded, filtered.expand]);
 
   const toggle = (path: string) => {
     setExpanded((current) => {
       const next = new Set(current);
+
       if (next.has(path)) next.delete(path);
       else next.add(path);
+
       return next;
     });
   };
@@ -167,6 +177,7 @@ export function FileTreePanel({
           onKeyDown={(event) => {
             if (event.key !== "Escape") return;
             event.stopPropagation();
+
             if (query !== "") setQuery("");
             else onClose();
           }}
@@ -257,6 +268,7 @@ function ResizeHandle({
     const pointerId = event.pointerId;
     const startY = event.clientY;
     const divider = dividerRef.current;
+
     if (divider !== null) divider.dataset.dragging = "true";
     onResizeStart();
     target.setPointerCapture(pointerId);
@@ -265,17 +277,21 @@ function ResizeHandle({
       if (moveEvent.pointerId !== pointerId) return;
       onResize(moveEvent.clientY - startY);
     };
+
     const finish = (finishEvent: PointerEvent) => {
       if (finishEvent.pointerId !== pointerId) return;
       target.removeEventListener("pointermove", move);
       target.removeEventListener("pointerup", finish);
       target.removeEventListener("pointercancel", finish);
+
       if (target.hasPointerCapture(pointerId)) {
         target.releasePointerCapture(pointerId);
       }
+
       if (divider !== null) delete divider.dataset.dragging;
       onResizeEnd();
     };
+
     target.addEventListener("pointermove", move);
     target.addEventListener("pointerup", finish);
     target.addEventListener("pointercancel", finish);
@@ -337,6 +353,7 @@ function Rows({
         const isDirectory = node.kind === "directory";
         const isOpen = isDirectory && expanded.has(node.path);
         const isActive = !isDirectory && node.path === activePath;
+
         return (
           <div key={node.path}>
             <button
@@ -387,7 +404,10 @@ function Chevron({ isOpen }: { isOpen: boolean }) {
     <svg
       viewBox="0 0 24 24"
       fill="none"
-      className={cn("size-3 transition-transform", isOpen && "rotate-90")}
+      className={cn(
+        "size-3 transition-transform duration-(--motion-duration-base) ease-in-out",
+        isOpen && "rotate-90",
+      )}
       aria-hidden
     >
       <path

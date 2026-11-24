@@ -13,19 +13,24 @@ import {
   turnStartParamsSchema as canonicalTurnStartParamsSchema,
   turnSteerParamsSchema as canonicalTurnSteerParamsSchema,
   skillsConfigureParamsSchema,
+  threadSpeedSetParamsSchema,
+  modelListParamsSchema,
   bridgeRequestEnvelopeSchema,
   providerMaintenanceParamsSchema,
   providerInstallationRunParamsSchema,
   providerInstallationStatusParamsSchema,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { z } from "zod";
 import { claudePermissionModeSchema } from "../interactive-contract.js";
 
 const bridgeInstructionModeSchema = z.enum(instructionModeValues);
+
 const bridgePermissionEscalationSchema = z
   .enum(permissionEscalationValues)
   .nullable();
+
 const bridgePermissionScopeSchema = z.enum(runtimePermissionScopeValues);
+
 const bridgeAdditionalWorkspaceWriteRootsSchema = z
   .array(z.string())
   .optional();
@@ -34,6 +39,7 @@ const bridgeClaudeLocalPluginSchema = z.object({
   type: z.literal("local"),
   path: z.string(),
 });
+
 const bridgeClaudePluginsSchema = z
   .array(bridgeClaudeLocalPluginSchema)
   .optional();
@@ -55,7 +61,9 @@ export const claudeThreadStartParamsSchema = z.object({
   workflowsEnabled: z.boolean(),
   chromeEnabled: z.boolean(),
   disable1MContext: z.boolean(),
+  allowModelFallback: z.boolean().default(false),
   sandboxEnabled: z.boolean(),
+  fullAccessApprovalsEnabled: z.boolean(),
   memoryEnabled: z.boolean().optional(),
   providerSubagentsEnabled: z.boolean().optional(),
   instructionMode: bridgeInstructionModeSchema,
@@ -85,7 +93,9 @@ export const claudeTurnStartParamsSchema = z.object({
   workflowsEnabled: z.boolean().optional(),
   chromeEnabled: z.boolean().optional(),
   disable1MContext: z.boolean().optional(),
+  allowModelFallback: z.boolean().default(false),
   sandboxEnabled: z.boolean().optional(),
+  fullAccessApprovalsEnabled: z.boolean().optional(),
   memoryEnabled: z.boolean().optional(),
   providerSubagentsEnabled: z.boolean().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
@@ -107,7 +117,7 @@ const claudeCodeCommandSchema = z.discriminatedUnion("method", [
   }),
   z.object({
     method: z.literal("model/list"),
-    params: z.object({}),
+    params: modelListParamsSchema,
   }),
   z.object({
     method: z.literal("provider/health"),
@@ -136,6 +146,10 @@ const claudeCodeCommandSchema = z.discriminatedUnion("method", [
   z.object({
     method: z.literal("thread/fork"),
     params: canonicalThreadForkParamsSchema,
+  }),
+  z.object({
+    method: z.literal("thread/speed/set"),
+    params: threadSpeedSetParamsSchema,
   }),
   z.object({
     method: z.literal("turn/start"),
@@ -197,6 +211,7 @@ function formatZodIssues(error: z.ZodError): string {
   return error.issues
     .map((issue) => {
       const path = issue.path.join(".");
+
       return path ? `${path}: ${issue.message}` : issue.message;
     })
     .join("; ");
@@ -206,9 +221,11 @@ export function decodeClaudeCodeJsonRpcRequest(
   raw: unknown,
 ): ClaudeCodeJsonRpcRequestDecodeResult {
   const envelope = bridgeRequestEnvelopeSchema.safeParse(raw);
+
   if (!envelope.success) return { kind: "not_a_request" };
 
   const { id, method } = envelope.data;
+
   if (!claudeCodeCommandMethods.has(method)) {
     return { kind: "unknown_method", id, method };
   }
@@ -217,6 +234,7 @@ export function decodeClaudeCodeJsonRpcRequest(
     method,
     params: envelope.data.params ?? {},
   });
+
   if (!command.success) {
     return {
       kind: "invalid_params",

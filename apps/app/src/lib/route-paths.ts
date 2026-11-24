@@ -10,7 +10,7 @@ import {
   SKILLS_ROUTE_PATH,
   TOOLS_ROUTE_PATH,
   stripRoutePathSuffix,
-} from "@bb/client-core";
+} from "@omnyo/client-core/route-paths";
 
 export {
   APP_ROOT_ROUTE_PATH,
@@ -51,6 +51,8 @@ export {
   AUTOMATION_EDIT_ROUTE_PATH,
   LEGACY_PROJECT_COMPOSE_ROUTE_PATH,
   PROJECTLESS_ARCHIVED_ROUTE_PATH,
+  PROJECTLESS_THREAD_DETAIL_ROUTE_PATH,
+  THREAD_DETAIL_ROUTE_PATH,
   LEGACY_PROJECT_SETTINGS_ROUTE_PATH,
   PROJECT_ARCHIVED_ROUTE_PATH,
   PLUGIN_PANEL_ROUTE_PATH,
@@ -73,8 +75,17 @@ export {
   getAutomationEditRoutePath,
   getPluginPanelRoutePath,
   getThreadRoutePath,
-} from "@bb/client-core";
-export type { ThreadRoutePathArgs } from "@bb/client-core";
+  isWorkspaceRoutePath,
+} from "@omnyo/client-core/route-paths";
+
+export type { ThreadRoutePathArgs } from "@omnyo/client-core/route-paths";
+
+export const SKILLS_PANEL = {
+  pluginId: "skill-discovery",
+  path: "browse",
+} as const;
+
+export const NEEDS_YOU_PANEL = { pluginId: "chief", path: "home" } as const;
 
 export function getPluginPanelRoutePluginId(pathname: string): string | null {
   return matchPath(PLUGIN_PANEL_ROUTE_PATH, pathname)?.params.pluginId ?? null;
@@ -122,6 +133,7 @@ const ABSOLUTE_HTTP_URL_PATTERN = /^https?:\/\//iu;
 
 export function isRoutePath({ path }: IsRoutePathArgs): boolean {
   const pathname = stripRoutePathSuffix(path);
+
   return ROUTE_PATTERNS.some(
     (pattern) => matchPath(pattern, pathname) !== null,
   );
@@ -140,6 +152,7 @@ export function resolveRouteHref({
   }
 
   let url: URL;
+
   try {
     url = new URL(href, currentOrigin);
   } catch {

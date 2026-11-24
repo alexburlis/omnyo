@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { convertLegacyStoredThreadEvent } from "./legacy-thread-events.js";
+import { importLegacyCoreThreadStateKindV1 } from "./thread-provider-state.js";
 import { threadEventSchema, threadEventTypeSchema } from "./provider-event.js";
 import {
   systemMessageKindSchema,
@@ -104,6 +105,7 @@ function toStoredThreadEventData<TEvent extends ThreadEvent>(
   event: TEvent,
 ): StoredThreadEventDataFromEvent<TEvent> {
   const { scope: _scope, threadId: _threadId, type: _type, ...data } = event;
+
   return data;
 }
 
@@ -111,6 +113,7 @@ function omitStoredScopeFields(
   data: Record<string, unknown>,
 ): Record<string, unknown> {
   const { scope: _scope, turnId: _turnId, ...rest } = data;
+
   return rest;
 }
 
@@ -118,19 +121,23 @@ export function parseStoredThreadEvent(
   args: StoredThreadEventParseArgs,
 ): ThreadEvent {
   const scopeResult = threadEventScopeSchema.safeParse(args.scope);
+
   if (!scopeResult.success) {
     throw new Error("Stored thread event is missing valid scope");
   }
+
   const scope = scopeResult.data;
+
   const stored = convertLegacyStoredThreadEvent(
     { type: args.type, data: args.data },
     { turnId: getThreadEventScopeTurnId(scope) ?? null },
   );
+
   const eventData = storedTurnRequestTypeSet.has(stored.type)
     ? storedTurnRequestEventDataSchema.parse(stored.data)
     : stored.data;
 
-  return threadEventSchema.parse({
+  const event = threadEventSchema.parse({
     ...omitStoredScopeFields(eventData),
     ...(args.providerThreadId != null
       ? { providerThreadId: args.providerThreadId }
@@ -139,6 +146,11 @@ export function parseStoredThreadEvent(
     threadId: args.threadId,
     type: stored.type,
   });
+
+  if (event.type !== "thread/extensionState/updated") return event;
+  const kind = importLegacyCoreThreadStateKindV1(event.kind);
+
+  return kind === event.kind ? event : { ...event, kind };
 }
 
 export function buildThreadEventRow(
@@ -151,6 +163,7 @@ export function buildThreadEventRow<TEvent extends ThreadEvent>(
   args: ThreadEventRowBase & { event: TEvent },
 ): ThreadEventRowFromEvent<TEvent> {
   const { event, ...row } = args;
+
   return {
     ...row,
     type: event.type,
@@ -187,6 +200,7 @@ function parseThreadEventRowInput(row: ThreadEventRowInput): ThreadEventRow {
 
 export function parseThreadEventRow(value: unknown): ThreadEventRow {
   const row = threadEventRowInputSchema.parse(value);
+
   return parseThreadEventRowInput(row);
 }
 

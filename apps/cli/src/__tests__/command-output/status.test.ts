@@ -10,15 +10,15 @@ import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import * as fixtures from "../helpers/command-output-fixtures.js";
 import { registerStatusCommand } from "../../commands/status.js";
 
-describe("bb status command output", () => {
+describe("omnyo status command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
     registerStatusCommand(program, () => "http://server");
 
-  it("bb status prints project/thread context", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
-    vi.stubEnv("BB_THREAD_ID", "thread-1");
+  it("omnyo status prints project/thread context", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-1");
 
     await runCommand(["status"], register);
 
@@ -27,14 +27,15 @@ describe("bb status command output", () => {
     expect(lines).toContain("Thread: thread-1");
   });
 
-  it("bb status prints environment without fetching hosts", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
-    vi.stubEnv("BB_THREAD_ID", "thread-1");
+  it("omnyo status prints environment without fetching hosts", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-1");
 
     const getProject = vi.fn(async () => ({
       id: "proj-1",
       name: "Alpha",
     }));
+
     const getThread = vi.fn(async () =>
       fixtures.makeThread({
         id: "thread-1",
@@ -43,6 +44,7 @@ describe("bb status command output", () => {
         environmentId: "env-1",
       }),
     );
+
     const getEnvironment = vi.fn(async () =>
       fixtures.makeEnvironment({
         id: "env-1",
@@ -50,6 +52,7 @@ describe("bb status command output", () => {
         hostId: "host-remote",
       }),
     );
+
     stubServerApi({
       "v1.projects.:id.$get": getProject,
       "v1.threads.:id.$get": getThread,
@@ -63,39 +66,56 @@ describe("bb status command output", () => {
     );
   });
 
-  it("bb status prints pinned state for pinned thread context", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
-    vi.stubEnv("BB_THREAD_ID", "thread-pinned-1");
+  it.each([
+    {
+      flag: "pinned",
+      stamp: { pinnedAt: 1_700_000_000_000 },
+      label: "Pinned:",
+    },
+    {
+      flag: "shelved",
+      stamp: { shelvedAt: 1_700_000_000_000 },
+      label: "Shelved:",
+    },
+  ])(
+    "omnyo status prints $flag state for $flag thread context",
+    async ({ flag, stamp, label }) => {
+      vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+      vi.stubEnv("OMNYO_THREAD_ID", `thread-${flag}-1`);
 
-    const getProject = vi.fn(async () => ({
-      id: "proj-1",
-      name: "Alpha",
-    }));
-    const getThread = vi.fn(async () =>
-      fixtures.makeThread({
-        id: "thread-pinned-1",
-        projectId: "proj-1",
-        providerId: "codex",
-        pinnedAt: 1_700_000_000_000,
-      }),
-    );
-    stubServerApi({
-      "v1.projects.:id.$get": getProject,
-      "v1.threads.:id.$get": getThread,
-    });
+      const getProject = vi.fn(async () => ({
+        id: "proj-1",
+        name: "Alpha",
+      }));
 
-    await runCommand(["status"], register);
+      const getThread = vi.fn(async () =>
+        fixtures.makeThread({
+          id: `thread-${flag}-1`,
+          projectId: "proj-1",
+          providerId: "codex",
+          ...stamp,
+        }),
+      );
 
-    const lines = collectLogLines(vi.mocked(console.log));
-    expect(lines.some((line) => line.includes("Pinned:"))).toBe(true);
-  });
+      stubServerApi({
+        "v1.projects.:id.$get": getProject,
+        "v1.threads.:id.$get": getThread,
+      });
+
+      await runCommand(["status"], register);
+
+      const lines = collectLogLines(vi.mocked(console.log));
+      expect(lines.some((line) => line.includes(label))).toBe(true);
+    },
+  );
 });
 
 function stubServer(plugins: Array<{ id: string; status: string }>): void {
   vi.mocked(fetch).mockImplementation(async (input) => {
     const url = String(input instanceof Request ? input.url : input);
+
     const body = url.endsWith("/api/v1/system/config")
-      ? { dataDir: "/data/bb" }
+      ? { dataDir: "/data/omnyo" }
       : {
           plugins: plugins.map(({ id, status }) => ({
             id,
@@ -124,13 +144,14 @@ function stubServer(plugins: Array<{ id: string; status: string }>): void {
             logoDarkUrl: null,
           })),
         };
+
     return new Response(JSON.stringify(body), {
       headers: { "Content-Type": "application/json" },
     });
   });
 }
 
-describe("bb status plugin attention", () => {
+describe("omnyo status plugin attention", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -149,7 +170,7 @@ describe("bb status plugin attention", () => {
     await runCommand(["status"], register);
 
     expect(collectLogPayloads(vi.mocked(console.log)).join("\n")).toContain(
-      "1 plugin not running (notify: incompatible). Run bb plugin list.",
+      "1 plugin not running (notify: incompatible). Run omnyo plugin list.",
     );
   });
 

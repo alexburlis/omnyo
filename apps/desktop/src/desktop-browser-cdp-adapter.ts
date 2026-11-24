@@ -1,6 +1,12 @@
 import type { Event, WebContents } from "electron";
 import { z } from "zod";
 import { captureDesktopBrowserCdpScreenshot } from "./desktop-browser-capture.js";
+import {
+  DESKTOP_BROWSER_DIALOG_CLOSED_METHOD,
+  agentClosedDialog,
+  returnDialogsToOwner,
+  routeDialogsToAgent,
+} from "./desktop-browser-dialogs.js";
 import type {
   DesktopBrowserCdpAdapter,
   DesktopBrowserCdpPage,
@@ -9,6 +15,7 @@ import type {
 import type { DesktopBrowserViewManager } from "./desktop-browser-view.js";
 
 const cdpObjectSchema = z.record(z.string(), z.json());
+
 const cdpMessageSchema = z.object({
   method: z.string().min(1),
   params: cdpObjectSchema,
@@ -39,19 +46,28 @@ function createPage(
     inputReady = undefined;
     inputGeneration += 1;
   }
+
   const nativeDebugger = webContents.debugger;
+
+  function observeAgentDialogClose(_event: Event, method: string): void {
+    if (method === DESKTOP_BROWSER_DIALOG_CLOSED_METHOD)
+      agentClosedDialog(webContents);
+  }
 
   function releaseOwnership(): void {
     ownsAttachment = false;
     generation += 1;
     attachmentReady = null;
     manager.setAutomationControlled(webContents, false);
+
     if (previousBackgroundThrottling !== null && !webContents.isDestroyed())
       webContents.setBackgroundThrottling(previousBackgroundThrottling);
     previousBackgroundThrottling = null;
     invalidateInputReadiness();
     webContents.off("did-start-navigation", invalidateInputReadiness);
     nativeDebugger.off("detach", releaseOwnership);
+    nativeDebugger.off("message", observeAgentDialogClose);
+    returnDialogsToOwner(webContents, () => webContents.isDestroyed());
   }
 
   function requireCurrent(): void {
@@ -62,6 +78,7 @@ function createPage(
 
   function requireAttached(): void {
     requireCurrent();
+
     if (!ownsAttachment || !nativeDebugger.isAttached()) {
       throw new Error("Native browser debugger is not attached");
     }
@@ -71,18 +88,23 @@ function createPage(
     tabId,
     get url() {
       requireCurrent();
+
       return webContents.getURL();
     },
     get title() {
       requireCurrent();
+
       return webContents.getTitle();
     },
     attach() {
       requireCurrent();
+
       if (ownsAttachment && nativeDebugger.isAttached()) return;
+
       if (nativeDebugger.isAttached()) {
         throw new Error("Native browser debugger already has a controller");
       }
+
       nativeDebugger.attach("1.3");
       ownsAttachment = true;
       manager.setAutomationControlled(webContents, true);
@@ -90,20 +112,26 @@ function createPage(
       webContents.setBackgroundThrottling(false);
       generation += 1;
       nativeDebugger.on("detach", releaseOwnership);
+      nativeDebugger.on("message", observeAgentDialogClose);
+      routeDialogsToAgent(webContents);
       webContents.on("did-start-navigation", invalidateInputReadiness);
       const attachmentGeneration = generation;
+
       const ready = nativeDebugger
         .sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true })
         .then((result) => {
           cdpObjectSchema.parse(result);
+
           if (generation === attachmentGeneration) attachmentReady = null;
         });
+
       attachmentReady = ready;
       void ready.catch(() => undefined);
     },
     detach() {
       if (!ownsAttachment) return;
       releaseOwnership();
+
       if (!webContents.isDestroyed() && nativeDebugger.isAttached()) {
         nativeDebugger.detach();
       }
@@ -112,18 +140,22 @@ function createPage(
       signal?.throwIfAborted();
       requireAttached();
       const commandGeneration = generation;
+
       if (attachmentReady !== null) {
         await attachmentReady;
         signal?.throwIfAborted();
         requireAttached();
+
         if (commandGeneration !== generation)
           throw new Error("Native browser debugger attachment changed");
       }
+
       if (
         method === "Input.dispatchMouseEvent" ||
         method === "Input.dispatchTouchEvent"
       ) {
         const commandInputGeneration = inputGeneration;
+
         if (inputReady === undefined) {
           const capture = captureDesktopBrowserCdpScreenshot(webContents, {
             format: "png",
@@ -132,14 +164,17 @@ function createPage(
           }).then((result) => {
             z.object({ data: z.string().min(1) }).parse(result);
           });
+
           inputReady = capture;
           void capture.catch(() => {
             if (inputReady === capture) inputReady = undefined;
           });
         }
+
         await inputReady;
         signal?.throwIfAborted();
         requireAttached();
+
         if (
           commandGeneration !== generation ||
           commandInputGeneration !== inputGeneration
@@ -147,17 +182,22 @@ function createPage(
           throw new Error("Browser view changed before input was dispatched");
         }
       }
+
       signal?.throwIfAborted();
+
       const result = cdpObjectSchema.parse(
         await (method === "Page.captureScreenshot"
           ? captureDesktopBrowserCdpScreenshot(webContents, params, sessionId)
           : nativeDebugger.sendCommand(method, params, sessionId)),
       );
+
       signal?.throwIfAborted();
       requireAttached();
+
       if (commandGeneration !== generation) {
         throw new Error("Native browser debugger attachment changed");
       }
+
       return result;
     },
     onMessage(listener) {
@@ -172,6 +212,7 @@ function createPage(
           params,
           sessionId,
         });
+
         if (!message.success || !ownsAttachment || !isCurrent()) return;
         listener(
           message.data.method,
@@ -179,13 +220,16 @@ function createPage(
           message.data.sessionId,
         );
       };
+
       nativeDebugger.on("message", onMessage);
+
       return () => {
         nativeDebugger.off("message", onMessage);
       };
     },
     onDetach(listener) {
       nativeDebugger.on("detach", listener);
+
       return () => {
         nativeDebugger.off("detach", listener);
       };
@@ -212,6 +256,7 @@ export function createDesktopBrowserCdpAdapter(
         .getAutomationTabs(scope)
         .map(({ tabId, webContents }) => {
           let page = pages.get(webContents);
+
           if (page === undefined) {
             const owningScope = { ...scope };
             page = createPage(args.manager, tabId, webContents, () =>
@@ -224,6 +269,7 @@ export function createDesktopBrowserCdpAdapter(
             );
             pages.set(webContents, page);
           }
+
           return page;
         });
     },
@@ -232,6 +278,7 @@ export function createDesktopBrowserCdpAdapter(
       const tabId = await args.createTab(scope, url, signal);
       signal.throwIfAborted();
       requireTab(scope, tabId);
+
       return tabId;
     },
     async activateTab(scope, tabId, signal) {

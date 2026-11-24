@@ -95,9 +95,11 @@ const OPTION_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
 
 function editDistance(left: string, right: string): number {
   const previous = Array.from({ length: right.length + 1 }, (_, i) => i);
+
   for (let row = 1; row <= left.length; row += 1) {
     let diagonal = previous[0];
     previous[0] = row;
+
     for (let column = 1; column <= right.length; column += 1) {
       const above = previous[column];
       previous[column] = Math.min(
@@ -108,6 +110,7 @@ function editDistance(left: string, right: string): number {
       diagonal = above;
     }
   }
+
   return previous[right.length];
 }
 
@@ -116,14 +119,17 @@ function nearestName(
   candidates: readonly string[],
 ): string | null {
   let best: { distance: number; name: string } | null = null;
+
   for (const name of candidates) {
     const distance = editDistance(token, name);
     const longest = Math.max(token.length, name.length);
     const similar = distance <= 2 && (longest - distance) / longest > 0.4;
+
     if (similar && (best === null || distance < best.distance)) {
       best = { distance, name };
     }
   }
+
   return best === null ? null : best.name;
 }
 
@@ -141,6 +147,7 @@ function findSubcommand(command: Command, token: string): Command | undefined {
 
 function findOption(command: Command, token: string): Option | undefined {
   const flag = token.split("=")[0];
+
   return command.options.find(
     (option) => option.long === flag || option.short === flag,
   );
@@ -153,28 +160,37 @@ export function resolveInvocation(
   const tokens = argv.slice(2);
   let command = program;
   const path: string[] = [];
+
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
+
     if (token === "--") break;
+
     if (token.startsWith("-")) {
       const option = findOption(command, token);
+
       const takesValue =
         option !== undefined && (option.required || option.optional);
+
       if (takesValue && !token.includes("=")) index += 1;
       continue;
     }
+
     const child = findSubcommand(command, token);
+
     if (child !== undefined) {
       command = child;
       path.push(child.name());
       continue;
     }
+
     return {
       command,
       path,
       unknownSubcommand: isPureGroup(command) ? token : null,
     };
   }
+
   return { command, path, unknownSubcommand: null };
 }
 
@@ -182,12 +198,15 @@ export function hasHelpFlag(argv: readonly string[]): boolean {
   const tokens = argv.slice(2);
   const terminator = tokens.indexOf("--");
   const scanned = terminator === -1 ? tokens : tokens.slice(0, terminator);
+
   return scanned.includes("--help") || scanned.includes("-h");
 }
 
 export function suggestCommand(invocation: ResolvedInvocation): string | null {
   const token = invocation.unknownSubcommand;
+
   if (token === null) return null;
+
   if (invocation.path.length === 0) {
     const target =
       TOP_LEVEL_SUGGESTIONS[token] ??
@@ -195,9 +214,12 @@ export function suggestCommand(invocation: ResolvedInvocation): string | null {
         token,
         invocation.command.commands.map((child) => child.name()),
       );
-    return target === null ? null : `bb ${target}`;
+
+    return target === null ? null : `omnyo ${target}`;
   }
+
   const candidates = SUBCOMMAND_SYNONYMS[token] ?? [];
+
   const match =
     candidates.find(
       (candidate) =>
@@ -207,8 +229,10 @@ export function suggestCommand(invocation: ResolvedInvocation): string | null {
       token,
       invocation.command.commands.map((child) => child.name()),
     );
+
   if (match === null) return null;
-  return `bb ${[...invocation.path, match].join(" ")}`;
+
+  return `omnyo ${[...invocation.path, match].join(" ")}`;
 }
 
 export function suggestOption(
@@ -216,17 +240,22 @@ export function suggestOption(
   unknownFlag: string,
 ): string | null {
   const flag = unknownFlag.split("=")[0];
+
   const longFlags = command.options
     .filter((option) => !option.hidden)
     .flatMap((option) => (option.long ? [option.long] : []));
+
   const synonym = (OPTION_SYNONYMS[flag] ?? []).find((candidate) =>
     longFlags.includes(candidate),
   );
+
   if (synonym !== undefined) return synonym;
+
   const prefixed = longFlags.find(
     (candidate) =>
       candidate.startsWith(`${flag}-`) || flag.startsWith(`${candidate}-`),
   );
+
   return prefixed ?? nearestName(flag, longFlags);
 }
 
@@ -242,6 +271,7 @@ export function formatOptionList(command: Command): string {
 }
 
 export function formatUsageLine(invocation: ResolvedInvocation): string {
-  const prefix = ["bb", ...invocation.path].join(" ");
+  const prefix = ["omnyo", ...invocation.path].join(" ");
+
   return `Usage: ${prefix} ${invocation.command.usage()}`.trimEnd();
 }

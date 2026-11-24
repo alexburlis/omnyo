@@ -20,6 +20,7 @@ describe("plugin marketplace author identity", () => {
       { name: "Pat Lee", github: "PatLee", url: "https://patlee.dev" },
       "selected",
     );
+
     const sameLogin = entry(
       "first",
       {
@@ -29,6 +30,7 @@ describe("plugin marketplace author identity", () => {
       },
       "same-login",
     );
+
     const otherMarketplace = entry(
       "second",
       {
@@ -38,14 +40,17 @@ describe("plugin marketplace author identity", () => {
       },
       "other-marketplace",
     );
+
     const sameName = entry(
       "first",
       { name: "Pat Lee", github: null, url: null },
       "same-name",
     );
+
     const key = pluginMarketplaceAuthorKey(selected);
 
     expect(key).toBe("5:first:github:patlee");
+
     if (key === null) throw new Error("Expected an author key");
     expect(
       entriesByMarketplaceAuthor(
@@ -58,27 +63,32 @@ describe("plugin marketplace author identity", () => {
   it("uses an exact name when a GitHub login is not present", () => {
     const selected = entry(
       "first",
-      { name: "BB", github: null, url: "https://bb.dev" },
+      { name: "Omnyo", github: null, url: "https://omnyo.dev" },
       "selected",
     );
+
     const sameName = entry(
       "first",
-      { name: "BB", github: null, url: "https://other.dev" },
+      { name: "Omnyo", github: null, url: "https://other.dev" },
       "same-name",
     );
+
     const differentCase = entry(
       "first",
-      { name: "bb", github: null, url: null },
+      { name: "omnyo", github: null, url: null },
       "different-case",
     );
+
     const githubName = entry(
       "first",
-      { name: "BB", github: "get-bb", url: "https://bb.dev" },
+      { name: "Omnyo", github: "get-bb", url: "https://omnyo.dev" },
       "github-name",
     );
+
     const key = pluginMarketplaceAuthorKey(selected);
 
-    expect(key).toBe("5:first:name:BB");
+    expect(key).toBe("5:first:name:Omnyo");
+
     if (key === null) throw new Error("Expected an author key");
     expect(
       entriesByMarketplaceAuthor(

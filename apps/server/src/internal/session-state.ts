@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
-import { getSessionById, hostDaemonSessions } from "@bb/db";
-import type { DbConnection, HostDaemonSessionRow } from "@bb/db";
+import { getSessionById, hostDaemonSessions } from "@omnyo/db";
+import type { DbConnection, HostDaemonSessionRow } from "@omnyo/db";
 import { ApiError } from "../errors.js";
 import { getAuthenticatedDaemon } from "./auth.js";
 
@@ -42,9 +42,11 @@ export function requireAuthorizedOpenSession(
   args: RequireAuthorizedActiveSessionArgs,
 ) {
   const session = getSessionById(db, { sessionId: args.sessionId });
+
   if (!session || session.status !== "active") {
     throw new ApiError(401, "inactive_session", "Session is not active");
   }
+
   if (session.hostId !== args.hostId) {
     throw new ApiError(
       403,
@@ -60,6 +62,7 @@ export function requireAuthenticatedDaemonSession(
   args: RequireAuthenticatedDaemonSessionArgs,
 ): HostDaemonSessionRow {
   const daemon = getAuthenticatedDaemon(args.context);
+
   return requireAuthorizedOpenSession(args.db, {
     hostId: daemon.hostId,
     sessionId: args.sessionId,

@@ -1,5 +1,5 @@
-import type { WorkspaceCommitSummary } from "@bb/domain";
-import type { DiffFileEntry } from "@bb/server-contract";
+import type { WorkspaceCommitSummary } from "@omnyo/domain";
+import type { DiffFileEntry } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
   buildGitDiffSelectionOptions,
@@ -138,6 +138,7 @@ describe("gitDiffPanelHelpers", () => {
       makeDiffFile("docs/api.mdx"),
       makeDiffFile("docs/new-name.md", "docs/Old-Name.txt"),
     ];
+
     const paths = (query: string) =>
       filterDiffFilesByPath(files, query).map((file) => file.path);
 

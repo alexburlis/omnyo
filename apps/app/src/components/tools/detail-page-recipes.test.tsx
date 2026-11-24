@@ -9,9 +9,9 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
-import { ResourceDetailPage } from "@bb/shared-ui/resource-list";
-import type { SkillSummary } from "@bb/server-contract";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
+import { ResourceDetailPage } from "@omnyo/shared-ui/resource-list";
+import type { SkillSummary } from "@omnyo/server-contract";
 import { type PluginListItem } from "@/hooks/queries/plugin-settings-queries";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import {
@@ -47,13 +47,13 @@ const PLUGIN: PluginListItem = makePluginListItem({
   id: "github",
   source: "builtin:github",
   rootDir: "/managed/plugins/github",
-  description: "Browse GitHub issues and pull requests in BB.",
+  description: "Browse GitHub issues and pull requests in Omnyo.",
   name: "GitHub",
   icon: "Github",
   provenance: "catalog",
   catalogEntryId: "github",
-  publisherLabel: "BB Community",
-  sourceDisplay: "BB Official · GitHub",
+  publisherLabel: "Acme Plugins",
+  sourceDisplay: "Omnyo Official · GitHub",
 });
 
 function renderPlugin(
@@ -62,11 +62,13 @@ function renderPlugin(
 ) {
   const { wrapper: QueryClientWrapper, queryClient } =
     createQueryClientTestHarness();
+
   if (options?.seedSkillsCache !== false) {
     queryClient.setQueryData(projectSkillsQueryKey(PERSONAL_PROJECT_ID), {
       skills: options?.skills ?? [],
     });
   }
+
   return render(
     <MemoryRouter>
       <QueryClientWrapper>
@@ -102,6 +104,7 @@ describe("Resource detail header", () => {
     const heading = screen.getByRole("heading", {
       name: "A long resource title",
     });
+
     const titleRow = heading.parentElement;
     const titleColumn = titleRow?.parentElement;
     const titleAndIcon = titleColumn?.parentElement;
@@ -206,13 +209,14 @@ describe("Plugin detail recipe", () => {
     const capabilities = container.querySelector(
       '[data-resource-detail-section="includes"]',
     );
+
     expect(capabilities?.querySelector("table")).not.toBeNull();
     expect(
       capabilities?.querySelector("[data-plugin-capability-group]"),
     ).toBeNull();
 
     for (const item of [
-      "bb gh",
+      "omnyo gh",
       "review",
       "gh_search",
       "Pull requests",
@@ -224,6 +228,7 @@ describe("Plugin detail recipe", () => {
 
   it("collapses long capability descriptions until requested", () => {
     const description = "Long capability guidance ".repeat(20).trim();
+
     const { container } = renderPlugin({
       ...PLUGIN,
       capabilities: [
@@ -238,17 +243,21 @@ describe("Plugin detail recipe", () => {
 
     const detail = screen.getByText(description);
     expect(detail.className).toContain("line-clamp-3");
+
     const disclosure = screen.getByRole("button", {
       name: "Show full description",
     });
+
     expect(disclosure.getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.click(disclosure);
 
     expect(detail.className).not.toContain("line-clamp-3");
+
     const collapseDisclosure = screen.getByRole("button", {
       name: "Show less",
     });
+
     expect(collapseDisclosure.getAttribute("aria-expanded")).toBe("true");
     expect(container.textContent).toContain(description);
   });
@@ -280,6 +289,7 @@ describe("Plugin detail recipe", () => {
     const listSkills = vi
       .spyOn(sdk.skills, "list")
       .mockResolvedValue({ skills: [] });
+
     setPluginSlotRegistrations(
       "github",
       makePluginRegistrationSet({
@@ -338,6 +348,7 @@ describe("Plugin detail recipe", () => {
         ],
       }),
     );
+
     const { container } = renderPlugin(
       {
         ...PLUGIN,
@@ -383,11 +394,13 @@ describe("Plugin detail recipe", () => {
       ["GitHub Dark", "/settings/appearance"],
       ["review", `/skills/library/skill_${"a".repeat(64)}`],
     ] as const;
+
     for (const [name, href] of destinations) {
       expect(screen.getByRole("link", { name }).getAttribute("href")).toBe(
         href,
       );
     }
+
     expect(
       screen.getByRole("button", { name: "GitHub settings" }),
     ).toBeTruthy();
@@ -559,6 +572,38 @@ function renderSkill(files: readonly string[]) {
 }
 
 describe("Skill detail recipe", () => {
+  it("links to the source and omits social proof", () => {
+    render(
+      <SkillDetailView
+        leading={<span>Skill</span>}
+        title="find-skills"
+        path="skills.sh/vercel-labs/skills/find-skills"
+        pathHref="https://www.skills.sh/vercel-labs/skills/find-skills"
+        files={["SKILL.md"]}
+        selectedPath="SKILL.md"
+        onSelectFile={() => {}}
+        contentState={{ kind: "ready", content: "# Find skills" }}
+      />,
+    );
+
+    const sourceLink = screen.getByRole("link", {
+      name: "Open skills.sh/vercel-labs/skills/find-skills in a new tab",
+    });
+
+    expect(sourceLink.getAttribute("href")).toBe(
+      "https://www.skills.sh/vercel-labs/skills/find-skills",
+    );
+    expect(sourceLink.getAttribute("target")).toBe("_blank");
+    expect(sourceLink.textContent).not.toContain("/SKILL.md");
+    expect(screen.queryByText("Registry social proof")).toBeNull();
+    expect(
+      screen
+        .getByRole("heading", { name: "Find skills" })
+        .closest(".overflow-auto"),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /Save/ })).toBeNull();
+  });
+
   it("routes relative images from Markdown skill files", () => {
     const markdownLinkRouting = buildMarkdownFileImageRouting({
       path: "/skills/writing-voice/SKILL.md",
@@ -566,6 +611,7 @@ describe("Skill detail recipe", () => {
       threadId: null,
       resolveRelativeSrc: (path) => `/skill-preview/${path}`,
     });
+
     render(
       <SkillDetailView
         title="writing-voice"
@@ -589,9 +635,7 @@ describe("Skill detail recipe", () => {
   it("shows only Definition for a single-file skill", () => {
     const { container } = renderSkill(["/skills/writing-voice/SKILL.md"]);
 
-    expect(renderedRecipe(container)).toEqual([
-      ["definition", "/skills/writing-voice/SKILL.md"],
-    ]);
+    expect(renderedRecipe(container)).toEqual([["definition", "SKILL.md"]]);
   });
 
   it("puts Files ahead of Definition for a multi-file skill", () => {
@@ -602,15 +646,17 @@ describe("Skill detail recipe", () => {
 
     expect(renderedRecipe(container)).toEqual([
       ["includes", "Files"],
-      ["definition", "/skills/writing-voice/SKILL.md"],
+      ["definition", "SKILL.md"],
     ]);
   });
 
   it("keeps short skill content in one chunk with no sentinel or pager", () => {
     const { container } = renderSkill(["/skills/writing-voice/SKILL.md"]);
+
     const viewport = container.querySelector<HTMLElement>(
       "[data-skill-content-viewport]",
     );
+
     expect(viewport).not.toBeNull();
     expect(
       screen.queryByRole("navigation", { name: "Skill content pagination" }),
@@ -635,10 +681,13 @@ describe("Skill detail recipe", () => {
         }
       },
     );
+
     try {
       const section = (marker: string) =>
         `## ${marker}\n${Array.from({ length: 125 }, (_, i) => `${marker} line ${i}`).join("\n")}\n`;
+
       const content = `${section("alpha")}\n${section("omega")}`;
+
       const { container } = render(
         <SkillDetailView
           title="writing-voice"
@@ -685,13 +734,17 @@ describe("Skill detail recipe", () => {
       "",
       "outro",
     ].join("\n");
+
     const chunks = splitMarkdownIntoChunks(fenced);
+
     for (const chunk of chunks) {
       const fenceCount = chunk
         .split("\n")
         .filter((line) => line.startsWith("```")).length;
+
       expect(fenceCount % 2).toBe(0);
     }
+
     expect(chunks.join("\n")).toBe(fenced);
   });
 });

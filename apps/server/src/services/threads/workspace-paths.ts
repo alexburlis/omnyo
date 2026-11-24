@@ -2,8 +2,8 @@ import {
   getHostPathSegments,
   isHostPathWithin,
   joinHostPath,
-} from "@bb/domain";
-import { PLUGIN_PROCESS_DATA_KINDS } from "@bb/process-utils";
+} from "@omnyo/domain";
+import { PLUGIN_PROCESS_DATA_KINDS } from "@omnyo/process-utils";
 
 const LEGACY_WORKSPACE_ROOT_NAMES = ["worktrees", "personal-workspaces"];
 
@@ -16,13 +16,14 @@ function isInsideDataDirChild(args: {
     rootPath: args.dataDir,
     relativePath: args.name,
   });
+
   return (
     rootPath !== null &&
     isHostPathWithin({ rootPath, candidatePath: args.path })
   );
 }
 
-export function isBbManagedWorkspacePath(args: {
+export function isOmnyoManagedWorkspacePath(args: {
   dataDir: string;
   path: string;
 }): boolean {
@@ -33,6 +34,7 @@ export function isBbManagedWorkspacePath(args: {
   ) {
     return true;
   }
+
   if (
     !isInsideDataDirChild({
       dataDir: args.dataDir,
@@ -42,10 +44,13 @@ export function isBbManagedWorkspacePath(args: {
   ) {
     return false;
   }
+
   const pluginsDepth = (getHostPathSegments(args.dataDir)?.length ?? 0) + 1;
+
   const [pluginSegment, kind] = (getHostPathSegments(args.path) ?? []).slice(
     pluginsDepth,
   );
+
   return (
     pluginSegment !== undefined &&
     pluginSegment.length > 0 &&

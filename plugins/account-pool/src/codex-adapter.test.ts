@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { codexQuotaFromUsage, createCodexAdapter } from "./codex-adapter.js";
-import type { AccountQuota } from "./contracts.js";
+import { extraUsageSchema, type AccountQuota } from "./contracts.js";
 import { isQuotaExhausted } from "./quota.js";
 
 const ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
@@ -37,6 +37,114 @@ const adapter = createCodexAdapter({
 });
 
 describe("Codex credit observations", () => {
+  it("accepts legacy stored credit observations and validates explicit units", () => {
+    const legacy = {
+      status: "allowed",
+      hasCredits: true,
+      unlimited: false,
+      observedAt: 1000,
+      source: "usage",
+    };
+
+    expect(extraUsageSchema.safeParse(legacy).success).toBe(true);
+    expect(
+      extraUsageSchema.parse({
+        ...legacy,
+        creditBalance: { unit: "currency", amount: 3.25, currency: "USD" },
+      }).creditBalance,
+    ).toEqual({ unit: "currency", amount: 3.25, currency: "USD" });
+    expect(
+      extraUsageSchema.safeParse({
+        ...legacy,
+        creditBalance: { unit: "points", amount: Infinity },
+      }).success,
+    ).toBe(false);
+    expect(
+      extraUsageSchema.safeParse({
+        ...legacy,
+        creditBalance: { unit: "currency", amount: 3.25 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    ["12.5", 12.5],
+    [0, 0],
+    ["0", 0],
+    [24, 24],
+    [undefined, null],
+    [null, null],
+    ["", null],
+    ["  ", null],
+    ["invalid", null],
+    [-1, null],
+    ["-1", null],
+    [Infinity, null],
+    [NaN, null],
+    [true, null],
+    [{}, null],
+  ])(
+    "preserves finite nonnegative credit points from usage %j",
+    (balance, amount) => {
+      const quota = codexQuotaFromUsage(
+        ACCOUNT_ID,
+        { credits: { has_credits: true, unlimited: false, balance } },
+        emptyQuota(),
+        1000,
+      );
+
+      expect(quota?.extraUsage?.creditBalance).toEqual(
+        amount === null ? null : { unit: "points", amount },
+      );
+      expect(quota?.extraUsage?.status).toBe("allowed");
+    },
+  );
+
+  it("reads balance-only headers without inventing spend permission", () => {
+    const quota = adapter.quotaFromHeaders(
+      ACCOUNT_ID,
+      new Headers({ "x-codex-credits-balance": "37.25" }),
+      emptyQuota(),
+      "other",
+      1000,
+    );
+
+    expect(quota.extraUsage).toMatchObject({
+      creditBalance: { unit: "points", amount: 37.25 },
+      status: "rejected",
+      hasCredits: null,
+      unlimited: null,
+    });
+  });
+
+  it.each([
+    ["0", 0],
+    ["1.5", 1.5],
+    ["NaN", null],
+    ["-2", null],
+    ["", null],
+  ])(
+    "parses balance headers %j while preserving credit availability",
+    (balance, amount) => {
+      const quota = adapter.quotaFromHeaders(
+        ACCOUNT_ID,
+        new Headers({
+          "x-codex-credits-has-credits": "true",
+          "x-codex-credits-unlimited": "false",
+          "x-codex-credits-balance": String(balance),
+        }),
+        emptyQuota(),
+        "other",
+        1000,
+      );
+
+      expect(quota.extraUsage?.creditBalance).toEqual(
+        amount === null ? null : { unit: "points", amount },
+      );
+      expect(quota.extraUsage?.status).toBe("allowed");
+    },
+  );
+
   it("accepts credit-only usage and headers without erasing allowance on unrelated updates", () => {
     const quota = codexQuotaFromUsage(
       ACCOUNT_ID,
@@ -44,12 +152,18 @@ describe("Codex credit observations", () => {
       emptyQuota(),
       1000,
     );
+
     expect(quota?.extraUsage).toEqual({
       status: "allowed",
+      hasCredits: true,
+      unlimited: false,
+      creditBalance: { unit: "points", amount: 20 },
       source: "usage",
       observedAt: 1000,
     });
+
     if (quota === null) throw new Error("Expected credit observation");
+
     const updated = adapter.quotaFromHeaders(
       ACCOUNT_ID,
       new Headers({
@@ -60,7 +174,9 @@ describe("Codex credit observations", () => {
       "other",
       2000,
     );
+
     expect(updated.extraUsage).toEqual(quota.extraUsage);
+
     const spent = adapter.quotaFromHeaders(
       ACCOUNT_ID,
       new Headers({
@@ -71,16 +187,23 @@ describe("Codex credit observations", () => {
       "other",
       3000,
     );
+
     expect(spent.extraUsage?.status).toBe("rejected");
-    expect(
-      adapter.quotaFromHeaders(
-        ACCOUNT_ID,
-        new Headers({ "x-codex-credits-has-credits": "true" }),
-        spent,
-        "other",
-        4000,
-      ).extraUsage,
-    ).toEqual(spent.extraUsage);
+
+    const partial = adapter.quotaFromHeaders(
+      ACCOUNT_ID,
+      new Headers({ "x-codex-credits-has-credits": "true" }),
+      updated,
+      "other",
+      4000,
+    );
+
+    expect(partial.extraUsage).toMatchObject({
+      status: "allowed",
+      hasCredits: true,
+      unlimited: null,
+    });
+
     const unlimited = adapter.quotaFromHeaders(
       ACCOUNT_ID,
       new Headers({
@@ -91,6 +214,7 @@ describe("Codex credit observations", () => {
       "other",
       5000,
     );
+
     expect(unlimited.extraUsage?.status).toBe("allowed");
   });
 
@@ -104,9 +228,11 @@ describe("Codex credit observations", () => {
       "other",
       1000,
     );
+
     expect(blocked.usageRestriction?.reason).toBe(
       "workspace_owner_credits_depleted",
     );
+
     const headerRecovery = adapter.quotaFromHeaders(
       ACCOUNT_ID,
       new Headers({
@@ -117,23 +243,29 @@ describe("Codex credit observations", () => {
       "other",
       1500,
     );
+
     expect(headerRecovery.usageRestriction).toBeNull();
     expect(headerRecovery.extraUsage?.status).toBe("allowed");
+
     const unrelated = codexQuotaFromUsage(
       ACCOUNT_ID,
       { rate_limit: { primary_window: { used_percent: 0 } } },
       blocked,
       2000,
     );
+
     expect(unrelated?.usageRestriction).toEqual(blocked.usageRestriction);
+
     const recovered = codexQuotaFromUsage(
       ACCOUNT_ID,
       { credits: { has_credits: true, unlimited: false } },
       blocked,
       3000,
     );
+
     expect(recovered?.usageRestriction).toBeNull();
     expect(recovered?.extraUsage?.status).toBe("allowed");
+
     const spending = codexQuotaFromUsage(
       ACCOUNT_ID,
       {
@@ -143,8 +275,10 @@ describe("Codex credit observations", () => {
       emptyQuota(),
       4000,
     );
+
     if (spending === null) throw new Error("Expected spending restriction");
     expect(spending.usageRestriction?.reason).toBe("spend_control_reached");
+
     const reset = codexQuotaFromUsage(
       ACCOUNT_ID,
       {
@@ -154,6 +288,7 @@ describe("Codex credit observations", () => {
       spending,
       5000,
     );
+
     expect(reset?.usageRestriction).toBeNull();
     expect(reset?.extraUsage?.status).toBe("allowed");
   });
@@ -178,6 +313,7 @@ describe("Codex credit observations", () => {
         )?.usageRestriction,
       ).toBeNull();
     }
+
     expect(
       codexQuotaFromUsage(
         ACCOUNT_ID,
@@ -217,6 +353,7 @@ describe("codexQuotaFromUsage", () => {
       emptyQuota(),
       1_000,
     );
+
     expect(quota).toMatchObject({
       fiveHourUtilization: null,
       sevenDayUtilization: null,
@@ -250,7 +387,9 @@ describe("codexQuotaFromUsage", () => {
         },
       },
     };
+
     expect(isQuotaExhausted(stale, "other", 0.9, 2_000)).toBe(true);
+
     const refreshed = codexQuotaFromUsage(
       ACCOUNT_ID,
       {
@@ -261,11 +400,13 @@ describe("codexQuotaFromUsage", () => {
       stale,
       2_000,
     );
+
     expect(refreshed).toMatchObject({
       fiveHourUtilization: null,
       fiveHourStatus: null,
       familyWeekly: { other: null },
     });
+
     if (refreshed === null) throw new Error("Expected a quota.");
     expect(isQuotaExhausted(refreshed, "other", 0.9, 2_000)).toBe(false);
   });
@@ -276,6 +417,135 @@ describe("codexQuotaFromUsage", () => {
 });
 
 describe("codex header quotas", () => {
+  it.each(["", "NaN", "-1"])(
+    "does not infer included allowance from invalid used percent %j",
+    (value) => {
+      const quota = adapter.quotaFromHeaders(
+        ACCOUNT_ID,
+        new Headers({
+          "x-codex-primary-used-percent": value,
+          "x-codex-primary-reset-after-seconds": "3600",
+        }),
+        emptyQuota(),
+        "other",
+        1_000,
+      );
+
+      expect(quota.limitWindows[0]).toMatchObject({
+        utilization: null,
+        status: null,
+      });
+    },
+  );
+
+  it.each([
+    { allowed: false, limit_reached: false },
+    { allowed: true, limit_reached: true },
+  ])(
+    "retains an explicit API rejection across inferred header updates %j",
+    (flags) => {
+      const payload = {
+        rate_limit: {
+          ...flags,
+          primary_window: { used_percent: 13, reset_after_seconds: 3600 },
+        },
+      };
+
+      const rejected = codexQuotaFromUsage(
+        ACCOUNT_ID,
+        payload,
+        emptyQuota(),
+        1_000,
+      );
+
+      if (rejected === null) throw new Error("Expected rejected usage.");
+      expect(rejected.limitWindows[0]?.status).toBe("rejected");
+
+      const fromHeaders = adapter.quotaFromHeaders(
+        ACCOUNT_ID,
+        new Headers({
+          "x-codex-primary-used-percent": "14",
+          "x-codex-primary-reset-after-seconds": "3600",
+        }),
+        rejected,
+        "other",
+        2_000,
+      );
+
+      expect(fromHeaders.limitWindows[0]?.status).toBe("rejected");
+
+      const recovered = codexQuotaFromUsage(
+        ACCOUNT_ID,
+        {
+          rate_limit: {
+            ...payload.rate_limit,
+            allowed: true,
+            limit_reached: false,
+          },
+        },
+        fromHeaders,
+        3_000,
+      );
+
+      expect(recovered?.limitWindows[0]?.status).toBe("allowed");
+    },
+  );
+
+  it("does not freshen old utilization with a reset-only header", () => {
+    const previous = codexQuotaFromUsage(
+      ACCOUNT_ID,
+      {
+        rate_limit: {
+          primary_window: { used_percent: 13, reset_after_seconds: 3600 },
+        },
+      },
+      emptyQuota(),
+      1_000,
+    );
+
+    if (previous === null) throw new Error("Expected usage observation.");
+
+    const quota = adapter.quotaFromHeaders(
+      ACCOUNT_ID,
+      new Headers({ "x-codex-primary-reset-after-seconds": "3600" }),
+      previous,
+      "other",
+      62_000,
+    );
+
+    expect(quota.limitWindows[0]).toMatchObject({
+      utilization: 0.13,
+      status: "allowed",
+      observedAt: 1_000,
+    });
+  });
+
+  it("preserves an active hold, error and workspace restriction on quota headers", () => {
+    const previous: AccountQuota = {
+      ...emptyQuota(),
+      heldUntil: 60_000,
+      error: "Account unavailable",
+      usageRestriction: { reason: "spend_control_reached", resetAt: null },
+    };
+
+    const quota = adapter.quotaFromHeaders(
+      ACCOUNT_ID,
+      new Headers({
+        "x-codex-primary-used-percent": "13",
+        "x-codex-primary-reset-after-seconds": "3600",
+      }),
+      previous,
+      "other",
+      1_000,
+    );
+
+    expect(quota).toMatchObject({
+      heldUntil: 60_000,
+      error: previous.error,
+      usageRestriction: previous.usageRestriction,
+    });
+  });
+
   it.each(["primary", "secondary"] as const)(
     "honors a fresh over-limit %s header after the previous reset expires",
     (slot) => {
@@ -289,6 +559,7 @@ describe("codex header quotas", () => {
         "other",
         1_000,
       );
+
       const rejected = adapter.quotaFromHeaders(
         ACCOUNT_ID,
         new Headers({ [`x-codex-${slot}-over-limit`]: "true" }),
@@ -296,10 +567,12 @@ describe("codex header quotas", () => {
         "other",
         3_000,
       );
+
       expect(isQuotaExhausted(rejected, "other", 0.98, 3_000)).toBe(true);
       expect(
         rejected.limitWindows.find((window) => window.slot === slot)?.resetAt,
       ).toBeNull();
+
       const recovered = codexQuotaFromUsage(
         ACCOUNT_ID,
         {
@@ -310,6 +583,7 @@ describe("codex header quotas", () => {
         rejected,
         4_000,
       );
+
       if (recovered === null) throw new Error("Expected refreshed usage.");
       expect(isQuotaExhausted(recovered, "other", 0.98, 4_000)).toBe(false);
     },
@@ -326,7 +600,9 @@ describe("codex header quotas", () => {
       emptyQuota(),
       1_000,
     );
+
     if (fromUsage === null) throw new Error("Expected a quota.");
+
     const rejected = adapter.quotaFromHeaders(
       ACCOUNT_ID,
       new Headers({ "x-codex-primary-used-percent": "100" }),
@@ -334,6 +610,7 @@ describe("codex header quotas", () => {
       "other",
       2_000,
     );
+
     expect(rejected.limitWindows).toEqual([
       {
         slot: "primary",
@@ -368,6 +645,7 @@ describe("codex header quotas", () => {
         "other",
         5_000,
       );
+
       expect(quota.limitWindows.map((window) => window.slot)).toEqual([
         "primary",
       ]);
@@ -398,6 +676,7 @@ describe("codex header quotas", () => {
         },
       ],
     };
+
     const quota = adapter.quotaFromHeaders(
       ACCOUNT_ID,
       new Headers({
@@ -409,6 +688,7 @@ describe("codex header quotas", () => {
       "other",
       5_000,
     );
+
     expect(quota.limitWindows.map((window) => window.slot)).toEqual([
       "primary",
     ]);
@@ -427,6 +707,7 @@ describe("codex header quotas", () => {
       "other",
       5_000,
     );
+
     expect(quota.limitWindows.map((window) => window.slot)).toEqual([
       "primary",
       "secondary",
@@ -448,13 +729,14 @@ describe("codex header quotas", () => {
       "other",
       5_000,
     );
+
     expect(quota.limitWindows).toEqual([
       {
         slot: "primary",
         windowMinutes: 300,
         utilization: 0.25,
         resetAt: 65_000,
-        status: null,
+        status: "allowed",
         observedAt: 5_000,
         source: "header",
       },
@@ -463,7 +745,7 @@ describe("codex header quotas", () => {
         windowMinutes: 10_080,
         utilization: 0.4,
         resetAt: 4_102_452_000_000,
-        status: null,
+        status: "allowed",
         observedAt: 5_000,
         source: "header",
       },
@@ -485,7 +767,7 @@ describe("requestHeaders", () => {
     const headers = adapter.requestHeaders(
       new Headers({
         authorization: "Bearer downstream",
-        "x-bb-account-pool-token": "machine-token",
+        "x-omnyo-account-pool-token": "machine-token",
         "x-codex-turn-state": "sticky",
         "x-openai-internal-codex-responses-lite": "true",
         "x-openai-internal-other": "dropped",
@@ -515,6 +797,7 @@ describe("requestHeaders", () => {
         expiresAt: null,
       },
     );
+
     expect(Object.fromEntries(headers)).toEqual({
       authorization: "Bearer upstream-token",
       "chatgpt-account-id": "chatgpt-account",

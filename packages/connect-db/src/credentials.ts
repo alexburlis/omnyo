@@ -3,7 +3,7 @@ import type { ConnectDb } from "./availability.js";
 import { sha256Hex } from "./crypto.js";
 import { server } from "./schema.js";
 
-export const SERVER_CREDENTIAL_HEADER = "x-bb-connect-machine";
+export const SERVER_CREDENTIAL_HEADER = "x-omnyo-connect-machine";
 
 export type ServerRow = typeof server.$inferSelect;
 
@@ -17,7 +17,9 @@ export async function resolveServerCredential(
   credential: string,
 ): Promise<ResolvedServerCredential | null> {
   const presented = credential.trim();
+
   if (!presented) return null;
+
   const row = await db
     .select()
     .from(server)
@@ -28,12 +30,15 @@ export async function resolveServerCredential(
       ),
     )
     .get();
+
   return row ? { server: row, userId: row.userId } : null;
 }
 
 export function serverCredentialFromHeaders(headers: Headers): string {
   const authorization = headers.get("authorization")?.trim() ?? "";
   const bearer = /^Bearer\s+(\S+)$/iu.exec(authorization)?.[1];
+
   if (bearer) return bearer;
+
   return headers.get(SERVER_CREDENTIAL_HEADER)?.trim() ?? "";
 }

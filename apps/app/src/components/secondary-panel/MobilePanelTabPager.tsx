@@ -5,14 +5,22 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { TabPill } from "@/components/ui/tab-pill";
-import { MACOS_APP_REGION_NO_DRAG_CLASS } from "@/lib/bb-desktop";
+import { MACOS_APP_REGION_NO_DRAG_CLASS } from "@/lib/omnyo-desktop";
 import { PANEL_TAB_CONTROL_CLASS } from "./panelChromeClasses";
 
 const MAX_TAB_WIDTH_PX = 144;
+
 const TAB_GAP_PX = 4;
+
+const PAGER_OFFSET_TRANSITION_CLASS =
+  "transition-transform duration-(--motion-duration-base) ease-(--motion-ease-smooth) motion-reduce:transition-none";
+
+const PAGER_TAB_HIDE_DELAY_CLASS =
+  "[transition:visibility_0s_linear_var(--motion-duration-base)] motion-reduce:transition-none";
 
 interface MobilePanelTab {
   id: string;
@@ -44,19 +52,24 @@ export function MobilePanelTabPager({
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const activeContentTabId = activeTab?.id ?? null;
   const [lastContentTabId, setLastContentTabId] = useState(activeContentTabId);
+
   const displayedIndex = Math.max(
     0,
     tabs.findIndex(
       (tab) => tab.id === (activeContentTabId ?? lastContentTabId),
     ),
   );
+
   const [visible, setVisible] = useState({
+    index: displayedIndex,
     start: displayedIndex,
     end: displayedIndex + 1,
     width: MAX_TAB_WIDTH_PX,
     offset: 0,
     available: MAX_TAB_WIDTH_PX,
+    animates: false,
   });
+
   const previousTab = tabs[displayedIndex - 1];
   const nextTab = tabs[displayedIndex + 1];
 
@@ -68,23 +81,30 @@ export function MobilePanelTabPager({
     const navigation = navigationRef.current;
     const viewport = viewportRef.current;
     const content = contentRef.current;
+
     if (!navigation || !viewport || !content) return;
+
     const measure = () => {
       if (navigation.clientWidth === 0) {
         setVisible((previous) =>
-          previous.start === displayedIndex
+          previous.start === displayedIndex && previous.index === displayedIndex
             ? previous
             : {
                 ...previous,
+                index: displayedIndex,
                 start: displayedIndex,
                 end: displayedIndex + 1,
+                animates: false,
               },
         );
+
         return;
       }
+
       const controls = Array.from(navigation.children).filter(
         (child) => child !== viewport,
       );
+
       const available = Math.max(
         0,
         navigation.clientWidth -
@@ -94,44 +114,67 @@ export function MobilePanelTabPager({
           ) -
           controls.length * TAB_GAP_PX,
       );
+
       const widths = Array.from(content.children, (child) =>
         Math.min(available, child.getBoundingClientRect().width),
       );
+
       const offsets = [0];
+
       for (const width of widths)
         offsets.push(offsets[offsets.length - 1] + width + TAB_GAP_PX);
       setVisible((previous) => {
         let start = Math.min(previous.start, displayedIndex);
+
         const total = (from: number, to: number) =>
           to > from ? offsets[to] - offsets[from] - TAB_GAP_PX : 0;
+
         while (
           start < displayedIndex &&
           total(start, displayedIndex + 1) > available
         )
           start++;
+
         let end = Math.min(
           widths.length,
           Math.max(start + 1, displayedIndex + 1),
         );
+
         while (end < widths.length && total(start, end + 1) <= available) end++;
+
         while (start > 0 && total(start - 1, end) <= available) start--;
         const width = total(start, end);
         const offset = offsets[start];
+        const animates = previous.index !== displayedIndex;
+
         if (
+          previous.index === displayedIndex &&
           previous.start === start &&
           previous.end === end &&
           previous.width === width &&
           previous.offset === offset &&
-          previous.available === available
+          previous.available === available &&
+          previous.animates === animates
         )
           return previous;
-        return { start, end, width, offset, available };
+
+        return {
+          index: displayedIndex,
+          start,
+          end,
+          width,
+          offset,
+          available,
+          animates,
+        };
       });
     };
+
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(navigation);
     observer.observe(content);
+
     return () => observer.disconnect();
   }, [displayedIndex, tabs]);
 
@@ -193,9 +236,11 @@ export function MobilePanelTabPager({
             const start = touchStart.current;
             touchStart.current = null;
             const touch = event.changedTouches[0];
+
             if (!start || !touch) return;
             const dx = touch.clientX - start.x;
             const dy = touch.clientY - start.y;
+
             if (Math.abs(dx) < 30 || Math.abs(dx) <= Math.abs(dy)) return;
             suppressClickUntil.current = Date.now() + 500;
             (dx < 0 ? nextTab : previousTab)?.onSelect();
@@ -209,14 +254,22 @@ export function MobilePanelTabPager({
         >
           <div
             ref={contentRef}
-            className="flex w-max items-center gap-1"
+            className={cn(
+              "flex w-max items-center gap-1",
+              visible.animates && PAGER_OFFSET_TRANSITION_CLASS,
+            )}
             style={{ transform: `translateX(-${visible.offset}px)` }}
           >
             {tabs.map((displayedTab, index) => (
               <div
                 key={displayedTab.id}
                 data-panel-tab-measure
-                className="flex shrink-0"
+                className={cn(
+                  "flex shrink-0",
+                  visible.animates &&
+                    (index < visible.start || index >= visible.end) &&
+                    PAGER_TAB_HIDE_DELAY_CLASS,
+                )}
                 style={{
                   maxWidth: Math.min(MAX_TAB_WIDTH_PX, visible.available),
                   visibility:

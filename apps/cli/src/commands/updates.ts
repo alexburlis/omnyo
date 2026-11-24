@@ -1,33 +1,41 @@
+import { registerWebUpdateCommands } from "./web-update.js";
 import { Command } from "commander";
-import type { Host } from "@bb/domain";
+import type { Host } from "@omnyo/domain";
+import { OmnyoHttpError } from "@omnyo/sdk/node";
 import {
   UPDATE_STATE_PRESENTATION,
   type UpdateState,
-} from "@bb/domain/update-state";
+} from "@omnyo/domain/update-state";
 import type {
   HostProviderCliStatusResponse,
+  SystemAppUpdateActivity,
   SystemAppUpdateResult,
   SystemAppUpdateRevision,
   SystemAppUpdateStatus,
   SystemVersionResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { action, CliExitError } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { columnWidths, printBorderlessTable } from "../table.js";
 import { confirmDestructiveAction, outputJson } from "./helpers.js";
 import { resolveMachineId, selectMachines } from "./machine.js";
 
 const APP_UPDATE_POLL_INTERVAL_MS = 1_000;
+
 const APP_UPDATE_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
+
 const INCOMING_SUBJECTS_SHOWN = 10;
 
 type ProviderCliKey = string;
+
 type ProviderCliStatus = HostProviderCliStatusResponse[string];
+
 type ProviderCliStatusResponse = HostProviderCliStatusResponse;
 
 interface UpdatesCommandOptions {
   json?: boolean;
   machine?: string;
+  yes?: boolean;
 }
 
 interface AppUpdateStatusOptions {
@@ -40,7 +48,7 @@ interface AppUpdateApplyOptions {
   yes?: boolean;
 }
 
-type CliSdk = ReturnType<typeof createCliBbSdk>;
+type CliSdk = ReturnType<typeof createCliOmnyoSdk>;
 
 interface ProviderUpdateTarget {
   host: Host;
@@ -56,25 +64,33 @@ interface MachineUpdatesEntry {
 
 export function providerState(status: ProviderCliStatus): UpdateState {
   if (!status.installed) return "not-installed";
+
   if (status.needsUpdate || status.versionUnsupported) {
     return status.installAction === null
       ? "update-manually"
       : "update-available";
   }
+
   if (status.latestVersion === null) return "latest-unknown";
+
   return "up-to-date";
 }
 
 function providerStateLabel(status: ProviderCliStatus): string {
-  return UPDATE_STATE_PRESENTATION[providerState(status)].label;
+  return (
+    status.startupUpdateError ??
+    UPDATE_STATE_PRESENTATION[providerState(status)].label
+  );
 }
 
 function providerVersionLabel(status: ProviderCliStatus): string {
   const current = status.currentVersion ?? "unknown";
   const latest = status.latestVersion;
+
   if (latest !== null && latest !== status.currentVersion) {
     return `${current} -> ${latest}`;
   }
+
   return current;
 }
 
@@ -95,7 +111,7 @@ function selectUpdateHosts(
 }
 
 async function collectMachineUpdates(
-  sdk: ReturnType<typeof createCliBbSdk>,
+  sdk: ReturnType<typeof createCliOmnyoSdk>,
   hosts: readonly Host[],
 ): Promise<MachineUpdatesEntry[]> {
   return Promise.all(
@@ -103,6 +119,7 @@ async function collectMachineUpdates(
       if (host.status !== "connected") {
         return { host, providerStatus: null, statusError: null };
       }
+
       try {
         return {
           host,
@@ -126,14 +143,17 @@ function actionableTargets(
   entries: readonly MachineUpdatesEntry[],
 ): ProviderUpdateTarget[] {
   const targets: ProviderUpdateTarget[] = [];
+
   for (const entry of entries) {
     if (entry.providerStatus === null) continue;
+
     for (const [provider, status] of Object.entries(entry.providerStatus)) {
       if (isActionableProviderStatus(status)) {
         targets.push({ host: entry.host, provider, status });
       }
     }
   }
+
   return targets;
 }
 
@@ -142,15 +162,18 @@ function printUpdatesTable(args: {
   entries: readonly MachineUpdatesEntry[];
 }): void {
   const rows: string[][] = [[...args.appRow]];
+
   for (const entry of args.entries) {
     if (entry.host.status !== "connected") {
       rows.push([entry.host.name, "-", "offline"]);
       continue;
     }
+
     if (entry.providerStatus === null) {
       rows.push([entry.host.name, "-", entry.statusError ?? "status failed"]);
       continue;
     }
+
     for (const status of Object.values(entry.providerStatus)) {
       rows.push([
         `${entry.host.name} · ${status.displayName}`,
@@ -159,6 +182,7 @@ function printUpdatesTable(args: {
       ]);
     }
   }
+
   printBorderlessTable(
     {
       head: ["Target", "Version", "State"],
@@ -177,31 +201,41 @@ function formatRevision(revision: SystemAppUpdateRevision): string {
 
 function formatAvailableTarget(status: SystemAppUpdateStatus): string | null {
   const available = status.available;
+
   if (available === null) return null;
-  if (available.commit === null) return available.version;
+
+  if (available.commit === null || available.channel === "private") {
+    return available.version;
+  }
+
   const count = available.commitCount ?? 0;
+
   return `${available.commit.slice(0, 10)} (+${String(count)} commit${count === 1 ? "" : "s"})`;
 }
 
 function unsupportedAppUpdateMessage(status: SystemAppUpdateStatus): string {
   if (status.support.kind === "supported") return "";
+
   switch (status.support.reason) {
     case "development":
       return "In-app updates are unavailable in development mode.";
     case "desktop":
       return "The desktop app updates itself; use its update controls.";
     case "unmanaged":
-      return "In-app updates are off. Start bb with `npx bb-app start` or `pnpm start`, without `--no-in-app-updates`, to turn them on.";
+      return "In-app updates are off. Start Omnyo with `omnyo-app start` or `pnpm start`, without `--no-in-app-updates`, to turn them on.";
   }
 }
 
 function describeAppUpdateResult(result: SystemAppUpdateResult): string {
   const target = formatRevision(result.to);
+
   switch (result.outcome) {
+    case "cancelled":
+      return "Update cancelled.";
     case "updated":
-      return `Updated bb to ${target}.`;
+      return `Updated Omnyo to ${target}.`;
     case "failed":
-      return `Update to ${target} failed: ${result.message ?? "unknown error"}`;
+      return `Update to ${target} failed${result.errorCode ? ` [${result.errorCode}]` : ""}: ${result.message ?? "unknown error"}`;
   }
 }
 
@@ -221,9 +255,11 @@ function appRowFromStatus(args: {
   version: SystemVersionResponse;
 }): readonly [string, string, string] {
   const { appUpdate, version } = args;
+
   if (appUpdate !== null && appUpdate.support.kind === "supported") {
     const target = formatAvailableTarget(appUpdate);
     const current = formatRevision(appUpdate.current);
+
     const state =
       appUpdate.activity.phase !== "idle"
         ? `Updating to ${appUpdate.activity.targetVersion}`
@@ -238,20 +274,31 @@ function appRowFromStatus(args: {
                 : UPDATE_STATE_PRESENTATION["up-to-date"].label
           : appUpdate.blocked !== null
             ? `${UPDATE_STATE_PRESENTATION["update-available"].label} (blocked: ${appUpdate.blocked.message})`
-            : `${UPDATE_STATE_PRESENTATION["update-available"].label} (run: bb updates app apply)`;
+            : `${UPDATE_STATE_PRESENTATION["update-available"].label} (run: omnyo updates app apply)`;
+
     return [
-      "bb-app",
+      "omnyo-app",
       target === null ? current : `${current} -> ${target}`,
       state,
     ];
   }
+
   if (version.installKind === "source") {
     return [
-      "bb-app",
+      "omnyo-app",
       `source checkout ${version.currentCommit === null ? `build ${version.currentVersion}` : version.currentCommit.slice(0, 10)}`,
       "Latest unknown (update this checkout with Git; automatic update checks are off)",
     ];
   }
+
+  if (version.source === "private") {
+    return [
+      "omnyo-app",
+      version.currentVersion,
+      `Private release (${version.upgradeCommand})`,
+    ];
+  }
+
   const appState = version.isDevelopment
     ? "development mode"
     : version.updateAvailable
@@ -259,55 +306,107 @@ function appRowFromStatus(args: {
       : version.latestVersion === null
         ? UPDATE_STATE_PRESENTATION["latest-unknown"].label
         : UPDATE_STATE_PRESENTATION["up-to-date"].label;
+
   const appVersionLabel =
     version.latestVersion !== null &&
     version.latestVersion !== version.currentVersion
       ? `${version.currentVersion} -> ${version.latestVersion}`
       : version.currentVersion;
-  return ["bb-app", appVersionLabel, appState];
+
+  return ["omnyo-app", appVersionLabel, appState];
+}
+
+function describeDrain(
+  activity: Extract<SystemAppUpdateActivity, { phase: "draining" }>,
+  count: number,
+): string[] {
+  const stopsAt = new Date(activity.stopsRunningChatsAt).toLocaleTimeString(
+    [],
+    { hour: "2-digit", minute: "2-digit" },
+  );
+
+  const them = count === 1 ? "it" : "them";
+
+  return [
+    `Omnyo installs ${activity.targetVersion} once ${String(count)} running chat${count === 1 ? " finishes" : "s finish"}, or at ${stopsAt} pauses ${them}, updates and resumes ${them}.`,
+    "Run omnyo updates app apply --yes to stop running chats, update now and resume them, or omnyo updates app cancel to stop.",
+  ];
 }
 
 function printAppUpdateStatus(status: SystemAppUpdateStatus): void {
   const current = formatRevision(status.current);
+
   if (status.support.kind !== "supported") {
-    console.log(`bb-app ${current}`);
+    console.log(`omnyo-app ${current}`);
     console.log(unsupportedAppUpdateMessage(status));
+
     return;
   }
+
   const target = formatAvailableTarget(status);
   console.log(
     target === null
       ? status.blocked !== null ||
+        status.newTurnsPausedForUpdate ||
         status.activity.phase !== "idle" ||
         (status.lastResult !== null &&
           !status.lastResult.acknowledged &&
           status.lastResult.outcome === "failed")
-        ? `bb-app ${current}`
-        : `bb-app ${current} is up to date.`
-      : `bb-app ${current} -> ${target}`,
+        ? `omnyo-app ${current}`
+        : `omnyo-app ${current} is up to date.`
+      : `omnyo-app ${current} -> ${target}`,
   );
+
   if (status.activity.phase === "preparing") {
     console.log(
       `Updating to ${status.activity.targetVersion}: ${status.activity.step}`,
     );
+
+    if (status.activity.code) {
+      console.log(
+        `[${status.activity.code}] ${status.activity.output.join("\n")}`,
+      );
+    }
+  } else if (status.activity.phase === "draining") {
+    for (const line of describeDrain(
+      status.activity,
+      status.runningThreadCount,
+    ))
+      console.log(line);
   } else if (status.activity.phase === "restarting") {
     console.log(`Restarting into ${status.activity.targetVersion}`);
   }
+
+  if (status.newTurnsPausedForUpdate && status.activity.phase !== "draining") {
+    console.log("New turns wait until the Omnyo update finishes.");
+  }
+
   const subjects = status.available?.subjects ?? [];
+
   for (const subject of subjects.slice(0, INCOMING_SUBJECTS_SHOWN)) {
     console.log(`  ${subject}`);
   }
+
   const hiddenCount =
     (status.available?.commitCount ?? subjects.length) -
     Math.min(subjects.length, INCOMING_SUBJECTS_SHOWN);
+
   if (hiddenCount > 0) {
     console.log(`  … ${String(hiddenCount)} more`);
   }
+
   if (status.blocked !== null) {
-    console.log(`Blocked: ${status.blocked.message}`);
-  } else if (target !== null && status.activity.phase === "idle") {
-    console.log("Run bb updates app apply to update and restart bb.");
+    console.log(
+      `Blocked${status.blocked.code ? ` [${status.blocked.code}]` : ""}: ${status.blocked.message}`,
+    );
+  } else if (
+    target !== null &&
+    status.activity.phase === "idle" &&
+    !status.newTurnsPausedForUpdate
+  ) {
+    console.log("Run omnyo updates app apply to update and restart Omnyo.");
   }
+
   if (status.lastResult !== null && !status.lastResult.acknowledged) {
     console.log(describeAppUpdateResult(status.lastResult));
   }
@@ -324,30 +423,40 @@ async function waitForAppUpdate(args: {
 }): Promise<SystemAppUpdateStatus> {
   const deadline = Date.now() + APP_UPDATE_WAIT_TIMEOUT_MS;
   let lastLine: string | null = null;
+
   const report = (line: string): void => {
     if (args.json || line === lastLine) return;
     lastLine = line;
     console.log(line);
   };
+
   while (Date.now() < deadline) {
     await delay(APP_UPDATE_POLL_INTERVAL_MS);
     const status = await readAppUpdateStatus(args.sdk, false);
+
     if (status === null) {
-      report("Restarting bb…");
+      report("Restarting Omnyo…");
       continue;
     }
+
     const result = status.lastResult;
-    if (result !== null && result.id !== args.previousResultId) {
+
+    if (
+      (result !== null && result.id !== args.previousResultId) ||
+      status.activity.phase === "draining"
+    ) {
       return status;
     }
+
     if (status.activity.phase === "preparing") {
       report(`${status.activity.step}…`);
     } else if (status.activity.phase === "restarting") {
-      report("Restarting bb…");
+      report("Restarting Omnyo…");
     }
   }
+
   throw new CliExitError(
-    "Timed out waiting for the update to finish. Run bb updates app to check on it; if bb did not come back, check the terminal running it.",
+    "Timed out waiting for the update to finish. Run omnyo updates app to check on it; if Omnyo did not come back, check the terminal running it.",
     1,
   );
 }
@@ -358,16 +467,17 @@ function registerAppUpdateCommands(
 ): void {
   const app = updates
     .command("app")
-    .description("Inspect and apply in-app updates to bb itself");
+    .description("Inspect and apply in-app updates to Omnyo itself");
 
   app
     .command("status", { isDefault: true })
-    .description("Show whether bb can update itself and what is available")
+    .description("Show whether Omnyo can update itself and what is available")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: AppUpdateStatusOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const status = await sdk.system.appUpdate({ force: true });
+
         if (outputJson(opts, status)) return;
         printAppUpdateStatus(status);
       }),
@@ -375,8 +485,13 @@ function registerAppUpdateCommands(
 
   app
     .command("apply")
-    .description("Download the available bb update and restart bb into it")
-    .option("--yes", "Interrupt running threads without asking")
+    .description(
+      "Download the available Omnyo update and restart Omnyo into it",
+    )
+    .option(
+      "--yes",
+      "Update now: stop running chats, restart and resume them afterwards",
+    )
     .option(
       "--no-wait",
       "Return once the update starts instead of following it",
@@ -384,61 +499,121 @@ function registerAppUpdateCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: AppUpdateApplyOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const status = await sdk.system.appUpdate({ force: true });
+
         if (status.support.kind !== "supported") {
           throw new CliExitError(unsupportedAppUpdateMessage(status), 1);
         }
+
         if (status.blocked !== null) {
           throw new CliExitError(status.blocked.message, 1);
         }
+
         if (status.available === null) {
           if (outputJson(opts, status)) return;
           console.log(
-            `bb-app ${formatRevision(status.current)} is up to date.`,
+            `omnyo-app ${formatRevision(status.current)} is up to date.`,
           );
+
           return;
         }
+
         let confirmInterruptingThreads = opts.yes === true;
-        if (status.runningThreadCount > 0 && !confirmInterruptingThreads) {
+
+        if (
+          status.support.mode !== "private" &&
+          status.runningThreadCount > 0 &&
+          !confirmInterruptingThreads
+        ) {
           const count = status.runningThreadCount;
           confirmInterruptingThreads = await confirmDestructiveAction(
-            `${String(count)} thread${count === 1 ? " is" : "s are"} running. Updating restarts bb and interrupts ${count === 1 ? "it" : "them"}. Continue?`,
+            `${String(count)} thread${count === 1 ? " is" : "s are"} running. Updating restarts Omnyo and interrupts ${count === 1 ? "it" : "them"}. Continue?`,
           );
+
           if (!confirmInterruptingThreads) {
             console.log("Update cancelled.");
+
             return;
           }
         }
+
         const previousResultId = status.lastResult?.id ?? null;
+
         const started = await sdk.system.applyAppUpdate({
           confirmInterruptingThreads,
         });
+
         if (!opts.wait) {
           if (outputJson(opts, started)) return;
           console.log(
-            `Updating bb to ${status.available.version}. Run bb updates app to follow it.`,
+            `Updating Omnyo to ${status.available.version}. Run omnyo updates app to follow it.`,
           );
+
           return;
         }
+
         if (!opts.json) {
-          console.log(`Updating bb to ${status.available.version}`);
+          console.log(`Updating Omnyo to ${status.available.version}`);
         }
+
         const finished = await waitForAppUpdate({
           json: opts.json === true,
           previousResultId,
           sdk,
         });
-        const result = finished.lastResult;
-        if (outputJson(opts, finished)) {
-          if (result?.outcome !== "updated") process.exitCode = 1;
+
+        if (finished.activity.phase === "draining") {
+          if (outputJson(opts, finished)) return;
+
+          for (const line of describeDrain(
+            finished.activity,
+            finished.runningThreadCount,
+          ))
+            console.log(line);
+
           return;
         }
+
+        const result = finished.lastResult;
+
+        if (outputJson(opts, finished)) {
+          if (result === null || result.outcome === "failed")
+            process.exitCode = 1;
+
+          return;
+        }
+
         if (result === null) return;
-        if (result.outcome !== "updated") {
+
+        if (result.outcome === "failed") {
           throw new CliExitError(describeAppUpdateResult(result), 1);
         }
+
         console.log(describeAppUpdateResult(result));
+      }),
+    );
+
+  app
+    .command("cancel")
+    .description("Stop an update that is waiting for running chats to finish")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (opts: AppUpdateStatusOptions) => {
+        const sdk = createCliOmnyoSdk(getUrl());
+        const status = await sdk.system.appUpdate();
+
+        if (status.activity.phase !== "draining") {
+          if (outputJson(opts, status)) return;
+          console.log("No Omnyo update is waiting to restart.");
+
+          return;
+        }
+
+        const next = await sdk.system.cancelAppUpdate();
+
+        if (outputJson(opts, next)) return;
+        console.log("Cancelled the Omnyo update. Waiting messages send now.");
       }),
     );
 
@@ -448,15 +623,19 @@ function registerAppUpdateCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: AppUpdateStatusOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const status = await sdk.system.appUpdate();
         const result = status.lastResult;
+
         if (result === null || result.acknowledged) {
           if (outputJson(opts, status)) return;
           console.log("No update result to dismiss.");
+
           return;
         }
+
         const next = await sdk.system.acknowledgeAppUpdate({ id: result.id });
+
         if (outputJson(opts, next)) return;
         console.log("Dismissed the last update result.");
       }),
@@ -469,26 +648,31 @@ export function registerUpdatesCommands(
 ): void {
   const updates = program
     .command("updates")
-    .description("Inspect and apply bb and provider CLI updates");
+    .description("Inspect and apply Omnyo and provider CLI updates");
+
   registerAppUpdateCommands(updates, getUrl);
+  registerWebUpdateCommands(updates, getUrl);
 
   updates
     .command("status", { isDefault: true })
-    .description("Show bb and provider CLI update status across machines")
+    .description("Show Omnyo and provider CLI update status across machines")
     .option("--machine <id-or-name>", "Limit to one machine")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: UpdatesCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const [version, appUpdate, hosts] = await Promise.all([
           sdk.system.version(),
           readAppUpdateStatus(sdk, false),
           sdk.hosts.list(),
         ]);
+
         const entries = await collectMachineUpdates(
           sdk,
           selectUpdateHosts(hosts, opts.machine),
         );
+
         if (
           outputJson(opts, {
             app: version,
@@ -514,18 +698,26 @@ export function registerUpdatesCommands(
     .command("apply")
     .description("Run every available provider CLI install/update")
     .option("--machine <id-or-name>", "Limit to one machine")
+    .option(
+      "--yes",
+      "Update now: pause chats on each affected machine and resume them afterward",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: UpdatesCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const hosts = await sdk.hosts.list();
+
         const entries = await collectMachineUpdates(
           sdk,
           selectUpdateHosts(hosts, opts.machine),
         );
+
         const targets = actionableTargets(entries);
+
         if (targets.length === 0) {
           if (outputJson(opts, { results: [] })) return;
+
           const hasManualUpdates = entries.some(
             (entry) =>
               entry.providerStatus !== null &&
@@ -536,11 +728,13 @@ export function registerUpdatesCommands(
                   status.installAction === null,
               ),
           );
+
           console.log(
             hasManualUpdates
-              ? "No updates bb can apply. Run bb updates status for manual updates."
+              ? "No updates Omnyo can apply. Run omnyo updates status for manual updates."
               : "Everything is up to date.",
           );
+
           return;
         }
 
@@ -550,40 +744,64 @@ export function registerUpdatesCommands(
           provider: ProviderCliKey;
           success: boolean;
           message: string | null;
+          errorCode: string | null;
         }[] = [];
+
         for (const target of targets) {
           const actionKind = target.status.installAction?.kind ?? "install";
+
           if (!opts.json) {
             console.log(
               `${target.status.displayName} on ${target.host.name}: running ${actionKind}…`,
             );
           }
+
           try {
             const events = await sdk.hosts.installProviderCli({
               hostId: target.host.id,
               provider: target.provider,
               actionKind,
+              confirmInterruptingThreads: opts.yes === true,
+              onEvent: (event) => {
+                if (!opts.json && event.type === "progress") {
+                  console.log(
+                    `${target.status.displayName} on ${target.host.name}: ${event.message}`,
+                  );
+                }
+              },
             });
-            const completed = events.find(
+
+            const latestEvents = events.slice().reverse();
+
+            const completed = latestEvents.find(
               (event) => event.type === "completed",
             );
-            const errorEvent = events.find((event) => event.type === "error");
+
+            const errorEvent = latestEvents.find(
+              (event) => event.type === "error",
+            );
+
             const success =
               completed?.type === "completed" && completed.success;
+
             results.push({
               hostId: target.host.id,
               hostName: target.host.name,
               provider: target.provider,
               success,
-              message: errorEvent?.type === "error" ? errorEvent.message : null,
+              message: success ? null : (errorEvent?.message ?? null),
+              errorCode: success
+                ? null
+                : (errorEvent?.code ?? "provider_installation_failed"),
             });
+
             if (!opts.json) {
               console.log(
                 success
                   ? `${target.status.displayName} on ${target.host.name}: done`
                   : `${target.status.displayName} on ${target.host.name}: failed${
                       errorEvent?.type === "error"
-                        ? ` (${errorEvent.message})`
+                        ? ` (${errorEvent.code ?? "provider_installation_failed"}: ${errorEvent.message})`
                         : ""
                     }`,
               );
@@ -591,13 +809,17 @@ export function registerUpdatesCommands(
           } catch (error) {
             const message =
               error instanceof Error ? error.message : String(error);
+
             results.push({
               hostId: target.host.id,
               hostName: target.host.name,
               provider: target.provider,
               success: false,
               message,
+              errorCode:
+                error instanceof OmnyoHttpError ? (error.code ?? null) : null,
             });
+
             if (!opts.json) {
               console.log(
                 `${target.status.displayName} on ${target.host.name}: failed (${message})`,
@@ -605,11 +827,18 @@ export function registerUpdatesCommands(
             }
           }
         }
-        if (outputJson(opts, { results })) return;
+
+        outputJson(opts, { results });
         const failures = results.filter((result) => !result.success);
+
         if (failures.length > 0) {
-          throw new Error(
+          throw new CliExitError(
             `${failures.length} update${failures.length === 1 ? "" : "s"} failed.`,
+            1,
+            {
+              code: failures[0]?.errorCode ?? "provider_installation_failed",
+              hint: null,
+            },
           );
         }
       }),

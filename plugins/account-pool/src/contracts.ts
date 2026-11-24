@@ -5,11 +5,13 @@ export const DEFAULT_ACCOUNT_POOL_CONFIG = {
   codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
   switchThreshold: 0.98,
   parentMode: "proxy" as const,
+  composerPredictionAllowance: "included-only" as const,
 };
 
 const httpUrlSchema = z.string().refine((value) => {
   try {
     const protocol = new URL(value).protocol;
+
     return protocol === "http:" || protocol === "https:";
   } catch {
     return false;
@@ -22,6 +24,11 @@ const switchThresholdSchema = z
   .max(1, "Must be at most 1.");
 
 export const parentModeSchema = z.enum(["proxy", "isolate"]);
+
+export const composerPredictionAllowanceSchema = z.enum([
+  "included-only",
+  "included-or-prepaid-credits",
+]);
 
 export const accountPoolConfigSchema = z
   .object({
@@ -37,6 +44,9 @@ export const accountPoolConfigSchema = z
     parentMode: parentModeSchema.default(
       DEFAULT_ACCOUNT_POOL_CONFIG.parentMode,
     ),
+    composerPredictionAllowance: composerPredictionAllowanceSchema.default(
+      DEFAULT_ACCOUNT_POOL_CONFIG.composerPredictionAllowance,
+    ),
   })
   .strict();
 
@@ -48,6 +58,7 @@ export const accountPoolConfigSetInputSchema = z
     codexUpstreamBaseUrl: httpUrlSchema.optional(),
     switchThreshold: switchThresholdSchema.optional(),
     parentMode: parentModeSchema.optional(),
+    composerPredictionAllowance: composerPredictionAllowanceSchema.optional(),
   })
   .strict();
 
@@ -72,8 +83,11 @@ export interface AccountPoolConfigController {
 }
 
 export const providerSchema = z.enum(["claude", "codex"]);
+
 export type PoolProvider = z.infer<typeof providerSchema>;
+
 export const accountKindSchema = z.enum(["oauth", "api-key"]);
+
 export const modelFamilySchema = z.enum([
   "fable",
   "sonnet",
@@ -151,6 +165,18 @@ export const accountSchema = z
 
 export type Account = z.infer<typeof accountSchema>;
 
+export const CLAUDE_POOL_LOGIN_RETIRED =
+  "Claude subscription sign-in in Account Pooler has been retired. Sign in directly in Claude Code or add an Anthropic API key.";
+
+export const CLAUDE_POOL_THREAD_RETIRED =
+  "This conversation used an older Claude account pool. Use Account Pooler bypass for this thread to sign in directly through Claude Code, or start a new conversation to use a pooled Anthropic API key.";
+
+export function isLegacyClaudeAccount(
+  account: Pick<Account, "provider" | "kind">,
+): boolean {
+  return account.provider === "claude" && account.kind === "oauth";
+}
+
 export const oauthSecretSchema = z
   .object({
     kind: z.literal("oauth"),
@@ -175,9 +201,25 @@ export const accountSecretSchema = z.discriminatedUnion("kind", [
 
 export type AccountSecret = z.infer<typeof accountSecretSchema>;
 
+export const creditBalanceSchema = z.discriminatedUnion("unit", [
+  z
+    .object({ unit: z.literal("points"), amount: z.number().nonnegative() })
+    .strict(),
+  z
+    .object({
+      unit: z.literal("currency"),
+      amount: z.number().nonnegative(),
+      currency: z.string().regex(/^[A-Z]{3}$/),
+    })
+    .strict(),
+]);
+
 export const extraUsageSchema = z
   .object({
     status: z.enum(["allowed", "rejected"]),
+    hasCredits: z.boolean().nullable().default(null),
+    unlimited: z.boolean().nullable().default(null),
+    creditBalance: creditBalanceSchema.nullable().optional(),
     observedAt: z.number().int(),
     source: z.enum(["header", "usage"]),
   })
@@ -212,9 +254,48 @@ export const quotaSchema = z
 
 export type AccountQuota = z.infer<typeof quotaSchema>;
 
+export const modelRejectionSchema = z
+  .object({
+    accountId: z.string().uuid(),
+    model: z.string().min(1),
+    plan: z.string().nullable(),
+    observedAt: z.number().int(),
+  })
+  .strict();
+
+export type ModelRejection = z.infer<typeof modelRejectionSchema>;
+
+export const incompatibleModelSchema = modelRejectionSchema
+  .omit({ accountId: true })
+  .strict();
+
+export const predictionRejectionSchema = modelRejectionSchema
+  .omit({ model: true })
+  .strict();
+
+export type PredictionRejection = z.infer<typeof predictionRejectionSchema>;
+
+export const modelCatalogSummarySchema = z
+  .object({
+    plan: z.string().nullable(),
+    clientVersion: z.string().nullable(),
+    fetchedAt: z.number().int(),
+    models: z.array(z.string().min(1)),
+  })
+  .strict();
+
+export type ModelCatalogSummary = z.infer<typeof modelCatalogSummarySchema>;
+
 export const accountSummarySchema = accountSchema.extend({
   lastUsedHostName: z.string().min(1).nullable(),
   ...quotaFieldsShape,
+  incompatibleModels: z.array(incompatibleModelSchema).default([]),
+  modelCatalog: modelCatalogSummarySchema.nullable().default(null),
+  composerPredictionsDisabled: predictionRejectionSchema
+    .omit({ accountId: true })
+    .strict()
+    .nullable()
+    .default(null),
   inFlight: z.number().int().nonnegative(),
   status: z.enum(["disabled", "ready", "held", "exhausted", "error"]),
 });
@@ -276,19 +357,29 @@ export type PoolStatusReport = z.infer<typeof statusReportSchema>;
 
 export const accountAddInputSchema = z
   .object({
-    provider: providerSchema,
-    source: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("import") }).strict(),
-      z
-        .object({ kind: z.literal("api-key"), apiKey: z.string().min(1) })
-        .strict(),
-    ]),
+    provider: z.literal("claude"),
+    apiKey: z.string().min(1),
     label: z.string().min(1).nullable(),
     priority: z.number().int(),
   })
   .strict();
 
 export type AccountAddInput = z.infer<typeof accountAddInputSchema>;
+
+export const loginTargetSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("add"),
+      label: z.string().min(1).nullable(),
+      priority: z.number().int(),
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal("relogin"), accountId: z.string().uuid() })
+    .strict(),
+]);
+
+export type LoginTarget = z.infer<typeof loginTargetSchema>;
 
 export const loginStartSchema = z
   .object({

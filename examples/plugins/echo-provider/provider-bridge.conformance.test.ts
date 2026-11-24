@@ -6,17 +6,18 @@ import {
   experimental_captureBridgeJsonRpcOutput as captureBridgeJsonRpcOutput,
   experimental_formatConformanceReport as formatConformanceReport,
   experimental_runBridgeConformance as runBridgeConformance,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
-import type { CapturedBridgeJsonRpcOutput } from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
+import type { CapturedBridgeJsonRpcOutput } from "@omnyo/plugin-sdk/provider-bridge/testing";
 
 import { handleLine } from "./src/provider-bridge.js";
 import { ECHO_PLUGIN_ID } from "./src/vocabulary.js";
 
 let output: CapturedBridgeJsonRpcOutput;
+
 let workspaceDir: string;
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-echo-conformance-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-echo-conformance-"));
   output = captureBridgeJsonRpcOutput();
 });
 
@@ -44,6 +45,7 @@ it("passes the canonical protocol suite", async () => {
   const statusById = Object.fromEntries(
     report.results.map((result) => [result.id, result.status]),
   );
+
   expect(statusById).toEqual({
     "rpc/unknown-method": "pass",
     "rpc/invalid-params": "pass",

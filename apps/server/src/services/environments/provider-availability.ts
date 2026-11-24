@@ -1,5 +1,5 @@
-import { getProjectSourceByHost } from "@bb/db";
-import { isLocalPathProjectSource, PERSONAL_PROJECT_ID } from "@bb/domain";
+import { getProjectSourceByHost } from "@omnyo/db";
+import { isLocalPathProjectSource, PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
 import type { WorkSessionDeps } from "../../types.js";
 import { callHostRetryableOnlineRpc } from "../hosts/online-rpc.js";
@@ -20,12 +20,13 @@ import {
 import type {
   PluginEnvironmentProviderAvailability,
   PluginEnvironmentProviderAvailabilityContext,
-} from "@get-bb/plugin-sdk/environment-provider";
-import { decideWithinBox } from "../threads/dispatch-hooks.js";
+} from "@omnyo/plugin-sdk/environment-provider";
+import { decideWithinBox } from "../lib/decision-timeout.js";
 
 type GitCheckoutAvailability =
   | { status: "available" }
   | { status: "unavailable"; message: string };
+
 export type EnvironmentProviderAvailabilityResolution =
   | { ok: true; availability: PluginEnvironmentProviderAvailability }
   | { ok: false; message: string };
@@ -48,28 +49,36 @@ export function environmentProviderMatchesContext(
   query: { projectId: string; hostId?: string },
 ): boolean {
   const project = requirePublicProject(deps.db, query.projectId);
+
   const hosts =
     query.hostId === undefined
       ? listPublicHostsWithStatus(deps)
       : [getNonDestroyedHostWithStatus(deps, query.hostId)];
+
   return hosts.some((host) => {
     if (host === null) return false;
     const requires = record.provider.requires;
+
     if (requires.projectless !== (project.id === PERSONAL_PROJECT_ID)) {
       return false;
     }
+
     const source = getProjectSourceByHost(deps.db, project.id, host.id);
+
     const projectCheckout =
       source !== null && isLocalPathProjectSource(source)
         ? { path: source.path }
         : null;
+
     if (
       (requires.projectCheckout || requires.gitCheckout) &&
       projectCheckout === null
     ) {
       return false;
     }
+
     if (requires.gitRemote && project.gitRemoteUrl === null) return false;
+
     return true;
   });
 }
@@ -79,9 +88,11 @@ export async function resolvePluginEnvironmentProviderAvailability(
   context: PluginEnvironmentProviderAvailabilityContext,
 ): Promise<EnvironmentProviderAvailabilityResolution> {
   const availability = record.provider.availability;
+
   if (availability === null) {
     return { ok: true, availability: { status: "available" } };
   }
+
   const invocation = await invokeEnvironmentProvider(
     record,
     `"${record.provider.id}" environment provider availability`,
@@ -91,6 +102,7 @@ export async function resolvePluginEnvironmentProviderAvailability(
         environmentProviderDecisionTimeoutMs(),
       ),
   );
+
   return parseProviderAvailabilityInvocation(record.pluginId, invocation);
 }
 
@@ -104,17 +116,23 @@ export function resolveGitCheckoutAvailability(
   args: { hostId: string; path: string },
 ): Promise<GitCheckoutAvailability> {
   let pending = pendingGitInspections.get(deps.db);
+
   if (pending === undefined) {
     pending = new Map();
     pendingGitInspections.set(deps.db, pending);
   }
+
   const key = JSON.stringify([args.hostId, args.path]);
   const existing = pending.get(key);
+
   if (existing !== undefined) return existing;
+
   const result = inspectGitCheckoutAvailability(deps, args).finally(() =>
     pending.delete(key),
   );
+
   pending.set(key, result);
+
   return result;
 }
 
@@ -132,6 +150,7 @@ async function inspectGitCheckoutAvailability(
         remoteRefresh: "background",
       },
     });
+
     if (
       inspection.checkout.kind === "unknown" ||
       inspection.checkout.kind === "unborn" ||
@@ -142,6 +161,7 @@ async function inspectGitCheckoutAvailability(
         message: "This project checkout has no usable git branch.",
       };
     }
+
     return { status: "available" };
   } catch {
     return {

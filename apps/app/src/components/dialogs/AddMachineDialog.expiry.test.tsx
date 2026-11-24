@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MachineLaunchCommand } from "./AddMachineDialog";
 
 const COMMAND =
-  "curl -fsSL -H 'X-BB-Enrollment: secret' https://bb/install.sh | sh";
+  "curl -sS --fail-with-body -L --max-redirs 0 -H 'X-Omnyo-Enrollment: secret' https://omnyo.example.test/install.sh | sh";
 
 describe("MachineLaunchCommand", () => {
   beforeEach(() => {
@@ -34,10 +34,12 @@ describe("MachineLaunchCommand", () => {
     );
     expect(screen.getByText(COMMAND)).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "macOS or Linux" }).ariaPressed,
+      screen
+        .getByRole("radio", { name: "macOS or Linux" })
+        .getAttribute("aria-checked"),
     ).toBe("true");
 
-    fireEvent.click(screen.getByRole("button", { name: "Windows" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Windows" }));
 
     expect(screen.getByText("irm windows-command | iex")).toBeTruthy();
     expect(screen.queryByText(COMMAND)).toBeNull();
@@ -99,5 +101,60 @@ describe("MachineLaunchCommand", () => {
     expect(
       screen.getByRole("button", { name: "Copy" }).hasAttribute("disabled"),
     ).toBe(true);
+  });
+
+  it("leads with the short setup code and keeps the full command as a fallback", async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(
+      <MachineLaunchCommand
+        command={COMMAND}
+        windowsCommand="irm windows-command | iex"
+        expiresAt={15 * 60_000}
+        shortCommand={{
+          code: "AB12-CD34",
+          command: "curl -fsSL https://omnyo.example.test/m/AB12-CD34 | sh",
+          windowsCommand:
+            "irm https://omnyo.example.test/m/AB12-CD34.ps1 | iex",
+          expiresAt: 10 * 60_000,
+        }}
+        onRegenerate={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText("Setup code").textContent).toBe("AB12-CD34");
+    expect(
+      screen.getByText(
+        "curl -fsSL https://omnyo.example.test/m/AB12-CD34 | sh",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(COMMAND)).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe(
+      "Command expires in 10:00",
+    );
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy full command" }),
+      );
+    });
+    expect(writeText).toHaveBeenCalledWith(COMMAND);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Windows" }));
+    expect(
+      screen.getByText("irm https://omnyo.example.test/m/AB12-CD34.ps1 | iex"),
+    ).toBeTruthy();
+
+    act(() => void vi.advanceTimersByTime(10 * 60_000));
+    expect(screen.getByRole("status").textContent).toBe("Command expired");
+    expect(
+      screen.getByRole("button", { name: "Copy" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: /full command/u })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+    vi.unstubAllGlobals();
   });
 });

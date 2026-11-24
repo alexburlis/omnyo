@@ -1,13 +1,46 @@
 import type {
   ComposerCustomization,
+  ExperimentalThreadRowSubtitle,
   PluginComposerScope,
   PluginComposerThreadRowStatus,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 
 export const PLUGIN_SLOT_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
 const PLUGIN_MESSAGE_DIRECTIVE_ID_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 type RejectionReporter = (reason: string) => void;
+
+export function normalizePluginThreadRowSubtitle(
+  value: unknown,
+  onRejected: RejectionReporter,
+): ExperimentalThreadRowSubtitle | null | undefined {
+  if (value === null) return null;
+  const kind = "contentScript.experimental_setThreadRowSubtitle";
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    onRejected(`${kind}: subtitle must be null or a non-array object`);
+
+    return undefined;
+  }
+
+  const subtitle = value as Record<string, unknown>;
+
+  const text =
+    typeof subtitle.text === "string"
+      ? subtitle.text.trim().replace(/\s+/gu, " ")
+      : "";
+
+  if (text.length === 0 || text.length > 140) {
+    onRejected(
+      `${kind}: "text" must contain 1 to 140 characters after whitespace normalization`,
+    );
+
+    return undefined;
+  }
+
+  return { text };
+}
 
 /**
  * Parse the runtime value handed to
@@ -19,24 +52,34 @@ export function normalizePluginThreadRowStatus(
   onRejected: RejectionReporter,
 ): PluginComposerThreadRowStatus | null | undefined {
   const kind = "contentScript.experimental_setThreadRowStatus";
+
   if (value === null) return null;
+
   if (typeof value !== "object" || Array.isArray(value)) {
     onRejected(`${kind}: status must be null or a non-array object`);
+
     return undefined;
   }
 
   const status = value as Record<string, unknown>;
   const icon = status.icon;
+
   if (typeof icon !== "string" || icon.trim() === "") {
     onRejected(`${kind}: "icon" must be a non-blank string`);
+
     return undefined;
   }
+
   const label = status.label;
+
   if (typeof label !== "string" || label.trim() === "") {
     onRejected(`${kind}: "label" must be a non-blank string`);
+
     return undefined;
   }
+
   const tone = status.tone;
+
   if (
     tone !== undefined &&
     tone !== "default" &&
@@ -47,6 +90,7 @@ export function normalizePluginThreadRowStatus(
     onRejected(
       `${kind}: "tone" must be "default", "running", "success", or "error" when set`,
     );
+
     return undefined;
   }
 
@@ -63,6 +107,7 @@ export function requireSlotId(kind: string, value: unknown): string {
       `${kind}: "id" must match ${String(PLUGIN_SLOT_ID_PATTERN)}, got ${JSON.stringify(value)}`,
     );
   }
+
   return value;
 }
 
@@ -75,6 +120,7 @@ export function requireEnvironmentProviderId(
       `${kind}: "environmentProviderId" must match ${String(PLUGIN_SLOT_ID_PATTERN)}, got ${JSON.stringify(value)}`,
     );
   }
+
   return value;
 }
 
@@ -88,6 +134,7 @@ export function requireProviderId(kind: string, value: unknown): string {
       `${kind}: "providerId" must match ${String(PLUGIN_SLOT_ID_PATTERN)}, got ${JSON.stringify(value)}`,
     );
   }
+
   return value;
 }
 
@@ -113,6 +160,7 @@ export function requireTimelineRendererKind(
       `${kind}: "kind" must be "tool" or "<pluginId>/<name>" (lowercase letters, digits, "-"), got ${JSON.stringify(value)}`,
     );
   }
+
   return value;
 }
 
@@ -128,6 +176,7 @@ export function requireMessageDirectiveId(
       `${kind}: "id" must match ${String(PLUGIN_MESSAGE_DIRECTIVE_ID_PATTERN)}, got ${JSON.stringify(value)}`,
     );
   }
+
   return value;
 }
 
@@ -139,6 +188,7 @@ export function requireNonEmptyString(
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`${kind}: "${field}" must be a non-empty string`);
   }
+
   return value;
 }
 
@@ -150,6 +200,7 @@ export function requireOptionalString(
   if (value !== undefined && typeof value !== "string") {
     throw new Error(`${kind}: "${field}" must be a string when set`);
   }
+
   return value;
 }
 
@@ -157,6 +208,7 @@ export function requireComponent<T>(kind: string, value: unknown): T {
   if (typeof value !== "function") {
     throw new Error(`${kind}: "component" must be a React component function`);
   }
+
   return value as T;
 }
 
@@ -164,6 +216,7 @@ function requireFunction<T>(kind: string, field: string, value: unknown): T {
   if (typeof value !== "function") {
     throw new Error(`${kind}: "${field}" must be a function`);
   }
+
   return value as T;
 }
 
@@ -175,6 +228,7 @@ export function requireUniqueId(
   if (seen.has(id)) {
     throw new Error(`${kind}: duplicate id "${id}"`);
   }
+
   seen.add(id);
 }
 
@@ -186,13 +240,18 @@ function parseContributionArray<T extends { id: string }>(
   seenIds = new Set<string>(),
 ): readonly T[] | undefined {
   if (value === undefined) return undefined;
+
   if (!Array.isArray(value)) {
     onRejected(`${kind}: must be an array when set`);
+
     return undefined;
   }
+
   const parsed: T[] = [];
+
   for (const [index, entry] of value.entries()) {
     const entryKind = `${kind}[${index}]`;
+
     try {
       const parsedEntry = parse(entryKind, entry);
       requireUniqueId(entryKind, seenIds, parsedEntry.id);
@@ -201,6 +260,7 @@ function parseContributionArray<T extends { id: string }>(
       onRejected(error instanceof Error ? error.message : String(error));
     }
   }
+
   return parsed;
 }
 
@@ -210,12 +270,15 @@ function parseMenuItem(entryKind: string, value: unknown): ComposerMenuItem {
   const entry = value as Record<string, unknown> | null;
   const id = requireSlotId(entryKind, entry?.id);
   const icon = requireOptionalString(entryKind, "icon", entry?.icon);
+
   const description = requireOptionalString(
     entryKind,
     "description",
     entry?.description,
   );
+
   const disabled = entry?.disabled;
+
   if (
     disabled !== undefined &&
     typeof disabled !== "boolean" &&
@@ -225,6 +288,7 @@ function parseMenuItem(entryKind: string, value: unknown): ComposerMenuItem {
       `${entryKind}: "disabled" must be a boolean or function when set`,
     );
   }
+
   return {
     id,
     label: requireNonEmptyString(entryKind, "label", entry?.label),
@@ -255,34 +319,48 @@ function parseRegions(
     NonNullable<ComposerCustomization["actions"]>[number]
   >(`${kind}.actions`, registration.actions, onRejected, (entryKind, value) => {
     const entry = value as Record<string, unknown> | null;
+
     return {
       id: requireSlotId(entryKind, entry?.id),
       component: requireComponent(entryKind, entry?.component),
     };
   });
+
   const banners = parseContributionArray<
     NonNullable<ComposerCustomization["banners"]>[number]
   >(`${kind}.banners`, registration.banners, onRejected, (entryKind, value) => {
     const entry = value as Record<string, unknown> | null;
     const id = requireSlotId(entryKind, entry?.id);
     const chrome = entry?.chrome;
+    const placement = entry?.experimental_placement;
+
     if (chrome !== undefined && chrome !== "card" && chrome !== "bare") {
       throw new Error(
         `${entryKind}: "chrome" must be "card" or "bare" when set`,
       );
     }
+
+    if (placement !== undefined && placement !== "adjacent-to-composer") {
+      throw new Error(
+        `${entryKind}: "experimental_placement" must be "adjacent-to-composer" when set`,
+      );
+    }
+
     return {
       id,
       ...(chrome !== undefined ? { chrome } : {}),
+      ...(placement !== undefined ? { experimental_placement: placement } : {}),
       component: requireComponent(entryKind, entry?.component),
     };
   });
+
   const plusMenu = parseContributionArray<ComposerMenuItem>(
     `${kind}.plusMenu`,
     registration.plusMenu,
     onRejected,
     parseMenuItem,
   );
+
   const sendMenu = parseContributionArray<ComposerMenuItem>(
     `${kind}.sendMenu`,
     registration.sendMenu,
@@ -298,6 +376,7 @@ function parseRegions(
     onRejected,
     (entryKind, value) => {
       const entry = value as Record<string, unknown> | null;
+
       return {
         id: requireSlotId(entryKind, entry?.id),
         label: requireNonEmptyString(entryKind, "label", entry?.label),
@@ -308,8 +387,10 @@ function parseRegions(
   );
 
   let richText: ComposerCustomization["richText"];
+
   if (registration.richText !== undefined) {
     const raw = registration.richText as Record<string, unknown> | null;
+
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       onRejected(`${kind}.richText: must be an object when set`);
     } else {
@@ -323,6 +404,7 @@ function parseRegions(
         onRejected,
         (entryKind, value) => {
           const entry = value as Record<string, unknown> | null;
+
           return {
             id: requireSlotId(entryKind, entry?.id),
             match: requireFunction<
@@ -338,12 +420,15 @@ function parseRegions(
           };
         },
       );
+
       const onDraftChange = raw.onDraftChange;
+
       if (onDraftChange !== undefined && typeof onDraftChange !== "function") {
         onRejected(
           `${kind}.richText: "onDraftChange" must be a function when set`,
         );
       }
+
       richText = {
         ...(effects !== undefined ? { effects } : {}),
         ...(typeof onDraftChange === "function"
@@ -378,14 +463,17 @@ export function collectComposerCustomization(
   seenPopupIds = new Set<string>(),
 ): ComposerCustomization | null {
   const kind = "composer.customize";
+
   try {
     const raw = registration as Record<string, unknown> | null;
     const id = requireSlotId(kind, raw?.id);
     const scopes = raw?.scopes;
+
     if (scopes !== undefined) {
       if (!Array.isArray(scopes)) {
         throw new Error(`${kind}: "scopes" must be an array when set`);
       }
+
       for (const scope of scopes) {
         if (
           scope !== "thread" &&
@@ -399,7 +487,9 @@ export function collectComposerCustomization(
         }
       }
     }
+
     requireUniqueId(kind, seenIds, id);
+
     return {
       id,
       ...(scopes !== undefined
@@ -414,6 +504,7 @@ export function collectComposerCustomization(
     };
   } catch (error) {
     onRejected(error instanceof Error ? error.message : String(error));
+
     return null;
   }
 }

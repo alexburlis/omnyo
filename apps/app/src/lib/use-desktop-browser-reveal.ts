@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { BbDesktopBrowserRevealRequest } from "@bb/desktop-contract";
-import { getDesktopBrowserApi } from "./bb-desktop";
+import type { OmnyoDesktopBrowserRevealRequest } from "@omnyo/desktop-contract";
+import { getDesktopBrowserApi } from "./omnyo-desktop";
 
 export function useDesktopBrowserReveal({
   threadId,
@@ -13,15 +13,16 @@ export function useDesktopBrowserReveal({
   browserTabs: readonly { id: string }[];
   activateTab: (tabId: string) => void;
 }) {
-  const [pending, setPending] = useState<BbDesktopBrowserRevealRequest | null>(
-    null,
-  );
+  const [pending, setPending] =
+    useState<OmnyoDesktopBrowserRevealRequest | null>(null);
 
   useEffect(() => {
     if (!isFocused) return;
+
     const unsubscribe = getDesktopBrowserApi()?.onReveal?.((request) => {
       if (request.threadId === threadId) setPending(request);
     });
+
     return () => {
       unsubscribe?.();
       setPending(null);

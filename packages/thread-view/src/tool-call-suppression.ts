@@ -1,10 +1,12 @@
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 
 export function shouldSuppressLowValueToolCall(decoded: ThreadEvent): boolean {
   if (decoded.type !== "item/started" && decoded.type !== "item/completed") {
     return false;
   }
+
   const item = decoded.item;
+
   switch (item.type) {
     case "toolCall":
     case "fileRead":
@@ -16,6 +18,7 @@ export function shouldSuppressLowValueToolCall(decoded: ThreadEvent): boolean {
       if (item.presentation?.suppress !== true) {
         return false;
       }
+
       return item.status === "pending" || item.status === "completed";
     default:
       return false;

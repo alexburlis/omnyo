@@ -13,7 +13,7 @@ import { dirname, join, resolve } from "node:path";
 import {
   createFakePluginHost,
   makeThreadResponse,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import { describe, expect, it, vi } from "vitest";
 
 import { createStore } from "../api";
@@ -22,6 +22,7 @@ import { registerTasksCli } from "./index";
 
 vi.mock("../attachments", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../attachments")>();
+
   const saveAttachmentFromBytes: typeof actual.saveAttachmentFromBytes = async (
     store,
     bytes,
@@ -30,8 +31,10 @@ vi.mock("../attachments", async (importOriginal) => {
     if (options.fileName === "boom.bin") {
       throw new Error("simulated blob write failure");
     }
+
     return actual.saveAttachmentFromBytes(store, bytes, options);
   };
+
   return { ...actual, saveAttachmentFromBytes };
 });
 
@@ -39,14 +42,18 @@ function localFilesSdk() {
   return {
     read: async ({ path }: { path: string }) => {
       const stats = await stat(path).catch(() => null);
+
       if (!stats?.isFile()) throw new Error(`Path does not exist: ${path}`);
+
       if (stats.size > 25 * 1024 * 1024) {
         throw new Error(
           `File size ${stats.size} bytes exceeds the 25 MB limit`,
         );
       }
+
       const contents = await readFile(path);
       const contentEncoding = isUtf8(contents) ? "utf8" : "base64";
+
       return {
         path,
         content: contents.toString(contentEncoding),
@@ -67,6 +74,7 @@ function localFilesSdk() {
     }) => {
       if (createParents) await mkdir(dirname(path), { recursive: true });
       await writeFile(path, Buffer.from(content, contentEncoding ?? "utf8"));
+
       return { outcome: "written", path };
     },
   };
@@ -78,16 +86,17 @@ function stdout(result: {
   stderr: string;
 }): string {
   expect(result, result.stderr).toMatchObject({ exitCode: 0, stderr: "" });
+
   return result.stdout;
 }
 
-describe("bb tasks CLI", () => {
+describe("omnyo tasks CLI", () => {
   it("lists seed-demo in help while retaining the explicit confirmation guard", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
 
     expect(stdout(await harness.runCli(["--help"]))).toContain(
-      "bb tasks seed-demo          Create sample folders, projects, labels, tasks, and comments",
+      "omnyo tasks seed-demo          Create sample folders, projects, labels, tasks, and comments",
     );
     await expect(harness.runCli(["seed-demo"])).resolves.toMatchObject({
       exitCode: 1,
@@ -101,7 +110,7 @@ describe("bb tasks CLI", () => {
   });
 
   it("runs create, list, show, update, and comment through case-insensitive key addressing", async () => {
-    const { bb, harness } = createFakePluginHost({
+    const { api, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: {
         threads: {
@@ -119,7 +128,8 @@ describe("bb tasks CLI", () => {
         },
       },
     });
-    await plugin(bb);
+
+    await plugin(api);
 
     const projectResult = await harness.runCli([
       "project",
@@ -130,6 +140,7 @@ describe("bb tasks CLI", () => {
       "CLI",
       "--json",
     ]);
+
     const projectPayload = JSON.parse(stdout(projectResult));
     expect(projectPayload).toMatchObject({
       project: { name: "CLI Project", prefix: "CLI" },
@@ -144,6 +155,7 @@ describe("bb tasks CLI", () => {
       "Backend",
       "--json",
     ]);
+
     expect(JSON.parse(stdout(labelResult))).toMatchObject({
       label: { name: "Backend", projectId: projectPayload.project.id },
     });
@@ -162,6 +174,7 @@ describe("bb tasks CLI", () => {
       "Backend",
       "--json",
     ]);
+
     const createPayload = JSON.parse(stdout(createResult));
     expect(createPayload).toMatchObject({
       task: {
@@ -202,6 +215,7 @@ describe("bb tasks CLI", () => {
       "2026-07-20",
       "--json",
     ]);
+
     expect(JSON.parse(stdout(updateResult))).toMatchObject({
       task: {
         id: createPayload.task.id,
@@ -213,8 +227,9 @@ describe("bb tasks CLI", () => {
 
     const commentResult = await harness.runCli(
       ["comment", "CLI-1", "--body", "Ready for review.", "--json"],
-      { threadId: "thr_cli_worker", projectId: "proj_bb" },
+      { threadId: "thr_cli_worker", projectId: "proj_omnyo" },
     );
+
     expect(JSON.parse(stdout(commentResult))).toMatchObject({
       comment: {
         taskId: createPayload.task.id,
@@ -229,6 +244,7 @@ describe("bb tasks CLI", () => {
     const updatedShow = JSON.parse(
       stdout(await harness.runCli(["show", createPayload.task.id, "--json"])),
     );
+
     expect(updatedShow.comments).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -257,12 +273,15 @@ describe("bb tasks CLI", () => {
     const updatedShowTable = stdout(
       await harness.runCli(["show", createPayload.task.id]),
     );
+
     expect(updatedShowTable).toContain(
       "TIME                      KIND    AUTHOR               PROVIDER  BODY",
     );
+
     const agentRow = updatedShowTable
       .split("\n")
       .find((line) => line.includes("Ready for review."));
+
     expect(agentRow).toContain("agent");
     expect(agentRow).toContain("CLI provider worker");
     expect(agentRow).toContain("Codex");
@@ -271,8 +290,8 @@ describe("bb tasks CLI", () => {
   });
 
   it("moves a task to another project and still resolves its old key", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
 
     for (const [name, prefix] of [
       ["Operations", "OPS"],
@@ -289,6 +308,7 @@ describe("bb tasks CLI", () => {
         ]),
       );
     }
+
     stdout(
       await harness.runCli(["create", "--project", "OPS", "--title", "Wander"]),
     );
@@ -317,8 +337,8 @@ describe("bb tasks CLI", () => {
   });
 
   it("assigns and promotes task parents by key or ID with stable JSON output", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
 
     stdout(
       await harness.runCli([
@@ -330,6 +350,7 @@ describe("bb tasks CLI", () => {
         "HIER",
       ]),
     );
+
     const parent = JSON.parse(
       stdout(
         await harness.runCli([
@@ -342,6 +363,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     ).task;
+
     const child = JSON.parse(
       stdout(
         await harness.runCli([
@@ -366,6 +388,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     );
+
     expect(assignedByKey).toEqual({
       task: expect.objectContaining({
         id: child.id,
@@ -378,6 +401,7 @@ describe("bb tasks CLI", () => {
         await harness.runCli(["update", child.id, "--no-parent", "--json"]),
       ),
     );
+
     expect(promoted).toEqual({
       task: expect.objectContaining({
         id: child.id,
@@ -396,6 +420,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     );
+
     expect(assignedById).toEqual({
       task: expect.objectContaining({
         id: child.id,
@@ -407,8 +432,8 @@ describe("bb tasks CLI", () => {
   });
 
   it("rejects conflicting or invalid parent updates without mutation", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
 
     for (const project of [
       { name: "Relationships", prefix: "REL" },
@@ -425,6 +450,7 @@ describe("bb tasks CLI", () => {
         ]),
       );
     }
+
     const taskInputs: Array<{
       project: string;
       title: string;
@@ -436,6 +462,7 @@ describe("bb tasks CLI", () => {
       { project: "REL", title: "Movable child", parent: "REL-3" },
       { project: "OTH", title: "Other root" },
     ];
+
     for (const taskInput of taskInputs) {
       stdout(
         await harness.runCli([
@@ -456,12 +483,13 @@ describe("bb tasks CLI", () => {
       "REL-1",
       "--no-parent",
     ]);
+
     expect(conflicting).toMatchObject({ exitCode: 1, stdout: "" });
     expect(conflicting.stderr).toContain(
       "--parent and --no-parent cannot be combined",
     );
     expect(conflicting.stderr).toContain(
-      "Usage:\n  bb tasks update <key-or-id>",
+      "Usage:\n  omnyo tasks update <key-or-id>",
     );
     await expect(harness.runCli(["update", "REL-3"])).resolves.toEqual({
       exitCode: 1,
@@ -500,6 +528,7 @@ describe("bb tasks CLI", () => {
     const unchanged = JSON.parse(
       stdout(await harness.runCli(["show", "REL-3", "--json"])),
     );
+
     expect(unchanged.task).toMatchObject({
       key: "REL-3",
       parentTaskId: null,
@@ -515,8 +544,8 @@ describe("bb tasks CLI", () => {
   });
 
   it("sorts list output by priority or due date and rejects unknown sorts", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
 
     stdout(
       await harness.runCli([
@@ -529,6 +558,7 @@ describe("bb tasks CLI", () => {
         "--json",
       ]),
     );
+
     const seed = [
       { title: "No priority", args: [] },
       {
@@ -541,6 +571,7 @@ describe("bb tasks CLI", () => {
       },
       { title: "Urgent undated", args: ["--priority", "urgent"] },
     ];
+
     for (const task of seed) {
       stdout(
         await harness.runCli([
@@ -567,6 +598,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     );
+
     expect(
       byPriority.tasks.map((task: { title: string }) => task.title),
     ).toEqual(["Urgent undated", "High soon", "High later", "No priority"]);
@@ -583,6 +615,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     );
+
     expect(byDue.tasks.map((task: { title: string }) => task.title)).toEqual([
       "High soon",
       "High later",
@@ -604,6 +637,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     );
+
     expect(
       commaFiltered.tasks.map((task: { title: string }) => task.title).sort(),
     ).toEqual(["High later", "High soon", "Urgent undated"]);
@@ -618,14 +652,16 @@ describe("bb tasks CLI", () => {
   });
 
   it("traverses a project whose former single JSON response exceeds 64 KiB", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
-    const store = createStore(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
+    const store = createStore(api);
+
     const project = store.tasks.createProject({
       name: "Large project",
       prefix: "BIG",
       color: "blue",
     });
+
     for (let index = 0; index < 180; index += 1) {
       store.tasks.createTask({
         projectId: project.id,
@@ -635,6 +671,7 @@ describe("bb tasks CLI", () => {
         priority: index % 3 === 0 ? "high" : "none",
       });
     }
+
     expect(
       Buffer.byteLength(
         JSON.stringify({
@@ -647,6 +684,7 @@ describe("bb tasks CLI", () => {
     const seen = new Set<string>();
     let cursor: string | null = null;
     let pageCount = 0;
+
     do {
       const result = await harness.runCli([
         "list",
@@ -659,17 +697,21 @@ describe("bb tasks CLI", () => {
         ...(cursor === null ? [] : ["--cursor", cursor]),
         "--json",
       ]);
+
       const page = JSON.parse(stdout(result)) as {
         tasks: Array<{ id: string }>;
         nextCursor: string | null;
         limit: number;
       };
+
       expect(page.limit).toBe(37);
       expect(page.tasks.length).toBeLessThanOrEqual(37);
+
       for (const task of page.tasks) {
         expect(seen.has(task.id)).toBe(false);
         seen.add(task.id);
       }
+
       cursor = page.nextCursor;
       pageCount += 1;
     } while (cursor !== null);
@@ -680,6 +722,7 @@ describe("bb tasks CLI", () => {
     const human = stdout(
       await harness.runCli(["list", "--project", "BIG", "--limit", "2"]),
     );
+
     expect(human).toContain("More results are available.");
     expect(human).toContain("--limit 2 --cursor ");
 
@@ -690,6 +733,7 @@ describe("bb tasks CLI", () => {
       "--limit",
       "501",
     ]);
+
     expect(invalidLimit.exitCode).toBe(1);
     expect(invalidLimit.stderr).toContain(
       "invalid value '501' for --limit. Expected an integer between 1 and 500",
@@ -699,8 +743,8 @@ describe("bb tasks CLI", () => {
   });
 
   it("defaults create and list to the tracker project linked to CLI project context", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
     const context = { projectId: "proj_linked" };
 
     stdout(
@@ -711,10 +755,11 @@ describe("bb tasks CLI", () => {
         "Linked",
         "--prefix",
         "LINK",
-        "--link-bb-project",
+        "--link-omnyo-project",
         context.projectId,
       ]),
     );
+
     const task = JSON.parse(
       stdout(
         await harness.runCli(
@@ -723,6 +768,7 @@ describe("bb tasks CLI", () => {
         ),
       ),
     ).task;
+
     expect(task).toMatchObject({
       key: "LINK-1",
       title: "Uses project context",
@@ -731,6 +777,7 @@ describe("bb tasks CLI", () => {
     const listed = JSON.parse(
       stdout(await harness.runCli(["list", "--json"], context)),
     );
+
     expect(listed.tasks).toEqual([
       expect.objectContaining({ id: task.id, agentsWorking: 0 }),
     ]);
@@ -738,19 +785,20 @@ describe("bb tasks CLI", () => {
     const missing = await harness.runCli(["create", "--title", "No link"], {
       projectId: "proj_missing",
     });
+
     expect(missing).toMatchObject({
       exitCode: 1,
       stdout: "",
       stderr:
-        "no tracker project is linked to BB project proj_missing; pass --project or link one with bb tasks project update\n",
+        "no tracker project is linked to Omnyo project proj_missing; pass --project or link one with omnyo tasks project update\n",
     });
 
     await harness.dispose();
   });
 
   it("returns single-line friendly errors for invalid statuses and unknown keys", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
     stdout(
       await harness.runCli([
         "project",
@@ -777,6 +825,7 @@ describe("bb tasks CLI", () => {
       "--status",
       "almost-done",
     ]);
+
     expect(invalidStatus).toMatchObject({ exitCode: 1, stdout: "" });
     expect(invalidStatus.stderr).toContain(
       "invalid value 'almost-done' for --status. Expected one of: backlog, todo, in_progress, in_review, done, canceled",
@@ -788,6 +837,7 @@ describe("bb tasks CLI", () => {
       "--due",
       "2026-02-31",
     ]);
+
     expect(invalidDueDate).toMatchObject({ exitCode: 1, stdout: "" });
     expect(invalidDueDate.stderr).toContain(
       "must be a valid calendar date in YYYY-MM-DD format",
@@ -804,8 +854,8 @@ describe("bb tasks CLI", () => {
   });
 
   it("validates combined project and folder updates before mutating", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
     stdout(
       await harness.runCli([
         "project",
@@ -826,15 +876,16 @@ describe("bb tasks CLI", () => {
       "ATOM",
       "--rename-prefix",
       "NEXT",
-      "--link-bb-project",
+      "--link-omnyo-project",
       "not-a-project-id",
     ]);
+
     expect(invalidProjectUpdate).toMatchObject({ exitCode: 1, stdout: "" });
     expect(
       JSON.parse(
         stdout(await harness.runCli(["project", "show", "ATOM", "--json"])),
       ).project,
-    ).toMatchObject({ prefix: "ATOM", linkedBbProjectId: null });
+    ).toMatchObject({ prefix: "ATOM", linkedAppProjectId: null });
 
     await expect(
       harness.runCli([
@@ -850,9 +901,11 @@ describe("bb tasks CLI", () => {
       exitCode: 1,
       stderr: "folder not found: Missing parent\n",
     });
+
     const folders = JSON.parse(
       stdout(await harness.runCli(["folder", "list", "--json"])),
     ).folders;
+
     expect(folders).toEqual([
       expect.objectContaining({
         name: "Original folder",
@@ -864,8 +917,9 @@ describe("bb tasks CLI", () => {
   });
 
   it("deletes a folder by name or id and unfiles its projects and subfolders", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
+
     const parent = JSON.parse(
       stdout(
         await harness.runCli([
@@ -877,6 +931,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     ).folder;
+
     const child = JSON.parse(
       stdout(
         await harness.runCli([
@@ -890,6 +945,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     ).folder;
+
     const project = JSON.parse(
       stdout(
         await harness.runCli([
@@ -905,6 +961,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     ).project;
+
     const task = JSON.parse(
       stdout(
         await harness.runCli([
@@ -933,6 +990,7 @@ describe("bb tasks CLI", () => {
     const deleted = JSON.parse(
       stdout(await harness.runCli(["folder", "delete", "parent", "--json"])),
     );
+
     expect(deleted).toMatchObject({
       deleted: true,
       folder: { id: parent.id, name: "Parent" },
@@ -970,19 +1028,22 @@ describe("bb tasks CLI", () => {
   });
 
   it("fails folder delete when another client removed the folder first", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    const store = createStore(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    const store = createStore(api);
+
     const racingStore = {
       ...store,
       tasks: {
         ...store.tasks,
         deleteFolder(id: string) {
           store.tasks.deleteFolder(id);
+
           return store.tasks.deleteFolder(id);
         },
       },
     };
-    registerTasksCli(bb, racingStore, { name: "tasks", version: "test" });
+
+    registerTasksCli(api, racingStore, { name: "tasks", version: "test" });
     const folder = store.tasks.createFolder({ name: "Racing" });
 
     const plain = await harness.runCli(["folder", "delete", "Racing"]);
@@ -991,12 +1052,14 @@ describe("bb tasks CLI", () => {
     expect(plain.stderr).toContain("folder not found: Racing");
 
     store.tasks.createFolder({ name: "Racing" });
+
     const asJson = await harness.runCli([
       "folder",
       "delete",
       "Racing",
       "--json",
     ]);
+
     expect(asJson.exitCode).toBe(1);
     expect(JSON.parse(asJson.stdout)).toEqual({
       ok: false,
@@ -1012,7 +1075,7 @@ describe("bb tasks CLI", () => {
   });
 
   it("creates, updates, lists, and deletes delegation presets", async () => {
-    const { bb, harness } = createFakePluginHost({
+    const { api, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: {
         hosts: {
@@ -1023,7 +1086,8 @@ describe("bb tasks CLI", () => {
         },
       },
     });
-    await plugin(bb);
+
+    await plugin(api);
 
     const created = JSON.parse(
       stdout(
@@ -1054,6 +1118,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     ).preset;
+
     expect(created).toMatchObject({
       name: "CLI worker",
       providerId: "codex",
@@ -1066,9 +1131,11 @@ describe("bb tasks CLI", () => {
       machineId: "host_air",
       builtin: false,
     });
+
     const shown = stdout(
       await harness.runCli(["preset", "show", "CLI worker"]),
     );
+
     expect(shown).toContain("Environment   worktree");
     expect(shown).toContain("Base branch   main");
     expect(shown).toContain("Machine       host_air");
@@ -1091,6 +1158,7 @@ describe("bb tasks CLI", () => {
         ]),
       ),
     ).preset;
+
     expect(updated).toMatchObject({
       id: created.id,
       name: "CLI reviewer",
@@ -1110,6 +1178,7 @@ describe("bb tasks CLI", () => {
     const listed = JSON.parse(
       stdout(await harness.runCli(["preset", "list", "--json"])),
     ).presets;
+
     expect(listed).toEqual([
       expect.objectContaining({ id: created.id, name: "CLI reviewer" }),
     ]);
@@ -1126,8 +1195,9 @@ describe("bb tasks CLI", () => {
   });
 
   it("reports friendly preset target validation errors", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
+
     const required = [
       "preset",
       "create",
@@ -1148,6 +1218,7 @@ describe("bb tasks CLI", () => {
       "--environment",
       "branch",
     ]);
+
     expect(invalidEnvironment.exitCode).toBe(1);
     expect(invalidEnvironment.stderr).toContain(
       "invalid value 'branch' for --environment. Expected one of: project-default, worktree",
@@ -1168,8 +1239,8 @@ describe("bb tasks CLI", () => {
     await harness.dispose();
   });
 
-  it("self-attaches through BB_THREAD_ID and lists the live thread status", async () => {
-    const { bb, harness } = createFakePluginHost({
+  it("self-attaches through OMNYO_THREAD_ID and lists the live thread status", async () => {
+    const { api, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: {
         threads: {
@@ -1183,7 +1254,8 @@ describe("bb tasks CLI", () => {
         },
       },
     });
-    await plugin(bb);
+
+    await plugin(api);
     stdout(
       await harness.runCli([
         "project",
@@ -1204,20 +1276,22 @@ describe("bb tasks CLI", () => {
       ]),
     );
 
-    const previousThreadId = process.env.BB_THREAD_ID;
-    process.env.BB_THREAD_ID = "thr_cli_self";
+    const previousThreadId = process.env.OMNYO_THREAD_ID;
+    process.env.OMNYO_THREAD_ID = "thr_cli_self";
+
     try {
       expect(
         JSON.parse(stdout(await harness.runCli(["attach", "ATT-1", "--json"]))),
       ).toMatchObject({ task: { key: "ATT-1" }, threadId: "thr_cli_self" });
     } finally {
-      if (previousThreadId === undefined) delete process.env.BB_THREAD_ID;
-      else process.env.BB_THREAD_ID = previousThreadId;
+      if (previousThreadId === undefined) delete process.env.OMNYO_THREAD_ID;
+      else process.env.OMNYO_THREAD_ID = previousThreadId;
     }
 
     const threads = JSON.parse(
       stdout(await harness.runCli(["threads", "ATT-1", "--json"])),
     );
+
     expect(threads.taskThreads).toEqual([
       expect.objectContaining({
         threadId: "thr_cli_self",
@@ -1225,7 +1299,7 @@ describe("bb tasks CLI", () => {
         presetName: "Attached",
       }),
     ]);
-    const taskStore = createStore(bb).tasks;
+    const taskStore = createStore(api).tasks;
     taskStore.createComment({
       taskId: threads.task.id,
       kind: "agent",
@@ -1247,10 +1321,11 @@ describe("bb tasks CLI", () => {
             "--notify",
             "--json",
           ],
-          { threadId: "thr_cli_sender", projectId: "proj_bb" },
+          { threadId: "thr_cli_sender", projectId: "proj_omnyo" },
         ),
       ),
     ).comment;
+
     expect(notified).toMatchObject({
       taskId: threads.task.id,
       kind: "agent",
@@ -1277,8 +1352,8 @@ describe("bb tasks CLI", () => {
     await harness.dispose();
   });
 
-  it("detaches a thread with `bb tasks detach` and lists live threads first", async () => {
-    const { bb, harness } = createFakePluginHost({
+  it("detaches a thread with `omnyo tasks detach` and lists live threads first", async () => {
+    const { api, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: {
         threads: {
@@ -1292,7 +1367,8 @@ describe("bb tasks CLI", () => {
         },
       },
     });
-    await plugin(bb);
+
+    await plugin(api);
     stdout(
       await harness.runCli([
         "project",
@@ -1308,7 +1384,7 @@ describe("bb tasks CLI", () => {
     );
 
     expect(stdout(await harness.runCli(["--help"]))).toContain(
-      "bb tasks detach             Detach an agent thread from a task",
+      "omnyo tasks detach             Detach an agent thread from a task",
     );
 
     stdout(
@@ -1317,9 +1393,11 @@ describe("bb tasks CLI", () => {
     stdout(
       await harness.runCli(["attach", "DET-1", "--thread", "thr_live_worker"]),
     );
+
     const listed = JSON.parse(
       stdout(await harness.runCli(["threads", "DET-1", "--json"])),
     );
+
     expect(
       listed.taskThreads.map((thread: { threadId: string }) => thread.threadId),
     ).toEqual(["thr_live_worker", "thr_dead_worker"]);
@@ -1341,21 +1419,23 @@ describe("bb tasks CLI", () => {
       stderr: "Thread thr_dead_worker is not attached to DET-1\n",
     });
 
-    const previousThreadId = process.env.BB_THREAD_ID;
-    process.env.BB_THREAD_ID = "thr_live_worker";
+    const previousThreadId = process.env.OMNYO_THREAD_ID;
+    process.env.OMNYO_THREAD_ID = "thr_live_worker";
+
     try {
       expect(
         JSON.parse(stdout(await harness.runCli(["detach", "DET-1", "--json"]))),
       ).toMatchObject({ task: { key: "DET-1" }, threadId: "thr_live_worker" });
-      delete process.env.BB_THREAD_ID;
+      delete process.env.OMNYO_THREAD_ID;
       await expect(harness.runCli(["detach", "DET-1"])).resolves.toMatchObject({
         exitCode: 1,
-        stderr: "missing --thread and BB_THREAD_ID is not set\n",
+        stderr: "missing --thread and OMNYO_THREAD_ID is not set\n",
       });
     } finally {
-      if (previousThreadId === undefined) delete process.env.BB_THREAD_ID;
-      else process.env.BB_THREAD_ID = previousThreadId;
+      if (previousThreadId === undefined) delete process.env.OMNYO_THREAD_ID;
+      else process.env.OMNYO_THREAD_ID = previousThreadId;
     }
+
     expect(
       JSON.parse(stdout(await harness.runCli(["threads", "DET-1", "--json"])))
         .taskThreads,
@@ -1365,7 +1445,7 @@ describe("bb tasks CLI", () => {
   });
 
   it("creates a task with --attach files after validating every source path", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bb-tasks-cli-"));
+    const directory = await mkdtemp(join(tmpdir(), "omnyo-tasks-cli-"));
     const notesPath = join(directory, "notes.txt");
     const pngPath = join(directory, "pixel.png");
     await writeFile(notesPath, "attach me at create\n", "utf8");
@@ -1373,11 +1453,13 @@ describe("bb tasks CLI", () => {
       pngPath,
       new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     );
-    const { bb, harness } = createFakePluginHost({
+
+    const { api, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: { files: localFilesSdk() },
     });
-    await plugin(bb);
+
+    await plugin(api);
 
     try {
       stdout(
@@ -1400,12 +1482,14 @@ describe("bb tasks CLI", () => {
         "--attach",
         join(directory, "missing.bin"),
       ]);
+
       expect(missing.exitCode).toBe(1);
       expect(missing.stderr).toContain("attachment source is not a file");
 
       const hugePath = join(directory, "huge.bin");
       await writeFile(hugePath, "");
       await truncate(hugePath, 25 * 1024 * 1024 + 1);
+
       const oversized = await harness.runCli([
         "create",
         "--project",
@@ -1415,6 +1499,7 @@ describe("bb tasks CLI", () => {
         "--attach",
         hugePath,
       ]);
+
       expect(oversized.exitCode).toBe(1);
       expect(oversized.stderr).toContain("exceeds the 25 MB limit");
 
@@ -1440,6 +1525,7 @@ describe("bb tasks CLI", () => {
           ]),
         ),
       );
+
       expect(created.task).toMatchObject({ key: "ATT-1" });
       expect(created.failedAttachments).toEqual([]);
       expect(created.attachments).toEqual([
@@ -1476,18 +1562,20 @@ describe("bb tasks CLI", () => {
   });
 
   it("attempts every --attach file after create and reports failures truthfully", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bb-tasks-cli-"));
+    const directory = await mkdtemp(join(tmpdir(), "omnyo-tasks-cli-"));
     const firstPath = join(directory, "first.txt");
     const boomPath = join(directory, "boom.bin");
     const lastPath = join(directory, "last.txt");
     await writeFile(firstPath, "first", "utf8");
     await writeFile(boomPath, "will fail at blob write", "utf8");
     await writeFile(lastPath, "last", "utf8");
-    const { bb, harness } = createFakePluginHost({
+
+    const { api, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: { files: localFilesSdk() },
     });
-    await plugin(bb);
+
+    await plugin(api);
 
     try {
       stdout(
@@ -1515,6 +1603,7 @@ describe("bb tasks CLI", () => {
         lastPath,
         "--json",
       ]);
+
       expect(mixed.exitCode).toBe(1);
       expect(mixed.stderr).toContain("1 of 3 attachments failed");
       const payload = JSON.parse(mixed.stdout);
@@ -1527,9 +1616,11 @@ describe("bb tasks CLI", () => {
       expect(payload.failedAttachments).toEqual([
         { path: boomPath, error: "simulated blob write failure" },
       ]);
+
       const listed = JSON.parse(
         stdout(await harness.runCli(["attachment", "list", "MIX-1", "--json"])),
       );
+
       expect(listed.attachments).toHaveLength(2);
 
       const human = await harness.runCli([
@@ -1543,6 +1634,7 @@ describe("bb tasks CLI", () => {
         "--attach",
         boomPath,
       ]);
+
       expect(human.exitCode).toBe(1);
       expect(human.stdout).toContain("Created MIX-2");
       expect(human.stdout).toContain("Attached first.txt");
@@ -1550,7 +1642,7 @@ describe("bb tasks CLI", () => {
         `Failed to attach ${boomPath}: simulated blob write failure`,
       );
       expect(human.stdout).toContain(
-        `Retry with: bb tasks attachment add MIX-2 --file ${boomPath}`,
+        `Retry with: omnyo tasks attachment add MIX-2 --file ${boomPath}`,
       );
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -1559,7 +1651,7 @@ describe("bb tasks CLI", () => {
   });
 
   it("shows attached-thread pull requests in show output and JSON", async () => {
-    const { bb, harness } = createFakePluginHost({
+    const { api, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: {
         threads: {
@@ -1584,11 +1676,11 @@ describe("bb tasks CLI", () => {
                   outcome: "available",
                   pullRequest: {
                     number: 12,
-                    title: "BB-15 Show PRs in tasks",
+                    title: "OMNYO-15 Show PRs in tasks",
                     state: "draft",
-                    url: "https://github.com/acme/bb/pull/12",
+                    url: "https://github.com/acme/omnyo/pull/12",
                     baseRefName: "main",
-                    headRefName: "bb/bb-15",
+                    headRefName: "omnyo/omnyo-15",
                     updatedAt: "2026-07-16T10:00:00.000Z",
                     checks: {
                       state: "pending",
@@ -1609,7 +1701,8 @@ describe("bb tasks CLI", () => {
         },
       },
     });
-    await plugin(bb);
+
+    await plugin(api);
     stdout(
       await harness.runCli([
         "project",
@@ -1641,18 +1734,19 @@ describe("bb tasks CLI", () => {
 
     const shown = stdout(await harness.runCli(["show", "PRS-1"]));
     expect(shown).toContain("Pull requests");
-    expect(shown).toContain("#12  draft  BB-15 Show PRs in tasks");
-    expect(shown).toContain("https://github.com/acme/bb/pull/12");
+    expect(shown).toContain("#12  draft  OMNYO-15 Show PRs in tasks");
+    expect(shown).toContain("https://github.com/acme/omnyo/pull/12");
     expect(shown).not.toContain("PR lookup unavailable");
 
     const payload = JSON.parse(
       stdout(await harness.runCli(["show", "PRS-1", "--json"])),
     );
+
     expect(payload.pullRequests).toEqual([
       {
-        url: "https://github.com/acme/bb/pull/12",
+        url: "https://github.com/acme/omnyo/pull/12",
         number: 12,
-        title: "BB-15 Show PRs in tasks",
+        title: "OMNYO-15 Show PRs in tasks",
         state: "draft",
         updatedAt: "2026-07-16T10:00:00.000Z",
         threadIds: ["thr_pr_worker"],
@@ -1664,7 +1758,7 @@ describe("bb tasks CLI", () => {
   });
 
   it("flags threads whose PR lookup failed in show output", async () => {
-    const { bb, harness } = createFakePluginHost({
+    const { api, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: {
         threads: {
@@ -1684,7 +1778,8 @@ describe("bb tasks CLI", () => {
         },
       },
     });
-    await plugin(bb);
+
+    await plugin(api);
     stdout(
       await harness.runCli([
         "project",
@@ -1715,7 +1810,7 @@ describe("bb tasks CLI", () => {
   });
 
   it("adds and downloads an attachment with an exact file round-trip", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bb-tasks-cli-"));
+    const directory = await mkdtemp(join(tmpdir(), "omnyo-tasks-cli-"));
     const inputPath = join(directory, "input.txt");
     const pngPath = join(directory, "pixel.png");
     const outputPath = join(directory, "nested", "output.txt");
@@ -1724,11 +1819,13 @@ describe("bb tasks CLI", () => {
       pngPath,
       new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     );
-    const { bb, harness } = createFakePluginHost({
+
+    const { api, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: { files: localFilesSdk() },
     });
-    await plugin(bb);
+
+    await plugin(api);
 
     try {
       stdout(
@@ -1765,6 +1862,7 @@ describe("bb tasks CLI", () => {
           ]),
         ),
       ).attachment;
+
       expect(attachment).toMatchObject({
         fileName: "renamed.txt",
         mime: "application/octet-stream",
@@ -1773,6 +1871,7 @@ describe("bb tasks CLI", () => {
       });
 
       const signalsBeforePng = harness.realtimeSignals.length;
+
       const pngAttachment = JSON.parse(
         stdout(
           await harness.runCli([
@@ -1785,6 +1884,7 @@ describe("bb tasks CLI", () => {
           ]),
         ),
       ).attachment;
+
       expect(pngAttachment).toMatchObject({
         fileName: "pixel.png",
         mime: "image/png",
@@ -1810,11 +1910,13 @@ describe("bb tasks CLI", () => {
         ]),
       );
       const signalsBeforeReferencedRemove = harness.realtimeSignals.length;
+
       const referencedRemove = await harness.runCli([
         "attachment",
         "remove",
         pngAttachment.id,
       ]);
+
       expect(referencedRemove.exitCode).toBe(1);
       expect(referencedRemove.stderr).toContain(
         "is used in the task description",
@@ -1828,6 +1930,7 @@ describe("bb tasks CLI", () => {
           await harness.runCli(["attachment", "list", "FILE-1", "--json"]),
         ),
       );
+
       expect(listed.attachments).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: attachment.id }),
@@ -1846,6 +1949,7 @@ describe("bb tasks CLI", () => {
           ]),
         ),
       ).comment;
+
       const commentAttachment = JSON.parse(
         stdout(
           await harness.runCli([
@@ -1858,15 +1962,18 @@ describe("bb tasks CLI", () => {
           ]),
         ),
       ).attachment;
+
       expect(commentAttachment).toMatchObject({
         taskId: null,
         commentId: comment.id,
       });
+
       const listedWithCommentAttachment = JSON.parse(
         stdout(
           await harness.runCli(["attachment", "list", "FILE-1", "--json"]),
         ),
       );
+
       expect(listedWithCommentAttachment.attachments).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: attachment.id }),
@@ -1897,15 +2004,18 @@ describe("bb tasks CLI", () => {
           ]),
         ),
       );
+
       expect(removed).toMatchObject({
         deleted: true,
         attachment: { id: attachment.id },
       });
+
       const afterRemove = JSON.parse(
         stdout(
           await harness.runCli(["attachment", "list", "FILE-1", "--json"]),
         ),
       );
+
       expect(
         afterRemove.attachments.map((entry: { id: string }) => entry.id),
       ).not.toContain(attachment.id);
@@ -1915,6 +2025,7 @@ describe("bb tasks CLI", () => {
         "remove",
         attachment.id,
       ]);
+
       expect(removeMissing.exitCode).toBe(1);
       expect(removeMissing.stderr).toContain("attachment not found");
 
@@ -1929,13 +2040,16 @@ describe("bb tasks CLI", () => {
           ]),
         ),
       );
+
       expect(removedReferenced).toMatchObject({
         deleted: true,
         attachment: { id: pngAttachment.id },
       });
+
       const shownAfterReferencedRemove = JSON.parse(
         stdout(await harness.runCli(["show", "FILE-1", "--json"])),
       );
+
       expect(shownAfterReferencedRemove.task.description).not.toContain(
         pngAttachment.id,
       );
@@ -1947,6 +2061,7 @@ describe("bb tasks CLI", () => {
 
   it("routes file flags to the invoking thread's machine and honors --machine", async () => {
     const remoteDir = resolve("/remote");
+
     const remoteFiles = new Map<string, Buffer>([
       [
         join(remoteDir, "notes.md"),
@@ -1957,7 +2072,8 @@ describe("bb tasks CLI", () => {
         Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
       ],
     ]);
-    const { bb, harness } = createFakePluginHost({
+
+    const { api, harness } = createFakePluginHost({
       pluginId: "tasks",
       sdk: {
         threads: {
@@ -1973,8 +2089,10 @@ describe("bb tasks CLI", () => {
         files: {
           read: async ({ path }: { path: string }) => {
             const contents = remoteFiles.get(path);
+
             if (!contents) throw new Error(`Path does not exist: ${path}`);
             const contentEncoding = isUtf8(contents) ? "utf8" : "base64";
+
             return {
               path,
               content: contents.toString(contentEncoding),
@@ -1992,12 +2110,14 @@ describe("bb tasks CLI", () => {
             contentEncoding?: "utf8" | "base64";
           }) => {
             remoteFiles.set(path, Buffer.from(content, contentEncoding));
+
             return { outcome: "written", path };
           },
         },
       },
     });
-    await plugin(bb);
+
+    await plugin(api);
     const threadCtx = { threadId: "thr_remote_worker", cwd: remoteDir };
 
     stdout(
@@ -2010,6 +2130,7 @@ describe("bb tasks CLI", () => {
         "REM",
       ]),
     );
+
     const created = JSON.parse(
       stdout(
         await harness.runCli(
@@ -2029,6 +2150,7 @@ describe("bb tasks CLI", () => {
         ),
       ),
     );
+
     expect(created.task).toMatchObject({
       key: "REM-1",
       description: "remote description\n",
@@ -2036,6 +2158,7 @@ describe("bb tasks CLI", () => {
     expect(created.attachments).toEqual([
       expect.objectContaining({ fileName: "shot.png", mime: "image/png" }),
     ]);
+
     for (const [args] of harness.sdk.callsTo("files.read")) {
       expect(args).toMatchObject({ hostId: "machine-remote" });
     }
@@ -2087,8 +2210,8 @@ describe("bb tasks CLI", () => {
   });
 
   it("returns a friendly dispatch error when the task project is not linked", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
     stdout(
       await harness.runCli([
         "project",
@@ -2131,19 +2254,22 @@ describe("bb tasks CLI", () => {
       "--preset",
       "CLI worker",
     ]);
+
     expect(result).toEqual({
       exitCode: 1,
       stdout: "",
-      stderr: 'Task project "Unlinked CLI" is not linked to a bb project\n',
+      stderr: 'Task project "Unlinked CLI" is not linked to an Omnyo project\n',
     });
+
     const aliased = await harness.runCli([
       "delegate",
       "UNL-1",
       "--preset",
       "CLI worker",
     ]);
+
     expect(aliased.stderr).toBe(
-      'Task project "Unlinked CLI" is not linked to a bb project\n',
+      'Task project "Unlinked CLI" is not linked to an Omnyo project\n',
     );
     expect(harness.sdk.callsTo("threads.spawn")).toEqual([]);
 
@@ -2151,16 +2277,18 @@ describe("bb tasks CLI", () => {
   });
 
   it("prints help at every level and never runs a command for it", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
 
     const top = await harness.runCli(["--help"]);
     expect(top).toMatchObject({ exitCode: 0, stderr: "" });
-    expect(top.stdout).toContain("bb tasks list               List and filter");
+    expect(top.stdout).toContain(
+      "omnyo tasks list               List and filter",
+    );
 
     const statusHelp = stdout(await harness.runCli(["status", "--help"]));
     expect(statusHelp).toContain("Plugin health only");
-    expect(statusHelp).toContain("bb tasks list --status <status>");
+    expect(statusHelp).toContain("omnyo tasks list --status <status>");
 
     const listHelp = stdout(await harness.runCli(["list", "-h"]));
     expect(listHelp).toContain("--limit <1-500>");
@@ -2176,8 +2304,8 @@ describe("bb tasks CLI", () => {
     expect(createHelp).toContain("At most one of:");
 
     const groupHelp = stdout(await harness.runCli(["preset", "--help"]));
-    expect(groupHelp).toContain("bb tasks preset list");
-    expect(groupHelp).toContain("bb tasks preset delete");
+    expect(groupHelp).toContain("omnyo tasks preset list");
+    expect(groupHelp).toContain("omnyo tasks preset delete");
 
     for (const group of [
       "project",
@@ -2188,12 +2316,12 @@ describe("bb tasks CLI", () => {
     ]) {
       const help = await harness.runCli([group, "--help"]);
       expect(help.exitCode, group).toBe(0);
-      expect(help.stdout, group).toContain(`bb tasks ${group} `);
+      expect(help.stdout, group).toContain(`omnyo tasks ${group} `);
     }
 
     const bareGroup = await harness.runCli(["preset"]);
     expect(bareGroup.exitCode).toBe(1);
-    expect(bareGroup.stdout).toContain("bb tasks preset show");
+    expect(bareGroup.stdout).toContain("omnyo tasks preset show");
 
     const unknownSubcommand = await harness.runCli(["preset", "bogus"]);
     expect(unknownSubcommand.exitCode).toBe(1);
@@ -2208,8 +2336,8 @@ describe("bb tasks CLI", () => {
   });
 
   it("rejects unknown flags and stray arguments instead of ignoring them", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
     stdout(
       await harness.runCli([
         "project",
@@ -2225,7 +2353,7 @@ describe("bb tasks CLI", () => {
     expect(unknownOption).toMatchObject({ exitCode: 1, stdout: "" });
     expect(unknownOption.stderr).toContain("unknown option '--lim'");
     expect(unknownOption.stderr).toContain("(Did you mean --limit?)");
-    expect(unknownOption.stderr).toContain("Usage:\n  bb tasks list");
+    expect(unknownOption.stderr).toContain("Usage:\n  omnyo tasks list");
 
     const strayTitle = await harness.runCli([
       "create",
@@ -2233,6 +2361,7 @@ describe("bb tasks CLI", () => {
       "STR",
       "Ship the strict parser",
     ]);
+
     expect(strayTitle).toMatchObject({ exitCode: 1, stdout: "" });
     expect(strayTitle.stderr).toContain(
       "unexpected argument 'Ship the strict parser'",
@@ -2253,8 +2382,8 @@ describe("bb tasks CLI", () => {
   });
 
   it("reports every missing required value at once, in JSON when asked", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
 
     const missing = await harness.runCli(["preset", "create"]);
     expect(missing).toMatchObject({ exitCode: 1, stdout: "" });
@@ -2279,16 +2408,16 @@ describe("bb tasks CLI", () => {
       "missing required arguments: <key-or-id>",
     );
     expect(missingKey.stderr).toContain(
-      "Usage:\n  bb tasks attach <key-or-id>",
+      "Usage:\n  omnyo tasks attach <key-or-id>",
     );
-    expect(missingKey.stderr).not.toContain("bb tasks project create");
+    expect(missingKey.stderr).not.toContain("omnyo tasks project create");
 
     await harness.dispose();
   });
 
-  it("answers `bb tasks get` and points --project at tracker projects", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "tasks" });
-    await plugin(bb);
+  it("answers `omnyo tasks get` and points --project at tracker projects", async () => {
+    const { api, harness } = createFakePluginHost({ pluginId: "tasks" });
+    await plugin(api);
     stdout(
       await harness.runCli([
         "project",
@@ -2297,10 +2426,11 @@ describe("bb tasks CLI", () => {
         "Linked",
         "--prefix",
         "LINK",
-        "--link-bb-project",
+        "--link-omnyo-project",
         "proj_linked",
       ]),
     );
+
     const task = JSON.parse(
       stdout(
         await harness.runCli([
@@ -2319,36 +2449,39 @@ describe("bb tasks CLI", () => {
         .task,
     ).toMatchObject({ id: task.id, key: "LINK-1" });
 
-    const unknownBbProject = await harness.runCli([
+    const unknownOmnyoProject = await harness.runCli([
       "list",
       "--project",
       "proj_unknown",
     ]);
-    expect(unknownBbProject.exitCode).toBe(1);
-    expect(unknownBbProject.stderr).toContain(
+
+    expect(unknownOmnyoProject.exitCode).toBe(1);
+    expect(unknownOmnyoProject.stderr).toContain(
       "project not found: proj_unknown",
     );
-    expect(unknownBbProject.stderr).toContain("is a bb project id");
-    expect(unknownBbProject.stderr).toContain("bb tasks project list");
+    expect(unknownOmnyoProject.stderr).toContain("is an Omnyo project id");
+    expect(unknownOmnyoProject.stderr).toContain("omnyo tasks project list");
 
-    const linkedBbProject = await harness.runCli([
+    const linkedOmnyoProject = await harness.runCli([
       "list",
       "--project",
       "proj_linked",
       "--json",
     ]);
-    expect(linkedBbProject.exitCode).toBe(1);
-    expect(JSON.parse(linkedBbProject.stdout)).toMatchObject({
+
+    expect(linkedOmnyoProject.exitCode).toBe(1);
+    expect(JSON.parse(linkedOmnyoProject.stdout)).toMatchObject({
       ok: false,
       error: {
         code: "project_not_found",
-        hint: "proj_linked is a bb project id; its tracker project is LINK — re-run with --project LINK",
+        hint: "proj_linked is an Omnyo project id; its tracker project is LINK — re-run with --project LINK",
       },
     });
 
     const missingProject = await harness.runCli(["label", "list"], {
       projectId: "proj_linked",
     });
+
     expect(missingProject.exitCode).toBe(1);
     expect(missingProject.stderr).toContain(
       "missing required option --project",

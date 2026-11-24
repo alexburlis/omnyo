@@ -28,6 +28,7 @@ const targetedTab = {
 } satisfies ExperimentalPluginFixedTabReference<RecordTarget>;
 
 declare const panel: ExperimentalAppPanel;
+
 if (false) {
   panel.openFixedTab({
     surface: { kind: "current" },

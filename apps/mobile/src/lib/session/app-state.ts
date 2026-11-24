@@ -8,5 +8,6 @@ export function bindSessionToAppState(
   const subscription = appState.addEventListener("change", (state) => {
     if (state === "active") scheduler.renewIfDue();
   });
+
   return () => subscription.remove();
 }

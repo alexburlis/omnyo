@@ -1,4 +1,4 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 export const retryAvailabilitySchema = z.discriminatedUnion("kind", [
@@ -18,8 +18,11 @@ export const retryAvailabilitySchema = z.discriminatedUnion("kind", [
     ]),
   }),
 ]);
+
 export type RetryAvailability = z.infer<typeof retryAvailabilitySchema>;
+
 export const retryAvailabilityMethod = "provider-retry.v1.availability";
+
 export const retryAvailabilityContract = defineRpcContract({
   [retryAvailabilityMethod]: {
     input: z.object({

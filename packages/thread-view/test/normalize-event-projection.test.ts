@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { threadScope } from "@bb/domain";
+import { threadScope } from "@omnyo/domain";
 import { normalizeEventProjection } from "../src/normalize-event-projection.js";
 import { getProjectionEntryMessages } from "../src/event-projection-flatten.js";
 import type {
@@ -61,6 +61,7 @@ function messagesIn(projection: EventProjection): EventProjectionMessage[] {
 describe("normalizeEventProjection", () => {
   it("keeps repeated nested delegation identities linear in the rendered history", () => {
     const messages: EventProjectionMessage[] = [delegation("root")];
+
     for (let depth = 1; depth <= 5; depth++) {
       const parent = depth === 1 ? "root" : `child-${depth - 1}`;
       const child = delegation(`child-${depth}`, parent);
@@ -80,6 +81,7 @@ describe("normalizeEventProjection", () => {
 
   it("uses the latest state of a repeated child without repeating its descendants", () => {
     const child = delegation("child", "root");
+
     const result = messagesIn(
       normalizeEventProjection(
         projection([
@@ -96,6 +98,7 @@ describe("normalizeEventProjection", () => {
         ]),
       ),
     );
+
     expect(result.map((message) => message.id)).toEqual([
       "root",
       "child",
@@ -118,6 +121,7 @@ describe("normalizeEventProjection", () => {
         ]),
       ),
     );
+
     expect(result.map((message) => message.id)).toEqual([
       "root",
       "first",

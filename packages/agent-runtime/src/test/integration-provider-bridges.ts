@@ -6,11 +6,14 @@ import {
   jsonObjectSchema,
   permissionModeSchema,
   providerForkSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { AgentRuntimeBridgeLaunch } from "../types.js";
 
 export function integrationProviderBridgeManifestPath(): string {
-  return join(tmpdir(), "bb-agent-runtime-integration-provider-bridges.json");
+  return join(
+    tmpdir(),
+    "omnyo-agent-runtime-integration-provider-bridges.json",
+  );
 }
 
 const bridgeLaunchSchema = z.object({
@@ -43,7 +46,9 @@ function readManifest(): IntegrationProviderBridgeManifest {
   if (cachedManifest !== null) {
     return cachedManifest;
   }
+
   let raw: string;
+
   try {
     raw = readFileSync(integrationProviderBridgeManifestPath(), "utf8");
   } catch {
@@ -53,7 +58,9 @@ function readManifest(): IntegrationProviderBridgeManifest {
         `global setup builds the first-party bridge artifacts.`,
     );
   }
+
   cachedManifest = manifestSchema.parse(JSON.parse(raw));
+
   return cachedManifest;
 }
 
@@ -62,17 +69,21 @@ export function resolveIntegrationBridgeLaunch(
 ): AgentRuntimeBridgeLaunch {
   const manifest = readManifest();
   const direct = manifest[providerId];
+
   if (direct !== undefined) {
     return direct;
   }
+
   if (providerId.startsWith("acp-")) {
     const acpEntry = Object.entries(manifest).find(([id]) =>
       id.startsWith("acp-"),
     );
+
     if (acpEntry) {
       return acpEntry[1];
     }
   }
+
   throw new Error(
     `No provider bridge artifact recorded for "${providerId}". ` +
       `Known: ${Object.keys(manifest).join(", ") || "none"}`,

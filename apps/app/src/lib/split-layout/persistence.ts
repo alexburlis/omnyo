@@ -3,7 +3,8 @@ import { MAX_PANES, countPanes, listPanes } from "./ops";
 import type { LayoutNode, PaneNode, SplitLayout, SplitNode } from "./types";
 
 export const SPLIT_LAYOUT_SCHEMA_VERSION = 1;
-export const SPLIT_LAYOUT_STORAGE_KEY = "bb.splitLayout";
+
+export const SPLIT_LAYOUT_STORAGE_KEY = "omnyo.splitLayout";
 
 const paneContentSchema = z.discriminatedUnion("kind", [
   z
@@ -58,7 +59,9 @@ const splitNodeSchema: z.ZodType<SplitNode> = z
         path: ["sizes"],
       });
     }
+
     const total = split.sizes.reduce((sum, size) => sum + size, 0);
+
     if (Math.abs(total - 1) > 1e-9) {
       context.addIssue({
         code: "custom",
@@ -76,6 +79,7 @@ const splitLayoutSchema: z.ZodType<SplitLayout> = z
   .strict()
   .superRefine((layout, context) => {
     const panes = listPanes(layout.root);
+
     if (countPanes(layout.root) > MAX_PANES) {
       context.addIssue({
         code: "custom",
@@ -83,6 +87,7 @@ const splitLayoutSchema: z.ZodType<SplitLayout> = z
         path: ["root"],
       });
     }
+
     if (!panes.some((pane) => pane.paneId === layout.focusedPaneId)) {
       context.addIssue({
         code: "custom",
@@ -90,6 +95,7 @@ const splitLayoutSchema: z.ZodType<SplitLayout> = z
         path: ["focusedPaneId"],
       });
     }
+
     if (new Set(panes.map((pane) => pane.paneId)).size !== panes.length) {
       context.addIssue({
         code: "custom",
@@ -116,9 +122,11 @@ export function deserializeSplitLayout(
   if (storedValue === null) {
     return null;
   }
+
   try {
     const parsed: unknown = JSON.parse(storedValue);
     const result = storedSplitLayoutSchema.safeParse(parsed);
+
     return result.success ? result.data.layout : null;
   } catch {
     return null;

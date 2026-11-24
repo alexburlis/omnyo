@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { createAgentRuntime } from "./runtime.js";
 import {
   createScriptedEchoLaunch,
@@ -27,7 +27,7 @@ describe("skills/configure handshake capability", () => {
   const runtimes: AgentRuntime[] = [];
 
   beforeEach(() => {
-    workspacePath = mkdtempSync(join(tmpdir(), "bb-skill-capability-"));
+    workspacePath = mkdtempSync(join(tmpdir(), "omnyo-skill-capability-"));
   });
 
   afterEach(async () => {
@@ -39,12 +39,14 @@ describe("skills/configure handshake capability", () => {
     const root = join(workspacePath, "skills");
     mkdirSync(join(root, "demo"), { recursive: true });
     writeFileSync(join(root, "demo", "SKILL.md"), "---\nname: demo\n---\n");
+
     return root;
   }
 
   it("starts a thread on a bridge that does not declare skills.configure, without sending the request", async () => {
     const events: ThreadEvent[] = [];
     const record = createScriptedEchoRequestRecord();
+
     const runtime = withBridgeLaunch(
       createAgentRuntime({
         workspacePath,
@@ -69,6 +71,7 @@ describe("skills/configure handshake capability", () => {
         },
       }),
     );
+
     runtimes.push(runtime);
 
     await runtime.startThread({
@@ -108,9 +111,11 @@ describe("skills/configure handshake capability", () => {
   it("selects a bridge by the session's skill snapshot without replacing sibling sessions", async () => {
     const events: ThreadEvent[] = [];
     const record = createScriptedEchoRequestRecord();
+
     const originalRoots = [
       { id: "original", path: stageSkillRoot(), skills: [] },
     ];
+
     const currentRoots = [
       {
         id: "current",
@@ -118,7 +123,9 @@ describe("skills/configure handshake capability", () => {
         skills: [],
       },
     ];
+
     mkdirSync(currentRoots[0]!.path);
+
     const runtime = withBridgeLaunch(
       createAgentRuntime({
         workspacePath,
@@ -129,22 +136,28 @@ describe("skills/configure handshake capability", () => {
       }),
       createScriptedEchoLaunch({ scripted: { identifyProcess: true } }),
     );
+
     runtimes.push(runtime);
+
     const startArgs = {
       environmentId: "env-1",
       projectId: "p1",
       providerId: "fake",
       options: fullRuntimeOptions,
     };
+
     const original = await runtime.startThread({
       ...startArgs,
       threadId: "original",
     });
+
     const currentArgs = { ...startArgs, skillRoots: currentRoots };
+
     const current = await runtime.startThread({
       ...currentArgs,
       threadId: "current",
     });
+
     const reused = await runtime.startThread({
       ...currentArgs,
       threadId: "reused",

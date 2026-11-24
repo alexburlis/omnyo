@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { shellSingleQuote, waitForSetupMarkerCount } from "@bb/test-helpers";
+import { shellSingleQuote, waitForSetupMarkerCount } from "@omnyo/test-helpers";
 import { describe, expect, it } from "vitest";
 import {
   createHostThread,
@@ -19,7 +19,9 @@ const FANOUT_PROVIDERS: ReadonlyArray<string> = [
   "fake-alpha",
   "fake-beta",
 ];
+
 const THREADS_PER_PROVIDER = 5;
+
 const FRESH_FANOUT_TIMEOUT_MS = scaleTimeoutMs(45_000);
 
 describe.sequential("fake provider fresh-environment fanout integration", () => {
@@ -31,8 +33,10 @@ describe.sequential("fake provider fresh-environment fanout integration", () => 
           path.dirname(harness.repoDir),
           "setup-coordination",
         );
+
         const markerDir = path.join(coordinationDir, "markers");
         const releaseFile = path.join(coordinationDir, "release");
+
         const sourceRepo = await createTestGitRepo({
           repoDir: path.join(path.dirname(harness.repoDir), "setup-project"),
           files: [
@@ -41,7 +45,7 @@ describe.sequential("fake provider fresh-environment fanout integration", () => 
               content: "setup project\n",
             },
             {
-              relativePath: ".bb-env-setup.sh",
+              relativePath: ".omnyo-env-setup.sh",
               content:
                 [
                   "set -euo pipefail",
@@ -56,6 +60,7 @@ describe.sequential("fake provider fresh-environment fanout integration", () => 
             },
           ],
         });
+
         const project = await createProjectFixture(harness, {
           name: "Concurrent Setup Fanout",
           path: sourceRepo,
@@ -124,6 +129,7 @@ describe.sequential("fake provider fresh-environment fanout integration", () => 
         const project = await createProjectFixture(harness, {
           name: "Fresh Environment Fanout",
         });
+
         const requests = FANOUT_PROVIDERS.flatMap((providerId) =>
           Array.from({ length: THREADS_PER_PROVIDER }, (_, index) => ({
             index: index + 1,
@@ -134,6 +140,7 @@ describe.sequential("fake provider fresh-environment fanout integration", () => 
         const spawned = await Promise.all(
           requests.map(async (request) => {
             const token = `${request.providerId}-fresh-${request.index}`;
+
             const thread = await createHostThread(harness.api, {
               hostId: harness.hostId,
               input: [{ type: "text", text: token, mentions: [] }],
@@ -141,6 +148,7 @@ describe.sequential("fake provider fresh-environment fanout integration", () => 
               providerId: request.providerId,
               workspace: { type: "managed-worktree" },
             });
+
             return { ...request, thread, token };
           }),
         );
@@ -160,6 +168,7 @@ describe.sequential("fake provider fresh-environment fanout integration", () => 
         for (const entry of readyThreads) {
           expect(entry.thread.environmentId).toBeTruthy();
           const output = await getThreadOutput(harness.api, entry.thread.id);
+
           if (!output?.includes(entry.token)) {
             const events = await getThreadEvents(harness.api, entry.thread.id);
             throw new Error(
@@ -175,6 +184,7 @@ describe.sequential("fake provider fresh-environment fanout integration", () => 
               ].join("; "),
             );
           }
+
           expect(
             (await getThreadEvents(harness.api, entry.thread.id)).every(
               (event) => event.threadId === entry.thread.id,

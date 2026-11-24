@@ -27,22 +27,27 @@ function getNormalizedUrl(location: Location): string {
 
 function findBackTargetIndex(state: AppRouteHistoryState): number | null {
   const currentUrl = state.entries[state.index]?.url;
+
   if (currentUrl === undefined) {
     return null;
   }
+
   for (let candidate = state.index - 1; candidate >= 0; candidate -= 1) {
     if (state.entries[candidate].url !== currentUrl) {
       return candidate;
     }
   }
+
   return null;
 }
 
 function findForwardTargetIndex(state: AppRouteHistoryState): number | null {
   const currentUrl = state.entries[state.index]?.url;
+
   if (currentUrl === undefined) {
     return null;
   }
+
   for (
     let candidate = state.index + 1;
     candidate < state.entries.length;
@@ -52,6 +57,7 @@ function findForwardTargetIndex(state: AppRouteHistoryState): number | null {
       return candidate;
     }
   }
+
   return null;
 }
 
@@ -64,29 +70,38 @@ function reduceHistory(
     case "PUSH": {
       const entries = state.entries.slice(0, state.index + 1);
       entries.push(entry);
+
       return { entries, index: entries.length - 1 };
     }
+
     case "REPLACE": {
       const entries = state.entries.slice();
       entries[state.index] = entry;
+
       return { entries, index: state.index };
     }
+
     case "POP": {
       const matchedIndex = state.entries.findIndex(
         (candidate) =>
           candidate.key === entry.key && candidate.url === entry.url,
       );
+
       if (matchedIndex >= 0) {
         return { entries: state.entries, index: matchedIndex };
       }
+
       return { entries: [entry], index: 0 };
     }
   }
 }
 
 const EMPTY_HISTORY_STATE: AppRouteHistoryState = { entries: [], index: 0 };
+
 let historyState = EMPTY_HISTORY_STATE;
+
 let lastRecordedLocation: Location | null = null;
+
 const historyListeners = new Set<() => void>();
 
 function recordLocation(
@@ -96,12 +111,14 @@ function recordLocation(
   if (lastRecordedLocation === location) {
     return;
   }
+
   lastRecordedLocation = location;
   const entry = { key: location.key, url: getNormalizedUrl(location) };
   historyState =
     historyState.entries.length === 0
       ? { entries: [entry], index: 0 }
       : reduceHistory(historyState, navigationType, entry);
+
   for (const listener of historyListeners) {
     listener();
   }
@@ -109,6 +126,7 @@ function recordLocation(
 
 function subscribeToHistory(listener: () => void): () => void {
   historyListeners.add(listener);
+
   return () => {
     historyListeners.delete(listener);
   };
@@ -137,18 +155,22 @@ export function useRouteStateHistoryNavigation(): AppRouteHistoryNavigation {
   const goBack = useCallback(() => {
     const current = historyState;
     const target = findBackTargetIndex(current);
+
     if (target === null) {
       return;
     }
+
     void navigate(target - current.index);
   }, [navigate]);
 
   const goForward = useCallback(() => {
     const current = historyState;
     const target = findForwardTargetIndex(current);
+
     if (target === null) {
       return;
     }
+
     void navigate(target - current.index);
   }, [navigate]);
 

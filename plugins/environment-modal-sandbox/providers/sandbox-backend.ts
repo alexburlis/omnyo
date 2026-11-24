@@ -2,12 +2,12 @@ import type {
   MachineExecutor,
   PluginMachineValidateDecision,
   StandardSchemaV1,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import type {
   PluginMachineProviderAvailability,
   PluginMachineProviderProgress,
   PluginMachineProviderResource,
-} from "@get-bb/plugin-sdk/machine-provider";
+} from "@omnyo/plugin-sdk/machine-provider";
 
 export interface SandboxOperationContext {
   report: PluginMachineProviderProgress;

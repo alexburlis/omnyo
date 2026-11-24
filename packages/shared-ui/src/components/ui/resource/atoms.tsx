@@ -56,6 +56,7 @@ export function ResourceMeta({
   items: readonly (ReactNode | null | undefined | false)[];
 }) {
   const visibleItems = items.filter(Boolean);
+
   return (
     <span className="inline-flex min-w-0 max-w-full flex-col items-start gap-x-1.5 gap-y-0.5 sm:flex-row sm:flex-wrap sm:items-center">
       {visibleItems.map((item, index) => (

@@ -6,6 +6,8 @@ import type {
   SidebarProjectSummary,
   Task,
 } from "../shared/contract.js";
+import { TaskWorkingDot } from "../components/working-dot.js";
+import { useCollapsedSections } from "../shared/collapsed-sections.js";
 import { useTasksRpc } from "./data.js";
 import type { TasksRoute } from "./routes.js";
 import {
@@ -14,6 +16,13 @@ import {
 } from "../views/manage/preset-dialog.js";
 import { Icon } from "@/components/ui/icon";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
+import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
+import {
+  CONTROL_HOVER_TRANSITION,
+  DISCLOSURE_CHEVRON_TRANSITION,
+  getDisclosureRevealClass,
+} from "@/components/ui/motion";
+import { SECTION_COUNT_CLASS } from "@/components/ui/section-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
@@ -22,6 +31,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+export const SIDEBAR_SECTIONS_SCOPE = "sidebar";
 
 interface SidebarRowProps {
   active?: boolean;
@@ -36,9 +47,11 @@ function SidebarRow({ active, onClick, children, title }: SidebarRowProps) {
       type="button"
       onClick={onClick}
       title={title}
+      aria-current={active ? "page" : undefined}
       className={cn(
-        "flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring max-md:pointer-coarse:h-9",
+        "flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-sm max-md:pointer-coarse:h-9",
         "cursor-pointer",
+        FOCUS_RING_CLASS,
         active
           ? "bg-sidebar-accent font-medium text-foreground"
           : "text-muted-foreground",
@@ -50,45 +63,63 @@ function SidebarRow({ active, onClick, children, title }: SidebarRowProps) {
   );
 }
 
-function SectionHeader({
+function SidebarSection({
   label,
-  collapsed,
-  onToggle,
+  count,
+  countLabel,
+  open,
+  onOpenChange,
+  children,
 }: {
   label: string;
-  collapsed?: boolean;
-  onToggle?: () => void;
+  count?: number;
+  countLabel?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
 }) {
-  const content = (
-    <>
-      {onToggle ? (
-        <Icon
-          name="ChevronDown"
-          className={cn(
-            "size-3 transition-transform",
-            collapsed && "-rotate-90",
-          )}
-        />
-      ) : null}
-      {label}
-    </>
-  );
-  if (onToggle) {
-    return (
+  return (
+    <section aria-label={label} className="mt-3">
       <button
         type="button"
-        onClick={onToggle}
-        className="mt-3.5 flex w-full items-center gap-1 rounded-md px-2 pb-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
-        aria-expanded={!collapsed}
+        onClick={() => onOpenChange(!open)}
+        aria-expanded={open}
+        title={open ? `Collapse ${label}` : `Show ${label}`}
+        className={cn(
+          "group/sidebar-section flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-2 text-left text-xs font-semibold text-muted-foreground hover:bg-state-hover hover:text-foreground max-md:pointer-coarse:h-9",
+          CONTROL_HOVER_TRANSITION,
+          FOCUS_RING_CLASS,
+        )}
       >
-        {content}
+        <Icon
+          name="ChevronRight"
+          aria-hidden="true"
+          className={cn(
+            "size-3 shrink-0 text-subtle-foreground group-hover/sidebar-section:text-muted-foreground",
+            DISCLOSURE_CHEVRON_TRANSITION,
+            open && "rotate-90",
+          )}
+        />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {count === undefined ? null : (
+          <span className={SECTION_COUNT_CLASS}>
+            <span aria-hidden="true">{count}</span>
+            {countLabel === undefined ? null : (
+              <span className="sr-only">{countLabel}</span>
+            )}
+          </span>
+        )}
       </button>
-    );
-  }
-  return (
-    <div className="mt-3.5 flex items-center gap-1 px-2 pb-1 text-xs font-semibold text-muted-foreground">
-      {content}
-    </div>
+      <div
+        aria-hidden={open ? undefined : true}
+        inert={!open}
+        className={getDisclosureRevealClass(open)}
+      >
+        <div className="-m-px min-h-0 space-y-px overflow-hidden p-px pt-0.5">
+          {children}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -102,21 +133,20 @@ function ProjectDot({ color }: { color: string }) {
   );
 }
 
-function WorkingDot() {
+function RowCount({ value, label }: { value: number; label: string }) {
   return (
     <span
-      aria-hidden
-      className="size-1.5 shrink-0 animate-pulse rounded-full bg-success"
-    />
+      title={label}
+      className="ml-auto text-xs tabular-nums text-muted-foreground"
+    >
+      <span aria-hidden="true">{value}</span>
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }
 
-function RowCount({ value }: { value: number }) {
-  return (
-    <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-      {value}
-    </span>
-  );
+function taskCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "task" : "tasks"}, not counting sub-tasks`;
 }
 
 function ProjectRow({
@@ -134,8 +164,23 @@ function ProjectRow({
     <SidebarRow active={active} onClick={onClick} title={project.name}>
       <ProjectDot color={project.color} />
       <span className="min-w-0 flex-1 truncate">{project.name}</span>
-      {summary && summary.activeAgentCount > 0 ? <WorkingDot /> : null}
-      {summary ? <RowCount value={summary.taskCount} /> : null}
+      {summary !== undefined && summary.activeAgentCount > 0 ? (
+        <span
+          className="flex shrink-0"
+          title={`${summary.activeAgentCount} ${summary.activeAgentCount === 1 ? "agent" : "agents"} working`}
+        >
+          <TaskWorkingDot />
+          <span className="sr-only">
+            {`${summary.activeAgentCount} ${summary.activeAgentCount === 1 ? "agent" : "agents"} working`}
+          </span>
+        </span>
+      ) : null}
+      {summary ? (
+        <RowCount
+          value={summary.taskCount}
+          label={taskCountLabel(summary.taskCount)}
+        />
+      ) : null}
     </SidebarRow>
   );
 }
@@ -152,6 +197,27 @@ function SidebarSkeleton() {
         ))}
       </div>
     </DelayedLoading>
+  );
+}
+
+function SidebarPresetDialog({
+  editing,
+  onClose,
+}: {
+  editing: Preset | null;
+  onClose: () => void;
+}) {
+  const rpc = useTasksRpc();
+
+  return (
+    <PresetDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      editing={editing}
+      onSave={(draft) => savePresetDraft(rpc, editing, draft)}
+    />
   );
 }
 
@@ -178,69 +244,63 @@ export function TasksSidebar({
   onNavigate,
   onNewProject,
 }: TasksSidebarProps) {
-  const [collapsedFolders, setCollapsedFolders] = useState<ReadonlySet<string>>(
-    new Set(),
-  );
-  const rpc = useTasksRpc();
+  const sections = useCollapsedSections(SIDEBAR_SECTIONS_SCOPE);
+
   const [presetDialog, setPresetDialog] = useState<{
     key: number;
     editing: Preset | null;
   } | null>(null);
+
   const summaryByProject = useMemo(
     () => new Map((summaries ?? []).map((entry) => [entry.projectId, entry])),
     [summaries],
   );
+
   const totalTasks = useMemo(
     () => (summaries ?? []).reduce((sum, entry) => sum + entry.taskCount, 0),
     [summaries],
   );
+
   const activeProjectId = route.kind === "project" ? route.projectId : null;
+
   const openProject = (projectId: string) =>
     onNavigate({ kind: "project", projectId, view: null });
-  const toggleFolder = (folderId: string) =>
-    setCollapsedFolders((current) => {
-      const next = new Set(current);
-      if (next.has(folderId)) next.delete(folderId);
-      else next.add(folderId);
-      return next;
-    });
 
   const rootFolders = (folders ?? []).filter((f) => f.parentFolderId === null);
   const childFolders = (folders ?? []).filter((f) => f.parentFolderId !== null);
   const knownFolderIds = new Set((folders ?? []).map((f) => f.id));
+
   const ungrouped = (projects ?? []).filter(
     (p) => p.folderId === null || !knownFolderIds.has(p.folderId),
   );
 
   const renderFolder = (folder: Folder, indent: boolean) => {
-    const collapsed = collapsedFolders.has(folder.id);
     const folderProjects = (projects ?? []).filter(
       (p) => p.folderId === folder.id,
     );
+
     const children = childFolders.filter((f) => f.parentFolderId === folder.id);
+
     return (
       <div key={folder.id} className={cn(indent && "pl-3")}>
-        <SectionHeader
+        <SidebarSection
           label={folder.name}
-          collapsed={collapsed}
-          onToggle={() => toggleFolder(folder.id)}
-        />
-        {!collapsed ? (
-          <div className="space-y-px">
-            {folderProjects.map((project) => (
-              <ProjectRow
-                key={project.id}
-                project={project}
-                summary={summaryByProject.get(project.id)}
-                active={activeProjectId === project.id}
-                onClick={() => openProject(project.id)}
-              />
-            ))}
-            {!indent
-              ? children.map((child) => renderFolder(child, true))
-              : null}
-          </div>
-        ) : null}
+          count={folderProjects.length}
+          countLabel={`${folderProjects.length} ${folderProjects.length === 1 ? "project" : "projects"}`}
+          open={sections.isOpen(`folder:${folder.id}`)}
+          onOpenChange={(open) => sections.setOpen(`folder:${folder.id}`, open)}
+        >
+          {folderProjects.map((project) => (
+            <ProjectRow
+              key={project.id}
+              project={project}
+              summary={summaryByProject.get(project.id)}
+              active={activeProjectId === project.id}
+              onClick={() => openProject(project.id)}
+            />
+          ))}
+          {!indent ? children.map((child) => renderFolder(child, true)) : null}
+        </SidebarSection>
       </div>
     );
   };
@@ -255,7 +315,9 @@ export function TasksSidebar({
           >
             <Icon name="ListView" className="size-3.5 shrink-0" />
             <span className="flex-1">All tasks</span>
-            {summaries ? <RowCount value={totalTasks} /> : null}
+            {summaries ? (
+              <RowCount value={totalTasks} label={taskCountLabel(totalTasks)} />
+            ) : null}
           </SidebarRow>
           <SidebarRow
             active={route.kind === "active"}
@@ -263,8 +325,13 @@ export function TasksSidebar({
           >
             <Icon name="Zap" className="size-3.5 shrink-0" />
             <span className="flex-1">Active</span>
-            {activeTasks && activeTasks.length > 0 ? <WorkingDot /> : null}
-            {activeTasks ? <RowCount value={activeTasks.length} /> : null}
+            {activeTasks && activeTasks.length > 0 ? <TaskWorkingDot /> : null}
+            {activeTasks ? (
+              <RowCount
+                value={activeTasks.length}
+                label={`${activeTasks.length} ${activeTasks.length === 1 ? "task has" : "tasks have"} an agent working`}
+              />
+            ) : null}
           </SidebarRow>
         </div>
         {isLoading ? (
@@ -272,20 +339,23 @@ export function TasksSidebar({
         ) : (
           <>
             {ungrouped.length > 0 ? (
-              <>
-                <SectionHeader label="Projects" />
-                <div className="space-y-px">
-                  {ungrouped.map((project) => (
-                    <ProjectRow
-                      key={project.id}
-                      project={project}
-                      summary={summaryByProject.get(project.id)}
-                      active={activeProjectId === project.id}
-                      onClick={() => openProject(project.id)}
-                    />
-                  ))}
-                </div>
-              </>
+              <SidebarSection
+                label="Projects"
+                count={ungrouped.length}
+                countLabel={`${ungrouped.length} ${ungrouped.length === 1 ? "project" : "projects"}`}
+                open={sections.isOpen("projects")}
+                onOpenChange={(open) => sections.setOpen("projects", open)}
+              >
+                {ungrouped.map((project) => (
+                  <ProjectRow
+                    key={project.id}
+                    project={project}
+                    summary={summaryByProject.get(project.id)}
+                    active={activeProjectId === project.id}
+                    onClick={() => openProject(project.id)}
+                  />
+                ))}
+              </SidebarSection>
             ) : null}
             {rootFolders.map((folder) => renderFolder(folder, false))}
             {(projects ?? []).length > 0 ? (
@@ -297,56 +367,60 @@ export function TasksSidebar({
               </div>
             ) : null}
             {presets ? (
-              <>
-                <SectionHeader label="Agent presets" />
-                <div className="space-y-px">
-                  {presets.map((preset) => (
-                    <SidebarRow
-                      key={preset.id}
-                      title={`Edit preset ${preset.name}`}
-                      onClick={() =>
-                        setPresetDialog({ key: Date.now(), editing: preset })
-                      }
-                    >
-                      <Icon name="Bot" className="size-3.5 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">
-                        {preset.name}
-                      </span>
-                      {preset.environmentKind === "new-worktree" ? (
-                        <TooltipProvider delayDuration={300}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span
-                                aria-label="Spawns a new worktree"
-                                className="flex shrink-0 text-muted-foreground/70"
-                              >
-                                <Icon name="GitBranch" className="size-3" />
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent side="left">
-                              Spawns a new worktree
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      ) : null}
-                    </SidebarRow>
-                  ))}
-                  {presets.length === 0 ? (
-                    <div className="px-2 py-1 text-xs text-muted-foreground">
-                      No presets yet.
-                    </div>
-                  ) : null}
+              <SidebarSection
+                label="Agent presets"
+                count={presets.length}
+                countLabel={`${presets.length} ${presets.length === 1 ? "preset" : "presets"}`}
+                open={sections.isOpen("presets")}
+                onOpenChange={(open) => sections.setOpen("presets", open)}
+              >
+                {presets.map((preset) => (
                   <SidebarRow
-                    title="New preset"
+                    key={preset.id}
+                    title={`Edit preset ${preset.name}`}
                     onClick={() =>
-                      setPresetDialog({ key: Date.now(), editing: null })
+                      setPresetDialog({ key: Date.now(), editing: preset })
                     }
                   >
-                    <Icon name="Plus" className="size-3.5 shrink-0" />
-                    <span className="flex-1">New preset</span>
+                    <Icon name="Bot" className="size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {preset.name}
+                    </span>
+                    {preset.environmentKind === "new-worktree" ? (
+                      <TooltipProvider delayDuration={300}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              aria-label="Starts each agent in a new worktree"
+                              className="flex shrink-0 text-subtle-foreground"
+                            >
+                              <Icon name="GitBranch" className="size-3" />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="left">
+                            Starts each agent in a new worktree
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : null}
                   </SidebarRow>
-                </div>
-              </>
+                ))}
+                {presets.length === 0 ? (
+                  <p className="px-2 py-1 text-xs text-muted-foreground">
+                    A preset picks the model and permissions an agent uses for a
+                    task.
+                  </p>
+                ) : null}
+                <SidebarRow
+                  title="New preset"
+                  onClick={() =>
+                    setPresetDialog({ key: Date.now(), editing: null })
+                  }
+                >
+                  <Icon name="Plus" className="size-3.5 shrink-0" />
+                  <span className="flex-1">New preset</span>
+                </SidebarRow>
+              </SidebarSection>
             ) : null}
           </>
         )}
@@ -361,14 +435,10 @@ export function TasksSidebar({
         </SidebarRow>
       </div>
       {presetDialog ? (
-        <PresetDialog
+        <SidebarPresetDialog
           key={presetDialog.key}
-          open
-          onOpenChange={(open) => {
-            if (!open) setPresetDialog(null);
-          }}
           editing={presetDialog.editing}
-          onSave={(draft) => savePresetDraft(rpc, presetDialog.editing, draft)}
+          onClose={() => setPresetDialog(null)}
         />
       ) : null}
     </div>

@@ -12,9 +12,10 @@ import { describe, expect, it } from "vitest";
 import type {
   PromptInput,
   RuntimePermissionPolicy,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import {
   buildCodexConfig,
+  codexSupportsAgentsEnabled,
   gitWritableRootsForWorkspace,
   resolveCodexInstructionOverrides,
   toCodexDynamicTools,
@@ -88,12 +89,12 @@ interface InvalidCommonDirCase {
 const optionalGitRootEscapeCases: readonly OptionalGitRootEscapeCase[] = [
   {
     label: "refs",
-    outsidePrefix: "bb-codex-refs-escape-",
+    outsidePrefix: "omnyo-codex-refs-escape-",
     relativePath: "refs",
   },
   {
     label: "logs refs",
-    outsidePrefix: "bb-codex-logs-refs-escape-",
+    outsidePrefix: "omnyo-codex-logs-refs-escape-",
     relativePath: path.join("logs", "refs"),
   },
 ];
@@ -105,7 +106,7 @@ const unsafeHeadRefCases: readonly UnsafeHeadRefCase[] = [
   },
   {
     label: "absolute path",
-    headContent: "ref: /tmp/bb-main\n",
+    headContent: "ref: /tmp/omnyo-main\n",
   },
   {
     label: "empty path segment",
@@ -130,14 +131,15 @@ const invalidCommonDirCases: readonly InvalidCommonDirCase[] = [
 
 function createLinkedWorktreeFixture(): LinkedWorktreeFixture {
   const rootPath = realpathSync.native(
-    mkdtempSync(path.join(tmpdir(), "bb-codex-worktree-")),
+    mkdtempSync(path.join(tmpdir(), "omnyo-codex-worktree-")),
   );
+
   const workspacePath = path.join(rootPath, "worktree");
   const commonDir = path.join(rootPath, "repo.git");
   const gitDir = path.join(commonDir, "worktrees", "bb1");
-  const headRef = "refs/heads/bb/probe";
-  const headRefParent = path.join(commonDir, "refs", "heads", "bb");
-  const headLogParent = path.join(commonDir, "logs", "refs", "heads", "bb");
+  const headRef = "refs/heads/omnyo/probe";
+  const headRefParent = path.join(commonDir, "refs", "heads", "omnyo");
+  const headLogParent = path.join(commonDir, "logs", "refs", "heads", "omnyo");
 
   mkdirSync(workspacePath, { recursive: true });
   mkdirSync(gitDir, { recursive: true });
@@ -173,7 +175,8 @@ function workspaceConfigForCwd(args: {
   cwd: string;
 }): ReturnType<typeof buildCodexConfig> {
   return buildCodexConfig({
-    threadId: "bb-thread-1",
+    supportsAgentsEnabled: true,
+    threadId: "omnyo-thread-1",
     additionalWorkspaceWriteRoots: [],
     gitWritableRoots: gitWritableRootsForWorkspace(args.cwd),
     options: WORKSPACE_ASK_OPTIONS,
@@ -193,6 +196,7 @@ function expectWorkspaceWriteWritableRootsConfigAbsent(
 describe("gitWritableRootsForWorkspace", () => {
   it("rejects linked worktree git roots that escape canonical containment", () => {
     const fixture = createLinkedWorktreeFixture();
+
     try {
       writeFileSync(path.join(fixture.workspacePath, ".git"), "gitdir: /\n");
 
@@ -208,6 +212,7 @@ describe("gitWritableRootsForWorkspace", () => {
   it("rejects linked worktree git roots from a foreign workspace", () => {
     const fixture = createLinkedWorktreeFixture();
     const foreignFixture = createLinkedWorktreeFixture();
+
     try {
       writeFileSync(
         path.join(fixture.workspacePath, ".git"),
@@ -227,6 +232,7 @@ describe("gitWritableRootsForWorkspace", () => {
   it("rejects symlinked workspace .git files", () => {
     const fixture = createLinkedWorktreeFixture();
     const foreignFixture = createLinkedWorktreeFixture();
+
     try {
       rmSync(path.join(fixture.workspacePath, ".git"), { force: true });
       symlinkSync(
@@ -246,10 +252,12 @@ describe("gitWritableRootsForWorkspace", () => {
 
   it("tolerates missing linked worktree ref and reflog dirs", () => {
     const fixture = createLinkedWorktreeFixture();
+
     const expectedWritableRoots = [
       fixture.gitDir,
       path.join(fixture.commonDir, "objects"),
     ];
+
     try {
       rmSync(path.join(fixture.commonDir, "refs"), {
         recursive: true,
@@ -277,10 +285,12 @@ describe("gitWritableRootsForWorkspace", () => {
     "skips linked worktree ref/log roots for unsafe HEAD ref: $label",
     (testCase) => {
       const fixture = createLinkedWorktreeFixture();
+
       const expectedWritableRoots = [
         fixture.gitDir,
         path.join(fixture.commonDir, "objects"),
       ];
+
       try {
         writeFileSync(path.join(fixture.gitDir, "HEAD"), testCase.headContent);
 
@@ -295,12 +305,14 @@ describe("gitWritableRootsForWorkspace", () => {
 
   it("includes branch ref roots for detached HEAD so later branch commits can update refs", () => {
     const fixture = createLinkedWorktreeFixture();
+
     const expectedWritableRoots = [
       fixture.gitDir,
       path.join(fixture.commonDir, "objects"),
       path.join(fixture.commonDir, "refs", "heads"),
       path.join(fixture.commonDir, "logs", "refs", "heads"),
     ];
+
     try {
       writeFileSync(
         path.join(fixture.gitDir, "HEAD"),
@@ -324,6 +336,7 @@ describe("gitWritableRootsForWorkspace", () => {
     "rejects linked worktree git roots for $label",
     (testCase) => {
       const fixture = createLinkedWorktreeFixture();
+
       try {
         testCase.setup(fixture);
 
@@ -339,9 +352,11 @@ describe("gitWritableRootsForWorkspace", () => {
 
   it("rejects linked worktree git roots when objects symlink escapes common dir", () => {
     const fixture = createLinkedWorktreeFixture();
+
     const outsideObjectsPath = realpathSync.native(
-      mkdtempSync(path.join(tmpdir(), "bb-codex-objects-escape-")),
+      mkdtempSync(path.join(tmpdir(), "omnyo-codex-objects-escape-")),
     );
+
     try {
       rmSync(path.join(fixture.commonDir, "objects"), {
         recursive: true,
@@ -366,9 +381,11 @@ describe("gitWritableRootsForWorkspace", () => {
 
   it("rejects linked worktree git roots when worktrees symlink escapes common dir", () => {
     const fixture = createLinkedWorktreeFixture();
+
     const outsideWorktreesPath = realpathSync.native(
-      mkdtempSync(path.join(tmpdir(), "bb-codex-worktrees-escape-")),
+      mkdtempSync(path.join(tmpdir(), "omnyo-codex-worktrees-escape-")),
     );
+
     try {
       rmSync(path.join(fixture.commonDir, "worktrees"), {
         recursive: true,
@@ -387,7 +404,7 @@ describe("gitWritableRootsForWorkspace", () => {
       );
       writeFileSync(
         path.join(escapedGitDir, "HEAD"),
-        "ref: refs/heads/bb/probe\n",
+        "ref: refs/heads/omnyo/probe\n",
       );
       symlinkSync(
         outsideWorktreesPath,
@@ -410,14 +427,17 @@ describe("gitWritableRootsForWorkspace", () => {
     "rejects linked worktree git roots when $label symlink escapes common dir",
     (escapeCase) => {
       const fixture = createLinkedWorktreeFixture();
+
       const outsidePath = realpathSync.native(
         mkdtempSync(path.join(tmpdir(), escapeCase.outsidePrefix)),
       );
+
       try {
         const escapePath = path.join(
           fixture.commonDir,
           escapeCase.relativePath,
         );
+
         rmSync(escapePath, {
           recursive: true,
           force: true,
@@ -526,9 +546,10 @@ describe("codex permission settings", () => {
   });
 });
 
-function configFor(options: CodexSessionOptions) {
+function configFor(options: CodexSessionOptions, supportsAgentsEnabled = true) {
   return buildCodexConfig({
-    threadId: "bb-thread-1",
+    supportsAgentsEnabled,
+    threadId: "omnyo-thread-1",
     additionalWorkspaceWriteRoots: [],
     gitWritableRoots: [],
     options,
@@ -551,13 +572,45 @@ describe("buildCodexConfig", () => {
   });
 
   it("disables Codex native subagents", () => {
-    expect(
-      configFor({ ...FULL_OPTIONS, providerSubagentsEnabled: false }),
-    ).toMatchObject({
+    const config = configFor({
+      ...FULL_OPTIONS,
+      providerSubagentsEnabled: false,
+    });
+
+    expect(config).toMatchObject({
+      "agents.enabled": false,
+      "features.multi_agent_v2": false,
+    });
+    expect(config).not.toHaveProperty("features.multi_agent");
+    expect(config).not.toHaveProperty(
+      "features.multi_agent_v2.max_concurrent_threads_per_session",
+    );
+  });
+
+  it("keeps the legacy subagent settings for Codex before 0.145.0", () => {
+    const config = configFor(
+      { ...FULL_OPTIONS, providerSubagentsEnabled: false },
+      false,
+    );
+
+    expect(config).toMatchObject({
       "features.multi_agent": false,
       "features.multi_agent_v2.max_concurrent_threads_per_session": 1,
     });
+    expect(config).not.toHaveProperty("agents.enabled");
+    expect(config).not.toHaveProperty("features.multi_agent_v2");
   });
+
+  it.each([true, undefined])(
+    "preserves native subagent configuration when enabled is %s",
+    (providerSubagentsEnabled) => {
+      const config = configFor({ ...FULL_OPTIONS, providerSubagentsEnabled });
+
+      expect(config).not.toHaveProperty("agents.enabled");
+      expect(config).not.toHaveProperty("features.multi_agent_v2");
+      expect(config).not.toHaveProperty("features.multi_agent");
+    },
+  );
 
   it("injects contributed environment into session params and drops invalid keys", () => {
     const config = configFor({
@@ -570,7 +623,7 @@ describe("buildCodexConfig", () => {
     });
 
     expect(config).toMatchObject({
-      "shell_environment_policy.set.BB_THREAD_ID": "bb-thread-1",
+      "shell_environment_policy.set.OMNYO_THREAD_ID": "omnyo-thread-1",
       "shell_environment_policy.set.PLUGIN_API_URL":
         "http://127.0.0.1:3334/plugins/example/auth",
       "shell_environment_policy.set.TEST_VAR": "123",
@@ -603,12 +656,29 @@ describe("buildCodexConfig", () => {
   it("omits the writable-roots key for a full-access session", () => {
     expectWorkspaceWriteWritableRootsConfigAbsent(
       buildCodexConfig({
-        threadId: "bb-thread-1",
+        supportsAgentsEnabled: true,
+        threadId: "omnyo-thread-1",
         additionalWorkspaceWriteRoots: ["/repo/.git/objects"],
         gitWritableRoots: [],
         options: FULL_OPTIONS,
       }),
     );
+  });
+});
+
+describe("codexSupportsAgentsEnabled", () => {
+  it.each([
+    { userAgent: "omnyo/0.136.0 (Linux; x86_64)", modern: false },
+    { userAgent: "omnyo/0.144.0 (Linux; x86_64)", modern: false },
+    { userAgent: "omnyo/0.145.0-alpha.1 (Linux; x86_64)", modern: false },
+    { userAgent: "omnyo/0.145.0 (Linux; x86_64)", modern: true },
+    { userAgent: "omnyo/0.169.0 (Mac OS 27.2.1; arm64)", modern: true },
+    { userAgent: "unrecognized", modern: false },
+    { userAgent: "omnyo/0.145.00 (Linux; x86_64)", modern: false },
+    { userAgent: "unrecognized (OS 99.99.99)", modern: false },
+    { userAgent: undefined, modern: false },
+  ])("maps $userAgent to $modern", ({ userAgent, modern }) => {
+    expect(codexSupportsAgentsEnabled(userAgent)).toBe(modern);
   });
 });
 
@@ -652,7 +722,7 @@ describe("toCodexDynamicTools", () => {
     expect(
       toCodexDynamicTools([
         {
-          name: "bb_test_ping",
+          name: "omnyo_test_ping",
           description: "Ping the host",
           inputSchema: {
             type: "object",
@@ -666,7 +736,7 @@ describe("toCodexDynamicTools", () => {
     ).toEqual([
       {
         type: "function",
-        name: "bb_test_ping",
+        name: "omnyo_test_ping",
         description: "Ping the host",
         inputSchema: {
           type: "object",
@@ -682,6 +752,66 @@ describe("toCodexDynamicTools", () => {
 });
 
 describe("toCodexUserInput", () => {
+  it.each(["/", "$"] as const)(
+    "delivers selected %s skills by path without interpreting unselected commands",
+    (trigger) => {
+      const input: PromptInput[] = [
+        {
+          type: "text",
+          text: `${trigger}teach /plan`,
+          mentions: [
+            {
+              start: 0,
+              end: 6,
+              resource: {
+                kind: "command",
+                trigger,
+                name: "teach",
+                source: "skill",
+                origin: "project",
+                label: "teach",
+                argumentHint: null,
+              },
+            },
+          ],
+        },
+      ];
+
+      expect(
+        toCodexUserInput(input, [
+          { name: "teach", path: "/workspace/.agents/skills/teach/SKILL.md" },
+        ]),
+      ).toEqual([
+        { type: "text", text: `${trigger}teach /plan`, text_elements: [] },
+        {
+          type: "skill",
+          name: "teach",
+          path: "/workspace/.agents/skills/teach/SKILL.md",
+        },
+      ]);
+      expect(
+        toCodexUserInput(input, [
+          {
+            name: "lesson-planner",
+            path: "/workspace/.agents/skills/teach/SKILL.md",
+          },
+        ]),
+      ).toContainEqual({
+        type: "skill",
+        name: "lesson-planner",
+        path: "/workspace/.agents/skills/teach/SKILL.md",
+      });
+      expect(toCodexUserInput(input, [])).toEqual([
+        { type: "text", text: `${trigger}teach /plan`, text_elements: [] },
+      ]);
+      expect(
+        toCodexUserInput([
+          { type: "text", text: "/teach /plan", mentions: [] },
+        ]),
+      ).toEqual([{ type: "text", text: "/teach /plan", text_elements: [] }]);
+    },
+  );
+
   it("maps every prompt input variant, rendering local files as text", () => {
     const input: PromptInput[] = [
       { type: "text", text: "hello", mentions: [] },

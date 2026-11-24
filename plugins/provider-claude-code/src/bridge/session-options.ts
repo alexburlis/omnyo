@@ -3,7 +3,7 @@ import {
   type ReasoningLevel,
   type ServiceTier,
   type RuntimePermissionScope,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import type { Options, Settings } from "@anthropic-ai/claude-agent-sdk";
@@ -28,6 +28,7 @@ export interface BuildSessionOptionsArgs {
   workflowsEnabled: boolean;
   chromeEnabled: boolean;
   disable1MContext: boolean;
+  allowModelFallback: boolean;
   sandboxEnabled: boolean;
   memoryEnabled?: boolean;
 }
@@ -59,7 +60,8 @@ const SUMMARIZED_ADAPTIVE_THINKING = {
   type: "adaptive",
   display: "summarized",
 } satisfies Exclude<Options["thinking"], undefined>;
-const CLAUDE_CODE_EXECUTABLE_ENV = "BB_CLAUDE_CODE_EXECUTABLE";
+
+const CLAUDE_CODE_EXECUTABLE_ENV = "OMNYO_CLAUDE_CODE_EXECUTABLE";
 
 export function toSdkEffort(
   reasoningLevel: ReasoningLevel,
@@ -88,6 +90,31 @@ function buildFlagSettings(params: BuildSessionOptionsArgs): Settings {
     enableWorkflows: params.workflowsEnabled,
     ultracode: params.reasoningLevel === "ultracode",
     fastMode: params.serviceTier === "fast",
+    ...buildModelFallbackSettings(params.allowModelFallback),
+  };
+}
+
+export function buildModelFallbackSettings(allowModelFallback: boolean) {
+  const disableModelFallback = allowModelFallback === true ? "0" : "1";
+
+  return {
+    switchModelsOnFlag: allowModelFallback === true,
+    env: {
+      CLAUDE_CODE_NO_MODEL_FALLBACK: disableModelFallback,
+      CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK: disableModelFallback,
+    },
+  } satisfies Pick<Settings, "env" | "switchModelsOnFlag">;
+}
+
+export function buildSessionSettingsEnv(args: {
+  env: NodeJS.ProcessEnv;
+  allowModelFallback: boolean;
+  disable1MContext: boolean;
+}): NodeJS.ProcessEnv {
+  return {
+    ...args.env,
+    CLAUDE_CODE_DISABLE_1M_CONTEXT: args.disable1MContext ? "1" : "0",
+    ...buildModelFallbackSettings(args.allowModelFallback).env,
   };
 }
 
@@ -107,6 +134,7 @@ export function buildMutableFlagSettings(args: {
     args.reasoningLevel === undefined
       ? undefined
       : toSdkEffort(args.reasoningLevel);
+
   return {
     autoMemoryEnabled: args.memoryEnabled,
     enableWorkflows: args.workflowsEnabled,
@@ -117,11 +145,11 @@ export function buildMutableFlagSettings(args: {
 }
 
 export function buildReadonlyDenialMessage(): string {
-  return "bb readonly mode allows reading and analysis only. Continue with a read-only answer; do not modify files, run mutating shell commands, use network, or use mutating tools.";
+  return "Omnyo readonly mode allows reading and analysis only. Continue with a read-only answer; do not modify files, run mutating shell commands, use network, or use mutating tools.";
 }
 
 export function buildWorkspaceWriteDenialMessage(): string {
-  return "bb's workspace sandbox allows work inside the current workspace only. Stay inside the workspace or explain why extra access is needed.";
+  return "Omnyo's workspace sandbox allows work inside the current workspace only. Stay inside the workspace or explain why extra access is needed.";
 }
 
 function isWorkspaceWriteSession(params: WorkspaceWriteSandboxArgs): boolean {
@@ -132,20 +160,36 @@ function isWorkspaceWriteSession(params: WorkspaceWriteSandboxArgs): boolean {
   );
 }
 
+function omnyoServerDomains(env: NodeJS.ProcessEnv): string[] {
+  const serverUrl = env.OMNYO_SERVER_URL?.trim();
+
+  if (!serverUrl || !URL.canParse(serverUrl)) {
+    return [];
+  }
+
+  return [new URL(serverUrl).hostname];
+}
+
 export function buildWorkspaceWriteSandbox(
   params: WorkspaceWriteSandboxArgs,
+  env: NodeJS.ProcessEnv,
 ): Options["sandbox"] | undefined {
   if (!params.sandboxEnabled || !isWorkspaceWriteSession(params)) {
     return undefined;
   }
 
   const allowWrite = params.additionalWorkspaceWriteRoots ?? [];
+  const allowedDomains = omnyoServerDomains(env);
+
   return {
     enabled: true,
     failIfUnavailable: false,
     autoAllowBashIfSandboxed: true,
     allowUnsandboxedCommands: true,
-    network: { allowLocalBinding: true },
+    network: {
+      allowLocalBinding: true,
+      ...(allowedDomains.length > 0 ? { allowedDomains } : {}),
+    },
     ...(allowWrite.length > 0
       ? { filesystem: { allowWrite: [...allowWrite] } }
       : {}),
@@ -157,6 +201,7 @@ const CLAUDE_WINDOWS_EXECUTABLE_NAME = "claude.exe";
 function isExecutableFile(candidatePath: string): boolean {
   try {
     accessSync(candidatePath, constants.X_OK);
+
     return statSync(candidatePath).isFile();
   } catch {
     return false;
@@ -174,7 +219,9 @@ function resolveExecutableOnPath(
     if (!searchDir) {
       continue;
     }
+
     const candidate = join(searchDir, args.executableName);
+
     if (isExecutableFile(candidate)) {
       return candidate;
     }
@@ -187,21 +234,27 @@ function wellKnownClaudeExecutablePaths(env: NodeJS.ProcessEnv): string[] {
   if (process.getuid?.() === 0) {
     return [];
   }
+
   if (process.platform === "win32") {
     const userProfile = env.USERPROFILE?.trim();
+
     return userProfile
       ? [join(userProfile, ".local", "bin", CLAUDE_WINDOWS_EXECUTABLE_NAME)]
       : [];
   }
+
   const candidatePaths: string[] = [];
   const home = env.HOME?.trim();
+
   if (home) {
     candidatePaths.push(
       join(home, ".local", "bin", "claude"),
       join(home, ".claude", "local", "claude"),
     );
   }
+
   candidatePaths.push("/opt/homebrew/bin/claude", "/usr/local/bin/claude");
+
   return candidatePaths;
 }
 
@@ -210,9 +263,11 @@ export function resolveClaudeCodeExecutable(
 ): string | null {
   const explicitPath = args.env[CLAUDE_CODE_EXECUTABLE_ENV];
   const trimmedExplicitPath = explicitPath?.trim();
+
   if (trimmedExplicitPath && trimmedExplicitPath.length > 0) {
     try {
       accessSync(trimmedExplicitPath, constants.X_OK);
+
       return trimmedExplicitPath;
     } catch {
       throw new Error(
@@ -226,6 +281,7 @@ export function resolveClaudeCodeExecutable(
       process.platform === "win32" ? CLAUDE_WINDOWS_EXECUTABLE_NAME : "claude",
     pathEnv: args.env.PATH ?? args.env.Path,
   });
+
   if (executableOnPath) {
     return executableOnPath;
   }
@@ -245,35 +301,43 @@ export function buildSessionOptions(
 ): SdkSessionOptions {
   const systemPrompt: Exclude<Options["systemPrompt"], undefined> =
     params.instructionMode === "replace"
-      ? (params.baseInstructions ?? "You are a helpful coding assistant.")
+      ? {
+          type: "custom",
+          prompt:
+            params.baseInstructions ?? "You are a helpful coding assistant.",
+          snapshot: false,
+        }
       : {
           type: "preset",
           preset: "claude_code",
+          snapshot: false,
           ...(params.baseInstructions && params.baseInstructions.length > 0
             ? { append: params.baseInstructions }
             : {}),
         };
+
   const model = params.model;
-  const sandbox = buildWorkspaceWriteSandbox(params);
+  const sandbox = buildWorkspaceWriteSandbox(params, env);
+
   const additionalDirectories = isWorkspaceWriteSession(params)
     ? (params.additionalWorkspaceWriteRoots ?? [])
     : [];
+
   const pathToClaudeCodeExecutable = resolveClaudeCodeExecutable({ env });
   const flagSettings = buildFlagSettings(params);
+
   const effort =
     params.reasoningLevel === undefined
       ? undefined
       : toSdkEffort(params.reasoningLevel);
+
   const extraArgs = buildChromeExtraArgs(params.chromeEnabled);
 
   return {
     cwd: params.cwd,
     systemPrompt,
     model,
-    env: {
-      ...env,
-      CLAUDE_CODE_DISABLE_1M_CONTEXT: params.disable1MContext ? "1" : "0",
-    },
+    env: buildSessionSettingsEnv({ ...params, env }),
     permissionMode: params.permissionMode,
     allowBypassPermissions: params.permissionScope === "full",
     ...(effort !== undefined ? { effort } : {}),

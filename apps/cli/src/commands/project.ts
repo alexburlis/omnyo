@@ -1,14 +1,16 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import type {
   CreateProjectSourceRequest,
   HostDiscoveredRepo,
   ProjectResponse,
+  ProjectAttachmentContentQuery,
   UpdateProjectSourceRequest,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
+import { attachmentDiagnosticSchema } from "@omnyo/server-contract";
 import { action } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { resolveLocalHostId } from "../daemon.js";
 import { columnWidths, printBorderlessTable } from "../table.js";
 import { confirmDestructiveAction, outputJson } from "./helpers.js";
@@ -60,6 +62,7 @@ interface ProjectDiscoveryCommandOptions {
   limit?: string;
   provider?: string;
   query?: string;
+  snapshot?: boolean;
 }
 
 function addProjectWorkspaceRoutingOptions(command: Command): Command {
@@ -74,6 +77,8 @@ function addProjectWorkspaceRoutingOptions(command: Command): Command {
 
 interface ProjectUpdateCommandOptions {
   name?: string;
+  icon?: string;
+  resetIcon?: boolean;
   json?: boolean;
 }
 
@@ -91,6 +96,11 @@ interface ProjectAttachmentUploadCommandOptions {
 
 interface ProjectAttachmentDownloadCommandOptions {
   clientFile: string;
+  json?: boolean;
+  thumbnailWidth?: ProjectAttachmentContentQuery["thumbnailWidth"];
+}
+
+interface ProjectAttachmentRetainCommandOptions {
   json?: boolean;
 }
 
@@ -128,9 +138,11 @@ function validateProjectSourceAddOptions(
   if (args.clone && args.path) {
     throw new Error("Cannot combine --clone with --path.");
   }
+
   if (!args.clone && (args.remoteUrl || args.targetPath)) {
     throw new Error("--remote-url and --target-path require --clone.");
   }
+
   if (!args.clone && !args.path) {
     throw new Error("Provide --path or --clone.");
   }
@@ -147,9 +159,11 @@ function buildProjectSourceAddRequest(
       ...(args.targetPath ? { targetPath: args.targetPath } : {}),
     };
   }
+
   if (!args.path) {
     throw new Error("Provide --path or --clone.");
   }
+
   return {
     hostId: args.hostId,
     path: args.path,
@@ -167,6 +181,7 @@ function buildProjectSourceFromOptions(
       type: "local_path",
     };
   }
+
   throw new Error("Provide --path.");
 }
 
@@ -175,6 +190,7 @@ async function resolveProjectSourceHostId(
   serverUrl: string,
 ): Promise<string> {
   const machineTarget = resolveMachineTargetOption(args);
+
   return machineTarget
     ? resolveMachineHostId({
         requireConnected: true,
@@ -189,11 +205,13 @@ function requireProjectSource(
   sourceId: string,
 ): ProjectSource {
   const source = project.sources.find((candidate) => candidate.id === sourceId);
+
   if (!source) {
     throw new Error(
       `Project source ${sourceId} not found on project ${project.id}.`,
     );
   }
+
   return source;
 }
 
@@ -204,6 +222,7 @@ function buildProjectSourceUpdateRequest(
   if (!args.path && !args.default) {
     throw new Error("Provide --path and/or --default.");
   }
+
   return {
     ...(args.default ? { isDefault: true } : {}),
     ...(args.path ? { path: args.path } : {}),
@@ -231,13 +250,17 @@ async function attachmentMimeType(
 ): Promise<string> {
   if (explicitMimeType !== undefined) {
     const normalized = explicitMimeType.trim();
+
     if (normalized.length === 0) {
       throw new Error("--mime-type must not be empty.");
     }
+
     return normalized;
   }
+
   const { default: mimeTypes } = await import("mime-types");
   const inferred = mimeTypes.lookup(filename) || mimeTypes.lookup(clientPath);
+
   return typeof inferred === "string" ? inferred : "application/octet-stream";
 }
 
@@ -248,12 +271,65 @@ export function registerProjectCommands(
   const project = program
     .command("project")
     .description("Inspect and manage projects");
+
   const source = project
     .command("source")
     .description("Manage project sources");
+
   const attachment = project
     .command("attachment")
-    .description("Upload and download server-managed project attachments");
+    .description(
+      "Upload, download and retain server-managed project attachments",
+    );
+
+  attachment
+    .command("diagnostic <file>")
+    .description(
+      "Record a validated content-free attachment upload failure report in the coordinator log",
+    )
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (path: string, opts: { json?: boolean }) => {
+        const report = attachmentDiagnosticSchema.parse(
+          JSON.parse(await readFile(path, "utf8")),
+        );
+
+        const result =
+          await createCliOmnyoSdk(
+            getUrl(),
+          ).system.experimental_recordAttachmentDiagnostic(report);
+
+        if (!outputJson(opts, result))
+          console.log("Attachment diagnostic recorded");
+      }),
+    );
+
+  attachment
+    .command("retain <id> <threadId> <paths...>")
+    .description("Keep project attachments while the owning thread exists")
+    .option("--json", "Print machine-readable retention confirmation")
+    .action(
+      action(
+        async (
+          id: string,
+          threadId: string,
+          paths: string[],
+          opts: ProjectAttachmentRetainCommandOptions,
+        ) => {
+          await createCliOmnyoSdk(
+            getUrl(),
+          ).projects.attachments.experimental_retain({
+            projectId: id,
+            threadId,
+            paths,
+          });
+          const result = { ok: true, projectId: id, threadId, paths };
+
+          if (outputJson(opts, result)) return;
+          console.log(`Attachments retained for thread ${threadId}`);
+        },
+      ),
+    );
 
   attachment
     .command("upload <id>")
@@ -272,11 +348,14 @@ export function registerProjectCommands(
       action(
         async (id: string, opts: ProjectAttachmentUploadCommandOptions) => {
           const filename = opts.filename ?? basename(opts.clientFile);
+
           if (filename.trim().length === 0) {
             throw new Error("Attachment filename must not be empty.");
           }
+
           const bytes = await readFile(opts.clientFile);
-          const uploaded = await createCliBbSdk(
+
+          const uploaded = await createCliOmnyoSdk(
             getUrl(),
           ).projects.attachments.upload({
             clientFile: bytes,
@@ -288,6 +367,7 @@ export function registerProjectCommands(
             ),
             projectId: id,
           });
+
           if (outputJson(opts, uploaded)) return;
           console.log(`Attachment uploaded: ${uploaded.path}`);
         },
@@ -297,6 +377,12 @@ export function registerProjectCommands(
   attachment
     .command("download <id> <attachmentPath>")
     .description("Download an attachment to this CLI machine")
+    .addOption(
+      new Option(
+        "--thumbnail-width <pixels>",
+        "Download a lossless image thumbnail when supported",
+      ).choices(["160", "320", "640"]),
+    )
     .requiredOption(
       "--client-file <path>",
       "Destination path on this CLI machine",
@@ -309,19 +395,23 @@ export function registerProjectCommands(
           attachmentPath: string,
           opts: ProjectAttachmentDownloadCommandOptions,
         ) => {
-          const downloaded = await createCliBbSdk(
+          const downloaded = await createCliOmnyoSdk(
             getUrl(),
           ).projects.attachments.read({
             path: attachmentPath,
             projectId: id,
+            thumbnailWidth: opts.thumbnailWidth,
           });
+
           await writeFile(opts.clientFile, downloaded.bytes);
+
           const result = {
             attachmentPath,
             clientFile: opts.clientFile,
             mimeType: downloaded.mimeType,
             sizeBytes: downloaded.sizeBytes,
           };
+
           if (outputJson(opts, result)) return;
           console.log(`Attachment downloaded: ${opts.clientFile}`);
         },
@@ -335,15 +425,20 @@ export function registerProjectCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: ProjectListCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const projects = await sdk.projects.list({
           includePersonal: opts.includePersonal,
         });
+
         if (outputJson(opts, projects)) return;
+
         if (projects.length === 0) {
           console.log("No projects found");
+
           return;
         }
+
         printProjectTable(projects);
       }),
     );
@@ -357,15 +452,18 @@ export function registerProjectCommands(
     .action(
       action(async (opts: ProjectDiscoverCommandOptions) => {
         const serverUrl = getUrl();
-        const sdk = createCliBbSdk(serverUrl);
+        const sdk = createCliOmnyoSdk(serverUrl);
         const hostId = await resolveProjectSourceHostId(opts, serverUrl);
         const result = await sdk.hosts.experimental_discoverRepos({ hostId });
+
         if (outputJson(opts, result)) return;
+
         if (result.repos.length === 0) {
           console.log("No recently used git repositories found");
         } else {
           printDiscoveredRepoTable(result.repos);
         }
+
         if (result.truncated) {
           console.log("The scan ran out of time, so the list may be partial.");
         }
@@ -382,10 +480,14 @@ export function registerProjectCommands(
         if (opts.limit !== undefined && !/^\d+$/u.test(opts.limit)) {
           throw new Error("--limit must be a positive integer.");
         }
-        const result = await createCliBbSdk(getUrl()).projects.promptHistory({
-          projectId: id,
-          ...(opts.limit ? { limit: opts.limit } : {}),
-        });
+
+        const result = await createCliOmnyoSdk(getUrl()).projects.promptHistory(
+          {
+            projectId: id,
+            ...(opts.limit ? { limit: opts.limit } : {}),
+          },
+        );
+
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));
       }),
@@ -399,11 +501,12 @@ export function registerProjectCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: ProjectReorderCommandOptions) => {
-        const result = await createCliBbSdk(getUrl()).projects.reorder({
+        const result = await createCliOmnyoSdk(getUrl()).projects.reorder({
           projectId: id,
           previousProjectId: opts.after ?? null,
           nextProjectId: opts.before ?? null,
         });
+
         if (outputJson(opts, result)) return;
         console.log(`Project ${id} reordered`);
       }),
@@ -418,12 +521,13 @@ export function registerProjectCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: ProjectDiscoveryCommandOptions) => {
-        const result = await createCliBbSdk(getUrl()).projects.branches({
+        const result = await createCliOmnyoSdk(getUrl()).projects.branches({
           projectId: id,
           hostId: opts.host ?? "",
           ...(opts.query ? { query: opts.query } : {}),
           ...(opts.limit ? { limit: opts.limit } : {}),
         });
+
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));
       }),
@@ -437,7 +541,8 @@ export function registerProjectCommands(
     .action(
       action(async (id: string, opts: ProjectDiscoveryCommandOptions) => {
         const serverUrl = getUrl();
-        const result = await createCliBbSdk(getUrl()).projects.paths({
+
+        const result = await createCliOmnyoSdk(getUrl()).projects.paths({
           projectId: id,
           ...(await resolveMachineEnvironmentRouting(opts, serverUrl)),
           includeFiles: "true",
@@ -445,6 +550,7 @@ export function registerProjectCommands(
           ...(opts.query ? { query: opts.query } : {}),
           ...(opts.limit ? { limit: opts.limit } : {}),
         });
+
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));
       }),
@@ -453,15 +559,27 @@ export function registerProjectCommands(
   addProjectWorkspaceRoutingOptions(project.command("commands <id>"))
     .description("List provider commands and skills available to a project")
     .requiredOption("--provider <id>", "Provider ID")
+    .option(
+      "--snapshot",
+      "Read prepared commands without waiting for discovery",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: ProjectDiscoveryCommandOptions) => {
         const serverUrl = getUrl();
-        const result = await createCliBbSdk(getUrl()).projects.commands({
+
+        const sdk = createCliOmnyoSdk(serverUrl);
+
+        const args = {
           projectId: id,
           provider: opts.provider ?? "",
           ...(await resolveMachineEnvironmentRouting(opts, serverUrl)),
-        });
+        };
+
+        const result = opts.snapshot
+          ? await sdk.projects.commandCatalog(args)
+          : await sdk.projects.commands(args);
+
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));
       }),
@@ -475,12 +593,14 @@ export function registerProjectCommands(
     .action(
       action(async (id: string, opts: ProjectDiscoveryCommandOptions) => {
         const serverUrl = getUrl();
-        const result = await createCliBbSdk(serverUrl).projects.files({
+
+        const result = await createCliOmnyoSdk(serverUrl).projects.files({
           projectId: id,
           ...(await resolveMachineEnvironmentRouting(opts, serverUrl)),
           ...(opts.query ? { query: opts.query } : {}),
           ...(opts.limit ? { limit: opts.limit } : {}),
         });
+
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));
       }),
@@ -497,11 +617,15 @@ export function registerProjectCommands(
           opts: ProjectDiscoveryCommandOptions,
         ) => {
           const serverUrl = getUrl();
-          const result = await createCliBbSdk(serverUrl).projects.fileContent({
+
+          const result = await createCliOmnyoSdk(
+            serverUrl,
+          ).projects.fileContent({
             projectId: id,
             path,
             ...(await resolveMachineEnvironmentRouting(opts, serverUrl)),
           });
+
           if (outputJson(opts, result)) return;
           console.log(result.content);
         },
@@ -522,16 +646,19 @@ export function registerProjectCommands(
     .action(
       action(async (opts: ProjectCreateCommandOptions) => {
         const serverUrl = getUrl();
-        const sdk = createCliBbSdk(serverUrl);
+        const sdk = createCliOmnyoSdk(serverUrl);
         const hostId = await resolveProjectSourceHostId(opts, serverUrl);
+
         const source = buildProjectSourceFromOptions({
           hostId,
           path: opts.root,
         });
+
         const created = await sdk.projects.create({
           name: opts.name,
           source,
         });
+
         if (outputJson(opts, created)) return;
         console.log(`Project created: ${created.id}`);
         printProject(created);
@@ -544,8 +671,9 @@ export function registerProjectCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: ProjectShowCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const found = await sdk.projects.get({ projectId: id });
+
         if (outputJson(opts, found)) return;
         printProject(found);
       }),
@@ -555,17 +683,37 @@ export function registerProjectCommands(
     .command("update <id>")
     .description("Update a project")
     .option("--name <name>", "Set the project name")
+    .option(
+      "--icon <path>",
+      "Set a PNG project icon (up to 512 × 512 pixels and 48 KiB)",
+    )
+    .option("--reset-icon", "Restore the automatic project icon")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: ProjectUpdateCommandOptions) => {
-        if (!opts.name) {
-          throw new Error("No changes requested. Provide --name.");
+        if (opts.icon && opts.resetIcon)
+          throw new Error("Choose --icon or --reset-icon.");
+
+        if (!opts.name && !opts.icon && !opts.resetIcon) {
+          throw new Error(
+            "No changes requested. Provide --name, --icon, or --reset-icon.",
+          );
         }
-        const sdk = createCliBbSdk(getUrl());
+
+        const customIcon = opts.resetIcon
+          ? null
+          : opts.icon
+            ? `data:image/png;base64,${(await readFile(opts.icon)).toString("base64")}`
+            : undefined;
+
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const updated = await sdk.projects.update({
           projectId: id,
           name: opts.name,
+          customIcon,
         });
+
         if (outputJson(opts, updated)) return;
         console.log(`Project ${updated.id} updated`);
         printProject(updated);
@@ -583,13 +731,17 @@ export function registerProjectCommands(
           const confirmed = await confirmDestructiveAction(
             `Delete project ${id} and all its threads?`,
           );
+
           if (!confirmed) {
             console.log("Aborted.");
+
             return;
           }
         }
-        const sdk = createCliBbSdk(getUrl());
+
+        const sdk = createCliOmnyoSdk(getUrl());
         await sdk.projects.delete({ projectId: id });
+
         if (outputJson(opts, { ok: true, id })) return;
         console.log(`Project ${id} deleted`);
       }),
@@ -613,13 +765,15 @@ export function registerProjectCommands(
       action(
         async (projectId: string, opts: ProjectSourceAddCommandOptions) => {
           const serverUrl = getUrl();
-          const sdk = createCliBbSdk(serverUrl);
+          const sdk = createCliOmnyoSdk(serverUrl);
           validateProjectSourceAddOptions(opts);
           const hostId = await resolveProjectSourceHostId(opts, serverUrl);
+
           const createPayload = buildProjectSourceAddRequest({
             ...opts,
             hostId,
           });
+
           const created = await sdk.projects.sources.add({
             projectId,
             ...createPayload,
@@ -654,13 +808,15 @@ export function registerProjectCommands(
           sourceId: string,
           opts: ProjectSourceUpdateCommandOptions,
         ) => {
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
           const project = await sdk.projects.get({ projectId });
           const existingSource = requireProjectSource(project, sourceId);
+
           const updatePayload = buildProjectSourceUpdateRequest(
             existingSource,
             opts,
           );
+
           const updated = await sdk.projects.sources.update({
             projectId,
             sourceId,
@@ -690,15 +846,18 @@ export function registerProjectCommands(
             const confirmed = await confirmDestructiveAction(
               `Delete project source ${sourceId} from project ${projectId}?`,
             );
+
             if (!confirmed) {
               console.log("Aborted.");
+
               return;
             }
           }
 
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
           await sdk.projects.sources.delete({ projectId, sourceId });
           const result = { ok: true, projectId, sourceId };
+
           if (outputJson(opts, result)) return;
           console.log(`Project source ${sourceId} deleted`);
         },
@@ -712,13 +871,16 @@ function printProject(project: ProjectResponse): void {
   console.log(`  Name:     ${project.name}`);
   console.log(`  Created:  ${new Date(project.createdAt).toLocaleString()}`);
   console.log(`  Updated:  ${new Date(project.updatedAt).toLocaleString()}`);
+
   if (project.sources.length > 0) {
     console.log("  Sources:");
+
     for (const source of project.sources) {
       const defaultMarker = source.isDefault ? " [default]" : "";
       console.log(`    ${source.type}  ${source.path}${defaultMarker}`);
     }
   }
+
   console.log("");
 }
 
@@ -729,6 +891,7 @@ function printDiscoveredRepoTable(repos: HostDiscoveredRepo[]): void {
     repo.lastActivityAt.slice(0, 10),
     repo.projectId ?? "-",
   ]);
+
   printBorderlessTable(
     {
       head: ["NAME", "PATH", "LAST ACTIVE", "PROJECT"],
@@ -745,8 +908,10 @@ function printDiscoveredRepoTable(repos: HostDiscoveredRepo[]): void {
 function printProjectTable(projects: ProjectResponse[]): void {
   const rows = projects.map((project) => {
     const source = getProjectDisplaySource(project);
+
     return [project.id, project.name, source?.path ?? "-"];
   });
+
   printBorderlessTable(
     {
       head: ["ID", "Name", "Path"],

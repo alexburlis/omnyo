@@ -8,7 +8,7 @@ import {
  * Provider-native roots: the directories a provider's own agent reads skills
  * and slash commands from. A plugin declares them (relative to the target
  * host's home — `user` — or to the workspace — `project`) and resolves the
- * host-absolute ones per host and workspace through its `bb.host` entry. The
+ * host-absolute ones per host and workspace through its `omnyo.host` entry. The
  * daemon scans exactly these; core never guesses a layout.
  *
  * Two forms. The INPUT form is what a plugin writes: a bare path or an object
@@ -88,13 +88,14 @@ export const providerNativeRootInputSchema = z.union([
       /**
        * A file, relative to a skill directory under this root, that marks the
        * directory as a vendor plugin rather than a skill (Claude's
-       * `.claude-plugin/plugin.json`): bb skips such a directory. The plugin
+       * `.claude-plugin/plugin.json`): Omnyo skips such a directory. The plugin
        * that knows the vendor layout declares it; core names no vendor path.
        */
       skipIfManifest: nativeRootManifestPathSchema.optional(),
     })
     .strict(),
 ]);
+
 /**
  * One provider-native root as a plugin declares it: a path, or a path with
  * options. `recursive`: the agent scans nested skill directories. `ancestors`
@@ -126,6 +127,7 @@ export const providerNativeRootSchema = z
     skipIfManifest: nativeRootManifestPathSchema.optional(),
   })
   .strict();
+
 export type ProviderNativeRoot = z.infer<typeof providerNativeRootSchema>;
 
 function uniqueByPath<T extends { path: string }>(
@@ -163,11 +165,12 @@ export const providerNativeRootsSchema = z
     project: nativeRootSideSchema("project"),
   })
   .strict();
+
 export type ProviderNativeRoots = z.infer<typeof providerNativeRootsSchema>;
 
 export const EMPTY_PROVIDER_NATIVE_ROOTS: ProviderNativeRoots = Object.freeze({
-  user: Object.freeze([]) as readonly ProviderNativeRoot[] as ProviderNativeRoot[],
-  project: Object.freeze([]) as readonly ProviderNativeRoot[] as ProviderNativeRoot[],
+  user: Object.freeze<ProviderNativeRoot[]>([]) as ProviderNativeRoot[],
+  project: Object.freeze<ProviderNativeRoot[]>([]) as ProviderNativeRoot[],
 });
 
 /** Fill an input-form entry's defaults. */
@@ -177,6 +180,7 @@ export function normalizeProviderNativeRoot(
   if (typeof entry === "string") {
     return { path: entry, recursive: false, ancestors: false, namePrefix: "" };
   }
+
   return {
     path: entry.path,
     recursive: entry.recursive ?? false,
@@ -230,6 +234,7 @@ export const providerResolvedNativeRootShapeSchema = z.enum([
   "commands",
   "command-file",
 ]);
+
 export type ProviderResolvedNativeRootShape = z.infer<
   typeof providerResolvedNativeRootShapeSchema
 >;
@@ -274,12 +279,14 @@ export const providerResolvedNativeRootSchema =
         message: "Only a skills root carries a manifest marker",
       });
     }
+
     if (root.ancestors && root.origin !== "project") {
       context.addIssue({
         code: "custom",
         message: "Only project roots may walk ancestors",
       });
     }
+
     if (root.fallbackName !== undefined && root.shape !== "skill-file") {
       context.addIssue({
         code: "custom",
@@ -287,6 +294,7 @@ export const providerResolvedNativeRootSchema =
       });
     }
   });
+
 export type ProviderResolvedNativeRoot = z.infer<
   typeof providerResolvedNativeRootSchema
 >;
@@ -299,6 +307,7 @@ export const providerResolvedNativeRootInputSchema =
     namePrefix: true,
     shape: true,
   });
+
 export type ProviderResolvedNativeRootInput = z.input<
   typeof providerResolvedNativeRootInputSchema
 >;
@@ -312,7 +321,7 @@ export type ProviderResolvedNativeRootInput = z.input<
  */
 export function normalizeProviderResolvedNativeRoot(
   root: ProviderResolvedNativeRootInput,
-  side: keyof ProviderResolvedNativeRoots,
+  side: "skills" | "commands",
 ): ProviderResolvedNativeRoot {
   return {
     path: root.path,
@@ -335,6 +344,7 @@ const resolvedSkillShapes = new Set<ProviderResolvedNativeRootShape>([
   "skill",
   "skill-file",
 ]);
+
 const resolvedCommandShapes = new Set<ProviderResolvedNativeRootShape>([
   "commands",
   "command-file",
@@ -345,6 +355,10 @@ export const PROVIDER_RESOLVED_NATIVE_ROOTS_MAX = 256;
 
 export const providerResolvedNativeRootsSchema = z
   .object({
+    watchPaths: z
+      .array(absoluteNativeRootPathSchema)
+      .max(PROVIDER_RESOLVED_NATIVE_ROOTS_MAX)
+      .optional(),
     skills: z
       .array(
         providerResolvedNativeRootSchema.refine(
@@ -363,14 +377,19 @@ export const providerResolvedNativeRootsSchema = z
       .max(PROVIDER_RESOLVED_NATIVE_ROOTS_MAX),
   })
   .strict();
+
 export type ProviderResolvedNativeRoots = z.infer<
   typeof providerResolvedNativeRootsSchema
 >;
 
 export const EMPTY_PROVIDER_RESOLVED_NATIVE_ROOTS: ProviderResolvedNativeRoots =
   Object.freeze({
-    skills: Object.freeze([]) as readonly ProviderResolvedNativeRoot[] as ProviderResolvedNativeRoot[],
-    commands: Object.freeze([]) as readonly ProviderResolvedNativeRoot[] as ProviderResolvedNativeRoot[],
+    skills: Object.freeze<ProviderResolvedNativeRoot[]>(
+      [],
+    ) as ProviderResolvedNativeRoot[],
+    commands: Object.freeze<ProviderResolvedNativeRoot[]>(
+      [],
+    ) as ProviderResolvedNativeRoot[],
   });
 
 /**
@@ -384,4 +403,5 @@ export const providerNativeRootSetSchema = z
     resolved: providerResolvedNativeRootsSchema,
   })
   .strict();
+
 export type ProviderNativeRootSet = z.infer<typeof providerNativeRootSetSchema>;

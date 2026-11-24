@@ -11,7 +11,9 @@ const SRC_DIR = path.resolve(
 function listSourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const fullPath = path.join(dir, entry.name);
+
     if (entry.isDirectory()) return listSourceFiles(fullPath);
+
     return /\.tsx?$/u.test(entry.name) ? [fullPath] : [];
   });
 }
@@ -24,7 +26,9 @@ function stripComments(source: string): string {
 
 const BROWSER_GLOBALS =
   "window|document|localStorage|sessionStorage|navigator|location|history|matchMedia|requestAnimationFrame";
+
 const GLOBAL_HOSTS = "globalThis|self|window";
+
 const BROWSER_GLOBAL_PATTERN = new RegExp(
   [
     String.raw`(?<![\w$.])(?:(?:${GLOBAL_HOSTS})\s*\??\.\s*)?(?:${BROWSER_GLOBALS})(?![\w$])\s*(?:[?!]?[.[(]|[;,)]|\?\?|\|\||&&|[!=]==?|as\b|$)`,
@@ -37,7 +41,7 @@ const BROWSER_GLOBAL_PATTERN = new RegExp(
 const FORBIDDEN_IMPORT_PATTERN =
   /from\s+["'](?:react|react-dom|react-router|react-router-dom|jotai|@tanstack\/[\w-]+|@\/[^"']*)(?:\/[^"']*)?["']/u;
 
-describe("@bb/client-core stays DOM-free", () => {
+describe("@omnyo/client-core stays DOM-free", () => {
   const files = listSourceFiles(SRC_DIR);
 
   it("has source files to check", () => {
@@ -78,14 +82,17 @@ describe("@bb/client-core stays DOM-free", () => {
       'matchMedia("(prefers-color-scheme: dark)")',
       "requestAnimationFrame(() => {});",
     ];
+
     for (const snippet of caught) {
       expect(BROWSER_GLOBAL_PATTERN.test(snippet), snippet).toBe(true);
     }
+
     expect(
       FORBIDDEN_IMPORT_PATTERN.test(
         'import { matchPath } from "react-router-dom";',
       ),
     ).toBe(true);
+
     const allowed = [
       "const windowed = true;",
       "row.document.id",
@@ -94,6 +101,7 @@ describe("@bb/client-core stays DOM-free", () => {
       "return { history: rows, location: at };",
       'kind: "document",',
     ];
+
     for (const snippet of allowed) {
       expect(BROWSER_GLOBAL_PATTERN.test(snippet), snippet).toBe(false);
     }

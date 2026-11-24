@@ -1,6 +1,9 @@
-import type { WorkspaceDiffTarget } from "@bb/domain";
-import type { ThreadListFilters, ThreadSearchFilters } from "@bb/client-core";
-import type { EnvironmentFilePreviewSource } from "@bb/client-core";
+import type { WorkspaceDiffTarget } from "@omnyo/domain";
+import type {
+  ThreadListFilters,
+  ThreadSearchFilters,
+} from "@omnyo/client-core";
+import type { EnvironmentFilePreviewSource } from "@omnyo/client-core";
 import {
   DEFAULT_THREAD_STORAGE_FILE_LIST_OPTIONS,
   type ThreadStorageFileListOptions,
@@ -11,80 +14,167 @@ import {
 } from "@/lib/path-list-options";
 
 const HOSTS_QUERY_KEY = "hosts";
+
 const HOST_QUERY_KEY = "host";
+
 const HOST_DIRECTORY_QUERY_KEY = "hostDirectory";
+
 const HOST_DISCOVERED_REPOS_QUERY_KEY = "hostDiscoveredRepos";
+
 const HOST_CLONE_DEFAULT_PATH_QUERY_KEY = "hostCloneDefaultPath";
+
 const PROJECTS_QUERY_KEY = "projects";
+
 const PROJECT_PATHS_QUERY_KEY = "projectPaths";
+
 const PROJECT_FILE_PREVIEW_QUERY_KEY = "projectFilePreview";
+
 const PROJECT_ATTACHMENT_PREVIEW_QUERY_KEY = "projectAttachmentPreview";
+
 export const PROJECT_SOURCE_BRANCHES_QUERY_KEY = "projectSourceBranches";
+
 const PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY =
   "projectDefaultExecutionOptions";
+
 const PROJECT_PROMPT_HISTORY_QUERY_KEY = "projectPromptHistory";
+
 export const SIDEBAR_NAVIGATION_QUERY_KEY = "sidebarNavigation";
+
 export const THREADS_QUERY_KEY = "threads";
+
 const THREAD_SEARCH_QUERY_KEY = "threadSearch";
+
 const THREADS_DISABLED_QUERY_KEY = "threadsDisabled";
+
 export const THREAD_QUERY_KEY = "thread";
+
+export function threadContinuationsQueryKey() {
+  return ["threadContinuations"] as const;
+}
+
+export function threadStartMachinesQueryKey(threadId: string) {
+  return ["threadStartMachines", threadId] as const;
+}
+
+export function managedPreviewsQueryKey(threadId: string) {
+  return ["managed-previews", threadId] as const;
+}
+
+export function managedPreviewStatusQueryKey(previewId: string | undefined) {
+  return ["managed-preview-status", previewId] as const;
+}
+
 const THREAD_TABS_QUERY_KEY = "threadTabs";
+
 const THREAD_DETAIL_BOOTSTRAP_QUERY_KEY = "threadDetailBootstrap";
+
+const THREAD_PLUGIN_BOOTSTRAP_QUERY_KEY = "threadPluginBootstrap";
+
+const THREAD_OPEN_RUNTIME_IDENTITY_QUERY_KEY = "threadOpenRuntimeIdentity";
+
 const THREAD_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY =
   "threadDefaultExecutionOptions";
+
 const THREAD_QUEUED_MESSAGES_QUERY_KEY = "threadQueuedMessages";
+
 const THREAD_PROMPT_HISTORY_QUERY_KEY = "threadPromptHistory";
+
 const THREAD_PENDING_INTERACTIONS_QUERY_KEY = "threadPendingInteractions";
+
 const TERMINALS_QUERY_KEY = "terminals";
-const PROJECT_COMMANDS_QUERY_KEY = "projectCommands";
+
+const PROJECT_COMMAND_CATALOG_QUERY_KEY = "projectCommandCatalog";
+
 const THREAD_STORAGE_FILES_QUERY_KEY = "threadStorageFiles";
+
 const THREAD_STORAGE_LOCATION_QUERY_KEY = "threadStorageLocation";
+
 const THREAD_STORAGE_PATHS_QUERY_KEY = "threadStoragePaths";
+
 const THREAD_STORAGE_FILE_PREVIEW_QUERY_KEY = "threadStorageFilePreview";
+
 const THREAD_HOST_FILE_PREVIEW_QUERY_KEY = "threadHostFilePreview";
+
 const HOST_FILE_PREVIEW_QUERY_KEY = "hostFilePreview";
+
 const ENVIRONMENT_QUERY_KEY = "environment";
+
 export const ENVIRONMENT_WORK_STATUS_QUERY_KEY = "environmentWorkStatus";
+
 const ENVIRONMENT_PULL_REQUEST_QUERY_KEY = "environmentPullRequest";
+
 export const ENVIRONMENT_MERGE_BASE_BRANCHES_QUERY_KEY =
   "environmentMergeBaseBranches";
+
 export const ENVIRONMENT_DIFF_FILES_QUERY_KEY = "environmentDiffFiles";
+
 const ENVIRONMENT_DIFF_PATCH_QUERY_KEY = "environmentDiffPatch";
+
 const ENVIRONMENT_DIFF_FILE_QUERY_KEY = "environmentDiffFile";
+
 const ENVIRONMENT_FILE_PREVIEW_QUERY_KEY = "environmentFilePreview";
+
 const ENVIRONMENT_PATHS_QUERY_KEY = "environmentPaths";
+
 export const THREAD_TIMELINE_QUERY_KEY = "threadTimeline";
+
 const THREAD_CONVERSATION_OUTLINE_QUERY_KEY = "threadConversationOutline";
+
 const THREAD_TIMELINE_TURN_SUMMARY_DETAILS_QUERY_KEY =
   "threadTimelineTurnSummaryDetails";
+
 const SYSTEM_PROVIDERS_QUERY_KEY = "systemProviders";
+
 const SYSTEM_MACHINE_PROVIDERS_QUERY_KEY = "systemMachineProviders";
+
 const MACHINE_ENVIRONMENT_QUERY_KEY = "machine-environment";
+
 const SYSTEM_CONFIG_QUERY_KEY = "systemConfig";
+
 const SYSTEM_AI_SERVICES_QUERY_KEY = "systemAiServices";
+
 const UI_PREFERENCES_QUERY_KEY = "uiPreferences";
+
 const SYSTEM_THEME_QUERY_KEY = "systemTheme";
+
 export const SYSTEM_EXECUTION_OPTIONS_QUERY_KEY = "systemExecutionOptions";
+
 const SYSTEM_CLI_SKILLS_QUERY_KEY = "systemCliSkills";
+
 const SYSTEM_VERSION_QUERY_KEY = "systemVersion";
+
 const SYSTEM_APP_UPDATE_QUERY_KEY = "systemAppUpdate";
+
 const SERVER_MOVE_STATUS_QUERY_KEY = "serverMoveStatus";
+
 const HOST_PROVIDER_CLI_STATUS_QUERY_KEY = "hostProviderCliStatus";
+
 const SYSTEM_PROVIDER_STATES_QUERY_KEY = "systemProviderStates";
+
 const HOST_PATH_EXISTENCE_QUERY_KEY = "hostPathExistence";
+
 const PROJECT_SKILLS_QUERY_KEY = "projectSkills";
-export const SKILL_CONTENT_QUERY_KEY = "skillContent";
-export const SKILL_FILES_QUERY_KEY = "skillFiles";
+
 const PLUGIN_LIST_QUERY_KEY = "plugin-list";
+
 const PLUGIN_SAFE_MODE_QUERY_KEY = "plugin-safe-mode";
+
 const PLUGIN_SETTINGS_VIEW_QUERY_KEY = "plugin-settings-view";
+
 const PLUGIN_CONTRIBUTIONS_QUERY_KEY = "plugin-contributions";
+
 const PLUGIN_SDK_SETTINGS_QUERY_KEY = "plugin-settings";
+
 const PLUGIN_SOURCE_QUERY_KEY = "plugin-source";
+
 const PLUGIN_CATALOG_SEARCH_QUERY_KEY = "plugin-catalog-search";
+
 const PLUGIN_CATALOG_INSTALL_PLAN_QUERY_KEY = "plugin-catalog-install-plan";
+
 const PLUGIN_MARKETPLACES_QUERY_KEY = "plugin-marketplaces";
+
 const PLUGIN_INSTALL_JOBS_QUERY_KEY = "plugin-install-jobs";
+
 export interface ThreadListQueryFilters {
   projectId?: string;
   hostId?: string;
@@ -110,42 +200,57 @@ export interface ArchivedThreadsListFilters {
 
 export const ARCHIVED_THREADS_LIST_KIND = "archivedList";
 
+export const SHELVED_THREADS_LIST_KIND = "shelvedList";
+
 type HostsQueryKey =
   | readonly [typeof HOSTS_QUERY_KEY]
   | readonly [typeof HOSTS_QUERY_KEY, true];
+
 type HostQueryId = string | null | undefined;
+
 type HostQueryKey = readonly [typeof HOST_QUERY_KEY, HostQueryId];
+
 type AllHostQueryKeyPrefix = readonly [typeof HOST_QUERY_KEY];
+
 type HostDirectoryQueryKey = readonly [
   typeof HOST_DIRECTORY_QUERY_KEY,
   HostQueryId,
   string | null,
 ];
+
 type HostCloneDefaultPathQueryKey = readonly [
   typeof HOST_CLONE_DEFAULT_PATH_QUERY_KEY,
   HostQueryId,
   string | null,
 ];
+
 type ProjectsQueryKey = readonly [typeof PROJECTS_QUERY_KEY];
+
 type AllProjectPathsQueryKeyPrefix = readonly [typeof PROJECT_PATHS_QUERY_KEY];
+
 type AllProjectSourceBranchesQueryKeyPrefix = readonly [
   typeof PROJECT_SOURCE_BRANCHES_QUERY_KEY,
 ];
+
 type ProjectSourceBranchesQueryKeyPrefix = readonly [
   typeof PROJECT_SOURCE_BRANCHES_QUERY_KEY,
   string,
 ];
+
 type ProjectDefaultExecutionOptionsQueryKey = readonly [
   typeof PROJECT_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY,
   string,
 ];
+
 type ProjectPromptHistoryQueryKeyPrefix = readonly [
   typeof PROJECT_PROMPT_HISTORY_QUERY_KEY,
 ];
+
 type ProjectPromptHistoryQueryKey = readonly [
   typeof PROJECT_PROMPT_HISTORY_QUERY_KEY,
   string | null | undefined,
 ];
+
 type ProjectPathsQueryKey = readonly [
   typeof PROJECT_PATHS_QUERY_KEY,
   string | undefined,
@@ -156,10 +261,12 @@ type ProjectPathsQueryKey = readonly [
   boolean,
   boolean,
 ];
+
 type ProjectPathsQueryKeyPrefix = readonly [
   typeof PROJECT_PATHS_QUERY_KEY,
   string,
 ];
+
 type ProjectFilePreviewQueryKey = readonly [
   typeof PROJECT_FILE_PREVIEW_QUERY_KEY,
   string | undefined,
@@ -167,11 +274,13 @@ type ProjectFilePreviewQueryKey = readonly [
   string | null,
   string | null,
 ];
+
 type ProjectAttachmentPreviewQueryKey = readonly [
   typeof PROJECT_ATTACHMENT_PREVIEW_QUERY_KEY,
   string,
   string,
 ];
+
 type ProjectSourceBranchesQueryKey = readonly [
   typeof PROJECT_SOURCE_BRANCHES_QUERY_KEY,
   string,
@@ -180,166 +289,219 @@ type ProjectSourceBranchesQueryKey = readonly [
   number,
   string,
 ];
+
 export type SidebarNavigationQueryKey = readonly [
   typeof SIDEBAR_NAVIGATION_QUERY_KEY,
 ];
+
 type ThreadsQueryKey = readonly [typeof THREADS_QUERY_KEY];
+
 type ThreadListQueryKey = readonly [
   typeof THREADS_QUERY_KEY,
   ThreadListQueryFilters,
 ];
+
 type ThreadSearchQueryKey = readonly [
   typeof THREAD_SEARCH_QUERY_KEY,
   ThreadSearchQueryFilters,
 ];
+
 type ThreadSearchQueryKeyPrefix = readonly [typeof THREAD_SEARCH_QUERY_KEY];
+
 type ArchivedThreadsListQueryKey = readonly [
   typeof THREADS_QUERY_KEY,
   typeof ARCHIVED_THREADS_LIST_KIND,
   ArchivedThreadsListFilters,
 ];
+
+type ShelvedThreadsListQueryKey = readonly [
+  typeof THREADS_QUERY_KEY,
+  typeof SHELVED_THREADS_LIST_KIND,
+  Record<string, never>,
+];
+
 type DisabledThreadListQueryKey = readonly [
   typeof THREADS_DISABLED_QUERY_KEY,
   ThreadListQueryFilters?,
 ];
+
 type ThreadQueryKeyPrefix = readonly [typeof THREAD_QUERY_KEY];
+
 type ThreadQueryKey = readonly [typeof THREAD_QUERY_KEY, string];
+
 type ThreadTabsQueryKey = readonly [typeof THREAD_TABS_QUERY_KEY, string];
+
 type ThreadDetailBootstrapQueryKeyPrefix = readonly [
   typeof THREAD_DETAIL_BOOTSTRAP_QUERY_KEY,
 ];
+
 type ThreadDetailBootstrapQueryKey = readonly [
   typeof THREAD_DETAIL_BOOTSTRAP_QUERY_KEY,
   string,
 ];
+
 type ThreadDefaultExecutionOptionsQueryKeyPrefix = readonly [
   typeof THREAD_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY,
 ];
+
 type ThreadDefaultExecutionOptionsQueryKey = readonly [
   typeof THREAD_DEFAULT_EXECUTION_OPTIONS_QUERY_KEY,
   string,
 ];
+
 type ThreadQueuedMessagesQueryKeyPrefix = readonly [
   typeof THREAD_QUEUED_MESSAGES_QUERY_KEY,
 ];
+
 type ThreadQueuedMessagesQueryKey = readonly [
   typeof THREAD_QUEUED_MESSAGES_QUERY_KEY,
   string,
 ];
+
 type ThreadPromptHistoryQueryKeyPrefix = readonly [
   typeof THREAD_PROMPT_HISTORY_QUERY_KEY,
 ];
+
 type ThreadPromptHistoryQueryKey = readonly [
   typeof THREAD_PROMPT_HISTORY_QUERY_KEY,
   string,
 ];
+
 type ThreadPendingInteractionsQueryKeyPrefix = readonly [
   typeof THREAD_PENDING_INTERACTIONS_QUERY_KEY,
 ];
+
 type ThreadPendingInteractionsQueryKey = readonly [
   typeof THREAD_PENDING_INTERACTIONS_QUERY_KEY,
   string,
 ];
+
 export type TerminalQueryScope =
   | { kind: "thread"; threadId: string }
   | { kind: "environment"; environmentId: string }
   | { kind: "host_path"; cwd?: string; hostId: string };
+
 type AllTerminalsQueryKeyPrefix = readonly [typeof TERMINALS_QUERY_KEY];
+
 type TerminalsQueryKey = readonly [
   typeof TERMINALS_QUERY_KEY,
   TerminalQueryScope,
 ];
-type ProjectCommandsQueryKey = readonly [
-  typeof PROJECT_COMMANDS_QUERY_KEY,
+
+type ProjectCommandCatalogQueryKey = readonly [
+  typeof PROJECT_COMMAND_CATALOG_QUERY_KEY,
   string | undefined,
   string | undefined,
   string | null,
   string | null,
 ];
-type AllProjectCommandsQueryKeyPrefix = readonly [
-  typeof PROJECT_COMMANDS_QUERY_KEY,
+
+type AllProjectCommandCatalogQueryKeyPrefix = readonly [
+  typeof PROJECT_COMMAND_CATALOG_QUERY_KEY,
 ];
+
 type ThreadStorageFilesQueryKey = readonly [
   typeof THREAD_STORAGE_FILES_QUERY_KEY,
   string,
   ThreadStorageFileListOptions,
 ];
+
 type ThreadStorageLocationQueryKey = readonly [
   typeof THREAD_STORAGE_LOCATION_QUERY_KEY,
   string,
 ];
+
 type AllThreadStorageLocationsQueryKeyPrefix = readonly [
   typeof THREAD_STORAGE_LOCATION_QUERY_KEY,
 ];
+
 type ThreadStoragePathsQueryKey = readonly [
   typeof THREAD_STORAGE_PATHS_QUERY_KEY,
   string,
   PathListOptions,
 ];
+
 type AllThreadStorageFilesQueryKeyPrefix = readonly [
   typeof THREAD_STORAGE_FILES_QUERY_KEY,
 ];
+
 type AllThreadStoragePathsQueryKeyPrefix = readonly [
   typeof THREAD_STORAGE_PATHS_QUERY_KEY,
 ];
+
 type ThreadStorageFilesForThreadQueryKeyPrefix = readonly [
   typeof THREAD_STORAGE_FILES_QUERY_KEY,
   string,
 ];
+
 type ThreadStoragePathsForThreadQueryKeyPrefix = readonly [
   typeof THREAD_STORAGE_PATHS_QUERY_KEY,
   string,
 ];
+
 type AllThreadStorageFilePreviewQueryKeyPrefix = readonly [
   typeof THREAD_STORAGE_FILE_PREVIEW_QUERY_KEY,
 ];
+
 type ThreadStorageFilePreviewQueryKey = readonly [
   typeof THREAD_STORAGE_FILE_PREVIEW_QUERY_KEY,
   string,
   string | null,
 ];
+
 type ThreadStorageFilePreviewQueryKeyPrefix = readonly [
   typeof THREAD_STORAGE_FILE_PREVIEW_QUERY_KEY,
   string,
 ];
+
 type ThreadHostFilePreviewQueryKey = readonly [
   typeof THREAD_HOST_FILE_PREVIEW_QUERY_KEY,
   string,
   string | null | undefined,
   string | null,
 ];
+
 type AllThreadHostFilePreviewQueryKeyPrefix = readonly [
   typeof THREAD_HOST_FILE_PREVIEW_QUERY_KEY,
 ];
+
 type HostFilePreviewQueryKey = readonly [
   typeof HOST_FILE_PREVIEW_QUERY_KEY,
   string | null,
   string | null,
 ];
+
 type EnvironmentQueryKeyPrefix = readonly [typeof ENVIRONMENT_QUERY_KEY];
+
 type EnvironmentQueryKey = readonly [
   typeof ENVIRONMENT_QUERY_KEY,
   string | null | undefined,
 ];
+
 type EnvironmentWorkStatusQueryKeyRootPrefix = readonly [
   typeof ENVIRONMENT_WORK_STATUS_QUERY_KEY,
 ];
+
 export type EnvironmentWorkStatusQueryKey = readonly [
   typeof ENVIRONMENT_WORK_STATUS_QUERY_KEY,
   string | null | undefined,
   string | null,
 ];
+
 type EnvironmentWorkStatusQueryKeyPrefix = readonly [
   typeof ENVIRONMENT_WORK_STATUS_QUERY_KEY,
   string,
 ];
+
 type EnvironmentPullRequestQueryKey = readonly [
   typeof ENVIRONMENT_PULL_REQUEST_QUERY_KEY,
   string | null | undefined,
 ];
+
 type EnvironmentMergeBaseBranchesQueryKeyRootPrefix = readonly [
   typeof ENVIRONMENT_MERGE_BASE_BRANCHES_QUERY_KEY,
 ];
+
 type EnvironmentMergeBaseBranchesQueryKey = readonly [
   typeof ENVIRONMENT_MERGE_BASE_BRANCHES_QUERY_KEY,
   string,
@@ -347,26 +509,32 @@ type EnvironmentMergeBaseBranchesQueryKey = readonly [
   number,
   string,
 ];
+
 type EnvironmentMergeBaseBranchesQueryKeyPrefix = readonly [
   typeof ENVIRONMENT_MERGE_BASE_BRANCHES_QUERY_KEY,
   string,
 ];
+
 type ThreadTimelineQueryKey = readonly [
   typeof THREAD_TIMELINE_QUERY_KEY,
   string,
 ];
+
 type ThreadConversationOutlineQueryKey = readonly [
   typeof THREAD_CONVERSATION_OUTLINE_QUERY_KEY,
   string,
   ThreadConversationOutlineRole,
 ];
+
 type ThreadConversationOutlineQueryKeyPrefix = readonly [
   typeof THREAD_CONVERSATION_OUTLINE_QUERY_KEY,
   string,
 ];
+
 type AllThreadConversationOutlineQueryKeyPrefix = readonly [
   typeof THREAD_CONVERSATION_OUTLINE_QUERY_KEY,
 ];
+
 export interface ThreadTimelineTurnSummaryDetailsQueryIdentity {
   itemId: string | null;
   sourceSeqEnd: number;
@@ -374,6 +542,7 @@ export interface ThreadTimelineTurnSummaryDetailsQueryIdentity {
   threadId: string;
   turnId: string;
 }
+
 type ThreadTimelineTurnSummaryDetailsQueryKey = readonly [
   typeof THREAD_TIMELINE_TURN_SUMMARY_DETAILS_QUERY_KEY,
   string,
@@ -382,33 +551,41 @@ type ThreadTimelineTurnSummaryDetailsQueryKey = readonly [
   number,
   string | null,
 ];
+
 type ThreadTimelineQueryKeyPrefix = readonly [
   typeof THREAD_TIMELINE_QUERY_KEY,
   string,
 ];
+
 type AllThreadTimelineQueryKeyPrefix = readonly [
   typeof THREAD_TIMELINE_QUERY_KEY,
 ];
+
 type ThreadTimelineTurnSummaryDetailsQueryKeyPrefix = readonly [
   typeof THREAD_TIMELINE_TURN_SUMMARY_DETAILS_QUERY_KEY,
   string,
 ];
+
 type AllThreadTimelineTurnSummaryDetailsQueryKeyPrefix = readonly [
   typeof THREAD_TIMELINE_TURN_SUMMARY_DETAILS_QUERY_KEY,
 ];
+
 type EnvironmentDiffFilesQueryKey = readonly [
   typeof ENVIRONMENT_DIFF_FILES_QUERY_KEY,
   string,
   string | null,
   string | null,
 ];
+
 type EnvironmentDiffFilesQueryKeyRootPrefix = readonly [
   typeof ENVIRONMENT_DIFF_FILES_QUERY_KEY,
 ];
+
 type EnvironmentDiffFilesQueryKeyPrefix = readonly [
   typeof ENVIRONMENT_DIFF_FILES_QUERY_KEY,
   string,
 ];
+
 type EnvironmentDiffPatchQueryKey = readonly [
   typeof ENVIRONMENT_DIFF_PATCH_QUERY_KEY,
   string,
@@ -416,13 +593,16 @@ type EnvironmentDiffPatchQueryKey = readonly [
   string | null,
   string,
 ];
+
 type EnvironmentDiffPatchQueryKeyRootPrefix = readonly [
   typeof ENVIRONMENT_DIFF_PATCH_QUERY_KEY,
 ];
+
 type EnvironmentDiffPatchQueryKeyPrefix = readonly [
   typeof ENVIRONMENT_DIFF_PATCH_QUERY_KEY,
   string,
 ];
+
 type EnvironmentDiffFileQueryKey = readonly [
   typeof ENVIRONMENT_DIFF_FILE_QUERY_KEY,
   string,
@@ -431,19 +611,23 @@ type EnvironmentDiffFileQueryKey = readonly [
   string,
   "old" | "new",
 ];
+
 type EnvironmentFilePreviewQueryKey = readonly [
   typeof ENVIRONMENT_FILE_PREVIEW_QUERY_KEY,
   string | null | undefined,
   string | null,
   EnvironmentFilePreviewSource | null,
 ];
+
 type EnvironmentFilePreviewQueryKeyRootPrefix = readonly [
   typeof ENVIRONMENT_FILE_PREVIEW_QUERY_KEY,
 ];
+
 type EnvironmentFilePreviewQueryKeyPrefix = readonly [
   typeof ENVIRONMENT_FILE_PREVIEW_QUERY_KEY,
   string,
 ];
+
 type EnvironmentPathsQueryKey = readonly [
   typeof ENVIRONMENT_PATHS_QUERY_KEY,
   string | undefined,
@@ -452,71 +636,95 @@ type EnvironmentPathsQueryKey = readonly [
   boolean,
   boolean,
 ];
+
 type EnvironmentPathsQueryKeyPrefix = readonly [
   typeof ENVIRONMENT_PATHS_QUERY_KEY,
   string,
 ];
+
 type SystemProvidersQueryKey = readonly [
   typeof SYSTEM_PROVIDERS_QUERY_KEY,
   string | null,
   string | null,
   "usage" | null,
 ];
+
 type AllSystemProvidersQueryKeyPrefix = readonly [
   typeof SYSTEM_PROVIDERS_QUERY_KEY,
 ];
+
 type SystemMachineProvidersQueryKey = readonly [
   typeof SYSTEM_MACHINE_PROVIDERS_QUERY_KEY,
 ];
+
 type AllSystemMachineProvidersQueryKeyPrefix = readonly [
   typeof SYSTEM_MACHINE_PROVIDERS_QUERY_KEY,
 ];
+
 type MachineEnvironmentQueryKey = readonly [
   typeof MACHINE_ENVIRONMENT_QUERY_KEY,
   string | null,
 ];
+
 type AllMachineEnvironmentQueryKeyPrefix = readonly [
   typeof MACHINE_ENVIRONMENT_QUERY_KEY,
 ];
+
 type SystemConfigQueryKey = readonly [typeof SYSTEM_CONFIG_QUERY_KEY];
+
 type SystemAiServicesQueryKey = readonly [typeof SYSTEM_AI_SERVICES_QUERY_KEY];
+
 type UiPreferencesQueryKey = readonly [typeof UI_PREFERENCES_QUERY_KEY];
+
 type SystemThemeQueryKey = readonly [typeof SYSTEM_THEME_QUERY_KEY, string];
+
 type AllSystemThemesQueryKeyPrefix = readonly [typeof SYSTEM_THEME_QUERY_KEY];
+
 type SystemCliSkillsQueryKey = readonly [typeof SYSTEM_CLI_SKILLS_QUERY_KEY];
+
 type SystemVersionQueryKey = readonly [typeof SYSTEM_VERSION_QUERY_KEY];
+
 type SystemAppUpdateQueryKey = readonly [typeof SYSTEM_APP_UPDATE_QUERY_KEY];
+
 type ServerMoveStatusQueryKey = readonly [typeof SERVER_MOVE_STATUS_QUERY_KEY];
+
 type HostProviderCliStatusQueryKey = readonly [
   typeof HOST_PROVIDER_CLI_STATUS_QUERY_KEY,
   string | null,
 ];
+
 type SystemProviderStatesQueryKey = readonly [
   typeof SYSTEM_PROVIDER_STATES_QUERY_KEY,
   string | null,
   string | null,
 ];
+
 type SystemExecutionOptionsQueryKey = readonly [
   typeof SYSTEM_EXECUTION_OPTIONS_QUERY_KEY,
   string | null,
   string | null,
   string | null,
 ];
+
 type AllSystemExecutionOptionsQueryKeyPrefix = readonly [
   typeof SYSTEM_EXECUTION_OPTIONS_QUERY_KEY,
 ];
+
 type SystemExecutionOptionsEnvironmentQueryKeyPrefix = readonly [
   typeof SYSTEM_EXECUTION_OPTIONS_QUERY_KEY,
   string | null,
 ];
+
 type HostPathExistenceQueryKey = readonly [
   typeof HOST_PATH_EXISTENCE_QUERY_KEY,
   string | null,
   readonly string[],
 ];
+
 type HostPathExistenceQueryKeyPrefix = readonly [
   typeof HOST_PATH_EXISTENCE_QUERY_KEY,
 ];
+
 interface ProjectDefaultExecutionOptionsQueryKeyArgs {
   projectId: string;
 }
@@ -724,6 +932,10 @@ export function archivedThreadsListQueryKey(
   return [THREADS_QUERY_KEY, ARCHIVED_THREADS_LIST_KIND, filters];
 }
 
+export function shelvedThreadsListQueryKey(): ShelvedThreadsListQueryKey {
+  return [THREADS_QUERY_KEY, SHELVED_THREADS_LIST_KIND, {}];
+}
+
 export function disabledThreadListQueryKey(
   filters?: ThreadListQueryFilters,
 ): DisabledThreadListQueryKey {
@@ -744,6 +956,18 @@ export function threadDetailBootstrapQueryKey(
   threadId: string,
 ): ThreadDetailBootstrapQueryKey {
   return [THREAD_DETAIL_BOOTSTRAP_QUERY_KEY, threadId];
+}
+
+export function threadPluginBootstrapQueryKey(threadId: string) {
+  return [THREAD_PLUGIN_BOOTSTRAP_QUERY_KEY, threadId] as const;
+}
+
+export function allThreadPluginBootstrapQueryKeyPrefix() {
+  return [THREAD_PLUGIN_BOOTSTRAP_QUERY_KEY] as const;
+}
+
+export function threadOpenRuntimeIdentityQueryKey() {
+  return [THREAD_OPEN_RUNTIME_IDENTITY_QUERY_KEY] as const;
 }
 
 export function allThreadDetailBootstrapQueryKeyPrefix(): ThreadDetailBootstrapQueryKeyPrefix {
@@ -804,23 +1028,23 @@ export function allTerminalsQueryKeyPrefix(): AllTerminalsQueryKeyPrefix {
   return [TERMINALS_QUERY_KEY];
 }
 
-export function projectCommandsQueryKey(
+export function projectCommandCatalogQueryKey(
   projectId: string | undefined,
   providerId: string | undefined,
   environmentId: string | null,
   hostId: string | null,
-): ProjectCommandsQueryKey {
+): ProjectCommandCatalogQueryKey {
   return [
-    PROJECT_COMMANDS_QUERY_KEY,
+    PROJECT_COMMAND_CATALOG_QUERY_KEY,
     projectId,
     providerId,
     environmentId,
-    hostId,
+    environmentId === null ? hostId : null,
   ];
 }
 
-export function allProjectCommandsQueryKeyPrefix(): AllProjectCommandsQueryKeyPrefix {
-  return [PROJECT_COMMANDS_QUERY_KEY];
+export function allProjectCommandCatalogQueryKeyPrefix(): AllProjectCommandCatalogQueryKeyPrefix {
+  return [PROJECT_COMMAND_CATALOG_QUERY_KEY];
 }
 
 export function threadStorageFilesQueryKey(
@@ -1251,18 +1475,6 @@ export function projectSkillsQueryKey(projectId: string) {
   return [PROJECT_SKILLS_QUERY_KEY, projectId] as const;
 }
 
-export function skillContentQueryKey(
-  projectId: string,
-  skillId: string,
-  path: string,
-) {
-  return [SKILL_CONTENT_QUERY_KEY, projectId, skillId, path] as const;
-}
-
-export function skillFilesQueryKey(projectId: string, skillId: string) {
-  return [SKILL_FILES_QUERY_KEY, projectId, skillId] as const;
-}
-
 export function pluginListQueryKey(enabled: boolean) {
   return [PLUGIN_LIST_QUERY_KEY, enabled] as const;
 }
@@ -1339,7 +1551,7 @@ export function pluginInstallJobsQueryKey() {
 }
 
 export function systemProviderCatalogQueryKey() {
-  return [SYSTEM_PROVIDERS_QUERY_KEY, "catalog"] as const;
+  return ["systemProviderCatalog"] as const;
 }
 
 export function pluginUpdateJobsQueryKey() {

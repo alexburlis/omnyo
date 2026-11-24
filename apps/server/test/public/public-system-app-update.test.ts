@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { SystemAppUpdateStatus } from "@bb/server-contract";
+import type { SystemAppUpdateStatus } from "@omnyo/server-contract";
 import { readJson } from "../helpers/json.js";
 import { withTestHarness } from "../helpers/test-app.js";
 
 const API = "/api/v1/system/app-update";
-const MACHINE_HEADERS = { "x-bb-gate-auth": "machine" };
+
+const MACHINE_HEADERS = { "x-omnyo-gate-auth": "machine" };
 
 describe("/api/v1/system/app-update", () => {
-  it("reports in-app updates as unavailable when bb runs without the launcher shim", () =>
+  it("reports in-app updates as unavailable when Omnyo runs without the launcher shim", () =>
     withTestHarness({ isDevelopment: false }, async (harness) => {
       const response = await harness.app.request(API);
 
@@ -26,6 +27,18 @@ describe("/api/v1/system/app-update", () => {
       const response = await harness.app.request(`${API}/apply`, {
         body: JSON.stringify({ confirmInterruptingThreads: true }),
         headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(409);
+      expect(await readJson(response)).toMatchObject({
+        code: "app_update_unsupported",
+      });
+    }));
+
+  it("reports that there is no update to cancel when none is waiting", () =>
+    withTestHarness({ isDevelopment: false }, async (harness) => {
+      const response = await harness.app.request(`${API}/cancel`, {
         method: "POST",
       });
 
@@ -59,6 +72,10 @@ describe("/api/v1/system/app-update", () => {
           headers: { ...MACHINE_HEADERS, "content-type": "application/json" },
           method: "POST",
         }),
+        harness.app.request(`${API}/cancel`, {
+          headers: MACHINE_HEADERS,
+          method: "POST",
+        }),
       ]);
 
       for (const response of responses) {
@@ -68,23 +85,29 @@ describe("/api/v1/system/app-update", () => {
 
   it("does not let machine credentials force launcher checks", async () => {
     const forced: boolean[] = [];
+
     const status: SystemAppUpdateStatus = {
       activity: { phase: "idle" },
       available: null,
       blocked: null,
       current: { commit: null, version: "1.0.0" },
+      installsWhenIdle: false,
       lastResult: null,
+      newTurnsPausedForUpdate: false,
       runningThreadCount: 0,
       support: { kind: "supported", mode: "source" },
     };
+
     await withTestHarness(
       {
         appUpdateService: {
           acknowledgeResult: async () => status,
           apply: async () => status,
+          cancel: async () => status,
           dispose: () => undefined,
           getStatus: async ({ forceRefresh }) => {
             forced.push(forceRefresh);
+
             return status;
           },
         },

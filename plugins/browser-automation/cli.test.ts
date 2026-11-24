@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PluginCliContext, PluginCliResult } from "@get-bb/plugin-sdk";
+import type { PluginCliContext, PluginCliResult } from "@omnyo/plugin-sdk";
 import {
   browserCliFailure,
   createBrowserAutomationCli,
@@ -19,24 +19,80 @@ function cli() {
       stdout: "{}",
     }),
   );
+
   const registration = createBrowserAutomationCli({ execute });
+
   const invoke = (
     argv: string[],
     ctx: PluginCliContext = { threadId: "thread" },
   ) => Promise.resolve(registration.run(argv, ctx));
+
   const requestFor = async (argv: string[], ctx?: PluginCliContext) => {
     const result = await invoke(argv, ctx);
     expect(result.exitCode, result.stderr).toBe(0);
     const call = execute.mock.calls.at(-1);
+
     if (call === undefined) throw new Error("execute was not called");
+
     return call[0];
   };
+
   return { registration, execute, invoke, requestFor };
 }
 
 describe("CLI boundaries", () => {
+  it("requires exact visual target and observation identities before dispatch", async () => {
+    const { requestFor, invoke } = cli();
+    expect((await invoke(["observe", id])).exitCode).toBe(1);
+    expect(
+      (await requestFor(["observe", id, "--target", "shown-target"])).input,
+    ).toMatchObject({ sessionId: id, targetId: "shown-target" });
+    expect(
+      (
+        await requestFor([
+          "inspect",
+          id,
+          "--target",
+          "shown-target",
+          "--observation",
+          id,
+          "--element",
+          "4",
+        ])
+      ).input,
+    ).toMatchObject({
+      targetId: "shown-target",
+      observationId: id,
+      elementId: "4",
+    });
+    expect(
+      (
+        await requestFor([
+          "viewport",
+          id,
+          "--target",
+          "shown-target",
+          "--preset",
+          "phone",
+        ])
+      ).input.preset,
+    ).toBe("phone");
+    expect(
+      (
+        await invoke([
+          "viewport",
+          id,
+          "--target",
+          "shown-target",
+          "--preset",
+          "watch",
+        ])
+      ).exitCode,
+    ).toBe(1);
+  });
   it("requires explicit backend, host, and headless selection", async () => {
     const { invoke, requestFor, execute } = cli();
+
     const missingHeadless = await invoke([
       "open",
       "--backend",
@@ -44,6 +100,7 @@ describe("CLI boundaries", () => {
       "--machine",
       "host",
     ]);
+
     expect(missingHeadless.exitCode).toBe(1);
     expect(missingHeadless.stderr).toContain("--headless");
 
@@ -55,6 +112,7 @@ describe("CLI boundaries", () => {
       "host",
       "--headless",
     ]);
+
     expect(request.input.selection).toEqual({
       backend: "local",
       hostId: "host",
@@ -89,6 +147,7 @@ describe("CLI boundaries", () => {
       "--script-host",
       "host",
     ]);
+
     expect(bothScripts.stderr).toContain("exactly one");
     expect(execute).not.toHaveBeenCalled();
   });
@@ -108,6 +167,7 @@ describe("CLI boundaries", () => {
       "--script-host",
       "host-1",
     ]);
+
     expect(request).toMatchObject({
       scriptFile: "a.js",
       scriptHost: "host-1",
@@ -116,12 +176,14 @@ describe("CLI boundaries", () => {
 
   it("preserves script strings and rejects a timeout outside the run boundary", async () => {
     const { invoke, requestFor } = cli();
+
     const request = await requestFor([
       "run",
       id,
       "--script",
       "await browser.getPage('main')",
     ]);
+
     expect(request.input.script).toBe("await browser.getPage('main')");
     expect(request.input.timeoutMs).toBe(30_000);
     expect(() => rpcContract.run.input.parse(request.input)).not.toThrow();
@@ -134,6 +196,7 @@ describe("CLI boundaries", () => {
       "--timeout-ms",
       "1",
     ]);
+
     expect(tooSmall.exitCode).toBe(1);
     expect(tooSmall.stderr).toContain(
       "invalid value '1' for --timeout-ms. Expected an integer between 1000 and 120000",
@@ -142,6 +205,7 @@ describe("CLI boundaries", () => {
 
   it("accepts --timeout as a duration and resolves bare numbers by range", async () => {
     const { invoke, requestFor } = cli();
+
     for (const [value, expected] of [
       ["90s", 90_000],
       ["2m", 120_000],
@@ -157,6 +221,7 @@ describe("CLI boundaries", () => {
         "--timeout",
         value,
       ]);
+
       expect(request.input.timeoutMs, value).toBe(expected);
     }
 
@@ -168,6 +233,7 @@ describe("CLI boundaries", () => {
       "--timeout",
       "500",
     ]);
+
     expect(ambiguous.exitCode).toBe(1);
     expect(ambiguous.stderr).toContain("invalid value '500' for --timeout");
     expect(ambiguous.stderr).toContain("a bare number of seconds (1-120)");
@@ -185,6 +251,7 @@ describe("CLI boundaries", () => {
       "--timeout-ms",
       "5000",
     ]);
+
     expect(both.exitCode).toBe(1);
     expect(both.stderr).toContain("cannot be combined");
   });
@@ -226,8 +293,16 @@ describe("CLI boundaries", () => {
     const { registration, invoke, execute } = cli();
     const top = await invoke(["--help"]);
     expect(top.exitCode).toBe(0);
-    expect(top.stdout).toContain("bb browser-automation open");
-    expect(top.stdout).toContain("bb browser-automation screenshot");
+    expect(top.stdout).toContain("omnyo browser-automation open");
+    expect(top.stdout).toContain("omnyo browser-automation screenshot");
+    expect(top.stdout).toContain(
+      "run, pages, and screenshot renew expiry to 30 minutes",
+    );
+    expect(top.stdout).toContain("capped at 8 hours from creation");
+    expect(top.stdout).toContain(
+      "non-renewable control lease/connection deadline",
+    );
+    expect(top.stdout).toContain("list and live preview do not renew expiry");
 
     const runHelp = await invoke(["run", "--help"]);
     expect(runHelp.exitCode).toBe(0);
@@ -242,37 +317,61 @@ describe("CLI boundaries", () => {
       "pages",
       "screenshot",
       "preview",
+      "observe",
+      "inspect",
+      "viewport",
       "stop",
       "close",
     ]);
   });
 
-  it("reports a failed --json run as JSON on stdout and text on stderr", async () => {
-    const execute = vi.fn(async (): Promise<PluginCliResult> => {
-      throw browserCliFailure(
-        new Error("Session stopped or expired; open a new session"),
-      );
-    });
-    const registration = createBrowserAutomationCli({ execute });
-    const json = await registration.run(["pages", id, "--json"], {
-      threadId: "thread",
-    });
-    expect(json.exitCode).toBe(1);
-    expect(JSON.parse(json.stdout ?? "")).toEqual({
-      ok: false,
-      error: {
-        code: "session_unavailable",
-        message: "Session stopped or expired; open a new session",
-        hint: expect.stringContaining("bb browser-automation open"),
-      },
-    });
-    expect(json.stderr).toContain("Session stopped or expired");
+  it.each([
+    ["Session stopped or expired; open a new session", []],
+    ["Session stopped, expired, or worker restarted; open a new session", []],
+    ["Session expired; open a new session", []],
+    ["Browser session stopped; open a new session", []],
+    ["Session does not belong to this thread", []],
+    ["Browser work cancelled or timed out", ["--timeout", "120 seconds"]],
+  ])(
+    "reports recovery guidance for %s in JSON and text",
+    async (message, extraHints) => {
+      const execute = vi.fn(async (): Promise<PluginCliResult> => {
+        throw browserCliFailure(new Error(message));
+      });
 
-    const text = await registration.run(["pages", id], { threadId: "thread" });
-    expect(text.exitCode).toBe(1);
-    expect(text.stdout).toBeUndefined();
-    expect(text.stderr).toContain("Session stopped or expired");
-  });
+      const registration = createBrowserAutomationCli({ execute });
+
+      const json = await registration.run(["pages", id, "--json"], {
+        threadId: "thread",
+      });
+
+      expect(json.exitCode).toBe(1);
+      expect(JSON.parse(json.stdout ?? "")).toEqual({
+        ok: false,
+        error: {
+          code: "session_unavailable",
+          message,
+          hint: expect.stringContaining("omnyo browser-automation open"),
+        },
+      });
+      expect(json.stderr).toContain(message);
+      expect(json.stderr).toContain("omnyo browser-automation open");
+
+      const text = await registration.run(["pages", id], {
+        threadId: "thread",
+      });
+
+      expect(text.exitCode).toBe(1);
+      expect(text.stdout).toBeUndefined();
+      expect(text.stderr).toContain(message);
+      expect(text.stderr).toContain("omnyo browser-automation open");
+
+      for (const hint of extraHints) {
+        expect(JSON.parse(json.stdout ?? "").error.hint).toContain(hint);
+        expect(text.stderr).toContain(hint);
+      }
+    },
+  );
 
   it("classifies capture-limit failures", () => {
     expect(

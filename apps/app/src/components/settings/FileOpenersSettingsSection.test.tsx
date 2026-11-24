@@ -39,9 +39,11 @@ describe("FileOpenersSettingsSection", () => {
 
     expect(screen.getByText(".md files")).toBeDefined();
     expect(screen.getByText(".mdx files")).toBeDefined();
+
     const trigger = screen.getByRole("button", {
       name: "Default opener for .md files",
     });
+
     expect(trigger.textContent).toContain("Automatic");
 
     await selectOption(trigger, /Built-in preview/u);
@@ -64,6 +66,6 @@ async function selectOption(trigger: HTMLElement, name: RegExp) {
 
 function storedPreference(): Record<string, string> {
   return JSON.parse(
-    window.localStorage.getItem("bb.fileOpenerByExtension") ?? "{}",
+    window.localStorage.getItem("omnyo.fileOpenerByExtension") ?? "{}",
   ) as Record<string, string>;
 }

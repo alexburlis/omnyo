@@ -1,13 +1,20 @@
 {
-  "appId": "dev.bb.desktop",
-  "productName": "bb",
-  "artifactName": "${productName}-${version}-${arch}.${ext}",
+  "appId": "dev.omnyo.private",
+  "productName": "Omnyo",
+  "artifactName": "omnyo-private-${version}-${arch}.${ext}",
+  "afterSign": "scripts/private-windows-identity.cjs",
   "toolsets": {
     "appimage": "1.0.3"
   },
   "afterPack": "scripts/prepare-native-modules.cjs",
   "asar": true,
-  "asarUnpack": ["dist/bb-app-bridge.mjs", "node_modules/**"],
+  "asarUnpack": [
+    "dist/omnyo-app-bridge.mjs",
+    "dist/desktop-profile-adoption-v1.cjs",
+    "dist/desktop-protected-store-*",
+    "dist/desktop-keychain-ui-fence-v1.node",
+    "node_modules/**"
+  ],
   "directories": {
     "buildResources": "assets",
     "output": "release"
@@ -17,25 +24,29 @@
     "dist/**",
     "node_modules/**",
     {
-      "from": "node_modules/bb-app/server/dist/app-scaffold-template",
-      "to": "node_modules/bb-app/server/dist/app-scaffold-template",
+      "from": "node_modules/omnyo-app/dist",
+      "to": "node_modules/omnyo-app/dist",
+      "filter": ["index.d.ts"]
+    },
+    {
+      "from": "node_modules/omnyo-app/server/dist/app-scaffold-template",
+      "to": "node_modules/omnyo-app/server/dist/app-scaffold-template",
       "filter": ["**/*"]
     },
     {
-      "from": "node_modules/bb-app/node_modules/npm/node_modules",
+      "from": "node_modules/omnyo-app/server/dist/builtin-plugins",
+      "to": "node_modules/omnyo-app/server/dist/builtin-plugins",
+      "filter": ["**/node_modules/**", "!**/*.map"]
+    },
+    {
+      "from": "node_modules/omnyo-app/node_modules/npm/node_modules",
       "to": "node_modules/npm/node_modules",
       "filter": ["**/*"]
     },
     "package.json",
     "!**/*.map"
   ],
-  "publish": [
-    {
-      "channel": "latest",
-      "provider": "generic",
-      "url": "https://github.com/get-bb/bb/releases/download/desktop-latest/"
-    }
-  ],
+  "publish": [],
   "mac": {
     "category": "public.app-category.developer-tools",
     "minimumSystemVersion": "13.0.0",
@@ -46,28 +57,54 @@
     "icon": "assets/icon.icns",
     "identity": null,
     "notarize": false,
+    "signIgnore": [
+      "\\.(br|gz|pak|png|ico|icns|woff2?|ttf|nib|dat|bin|json|cjs|asar)$",
+      "/prebuilds/(android|linux|linuxmusl|win32)-[^/]+(/|\\.node$)",
+      "/node_modules/omnyo-app/(dist|server/dist|host-daemon/dist|app/dist)/"
+    ],
     "target": [
-      {
-        "target": "dmg",
-        "arch": ["arm64"]
-      },
       {
         "target": "zip",
         "arch": ["arm64"]
+      }
+    ],
+    "protocols": [
+      {
+        "name": "Omnyo import links",
+        "schemes": ["omnyo"]
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "omnyoworkflow",
+        "name": "Omnyo workflow",
+        "role": "Viewer"
       }
     ]
   },
   "linux": {
     "category": "Development",
-    "executableName": "bb",
+    "executableName": "omnyo-private",
     "icon": "assets/icon.png",
-    "target": [{ "target": "AppImage", "arch": ["x64"] }]
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": ["x64"]
+      }
+    ]
   },
   "win": {
     "icon": "assets/icon.png",
-    "target": [{ "target": "nsis", "arch": ["x64"] }]
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ]
   },
   "nsis": {
+    "useZip": true,
+    "differentialPackage": false,
     "oneClick": true,
     "perMachine": false
   },

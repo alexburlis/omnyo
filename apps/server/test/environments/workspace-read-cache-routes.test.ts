@@ -1,7 +1,7 @@
-import { updateHost } from "@bb/db";
+import { updateHost } from "@omnyo/db";
 import { describe, expect, it } from "vitest";
-import type { GitHostPullRequest, WorkspaceWorkingTree } from "@bb/domain";
-import type { HostDaemonOnlineRpcResult } from "@bb/host-daemon-contract";
+import type { GitHostPullRequest, WorkspaceWorkingTree } from "@omnyo/domain";
+import type { HostDaemonOnlineRpcResult } from "@omnyo/host-daemon-contract";
 import {
   listQueuedCommands,
   reportQueuedCommandSuccess,
@@ -24,6 +24,7 @@ function workspaceStatus(
     state === "untracked" ||
     state === "dirty_uncommitted" ||
     state === "dirty_and_committed_unmerged";
+
   return {
     outcome: "available",
     workspaceStatus: {
@@ -31,6 +32,7 @@ function workspaceStatus(
         insertions: 0,
         deletions: 0,
         lineStatsComplete: true,
+        fileCount: 0,
         files: [],
         hasUncommittedChanges,
         state,
@@ -49,10 +51,10 @@ function rawPullRequest(
     number: 42,
     title: "Cache the PR probe",
     state: "OPEN",
-    url: "https://github.com/acme/bb/pull/42",
+    url: "https://github.com/acme/omnyo/pull/42",
     isDraft: false,
     baseRefName: "main",
-    headRefName: "bb/pr-cache",
+    headRefName: "omnyo/pr-cache",
     updatedAt: "2026-06-16T12:30:00Z",
     autoMerge: false,
     inMergeQueue: false,
@@ -69,17 +71,20 @@ function seedGitEnvironment(harness: TestAppHarness, suffix: string) {
   const { host } = seedHostSession(harness.deps, {
     id: `host-workspace-read-cache-${suffix}`,
   });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
-    branchName: "bb/pr-cache",
+    branchName: "omnyo/pr-cache",
     defaultBranch: "main",
     path: `/tmp/workspace-read-cache-${suffix}`,
     environmentProviderId: "git-worktree",
   });
+
   return { host, environment };
 }
 
@@ -91,17 +96,20 @@ describe("workspace read caches on the environment routes", () => {
 
       const first = harness.app.request(url);
       const second = harness.app.request(url);
+
       const statusCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "workspace.status" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(
         harness,
         statusCommand,
         workspaceStatus("feature/one"),
       );
+
       for (const response of await Promise.all([first, second])) {
         expect(response.status).toBe(200);
         await expect(readJson(response)).resolves.toMatchObject({
@@ -120,6 +128,7 @@ describe("workspace read caches on the environment routes", () => {
       const withMergeBase = harness.app.request(
         `${url}?mergeBaseBranch=release`,
       );
+
       const mergeBaseCommand = await waitForQueuedCommandAfter(
         harness,
         statusCommand.row.cursor,
@@ -127,6 +136,7 @@ describe("workspace read caches on the environment routes", () => {
           command.type === "workspace.status" &&
           command.environmentId === environment.id,
       );
+
       expect(mergeBaseCommand.command).toMatchObject({
         mergeBaseBranch: "release",
       });
@@ -139,6 +149,7 @@ describe("workspace read caches on the environment routes", () => {
 
       harness.hub.notifyEnvironment(environment.id, ["work-status-changed"]);
       const fourth = harness.app.request(url);
+
       const refreshedCommand = await waitForQueuedCommandAfter(
         harness,
         mergeBaseCommand.row.cursor,
@@ -147,6 +158,7 @@ describe("workspace read caches on the environment routes", () => {
           command.environmentId === environment.id &&
           command.mergeBaseBranch === undefined,
       );
+
       await reportQueuedCommandSuccess(
         harness,
         refreshedCommand,
@@ -167,16 +179,19 @@ describe("workspace read caches on the environment routes", () => {
 
       const first = harness.app.request(url);
       const second = harness.app.request(url);
+
       const pullRequestCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "workspace.pull_request" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, pullRequestCommand, {
         outcome: "available",
         pullRequest: rawPullRequest({ isDraft: true }),
       });
+
       for (const response of await Promise.all([first, second])) {
         expect(response.status).toBe(200);
         await expect(readJson(response)).resolves.toMatchObject({
@@ -196,6 +211,7 @@ describe("workspace read caches on the environment routes", () => {
 
       harness.hub.notifyEnvironment(environment.id, ["git-refs-changed"]);
       const fourth = harness.app.request(url);
+
       const refreshedCommand = await waitForQueuedCommandAfter(
         harness,
         pullRequestCommand.row.cursor,
@@ -203,6 +219,7 @@ describe("workspace read caches on the environment routes", () => {
           command.type === "workspace.pull_request" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, refreshedCommand, {
         outcome: "available",
         pullRequest: rawPullRequest({ isDraft: false }),
@@ -222,27 +239,31 @@ describe("workspace read caches on the environment routes", () => {
       const pullRequestUrl = `/api/v1/environments/${environment.id}/pull-request`;
 
       const dirtyRead = harness.app.request(statusUrl);
+
       const dirtyCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "workspace.status" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(
         harness,
         dirtyCommand,
-        workspaceStatus("bb/pr-cache", "untracked"),
+        workspaceStatus("omnyo/pr-cache", "untracked"),
       );
       await expect(readJson(await dirtyRead)).resolves.toMatchObject({
         workspace: { workingTree: { state: "untracked" } },
       });
       const pullRequestRead = harness.app.request(pullRequestUrl);
+
       const pullRequestCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "workspace.pull_request" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, pullRequestCommand, {
         outcome: "absent",
       });
@@ -256,6 +277,7 @@ describe("workspace read caches on the environment routes", () => {
           body: JSON.stringify({ action: "commit" }),
         },
       );
+
       const preflightCommand = await waitForQueuedCommandAfter(
         harness,
         pullRequestCommand.row.cursor,
@@ -263,17 +285,20 @@ describe("workspace read caches on the environment routes", () => {
           command.type === "workspace.status" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(
         harness,
         preflightCommand,
-        workspaceStatus("bb/pr-cache", "untracked"),
+        workspaceStatus("omnyo/pr-cache", "untracked"),
       );
+
       const diffCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "workspace.diff" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, diffCommand, {
         outcome: "available",
         diff: {
@@ -284,19 +309,22 @@ describe("workspace read caches on the environment routes", () => {
           truncated: false,
         },
       });
+
       const commitCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "workspace.commit" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, commitCommand, {
         commitSha: "abc123",
-        commitSubject: "bb: automated commit",
+        commitSubject: "omnyo: automated commit",
       });
       expect((await commitResponse).status).toBe(200);
 
       const refreshedRead = harness.app.request(statusUrl);
+
       const refreshedCommand = await waitForQueuedCommandAfter(
         harness,
         commitCommand.row.cursor,
@@ -304,10 +332,11 @@ describe("workspace read caches on the environment routes", () => {
           command.type === "workspace.status" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(
         harness,
         refreshedCommand,
-        workspaceStatus("bb/pr-cache", "clean"),
+        workspaceStatus("omnyo/pr-cache", "clean"),
       );
       const refreshedResponse = await refreshedRead;
       expect(refreshedResponse.status).toBe(200);
@@ -316,6 +345,7 @@ describe("workspace read caches on the environment routes", () => {
       });
 
       const refreshedPullRequestRead = harness.app.request(pullRequestUrl);
+
       const refreshedPullRequestCommand = await waitForQueuedCommandAfter(
         harness,
         commitCommand.row.cursor,
@@ -323,6 +353,7 @@ describe("workspace read caches on the environment routes", () => {
           command.type === "workspace.pull_request" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, refreshedPullRequestCommand, {
         outcome: "available",
         pullRequest: rawPullRequest(),
@@ -344,10 +375,12 @@ it.each(["suspended", "suspending"] as const)(
         machineProviderId: "test-paused-provider",
         suspendedAt: phase === "suspended" ? Date.now() : null,
       });
+
       for (const path of ["status", "pull-request"]) {
         const response = await h.app.request(
           `/api/v1/environments/${environment.id}/${path}`,
         );
+
         expect(response.status).not.toBe(404);
         expect(listQueuedCommands(h, "workspace.status")).toHaveLength(0);
         expect(listQueuedCommands(h, "workspace.pull_request")).toHaveLength(0);

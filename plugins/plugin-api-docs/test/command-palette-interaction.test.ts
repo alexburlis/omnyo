@@ -64,12 +64,15 @@ describe("command palette guide interaction", () => {
   it("closes the palette and opens the release-checklist tab, then restores it on its own", () => {
     vi.useFakeTimers();
     const contract = anatomy.surfaceFixtures["command-palette-actions"];
+
     const action = container.querySelector<HTMLButtonElement>(
       '[data-guide-fixture="command-palette-action"]',
     );
+
     const badge = container.querySelector<HTMLAnchorElement>(
       '[data-guide-badge="command-palette-actions"]',
     );
+
     const listbox = container.querySelector('[role="listbox"]');
 
     expect(action?.getAttribute("aria-selected")).toBe("true");
@@ -101,9 +104,11 @@ describe("command palette guide interaction", () => {
     expect(
       container.querySelector('[data-guide-fixture="release-checklist-panel"]'),
     ).not.toBeNull();
+
     for (const label of contract.labels.outcome) {
       expect(container.textContent).toContain(label);
     }
+
     expect(
       container
         .querySelector('[data-guide-fixture="release-checklist-tab"]')
@@ -121,13 +126,16 @@ describe("command palette guide interaction", () => {
     const rerunAction = container.querySelector<HTMLButtonElement>(
       '[data-guide-fixture="command-palette-action"]',
     );
+
     act(() => rerunAction?.click());
     expect(
       container.querySelector('[data-guide-fixture="command-palette-overlay"]'),
     ).toBeNull();
+
     const shortcut = container.querySelector<HTMLElement>(
       '[data-guide-fixture="command-palette-shortcut"]',
     );
+
     act(() => shortcut?.click());
     expect(
       container.querySelector('[data-guide-fixture="command-palette-overlay"]'),

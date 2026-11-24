@@ -1,5 +1,5 @@
-import { PERSONAL_PROJECT_ID, type Thread } from "@bb/domain";
-import { makeThread as makeThreadFixture } from "@bb/test-helpers/domain-fixtures";
+import { PERSONAL_PROJECT_ID, type Thread } from "@omnyo/domain";
+import { makeThread as makeThreadFixture } from "@omnyo/test-helpers/domain-fixtures";
 import { describe, expect, it } from "vitest";
 import { buildThreadMentionSuggestions } from "./threadMentionSuggestions";
 
@@ -620,6 +620,7 @@ describe("buildThreadMentionSuggestions", () => {
         title: "Continue from @thread:thr_design",
       }),
     ];
+
     const buildWithResolver = (resolveTitle: (title: string) => string) =>
       buildThreadMentionSuggestions({
         threads,

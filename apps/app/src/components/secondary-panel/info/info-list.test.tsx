@@ -48,6 +48,7 @@ describe("InfoList", () => {
 
 function CollapsibleSection() {
   const [collapsed, setCollapsed] = useState(false);
+
   return (
     <InfoSection
       label="Commits"

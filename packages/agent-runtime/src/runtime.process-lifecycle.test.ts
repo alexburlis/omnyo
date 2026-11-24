@@ -1,5 +1,6 @@
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -8,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { createAgentRuntime } from "./runtime.js";
 import { createProviderForId } from "./provider-registry.js";
 import { RuntimeProviderProcessManager } from "./runtime-provider-process.js";
@@ -17,7 +18,7 @@ import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
 import {
   parseJsonRpcLine,
   settleJsonRpcResponse,
-} from "@bb/provider-bridge-protocol/bridge-kit";
+} from "@omnyo/provider-bridge-protocol/bridge-kit";
 import {
   createScriptedEchoLaunch,
   createScriptedEchoProcessLog,
@@ -27,6 +28,7 @@ import {
   scriptedEchoProcessEnv,
   waitForRuntimeState,
   waitForThreadAgentMessageText,
+  waitForThreadTurnCompleted,
   waitForThreadTurnStarted,
   withBridgeLaunch,
   type ScriptedEchoLaunchScript,
@@ -36,6 +38,7 @@ import type { AgentRuntimeBridgeLaunch, AgentRuntimeOptions } from "./types.js";
 
 interface CreateProviderProcessManagerArgs {
   adapterProcessEnv?: Record<string, string>;
+  containProviderProcess?: AgentRuntimeOptions["containProviderProcess"];
   createAdapter?: () => BridgeProtocolAdapter;
   env?: Record<string, string>;
   handleStdoutLine?: (line: string, childPid: number | undefined) => void;
@@ -48,6 +51,7 @@ interface CreateProviderProcessManagerArgs {
 function processIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -67,6 +71,15 @@ const CODEX_SCRIPT: ScriptedEchoLaunchScript = {
 };
 
 const MANAGER_BRIDGE_LAUNCH = createScriptedEchoLaunch();
+
+const SUPERSEDING_BRIDGE_LAUNCH = {
+  ...MANAGER_BRIDGE_LAUNCH,
+  source: {
+    ...MANAGER_BRIDGE_LAUNCH.source,
+    digest: `b${MANAGER_BRIDGE_LAUNCH.source.digest.slice(1)}`,
+  },
+};
+
 const MANAGER_PROVIDER = {
   bridgeLaunch: MANAGER_BRIDGE_LAUNCH,
   processKey: "fake",
@@ -78,12 +91,13 @@ describe("createAgentRuntime process lifecycle", () => {
   let fixturePidFile: string | undefined;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "bb-runtime-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "omnyo-runtime-test-"));
   });
 
   afterEach(async () => {
     if (fixturePidFile && existsSync(fixturePidFile)) {
       const pid = Number(readFileSync(fixturePidFile, "utf8"));
+
       if (processIsAlive(pid)) process.kill(pid, "SIGKILL");
       await waitForRuntimeState({
         label: "fixture writer exit",
@@ -91,6 +105,7 @@ describe("createAgentRuntime process lifecycle", () => {
         timeoutMs: 5_000,
       });
     }
+
     fixturePidFile = undefined;
     vi.unstubAllEnvs();
     rmSync(tmpDir, { recursive: true, force: true });
@@ -106,10 +121,12 @@ describe("createAgentRuntime process lifecycle", () => {
       additionalWorkspaceWriteRoots: [],
       bridgeLaunch: createScriptedEchoLaunch(),
     });
+
     const process =
       args.rawScriptPath === undefined
         ? adapter.process
         : { command: adapter.process.command, args: [args.rawScriptPath] };
+
     return {
       ...adapter,
       process: {
@@ -127,6 +144,7 @@ describe("createAgentRuntime process lifecycle", () => {
     const identityRegistry = new RuntimeThreadIdentityRegistry();
     let nextRequestId = 1;
     const adapter = createManagerAdapter(args);
+
     return new RuntimeProviderProcessManager({
       additionalWorkspaceWriteRoots: [],
       createAdapter: args.createAdapter ?? (() => adapter),
@@ -139,6 +157,7 @@ describe("createAgentRuntime process lifecycle", () => {
           identityRegistry.getProviderThreadId(threadId) ?? null,
         threadId,
       }),
+      containProviderProcess: args.containProviderProcess,
       createProviderIdentityState: (providerId) =>
         identityRegistry.createProviderState({ providerId }),
       env: args.env,
@@ -146,6 +165,7 @@ describe("createAgentRuntime process lifecycle", () => {
       handleStdoutLine: ({ line, providerProcess }) => {
         args.handleStdoutLine?.(line, providerProcess.child.pid);
         const parsed = parseJsonRpcLine(line);
+
         if (parsed.kind === "response") {
           settleJsonRpcResponse({
             id: parsed.parsedId,
@@ -155,7 +175,7 @@ describe("createAgentRuntime process lifecycle", () => {
         }
       },
       onProcessExit: args.onProcessExit,
-      onProviderThreadDetached: (threadId) =>
+      onProviderThreadDetached: ({ threadId }) =>
         identityRegistry.clearThread(threadId),
       onStderr: args.onStderr,
       skillRoots: [],
@@ -208,6 +228,7 @@ describe("createAgentRuntime process lifecycle", () => {
 
   it("fires onProcessExit when provider crashes", async () => {
     const exitInfo = vi.fn();
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -242,13 +263,14 @@ describe("createAgentRuntime process lifecycle", () => {
       processKey: staleKey,
       providerId: "fake",
     });
+
     const staleProcess = manager.requireProviderProcess({
       processKey: staleKey,
       providerId: "fake",
     });
 
     await manager.ensureProvider({
-      bridgeLaunch: MANAGER_BRIDGE_LAUNCH,
+      bridgeLaunch: SUPERSEDING_BRIDGE_LAUNCH,
       processKey: freshKey,
       providerId: "fake",
     });
@@ -282,10 +304,12 @@ describe("createAgentRuntime process lifecycle", () => {
       processKey: staleKey,
       providerId: "fake",
     });
+
     const staleProcess = manager.requireProviderProcess({
       processKey: staleKey,
       providerId: "fake",
     });
+
     staleProcess.identity.threadIds.add("thread-live");
 
     await manager.ensureProvider({
@@ -305,11 +329,75 @@ describe("createAgentRuntime process lifecycle", () => {
     await manager.shutdown();
   });
 
+  it("contains the provider process before startup completes", async () => {
+    let releaseContainment: () => void = () => undefined;
+    const containedPids: number[] = [];
+
+    const manager = createProviderProcessManager({
+      containProviderProcess: (pid) => {
+        containedPids.push(pid);
+
+        return new Promise<void>((resolve) => {
+          releaseContainment = resolve;
+        });
+      },
+      onProcessExit: vi.fn(),
+      workspacePath: tmpDir,
+    });
+
+    let started = false;
+
+    const starting = manager.ensureProvider(MANAGER_PROVIDER).then(() => {
+      started = true;
+    });
+
+    await waitForRuntimeState({
+      label: "containment request",
+      predicate: () => containedPids.length === 1,
+      timeoutMs: 5_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(started).toBe(false);
+    releaseContainment();
+    await starting;
+
+    expect(containedPids).toEqual([
+      manager.requireProviderProcess(MANAGER_PROVIDER).child.pid,
+    ]);
+    await manager.shutdown();
+  });
+
+  it("fails startup and stops the provider when containment fails", async () => {
+    let containedPid: number | undefined;
+
+    const manager = createProviderProcessManager({
+      containProviderProcess: async (pid) => {
+        containedPid = pid;
+
+        throw new Error("host job unavailable");
+      },
+      onProcessExit: vi.fn(),
+      workspacePath: tmpDir,
+    });
+
+    await expect(manager.ensureProvider(MANAGER_PROVIDER)).rejects.toThrow(
+      "host job unavailable",
+    );
+    expect(containedPid).toBeTypeOf("number");
+    await waitForRuntimeState({
+      label: "uncontained provider exit",
+      predicate: () => !processIsAlive(containedPid ?? 0),
+      timeoutMs: 5_000,
+    });
+    await manager.shutdown();
+  });
+
   it("waits for provider retirement before starting a same-key replacement", async () => {
     const manager = createProviderProcessManager({
       onProcessExit: vi.fn(),
       workspacePath: tmpDir,
     });
+
     await manager.ensureProvider(MANAGER_PROVIDER);
     const retiringProcess = manager.requireProviderProcess(MANAGER_PROVIDER);
     await Promise.all([
@@ -331,6 +419,7 @@ describe("createAgentRuntime process lifecycle", () => {
       `require("readline").createInterface({input:process.stdin}).once("line",line=>{require("fs").writeFileSync(${JSON.stringify(stalledBridgeStarted)},"");setTimeout(()=>console.log(JSON.stringify({jsonrpc:"2.0",id:JSON.parse(line).id,result:{protocolVersion:2,capabilities:{grammarVersions:[3,3]}}})),3000)});`,
     );
     let starts = 0;
+
     const manager = createProviderProcessManager({
       createAdapter: () =>
         createManagerAdapter(
@@ -339,6 +428,7 @@ describe("createAgentRuntime process lifecycle", () => {
       onProcessExit: vi.fn(),
       workspacePath: tmpDir,
     });
+
     await manager.ensureProvider(MANAGER_PROVIDER);
     const retirement = manager.shutdownProvider(MANAGER_PROVIDER);
     const replacementStart = manager.ensureProvider(MANAGER_PROVIDER);
@@ -350,12 +440,15 @@ describe("createAgentRuntime process lifecycle", () => {
     expect(starts).toBe(2);
     const replacementProcess = manager.requireProviderProcess(MANAGER_PROVIDER);
     const fullShutdown = manager.shutdown();
+
     const operations = Promise.all([
       retirement,
       replacementStart,
       fullShutdown,
     ]);
+
     let completionTimer: ReturnType<typeof setTimeout> | undefined;
+
     const completedPromptly = await Promise.race([
       operations.then(() => true),
       new Promise<false>((resolve) => {
@@ -363,6 +456,7 @@ describe("createAgentRuntime process lifecycle", () => {
         completionTimer.unref();
       }),
     ]);
+
     if (completionTimer !== undefined) clearTimeout(completionTimer);
     await expect(operations).resolves.toEqual([
       undefined,
@@ -384,6 +478,7 @@ describe("createAgentRuntime process lifecycle", () => {
       `process.exitCode = 42;
       process.stderr.write("a".repeat(100_000) + "stderr-tail");`,
     );
+
     const manager = createProviderProcessManager({
       onProcessExit: exitInfo,
       onStderr: (line) => stderrLines.push(line),
@@ -400,9 +495,11 @@ describe("createAgentRuntime process lifecycle", () => {
     const stderr = exitInfo.mock.calls[0]?.[0].stderr;
     expect(Buffer.byteLength(stderr ?? "", "utf8")).toBeLessThanOrEqual(4_000);
     expect(stderr?.endsWith("stderr-tail")).toBe(true);
+
     const providerStderr = stderrLines.filter((line) =>
       line.endsWith("stderr-tail"),
     );
+
     expect(providerStderr).toHaveLength(1);
     expect(
       Buffer.byteLength(providerStderr[0] ?? "", "utf8"),
@@ -413,8 +510,10 @@ describe("createAgentRuntime process lifecycle", () => {
   it("drains provider stderr before reporting process exit", async () => {
     const exitInfo = vi.fn<NonNullable<AgentRuntimeOptions["onProcessExit"]>>();
     const crashScript = join(tmpDir, "delayed-stderr-provider.cjs");
+
     const delayedWriter =
       'setTimeout(() => process.stderr.write("stderr-after-exit"), 50);';
+
     writeFileSync(
       crashScript,
       `const { spawn } = require("node:child_process");
@@ -425,6 +524,7 @@ describe("createAgentRuntime process lifecycle", () => {
       writer.unref();
       process.exit(42);`,
     );
+
     const manager = createProviderProcessManager({
       onProcessExit: exitInfo,
       rawScriptPath: crashScript,
@@ -454,6 +554,7 @@ describe("createAgentRuntime process lifecycle", () => {
       setTimeout(() => process.exit(42), 100);`,
     );
     const exitInfo = vi.fn<NonNullable<AgentRuntimeOptions["onProcessExit"]>>();
+
     const manager = createProviderProcessManager({
       onProcessExit: exitInfo,
       rawScriptPath: crashScript,
@@ -520,6 +621,7 @@ describe("createAgentRuntime process lifecycle", () => {
         setTimeout(() => process.exit(42), 100);`,
     });
     const exitInfo = vi.fn<NonNullable<AgentRuntimeOptions["onProcessExit"]>>();
+
     const manager = createProviderProcessManager({
       onProcessExit: exitInfo,
       rawScriptPath: crashScript,
@@ -539,10 +641,12 @@ describe("createAgentRuntime process lifecycle", () => {
         processKey: "fake",
         providerId: "fake",
       });
+
       const replacementProvider = manager.requireProviderProcess({
         processKey: "fake",
         providerId: "fake",
       });
+
       expect(exitedPid).toBeDefined();
       expect(replacementProvider.child.exitCode).toBeNull();
       expect(startedPids(startsLog)).toHaveLength(2);
@@ -567,6 +671,7 @@ describe("createAgentRuntime process lifecycle", () => {
         setTimeout(() => process.exit(42), 100);`,
     });
     const exitInfo = vi.fn<NonNullable<AgentRuntimeOptions["onProcessExit"]>>();
+
     const manager = createProviderProcessManager({
       onProcessExit: exitInfo,
       rawScriptPath: crashScript,
@@ -605,6 +710,7 @@ describe("createAgentRuntime process lifecycle", () => {
         processKey: "fake",
         providerId: "fake",
       });
+
       expect(exitedPid).toBeDefined();
       expect(replacementProvider.child.exitCode).toBeNull();
       expect(startedPids(startsLog)).toHaveLength(2);
@@ -621,6 +727,7 @@ describe("createAgentRuntime process lifecycle", () => {
     const childPidFile = join(tmpDir, "writer.pid");
     fixturePidFile = childPidFile;
     const writeMarker = join(tmpDir, "stale-descendant-output.wrote");
+
     const delayedWriter = `const fs = require("node:fs");
       const writeMarker = ${JSON.stringify(writeMarker)};
       process.on("SIGTERM", () => {});
@@ -629,6 +736,7 @@ describe("createAgentRuntime process lifecycle", () => {
         process.stdout.write("stale-from-old-provider\\n");
       }, 1_200);
       setTimeout(() => process.exit(0), 5_000);`;
+
     writeCrashOnceScript({
       scriptPath: crashScript,
       startMarker,
@@ -643,6 +751,7 @@ describe("createAgentRuntime process lifecycle", () => {
     });
     const lines: Array<{ childPid: number | undefined; line: string }> = [];
     const exitInfo = vi.fn<NonNullable<AgentRuntimeOptions["onProcessExit"]>>();
+
     const manager = createProviderProcessManager({
       handleStdoutLine: (line, childPid) => lines.push({ childPid, line }),
       onProcessExit: exitInfo,
@@ -674,6 +783,7 @@ describe("createAgentRuntime process lifecycle", () => {
         processKey: "fake",
         providerId: "fake",
       });
+
       expect(exitedPid).toBeDefined();
       expect(replacementProvider.child.exitCode).toBeNull();
       expect(startedPids(startsLog)).toHaveLength(2);
@@ -688,6 +798,7 @@ describe("createAgentRuntime process lifecycle", () => {
 
   it("treats shutdown process errors as expected without carrying state to replacement processes", async () => {
     const exitInfo = vi.fn<NonNullable<AgentRuntimeOptions["onProcessExit"]>>();
+
     const manager = createProviderProcessManager({
       onProcessExit: exitInfo,
       workspacePath: tmpDir,
@@ -698,15 +809,18 @@ describe("createAgentRuntime process lifecycle", () => {
       processKey: "fake",
       providerId: "fake",
     });
+
     const shuttingDownProcess = manager.requireProviderProcess({
       processKey: "fake",
       providerId: "fake",
     });
+
     const shutdown = manager.shutdownProvider({
       processKey: "fake",
       providerId: "fake",
       timeoutMs: 50,
     });
+
     shuttingDownProcess.child.emit(
       "error",
       new Error("simulated shutdown process error"),
@@ -728,10 +842,12 @@ describe("createAgentRuntime process lifecycle", () => {
       processKey: "fake",
       providerId: "fake",
     });
+
     const replacementProcess = manager.requireProviderProcess({
       processKey: "fake",
       providerId: "fake",
     });
+
     replacementProcess.child.emit("exit", 64, null);
     replacementProcess.child.emit("close", 64, null);
 
@@ -747,9 +863,11 @@ describe("createAgentRuntime process lifecycle", () => {
         providerId: "fake",
       }),
     );
+
     const replacementExited = new Promise<void>((resolve) =>
       replacementProcess.child.once("exit", () => resolve()),
     );
+
     replacementProcess.child.kill("SIGTERM");
     await replacementExited;
     await manager.shutdown();
@@ -761,6 +879,7 @@ describe("createAgentRuntime process lifecycle", () => {
     env?: Record<string, string>;
   }) {
     const processLog = createScriptedEchoProcessLog();
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -772,6 +891,7 @@ describe("createAgentRuntime process lifecycle", () => {
         scripted: { ...CODEX_SCRIPT, ...args.scripted },
       },
     });
+
     return { processLog, runtime };
   }
 
@@ -797,9 +917,11 @@ describe("createAgentRuntime process lifecycle", () => {
     ).toHaveLength(1);
     const firstSession = runtime.getProviderSession("t1");
     const secondSession = runtime.getProviderSession("t2");
+
     if (!firstSession || !secondSession) {
       throw new Error("Expected both codex threads to have provider sessions");
     }
+
     expect(firstSession.providerThreadId).not.toBe(
       secondSession.providerThreadId,
     );
@@ -831,6 +953,7 @@ describe("createAgentRuntime process lifecycle", () => {
       text: "second",
       threadId: "t2",
     });
+
     const pidOf = (threadId: string): string | undefined =>
       events
         .filter(
@@ -843,6 +966,7 @@ describe("createAgentRuntime process lifecycle", () => {
             : undefined,
         )
         .find((pid) => pid !== undefined);
+
     expect(pidOf("t1")).toBeDefined();
     expect(pidOf("t1")).toBe(pidOf("t2"));
 
@@ -868,6 +992,7 @@ describe("createAgentRuntime process lifecycle", () => {
 
   it("retires the provider process when session construction fails", async () => {
     const events: ThreadEvent[] = [];
+
     const { processLog, runtime } = createCodexRuntime({
       events,
       scripted: {
@@ -876,6 +1001,7 @@ describe("createAgentRuntime process lifecycle", () => {
         ],
       },
     });
+
     await expect(
       runtime.startThread({
         environmentId: "env-1",
@@ -893,18 +1019,22 @@ describe("createAgentRuntime process lifecycle", () => {
 
   it("gives a changed declaration its own bridge process at the same artifact hash", async () => {
     const record = createScriptedEchoRequestRecord();
+
     const bridgeLaunch: AgentRuntimeBridgeLaunch = createScriptedEchoLaunch({
       pluginId: "provider-declared",
       digest: "d".repeat(64),
     });
+
     const runtime = createAgentRuntime({
       workspacePath: tmpDir,
       env: record.env,
       onEvent: () => {},
       onToolCall: async () => ({ contentItems: [], success: true }),
     });
+
     const initializeCount = (): number =>
       record.read().filter((r) => r.method === "initialize").length;
+
     try {
       await runtime.startThread({
         bridgeLaunch,
@@ -931,6 +1061,7 @@ describe("createAgentRuntime process lifecycle", () => {
           supportsThreadRename: !bridgeLaunch.capabilities.supportsThreadRename,
         },
       };
+
       await runtime.startThread({
         bridgeLaunch: updatedDeclaration,
         environmentId: "env-1",
@@ -945,9 +1076,49 @@ describe("createAgentRuntime process lifecycle", () => {
     }
   });
 
+  it("starts threads of two skill catalogs at once without retiring either bridge", async () => {
+    const runtime = createAgentRuntime({
+      workspacePath: tmpDir,
+      onEvent: () => {},
+      onToolCall: async () => ({ contentItems: [], success: true }),
+    });
+
+    const bridgeLaunch = createScriptedEchoLaunch();
+
+    const stageSkillRoots = (name: string) => {
+      const path = join(tmpDir, `skills-${name}`);
+      mkdirSync(join(path, name), { recursive: true });
+      writeFileSync(join(path, name, "SKILL.md"), `---\nname: ${name}\n---\n`);
+
+      return [
+        { id: `skills:${name}`, path, skills: [{ name, description: name }] },
+      ];
+    };
+
+    const start = (threadId: string, skillName: string) =>
+      runtime.startThread({
+        bridgeLaunch,
+        skillRoots: stageSkillRoots(skillName),
+        environmentId: "env-1",
+        threadId,
+        projectId: "p1",
+        providerId: "scripted",
+        options: fullRuntimeOptions,
+      });
+
+    try {
+      await Promise.all([start("t1", "first"), start("t2", "second")]);
+      expect(runtime.hasThread("t1")).toBe(true);
+      expect(runtime.hasThread("t2")).toBe(true);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
   it("reaps a codex session after a terminal provider error before turn start", async () => {
     const events: ThreadEvent[] = [];
     const { processLog, runtime } = createCodexRuntime({ events });
+
     try {
       await runtime.startThread({
         environmentId: "env-1",
@@ -957,9 +1128,11 @@ describe("createAgentRuntime process lifecycle", () => {
         options: fullRuntimeOptions,
       });
       const initialSession = runtime.getProviderSession("t1");
+
       if (!initialSession) {
         throw new Error("Expected a codex session");
       }
+
       await runtime.runTurn({
         clientRequestId: "creq_2222222257",
         threadId: "t1",
@@ -983,6 +1156,7 @@ describe("createAgentRuntime process lifecycle", () => {
         idleForMs: 0,
         nowMs: Date.now() + 60 * 60 * 1000,
       });
+
       expect(result.reapedSessions).toEqual([
         expect.objectContaining({
           providerId: "codex",
@@ -1001,6 +1175,7 @@ describe("createAgentRuntime process lifecycle", () => {
   it("reaps an idle codex session and resumes it on a new process", async () => {
     const events: ThreadEvent[] = [];
     const { processLog, runtime } = createCodexRuntime({ events });
+
     try {
       await runtime.startThread({
         environmentId: "env-1",
@@ -1010,9 +1185,11 @@ describe("createAgentRuntime process lifecycle", () => {
         options: fullRuntimeOptions,
       });
       const initialSession = runtime.getProviderSession("t1");
+
       if (!initialSession) {
         throw new Error("Expected a codex session");
       }
+
       await runtime.runTurn({
         clientRequestId: "creq_2222222258",
         threadId: "t1",
@@ -1031,7 +1208,15 @@ describe("createAgentRuntime process lifecycle", () => {
         idleForMs: 30 * 60 * 1000,
         nowMs: Date.now() + 29 * 60 * 1000,
       });
+
       expect(belowThresholdResult.reapedSessions).toEqual([]);
+      expect(belowThresholdResult.retainedSessions).toEqual([
+        expect.objectContaining({
+          threadId: "t1",
+          reason: "idle-grace",
+          processId: expect.any(Number),
+        }),
+      ]);
       expect(runtime.hasThread("t1")).toBe(true);
       expect(stoppedProcessPids(processLog.read())).toHaveLength(0);
 
@@ -1039,10 +1224,13 @@ describe("createAgentRuntime process lifecycle", () => {
         idleForMs: 30 * 60 * 1000,
         nowMs: Date.now() + 31 * 60 * 1000,
       });
+
       const reapedSession = result.reapedSessions[0];
+
       if (!reapedSession) {
         throw new Error("Expected the idle codex session to be reaped");
       }
+
       expect(result.reapedSessions).toHaveLength(1);
       expect(reapedSession).toMatchObject({
         providerId: "codex",
@@ -1095,6 +1283,7 @@ describe("createAgentRuntime process lifecycle", () => {
   it("does not reap a codex thread process while a turn is active", async () => {
     const events: ThreadEvent[] = [];
     const { processLog, runtime } = createCodexRuntime({ events });
+
     try {
       await runtime.startThread({
         environmentId: "env-1",
@@ -1109,23 +1298,35 @@ describe("createAgentRuntime process lifecycle", () => {
         input: [promptTextInput({ text: "hold_turn" })],
         options: fullRuntimeOptions,
       });
+
       const { turnId } = await waitForThreadTurnStarted({
         events,
         providerId: "codex",
         runtime,
         threadId: "t1",
       });
+
       expect(runtime.getActiveTurnId("t1")).toBe(turnId);
+
       const firstResult = await runtime.reapIdleProviderSessions({
         idleForMs: 0,
         nowMs: Date.now() + 60 * 60 * 1000,
       });
+
       const secondResult = await runtime.reapIdleProviderSessions({
         idleForMs: 0,
         nowMs: Date.now() + 60 * 60 * 1000,
       });
+
       expect(firstResult.reapedSessions).toEqual([]);
       expect(secondResult.reapedSessions).toEqual([]);
+      expect(firstResult.retainedSessions).toEqual([
+        expect.objectContaining({
+          threadId: "t1",
+          reason: "active-turn",
+          processId: expect.any(Number),
+        }),
+      ]);
       expect(runtime.hasThread("t1")).toBe(true);
       expect(stoppedProcessPids(processLog.read())).toHaveLength(0);
     } finally {
@@ -1136,6 +1337,7 @@ describe("createAgentRuntime process lifecycle", () => {
   it("reaps a restorable non-Codex session", async () => {
     const events: ThreadEvent[] = [];
     const processLog = createScriptedEchoProcessLog();
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         env: processLog.env,
@@ -1147,6 +1349,7 @@ describe("createAgentRuntime process lifecycle", () => {
         scripted: { sessionRestorable: true },
       },
     });
+
     try {
       await runtime.startThread({
         environmentId: "env-1",
@@ -1155,10 +1358,12 @@ describe("createAgentRuntime process lifecycle", () => {
         providerId: "claude-code",
         options: fullRuntimeOptions,
       });
+
       const result = await runtime.reapIdleProviderSessions({
         idleForMs: 0,
         nowMs: Date.now(),
       });
+
       expect(result.reapedSessions).toEqual([
         expect.objectContaining({
           providerId: "claude-code",
@@ -1173,6 +1378,71 @@ describe("createAgentRuntime process lifecycle", () => {
     }
   });
 
+  it("restarts the idle grace when background work settles after the turn", async () => {
+    const events: ThreadEvent[] = [];
+    const processLog = createScriptedEchoProcessLog();
+    const idleForMs = 500;
+
+    const runtime = createScriptedEchoRuntime({
+      runtime: {
+        env: processLog.env,
+        workspacePath: tmpDir,
+        onEvent: (event) => events.push(event),
+      },
+      launch: {
+        pluginId: "provider-claude-code",
+        scripted: { sessionRestorable: true },
+      },
+    });
+
+    try {
+      await runtime.startThread({
+        environmentId: "env-1",
+        threadId: "t1",
+        projectId: "p1",
+        providerId: "claude-code",
+        options: fullRuntimeOptions,
+      });
+      await runtime.runTurn({
+        clientRequestId: "creq_bgsettrea2",
+        threadId: "t1",
+        input: [promptTextInput({ text: "bg_task_settle_after:700" })],
+        options: fullRuntimeOptions,
+      });
+      await waitForThreadTurnCompleted({ events, runtime, threadId: "t1" });
+      expect(runtime.hasOpenBackgroundWork()).toBe(true);
+
+      await waitForRuntimeState({
+        label: "the background task settled after its turn",
+        predicate: () => !runtime.hasOpenBackgroundWork(),
+        runtime,
+        timeoutMs: 5_000,
+      });
+
+      const graceResult = await runtime.reapIdleProviderSessions({
+        idleForMs,
+        nowMs: Date.now(),
+      });
+
+      expect(graceResult.reapedSessions).toEqual([]);
+      expect(graceResult.retainedSessions).toEqual([
+        expect.objectContaining({ threadId: "t1", reason: "idle-grace" }),
+      ]);
+      expect(runtime.hasThread("t1")).toBe(true);
+
+      const result = await runtime.reapIdleProviderSessions({
+        idleForMs,
+        nowMs: Date.now() + idleForMs,
+      });
+
+      expect(result.reapedSessions).toEqual([
+        expect.objectContaining({ providerId: "claude-code", threadId: "t1" }),
+      ]);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
   it("marks a cold-resumed session restorable from the bridge's resume result", async () => {
     const runtime = createScriptedEchoRuntime({
       runtime: { workspacePath: tmpDir, onEvent: () => {} },
@@ -1181,6 +1451,7 @@ describe("createAgentRuntime process lifecycle", () => {
         scripted: { sessionRestorable: true },
       },
     });
+
     try {
       await runtime.resumeThread({
         environmentId: "env-1",
@@ -1191,10 +1462,12 @@ describe("createAgentRuntime process lifecycle", () => {
         options: fullRuntimeOptions,
       });
       expect(runtime.hasThread("t1")).toBe(true);
+
       const result = await runtime.reapIdleProviderSessions({
         idleForMs: 0,
         nowMs: Date.now(),
       });
+
       expect(result.reapedSessions).toEqual([
         expect.objectContaining({ providerId: "claude-code", threadId: "t1" }),
       ]);
@@ -1212,6 +1485,7 @@ describe("createAgentRuntime process lifecycle", () => {
         scripted: { sessionRestorable: false },
       },
     });
+
     try {
       await runtime.resumeThread({
         environmentId: "env-1",
@@ -1226,7 +1500,12 @@ describe("createAgentRuntime process lifecycle", () => {
           idleForMs: 0,
           nowMs: Date.now(),
         }),
-      ).resolves.toEqual({ reapedSessions: [] });
+      ).resolves.toMatchObject({
+        reapedSessions: [],
+        retainedSessions: [
+          expect.objectContaining({ threadId: "t1", reason: "not-restorable" }),
+        ],
+      });
       expect(runtime.hasThread("t1")).toBe(true);
     } finally {
       await runtime.shutdown();
@@ -1235,6 +1514,7 @@ describe("createAgentRuntime process lifecycle", () => {
 
   it("keeps releasing later sessions after one release fails", async () => {
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -1248,6 +1528,7 @@ describe("createAgentRuntime process lifecycle", () => {
         },
       },
     });
+
     try {
       for (const threadId of ["t-stopfail-1", "t2"]) {
         await runtime.startThread({
@@ -1258,10 +1539,12 @@ describe("createAgentRuntime process lifecycle", () => {
           options: fullRuntimeOptions,
         });
       }
+
       const result = await runtime.reapIdleProviderSessions({
         idleForMs: 0,
         nowMs: Date.now(),
       });
+
       expect(result.reapedSessions).toEqual([
         expect.objectContaining({ threadId: "t2" }),
       ]);
@@ -1272,28 +1555,29 @@ describe("createAgentRuntime process lifecycle", () => {
     }
   });
 
-  it("scrubs inherited bb runtime env vars before spawning provider processes", async () => {
-    vi.stubEnv("BB_DATA_DIR", "/tmp/leaked-bb-data");
-    vi.stubEnv("BB_SERVER_PORT", "38886");
+  it("scrubs inherited Omnyo runtime env vars before spawning provider processes", async () => {
+    vi.stubEnv("OMNYO_DATA_DIR", "/tmp/leaked-omnyo-data");
+    vi.stubEnv("OMNYO_SERVER_PORT", "38886");
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("OPENAI_API_KEY", "external-secret");
     const envScript = join(tmpDir, "env-provider.cjs");
     writeFileSync(
       envScript,
       `const values = [
-        process.env.BB_DATA_DIR ?? "missing",
-        process.env.BB_SERVER_PORT ?? "missing",
+        process.env.OMNYO_DATA_DIR ?? "missing",
+        process.env.OMNYO_SERVER_PORT ?? "missing",
         process.env.NODE_ENV ?? "missing",
         process.env.OPENAI_API_KEY ?? "missing",
-        process.env.BB_THREAD_ID ?? "missing"
+        process.env.OMNYO_THREAD_ID ?? "missing"
       ];
       process.stderr.write(values.join("|") + "\\n");
       setInterval(() => {}, 1000);`,
     );
     const stderrLines: string[] = [];
+
     const manager = createProviderProcessManager({
       env: {
-        BB_THREAD_ID: "thr_explicit",
+        OMNYO_THREAD_ID: "thr_explicit",
       },
       onProcessExit: vi.fn(),
       onStderr: (line) => {
@@ -1311,6 +1595,7 @@ describe("createAgentRuntime process lifecycle", () => {
           providerId: "fake",
         })
         .catch(() => undefined);
+
       await waitForRuntimeState({
         label: "provider env stderr",
         predicate: () => stderrLines.length > 0,
@@ -1328,9 +1613,11 @@ describe("createAgentRuntime process lifecycle", () => {
   it("launches runtime-managed node bridges with the current executable when node is absent from PATH", async () => {
     vi.stubEnv("PATH", "");
     const record = createScriptedEchoRequestRecord();
+
     const runtime = createScriptedEchoRuntime({
       runtime: { workspacePath: tmpDir, env: record.env, onEvent: () => {} },
     });
+
     try {
       await runtime.ensureProvider({ providerId: "fake" });
       expect(record.last("initialize")).toBeDefined();
@@ -1347,19 +1634,20 @@ describe("createAgentRuntime process lifecycle", () => {
       `const values = [
         process.env.ELECTRON_RUN_AS_NODE ?? "missing",
         process.env.BRIDGE_ONLY ?? "missing",
-        process.env.BB_THREAD_ID ?? "missing"
+        process.env.OMNYO_THREAD_ID ?? "missing"
       ];
       process.stderr.write(values.join("|") + "\\n");
       setInterval(() => {}, 1000);`,
     );
     const stderrLines: string[] = [];
+
     const manager = createProviderProcessManager({
       adapterProcessEnv: {
         BRIDGE_ONLY: "bridge",
         ELECTRON_RUN_AS_NODE: "1",
       },
       env: {
-        BB_THREAD_ID: "thr_explicit",
+        OMNYO_THREAD_ID: "thr_explicit",
         ELECTRON_RUN_AS_NODE: "runtime",
       },
       onProcessExit: vi.fn(),
@@ -1378,6 +1666,7 @@ describe("createAgentRuntime process lifecycle", () => {
           providerId: "fake",
         })
         .catch(() => undefined);
+
       await waitForRuntimeState({
         label: "bridge env stderr",
         predicate: () => stderrLines.length > 0,
@@ -1392,6 +1681,7 @@ describe("createAgentRuntime process lifecycle", () => {
 
   it("ignores provider stdout emitted after shutdown starts", async () => {
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -1399,6 +1689,7 @@ describe("createAgentRuntime process lifecycle", () => {
         onEvent: (event) => events.push(event),
       },
     });
+
     const { providerThreadId } = await runtime.startThread({
       environmentId: "env-1",
       threadId: "t1",
@@ -1406,6 +1697,7 @@ describe("createAgentRuntime process lifecycle", () => {
       providerId: "fake",
       options: fullRuntimeOptions,
     });
+
     await waitForRuntimeState({
       label: "initial provider identity event",
       predicate: () =>
@@ -1427,6 +1719,7 @@ describe("createAgentRuntime process lifecycle", () => {
       onEvent: () => {},
       onToolCall: async () => ({ contentItems: [], success: true }),
     });
+
     await expect(
       withBridgeLaunch(
         runtime,
@@ -1440,6 +1733,7 @@ describe("createAgentRuntime process lifecycle", () => {
 
   it("removes the cached provider and retries when startup skill configuration fails", async () => {
     const record = createScriptedEchoRequestRecord();
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -1456,6 +1750,7 @@ describe("createAgentRuntime process lifecycle", () => {
       },
       launch: { pluginId: "provider-codex" },
     });
+
     try {
       await expect(
         runtime.startThread({
@@ -1478,7 +1773,9 @@ describe("createAgentRuntime process lifecycle", () => {
     } finally {
       await runtime.shutdown();
     }
+
     const retryRecord = createScriptedEchoRequestRecord();
+
     const retryRuntime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -1488,6 +1785,7 @@ describe("createAgentRuntime process lifecycle", () => {
       },
       launch: { pluginId: "provider-codex" },
     });
+
     try {
       await retryRuntime.startThread({
         environmentId: "env-1",
@@ -1509,6 +1807,7 @@ describe("createAgentRuntime process lifecycle", () => {
 
   it("fails fast on runTurn after provider has crashed", async () => {
     const exitInfo = vi.fn();
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -1542,6 +1841,7 @@ describe("createAgentRuntime process lifecycle", () => {
 
   it("reports a pending turn when the provider exits after acknowledging turn/start", async () => {
     const exitInfo = vi.fn<NonNullable<AgentRuntimeOptions["onProcessExit"]>>();
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -1558,6 +1858,7 @@ describe("createAgentRuntime process lifecycle", () => {
       providerId: "fake",
       options: fullRuntimeOptions,
     });
+
     await runtime.runTurn({
       clientRequestId: "creq_2222222262",
       threadId: "t1",
@@ -1577,6 +1878,7 @@ describe("createAgentRuntime process lifecycle", () => {
             providerThreadId,
             activeTurnId: null,
             pendingTurnStart: true,
+            pendingRequestId: "creq_2222222262",
           }),
         ],
       }),
@@ -1586,6 +1888,7 @@ describe("createAgentRuntime process lifecycle", () => {
 
   it("concurrent ensureProvider calls do not spawn duplicate processes", async () => {
     const record = createScriptedEchoRequestRecord();
+
     const runtime = createScriptedEchoRuntime({
       runtime: { workspacePath: tmpDir, env: record.env, onEvent: () => {} },
     });
@@ -1607,6 +1910,8 @@ function readLogLines(logPath: string): string[] {
   if (!existsSync(logPath)) {
     return [];
   }
+
   const content = readFileSync(logPath, "utf8").trim();
+
   return content.length > 0 ? content.split("\n") : [];
 }

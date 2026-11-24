@@ -1,6 +1,10 @@
+import { ManagedPreviewLink } from "./managed-preview-link.js";
+import { parseLoopbackPreviewUrl } from "@omnyo/client-core";
 import {
   Children,
+  Fragment,
   cloneElement,
+  createContext,
   isValidElement,
   memo,
   useLayoutEffect,
@@ -26,7 +30,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
-} from "@bb/shared-ui/context-menu";
+} from "@omnyo/shared-ui/context-menu";
 import type {
   Components,
   ExtraProps,
@@ -40,13 +44,14 @@ import remarkMath from "remark-math";
 import { ImageLightbox, getWrappedImageIndex } from "./image-lightbox.js";
 import { InlineImageGalleryContext } from "./inline-image-gallery-context.js";
 import { normalizeMathFences } from "./markdown-math-fences.js";
+import { repairMessageDirectiveLines } from "./markdown-message-directive-repair.js";
 import {
   markdownMayContainMath,
   useRehypeKatex,
   type RehypeKatex,
 } from "./markdown-katex-loader.js";
 import { CopyButton } from "./copy-button.js";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { WorkspaceOpenTargetIcon } from "@/components/workspace-open-target/WorkspaceOpenTargetIcon";
 import { RouteAnchor } from "./app-route-anchor.js";
 import {
@@ -101,12 +106,28 @@ import {
 } from "./markdown-code-fence-renderers.js";
 import {
   createMarkdownPieceCache,
+  findMarkdownPieceCandidates,
   resolveMarkdownPieces,
+  resolveMarkdownPiecesUnlessHtml,
   type MarkdownPieceRenderConfig,
 } from "./markdown-incremental-pieces.js";
+import { wrapStreamingTailWords } from "./markdown-streaming-words.js";
+import {
+  remarkPreparedMarkdown,
+  usePreparedMarkdownParse,
+} from "./markdown-parse-client.js";
 import { normalizePromptBlockquoteBoundaries } from "./markdown-prompt-blockquote-boundaries.js";
 import { MarkdownMermaidDiagram } from "./markdown-mermaid-diagram.js";
-import type { PromptTextMention } from "@bb/domain";
+import {
+  hasSettledFirstMarkdownBlock,
+  MARKDOWN_BLOCK_CONTROLS_CLASS,
+  MARKDOWN_BLOCK_SURFACE_CLASS,
+  rehypeMarkdownLeadParagraph,
+  rehypeMarkdownNumericColumns,
+} from "./markdown-typeset.js";
+import { ConversationMessageOverflowToggle } from "@/components/thread/timeline/conversation-message-overflow.js";
+import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@omnyo/shared-ui/hover-reveal";
+import type { PromptTextMention } from "@omnyo/domain";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import { usePreferredTheme, type Theme } from "@/hooks/useTheme";
 import {
@@ -114,7 +135,7 @@ import {
   useRewriteLocalhostLinksPreference,
 } from "@/lib/localhost-link-rewrite-preference";
 import { resolveRouteHref } from "@/lib/route-paths";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import remarkDirective from "remark-directive";
 import { PromptMentionPill } from "@/components/thread/timeline/ConversationMessageMentions.js";
 import {
@@ -129,11 +150,24 @@ interface MarkdownPreviewProps {
   sourcePrefix?: string;
   imagePolicy?: MarkdownImagePolicy;
   incrementalBlocks?: boolean;
+  streamingTail?: boolean;
+  streamingTailOwner?: string;
+  streamingWords?: boolean;
   linkRouting?: MarkdownLinkRouting;
   threadMentions?: MarkdownThreadMentions;
   promptMentions?: MarkdownPromptMentions;
   messageDirectives?: MarkdownMessageDirectives;
   urlTransform?: UrlTransform;
+}
+
+interface CommittedMarkdownRender {
+  config: object;
+  content: string;
+  owner: string | undefined;
+  prepared: ReturnType<typeof usePreparedMarkdownParse>;
+  source: string;
+  sourcePrefix: string;
+  children: ReactNode;
 }
 
 type MarkdownImagePolicy = "alt-text" | "render";
@@ -254,50 +288,139 @@ type MarkdownPreviewPropsEqual = (
   previous: MarkdownPreviewProps,
   next: MarkdownPreviewProps,
 ) => boolean;
+
 type MarkdownAnchorEvent = ReactMouseEvent<HTMLAnchorElement>;
+
 type MarkdownBlockquoteProps = ComponentPropsWithoutRef<"blockquote"> &
   ExtraProps;
+
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> &
   ExtraProps &
   CodeFenceElementProps;
+
+type MarkdownCodeCollapse = "off" | "expanded" | "collapsed";
+
 interface MarkdownCodeRendererProps extends MarkdownCodeProps {
+  codeCollapse: MarkdownCodeCollapse;
   codeFenceSourceOffset: number;
   imagePolicy: MarkdownImagePolicy;
   linkRouting?: MarkdownLinkRouting;
   preferredTheme: Theme;
   rewriteLocalhostLinks: boolean;
 }
+
 type MarkdownHeadingProps = ComponentPropsWithoutRef<"h1"> & ExtraProps;
+
 type MarkdownHrProps = ComponentPropsWithoutRef<"hr"> & ExtraProps;
+
 type MarkdownImageProps = ComponentPropsWithoutRef<"img"> &
   ExtraProps & {
     "data-markdown-image-offset"?: number;
   };
+
 type MarkdownImageRenderAttributes = Omit<
   MarkdownImageProps,
   "alt" | "children" | "className" | "node" | "src"
 >;
+
 type MarkdownListItemProps = ComponentPropsWithoutRef<"li"> & ExtraProps;
+
 type MarkdownOrderedListProps = ComponentPropsWithoutRef<"ol"> & ExtraProps;
-type MarkdownParagraphProps = ComponentPropsWithoutRef<"p"> & ExtraProps;
+
+type MarkdownParagraphProps = ComponentPropsWithoutRef<"p"> &
+  ExtraProps & {
+    "data-markdown-lead"?: string;
+  };
+
 type MarkdownPreProps = ComponentPropsWithoutRef<"pre"> & ExtraProps;
+
 type MarkdownSourceMedia = ComponentPropsWithoutRef<"source">["media"];
+
 type MarkdownSourceProps = ComponentPropsWithoutRef<"source"> & ExtraProps;
+
 type MarkdownTableProps = ComponentPropsWithoutRef<"table"> & ExtraProps;
-type MarkdownTableCellProps = ComponentPropsWithoutRef<"td"> & ExtraProps;
+
+type MarkdownTableCellProps = ComponentPropsWithoutRef<"td"> &
+  ExtraProps & {
+    "data-markdown-numeric"?: string;
+  };
+
 type MarkdownTableHeadProps = ComponentPropsWithoutRef<"thead"> & ExtraProps;
-type MarkdownTableHeaderProps = ComponentPropsWithoutRef<"th"> & ExtraProps;
+
+type MarkdownTableHeaderProps = ComponentPropsWithoutRef<"th"> &
+  ExtraProps & {
+    "data-markdown-numeric"?: string;
+  };
+
 type MarkdownUnorderedListProps = ComponentPropsWithoutRef<"ul"> & ExtraProps;
+
 type MarkdownRehypePlugins = NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+
 type MarkdownRemarkPlugins = NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
 const MARKDOWN_TABLE_BREAKOUT_LIMIT_VARIABLE = "--md-table-breakout-max";
+
 const MARKDOWN_TABLE_BREAKOUT_WIDTH = `max(100%, min(1100px, 100cqw - 2rem, var(${MARKDOWN_TABLE_BREAKOUT_LIMIT_VARIABLE}, 100cqw)))`;
+
 const MARKDOWN_CONTENT_WIDTH_VARIABLE = "--md-content-w";
+
+export const MarkdownTablesContainedContext = createContext(false);
+
+const MarkdownLeadParagraphContext = createContext(false);
+
 const MARKDOWN_SOURCE_COLOR_SCHEME_MEDIA_PATTERN =
   /^\(\s*prefers-color-scheme\s*:\s*(dark|light)\s*\)$/iu;
 
-const MARKDOWN_PLAIN_REHYPE_PLUGINS: MarkdownRehypePlugins = [];
+const MARKDOWN_PLAIN_REHYPE_PLUGINS: MarkdownRehypePlugins = [
+  rehypeMarkdownNumericColumns,
+];
+
+const MARKDOWN_LEADING_REHYPE_PLUGINS: MarkdownRehypePlugins = [
+  rehypeMarkdownLeadParagraph,
+];
+
+const MARKDOWN_CODE_COLLAPSE_LINE_LIMIT = 24;
+
+const STREAMED_MARKDOWN_OWNER_LIMIT = 200;
+
+const streamedMarkdownOwners = new Set<string>();
+
+function rememberStreamedMarkdownOwner(owner: string): void {
+  streamedMarkdownOwners.delete(owner);
+  streamedMarkdownOwners.add(owner);
+
+  if (streamedMarkdownOwners.size > STREAMED_MARKDOWN_OWNER_LIMIT) {
+    const oldest = streamedMarkdownOwners.values().next();
+
+    if (!oldest.done) streamedMarkdownOwners.delete(oldest.value);
+  }
+}
+
+function resolveMarkdownCodeCollapse({
+  owner,
+  streamingTail,
+  timeline,
+}: {
+  owner: string | undefined;
+  streamingTail: boolean;
+  timeline: boolean;
+}): MarkdownCodeCollapse {
+  if (!timeline || streamingTail || owner === undefined) return "off";
+
+  return streamedMarkdownOwners.has(owner) ? "expanded" : "collapsed";
+}
+
+function countMarkdownCodeLines(code: string): number {
+  let lines = 1;
+  let index = code.indexOf("\n");
+
+  while (index !== -1) {
+    lines += 1;
+    index = code.indexOf("\n", index + 1);
+  }
+
+  return lines;
+}
 
 function resolveRehypePlugins({
   rehypeKatex,
@@ -305,6 +428,7 @@ function resolveRehypePlugins({
   rehypeKatex: RehypeKatex | null;
 }): MarkdownRehypePlugins {
   const base = MARKDOWN_PLAIN_REHYPE_PLUGINS;
+
   return rehypeKatex === null ? base : [...base, rehypeKatex];
 }
 
@@ -313,11 +437,15 @@ function areMarkdownAbsoluteLocalFileLinkRoutingsEqual({
   previous,
 }: AreMarkdownAbsoluteLocalFileLinkRoutingsEqualArgs): boolean {
   if (previous === next) return true;
+
   if (previous === undefined || next === undefined) return false;
+
   if (previous.kind !== next.kind) return false;
+
   if (previous.kind === "trusted-host" || next.kind === "trusted-host") {
     return true;
   }
+
   return previous.rootPath === next.rootPath;
 }
 
@@ -326,7 +454,9 @@ function areMarkdownRelativeLocalFileLinkRoutingsEqual({
   previous,
 }: AreMarkdownRelativeLocalFileLinkRoutingsEqualArgs): boolean {
   if (previous === next) return true;
+
   if (previous === undefined || next === undefined) return false;
+
   return (
     previous.baseDir === next.baseDir && previous.rootPath === next.rootPath
   );
@@ -337,7 +467,9 @@ function areMarkdownLocalFileLinkRoutingsEqual({
   previous,
 }: AreMarkdownLocalFileLinkRoutingsEqualArgs): boolean {
   if (previous === next) return true;
+
   if (previous === undefined || next === undefined) return false;
+
   return (
     previous.onOpenLink === next.onOpenLink &&
     areMarkdownAbsoluteLocalFileLinkRoutingsEqual({
@@ -356,7 +488,9 @@ function areMarkdownLocalImageRoutingsEqual({
   previous,
 }: AreMarkdownLocalImageRoutingsEqualArgs): boolean {
   if (previous === next) return true;
+
   if (previous === undefined || next === undefined) return false;
+
   return (
     previous.resolveSrc === next.resolveSrc &&
     areMarkdownAbsoluteLocalFileLinkRoutingsEqual({
@@ -375,9 +509,12 @@ function areMarkdownLinkRoutingsEqual({
   previous,
 }: AreMarkdownLinkRoutingsEqualArgs): boolean {
   if (previous === next) return true;
+
   if (previous === undefined || next === undefined) return false;
+
   return (
     previous.onOpenLink === next.onOpenLink &&
+    previous.previewThreadId === next.previewThreadId &&
     areMarkdownLocalFileLinkRoutingsEqual({
       next: next.localFile,
       previous: previous.localFile,
@@ -394,7 +531,9 @@ function areMarkdownThreadMentionsEqual({
   previous,
 }: AreMarkdownThreadMentionsEqualArgs): boolean {
   if (previous === next) return true;
+
   if (previous === undefined || next === undefined) return false;
+
   return (
     previous.mentions === next.mentions &&
     previous.preserveSoftBreaks === next.preserveSoftBreaks
@@ -406,7 +545,9 @@ function areMarkdownPromptMentionsEqual({
   previous,
 }: AreMarkdownPromptMentionsEqualArgs): boolean {
   if (previous === next) return true;
+
   if (previous === undefined || next === undefined) return false;
+
   return (
     previous.mentions === next.mentions &&
     previous.resolveMentionLink === next.resolveMentionLink
@@ -418,7 +559,9 @@ function areMarkdownMessageDirectivesEqual({
   previous,
 }: AreMarkdownMessageDirectivesEqualArgs): boolean {
   if (previous === next) return true;
+
   if (previous === undefined || next === undefined) return false;
+
   return (
     previous.registry === next.registry &&
     previous.openWorkspaceFile === next.openWorkspaceFile &&
@@ -440,6 +583,9 @@ const areMarkdownPreviewPropsEqual: MarkdownPreviewPropsEqual = (
   (previous.sourcePrefix ?? "") === (next.sourcePrefix ?? "") &&
   (previous.imagePolicy ?? "render") === (next.imagePolicy ?? "render") &&
   (previous.incrementalBlocks ?? false) === (next.incrementalBlocks ?? false) &&
+  (previous.streamingTail ?? false) === (next.streamingTail ?? false) &&
+  previous.streamingTailOwner === next.streamingTailOwner &&
+  (previous.streamingWords ?? false) === (next.streamingWords ?? false) &&
   previous.urlTransform === next.urlTransform &&
   areMarkdownThreadMentionsEqual({
     next: next.threadMentions,
@@ -480,6 +626,7 @@ function resolveMarkdownLocalFileTarget(
     absoluteLinks: absolute,
     href: value,
   });
+
   if (absoluteLink !== null) {
     return {
       href: value,
@@ -487,6 +634,7 @@ function resolveMarkdownLocalFileTarget(
       sourceKind: "absolute",
     };
   }
+
   if (relative === undefined) {
     return null;
   }
@@ -495,13 +643,16 @@ function resolveMarkdownLocalFileTarget(
     href: value,
     ...relative,
   });
+
   if (resolvedHref === null) {
     return null;
   }
+
   const relativeLink = parseLocalFileHref({
     absoluteLinks: absolute,
     href: resolvedHref,
   });
+
   return relativeLink === null
     ? null
     : {
@@ -523,6 +674,7 @@ function buildLocalAwareUrlTransform({
         localFileRouting.absoluteLinks,
         localFileRouting.relativeLinks,
       );
+
       if (localFile !== null) {
         return localFile.href;
       }
@@ -537,6 +689,7 @@ function buildLocalAwareUrlTransform({
         localImageRouting.absolutePaths,
         localImageRouting.relativePaths,
       );
+
       if (localImage !== null) {
         return localImageRouting.resolveSrc(
           localImage.link,
@@ -573,6 +726,7 @@ function resolveInlineCodeMarkdownFileHref({
     localFileRouting.absoluteLinks,
     localFileRouting.relativeLinks,
   );
+
   return target !== null && hasMarkdownFileExtension(target.link.path)
     ? target.href
     : null;
@@ -595,14 +749,18 @@ function appendMarkdownLinkIcon(
   icon: ReactNode,
 ): ReactNode {
   let appended = false;
+
   const append = (node: ReactNode): ReactNode => {
     if (typeof node === "string" || typeof node === "number") {
       const text = String(node);
+
       const last = markdownLinkGraphemes
         .segment(text)
         .containing(text.trimEnd().length - 1);
+
       if (!last) return node;
       appended = true;
+
       return (
         <>
           {text.slice(0, last.index)}
@@ -613,17 +771,24 @@ function appendMarkdownLinkIcon(
         </>
       );
     }
+
     if (isValidElement<{ children?: ReactNode }>(node)) {
       const content = append(node.props.children);
+
       return appended ? cloneElement(node, undefined, content) : node;
     }
+
     const nodes: ReactNode[] = Children.toArray(node);
+
     for (let index = nodes.length - 1; index >= 0 && !appended; index--) {
       nodes[index] = append(nodes[index]);
     }
+
     return nodes;
   };
+
   const content = append(children);
+
   return appended ? (
     content
   ) : (
@@ -641,15 +806,53 @@ function MarkdownAnchor({
   rewriteLocalhostLinks,
   ...anchorProps
 }: MarkdownAnchorProps) {
+  if (
+    linkRouting?.previewThreadId !== undefined &&
+    parseLoopbackPreviewUrl(href) !== null &&
+    href !== undefined
+  ) {
+    return (
+      <ManagedPreviewLink
+        {...anchorProps}
+        href={href}
+        threadId={linkRouting.previewThreadId}
+        enabled={rewriteLocalhostLinks ?? false}
+        onOpenLink={linkRouting.onOpenLink}
+      >
+        {children}
+      </ManagedPreviewLink>
+    );
+  }
+
+  return (
+    <MarkdownPlainAnchor
+      {...anchorProps}
+      href={href}
+      linkRouting={linkRouting}
+      rewriteLocalhostLinks={rewriteLocalhostLinks}
+    >
+      {children}
+    </MarkdownPlainAnchor>
+  );
+}
+
+function MarkdownPlainAnchor({
+  children,
+  href,
+  linkRouting,
+  rewriteLocalhostLinks,
+  ...anchorProps
+}: MarkdownAnchorProps) {
   const localFileRouting = linkRouting?.localFile;
   const onOpenLocalFileLink = localFileRouting?.onOpenLink;
+
   const rewrittenHref = rewriteLocalhostLinkHref({
-    currentHostname:
-      typeof window === "undefined" ? undefined : window.location.hostname,
     enabled: rewriteLocalhostLinks ?? false,
     href,
   });
+
   const isAppRouteHref = isMarkdownAppRouteHref({ href: rewrittenHref });
+
   const localFileLink =
     !isAppRouteHref && localFileRouting
       ? parseLocalFileHref({
@@ -657,25 +860,31 @@ function MarkdownAnchor({
           href: rewrittenHref,
         })
       : null;
+
   const anchorHref = buildLocalFileAnchorHref(localFileLink, rewrittenHref);
   const getContextMenuItems = useContext(MarkdownLocalFileContextMenuContext);
   const openTargets = useContext(MarkdownLocalFileOpenTargetsContext);
+
   if (!anchorHref) {
     return <span>{children}</span>;
   }
+
   const contextMenuItems =
     localFileLink !== null && getContextMenuItems !== null
       ? getContextMenuItems(localFileLink)
       : null;
+
   const openTarget =
     localFileLink === null || localFileLink.openTargetId === null
       ? undefined
       : openTargets.find((target) => target.id === localFileLink.openTargetId);
+
   const handleAnchorClick = (event: MarkdownAnchorEvent) => {
     if (localFileLink && onOpenLocalFileLink) {
       if (onOpenLocalFileLink(localFileLink)) {
         event.preventDefault();
       }
+
       return;
     }
 
@@ -689,6 +898,7 @@ function MarkdownAnchor({
       linkRouting.onOpenLink({ href: rewrittenHref })
     ) {
       event.preventDefault();
+
       return;
     }
   };
@@ -723,9 +933,11 @@ function MarkdownAnchor({
         : children}
     </RouteAnchor>
   );
+
   if (contextMenuItems === null || contextMenuItems.length === 0) {
     return anchor;
   }
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{anchor}</ContextMenuTrigger>
@@ -742,6 +954,7 @@ function renderMarkdownLocalFileContextMenuItem(
   if (item.type === "separator") {
     return <ContextMenuSeparator key={item.id} />;
   }
+
   if (item.type === "submenu") {
     return (
       <ContextMenuSub key={item.id}>
@@ -752,6 +965,7 @@ function renderMarkdownLocalFileContextMenuItem(
       </ContextMenuSub>
     );
   }
+
   return (
     <ContextMenuItem key={item.id} onSelect={item.onSelect}>
       {item.label}
@@ -760,12 +974,14 @@ function renderMarkdownLocalFileContextMenuItem(
 }
 
 function MarkdownCodeBlock({
+  codeCollapse,
   codeProps,
   codeText,
   imagePolicy,
   language,
   preferredTheme,
 }: {
+  codeCollapse: MarkdownCodeCollapse;
   codeProps: ComponentPropsWithoutRef<"code">;
   codeText: string;
   imagePolicy: MarkdownImagePolicy;
@@ -773,6 +989,8 @@ function MarkdownCodeBlock({
   preferredTheme: Theme;
 }) {
   const [softWrap, setSoftWrap] = useState(false);
+  const [expanded, setExpanded] = useState(codeCollapse !== "collapsed");
+
   const highlightedHtml = useMemo(
     () =>
       language !== "mermaid"
@@ -780,10 +998,14 @@ function MarkdownCodeBlock({
         : null,
     [language, codeText],
   );
+
   const highlightedMarkup = useMemo(
     () => (highlightedHtml === null ? null : { __html: highlightedHtml }),
     [highlightedHtml],
   );
+
+  const lineCount = useMemo(() => countMarkdownCodeLines(codeText), [codeText]);
+
   if (language === "mermaid" && imagePolicy === "render") {
     return (
       <MarkdownMermaidDiagram
@@ -793,13 +1015,23 @@ function MarkdownCodeBlock({
     );
   }
 
+  const collapsible =
+    codeCollapse !== "off" && lineCount > MARKDOWN_CODE_COLLAPSE_LINE_LIMIT;
+
+  const collapsed = collapsible && !expanded;
+
   return (
-    <div className="my-2 overflow-hidden rounded-md border border-border bg-surface-recessed">
-      <div className="flex items-center justify-between pl-3 pr-1.5 pt-1.5">
-        <span className="font-mono text-xs uppercase text-muted-foreground">
+    <div className={MARKDOWN_BLOCK_SURFACE_CLASS}>
+      <div className="flex items-center justify-between pl-4 pr-2 pt-2.5">
+        <span className="font-mono text-xs lowercase text-muted-foreground">
           {language ?? ""}
         </span>
-        <div className="flex items-center gap-0.5">
+        <div
+          className={cn(
+            MARKDOWN_BLOCK_CONTROLS_CLASS,
+            HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS,
+          )}
+        >
           <button
             type="button"
             aria-pressed={softWrap}
@@ -815,21 +1047,24 @@ function MarkdownCodeBlock({
         </div>
       </div>
       <pre
+        data-markdown-code-collapsed={collapsed ? "" : undefined}
         className={cn(
-          "bb-code-highlight px-3 pb-3 pt-1",
+          "omnyo-code-highlight px-4 pb-3.5 pt-1",
           softWrap
             ? "whitespace-pre-wrap [overflow-wrap:anywhere]"
             : "overflow-x-auto",
+          collapsed &&
+            "max-h-80 overflow-y-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]",
         )}
       >
         {highlightedMarkup === null ? (
-          <code className="font-mono text-xs" {...codeProps}>
+          <code className="font-mono text-sm leading-5" {...codeProps}>
             {codeText}
           </code>
         ) : (
           <code
             className={cn(
-              "font-mono text-xs",
+              "font-mono text-sm leading-5",
               language ? `language-${language}` : "",
             )}
             dangerouslySetInnerHTML={highlightedMarkup}
@@ -837,6 +1072,17 @@ function MarkdownCodeBlock({
           />
         )}
       </pre>
+      {collapsible ? (
+        <div className="-mt-2 px-4 pb-2.5">
+          <ConversationMessageOverflowToggle
+            collapsedLabel={`Show all ${lineCount} lines`}
+            expanded={expanded}
+            onToggle={() => {
+              setExpanded((value) => !value);
+            }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -844,6 +1090,7 @@ function MarkdownCodeBlock({
 function MarkdownCode({
   className: codeClassName,
   children,
+  codeCollapse,
   codeFenceSourceOffset,
   imagePolicy,
   linkRouting,
@@ -856,11 +1103,19 @@ function MarkdownCode({
 }: MarkdownCodeRendererProps) {
   const codeText =
     typeof children === "string" ? children.replace(/\n$/, "") : "";
+
   const language = getMarkdownCodeLanguage({ className: codeClassName });
-  const isBlock = isMarkdownCodeBlock({ codeText, language });
+
+  const isBlock = isMarkdownCodeBlock({
+    className: codeClassName,
+    codeText,
+    language,
+  });
+
   if (isBlock) {
     const original = (
       <MarkdownCodeBlock
+        codeCollapse={codeCollapse}
         codeProps={props}
         codeText={codeText}
         imagePolicy={imagePolicy}
@@ -868,6 +1123,7 @@ function MarkdownCode({
         preferredTheme={preferredTheme}
       />
     );
+
     return codeFenceOffset === undefined || language === null ? (
       original
     ) : (
@@ -885,6 +1141,7 @@ function MarkdownCode({
     codeText,
     localFileRouting: linkRouting?.localFile,
   });
+
   if (markdownFileHref !== null) {
     return (
       <MarkdownAnchor
@@ -963,10 +1220,22 @@ function MarkdownParagraph({
   children,
   className: _className,
   node: _node,
+  "data-markdown-lead": leadCandidate,
   ...paragraphProps
 }: MarkdownParagraphProps) {
+  const leadEnabled = useContext(MarkdownLeadParagraphContext);
+  const lead = leadEnabled && leadCandidate !== undefined;
+
   return (
-    <p {...paragraphProps} className="mb-2 text-foreground last:mb-0">
+    <p
+      {...paragraphProps}
+      data-markdown-lead={lead ? "" : undefined}
+      className={
+        lead
+          ? "mb-3 text-lead font-semibold tracking-[-0.01em] text-foreground last:mb-0 [&>strong]:font-semibold"
+          : "mb-2 text-foreground last:mb-0"
+      }
+    >
       {children}
     </p>
   );
@@ -986,16 +1255,20 @@ function MarkdownOrderedList({
     node?.children.filter(
       (child) => child.type === "element" && child.tagName === "li",
     ).length ?? Children.toArray(children).filter(isValidElement).length;
+
   const start = orderedListProps.start ?? 1;
+
   const markerDigits = Math.max(
     String(start).length,
     String(start + Math.max(0, itemCount - 1)).length,
   );
+
   const style: CSSProperties & { "--markdown-list-marker-digits": number } = {
     "--markdown-list-marker-digits": markerDigits,
     paddingInlineStart:
       "calc(var(--spacing) * 5 + (var(--markdown-list-marker-digits) - 1) * 1ch)",
   };
+
   return (
     <ol
       {...orderedListProps}
@@ -1021,43 +1294,106 @@ function MarkdownBlockquote({ children }: MarkdownBlockquoteProps) {
 
 function MarkdownTable({ children }: MarkdownTableProps) {
   const breakoutRef = useMarkdownTableContentWidthVariable();
+  const contained = useContext(MarkdownTablesContainedContext);
 
   return (
     <div
       ref={breakoutRef}
       className="my-2 flex justify-center"
-      style={{
-        width: MARKDOWN_TABLE_BREAKOUT_WIDTH,
-        marginInline: `calc((100% - ${MARKDOWN_TABLE_BREAKOUT_WIDTH}) / 2)`,
-      }}
+      style={
+        contained
+          ? undefined
+          : {
+              width: MARKDOWN_TABLE_BREAKOUT_WIDTH,
+              marginInline: `calc((100% - ${MARKDOWN_TABLE_BREAKOUT_WIDTH}) / 2)`,
+            }
+      }
     >
       {}
       <div
-        className="w-max max-w-full overflow-x-auto"
+        role="region"
+        aria-label="Table (scroll horizontally for more columns)"
+        tabIndex={0}
+        className={cn(
+          "w-max max-w-full overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "rounded-lg border border-border-hairline",
+          contained && "max-h-[min(32rem,65dvh)] overflow-y-auto",
+        )}
         style={{
           minWidth: `min(var(${MARKDOWN_CONTENT_WIDTH_VARIABLE}, 100%), 100%)`,
         }}
       >
-        <table className="border border-border">{children}</table>
+        <table
+          className={cn(
+            "min-w-full border-collapse break-normal [overflow-wrap:normal]",
+            contained ? "w-full table-auto" : "w-max",
+            contained &&
+              "text-sm leading-relaxed [&_tbody>tr:nth-child(even)]:bg-surface-recessed/50 [&_tbody>tr:hover]:bg-state-hover [&_tbody>tr:last-child>td]:border-b-0",
+          )}
+        >
+          {children}
+        </table>
       </div>
     </div>
   );
 }
 
 function MarkdownTableHead({ children }: MarkdownTableHeadProps) {
-  return <thead className="bg-surface-recessed">{children}</thead>;
+  const contained = useContext(MarkdownTablesContainedContext);
+
+  return (
+    <thead
+      className={cn("bg-surface-recessed", contained && "sticky top-0 z-10")}
+    >
+      {children}
+    </thead>
+  );
 }
 
-function MarkdownTableHeader({ children }: MarkdownTableHeaderProps) {
+function MarkdownTableHeader({
+  children,
+  "data-markdown-numeric": numeric,
+}: MarkdownTableHeaderProps) {
+  const contained = useContext(MarkdownTablesContainedContext);
+
   return (
-    <th className="border border-border px-2 py-1 text-left font-medium">
+    <th
+      className={cn(
+        "whitespace-nowrap border-b px-3 py-2 text-left align-top font-medium",
+        contained
+          ? "border-border-seam text-xs font-semibold text-foreground"
+          : "border-border",
+        contained &&
+          numeric !== undefined &&
+          "min-w-20 text-right tabular-nums",
+      )}
+    >
       {children}
     </th>
   );
 }
 
-function MarkdownTableCell({ children }: MarkdownTableCellProps) {
-  return <td className="border border-border px-2 py-1">{children}</td>;
+function MarkdownTableCell({
+  children,
+  "data-markdown-numeric": numeric,
+}: MarkdownTableCellProps) {
+  const contained = useContext(MarkdownTablesContainedContext);
+
+  return (
+    <td
+      className={cn(
+        "max-w-[28rem] border-b px-3 py-2 align-top",
+        contained
+          ? "min-w-[8rem] border-border-seam [overflow-wrap:anywhere]"
+          : "border-border",
+        contained &&
+          numeric !== undefined &&
+          "min-w-20 text-right tabular-nums",
+      )}
+    >
+      {children}
+    </td>
+  );
 }
 
 function MarkdownRenderedImage({
@@ -1069,31 +1405,45 @@ function MarkdownRenderedImage({
 }: MarkdownImageRendererArgs) {
   const openGallery = useContext(InlineImageGalleryContext);
   const imageUrl = typeof src === "string" ? src : "";
+
   if (!imageUrl) return null;
+
   return (
     <img
       {...imageAttributes}
       src={imageUrl}
       alt={typeof alt === "string" ? alt : "Image"}
-      className="my-2 max-h-[max(384px,50vh)] max-w-full cursor-zoom-in object-contain"
+      className={cn(
+        "my-2 max-h-[max(384px,50vh)] max-w-full cursor-zoom-in object-contain",
+        !(
+          Number(imageAttributes.width) > 0 &&
+          Number(imageAttributes.height) > 0
+        ) && "aspect-video w-full",
+      )}
       loading="lazy"
       data-markdown-image=""
       data-markdown-image-offset={sourceOffset}
       onClick={(event) => {
         if (openGallery) {
           openGallery(event.currentTarget);
+
           return;
         }
+
         const markdownElement = event.currentTarget.closest(
           "[data-markdown-preview]",
         );
+
         const images = Array.from(
           markdownElement?.querySelectorAll("img") ?? [],
         );
+
         const imageIndex = images.indexOf(event.currentTarget);
+
         const imageSources = images.map(
           (image) => image.getAttribute("src") ?? image.src,
         );
+
         setExpandedImage({
           imageSources,
           index: imageIndex,
@@ -1111,9 +1461,11 @@ function MarkdownHr(_props: MarkdownHrProps) {
 function parseMarkdownSourceColorScheme(media: string): Theme | null {
   const match = MARKDOWN_SOURCE_COLOR_SCHEME_MEDIA_PATTERN.exec(media);
   const colorScheme = match?.[1];
+
   if (colorScheme === "dark" || colorScheme === "light") {
     return colorScheme;
   }
+
   return null;
 }
 
@@ -1124,6 +1476,7 @@ function resolveMarkdownSourceMedia({
   if (!media) return media;
 
   const colorScheme = parseMarkdownSourceColorScheme(media);
+
   if (!colorScheme) return media;
 
   return colorScheme === preferredTheme ? "all" : "not all";
@@ -1131,13 +1484,92 @@ function resolveMarkdownSourceMedia({
 
 const EMPTY_THREAD_IDS: readonly string[] = [];
 
+type MarkdownMediaConfig = Pick<
+  BuildMarkdownComponentsArgs,
+  | "imagePolicy"
+  | "imageSourceOffset"
+  | "linkRouting"
+  | "preferredTheme"
+  | "rewriteLocalhostLinks"
+  | "setExpandedImage"
+> & {
+  codeCollapse: MarkdownCodeCollapse;
+};
+
+const MarkdownMediaContext = createContext<MarkdownMediaConfig | null>(null);
+
+function useMarkdownMediaConfig(): MarkdownMediaConfig {
+  const config = useContext(MarkdownMediaContext);
+
+  if (config === null) throw new Error("Markdown media requires a preview");
+
+  return config;
+}
+
+function MarkdownCodeRenderer(props: MarkdownCodeProps) {
+  const {
+    codeCollapse,
+    imageSourceOffset,
+    imagePolicy,
+    linkRouting,
+    preferredTheme,
+    rewriteLocalhostLinks,
+  } = useMarkdownMediaConfig();
+
+  return (
+    <MarkdownCode
+      {...props}
+      codeCollapse={codeCollapse}
+      codeFenceSourceOffset={imageSourceOffset}
+      imagePolicy={imagePolicy}
+      linkRouting={linkRouting}
+      preferredTheme={preferredTheme}
+      rewriteLocalhostLinks={rewriteLocalhostLinks}
+    />
+  );
+}
+
+function MarkdownImage({
+  src,
+  alt,
+  className: _className,
+  node,
+  "data-markdown-image-offset": pieceOffset,
+  ...imageAttributes
+}: MarkdownImageProps) {
+  const { imagePolicy, imageSourceOffset, setExpandedImage } =
+    useMarkdownMediaConfig();
+
+  if (imagePolicy === "alt-text") {
+    return (
+      <span data-markdown-image-fallback="">
+        [Image: {typeof alt === "string" && alt.length > 0 ? alt : "image"}]
+      </span>
+    );
+  }
+
+  const sourceOffset = pieceOffset ?? node?.position?.start.offset;
+
+  return (
+    <MarkdownRenderedImage
+      alt={alt}
+      sourceOffset={
+        sourceOffset === undefined
+          ? undefined
+          : imageSourceOffset + sourceOffset
+      }
+      imageAttributes={imageAttributes}
+      setExpandedImage={setExpandedImage}
+      src={src}
+    />
+  );
+}
+
 function buildMarkdownComponents({
   imagePolicy,
-  imageSourceOffset,
   linkRouting,
   preferredTheme,
   rewriteLocalhostLinks,
-  setExpandedImage,
   threadMentions,
   promptMentions,
   hasMessageDirectives,
@@ -1154,25 +1586,35 @@ function buildMarkdownComponents({
   } {
     const codeRanges: Array<{ end: number; start: number }> = [];
     let text = "";
+
     const append = (child: ReactNode): void => {
       if (typeof child === "string" || typeof child === "number") {
         text += String(child);
+
         return;
       }
+
       if (!isValidElement(child)) {
         Children.forEach(child, append);
+
         return;
       }
+
       const element = child as ReactElement<{ children?: ReactNode }>;
+
       const isCode =
         element.type === "code" || element.type === MarkdownCodeRenderer;
+
       const start = text.length;
       append(element.props.children);
+
       if (isCode && text.length > start) {
         codeRanges.push({ start, end: text.length });
       }
     };
+
     append(node);
+
     return { codeRanges, text };
   }
 
@@ -1182,10 +1624,12 @@ function buildMarkdownComponents({
     const flattened = flattenMarkdownLinkLabel(node);
     const candidates: RawThreadIdLabelCandidate[] = [];
     let offset = 0;
+
     for (const segment of splitRawThreadIdsInText(flattened.text)) {
       const start = offset;
       const end = start + segment.text.length;
       offset = end;
+
       if (
         segment.rawThreadId === null ||
         flattened.codeRanges.some(
@@ -1194,8 +1638,10 @@ function buildMarkdownComponents({
       ) {
         continue;
       }
+
       candidates.push({ start, end, threadId: segment.rawThreadId });
     }
+
     return candidates;
   }
 
@@ -1211,9 +1657,11 @@ function buildMarkdownComponents({
       const start = cursor.value;
       const end = start + text.length;
       cursor.value = end;
+
       const containedCandidates = candidates.filter(
         (candidate) => candidate.start >= start && candidate.end <= end,
       );
+
       if (containedCandidates.length === 0) {
         return (
           <MarkdownAnchor
@@ -1225,11 +1673,14 @@ function buildMarkdownComponents({
           </MarkdownAnchor>
         );
       }
+
       const rendered: ReactNode[] = [];
       let localCursor = 0;
+
       for (const candidate of containedCandidates) {
         const candidateStart = candidate.start - start;
         const candidateEnd = candidate.end - start;
+
         if (candidateStart > localCursor) {
           rendered.push(
             <MarkdownAnchor
@@ -1242,7 +1693,9 @@ function buildMarkdownComponents({
             </MarkdownAnchor>,
           );
         }
+
         const resource = resourceById.get(candidate.threadId);
+
         if (resource !== undefined) {
           rendered.push(
             <PromptMentionPill
@@ -1252,8 +1705,10 @@ function buildMarkdownComponents({
             />,
           );
         }
+
         localCursor = candidateEnd;
       }
+
       if (localCursor < text.length) {
         rendered.push(
           <MarkdownAnchor
@@ -1266,8 +1721,10 @@ function buildMarkdownComponents({
           </MarkdownAnchor>,
         );
       }
+
       return rendered;
     }
+
     if (!isValidElement(node)) {
       return Children.map(node, (child) =>
         renderLiftedMarkdownLinkLabel(
@@ -1279,8 +1736,10 @@ function buildMarkdownComponents({
         ),
       );
     }
+
     if (node.type === "code" || node.type === MarkdownCodeRenderer) {
       cursor.value += flattenMarkdownLinkLabel(node).text.length;
+
       return (
         <MarkdownAnchor
           {...anchorProps}
@@ -1291,7 +1750,9 @@ function buildMarkdownComponents({
         </MarkdownAnchor>
       );
     }
+
     const element = node as ReactElement<{ children?: ReactNode }>;
+
     return cloneElement(
       element,
       undefined,
@@ -1307,6 +1768,7 @@ function buildMarkdownComponents({
 
   function MarkdownLink(props: MarkdownAnchorProps) {
     const { children, ...anchorProps } = props;
+
     const candidates = useMemo(
       () =>
         threadMentions === undefined
@@ -1314,6 +1776,7 @@ function buildMarkdownComponents({
           : rawThreadIdLabelCandidates(children),
       [children],
     );
+
     const candidateThreadIds = useMemo(
       () =>
         candidates.length === 0
@@ -1321,10 +1784,13 @@ function buildMarkdownComponents({
           : [...new Set(candidates.map((candidate) => candidate.threadId))],
       [candidates],
     );
+
     const resourceById = useRawThreadMentionResources(candidateThreadIds);
+
     const resolvedCandidates = candidates.filter((candidate) =>
       resourceById.has(candidate.threadId),
     );
+
     if (resolvedCandidates.length > 0) {
       return (
         <>
@@ -1338,6 +1804,7 @@ function buildMarkdownComponents({
         </>
       );
     }
+
     return (
       <MarkdownAnchor
         {...anchorProps}
@@ -1346,50 +1813,6 @@ function buildMarkdownComponents({
       >
         {children}
       </MarkdownAnchor>
-    );
-  }
-
-  function MarkdownCodeRenderer(props: MarkdownCodeProps) {
-    return (
-      <MarkdownCode
-        {...props}
-        codeFenceSourceOffset={imageSourceOffset}
-        imagePolicy={imagePolicy}
-        linkRouting={linkRouting}
-        preferredTheme={preferredTheme}
-        rewriteLocalhostLinks={rewriteLocalhostLinks}
-      />
-    );
-  }
-
-  function MarkdownImage({
-    src,
-    alt,
-    className: _className,
-    node,
-    "data-markdown-image-offset": pieceOffset,
-    ...imageAttributes
-  }: MarkdownImageProps) {
-    if (imagePolicy === "alt-text") {
-      return (
-        <span data-markdown-image-fallback="">
-          [Image: {typeof alt === "string" && alt.length > 0 ? alt : "image"}]
-        </span>
-      );
-    }
-    const sourceOffset = pieceOffset ?? node?.position?.start.offset;
-    return (
-      <MarkdownRenderedImage
-        alt={alt}
-        sourceOffset={
-          sourceOffset === undefined
-            ? undefined
-            : imageSourceOffset + sourceOffset
-        }
-        imageAttributes={imageAttributes}
-        setExpandedImage={setExpandedImage}
-        src={src}
-      />
     );
   }
 
@@ -1409,6 +1832,7 @@ function buildMarkdownComponents({
     if (imagePolicy === "alt-text") {
       return <span>[Video: {label || title || "video"}]</span>;
     }
+
     return (
       <video
         src={src}
@@ -1419,7 +1843,11 @@ function buildMarkdownComponents({
         preload={preload}
         width={width}
         height={height}
-        className="my-2 max-h-[max(384px,50vh)] max-w-full"
+        className={cn(
+          "my-2 max-h-[max(384px,50vh)] max-w-full",
+          !(Number(width) > 0 && Number(height) > 0) &&
+            "aspect-video w-full object-contain",
+        )}
       >
         {children}
       </video>
@@ -1434,6 +1862,7 @@ function buildMarkdownComponents({
     if (imagePolicy === "alt-text") {
       return null;
     }
+
     return (
       <source
         {...sourceProps}
@@ -1468,20 +1897,20 @@ function buildMarkdownComponents({
   };
 
   if (threadMentions !== undefined) {
-    components["bb-thread-mention"] = buildThreadMentionComponent({
+    components["omnyo-thread-mention"] = buildThreadMentionComponent({
       mentions: threadMentions.mentions,
     });
   }
 
   if (promptMentions !== undefined) {
-    components["bb-prompt-mention"] = buildPromptMentionComponent({
+    components["omnyo-prompt-mention"] = buildPromptMentionComponent({
       mentions: promptMentions.mentions,
       resolveMentionLink: promptMentions.resolveMentionLink,
     });
   }
 
   if (hasMessageDirectives) {
-    components["bb-message-directive"] = MessageDirectiveElement;
+    components["omnyo-message-directive"] = MessageDirectiveElement;
   }
 
   return components;
@@ -1494,6 +1923,7 @@ function setMarkdownContentWidthVariable({
   if (width <= 0) {
     return;
   }
+
   element.style.setProperty(MARKDOWN_CONTENT_WIDTH_VARIABLE, `${width}px`);
 }
 
@@ -1520,22 +1950,26 @@ const markdownTableRegistrationsByElement = new Map<
   HTMLElement,
   Set<MarkdownTableGeometryRegistration>
 >();
+
 let sharedMarkdownTableResizeObserver: ResizeObserver | null = null;
 
 function measureMarkdownTableGeometry(
   registrations: Iterable<MarkdownTableGeometryRegistration>,
 ): void {
   const measurements: MarkdownTableGeometryMeasurement[] = [];
+
   for (const registration of registrations) {
     const { breakout, clip, content } = registration;
     const contentWidth = content.getBoundingClientRect().width;
     const clipWidth = clip?.clientWidth ?? -1;
+
     if (
       contentWidth === registration.lastContentWidth &&
       clipWidth === registration.lastClipWidth
     ) {
       continue;
     }
+
     registration.lastContentWidth = contentWidth;
     registration.lastClipWidth = clipWidth;
     measurements.push({
@@ -1557,16 +1991,20 @@ function measureMarkdownTableGeometry(
 function getSharedMarkdownTableResizeObserver(): ResizeObserver {
   sharedMarkdownTableResizeObserver ??= new ResizeObserver((entries) => {
     const registrations = new Set<MarkdownTableGeometryRegistration>();
+
     for (const entry of entries) {
       if (!(entry.target instanceof HTMLElement)) continue;
+
       for (const registration of markdownTableRegistrationsByElement.get(
         entry.target,
       ) ?? []) {
         registrations.add(registration);
       }
     }
+
     measureMarkdownTableGeometry(registrations);
   });
+
   return sharedMarkdownTableResizeObserver;
 }
 
@@ -1577,14 +2015,18 @@ function observeMarkdownTableGeometry(
     registration.clip === null || registration.clip === registration.content
       ? [registration.content]
       : [registration.content, registration.clip];
+
   const observer = getSharedMarkdownTableResizeObserver();
+
   for (const element of elements) {
     let registrations = markdownTableRegistrationsByElement.get(element);
+
     if (!registrations) {
       registrations = new Set();
       markdownTableRegistrationsByElement.set(element, registrations);
       observer.observe(element);
     }
+
     registrations.add(registration);
   }
 
@@ -1592,11 +2034,13 @@ function observeMarkdownTableGeometry(
     for (const element of elements) {
       const registrations = markdownTableRegistrationsByElement.get(element);
       registrations?.delete(registration);
+
       if (registrations?.size === 0) {
         markdownTableRegistrationsByElement.delete(element);
         sharedMarkdownTableResizeObserver?.unobserve(element);
       }
     }
+
     if (markdownTableRegistrationsByElement.size === 0) {
       sharedMarkdownTableResizeObserver?.disconnect();
       sharedMarkdownTableResizeObserver = null;
@@ -1610,10 +2054,13 @@ function useMarkdownTableContentWidthVariable() {
   useLayoutEffect(() => {
     const breakout = breakoutRef.current;
     const content = breakout?.closest<HTMLElement>("[data-markdown-preview]");
+
     if (!breakout || !content) {
       return;
     }
+
     const clip = findHorizontalClipAncestor(content);
+
     const registration: MarkdownTableGeometryRegistration = {
       breakout,
       clip,
@@ -1624,6 +2071,7 @@ function useMarkdownTableContentWidthVariable() {
 
     if (typeof ResizeObserver === "undefined") {
       measureMarkdownTableGeometry([registration]);
+
       return;
     }
 
@@ -1642,14 +2090,17 @@ const HORIZONTAL_CLIP_OVERFLOW_VALUES = new Set([
 
 function findHorizontalClipAncestor(element: HTMLElement): HTMLElement | null {
   let current: HTMLElement | null = element;
+
   while (current && current !== document.body) {
     if (
       HORIZONTAL_CLIP_OVERFLOW_VALUES.has(getComputedStyle(current).overflowX)
     ) {
       return current;
     }
+
     current = current.parentElement;
   }
+
   return null;
 }
 
@@ -1661,27 +2112,37 @@ function readMarkdownTableBreakoutLimit({
   clip: HTMLElement | null;
 }): MarkdownTableBreakoutLimitMeasurement {
   const parent = breakout.parentElement;
+
   if (!clip || !parent) {
     return { kind: "remove" };
   }
+
   const parentStyle = getComputedStyle(parent);
+
   const parentPaddingLeft =
     parent.getBoundingClientRect().left + parent.clientLeft + clip.scrollLeft;
+
   const parentLeft = parentPaddingLeft + cssPixels(parentStyle.paddingLeft);
+
   const parentRight =
     parentPaddingLeft +
     parent.clientWidth -
     cssPixels(parentStyle.paddingRight);
+
   const parentWidth = parentRight - parentLeft;
+
   if (parentWidth <= 0) {
     return { kind: "unchanged" };
   }
+
   const clipLeft = clip.getBoundingClientRect().left + clip.clientLeft;
   const clipRight = clipLeft + clip.clientWidth;
+
   const room = Math.max(
     0,
     Math.min(parentLeft - clipLeft, clipRight - parentRight),
   );
+
   return { kind: "set", value: `${parentWidth + 2 * room}px` };
 }
 
@@ -1704,6 +2165,7 @@ function applyMarkdownTableBreakoutLimit({
 
 function cssPixels(value: string): number {
   const parsed = Number.parseFloat(value);
+
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -1715,24 +2177,30 @@ function splitMarkdownFrontmatter(markdown: string): {
   body: string;
 } {
   const match = FRONTMATTER_PATTERN.exec(markdown);
+
   if (match === null) {
     return { frontmatter: null, body: markdown };
   }
+
   return { frontmatter: match[1], body: markdown.slice(match[0].length) };
 }
 
 function MarkdownFrontmatter({ source }: { source: string }) {
   const lines = source.split("\n").filter((line) => line.trim().length > 0);
+
   if (lines.length === 0) {
     return null;
   }
+
   return (
     <div className="mb-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 border-l-2 border-border pl-3 text-xs leading-relaxed text-muted-foreground">
       {lines.map((line, index) => {
         const separator = line.indexOf(":");
+
         if (separator > 0 && !/^[\s-]/.test(line)) {
           const key = line.slice(0, separator).trim();
           const value = line.slice(separator + 1).trim();
+
           return (
             <div key={index} className="contents">
               <span className="font-medium text-muted-foreground/70">
@@ -1742,6 +2210,7 @@ function MarkdownFrontmatter({ source }: { source: string }) {
             </div>
           );
         }
+
         return (
           <div
             key={index}
@@ -1762,6 +2231,9 @@ function MarkdownPreviewComponent({
   sourcePrefix = "",
   imagePolicy = "render",
   incrementalBlocks = false,
+  streamingTail = false,
+  streamingTailOwner,
+  streamingWords = false,
   linkRouting,
   threadMentions,
   promptMentions,
@@ -1770,22 +2242,52 @@ function MarkdownPreviewComponent({
 }: MarkdownPreviewProps) {
   const preferredTheme = usePreferredTheme();
   const [rewriteLocalhostLinks] = useRewriteLocalhostLinksPreference();
+  const timeline = useContext(MarkdownTablesContainedContext);
+
+  useLayoutEffect(() => {
+    if (streamingTail && streamingTailOwner !== undefined) {
+      rememberStreamedMarkdownOwner(streamingTailOwner);
+    }
+  }, [streamingTail, streamingTailOwner]);
+
   const [expandedImage, setExpandedImage] =
     useState<ExpandedMarkdownImage | null>(null);
+
   const [markdownPieceCache] = useState(createMarkdownPieceCache);
-  const rendersHtml = allowHtml && content.includes("<");
+  const mayRenderHtml = allowHtml && content.includes("<");
+
   const usesIncrementalBlocks =
-    incrementalBlocks && !rendersHtml && promptMentions === undefined;
+    incrementalBlocks && promptMentions === undefined;
+
   const localFileRouting = linkRouting?.localFile;
   const localImageRouting = linkRouting?.localImage;
+
   const normalizeLocalFileLinks =
     localFileRouting !== undefined || localImageRouting !== undefined;
+
+  const messageDirectiveRegistry = messageDirectives?.registry;
+
+  const messageDirectiveNames = useMemo(() => {
+    const names = new Set<string>();
+
+    for (const [name, entry] of messageDirectiveRegistry ?? []) {
+      if (entry.status === "ok") names.add(name);
+    }
+
+    return names;
+  }, [messageDirectiveRegistry]);
+
   const imageSourceOffset = useMemo(() => {
     const prefix = normalizeLocalFileLinks
       ? normalizeLocalFileMarkdownLinks(sourcePrefix)
       : sourcePrefix;
-    return normalizeMathFences(splitMarkdownFrontmatter(prefix).body).length;
-  }, [sourcePrefix, normalizeLocalFileLinks]);
+
+    return repairMessageDirectiveLines(
+      normalizeMathFences(splitMarkdownFrontmatter(prefix).body),
+      messageDirectiveNames,
+    ).length;
+  }, [sourcePrefix, normalizeLocalFileLinks, messageDirectiveNames]);
+
   const promptMentionSubstitution = useMemo(
     () =>
       promptMentions
@@ -1793,6 +2295,7 @@ function MarkdownPreviewComponent({
         : null,
     [content, promptMentions],
   );
+
   const resolvedPromptMentions = useMemo<ResolvedPromptMentions | undefined>(
     () =>
       promptMentions && promptMentionSubstitution
@@ -1803,7 +2306,9 @@ function MarkdownPreviewComponent({
         : undefined,
     [promptMentions, promptMentionSubstitution],
   );
+
   const substitutedContent = promptMentionSubstitution?.content ?? content;
+
   const markdownContent = useMemo(
     () =>
       normalizeLocalFileLinks
@@ -1811,6 +2316,7 @@ function MarkdownPreviewComponent({
         : substitutedContent,
     [substitutedContent, normalizeLocalFileLinks],
   );
+
   const promptMarkdownContent = useMemo(
     () =>
       promptMentions !== undefined
@@ -1818,18 +2324,26 @@ function MarkdownPreviewComponent({
         : markdownContent,
     [markdownContent, promptMentions],
   );
+
   const { frontmatter, body } = useMemo(() => {
     const split = splitMarkdownFrontmatter(promptMarkdownContent);
+
     return {
       frontmatter: split.frontmatter,
-      body: normalizeMathFences(split.body),
+      body: repairMessageDirectiveLines(
+        normalizeMathFences(split.body),
+        messageDirectiveNames,
+      ),
     };
-  }, [promptMarkdownContent]);
+  }, [promptMarkdownContent, messageDirectiveNames]);
+
   const messageDirectiveMounts = useMemo(() => {
     if (messageDirectives === undefined) {
       return null;
     }
+
     const mounts: MountedMessageDirective[] = [];
+
     return {
       mounts,
       message: messageDirectives.message,
@@ -1838,6 +2352,7 @@ function MarkdownPreviewComponent({
       registry: messageDirectives.registry,
     };
   }, [messageDirectives]);
+
   const markdownComponents = useMemo(
     () =>
       buildMarkdownComponents({
@@ -1862,32 +2377,42 @@ function MarkdownPreviewComponent({
       messageDirectiveMounts,
     ],
   );
+
   const hasMessageDirectives = messageDirectiveMounts !== null;
+
   const baseRemarkPlugins = useMemo((): MarkdownRemarkPlugins => {
     const plugins: MarkdownRemarkPlugins = [
       remarkGfm,
       [remarkMath, { singleDollarTextMath: false }],
     ];
+
     if (
       threadMentions?.preserveSoftBreaks === true ||
       promptMentions !== undefined
     ) {
       plugins.push(remarkBreaks);
     }
+
     if (threadMentions !== undefined) {
       plugins.push(remarkThreadMentions);
     }
+
     if (promptMentions !== undefined) {
       plugins.push(remarkPromptMentions);
     }
+
     if (hasMessageDirectives) {
       plugins.push(remarkDirective);
     }
+
     return plugins;
   }, [threadMentions, promptMentions, hasMessageDirectives]);
+
   const codeFenceRegistry = useCodeFenceLanguages();
+
   const remarkPlugins = useMemo((): MarkdownRemarkPlugins => {
     const plugins: MarkdownRemarkPlugins = [...baseRemarkPlugins];
+
     if (messageDirectiveMounts !== null) {
       plugins.push([
         remarkMessageDirectives,
@@ -1899,14 +2424,17 @@ function MarkdownPreviewComponent({
         },
       ]);
     }
+
     if (codeFenceRegistry !== null) {
       plugins.push([
         remarkCodeFenceRenderers,
         { registry: codeFenceRegistry, sourceOffset: 0 },
       ]);
     }
+
     return plugins;
   }, [baseRemarkPlugins, messageDirectiveMounts, codeFenceRegistry]);
+
   const resolvedUrlTransform = useMemo(
     () =>
       localFileRouting || localImageRouting
@@ -1920,15 +2448,22 @@ function MarkdownPreviewComponent({
   );
 
   const rehypeKatex = useRehypeKatex(markdownMayContainMath(body));
+
   const rehypePlugins = useMemo(
     () => resolveRehypePlugins({ rehypeKatex }),
     [rehypeKatex],
+  );
+
+  const documentRehypePlugins = useMemo(
+    () => [...rehypePlugins, ...MARKDOWN_LEADING_REHYPE_PLUGINS],
+    [rehypePlugins],
   );
 
   const markdownPieceRenderConfig = useMemo(
     (): MarkdownPieceRenderConfig => ({
       codeFenceRendererRegistry: codeFenceRegistry,
       components: markdownComponents,
+      leadingRehypePlugins: MARKDOWN_LEADING_REHYPE_PLUGINS,
       messageDirectiveRegistry: messageDirectiveMounts?.registry ?? null,
       rehypePlugins,
       remarkPlugins: baseRemarkPlugins,
@@ -1943,36 +2478,205 @@ function MarkdownPreviewComponent({
       resolvedUrlTransform,
     ],
   );
-  const markdownPieces = usesIncrementalBlocks
-    ? resolveMarkdownPieces(markdownPieceCache, markdownPieceRenderConfig, body)
-    : null;
+
+  const workerRenderConfig = useMemo(
+    () => ({
+      render: markdownPieceRenderConfig,
+      sourcePrefix,
+      owner: streamingTailOwner,
+    }),
+    [markdownPieceRenderConfig, sourcePrefix, streamingTailOwner],
+  );
+
+  const usesWorker =
+    body.length > 100_000 &&
+    !content.includes("<") &&
+    !body.includes("::") &&
+    (streamingTail
+      ? usesIncrementalBlocks && findMarkdownPieceCandidates(body).length === 0
+      : promptMentions === undefined);
+
+  const prepared = usePreparedMarkdownParse({
+    config: workerRenderConfig,
+    directives: hasMessageDirectives,
+    enabled: usesWorker,
+    source: body,
+  });
+
+  const [committedRender, setCommittedRender] =
+    useState<CommittedMarkdownRender | null>(null);
+
+  const prior = committedRender;
+
+  const appendsPrior =
+    prior !== null &&
+    (streamingTail || prior.content === content) &&
+    prior.owner === streamingTailOwner &&
+    prior.sourcePrefix === sourcePrefix &&
+    content.startsWith(prior.content) &&
+    body.startsWith(prior.source);
+
+  const preparedForRender =
+    prepared ??
+    (usesWorker &&
+    appendsPrior &&
+    prior.config !== workerRenderConfig &&
+    prior.prepared?.directives === hasMessageDirectives
+      ? prior.prepared
+      : null);
+
+  const preparedChildren = useMemo(() => {
+    if (preparedForRender === null) return null;
+    const source = preparedForRender.source;
+
+    const element = ReactMarkdown({
+      children: source,
+      components: markdownComponents,
+      rehypePlugins: documentRehypePlugins,
+      remarkPlugins: [
+        ...remarkPlugins,
+        [
+          remarkPreparedMarkdown,
+          {
+            source,
+            directives: hasMessageDirectives,
+            prepared: preparedForRender,
+          },
+        ],
+      ],
+      urlTransform: resolvedUrlTransform,
+    });
+
+    if (
+      element.type !== Fragment ||
+      !isValidElement<{ children?: ReactNode }>(element)
+    ) {
+      return [element];
+    }
+
+    const children = element.props.children;
+
+    return Array.isArray(children) ? children : [children];
+  }, [
+    documentRehypePlugins,
+    hasMessageDirectives,
+    markdownComponents,
+    preparedForRender,
+    remarkPlugins,
+    resolvedUrlTransform,
+  ]);
+
+  const markdownPieces =
+    !usesIncrementalBlocks || usesWorker
+      ? null
+      : mayRenderHtml
+        ? resolveMarkdownPiecesUnlessHtml(
+            markdownPieceCache,
+            markdownPieceRenderConfig,
+            body,
+          )
+        : resolveMarkdownPieces(
+            markdownPieceCache,
+            markdownPieceRenderConfig,
+            body,
+          );
+
+  const rendersHtml = mayRenderHtml && markdownPieces === null;
+
+  const retainedChildren =
+    appendsPrior && prior.config === workerRenderConfig ? prior.children : null;
 
   const Markdown = rendersHtml ? LazyMarkdownHtml : ReactMarkdown;
-  const renderedMarkdown =
-    markdownPieces === null ? (
+
+  const currentMarkdown = useMemo(() => {
+    if (usesWorker) return preparedChildren;
+
+    if (markdownPieces !== null) return markdownPieces.children;
+
+    return (
       <Markdown
-        rehypePlugins={rehypePlugins}
+        rehypePlugins={documentRehypePlugins}
         remarkPlugins={remarkPlugins}
         components={markdownComponents}
         urlTransform={resolvedUrlTransform}
       >
         {body}
       </Markdown>
-    ) : (
-      markdownPieces.children
     );
+  }, [
+    body,
+    documentRehypePlugins,
+    Markdown,
+    markdownComponents,
+    markdownPieces,
+    preparedChildren,
+    remarkPlugins,
+    resolvedUrlTransform,
+    usesWorker,
+  ]);
+
+  const markdownChildren = currentMarkdown ?? retainedChildren;
+  const fadesStreamingWords = streamingTail && streamingWords;
+
+  const visibleMarkdown = useMemo(
+    () =>
+      fadesStreamingWords && markdownChildren !== null
+        ? wrapStreamingTailWords(markdownChildren)
+        : markdownChildren,
+    [fadesStreamingWords, markdownChildren],
+  );
+
+  const renderedMarkdown = visibleMarkdown ?? (
+    <span role="status">Rendering message…</span>
+  );
+
+  if (
+    streamingTail &&
+    currentMarkdown !== null &&
+    (!usesWorker || prepared !== null) &&
+    (committedRender?.config !== workerRenderConfig ||
+      committedRender.content !== content ||
+      committedRender.source !== body ||
+      committedRender.children !== currentMarkdown)
+  ) {
+    setCommittedRender({
+      config: workerRenderConfig,
+      content,
+      owner: streamingTailOwner,
+      prepared,
+      source: body,
+      sourcePrefix,
+      children: currentMarkdown,
+    });
+  }
+
+  const leadParagraph =
+    timeline &&
+    streamingTailOwner !== undefined &&
+    sourcePrefix === "" &&
+    (!streamingTail || hasSettledFirstMarkdownBlock(body));
+
+  const codeCollapse = resolveMarkdownCodeCollapse({
+    owner: streamingTailOwner,
+    streamingTail,
+    timeline,
+  });
 
   const imageSources = expandedImage?.imageSources ?? [];
   const expandedImageIndex = expandedImage?.index ?? -1;
+
   const hasImageNavigation =
     expandedImageIndex !== -1 && imageSources.length > 1;
+
   const stepExpandedImage = (direction: "previous" | "next") => {
     if (expandedImageIndex === -1) return;
+
     const nextIndex = getWrappedImageIndex({
       currentIndex: expandedImageIndex,
       direction,
       itemCount: imageSources.length,
     });
+
     const nextImageSource = imageSources[nextIndex];
     setExpandedImage(
       nextImageSource === undefined
@@ -2002,13 +2706,27 @@ function MarkdownPreviewComponent({
             render: messageDirectiveMounts,
           }}
         >
-          {threadMentions === undefined ? (
-            renderedMarkdown
-          ) : (
-            <RawThreadMentionBatchProvider>
-              {renderedMarkdown}
-            </RawThreadMentionBatchProvider>
-          )}
+          <MarkdownMediaContext.Provider
+            value={{
+              codeCollapse,
+              imagePolicy,
+              imageSourceOffset,
+              linkRouting,
+              preferredTheme,
+              rewriteLocalhostLinks,
+              setExpandedImage,
+            }}
+          >
+            <MarkdownLeadParagraphContext.Provider value={leadParagraph}>
+              {threadMentions === undefined ? (
+                renderedMarkdown
+              ) : (
+                <RawThreadMentionBatchProvider>
+                  {renderedMarkdown}
+                </RawThreadMentionBatchProvider>
+              )}
+            </MarkdownLeadParagraphContext.Provider>
+          </MarkdownMediaContext.Provider>
         </MessageDirectiveMountsContext.Provider>
       </div>
 
@@ -2029,4 +2747,5 @@ export const MarkdownPreview = memo(
   MarkdownPreviewComponent,
   areMarkdownPreviewPropsEqual,
 );
+
 MarkdownPreview.displayName = "MarkdownPreview";

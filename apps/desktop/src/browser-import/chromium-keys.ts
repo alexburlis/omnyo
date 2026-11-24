@@ -3,9 +3,13 @@ import { pbkdf2Sync } from "node:crypto";
 import { BrowserImportError } from "./cookie-database.js";
 
 const KEY_SALT = "saltysalt";
+
 const KEY_LENGTH = 16;
+
 const MAC_KEY_ITERATIONS = 1003;
+
 const LINUX_KEY_ITERATIONS = 1;
+
 const LINUX_FALLBACK_PASSPHRASE = "peanuts";
 
 export interface ChromiumKeyMaterial {
@@ -48,8 +52,10 @@ export const runSecretCommand: SecretCommandRunner = (file, args) =>
             exitCode: null,
             spawnError: error as NodeJS.ErrnoException,
           });
+
           return;
         }
+
         resolve({
           stdout,
           stderr,
@@ -83,21 +89,28 @@ export async function readMacKeychainSecret(
     "-a",
     account,
   ]);
+
   if (result.spawnError) {
     throw new BrowserImportError("keychainUnavailable", undefined, {
       cause: result.spawnError,
     });
   }
+
   if (result.exitCode !== 0) {
     const stderr = result.stderr;
+
     if (/could not be found|item not found|errSecItemNotFound/i.test(stderr))
       throw new BrowserImportError("keychainItemMissing");
+
     if (result.exitCode === 44)
       throw new BrowserImportError("keychainItemMissing");
     throw new BrowserImportError("needsKeychainApproval", stderr.trim());
   }
+
   const secret = result.stdout.replace(/\r?\n$/, "");
+
   if (secret.length === 0) throw new BrowserImportError("keychainItemMissing");
+
   return secret;
 }
 
@@ -110,18 +123,23 @@ export async function readLinuxSecret(
     "application",
     application,
   ]);
+
   if (result.spawnError) {
     throw new BrowserImportError("keychainUnavailable", undefined, {
       cause: result.spawnError,
     });
   }
+
   if (result.exitCode !== 0) {
     if (/dismissed|cancel|denied|locked/i.test(result.stderr))
       throw new BrowserImportError("needsKeychainApproval", result.stderr);
     throw new BrowserImportError("keychainUnavailable", result.stderr.trim());
   }
+
   const secret = result.stdout.replace(/\r?\n$/, "");
+
   if (secret.length === 0) throw new BrowserImportError("keychainItemMissing");
+
   return secret;
 }
 
@@ -132,13 +150,16 @@ export async function resolveChromiumKeys(
   if (request.platform === "darwin") {
     if (!request.keychainService || !request.keychainAccount)
       throw new BrowserImportError("unsupportedPlatform");
+
     const secret = await readMacKeychainSecret(
       request.keychainService,
       request.keychainAccount,
       run,
     );
+
     return { cbcV10: deriveChromiumKey(secret, MAC_KEY_ITERATIONS) };
   }
+
   if (request.platform === "linux") {
     const material: ChromiumKeyMaterial = {
       cbcV10: deriveChromiumKey(
@@ -147,20 +168,25 @@ export async function resolveChromiumKeys(
       ),
       cbcEmpty: deriveChromiumKey("", LINUX_KEY_ITERATIONS),
     };
+
     if (request.linuxSecretApplication) {
       try {
         const secret = await readLinuxSecret(
           request.linuxSecretApplication,
           run,
         );
+
         material.cbcV11 = deriveChromiumKey(secret, LINUX_KEY_ITERATIONS);
       } catch (error) {
         if (!(error instanceof BrowserImportError)) throw error;
+
         if (error.reason === "needsKeychainApproval") throw error;
         material.cbcV11Error = error;
       }
     }
+
     return material;
   }
+
   throw new BrowserImportError("unsupportedPlatform");
 }

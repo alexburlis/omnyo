@@ -1,10 +1,15 @@
-import { getLatestThreadSequence } from "@bb/db";
+import { getLatestThreadSequence } from "@omnyo/db";
 import { emitPluginThreadEvents } from "../../../src/services/plugins/plugin-thread-events.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { threadScope, turnScope } from "@bb/domain";
+import { threadScope, turnScope } from "@omnyo/domain";
+import {
+  groupHostDaemonEvents,
+  type HostDaemonEventEnvelope,
+} from "@omnyo/host-daemon-contract";
+import { internalAuthHeaders } from "../../helpers/commands.js";
 import { applyLoggedThreadLifecycleEvent } from "../../../src/services/threads/lifecycle-outcome.js";
 import { beginProjectDeletion } from "../../../src/services/projects/project-deletion.js";
 import { createThreadRecord } from "../../../src/services/threads/thread-create-helpers.js";
@@ -17,6 +22,7 @@ import {
   seedThread,
 } from "../../helpers/seed.js";
 import { createUserQuestionPayload } from "../../helpers/pending-interactions.js";
+import { setMaintenanceFrozen } from "../../../src/services/server-move/freeze-state.js";
 import {
   createTestAppHarness,
   testLogger,
@@ -51,15 +57,15 @@ async function setUpPluginHarness(serverSource: string): Promise<{
   cleanup(): Promise<void>;
 }> {
   const harness = await createTestAppHarness();
-  const workDir = await mkdtemp(join(tmpdir(), "bb-plugin-events-"));
-  const rootDir = join(workDir, "bb-plugin-observer");
+  const workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-events-"));
+  const rootDir = join(workDir, "omnyo-plugin-observer");
   await mkdir(rootDir, { recursive: true });
   await writeFile(
     join(rootDir, "package.json"),
     JSON.stringify({
-      name: "bb-plugin-observer",
+      name: "omnyo-plugin-observer",
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Observer fixture",
         description: "Thread events plugin fixture.",
         branding: { icon: "Zap" },
@@ -70,6 +76,7 @@ async function setUpPluginHarness(serverSource: string): Promise<{
   await writeFile(join(rootDir, "server.ts"), serverSource);
   const entry = await harness.pluginService.installPath(rootDir);
   expect(entry.status).toBe("running");
+
   return {
     harness,
     async cleanup() {
@@ -93,13 +100,15 @@ describe("plugin thread lifecycle events", () => {
   it("delivers thread.active once when run.started enters active", async () => {
     const recorded: RecordedThreadPayload[] = [];
     globals.__activeEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.active", (payload: any) => {
+      export default function plugin(api: any) {
+        api.events.on("thread.active", (payload: any) => {
           (globalThis as any).__activeEvents.push(payload);
         });
       }
     `);
+
     try {
       const { thread } = seedThreadFixture(harness, {
         thread: { status: "starting" },
@@ -109,6 +118,7 @@ describe("plugin thread lifecycle events", () => {
         threadId: thread.id,
         event: { type: "run.started" },
       });
+
       expect(started.applied).toBe(true);
 
       const duplicate = applyLoggedThreadLifecycleEvent(
@@ -118,6 +128,7 @@ describe("plugin thread lifecycle events", () => {
           event: { type: "run.started" },
         },
       );
+
       expect(duplicate.applied).toBe(false);
 
       await vi.waitFor(() => expect(recorded).toHaveLength(1));
@@ -132,17 +143,20 @@ describe("plugin thread lifecycle events", () => {
   it("delivers thread.idle with the public DTO and lastAssistantText", async () => {
     const recorded: RecordedThreadPayload[] = [];
     globals.__idleEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.idle", (payload: any) => {
+      export default function plugin(api: any) {
+        api.events.on("thread.idle", (payload: any) => {
           (globalThis as any).__idleEvents.push(payload);
         });
       }
     `);
+
     try {
       const { environment, thread } = seedThreadFixture(harness, {
         thread: { status: "active" },
       });
+
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -159,6 +173,7 @@ describe("plugin thread lifecycle events", () => {
         threadId: thread.id,
         event: { type: "run.succeeded" },
       });
+
       expect(outcome.applied).toBe(true);
       expect(
         applyLoggedThreadLifecycleEvent(lifecycleDeps(harness), {
@@ -175,6 +190,7 @@ describe("plugin thread lifecycle events", () => {
       const entry = harness.pluginService
         .list()
         .find((plugin) => plugin.id === "observer");
+
       expect(entry?.handlerStats.count).toBe(1);
       expect(entry?.handlerStats.errorCount).toBe(0);
     } finally {
@@ -186,17 +202,20 @@ describe("plugin thread lifecycle events", () => {
   it("delivers thread.failed with the latest system/error message", async () => {
     const recorded: RecordedThreadPayload[] = [];
     globals.__failedEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.failed", (payload: any) => {
+      export default function plugin(api: any) {
+        api.events.on("thread.failed", (payload: any) => {
           (globalThis as any).__failedEvents.push(payload);
         });
       }
     `);
+
     try {
       const { environment, thread } = seedThreadFixture(harness, {
         thread: { status: "active" },
       });
+
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -210,6 +229,7 @@ describe("plugin thread lifecycle events", () => {
         threadId: thread.id,
         event: { type: "run.failed" },
       });
+
       expect(outcome.applied).toBe(true);
       expect(
         applyLoggedThreadLifecycleEvent(lifecycleDeps(harness), {
@@ -231,17 +251,20 @@ describe("plugin thread lifecycle events", () => {
   it("delivers interaction.pending after the interaction is committed", async () => {
     const recorded: RecordedInteractionPayload[] = [];
     globals.__pendingInteractionEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("interaction.pending", (payload: any) => {
+      export default function plugin(api: any) {
+        api.events.on("interaction.pending", (payload: any) => {
           (globalThis as any).__pendingInteractionEvents.push(payload);
         });
       }
     `);
+
     try {
       const { thread } = seedThreadFixture(harness, {
         thread: { status: "active" },
       });
+
       seedTurnStarted(harness.deps, {
         threadId: thread.id,
         turnId: "turn-pending-event",
@@ -268,9 +291,11 @@ describe("plugin thread lifecycle events", () => {
         id: thread.id,
         status: "active",
       });
+
       if (result.outcome === "rejected") {
         throw new Error(result.reason);
       }
+
       expect(recorded[0]?.interaction).toEqual(result.interaction);
     } finally {
       delete globals.__pendingInteractionEvents;
@@ -281,17 +306,21 @@ describe("plugin thread lifecycle events", () => {
   it("delivers thread.created from the thread creation seam", async () => {
     const recorded: RecordedThreadPayload[] = [];
     globals.__createdEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.created", (payload: any) => {
+      export default function plugin(api: any) {
+        api.events.on("thread.created", (payload: any) => {
           (globalThis as any).__createdEvents.push(payload);
         });
       }
     `);
+
     try {
       const { environment, project } = seedThreadFixture(harness);
+
       const request: ThreadCreateServiceRequest = {
         environment: { type: "reuse", environmentId: environment.id },
+        machinePinned: true,
         input: [],
         origin: null,
         pluginMetadata: null,
@@ -301,6 +330,7 @@ describe("plugin thread lifecycle events", () => {
         titleFallback: "Plugin event test thread",
         visibility: "visible",
       };
+
       const thread = createThreadRecord(
         { db: harness.db, hub: harness.hub },
         { environmentId: environment.id, request },
@@ -308,10 +338,7 @@ describe("plugin thread lifecycle events", () => {
 
       await vi.waitFor(() => expect(recorded).toHaveLength(1));
       expect(recorded[0]?.thread.id).toBe(thread.id);
-      // `pending`, not `starting`: creation is unhooked, so the row — and this
-      // event — exist before the first message has been admitted. A listener
-      // that treated `thread.created` as "this thread is running" would count
-      // a thread that may never start (the concurrency limiter used to).
+
       expect(recorded[0]?.thread.status).toBe("pending");
     } finally {
       delete globals.__createdEvents;
@@ -322,15 +349,18 @@ describe("plugin thread lifecycle events", () => {
   it("broadcasts hidden lifecycle events like visible lifecycle events", async () => {
     const recorded: RecordedThreadPayload[] = [];
     globals.__hiddenCreatedEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.created", (payload: any) => {
+      export default function plugin(api: any) {
+        api.events.on("thread.created", (payload: any) => {
           (globalThis as any).__hiddenCreatedEvents.push(payload);
         });
       }
     `);
+
     try {
       const { environment, project } = seedThreadFixture(harness);
+
       const createHidden = (originPluginId: string) =>
         createThreadRecord(
           { db: harness.db, hub: harness.hub },
@@ -338,6 +368,7 @@ describe("plugin thread lifecycle events", () => {
             environmentId: environment.id,
             request: {
               environment: { type: "reuse", environmentId: environment.id },
+              machinePinned: true,
               input: [],
               origin: "plugin",
               originPluginId,
@@ -370,13 +401,15 @@ describe("plugin thread lifecycle events", () => {
   it("delivers thread.deleted when thread creation rolls back after insert", async () => {
     const deleted: RecordedThreadPayload[] = [];
     globals.__rollbackDeletedEvents = deleted;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.deleted", (payload: any) => {
+      export default function plugin(api: any) {
+        api.events.on("thread.deleted", (payload: any) => {
           (globalThis as any).__rollbackDeletedEvents.push(payload);
         });
       }
     `);
+
     try {
       const { environment, project } = seedThreadFixture(harness);
 
@@ -409,21 +442,25 @@ describe("plugin thread lifecycle events", () => {
   it("delivers one delete event per live dependent from route-driven deletion", async () => {
     const recorded: RecordedThreadPayload[] = [];
     globals.__deletedEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.deleted", (payload: any) => {
+      export default function plugin(api: any) {
+        api.events.on("thread.deleted", (payload: any) => {
           (globalThis as any).__deletedEvents.push(payload);
         });
       }
     `);
+
     try {
       const { project, thread } = seedThreadFixture(harness, {
         thread: { status: "idle" },
       });
+
       const alreadyDeleted = seedThread(harness.deps, {
         projectId: project.id,
         lifecycleOwnerThreadId: thread.id,
       });
+
       const liveChild = seedThread(harness.deps, {
         projectId: project.id,
         lifecycleOwnerThreadId: thread.id,
@@ -437,6 +474,7 @@ describe("plugin thread lifecycle events", () => {
           body: JSON.stringify({ childThreadsConfirmed: false }),
         },
       );
+
       expect(childResponse.status).toBe(200);
 
       const response = await harness.app.request(
@@ -453,6 +491,7 @@ describe("plugin thread lifecycle events", () => {
       expect(recorded.map(({ thread }) => thread.id).sort()).toEqual(
         [thread.id, alreadyDeleted.id, liveChild.id].sort(),
       );
+
       for (const event of recorded) {
         expect(event.thread.projectId).toBe(project.id);
         expect(event.thread.deletedAt).toEqual(expect.any(Number));
@@ -468,33 +507,40 @@ describe("plugin thread lifecycle events", () => {
     const recordedProjectIds: string[] = [];
     globals.__cascadeEvents = recorded;
     globals.__cascadeProjectIds = recordedProjectIds;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
+      export default function plugin(api: any) {
         for (const kind of ["thread.archived", "thread.unarchived"]) {
-          bb.events.on(kind, ({ thread }: any) => {
+          api.events.on(kind, ({ thread }: any) => {
             (globalThis as any).__cascadeEvents.push({ kind, threadId: thread.id });
             (globalThis as any).__cascadeProjectIds.push(thread.projectId);
           });
         }
       }
     `);
+
     try {
       const { project, thread } = seedThreadFixture(harness, {
         thread: { status: "idle" },
       });
+
       const child = seedThread(harness.deps, {
         projectId: project.id,
         lifecycleOwnerThreadId: thread.id,
       });
+
       const archived = await harness.app.request(
         `/api/v1/threads/${thread.id}/archive-all`,
         { method: "POST" },
       );
+
       expect(archived.status).toBe(200);
+
       const repeatedArchive = await harness.app.request(
         `/api/v1/threads/${thread.id}/archive-all`,
         { method: "POST" },
       );
+
       expect(repeatedArchive.status).toBe(200);
       await vi.waitFor(() => expect(recorded).toHaveLength(2));
       expect(recorded).toEqual(
@@ -503,18 +549,23 @@ describe("plugin thread lifecycle events", () => {
           { kind: "thread.archived", threadId: child.id },
         ]),
       );
+
       for (const threadId of [thread.id, child.id]) {
         const response = await harness.app.request(
           `/api/v1/threads/${threadId}/unarchive`,
           { method: "POST" },
         );
+
         expect(response.status).toBe(200);
+
         const repeated = await harness.app.request(
           `/api/v1/threads/${threadId}/unarchive`,
           { method: "POST" },
         );
+
         expect(repeated.status).toBe(200);
       }
+
       await vi.waitFor(() => expect(recorded).toHaveLength(4));
       expect(recorded.slice(2)).toEqual([
         { kind: "thread.unarchived", threadId: thread.id },
@@ -534,10 +585,12 @@ describe("plugin thread lifecycle events", () => {
       parentThreadId: string | null;
       previousParentThreadId: string | null;
     }> = [];
+
     globals.__parentChangedEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("experimental_thread.parentChanged", ({ thread, previousParentThreadId }: any) => {
+      export default function plugin(api: any) {
+        api.events.on("experimental_thread.parentChanged", ({ thread, previousParentThreadId }: any) => {
           (globalThis as any).__parentChangedEvents.push({
             threadId: thread.id,
             parentThreadId: thread.parentThreadId,
@@ -546,15 +599,19 @@ describe("plugin thread lifecycle events", () => {
         });
       }
     `);
+
     try {
       const { project, thread: parent } = seedThreadFixture(harness, {
         thread: { status: "idle" },
       });
+
       const child = seedThread(harness.deps, { projectId: project.id });
+
       const sibling = seedThread(harness.deps, {
         projectId: project.id,
         parentThreadId: parent.id,
       });
+
       const move = (body: unknown) =>
         harness.app.request(`/api/v1/threads/${child.id}`, {
           method: "PATCH",
@@ -591,21 +648,25 @@ describe("plugin thread lifecycle events", () => {
   it("delivers one delete event per thread when deleting a project", async () => {
     const recorded: string[] = [];
     globals.__projectDeletedEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.deleted", ({ thread }: any) => {
+      export default function plugin(api: any) {
+        api.events.on("thread.deleted", ({ thread }: any) => {
           (globalThis as any).__projectDeletedEvents.push(thread.id);
         });
       }
     `);
+
     try {
       const { project, thread } = seedThreadFixture(harness, {
         thread: { status: "idle" },
       });
+
       const child = seedThread(harness.deps, {
         projectId: project.id,
         lifecycleOwnerThreadId: thread.id,
       });
+
       beginProjectDeletion(harness.deps, { projectId: project.id });
       beginProjectDeletion(harness.deps, { projectId: project.id });
       await vi.waitFor(() => expect(recorded).toHaveLength(2));
@@ -618,12 +679,13 @@ describe("plugin thread lifecycle events", () => {
 
   it("isolates a throwing thread.deleted handler and still deletes", async () => {
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.deleted", () => {
+      export default function plugin(api: any) {
+        api.events.on("thread.deleted", () => {
           throw new Error("delete handler boom");
         });
       }
     `);
+
     try {
       const { thread } = seedThreadFixture(harness, {
         thread: { status: "idle" },
@@ -643,6 +705,7 @@ describe("plugin thread lifecycle events", () => {
         const entry = harness.pluginService
           .list()
           .find((plugin) => plugin.id === "observer");
+
         expect(entry?.handlerStats.count).toBe(1);
         expect(entry?.handlerStats.errorCount).toBe(1);
         expect(entry?.status).toBe("running");
@@ -656,16 +719,18 @@ describe("plugin thread lifecycle events", () => {
   it("isolates a throwing handler, keeps the transition, and records metrics", async () => {
     const recorded: RecordedThreadPayload[] = [];
     globals.__survivorEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.idle", () => {
+      export default function plugin(api: any) {
+        api.events.on("thread.idle", () => {
           throw new Error("handler boom");
         });
-        bb.events.on("thread.idle", (payload: any) => {
+        api.events.on("thread.idle", (payload: any) => {
           (globalThis as any).__survivorEvents.push(payload);
         });
       }
     `);
+
     try {
       const { thread } = seedThreadFixture(harness, {
         thread: { status: "active" },
@@ -675,6 +740,7 @@ describe("plugin thread lifecycle events", () => {
         threadId: thread.id,
         event: { type: "run.succeeded" },
       });
+
       expect(outcome.applied).toBe(true);
 
       await vi.waitFor(() => expect(recorded).toHaveLength(1));
@@ -684,6 +750,7 @@ describe("plugin thread lifecycle events", () => {
         const entry = harness.pluginService
           .list()
           .find((plugin) => plugin.id === "observer");
+
         expect(entry?.handlerStats.count).toBe(2);
         expect(entry?.handlerStats.errorCount).toBe(1);
         expect(entry?.handlerStats.maxMs).toBeGreaterThanOrEqual(0);
@@ -693,9 +760,11 @@ describe("plugin thread lifecycle events", () => {
 
       const response = await harness.app.request("/api/v1/plugins");
       expect(response.status).toBe(200);
+
       const body = (await response.json()) as {
         plugins: Array<{ id: string; handlerStats: { count: number } }>;
       };
+
       expect(
         body.plugins.find((plugin) => plugin.id === "observer")?.handlerStats
           .count,
@@ -709,17 +778,20 @@ describe("plugin thread lifecycle events", () => {
   it("stops delivering to a disabled plugin", async () => {
     const recorded: RecordedThreadPayload[] = [];
     globals.__disabledEvents = recorded;
+
     const { harness, cleanup } = await setUpPluginHarness(`
-      export default function plugin(bb: any) {
-        bb.events.on("thread.idle", (payload: any) => {
+      export default function plugin(api: any) {
+        api.events.on("thread.idle", (payload: any) => {
           (globalThis as any).__disabledEvents.push(payload);
         });
       }
     `);
+
     try {
       const { thread } = seedThreadFixture(harness, {
         thread: { status: "active" },
       });
+
       applyLoggedThreadLifecycleEvent(lifecycleDeps(harness), {
         threadId: thread.id,
         event: { type: "run.succeeded" },
@@ -749,19 +821,24 @@ it("coalesces thread appends and delivers current status without reading history
     thread: { id: string; status: string };
     sequence: number;
   }> = [];
+
   globals.__sequenceEvents = recorded;
+
   const { harness, cleanup } = await setUpPluginHarness(`
-    export default function plugin(bb) {
-      bb.events.on("experimental_thread.events", (payload) => {
+    export default function plugin(api) {
+      api.events.on("experimental_thread.events", (payload) => {
         globalThis.__sequenceEvents.push(payload);
       });
     }
   `);
+
   try {
     const { thread } = seedThreadFixture(harness, {
       thread: { status: "starting" },
     });
+
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
     for (let i = 0; i < 20; i++) emitPluginThreadEvents(thread.id);
     await vi.advanceTimersByTimeAsync(999);
     expect(recorded).toHaveLength(0);
@@ -784,6 +861,360 @@ it("coalesces thread appends and delivers current status without reading history
   } finally {
     vi.useRealTimers();
     delete globals.__sequenceEvents;
+    await cleanup();
+  }
+});
+
+it("filters known batches after initial catch-up while retaining legacy delivery", async () => {
+  const filtered: Array<{ sequence: number }> = [];
+  const legacy: Array<{ sequence: number }> = [];
+  globals.__filteredBatches = filtered;
+  globals.__legacyBatches = legacy;
+
+  const { harness, cleanup } = await setUpPluginHarness(`
+    export default function plugin(api) {
+      api.events.on("experimental_thread.events", payload => {
+        globalThis.__filteredBatches.push(payload);
+      }, { experimental_eventTypes: ["item/backgroundTask/progress"] });
+      api.events.on("experimental_thread.events", payload => {
+        globalThis.__legacyBatches.push(payload);
+      });
+    }
+  `);
+
+  try {
+    const { thread } = seedThreadFixture(harness, {
+      thread: { status: "active" },
+    });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    for (const sequence of [1, 2]) {
+      seedEvent(harness, {
+        threadId: thread.id,
+        sequence,
+        providerThreadId: "filter-provider",
+        type: "item/agentMessage/delta",
+        scope: turnScope("filter-turn"),
+        data: { itemId: "filter-message", delta: "text" },
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+
+    expect(legacy).toHaveLength(2);
+    expect(filtered).toHaveLength(1);
+    seedEvent(harness, {
+      threadId: thread.id,
+      sequence: 3,
+      providerThreadId: "filter-provider",
+      type: "item/backgroundTask/progress",
+      scope: threadScope(),
+      data: {
+        item: {
+          type: "backgroundTask",
+          id: "native-filter-agent",
+          taskType: "local_agent",
+          description: "Filter fixture",
+          status: "pending",
+          taskStatus: "running",
+          skipTranscript: false,
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(filtered).toHaveLength(2);
+    expect(legacy).toHaveLength(3);
+    expect(filtered[1]).toMatchObject({
+      sequence: 3,
+      experimental_eventTypes: ["item/backgroundTask/progress"],
+      experimental_coveredSequence: { from: 3, to: 3 },
+    });
+  } finally {
+    vi.useRealTimers();
+    delete globals.__filteredBatches;
+    delete globals.__legacyBatches;
+    await cleanup();
+  }
+});
+
+it("keeps flushed type coverage separate from a newer deferred snapshot", async () => {
+  const recorded: Array<{
+    sequence: number;
+    experimental_eventTypes?: string[];
+    experimental_coveredSequence?: { from: number; to: number };
+  }> = [];
+
+  globals.__flushedCoverage = recorded;
+
+  const { harness, cleanup } = await setUpPluginHarness(`
+    export default function plugin(api) {
+      api.events.on("experimental_thread.events", payload => {
+        globalThis.__flushedCoverage.push(payload);
+      });
+    }
+  `);
+
+  try {
+    const { thread } = seedThreadFixture(harness);
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "setImmediate"],
+    });
+
+    const append = (sequence: number) =>
+      seedEvent(harness, {
+        threadId: thread.id,
+        sequence,
+        providerThreadId: "race-provider",
+        type: "item/agentMessage/delta",
+        scope: turnScope("race-turn"),
+        data: { itemId: "race-message", delta: "text" },
+      });
+
+    append(1);
+    vi.advanceTimersByTime(1000);
+    append(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(recorded).toMatchObject([
+      {
+        sequence: 2,
+        experimental_eventTypes: ["item/agentMessage/delta"],
+        experimental_coveredSequence: { from: 1, to: 1 },
+      },
+    ]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(recorded[1]).toMatchObject({
+      sequence: 2,
+      experimental_coveredSequence: { from: 2, to: 2 },
+    });
+  } finally {
+    vi.useRealTimers();
+    delete globals.__flushedCoverage;
+    await cleanup();
+  }
+});
+
+it("captures exact random append batches and treats gaps or unknown metadata conservatively", async () => {
+  const recorded: Array<{
+    experimental_eventTypes?: string[];
+    experimental_coveredSequence?: { from: number; to: number };
+  }> = [];
+
+  globals.__randomCoverage = recorded;
+
+  const { harness, cleanup } = await setUpPluginHarness(`
+    export default function plugin(api) {
+      api.events.on("experimental_thread.events", payload => {
+        globalThis.__randomCoverage.push(payload);
+      }, { experimental_eventTypes: ["thread/extensionState/updated"] });
+    }
+  `);
+
+  try {
+    const { thread } = seedThreadFixture(harness);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let state = 9719;
+    let sequence = 0;
+
+    for (let trial = 0; trial < 50; trial++) {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      const count = 2 + (state % 5);
+      const from = sequence + 1;
+      const unknown = trial % 5 === 0;
+      const gapped = trial % 5 === 1;
+      const relevant = trial % 5 === 2;
+
+      for (let index = 0; index < count; index++) {
+        sequence += gapped && index === 1 ? 2 : 1;
+        seedEvent(harness, {
+          threadId: thread.id,
+          sequence,
+          providerThreadId: "random-provider",
+          type: "item/agentMessage/delta",
+          scope: turnScope("random-turn"),
+          data: { itemId: "random-message", delta: "text" },
+        });
+      }
+
+      if (relevant) {
+        sequence += 1;
+        seedEvent(harness, {
+          threadId: thread.id,
+          sequence,
+          providerThreadId: "random-provider",
+          type: "thread/extensionState/updated",
+          scope: threadScope(),
+          data: { kind: "fixture/coverage", payload: {} },
+        });
+      }
+
+      if (unknown) emitPluginThreadEvents(thread.id);
+      const previousCount = recorded.length;
+      await vi.advanceTimersByTimeAsync(1000);
+      const expectedDelivery = unknown || gapped || relevant;
+      expect(recorded.length - previousCount).toBe(expectedDelivery ? 1 : 0);
+
+      if (expectedDelivery) {
+        const payload = recorded.at(-1);
+        expect(payload?.experimental_coveredSequence).toEqual(
+          unknown || gapped ? undefined : { from, to: sequence },
+        );
+        expect(payload?.experimental_eventTypes).toEqual(
+          unknown || gapped
+            ? undefined
+            : relevant
+              ? ["item/agentMessage/delta", "thread/extensionState/updated"]
+              : ["item/agentMessage/delta"],
+        );
+      }
+    }
+  } finally {
+    vi.useRealTimers();
+    delete globals.__randomCoverage;
+    await cleanup();
+  }
+});
+
+it("catches up on ordinary output after maintenance refuses a relevant handler", async () => {
+  const recorded: Array<{ sequence: number }> = [];
+  globals.__refusedCoverage = recorded;
+
+  const { harness, cleanup } = await setUpPluginHarness(`
+    export default function plugin(api) {
+      api.events.on("experimental_thread.events", payload => {
+        globalThis.__refusedCoverage.push(payload);
+      }, { experimental_eventTypes: ["item/backgroundTask/progress"] });
+    }
+  `);
+
+  try {
+    const { thread } = seedThreadFixture(harness);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const appendOutput = (sequence: number) =>
+      seedEvent(harness, {
+        threadId: thread.id,
+        sequence,
+        providerThreadId: "refused-provider",
+        type: "item/agentMessage/delta",
+        scope: turnScope("refused-turn"),
+        data: { itemId: "refused-message", delta: "text" },
+      });
+
+    appendOutput(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(recorded).toHaveLength(1);
+    setMaintenanceFrozen(harness.db, true);
+    seedEvent(harness, {
+      threadId: thread.id,
+      sequence: 2,
+      providerThreadId: "refused-provider",
+      type: "item/backgroundTask/progress",
+      scope: threadScope(),
+      data: {
+        item: {
+          type: "backgroundTask",
+          id: "refused-native",
+          taskType: "local_agent",
+          description: "Refused fixture",
+          status: "pending",
+          taskStatus: "running",
+          skipTranscript: false,
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(recorded).toHaveLength(1);
+    setMaintenanceFrozen(harness.db, false);
+    appendOutput(3);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(recorded).toHaveLength(2);
+    expect(recorded[1]).toMatchObject({ sequence: 3 });
+  } finally {
+    setMaintenanceFrozen(harness.db, false);
+    vi.useRealTimers();
+    delete globals.__refusedCoverage;
+    await cleanup();
+  }
+});
+
+it("ingests native stream batches through source coverage before filtering rich events", async () => {
+  const recorded: Array<{
+    sequence: number;
+    experimental_eventTypes?: string[];
+    experimental_coveredSequence?: { from: number; to: number };
+  }> = [];
+
+  globals.__nativeCoverage = recorded;
+
+  const { harness, cleanup } = await setUpPluginHarness(`
+    export default function plugin(api) {
+      api.events.on("experimental_thread.events", payload => {
+        globalThis.__nativeCoverage.push(payload);
+      }, { experimental_eventTypes: ["item/backgroundTask/progress"] });
+    }
+  `);
+
+  try {
+    const { host, session, thread } = seedThreadFixture(harness, {
+      thread: { status: "active" },
+    });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const delta: HostDaemonEventEnvelope = {
+      threadId: thread.id,
+      event: {
+        type: "item/agentMessage/delta",
+        threadId: thread.id,
+        providerThreadId: "native-provider",
+        scope: turnScope("native-turn"),
+        itemId: "native-message",
+        delta: "stream output",
+      },
+    };
+
+    const post = async (events: HostDaemonEventEnvelope[]) => {
+      const response = await harness.app.request("/internal/session/events", {
+        method: "POST",
+        headers: internalAuthHeaders(harness, { hostId: host.id }),
+        body: JSON.stringify({
+          sessionId: session.id,
+          eventGroups: groupHostDaemonEvents(events),
+        }),
+      });
+
+      expect(response.status).toBe(200);
+    };
+
+    await post([
+      {
+        threadId: thread.id,
+        event: {
+          type: "turn/started",
+          threadId: thread.id,
+          providerThreadId: "native-provider",
+          scope: turnScope("native-turn"),
+        },
+      },
+      delta,
+    ]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(recorded).toMatchObject([
+      {
+        sequence: 2,
+        experimental_eventTypes: ["turn/started", "item/agentMessage/delta"],
+        experimental_coveredSequence: { from: 1, to: 2 },
+      },
+    ]);
+    await post([delta, delta]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(getLatestThreadSequence(harness.db, { threadId: thread.id })).toBe(
+      4,
+    );
+    expect(recorded).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+    delete globals.__nativeCoverage;
     await cleanup();
   }
 });

@@ -2,13 +2,14 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { createConnection, migrate, setExperiments } from "@bb/db";
+import { createConnection, migrate, setExperiments } from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import { NotificationHub } from "../../src/ws/hub.js";
 import { startGatedPerformanceDiagnostics } from "../../src/services/system/performance-diagnostics.js";
 
 async function until(check: () => boolean): Promise<void> {
   const deadline = Date.now() + 5_000;
+
   while (!check() && Date.now() < deadline) await setTimeout(10);
   expect(check()).toBe(true);
 }
@@ -19,9 +20,10 @@ describe("performance diagnostics gates", () => {
     async (allowed) => {
       const db = createConnection(":memory:");
       migrate(db);
-      const dataDir = await mkdtemp(join(tmpdir(), "bb-perf-gates-"));
+      const dataDir = await mkdtemp(join(tmpdir(), "omnyo-perf-gates-"));
       const hub = new NotificationHub();
       const messages: string[] = [];
+
       const monitor = await startGatedPerformanceDiagnostics({
         allowed,
         dataDir,
@@ -36,12 +38,14 @@ describe("performance diagnostics gates", () => {
           },
         },
       });
+
       try {
         expect(monitor.isEnabled()).toBe(false);
         expect(await readdir(dataDir)).toEqual([]);
         setExperiments(db, { performanceDiagnostics: true });
         hub.notifySystem(["config-changed"]);
         expect(monitor.isEnabled()).toBe(allowed);
+
         if (allowed) {
           await until(() =>
             messages.includes("Server performance diagnostics enabled"),
@@ -51,9 +55,11 @@ describe("performance diagnostics gates", () => {
           expect(messages).toEqual([]);
           expect(await readdir(dataDir)).toEqual([]);
         }
+
         setExperiments(db, { performanceDiagnostics: false });
         hub.notifySystem(["config-changed"]);
         expect(monitor.isEnabled()).toBe(false);
+
         if (allowed) {
           await until(() =>
             messages.includes("Server performance diagnostics stopped"),
@@ -62,12 +68,14 @@ describe("performance diagnostics gates", () => {
           expect(captures).toHaveLength(1);
           expect(captures[0]).toMatch(/\.cpuprofile$/);
         }
+
         setExperiments(db, { performanceDiagnostics: true });
         hub.notifySystem(["config-changed"]);
         await monitor.stop();
         expect(monitor.isEnabled()).toBe(false);
         hub.notifySystem(["config-changed"]);
         expect(monitor.isEnabled()).toBe(false);
+
         const restarted = await startGatedPerformanceDiagnostics({
           allowed,
           dataDir,
@@ -75,6 +83,7 @@ describe("performance diagnostics gates", () => {
           hub,
           logger: { info: () => {}, warn: () => {} },
         });
+
         try {
           expect(restarted.isEnabled()).toBe(allowed);
         } finally {

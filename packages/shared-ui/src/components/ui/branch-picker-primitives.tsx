@@ -14,10 +14,13 @@ import { LIST_HOVER_TRANSITION } from "./motion";
 
 const BRANCH_PICKER_ROW_CLASS_NAME =
   "flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-[0.3125rem] text-left text-xs outline-none hover:bg-state-hover hover:text-foreground focus-visible:bg-state-hover focus-visible:text-foreground";
+
 const BRANCH_PICKER_HEADER_BASE_CLASS_NAME =
   "text-xs font-medium text-muted-foreground";
+
 const BRANCH_PICKER_HEADER_STICKY_CLASS_NAME =
   "sticky top-0 z-20 -mx-1 bg-background px-3";
+
 export const BRANCH_PICKER_CONTENT_CLASS_NAME =
   "flex w-full min-w-0 flex-col overflow-hidden p-0 md:w-max md:max-w-[min(18rem,calc(100vw-2rem))] md:max-h-[calc(100vh-6rem)]";
 
@@ -54,6 +57,7 @@ export function BranchPickerSectionHeader({
   const positionClassName = sticky
     ? BRANCH_PICKER_HEADER_STICKY_CLASS_NAME
     : "px-2";
+
   if (subtitle) {
     return (
       <div
@@ -71,6 +75,7 @@ export function BranchPickerSectionHeader({
       </div>
     );
   }
+
   return (
     <div
       className={cn(
@@ -93,6 +98,7 @@ export function BranchPickerRow({
   children,
 }: BranchPickerRowProps) {
   const { hoverProps } = useMenuItemHover();
+
   return (
     <button
       type="button"
@@ -152,6 +158,7 @@ export function BranchPickerSearch({
             if (event.key !== "Enter") return;
             event.preventDefault();
             event.stopPropagation();
+
             if (enterSelection) onEnterSelection(enterSelection);
           }}
           placeholder={placeholder}

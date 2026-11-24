@@ -1,5 +1,5 @@
-import type { ServerMoveHealth } from "@bb/host-daemon-contract";
-import { readLastServerMoveFile } from "@bb/server-archive";
+import type { ServerMoveHealth } from "@omnyo/host-daemon-contract";
+import { readLastServerMoveFile } from "@omnyo/server-archive";
 import type { PendingServerMove } from "./pending-boot.js";
 
 export interface ReadServerMoveHealthArgs {
@@ -14,11 +14,13 @@ export async function readServerMoveHealth(
     (file) => file?.moveId ?? null,
     () => null,
   );
+
   if (args.pending !== null) {
     return {
       moveId: args.pending.moveId,
       state: lastMoveId === args.pending.moveId ? "activating" : "pending",
     };
   }
+
   return lastMoveId === null ? null : { moveId: lastMoveId, state: "ready" };
 }

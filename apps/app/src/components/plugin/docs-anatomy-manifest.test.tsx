@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ActionHistoryProvider } from "@/components/layout/ActionHistoryProvider";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -6,17 +7,20 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { Provider as JotaiProvider } from "jotai";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 
 import { makeProject } from "../../../.ladle/story-fixtures";
 import { AppCommandProvider } from "@/components/commands/AppCommandProvider";
 import { QuickCreateProjectProvider } from "@/hooks/useQuickCreateProject";
 import { ProjectActionsProvider } from "@/components/project/ProjectActionsProvider";
 import { ThreadActionsProvider } from "@/components/thread/ThreadActionsProvider";
+import { AppFooter } from "@/components/layout/AppFooter";
 import { AppSidebar } from "@/components/sidebar/AppSidebar";
+import { SidebarFooterStateProvider } from "@/components/sidebar/SidebarFooterState";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { MessageActionBar } from "@/components/thread/timeline/MessageActionBar";
+import { buildMessageActions } from "@/components/thread/timeline/message-actions";
 import {
   removePluginSlotRegistrations,
   setPluginSlotRegistrations,
@@ -112,6 +116,7 @@ function renderAppSidebar() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
+
   queryClient.setQueryData(sidebarNavigationQueryKey(), {
     sections: [],
     personalProject: {
@@ -134,18 +139,26 @@ function renderAppSidebar() {
             <AppCommandProvider>
               <QuickCreateProjectProvider>
                 <ProjectActionsProvider>
-                  <ThreadActionsProvider>
-                    <SidebarProvider>
-                      <AppSidebar
-                        onResizeMouseDown={() => {}}
-                        isResizing={false}
-                        isBodyHidden={false}
-                        renderRail={() => null}
-                        railFooter={null}
-                        alternateBody={null}
-                      />
-                    </SidebarProvider>
-                  </ThreadActionsProvider>
+                  <ActionHistoryProvider>
+                    <ThreadActionsProvider>
+                      <SidebarProvider>
+                        <SidebarFooterStateProvider>
+                          <AppSidebar
+                            onResizeMouseDown={() => {}}
+                            isResizing={false}
+                            isBodyHidden={false}
+                            renderRail={() => null}
+                            railFooter={null}
+                            alternateBody={null}
+                          />
+                          <AppFooter
+                            isSettingsActive={false}
+                            settingsToggleRoutePath="/settings"
+                          />
+                        </SidebarFooterStateProvider>
+                      </SidebarProvider>
+                    </ThreadActionsProvider>
+                  </ActionHistoryProvider>
                 </ProjectActionsProvider>
               </QuickCreateProjectProvider>
             </AppCommandProvider>
@@ -166,6 +179,7 @@ describe("docs anatomy manifest", () => {
           resolve(REPO_ROOT, source.path),
           "utf8",
         );
+
         for (const anchor of source.anchors) {
           expect(
             sourceText,
@@ -184,6 +198,7 @@ describe("docs anatomy manifest", () => {
       ),
       "utf8",
     );
+
     const info = source.indexOf("createThreadInfoFixedPanelTab()");
     const diff = source.indexOf("createGitDiffFixedPanelTab()");
 
@@ -192,15 +207,18 @@ describe("docs anatomy manifest", () => {
     expect(info).toBeLessThan(diff);
   });
 
-  it("matches AppSidebar's section order", () => {
+  it("matches the desktop shell's section order, with the app footer after the sidebar", () => {
     registerTestPlugin();
     const { container } = renderAppSidebar();
 
     const sectionSelectors: Record<string, string> = {
       "top-reserve": '[data-testid="app-sidebar-top-reserve-row"]',
       "thread-list": '[data-sidebar="content"]',
-      footer: '[data-sidebar="footer"]',
+      footer: "[data-app-footer]",
     };
+
+    expect(container.querySelector('[data-sidebar="footer"]')).toBeNull();
+
     expect(Object.keys(sectionSelectors).sort()).toEqual(
       [...manifest.appSidebar].sort(),
     );
@@ -208,22 +226,24 @@ describe("docs anatomy manifest", () => {
     const sections = manifest.appSidebar.map((key): [string, Element] => {
       const element = container.querySelector(sectionSelectors[key]);
       expect(element, `missing sidebar section "${key}"`).not.toBeNull();
+
       return [key, element as Element];
     });
+
     expectDocumentOrder(sections);
   });
 
-  it("matches the sidebar footer's item order", () => {
+  it("matches the app footer's item order", () => {
     registerTestPlugin();
     const { container } = renderAppSidebar();
-    const footer = container.querySelector('[data-sidebar="footer"]');
+    const footer = container.querySelector("[data-app-footer]");
     expect(footer).not.toBeNull();
 
     const footerSelectors: Record<string, () => Element | null> = {
       "plugin-footer-items": () =>
         footer!.querySelector('button[aria-label="Anatomy footer action"]'),
-      "bug-report": () => footer!.querySelector('[aria-label^="Report a bug"]'),
     };
+
     expect(Object.keys(footerSelectors).sort()).toEqual(
       [...manifest.sidebarFooter].sort(),
     );
@@ -231,8 +251,10 @@ describe("docs anatomy manifest", () => {
     const items = manifest.sidebarFooter.map((key): [string, Element] => {
       const element = footerSelectors[key]();
       expect(element, `missing footer item "${key}"`).not.toBeNull();
+
       return [key, element as Element];
     });
+
     expectDocumentOrder(items);
   });
 
@@ -241,21 +263,22 @@ describe("docs anatomy manifest", () => {
       <TooltipProvider delayDuration={0}>
         <MessageActionBar
           timestamp={0}
-          messageText="hello"
           alignment="start"
-          mobileActionDisplay="inline"
-          onAddToChat={() => {}}
-          onEdit={() => {}}
-          onFork={() => {}}
-          pluginActions={[
-            {
-              key: "anatomy-plugin-action",
-              pluginId: null,
-              icon: null,
-              label: "Anatomy message action",
-              onSelect: () => {},
-            },
-          ]}
+          actions={buildMessageActions({
+            messageText: "hello",
+            onAddToChat: () => {},
+            onEdit: () => {},
+            onFork: () => {},
+            pluginActions: [
+              {
+                key: "anatomy-plugin-action",
+                pluginId: null,
+                icon: null,
+                label: "Anatomy message action",
+                onSelect: () => {},
+              },
+            ],
+          })}
         />
       </TooltipProvider>,
     );
@@ -264,16 +287,18 @@ describe("docs anatomy manifest", () => {
       copy: "Copy message",
       edit: "Edit message",
       "plugin-actions": "Anatomy message action",
-      "message-menu": "Message actions",
     };
+
     expect(Object.keys(actionLabels).sort()).toEqual(
       [...manifest.messageActionBar].sort(),
     );
 
     const buttons = manifest.messageActionBar.map((key): [string, Element] => {
       const element = screen.getByLabelText(actionLabels[key]);
+
       return [key, element];
     });
+
     expectDocumentOrder(buttons);
   });
 });

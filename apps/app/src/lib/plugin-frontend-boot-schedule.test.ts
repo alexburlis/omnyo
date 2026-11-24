@@ -3,23 +3,28 @@ import { scheduleDeferredPluginFrontendBoot } from "./plugin-frontend-boot-sched
 
 function makeHarness() {
   let resolvePainted: () => void = () => {};
+
   const painted = new Promise<void>((resolve) => {
     resolvePainted = resolve;
   });
+
   const idleCallbacks: Array<() => void> = [];
   const cancelIdle = vi.fn();
   const timers = new Map<number, () => void>();
   let nextTimer = 1;
   const boot = vi.fn();
+
   const cancel = scheduleDeferredPluginFrontendBoot(boot, {
     whenRoutePainted: () => painted,
     requestIdle: (callback) => {
       idleCallbacks.push(callback);
+
       return cancelIdle;
     },
     setTimeout: (callback, _ms) => {
       const id = nextTimer++;
       timers.set(id, callback);
+
       return id;
     },
     clearTimeout: (id) => {
@@ -27,6 +32,7 @@ function makeHarness() {
     },
     timeoutMs: 1_500,
   });
+
   return {
     boot,
     cancel,
@@ -35,6 +41,7 @@ function makeHarness() {
     timers,
     paint: () => {
       resolvePainted();
+
       return Promise.resolve();
     },
     fireTimeout: () => {

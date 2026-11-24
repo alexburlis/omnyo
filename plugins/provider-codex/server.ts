@@ -1,33 +1,35 @@
+import { registerWorkflowModelService } from "./src/workflow-model-service.js";
 import { registerCodexAiService } from "./src/ai-service.js";
 import { registerAsyncQuestions } from "./src/async-questions.js";
 import { registerUsageSource } from "./src/usage-source.js";
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { codexExtensionKinds } from "./src/extension-kinds.js";
 import { CODEX_NATIVE_ROOTS_DECLARATION } from "./src/native-roots.js";
 
-export default function plugin(bb: BbPluginApi) {
-  registerUsageSource(bb);
-  registerCodexAiService(bb);
-  registerAsyncQuestions(bb);
+export default function plugin(api: PluginApi) {
+  registerUsageSource(api);
+  registerCodexAiService(api);
+  registerWorkflowModelService(api);
+  registerAsyncQuestions(api);
 
-  bb.settings.define({
+  api.settings.define({
     memoryEnabled: {
       type: "boolean",
       label: "Codex memory",
       description:
-        "Allow Codex to recall existing memories and generate new memories from bb threads.",
+        "Allow Codex to recall existing memories and generate new memories from Omnyo threads.",
       default: true,
     },
     subagentsDisabled: {
       type: "boolean",
       label: "Disable provider subagents",
       description:
-        "Prevent Codex from starting native subagents so agents use bb for delegation.",
+        "Prevent Codex from starting native subagents so agents use Omnyo for delegation.",
       default: false,
     },
   });
 
-  bb.providers.register({
+  api.providers.register({
     id: "codex",
     displayName: "Codex",
     icon: "./icons/codex.svg",
@@ -63,7 +65,7 @@ export default function plugin(bb: BbPluginApi) {
       { id: "low", label: "Low" },
       { id: "medium", label: "Medium" },
       { id: "high", label: "High" },
-      { id: "xhigh", label: "Extra High" },
+      { id: "xhigh", label: "xHigh" },
       { id: "max", label: "Max" },
       {
         id: "ultra",

@@ -11,12 +11,14 @@ export function SegmentedChoice<T extends string>({
     0,
     options.findIndex((option) => option.value === value),
   );
+
   return (
     <SegmentedControl
       values={options.map((option) => option.label)}
       selectedIndex={selectedIndex}
       onChange={(event) => {
         const option = options[event.nativeEvent.selectedSegmentIndex];
+
         if (option === undefined || option.value === value) return;
         haptic("selection");
         onChange(option.value);

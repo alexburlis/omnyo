@@ -1,7 +1,24 @@
-import { type HostDaemonRpcCommand } from "@bb/host-daemon-contract";
+import { type HostDaemonRpcCommand } from "@omnyo/host-daemon-contract";
 
 const hostCommandWakePolicy = {
+  "host.housekeeping.status": "never",
+  "host.preview.status": "never",
+  "host.preview.ensure": "work",
+  "terminal.foreground": "never",
+  "preview.http": "never",
+  "preview.socket.open": "never",
+  "preview.socket.read": "never",
+  "preview.socket.write": "never",
+  "preview.socket.close": "never",
+  "runtime_update.acquire": "never",
+  "runtime_update.release": "never",
+  "provider.installation.get": "never",
+  "provider.installation.start": "work",
   "server_move.abort": "never",
+  "server_access.inspect_direct_probe": "never",
+  "server_access.probe_direct": "never",
+  "server_access.prove_current_primary": "never",
+  "server_access.release_direct_probe": "never",
   "server_move.activate": "never",
   "server_move.delete_old_copy": "never",
   "server_move.inspect": "never",
@@ -14,6 +31,7 @@ const hostCommandWakePolicy = {
   "thread.stop": "never",
   "thread.storage.delete": "never",
   "thread.goal.clear": "never",
+  "thread.speed.set": "never",
   "thread.plan.cancel": "never",
   "thread.rename": "never",
   "thread.archive": "never",
@@ -25,6 +43,7 @@ const hostCommandWakePolicy = {
   "workspace.commit": "work",
   "workspace.pull_request_action": "work",
   "desktop.browser.list_instances": "work",
+  "desktop.browser.profile_renderer": "never",
   "desktop.browser.list_tabs": "work",
   "desktop.browser.create_tab": "work",
   "desktop.browser.reveal_tab": "work",
@@ -35,6 +54,9 @@ const hostCommandWakePolicy = {
   "desktop.browser.release_control": "never",
   "desktop.browser.list_import_sources": "work",
   "desktop.browser.import_cookies": "work",
+  "desktop.browser.cookie_sync_status": "work",
+  "desktop.browser.cookie_sync_configure": "work",
+  "desktop.browser.cookie_sync_run": "work",
   "host.list_files": "work",
   "host.list_paths": "work",
   "host.mkdir": "work",
@@ -42,6 +64,8 @@ const hostCommandWakePolicy = {
   "host.remove_path": "work",
   "host.browse_directory": "work",
   "host.paths_exist": "work",
+  "host.agent_processes.terminate": "never",
+  "host.prepare_workspace_identity_v1": "work",
   "project.inspect": "work",
   "project.clone_default_path": "work",
   "host.pick_folder": "work",
@@ -52,6 +76,7 @@ const hostCommandWakePolicy = {
   "plugin.host.dispose": "never",
   "connect-tunnel.ensure-identity": "work",
   "host.list_commands": "work",
+  "host.list_command_metadata": "work",
   "host.list_skills": "work",
   "host.read_workspace_agent_context": "work",
   "host.delete_skill": "work",
@@ -74,6 +99,7 @@ const hostCommandWakePolicy = {
   "workspace.diff": "work",
   "workspace.diffFiles": "work",
   "workspace.diffPatch": "work",
+  "workspace.gitActivity": "never",
   "workspace.pull_request": "work",
 } satisfies Record<HostDaemonRpcCommand["type"], "never" | "work">;
 
@@ -81,5 +107,6 @@ export function hostCommandMayWake(command: HostDaemonRpcCommand): boolean {
   if (command.type === "environment.hook.run" && command.kind === "teardown") {
     return false;
   }
+
   return hostCommandWakePolicy[command.type] === "work";
 }

@@ -20,6 +20,7 @@ function createMemoryFs(initial: Record<string, string> = {}): {
   fs: ServerTargetFs;
 } {
   const files = new Map(Object.entries(initial));
+
   return {
     files,
     fs: {
@@ -28,9 +29,11 @@ function createMemoryFs(initial: Record<string, string> = {}): {
       },
       async readFile(path) {
         const content = files.get(path);
+
         if (content === undefined) {
           throw new Error(`ENOENT: ${path}`);
         }
+
         return content;
       },
       async writeFile(path, data) {
@@ -77,6 +80,7 @@ describe("server target store", () => {
       fs,
       storagePath: "/tmp/t.json",
     });
+
     await reloaded.load();
     expect(reloaded.getTarget()).toEqual({
       kind: "custom",
@@ -92,10 +96,12 @@ describe("server target store", () => {
     await store.setCustomServerUrl("https://first.example");
     await store.setCustomServerUrl("https://second.example");
     await store.setCustomServerUrl("https://first.example/#fragment");
+
     const reloaded = createServerTargetStore({
       fs,
       storagePath: "/tmp/t.json",
     });
+
     await reloaded.load();
     expect(reloaded.getCustomServerUrls()).toEqual([
       "https://first.example",
@@ -116,6 +122,7 @@ describe("server target store", () => {
         target: "custom",
       }),
     });
+
     const store = createServerTargetStore({ fs, storagePath: "/tmp/t.json" });
     await store.load();
     expect(store.getTarget()).toEqual({
@@ -150,10 +157,12 @@ describe("server target store", () => {
     await store.setCustomServerUrl(null);
     expect(store.getTarget()).toEqual({ kind: "builtin" });
     expect(store.getCustomServerUrls()).toEqual(["https://first.example"]);
+
     const reloaded = createServerTargetStore({
       fs,
       storagePath: "/tmp/t.json",
     });
+
     await reloaded.load();
     expect(reloaded.getCustomServerUrls()).toEqual(["https://first.example"]);
     expect(reloaded.getTarget()).toEqual({ kind: "builtin" });
@@ -191,14 +200,14 @@ describe("server target store", () => {
     await store.setConnectServer({
       handle: "laptop",
       name: "Laptop",
-      url: "https://laptop.getbb.app",
+      url: "https://laptop.example.test",
     });
     expect(store.getTarget()).toEqual({
       kind: "connect",
       server: {
         handle: "laptop",
         name: "Laptop",
-        url: "https://laptop.getbb.app",
+        url: "https://laptop.example.test",
       },
     });
 
@@ -207,14 +216,14 @@ describe("server target store", () => {
       await store.refreshConnectServer({
         handle: "laptop",
         name: "Laptop Renamed",
-        url: "https://laptop-new.getbb.app",
+        url: "https://laptop-new.example.test",
       }),
     ).toBe(true);
     expect(
       await store.refreshConnectServer({
         handle: "unknown",
         name: "Nope",
-        url: "https://nope.getbb.app",
+        url: "https://nope.example.test",
       }),
     ).toBe(false);
     expect(store.getTarget()).toEqual({ kind: "builtin" });
@@ -224,12 +233,13 @@ describe("server target store", () => {
       fs,
       storagePath: "/tmp/t.json",
     });
+
     await reloaded.load();
     expect(reloaded.getTarget()).toEqual({ kind: "builtin" });
     expect(reloaded.getConnectServer()).toEqual({
       handle: "laptop",
       name: "Laptop Renamed",
-      url: "https://laptop-new.getbb.app",
+      url: "https://laptop-new.example.test",
     });
   });
 
@@ -241,7 +251,7 @@ describe("server target store", () => {
     await store.setConnectServer({
       handle: "laptop",
       name: "Laptop",
-      url: "https://laptop.getbb.app",
+      url: "https://laptop.example.test",
     });
     await store.setCustomServerUrl(null);
     expect(store.getTarget().kind).toBe("connect");
@@ -253,6 +263,7 @@ describe("server target store", () => {
       fs: createMemoryFs({ "/tmp/t.json": "{not json" }).fs,
       storagePath: "/tmp/t.json",
     });
+
     await corrupt.load();
     expect(corrupt.getTarget()).toEqual({ kind: "builtin" });
 
@@ -265,6 +276,7 @@ describe("server target store", () => {
       }).fs,
       storagePath: "/tmp/t.json",
     });
+
     await dangling.load();
     expect(dangling.getTarget()).toEqual({ kind: "builtin" });
 
@@ -278,6 +290,7 @@ describe("server target store", () => {
       }).fs,
       storagePath: "/tmp/t.json",
     });
+
     await danglingConnect.load();
     expect(danglingConnect.getTarget()).toEqual({ kind: "builtin" });
 
@@ -290,8 +303,45 @@ describe("server target store", () => {
       }).fs,
       storagePath: "/tmp/t.json",
     });
+
     await invalidUrl.load();
     expect(invalidUrl.getTarget()).toEqual({ kind: "builtin" });
     expect(invalidUrl.getCustomServerUrl()).toBeNull();
   });
+});
+
+it("preserves opaque connect-server own fields when another target is persisted", async () => {
+  const path = "/tmp/server-target-opaque.json";
+
+  const server = {
+    handle: "owned-machine",
+    name: "Owned machine",
+    url: "https://private.example",
+    opaque: { revision: 7, selected: ["stable-id", "raw omnyo user value"] },
+  };
+
+  const document = {
+    connectServer: server,
+    customServerUrl: null,
+    customServerUrls: [],
+    target: "connect",
+    opaqueRoot: { unchanged: true },
+  };
+
+  const { files, fs } = createMemoryFs({ [path]: JSON.stringify(document) });
+  const store = createServerTargetStore({ fs, storagePath: path });
+  await store.load();
+  await store.setCustomServerUrl("http://127.0.0.1:49173");
+  const raw = files.get(path);
+
+  if (raw === undefined) throw new Error("Server target was not persisted");
+  expect(JSON.parse(raw)).toEqual({
+    ...document,
+    customServerUrl: "http://127.0.0.1:49173",
+    customServerUrls: ["http://127.0.0.1:49173"],
+    target: "custom",
+  });
+  const reloaded = createServerTargetStore({ fs, storagePath: path });
+  await reloaded.load();
+  expect(reloaded.getConnectServer()).toEqual(server);
 });

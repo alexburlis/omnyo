@@ -49,31 +49,42 @@ function parseWorkflowReference(value: JsonValue): WorkflowReference {
     if (value.length === 0) {
       throw new Error("workflow nameOrRef string must not be empty");
     }
+
     return value;
   }
+
   if (value === null || Array.isArray(value) || typeof value !== "object") {
     throw new Error(
       "workflow nameOrRef must be a non-empty string or a reference object",
     );
   }
+
   const keys = Object.keys(value);
+
   if (keys.length !== 1) {
     throw new Error(
       "workflow reference must contain exactly one of name, script, or scriptPath",
     );
   }
+
   const key = keys[0];
+
   if (key !== "name" && key !== "script" && key !== "scriptPath") {
     throw new Error(
       "workflow reference must contain exactly one of name, script, or scriptPath",
     );
   }
+
   const referenceValue = value[key];
+
   if (typeof referenceValue !== "string" || referenceValue.length === 0) {
     throw new Error(`workflow reference ${key} must be a non-empty string`);
   }
+
   if (key === "name") return { name: referenceValue };
+
   if (key === "script") return { script: referenceValue };
+
   return { scriptPath: referenceValue };
 }
 
@@ -81,6 +92,7 @@ function normalizeLimits(
   overrides: Partial<WorkflowRuntimeLimits> | undefined,
 ): WorkflowRuntimeLimits {
   if (overrides === undefined) return { ...DEFAULT_LIMITS };
+
   if (
     typeof overrides !== "object" ||
     overrides === null ||
@@ -89,60 +101,80 @@ function normalizeLimits(
   ) {
     throw new Error("Workflow runtime limits must be a plain object");
   }
+
   for (const key of Object.keys(overrides)) {
     if (!Object.hasOwn(DEFAULT_LIMITS, key)) {
       throw new Error(`Unknown workflow runtime limit ${JSON.stringify(key)}`);
     }
+
     const descriptor = Object.getOwnPropertyDescriptor(overrides, key);
+
     if (descriptor === undefined || !("value" in descriptor)) {
       throw new Error(`Workflow runtime limit ${key} must be a data property`);
     }
   }
+
   const limits = { ...DEFAULT_LIMITS };
+
   for (const key of Object.keys(DEFAULT_LIMITS) as Array<
     keyof WorkflowRuntimeLimits
   >) {
     const descriptor = Object.getOwnPropertyDescriptor(overrides, key);
+
     const value =
       descriptor !== undefined && "value" in descriptor
         ? descriptor.value
         : undefined;
+
     if (value === undefined) continue;
+
     if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
       throw new Error(
         `Workflow runtime limit ${key} must be a positive finite integer`,
       );
     }
+
     if (value > LIMIT_MAXIMUMS[key]) {
       throw new Error(
         `Workflow runtime limit ${key} cannot exceed ${LIMIT_MAXIMUMS[key]}`,
       );
     }
+
     limits[key] = value;
   }
+
   return limits;
 }
 
 function jsonToHandle(vm: QuickJSContext, value: JsonValue): QuickJSHandle {
   if (value === null) return vm.null;
+
   if (typeof value === "string") return vm.newString(value);
+
   if (typeof value === "number") return vm.newNumber(value);
+
   if (typeof value === "boolean") return value ? vm.true : vm.false;
+
   if (Array.isArray(value)) {
     const array = vm.newArray();
+
     for (let index = 0; index < value.length; index += 1) {
       const child = jsonToHandle(vm, value[index]!);
       vm.setProp(array, index, child);
       child.dispose();
     }
+
     return array;
   }
+
   const object = vm.newObject();
+
   for (const [key, childValue] of Object.entries(value)) {
     const child = jsonToHandle(vm, childValue);
     vm.setProp(object, key, child);
     child.dispose();
   }
+
   return object;
 }
 
@@ -153,6 +185,7 @@ function dumpJson(
 ): JsonValue {
   const value: unknown = vm.dump(handle);
   assertJsonValue(value, path);
+
   return value;
 }
 
@@ -190,6 +223,7 @@ class SharedWorkflowScheduler implements WorkflowExecutionScheduler {
     signal: AbortSignal,
   ): Promise<JsonValue> {
     this.agentCalls += 1;
+
     if (this.agentCalls > this.limits.maxAgentCalls) {
       return Promise.reject(
         new Error(
@@ -197,6 +231,7 @@ class SharedWorkflowScheduler implements WorkflowExecutionScheduler {
         ),
       );
     }
+
     if (signal.aborted) return Promise.reject(new Error("Workflow cancelled"));
 
     return new Promise((resolve, reject) => {
@@ -205,6 +240,7 @@ class SharedWorkflowScheduler implements WorkflowExecutionScheduler {
           if (call.state !== "queued") return;
           call.state = "settled";
           const index = this.queue.indexOf(call);
+
           if (index >= 0) this.queue.splice(index, 1);
           signal.removeEventListener("abort", call.abort);
           reject(new Error("Workflow cancelled"));
@@ -216,6 +252,7 @@ class SharedWorkflowScheduler implements WorkflowExecutionScheduler {
         signal,
         state: "queued",
       };
+
       signal.addEventListener("abort", call.abort, { once: true });
       this.queue.push(call);
       this.drain();
@@ -239,6 +276,7 @@ class SharedWorkflowScheduler implements WorkflowExecutionScheduler {
       this.queue.length > 0
     ) {
       const call = this.queue.shift();
+
       if (call === undefined || call.state !== "queued") continue;
       call.state = "active";
       this.activeAgents += 1;
@@ -259,6 +297,7 @@ class SharedWorkflowScheduler implements WorkflowExecutionScheduler {
     call.state = "settled";
     call.signal.removeEventListener("abort", call.abort);
     this.activeAgents -= 1;
+
     if ("value" in settlement) call.resolve(settlement.value);
     else call.reject(settlement.error);
     this.drain();
@@ -292,6 +331,7 @@ function createHostCallBridge(
     settlement: { value: JsonValue } | { error: unknown },
   ) => {
     if (closed || !pending.delete(call)) return;
+
     if ("value" in settlement) {
       const handle = jsonToHandle(vm, settlement.value);
       call.deferred.resolve(handle);
@@ -301,6 +341,7 @@ function createHostCallBridge(
       call.deferred.reject(handle);
       handle.dispose();
     }
+
     call.deferred.dispose();
     enterVm();
     vm.unwrapResult(runtime.executePendingJobs());
@@ -313,6 +354,7 @@ function createHostCallBridge(
     deferred.reject(error);
     error.dispose();
     deferred.dispose();
+
     return promise;
   };
 
@@ -324,6 +366,7 @@ function createHostCallBridge(
       controller: new AbortController(),
       deferred: vm.newPromise(),
     };
+
     pending.add(call);
     void run(call.controller.signal)
       .then(
@@ -334,6 +377,7 @@ function createHostCallBridge(
         (error) => finish(call, { error }),
       )
       .catch((error) => finish(call, { error }));
+
     return call.deferred.handle;
   };
 
@@ -341,23 +385,30 @@ function createHostCallBridge(
     if (closed) return;
     closed = true;
     signal?.removeEventListener("abort", abort);
+
     for (const call of pending) {
       call.controller.abort(reason);
+
       if (reason !== undefined && call.deferred.alive) {
         const error = vm.newError(reason);
         call.deferred.reject(error);
         error.dispose();
       }
+
       call.deferred.dispose();
     }
+
     pending.clear();
+
     if (reason !== undefined) {
       enterVm();
       vm.unwrapResult(runtime.executePendingJobs());
     }
   };
+
   const abort = () => close("Workflow cancelled");
   signal?.addEventListener("abort", abort, { once: true });
+
   if (signal?.aborted === true) abort();
 
   return { isClosed: () => closed, rejectImmediately, launch, close };
@@ -378,16 +429,21 @@ function installAgentFunction(
     if (bridge.isClosed()) {
       return bridge.rejectImmediately("Workflow is no longer running");
     }
+
     const promptValue = handles[0] ? vm.dump(handles[0]) : "";
+
     const prompt =
       typeof promptValue === "string" ? promptValue : String(promptValue);
+
     const parsedOptions = parseAgentOptions(
       handles[1] ? dumpJson(vm, handles[1], "agent options") : undefined,
     );
+
     const options: WorkflowAgentOptions = {
       ...parsedOptions,
       phase: parsedOptions.phase ?? currentPhase(),
     };
+
     return bridge.launch("agent result", (agentSignal) =>
       scheduler.schedule(
         () => capabilities.agent(prompt, options, agentSignal),
@@ -395,6 +451,7 @@ function installAgentFunction(
       ),
     );
   });
+
   vm.setProp(vm.global, "agent", fn);
   fn.dispose();
 
@@ -413,27 +470,33 @@ function installWorkflowFunction(
 ): { close(reason?: string): void } {
   const bridge = createHostCallBridge(vm, runtime, enterVm, signal);
 
-  const fn = vm.newFunction("__bbWorkflow", (...handles) => {
+  const fn = vm.newFunction("__omnyoWorkflow", (...handles) => {
     if (bridge.isClosed()) {
       return bridge.rejectImmediately("Workflow is no longer running");
     }
+
     if (depth >= 1) {
       return bridge.rejectImmediately(
         "Nested workflow depth limit exceeded: workflows may invoke one child level only",
       );
     }
+
     if (capabilities.workflow === undefined) {
       return bridge.rejectImmediately(
         "workflow() is unavailable: configure the workflow host capability to run nested workflows",
       );
     }
+
     const referenceValue = handles[0]
       ? dumpJson(vm, handles[0], "workflow reference")
       : null;
+
     const reference = parseWorkflowReference(referenceValue);
+
     const childArgs = handles[1]
       ? dumpJson(vm, handles[1], "workflow args")
       : null;
+
     return bridge.launch("nested workflow result", (callSignal) =>
       Promise.resolve().then(() =>
         capabilities.workflow!(reference, childArgs, {
@@ -445,7 +508,8 @@ function installWorkflowFunction(
       ),
     );
   });
-  vm.setProp(vm.global, "__bbWorkflow", fn);
+
+  vm.setProp(vm.global, "__omnyoWorkflow", fn);
   fn.dispose();
 
   return { close: bridge.close };
@@ -458,8 +522,10 @@ function installHostVoidFunction(
 ): void {
   const fn = vm.newFunction(name, (...handles) => {
     invoke(handles);
+
     return vm.undefined;
   });
+
   vm.setProp(vm.global, name, fn);
   fn.dispose();
 }
@@ -492,10 +558,10 @@ const HARDENING_SOURCE = `
 
 const DSL_SOURCE = `
 (() => {
-  const readBudget = globalThis.__bbWorkflowBudget;
-  const callWorkflow = globalThis.__bbWorkflow;
-  delete globalThis.__bbWorkflowBudget;
-  delete globalThis.__bbWorkflow;
+  const readBudget = globalThis.__omnyoWorkflowBudget;
+  const callWorkflow = globalThis.__omnyoWorkflow;
+  delete globalThis.__omnyoWorkflowBudget;
+  delete globalThis.__omnyoWorkflow;
   const maximumCollectionSize = 4096;
   const validateWorkflowReference = (reference) => {
     if (typeof reference === "string") {
@@ -582,9 +648,11 @@ export async function executeWorkflowScript({
   scheduler: providedScheduler,
 }: ExecuteWorkflowScriptArgs): Promise<JsonValue> {
   assertJsonValue(args, "args");
+
   if (depth !== 0 && depth !== 1) {
     throw new Error("Workflow depth must be 0 or 1");
   }
+
   if (
     providedScheduler !== undefined &&
     !(providedScheduler instanceof SharedWorkflowScheduler)
@@ -593,12 +661,16 @@ export async function executeWorkflowScript({
       "Workflow scheduler must be the scheduler supplied by a nested workflow context",
     );
   }
+
   const scheduler =
     providedScheduler ??
     new SharedWorkflowScheduler(Object.freeze(normalizeLimits(limitOverrides)));
+
   const limits = scheduler.limits;
+
   if (providedScheduler !== undefined && limitOverrides !== undefined) {
     const requestedLimits = normalizeLimits(limitOverrides);
+
     if (
       requestedLimits.memoryLimitBytes !== limits.memoryLimitBytes ||
       requestedLimits.maxStackBytes !== limits.maxStackBytes ||
@@ -611,15 +683,18 @@ export async function executeWorkflowScript({
       );
     }
   }
+
   if (isAborted(signal)) throw new Error("Workflow cancelled");
   const QuickJS = await quickJsModule;
   const runtime = QuickJS.newRuntime();
   runtime.setMemoryLimit(limits.memoryLimitBytes);
   runtime.setMaxStackSize(limits.maxStackBytes);
   let deadline = Number.POSITIVE_INFINITY;
+
   const enterVm = () => {
     deadline = Date.now() + limits.synchronousDeadlineMs;
   };
+
   runtime.setInterruptHandler(
     () => signal?.aborted === true || Date.now() > deadline,
   );
@@ -639,10 +714,12 @@ export async function executeWorkflowScript({
       signal,
       () => currentPhase,
     );
-    const budgetFunction = vm.newFunction("__bbWorkflowBudget", () =>
+
+    const budgetFunction = vm.newFunction("__omnyoWorkflowBudget", () =>
       jsonToHandle(vm, scheduler.budget()),
     );
-    vm.setProp(vm.global, "__bbWorkflowBudget", budgetFunction);
+
+    vm.setProp(vm.global, "__omnyoWorkflowBudget", budgetFunction);
     budgetFunction.dispose();
     workflowBridge = installWorkflowFunction(
       vm,
@@ -659,9 +736,11 @@ export async function executeWorkflowScript({
     });
     installHostVoidFunction(vm, "phase", (handles) => {
       const value = handles[0] ? vm.dump(handles[0]) : undefined;
+
       if (typeof value !== "string" || value.trim() === "") {
         throw new Error("phase title must be a non-empty string");
       }
+
       currentPhase = value;
       capabilities.phase(value);
     });
@@ -673,12 +752,14 @@ export async function executeWorkflowScript({
     enterVm();
     const evaluated = vm.evalCode(`(async () => {\n${body}\n})()`);
     const promise = vm.unwrapResult(evaluated);
+
     try {
       const nativeSettlement = vm.resolvePromise(promise);
       enterVm();
       vm.unwrapResult(runtime.executePendingJobs());
       const settled = await nativeSettlement;
       const value = vm.unwrapResult(settled);
+
       try {
         return dumpJson(vm, value, "workflow result");
       } finally {
@@ -691,6 +772,7 @@ export async function executeWorkflowScript({
     if (isAborted(signal)) {
       throw new Error("Workflow cancelled");
     }
+
     throw error;
   } finally {
     workflowBridge?.close();

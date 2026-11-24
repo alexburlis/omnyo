@@ -8,12 +8,15 @@ export async function hostArtifactFileResponse(args: {
   digest: string;
 }): Promise<Response | null> {
   const stats = await stat(args.path).catch(() => null);
+
   if (stats === null || !stats.isFile() || stats.size !== args.byteLength) {
     return null;
   }
+
   const body = Readable.toWeb(
     createReadStream(args.path),
   ) as ReadableStream<Uint8Array>;
+
   return new Response(body, {
     status: 200,
     headers: {

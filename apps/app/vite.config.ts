@@ -6,9 +6,11 @@ import tailwindcss from "@tailwindcss/vite";
 import { bundleStats } from "./vite-bundle-stats.js";
 import { splitPrefetch } from "./vite-split-prefetch.js";
 import { routeModulePreload } from "./vite-route-modulepreload.js";
-import { fontPreload } from "./vite-font-preload.js";
 import { sharedUiEnvSeam } from "./vite-shared-ui-seam.js";
 import { cachedReactCompiler } from "./vite-react-compiler.js";
+import { cssDependencyChunkHash } from "./vite-css-dependency-hash.js";
+import { startupChunks } from "./vite-startup-chunks.js";
+import { webReleaseIdentity } from "./vite-web-release.js";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
 
@@ -18,39 +20,25 @@ export const sharedViteConfig = {
     react(),
     cachedReactCompiler(),
     tailwindcss(),
+    cssDependencyChunkHash(),
+    startupChunks(),
     bundleStats(),
-    fontPreload(),
-    routeModulePreload("src/views/SplitWorkspaceRoute.tsx"),
-    splitPrefetch({
-      "markdown-html": "src/components/ui/markdown-html.tsx",
-      "queued-messages-list":
-        "src/components/promptbox/banner/QueuedMessagesList.tsx",
-    }),
+    routeModulePreload("src/views/SplitWorkspaceRoute.tsx", [
+      "src/lib/plugin-frontend.ts",
+    ]),
+    splitPrefetch(),
+    webReleaseIdentity(appDir),
   ],
   cacheDir: "node_modules/.vite/app",
   build: {
+    chunkImportMap: true,
     reportCompressedSize: false,
     assetsInlineLimit: (filePath) =>
       filePath.includes("/workspace-open-target-icons/") ? false : undefined,
     rolldownOptions: {
-      output: {
-        advancedChunks: {
-          groups: [
-            {
-              name: "boot-vendor",
-              test: /node_modules/,
-              tags: ["$initial"],
-              priority: 2,
-              minSize: 12 * 1024,
-            },
-            {
-              name: "boot-app",
-              tags: ["$initial"],
-              priority: 1,
-              minSize: 12 * 1024,
-            },
-          ],
-        },
+      input: {
+        app: resolve(appDir, "index.html"),
+        originAdoption: resolve(appDir, "origin-adoption-v1.html"),
       },
     },
   },

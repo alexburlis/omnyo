@@ -26,12 +26,14 @@ describe("sidebar group visibility and ordering", () => {
       "threads",
     ]);
     store.set(sidebarHiddenGroupsAtom, ["project:b"]);
+
     const { result, rerender } = renderHook(
       ({ entitySectionIds }: { entitySectionIds: SidebarSectionId[] }) =>
         useSidebarModeSectionOrder({
           mode: "project",
           entitySectionIds,
           showPinnedSection: false,
+          showShelfSection: false,
         }),
       {
         initialProps: {
@@ -55,6 +57,7 @@ describe("sidebar group visibility and ordering", () => {
       "project:offline",
       "project:a",
       "threads",
+      "shelf",
     ]);
     act(() => store.set(sidebarHiddenGroupsAtom, []));
     rerender({
@@ -83,12 +86,14 @@ describe("sidebar group visibility and ordering", () => {
       "threads",
     ]);
     store.set(sidebarHiddenGroupsAtom, ["section:b"]);
+
     const { result } = renderHook(
       () =>
         useSidebarModeSectionOrder({
           mode: "chronological",
           entitySectionIds: ["section:a", "section:b"],
           showPinnedSection: false,
+          showShelfSection: false,
         }),
       {
         wrapper: ({ children }: { children: ReactNode }) => (
@@ -103,6 +108,7 @@ describe("sidebar group visibility and ordering", () => {
       "section:b",
       "section:a",
       "threads",
+      "shelf",
     ]);
     expect(result.current.order).toEqual(["section:a", "threads"]);
     expect(store.get(sidebarHiddenGroupsAtom)).toEqual(["section:b"]);
@@ -113,12 +119,14 @@ describe("sidebar group visibility and ordering", () => {
   it("moves the built-in Threads section out of every organization when hidden", () => {
     const store = createStore();
     store.set(sidebarHiddenGroupsAtom, ["threads"]);
+
     const { result } = renderHook(
       () =>
         useSidebarModeSectionOrder({
           mode: "chronological",
           entitySectionIds: ["section:a"],
           showPinnedSection: true,
+          showShelfSection: false,
         }),
       {
         wrapper: ({ children }: { children: ReactNode }) => (
@@ -131,6 +139,7 @@ describe("sidebar group visibility and ordering", () => {
       "pinned",
       "section:a",
       "threads",
+      "shelf",
     ]);
     expect(result.current.order).toEqual(["pinned", "section:a"]);
   });

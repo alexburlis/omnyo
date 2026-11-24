@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadTimelineResponse, TimelineRow } from "@bb/server-contract";
+import type { ThreadTimelineResponse, TimelineRow } from "@omnyo/server-contract";
 import {
   DEFAULT_MAX_INLINE_OUTPUT_CHARS,
   truncateTimelineResponseOutputs,
@@ -62,10 +62,12 @@ describe("truncateTimelineResponseOutputs", () => {
   it("truncates a command output above the cap and keeps a marker", () => {
     const big = "x".repeat(DEFAULT_MAX_INLINE_OUTPUT_CHARS + 5_000);
     const out = truncateTimelineResponseOutputs(response([commandRow(big)]));
+
     const row = out.rows[0] as Extract<
       TimelineRow,
       { kind: "work"; workKind: "command" }
     >;
+
     expect(row.output.length).toBeLessThan(big.length);
     expect(row.output).toContain("more characters truncated");
     expect(
@@ -82,6 +84,7 @@ describe("truncateTimelineResponseOutputs", () => {
 
   it("recurses into turn children", () => {
     const big = "y".repeat(DEFAULT_MAX_INLINE_OUTPUT_CHARS + 1_000);
+
     const turn: TimelineRow = {
       ...base,
       kind: "turn",
@@ -91,12 +94,15 @@ describe("truncateTimelineResponseOutputs", () => {
       completedAt: 1,
       children: [commandRow(big)],
     };
+
     const out = truncateTimelineResponseOutputs(response([turn]));
     const turnOut = out.rows[0] as Extract<TimelineRow, { kind: "turn" }>;
+
     const child = turnOut.children![0] as Extract<
       TimelineRow,
       { kind: "work"; workKind: "command" }
     >;
+
     expect(child.output).toContain("more characters truncated");
   });
 });

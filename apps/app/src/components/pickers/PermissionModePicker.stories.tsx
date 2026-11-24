@@ -1,4 +1,4 @@
-import type { PermissionMode } from "@bb/domain";
+import type { PermissionMode } from "@omnyo/domain";
 import { PermissionModePicker } from "./PermissionModePicker";
 import type { PickerOption } from "./OptionPicker";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
@@ -106,6 +106,37 @@ export function Overview() {
           muted={false}
         />
       </StoryRow>
+      <StoryRow
+        label="open menu"
+        hint="click to open; the Open Menu story starts open"
+      >
+        <PermissionModePicker
+          value="accept-edits"
+          options={allOptions}
+          onChange={noop}
+          supported
+          modal={false}
+        />
+      </StoryRow>
+      <StoryRow
+        label="wrapping menu"
+        hint="long labels and descriptions; the Wrapping Menu story starts open"
+      >
+        <PermissionModePicker
+          value="accept-edits"
+          options={longOptions}
+          onChange={noop}
+          supported
+          modal={false}
+        />
+      </StoryRow>
+    </StoryCard>
+  );
+}
+
+export function OpenMenu() {
+  return (
+    <StoryCard>
       <StoryRow label="open menu" hint="defaultOpen + modal=false">
         <PermissionModePicker
           value="accept-edits"
@@ -116,6 +147,13 @@ export function Overview() {
           modal={false}
         />
       </StoryRow>
+    </StoryCard>
+  );
+}
+
+export function WrappingMenu() {
+  return (
+    <StoryCard>
       <StoryRow label="wrapping menu" hint="long labels and descriptions">
         <PermissionModePicker
           value="accept-edits"

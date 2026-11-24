@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createDebouncedCallbackScheduler } from "@bb/domain";
-import { isPathWithinDirectory } from "@bb/process-utils";
+import { createDebouncedCallbackScheduler } from "@omnyo/domain";
+import { isPathWithinDirectory } from "@omnyo/process-utils";
 import {
   RootSubscription,
   type ParcelWatcherEventBatch,
@@ -14,9 +14,13 @@ import type {
 import { resolveEventPath } from "./watch-specs.js";
 
 const PATH_CHANGE_WATCH_DEBOUNCE_MS = 75;
+
 const PATH_CHANGE_WATCH_MAX_WAIT_MS = 500;
+
 const PATH_CHANGE_WATCH_RETRY_DELAY_MS = 250;
+
 const PATH_CHANGE_WATCH_MAX_RETRY_DELAY_MS = 30_000;
+
 const PATH_CHANGE_WATCH_HEAVY_TREE_NAMES = [
   "node_modules",
   ".pnpm-store",
@@ -27,6 +31,7 @@ const PATH_CHANGE_WATCH_HEAVY_TREE_NAMES = [
   ".cache",
   "__pycache__",
 ];
+
 const PATH_CHANGE_WATCH_IGNORES = [
   `**/{${PATH_CHANGE_WATCH_HEAVY_TREE_NAMES.join(",")}}/**`,
   "**/.git/**",
@@ -55,12 +60,15 @@ function collectTouchedTargetPaths(
   events: ParcelWatcherEventBatch,
 ): string[] {
   const touchedPaths = new Set<string>();
+
   for (const event of events) {
     const candidatePath = resolveEventPath(targetPath, event.path);
+
     if (isPathWithinDirectory(targetPath, candidatePath)) {
       touchedPaths.add(candidatePath);
     }
   }
+
   return Array.from(touchedPaths).sort();
 }
 
@@ -80,12 +88,15 @@ class PathChangeWatcher {
         if (this.disposed) {
           return;
         }
+
         try {
           const changedPaths = Array.from(this.changedPaths).sort();
           this.changedPaths.clear();
+
           if (changedPaths.length === 0) {
             return;
           }
+
           this.args.onChange({ changedPaths });
         } catch (error) {
           this.args.onWatchError(
@@ -101,12 +112,15 @@ class PathChangeWatcher {
       maxRetryDelayMs: args.maxRetryDelayMs,
       onEvents: (events) => {
         const touchedPaths = collectTouchedTargetPaths(this.targetPath, events);
+
         if (touchedPaths.length === 0) {
           return;
         }
+
         for (const touchedPath of touchedPaths) {
           this.changedPaths.add(touchedPath);
         }
+
         this.changeScheduler.schedule();
       },
       onDroppedEvents: () => {
@@ -131,17 +145,21 @@ class PathChangeWatcher {
 
   private async rescanAfterDroppedEvents(): Promise<void> {
     let entries: string[];
+
     try {
       entries = await fs.readdir(this.targetPath);
     } catch {
       return;
     }
+
     if (this.disposed || entries.length === 0) {
       return;
     }
+
     for (const entry of entries) {
       this.changedPaths.add(path.join(this.targetPath, entry));
     }
+
     this.changeScheduler.schedule();
   }
 }
@@ -159,6 +177,8 @@ export function watchPathChanges(
     onWatchError: args.onWatchError,
     retryDelayMs: PATH_CHANGE_WATCH_RETRY_DELAY_MS,
   });
+
   watcher.start();
+
   return () => watcher.dispose();
 }

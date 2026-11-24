@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { performance } from "node:perf_hooks";
 import {
   CLOSED_SESSION_ROW_RETENTION_MS,
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
@@ -13,9 +14,9 @@ import {
   retainedEventOutputs,
   threads,
   threadPruningCursors,
-} from "@bb/db";
-import { threadScope } from "@bb/domain";
-import type { PluginHookName } from "@get-bb/plugin-sdk";
+} from "@omnyo/db";
+import { threadScope } from "@omnyo/domain";
+import type { PluginHookName } from "@omnyo/plugin-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   setPluginHookProvider,
@@ -68,25 +69,30 @@ function installHooks(registry: HookRegistry): void {
 
 function seedRunnableThread(harness: TestAppHarness, hostId: string) {
   const { host } = seedHostSession(harness.deps, { id: hostId });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: `/tmp/${hostId}`,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: `/tmp/${hostId}`,
   });
+
   const thread = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
     status: "idle",
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     providerThreadId: `provider-${hostId}`,
     threadId: thread.id,
   });
+
   return thread;
 }
 
@@ -99,6 +105,7 @@ function releaseRunningJob(release: ReleaseCallback | null): void {
   if (!release) {
     throw new Error("Expected a pending sweep job");
   }
+
   release();
 }
 
@@ -108,10 +115,11 @@ const UNTIMED_SWEEP_LIMITS: ThreadPruningSweepLimits = {
 };
 
 describe("runPeriodicSweeps", () => {
-  it("deletes expired retained outputs across yielded advances without changing previews", async () => {
+  it("commits small expired outputs together without changing previews", async () => {
     const now = Date.now();
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       for (const sequence of [1, 2]) {
         seedEvent(harness.deps, {
           createdAt: now - COMPLETED_EVENT_OUTPUT_RETENTION_MS - sequence,
@@ -135,31 +143,39 @@ describe("runPeriodicSweeps", () => {
           type: "item/completed",
         });
       }
+
       const previews = harness.db
         .select({ data: events.data, id: events.id })
         .from(events)
         .where(eq(events.threadId, thread.id))
         .all();
+
       expect(harness.db.select().from(retainedEventOutputs).all()).toHaveLength(
         2,
       );
       const observedSidecarCounts: number[] = [];
       const changes: (readonly string[])[] = [];
+
       const unsubscribe = harness.deps.hub.onChangedMessage((message) => {
         if (message.entity === "thread" && message.id === thread.id) {
           changes.push(message.changes);
         }
       });
+
       let sweepSettled = false;
+      const clock = vi.spyOn(performance, "now").mockReturnValue(0);
+
       const probe = () => {
         if (sweepSettled) {
           return;
         }
+
         observedSidecarCounts.push(
           harness.db.select().from(retainedEventOutputs).all().length,
         );
         setImmediate(probe);
       };
+
       setImmediate(probe);
 
       try {
@@ -171,10 +187,11 @@ describe("runPeriodicSweeps", () => {
       } finally {
         sweepSettled = true;
         unsubscribe();
+        clock.mockRestore();
       }
 
       expect(harness.db.select().from(retainedEventOutputs).all()).toEqual([]);
-      expect(observedSidecarCounts).toContain(1);
+      expect(observedSidecarCounts).not.toContain(1);
       expect(
         harness.db
           .select({ data: events.data, id: events.id })
@@ -190,11 +207,12 @@ describe("runPeriodicSweeps", () => {
     });
   });
 
-  it("migrates legacy outputs one per event-loop turn and notifies their thread", async () => {
+  it("commits small legacy output migrations together and notifies their thread", async () => {
     await withTestHarness(async (harness) => {
       const now = Date.now();
       const { environment, thread } = seedThreadFixture(harness);
       const output = "legacy-" + "m".repeat(40_000);
+
       for (const sequence of [1, 2]) {
         harness.db
           .insert(events)
@@ -231,21 +249,28 @@ describe("runPeriodicSweeps", () => {
           .filter(
             (row) => JSON.parse(row.data).item.aggregatedOutput.length > 40_000,
           ).length;
+
       const observedCounts: number[] = [];
       let sweepSettled = false;
+      const clock = vi.spyOn(performance, "now").mockReturnValue(0);
+
       const probe = () => {
         if (sweepSettled) {
           return;
         }
+
         observedCounts.push(countLargeInlineOutputs());
         setImmediate(probe);
       };
+
       const changes: (readonly string[])[] = [];
+
       const unsubscribe = harness.deps.hub.onChangedMessage((message) => {
         if (message.entity === "thread" && message.id === thread.id) {
           changes.push(message.changes);
         }
       });
+
       setImmediate(probe);
 
       try {
@@ -257,10 +282,11 @@ describe("runPeriodicSweeps", () => {
       } finally {
         sweepSettled = true;
         unsubscribe();
+        clock.mockRestore();
       }
 
       expect(countLargeInlineOutputs()).toBe(0);
-      expect(observedCounts).toContain(1);
+      expect(observedCounts).not.toContain(1);
       expect(
         changes.filter((threadChanges) =>
           threadChanges.includes("history-compacted"),
@@ -311,6 +337,7 @@ describe("runPeriodicSweeps", () => {
         })
         .run();
       const changes: (readonly string[])[] = [];
+
       const unsubscribe = harness.deps.hub.onChangedMessage((message) => {
         if (message.entity === "thread" && message.id === thread.id) {
           changes.push(message.changes);
@@ -332,6 +359,7 @@ describe("runPeriodicSweeps", () => {
         .from(events)
         .where(eq(events.threadId, thread.id))
         .all();
+
       expect(stored?.data.length).toBeLessThan(10_000);
       expect(harness.db.select().from(retainedEventOutputs).all()).toHaveLength(
         1,
@@ -348,17 +376,22 @@ describe("runPeriodicSweeps", () => {
     await withTestHarness(async (harness) => {
       let releaseIdleRecovery: ReleaseCallback | null = null;
       let resolveIdleRecoveryStarted: ReleaseCallback | null = null;
+
       let resolveSecondAttempt: ((kind: "idle" | "scheduled") => void) | null =
         null;
+
       const idleRecoveryStarted = new Promise<void>((resolve) => {
         resolveIdleRecoveryStarted = resolve;
       });
+
       const idleRecoveryRelease = new Promise<void>((resolve) => {
         releaseIdleRecovery = resolve;
       });
+
       const secondAttempt = new Promise<"idle" | "scheduled">((resolve) => {
         resolveSecondAttempt = resolve;
       });
+
       let attempts = 0;
       installHooks({
         "message.dispatch": [
@@ -366,17 +399,21 @@ describe("runPeriodicSweeps", () => {
             pluginId: "slow-idle-recovery",
             handler: async (context) => {
               attempts += 1;
+
               const kind = context.input.text.includes("overlapping tick")
                 ? "scheduled"
                 : "idle";
+
               if (attempts === 1) {
                 if (resolveIdleRecoveryStarted) {
                   resolveIdleRecoveryStarted();
                 }
+
                 await idleRecoveryRelease;
               } else if (attempts === 2 && resolveSecondAttempt) {
                 resolveSecondAttempt(kind);
               }
+
               return kind === "scheduled"
                 ? ({ action: "proceed" } as const)
                 : ({ action: "wait", reason: "Slow idle recovery" } as const);
@@ -392,10 +429,12 @@ describe("runPeriodicSweeps", () => {
           threadId: idleThread.id,
         });
       }
+
       const scheduledThread = seedRunnableThread(
         harness,
         "host-scheduled-recovery",
       );
+
       seedQueuedMessage(harness.deps, {
         content: textInput("deliver on the overlapping tick"),
         sendAt: Date.now() - 1_000,
@@ -410,9 +449,11 @@ describe("runPeriodicSweeps", () => {
         pluginService: harness.pluginService,
         pluginCatalogService: harness.pluginCatalogService,
       };
+
       const firstSweep = runPeriodicSweeps(deps);
       await idleRecoveryStarted;
       const overlappingSweep = runPeriodicSweeps(deps);
+
       for (
         let yielded = 0;
         yielded <= RETAINED_EVENT_OUTPUT_TARGETS.length + 1;
@@ -420,7 +461,9 @@ describe("runPeriodicSweeps", () => {
       ) {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
+
       releaseRunningJob(releaseIdleRecovery);
+
       try {
         await expect(secondAttempt).resolves.toBe("scheduled");
         await overlappingSweep;
@@ -451,6 +494,7 @@ describe("runPeriodicSweeps", () => {
         ...testLogger,
         error: vi.fn(),
       };
+
       const deps = {
         ...harness.deps,
         logger,
@@ -473,6 +517,7 @@ describe("runPeriodicSweeps", () => {
         .from(hostDaemonSessions)
         .where(eq(hostDaemonSessions.id, session.id))
         .get();
+
       expect(sessionAfterSweep).toBeUndefined();
       expect(logger.error).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -487,20 +532,24 @@ describe("runPeriodicSweeps", () => {
   it("keeps a long-destroyed environment so deleting its thread still removes host storage", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         environmentProviderId: "personal-workspace",
         isGitRepo: false,
       });
+
       const thread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
         status: "idle",
       });
+
       seedEvent(harness.deps, {
         data: { text: "history" },
         environmentId: environment.id,
@@ -550,6 +599,7 @@ describe("runPeriodicSweeps", () => {
           body: JSON.stringify({ childThreadsConfirmed: false }),
         },
       );
+
       expect(response.status).toBe(200);
       expect(
         listQueuedThreadCommands(harness, "thread.storage.delete", thread.id),
@@ -560,6 +610,7 @@ describe("runPeriodicSweeps", () => {
   it("retries pruning on the next tick after a busy skip and continues without an hourly delay", async () => {
     await withTestHarness(async (harness) => {
       const { thread } = seedThreadFixture(harness);
+
       const deps = {
         ...harness.deps,
         pluginSchedules: harness.pluginService,
@@ -567,6 +618,7 @@ describe("runPeriodicSweeps", () => {
         pluginService: harness.pluginService,
         pluginCatalogService: harness.pluginCatalogService,
       };
+
       insertEvents(
         harness.db,
         noopNotifier,
@@ -590,6 +642,7 @@ describe("runPeriodicSweeps", () => {
       const pruningJobs = [createThreadEventPruningJob(UNTIMED_SWEEP_LIMITS)];
       const now = Date.now();
       const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+
       try {
         await runPeriodicSweepJobs(deps, pruningJobs, Date.now());
         expect(harness.db.select().from(threadPruningCursors).all()).toEqual(
@@ -642,9 +695,11 @@ describe("runPeriodicSweeps", () => {
       let runCount = 0;
       let releaseJob: (() => void) | null = null;
       let resolveJobStarted: (() => void) | null = null;
+
       const jobStarted = new Promise<void>((resolveStarted) => {
         resolveJobStarted = resolveStarted;
       });
+
       const jobs: PeriodicSweepJob[] = [
         {
           cadenceMs: 0,
@@ -652,9 +707,11 @@ describe("runPeriodicSweeps", () => {
           name: "test-overlap-sweep",
           async run() {
             runCount += 1;
+
             if (resolveJobStarted) {
               resolveJobStarted();
             }
+
             await new Promise<void>((resolveRunningJob) => {
               releaseJob = resolveRunningJob;
             });
@@ -669,6 +726,7 @@ describe("runPeriodicSweeps", () => {
         pluginService: harness.pluginService,
         pluginCatalogService: harness.pluginCatalogService,
       };
+
       const firstSweep = runPeriodicSweepJobs(deps, jobs, 10_000);
       await jobStarted;
       await runPeriodicSweepJobs(deps, jobs, 10_001);
@@ -681,6 +739,7 @@ describe("runPeriodicSweeps", () => {
   it("does not run cadence-limited generic jobs early", async () => {
     await withTestHarness(async (harness) => {
       let runCount = 0;
+
       const jobs: PeriodicSweepJob[] = [
         {
           cadenceMs: 1_000,
@@ -699,6 +758,7 @@ describe("runPeriodicSweeps", () => {
         pluginService: harness.pluginService,
         pluginCatalogService: harness.pluginCatalogService,
       };
+
       await runPeriodicSweepJobs(deps, jobs, 20_000);
       await runPeriodicSweepJobs(deps, jobs, 20_999);
       await runPeriodicSweepJobs(deps, jobs, 21_000);

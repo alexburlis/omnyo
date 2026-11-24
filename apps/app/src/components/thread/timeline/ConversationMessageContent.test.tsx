@@ -2,8 +2,8 @@
 
 import { LazyMarkdownHtml } from "@/components/ui/lazy-markdown-html";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ThreadListEntry } from "@bb/domain";
-import { beforeAll, afterEach, describe, expect, it } from "vitest";
+import type { PromptTextMention, ThreadListEntry } from "@omnyo/domain";
+import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
@@ -12,9 +12,9 @@ import {
   type MessageDirectiveRegistry,
 } from "@/components/ui/markdown-message-directives";
 import { ConversationMessageContent } from "./ConversationMessageContent";
-import { USER_MESSAGE_CHAR_CAP } from "@bb/client-core";
+import { USER_MESSAGE_CHAR_CAP } from "@omnyo/client-core";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
-import { makeThreadListEntry as makeThreadListEntryFixture } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry as makeThreadListEntryFixture } from "@omnyo/test-helpers/domain-fixtures";
 
 beforeAll(() => LazyMarkdownHtml.preload());
 
@@ -42,12 +42,12 @@ describe("ConversationMessageContent assistant images", () => {
         <RouteNavigationProvider>
           <ConversationMessageContent
             role="assistant"
+            turnGit={null}
             attachments={null}
             id="msg_image"
             threadId="thr_image"
             turnId="turn_image"
             showActions={false}
-            mobileActionDisplay="overflow"
             streaming={false}
             timestamp={0}
             text={
@@ -76,6 +76,8 @@ describe("ConversationMessageContent user images", () => {
         <RouteNavigationProvider>
           <ConversationMessageContent
             role="user"
+            id="user_content_1"
+            turnId={null}
             attachments={{
               webImages: 0,
               localImages: 0,
@@ -103,6 +105,7 @@ describe("ConversationMessageContent user images", () => {
             threadId="thr_paste"
             projectId="proj_paste"
             turnRequest={{
+              clientRequestId: null,
               isGrouped: false,
               kind: "message",
               status: "accepted",
@@ -126,6 +129,8 @@ describe("ConversationMessageContent user images", () => {
         <RouteNavigationProvider>
           <ConversationMessageContent
             role="user"
+            id="user_content_2"
+            turnId={null}
             attachments={null}
             initiator="user"
             mentions={[]}
@@ -138,6 +143,7 @@ describe("ConversationMessageContent user images", () => {
             timestamp={0}
             threadId="thr_image"
             turnRequest={{
+              clientRequestId: null,
               isGrouped: false,
               kind: "message",
               status: "accepted",
@@ -161,6 +167,8 @@ describe("ConversationMessageContent user HTML", () => {
         <RouteNavigationProvider>
           <ConversationMessageContent
             role="user"
+            id="user_content_3"
+            turnId={null}
             attachments={null}
             initiator="user"
             mentions={[]}
@@ -175,6 +183,7 @@ describe("ConversationMessageContent user HTML", () => {
             timestamp={0}
             threadId="thr_html"
             turnRequest={{
+              clientRequestId: null,
               isGrouped: false,
               kind: "message",
               status: "accepted",
@@ -200,6 +209,7 @@ describe("ConversationMessageContent assistant thread mentions", () => {
       projectId: "proj_personal",
       title: "Plugin composer support on root new-thread page",
     });
+
     const messageDirectiveRegistry: MessageDirectiveRegistry = new Map([
       [
         "inline-vis",
@@ -220,12 +230,12 @@ describe("ConversationMessageContent assistant thread mentions", () => {
             >
               <ConversationMessageContent
                 role="assistant"
+                turnGit={null}
                 attachments={null}
                 id="msg_spawned"
                 threadId="thr_parent"
                 turnId="turn_spawned"
                 showActions={false}
-                mobileActionDisplay="overflow"
                 streaming={false}
                 text="Spawned and parented: @thread:thr_xpxxt2ipz8"
                 timestamp={0}
@@ -239,6 +249,7 @@ describe("ConversationMessageContent assistant thread mentions", () => {
     const mentionLink = screen.getByRole("link", {
       name: "Plugin composer support on root new-thread page",
     });
+
     expect(mentionLink.getAttribute("href")).toBe("/threads/thr_xpxxt2ipz8");
     expect(screen.queryByText("@thread", { exact: false })).toBeNull();
   });
@@ -246,6 +257,7 @@ describe("ConversationMessageContent assistant thread mentions", () => {
 
 describe("ConversationMessageContent long user messages", () => {
   const rawThreadId = "thr_dcwivn5n8w";
+
   const mentionedThread = threadListEntry({
     id: rawThreadId,
     projectId: "proj_target",
@@ -254,6 +266,7 @@ describe("ConversationMessageContent long user messages", () => {
 
   function renderLongUserMessage(text: string) {
     const { wrapper } = createQueryClientTestHarness();
+
     return render(
       <MemoryRouter>
         <RouteNavigationProvider>
@@ -264,6 +277,9 @@ describe("ConversationMessageContent long user messages", () => {
           >
             <ConversationMessageContent
               role="user"
+              id="user_content_4"
+              threadId="thr_user_content"
+              turnId={null}
               attachments={null}
               initiator="user"
               mentions={[]}
@@ -275,6 +291,7 @@ describe("ConversationMessageContent long user messages", () => {
               text={text}
               timestamp={0}
               turnRequest={{
+                clientRequestId: null,
                 isGrouped: false,
                 kind: "message",
                 status: "accepted",
@@ -296,6 +313,9 @@ describe("ConversationMessageContent long user messages", () => {
         <RouteNavigationProvider>
           <ConversationMessageContent
             role="user"
+            id="user_content_5"
+            threadId="thr_user_content"
+            turnId={null}
             attachments={null}
             initiator="user"
             mentions={[]}
@@ -307,6 +327,7 @@ describe("ConversationMessageContent long user messages", () => {
             text={text}
             timestamp={0}
             turnRequest={{
+              clientRequestId: null,
               isGrouped: false,
               kind: "message",
               status: "accepted",
@@ -377,6 +398,7 @@ describe("ConversationMessageContent long user messages", () => {
     const prefix = `${"a".repeat(
       USER_MESSAGE_CHAR_CAP - rawThreadId.length - 1,
     )} `;
+
     const text = `${prefix}${rawThreadId}/path`;
     const { container } = renderLongUserMessage(text);
 
@@ -409,6 +431,9 @@ describe("ConversationMessageContent user thread mentions", () => {
           >
             <ConversationMessageContent
               role="user"
+              id="user_content_6"
+              threadId="thr_user_content"
+              turnId={null}
               attachments={null}
               initiator="user"
               mentions={[]}
@@ -420,6 +445,7 @@ describe("ConversationMessageContent user thread mentions", () => {
               text="Continue in thr_dcwivn5n8w when this is ready."
               timestamp={0}
               turnRequest={{
+                clientRequestId: null,
                 isGrouped: false,
                 kind: "message",
                 status: "accepted",
@@ -434,6 +460,7 @@ describe("ConversationMessageContent user thread mentions", () => {
     const mentionLink = screen.getByRole("link", {
       name: "Raw ID mention target",
     });
+
     expect(mentionLink.getAttribute("href")).toBe("/threads/thr_dcwivn5n8w");
     expect(screen.queryByText("thr_dcwivn5n8w")).toBeNull();
   });
@@ -455,6 +482,9 @@ describe("ConversationMessageContent user thread mentions", () => {
           >
             <ConversationMessageContent
               role="user"
+              id="user_content_7"
+              threadId="thr_user_content"
+              turnId={null}
               attachments={null}
               initiator="user"
               mentions={[]}
@@ -466,6 +496,7 @@ describe("ConversationMessageContent user thread mentions", () => {
               text="See @thread:thr_cross_project for the result."
               timestamp={0}
               turnRequest={{
+                clientRequestId: null,
                 isGrouped: false,
                 kind: "message",
                 status: "accepted",
@@ -491,6 +522,8 @@ describe("ConversationMessageContent automation messages", () => {
         <RouteNavigationProvider>
           <ConversationMessageContent
             role="user"
+            id="user_content_8"
+            turnId={null}
             attachments={null}
             initiator="user"
             mentions={[]}
@@ -506,6 +539,7 @@ describe("ConversationMessageContent automation messages", () => {
             timestamp={0}
             threadId="thr_automation"
             turnRequest={{
+              clientRequestId: null,
               isGrouped: false,
               kind: "message",
               status: "accepted",
@@ -539,6 +573,8 @@ describe("ConversationMessageContent undelivered automation messages", () => {
         <RouteNavigationProvider>
           <ConversationMessageContent
             role="user"
+            id="user_content_9"
+            turnId={null}
             attachments={null}
             initiator="user"
             mentions={[]}
@@ -553,6 +589,7 @@ describe("ConversationMessageContent undelivered automation messages", () => {
             timestamp={0}
             threadId="thr_automation"
             turnRequest={{
+              clientRequestId: null,
               isGrouped: false,
               kind: "steer",
               status: "rejected",
@@ -564,4 +601,153 @@ describe("ConversationMessageContent undelivered automation messages", () => {
 
     expect(screen.getByText("Steer failed")).toBeTruthy();
   });
+});
+
+describe("generated message attribution", () => {
+  it("keeps an agent without a surviving sender thread out of the user bubble", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <RouteNavigationProvider>
+          <ConversationMessageContent
+            role="user"
+            id="user_content_10"
+            turnId={null}
+            attachments={null}
+            initiator="agent"
+            mentions={[]}
+            senderThreadId={null}
+            senderThreadTitle={null}
+            senderIsPluginSideChat={false}
+            systemMessageKind="unlabeled"
+            systemMessageSubject={null}
+            text="A background result arrived"
+            timestamp={0}
+            threadId="thr_target"
+            turnRequest={{
+              clientRequestId: null,
+              isGrouped: false,
+              kind: "message",
+              status: "accepted",
+            }}
+          />
+        </RouteNavigationProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Message from")).toBeTruthy();
+    expect(screen.getByText("Agent")).toBeTruthy();
+    expect(container.querySelector("[data-user-message-bubble]")).toBeNull();
+  });
+
+  it.each([
+    [
+      { kind: "script", label: "Verification runner" },
+      "Script",
+      "Verification runner",
+    ],
+    [{ kind: "plugin", pluginId: "resources" }, "Plugin", "resources"],
+  ] as const)("shows typed external source %j", (source, kind, label) => {
+    render(
+      <MemoryRouter>
+        <RouteNavigationProvider>
+          <ConversationMessageContent
+            role="user"
+            id="user_content_11"
+            turnId={null}
+            attachments={null}
+            initiator="user"
+            mentions={[]}
+            senderThreadId={null}
+            senderThreadTitle={null}
+            senderIsPluginSideChat={false}
+            systemMessageKind="external-message"
+            systemMessageSubject={{ kind: "message-source", source }}
+            text="A background result arrived"
+            timestamp={0}
+            threadId="thr_target"
+            turnRequest={{
+              clientRequestId: null,
+              isGrouped: false,
+              kind: "steer",
+              status: "accepted",
+            }}
+          />
+        </RouteNavigationProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(kind)).toBeTruthy();
+    expect(screen.getByText(label)).toBeTruthy();
+  });
+});
+
+it("shows the display answer while Add to chat preserves the original completion report", () => {
+  const onAddToChat = vi.fn();
+  const text = "The answer.\n\nCompleted: The fix; verified: checks.";
+  render(
+    <MemoryRouter>
+      <ConversationMessageContent
+        role="assistant"
+        turnGit={null}
+        attachments={null}
+        id="display-answer"
+        threadId="thread-display"
+        turnId="turn-display"
+        showActions
+        streaming={false}
+        timestamp={0}
+        text={text}
+        displayText="The answer."
+        onAddToChat={onAddToChat}
+      />
+    </MemoryRouter>,
+  );
+  expect(screen.getByText("The answer.")).toBeTruthy();
+  expect(screen.queryByText(/Completed: The fix/u)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+  expect(onAddToChat).toHaveBeenCalledWith(text);
+});
+
+it("passes saved mention resources with the trimmed quote text", () => {
+  const onAddToChat = vi.fn();
+
+  const resource = {
+    kind: "path",
+    source: "workspace",
+    entryKind: "file",
+    path: "docs/spec.md",
+    label: "Source spec",
+  } satisfies PromptTextMention["resource"];
+
+  render(
+    <MemoryRouter>
+      <ConversationMessageContent
+        role="user"
+        id="user_quote"
+        turnId={null}
+        attachments={null}
+        initiator="user"
+        mentions={[{ start: 9, end: 14, resource }]}
+        senderThreadId={null}
+        senderThreadTitle={null}
+        senderIsPluginSideChat={false}
+        systemMessageKind="unlabeled"
+        systemMessageSubject={null}
+        text="  Review @spec  "
+        timestamp={0}
+        threadId="thr_quote"
+        onAddToChat={onAddToChat}
+        turnRequest={{
+          clientRequestId: null,
+          isGrouped: false,
+          kind: "message",
+          status: "accepted",
+        }}
+      />
+    </MemoryRouter>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+  expect(onAddToChat).toHaveBeenCalledWith("Review @spec", undefined, [
+    { start: 7, end: 12, resource },
+  ]);
 });

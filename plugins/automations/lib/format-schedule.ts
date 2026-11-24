@@ -1,5 +1,5 @@
 import { toString as cronstrueToString } from "cronstrue";
-import type { AutomationTrigger } from "../src/rpc-types";
+import type { AutomationRunStatus, AutomationTrigger } from "../src/rpc-types";
 
 export const PERSONAL_PROJECT_ID = "proj_personal";
 
@@ -15,7 +15,7 @@ interface FormatScheduleStatusLabelArgs {
   nextRunAt: number | null;
   trigger?: AutomationTrigger;
   runCount?: number;
-  lastRunStatus?: "running" | "succeeded" | "failed" | "skipped" | null;
+  lastRunStatus?: AutomationRunStatus | null;
   now?: number;
 }
 
@@ -30,7 +30,7 @@ interface OneShotLifecycleArgs {
   enabled: boolean;
   trigger: AutomationTrigger;
   runCount: number;
-  lastRunStatus: "running" | "succeeded" | "failed" | "skipped" | null;
+  lastRunStatus: AutomationRunStatus | null;
   now?: number;
 }
 
@@ -40,6 +40,7 @@ type OneShotLifecycle =
   | "expired"
   | "running"
   | "completed"
+  | "recovered"
   | "failed"
   | "skipped";
 
@@ -55,11 +56,13 @@ const DAY_ABBREVIATION: Record<string, string> = {
 
 function formatCronCadence(cron: string): string {
   let text: string;
+
   try {
     text = cronstrueToString(cron, { verbose: false });
   } catch {
     return "Custom schedule";
   }
+
   return text
     .replace(/^At /, "")
     .replace(
@@ -88,6 +91,7 @@ export function formatAutomationTrigger(trigger: AutomationTrigger): string {
   if (trigger.triggerType === "once") {
     return "One time";
   }
+
   return formatCronCadence(trigger.cron);
 }
 
@@ -99,13 +103,21 @@ export function getOneShotLifecycle({
   now = Date.now(),
 }: OneShotLifecycleArgs): OneShotLifecycle | null {
   if (trigger.triggerType !== "once") return null;
+
   if (enabled) return "scheduled";
+
   if (runCount > 0) {
     if (lastRunStatus === "running") return "running";
+
     if (lastRunStatus === "failed") return "failed";
+
     if (lastRunStatus === "skipped") return "skipped";
+
+    if (lastRunStatus === "recovered") return "recovered";
+
     return "completed";
   }
+
   return trigger.runAt <= now ? "expired" : "paused";
 }
 
@@ -137,18 +149,28 @@ export function formatScheduleStatusLabel({
       lastRunStatus,
       now,
     });
+
     if (oneShotLifecycle === "running") return "Running";
+
     if (oneShotLifecycle === "failed") return "Failed";
+
     if (oneShotLifecycle === "skipped") return "Skipped";
+
     if (oneShotLifecycle === "completed") return "Completed";
+
+    if (oneShotLifecycle === "recovered") return "Recovered";
+
     if (oneShotLifecycle === "expired") return "Expired — edit to reschedule";
   }
+
   if (!enabled) {
     return "Paused";
   }
+
   if (nextRunAt === null) {
     return "Not scheduled";
   }
+
   return `Next ${formatScheduleRunTime(nextRunAt)}`;
 }
 
@@ -156,6 +178,7 @@ export function formatOverviewScheduleMetadata(
   args: FormatScheduleStatusLabelArgs,
 ): OverviewScheduleMetadata | null {
   const label = formatScheduleStatusLabel(args);
+
   if (
     label === "Failed" ||
     label === "Paused" ||
@@ -164,9 +187,11 @@ export function formatOverviewScheduleMetadata(
   ) {
     return null;
   }
+
   if (label.startsWith("Next ")) {
     return { isNextRun: true, text: label.slice("Next ".length) };
   }
+
   return { isNextRun: false, text: label };
 }
 
@@ -174,6 +199,7 @@ export function formatDetailScheduleStatusLabel(
   args: FormatScheduleStatusLabelArgs,
 ): string | null {
   const label = formatScheduleStatusLabel(args);
+
   return label === "Paused" || label === "Completed" ? null : label;
 }
 
@@ -182,10 +208,13 @@ export function matchesAutomationStatusFilters(
   filters: readonly AutomationStatusFilter[],
 ): boolean {
   if (filters.length === 0) return true;
+
   if (automation.enabled) return filters.includes("active");
+
   if (automation.trigger?.triggerType !== "once") {
     return filters.includes("paused");
   }
+
   const lifecycle = getOneShotLifecycle({
     enabled: automation.enabled,
     trigger: automation.trigger,
@@ -193,9 +222,16 @@ export function matchesAutomationStatusFilters(
     lastRunStatus: automation.lastRunStatus ?? null,
     now: automation.now,
   });
+
   if (lifecycle === "running") return filters.includes("active");
-  if (lifecycle === "paused" || lifecycle === "completed") {
+
+  if (
+    lifecycle === "paused" ||
+    lifecycle === "completed" ||
+    lifecycle === "recovered"
+  ) {
     return filters.includes("paused");
   }
+
   return false;
 }

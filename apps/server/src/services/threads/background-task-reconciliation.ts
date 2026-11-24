@@ -6,14 +6,14 @@ import {
   type DbNotifier,
   type DbTransaction,
   type OpenBackgroundTaskItemRow,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   backgroundTaskItemStatus,
   isSettledBackgroundTaskStatus,
   threadEventBackgroundTaskItemSchema,
   threadScope,
-} from "@bb/domain";
-import type { ThreadEventBackgroundTaskItem } from "@bb/domain";
+} from "@omnyo/domain";
+import type { ThreadEventBackgroundTaskItem } from "@omnyo/domain";
 import type { AppDeps } from "../../types.js";
 import { appendThreadEventsInTransaction } from "./thread-events.js";
 
@@ -22,6 +22,7 @@ interface SettleDanglingBackgroundTasksArgs {
 }
 
 type SettleDanglingBackgroundTasksDeps = Pick<AppDeps, "db" | "hub" | "logger">;
+
 type SettleDanglingBackgroundTasksTransactionDeps = {
   db: DbTransaction;
   hub: DbNotifier;
@@ -39,6 +40,7 @@ function parseStoredBackgroundTaskItem(
     const parsed = storedBackgroundTaskEventDataSchema.safeParse(
       JSON.parse(row.data),
     );
+
     return parsed.success ? parsed.data.item : null;
   } catch {
     return null;
@@ -49,9 +51,36 @@ export function settleDanglingBackgroundTasks(
   deps: SettleDanglingBackgroundTasksDeps,
   args: SettleDanglingBackgroundTasksArgs,
 ): void {
-  const rows = listOpenBackgroundTaskItemRowsForHost(deps.db, {
-    hostId: args.hostId,
-  });
+  settleBackgroundTaskRows(
+    deps,
+    listOpenBackgroundTaskItemRowsForHost(deps.db, { hostId: args.hostId }),
+  );
+}
+
+export function settleBackgroundTasksTheDaemonNoLongerRuns(
+  deps: SettleDanglingBackgroundTasksDeps,
+  args: {
+    hostId: string;
+    openItemIdsByThreadId: ReadonlyMap<string, ReadonlySet<string>>;
+    unsettledThreadIds: ReadonlySet<string>;
+  },
+): void {
+  settleBackgroundTaskRows(
+    deps,
+    listOpenBackgroundTaskItemRowsForHost(deps.db, {
+      hostId: args.hostId,
+    }).filter(
+      (row) =>
+        !args.unsettledThreadIds.has(row.threadId) &&
+        !args.openItemIdsByThreadId.get(row.threadId)?.has(row.itemId),
+    ),
+  );
+}
+
+function settleBackgroundTaskRows(
+  deps: SettleDanglingBackgroundTasksDeps,
+  rows: readonly OpenBackgroundTaskItemRow[],
+): void {
   if (rows.length === 0) {
     return;
   }
@@ -71,6 +100,7 @@ export function settleDanglingBackgroundTasks(
 
   for (const threadId of settledThreadIds) {
     deps.hub.notifyThread(threadId, ["events-appended"], {
+      backgroundActivityChanged: true,
       timelineSequence: getLatestThreadSequence(deps.db, {
         threadId: threadId,
       }),
@@ -85,8 +115,10 @@ export function settleDanglingBackgroundTasksForStoppedThreadInTransaction(
 ): void {
   const rows = listOpenBackgroundTaskItemRowsForThread(deps.db, args);
   const settledThreadIds = appendDanglingBackgroundTaskCompletions(deps, rows);
+
   for (const threadId of settledThreadIds) {
     deps.hub.notifyThread(threadId, ["events-appended"], {
+      backgroundActivityChanged: true,
       timelineSequence: getLatestThreadSequence(deps.db, {
         threadId: threadId,
       }),
@@ -100,8 +132,10 @@ function appendDanglingBackgroundTaskCompletions(
   rows: readonly OpenBackgroundTaskItemRow[],
 ): Set<string> {
   const settledThreadIds = new Set<string>();
+
   for (const row of rows) {
     const item = parseStoredBackgroundTaskItem(row);
+
     if (!item) {
       deps.logger.warn(
         { itemId: row.itemId, threadId: row.threadId },
@@ -109,10 +143,13 @@ function appendDanglingBackgroundTaskCompletions(
       );
       continue;
     }
+
     const providerThreadId = row.providerThreadId ?? "";
+
     const taskStatus = isSettledBackgroundTaskStatus(item.taskStatus)
       ? item.taskStatus
       : "stopped";
+
     appendThreadEventsInTransaction(deps.db, [
       {
         threadId: row.threadId,
@@ -132,5 +169,6 @@ function appendDanglingBackgroundTaskCompletions(
     ]);
     settledThreadIds.add(row.threadId);
   }
+
   return settledThreadIds;
 }

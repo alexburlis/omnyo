@@ -8,7 +8,10 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installTestPluginRuntime } from "@get-bb/plugin-sdk/testing/app";
+import {
+  installTestPluginRuntime,
+  renderSlot,
+} from "@omnyo/plugin-sdk/testing/app";
 import { CompactViewportOverrideProvider } from "@/components/ui/hooks/use-compact-viewport";
 import { AutomationOverviewView } from "../overview-view.js";
 import type {
@@ -44,7 +47,6 @@ const INSTALLED_AUTOMATIONS: AutomationsOverviewResponse["automations"] = [
       },
       execution: {
         mode: "agent",
-        prompt: "Summarize yesterday's commits.",
         providerId: "claude",
         model: "claude-opus-5",
         reasoningLevel: "medium",
@@ -62,19 +64,77 @@ const INSTALLED_AUTOMATIONS: AutomationsOverviewResponse["automations"] = [
       createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_000_000,
     },
-    project: { id: "proj_1", name: "bb" },
+    project: { id: "proj_1", name: "omnyo" },
   },
 ];
 
 afterEach(cleanup);
 
 describe("AutomationOverviewView", () => {
+  it.each([
+    {
+      state: "a paused automation whose last run failed",
+      lastRunStatus: "failed",
+      lastError: "Target thread thr_target was archived",
+      shown: true,
+    },
+    {
+      state: "a retry in flight",
+      lastRunStatus: "running",
+      lastError: "Target thread thr_target was archived",
+      shown: false,
+    },
+    {
+      state: "an automation resumed after a failure",
+      lastRunStatus: "failed",
+      lastError: null,
+      shown: false,
+    },
+  ] as const)(
+    "marks a row failed only with its reason, for $state",
+    ({ lastRunStatus, lastError, shown }) => {
+      const [entry] = INSTALLED_AUTOMATIONS;
+      render(
+        <AutomationOverviewView
+          entries={[
+            {
+              ...entry!,
+              automation: {
+                ...(entry!.automation as AutomationResponse),
+                enabled: lastRunStatus !== "failed" || lastError === null,
+                lastRunStatus,
+                lastError,
+              },
+            },
+          ]}
+          error={null}
+          onRetry={() => {}}
+          onOpenDetail={() => {}}
+          onEnabledChange={async () => {}}
+          onRunNow={async () => {}}
+          onDelete={() => {}}
+          onCreateViaChat={() => {}}
+          activeMode="installed"
+          onModeChange={() => {}}
+        />,
+      );
+
+      expect(screen.queryByLabelText("Failed") !== null).toBe(shown);
+      expect(
+        screen.queryByText("Target thread thr_target was archived") !== null,
+      ).toBe(shown);
+    },
+  );
+
   it("keeps lifecycle groups stable around the selected sort", () => {
     const baseEntry = INSTALLED_AUTOMATIONS[0]!;
+
     if ("problem" in baseEntry.automation) {
       throw new Error("Expected a canonical automation fixture");
     }
+
     const baseAutomation = baseEntry.automation;
+
     const entry = (
       name: string,
       overrides: Partial<AutomationResponse> = {},
@@ -87,6 +147,7 @@ describe("AutomationOverviewView", () => {
         ...overrides,
       },
     });
+
     const entries = [
       entry("Aardvark completed", {
         enabled: false,
@@ -104,6 +165,7 @@ describe("AutomationOverviewView", () => {
       entry("Alpha inactive", { enabled: false, nextRunAt: null }),
       entry("Alpha active"),
     ];
+
     const { container } = render(
       <AutomationOverviewView
         entries={entries}
@@ -123,6 +185,7 @@ describe("AutomationOverviewView", () => {
       container.querySelectorAll<HTMLElement>("[data-resource-row]"),
       (row) => row.querySelector("button")?.textContent,
     );
+
     expect(rowTitles).toEqual([
       "Alpha active",
       "Zulu active",
@@ -149,7 +212,7 @@ describe("AutomationOverviewView", () => {
       />,
     );
 
-    expect(screen.getByRole("tab", { name: "Installed0" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Automations0" })).toBeTruthy();
     expect(screen.getByText("No automations installed.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "New automation" })).toBeTruthy();
   });
@@ -157,12 +220,14 @@ describe("AutomationOverviewView", () => {
   it("opens a missing-prompt row in the standard editor", () => {
     const onOpenDetail = vi.fn();
     const healthyAutomation = INSTALLED_AUTOMATIONS[0]!.automation;
+
     if (
       "problem" in healthyAutomation ||
       healthyAutomation.execution.mode !== "agent"
     ) {
       throw new Error("Expected an agent automation fixture");
     }
+
     const entries: AutomationsOverviewResponse["automations"] = [
       {
         automation: {
@@ -172,7 +237,7 @@ describe("AutomationOverviewView", () => {
           execution: { ...healthyAutomation.execution, prompt: "" },
           problem: "missing-agent-prompt",
         },
-        project: { id: "proj_1", name: "bb" },
+        project: { id: "proj_1", name: "omnyo" },
       },
       {
         automation: {
@@ -181,10 +246,11 @@ describe("AutomationOverviewView", () => {
           name: "Unreadable automation",
           problem: "invalid-stored-data",
         },
-        project: { id: "proj_1", name: "bb" },
+        project: { id: "proj_1", name: "omnyo" },
       },
       ...INSTALLED_AUTOMATIONS,
     ];
+
     render(
       <AutomationOverviewView
         entries={entries}
@@ -244,12 +310,14 @@ describe("AutomationOverviewView", () => {
   it("runs an automation from its row without opening the detail", async () => {
     const onOpenDetail = vi.fn();
     let resolveRun: (() => void) | null = null;
+
     const onRunNow = vi.fn(
       () =>
         new Promise<void>((resolve) => {
           resolveRun = resolve;
         }),
     );
+
     render(
       <AutomationOverviewView
         entries={INSTALLED_AUTOMATIONS}
@@ -267,9 +335,11 @@ describe("AutomationOverviewView", () => {
 
     const actions = () =>
       screen.getByRole("button", { name: "Nightly digest actions" });
+
     const enabledSwitch = screen.getByRole("switch", {
       name: "Disable Nightly digest",
     });
+
     expect(enabledSwitch.compareDocumentPosition(actions())).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
@@ -354,17 +424,23 @@ describe("AutomationOverviewView", () => {
     expect(screen.getByText("Projects")).toBeTruthy();
     expect(screen.getByText("Status")).toBeTruthy();
 
-    const projectOption = screen.getByRole("menuitemcheckbox", { name: "bb" });
+    const projectOption = screen.getByRole("menuitemcheckbox", {
+      name: "omnyo",
+    });
+
     expect(projectOption.querySelector("[data-icon]")).toBeNull();
     expect(
       projectOption.querySelector(".truncate")?.getAttribute("title"),
-    ).toBe("bb");
+    ).toBe("omnyo");
+
     const activeOption = screen.getByRole("menuitemcheckbox", {
       name: "Active",
     });
+
     const pausedOption = screen.getByRole("menuitemcheckbox", {
       name: "Paused",
     });
+
     expect(activeOption.querySelector("[data-icon]")).toBeNull();
     expect(pausedOption.querySelector("[data-icon]")).toBeNull();
   });
@@ -384,6 +460,7 @@ describe("AutomationOverviewView", () => {
         onModeChange={() => {}}
       />,
     );
+
     const rowTitles = () =>
       Array.from(
         container.querySelectorAll<HTMLElement>("[data-resource-row]"),
@@ -393,15 +470,15 @@ describe("AutomationOverviewView", () => {
     expect(rowTitles()).toEqual(["Nightly digest"]);
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Filters" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "bb" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "omnyo" }));
     expect(
-      screen.getByRole("menuitemcheckbox", { name: "bb" }).ariaChecked,
+      screen.getByRole("menuitemcheckbox", { name: "omnyo" }).ariaChecked,
     ).toBe("true");
     expect(rowTitles()).toEqual(["Nightly digest"]);
 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Paused" }));
     expect(
-      screen.getByRole("menuitemcheckbox", { name: "bb" }).ariaChecked,
+      screen.getByRole("menuitemcheckbox", { name: "omnyo" }).ariaChecked,
     ).toBe("true");
     expect(
       screen.getByRole("menuitemcheckbox", { name: "Paused" }).ariaChecked,
@@ -417,14 +494,14 @@ describe("AutomationOverviewView", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(
       screen.getByRole("button", {
-        name: "Filters: Projects: bb; Status: Paused",
+        name: "Filters: Projects: omnyo; Status: Paused",
       }),
     ).toBeTruthy();
 
     fireEvent.pointerDown(screen.getByRole("button", { name: /^Filters/ }));
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Paused" }));
     expect(
-      screen.getByRole("menuitemcheckbox", { name: "bb" }).ariaChecked,
+      screen.getByRole("menuitemcheckbox", { name: "omnyo" }).ariaChecked,
     ).toBe("true");
     expect(rowTitles()).toEqual(["Nightly digest"]);
     expect(
@@ -450,17 +527,23 @@ describe("AutomationOverviewView", () => {
 
     const ENGAGED = ["bg-state-active", "text-foreground"];
     const classesOf = (el: HTMLElement) => new Set(el.className.split(/\s+/));
+
     const isEngaged = (el: HTMLElement) => {
       const classes = classesOf(el);
+
       return ENGAGED.every((engagedClass) => classes.has(engagedClass));
     };
+
     const byLabel = (prefix: string) => {
       const el = container.querySelector<HTMLElement>(
         `button[aria-label^="${prefix}"]`,
       );
+
       if (el === null) throw new Error(`no trigger labelled ${prefix}`);
+
       return el;
     };
+
     const filters = () => byLabel("Filters");
     const sort = () => byLabel("Sort:");
 
@@ -482,7 +565,7 @@ describe("AutomationOverviewView", () => {
     expect(isEngaged(sort())).toBe(false);
 
     fireEvent.pointerDown(filters());
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "bb" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "omnyo" }));
     fireEvent.keyDown(document, { key: "Escape" });
     expect(isEngaged(filters())).toBe(true);
   });
@@ -506,14 +589,18 @@ describe("AutomationOverviewView", () => {
     const sortTrigger = screen.getByRole("button", {
       name: "Sort: Automation name, ascending",
     });
+
     expect(sortTrigger.querySelector('[data-icon="ArrowUpDown"]')).toBeTruthy();
     fireEvent.pointerDown(sortTrigger);
+
     const projectOption = screen.getByRole("menuitemradio", {
       name: "Project",
     });
+
     const nameOption = screen.getByRole("menuitemradio", {
       name: "Automation name",
     });
+
     expect(projectOption.getAttribute("aria-disabled")).toBe("true");
     expect(projectOption.getAttribute("aria-checked")).toBe("false");
     expect(nameOption.getAttribute("aria-checked")).toBe("true");
@@ -548,14 +635,17 @@ describe("AutomationOverviewView", () => {
     const sortTrigger = screen.getByRole("button", {
       name: "Sort: Automation name, ascending",
     });
+
     fireEvent.click(sortTrigger);
 
     const projectOption = await screen.findByRole("menuitemradio", {
       name: "Project",
     });
+
     const nameOption = screen.getByRole("menuitemradio", {
       name: "Automation name",
     });
+
     expect(projectOption.getAttribute("aria-checked")).toBe("false");
     expect(projectOption.getAttribute("aria-disabled")).toBe("true");
     expect((projectOption as HTMLButtonElement).disabled).toBe(true);
@@ -579,24 +669,27 @@ describe("AutomationOverviewView", () => {
 
   it("renders template actions as icon-only controls with specific labels", () => {
     const onCreateViaChat = vi.fn();
-    const { container } = render(
-      <AutomationOverviewView
-        entries={[]}
-        error={null}
-        onRetry={() => {}}
-        onOpenDetail={() => {}}
-        onEnabledChange={async () => {}}
-        onRunNow={async () => {}}
-        onDelete={() => {}}
-        onCreateViaChat={onCreateViaChat}
-        activeMode="browse"
-        onModeChange={() => {}}
-      />,
+
+    const { container } = renderSlot(
+      { component: AutomationOverviewView },
+      {
+        entries: [],
+        error: null,
+        onRetry: () => {},
+        onOpenDetail: () => {},
+        onEnabledChange: async () => {},
+        onRunNow: async () => {},
+        onDelete: () => {},
+        onCreateViaChat,
+        activeMode: "browse",
+        onModeChange: () => {},
+      },
     );
 
     const ciTemplateButton = screen.getByRole("button", {
       name: "Use template: CI failure triage",
     });
+
     expect(
       ciTemplateButton.querySelector('[data-icon="MessageCirclePlus"]'),
     ).toBeTruthy();
@@ -613,6 +706,108 @@ describe("AutomationOverviewView", () => {
       ) as HTMLElement,
     );
     expect(onCreateViaChat).toHaveBeenCalledOnce();
+  });
+
+  it("opens local imports and links to the developer-curated Marketplace", () => {
+    const { navigateCalls } = renderSlot(
+      { component: AutomationOverviewView },
+      {
+        entries: [],
+        error: null,
+        onRetry: () => {},
+        onOpenDetail: () => {},
+        onEnabledChange: async () => {},
+        onRunNow: async () => {},
+        onDelete: () => {},
+        onCreateViaChat: () => {},
+        activeMode: "browse",
+        onModeChange: () => {},
+      },
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Weekly Content Feed" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Import a workflow" }),
+    );
+
+    expect(
+      screen
+        .getByRole("link", { name: "Browse Marketplace" })
+        .getAttribute("href"),
+    ).toBe("https://omnyohq.com/explore?type=workflow");
+    expect(navigateCalls).toEqual([
+      {
+        method: "toPluginPanel",
+        path: "automations",
+        options: { subPath: "import" },
+      },
+      {
+        method: "toPluginPanel",
+        path: "automations",
+        options: { subPath: "import" },
+      },
+    ]);
+  });
+
+  it("lists installed graphs with their run status and opens the actual editor owner", async () => {
+    renderSlot(
+      { component: AutomationOverviewView },
+      {
+        entries: [],
+        error: null,
+        onRetry: () => {},
+        onOpenDetail: () => {},
+        onEnabledChange: async () => {},
+        onRunNow: async () => {},
+        onDelete: () => {},
+        onCreateViaChat: () => {},
+        activeMode: "graphs",
+        onModeChange: () => {},
+      },
+      {
+        rpc: {
+          workflow_graphs: () => [
+            {
+              machineId: "mch_fixture",
+              projectId: "proj_1",
+              name: "Release loop",
+              latestVersionNumber: 3,
+              draftChangeCount: 0,
+              openAttentionCount: 1,
+              instances: [{ lifecycle: "running", stateTitle: "Review" }],
+            },
+          ],
+        },
+      },
+    );
+
+    expect(screen.getByRole("tab", { name: "State machines" })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "Installed workflows" }),
+    ).toBeTruthy();
+    expect(screen.queryByText("Shared workflows")).toBeNull();
+    expect(
+      screen
+        .getByRole("link", { name: "New state machine" })
+        .getAttribute("href"),
+    ).toBe("/plugins/state-machines/machines/new");
+
+    const graph = await screen.findByRole("link", {
+      name: /Release loop.*Running.*Review.*Needs you/i,
+    });
+
+    expect(graph.getAttribute("href")).toBe(
+      "/plugins/state-machines/machines/m/mch_fixture",
+    );
+    fireEvent.change(screen.getByPlaceholderText("Search state machines"), {
+      target: { value: "Missing" },
+    });
+    expect(screen.queryByRole("link", { name: /Release loop/ })).toBeNull();
+    expect(
+      screen.getByText("No state machines match your search."),
+    ).toBeTruthy();
   });
 
   it("keeps labelled metadata tooltip triggers outside the row button", async () => {
@@ -692,6 +887,7 @@ describe("AutomationOverviewView", () => {
       ...INSTALLED_AUTOMATIONS[0]!,
       project: { id: "proj_named_local", name: "Local" },
     };
+
     const { container } = render(
       <AutomationOverviewView
         entries={[namedLocalEntry]}

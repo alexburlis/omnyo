@@ -7,6 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import {
+  SegmentedControl,
+  type SegmentedControlOption,
+} from "@/components/ui/segmented-control";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -15,6 +19,11 @@ import {
 import { useTasksRefresh } from "./refresh.js";
 
 const REFRESH_TASKS_LABEL = "Refresh tasks";
+
+const VIEW_OPTIONS: readonly SegmentedControlOption<TaskViewMode>[] = [
+  { value: "list", label: "List", icon: "ListView" },
+  { value: "board", label: "Board", icon: "Columns2" },
+];
 
 interface PagerPosition {
   index: number;
@@ -30,7 +39,9 @@ export function pagerPosition(
   const ordered = groupTasksByStatus(tasks).flatMap((group) => group.tasks);
   const wanted = taskKey.toUpperCase();
   const index = ordered.findIndex((task) => task.key.toUpperCase() === wanted);
+
   if (index === -1) return null;
+
   return {
     index: index + 1,
     total: ordered.length,
@@ -57,14 +68,18 @@ function TaskPager({
     ["tasks:changed"],
     [projectId],
   );
+
   const position = useMemo(
     () => (siblings.data ? pagerPosition(siblings.data, taskKey) : null),
     [siblings.data, taskKey],
   );
+
   if (!position) return null;
+
   const step = (key: string | null) => {
     if (key !== null) onNavigate({ kind: "task", taskKey: key });
   };
+
   return (
     <div className="hidden shrink-0 items-center gap-0.5 text-xs tabular-nums text-muted-foreground @sm:flex">
       <span className="hidden px-1 @md:inline">
@@ -101,26 +116,14 @@ function ViewToggle({
   view: TaskViewMode;
   onChange: (view: TaskViewMode) => void;
 }) {
-  const segment = (mode: TaskViewMode, label: string) => (
-    <button
-      type="button"
-      onClick={() => onChange(mode)}
-      aria-pressed={view === mode}
-      className={cn(
-        "rounded-sm px-2.5 py-0.5 text-xs max-md:pointer-coarse:py-1.5",
-        view === mode
-          ? "bg-background text-foreground shadow-2xs"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  );
   return (
-    <div className="flex items-center rounded-md bg-muted p-0.5">
-      {segment("list", "List")}
-      {segment("board", "Board")}
-    </div>
+    <SegmentedControl
+      ariaLabel="Project view"
+      size="sm"
+      value={view}
+      onValueChange={onChange}
+      options={VIEW_OPTIONS}
+    />
   );
 }
 
@@ -147,7 +150,7 @@ function RefreshTasksButton() {
             onClick={handleRefresh}
           >
             <Icon
-              name="RotateCcw"
+              name={isRefreshing ? "Loading" : "RotateCcw"}
               className={cn("size-3.5", isRefreshing && "animate-spin")}
             />
           </Button>
@@ -179,10 +182,13 @@ export function TasksTopbar({
     if (route.kind === "project") {
       return (projects ?? []).find((p) => p.id === route.projectId) ?? null;
     }
+
     if (route.kind === "task") {
       const prefix = route.taskKey.split("-", 1)[0] ?? "";
+
       return (projects ?? []).find((p) => p.prefix === prefix) ?? null;
     }
+
     return null;
   }, [route, projects]);
 

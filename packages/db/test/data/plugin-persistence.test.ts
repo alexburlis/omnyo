@@ -28,15 +28,15 @@ describe("normalized plugin persistence", () => {
   it("persists typed plugin intent and an active artifact reference", () => {
     const linearPlugin: UpsertInstalledPluginInput = {
       id: "linear",
-      source: "npm:bb-plugin-linear@1.2.3",
+      source: "npm:omnyo-plugin-linear@1.2.3",
       provenance: {
         kind: "catalog",
-        marketplace: "bb-community",
+        marketplace: "acme-plugins",
         entryId: "linear",
       },
       sourceIntent: {
         kind: "npm",
-        packageName: "bb-plugin-linear",
+        packageName: "omnyo-plugin-linear",
         registry: "https://registry.npmjs.org",
         requestedSpec: "^1.2.0",
         specKind: "range",
@@ -58,6 +58,7 @@ describe("normalized plugin persistence", () => {
       enabled: true,
       enabledFollowsDefault: false,
     };
+
     upsertInstalledPlugin(db, linearPlugin);
     createPluginArtifact(db, {
       id: "artifact-1",
@@ -72,7 +73,10 @@ describe("normalized plugin persistence", () => {
       validationResult: "valid",
       validatedAt: 100,
     });
-    upsertInstalledPlugin(db, { ...linearPlugin, activeArtifactId: "artifact-1" });
+    upsertInstalledPlugin(db, {
+      ...linearPlugin,
+      activeArtifactId: "artifact-1",
+    });
     expect(getInstalledPlugin(db, "linear")?.rootDir).toBe(
       "/cache/artifact-1.tgz",
     );
@@ -80,7 +84,7 @@ describe("normalized plugin persistence", () => {
     expect(getInstalledPluginRegistration(db, "linear")).toMatchObject({
       provenance: "catalog",
       catalogEntryId: "linear",
-      catalogMarketplaceName: "bb-community",
+      catalogMarketplaceName: "acme-plugins",
       sourceKind: "npm",
       sourceNpmRequestedSpec: "^1.2.0",
       sourceNpmSpecKind: "range",
@@ -107,8 +111,83 @@ describe("normalized plugin persistence", () => {
       validationResult: "pending",
       validatedAt: null,
     };
+
     expect(() =>
       Reflect.apply(createPluginArtifact, undefined, [db, invalidArtifact]),
+    ).toThrow(/resolution fields/);
+  });
+
+  it("keeps a verified path artifact distinct from git and builtin provenance", () => {
+    createPluginArtifact(db, {
+      id: "path-artifact",
+      pluginId: "path-plugin",
+      sourceKind: "path",
+      path: "/owned/immutable/plugin",
+      npmResolvedVersion: null,
+      gitResolvedCommit: null,
+      gitCheckoutRoot: null,
+      integrity: null,
+      contentHash: "sha256:verified",
+      validationResult: "valid",
+      validatedAt: 17,
+    });
+    expect(listPluginArtifacts(db, "path-plugin")).toMatchObject([
+      {
+        sourceKind: "path",
+        gitResolvedCommit: null,
+        gitCheckoutRoot: null,
+        bundledRootDir: null,
+        integrity: null,
+      },
+    ]);
+    expect(() =>
+      Reflect.apply(createPluginArtifact, undefined, [
+        db,
+        {
+          id: "fake-path",
+          pluginId: "path-plugin",
+          sourceKind: "path",
+          path: "/owned/immutable/plugin",
+          npmResolvedVersion: null,
+          gitResolvedCommit: "fake-git",
+          gitCheckoutRoot: null,
+          integrity: null,
+          contentHash: "sha256:verified",
+          validationResult: "valid",
+          validatedAt: 17,
+        },
+      ]),
+    ).toThrow(/resolution fields/);
+  });
+
+  it("persists an immutable git commit snapshot without claiming a disposable checkout", () => {
+    const artifact = {
+      id: "git-snapshot",
+      path: "/owned/immutable/git-snapshot",
+      pluginId: "git-owner",
+      sourceKind: "git" as const,
+      npmResolvedVersion: null,
+      gitResolvedCommit: "a".repeat(40),
+      gitCheckoutRoot: null,
+      integrity: null,
+      contentHash: `sha256:${"b".repeat(64)}`,
+      validationResult: "valid" as const,
+      validatedAt: 17,
+    };
+
+    createPluginArtifact(db, artifact);
+    expect(listPluginArtifacts(db, "git-owner")).toMatchObject([
+      {
+        gitResolvedCommit: "a".repeat(40),
+        gitCheckoutRoot: null,
+        contentHash: artifact.contentHash,
+      },
+    ]);
+    expect(() =>
+      Reflect.apply(createPluginArtifact, undefined, [
+        db,
+        { ...artifact, id: "unverified-git", validationResult: "pending" },
+      ]),
     ).toThrow(/resolution fields/);
   });
 
@@ -128,6 +207,7 @@ describe("normalized plugin persistence", () => {
       enabled: true,
       enabledFollowsDefault: false,
     };
+
     upsertInstalledPlugin(db, {
       ...common,
       id: "ranged",
@@ -196,6 +276,7 @@ describe("normalized plugin persistence", () => {
       enabled: true,
       enabledFollowsDefault: false,
     };
+
     upsertInstalledPlugin(db, retainedPlugin);
     createPluginArtifact(db, {
       id: "retained-artifact",
@@ -210,7 +291,10 @@ describe("normalized plugin persistence", () => {
       validationResult: "valid",
       validatedAt: Date.now(),
     });
-    upsertInstalledPlugin(db, { ...retainedPlugin, activeArtifactId: "retained-artifact" });
+    upsertInstalledPlugin(db, {
+      ...retainedPlugin,
+      activeArtifactId: "retained-artifact",
+    });
 
     expect(deleteInstalledPlugin(db, "retained")).toBe(true);
     expect(listPluginArtifacts(db, "retained")).toHaveLength(1);
@@ -220,6 +304,7 @@ describe("normalized plugin persistence", () => {
     for (const key of ["a_b/1", "axb/2", "50%/3", "50x/4", "c\\d/5", "cxd/6"]) {
       setPluginKvValue(db, "kv-plugin", key, "value");
     }
+
     expect(listPluginKvKeys(db, "kv-plugin", "a_b")).toEqual(["a_b/1"]);
     expect(listPluginKvKeys(db, "kv-plugin", "50%")).toEqual(["50%/3"]);
     expect(listPluginKvKeys(db, "kv-plugin", "c\\")).toEqual(["c\\d/5"]);
@@ -243,6 +328,7 @@ describe("normalized plugin persistence", () => {
         validatedAt: 100,
       });
     }
+
     expect(
       listPluginArtifactsUnderPath(db, "/cache/a_b", "/").map(({ id }) => id),
     ).toEqual(["child"]);

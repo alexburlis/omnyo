@@ -56,6 +56,37 @@ export function Overview() {
           muted
         />
       </StoryRow>
+      <StoryRow
+        label="open menu"
+        hint="click to open; the Open Menu story starts open"
+      >
+        <OptionPicker
+          label="Reasoning"
+          value="medium"
+          options={reasoningOptions}
+          onChange={noop}
+          modal={false}
+        />
+      </StoryRow>
+      <StoryRow
+        label="wrapping menu"
+        hint="long labels and descriptions; the Wrapping Menu story starts open"
+      >
+        <OptionPicker
+          label="Launch behavior"
+          value="long"
+          options={longOptions}
+          onChange={noop}
+          modal={false}
+        />
+      </StoryRow>
+    </StoryCard>
+  );
+}
+
+export function OpenMenu() {
+  return (
+    <StoryCard>
       <StoryRow label="open menu" hint="defaultOpen + modal=false">
         <OptionPicker
           label="Reasoning"
@@ -66,6 +97,13 @@ export function Overview() {
           modal={false}
         />
       </StoryRow>
+    </StoryCard>
+  );
+}
+
+export function WrappingMenu() {
+  return (
+    <StoryCard>
       <StoryRow label="wrapping menu" hint="long labels and descriptions">
         <OptionPicker
           label="Launch behavior"

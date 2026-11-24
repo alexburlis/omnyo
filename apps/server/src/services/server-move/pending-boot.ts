@@ -14,8 +14,9 @@ import {
   type DbConnection,
   type RerootServerOwnedPathsResult,
   type SwapServerHostRolesResult,
-} from "@bb/db";
-import { appSettingsSchema } from "@bb/domain";
+} from "@omnyo/db";
+import { appSettingsSchema } from "@omnyo/domain";
+import type { SecretVault } from "@omnyo/secret-storage";
 import {
   readLastServerMoveFile,
   readServerImportFile,
@@ -24,10 +25,11 @@ import {
   writeLastServerMoveFile,
   writeServerImportFile,
   type ServerImportFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import { z } from "zod";
 import type { AppDeps, ServerLogger } from "../../types.js";
 import { readPrimaryHostIdFromDataDir } from "../hosts/primary-host.js";
+import { createPluginSecretStore } from "../plugins/plugin-secrets.js";
 import {
   oldServerAddress,
   readServerManagedFiles,
@@ -37,14 +39,28 @@ import {
 } from "./managed-files.js";
 
 const PLUGIN_SNAPSHOTS_RELATIVE_PATH = ["plugins", "snapshots"] as const;
+
 const PREVIOUS_REGISTRATION_FILE_NAME = "previous-registration.json";
+
 const REGISTRATION_PATH_KEYS = ["rootDir", "sourcePath"] as const;
+
 const CONNECT_CREDENTIAL_KEY = "credential";
-const CONNECT_CREDENTIAL_PLUGIN_IDS = ["bb-account", "connect"] as const;
+
+const LEGACY_KV_CONNECT_CREDENTIAL_PLUGIN_IDS = [
+  "omnyo-account",
+  "bb-account",
+  "connect",
+] as const;
+
+const SECRET_CONNECT_CREDENTIAL_PLUGIN_IDS = [
+  "omnyo-account",
+  "connect",
+] as const;
 
 const connectCredentialUrlSchema = z
   .object({ serverUrl: z.string().min(1) })
   .passthrough();
+
 const registrationObjectSchema = z.record(z.string(), z.unknown());
 
 export interface PendingServerMove {
@@ -69,7 +85,9 @@ export interface ServerImportFixupResult {
 export interface ApplyServerImportFixupsArgs {
   dataDir: string;
   db: DbConnection;
+  logger: Pick<ServerLogger, "warn">;
   marker: ServerImportFile;
+  vault: SecretVault;
 }
 
 export interface ApplyServerImportAtBootArgs {
@@ -77,6 +95,7 @@ export interface ApplyServerImportAtBootArgs {
   db: DbConnection;
   logger: Pick<ServerLogger, "info" | "warn">;
   now: number;
+  vault: SecretVault;
 }
 
 export interface ImportedDaemonSession {
@@ -122,6 +141,7 @@ async function readDirectoryOrEmpty(path: string): Promise<Dirent[]> {
     if (isMissingFileError(error)) {
       return [];
     }
+
     throw error;
   }
 }
@@ -132,12 +152,15 @@ function rerootPath(
   toRoot: string,
 ): string | null {
   const underFromRoot = value === fromRoot || value.startsWith(`${fromRoot}/`);
+
   const alreadyUnderToRoot =
     toRoot.startsWith(`${fromRoot}/`) &&
     (value === toRoot || value.startsWith(`${toRoot}/`));
+
   if (!underFromRoot || alreadyUnderToRoot) {
     return null;
   }
+
   return `${toRoot}${value.slice(fromRoot.length)}`;
 }
 
@@ -147,36 +170,47 @@ async function rerootRegistrationFile(
   toRoot: string,
 ): Promise<boolean> {
   let raw: unknown;
+
   try {
     raw = JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
     if (isMissingFileError(error)) {
       return false;
     }
+
     throw new Error(`Invalid plugin snapshot registration at ${path}`, {
       cause: error,
     });
   }
+
   const parsed = registrationObjectSchema.safeParse(raw);
+
   if (!parsed.success) {
     throw new Error(`Invalid plugin snapshot registration at ${path}`);
   }
+
   const registration = { ...parsed.data };
   let changed = false;
+
   for (const key of REGISTRATION_PATH_KEYS) {
     const value = registration[key];
+
     if (typeof value !== "string") {
       continue;
     }
+
     const rerooted = rerootPath(value, fromRoot, toRoot);
+
     if (rerooted !== null) {
       registration[key] = rerooted;
       changed = true;
     }
   }
+
   if (changed) {
     await writeTextAtomically(path, JSON.stringify(registration));
   }
+
   return changed;
 }
 
@@ -187,25 +221,31 @@ async function rerootPreviousRegistrationFiles(args: {
 }): Promise<number> {
   const snapshotsDir = join(args.dataDir, ...PLUGIN_SNAPSHOTS_RELATIVE_PATH);
   let changedFiles = 0;
+
   for (const plugin of await readDirectoryOrEmpty(snapshotsDir)) {
     if (!plugin.isDirectory()) {
       continue;
     }
+
     const pluginDir = join(snapshotsDir, plugin.name);
+
     for (const snapshot of await readDirectoryOrEmpty(pluginDir)) {
       if (!snapshot.isDirectory()) {
         continue;
       }
+
       const changed = await rerootRegistrationFile(
         join(pluginDir, snapshot.name, PREVIOUS_REGISTRATION_FILE_NAME),
         args.fromRoot,
         args.toRoot,
       );
+
       if (changed) {
         changedFiles += 1;
       }
     }
   }
+
   return changedFiles;
 }
 
@@ -213,41 +253,64 @@ function normalizeUrl(value: string): string {
   return value.replace(/\/+$/u, "");
 }
 
-function storedConnectServerUrl(
-  db: DbConnection,
-  pluginId: (typeof CONNECT_CREDENTIAL_PLUGIN_IDS)[number],
-): string | null {
-  const raw = getPluginKvValue(db, pluginId, CONNECT_CREDENTIAL_KEY);
+function credentialServerUrl(raw: string | undefined): string | null {
   if (raw === undefined) {
     return null;
   }
+
   let credential: unknown;
+
   try {
     credential = JSON.parse(raw);
   } catch {
     return null;
   }
+
   const parsed = connectCredentialUrlSchema.safeParse(credential);
+
   return parsed.success ? normalizeUrl(parsed.data.serverUrl) : null;
 }
 
-function isConnectServerUrl(db: DbConnection, serverUrl: string): boolean {
-  const target = normalizeUrl(serverUrl);
-  return CONNECT_CREDENTIAL_PLUGIN_IDS.some(
-    (pluginId) => storedConnectServerUrl(db, pluginId) === target,
+async function storedConnectServerUrls(
+  args: Pick<ApplyServerImportFixupsArgs, "db" | "logger" | "vault">,
+): Promise<Array<string | null>> {
+  const fromSecrets = await Promise.all(
+    SECRET_CONNECT_CREDENTIAL_PLUGIN_IDS.map(async (pluginId) =>
+      credentialServerUrl(
+        await createPluginSecretStore({
+          logger: args.logger,
+          pluginId,
+          vault: args.vault,
+        }).get(CONNECT_CREDENTIAL_KEY),
+      ),
+    ),
   );
+
+  return [
+    ...fromSecrets,
+    ...LEGACY_KV_CONNECT_CREDENTIAL_PLUGIN_IDS.map((pluginId) =>
+      credentialServerUrl(
+        getPluginKvValue(args.db, pluginId, CONNECT_CREDENTIAL_KEY),
+      ),
+    ),
+  ];
 }
 
-function directMoveServerUrl(
-  db: DbConnection,
+async function directMoveServerUrl(
+  args: Pick<ApplyServerImportFixupsArgs, "db" | "logger" | "vault">,
   serverUrl: string | null,
-): string | null {
-  if (serverUrl === null || isConnectServerUrl(db, serverUrl)) {
+): Promise<string | null> {
+  if (
+    serverUrl === null ||
+    (await storedConnectServerUrls(args)).includes(normalizeUrl(serverUrl))
+  ) {
     return null;
   }
+
   const parsed = appSettingsSchema.shape.machineServerUrl.safeParse(
     normalizeUrl(serverUrl),
   );
+
   return parsed.success ? parsed.data : null;
 }
 
@@ -256,10 +319,13 @@ function applyDirectMachineServerUrl(
   serverUrl: string,
 ): boolean {
   const settings = getAppSettings(db);
+
   if (settings.machineServerUrl === serverUrl) {
     return false;
   }
+
   setAppSettings(db, { ...settings, machineServerUrl: serverUrl });
+
   return true;
 }
 
@@ -270,9 +336,11 @@ async function rewriteOldServerAddresses(args: {
 }): Promise<ManagedAddressKey[]> {
   const managed = await readServerManagedFiles(args.dataDir);
   const oldAddress = oldServerAddress(args.db, managed);
+
   if (oldAddress === null) {
     return [];
   }
+
   return rewriteManagedAddresses({
     dataDir: args.dataDir,
     fromOrigin: oldAddress.origin,
@@ -286,6 +354,7 @@ export async function applyServerImportFixups(
   const fromRoot = resolve(args.marker.sourceDataDir);
   const toRoot = resolve(args.dataDir);
   const rerooted = rerootServerOwnedPluginPaths(args.db, { fromRoot, toRoot });
+
   const registrationFiles =
     fromRoot === toRoot
       ? 0
@@ -294,7 +363,12 @@ export async function applyServerImportFixups(
           fromRoot,
           toRoot,
         });
-  const directServerUrl = directMoveServerUrl(args.db, args.marker.serverUrl);
+
+  const directServerUrl = await directMoveServerUrl(
+    args,
+    args.marker.serverUrl,
+  );
+
   if (directServerUrl === null) {
     return {
       machineServerUrlSet: false,
@@ -303,11 +377,13 @@ export async function applyServerImportFixups(
       rerooted,
     };
   }
+
   const managedAddresses = await rewriteOldServerAddresses({
     dataDir: args.dataDir,
     db: args.db,
     serverUrl: directServerUrl,
   });
+
   return {
     machineServerUrlSet: applyDirectMachineServerUrl(args.db, directServerUrl),
     managedAddresses,
@@ -343,6 +419,7 @@ async function finishManualImport(args: {
     { hostRoles, targetHostId: args.targetHostId },
     "Finished importing server data",
   );
+
   return hostRoles;
 }
 
@@ -355,10 +432,12 @@ export async function refuseInterruptedServerImport(
   args: RefuseInterruptedServerImportArgs,
 ): Promise<void> {
   const status = await readServerImportJournalStatus(args.dataDir);
+
   if (status.kind !== "interrupted") {
     return;
   }
-  const message = `bb server import into ${args.dataDir} was interrupted, so this server won't start on partial data. Run bb server import <file> --data-dir ${args.dataDir} again; it rolls back the interrupted import first.`;
+
+  const message = `omnyo server import into ${args.dataDir} was interrupted, so this server won't start on partial data. Run omnyo server import <file> --data-dir ${args.dataDir} again; it rolls back the interrupted import first.`;
   args.logger.error({ dataDir: args.dataDir }, message);
   throw new Error(message);
 }
@@ -367,6 +446,7 @@ export async function applyServerImportAtBoot(
   args: ApplyServerImportAtBootArgs,
 ): Promise<ServerImportBootResult> {
   const marker = await readServerImportFile(args.dataDir);
+
   if (marker === null) {
     return {
       importedDaemonSessions: [],
@@ -374,16 +454,22 @@ export async function applyServerImportAtBoot(
       pendingMove: null,
     };
   }
+
   const targetHostId =
     marker.targetHostId ??
     readPrimaryHostIdFromDataDir({ dataDir: args.dataDir });
+
   let importedDaemonSessions: ImportedDaemonSession[] = [];
+
   if (marker.fixupsAppliedAt === null) {
     const result = await applyServerImportFixups({
       dataDir: args.dataDir,
       db: args.db,
+      logger: args.logger,
       marker,
+      vault: args.vault,
     });
+
     const hostRoles =
       marker.kind === "move" && targetHostId !== null
         ? swapImportedHostRoles({
@@ -393,6 +479,7 @@ export async function applyServerImportAtBoot(
             targetHostId,
           })
         : null;
+
     importedDaemonSessions = listActiveDaemonSessions(args.db);
     await writeServerImportFile(args.dataDir, {
       ...marker,
@@ -409,18 +496,21 @@ export async function applyServerImportAtBoot(
       "Applied imported server data fixups",
     );
   }
+
   if (marker.kind === "manual") {
     if (targetHostId === null) {
       args.logger.info(
         {},
         "Imported server data is waiting for this machine to enroll before it swaps machine roles",
       );
+
       return {
         importedDaemonSessions,
         manualImportPending: true,
         pendingMove: null,
       };
     }
+
     await finishManualImport({
       dataDir: args.dataDir,
       db: args.db,
@@ -429,15 +519,18 @@ export async function applyServerImportAtBoot(
       now: args.now,
       targetHostId,
     });
+
     return {
       importedDaemonSessions,
       manualImportPending: false,
       pendingMove: null,
     };
   }
+
   if (marker.moveId === null) {
     throw new Error(`${SERVER_IMPORT_FILE_NAME} for a move has no moveId`);
   }
+
   return {
     importedDaemonSessions,
     manualImportPending: false,
@@ -455,7 +548,9 @@ export async function completeManualServerImport(
   if (readPrimaryHostIdFromDataDir({ dataDir: args.dataDir }) !== args.hostId) {
     return "waiting";
   }
+
   const marker = await readServerImportFile(args.dataDir);
+
   if (
     marker === null ||
     marker.kind !== "manual" ||
@@ -463,6 +558,7 @@ export async function completeManualServerImport(
   ) {
     return "not-pending";
   }
+
   await finishManualImport({
     dataDir: args.dataDir,
     db: args.db,
@@ -471,6 +567,7 @@ export async function completeManualServerImport(
     now: args.now,
     targetHostId: args.hostId,
   });
+
   return "completed";
 }
 
@@ -483,10 +580,12 @@ export function createManualServerImportCompletion(
   args: CreateManualServerImportCompletionArgs,
 ): (hostId: string) => Promise<void> {
   let pending = args.pending;
+
   return async (hostId) => {
     if (!pending) {
       return;
     }
+
     try {
       const outcome = await completeManualServerImport({
         dataDir: args.deps.config.dataDir,
@@ -495,10 +594,13 @@ export function createManualServerImportCompletion(
         logger: args.deps.logger,
         now: Date.now(),
       });
+
       if (outcome === "waiting") {
         return;
       }
+
       pending = false;
+
       if (outcome === "completed") {
         args.deps.hub.notifyHost(hostId, ["host-connected"]);
       }
@@ -521,6 +623,7 @@ export async function repairLastServerMoveHostName(
   args: RepairLastServerMoveArgs,
 ): Promise<boolean> {
   let lastMove: Awaited<ReturnType<typeof readLastServerMoveFile>>;
+
   try {
     lastMove = await readLastServerMoveFile(args.dataDir);
   } catch (error) {
@@ -528,15 +631,20 @@ export async function repairLastServerMoveHostName(
       { err: error },
       "Could not read last-server-move.json at boot",
     );
+
     return false;
   }
+
   if (lastMove === null || lastMove.fromHostName !== lastMove.fromHostId) {
     return false;
   }
+
   const host = getHost(args.db, lastMove.fromHostId);
+
   if (host === null || host.name === lastMove.fromHostName) {
     return false;
   }
+
   await writeLastServerMoveFile(args.dataDir, {
     ...lastMove,
     fromHostName: host.name,
@@ -545,6 +653,7 @@ export async function repairLastServerMoveHostName(
     { fromHostId: lastMove.fromHostId, moveId: lastMove.moveId },
     "Restored the old server machine's name in last-server-move.json",
   );
+
   return true;
 }
 
@@ -554,9 +663,11 @@ export function verifyPendingServerMove(
 ): PendingServerMoveVerification {
   const problems: string[] = [];
   const migrationCount = countAppliedMigrations(db);
+
   if (migrationCount === 0) {
     problems.push("The imported database has no applied migrations");
   }
+
   for (const [label, hostId] of [
     ["new server machine", pending.targetHostId],
     ["old server machine", pending.sourceServerHostId],
@@ -565,9 +676,11 @@ export function verifyPendingServerMove(
       problems.push(`The imported database has no row for the ${label}`);
     }
   }
+
   if (pending.targetHostId === null) {
     problems.push("The new server machine is unknown");
   }
+
   return {
     message: problems.length === 0 ? null : problems.join(". "),
     moveId: pending.moveId,

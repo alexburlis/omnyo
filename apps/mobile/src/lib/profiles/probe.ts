@@ -35,8 +35,10 @@ function describeError(error: unknown): string {
     if (error.name === "AbortError" || error.name === "TimeoutError") {
       return "Timed out";
     }
+
     return error.message;
   }
+
   return String(error);
 }
 
@@ -52,9 +54,11 @@ async function getJson(
       },
       signal: AbortSignal.timeout(timeoutMs),
     });
+
     if (!response.ok) {
       return { ok: false, error: `HTTP ${response.status}` };
     }
+
     try {
       return { ok: true, body: await response.json() };
     } catch {
@@ -76,15 +80,17 @@ export async function probeServer(
     `${base}/health`,
     DEFAULT_PROBE_TIMEOUT_MS,
   );
+
   if (!health.ok) {
     return { ok: false, serverUrl: base, stage: "health", error: health.error };
   }
+
   if (!healthSchema.safeParse(health.body).success) {
     return {
       ok: false,
       serverUrl: base,
       stage: "health",
-      error: "Not a bb server (unexpected /health response)",
+      error: "Not an Omnyo server (unexpected /health response)",
     };
   }
 
@@ -93,16 +99,19 @@ export async function probeServer(
     `${base}/api/v1/system/config`,
     DEFAULT_PROBE_TIMEOUT_MS,
   );
+
   if (!config.ok) {
     return { ok: false, serverUrl: base, stage: "config", error: config.error };
   }
+
   const parsed = probeConfigSchema.safeParse(config.body);
+
   if (!parsed.success) {
     return {
       ok: false,
       serverUrl: base,
       stage: "config",
-      error: "Not a bb server (unexpected /system/config response)",
+      error: "Not an Omnyo server (unexpected /system/config response)",
     };
   }
 
@@ -115,12 +124,15 @@ export async function probeServer(
 
 function advertisedServerUrl(entered: string, reported: string): string | null {
   let reportedUrl: URL;
+
   try {
     reportedUrl = new URL(reported);
   } catch {
     return null;
   }
+
   if (isLoopbackHost(reportedUrl.hostname)) return null;
   const normalized = reported.replace(/\/+$/u, "");
+
   return normalized === entered ? null : normalized;
 }

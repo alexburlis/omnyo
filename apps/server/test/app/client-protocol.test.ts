@@ -18,6 +18,54 @@ function createProtocolDeps(hub: NotificationHub) {
 }
 
 describe("client websocket protocol", () => {
+  it("catches up a new system subscriber before delivering later publications", () => {
+    const hub = new NotificationHub();
+    const deps = createProtocolDeps(hub);
+    const otherSocket = createMockHubSocket();
+    const received = createMockHubSocket();
+
+    const socket = {
+      ...received,
+      send(data: string) {
+        received.send(data);
+
+        if (received.messages.length === 1) {
+          hub.notifySystem(["config-changed"]);
+        }
+      },
+    };
+
+    const subscribe = JSON.stringify({
+      type: "subscribe",
+      target: { kind: "system" },
+    });
+
+    onClientSocketOpen(hub, otherSocket);
+    onClientSocketMessage(deps, otherSocket, subscribe);
+    onClientSocketOpen(hub, socket);
+    hub.notifySystem(["command-catalog-changed"]);
+    expect(received.messages).toEqual([]);
+    const otherMessageCount = otherSocket.messages.length;
+
+    onClientSocketMessage(deps, socket, subscribe);
+
+    expect(received.messages.map((message) => JSON.parse(message))).toEqual([
+      {
+        type: "changed",
+        entity: "system",
+        changes: ["command-catalog-changed"],
+      },
+      { type: "changed", entity: "system", changes: ["config-changed"] },
+    ]);
+    expect(
+      otherSocket.messages
+        .slice(otherMessageCount)
+        .map((message) => JSON.parse(message)),
+    ).toEqual([
+      { type: "changed", entity: "system", changes: ["config-changed"] },
+    ]);
+  });
+
   it("subscribes valid client messages parsed through the shared schema", () => {
     const hub = new NotificationHub();
     const deps = createProtocolDeps(hub);
@@ -189,6 +237,27 @@ describe("client websocket protocol", () => {
     ]);
     expect(otherSocket.messages).toHaveLength(0);
     expect(deps.watchInterests.subscribe).not.toHaveBeenCalled();
+  });
+
+  it("disconnects a backed-up ping client without queuing a pong", () => {
+    const hub = new NotificationHub();
+    const deps = createProtocolDeps(hub);
+
+    const socket = {
+      ...createMockHubSocket(),
+      raw: { bufferedAmount: 4 * 1024 * 1024 },
+    };
+
+    onClientSocketOpen(hub, socket);
+    onClientSocketMessage(deps, socket, JSON.stringify({ type: "ping" }));
+
+    expect(socket.closed).toEqual([
+      { code: 1013, reason: "client-backpressure" },
+    ]);
+    expect(socket.messages).toEqual([]);
+    socket.raw.bufferedAmount = 0;
+    onClientSocketMessage(deps, socket, JSON.stringify({ type: "ping" }));
+    expect(socket.messages).toEqual([]);
   });
 
   it("rejects direct watch messages", () => {

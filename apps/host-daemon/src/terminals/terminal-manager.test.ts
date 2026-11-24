@@ -1,14 +1,17 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentRuntime } from "@bb/agent-runtime";
-import type { HostDaemonDaemonWsMessage } from "@bb/host-daemon-contract";
-import type { HostWorkspace } from "@bb/host-workspace";
+import type { AgentRuntime } from "@omnyo/agent-runtime";
+import type {
+  HostDaemonDaemonWsMessage,
+  TerminalForegroundResult,
+} from "@omnyo/host-daemon-contract";
+import type { HostWorkspace } from "@omnyo/host-workspace";
 import {
   createDeferredPromise,
   makeWorkspaceMergeBase,
   makeWorkspaceStatus,
-} from "@bb/test-helpers";
+} from "@omnyo/test-helpers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostDaemonLogger } from "../logger.js";
 import { RuntimeManager } from "../runtime-manager.js";
@@ -25,6 +28,7 @@ import {
 } from "./terminal-manager.js";
 
 const tempDirs: string[] = [];
+
 const DEFAULT_TERMINAL_START = { mode: "shell" } as const;
 
 interface ResizeCall {
@@ -81,6 +85,7 @@ type SteerTurnResult = Awaited<ReturnType<AgentRuntime["steerTurn"]>>;
 async function makeTempDir(prefix: string): Promise<string> {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 
@@ -107,6 +112,10 @@ async function cleanupTempDirs(): Promise<void> {
 }
 
 class FakeTerminalPty implements TerminalPtyProcess {
+  foreground(): Promise<TerminalForegroundResult> {
+    return Promise.resolve({ state: "idle" });
+  }
+
   disposeCount: number;
   exited = false;
   paused = false;
@@ -156,9 +165,11 @@ class FakeTerminalPty implements TerminalPtyProcess {
   onData(listener: (data: string) => void): TerminalPtyDisposable {
     this.dataListeners.push(listener);
     this.registeredDataListeners.push(listener);
+
     return {
       dispose: () => {
         const index = this.dataListeners.indexOf(listener);
+
         if (index >= 0) {
           this.dataListeners.splice(index, 1);
         }
@@ -169,9 +180,11 @@ class FakeTerminalPty implements TerminalPtyProcess {
   onExit(listener: (event: TerminalPtyExit) => void): TerminalPtyDisposable {
     this.exitListeners.push(listener);
     this.registeredExitListeners.push(listener);
+
     return {
       dispose: () => {
         const index = this.exitListeners.indexOf(listener);
+
         if (index >= 0) {
           this.exitListeners.splice(index, 1);
         }
@@ -222,12 +235,14 @@ class FakeTerminalPtyAdapter implements TerminalPtyAdapter {
   spawn(args: SpawnTerminalPtyArgs): TerminalPtyProcess {
     const pty = new FakeTerminalPty();
     this.spawned.push({ args, pty });
+
     return pty;
   }
 }
 
 function createFakeRuntime(): AgentRuntime {
   const steerTurnResult: SteerTurnResult = { status: "steered" };
+
   return {
     ensureProvider: vi.fn(async () => undefined),
     startThread: vi.fn(async () => ({
@@ -240,9 +255,10 @@ function createFakeRuntime(): AgentRuntime {
     resumeThread: vi.fn(async () => ({
       providerThreadId: "provider-thread",
     })),
-    runTurn: vi.fn(async () => undefined),
+    runTurn: vi.fn(async () => ({ status: "started" as const })),
     steerTurn: vi.fn(async () => steerTurnResult),
     stopThread: vi.fn(async () => ({ providerCheckpointId: null })),
+    setThreadSpeed: vi.fn(async () => undefined),
     clearThreadGoal: vi.fn(async () => ({ cleared: true })),
     renameThread: vi.fn(async () => undefined),
     archiveThread: vi.fn(async () => undefined),
@@ -260,10 +276,14 @@ function createFakeRuntime(): AgentRuntime {
     getActiveTurnId: vi.fn(() => null),
     waitForActiveTurn: vi.fn(async () => null),
     getProviderSession: vi.fn(() => null),
-    reapIdleProviderSessions: vi.fn(async () => ({ reapedSessions: [] })),
+    reapIdleProviderSessions: vi.fn(async () => ({
+      reapedSessions: [],
+      retainedSessions: [],
+    })),
     hasThread: vi.fn(() => false),
     getLiveThreadIds: vi.fn(() => []),
     hasOpenBackgroundWork: vi.fn(() => false),
+    listOpenBackgroundWork: vi.fn(() => []),
     shutdown: vi.fn(async () => undefined),
   };
 }
@@ -329,13 +349,17 @@ function createHarnessWithOptions(
   const messages: HostDaemonDaemonWsMessage[] = [];
   const runtime = createFakeRuntime();
   const workspace = createFakeWorkspace("/tmp/terminal-workspace");
+
   const runtimeManager = new RuntimeManager({
+    workspaceUnscopedWriterActivity: () =>
+      manager.getDirectAccessActivityCount(),
     createRuntime: () => runtime,
     provisionWorkspace: async () => workspace,
     shellEnv: {
-      BB_BASE_ENV: "1",
+      TEST_BASE_ENV: "1",
     },
   });
+
   const manager = new TerminalManager({
     closeGracePeriodMs: args.closeGracePeriodMs,
     exitedRetentionMs: args.exitedRetentionMs,
@@ -348,6 +372,7 @@ function createHarnessWithOptions(
     sendMessage: (message) => {
       messages.push(message);
       args.onSendMessage(message);
+
       return true;
     },
   });
@@ -360,6 +385,17 @@ function createHarnessWithOptions(
     runtimeManager,
     workspace,
   };
+}
+
+async function streamTerminalOutput(
+  manager: TerminalManager,
+  terminalId = "term-1",
+): Promise<void> {
+  await manager.handleMessage({
+    type: "terminal.stream",
+    terminalId,
+    enabled: true,
+  });
 }
 
 function collectTerminalOutput(messages: HostDaemonDaemonWsMessage[]): string {
@@ -377,8 +413,10 @@ async function waitForOutputContaining(args: WaitForOutputArgs): Promise<void> {
     if (collectTerminalOutput(args.messages).includes(args.text)) {
       return;
     }
+
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+
   throw new Error(
     `Timed out waiting for terminal output: ${args.text}\nCurrent output:\n${collectTerminalOutput(args.messages)}\nMessages:\n${JSON.stringify(args.messages)}`,
   );
@@ -390,7 +428,7 @@ function shellQuote(value: string): string {
 
 async function openTerminal(
   harness: TerminalManagerHarness,
-  contributedEnv: import("@bb/host-daemon-contract").HostDaemonContributedEnvEntry[] = [],
+  contributedEnv: import("@omnyo/host-daemon-contract").HostDaemonContributedEnvEntry[] = [],
 ): Promise<FakeTerminalPty> {
   await harness.manager.handleMessage({
     type: "terminal.open",
@@ -410,9 +448,11 @@ async function openTerminal(
     start: DEFAULT_TERMINAL_START,
   });
   const spawned = harness.adapter.spawned[0];
+
   if (!spawned) {
     throw new Error("Expected terminal PTY to spawn");
   }
+
   return spawned.pty;
 }
 
@@ -439,9 +479,11 @@ async function openTerminalWithId(
     start: DEFAULT_TERMINAL_START,
   });
   const spawned = harness.adapter.spawned[spawnedBefore];
+
   if (!spawned) {
     throw new Error(`Expected terminal PTY to spawn for ${terminalId}`);
   }
+
   return spawned.pty;
 }
 
@@ -496,8 +538,8 @@ describe("TerminalManager", () => {
       rows: 30,
     });
     expect(harness.adapter.spawned[0]?.args.env).toMatchObject({
-      BB_BASE_ENV: "1",
-      BB_TERMINAL_SESSION_ID: "term-1",
+      TEST_BASE_ENV: "1",
+      OMNYO_TERMINAL_SESSION_ID: "term-1",
       COLORTERM: "truecolor",
       DISABLE_AUTO_TITLE: "true",
       FORCE_HYPERLINK: "1",
@@ -515,13 +557,14 @@ describe("TerminalManager", () => {
     expect(harness.runtimeManager.get("env-1")?.terminals.has("term-1")).toBe(
       true,
     );
-    await harness.runtimeManager.replaceBaseShellEnv({ BB_BASE_ENV: "2" });
+    await harness.runtimeManager.replaceBaseShellEnv({ TEST_BASE_ENV: "2" });
     expect(harness.runtimeManager.get("env-1")).toBeDefined();
     expect(harness.runtime.shutdown).not.toHaveBeenCalled();
   });
 
   it("injects host credentials into a PTY and forwards terminal output as-is", async () => {
     const harness = createHarness();
+
     const pty = await openTerminal(harness, [
       {
         name: "GH_TOKEN",
@@ -530,9 +573,11 @@ describe("TerminalManager", () => {
         reason: "Git",
       },
     ]);
+
     expect(harness.adapter.spawned[0]?.args.env.GH_TOKEN).toBe(
       "terminal-private-token",
     );
+    await streamTerminalOutput(harness.manager);
     pty.emitData("terminal-private-token");
     await waitForOutputContaining({
       messages: harness.messages,
@@ -605,13 +650,13 @@ describe("TerminalManager", () => {
       }),
     );
 
-    await harness.runtimeManager.replaceBaseShellEnv({ BB_BASE_ENV: "2" });
+    await harness.runtimeManager.replaceBaseShellEnv({ TEST_BASE_ENV: "2" });
     expect(harness.runtimeManager.get("env-1")).toBeDefined();
     expect(harness.runtime.shutdown).not.toHaveBeenCalled();
   });
 
   it("opens a PTY in a host path without an environment", async () => {
-    const cwd = await makeTempDir("bb-terminal-host-path-");
+    const cwd = await makeTempDir("omnyo-terminal-host-path-");
     const harness = createHarness();
 
     await harness.manager.handleMessage({
@@ -679,9 +724,11 @@ describe("TerminalManager", () => {
   it("closes a terminal after an in-progress open finishes", async () => {
     const shell = createDeferredPromise<string>();
     let resolveShellCalls = 0;
+
     const harness = createHarnessWithShell({
       resolveShell: () => {
         resolveShellCalls += 1;
+
         return shell.promise;
       },
     });
@@ -703,6 +750,7 @@ describe("TerminalManager", () => {
       rows: 30,
       start: DEFAULT_TERMINAL_START,
     });
+
     await vi.waitFor(() => expect(resolveShellCalls).toBe(1));
 
     const closePromise = harness.manager.handleMessage({
@@ -716,9 +764,11 @@ describe("TerminalManager", () => {
     await Promise.all([openPromise, closePromise]);
 
     const pty = harness.adapter.spawned[0]?.pty;
+
     if (!pty) {
       throw new Error("Expected terminal PTY to spawn");
     }
+
     expect(harness.adapter.spawned).toHaveLength(1);
     expect(pty.killCalls).toEqual([null]);
 
@@ -742,9 +792,11 @@ describe("TerminalManager", () => {
   it("shuts down terminals after in-progress opens finish", async () => {
     const shell = createDeferredPromise<string>();
     let resolveShellCalls = 0;
+
     const harness = createHarnessWithShell({
       resolveShell: () => {
         resolveShellCalls += 1;
+
         return shell.promise;
       },
     });
@@ -766,6 +818,7 @@ describe("TerminalManager", () => {
       rows: 30,
       start: DEFAULT_TERMINAL_START,
     });
+
     await vi.waitFor(() => expect(resolveShellCalls).toBe(1));
 
     const shutdownPromise = harness.manager.shutdownAll();
@@ -773,9 +826,11 @@ describe("TerminalManager", () => {
     await Promise.all([openPromise, shutdownPromise]);
 
     const pty = harness.adapter.spawned[0]?.pty;
+
     if (!pty) {
       throw new Error("Expected terminal PTY to spawn");
     }
+
     expect(pty.killCalls).toEqual([null]);
     expect(
       harness.messages.filter((message) => message.type === "terminal.exited"),
@@ -799,15 +854,19 @@ describe("TerminalManager", () => {
         if (!exitOnOpened || message.type !== "terminal.opened") {
           return;
         }
+
         const currentHarness = harness;
         const pty = currentHarness?.adapter.spawned[0]?.pty;
+
         if (!pty) {
           throw new Error("Expected terminal PTY to spawn");
         }
+
         pty.emitExit(0);
       },
       resolveShell: () => {
         resolveShellCalls += 1;
+
         return shell.promise;
       },
     });
@@ -829,6 +888,7 @@ describe("TerminalManager", () => {
       rows: 30,
       start: DEFAULT_TERMINAL_START,
     });
+
     await vi.waitFor(() => expect(resolveShellCalls).toBe(1));
 
     const secondOpenPromise = harness.manager.handleMessage({
@@ -924,47 +984,56 @@ describe("TerminalManager", () => {
     ]);
   });
 
-  it("scrubs inherited bb runtime env vars before spawning a terminal", async () => {
-    vi.stubEnv("BB_DATA_DIR", "/tmp/leaked-bb-data");
-    vi.stubEnv("BB_HOST_DAEMON_PORT", "38887");
+  it("scrubs inherited Omnyo runtime env vars before spawning a terminal", async () => {
+    vi.stubEnv("OMNYO_DATA_DIR", "/tmp/leaked-omnyo-data");
+    vi.stubEnv("OMNYO_HOST_DAEMON_PORT", "38887");
     vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("OMNYO_TERMINAL_SESSION_ID", "other-parent-terminal");
     vi.stubEnv("OPENAI_API_KEY", "external-secret");
 
     const harness = createHarness();
+    await harness.runtimeManager.replaceBaseShellEnv({
+      TEST_BASE_ENV: "1",
+      OMNYO_TERMINAL_SESSION_ID: "other-workspace-terminal",
+    });
     await openTerminal(harness);
 
     const env = harness.adapter.spawned[0]?.args.env;
     expect(env).toMatchObject({
-      BB_BASE_ENV: "1",
-      BB_TERMINAL_SESSION_ID: "term-1",
+      TEST_BASE_ENV: "1",
+      OMNYO_TERMINAL_SESSION_ID: "term-1",
       OPENAI_API_KEY: "external-secret",
     });
-    expect(env?.BB_DATA_DIR).toBeUndefined();
-    expect(env?.BB_HOST_DAEMON_PORT).toBeUndefined();
+    expect(env?.OMNYO_DATA_DIR).toBeUndefined();
+    expect(env?.OMNYO_HOST_DAEMON_PORT).toBeUndefined();
     expect(env?.NODE_ENV).toBeUndefined();
   });
 
   it("makes every available node-pty spawn-helper executable", async () => {
     const logger = createFakeLogger();
-    const packageDirectory = await makeTempDir("bb-node-pty-package-");
+    const packageDirectory = await makeTempDir("omnyo-node-pty-package-");
+
     const buildNativePath = path.join(
       packageDirectory,
       "build",
       "Release",
       "pty.node",
     );
+
     const buildHelperPath = path.join(
       packageDirectory,
       "build",
       "Release",
       "spawn-helper",
     );
+
     const prebuildHelperPath = path.join(
       packageDirectory,
       "prebuilds",
       `${process.platform}-${process.arch}`,
       "spawn-helper",
     );
+
     await writeEmptyFile(buildNativePath);
     await writeEmptyFile(buildHelperPath);
     await fs.chmod(buildHelperPath, 0o644);
@@ -995,24 +1064,28 @@ describe("TerminalManager", () => {
       expect(buildHelperMode & 0o111).not.toBe(0);
       expect(prebuildHelperMode & 0o111).not.toBe(0);
     }
+
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it("logs and skips when no node-pty spawn-helper is present", async () => {
     const logger = createFakeLogger();
-    const packageDirectory = await makeTempDir("bb-node-pty-package-");
+    const packageDirectory = await makeTempDir("omnyo-node-pty-package-");
+
     const buildHelperPath = path.join(
       packageDirectory,
       "build",
       "Release",
       "spawn-helper",
     );
+
     const prebuildHelperPath = path.join(
       packageDirectory,
       "prebuilds",
       `${process.platform}-${process.arch}`,
       "spawn-helper",
     );
+
     await writeEmptyFile(
       path.join(packageDirectory, "build", "Release", "pty.node"),
     );
@@ -1038,9 +1111,47 @@ describe("TerminalManager", () => {
     });
   });
 
+  it("keeps unsubscribed output in bounded local scrollback and sends later output only while subscribed", async () => {
+    const harness = createHarness();
+    const pty = await openTerminal(harness);
+
+    for (let index = 0; index < 80; index += 1)
+      pty.emitData("x".repeat(64 * 1024));
+    pty.emitData("latest");
+
+    await attachTerminal(harness, {
+      requestId: "unsubscribed",
+      terminalId: "term-1",
+    });
+    expect(collectTerminalOutput(harness.messages)).toBe("");
+    expect(pty.pauseCount).toBe(0);
+
+    const replay = harness.messages.find(
+      (message) => message.type === "terminal.replay",
+    );
+
+    const replayText = replay?.chunks
+      .map((chunk) => Buffer.from(chunk.dataBase64, "base64").toString())
+      .join("");
+
+    expect(replayText?.length).toBeLessThanOrEqual(4 * 1024 * 1024);
+    expect(replayText?.endsWith("latest")).toBe(true);
+
+    await streamTerminalOutput(harness.manager);
+    pty.emitData("live");
+    await vi.waitFor(() =>
+      expect(collectTerminalOutput(harness.messages)).toBe("live"),
+    );
+    harness.manager.releaseOutputStreams();
+    pty.emitData("detached");
+    await attachTerminal(harness, { requestId: "again", terminalId: "term-1" });
+    expect(collectTerminalOutput(harness.messages)).toBe("live");
+  });
+
   it("forwards output and replays scrollback on attach", async () => {
     const harness = createHarness();
     const pty = await openTerminal(harness);
+    await streamTerminalOutput(harness.manager);
 
     pty.emitData("hello");
     pty.emitData("\n");
@@ -1082,6 +1193,7 @@ describe("TerminalManager", () => {
   it("flushes the first output after an idle period without the batch delay", async () => {
     const harness = createHarness();
     const pty = await openTerminal(harness);
+    await streamTerminalOutput(harness.manager);
     vi.useFakeTimers({
       toFake: [
         "setTimeout",
@@ -1115,7 +1227,7 @@ describe("TerminalManager", () => {
     const harness = createHarness();
     const pty = await openTerminal(harness);
     await harness.manager.handleMessage({
-      type: "terminal.flow-control",
+      type: "terminal.stream",
       terminalId: "term-1",
       enabled: true,
     });
@@ -1124,6 +1236,7 @@ describe("TerminalManager", () => {
     for (let index = 0; index < 16; index += 1) {
       pty.emitData(chunk);
     }
+
     expect(pty.paused).toBe(false);
     pty.emitData(chunk);
     expect(pty.paused).toBe(true);
@@ -1146,13 +1259,15 @@ describe("TerminalManager", () => {
     const harness = createHarness();
     const pty = await openTerminal(harness);
     await harness.manager.handleMessage({
-      type: "terminal.flow-control",
+      type: "terminal.stream",
       terminalId: "term-1",
       enabled: true,
     });
+
     for (let index = 0; index < 17; index += 1) {
       pty.emitData("x".repeat(64 * 1024));
     }
+
     expect(pty.paused).toBe(true);
 
     pty.exited = true;
@@ -1166,16 +1281,19 @@ describe("TerminalManager", () => {
     const harness = createHarness();
     const pty = await openTerminal(harness);
     await harness.manager.handleMessage({
-      type: "terminal.flow-control",
+      type: "terminal.stream",
       terminalId: "term-1",
       enabled: true,
     });
+
     for (let index = 0; index < 17; index += 1) {
       pty.emitData("x".repeat(64 * 1024));
     }
+
     expect(pty.paused).toBe(true);
 
-    harness.manager.releaseOutputFlowControl();
+    harness.manager.releaseOutputStreams();
+
     for (let index = 0; index < 17; index += 1) {
       pty.emitData("x".repeat(64 * 1024));
     }
@@ -1227,11 +1345,13 @@ describe("TerminalManager", () => {
 
   it("forgets retained scrollback once the retention window passes", async () => {
     vi.useFakeTimers();
+
     const harness = createHarnessWithOptions({
       exitedRetentionMs: 60_000,
       onSendMessage: () => undefined,
       resolveShell: async () => "/bin/zsh",
     });
+
     const pty = await openTerminal(harness);
 
     pty.emitData("build failed\n");
@@ -1270,6 +1390,7 @@ describe("TerminalManager", () => {
       onSendMessage: () => undefined,
       resolveShell: async () => "/bin/zsh",
     });
+
     const first = await openTerminalWithId(harness, "term-first");
     first.emitData("first output\n");
     first.emitExit(0);
@@ -1308,6 +1429,7 @@ describe("TerminalManager", () => {
       onSendMessage: () => undefined,
       resolveShell: async () => "/bin/zsh",
     });
+
     const first = await openTerminalWithId(harness, "term-first");
     first.emitData("first output\n");
     first.emitExit(0);
@@ -1377,6 +1499,7 @@ describe("TerminalManager", () => {
   it("answers primary device attribute queries without replaying them", async () => {
     const harness = createHarness();
     const pty = await openTerminal(harness);
+    await streamTerminalOutput(harness.manager);
 
     pty.emitData("before\u001b[0cbetween\u001b[cafter");
     await harness.manager.handleMessage({
@@ -1413,6 +1536,7 @@ describe("TerminalManager", () => {
     for (const chunk of ["\u001b", "[", "0", "c", "\u001b[", "c"]) {
       pty.emitData(chunk);
     }
+
     await harness.manager.handleMessage({
       type: "terminal.attach",
       requestId: "attach-split-da1",
@@ -1446,6 +1570,7 @@ describe("TerminalManager", () => {
   it("preserves near matches and incomplete device attribute queries on exit", async () => {
     const harness = createHarness();
     const pty = await openTerminal(harness);
+    await streamTerminalOutput(harness.manager);
 
     pty.emitData("before\u001b[1cafter\u001b[0");
     pty.emitExit(0);
@@ -1543,7 +1668,7 @@ describe("TerminalManager", () => {
         closeReason: "user",
       },
     ]);
-    await harness.runtimeManager.replaceBaseShellEnv({ BB_BASE_ENV: "2" });
+    await harness.runtimeManager.replaceBaseShellEnv({ TEST_BASE_ENV: "2" });
     expect(harness.runtimeManager.get("env-1")).toBeUndefined();
     expect(harness.runtime.shutdown).toHaveBeenCalledTimes(1);
   });
@@ -1569,11 +1694,13 @@ describe("TerminalManager", () => {
 
   it("force kills and cleans up a terminal when node-pty never emits exit", async () => {
     vi.useFakeTimers();
+
     const harness = createHarnessWithOptions({
       closeGracePeriodMs: 10,
       onSendMessage: () => undefined,
       resolveShell: async () => "/bin/zsh",
     });
+
     const pty = await openTerminal(harness);
 
     await harness.manager.handleMessage({
@@ -1595,7 +1722,7 @@ describe("TerminalManager", () => {
         closeReason: "user",
       },
     ]);
-    await harness.runtimeManager.replaceBaseShellEnv({ BB_BASE_ENV: "2" });
+    await harness.runtimeManager.replaceBaseShellEnv({ TEST_BASE_ENV: "2" });
     expect(harness.runtimeManager.get("env-1")).toBeUndefined();
   });
 
@@ -1626,10 +1753,12 @@ describe("TerminalManager", () => {
     await harness.manager.shutdownAll();
     await openTerminal(harness);
     const newPty = harness.adapter.spawned[1]?.pty;
+
     if (!newPty) {
       throw new Error("Expected replacement terminal PTY to spawn");
     }
 
+    await streamTerminalOutput(harness.manager);
     oldPty.emitStaleData("stale-output\n");
     oldPty.emitStaleExit(7);
     newPty.emitData("current-output\n");
@@ -1670,15 +1799,17 @@ describe("TerminalManager", () => {
       return;
     }
 
-    const workspacePath = await makeTempDir("bb-terminal-manager-real-");
-    const targetPath = await makeTempDir("bb-terminal-manager-target-");
+    const workspacePath = await makeTempDir("omnyo-terminal-manager-real-");
+    const targetPath = await makeTempDir("omnyo-terminal-manager-target-");
     const expectedWorkspacePath = await fs.realpath(workspacePath);
     const expectedTargetPath = await fs.realpath(targetPath);
     const messages: HostDaemonDaemonWsMessage[] = [];
+
     const runtimeManager = new RuntimeManager({
       createRuntime: () => createFakeRuntime(),
       provisionWorkspace: async () => createFakeWorkspace(workspacePath),
     });
+
     const manager = new TerminalManager({
       logger: {
         debug: vi.fn(),
@@ -1690,6 +1821,7 @@ describe("TerminalManager", () => {
       runtimeManager,
       sendMessage: (message) => {
         messages.push(message);
+
         return true;
       },
     });
@@ -1711,6 +1843,7 @@ describe("TerminalManager", () => {
       rows: 30,
       start: DEFAULT_TERMINAL_START,
     });
+    await streamTerminalOutput(manager, "term-real");
     await manager.handleMessage({
       type: "terminal.input",
       terminalId: "term-real",
@@ -1735,4 +1868,48 @@ describe("TerminalManager", () => {
     });
     await manager.shutdownAll();
   }, 10_000);
+});
+
+it("workspace identity admission excludes terminal opens and refuses live terminal writers", async () => {
+  const harness = createHarness();
+
+  const root = await fs.realpath(
+    await makeTempDir("omnyo-terminal-admission-"),
+  );
+
+  try {
+    await harness.runtimeManager.withWorkspaceIdentityAdmission(
+      root,
+      async () => {
+        await harness.manager.handleMessage({
+          type: "terminal.open",
+          contributedEnv: [],
+          requestId: "identity-open",
+          terminalId: "term-identity",
+          target: { kind: "host_path", cwd: root },
+          cols: 80,
+          rows: 24,
+          start: DEFAULT_TERMINAL_START,
+        });
+        expect(harness.adapter.spawned).toHaveLength(0);
+        expect(harness.messages).toContainEqual(
+          expect.objectContaining({
+            type: "terminal.error",
+            code: "workspace_identity_busy",
+          }),
+        );
+      },
+    );
+    const pty = await openTerminal(harness);
+    await expect(
+      harness.runtimeManager.withWorkspaceIdentityAdmission(
+        root,
+        async () => undefined,
+      ),
+    ).rejects.toThrow(/Terminal work/u);
+    pty.emitExit(0);
+  } finally {
+    await harness.manager.shutdownAll();
+    harness.manager.dispose();
+  }
 });

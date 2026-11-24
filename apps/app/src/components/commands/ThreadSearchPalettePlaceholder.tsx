@@ -1,8 +1,8 @@
 import { useId, type ReactNode } from "react";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { ListLoadingPlaceholder } from "@/components/ui/ListLoadingPlaceholder";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { PaletteModeChip } from "./PaletteModeChip";
 import { PALETTE_INPUT_CLASS, PaletteInputBand } from "./PaletteInputBand";
 
@@ -40,6 +40,7 @@ export function ThreadSearchPalettePlaceholder({
 }) {
   const listId = useId();
   const isCompact = useIsCompactViewport();
+
   return (
     <TooltipProvider>
       <PaletteInputBand>
@@ -56,6 +57,7 @@ export function ThreadSearchPalettePlaceholder({
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return;
+
             if (
               event.key === "Escape" ||
               (event.key === "Backspace" && query.length === 0)

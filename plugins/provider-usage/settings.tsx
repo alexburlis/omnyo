@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   useRpc,
   experimental_ProviderIcon as ProviderIcon,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import {
@@ -11,7 +11,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import {
+  formatUsageReset,
+  formatUsdCents,
+  usageBarColorClass,
+} from "./usage-format.js";
 import type { providerUsageRpcContract } from "./server.js";
 import {
   emptyUsageMessage,
@@ -27,9 +33,10 @@ import {
   type ProviderUsage,
   type UsageWindow,
 } from "./usage-schema.js";
+
 function SettingsBadge({ children }: { children: ReactNode }) {
   return (
-    <span className="shrink-0 rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-2xs leading-none text-subtle-foreground">
+    <span className="inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full bg-state-hover px-2 text-xs font-medium text-muted-foreground">
       {children}
     </span>
   );
@@ -43,102 +50,67 @@ interface ProviderConfig {
   provider: UsageProvider;
 }
 
-function barColorClass(usedPercent: number): string {
-  if (usedPercent >= 95) {
-    return "bg-destructive";
-  }
-  if (usedPercent >= 80) {
-    return "bg-warning";
-  }
-  return "bg-primary";
-}
-
-function formatReset(resetsAt: string | null): string | null {
-  if (!resetsAt) {
-    return null;
-  }
-  const reset = new Date(resetsAt);
-  if (Number.isNaN(reset.getTime())) {
-    return null;
-  }
-  const diffMs = reset.getTime() - Date.now();
-  if (diffMs <= 0) {
-    return "Resetting now";
-  }
-
-  const diffMinutes = Math.round(diffMs / 60_000);
-  if (diffMinutes < 60) {
-    return `Resets in ${diffMinutes} min`;
-  }
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) {
-    const minutes = diffMinutes % 60;
-    return minutes > 0
-      ? `Resets in ${diffHours} hr ${minutes} min`
-      : `Resets in ${diffHours} hr`;
-  }
-
-  const withinWeek = diffMs < 7 * 24 * 60 * 60_000;
-  const formatted = reset.toLocaleString(undefined, {
-    weekday: withinWeek ? "short" : undefined,
-    month: withinWeek ? undefined : "short",
-    day: withinWeek ? undefined : "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  return `Resets ${formatted}`;
-}
-
-function formatUsdCents(cents: number, alwaysShowCents: boolean): string {
-  const hasFractionalDollar = cents % 100 !== 0;
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: alwaysShowCents || hasFractionalDollar ? 2 : 0,
-    maximumFractionDigits: 2,
-  }).format(cents / 100);
-}
-
 function usageWindowValue(window: UsageWindow): string {
   if (!window.cost) {
     return `${window.usedPercent}% used`;
   }
+
   return `${formatUsdCents(window.cost.usedUsdCents, true)} / ${formatUsdCents(window.cost.limitUsdCents, false)}`;
 }
 
+function usageValueToneClass(usedPercent: number): string {
+  if (usedPercent >= 95) return "text-destructive-text";
+
+  if (usedPercent >= 80) return "text-warning-text";
+
+  return "text-muted-foreground";
+}
+
 function UsageWindowRow({ window }: { window: UsageWindow }) {
-  const reset = formatReset(window.resetsAt);
+  const reset = formatUsageReset(window.resetsAt);
+  const value = usageWindowValue(window);
+
   return (
-    <div className="space-y-1">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs text-foreground">{window.label}</span>
-        <span className="text-xs tabular-nums text-muted-foreground">
-          {usageWindowValue(window)}
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="min-w-0 truncate text-xs font-medium text-foreground">
+          {window.label}
+        </span>
+        <span
+          className={cn(
+            "shrink-0 text-xs font-medium tabular-nums",
+            usageValueToneClass(window.usedPercent),
+          )}
+        >
+          {value}
         </span>
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+      <div
+        role="meter"
+        aria-label={`${window.label}: ${value}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(
+          Math.min(100, Math.max(0, window.usedPercent)),
+        )}
+        className="h-1.5 w-full overflow-hidden rounded-full bg-state-active"
+      >
         <div
           className={cn(
             "h-full rounded-full",
-            barColorClass(window.usedPercent),
+            usageBarColorClass(window.usedPercent),
           )}
           style={{
             width: `${Math.min(100, Math.max(window.usedPercent, 2))}%`,
           }}
         />
       </div>
-      {reset ? <p className="text-xs text-muted-foreground">{reset}</p> : null}
+      <p className="flex items-center gap-1 text-xs text-subtle-foreground">
+        <Icon name="Clock" aria-hidden="true" className="size-3 shrink-0" />
+        {reset ?? "Reset time not reported"}
+      </p>
     </div>
   );
-}
-
-interface ProviderUsageBlockProps {
-  accountLabel?: string;
-  config: ProviderConfig;
-  usage: ProviderUsage | undefined;
-  isLoading: boolean;
-  isError: boolean;
 }
 
 interface UsageLocation {
@@ -184,6 +156,7 @@ function UsageLocationPicker({
       <DropdownMenuContent align="end" mobileTitle="Usage source">
         {locations.map((location) => {
           const connected = !location.disabled;
+
           return (
             <DropdownMenuItem
               key={location.id}
@@ -196,6 +169,11 @@ function UsageLocationPicker({
                 className="size-3.5 shrink-0"
               />
               <span className="min-w-0 flex-1 truncate">{location.name}</span>
+              {connected ? null : (
+                <span className="shrink-0 text-xs text-subtle-foreground">
+                  Offline
+                </span>
+              )}
               {location.id === selectedLocation?.id ? (
                 <Icon name="Check" className="size-3.5 shrink-0" />
               ) : null}
@@ -207,72 +185,132 @@ function UsageLocationPicker({
   );
 }
 
-function ProviderUsageBlock({
-  accountLabel,
+type UsageStateTone = "neutral" | "warning" | "error";
+
+const USAGE_STATE_CLASS: Record<UsageStateTone, string> = {
+  neutral: "text-muted-foreground",
+  warning: "text-warning-text",
+  error: "text-destructive-text",
+};
+
+const USAGE_STATE_ICON = {
+  neutral: "Info",
+  warning: "Lock",
+  error: "AlertCircle",
+} as const;
+
+function UsageStateMessage({
+  tone,
+  children,
+}: {
+  tone: UsageStateTone;
+  children: ReactNode;
+}) {
+  return (
+    <p
+      className={cn(
+        "flex min-w-0 items-start gap-1.5 text-xs leading-5",
+        USAGE_STATE_CLASS[tone],
+      )}
+    >
+      <Icon
+        name={USAGE_STATE_ICON[tone]}
+        aria-hidden="true"
+        className="mt-0.5 size-3.5 shrink-0"
+      />
+      <span className="min-w-0 break-words">{children}</span>
+    </p>
+  );
+}
+
+function UsageWindowsSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label={usageFeedbackMessages.loading}
+      className="space-y-1.5"
+    >
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-2.5 w-24" />
+        <Skeleton className="h-2.5 w-12" />
+      </div>
+      <Skeleton className="h-1.5 w-full rounded-full" />
+      <Skeleton className="h-2.5 w-28" />
+    </div>
+  );
+}
+
+interface AccountUsageBodyProps {
+  config: ProviderConfig;
+  usage: ProviderUsage | undefined;
+  isLoading: boolean;
+  isError: boolean;
+}
+
+function AccountUsageBody({
   config,
   usage,
   isLoading,
   isError,
-}: ProviderUsageBlockProps) {
-  const planLabel = usage?.status === "ok" ? usage.planLabel : null;
-  const accountEmail =
-    accountLabel ?? (usage?.status === "ok" ? usage.accountEmail : null);
-  const headingId = useId();
-  const showsUsageWindows =
-    !isError && usage?.status === "ok" && usage.windows.length > 0;
+}: AccountUsageBodyProps) {
+  if (isError) {
+    return (
+      <UsageStateMessage tone="error">
+        {usageFeedbackMessages.unavailable}
+      </UsageStateMessage>
+    );
+  }
 
-  return (
-    <section
-      aria-labelledby={headingId}
-      className="space-y-3.5 py-3.5 first:pt-0 last:pb-0"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-1 items-start gap-2.5">
-          <span aria-hidden="true" className="mt-0.5 shrink-0">
-            <ProviderIcon
-              providerKind="agent"
-              provider={{ ...config.provider, id: config.providerId }}
-              className="size-4"
-            />
-          </span>
-          <div className="min-w-0 flex-1">
-            <h3
-              id={headingId}
-              className="text-sm font-semibold text-foreground"
-            >
-              {config.name}
-            </h3>
-            {accountEmail && accountEmail !== config.name ? (
-              <p className="truncate text-xs text-muted-foreground">
-                {accountEmail}
-              </p>
-            ) : null}
-            {!showsUsageWindows ? (
-              <div className={accountEmail ? "mt-1.5" : undefined}>
-                <ProviderUsageBody
-                  config={config}
-                  usage={usage}
-                  isLoading={isLoading}
-                  isError={isError}
-                />
-              </div>
-            ) : null}
-          </div>
+  if (!usage) {
+    return isLoading ? (
+      <UsageWindowsSkeleton />
+    ) : (
+      <UsageStateMessage tone="neutral">Usage not provided.</UsageStateMessage>
+    );
+  }
+
+  switch (usage.status) {
+    case "ok":
+      if (usage.windows.length === 0) {
+        return (
+          <UsageStateMessage tone="neutral">
+            No usage limits reported for this plan.
+          </UsageStateMessage>
+        );
+      }
+
+      return (
+        <div className="space-y-3.5">
+          {usage.windows.map((window) => (
+            <UsageWindowRow key={window.label} window={window} />
+          ))}
         </div>
-        {planLabel ? <SettingsBadge>{planLabel}</SettingsBadge> : null}
-      </div>
-      {showsUsageWindows ? (
-        <div className="pl-6">
-          <ProviderUsageBody
-            config={config}
-            usage={usage}
-            isLoading={isLoading}
-            isError={isError}
-          />
-        </div>
-      ) : null}
-    </section>
-  );
+      );
+    case "not_installed":
+      return (
+        <UsageStateMessage tone="neutral">
+          Not installed on this machine.
+        </UsageStateMessage>
+      );
+    case "unauthenticated":
+      return (
+        <UsageStateMessage tone="warning">
+          {config.signInHint}
+        </UsageStateMessage>
+      );
+    case "expired":
+      return (
+        <UsageStateMessage tone="warning">
+          {config.expiredHint}
+        </UsageStateMessage>
+      );
+    case "error":
+      return (
+        <UsageStateMessage tone="error">{usage.message}</UsageStateMessage>
+      );
+    default:
+      return null;
+  }
 }
 
 function UsageResourceGroup({
@@ -286,84 +324,93 @@ function UsageResourceGroup({
   isLoading: boolean;
   isError: boolean;
 }) {
-  return (
-    <div className="py-3.5 first:pt-0 last:pb-0">
-      {resources.map((resource) => {
-        const email =
-          resource.usage?.status === "ok"
-            ? (resource.usage.accountEmail ?? resource.accountLabel)
-            : resource.accountLabel;
-        const usage = resource.usage ?? undefined;
-        return (
-          <ProviderUsageBlock
-            key={resource.id}
-            accountLabel={email ?? undefined}
-            config={config}
-            usage={usage}
-            isLoading={isLoading}
-            isError={isError && usage === undefined}
-          />
-        );
-      })}
-    </div>
-  );
-}
+  const headingId = useId();
 
-function ProviderUsageBody({
-  config,
-  usage,
-  isLoading,
-  isError,
-}: ProviderUsageBlockProps) {
-  if (isError) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        {usageFeedbackMessages.unavailable}
-      </p>
-    );
-  }
-  if (!usage) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        {isLoading ? "Loading usage…" : "Usage not provided."}
-      </p>
-    );
-  }
-  switch (usage.status) {
-    case "ok":
-      if (usage.windows.length === 0) {
-        return (
-          <p className="text-xs text-muted-foreground">
-            No usage limits reported for this plan.
-          </p>
-        );
-      }
-      return (
-        <div className="space-y-3.5">
-          {usage.windows.map((window) => (
-            <UsageWindowRow key={window.label} window={window} />
-          ))}
+  const accounts = resources.map((resource) => {
+    const usage = resource.usage ?? undefined;
+
+    return {
+      id: resource.id,
+      usage,
+      email:
+        usage?.status === "ok"
+          ? (usage.accountEmail ?? resource.accountLabel)
+          : resource.accountLabel,
+      plan: usage?.status === "ok" ? usage.planLabel : null,
+    };
+  });
+
+  const single = accounts.length === 1 ? accounts[0] : undefined;
+
+  return (
+    <section aria-labelledby={headingId} className="py-4 first:pt-0 last:pb-0">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span
+          aria-hidden="true"
+          className="grid size-7 shrink-0 place-items-center rounded-md bg-state-hover"
+        >
+          <ProviderIcon
+            providerKind="agent"
+            provider={{ ...config.provider, id: config.providerId }}
+            className="size-4"
+          />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3
+            id={headingId}
+            className="truncate text-sm font-semibold text-foreground"
+          >
+            {config.name}
+          </h3>
+          {single?.email && single.email !== config.name ? (
+            <p className="truncate text-xs text-muted-foreground">
+              {single.email}
+            </p>
+          ) : null}
         </div>
-      );
-    case "not_installed":
-      return (
-        <p className="text-xs text-muted-foreground">
-          Not installed on this machine.
-        </p>
-      );
-    case "unauthenticated":
-      return (
-        <p className="text-xs text-muted-foreground">{config.signInHint}</p>
-      );
-    case "expired":
-      return (
-        <p className="text-xs text-muted-foreground">{config.expiredHint}</p>
-      );
-    case "error":
-      return <p className="text-xs text-muted-foreground">{usage.message}</p>;
-    default:
-      return null;
-  }
+        {single === undefined ? (
+          <SettingsBadge>{accounts.length} accounts</SettingsBadge>
+        ) : single.plan ? (
+          <SettingsBadge>{single.plan}</SettingsBadge>
+        ) : null}
+      </div>
+      <div className="mt-3 pl-9.5">
+        {single !== undefined ? (
+          <AccountUsageBody
+            config={config}
+            usage={single.usage}
+            isLoading={isLoading}
+            isError={isError && single.usage === undefined}
+          />
+        ) : (
+          <ul className="m-0 list-none divide-y divide-border-seam p-0">
+            {accounts.map((account) => (
+              <li
+                key={account.id}
+                aria-label={account.email ?? config.name}
+                className="space-y-2.5 py-3 first:pt-0 last:pb-0"
+              >
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <p className="min-w-0 truncate text-xs font-medium text-foreground">
+                    {account.email ?? config.name}
+                  </p>
+                  {account.plan ? (
+                    <SettingsBadge>{account.plan}</SettingsBadge>
+                  ) : null}
+                </div>
+                <AccountUsageBody
+                  config={config}
+                  usage={account.usage}
+                  isLoading={isLoading}
+                  isError={isError && account.usage === undefined}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
 }
 
 export function UsageSettingsContent({
@@ -383,12 +430,15 @@ export function UsageSettingsContent({
 }) {
   const selected = selectUsageMachine(machines, selectedId, null);
   const groups = new Map<string, UsageProvider[]>();
+
   for (const provider of selected?.providers ?? []) {
     if (provider.usage?.status === "not_installed") continue;
     const group = groups.get(provider.providerId);
+
     if (group) group.push(provider);
     else groups.set(provider.providerId, [provider]);
   }
+
   const notice =
     selected?.status === "disconnected"
       ? offlineUsageMessage(selected, hasReportedUsage(selected.providers))
@@ -403,6 +453,7 @@ export function UsageSettingsContent({
           : groups.size === 0
             ? emptyUsageMessage(selected)
             : null;
+
   return (
     <section className="@container/usage-settings space-y-3">
       <div
@@ -413,13 +464,12 @@ export function UsageSettingsContent({
         )}
       >
         <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <h2 className="min-w-0 text-sm font-semibold text-foreground">
-              Usage limits
-            </h2>
-          </div>
-          <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
-            Your provider subscription usage.
+          <h2 className="min-w-0 text-sm font-semibold text-foreground">
+            Usage limits
+          </h2>
+          <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
+            How much of each subscription’s limits you’ve used. Bars turn amber
+            at 80% and red at 95%.
           </p>
         </div>
         <div className="shrink-0 self-start">
@@ -438,8 +488,8 @@ export function UsageSettingsContent({
             ) : null}
             <Button
               variant="ghost"
-              size="icon"
-              className="size-7 text-muted-foreground hover:text-foreground"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-foreground"
               disabled={loading}
               onClick={onRefresh}
               aria-label={
@@ -454,7 +504,7 @@ export function UsageSettingsContent({
           </div>
         </div>
       </div>
-      <div className="rounded-lg border border-border bg-card px-4 py-3.5">
+      <div className="rounded-xl border border-border bg-card px-4 py-4 shadow-card">
         {notice ? (
           <UsageFeedback
             message={notice}
@@ -462,9 +512,10 @@ export function UsageSettingsContent({
             className={groups.size > 0 ? "mb-3" : undefined}
           />
         ) : null}
-        <div className="divide-y divide-border">
+        <div className="divide-y divide-border-seam">
           {[...groups].map(([id, resources]) => {
             const provider = resources[0]!;
+
             return (
               <UsageResourceGroup
                 key={id}
@@ -500,11 +551,13 @@ export function UsageSettings() {
     let running = false;
     const force = refresh > forceGeneration.current;
     forceGeneration.current = refresh;
+
     async function load(force: boolean) {
       if (running) return;
       running = true;
       setLoading(true);
       setError(false);
+
       try {
         const inventory = await rpc.call("getUsage", {
           force: false,
@@ -512,18 +565,22 @@ export function UsageSettings() {
           providerIds: [],
           maxAgeMs: 60_000,
         });
+
         if (disposed) return;
         setMachines(inventory.machines);
+
         const selected = selectUsageMachine(
           inventory.machines,
           selectedId,
           null,
         );
+
         const providerIds = [
           ...new Set(
             selected?.providers.map((provider) => provider.providerId),
           ),
         ];
+
         if (
           selected &&
           selected.status === "connected" &&
@@ -535,6 +592,7 @@ export function UsageSettings() {
             providerIds,
             maxAgeMs: 60_000,
           });
+
           if (disposed) return;
           setMachines(result.machines);
         }
@@ -542,18 +600,23 @@ export function UsageSettings() {
         if (!disposed) setError(true);
       } finally {
         running = false;
+
         if (!disposed) setLoading(false);
       }
     }
+
     void load(force);
+
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void load(false);
     }, 60_000);
+
     return () => {
       disposed = true;
       window.clearInterval(timer);
     };
   }, [rpc, selectedId, refresh]);
+
   return (
     <UsageSettingsContent
       machines={machines}

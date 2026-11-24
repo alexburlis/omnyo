@@ -9,9 +9,13 @@ interface ConfirmTypedWordArgs {
 }
 
 export const dim: Formatter = pc.dim;
+
 export const bold: Formatter = pc.bold;
+
 export const green: Formatter = pc.green;
+
 export const cyan: Formatter = pc.cyan;
+
 export const yellow: Formatter = pc.yellow;
 
 export function log(icon: string, msg: string): void {
@@ -22,6 +26,7 @@ export function endStep(icon: string, msg: string): void {
   if (process.stdout.isTTY) {
     process.stdout.write("\x1b[2K");
   }
+
   log(icon, msg);
 }
 
@@ -41,9 +46,11 @@ export async function confirmTypedWord(
 
   try {
     args.renderIntro();
+
     const answer = await rl.question(
       `  ${dim("?")}  Type ${bold(`"${args.word}"`)} to continue: `,
     );
+
     return answer.trim() === args.word;
   } finally {
     rl.close();

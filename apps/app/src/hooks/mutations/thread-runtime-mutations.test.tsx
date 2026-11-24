@@ -1,27 +1,31 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { ThreadQueuedMessage } from "@bb/domain";
+import type { ThreadQueuedMessage } from "@omnyo/domain";
 import type {
   ExistingThreadExecutionInputSources,
+  PromptHistoryResponse,
   ThreadResponse,
   ThreadTimelineResponse,
-} from "@bb/server-contract";
-import { createDeferredPromise } from "@bb/test-helpers";
-import { makeThreadQueuedMessage as makeThreadQueuedMessageFixture } from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/server-contract";
+import { createDeferredPromise } from "@omnyo/test-helpers";
+import { makeThreadQueuedMessage as makeThreadQueuedMessageFixture } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BbHttpError, sdk } from "@/lib/sdk";
+import { OmnyoHttpError, sdk } from "@/lib/sdk";
 import { subscribeComposerSubmitted } from "@/lib/composer-submissions";
 import { wsManager } from "@/lib/ws";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
+import { conversationRow } from "@/test/fixtures/thread-timeline-rows";
 import {
   makeThreadResponse as makeThreadResponseFixture,
   makeThreadTimelineResponse,
 } from "@/test/fixtures/thread-responses";
+import { displayedTimelineRows } from "@/test/displayed-timeline-rows";
 import {
   threadQueryKey,
   threadQueuedMessagesQueryKey,
   threadTimelineQueryKey,
+  threadPromptHistoryQueryKey,
 } from "../queries/query-keys";
 import {
   useCancelThreadPlan,
@@ -37,6 +41,7 @@ import {
 
 vi.mock("@/lib/sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sdk")>();
+
   return {
     ...actual,
     sdk: {
@@ -180,17 +185,33 @@ describe("thread runtime mutations", () => {
     ).toEqual([makeQueuedMessage()]);
   });
 
-  it("keeps the existing timeline while an edit is pending and lets connected realtime own success", async () => {
+  it("shows the edited text at once, keeps later rows and lets connected realtime own success", async () => {
     const { queryClient, wrapper } = createQueryClientTestHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
     const edit = createDeferredPromise<{
       ok: true;
       operationId: string;
       requestSequence: number;
     }>();
+
     vi.mocked(sdk.threads.editMessage).mockReturnValueOnce(edit.promise);
-    const timeline = makeBannerTimeline();
-    queryClient.setQueryData(threadTimelineQueryKey("thread-1"), timeline);
+
+    const later = conversationRow({ id: "reply", text: "Old reply", seq: 2 });
+
+    queryClient.setQueryData(threadTimelineQueryKey("thread-1"), {
+      ...makeBannerTimeline(),
+      rows: [
+        conversationRow({
+          id: "edited",
+          role: "user",
+          text: "Original",
+          seq: 1,
+        }),
+        later,
+      ],
+    });
+
     const { result } = renderHook(() => useEditThreadMessage(), {
       wrapper,
     });
@@ -199,15 +220,22 @@ describe("thread runtime mutations", () => {
     act(() => {
       editPromise = result.current.mutateAsync({
         id: "thread-1",
+        messageId: "edited",
         operationId: "edit-op-1",
         expectedRequestSequence: 41,
         input: [{ type: "text", text: "Replacement", mentions: [] }],
       });
     });
     await waitFor(() => expect(sdk.threads.editMessage).toHaveBeenCalledOnce());
-    expect(queryClient.getQueryData(threadTimelineQueryKey("thread-1"))).toBe(
-      timeline,
+    expect(sdk.threads.editMessage).toHaveBeenCalledWith(
+      expect.not.objectContaining({ messageId: expect.anything() }),
     );
+    expect(
+      displayedTimelineRows(queryClient, threadTimelineQueryKey("thread-1")),
+    ).toEqual([
+      expect.objectContaining({ id: "edited", text: "Replacement" }),
+      later,
+    ]);
     expect(invalidateQueries).not.toHaveBeenCalled();
 
     edit.resolve({
@@ -230,6 +258,7 @@ describe("thread runtime mutations", () => {
     await act(async () => {
       await result.current.mutateAsync({
         id: "thread-1",
+        messageId: "edited",
         operationId: "edit-op-disconnected",
         expectedRequestSequence: 41,
         input: [{ type: "text", text: "Replacement", mentions: [] }],
@@ -239,6 +268,77 @@ describe("thread runtime mutations", () => {
     expect(invalidateQueries).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: threadTimelineQueryKey("thread-1") }),
     );
+  });
+
+  it("starts the edited turn at once and restores the text and status when the edit fails", async () => {
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+
+    const edit = createDeferredPromise<{
+      ok: true;
+      operationId: string;
+      requestSequence: number;
+    }>();
+
+    vi.mocked(sdk.threads.editMessage).mockReturnValueOnce(edit.promise);
+
+    const thread = makeThreadResponse({
+      status: "idle",
+      runtime: { displayStatus: "idle" },
+    });
+
+    const timeline = {
+      ...makeBannerTimeline(),
+      rows: [
+        conversationRow({
+          id: "edited",
+          role: "user",
+          text: "Original",
+          seq: 1,
+        }),
+      ],
+    };
+
+    queryClient.setQueryData(threadQueryKey("thread-1"), thread);
+    queryClient.setQueryData(threadTimelineQueryKey("thread-1"), timeline);
+
+    const { result } = renderHook(() => useEditThreadMessage(), { wrapper });
+
+    let editPromise!: Promise<unknown>;
+    act(() => {
+      editPromise = result.current
+        .mutateAsync({
+          id: "thread-1",
+          messageId: "edited",
+          operationId: "edit-op-failed",
+          input: [{ type: "text", text: "Replacement", mentions: [] }],
+        })
+        .catch(() => undefined);
+    });
+
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<ThreadResponse>(threadQueryKey("thread-1"))
+          ?.status,
+      ).toBe("active"),
+    );
+    expect(
+      displayedTimelineRows(
+        queryClient,
+        threadTimelineQueryKey("thread-1"),
+      )?.[0],
+    ).toMatchObject({ text: "Replacement" });
+
+    edit.reject(new Error("rewind failed"));
+    await act(async () => {
+      await editPromise;
+    });
+
+    expect(
+      queryClient.getQueryData(threadTimelineQueryKey("thread-1")),
+    ).toEqual(timeline);
+    expect(
+      queryClient.getQueryData<ThreadResponse>(threadQueryKey("thread-1")),
+    ).toMatchObject({ status: "idle", runtime: { displayStatus: "idle" } });
   });
 
   it.each([
@@ -277,10 +377,12 @@ describe("thread runtime mutations", () => {
       });
       expect(getSdkMethod()).toHaveBeenCalledWith({ threadId: "thread-1" });
       expect(invalidateQueries).toHaveBeenCalled();
+
       const timelineAfterSuccess =
         queryClient.getQueryData<ThreadTimelineResponse>(
           threadTimelineQueryKey("thread-1"),
         );
+
       if (_label === "Plan") {
         expect(timelineAfterSuccess?.activePromptMode).toBeNull();
         expect(timelineAfterSuccess?.goal).toMatchObject({ status: "active" });
@@ -320,15 +422,18 @@ describe("thread runtime mutations", () => {
     const { wrapper } = createQueryClientTestHarness();
     const { result } = renderHook(() => useSendThreadMessage(), { wrapper });
     const submitted = vi.fn();
+
     const dispose = subscribeComposerSubmitted(
       { kind: "thread", threadId: "thread-1" },
       submitted,
     );
+
     const request = {
       id: "thread-1",
       mode: "auto" as const,
       input: [{ type: "text" as const, text: "Run this", mentions: [] }],
     };
+
     try {
       vi.mocked(sdk.threads.send).mockRejectedValueOnce(new Error("offline"));
       await act(async () => {
@@ -367,6 +472,245 @@ describe("thread runtime mutations", () => {
     );
   });
 
+  it("accepts consecutive messages locally while transporting each thread in order", async () => {
+    const firstSend = createDeferredPromise<{ ok: true; delivery: "sent" }>();
+    vi.mocked(sdk.threads.send).mockImplementationOnce(() => firstSend.promise);
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+    queryClient.setQueryData(
+      threadQueryKey("thread-1"),
+      makeThreadResponse({
+        status: "idle",
+        runtime: { displayStatus: "idle" },
+      }),
+    );
+    queryClient.setQueryData(
+      threadTimelineQueryKey("thread-1"),
+      makeBannerTimeline(),
+    );
+    const { result } = renderHook(() => useSendThreadMessage(), { wrapper });
+
+    let first: Promise<unknown>;
+    let second: Promise<unknown>;
+    let otherThread: Promise<unknown>;
+    await act(async () => {
+      first = result.current.mutateAsync({
+        id: "thread-1",
+        mode: "auto",
+        input: [{ type: "text", text: "First", mentions: [] }],
+      });
+    });
+    await waitFor(() => expect(sdk.threads.send).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      second = result.current.mutateAsync({
+        id: "thread-1",
+        mode: "auto",
+        input: [{ type: "text", text: "Second", mentions: [] }],
+      });
+      otherThread = result.current.mutateAsync({
+        id: "thread-2",
+        mode: "auto",
+        input: [{ type: "text", text: "Independent", mentions: [] }],
+      });
+      await otherThread;
+    });
+
+    expect(
+      vi.mocked(sdk.threads.send).mock.calls.map(([request]) => request.input),
+    ).toEqual([
+      [{ type: "text", text: "First", mentions: [] }],
+      [{ type: "text", text: "Independent", mentions: [] }],
+    ]);
+    expect(
+      displayedTimelineRows(
+        queryClient,
+        threadTimelineQueryKey("thread-1"),
+      )?.map((row) => (row.kind === "conversation" ? row.text : null)),
+    ).toEqual(["First", "Second"]);
+
+    await act(async () => {
+      firstSend.resolve({ ok: true, delivery: "sent" });
+      await Promise.all([first!, second!]);
+    });
+    expect(vi.mocked(sdk.threads.send).mock.calls.at(-1)?.[0].input).toEqual([
+      { type: "text", text: "Second", mentions: [] },
+    ]);
+  });
+
+  it("publishes upload preparation immediately and sends only prepared input in order", async () => {
+    const preparedInput =
+      createDeferredPromise<{ type: "text"; text: string; mentions: [] }[]>();
+
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+    queryClient.setQueryData(
+      threadTimelineQueryKey("thread-1"),
+      makeBannerTimeline(),
+    );
+    const { result } = renderHook(() => useSendThreadMessage(), { wrapper });
+
+    const request = {
+      id: "thread-1",
+      mode: "auto" as const,
+      input: [
+        { type: "text" as const, text: "Uploading report.pdf", mentions: [] },
+      ],
+      prepareInput: () => preparedInput.promise,
+    };
+
+    let upload: Promise<unknown>;
+    let later: Promise<unknown>;
+    await act(async () => {
+      upload = result.current.mutateAsync(request);
+      later = result.current.mutateAsync({
+        id: "thread-1",
+        mode: "auto",
+        input: [{ type: "text", text: "Later", mentions: [] }],
+      });
+      await result.current.mutateAsync({
+        id: "thread-2",
+        mode: "auto",
+        input: [{ type: "text", text: "Independent", mentions: [] }],
+      });
+    });
+
+    expect(
+      displayedTimelineRows(
+        queryClient,
+        threadTimelineQueryKey("thread-1"),
+      )?.map((row) => (row.kind === "conversation" ? row.text : null)),
+    ).toEqual(["Uploading report.pdf", "Later"]);
+    expect(
+      vi.mocked(sdk.threads.send).mock.calls.map(([sent]) => sent.threadId),
+    ).toEqual(["thread-2"]);
+
+    await act(async () => {
+      preparedInput.resolve([
+        { type: "text", text: "Prepared attachment reference", mentions: [] },
+      ]);
+      await Promise.all([upload!, later!]);
+    });
+
+    expect(
+      vi.mocked(sdk.threads.send).mock.calls.map(([sent]) => sent.input),
+    ).toEqual([
+      [{ type: "text", text: "Independent", mentions: [] }],
+      [{ type: "text", text: "Prepared attachment reference", mentions: [] }],
+      [{ type: "text", text: "Later", mentions: [] }],
+    ]);
+    expect(vi.mocked(sdk.threads.send).mock.calls[1]?.[0]).not.toHaveProperty(
+      "prepareInput",
+    );
+    expect(
+      queryClient.getQueryData<PromptHistoryResponse>(
+        threadPromptHistoryQueryKey("thread-1"),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          input: [
+            {
+              type: "text",
+              text: "Prepared attachment reference",
+              mentions: [],
+            },
+          ],
+        }),
+      ]),
+    );
+    expect(request.input).toEqual([
+      { type: "text", text: "Uploading report.pdf", mentions: [] },
+    ]);
+  });
+
+  it.each(["submitted", "cancelled"] as const)(
+    "keeps later text behind a voice submission until it is %s",
+    async (outcome) => {
+      const { queryClient, wrapper } = createQueryClientTestHarness();
+      queryClient.setQueryData(
+        threadTimelineQueryKey("thread-1"),
+        makeBannerTimeline(),
+      );
+      const { result } = renderHook(() => useSendThreadMessage(), { wrapper });
+      const voice = result.current.reserve("thread-1");
+      let typed: Promise<unknown>;
+      await act(async () => {
+        typed = result.current.mutateAsync({
+          id: "thread-1",
+          mode: "auto",
+          input: [{ type: "text", text: "Typed after voice", mentions: [] }],
+        });
+      });
+      expect(sdk.threads.send).not.toHaveBeenCalled();
+      expect(
+        displayedTimelineRows(queryClient, threadTimelineQueryKey("thread-1")),
+      ).toMatchObject([{ text: "Typed after voice" }]);
+
+      await act(async () => {
+        if (outcome === "submitted") {
+          await result.current.mutateAsync({
+            id: "thread-1",
+            mode: "auto",
+            input: [{ type: "text", text: "Voice transcript", mentions: [] }],
+            sendReservation: voice,
+          });
+        } else {
+          voice.cancel();
+        }
+
+        await typed!;
+      });
+      expect(
+        vi
+          .mocked(sdk.threads.send)
+          .mock.calls.map(([request]) => request.input),
+      ).toEqual([
+        ...(outcome === "submitted"
+          ? [[{ type: "text", text: "Voice transcript", mentions: [] }]]
+          : []),
+        [{ type: "text", text: "Typed after voice", mentions: [] }],
+      ]);
+    },
+  );
+
+  it("keeps Send now behind an earlier accepted voice submission", async () => {
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+    queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), [
+      makeQueuedMessage(),
+    ]);
+
+    const { result } = renderHook(
+      () => ({
+        send: useSendThreadMessage(),
+        queued: useSendThreadQueuedMessage(),
+      }),
+      { wrapper },
+    );
+
+    const voice = result.current.send.reserve("thread-1");
+    let queued: Promise<unknown>;
+    await act(async () => {
+      queued = result.current.queued.mutateAsync({
+        id: "thread-1",
+        queuedMessageId: "qmsg-1",
+        mode: "auto",
+      });
+    });
+    expect(sdk.threads.queuedMessages.send).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.send.mutateAsync({
+        id: "thread-1",
+        mode: "auto",
+        input: [{ type: "text", text: "Voice transcript", mentions: [] }],
+        sendReservation: voice,
+      });
+      await queued!;
+    });
+    expect(
+      vi.mocked(sdk.threads.send).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(sdk.threads.queuedMessages.send).mock.invocationCallOrder[0]!,
+    );
+  });
+
   it("returns the server's delivery so a queued message is not treated as a started turn", async () => {
     vi.mocked(sdk.threads.send).mockResolvedValue({
       ok: true,
@@ -382,6 +726,7 @@ describe("thread runtime mutations", () => {
       ok: true,
       delivery: "sent",
     };
+
     await act(async () => {
       sendResult = await result.current.mutateAsync({
         id: "thread-1",
@@ -403,10 +748,12 @@ describe("thread runtime mutations", () => {
     const queuedMessage = makeQueuedMessage({
       waitingOn: { kind: "thread-busy" },
     });
+
     const provisioningQueuedMessage = makeQueuedMessage({
       waitingOn: { kind: "provisioning" },
       updatedAt: 2,
     });
+
     vi.mocked(sdk.threads.queuedMessages.send).mockResolvedValue({
       ok: true,
       delivery: "queued",
@@ -429,6 +776,7 @@ describe("thread runtime mutations", () => {
       threadTimelineQueryKey("thread-1"),
       makeBannerTimeline(),
     );
+
     const { result } = renderHook(() => useSendThreadQueuedMessage(), {
       wrapper,
     });
@@ -445,14 +793,13 @@ describe("thread runtime mutations", () => {
       queryClient.getQueryData(threadQueuedMessagesQueryKey("thread-1")),
     ).toEqual([provisioningQueuedMessage]);
     expect(
-      queryClient.getQueryData<ThreadTimelineResponse>(
-        threadTimelineQueryKey("thread-1"),
-      )?.rows,
+      displayedTimelineRows(queryClient, threadTimelineQueryKey("thread-1")),
     ).toEqual([]);
   });
 
   it("forwards execution input sources and sender thread when queueing a message", async () => {
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(() => useCreateThreadQueuedMessage(), {
       wrapper,
     });
@@ -475,6 +822,47 @@ describe("thread runtime mutations", () => {
     );
   });
 
+  it("drops a queued message the server reports as already sent", async () => {
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+    queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), [
+      makeQueuedMessage({ id: "qmsg-1" }),
+      makeQueuedMessage({ id: "qmsg-2" }),
+    ]);
+    queryClient.setQueryData(threadQueryKey("thread-1"), makeThreadResponse());
+    queryClient.setQueryData(
+      threadTimelineQueryKey("thread-1"),
+      makeBannerTimeline(),
+    );
+    vi.mocked(sdk.threads.queuedMessages.send).mockResolvedValue({
+      ok: true,
+      delivery: "already-sent",
+    });
+
+    const { result } = renderHook(() => useSendThreadQueuedMessage(), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "thread-1",
+        mode: "auto",
+        queuedMessageId: "qmsg-1",
+        requestId: "creq_7777777777",
+      });
+    });
+
+    expect(
+      queryClient
+        .getQueryData<ThreadQueuedMessage[]>(
+          threadQueuedMessagesQueryKey("thread-1"),
+        )
+        ?.map((queuedMessage) => queuedMessage.id),
+    ).toEqual(["qmsg-2"]);
+    expect(
+      displayedTimelineRows(queryClient, threadTimelineQueryKey("thread-1")),
+    ).toEqual([]);
+  });
+
   it("keeps an optimistically deleted queued message removed when the server says it is already gone", async () => {
     const { queryClient, wrapper } = createQueryClientTestHarness();
     queryClient.setQueryData(threadQueuedMessagesQueryKey("thread-1"), [
@@ -482,7 +870,7 @@ describe("thread runtime mutations", () => {
       makeQueuedMessage({ id: "qmsg-2" }),
     ]);
     vi.mocked(sdk.threads.queuedMessages.delete).mockRejectedValue(
-      new BbHttpError({
+      new OmnyoHttpError({
         status: 404,
         code: "invalid_request",
         message: "Queued message not found",
@@ -492,6 +880,7 @@ describe("thread runtime mutations", () => {
         },
       }),
     );
+
     const { result } = renderHook(() => useDeleteThreadQueuedMessage(), {
       wrapper,
     });
@@ -502,7 +891,7 @@ describe("thread runtime mutations", () => {
           id: "thread-1",
           queuedMessageId: "qmsg-1",
         }),
-      ).resolves.toBeUndefined();
+      ).resolves.toBe("missing");
     });
 
     expect(
@@ -516,6 +905,7 @@ describe("thread runtime mutations", () => {
 
   it("sets the queued-message group boundary through the API", async () => {
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useSetThreadQueuedMessageGroupBoundary(),
       { wrapper },

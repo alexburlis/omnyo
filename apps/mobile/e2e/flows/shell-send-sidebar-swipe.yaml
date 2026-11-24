@@ -7,9 +7,9 @@ env:
 - runFlow: ../subflows/launch-app.yaml
 - runFlow: ../subflows/pair-direct-server.yaml
 - runFlow:
-    file: ../subflows/open-bb-link.yaml
+    file: ../subflows/open-omnyo-link.yaml
     env:
-      LINK: "bb://"
+      LINK: "omnyo://"
 - extendedWaitUntil:
     visible: ".*Idle thread.*"
     timeout: 60000
@@ -29,7 +29,10 @@ env:
     visible: ".*Settings.*"
     timeout: 10000
 - takeScreenshot: sidebar-baseline-open
-- tapOn: ".*Toggle sidebar.*"
+- swipe:
+    start: 85%, 45%
+    end: 10%, 45%
+    duration: 500
 - waitForAnimationToEnd:
     timeout: 5000
 - tapOn: ".*follow-up.*"

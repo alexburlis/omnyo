@@ -12,14 +12,14 @@ describe("compareBridgeVersions", () => {
     });
   });
 
-  it("keeps working when the server serves an older page", () => {
-    const compatibility = compareBridgeVersions(1, 3);
-    expect(compatibility.kind).toBe("older-peer");
-    expect(isBridgeUsable(compatibility)).toBe(true);
+  it.each([1, 2])("refuses the pre-Omnyo bridge version %s", (version) => {
+    const compatibility = compareBridgeVersions(version, 3);
+    expect(compatibility.kind).toBe("unsupported");
+    expect(isBridgeUsable(compatibility)).toBe(false);
   });
 
   it("keeps working when a phone lags behind the server", () => {
-    const compatibility = compareBridgeVersions(4, 2);
+    const compatibility = compareBridgeVersions(4, 3);
     expect(compatibility.kind).toBe("newer-peer");
     expect(isBridgeUsable(compatibility)).toBe(true);
   });

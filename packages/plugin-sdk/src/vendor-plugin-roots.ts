@@ -16,7 +16,7 @@
  *
  * Symlinks follow the root's origin. A personal (`user`) plugin commonly
  * links a skill from elsewhere in the home directory, so its skill
- * components are followed; a checked-in (`project`) plugin must not point bb
+ * components are followed; a checked-in (`project`) plugin must not point Omnyo
  * outside the repository, so its links are not. Command components never
  * follow a link, whatever the origin.
  */
@@ -32,7 +32,9 @@ type ResolvedRoot = NonNullable<
 >[number];
 
 type ResolvedRootOrigin = "user" | "project";
+
 type ResolvedRootSide = "skills" | "commands";
+
 type PluginComponentKind = "directory" | "file" | "missing";
 
 /** The two sides of a `resolveNativeRoots` answer, each path once per side. */
@@ -78,7 +80,7 @@ export interface ExperimentalVendorPluginRootsArgs {
 
 export interface ExperimentalClaudePluginRootsArgs {
   /**
-   * The workspace, or null when bb lists without one: project- and
+   * The workspace, or null when Omnyo lists without one: project- and
    * local-scoped installs and the project skills directory's plugins count
    * only for the workspace that holds them.
    */
@@ -114,6 +116,7 @@ class RootCollector {
     if (this.seen[side].has(root.path)) {
       return;
     }
+
     this.seen[side].add(root.path);
     this[side].push(root);
   }
@@ -125,6 +128,7 @@ function normalizePluginPathList(
   if (value === undefined) {
     return [];
   }
+
   return typeof value === "string" ? [value] : [...value];
 }
 
@@ -133,6 +137,7 @@ function isPathWithinDirectory(
   candidatePath: string,
 ): boolean {
   const relativePath = path.relative(directoryPath, candidatePath);
+
   return (
     relativePath === "" ||
     (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
@@ -147,7 +152,9 @@ function resolvePluginRelativePath(
   if (path.isAbsolute(relativePath)) {
     return null;
   }
+
   const resolvedPath = path.resolve(pluginRootPath, relativePath);
+
   return isPathWithinDirectory(pluginRootPath, resolvedPath)
     ? resolvedPath
     : null;
@@ -160,19 +167,25 @@ async function resolvePluginComponentKind(
 ): Promise<PluginComponentKind> {
   try {
     const stat = await fs.lstat(componentPath);
+
     if (stat.isFile()) {
       return "file";
     }
+
     if (stat.isDirectory()) {
       return "directory";
     }
+
     if (!stat.isSymbolicLink() || origin !== "user") {
       return "missing";
     }
+
     const targetStat = await fs.stat(componentPath);
+
     if (targetStat.isFile()) {
       return "file";
     }
+
     return targetStat.isDirectory() ? "directory" : "missing";
   } catch {
     return "missing";
@@ -188,6 +201,7 @@ async function resolveSkillDirectoryShape(
     path.join(componentPath, "SKILL.md"),
     origin,
   );
+
   return skillFileKind === "file" ? "skill" : "skills";
 }
 
@@ -198,10 +212,12 @@ async function addConventionalRoots(
   namePrefix: string,
 ): Promise<void> {
   const rootSkillFilePath = path.join(plugin.rootPath, "SKILL.md");
+
   const rootSkillFileKind = await resolvePluginComponentKind(
     rootSkillFilePath,
     plugin.origin,
   );
+
   if (rootSkillFileKind === "file") {
     collector.add("skills", {
       path: rootSkillFilePath,
@@ -213,10 +229,12 @@ async function addConventionalRoots(
   }
 
   const skillsRootPath = path.join(plugin.rootPath, "skills");
+
   const skillsRootKind = await resolvePluginComponentKind(
     skillsRootPath,
     plugin.origin,
   );
+
   if (skillsRootKind === "directory") {
     collector.add("skills", {
       path: skillsRootPath,
@@ -228,6 +246,7 @@ async function addConventionalRoots(
 
   const commandsRootPath = path.join(plugin.rootPath, "commands");
   const commandsRootStat = await fs.lstat(commandsRootPath).catch(() => null);
+
   if (commandsRootStat?.isDirectory()) {
     collector.add("commands", {
       path: commandsRootPath,
@@ -251,13 +270,16 @@ async function addManifestSkillRoots(
 ): Promise<void> {
   for (const entry of normalizePluginPathList(plugin.skills)) {
     const componentPath = resolvePluginRelativePath(plugin.rootPath, entry);
+
     if (componentPath === null) {
       continue;
     }
+
     const componentKind = await resolvePluginComponentKind(
       componentPath,
       plugin.origin,
     );
+
     if (
       componentKind === "file" &&
       path.basename(componentPath) === "SKILL.md"
@@ -270,9 +292,11 @@ async function addManifestSkillRoots(
       });
       continue;
     }
+
     if (componentKind !== "directory") {
       continue;
     }
+
     if (recursive) {
       collector.add("skills", {
         path: componentPath,
@@ -283,6 +307,7 @@ async function addManifestSkillRoots(
       });
       continue;
     }
+
     collector.add("skills", {
       path: componentPath,
       origin: plugin.origin,
@@ -300,13 +325,17 @@ async function addManifestCommandRoots(
 ): Promise<void> {
   for (const entry of normalizePluginPathList(plugin.commands)) {
     const componentPath = resolvePluginRelativePath(plugin.rootPath, entry);
+
     if (componentPath === null) {
       continue;
     }
+
     const stat = await fs.lstat(componentPath).catch(() => null);
+
     if (stat === null) {
       continue;
     }
+
     if (stat.isFile() && componentPath.endsWith(".md")) {
       collector.add("commands", {
         path: componentPath,
@@ -316,6 +345,7 @@ async function addManifestCommandRoots(
       });
       continue;
     }
+
     if (stat.isDirectory()) {
       collector.add("commands", {
         path: componentPath,
@@ -340,11 +370,14 @@ export async function experimental_resolveVendorPluginRoots(
   args: ExperimentalVendorPluginRootsArgs,
 ): Promise<ExperimentalVendorPluginRoots> {
   const collector = new RootCollector();
+
   for (const plugin of args.plugins) {
     const namePrefix = `${plugin.name}:`;
+
     if (args.layout === "claude") {
       await addConventionalRoots(collector, plugin, namePrefix);
     }
+
     await addManifestSkillRoots(
       collector,
       plugin,
@@ -353,16 +386,20 @@ export async function experimental_resolveVendorPluginRoots(
     );
     await addManifestCommandRoots(collector, plugin, namePrefix);
   }
+
   return { skills: collector.skills, commands: collector.commands };
 }
 
 // --- Claude Code's plugin registry -----------------------------------------
 
 const CLAUDE_DIR_NAME = ".claude";
+
 const CLAUDE_PLUGIN_MANIFEST_PATH = path.join(".claude-plugin", "plugin.json");
+
 const CLAUDE_PLUGIN_INSTALLED_FILE_NAME = "installed_plugins.json";
 
 const claudePluginScopeSchema = z.enum(["managed", "project", "local", "user"]);
+
 type ClaudePluginScope = z.infer<typeof claudePluginScopeSchema>;
 
 const claudeSettingsSchema = z
@@ -395,6 +432,7 @@ const claudePluginManifestSchema = z
     commands: claudePluginPathListSchema.optional(),
   })
   .passthrough();
+
 type ClaudePluginManifest = z.infer<typeof claudePluginManifestSchema>;
 
 type EnabledPlugins = ReadonlyMap<string, boolean>;
@@ -422,9 +460,11 @@ function resolveStoredPath(homeDir: string, storedPath: string): string {
   if (storedPath === "~") {
     return homeDir;
   }
+
   if (storedPath.startsWith("~/")) {
     return path.join(homeDir, storedPath.slice(2));
   }
+
   return path.resolve(homeDir, storedPath);
 }
 
@@ -433,6 +473,7 @@ function resolveClaudeConfigDir(
   env: Readonly<Record<string, string | undefined>>,
 ): string {
   const configured = env.CLAUDE_CONFIG_DIR?.trim();
+
   return configured
     ? resolveStoredPath(homeDir, configured)
     : path.join(homeDir, CLAUDE_DIR_NAME);
@@ -444,6 +485,7 @@ async function readJsonFile<T>(
   schema: z.ZodType<T>,
 ): Promise<T | null> {
   let content: string;
+
   try {
     content = await fs.readFile(filePath, "utf8");
   } catch {
@@ -451,6 +493,7 @@ async function readJsonFile<T>(
   }
 
   let parsedJson: unknown;
+
   try {
     parsedJson = JSON.parse(content);
   } catch {
@@ -458,6 +501,7 @@ async function readJsonFile<T>(
   }
 
   const parsed = schema.safeParse(parsedJson);
+
   return parsed.success ? parsed.data : null;
 }
 
@@ -476,6 +520,7 @@ async function directoryHasClaudePluginManifest(
     const stat = await fs.lstat(
       path.join(directoryPath, CLAUDE_PLUGIN_MANIFEST_PATH),
     );
+
     return stat.isFile();
   } catch {
     return false;
@@ -495,9 +540,11 @@ function parseMarketplacePluginId(
   pluginId: string,
 ): { marketplaceName: string; pluginName: string } | null {
   const separatorIndex = pluginId.lastIndexOf("@");
+
   if (separatorIndex <= 0 || separatorIndex === pluginId.length - 1) {
     return null;
   }
+
   return {
     pluginName: pluginId.slice(0, separatorIndex),
     marketplaceName: pluginId.slice(separatorIndex + 1),
@@ -518,6 +565,7 @@ function shouldIncludeInstalledClaudePlugin(
   if (plugin.scope === "managed" || plugin.scope === "user") {
     return true;
   }
+
   return cwd !== null && isPathWithinDirectory(cwd, plugin.installPath);
 }
 
@@ -526,26 +574,31 @@ async function readClaudeEnabledPluginSettings(
   settingsFiles: readonly string[],
 ): Promise<EnabledPlugins> {
   const enabledPlugins = new Map<string, boolean>();
+
   for (const settingsFile of settingsFiles) {
     const settings = await readJsonFile(settingsFile, claudeSettingsSchema);
+
     for (const [pluginId, enabled] of Object.entries(
       settings?.enabledPlugins ?? {},
     )) {
       enabledPlugins.set(pluginId, enabled);
     }
   }
+
   return enabledPlugins;
 }
 
 /** User settings, then the workspace's `settings.json` and `settings.local.json`. */
 function resolveClaudeSettingsFiles(dirs: ResolvedClaudeDirs): string[] {
   const files = [path.join(dirs.claudeDir, "settings.json")];
+
   if (dirs.cwd !== null) {
     files.push(
       path.join(dirs.cwd, CLAUDE_DIR_NAME, "settings.json"),
       path.join(dirs.cwd, CLAUDE_DIR_NAME, "settings.local.json"),
     );
   }
+
   return files;
 }
 
@@ -556,11 +609,13 @@ async function readClaudeInstalledPluginReferences(
     path.join(dirs.claudeDir, "plugins", CLAUDE_PLUGIN_INSTALLED_FILE_NAME),
     claudeInstalledPluginsFileSchema,
   );
+
   if (!installedPlugins) {
     return [];
   }
 
   const references: ClaudeInstalledPluginReference[] = [];
+
   for (const [id, entries] of Object.entries(installedPlugins.plugins)) {
     for (const entry of entries) {
       references.push({
@@ -571,6 +626,7 @@ async function readClaudeInstalledPluginReferences(
       });
     }
   }
+
   return references;
 }
 
@@ -584,6 +640,7 @@ async function findFallbackClaudePluginRoot(
   plugin: ClaudeInstalledPluginReference,
 ): Promise<string | null> {
   const pluginId = parseMarketplacePluginId(plugin.id);
+
   if (!pluginId) {
     return null;
   }
@@ -595,15 +652,20 @@ async function findFallbackClaudePluginRoot(
     pluginId.marketplaceName,
     pluginId.pluginName,
   );
+
   const candidates: PluginCacheCandidate[] = [];
+
   for (const entry of await readDirectoryEntries(pluginCacheRootPath)) {
     if (!entry.isDirectory()) {
       continue;
     }
+
     const candidatePath = path.join(pluginCacheRootPath, entry.name);
+
     if (!(await directoryHasClaudePluginManifest(candidatePath))) {
       continue;
     }
+
     try {
       const stat = await fs.stat(candidatePath);
       candidates.push({ rootPath: candidatePath, modifiedAtMs: stat.mtimeMs });
@@ -613,10 +675,12 @@ async function findFallbackClaudePluginRoot(
   }
 
   const commitPrefix = plugin.gitCommitSha?.slice(0, 12);
+
   if (commitPrefix) {
     const commitMatch = candidates.find((candidate) =>
       path.basename(candidate.rootPath).startsWith(commitPrefix),
     );
+
     if (commitMatch) {
       return commitMatch.rootPath;
     }
@@ -657,22 +721,28 @@ async function resolveInstalledClaudePlugins(
   enabledPlugins: EnabledPlugins,
 ): Promise<ExperimentalVendorPlugin[]> {
   const plugins: ExperimentalVendorPlugin[] = [];
+
   for (const plugin of await readClaudeInstalledPluginReferences(dirs)) {
     if (!shouldIncludeInstalledClaudePlugin(dirs.cwd, plugin)) {
       continue;
     }
+
     const rootPath = (await directoryHasClaudePluginManifest(
       plugin.installPath,
     ))
       ? plugin.installPath
       : await findFallbackClaudePluginRoot(dirs, plugin);
+
     if (rootPath === null) {
       continue;
     }
+
     const manifest = await readClaudePluginManifest(rootPath);
+
     if (!manifest || !isPluginEnabled(enabledPlugins, plugin.id, manifest)) {
       continue;
     }
+
     const pluginId = parseMarketplacePluginId(plugin.id);
     plugins.push(
       vendorPlugin(
@@ -683,6 +753,7 @@ async function resolveInstalledClaudePlugins(
       ),
     );
   }
+
   return plugins;
 }
 
@@ -695,11 +766,14 @@ async function isSkillsDirectoryPluginEntry(
   if (entry.isDirectory()) {
     return directoryHasClaudePluginManifest(entryPath);
   }
+
   if (!entry.isSymbolicLink() || origin !== "user") {
     return false;
   }
+
   try {
     const stat = await fs.stat(entryPath);
+
     return (
       stat.isDirectory() && (await directoryHasClaudePluginManifest(entryPath))
     );
@@ -719,26 +793,35 @@ async function resolveSkillsDirectoryClaudePlugins(
   enabledPlugins: EnabledPlugins,
 ): Promise<ExperimentalVendorPlugin[]> {
   const plugins: ExperimentalVendorPlugin[] = [];
+
   const entries = (await readDirectoryEntries(skillsRootPath)).sort(
     (left, right) => left.name.localeCompare(right.name),
   );
+
   for (const entry of entries) {
     const pluginRootPath = path.join(skillsRootPath, entry.name);
+
     if (!(await isSkillsDirectoryPluginEntry(entry, pluginRootPath, origin))) {
       continue;
     }
+
     const manifest = await readClaudePluginManifest(pluginRootPath);
+
     if (!manifest) {
       continue;
     }
+
     const pluginName = manifest.name ?? entry.name;
+
     if (
       !isPluginEnabled(enabledPlugins, `${pluginName}@skills-dir`, manifest)
     ) {
       continue;
     }
+
     plugins.push(vendorPlugin(pluginRootPath, pluginName, origin, manifest));
   }
+
   return plugins;
 }
 
@@ -763,10 +846,13 @@ export async function experimental_resolveClaudePluginRoots(
     cwd: args.cwd === null ? null : path.resolve(args.cwd),
     homeDir: args.homeDir,
   };
+
   const enabledPlugins = await readClaudeEnabledPluginSettings(
     resolveClaudeSettingsFiles(dirs),
   );
+
   const plugins = await resolveInstalledClaudePlugins(dirs, enabledPlugins);
+
   if (dirs.cwd !== null) {
     plugins.push(
       ...(await resolveSkillsDirectoryClaudePlugins(
@@ -776,6 +862,7 @@ export async function experimental_resolveClaudePluginRoots(
       )),
     );
   }
+
   plugins.push(
     ...(await resolveSkillsDirectoryClaudePlugins(
       path.join(dirs.claudeDir, "skills"),
@@ -783,9 +870,11 @@ export async function experimental_resolveClaudePluginRoots(
       enabledPlugins,
     )),
   );
+
   const roots = await experimental_resolveVendorPluginRoots({
     plugins,
     layout: "claude",
   });
+
   return { claudeDir: dirs.claudeDir, ...roots };
 }

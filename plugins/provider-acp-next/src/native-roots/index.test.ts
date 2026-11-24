@@ -16,7 +16,9 @@ import { resolveAcpNativeRoots } from "./index.js";
 let tempRoot: string;
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), "bb-acp-native-roots-index-"));
+  tempRoot = await mkdtemp(
+    path.join(tmpdir(), "omnyo-acp-native-roots-index-"),
+  );
 });
 
 afterEach(async () => {
@@ -25,9 +27,44 @@ afterEach(async () => {
 });
 
 describe("resolveAcpNativeRoots", () => {
+  it.each(["workspace", "workspace/nested"])(
+    "exposes OpenCode project commands before a session exists in %s",
+    async (workspace) => {
+      const cwd = path.join(tempRoot, workspace);
+
+      const answer = await resolveAcpNativeRoots({
+        agentId: "acp-opencode",
+        cwd,
+        homeDir: path.join(tempRoot, "home"),
+        env: {},
+      });
+
+      expect(answer.commands).toEqual([
+        {
+          path: path.join(cwd, ".opencode", "commands"),
+          origin: "project",
+          shape: "commands",
+          ancestors: true,
+        },
+      ]);
+    },
+  );
+
+  it("omits OpenCode project command roots without a workspace", async () => {
+    const answer = await resolveAcpNativeRoots({
+      agentId: "acp-opencode",
+      cwd: null,
+      homeDir: path.join(tempRoot, "home"),
+      env: {},
+    });
+
+    expect(answer.commands).toEqual([]);
+  });
+
   it("lists Cursor plugin skills", async () => {
     const homeDir = path.join(tempRoot, "home");
     const pluginRoot = path.join(tempRoot, "plugins", "review-tools");
+
     const installedPluginRoot = path.join(
       homeDir,
       ".cursor",
@@ -35,6 +72,7 @@ describe("resolveAcpNativeRoots", () => {
       "local",
       "review-tools",
     );
+
     await Promise.all([
       mkdir(path.join(pluginRoot, ".cursor-plugin"), { recursive: true }),
       mkdir(path.join(pluginRoot, "skills", "review"), { recursive: true }),
@@ -71,6 +109,7 @@ describe("resolveAcpNativeRoots", () => {
 
   it("lists conventional skills from a portable Cursor plugin", async () => {
     const homeDir = path.join(tempRoot, "home");
+
     const pluginRoot = path.join(
       homeDir,
       ".cursor",
@@ -78,6 +117,7 @@ describe("resolveAcpNativeRoots", () => {
       "local",
       "scott-engineering",
     );
+
     await mkdir(path.join(pluginRoot, "skills", "code-review"), {
       recursive: true,
     });
@@ -111,6 +151,7 @@ describe("resolveAcpNativeRoots", () => {
 
   it("lists skills from a completed Cursor marketplace cache entry", async () => {
     const homeDir = path.join(tempRoot, "home");
+
     const pluginRoot = path.join(
       homeDir,
       ".cursor",
@@ -120,6 +161,7 @@ describe("resolveAcpNativeRoots", () => {
       "review-tools",
       "revision-one",
     );
+
     await mkdir(path.join(pluginRoot, ".cursor-plugin"), { recursive: true });
     await mkdir(path.join(pluginRoot, "skills", "review"), {
       recursive: true,
@@ -155,6 +197,7 @@ describe("resolveAcpNativeRoots", () => {
 
   it("uses the newest completed Cursor marketplace plugin revision", async () => {
     const homeDir = path.join(tempRoot, "home");
+
     const pluginCache = path.join(
       homeDir,
       ".cursor",
@@ -163,9 +206,11 @@ describe("resolveAcpNativeRoots", () => {
       "cursor-public",
       "review-tools",
     );
+
     const olderRoot = path.join(pluginCache, "older");
     const newerRoot = path.join(pluginCache, "newer");
     const incompleteRoot = path.join(pluginCache, "incomplete");
+
     for (const pluginRoot of [olderRoot, newerRoot, incompleteRoot]) {
       await mkdir(path.join(pluginRoot, "skills", "review"), {
         recursive: true,
@@ -181,6 +226,7 @@ describe("resolveAcpNativeRoots", () => {
         "utf8",
       );
     }
+
     const olderMarker = path.join(olderRoot, ".cache-complete");
     const newerMarker = path.join(newerRoot, ".cache-complete");
     await writeFile(olderMarker, "", "utf8");
@@ -202,6 +248,7 @@ describe("resolveAcpNativeRoots", () => {
 
   it("deduplicates a local link to a cached Cursor plugin", async () => {
     const homeDir = path.join(tempRoot, "home");
+
     const pluginRoot = path.join(
       homeDir,
       ".cursor",
@@ -211,6 +258,7 @@ describe("resolveAcpNativeRoots", () => {
       "review-tools",
       "revision-one",
     );
+
     const localPluginRoot = path.join(
       homeDir,
       ".cursor",
@@ -218,6 +266,7 @@ describe("resolveAcpNativeRoots", () => {
       "local",
       "review-tools",
     );
+
     await mkdir(path.join(pluginRoot, "skills", "review"), {
       recursive: true,
     });
@@ -260,6 +309,7 @@ describe("resolveAcpNativeRoots", () => {
       ...args,
       agentId: "acp-opencode",
     });
+
     expect(opencode.skills?.map((root) => root.path)).toEqual([
       path.join(homeDir, ".config", "opencode", "skills"),
       path.join(homeDir, "oc", "skills"),
@@ -290,6 +340,7 @@ describe("resolveAcpNativeRoots", () => {
       homeDir,
       env: {},
     });
+
     expect(answer.skills?.map((root) => root.path)).toEqual([
       path.join(homeDir, ".grok", "skills"),
       path.join(homeDir, ".claude", "skills"),

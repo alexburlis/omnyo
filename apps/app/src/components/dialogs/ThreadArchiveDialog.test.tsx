@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { makeThread } from "@bb/test-helpers/domain-fixtures";
+import { makeThread } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadArchiveDialog } from "./ThreadArchiveDialog";
 
@@ -21,6 +21,7 @@ function renderDialog({
   const onArchive = vi.fn();
   const onOpenChange = vi.fn();
   const thread = makeThread({ status });
+
   const view = render(
     <ThreadArchiveDialog
       target={{ thread, childThreadCount }}
@@ -29,6 +30,7 @@ function renderDialog({
       onArchive={onArchive}
     />,
   );
+
   return { onArchive, onOpenChange, thread, view };
 }
 
@@ -55,9 +57,7 @@ describe("ThreadArchiveDialog", () => {
     expect(
       screen.getByRole("heading", { name: "Archive thread?" }),
     ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Archive" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeTruthy();
   });
 
   it.each(["starting", "active", "stopping"] as const)(

@@ -2,7 +2,7 @@ import type {
   UiPreferenceEntries,
   UiPreferenceKey,
   UiPreferenceValue,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { z } from "zod";
 
 export type PathUiPreferenceKey = { param: { key: string } };
@@ -25,6 +25,7 @@ export const updateUiPreferenceRequestSchema = z
     value: z.unknown(),
   })
   .strict();
+
 export type UpdateUiPreferenceRequest = z.infer<
   typeof updateUiPreferenceRequestSchema
 >;

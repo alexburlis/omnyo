@@ -1,4 +1,4 @@
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { registerHostRpcResponder } from "../helpers/host-rpc.js";
 import {
@@ -43,11 +43,13 @@ describe("Personal project file access", () => {
       await withTestHarness(async (harness) => {
         const { host, session } = seedHostSession(harness.deps);
         seedPrimaryHost(harness.deps, host.id);
+
         const environment = seedEnvironment(harness.deps, {
           projectId: PERSONAL_PROJECT_ID,
           hostId: host.id,
           path: "/personal/workspace",
         });
+
         const responder = registerHostRpcResponder(harness, {
           hostId: host.id,
           sessionId: session.id,
@@ -55,6 +57,7 @@ describe("Personal project file access", () => {
             switch (request.command.type) {
               case "host.list_files":
                 expect(request.command.path).toBe(environment.path);
+
                 return {
                   ok: true,
                   result: {
@@ -64,6 +67,7 @@ describe("Personal project file access", () => {
                 };
               case "host.list_paths":
                 expect(request.command.path).toBe(environment.path);
+
                 return {
                   ok: true,
                   result: {
@@ -84,6 +88,7 @@ describe("Personal project file access", () => {
                   "/personal/workspace/hello.txt",
                 );
                 expect(request.command.rootPath).toBe(environment.path);
+
                 return {
                   ok: true,
                   result: {
@@ -100,9 +105,11 @@ describe("Personal project file access", () => {
             }
           },
         });
+
         const response = await harness.app.request(
           `/api/v1/projects/${PERSONAL_PROJECT_ID}/${route.path}?environmentId=${environment.id}&${route.query}`,
         );
+
         expect(response.status).toBe(200);
         expect(
           typeof route.body === "string"
@@ -118,19 +125,23 @@ describe("Personal project file access", () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const foreign = seedEnvironment(harness.deps, {
         projectId: project.id,
         hostId: host.id,
       });
+
       const unready = seedEnvironment(harness.deps, {
         projectId: PERSONAL_PROJECT_ID,
         hostId: host.id,
         status: "creating",
         path: null,
       });
+
       const responder = registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -138,6 +149,7 @@ describe("Personal project file access", () => {
           throw new Error(`Unexpected RPC ${request.command.type}`);
         },
       });
+
       for (const [selector, status, code] of [
         [`environmentId=${foreign.id}`, 404, "environment_not_found"],
         [`environmentId=${unready.id}`, 409, "environment_not_ready"],
@@ -147,9 +159,11 @@ describe("Personal project file access", () => {
         const response = await harness.app.request(
           `/api/v1/projects/${PERSONAL_PROJECT_ID}/${route.path}?${route.query}&${selector}`,
         );
+
         expect(response.status, selector).toBe(status);
         expect(await response.json()).toMatchObject({ code });
       }
+
       expect(responder.requests).toHaveLength(0);
     });
   });

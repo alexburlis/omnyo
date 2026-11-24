@@ -1,9 +1,9 @@
 import { createElement, useCallback, useRef, type ReactNode } from "react";
 import { appToast } from "@/components/ui/app-toast";
 import { AppToastCommitDescription } from "@/components/ui/app-toast-descriptions";
-import type { Environment, Thread, WorkspaceStatus } from "@bb/domain";
-import type { CommitActionResponse } from "@bb/server-contract";
-import { useDialogState } from "@bb/shared-ui/use-dialog-state";
+import type { Environment, Thread, WorkspaceStatus } from "@omnyo/domain";
+import type { CommitActionResponse } from "@omnyo/server-contract";
+import { useDialogState } from "@omnyo/shared-ui/use-dialog-state";
 import type { ThreadGitActionDialogTarget } from "@/components/dialogs/ThreadGitActionDialog";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
 import type { RequestEnvironmentActionMutationLike } from "./threadDetailMutationTypes";
@@ -37,16 +37,6 @@ interface UseThreadGitActionsParams {
   workspaceStatus?: WorkspaceStatus;
 }
 
-export interface ThreadHeaderGitAction {
-  label: string;
-  target: ThreadGitActionDialogTarget;
-}
-
-const EMPTY_THREAD_HEADER_GIT_ACTIONS: ThreadHeaderGitAction[] = [];
-const COMMIT_THREAD_HEADER_GIT_ACTIONS: ThreadHeaderGitAction[] = [
-  { target: { kind: "commit" }, label: "Commit" },
-];
-
 function renderGitActionDescription(response: CommitActionResponse): ReactNode {
   return createElement(AppToastCommitDescription, {
     commitSha: response.commitSha,
@@ -69,11 +59,13 @@ function showGitActionErrorToast({
   toastId,
 }: ShowGitActionErrorToastParams): void {
   const title = "Commit failed";
+
   const message = getMutationErrorMessage({
     error,
     fallbackMessage: "Failed to start git action",
     lifecycleOperation: "commit",
   });
+
   const description = message === title ? undefined : message;
 
   appToast.error(title, {
@@ -100,14 +92,12 @@ export function useThreadGitActions({
     Boolean(environment) &&
     !isArchivedThread &&
     workspaceWorkingTree?.hasUncommittedChanges === true;
-  const threadHeaderGitActions = canCommit
-    ? COMMIT_THREAD_HEADER_GIT_ACTIONS
-    : EMPTY_THREAD_HEADER_GIT_ACTIONS;
 
   const enqueueGitAction = useCallback(
     ({ run }: EnqueueGitActionParams): Promise<void> => {
       const isQueuedBehindGitAction = queuedGitActionCountRef.current > 0;
       queuedGitActionCountRef.current += 1;
+
       const toastId = appToast.loading(
         isQueuedBehindGitAction ? "Commit queued" : "Creating commit",
       );
@@ -116,6 +106,7 @@ export function useThreadGitActions({
         if (isQueuedBehindGitAction) {
           appToast.loading("Creating commit", { id: toastId });
         }
+
         await run({ toastId });
       };
 
@@ -123,11 +114,13 @@ export function useThreadGitActions({
         runQueuedGitAction,
         runQueuedGitAction,
       );
+
       gitActionQueueRef.current = queuedAction
         .catch(() => undefined)
         .finally(() => {
           queuedGitActionCountRef.current -= 1;
         });
+
       return queuedAction;
     },
     [],
@@ -136,18 +129,23 @@ export function useThreadGitActions({
   const runCommitThread = useCallback(
     async ({ toastId }: RunQueuedGitActionParams) => {
       const attachedEnvironmentId = thread?.environmentId;
+
       if (!thread || !attachedEnvironmentId) {
         appToast.dismiss(toastId);
+
         return;
       }
+
       try {
         const response = await requestEnvironmentAction.mutateAsync({
           id: attachedEnvironmentId,
           action: "commit",
         });
+
         if (response.action !== "commit") {
           throw new Error("Expected commit action response.");
         }
+
         showGitActionSuccessToast({
           response,
           toastId,
@@ -166,12 +164,13 @@ export function useThreadGitActions({
     if (!thread?.environmentId) {
       return;
     }
+
     await enqueueGitAction({ run: runCommitThread });
   }, [enqueueGitAction, runCommitThread, thread?.environmentId]);
 
   return {
+    canCommit,
     handleCommitThread,
     threadGitActionDialog,
-    threadHeaderGitActions,
   };
 }

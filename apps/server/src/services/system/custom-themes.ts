@@ -8,10 +8,11 @@ import {
   resolveCodeTheme,
   type AppTheme,
   type FaviconColorPreference,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { readCustomThemeCodeTheme } from "./code-themes.js";
 
 const THEME_DIR_NAME = "theme";
+
 const THEME_CSS_FILE_NAME = "theme.css";
 
 export function resolveThemeRootPath(dataDir: string): string {
@@ -27,11 +28,13 @@ export function resolveCustomThemeCssPath(
 
 export function listCustomThemeNames(themeRoot: string): string[] {
   let entries;
+
   try {
     entries = readdirSync(themeRoot, { withFileTypes: true });
   } catch {
     return [];
   }
+
   return entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
@@ -46,12 +49,15 @@ export function readCustomThemeCss(
 ): string | null {
   if (!customThemeNameSchema.safeParse(name).success) return null;
   let css: string;
+
   try {
     css = readFileSync(resolveCustomThemeCssPath(themeRoot, name), "utf8");
   } catch {
     return null;
   }
+
   if (css.length > CUSTOM_THEME_CSS_MAX_LENGTH) return null;
+
   return css;
 }
 
@@ -63,7 +69,9 @@ export function resolveAppTheme(
   const declared = isBuiltInThemeId(themeId)
     ? null
     : readCustomThemeCodeTheme(themeRoot, themeId);
+
   const resolvedCodeTheme = resolveCodeTheme(declared, themeId);
+
   if (isBuiltInThemeId(themeId)) {
     return {
       themeId,
@@ -72,7 +80,9 @@ export function resolveAppTheme(
       resolvedCodeTheme,
     };
   }
+
   const customCss = readCustomThemeCss(themeRoot, themeId);
+
   if (customCss === null) {
     return {
       ...defaultAppTheme,
@@ -80,5 +90,6 @@ export function resolveAppTheme(
       resolvedCodeTheme: resolveCodeTheme(null, "default"),
     };
   }
+
   return { themeId, customCss, faviconColor, resolvedCodeTheme };
 }

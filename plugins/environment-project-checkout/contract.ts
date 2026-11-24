@@ -1,6 +1,6 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { z } from "zod";
-import { environmentHostProgressSchema } from "bb-environment-provider-host/progress";
+import { environmentHostProgressSchema } from "omnyo-environment-provider-host/progress";
 
 export const checkoutBranchSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("existing"), name: z.string().min(1) }).strict(),
@@ -12,12 +12,14 @@ export const checkoutBranchSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
 export type CheckoutBranch = z.infer<typeof checkoutBranchSchema>;
 
 export const checkoutBranchSelectionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("existing"), name: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("new"), baseBranch: z.string().min(1) }).strict(),
 ]);
+
 export type CheckoutBranchSelection = z.infer<
   typeof checkoutBranchSelectionSchema
 >;
@@ -38,6 +40,7 @@ export const gitCheckoutRefSchema = z.discriminatedUnion("kind", [
     .strict(),
   z.object({ kind: z.literal("unknown"), reason: z.string() }).strict(),
 ]);
+
 export type GitCheckoutRef = z.infer<typeof gitCheckoutRefSchema>;
 
 export const workspaceGitOperationSchema = z.union([
@@ -49,6 +52,7 @@ export const workspaceGitOperationSchema = z.union([
     })
     .strict(),
 ]);
+
 export type WorkspaceGitOperation = z.infer<typeof workspaceGitOperationSchema>;
 
 export const checkoutInspectionSchema = z.union([
@@ -62,6 +66,7 @@ export const checkoutInspectionSchema = z.union([
     })
     .strict(),
 ]);
+
 export type CheckoutInspection = z.infer<typeof checkoutInspectionSchema>;
 
 export const checkoutHostContract = defineRpcContract({
@@ -79,6 +84,7 @@ export const checkoutHostContract = defineRpcContract({
           status: z.literal("attached"),
           path: z.string().min(1),
           branchName: z.string().min(1).nullable(),
+          mergeBaseBranch: z.string().min(1).nullable(),
         })
         .strict(),
       z

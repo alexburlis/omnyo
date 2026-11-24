@@ -8,33 +8,35 @@ import {
   desktopBrowserBrokerDescriptorSchema,
   desktopBrowserBrokerResponseSchema,
   desktopBrowserChangedSchema,
-  desktopBrowserCommandSchema,
+  desktopBrowserBrokerCommandSchema,
   desktopBrowserRegistrationSchema,
-  desktopBrowserResultSchemas,
+  desktopBrowserBrokerResultSchemas,
   type DesktopBrowserBrokerDescriptor,
   type DesktopBrowserChanged,
-  type DesktopBrowserCommand,
+  type DesktopBrowserBrokerCommand,
   type DesktopBrowserInstance,
-  type DesktopBrowserResult,
-} from "@bb/host-daemon-contract";
+  type DesktopBrowserBrokerResult,
+} from "@omnyo/host-daemon-contract";
 
 interface Peer {
   socket: WebSocket;
   instances: DesktopBrowserInstance[];
 }
+
 interface Pending {
   peer: Peer;
-  command: DesktopBrowserCommand;
-  resolve: (value: DesktopBrowserResult) => void;
+  command: DesktopBrowserBrokerCommand;
+  resolve: (value: DesktopBrowserBrokerResult) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
+
 export interface DesktopBrowserBroker {
   descriptor: DesktopBrowserBrokerDescriptor;
   setConnected(connected: boolean): void;
-  request<C extends DesktopBrowserCommand>(
+  request<C extends DesktopBrowserBrokerCommand>(
     command: C,
-  ): Promise<DesktopBrowserResult<C["type"]>>;
+  ): Promise<DesktopBrowserBrokerResult<C["type"]>>;
   close(): Promise<void>;
 }
 
@@ -52,9 +54,11 @@ export async function startDesktopBrowserBroker(options: {
   const peers = new Set<Peer>();
   const pending = new Map<string, Pending>();
   const timeoutMs = options.requestTimeoutMs ?? 15_000;
+
   const server = createServer((_request, response) => {
     response.writeHead(404).end();
   });
+
   const websocketServer = new WebSocketServer({
     noServer: true,
     maxPayload: 18 * 1024 * 1024,
@@ -62,6 +66,7 @@ export async function startDesktopBrowserBroker(options: {
 
   function removePeer(peer: Peer): void {
     peers.delete(peer);
+
     for (const [requestId, request] of pending) {
       if (request.peer !== peer) continue;
       pending.delete(requestId);
@@ -69,10 +74,12 @@ export async function startDesktopBrowserBroker(options: {
       request.reject(new Error("Desktop browser disconnected"));
     }
   }
+
   function disconnect(peer: Peer): void {
     removePeer(peer);
     peer.socket.terminate();
   }
+
   function ownInstance(
     peer: Peer,
     instanceId: string,
@@ -89,6 +96,7 @@ export async function startDesktopBrowserBroker(options: {
     const authorization = request.headers.authorization;
     const expected = Buffer.from(`Bearer ${token}`);
     const actual = Buffer.from(authorization ?? "");
+
     if (
       !connected ||
       closed ||
@@ -98,9 +106,12 @@ export async function startDesktopBrowserBroker(options: {
       actual.length !== expected.length ||
       !timingSafeEqual(actual, expected)
     ) {
+      socket.on("error", () => socket.destroy());
       socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+
       return;
     }
+
     websocketServer.handleUpgrade(request, socket, head, (websocket) => {
       const peer: Peer = { socket: websocket, instances: [] };
       peers.add(peer);
@@ -117,8 +128,10 @@ export async function startDesktopBrowserBroker(options: {
           if (!connected || isBinary)
             throw new Error("Invalid desktop message");
           const value: unknown = JSON.parse(data.toString());
+
           const registration =
             desktopBrowserRegistrationSchema.safeParse(value);
+
           if (registration.success) {
             if (
               registration.data.hostId !== options.hostId ||
@@ -126,7 +139,9 @@ export async function startDesktopBrowserBroker(options: {
             ) {
               throw new Error("Desktop server identity mismatch");
             }
+
             const ids = new Set<string>();
+
             for (const instance of registration.data.instances) {
               if (
                 ids.has(instance.instanceId) ||
@@ -140,11 +155,14 @@ export async function startDesktopBrowserBroker(options: {
               ) {
                 throw new Error("Duplicate desktop instance");
               }
+
               ids.add(instance.instanceId);
             }
+
             peer.instances = registration.data.instances;
             registered = true;
             clearTimeout(registrationTimer);
+
             for (const request of pending.values()) {
               if (
                 request.peer === peer &&
@@ -158,10 +176,13 @@ export async function startDesktopBrowserBroker(options: {
                 throw new Error("Desktop generation changed during request");
               }
             }
+
             return;
           }
+
           if (!registered) throw new Error("Desktop must register");
           const changed = desktopBrowserChangedSchema.safeParse(value);
+
           if (changed.success) {
             if (
               !ownInstance(
@@ -175,29 +196,41 @@ export async function startDesktopBrowserBroker(options: {
             ) {
               throw new Error("Desktop snapshot scope mismatch");
             }
+
             options.onChanged(changed.data);
+
             return;
           }
+
           const response = desktopBrowserBrokerResponseSchema.parse(value);
           const request = pending.get(response.requestId);
+
           if (!request) return;
+
           if (request.peer !== peer)
             throw new Error("Desktop response owner mismatch");
           pending.delete(response.requestId);
           clearTimeout(request.timer);
+
           if (response.type === "error") {
             request.reject(new Error(response.message));
+
             return;
           }
-          const result = desktopBrowserResultSchemas[
+
+          const result = desktopBrowserBrokerResultSchemas[
             request.command.type
           ].safeParse(response.result);
+
           if (!result.success) {
             request.reject(new Error("Invalid desktop browser result"));
             disconnect(peer);
+
             return;
           }
+
           const command = request.command;
+
           if (
             "threadId" in command &&
             (("tabs" in result.data &&
@@ -211,8 +244,10 @@ export async function startDesktopBrowserBroker(options: {
           ) {
             request.reject(new Error("Desktop tab scope mismatch"));
             disconnect(peer);
+
             return;
           }
+
           if (
             command.type === "desktop.browser.acquire_control" &&
             "lease" in result.data &&
@@ -222,8 +257,10 @@ export async function startDesktopBrowserBroker(options: {
           ) {
             request.reject(new Error("Desktop lease scope mismatch"));
             disconnect(peer);
+
             return;
           }
+
           request.resolve(result.data);
         } catch {
           disconnect(peer);
@@ -239,8 +276,10 @@ export async function startDesktopBrowserBroker(options: {
     });
   });
   const address = server.address();
+
   if (!address || typeof address === "string")
     throw new Error("Desktop broker missing loopback address");
+
   const descriptor = desktopBrowserBrokerDescriptorSchema.parse({
     version: 1,
     hostId: options.hostId,
@@ -248,11 +287,14 @@ export async function startDesktopBrowserBroker(options: {
     url: `ws://127.0.0.1:${address.port}/desktop-browser`,
     token,
   });
+
   const descriptorPath = join(
     options.dataDir,
     DESKTOP_BROWSER_BROKER_DESCRIPTOR_FILE,
   );
+
   const temporaryPath = `${descriptorPath}.${randomUUID()}.tmp`;
+
   try {
     await mkdir(options.dataDir, { recursive: true, mode: 0o700 });
     await writeFile(temporaryPath, JSON.stringify(descriptor), {
@@ -267,41 +309,65 @@ export async function startDesktopBrowserBroker(options: {
     throw error;
   }
 
-  function request<C extends DesktopBrowserCommand>(
+  function request<C extends DesktopBrowserBrokerCommand>(
     command: C,
-  ): Promise<DesktopBrowserResult<C["type"]>>;
+  ): Promise<DesktopBrowserBrokerResult<C["type"]>>;
   async function request(
-    input: DesktopBrowserCommand,
-  ): Promise<DesktopBrowserResult> {
-    const command = desktopBrowserCommandSchema.parse(input);
+    input: DesktopBrowserBrokerCommand,
+  ): Promise<DesktopBrowserBrokerResult> {
+    const command = desktopBrowserBrokerCommandSchema.parse(input);
+
     if (!connected || closed)
       throw new Error("Desktop browser broker is disconnected from server");
+
     if (command.type === "desktop.browser.list_instances") {
       return { instances: [...peers].flatMap((peer) => peer.instances) };
     }
+
     const peer = [...peers].find((entry) =>
       ownInstance(entry, command.instanceId, command.generation),
     );
+
     if (!peer)
       throw new Error(
         "Desktop browser instance is unavailable or generation is stale",
       );
+
+    if (
+      command.type === "desktop.browser.profile_renderer" &&
+      !peer.instances.some(
+        (instance) =>
+          instance.instanceId === command.instanceId &&
+          instance.generation === command.generation &&
+          instance.rendererProfiling === true,
+      )
+    ) {
+      throw new Error(
+        "Desktop renderer profiling is unavailable on this client",
+      );
+    }
+
     if (pending.size >= 1000) throw new Error("Desktop browser broker is busy");
+
     if (
       command.type === "desktop.browser.acquire_control" &&
       command.expiresAt <= Date.now()
     ) {
       throw new Error("Desktop browser grant has expired");
     }
+
     return new Promise((resolve, reject) => {
       const requestId = randomUUID();
+
       const timer = setTimeout(() => {
         pending.delete(requestId);
         reject(new Error("Desktop browser request timed out"));
         disconnect(peer);
       }, timeoutMs);
+
       timer.unref();
       pending.set(requestId, { peer, command, resolve, reject, timer });
+
       try {
         peer.socket.send(
           JSON.stringify({ type: "request", requestId, command }),
@@ -311,17 +377,20 @@ export async function startDesktopBrowserBroker(options: {
       }
     });
   }
+
   return {
     descriptor,
     request,
     setConnected(value) {
       connected = value;
+
       if (!value) for (const peer of peers) disconnect(peer);
     },
     async close() {
       if (closed) return;
       closed = true;
       connected = false;
+
       for (const peer of peers) disconnect(peer);
       await rm(descriptorPath, { force: true });
       await new Promise<void>((resolve) =>

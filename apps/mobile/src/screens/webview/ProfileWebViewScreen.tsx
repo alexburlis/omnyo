@@ -2,7 +2,7 @@ import {
   MOBILE_BRIDGE_VERSION,
   buildBridgeInjectionScript,
   type NativeShellHandshake,
-} from "@bb/mobile-bridge";
+} from "@omnyo/mobile-bridge";
 import Constants from "expo-constants";
 import { nativeApplicationVersion, nativeBuildVersion } from "expo-application";
 import CookieManager from "@react-native-cookies/cookies";
@@ -25,27 +25,35 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebViewKeyboardFrame } from "./WebViewKeyboardFrame";
 import { WebView, type WebViewProps } from "react-native-webview";
 import { revealApp, useProfiles } from "@/app-shell";
+import { describeError } from "@/lib/describe-error";
 import { nativeSessionCache } from "@/lib/native";
 import {
   buildShellUrl,
-  isExternallyOpenable,
-  isShellNavigation,
+  clearWebsiteData,
+  decideShellNavigation,
   resolveShellLoadPath,
   resolveShellScreenState,
   revealsShellFailure,
+  SHELL_ORIGIN_WHITELIST,
   shellPathFromUrl,
   shouldReloadForSession,
   subscribeToShellCommands,
   type ShellLoadPhase,
 } from "@/lib/shell";
-import { firstParam, settingsSectionHref } from "@/screens/shell/hrefs";
+import type { ShellScreenState } from "@/lib/shell/shell-state";
+import {
+  connectEnrollHref,
+  firstParam,
+  settingsSectionHref,
+} from "@/screens/shell/hrefs";
 import { useTheme } from "@/theme";
-import { Button, EmptyStatePanel, Spinner, Text } from "@/ui";
+import { Button, EmptyStatePanel, Spinner, Text, toast } from "@/ui";
 import { Linking } from "react-native";
 import { useShellBridge } from "./useShellBridge";
 
 const APP_VERSION =
   nativeApplicationVersion ?? String(Constants.expoConfig?.version ?? "0.0.0");
+
 const ANDROID_VERSION_CODE = Number(nativeBuildVersion);
 
 const IDLE_SESSION = { status: "idle" } as const;
@@ -54,26 +62,52 @@ export function ProfileWebViewScreen() {
   const { tokens } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ profileId?: string; path?: string }>();
-  const { status, profiles, activeProfile, connection, setActiveProfile } =
-    useProfiles();
+
+  const params = useLocalSearchParams<{
+    profileId?: string;
+    path?: string;
+  }>();
+
+  const {
+    status,
+    profiles,
+    activeProfile,
+    connection,
+    setActiveProfile,
+    renewSession,
+    reportShellAuthFailure,
+  } = useProfiles();
 
   const requestedProfileId = firstParam(params.profileId);
   const requestedPath = firstParam(params.path);
 
+  const appliedProfileRequest = useRef<string | null>(null);
   useEffect(() => {
-    if (requestedProfileId === undefined) return;
-    if (activeProfile?.id === requestedProfileId) return;
+    if (requestedProfileId === undefined) {
+      appliedProfileRequest.current = null;
+
+      return;
+    }
+
+    if (appliedProfileRequest.current === requestedProfileId) return;
+
     if (!profiles.some((profile) => profile.id === requestedProfileId)) return;
-    void setActiveProfile(requestedProfileId);
+    appliedProfileRequest.current = requestedProfileId;
+
+    if (activeProfile?.id !== requestedProfileId) {
+      void setActiveProfile(requestedProfileId);
+    }
   }, [activeProfile?.id, profiles, requestedProfileId, setActiveProfile]);
 
   const profile = activeProfile;
-  const session = connection?.session ?? IDLE_SESSION;
+
+  const unavailable = connection?.client === null ? connection.session : null;
+  const session = connection?.client ? connection.session : IDLE_SESSION;
   const webViewRef = useRef<WebView>(null);
   const canGoBack = useRef(false);
   const [load, setLoad] = useState<ShellLoadPhase>({ kind: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
+
   const [visited, setVisited] = useState<{
     scope: string;
     path: string;
@@ -85,31 +119,40 @@ export function ProfileWebViewScreen() {
       : `${profile.id}#${profile.serverUrl}#${requestedPath ?? ""}`;
 
   useEffect(() => {
+    setLoad({ kind: "loading" });
+  }, [loadScope]);
+
+  useEffect(() => {
     canGoBack.current = false;
   }, [loadScope, reloadKey]);
 
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS !== "android") return;
+
       const subscription = BackHandler.addEventListener(
         "hardwareBackPress",
         () => {
           if (!canGoBack.current || webViewRef.current === null) return false;
           webViewRef.current.goBack();
+
           return true;
         },
       );
+
       return () => subscription.remove();
     }, []),
   );
 
   const sourceUrl = useMemo(() => {
     if (profile === null) return null;
+
     const path = resolveShellLoadPath({
       visitedPath:
         visited !== null && visited.scope === loadScope ? visited.path : null,
       requestedPath,
     });
+
     return buildShellUrl(profile.serverUrl, path);
   }, [loadScope, profile, requestedPath, visited]);
 
@@ -127,7 +170,7 @@ export function ProfileWebViewScreen() {
     [loadScope],
   );
 
-  const openDeviceSettings = useCallback(() => {
+  const openServers = useCallback(() => {
     router.push(settingsSectionHref("device"));
   }, [router]);
 
@@ -139,7 +182,7 @@ export function ProfileWebViewScreen() {
     },
     onPath: rememberPath,
     onOpenNative: (screen) => {
-      if (screen === "device-settings") openDeviceSettings();
+      if (screen === "device-settings") openServers();
     },
   });
 
@@ -147,18 +190,31 @@ export function ProfileWebViewScreen() {
   useEffect(
     () =>
       subscribeToShellCommands((command) => {
-        if (command.kind === "clear-website-data") {
-          webViewRef.current?.clearCache(true);
-          void CookieManager.clearAll(false);
-          void CookieManager.clearAll(true);
-          if (connectProfileId !== null) {
-            void nativeSessionCache.clear(connectProfileId);
-          }
-        }
         setLoad({ kind: "loading" });
-        setReloadKey((value) => value + 1);
+
+        if (command.kind !== "clear-website-data") {
+          setReloadKey((value) => value + 1);
+
+          return;
+        }
+
+        webViewRef.current?.clearCache(true);
+        void clearWebsiteData(connectProfileId, {
+          clearCookies: (useWebKit) => CookieManager.clearAll(useWebKit),
+          clearSessionCache: (profileId) => nativeSessionCache.clear(profileId),
+          renewSession,
+        })
+          .then(
+            () => toast.success("Cleared"),
+            (error: unknown) => {
+              toast.error("Could not clear website data", {
+                description: describeError(error),
+              });
+            },
+          )
+          .finally(() => setReloadKey((value) => value + 1));
       }),
-    [connectProfileId],
+    [connectProfileId, renewSession],
   );
 
   const safeArea = useMemo(
@@ -170,12 +226,15 @@ export function ProfileWebViewScreen() {
     }),
     [insets.bottom, insets.left, insets.right, insets.top],
   );
+
   const hasSentHandshake = useRef(false);
   useEffect(() => {
     if (!hasSentHandshake.current) {
       hasSentHandshake.current = true;
+
       return;
     }
+
     bridge.send({ type: "safe-area", safeArea });
   }, [bridge, safeArea]);
 
@@ -183,6 +242,7 @@ export function ProfileWebViewScreen() {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") bridge.send({ type: "resume" });
     });
+
     return () => subscription.remove();
   }, [bridge]);
 
@@ -194,11 +254,13 @@ export function ProfileWebViewScreen() {
       setReloadKey((value) => value + 1);
       setLoad({ kind: "loading" });
     }
+
     previousSession.current = session;
   }, [load, session]);
 
   const handshake = useMemo<NativeShellHandshake | null>(() => {
     if (profile === null || sourceUrl === null) return null;
+
     return {
       bridgeVersion: MOBILE_BRIDGE_VERSION,
       appVersion: APP_VERSION,
@@ -222,19 +284,41 @@ export function ProfileWebViewScreen() {
     };
   }, [profile, safeArea, sourceUrl]);
 
+  const injectionScript = useMemo(
+    () =>
+      handshake === null ? undefined : buildBridgeInjectionScript(handshake),
+    [handshake],
+  );
+
   const retry = useCallback(() => {
     setLoad({ kind: "loading" });
     setReloadKey((value) => value + 1);
   }, []);
 
-  const screen = resolveShellScreenState({
-    storeReady: status === "ready",
-    hasAnyProfile: profiles.length > 0,
-    hasProfile: profile !== null && sourceUrl !== null,
-    requiresSession: profile?.mode === "connect",
-    session,
-    load,
-  });
+  const screen: ShellScreenState =
+    unavailable !== null
+      ? {
+          kind: "error",
+          title: "Pair this server again",
+          detail: unavailable.detail,
+          action: "re-pair",
+        }
+      : resolveShellScreenState({
+          storeReady: status === "ready",
+          hasAnyProfile: profiles.length > 0,
+          hasProfile: profile !== null && sourceUrl !== null,
+          requiresSession: profile?.mode === "connect",
+          session,
+          load,
+        });
+
+  useEffect(() => {
+    if (screen.kind !== "reconnecting" || loadScope === null) return;
+
+    const timer = setTimeout(retry, 2_000);
+
+    return () => clearTimeout(timer);
+  }, [loadScope, retry, screen.kind]);
 
   const showsFailure = revealsShellFailure(screen, profile?.mode === "connect");
   useEffect(() => {
@@ -245,21 +329,41 @@ export function ProfileWebViewScreen() {
     return <Redirect href="/settings/servers/add" />;
   }
 
-  if (screen.kind === "loading") {
+  if (screen.kind === "loading" || screen.kind === "reconnecting") {
     return (
       <View
         className="flex-1 items-center justify-center gap-3"
-        testID="shell-loading"
+        testID={
+          screen.kind === "reconnecting"
+            ? "shell-reconnecting"
+            : "shell-loading"
+        }
       >
         <Spinner />
         <Text className="text-sm text-muted-foreground">{screen.message}</Text>
+        {screen.kind === "reconnecting" ? (
+          <Button
+            variant="ghost"
+            testID="shell-device-settings"
+            onPress={openServers}
+          >
+            Servers
+          </Button>
+        ) : null}
       </View>
     );
   }
 
   if (screen.kind === "error") {
     return (
-      <View className="flex-1 justify-center p-6" testID="shell-error">
+      <View
+        className="flex-1 justify-center p-6"
+        style={{
+          paddingLeft: 24 + insets.left,
+          paddingRight: 24 + insets.right,
+        }}
+        testID="shell-error"
+      >
         <EmptyStatePanel>
           <View className="items-center gap-3">
             <Text className="text-center text-base font-semibold">
@@ -279,8 +383,8 @@ export function ProfileWebViewScreen() {
                 onPress={() =>
                   router.push(
                     profile === null
-                      ? "/settings/servers"
-                      : `/connect?profileId=${encodeURIComponent(profile.id)}`,
+                      ? settingsSectionHref("device")
+                      : connectEnrollHref({ profileId: profile.id }),
                   )
                 }
               >
@@ -290,9 +394,9 @@ export function ProfileWebViewScreen() {
             <Button
               variant="ghost"
               testID="shell-device-settings"
-              onPress={openDeviceSettings}
+              onPress={openServers}
             >
-              Device settings
+              Servers
             </Button>
           </View>
         </EmptyStatePanel>
@@ -319,6 +423,7 @@ export function ProfileWebViewScreen() {
         ref={webViewRef}
         initialUrl={sourceUrl}
         style={{ backgroundColor: tokens.background }}
+        originWhitelist={SHELL_ORIGIN_WHITELIST}
         sharedCookiesEnabled
         javaScriptEnabled
         domStorageEnabled
@@ -332,23 +437,29 @@ export function ProfileWebViewScreen() {
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
         webviewDebuggingEnabled={__DEV__}
-        injectedJavaScriptBeforeContentLoaded={buildBridgeInjectionScript(
-          handshake,
-        )}
+        injectedJavaScriptBeforeContentLoaded={injectionScript}
         onMessage={(event) => {
           canGoBack.current = event.nativeEvent.canGoBack;
           bridge.onMessage(event);
         }}
         onShouldStartLoadWithRequest={(request) => {
-          if (isShellNavigation(request.url, profile.serverUrl)) return true;
-          if (isExternallyOpenable(request.url)) {
+          const decision = decideShellNavigation(request, profile);
+
+          if (decision === "relay-sign-in") {
+            setLoad({ kind: "http-error", status: 401 });
+            reportShellAuthFailure(profile.id);
+          }
+
+          if (decision === "open-external") {
             void Linking.openURL(request.url).catch(() => undefined);
           }
-          return false;
+
+          return decision === "load";
         }}
         onNavigationStateChange={(state) => {
           canGoBack.current = state.canGoBack;
           const path = shellPathFromUrl(state.url, profile.serverUrl);
+
           if (path !== null) rememberPath(path);
         }}
         onLoadEnd={() =>
@@ -360,10 +471,12 @@ export function ProfileWebViewScreen() {
           setLoad({
             kind: "failed",
             detail: event.nativeEvent.description || "Unknown error",
+            code: event.nativeEvent.code,
           })
         }
         onHttpError={(event) => {
           const { statusCode } = event.nativeEvent;
+
           if (statusCode >= 400)
             setLoad({ kind: "http-error", status: statusCode });
         }}
@@ -381,9 +494,9 @@ export function ProfileWebViewScreen() {
             variant="outline"
             icon="Settings"
             testID="shell-server-error-device-settings"
-            onPress={openDeviceSettings}
+            onPress={openServers}
           >
-            Device settings
+            Servers
           </Button>
         </View>
       ) : null}
@@ -398,5 +511,6 @@ type ShellWebViewProps = Omit<WebViewProps, "source"> & {
 
 function ShellWebView({ initialUrl, ref, ...props }: ShellWebViewProps) {
   const [source] = useState(() => ({ uri: initialUrl }));
+
   return <WebView {...props} ref={ref} source={source} />;
 }

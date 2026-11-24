@@ -46,7 +46,9 @@ function section(kind: ResourceDetailSectionKind) {
   function ResourceKindSection(props: ResourceDetailSectionProps) {
     return <ResourceDetailSection {...props} kind={kind} />;
   }
+
   ResourceKindSection.displayName = `Resource${kind[0]!.toUpperCase()}${kind.slice(1)}Section`;
+
   return ResourceKindSection;
 }
 
@@ -97,6 +99,7 @@ export function ResourceDetailPage({
       {leading}
     </span>
   ) : null;
+
   const titleRow = (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
       <h1 className="min-w-0 truncate text-base font-semibold">{title}</h1>
@@ -107,9 +110,11 @@ export function ResourceDetailPage({
       ) : null}
     </div>
   );
+
   const metadataNode = metadata ? (
     <div className="min-w-0 text-xs text-subtle-foreground">{metadata}</div>
   ) : null;
+
   return (
     <div className={cn("mx-auto w-full space-y-6", maxWidthClassName)}>
       <div className="flex min-w-0 items-start justify-between gap-4">

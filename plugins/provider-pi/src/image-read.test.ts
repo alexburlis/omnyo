@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { experimental_createDeltaAssembler as createDeltaAssembler } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { experimental_createDeltaAssembler as createDeltaAssembler } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { createPiDeltaTranslator } from "./delta-translation.js";
 
 const workspace = resolve("/workspace");
@@ -16,11 +16,13 @@ function createHarness() {
   const translator = createPiDeltaTranslator({
     resolveModelContextWindow: () => null,
   });
+
   const assembler = createDeltaAssembler({
     providerId: "pi",
     entropyPrefix: "image-read",
     textDeltaFlushMs: 0,
   });
+
   return (event: unknown, threadId = "thread-a", cwd?: string) =>
     assembler.assemble({
       threadId,
@@ -141,6 +143,7 @@ describe("Pi native image read completion", () => {
     const cwd = "cwd" in scenario ? scenario.cwd : workspace;
     const translate = createHarness();
     translate({ type: "agent_start" });
+
     const startEvents = translate(
       {
         type: "tool_execution_start",
@@ -151,6 +154,7 @@ describe("Pi native image read completion", () => {
       "thread-a",
       cwd,
     );
+
     const endEvents = translate(
       {
         type: "tool_execution_end",
@@ -162,6 +166,7 @@ describe("Pi native image read completion", () => {
       "thread-a",
       cwd,
     );
+
     const events = [...startEvents, ...endEvents];
     const started = events.filter((event) => event.type === "item/started");
     const completed = events.filter((event) => event.type === "item/completed");
@@ -171,6 +176,7 @@ describe("Pi native image read completion", () => {
       "opensAtStart" in scenario,
     );
     const id = started[0]?.item.id;
+
     if (scenario.imagePath !== null) {
       expect(started[0]?.item).toEqual({
         type: "imageView",
@@ -190,6 +196,7 @@ describe("Pi native image read completion", () => {
 
   it("does not reuse another thread's path for overlapping tool IDs", () => {
     const translate = createHarness();
+
     for (const threadId of ["thread-a", "thread-b"]) {
       translate({ type: "agent_start" }, threadId);
       translate(
@@ -203,6 +210,7 @@ describe("Pi native image read completion", () => {
         join(workspace, threadId),
       );
     }
+
     for (const threadId of ["thread-b", "thread-a"]) {
       const completed = translate(
         {
@@ -215,6 +223,7 @@ describe("Pi native image read completion", () => {
         threadId,
         join(workspace, threadId),
       ).filter((event) => event.type === "item/completed");
+
       expect(completed).toHaveLength(1);
       expect(completed[0]?.item).toMatchObject({
         type: "imageView",
@@ -226,6 +235,7 @@ describe("Pi native image read completion", () => {
   it("keeps an image-bearing close without a start generic", () => {
     const translate = createHarness();
     translate({ type: "agent_start" });
+
     const completed = translate({
       type: "tool_execution_end",
       toolCallId: "unseen-read",
@@ -233,6 +243,7 @@ describe("Pi native image read completion", () => {
       result: { content: [imageBlock] },
       isError: false,
     }).filter((event) => event.type === "item/completed");
+
     expect(completed).toHaveLength(1);
     expect(completed[0]?.item).toMatchObject({
       type: "toolCall",

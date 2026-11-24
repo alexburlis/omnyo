@@ -5,27 +5,33 @@ import { z } from "zod";
 import {
   createDesktopBrowserCdpBridge,
   desktopBrowserCdpTargetId,
+  redactCdpCookieMaterial,
   type DesktopBrowserCdpAdapter,
   type DesktopBrowserCdpPage,
   type DesktopBrowserCdpScope,
 } from "../src/desktop-browser-cdp.js";
 
 const messageSchema = z.record(z.string(), z.json());
+
 type Message = z.infer<typeof messageSchema>;
+
 const disposers: Array<() => Promise<void>> = [];
 
 function deferred() {
   let resolve: () => void = () => {
     throw new Error("Deferred promise is not initialized");
   };
+
   const promise = new Promise<void>((done) => {
     resolve = done;
   });
+
   return { promise, resolve };
 }
 
 afterEach(async () => {
   vi.unstubAllGlobals();
+
   for (const dispose of disposers.splice(0).reverse()) await dispose();
 });
 
@@ -34,25 +40,31 @@ function createFixture() {
   const scopes = new Map<string, DesktopBrowserCdpScope>();
   const changes = new Set<() => void>();
   const commands: Array<{ tabId: string; method: string }> = [];
+
   const nativeCommands: Array<{
     tabId: string;
     method: string;
     params: Message;
     sessionId: string | undefined;
   }> = [];
+
   const messageListeners = new Map<
     string,
     Set<Parameters<DesktopBrowserCdpPage["onMessage"]>[0]>
   >();
+
   const attachments = new Set<string>();
   const scopeA = { hostWebContentsId: 1, threadId: "thread-a" };
   const scopeB = { hostWebContentsId: 1, threadId: "thread-b" };
   const scopeOtherWindow = { hostWebContentsId: 2, threadId: "thread-a" };
+
   function addTab(tabId: string, scope: DesktopBrowserCdpScope) {
     const listeners = new Set<
       Parameters<DesktopBrowserCdpPage["onMessage"]>[0]
     >();
+
     messageListeners.set(tabId, listeners);
+
     const page: DesktopBrowserCdpPage = {
       tabId,
       url: `https://example.com/${tabId}`,
@@ -66,10 +78,12 @@ function createFixture() {
       async send(method, params, sessionId) {
         commands.push({ tabId, method });
         nativeCommands.push({ tabId, method, params, sessionId });
+
         return { value: tabId };
       },
       onMessage(listener) {
         listeners.add(listener);
+
         return () => {
           listeners.delete(listener);
         };
@@ -78,18 +92,24 @@ function createFixture() {
         return () => {};
       },
     };
+
     tabs.set(tabId, page);
     scopes.set(tabId, scope);
+
     for (const listener of changes) listener();
+
     return page;
   }
+
   addTab("a", scopeA);
   addTab("b", scopeB);
   addTab("other-window", scopeOtherWindow);
+
   const adapter: DesktopBrowserCdpAdapter = {
     listTabs(scope) {
       return [...tabs.values()].filter((page) => {
         const owner = scopes.get(page.tabId);
+
         return (
           owner?.threadId === scope.threadId &&
           owner.hostWebContentsId === scope.hostWebContentsId
@@ -99,10 +119,12 @@ function createFixture() {
     async createTab(scope, url) {
       const page = addTab(`created-${tabs.size}`, scope);
       page.url = url;
+
       return page.tabId;
     },
     async closeTab(_scope, tabId) {
       tabs.delete(tabId);
+
       for (const listener of changes) listener();
     },
     async activateTab(_scope, tabId) {
@@ -110,11 +132,13 @@ function createFixture() {
     },
     subscribe(listener) {
       changes.add(listener);
+
       return () => {
         changes.delete(listener);
       };
     },
   };
+
   function emitMessage(
     tabId: string,
     method: string,
@@ -122,9 +146,12 @@ function createFixture() {
     sessionId = "",
   ) {
     const listeners = messageListeners.get(tabId);
+
     if (listeners === undefined) throw new Error("Missing fixture tab");
+
     for (const listener of listeners) listener(method, params, sessionId);
   }
+
   return {
     adapter,
     scopeA,
@@ -139,11 +166,14 @@ function createFixture() {
 
 async function openBridge() {
   const fixture = createFixture();
+
   const bridge = await createDesktopBrowserCdpBridge({
     adapter: fixture.adapter,
     product: "Chrome/146.0.0.0",
   });
+
   disposers.push(() => bridge.close());
+
   return { ...fixture, bridge };
 }
 
@@ -161,26 +191,32 @@ async function connect(endpoint: string) {
     await closed;
   });
   let id = 0;
+
   async function call(
     method: string,
     params: Message = {},
     sessionId?: string,
   ) {
     const requestId = ++id;
+
     const result = new Promise<Message>((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error(`Timed out: ${method}`)),
         2000,
       );
+
       const onMessage = (data: Buffer) => {
         const message = messageSchema.parse(JSON.parse(data.toString()));
+
         if (message.id !== requestId) return;
         clearTimeout(timer);
         socket.off("message", onMessage);
         resolve(message);
       };
+
       socket.on("message", onMessage);
     });
+
     socket.send(
       JSON.stringify({
         id: requestId,
@@ -189,8 +225,10 @@ async function connect(endpoint: string) {
         ...(sessionId === undefined ? {} : { sessionId }),
       }),
     );
+
     return result;
   }
+
   return { socket, messages, call };
 }
 
@@ -199,7 +237,9 @@ async function rejectedConnection(endpoint: string, origin?: string) {
     endpoint,
     origin === undefined ? {} : { origin },
   );
+
   const [error] = await once(socket, "error");
+
   return error;
 }
 
@@ -212,6 +252,7 @@ describe("thread-scoped browser CDP", () => {
     expect(listed.result).toMatchObject({
       targetInfos: [{ targetId: desktopBrowserCdpTargetId(scopeA, "a") }],
     });
+
     for (const method of [
       "Target.attachToTarget",
       "Target.closeTarget",
@@ -225,21 +266,26 @@ describe("thread-scoped browser CDP", () => {
         await client.call(method, { targetId: "other-window", flatten: true }),
       ).toHaveProperty("error");
     }
+
     expect(commands).toEqual([]);
   });
 
   it("routes concurrent controllers to their own pages and keeps session IDs private", async () => {
     const { bridge, scopeA, scopeB, commands } = await openBridge();
+
     const first = await connect(
       bridge.grant(scopeA, Date.now() + 60_000).endpoint,
     );
+
     const second = await connect(
       bridge.grant(scopeB, Date.now() + 60_000).endpoint,
     );
+
     const response = await first.call("Target.attachToTarget", {
       targetId: desktopBrowserCdpTargetId(scopeA, "a"),
       flatten: true,
     });
+
     const result = z.object({ sessionId: z.string() }).parse(response.result);
     expect(
       await first.call(
@@ -262,18 +308,83 @@ describe("thread-scoped browser CDP", () => {
     expect(commands).toEqual([{ tabId: "a", method: "Runtime.evaluate" }]);
   });
 
-  it("reveals the tab for Page.bringToFront instead of focusing it natively", async () => {
-    const { bridge, scopeA, commands, nativeCommands } = await openBridge();
+  it("refuses cookie reads and strips cookie material from network traffic", async () => {
+    const { bridge, scopeA, nativeCommands, emitMessage } = await openBridge();
+
     const client = await connect(
       bridge.grant(scopeA, Date.now() + 60_000).endpoint,
     );
+
     const attached = await client.call("Target.attachToTarget", {
       targetId: desktopBrowserCdpTargetId(scopeA, "a"),
       flatten: true,
     });
+
     const { sessionId } = z
       .object({ sessionId: z.string() })
       .parse(attached.result);
+
+    for (const method of [
+      "Network.getCookies",
+      "Network.getAllCookies",
+      "Page.getCookies",
+      "Storage.getCookies",
+    ]) {
+      expect(await client.call(method, {}, sessionId)).toMatchObject({
+        error: { message: expect.stringMatching(/cookies/u) },
+      });
+    }
+
+    expect(nativeCommands).toEqual([]);
+    expect(
+      await client.call("Runtime.evaluate", { expression: "1" }, sessionId),
+    ).toMatchObject({ result: { value: "a" } });
+
+    emitMessage("a", "Network.responseReceivedExtraInfo", {
+      requestId: "r1",
+      headers: { "Set-Cookie": "sid=secret", "content-type": "text/html" },
+      headersText: "HTTP/1.1 200\r\nSet-Cookie: sid=secret",
+      blockedCookies: [{ cookieLine: "sid=secret" }],
+    });
+    emitMessage("a", "Page.frameNavigated", { headers: { Cookie: "kept" } });
+
+    const emitted = () =>
+      client.messages.filter(
+        (message) =>
+          message.method === "Network.responseReceivedExtraInfo" ||
+          message.method === "Page.frameNavigated",
+      );
+
+    await vi.waitFor(() => expect(emitted()).toHaveLength(2));
+    const events = emitted();
+
+    expect(events[0]).toEqual({
+      method: "Network.responseReceivedExtraInfo",
+      params: { requestId: "r1", headers: { "content-type": "text/html" } },
+      sessionId,
+    });
+    expect(events[1]).toMatchObject({
+      method: "Page.frameNavigated",
+      params: { headers: { Cookie: "kept" } },
+    });
+  });
+
+  it("reveals the tab for Page.bringToFront instead of focusing it natively", async () => {
+    const { bridge, scopeA, commands, nativeCommands } = await openBridge();
+
+    const client = await connect(
+      bridge.grant(scopeA, Date.now() + 60_000).endpoint,
+    );
+
+    const attached = await client.call("Target.attachToTarget", {
+      targetId: desktopBrowserCdpTargetId(scopeA, "a"),
+      flatten: true,
+    });
+
+    const { sessionId } = z
+      .object({ sessionId: z.string() })
+      .parse(attached.result);
+
     expect(await client.call("Page.bringToFront", {}, sessionId)).toMatchObject(
       { result: {} },
     );
@@ -283,16 +394,20 @@ describe("thread-scoped browser CDP", () => {
 
   it("supports Puppeteer tab-to-page auto-attach and honors target filters", async () => {
     const { bridge, scopeA } = await openBridge();
+
     const client = await connect(
       bridge.grant(scopeA, Date.now() + 60_000).endpoint,
     );
+
     await client.call("Target.setDiscoverTargets", {
       discover: true,
       filter: [{ type: "page", exclude: true }, {}],
     });
+
     const discovered = client.messages.filter(
       (message) => message.method === "Target.targetCreated",
     );
+
     expect(discovered).toHaveLength(2);
     expect(JSON.stringify(discovered)).not.toContain('"targetId":"b"');
     await client.call("Target.setAutoAttach", {
@@ -301,6 +416,7 @@ describe("thread-scoped browser CDP", () => {
       waitForDebuggerOnStart: true,
       filter: [{ type: "page", exclude: true }, {}],
     });
+
     const tab = z
       .object({
         params: z.object({
@@ -313,6 +429,7 @@ describe("thread-scoped browser CDP", () => {
           (message) => message.method === "Target.attachedToTarget",
         ),
       );
+
     const tabSession = tab.params.sessionId;
     await client.call(
       "Target.setAutoAttach",
@@ -337,15 +454,18 @@ describe("thread-scoped browser CDP", () => {
     "releases automatic sessions on disable while preserving explicit sessions: %s",
     async (preserveExplicit) => {
       const { bridge, scopeA, attachments } = await openBridge();
+
       const client = await connect(
         bridge.grant(scopeA, Date.now() + 60_000).endpoint,
       );
+
       const targetId = desktopBrowserCdpTargetId(scopeA, "a");
       await client.call("Target.setAutoAttach", {
         autoAttach: true,
         flatten: true,
         filter: [{ type: "page" }],
       });
+
       const automatic = z
         .object({ params: z.object({ sessionId: z.string() }) })
         .parse(
@@ -353,6 +473,7 @@ describe("thread-scoped browser CDP", () => {
             (message) => message.method === "Target.attachedToTarget",
           ),
         ).params.sessionId;
+
       const explicit = preserveExplicit
         ? z.object({ sessionId: z.string() }).parse(
             (
@@ -363,6 +484,7 @@ describe("thread-scoped browser CDP", () => {
             ).result,
           ).sessionId
         : undefined;
+
       expect(attachments.has("a")).toBe(true);
 
       expect(
@@ -379,6 +501,7 @@ describe("thread-scoped browser CDP", () => {
         await client.call("Runtime.evaluate", { expression: "1" }, automatic),
       ).toHaveProperty("error");
       expect(attachments.has("a")).toBe(preserveExplicit);
+
       if (explicit !== undefined) {
         expect(
           await client.call("Runtime.evaluate", { expression: "1" }, explicit),
@@ -394,9 +517,11 @@ describe("thread-scoped browser CDP", () => {
     async (detachFrom) => {
       const { bridge, scopeA, emitMessage, nativeCommands, attachments } =
         await openBridge();
+
       const client = await connect(
         bridge.grant(scopeA, Date.now() + 60_000).endpoint,
       );
+
       const root = z.object({ sessionId: z.string() }).parse(
         (
           await client.call("Target.attachToTarget", {
@@ -405,12 +530,14 @@ describe("thread-scoped browser CDP", () => {
           })
         ).result,
       ).sessionId;
+
       emitMessage("a", "Target.attachedToTarget", {
         sessionId: "native-child",
         targetInfo: { targetId: "native-frame", type: "iframe" },
         waitingForDebugger: true,
       });
       await client.call("Browser.getVersion");
+
       const child = z
         .object({ params: z.object({ sessionId: z.string() }) })
         .parse(
@@ -446,10 +573,13 @@ describe("thread-scoped browser CDP", () => {
 
   it("routes each native child detach to its own virtual parent", async () => {
     const { bridge, scopeA, emitMessage } = await openBridge();
+
     const client = await connect(
       bridge.grant(scopeA, Date.now() + 60_000).endpoint,
     );
+
     const roots: string[] = [];
+
     for (let index = 0; index < 2; index += 1) {
       roots.push(
         z.object({ sessionId: z.string() }).parse(
@@ -462,12 +592,14 @@ describe("thread-scoped browser CDP", () => {
         ).sessionId,
       );
     }
+
     emitMessage("a", "Target.attachedToTarget", {
       sessionId: "native-child",
       targetInfo: { targetId: "native-frame", type: "iframe" },
       waitingForDebugger: false,
     });
     await client.call("Browser.getVersion");
+
     const children = client.messages
       .filter(
         (message) =>
@@ -483,6 +615,7 @@ describe("thread-scoped browser CDP", () => {
           })
           .parse(message),
       );
+
     expect(children).toHaveLength(2);
     emitMessage("a", "Target.detachedFromTarget", {
       sessionId: "native-child",
@@ -504,6 +637,7 @@ describe("thread-scoped browser CDP", () => {
         },
       })),
     );
+
     for (const child of children) {
       expect(
         await client.call("Runtime.enable", {}, child.params.sessionId),
@@ -519,7 +653,9 @@ describe("thread-scoped browser CDP", () => {
     async (method) => {
       const { bridge, scopeA, tabs, emitMessage, nativeCommands, attachments } =
         await openBridge();
+
       const page = tabs.get("a");
+
       if (page === undefined) throw new Error("Missing fixture page");
       const entered = deferred();
       const ready = deferred();
@@ -531,11 +667,14 @@ describe("thread-scoped browser CDP", () => {
           await ready.promise;
           signal?.throwIfAborted();
         }
+
         return originalSend(command, params, sessionId);
       };
+
       const client = await connect(
         bridge.grant(scopeA, Date.now() + 60_000).endpoint,
       );
+
       async function attachParent() {
         return z.object({ sessionId: z.string() }).parse(
           (
@@ -546,6 +685,7 @@ describe("thread-scoped browser CDP", () => {
           ).result,
         ).sessionId;
       }
+
       const firstParent = await attachParent();
       const secondParent = await attachParent();
       emitMessage("a", "Target.attachedToTarget", {
@@ -554,6 +694,7 @@ describe("thread-scoped browser CDP", () => {
         waitingForDebugger: false,
       });
       await client.call("Browser.getVersion");
+
       function childFor(parent: string) {
         return z
           .object({ params: z.object({ sessionId: z.string() }) })
@@ -565,12 +706,15 @@ describe("thread-scoped browser CDP", () => {
             ),
           ).params.sessionId;
       }
+
       const firstChild = childFor(firstParent);
       const secondChild = childFor(secondParent);
+
       const params: Message =
         method === "Input.dispatchMouseEvent"
           ? { type: "mousePressed", x: 10, y: 10, button: "left" }
           : { type: "touchStart", touchPoints: [{ x: 10, y: 10 }] };
+
       const pending = client.call(method, params, firstChild);
       await entered.promise;
 
@@ -614,9 +758,11 @@ describe("thread-scoped browser CDP", () => {
       const finished = deferred();
       let mutations = 0;
       let aborted = false;
+
       async function beforeMutation(signal: AbortSignal) {
         entered.resolve();
         await release.promise;
+
         try {
           aborted = signal.aborted;
           signal.throwIfAborted();
@@ -625,16 +771,21 @@ describe("thread-scoped browser CDP", () => {
           finished.resolve();
         }
       }
+
       adapter.createTab = async (_scope, _url, signal) => {
         await beforeMutation(signal);
+
         return "a";
       };
+
       adapter.closeTab = async (_scope, _tabId, signal) => {
         await beforeMutation(signal);
       };
+
       adapter.activateTab = async (_scope, _tabId, signal) => {
         await beforeMutation(signal);
       };
+
       const grant = bridge.grant(scopeA, Date.now() + 60_000);
       const client = await connect(grant.endpoint);
       client.socket.send(
@@ -651,9 +802,11 @@ describe("thread-scoped browser CDP", () => {
       const closed = once(client.socket, "close");
       grant.revoke();
       await closed;
+
       const replacement = await connect(
         bridge.grant(scopeA, Date.now() + 60_000).endpoint,
       );
+
       release.resolve();
       await finished.promise;
 
@@ -670,16 +823,21 @@ describe("thread-scoped browser CDP", () => {
 
   it("creates and closes real scoped targets with lifecycle events", async () => {
     const { bridge, scopeA, tabs } = await openBridge();
+
     const client = await connect(
       bridge.grant(scopeA, Date.now() + 60_000).endpoint,
     );
+
     await client.call("Target.setDiscoverTargets", { discover: true });
+
     const created = await client.call("Target.createTarget", {
       url: "https://example.org",
     });
+
     const { targetId } = z
       .object({ targetId: z.string() })
       .parse(created.result);
+
     expect(
       [...tabs.values()].find(
         (tab) => desktopBrowserCdpTargetId(scopeA, tab.tabId) === targetId,
@@ -746,6 +904,7 @@ describe("thread-scoped browser CDP", () => {
               callback(...args);
             },
           });
+
           return timer;
         }),
     );
@@ -756,6 +915,7 @@ describe("thread-scoped browser CDP", () => {
     vi.unstubAllGlobals();
     expect(deadlines).toHaveLength(1);
     const deadline = deadlines[0];
+
     if (deadline === undefined)
       throw new Error("Grant did not schedule expiry");
     expect(deadline.delay).toBeGreaterThanOrEqual(expiresAt - afterGrant);
@@ -765,5 +925,36 @@ describe("thread-scoped browser CDP", () => {
     deadline.expire();
     await closed;
     expect(await rejectedConnection(grant.endpoint)).toBeInstanceOf(Error);
+  });
+});
+
+describe("CDP cookie redaction", () => {
+  it("drops cookie headers and cookie lists at any depth", () => {
+    expect(
+      redactCdpCookieMaterial({
+        requestId: "r1",
+        associatedCookies: [{ cookie: { name: "sid" } }],
+        exemptedCookies: [],
+        requestHeadersText: "Cookie: sid=secret",
+        request: {
+          url: "https://example.com/",
+          headers: { cookie: "sid=secret", accept: "*/*" },
+        },
+        response: {
+          headers: { "SET-COOKIE": "sid=secret", "x-ok": "1" },
+          requestHeaders: { Cookie: "sid=secret" },
+          headersText: "Set-Cookie: sid=secret",
+        },
+        responseHeaders: [
+          { name: "Set-Cookie", value: "sid=secret" },
+          { name: "Content-Type", value: "text/html" },
+        ],
+      }),
+    ).toEqual({
+      requestId: "r1",
+      request: { url: "https://example.com/", headers: { accept: "*/*" } },
+      response: { headers: { "x-ok": "1" }, requestHeaders: {} },
+      responseHeaders: [{ name: "Content-Type", value: "text/html" }],
+    });
   });
 });

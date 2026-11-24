@@ -1,14 +1,16 @@
+import { assertPublicBetaUpdatePolicy } from "./public-beta-update.js";
 import type {
   AppUpdater,
   UpdateCheckResult,
   UpdateDownloadedEvent,
   UpdateInfo,
 } from "electron-updater";
-import type { BbDesktopInfo } from "@bb/desktop-contract";
+import type { OmnyoDesktopInfo } from "@omnyo/desktop-contract";
+import { type DesktopAutoUpdateFeedConfig } from "./desktop-update-provider.js";
 import {
-  DESKTOP_AUTO_UPDATE_FEED_CONFIG,
-  type DesktopAutoUpdateFeedConfig,
-} from "./desktop-update-provider.js";
+  parsePrivateReleaseInfo,
+  type PrivateReleaseInfo,
+} from "./private-update-config.js";
 import {
   createDesktopUpdateScheduler,
   type DesktopUpdateService,
@@ -21,9 +23,11 @@ export interface DesktopAutoUpdateLogger {
 }
 
 export type DesktopAutoUpdateAvailableHandler = (info: UpdateInfo) => void;
+
 export type DesktopAutoUpdateDownloadedHandler = (
   event: UpdateDownloadedEvent,
 ) => void;
+
 export type DesktopAutoUpdateNotAvailableHandler = (info: UpdateInfo) => void;
 
 export interface DesktopAutoUpdateErrorArgs {
@@ -51,12 +55,15 @@ export interface DesktopAutoUpdaterAdapter {
 }
 
 interface CreateDesktopAutoUpdateServiceArgs {
+  verifyInstalledArtifact(): Promise<void>;
   currentVersion: string;
   enabled: boolean;
+  feedConfig?: DesktopAutoUpdateFeedConfig | null;
+  appId?: string;
   forceDevUpdateConfig: boolean;
   logger: DesktopAutoUpdateLogger;
   now?: () => number;
-  platform: BbDesktopInfo["platform"];
+  platform: OmnyoDesktopInfo["platform"];
   updater: DesktopAutoUpdaterAdapter;
 }
 
@@ -65,29 +72,21 @@ interface ShouldEnableDesktopAutoUpdateArgs {
   isPackaged: boolean;
 }
 
-interface ApplyUpdateAvailableArgs {
-  checkedAt: string;
-  version: string;
-}
-
-interface ApplyUpdateDownloadedArgs {
-  checkedAt: string;
-  version: string;
-}
-
-interface ApplyUpdateNotAvailableArgs {
-  checkedAt: string;
-  version: string;
+export interface PrivateInstallLifecycle {
+  acquireInstallHold(): Promise<void>;
+  stageNativeUpdate(): Promise<void>;
+  finishQuit(): Promise<void>;
 }
 
 export interface DesktopAutoUpdateService extends DesktopUpdateService {
-  installUpdate(): void;
+  getDownloadedCandidate(): { file: string; release: PrivateReleaseInfo };
+  installUpdate(lifecycle: PrivateInstallLifecycle): Promise<void>;
 }
 
 function createBaseInfo(
   currentVersion: string,
-  platform: BbDesktopInfo["platform"],
-): BbDesktopInfo {
+  platform: OmnyoDesktopInfo["platform"],
+): OmnyoDesktopInfo {
   return {
     downloadState: "idle",
     lastCheckedAt: null,
@@ -100,20 +99,10 @@ function createBaseInfo(
   };
 }
 
-function formatErrorMessage(error: unknown): string {
-  return error instanceof Error
-    ? (error.stack ?? error.message)
-    : String(error);
-}
-
-function formatCheckedAt(now: () => number): string {
-  return new Date(now()).toISOString();
-}
-
 export function shouldEnableDesktopAutoUpdate(
   args: ShouldEnableDesktopAutoUpdateArgs,
 ): boolean {
-  return args.isPackaged || args.env.BB_DESKTOP_AUTO_UPDATE === "1";
+  return args.isPackaged || args.env.OMNYO_DESKTOP_AUTO_UPDATE === "1";
 }
 
 export function createElectronAutoUpdaterAdapter(
@@ -150,6 +139,8 @@ export function createElectronAutoUpdaterAdapter(
       updater.autoInstallOnAppQuit = enabled;
     },
     setFeedURL(config) {
+      if (config.channel === "public-beta")
+        updater.disableDifferentialDownload = true;
       updater.setFeedURL(config);
     },
     setForceDevUpdateConfig(enabled) {
@@ -165,184 +156,183 @@ export function createDesktopAutoUpdateService(
   args: CreateDesktopAutoUpdateServiceArgs,
 ): DesktopAutoUpdateService {
   const now = args.now ?? (() => Date.now());
-  let downloadInFlight: Promise<Array<string>> | null = null;
+  const feed = args.feedConfig ?? null;
+
+  if (feed !== null)
+    assertPublicBetaUpdatePolicy(feed, args.appId, args.platform);
+
+  const enabled =
+    args.enabled &&
+    feed !== null &&
+    (args.platform === "macos" || args.platform === "windows");
+
+  let selected: PrivateReleaseInfo | null = null;
+  let downloaded: { file: string; release: PrivateReleaseInfo } | null = null;
+  let generation = 0;
+  let installing: Promise<void> | null = null;
+
   const scheduler = createDesktopUpdateScheduler({
-    enabled: args.enabled,
+    enabled,
     initialInfo: createBaseInfo(args.currentVersion, args.platform),
     now,
     runCheck,
-    shouldSkipCheck,
+    shouldSkipCheck: () => downloaded !== null || installing !== null,
   });
 
-  function shouldSkipCheck(): boolean {
-    return scheduler.getInfo().updateDownloaded;
-  }
-
-  function applyUpdateAvailable(applyArgs: ApplyUpdateAvailableArgs): void {
+  function fail(message: string): void {
+    generation += 1;
+    selected = null;
+    downloaded = null;
     scheduler.updateInfo({
       ...scheduler.getInfo(),
-      lastCheckedAt: applyArgs.checkedAt,
-      latestVersion: applyArgs.version,
-      updateAvailable: true,
-    });
-  }
-
-  function applyUpdateDownloaded(applyArgs: ApplyUpdateDownloadedArgs): void {
-    scheduler.updateInfo({
-      ...scheduler.getInfo(),
-      downloadState: "downloaded",
-      lastCheckedAt: applyArgs.checkedAt,
-      latestVersion: applyArgs.version,
-      pendingVersion: applyArgs.version,
-      updateAvailable: true,
-      updateDownloaded: true,
-    });
-  }
-
-  function applyUpdateNotAvailable(
-    applyArgs: ApplyUpdateNotAvailableArgs,
-  ): void {
-    scheduler.updateInfo({
-      ...scheduler.getInfo(),
-      downloadState: "idle",
-      lastCheckedAt: applyArgs.checkedAt,
-      latestVersion: applyArgs.version,
+      downloadState: "failed",
       pendingVersion: null,
-      updateAvailable: false,
       updateDownloaded: false,
+      updateAvailable: false,
     });
-  }
-
-  function startDownload(): void {
-    if (downloadInFlight !== null) {
-      return;
-    }
-    scheduler.updateInfo({
-      ...scheduler.getInfo(),
-      downloadState: "downloading",
-    });
-    try {
-      downloadInFlight = args.updater.downloadUpdate();
-    } catch (error: unknown) {
-      scheduler.updateInfo({
-        ...scheduler.getInfo(),
-        downloadState: "failed",
-      });
-      args.logger.error(
-        `Desktop auto-update download failed; preserving current update state: ${formatErrorMessage(
-          error,
-        )}`,
-      );
-      return;
-    }
-    void downloadInFlight
-      .catch((error: unknown) => {
-        scheduler.updateInfo({
-          ...scheduler.getInfo(),
-          downloadState: "failed",
-        });
-        args.logger.error(
-          `Desktop auto-update download failed; preserving current update state: ${formatErrorMessage(
-            error,
-          )}`,
-        );
-      })
-      .finally(() => {
-        downloadInFlight = null;
-      });
+    args.logger.error(message);
   }
 
   async function runCheck(checkedAt: string): Promise<void> {
-    let result: UpdateCheckResult | null;
+    const checkGeneration = ++generation;
+    selected = null;
+    downloaded = null;
+
     try {
-      result = await args.updater.checkForUpdates();
-    } catch (error: unknown) {
-      args.logger.error(
-        `Desktop auto-update check failed; update installation remains disabled until a later check succeeds: ${formatErrorMessage(
-          error,
-        )}`,
+      await args.verifyInstalledArtifact();
+
+      if (feed !== null)
+        assertPublicBetaUpdatePolicy(feed, args.appId, args.platform);
+      const result = await args.updater.checkForUpdates();
+
+      if (generation !== checkGeneration || result === null || feed === null)
+        return;
+
+      const candidate = parsePrivateReleaseInfo(
+        result.updateInfo,
+        feed.url,
+        args.currentVersion,
+        args.appId,
+        args.platform,
       );
+
+      if (!result.isUpdateAvailable || candidate === null) {
+        scheduler.updateInfo({
+          ...scheduler.getInfo(),
+          lastCheckedAt: checkedAt,
+          latestVersion: args.currentVersion,
+          downloadState: "idle",
+          pendingVersion: null,
+          updateAvailable: false,
+          updateDownloaded: false,
+        });
+
+        return;
+      }
+
+      selected = candidate;
       scheduler.updateInfo({
         ...scheduler.getInfo(),
         lastCheckedAt: checkedAt,
+        latestVersion: candidate.version,
+        downloadState: "downloading",
+        updateAvailable: true,
       });
-      return;
+      assertPublicBetaUpdatePolicy(feed, args.appId, args.platform);
+      await args.updater.downloadUpdate();
+    } catch {
+      if (generation === checkGeneration)
+        fail(
+          "Private update check or download failed; installation is unavailable.",
+        );
     }
-
-    if (result === null) {
-      return;
-    }
-    if (result.isUpdateAvailable) {
-      applyUpdateAvailable({
-        checkedAt,
-        version: result.updateInfo.version,
-      });
-      return;
-    }
-    applyUpdateNotAvailable({
-      checkedAt,
-      version: result.updateInfo.version,
-    });
   }
 
-  if (args.enabled) {
-    args.updater.setLogger(args.logger);
-    args.updater.setFeedURL(DESKTOP_AUTO_UPDATE_FEED_CONFIG);
+  args.updater.setAutoInstallOnAppQuit(false);
+
+  if (enabled && feed !== null) {
+    args.updater.setLogger({
+      error: () => args.logger.error("Private updater reported an error."),
+      info: () => {},
+      warn: () => args.logger.warn("Private updater reported a warning."),
+    });
+    args.updater.setFeedURL(feed);
     args.updater.setAutoDownload(false);
-    args.updater.setAutoInstallOnAppQuit(true);
     args.updater.setForceDevUpdateConfig(args.forceDevUpdateConfig);
-    args.updater.onUpdateAvailable((info) => {
-      args.logger.info(
-        `Desktop auto-update available: ${info.version}; downloading in background.`,
-      );
-      applyUpdateAvailable({
-        checkedAt: formatCheckedAt(now),
-        version: info.version,
-      });
-      startDownload();
-    });
     args.updater.onUpdateDownloaded((event) => {
-      args.logger.info(
-        `Desktop auto-update downloaded: ${event.version}; it will install on restart or quit.`,
-      );
-      applyUpdateDownloaded({
-        checkedAt: formatCheckedAt(now),
-        version: event.version,
-      });
-    });
-    args.updater.onUpdateNotAvailable((info) => {
-      args.logger.info(`Desktop auto-update not available: ${info.version}.`);
-      applyUpdateNotAvailable({
-        checkedAt: formatCheckedAt(now),
-        version: info.version,
-      });
-    });
-    args.updater.onError((errorArgs) => {
-      const suffix = errorArgs.message === null ? "" : ` ${errorArgs.message}`;
-      args.logger.error(
-        `Desktop auto-update error; preserving current update state.${suffix} ${formatErrorMessage(
-          errorArgs.error,
-        )}`,
-      );
-      if (scheduler.getInfo().downloadState === "downloading") {
+      if (selected === null || feed === null || installing !== null) return;
+
+      try {
+        assertPublicBetaUpdatePolicy(feed, args.appId, args.platform);
+
+        const candidate = parsePrivateReleaseInfo(
+          event,
+          feed.url,
+          args.currentVersion,
+          args.appId,
+          args.platform,
+        );
+
+        if (
+          candidate === null ||
+          candidate.version !== selected.version ||
+          JSON.stringify(candidate.files) !== JSON.stringify(selected.files) ||
+          JSON.stringify(candidate.omnyoPrivate) !==
+            JSON.stringify(selected.omnyoPrivate) ||
+          !event.downloadedFile
+        )
+          return;
+        downloaded = { file: event.downloadedFile, release: candidate };
         scheduler.updateInfo({
           ...scheduler.getInfo(),
-          downloadState: "failed",
+          downloadState: "downloaded",
+          pendingVersion: candidate.version,
+          updateDownloaded: true,
         });
+      } catch {
+        fail(
+          "Private downloaded candidate is invalid; installation is unavailable.",
+        );
       }
     });
+    args.updater.onError(() =>
+      fail("Private updater failed; installation is unavailable."),
+    );
+  }
+
+  function getDownloadedCandidate() {
+    if (downloaded === null)
+      throw new Error("No verified private update is downloaded");
+
+    return downloaded;
   }
 
   return {
     ...scheduler,
-    installUpdate(): void {
-      if (!scheduler.getInfo().updateDownloaded) {
-        args.logger.warn(
-          "Desktop auto-update install requested before an update was downloaded; ignoring.",
-        );
-        return;
-      }
-      args.updater.quitAndInstall();
+    getDownloadedCandidate,
+    installUpdate(lifecycle) {
+      if (installing !== null) return installing;
+
+      const operation = (async () => {
+        await args.verifyInstalledArtifact();
+        const candidate = getDownloadedCandidate();
+        await lifecycle.acquireInstallHold();
+        await lifecycle.stageNativeUpdate();
+
+        if (downloaded !== candidate)
+          throw new Error("Private update candidate was invalidated");
+        await lifecycle.finishQuit();
+        args.updater.quitAndInstall();
+      })();
+
+      installing = operation;
+      void operation
+        .finally(() => {
+          if (installing === operation) installing = null;
+        })
+        .catch(() => {});
+
+      return operation;
     },
   };
 }

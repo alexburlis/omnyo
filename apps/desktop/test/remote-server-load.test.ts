@@ -20,6 +20,7 @@ function createElectronLoadError(url: string): Error {
     "    at rejectAndCleanup (node:electron/js2c/browser_init:2:89743)\n" +
     "    at WebContents.finishListener (node:electron/js2c/browser_init:2:89905)\n" +
     "    at WebContents.emit (node:events:509:28)";
+
   return error;
 }
 
@@ -27,9 +28,11 @@ function createHarness(
   overrides: Partial<LoadRemoteServerPageArgs> = {},
 ): TestHarness {
   const serverUrl =
-    overrides.serverUrl ?? "http://bb-host.tailnet.ts.net:38886";
+    overrides.serverUrl ?? "http://omnyo-host.tailnet.ts.net:38886";
+
   const shownErrors: StartupErrorView[] = [];
   const warnings: string[] = [];
+
   return {
     isCurrent: () => true,
     loadStartupError: async (view) => {
@@ -56,9 +59,9 @@ describe("loadRemoteServerPage", () => {
 
     expect(harness.shownErrors).toHaveLength(1);
     const view = harness.shownErrors[0];
-    expect(view?.title).toBe("Could not reach this bb server");
+    expect(view?.title).toBe("Could not reach this Omnyo server");
     expect(view?.details).toBe(
-      "The bb server at http://bb-host.tailnet.ts.net:38886 did not answer. Check that the machine is awake and reachable.",
+      "The Omnyo server at http://omnyo-host.tailnet.ts.net:38886 did not answer. Check that the machine is awake and reachable.",
     );
     expect(view?.actions.map((action) => action.id)).toEqual([
       "retry",
@@ -74,16 +77,16 @@ describe("loadRemoteServerPage", () => {
   it("keeps credentials and query tokens off the screen and out of the log", async () => {
     const harness = createHarness({
       serverUrl:
-        "https://user:hunter2@bb.example.com:8443/app?token=s3cret#frag",
+        "https://user:hunter2@omnyo.example.com:8443/app?token=s3cret#frag",
     });
 
     await expect(loadRemoteServerPage(harness)).resolves.toBe(false);
 
     expect(harness.shownErrors[0]?.details).toBe(
-      "The bb server at https://bb.example.com:8443 did not answer. Check that the machine is awake and reachable.",
+      "The Omnyo server at https://omnyo.example.com:8443 did not answer. Check that the machine is awake and reachable.",
     );
     const logged = harness.warnings[0] ?? "";
-    expect(logged).toContain("https://bb.example.com:8443");
+    expect(logged).toContain("https://omnyo.example.com:8443");
     expect(logged).not.toContain("hunter2");
     expect(logged).not.toContain("s3cret");
   });
@@ -94,7 +97,7 @@ describe("loadRemoteServerPage", () => {
     await expect(loadRemoteServerPage(harness)).resolves.toBe(false);
 
     expect(harness.shownErrors[0]?.details).toBe(
-      "The saved bb server did not answer. Check that the machine is awake and reachable.",
+      "The saved Omnyo server did not answer. Check that the machine is awake and reachable.",
     );
   });
 

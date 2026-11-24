@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { createAgentRuntime } from "./runtime.js";
 import type { AgentRuntime } from "./types.js";
 import {
@@ -50,7 +50,7 @@ describe("createAgentRuntime multi-thread routing", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "bb-runtime-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "omnyo-runtime-test-"));
   });
 
   afterEach(() => {
@@ -59,6 +59,7 @@ describe("createAgentRuntime multi-thread routing", () => {
 
   it("handles multiple threads on the same provider", async () => {
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: { workspacePath: tmpDir, onEvent: (e) => events.push(e) },
     });
@@ -70,6 +71,7 @@ describe("createAgentRuntime multi-thread routing", () => {
       providerId: "fake",
       options: fullRuntimeOptions,
     });
+
     const r2 = await runtime.startThread({
       environmentId: "env-1",
       threadId: "t2",
@@ -114,20 +116,25 @@ describe("createAgentRuntime multi-thread routing", () => {
       events.filter(
         (e) => e.type === "turn/completed" && e.threadId === threadId,
       );
+
     expect(completedFor("t1")).toHaveLength(1);
     expect(completedFor("t2")).toHaveLength(1);
+
     const providerThreadIdsByThreadId = new Map([
       ["t1", r1.providerThreadId],
       ["t2", r2.providerThreadId],
     ]);
+
     for (const e of events) {
       expect(providerThreadIdsByThreadId.has(e.threadId)).toBe(true);
+
       if ("providerThreadId" in e) {
         expect(e.providerThreadId).toBe(
           providerThreadIdsByThreadId.get(e.threadId),
         );
       }
     }
+
     await waitForThreadAgentMessageText({
       events,
       providerId: "fake",
@@ -158,6 +165,7 @@ describe("createAgentRuntime multi-thread routing", () => {
   it("keeps sibling threads running after stopping one thread", async () => {
     const events: ThreadEvent[] = [];
     const providerId = "keep-provider-fake";
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -240,6 +248,7 @@ describe("createAgentRuntime multi-thread routing", () => {
 
   it("handles multiple providers in a single runtime", async () => {
     const events: ThreadEvent[] = [];
+
     const runtime = createAgentRuntime({
       workspacePath: tmpDir,
       onEvent: (e) => events.push(e),
@@ -248,10 +257,12 @@ describe("createAgentRuntime multi-thread routing", () => {
         success: true,
       }),
     });
+
     const launchA = createScriptedEchoLaunch({
       pluginId: "provider-a",
       digest: "provider-a",
     });
+
     const launchB = createScriptedEchoLaunch({
       pluginId: "provider-b",
       digest: "provider-b",
@@ -315,6 +326,7 @@ describe("createAgentRuntime multi-thread routing", () => {
 
   it("resumes across runtime instances", async () => {
     const events1: ThreadEvent[] = [];
+
     const runtime1 = createScriptedEchoRuntime({
       runtime: { workspacePath: tmpDir, onEvent: (e) => events1.push(e) },
     });
@@ -326,6 +338,7 @@ describe("createAgentRuntime multi-thread routing", () => {
       providerId: "fake",
       options: fullRuntimeOptions,
     });
+
     await runtime1.runTurn({
       clientRequestId: "creq_222222222p",
       threadId: "t1",
@@ -341,6 +354,7 @@ describe("createAgentRuntime multi-thread routing", () => {
     await runtime1.shutdown();
 
     const events2: ThreadEvent[] = [];
+
     const runtime2 = createScriptedEchoRuntime({
       runtime: { workspacePath: tmpDir, onEvent: (e) => events2.push(e) },
     });
@@ -352,6 +366,7 @@ describe("createAgentRuntime multi-thread routing", () => {
       providerId: "fake",
       options: fullRuntimeOptions,
     });
+
     expect(resumed.providerThreadId).toBe(providerThreadId);
     await runtime2.runTurn({
       clientRequestId: "creq_222222222q",

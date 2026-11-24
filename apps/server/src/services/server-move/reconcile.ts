@@ -1,8 +1,8 @@
 import { rm, rmdir } from "node:fs/promises";
 import { resolve, sep } from "node:path";
-import type { ServerMoveStepId } from "@bb/domain";
-import { readServerMovedFile } from "@bb/server-archive";
-import type { ServerMoveStatus } from "@bb/server-contract";
+import type { ServerMoveStepId } from "@omnyo/domain";
+import { readServerMovedFile } from "@omnyo/server-archive";
+import type { ServerMoveStatus } from "@omnyo/server-contract";
 import type { ServerLogger } from "../../types.js";
 import { SERVER_MOVE_WORK_DIR_NAME } from "./coordinator.js";
 import {
@@ -79,6 +79,7 @@ function completedStatus(
 
 function recoveryStatus(status: ServerMoveStatus): ServerMoveStatus {
   const name = status.targetHostName;
+
   return {
     ...status,
     state: "recovery_required",
@@ -103,15 +104,7 @@ function recoveryStatus(status: ServerMoveStatus): ServerMoveStatus {
 async function readRunFile(
   args: ReconcileServerMoveRunAtBootArgs,
 ): Promise<ServerMoveRunFile | null> {
-  try {
-    return await readServerMoveRunFile(args.dataDir);
-  } catch (error) {
-    args.logger.error(
-      { err: error },
-      "Ignoring an unreadable server-move-run.json at boot",
-    );
-    return null;
-  }
+  return readServerMoveRunFile(args.dataDir);
 }
 
 async function removeWorkDir(
@@ -120,13 +113,16 @@ async function removeWorkDir(
 ): Promise<void> {
   const moveRoot = resolve(args.dataDir, SERVER_MOVE_WORK_DIR_NAME);
   const target = resolve(workDir);
+
   if (!target.startsWith(`${moveRoot}${sep}`)) {
     args.logger.warn(
       { workDir },
       "Not removing a recorded server move work directory outside the data directory",
     );
+
     return;
   }
+
   try {
     await rm(target, { force: true, recursive: true });
     await rmdir(moveRoot).catch(() => undefined);
@@ -154,36 +150,65 @@ export async function reconcileServerMoveRunAtBoot(
   args: ReconcileServerMoveRunAtBootArgs,
 ): Promise<RestoredServerMoveRun | null> {
   const run = await readRunFile(args);
+
   if (run === null) {
     return null;
   }
+
   const moveId = run.status.moveId;
+
+  const preparationUncertain =
+    run.prepareDispatchedAt !== null ||
+    run.status.steps.some(
+      (step) =>
+        (step.id === "start-target" || step.id === "transfer") &&
+        (step.status === "running" || step.status === "done"),
+    );
+
+  if (
+    preparationUncertain &&
+    run.activationConfirmedAt === null &&
+    run.status.state !== "failed" &&
+    run.status.state !== "cancelled"
+  ) {
+    return {
+      kind: "recovery_required",
+      run: { ...run, status: recoveryStatus(run.status) },
+    };
+  }
+
   await removeWorkDir(args, run.workDir);
   const lock = await readServerMovedFile(args.dataDir).catch(() => null);
   const locked = lock !== null && lock.moveId === moveId;
+
   const terminal =
     run.status.state === "failed" || run.status.state === "cancelled";
+
   if (lock !== null && locked && !terminal) {
     if (run.activationConfirmedAt !== null) {
       args.logger.info(
         { moveId },
         "Republishing a committed server move after a restart",
       );
+
       return {
         kind: "completed",
         movedAt: lock.movedAt,
         run: { ...run, status: completedStatus(run.status, args.now) },
       };
     }
+
     args.logger.warn(
       { moveId },
       "A server move restarted before the target confirmed activation; recovery is required",
     );
+
     return {
       kind: "recovery_required",
       run: { ...run, status: recoveryStatus(run.status) },
     };
   }
+
   if (!terminal && run.activationConfirmedAt !== null) {
     await bestEffort(
       args,
@@ -194,8 +219,10 @@ export async function reconcileServerMoveRunAtBoot(
       { moveId },
       "Forgetting a committed server move whose old copy was unlocked",
     );
+
     return null;
   }
+
   if (locked) {
     await bestEffort(
       args,
@@ -203,7 +230,9 @@ export async function reconcileServerMoveRunAtBoot(
       () => unlockOldServerDataDir(args.dataDir),
     );
   }
+
   const configBackup = run.configBackup;
+
   if (configBackup !== null) {
     await bestEffort(
       args,
@@ -211,10 +240,12 @@ export async function reconcileServerMoveRunAtBoot(
       () => restoreOldServerDaemonConfig(configBackup),
     );
   }
+
   args.logger.warn(
     { moveId, state: run.status.state },
     "Abandoned a server move that did not finish before a restart",
   );
+
   return {
     kind: "ended",
     run: terminal

@@ -12,17 +12,21 @@ export function compactThreadTimelineSummaryEvents(
 ): ThreadEventWithMeta[] {
   let agentMessageDeltaCount = precedingAgentMessageDeltaCount;
   const completedAssistantKeys = new Set<string>();
+
   for (const eventWithMeta of events) {
     const { event } = eventWithMeta;
+
     if (event.type === "item/agentMessage/delta") {
       agentMessageDeltaCount += 1;
       continue;
     }
+
     if (event.type === "item/completed" && event.item.type === "agentMessage") {
       const identity = resolveBufferedTextIdentity({
         decoded: event,
         kind: "assistant",
       });
+
       if (identity) {
         completedAssistantKeys.add(createBufferedTextInstanceKey(identity));
       }
@@ -41,6 +45,7 @@ export function compactThreadTimelineSummaryEvents(
 
   for (const eventWithMeta of events) {
     const { event } = eventWithMeta;
+
     if (event.type !== "item/agentMessage/delta") {
       compactedEvents.push(eventWithMeta);
       continue;
@@ -50,19 +55,23 @@ export function compactThreadTimelineSummaryEvents(
       decoded: event,
       kind: "assistant",
     });
+
     if (!identity) {
       compactedEvents.push(eventWithMeta);
       continue;
     }
 
     const assistantKey = createBufferedTextInstanceKey(identity);
+
     if (!completedAssistantKeys.has(assistantKey)) {
       compactedEvents.push(eventWithMeta);
       continue;
     }
+
     if (retainedCompletedDeltaKeys.has(assistantKey)) {
       continue;
     }
+
     retainedCompletedDeltaKeys.add(assistantKey);
     compactedEvents.push(eventWithMeta);
   }

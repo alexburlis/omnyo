@@ -19,8 +19,9 @@ import { startPerformanceDiagnostics } from "../src/performance-diagnostics.js";
 
 describe("performance diagnostics", () => {
   it("saves an actual CPU profile on shutdown and stops idempotently", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "bb-perf-test-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "omnyo-perf-test-"));
     const warnings: unknown[] = [];
+
     const monitor = await startPerformanceDiagnostics({
       dataDir,
       logger: {
@@ -30,8 +31,10 @@ describe("performance diagnostics", () => {
         },
       },
     });
+
     try {
       const until = performance.now() + 40;
+
       while (performance.now() < until) Math.sqrt(performance.now());
       await Promise.all([monitor.stop(), monitor.stop()]);
       const directory = join(dataDir, "logs", "performance");
@@ -43,6 +46,7 @@ describe("performance diagnostics", () => {
       expect(profile.nodes.length).toBeGreaterThan(0);
       expect(profile.samples.length).toBeGreaterThan(0);
       expect(profile.endTime).toBeGreaterThan(profile.startTime);
+
       if (process.platform !== "win32")
         expect((await stat(path)).mode & 0o777).toBe(0o600);
       expect(warnings).toEqual([]);
@@ -53,10 +57,11 @@ describe("performance diagnostics", () => {
   });
 
   it("rotates continuous bounded windows and ignores unrelated console captures", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "bb-perf-rotation-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "omnyo-perf-rotation-"));
     const savedPaths: string[] = [];
     const warnings: unknown[] = [];
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+
     const monitor = await startPerformanceDiagnostics({
       dataDir,
       logger: {
@@ -73,29 +78,36 @@ describe("performance diagnostics", () => {
         },
       },
     });
+
     try {
       for (let window = 1; window <= 2; window++) {
         inspectorConsole.profile("unrelated-user-capture");
         const until = performance.now() + 40;
+
         while (performance.now() < until) Math.sqrt(performance.now());
         inspectorConsole.profileEnd("unrelated-user-capture");
         await vi.advanceTimersByTimeAsync(30_000);
         const deadline = Date.now() + 5_000;
+
         while (savedPaths.length < window && Date.now() < deadline)
           await delay(10);
         expect(savedPaths).toHaveLength(window);
       }
+
       await Promise.all([monitor.stop(), monitor.stop()]);
       expect(savedPaths).toHaveLength(3);
+
       const profiles = await Promise.all(
         savedPaths.map(async (path) =>
           JSON.parse(await readFile(path, "utf8")),
         ),
       );
+
       for (const profile of profiles) {
         expect(profile.nodes.length).toBeGreaterThan(0);
         expect(profile.endTime).toBeGreaterThan(profile.startTime);
       }
+
       expect(profiles[0].samples.length).toBeGreaterThan(0);
       expect(profiles[1].samples.length).toBeGreaterThan(0);
       expect(profiles[1].startTime).toBeLessThanOrEqual(profiles[0].endTime);
@@ -111,10 +123,11 @@ describe("performance diagnostics", () => {
   });
 
   it("expires old captures and reserves the byte budget without overwriting recent sessions", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "bb-perf-retention-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "omnyo-perf-retention-"));
     const directory = join(dataDir, "logs", "performance");
     await mkdir(directory, { recursive: true });
     const now = Date.now();
+
     for (const [name, bytes, ageHours] of [
       ["profile-00.cpuprofile", 10, 13],
       ["profile-01.cpuprofile", 600_000_000, 11],
@@ -127,9 +140,11 @@ describe("performance diagnostics", () => {
       const at = new Date(now - ageHours * 3_600_000);
       await utimes(path, at, at);
     }
+
     await writeFile(join(directory, "notes.txt"), "preserve");
     await writeFile(join(directory, "profile.pending"), "interrupted write");
     const warnings: unknown[] = [];
+
     const options = {
       dataDir,
       logger: {
@@ -139,6 +154,7 @@ describe("performance diagnostics", () => {
         },
       },
     };
+
     try {
       const first = await startPerformanceDiagnostics(options);
       await first.stop();
@@ -154,14 +170,18 @@ describe("performance diagnostics", () => {
       expect(saved).toHaveLength(2);
       const second = await startPerformanceDiagnostics(options);
       await second.stop();
+
       const retained = (await readdir(directory)).filter((name) =>
         name.endsWith(".cpuprofile"),
       );
+
       expect(retained).toHaveLength(3);
       expect(retained).toEqual(expect.arrayContaining(saved));
+
       const sizes = await Promise.all(
         retained.map(async (name) => (await stat(join(directory, name))).size),
       );
+
       expect(sizes.reduce((sum, size) => sum + size, 0)).toBeLessThanOrEqual(
         1_000_000_000,
       );
@@ -172,10 +192,12 @@ describe("performance diagnostics", () => {
   });
 
   it("keeps startup and shutdown usable when the profile directory cannot be created", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "bb-perf-unwritable-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "omnyo-perf-unwritable-"));
     const warnings: unknown[] = [];
+
     try {
       await writeFile(join(dataDir, "logs"), "not a directory");
+
       const monitor = await startPerformanceDiagnostics({
         dataDir,
         logger: {
@@ -185,6 +207,7 @@ describe("performance diagnostics", () => {
           },
         },
       });
+
       await monitor.stop();
       expect(warnings).toHaveLength(1);
     } finally {

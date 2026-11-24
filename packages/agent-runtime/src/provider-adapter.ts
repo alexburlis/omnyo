@@ -9,7 +9,7 @@ import type {
   RuntimePermissionPolicy,
   ServiceTier,
   SessionOptionSelections,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   AgentRuntimeBridgeLaunch,
   AgentRuntimeSkillRoot,
@@ -39,7 +39,7 @@ export type AdapterCommand =
       type: "skills/configure";
       skillRoots: readonly AgentRuntimeSkillRoot[];
     }
-  | { type: "model/list"; cwd?: string }
+  | { type: "model/list"; cwd?: string; envVars?: Record<string, string> }
   | { type: "provider/health"; cwd?: string }
   | { type: "provider/usage"; cwd?: string }
   | {
@@ -107,6 +107,12 @@ export type AdapterCommand =
       type: "thread/discard";
       threadId: string;
       providerThreadId: string;
+    }
+  | {
+      type: "thread/speed/set";
+      threadId: string;
+      providerThreadId: string;
+      serviceTier: ServiceTier;
     }
   | {
       type: "thread/goal/clear";

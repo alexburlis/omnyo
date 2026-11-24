@@ -1,14 +1,18 @@
-import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import {
+  environmentStatusValues,
+  pendingInteractionStatusSchema,
+  threadStatusValues,
+} from "@omnyo/domain";
 import { createConnection } from "../../src/connection.js";
 import type { DbConnection } from "../../src/connection.js";
 import { migrate } from "../../src/migrate.js";
 import { noopNotifier } from "../../src/notifier.js";
 import {
-  compactDatabase,
   DATABASE_INCREMENTAL_VACUUM_MIN_FREELIST_PAGES,
   dropDeferredLegacyTables,
   getDatabaseAutoVacuumMode,
@@ -17,12 +21,14 @@ import {
   isDatabaseMaintenanceIdle,
   listDeferredLegacyTables,
   runIncrementalVacuum,
-  shouldCompactDatabase,
   shouldRunIncrementalVacuum,
 } from "../../src/data/maintenance.js";
 import { upsertHost } from "../../src/data/hosts.js";
-import { createProject } from "../../src/data/projects.js";
+import { createProject, markProjectDeleted } from "../../src/data/projects.js";
 import { createThread, markThreadDeleted } from "../../src/data/threads.js";
+import { createEnvironment } from "../../src/data/environments.js";
+import { createPendingInteraction } from "../../src/data/pending-interactions.js";
+import { pendingInteractions } from "../../src/schema.js";
 import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 const TEST_INCREMENTAL_VACUUM_MAX_PAGES = 128;
@@ -30,10 +36,6 @@ const TEST_INCREMENTAL_VACUUM_MAX_PAGES = 128;
 interface TempDatabasePath {
   dbPath: string;
   cleanup(): void;
-}
-
-interface PreservedValueRow {
-  value: string;
 }
 
 interface ProjectNameRow {
@@ -51,39 +53,28 @@ const TEST_DEFERRED_LEGACY_TABLE_NAMES = [
 
 function setup() {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "maintenance-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "maintenance-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/project" },
   });
+
   return { db, host, project };
 }
 
 function createTempDatabasePath(): TempDatabasePath {
-  const dir = mkdtempSync(join(tmpdir(), "bb-db-maintenance-"));
+  const dir = mkdtempSync(join(tmpdir(), "omnyo-db-maintenance-"));
+
   return {
     cleanup(): void {
       rmSync(dir, { force: true, recursive: true });
     },
-    dbPath: join(dir, "bb.db"),
+    dbPath: join(dir, "app.db"),
   };
-}
-
-function createLegacyDatabaseWithPreservedData(dbPath: string): void {
-  const rawDb = new Database(dbPath);
-  try {
-    rawDb.exec("PRAGMA journal_mode = WAL");
-    rawDb.exec(
-      "CREATE TABLE preserved_rows (id INTEGER PRIMARY KEY, value TEXT NOT NULL)",
-    );
-    rawDb
-      .prepare("INSERT INTO preserved_rows (id, value) VALUES (1, ?)")
-      .run("survives-vacuum");
-  } finally {
-    rawDb.close();
-  }
 }
 
 function quoteSqlIdentifier(identifier: string): string {
@@ -100,14 +91,6 @@ function createDeferredLegacyTables(db: DbConnection): void {
   }
 }
 
-function readPreservedValue(db: DbConnection): string | undefined {
-  return db.$client
-    .prepare<[], PreservedValueRow>(
-      "SELECT value FROM preserved_rows WHERE id = 1",
-    )
-    .get()?.value;
-}
-
 function readProjectName(
   db: DbConnection,
   projectId: string,
@@ -118,24 +101,118 @@ function readProjectName(
 }
 
 describe("database maintenance", () => {
-  it("detects active work that should block compaction", () => {
-    const { db, project } = setup();
-    const idleActivity = getDatabaseMaintenanceActivity(db);
-    expect(isDatabaseMaintenanceIdle(idleActivity)).toBe(true);
+  it("counts every maintenance blocker without treating deleted threads as live", () => {
+    const { db, host, project } = setup();
 
-    const activeThread = createThread(db, noopNotifier, {
-      projectId: project.id,
-      providerId: "codex",
-      status: "active",
-    });
-    const threadActivity = getDatabaseMaintenanceActivity(db);
-    expect(threadActivity.activeThreadCount).toBe(1);
-    expect(isDatabaseMaintenanceIdle(threadActivity)).toBe(false);
+    const zero = {
+      activeEnvironmentProvisioningCount: 0,
+      activePendingInteractionCount: 0,
+      activeProjectDeletionCount: 0,
+      activeThreadCount: 0,
+      activeThreadProvisioningCount: 0,
+    };
 
-    markThreadDeleted(db, noopNotifier, { threadId: activeThread.id });
-    expect(isDatabaseMaintenanceIdle(getDatabaseMaintenanceActivity(db))).toBe(
-      true,
-    );
+    try {
+      expect(getDatabaseMaintenanceActivity(db)).toEqual(zero);
+      expect(
+        isDatabaseMaintenanceIdle(getDatabaseMaintenanceActivity(db)),
+      ).toBe(true);
+
+      const idleThread = createThread(db, noopNotifier, {
+        projectId: project.id,
+        providerId: "codex",
+        status: "idle",
+      });
+
+      for (const status of threadStatusValues.filter(
+        (value) => value !== "idle",
+      ))
+        createThread(db, noopNotifier, {
+          projectId: project.id,
+          providerId: "codex",
+          status,
+        });
+      let deletedThreadId = "";
+
+      for (const status of ["active", "starting"] as const) {
+        const thread = createThread(db, noopNotifier, {
+          projectId: project.id,
+          providerId: "codex",
+          status,
+        });
+
+        markThreadDeleted(db, noopNotifier, { threadId: thread.id });
+        deletedThreadId = thread.id;
+      }
+
+      for (const status of [
+        ...environmentStatusValues,
+        "provisioning",
+      ] as const)
+        createEnvironment(db, noopNotifier, {
+          projectId: project.id,
+          hostId: host.id,
+          providerOwnsPath: false,
+          status,
+        });
+
+      for (let index = 0; index < 2; index++) {
+        const deletedProject = createProject(db, noopNotifier, {
+          name: `deleted-${index}`,
+          source: {
+            type: "local_path",
+            hostId: host.id,
+            path: `/tmp/deleted-${index}`,
+          },
+        }).project;
+
+        markProjectDeleted(db, noopNotifier, { projectId: deletedProject.id });
+      }
+
+      for (const status of pendingInteractionStatusSchema.options) {
+        const interaction = createPendingInteraction(db, {
+          originKind: "plugin",
+          pluginId: "maintenance-test",
+          rendererId: "inert",
+          threadId: idleThread.id,
+          turnId: null,
+          payload: "{}",
+        });
+
+        db.update(pendingInteractions)
+          .set({ status })
+          .where(eq(pendingInteractions.id, interaction.id))
+          .run();
+      }
+
+      createPendingInteraction(db, {
+        originKind: "plugin",
+        pluginId: "maintenance-test",
+        rendererId: "inert",
+        threadId: deletedThreadId,
+        turnId: null,
+        payload: "{}",
+      });
+      const activity = getDatabaseMaintenanceActivity(db);
+      expect(activity).toEqual({
+        activeEnvironmentProvisioningCount: 2,
+        activePendingInteractionCount: 3,
+        activeProjectDeletionCount: 2,
+        activeThreadCount: 2,
+        activeThreadProvisioningCount: 2,
+      });
+      expect(isDatabaseMaintenanceIdle(activity)).toBe(false);
+
+      db.$client.exec(
+        "UPDATE threads SET status = 'idle'; UPDATE projects SET deleted_at = NULL; UPDATE environments SET status = 'ready'; UPDATE pending_interactions SET status = 'resolved'",
+      );
+      expect(getDatabaseMaintenanceActivity(db)).toEqual(zero);
+      expect(
+        isDatabaseMaintenanceIdle(getDatabaseMaintenanceActivity(db)),
+      ).toBe(true);
+    } finally {
+      db.$client.close();
+    }
   });
 
   it("drops deferred legacy queue tables without touching current data", () => {
@@ -156,8 +233,10 @@ describe("database maintenance", () => {
 
   it("keeps fresh file-backed databases in incremental auto-vacuum mode after reopen", () => {
     const tempDatabase = createTempDatabasePath();
+
     try {
       const db = createConnection(tempDatabase.dbPath);
+
       try {
         migrate(db);
         expect(getDatabaseAutoVacuumMode(db)).toBe("incremental");
@@ -166,34 +245,12 @@ describe("database maintenance", () => {
       }
 
       const reopenedDb = createConnection(tempDatabase.dbPath);
+
       try {
         migrate(reopenedDb);
         expect(getDatabaseAutoVacuumMode(reopenedDb)).toBe("incremental");
       } finally {
         reopenedDb.$client.close();
-      }
-    } finally {
-      tempDatabase.cleanup();
-    }
-  });
-
-  it("converts legacy databases to incremental auto-vacuum during compaction while preserving data", () => {
-    const tempDatabase = createTempDatabasePath();
-    try {
-      createLegacyDatabaseWithPreservedData(tempDatabase.dbPath);
-
-      const db = createConnection(tempDatabase.dbPath);
-      try {
-        migrate(db);
-        expect(getDatabaseAutoVacuumMode(db)).toBe("none");
-        expect(readPreservedValue(db)).toBe("survives-vacuum");
-
-        compactDatabase(db);
-
-        expect(getDatabaseAutoVacuumMode(db)).toBe("incremental");
-        expect(readPreservedValue(db)).toBe("survives-vacuum");
-      } finally {
-        db.$client.close();
       }
     } finally {
       tempDatabase.cleanup();
@@ -207,15 +264,19 @@ describe("database maintenance", () => {
     db.$client.exec(
       "CREATE TABLE scratch_blobs (id INTEGER PRIMARY KEY, blob TEXT)",
     );
+
     const insert = db.$client.prepare(
       "INSERT INTO scratch_blobs (blob) VALUES (?)",
     );
+
     const blob = "x".repeat(8 * 1024);
+
     const insertMany = db.$client.transaction((count: number) => {
       for (let index = 0; index < count; index += 1) {
         insert.run(blob);
       }
     });
+
     insertMany(3_000);
     db.$client.exec("DELETE FROM scratch_blobs");
 
@@ -229,11 +290,13 @@ describe("database maintenance", () => {
       configurable: true,
       value: (source: string) => {
         preparedSql.push(source);
+
         return originalPrepare(source);
       },
       writable: true,
     });
     let result: ReturnType<typeof runIncrementalVacuum>;
+
     try {
       result = runIncrementalVacuum(db, {
         maxPages: TEST_INCREMENTAL_VACUUM_MAX_PAGES,
@@ -245,6 +308,7 @@ describe("database maintenance", () => {
         writable: true,
       });
     }
+
     const reclaimedPages =
       result.before.freelistCount - result.after.freelistCount;
 
@@ -273,65 +337,6 @@ describe("database maintenance", () => {
       shouldRunIncrementalVacuum({
         minFreelistPages: DATABASE_INCREMENTAL_VACUUM_MIN_FREELIST_PAGES,
         stats: freelistStats,
-      }),
-    ).toBe(false);
-    expect(
-      shouldCompactDatabase({
-        minReclaimableBytes: 100,
-        minReclaimableRatio: 0.2,
-        stats: {
-          ...freelistStats,
-          reclaimableBytes: 250,
-          unusedBytes: 250,
-        },
-      }),
-    ).toBe(true);
-  });
-
-  it("requires both reclaimable bytes and ratio before compacting", () => {
-    expect(
-      shouldCompactDatabase({
-        minReclaimableBytes: 100,
-        minReclaimableRatio: 0.2,
-        stats: {
-          databaseBytes: 1_000,
-          freelistBytes: 0,
-          freelistCount: 0,
-          pageCount: 10,
-          pageSize: 100,
-          reclaimableBytes: 250,
-          unusedBytes: 250,
-        },
-      }),
-    ).toBe(true);
-    expect(
-      shouldCompactDatabase({
-        minReclaimableBytes: 300,
-        minReclaimableRatio: 0.2,
-        stats: {
-          databaseBytes: 1_000,
-          freelistBytes: 0,
-          freelistCount: 0,
-          pageCount: 10,
-          pageSize: 100,
-          reclaimableBytes: 250,
-          unusedBytes: 250,
-        },
-      }),
-    ).toBe(false);
-    expect(
-      shouldCompactDatabase({
-        minReclaimableBytes: 100,
-        minReclaimableRatio: 0.3,
-        stats: {
-          databaseBytes: 1_000,
-          freelistBytes: 0,
-          freelistCount: 0,
-          pageCount: 10,
-          pageSize: 100,
-          reclaimableBytes: 250,
-          unusedBytes: 250,
-        },
       }),
     ).toBe(false);
   });

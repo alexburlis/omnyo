@@ -1,5 +1,6 @@
 import type { EventProjectionMessage } from "./event-projection-types.js";
 import { parseSentThreadMessage } from "./tool-call-parsing.js";
+import { isHumanThreadInput } from "./user-message-source.js";
 
 export function isTimelineTerminalMessage(
   message: EventProjectionMessage,
@@ -13,7 +14,7 @@ function isTimelineSummaryGroupableSteerMessage(
   return (
     message.kind === "user" &&
     message.turnRequest.kind === "steer" &&
-    (message.initiator === "agent" || message.initiator === "system")
+    !isHumanThreadInput(message)
   );
 }
 
@@ -23,19 +24,32 @@ export function isTimelineUngroupableMessage(
   if (message.kind === "user") {
     return !isTimelineSummaryGroupableSteerMessage(message);
   }
+
   if (message.kind === "assistant-text") {
     return message.isLegacyUserMessage === true;
   }
+
   if (message.kind === "command") {
     return parseSentThreadMessage(message) !== null;
   }
-  return false;
+
+  if (
+    message.kind === "permission-grant-lifecycle" ||
+    message.kind === "user-question-lifecycle"
+  ) {
+    return true;
+  }
+
+  return (
+    message.kind === "plugin-form-lifecycle" && message.status === "pending"
+  );
 }
 
 export function isSingletonContextManagementOperation(
   messages: readonly EventProjectionMessage[],
 ): boolean {
   const onlyMessage = messages.length === 1 ? messages[0] : undefined;
+
   return (
     onlyMessage?.kind === "operation" &&
     (onlyMessage.opType === "compaction" ||
@@ -48,9 +62,11 @@ export function findLastTerminalTimelineMessage(
 ): EventProjectionMessage | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
+
     if (message && isTimelineTerminalMessage(message)) {
       return message;
     }
   }
+
   return undefined;
 }

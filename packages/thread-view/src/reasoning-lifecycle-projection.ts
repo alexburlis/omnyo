@@ -1,4 +1,4 @@
-import type { ActiveThinking } from "@bb/domain";
+import type { ActiveThinking } from "@omnyo/domain";
 import type { EventMeta } from "./event-decode.js";
 import type {
   BuildEventProjectionMessagesOptions,
@@ -64,14 +64,18 @@ type ReasoningCompletionStatus = Extract<
 >;
 
 const MAX_REASONING_DETAIL_CHARS = 32_000;
+
 const REASONING_DETAIL_TRUNCATION_SUFFIX_TAIL = " more characters truncated]";
 
 function normalizeReasoningDetail(detail: string): string {
   const trimmed = detail.trim();
+
   if (trimmed.length <= MAX_REASONING_DETAIL_CHARS) {
     return trimmed;
   }
+
   const dropped = trimmed.length - MAX_REASONING_DETAIL_CHARS;
+
   return `${trimmed.slice(0, MAX_REASONING_DETAIL_CHARS)}\n…[${dropped.toLocaleString("en-US")}${REASONING_DETAIL_TRUNCATION_SUFFIX_TAIL}`;
 }
 
@@ -110,6 +114,7 @@ function isNewerActiveThinkingLifecycle(
   if (candidate.updatedSeq !== current.updatedSeq) {
     return candidate.updatedSeq > current.updatedSeq;
   }
+
   return candidate.updatedAt > current.updatedAt;
 }
 
@@ -117,6 +122,7 @@ function findLatestActiveThinkingLifecycle(
   openLifecycles: ReadonlyMap<string, ActiveThinkingLifecycle>,
 ): ActiveThinkingLifecycle | null {
   let latestLifecycle: ActiveThinkingLifecycle | null = null;
+
   for (const lifecycle of openLifecycles.values()) {
     if (
       latestLifecycle === null ||
@@ -125,6 +131,7 @@ function findLatestActiveThinkingLifecycle(
       latestLifecycle = lifecycle;
     }
   }
+
   return latestLifecycle;
 }
 
@@ -133,6 +140,7 @@ function getActiveThinkingText(
   messageKey: string,
 ): string {
   const buffer = state.reasoningTextBuffersByKey.get(messageKey);
+
   return (buffer ? getVisibleTextBufferText(buffer) : undefined)?.trim() ?? "";
 }
 
@@ -147,6 +155,7 @@ export function buildProjectionActiveThinking(
   const latestLifecycle = findLatestActiveThinkingLifecycle(
     state.openReasoningLifecyclesByKey,
   );
+
   if (!latestLifecycle) {
     return null;
   }
@@ -171,9 +180,11 @@ export function upsertReasoningLifecycle(
   }
 
   const messageKey = createBufferedTextInstanceKey(args.identity);
+
   if (args.state.closedTurnIds.has(args.identity.turnId)) {
     return;
   }
+
   if (args.state.finalizedReasoningKeys.has(messageKey)) {
     return;
   }
@@ -182,9 +193,11 @@ export function upsertReasoningLifecycle(
 
   const existingLifecycle =
     args.state.openReasoningLifecyclesByKey.get(messageKey);
+
   if (existingLifecycle) {
     existingLifecycle.updatedAt = args.meta.createdAt;
     existingLifecycle.updatedSeq = args.meta.seq;
+
     return;
   }
 
@@ -206,20 +219,24 @@ function finalizeReasoningLifecycleByKey(
   const lifecycle = args.state.openReasoningLifecyclesByKey.get(
     args.messageKey,
   );
+
   const buffer = args.state.reasoningTextBuffersByKey.get(args.messageKey);
   args.state.openReasoningLifecyclesByKey.delete(args.messageKey);
   args.state.reasoningTextBuffersByKey.delete(args.messageKey);
   args.state.finalizedReasoningKeys.add(args.messageKey);
+
   if (!lifecycle || !buffer) {
     return null;
   }
 
   const detail = getVisibleTextBufferFullText(buffer);
+
   if (detail.trim().length === 0) {
     return null;
   }
 
   const durationMs = args.meta.createdAt - lifecycle.startedAt;
+
   const message: EventProjectionOperationMessage = {
     kind: "operation",
     id: messageId(
@@ -246,7 +263,9 @@ function finalizeReasoningLifecycleByKey(
     detail: normalizeReasoningDetail(detail),
     status: args.status,
   };
+
   args.state.messages.push(message);
+
   return message;
 }
 
@@ -259,14 +278,18 @@ export function finalizeReasoningLifecycle(
 
   const messageKey = createBufferedTextInstanceKey(args.identity);
   args.state.reasoningDeltaTextByKey.delete(messageKey);
+
   const message =
     args.state.reasoningMessagesAwaitingCompletion.get(messageKey);
+
   if (message) {
     args.state.reasoningMessagesAwaitingCompletion.delete(messageKey);
     message.sourceSeqEnd = args.meta.seq;
+
     if (args.text?.trim()) {
       message.detail = normalizeReasoningDetail(args.text);
     }
+
     return;
   }
 
@@ -282,6 +305,7 @@ function finalizeReasoningWithoutCompletion(
   args: FinalizeOpenReasoningLifecyclesArgs & { messageKey: string },
 ): void {
   const message = finalizeReasoningLifecycleByKey(args);
+
   if (message) {
     args.state.reasoningMessagesAwaitingCompletion.set(
       args.messageKey,
@@ -306,6 +330,7 @@ export function finalizeOpenReasoningLifecyclesForTurn(
     if (lifecycle.turnId !== args.turnId) {
       continue;
     }
+
     finalizeReasoningWithoutCompletion({ ...args, messageKey });
   }
 }
@@ -317,7 +342,9 @@ export function getReasoningTextBuffer(
   const buffer =
     state.reasoningTextBuffersByKey.get(messageKey) ??
     createVisibleTextBuffer();
+
   state.reasoningTextBuffersByKey.set(messageKey, buffer);
+
   return buffer;
 }
 

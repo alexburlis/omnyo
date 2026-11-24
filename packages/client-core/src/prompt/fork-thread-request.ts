@@ -1,6 +1,9 @@
-import type { Thread } from "@bb/domain";
+import type { Thread } from "@omnyo/domain";
 
-type ForkableThread = Pick<Thread, "archivedAt" | "environmentId" | "providerId">;
+type ForkableThread = Pick<
+  Thread,
+  "archivedAt" | "environmentId" | "providerId"
+>;
 
 export function isThreadForkable(
   sourceThread: ForkableThread | null,
@@ -13,5 +16,6 @@ export function isThreadForkable(
   ) {
     return false;
   }
+
   return providerSupportsFork;
 }

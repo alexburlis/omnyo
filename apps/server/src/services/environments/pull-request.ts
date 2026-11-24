@@ -9,7 +9,7 @@ import type {
   ThreadPullRequestMergeabilityState,
   ThreadPullRequestReview,
   ThreadPullRequestReviewState,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 function isSameOrLaterCheck(
   candidate: GitHostPullRequestCheck,
@@ -18,9 +18,11 @@ function isSameOrLaterCheck(
   if (candidate.startedAt === null) {
     return current.startedAt === null;
   }
+
   if (current.startedAt === null) {
     return true;
   }
+
   return Date.parse(candidate.startedAt) >= Date.parse(current.startedAt);
 }
 
@@ -28,12 +30,15 @@ function assembleThreadPullRequestChecks(
   rawChecks: readonly GitHostPullRequestCheck[],
 ): ThreadPullRequestChecks {
   const latestChecksByName = new Map<string, GitHostPullRequestCheck>();
+
   for (const check of rawChecks) {
     const current = latestChecksByName.get(check.name);
+
     if (!current || isSameOrLaterCheck(check, current)) {
       latestChecksByName.set(check.name, check);
     }
   }
+
   const checks = [...latestChecksByName.values()];
 
   let passedCount = 0;
@@ -46,6 +51,7 @@ function assembleThreadPullRequestChecks(
       pendingCount += 1;
       continue;
     }
+
     switch (check.conclusion) {
       case "success":
       case "skipped":
@@ -68,6 +74,7 @@ function assembleThreadPullRequestChecks(
   }
 
   let state: ThreadPullRequestChecksState;
+
   if (checks.length === 0) {
     state = "no_checks";
   } else if (failedCount > 0) {
@@ -93,6 +100,7 @@ function assembleThreadPullRequestReview(
   raw: GitHostPullRequest,
 ): ThreadPullRequestReview {
   let state: ThreadPullRequestReviewState;
+
   switch (raw.reviewDecision) {
     case "APPROVED":
       state = "approved";
@@ -119,6 +127,7 @@ function assembleThreadPullRequestMergeability(
   raw: GitHostPullRequest,
 ): ThreadPullRequestMergeability {
   let state: ThreadPullRequestMergeabilityState;
+
   if (raw.mergeable === "CONFLICTING" || raw.mergeStateStatus === "DIRTY") {
     state = "conflicts";
   } else if (raw.state === "OPEN" && raw.isDraft) {
@@ -153,23 +162,34 @@ function assemblePullRequestAttention(
   inMergeQueue: boolean | null,
 ): ThreadPullRequestAttentionState {
   if (state === "merged") return "merged";
+
   if (state === "closed") return "closed";
+
   if (mergeability.state === "conflicts") return "conflicts";
+
   if (checks.state === "failing") return "checks_failed";
+
   if (review.state === "changes_requested") return "changes_requested";
+
   if (state === "draft") return "draft";
+
   if (inMergeQueue) return "queued";
+
   if (
     review.state === "review_requested" ||
     review.state === "review_required"
   ) {
     return "review_requested";
   }
+
   if (checks.state === "pending") return "checks_pending";
+
   if (mergeability.state === "blocked") return "blocked";
+
   if (mergeability.state === "mergeable" && checks.state === "passing") {
     return "ready_to_merge";
   }
+
   return "none";
 }
 
@@ -184,9 +204,11 @@ export function assembleThreadPullRequest(
         : raw.isDraft
           ? "draft"
           : "open";
+
   const checks = assembleThreadPullRequestChecks(raw.checks);
   const review = assembleThreadPullRequestReview(raw);
   const mergeability = assembleThreadPullRequestMergeability(raw);
+
   return {
     number: raw.number,
     title: raw.title,

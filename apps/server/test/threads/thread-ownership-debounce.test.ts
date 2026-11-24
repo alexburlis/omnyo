@@ -1,4 +1,4 @@
-import { archiveThread, getThread, updateThread } from "@bb/db";
+import { archiveThread, getThread, updateThread } from "@omnyo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { queueParentSystemMessage } from "../../src/services/threads/parent-system-messages.js";
 import { handleThreadOwnershipChange } from "../../src/services/threads/thread-ownership.js";
@@ -35,9 +35,11 @@ async function withOwnershipFixture(
 ) {
   await withTestHarness(async (harness) => {
     const { host } = seedHostSession(harness.deps);
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const parents = ["A", "B", "C"].map(
       (title) =>
         seedThread(harness.deps, {
@@ -45,15 +47,19 @@ async function withOwnershipFixture(
           title,
         }).id,
     );
+
     const child = seedThread(harness.deps, {
       projectId: project.id,
       parentThreadId: parents[0],
     });
+
     const secondChild = seedThread(harness.deps, {
       projectId: project.id,
       parentThreadId: parents[0],
     });
+
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
     try {
       await run({
         childId: child.id,
@@ -61,12 +67,14 @@ async function withOwnershipFixture(
         parents,
         async move(childId, parentThreadId) {
           const previousThread = getThread(harness.db, childId)!;
+
           const updatedThread = updateThread(
             harness.db,
             harness.deps.hub,
             childId,
             { parentThreadId },
           )!;
+
           await handleThreadOwnershipChange(harness.deps, {
             previousThread,
             updatedThread,

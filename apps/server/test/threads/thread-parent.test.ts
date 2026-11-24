@@ -5,7 +5,7 @@ import {
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../src/errors.js";
 import {
@@ -18,9 +18,11 @@ type ThrowingCallback = () => void;
 function setup() {
   const db = createConnection(":memory:");
   migrate(db);
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: {
@@ -29,6 +31,7 @@ function setup() {
       type: "local_path",
     },
   });
+
   return { db, host, project };
 }
 
@@ -39,14 +42,17 @@ function captureApiError(callback: ThrowingCallback): ApiError {
     if (error instanceof ApiError) {
       return error;
     }
+
     throw error;
   }
+
   throw new Error("Expected ApiError");
 }
 
 describe("thread parent validation", () => {
   it("accepts a live parent thread from another project", () => {
     const { db, host } = setup();
+
     const { project: otherProject } = createProject(db, noopNotifier, {
       name: "other-project",
       source: {
@@ -55,6 +61,7 @@ describe("thread parent validation", () => {
         type: "local_path",
       },
     });
+
     const parentThread = createThread(db, noopNotifier, {
       projectId: otherProject.id,
       providerId: "codex",
@@ -70,6 +77,7 @@ describe("thread parent validation", () => {
 
   it("rejects self-parenting", () => {
     const { db, project } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -93,15 +101,18 @@ describe("thread parent validation", () => {
 
   it("rejects parent assignments that would create a cycle", () => {
     const { db, project } = setup();
+
     const rootThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const childThread = createThread(db, noopNotifier, {
       parentThreadId: rootThread.id,
       projectId: project.id,
       providerId: "codex",
     });
+
     const grandchildThread = createThread(db, noopNotifier, {
       parentThreadId: childThread.id,
       projectId: project.id,
@@ -126,15 +137,18 @@ describe("thread parent validation", () => {
 
   it("allows nesting up to the configured depth cap", () => {
     const { db, project } = setup();
+
     const rootThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const level2Thread = createThread(db, noopNotifier, {
       parentThreadId: rootThread.id,
       projectId: project.id,
       providerId: "codex",
     });
+
     const level3Thread = createThread(db, noopNotifier, {
       parentThreadId: level2Thread.id,
       projectId: project.id,
@@ -153,20 +167,24 @@ describe("thread parent validation", () => {
 
   it("rejects new children beyond the configured depth cap", () => {
     const { db, project } = setup();
+
     const rootThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const level2Thread = createThread(db, noopNotifier, {
       parentThreadId: rootThread.id,
       projectId: project.id,
       providerId: "codex",
     });
+
     const level3Thread = createThread(db, noopNotifier, {
       parentThreadId: level2Thread.id,
       projectId: project.id,
       providerId: "codex",
     });
+
     const level4Thread = createThread(db, noopNotifier, {
       parentThreadId: level3Thread.id,
       projectId: project.id,
@@ -190,24 +208,29 @@ describe("thread parent validation", () => {
 
   it("rejects moves whose existing descendants would exceed the depth cap", () => {
     const { db, project } = setup();
+
     const rootThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const level2Thread = createThread(db, noopNotifier, {
       parentThreadId: rootThread.id,
       projectId: project.id,
       providerId: "codex",
     });
+
     const level3Thread = createThread(db, noopNotifier, {
       parentThreadId: level2Thread.id,
       projectId: project.id,
       providerId: "codex",
     });
+
     const movingThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     createThread(db, noopNotifier, {
       parentThreadId: movingThread.id,
       projectId: project.id,

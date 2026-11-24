@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { BbDesktopServerChoice } from "@bb/desktop-contract";
+import type { OmnyoDesktopServerChoice } from "@omnyo/desktop-contract";
 import {
   BUILTIN_SERVER_NAME,
   type ConnectServerRef,
@@ -13,8 +13,9 @@ export function customServerId(url: string): string {
 export function buildDesktopServerChoices(
   store: ServerTargetStore | null,
   connectServers: readonly ConnectServerRef[],
-): BbDesktopServerChoice[] {
+): OmnyoDesktopServerChoice[] {
   const target = store?.getTarget() ?? { kind: "builtin" };
+
   return [
     {
       id: "builtin",

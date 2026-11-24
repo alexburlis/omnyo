@@ -1,9 +1,9 @@
 import { TouchSensor } from "@dnd-kit/core";
-import { COMPACT_VIEWPORT_QUERY } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { COMPACT_VIEWPORT_QUERY } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   getMediaQuerySnapshot,
   subscribeMediaQuery,
-} from "@bb/shared-ui/hooks/use-media-query";
+} from "@omnyo/shared-ui/hooks/use-media-query";
 import {
   isCompactSidebarDrawerShowing,
   subscribeCompactSidebarDrawerShowing,
@@ -21,10 +21,14 @@ export class SidebarTouchSensor extends TouchSensor {
     if (typeof window === "undefined") {
       return () => {};
     }
+
     const noop = () => {};
+
     let installed = false;
+
     const sync = () => {
       const wanted = shouldInstallSidebarTouchMoveListener();
+
       if (wanted && !installed) {
         window.addEventListener("touchmove", noop, {
           capture: false,
@@ -36,15 +40,19 @@ export class SidebarTouchSensor extends TouchSensor {
         installed = false;
       }
     };
+
     sync();
     const unsubscribeDrawer = subscribeCompactSidebarDrawerShowing(sync);
+
     const unsubscribeViewport = subscribeMediaQuery(
       COMPACT_VIEWPORT_QUERY,
       sync,
     );
+
     return () => {
       unsubscribeDrawer();
       unsubscribeViewport();
+
       if (installed) {
         window.removeEventListener("touchmove", noop);
         installed = false;

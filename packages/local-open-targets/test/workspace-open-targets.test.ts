@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { sanitizeInheritedChildProcessEnv } from "@bb/process-utils";
+import { sanitizeInheritedChildProcessEnv } from "@omnyo/process-utils";
 import {
   createWorkspaceOpenTargetRuntime,
   listWorkspaceOpenTargetsWithRuntime,
@@ -19,10 +19,12 @@ describe("default workspace open-target runtime", () => {
     });
 
     expect(runtime.env?.PATH).toBe("/Users/test/.local/bin:/usr/bin");
+
     const inheritedResult = await runtime.execFile(process.execPath, [
       "-e",
       "process.stdout.write(process.env.PATH ?? '')",
     ]);
+
     expect(inheritedResult.stdout).toBe(process.env.PATH ?? "");
 
     const userExecutableResult = await runtime.execFile(
@@ -30,6 +32,7 @@ describe("default workspace open-target runtime", () => {
       ["-e", "process.stdout.write(process.env.PATH ?? '')"],
       { env: runtime.env },
     );
+
     expect(userExecutableResult.stdout).toBe("/Users/test/.local/bin:/usr/bin");
   });
 });
@@ -100,6 +103,7 @@ function createRuntime(
         if (file === "which" || file === "where.exe") {
           throw new Error("Executable not found");
         }
+
         return { stdout: "" };
       }),
     env: args.env,
@@ -111,6 +115,7 @@ function createAvailableExecFile(
   args: CreateAvailableExecFileArgs = {},
 ): ExecFileHandler {
   const availableBundleIdSubstrings = args.availableBundleIdSubstrings ?? [];
+
   const availableMacApplications: AvailableMacApplication[] = [
     ...(args.availableMacApplications ?? []),
     ...availableBundleIdSubstrings.map((bundleId) => ({
@@ -118,15 +123,19 @@ function createAvailableExecFile(
       bundleId,
     })),
   ];
+
   const availableExecutables = args.availableExecutables ?? [];
+
   const fileAssociatedMacApplications =
     args.fileAssociatedMacApplications ?? [];
 
   return async (file, commandArgs, options) => {
     const call: ExecFileCall = { file, args: commandArgs };
+
     if (options?.env !== undefined) {
       call.env = options.env;
     }
+
     args.calls?.push(call);
 
     if (file === "mdfind") {
@@ -137,6 +146,7 @@ function createAvailableExecFile(
             .join("\n")}\n`,
         };
       }
+
       return {
         stdout:
           availableMacApplications
@@ -151,20 +161,25 @@ function createAvailableExecFile(
     if (file === "plutil") {
       const key = commandArgs[1];
       const plistPath = commandArgs.at(-1) ?? "";
+
       const application = availableMacApplications.find((candidate) =>
         plistPath.startsWith(path.join(candidate.appPath, "Contents")),
       );
+
       if (!application) {
         return { stdout: "" };
       }
+
       if (key === "CFBundleIdentifier") {
         return { stdout: `${application.bundleId}\n` };
       }
+
       if (key === "CFBundleDisplayName" || key === "CFBundleName") {
         return {
           stdout: `${application.displayName ?? path.basename(application.appPath, ".app")}\n`,
         };
       }
+
       return { stdout: "" };
     }
 
@@ -181,11 +196,13 @@ function createAvailableExecFile(
 
     if (file === "which" || file === "where.exe") {
       const executable = commandArgs[0];
+
       if (executable && availableExecutables.includes(executable)) {
         return {
           stdout: `/usr/local/bin/${executable}\n`,
         };
       }
+
       throw new Error("Executable not found");
     }
 
@@ -206,6 +223,42 @@ describe("workspace open targets", () => {
       ),
     ).resolves.toEqual([]);
     expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("reuses one macOS application scan for five minutes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+
+    try {
+      const calls: ExecFileCall[] = [];
+
+      const runtime = createRuntime({
+        execFile: createAvailableExecFile({ calls }),
+      });
+
+      const bundleLookups = () =>
+        calls.filter(
+          (call) =>
+            call.file === "mdfind" &&
+            call.args.join(" ").includes("kMDItemCFBundleIdentifier"),
+        ).length;
+
+      const first = await listWorkspaceOpenTargetsWithRuntime(runtime);
+      const scanned = bundleLookups();
+
+      expect(scanned).toBeGreaterThan(0);
+
+      vi.advanceTimersByTime(4 * 60 * 1000);
+      await expect(
+        listWorkspaceOpenTargetsWithRuntime(runtime),
+      ).resolves.toEqual(first);
+      expect(bundleLookups()).toBe(scanned);
+
+      vi.advanceTimersByTime(60 * 1000 + 1);
+      await listWorkspaceOpenTargetsWithRuntime(runtime);
+      expect(bundleLookups()).toBe(scanned * 2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("discovers Linux platform targets and editor CLIs from PATH", async () => {
@@ -249,7 +302,7 @@ describe("workspace open targets", () => {
   });
 
   it("discovers Linux desktop apps outside app-specific adapters", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "bb-desktop-apps-"));
+    const root = await mkdtemp(path.join(tmpdir(), "omnyo-desktop-apps-"));
     const desktopDirectory = path.join(root, "applications");
     await mkdir(desktopDirectory, { recursive: true });
     await writeFile(
@@ -367,9 +420,13 @@ describe("workspace open targets", () => {
   });
 
   it("opens WSL paths with the configured default app bridge", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "notes.md");
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableExecutables: ["wslview"],
       calls,
@@ -404,9 +461,13 @@ describe("workspace open targets", () => {
   });
 
   it("opens WSL paths with the file manager bridge through the Linux runtime", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "notes.md");
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableExecutables: ["explorer.exe"],
       calls,
@@ -441,9 +502,13 @@ describe("workspace open targets", () => {
   });
 
   it("opens Linux files with discovered editor CLIs", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "src", "file.ts");
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableExecutables: ["code"],
       calls,
@@ -483,7 +548,7 @@ describe("workspace open targets", () => {
   });
 
   it("opens Linux desktop app targets from desktop Exec entries", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "bb-desktop-open-"));
+    const root = await mkdtemp(path.join(tmpdir(), "omnyo-desktop-open-"));
     const desktopDirectory = path.join(root, "applications");
     const workspacePath = path.join(root, "workspace");
     const filePath = path.join(workspacePath, "notes.md");
@@ -531,9 +596,13 @@ describe("workspace open targets", () => {
   });
 
   it("opens Linux paths with the platform default app", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "notes.md");
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableExecutables: ["xdg-open"],
       calls,
@@ -564,6 +633,7 @@ describe("workspace open targets", () => {
 
   it("opens remote SSH paths in a Linux terminal", async () => {
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableExecutables: ["ssh", "x-terminal-emulator"],
       calls,
@@ -586,6 +656,7 @@ describe("workspace open targets", () => {
     const terminalCall = calls.find(
       (call) => call.file === "x-terminal-emulator",
     );
+
     expect(terminalCall).toBeDefined();
     expect(terminalCall?.args.slice(0, 5)).toEqual([
       "-e",
@@ -601,6 +672,7 @@ describe("workspace open targets", () => {
 
   it("discovers built-in targets and bundle-id matches", async () => {
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableBundleIdSubstrings: ["dev.zed.Zed"],
       calls,
@@ -659,7 +731,10 @@ describe("workspace open targets", () => {
   });
 
   it("opens paths with the macOS default app", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "notes.md");
     const calls: ExecFileCall[] = [];
     const execFile = createAvailableExecFile({ calls });
@@ -692,9 +767,13 @@ describe("workspace open targets", () => {
   });
 
   it("reveals files in Finder", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "notes.md");
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableExecutables: ["open"],
       calls,
@@ -724,7 +803,7 @@ describe("workspace open targets", () => {
   });
 
   it("opens BBEdit and Emacs through macOS application open instead of editor CLIs", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const root = await mkdtemp(path.join(tmpdir(), "omnyo-workspace-"));
     const applicationsDirectory = path.join(root, "Applications");
     const workspacePath = path.join(root, "workspace");
     const filePath = path.join(workspacePath, "notes.md");
@@ -775,11 +854,12 @@ describe("workspace open targets", () => {
   });
 
   it("opens TextMate locations through txmt URLs with column support", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const root = await mkdtemp(path.join(tmpdir(), "omnyo-workspace-"));
     const applicationsDirectory = path.join(root, "Applications");
     const workspacePath = path.join(root, "workspace");
     const filePath = path.join(workspacePath, "notes.md");
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableExecutables: ["open"],
       calls,
@@ -807,9 +887,11 @@ describe("workspace open targets", () => {
       );
 
       expect(calls.some((call) => call.file === "mate")).toBe(false);
+
       const openCall = calls.find(
         (call) => call.file === "open" && call.args[1] === "TextMate",
       );
+
       expect(openCall?.args.slice(0, 2)).toEqual(["-a", "TextMate"]);
       const textMateUri = new URL(openCall?.args[2] ?? "");
       expect(textMateUri.protocol).toBe("txmt:");
@@ -824,18 +906,21 @@ describe("workspace open targets", () => {
   });
 
   it("advertises and uses column support for IntelliJ IDEA", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "bb-intellij-idea-"));
+    const root = await mkdtemp(path.join(tmpdir(), "omnyo-intellij-idea-"));
     const applicationsDirectory = path.join(root, "Applications");
+
     const intellijAppPath = path.join(
       applicationsDirectory,
       "IntelliJ IDEA.app",
     );
+
     const intellijExecutable = path.join(
       intellijAppPath,
       "Contents",
       "MacOS",
       "idea",
     );
+
     const workspacePath = path.join(root, "workspace");
     const filePath = path.join(workspacePath, "src", "file.ts");
     const calls: ExecFileCall[] = [];
@@ -891,8 +976,9 @@ describe("workspace open targets", () => {
 
   it("falls back to application bundle paths when bundle id lookup misses", async () => {
     const root = await mkdtemp(
-      path.join(tmpdir(), "bb-workspace-open-targets-"),
+      path.join(tmpdir(), "omnyo-workspace-open-targets-"),
     );
+
     const applicationsDirectory = path.join(root, "Applications");
     await mkdir(path.join(applicationsDirectory, "Cursor.app"), {
       recursive: true,
@@ -913,16 +999,19 @@ describe("workspace open targets", () => {
 
   it("uses Cursor's bundled macOS CLI when the shell command is unavailable", async () => {
     const root = await mkdtemp(
-      path.join(tmpdir(), "bb-workspace-open-targets-"),
+      path.join(tmpdir(), "omnyo-workspace-open-targets-"),
     );
+
     const applicationsDirectory = path.join(root, "Applications");
     const cursorAppPath = path.join(applicationsDirectory, "Cursor.app");
+
     const cursorExecutable = path.join(
       cursorAppPath,
       "Contents",
       "MacOS",
       "Cursor",
     );
+
     const cursorCli = path.join(
       cursorAppPath,
       "Contents",
@@ -931,6 +1020,7 @@ describe("workspace open targets", () => {
       "out",
       "cli.js",
     );
+
     const workspacePath = path.join(root, "workspace");
     const filePath = path.join(workspacePath, "src", "file.ts");
     const calls: ExecFileCall[] = [];
@@ -981,13 +1071,15 @@ describe("workspace open targets", () => {
 
   it("uses bundled macOS editor CLIs when shell commands are unavailable", async () => {
     const root = await mkdtemp(
-      path.join(tmpdir(), "bb-workspace-open-targets-"),
+      path.join(tmpdir(), "omnyo-workspace-open-targets-"),
     );
+
     const applicationsDirectory = path.join(root, "Applications");
     const workspacePath = path.join(root, "workspace");
     const filePath = path.join(workspacePath, "src", "file.ts");
     const calls: ExecFileCall[] = [];
     const execFile = createAvailableExecFile({ calls });
+
     const cases = [
       {
         appName: "Code",
@@ -1054,12 +1146,14 @@ describe("workspace open targets", () => {
     try {
       await mkdir(path.dirname(filePath), { recursive: true });
       await writeFile(filePath, "export const value = 1;\n");
+
       for (const testCase of cases) {
         const executablePath = path.join(
           applicationsDirectory,
           `${testCase.appName}.app`,
           ...testCase.relativeExecutablePath,
         );
+
         await mkdir(path.dirname(executablePath), { recursive: true });
         await writeFile(executablePath, "");
 
@@ -1089,9 +1183,11 @@ describe("workspace open targets", () => {
 
   it("uses bundled VS Code CLI for remote SSH opens when the shell command is unavailable", async () => {
     const root = await mkdtemp(
-      path.join(tmpdir(), "bb-workspace-open-targets-"),
+      path.join(tmpdir(), "omnyo-workspace-open-targets-"),
     );
+
     const applicationsDirectory = path.join(root, "Applications");
+
     const codeExecutable = path.join(
       applicationsDirectory,
       "Code.app",
@@ -1101,7 +1197,9 @@ describe("workspace open targets", () => {
       "bin",
       "code",
     );
+
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableExecutables: ["ssh"],
       calls,
@@ -1117,6 +1215,7 @@ describe("workspace open targets", () => {
           execFile,
         }),
       );
+
       expect(targets.find((target) => target.id === "vscode")).toMatchObject({
         remoteSshCapabilities: {
           openDirectory: true,
@@ -1159,8 +1258,9 @@ describe("workspace open targets", () => {
 
   it("discovers Warp from the macOS application bundle", async () => {
     const root = await mkdtemp(
-      path.join(tmpdir(), "bb-workspace-open-targets-"),
+      path.join(tmpdir(), "omnyo-workspace-open-targets-"),
     );
+
     const applicationsDirectory = path.join(root, "Applications");
     await mkdir(path.join(applicationsDirectory, "Warp.app"), {
       recursive: true,
@@ -1230,21 +1330,29 @@ describe("workspace open targets", () => {
   });
 
   it("discovers generic macOS apps from file-specific LaunchServices results", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "notes.md");
     const mockEditPath = "/Applications/MockEdit.app";
     const zedPath = "/Applications/Zed.app";
+
     const execFile: ExecFileHandler = async (file, commandArgs) => {
       if (file === "mdfind") {
         const query = commandArgs.join(" ");
+
         if (query.includes("kMDItemContentType")) {
           return { stdout: `${mockEditPath}\n${zedPath}\n` };
         }
+
         if (query.includes("dev.zed.Zed")) {
           return { stdout: `${zedPath}\n` };
         }
+
         return { stdout: "" };
       }
+
       if (file === "osascript" && commandArgs.includes("JavaScript")) {
         return {
           stdout: JSON.stringify([
@@ -1253,30 +1361,38 @@ describe("workspace open targets", () => {
           ]),
         };
       }
+
       if (file === "plutil") {
         const key = commandArgs[1];
         const plistPath = commandArgs.at(-1) ?? "";
+
         if (plistPath.includes("MockEdit.app")) {
           if (key === "CFBundleIdentifier") {
             return { stdout: "com.example.MockEdit\n" };
           }
+
           if (key === "CFBundleDisplayName") {
             return { stdout: "Mock Edit\n" };
           }
+
           return { stdout: "" };
         }
+
         if (plistPath.includes("Zed.app")) {
           if (key === "CFBundleIdentifier") {
             return { stdout: "dev.zed.Zed\n" };
           }
+
           if (key === "CFBundleDisplayName") {
             return { stdout: "Zed\n" };
           }
         }
       }
+
       if (file === "which") {
         throw new Error("Executable not found");
       }
+
       return { stdout: "" };
     };
 
@@ -1286,6 +1402,7 @@ describe("workspace open targets", () => {
       const globalTargets = await listWorkspaceOpenTargetsWithRuntime(
         createRuntime({ execFile }),
       );
+
       expect(globalTargets.find((target) => target.id === "zed")).toBeDefined();
       expect(
         globalTargets.find(
@@ -1323,19 +1440,26 @@ describe("workspace open targets", () => {
   });
 
   it("opens generic macOS app targets by bundle id", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "notes.md");
     const calls: ExecFileCall[] = [];
+
     const execFile: ExecFileHandler = async (file, commandArgs) => {
       calls.push({ file, args: commandArgs });
+
       if (file === "mdfind") {
         return commandArgs.join(" ").includes("com.example.MockEdit")
           ? { stdout: "/Applications/MockEdit.app\n" }
           : { stdout: "" };
       }
+
       if (file === "which") {
         throw new Error("Executable not found");
       }
+
       return { stdout: "" };
     };
 
@@ -1363,49 +1487,62 @@ describe("workspace open targets", () => {
   });
 
   it("uses app-provided icons for discovered targets without built-in icons", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "bb-open-target-icon-"));
+    const root = await mkdtemp(path.join(tmpdir(), "omnyo-open-target-icon-"));
     const appPath = path.join(root, "WebStorm.app");
     const calls: ExecFileCall[] = [];
     await mkdir(appPath, { recursive: true });
+
     const execFile: ExecFileHandler = async (file, commandArgs) => {
       calls.push({ file, args: commandArgs });
+
       if (file === "mdfind") {
         if (commandArgs.join(" ").includes("kMDItemContentType")) {
           return { stdout: `${appPath}\n` };
         }
+
         return {
           stdout: commandArgs.join(" ").includes("com.jetbrains.WebStorm")
             ? `${appPath}\n`
             : "",
         };
       }
+
       if (file === "plutil") {
         const key = commandArgs[1];
+
         if (key === "CFBundleIdentifier") {
           return { stdout: "com.jetbrains.WebStorm\n" };
         }
+
         if (key === "CFBundleDisplayName" || key === "CFBundleName") {
           return { stdout: "WebStorm\n" };
         }
+
         if (key === "CFBundleIconFile") {
           return { stdout: "webstorm\n" };
         }
+
         return { stdout: "" };
       }
+
       if (file === "qlmanage") {
         const outputDir = commandArgs[commandArgs.indexOf("-o") + 1];
         const inputPath = commandArgs.at(-1);
+
         if (outputDir && inputPath) {
           await writeFile(
             path.join(outputDir, `${path.basename(inputPath)}.png`),
             "fake-png",
           );
         }
+
         return { stdout: "" };
       }
+
       if (file === "which") {
         throw new Error("Executable not found");
       }
+
       return { stdout: "" };
     };
 
@@ -1431,49 +1568,62 @@ describe("workspace open targets", () => {
   });
 
   it("prefers app-provided icons for discovered known app targets", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "bb-open-target-icon-"));
+    const root = await mkdtemp(path.join(tmpdir(), "omnyo-open-target-icon-"));
     const appPath = path.join(root, "Visual Studio Code.app");
     const calls: ExecFileCall[] = [];
     await mkdir(appPath, { recursive: true });
+
     const execFile: ExecFileHandler = async (file, commandArgs) => {
       calls.push({ file, args: commandArgs });
+
       if (file === "mdfind") {
         if (commandArgs.join(" ").includes("kMDItemContentType")) {
           return { stdout: `${appPath}\n` };
         }
+
         return {
           stdout: commandArgs.join(" ").includes("com.microsoft.VSCode")
             ? `${appPath}\n`
             : "",
         };
       }
+
       if (file === "plutil") {
         const key = commandArgs[1];
+
         if (key === "CFBundleIdentifier") {
           return { stdout: "com.microsoft.VSCode\n" };
         }
+
         if (key === "CFBundleDisplayName" || key === "CFBundleName") {
           return { stdout: "Code\n" };
         }
+
         if (key === "CFBundleIconFile") {
           return { stdout: "Code\n" };
         }
+
         return { stdout: "" };
       }
+
       if (file === "qlmanage") {
         const outputDir = commandArgs[commandArgs.indexOf("-o") + 1];
         const inputPath = commandArgs.at(-1);
+
         if (outputDir && inputPath) {
           await writeFile(
             path.join(outputDir, `${path.basename(inputPath)}.png`),
             "vscode-png",
           );
         }
+
         return { stdout: "" };
       }
+
       if (file === "which") {
         throw new Error("Executable not found");
       }
+
       return { stdout: "" };
     };
 
@@ -1499,8 +1649,9 @@ describe("workspace open targets", () => {
   });
 
   it("discovers and opens JetBrains Toolbox applications through bundled executables", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "bb-jetbrains-toolbox-"));
+    const root = await mkdtemp(path.join(tmpdir(), "omnyo-jetbrains-toolbox-"));
     const homeDirectory = path.join(root, "home");
+
     const webStormAppPath = path.join(
       homeDirectory,
       "Library",
@@ -1513,12 +1664,14 @@ describe("workspace open targets", () => {
       "241.1",
       "WebStorm.app",
     );
+
     const webStormExecutable = path.join(
       webStormAppPath,
       "Contents",
       "MacOS",
       "webstorm",
     );
+
     const workspacePath = path.join(root, "workspace");
     const filePath = path.join(workspacePath, "src", "file.ts");
     const calls: ExecFileCall[] = [];
@@ -1536,6 +1689,7 @@ describe("workspace open targets", () => {
           execFile,
         }),
       );
+
       expect(targets.find((target) => target.id === "webstorm")).toMatchObject({
         capabilities: {
           openDirectory: true,
@@ -1571,42 +1725,53 @@ describe("workspace open targets", () => {
   });
 
   it("falls back when app-provided icons exceed the contract size limit", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "bb-open-target-icon-"));
+    const root = await mkdtemp(path.join(tmpdir(), "omnyo-open-target-icon-"));
     const appPath = path.join(root, "Visual Studio Code.app");
     await mkdir(appPath, { recursive: true });
+
     const execFile: ExecFileHandler = async (file, commandArgs) => {
       if (file === "mdfind") {
         return commandArgs.join(" ").includes("com.microsoft.VSCode")
           ? { stdout: `${appPath}\n` }
           : { stdout: "" };
       }
+
       if (file === "plutil") {
         const key = commandArgs[1];
+
         if (key === "CFBundleIdentifier") {
           return { stdout: "com.microsoft.VSCode\n" };
         }
+
         if (key === "CFBundleDisplayName" || key === "CFBundleName") {
           return { stdout: "Code\n" };
         }
+
         if (key === "CFBundleIconFile") {
           return { stdout: "Code\n" };
         }
+
         return { stdout: "" };
       }
+
       if (file === "qlmanage") {
         const outputDir = commandArgs[commandArgs.indexOf("-o") + 1];
         const inputPath = commandArgs.at(-1);
+
         if (outputDir && inputPath) {
           await writeFile(
             path.join(outputDir, `${path.basename(inputPath)}.png`),
             "x".repeat(200_000),
           );
         }
+
         return { stdout: "" };
       }
+
       if (file === "which") {
         throw new Error("Executable not found");
       }
+
       return { stdout: "" };
     };
 
@@ -1625,9 +1790,10 @@ describe("workspace open targets", () => {
   });
 
   it("opens Xcode files through xed with the enclosing project container", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "bb-xcode-open-"));
+    const root = await mkdtemp(path.join(tmpdir(), "omnyo-xcode-open-"));
     const applicationsDirectory = path.join(root, "Applications");
     const xcodeAppPath = path.join(applicationsDirectory, "Xcode.app");
+
     const xedPath = path.join(
       xcodeAppPath,
       "Contents",
@@ -1636,6 +1802,7 @@ describe("workspace open targets", () => {
       "bin",
       "xed",
     );
+
     const workspacePath = path.join(root, "workspace");
     const xcodeWorkspacePath = path.join(workspacePath, "App.xcworkspace");
     const filePath = path.join(workspacePath, "Sources", "App", "File.swift");
@@ -1673,8 +1840,12 @@ describe("workspace open targets", () => {
   });
 
   it("opens the workspace with an argument separator before the path", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableBundleIdSubstrings: ["dev.zed.Zed"],
       calls,
@@ -1702,8 +1873,12 @@ describe("workspace open targets", () => {
   });
 
   it("uses the VS Code CLI for workspace opens when available", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableBundleIdSubstrings: ["com.microsoft.VSCode"],
       availableExecutables: ["code"],
@@ -1741,6 +1916,7 @@ describe("workspace open targets", () => {
         }),
       }),
     );
+
     expect(withCli.find((target) => target.id === "vscode")).toMatchObject({
       remoteSshCapabilities: {
         openDirectory: true,
@@ -1756,6 +1932,7 @@ describe("workspace open targets", () => {
         }),
       }),
     );
+
     expect(
       withoutCli.find((target) => target.id === "vscode")
         ?.remoteSshCapabilities,
@@ -1770,6 +1947,7 @@ describe("workspace open targets", () => {
         }),
       }),
     );
+
     expect(
       withLauncher.find((target) => target.id === "terminal"),
     ).toMatchObject({
@@ -1785,6 +1963,7 @@ describe("workspace open targets", () => {
         execFile: createAvailableExecFile(),
       }),
     );
+
     expect(
       withoutLauncher.find((target) => target.id === "terminal")
         ?.remoteSshCapabilities,
@@ -1797,6 +1976,7 @@ describe("workspace open targets", () => {
         }),
       }),
     );
+
     expect(
       withoutSsh.find((target) => target.id === "terminal")
         ?.remoteSshCapabilities,
@@ -1805,6 +1985,7 @@ describe("workspace open targets", () => {
 
   it("opens remote SSH paths with VS Code without local path checks", async () => {
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableBundleIdSubstrings: ["com.microsoft.VSCode"],
       availableExecutables: ["code"],
@@ -1838,6 +2019,7 @@ describe("workspace open targets", () => {
 
   it("opens remote SSH paths in Terminal with a remote editor script", async () => {
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableExecutables: ["osascript", "ssh"],
       calls,
@@ -1874,6 +2056,7 @@ describe("workspace open targets", () => {
 
   it("opens remote SSH paths in Ghostty by passing ssh args to the app", async () => {
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableBundleIdSubstrings: ["com.mitchellh.ghostty"],
       availableExecutables: ["open", "ssh"],
@@ -1912,6 +2095,7 @@ describe("workspace open targets", () => {
 
   it("opens remote SSH paths in Zed with SSH URIs", async () => {
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableBundleIdSubstrings: ["dev.zed.Zed"],
       availableExecutables: ["zed"],
@@ -1969,7 +2153,7 @@ describe("workspace open targets", () => {
           context: { kind: "local" },
           columnNumber: null,
           lineNumber: null,
-          path: path.join(tmpdir(), "bb-missing-workspace"),
+          path: path.join(tmpdir(), "omnyo-missing-workspace"),
           targetId: "zed",
         },
         createRuntime({
@@ -2117,15 +2301,19 @@ describe("workspace open targets", () => {
     },
   ] satisfies TerminalOpenCase[])("opens $name", async (testCase) => {
     const root = await mkdtemp(
-      path.join(tmpdir(), "bb-workspace-open-targets-"),
+      path.join(tmpdir(), "omnyo-workspace-open-targets-"),
     );
+
     const applicationsDirectory = path.join(root, "Applications");
     const workspacePath = path.join(root, "workspace");
+
     const filePath =
       testCase.file === null
         ? workspacePath
         : path.join(workspacePath, testCase.file);
+
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableBundleIdSubstrings: testCase.bundleIds,
       availableExecutables: testCase.executables,
@@ -2134,10 +2322,12 @@ describe("workspace open targets", () => {
 
     try {
       await mkdir(workspacePath, { recursive: true });
+
       if (testCase.file !== null) {
         await mkdir(path.dirname(filePath), { recursive: true });
         await writeFile(filePath, "export const value = 1;\n");
       }
+
       if (testCase.warpInstalled) {
         await mkdir(path.join(applicationsDirectory, "Warp.app"), {
           recursive: true,
@@ -2162,12 +2352,16 @@ describe("workspace open targets", () => {
 
       const expected = testCase.expected({ workspacePath, filePath });
       const call = calls.find((entry) => entry.file === expected.file);
+
       if (expected.file === "open") {
         expect(call).toEqual({ file: "open", args: expected.args });
+
         return;
       }
+
       expect(call).toBeDefined();
       const script = call?.args.join("\n") ?? "";
+
       for (const fragment of expected.fragments) {
         expect(script).toContain(fragment);
       }
@@ -2177,9 +2371,13 @@ describe("workspace open targets", () => {
   });
 
   it("inserts terminal editor location args before explicit editor args separator", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "src", "file.ts");
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       calls,
     });
@@ -2216,9 +2414,13 @@ describe("workspace open targets", () => {
   });
 
   it("uses line-aware direct-editor commands when available", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "src", "file.ts");
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableBundleIdSubstrings: ["com.todesktop.230313mzl4w4u92"],
       availableExecutables: ["cursor"],
@@ -2251,9 +2453,13 @@ describe("workspace open targets", () => {
   });
 
   it("uses Devin Desktop line and column direct-editor commands when available", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "src", "file.ts");
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableBundleIdSubstrings: ["com.exafunction.windsurf"],
       availableExecutables: ["devin-desktop"],
@@ -2286,9 +2492,13 @@ describe("workspace open targets", () => {
   });
 
   it("falls back to regular app opens when a line-aware executable is unavailable", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "src", "file.ts");
     const calls: ExecFileCall[] = [];
+
     const execFile = createAvailableExecFile({
       availableBundleIdSubstrings: ["com.todesktop.230313mzl4w4u92"],
       calls,
@@ -2319,7 +2529,9 @@ describe("workspace open targets", () => {
   });
 
   it("rejects unavailable targets", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
 
     try {
       await expect(
@@ -2343,6 +2555,7 @@ describe("workspace open targets", () => {
 
   it("discovers Windows platform targets and editor CLIs from PATH", async () => {
     const calls: ExecFileCall[] = [];
+
     const targets = await listWorkspaceOpenTargetsWithRuntime(
       createRuntime({
         execFile: createAvailableExecFile({
@@ -2378,10 +2591,14 @@ describe("workspace open targets", () => {
   });
 
   it("opens Windows paths without putting them on a command line", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const filePath = path.join(workspacePath, "it's & notes.md");
     await writeFile(filePath, "notes");
     const calls: ExecFileCall[] = [];
+
     const runtime = createRuntime({
       env: { SystemRoot: "C:\\Windows", PATH: "C:\\bin" },
       execFile: createAvailableExecFile({
@@ -2390,6 +2607,7 @@ describe("workspace open targets", () => {
       }),
       platform: "win32",
     });
+
     const open = async (
       targetId: OpenPathInTargetArgs["targetId"],
       target: string,
@@ -2406,10 +2624,13 @@ describe("workspace open targets", () => {
         },
         runtime,
       );
+
       return calls.filter((call) => call.file !== "where.exe").at(-1);
     };
+
     const powershell =
       "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+
     const powershellArgs = (script: string): string[] => [
       "-NoProfile",
       "-NonInteractive",
@@ -2434,13 +2655,15 @@ describe("workspace open targets", () => {
         args: powershellArgs(
           "Start-Process -FilePath explorer.exe -ArgumentList ('/select,\"' + $env:WORKSPACE_OPEN_TARGET_PATH + '\"')",
         ),
-        env: { WORKSPACE_OPEN_TARGET_PATH: filePath },
+        env: { WORKSPACE_OPEN_TARGET_PATH: path.win32.normalize(filePath) },
       });
       expect(await open("file-manager", workspacePath, null)).toMatchObject({
         args: powershellArgs(
           "Invoke-Item -LiteralPath $env:WORKSPACE_OPEN_TARGET_PATH",
         ),
-        env: { WORKSPACE_OPEN_TARGET_PATH: workspacePath },
+        env: {
+          WORKSPACE_OPEN_TARGET_PATH: path.win32.normalize(workspacePath),
+        },
       });
       expect(await open("terminal", filePath, null)).toMatchObject({
         file: powershell,
@@ -2477,7 +2700,9 @@ describe("workspace open targets", () => {
   });
 
   it("rejects workspace opening on unsupported platforms", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
 
     try {
       await expect(

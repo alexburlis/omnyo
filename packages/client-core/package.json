@@ -1,5 +1,6 @@
 {
-  "name": "@bb/client-core",
+  "name": "@omnyo/client-core",
+  "private": true,
   "version": "0.0.1",
   "type": "module",
   "sideEffects": false,
@@ -8,6 +9,16 @@
       "source": "./src/index.ts",
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./route-paths": {
+      "source": "./src/routes/route-paths.ts",
+      "types": "./src/routes/route-paths.ts",
+      "default": "./src/routes/route-paths.ts"
+    },
+    "./prompt-draft": {
+      "source": "./src/prompt/prompt-draft.ts",
+      "types": "./src/prompt/prompt-draft.ts",
+      "default": "./src/prompt/prompt-draft.ts"
     }
   },
   "types": "./src/index.ts",
@@ -17,20 +28,21 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
-    "@bb/core-ui": "workspace:*",
-    "@bb/desktop-contract": "workspace:*",
-    "@bb/domain": "workspace:*",
-    "@bb/fuzzy-match": "workspace:*",
-    "@bb/server-contract": "workspace:*",
-    "@bb/text-utils": "workspace:*",
-    "@bb/thread-view": "workspace:*",
+    "@omnyo/core-ui": "workspace:*",
+    "@omnyo/desktop-contract": "workspace:*",
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/fuzzy-match": "workspace:*",
+    "@omnyo/server-contract": "workspace:*",
+    "@omnyo/text-utils": "workspace:*",
+    "@omnyo/thread-view": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@bb/test-helpers": "workspace:*",
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/test-helpers": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "typescript-7": "npm:typescript@^7.0.2"
+    "typescript-7": "npm:typescript@^7.0.2",
+    "@omnyo/plugin-sdk": "workspace:*"
   }
 }

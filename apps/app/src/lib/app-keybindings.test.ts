@@ -6,7 +6,7 @@ import {
   type AppCommandContext,
   type AppKeybinding,
   type AppShortcut,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   appShortcutMatchesQuery,
   formatAppShortcut,
@@ -43,6 +43,7 @@ const CONTEXT: AppCommandContext = {
   questionOpen: false,
   promptAvailable: false,
   splitActive: false,
+  chatSelection: false,
   webSurface: false,
   macPlatform: false,
   windowsPlatform: false,
@@ -59,6 +60,7 @@ describe("app keybindings", () => {
       altKey: false,
       shiftKey: false,
     };
+
     expect(matchesAppShortcut(base, MOD_N, true)).toBe(true);
     expect(
       matchesAppShortcut(
@@ -104,6 +106,7 @@ describe("app keybindings", () => {
         alt: true,
         shift: false,
       };
+
       expect(
         matchesAppShortcut(
           {
@@ -154,6 +157,7 @@ describe("app keybindings", () => {
       altKey: true,
       shiftKey: false,
     };
+
     const forward = { ...ALT_P, key: "m" };
     const backward = { ...forward, shift: true };
 
@@ -230,6 +234,7 @@ describe("app keybindings", () => {
         none: ["editableFocus", "terminalFocus"],
       },
     };
+
     expect(matchesAppCommandContext(binding, CONTEXT)).toBe(true);
     expect(
       matchesAppCommandContext(binding, { ...CONTEXT, editableFocus: true }),
@@ -272,6 +277,7 @@ describe("app keybindings", () => {
       alt: false,
       shift: false,
     };
+
     const modShiftO: AppShortcut = {
       key: "o",
       mod: true,
@@ -280,6 +286,7 @@ describe("app keybindings", () => {
       alt: false,
       shift: true,
     };
+
     expect(appShortcutMatchesQuery(escape, "Win32", "escape")).toBe(true);
     expect(appShortcutMatchesQuery(escape, "Win32", "esc")).toBe(true);
     expect(appShortcutMatchesQuery(escape, "Win32", "enter")).toBe(false);
@@ -310,6 +317,7 @@ describe("app keybindings", () => {
       alt: false,
       shift: false,
     };
+
     expect(formatAppShortcut(shortcut, "MacIntel")).toBe("⌃ ⌘ ←");
     expect(formatAppShortcut(shortcut, "Win32")).toBe("Ctrl + ←");
     expect(formatAppShortcutAria(shortcut, "MacIntel")).toBe(

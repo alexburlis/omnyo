@@ -1,4 +1,4 @@
-import { defaultAppSettings } from "@bb/domain";
+import { defaultAppSettings } from "@omnyo/domain";
 import {
   createConnection,
   migrate,
@@ -6,7 +6,7 @@ import {
   noopNotifier,
   getHost,
   setAppSettings,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   copyFile,
   mkdtemp,
@@ -17,9 +17,58 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { expect, it, vi } from "vitest";
 import { resolveHostEnvironment } from "./host-environment.js";
 import { replaceMachineEnvironment } from "../machines/environment-settings.js";
+import * as machineEnvironment from "../machines/environment-settings.js";
+import * as gitCredentials from "../machines/git-credentials.js";
+import { openSecretVault } from "@omnyo/secret-storage";
+
+it("starts user environment reads while the independent Git lookup is pending", async () => {
+  const db = createConnection(":memory:");
+  const dataDir = await mkdtemp(join(tmpdir(), "omnyo-parallel-host-env-"));
+  const vault = await openSecretVault(dataDir);
+
+  const credentials =
+    createDeferredPromise<
+      Awaited<ReturnType<typeof gitCredentials.resolveGitCredentials>>
+    >();
+
+  try {
+    migrate(db);
+    upsertHost(db, noopNotifier, { id: "remote", name: "Remote" });
+    vi.spyOn(gitCredentials, "resolveGitCredentials").mockReturnValue(
+      credentials.promise,
+    );
+
+    const environment = vi.spyOn(
+      machineEnvironment,
+      "resolveUserMachineEnvironment",
+    );
+
+    const pending = resolveHostEnvironment(
+      { db, config: { dataDir }, vault },
+      { hostId: "remote", projectId: "project" },
+    );
+
+    try {
+      expect(environment.mock.calls.map((args) => args[2] ?? null)).toEqual([
+        null,
+        "project",
+      ]);
+    } finally {
+      credentials.resolve([]);
+      await pending;
+    }
+
+    expect(await pending).toEqual([]);
+  } finally {
+    vi.restoreAllMocks();
+    db.$client.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
 
 async function writeFakeGh(bin: string): Promise<void> {
   if (process.platform !== "win32") {
@@ -30,8 +79,10 @@ if [ "$1" = auth ]; then printf 'test-gh-secret\\n'; else printf '{"login":"octo
 `,
       { mode: 0o700 },
     );
+
     return;
   }
+
   const preload = join(bin, "fake-gh.cjs");
   await writeFile(
     preload,
@@ -46,11 +97,14 @@ process.exit(0);
 
 it("gives every host user environment while forwarding automatic gh credentials only to non-primary hosts", async () => {
   const db = createConnection(":memory:");
-  const dataDir = await mkdtemp(join(tmpdir(), "bb-backfilled-env-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "omnyo-backfilled-env-"));
+  const vault = await openSecretVault(dataDir);
+
   try {
     migrate(db);
     upsertHost(db, noopNotifier, { id: "legacy-remote", name: "Remote" });
     upsertHost(db, noopNotifier, { id: "local-daemon", name: "Local" });
+
     const sql = (
       await readFile(
         new URL(
@@ -62,19 +116,20 @@ it("gives every host user environment while forwarding automatic gh credentials 
     )
       .split("--> statement-breakpoint")
       .find((statement) => statement.includes("UPDATE hosts"));
+
     if (sql === undefined) throw new Error("Missing manual machine backfill");
     db.$client.exec(sql);
     migrate(db);
     await writeFile(join(dataDir, "host-id"), "local-daemon");
     expect(getHost(db, "legacy-remote")?.machineProviderId).toBe("manual");
-    await replaceMachineEnvironment(db, dataDir, {
+    await replaceMachineEnvironment(db, vault, {
       variables: [{ name: "MACHINE_VALUE", value: "configured", note: null }],
     });
     const bin = join(dataDir, "bin");
     await mkdir(bin);
     await writeFakeGh(bin);
     vi.stubEnv("PATH", `${bin}${delimiter}${process.env.PATH}`);
-    const deps = { db, config: { dataDir } };
+    const deps = { db, config: { dataDir }, vault };
     expect(
       await resolveHostEnvironment(deps, {
         hostId: "legacy-remote",
@@ -116,29 +171,35 @@ it("gives every host user environment while forwarding automatic gh credentials 
       ...defaultAppSettings,
       machineGitCredentialsEnabled: false,
     });
+
     const disabled = await resolveHostEnvironment(deps, {
       hostId: "legacy-remote",
       projectId: null,
     });
+
     expect(disabled.some((row) => row.name === "GH_TOKEN")).toBe(false);
     expect(disabled.some((row) => row.name === "MACHINE_VALUE")).toBe(true);
-    await replaceMachineEnvironment(db, dataDir, {
+    await replaceMachineEnvironment(db, vault, {
       variables: [
         { name: "MACHINE_VALUE", value: null, note: null },
         { name: "GH_TOKEN", value: "custom-token", note: null },
       ],
     });
+
     const overridden = await resolveHostEnvironment(deps, {
       hostId: "legacy-remote",
       projectId: null,
     });
+
     expect(overridden.find((row) => row.name === "GH_TOKEN")?.value).toBe(
       "custom-token",
     );
+
     const localOverride = await resolveHostEnvironment(deps, {
       hostId: "local-daemon",
       projectId: null,
     });
+
     expect(localOverride.find((row) => row.name === "GH_TOKEN")?.value).toBe(
       "custom-token",
     );
@@ -154,7 +215,9 @@ it("gives every host user environment while forwarding automatic gh credentials 
 
 it("forwards automatic gh credentials to every machine when the server has no local host daemon", async () => {
   const db = createConnection(":memory:");
-  const dataDir = await mkdtemp(join(tmpdir(), "bb-serverless-env-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "omnyo-serverless-env-"));
+  const vault = await openSecretVault(dataDir);
+
   try {
     migrate(db);
     upsertHost(db, noopNotifier, { id: "remote", name: "Remote" });
@@ -162,7 +225,7 @@ it("forwards automatic gh credentials to every machine when the server has no lo
     await mkdir(bin);
     await writeFakeGh(bin);
     vi.stubEnv("PATH", `${bin}${delimiter}${process.env.PATH}`);
-    const deps = { db, config: { dataDir } };
+    const deps = { db, config: { dataDir }, vault };
     expect(
       await resolveHostEnvironment(deps, { hostId: "remote", projectId: null }),
     ).toEqual(

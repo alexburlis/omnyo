@@ -29,14 +29,20 @@ export const THREAD_PRUNING_POLICIES = [
   "turn-diffs",
   "resolved-items",
 ] as const;
+
 export type ThreadPruningPolicy = (typeof THREAD_PRUNING_POLICIES)[number];
+
 const VERSION_BY_POLICY: Record<ThreadPruningPolicy, number> = {
   "rate-limits": 1,
   usage: 1,
   "turn-diffs": 1,
   "resolved-items": 1,
 };
-const BATCH_SIZE = 500;
+
+export const THREAD_PRUNING_MAX_BATCH_SIZE = 500;
+
+const RATE_LIMIT_BATCH_SIZE = 64;
+
 const LIVE_BATCH_SIZE = 32;
 
 export function getNextThreadPruningPolicy(
@@ -58,6 +64,7 @@ export function getNextThreadPruningPolicy(
       ),
     )
     .all();
+
   const hasIncoming =
     db
       .select({ threadId: threadPruningWork.threadId })
@@ -65,6 +72,7 @@ export function getNextThreadPruningPolicy(
       .where(eq(threadPruningWork.policy, THREAD_PRUNING_PENDING_POLICY))
       .limit(1)
       .get() !== undefined;
+
   const pending =
     scope === ""
       ? new Set(
@@ -83,7 +91,9 @@ export function getNextThreadPruningPolicy(
           ),
         )
       : new Set(THREAD_PRUNING_POLICIES);
+
   const updated = new Map(rows.map((row) => [row.policy, row.updatedAt]));
+
   return (
     THREAD_PRUNING_POLICIES.filter(
       (policy) => !excluded.has(policy) && pending.has(policy),
@@ -94,13 +104,18 @@ export function getNextThreadPruningPolicy(
 function advanceThreadPruningTransaction(
   db: DbConnection,
   policy: ThreadPruningPolicy,
-  threadScope?: string,
+  threadScope: string | undefined,
+  requestedBatchSize: number,
 ) {
   const scope = threadScope ?? "";
-  const batchSize = threadScope === undefined ? BATCH_SIZE : LIVE_BATCH_SIZE;
+
+  const batchSize =
+    threadScope === undefined ? requestedBatchSize : LIVE_BATCH_SIZE;
+
   const result = db.transaction(
     (tx) => {
       drainPendingThreadPruningWork(tx, threadScope);
+
       const latestAdvance = tx
         .select({ updatedAt: threadPruningCursors.updatedAt })
         .from(threadPruningCursors)
@@ -111,10 +126,12 @@ function advanceThreadPruningTransaction(
           ),
         )
         .all();
+
       const now = Math.max(
         Date.now(),
         ...latestAdvance.map((row) => row.updatedAt + 1),
       );
+
       tx.insert(threadPruningCursors)
         .values({
           policy,
@@ -125,6 +142,7 @@ function advanceThreadPruningTransaction(
         })
         .onConflictDoNothing()
         .run();
+
       let cursor = tx
         .select()
         .from(threadPruningCursors)
@@ -135,7 +153,9 @@ function advanceThreadPruningTransaction(
           ),
         )
         .get();
+
       if (!cursor) throw new Error("Missing thread pruning cursor");
+
       if (cursor.version !== VERSION_BY_POLICY[policy]) {
         cursor = {
           policy,
@@ -155,14 +175,17 @@ function advanceThreadPruningTransaction(
           updatedAt: now,
         };
       }
+
       let action:
         | "advanced"
         | "cycle-complete"
         | "thread-complete"
         | "missing-thread" = "advanced";
+
       let removed = 0;
       let scanned = 0;
       let removedBytes = 0;
+
       if (cursor.currentThreadId === null) {
         let next =
           threadScope === undefined
@@ -186,6 +209,7 @@ function advanceThreadPruningTransaction(
                 .from(threads)
                 .where(eq(threads.id, threadScope))
                 .get();
+
         if (!next && threadScope === undefined && cursor.lastThreadId !== "") {
           next = tx
             .select({
@@ -197,11 +221,13 @@ function advanceThreadPruningTransaction(
             .orderBy(threadPruningWork.threadId)
             .limit(1)
             .get();
+
           if (next) {
             cursor.lastThreadId = "";
             cursor.cycle += 1;
           }
         }
+
         if (!next) {
           cursor.lastThreadId = "";
           cursor.cycle += 1;
@@ -227,13 +253,16 @@ function advanceThreadPruningTransaction(
           Object.assign(cursor, emptyResolvedItemPruningProbe());
         }
       }
+
       const threadId = cursor.currentThreadId;
+
       if (threadId !== null) {
         const thread = tx
           .select({ id: threads.id })
           .from(threads)
           .where(eq(threads.id, threadId))
           .get();
+
         if (!thread) {
           action = "missing-thread";
         } else if (policy === "rate-limits") {
@@ -241,11 +270,16 @@ function advanceThreadPruningTransaction(
             threadId,
             afterSequence: cursor.sequence,
             throughSequence: cursor.upperSequence,
-            limit: threadScope === undefined ? 64 : LIVE_BATCH_SIZE,
+            limit:
+              threadScope === undefined
+                ? Math.min(RATE_LIMIT_BATCH_SIZE, batchSize)
+                : LIVE_BATCH_SIZE,
           });
+
           scanned = batch.scanned;
           removed = batch.removed;
           cursor.sequence = batch.nextSequence;
+
           if (batch.complete || cursor.sequence >= cursor.upperSequence)
             action = "thread-complete";
         } else if (policy === "resolved-items") {
@@ -254,8 +288,10 @@ function advanceThreadPruningTransaction(
             kind: cursor.step === 0 ? "deltas" : "background",
             limit: batchSize,
           });
+
           scanned = batch.scanned;
           removed = batch.removed;
+
           if (batch.complete) {
             if (cursor.step === 0) cursor.step = 1;
             else action = "thread-complete";
@@ -267,15 +303,18 @@ function advanceThreadPruningTransaction(
               : cursor.step <= 1
                 ? "thread/contextWindowUsage/updated"
                 : "thread/tokenUsage/updated";
+
           const rows = tx.all<{ id: string; sequence: number }>(sql`
             SELECT id, sequence FROM events INDEXED BY events_thread_type_sequence_idx
             WHERE thread_id = ${threadId} AND type = ${type}
               AND sequence > ${cursor.sequence} AND sequence <= ${cursor.upperSequence}
             ORDER BY sequence LIMIT ${batchSize}
           `);
+
           scanned = rows.length;
           const last = rows.at(-1);
           const throughSequence = last?.sequence ?? cursor.sequence;
+
           if (last) {
             const window = {
               threadId,
@@ -283,13 +322,16 @@ function advanceThreadPruningTransaction(
               throughSequence: last.sequence,
               candidateIds: rows.map((row) => row.id),
             };
+
             const relevantIds = rows.map((row) => row.id);
             const bytesQuery = sql`SELECT COALESCE(SUM(octet_length(data)), 0) AS bytes FROM events WHERE ${inArray(events.id, relevantIds)} AND ${events.type} = ${type}`;
+
             const before =
               threadScope !== undefined ||
               (policy === "usage" && (cursor.step === 0 || cursor.step === 2))
                 ? 0
                 : (tx.get<{ bytes: number }>(bytesQuery)?.bytes ?? 0);
+
             if (policy === "turn-diffs") {
               removed = tx
                 .delete(events)
@@ -311,6 +353,7 @@ function advanceThreadPruningTransaction(
                   latestContextSequence: cursor.latestContextSequence,
                 },
               };
+
               switch (cursor.step) {
                 case 0:
                 case 2: {
@@ -318,10 +361,12 @@ function advanceThreadPruningTransaction(
                     cursor.step === 0
                       ? "thread/contextWindowUsage/updated"
                       : "thread/tokenUsage/updated";
+
                   const hasContext =
                     cursor.step === 0
                       ? sql`CASE WHEN json_valid(data) THEN json_extract(data, '$.contextWindowUsage.modelContextWindow') IS NOT NULL ELSE 0 END`
                       : sql`0`;
+
                   const usage = tx.all<{
                     sequence: number;
                     hasContext: number;
@@ -331,13 +376,17 @@ function advanceThreadPruningTransaction(
                   AND NOT EXISTS (SELECT 1 FROM events nested WHERE nested.thread_id = candidate.thread_id AND nested.turn_id = candidate.turn_id AND nested.type = 'turn/started' AND nested.parent_tool_call_id IS NOT NULL)
                   ORDER BY sequence
                 `);
+
                   for (const row of usage) {
                     cursor.latestRootSequence = row.sequence;
+
                     if (cursor.step === 0 && row.hasContext)
                       cursor.latestContextSequence = row.sequence;
                   }
+
                   break;
                 }
+
                 case 1:
                   removed = pruneContextWindowUsageEventsInTransaction(
                     tx,
@@ -351,12 +400,15 @@ function advanceThreadPruningTransaction(
                   throw new Error("Invalid usage pruning step");
               }
             }
+
             if (removed > 0 && threadScope === undefined) {
               const after = tx.get<{ bytes: number }>(bytesQuery)?.bytes ?? 0;
               removedBytes = before - after;
             }
+
             cursor.sequence = throughSequence;
           }
+
           if (
             rows.length < batchSize ||
             cursor.sequence >= cursor.upperSequence
@@ -365,6 +417,7 @@ function advanceThreadPruningTransaction(
               cursor.step += 1;
               cursor.sequence = 0;
               Object.assign(cursor, emptyResolvedItemPruningProbe());
+
               if (cursor.step === 2) {
                 cursor.latestRootSequence = 0;
                 cursor.latestContextSequence = 0;
@@ -372,6 +425,7 @@ function advanceThreadPruningTransaction(
             } else action = "thread-complete";
           }
         }
+
         if (action !== "advanced") {
           if (threadScope === undefined)
             tx.delete(threadPruningWork)
@@ -390,6 +444,7 @@ function advanceThreadPruningTransaction(
           cursor.step = 0;
         }
       }
+
       cursor.updatedAt = now;
       tx.update(threadPruningCursors)
         .set(cursor)
@@ -400,6 +455,7 @@ function advanceThreadPruningTransaction(
           ),
         )
         .run();
+
       return {
         policy,
         action,
@@ -412,28 +468,41 @@ function advanceThreadPruningTransaction(
     },
     { behavior: "immediate" },
   );
+
   if (result.removed > 0 && result.threadId !== null)
     bumpThreadEventRewriteGeneration(result.threadId);
+
   return result;
 }
 
 export function advanceThreadPruning(
   db: DbConnection,
   target: ThreadPruningPolicy | { threadId: string },
+  batchSize = THREAD_PRUNING_MAX_BATCH_SIZE,
 ) {
   const timeout: unknown = db.$client.pragma("busy_timeout", { simple: true });
+
   if (typeof timeout !== "number")
     throw new Error("Invalid SQLite busy timeout");
   db.$client.pragma("busy_timeout = 0");
+
   try {
     const threadScope =
       typeof target === "string" ? undefined : target.threadId;
+
     const policy =
       typeof target === "string"
         ? target
         : getNextThreadPruningPolicy(db, new Set(), target.threadId);
+
     if (policy === null) throw new Error("Missing live pruning policy");
-    return advanceThreadPruningTransaction(db, policy, threadScope);
+
+    return advanceThreadPruningTransaction(
+      db,
+      policy,
+      threadScope,
+      Math.min(THREAD_PRUNING_MAX_BATCH_SIZE, Math.max(1, batchSize)),
+    );
   } finally {
     db.$client.pragma(`busy_timeout = ${timeout}`);
   }

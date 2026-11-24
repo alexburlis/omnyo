@@ -3,10 +3,10 @@ import {
   threadVisibilitySchema,
   type PromptInput,
   type Thread,
-} from "@bb/domain";
-import type { EnvironmentArgs } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { EnvironmentArgs } from "@omnyo/server-contract";
 import { action } from "../../action.js";
-import { createCliBbSdk } from "../../client.js";
+import { createCliOmnyoSdk } from "../../client.js";
 import { resolveExplicitIdFlag } from "../../context-env.js";
 import { resolveTextInput, TEXT_FILE_HELP_SUFFIX } from "../../text-input.js";
 import { collectOption, outputJson, prependErrorContext } from "../helpers.js";
@@ -42,9 +42,11 @@ interface ThreadForkCommandOptions {
 function parseSourceSeqEnd(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
+
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error("--source-seq-end must be a non-negative integer.");
   }
+
   return parsed;
 }
 
@@ -53,18 +55,22 @@ async function buildForkInput(
 ): Promise<PromptInput[] | undefined> {
   const files = opts.file ?? [];
   const images = opts.image ?? [];
+
   const prompt = await resolveTextInput({
     file: opts.promptFile,
     fileLabel: "--prompt-file",
     inline: opts.prompt,
     inlineLabel: "--prompt <prompt>",
   });
+
   if (prompt === undefined && files.length === 0 && images.length === 0) {
     return undefined;
   }
+
   if (prompt !== undefined) {
     return buildPromptInputs({ message: prompt, files, images });
   }
+
   return [
     ...files.map((path): PromptInput => ({ type: "localFile", path })),
     ...images.map((path): PromptInput => ({ type: "localImage", path })),
@@ -72,16 +78,19 @@ async function buildForkInput(
 }
 
 async function resolveForkSourceHostId(
-  sdk: ReturnType<typeof createCliBbSdk>,
+  sdk: ReturnType<typeof createCliOmnyoSdk>,
   sourceThreadId: string,
 ): Promise<string> {
   const sourceThread = await sdk.threads.get({ threadId: sourceThreadId });
+
   if (sourceThread.environmentId === null) {
     throw new Error("Source thread has no environment.");
   }
+
   const sourceEnvironment = await sdk.environments.get({
     environmentId: sourceThread.environmentId,
   });
+
   return sourceEnvironment.hostId;
 }
 
@@ -89,11 +98,15 @@ function describeForkEnvironment(
   environment: EnvironmentArgs | undefined,
 ): string {
   if (environment === undefined) return "source environment";
+
   if (environment.type === "reuse") return environment.environmentId;
+
   if (environment.workspace.type === "managed-worktree") {
     return "new worktree";
   }
+
   if (environment.workspace.type === "personal") return "new personal";
+
   return environment.workspace.path ?? "host project source";
 }
 
@@ -131,7 +144,7 @@ export function registerForkCommand(
     )
     .option(
       "--base-branch <branch>",
-      "Exact Git ref; omit for bb's project default (use origin/<branch> for a remote ref)",
+      "Base branch or ref; a named branch uses origin/<name> unless local has commits it lacks (use refs/heads/<name> to force local)",
     )
     .option("--permission-mode <mode>", PERMISSION_MODE_HELP)
     .option("--visibility <visibility>", "Thread visibility: visible or hidden")
@@ -159,24 +172,30 @@ export function registerForkCommand(
             flagName: "source thread ID",
             value: sourceThreadIdValue,
           });
+
           if (!sourceThreadId) {
             throw new Error("Source thread ID is required.");
           }
+
           const requestedInput = await buildForkInput(opts);
           const sourceSeqEnd = parseSourceSeqEnd(opts.sourceSeqEnd);
           const permissionMode = parsePermissionMode(opts.permissionMode);
+
           const visibility =
             opts.visibility === undefined
               ? undefined
               : threadVisibilitySchema.parse(opts.visibility);
+
           const environmentValue = resolveSpawnEnvironmentValue(
             opts.environment,
           );
 
           let thread: Thread;
           let environment: EnvironmentArgs | undefined;
+
           try {
-            const sdk = createCliBbSdk(getUrl());
+            const sdk = createCliOmnyoSdk(getUrl());
+
             const input =
               requestedInput === undefined
                 ? undefined
@@ -190,13 +209,16 @@ export function registerForkCommand(
                       ).projectId,
                     sdk,
                   });
+
             const needsHostId =
               Boolean(opts.newEnvironment) ||
               (environmentValue !== undefined &&
                 looksLikePath(environmentValue));
+
             const hostId = needsHostId
               ? await resolveForkSourceHostId(sdk, sourceThreadId)
               : null;
+
             if (
               environmentValue === undefined &&
               opts.newEnvironment === undefined &&
@@ -206,11 +228,13 @@ export function registerForkCommand(
             } else {
               const builtEnvironment = buildSpawnEnvironment({
                 defaultPersonalWorkspace: false,
+                machineChoice: "explicit",
                 environmentValue,
                 newEnvironmentKind: opts.newEnvironment,
                 hostId,
                 baseBranch: opts.baseBranch,
               });
+
               if (
                 builtEnvironment.type === "project-default" ||
                 builtEnvironment.type === "provider"
@@ -219,8 +243,10 @@ export function registerForkCommand(
                   "Fork environment flags resolved no environment",
                 );
               }
+
               environment = builtEnvironment;
             }
+
             thread = await sdk.threads.fork({
               sourceThreadId,
               ...(opts.lifecycleOwnerThread !== undefined
@@ -258,6 +284,7 @@ export function registerForkCommand(
           console.log(`Source: ${sourceThreadId}`);
           console.log(`Status: ${thread.status}`);
           console.log(`Environment: ${describeForkEnvironment(environment)}`);
+
           if (thread.visibility === "hidden") {
             console.log("Visibility: hidden");
           }

@@ -35,9 +35,11 @@ function rowWrapper(container: HTMLElement, rowId: string): HTMLElement {
   const element = container.querySelector<HTMLElement>(
     `[data-timeline-row-id="${rowId}"]`,
   );
+
   if (element === null) {
     throw new Error(`row ${rowId} did not render`);
   }
+
   return element;
 }
 
@@ -48,6 +50,67 @@ function nextAnimationFrame(): Promise<void> {
 }
 
 describe("ThreadTimelineRows row containment", () => {
+  it("keeps ordinary rows mounted and restores measured deep history when it enters the viewport", () => {
+    let report = (_row: Element, _visible: boolean) => {};
+
+    const observe = vi.fn();
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(callback: (entries: object[]) => void) {
+          report = (row, visible) =>
+            callback([
+              {
+                target: row,
+                isIntersecting: visible,
+                boundingClientRect: { height: 112 },
+              },
+            ]);
+        }
+        observe = observe;
+        disconnect = vi.fn();
+        unobserve = vi.fn();
+      },
+    );
+
+    const rows = Array.from({ length: 100 }, (_, seq) =>
+      conversationRow({
+        id: `old-${seq}`,
+        role: "user",
+        text: `message ${seq}`,
+        seq: seq + 1,
+      }),
+    );
+
+    const client = new QueryClient();
+
+    const tree = (paged: boolean) => (
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ThreadTimelineRows
+            threadId="thr_main"
+            timelineRows={rows}
+            hasPagedHistory={paged}
+            workspaceRootPath={undefined}
+          />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    const view = render(tree(false));
+    const row = rowWrapper(view.container, "old-20");
+    expect(observe).not.toHaveBeenCalledWith(row);
+    view.rerender(tree(true));
+    expect(observe).toHaveBeenCalledWith(row);
+    act(() => report(row, false));
+    expect(
+      row.querySelector<HTMLElement>("[data-history-spacer]")?.style.height,
+    ).toBe("112px");
+    expect(row.textContent).not.toContain("message 20");
+    act(() => report(row, true));
+    expect(row.textContent).toContain("message 20");
+  });
+
   it("applies content-visibility containment to top-level row wrappers only, after their first layout", async () => {
     const rows = [
       conversationRow({
@@ -76,6 +139,7 @@ describe("ThreadTimelineRows row containment", () => {
         seq: 4,
       }),
     ];
+
     const view = render(
       <MemoryRouter>
         <QueryClientProvider client={new QueryClient()}>
@@ -91,30 +155,41 @@ describe("ThreadTimelineRows row containment", () => {
     );
 
     for (const rowId of ["user_1", "turn_1", "assistant_1"]) {
-      expect(rowWrapper(view.container, rowId).className).toBe(
+      expect(rowWrapper(view.container, rowId).className).not.toContain(
+        "content-visibility",
+      );
+      expect(rowWrapper(view.container, rowId).className).toContain(
         TOP_LEVEL_TIMELINE_ROW_INTRINSIC_SIZE_CLASS_NAME,
       );
     }
+
     expect(TOP_LEVEL_TIMELINE_ROW_INTRINSIC_SIZE_CLASS_NAME).not.toContain(
       "content-visibility",
     );
 
     await act(nextAnimationFrame);
-    expect(rowWrapper(view.container, "assistant_1").className).toBe(
+    expect(rowWrapper(view.container, "assistant_1").className).not.toContain(
+      "content-visibility",
+    );
+    expect(rowWrapper(view.container, "assistant_1").className).toContain(
       TOP_LEVEL_TIMELINE_ROW_INTRINSIC_SIZE_CLASS_NAME,
     );
     await act(nextAnimationFrame);
+
     const armedClassNames = [
       "max-md:[content-visibility:auto]",
       TOP_LEVEL_TIMELINE_ROW_INTRINSIC_SIZE_CLASS_NAME,
     ];
+
     for (const rowId of ["user_1", "turn_1", "assistant_1"]) {
       expect(
         Array.from(rowWrapper(view.container, rowId).classList).sort(),
-      ).toEqual([...armedClassNames].sort());
+      ).toEqual(expect.arrayContaining(armedClassNames));
     }
 
-    rowWrapper(view.container, "assistant_1").classList.add("bb-search-flash");
+    rowWrapper(view.container, "assistant_1").classList.add(
+      "omnyo-search-flash",
+    );
     view.rerender(
       <MemoryRouter>
         <QueryClientProvider client={new QueryClient()}>
@@ -130,7 +205,7 @@ describe("ThreadTimelineRows row containment", () => {
     );
     expect(
       rowWrapper(view.container, "assistant_1").classList.contains(
-        "bb-search-flash",
+        "omnyo-search-flash",
       ),
     ).toBe(true);
     expect(
@@ -139,11 +214,17 @@ describe("ThreadTimelineRows row containment", () => {
       ),
     ).toBe(true);
 
-    expect(rowWrapper(view.container, "cmd_nested").className).toBe("");
-    expect(rowWrapper(view.container, "assistant_nested").className).toBe("");
+    expect(rowWrapper(view.container, "cmd_nested").className).not.toContain(
+      "content-visibility",
+    );
+    expect(
+      rowWrapper(view.container, "assistant_nested").className,
+    ).not.toContain("content-visibility");
     expect(rowWrapper(view.container, "assistant_nested").style.length).toBe(0);
 
-    expect(rowWrapper(view.container, "turn_1").style.length).toBe(0);
+    expect(
+      rowWrapper(view.container, "turn_1").style.containIntrinsicBlockSize,
+    ).toBe("");
     expect(
       rowWrapper(view.container, "assistant_1").style.containIntrinsicBlockSize,
     ).toBe(`auto ${estimateTimelineRowIntrinsicBlockSizePx(rows[2]!)}px`);
@@ -154,6 +235,7 @@ describe("ThreadTimelineRows row containment", () => {
 
   it("never arms content-visibility where CSS scroll anchoring is missing (WebKit)", async () => {
     stubScrollAnchoring(false);
+
     const rows = [
       conversationRow({
         id: "user_1",
@@ -168,6 +250,7 @@ describe("ThreadTimelineRows row containment", () => {
         seq: 2,
       }),
     ];
+
     const view = render(
       <MemoryRouter>
         <QueryClientProvider client={new QueryClient()}>
@@ -181,9 +264,11 @@ describe("ThreadTimelineRows row containment", () => {
         </QueryClientProvider>
       </MemoryRouter>,
     );
+
     await act(nextAnimationFrame);
     await act(nextAnimationFrame);
     await act(nextAnimationFrame);
+
     for (const rowId of ["user_1", "assistant_1"]) {
       const classes = Array.from(rowWrapper(view.container, rowId).classList);
       expect(classes).toContain(

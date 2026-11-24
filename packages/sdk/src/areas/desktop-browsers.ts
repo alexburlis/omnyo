@@ -15,7 +15,11 @@ import type {
   ExperimentalDesktopBrowserImportCookiesInput,
   ExperimentalDesktopBrowserImportSources,
   ExperimentalDesktopBrowserImportOutcome,
-} from "@bb/server-contract";
+  ExperimentalDesktopBrowserCookieSyncConfigureRequest,
+  ExperimentalDesktopBrowserCookieSyncStatus,
+  ExperimentalDesktopRendererProfileInput,
+  ExperimentalDesktopRendererProfile,
+} from "@omnyo/server-contract";
 import type { CreateSdkAreaArgs } from "./common.js";
 
 export type {
@@ -35,9 +39,16 @@ export type {
   ExperimentalDesktopBrowserImportCookiesInput,
   ExperimentalDesktopBrowserImportSources,
   ExperimentalDesktopBrowserImportOutcome,
-} from "@bb/server-contract";
+  ExperimentalDesktopBrowserCookieSyncConfigureRequest,
+  ExperimentalDesktopBrowserCookieSyncStatus,
+  ExperimentalDesktopRendererProfileInput,
+  ExperimentalDesktopRendererProfile,
+} from "@omnyo/server-contract";
 
 export interface ExperimentalDesktopBrowsersArea {
+  profileRenderer(
+    input: ExperimentalDesktopRendererProfileInput,
+  ): Promise<ExperimentalDesktopRendererProfile>;
   listInstances(
     input: ExperimentalDesktopBrowserHostRequest,
   ): Promise<ExperimentalDesktopBrowserInstances>;
@@ -67,6 +78,15 @@ export interface ExperimentalDesktopBrowsersArea {
   importCookies(
     input: ExperimentalDesktopBrowserImportCookiesInput,
   ): Promise<ExperimentalDesktopBrowserImportOutcome>;
+  cookieSyncStatus(
+    input: ExperimentalDesktopBrowserInstanceRequest,
+  ): Promise<ExperimentalDesktopBrowserCookieSyncStatus>;
+  configureCookieSync(
+    input: ExperimentalDesktopBrowserCookieSyncConfigureRequest,
+  ): Promise<ExperimentalDesktopBrowserCookieSyncStatus>;
+  runCookieSync(
+    input: ExperimentalDesktopBrowserInstanceRequest,
+  ): Promise<ExperimentalDesktopBrowserCookieSyncStatus>;
   subscribe(
     input: ExperimentalDesktopBrowserScope & {
       onChange: (result: ExperimentalDesktopBrowserTabs) => void;
@@ -79,9 +99,13 @@ export function createDesktopBrowsersArea({
   transport,
 }: CreateSdkAreaArgs): ExperimentalDesktopBrowsersArea {
   const api = () => transport.api.v1["desktop-browsers"];
+
   const listTabs = (input: ExperimentalDesktopBrowserScope) =>
     transport.readJson(api().tabs.$post({ json: input }));
+
   return {
+    profileRenderer: (input) =>
+      transport.readJson(api()["profile-renderer"].$post({ json: input })),
     listInstances: (input) =>
       transport.readJson(api().instances.$post({ json: input })),
     listTabs,
@@ -102,20 +126,29 @@ export function createDesktopBrowsersArea({
       transport.readJson(api()["import-sources"].$post({ json: input })),
     importCookies: (input) =>
       transport.readJson(api()["import-cookies"].$post({ json: input })),
+    cookieSyncStatus: (input) =>
+      transport.readJson(api()["cookie-sync-status"].$post({ json: input })),
+    configureCookieSync: (input) =>
+      transport.readJson(api()["cookie-sync-configure"].$post({ json: input })),
+    runCookieSync: (input) =>
+      transport.readJson(api()["cookie-sync-run"].$post({ json: input })),
     subscribe(input) {
       let disposed = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
       let previous = "";
+
       const scope: ExperimentalDesktopBrowserScope = {
         hostId: input.hostId,
         instanceId: input.instanceId,
         generation: input.generation,
         threadId: input.threadId,
       };
+
       const poll = async () => {
         try {
           const result = await listTabs(scope);
           const serialized = JSON.stringify(result);
+
           if (!disposed && serialized !== previous) {
             previous = serialized;
             input.onChange(result);
@@ -132,7 +165,9 @@ export function createDesktopBrowsersArea({
             }, 2000);
         }
       };
+
       void poll();
+
       return {
         dispose() {
           disposed = true;

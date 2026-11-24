@@ -4,9 +4,11 @@ import { MachineEnvironment } from "./machine-environment.js";
 
 it("makes machine settings available to arbitrary child commands and removes stale values", () => {
   const target = { ...process.env, MACHINE_EXISTING: "original" };
+
   const environment = new MachineEnvironment(target, {
     MACHINE_EXISTING: "shell-original",
   });
+
   environment.replace([
     {
       name: "MACHINE_EXISTING",
@@ -21,6 +23,7 @@ it("makes machine settings available to arbitrary child commands and removes sta
       reason: "test",
     },
   ]);
+
   const readChild = () =>
     execFileSync(
       process.execPath,
@@ -30,6 +33,7 @@ it("makes machine settings available to arbitrary child commands and removes sta
       ],
       { env: target, encoding: "utf8" },
     );
+
   expect(JSON.parse(readChild())).toEqual(["configured", "first"]);
   expect(environment.shellEnvironment({ MACHINE_EXISTING: "stale" })).toEqual({
     MACHINE_EXISTING: "configured",
@@ -56,9 +60,10 @@ it("makes machine settings available to arbitrary child commands and removes sta
 
 it("resolves server-relative entries and preserves explicitly empty values", () => {
   const target = {
-    BB_SERVER_URL: "https://server.example",
+    OMNYO_SERVER_URL: "https://server.example",
     MACHINE_VALUE: "original",
   };
+
   const environment = new MachineEnvironment(target, {});
   environment.replace([
     {

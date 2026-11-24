@@ -9,6 +9,7 @@ export function createBrowserLifecycleFetchController(
   queryClient: QueryClient,
 ): BrowserLifecycleFetchController {
   let cancelledOnSuspend = new Set<Query>();
+
   return {
     suspend: () => {
       for (const query of queryClient
@@ -16,6 +17,7 @@ export function createBrowserLifecycleFetchController(
         .findAll({ fetchStatus: "fetching", type: "active" })) {
         cancelledOnSuspend.add(query);
       }
+
       void queryClient.cancelQueries({
         fetchStatus: "fetching",
         type: "active",
@@ -25,6 +27,7 @@ export function createBrowserLifecycleFetchController(
       if (cancelledOnSuspend.size === 0) {
         return;
       }
+
       const cancelled = cancelledOnSuspend;
       cancelledOnSuspend = new Set<Query>();
       void queryClient.refetchQueries(

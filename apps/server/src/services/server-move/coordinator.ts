@@ -2,19 +2,23 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { rm, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { AppSurface } from "@bb/config/app-surface";
-import type { ServerBindHost } from "@bb/config/server";
-import { listNonDestroyedHostsByIds } from "@bb/db";
+import type { AppSurface } from "@omnyo/config/app-surface";
+import type { ServerBindHost } from "@omnyo/config/server";
+import { listNonDestroyedHostsByIds } from "@omnyo/db";
 import {
   formatServerDataSize,
   SERVER_MOVE_STEP_IDS,
   type ServerMoveStepId,
-} from "@bb/domain";
-import { writeServerMovedFile } from "@bb/server-archive";
+} from "@omnyo/domain";
+import {
+  writeServerMovedFile,
+  readMaintenanceHold,
+} from "@omnyo/server-archive";
+import { reserveMaintenanceAdmission } from "../maintenance/admission.js";
 import type {
   ServerMovedErrorDetails,
   ServerMoveProgressMessage,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type {
   ServerMoveCheckItem,
   ServerMoveCheckRequest,
@@ -23,7 +27,7 @@ import type {
   ServerMoveStatus,
   ServerMoveStep,
   ServerMoveStepStatus,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { ApiError } from "../../errors.js";
 import type { AppDeps } from "../../types.js";
 import { callHostOnlineRpc } from "../hosts/online-rpc.js";
@@ -34,12 +38,13 @@ import {
 } from "./checks.js";
 import type { ServerArchiveExport } from "./export.js";
 import type {
-  FullBbAppArtifact,
-  FullBbAppArtifactService,
+  FullOmnyoAppArtifact,
+  FullOmnyoAppArtifactService,
 } from "./full-artifact.js";
 import {
   setServerMoveFrozen,
   setServerMoveSnapshotFence,
+  isMaintenanceFrozen,
 } from "./freeze-state.js";
 import type { ServerMoveModeResolution } from "./mode.js";
 import type { RestoredServerMoveRun } from "./reconcile.js";
@@ -100,7 +105,7 @@ export interface ServerMoveEnvironment {
   bindHost: ServerBindHost | null;
   deps: AppDeps;
   exportArchive(args: ServerMoveExportArgs): Promise<ServerArchiveExport>;
-  fullArtifact: FullBbAppArtifactService;
+  fullArtifact: FullOmnyoAppArtifactService;
   now(): number;
   plugins: ServerMovePluginControl;
   readServerDiskFreeBytes(): Promise<number | null>;
@@ -118,7 +123,7 @@ export interface ServerMoveEnvironment {
   timings: ServerMoveTimings;
 }
 
-export type ServerMoveDownloadKind = "archive" | "bb-app";
+export type ServerMoveDownloadKind = "archive" | "omnyo-app";
 
 export interface ServerMoveDownload {
   path: string;
@@ -138,7 +143,7 @@ export interface ResolveServerMoveDownloadArgs {
 }
 
 export interface ServerMoveCoordinator {
-  cancel(): ServerMoveStatus;
+  cancel(): Promise<ServerMoveStatus>;
   check(request: ServerMoveCheckRequest): Promise<ServerMoveCheckResponse>;
   dispose(): void;
   getStatus(): ServerMoveStatus | null;
@@ -162,10 +167,13 @@ interface MoveRun {
   abort: AbortController;
   activationConfirmedAt: number | null;
   activationRequestedAt: number | null;
+  prepareDispatchedAt: number | null;
+  finishing?: Promise<void>;
+  releaseAdmission?: () => void;
   activationToken: string;
   archive: ServerArchiveExport | null;
   archiveExistingTargetServerData: boolean;
-  bbApp: FullBbAppArtifact | null;
+  appRuntime: FullOmnyoAppArtifact | null;
   configBackup: OldServerDaemonConfigBackup | null;
   connectHandle: string | null;
   finished: boolean;
@@ -193,17 +201,21 @@ const PREPARE_PROGRESS_STEPS: ReadonlySet<ServerMoveStepId> = new Set([
   "transfer",
   "start-target",
 ]);
+
 const ALREADY_ACTIVATED_ERROR_CODE = "server_move_already_activated";
+
 const ARCHIVE_ERROR_CODE_PREFIX = "server_move_archive_";
+
 const DAEMON_ERROR_SUMMARIES: Record<string, string> = {
   server_move_activation_rejected: "The machine refused to take over",
   server_move_busy: "The machine is busy with another server move",
   server_move_cancelled: "The machine cancelled the move",
   server_move_digest_mismatch: "The export was damaged in transit",
   server_move_download_failed: "The machine couldn't download the export",
-  server_move_install_failed: "Installing bb on the machine failed",
+  server_move_install_failed: "Installing Omnyo on the machine failed",
   server_move_rejected: "The machine rejected the move",
-  server_move_server_entry_unavailable: "The machine can't run the bb server",
+  server_move_server_entry_unavailable:
+    "The machine can't run the Omnyo server",
   server_move_start_failed: "The new server didn't start",
 };
 
@@ -218,8 +230,8 @@ export function serverMoveArchiveDownloadPath(moveId: string): string {
   return `/internal/server-move/${encodeURIComponent(moveId)}/archive`;
 }
 
-export function serverMoveBbAppDownloadPath(moveId: string): string {
-  return `/internal/server-move/${encodeURIComponent(moveId)}/bb-app.tgz`;
+export function serverMoveOmnyoAppDownloadPath(moveId: string): string {
+  return `/internal/server-move/${encodeURIComponent(moveId)}/app-runtime.tgz`;
 }
 
 export function serverMoveDestinationStatusUrl(serverUrl: string): string {
@@ -234,12 +246,15 @@ export function describeServerMoveError(error: unknown): string {
   if (!(error instanceof ApiError)) {
     return errorMessage(error);
   }
+
   const code = error.body.code;
+
   const summary =
     DAEMON_ERROR_SUMMARIES[code] ??
     (code.startsWith(ARCHIVE_ERROR_CODE_PREFIX)
       ? "The machine couldn't unpack the export"
       : null);
+
   return summary === null ? error.message : `${summary}: ${error.message}`;
 }
 
@@ -257,6 +272,7 @@ function requireValue<T>(value: T | null, description: string): T {
   if (value === null) {
     throw new Error(`Server move is missing ${description}`);
   }
+
   return value;
 }
 
@@ -296,10 +312,11 @@ function moveFromRunFile(run: ServerMoveRunFile): MoveRun {
     abort: new AbortController(),
     activationConfirmedAt: run.activationConfirmedAt,
     activationRequestedAt: run.activationRequestedAt,
+    prepareDispatchedAt: run.prepareDispatchedAt,
     activationToken: run.activationToken,
     archive: null,
     archiveExistingTargetServerData: run.archiveExistingTargetServerData,
-    bbApp: null,
+    appRuntime: null,
     configBackup: run.configBackup,
     connectHandle: run.connectHandle,
     finished: true,
@@ -317,6 +334,7 @@ export function createServerMoveCoordinator(
   environment: ServerMoveEnvironment,
 ): ServerMoveCoordinator {
   const { deps, timings } = environment;
+
   const checkEnvironment: ServerMoveCheckEnvironment = {
     allowLoopbackServerUrl: environment.allowLoopbackServerUrl,
     deps,
@@ -328,6 +346,7 @@ export function createServerMoveCoordinator(
     serverTimeZone: environment.serverTimeZone,
     targetServerPort: () => environment.targetServerPort(),
   };
+
   let current: MoveRun | null = null;
   let pendingStart: PendingStart | null = null;
   let runFileWork: Promise<void> = Promise.resolve();
@@ -358,6 +377,7 @@ export function createServerMoveCoordinator(
         move.configBackup === null ? null : { ...move.configBackup },
       movedAt: move.movedAt,
       activationRequestedAt: move.activationRequestedAt,
+      prepareDispatchedAt: move.prepareDispatchedAt,
       activationConfirmedAt: move.activationConfirmedAt,
     };
   }
@@ -371,17 +391,20 @@ export function createServerMoveCoordinator(
         await work();
       }
     });
+
     runFileWork = next.catch((error: unknown) => {
       deps.logger.error(
         { err: error, moveId: move.status.moveId },
         "Server move could not update server-move-run.json",
       );
     });
+
     return next;
   }
 
   function persistRun(move: MoveRun): Promise<void> {
     const snapshot = runFileFor(move);
+
     return queueRunFileWork(move, () =>
       writeServerMoveRunFile(deps.config.dataDir, snapshot),
     );
@@ -394,14 +417,19 @@ export function createServerMoveCoordinator(
   }
 
   function isBlocking(move: MoveRun | null): boolean {
-    return move !== null && isServerMoveInFlight(move.status);
+    return (
+      move !== null &&
+      (move.finishing !== undefined || isServerMoveInFlight(move.status))
+    );
   }
 
   function findStep(move: MoveRun, id: ServerMoveStepId): ServerMoveStep {
     const step = move.status.steps.find((candidate) => candidate.id === id);
+
     if (step === undefined) {
       throw new Error(`Unknown server move step ${id}`);
     }
+
     return step;
   }
 
@@ -416,6 +444,7 @@ export function createServerMoveCoordinator(
     step.status = status;
     step.message = message;
     notify();
+
     if (transitioned) {
       void persistRun(move).catch(() => undefined);
     }
@@ -429,13 +458,17 @@ export function createServerMoveCoordinator(
 
   function untilCancelled<T>(move: MoveRun, work: Promise<T>): Promise<T> {
     const signal = move.abort.signal;
+
     return new Promise<T>((resolve, reject) => {
       const onAbort = () => reject(new ServerMoveCancelledError());
+
       if (signal.aborted) {
         work.catch(() => {});
         onAbort();
+
         return;
       }
+
       signal.addEventListener("abort", onAbort, { once: true });
       work.then(
         (value) => {
@@ -459,17 +492,15 @@ export function createServerMoveCoordinator(
       () => null,
       (error: unknown) => ({ error }),
     );
+
     if (!(await settledWithin(outcome, timings.pluginShutdownTimeoutMs))) {
-      deps.logger.warn(
-        {
-          moveId: move.status.moveId,
-          timeoutMs: timings.pluginShutdownTimeoutMs,
-        },
-        `Server move plugin ${operation} did not finish in time; continuing`,
+      throw new Error(
+        `Server move plugin ${operation} did not quiesce within ${timings.pluginShutdownTimeoutMs}ms`,
       );
-      return;
     }
+
     const failure = await outcome;
+
     if (failure !== null) {
       throw failure.error;
     }
@@ -478,6 +509,7 @@ export function createServerMoveCoordinator(
   function queuePluginWork(work: () => Promise<void>): Promise<void> {
     const next = pluginWork.then(work);
     pluginWork = next.catch(() => undefined);
+
     return next;
   }
 
@@ -486,6 +518,7 @@ export function createServerMoveCoordinator(
       if (current !== move || !isServerMoveInFlight(move.status)) {
         return;
       }
+
       pluginsSuspended = true;
       await settlePluginWork(
         move,
@@ -510,34 +543,34 @@ export function createServerMoveCoordinator(
     if (current !== move) {
       return;
     }
+
     move.frozen = false;
     setServerMoveFrozen(deps.db, false);
     setServerMoveSnapshotFence(deps.db, false);
+    move.releaseAdmission?.();
+    delete move.releaseAdmission;
   }
 
   function resumePluginWork(move: MoveRun): Promise<void> {
     return queuePluginWork(async () => {
+      if (isMaintenanceFrozen(deps.db)) return;
+
       if (current !== move) {
         return;
       }
+
       if (pluginsSuspended) {
-        pluginsSuspended = false;
         await settlePluginWork(
           move,
           "resume",
           environment.plugins.resumeSuspended(),
-        ).catch((error: unknown) => {
-          deps.logger.error(
-            { err: error, moveId: move.status.moveId },
-            "Server move could not restart paused plugins",
-          );
-        });
+        );
+        pluginsSuspended = false;
       }
+
       if (current !== move) {
         return;
       }
-      environment.plugins.setSchedulesPaused(false);
-      environment.resumeDeferredWork();
     });
   }
 
@@ -556,6 +589,8 @@ export function createServerMoveCoordinator(
     assertNotCancelled(move);
     move.frozen = true;
     setServerMoveFrozen(deps.db, true);
+    move.releaseAdmission?.();
+    delete move.releaseAdmission;
     environment.plugins.setSchedulesPaused(true);
     setStep(move, "stop-work", "running", "Stopping running turns");
     await persistRun(move);
@@ -581,6 +616,7 @@ export function createServerMoveCoordinator(
   async function runUpdateTarget(move: MoveRun): Promise<void> {
     const targetName = move.status.targetHostName;
     setStep(move, "update-target", "running", `Checking ${targetName}`);
+
     const inspect = await untilCancelled(
       move,
       callHostOnlineRpc(deps, {
@@ -593,57 +629,59 @@ export function createServerMoveCoordinator(
         },
       }),
     );
+
     if (inspect.dataDirHasServerData) {
       throw new Error(
-        `${targetName} already has bb server data in ${inspect.dataDir}`,
+        `${targetName} already has Omnyo server data in ${inspect.dataDir}`,
       );
     }
+
     if (!inspect.portAvailable) {
       throw new Error(
         `Port ${environment.targetServerPort()} is in use on ${targetName}`,
       );
     }
+
     if (
       inspect.existingServerData !== null &&
       !move.archiveExistingTargetServerData
     ) {
       throw new Error(
-        `${targetName} has its own bb data at ${inspect.existingServerData.path}. Confirm archiving it, then start the move again.`,
+        `${targetName} has its own Omnyo data at ${inspect.existingServerData.path}. Confirm archiving it, then start the move again.`,
       );
     }
+
     const appVersion = deps.config.appVersion;
-    if (inspect.serverEntryAvailable && inspect.bbAppVersion === appVersion) {
-      setStep(
-        move,
-        "update-target",
-        "skipped",
-        `${targetName} already runs bb ${appVersion}`,
-      );
-      return;
-    }
     setStep(
       move,
       "update-target",
       "running",
-      `Packing bb ${appVersion} for ${targetName}`,
+      `Packing Omnyo ${appVersion} for ${targetName}`,
     );
-    const bbApp = await untilCancelled(move, environment.fullArtifact.build());
-    move.bbApp = bbApp;
+
+    const appRuntime = await untilCancelled(
+      move,
+      environment.fullArtifact.build(),
+    );
+
+    move.appRuntime = appRuntime;
     setStep(
       move,
       "update-target",
       "done",
-      `bb ${bbApp.version} will be installed on ${targetName}`,
+      `Omnyo ${appRuntime.version} will be installed on ${targetName}`,
     );
   }
 
   async function runExport(move: MoveRun): Promise<void> {
     setStep(move, "export", "running", "Exporting server data");
     setServerMoveSnapshotFence(deps.db, true);
+
     const archive = await environment.exportArchive({
       sourceServerHostId: move.sourceServerHost.id,
       workDir: move.workDir,
     });
+
     move.archive = archive;
     assertNotCancelled(move);
     setStep(
@@ -663,6 +701,10 @@ export function createServerMoveCoordinator(
       "running",
       `Sending ${formatServerDataSize(archive.sizeBytes)} to ${targetName}`,
     );
+    move.prepareDispatchedAt = environment.now();
+    await persistRun(move);
+    assertNotCancelled(move);
+
     const result = await untilCancelled(
       move,
       callHostOnlineRpc(deps, {
@@ -677,14 +719,17 @@ export function createServerMoveCoordinator(
             sha256: archive.sha256,
             sizeBytes: archive.sizeBytes,
           },
-          bbApp:
-            move.bbApp === null
+          appRuntime:
+            move.appRuntime === null
               ? null
               : {
-                  downloadPath: serverMoveBbAppDownloadPath(move.status.moveId),
-                  sha256: move.bbApp.sha256,
-                  sizeBytes: move.bbApp.sizeBytes,
-                  version: move.bbApp.version,
+                  downloadPath: serverMoveOmnyoAppDownloadPath(
+                    move.status.moveId,
+                  ),
+                  sha256: move.appRuntime.sha256,
+                  sizeBytes: move.appRuntime.sizeBytes,
+                  version: move.appRuntime.version,
+                  runtimeSha256: move.appRuntime.runtimeSha256,
                 },
           serverPort: environment.targetServerPort(),
           bindHost: environment.bindHost === "0.0.0.0" ? "0.0.0.0" : null,
@@ -695,12 +740,15 @@ export function createServerMoveCoordinator(
         },
       }),
     );
+
     if (findStep(move, "update-target").status === "running") {
       findStep(move, "update-target").status = "done";
     }
+
     if (findStep(move, "transfer").status !== "done") {
       setStep(move, "transfer", "done", `Sent to ${targetName}`);
     }
+
     setStep(
       move,
       "start-target",
@@ -720,6 +768,7 @@ export function createServerMoveCoordinator(
 
   async function runVerifyAddress(move: MoveRun): Promise<void> {
     const serverUrl = move.status.serverUrl;
+
     if (move.status.mode === "connect") {
       setStep(
         move,
@@ -727,14 +776,17 @@ export function createServerMoveCoordinator(
         "skipped",
         `Machines keep using ${serverUrl}`,
       );
+
       return;
     }
+
     setStep(
       move,
       "verify-address",
       "running",
       `Checking that machines can reach ${serverUrl}`,
     );
+
     const hosts = listNonDestroyedHostsByIds(
       deps.db,
       deps.hub.listConnectedHostIds(),
@@ -742,6 +794,7 @@ export function createServerMoveCoordinator(
       (host) =>
         host.type === "persistent" && host.id !== move.status.targetHostId,
     );
+
     const failures = await untilCancelled(
       move,
       Promise.all(
@@ -756,6 +809,7 @@ export function createServerMoveCoordinator(
                 moveId: move.status.moveId,
               },
             });
+
             return probe.reachable
               ? null
               : `${host.name}: ${probe.message ?? "unreachable"}`;
@@ -765,14 +819,17 @@ export function createServerMoveCoordinator(
         }),
       ),
     );
+
     const problems = failures.filter(
       (failure): failure is string => failure !== null,
     );
+
     if (problems.length > 0) {
       throw new Error(
         `Not every machine can reach ${serverUrl}. ${problems.join("; ")}`,
       );
     }
+
     setStep(
       move,
       "verify-address",
@@ -792,9 +849,11 @@ export function createServerMoveCoordinator(
         );
       },
     );
+
     if (backup === null) {
       return;
     }
+
     await restoreOldServerDaemonConfig(backup).catch((error: unknown) => {
       deps.logger.error(
         { err: error },
@@ -837,12 +896,15 @@ export function createServerMoveCoordinator(
     const deadline = Date.now() + timings.activateRetryWindowMs;
     let attempted = false;
     let lastProblem = `${targetName} disconnected before confirming`;
+
     while (true) {
       const remaining = deadline - Date.now();
+
       if (!deps.hub.hasDaemonForHost(targetHostId)) {
         const reconnected =
           remaining > 0 &&
           (await deps.hub.waitForDaemonForHost(targetHostId, remaining));
+
         if (!reconnected) {
           return attempted
             ? { outcome: "unconfirmed", message: lastProblem }
@@ -852,7 +914,9 @@ export function createServerMoveCoordinator(
               };
         }
       }
+
       attempted = true;
+
       try {
         await requestActivation(
           move,
@@ -862,27 +926,33 @@ export function createServerMoveCoordinator(
             Math.min(timings.activateAttemptTimeoutMs, deadline - Date.now()),
           ),
         );
+
         return { outcome: "activated" };
       } catch (error) {
         if (isAlreadyActivatedError(error)) {
           return { outcome: "activated" };
         }
+
         if (isDaemonRefusal(error)) {
           return {
             outcome: "refused",
             message: `${targetName} couldn't take over: ${describeServerMoveError(error)}`,
           };
         }
+
         lastProblem = errorMessage(error);
         deps.logger.warn(
           { err: error, moveId: move.status.moveId, targetHostId },
           "Server move activation was not confirmed; retrying",
         );
       }
+
       const wait = deadline - Date.now();
+
       if (wait <= 0) {
         return { outcome: "unconfirmed", message: lastProblem };
       }
+
       await sleep(Math.min(timings.activateRetryDelayMs, wait));
     }
   }
@@ -892,14 +962,17 @@ export function createServerMoveCoordinator(
       deps.db,
       deps.hub.listConnectedHostIds(),
     );
+
     const targets = listServerMovedTargets({
       connectedHosts,
       mode: move.status.mode,
       sourceServerHostId: move.sourceServerHost.id,
       targetHostId: move.status.targetHostId,
     });
+
     for (const hostId of targets) {
       const ownHost = hostId === move.sourceServerHost.id;
+
       try {
         deps.hub.sendDaemonMessage(hostId, {
           type: "server.moved",
@@ -924,6 +997,7 @@ export function createServerMoveCoordinator(
     move.status.state = "switching";
     setStep(move, "switch", "running", `Switching to ${targetName}`);
     const movedAt = environment.now();
+
     try {
       await writeServerMovedFile(deps.config.dataDir, {
         version: 1,
@@ -946,22 +1020,26 @@ export function createServerMoveCoordinator(
       move.activationRequestedAt = environment.now();
       await persistRun(move);
     } catch (error) {
-      await rollbackSwitchFiles(move.configBackup);
       throw error;
     }
+
     const activation = await activateTarget(
       move,
       requireValue(move.activationRequestedAt, "its activation time"),
     );
+
     if (activation.outcome === "refused") {
-      await rollbackSwitchFiles(move.configBackup);
       throw new Error(activation.message);
     }
+
     move.finished = true;
+
     if (activation.outcome === "unconfirmed") {
       enterRecovery(move, grant, activation.message);
+
       return;
     }
+
     await completeSwitch(move, grant);
   }
 
@@ -1061,9 +1139,11 @@ export function createServerMoveCoordinator(
   ): Promise<void> {
     while (isRecovering(move, signal)) {
       const confirmed = await confirmRecoveredActivation(move);
+
       if (!isRecovering(move, signal)) {
         return;
       }
+
       if (confirmed) {
         move.recovery = null;
         deps.logger.info(
@@ -1074,14 +1154,17 @@ export function createServerMoveCoordinator(
           "Server move target confirmed activation after recovery",
         );
         await completeSwitch(move, grant);
+
         return;
       }
+
       await waitForRecoveryTick(move, signal);
     }
   }
 
   async function confirmRecoveredActivation(move: MoveRun): Promise<boolean> {
     const targetHostId = move.status.targetHostId;
+
     if (deps.hub.hasDaemonForHost(targetHostId)) {
       try {
         await requestActivation(
@@ -1089,25 +1172,30 @@ export function createServerMoveCoordinator(
           requireValue(move.activationRequestedAt, "its activation time"),
           timings.activateAttemptTimeoutMs,
         );
+
         return true;
       } catch (error) {
         if (isAlreadyActivatedError(error)) {
           return true;
         }
+
         deps.logger.warn(
           { err: error, moveId: move.status.moveId, targetHostId },
           "Server move activation retry was not confirmed",
         );
       }
     }
+
     return destinationReportsReady(move);
   }
 
   function recoveryProbeHostId(move: MoveRun): string | null {
     const sourceHostId = move.sourceServerHost.id;
+
     if (deps.hub.hasDaemonForHost(sourceHostId)) {
       return sourceHostId;
     }
+
     return (
       listNonDestroyedHostsByIds(deps.db, deps.hub.listConnectedHostIds()).find(
         (host) =>
@@ -1118,9 +1206,11 @@ export function createServerMoveCoordinator(
 
   async function destinationReportsReady(move: MoveRun): Promise<boolean> {
     const hostId = recoveryProbeHostId(move);
+
     if (hostId === null) {
       return false;
     }
+
     try {
       const probe = await callHostOnlineRpc(deps, {
         hostId,
@@ -1131,12 +1221,14 @@ export function createServerMoveCoordinator(
           moveId: move.status.moveId,
         },
       });
+
       return probe.reachable && probe.state === "ready";
     } catch (error) {
       deps.logger.warn(
         { err: error, hostId, moveId: move.status.moveId },
         "Server move could not check the new server during recovery",
       );
+
       return false;
     }
   }
@@ -1146,125 +1238,123 @@ export function createServerMoveCoordinator(
     signal: AbortSignal,
   ): Promise<void> {
     const targetHostId = move.status.targetHostId;
+
     if (!deps.hub.hasDaemonForHost(targetHostId)) {
       await deps.hub.waitForDaemonForHost(
         targetHostId,
         timings.recoveryProbeIntervalMs,
       );
+
       return;
     }
+
     await sleep(timings.recoveryProbeIntervalMs, undefined, { signal }).catch(
       () => undefined,
     );
   }
 
-  function abandonRecovery(move: MoveRun): ServerMoveStatus {
-    move.recovery?.abort();
-    move.recovery = null;
-    const message = `The move was abandoned before ${move.status.targetHostName} confirmed it took over`;
-    const step = findStep(move, "switch");
-    step.status = "skipped";
-    step.message = message;
-    move.status.state = "cancelled";
-    move.status.error = { step: "switch", message };
-    move.status.cancellable = false;
-    move.status.finishedAt = environment.now();
-    clearFreeze(move);
-    notify();
-    deps.logger.warn(
-      { moveId: move.status.moveId, targetHostId: move.status.targetHostId },
-      "Server move abandoned before the target confirmed activation",
-    );
-    void persistRun(move).catch(() => undefined);
-    void finishAbandon(move);
-    return structuredClone(move.status);
-  }
-
-  async function finishAbandon(move: MoveRun): Promise<void> {
-    await rollbackSwitchFiles(move.configBackup);
-    await Promise.all([resumePluginWork(move), abortTargetWhenReachable(move)]);
-    await forgetRun(move).catch(() => undefined);
-  }
-
-  async function abortTargetWhenReachable(move: MoveRun): Promise<void> {
-    const targetHostId = move.status.targetHostId;
-    if (
-      !(await deps.hub.waitForDaemonForHost(
-        targetHostId,
-        timings.abortTimeoutMs,
-      ))
-    ) {
-      deps.logger.warn(
-        { moveId: move.status.moveId, targetHostId },
-        "Server move abort could not reach the target machine",
-      );
-      return;
-    }
-    await sendAbort(move);
-  }
-
   async function sendAbort(move: MoveRun): Promise<void> {
-    try {
-      await callHostOnlineRpc(deps, {
-        hostId: move.status.targetHostId,
-        timeoutMs: timings.abortTimeoutMs,
-        command: { type: "server_move.abort", moveId: move.status.moveId },
-      });
-    } catch (error) {
-      if (isAlreadyActivatedError(error)) {
-        deps.logger.error(
-          {
-            err: error,
-            moveId: move.status.moveId,
-            targetHostId: move.status.targetHostId,
-          },
-          "The target machine already activated the moved server; stop one of the two servers",
-        );
+    const receipt = await callHostOnlineRpc(deps, {
+      hostId: move.status.targetHostId,
+      timeoutMs: timings.abortTimeoutMs,
+      command: { type: "server_move.abort", moveId: move.status.moveId },
+    });
+
+    if (!receipt.fenced || receipt.moveId !== move.status.moveId)
+      throw new Error("Target fencing receipt does not match this move");
+  }
+
+  function failMove(move: MoveRun, error: unknown): Promise<void> {
+    if (move.finishing !== undefined) return move.finishing;
+
+    if (move.finished && move.status.state !== "recovery_required")
+      return Promise.resolve();
+    move.finished = true;
+
+    const work = (async () => {
+      move.recovery?.abort();
+      move.recovery = null;
+      const cancelled = error instanceof ServerMoveCancelledError;
+      const message = describeServerMoveError(error);
+
+      const runningStep = move.status.steps.find(
+        (step) => step.status === "running",
+      );
+
+      const stepId = runningStep?.id ?? "switch";
+
+      try {
+        if (
+          move.prepareDispatchedAt !== null ||
+          move.status.state === "recovery_required"
+        )
+          await sendAbort(move);
+      } catch (fenceError) {
+        move.status.state = "recovery_required";
+        move.status.finishedAt = null;
+        move.status.cancellable = true;
+        move.status.error = {
+          step: stepId,
+          message: `Target fencing is unconfirmed: ${describeServerMoveError(fenceError)}`,
+        };
+        move.frozen = true;
+        setServerMoveFrozen(deps.db, true);
+        await persistRun(move);
+        notify();
+
         return;
       }
-      deps.logger.warn(
-        {
-          err: error,
-          moveId: move.status.moveId,
-          targetHostId: move.status.targetHostId,
-        },
-        "Server move abort could not reach the target machine",
-      );
-    }
-  }
 
-  async function failMove(move: MoveRun, error: unknown): Promise<void> {
-    if (move.finished) {
-      return;
-    }
-    move.finished = true;
-    const cancelled = error instanceof ServerMoveCancelledError;
-    const message = describeServerMoveError(error);
-    const runningStep = move.status.steps.find(
-      (step) => step.status === "running",
-    );
-    const failedStepId =
-      runningStep?.id ??
-      move.status.steps.find((step) => step.status === "pending")?.id ??
-      "switch";
-    if (runningStep !== undefined) {
-      runningStep.status = cancelled ? "skipped" : "failed";
-      runningStep.message = message;
-    }
-    move.status.state = cancelled ? "cancelled" : "failed";
-    move.status.error = { step: failedStepId, message };
-    move.status.cancellable = false;
-    move.status.finishedAt = environment.now();
-    clearFreeze(move);
-    notify();
-    if (!cancelled) {
-      deps.logger.warn(
-        { err: error, moveId: move.status.moveId, step: failedStepId },
-        "Server move failed",
+      await rollbackSwitchFiles(move.configBackup);
+
+      if (runningStep !== undefined) {
+        runningStep.status = cancelled ? "skipped" : "failed";
+        runningStep.message = message;
+      }
+
+      try {
+        await resumePluginWork(move);
+      } catch (resumeError) {
+        move.status.state = "recovery_required";
+        move.status.finishedAt = null;
+        move.status.cancellable = true;
+        move.status.error = {
+          step: stepId,
+          message: `Source owner resume is unconfirmed: ${describeServerMoveError(resumeError)}`,
+        };
+        await persistRun(move);
+        notify();
+
+        return;
+      }
+
+      move.status.state = cancelled ? "cancelled" : "failed";
+      move.status.error = { step: stepId, message };
+      move.status.cancellable = false;
+      move.status.finishedAt = environment.now();
+      await persistRun(move);
+
+      clearFreeze(move);
+
+      if (!isMaintenanceFrozen(deps.db)) {
+        environment.plugins.setSchedulesPaused(false);
+        environment.resumeDeferredWork();
+      }
+
+      await forgetRun(move);
+      notify();
+    })();
+
+    move.finishing = work;
+    void work
+      .finally(() => {
+        if (move.finishing === work) delete move.finishing;
+      })
+      .catch((failure) =>
+        deps.logger.error({ err: failure }, "Server move cancellation failed"),
       );
-    }
-    await Promise.all([resumePluginWork(move), sendAbort(move)]);
-    await forgetRun(move).catch(() => undefined);
+
+    return work;
   }
 
   async function run(move: MoveRun): Promise<void> {
@@ -1282,41 +1372,39 @@ export function createServerMoveCoordinator(
     } catch (error) {
       await failMove(move, error);
     } finally {
-      await rm(move.workDir, { force: true, recursive: true }).catch(
-        (error: unknown) => {
-          deps.logger.warn(
-            { err: error, workDir: move.workDir },
-            "Server move could not remove its work directory",
-          );
-        },
-      );
-      await rmdir(dirname(move.workDir)).catch(() => undefined);
+      if (move.status.state !== "recovery_required")
+        await rm(move.workDir, { force: true, recursive: true }).catch(
+          (error: unknown) => {
+            deps.logger.warn(
+              { err: error, workDir: move.workDir },
+              "Server move could not remove its work directory",
+            );
+          },
+        );
+
+      if (move.status.state !== "recovery_required")
+        await rmdir(dirname(move.workDir)).catch(() => undefined);
     }
   }
 
   return {
-    cancel() {
+    async cancel() {
       const move = current;
-      if (move?.status.state === "recovery_required") {
-        return abandonRecovery(move);
-      }
+
       if (
         move === null ||
-        move.status.state !== "preparing" ||
-        !move.status.cancellable
-      ) {
+        !move.status.cancellable ||
+        (move.status.state !== "preparing" &&
+          move.status.state !== "recovery_required")
+      )
         throw new ApiError(
           409,
           "server_move_not_cancellable",
-          move !== null &&
-            (move.status.state === "switching" ||
-              move.status.state === "completed")
-            ? "The move can't be cancelled after the switch starts"
-            : "No server move is in progress",
+          "No cancellable server move is in progress",
         );
-      }
       move.abort.abort();
-      void failMove(move, new ServerMoveCancelledError());
+      await failMove(move, new ServerMoveCancelledError());
+
       return structuredClone(move.status);
     },
 
@@ -1325,6 +1413,7 @@ export function createServerMoveCoordinator(
         moveInProgress: pendingStart !== null || isBlocking(current),
         request,
       });
+
       return result.response;
     },
 
@@ -1338,6 +1427,7 @@ export function createServerMoveCoordinator(
 
     handleProgress(hostId, message) {
       const move = current;
+
       if (
         move === null ||
         move.status.moveId !== message.moveId ||
@@ -1346,10 +1436,13 @@ export function createServerMoveCoordinator(
       ) {
         return;
       }
+
       if (!PREPARE_PROGRESS_STEPS.has(message.step)) {
         return;
       }
+
       let finishedEarlierStep = false;
+
       for (const step of move.status.steps) {
         if (
           step.id !== message.step &&
@@ -1360,7 +1453,9 @@ export function createServerMoveCoordinator(
           finishedEarlierStep = true;
         }
       }
+
       setStep(move, message.step, "running", message.message);
+
       if (finishedEarlierStep) {
         void persistRun(move).catch(() => undefined);
       }
@@ -1368,6 +1463,7 @@ export function createServerMoveCoordinator(
 
     async handlePluginsStarted() {
       const move = current;
+
       if (
         move === null ||
         move.status.state !== "recovery_required" ||
@@ -1375,6 +1471,7 @@ export function createServerMoveCoordinator(
       ) {
         return;
       }
+
       await suspendPlugins(move).catch((error: unknown) => {
         deps.logger.warn(
           { err: error, moveId: move.status.moveId },
@@ -1389,6 +1486,7 @@ export function createServerMoveCoordinator(
 
     movedTo() {
       const move = current;
+
       if (
         move === null ||
         move.status.state !== "completed" ||
@@ -1396,6 +1494,7 @@ export function createServerMoveCoordinator(
       ) {
         return null;
       }
+
       return {
         serverUrl: move.status.serverUrl,
         toHostName: move.status.targetHostName,
@@ -1405,6 +1504,7 @@ export function createServerMoveCoordinator(
 
     resolveDownload(args) {
       const move = current;
+
       if (
         move === null ||
         move.status.moveId !== args.moveId ||
@@ -1412,13 +1512,17 @@ export function createServerMoveCoordinator(
       ) {
         return { outcome: "not_found" };
       }
+
       if (move.status.targetHostId !== args.hostId) {
         return { outcome: "forbidden" };
       }
-      const artifact = args.kind === "archive" ? move.archive : move.bbApp;
+
+      const artifact = args.kind === "archive" ? move.archive : move.appRuntime;
+
       if (artifact === null) {
         return { outcome: "not_found" };
       }
+
       return {
         outcome: "found",
         download: {
@@ -1430,29 +1534,64 @@ export function createServerMoveCoordinator(
     },
 
     start(request) {
+      const hold = readMaintenanceHold(deps.config.dataDir);
+      const startupHeld = hold?.kind === "startup" && hold.phase !== "released";
+
+      if (
+        startupHeld
+          ? hold.phase !== "held" ||
+            request.startupOwnership?.id !== hold.id ||
+            request.startupOwnership.ownerId !== hold.ownerId
+          : request.startupOwnership !== undefined
+      )
+        return Promise.reject(
+          new ApiError(
+            409,
+            "maintenance_ownership_mismatch",
+            "Startup maintenance ownership does not match",
+          ),
+        );
       const existing = current;
+
       if (existing !== null && isBlocking(existing)) {
         if (existing.status.targetHostId === request.targetHostId) {
           return Promise.resolve(structuredClone(existing.status));
         }
+
         return Promise.reject(inProgressError());
       }
+
       if (pendingStart !== null) {
         if (pendingStart.targetHostId === request.targetHostId) {
           return pendingStart.promise;
         }
+
         return Promise.reject(inProgressError());
       }
+
+      let releaseAdmission: () => void;
+
+      try {
+        releaseAdmission = reserveMaintenanceAdmission(deps.db);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+
+      let transferred = false;
+
       const promise = (async (): Promise<ServerMoveStatus> => {
         try {
           const check = await runServerMoveCheck(checkEnvironment, {
             moveInProgress: false,
             request,
           });
+
           const blockers: ServerMoveCheckItem[] = check.response.items.filter(
             (item) => item.severity === "blocker",
           );
+
           const existingData = check.response.existingTargetServerData;
+
           if (
             blockers.length === 0 &&
             existingData !== null &&
@@ -1461,10 +1600,11 @@ export function createServerMoveCoordinator(
             blockers.push({
               id: "archive-existing-data-required",
               severity: "blocker",
-              title: `Confirm archiving the existing bb data on ${check.response.targetHostName}`,
+              title: `Confirm archiving the existing Omnyo data on ${check.response.targetHostName}`,
               detail: existingData.path,
             });
           }
+
           if (blockers.length > 0) {
             throw new ApiError(
               400,
@@ -1473,7 +1613,9 @@ export function createServerMoveCoordinator(
               { details: { items: blockers } },
             );
           }
+
           const { mode, serverUrl, sourceServerHost, targetHost } = check;
+
           if (
             sourceServerHost === null ||
             targetHost === null ||
@@ -1484,16 +1626,20 @@ export function createServerMoveCoordinator(
               "Server move check passed without a server machine, target, and address",
             );
           }
+
           const moveId = randomUUID();
+
           const move: MoveRun = {
             abort: new AbortController(),
+            releaseAdmission,
             activationConfirmedAt: null,
             activationRequestedAt: null,
+            prepareDispatchedAt: null,
             activationToken: randomBytes(32).toString("base64url"),
             archive: null,
             archiveExistingTargetServerData:
               request.archiveExistingTargetServerData,
-            bbApp: null,
+            appRuntime: null,
             configBackup: null,
             connectHandle: mode.mode === "connect" ? mode.connectHandle : null,
             finished: false,
@@ -1528,15 +1674,21 @@ export function createServerMoveCoordinator(
               moveId,
             ),
           };
+
           current = move;
+          transferred = true;
           notify();
           void run(move);
+
           return structuredClone(move.status);
         } finally {
+          if (!transferred) releaseAdmission();
           pendingStart = null;
         }
       })();
+
       pendingStart = { promise, targetHostId: request.targetHostId };
+
       return promise;
     },
 
@@ -1544,19 +1696,27 @@ export function createServerMoveCoordinator(
       if (current !== null) {
         throw new Error("A server move is already loaded");
       }
+
       const move = moveFromRunFile(restored.run);
       current = move;
       notify();
+
       if (restored.kind === "ended") {
-        void abortTargetWhenReachable(move).finally(() =>
-          forgetRun(move).catch(() => undefined),
+        void forgetRun(move).catch((error: unknown) =>
+          deps.logger.error(
+            { err: error },
+            "Could not close a fenced server move receipt",
+          ),
         );
+
         return;
       }
+
       move.frozen = true;
       setServerMoveFrozen(deps.db, true);
       setServerMoveSnapshotFence(deps.db, true);
       environment.plugins.setSchedulesPaused(true);
+
       if (restored.kind === "completed") {
         move.movedAt = restored.movedAt;
         const grant = move.grant;
@@ -1569,8 +1729,10 @@ export function createServerMoveCoordinator(
             environment.retireProcess();
           }, timings.retireDelayMs);
         });
+
         return;
       }
+
       void persistRun(move).catch(() => undefined);
       startRecovery(
         move,

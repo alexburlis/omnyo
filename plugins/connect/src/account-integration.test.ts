@@ -2,16 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createFakePluginHost,
   type FakePluginHost,
-} from "@get-bb/plugin-sdk/testing";
-import { isAllowedBaseUrl } from "bb-plugin-bb-account/src/base-url";
-import { createBbAccountPlugin } from "bb-plugin-bb-account/src/plugin";
-import { StubGetbb } from "bb-plugin-bb-account/src/testing/stub-getbb";
+} from "@omnyo/plugin-sdk/testing";
+import { isAllowedBaseUrl } from "omnyo-plugin-omnyo-account/src/base-url";
+import { createOmnyoAccountPlugin } from "omnyo-plugin-omnyo-account/src/plugin";
+import { StubGetOmnyo } from "omnyo-plugin-omnyo-account/src/testing/stub-getomnyo";
 import {
   COPY_MARKER_KV_KEY,
   CREDENTIAL_COPY_KV_KEY,
   credentialMarker,
 } from "./credential-copy.js";
 import { createConnectPlugin } from "./plugin.js";
+import { storedCopy } from "./testing/stored-copy.js";
 import type { ConnectStatus } from "./types.js";
 
 const ACCOUNT_OPTIONS = {
@@ -32,21 +33,31 @@ interface RpcArgs {
   signal?: AbortSignal;
 }
 
-let stub: StubGetbb;
+let stub: StubGetOmnyo;
+
 let accountHost: FakePluginHost;
+
 let connectHost: FakePluginHost;
+
 let accountRunning = true;
+
 let serverMoving = false;
+
 let blockedAccountReads = 0;
+
 let successfulAccountReads = 0;
+
 let credentialReads = 0;
+
 let failCredentialRead: number | null = null;
+
 let tunnelService: { controller: AbortController; done: Promise<void> } | null =
   null;
 
 function callAccountRpc(args: RpcArgs): Promise<unknown> {
   if (serverMoving) {
     blockedAccountReads += 1;
+
     return Promise.reject(
       Object.assign(new Error("HTTP 503: Changes are paused"), {
         status: 503,
@@ -54,32 +65,43 @@ function callAccountRpc(args: RpcArgs): Promise<unknown> {
       }),
     );
   }
-  if (args.method === "bb-account.v1.connectCredential") credentialReads += 1;
+
+  if (args.method === "omnyo-account.v1.connectCredential")
+    credentialReads += 1;
+
   const failRead =
-    args.method === "bb-account.v1.connectCredential" &&
+    args.method === "omnyo-account.v1.connectCredential" &&
     credentialReads === failCredentialRead;
-  if (args.pluginId !== "bb-account" || !accountRunning || failRead) {
+
+  if (args.pluginId !== "omnyo-account" || !accountRunning || failRead) {
     return Promise.reject(
       Object.assign(new Error(`HTTP 503: ${args.pluginId} is not running`), {
         status: 503,
       }),
     );
   }
+
   const call = accountHost.harness
     .callRpc(args.method, args.input ?? null, {
       experimental_caller: { kind: "plugin", pluginId: "connect" },
     })
     .then((result) => {
       successfulAccountReads += 1;
+
       return args.outputSchema.parse(result);
     });
+
   const signal = args.signal;
+
   if (signal === undefined) return call;
+
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(signal.reason);
+
       return;
     }
+
     signal.addEventListener("abort", () => reject(signal.reason), {
       once: true,
     });
@@ -89,10 +111,12 @@ function callAccountRpc(args: RpcArgs): Promise<unknown> {
 
 async function loadBoth(
   seedConnect?: (host: FakePluginHost) => Promise<void>,
-  accountOptions: Parameters<typeof createBbAccountPlugin>[0] = ACCOUNT_OPTIONS,
+  accountOptions: Parameters<
+    typeof createOmnyoAccountPlugin
+  >[0] = ACCOUNT_OPTIONS,
 ): Promise<void> {
-  accountHost = createFakePluginHost({ pluginId: "bb-account" });
-  await createBbAccountPlugin(accountOptions)(accountHost.bb);
+  accountHost = createFakePluginHost({ pluginId: "omnyo-account" });
+  await createOmnyoAccountPlugin(accountOptions)(accountHost.api);
   connectHost = createFakePluginHost({
     pluginId: "connect",
     sdk: {
@@ -110,7 +134,7 @@ async function loadBoth(
   });
   await seedConnect?.(connectHost);
   await createConnectPlugin({ accountRetryMinMs: 20 })(
-    connectHost.bb as Parameters<ReturnType<typeof createConnectPlugin>>[0],
+    connectHost.api as Parameters<ReturnType<typeof createConnectPlugin>>[0],
   );
 }
 
@@ -124,7 +148,7 @@ async function connectStatus(): Promise<ConnectStatus> {
 
 async function accountState(): Promise<string> {
   return (
-    (await accountHost.harness.callRpc("bb-account.v1.status", {})) as {
+    (await accountHost.harness.callRpc("omnyo-account.v1.status", {})) as {
       state: string;
     }
   ).state;
@@ -149,15 +173,15 @@ async function waitForConnected(dials: number): Promise<void> {
 }
 
 async function storedCredential(): Promise<string> {
-  return (
-    (await accountHost.bb.storage.kv.get("credential")) as {
-      credential: string;
-    }
-  ).credential;
+  const value = await accountHost.api.experimental_secrets.get("credential");
+
+  if (value === undefined) throw new Error("Omnyo account has no credential.");
+
+  return (JSON.parse(value) as { credential: string }).credential;
 }
 
 beforeEach(async () => {
-  stub = await StubGetbb.start();
+  stub = await StubGetOmnyo.start();
   accountRunning = true;
   serverMoving = false;
   blockedAccountReads = 0;
@@ -172,12 +196,13 @@ afterEach(async () => {
     await tunnelService.done;
     tunnelService = null;
   }
+
   await connectHost.harness.dispose();
   await accountHost.harness.dispose();
   await stub.close();
 });
 
-describe("connect on top of bb account", () => {
+describe("connect on top of Omnyo account", () => {
   it("keeps the live tunnel through a server move freeze and resumes account polling", async () => {
     await loadBoth();
     await signInAccount();
@@ -250,23 +275,23 @@ describe("connect on top of bb account", () => {
   it("copies the legacy connect credential on upgrade and keeps connect's copy for older builds", async () => {
     const legacy = stub.issueCredential();
     const apexPort = new URL(stub.apexUrl).port;
+
     const copy = {
       serverUrl: `http://sawyer-desktop.localhost:${apexPort}`,
       handle: "sawyer-desktop",
       credential: legacy,
     };
+
     await loadBoth((seeded) =>
-      seeded.bb.storage.kv.set(CREDENTIAL_COPY_KV_KEY, copy),
+      seeded.api.storage.kv.set(CREDENTIAL_COPY_KV_KEY, copy),
     );
     startTunnel();
 
     await waitForConnected(1);
     expect(await accountState()).toBe("signed-in");
     expect(await storedCredential()).toBe(legacy);
-    expect(await connectHost.bb.storage.kv.get(CREDENTIAL_COPY_KV_KEY)).toEqual(
-      copy,
-    );
-    expect(await connectHost.bb.storage.kv.get(COPY_MARKER_KV_KEY)).toBe(
+    expect(await storedCopy(connectHost)).toEqual(copy);
+    expect(await connectHost.api.storage.kv.get(COPY_MARKER_KV_KEY)).toBe(
       credentialMarker(legacy),
     );
     expect(stub.revokedCredentials).toEqual([]);
@@ -279,6 +304,7 @@ describe("connect on top of bb account", () => {
     startTunnel();
     await waitForConnected(1);
     const serverSide = stub.tunnelDials[0]!.socket!;
+
     const closed = new Promise<void>((resolve) =>
       serverSide.once("close", () => resolve()),
     );
@@ -294,7 +320,7 @@ describe("connect on top of bb account", () => {
     });
   });
 
-  it("signs out everywhere when getbb.app rejects the credential", async () => {
+  it("signs out everywhere when the relay rejects the credential", async () => {
     await loadBoth();
     await signInAccount();
     startTunnel();
@@ -310,10 +336,12 @@ describe("connect on top of bb account", () => {
       },
       { timeout: 8_000 },
     );
-    expect(await accountHost.bb.storage.kv.get("credential")).toBeUndefined();
+    expect(
+      await accountHost.api.experimental_secrets.get("credential"),
+    ).toBeUndefined();
   });
 
-  it("`bb connect off` closes the tunnel and keeps the account; `on` redials", async () => {
+  it("`omnyo connect off` closes the tunnel and keeps the account; `on` redials", async () => {
     await loadBoth();
     await signInAccount();
     startTunnel();
@@ -334,7 +362,7 @@ describe("connect on top of bb account", () => {
     );
   });
 
-  it("`bb connect --code` signs in through bb account", async () => {
+  it("`omnyo connect --code` signs in through Omnyo account", async () => {
     await loadBoth();
     startTunnel();
     stub.issueRedeemCode("WXYZ-2345");
@@ -354,7 +382,7 @@ describe("connect on top of bb account", () => {
     await waitForConnected(1);
   });
 
-  it("treats a stopped bb account as signed out", async () => {
+  it("treats a stopped Omnyo account as signed out", async () => {
     await loadBoth();
     await signInAccount();
     startTunnel();
@@ -362,7 +390,7 @@ describe("connect on top of bb account", () => {
 
     accountRunning = false;
     accountHost = await accountHost.harness.reload(
-      createBbAccountPlugin(ACCOUNT_OPTIONS),
+      createOmnyoAccountPlugin(ACCOUNT_OPTIONS),
     );
     await vi.waitFor(
       async () => {
@@ -374,7 +402,7 @@ describe("connect on top of bb account", () => {
     accountRunning = true;
     await waitForConnected(2);
   });
-  it("retries when bb account is briefly unavailable while handing over the credential", async () => {
+  it("retries when Omnyo account is briefly unavailable while handing over the credential", async () => {
     await loadBoth();
     await signInAccount();
     failCredentialRead = 2;
@@ -384,17 +412,18 @@ describe("connect on top of bb account", () => {
       expect(await connectStatus()).toMatchObject({
         state: "reconnecting",
         nextRetryAt: expect.any(Number),
-        lastError: expect.stringContaining("bb account isn't running"),
+        lastError: expect.stringContaining("Omnyo account isn't running"),
       });
     });
     await waitForConnected(1);
   });
 
-  it("prefers a pairing an older build made over a stale bb account sign-in, and revokes neither", async () => {
+  it("prefers a pairing an older build made over a stale Omnyo account sign-in, and revokes neither", async () => {
     const legacy = stub.issueCredential({
       serverId: "srv_old",
       serverLabel: "old-desktop",
     });
+
     await loadBoth(async (seeded) => {
       stub.issueRedeemCode("ABCD-EFGH");
       await accountHost.harness.callRpc("redeemCode", {
@@ -402,7 +431,7 @@ describe("connect on top of bb account", () => {
         baseUrl: stub.apexUrl,
       });
       const apexPort = new URL(stub.apexUrl).port;
-      await seeded.bb.storage.kv.set(CREDENTIAL_COPY_KV_KEY, {
+      await seeded.api.storage.kv.set(CREDENTIAL_COPY_KV_KEY, {
         serverUrl: `http://old-desktop.localhost:${apexPort}`,
         handle: "old-desktop",
         credential: legacy,
@@ -414,7 +443,7 @@ describe("connect on top of bb account", () => {
     await vi.waitFor(async () => {
       expect(await storedCredential()).toBe(legacy);
     });
-    expect(await connectHost.bb.storage.kv.get(CREDENTIAL_COPY_KV_KEY)).toEqual(
+    expect(await storedCopy(connectHost)).toEqual(
       expect.objectContaining({ credential: legacy }),
     );
     expect(stub.isValid(legacy)).toBe(true);
@@ -423,25 +452,32 @@ describe("connect on top of bb account", () => {
     await waitForConnected(1);
   });
 
-  it("refuses a dashboard --server outside getbb.app before any request", async () => {
-    await loadBoth(undefined, {
-      timing: ACCOUNT_OPTIONS.timing,
-      allowedBaseUrl: (origin) => isAllowedBaseUrl(origin, process.env),
-    });
-    stub.issueRedeemCode("WXYZ-2345");
+  it.each([
+    "https://sawyer.evil.test",
+    "https://sawyer.slashnew.com",
+    "https://sawyer.stg.slashnew.com",
+  ])(
+    "refuses a dashboard --server outside omnyo.link before any request: %s",
+    async (serverUrl) => {
+      await loadBoth(undefined, {
+        timing: ACCOUNT_OPTIONS.timing,
+        allowedBaseUrl: (origin) => isAllowedBaseUrl(origin, process.env),
+      });
+      stub.issueRedeemCode("WXYZ-2345");
 
-    const result = await connectHost.harness.runCli([
-      "--code",
-      "WXYZ-2345",
-      "--server",
-      "https://sawyer.evil.test",
-    ]);
+      const result = await connectHost.harness.runCli([
+        "--code",
+        "WXYZ-2345",
+        "--server",
+        serverUrl,
+      ]);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain(
-      "https://getbb.app or https://vibecodethis.site",
-    );
-    expect(stub.requests).toEqual([]);
-    expect(await accountState()).toBe("signed-out");
-  });
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "https://omnyo.link or https://stg.omnyo.link",
+      );
+      expect(stub.requests).toEqual([]);
+      expect(await accountState()).toBe("signed-out");
+    },
+  );
 });

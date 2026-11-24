@@ -1,4 +1,7 @@
-import { providerRecoveryKindSchema } from "@bb/domain";
+import {
+  providerRecoveryKindSchema,
+  providerFailureMetadataSchema,
+} from "@omnyo/domain";
 import { z } from "zod";
 
 export const BRIDGE_JSON_RPC_ERRORS = {
@@ -16,9 +19,11 @@ export const providerRecoveryHintSchema = z.object({
   message: z.string().min(1),
   retryable: z.boolean(),
 });
+
 export type ProviderRecoveryHint = z.infer<typeof providerRecoveryHintSchema>;
 
-export const bridgeErrorDataSchema = z
-  .object({ recovery: providerRecoveryHintSchema.optional() })
+export const bridgeErrorDataSchema = providerFailureMetadataSchema
+  .extend({ recovery: providerRecoveryHintSchema.optional() })
   .passthrough();
+
 export type BridgeErrorData = z.infer<typeof bridgeErrorDataSchema>;

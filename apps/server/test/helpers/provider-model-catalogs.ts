@@ -1,4 +1,4 @@
-import type { AvailableModel } from "@bb/domain";
+import type { AvailableModel } from "@omnyo/domain";
 import { vi } from "vitest";
 import {
   createProviderModelCatalogStore,
@@ -18,7 +18,9 @@ export function installCatalogStore(
     pushCoalesceMs: 0,
     memoryEntryLimit: args.memoryEntryLimit ?? 256,
   });
+
   harness.deps.lifecycleDedupers.providerModelCatalogs = store;
+
   return store;
 }
 
@@ -64,9 +66,11 @@ export function requireRegistration(
   providerId: string,
 ): ProviderRegistration {
   const registration = harness.deps.providerRegistry.get(providerId);
+
   if (registration === null) {
     throw new Error(`Missing provider registration ${providerId}`);
   }
+
   return registration;
 }
 
@@ -80,6 +84,7 @@ export function capturePushes(harness: TestAppHarness): string[] {
       hostIds.push(message.id);
     }
   });
+
   return hostIds;
 }
 
@@ -88,6 +93,7 @@ export function captureLogLines(harness: TestAppHarness) {
   const warn = vi.fn();
   const error = vi.fn();
   harness.deps.logger = { ...harness.deps.logger, info, warn, error };
+
   return (message: string) =>
     (
       [

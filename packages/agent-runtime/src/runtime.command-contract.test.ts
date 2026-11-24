@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { promptTextInput } from "./test/prompt-input.js";
 import { UNSOLICITED_TURN_THREAD_ID_ENV } from "./test/bridges/unsolicited-turn-bridge.js";
 import {
@@ -24,6 +24,7 @@ import {
 interface CreateContractRuntimeArgs {
   additionalWorkspaceWriteRoots?: readonly string[];
   env?: Record<string, string>;
+  shellEnv?: Record<string, string>;
   launch?: CreateScriptedEchoLaunchOptions;
   onEvent?: (event: ThreadEvent) => void;
   onStderr?: (line: string) => void;
@@ -35,17 +36,21 @@ interface ContractRuntime {
 }
 
 const missingProviderThreadId = "t-missing";
+
 const missingProviderThreadIdError =
   /No provider thread id available for t-missing/;
+
 const acpLaunchSpec = {
   displayName: "Custom ACP",
   command: "custom-agent",
   args: ["serve"],
   env: { CUSTOM_AGENT_TOKEN: "token" },
 };
+
 const unsolicitedTurnBridgeModulePath = fileURLToPath(
   new URL("./test/bridges/unsolicited-turn-bridge.ts", import.meta.url),
 );
+
 const codexEmptyRolloutRenameError =
   "failed to set thread name: rollout at /tmp/new-rollout.jsonl is empty";
 
@@ -67,7 +72,7 @@ describe("createAgentRuntime command contracts", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "bb-runtime-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "omnyo-runtime-test-"));
   });
 
   afterEach(() => {
@@ -78,10 +83,12 @@ describe("createAgentRuntime command contracts", () => {
     args: CreateContractRuntimeArgs = {},
   ): ContractRuntime {
     const record = createScriptedEchoRequestRecord();
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
         env: { ...record.env, ...args.env },
+        ...(args.shellEnv !== undefined ? { shellEnv: args.shellEnv } : {}),
         ...(args.additionalWorkspaceWriteRoots !== undefined
           ? {
               additionalWorkspaceWriteRoots: args.additionalWorkspaceWriteRoots,
@@ -96,6 +103,7 @@ describe("createAgentRuntime command contracts", () => {
       },
       ...(args.launch !== undefined ? { launch: args.launch } : {}),
     });
+
     return { record, runtime };
   }
 
@@ -104,6 +112,7 @@ describe("createAgentRuntime command contracts", () => {
       "/repo/.git/worktrees/bb13",
       "/repo/.git/objects",
     ];
+
     const { record, runtime } = createContractRuntime({
       additionalWorkspaceWriteRoots,
     });
@@ -130,8 +139,45 @@ describe("createAgentRuntime command contracts", () => {
     }
   });
 
+  it("sends a model list's contributed environment with server paths expanded", async () => {
+    const { record, runtime } = createContractRuntime({
+      shellEnv: { OMNYO_SERVER_URL: "http://127.0.0.1:38886" },
+    });
+
+    try {
+      await runtime.listModels({
+        providerId: "fake",
+        contributedEnv: [
+          {
+            name: "CODEX_OPENAI_BASE_URL",
+            value: { serverPath: "/api/v1/plugins/account-pool/http/v1" },
+            source: { plugin: "account-pool" },
+            reason: "Routed through the Account Pooler hub",
+          },
+          {
+            name: "CODEX_POOL_AUTH_TOKEN",
+            value: "pool-test-token",
+            source: { plugin: "account-pool" },
+            reason: "Account Pooler hub token for this machine",
+          },
+        ],
+      });
+
+      expect(record.last("model/list")?.params).toEqual({
+        envVars: {
+          CODEX_OPENAI_BASE_URL:
+            "http://127.0.0.1:38886/api/v1/plugins/account-pool/http/v1",
+          CODEX_POOL_AUTH_TOKEN: "pool-test-token",
+        },
+      });
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
   it("passes a provider's declared launch spec on model list, start, and resume", async () => {
     const { record, runtime } = createContractRuntime();
+
     const bridgeLaunch = createScriptedEchoLaunch({
       providerOptions: { acpLaunchSpec },
     });
@@ -175,6 +221,7 @@ describe("createAgentRuntime command contracts", () => {
 
   it("launches the caller's bridge for archive and unarchive", async () => {
     const { record, runtime } = createContractRuntime();
+
     const bridgeLaunch = createScriptedEchoLaunch({
       pluginId: "provider-graduated",
     });
@@ -270,6 +317,7 @@ describe("createAgentRuntime command contracts", () => {
 
   it("prefixes provider rename titles and normalizes provider title events", async () => {
     const events: ThreadEvent[] = [];
+
     const { record, runtime } = createContractRuntime({
       onEvent: (event) => events.push(event),
     });
@@ -297,11 +345,11 @@ describe("createAgentRuntime command contracts", () => {
       expect(record.last("thread/name/set")?.params).toEqual({
         threadId: "t1",
         providerThreadId: "prov-1",
-        title: "[bb] New Title",
+        title: "[omnyo] New Title",
       });
       expect(events).not.toContainEqual(
         expect.objectContaining({
-          threadName: "[bb] New Title",
+          threadName: "[omnyo] New Title",
           type: "thread/name/updated",
         }),
       );
@@ -374,6 +422,7 @@ describe("createAgentRuntime command contracts", () => {
     "$label after a provider persists a delayed Goal clear",
     async ({ reportedCleared }) => {
       const events: ThreadEvent[] = [];
+
       const { record, runtime } = createContractRuntime({
         onEvent: (event) => events.push(event),
         launch: {
@@ -393,9 +442,11 @@ describe("createAgentRuntime command contracts", () => {
           options: fullRuntimeOptions,
         });
         let settled = false;
+
         const clearPromise = runtime.clearThreadGoal({
           threadId: "t-goal",
         });
+
         void clearPromise.then(
           () => {
             settled = true;
@@ -481,6 +532,7 @@ describe("createAgentRuntime command contracts", () => {
         ],
       }),
     });
+
     const bridgeLaunch = createScriptedEchoLaunch();
 
     try {
@@ -614,6 +666,7 @@ describe("createAgentRuntime command contracts", () => {
 
   it("rejects turn steer when providerThreadId cannot be resolved", async () => {
     const events: ThreadEvent[] = [];
+
     const { runtime } = createContractRuntime({
       onEvent: (event) => events.push(event),
       env: { [UNSOLICITED_TURN_THREAD_ID_ENV]: missingProviderThreadId },
@@ -624,6 +677,7 @@ describe("createAgentRuntime command contracts", () => {
     });
 
     await registerThreadWithoutProviderThreadId(runtime);
+
     const { turnId } = await waitForThreadTurnStarted({
       events,
       label: "synthetic active turn without provider identity",
@@ -632,6 +686,7 @@ describe("createAgentRuntime command contracts", () => {
       threadId: missingProviderThreadId,
       timeoutMs: 1000,
     });
+
     expect(runtime.getActiveTurnId(missingProviderThreadId)).toBe(turnId);
     await expect(
       runtime.steerTurn({
@@ -666,6 +721,7 @@ describe("createAgentRuntime command contracts", () => {
 
   it("interrupts an active turn on stop and releases an idle thread", async () => {
     const events: ThreadEvent[] = [];
+
     const { record, runtime } = createContractRuntime({
       onEvent: (event) => events.push(event),
     });
@@ -677,6 +733,7 @@ describe("createAgentRuntime command contracts", () => {
       providerId: "fake",
       options: fullRuntimeOptions,
     });
+
     await expect(runtime.stopThread({ threadId: "t1" })).resolves.toEqual({
       providerCheckpointId: null,
     });
@@ -702,12 +759,14 @@ describe("createAgentRuntime command contracts", () => {
       input: [promptTextInput({ text: "delay:500" })],
       options: fullRuntimeOptions,
     });
+
     const { turnId } = await waitForThreadTurnStarted({
       events,
       providerId: "fake",
       runtime,
       threadId: "t1",
     });
+
     await runtime.stopThread({ threadId: "t1" });
     expect(record.last("thread/stop")?.params).toEqual({
       threadId: "t1",

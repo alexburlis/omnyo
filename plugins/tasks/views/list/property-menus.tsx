@@ -7,6 +7,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "../../shared/contract.js";
+import { CONTROL_HOVER_TRANSITION } from "@/components/ui/motion";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,6 +52,7 @@ export const PRIORITY_MENU_ORDER: readonly TaskPriority[] = [
 export function statusForShortcut(key: string): TaskStatus | null {
   if (!/^[0-9]$/.test(key)) return null;
   const index = Number(key) - 1;
+
   return index >= 0 && index < TASK_STATUSES.length
     ? (TASK_STATUSES[index] ?? null)
     : null;
@@ -59,6 +61,7 @@ export function statusForShortcut(key: string): TaskStatus | null {
 export function priorityForShortcut(key: string): TaskPriority | null {
   if (!/^[0-9]$/.test(key)) return null;
   const index = Number(key);
+
   return index >= 0 && index < PRIORITY_MENU_ORDER.length
     ? (PRIORITY_MENU_ORDER[index] ?? null)
     : null;
@@ -118,8 +121,7 @@ function PickerOption({
   );
 }
 
-const TRIGGER_CLASS =
-  "relative z-10 inline-flex size-5 shrink-0 items-center justify-center rounded-sm hover:bg-state-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-state-active max-md:pointer-coarse:size-8";
+const TRIGGER_CLASS = `relative z-10 inline-flex size-5 shrink-0 items-center justify-center rounded-sm hover:bg-state-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-state-active max-md:pointer-coarse:size-8 ${CONTROL_HOVER_TRANSITION}`;
 
 export function StatusEditor({
   task,
@@ -137,6 +139,7 @@ export function StatusEditor({
   const select = (status: TaskStatus) => {
     if (status !== task.status) onEdit(task, { status });
   };
+
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
@@ -154,6 +157,7 @@ export function StatusEditor({
         mobileTitle="Change status"
         onKeyDown={(event) => {
           const status = statusForShortcut(event.key);
+
           if (status !== null && isBareKey(event)) {
             event.preventDefault();
             select(status);
@@ -197,6 +201,7 @@ export function PriorityEditor({
   const select = (priority: TaskPriority) => {
     if (priority !== task.priority) onEdit(task, { priority });
   };
+
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
@@ -214,6 +219,7 @@ export function PriorityEditor({
         mobileTitle="Set priority"
         onKeyDown={(event) => {
           const priority = priorityForShortcut(event.key);
+
           if (priority !== null && isBareKey(event)) {
             event.preventDefault();
             select(priority);
@@ -260,8 +266,10 @@ export function TaskContextMenu({
     const labelIds = task.labelIds.includes(labelId)
       ? task.labelIds.filter((id) => id !== labelId)
       : [...task.labelIds, labelId];
+
     onEdit(task, { labelIds });
   };
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
@@ -334,6 +342,7 @@ export function TaskContextMenu({
           <ContextMenuSubContent className="min-w-44">
             {DUE_DATE_PRESETS.map(([label, days]) => {
               const value = localIsoDate(days);
+
               return (
                 <ContextMenuItem
                   key={label}

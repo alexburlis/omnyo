@@ -7,43 +7,53 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { hostSchema } from "@bb/domain";
-import type { Host } from "@bb/domain";
+import { hostSchema } from "@omnyo/domain";
+import type { Host } from "@omnyo/domain";
 import {
   type CreateProjectRequest,
   type ProjectResponse,
   projectResponseSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   hostDaemonEnrollKeyResponseSchema,
   type HostDaemonEnrollKeyResponse,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   listOpenFilePids,
   readPositivePidFile,
   resolveProjectEnvCandidates,
   shellSingleQuote,
-} from "@bb/test-helpers";
+} from "@omnyo/test-helpers";
 import { z } from "zod";
 
 const execFile = promisify(execFileCallback);
 
-export const STANDALONE_INSTANCE_ENV = "BB_STANDALONE_INSTANCE";
-export const STANDALONE_PARENT_PID_ENV = "BB_STANDALONE_PARENT_PID";
-export const STANDALONE_OPENAI_API_KEY_ENV = "BB_QA_OPENAI_API_KEY";
-const STANDALONE_TMP_PREFIX = "bb-standalone-";
+export const STANDALONE_INSTANCE_ENV = "OMNYO_STANDALONE_INSTANCE";
+
+export const STANDALONE_PARENT_PID_ENV = "OMNYO_STANDALONE_PARENT_PID";
+
+export const STANDALONE_OPENAI_API_KEY_ENV = "OMNYO_QA_OPENAI_API_KEY";
+
+const STANDALONE_TMP_PREFIX = "omnyo-standalone-";
+
 const PROCESS_SCAN_MAX_BUFFER = 10 * 1024 * 1024;
 
 type EnvironmentMap = Record<string, string>;
+
 const STANDALONE_THREAD_CONTEXT_ENV = [
-  "BB_THREAD_ID",
-  "BB_ENVIRONMENT_ID",
-  "BB_THREAD_STORAGE",
+  "OMNYO_THREAD_ID",
+  "OMNYO_ENVIRONMENT_ID",
+  "OMNYO_THREAD_STORAGE",
 ];
-const RESTART_DAEMON_ENTRYPOINT_ENV = "BB_RESTART_DAEMON_ENTRYPOINT";
-const RESTART_DAEMON_CWD_ENV = "BB_RESTART_DAEMON_CWD";
-const RESTART_DAEMON_LOG_PATH_ENV = "BB_RESTART_DAEMON_LOG_PATH";
-const RESTART_DAEMON_PID_PATH_ENV = "BB_RESTART_DAEMON_PID_PATH";
+
+const RESTART_DAEMON_ENTRYPOINT_ENV = "OMNYO_RESTART_DAEMON_ENTRYPOINT";
+
+const RESTART_DAEMON_CWD_ENV = "OMNYO_RESTART_DAEMON_CWD";
+
+const RESTART_DAEMON_LOG_PATH_ENV = "OMNYO_RESTART_DAEMON_LOG_PATH";
+
+const RESTART_DAEMON_PID_PATH_ENV = "OMNYO_RESTART_DAEMON_PID_PATH";
+
 const DETACHED_DAEMON_LAUNCHER_SCRIPT = [
   'const { spawn } = require("node:child_process");',
   'const { closeSync, openSync, writeFileSync } = require("node:fs");',
@@ -201,6 +211,7 @@ function isRestrictedProcessScanError(error: ExecFileException): boolean {
 function warnProcessEnumerationSkipped(error: ExecFileException): void {
   const reason =
     error.code == null ? error.message : `code ${String(error.code)}`;
+
   console.warn(
     `Warning: skipped standalone QA process enumeration (${reason}); orphaned QA processes may remain.`,
   );
@@ -224,6 +235,7 @@ export function buildStandaloneShellExports(env: EnvironmentMap): string {
   const unsetThreadContext = STANDALONE_THREAD_CONTEXT_ENV.map(
     (key) => `unset ${key}`,
   );
+
   return [...unsetThreadContext, buildShellExports(env)].join("\n");
 }
 
@@ -234,15 +246,19 @@ export function buildStandaloneRuntimeEnv(
     ...args.baseEnv,
     ...args.overrides,
   };
+
   for (const key of STANDALONE_THREAD_CONTEXT_ENV) {
     delete env[key];
   }
+
   const qaOpenAiApiKey = env[STANDALONE_OPENAI_API_KEY_ENV];
+
   if (typeof qaOpenAiApiKey === "string" && qaOpenAiApiKey.trim().length > 0) {
     env.OPENAI_API_KEY = qaOpenAiApiKey;
   } else {
     delete env.OPENAI_API_KEY;
   }
+
   return env;
 }
 
@@ -270,6 +286,7 @@ export function resolveStandaloneParentPid(
     args.env[STANDALONE_PARENT_PID_ENV] ?? "",
     10,
   );
+
   return Number.isInteger(configuredPid) && configuredPid > 0
     ? configuredPid
     : args.fallbackPid;
@@ -279,7 +296,7 @@ export async function createTestGitRepo(repoDir: string): Promise<string> {
   await fs.mkdir(repoDir, { recursive: true });
   await runGit(repoDir, ["init", "--initial-branch", "main"]);
   await runGit(repoDir, ["config", "user.email", "standalone-qa@example.com"]);
-  await runGit(repoDir, ["config", "user.name", "BB Standalone QA"]);
+  await runGit(repoDir, ["config", "user.name", "Omnyo Standalone QA"]);
   await fs.writeFile(path.join(repoDir, "alpha.txt"), "alpha\n", "utf8");
   await fs.writeFile(
     path.join(repoDir, "beta.md"),
@@ -288,6 +305,7 @@ export async function createTestGitRepo(repoDir: string): Promise<string> {
   );
   await runGit(repoDir, ["add", "."]);
   await runGit(repoDir, ["commit", "-m", "Initial commit"]);
+
   return repoDir;
 }
 
@@ -302,11 +320,13 @@ export async function createProject(
     },
     body: JSON.stringify(project),
   });
+
   if (!response.ok) {
     throw new Error(
       `Failed to create project: ${response.status} ${await response.text()}`,
     );
   }
+
   return projectResponseSchema.parse(await response.json());
 }
 
@@ -320,11 +340,13 @@ export async function createHostEnrollKey(
     },
     body: JSON.stringify({}),
   });
+
   if (!response.ok) {
     throw new Error(
       `Failed to create host enroll key: ${response.status} ${await response.text()}`,
     );
   }
+
   return hostDaemonEnrollKeyResponseSchema.parse(await response.json());
 }
 
@@ -360,22 +382,29 @@ export async function loadDotEnv(): Promise<LoadDotEnvResult> {
   for (const candidate of await resolveProjectEnvCandidates(repoRoot)) {
     try {
       const content = await fs.readFile(candidate, "utf8");
+
       for (const line of content.split("\n")) {
         const trimmed = line.trim();
+
         if (!trimmed || trimmed.startsWith("#")) {
           continue;
         }
+
         const equalsIndex = trimmed.indexOf("=");
+
         if (equalsIndex < 0) {
           continue;
         }
+
         const key = trimmed.slice(0, equalsIndex).trim();
         const value = trimmed.slice(equalsIndex + 1).trim();
+
         if (key && !(key in process.env)) {
           process.env[key] = value;
           loaded[key] = value;
         }
       }
+
       return {
         loaded,
         path: candidate,
@@ -384,6 +413,7 @@ export async function loadDotEnv(): Promise<LoadDotEnvResult> {
       if (isNodeError(error) && error.code === "ENOENT") {
         continue;
       }
+
       throw error;
     }
   }
@@ -400,16 +430,21 @@ export async function reservePort(): Promise<number> {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
+
       if (!address || typeof address === "string") {
         reject(new Error("Failed to reserve port"));
+
         return;
       }
+
       const port = address.port;
       server.close((error) => {
         if (error) {
           reject(error);
+
           return;
         }
+
         resolve(port);
       });
     });
@@ -428,6 +463,7 @@ export function spawnLoggedProcess(
   options: SpawnLoggedProcessOptions,
 ): ChildProcess {
   const logFd = openSync(options.logPath, "a");
+
   try {
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
@@ -435,7 +471,9 @@ export function spawnLoggedProcess(
       env: options.env,
       stdio: ["ignore", logFd, logFd],
     });
+
     child.unref();
+
     return child;
   } finally {
     closeSync(logFd);
@@ -445,11 +483,13 @@ export function spawnLoggedProcess(
 async function readLogExcerpt(logPath: string): Promise<string | null> {
   try {
     const content = await fs.readFile(logPath, "utf8");
+
     return content.slice(-4_000);
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
       return null;
     }
+
     throw error;
   }
 }
@@ -459,13 +499,18 @@ export async function startQaServer(
 ): Promise<StartQaServerResult> {
   const serverUrl = buildLocalServerUrl(args.port);
 
+  const inheritedEnv = args.env ?? process.env;
+
   const serverEnv: NodeJS.ProcessEnv = {
-    ...(args.env ?? process.env),
-    BB_DATA_DIR: args.dataDir,
-    BB_SERVER_PORT: String(args.port),
+    ...inheritedEnv,
+    OMNYO_DATA_DIR: args.dataDir,
+    OMNYO_SERVER_PORT: String(args.port),
+    OMNYO_VAULT_KEY_STORE:
+      inheritedEnv.OMNYO_VAULT_KEY_STORE?.trim() || "key-file",
   };
-  delete serverEnv.BB_APP_URL;
-  delete serverEnv.BB_EXTERNAL_URL;
+
+  delete serverEnv.OMNYO_APP_URL;
+  delete serverEnv.OMNYO_EXTERNAL_URL;
 
   const serverProcess = spawnLoggedProcess({
     command: process.execPath,
@@ -498,17 +543,20 @@ async function readJsonIfExists(
 ): Promise<StandaloneState | null> {
   try {
     const raw = await fs.readFile(filePath, "utf8");
+
     return parseStandaloneState(raw);
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
       return null;
     }
+
     throw error;
   }
 }
 
 async function listStandaloneTmpRoots(): Promise<string[]> {
   const entries = await fs.readdir(tmpdir(), { withFileTypes: true });
+
   return entries
     .filter(
       (entry) =>
@@ -528,22 +576,27 @@ function readStandaloneEnvValue(
   envName: string,
 ): string | null {
   const match = new RegExp(`${envName}=([^\\s]+)`, "u").exec(command);
+
   return match?.[1] ?? null;
 }
 
 async function listStandaloneProcesses(): Promise<StandaloneProcessInfo[]> {
   let stdout: string;
+
   try {
     const result = await execFile("ps", ["eww", "-Ao", "pid=,command="], {
       encoding: "utf8",
       maxBuffer: PROCESS_SCAN_MAX_BUFFER,
     });
+
     stdout = result.stdout;
   } catch (error) {
     if (isNodeError(error) && isRestrictedProcessScanError(error)) {
       warnProcessEnumerationSkipped(error);
+
       return [];
     }
+
     throw error;
   }
 
@@ -553,9 +606,11 @@ async function listStandaloneProcesses(): Promise<StandaloneProcessInfo[]> {
     .filter(Boolean)
     .flatMap((line): Array<{ command: string; pid: number }> => {
       const match = /^(\d+)\s+(.*)$/u.exec(line);
+
       if (!match) {
         return [];
       }
+
       return [
         {
           command: match[2],
@@ -569,6 +624,7 @@ async function listStandaloneProcesses(): Promise<StandaloneProcessInfo[]> {
         readStandaloneEnvValue(entry.command, STANDALONE_PARENT_PID_ENV) ?? "",
         10,
       );
+
       return {
         instanceId: readStandaloneEnvValue(
           entry.command,
@@ -584,14 +640,17 @@ async function listStandaloneProcesses(): Promise<StandaloneProcessInfo[]> {
 function getProcessSignalStatus(pid: number): ProcessSignalStatus {
   try {
     process.kill(pid, 0);
+
     return "running";
   } catch (error) {
     if (isNodeError(error) && error.code === "ESRCH") {
       return "missing";
     }
+
     if (isNodeError(error) && error.code === "EPERM") {
       return "permission-denied";
     }
+
     throw error;
   }
 }
@@ -600,12 +659,15 @@ function shouldCleanupStandaloneParent(
   args: ShouldCleanupStandaloneParentArgs,
 ): boolean {
   const status = getProcessSignalStatus(args.parentPid);
+
   if (status === "missing") {
     return true;
   }
+
   if (status === "permission-denied") {
     warnStandaloneParentSkipped(args);
   }
+
   return false;
 }
 
@@ -614,6 +676,7 @@ export async function cleanupStandaloneInstance(
 ): Promise<CleanupStandaloneResult> {
   const runtime = readStandaloneStateRuntime(state);
   const killedPids = new Set<number>();
+
   const pidsToKill = new Set<number | null>([
     runtime.daemonPid,
     runtime.daemonRestartPidPath
@@ -630,6 +693,7 @@ export async function cleanupStandaloneInstance(
     if (!pid || killedPids.has(pid)) {
       continue;
     }
+
     await killProcess(pid).catch(() => undefined);
     killedPids.add(pid);
   }
@@ -654,7 +718,9 @@ export async function cleanupStandaloneOrphans(): Promise<CleanupStandaloneResul
     const state = await readJsonIfExists(
       path.join(tmpRoot, "standalone-state.json"),
     );
+
     const runtime = readStandaloneStateRuntime(state);
+
     if (
       !runtime.parentPid ||
       !shouldCleanupStandaloneParent({
@@ -664,6 +730,7 @@ export async function cleanupStandaloneOrphans(): Promise<CleanupStandaloneResul
     ) {
       continue;
     }
+
     const cleanupResult = await cleanupStandaloneInstance({
       ...state,
       paths: {
@@ -674,9 +741,11 @@ export async function cleanupStandaloneOrphans(): Promise<CleanupStandaloneResul
       killedPids: [],
       removedRoot: null,
     }));
+
     for (const pid of cleanupResult.killedPids) {
       killedPids.add(pid);
     }
+
     if (cleanupResult.removedRoot) {
       removedRoots.add(cleanupResult.removedRoot);
     }
@@ -693,6 +762,7 @@ export async function cleanupStandaloneOrphans(): Promise<CleanupStandaloneResul
     ) {
       continue;
     }
+
     await killProcess(processInfo.pid).catch(() => undefined);
     killedPids.add(processInfo.pid);
   }
@@ -709,13 +779,16 @@ export function buildDaemonRestartCommand(
   const fallbackDaemonPid = args.daemonPid
     ? shellSingleQuote(String(args.daemonPid))
     : "''";
+
   const pidPath = shellSingleQuote(args.pidPath);
+
   const resolveCurrentPidCommand = [
     `daemon_pid=${fallbackDaemonPid}`,
     `if [ -s ${pidPath} ]; then daemon_pid=$(cat ${pidPath}); fi`,
     "daemon_pid_valid=1",
     `case "$daemon_pid" in '' ) ;; *[!0-9]*) echo "Invalid daemon PID: $daemon_pid" >&2; daemon_pid_valid=0 ;; *) if ! [ "$daemon_pid" -gt 0 ]; then echo "Invalid daemon PID: $daemon_pid" >&2; daemon_pid_valid=0; fi ;; esac`,
   ].join("; ");
+
   const shutdownCommand = [
     `(kill "$daemon_pid" >/dev/null 2>&1 || true)`,
     `while kill -0 "$daemon_pid" 2>/dev/null; do sleep 1; done`,
@@ -724,29 +797,36 @@ export function buildDaemonRestartCommand(
   const envFileCommand = args.envFilePath
     ? `[ ! -f ${shellSingleQuote(args.envFilePath)} ] || . ${shellSingleQuote(args.envFilePath)}`
     : ":";
+
   const qaOpenAiApiKeyParameter = `\${${STANDALONE_OPENAI_API_KEY_ENV}-}`;
+
   const providerEnvCommand =
     `case "${qaOpenAiApiKeyParameter}" in *[![:space:]]*) ` +
     `OPENAI_API_KEY="$${STANDALONE_OPENAI_API_KEY_ENV}"; export OPENAI_API_KEY ;; ` +
     "*) unset OPENAI_API_KEY ;; esac";
+
   const daemonEnv = [
-    `BB_DATA_DIR=${shellSingleQuote(args.dataDir)}`,
-    `BB_HOST_DAEMON_PORT=${shellSingleQuote(String(args.daemonPort))}`,
-    `BB_SERVER_URL=${shellSingleQuote(args.serverUrl)}`,
+    `OMNYO_DATA_DIR=${shellSingleQuote(args.dataDir)}`,
+    `OMNYO_HOST_DAEMON_PORT=${shellSingleQuote(String(args.daemonPort))}`,
+    `OMNYO_SERVER_URL=${shellSingleQuote(args.serverUrl)}`,
     `${STANDALONE_INSTANCE_ENV}=${shellSingleQuote(args.instanceId)}`,
-    `BB_STANDALONE_PARENT_PID=${shellSingleQuote(String(args.parentPid))}`,
+    `OMNYO_STANDALONE_PARENT_PID=${shellSingleQuote(String(args.parentPid))}`,
   ].join(" ");
+
   const launcherEnv = [
     `${RESTART_DAEMON_ENTRYPOINT_ENV}=${shellSingleQuote(args.entrypoint)}`,
     `${RESTART_DAEMON_CWD_ENV}=${shellSingleQuote(args.cwd)}`,
     `${RESTART_DAEMON_LOG_PATH_ENV}=${shellSingleQuote(args.logPath)}`,
     `${RESTART_DAEMON_PID_PATH_ENV}=${shellSingleQuote(args.pidPath)}`,
   ].join(" ");
+
   const startScript =
     `set -a; ${envFileCommand}; set +a; ` +
     `${providerEnvCommand}; ` +
     `${daemonEnv} ${launcherEnv} node -e ${shellSingleQuote(DETACHED_DAEMON_LAUNCHER_SCRIPT)}`;
+
   const startCommand = `(${startScript}) </dev/null >> ${shellSingleQuote(args.logPath)} 2>&1`;
+
   const waitForReconnectCommand = [
     "connected=0",
     `for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do if curl -fsS ${shellSingleQuote(`${args.serverUrl}/api/v1/hosts`)} | jq -e ${shellSingleQuote(`any(.[]; .id == ${JSON.stringify(args.hostId)} and .status == "connected")`)} >/dev/null; then connected=1; break; fi`,
@@ -754,6 +834,7 @@ export function buildDaemonRestartCommand(
     "done",
     `[ "$connected" = 1 ]`,
   ].join("; ");
+
   const startAndWaitCommand = `${startCommand}; ${waitForReconnectCommand}`;
 
   return (
@@ -772,9 +853,11 @@ async function waitFor<TResult>(
 
   while (Date.now() - startedAt <= options.timeoutMs) {
     const result = await check();
+
     if (result) {
       return result;
     }
+
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
@@ -785,15 +868,19 @@ export async function waitForConnectedHost(serverUrl: string): Promise<Host> {
   return waitFor(
     async () => {
       let response;
+
       try {
         response = await fetch(`${serverUrl}/api/v1/hosts`);
       } catch {
         return null;
       }
+
       if (!response.ok) {
         return null;
       }
+
       const hosts = connectedHostListSchema.parse(await response.json());
+
       return hosts.find((host) => host.status === "connected") ?? null;
     },
     {
@@ -808,6 +895,7 @@ async function waitForServerReady(serverUrl: string): Promise<boolean> {
     async () => {
       try {
         const response = await fetch(`${serverUrl}/api/v1/system/config`);
+
         return response.ok ? true : null;
       } catch {
         return null;

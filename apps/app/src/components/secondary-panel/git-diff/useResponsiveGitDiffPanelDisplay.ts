@@ -1,4 +1,4 @@
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { useCallback, useState } from "react";
 import { useGitDiffDisplayModePreference } from "@/lib/git-diff-view-preferences";
 import type {
@@ -27,9 +27,11 @@ export function resolveGitDiffDisplayMode({
   if (isCompactViewport) {
     return compactDisplayMode ?? COMPACT_GIT_DIFF_DISPLAY_MODE;
   }
+
   if (displayModePreference !== null) {
     return displayModePreference;
   }
+
   return isWideEnoughForSplit === true ? "split" : "unified";
 }
 
@@ -41,10 +43,13 @@ export function useResponsiveGitDiffPanelDisplay({
   isSecondaryPanelOpen,
 }: UseResponsiveGitDiffPanelDisplayArgs) {
   const isCompactViewport = useIsCompactViewport();
+
   const [displayModePreference, setDisplayModePreference] =
     useGitDiffDisplayModePreference();
+
   const [compactDisplayMode, setCompactDisplayMode] =
     useState<GitDiffDisplayMode | null>(null);
+
   const [isWideEnoughForSplit, setIsWideEnoughForSplit] = useState<
     boolean | null
   >(null);
@@ -69,8 +74,10 @@ export function useResponsiveGitDiffPanelDisplay({
       (nextMode) => {
         if (isCompactViewport) {
           setCompactDisplayMode(nextMode);
+
           return;
         }
+
         setDisplayModePreference(nextMode);
       },
       [isCompactViewport, setDisplayModePreference],

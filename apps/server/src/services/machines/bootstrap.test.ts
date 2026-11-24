@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MachineExecutor } from "@get-bb/plugin-sdk";
+import type { MachineExecutor } from "@omnyo/plugin-sdk";
 import type { MachineEnrollments, EnrollmentBootstrap } from "./enrollments.js";
 import { createMachineBootstrapApi } from "./bootstrap.js";
 
@@ -19,13 +19,20 @@ function harness() {
       state: "pending",
       bootstrap,
     })),
-    waitForConnection: vi.fn(async () => ({ hostId: "host_1", hostName: "Host 1" })),
+    waitForConnection: vi.fn(async () => ({
+      hostId: "host_1",
+      hostName: "Host 1",
+    })),
   };
+
   const api = createMachineBootstrapApi(enrollments);
+
   const exec = vi.fn<MachineExecutor["exec"]>(async () => ({
     exitCode: 0,
   }));
+
   const report = { step: vi.fn(), log: vi.fn() };
+
   return { api, enrollments, exec, report };
 }
 
@@ -35,16 +42,19 @@ describe("machine bootstrap", () => {
     h.exec.mockImplementation(async (request) => {
       request.onOutput("installing\nstart");
       request.onOutput("ed\n");
+
       return {
         exitCode: 0,
       };
     });
+
     const result = await h.api.bootstrap({
       key: "key",
       executor: { exec: h.exec },
       report: h.report,
       signal: new AbortController().signal,
     });
+
     const request = vi.mocked(h.exec).mock.calls[0];
     expect(JSON.stringify(request)).toContain(bootstrap.credential);
     expect(JSON.stringify(h.report.step.mock.calls)).not.toContain(
@@ -56,6 +66,24 @@ describe("machine bootstrap", () => {
     expect(request[0].command.join(" ")).not.toContain(bootstrap.credential);
   });
 
+  it("never follows a redirect while it carries the enrollment headers", async () => {
+    const h = harness();
+
+    await h.api.bootstrap({
+      key: "key",
+      executor: { exec: h.exec },
+      report: h.report,
+      signal: new AbortController().signal,
+    });
+
+    const command = vi.mocked(h.exec).mock.calls[0]?.[0].command ?? [];
+    const script = command.join(" ");
+
+    expect(script).toContain("curl --config -");
+    expect(script).toContain("--max-redirs 0");
+    expect(script).not.toMatch(/--location|\s-[a-zA-Z]*L\b/u);
+  });
+
   it("includes the last 20 streamed lines when the command exits non-zero", async () => {
     const h = harness();
     h.exec.mockImplementation(async (request) => {
@@ -64,8 +92,10 @@ describe("machine bootstrap", () => {
           "\n",
         ) + "\n",
       );
+
       return { exitCode: 9 };
     });
+
     const error = await h.api
       .bootstrap({
         key: "key",
@@ -74,6 +104,7 @@ describe("machine bootstrap", () => {
         signal: new AbortController().signal,
       })
       .catch((caught) => caught);
+
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toContain("line 6\nline 7");
     expect(error.message).toContain("line 25");
@@ -143,12 +174,14 @@ it("cancels pending preparation without executing or waiting for enrollment", as
         });
       }),
   );
+
   const pending = h.api.bootstrap({
     key: "pending",
     executor: { exec: h.exec },
     report: h.report,
     signal: controller.signal,
   });
+
   controller.abort(new Error("cancelled"));
   await expect(pending).rejects.toThrow("cancelled");
   expect(h.exec).not.toHaveBeenCalled();

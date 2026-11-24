@@ -6,7 +6,6 @@ export const LazyPluginsView = defineSplit<{ detailKey?: string }>({
   id: "plugins-view",
   load: () => import("./ToolsView").then((module) => module.PluginsView),
   loading: () => <RouteLoadingSkeleton isBoundedPane={false} />,
-  tier: "intent",
 });
 
 export const LazyPluginDetailPaneView = defineSplit<{ pluginId: string }>({
@@ -14,5 +13,4 @@ export const LazyPluginDetailPaneView = defineSplit<{ pluginId: string }>({
   load: () =>
     import("./ToolsView").then((module) => module.PluginDetailPaneView),
   loading: SecondaryPanelContentSkeleton,
-  tier: "intent",
 });

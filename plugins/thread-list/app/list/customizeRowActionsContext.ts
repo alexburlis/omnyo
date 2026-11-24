@@ -22,5 +22,6 @@ export function useThreadRowActionsCustomizing(
   threadId: string,
 ): ((restoreFocus: boolean) => void) | null {
   const customizing = useContext(ThreadRowActionsCustomizingContext);
+
   return customizing?.threadId === threadId ? customizing.onDone : null;
 }

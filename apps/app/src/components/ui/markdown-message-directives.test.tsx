@@ -12,8 +12,8 @@ import {
   vi,
   type Mock,
 } from "vitest";
-import type { PluginMessageDirectiveProps } from "@get-bb/plugin-sdk";
-import { useBbNavigate } from "@/lib/plugin-sdk-hooks";
+import type { PluginMessageDirectiveProps } from "@omnyo/plugin-sdk";
+import { experimental_useAppNavigate } from "@/lib/plugin-sdk-hooks";
 import { MarkdownPreview } from "./markdown-preview";
 import {
   buildMessageDirectiveRegistry,
@@ -65,6 +65,7 @@ function WorkspaceFileVis(props: PluginMessageDirectiveProps) {
   if (props.openWorkspaceFile === null) {
     return <span>workspace opener unavailable</span>;
   }
+
   return (
     <button
       type="button"
@@ -76,7 +77,8 @@ function WorkspaceFileVis(props: PluginMessageDirectiveProps) {
 }
 
 function ThreadPanelVis(_props: PluginMessageDirectiveProps) {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   return (
     <button
       type="button"
@@ -127,6 +129,7 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     render(
       <MarkdownPreview
         content={'Intro\n\n::inline-vis{file="demo.html"}\n\nOutro'}
@@ -155,6 +158,7 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     render(
       <MarkdownPreview
         content={[
@@ -181,6 +185,7 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     render(
       <MarkdownPreview
         content={[
@@ -201,10 +206,39 @@ describe("MarkdownPreview message directives", () => {
     expect(screen.getByText('::inline-vis{file="still-streaming')).toBeTruthy();
   });
 
+  it("mounts directives whose values contain quotes agents wrote unescaped or backslash-escaped", () => {
+    const registry = buildMessageDirectiveRegistry([
+      slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
+    ]);
+
+    render(
+      <MarkdownPreview
+        content={[
+          "Results:",
+          '::inline-vis{file="\\"Commander can\'t\\"|"Opened" after 1.5 s"}',
+          "",
+          '::not-registered{a="say \\"hi\\""}',
+        ].join("\n")}
+        messageDirectives={{
+          registry,
+          message: MESSAGE,
+          openWorkspaceFile: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("inline-vis").getAttribute("data-file")).toBe(
+      '"Commander can\'t"|"Opened" after 1.5 s',
+    );
+    expect(screen.getByText("Results:")).toBeTruthy();
+    expect(screen.getByText('::not-registered{a="say "hi""}')).toBeTruthy();
+  });
+
   it("mounts a leaf directive glued to trailing prose on the same line", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     render(
       <MarkdownPreview
         content={'::inline-vis{file="demo.html"}Next I will load the thread.'}
@@ -228,6 +262,7 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     const { container } = render(
       <MarkdownPreview
         content={'::inline-vis{file="demo.html"} Next **bold** tail'}
@@ -245,10 +280,81 @@ describe("MarkdownPreview message directives", () => {
     expect(container.textContent).toContain("tail");
   });
 
+  it("mounts a directive after prose and preserves surrounding formatting", () => {
+    const registry = buildMessageDirectiveRegistry([
+      slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
+    ]);
+
+    const { container } = render(
+      <MarkdownPreview
+        content={
+          'Omnyo didnt **format this** [docs](https://example.com) ::inline-vis{file="demo.html"} Next **bold** tail'
+        }
+        messageDirectives={{
+          registry,
+          message: MESSAGE,
+          openWorkspaceFile: null,
+        }}
+      />,
+    );
+
+    const mount = screen.getByTestId("inline-vis");
+    expect(mount.getAttribute("data-file")).toBe("demo.html");
+    expect(mount.getAttribute("data-source")).toBe(
+      '::inline-vis{file="demo.html"}',
+    );
+    expect(screen.getByText("format this").tagName).toBe("STRONG");
+    expect(screen.getByText("bold").tagName).toBe("STRONG");
+    expect(
+      screen.getByRole("link", { name: "docs" }).getAttribute("href"),
+    ).toBe("https://example.com");
+    expect(
+      Array.from(container.querySelectorAll("p")).map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["Omnyo didnt format this docs ", " Next bold tail"]);
+    expect(mount.closest("p")).toBeNull();
+    expect(container.textContent?.replaceAll("\n", "")).toBe(
+      "Omnyo didnt format this docs vis:demo.html Next bold tail",
+    );
+  });
+
+  it("mounts multiple directives in one paragraph in source order", () => {
+    const registry = buildMessageDirectiveRegistry([
+      slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
+    ]);
+
+    const { container } = render(
+      <MarkdownPreview
+        content={
+          'Prefix::inline-vis{file="first.html"} middle *text* ::inline-vis{file="second.html"} suffix'
+        }
+        messageDirectives={{
+          registry,
+          message: MESSAGE,
+          openWorkspaceFile: null,
+        }}
+      />,
+    );
+
+    expect(
+      screen
+        .getAllByTestId("inline-vis")
+        .map((node) => node.getAttribute("data-file")),
+    ).toEqual(["first.html", "second.html"]);
+    expect(
+      Array.from(container.querySelectorAll("p")).map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["Prefix", " middle text ", " suffix"]);
+    expect(screen.getByText("text").tagName).toBe("EM");
+  });
+
   it("leaves glued unknown and incomplete directives literal", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     render(
       <MarkdownPreview
         content={[
@@ -275,7 +381,11 @@ describe("MarkdownPreview message directives", () => {
     String.raw`\::inline-vis{file="demo.html"}Next`,
     '&#58;:inline-vis{file="demo.html"}Next',
     String.raw`::inline-vis\{file="demo.html"\}Next`,
-    'Prefix ::inline-vis{file="demo.html"}Next',
+    ':::inline-vis{file="demo.html"}Next',
+    'Prefix :::inline-vis{file="demo.html"}Next',
+    'Prefix :inline-vis{file="demo.html"}Next',
+    '*::inline-vis{file="demo.html"}*',
+    '[::inline-vis{file="demo.html"}](https://example.com)',
     '::inline-vis{file="demo.html"\n}Next',
     '`::inline-vis{file="demo.html"}Next`',
     '```text\n::inline-vis{file="demo.html"}Next\n```',
@@ -283,6 +393,7 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     render(
       <MarkdownPreview
         content={content}
@@ -306,6 +417,7 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     const source = `::inline-vis[label]{${body}}`;
     render(
       <MarkdownPreview
@@ -333,6 +445,7 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     render(
       <MarkdownPreview
         content={content}
@@ -354,8 +467,10 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     const sentence =
       "Watchdog runs every 30 min UTC, next run 13:30. It checks a:b and :D too.";
+
     const { container } = render(
       <MarkdownPreview
         content={sentence}
@@ -378,7 +493,9 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     const sentence = "Meeting at 9:30 and 10:45 today.";
+
     const { container } = render(
       <MarkdownPreview
         content={sentence}
@@ -400,6 +517,7 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     render(
       <MarkdownPreview
         content={
@@ -423,6 +541,7 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: CrashVis }),
     ]);
+
     render(
       <MarkdownPreview
         content={'::inline-vis{file="boom.html"}'}
@@ -449,6 +568,7 @@ describe("MarkdownPreview message directives", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
     ]);
+
     render(
       <MarkdownPreview
         content={'::inline-vis{file="demo.html"}'}
@@ -472,19 +592,22 @@ describe("MarkdownPreview message directives", () => {
     );
   });
 
-  it.each([false, true])(
-    "caps mounts in source order with glued first: %s",
-    (gluedFirst) => {
+  it.each(["leaf", "glued", "prefixed"])(
+    "caps mounts in source order with %s directives",
+    (syntax) => {
       const lines: string[] = [];
+
       for (let i = 0; i < MESSAGE_DIRECTIVE_MOUNT_LIMIT + 2; i += 1) {
         lines.push(
-          `::inline-vis{file="f${i}.html"}${gluedFirst && i === 0 ? "Next" : ""}`,
+          `${syntax === "prefixed" ? "Prefix " : ""}::inline-vis{file="f${i}.html"}${syntax === "glued" && i === 0 ? "Next" : ""}`,
         );
       }
+
       const registry = buildMessageDirectiveRegistry([
         slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
       ]);
-      render(
+
+      const { container } = render(
         <MarkdownPreview
           content={lines.join("\n")}
           messageDirectives={{
@@ -494,37 +617,50 @@ describe("MarkdownPreview message directives", () => {
           }}
         />,
       );
+
       expect(screen.getAllByTestId("inline-vis")).toHaveLength(
         MESSAGE_DIRECTIVE_MOUNT_LIMIT,
       );
       expect(
-        screen.getAllByTestId("inline-vis")[0]?.getAttribute("data-file"),
-      ).toBe("f0.html");
-      expect(
-        screen.getByText(
-          `::inline-vis{file="f${MESSAGE_DIRECTIVE_MOUNT_LIMIT}.html"}`,
+        screen
+          .getAllByTestId("inline-vis")
+          .map((node) => node.getAttribute("data-file")),
+      ).toEqual(
+        Array.from(
+          { length: MESSAGE_DIRECTIVE_MOUNT_LIMIT },
+          (_, index) => `f${index}.html`,
         ),
-      ).toBeTruthy();
+      );
+      expect(container.textContent).toContain(
+        `::inline-vis{file="f${MESSAGE_DIRECTIVE_MOUNT_LIMIT}.html"}`,
+      );
+      expect(container.textContent).toContain(
+        `::inline-vis{file="f${MESSAGE_DIRECTIVE_MOUNT_LIMIT + 1}.html"}`,
+      );
     },
   );
 
   it("keeps a completed directive mounted while later assistant text streams", () => {
     let mountCount = 0;
+
     function StatefulVis(props: PluginMessageDirectiveProps) {
       useEffect(() => {
         mountCount += 1;
       }, []);
+
       return <div data-testid="stateful-vis">{props.attributes.file}</div>;
     }
 
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo", component: StatefulVis }),
     ]);
+
     const messageDirectives = {
       registry,
       message: MESSAGE,
       openWorkspaceFile: null,
     };
+
     const view = render(
       <MarkdownPreview
         content={'::inline-vis{file="demo.html"}'}
@@ -548,196 +684,200 @@ describe("MarkdownPreview message directives", () => {
   });
 });
 
-describe("ConversationMessageContent assistant directives", () => {
-  it("activates directives for assistant messages when registry context is set", () => {
-    const registry = buildMessageDirectiveRegistry([
-      slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
-    ]);
-    render(
-      <MemoryRouter>
-        <RouteNavigationProvider>
-          <MessageDirectiveRegistryProvider registry={registry}>
-            <ConversationMessageContent
-              role="assistant"
-              attachments={null}
-              id="msg_a"
-              threadId="thr_a"
-              turnId="turn_a"
-              showActions={false}
-              text={'::inline-vis{file="a.html"}'}
-              timestamp={0}
-              projectId="proj_a"
-            />
-          </MessageDirectiveRegistryProvider>
-        </RouteNavigationProvider>
-      </MemoryRouter>,
-    );
-    expect(screen.getByTestId("inline-vis").getAttribute("data-file")).toBe(
-      "a.html",
-    );
-    expect(
-      screen.getByTestId("inline-vis").getAttribute("data-project-id"),
-    ).toBe("proj_a");
-    expect(
-      screen
-        .getByTestId("inline-vis")
-        .getAttribute("data-can-open-workspace-file"),
-    ).toBe("false");
-  });
+describe.each(["assistant", "user"] as const)(
+  "ConversationMessageContent %s directives",
+  (role) => {
+    const roleProps =
+      role === "assistant"
+        ? { role }
+        : {
+            role,
+            initiator: "user" as const,
+            mentions: [],
+            senderThreadId: null,
+            senderThreadTitle: null,
+            senderIsPluginSideChat: false,
+            systemMessageKind: "unlabeled" as const,
+            systemMessageSubject: null,
+            turnRequest: { kind: "message", status: "accepted" } as const,
+          };
 
-  it("opens a contained directive file through the timeline sidebar handler", () => {
-    const onOpenLocalFileLink = vi.fn(() => true);
-    const registry = buildMessageDirectiveRegistry([
-      slot({
-        id: "inline-vis",
-        pluginId: "demo",
-        component: WorkspaceFileVis,
-      }),
-    ]);
-    render(
-      <MemoryRouter>
-        <RouteNavigationProvider>
-          <MessageDirectiveRegistryProvider registry={registry}>
-            <ConversationMessageContent
-              role="assistant"
-              attachments={null}
-              id="msg_a"
-              threadId="thr_a"
-              turnId="turn_a"
-              showActions={false}
-              text={'::inline-vis{file="charts/demo.html"}'}
-              timestamp={0}
-              projectId="proj_a"
-              workspaceRootPath="/workspace/project"
-              onOpenLocalFileLink={onOpenLocalFileLink}
-            />
-          </MessageDirectiveRegistryProvider>
-        </RouteNavigationProvider>
-      </MemoryRouter>,
-    );
+    it("activates directives with the exact conversation message context", () => {
+      const registry = buildMessageDirectiveRegistry([
+        slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
+      ]);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Open workspace file" }),
-    );
-    expect(onOpenLocalFileLink).toHaveBeenCalledWith({
-      lineRange: null,
-      openTargetId: null,
-      path: "/workspace/project/charts/demo.html",
-    });
-  });
-
-  it("scopes directive thread-panel actions to the registering plugin", () => {
-    const onOpenPluginPanel = vi.fn(() => true);
-    const registry = buildMessageDirectiveRegistry([
-      slot({
-        id: "inline-vis",
-        pluginId: "demo",
-        component: ThreadPanelVis,
-      }),
-    ]);
-    render(
-      <QueryClientProvider client={new QueryClient()}>
+      render(
         <MemoryRouter>
           <RouteNavigationProvider>
             <MessageDirectiveRegistryProvider registry={registry}>
               <ConversationMessageContent
-                role="assistant"
+                {...roleProps}
                 attachments={null}
                 id="msg_a"
                 threadId="thr_a"
                 turnId="turn_a"
                 showActions={false}
-                text={'::inline-vis{file="plan.md"}'}
+                text={'::inline-vis{file="a.html"}'}
                 timestamp={0}
                 projectId="proj_a"
-                onOpenPluginPanel={onOpenPluginPanel}
               />
             </MessageDirectiveRegistryProvider>
           </RouteNavigationProvider>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Open thread panel" }));
-    expect(onOpenPluginPanel).toHaveBeenCalledWith({
-      pluginId: "demo",
-      actionId: "document",
-      title: "Plan",
-      params: { path: "plan.md" },
+        </MemoryRouter>,
+      );
+      expect(screen.getByTestId("inline-vis").getAttribute("data-file")).toBe(
+        "a.html",
+      );
+      expect(
+        screen.getByTestId("inline-vis").getAttribute("data-message-id"),
+      ).toBe("msg_a");
+      expect(
+        screen.getByTestId("inline-vis").getAttribute("data-thread-id"),
+      ).toBe("thr_a");
+      expect(
+        screen.getByTestId("inline-vis").getAttribute("data-turn-id"),
+      ).toBe("turn_a");
+      expect(
+        screen.getByTestId("inline-vis").getAttribute("data-project-id"),
+      ).toBe("proj_a");
+      expect(
+        screen
+          .getByTestId("inline-vis")
+          .getAttribute("data-can-open-workspace-file"),
+      ).toBe("false");
     });
-  });
 
-  it("rejects directive workspace paths that escape the worktree", () => {
-    const onOpenLocalFileLink = vi.fn(() => true);
-    const registry = buildMessageDirectiveRegistry([
-      slot({
-        id: "inline-vis",
+    it("opens a contained directive file through the timeline sidebar handler", () => {
+      const onOpenLocalFileLink = vi.fn(() => true);
+
+      const registry = buildMessageDirectiveRegistry([
+        slot({
+          id: "inline-vis",
+          pluginId: "demo",
+          component: WorkspaceFileVis,
+        }),
+      ]);
+
+      render(
+        <MemoryRouter>
+          <RouteNavigationProvider>
+            <MessageDirectiveRegistryProvider registry={registry}>
+              <ConversationMessageContent
+                {...roleProps}
+                attachments={null}
+                id="msg_a"
+                threadId="thr_a"
+                turnId="turn_a"
+                showActions={false}
+                text={'::inline-vis{file="charts/demo.html"}'}
+                timestamp={0}
+                projectId="proj_a"
+                workspaceRootPath="/workspace/project"
+                onOpenLocalFileLink={onOpenLocalFileLink}
+              />
+            </MessageDirectiveRegistryProvider>
+          </RouteNavigationProvider>
+        </MemoryRouter>,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open workspace file" }),
+      );
+      expect(onOpenLocalFileLink).toHaveBeenCalledWith({
+        lineRange: null,
+        openTargetId: null,
+        path: "/workspace/project/charts/demo.html",
+      });
+    });
+
+    it("scopes directive thread-panel actions to the registering plugin", () => {
+      const onOpenPluginPanel = vi.fn(() => true);
+
+      const registry = buildMessageDirectiveRegistry([
+        slot({
+          id: "inline-vis",
+          pluginId: "demo",
+          component: ThreadPanelVis,
+        }),
+      ]);
+
+      render(
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>
+            <RouteNavigationProvider>
+              <MessageDirectiveRegistryProvider registry={registry}>
+                <ConversationMessageContent
+                  {...roleProps}
+                  attachments={null}
+                  id="msg_a"
+                  threadId="thr_a"
+                  turnId="turn_a"
+                  showActions={false}
+                  text={'::inline-vis{file="plan.md"}'}
+                  timestamp={0}
+                  projectId="proj_a"
+                  onOpenPluginPanel={onOpenPluginPanel}
+                />
+              </MessageDirectiveRegistryProvider>
+            </RouteNavigationProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open thread panel" }),
+      );
+      expect(onOpenPluginPanel).toHaveBeenCalledWith({
         pluginId: "demo",
-        component: WorkspaceFileVis,
-      }),
-    ]);
-    render(
-      <MemoryRouter>
-        <RouteNavigationProvider>
-          <MessageDirectiveRegistryProvider registry={registry}>
-            <ConversationMessageContent
-              role="assistant"
-              attachments={null}
-              id="msg_a"
-              threadId="thr_a"
-              turnId="turn_a"
-              showActions={false}
-              text={'::inline-vis{file="../secret.html"}'}
-              timestamp={0}
-              workspaceRootPath="/workspace/project"
-              onOpenLocalFileLink={onOpenLocalFileLink}
-            />
-          </MessageDirectiveRegistryProvider>
-        </RouteNavigationProvider>
-      </MemoryRouter>,
-    );
+        actionId: "document",
+        title: "Plan",
+        params: { path: "plan.md" },
+      });
+    });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Open workspace file" }),
-    );
-    expect(onOpenLocalFileLink).not.toHaveBeenCalled();
-  });
+    it("rejects directive workspace paths that escape the worktree", () => {
+      const onOpenLocalFileLink = vi.fn(() => true);
 
-  it("does not activate directives on user messages even with registry context", () => {
-    const registry = buildMessageDirectiveRegistry([
-      slot({ id: "inline-vis", pluginId: "demo", component: InlineVis }),
-    ]);
-    render(
-      <MemoryRouter>
-        <RouteNavigationProvider>
-          <MessageDirectiveRegistryProvider registry={registry}>
-            <ConversationMessageContent
-              role="user"
-              attachments={null}
-              originKind={null}
-              initiator="user"
-              mentions={[]}
-              senderThreadId={null}
-              senderThreadTitle={null}
-              senderIsPluginSideChat={false}
-              systemMessageKind="unlabeled"
-              systemMessageSubject={null}
-              text={'::inline-vis{file="user.html"}'}
-              timestamp={0}
-              turnRequest={{ kind: "message", status: "accepted" }}
-              projectId="proj_a"
-            />
-          </MessageDirectiveRegistryProvider>
-        </RouteNavigationProvider>
-      </MemoryRouter>,
-    );
-    expect(screen.queryByTestId("inline-vis")).toBeNull();
-    expect(screen.getByText(/::inline-vis/)).toBeTruthy();
-  });
-});
+      const registry = buildMessageDirectiveRegistry([
+        slot({
+          id: "inline-vis",
+          pluginId: "demo",
+          component: WorkspaceFileVis,
+        }),
+      ]);
+
+      render(
+        <MemoryRouter>
+          <RouteNavigationProvider>
+            <MessageDirectiveRegistryProvider registry={registry}>
+              <ConversationMessageContent
+                {...roleProps}
+                attachments={null}
+                id="msg_a"
+                threadId="thr_a"
+                turnId="turn_a"
+                showActions={false}
+                text={'::inline-vis{file="../secret.html"}'}
+                timestamp={0}
+                workspaceRootPath="/workspace/project"
+                onOpenLocalFileLink={onOpenLocalFileLink}
+              />
+            </MessageDirectiveRegistryProvider>
+          </RouteNavigationProvider>
+        </MemoryRouter>,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open workspace file" }),
+      );
+      expect(onOpenLocalFileLink).not.toHaveBeenCalled();
+    });
+  },
+);
 
 describe("ThreadTimelineRows message directive subscription", () => {
-  it("mounts directives in assistant and delegation output from the slot store", () => {
+  it("mounts user, assistant, and delegation directives from the slot store", () => {
     setPluginSlotRegistrations(
       "demo",
       emptyRegistrationSet({
@@ -753,6 +893,13 @@ describe("ThreadTimelineRows message directive subscription", () => {
             threadId="thr_main"
             projectId="proj_main"
             timelineRows={[
+              conversationRow({
+                id: "user_1",
+                role: "user",
+                text: 'Prefix ::inline-vis{file="user.html"}',
+                threadId: "thr_main",
+                turnId: "turn_user",
+              }),
               conversationRow({
                 id: "asst_1",
                 role: "assistant",
@@ -778,10 +925,18 @@ describe("ThreadTimelineRows message directive subscription", () => {
     );
 
     const mounts = screen.getAllByTestId("inline-vis");
-    expect(mounts).toHaveLength(2);
+    expect(mounts).toHaveLength(3);
     const files = mounts.map((node) => node.getAttribute("data-file")).sort();
-    expect(files).toEqual(["nested.html", "top.html"]);
-    expect(mounts[0]?.getAttribute("data-project-id")).toBe("proj_main");
+    expect(files).toEqual(["nested.html", "top.html", "user.html"]);
+
+    const userMount = mounts.find(
+      (node) => node.getAttribute("data-file") === "user.html",
+    );
+
+    expect(userMount?.getAttribute("data-message-id")).toBe("user_1");
+    expect(userMount?.getAttribute("data-thread-id")).toBe("thr_main");
+    expect(userMount?.getAttribute("data-turn-id")).toBe("turn_user");
+    expect(userMount?.getAttribute("data-project-id")).toBe("proj_main");
   });
 
   it.each(["", "Next"])(

@@ -1,4 +1,4 @@
-import type { PluginNavPanelProps } from "@get-bb/plugin-sdk/app";
+import type { PluginNavPanelProps } from "@omnyo/plugin-sdk/app";
 import {
   useActiveTasks,
   useFolders,

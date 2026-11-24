@@ -6,6 +6,7 @@ describe("ICON_MAP", () => {
     for (const [name, glyph] of Object.entries(ICON_MAP)) {
       expect(Array.isArray(glyph), name).toBe(true);
       expect(glyph.length, name).toBeGreaterThan(0);
+
       for (const [tag, attrs] of glyph) {
         expect(typeof tag).toBe("string");
         expect(typeof attrs).toBe("object");

@@ -1,7 +1,7 @@
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
 import type { AgentRuntimeExecutionOptions } from "./types.js";
 import type { ProviderExecutionContext } from "./provider-adapter.js";
-import type { RuntimePermissionPolicy } from "@bb/domain";
+import type { RuntimePermissionPolicy } from "@omnyo/domain";
 
 interface AssertProviderSupportsExecutionOptionsArgs {
   adapter: BridgeProtocolAdapter;
@@ -43,6 +43,7 @@ export function toProviderExecutionContext(
   args: ToProviderExecutionContextArgs,
 ): ProviderExecutionContext {
   const permissionPolicy: RuntimePermissionPolicy = args.execOpts;
+
   return {
     model: args.execOpts.model,
     serviceTier: args.execOpts.serviceTier,

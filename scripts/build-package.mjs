@@ -4,7 +4,9 @@ import path from "node:path";
 import { buildNodeEsmEntry } from "./build-utils.mjs";
 
 const packageRoot = process.cwd();
+
 const packageJsonPath = path.join(packageRoot, "package.json");
+
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
 
 function sourceFromDistJs(distPath) {
@@ -15,6 +17,7 @@ function sourceFromDistJs(distPath) {
   const sourcePath = distPath
     .replace(/^\.\/dist\//u, "./src/")
     .replace(/\.js$/u, ".ts");
+
   return sourcePath === distPath ? undefined : sourcePath;
 }
 
@@ -47,11 +50,13 @@ function collectExportEntries() {
 function collectBinEntries() {
   return Object.entries(packageJson.bin ?? {}).flatMap(([, binPath]) => {
     const sourcePath = sourceFromDistJs(binPath);
+
     if (!sourcePath) {
       return [];
     }
 
     const entryPoint = path.resolve(packageRoot, sourcePath);
+
     if (!existsSync(entryPoint)) {
       return [];
     }
@@ -68,9 +73,11 @@ function collectBinEntries() {
 
 function dedupeEntries(entries) {
   const byOutfile = new Map();
+
   for (const entry of entries) {
     byOutfile.set(entry.outfile, entry);
   }
+
   return [...byOutfile.values()];
 }
 

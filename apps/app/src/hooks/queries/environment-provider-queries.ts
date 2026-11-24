@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type {
   SystemEnvironmentProvider,
   SystemEnvironmentProvidersQuery,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { sdk } from "@/lib/sdk";
 import {
   environmentProviderListCacheKey,
@@ -33,6 +33,7 @@ export function systemEnvironmentProvidersQueryKey(
       string | null,
     ] {
   if (query === undefined) return [SYSTEM_ENVIRONMENT_PROVIDERS_QUERY_KEY];
+
   return [
     SYSTEM_ENVIRONMENT_PROVIDERS_QUERY_KEY,
     query.projectId ?? null,
@@ -49,11 +50,13 @@ function environmentProvidersQueryOptions(
     projectId: query.projectId ?? null,
     hostId: query.hostId ?? null,
   });
+
   return {
     queryKey: systemEnvironmentProvidersQueryKey(query),
     queryFn: async () => {
       const providers = await sdk.environments.listProviders(query);
       writeCachedEnvironmentProviderList(cacheKey, providers);
+
       return providers;
     },
     placeholderData: () =>
@@ -68,6 +71,7 @@ export function useSystemEnvironmentProviders(
   providers: readonly SystemEnvironmentProvider[] | undefined;
 } {
   const result = useQuery(environmentProvidersQueryOptions(query));
+
   return {
     providers: result.isError ? NO_ENVIRONMENT_PROVIDERS : result.data,
   };

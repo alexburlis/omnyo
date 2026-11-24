@@ -21,6 +21,7 @@ const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   yml: "yaml",
   toml: "ini",
   ini: "ini",
+  properties: "ini",
   cfg: "ini",
   conf: "ini",
   env: "shell",
@@ -95,7 +96,7 @@ const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   log: "plaintext",
 };
 
-const PREVIEW_RENDERED_EXTENSIONS = new Set(["md", "markdown"]);
+const PREVIEW_RENDERED_EXTENSIONS = new Set(["md", "markdown", "html", "htm"]);
 
 export const CLAIMED_EXTENSIONS: readonly string[] = Object.keys(
   LANGUAGE_BY_EXTENSION,
@@ -104,7 +105,9 @@ export const CLAIMED_EXTENSIONS: readonly string[] = Object.keys(
 export function languageForPath(path: string): string {
   const name = path.split("/").at(-1) ?? path;
   const dotIndex = name.lastIndexOf(".");
+
   if (dotIndex <= 0 || dotIndex === name.length - 1) return "plaintext";
   const extension = name.slice(dotIndex + 1).toLowerCase();
+
   return LANGUAGE_BY_EXTENSION[extension] ?? "plaintext";
 }

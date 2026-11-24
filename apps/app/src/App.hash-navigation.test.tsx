@@ -52,6 +52,7 @@ describe("HashNavigationScroll", () => {
 
   it("waits for lazy plugin surfaces to mount", async () => {
     const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+
     const view = render(
       <MemoryRouter initialEntries={["/#plugin-workflows-active-runs"]}>
         <HashNavigationScroll />
@@ -78,6 +79,7 @@ describe("HashNavigationScroll", () => {
   it("stops observing when a destination does not mount by the deadline", async () => {
     vi.useFakeTimers();
     const getElementById = vi.spyOn(document, "getElementById");
+
     const view = render(
       <MemoryRouter initialEntries={["/#destination-that-never-mounts"]}>
         <HashNavigationScroll />

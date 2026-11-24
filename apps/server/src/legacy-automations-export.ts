@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import type { DbConnection } from "@bb/db";
-import { resolveContainedPath } from "@bb/process-utils";
+import type { DbConnection } from "@omnyo/db";
+import { resolveContainedPath } from "@omnyo/process-utils";
 
 interface LegacyAutomationsExportLogger {
   error(fields: { err: unknown }, message: string): void;
@@ -82,6 +82,7 @@ function tableExists(db: DbConnection, tableName: string): boolean {
        WHERE type = 'table' AND name = ?`,
     )
     .get(tableName) as SqliteCountRow | undefined;
+
   return (row?.count ?? 0) > 0;
 }
 
@@ -89,6 +90,7 @@ function tableRowCount(db: DbConnection, tableName: string): number {
   const row = db.$client
     .prepare(`SELECT COUNT(*) AS count FROM ${tableName}`)
     .get() as SqliteCountRow | undefined;
+
   return row?.count ?? 0;
 }
 
@@ -101,6 +103,7 @@ function containedPath(rootPath: string, pathFromRoot: string): string {
     rootPath,
     candidatePath: resolve(rootPath, pathFromRoot),
   });
+
   if (candidate !== null) return candidate;
   throw new Error(
     `Legacy automation script path escapes its directory: ${pathFromRoot}`,
@@ -113,14 +116,18 @@ function readLegacyAutomationScripts(args: {
   logger: LegacyAutomationsExportLogger;
 }): LegacyAutomationExportFile["scripts"] {
   const scripts: LegacyAutomationExportFile["scripts"] = {};
+
   for (const automation of args.automations) {
     const execution = executionSchema.parse(JSON.parse(automation.execution));
+
     if (execution.mode !== "script" || execution.scriptFile === undefined) {
       continue;
     }
+
     const scriptDir = join(args.dataDir, "automation-scripts", automation.id);
     const scriptPath = containedPath(scriptDir, execution.scriptFile);
     let content: string;
+
     try {
       content = readFileSync(scriptPath, "utf8");
     } catch (err) {
@@ -131,11 +138,13 @@ function readLegacyAutomationScripts(args: {
       );
       continue;
     }
+
     scripts[automation.id] = {
       fileName: execution.scriptFile,
       content,
     };
   }
+
   return scripts;
 }
 
@@ -216,6 +225,7 @@ function listLegacyRuns(db: DbConnection): LegacyAutomationExportFile["runs"] {
   if (!tableExists(db, "automation_runs")) {
     return [];
   }
+
   return z.array(runRowSchema).parse(
     db.$client
       .prepare(
@@ -247,17 +257,20 @@ export function exportLegacyAutomationsForPluginImport(args: {
   logger: LegacyAutomationsExportLogger;
 }): void {
   const importPath = legacyImportPath(args.dataDir);
+
   if (existsSync(importPath) || !tableExists(args.db, "automations")) {
     return;
   }
 
   const automationCount = tableRowCount(args.db, "automations");
+
   if (automationCount === 0) {
     return;
   }
 
   try {
     const automations = listLegacyAutomations(args.db);
+
     const payload = legacyAutomationExportFileSchema.parse({
       automations,
       runs: listLegacyRuns(args.db),

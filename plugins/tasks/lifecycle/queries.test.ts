@@ -1,7 +1,7 @@
 import {
   createFakePluginHost,
   makeThreadResponse,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { createStore } from "../api";
@@ -27,16 +27,22 @@ function recordStatements(
       const run = statement.run.bind(statement);
       statement.all = (...params: unknown[]) => {
         executed.push({ sql });
+
         return all(...params);
       };
+
       statement.get = (...params: unknown[]) => {
         executed.push({ sql });
+
         return get(...params);
       };
+
       statement.run = (...params: unknown[]) => {
         executed.push({ sql });
+
         return run(...params);
       };
+
       return statement;
     },
   });
@@ -44,6 +50,7 @@ function recordStatements(
 
 function fixture(taskCount: number, mappingCount: number) {
   const queries: ExecutedStatement[] = [];
+
   const host = createFakePluginHost({
     pluginId: "tasks",
     sdk: {
@@ -53,19 +60,23 @@ function fixture(taskCount: number, mappingCount: number) {
       },
     },
   });
-  const bb = host.bb;
-  const db = bb.storage.database();
+
+  const api = host.api;
+  const db = api.storage.database();
   db.pragma("synchronous = OFF");
   recordStatements(db, queries);
-  const store = createStore(bb);
+  const store = createStore(api);
+
   const project = store.tasks.createProject({
     name: "Query counts",
     prefix: "QUERY",
     color: "blue",
   });
+
   const tasks = Array.from({ length: taskCount }, (_, index) =>
     store.tasks.createTask({ projectId: project.id, title: `Task ${index}` }),
   );
+
   const mappings = tasks.slice(0, mappingCount).map((task, index) =>
     store.tasks.upsertTaskThread({
       taskId: task.id,
@@ -75,9 +86,10 @@ function fixture(taskCount: number, mappingCount: number) {
       liveStatus: "working",
     }),
   );
+
   return {
     ...host,
-    bb,
+    api,
     db,
     store,
     tasks,
@@ -113,8 +125,9 @@ describe("lifecycle SQL scope", () => {
     "uses one lookup per unrelated event with %i tasks and %i mappings",
     async (tasks, mappings) => {
       const f = fixture(tasks, mappings);
+
       try {
-        await registerLifecycle(f.bb, f.store);
+        await registerLifecycle(f.api, f.store);
         f.queries.length = 0;
         await emitAllEvents(f, "thr_unrelated");
         expect(f.harness.realtimeSignals).toEqual([]);
@@ -132,6 +145,7 @@ describe("lifecycle SQL scope", () => {
     "preserves %i matching rows through recovery, comments, idempotence and completion",
     async (count) => {
       const f = fixture(count + 1, count + 1);
+
       try {
         for (const task of f.tasks.slice(0, count)) {
           f.store.tasks.upsertTaskThread({
@@ -142,7 +156,9 @@ describe("lifecycle SQL scope", () => {
             liveStatus: "working",
           });
         }
-        await registerLifecycle(f.bb, f.store);
+
+        await registerLifecycle(f.api, f.store);
+
         const transition = async (
           status: "active" | "idle" | "error" | "deleted",
           expected: string,
@@ -151,10 +167,12 @@ describe("lifecycle SQL scope", () => {
         ) => {
           f.queries.length = 0;
           const signalsBefore = f.harness.realtimeSignals.length;
+
           const thread = makeThreadResponse({
             id: "thr_shared",
             status: status === "deleted" ? "idle" : status,
           });
+
           if (status === "active")
             await f.harness.emitThreadEvent("thread.active", { thread });
           else if (status === "idle")
@@ -172,6 +190,7 @@ describe("lifecycle SQL scope", () => {
           expect(f.harness.realtimeSignals.length - signalsBefore).toBe(
             statementsPerMapping === 0 ? 0 : count * 2,
           );
+
           if (statementsPerMapping > 0) {
             expect(f.harness.realtimeSignals.slice(signalsBefore)).toEqual(
               expect.arrayContaining(
@@ -182,6 +201,7 @@ describe("lifecycle SQL scope", () => {
               ),
             );
           }
+
           for (const task of f.tasks.slice(0, count)) {
             expect(
               f.store.tasks.getTaskThreadByThreadId(task.id, "thr_shared")
@@ -199,10 +219,12 @@ describe("lifecycle SQL scope", () => {
             ).toBe(true);
             expect(f.store.tasks.getTask(task.id)!.status).toBe("backlog");
           }
+
           expect(
             f.store.tasks.getTaskThread(f.mappings[count]!.id)?.liveStatus,
           ).toBe("working");
         };
+
         await transition("active", "working", 0, 0);
         await transition("idle", "idle", 3, 0);
         await transition("error", "failed", 6, 1);
@@ -230,8 +252,9 @@ describe("lifecycle SQL scope", () => {
     "maps created %s / deletedAt %s to %s",
     async (status, deletedAt, expected, statements) => {
       const f = fixture(1, 1);
+
       try {
-        await registerLifecycle(f.bb, f.store);
+        await registerLifecycle(f.api, f.store);
         f.queries.length = 0;
         await f.harness.emitThreadEvent("thread.created", {
           thread: makeThreadResponse({ id: "thr_worker_0", status, deletedAt }),
@@ -248,8 +271,10 @@ describe("lifecycle SQL scope", () => {
 
   it("tracks workers across task status changes without changing task status", async () => {
     const f = fixture(1, 1);
+
     try {
-      await registerLifecycle(f.bb, f.store);
+      await registerLifecycle(f.api, f.store);
+
       for (const status of [
         "todo",
         "in_progress",
@@ -276,13 +301,16 @@ describe("lifecycle SQL scope", () => {
 
   it("uses the existing non-unique thread index and cascades deleted task mappings", async () => {
     const f = fixture(3, 3);
+
     try {
       expect(f.db.pragma("foreign_keys", { simple: true })).toBe(1);
+
       const plan = f.db
         .prepare<[], { detail: string }>(
           "EXPLAIN QUERY PLAN SELECT * FROM task_threads WHERE thread_id = 'thr_worker_0' ORDER BY task_id, id",
         )
         .all();
+
       expect(
         plan.some((row) =>
           row.detail.includes(
@@ -292,7 +320,7 @@ describe("lifecycle SQL scope", () => {
       ).toBe(true);
       f.store.tasks.deleteTask(f.tasks[0]!.id);
       expect(f.store.tasks.getTaskThread(f.mappings[0]!.id)).toBeUndefined();
-      await registerLifecycle(f.bb, f.store);
+      await registerLifecycle(f.api, f.store);
       f.queries.length = 0;
       await emitAllEvents(f, "thr_worker_0");
       expect(f.queries).toHaveLength(5);

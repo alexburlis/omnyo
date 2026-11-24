@@ -4,7 +4,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { useEffect } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { defaultAppSettings, type AppDefaultKeybinding } from "@bb/domain";
+import { defaultAppSettings, type AppDefaultKeybinding } from "@omnyo/domain";
 import {
   AppCommandProvider,
   useAppCommandRunner,
@@ -19,6 +19,7 @@ const LOGS_BINDING: AppDefaultKeybinding = {
 };
 
 const openServerDaemonLogs = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+
 const testState = vi.hoisted(() => ({ available: false }));
 
 vi.mock("@/hooks/queries/system-queries", () => ({
@@ -31,8 +32,8 @@ vi.mock("@/hooks/queries/system-queries", () => ({
   }),
 }));
 
-vi.mock("@/lib/bb-desktop", () => ({
-  getBbDesktopInfo: () => ({
+vi.mock("@/lib/omnyo-desktop", () => ({
+  getOmnyoDesktopInfo: () => ({
     platform: "macos",
     getInfo: () =>
       Promise.resolve({ serverDaemonLogsAvailable: testState.available }),
@@ -49,6 +50,7 @@ function Harness() {
   useEffect(() => {
     runner = value;
   }, [value]);
+
   return null;
 }
 

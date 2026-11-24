@@ -3,9 +3,9 @@ import { basename, join } from "node:path";
 import { z } from "zod";
 import { isProcessRunning } from "./verified-process-stop.js";
 
-const BB_APP_RUNTIME_FILE_NAME = "bb-app-runtime.json";
+const APP_RUNTIME_FILE_NAME = "app-runtime.json";
 
-const bbAppRuntimeFileSchema = z.object({
+const appRuntimeFileSchema = z.object({
   entryPath: z.string().min(1),
   pid: z.number().int().positive(),
   surface: z.string().min(1),
@@ -14,9 +14,9 @@ const bbAppRuntimeFileSchema = z.object({
   version: z.string().min(1),
 });
 
-export type BbAppRuntimeFile = z.infer<typeof bbAppRuntimeFileSchema>;
+export type AppRuntimeFile = z.infer<typeof appRuntimeFileSchema>;
 
-interface WriteBbAppRuntimeFileArgs {
+interface WriteAppRuntimeFileArgs {
   dataDir: string;
   entryPath: string;
   pid: number;
@@ -26,14 +26,14 @@ interface WriteBbAppRuntimeFileArgs {
   version: string;
 }
 
-export function formatBbAppRuntimeFilePath(dataDir: string): string {
-  return join(dataDir, BB_APP_RUNTIME_FILE_NAME);
+export function formatAppRuntimeFilePath(dataDir: string): string {
+  return join(dataDir, APP_RUNTIME_FILE_NAME);
 }
 
-export async function writeBbAppRuntimeFile(
-  args: WriteBbAppRuntimeFileArgs,
+export async function writeAppRuntimeFile(
+  args: WriteAppRuntimeFileArgs,
 ): Promise<void> {
-  const runtimeFile: BbAppRuntimeFile = {
+  const runtimeFile: AppRuntimeFile = {
     entryPath: args.entryPath,
     pid: args.pid,
     serverUrl: args.serverUrl,
@@ -41,64 +41,65 @@ export async function writeBbAppRuntimeFile(
     surface: args.surface,
     version: args.version,
   };
+
   await mkdir(args.dataDir, { recursive: true });
   await writeFile(
-    formatBbAppRuntimeFilePath(args.dataDir),
+    formatAppRuntimeFilePath(args.dataDir),
     `${JSON.stringify(runtimeFile, null, 2)}\n`,
     "utf8",
   );
 }
 
-export async function claimBbAppRuntimeFile(
-  args: WriteBbAppRuntimeFileArgs & { isRunning?: (pid: number) => boolean },
+export async function claimAppRuntimeFile(
+  args: WriteAppRuntimeFileArgs & { isRunning?: (pid: number) => boolean },
 ): Promise<boolean> {
   const isRunning = args.isRunning ?? isProcessRunning;
-  const existing = await readBbAppRuntimeFile(args.dataDir);
-  if (
-    existing !== null &&
-    existing.pid !== args.pid &&
-    isRunning(existing.pid)
-  ) {
+
+  const existing = await readAppRuntimeFile(args.dataDir);
+
+  if (existing !== null && existing.pid !== args.pid && isRunning(existing.pid))
     return false;
-  }
-  await writeBbAppRuntimeFile(args);
+
+  await writeAppRuntimeFile(args);
+
   return true;
 }
 
-async function clearBbAppRuntimeFile(dataDir: string): Promise<void> {
-  await rm(formatBbAppRuntimeFilePath(dataDir), { force: true });
+async function clearAppRuntimeFile(dataDir: string): Promise<void> {
+  await rm(formatAppRuntimeFilePath(dataDir), { force: true });
 }
 
-export async function clearOwnBbAppRuntimeFile(args: {
+export async function clearOwnAppRuntimeFile(args: {
   dataDir: string;
   pid: number;
 }): Promise<boolean> {
-  const runtimeFile = await readBbAppRuntimeFile(args.dataDir);
+  const runtimeFile = await readAppRuntimeFile(args.dataDir);
+
   if (runtimeFile === null || runtimeFile.pid !== args.pid) {
     return false;
   }
-  await clearBbAppRuntimeFile(args.dataDir);
+
+  await clearAppRuntimeFile(args.dataDir);
+
   return true;
 }
 
-export function bbAppRuntimeVerifyTokens(entryPath: string): string[] {
+export function appRuntimeVerifyTokens(entryPath: string): string[] {
   return [entryPath, basename(entryPath)];
 }
 
-export async function readBbAppRuntimeFile(
+export async function readAppRuntimeFile(
   dataDir: string,
-): Promise<BbAppRuntimeFile | null> {
+): Promise<AppRuntimeFile | null> {
   let rawContents: string;
-  try {
-    rawContents = await readFile(formatBbAppRuntimeFilePath(dataDir), "utf8");
-  } catch {
-    return null;
-  }
 
   try {
-    const parsed = bbAppRuntimeFileSchema.safeParse(JSON.parse(rawContents));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
+    rawContents = await readFile(formatAppRuntimeFilePath(dataDir), "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT")
+      return null;
+    throw error;
   }
+
+  return appRuntimeFileSchema.parse(JSON.parse(rawContents));
 }

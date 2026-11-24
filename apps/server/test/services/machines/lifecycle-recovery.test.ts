@@ -13,6 +13,7 @@ import {
 import {
   createEnvironment,
   createTerminalSession,
+  environmentHookOperations,
   environments,
   getEnvironment,
   getHost,
@@ -20,8 +21,9 @@ import {
   hosts,
   listThreadIdsWithHostOfflineQueueWaits,
   updateHost,
-} from "@bb/db";
-import { validatePluginEnvironmentProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/db";
+import { validatePluginEnvironmentProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
+import type { PluginMachineProviderDeclaration } from "@omnyo/plugin-sdk";
 import {
   requestMachineRemoval,
   retryMachineCleanup,
@@ -46,7 +48,10 @@ import {
   seedSession,
 } from "../../helpers/seed.js";
 import { advanceUntilSettled } from "../../helpers/fake-timers.js";
-import { withTestHarness } from "../../helpers/test-app.js";
+import {
+  type TestAppHarness,
+  withTestHarness,
+} from "../../helpers/test-app.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -60,10 +65,13 @@ it("can resume after a snapshot fails following daemon shutdown", async () =>
     const target = seedHostSession(harness.deps, {
       id: "review-failed-suspend",
     });
+
     const resume = vi.fn(async () => {
       seedSession(harness.deps, target.host.id);
+
       return { resource: { id: "owned" } };
     });
+
     installMachineProvider({
       suspend: async () => {
         throw new Error("snapshot API unavailable");
@@ -96,6 +104,7 @@ it("recovers a persisted resuming machine without queued work", async () =>
     const target = seedHostSession(harness.deps, {
       id: "interrupted-resume",
     });
+
     const resume = vi.fn(async () => ({ resource: { id: "restored" } }));
     installMachineProvider({
       suspend: async () => ({ resource: { id: "owned" } }),
@@ -130,10 +139,13 @@ it.each([
   async ({ phase, failCleanup }) =>
     withTestHarness(async (harness) => {
       const target = seedHostSession(harness.deps, { id: "review-removing" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: target.host.id,
       });
+
       const machineRemove = vi.fn(async () => ({ status: "removed" as const }));
+
       const enrollment = createMachineEnrollmentService({
         db: harness.db,
         machineAuth: harness.deps.machineAuth,
@@ -145,14 +157,18 @@ it.each([
           }),
         },
       }).forOwner("test-machine-plugin");
+
       const cleanupCall = vi.fn(async () => ({ output: {} }));
+
       const registerCleanupCapture = (sessionId: string) =>
         registerTestHostRpcCapture(harness, {
           hostId: target.host.id,
           sessionId,
           onPluginHostCall: cleanupCall,
         });
+
       registerCleanupCapture(target.session.id);
+
       const resume = vi.fn(async () => {
         expect(
           await enrollment.prepare({
@@ -167,8 +183,10 @@ it.each([
           timeoutMs: 100,
           signal: new AbortController().signal,
         });
+
         return { resource: { id: "owned" } };
       });
+
       installMachineProvider({
         remove: machineRemove,
         resume,
@@ -186,8 +204,10 @@ it.each([
         .set({ lastSeenAt: Date.now() })
         .where(eq(hosts.id, target.host.id))
         .run();
+
       if (phase === "suspended")
         harness.hub.unregisterDaemon(target.session.id);
+
       const environment = createEnvironment(harness.db, harness.hub, {
         projectId: project.id,
         hostId: target.host.id,
@@ -196,6 +216,7 @@ it.each([
         status: "ready",
         environmentProvider: null,
       });
+
       harness.db
         .update(environments)
         .set({
@@ -206,6 +227,7 @@ it.each([
         .where(eq(environments.id, environment.id))
         .run();
       let cleanupFailurePending = failCleanup;
+
       const record = {
         pluginId: "review-worktree-plugin",
         provider: validatePluginEnvironmentProviderDeclaration({
@@ -221,11 +243,13 @@ it.each([
           remove: async () => {
             if (cleanupFailurePending) {
               cleanupFailurePending = false;
+
               return {
                 status: "failed",
                 message: "Workspace cleanup temporarily failed",
               };
             }
+
             await callPluginHostRpc(harness.deps, {
               pluginId: "review-worktree-plugin",
               hostId: target.host.id,
@@ -242,10 +266,12 @@ it.each([
                 byteLength: 1,
               },
             });
+
             return { status: "removed" };
           },
         }),
       };
+
       setPluginEnvironmentProviderBridge({
         listEnvironmentProviders: () => [record],
         getEnvironmentProvider: (id) =>
@@ -256,12 +282,14 @@ it.each([
         }),
         decisionTimeoutMs: 1000,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "idle",
         visibility: "hidden",
       });
+
       expect(requestEnvironmentRemoval(harness.deps, environment.id)).toBe(
         false,
       );
@@ -283,6 +311,7 @@ it.each([
         }),
       ).rejects.toThrow("cancelled");
       await sweepProviderMachine(harness.deps, target.host.id);
+
       if (failCleanup) {
         expect(getHost(harness.db, target.host.id)).toMatchObject({
           phase: "removing",
@@ -292,6 +321,7 @@ it.each([
         expect(machineRemove).not.toHaveBeenCalled();
         await retryMachineCleanup(harness.deps, target.host.id);
       }
+
       expect(getEnvironment(harness.db, environment.id)).toMatchObject({
         status: "destroyed",
         teardownStatus: "removed",
@@ -308,6 +338,227 @@ it.each([
     }),
 );
 
+const OFFLINE_REMOVAL_GRACE_MS = 2 * 60_000;
+
+function seedOfflineRemoval(
+  harness: TestAppHarness,
+  machine: Partial<PluginMachineProviderDeclaration> = {},
+) {
+  const target = seedHostSession(harness.deps, { id: "offline-removal" });
+
+  const { project } = seedProjectWithSource(harness.deps, {
+    hostId: target.host.id,
+  });
+
+  const machineRemove = vi.fn(async () => ({ status: "removed" as const }));
+  installMachineProvider({ remove: machineRemove, ...machine });
+  updateHost(harness.db, harness.hub, target.host.id, {
+    machineProviderId: "test-machine",
+    resource: { id: "owned" },
+  });
+  harness.hub.unregisterDaemon(target.session.id);
+
+  const seedWorkspace = (path: string, providerOwnsPath: boolean) => {
+    const environment = createEnvironment(harness.db, harness.hub, {
+      projectId: project.id,
+      hostId: target.host.id,
+      path,
+      providerOwnsPath,
+      status: "ready",
+      environmentProvider: null,
+    });
+
+    harness.db
+      .update(environments)
+      .set({
+        environmentProviderId: "offline-workspace",
+        environmentProviderPluginId: "offline-workspace-plugin",
+        environmentProviderInstanceKey: environment.id,
+      })
+      .where(eq(environments.id, environment.id))
+      .run();
+
+    return environment;
+  };
+
+  const workspace = seedWorkspace("/tmp/offline-workspace", true);
+  const checkout = seedWorkspace("/tmp/user-checkout", false);
+  const hookId = `environment:${workspace.id}:${workspace.id}:teardown`;
+  harness.db
+    .insert(environmentHookOperations)
+    .values({
+      id: hookId,
+      operationId: hookId,
+      hostId: target.host.id,
+      path: "/tmp/offline-workspace",
+      kind: "teardown",
+      startedAt: Date.now(),
+    })
+    .run();
+
+  const environmentRemove = vi.fn(async () => ({
+    status: "failed" as const,
+    message: "Host is not connected",
+  }));
+
+  const record = {
+    pluginId: "offline-workspace-plugin",
+    provider: validatePluginEnvironmentProviderDeclaration({
+      id: "offline-workspace",
+      displayName: "Offline workspace",
+      description: "Prepare a workspace for this thread.",
+      icon: "Folder",
+      create: async () => ({
+        status: "created",
+        path: "/tmp/offline-workspace",
+        ownsPath: true,
+      }),
+      remove: environmentRemove,
+    }),
+  };
+
+  setPluginEnvironmentProviderBridge({
+    listEnvironmentProviders: () => [record],
+    getEnvironmentProvider: (id) =>
+      id === record.provider.id ? record : undefined,
+    invokeProvider: async (_id, _label, run) => ({
+      ok: true,
+      value: await run(),
+    }),
+    decisionTimeoutMs: 1000,
+  });
+
+  const thread = seedThread(harness.deps, {
+    projectId: project.id,
+    environmentId: workspace.id,
+    status: "idle",
+    visibility: "hidden",
+  });
+
+  return {
+    target,
+    workspace,
+    checkout,
+    hookId,
+    environmentRemove,
+    machineRemove,
+    thread,
+  };
+}
+
+function expectLeftOnMachine(
+  harness: TestAppHarness,
+  seeded: ReturnType<typeof seedOfflineRemoval>,
+) {
+  const { target, workspace, checkout, hookId } = seeded;
+  expect(seeded.environmentRemove).not.toHaveBeenCalled();
+  expect(seeded.machineRemove).toHaveBeenCalledOnce();
+  expect(getHost(harness.db, target.host.id)?.phase).toBe("destroyed");
+  expect(getEnvironment(harness.db, workspace.id)).toMatchObject({
+    status: "destroyed",
+    teardownStatus: "removed",
+    teardownMessage: `${target.host.name} was offline when it was removed, so Omnyo did not clean up /tmp/offline-workspace.`,
+    claimPath: null,
+  });
+  expect(getEnvironment(harness.db, checkout.id)).toMatchObject({
+    status: "destroyed",
+    teardownStatus: "removed",
+    teardownMessage: null,
+  });
+  expect(
+    harness.db
+      .select()
+      .from(environmentHookOperations)
+      .where(eq(environmentHookOperations.id, hookId))
+      .get(),
+  ).toMatchObject({
+    finishedAt: expect.any(Number),
+    error: `${target.host.name} was offline when it was removed`,
+  });
+  expect(getThread(harness.db, seeded.thread.id)).toMatchObject({
+    archivedAt: null,
+    deletedAt: null,
+  });
+}
+
+it("removes a persistent machine that stays offline without cleaning up its workspaces", async () =>
+  withTestHarness(async (harness) => {
+    const seeded = seedOfflineRemoval(harness);
+    vi.useFakeTimers({
+      toFake: ["Date"],
+      now: Date.now() + OFFLINE_REMOVAL_GRACE_MS + 1,
+      shouldAdvanceTime: true,
+    });
+
+    expect(requestMachineRemoval(harness.deps, seeded.target.host.id)).toBe(
+      true,
+    );
+    await sweepProviderMachine(harness.deps, seeded.target.host.id);
+
+    expectLeftOnMachine(harness, seeded);
+  }));
+
+it("waits for a machine that just went offline before removing it without cleanup", async () =>
+  withTestHarness(async (harness) => {
+    const seeded = seedOfflineRemoval(harness);
+
+    expect(requestMachineRemoval(harness.deps, seeded.target.host.id)).toBe(
+      true,
+    );
+    await sweepProviderMachine(harness.deps, seeded.target.host.id);
+
+    expect(seeded.environmentRemove).not.toHaveBeenCalled();
+    expect(seeded.machineRemove).not.toHaveBeenCalled();
+    expect(getHost(harness.db, seeded.target.host.id)).toMatchObject({
+      phase: "removing",
+      removeRetryAt: expect.any(Number),
+    });
+    expect(
+      getHost(harness.db, seeded.target.host.id)?.removeRetryAt,
+    ).toBeGreaterThan(Date.now());
+    expect(getEnvironment(harness.db, seeded.workspace.id)).toMatchObject({
+      status: "ready",
+      teardownStatus: null,
+    });
+  }));
+
+it("removes a suspended machine without cleanup once its resume keeps failing", async () =>
+  withTestHarness(async (harness) => {
+    const resume = vi.fn(async () => {
+      throw new Error("snapshot expired");
+    });
+
+    const seeded = seedOfflineRemoval(harness, {
+      resume,
+      suspend: async () => ({ resource: { id: "owned" } }),
+    });
+
+    updateHost(harness.db, harness.hub, seeded.target.host.id, {
+      phase: "suspended",
+      suspendedAt: Date.now(),
+    });
+    vi.useFakeTimers({
+      toFake: ["Date"],
+      now: Date.now() + OFFLINE_REMOVAL_GRACE_MS + 1,
+      shouldAdvanceTime: true,
+    });
+    expect(requestMachineRemoval(harness.deps, seeded.target.host.id)).toBe(
+      true,
+    );
+    await expect(
+      sweepProviderMachine(harness.deps, seeded.target.host.id),
+    ).rejects.toThrow("snapshot expired");
+    expect(getHost(harness.db, seeded.target.host.id)?.phase).toBe("removing");
+
+    updateHost(harness.db, harness.hub, seeded.target.host.id, {
+      teardownAttempt: 5,
+    });
+    await sweepProviderMachine(harness.deps, seeded.target.host.id);
+
+    expect(resume).toHaveBeenCalledTimes(2);
+    expectLeftOnMachine(harness, seeded);
+  }));
+
 it("keeps a standalone ephemeral machine available after successful creation", async () =>
   withTestHarness(async (harness) => {
     const remove = vi.fn(async () => ({ status: "removed" as const }));
@@ -316,6 +567,7 @@ it("keeps a standalone ephemeral machine available after successful creation", a
       inputs: z.object({ size: z.string().default("small") }),
       create: async ({ key, inputs }) => {
         expect(inputs).toEqual({ size: "small" });
+
         return {
           status: "created",
           name: "Standalone machine",
@@ -324,11 +576,13 @@ it("keeps a standalone ephemeral machine available after successful creation", a
       },
       remove,
     });
+
     const response = await harness.app.request("/api/v1/hosts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ machineProviderId: "test-machine", inputs: null }),
     });
+
     expect(response.status).toBe(201);
     const result = z.object({ id: z.string() }).parse(await readJson(response));
     await expect
@@ -348,9 +602,11 @@ it("removes a suspended machine when its last thread is archived with an offline
     const target = seedHostSession(harness.deps, {
       id: "review-archived-queue",
     });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: target.host.id,
     });
+
     const environment = createEnvironment(harness.db, harness.hub, {
       projectId: project.id,
       hostId: target.host.id,
@@ -359,11 +615,13 @@ it("removes a suspended machine when its last thread is archived with an offline
       status: "ready",
       environmentProvider: null,
     });
+
     const thread = seedThread(harness.deps, {
       projectId: project.id,
       environmentId: environment.id,
       status: "idle",
     });
+
     const remove = vi.fn(async () => ({ status: "removed" as const }));
     installMachineProvider({
       ephemeral: true,
@@ -387,10 +645,12 @@ it("removes a suspended machine when its last thread is archived with an offline
     expect(
       listThreadIdsWithHostOfflineQueueWaits(harness.db, target.host.id),
     ).toEqual([thread.id]);
+
     const response = await harness.app.request(
       `/api/v1/threads/${thread.id}/archive-all`,
       { method: "POST" },
     );
+
     expect(response.status).toBe(200);
     expect(
       listThreadIdsWithHostOfflineQueueWaits(harness.db, target.host.id),
@@ -406,15 +666,20 @@ it("reconciles on request using core's current state and serializes a concurrent
     const { host, session } = seedHostSession(harness.deps, {
       id: "plugin-reconcile",
     });
+
     harness.hub.unregisterDaemon(session.id);
     let finish!: () => void;
+
     const pending = new Promise<void>((resolve) => {
       finish = resolve;
     });
+
     const suspend = vi.fn(async () => {
       await pending;
+
       return { resource: { id: "saved" } };
     });
+
     const resume = vi.fn(async () => ({ resource: { id: "running" } }));
     installMachineProvider({ suspend, resume });
     updateHost(harness.db, harness.hub, host.id, {
@@ -457,10 +722,12 @@ it("exposes reconciliation through the host API without changing active intent",
       phase: "active",
       resource: { id: "running" },
     });
+
     const response = await harness.app.request(
       `/api/v1/hosts/${host.id}/reconcile`,
       { method: "POST" },
     );
+
     expect(response.status).toBe(202);
     expect(suspend).not.toHaveBeenCalled();
     expect(getHost(harness.db, host.id)?.phase).toBe("active");
@@ -471,15 +738,20 @@ it("accepts reconciliation before the provider finishes and coalesces repeated r
     const { host, session } = seedHostSession(harness.deps, {
       id: "reconcile-slow",
     });
+
     harness.hub.unregisterDaemon(session.id);
     let finish!: () => void;
+
     const pending = new Promise<void>((resolve) => {
       finish = resolve;
     });
+
     const suspend = vi.fn(async () => {
       await pending;
+
       return { resource: { id: "saved" } };
     });
+
     installMachineProvider({
       suspend,
       resume: async ({ resource }) => ({ resource }),
@@ -490,18 +762,22 @@ it("accepts reconciliation before the provider finishes and coalesces repeated r
       suspendedAt: 1,
       resource: { id: "running" },
     });
+
     try {
       const response = await harness.app.request(
         `/api/v1/hosts/${host.id}/reconcile`,
         { method: "POST" },
       );
+
       expect(response.status).toBe(202);
       await expect.poll(() => suspend.mock.calls.length).toBe(1);
       expect(getHost(harness.db, host.id)?.phase).toBe("suspending");
+
       const repeated = await harness.app.request(
         `/api/v1/hosts/${host.id}/reconcile`,
         { method: "POST" },
       );
+
       expect(repeated.status).toBe(202);
       expect(suspend).toHaveBeenCalledOnce();
     } finally {
@@ -517,6 +793,7 @@ it("holds the machine drain deadline while the server is moving", async () =>
     const target = seedHostSession(harness.deps, {
       id: "review-frozen-drain",
     });
+
     createTerminalSession(harness.db, {
       cols: 80,
       daemonSessionId: target.session.id,
@@ -530,6 +807,7 @@ it("holds the machine drain deadline while the server is moving", async () =>
     });
     const save = vi.fn(async () => {});
     vi.useFakeTimers();
+
     const outcome = maintainMachine(
       harness.deps,
       target.host.id,
@@ -541,6 +819,7 @@ it("holds the machine drain deadline while the server is moving", async () =>
     );
 
     setServerMoveFrozen(harness.db, true);
+
     try {
       await vi.advanceTimersByTimeAsync(
         5 * 60_000 + SERVER_MOVE_FROZEN_RETRY_MS,

@@ -27,9 +27,11 @@ function withoutLineComments(statement: string): string {
 export function connectDbMigrationStatements(): string[] {
   return connectDbMigrationFiles().flatMap((file) => {
     const sql = readConnectDbMigration(file);
+
     const chunks = sql.includes("--> statement-breakpoint")
       ? sql.split("--> statement-breakpoint")
       : sql.split(/;\s*\n/u);
+
     return chunks.map(withoutLineComments).filter((chunk) => chunk !== "");
   });
 }

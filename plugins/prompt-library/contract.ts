@@ -1,7 +1,7 @@
 import {
   defineRpcContract,
   type ComposerDraftReplacement,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 const mentionSchema = z.intersection(
@@ -91,6 +91,7 @@ export const promptSchema = draftSchema
   ) satisfies z.ZodType<ComposerDraftReplacement>;
 
 export const promptScopeSchema = z.enum(["thread", "project", "global"]);
+
 export type PromptScope = z.infer<typeof promptScopeSchema>;
 
 const snippetSchema = z
@@ -99,6 +100,7 @@ const snippetSchema = z
     highlights: z.array(z.tuple([z.number().int(), z.number().int()])),
   })
   .strict();
+
 export type PromptSnippet = z.infer<typeof snippetSchema>;
 
 const starredPromptSchema = z
@@ -111,6 +113,7 @@ const starredPromptSchema = z
     lastUsedAt: z.number().nullable(),
   })
   .strict();
+
 export type StarredPromptRow = z.infer<typeof starredPromptSchema>;
 
 const recentPromptSchema = z
@@ -126,12 +129,14 @@ const recentPromptSchema = z
     starredId: z.string().nullable(),
   })
   .strict();
+
 export type RecentPromptRow = z.infer<typeof recentPromptSchema>;
 
 const promptRowSchema = z.discriminatedUnion("kind", [
   starredPromptSchema,
   recentPromptSchema,
 ]);
+
 export type PromptRow = z.infer<typeof promptRowSchema>;
 
 export const searchPromptsInputSchema = z
@@ -143,6 +148,7 @@ export const searchPromptsInputSchema = z
     composer: z.enum(["new-thread", "follow-up"]),
   })
   .strict();
+
 export type SearchPromptsInput = z.infer<typeof searchPromptsInputSchema>;
 
 export const promptLibraryRpcContract = defineRpcContract({

@@ -1,7 +1,7 @@
-import { SERVER_MOVE_STEP_IDS } from "@bb/domain";
-import { BbHttpError } from "@bb/sdk/browser";
-import type { ServerMoveStatus } from "@bb/server-contract";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import { SERVER_MOVE_STEP_IDS } from "@omnyo/domain";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
+import type { ServerMoveStatus } from "@omnyo/server-contract";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   canMoveServerHere,
@@ -21,7 +21,7 @@ function move(overrides: Partial<ServerMoveStatus> = {}): ServerMoveStatus {
     mode: "connect",
     targetHostId: "host_desk",
     targetHostName: "desk",
-    serverUrl: "https://sawyer.getbb.app",
+    serverUrl: "https://sawyer.example.test",
     destinationStatusUrl: null,
     startedAt: 1,
     finishedAt: null,
@@ -39,21 +39,25 @@ function move(overrides: Partial<ServerMoveStatus> = {}): ServerMoveStatus {
 describe("serverMoveDestinationUrl", () => {
   it("keeps a base path, drops duplicate slashes, and carries the move id", () => {
     expect(
-      serverMoveDestinationUrl("https://example.com/bb/", LOCATION, "move_1"),
-    ).toBe("https://example.com/bb/threads/thr_1?a=1&bbServerMove=move_1#x");
+      serverMoveDestinationUrl(
+        "https://example.com/omnyo/",
+        LOCATION,
+        "move_1",
+      ),
+    ).toBe("https://example.com/omnyo/threads/thr_1?a=1&serverMove=move_1#x");
     expect(
       serverMoveDestinationUrl("http://10.0.0.5:38886", LOCATION, "move_1"),
-    ).toBe("http://10.0.0.5:38886/threads/thr_1?a=1&bbServerMove=move_1#x");
+    ).toBe("http://10.0.0.5:38886/threads/thr_1?a=1&serverMove=move_1#x");
   });
 
   it("replaces any query or fragment on the server address with the current ones", () => {
     expect(
       serverMoveDestinationUrl(
         "https://example.com/?stale=1#old",
-        { pathname: "/", search: "?bbServerMove=move_0", hash: "" },
+        { pathname: "/", search: "?serverMove=move_0", hash: "" },
         "move_1",
       ),
-    ).toBe("https://example.com/?bbServerMove=move_1");
+    ).toBe("https://example.com/?serverMove=move_1");
   });
 });
 
@@ -149,12 +153,13 @@ describe("canMoveServerHere", () => {
 });
 
 describe("movedServerUrlFromError", () => {
-  function httpError(status: number, body: unknown): BbHttpError {
+  function httpError(status: number, body: unknown): OmnyoHttpError {
     const code =
       typeof body === "object" && body !== null && "code" in body
         ? String(body.code)
         : null;
-    return new BbHttpError({ status, code, message: "moved", body });
+
+    return new OmnyoHttpError({ status, code, message: "moved", body });
   }
 
   it("reads the new address from a server_moved answer", () => {
@@ -231,6 +236,7 @@ describe("resolveServerMoveOverlay", () => {
       completedAt: 2,
       oldCopyDeletedAt: null,
     };
+
     const args = {
       response: { move: null, lastMove },
       error: null,
@@ -239,6 +245,7 @@ describe("resolveServerMoveOverlay", () => {
       destination: null,
       location: LOCATION,
     };
+
     expect(
       resolveServerMoveOverlay({ ...args, arrivalMoveId: "move_1" }),
     ).toEqual({ kind: "arrived", lastMove });
@@ -258,6 +265,7 @@ describe("resolveServerMoveOverlay", () => {
       destinationStatusUrl: "https://desk.example.com/health",
       cancellable: false,
     });
+
     const args = {
       response: { move: switching, lastMove: null },
       error: new TypeError("Failed to fetch"),
@@ -297,7 +305,7 @@ describe("resolveServerMoveOverlay", () => {
       kind: "redirecting",
       move: switching,
       destination:
-        "https://desk.example.com/threads/thr_1?a=1&bbServerMove=move_1#x",
+        "https://desk.example.com/threads/thr_1?a=1&serverMove=move_1#x",
     });
     expect(
       resolveServerMoveOverlay({ ...args, error: null, destination: null })
@@ -351,6 +359,7 @@ describe("resolveServerMoveOverlay", () => {
       state: "recovery_required",
       error: { step: "switch", message: "desk disconnected before confirming" },
     });
+
     const content = resolveServerMoveOverlay({
       response: { move: recovering, lastMove: null },
       error: null,
@@ -360,6 +369,7 @@ describe("resolveServerMoveOverlay", () => {
       arrivalMoveId: null,
       location: LOCATION,
     });
+
     expect(content).toEqual({ kind: "recovery", move: recovering });
     expect(
       serverMoveOverlayPollIntervalMs({

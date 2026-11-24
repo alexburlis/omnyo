@@ -16,9 +16,9 @@ import {
 } from "./FilePreview";
 import { SOURCE_CODE_MAX_LINES } from "@/components/code/source-code-budget";
 import { SecondaryPanelFilePreview } from "./ThreadStorageFilePreview";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { HttpError } from "@/lib/api";
-import { BbHttpError } from "@bb/sdk/browser";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 import {
   PierreWorkerPoolGateContext,
   type PierreWorkerPoolGate,
@@ -71,7 +71,6 @@ const pierreMock = vi.hoisted(() => {
     initialStats: createStats(),
     lastFile: null as MockPierreFileProps["file"] | null,
     mountCount: 0,
-    renderCount: 0,
     statsCallback: null as StatsCallback | null,
     unsubscribe: vi.fn(),
   };
@@ -82,6 +81,7 @@ const pierreMock = vi.hoisted(() => {
       subscribeToStatChanges: vi.fn((callback: StatsCallback) => {
         state.statsCallback = callback;
         callback(state.initialStats);
+
         return state.unsubscribe;
       }),
       getFileResultCache: vi.fn((file: MockPierreFileProps["file"]) =>
@@ -101,17 +101,21 @@ vi.mock("@pierre/diffs/react", async () => {
     File: ({ file, selectedLines = null }: MockPierreFileProps) => {
       const [instanceId] = React.useState(() => {
         pierreMock.state.mountCount += 1;
+
         return pierreMock.state.mountCount;
       });
+
       const hostRef = React.useRef<HTMLElement>(null);
       pierreMock.state.lastFile = file;
-      pierreMock.state.renderCount += 1;
 
       React.useLayoutEffect(() => {
         const host = hostRef.current;
+
         if (host === null) return;
+
         const shadowRoot =
           host.shadowRoot ?? host.attachShadow({ mode: "open" });
+
         const code = document.createElement("code");
         code.dataset.code = "";
         code.scrollLeft = 240;
@@ -136,6 +140,7 @@ vi.mock("@pierre/diffs/react", async () => {
             line.scrollIntoView = () => {
               code.scrollLeft = 0;
             };
+
             if (
               selectedLines !== null &&
               lineNumber >= selectedLines.start &&
@@ -143,6 +148,7 @@ vi.mock("@pierre/diffs/react", async () => {
             ) {
               line.dataset.selectedLine = "single";
             }
+
             return line;
           }),
         );
@@ -152,7 +158,6 @@ vi.mock("@pierre/diffs/react", async () => {
       return React.createElement("diffs-container", {
         ref: hostRef,
         "data-instance-id": String(instanceId),
-        "data-render-count": String(pierreMock.state.renderCount),
         "data-testid": "pierre-file",
       });
     },
@@ -170,6 +175,7 @@ function renderWithWorkerPool(ui: ReactElement) {
     >,
     request: () => undefined,
   };
+
   return render(
     <PierreWorkerPoolGateContext.Provider value={gate}>
       {ui}
@@ -178,6 +184,7 @@ function renderWithWorkerPool(ui: ReactElement) {
 }
 
 const CSV_TEST_ROW_HEIGHT_PX = 29;
+
 function mockCsvTableLayout() {
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
     function (this: HTMLElement) {
@@ -192,7 +199,6 @@ describe("FilePreview", () => {
     pierreMock.state.initialStats = pierreMock.createStats();
     pierreMock.state.lastFile = null;
     pierreMock.state.mountCount = 0;
-    pierreMock.state.renderCount = 0;
     pierreMock.state.statsCallback = null;
     pierreMock.state.unsubscribe.mockClear();
     pierreMock.workerPool.subscribeToStatChanges.mockClear();
@@ -245,7 +251,7 @@ describe("FilePreview", () => {
     ).toBe(true);
   });
 
-  it("rerenders the code view when the Pierre worker pool advances", async () => {
+  it("keeps the code view in place when the Pierre worker pool advances", async () => {
     renderWithWorkerPool(
       <FilePreview
         headerMode="none"
@@ -262,30 +268,23 @@ describe("FilePreview", () => {
       />,
     );
 
-    await waitFor(() => expect(pierreMock.state.statsCallback).not.toBeNull());
-    const renderCountBeforeStatsChange = Number(
-      screen.getByTestId("pierre-file").dataset.renderCount,
-    );
+    const pierreFile = await screen.findByTestId("pierre-file");
 
     act(() => {
-      pierreMock.state.statsCallback?.({
-        activeTasks: 1,
-        busyWorkers: 1,
-        diffCacheSize: 0,
-        fileCacheSize: 0,
-        managerState: "initialized",
-        queuedTasks: 0,
-        themeSubscribers: 1,
-        totalWorkers: 1,
-        workersFailed: false,
-      });
+      pierreMock.state.statsCallback?.(
+        pierreMock.createStats({
+          activeTasks: 1,
+          busyWorkers: 1,
+          themeSubscribers: 1,
+        }),
+      );
     });
 
-    await waitFor(() => {
-      expect(
-        Number(screen.getByTestId("pierre-file").dataset.renderCount),
-      ).toBeGreaterThan(renderCountBeforeStatsChange);
-    });
+    expect(screen.getByTestId("pierre-file")).toBe(pierreFile);
+    expect(pierreMock.state.mountCount).toBe(1);
+    expect(pierreMock.state.lastFile?.contents).toBe(
+      "export const marker = true;",
+    );
   });
 
   it("waits for the Pierre worker pool before mounting the code view", async () => {
@@ -359,9 +358,11 @@ describe("FilePreview", () => {
     );
 
     const pierreFile = await screen.findByTestId("pierre-file");
+
     const codeViewport = scrollViewport.querySelector<HTMLElement>(
-      "[data-bb-source-code-viewport]",
+      "[data-omnyo-source-code-viewport]",
     );
+
     expect(codeViewport).not.toBeNull();
     await waitFor(() => {
       expect(codeViewport?.scrollTop).toBe(727);
@@ -374,7 +375,7 @@ describe("FilePreview", () => {
     expect(
       pierreFile.shadowRoot
         ?.querySelector('[data-line="2"]')
-        ?.hasAttribute("data-bb-source-code-target-line"),
+        ?.hasAttribute("data-omnyo-source-code-target-line"),
     ).toBe(true);
   });
 
@@ -401,7 +402,6 @@ describe("FilePreview", () => {
 
     const pierreFile = await screen.findByTestId("pierre-file");
     const firstInstanceId = Number(pierreFile.dataset.instanceId);
-    const renderCountBeforeHighlight = Number(pierreFile.dataset.renderCount);
 
     act(() => {
       pierreMock.state.cachedFileKeys.add(cacheKey);
@@ -410,18 +410,66 @@ describe("FilePreview", () => {
       );
     });
 
-    await waitFor(() => {
-      expect(
-        Number(screen.getByTestId("pierre-file").dataset.renderCount),
-      ).toBeGreaterThan(renderCountBeforeHighlight);
-    });
+    expect(screen.getByTestId("pierre-file")).toBe(pierreFile);
     expect(Number(screen.getByTestId("pierre-file").dataset.instanceId)).toBe(
       firstInstanceId,
     );
   });
 
+  it("marks the target line again after highlighted output replaces the code lines", async () => {
+    const cacheKey =
+      "file-preview:/api/v1/projects/proj/files/content:target.ts";
+
+    renderWithWorkerPool(
+      <FilePreview
+        headerMode="none"
+        path="apps/app/src/lib/target.ts"
+        state={{
+          kind: "ready",
+          file: {
+            cacheKey,
+            name: "target.ts",
+            contents: ["first", "second", "third"].join("\n"),
+          },
+          lineRange: { startLineNumber: 2, endLineNumber: 2 },
+          textPreviewKind: null,
+        }}
+      />,
+    );
+
+    const pierreFile = await screen.findByTestId("pierre-file");
+
+    const targetLine = () =>
+      pierreFile.shadowRoot?.querySelector<HTMLElement>('[data-line="2"]');
+
+    await waitFor(() => {
+      expect(
+        targetLine()?.hasAttribute("data-omnyo-source-code-target-line"),
+      ).toBe(true);
+    });
+
+    const highlightedLine = document.createElement("div");
+    highlightedLine.dataset.line = "2";
+    highlightedLine.textContent = "second";
+
+    act(() => {
+      targetLine()?.replaceWith(highlightedLine);
+      pierreMock.state.cachedFileKeys.add(cacheKey);
+      pierreMock.state.statsCallback?.(
+        pierreMock.createStats({ fileCacheSize: 1 }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        highlightedLine.hasAttribute("data-omnyo-source-code-target-line"),
+      ).toBe(true);
+    });
+  });
+
   it("caps oversized code previews to a leading prefix until the full file is requested", async () => {
     const totalLineCount = SOURCE_CODE_MAX_LINES + 1_500;
+
     const contents = Array.from(
       { length: totalLineCount },
       (_, index) => `line ${index + 1}`,
@@ -494,6 +542,7 @@ describe("FilePreview", () => {
 
   it("shows the whole file when a line link points past the capped prefix", async () => {
     const totalLineCount = SOURCE_CODE_MAX_LINES + 20;
+
     const contents = Array.from(
       { length: totalLineCount },
       (_, index) => `line ${index + 1}`,
@@ -554,6 +603,7 @@ describe("FilePreview", () => {
   it("keeps compact file actions available without crowding the preview controls", async () => {
     const onRefresh = vi.fn();
     const onOpenInEditor = vi.fn();
+
     const view = render(
       <CompactViewportOverrideProvider isCompactViewport>
         <FilePreview
@@ -573,16 +623,19 @@ describe("FilePreview", () => {
         />
       </CompactViewportOverrideProvider>,
     );
-    expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Raw" })).toBeTruthy();
+
+    expect(screen.getByRole("radio", { name: "Preview" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Raw" })).toBeTruthy();
     expect(
       screen.queryByRole("button", { name: "Copy HTML source" }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Refresh file" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "File actions" }));
+
     const refresh = await screen.findByRole("menuitem", {
       name: "Refresh file",
     });
+
     expect(
       screen.getByRole("menuitem", { name: "Copy HTML source" }),
     ).toBeTruthy();
@@ -600,11 +653,13 @@ describe("FilePreview", () => {
       await screen.findByRole("menuitem", { name: "Open in editor" }),
     );
     expect(onOpenInEditor).toHaveBeenCalledWith("reports/gallery.html");
-    fireEvent.click(screen.getByRole("button", { name: "Raw" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Raw" }));
     fireEvent.click(screen.getByRole("button", { name: "File actions" }));
+
     const wrap = await screen.findByRole("menuitemcheckbox", {
       name: "Wrap lines",
     });
+
     expect(wrap.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(wrap);
     fireEvent.click(screen.getByRole("button", { name: "File actions" }));
@@ -655,7 +710,7 @@ describe("FilePreview", () => {
 
   it("hands the desktop shell an absolute preview url", () => {
     const openExternalUrl = vi.fn();
-    (window as unknown as { bbDesktop: unknown }).bbDesktop = {
+    (window as unknown as { omnyoDesktop: unknown }).omnyoDesktop = {
       openExternalUrl,
     };
 
@@ -684,7 +739,7 @@ describe("FilePreview", () => {
         `${window.location.origin}/api/v1/threads/thread-1/thread-storage/files/docs/progress-vis.html`,
       );
     } finally {
-      delete (window as unknown as { bbDesktop?: unknown }).bbDesktop;
+      delete (window as unknown as { omnyoDesktop?: unknown }).omnyoDesktop;
     }
   });
 
@@ -761,8 +816,8 @@ describe("FilePreview", () => {
 
     expect(
       screen
-        .getByRole("button", { name: "Preview" })
-        .getAttribute("aria-pressed"),
+        .getByRole("radio", { name: "Preview" })
+        .getAttribute("aria-checked"),
     ).toBe("true");
     const iframe = container.querySelector("iframe");
     expect(iframe?.getAttribute("src")).toBe("/preview/docs/report.html");
@@ -814,7 +869,7 @@ describe("FilePreview", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Raw" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Raw" }));
 
     await screen.findByTestId("pierre-file");
     expect(
@@ -824,6 +879,7 @@ describe("FilePreview", () => {
 
   it("does not report truncation for a CSV exactly at the row cap", () => {
     const lines = ["name"];
+
     for (let rowIndex = 0; rowIndex < 500; rowIndex += 1) {
       lines.push(`r${rowIndex + 1}`);
     }
@@ -841,6 +897,7 @@ describe("FilePreview", () => {
     const columnCount = 120;
     const header = Array.from({ length: columnCount }, (_, i) => `col_${i}`);
     const lines = [header.join(",")];
+
     for (let rowIndex = 0; rowIndex < 600; rowIndex += 1) {
       lines.push(header.map((_, c) => `r${rowIndex}c${c}`).join(","));
     }
@@ -866,6 +923,7 @@ describe("FilePreview", () => {
     expect(screen.queryByText("r499c0")).toBeNull();
 
     const scrollBox = table.parentElement;
+
     if (!(scrollBox instanceof HTMLElement)) throw new Error("no scroll box");
     scrollBox.scrollTop = 499 * CSV_TEST_ROW_HEIGHT_PX;
     fireEvent.scroll(scrollBox);
@@ -924,7 +982,7 @@ describe("FilePreview", () => {
       />,
     );
 
-    expect(screen.getByRole("alert").textContent).toBe(
+    expect(screen.getByRole("alert").textContent).toContain(
       "File is too large to preview",
     );
   });
@@ -934,7 +992,7 @@ describe("FilePreview", () => {
       <SecondaryPanelFilePreview
         activePath="docs/notes.md"
         error={
-          new BbHttpError({
+          new OmnyoHttpError({
             status: 502,
             code: "host_unavailable",
             message: "Host is not connected",
@@ -949,7 +1007,9 @@ describe("FilePreview", () => {
       />,
     );
 
-    expect(screen.getByRole("alert").textContent).toBe("Host is not connected");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Host is not connected",
+    );
   });
 
   it.each([false, true])(
@@ -974,7 +1034,7 @@ describe("FilePreview", () => {
         />,
       );
 
-      expect(screen.getByRole("alert").textContent).toBe("File not found.");
+      expect(screen.getByRole("alert").textContent).toContain("File not found");
     },
   );
 
@@ -983,7 +1043,7 @@ describe("FilePreview", () => {
       <SecondaryPanelFilePreview
         activePath="does-not-exist.md"
         error={
-          new BbHttpError({
+          new OmnyoHttpError({
             status: 404,
             code: "ENOENT",
             message: "Path does not exist: /workspace/does-not-exist.md",
@@ -998,7 +1058,7 @@ describe("FilePreview", () => {
       />,
     );
 
-    expect(screen.getByRole("alert").textContent).toBe("File not found.");
+    expect(screen.getByRole("alert").textContent).toContain("File not found");
   });
 
   it("falls back to the generic failure message when the error carries none", () => {
@@ -1011,11 +1071,54 @@ describe("FilePreview", () => {
       />,
     );
 
-    expect(screen.getByRole("alert").textContent).toBe("Failed to load file");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Couldn’t open this file",
+    );
+  });
+
+  it("renders .htm files with the existing Preview and Raw controls", () => {
+    const path = "reports/report.HTM";
+    const url = "/preview/reports/report.HTM";
+
+    const view = render(
+      <SecondaryPanelFilePreview
+        activePath={path}
+        filePreview={{
+          kind: "text",
+          content: "<!doctype html><h1>Report</h1>",
+          mimeType: "text/html",
+          path,
+          url,
+        }}
+        htmlPreviewUrl={url}
+        isLoading={false}
+      />,
+    );
+
+    expect(view.container.querySelector("iframe")?.getAttribute("src")).toBe(
+      url,
+    );
+    expect(
+      screen
+        .getByRole("radio", { name: "Preview" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("radio", { name: "Raw" }));
+    expect(
+      screen.getByRole("radio", { name: "Raw" }).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      view.container.querySelector("diffs-container")?.shadowRoot?.textContent,
+    ).toBe("<!doctype html><h1>Report</h1>");
+    fireEvent.click(screen.getByRole("radio", { name: "Preview" }));
+    expect(view.container.querySelector("iframe")?.getAttribute("src")).toBe(
+      url,
+    );
   });
 
   it("renders HTML over the preview render limit as source instead of an iframe", () => {
     const content = `<html>${"a".repeat(5 * 1024 * 1024)}</html>`;
+
     const view = render(
       <SecondaryPanelFilePreview
         activePath="reports/large.html"
@@ -1053,7 +1156,7 @@ describe("FilePreview", () => {
 
     expect(view.container.querySelector("iframe")).toBeNull();
     expect(
-      screen.getByText("This file is too large to preview."),
+      screen.getByText(/This file is too large to preview here\./),
     ).not.toBeNull();
     expect(
       screen.getByRole("link", { name: "Download" }).getAttribute("href"),
@@ -1077,9 +1180,9 @@ describe("FilePreview", () => {
     );
 
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByText("application/zip · 2.0 KB")).not.toBeNull();
+    expect(screen.getByText("2.0 KB · application/zip")).not.toBeNull();
     expect(
-      screen.getByText("This file type can't be previewed."),
+      screen.getByText(/This file type can't be previewed here\./),
     ).not.toBeNull();
     const download = screen.getByRole("link", { name: "Download" });
     expect(download.getAttribute("href")).toBe(
@@ -1096,6 +1199,7 @@ describe("FilePreview", () => {
       path: "apps/app/src/lib/thread-read-state.ts",
       url: "/api/v1/preview/one",
     };
+
     const view = render(
       <SecondaryPanelFilePreview
         activePath={firstPreview.path}
@@ -1128,6 +1232,7 @@ describe("FilePreview", () => {
 
   it("tracks preview loading across view changes, document revisions, and URLs", () => {
     vi.useFakeTimers();
+
     const preview = (revision: string, url = "/gallery.html") => (
       <FilePreview
         path="gallery.html"
@@ -1143,6 +1248,7 @@ describe("FilePreview", () => {
         }}
       />
     );
+
     const view = render(
       <FilePreview
         path="gallery.html"
@@ -1151,6 +1257,7 @@ describe("FilePreview", () => {
         onRefresh={() => {}}
       />,
     );
+
     expect(screen.queryByRole("status")).toBeNull();
     act(() => vi.advanceTimersByTime(200));
     const loadingStatus = screen.getByRole("status");
@@ -1158,10 +1265,10 @@ describe("FilePreview", () => {
     view.rerender(preview("first"));
     expect(screen.getByRole("status")).toBe(loadingStatus);
     const frame = screen.getByTitle("Gallery");
-    fireEvent.click(screen.getByRole("button", { name: "Raw" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Raw" }));
     expect(screen.queryByRole("status")).toBeNull();
     fireEvent.load(frame);
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Preview" }));
     act(() => vi.advanceTimersByTime(200));
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByTitle("Gallery")).toBe(frame);
@@ -1182,8 +1289,10 @@ describe("FilePreview", () => {
 
   it("reloads an HTML iframe only when the fetched source changes", () => {
     const path = "reports/preview.html";
+
     const htmlPreviewUrl =
       "/api/v1/threads/thread-1/worktree/files/preview.html";
+
     const firstPreview = {
       kind: "text" as const,
       content: "<!doctype html><h1>First</h1>",
@@ -1191,6 +1300,7 @@ describe("FilePreview", () => {
       path,
       url: htmlPreviewUrl,
     };
+
     const view = render(
       <SecondaryPanelFilePreview
         activePath={path}

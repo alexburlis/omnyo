@@ -1,5 +1,5 @@
-import type { PluginRuntimeStatus } from "@bb/server-contract";
-import type { IconName } from "@bb/shared-ui/icon";
+import type { PluginRuntimeStatus } from "@omnyo/server-contract";
+import type { IconName } from "@omnyo/shared-ui/icon";
 import type { PluginListItem } from "@/hooks/queries/plugin-settings-queries";
 
 export interface PluginRuntimeStatusPresentation {
@@ -48,18 +48,20 @@ function pluginRuntimeRecovery(plugin: PluginListItem): string {
     case "error":
       if (configuredPathUnavailable(plugin))
         return "Check the path, then reload.";
+
       return plugin.source.startsWith("path:")
         ? "Fix the plugin, then reload."
         : "Try reloading it.";
     case "incompatible":
       return plugin.provenance === "builtin"
-        ? "Update bb."
+        ? "Update Omnyo."
         : "Install a compatible version.";
     case "missing":
       if (plugin.source.startsWith("path:"))
         return "Restore the folder, then reload.";
+
       return plugin.provenance === "builtin"
-        ? "Update or reinstall bb."
+        ? "Update or reinstall Omnyo."
         : "Reinstall from its source.";
     case "needs-configuration":
       return plugin.hasSettings ? "" : "Then reload.";
@@ -79,15 +81,17 @@ function pluginRuntimeCondition(plugin: PluginListItem): string {
         ? "Configured folder unavailable."
         : "The plugin couldn't start.";
     case "incompatible":
-      return "This version is incompatible with bb.";
+      return "This version is incompatible with Omnyo.";
     case "missing":
       return "Plugin files are missing.";
     case "needs-configuration": {
       const detail = plugin.statusDetail?.trim();
+
       return detail && detail.length <= 60
         ? detail
         : "Complete the required settings.";
     }
+
     case "degraded":
       return "A service is still stopping.";
     default:
@@ -99,7 +103,9 @@ export function pluginRuntimeStatusPresentation(
   plugin: PluginListItem,
 ): PluginRuntimeStatusPresentation | null {
   const definition = PLUGIN_RUNTIME_STATUS_DEFINITIONS[plugin.status];
+
   if (definition === null) return null;
+
   return {
     ...definition,
     condition: pluginRuntimeCondition(plugin),
@@ -121,6 +127,7 @@ export function pluginRowSignal(
   plugin: PluginListItem,
 ): PluginRowSignal | null {
   const state = plugin.updateState;
+
   if (state.lastFailure !== null) {
     return {
       kind: "status",
@@ -133,7 +140,9 @@ export function pluginRowSignal(
           : `Update to ${state.lastFailure.version} failed and was rolled back.`,
     };
   }
+
   const runtimeStatus = pluginRuntimeStatusPresentation(plugin);
+
   if (runtimeStatus !== null) {
     return {
       kind: "status",
@@ -143,6 +152,7 @@ export function pluginRowSignal(
       detail: plugin.statusDetail,
     };
   }
+
   if (state.outcome === "unavailable") {
     return {
       kind: "status",
@@ -152,8 +162,10 @@ export function pluginRowSignal(
       detail: state.detail,
     };
   }
+
   if (state.availableVersion !== null) {
     return { kind: "update", version: state.availableVersion };
   }
+
   return null;
 }

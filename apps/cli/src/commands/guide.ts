@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { createGuideArea } from "@bb/sdk/node";
+import { createGuideArea } from "@omnyo/sdk/node";
 import { action, CliUsageError } from "../action.js";
 import { CORE_COMMAND_GROUPS } from "../command-groups.js";
 import { outputJson } from "./helpers.js";
@@ -20,6 +20,7 @@ function argumentUsage(command: Command): string {
   return command.registeredArguments
     .map((argument) => {
       const name = `${argument.name()}${argument.variadic ? "..." : ""}`;
+
       return argument.required ? `<${name}>` : `[${name}]`;
     })
     .join(" ");
@@ -33,18 +34,25 @@ function collectCommandIndex(
     if (child.name() === "help") return [];
     const path = [...prefix, child.name()];
     const nested = collectCommandIndex(child, path);
-    if (nested.length > 0) return nested;
-    return [
-      {
-        aliases: child.aliases(),
-        arguments: argumentUsage(child),
-        description: child.description(),
-        options: child.options
-          .filter((option) => !option.hidden)
-          .map((option) => option.flags.replace(/^-\w, /u, "")),
-        path: path.join(" "),
-      },
-    ];
+
+    const options = child.options
+      .filter((option) => !option.hidden)
+      .map((option) => option.flags.replace(/^-\w, /u, ""));
+
+    const entry: GuideCommandIndexEntry = {
+      aliases: child.aliases(),
+      arguments: argumentUsage(child),
+      description: child.description(),
+      options,
+      path: path.join(" "),
+    };
+
+    if (nested.length === 0) return [entry];
+
+    const runsItself =
+      child.registeredArguments.length > 0 || options.length > 0;
+
+    return runsItself ? [entry, ...nested] : nested;
   });
 }
 
@@ -52,19 +60,25 @@ export async function buildCommandIndex(
   group: string | undefined,
 ): Promise<GuideCommandIndexEntry[]> {
   const program = new Command();
+
   const deps = {
     getUrl: () => "",
     getContext: () => ({ serverUrl: "" }),
   };
+
   for (const entry of CORE_COMMAND_GROUPS) {
     const register = await entry.load();
     register(program, deps);
   }
+
   const entries = collectCommandIndex(program, []);
+
   if (group === undefined) return entries;
+
   const filtered = entries.filter(
     (entry) => entry.path === group || entry.path.startsWith(`${group} `),
   );
+
   if (filtered.length === 0) {
     throw new CliUsageError({
       code: "invalid_value",
@@ -72,6 +86,7 @@ export async function buildCommandIndex(
       message: `Unknown command group '${group}'.`,
     });
   }
+
   return filtered;
 }
 
@@ -80,13 +95,16 @@ function formatCommandIndexLine(
   withOptions: boolean,
 ): string {
   const names = [entry.path, ...entry.aliases.map((alias) => `|${alias}`)];
-  const head = [`bb ${names.join("")}`, entry.arguments]
+
+  const head = [`omnyo ${names.join("")}`, entry.arguments]
     .filter((part) => part.length > 0)
     .join(" ");
+
   const options =
     withOptions && entry.options.length > 0
       ? `  ${entry.options.map((option) => `[${option}]`).join(" ")}`
       : "";
+
   return `${head}${options}\n    ${entry.description}`;
 }
 
@@ -94,7 +112,7 @@ export function registerGuideCommand(program: Command): void {
   program
     .command("guide [chapter] [group]")
     .description(
-      "Show the BB system overview and CLI guide; `bb guide commands [group]` lists every core command on one page",
+      "Show the Omnyo system overview and CLI guide; `omnyo guide commands [group]` lists every core command on one page",
     )
     .option("--json", "Print machine-readable JSON output")
     .action(
@@ -106,22 +124,30 @@ export function registerGuideCommand(program: Command): void {
         ) => {
           if (chapter === "commands") {
             const commands = await buildCommandIndex(group);
+
             if (outputJson(opts, { chapter, commands })) return;
+
             const lines = commands.map((entry) =>
               formatCommandIndexLine(entry, group !== undefined),
             );
+
             console.log(lines.join("\n"));
+
             if (group === undefined) {
               console.log(
-                "\nRun `bb guide commands <group>` (for example `bb guide commands thread`) to include every option. Commands contributed by plugins are listed by `bb plugin list`.",
+                "\nRun `omnyo guide commands <group>` (for example `omnyo guide commands thread`) to include every option. Commands contributed by plugins are listed by `omnyo plugin list`.",
               );
             }
+
             return;
           }
+
           const rendered = createGuideArea().render({ chapter });
+
           if (chapter) {
             if (outputJson(opts, rendered)) return;
             console.log(rendered.content);
+
             return;
           }
 

@@ -1,6 +1,6 @@
-import type { ThreadListEntry } from "@bb/domain";
+import type { ThreadListEntry } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import {
   buildParentSelectorOptions,
   isRootThread,

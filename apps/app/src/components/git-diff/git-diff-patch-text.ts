@@ -5,6 +5,7 @@ import {
 } from "./git-diff-parsing";
 
 type DiffPatchDisplayStyle = "unified" | "split";
+
 type DiffPatchLinePrefix = " " | "+" | "-";
 
 interface DiffPatchLine {
@@ -38,6 +39,7 @@ function formatPrefixedDiffPath(path: string, prefix: "a" | "b") {
   if (path === "/dev/null") {
     return path;
   }
+
   return path.startsWith(`${prefix}/`) ? path : `${prefix}/${path}`;
 }
 
@@ -46,6 +48,7 @@ function getDiffPatchPaths(fileDiff: ParsedGitDiffFile) {
   const previousPath = normalizeGitDiffPath(fileDiff.prevName) ?? currentPath;
   const gitOldPath = previousPath === "/dev/null" ? currentPath : previousPath;
   const gitNewPath = currentPath === "/dev/null" ? previousPath : currentPath;
+
   return {
     diffGitOldPath: formatPrefixedDiffPath(gitOldPath, "a"),
     diffGitNewPath: formatPrefixedDiffPath(gitNewPath, "b"),
@@ -74,12 +77,15 @@ function collectDiffPatchLines(fileDiff: ParsedGitDiffFile): DiffPatchLine[] {
         for (let offset = 0; offset < content.lines; offset += 1) {
           const oldLineIndex = deletionLineIndex + offset;
           const newLineIndex = additionLineIndex + offset;
+
           const lineText =
             fileDiff.additionLines[newLineIndex] ??
             fileDiff.deletionLines[oldLineIndex];
+
           if (lineText === undefined) {
             continue;
           }
+
           patchLines.push({
             hunkIndex,
             newLineNumber: getDiffLineNumberFromIndex({
@@ -99,6 +105,7 @@ function collectDiffPatchLines(fileDiff: ParsedGitDiffFile): DiffPatchLine[] {
             unifiedLineIndex: unifiedLineIndex + offset,
           });
         }
+
         unifiedLineIndex += content.lines;
         splitLineIndex += content.lines;
         deletionLineIndex += content.lines;
@@ -108,12 +115,15 @@ function collectDiffPatchLines(fileDiff: ParsedGitDiffFile): DiffPatchLine[] {
 
       const splitCount = Math.max(content.deletions, content.additions);
       const unifiedCount = content.deletions + content.additions;
+
       for (let offset = 0; offset < content.deletions; offset += 1) {
         const oldLineIndex = deletionLineIndex + offset;
         const lineText = fileDiff.deletionLines[oldLineIndex];
+
         if (lineText === undefined) {
           continue;
         }
+
         patchLines.push({
           hunkIndex,
           newLineNumber: null,
@@ -129,12 +139,15 @@ function collectDiffPatchLines(fileDiff: ParsedGitDiffFile): DiffPatchLine[] {
           unifiedLineIndex: unifiedLineIndex + offset,
         });
       }
+
       for (let offset = 0; offset < content.additions; offset += 1) {
         const newLineIndex = additionLineIndex + offset;
         const lineText = fileDiff.additionLines[newLineIndex];
+
         if (lineText === undefined) {
           continue;
         }
+
         patchLines.push({
           hunkIndex,
           newLineNumber: getDiffLineNumberFromIndex({
@@ -150,6 +163,7 @@ function collectDiffPatchLines(fileDiff: ParsedGitDiffFile): DiffPatchLine[] {
           unifiedLineIndex: unifiedLineIndex + content.deletions + offset,
         });
       }
+
       unifiedLineIndex += unifiedCount;
       splitLineIndex += splitCount;
       deletionLineIndex += content.deletions;
@@ -180,16 +194,19 @@ function getDiffPatchSelectionPointIndex({
 }) {
   const sides: SelectionSide[] =
     side === undefined ? ["additions", "deletions"] : [side];
+
   for (const candidateSide of sides) {
     const line = patchLines.find((patchLine) =>
       candidateSide === "additions"
         ? patchLine.newLineNumber === lineNumber
         : patchLine.oldLineNumber === lineNumber,
     );
+
     if (line !== undefined) {
       return getDiffPatchLineSelectionIndex(line, displayStyle);
     }
   }
+
   return null;
 }
 
@@ -202,9 +219,11 @@ function isDiffPatchLineSelectedInSplitView({
 }) {
   const startSide = range.side ?? range.endSide ?? "additions";
   const endSide = range.endSide ?? startSide;
+
   if (startSide !== endSide || line.selectionSide === null) {
     return true;
   }
+
   return line.selectionSide === startSide;
 }
 
@@ -223,26 +242,32 @@ function getSelectedDiffPatchLines({
     patchLines,
     side: range.side,
   });
+
   const endIndex = getDiffPatchSelectionPointIndex({
     displayStyle,
     lineNumber: range.end,
     patchLines,
     side: range.endSide ?? range.side,
   });
+
   if (startIndex === null || endIndex === null) {
     return [];
   }
 
   const firstIndex = Math.min(startIndex, endIndex);
   const lastIndex = Math.max(startIndex, endIndex);
+
   return patchLines.filter((line) => {
     const lineIndex = getDiffPatchLineSelectionIndex(line, displayStyle);
+
     if (lineIndex < firstIndex || lineIndex > lastIndex) {
       return false;
     }
+
     if (displayStyle === "unified") {
       return true;
     }
+
     return isDiffPatchLineSelectedInSplitView({ line, range });
   });
 }
@@ -259,15 +284,19 @@ function buildDiffPatchHunkHeader(lines: DiffPatchLine[]) {
   const oldLineNumbers = lines
     .map((line) => line.oldLineNumber)
     .filter((lineNumber) => lineNumber !== null);
+
   const newLineNumbers = lines
     .map((line) => line.newLineNumber)
     .filter((lineNumber) => lineNumber !== null);
+
   const oldStart =
     getMinimumLineNumber(oldLineNumbers) ??
     Math.max(0, (getMinimumLineNumber(newLineNumbers) ?? 1) - 1);
+
   const newStart =
     getMinimumLineNumber(newLineNumbers) ??
     Math.max(0, (getMinimumLineNumber(oldLineNumbers) ?? 1) - 1);
+
   return `@@ -${formatUnifiedDiffRange(
     oldStart,
     oldLineNumbers.length,
@@ -276,14 +305,17 @@ function buildDiffPatchHunkHeader(lines: DiffPatchLine[]) {
 
 function groupDiffPatchLinesByHunk(lines: DiffPatchLine[]) {
   const groups: DiffPatchLine[][] = [];
+
   for (const line of lines) {
     const previousGroup = groups.at(-1);
+
     if (previousGroup?.at(-1)?.hunkIndex === line.hunkIndex) {
       previousGroup.push(line);
     } else {
       groups.push([line]);
     }
   }
+
   return groups;
 }
 
@@ -295,17 +327,20 @@ function buildUnifiedDiffPatchText({
   lines: DiffPatchLine[];
 }) {
   const paths = getDiffPatchPaths(fileDiff);
+
   const patchTextLines = [
     `diff --git ${paths.diffGitOldPath} ${paths.diffGitNewPath}`,
     `--- ${paths.oldHeaderPath}`,
     `+++ ${paths.newHeaderPath}`,
   ];
+
   for (const group of groupDiffPatchLinesByHunk(lines)) {
     patchTextLines.push(
       buildDiffPatchHunkHeader(group),
       ...group.map((line) => `${line.prefix}${line.text}`),
     );
   }
+
   return patchTextLines.join("\n");
 }
 
@@ -326,14 +361,17 @@ export function buildDiffLineSelectionText({
   range: SelectedLineRange;
 }): string | null {
   const patchLines = collectDiffPatchLines(fileDiff);
+
   const selectedLines = getSelectedDiffPatchLines({
     displayStyle,
     patchLines,
     range,
   });
+
   if (selectedLines.length === 0) {
     return null;
   }
+
   return buildUnifiedDiffPatchText({ fileDiff, lines: selectedLines });
 }
 
@@ -341,6 +379,7 @@ export function getDiffShadowRoots(containerElement: HTMLElement | null) {
   if (containerElement === null) {
     return [];
   }
+
   return Array.from(containerElement.querySelectorAll("diffs-container"))
     .map((container) => container.shadowRoot)
     .filter((root) => root !== null);
@@ -348,12 +387,15 @@ export function getDiffShadowRoots(containerElement: HTMLElement | null) {
 
 function getDiffDomLineSide(lineElement: HTMLElement): SelectionSide {
   const codeElement = lineElement.closest("[data-deletions],[data-additions]");
+
   if (codeElement?.hasAttribute("data-deletions")) {
     return "deletions";
   }
+
   if (codeElement?.hasAttribute("data-additions")) {
     return "additions";
   }
+
   return lineElement.dataset.lineType === "change-deletion"
     ? "deletions"
     : "additions";
@@ -361,6 +403,7 @@ function getDiffDomLineSide(lineElement: HTMLElement): SelectionSide {
 
 function getDiffDomLineNumber(lineElement: HTMLElement): number | null {
   const lineNumber = Number.parseInt(lineElement.dataset.line ?? "", 10);
+
   return Number.isFinite(lineNumber) ? lineNumber : null;
 }
 
@@ -374,6 +417,7 @@ function getDiffDomLineIndex(lineElement: HTMLElement) {
   )
     .split(",")
     .map((value) => Number.parseInt(value, 10));
+
   if (
     unifiedLineIndex === undefined ||
     splitLineIndex === undefined ||
@@ -382,6 +426,7 @@ function getDiffDomLineIndex(lineElement: HTMLElement) {
   ) {
     return null;
   }
+
   return { splitLineIndex, unifiedLineIndex };
 }
 
@@ -404,12 +449,15 @@ function getDiffDomPatchLine({
   lineElement: HTMLElement;
 }): DiffPatchLine | null {
   const lineIndex = getDiffDomLineIndex(lineElement);
+
   if (lineIndex === null) {
     return null;
   }
+
   const lineNumber = getDiffDomLineNumber(lineElement);
   const prefix = getDiffDomPatchPrefix(lineElement);
   const side = getDiffDomLineSide(lineElement);
+
   return {
     hunkIndex,
     newLineNumber:
@@ -454,6 +502,7 @@ export function buildDiffDomSelectionText({
 
   const selectedRows: HTMLElement[] = [];
   const seenRows = new Set<string>();
+
   for (const root of getDiffShadowRoots(containerElement)) {
     for (const row of root.querySelectorAll<HTMLElement>(
       "[data-selected-line][data-line]",
@@ -462,9 +511,11 @@ export function buildDiffDomSelectionText({
       const lineIndex = row.dataset.lineIndex ?? "";
       const side = getDiffDomLineSide(row);
       const key = `${lineIndex}:${side}:${text}`;
+
       if (seenRows.has(key)) {
         continue;
       }
+
       seenRows.add(key);
       selectedRows.push(row);
     }
@@ -475,17 +526,21 @@ export function buildDiffDomSelectionText({
   }
 
   const patchLineMap = new Map<string, DiffPatchLine>();
+
   for (const row of selectedRows) {
     const patchLine = getDiffDomPatchLine({ hunkIndex: 0, lineElement: row });
+
     if (patchLine === null) {
       continue;
     }
+
     const key = [
       patchLine.unifiedLineIndex,
       patchLine.splitLineIndex,
       patchLine.prefix,
       patchLine.text,
     ].join(":");
+
     const existingLine = patchLineMap.get(key);
     patchLineMap.set(
       key,
@@ -494,12 +549,15 @@ export function buildDiffDomSelectionText({
         : (existingLine ?? patchLine),
     );
   }
+
   const patchLines = Array.from(patchLineMap.values()).sort((lineA, lineB) => {
     if (lineA.unifiedLineIndex !== lineB.unifiedLineIndex) {
       return lineA.unifiedLineIndex - lineB.unifiedLineIndex;
     }
+
     return lineA.prefix.localeCompare(lineB.prefix);
   });
+
   return patchLines.length > 0
     ? buildUnifiedDiffPatchText({ fileDiff, lines: patchLines })
     : null;

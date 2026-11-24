@@ -32,6 +32,7 @@ export function resolveBundledMarketplaceDirectory(
       BUNDLED_MARKETPLACE_GENERATED_DIRECTORY,
     ),
   ];
+
   return (
     candidates.find((candidate) =>
       existsSync(path.join(candidate, BUNDLED_MARKETPLACE_FILENAME)),
@@ -45,16 +46,20 @@ export function loadBundledMarketplace(
 ): { catalog: MarketplaceManifestV2; directory: string; manifestJson: string } {
   const directory = resolveBundledMarketplaceDirectory(baseDirectory);
   const manifestPath = path.join(directory, BUNDLED_MARKETPLACE_FILENAME);
+
   if (!existsSync(manifestPath)) {
     throw new Error(
-      `the bundled marketplace document is missing at ${manifestPath}; run pnpm exec turbo run generate:bb-official-marketplace --filter=@bb/server`,
+      `the bundled marketplace document is missing at ${manifestPath}; run pnpm exec turbo run generate:omnyo-official-marketplace --filter=@omnyo/server`,
     );
   }
+
   const catalog = parseBundledMarketplaceManifestJson(
     readFileSync(manifestPath, "utf8"),
     `${BUNDLED_MARKETPLACE_NAME} marketplace catalog`,
   );
+
   const names = new Set(plugins.map((plugin) => plugin.name));
+
   const filtered = {
     ...catalog,
     plugins: catalog.plugins.filter(
@@ -63,6 +68,7 @@ export function loadBundledMarketplace(
         names.has(entry.source.bundled.plugin),
     ),
   };
+
   return {
     catalog: filtered,
     directory,

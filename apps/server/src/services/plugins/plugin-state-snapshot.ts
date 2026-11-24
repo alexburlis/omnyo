@@ -11,10 +11,16 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { CURATED_PLUGIN_MARKETPLACE_NAME } from "@bb/server-contract";
+import {
+  importLegacyBuiltinNameV1,
+  importLegacyPluginSnapshotIdV1,
+} from "@omnyo/domain";
+import {
+  projectOmnyoSnapshotPathV1,
+  projectLegacyBundledMarketplaceSnapshotV1,
+} from "./omnyo-plugin-state-v1.js";
 import {
   createPluginStateSnapshot,
-  getInstalledPlugin,
   getPluginStateSnapshot,
   listPluginKvRows,
   listPluginSchedules,
@@ -24,7 +30,7 @@ import {
   type DbConnection,
   type InstalledPluginRow,
   type PluginStateSnapshotRow,
-} from "@bb/db";
+} from "@omnyo/db";
 
 const kvRowSchema = z.object({
   pluginId: z.string(),
@@ -32,7 +38,9 @@ const kvRowSchema = z.object({
   value: z.string(),
   updatedAt: z.number().int(),
 });
+
 const settingRowSchema = kvRowSchema;
+
 const scheduleRowSchema = z.object({
   pluginId: z.string(),
   name: z.string(),
@@ -43,11 +51,13 @@ const scheduleRowSchema = z.object({
   lastError: z.string().nullable(),
   updatedAt: z.number().int(),
 });
+
 const stateSchema = z.object({
   kv: z.array(kvRowSchema),
   settings: z.array(settingRowSchema),
   schedules: z.array(scheduleRowSchema),
 });
+
 const installedPluginRowFields = {
   id: z.string(),
   source: z.string(),
@@ -85,6 +95,7 @@ const installedPluginRowFields = {
   installedAt: z.number().int(),
   updatedAt: z.number().int(),
 } as const;
+
 const installedPluginRowSchema = z
   .object({
     ...installedPluginRowFields,
@@ -93,6 +104,7 @@ const installedPluginRowSchema = z
     catalogMarketplaceName: z.string().nullable().default(null),
   })
   .strict();
+
 const legacyInstalledPluginRowSchema = z
   .object({
     ...installedPluginRowFields,
@@ -113,6 +125,7 @@ async function exists(path: string): Promise<boolean> {
       ) {
         return false;
       }
+
       throw error;
     },
   );
@@ -120,6 +133,82 @@ async function exists(path: string): Promise<boolean> {
 
 function pluginDataDir(dataDir: string, pluginId: string): string {
   return join(dataDir, "plugins", pluginId);
+}
+
+async function readSnapshotHostState(snapshot: PluginStateSnapshotRow) {
+  const state = stateSchema.parse(
+    JSON.parse(await readFile(snapshot.statePath, "utf8")),
+  );
+
+  const project = <T extends { pluginId: string }>(rows: T[]): T[] =>
+    rows.map((row) => ({
+      ...row,
+      pluginId: importLegacyPluginSnapshotIdV1(row.pluginId, snapshot.pluginId),
+    }));
+
+  return {
+    kv: project(state.kv),
+    settings: project(state.settings),
+    schedules: project(state.schedules),
+  };
+}
+
+const RETIRED_UPSTREAM_MARKETPLACE_NAME = "bb-community";
+
+function projectSnapshotRegistration(
+  db: DbConnection,
+  snapshot: PluginStateSnapshotRow,
+  registration: InstalledPluginRow,
+): InstalledPluginRow {
+  const id = importLegacyPluginSnapshotIdV1(registration.id, snapshot.pluginId);
+  const rootDir = projectOmnyoSnapshotPathV1(db, registration.rootDir);
+
+  const sourcePath =
+    registration.sourcePath === null
+      ? null
+      : projectOmnyoSnapshotPathV1(db, registration.sourcePath);
+
+  const sourceBuiltinName = importLegacyBuiltinNameV1(
+    registration.sourceBuiltinName,
+  );
+
+  const source =
+    registration.source === `builtin:${registration.sourceBuiltinName}`
+      ? `builtin:${sourceBuiltinName}`
+      : registration.sourcePath !== null &&
+          registration.source === `path:${registration.sourcePath}`
+        ? `path:${sourcePath}`
+        : registration.source;
+
+  const catalog =
+    registration.provenance === "catalog"
+      ? projectLegacyBundledMarketplaceSnapshotV1(
+          db,
+          registration.catalogMarketplaceName,
+          registration.catalogEntryId,
+        )
+      : null;
+
+  const retiredCatalog =
+    catalog !== null &&
+    (catalog.catalogMarketplaceName === null ||
+      catalog.catalogMarketplaceName === RETIRED_UPSTREAM_MARKETPLACE_NAME);
+
+  return {
+    ...registration,
+    id,
+    rootDir,
+    sourcePath,
+    sourceBuiltinName,
+    source,
+    ...(retiredCatalog
+      ? {
+          provenance: "direct" as const,
+          catalogEntryId: null,
+          catalogMarketplaceName: null,
+        }
+      : (catalog ?? {})),
+  };
 }
 
 export async function createPluginStateSnapshotOnDisk(args: {
@@ -133,6 +222,7 @@ export async function createPluginStateSnapshotOnDisk(args: {
   previousRegistration: InstalledPluginRow;
 }): Promise<PluginStateSnapshotRow> {
   const id = randomUUID();
+
   const snapshotPath = join(
     args.dataDir,
     "plugins",
@@ -140,6 +230,7 @@ export async function createPluginStateSnapshotOnDisk(args: {
     args.pluginId,
     `${args.now}-${args.toArtifactId}-${id}`,
   );
+
   const sourceDir = pluginDataDir(args.dataDir, args.pluginId);
   const sourceDatabasePath = join(sourceDir, "data.db");
   const databasePath = join(snapshotPath, "data.db");
@@ -149,6 +240,7 @@ export async function createPluginStateSnapshotOnDisk(args: {
   const secretsPath = join(snapshotPath, "secrets");
   const hasDatabase = await exists(sourceDatabasePath);
   const hasSecrets = await exists(sourceSecretsPath);
+
   const record = createPluginStateSnapshot(args.db, {
     id,
     pluginId: args.pluginId,
@@ -162,27 +254,33 @@ export async function createPluginStateSnapshotOnDisk(args: {
     status: "pending",
     rollbackCandidateVersion: null,
     rollbackSourceFingerprint: null,
-    rollbackBbVersion: null,
+    rollbackCoreVersion: null,
     rollbackSdkVersion: null,
     rollbackDetail: null,
     createdAt: args.now,
     retainedUntil: args.retainedUntil,
     updatedAt: args.now,
   });
+
   try {
     await mkdir(snapshotPath, { recursive: true });
+
     if (hasDatabase) {
       const database = new Database(sourceDatabasePath);
+
       try {
         database.pragma("wal_checkpoint(TRUNCATE)");
       } finally {
         database.close();
       }
+
       await copyFile(sourceDatabasePath, databasePath);
     }
+
     if (hasSecrets) {
       await cp(sourceSecretsPath, secretsPath, { recursive: true });
     }
+
     await writeFile(
       statePath,
       JSON.stringify({
@@ -198,6 +296,7 @@ export async function createPluginStateSnapshotOnDisk(args: {
       { mode: 0o600 },
     );
     setPluginStateSnapshotStatus(args.db, id, "ready", args.now);
+
     return { ...record, status: "ready" };
   } catch (error) {
     setPluginStateSnapshotStatus(args.db, id, "failed", args.now);
@@ -212,9 +311,11 @@ export async function restorePluginStateSnapshot(args: {
   now: number;
 }): Promise<void> {
   const snapshot = getPluginStateSnapshot(args.db, args.snapshotId);
+
   if (snapshot === undefined) {
     throw new Error(`plugin state snapshot disappeared: ${args.snapshotId}`);
   }
+
   if (
     snapshot.status !== "ready" &&
     snapshot.status !== "rollback-pending" &&
@@ -225,26 +326,29 @@ export async function restorePluginStateSnapshot(args: {
       `plugin state snapshot ${snapshot.id} is not restorable (${snapshot.status})`,
     );
   }
+
+  const hostState = await readSnapshotHostState(snapshot);
   setPluginStateSnapshotStatus(args.db, snapshot.id, "restoring", args.now);
   const targetDir = pluginDataDir(args.dataDir, snapshot.pluginId);
   await mkdir(targetDir, { recursive: true });
   const targetDatabasePath = join(targetDir, "data.db");
   await rm(`${targetDatabasePath}-wal`, { force: true });
   await rm(`${targetDatabasePath}-shm`, { force: true });
+
   if (snapshot.databasePath === null) {
     await rm(targetDatabasePath, { force: true });
   } else {
     await copyFile(snapshot.databasePath, targetDatabasePath);
   }
+
   const targetSecretsPath = join(targetDir, "secrets");
   await rm(targetSecretsPath, { recursive: true, force: true });
+
   if (snapshot.secretsPath !== null) {
     await cp(snapshot.secretsPath, targetSecretsPath, { recursive: true });
   }
-  await restorePluginHostStateSnapshot({
-    db: args.db,
-    snapshotId: snapshot.id,
-  });
+
+  replacePluginSnapshotState(args.db, snapshot.pluginId, hostState);
 }
 
 export async function readPluginSnapshotRegistration(args: {
@@ -252,42 +356,34 @@ export async function readPluginSnapshotRegistration(args: {
   snapshotId: string;
 }): Promise<InstalledPluginRow> {
   const snapshot = getPluginStateSnapshot(args.db, args.snapshotId);
+
   if (snapshot === undefined) {
     throw new Error(`plugin state snapshot disappeared: ${args.snapshotId}`);
   }
+
   if (snapshot.registrationPath === null) {
     throw new Error(
       `plugin state snapshot ${snapshot.id} predates restart-safe rollback metadata`,
     );
   }
+
   const json: unknown = JSON.parse(
     await readFile(snapshot.registrationPath, "utf8"),
   );
+
   const current = installedPluginRowSchema.safeParse(json);
-  if (current.success) return current.data;
+
+  if (current.success)
+    return projectSnapshotRegistration(args.db, snapshot, current.data);
   const legacy = legacyInstalledPluginRowSchema.parse(json);
   const { marketplaceId, marketplaceEntryId, ...registration } = legacy;
-  const installed = getInstalledPlugin(args.db, legacy.id);
-  if (
-    legacy.provenance === "marketplace" &&
-    marketplaceId === CURATED_PLUGIN_MARKETPLACE_NAME &&
-    marketplaceEntryId !== null &&
-    installed?.provenance === "catalog" &&
-    installed.catalogEntryId === marketplaceEntryId
-  ) {
-    return {
-      ...registration,
-      provenance: "catalog",
-      catalogEntryId: marketplaceEntryId,
-      catalogMarketplaceName: CURATED_PLUGIN_MARKETPLACE_NAME,
-    };
-  }
-  return {
+
+  return projectSnapshotRegistration(args.db, snapshot, {
     ...registration,
     provenance: legacy.provenance === "builtin" ? "builtin" : "direct",
     catalogEntryId: null,
     catalogMarketplaceName: null,
-  };
+  });
 }
 
 export async function restorePluginHostStateSnapshot(args: {
@@ -295,11 +391,12 @@ export async function restorePluginHostStateSnapshot(args: {
   snapshotId: string;
 }): Promise<void> {
   const snapshot = getPluginStateSnapshot(args.db, args.snapshotId);
+
   if (snapshot === undefined) {
     throw new Error(`plugin state snapshot disappeared: ${args.snapshotId}`);
   }
-  const state = stateSchema.parse(
-    JSON.parse(await readFile(snapshot.statePath, "utf8")),
-  );
+
+  const state = await readSnapshotHostState(snapshot);
+
   replacePluginSnapshotState(args.db, snapshot.pluginId, state);
 }

@@ -12,7 +12,11 @@ import {
   type ReactNode,
 } from "react";
 import type { ActiveProfileConnection } from "@/lib/connection";
-import { getProfileStore, nativeAppState } from "@/lib/native";
+import {
+  getProfileStore,
+  nativeAppState,
+  nativeSessionCache,
+} from "@/lib/native";
 import {
   useProfileStoreState,
   type NewServerProfile,
@@ -26,6 +30,10 @@ import type { ProfileClient } from "@/lib/sdk";
 import { getAppProfileClientRegistry } from "./client-registry";
 import { getActiveProfileConnector } from "./connector";
 
+export type ProfileRemoval =
+  | { sessionCleared: true }
+  | { sessionCleared: false; error: unknown };
+
 export interface ProfilesContextValue {
   status: ProfileStoreStatus;
   profiles: readonly ServerProfile[];
@@ -33,15 +41,19 @@ export interface ProfilesContextValue {
   connection: ActiveProfileConnection | null;
   addProfile(input: NewServerProfile): Promise<ServerProfile>;
   updateProfile(id: string, patch: ServerProfilePatch): Promise<ServerProfile>;
-  removeProfile(id: string): Promise<void>;
+  removeProfile(id: string): Promise<ProfileRemoval>;
   setActiveProfile(id: string): Promise<void>;
+  renewSession(profileId: string): Promise<void>;
+  reportShellAuthFailure(profileId: string): void;
 }
 
 const ProfilesContext = createContext<ProfilesContextValue | null>(null);
 
 let placeholderQueryClient: QueryClient | null = null;
+
 function getPlaceholderQueryClient(): QueryClient {
   placeholderQueryClient ??= createProfileQueryClient();
+
   return placeholderQueryClient;
 }
 
@@ -49,6 +61,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   const store = getProfileStore();
   const connector = getActiveProfileConnector();
   const storeState = useProfileStoreState(store);
+
   const connection = useSyncExternalStore(
     connector.subscribe,
     connector.getSnapshot,
@@ -84,16 +97,27 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       async removeProfile(id) {
         await store.removeProfile(id);
         getAppProfileClientRegistry().disposeClient(id);
+
+        try {
+          await nativeSessionCache.clear(id);
+        } catch (error) {
+          return { sessionCleared: false, error };
+        }
+
+        return { sessionCleared: true };
       },
       setActiveProfile: (id) => store.setActiveProfile(id),
+      renewSession: (profileId) => connector.renewSession(profileId),
+      reportShellAuthFailure: (profileId) =>
+        connector.reportShellAuthFailure(profileId),
     }),
-    [store, storeState, activeProfile, connection],
+    [store, connector, storeState, activeProfile, connection],
   );
 
   return (
     <ProfilesContext.Provider value={value}>
       <QueryClientProvider
-        client={connection?.client.queryClient ?? getPlaceholderQueryClient()}
+        client={connection?.client?.queryClient ?? getPlaceholderQueryClient()}
       >
         {children}
       </QueryClientProvider>
@@ -103,16 +127,20 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
 
 export function useProfiles(): ProfilesContextValue {
   const value = useContext(ProfilesContext);
+
   if (!value) {
     throw new Error("useProfiles must be used inside <ProfilesProvider>");
   }
+
   return value;
 }
 
 export function useProfileClient(): ProfileClient {
   const { connection } = useProfiles();
-  if (!connection) {
+
+  if (!connection?.client) {
     throw new Error("useProfileClient requires an active server profile");
   }
+
   return connection.client;
 }

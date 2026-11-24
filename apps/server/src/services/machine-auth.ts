@@ -1,23 +1,37 @@
 import { createHash } from "node:crypto";
-import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { betterAuth } from "better-auth";
 import { apiKey } from "@better-auth/api-key";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
-import { authApiKeys, authUsers, type DbConnection } from "@bb/db";
-import { readOrCreateSecretFile } from "@bb/secret-storage";
+import { authApiKeys, authUsers, type DbConnection } from "@omnyo/db";
+import {
+  readOrCreateSecretFile,
+  type SecretVault,
+} from "@omnyo/secret-storage";
 import { z } from "zod";
 import type { ServerLogger } from "../types.js";
 import { runSerialized } from "./lib/async-deduper.js";
+import { AUTH_SECRET_FILE_NAME } from "./system/server-vault.js";
 
-const AUTH_SECRET_FILE_NAME = "auth-secret";
 export const DAEMON_ENROLL_CONFIG_ID = "daemon-enroll";
+
 export const DAEMON_HOST_CONFIG_ID = "daemon-host";
+
 const ENROLL_KEY_TTL_SECONDS = 60 * 15;
+
 const DAEMON_KEY_CACHE_TTL_MS = 30_000;
+
 const DAEMON_KEY_CACHE_MAX_ENTRIES = 1024;
-const MACHINE_AUTH_SYSTEM_USER_ID = "bb-machine-auth-system-user";
-const MACHINE_AUTH_SYSTEM_USER_EMAIL = "machine-auth@bb.internal";
+
+const MACHINE_AUTH_SYSTEM_USER_ID = "omnyo-machine-auth-system-user";
+
+const LEGACY_MACHINE_AUTH_SYSTEM_USER_ID_V1 = "bb-machine-auth-system-user";
+
+const MACHINE_AUTH_SYSTEM_USER_EMAIL = "machine-auth@omnyo.internal";
+
+const LEGACY_MACHINE_AUTH_SYSTEM_USER_EMAIL_V1 = "machine-auth@bb.internal";
+
 const MACHINE_AUTH_SYSTEM_USER_NAME = "Machine Auth System";
 
 const machineAuthSchema = {
@@ -94,9 +108,9 @@ interface CreateDaemonHostKeyResult {
 }
 
 interface CreateMachineAuthServiceArgs {
-  dataDir: string;
   db: DbConnection;
   logger: ServerLogger;
+  vault: SecretVault;
 }
 
 export interface MachineAuthService {
@@ -128,13 +142,13 @@ function parseCredentialMetadata(
   raw: unknown,
 ): MachineCredentialMetadata | null {
   const parsed = machineCredentialMetadataSchema.safeParse(raw);
+
   return parsed.success ? parsed.data : null;
 }
 
-async function readOrCreateAuthSecret(dataDir: string): Promise<string> {
-  return readOrCreateSecretFile({
+async function readOrCreateAuthSecret(vault: SecretVault): Promise<string> {
+  return readOrCreateSecretFile(vault, {
     bytes: 32,
-    dataDir,
     encoding: "hex",
     fileName: AUTH_SECRET_FILE_NAME,
   });
@@ -143,7 +157,8 @@ async function readOrCreateAuthSecret(dataDir: string): Promise<string> {
 export async function createMachineAuthService(
   args: CreateMachineAuthServiceArgs,
 ): Promise<MachineAuthService> {
-  const secret = await readOrCreateAuthSecret(args.dataDir);
+  const secret = await readOrCreateAuthSecret(args.vault);
+
   const auth = betterAuth({
     baseURL: "http://localhost",
     secret,
@@ -151,11 +166,12 @@ export async function createMachineAuthService(
       provider: "sqlite",
       schema: machineAuthSchema,
     }),
+    advanced: { database: { validateSchema: false } },
     plugins: [
       apiKey([
         {
           configId: DAEMON_ENROLL_CONFIG_ID,
-          defaultPrefix: "bbde_",
+          defaultPrefix: "omnyode_",
           enableMetadata: true,
           keyExpiration: {
             defaultExpiresIn: ENROLL_KEY_TTL_SECONDS,
@@ -165,7 +181,7 @@ export async function createMachineAuthService(
         },
         {
           configId: DAEMON_HOST_CONFIG_ID,
-          defaultPrefix: "bbdh_",
+          defaultPrefix: "omnyodh_",
           enableMetadata: true,
           references: "user",
           requireName: false,
@@ -174,49 +190,109 @@ export async function createMachineAuthService(
     ],
   });
 
-  let readyPromise: Promise<void> | null = null;
+  let readyPromise: Promise<string> | null = null;
   const hostOperations = new Map<string, Promise<unknown>>();
+
   const daemonKeyCache = new Map<
     string,
     { result: ApiKeyVerificationResult; validUntilMs: number }
   >();
+
   const pendingDaemonVerifications = new Set<Set<string>>();
 
   function invalidateDaemonHostKeys(hostId: string): void {
     for (const invalidatedHosts of pendingDaemonVerifications) {
       invalidatedHosts.add(hostId);
     }
+
     for (const [key, entry] of daemonKeyCache) {
       if (entry.result.metadata.hostId === hostId) daemonKeyCache.delete(key);
     }
   }
 
-  async function ensureSystemUser(): Promise<void> {
-    const now = new Date();
-    await args.db
-      .insert(authUsers)
-      .values({
-        id: MACHINE_AUTH_SYSTEM_USER_ID,
-        name: MACHINE_AUTH_SYSTEM_USER_NAME,
-        email: MACHINE_AUTH_SYSTEM_USER_EMAIL,
-        emailVerified: true,
-        image: null,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoNothing()
-      .run();
+  function ensureSystemUser(): string {
+    return args.db.transaction((db) => {
+      const users = db
+        .select()
+        .from(authUsers)
+        .where(
+          or(
+            inArray(authUsers.id, [
+              MACHINE_AUTH_SYSTEM_USER_ID,
+              LEGACY_MACHINE_AUTH_SYSTEM_USER_ID_V1,
+            ]),
+            inArray(authUsers.email, [
+              MACHINE_AUTH_SYSTEM_USER_EMAIL,
+              LEGACY_MACHINE_AUTH_SYSTEM_USER_EMAIL_V1,
+            ]),
+          ),
+        )
+        .all();
+
+      const existing = users[0];
+
+      if (
+        users.length > 1 ||
+        (existing !== undefined &&
+          existing.id !== MACHINE_AUTH_SYSTEM_USER_ID &&
+          existing.id !== LEGACY_MACHINE_AUTH_SYSTEM_USER_ID_V1)
+      ) {
+        throw new Error(
+          "Machine authentication principal collision; refusing to merge identities",
+        );
+      }
+
+      const now = new Date();
+
+      if (existing !== undefined) {
+        if (
+          existing.email !== MACHINE_AUTH_SYSTEM_USER_EMAIL ||
+          existing.name !== MACHINE_AUTH_SYSTEM_USER_NAME
+        ) {
+          db.update(authUsers)
+            .set({
+              email: MACHINE_AUTH_SYSTEM_USER_EMAIL,
+              name: MACHINE_AUTH_SYSTEM_USER_NAME,
+              updatedAt: now,
+            })
+            .where(eq(authUsers.id, existing.id))
+            .run();
+        }
+
+        return existing.id;
+      }
+
+      db.insert(authUsers)
+        .values({
+          id: MACHINE_AUTH_SYSTEM_USER_ID,
+          name: MACHINE_AUTH_SYSTEM_USER_NAME,
+          email: MACHINE_AUTH_SYSTEM_USER_EMAIL,
+          emailVerified: true,
+          image: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      return MACHINE_AUTH_SYSTEM_USER_ID;
+    });
+  }
+
+  async function systemUserId(): Promise<string> {
+    if (!readyPromise) {
+      readyPromise = Promise.resolve()
+        .then(ensureSystemUser)
+        .catch((error) => {
+          readyPromise = null;
+          throw error;
+        });
+    }
+
+    return readyPromise;
   }
 
   async function ensureReady(): Promise<void> {
-    if (!readyPromise) {
-      readyPromise = ensureSystemUser().catch((error) => {
-        readyPromise = null;
-        throw error;
-      });
-    }
-
-    await readyPromise;
+    await systemUserId();
   }
 
   async function verifyKey(
@@ -236,11 +312,13 @@ export async function createMachineAuthService(
     }
 
     const metadata = parseCredentialMetadata(result.key.metadata);
+
     if (!metadata) {
       args.logger.warn(
         { configId: verifyArgs.configId, keyId: result.key.id },
         "Machine auth key metadata is missing required fields",
       );
+
       return null;
     }
 
@@ -266,7 +344,7 @@ export async function createMachineAuthService(
         configId: DAEMON_HOST_CONFIG_ID,
         metadata,
         rateLimitEnabled: false,
-        userId: MACHINE_AUTH_SYSTEM_USER_ID,
+        userId: await systemUserId(),
       },
     });
 
@@ -282,6 +360,7 @@ export async function createMachineAuthService(
     preserveKeyId?: string,
   ): Promise<void> {
     await ensureReady();
+
     if (configId === DAEMON_HOST_CONFIG_ID) invalidateDaemonHostKeys(hostId);
     await args.db
       .update(authApiKeys)
@@ -332,9 +411,11 @@ export async function createMachineAuthService(
           configId: DAEMON_ENROLL_CONFIG_ID,
           token,
         });
+
         if (!verified) {
           return null;
         }
+
         if (verified.metadata.hostId !== hostId) {
           return null;
         }
@@ -349,6 +430,7 @@ export async function createMachineAuthService(
           hostMetadata.hostId,
           hostKey.keyId,
         );
+
         return {
           hostKey: hostKey.key,
           metadata: hostMetadata,
@@ -359,6 +441,7 @@ export async function createMachineAuthService(
       hostId,
     }: IssueDaemonHostKeyArgs): Promise<string> {
       const created = await createDaemonHostKey({ hostId });
+
       return created.key;
     },
     async issueHostEnrollKey({
@@ -367,10 +450,12 @@ export async function createMachineAuthService(
     }: IssueHostEnrollKeyArgs): Promise<IssueHostEnrollKeyResult> {
       return runSerialized(hostOperations, hostId, async () => {
         await ensureReady();
+
         const metadata = {
           enrollSource,
           hostId,
         };
+
         await disableActiveKeysForHost(DAEMON_ENROLL_CONFIG_ID, hostId);
 
         const created = await auth.api.createApiKey({
@@ -379,7 +464,7 @@ export async function createMachineAuthService(
             metadata,
             remaining: 1,
             rateLimitEnabled: false,
-            userId: MACHINE_AUTH_SYSTEM_USER_ID,
+            userId: await systemUserId(),
           },
         });
 
@@ -415,23 +500,28 @@ export async function createMachineAuthService(
       const cacheKey = createHash("sha256").update(token).digest("hex");
       const startedAt = Date.now();
       const cached = daemonKeyCache.get(cacheKey);
+
       if (cached && startedAt < cached.validUntilMs) {
         daemonKeyCache.delete(cacheKey);
         daemonKeyCache.set(cacheKey, cached);
+
         return {
           keyId: cached.result.keyId,
           metadata: { ...cached.result.metadata },
         };
       }
+
       daemonKeyCache.delete(cacheKey);
 
       const invalidatedHosts = new Set<string>();
       pendingDaemonVerifications.add(invalidatedHosts);
+
       try {
         const result = await verifyKey({
           configId: DAEMON_HOST_CONFIG_ID,
           token,
         });
+
         if (
           !result ||
           invalidatedHosts.has(result.metadata.hostId) ||
@@ -444,14 +534,18 @@ export async function createMachineAuthService(
           startedAt + DAEMON_KEY_CACHE_TTL_MS,
           result.expiresAtMs ?? Infinity,
         );
+
         if (result.cacheable && Date.now() < validUntilMs) {
           daemonKeyCache.delete(cacheKey);
           daemonKeyCache.set(cacheKey, { result, validUntilMs });
+
           while (daemonKeyCache.size > DAEMON_KEY_CACHE_MAX_ENTRIES) {
             const oldest = daemonKeyCache.keys().next();
+
             if (!oldest.done) daemonKeyCache.delete(oldest.value);
           }
         }
+
         return { keyId: result.keyId, metadata: { ...result.metadata } };
       } finally {
         pendingDaemonVerifications.delete(invalidatedHosts);

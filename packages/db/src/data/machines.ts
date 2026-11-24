@@ -69,6 +69,7 @@ export function machineHasPendingThreads(
     when 'pending' then json_extract(${threads.startupContext}, '$.environmentIntent')
     when 'provisioning' then json_extract(${threads.startupContext}, '$.request.environmentIntent')
   end`;
+
   return (
     db
       .select({ id: threads.id })

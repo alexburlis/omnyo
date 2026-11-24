@@ -25,13 +25,17 @@ export async function waitForSetupMarkerCount(
 ): Promise<string[]> {
   const startedAt = Date.now();
   let markers: string[] = [];
+
   while (Date.now() - startedAt <= args.timeoutMs) {
     markers = await listSetupMarkers(args.markerDir);
+
     if (markers.length >= args.expectedCount) {
       return markers;
     }
+
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+
   throw new Error(
     `Timed out waiting for ${args.expectedCount} setup markers; saw ${markers.length}`,
   );

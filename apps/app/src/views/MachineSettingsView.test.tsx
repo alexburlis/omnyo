@@ -11,20 +11,24 @@ import {
 import {
   makeHost as makeHostFixture,
   makeThreadListEntry,
-} from "@bb/test-helpers/domain-fixtures";
-import type { SystemConfigResponse } from "@bb/server-contract";
+} from "@omnyo/test-helpers/domain-fixtures";
+import type { SystemConfigResponse } from "@omnyo/server-contract";
 import type {
   ProviderCliKey,
   ProviderCliStatus,
   ProviderCliStatusResponse,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { defaultExperiments, type Host, type LastServerMove } from "@bb/domain";
+import {
+  defaultExperiments,
+  type Host,
+  type LastServerMove,
+} from "@omnyo/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { makeSystemConfig } from "@/test/fixtures/system-config";
-import { makeProviderInfo } from "@bb/test-helpers/domain-fixtures";
+import { makeProviderInfo } from "@omnyo/test-helpers/domain-fixtures";
 import { MachineSettingsView } from "./MachineSettingsView";
 
 vi.mock("@/lib/sdk", () => ({
@@ -99,6 +103,7 @@ function providerCliStatus(
       : provider === "claude-code"
         ? { displayName: "Claude Code", executableName: "claude" }
         : { displayName: "Cursor", executableName: "agent" };
+
   return {
     ...identity,
     executablePath: `/usr/local/bin/${identity.executableName}`,
@@ -125,6 +130,7 @@ function providerCliStatusResponse(): ProviderCliStatusResponse {
 
 function renderView() {
   const { wrapper } = createQueryClientTestHarness();
+
   return render(
     <MemoryRouter initialEntries={[`/settings/machines/${HOST_ID}`]}>
       <Routes>
@@ -197,6 +203,26 @@ afterEach(() => {
 });
 
 describe("MachineSettingsView", () => {
+  it("checks provider CLIs only on the selected machine", async () => {
+    vi.mocked(sdk.system.config).mockResolvedValue(systemConfig());
+    vi.mocked(sdk.hosts.list).mockResolvedValue([
+      host(),
+      host({ id: "host_other", name: "other-machine" }),
+    ]);
+    stubSupportingFetches();
+
+    renderView();
+
+    await screen.findByText("0.148.0");
+
+    expect(sdk.hosts.providerCliStatus).toHaveBeenCalledTimes(1);
+    expect(sdk.hosts.providerCliStatus).toHaveBeenCalledWith({
+      hostId: HOST_ID,
+      signal: expect.any(AbortSignal),
+    });
+    expect(sdk.system.version).not.toHaveBeenCalled();
+  });
+
   it("renders the machine's permission limit as a checked radio with descriptions", async () => {
     vi.mocked(sdk.system.config).mockResolvedValue(systemConfig());
     vi.mocked(sdk.hosts.list).mockResolvedValue([
@@ -209,7 +235,9 @@ describe("MachineSettingsView", () => {
     const machineHeading = await screen.findByRole("heading", {
       name: /dev-vm/u,
     });
+
     expect(machineHeading.tagName).toBe("H1");
+
     const checkedByMode = Object.fromEntries(
       (await screen.findAllByRole("radio")).map((option) => [
         option.textContent?.startsWith("Accept Edits")
@@ -220,6 +248,7 @@ describe("MachineSettingsView", () => {
         option.getAttribute("aria-checked"),
       ]),
     );
+
     expect(checkedByMode).toEqual({
       "accept-edits": "false",
       auto: "true",
@@ -300,6 +329,7 @@ describe("MachineSettingsView", () => {
 
     expect(await screen.findByText(/^Offline · last seen/u)).toBeDefined();
     expect(screen.queryByRole("img", { name: "Offline" })).toBeNull();
+    expect(sdk.hosts.providerCliStatus).not.toHaveBeenCalled();
   });
 
   it("links update issues to Updates in a warning pill", async () => {
@@ -338,13 +368,16 @@ describe("MachineSettingsView", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+
         if (url.includes("/permission-ceiling")) {
           requests.push({ url, body: String(init?.body ?? "") });
+
           return new Response(
             JSON.stringify(host({ maxPermissionMode: "accept-edits" })),
             { status: 200, headers: { "content-type": "application/json" } },
           );
         }
+
         return new Response(JSON.stringify({ projects: [] }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -382,6 +415,7 @@ describe("MachineSettingsView", () => {
     const remove = await screen.findByRole("button", {
       name: "Remove machine",
     });
+
     expect(remove.hasAttribute("disabled")).toBe(true);
     expect(remove.className).toContain("bg-destructive");
     expect(remove.parentElement?.className).not.toContain("justify-end");
@@ -526,7 +560,7 @@ describe("MachineSettingsView", () => {
       mode: "connect",
       serverUrl: null,
       requiresServerUrl: false,
-      targetDataDir: "/home/sawyer/.bb-machines/workstation",
+      targetDataDir: "/home/sawyer/.omnyo-machines/workstation",
       existingTargetServerData: null,
       items: [],
       canMove: true,
@@ -607,9 +641,11 @@ describe("MachineSettingsView", () => {
       ),
     ).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Delete old copy" }));
+
     const confirm = await screen.findByRole("dialog", {
       name: "Delete the old server copy?",
     });
+
     expect(
       vi.mocked(sdk.hosts.experimental_deleteOldServerCopy),
     ).not.toHaveBeenCalled();
@@ -709,6 +745,7 @@ describe("MachineSettingsView", () => {
     const deleteButton = await screen.findByRole("button", {
       name: "Delete old copy",
     });
+
     expect(deleteButton.hasAttribute("disabled")).toBe(true);
     expect(
       screen.getByText(/dev-vm has to be online to delete it\.$/u),

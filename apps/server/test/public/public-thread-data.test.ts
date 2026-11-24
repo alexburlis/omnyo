@@ -3,6 +3,7 @@ import {
   claimQueuedThreadMessageGroup,
   createQueuedThreadMessageId,
   createThreadSection,
+  deleteClaimedQueuedThreadMessageBatchInTransaction,
   deleteQueuedThreadMessage,
   deleteThreadEventSuffixInTransaction,
   environments,
@@ -15,18 +16,21 @@ import {
   listQueuedThreadMessages,
   getThread,
   queuedThreadMessages,
+  requeueClaimedQueuedThreadMessages,
   reorderQueuedThreadMessage,
   setQueuedThreadMessageGroupBoundary,
   setThreadExecutionOverride,
+  updateThread,
   threads as threadRows,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   encodeClientTurnRequestIdNumber,
+  INBOX_CALLER_PLUGIN_HEADER,
   threadQueuedMessageSchema,
   threadScope,
   threadSchema,
   turnScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   type TimelineRow,
   sidebarBootstrapResponseSchema,
@@ -39,10 +43,12 @@ import {
   threadWithIncludesResponseSchema,
   timelineTurnSummaryDetailsResponseSchema,
   uploadedPromptAttachmentSchema,
-} from "@bb/server-contract";
-import { renderTemplate } from "@bb/templates";
+} from "@omnyo/server-contract";
+import { renderTemplate } from "@omnyo/templates";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
+import { createOmnyoSdk } from "@omnyo/sdk/core";
+import { createHttpTransport } from "@omnyo/sdk/node";
 import type { TelemetryService } from "../../src/services/system/telemetry.js";
 import {
   reportNextEnvironmentAttachSuccess,
@@ -51,6 +57,7 @@ import {
   waitForQueuedCommand,
 } from "../helpers/commands.js";
 import {
+  currentWorkspaceIdentity,
   registerHostRpcResponder,
   type HostRpcHandlerResult,
   EMPTY_WORKSPACE_AGENT_CONTEXT,
@@ -95,6 +102,179 @@ const clientTurnRequestedDataSchema = z.object({
 type TimelineTurnRow = Extract<TimelineRow, { kind: "turn" }>;
 
 describe("public thread data routes", () => {
+  it("conditionally names an untitled thread through the SDK and preserves ordinary updates", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness, {
+        thread: { title: null },
+      });
+
+      updateThread(harness.deps.db, harness.deps.hub, thread.id, {
+        title: null,
+      });
+
+      const sdk = createOmnyoSdk({
+        transport: createHttpTransport({
+          baseUrl: "http://localhost",
+          runtime: "node",
+          fetch: async (input, init) =>
+            harness.app.fetch(new Request(input, init)),
+        }),
+      });
+
+      const named = await sdk.threads.update({
+        threadId: thread.id,
+        title: "  Ship the new sidebar  ",
+        experimental_titleIfUntitled: true,
+      });
+
+      expect(getThread(harness.deps.db, thread.id)?.title).toBe(
+        "Ship the new sidebar",
+      );
+      expect(named).toMatchObject({
+        id: thread.id,
+        title: "Ship the new sidebar",
+        experimental_titleApplied: true,
+      });
+
+      const renamed = await sdk.threads.update({
+        threadId: thread.id,
+        title: "My own sidebar title",
+      });
+
+      expect(renamed.title).toBe("My own sidebar title");
+      expect(renamed).not.toHaveProperty("experimental_titleApplied");
+      expect(getThread(harness.deps.db, thread.id)?.title).toBe(
+        "My own sidebar title",
+      );
+    });
+  });
+
+  it("preserves a manual title set while a conditional SDK request is in flight", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness, {
+        thread: { title: null },
+      });
+
+      updateThread(harness.deps.db, harness.deps.hub, thread.id, {
+        title: null,
+      });
+
+      let notifyStarted: () => void = () => undefined;
+      let releaseRequest: () => void = () => undefined;
+
+      const started = new Promise<void>((resolve) => {
+        notifyStarted = resolve;
+      });
+
+      const release = new Promise<void>((resolve) => {
+        releaseRequest = resolve;
+      });
+
+      const sdk = createOmnyoSdk({
+        transport: createHttpTransport({
+          baseUrl: "http://localhost",
+          runtime: "node",
+          fetch: async (input, init) => {
+            const request = new Request(input, init);
+            notifyStarted();
+            await release;
+
+            return harness.app.fetch(request);
+          },
+        }),
+      });
+
+      const naming = sdk.threads.update({
+        threadId: thread.id,
+        title: "Generated name",
+        experimental_titleIfUntitled: true,
+      });
+
+      await started;
+
+      const manual = await harness.app.request(`/api/v1/threads/${thread.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Keep my manual title" }),
+      });
+
+      releaseRequest();
+      const result = await naming;
+
+      expect(manual.status).toBe(200);
+      expect(getThread(harness.deps.db, thread.id)?.title).toBe(
+        "Keep my manual title",
+      );
+      expect(result).toMatchObject({
+        id: thread.id,
+        title: "Keep my manual title",
+        experimental_titleApplied: false,
+      });
+    });
+  });
+
+  it("does not name a thread when the conditional SDK request was aborted", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness, {
+        thread: { title: null },
+      });
+
+      updateThread(harness.deps.db, harness.deps.hub, thread.id, {
+        title: null,
+      });
+
+      const controller = new AbortController();
+      controller.abort();
+
+      const sdk = createOmnyoSdk({
+        transport: createHttpTransport({
+          baseUrl: "http://localhost",
+          runtime: "node",
+          fetch: async (input, init) =>
+            harness.app.fetch(new Request(input, init)),
+        }),
+      });
+
+      await expect(
+        sdk.threads.update({
+          threadId: thread.id,
+          title: "Cancelled name",
+          experimental_titleIfUntitled: true,
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({ status: 499 });
+      expect(getThread(harness.deps.db, thread.id)?.title).toBeNull();
+    });
+  });
+
+  it.each([
+    { experimental_titleIfUntitled: true },
+    { experimental_titleIfUntitled: true, title: null },
+    { experimental_titleIfUntitled: true, title: "   " },
+    { experimental_titleIfUntitled: true, title: "Name", visibility: "hidden" },
+  ])("rejects an invalid conditional title mutation %j", async (payload) => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness, {
+        thread: { title: "Keep existing title" },
+      });
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      expect(response.status).toBe(400);
+      expect(getThread(harness.deps.db, thread.id)?.title).toBe(
+        "Keep existing title",
+      );
+      expect(getThread(harness.deps.db, thread.id)?.visibility).toBe("visible");
+    });
+  });
+
   it("manages sections through the canonical public route lifecycle", async () => {
     await withTestHarness(async (harness) => {
       const initialList = await harness.app.request("/api/v1/thread-sections");
@@ -102,9 +282,11 @@ describe("public thread data routes", () => {
       expect(await readJson(initialList)).toEqual([]);
 
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         title: "Release checklist",
@@ -118,6 +300,7 @@ describe("public thread data routes", () => {
           body: JSON.stringify({ name: " Release QA " }),
         },
       );
+
       expect(createResponse.status).toBe(201);
       const section = threadSectionSchema.parse(await readJson(createResponse));
       expect(section.name).toBe("Release QA");
@@ -130,6 +313,7 @@ describe("public thread data routes", () => {
           body: JSON.stringify({ name: "Release QA" }),
         },
       );
+
       expect(duplicateResponse.status).toBe(409);
       await expect(readJson(duplicateResponse)).resolves.toMatchObject({
         code: "section_name_conflict",
@@ -143,6 +327,7 @@ describe("public thread data routes", () => {
           body: JSON.stringify({ sectionId: section.id }),
         },
       );
+
       expect(assignResponse.status).toBe(200);
 
       const renameResponse = await harness.app.request(
@@ -153,6 +338,7 @@ describe("public thread data routes", () => {
           body: JSON.stringify({ id: section.id, name: "Ship room" }),
         },
       );
+
       expect(renameResponse.status).toBe(200);
       expect(
         threadSectionMutationResponseSchema.parse(
@@ -167,10 +353,13 @@ describe("public thread data routes", () => {
       const bootstrapResponse = await harness.app.request(
         "/api/v1/sidebar-bootstrap",
       );
+
       expect(bootstrapResponse.status).toBe(200);
+
       const bootstrap = sidebarBootstrapResponseSchema.parse(
         await readJson(bootstrapResponse),
       );
+
       expect(bootstrap.sections).toContainEqual(
         expect.objectContaining({ id: section.id, name: "Ship room" }),
       );
@@ -186,6 +375,7 @@ describe("public thread data routes", () => {
           body: JSON.stringify({ id: section.id }),
         },
       );
+
       expect(deleteResponse.status).toBe(200);
       expect(
         threadSectionMutationResponseSchema.parse(
@@ -208,6 +398,7 @@ describe("public thread data routes", () => {
           body: JSON.stringify({ id: section.id }),
         },
       );
+
       expect(missingResponse.status).toBe(404);
       await expect(readJson(missingResponse)).resolves.toMatchObject({
         code: "section_not_found",
@@ -232,9 +423,11 @@ describe("public thread data routes", () => {
   it("updates visibility and requires includeHidden to list hidden threads", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         title: "Visibility candidate",
@@ -248,6 +441,7 @@ describe("public thread data routes", () => {
           body: JSON.stringify({ visibility: "hidden" }),
         },
       );
+
       expect(updateResponse.status).toBe(200);
       await expect(readJson(updateResponse)).resolves.toMatchObject({
         id: thread.id,
@@ -257,10 +451,13 @@ describe("public thread data routes", () => {
       const defaultListResponse = await harness.app.request(
         `/api/v1/threads?projectId=${project.id}`,
       );
+
       expect(defaultListResponse.status).toBe(200);
+
       const defaultList = z
         .array(threadSchema)
         .parse(await readJson(defaultListResponse));
+
       expect(defaultList.map((candidate) => candidate.id)).not.toContain(
         thread.id,
       );
@@ -268,10 +465,13 @@ describe("public thread data routes", () => {
       const hiddenListResponse = await harness.app.request(
         `/api/v1/threads?projectId=${project.id}&includeHidden=true`,
       );
+
       expect(hiddenListResponse.status).toBe(200);
+
       const hiddenList = z
         .array(threadSchema)
         .parse(await readJson(hiddenListResponse));
+
       expect(hiddenList).toContainEqual(
         expect.objectContaining({ id: thread.id, visibility: "hidden" }),
       );
@@ -281,24 +481,29 @@ describe("public thread data routes", () => {
   it("lists only the threads on one environment", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-list-env",
         projectId: project.id,
       });
+
       const other = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-list-env-other",
         projectId: project.id,
       });
+
       const onEnvironment = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
         title: "On the environment",
       });
+
       seedThread(harness.deps, {
         environmentId: other.id,
         projectId: project.id,
@@ -312,6 +517,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads?environmentId=${environment.id}`,
       );
+
       expect(response.status).toBe(200);
       const listed = z.array(threadSchema).parse(await readJson(response));
       expect(listed.map((thread) => thread.id)).toEqual([onEnvironment.id]);
@@ -321,40 +527,49 @@ describe("public thread data routes", () => {
   it("lists only the unarchived threads whose environment is on one machine", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const other = seedHost(harness.deps, {
         id: "host_other",
         name: "Other",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const first = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-list-host-a",
         projectId: project.id,
       });
+
       const second = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-list-host-b",
         projectId: project.id,
       });
+
       const elsewhere = seedEnvironment(harness.deps, {
         hostId: other.id,
         path: "/tmp/thread-list-host-other",
         projectId: project.id,
       });
+
       const onFirst = seedThread(harness.deps, {
         environmentId: first.id,
         projectId: project.id,
       });
+
       const onSecond = seedThread(harness.deps, {
         environmentId: second.id,
         projectId: project.id,
       });
+
       const archived = seedThread(harness.deps, {
         environmentId: second.id,
         projectId: project.id,
       });
+
       harness.db
         .update(threadRows)
         .set({ archivedAt: 1 })
@@ -369,6 +584,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads?hostId=${host.id}&archived=false`,
       );
+
       expect(response.status).toBe(200);
       const listed = z.array(threadSchema).parse(await readJson(response));
       expect(listed.map((thread) => thread.id).sort()).toEqual(
@@ -377,15 +593,63 @@ describe("public thread data routes", () => {
     });
   });
 
-  it("allows creating or assigning a hidden thread in a section", async () => {
+  it("lists only the requested thread IDs, treats an empty list as no threads and caps the list", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
+      const first = seedThread(harness.deps, { projectId: project.id });
+      const second = seedThread(harness.deps, { projectId: project.id });
+      seedThread(harness.deps, { projectId: project.id });
+
+      const list = async (threadIds: string) => {
+        const response = await harness.app.request(
+          `/api/v1/threads?threadIds=${threadIds}`,
+        );
+
+        expect(response.status).toBe(200);
+
+        return z
+          .array(threadSchema)
+          .parse(await readJson(response))
+          .map((thread) => thread.id)
+          .sort();
+      };
+
+      await expect(
+        list(`${first.id},thr_unknown,${second.id}`),
+      ).resolves.toEqual([first.id, second.id].sort());
+      await expect(list("")).resolves.toEqual([]);
+
+      const tooMany = await harness.app.request(
+        `/api/v1/threads?threadIds=${Array.from({ length: 201 }, (_, index) => `thr_${index}`).join(",")}`,
+      );
+
+      expect(tooMany.status).toBe(400);
+
+      const blank = await harness.app.request(
+        `/api/v1/threads?threadIds=${first.id},,${second.id}`,
+      );
+
+      expect(blank.status).toBe(400);
+    });
+  });
+
+  it("allows creating or assigning a hidden thread in a section", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps);
+
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+
       const sectionResult = createThreadSection(harness.db, harness.deps.hub, {
         name: "Work",
       });
+
       if (sectionResult.status !== "created") {
         throw new Error("Expected section fixture to be created");
       }
@@ -407,6 +671,7 @@ describe("public thread data routes", () => {
           },
         }),
       });
+
       expect(createResponse.status).toBe(201);
       const createdThread = threadSchema.parse(await readJson(createResponse));
       expect(createdThread.sectionId).toBe(sectionResult.section.id);
@@ -446,6 +711,7 @@ describe("public thread data routes", () => {
       const leanResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}`,
       );
+
       expect(leanResponse.status).toBe(200);
       const leanThread = await readJson(leanResponse);
       expect(leanThread).not.toHaveProperty("environment");
@@ -455,7 +721,9 @@ describe("public thread data routes", () => {
       const includeResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}?include=environment,host`,
       );
+
       expect(includeResponse.status).toBe(200);
+
       const includedThread = threadWithIncludesResponseSchema.parse(
         await readJson(includeResponse),
       );
@@ -472,6 +740,7 @@ describe("public thread data routes", () => {
       const { host, environment, thread } = seedThreadFixture(harness, {
         session: { id: "host-thread-removed-name" },
       });
+
       harness.deps.db
         .update(hosts)
         .set({ destroyedAt: Date.now() })
@@ -481,10 +750,13 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}?include=environment,host`,
       );
+
       expect(response.status).toBe(200);
+
       const includedThread = threadWithIncludesResponseSchema.parse(
         await readJson(response),
       );
+
       expect(includedThread.environment?.id).toBe(environment.id);
       expect(includedThread.environment?.hostLifecycle).toBe("removed");
       expect(includedThread.host).toBeNull();
@@ -497,30 +769,38 @@ describe("public thread data routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-null-include",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const threadWithoutEnvironment = seedThread(harness.deps, {
         environmentId: null,
         projectId: project.id,
       });
+
       const threadWithMissingHost = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
       });
+
       harness.deps.db.delete(hosts).where(eq(hosts.id, host.id)).run();
 
       const noEnvironmentResponse = await harness.app.request(
         `/api/v1/threads/${threadWithoutEnvironment.id}?include=environment,host`,
       );
+
       expect(noEnvironmentResponse.status).toBe(200);
+
       const noEnvironmentThread = threadWithIncludesResponseSchema.parse(
         await readJson(noEnvironmentResponse),
       );
+
       expect(noEnvironmentThread.environment).toBeNull();
       expect(noEnvironmentThread.host).toBeNull();
       expect(noEnvironmentThread.environmentHostName).toBeNull();
@@ -528,10 +808,13 @@ describe("public thread data routes", () => {
       const missingHostResponse = await harness.app.request(
         `/api/v1/threads/${threadWithMissingHost.id}?include=host`,
       );
+
       expect(missingHostResponse.status).toBe(200);
+
       const missingHostThread = threadWithIncludesResponseSchema.parse(
         await readJson(missingHostResponse),
       );
+
       expect(missingHostThread).not.toHaveProperty("environment");
       expect(missingHostThread.host).toBeNull();
       expect(missingHostThread.environmentHostName).toBeNull();
@@ -541,9 +824,11 @@ describe("public thread data routes", () => {
   it("rejects invalid thread include values", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
       });
@@ -551,6 +836,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}?include=environment,timeline`,
       );
+
       expect(response.status).toBe(400);
     });
   });
@@ -558,6 +844,7 @@ describe("public thread data routes", () => {
   it("returns a timeline when a stored history holds a duplicate turn/started from a daemon replay", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       const eventBase = {
         threadId: thread.id,
         environmentId: environment.id,
@@ -603,9 +890,11 @@ describe("public thread data routes", () => {
       );
 
       expect(response.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(response),
       );
+
       expect(timeline.rows.filter((row) => row.kind === "turn")).toHaveLength(
         1,
       );
@@ -705,11 +994,15 @@ describe("public thread data routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline?segmentLimit=1`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       expect(timeline.timelinePage.hasOlderRows).toBe(true);
+
       const windowedConversationIds = timeline.rows
         .filter((row) => row.kind === "conversation")
         .map((row) => row.id);
@@ -717,7 +1010,9 @@ describe("public thread data routes", () => {
       const outlineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/conversation-outline`,
       );
+
       expect(outlineResponse.status).toBe(200);
+
       const outline = threadConversationOutlineResponseSchema.parse(
         await readJson(outlineResponse),
       );
@@ -740,10 +1035,12 @@ describe("public thread data routes", () => {
         "Third question",
         "Third question — answered.",
       ]);
+
       for (const role of ["user", "assistant"] as const) {
         const roleResponse = await harness.app.request(
           `/api/v1/threads/${thread.id}/conversation-outline?role=${role}`,
         );
+
         expect(roleResponse.status).toBe(200);
         expect(
           threadConversationOutlineResponseSchema.parse(
@@ -756,6 +1053,7 @@ describe("public thread data routes", () => {
       }
 
       const outlineIds = new Set(outline.items.map((item) => item.id));
+
       for (const id of windowedConversationIds) {
         expect(outlineIds.has(id)).toBe(true);
       }
@@ -769,6 +1067,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/conversation-outline`,
       );
+
       expect(response.status).toBe(200);
       await expect(readJson(response)).resolves.toEqual({
         items: [],
@@ -788,24 +1087,61 @@ describe("public thread data routes", () => {
         scope: threadScope(),
         data: { text: "Visible response" },
       });
-      const prepareSpy = vi.spyOn(harness.db.$client, "prepare");
+
+      const outlineReads: {
+        starts: unknown[];
+        ends: unknown[];
+        rowCount: number;
+      }[] = [];
+
+      const prepare = harness.db.$client.prepare.bind(harness.db.$client);
+      const recorded = new WeakSet<object>();
+      vi.spyOn(harness.db.$client, "prepare").mockImplementation((source) => {
+        const statement = prepare(source);
+
+        if (
+          !recorded.has(statement) &&
+          source.includes('"created_at"') &&
+          source.includes('"data"') &&
+          source.includes("union all")
+        ) {
+          recorded.add(statement);
+          const all = statement.all.bind(statement);
+          vi.spyOn(statement, "all").mockImplementation((...bindings) => {
+            const rows = all(...bindings);
+
+            const boundValues = (pattern: RegExp) =>
+              [...source.matchAll(pattern)].map(
+                (match) =>
+                  bindings[source.slice(0, match.index).split("?").length - 1],
+              );
+
+            outlineReads.push({
+              starts: boundValues(/"events"\."sequence" >= \?/gu),
+              ends: boundValues(/"events"\."sequence" < \?/gu),
+              rowCount: rows.length,
+            });
+
+            return rows;
+          });
+        }
+
+        return statement;
+      });
+
       const countFullOutlineQueries = () =>
-        prepareSpy.mock.calls.filter(([source]) => {
-          return (
-            typeof source === "string" &&
-            source.includes('"created_at"') &&
-            source.includes('"data"') &&
-            source.includes("union all")
-          );
-        }).length;
+        outlineReads.filter((read) => read.starts.includes(0)).length;
 
       const firstResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/conversation-outline`,
       );
+
       expect(firstResponse.status).toBe(200);
+
       const first = threadConversationOutlineResponseSchema.parse(
         await readJson(firstResponse),
       );
+
       expect(first.maxSeq).toBe(1);
       expect(countFullOutlineQueries()).toBe(1);
 
@@ -833,12 +1169,18 @@ describe("public thread data routes", () => {
       const cachedResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/conversation-outline`,
       );
+
       expect(cachedResponse.status).toBe(200);
+
       const cached = threadConversationOutlineResponseSchema.parse(
         await readJson(cachedResponse),
       );
+
       expect(cached).toEqual({ items: first.items, maxSeq: 2 });
       expect(countFullOutlineQueries()).toBe(1);
+      expect(outlineReads.slice(1)).toEqual([
+        { starts: [2, 2, 2], ends: [3, 3, 3], rowCount: 0 },
+      ]);
 
       seedEvent(harness.deps, {
         threadId: thread.id,
@@ -852,16 +1194,28 @@ describe("public thread data routes", () => {
       const changedResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/conversation-outline`,
       );
+
       expect(changedResponse.status).toBe(200);
+
       const changed = threadConversationOutlineResponseSchema.parse(
         await readJson(changedResponse),
       );
+
       expect(changed.maxSeq).toBe(3);
       expect(changed.items.map((item) => item.preview)).toEqual([
         "Visible response",
         "New visible response",
       ]);
-      expect(countFullOutlineQueries()).toBe(2);
+      expect(countFullOutlineQueries()).toBe(1);
+      const appendedReads = outlineReads.slice(2);
+      expect(appendedReads.length).toBeGreaterThan(0);
+
+      for (const read of appendedReads)
+        expect(read).toEqual({
+          starts: [3, 3, 3],
+          ends: [4, 4, 4],
+          rowCount: 1,
+        });
       harness.db.transaction((tx) =>
         deleteThreadEventSuffixInTransaction(tx, {
           threadId: thread.id,
@@ -877,19 +1231,23 @@ describe("public thread data routes", () => {
         scope: threadScope(),
         data: { text: "Replacement response" },
       });
+
       const rewrittenResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/conversation-outline`,
       );
+
       expect(rewrittenResponse.status).toBe(200);
+
       const rewritten = threadConversationOutlineResponseSchema.parse(
         await readJson(rewrittenResponse),
       );
+
       expect(rewritten.maxSeq).toBe(3);
       expect(rewritten.items.map((item) => item.preview)).toEqual([
         "Visible response",
         "Replacement response",
       ]);
-      expect(countFullOutlineQueries()).toBe(3);
+      expect(countFullOutlineQueries()).toBe(2);
     });
   });
 
@@ -933,10 +1291,13 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/conversation-outline`,
       );
+
       expect(response.status).toBe(200);
+
       const outline = threadConversationOutlineResponseSchema.parse(
         await readJson(response),
       );
+
       const userItem = outline.items.find((item) => item.role === "user");
       expect(userItem).toBeDefined();
       expect(userItem?.preview).toBe("");
@@ -953,15 +1314,18 @@ describe("public thread data routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-uploaded-local-file",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/uploaded-local-file-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/uploaded-local-file-project",
       });
+
       const formData = new FormData();
       formData.set(
         "file",
@@ -975,18 +1339,22 @@ describe("public thread data routes", () => {
           body: formData,
         },
       );
+
       expect(uploadResponse.status).toBe(201);
+
       const uploaded = uploadedPromptAttachmentSchema.parse(
         await readJson(uploadResponse),
       );
+
       if (uploaded.type !== "localFile") {
         throw new Error("Expected text upload to produce localFile attachment");
       }
 
-      const promptText = "Review @alpha.txt";
+      const promptText = "  Review\n\n@alpha.txt";
       const mentionText = "@alpha.txt";
       const mentionStart = promptText.indexOf(mentionText);
       const mentionEnd = mentionStart + mentionText.length;
+
       const mention = {
         start: mentionStart,
         end: mentionEnd,
@@ -998,6 +1366,7 @@ describe("public thread data routes", () => {
           label: "alpha.txt",
         },
       };
+
       const attachmentInput = {
         type: "localFile",
         path: uploaded.path,
@@ -1031,18 +1400,22 @@ describe("public thread data routes", () => {
       );
 
       expect(createThreadResponse.status).toBe(201);
+
       const createdThread = threadSchema.parse(
         await readJson(createThreadResponse),
       );
+
       const queuedStart = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" &&
           command.threadId === createdThread.id,
       );
+
       if (queuedStart.command.type !== "thread.start") {
         throw new Error("Expected queued thread.start command");
       }
+
       expect(queuedStart.command.input).toEqual([
         { type: "text", text: promptText, mentions: [mention] },
         attachmentInput,
@@ -1051,13 +1424,17 @@ describe("public thread data routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${createdThread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       const userRow = timeline.rows.find(
         (row) => row.kind === "conversation" && row.role === "user",
       );
+
       if (
         !userRow ||
         userRow.kind !== "conversation" ||
@@ -1065,8 +1442,27 @@ describe("public thread data routes", () => {
       ) {
         throw new Error("Expected user conversation timeline row");
       }
+
       expect(userRow.text).toBe(promptText);
       expect(userRow.mentions).toEqual([mention]);
+
+      const outlineResponse = await harness.app.request(
+        `/api/v1/threads/${createdThread.id}/conversation-outline`,
+      );
+
+      expect(outlineResponse.status).toBe(200);
+
+      const outline = threadConversationOutlineResponseSchema.parse(
+        await readJson(outlineResponse),
+      );
+
+      expect(outline.items).toContainEqual(
+        expect.objectContaining({
+          id: userRow.id,
+          preview: "Review @alpha.txt",
+          mentions: [{ ...mention, start: 7, end: 17 }],
+        }),
+      );
       expect(userRow.attachments).toEqual({
         webImages: 0,
         localImages: 0,
@@ -1090,10 +1486,12 @@ describe("public thread data routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-missing-local-file-token",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/missing-local-file-token-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -1198,23 +1596,31 @@ describe("public thread data routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       const turnRow = timeline.rows.find(
         (row): row is TimelineTurnRow => row.kind === "turn",
       );
+
       expect(turnRow).toBeDefined();
+
       if (!turnRow) {
         throw new Error("Expected a turn row");
       }
+
       expect(turnRow.children).toBeNull();
 
       const toolDetailsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${turnRow.turnId}&sourceSeqStart=${turnRow.sourceSeqStart}&sourceSeqEnd=${turnRow.sourceSeqEnd}`,
       );
+
       expect(toolDetailsResponse.status).toBe(200);
+
       const toolDetails = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(toolDetailsResponse),
       );
@@ -1222,6 +1628,7 @@ describe("public thread data routes", () => {
       expect(toolDetails.rows.map((row) => row.kind)).toEqual(["work"]);
       expect(toolDetails.rows[0]?.kind).toBe("work");
       const detailRow = toolDetails.rows[0];
+
       if (detailRow?.kind === "work" && detailRow.workKind === "tool") {
         expect(detailRow.workKind).toBe("tool");
         expect(detailRow.callId).toBe("tool-1");
@@ -1232,6 +1639,7 @@ describe("public thread data routes", () => {
   it("hydrates turn-summary workflow details with late background task completion", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       const taskData = (
         status: "pending" | "completed",
         taskStatus: "running" | "completed",
@@ -1306,14 +1714,19 @@ describe("public thread data routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       const turnRow = timeline.rows.find(
         (row): row is TimelineTurnRow => row.kind === "turn",
       );
+
       expect(turnRow).toBeDefined();
+
       if (!turnRow) {
         throw new Error("Expected a turn row");
       }
@@ -1321,17 +1734,22 @@ describe("public thread data routes", () => {
       const detailsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${turnRow.turnId}&sourceSeqStart=${turnRow.sourceSeqStart}&sourceSeqEnd=${turnRow.sourceSeqEnd}`,
       );
+
       expect(detailsResponse.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(detailsResponse),
       );
+
       const workflowRow = details.rows.find(
         (row) =>
           row.kind === "work" &&
           row.workKind === "workflow" &&
           row.itemId === "task:wf-1",
       );
+
       expect(workflowRow).toBeDefined();
+
       if (
         !workflowRow ||
         workflowRow.kind !== "work" ||
@@ -1350,12 +1768,14 @@ describe("public thread data routes", () => {
   it("hydrates a summary whose range reaches turn completion", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       const base = {
         threadId: thread.id,
         environmentId: environment.id,
         providerThreadId: "provider-thread-1",
         scope: turnScope("turn-1"),
       };
+
       seedEvent(harness.deps, {
         ...base,
         sequence: 1,
@@ -1400,26 +1820,34 @@ describe("public thread data routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       const turnRow = timeline.rows.find(
         (row): row is TimelineTurnRow => row.kind === "turn",
       );
+
       expect(turnRow).toMatchObject({
         sourceSeqStart: 2,
         sourceSeqEnd: 6,
       });
+
       if (!turnRow) throw new Error("Expected a turn row");
 
       const detailsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${turnRow.turnId}&sourceSeqStart=${turnRow.sourceSeqStart}&sourceSeqEnd=${turnRow.sourceSeqEnd}`,
       );
+
       expect(detailsResponse.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(detailsResponse),
       );
+
       expect(details.rows).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1436,6 +1864,7 @@ describe("public thread data routes", () => {
   it("returns active background task state when the task started outside the latest window", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       const requestData = (requestId: number, text: string) => ({
         direction: "outbound" as const,
         requestId: encodeClientTurnRequestIdNumber({ value: requestId }),
@@ -1456,6 +1885,7 @@ describe("public thread data routes", () => {
         },
         source: "tell" as const,
       });
+
       const taskData = (args: {
         itemId: string;
         taskType: string;
@@ -1474,7 +1904,9 @@ describe("public thread data routes", () => {
             : {}),
         },
       });
+
       const providerThreadId = "provider-thread-1";
+
       const seedClientRequest = (
         sequence: number,
         requestId: number,
@@ -1489,6 +1921,7 @@ describe("public thread data routes", () => {
           data: requestData(requestId, text),
         });
       };
+
       const seedCompletedMessageTurn = (args: {
         requestId: number;
         requestSequence: number;
@@ -1530,6 +1963,7 @@ describe("public thread data routes", () => {
           data: { status: "completed" },
         });
       };
+
       const activeTasks = [
         {
           itemId: "task:wf-open",
@@ -1553,6 +1987,7 @@ describe("public thread data routes", () => {
         scope: turnScope("turn-1"),
         data: {},
       });
+
       for (const [index, task] of activeTasks.entries()) {
         seedEvent(harness.deps, {
           threadId: thread.id,
@@ -1573,6 +2008,7 @@ describe("public thread data routes", () => {
           data: taskData(task),
         });
       }
+
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -1598,7 +2034,9 @@ describe("public thread data routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline?segmentLimit=1`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
@@ -1712,15 +2150,20 @@ describe("public thread data routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       const childTurnRow = timeline.rows.find(
         (row): row is TimelineTurnRow =>
           row.kind === "turn" && row.turnId === "child-turn",
       );
+
       expect(childTurnRow).toBeDefined();
+
       if (!childTurnRow) {
         throw new Error("Expected child turn row");
       }
@@ -1728,7 +2171,9 @@ describe("public thread data routes", () => {
       const detailsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${childTurnRow.turnId}&sourceSeqStart=${childTurnRow.sourceSeqStart}&sourceSeqEnd=${childTurnRow.sourceSeqEnd}`,
       );
+
       expect(detailsResponse.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(detailsResponse),
       );
@@ -1736,6 +2181,7 @@ describe("public thread data routes", () => {
       expect(details.rows.map((row) => row.kind)).toEqual(["work"]);
       expect(details.rows[0]?.kind).toBe("work");
       const detailRow = details.rows[0];
+
       if (detailRow?.kind === "work" && detailRow.workKind === "tool") {
         expect(detailRow.callId).toBe("child-tool");
       } else {
@@ -1848,15 +2294,20 @@ describe("public thread data routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       const parentTurnRow = timeline.rows.find(
         (row): row is TimelineTurnRow =>
           row.kind === "turn" && row.turnId === "parent-turn",
       );
+
       expect(parentTurnRow).toBeDefined();
+
       if (!parentTurnRow) {
         throw new Error("Expected parent turn row");
       }
@@ -1864,10 +2315,13 @@ describe("public thread data routes", () => {
       const detailsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${parentTurnRow.turnId}&sourceSeqStart=${parentTurnRow.sourceSeqStart}&sourceSeqEnd=${parentTurnRow.sourceSeqEnd}&deferContent=true`,
       );
+
       expect(detailsResponse.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(detailsResponse),
       );
+
       const delegation = details.rows.find(
         (
           row,
@@ -1880,16 +2334,20 @@ describe("public thread data routes", () => {
       if (!delegation) {
         throw new Error("Expected delegation row");
       }
+
       expect(delegation.callId).toBe("agent-call");
       expect(delegation.childRows).toBeNull();
 
       const delegationResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${delegation.turnId}&sourceSeqStart=${delegation.sourceSeqStart}&sourceSeqEnd=${delegation.sourceSeqEnd}&itemId=${delegation.callId}`,
       );
+
       expect(delegationResponse.status).toBe(200);
+
       const delegationDetails = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(delegationResponse),
       );
+
       expect(delegationDetails.rows).toEqual([
         expect.objectContaining({
           callId: "agent-call",
@@ -1910,9 +2368,12 @@ describe("public thread data routes", () => {
       const providerThreadId = "provider-thread-1";
       const turnId = "parent-turn";
       const parentToolCallId = "agent-call";
+
       type EventInput = Parameters<typeof insertEvents>[2][number];
+
       const eventInputs: EventInput[] = [];
       let sequence = 0;
+
       const push = (
         event: Omit<EventInput, "environmentId" | "sequence" | "threadId">,
       ): void => {
@@ -1951,6 +2412,7 @@ describe("public thread data routes", () => {
           },
         }),
       });
+
       for (let item = 0; item < 200; item += 1) {
         const itemId = `command-${item}`;
         const command = "x".repeat(25_000);
@@ -1995,6 +2457,7 @@ describe("public thread data routes", () => {
           }),
         });
       }
+
       push({
         providerThreadId,
         scope: turnScope(turnId),
@@ -2027,22 +2490,29 @@ describe("public thread data routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       const turnRow = timeline.rows.find(
         (row): row is TimelineTurnRow => row.kind === "turn",
       );
+
       expect(turnRow).toBeDefined();
+
       if (!turnRow) {
         throw new Error("Expected a turn row");
       }
+
       expect(turnRow.sourceSeqStart).toBe(1);
 
       const detailsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${turnRow.turnId}&sourceSeqStart=${turnRow.sourceSeqStart}&sourceSeqEnd=${turnRow.sourceSeqEnd}`,
       );
+
       expect(detailsResponse.status).toBe(200);
     });
   }, 10_000);
@@ -2172,7 +2642,9 @@ describe("public thread data routes", () => {
       const detailsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=requested-turn&sourceSeqStart=1&sourceSeqEnd=5`,
       );
+
       expect(detailsResponse.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(detailsResponse),
       );
@@ -2227,13 +2699,16 @@ describe("public thread data routes", () => {
       const detailsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=turn-1&sourceSeqStart=2&sourceSeqEnd=2`,
       );
+
       expect(detailsResponse.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(detailsResponse),
       );
 
       expect(details.rows).toHaveLength(1);
       expect(details.rows[0]?.kind).toBe("conversation");
+
       if (details.rows[0]?.kind === "conversation") {
         expect(details.rows[0].role).toBe("assistant");
         expect(details.rows[0].text).toBe("Single detail.");
@@ -2250,6 +2725,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=turn-1&sourceSeqStart=oops&sourceSeqEnd=2`,
       );
+
       expect(response.status).toBe(400);
       await expect(readJson(response)).resolves.toMatchObject({
         code: "invalid_request",
@@ -2322,6 +2798,7 @@ describe("public thread data routes", () => {
       const outputResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/output`,
       );
+
       expect(outputResponse.status).toBe(200);
       await expect(readJson(outputResponse)).resolves.toEqual({
         output: "Last assistant reply",
@@ -2330,6 +2807,7 @@ describe("public thread data routes", () => {
       const defaultsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/default-execution-options`,
       );
+
       expect(defaultsResponse.status).toBe(200);
       await expect(readJson(defaultsResponse)).resolves.toEqual({
         model: "gpt-4o-mini",
@@ -2377,6 +2855,7 @@ describe("public thread data routes", () => {
       const outputResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/output`,
       );
+
       expect(outputResponse.status).toBe(200);
       await expect(readJson(outputResponse)).resolves.toEqual({
         output: "Visible system update",
@@ -2492,6 +2971,7 @@ describe("public thread data routes", () => {
       const defaultsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/default-execution-options`,
       );
+
       expect(defaultsResponse.status).toBe(200);
       await expect(readJson(defaultsResponse)).resolves.toEqual({
         model: "gpt-5-mini",
@@ -2508,6 +2988,7 @@ describe("public thread data routes", () => {
       const { environment, thread } = seedThreadFixture(harness, {
         thread: { providerId: "claude-code" },
       });
+
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -2561,6 +3042,7 @@ describe("public thread data routes", () => {
       const { environment, thread } = seedThreadFixture(harness, {
         thread: { providerId: "pi" },
       });
+
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -2673,10 +3155,13 @@ describe("public thread data routes", () => {
           method: "POST",
         },
       );
+
       expect(readResponse.status).toBe(200);
+
       const readThread = threadReadResponseSchema.parse(
         await readJson(readResponse),
       );
+
       expect(readThread.lastReadAt).toBeTypeOf("number");
       const threadAfterRead = getThread(harness.db, thread.id);
       expect(threadAfterRead?.lastReadAt).toBeTypeOf("number");
@@ -2688,6 +3173,7 @@ describe("public thread data routes", () => {
           method: "POST",
         },
       );
+
       expect(unreadResponse.status).toBe(200);
       await expect(readJson(unreadResponse)).resolves.toMatchObject({
         lastReadAt: null,
@@ -2696,6 +3182,57 @@ describe("public thread data routes", () => {
       expect(threadAfterUnread?.lastReadAt).toBeNull();
       expect(threadAfterUnread?.latestAttentionAt).toBe(
         thread.latestAttentionAt,
+      );
+    });
+  });
+
+  it("records the actor and fixed reason when a queued retry is removed", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness);
+
+      const queued = seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: textInput("private retry payload"),
+      });
+
+      const originalRequestId = encodeClientTurnRequestIdNumber({ value: 800 });
+      harness.db
+        .update(queuedThreadMessages)
+        .set({
+          payloadKind: "retry",
+          retryOfTurnRequestId: originalRequestId,
+          retryAttempt: 2,
+          retryReason: "private provider detail",
+        })
+        .where(eq(queuedThreadMessages.id, queued.id))
+        .run();
+      const info = vi.spyOn(harness.deps.logger, "info");
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}/queued-messages/${queued.id}`,
+        {
+          method: "DELETE",
+          headers: { [INBOX_CALLER_PLUGIN_HEADER]: "provider-retry" },
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(info).toHaveBeenCalledWith(
+        {
+          threadId: thread.id,
+          queuedMessageId: queued.id,
+          retryOfTurnRequestId: originalRequestId,
+          retryAttempt: 2,
+          actorKind: "plugin",
+          reason: "cancelled",
+        },
+        "Queued retry removed",
+      );
+      expect(JSON.stringify(info.mock.calls)).not.toContain(
+        "private retry payload",
+      );
+      expect(JSON.stringify(info.mock.calls)).not.toContain(
+        "private provider detail",
       );
     });
   });
@@ -2747,10 +3284,13 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(createResponse.status).toBe(201);
+
       const queuedMessage = queuedMessageIdResponseSchema.parse(
         await readJson(createResponse),
       );
+
       expect(
         getQueuedThreadMessage(harness.db, queuedMessage.id),
       ).toMatchObject({
@@ -2761,13 +3301,14 @@ describe("public thread data routes", () => {
         properties: {
           is_child_thread: false,
           message_source: "queued_message",
-          provider: "codex",
         },
       });
+
       const queuedMessageBeforeUpdate = getQueuedThreadMessage(
         harness.db,
         queuedMessage.id,
       );
+
       expect(queuedMessageBeforeUpdate).not.toBeNull();
 
       const updateResponse = await harness.app.request(
@@ -2783,6 +3324,7 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(updateResponse.status).toBe(200);
       await expect(readJson(updateResponse)).resolves.toMatchObject({
         id: queuedMessage.id,
@@ -2810,6 +3352,7 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(staleUpdateResponse.status).toBe(409);
       await expect(readJson(staleUpdateResponse)).resolves.toMatchObject({
         code: "invalid_request",
@@ -2829,9 +3372,35 @@ describe("public thread data routes", () => {
           method: "DELETE",
         },
       );
+
       expect(deleteResponse.status).toBe(200);
       await expect(readJson(deleteResponse)).resolves.toEqual({ ok: true });
       expect(getQueuedThreadMessage(harness.db, queuedMessage.id)).toBeNull();
+
+      const restoreUrl = `/api/v1/threads/${thread.id}/queued-messages/${queuedMessage.id}/restore`;
+
+      const restoreResponse = await harness.app.request(restoreUrl, {
+        method: "POST",
+      });
+
+      expect(restoreResponse.status).toBe(200);
+      await expect(readJson(restoreResponse)).resolves.toMatchObject({
+        id: queuedMessage.id,
+        threadId: thread.id,
+      });
+      expect(
+        getQueuedThreadMessage(harness.db, queuedMessage.id)?.content,
+      ).toBe(
+        JSON.stringify([
+          { type: "text", text: "Edited queued message", mentions: [] },
+        ]),
+      );
+
+      const repeatedRestoreResponse = await harness.app.request(restoreUrl, {
+        method: "POST",
+      });
+
+      expect(repeatedRestoreResponse.status).toBe(404);
     });
   });
 
@@ -2839,11 +3408,13 @@ describe("public thread data routes", () => {
     await withTestHarness(async (harness) => {
       const capture = vi.fn<TelemetryService["capture"]>();
       harness.deps.telemetry = { ...harness.deps.telemetry, capture };
+
       const { project, thread } = seedThreadFixture(harness, {
         thread: {
           status: "active",
         },
       });
+
       const senderThread = seedThread(harness.deps, {
         projectId: project.id,
       });
@@ -2887,8 +3458,7 @@ describe("public thread data routes", () => {
       expect(JSON.parse(queuedRows[0]?.content ?? "null")).toEqual([
         { type: "text", text: "Queued active follow-up", mentions: [] },
       ]);
-      // Nothing was dispatched, and queueing writes no timeline event at all:
-      // the queue rows above the composer are the only narration of a wait.
+
       expect(
         harness.db
           .select({ type: events.type })
@@ -2907,12 +3477,15 @@ describe("public thread data routes", () => {
           status: "active",
         },
       });
+
       const { host: otherHost } = seedHostSession(harness.deps, {
         id: "host-cross-project-sender",
       });
+
       const { project: otherProject } = seedProjectWithSource(harness.deps, {
         hostId: otherHost.id,
       });
+
       const crossProjectSender = seedThread(harness.deps, {
         projectId: otherProject.id,
       });
@@ -2958,6 +3531,7 @@ describe("public thread data routes", () => {
   it("sends queued sender messages as agent-originated turn requests", async () => {
     await withTestHarness(async (harness) => {
       const { project, thread } = seedThreadFixture(harness);
+
       const senderThread = seedThread(harness.deps, {
         projectId: project.id,
       });
@@ -2979,7 +3553,9 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(createResponse.status).toBe(201);
+
       const queuedMessage = queuedMessageIdResponseSchema.parse(
         await readJson(createResponse),
       );
@@ -2996,14 +3572,17 @@ describe("public thread data routes", () => {
       );
 
       expect(sendResponse.status).toBe(200);
+
       const requestedEvent = harness.db
         .select({ data: events.data })
         .from(events)
         .where(eq(events.threadId, thread.id))
         .get();
+
       const requestedData = clientTurnRequestedDataSchema.parse(
         requestedEvent ? JSON.parse(requestedEvent.data) : null,
       );
+
       expect(requestedData).toMatchObject({
         initiator: "agent",
         senderThreadId: senderThread.id,
@@ -3023,21 +3602,26 @@ describe("public thread data routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-queued-message-reorder",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-queued-message-reorder-source",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
       });
+
       const firstQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("First queued message"),
       });
+
       const secondQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Second queued message"),
       });
+
       const thirdQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Third queued message"),
@@ -3058,9 +3642,11 @@ describe("public thread data routes", () => {
       );
 
       expect(response.status).toBe(200);
+
       const queuedMessages = threadQueuedMessageListResponseSchema.parse(
         await readJson(response),
       );
+
       expect(queuedMessages.map((queuedMessage) => queuedMessage.id)).toEqual([
         thirdQueuedMessage.id,
         firstQueuedMessage.id,
@@ -3083,21 +3669,26 @@ describe("public thread data routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-queued-message-reorder-errors",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-queued-message-reorder-errors-source",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
       });
+
       const firstQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("First queued message"),
       });
+
       const secondQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Second queued message"),
       });
+
       const thirdQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Third queued message"),
@@ -3116,6 +3707,7 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(notFoundResponse.status).toBe(404);
       await expect(readJson(notFoundResponse)).resolves.toMatchObject({
         code: "invalid_request",
@@ -3135,6 +3727,7 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(invalidNeighborResponse.status).toBe(409);
       await expect(readJson(invalidNeighborResponse)).resolves.toMatchObject({
         code: "invalid_request",
@@ -3148,18 +3741,22 @@ describe("public thread data routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-queued-message-group-execution-errors",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-queued-message-group-execution-errors-source",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
       });
+
       const firstQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("First queued message"),
         model: "gpt-5",
       });
+
       const secondQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Second queued message"),
@@ -3197,25 +3794,31 @@ describe("public thread data routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-queued-message-group-stale-prefix",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-queued-message-group-stale-prefix-source",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
       });
+
       const firstQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("First queued message"),
       });
+
       const secondQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Second queued message"),
       });
+
       const thirdQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Third queued message"),
       });
+
       expect(
         reorderQueuedThreadMessage({
           db: harness.db,
@@ -3257,25 +3860,31 @@ describe("public thread data routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-queued-message-reorder-unchanged",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-queued-message-reorder-unchanged-source",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
       });
+
       const firstQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("First queued message"),
       });
+
       const secondQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Second queued message"),
       });
+
       const thirdQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Third queued message"),
       });
+
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/queued-messages/${secondQueuedMessage.id}/order`,
         {
@@ -3291,9 +3900,11 @@ describe("public thread data routes", () => {
       );
 
       expect(response.status).toBe(200);
+
       const queuedMessages = threadQueuedMessageListResponseSchema.parse(
         await readJson(response),
       );
+
       expect(queuedMessages.map((queuedMessage) => queuedMessage.id)).toEqual([
         firstQueuedMessage.id,
         secondQueuedMessage.id,
@@ -3302,26 +3913,108 @@ describe("public thread data routes", () => {
     });
   });
 
+  it("keeps a concurrency-held message visible through a dispatch recheck", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness);
+
+      const waitingOn = {
+        kind: "plugin",
+        pluginId: "concurrency-limit",
+        reason: "Overall thread limit reached",
+      } as const;
+
+      const message = seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: textInput("Send when there is room"),
+        waitingOn,
+      });
+
+      async function readQueue() {
+        const response = await harness.app.request(
+          `/api/v1/threads/${thread.id}/queued-messages`,
+        );
+
+        expect(response.status).toBe(200);
+
+        return threadQueuedMessageListResponseSchema.parse(
+          await readJson(response),
+        );
+      }
+
+      const claim = () =>
+        claimQueuedThreadMessageGroup(harness.db, harness.hub, message.id, {
+          kind: "automatic",
+          isGroupEligible: () => true,
+          retryingFailure: false,
+        });
+
+      expect(await readQueue()).toMatchObject([{ id: message.id, waitingOn }]);
+
+      const claims = claim();
+
+      if (claims === null) throw new Error("Expected a queue claim");
+
+      expect(await readQueue()).toMatchObject([
+        { id: message.id, waitingOn, editable: false },
+      ]);
+      const detail = await harness.app.request(`/api/v1/threads/${thread.id}`);
+
+      expect(detail.status).toBe(200);
+      await expect(readJson(detail)).resolves.toMatchObject({
+        queuedMessageCount: 1,
+      });
+
+      requeueClaimedQueuedThreadMessages(harness.db, harness.hub, {
+        claims,
+        threadId: thread.id,
+        waitingOn,
+        sendAt: null,
+      });
+
+      expect(await readQueue()).toMatchObject([
+        { id: message.id, waitingOn, editable: true },
+      ]);
+
+      const dispatchClaims = claim();
+
+      if (dispatchClaims === null) throw new Error("Expected a dispatch claim");
+
+      expect(
+        harness.db.transaction((tx) =>
+          deleteClaimedQueuedThreadMessageBatchInTransaction(tx, {
+            queuedMessages: dispatchClaims,
+          }),
+        ),
+      ).toBe(true);
+      expect(await readQueue()).toEqual([]);
+    });
+  });
+
   it("rejects stale and claimed queued message reorder requests", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-queued-message-reorder-stale",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-queued-message-reorder-stale-source",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
       });
+
       const firstQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("First queued message"),
       });
+
       const secondQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Second queued message"),
       });
+
       const thirdQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Third queued message"),
@@ -3333,7 +4026,8 @@ describe("public thread data routes", () => {
           harness.hub,
           firstQueuedMessage.id,
         ),
-      ).toBe(true);
+      ).not.toBeNull();
+
       const staleResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/queued-messages/${thirdQueuedMessage.id}/order`,
         {
@@ -3347,6 +4041,7 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(staleResponse.status).toBe(409);
       await expect(readJson(staleResponse)).resolves.toMatchObject({
         code: "invalid_request",
@@ -3359,7 +4054,9 @@ describe("public thread data routes", () => {
         secondQueuedMessage.id,
         { kind: "explicit-send" },
       )?.[0];
+
       expect(claimedQueuedMessage?.id).toBe(secondQueuedMessage.id);
+
       const claimedResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/queued-messages/${secondQueuedMessage.id}/order`,
         {
@@ -3373,6 +4070,7 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(claimedResponse.status).toBe(409);
       await expect(readJson(claimedResponse)).resolves.toMatchObject({
         code: "invalid_request",
@@ -3386,20 +4084,24 @@ describe("public thread data routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-queued-message-create-idle-auto-send",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/queued-message-create-idle-auto-send-source",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/queued-message-create-idle-auto-send-environment",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "idle",
       });
+
       seedThreadRuntimeState(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -3419,7 +4121,9 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(createResponse.status).toBe(201);
+
       const queuedMessage = queuedMessageIdResponseSchema.parse(
         await readJson(createResponse),
       );
@@ -3429,6 +4133,7 @@ describe("public thread data routes", () => {
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === thread.id,
       );
+
       expect(queued.command).toMatchObject({
         environmentId: environment.id,
         input: [{ type: "text", text: "Queued message ready to send" }],
@@ -3437,6 +4142,7 @@ describe("public thread data routes", () => {
         },
       });
       expect("inputGroups" in queued.command).toBe(false);
+
       const requestedEvent = harness.db
         .select({ data: events.data })
         .from(events)
@@ -3447,6 +4153,7 @@ describe("public thread data routes", () => {
           ),
         )
         .get();
+
       expect(requestedEvent).toBeTruthy();
       expect(
         Object.hasOwn(JSON.parse(requestedEvent!.data), "inputGroups"),
@@ -3463,23 +4170,28 @@ describe("public thread data routes", () => {
           status: "idle",
         },
       });
+
       seedThreadRuntimeState(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
         providerThreadId: "provider-queued-message-group",
       });
+
       const firstQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("First grouped queued message"),
       });
+
       const secondQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Second grouped queued message"),
       });
+
       const thirdQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Ungrouped queued message"),
       });
+
       expect(
         setQueuedThreadMessageGroupBoundary({
           db: harness.db,
@@ -3503,6 +4215,7 @@ describe("public thread data routes", () => {
           body: JSON.stringify({ mode: "auto" }),
         },
       );
+
       expect(sendResponse.status, await sendResponse.clone().text()).toBe(200);
 
       const queued = await waitForQueuedCommand(
@@ -3510,6 +4223,7 @@ describe("public thread data routes", () => {
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === thread.id,
       );
+
       expect(queued.command).toMatchObject({
         input: [
           { type: "text", text: "First grouped queued message" },
@@ -3547,13 +4261,17 @@ describe("public thread data routes", () => {
           ),
         )
         .all();
+
       const groupedRequestEvents = requestedEvents.filter((event) =>
         Object.hasOwn(JSON.parse(event.data), "inputGroups"),
       );
+
       expect(groupedRequestEvents).toHaveLength(1);
+
       const eventData = JSON.parse(groupedRequestEvents[0]!.data) as {
         inputGroups: { text: string; type: "text" }[][];
       };
+
       expect(eventData.inputGroups.map((group) => group[0]?.text)).toEqual([
         "First grouped queued message",
         "Second grouped queued message",
@@ -3562,13 +4280,17 @@ describe("public thread data routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       const userRows = timeline.rows.filter(
         (row) => row.kind === "conversation" && row.role === "user",
       );
+
       expect(userRows.map((row) => row.text).slice(-2)).toEqual([
         "First grouped queued message",
         "Second grouped queued message",
@@ -3601,9 +4323,11 @@ describe("public thread data routes", () => {
       );
 
       expect(response.status).toBe(200);
+
       const queuedMessages = threadQueuedMessageListResponseSchema.parse(
         await readJson(response),
       );
+
       expect(queuedMessages).toHaveLength(2);
       expect(queuedMessages).toEqual(
         expect.arrayContaining([
@@ -3669,10 +4393,13 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(createResponse.status).toBe(201);
+
       const queuedMessage = queuedMessageIdResponseSchema.parse(
         await readJson(createResponse),
       );
+
       expect(
         getQueuedThreadMessage(harness.db, queuedMessage.id),
       ).toMatchObject({
@@ -3688,25 +4415,30 @@ describe("public thread data routes", () => {
   it("persists queued message model and service tier and clears the queued message after reprovision send", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/queued-message-reprovision",
         status: "error",
         environmentProviderId: "personal-workspace",
-        environmentProviderPluginId: "bb-plugin-environment-personal-workspace",
+        environmentProviderPluginId:
+          "omnyo-plugin-environment-personal-workspace",
         isGitRepo: false,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       installFakeEnvironmentProvider({
         id: "personal-workspace",
-        pluginId: "bb-plugin-environment-personal-workspace",
+        pluginId: "omnyo-plugin-environment-personal-workspace",
         displayName: "Personal workspace",
         requires: {
           projectCheckout: false,
@@ -3740,10 +4472,13 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(createResponse.status).toBe(201);
+
       const createdQueuedMessage = threadQueuedMessageSchema.parse(
         await readJson(createResponse),
       );
+
       expect(createdQueuedMessage).toMatchObject({
         model: "gpt-5",
         serviceTier: "default",
@@ -3765,12 +4500,15 @@ describe("public thread data routes", () => {
         getQueuedThreadMessage(harness.db, createdQueuedMessage.id),
       ).toBeNull();
       await reportNextEnvironmentAttachSuccess(harness, thread.id);
+
       const startCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" && command.threadId === thread.id,
       );
+
       expect(startCommand.command.type).toBe("thread.start");
+
       const requestedEvent = harness.db
         .select({ data: events.data })
         .from(events)
@@ -3781,8 +4519,10 @@ describe("public thread data routes", () => {
           const parsed = JSON.parse(event.data) as {
             execution?: { model?: string; serviceTier?: string };
           };
+
           return parsed.execution?.model === "gpt-5";
         });
+
       expect(requestedEvent).toBeTruthy();
       expect(
         requestedEvent ? JSON.parse(requestedEvent.data) : null,
@@ -3810,19 +4550,23 @@ describe("public thread data routes", () => {
   it("keeps queued messages when reprovision dispatch is rejected", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/queued-message-reprovision-rejected",
         status: "error",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       const queuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Queued message survives rejected reprovision"),
@@ -3865,29 +4609,35 @@ describe("public thread data routes", () => {
   it("persists queued reprovision request before starting the provision command", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/queued-message-immediate-reprovision",
         status: "error",
         environmentProviderId: "personal-workspace",
-        environmentProviderPluginId: "bb-plugin-environment-personal-workspace",
+        environmentProviderPluginId:
+          "omnyo-plugin-environment-personal-workspace",
         isGitRepo: false,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       const queuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Queued message before immediate reprovision"),
       });
+
       installFakeEnvironmentProvider({
         id: "personal-workspace",
-        pluginId: "bb-plugin-environment-personal-workspace",
+        pluginId: "omnyo-plugin-environment-personal-workspace",
         displayName: "Personal workspace",
         requires: {
           projectCheckout: false,
@@ -3904,6 +4654,7 @@ describe("public thread data routes", () => {
           },
         }),
       });
+
       let stateAtProvisionStart: {
         activeContextStage: string | null;
         queuedMessageExists: boolean;
@@ -3938,27 +4689,38 @@ describe("public thread data routes", () => {
                 )
                 .all().length,
             };
+
             return {
               ok: true,
               result: {
                 path: request.command.path,
                 isGitRepo: true,
                 isWorktree: false,
-                branchName: `bb/${thread.id}`,
+                branchName: `omnyo/${thread.id}`,
                 defaultBranch: "main",
                 transcript: [],
               },
             };
           }
+
           if (request.command.type === "thread.start") {
             return {
               ok: true,
               result: { providerThreadId: "provider-immediate-reprovision" },
             };
           }
+
+          if (request.command.type === "host.prepare_workspace_identity_v1") {
+            return {
+              ok: true,
+              result: currentWorkspaceIdentity(request.command.rootPath),
+            };
+          }
+
           if (request.command.type === "host.read_workspace_agent_context") {
             return { ok: true, result: EMPTY_WORKSPACE_AGENT_CONTEXT };
           }
+
           throw new Error(`Unexpected RPC command ${request.command.type}`);
         },
       });
@@ -3997,33 +4759,40 @@ describe("public thread data routes", () => {
   it("preserves grouped queued messages and consumes them during reprovision send", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/grouped-queued-message-reprovision",
         status: "error",
         environmentProviderId: "personal-workspace",
-        environmentProviderPluginId: "bb-plugin-environment-personal-workspace",
+        environmentProviderPluginId:
+          "omnyo-plugin-environment-personal-workspace",
         isGitRepo: false,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       const firstQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("First reprovision grouped message"),
       });
+
       const secondQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Second reprovision grouped message"),
       });
+
       installFakeEnvironmentProvider({
         id: "personal-workspace",
-        pluginId: "bb-plugin-environment-personal-workspace",
+        pluginId: "omnyo-plugin-environment-personal-workspace",
         displayName: "Personal workspace",
         requires: {
           projectCheckout: false,
@@ -4073,6 +4842,7 @@ describe("public thread data routes", () => {
       ).toBeNull();
 
       await reportNextEnvironmentAttachSuccess(harness, thread.id);
+
       const startCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
@@ -4089,10 +4859,13 @@ describe("public thread data routes", () => {
           ),
         )
         .get();
+
       expect(requestedEvent).toBeTruthy();
+
       const requestedData = JSON.parse(requestedEvent?.data ?? "{}") as {
         inputGroups?: { text: string; type: "text" }[][];
       };
+
       expect(requestedData.inputGroups?.map((group) => group[0]?.text)).toEqual(
         [
           "First reprovision grouped message",
@@ -4103,9 +4876,11 @@ describe("public thread data routes", () => {
       if (startCommand.command.type !== "thread.start") {
         throw new Error("Expected thread.start command");
       }
+
       expect(
         startCommand.command.inputGroups?.map((group) => {
           const firstInput = group[0];
+
           return firstInput?.type === "text" ? firstInput.text : undefined;
         }),
       ).toEqual([
@@ -4122,9 +4897,11 @@ describe("public thread data routes", () => {
           status: "active",
         },
       });
+
       const senderThread = seedThread(harness.deps, {
         projectId: project.id,
       });
+
       seedThreadIdentity(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -4140,16 +4917,19 @@ describe("public thread data routes", () => {
         type: "turn/started",
         data: {},
       });
+
       const firstQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         senderThreadId: senderThread.id,
         content: textInput("First grouped sender message"),
       });
+
       const secondQueuedMessage = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         senderThreadId: senderThread.id,
         content: textInput("Second grouped sender message"),
       });
+
       expect(
         setQueuedThreadMessageGroupBoundary({
           db: harness.db,
@@ -4173,30 +4953,36 @@ describe("public thread data routes", () => {
           body: JSON.stringify({ mode: "auto" }),
         },
       );
+
       expect(sendResponse.status, await sendResponse.clone().text()).toBe(200);
 
       const firstFormattedText = renderTemplate("agentThreadMessage", {
         messageText: "First grouped sender message",
         senderThreadId: senderThread.id,
       });
+
       const secondFormattedText = renderTemplate("agentThreadMessage", {
         messageText: "Second grouped sender message",
         senderThreadId: senderThread.id,
       });
+
       const expectedInput = [
         { type: "text", text: firstFormattedText, mentions: [] },
         { type: "text", text: "\n\n", mentions: [] },
         { type: "text", text: secondFormattedText, mentions: [] },
       ];
+
       const expectedInputGroups = [
         [{ type: "text", text: firstFormattedText, mentions: [] }],
         [{ type: "text", text: secondFormattedText, mentions: [] }],
       ];
+
       const queued = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === thread.id,
       );
+
       expect(queued.command).toMatchObject({
         input: expectedInput,
         inputGroups: expectedInputGroups,
@@ -4205,9 +4991,11 @@ describe("public thread data routes", () => {
           expectedTurnId: "turn-active-grouped-sender",
         },
       });
+
       if (queued.command.type !== "turn.submit") {
         throw new Error("Expected turn.submit command");
       }
+
       expect(queued.command.input).toEqual(
         queued.command.inputGroups?.flatMap((input, index) =>
           index === 0
@@ -4228,11 +5016,14 @@ describe("public thread data routes", () => {
         .orderBy(events.sequence)
         .all()
         .at(-1);
+
       expect(requestedEvent).toBeTruthy();
+
       const requestedData = JSON.parse(requestedEvent?.data ?? "{}") as {
         input?: unknown;
         inputGroups?: unknown;
       };
+
       expect(requestedData.input).toEqual(expectedInput);
       expect(requestedData.inputGroups).toEqual(expectedInputGroups);
     });
@@ -4243,10 +5034,12 @@ describe("public thread data routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-queued-message-created-thread-send",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/queued-message-created-thread-send",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -4275,9 +5068,11 @@ describe("public thread data routes", () => {
       );
 
       expect(createThreadResponse.status).toBe(201);
+
       const createdThread = threadSchema.parse(
         await readJson(createThreadResponse),
       );
+
       expect(createdThread.status).toBe("starting");
 
       const createQueuedThreadMessageResponse = await harness.app.request(
@@ -4297,7 +5092,9 @@ describe("public thread data routes", () => {
           }),
         },
       );
+
       expect(createQueuedThreadMessageResponse.status).toBe(201);
+
       const createdQueuedMessage = queuedMessageIdResponseSchema.parse(
         await readJson(createQueuedThreadMessageResponse),
       );
@@ -4313,9 +5110,6 @@ describe("public thread data routes", () => {
         },
       );
 
-      // "Send now" overrides plugin waits, not core ones: the workspace is
-      // still being prepared, so the row goes back on the queue waiting on that
-      // rather than being dispatched into a thread that cannot take it.
       expect(sendResponse.status).toBe(409);
       await expect(readJson(sendResponse)).resolves.toMatchObject({
         code: "queued_message_still_waiting",
@@ -4326,12 +5120,14 @@ describe("public thread data routes", () => {
         id: createdQueuedMessage.id,
         waitingOn: JSON.stringify({ kind: "provisioning" }),
       });
+
       const requestedEvents = harness.db
         .select({ type: events.type })
         .from(events)
         .where(eq(events.threadId, createdThread.id))
         .all()
         .filter((event) => event.type === "client/turn/requested");
+
       expect(requestedEvents).toHaveLength(1);
       expect(
         harness.db
@@ -4346,30 +5142,36 @@ describe("public thread data routes", () => {
   it("lists thread storage files via host.list_files", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/project-source",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/project-source",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
-      const threadStoragePath = `/tmp/bb-host-data/${host.id}/thread-storage/${thread.id}`;
+
+      const threadStoragePath = `/tmp/omnyo-host-data/${host.id}/thread-storage/${thread.id}`;
 
       const filesPromise = harness.app.request(
         `/api/v1/threads/${thread.id}/thread-storage/files?query=notes`,
       );
+
       const filesCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "host.list_files" &&
           command.path === threadStoragePath,
       );
+
       expect(filesCommand.command).toMatchObject({
         path: threadStoragePath,
         query: "notes",
@@ -4398,15 +5200,18 @@ describe("public thread data routes", () => {
   it("resolves thread storage location without a host filesystem command", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/project-source",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/project-source",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -4421,7 +5226,7 @@ describe("public thread data routes", () => {
         threadStorageLocationResponseSchema.parse(await readJson(response)),
       ).toEqual({
         hostId: host.id,
-        storageRootPath: `/tmp/bb-host-data/${host.id}/thread-storage/${thread.id}`,
+        storageRootPath: `/tmp/omnyo-host-data/${host.id}/thread-storage/${thread.id}`,
       });
     });
   });
@@ -4429,30 +5234,36 @@ describe("public thread data routes", () => {
   it("lists thread storage paths via host.list_paths", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/project-source",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/project-source",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
-      const threadStoragePath = `/tmp/bb-host-data/${host.id}/thread-storage/${thread.id}`;
+
+      const threadStoragePath = `/tmp/omnyo-host-data/${host.id}/thread-storage/${thread.id}`;
 
       const pathsPromise = harness.app.request(
         `/api/v1/threads/${thread.id}/thread-storage/paths?query=notes&includeFiles=true&includeDirectories=true`,
       );
+
       const pathsCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "host.list_paths" &&
           command.path === threadStoragePath,
       );
+
       expect(pathsCommand.command).toMatchObject({
         path: threadStoragePath,
         query: "notes",
@@ -4509,16 +5320,19 @@ describe("public thread data routes", () => {
   it("lists thread storage files without requiring a ready environment", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/project-source",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/project-source",
         status: "provisioning",
       });
+
       harness.db
         .update(environments)
         .set({
@@ -4528,22 +5342,26 @@ describe("public thread data routes", () => {
         })
         .where(eq(environments.id, environment.id))
         .run();
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "starting",
       });
-      const threadStoragePath = `/tmp/bb-host-data/${host.id}/thread-storage/${thread.id}`;
+
+      const threadStoragePath = `/tmp/omnyo-host-data/${host.id}/thread-storage/${thread.id}`;
 
       const filesPromise = harness.app.request(
         `/api/v1/threads/${thread.id}/thread-storage/files`,
       );
+
       const filesCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "host.list_files" &&
           command.path === threadStoragePath,
       );
+
       await reportQueuedCommandSuccess(harness, filesCommand, {
         files: [{ path: "notes/plan.md", name: "plan.md" }],
         truncated: false,
@@ -4562,15 +5380,17 @@ describe("public thread data routes", () => {
   it("returns an empty thread storage file list when the durable storage is absent", async () => {
     await withTestHarness(async (harness) => {
       const { host, thread } = seedThreadFixture(harness);
-      const threadStoragePath = `/tmp/bb-host-data/${host.id}/thread-storage/${thread.id}`;
+      const threadStoragePath = `/tmp/omnyo-host-data/${host.id}/thread-storage/${thread.id}`;
 
       const filesPromise = harness.app.request(
         `/api/v1/threads/${thread.id}/thread-storage/files`,
       );
+
       const filesCommand = await waitForQueuedCommand(
         harness,
         ({ command }) => command.type === "host.list_files",
       );
+
       const filesErrorResponse = await reportQueuedCommandError(
         harness,
         filesCommand,
@@ -4579,6 +5399,7 @@ describe("public thread data routes", () => {
           errorMessage: "Path does not exist",
         },
       );
+
       expect(filesErrorResponse.status).toBe(200);
 
       const filesResponse = await filesPromise;
@@ -4632,6 +5453,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/events?types=system%2Ferror%2Citem%2Fcompleted&order=desc&beforeSeq=4&limit=2`,
       );
+
       expect(response.status).toBe(200);
       await expect(readJson(response)).resolves.toMatchObject([
         { seq: 3, type: "system/error" },
@@ -4643,6 +5465,7 @@ describe("public thread data routes", () => {
   it("rejects thread event list pages above the public limit", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       for (let sequence = 1; sequence <= 101; sequence += 1) {
         seedEvent(harness.deps, {
           data: { message: `error ${sequence}` },
@@ -4657,6 +5480,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/events?limit=1000`,
       );
+
       expect(response.status).toBe(400);
     });
   });
@@ -4664,9 +5488,11 @@ describe("public thread data routes", () => {
   it("rejects invalid thread event list filters", async () => {
     await withTestHarness(async (harness) => {
       const { thread } = seedThreadFixture(harness);
+
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/events?types=not-a-real-event`,
       );
+
       expect(response.status).toBe(400);
       await expect(readJson(response)).resolves.toMatchObject({
         code: "invalid_request",
@@ -4680,6 +5506,7 @@ describe("public thread data routes", () => {
       const { thread } = seedThreadFixture(harness);
       const now = Date.now();
       const queuedMessageId = createQueuedThreadMessageId();
+
       const queuedMessage = harness.db
         .insert(queuedThreadMessages)
         .values({
@@ -4742,10 +5569,13 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/events/wait?type=item/completed&waitMs=1000`,
       );
+
       expect(response.status).toBe(200);
+
       const body = threadEventWaitResponseSchema.parse(
         await readJson(response),
       );
+
       expect(body.type).toBe("item/completed");
       expect(body.seq).toBe(2);
     });
@@ -4767,6 +5597,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/events/wait?type=item/completed&waitMs=100`,
       );
+
       expect(response.status).toBe(204);
     });
   });
@@ -4788,6 +5619,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/events/wait?type=item/completed&afterSeq=5&waitMs=100`,
       );
+
       expect(response.status).toBe(204);
     });
   });
@@ -4797,6 +5629,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/nonexistent-thread-id/events/wait?type=item/completed&waitMs=100`,
       );
+
       expect(response.status).toBe(404);
     });
   });
@@ -4808,6 +5641,7 @@ describe("public thread data routes", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/events/wait?type=not-a-real-event&waitMs=100`,
       );
+
       expect(response.status).toBe(400);
       await expect(readJson(response)).resolves.toMatchObject({
         code: "invalid_request",

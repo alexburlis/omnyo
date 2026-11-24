@@ -10,6 +10,7 @@ function findBlockquoteDepth($from: ResolvedPos): number | null {
       return depth;
     }
   }
+
   return null;
 }
 
@@ -17,20 +18,26 @@ export function createInsertParagraphBeforeBlockquoteTransaction(
   state: EditorState,
 ): Transaction | null {
   const { selection, schema } = state;
+
   if (!selection.empty) return null;
 
   const { $from } = selection;
   const paragraphType = schema.nodes.paragraph;
+
   if (!paragraphType || $from.parent.type !== paragraphType) return null;
+
   if ($from.parentOffset !== 0) return null;
 
   const blockquoteDepth = findBlockquoteDepth($from);
+
   if (blockquoteDepth === null) return null;
+
   if ($from.index(blockquoteDepth) !== 0) return null;
 
   const insertAt = $from.before(blockquoteDepth);
   const emptyParagraph = paragraphType.create();
   const transaction = state.tr.insert(insertAt, emptyParagraph);
+
   return transaction
     .setSelection(TextSelection.create(transaction.doc, insertAt + 1))
     .scrollIntoView();
@@ -40,17 +47,22 @@ export function createExitTrailingBlockquoteBreakTransaction(
   state: EditorState,
 ): Transaction | null {
   const { selection, schema } = state;
+
   if (!selection.empty) return null;
 
   const { $from } = selection;
   const paragraphType = schema.nodes.paragraph;
+
   if (!paragraphType || $from.parent.type !== paragraphType) return null;
+
   if ($from.parentOffset !== $from.parent.content.size) return null;
 
   const nodeBefore = $from.nodeBefore;
+
   if (!nodeBefore || nodeBefore.type.name !== "hardBreak") return null;
 
   const blockquoteDepth = findBlockquoteDepth($from);
+
   if (blockquoteDepth === null) return null;
 
   if ($from.after($from.depth) !== $from.end(blockquoteDepth)) {
@@ -63,6 +75,7 @@ export function createExitTrailingBlockquoteBreakTransaction(
   let transaction = state.tr.delete(hardBreakFrom, selection.from);
   const insertAt = transaction.mapping.map(afterBlockquote);
   transaction = transaction.insert(insertAt, emptyParagraph);
+
   return transaction
     .setSelection(TextSelection.create(transaction.doc, insertAt + 1))
     .scrollIntoView();
@@ -72,6 +85,7 @@ export function createRemoveEmptyBlockquotesTransaction(
   state: EditorState,
 ): Transaction | null {
   const paragraphType = state.schema.nodes.paragraph;
+
   if (!paragraphType) return null;
 
   const ranges: Array<{ from: number; to: number }> = [];
@@ -80,12 +94,15 @@ export function createRemoveEmptyBlockquotesTransaction(
       ranges.push({ from: pos, to: pos + node.nodeSize });
     }
   });
+
   if (ranges.length === 0) return null;
 
   let transaction = state.tr;
+
   for (const range of [...ranges].reverse()) {
     const from = transaction.mapping.map(range.from);
     const to = transaction.mapping.map(range.to);
+
     if (from === 0 && to === transaction.doc.content.size) {
       transaction = transaction.replaceWith(from, to, paragraphType.create());
     } else {

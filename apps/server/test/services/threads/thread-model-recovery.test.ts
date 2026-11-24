@@ -1,4 +1,4 @@
-import { getThreadExecutionOverride, setThreadExecutionOverride } from "@bb/db";
+import { getThreadExecutionOverride, setThreadExecutionOverride } from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import { recoverThreadModelOverride } from "../../../src/services/threads/thread-execution-override.js";
 import { buildExecutionOptions } from "../../../src/services/threads/thread-commands.js";
@@ -19,22 +19,26 @@ describe("stale model recovery", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-stale-model-recovery",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/stale-model-recovery",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/stale-model-recovery",
         status: "ready",
       });
+
       const thread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
         providerId: "claude-code",
         status: "idle",
       });
+
       setThreadExecutionOverride(harness.db, {
         threadId: thread.id,
         modelOverride: savedModel,
@@ -82,26 +86,31 @@ describe("stale model recovery", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-stale-model-errors",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/stale-model-errors",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/stale-model-errors",
         status: "ready",
       });
+
       const thread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
         providerId: "claude-code",
         status: "idle",
       });
+
       setThreadExecutionOverride(harness.db, {
         threadId: thread.id,
         modelOverride: "claude-mythos-5",
       });
+
       const temporaryFailure = registerProviderHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -112,6 +121,7 @@ describe("stale model recovery", () => {
           },
         },
       });
+
       const recovery = {
         model: "claude-opus-4-8[1m]",
         modelSource: "explicit" as const,

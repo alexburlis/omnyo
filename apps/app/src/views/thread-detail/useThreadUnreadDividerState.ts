@@ -57,6 +57,7 @@ function isThreadUnread({
   if (lastReadAt === undefined || latestAttentionAt === undefined) {
     return false;
   }
+
   return lastReadAt === null || lastReadAt < latestAttentionAt;
 }
 
@@ -66,9 +67,11 @@ function buildUnreadDividerPlacement(
   if (thread.lastReadAt === null) {
     return { kind: "before-first" };
   }
+
   if (thread.lastReadAt < thread.latestAttentionAt) {
     return { kind: "after-cutoff", cutoffAt: thread.lastReadAt };
   }
+
   return null;
 }
 
@@ -79,6 +82,7 @@ export function useThreadUnreadDividerState({
   const [snapshot, setSnapshot] = useState<ThreadUnreadDividerSnapshot | null>(
     null,
   );
+
   const trackedThreadIdRef = useRef<string | null>(null);
   const threadId = thread?.id;
   const threadLastReadAt = thread?.lastReadAt;
@@ -96,11 +100,13 @@ export function useThreadUnreadDividerState({
     ) {
       trackedThreadIdRef.current = null;
       setSnapshot(null);
+
       return;
     }
 
     const isFirstTrackedThreadState = trackedThreadIdRef.current !== threadId;
     trackedThreadIdRef.current = threadId;
+
     const threadState: ThreadUnreadDividerThreadState = {
       id: threadId,
       lastReadAt: threadLastReadAt,
@@ -115,6 +121,7 @@ export function useThreadUnreadDividerState({
         if (threadLastReadAt === null) {
           const autoScroll =
             currentSnapshot.placement !== null && currentSnapshot.autoScroll;
+
           return {
             attentionAt: threadLatestAttentionAt,
             autoScroll,
@@ -122,10 +129,12 @@ export function useThreadUnreadDividerState({
             threadId,
           };
         }
+
         return currentSnapshot;
       }
 
       const placement = buildUnreadDividerPlacement(threadState);
+
       return {
         attentionAt: threadLatestAttentionAt,
         autoScroll: isFirstTrackedThreadState && placement !== null,

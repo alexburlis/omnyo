@@ -1,12 +1,11 @@
-import {
-  COARSE_POINTER_COMPACT_ICON_SIZE_CLASS,
-  COARSE_POINTER_TEXT_SM_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { COARSE_POINTER_COMPACT_ICON_SIZE_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { getBrowserUrlHost } from "@/lib/browser-url";
 import { formatRelativeTime } from "@/lib/relative-time";
 import type { BrowserHistoryEntry } from "@/lib/browser-history";
+import { BrowserStatePage } from "./BrowserStatePage";
 import {
   LAUNCHER_ROW_BASE_CLASS,
   LAUNCHER_ROW_ICON_CLASS,
@@ -18,6 +17,8 @@ interface BrowserNewTabScreenProps {
   onNavigateInput: (rawInput: string) => void;
   recent: readonly BrowserHistoryEntry[];
   onClearRecent: () => void;
+  onFocusAddress: () => void;
+  showStartPrompt: boolean;
 }
 
 interface BrowserRecentRowProps {
@@ -63,11 +64,30 @@ export function BrowserNewTabScreen({
   onNavigateInput,
   recent,
   onClearRecent,
+  onFocusAddress,
+  showStartPrompt,
 }: BrowserNewTabScreenProps) {
   const now = Date.now();
 
   if (recent.length === 0) {
-    return null;
+    return showStartPrompt ? (
+      <BrowserStatePage
+        icon="Globe"
+        title="Open a web page"
+        description="Type an address or a search in the bar above. Local servers such as localhost:5173 open here too."
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onFocusAddress}
+          >
+            <Icon name="Search" aria-hidden />
+            Enter an address
+          </Button>
+        }
+      />
+    ) : null;
   }
 
   return (
@@ -78,17 +98,16 @@ export function BrowserNewTabScreen({
             label="Recently visited"
             count={recent.length}
             action={
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="xs"
                 onClick={onClearRecent}
                 aria-label="Clear recently visited"
-                className={cn(
-                  "rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                  COARSE_POINTER_TEXT_SM_CLASS,
-                )}
+                className="-my-1 self-center text-muted-foreground"
               >
                 Clear
-              </button>
+              </Button>
             }
           />
           <ul aria-label="Recently visited" className="flex flex-col gap-px">

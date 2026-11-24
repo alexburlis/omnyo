@@ -1,7 +1,7 @@
 import { useCallback } from "react";
-import { normalizeProjectPathInput } from "@bb/domain";
-import type { HostPlatform } from "@bb/host-daemon-contract";
-import { useDialogState } from "@bb/shared-ui/use-dialog-state";
+import { normalizeProjectPathInput } from "@omnyo/domain";
+import type { HostPlatform } from "@omnyo/host-daemon-contract";
+import { useDialogState } from "@omnyo/shared-ui/use-dialog-state";
 import { useHostDaemon } from "@/hooks/useHostDaemon";
 import {
   selectHosts,
@@ -50,9 +50,12 @@ export function usePathPickerHost(): PathPickerHost {
 
   const connectedPrimaryHostId =
     primaryHost?.status === "connected" ? primaryHost.id : null;
+
   const hostId = connectedPrimaryHostId ?? localDaemonHostId;
+
   const hostName =
     primaryHost && primaryHost.id === hostId ? primaryHost.name : null;
+
   const canUseNativeFolderPicker =
     supportsNativeFolderPicker &&
     localDaemonHostId !== null &&
@@ -71,13 +74,17 @@ export function useLocalPathPicker({
   submit,
 }: UseLocalPathPickerOptions): LocalPathPickerController {
   const { platform } = useHostDaemon();
+
   const { canUseNativeFolderPicker, clientHostId, hostId, hostName } =
     usePathPickerHost();
+
   const hostsQuery = useHosts();
   const isLoadingHosts = hostsQuery.isPending;
+
   const connectedHostCount = selectHosts(hostsQuery.data, "all").filter(
     (host) => host.status === "connected",
   ).length;
+
   const projectPathDialog = useDialogState<ProjectPathDialogTarget>();
   const closeDialog = projectPathDialog.onClose;
 
@@ -100,17 +107,21 @@ export function useLocalPathPicker({
       if (canUseNativeFolderPicker && clientHostId !== null) {
         void (async () => {
           let selectedPath: string | null;
+
           try {
             selectedPath = (
               await sdk.hosts.pickFolder({ hostId, clientHostId })
             ).path;
           } catch {
             projectPathDialog.onOpen(target);
+
             return;
           }
+
           if (!selectedPath) return;
           submitPath(normalizeProjectPathInput(selectedPath), target, hostId);
         })();
+
         return;
       }
 
@@ -137,8 +148,10 @@ export function useLocalPathPicker({
     (target: ProjectPathDialogTarget) => {
       if (isLoadingHosts || connectedHostCount > 1) {
         projectPathDialog.onOpen(target);
+
         return;
       }
+
       openPicker(target);
     },
     [connectedHostCount, isLoadingHosts, openPicker, projectPathDialog],

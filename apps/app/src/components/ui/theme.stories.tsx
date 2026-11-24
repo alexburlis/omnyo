@@ -1,10 +1,16 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Button } from "@bb/shared-ui/button";
-import { Input } from "@bb/shared-ui/input";
-import { Pill } from "@bb/shared-ui/pill";
-import { EmptyStatePanel } from "@bb/shared-ui/empty-state";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { Input } from "@omnyo/shared-ui/input";
+import { Pill } from "@omnyo/shared-ui/pill";
+import { EmptyStatePanel } from "@omnyo/shared-ui/empty-state";
+import {
+  CONTROL_PRESS_FEEDBACK,
+  CONTROL_PRESS_TRANSITION,
+  MOTION_DURATION_MS,
+  type MotionEaseName,
+} from "@omnyo/shared-ui/motion";
 
 export default {
   title: "Theme Tokens",
@@ -40,7 +46,7 @@ function OnBothSurfaces({ children }: { children: ReactNode }) {
         ] as const
       ).map(([label, surface]) => (
         <div key={label} className="flex min-w-0 flex-col gap-1.5">
-          <span className="text-[11px] font-medium text-muted-foreground">
+          <span className="text-xs font-medium text-muted-foreground">
             {label}
           </span>
           <div className={cn("rounded-md border border-border p-3", surface)}>
@@ -71,7 +77,7 @@ function StateRows() {
           )}
         >
           <span>List row — {label}</span>
-          <span className="font-mono text-[10px] text-muted-foreground">
+          <span className="font-mono text-2xs text-muted-foreground">
             {cls.split(" ")[0] || "transparent"}
           </span>
         </div>
@@ -86,7 +92,7 @@ function Swatch({ token, fill }: { token: string; fill: string }) {
       <div
         className={cn("h-11 w-full rounded-md border border-border", fill)}
       />
-      <span className="text-center text-[10px] leading-tight text-muted-foreground">
+      <span className="text-center text-2xs leading-tight text-muted-foreground">
         {token}
       </span>
     </div>
@@ -112,7 +118,7 @@ function EmphasisChip({
       >
         {tier}
       </div>
-      <span className="text-center text-[10px] leading-tight text-muted-foreground">
+      <span className="text-center text-2xs leading-tight text-muted-foreground">
         {token}
       </span>
     </div>
@@ -127,7 +133,7 @@ function SurfaceTag({
   children: ReactNode;
 }) {
   return (
-    <span className={cn("text-[10px] font-medium", className)}>{children}</span>
+    <span className={cn("text-2xs font-medium", className)}>{children}</span>
   );
 }
 
@@ -136,13 +142,13 @@ function SurfaceWidget() {
     <div className="flex h-44 overflow-hidden rounded-lg border border-border shadow-sm">
       <div className="flex w-36 flex-col gap-1 bg-sidebar p-2 text-sidebar-foreground">
         <SurfaceTag className="text-sidebar-foreground">sidebar</SurfaceTag>
-        <div className="rounded border border-surface-selected-border bg-surface-selected px-2 py-1 text-[10px]">
+        <div className="rounded border border-surface-selected-border bg-surface-selected px-2 py-1 text-2xs">
           Active item
         </div>
-        <div className="rounded bg-state-hover px-2 py-1 text-[10px]">
+        <div className="rounded bg-state-hover px-2 py-1 text-2xs">
           Hovered item
         </div>
-        <div className="px-2 py-1 text-[10px] text-muted-foreground">Item</div>
+        <div className="px-2 py-1 text-2xs text-muted-foreground">Item</div>
       </div>
       <div className="relative flex-1 bg-background p-3 text-foreground">
         <SurfaceTag className="text-foreground">background</SurfaceTag>
@@ -151,7 +157,7 @@ function SurfaceWidget() {
           <div className="mt-1.5 h-1.5 w-3/4 rounded-full bg-muted" />
           <div className="mt-1 h-1.5 w-1/2 rounded-full bg-secondary" />
         </div>
-        <div className="absolute right-3 bottom-3 rounded-md border border-border bg-popover px-2.5 py-1.5 text-[10px] text-popover-foreground shadow-md">
+        <div className="absolute right-3 bottom-3 rounded-md border border-border bg-popover px-2.5 py-1.5 text-2xs text-popover-foreground shadow-md">
           popover
         </div>
       </div>
@@ -179,7 +185,7 @@ function RampBar() {
         {RAMP.map(([token]) => (
           <span
             key={token}
-            className="flex-1 text-center text-[9px] leading-tight text-muted-foreground"
+            className="flex-1 text-center text-2xs leading-tight text-muted-foreground"
           >
             {token}
           </span>
@@ -192,9 +198,7 @@ function RampBar() {
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-[11px] font-medium text-muted-foreground">
-        {title}
-      </span>
+      <span className="text-xs font-medium text-muted-foreground">{title}</span>
       <div className="flex flex-wrap gap-2">{children}</div>
     </div>
   );
@@ -206,7 +210,7 @@ function Chip({ token, children }: { token: string; children: ReactNode }) {
       <div className="flex size-11 items-center justify-center rounded-md border border-border bg-background">
         {children}
       </div>
-      <span className="text-center text-[10px] leading-tight text-muted-foreground">
+      <span className="text-center text-2xs leading-tight text-muted-foreground">
         {token}
       </span>
     </div>
@@ -365,6 +369,139 @@ export function Overview() {
             <Primitives />
           </OnBothSurfaces>
         </DualTheme>
+      </StoryRow>
+    </StoryCard>
+  );
+}
+
+type MotionDurationName = keyof typeof MOTION_DURATION_MS;
+
+const MOTION_CURVES: readonly (readonly [MotionEaseName, string, string])[] = [
+  [
+    "standard",
+    "ease-(--motion-ease-standard)",
+    "Colour, opacity, hover and focus; overlay entrances",
+  ],
+  ["out", "ease-(--motion-ease-out)", "Arrival of content in place"],
+  ["in", "ease-(--motion-ease-in)", "Exits that travel away along their axis"],
+  ["inOut", "ease-(--motion-ease-in-out)", "Symmetric and looping motion only"],
+  [
+    "smooth",
+    "ease-(--motion-ease-smooth)",
+    "Travel and layout; every expand and collapse",
+  ],
+  [
+    "snappy",
+    "ease-(--motion-ease-snappy)",
+    "Small controls only: press release, thumb, mark",
+  ],
+  ["sheet", "ease-(--motion-ease-sheet)", "Edge sheets, drawers, drag settle"],
+];
+
+const MOTION_DURATIONS: readonly (readonly [MotionDurationName, string])[] = [
+  ["sidebar", "duration-(--motion-duration-sidebar)"],
+  ["panel", "duration-(--motion-duration-panel)"],
+  ["fast", "duration-(--motion-duration-fast)"],
+  ["base", "duration-(--motion-duration-base)"],
+  ["drawer", "duration-(--motion-duration-drawer)"],
+  ["slow", "duration-(--motion-duration-slow)"],
+  ["sheet", "duration-(--motion-duration-sheet)"],
+];
+
+function MotionTrack({
+  label,
+  detail,
+  played,
+  timingClass,
+}: {
+  label: string;
+  detail: string;
+  played: boolean;
+  timingClass: string;
+}) {
+  return (
+    <div className="grid grid-cols-[17rem_minmax(0,1fr)] items-center gap-3">
+      <div className="flex min-w-0 flex-col">
+        <span className="font-mono text-xs text-foreground">{label}</span>
+        <span className="text-2xs text-muted-foreground">{detail}</span>
+      </div>
+      <div className="relative h-6 rounded-full bg-surface-recessed">
+        <div
+          className={cn(
+            "absolute inset-y-1 left-1 right-5 transition-[translate] motion-reduce:transition-none",
+            timingClass,
+            played ? "translate-x-full" : "translate-x-0",
+          )}
+        >
+          <div className="size-4 rounded-full bg-foreground" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function Motion() {
+  const [played, setPlayed] = useState(false);
+
+  return (
+    <StoryCard labelWidth="150px">
+      <StoryRow
+        label="Play"
+        hint="Every dot travels the same track; compare how each curve and duration settles. Under Reduce Motion the dots snap."
+      >
+        <Button size="sm" onClick={() => setPlayed((value) => !value)}>
+          {played ? "Reverse" : "Play"}
+        </Button>
+      </StoryRow>
+      <StoryRow
+        label="Curves"
+        hint="All at the slow duration. Springs reach 90% at half their duration; snappy peaks just past the end."
+      >
+        <div className="flex w-full max-w-2xl flex-col gap-2">
+          {MOTION_CURVES.map(([name, easeClass, use]) => (
+            <MotionTrack
+              key={name}
+              label={name}
+              detail={use}
+              played={played}
+              timingClass={cn("duration-(--motion-duration-slow)", easeClass)}
+            />
+          ))}
+        </div>
+      </StoryRow>
+      <StoryRow label="Durations" hint="All on the smooth spring.">
+        <div className="flex w-full max-w-2xl flex-col gap-2">
+          {MOTION_DURATIONS.map(([name, durationClass]) => (
+            <MotionTrack
+              key={name}
+              label={name}
+              detail={`${MOTION_DURATION_MS[name]} ms`}
+              played={played}
+              timingClass={cn("ease-(--motion-ease-smooth)", durationClass)}
+            />
+          ))}
+        </div>
+      </StoryRow>
+      <StoryRow
+        label="Press"
+        hint="Hover colour over fast on standard; press scales to 0.97 over fast and releases over base on snappy."
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm">Press and hold</Button>
+          <Button size="sm" variant="outline">
+            Outline
+          </Button>
+          <button
+            type="button"
+            className={cn(
+              "rounded-md bg-state-hover px-3 py-1.5 text-xs text-foreground hover:bg-state-active",
+              CONTROL_PRESS_TRANSITION,
+              CONTROL_PRESS_FEEDBACK,
+            )}
+          >
+            Tile
+          </button>
+        </div>
       </StoryRow>
     </StoryCard>
   );

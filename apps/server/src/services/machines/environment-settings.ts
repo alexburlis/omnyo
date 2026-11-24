@@ -1,23 +1,25 @@
 import { machineGitHealth } from "./git-credentials.js";
-import { getAppSettings, type DbConnection } from "@bb/db";
+import { getAppSettings, type DbConnection } from "@omnyo/db";
+import type { SecretVault } from "@omnyo/secret-storage";
 import {
   readMachineEnvironment,
   decryptMachineEnvironment,
 } from "./environment-storage.js";
-import type { HostDaemonContributedEnvEntry } from "@bb/host-daemon-contract";
+import type { HostDaemonContributedEnvEntry } from "@omnyo/host-daemon-contract";
 
 export { replaceMachineEnvironment } from "./environment-storage.js";
 
 export async function resolveUserMachineEnvironment(
   db: DbConnection,
-  dataDir: string,
+  vault: SecretVault,
   projectId: string | null = null,
 ): Promise<HostDaemonContributedEnvEntry[]> {
   const rows = readMachineEnvironment(db, projectId);
+
   return Promise.all(
     rows.map(async (row) => ({
       name: row.name,
-      value: await decryptMachineEnvironment(dataDir, row),
+      value: await decryptMachineEnvironment(vault, row),
       reason:
         row.note ??
         (projectId === null
@@ -38,8 +40,10 @@ export async function machineEnvironmentView(db: DbConnection) {
     secret: true as const,
     note: row.note,
   }));
+
   const overridden = variables.some((row) => row.name === "GH_TOKEN");
   const enabled = getAppSettings(db).machineGitCredentialsEnabled;
+
   const health =
     overridden || !enabled
       ? {
@@ -48,6 +52,7 @@ export async function machineEnvironmentView(db: DbConnection) {
             "The built-in gh token is overridden by Machine environment.",
         }
       : await machineGitHealth();
+
   return {
     variables,
     builtInGit: {
@@ -71,12 +76,14 @@ export async function projectMachineEnvironmentView(
   projectId: string,
 ) {
   const global = await machineEnvironmentView(db);
+
   const variables = readMachineEnvironment(db, projectId).map((row) => ({
     name: row.name,
     value: null,
     secret: true as const,
     note: row.note,
   }));
+
   return {
     builtInGit: variables.some((row) => row.name === "GH_TOKEN")
       ? {

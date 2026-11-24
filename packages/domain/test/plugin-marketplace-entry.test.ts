@@ -155,6 +155,7 @@ describe("marketplace entry schemas", () => {
         }).success,
       ).toBe(true);
     }
+
     for (const range of ["1.2+build", ">=1.2.3-alpha", "==1", "==1.2"]) {
       expect(
         marketplaceEntryV2Schema.safeParse({
@@ -167,6 +168,7 @@ describe("marketplace entry schemas", () => {
 
   it("accepts a long semver range without expression evaluation", () => {
     const startedAt = performance.now();
+
     const result = marketplaceEntryV2Schema.safeParse({
       ...entry(),
       source: {
@@ -271,13 +273,14 @@ describe("marketplace entry schemas", () => {
       ...entry(),
       source: { bundled: { plugin: "docs" } },
     };
+
     expect(marketplaceEntryV2Schema.parse(bundled)).toEqual(bundled);
     expect(
       marketplaceEntryV2Schema.safeParse({
         ...bundled,
         source: {
           bundled: { plugin: "docs" },
-          npm: { package: "bb-plugin-docs" },
+          npm: { package: "omnyo-plugin-docs" },
         },
       }).success,
     ).toBe(false);

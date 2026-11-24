@@ -1,40 +1,37 @@
-Keep a Claude Code or Codex thread running when one account hits its limit. The Account Pooler puts every account you own behind a local hub and picks the account for each request.
+Keep Claude Code and Codex threads running across limits. Account Pooler routes each request through accounts you own.
 
 ## What you get
 
-- A pool of Claude and Codex accounts, added by importing the login already on the machine, signing in through the browser, or pasting an Anthropic API key.
+- Add Claude or Codex accounts by browser/device sign-in, or an Anthropic API key. Each has a separate pool login; **Sign in again** renews it.
 - Accounts run one after another in priority order, with ties following the order added. New conversations stay on the current fallback even when an earlier account recovers. Existing conversations keep their own account until it becomes unavailable.
-- Drag handles set the account order within each provider in settings (keyboard: Space to pick up, arrow keys to move, Space to drop, Escape to cancel), with the same operation available through `bb pool account reorder <claude|codex> <id>...`.
-- Live limit windows per account and model family in the plugin's settings page, and the same numbers from `bb pool status`.
-- A routing switch per provider and a bypass per thread, so one thread can go straight to its own credentials.
+- Reorder accounts in settings with drag handles or Space and arrow keys, or `omnyo pool account reorder <claude|codex> <id>...`.
+- Live account and model-family limits in settings and `omnyo pool status`.
+- A routing switch per provider and a per-thread bypass to the thread's own credentials.
+- Provider Retry recovery times, Composer Predictions, and selected-account Codex reset credits in the private distribution.
 
-## How it works
+## Routing and cost
 
-The hub serves Anthropic Messages and OpenAI Responses endpoints. Routed providers report **Proxied** and receive a machine-scoped hub token. Accounts in error are skipped. The switch threshold defaults to 98 percent. Claude extra usage and Codex credits are fallbacks: usable subscription accounts take precedence, and conversations return when quota recovers. Exhausted accounts are rechecked before fallback. Codex spending-control and explicit credit-depletion restrictions block routing even below the threshold. The pool does not enable extra usage, purchase credits, or change spending limits. Settings shows “Extra usage available” only for reported allowance, never current billing activity. CLI and RPC status expose the same observations. Secrets stay on the server and tokens refresh in the background.
+The switch threshold defaults to 98 percent. It moves new conversations toward accounts below that threshold; provider-allowed subscription quota above it remains usable before paid fallback. Existing conversations keep their included-quota pin while the provider permits it. Usable subscription allowance takes precedence over reported Claude extra usage or Codex credits. Exhausted accounts are checked before fallback. Spending-control and explicit credit-depletion restrictions block Codex routing. The pool does not enable extra usage, buy credits, change spending limits, or treat reported credit availability as current billing activity.
 
-The pool waits once on the same account for short temporary rate limits. Longer holds return Retry-After for pinned conversations while new conversations can advance. A model-family limit detours requests for that family without moving the session’s main pin or the provider cursor. The pool commits a new account after a successful response; a failed attempt across every account retains the previous binding. The current account and session pins survive hub restarts. Session pins expire after 30 idle minutes, with the 4,096 most recently used pins retained.
+A short rate limit waits once on the same account; a longer one returns Retry-After to pinned conversations while new ones advance. Server, overload and connection errors retry a pinned account twice, then fail over. Model-family limits detour without moving the main pin. A new account is kept after it succeeds. Pins expire after 30 idle minutes; at most 4,096 stay.
 
-The pool uses HTTP/1.1 and honors standard proxy environment variables. Connection failures log error codes without credentials or request contents.
+Credentials remain on the server. Routed providers receive machine-scoped hub tokens. The pool uses HTTP/1.1 and standard proxy environment variables; connection diagnostics exclude credentials and request contents.
 
-## Nested bb servers
+## Predictions and reset credits
 
-A bb server started inside another bb server's thread detects the parent's pooler and enables this plugin. Choose in settings or with `bb pool parent`:
+Composer Predictions uses the provider prompt and an ephemeral native fork of an idle, completed Codex thread; only the bundled prediction plugin can call it. Codex predictions require fresh included allowance and provider eligibility; Advanced settings can permit prepaid credits for Codex contexts. Claude predictions lease an enabled Claude subscription account below its limits, never an API-key account. Omnyo does not claim the desktop beta's free billing exemption. Cancellation and source changes revoke the capability and stop the owned child. Unknown allowance and parent proxy mode fail visibly.
 
-- **proxy** (default): keep a local hub with its own machine tokens and forward pooled traffic to the parent, so the parent's token never reaches this server's agents. Routing is contributed only for providers the parent can serve.
-- **isolate**: neutralise the inherited routing and use this instance's own accounts, or each provider's own credentials.
+Account Usage can inspect reset credits for a selected enabled Codex OAuth account. Redemption requires the user's explicit confirmation and consumes an existing credit. An uncertain manual retry keeps the same account, credit and request ID. There is no purchase flow.
 
-Proxied traffic authenticates as the parent machine's token, so the parent attributes it to itself.
+## Nested servers
 
-## Requirements
-
-Accounts you own and are permitted to use this way.
-
-Experimental: routing, storage, and CLI may change.
+A nested Omnyo server can proxy through the parent pool using its own machine tokens, or isolate routing and use its own accounts. The parent token never reaches nested agents. Proxy mode contributes routing only for providers the parent can serve.
 
 ## For agents
 
-`bb pool account add|list|remove|enable|disable|priority|reorder`, `bb pool status`, `bb pool routing <claude|codex> [--off]`, `bb pool config`, `bb pool config set`, `bb pool parent [proxy|isolate]`, `bb pool token rotate`, and `bb pool bypass <thread-id>`. Every command takes `--json` and `--help`; `bb pool --help` lists the commands and `bb pool <command> --help` prints its arguments, options, and rules.
+Use `omnyo pool --help` and nested `--help` for account, routing, config, parent-mode, token and bypass commands. `omnyo pool account login <id>` renews an existing account; commands support `--json`.
 
 ## Automatic retries
 
-Provider Retry uses pool recovery times. Inspect `bb provider-retry status` or `bb provider-retry explain <thread-id>`.
+Provider Retry uses pool recovery times. Inspect `omnyo provider-retry status` or `omnyo provider-retry explain <thread-id>`.
+For exact account, routing and reset procedures, read [accounts and routing](skills/account-pool/references/accounts-and-routing.md). For prediction boundaries, read [composer predictions](skills/account-pool/references/composer-predictions.md).

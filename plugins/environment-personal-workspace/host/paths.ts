@@ -24,6 +24,7 @@ export function resolveWorkspacePath(args: {
       `Personal workspace key must be a single path segment: ${args.pathKey}`,
     );
   }
+
   return path.join(args.dataDir, WORKSPACES_DIR_NAME, args.pathKey);
 }
 
@@ -34,14 +35,17 @@ export function assertRemovableWorkspacePath(args: {
   const target = path.resolve(args.path);
   const parent = path.dirname(target);
   const ownRoot = path.resolve(args.dataDir, WORKSPACES_DIR_NAME);
+
   const removable =
     parent !== target &&
     isSinglePathSegment(path.basename(target)) &&
     (parent === ownRoot || path.basename(parent) === CORE_WORKSPACES_DIR_NAME);
+
   if (!removable) {
     throw new PersonalWorkspacePathError(
       `Refusing to remove a path outside the personal workspace roots: ${args.path}`,
     );
   }
+
   return target;
 }

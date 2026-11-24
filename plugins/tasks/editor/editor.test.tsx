@@ -20,6 +20,7 @@ function mockPointerCoarse(matches: boolean): () => void {
     removeEventListener: () => {},
     dispatchEvent: () => false,
   }));
+
   return () => {
     window.matchMedia = original;
   };
@@ -27,9 +28,11 @@ function mockPointerCoarse(matches: boolean): () => void {
 
 function getEditorSurface(container: HTMLElement): HTMLElement {
   const surface = container.querySelector(".tiptap");
+
   if (!(surface instanceof HTMLElement)) {
     throw new Error("Expected TipTap surface");
   }
+
   return surface;
 }
 
@@ -38,6 +41,7 @@ function roundTrip(markdown: string): string {
     extensions: createEditorExtensions(),
     content: markdown,
   });
+
   try {
     return editor.storage.markdown.getMarkdown() as string;
   } finally {
@@ -56,18 +60,19 @@ describe("markdown round-trip", () => {
     ["task list", "- [ ] open task\n- [x] done task"],
     ["code block", "```ts\nconst answer = 42;\n```"],
     ["blockquote", "> quoted wisdom"],
-    ["link", "Read the [bb guide](https://example.com/guide)."],
+    ["link", "Read the [Omnyo guide](https://example.com/guide)."],
     ["image", "![diagram](https://example.com/diagram.png)"],
-    ["mention", "Blocked on [TSK-42](bbtask://TSK-42) for review."],
+    ["mention", "Blocked on [TSK-42](omnyotask://TSK-42) for review."],
     [
       "thread mention",
-      "Discussed in [Fix login flow](bbthread://thr_a82u8wp8qq) yesterday.",
+      "Discussed in [Fix login flow](omnyothread://thr_a82u8wp8qq) yesterday.",
     ],
     [
       "mixed document",
-      "## Plan\n\nShip the **editor** with `tiptap`.\n\n- [x] parse\n- [ ] serialize\n\n> Notes on [TSK-7](bbtask://TSK-7)\n\n```\nplain code\n```",
+      "## Plan\n\nShip the **editor** with `tiptap`.\n\n- [x] parse\n- [ ] serialize\n\n> Notes on [TSK-7](omnyotask://TSK-7)\n\n```\nplain code\n```",
     ],
   ];
+
   it.each(cases)("preserves %s", (_name, markdown) => {
     expect(roundTrip(markdown)).toBe(markdown);
   });
@@ -101,10 +106,11 @@ describe("markdown round-trip", () => {
     const value = [
       "| Image | Task | Thread |",
       "| --- | --- | --- |",
-      "| ![diagram](https://example.com/diagram.png) | [TSK-42](bbtask://TSK-42) | [Fix login](bbthread://thr_test) |",
+      "| ![diagram](https://example.com/diagram.png) | [TSK-42](omnyotask://TSK-42) | [Fix login](omnyothread://thr_test) |",
       "",
       "Edit here",
     ].join("\n");
+
     const onChange = vi.fn();
     let editor: Editor | null = null;
     render(
@@ -138,25 +144,30 @@ describe("markdown round-trip", () => {
 });
 
 describe("mention extension", () => {
-  it("parses a bbtask link into a pill node and serializes it back", () => {
+  it("parses an Omnyo task link into a pill node and serializes it back", () => {
     const editor = new Editor({
       extensions: createEditorExtensions(),
-      content: "Ping [TSK-42](bbtask://TSK-42) today.",
+      content: "Ping [TSK-42](omnyotask://TSK-42) today.",
     });
+
     const findMentions = () => {
       const found: Array<Record<string, unknown>> = [];
       editor.state.doc.descendants((node) => {
         if (node.type.name === "taskMention")
           found.push(node.attrs as Record<string, unknown>);
       });
+
       return found;
     };
+
     try {
       expect(findMentions()).toEqual([{ key: "TSK-42", label: "TSK-42" }]);
+
       const pill = editor.view.dom.querySelector(
         '[data-task-mention="TSK-42"]',
       );
-      expect(pill?.classList.contains("bb-tasks-mention")).toBe(true);
+
+      expect(pill?.classList.contains("omnyo-tasks-mention")).toBe(true);
       expect(pill?.textContent).toBe("TSK-42");
       editor.commands.setContent("[docs](https://example.com)");
       expect(findMentions()).toEqual([]);
@@ -171,6 +182,7 @@ describe("mention extension", () => {
   it("suggests and inserts mentions from the mentionItems prop", async () => {
     let instance: Editor | null = null;
     const onChange = vi.fn();
+
     const screen = render(
       <TasksEditor
         value=""
@@ -200,12 +212,13 @@ describe("mention extension", () => {
         }}
       />,
     );
+
     expect(instance).not.toBeNull();
     instance!.chain().focus().insertContent("@").run();
     const option = await screen.findByText("Round-trip review");
     fireEvent.click(option.closest("button")!);
     await waitFor(() =>
-      expect(onChange).toHaveBeenCalledWith("[TSK-42](bbtask://TSK-42) "),
+      expect(onChange).toHaveBeenCalledWith("[TSK-42](omnyotask://TSK-42) "),
     );
     expect(
       screen.container.querySelector('[data-task-mention="TSK-42"]'),
@@ -214,6 +227,7 @@ describe("mention extension", () => {
 
   it("stays inert without a mentionItems prop", async () => {
     let instance: Editor | null = null;
+
     const screen = render(
       <TasksEditor
         value=""
@@ -223,6 +237,7 @@ describe("mention extension", () => {
         }}
       />,
     );
+
     instance!.chain().focus().insertContent("@").run();
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(screen.queryByRole("listbox")).toBeNull();
@@ -231,6 +246,7 @@ describe("mention extension", () => {
   it("offers a Threads section and inserts a thread pill", async () => {
     let instance: Editor | null = null;
     const onChange = vi.fn();
+
     const screen = render(
       <TasksEditor
         value=""
@@ -255,13 +271,14 @@ describe("mention extension", () => {
         }}
       />,
     );
+
     instance!.chain().focus().insertContent("@").run();
     await screen.findByText("Threads");
     expect(screen.getByText("Tasks")).toBeTruthy();
     fireEvent.click(screen.getByText("Fix login flow").closest("button")!);
     await waitFor(() =>
       expect(onChange).toHaveBeenCalledWith(
-        "[Fix login flow](bbthread://thr_a82u8wp8qq) ",
+        "[Fix login flow](omnyothread://thr_a82u8wp8qq) ",
       ),
     );
     expect(
@@ -271,20 +288,22 @@ describe("mention extension", () => {
 });
 
 describe("thread mention extension", () => {
-  it("parses a bbthread link into a pill and serializes it back", () => {
+  it("parses an Omnyo thread link into a pill and serializes it back", () => {
     const editor = new Editor({
       extensions: createEditorExtensions(),
-      content: "See [Fix login flow](bbthread://thr_a82u8wp8qq).",
+      content: "See [Fix login flow](omnyothread://thr_a82u8wp8qq).",
     });
+
     try {
       const pill = editor.view.dom.querySelector(
         '[data-thread-mention="thr_a82u8wp8qq"]',
       );
-      expect(pill?.classList.contains("bb-tasks-thread-mention")).toBe(true);
+
+      expect(pill?.classList.contains("omnyo-tasks-thread-mention")).toBe(true);
       expect(pill?.textContent).toBe("Fix login flow");
-      expect(pill?.querySelector("svg.bb-tasks-mention-icon")).toBeTruthy();
+      expect(pill?.querySelector("svg.omnyo-tasks-mention-icon")).toBeTruthy();
       expect(editor.storage.markdown.getMarkdown()).toBe(
-        "See [Fix login flow](bbthread://thr_a82u8wp8qq).",
+        "See [Fix login flow](omnyothread://thr_a82u8wp8qq).",
       );
     } finally {
       editor.destroy();
@@ -293,18 +312,21 @@ describe("thread mention extension", () => {
 
   it("opens the thread when a pill is clicked, including read-only", () => {
     const onOpenThread = vi.fn();
+
     const screen = render(
       <TasksEditor
-        value="See [Fix login flow](bbthread://thr_a82u8wp8qq)."
+        value="See [Fix login flow](omnyothread://thr_a82u8wp8qq)."
         onChange={() => undefined}
         readOnly
         variant="comment"
         onOpenThread={onOpenThread}
       />,
     );
+
     const pill = screen.container.querySelector(
       '[data-thread-mention="thr_a82u8wp8qq"]',
     );
+
     fireEvent.click(pill!);
     expect(onOpenThread).toHaveBeenCalledWith("thr_a82u8wp8qq");
   });
@@ -335,6 +357,7 @@ describe("heading toggle", () => {
 
   it("converts only the block under a within-block selection", () => {
     const editor = editorWith("First\n\nSecond\n\nThird");
+
     try {
       selectBlocks(editor, 2);
       editor.chain().toggleHeading({ level: 2 }).run();
@@ -348,6 +371,7 @@ describe("heading toggle", () => {
 
   it("converts only intersecting blocks for a multi-block selection", () => {
     const editor = editorWith("First\n\nSecond\n\nThird");
+
     try {
       selectBlocks(editor, 2, 3);
       editor.chain().toggleHeading({ level: 2 }).run();
@@ -361,6 +385,7 @@ describe("heading toggle", () => {
 
   it("toggles a heading back to a paragraph", () => {
     const editor = editorWith("First\n\n## Second\n\nThird");
+
     try {
       selectBlocks(editor, 2);
       editor.chain().toggleHeading({ level: 2 }).run();
@@ -374,6 +399,7 @@ describe("heading toggle", () => {
 
   it("converts only the caret's block with no selection", () => {
     const editor = editorWith("First\n\nSecond\n\nThird");
+
     try {
       selectBlocks(editor, 3);
       editor.commands.setTextSelection(editor.state.selection.from);
@@ -390,12 +416,15 @@ describe("heading toggle", () => {
 describe("TasksEditor component", () => {
   it("renders checklists and reports checkbox toggles as markdown", async () => {
     const onChange = vi.fn();
+
     const screen = render(
       <TasksEditor value={"- [ ] write tests"} onChange={onChange} />,
     );
+
     const checkbox = screen.container.querySelector<HTMLInputElement>(
       'ul[data-type="taskList"] input[type="checkbox"]',
     );
+
     expect(checkbox).toBeTruthy();
     fireEvent.click(checkbox!);
     await waitFor(() =>
@@ -412,6 +441,7 @@ describe("TasksEditor component", () => {
         variant="comment"
       />,
     );
+
     expect(screen.queryByRole("toolbar")).toBeNull();
     const surface = screen.container.querySelector(".tiptap");
     expect(surface?.getAttribute("contenteditable")).toBe("false");
@@ -422,7 +452,7 @@ describe("TasksEditor component", () => {
   });
 
   it("renders pasted Markdown as rich content", async () => {
-    const markdown = "| Task |\n| --- |\n| [TSK-42](bbtask://TSK-42) |";
+    const markdown = "| Task |\n| --- |\n| [TSK-42](omnyotask://TSK-42) |";
     const onChange = vi.fn();
     const screen = render(<TasksEditor value="" onChange={onChange} />);
 
@@ -459,6 +489,7 @@ describe("TasksEditor component", () => {
     const pasteEvent = {
       clipboardData: { files: [file] },
     } as unknown as ClipboardEvent;
+
     expect(
       handlePaste!.call(editor!.view, editor!.view, pasteEvent, null as never),
     ).toBe(true);
@@ -468,15 +499,18 @@ describe("TasksEditor component", () => {
     const textPaste = {
       clipboardData: { files: [] },
     } as unknown as ClipboardEvent;
+
     expect(
       handlePaste!.call(editor!.view, editor!.view, textPaste, null as never),
     ).toBe(false);
 
     const preventDefault = vi.fn();
+
     const dropEvent = {
       dataTransfer: { files: [file] },
       preventDefault,
     } as unknown as DragEvent;
+
     expect(
       handleDrop!.call(
         editor!.view,
@@ -492,9 +526,11 @@ describe("TasksEditor component", () => {
 
   it("replaces the document when the value prop changes externally", async () => {
     const onChange = vi.fn();
+
     const screen = render(
       <TasksEditor value={"original"} onChange={onChange} />,
     );
+
     screen.rerender(<TasksEditor value={"replaced"} onChange={onChange} />);
     await screen.findByText("replaced");
     expect(onChange).not.toHaveBeenCalled();
@@ -521,12 +557,14 @@ describe("TasksEditor component", () => {
 describe("TasksEditor submit-on-Enter", () => {
   function callHandleKeyDown(editor: Editor, event: KeyboardEvent): boolean {
     const { handleKeyDown } = editor.options.editorProps;
+
     return Boolean(handleKeyDown?.call(editor.view, editor.view, event));
   }
 
   it("submits on bare Enter when onSubmit is provided", () => {
     const onSubmit = vi.fn();
     let editor: Editor | null = null;
+
     const screen = render(
       <TasksEditor
         value="Draft"
@@ -538,6 +576,7 @@ describe("TasksEditor submit-on-Enter", () => {
         }}
       />,
     );
+
     editor!.commands.focus("end");
     const surface = getEditorSurface(screen.container);
     expect(surface.getAttribute("enterkeyhint")).toBe("send");
@@ -594,17 +633,20 @@ describe("TasksEditor submit-on-Enter", () => {
       />,
     );
     editor!.commands.focus("end");
+
     const composing = new KeyboardEvent("keydown", {
       key: "Enter",
       cancelable: true,
       isComposing: true,
     });
+
     expect(callHandleKeyDown(editor!, composing)).toBe(false);
 
     const keyCode229 = new KeyboardEvent("keydown", {
       key: "Enter",
       cancelable: true,
     });
+
     Object.defineProperty(keyCode229, "keyCode", {
       get: () => 229,
     });
@@ -614,9 +656,11 @@ describe("TasksEditor submit-on-Enter", () => {
 
   it("submits on Cmd/Ctrl+Enter even when pointer is coarse", () => {
     const restore = mockPointerCoarse(true);
+
     try {
       const onSubmit = vi.fn();
       let editor: Editor | null = null;
+
       const screen = render(
         <TasksEditor
           value="Touch draft"
@@ -628,6 +672,7 @@ describe("TasksEditor submit-on-Enter", () => {
           }}
         />,
       );
+
       editor!.commands.focus("end");
       const surface = getEditorSurface(screen.container);
       expect(surface.getAttribute("enterkeyhint")).toBe("enter");
@@ -680,6 +725,7 @@ describe("TasksEditor submit-on-Enter", () => {
   it("lets the mention popover own Enter while open", async () => {
     const onSubmit = vi.fn();
     let editor: Editor | null = null;
+
     const screen = render(
       <TasksEditor
         value=""
@@ -701,6 +747,7 @@ describe("TasksEditor submit-on-Enter", () => {
         }}
       />,
     );
+
     editor!.chain().focus().insertContent("@").run();
     await screen.findByText("Pick me");
     fireEvent.keyDown(getEditorSurface(screen.container), { key: "Enter" });

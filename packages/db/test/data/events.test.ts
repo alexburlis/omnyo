@@ -11,7 +11,7 @@ import {
   turnScope,
   type PromptInput,
   type ThreadEventType,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { noopNotifier } from "../../src/notifier.js";
 import type { DbNotifier } from "../../src/notifier.js";
 import {
@@ -40,6 +40,7 @@ import {
   listContextWindowUsageRows,
   listEvents,
   listLatestThreadStateEventRowsByThreadIds,
+  deleteThreadEventSuffixInTransaction,
   listStoredConversationOutlineEventRows,
   listTimelineWindowHintsDescending,
   listOpenTurnInputAcceptedRowsByThreadIds,
@@ -53,6 +54,7 @@ import {
   MissingStoredTurnStartedError,
   listActiveBackgroundTaskCountsByThreadIds,
   listLatestBackgroundTaskStateRowsByItemIds,
+  listStoredDelegatingItemRowsByItemIds,
   listOpenBackgroundTaskItemRowsForHost,
   listThreadTurnInterruptionEventStates,
   listLatestOpenBackgroundTaskStateRowsForThread,
@@ -78,17 +80,21 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup() {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
   });
+
   return { db, project, thread };
 }
 
@@ -97,11 +103,14 @@ function pruneThreadEvents(
   policy: ThreadPruningPolicy,
 ): number {
   let removed = 0;
+
   for (let pass = 0; pass < 100; pass += 1) {
     const result = advanceThreadPruning(db, policy);
     removed += result.removed;
+
     if (result.action === "cycle-complete") return removed;
   }
+
   throw new Error("Pruning did not finish a cycle");
 }
 
@@ -155,6 +164,7 @@ function searchNeedleDaemonEventInputs(
     environmentId: null,
     providerThreadId: "provider-search",
   };
+
   return [
     {
       threadId,
@@ -336,6 +346,7 @@ describe("events", () => {
         },
       ]),
     );
+
     const legacy = {
       totalTokens: 140,
       inputTokens: 80,
@@ -343,11 +354,13 @@ describe("events", () => {
       outputTokens: 20,
       reasoningOutputTokens: 0,
     };
+
     const variants = [
       legacy,
       { ...legacy, cacheReadInputTokens: 31, cacheWriteInputTokens: 9 },
       { ...legacy, cacheWriteInputTokens: 0 },
     ];
+
     for (const last of variants) {
       db.transaction((tx) =>
         appendDaemonEventsInTransaction(tx, [
@@ -364,6 +377,7 @@ describe("events", () => {
         ]),
       );
     }
+
     const rows = listEvents(db, { threadId: thread.id, afterSequence: 1 });
     expect(rows).toHaveLength(variants.length);
     rows.forEach((row, index) => {
@@ -454,6 +468,7 @@ describe("events", () => {
         data: JSON.stringify({ message: "first" }),
       },
     ]);
+
     expect(result1).toEqual({
       insertedCount: 1,
       insertedInputIndexes: [0],
@@ -475,6 +490,7 @@ describe("events", () => {
         data: JSON.stringify({ message: "new" }),
       },
     ]);
+
     expect(result2).toEqual({
       insertedCount: 1,
       insertedInputIndexes: [1],
@@ -529,6 +545,7 @@ describe("events", () => {
         },
       ],
       insertedInputIndexes: [0, 1],
+      reopenedInputIndexes: [],
       skippedTurnUnstartedInputIndexes: [],
     });
     expect(listEvents(db, { threadId: thread.id })).toMatchObject([
@@ -686,6 +703,7 @@ describe("events", () => {
         { threadId: thread.id, sequence: 6 },
       ],
       insertedInputIndexes: [1, 2, 3],
+      reopenedInputIndexes: [],
       skippedTurnUnstartedInputIndexes: [],
     });
     expect(listEvents(db, { threadId: thread.id })).toMatchObject([
@@ -708,6 +726,7 @@ describe("events", () => {
     const turnId = "turn-background-reuse";
     const itemId = "background-reused";
     const providerThreadId = "provider-background-reuse";
+
     const backgroundItem = {
       type: "backgroundTask" as const,
       id: itemId,
@@ -717,6 +736,7 @@ describe("events", () => {
       description: "Background command",
       skipTranscript: false,
     };
+
     const completedBackgroundItem = {
       ...backgroundItem,
       status: "completed" as const,
@@ -814,12 +834,14 @@ describe("events", () => {
         { threadId: thread.id, sequence: 5 },
       ],
       insertedInputIndexes: [1, 2],
+      reopenedInputIndexes: [],
       skippedTurnUnstartedInputIndexes: [],
     });
   });
 
   it("skips turn/started when a daemon replays an already-committed batch", () => {
     const { db, thread } = setup();
+
     const turnStarted = {
       threadId: thread.id,
       type: "turn/started" as const,
@@ -831,6 +853,7 @@ describe("events", () => {
         turnId: "turn_replayed",
       }),
     };
+
     const turnCompleted = {
       threadId: thread.id,
       type: "turn/completed" as const,
@@ -848,6 +871,7 @@ describe("events", () => {
       (tx) => appendDaemonEventsInTransaction(tx, [turnStarted, turnCompleted]),
       { behavior: "immediate" },
     );
+
     const replay = db.transaction(
       (tx) => appendDaemonEventsInTransaction(tx, [turnStarted, turnCompleted]),
       { behavior: "immediate" },
@@ -857,6 +881,7 @@ describe("events", () => {
     expect(replay).toEqual({
       acceptedEvents: [{ threadId: thread.id, sequence: 3 }],
       insertedInputIndexes: [1],
+      reopenedInputIndexes: [],
       skippedTurnUnstartedInputIndexes: [],
     });
     expect(
@@ -866,6 +891,7 @@ describe("events", () => {
 
   it("skips a turn/started repeated inside one daemon batch", () => {
     const { db, thread } = setup();
+
     const turnStarted = {
       threadId: thread.id,
       type: "turn/started" as const,
@@ -1077,6 +1103,7 @@ describe("events", () => {
     const { db, thread } = setup();
     const inputs = searchNeedleDaemonEventInputs(thread.id);
     const parse = vi.spyOn(JSON, "parse");
+
     try {
       db.transaction((tx) => appendDaemonEventsInTransaction(tx, inputs), {
         behavior: "immediate",
@@ -1100,10 +1127,12 @@ describe("events", () => {
 
   it("indexes copied messages, including legacy rows without an item kind, when a fork copies events", () => {
     const { db, project, thread } = setup();
+
     const fork = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     insertEvents(
       db,
       noopNotifier,
@@ -1219,11 +1248,13 @@ describe("events", () => {
 
   it("returns the same type-filtered rows with and without a limit", () => {
     const { db, thread } = setup();
+
     const types = [
       "turn/started",
       "turn/completed",
       "system/error",
     ] as const satisfies readonly ThreadEventType[];
+
     const rotation = [...types, "thread/compacted"] as const;
     insertEvents(
       db,
@@ -1247,6 +1278,7 @@ describe("events", () => {
         (sequence) => sequence % rotation.length !== 0,
       ),
     );
+
     for (const args of [
       { threadId: thread.id, types: [...types, ...types], order: "desc" },
       {
@@ -1410,6 +1442,7 @@ describe("events", () => {
 
   it("includes the latest snapshot or invalidation in bounded context reads", () => {
     const { db, thread } = setup();
+
     const appendUsage = (sequence: number, contextWindowUsage: object) => {
       insertEvents(db, noopNotifier, [
         {
@@ -1421,11 +1454,13 @@ describe("events", () => {
         },
       ]);
     };
+
     const readSequences = (sequenceStart = 0) =>
       listContextWindowUsageRows(db, {
         threadId: thread.id,
         sequenceStart,
       }).map((row) => row.sequence);
+
     appendUsage(1, {
       usedTokens: 128_000,
       modelContextWindow: 256_000,
@@ -1628,43 +1663,55 @@ describe("events", () => {
         sequenceStart: 0,
         threadId: thread.id,
       }),
-    ).toEqual([
-      { sequence: 7 },
-      { sequence: 6 },
-      { sequence: 5 },
-    ]);
+    ).toEqual([{ sequence: 7 }, { sequence: 6 }, { sequence: 5 }]);
   });
 
   it("keeps window-hint lookup bounded as request history grows", () => {
     const { db, thread } = setup();
+
     try {
       const statement = db.$client.prepare(
         "INSERT INTO events (id, thread_id, scope_kind, sequence, type, data, created_at) VALUES (?, ?, 'thread', ?, 'client/turn/requested', ?, 0)",
       );
-      const payload = JSON.stringify({ input: [{ type: "text", text: "x".repeat(2_000) }] });
+
+      const payload = JSON.stringify({
+        input: [{ type: "text", text: "x".repeat(2_000) }],
+      });
+
       const seed = (start: number, end: number): void => {
         db.$client.transaction(() => {
           for (let sequence = start; sequence <= end; sequence += 1) {
-            statement.run(`request-${sequence}`, thread.id, sequence, sequence % 20 === 0 ? "{}" : payload);
+            statement.run(
+              `request-${sequence}`,
+              thread.id,
+              sequence,
+              sequence % 20 === 0 ? "{}" : payload,
+            );
           }
         })();
       };
+
       const sample = (beforeSequence: number): number => {
         const times: number[] = [];
+
         for (let sample = 0; sample < 10; sample += 1) {
           const start = performance.now();
+
           const hints = listTimelineWindowHintsDescending(db, {
             threadId: thread.id,
             sequenceStart: 0,
             beforeSequence,
             limit: 21,
           });
+
           times.push(performance.now() - start);
           expect(hints).toHaveLength(21);
           expect(hints[0]?.sequence).toBe(beforeSequence - 1);
         }
+
         return Math.min(...times);
       };
+
       seed(1, 1_000);
       const small = sample(1_001);
       seed(1_001, 30_000);
@@ -1678,6 +1725,7 @@ describe("events", () => {
 
   it("uses request positions as hints without resolving acceptance", () => {
     const { db, thread } = setup();
+
     const request = (
       sequence: number,
       requestId: string,
@@ -1694,6 +1742,7 @@ describe("events", () => {
         target: { kind: "steer", expectedTurnId },
       }),
     });
+
     const accepted = (
       sequence: number,
       clientRequestId: string,
@@ -1737,7 +1786,12 @@ describe("events", () => {
         sequenceStart: 0,
         threadId: thread.id,
       }),
-    ).toEqual([{ sequence: 9 }, { sequence: 6 }, { sequence: 2 }, { sequence: 1 }]);
+    ).toEqual([
+      { sequence: 9 },
+      { sequence: 6 },
+      { sequence: 2 },
+      { sequence: 1 },
+    ]);
     expect(
       listTimelineWindowHintsDescending(db, {
         beforeSequence: 100,
@@ -1828,6 +1882,7 @@ describe("events", () => {
     "finds the parented timeline boundary for $name",
     ({ overrides = {}, range, expected }) => {
       const { db, thread } = setup();
+
       const rows: InsertEventInput[] = [
         {
           threadId: thread.id,
@@ -1868,6 +1923,7 @@ describe("events", () => {
           data: "{}",
         },
       ];
+
       insertEvents(
         db,
         noopNotifier,
@@ -1916,12 +1972,14 @@ describe("events", () => {
         }),
       },
     ]);
+
     const read = (maxSeq: number) =>
       getFirstParentedTimelineBoundarySequence(db, {
         threadId: thread.id,
         sequenceStart: 0,
         maxSeq,
       });
+
     expect(read(3)).toBeNull();
     insertEvents(db, noopNotifier, [
       {
@@ -2023,6 +2081,7 @@ describe("events", () => {
           skipTranscript: false,
         },
       });
+
     const progress = (sequence: number, itemId: string) => ({
       threadId: thread.id,
       sequence,
@@ -2390,14 +2449,17 @@ describe("events", () => {
 
   it("lists only the latest goal-state row per thread, legacy and extension rows alike", () => {
     const { db, project, thread } = setup();
+
     const otherThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const unrelatedStateThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const noStateThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -2504,12 +2566,172 @@ describe("events", () => {
     ).toEqual([]);
   });
 
+  describe("repeated latest-state lookups", () => {
+    function setupLatestState() {
+      const { db, thread } = setup();
+
+      const goalState = (sequence: number) => ({
+        threadId: thread.id,
+        sequence,
+        type: "thread/extensionState/updated" as const,
+        ...threadEventFields,
+        providerThreadId: "provider-thread-1",
+        data: JSON.stringify({
+          kind: "provider-codex/goal",
+          payload: { objective: `goal-${sequence}` },
+        }),
+      });
+
+      const otherState = (sequence: number) => ({
+        ...goalState(sequence),
+        data: JSON.stringify({ kind: "other-plugin/widget", payload: {} }),
+      });
+
+      const latestSequence = () =>
+        listLatestThreadStateEventRowsByThreadIds(db, {
+          threadIds: [thread.id],
+          kind: "provider-codex/goal",
+        }).map((row) => row.sequence);
+
+      const deleteSequences = (sequences: readonly number[]) => {
+        for (const sequence of sequences) {
+          db.$client
+            .prepare("DELETE FROM events WHERE thread_id = ? AND sequence = ?")
+            .run(thread.id, sequence);
+        }
+      };
+
+      return {
+        db,
+        thread,
+        goalState,
+        otherState,
+        latestSequence,
+        deleteSequences,
+      };
+    }
+
+    it("picks up newer matching state and goal events", () => {
+      const { db, thread, goalState, otherState, latestSequence } =
+        setupLatestState();
+
+      insertEvents(db, noopNotifier, [goalState(1), otherState(2)]);
+      expect(latestSequence()).toEqual([1]);
+
+      insertEvents(db, noopNotifier, [otherState(3), goalState(4)]);
+      expect(latestSequence()).toEqual([4]);
+
+      insertEvents(db, noopNotifier, [
+        {
+          threadId: thread.id,
+          sequence: 5,
+          type: "thread/goal/cleared",
+          ...threadEventFields,
+          data: JSON.stringify({}),
+        },
+        otherState(6),
+      ]);
+      expect(latestSequence()).toEqual([5]);
+    });
+
+    it("rescans after a rewind replaces events at already-scanned sequences", () => {
+      const { db, thread, goalState, otherState, latestSequence } =
+        setupLatestState();
+
+      insertEvents(db, noopNotifier, [goalState(1), otherState(2)]);
+      expect(latestSequence()).toEqual([1]);
+
+      db.transaction((tx) =>
+        deleteThreadEventSuffixInTransaction(tx, {
+          cutoffSequence: 2,
+          oldMaxSequence: 2,
+          threadId: thread.id,
+        }),
+      );
+      insertEvents(db, noopNotifier, [goalState(2), otherState(3)]);
+
+      expect(latestSequence()).toEqual([2]);
+    });
+
+    it("falls back to an older row when the remembered latest row is gone", () => {
+      const { db, goalState, otherState, latestSequence, deleteSequences } =
+        setupLatestState();
+
+      insertEvents(db, noopNotifier, [
+        goalState(1),
+        goalState(2),
+        otherState(3),
+      ]);
+      expect(latestSequence()).toEqual([2]);
+
+      deleteSequences([2]);
+
+      expect(latestSequence()).toEqual([1]);
+    });
+
+    it("rescans when state rows were removed below the scanned sequence", () => {
+      const { db, goalState, otherState, latestSequence, deleteSequences } =
+        setupLatestState();
+
+      insertEvents(db, noopNotifier, [
+        goalState(1),
+        otherState(2),
+        otherState(3),
+      ]);
+      expect(latestSequence()).toEqual([1]);
+
+      deleteSequences([2, 3]);
+      insertEvents(db, noopNotifier, [goalState(2)]);
+
+      expect(latestSequence()).toEqual([2]);
+    });
+
+    it("does not remember state read from a rolled-back transaction", () => {
+      const { db, goalState, otherState, latestSequence } = setupLatestState();
+
+      insertEvents(db, noopNotifier, [goalState(1), otherState(2)]);
+
+      expect(() =>
+        db.transaction(() => {
+          insertEvents(db, noopNotifier, [goalState(3), otherState(4)]);
+          expect(latestSequence()).toEqual([3]);
+          throw new Error("roll back");
+        }),
+      ).toThrow("roll back");
+      insertEvents(db, noopNotifier, [goalState(3), goalState(4)]);
+
+      expect(latestSequence()).toEqual([4]);
+    });
+
+    it("keeps bounded head lookups exact while the cache is warm", () => {
+      const { db, thread, goalState, otherState, latestSequence } =
+        setupLatestState();
+
+      insertEvents(db, noopNotifier, [
+        goalState(1),
+        otherState(2),
+        goalState(3),
+      ]);
+      expect(latestSequence()).toEqual([3]);
+
+      expect(
+        listLatestThreadStateEventRowsByThreadIds(db, {
+          threadIds: [thread.id],
+          beforeSequence: 3,
+          kind: "provider-codex/goal",
+        }).map((row) => row.sequence),
+      ).toEqual([1]);
+    });
+  });
+
   it("batches latest goal lookups above the SQLite variable limit", () => {
     const { db, project, thread } = setup();
+
     const finalBatchThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     insertEvents(db, noopNotifier, [
       {
         threadId: thread.id,
@@ -2526,9 +2748,12 @@ describe("events", () => {
         data: JSON.stringify({ objective: "Final batch goal" }),
       },
     ]);
+
     const threadIds = Array.from({ length: 32_767 }, (_, index) => {
       if (index === 0) return thread.id;
+
       if (index === 32_766) return finalBatchThread.id;
+
       return `thr_missing_goal_${index}`;
     });
 
@@ -2544,6 +2769,7 @@ describe("events", () => {
 
   it("lists only open accepted turn inputs after the latest interruption", () => {
     const { db, project, thread } = setup();
+
     const otherThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -2606,6 +2832,7 @@ describe("events", () => {
 
   it("lists client turn request rows by thread/request keys", () => {
     const { db, project, thread } = setup();
+
     const otherThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -2638,9 +2865,21 @@ describe("events", () => {
     const rowsByThreadId = new Map(
       listStoredClientTurnRequestRowsByKeys(db, {
         keys: [
-          { threadId: thread.id, requestId: "creq_23456789aa" },
-          { threadId: otherThread.id, requestId: "creq_23456789aa" },
-          { threadId: thread.id, requestId: "creq_23456789aa" },
+          {
+            beforeSequence: 10,
+            threadId: thread.id,
+            requestId: "creq_23456789aa",
+          },
+          {
+            beforeSequence: 10,
+            threadId: otherThread.id,
+            requestId: "creq_23456789aa",
+          },
+          {
+            beforeSequence: 10,
+            threadId: thread.id,
+            requestId: "creq_23456789aa",
+          },
         ],
       }).map((row) => [row.threadId, row]),
     );
@@ -2651,14 +2890,22 @@ describe("events", () => {
     expect(
       listStoredClientTurnRequestRowsByKeys(db, {
         keys: [
-          { threadId: thread.id, requestId: "creq_23456789ab" },
-          { threadId: thread.id, requestId: "creq_23456789aa" },
+          {
+            beforeSequence: 10,
+            threadId: thread.id,
+            requestId: "creq_23456789ab",
+          },
+          {
+            beforeSequence: 10,
+            threadId: thread.id,
+            requestId: "creq_23456789aa",
+          },
         ],
       }).map((row) => row.sequence),
     ).toEqual([1, 2]);
   });
 
-  it("batches client turn request keys above the expression-depth limit", () => {
+  it("returns the latest matching request before the accepted sequence", () => {
     const { db, thread } = setup();
     const requestId = "creq_23456789ab";
     insertEvents(db, noopNotifier, [
@@ -2667,24 +2914,54 @@ describe("events", () => {
         sequence: 1,
         type: "client/turn/requested",
         ...threadEventFields,
-        data: clientTurnRequestData(requestId, "second batch"),
+        data: clientTurnRequestData(requestId, "first"),
+      },
+      {
+        threadId: thread.id,
+        sequence: 2,
+        type: "client/turn/requested",
+        ...threadEventFields,
+        data: clientTurnRequestData("creq_23456789aa", "other request"),
+      },
+      {
+        threadId: thread.id,
+        sequence: 3,
+        type: "client/turn/requested",
+        ...threadEventFields,
+        data: clientTurnRequestData(requestId, "resent"),
+      },
+      {
+        threadId: thread.id,
+        sequence: 5,
+        type: "client/turn/requested",
+        ...threadEventFields,
+        data: clientTurnRequestData(requestId, "after acceptance"),
       },
     ]);
-    const keys = [
-      ...Array.from({ length: 995 }, (_, index) => ({
-        requestId,
-        threadId: `thr_missing_request_${index}`,
-      })),
-      { requestId, threadId: thread.id },
-    ];
 
-    expect(listStoredClientTurnRequestRowsByKeys(db, { keys })).toEqual([
-      expect.objectContaining({ sequence: 1, threadId: thread.id }),
-    ]);
+    const sequenceBefore = (beforeSequence: number | null) =>
+      listStoredClientTurnRequestRowsByKeys(db, {
+        keys: [{ beforeSequence, requestId, threadId: thread.id }],
+      }).map((row) => row.sequence);
+
+    expect(sequenceBefore(null)).toEqual([5]);
+    expect(sequenceBefore(4)).toEqual([3]);
+    expect(sequenceBefore(3)).toEqual([1]);
+    expect(sequenceBefore(1)).toEqual([]);
+    expect(
+      listStoredClientTurnRequestRowsByKeys(db, {
+        keys: [
+          { beforeSequence: 2, requestId, threadId: thread.id },
+          { beforeSequence: 4, requestId, threadId: thread.id },
+          { beforeSequence: 4, requestId, threadId: "thr_missing_request" },
+        ],
+      }).map((row) => row.sequence),
+    ).toEqual([3]);
   });
 
   it("lists client turn request ids in range with a storage predicate", () => {
     const { db, project, thread } = setup();
+
     const otherThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -2987,6 +3264,7 @@ describe("events", () => {
       type: "thread/identity",
       data: { providerThreadId: "provider_old" },
     });
+
     const failedSequence = appendStoredThreadEvent(db, noopNotifier, {
       threadId: thread.id,
       scope: threadScope(),
@@ -3078,6 +3356,7 @@ describe("events", () => {
 
   it("appends stored thread events in one transaction with per-thread sequences", () => {
     const { db, project, thread } = setup();
+
     const otherThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -3130,6 +3409,7 @@ describe("events", () => {
 
   it("lists only requested turn keys that have a stored turn/completed", () => {
     const { db, project, thread } = setup();
+
     const otherThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -3246,14 +3526,17 @@ describe("events", () => {
 
   it("lists active turn and latest provider state for thread interruption", () => {
     const { db, project, thread } = setup();
+
     const completedThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const noProviderThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const noEventThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -3435,6 +3718,7 @@ describe("events", () => {
 
   it("returns high-water marks for specific threads", () => {
     const { db, project, thread } = setup();
+
     const thread2 = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -3891,8 +4175,217 @@ describe("events", () => {
     ).toEqual([]);
   });
 
+  it.each(["matched", "missing"])(
+    "keeps task-state lookup bounded as unrelated history grows (%s)",
+    (kind) => {
+      const { db, thread } = setup();
+
+      try {
+        const itemIds = [
+          "task:selected",
+          "delegation:selected",
+          "task:missing",
+        ];
+
+        if (kind === "matched") {
+          insertEvents(db, noopNotifier, [
+            {
+              threadId: thread.id,
+              sequence: 1,
+              scope: threadScope(),
+              type: "item/backgroundTask/progress",
+              itemId: itemIds[0]!,
+              itemKind: "backgroundTask",
+              parentToolCallId: null,
+              data: "{}",
+            },
+            {
+              threadId: thread.id,
+              sequence: 2,
+              scope: threadScope(),
+              type: "item/delegation/completed",
+              itemId: itemIds[1]!,
+              itemKind: "delegation",
+              parentToolCallId: null,
+              data: "{}",
+            },
+          ]);
+        }
+
+        const read = () =>
+          listLatestBackgroundTaskStateRowsByItemIds(db, {
+            threadId: thread.id,
+            itemIds,
+            beforeSequence: 100_000,
+          });
+
+        const expected = kind === "matched" ? [1, 2] : [];
+        expect(read().map((row) => row.sequence)).toEqual(expected);
+
+        const measure = () => {
+          read();
+
+          return Math.min(
+            ...Array.from({ length: 7 }, () => {
+              const started = performance.now();
+
+              for (let iteration = 0; iteration < 5; iteration += 1) read();
+
+              return (performance.now() - started) / 5;
+            }),
+          );
+        };
+
+        const smallMs = measure();
+        insertEvents(
+          db,
+          noopNotifier,
+          Array.from({ length: 85_000 }, (_, index) => ({
+            threadId: thread.id,
+            sequence: index + 10,
+            scope: turnScope("unrelated-turn"),
+            type: "item/agentMessage/delta" as const,
+            itemId: "unrelated-message",
+            itemKind: null,
+            parentToolCallId: null,
+            data: '{"itemId":"unrelated-message","delta":"synthetic"}',
+          })),
+        );
+        const largeMs = measure();
+        expect(read().map((row) => row.sequence)).toEqual(expected);
+        process.stdout.write(
+          JSON.stringify({
+            workload: "timeline-task-state-size-scaling",
+            kind,
+            unrelatedEvents: 85_000,
+            smallMs,
+            largeMs,
+          }) + "\n",
+        );
+        expect(largeMs).toBeLessThan(Math.max(2, smallMs * 8));
+      } finally {
+        db.$client.close();
+      }
+    },
+  );
+  it.each(["matched", "missing"])(
+    "keeps parent backfill bounded as unrelated history grows (%s)",
+    (kind) => {
+      const { db, project, thread } = setup();
+
+      try {
+        const otherThread = createThread(db, noopNotifier, {
+          projectId: project.id,
+          providerId: "codex",
+        });
+
+        const requestedIds = [
+          "parent-tool",
+          "parent-delegation",
+          "parent-tool",
+        ];
+
+        const fixture = (
+          sequence: number,
+          itemId: string,
+          itemKind: InsertEventInput["itemKind"],
+          type: ThreadEventType,
+          threadId = thread.id,
+        ): InsertEventInput => ({
+          threadId,
+          sequence,
+          scope: turnScope("fixture-turn"),
+          type,
+          itemId,
+          itemKind,
+          parentToolCallId: null,
+          data: JSON.stringify({
+            item: { id: itemId, type: itemKind, result: "x".repeat(400) },
+          }),
+        });
+
+        insertEvents(db, noopNotifier, [
+          fixture(1, "parent-tool", "toolCall", "item/started"),
+          fixture(2, "parent-delegation", "delegation", "item/started"),
+          fixture(3, "parent-tool", "toolCall", "item/completed"),
+          fixture(4, "parent-delegation", "delegation", "item/completed"),
+          fixture(5, "parent-tool", "agentMessage", "item/completed"),
+          fixture(6, "parent-tool", "toolCall", "item/delegation/progress"),
+          fixture(1, "parent-tool", "toolCall", "item/started", otherThread.id),
+        ]);
+
+        const read = () =>
+          listStoredDelegatingItemRowsByItemIds(db, {
+            threadId: thread.id,
+            itemIds: kind === "matched" ? requestedIds : ["missing-parent"],
+            maxInlineOutputChars: 64,
+          });
+
+        const expected = kind === "matched" ? [1, 2, 3, 4] : [];
+        expect(read().map((row) => row.sequence)).toEqual(expected);
+        expect(
+          listStoredDelegatingItemRowsByItemIds(db, {
+            threadId: thread.id,
+            itemIds: [],
+            maxInlineOutputChars: 64,
+          }),
+        ).toEqual([]);
+
+        if (kind === "matched") {
+          expect(JSON.parse(read()[0]!.data).item.result).toBe(
+            "x".repeat(64) + "\n…[336 more characters truncated]",
+          );
+        }
+
+        const measure = () => {
+          read();
+
+          return Math.min(
+            ...Array.from({ length: 7 }, () => {
+              const started = performance.now();
+
+              for (let iteration = 0; iteration < 5; iteration += 1) read();
+
+              return (performance.now() - started) / 5;
+            }),
+          );
+        };
+
+        const smallMs = measure();
+        insertEvents(
+          db,
+          noopNotifier,
+          Array.from({ length: 85_000 }, (_, index) => ({
+            threadId: thread.id,
+            sequence: index + 10,
+            scope: turnScope("unrelated-turn"),
+            type: "item/agentMessage/delta" as const,
+            itemId: "unrelated-message",
+            itemKind: null,
+            parentToolCallId: null,
+            data: '{"itemId":"unrelated-message","delta":"synthetic"}',
+          })),
+        );
+        const largeMs = measure();
+        expect(read().map((row) => row.sequence)).toEqual(expected);
+        process.stdout.write(
+          JSON.stringify({
+            workload: "timeline-parent-backfill-size-scaling",
+            kind,
+            unrelatedEvents: 85_000,
+            smallMs,
+            largeMs,
+          }) + "\n",
+        );
+        expect(largeMs).toBeLessThan(Math.max(1, smallMs * 8));
+      } finally {
+        db.$client.close();
+      }
+    },
+  );
   it("returns latest non-terminal open backgroundTask state rows for a thread", () => {
     const { db, project, thread } = setup();
+
     const otherThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -4096,6 +4589,56 @@ describe("events", () => {
         type: "item/backgroundTask/progress",
       },
     ]);
+
+    const read = () =>
+      listLatestOpenBackgroundTaskStateRowsForThread(db, {
+        threadId: thread.id,
+      });
+
+    const measure = () => {
+      read();
+
+      return Math.min(
+        ...Array.from({ length: 7 }, () => {
+          const started = performance.now();
+
+          for (let iteration = 0; iteration < 5; iteration += 1) read();
+
+          return (performance.now() - started) / 5;
+        }),
+      );
+    };
+
+    try {
+      const smallMs = measure();
+      insertEvents(
+        db,
+        noopNotifier,
+        Array.from({ length: 85_000 }, (_, index) => ({
+          threadId: thread.id,
+          sequence: index + 10,
+          scope: turnScope("unrelated-turn"),
+          type: "item/agentMessage/delta" as const,
+          itemId: "unrelated-message",
+          itemKind: null,
+          parentToolCallId: null,
+          data: '{"itemId":"unrelated-message","delta":"synthetic"}',
+        })),
+      );
+      const largeMs = measure();
+      expect(read().map((row) => row.sequence)).toEqual([1, 3, 9]);
+      process.stdout.write(
+        JSON.stringify({
+          workload: "timeline-open-background-size-scaling",
+          unrelatedEvents: 85_000,
+          smallMs,
+          largeMs,
+        }) + "\n",
+      );
+      expect(largeMs).toBeLessThan(Math.max(1, smallMs * 8));
+    } finally {
+      db.$client.close();
+    }
   });
 
   it("counts active workflow, agent, subagent, and command snapshots by thread", () => {
@@ -4285,15 +4828,18 @@ describe("events", () => {
       activeWorkflowCount: 1,
       activeBackgroundAgentCount: 2,
       activeBackgroundCommandCount: 1,
+      activeSubagentCount: 2,
     });
   });
 
   it("returns the same counts from chunked and unchunked thread IDs", () => {
     const { db, project, thread } = setup();
+
     const otherThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const taskData = (itemId: string, taskType: string) =>
       JSON.stringify({
         item: {
@@ -4333,10 +4879,12 @@ describe("events", () => {
     const unchunkedRows = listActiveBackgroundTaskCountsByThreadIds(db, {
       threadIds: [thread.id, otherThread.id],
     });
+
     const missingThreadIds = Array.from(
       { length: 32_751 },
       (_, index) => `thr_missing_${index}`,
     );
+
     const chunkedRows = listActiveBackgroundTaskCountsByThreadIds(db, {
       threadIds: [thread.id, ...missingThreadIds, otherThread.id],
     });
@@ -4344,20 +4892,267 @@ describe("events", () => {
     expect(chunkedRows).toEqual(unchunkedRows);
   });
 
+  it("refreshes reused background-task counts whenever a thread's events change", () => {
+    const { db, thread } = setup();
+
+    const task = (
+      itemId: string,
+      sequence: number,
+      type: "item/started" | "item/backgroundTask/completed",
+    ) => ({
+      threadId: thread.id,
+      sequence,
+      scope: turnScope("turn-1"),
+      type,
+      itemId,
+      itemKind: "backgroundTask" as const,
+      parentToolCallId: null,
+      data: JSON.stringify({
+        item: {
+          id: itemId,
+          type: "backgroundTask",
+          taskType: LOCAL_BASH_TASK_TYPE,
+          description: "fixture background task",
+          status: type === "item/started" ? "pending" : "completed",
+          taskStatus: type === "item/started" ? "running" : "completed",
+          skipTranscript: false,
+        },
+      }),
+    });
+
+    const commands = () =>
+      listActiveBackgroundTaskCountsByThreadIds(db, {
+        threadIds: [thread.id],
+      })[0]?.activeBackgroundCommandCount ?? 0;
+
+    expect(commands()).toBe(0);
+    insertEvents(db, noopNotifier, [task("task:one", 1, "item/started")]);
+    expect(commands()).toBe(1);
+    expect(commands()).toBe(1);
+    insertEvents(db, noopNotifier, [task("task:two", 2, "item/started")]);
+    expect(commands()).toBe(2);
+    insertEvents(db, noopNotifier, [
+      task("task:one", 3, "item/backgroundTask/completed"),
+    ]);
+    expect(commands()).toBe(1);
+    db.$client
+      .prepare("DELETE FROM events WHERE thread_id = ? AND sequence = ?")
+      .run(thread.id, 2);
+    expect(commands()).toBe(0);
+  });
+
+  it("keeps reused background-task counts equal to fresh counts while a thread streams", () => {
+    const { db, project, thread } = setup();
+
+    const idleThread = createThread(db, noopNotifier, {
+      projectId: project.id,
+      providerId: "codex",
+    });
+
+    let sequence = 0;
+
+    const task = (args: {
+      itemId: string;
+      type:
+        | "item/started"
+        | "item/backgroundTask/progress"
+        | "item/backgroundTask/completed";
+      taskType: string;
+      status: "pending" | "completed";
+      skipTranscript?: boolean;
+      sequence?: number;
+    }) => ({
+      threadId: thread.id,
+      sequence: args.sequence ?? ++sequence,
+      scope: threadScope(),
+      type: args.type,
+      itemId: args.itemId,
+      itemKind: "backgroundTask" as const,
+      parentToolCallId: null,
+      data: JSON.stringify({
+        item: {
+          id: args.itemId,
+          type: "backgroundTask",
+          taskType: args.taskType,
+          description: "fixture background task",
+          status: args.status,
+          taskStatus: args.status === "pending" ? "running" : "completed",
+          skipTranscript: args.skipTranscript ?? false,
+        },
+      }),
+    });
+
+    const message = () => ({
+      threadId: thread.id,
+      sequence: ++sequence,
+      scope: threadScope(),
+      type: "item/agentMessage/delta" as const,
+      itemId: `msg-${sequence}`,
+      itemKind: "agentMessage" as const,
+      parentToolCallId: null,
+      data: JSON.stringify({ itemId: `msg-${sequence}`, delta: "hello" }),
+    });
+
+    const threadIds = [thread.id, idleThread.id];
+
+    const reused = () =>
+      listActiveBackgroundTaskCountsByThreadIds(db, { threadIds });
+
+    const fresh = () =>
+      db.transaction((tx) =>
+        listActiveBackgroundTaskCountsByThreadIds(tx, { threadIds }),
+      );
+
+    const expectCounts = (
+      counts: {
+        activeWorkflowCount: number;
+        activeBackgroundAgentCount: number;
+        activeBackgroundCommandCount: number;
+        activeSubagentCount: number;
+      } | null,
+    ) => {
+      const rows = reused();
+      expect(rows).toEqual(fresh());
+      expect(rows).toEqual(
+        counts === null ? [] : [{ threadId: thread.id, ...counts }],
+      );
+    };
+
+    const none = null;
+
+    const only = (
+      field:
+        | "activeWorkflowCount"
+        | "activeBackgroundAgentCount"
+        | "activeBackgroundCommandCount",
+    ) => ({
+      activeWorkflowCount: 0,
+      activeBackgroundAgentCount: 0,
+      activeBackgroundCommandCount: 0,
+      activeSubagentCount: field === "activeBackgroundAgentCount" ? 1 : 0,
+      [field]: 1,
+    });
+
+    expectCounts(none);
+    insertEvents(db, noopNotifier, [
+      task({
+        itemId: "task:cmd",
+        type: "item/started",
+        taskType: LOCAL_BASH_TASK_TYPE,
+        status: "pending",
+      }),
+    ]);
+    expectCounts(only("activeBackgroundCommandCount"));
+    insertEvents(db, noopNotifier, [message(), message()]);
+    expectCounts(only("activeBackgroundCommandCount"));
+    insertEvents(db, noopNotifier, [
+      task({
+        itemId: "task:cmd",
+        type: "item/backgroundTask/progress",
+        taskType: LOCAL_BASH_TASK_TYPE,
+        status: "completed",
+      }),
+      task({
+        itemId: "task:wf",
+        type: "item/started",
+        taskType: LOCAL_WORKFLOW_TASK_TYPE,
+        status: "pending",
+      }),
+      task({
+        itemId: "task:hidden",
+        type: "item/started",
+        taskType: LOCAL_AGENT_TASK_TYPE,
+        status: "pending",
+        skipTranscript: true,
+      }),
+    ]);
+    expectCounts(only("activeWorkflowCount"));
+    insertEvents(db, noopNotifier, [
+      message(),
+      task({
+        itemId: "task:wf",
+        type: "item/backgroundTask/progress",
+        taskType: LOCAL_WORKFLOW_TASK_TYPE,
+        status: "pending",
+      }),
+    ]);
+    expectCounts(only("activeWorkflowCount"));
+    insertEvents(db, noopNotifier, [
+      task({
+        itemId: "task:wf",
+        type: "item/backgroundTask/completed",
+        taskType: LOCAL_WORKFLOW_TASK_TYPE,
+        status: "completed",
+      }),
+    ]);
+    expectCounts(none);
+    insertEvents(db, noopNotifier, [
+      task({
+        itemId: "task:wf",
+        type: "item/backgroundTask/progress",
+        taskType: LOCAL_WORKFLOW_TASK_TYPE,
+        status: "completed",
+      }),
+      task({
+        itemId: "task:sub",
+        type: "item/backgroundTask/progress",
+        taskType: LOCAL_SUBAGENT_TASK_TYPE,
+        status: "pending",
+      }),
+    ]);
+    expectCounts(only("activeBackgroundAgentCount"));
+    db.$client
+      .prepare(
+        "DELETE FROM events WHERE thread_id = ? AND item_id = 'task:sub'",
+      )
+      .run(thread.id);
+    expectCounts(none);
+    insertEvents(db, noopNotifier, [
+      task({
+        itemId: "task:late",
+        type: "item/started",
+        taskType: LOCAL_AGENT_TASK_TYPE,
+        status: "pending",
+        sequence: sequence + 100,
+      }),
+    ]);
+    sequence += 100;
+    expectCounts(only("activeBackgroundAgentCount"));
+    insertEvents(db, noopNotifier, [
+      task({
+        itemId: "task:early",
+        type: "item/started",
+        taskType: LOCAL_BASH_TASK_TYPE,
+        status: "pending",
+        sequence: sequence - 50,
+      }),
+    ]);
+    expectCounts({
+      activeWorkflowCount: 0,
+      activeBackgroundAgentCount: 1,
+      activeBackgroundCommandCount: 1,
+      activeSubagentCount: 1,
+    });
+  });
+
   it("lists the latest lifecycle row per open backgroundTask item on a host", () => {
     const db = createMigratedConnection();
+
     const host = upsertHost(db, noopNotifier, {
       name: "task-host",
     });
+
     const { project } = createProject(db, noopNotifier, {
       name: "task-project",
       source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
     });
+
     const environment = createEnvironment(db, noopNotifier, {
       providerOwnsPath: false,
       projectId: project.id,
       hostId: host.id,
     });
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       environmentId: environment.id,
@@ -4438,6 +5233,7 @@ describe("events", () => {
     const rows = listOpenBackgroundTaskItemRowsForHost(db, {
       hostId: host.id,
     });
+
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       itemId: "task:wf-open",
@@ -4451,6 +5247,7 @@ describe("events", () => {
     const otherHost = upsertHost(db, noopNotifier, {
       name: "other-host",
     });
+
     expect(
       listOpenBackgroundTaskItemRowsForHost(db, { hostId: otherHost.id }),
     ).toEqual([]);
@@ -4458,6 +5255,7 @@ describe("events", () => {
 
   it("notifies on events-appended per thread", () => {
     const { db, project, thread } = setup();
+
     const thread2 = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -4501,6 +5299,7 @@ describe("events", () => {
       {
         eventTypes: ["system/error", "client/turn/requested"],
         timelineSequence: 2,
+        eventSequenceRange: { from: 1, to: 2 },
       },
     );
     expect(spy.notifyThread).toHaveBeenCalledWith(
@@ -4509,9 +5308,32 @@ describe("events", () => {
       {
         eventTypes: ["system/error"],
         timelineSequence: 1,
+        eventSequenceRange: { from: 1, to: 1 },
       },
     );
     expect(spy.notifyThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("omits contiguous coverage for gapped imports", () => {
+    const { db, thread } = setup();
+    const notifyThread = vi.fn();
+
+    insertEvents(
+      db,
+      { ...noopNotifier, notifyThread },
+      [1, 3].map<Parameters<typeof insertEvents>[2][number]>((sequence) => ({
+        threadId: thread.id,
+        sequence,
+        type: "system/error",
+        ...threadEventFields,
+        data: "{}",
+      })),
+    );
+
+    expect(notifyThread).toHaveBeenCalledWith(thread.id, ["events-appended"], {
+      eventTypes: ["system/error"],
+      timelineSequence: 3,
+    });
   });
 });
 
@@ -4528,10 +5350,13 @@ describe("timeline read-boundary output truncation", () => {
       sequenceStart: 0,
       threadId,
     });
+
     const row = rows.at(-1);
+
     if (!row) {
       throw new Error("expected a window row");
     }
+
     return JSON.parse(row.data) as Record<string, unknown>;
   }
 
@@ -4561,11 +5386,13 @@ describe("timeline read-boundary output truncation", () => {
         }),
       },
     ]);
+
     const args = {
       maxInlineOutputChars,
       sequenceStart: 0,
       threadId: thread.id,
     };
+
     const rows = listStoredTimelineWindowEventRows(db, args);
 
     expect(
@@ -4598,16 +5425,21 @@ describe("timeline read-boundary output truncation", () => {
         data: JSON.stringify({ message: "x".repeat(messageChars) }),
       })),
     );
+
     const args = {
       maxInlineOutputChars: null,
       sequenceStart: 0,
       threadId: thread.id,
     };
+
     const rows = listStoredTimelineWindowEventRows(db, args);
+
     const rowBytes = new Map(
       rows.map((row) => [row.sequence, Buffer.byteLength(row.data)]),
     );
+
     const newestTwoBytes = (rowBytes.get(3) ?? 0) + (rowBytes.get(2) ?? 0);
+
     const allRowBytes = rows.reduce(
       (total, row) => total + Buffer.byteLength(row.data),
       0,
@@ -4703,15 +5535,19 @@ describe("timeline read-boundary output truncation", () => {
           data: JSON.stringify({ message: "x".repeat(messageChars) }),
         })),
       );
+
       const args = {
         maxInlineOutputChars: null,
         sequenceStart: 0,
         threadId: thread.id,
       };
+
       const newestRow = listStoredTimelineWindowEventRows(db, args).at(-1);
+
       if (!newestRow) {
         throw new Error("expected a newest event row");
       }
+
       const newestRowBytes = Buffer.byteLength(newestRow.data);
 
       expect(
@@ -4841,11 +5677,13 @@ describe("timeline read-boundary output truncation", () => {
       sequenceStart: 0,
       threadId: thread.id,
     });
+
     const stored = listStoredTimelineWindowEventRows(db, {
       maxInlineOutputChars: null,
       sequenceStart: 0,
       threadId: thread.id,
     });
+
     expect(rows.at(-1)?.data).toBe(stored.at(-1)?.data);
   });
 });
@@ -4853,14 +5691,17 @@ describe("timeline read-boundary output truncation", () => {
 describe("stored provider thread identity ownership", () => {
   function setupThreads(args: { providerIds?: readonly string[] } = {}) {
     const db = createMigratedConnection();
+
     const host = upsertHost(db, noopNotifier, {
       name: "identity-host",
       type: "persistent",
     });
+
     const { project } = createProject(db, noopNotifier, {
       name: "identity-project",
       source: { type: "local_path", hostId: host.id, path: "/tmp/identity" },
     });
+
     const environment = createEnvironment(db, noopNotifier, {
       projectId: project.id,
       hostId: host.id,
@@ -4868,6 +5709,7 @@ describe("stored provider thread identity ownership", () => {
       status: "ready",
       providerOwnsPath: false,
     });
+
     const threadIds = (args.providerIds ?? ["codex", "codex"]).map(
       (providerId) =>
         createThread(db, noopNotifier, {
@@ -4876,6 +5718,7 @@ describe("stored provider thread identity ownership", () => {
           providerId,
         }).id,
     );
+
     return { db, environment, host, project, threadIds };
   }
 
@@ -4946,9 +5789,11 @@ describe("stored provider thread identity ownership", () => {
 
   function requireThreadIds(threadIds: readonly string[]): [string, string] {
     const [first, second] = threadIds;
+
     if (first === undefined || second === undefined) {
       throw new Error("Expected two threads");
     }
+
     return [first, second];
   }
 
@@ -5121,6 +5966,7 @@ describe("stored provider thread identity ownership", () => {
       providerThreadId: "01a03fb4-1bb9-session-a",
       threadId: late,
     });
+
     for (const [threadId, providerThreadId] of [
       [early, "01a03fb4-1c1a-session-b"],
       [late, "01a03fb4-1bb9-session-a"],
@@ -5246,10 +6092,13 @@ describe("stored provider thread identity ownership", () => {
     const { db, threadIds } = setupThreads({
       providerIds: ["codex", "codex", "codex"],
     });
+
     const [first, second, third] = threadIds;
+
     if (first === undefined || second === undefined || third === undefined) {
       throw new Error("Expected three threads");
     }
+
     for (const threadId of [first, second]) {
       announceIdentity(db, {
         createdAt: 1_787_775_164_121,
@@ -5257,6 +6106,7 @@ describe("stored provider thread identity ownership", () => {
         threadId,
       });
     }
+
     announceIdentity(db, {
       createdAt: 1_787_775_100_000,
       providerThreadId: "session-third-own",
@@ -5355,10 +6205,12 @@ describe("stored provider thread identity ownership", () => {
   ] as const)("checks shared claim removal within the %s scope", (kind) => {
     const { db, environment, project, threadIds } = setupThreads();
     const [owner] = requireThreadIds(threadIds);
+
     const host = upsertHost(db, noopNotifier, {
       name: "claim-other-host",
       type: "persistent",
     });
+
     const otherEnvironment = createEnvironment(db, noopNotifier, {
       projectId: project.id,
       hostId: host.id,
@@ -5366,6 +6218,7 @@ describe("stored provider thread identity ownership", () => {
       status: "ready",
       providerOwnsPath: false,
     });
+
     const other = createThread(db, noopNotifier, {
       projectId: project.id,
       ...(kind === "unknown-host"
@@ -5376,6 +6229,7 @@ describe("stored provider thread identity ownership", () => {
           }),
       providerId: kind === "other-provider" ? "claude-code" : "codex",
     });
+
     for (const threadId of [owner, other.id]) {
       announceIdentity(db, {
         threadId,
@@ -5383,6 +6237,7 @@ describe("stored provider thread identity ownership", () => {
         providerThreadId: "shared",
       });
     }
+
     expect(
       wouldRemoveSharedProviderSessionClaim(db, {
         threadId: owner,
@@ -5396,6 +6251,7 @@ describe("stored provider thread identity ownership", () => {
   it("allows removing later duplicate or foreign claims while retaining the original evidence", () => {
     const { db, threadIds } = setupThreads();
     const [owner, other] = requireThreadIds(threadIds);
+
     for (const [threadId, createdAt] of [
       [owner, 100],
       [owner, 101],
@@ -5403,6 +6259,7 @@ describe("stored provider thread identity ownership", () => {
     ] as const) {
       announceIdentity(db, { threadId, createdAt, providerThreadId: "shared" });
     }
+
     expect(
       wouldRemoveSharedProviderSessionClaim(db, {
         threadId: owner,
@@ -5434,11 +6291,14 @@ describe("stored provider thread identity ownership", () => {
     const { db, host, project, threadIds } = setupThreads({
       providerIds: ["codex", "claude-code"],
     });
+
     const [codexThread, claudeThread] = requireThreadIds(threadIds);
+
     const otherHost = upsertHost(db, noopNotifier, {
       name: "identity-other-host",
       type: "persistent",
     });
+
     const otherEnvironment = createEnvironment(db, noopNotifier, {
       projectId: project.id,
       hostId: otherHost.id,
@@ -5446,15 +6306,18 @@ describe("stored provider thread identity ownership", () => {
       status: "ready",
       providerOwnsPath: false,
     });
+
     const otherHostThread = createThread(db, noopNotifier, {
       projectId: project.id,
       environmentId: otherEnvironment.id,
       providerId: "codex",
     });
+
     const detachedThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     for (const threadId of [claudeThread, otherHostThread.id]) {
       announceIdentity(db, {
         createdAt: 1_787_775_100_000,
@@ -5462,6 +6325,7 @@ describe("stored provider thread identity ownership", () => {
         threadId,
       });
     }
+
     announceIdentity(db, {
       createdAt: 1_787_775_200_000,
       providerThreadId: "session-shared",

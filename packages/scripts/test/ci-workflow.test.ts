@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it, onTestFinished } from "vitest";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
+
 const repoRoot = resolve(testDir, "..", "..", "..");
 
 it("limits concurrent Turbo test tasks to the CI runner CPU count", () => {
@@ -20,6 +21,7 @@ it("limits concurrent Turbo test tasks to the CI runner CPU count", () => {
     resolve(repoRoot, ".github", "workflows", "ci.yml"),
     "utf8",
   );
+
   const testStep = /- name: Test\n\s+run: ([^\n]+)/u.exec(workflow)?.[1];
 
   expect(testStep).toContain("--concurrency=4");
@@ -32,7 +34,7 @@ it("rejects a pnpm version that disagrees with the root manifest", ({
     process.platform === "win32",
     "install-pnpm.sh runs only on Linux and macOS CI runners",
   );
-  const fixture = mkdtempSync(join(tmpdir(), "bb-pnpm-version-"));
+  const fixture = mkdtempSync(join(tmpdir(), "omnyo-pnpm-version-"));
   onTestFinished(() => rmSync(fixture, { force: true, recursive: true }));
   const fakeBin = resolve(fixture, "bin");
   mkdirSync(fakeBin);

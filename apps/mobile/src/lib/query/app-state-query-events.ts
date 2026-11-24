@@ -23,11 +23,13 @@ export function installAppStateQueryEvents({
       if (state === "active") setFocused(true);
       else if (state === "background") setFocused(false);
     });
+
     return () => {
       subscription?.remove();
       subscription = null;
     };
   });
+
   return () => {
     focusManager.setEventListener(() => () => {});
     focusManager.setFocused(true);

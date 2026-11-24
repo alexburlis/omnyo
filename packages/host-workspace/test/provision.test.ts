@@ -10,17 +10,21 @@ const tempDirs: string[] = [];
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
+
   return dir;
 }
 
 async function initRepo(): Promise<string> {
-  const repoPath = await makeTempDir("bb-provision-repo-");
+  const repoPath = await makeTempDir("omnyo-provision-repo-");
   await runGit(["init", "-b", "main"], { cwd: repoPath });
-  await runGit(["config", "user.name", "BB Tests"], { cwd: repoPath });
-  await runGit(["config", "user.email", "bb@example.com"], { cwd: repoPath });
+  await runGit(["config", "user.name", "Omnyo Tests"], { cwd: repoPath });
+  await runGit(["config", "user.email", "omnyo@example.com"], {
+    cwd: repoPath,
+  });
   await fs.writeFile(path.join(repoPath, "README.md"), "hello\n", "utf8");
   await runGit(["add", "."], { cwd: repoPath });
   await runGit(["commit", "-m", "Initial commit"], { cwd: repoPath });
+
   return repoPath;
 }
 
@@ -48,7 +52,7 @@ describe("provisionWorkspace", () => {
     });
 
     it("provisions an unmanaged non-git directory", async () => {
-      const dirPath = await makeTempDir("bb-provision-nongit-");
+      const dirPath = await makeTempDir("omnyo-provision-nongit-");
 
       const ws = await provisionWorkspace({
         path: dirPath,
@@ -60,7 +64,7 @@ describe("provisionWorkspace", () => {
 
     it("detects a worktree as isWorktree=true", async () => {
       const repoPath = await initRepo();
-      const parentDir = await makeTempDir("bb-provision-wt-parent-");
+      const parentDir = await makeTempDir("omnyo-provision-wt-parent-");
       const wtPath = path.join(parentDir, "wt");
       await runGit(["worktree", "add", "-B", "feature", wtPath], {
         cwd: repoPath,
@@ -76,17 +80,24 @@ describe("provisionWorkspace", () => {
 
     it("resolves external git metadata roots for unmanaged worktrees", async () => {
       const repoPath = await initRepo();
-      const parentDir = await makeTempDir("bb-provision-unmanaged-wt-roots-");
+
+      const parentDir = await makeTempDir(
+        "omnyo-provision-unmanaged-wt-roots-",
+      );
+
       const wtPath = path.join(parentDir, "wt");
       await runGit(["worktree", "add", "-B", "feature", wtPath], {
         cwd: repoPath,
       });
+
       const ws = await provisionWorkspace({
         path: wtPath,
       });
+
       const gitDir = (
         await runGit(["rev-parse", "--absolute-git-dir"], { cwd: ws.path })
       ).stdout.trim();
+
       const commonGitDir = path.resolve(
         ws.path,
         (
@@ -105,7 +116,7 @@ describe("provisionWorkspace", () => {
     it("throws for non-existent path", async () => {
       await expect(
         provisionWorkspace({
-          path: "/tmp/does-not-exist-bb",
+          path: "/tmp/does-not-exist-omnyo",
         }),
       ).rejects.toThrow(/does not exist/u);
     });

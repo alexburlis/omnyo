@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { HostDaemonRpcCommand } from "@bb/host-daemon-contract";
-import { createDeferredPromise } from "@bb/test-helpers";
+import type { HostDaemonRpcCommand } from "@omnyo/host-daemon-contract";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { createServerErrorHandler } from "../../src/errors.js";
@@ -25,16 +25,18 @@ type PrepareCommand = Extract<
 >;
 
 describe("server move downloads", () => {
-  it("streams the archive and the full bb-app package with exact content lengths", () =>
+  it("streams the archive and the full omnyo-app package with exact content lengths", () =>
     withTestHarness(async (harness) => {
       seedHost(harness.deps, { id: "host-old", name: "Laptop" });
       seedPrimaryHost(harness.deps, "host-old");
       seedHost(harness.deps, { id: "host-new", name: "Desktop" });
-      const artifactDir = await mkdtemp(join(tmpdir(), "bb-app-artifact-"));
+      const artifactDir = await mkdtemp(join(tmpdir(), "omnyo-app-artifact-"));
+
       try {
-        const artifactPath = join(artifactDir, "bb-app-full.tgz");
-        const artifactBytes = Buffer.from("full bb-app package bytes");
+        const artifactPath = join(artifactDir, "omnyo-app-full.tgz");
+        const artifactBytes = Buffer.from("full omnyo-app package bytes");
         await writeFile(artifactPath, artifactBytes);
+
         const { environment, events } = createTestServerMoveEnvironment(
           harness,
           {
@@ -46,6 +48,7 @@ describe("server move downloads", () => {
               }),
               build: async () => ({
                 path: artifactPath,
+                runtimeSha256: "c".repeat(64),
                 sha256: createHash("sha256")
                   .update(artifactBytes)
                   .digest("hex"),
@@ -55,6 +58,7 @@ describe("server move downloads", () => {
             },
           },
         );
+
         const coordinator = createServerMoveCoordinator(environment);
         const releasePrepare = createDeferredPromise<FakeDaemonReply>();
         const received: { prepare: PrepareCommand | null } = { prepare: null };
@@ -77,11 +81,21 @@ describe("server move downloads", () => {
               case "server_move.inspect":
                 return {
                   ok: true,
-                  result: inspectResult({ bbAppVersion: "0.0.0-alpha.1" }),
+                  result: inspectResult({ coreVersion: "0.0.0-alpha.1" }),
                 };
               case "server_move.prepare":
                 received.prepare = request.command;
+
                 return releasePrepare.promise;
+              case "server_move.abort":
+                return {
+                  ok: true,
+                  result: {
+                    ok: true,
+                    moveId: request.command.moveId,
+                    fenced: true,
+                  },
+                };
               default:
                 return { ok: true, result: { ok: true } };
             }
@@ -111,23 +125,28 @@ describe("server move downloads", () => {
         });
         await expect.poll(() => received.prepare !== null).toBe(true);
         const prepare = received.prepare;
-        if (prepare === null || prepare.bbApp === null) {
-          throw new Error("The target never received a bb-app download");
+
+        if (prepare === null || prepare.appRuntime === null) {
+          throw new Error("The target never received an omnyo-app download");
         }
 
-        const bbApp = await app.request(prepare.bbApp.downloadPath, {
+        const appRuntime = await app.request(prepare.appRuntime.downloadPath, {
           headers: { "x-test-host": "host-new" },
         });
-        expect(bbApp.status).toBe(200);
-        expect(bbApp.headers.get("content-length")).toBe(
+
+        expect(appRuntime.status).toBe(200);
+        expect(appRuntime.headers.get("content-length")).toBe(
           String(artifactBytes.byteLength),
         );
-        expect(Buffer.from(await bbApp.arrayBuffer())).toEqual(artifactBytes);
-        expect(prepare.bbApp.sizeBytes).toBe(artifactBytes.byteLength);
+        expect(Buffer.from(await appRuntime.arrayBuffer())).toEqual(
+          artifactBytes,
+        );
+        expect(prepare.appRuntime.sizeBytes).toBe(artifactBytes.byteLength);
 
         const archive = await app.request(prepare.archive.downloadPath, {
           headers: { "x-test-host": "host-new" },
         });
+
         expect(archive.status).toBe(200);
         expect(archive.headers.get("content-length")).toBe(
           String(prepare.archive.sizeBytes),
@@ -136,9 +155,10 @@ describe("server move downloads", () => {
           prepare.archive.sizeBytes,
         );
 
-        const forbidden = await app.request(prepare.bbApp.downloadPath, {
+        const forbidden = await app.request(prepare.appRuntime.downloadPath, {
           headers: { "x-test-host": "host-old" },
         });
+
         expect(forbidden.status).toBe(403);
         expect((await stat(artifactPath)).size).toBe(artifactBytes.byteLength);
         coordinator.cancel();

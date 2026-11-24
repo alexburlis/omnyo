@@ -1,11 +1,11 @@
-import { upsertHost } from "@bb/db";
-import { isLoopbackAddress } from "@bb/config/loopback";
+import { upsertHost } from "@omnyo/db";
+import { isLoopbackAddress } from "@omnyo/config/loopback";
 import {
   hostDaemonEnrollKeyRequestSchema,
   hostDaemonEnrollRequestSchema,
   typedRoutes,
   type HostDaemonInternalSchema,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { Hono } from "hono";
 import type { AppDeps } from "../types.js";
 import { ApiError } from "../errors.js";
@@ -22,6 +22,7 @@ function assertLoopbackRequest(remoteAddress: string | undefined): void {
   if (remoteAddress && isLoopbackAddress(remoteAddress)) {
     return;
   }
+
   throw new ApiError(
     400,
     "unsupported_host",
@@ -34,6 +35,7 @@ export function resolveReportedConnectMachineId(
 ): string | undefined {
   if (getGateAuthKind(context) !== "machine") return undefined;
   const gateMachineId = getGateMachineId(context);
+
   if (gateMachineId === null) {
     throw new ApiError(
       403,
@@ -41,6 +43,7 @@ export function resolveReportedConnectMachineId(
       "Connect machine identity does not match the authenticated credential",
     );
   }
+
   return gateMachineId;
 }
 
@@ -61,7 +64,9 @@ export function registerInternalHostRoutes(app: Hono, deps: AppDeps): void {
           "Machine credentials cannot mint host enrollment keys",
         );
       }
+
       assertLoopbackRequest(getTrustedRemoteAddress(context));
+
       const issued = await issueHostEnrollKey(deps, {
         enrollSource: "loopback",
         ...(payload.hostId ? { hostId: payload.hostId } : {}),
@@ -84,6 +89,7 @@ export function registerInternalHostRoutes(app: Hono, deps: AppDeps): void {
     async (context, payload) => {
       const connectMachineId = resolveReportedConnectMachineId(context);
       const token = requireBearerToken(context.req.header("authorization"));
+
       const enrollment = await deps.machineAuth.enrollHost({
         hostId: payload.hostId,
         token,
@@ -92,6 +98,7 @@ export function registerInternalHostRoutes(app: Hono, deps: AppDeps): void {
       if (!enrollment) {
         throw new ApiError(401, "unauthorized", "Unauthorized");
       }
+
       upsertHost(deps.db, deps.hub, {
         ...(connectMachineId !== undefined ? { connectMachineId } : {}),
         id: enrollment.metadata.hostId,

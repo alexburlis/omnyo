@@ -95,6 +95,7 @@ describe("thread tab file-opener owner", () => {
       hostId: "host_docs",
       threadId: null,
     };
+
     const parsed = threadTabsSchema.parse([
       { ...OPENER_TAB_BASE, fileOpenerOwner },
     ]);

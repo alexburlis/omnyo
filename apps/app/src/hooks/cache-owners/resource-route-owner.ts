@@ -5,13 +5,13 @@ import type {
   EnvironmentChangedMessage,
   ProjectChangedMessage,
   ThreadChangedMessage,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   destroyPersistedBrowserViewsForEnvironment,
   destroyPersistedBrowserViewsForThread,
 } from "@/components/secondary-panel/browserViewVisibilityCoordinator";
 import { getRootComposeRoutePath } from "@/lib/route-paths";
-import { getDesktopBrowserApi } from "@/lib/bb-desktop";
+import { getDesktopBrowserApi } from "@/lib/omnyo-desktop";
 import { useRouteState } from "../useRouteState";
 
 type DeletedResourceRouteChangeHandler = (message: ChangedMessage) => void;
@@ -48,6 +48,7 @@ function isDeletedEnvironmentMessage(
 
 export function useDeletedResourceRouteOwner(): DeletedResourceRouteChangeHandler {
   const navigate = useNavigate();
+
   const { projectId: routeProjectId, threadId: routeThreadId } =
     useRouteState();
 
@@ -57,6 +58,7 @@ export function useDeletedResourceRouteOwner(): DeletedResourceRouteChangeHandle
         if (routeProjectId === message.id) {
           navigate(getRootComposeRoutePath(), { replace: true });
         }
+
         return;
       }
 
@@ -67,13 +69,16 @@ export function useDeletedResourceRouteOwner(): DeletedResourceRouteChangeHandle
             environmentId: message.id,
           });
         }
+
         return;
       }
+
       const deletedThreadId = message.id;
       destroyPersistedBrowserViewsForThread({
         desktopBrowser: getDesktopBrowserApi(),
         threadId: deletedThreadId,
       });
+
       if (routeThreadId !== deletedThreadId) {
         return;
       }

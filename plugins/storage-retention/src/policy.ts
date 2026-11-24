@@ -1,9 +1,8 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import type { Policy } from "./contract.js";
 
-type Thread = Awaited<
-  ReturnType<BbPluginApi["sdk"]["threads"]["list"]>
->[number];
+type Thread = Awaited<ReturnType<PluginApi["sdk"]["threads"]["list"]>>[number];
+
 export type RetentionThread = Pick<
   Thread,
   | "id"
@@ -14,10 +13,13 @@ export type RetentionThread = Pick<
   | "archivedAt"
   | "deletedAt"
   | "pinnedAt"
+  | "pluginHome"
+  | "shelvedAt"
   | "updatedAt"
   | "status"
   | "environmentId"
 >;
+
 interface Candidate {
   rootId: string;
   memberIds: string[];
@@ -33,6 +35,7 @@ export function selectCandidates(
   const byId = new Map(live.map((thread) => [thread.id, thread]));
   const archiveEdges = new Map<string, RetentionThread[]>();
   const deleteEdges = new Map<string, RetentionThread[]>();
+
   function link(
     map: Map<string, RetentionThread[]>,
     id: string | null,
@@ -43,13 +46,16 @@ export function selectCandidates(
     children.push(thread);
     map.set(id, children);
   }
+
   for (const thread of live) {
     link(deleteEdges, thread.lifecycleOwnerThreadId, thread);
     link(archiveEdges, thread.lifecycleOwnerThreadId, thread);
     link(archiveEdges, thread.parentThreadId, thread);
+
     if (thread.visibility === "hidden")
       link(archiveEdges, thread.sourceThreadId, thread);
   }
+
   function members(
     root: RetentionThread,
     edges: Map<string, RetentionThread[]>,
@@ -57,21 +63,28 @@ export function selectCandidates(
     const result: RetentionThread[] = [];
     const seen = new Set<string>();
     const pending = [root];
+
     while (pending.length) {
       const thread = pending.pop()!;
+
       if (seen.has(thread.id)) continue;
       seen.add(thread.id);
       result.push(thread);
       pending.push(...(edges.get(thread.id) ?? []));
     }
+
     return result;
   }
+
   const archive: Candidate[] = [];
   const deletion: Candidate[] = [];
+
   const active = (id: string | null) =>
     id !== null && byId.has(id) && byId.get(id)!.archivedAt === null;
+
   for (const root of live) {
     if (root.lifecycleOwnerThreadId !== null) continue;
+
     if (
       policy.archiveAfterDays !== null &&
       root.archivedAt === null &&
@@ -81,12 +94,16 @@ export function selectCandidates(
       const group = members(root, archiveEdges).filter(
         (thread) => thread.archivedAt === null,
       );
+
       const cutoff = now - policy.archiveAfterDays * 86400000;
+
       if (
         group.every(
           (thread) =>
             thread.updatedAt < cutoff &&
             thread.pinnedAt === null &&
+            !thread.pluginHome &&
+            thread.shelvedAt === null &&
             !(
               thread.environmentId === null &&
               (thread.status === "starting" || thread.status === "stopping")
@@ -103,15 +120,19 @@ export function selectCandidates(
         });
       }
     }
+
     if (policy.deleteAfterDays !== null && root.archivedAt !== null) {
       const group = members(root, deleteEdges);
       const cutoff = now - policy.deleteAfterDays * 86400000;
+
       if (
         group.every(
           (thread) =>
             thread.archivedAt !== null &&
             thread.archivedAt < cutoff &&
-            thread.pinnedAt === null,
+            thread.pinnedAt === null &&
+            !thread.pluginHome &&
+            thread.shelvedAt === null,
         )
       ) {
         deletion.push({
@@ -125,7 +146,9 @@ export function selectCandidates(
       }
     }
   }
+
   const sort = (a: Candidate, b: Candidate) =>
     a.oldestAt - b.oldestAt || a.rootId.localeCompare(b.rootId);
+
   return { archive: archive.sort(sort), delete: deletion.sort(sort) };
 }

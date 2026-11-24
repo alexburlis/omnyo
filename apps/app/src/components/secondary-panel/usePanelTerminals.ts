@@ -3,21 +3,19 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   closeSecondaryPanelTabInState,
   createNewTabFixedPanelTab,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import type {
   TerminalCreateTarget,
   TerminalSession,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { useAppCommandHandler } from "@/components/commands/AppCommandProvider";
 import {
   DEFAULT_TERMINAL_COLS,
   DEFAULT_TERMINAL_ROWS,
 } from "@/components/thread/terminal/useThreadTerminalController";
 import { applyTerminalSessionUpsert } from "@/hooks/cache-owners/terminal-cache-owner";
-import {
-  useCloseTerminal,
-  useCreateTerminal,
-} from "@/hooks/queries/thread-terminal-queries";
+import { useGuardedTerminalClose } from "@/components/thread/terminal/terminal-close-guard";
+import { useCreateTerminal } from "@/hooks/queries/thread-terminal-queries";
 import {
   useRemoveFixedRightTerminalTab,
   useSetFixedRightTerminalActiveTerminal,
@@ -53,9 +51,11 @@ export function terminalTargetForSession(
   if (session.threadId !== null) {
     return { kind: "thread", threadId: session.threadId };
   }
+
   if (session.environmentId !== null) {
     return { kind: "environment", environmentId: session.environmentId };
   }
+
   return { kind: "host_path", hostId: session.hostId, cwd: session.initialCwd };
 }
 
@@ -72,17 +72,21 @@ export function usePanelTerminals({
   const [autoFocusTerminalId, setAutoFocusTerminalId] = useState<string | null>(
     null,
   );
+
   const queryClient = useQueryClient();
   const createTerminal = useCreateTerminal();
-  const { mutateAsync: closeTerminal } = useCloseTerminal();
+  const closeTerminal = useGuardedTerminalClose();
+
   const updatePanelState = useUpdateFixedPanelTabsState(
     panelStateId,
     syncThreadId,
   );
+
   const setActiveTerminal = useSetFixedRightTerminalActiveTerminal(
     panelStateId,
     syncThreadId,
   );
+
   const removeTerminalTab = useRemoveFixedRightTerminalTab(
     panelStateId,
     syncThreadId,
@@ -103,11 +107,13 @@ export function usePanelTerminals({
       if (!isVisibleTerminalSession(session) || !acceptsSession(session)) {
         return false;
       }
+
       applyTerminalSessionUpsert({ queryClient, session });
       select(
         session.id,
         tabsCarryTarget ? terminalTargetForSession(session) : undefined,
       );
+
       return true;
     },
     [acceptsSession, queryClient, select, tabsCarryTarget],
@@ -115,6 +121,7 @@ export function usePanelTerminals({
 
   const isStarting = createTerminal.isPending;
   const canStart = createTarget !== null && !isStarting;
+
   const start = useCallback(() => {
     if (createTarget === null || createTerminal.isPending) return;
     void createTerminal
@@ -135,13 +142,16 @@ export function usePanelTerminals({
   useAppCommandHandler("terminal.open", () => {
     if (!isFocused || !canStart) return false;
     start();
+
     return true;
   });
 
   const close = useCallback(
     (terminalId: string) => {
-      void closeTerminal({ mode: "force", terminalId })
-        .then(() => removeTerminalTab(terminalId))
+      void closeTerminal(terminalId)
+        .then((closed) => {
+          if (closed) removeTerminalTab(terminalId);
+        })
         .catch(() => undefined);
     },
     [closeTerminal, removeTerminalTab],

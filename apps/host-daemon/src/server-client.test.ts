@@ -1,7 +1,9 @@
 import { AbortError } from "p-retry";
+import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
-import type { PendingInteractionCreate } from "@bb/domain";
-import { HOST_ARTIFACT_MAX_BYTES } from "@bb/host-daemon-contract/protocol";
+import type { PendingInteractionCreate } from "@omnyo/domain";
+import { hostDaemonSessionOpenRequestSchema } from "@omnyo/host-daemon-contract";
+import { HOST_ARTIFACT_MAX_BYTES } from "@omnyo/host-daemon-contract/protocol";
 import {
   createServerClient,
   readHostArtifactBytes,
@@ -53,21 +55,24 @@ describe("createServerClient", () => {
         { status: 400 },
       ),
     );
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
       hostKey: "host-key",
       logger: createLogger(),
-      serverUrl: "https://bb.example.test",
+      serverUrl: "https://omnyo.example.test",
     });
 
     const result = client.openSession({
       hostId: "host-1",
       hostName: "Host",
-      dataDir: "/tmp/bb",
+      dataDir: "/tmp/omnyo",
       instanceId: "instance-1",
       localApiPort: null,
       activeThreads: [],
+      openThreadWork: [],
+
       undeliveredEventThreadIds: [],
       loadedEnvironments: [],
     });
@@ -80,18 +85,150 @@ describe("createServerClient", () => {
 
   it.each([
     {
+      server: "predates open-work sync",
+      olderServerRequestSchema: hostDaemonSessionOpenRequestSchema.omit({
+        openThreadWork: true,
+      }),
+      unsupportedFields: ["openThreadWork"],
+    },
+  ])(
+    "opens a session on a server that $server without the fields it rejects",
+    async ({ olderServerRequestSchema, unsupportedFields }) => {
+      const bodies: Record<string, unknown>[] = [];
+
+      const fetchFn = vi.fn<FetchFn>(async (_input, init) => {
+        const body = z
+          .record(z.string(), z.unknown())
+          .parse(JSON.parse(String(init?.body)));
+
+        bodies.push(body);
+        const parsed = olderServerRequestSchema.safeParse(body);
+
+        if (!parsed.success) {
+          return Response.json(
+            {
+              code: "invalid_request",
+              message: parsed.error.issues[0]?.message ?? "Invalid request",
+            },
+            { status: 400 },
+          );
+        }
+
+        return Response.json(
+          {
+            sessionId: "session-shipped-server",
+            machineEnvironment: { revision: 0, entries: [] },
+            diagnosticsPolicy: { revision: 0, crashReportsEnabled: false },
+            heartbeatIntervalMs: 5_000,
+            leaseTimeoutMs: 30_000,
+          },
+          { status: 201 },
+        );
+      });
+
+      const logger = createLogger();
+
+      const client = createServerClient({
+        fetchFn,
+        getSessionId: () => "session-1",
+        hostKey: "host-key",
+        logger,
+        serverUrl: "https://omnyo.example.test",
+      });
+
+      const session = await client.openSession({
+        hostId: "host-1",
+        hostName: "Host",
+        dataDir: "/tmp/omnyo",
+        instanceId: "instance-1",
+        localApiPort: null,
+        activeThreads: [],
+        openThreadWork: [
+          {
+            threadId: "thr_123",
+            backgroundItemIds: ["item_1"],
+            interactiveRequests: [],
+          },
+        ],
+
+        undeliveredEventThreadIds: [],
+        loadedEnvironments: [],
+      });
+
+      expect(session).toMatchObject({
+        sessionId: "session-shipped-server",
+        endedInteractiveRequests: [],
+      });
+      expect(bodies).toHaveLength(2);
+      expect(bodies[0]).toMatchObject({
+        openThreadWork: [{ threadId: "thr_123" }],
+      });
+
+      for (const field of ["openThreadWork"]) {
+        if (unsupportedFields.includes(field)) {
+          expect(bodies[1]).not.toHaveProperty(field);
+        } else {
+          expect(bodies[1]?.[field]).toEqual(bodies[0]?.[field]);
+        }
+      }
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 400, unsupportedFields }),
+        "Server predates optional session-open fields; opening the session without them",
+      );
+    },
+  );
+
+  it.each([
+    'Unrecognized key: "extra"',
+    'Unrecognized keys: "openThreadWork", "extra"',
+  ])(
+    "does not retry a session open the server rejects with %s",
+    async (message) => {
+      const fetchFn = vi.fn<FetchFn>(async () =>
+        Response.json({ code: "invalid_request", message }, { status: 400 }),
+      );
+
+      const client = createServerClient({
+        fetchFn,
+        getSessionId: () => "session-1",
+        hostKey: "host-key",
+        logger: createLogger(),
+        serverUrl: "https://omnyo.example.test",
+      });
+
+      await expect(
+        client.openSession({
+          hostId: "host-1",
+          hostName: "Host",
+          dataDir: "/tmp/omnyo",
+          instanceId: "instance-1",
+          localApiPort: null,
+          activeThreads: [],
+          openThreadWork: [],
+
+          undeliveredEventThreadIds: [],
+          loadedEnvironments: [],
+        }),
+      ).rejects.toMatchObject({ code: "invalid_request", status: 400 });
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    {
       name: "with headers",
       details: {
         serverUrl: "https://studio.example.test",
         toHostName: "studio",
         movedAt: 1_700_000_000_000,
-        headers: { "x-bb-connect-machine": "bbcm_new" },
+        headers: { "x-omnyo-connect-machine": "bbcm_new" },
       },
       expected: {
         serverUrl: "https://studio.example.test",
         toHostName: "studio",
         movedAt: 1_700_000_000_000,
-        headers: { "x-bb-connect-machine": "bbcm_new" },
+        headers: { "x-omnyo-connect-machine": "bbcm_new" },
       },
     },
     {
@@ -119,12 +256,13 @@ describe("createServerClient", () => {
         Response.json(
           {
             code: "server_moved",
-            message: "This bb server moved to studio",
+            message: "This Omnyo server moved to studio",
             details,
           },
           { status: 410 },
         ),
       );
+
       const client = createServerClient({
         fetchFn,
         getSessionId: () => "session-1",
@@ -137,10 +275,12 @@ describe("createServerClient", () => {
         client.openSession({
           hostId: "host-1",
           hostName: "Host",
-          dataDir: "/tmp/bb",
+          dataDir: "/tmp/omnyo",
           instanceId: "instance-1",
           localApiPort: null,
           activeThreads: [],
+          openThreadWork: [],
+
           undeliveredEventThreadIds: [],
           loadedEnvironments: [],
         }),
@@ -155,7 +295,7 @@ describe("createServerClient", () => {
 
   it.each([
     {
-      serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
       hasMachineCredential: true,
     },
     { serverHeaders: undefined, hasMachineCredential: false },
@@ -167,32 +307,38 @@ describe("createServerClient", () => {
           hasMachineCredential,
           localApiPort: 38_888,
         });
+
         return Response.json(
           {
             sessionId: "session-1",
             machineEnvironment: { revision: 0, entries: [] },
+            diagnosticsPolicy: { revision: 0, crashReportsEnabled: false },
             heartbeatIntervalMs: 5_000,
             leaseTimeoutMs: 30_000,
+            endedInteractiveRequests: [],
           },
           { status: 201 },
         );
       });
+
       const client = createServerClient({
         fetchFn,
         getSessionId: () => "session-1",
         hostKey: "host-key",
         logger: createLogger(),
         ...(serverHeaders !== undefined ? { serverHeaders } : {}),
-        serverUrl: "https://bb.example.test",
+        serverUrl: "https://omnyo.example.test",
       });
 
       await client.openSession({
         hostId: "host-1",
         hostName: "Host",
-        dataDir: "/tmp/bb",
+        dataDir: "/tmp/omnyo",
         instanceId: "instance-1",
         localApiPort: 38_888,
         activeThreads: [],
+        openThreadWork: [],
+
         undeliveredEventThreadIds: [],
         loadedEnvironments: [],
       });
@@ -202,12 +348,13 @@ describe("createServerClient", () => {
 
   it("refuses to fetch project attachments over insecure non-loopback HTTP", async () => {
     const fetchFn = vi.fn<FetchFn>();
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
       hostKey: "host-key",
       logger: createLogger(),
-      serverUrl: "http://bb.example.test",
+      serverUrl: "http://omnyo.example.test",
     });
 
     await expect(
@@ -223,6 +370,7 @@ describe("createServerClient", () => {
 
   it("refuses to fetch project attachments when the server URL is malformed", async () => {
     const fetchFn = vi.fn<FetchFn>();
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
@@ -250,6 +398,7 @@ describe("createServerClient", () => {
       expect(url.searchParams.get("threadId")).toBe("thread-1");
       expect(url.searchParams.get("projectId")).toBe("project-1");
       expect(url.searchParams.get("path")).toBe("network-tab.har");
+
       return new Response("attachment-body", {
         headers: {
           "content-type": "application/octet-stream",
@@ -257,12 +406,13 @@ describe("createServerClient", () => {
         status: 200,
       });
     });
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
       hostKey: "host-key",
       logger: createLogger(),
-      serverUrl: "https://bb.example.test",
+      serverUrl: "https://omnyo.example.test",
     });
 
     const attachment = await client.fetchProjectAttachment({
@@ -281,13 +431,17 @@ describe("createServerClient", () => {
 
   it("fetches and parses a skill tree over authenticated LAN HTTP", async () => {
     const treeHash = "a".repeat(64);
+
     const fetchFn = vi.fn<FetchFn>(async (input, init) => {
       const url = new URL(String(input));
       expect(url.pathname).toBe(`/internal/skills/tree/${treeHash}`);
       expect(new Headers(init?.headers).get("authorization")).toBe(
         "Bearer host-key",
       );
-      expect(new Headers(init?.headers).get("x-bb-connect-machine")).toBeNull();
+      expect(
+        new Headers(init?.headers).get("x-omnyo-connect-machine"),
+      ).toBeNull();
+
       return new Response(
         JSON.stringify({
           treeHash,
@@ -298,6 +452,7 @@ describe("createServerClient", () => {
         { status: 200 },
       );
     });
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
@@ -314,12 +469,13 @@ describe("createServerClient", () => {
 
   it("rejects oversized host artifacts before fetching them", async () => {
     const fetchFn = vi.fn<FetchFn>();
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
       hostKey: "host-key",
       logger: createLogger(),
-      serverUrl: "https://bb.example.test",
+      serverUrl: "https://omnyo.example.test",
     });
 
     await expect(
@@ -337,11 +493,13 @@ describe("createServerClient", () => {
     const maxBytes = chunkBytes * 2;
     let emittedChunks = 0;
     const cancel = vi.fn();
+
     const response = new Response(
       new ReadableStream<Uint8Array>({
         pull(controller) {
           emittedChunks += 1;
           controller.enqueue(new Uint8Array(chunkBytes));
+
           if (emittedChunks === 32) controller.close();
         },
         cancel,
@@ -358,21 +516,24 @@ describe("createServerClient", () => {
 
   it("adds the connect machine credential to internal HTTP requests", async () => {
     const treeHash = "b".repeat(64);
+
     const fetchFn = vi.fn<FetchFn>(async (_input, init) => {
       const headers = new Headers(init?.headers);
       expect(headers.get("authorization")).toBe("Bearer host-key");
-      expect(headers.get("x-bb-connect-machine")).toBe("bbcm_machine");
+      expect(headers.get("x-omnyo-connect-machine")).toBe("bbcm_machine");
+
       return new Response(JSON.stringify({ treeHash, entries: [] }), {
         status: 200,
       });
     });
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
       hostKey: "host-key",
       logger: createLogger(),
-      serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
-      serverUrl: "https://bb.example.test",
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
+      serverUrl: "https://omnyo.example.test",
     });
 
     await client.fetchSkillTree(treeHash);
@@ -386,12 +547,13 @@ describe("createServerClient", () => {
           status: 200,
         }),
     );
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
       hostKey: "host-key",
       logger: createLogger(),
-      serverUrl: "https://bb.example.test",
+      serverUrl: "https://omnyo.example.test",
     });
 
     await expect(
@@ -409,10 +571,12 @@ describe("createServerClient", () => {
     const fetchFn = vi.fn<FetchFn>(async (input) => {
       const url = new URL(String(input));
       expect(url.pathname).toBe("/internal/session/project-attachment-content");
+
       return new Response("loopback-body", {
         status: 200,
       });
     });
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
@@ -452,7 +616,9 @@ describe("createServerClient", () => {
             ],
           },
         ],
+        firstEventIndex: 7,
       });
+
       return new Response(
         JSON.stringify({
           acceptedEvents: [
@@ -472,26 +638,30 @@ describe("createServerClient", () => {
         },
       );
     });
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
       hostKey: "host-key",
       logger: createLogger(),
-      serverUrl: "https://bb.example.test",
+      serverUrl: "https://omnyo.example.test",
     });
 
     await expect(
-      client.postEvents([
-        {
-          threadId: "thr_123",
-          event: {
-            type: "turn/started",
+      client.postEvents({
+        events: [
+          {
             threadId: "thr_123",
-            providerThreadId: "provider-thread",
-            scope: { kind: "turn", turnId: "turn-1" },
+            event: {
+              type: "turn/started",
+              threadId: "thr_123",
+              providerThreadId: "provider-thread",
+              scope: { kind: "turn", turnId: "turn-1" },
+            },
           },
-        },
-      ]),
+        ],
+        firstEventIndex: 7,
+      }),
     ).resolves.toEqual({
       acceptedEvents: [
         {
@@ -504,10 +674,12 @@ describe("createServerClient", () => {
     });
   });
 
-  it("retries retryable interactive request registration responses after the attempt hook", async () => {
+  it("retries retryable interactive request registration responses with the same events stamp", async () => {
     let calls = 0;
+
     const fetchFn = vi.fn<FetchFn>(async () => {
       calls += 1;
+
       if (calls === 1) {
         return new Response(
           JSON.stringify({
@@ -539,26 +711,30 @@ describe("createServerClient", () => {
         },
       );
     });
-    const beforeAttempt = vi.fn(async () => undefined);
+
     const logger = createLogger();
+
     const client = createServerClient({
-      beforeInteractiveRequestRegistrationAttempt: beforeAttempt,
       fetchFn,
       getSessionId: () => "session-1",
       hostKey: "host-key",
       logger,
-      serverUrl: "https://bb.example.test",
+      serverUrl: "https://omnyo.example.test",
     });
 
     await expect(
-      client.registerInteractiveRequest(createInteractiveRequest()),
+      client.registerInteractiveRequest(createInteractiveRequest(), 5),
     ).resolves.toEqual({
       outcome: "created",
       interactionId: "pint_123",
       status: "pending",
     });
     expect(fetchFn).toHaveBeenCalledTimes(2);
-    expect(beforeAttempt).toHaveBeenCalledTimes(2);
+    expect(
+      fetchFn.mock.calls.map(
+        ([, init]) => JSON.parse(String(init?.body)).eventsThrough,
+      ),
+    ).toEqual([5, 5]);
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         attempt: 1,
@@ -585,17 +761,20 @@ describe("createServerClient", () => {
           },
         ),
     );
+
     const logger = createLogger();
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
       hostKey: "host-key",
       logger,
-      serverUrl: "https://bb.example.test",
+      serverUrl: "https://omnyo.example.test",
     });
 
     const result = client.registerInteractiveRequest(
       createInteractiveRequest(),
+      0,
     );
 
     await expect(result).rejects.toBeInstanceOf(ServerResponseError);
@@ -613,10 +792,13 @@ describe("dynamic tool cancellation", () => {
   it("passes cancellation to the tool-call HTTP transport", async () => {
     const controller = new AbortController();
     let transportSignal: AbortSignal | null | undefined;
+
     const fetchFn = vi.fn<FetchFn>(async (_input, init) => {
       transportSignal = init?.signal;
+
       return Response.json({ success: true, contentItems: [] });
     });
+
     const client = createServerClient({
       fetchFn,
       getSessionId: () => "session-1",
@@ -624,6 +806,7 @@ describe("dynamic tool cancellation", () => {
       logger: createLogger(),
       serverUrl: "http://localhost",
     });
+
     await client.callTool(
       {
         requestId: 1,
@@ -633,12 +816,12 @@ describe("dynamic tool cancellation", () => {
         callId: "call",
         tool: "question",
       },
-      controller.signal,
+      { eventsThrough: 3, signal: controller.signal },
     );
     controller.abort();
     expect(transportSignal?.aborted).toBe(true);
-    expect(
-      JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body)),
-    ).not.toHaveProperty("signal");
+    const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body));
+    expect(body).not.toHaveProperty("signal");
+    expect(body).toMatchObject({ eventsThrough: 3 });
   });
 });

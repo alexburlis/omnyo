@@ -12,6 +12,7 @@ const builtInThemeIdSchema = z.enum([
   "gruvbox",
   "catppuccin",
 ]);
+
 export type BuiltInThemeId = z.infer<typeof builtInThemeIdSchema>;
 
 interface BuiltInThemeMeta {
@@ -21,7 +22,7 @@ interface BuiltInThemeMeta {
 }
 
 export const builtInThemes: readonly BuiltInThemeMeta[] = [
-  { id: "default", name: "Default", description: "The standard bb look" },
+  { id: "default", name: "Default", description: "The standard Omnyo look" },
   { id: "nord", name: "Nord", description: "Cool, muted arctic blues" },
   {
     id: "dracula",
@@ -73,12 +74,14 @@ export const FAVICON_COLORS = [
   "purple",
   "pink",
 ] as const;
+
 export type FaviconColor = (typeof FAVICON_COLORS)[number];
 
 export const faviconColorPreferenceSchema = z.enum([
   "default",
   ...FAVICON_COLORS,
 ]);
+
 export type FaviconColorPreference = z.infer<
   typeof faviconColorPreferenceSchema
 >;
@@ -91,6 +94,7 @@ export const appThemeSchema = z.object({
   faviconColor: faviconColorPreferenceSchema,
   resolvedCodeTheme: resolvedCodeThemeSchema.default(defaultResolvedCodeTheme),
 });
+
 export type AppTheme = z.infer<typeof appThemeSchema>;
 
 export const pluginThemeMetaSchema = z.object({
@@ -99,6 +103,7 @@ export const pluginThemeMetaSchema = z.object({
   name: z.string().min(1),
   description: z.string().nullable(),
 });
+
 export type PluginThemeMeta = z.infer<typeof pluginThemeMetaSchema>;
 
 const PLUGIN_THEME_ID_PREFIX = "plugin:";
@@ -111,6 +116,7 @@ export const appThemeSelectionSchema = z.object({
   themeId: z.string().min(1),
   faviconColor: faviconColorPreferenceSchema,
 });
+
 export type AppThemeSelection = z.infer<typeof appThemeSelectionSchema>;
 
 export const defaultAppTheme: AppTheme = {

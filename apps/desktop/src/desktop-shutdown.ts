@@ -1,4 +1,5 @@
 export type DesktopShutdownSignal = "SIGINT" | "SIGTERM";
+
 export type DesktopSignalListener = () => void;
 
 interface DesktopShutdownState {
@@ -50,6 +51,7 @@ export function registerDesktopShutdownSignalHandlers(
 ): void {
   const state: DesktopShutdownState = { inProgress: false };
   const signals: DesktopShutdownSignal[] = ["SIGINT", "SIGTERM"];
+
   for (const signal of signals) {
     args.processEvents.on(signal, () => {
       void handleDesktopShutdownSignal({

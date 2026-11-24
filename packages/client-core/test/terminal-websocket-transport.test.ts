@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   TerminalServerMessage,
   TerminalSession,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   TerminalWebSocketTransport,
   type TerminalBrowserSocket,
@@ -22,9 +22,11 @@ class FakeTerminalBrowserSocket implements TerminalBrowserSocket {
 
   close(code?: number, reason?: string): void {
     this.closeCalls.push({ code, reason });
+
     if (this.readyState === 3) {
       return;
     }
+
     this.readyState = 3;
     this.onclose?.({ code: code ?? 1005, reason: reason ?? "" } as CloseEvent);
   }
@@ -44,6 +46,7 @@ class FakeTerminalBrowserSocket implements TerminalBrowserSocket {
     if (this.throwOnSend) {
       throw new Error("send failed");
     }
+
     this.sent.push(data);
   }
 }
@@ -67,11 +70,13 @@ function createHarness(
   const states: TerminalSocketConnectionState[] = [];
   const overflow = vi.fn<(maxBytes: number) => void>();
   const urls: string[] = [];
+
   const transport = new TerminalWebSocketTransport({
     createSocket: (url) => {
       urls.push(url);
       const socket = new FakeTerminalBrowserSocket();
       sockets.push(socket);
+
       return socket;
     },
     heartbeatIntervalMs: 15_000,
@@ -84,6 +89,7 @@ function createHarness(
     url: "ws://example.test/ws/terminals/term-1",
     ...overrides,
   });
+
   return { messages, overflow, sockets, states, transport, urls };
 }
 
@@ -145,6 +151,7 @@ describe("TerminalWebSocketTransport", () => {
     vi.useFakeTimers();
     const gaps = vi.fn<(expectedSeq: number, receivedSeq: number) => void>();
     const harness = createHarness({ onSequenceGap: gaps });
+
     const output = (seq: number): TerminalServerMessage => ({
       type: "output",
       chunk: {
@@ -281,10 +288,12 @@ describe("TerminalWebSocketTransport", () => {
 
   it("holds input above the socket high-water mark and flushes after drain", () => {
     vi.useFakeTimers();
+
     const harness = createHarness({
       drainPollMs: 10,
       socketHighWaterBytes: 8,
     });
+
     const input = Buffer.from("queued").toString("base64");
 
     harness.transport.start();
@@ -302,10 +311,12 @@ describe("TerminalWebSocketTransport", () => {
 
   it("flushes input when the socket never reports bufferedAmount (React Native)", () => {
     vi.useFakeTimers();
+
     const harness = createHarness({
       drainPollMs: 10,
       socketHighWaterBytes: 8,
     });
+
     const queuedInput = Buffer.from("queued").toString("base64");
     const liveInput = Buffer.from("live").toString("base64");
 

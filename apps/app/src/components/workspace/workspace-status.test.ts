@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { WorkspaceStatus } from "@bb/domain";
+import type { WorkspaceStatus } from "@omnyo/domain";
 import {
   makeWorkspaceMergeBase,
   makeWorkspaceStatus,
   makeWorkspaceWorkingTree,
-} from "@bb/test-helpers";
-import { BbHttpError } from "@bb/sdk/browser";
+} from "@omnyo/test-helpers";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 import { getGitStatusDisplay } from "./workspace-status";
 
 interface MakeStatusOptions {
@@ -20,17 +20,21 @@ interface MakeStatusOptions {
 function makeStatus(options: MakeStatusOptions): WorkspaceStatus {
   const aheadCount = options.aheadCount ?? 0;
   const behindCount = options.behindCount ?? 0;
+
   const hasUncommittedChanges =
     options.state === "untracked" ||
     options.state === "dirty_uncommitted" ||
     options.state === "dirty_and_committed_unmerged";
+
   const fileCount = options.changedFiles ?? 0;
+
   const files = Array.from({ length: fileCount }, (_, index) => ({
     path: `file-${index}.ts`,
     status: "M" as const,
     insertions: null,
     deletions: null,
   }));
+
   return makeWorkspaceStatus({
     workingTree: makeWorkspaceWorkingTree({
       hasUncommittedChanges,
@@ -52,12 +56,32 @@ function makeStatus(options: MakeStatusOptions): WorkspaceStatus {
       baseRef: "origin/main",
       aheadCount,
       behindCount,
+      squashMergeCheckComplete: true,
       hasCommittedUnmergedChanges: aheadCount > 0,
     }),
   });
 }
 
 describe("workspace-status", () => {
+  it("qualifies counts when squash detection could not finish", () => {
+    const status = makeStatus({
+      state: "committed_unmerged",
+      aheadCount: 2,
+      behindCount: 3,
+    });
+
+    if (!status.mergeBase) throw new Error("Missing comparison fixture");
+    status.mergeBase.squashMergeCheckComplete = false;
+    expect(getGitStatusDisplay(status, { showBranchComparison: true })).toEqual(
+      {
+        label: "Diverged",
+        summary: "2 ahead, 3 behind relative to main",
+        warning:
+          "Squash-merge check incomplete; counts may include already-merged commits.",
+      },
+    );
+  });
+
   it("reports untracked workspaces without echoing working-tree file counts", () => {
     expect(
       getGitStatusDisplay(makeStatus({ changedFiles: 1, state: "untracked" })),
@@ -167,7 +191,7 @@ describe("workspace-status", () => {
   });
 
   it("reports a missing workspace when the path is gone", () => {
-    const error = new BbHttpError({
+    const error = new OmnyoHttpError({
       status: 502,
       message: "Managed workspace path does not exist",
       code: "path_not_found",
@@ -176,6 +200,7 @@ describe("workspace-status", () => {
         message: "Managed workspace path does not exist",
       },
     });
+
     expect(getGitStatusDisplay(undefined, { error })).toMatchObject({
       label: "Unknown",
       summary: "Workspace not found.",
@@ -183,7 +208,7 @@ describe("workspace-status", () => {
   });
 
   it("reports lifecycle-aware workspace errors before generic fallbacks", () => {
-    const error = new BbHttpError({
+    const error = new OmnyoHttpError({
       status: 409,
       message: "Environment unavailable",
       code: "environment_not_ready",

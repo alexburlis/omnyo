@@ -11,6 +11,7 @@ import { Provider, createStore } from "jotai";
 import { useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MOTION_DURATION_MS } from "@omnyo/shared-ui/motion";
 import { ExpandablePanel } from "./disclosure";
 import { layoutAnimationInFlightCountAtom } from "./layoutAnimationAtoms.js";
 
@@ -49,9 +50,11 @@ function renderPanel(isExpanded: boolean) {
 
 function fireResize(entries: ResizeObserverEntry[] = []): void {
   const observer = ResizeObserverStub.instances.at(-1);
+
   if (!observer) {
     throw new Error("No ResizeObserver was installed");
   }
+
   act(() => {
     observer.callback(entries, observer);
   });
@@ -73,8 +76,10 @@ describe("ExpandablePanel body height", () => {
       </ExpandablePanel>,
     );
     expect(readHeight).not.toHaveBeenCalled();
+
     const target = screen.getByText("Streaming body update").parentElement
       ?.parentElement;
+
     if (!target) throw new Error("Panel content was not rendered");
     fireResize([
       {
@@ -92,9 +97,11 @@ describe("ExpandablePanel body height", () => {
   it("snaps content growth inside an open body but eases the toggle", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
     const view = renderPanel(true);
+
     const region =
       view.getByText("Expanded body").parentElement?.parentElement
         ?.parentElement;
+
     if (!region) {
       throw new Error("Panel body region was not rendered");
     }
@@ -128,6 +135,7 @@ function TogglablePanel({
   collapsedContent?: ReactNode;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+
   return (
     <ExpandablePanel
       isExpanded={isExpanded}
@@ -174,7 +182,7 @@ describe("ExpandablePanel deferred body realization", () => {
     expect(screen.getByText("Expanded body")).toBe(body);
 
     act(() => {
-      vi.advanceTimersByTime(200);
+      vi.advanceTimersByTime(MOTION_DURATION_MS.base);
     });
     expect(screen.queryByText("Expanded body")).toBeNull();
   });
@@ -196,9 +204,11 @@ describe("ExpandablePanel deferred body realization", () => {
     const header = screen.getByRole("button", { name: "Tool call" });
     const preview = screen.getByText("Collapsed summary");
     const region = preview.parentElement?.parentElement;
+
     if (!region) {
       throw new Error("Panel body region was not rendered");
     }
+
     fireResize();
     const previewHeight = `${"Collapsed summary".length}px`;
     const bodyHeight = `${"Expanded body".length}px`;
@@ -211,6 +221,7 @@ describe("ExpandablePanel deferred body realization", () => {
       transitionDuration: string;
       inFlight: number;
     } | null = null;
+
     act(() => {
       flushSync(() => {
         header.click();
@@ -238,7 +249,7 @@ describe("ExpandablePanel deferred body realization", () => {
     expect(region.style.transitionDuration).toBe("");
     expect(store.get(layoutAnimationInFlightCountAtom)).toBe(1);
     act(() => {
-      vi.advanceTimersByTime(200);
+      vi.advanceTimersByTime(MOTION_DURATION_MS.slow);
     });
     expect(store.get(layoutAnimationInFlightCountAtom)).toBe(0);
   });
@@ -249,6 +260,7 @@ describe("ExpandablePanel deferred body realization", () => {
     const header = screen.getByRole("button", { name: "Tool call" });
     fireEvent.click(header);
     const region = screen.getByText("Expanded body").closest("[aria-hidden]");
+
     if (!region) {
       throw new Error("Panel body region was not rendered");
     }
@@ -275,7 +287,7 @@ describe("ExpandablePanel deferred body realization", () => {
     expect(screen.getByText("Expanded body")).toBe(body);
 
     act(() => {
-      vi.advanceTimersByTime(200);
+      vi.advanceTimersByTime(MOTION_DURATION_MS.base);
     });
     expect(screen.getByText("Expanded body")).toBe(body);
   });

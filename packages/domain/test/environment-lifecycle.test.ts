@@ -42,9 +42,11 @@ function expectedTarget(
   row: EnvironmentLifecycleRowState,
 ): EnvironmentStatus | undefined {
   const target = ENVIRONMENT_LIFECYCLE[status][eventType];
+
   if (target === undefined || typeof target === "string") {
     return target;
   }
+
   return row.path !== null
     ? target.withWorkspacePath
     : target.withoutWorkspacePath;
@@ -93,6 +95,7 @@ describe("evaluateEnvironmentLifecycleEvent", () => {
         if (ENVIRONMENT_LIFECYCLE[status][eventType] === undefined) {
           continue;
         }
+
         const environment = rowState(status);
         expect(
           evaluateEnvironmentLifecycleEvent({
@@ -110,6 +113,7 @@ describe("evaluateEnvironmentLifecycleEvent", () => {
         if (ENVIRONMENT_LIFECYCLE[status][eventType] !== undefined) {
           continue;
         }
+
         expect(
           evaluateEnvironmentLifecycleEvent({
             environment: rowState(status),

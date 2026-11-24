@@ -1,5 +1,5 @@
-import type { PromptMentionResource, PromptTextMention } from "@bb/domain";
-import type { TimelineConversationTurnRequest } from "@bb/server-contract";
+import type { PromptMentionResource, PromptTextMention } from "@omnyo/domain";
+import type { TimelineConversationTurnRequest } from "@omnyo/server-contract";
 import type { ReactNode } from "react";
 import { ConversationMessageContent } from "@/components/thread/timeline/ConversationMessageContent";
 import {
@@ -11,6 +11,8 @@ import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
 export default {
   title: "thread/timeline/User Message Markdown",
 };
+
+const STORY_TIMESTAMP = Date.UTC(2026, 8, 30, 16, 5);
 
 function TimelineStage({
   children,
@@ -33,6 +35,7 @@ function TimelineStage({
 const resolveMentionLink = () => () => {};
 
 const acceptedMessage: TimelineConversationTurnRequest = {
+  clientRequestId: null,
   isGrouped: false,
   kind: "message",
   status: "accepted",
@@ -44,6 +47,7 @@ function mentionAt(
   resource: PromptMentionResource,
 ): PromptTextMention {
   const start = text.indexOf(token);
+
   return { start, end: start + token.length, resource };
 }
 
@@ -62,6 +66,9 @@ function UserMessage({
     <TimelineStage revealMessageActions={revealMessageActions}>
       <ConversationMessageContent
         role="user"
+        id="user_markdown_1"
+        threadId="thr_user_markdown"
+        turnId={null}
         initiator="user"
         senderThreadId={null}
         senderThreadTitle={null}
@@ -71,7 +78,7 @@ function UserMessage({
         systemMessageKind="unlabeled"
         systemMessageSubject={null}
         text={text}
-        timestamp={0}
+        timestamp={STORY_TIMESTAMP}
         attachments={null}
         mentions={mentions}
         projectId="proj_demo"
@@ -98,6 +105,7 @@ const FORMATTING_BODY = [
 
 const MENTIONS_BODY =
   "Ask @thread:thr_child to update @src/promptbox/PromptBoxInternal.tsx, then run /deploy.";
+
 const MENTIONS: readonly PromptTextMention[] = [
   mentionAt(MENTIONS_BODY, "@thread:thr_child", {
     kind: "thread",
@@ -233,14 +241,14 @@ export function OrderedListMarkers() {
                   <TimelineStage>
                     <ConversationMessageContent
                       role="assistant"
+                      turnGit={null}
                       id="msg_marker_widths"
                       threadId="thr_demo"
                       turnId="turn_demo"
                       text={text}
-                      timestamp={0}
+                      timestamp={STORY_TIMESTAMP}
                       attachments={null}
                       showActions={false}
-                      mobileActionDisplay="inline"
                       streaming={false}
                     />
                   </TimelineStage>

@@ -1,4 +1,5 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
+import { resolveWorkflowPlacement } from "./placement.js";
 import {
   resolveWorkflowSource,
   type ResolvedWorkflowSource,
@@ -15,17 +16,19 @@ interface PreparedWorkflowSource extends ResolvedWorkflowSource {
 }
 
 export async function prepareWorkflowSource(
-  bb: BbPluginApi,
+  api: PluginApi,
   context: WorkflowSourceContext,
   input: WorkflowSourceInput,
 ): Promise<PreparedWorkflowSource> {
   const resolved = await resolveWorkflowSource(input, context, {
     async getThreadEnvironmentId(threadId) {
-      const thread = await bb.sdk.threads.get({ threadId });
+      const thread = await api.sdk.threads.get({ threadId });
+
       return thread.environmentId;
     },
     async getEnvironment(environmentId) {
-      const environment = await bb.sdk.environments.get({ environmentId });
+      const environment = await api.sdk.environments.get({ environmentId });
+
       return {
         id: environment.id,
         projectId: environment.projectId,
@@ -34,20 +37,29 @@ export async function prepareWorkflowSource(
       };
     },
     readFile(input) {
-      return bb.sdk.files.read(input);
+      return api.sdk.files.read(input);
     },
   });
+
   const validation = await validateWorkflowSource(
     resolved.source,
     resolved.environmentId,
     {
+      async validateEnvironment(environmentId) {
+        await resolveWorkflowPlacement(
+          api.sdk,
+          context.projectId,
+          environmentId,
+        );
+      },
       listProviders(environmentId) {
-        return bb.sdk.providers.list({ environmentId });
+        return api.sdk.providers.list({ environmentId });
       },
       loadModels(environmentId, providerId) {
-        return bb.sdk.providers.models({ environmentId, providerId });
+        return api.sdk.providers.models({ environmentId, providerId });
       },
     },
   );
+
   return { ...resolved, validation };
 }

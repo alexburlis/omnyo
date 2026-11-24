@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PromptInput } from "@bb/domain";
+import type { PromptInput } from "@omnyo/domain";
 import {
   formatQueuedMessagePreview,
   queuedInputToDraft,
@@ -68,6 +68,7 @@ describe("threadQueuedMessages", () => {
         path: "/tmp/image.png",
       },
     ]);
+
     const attachmentOnlyDraft = queuedInputToDraft([
       {
         type: "localImage",

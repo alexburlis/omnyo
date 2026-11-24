@@ -1,9 +1,9 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { piProviderDeclaration } from "./src/declaration.js";
 
-export default function plugin(bb: BbPluginApi): void {
-  const registered = bb.providers.register(piProviderDeclaration());
-  bb.onDispose(() => {
+export default function plugin(api: PluginApi): void {
+  const registered = api.providers.register(piProviderDeclaration());
+  api.onDispose(() => {
     registered.dispose();
   });
 }

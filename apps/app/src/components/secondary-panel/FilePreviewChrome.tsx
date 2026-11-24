@@ -1,17 +1,18 @@
 import type { CSSProperties, ReactNode, Ref } from "react";
 import { SourceLoadingSkeleton } from "@/components/code/code-loading-skeletons";
+import { DelayedLoading } from "@omnyo/shared-ui/delayed-loading";
 import {
   COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
   COARSE_POINTER_TEXT_SM_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
+} from "@omnyo/shared-ui/tooltip";
 import { TruncateStart } from "@/components/ui/truncate-start.js";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
 
@@ -44,6 +45,7 @@ export function FilePreviewPath({
 }) {
   const copyTarget = copyPath ?? path;
   const label = "Copy file path";
+
   const className = cn(
     "min-w-0 font-mono font-medium leading-5 text-file-accent",
     COARSE_POINTER_TEXT_SM_CLASS,
@@ -95,19 +97,21 @@ export function FilePreviewLoading({
       {showHeader ? (
         <FilePreviewHeaderFrame>
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span
-            className={cn(
-              "flex items-center justify-center text-subtle-foreground",
-              COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
-            )}
-          >
-            <Icon name="File" className="size-full" aria-hidden />
-          </span>
-          <FilePreviewPath path={path} copyPath={copyPath} />
+            <span
+              className={cn(
+                "flex items-center justify-center text-subtle-foreground",
+                COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
+              )}
+            >
+              <Icon name="File" className="size-full" aria-hidden />
+            </span>
+            <FilePreviewPath path={path} copyPath={copyPath} />
           </div>
         </FilePreviewHeaderFrame>
       ) : null}
-      <SourceLoadingSkeleton />
+      <DelayedLoading>
+        <SourceLoadingSkeleton />
+      </DelayedLoading>
     </div>
   );
 }

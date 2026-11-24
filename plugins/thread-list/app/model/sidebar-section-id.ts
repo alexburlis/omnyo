@@ -1,7 +1,13 @@
+export type CollapsibleSidebarSectionId = "pinned" | "threads" | "shelf";
+
 export type SidebarSectionId =
-  | "pinned"
-  | "threads"
+  | CollapsibleSidebarSectionId
   | `project:${string}`
   | `section:${string}`
   | `machine:${string}`;
-export type CollapsibleSidebarSectionId = "pinned" | "threads";
+
+export function isCollapsibleSidebarSectionId(
+  value: string,
+): value is CollapsibleSidebarSectionId {
+  return value === "pinned" || value === "threads" || value === "shelf";
+}

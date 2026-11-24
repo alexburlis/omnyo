@@ -1,4 +1,4 @@
-import type { SystemProvidersQuery } from "@bb/server-contract";
+import type { SystemProvidersQuery } from "@omnyo/server-contract";
 import type { WorkSessionDeps } from "../../types.js";
 import { requireEnvironment } from "../lib/entity-lookup.js";
 import {
@@ -18,11 +18,15 @@ export function resolveSystemLookupHostId(
   if (query.environmentId) {
     const environment = requireEnvironment(deps.db, query.environmentId);
     assertUsableHostId(deps, { hostId: environment.hostId });
+
     return environment.hostId;
   }
+
   if (query.hostId) {
     assertUsableHostId(deps, { hostId: query.hostId });
+
     return query.hostId;
   }
+
   return requireConnectedPrimaryHostId(deps);
 }

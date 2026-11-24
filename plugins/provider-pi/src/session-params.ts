@@ -3,7 +3,7 @@ import {
   type DynamicTool,
   type InstructionMode,
   type ReasoningLevel,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 
 type PiReasoningLevel = "off" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -68,10 +68,11 @@ export function buildPiSessionParams(
 ): PiSessionParams {
   const instructions = args.options.instructions?.trim();
   const thinkingLevel = toPiThinkingLevel(args.options.reasoningLevel);
+
   return {
     cwd: args.cwd,
     shellEnvOverrides: {
-      BB_THREAD_ID: args.threadId,
+      OMNYO_THREAD_ID: args.threadId,
       ...buildShellEnvOverrides(args.options.envVars),
     },
     ...(instructions

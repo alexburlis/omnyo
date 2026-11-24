@@ -1,11 +1,11 @@
 import type {
   SystemExecutionOptionsQuery,
   SystemExecutionOptionsResponse,
-} from "@bb/server-contract";
-import type { BbSdkTransport } from "../transport.js";
+} from "@omnyo/server-contract";
+import type { OmnyoSdkTransport } from "../transport.js";
 
 export interface CreateSdkAreaArgs {
-  transport: BbSdkTransport;
+  transport: OmnyoSdkTransport;
 }
 
 type SignalRequestOptions = { init: { signal: AbortSignal } };
@@ -17,10 +17,10 @@ export function signalRequestArgs(
 }
 
 export async function readExecutionOptions(
-  transport: BbSdkTransport,
+  transport: OmnyoSdkTransport,
   input: SystemExecutionOptionsQuery & { signal?: AbortSignal },
 ): Promise<SystemExecutionOptionsResponse> {
-  return transport.readJson(
+  const response = await transport.readJson(
     transport.api.v1.system["execution-options"].$get(
       {
         query: {
@@ -32,4 +32,6 @@ export async function readExecutionOptions(
       ...signalRequestArgs(input.signal),
     ),
   );
+
+  return { ...response, modelNotice: response.modelNotice ?? null };
 }

@@ -19,21 +19,22 @@ import {
   migrate,
   upsertInstalledPlugin,
   type DbConnection,
-} from "@bb/db";
+} from "@omnyo/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPluginCatalogService } from "../../../src/services/plugin-catalog/plugin-catalog-service.js";
-import { refreshCuratedMarketplace } from "../../helpers/plugin-catalog.js";
 import type { MarketplaceFetch } from "../../../src/services/plugin-catalog/marketplace-http.js";
 import type { PluginService } from "../../../src/services/plugins/plugin-service.js";
 
 const run = promisify(execFile);
 
-const OFFICIAL_URL = "https://marketplace.test/marketplace/v1/marketplace.json";
+const PARTNER_URL = "https://partner.test/marketplace.json";
+
 const ACME_URL = "https://acme.test/marketplace.json";
 
 const VALID_SVG = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M0 0h16v16H0z"/></svg>',
 );
+
 const OTHER_SVG = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M1 1h14v14H1z"/></svg>',
 );
@@ -92,12 +93,13 @@ describe("third-party marketplaces", () => {
     db = createConnection(":memory:");
     migrate(db);
     installedCatalogEntries = [];
-    dataDir = await mkdtemp(join(tmpdir(), "bb-marketplace-data-"));
+    dataDir = await mkdtemp(join(tmpdir(), "omnyo-marketplace-data-"));
     cleanup.push(dataDir);
   });
 
   afterEach(async () => {
     db.$client.close();
+
     for (const restore of restoreEnv.splice(0)) restore();
     await Promise.all(
       cleanup
@@ -114,7 +116,6 @@ describe("third-party marketplaces", () => {
     return createPluginCatalogService({
       db,
       appVersion: "1.0.0",
-      marketplaceUrl: OFFICIAL_URL,
       dataDir,
       bundledPlugins: [],
       plugins: {
@@ -144,9 +145,12 @@ describe("third-party marketplaces", () => {
   ): MarketplaceFetch {
     return async (url) => {
       const document = documents[url];
+
       if (document !== undefined) return jsonResponse(document);
       const icon = icons[url];
+
       if (icon !== undefined) return svgResponse(icon);
+
       return new Response("not found", { status: 404 });
     };
   }
@@ -172,30 +176,35 @@ describe("third-party marketplaces", () => {
     icon?: Buffer;
     subdirectory?: string;
   }): Promise<string> {
-    const repo = await mkdtemp(join(tmpdir(), "bb-marketplace-repo-"));
+    const repo = await mkdtemp(join(tmpdir(), "omnyo-marketplace-repo-"));
     cleanup.push(repo);
     await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
     await run("git", ["config", "user.email", "test@example.com"], {
       cwd: repo,
     });
     await run("git", ["config", "user.name", "Test"], { cwd: repo });
+
     const catalogDir =
       args.subdirectory === undefined
         ? repo
         : join(repo, ...args.subdirectory.split("/"));
+
     await mkdir(catalogDir, { recursive: true });
     await writeFile(
       join(catalogDir, "marketplace.json"),
       JSON.stringify(manifest(args.name, args.plugins)),
     );
+
     if (args.icon !== undefined) {
       await mkdir(join(catalogDir, "icons"), { recursive: true });
       await writeFile(join(catalogDir, "icons", "notes.svg"), args.icon);
     }
+
     await run("git", ["-c", "core.excludesFile=/dev/null", "add", "."], {
       cwd: repo,
     });
     await run("git", ["commit", "-qm", "catalog"], { cwd: repo });
+
     return repo;
   }
 
@@ -225,9 +234,11 @@ describe("third-party marketplaces", () => {
       await run("git", ["tag", "-am", "catalog release", "catalog-release"], {
         cwd: repo,
       });
+
       const commit = (
         await run("git", ["rev-parse", "HEAD"], { cwd: repo })
       ).stdout.trim();
+
       await run("git", ["checkout", "-q", "main"], { cwd: repo });
       const catalog = service({ fetch: marketplaceFetch({}) });
 
@@ -240,6 +251,7 @@ describe("third-party marketplaces", () => {
       expect(await catalog.search("Acme Notes")).toEqual([
         expect.objectContaining({ entryId: "next-notes" }),
       ]);
+
       if (ref === "catalog-next") {
         await run("git", ["checkout", "-q", "catalog-next"], { cwd: repo });
         await writeFile(
@@ -249,9 +261,11 @@ describe("third-party marketplaces", () => {
           ),
         );
         await run("git", ["commit", "-qam", "refresh catalog"], { cwd: repo });
+
         const refreshedCommit = (
           await run("git", ["rev-parse", "HEAD"], { cwd: repo })
         ).stdout.trim();
+
         await run("git", ["checkout", "-q", "main"], { cwd: repo });
 
         const [refreshed] = await catalog.refreshMarketplaces({
@@ -275,6 +289,7 @@ describe("third-party marketplaces", () => {
         source: `git:${repo}@main`,
         subdirectory: null,
       });
+
       expect(added).toMatchObject({
         name: "acme-plugins",
         displayName: "Acme Plugins",
@@ -305,9 +320,11 @@ describe("third-party marketplaces", () => {
         ),
       );
       await run("git", ["commit", "-qam", "second"], { cwd: repo });
+
       const [refreshed] = await catalog.refreshMarketplaces({
         name: "acme-plugins",
       });
+
       expect(refreshed).toMatchObject({ name: "acme-plugins", ok: true });
       expect(refreshed?.marketplace.entryCount).toBe(2);
       expect(refreshed?.marketplace.resolvedCommit).not.toBe(
@@ -321,14 +338,14 @@ describe("third-party marketplaces", () => {
         getPluginMarketplaceIcon(db, "acme-plugins", "notes"),
       ).toBeUndefined();
       expect(catalog.listMarketplaces().map((row) => row.name)).toEqual([
-        "bb-official",
-        "bb-community",
+        "omnyo-official",
       ]);
 
       const readded = await catalog.addMarketplace({
         source: `git:${repo}@main`,
         subdirectory: null,
       });
+
       expect(readded).toMatchObject({
         name: "acme-plugins",
         entryCount: 2,
@@ -348,7 +365,7 @@ describe("third-party marketplaces", () => {
         name: "acme-plugins",
         plugins: [entry({ icon: { url: "./icons/notes.svg" } })],
         icon: VALID_SVG,
-        subdirectory: "tools/bb",
+        subdirectory: "tools/omnyo",
       });
       await writeFile(
         join(repo, "marketplace.json"),
@@ -367,14 +384,14 @@ describe("third-party marketplaces", () => {
 
       const added = await catalog.addMarketplace({
         source: `git:${repo}@main`,
-        subdirectory: "./tools/bb",
+        subdirectory: "./tools/omnyo",
       });
 
       expect(added).toMatchObject({
         name: "acme-plugins",
         sourceKind: "git",
         source: `git:${repo}@main`,
-        subdirectory: "tools/bb",
+        subdirectory: "tools/omnyo",
         entryCount: 1,
       });
       expect(
@@ -383,7 +400,7 @@ describe("third-party marketplaces", () => {
       expect(await stagedCheckouts()).toEqual([]);
 
       await writeFile(
-        join(repo, "tools", "bb", "marketplace.json"),
+        join(repo, "tools", "omnyo", "marketplace.json"),
         JSON.stringify(
           manifest("acme-plugins", [
             entry({ icon: { url: "./icons/notes.svg" } }),
@@ -392,6 +409,7 @@ describe("third-party marketplaces", () => {
         ),
       );
       await run("git", ["commit", "-qam", "second"], { cwd: repo });
+
       const [refreshed] = await catalog.refreshMarketplaces({
         name: "acme-plugins",
       });
@@ -399,20 +417,19 @@ describe("third-party marketplaces", () => {
       expect(refreshed).toMatchObject({
         name: "acme-plugins",
         ok: true,
-        marketplace: { subdirectory: "tools/bb", entryCount: 2 },
+        marketplace: { subdirectory: "tools/omnyo", entryCount: 2 },
       });
       expect(getPluginMarketplace(db, "acme-plugins")).toMatchObject({
         sourceGitRef: "main",
-        sourceGitSubdirectory: "tools/bb",
+        sourceGitSubdirectory: "tools/omnyo",
       });
       expect(
         catalog
           .listMarketplaces()
           .map((marketplace) => [marketplace.name, marketplace.subdirectory]),
       ).toEqual([
-        ["bb-official", null],
-        ["bb-community", null],
-        ["acme-plugins", "tools/bb"],
+        ["omnyo-official", null],
+        ["acme-plugins", "tools/omnyo"],
       ]);
     });
 
@@ -432,14 +449,14 @@ describe("third-party marketplaces", () => {
       ["/etc", /invalid marketplace subdirectory/u],
       ["tools/../..", /invalid marketplace subdirectory/u],
       [".git", /invalid marketplace subdirectory/u],
-      ["tools\\bb", /invalid marketplace subdirectory/u],
+      ["tools\\omnyo", /invalid marketplace subdirectory/u],
       [
         "tools/missing",
         /"tools\/missing" is not a directory in the repository/u,
       ],
       [
-        "tools/bb/marketplace.json",
-        /"tools\/bb\/marketplace.json" is not a directory in the repository/u,
+        "tools/omnyo/marketplace.json",
+        /"tools\/omnyo\/marketplace.json" is not a directory in the repository/u,
       ],
     ])("refuses the subdirectory %s", async (subdirectory, message) => {
       const catalog = service({ fetch: marketplaceFetch({}) });
@@ -455,7 +472,7 @@ describe("third-party marketplaces", () => {
     it.skipIf(process.platform === "win32")(
       "refuses a subdirectory that is a symlink out of the checkout",
       async () => {
-        const outside = await mkdtemp(join(tmpdir(), "bb-marketplace-out-"));
+        const outside = await mkdtemp(join(tmpdir(), "omnyo-marketplace-out-"));
         cleanup.push(outside);
         await writeFile(
           join(outside, "marketplace.json"),
@@ -490,7 +507,7 @@ describe("third-party marketplaces", () => {
         });
 
         await expect(
-          catalog.addMarketplace({ source, subdirectory: "bb" }),
+          catalog.addMarketplace({ source, subdirectory: "omnyo" }),
         ).rejects.toThrow(/a subdirectory applies to git: sources only/u);
       },
     );
@@ -501,12 +518,14 @@ describe("third-party marketplaces", () => {
       name: "acme-plugins",
       plugins: [entry()],
     });
+
     const staleCheckout = join(
       dataDir,
       "marketplaces",
       "staging",
       "stale-checkout",
     );
+
     await mkdir(staleCheckout, { recursive: true });
     await writeFile(join(staleCheckout, "marketplace.json"), "stale");
 
@@ -520,7 +539,7 @@ describe("third-party marketplaces", () => {
   });
 
   it("reads a path marketplace and its icons in place", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bb-marketplace-dir-"));
+    const directory = await mkdtemp(join(tmpdir(), "omnyo-marketplace-dir-"));
     cleanup.push(directory);
     await mkdir(join(directory, "icons"), { recursive: true });
     await writeFile(join(directory, "icons", "notes.svg"), VALID_SVG);
@@ -538,6 +557,7 @@ describe("third-party marketplaces", () => {
       source: `path:${directory}`,
       subdirectory: null,
     });
+
     expect(added).toMatchObject({
       name: "acme-plugins",
       sourceKind: "path",
@@ -550,6 +570,7 @@ describe("third-party marketplaces", () => {
 
   it("rejects a bundled source from a fetched marketplace", async () => {
     const bundledUrl = "https://acme.test/bundled-marketplace.json";
+
     const catalog = service({
       fetch: marketplaceFetch({
         [bundledUrl]: {
@@ -570,11 +591,8 @@ describe("third-party marketplaces", () => {
     const catalog = service({
       fetch: marketplaceFetch({
         [ACME_URL]: manifest("acme-plugins", [entry()]),
-        "https://impostor.test/marketplace.json": manifest("bb-community", [
-          entry(),
-        ]),
         "https://official-impostor.test/marketplace.json": manifest(
-          "bb-official",
+          "omnyo-official",
           [entry()],
         ),
         "https://other.test/marketplace.json": manifest("acme-plugins", [
@@ -592,25 +610,15 @@ describe("third-party marketplaces", () => {
     ).rejects.toThrow('marketplace "acme-plugins" is already added');
     await expect(
       catalog.addMarketplace({
-        source: "https://impostor.test/marketplace.json",
-        subdirectory: null,
-      }),
-    ).rejects.toThrow(/"bb-community" is reserved/);
-    await expect(
-      catalog.addMarketplace({
         source: "https://official-impostor.test/marketplace.json",
         subdirectory: null,
       }),
-    ).rejects.toThrow(/"bb-official" is reserved/);
-    await expect(catalog.removeMarketplace("bb-community")).rejects.toThrow(
-      /cannot be removed/,
-    );
-    await expect(catalog.removeMarketplace("bb-official")).rejects.toThrow(
+    ).rejects.toThrow(/"omnyo-official" is reserved/);
+    await expect(catalog.removeMarketplace("omnyo-official")).rejects.toThrow(
       /cannot be removed/,
     );
     expect(catalog.listMarketplaces().map((row) => row.name)).toEqual([
-      "bb-official",
-      "bb-community",
+      "omnyo-official",
       "acme-plugins",
     ]);
   });
@@ -618,23 +626,24 @@ describe("third-party marketplaces", () => {
   it("refuses an ambiguous bare install and installs the qualified one", async () => {
     const catalog = service({
       fetch: marketplaceFetch({
-        [OFFICIAL_URL]: manifest("bb-community", [
+        [PARTNER_URL]: manifest("partner-plugins", [
           entry({
             id: "notes",
-            displayName: "Official Notes",
-            source: { npm: { package: "bb-plugin-notes" } },
+            displayName: "Partner Notes",
+            source: { npm: { package: "omnyo-plugin-notes" } },
           }),
         ]),
         [ACME_URL]: manifest("acme-plugins", [
-          entry({ source: { npm: { package: "bb-plugin-notes" } } }),
+          entry({ source: { npm: { package: "omnyo-plugin-notes" } } }),
         ]),
       }),
     });
-    await refreshCuratedMarketplace(catalog, 1_000);
+
+    await catalog.addMarketplace({ source: PARTNER_URL, subdirectory: null });
     await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
 
     await expect(catalog.install({ entryId: "notes" })).rejects.toThrow(
-      "notes@bb-community, notes@acme-plugins",
+      "notes@acme-plugins, notes@partner-plugins",
     );
     expect(installedCatalogEntries).toEqual([]);
 
@@ -644,7 +653,7 @@ describe("third-party marketplaces", () => {
         marketplace: "acme-plugins",
         confirmedSource: {
           kind: "npm",
-          package: "bb-plugin-notes",
+          package: "omnyo-plugin-notes",
           resolvedVersion: "1.4.2",
           resolvedIntegrity: "sha512-listed",
         },
@@ -655,7 +664,7 @@ describe("third-party marketplaces", () => {
         marketplace: "acme-plugins",
         entryId: "notes",
         pluginId: "notes",
-        source: "npm:bb-plugin-notes",
+        source: "npm:omnyo-plugin-notes",
         selection: { kind: "root" },
         expectedNpmVersion: "1.4.2",
         expectedNpmIntegrity: "sha512-listed",
@@ -663,11 +672,10 @@ describe("third-party marketplaces", () => {
     ]);
   });
 
-  it("names a bundled official plugin with <id>@bb-official", async () => {
+  it("names a bundled official plugin with <id>@omnyo-official", async () => {
     const catalog = createPluginCatalogService({
       db,
       appVersion: "1.0.0",
-      marketplaceUrl: OFFICIAL_URL,
       dataDir,
       plugins: {
         installOfficialPlugin: async (name: string) => {
@@ -682,11 +690,11 @@ describe("third-party marketplaces", () => {
           detail: "no registry in this test",
         }),
       },
-      fetch: marketplaceFetch({ [OFFICIAL_URL]: manifest("bb-community", []) }),
+      fetch: marketplaceFetch({}),
     });
 
     await expect(
-      catalog.install({ entryId: "docs", marketplace: "bb-official" }),
+      catalog.install({ entryId: "docs", marketplace: "omnyo-official" }),
     ).rejects.toThrow(/bundled installation stopped by test/u);
     await expect(
       catalog.install({ entryId: "docs", marketplace: "acme-plugins" }),
@@ -696,13 +704,12 @@ describe("third-party marketplaces", () => {
   it("installs a single marketplace match from a bare entry id", async () => {
     const catalog = service({
       fetch: marketplaceFetch({
-        [OFFICIAL_URL]: manifest("bb-community", []),
         [ACME_URL]: manifest("acme-plugins", [
-          entry({ source: { npm: { package: "bb-plugin-notes" } } }),
+          entry({ source: { npm: { package: "omnyo-plugin-notes" } } }),
         ]),
       }),
     });
-    await refreshCuratedMarketplace(catalog, 1_000);
+
     await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
 
     await expect(
@@ -710,7 +717,7 @@ describe("third-party marketplaces", () => {
         entryId: "notes",
         confirmedSource: {
           kind: "npm",
-          package: "bb-plugin-notes",
+          package: "omnyo-plugin-notes",
           resolvedVersion: "1.4.2",
           resolvedIntegrity: "sha512-listed",
         },
@@ -723,7 +730,8 @@ describe("third-party marketplaces", () => {
   });
 
   it("refuses a third-party source that changed after confirmation", async () => {
-    let packageName = "bb-plugin-notes";
+    let packageName = "omnyo-plugin-notes";
+
     const catalog = service({
       fetch: async (url) =>
         url === ACME_URL
@@ -734,14 +742,17 @@ describe("third-party marketplaces", () => {
             )
           : new Response("not found", { status: 404 }),
     });
+
     await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
+
     const plan = await catalog.installPlan({
       entryId: "notes",
       marketplace: "acme-plugins",
     });
+
     if (plan.kind !== "marketplace") throw new Error("expected a listing");
 
-    packageName = "bb-plugin-notes-impostor";
+    packageName = "omnyo-plugin-notes-impostor";
     await catalog.refreshMarketplaces({ name: "acme-plugins" });
 
     await expect(
@@ -760,6 +771,7 @@ describe("third-party marketplaces", () => {
         [ACME_URL]: manifest("acme-plugins", [entry()]),
       }),
     });
+
     await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
     upsertInstalledPlugin(db, {
       id: "notes",
@@ -818,10 +830,10 @@ describe("third-party marketplaces", () => {
     const catalog = service({
       fetch: marketplaceFetch(
         {
-          [OFFICIAL_URL]: manifest("bb-community", [
+          [PARTNER_URL]: manifest("partner-plugins", [
             entry({
-              id: "official-notes",
-              icon: { url: "https://marketplace.test/marketplace/v1/a.svg" },
+              id: "partner-notes",
+              icon: { url: "https://partner.test/a.svg" },
             }),
           ]),
           [ACME_URL]: manifest("acme-plugins", [
@@ -829,95 +841,102 @@ describe("third-party marketplaces", () => {
           ]),
         },
         {
-          "https://marketplace.test/marketplace/v1/a.svg": VALID_SVG,
+          "https://partner.test/a.svg": VALID_SVG,
           "https://acme.test/b.svg": OTHER_SVG,
         },
       ),
     });
-    await refreshCuratedMarketplace(catalog, 1_000);
+
+    await catalog.addMarketplace({ source: PARTNER_URL, subdirectory: null });
     await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
 
-    const official = getPluginMarketplaceIcon(
+    const partner = getPluginMarketplaceIcon(
       db,
-      "bb-community",
-      "official-notes",
+      "partner-plugins",
+      "partner-notes",
     );
+
     const acme = getPluginMarketplaceIcon(db, "acme-plugins", "notes");
-    expect(official?.contentHash).not.toBe(acme?.contentHash);
+    expect(partner?.contentHash).not.toBe(acme?.contentHash);
     expect(
-      getPluginMarketplaceIcon(db, "bb-community", "notes"),
+      getPluginMarketplaceIcon(db, "partner-plugins", "notes"),
     ).toBeUndefined();
     expect(
-      getPluginMarketplaceIcon(db, "acme-plugins", "official-notes"),
+      getPluginMarketplaceIcon(db, "acme-plugins", "partner-notes"),
     ).toBeUndefined();
 
     await catalog.removeMarketplace("acme-plugins");
     expect(
-      getPluginMarketplaceIcon(db, "bb-community", "official-notes"),
+      getPluginMarketplaceIcon(db, "partner-plugins", "partner-notes"),
     ).toBeDefined();
     expect(
       getPluginMarketplaceIcon(db, "acme-plugins", "notes"),
     ).toBeUndefined();
   });
 
-  it("leaves bb-community serving when a third-party refresh fails", async () => {
+  it("leaves other marketplaces serving when one refresh fails", async () => {
     const warnings: string[] = [];
     let acmeFails = false;
+
     const catalog = service({
       warn: (message) => warnings.push(message),
       fetch: async (url) => {
-        if (url === OFFICIAL_URL) {
+        if (url === PARTNER_URL) {
           return jsonResponse(
-            manifest("bb-community", [entry({ id: "official-notes" })]),
+            manifest("partner-plugins", [entry({ id: "partner-notes" })]),
           );
         }
+
         if (url === ACME_URL) {
           if (acmeFails) return new Response("boom", { status: 503 });
+
           return jsonResponse(manifest("acme-plugins", [entry()]));
         }
+
         return new Response("not found", { status: 404 });
       },
     });
-    await refreshCuratedMarketplace(catalog, 1_000);
+
+    await catalog.addMarketplace({ source: PARTNER_URL, subdirectory: null });
     await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
     acmeFails = true;
 
     const results = await catalog.refreshMarketplaces({ attemptedAt: 2_000 });
     expect(results).toMatchObject([
-      { name: "bb-official", ok: true },
-      { name: "bb-community", ok: true },
+      { name: "omnyo-official", ok: true },
       { name: "acme-plugins", ok: false },
+      { name: "partner-plugins", ok: true },
     ]);
-    expect(results[2]?.error).toContain("503");
+    expect(results[1]?.error).toContain("503");
 
     const marketplaces = catalog.listMarketplaces();
     expect(marketplaces[0]).toMatchObject({
-      name: "bb-official",
+      name: "omnyo-official",
       lastRefreshAt: 2_000,
       lastError: null,
     });
     expect(marketplaces[1]).toMatchObject({
-      name: "bb-community",
-      lastRefreshAt: 2_000,
-      lastError: null,
-    });
-    expect(marketplaces[2]).toMatchObject({
       name: "acme-plugins",
       entryCount: 1,
       lastAttemptAt: 2_000,
     });
+    expect(marketplaces[2]).toMatchObject({
+      name: "partner-plugins",
+      lastRefreshAt: 2_000,
+      lastError: null,
+    });
     const searched = await catalog.search("");
     expect(searched.map((result) => result.entryId)).toEqual([
-      "official-notes",
       "notes",
+      "partner-notes",
     ]);
   });
 
-  it("groups search results by marketplace with the official one first", async () => {
+  it("groups search results by marketplace", async () => {
     const catalog = service({
       fetch: marketplaceFetch({
-        [OFFICIAL_URL]: manifest("bb-community", [
-          entry({ id: "official-notes", tags: ["interface"] }),
+        [PARTNER_URL]: manifest("partner-plugins", [
+          entry({ id: "partner-notes", tags: ["interface"] }),
         ]),
         [ACME_URL]: manifest("acme-plugins", [
           entry({ tags: ["git-tools"] }),
@@ -925,7 +944,8 @@ describe("third-party marketplaces", () => {
         ]),
       }),
     });
-    await refreshCuratedMarketplace(catalog, 1_000);
+
+    await catalog.addMarketplace({ source: PARTNER_URL, subdirectory: null });
     await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
 
     const results = await catalog.search("");
@@ -936,21 +956,21 @@ describe("third-party marketplaces", () => {
         result.entryId,
       ]),
     ).toEqual([
-      ["bb-community", "Interface", "official-notes"],
       ["acme-plugins", "Git Tools", "notes"],
       ["acme-plugins", "Git Tools", "zebra"],
+      ["partner-plugins", "Interface", "partner-notes"],
     ]);
-    expect(results[1]).toMatchObject({
+    expect(results[0]).toMatchObject({
       official: false,
       marketplaceDisplayName: "Acme Plugins",
       author: { name: "Acme", url: "https://github.com/acme" },
     });
-    expect(results[0]?.official).toBe(true);
+    expect(results[2]?.official).toBe(false);
   });
 
   describe("install plans", () => {
     it("resolves a third-party git range to its current tag and commit", async () => {
-      const repo = await mkdtemp(join(tmpdir(), "bb-plugin-repo-"));
+      const repo = await mkdtemp(join(tmpdir(), "omnyo-plugin-repo-"));
       cleanup.push(repo);
       await run("git", ["init", "-q", "-b", "main"], { cwd: repo });
       await run("git", ["config", "user.email", "test@example.com"], {
@@ -965,10 +985,12 @@ describe("third-party marketplaces", () => {
       await run("git", ["commit", "-qam", "two"], { cwd: repo });
       await run("git", ["tag", "notes/v1.2.0"], { cwd: repo });
       await run("git", ["tag", "notes/v2.0.0"], { cwd: repo });
+
       const expected = (
         await run("git", ["rev-parse", "notes/v1.2.0"], { cwd: repo })
       ).stdout.trim();
-      const listedUrl = "https://acme.test/bb-plugins.git";
+
+      const listedUrl = "https://acme.test/omnyo-plugins.git";
       await useGitUrlRewrite(listedUrl, repo);
 
       const catalog = service({
@@ -987,12 +1009,14 @@ describe("third-party marketplaces", () => {
           ]),
         }),
       });
+
       await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
 
       const plan = await catalog.installPlan({
         entryId: "notes",
         marketplace: "acme-plugins",
       });
+
       expect(plan).toMatchObject({
         kind: "marketplace",
         entryId: "notes",
@@ -1028,13 +1052,16 @@ describe("third-party marketplaces", () => {
           ]),
         }),
       });
+
       await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
 
       const plan = await catalog.installPlan({
         entryId: "notes",
         marketplace: "acme-plugins",
       });
+
       expect(plan).toMatchObject({ kind: "marketplace" });
+
       if (plan.kind !== "marketplace") throw new Error("expected a listing");
       expect(plan.resolvedSource).toMatchObject({
         kind: "git",
@@ -1054,7 +1081,7 @@ describe("third-party marketplaces", () => {
             entry({
               source: {
                 npm: {
-                  package: "bb-plugin-notes",
+                  package: "omnyo-plugin-notes",
                   tag: "beta",
                   registry: "https://npm.acme.test",
                 },
@@ -1063,68 +1090,35 @@ describe("third-party marketplaces", () => {
           ]),
         }),
       });
+
       await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
 
       const plan = await catalog.installPlan({
         entryId: "notes",
         marketplace: "acme-plugins",
       });
+
       expect(plan).toMatchObject({
         kind: "marketplace",
-        source: "npm:bb-plugin-notes@beta",
+        source: "npm:omnyo-plugin-notes@beta",
         resolvedSource: {
           kind: "npm",
-          package: "bb-plugin-notes",
+          package: "omnyo-plugin-notes",
           tag: "beta",
           registry: "https://npm.acme.test",
         },
       });
     });
-
-    it("names the official catalog without a network round trip", async () => {
-      const catalog = service({
-        fetch: marketplaceFetch({
-          [OFFICIAL_URL]: manifest("bb-community", [
-            entry({
-              id: "official-notes",
-              source: {
-                git: {
-                  url: "https://github.invalid/bb/plugins.git",
-                  range: "^1.0.0",
-                },
-              },
-            }),
-          ]),
-        }),
-      });
-      await refreshCuratedMarketplace(catalog, 1_000);
-
-      const plan = await catalog.installPlan({ entryId: "official-notes" });
-      expect(plan).toMatchObject({
-        kind: "marketplace",
-        marketplace: "bb-community",
-        official: true,
-        resolvedSource: {
-          kind: "git",
-          url: "https://github.invalid/bb/plugins.git",
-          range: "^1.0.0",
-        },
-      });
-      if (plan.kind !== "marketplace") throw new Error("expected a listing");
-      expect(
-        plan.resolvedSource.kind === "git"
-          ? plan.resolvedSource.unresolvedReason
-          : undefined,
-      ).toBeUndefined();
-    });
   });
 
   it("adds a local manifest larger than 1 MiB", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bb-marketplace-big-"));
+    const directory = await mkdtemp(join(tmpdir(), "omnyo-marketplace-big-"));
     cleanup.push(directory);
+
     const padded = manifest("acme-plugins", [
       entry({ description: "x".repeat(1_100_000) }),
     ]);
+
     await writeFile(
       join(directory, "marketplace.json"),
       JSON.stringify(padded),
@@ -1143,12 +1137,13 @@ describe("third-party marketplaces", () => {
 
   it("binds an npm install to the exact version it confirmed", async () => {
     const npmEntry = entry({
-      source: { npm: { package: "bb-plugin-notes", range: "^1.0.0" } },
+      source: { npm: { package: "omnyo-plugin-notes", range: "^1.0.0" } },
     });
+
     let resolvedVersion = "1.4.2";
+
     const catalog = service({
       fetch: marketplaceFetch({
-        [OFFICIAL_URL]: manifest("bb-community", []),
         [ACME_URL]: manifest("acme-plugins", [npmEntry]),
       }),
       resolveNpm: async () => ({
@@ -1157,22 +1152,25 @@ describe("third-party marketplaces", () => {
         integrity: `sha512-${resolvedVersion}`,
       }),
     });
+
     await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
 
     const plan = await catalog.installPlan({
       entryId: "notes",
       marketplace: "acme-plugins",
     });
+
     expect(plan).toMatchObject({
       kind: "marketplace",
       resolvedSource: {
         kind: "npm",
-        package: "bb-plugin-notes",
+        package: "omnyo-plugin-notes",
         range: "^1.0.0",
         resolvedVersion: "1.4.2",
         resolvedIntegrity: "sha512-1.4.2",
       },
     });
+
     if (plan.kind !== "marketplace") throw new Error("expected a marketplace");
 
     resolvedVersion = "1.5.0";
@@ -1189,9 +1187,11 @@ describe("third-party marketplaces", () => {
       entryId: "notes",
       marketplace: "acme-plugins",
     });
+
     if (current.kind !== "marketplace") {
       throw new Error("expected a marketplace");
     }
+
     await expect(
       catalog.install({
         entryId: "notes",
@@ -1210,22 +1210,26 @@ describe("third-party marketplaces", () => {
   it("holds the marketplace lock across an install", async () => {
     const order: string[] = [];
     let release = (): void => {};
+
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+
     let resolveCalls = 0;
+
     const catalog = service({
       fetch: marketplaceFetch({
-        [OFFICIAL_URL]: manifest("bb-community", []),
         [ACME_URL]: manifest("acme-plugins", [
           entry({
-            source: { npm: { package: "bb-plugin-notes", range: "^1.0.0" } },
+            source: { npm: { package: "omnyo-plugin-notes", range: "^1.0.0" } },
           }),
         ]),
       }),
       resolveNpm: async () => {
         resolveCalls += 1;
+
         if (resolveCalls > 1) await gate;
+
         return {
           outcome: "resolved" as const,
           version: "1.4.2",
@@ -1233,11 +1237,14 @@ describe("third-party marketplaces", () => {
         };
       },
     });
+
     await catalog.addMarketplace({ source: ACME_URL, subdirectory: null });
+
     const plan = await catalog.installPlan({
       entryId: "notes",
       marketplace: "acme-plugins",
     });
+
     if (plan.kind !== "marketplace") throw new Error("expected a marketplace");
 
     const install = catalog
@@ -1250,10 +1257,13 @@ describe("third-party marketplaces", () => {
         order.push("install");
         throw error;
       });
+
     const removal = catalog.removeMarketplace("acme-plugins").then((result) => {
       order.push("removal");
+
       return result;
     });
+
     release();
 
     await expect(install).rejects.toThrow(
@@ -1270,7 +1280,6 @@ describe("third-party marketplaces", () => {
   it("refuses a manifest name that later routes cannot address", async () => {
     const catalog = service({
       fetch: marketplaceFetch({
-        [OFFICIAL_URL]: manifest("bb-community", []),
         [ACME_URL]: manifest("a".repeat(65), [entry()]),
       }),
     });
@@ -1281,7 +1290,7 @@ describe("third-party marketplaces", () => {
     expect(getPluginMarketplace(db, "a".repeat(65))).toBeUndefined();
   });
 
-  it("refuses a marketplace source bb cannot interpret", async () => {
+  it("refuses a marketplace source Omnyo cannot interpret", async () => {
     const catalog = service({ fetch: marketplaceFetch({}) });
     await expect(
       catalog.addMarketplace({

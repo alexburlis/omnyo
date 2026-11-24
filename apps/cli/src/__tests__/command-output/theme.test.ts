@@ -10,7 +10,7 @@ import {
 } from "../helpers/command-output-harness.js";
 import { registerThemeCommands } from "../../commands/theme.js";
 
-describe("bb theme commands", () => {
+describe("omnyo theme commands", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -26,6 +26,7 @@ describe("bb theme commands", () => {
         files: {},
       },
     }));
+
     stubServerApi({
       "v1.system.config.$get": vi.fn(async () => ({
         appearance: {
@@ -41,6 +42,7 @@ describe("bb theme commands", () => {
       })),
       "v1.settings.appearance.$put": put,
     });
+
     return put;
   }
 

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { runFirstPartyRecordedConformance } from "@bb/provider-bridge-protocol/testing";
+import { runFirstPartyRecordedConformance } from "@omnyo/provider-bridge-protocol/testing";
 
 it.concurrent.each(["claude-code", "codex"])(
   "%s reproduces every recorded matrix cell",
@@ -8,6 +8,7 @@ it.concurrent.each(["claude-code", "codex"])(
       servesProvider: (candidate) => candidate === providerId,
       label: providerId,
     });
+
     expect(run.cells.length).toBeGreaterThan(0);
     console.info(run.report);
     expect(run.failures).toEqual([]);

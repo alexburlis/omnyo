@@ -1,144 +1,81 @@
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { PluginMobileSettingsSections } from "@/components/plugin/PluginSettingsSections";
-import { MobilePlatformIcon } from "./MobilePlatformIcon";
+import {
+  SettingsRow,
+  SettingsRowList,
+  SettingsSection,
+} from "@/components/ui/settings-section";
+import {
+  canOpenNativeScreen,
+  nativeShellServerSummary,
+  shellOpenNative,
+  type NativeShellServerSummary,
+} from "@/lib/native-shell";
 import { MachineAccessSettings } from "./MachineAccessSettings";
-import { mobileAppDownloads } from "@bb/domain";
-import { buttonVariants } from "@bb/shared-ui/button";
-import { useQuery } from "@tanstack/react-query";
-import { SettingsSection } from "@/components/ui/settings-section";
-import { sdk } from "@/lib/sdk";
-import { getNativeShell } from "@/lib/native-shell";
+import { IosPlatformIcon } from "./IosPlatformIcon";
+
+function ThisPhoneSection({ phone }: { phone: NativeShellServerSummary }) {
+  return (
+    <SettingsSection title="This phone">
+      <div className="space-y-3">
+        <p className="text-sm text-subtle-foreground">
+          This phone is using{" "}
+          <span className="font-medium break-all text-foreground">
+            {phone.host}
+          </span>{" "}
+          through {phone.mode === "connect" ? "Omnyo connect" : "a direct URL"}.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => shellOpenNative("device-settings")}
+        >
+          <Icon name="Smartphone" />
+          Servers and phone settings
+        </Button>
+      </div>
+    </SettingsSection>
+  );
+}
 
 export function MobileAppSection() {
-  const releases = useQuery({
-    queryKey: ["system", "mobile-app-releases"],
-    queryFn: () => sdk.system.mobileAppReleases(),
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
-  const android = releases.data?.android;
-  const handshake = getNativeShell()?.handshake;
-  const installedAndroid = handshake?.platform === "android" ? handshake : null;
+  const phone = canOpenNativeScreen() ? nativeShellServerSummary() : null;
+
   return (
-    <section aria-label="Mobile app downloads" className="space-y-5">
+    <section aria-label="Mobile" className="space-y-5">
       <div>
         <h2 className="text-base font-semibold">Mobile apps</h2>
         <p className="mt-1 text-sm text-subtle-foreground">
-          Use bb from your phone
+          Use Omnyo from your phone
         </p>
       </div>
-      <MachineAccessSettings title="Accessing bb from your phone">
-        {(pluginId) => <PluginMobileSettingsSections pluginId={pluginId} />}
-      </MachineAccessSettings>
-      <div className="space-y-5">
-        <SettingsSection
-          title={
-            <span className="flex items-center gap-2">
-              <MobilePlatformIcon platform="ios" />
-              iOS
-            </span>
-          }
-          description="Available through TestFlight"
-          bodyClassName="space-y-4"
-        >
-          <p className="text-sm text-subtle-foreground">
-            Install{" "}
-            <a
-              href="https://apps.apple.com/app/testflight/id899247664"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline underline-offset-2"
-            >
-              TestFlight
-            </a>
-            , then join the bb beta to install the app on your iPhone.
-          </p>
-          <a
-            href={mobileAppDownloads.ios}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={buttonVariants()}
-          >
-            Join iOS TestFlight
-          </a>
-        </SettingsSection>
-        <SettingsSection
-          title={
-            <span className="flex items-center gap-2">
-              <MobilePlatformIcon platform="android" />
-              Android
-            </span>
-          }
-          description="Direct download for Android phones"
-          bodyClassName="space-y-4"
-        >
-          <p className="text-sm text-subtle-foreground">
-            Download the APK and open it on your phone to install. Allow
-            installation from your browser if prompted.
-          </p>
-          <p className="text-sm text-subtle-foreground">
-            Google Play access is under review. For now, return here for
-            updates.
-          </p>
-          {installedAndroid && (
-            <div className="space-y-1 text-sm">
-              <p>
-                Installed: {installedAndroid.appVersion}
-                {installedAndroid.androidVersionCode !== undefined &&
-                  ` (build ${installedAndroid.androidVersionCode})`}
-              </p>
-              <p role="status">
-                {installedAndroid.androidVersionCode === undefined
-                  ? "This app does not report its build number. Download the latest APK to check for updates."
-                  : releases.isPending
-                    ? "Checking for updates…"
-                    : !android
-                      ? "Unable to check for updates. You can still download the latest APK."
-                      : installedAndroid.androidVersionCode <
-                          android.versionCode
-                        ? "Update available"
-                        : installedAndroid.androidVersionCode ===
-                            android.versionCode
-                          ? "You’re up to date"
-                          : "You’re running a newer build than the latest published release"}
-              </p>
-            </div>
-          )}
-          {android ? (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-              <dt className="text-subtle-foreground">Version</dt>
-              <dd>
-                {android.version} (build {android.versionCode})
-              </dd>
-              <dt className="text-subtle-foreground">Updated</dt>
-              <dd>
-                <time dateTime={android.updatedAt}>
-                  {new Date(android.updatedAt).toLocaleDateString(undefined, {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </time>
-              </dd>
-              <dt className="text-subtle-foreground">Download size</dt>
-              <dd>{Math.ceil(android.size / 1024 / 1024)} MB</dd>
-            </dl>
+      {phone === null ? null : <ThisPhoneSection phone={phone} />}
+      <MachineAccessSettings title="Accessing Omnyo from your phone">
+        {(pluginId) =>
+          phone === null || pluginId === null ? (
+            <PluginMobileSettingsSections pluginId={pluginId} />
           ) : (
-            <p className="text-sm text-subtle-foreground" role="status">
-              {releases.isPending
-                ? "Checking the latest release…"
-                : "Release details are unavailable. You can still download the APK."}
-            </p>
-          )}
-          <a
-            href={mobileAppDownloads.android}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={buttonVariants()}
-          >
-            Download Android APK
-          </a>
-        </SettingsSection>
-      </div>
+            <>
+              <p className="mt-3 text-xs text-subtle-foreground">
+                Any pairing code below is for another phone.
+              </p>
+              <PluginMobileSettingsSections pluginId={pluginId} />
+            </>
+          )
+        }
+      </MachineAccessSettings>
+      <SettingsSection title="Apps">
+        <SettingsRowList>
+          <SettingsRow>
+            <IosPlatformIcon />
+            <span className="text-foreground">iOS</span>
+            <span className="ml-auto text-subtle-foreground">
+              Invite only, through TestFlight
+            </span>
+          </SettingsRow>
+        </SettingsRowList>
+      </SettingsSection>
     </section>
   );
 }

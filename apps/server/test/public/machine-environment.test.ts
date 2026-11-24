@@ -7,9 +7,9 @@ import {
   setAppSettings,
   updateHost,
   upsertHost,
-} from "@bb/db";
-import { createBbSdk } from "@bb/sdk/core";
-import { createHttpTransport } from "@bb/sdk/node";
+} from "@omnyo/db";
+import { createOmnyoSdk } from "@omnyo/sdk/core";
+import { createHttpTransport } from "@omnyo/sdk/node";
 import { describe, expect, it, vi } from "vitest";
 import { withTestHarness } from "../helpers/test-app.js";
 import { seedPrimaryHost } from "../helpers/seed.js";
@@ -28,13 +28,15 @@ describe("machine environment settings", () => {
           reason: "Git",
         },
       ]);
+
     try {
       await withTestHarness(async (harness) => {
         setAppSettings(harness.db, {
           ...getAppSettings(harness.db),
           machineGitCredentialsEnabled: true,
         });
-        const sdk = createBbSdk({
+
+        const sdk = createOmnyoSdk({
           transport: createHttpTransport({
             baseUrl: "http://localhost",
             runtime: "node",
@@ -42,6 +44,7 @@ describe("machine environment settings", () => {
               harness.app.fetch(new Request(input, init)),
           }),
         });
+
         const result = await sdk.system.replaceMachineEnvironment({
           variables: [
             {
@@ -56,6 +59,7 @@ describe("machine environment settings", () => {
             },
           ],
         });
+
         expect(result.builtInGit.status).toBe("overridden");
         expect(result.variables).toContainEqual({
           name: "GH_TOKEN",
@@ -69,13 +73,16 @@ describe("machine environment settings", () => {
         expect(
           JSON.stringify(harness.db.select().from(environmentVariables).all()),
         ).not.toContain("user-private-token");
+
         const path = join(
           harness.config.dataDir,
           "secrets",
           "machine-environment",
           "GH_TOKEN",
         );
+
         await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+
         if (process.platform !== "win32") {
           expect(
             (
@@ -85,16 +92,19 @@ describe("machine environment settings", () => {
             ).mode & 0o777,
           ).toBe(0o600);
         }
+
         expect(
           JSON.stringify(harness.db.select().from(environmentVariables).all()),
         ).not.toContain("test-region");
         expect(JSON.stringify(result)).not.toContain("test-region");
         upsertHost(harness.db, harness.hub, { id: "local", name: "Local" });
         seedPrimaryHost(harness.deps, "local");
+
         const localEnvironment = await resolveHostEnvironment(harness.deps, {
           hostId: "local",
           projectId: null,
         });
+
         expect(localEnvironment).toContainEqual(
           expect.objectContaining({
             name: "DEPLOY_REGION",
@@ -117,10 +127,12 @@ describe("machine environment settings", () => {
         updateHost(harness.db, harness.hub, "machine", {
           machineProviderId: "manual",
         });
+
         const env = await resolveHostEnvironment(harness.deps, {
           hostId: "machine",
           projectId: null,
         });
+
         expect(env.filter((entry) => entry.name === "GH_TOKEN")).toEqual([
           expect.objectContaining({
             value: "user-private-token",
@@ -162,7 +174,7 @@ describe("machine environment settings", () => {
 
 it("isolates projects on a shared machine and restores global values after removal", async () => {
   await withTestHarness(async (harness) => {
-    const sdk = createBbSdk({
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
         baseUrl: "http://localhost",
         runtime: "node",
@@ -170,6 +182,7 @@ it("isolates projects on a shared machine and restores global values after remov
           harness.app.fetch(new Request(input, init)),
       }),
     });
+
     harness.db
       .insert(projects)
       .values(
@@ -204,14 +217,17 @@ it("isolates projects on a shared machine and restores global values after remov
       value: "",
       note: null,
     });
+
     const view = await sdk.projects.machineEnvironment({
       projectId: "project-a",
     });
+
     expect(view.variables).toEqual([
       { name: "REGION", value: null, secret: true, note: null },
     ]);
     expect(view.inheritedVariables).toEqual(view.variables);
     expect(JSON.stringify(view)).not.toContain("region-a");
+
     const resolve = async (projectId: string | null) =>
       (
         await resolveHostEnvironment(harness.deps, {
@@ -219,6 +235,7 @@ it("isolates projects on a shared machine and restores global values after remov
           projectId,
         })
       ).find((row) => row.name === "REGION");
+
     expect(await resolve("project-a")).toMatchObject({
       value: "region-a",
       source: { core: "project-environment" },

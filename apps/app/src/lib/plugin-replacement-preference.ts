@@ -46,12 +46,15 @@ export function resolvePreferredReplacement<
   bundledProvider?: string,
 ): ResolvedReplacement<Slot> {
   if (preference === BUILT_IN_REPLACEMENT_PROVIDER) return { kind: "owner" };
+
   if (preference === AUTOMATIC_REPLACEMENT_PROVIDER) {
     const registration = findAutomaticReplacement(slots, bundledProvider);
+
     return registration === undefined
       ? { kind: "owner" }
       : { kind: "plugin", registration };
   }
+
   return resolveReplacement(
     slots,
     (candidate) => replacementProviderKey(candidate) === preference,

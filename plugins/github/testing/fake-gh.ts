@@ -25,6 +25,7 @@ export function installFakeGh(binDir: string, body: string): () => void {
   const originalPath = process.env.PATH;
   const originalNodeOptions = process.env.NODE_OPTIONS;
   const source = `${PROLOGUE}${body}\nprocess.exit(0);\n`;
+
   if (process.platform === "win32") {
     const script = join(binDir, "fake-gh.cjs");
     writeFileSync(script, source);
@@ -35,9 +36,12 @@ export function installFakeGh(binDir: string, body: string): () => void {
     writeFileSync(script, `#!${process.execPath}\n${source}`);
     chmodSync(script, 0o755);
   }
+
   process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
+
   return () => {
     process.env.PATH = originalPath;
+
     if (originalNodeOptions === undefined) delete process.env.NODE_OPTIONS;
     else process.env.NODE_OPTIONS = originalNodeOptions;
   };

@@ -26,17 +26,22 @@ function fieldsByDiscriminator(
   const entries = zodUnionOptions(union).map((option) => {
     const fields = zodObjectFields(option);
     const discriminatorSchema = zodObjectShape(option)[discriminator];
+
     const value = discriminatorSchema
       ? zodLiteralValue(discriminatorSchema)
       : undefined;
+
     if (typeof value !== "string") {
       throw new Error(
         `union member without a string "${discriminator}" literal: ${JSON.stringify(Object.keys(fields))}`,
       );
     }
+
     return [value, fields] as const;
   });
+
   entries.sort(([a], [b]) => a.localeCompare(b));
+
   return Object.fromEntries(entries);
 }
 
@@ -55,6 +60,7 @@ describe("guardrail G3: delta grammar shape is paired with the protocol version"
         BRIDGE_INBOUND_REQUEST_METHODS,
       ).sort(),
     };
+
     await expect(`${JSON.stringify(grammar, null, 2)}\n`).toMatchFileSnapshot(
       `./provider-bridge-grammar.v${PROVIDER_BRIDGE_PROTOCOL_VERSION}.snapshot.json`,
     );

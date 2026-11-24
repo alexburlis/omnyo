@@ -63,6 +63,7 @@ describe("grammar v3 item variants", () => {
         status: "completed",
       },
     ];
+
     for (const item of items) {
       const parsed = threadEventItemSchema.safeParse(item);
       expect(parsed.success, `expected ${item.type} to parse`).toBe(true);
@@ -77,6 +78,7 @@ describe("grammar v3 item variants", () => {
       status: "completed",
       presentation: { ...presentation, suppress: true },
     });
+
     expect(parsed.type === "toolCall" && parsed.presentation?.suppress).toBe(
       true,
     );
@@ -99,11 +101,13 @@ describe("grammar v3 item variants", () => {
       status: "pending",
       presentation,
     };
+
     expect(threadEventItemSchema.safeParse(valid).success).toBe(true);
     expect(
       threadEventItemSchema.safeParse({ ...valid, presentation: undefined })
         .success,
     ).toBe(false);
+
     for (const kind of ["goal", "Codex/goal", "codex/", "/goal", "a/b/c"]) {
       expect(
         threadEventItemSchema.safeParse({ ...valid, kind }).success,
@@ -145,10 +149,12 @@ describe("grammar v3 item variants", () => {
         icon: { asset: "./icons/tool.svg" },
       }).success,
     ).toBe(false);
+
     const namespaced = threadEventItemPresentationSchema.safeParse({
       ...presentation,
       icon: { glyph: "echo-provider/receipt" },
     });
+
     expect(namespaced.success).toBe(true);
     expect(namespaced.data?.icon.glyph).toBe("echo-provider/receipt");
     expect(
@@ -169,6 +175,7 @@ describe("grammar v3 item variants", () => {
       background: true,
       summary: "Found it",
     };
+
     for (const type of [
       "item/delegation/progress",
       "item/delegation/completed",
@@ -192,6 +199,7 @@ describe("grammar v3 item variants", () => {
         }).success,
       ).toBe(false);
     }
+
     expect(
       threadEventSchema.safeParse({
         type: "item/completed",

@@ -1,30 +1,35 @@
-import {
-  createBbDesktopVersionFeedFileName,
-  type BbDesktopVersionFeedPlatform,
-} from "@bb/desktop-contract";
+import type { OmnyoDesktopInfo } from "@omnyo/desktop-contract";
 
-type DesktopReleaseChannel = "latest" | "nightly";
+type DesktopReleaseChannel = "latest" | "nightly" | "public-beta";
 
 interface DesktopReleaseInfo {
-  applicationName: "bb" | "bb Nightly";
+  applicationName: "Omnyo" | "Omnyo Nightly";
   channel: DesktopReleaseChannel;
   iconFileName: "icon.png" | "icon-nightly.png";
-  releaseTag: "desktop-latest" | "desktop-nightly";
-  updateReleaseBaseUrl: string;
+  profileName: "Omnyo Private" | "Omnyo Private Nightly" | "Omnyo";
+  releaseTag: "desktop-latest" | "desktop-nightly" | "desktop-public-beta";
 }
 
 export function createDesktopReleaseInfo(
   channel: DesktopReleaseChannel,
 ): DesktopReleaseInfo {
+  if (channel === "public-beta")
+    return {
+      applicationName: "Omnyo",
+      profileName: "Omnyo",
+      channel,
+      iconFileName: "icon.png",
+      releaseTag: "desktop-public-beta",
+    };
   const nightly = channel === "nightly";
   const releaseTag = nightly ? "desktop-nightly" : "desktop-latest";
 
   return {
-    applicationName: nightly ? "bb Nightly" : "bb",
+    applicationName: nightly ? "Omnyo Nightly" : "Omnyo",
     channel,
     iconFileName: nightly ? "icon-nightly.png" : "icon.png",
+    profileName: nightly ? "Omnyo Private Nightly" : "Omnyo Private",
     releaseTag,
-    updateReleaseBaseUrl: `https://github.com/get-bb/bb/releases/download/${releaseTag}/`,
   };
 }
 
@@ -34,7 +39,12 @@ function resolveBuiltDesktopReleaseChannel(
   if (rawChannel === undefined || rawChannel.length === 0) {
     return "latest";
   }
-  if (rawChannel === "latest" || rawChannel === "nightly") {
+
+  if (
+    rawChannel === "latest" ||
+    rawChannel === "nightly" ||
+    rawChannel === "public-beta"
+  ) {
     return rawChannel;
   }
 
@@ -44,19 +54,12 @@ function resolveBuiltDesktopReleaseChannel(
 }
 
 export const DESKTOP_RELEASE_CHANNEL = resolveBuiltDesktopReleaseChannel(
-  process.env.BB_DESKTOP_RELEASE_CHANNEL,
+  process.env.OMNYO_DESKTOP_RELEASE_CHANNEL,
 );
+
 export const DESKTOP_RELEASE_INFO = createDesktopReleaseInfo(
   DESKTOP_RELEASE_CHANNEL,
 );
-const DESKTOP_UPDATE_RELEASE_BASE_URL =
-  DESKTOP_RELEASE_INFO.updateReleaseBaseUrl;
-
-export function createDesktopUpdateFeedUrl(
-  platform: BbDesktopVersionFeedPlatform,
-): string {
-  return `${DESKTOP_UPDATE_RELEASE_BASE_URL}${createBbDesktopVersionFeedFileName(platform)}`;
-}
 
 export interface DesktopAutoUpdateFeedConfig {
   channel: DesktopReleaseChannel;
@@ -64,37 +67,21 @@ export interface DesktopAutoUpdateFeedConfig {
   url: string;
 }
 
-export const DESKTOP_AUTO_UPDATE_FEED_CONFIG: DesktopAutoUpdateFeedConfig = {
-  channel: DESKTOP_RELEASE_CHANNEL,
-  provider: "generic",
-  url: DESKTOP_UPDATE_RELEASE_BASE_URL,
-};
-
 interface DesktopUpdateSupport {
   autoUpdate: boolean;
   versionCheck: boolean;
 }
 
-interface ResolveDesktopUpdateSupportArgs {
-  canReplaceAppImage: (appImagePath: string) => boolean;
-  env: NodeJS.ProcessEnv;
-  platform: BbDesktopVersionFeedPlatform;
-}
-
 export function resolveDesktopUpdateSupport(
-  args: ResolveDesktopUpdateSupportArgs,
+  args: {
+    feedConfig?: DesktopAutoUpdateFeedConfig | null;
+    platform?: OmnyoDesktopInfo["platform"];
+  } = {},
 ): DesktopUpdateSupport {
-  if (args.platform === "macos" || args.platform === "windows") {
-    return { autoUpdate: true, versionCheck: true };
-  }
-
-  const appImagePath = args.env.APPIMAGE?.trim() ?? "";
-  if (appImagePath.length === 0) {
-    return { autoUpdate: false, versionCheck: true };
-  }
-
   return {
-    autoUpdate: args.canReplaceAppImage(appImagePath),
-    versionCheck: true,
+    autoUpdate:
+      args.feedConfig != null &&
+      (args.platform === "macos" || args.platform === "windows"),
+    versionCheck: false,
   };
 }

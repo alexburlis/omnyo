@@ -1,9 +1,12 @@
 import { z } from "zod";
 import {
+  hostAvailabilitySchema,
   hostTypeSchema,
   jsonValueSchema,
   permissionModeSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
+import type { Host } from "@omnyo/domain";
+import type { HostDaemonOnlineRpcResult } from "@omnyo/host-daemon-contract";
 import {
   pathsExistRequestSchema,
   providerCliInstallEventSchema,
@@ -14,11 +17,12 @@ import {
   type ProviderCliInstallEvent,
   type ProviderCliInstallRequest,
   type ProviderCliStatusResponse,
-} from "@bb/host-daemon-contract/local";
+} from "@omnyo/host-daemon-contract/local";
 
 export const hostDirectoryQuerySchema = z.object({
   path: z.string().min(1).optional(),
 });
+
 export type HostDirectoryQuery = z.infer<typeof hostDirectoryQuerySchema>;
 
 export const hostDirectoryEntrySchema = z.object({
@@ -32,6 +36,7 @@ export const hostDirectoryListingSchema = z.object({
   parent: z.string().nullable(),
   entries: z.array(hostDirectoryEntrySchema),
 });
+
 export type HostDirectoryListing = z.infer<typeof hostDirectoryListingSchema>;
 
 export const hostDiscoveredRepoSchema = z.object({
@@ -41,12 +46,14 @@ export const hostDiscoveredRepoSchema = z.object({
   originUrl: z.string().min(1).nullable(),
   projectId: z.string().min(1).nullable(),
 });
+
 export type HostDiscoveredRepo = z.infer<typeof hostDiscoveredRepoSchema>;
 
 export const hostDiscoveredReposResponseSchema = z.object({
   repos: z.array(hostDiscoveredRepoSchema),
   truncated: z.boolean(),
 });
+
 export type HostDiscoveredReposResponse = z.infer<
   typeof hostDiscoveredReposResponseSchema
 >;
@@ -54,6 +61,7 @@ export type HostDiscoveredReposResponse = z.infer<
 export const hostCloneDefaultPathQuerySchema = z.object({
   projectId: z.string().min(1),
 });
+
 export type HostCloneDefaultPathQuery = z.infer<
   typeof hostCloneDefaultPathQuerySchema
 >;
@@ -61,11 +69,13 @@ export type HostCloneDefaultPathQuery = z.infer<
 export const hostCloneDefaultPathResponseSchema = z
   .object({ path: z.string().min(1) })
   .strict();
+
 export type HostCloneDefaultPathResponse = z.infer<
   typeof hostCloneDefaultPathResponseSchema
 >;
 
 export const createHostJoinCodeRequestSchema = z.object({}).strict();
+
 export type CreateHostJoinCodeRequest = z.infer<
   typeof createHostJoinCodeRequestSchema
 >;
@@ -77,6 +87,7 @@ export const createMachineRequestSchema = z
     key: z.string().min(1).optional(),
   })
   .strict();
+
 export type CreateMachineRequest = z.infer<typeof createMachineRequestSchema>;
 
 export const hostEnrollmentCommandResponseSchema = z
@@ -84,8 +95,18 @@ export const hostEnrollmentCommandResponseSchema = z
     command: z.string().min(1),
     windowsCommand: z.string().min(1),
     expiresAt: z.number().int().positive(),
+    shortCommand: z
+      .object({
+        code: z.string().min(1),
+        command: z.string().min(1),
+        windowsCommand: z.string().min(1),
+        pageUrl: z.string().min(1).optional(),
+        expiresAt: z.number().int().positive(),
+      })
+      .optional(),
   })
   .nullable();
+
 export type HostEnrollmentCommandResponse = z.infer<
   typeof hostEnrollmentCommandResponseSchema
 >;
@@ -98,6 +119,7 @@ export const hostReconnectResponseSchema = z
     hostId: z.string().min(1),
   })
   .strict();
+
 export type HostReconnectResponse = z.infer<typeof hostReconnectResponseSchema>;
 
 export const createHostJoinCodeResponseSchema = z.object({
@@ -105,6 +127,7 @@ export const createHostJoinCodeResponseSchema = z.object({
   hostId: z.string().min(1),
   expiresAt: z.number().int().positive(),
 });
+
 export type CreateHostJoinCodeResponse = z.infer<
   typeof createHostJoinCodeResponseSchema
 >;
@@ -114,6 +137,7 @@ export const updateHostRequestSchema = z
     name: z.string().trim().min(1).max(100),
   })
   .strict();
+
 export type UpdateHostRequest = z.infer<typeof updateHostRequestSchema>;
 
 export const updateHostPermissionCeilingRequestSchema = z
@@ -121,21 +145,35 @@ export const updateHostPermissionCeilingRequestSchema = z
     maxPermissionMode: permissionModeSchema,
   })
   .strict();
+
 export type UpdateHostPermissionCeilingRequest = z.infer<
   typeof updateHostPermissionCeilingRequestSchema
+>;
+
+export const updateHostAvailabilityRequestSchema = z
+  .object({
+    availability: hostAvailabilitySchema,
+  })
+  .strict();
+
+export type UpdateHostAvailabilityRequest = z.infer<
+  typeof updateHostAvailabilityRequestSchema
 >;
 
 export const hostActionResponseSchema = z
   .object({ ok: z.literal(true) })
   .strict();
+
 export type HostActionResponse = z.infer<typeof hostActionResponseSchema>;
 
 export const hostRetryUpdateResponseSchema = hostActionResponseSchema;
+
 export type HostRetryUpdateResponse = z.infer<
   typeof hostRetryUpdateResponseSchema
 >;
 
 export const hostPathsExistRequestSchema = pathsExistRequestSchema;
+
 export type HostPathsExistRequest = PathsExistRequest;
 
 export type HostPathsExistResponse = PathsExistResponse;
@@ -145,21 +183,69 @@ export const hostPickFolderRequestSchema = z
     clientHostId: z.string().min(1),
   })
   .strict();
+
 export type HostPickFolderRequest = z.infer<typeof hostPickFolderRequestSchema>;
 
 export type HostPickFolderResponse = PickFolderResponse;
 
-export type HostProviderCliStatusResponse = ProviderCliStatusResponse;
+export type HostProviderCliStatusResponse = Record<
+  string,
+  ProviderCliStatusResponse[string] & { startupUpdateError?: string }
+>;
 
 export const hostProviderCliInstallRequestSchema =
   providerCliInstallRequestSchema;
+
 export type HostProviderCliInstallRequest = ProviderCliInstallRequest;
 
 export const hostProviderCliInstallEventSchema = providerCliInstallEventSchema;
+
 export type HostProviderCliInstallEvent = ProviderCliInstallEvent;
 
 export const hostListQuerySchema = z.object({
   includeCreating: z.enum(["true", "false"]).optional(),
   type: hostTypeSchema.optional(),
 });
+
 export type HostListQuery = z.input<typeof hostListQuerySchema>;
+
+export type HostDirectAccessCoordinatorStatus = {
+  held: boolean;
+  phase:
+    | "idle"
+    | "reserving"
+    | "probing"
+    | "release-uncertain"
+    | "awaiting-primary"
+    | "retirement-pending";
+  instanceId: string;
+  sessionId: string | null;
+  ownerFingerprint: string | null;
+};
+
+type DirectAccessUnavailable = {
+  status: "unavailable";
+  code: string;
+  message: string;
+};
+
+export type HostDirectAccessStatus =
+  | {
+      status: "available";
+      coordinator: HostDirectAccessCoordinatorStatus;
+      worker:
+        | ({
+            status: "available";
+          } & HostDaemonOnlineRpcResult<"server_access.inspect_direct_probe">)
+        | DirectAccessUnavailable;
+    }
+  | DirectAccessUnavailable;
+
+export type HostGetResponse = Host & {
+  connectMachineId: string | null;
+  threadStorageRootPath: string | null;
+  directAccess: HostDirectAccessStatus;
+};
+
+export type HostHousekeepingResponse =
+  HostDaemonOnlineRpcResult<"host.housekeeping.status">;

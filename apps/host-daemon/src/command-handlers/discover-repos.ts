@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import type {
   DiscoverReposResult,
   DiscoveredRepo,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 
 const SKIP_DIRECTORIES = new Set([
   "node_modules",
@@ -26,11 +26,15 @@ const SKIP_DIRECTORIES = new Set([
   "tmp",
   "temp",
 ]);
+
 const SKIP_DIRECTORY_PREFIXES = ["tmp-", "tmp_"];
 
 const ACTIVITY_MARKERS = ["HEAD", "index", join("logs", "HEAD")];
+
 const WALK_BUDGET_MS = 3_000;
+
 const WALK_CONCURRENCY = 32;
+
 const MS_PER_DAY = 86_400_000;
 
 interface FoundRepo {
@@ -53,16 +57,21 @@ async function withDeadline<T>(
   disposeLate?: (value: T) => void,
 ): Promise<T | null> {
   const remaining = deadline - Date.now();
+
   if (remaining <= 0) {
     void operation.then((value) => disposeLate?.(value)).catch(() => {});
+
     return null;
   }
+
   let timer: NodeJS.Timeout | undefined;
   let timedOut = false;
+
   try {
     const result = await Promise.race([
       operation.then((value) => {
         if (timedOut) disposeLate?.(value);
+
         return value;
       }),
       new Promise<null>((resolve) => {
@@ -73,6 +82,7 @@ async function withDeadline<T>(
         timer.unref();
       }),
     ]);
+
     return timedOut ? null : result;
   } catch {
     return null;
@@ -88,23 +98,29 @@ function closeLateDir(dir: Dir): void {
 async function readLastActivityMs(
   gitDir: string,
   deadline: number,
-): Promise<number> {
-  const stats = await Promise.all(
+): Promise<number | null> {
+  const [head, ...rest] = await Promise.all(
     ACTIVITY_MARKERS.map((marker) =>
       withDeadline<Stats>(stat(join(gitDir, marker)), deadline),
     ),
   );
-  return Math.max(0, ...stats.map((entry) => entry?.mtimeMs ?? 0));
+
+  if (head === null || head === undefined) return null;
+
+  return Math.max(head.mtimeMs, ...rest.map((entry) => entry?.mtimeMs ?? 0));
 }
 
 function createLimiter(limit: number) {
   let active = 0;
   const waiting: (() => void)[] = [];
+
   return async function run<T>(task: () => Promise<T>): Promise<T> {
     if (active >= limit) {
       await new Promise<void>((resolve) => waiting.push(resolve));
     }
+
     active += 1;
+
     try {
       return await task();
     } finally {
@@ -131,24 +147,32 @@ async function walkForRepos(
     gitMarker: "directory" | "file" | null;
   } | null> => {
     const handle = await withDeadline(opendir(dir), deadline, closeLateDir);
+
     if (handle === null) {
       if (Date.now() > deadline) truncated = true;
+
       return null;
     }
 
     const children: string[] = [];
     let gitMarker: "directory" | "file" | null = null;
+
     try {
       for await (const entry of handle) {
         if (entry.name === ".git") {
           if (depth > 0) {
             gitMarker = entry.isDirectory() ? "directory" : "file";
           }
+
           continue;
         }
+
         if (!entry.isDirectory()) continue;
+
         if (entry.name.startsWith(".")) continue;
+
         if (SKIP_DIRECTORIES.has(entry.name)) continue;
+
         if (
           SKIP_DIRECTORY_PREFIXES.some((prefix) =>
             entry.name.startsWith(prefix),
@@ -156,36 +180,48 @@ async function walkForRepos(
         ) {
           continue;
         }
+
         children.push(entry.name);
       }
     } catch {
       return null;
     }
+
     return { children, gitMarker };
   };
 
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > maxDepth) return;
+
     if (Date.now() > deadline) {
       truncated = true;
+
       return;
     }
 
     const listing = await limitOpenDirectories(() => readDirectory(dir, depth));
+
     if (listing === null) return;
 
     if (listing.gitMarker === "file") return;
+
     if (listing.gitMarker === "directory") {
       const lastActivityMs = await readLastActivityMs(
         join(dir, ".git"),
         deadline,
       );
-      if (lastActivityMs === 0 && Date.now() > deadline) {
+
+      if (lastActivityMs === null && Date.now() > deadline) {
         truncated = true;
+
         return;
       }
-      repos.push({ path: dir, lastActivityMs });
-      return;
+
+      if (lastActivityMs !== null) {
+        repos.push({ path: dir, lastActivityMs });
+
+        return;
+      }
     }
 
     await Promise.all(
@@ -194,20 +230,25 @@ async function walkForRepos(
   };
 
   await walk(root, 0);
+
   return { repos, truncated };
 }
 
 async function readOriginUrl(repoPath: string): Promise<string | null> {
   let config: string;
+
   try {
     config = await readFile(join(repoPath, ".git", "config"), "utf8");
   } catch {
     return null;
   }
+
   const section = config.split(/\[remote "origin"\]/u)[1];
+
   if (section === undefined) return null;
   const match = /^\s*url\s*=\s*(.+)$/mu.exec(section.split("[")[0] ?? "");
   const url = match?.[1]?.trim();
+
   return url === undefined || url === "" ? null : url;
 }
 
@@ -216,6 +257,7 @@ export async function discoverRepos(
 ): Promise<DiscoverReposResult> {
   const home = args.home ?? homedir();
   const now = args.now ?? Date.now();
+
   const { repos, truncated } = await walkForRepos(
     home,
     args.maxDepth,
@@ -223,6 +265,7 @@ export async function discoverRepos(
   );
 
   const cutoff = now - args.sinceDays * MS_PER_DAY;
+
   const recent = repos
     .filter((repo) => repo.lastActivityMs >= cutoff)
     .sort((left, right) => right.lastActivityMs - left.lastActivityMs)

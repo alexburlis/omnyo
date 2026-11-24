@@ -19,8 +19,8 @@ describe("declared provider labels", () => {
   it("labels a reasoning level from the declaration, else the fallback table", () => {
     expect(reasoningLevelLabel("low", declared)).toBe("Quick");
     expect(reasoningLevelLabel("high", declared)).toBe("Deep");
-    expect(reasoningLevelLabel("xhigh", declared)).toBe("Extra High");
-    expect(reasoningLevelLabel("xhigh", undefined)).toBe("Extra High");
+    expect(reasoningLevelLabel("xhigh", declared)).toBe("xHigh");
+    expect(reasoningLevelLabel("xhigh", undefined)).toBe("xHigh");
   });
 
   it("labels a provider-specific level from the model's own name, else a readable form of its id", () => {
@@ -57,7 +57,7 @@ describe("reasoningLadderLabels", () => {
       label,
     }));
 
-  it("drops a prefix every level shares, using bb's own name where the rest is a standard level", () => {
+  it("drops a prefix every level shares, using Omnyo's own name where the rest is a standard level", () => {
     expect(
       reasoningLadderLabels(
         ladder({
@@ -69,7 +69,7 @@ describe("reasoningLadderLabels", () => {
         }),
         undefined,
       ),
-    ).toEqual(["Off", "Minimal", "Low", "Extra High", "Max"]);
+    ).toEqual(["Off", "Minimal", "Low", "xHigh", "Max"]);
   });
 
   it("keeps the provider's names when the levels do not all share the prefix", () => {

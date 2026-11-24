@@ -1,4 +1,4 @@
-import type { PluginCliExecutionResult } from "@get-bb/plugin-sdk";
+import type { PluginCliExecutionResult } from "@omnyo/plugin-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pluginCliResponse } from "../../src/routes/plugins.js";
 
@@ -11,10 +11,12 @@ const RESULT: PluginCliExecutionResult = {
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
+
   const promise = new Promise<T>((res, rej) => {
     resolve = res;
     reject = rej;
   });
+
   return { promise, resolve, reject };
 }
 
@@ -48,11 +50,14 @@ describe("pluginCliResponse", () => {
     let text =
       new TextDecoder().decode(first.value) +
       new TextDecoder().decode(keepalive.value);
+
     for (;;) {
       const chunk = await reader.read();
+
       if (chunk.done) break;
       text += new TextDecoder().decode(chunk.value);
     }
+
     expect(text.trim()).toBe(JSON.stringify(RESULT));
     expect(text.indexOf("{")).toBeGreaterThan(1);
     expect(JSON.parse(text)).toEqual(RESULT);

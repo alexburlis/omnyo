@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   collectLogPayloads,
@@ -48,11 +51,215 @@ function jsonResponse(value: object, status = 200): Response {
   });
 }
 
-describe("bb plugin update commands", () => {
+describe("omnyo plugin update commands", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
     registerPluginCommands(program, () => "http://server");
+
+  it("uploads a local bundled runtime using the installed version and active artifact guards", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "omnyo-cli-builtin-update-"),
+    );
+
+    try {
+      await mkdir(join(directory, "dist"));
+      await writeFile(
+        join(directory, "dist/server.js"),
+        "export default () => {};\n",
+      );
+      await writeFile(
+        join(directory, "package.json"),
+        JSON.stringify({
+          name: "omnyo-plugin-omnyo--fixture",
+          version: "2.0.0",
+          omnyo: {
+            name: "Fixture",
+            description: "Fixture",
+            branding: { icon: "Zap" },
+            server: "./dist/server.js",
+          },
+        }),
+      );
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          jsonResponse({
+            requested: "builtin:fixture",
+            resolved: "builtin:fixture",
+            activeArtifactId: "prior-artifact",
+            engines: {},
+            history: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(pluginList("omnyo--fixture", "builtin:fixture")),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            applied: true,
+            from: version("1.0.0"),
+            to: version("2.0.0"),
+            outcome: "updated",
+          }),
+        );
+      await runCommand(
+        [
+          "plugin",
+          "update",
+          "omnyo--fixture",
+          "--directory",
+          directory,
+          "--yes",
+        ],
+        register,
+      );
+      const requests = vi.mocked(fetch).mock.calls;
+      expect(requests).toHaveLength(3);
+      expect(String(requests[2][0])).toBe(
+        "http://server/api/v1/plugins/omnyo--fixture/update",
+      );
+      const body = JSON.parse(String(requests[2][1]?.body));
+      expect(body.bundledCandidate).toMatchObject({
+        expectedVersion: "1.0.0",
+        expectedArtifactId: "prior-artifact",
+      });
+      expect(
+        body.bundledCandidate.files.map((file: { path: string }) => file.path),
+      ).toEqual(["package.json", "dist/server.js"]);
+      expect(collectLogPayloads(vi.mocked(console.log)).join("\n")).toContain(
+        "omnyo--fixture: updated.",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [["--replace-active", "other-artifact"], "names other-artifact"],
+    [[], "is lower than installed version"],
+  ])(
+    "refuses a lower-version bundled runtime with flags %j",
+    async (flags, reason) => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "omnyo-cli-builtin-lower-"),
+      );
+
+      try {
+        await mkdir(join(directory, "dist"));
+        await writeFile(
+          join(directory, "dist/server.js"),
+          "export default 0;\n",
+        );
+        await writeFile(
+          join(directory, "package.json"),
+          JSON.stringify({
+            name: "omnyo-plugin-omnyo--fixture",
+            version: "0.9.0",
+            bb: {
+              name: "Fixture",
+              description: "Fixture",
+              branding: { icon: "Zap" },
+              server: "./dist/server.js",
+            },
+          }),
+        );
+        vi.mocked(fetch)
+          .mockResolvedValueOnce(
+            jsonResponse({
+              requested: "builtin:fixture",
+              resolved: "builtin:fixture",
+              activeArtifactId: "prior-artifact",
+              engines: {},
+              history: [],
+            }),
+          )
+          .mockResolvedValueOnce(
+            jsonResponse(pluginList("omnyo--fixture", "builtin:fixture")),
+          );
+        await expect(
+          runCommand(
+            [
+              "plugin",
+              "update",
+              "omnyo--fixture",
+              "--directory",
+              directory,
+              "--yes",
+              ...flags,
+            ],
+            register,
+          ),
+        ).rejects.toThrow("process.exit:1");
+        expect(vi.mocked(fetch).mock.calls).toHaveLength(2);
+        expect(
+          collectLogPayloads(vi.mocked(console.error)).join("\n"),
+        ).toContain(reason);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("uploads a refused runtime when the exact active artifact is named", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "omnyo-cli-builtin-replace-"),
+    );
+
+    try {
+      await mkdir(join(directory, "dist"));
+      await writeFile(join(directory, "dist/server.js"), "export default 0;\n");
+      await writeFile(
+        join(directory, "package.json"),
+        JSON.stringify({
+          name: "omnyo-plugin-omnyo--fixture",
+          version: "0.9.0",
+          bb: {
+            name: "Fixture",
+            description: "Fixture",
+            branding: { icon: "Zap" },
+            server: "./dist/server.js",
+          },
+        }),
+      );
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          jsonResponse({
+            requested: "builtin:fixture",
+            resolved: "builtin:fixture",
+            activeArtifactId: "prior-artifact",
+            engines: {},
+            history: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(pluginList("omnyo--fixture", "builtin:fixture")),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            applied: true,
+            from: version("1.0.0"),
+            to: version("0.9.0"),
+            outcome: "updated",
+          }),
+        );
+      await runCommand(
+        [
+          "plugin",
+          "update",
+          "omnyo--fixture",
+          "--directory",
+          directory,
+          "--yes",
+          "--replace-active",
+          "prior-artifact",
+        ],
+        register,
+      );
+      expect(vi.mocked(fetch).mock.calls).toHaveLength(3);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 
   it("outdated renders every outcome, reasons, and the dev-build annotation", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
@@ -76,7 +283,7 @@ describe("bb plugin update commands", () => {
             outcome: "incompatible",
             devMode: true,
             installed: version("1.0.0"),
-            blocked: { version: "2.0.0", reasons: ["requires bb >= 9"] },
+            blocked: { version: "2.0.0", reasons: ["requires Omnyo >= 9"] },
           },
           {
             id: "e",
@@ -93,9 +300,9 @@ describe("bb plugin update commands", () => {
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
     expect(output).toContain("update available");
     expect(output).toContain("pinned");
-    expect(output).toContain("2.0.0: requires bb >= 9");
+    expect(output).toContain("2.0.0: requires Omnyo >= 9");
     expect(output).toContain(
-      "incompatible [dev build: engines.bb not enforced]",
+      "incompatible [dev build: engines.omnyo not enforced]",
     );
     expect(output).toContain("unavailable");
   });
@@ -108,6 +315,7 @@ describe("bb plugin update commands", () => {
         installed: version("1.0.0"),
       },
     ];
+
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ results }));
 
     await runCommand(["plugin", "outdated", "--json"], register);
@@ -124,7 +332,7 @@ describe("bb plugin update commands", () => {
         resolved: "1.2.0",
         integrity: "sha512-test",
         registry: "https://registry.npmjs.org",
-        engines: { bb: ">=0.9", bbPluginSdk: "^0.2.0" },
+        engines: { omnyo: ">=0.9", omnyoPluginSdk: "^0.2.0" },
         installedAt: 1_752_300_000_000,
         history: [
           { version: "1.2.0", activatedAt: 1_752_300_000_000 },
@@ -138,7 +346,7 @@ describe("bb plugin update commands", () => {
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
     expect(output).toContain("requested: npm:notes@^1");
     expect(output).toContain("resolved: 1.2.0");
-    expect(output).toContain("engines.bbPluginSdk: ^0.2.0");
+    expect(output).toContain("engines.omnyoPluginSdk: ^0.2.0");
     expect(output).toContain("1.1.0");
   });
 
@@ -150,12 +358,13 @@ describe("bb plugin update commands", () => {
       installedAt: 1_752_300_000_000,
       history: [{ version: "1.0.0", activatedAt: 1_752_300_000_000 }],
     };
+
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(source));
 
     await runCommand(["plugin", "source", "notes", "--json"], register);
 
     expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
-      JSON.stringify(source, null, 2),
+      JSON.stringify({ activeArtifactId: null, ...source }, null, 2),
     ]);
   });
 
@@ -214,10 +423,10 @@ describe("bb plugin update commands", () => {
 
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
     expect(output).toContain(
-      'command: bb plugin run shadower — Shadow threads (core command "bb thread" takes precedence)',
+      'command: omnyo plugin run shadower — Shadow threads (core command "omnyo thread" takes precedence)',
     );
-    expect(output).toContain("command: bb notes — Take notes");
-    expect(output).not.toContain('core command "bb notes"');
+    expect(output).toContain("command: omnyo notes — Take notes");
+    expect(output).not.toContain('core command "omnyo notes"');
   });
 
   it("skips pinned plugins with manual reinstall guidance", async () => {
@@ -250,6 +459,7 @@ describe("bb plugin update commands", () => {
       state: "running",
       phase: "checking",
     };
+
     vi.mocked(fetch)
       .mockResolvedValueOnce(
         jsonResponse({
@@ -271,7 +481,7 @@ describe("bb plugin update commands", () => {
     );
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(collectLogPayloads(vi.mocked(console.log)).join("\n")).toContain(
-      "bb plugin update-jobs update-1",
+      "omnyo plugin update-jobs update-1",
     );
     vi.mocked(console.log).mockClear();
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ job }));
@@ -292,7 +502,7 @@ describe("bb plugin update commands", () => {
               id: "bad",
               outcome: "incompatible",
               installed: version("1"),
-              blocked: { version: "2", reasons: ["requires newer bb"] },
+              blocked: { version: "2", reasons: ["requires newer Omnyo"] },
             },
             {
               id: "good",
@@ -317,7 +527,9 @@ describe("bb plugin update commands", () => {
 
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
     expect(output).toContain("pin: skipped — pinned");
-    expect(output).toContain("bad: skipped — incompatible: requires newer bb");
+    expect(output).toContain(
+      "bad: skipped — incompatible: requires newer Omnyo",
+    );
     expect(output).toContain("good: updated and activated 1 → 2");
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({});
   });
@@ -365,6 +577,7 @@ describe("bb plugin update commands", () => {
         },
       ],
     };
+
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(update))
       .mockResolvedValueOnce(jsonResponse(pluginList("notes", "npm:notes@^1")))

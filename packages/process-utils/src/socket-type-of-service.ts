@@ -9,9 +9,11 @@ export function installSocketTypeOfServiceGuard(): void {
     Socket.prototype,
     "setTypeOfService",
   );
+
   if (typeof setTypeOfService !== "function") {
     return;
   }
+
   Reflect.set(
     Socket.prototype,
     "setTypeOfService",
@@ -22,6 +24,7 @@ export function installSocketTypeOfServiceGuard(): void {
         if (isEinvalError(error)) {
           return this;
         }
+
         throw error;
       }
     },

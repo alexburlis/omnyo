@@ -14,19 +14,21 @@ import type {
   TimelineSystemRow,
   TimelineUserConversationRow,
   TimelineWorkflowWorkRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
+import { z } from "zod";
 import {
   isBackgroundAgentTaskType,
   readTerminalOutputLines,
   type ActiveThinking,
   type CompletedTurnDisplay,
+  type GitActivity,
   type Thread,
   type ThreadEventItemPresentation,
   type ThreadTimelineActivePromptMode,
   type ThreadTimelineGoal,
   type ThreadTimelineModelFallback,
   type ThreadTimelinePendingTodos,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   BuildEventProjectionMessagesOptions,
   EventProjectionFileEditChange,
@@ -37,6 +39,7 @@ import type {
   EventProjectionUserMessage,
 } from "./event-projection-types.js";
 import { assertNever } from "./assert-never.js";
+import { isHumanThreadInput } from "./user-message-source.js";
 import {
   durationToCompactString,
   getMessageStartedAt,
@@ -46,6 +49,10 @@ import { getEventProjectionMessageScopeTurnId } from "./message-scope.js";
 import {
   buildEventProjection,
   buildEventProjectionEntries,
+  createEventProjectionCheckpoint,
+  appendEventProjectionCheckpoint,
+  materializeEventProjectionCheckpoint,
+  type EventProjectionCheckpoint,
   type ThreadEventWithMeta,
 } from "./build-event-projection.js";
 import {
@@ -59,6 +66,7 @@ import {
 } from "./user-message-parsing.js";
 import { getOrderedThreadEvents } from "./group-event-projection-turns.js";
 import { planTimelineRows, type TimelineRowPlan } from "./timeline-row-plan.js";
+import { relativizeWorkspacePath } from "./workspace-path.js";
 import { extractThreadContextWindowUsage } from "./thread-context-window-usage.js";
 import {
   extractThreadTimelineActivePromptMode,
@@ -72,6 +80,7 @@ import {
 import { extractThreadTimelineModelFallback } from "./model-fallback-extraction.js";
 import { extractThreadTimelinePendingTodos } from "./todo-snapshot-extraction.js";
 import { buildTimelineErrorDisplay } from "./error-display.js";
+import { toTimelineActivityRef } from "./timeline-activity.js";
 
 interface ThreadTimelineFromEventsBaseOptions {
   completedTurnDisplay: CompletedTurnDisplay;
@@ -95,6 +104,13 @@ interface BuildThreadTimelineFromEventsArgs {
   headStateEvents?: ThreadEventWithMeta[];
   events: ThreadEventWithMeta[];
   options: ThreadTimelineFromEventsOptions;
+}
+
+export interface ThreadTimelineProjectionCheckpoint extends Omit<
+  BuildThreadTimelineFromEventsArgs,
+  "contextWindowEvents"
+> {
+  projection: EventProjectionCheckpoint;
 }
 
 export interface ThreadTimelineFromEventsResult {
@@ -161,14 +177,18 @@ interface BuildParentChangeSystemRowArgs {
 
 const ROOT_TIMELINE_ROW_ID_PREFIX = "";
 
+const provisioningDurationSchema = z.number();
+
 type TimelineOperationMessage = Extract<
   EventProjectionMessage,
   { kind: "operation" }
 >;
+
 type TimelineWorkflowMessage = Extract<
   EventProjectionMessage,
   { kind: "workflow" }
 >;
+
 type TimelineGenericSystemOperationKind = Exclude<
   TimelineSystemOperationKind,
   "parent-change"
@@ -208,10 +228,13 @@ function parentChangeForMessage(
   }
 
   const metadata = message.threadOperation.metadata;
+
   if (metadata === null) {
     return null;
   }
+
   const action = metadata.action;
+
   switch (action) {
     case "assign":
     case "release":
@@ -233,17 +256,29 @@ function buildGenericOperationSystemRow({
   message,
   operationKind,
 }: BuildGenericOperationSystemRowArgs): TimelineSystemRow {
-  return {
+  const row: TimelineSystemRow = {
     ...base,
     kind: "system",
     systemKind: "operation",
     operationKind,
-    ...(operationKind === "reasoning" ? { reasoningId: message.id } : {}),
     title: message.title,
     detail: buildTimelineOperationDetail(message),
     status: message.status ?? null,
     completedAt: message.completedAt,
   };
+
+  if (operationKind === "reasoning") {
+    row.reasoningId = message.id;
+  }
+
+  if (
+    message.threadOperation?.operation === "activity" &&
+    message.threadOperation.activity !== null
+  ) {
+    row.activityRef = toTimelineActivityRef(message.threadOperation.activity);
+  }
+
+  return row;
 }
 
 function buildParentChangeSystemRow({
@@ -254,7 +289,9 @@ function buildParentChangeSystemRow({
   if (message.status === undefined) {
     throw new Error("Parent change operation message requires a status");
   }
+
   const status: TimelineRowStatus = message.status;
+
   return {
     ...base,
     kind: "system",
@@ -290,6 +327,7 @@ function buildWorkflowWorkRow(
   if (message.skipTranscript) {
     return null;
   }
+
   return {
     ...buildTimelineRowBase(message, rowIdPrefix),
     kind: "work",
@@ -328,6 +366,7 @@ function toConversationAttachments(
   if (!attachments) {
     return null;
   }
+
   return {
     webImages: attachments.webImages,
     localImages: attachments.localImages,
@@ -379,19 +418,6 @@ function convertActivityIntent(
   }
 }
 
-function relativizeWorkspacePath(
-  path: string,
-  workspaceRoot: string | null,
-): string {
-  if (!workspaceRoot) return path;
-  const normalizedRoot = workspaceRoot.replace(/\/+$/u, "");
-  if (normalizedRoot.length === 0) return path;
-  if (path.startsWith(`${normalizedRoot}/`)) {
-    return path.slice(normalizedRoot.length + 1);
-  }
-  return path;
-}
-
 function toTimelineFileChange(
   change: EventProjectionFileEditChange,
   workspaceRoot: string | null,
@@ -411,16 +437,19 @@ function toTimelineFileChange(
 function formatProvisioningTranscriptEntryText(
   entry: EventProjectionProvisioningTranscriptEntry,
 ): string {
-  const durationMs =
-    typeof entry.metadata?.durationMs === "number"
-      ? entry.metadata.durationMs
-      : null;
+  const duration = provisioningDurationSchema.safeParse(
+    entry.metadata?.durationMs,
+  );
+
+  const durationMs = duration.success ? duration.data : null;
+
   if (
     durationMs !== null &&
     (entry.status === "completed" || entry.status === "failed")
   ) {
     return `${entry.text} (${durationToCompactString(durationMs)})`;
   }
+
   return entry.text;
 }
 
@@ -444,6 +473,7 @@ function provisioningTerminalDetailLine(
   }
 
   const elapsedMs = message.createdAt - message.startedAt;
+
   if (elapsedMs <= 1_000) {
     return null;
   }
@@ -454,6 +484,7 @@ function provisioningTerminalDetailLine(
       : message.status === "error"
         ? "Provisioning thread failed"
         : "Provisioning thread interrupted";
+
   return `${label} (${durationToCompactString(elapsedMs)})`;
 }
 
@@ -468,30 +499,38 @@ function buildTimelineOperationDetail(
     message.provisioning?.transcript?.flatMap(
       formatProvisioningTranscriptEntryLines,
     ) ?? [];
+
   const terminalLine = provisioningTerminalDetailLine(message);
+
   const detailLines = (message.detail ?? "")
     .split(/\n|•/u)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
+
   const lines = [...transcriptLines];
+
   if (terminalLine) {
     lines.push(terminalLine);
   }
+
   for (const line of detailLines) {
     if (!lines.includes(line)) {
       lines.push(line);
     }
   }
+
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
 function convertMessage(
   message: EventProjectionMessage,
+  turnGit: GitActivity | null,
   options: BuildTimelineRowsOptions,
 ): TimelineSourceRow[] {
   switch (message.kind) {
     case "user":
       if (isSuppressedSystemMessage(message)) return [];
+
       return [
         {
           ...buildTimelineRowBase(message, options.rowIdPrefix),
@@ -505,6 +544,7 @@ function convertMessage(
           senderThreadId: message.senderThreadId,
           systemMessageKind: message.systemMessageKind,
           systemMessageSubject: message.systemMessageSubject,
+          ...(message.maintenance ? { maintenance: message.maintenance } : {}),
           turnRequest: message.turnRequest,
         },
       ];
@@ -514,10 +554,12 @@ function convertMessage(
           ...buildTimelineRowBase(message, options.rowIdPrefix),
           kind: "conversation",
           role: "assistant",
+          status: message.status,
           messageSeq: message.sourceSeqEnd,
           text: message.text,
           attachments: null,
           turnRequest: null,
+          turnGit,
         },
       ];
     case "command":
@@ -574,8 +616,10 @@ function convertMessage(
           },
         ];
       }
+
       return message.changes.map((change, index) => {
         const base = buildTimelineRowBase(message, options.rowIdPrefix);
+
         return {
           ...base,
           id: `${base.id}:file-change:${index}`,
@@ -707,6 +751,7 @@ function convertMessage(
       ];
     case "delegation": {
       const base = buildTimelineRowBase(message, options.rowIdPrefix);
+
       return [
         {
           ...base,
@@ -733,10 +778,13 @@ function convertMessage(
         },
       ];
     }
+
     case "workflow": {
       const row = buildWorkflowWorkRow(message, options.rowIdPrefix);
+
       return row ? [row] : [];
     }
+
     case "permission-grant-lifecycle":
       return [
         {
@@ -787,6 +835,7 @@ function convertMessage(
       const parentChange = parentChangeForMessage(message);
       const operationKind = operationKindForMessage(message, parentChange);
       const base = buildTimelineRowBase(message, options.rowIdPrefix);
+
       if (operationKind === "parent-change") {
         return parentChange !== null
           ? [
@@ -804,6 +853,7 @@ function convertMessage(
               }),
             ];
       }
+
       return [
         buildGenericOperationSystemRow({
           base,
@@ -812,9 +862,11 @@ function convertMessage(
         }),
       ];
     }
+
     case "error": {
       const errorDisplay = buildTimelineErrorDisplay(message);
       const isReconnect = message.willRetry === true;
+
       return [
         {
           ...buildTimelineRowBase(message, options.rowIdPrefix),
@@ -826,6 +878,7 @@ function convertMessage(
         },
       ];
     }
+
     default:
       return assertNever(message);
   }
@@ -848,6 +901,7 @@ function convertSteerMessage(
   if (message.kind !== "user" || message.turnRequest.kind !== "steer") {
     throw new Error(`Expected steer message, received ${message.kind}`);
   }
+
   return {
     ...buildTimelineRowBase(message, rowIdPrefix),
     kind: "conversation",
@@ -860,6 +914,7 @@ function convertSteerMessage(
     senderThreadId: message.senderThreadId,
     systemMessageKind: message.systemMessageKind,
     systemMessageSubject: message.systemMessageSubject,
+    ...(message.maintenance ? { maintenance: message.maintenance } : {}),
     turnRequest: message.turnRequest,
   };
 }
@@ -870,26 +925,32 @@ export function buildPendingSteerMessagesFromEvents(
   options: BuildEventProjectionMessagesOptions,
 ): EventProjectionUserMessage[] {
   const orderedEvents = getOrderedThreadEvents(events);
+
   const acceptedClientRequestById = buildAcceptedClientRequestById({
     context: acceptedClientRequestContext,
     events: orderedEvents,
   });
+
   const rejectedClientRequestById = buildRejectedClientRequestById(
     acceptedClientRequestContext,
     orderedEvents,
   );
+
   const inWindowRejectedClientRequestIds = new Set(
     orderedEvents.flatMap(({ event }) =>
       event.type === "client/turn/rejected" ? [event.requestId] : [],
     ),
   );
+
   const legacyRejectedRequestMetaById = new Map<
     string,
     ThreadEventWithMeta["meta"]
   >();
+
   const unresolvedSteerRequestIds = new Set<string>();
   const unresolvedSteerRequestOrder: string[] = [];
   let explicitRejectionNeedsCompanionError = false;
+
   for (const { event, meta } of orderedEvents) {
     if (
       event.type === "client/turn/requested" &&
@@ -901,16 +962,19 @@ export function buildPendingSteerMessagesFromEvents(
       explicitRejectionNeedsCompanionError = false;
       continue;
     }
+
     if (event.type === "turn/input/accepted") {
       unresolvedSteerRequestIds.delete(event.clientRequestId);
       explicitRejectionNeedsCompanionError = false;
       continue;
     }
+
     if (event.type === "client/turn/rejected") {
       unresolvedSteerRequestIds.delete(event.requestId);
       explicitRejectionNeedsCompanionError = true;
       continue;
     }
+
     if (
       event.type === "system/error" &&
       event.code === "thread_command_failed"
@@ -919,15 +983,20 @@ export function buildPendingSteerMessagesFromEvents(
         explicitRejectionNeedsCompanionError = false;
         continue;
       }
+
       let requestId = unresolvedSteerRequestOrder.pop();
+
       while (requestId && !unresolvedSteerRequestIds.delete(requestId)) {
         requestId = unresolvedSteerRequestOrder.pop();
       }
+
       if (requestId) legacyRejectedRequestMetaById.set(requestId, meta);
       continue;
     }
+
     explicitRejectionNeedsCompanionError = false;
   }
+
   const pendingSteerMessages: EventProjectionUserMessage[] = [];
 
   for (const { event, meta } of orderedEvents) {
@@ -937,18 +1006,22 @@ export function buildPendingSteerMessagesFromEvents(
     ) {
       continue;
     }
+
     const acceptedClientRequest =
       event.type === "client/turn/requested"
         ? acceptedClientRequestById.get(event.requestId)
         : undefined;
+
     const legacyRejectedMeta =
       event.type === "client/turn/requested"
         ? legacyRejectedRequestMetaById.get(event.requestId)
         : undefined;
+
     const rejectedMeta =
       event.type === "client/turn/requested"
         ? rejectedClientRequestById.get(event.requestId)
         : undefined;
+
     if (
       event.type === "client/turn/requested" &&
       acceptedClientRequest === undefined &&
@@ -964,6 +1037,7 @@ export function buildPendingSteerMessagesFromEvents(
       );
       continue;
     }
+
     if (
       event.type === "client/turn/requested" &&
       acceptedClientRequest === undefined &&
@@ -979,15 +1053,18 @@ export function buildPendingSteerMessagesFromEvents(
       );
       continue;
     }
+
     const pendingSteers = parsePendingSteersFromClientRequest({
       acceptedClientRequest,
       decoded: event,
       meta,
       options,
     });
+
     if (pendingSteers.length === 0) {
       continue;
     }
+
     pendingSteerMessages.push(...pendingSteers);
   }
 
@@ -1027,6 +1104,7 @@ function isCompanionThreadInterruptedRow(
 function appendRows(target: TimelineRow[], rows: readonly TimelineRow[]): void {
   for (const row of rows) {
     const previous = target[target.length - 1];
+
     if (
       previous &&
       isReconnectSystemRow(previous) &&
@@ -1035,9 +1113,11 @@ function appendRows(target: TimelineRow[], rows: readonly TimelineRow[]): void {
       target[target.length - 1] = row;
       continue;
     }
+
     if (previous && isCompanionThreadInterruptedRow(previous, row)) {
       continue;
     }
+
     target.push(row);
   }
 }
@@ -1046,7 +1126,7 @@ function isRootOwnedHumanSteerRow(row: TimelineRow): boolean {
   return (
     row.kind === "conversation" &&
     row.role === "user" &&
-    row.initiator === "user" &&
+    isHumanThreadInput(row) &&
     row.turnRequest?.kind === "steer"
   );
 }
@@ -1055,14 +1135,17 @@ function collectExternalUserBoundarySeqs(
   projection: EventProjection,
 ): number[] {
   const boundarySeqs = new Set<number>();
+
   for (const entry of projection.entries) {
     if (entry.kind !== "turn") {
       continue;
     }
+
     for (const seq of entry.turn.externalUserBoundarySeqs ?? []) {
       boundarySeqs.add(seq);
     }
   }
+
   return [...boundarySeqs].sort((left, right) => left - right);
 }
 
@@ -1073,9 +1156,11 @@ function compareTimelineRowsBySource(
   if (left.sourceSeqStart !== right.sourceSeqStart) {
     return left.sourceSeqStart - right.sourceSeqStart;
   }
+
   if (left.sourceSeqEnd !== right.sourceSeqEnd) {
     return left.sourceSeqEnd - right.sourceSeqEnd;
   }
+
   return 0;
 }
 
@@ -1084,6 +1169,7 @@ function orderRowsAfterExternalUserBoundary(
   boundarySeqs: readonly number[],
 ): TimelineRow[] {
   const firstBoundarySeq = boundarySeqs[0];
+
   if (firstBoundarySeq === undefined) {
     return rows;
   }
@@ -1091,15 +1177,18 @@ function orderRowsAfterExternalUserBoundary(
   const suffixStartIndex = rows.findIndex(
     (row) => row.sourceSeqStart >= firstBoundarySeq,
   );
+
   if (suffixStartIndex === -1) {
     return rows;
   }
 
   const suffix = rows.slice(suffixStartIndex);
+
   const orderedSuffix = suffix
     .map((row, index) => ({ index, row }))
     .sort((left, right) => {
       const sourceOrder = compareTimelineRowsBySource(left.row, right.row);
+
       return sourceOrder === 0 ? left.index - right.index : sourceOrder;
     })
     .map(({ row }) => row);
@@ -1112,9 +1201,11 @@ function materializeTimelineMessages(
   options: BuildTimelineRowsOptions,
 ): TimelineRow[] {
   const rows: TimelineRow[] = [];
+
   for (const message of messages) {
-    appendRows(rows, convertMessage(message, options));
+    appendRows(rows, convertMessage(message, null, options));
   }
+
   return rows;
 }
 
@@ -1122,7 +1213,10 @@ function materializeTimelinePlan(
   item: TimelineRowPlan,
   options: BuildTimelineRowsOptions,
 ): TimelineRow[] {
-  if (item.kind === "message") return convertMessage(item.message, options);
+  if (item.kind === "message") {
+    return convertMessage(item.message, item.turnGit, options);
+  }
+
   return [
     options.includeNestedRows
       ? {
@@ -1138,10 +1232,12 @@ function buildTimelineRows(
   options: BuildTimelineRowsOptions,
 ): TimelineRow[] {
   const rows: TimelineRow[] = [];
+
   for (const item of planTimelineRows(
     projection,
     options.completedTurnDisplay,
     options.rowIdPrefix,
+    options.workspaceRoot,
   )) {
     appendRows(rows, materializeTimelinePlan(item, options));
   }
@@ -1152,21 +1248,26 @@ function buildTimelineRows(
   );
 }
 
-export function buildThreadTimelineFromEvents(
+function threadTimelineProjectionOptions(
   args: BuildThreadTimelineFromEventsArgs,
-): ThreadTimelineFromEventsResult {
-  const stateEvents = args.headStateEvents?.length
-    ? getOrderedThreadEvents([...args.events, ...args.headStateEvents])
-    : args.events;
-  const projectionOptions = {
+): Parameters<typeof buildEventProjection>[1] {
+  return {
     acceptedClientRequestContext: args.acceptedClientRequestContext,
     includeDiagnosticOperations: args.options.includeDiagnosticOperations,
     providerDisplayName: args.options.providerDisplayName,
     threadStatus: args.options.threadStatus,
     threadName: args.options.threadName,
     turnMessageDetail: "full",
-  } satisfies Parameters<typeof buildEventProjection>[1];
-  const projection = buildEventProjection(args.events, projectionOptions);
+  };
+}
+
+function materializeThreadTimelineFromProjection(
+  args: BuildThreadTimelineFromEventsArgs,
+  projection: EventProjection,
+): ThreadTimelineFromEventsResult {
+  const stateEvents = args.headStateEvents?.length
+    ? getOrderedThreadEvents([...args.events, ...args.headStateEvents])
+    : args.events;
 
   const rows = [
     ...buildTimelineRows(projection, {
@@ -1198,11 +1299,13 @@ export function buildThreadTimelineFromEvents(
     activeThinking: projection.state.activeThinking,
     activeWorkflows: projection.state.activeWorkflows.flatMap((message) => {
       const row = buildWorkflowWorkRow(message, ROOT_TIMELINE_ROW_ID_PREFIX);
+
       return row ? [row] : [];
     }),
     activeBackgroundCommands: projection.state.activeBackgroundCommands.flatMap(
       (message) => {
         const row = buildWorkflowWorkRow(message, ROOT_TIMELINE_ROW_ID_PREFIX);
+
         return row ? [row] : [];
       },
     ),
@@ -1231,6 +1334,49 @@ export function buildThreadTimelineFromEvents(
   };
 }
 
+export function buildThreadTimelineFromEvents(
+  args: BuildThreadTimelineFromEventsArgs,
+): ThreadTimelineFromEventsResult {
+  return materializeThreadTimelineFromProjection(
+    args,
+    buildEventProjection(args.events, threadTimelineProjectionOptions(args)),
+  );
+}
+
+export function createThreadTimelineProjectionCheckpoint(
+  args: BuildThreadTimelineFromEventsArgs,
+): ThreadTimelineProjectionCheckpoint {
+  const projection = createEventProjectionCheckpoint(
+    args.events,
+    threadTimelineProjectionOptions(args),
+  );
+
+  return {
+    acceptedClientRequestContext: args.acceptedClientRequestContext,
+    events: projection.events,
+    headStateEvents: args.headStateEvents,
+    options: args.options,
+    projection,
+  };
+}
+
+export function appendThreadTimelineProjectionCheckpoint(
+  checkpoint: ThreadTimelineProjectionCheckpoint,
+  events: ThreadEventWithMeta[],
+): boolean {
+  return appendEventProjectionCheckpoint(checkpoint.projection, events);
+}
+
+export function materializeThreadTimelineProjectionCheckpoint(
+  checkpoint: ThreadTimelineProjectionCheckpoint,
+  contextWindowEvents: ThreadEventWithMeta[],
+): ThreadTimelineFromEventsResult {
+  return materializeThreadTimelineFromProjection(
+    { ...checkpoint, contextWindowEvents },
+    materializeEventProjectionCheckpoint(checkpoint.projection),
+  );
+}
+
 function findTurnSummaryStartingAt(
   plan: readonly TimelineRowPlan[],
   turnId: string,
@@ -1238,8 +1384,10 @@ function findTurnSummaryStartingAt(
 ): Extract<TimelineRowPlan, { kind: "summary" }> | undefined {
   let match: Extract<TimelineRowPlan, { kind: "summary" }> | undefined;
   let matchSeq = Infinity;
+
   for (const item of plan) {
     if (item.kind !== "summary" || item.row.turnId !== turnId) continue;
+
     for (const message of item.messages) {
       if (
         message.sourceSeqStart >= sourceSeqStart &&
@@ -1250,6 +1398,7 @@ function findTurnSummaryStartingAt(
       }
     }
   }
+
   return match;
 }
 
@@ -1263,40 +1412,49 @@ export function buildThreadTimelineTurnDetailsFromEvents(
     threadName: args.options.threadName,
     turnMessageDetail: "full",
   });
+
   const includesRequestedTurn = projection.entries.some(
     (entry) =>
       entry.kind === "turn" &&
       entry.turn.turnId === args.options.turnId &&
       entry.turn.sourceSeqEnd >= args.options.sourceSeqStart,
   );
+
   if (!includesRequestedTurn) {
     return { kind: "missing-match" };
   }
+
   const options: BuildTimelineRowsOptions = {
     completedTurnDisplay: args.options.completedTurnDisplay,
     includeNestedRows: true,
     rowIdPrefix: ROOT_TIMELINE_ROW_ID_PREFIX,
     workspaceRoot: args.options.workspaceRoot,
   };
+
   const plan = planTimelineRows(
     projection,
     options.completedTurnDisplay,
     options.rowIdPrefix,
+    options.workspaceRoot,
   );
+
   const matchingSummary = findTurnSummaryStartingAt(
     plan,
     args.options.turnId,
     args.options.sourceSeqStart,
   );
+
   if (matchingSummary) {
     return {
       kind: "matched",
       rows: materializeTimelineMessages(matchingSummary.messages, options),
     };
   }
+
   if (plan.some((item) => item.kind === "summary")) {
     return { kind: "missing-match" };
   }
+
   return {
     kind: "ungrouped",
     rows: buildTimelineRows(projection, options).filter(

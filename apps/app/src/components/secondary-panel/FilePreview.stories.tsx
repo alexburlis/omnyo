@@ -67,7 +67,7 @@ flowchart LR
 The Raw toggle still shows this markdown source unchanged.`;
 
 const SAMPLE_BUTTON_TSX = `import { forwardRef, type ButtonHTMLAttributes } from "react";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "default" | "ghost" | "outline";
@@ -112,13 +112,20 @@ Katherine Johnson,Active,9600,"Needs ""Executive Summary"" column added"
 `;
 
 const README_PATH = "docs/right-panel/README.md";
+
 const ARCHIVE_PATH = "keyboard-reset-qa/report-with-images.zip";
+
 const DIAGRAM_PATH = "docs/right-panel/preview-flow.md";
+
 const BUTTON_PATH = "apps/app/src/components/ui/button.tsx";
+
 const DELETED_BUTTON_PATH = "apps/app/src/components/ui/legacy-button.tsx";
+
 const METRICS_PATH = "reports/customers.csv";
+
 const SCREENSHOT_PATH = "docs/screenshots/right-panel.svg";
-const STORY_WORKSPACE_ROOT = "/Users/alex/Code/bb";
+
+const STORY_WORKSPACE_ROOT = "/Users/developer/Code/omnyo";
 
 function copyPathFor(path: string) {
   return `${STORY_WORKSPACE_ROOT}/${path}`;
@@ -142,7 +149,9 @@ const SAMPLE_IMAGE_URL =
   );
 
 const LARGE_FILE_LINE_COUNT = 8_000;
+
 const LARGE_FILE_TARGET_LINE = 6_500;
+
 const SAMPLE_LARGE_TS = Array.from({ length: LARGE_FILE_LINE_COUNT }, (_, i) =>
   i % 40 === 0
     ? `export function block${i / 40}(input: number): number {`

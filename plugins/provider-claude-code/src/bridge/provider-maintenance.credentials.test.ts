@@ -1,124 +1,123 @@
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+  getClaudeProviderHealth,
+  getClaudeProviderUsage,
+} from "./provider-maintenance.js";
 
 const state = vi.hoisted(() => ({
-  keychain: "",
-  file: "",
+  stdout: "",
+  code: 0,
+  spawn: vi.fn(),
+  readFile: vi.fn(),
+  resolveExecutablePath: vi.fn(),
 }));
 
-vi.mock("node:child_process", () => ({
-  execFile: (
-    _file: string,
-    _args: readonly string[],
-    _options: object,
-    callback: (
-      error: Error | null,
-      result: { stdout: string; stderr: string },
-    ) => void,
-  ) => callback(null, { stdout: state.keychain, stderr: "" }),
-}));
+vi.mock("node:fs/promises", () => ({ default: { readFile: state.readFile } }));
 
-vi.mock("node:fs/promises", () => ({
-  default: {
-    readFile: (file: string) =>
-      Promise.resolve(
-        file.endsWith(".credentials.json")
-          ? state.file
-          : JSON.stringify({ oauthAccount: { emailAddress: null } }),
-      ),
-  },
-}));
-
-vi.mock("@get-bb/plugin-sdk/provider-bridge", async (importOriginal) => ({
+vi.mock("@omnyo/plugin-sdk/provider-bridge", async (importOriginal) => ({
   ...(await importOriginal<
-    typeof import("@get-bb/plugin-sdk/provider-bridge")
+    typeof import("@omnyo/plugin-sdk/provider-bridge")
   >()),
-  experimental_resolveExecutablePath: () => Promise.resolve("/test/claude"),
+  experimental_readCliVersion: () => Promise.resolve("2.1.318"),
+  experimental_resolveExecutablePath: state.resolveExecutablePath,
+  experimental_spawnPortableProcess: state.spawn,
 }));
 
-import { getClaudeProviderUsage } from "./provider-maintenance.js";
+const network = vi.fn();
 
-const originalPlatform = process.platform;
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubGlobal("fetch", network);
+  state.stdout = JSON.stringify({
+    loggedIn: true,
+    email: "claude@example.com",
+    subscriptionType: "pro",
+  });
+  state.code = 0;
+  state.resolveExecutablePath.mockResolvedValue("/test/claude");
+  state.spawn.mockImplementation(() => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+    });
 
-beforeAll(() => {
-  Object.defineProperty(process, "platform", {
-    configurable: true,
-    value: "darwin",
+    queueMicrotask(() => {
+      child.stdout.end(state.stdout);
+      child.emit("close", state.code);
+    });
+
+    return child;
   });
 });
 
-afterAll(() => {
-  Object.defineProperty(process, "platform", {
-    configurable: true,
-    value: originalPlatform,
-  });
+afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-beforeEach(() => {
-  const credentials = JSON.stringify({
-    claudeAiOauth: {
-      accessToken: "test-access-token",
-      expiresAt: null,
-      subscriptionType: "pro",
-      rateLimitTier: "default_claude_max_5x",
-    },
-  });
-  state.file = credentials;
-  state.keychain = Buffer.from(credentials, "utf8").toString("hex");
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ limits: [] }),
-    }),
-  );
-});
-
-describe("Claude Code credential loading", () => {
-  it("loads a hex-encoded Keychain credential", async () => {
-    const result = await getClaudeProviderUsage();
-
-    expect(result).toEqual({
+describe("Claude Code authentication and usage", () => {
+  it("uses only Claude Code's auth status and omits unreported quota windows", async () => {
+    expect(await getClaudeProviderUsage()).toEqual({
       supported: true,
-      usage: expect.objectContaining({ status: "ok" }),
-    });
-  });
-
-  it("uses the credential file when the Keychain value is invalid", async () => {
-    state.keychain = "invalid-keychain-value";
-
-    const result = await getClaudeProviderUsage();
-
-    expect(result).toEqual({
-      supported: true,
-      usage: expect.objectContaining({ status: "ok" }),
-    });
-  });
-
-  it("distinguishes usage-check throttling from an exhausted Claude limit", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: false, status: 429 }),
-    );
-
-    const result = await getClaudeProviderUsage();
-
-    expect(result).toEqual({
-      supported: true,
-      usage: expect.objectContaining({
+      usage: {
         status: "error",
-        message:
-          "Anthropic temporarily throttled this usage check. This does not mean your Claude limit is exhausted. Try again later.",
-      }),
+        message: "Run /usage in Claude Code to see your current limits.",
+        accountEmail: "claude@example.com",
+        planLabel: "Pro",
+      },
+    });
+    expect(state.spawn).toHaveBeenCalledExactlyOnceWith({
+      command: "claude",
+      args: ["auth", "status"],
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    expect(state.readFile).not.toHaveBeenCalled();
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  it("uses Claude Code's sign-in status for provider health", async () => {
+    expect(await getClaudeProviderHealth()).toMatchObject({
+      supported: true,
+      health: {
+        status: "ready",
+        accountEmail: "claude@example.com",
+        installedVersion: "2.1.318",
+      },
+    });
+  });
+
+  it("distinguishes logged-out status from a failed CLI probe", async () => {
+    state.code = 1;
+    state.stdout = '{"loggedIn":false,"authMethod":"none"}';
+
+    expect(await getClaudeProviderUsage()).toMatchObject({
+      usage: { status: "unauthenticated" },
+    });
+
+    state.stdout = "unrecognized output";
+
+    expect(await getClaudeProviderUsage()).toMatchObject({
+      usage: {
+        status: "error",
+        message: "Claude Code did not report its login status.",
+      },
+    });
+    expect(await getClaudeProviderHealth()).toMatchObject({
+      health: { status: "unknown" },
+    });
+  });
+
+  it("reports the CLI's login expiration and handles an absent CLI", async () => {
+    state.stdout = '{"loggedIn":true,"loginExpiresAt":"2020-01-01T00:00:00Z"}';
+
+    expect(await getClaudeProviderUsage()).toMatchObject({
+      usage: { status: "expired" },
+    });
+
+    state.resolveExecutablePath.mockResolvedValue(null);
+
+    expect(await getClaudeProviderHealth()).toMatchObject({
+      health: { status: "not_installed" },
     });
   });
 });

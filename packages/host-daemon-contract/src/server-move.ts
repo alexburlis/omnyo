@@ -1,10 +1,13 @@
-import { lastServerMoveSchema, serverMoveStepIdSchema } from "@bb/domain";
+import { lastServerMoveSchema, serverMoveStepIdSchema } from "@omnyo/domain";
 import { z } from "zod";
 import { hostPlatformSchema } from "./local.js";
 
 const moveIdSchema = z.string().min(1);
+
 const activationTokenSchema = z.string().min(16);
+
 const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
 const portSchema = z.number().int().min(1).max(65535);
 
 export const serverMoveBindHostSchema = z.enum(["127.0.0.1", "0.0.0.0"]);
@@ -14,12 +17,14 @@ export const serverMoveHealthStateSchema = z.enum([
   "activating",
   "ready",
 ]);
+
 export type ServerMoveHealthState = z.infer<typeof serverMoveHealthStateSchema>;
 
 export const serverMoveHealthSchema = z.object({
   moveId: moveIdSchema,
   state: serverMoveHealthStateSchema,
 });
+
 export type ServerMoveHealth = z.infer<typeof serverMoveHealthSchema>;
 
 export const serverHealthResponseSchema = z.object({
@@ -27,6 +32,32 @@ export const serverHealthResponseSchema = z.object({
 });
 
 export const serverMoveCommandSchemas = {
+  "server_access.prove_current_primary": z
+    .object({
+      type: z.literal("server_access.prove_current_primary"),
+      serverUrl: z.string().url(),
+      challenge: z.string().min(1),
+      instanceId: z.string().min(1),
+      expectedSessionId: z.string().min(1),
+    })
+    .strict(),
+  "server_access.inspect_direct_probe": z
+    .object({ type: z.literal("server_access.inspect_direct_probe") })
+    .strict(),
+  "server_access.probe_direct": z
+    .object({
+      type: z.literal("server_access.probe_direct"),
+      serverUrl: z.string().url(),
+      challenge: z.string().min(1),
+      instanceId: z.string().min(1),
+    })
+    .strict(),
+  "server_access.release_direct_probe": z
+    .object({
+      type: z.literal("server_access.release_direct_probe"),
+      challenge: z.string().min(1),
+    })
+    .strict(),
   "server_move.inspect": z
     .object({
       type: z.literal("server_move.inspect"),
@@ -53,12 +84,13 @@ export const serverMoveCommandSchemas = {
           sizeBytes: z.number().int().nonnegative(),
         })
         .strict(),
-      bbApp: z
+      appRuntime: z
         .object({
           downloadPath: z.string().min(1),
           sha256: sha256HexSchema,
           sizeBytes: z.number().int().nonnegative(),
           version: z.string().min(1),
+          runtimeSha256: sha256HexSchema,
         })
         .strict()
         .nullable(),
@@ -99,12 +131,35 @@ const existingServerDataSchema = z
   .strict();
 
 export const serverMoveResultSchemas = {
+  "server_access.prove_current_primary": z
+    .object({ ok: z.literal(true) })
+    .strict(),
+  "server_access.inspect_direct_probe": z
+    .object({
+      hostId: z.string().min(1),
+      workerInstanceId: z.string().min(1),
+      sessionId: z.string().min(1).nullable(),
+      probe: z
+        .object({
+          phase: z.enum(["uncommitted", "committed"]),
+          ownerFingerprint: sha256HexSchema,
+          coordinatorInstanceId: z.string().min(1),
+          sessionId: z.string().min(1).nullable(),
+        })
+        .strict()
+        .nullable(),
+    })
+    .strict(),
+  "server_access.probe_direct": z.object({ ok: z.literal(true) }).strict(),
+  "server_access.release_direct_probe": z
+    .object({ ok: z.literal(true) })
+    .strict(),
   "server_move.inspect": z
     .object({
       dataDir: z.string().min(1),
       platform: hostPlatformSchema,
       timeZone: z.string().min(1).nullable(),
-      bbAppVersion: z.string().min(1),
+      coreVersion: z.string().min(1),
       serverEntryAvailable: z.boolean(),
       existingServerData: existingServerDataSchema.nullable(),
       dataDirHasServerData: z.boolean(),
@@ -129,7 +184,13 @@ export const serverMoveResultSchemas = {
     })
     .strict(),
   "server_move.activate": z.object({ ok: z.literal(true) }).strict(),
-  "server_move.abort": z.object({ ok: z.literal(true) }).strict(),
+  "server_move.abort": z
+    .object({
+      ok: z.literal(true),
+      moveId: moveIdSchema,
+      fenced: z.literal(true),
+    })
+    .strict(),
   "server_move.delete_old_copy": z.object({ deleted: z.boolean() }).strict(),
 } as const;
 
@@ -144,6 +205,7 @@ export const serverMovedMessageSchema = z
     headers: z.record(z.string(), z.string()),
   })
   .strict();
+
 export type ServerMovedMessage = z.infer<typeof serverMovedMessageSchema>;
 
 export const serverMoveProgressMessageSchema = z
@@ -154,6 +216,7 @@ export const serverMoveProgressMessageSchema = z
     message: z.string(),
   })
   .strict();
+
 export type ServerMoveProgressMessage = z.infer<
   typeof serverMoveProgressMessageSchema
 >;
@@ -167,6 +230,7 @@ export const serverMovedErrorDetailsSchema = z
     movedAt: z.number().int().nonnegative(),
   })
   .strict();
+
 export type ServerMovedErrorDetails = z.infer<
   typeof serverMovedErrorDetailsSchema
 >;

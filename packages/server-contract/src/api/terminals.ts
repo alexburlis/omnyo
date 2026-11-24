@@ -5,7 +5,7 @@ import {
   terminalRowsSchema,
   terminalSessionCloseReasonSchema,
   terminalSessionStatusSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 export const terminalSessionSchema = z.object({
   id: z.string().min(1),
@@ -23,11 +23,28 @@ export const terminalSessionSchema = z.object({
   updatedAt: z.number().int().nonnegative(),
   lastUserInputAt: z.number().int().nonnegative().nullable(),
 });
+
 export type TerminalSession = z.infer<typeof terminalSessionSchema>;
+
+export const terminalForegroundResponseSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("idle") }).strict(),
+  z
+    .object({
+      state: z.literal("busy"),
+      command: z.string().min(1).nullable(),
+    })
+    .strict(),
+  z.object({ state: z.literal("unknown") }).strict(),
+]);
+
+export type TerminalForegroundResponse = z.infer<
+  typeof terminalForegroundResponseSchema
+>;
 
 export const terminalListResponseSchema = z.object({
   sessions: z.array(terminalSessionSchema),
 });
+
 export type TerminalListResponse = z.infer<typeof terminalListResponseSchema>;
 
 export const terminalListQuerySchema = z
@@ -44,6 +61,7 @@ export const terminalListQuerySchema = z
       query.environmentId !== undefined,
       query.hostId !== undefined,
     ].filter(Boolean).length;
+
     if (scopeCount !== 1) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -51,6 +69,7 @@ export const terminalListQuerySchema = z
           "Exactly one terminal scope must be provided: threadId, environmentId, or hostId",
       });
     }
+
     if (query.cwd !== undefined && query.hostId === undefined) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -58,6 +77,7 @@ export const terminalListQuerySchema = z
       });
     }
   });
+
 export type TerminalListQuery = z.infer<typeof terminalListQuerySchema>;
 
 export const terminalCreateTargetSchema = z.discriminatedUnion("kind", [
@@ -81,6 +101,7 @@ export const terminalCreateTargetSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
 export type TerminalCreateTarget = z.infer<typeof terminalCreateTargetSchema>;
 
 export const createTerminalRequestSchema = z
@@ -112,6 +133,7 @@ export const createTerminalRequestSchema = z
     title: z.string().trim().min(1).max(200).optional(),
   })
   .strict();
+
 export type CreateTerminalRequest = z.infer<typeof createTerminalRequestSchema>;
 
 export const closeTerminalRequestSchema = z
@@ -120,9 +142,11 @@ export const closeTerminalRequestSchema = z
     reason: z.literal("user"),
   })
   .strict();
+
 export type CloseTerminalRequest = z.infer<typeof closeTerminalRequestSchema>;
 
 export const restartTerminalRequestSchema = z.object({}).strict();
+
 export type RestartTerminalRequest = z.infer<
   typeof restartTerminalRequestSchema
 >;
@@ -132,6 +156,7 @@ export const updateTerminalRequestSchema = z
     title: z.string().trim().min(1).max(200),
   })
   .strict();
+
 export type UpdateTerminalRequest = z.infer<typeof updateTerminalRequestSchema>;
 
 export const terminalOutputChunkSchema = z
@@ -140,6 +165,7 @@ export const terminalOutputChunkSchema = z
     dataBase64: terminalDataBase64Schema,
   })
   .strict();
+
 export type TerminalOutputChunk = z.infer<typeof terminalOutputChunkSchema>;
 
 export const terminalInputRequestSchema = z
@@ -147,6 +173,7 @@ export const terminalInputRequestSchema = z
     dataBase64: terminalDataBase64Schema,
   })
   .strict();
+
 export type TerminalInputRequest = z.infer<typeof terminalInputRequestSchema>;
 
 export const terminalResizeRequestSchema = z
@@ -155,6 +182,7 @@ export const terminalResizeRequestSchema = z
     rows: terminalRowsSchema,
   })
   .strict();
+
 export type TerminalResizeRequest = z.infer<typeof terminalResizeRequestSchema>;
 
 export const terminalOutputQuerySchema = z
@@ -169,6 +197,7 @@ export const terminalOutputQuerySchema = z
     limitChunks: z.coerce.number().int().positive().max(10_000).optional(),
   })
   .strict();
+
 export type TerminalOutputQuery = z.infer<typeof terminalOutputQuerySchema>;
 
 export const terminalWebSocketQuerySchema = z
@@ -191,6 +220,7 @@ export const terminalOutputResponseSchema = z
     closeReason: terminalSessionCloseReasonSchema.nullable(),
   })
   .strict();
+
 export type TerminalOutputResponse = z.infer<
   typeof terminalOutputResponseSchema
 >;
@@ -227,6 +257,7 @@ export const terminalClientMessageSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
+
 export type TerminalClientMessage = z.infer<typeof terminalClientMessageSchema>;
 
 export const terminalServerMessageSchema = z.discriminatedUnion("type", [
@@ -269,4 +300,5 @@ export const terminalServerMessageSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
+
 export type TerminalServerMessage = z.infer<typeof terminalServerMessageSchema>;

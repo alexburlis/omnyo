@@ -6,7 +6,7 @@ import {
   type HostType,
   type JsonValue,
   type PermissionMode,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   DbConnection,
   DbTransaction,
@@ -37,6 +37,7 @@ export interface UpdateHostInput {
   destroyedAt?: number | null;
   lastRejectedProtocolVersion?: number | null;
   maxPermissionMode?: PermissionMode;
+  availability?: "available" | "away";
   name?: string;
   machineProviderId?: string | null;
   phase?:
@@ -80,6 +81,7 @@ function notifyHostMutation(
   }
 
   const hostChange = getHostConnectionChange(previous, next);
+
   if (!hostChange) {
     return;
   }
@@ -131,7 +133,9 @@ export function upsertHost(
       .where(eq(hosts.id, id))
       .returning()
       .get()!;
+
     notifyHostMutation(db, notifier, existing, updated);
+
     return updated;
   } else {
     const row = db
@@ -158,7 +162,9 @@ export function upsertHost(
       })
       .returning()
       .get();
+
     notifier.notifyHost(id, ["host-connected"]);
+
     return row;
   }
 }
@@ -185,14 +191,15 @@ export function getHost(db: HostWriteConnection, id: string) {
   return prepareCachedQuery(db, prepareGetHost).get({ id }) ?? null;
 }
 
+const prepareGetNonDestroyedHost = (db: DbQueryConnection) =>
+  db
+    .select()
+    .from(hosts)
+    .where(and(eq(hosts.id, placeholder("id")), isNull(hosts.destroyedAt)))
+    .prepare();
+
 export function getNonDestroyedHost(db: DbConnection, id: string) {
-  return (
-    db
-      .select()
-      .from(hosts)
-      .where(and(eq(hosts.id, id), isNull(hosts.destroyedAt)))
-      .get() ?? null
-  );
+  return prepareCachedQuery(db, prepareGetNonDestroyedHost).get({ id }) ?? null;
 }
 
 export function getNonDestroyedHostByLaunchKey(
@@ -231,6 +238,7 @@ export function listPublicHosts(
 
 export function listHostsByIds(db: DbConnection, hostIds: readonly string[]) {
   if (hostIds.length === 0) return [];
+
   return db
     .select()
     .from(hosts)
@@ -260,6 +268,7 @@ export function updateHost(
   input: UpdateHostInput,
 ) {
   const existing = getHost(db, hostId);
+
   if (!existing) {
     return null;
   }
@@ -274,6 +283,9 @@ export function updateHost(
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.maxPermissionMode !== undefined
         ? { maxPermissionMode: input.maxPermissionMode }
+        : {}),
+      ...(input.availability !== undefined
+        ? { availability: input.availability }
         : {}),
       ...(input.lastRejectedProtocolVersion !== undefined
         ? { lastRejectedProtocolVersion: input.lastRejectedProtocolVersion }
@@ -316,5 +328,6 @@ export function updateHost(
 
   const updated = getHost(db, hostId);
   notifyHostMutation(db, notifier, existing, updated);
+
   return updated;
 }

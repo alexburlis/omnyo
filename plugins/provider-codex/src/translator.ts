@@ -6,7 +6,7 @@ import {
   extractResultText,
   type PreparedProviderCommandDispatch,
   type ProviderRuntimeEvent,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { z } from "zod";
 import {
   applyCodexRateLimitUpdate,
@@ -47,8 +47,11 @@ const codexTurnLifecyclePeekSchema = z
 const MAX_RESPONSE_HANDLED_TURNS_PER_THREAD = 256;
 
 const CODEX_SHELL_TOOL_NAMES = new Set(["exec_command", "Bash", "bash"]);
+
 const CODEX_DELEGATION_TOOL_NAMES = new Set(["spawnAgent", "resumeAgent"]);
+
 const TOOL_OUTPUT_MARKER_LINE = "Output:";
+
 const TOOL_OUTPUT_METADATA_PREFIXES = [
   "Chunk ID:",
   "Wall time:",
@@ -72,6 +75,7 @@ interface CodexUnparseableCommandOutput {
 type CodexCapturedCommandOutput =
   | CodexRecoveredCommandOutput
   | CodexEmptyCommandOutput;
+
 type CodexParsedCommandOutput =
   | CodexCapturedCommandOutput
   | CodexUnparseableCommandOutput;
@@ -110,6 +114,7 @@ function collectStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
+
   return value.filter(
     (entry): entry is string => typeof entry === "string" && entry.length > 0,
   );
@@ -124,18 +129,21 @@ function getCodexDelegationToolCall(
   ) {
     return null;
   }
+
   if (delta.item.type === "delegation") {
     return {
       callId: delta.key.providerItemId,
       receiverThreadIds: [delta.item.childRef],
     };
   }
+
   if (
     delta.item.type !== "tool" ||
     !CODEX_DELEGATION_TOOL_NAMES.has(delta.item.tool)
   ) {
     return null;
   }
+
   const args = codexDelegationArgsSchema.safeParse(delta.item.args);
 
   return {
@@ -211,15 +219,19 @@ function extractCodexProviderThreadId(
   event: ProviderRuntimeEvent,
 ): string | undefined {
   const envelope = codexBridgeEnvelopeSchema.safeParse(event);
+
   if (!envelope.success) {
     return undefined;
   }
+
   const params = codexProviderThreadIdParamsSchema.safeParse(
     envelope.data.params,
   );
+
   if (!params.success) {
     return undefined;
   }
+
   return params.data.threadId ?? params.data.thread?.id;
 }
 
@@ -228,13 +240,17 @@ function toCodexRawNotification(
   expectedMethod?: string,
 ): { method: string; params: unknown } | null {
   const rawMethod = typeof event.method === "string" ? event.method : undefined;
+
   if (expectedMethod && rawMethod !== expectedMethod) {
     return null;
   }
+
   const envelope = codexBridgeEnvelopeSchema.safeParse(event);
+
   if (!envelope.success) {
     return null;
   }
+
   return { method: envelope.data.method, params: envelope.data.params };
 }
 
@@ -252,12 +268,14 @@ function readCodexOutputLine(
   startIndex: number,
 ): ParsedCodexOutputLine {
   const nextNewlineIndex = text.indexOf("\n", startIndex);
+
   if (nextNewlineIndex === -1) {
     return {
       line: text.slice(startIndex),
       nextIndex: text.length,
     };
   }
+
   return {
     line: text.slice(startIndex, nextNewlineIndex),
     nextIndex: nextNewlineIndex + 1,
@@ -283,16 +301,21 @@ function findCodexOutputMarkerNextIndex(
   startIndex: number,
 ): number | null {
   let cursor = startIndex;
+
   while (cursor <= text.length) {
     const { line, nextIndex } = readCodexOutputLine(text, cursor);
+
     if (line === TOOL_OUTPUT_MARKER_LINE) {
       return nextIndex;
     }
+
     if (nextIndex >= text.length) {
       return null;
     }
+
     cursor = nextIndex;
   }
+
   return null;
 }
 
@@ -300,11 +323,13 @@ function extractRecoveredCommandOutput(
   rawToolOutput: unknown,
 ): CodexParsedCommandOutput {
   const text = normalizeCommandOutputNewlines(extractResultText(rawToolOutput));
+
   if (text.length === 0) {
     return { kind: "empty" };
   }
 
   const firstLine = readCodexOutputLine(text, 0);
+
   if (firstLine.line === TOOL_OUTPUT_MARKER_LINE) {
     return toCapturedCodexCommandOutput(text.slice(firstLine.nextIndex));
   }
@@ -315,22 +340,28 @@ function extractRecoveredCommandOutput(
 
   let cursor = firstLine.nextIndex;
   let metadataLineCount = 1;
+
   while (cursor <= text.length) {
     const { line, nextIndex } = readCodexOutputLine(text, cursor);
+
     if (line === TOOL_OUTPUT_MARKER_LINE) {
       return toCapturedCodexCommandOutput(text.slice(nextIndex));
     }
+
     if (!isCodexToolOutputMetadataLine(line)) {
       return findCodexOutputMarkerNextIndex(text, cursor) === null
         ? toCapturedCodexCommandOutput(text)
         : { kind: "unparseable" };
     }
+
     metadataLineCount += 1;
+
     if (nextIndex >= text.length) {
       return metadataLineCount === 1
         ? toCapturedCodexCommandOutput(text)
         : { kind: "unparseable" };
     }
+
     cursor = nextIndex;
   }
 
@@ -357,7 +388,7 @@ interface ActivateThreadGitWritableRootsArgs {
   threadId: string;
 }
 
-interface ClearGitWritableRootsByBbThreadIdArgs {
+interface ClearGitWritableRootsByOmnyoThreadIdArgs {
   threadId: string;
 }
 
@@ -371,6 +402,7 @@ interface PreparedWorkspaceWriteGitRoots {
 }
 
 interface PrepareWorkspaceWriteGitRootsArgs {
+  supportsAgentsEnabled: boolean;
   command: CodexSessionConstructionInput;
 }
 
@@ -383,44 +415,56 @@ export function createCodexEventTranslator(
 ) {
   const additionalWorkspaceWriteRoots = options.additionalWorkspaceWriteRoots;
   const eventTranslationState = createCodexEventTranslationState();
+
   const nativeTurnStartClientRequestIdsByProviderThreadId = new Map<
     string,
     ClientTurnRequestId[]
   >();
+
   const responseHandledTurnsByThreadId = new Map<
     string,
     Map<string, { started: boolean; completed: boolean }>
   >();
+
   const pendingWorkspaceWriteGitWritableRootsByThreadId = new Map<
     string,
     string[]
   >();
+
   const workspaceWriteGitWritableRootsByThreadId = new Map<string, string[]>();
-  const bbThreadIdByProviderThreadId = new Map<string, string>();
+  const omnyoThreadIdByProviderThreadId = new Map<string, string>();
+
   const rawCommandOutputStateByProviderThreadId = new Map<
     string,
     CodexRawCommandOutputState
   >();
+
   const delegationParentToolCallIdsByProviderThreadId = new Map<
     string,
     string
   >();
+
   const delegationParentToolCallIdsByTurnId = new Map<string, string>();
+
   const pendingDelegationTurnLinksByProviderThreadId = new Map<
     string,
     CodexPendingDelegationTurnLink[]
   >();
+
   const pendingDelegationCallIds = new Set<string>();
   const pendingDelegationProviderThreadIdByCallId = new Map<string, string>();
   const processedSubAgentInteractionIds = new Set<string>();
+
   const interactionKindsByProviderThreadId = new Map<
     string,
     Map<string, CodexInteractionKind>
   >();
+
   const unclassifiedInteractionsByProviderThreadId = new Map<
     string,
     CodexSubAgentActivityEvent[]
   >();
+
   const trackedSubAgentsByCallId = new Map<string, CodexTrackedSubAgent>();
   const trackedSubAgentCallIdsByAgentThreadId = new Map<string, string>();
 
@@ -438,24 +482,27 @@ export function createCodexEventTranslator(
     const writableRoots = pendingWorkspaceWriteGitWritableRootsByThreadId.get(
       args.threadId,
     );
+
     if (!writableRoots) {
       return;
     }
+
     pendingWorkspaceWriteGitWritableRootsByThreadId.delete(args.threadId);
     workspaceWriteGitWritableRootsByThreadId.set(args.threadId, [
       ...writableRoots,
     ]);
-    bbThreadIdByProviderThreadId.set(args.providerThreadId, args.threadId);
+    omnyoThreadIdByProviderThreadId.set(args.providerThreadId, args.threadId);
   }
 
-  function clearGitWritableRootsByBbThreadId(
-    args: ClearGitWritableRootsByBbThreadIdArgs,
+  function clearGitWritableRootsByOmnyoThreadId(
+    args: ClearGitWritableRootsByOmnyoThreadIdArgs,
   ): void {
     pendingWorkspaceWriteGitWritableRootsByThreadId.delete(args.threadId);
     workspaceWriteGitWritableRootsByThreadId.delete(args.threadId);
-    for (const [providerThreadId, threadId] of bbThreadIdByProviderThreadId) {
+
+    for (const [providerThreadId, threadId] of omnyoThreadIdByProviderThreadId) {
       if (threadId === args.threadId) {
-        bbThreadIdByProviderThreadId.delete(providerThreadId);
+        omnyoThreadIdByProviderThreadId.delete(providerThreadId);
       }
     }
   }
@@ -463,34 +510,41 @@ export function createCodexEventTranslator(
   function clearGitWritableRootsByProviderThreadId(
     args: ClearGitWritableRootsByProviderThreadIdArgs,
   ): void {
-    const threadId = bbThreadIdByProviderThreadId.get(args.providerThreadId);
-    bbThreadIdByProviderThreadId.delete(args.providerThreadId);
+    const threadId = omnyoThreadIdByProviderThreadId.get(args.providerThreadId);
+    omnyoThreadIdByProviderThreadId.delete(args.providerThreadId);
+
     if (!threadId) {
       return;
     }
-    clearGitWritableRootsByBbThreadId({ threadId });
+
+    clearGitWritableRootsByOmnyoThreadId({ threadId });
   }
 
   function prepareWorkspaceWriteGitRoots(
     args: PrepareWorkspaceWriteGitRootsArgs,
   ): PreparedWorkspaceWriteGitRoots {
     const command = args.command;
+
     const captureWorkspaceWriteGitRoots = shouldCaptureWorkspaceWriteGitRoots(
       command.options,
     );
+
     const writableRoots = captureWorkspaceWriteGitRoots
       ? gitWritableRootsForWorkspace(command.cwd)
       : [];
+
     if (captureWorkspaceWriteGitRoots) {
       stageThreadGitWritableRoots({
         threadId: command.threadId,
         writableRoots,
       });
     } else {
-      clearGitWritableRootsByBbThreadId({ threadId: command.threadId });
+      clearGitWritableRootsByOmnyoThreadId({ threadId: command.threadId });
     }
+
     return {
       config: buildCodexConfig({
+        supportsAgentsEnabled: args.supportsAgentsEnabled,
         additionalWorkspaceWriteRoots,
         gitWritableRoots: writableRoots,
         options: command.options,
@@ -509,6 +563,7 @@ export function createCodexEventTranslator(
   ): CodexRawCommandOutputState {
     const existingState =
       rawCommandOutputStateByProviderThreadId.get(providerThreadId);
+
     if (existingState) {
       return existingState;
     }
@@ -521,15 +576,19 @@ export function createCodexEventTranslator(
       pendingCloseDeltaByCallId: new Map<string, CommandCloseDelta>(),
       shellToolCallIds: new Set<string>(),
     };
+
     rawCommandOutputStateByProviderThreadId.set(providerThreadId, nextState);
+
     return nextState;
   }
 
   function pruneRawCommandOutputState(providerThreadId: string): void {
     const state = rawCommandOutputStateByProviderThreadId.get(providerThreadId);
+
     if (!state) {
       return;
     }
+
     if (
       state.capturedCommandOutputByCallId.size === 0 &&
       state.pendingCloseDeltaByCallId.size === 0 &&
@@ -541,18 +600,23 @@ export function createCodexEventTranslator(
 
   function clearClosedThreadState(event: ProviderRuntimeEvent): ThreadDelta[] {
     const rawEvent = toCodexRawNotification(event, "thread/closed");
+
     if (!rawEvent) {
       return [];
     }
+
     const paramsResult = codexThreadClosedParamsSchema.safeParse(
       rawEvent.params,
     );
+
     if (!paramsResult.success) {
       return [];
     }
+
     const closed = clearExitedChildThreadState({
       providerThreadId: paramsResult.data.threadId,
     });
+
     clearCodexEventTranslationThreadState(
       eventTranslationState,
       paramsResult.data.threadId,
@@ -560,6 +624,7 @@ export function createCodexEventTranslator(
     clearGitWritableRootsByProviderThreadId({
       providerThreadId: paramsResult.data.threadId,
     });
+
     return closed;
   }
 
@@ -570,6 +635,7 @@ export function createCodexEventTranslator(
   }): ThreadDelta[] {
     rawCommandOutputStateByProviderThreadId.delete(providerThreadId);
     responseHandledTurnsByThreadId.delete(providerThreadId);
+
     return clearCodexDelegationParentState(providerThreadId);
   }
 
@@ -581,6 +647,7 @@ export function createCodexEventTranslator(
     delegationParentToolCallIdsByProviderThreadId.delete(providerThreadId);
     pendingDelegationTurnLinksByProviderThreadId.delete(providerThreadId);
     const closes: ThreadDelta[] = [];
+
     for (const [callId, tracked] of trackedSubAgentsByCallId) {
       if (
         tracked.parentProviderThreadId !== providerThreadId &&
@@ -588,22 +655,26 @@ export function createCodexEventTranslator(
       ) {
         continue;
       }
-      if (isTrackedSubAgentOpen(tracked)) {
-        closes.push(
-          buildCodexSubAgentCloseDelta({ status: "failed", tracked }),
-        );
+
+      if (!isTrackedSubAgentOpen(tracked)) {
+        continue;
       }
+
+      closes.push(buildCodexSubAgentCloseDelta({ status: "failed", tracked }));
       tracked.terminal = true;
       tracked.pendingFollowups = 0;
       clearTrackedSubAgentLinks(tracked);
+
       if (
         trackedSubAgentCallIdsByAgentThreadId.get(tracked.agentThreadId) ===
         tracked.callId
       ) {
         trackedSubAgentCallIdsByAgentThreadId.delete(tracked.agentThreadId);
       }
+
       trackedSubAgentsByCallId.delete(callId);
     }
+
     return closes;
   }
 
@@ -617,6 +688,7 @@ export function createCodexEventTranslator(
     ) {
       return null;
     }
+
     const clientRequestId = args.clientRequestId;
     const providerThreadId = args.providerThreadId;
     nativeTurnStartClientRequestIdsByProviderThreadId.set(providerThreadId, [
@@ -638,13 +710,16 @@ export function createCodexEventTranslator(
           nativeTurnStartClientRequestIdsByProviderThreadId.get(
             providerThreadId,
           ) ?? [];
+
         if (!queued.includes(clientRequestId)) {
           return false;
         }
+
         removeNativeTurnStartClientRequestId({
           clientRequestId,
           providerThreadId,
         });
+
         return true;
       },
     };
@@ -657,21 +732,28 @@ export function createCodexEventTranslator(
     const sequences = nativeTurnStartClientRequestIdsByProviderThreadId.get(
       args.providerThreadId,
     );
+
     if (!sequences || sequences.length === 0) {
       return;
     }
+
     const nextSequences = [...sequences];
     const sequenceIndex = nextSequences.indexOf(args.clientRequestId);
+
     if (sequenceIndex === -1) {
       return;
     }
+
     nextSequences.splice(sequenceIndex, 1);
+
     if (nextSequences.length === 0) {
       nativeTurnStartClientRequestIdsByProviderThreadId.delete(
         args.providerThreadId,
       );
+
       return;
     }
+
     nativeTurnStartClientRequestIdsByProviderThreadId.set(
       args.providerThreadId,
       nextSequences,
@@ -685,35 +767,45 @@ export function createCodexEventTranslator(
     turnAlreadyOpen: boolean;
   }): ThreadDelta[] {
     const { providerThreadId, turn, clientRequestId, turnAlreadyOpen } = args;
+
     const queued =
       nativeTurnStartClientRequestIdsByProviderThreadId.get(providerThreadId);
+
     if (queued?.[0] !== clientRequestId) {
       return [];
     }
+
     if (turnAlreadyOpen) {
       removeNativeTurnStartClientRequestId({
         clientRequestId,
         providerThreadId,
       });
+
       return [
         { kind: "input.accepted", clientRequestId, providerTurnId: turn.id },
       ];
     }
+
     const startedDeltas = translateEvent({
       jsonrpc: "2.0",
       method: "turn/started",
       params: { threadId: providerThreadId, turn },
     });
+
     if (turn.status === "inProgress") {
       recordResponseHandledTurn(providerThreadId, turn.id, false);
+
       return startedDeltas;
     }
+
     const settledDeltas = translateEvent({
       jsonrpc: "2.0",
       method: "turn/completed",
       params: { threadId: providerThreadId, turn },
     });
+
     recordResponseHandledTurn(providerThreadId, turn.id, true);
+
     return [...startedDeltas, ...settledDeltas];
   }
 
@@ -725,13 +817,17 @@ export function createCodexEventTranslator(
     const turns =
       responseHandledTurnsByThreadId.get(providerThreadId) ??
       new Map<string, { started: boolean; completed: boolean }>();
+
     turns.set(turnId, { started: true, completed });
+
     if (turns.size > MAX_RESPONSE_HANDLED_TURNS_PER_THREAD) {
       const oldest = turns.keys().next().value;
+
       if (oldest !== undefined) {
         turns.delete(oldest);
       }
     }
+
     responseHandledTurnsByThreadId.set(providerThreadId, turns);
   }
 
@@ -744,25 +840,34 @@ export function createCodexEventTranslator(
         : event.method === "turn/completed"
           ? "completed"
           : null;
+
     if (boundary === null) {
       return false;
     }
+
     const parsed = codexTurnLifecyclePeekSchema.safeParse(event.params);
+
     if (!parsed.success) {
       return false;
     }
+
     const turns = responseHandledTurnsByThreadId.get(parsed.data.threadId);
     const turn = turns?.get(parsed.data.turn.id);
+
     if (!turn?.[boundary]) {
       return false;
     }
+
     turn[boundary] = false;
+
     if (!turn.started && !turn.completed) {
       turns?.delete(parsed.data.turn.id);
+
       if (turns?.size === 0) {
         responseHandledTurnsByThreadId.delete(parsed.data.threadId);
       }
     }
+
     return true;
   }
 
@@ -771,10 +876,13 @@ export function createCodexEventTranslator(
   ): ClientTurnRequestId | undefined {
     const sequences =
       nativeTurnStartClientRequestIdsByProviderThreadId.get(providerThreadId);
+
     if (!sequences || sequences.length === 0) {
       return undefined;
     }
+
     const [clientRequestId, ...remainingSequences] = sequences;
+
     if (remainingSequences.length === 0) {
       nativeTurnStartClientRequestIdsByProviderThreadId.delete(
         providerThreadId,
@@ -785,6 +893,7 @@ export function createCodexEventTranslator(
         remainingSequences,
       );
     }
+
     return clientRequestId;
   }
 
@@ -798,6 +907,7 @@ export function createCodexEventTranslator(
           providerThreadId,
         );
       }
+
       return [delta];
     }
 
@@ -808,9 +918,11 @@ export function createCodexEventTranslator(
     ) {
       const clientRequestId =
         shiftNativeTurnStartClientRequestId(providerThreadId);
+
       if (clientRequestId === undefined) {
         return [delta];
       }
+
       return [
         delta,
         {
@@ -832,6 +944,7 @@ export function createCodexEventTranslator(
     if (!args.providerThreadId || !args.parentTurnId) {
       return;
     }
+
     if (pendingDelegationCallIds.has(args.callId)) {
       return;
     }
@@ -839,6 +952,7 @@ export function createCodexEventTranslator(
     const pendingLinks =
       pendingDelegationTurnLinksByProviderThreadId.get(args.providerThreadId) ??
       [];
+
     pendingLinks.push({
       callId: args.callId,
       parentTurnId: args.parentTurnId,
@@ -856,20 +970,27 @@ export function createCodexEventTranslator(
 
   function removePendingDelegationCall(callId: string): void {
     pendingDelegationCallIds.delete(callId);
+
     const providerThreadId =
       pendingDelegationProviderThreadIdByCallId.get(callId);
+
     pendingDelegationProviderThreadIdByCallId.delete(callId);
+
     if (!providerThreadId) {
       return;
     }
+
     const pendingLinks =
       pendingDelegationTurnLinksByProviderThreadId.get(providerThreadId);
+
     if (!pendingLinks) {
       return;
     }
+
     const remainingLinks = pendingLinks.filter(
       (pendingLink) => pendingLink.callId !== callId,
     );
+
     if (remainingLinks.length === 0) {
       pendingDelegationTurnLinksByProviderThreadId.delete(providerThreadId);
     } else if (remainingLinks.length !== pendingLinks.length) {
@@ -889,6 +1010,7 @@ export function createCodexEventTranslator(
 
   function clearTrackedSubAgentLinks(tracked: CodexTrackedSubAgent): void {
     removePendingDelegationCall(tracked.callId);
+
     if (
       delegationParentToolCallIdsByProviderThreadId.get(
         tracked.agentThreadId,
@@ -898,6 +1020,7 @@ export function createCodexEventTranslator(
         tracked.agentThreadId,
       );
     }
+
     for (const [
       turnId,
       parentToolCallId,
@@ -915,6 +1038,7 @@ export function createCodexEventTranslator(
     if (!args.providerThreadId) {
       return undefined;
     }
+
     if (delegationParentToolCallIdsByTurnId.has(args.turnId)) {
       return delegationParentToolCallIdsByTurnId.get(args.turnId);
     }
@@ -922,25 +1046,31 @@ export function createCodexEventTranslator(
     const pendingLinks = pendingDelegationTurnLinksByProviderThreadId.get(
       args.providerThreadId,
     );
+
     if (!pendingLinks || pendingLinks.length === 0) {
       return undefined;
     }
 
     while (pendingLinks.length > 0) {
       const pendingLink = pendingLinks.shift();
+
       if (!pendingLink || pendingLink.parentTurnId === args.turnId) {
         continue;
       }
+
       if (pendingLinks.length === 0) {
         pendingDelegationTurnLinksByProviderThreadId.delete(
           args.providerThreadId,
         );
       }
+
       delegationParentToolCallIdsByTurnId.set(args.turnId, pendingLink.callId);
+
       return pendingLink.callId;
     }
 
     pendingDelegationTurnLinksByProviderThreadId.delete(args.providerThreadId);
+
     return undefined;
   }
 
@@ -949,6 +1079,7 @@ export function createCodexEventTranslator(
     providerThreadId: string | undefined,
   ): ThreadDelta {
     const turnId = getDeltaProviderTurnId(delta);
+
     let parentToolCallId =
       getDeltaParentRef(delta) ??
       (turnId ? delegationParentToolCallIdsByTurnId.get(turnId) : undefined);
@@ -959,9 +1090,19 @@ export function createCodexEventTranslator(
       delta.providerTurnId !== undefined
     ) {
       const startedTurnId = delta.providerTurnId;
-      const mappedFromProviderThread = providerThreadId
+
+      let mappedFromProviderThread = providerThreadId
         ? delegationParentToolCallIdsByProviderThreadId.get(providerThreadId)
         : undefined;
+
+      if (!mappedFromProviderThread && providerThreadId) {
+        const tracked = findTrackedSubAgentByAgentThreadId(providerThreadId);
+
+        if (tracked && tracked.parentProviderThreadId !== providerThreadId) {
+          mappedFromProviderThread = tracked.callId;
+        }
+      }
+
       if (mappedFromProviderThread) {
         parentToolCallId = mappedFromProviderThread;
         removePendingDelegationCall(mappedFromProviderThread);
@@ -1002,6 +1143,7 @@ export function createCodexEventTranslator(
     providerThreadId: string | undefined,
   ): void {
     const delegationToolCall = getCodexDelegationToolCall(delta);
+
     if (!delegationToolCall) {
       return;
     }
@@ -1018,6 +1160,7 @@ export function createCodexEventTranslator(
         });
         continue;
       }
+
       delegationParentToolCallIdsByProviderThreadId.set(
         receiverThreadId,
         delegationToolCall.callId,
@@ -1042,7 +1185,9 @@ export function createCodexEventTranslator(
         delta,
         providerThreadId,
       );
+
       observeCodexDelegationToolCall(parentLinkedDelta, providerThreadId);
+
       return parentLinkedDelta;
     });
   }
@@ -1051,15 +1196,21 @@ export function createCodexEventTranslator(
     agentThreadId: string,
   ): CodexTrackedSubAgent | undefined {
     const callId = trackedSubAgentCallIdsByAgentThreadId.get(agentThreadId);
+
     if (!callId) {
       return undefined;
     }
+
     return trackedSubAgentsByCallId.get(callId);
   }
 
   function beginCodexTrackedSubAgent(
     activity: CodexSubAgentActivityEvent,
   ): ThreadDelta[] {
+    const previous = findTrackedSubAgentByAgentThreadId(
+      activity.item.agentThreadId,
+    );
+
     const tracked: CodexTrackedSubAgent = {
       agentPath: activity.item.agentPath,
       agentThreadId: activity.item.agentThreadId,
@@ -1069,6 +1220,15 @@ export function createCodexEventTranslator(
       pendingFollowups: 0,
       terminal: false,
     };
+
+    if (previous) {
+      for (const [turnId, callId] of delegationParentToolCallIdsByTurnId) {
+        if (callId === previous.callId) {
+          delegationParentToolCallIdsByTurnId.set(turnId, tracked.callId);
+        }
+      }
+    }
+
     trackedSubAgentsByCallId.set(tracked.callId, tracked);
     trackedSubAgentCallIdsByAgentThreadId.set(
       tracked.agentThreadId,
@@ -1079,14 +1239,17 @@ export function createCodexEventTranslator(
       [buildCodexSubAgentOpenDelta(tracked)],
       activity.providerThreadId,
     );
+
     if (openDelta?.kind === "item.open") {
       tracked.parentToolCallId = openDelta.key.parentRef;
     }
+
     enqueuePendingDelegationTurnLink({
       callId: tracked.callId,
       parentTurnId: tracked.parentTurnId,
       providerThreadId: tracked.parentProviderThreadId,
     });
+
     return openDelta ? [openDelta] : [];
   }
 
@@ -1097,14 +1260,19 @@ export function createCodexEventTranslator(
     const interactionKinds = interactionKindsByProviderThreadId.get(
       args.providerThreadId,
     );
+
     const kind = interactionKinds?.get(args.callId);
+
     if (!kind || !interactionKinds) {
       return undefined;
     }
+
     interactionKinds.delete(args.callId);
+
     if (interactionKinds.size === 0) {
       interactionKindsByProviderThreadId.delete(args.providerThreadId);
     }
+
     return kind;
   }
 
@@ -1113,12 +1281,14 @@ export function createCodexEventTranslator(
       tracked.agentThreadId,
       tracked.callId,
     );
+
     if (tracked.agentThreadId !== tracked.parentProviderThreadId) {
       delegationParentToolCallIdsByProviderThreadId.set(
         tracked.agentThreadId,
         tracked.callId,
       );
     }
+
     enqueuePendingDelegationTurnLink({
       callId: tracked.callId,
       parentTurnId: tracked.parentTurnId,
@@ -1133,6 +1303,7 @@ export function createCodexEventTranslator(
       unclassifiedInteractionsByProviderThreadId.get(
         activity.providerThreadId,
       ) ?? [];
+
     pending.push(activity);
     unclassifiedInteractionsByProviderThreadId.set(
       activity.providerThreadId,
@@ -1146,9 +1317,11 @@ export function createCodexEventTranslator(
     startedTurnId?: string;
   }): CodexSubAgentActivityEvent | undefined {
     let interactionProviderThreadId = args.providerThreadId;
+
     let pending = unclassifiedInteractionsByProviderThreadId.get(
       interactionProviderThreadId,
     );
+
     if (!pending && args.callId === undefined) {
       for (const [
         candidateProviderThreadId,
@@ -1165,13 +1338,16 @@ export function createCodexEventTranslator(
         }
       }
     }
+
     if (!pending) {
       return undefined;
     }
+
     let index =
       args.callId !== undefined
         ? pending.findIndex((activity) => activity.item.id === args.callId)
         : -1;
+
     if (args.callId === undefined) {
       for (
         let candidateIndex = pending.length - 1;
@@ -1179,6 +1355,7 @@ export function createCodexEventTranslator(
         --candidateIndex
       ) {
         const activity = pending[candidateIndex];
+
         if (
           activity &&
           activity.turnId !== args.startedTurnId &&
@@ -1190,15 +1367,19 @@ export function createCodexEventTranslator(
         }
       }
     }
+
     if (index === -1) {
       return undefined;
     }
+
     const [activity] = pending.splice(index, 1);
+
     if (pending.length === 0) {
       unclassifiedInteractionsByProviderThreadId.delete(
         interactionProviderThreadId,
       );
     }
+
     return activity;
   }
 
@@ -1208,17 +1389,22 @@ export function createCodexEventTranslator(
     const tracked = findTrackedSubAgentByAgentThreadId(
       activity.item.agentThreadId,
     );
+
     if (!tracked) {
       return beginCodexTrackedSubAgent(activity);
     }
+
     if (!tracked.terminal) {
       return [];
     }
+
     if (!isTrackedSubAgentOpen(tracked)) {
       return beginCodexTrackedSubAgent(activity);
     }
+
     tracked.pendingFollowups += 1;
     rearmTrackedSubAgent(tracked);
+
     return [];
   }
 
@@ -1240,7 +1426,9 @@ export function createCodexEventTranslator(
     if (!providerThreadId) {
       return deltas;
     }
+
     const materialized: ThreadDelta[] = [];
+
     for (const delta of deltas) {
       if (
         delta.kind === "turn.open" &&
@@ -1255,23 +1443,28 @@ export function createCodexEventTranslator(
           providerThreadId,
           startedTurnId: delta.providerTurnId,
         });
+
         if (activity) {
           materialized.push(...materializeCodexFollowup(activity));
         }
       }
+
       materialized.push(
         ...attachCodexDelegationParentLinks([delta], providerThreadId),
       );
+
       if (
         delta.kind === "turn.boundary" &&
         delta.providerTurnId !== undefined
       ) {
         const pending =
           unclassifiedInteractionsByProviderThreadId.get(providerThreadId);
+
         if (pending) {
           const remaining = pending.filter(
             (activity) => activity.turnId !== delta.providerTurnId,
           );
+
           if (remaining.length === 0) {
             unclassifiedInteractionsByProviderThreadId.delete(providerThreadId);
           } else if (remaining.length !== pending.length) {
@@ -1283,6 +1476,7 @@ export function createCodexEventTranslator(
         }
       }
     }
+
     return materialized;
   }
 
@@ -1298,15 +1492,19 @@ export function createCodexEventTranslator(
     const alreadyTerminal = args.tracked.terminal;
     args.tracked.terminal = true;
     clearTrackedSubAgentLinks(args.tracked);
+
     if (alreadyTerminal && args.tracked.pendingFollowups > 0) {
       args.tracked.pendingFollowups -= 1;
     }
+
     if (args.tracked.pendingFollowups > 0) {
       rearmTrackedSubAgent(args.tracked);
     }
+
     if (!wasOpen || isTrackedSubAgentOpen(args.tracked)) {
       return null;
     }
+
     return buildCodexSubAgentCloseDelta(args);
   }
 
@@ -1314,6 +1512,7 @@ export function createCodexEventTranslator(
     event: ProviderRuntimeEvent,
   ): ThreadDelta[] | null {
     const activity = parseCodexSubAgentActivityEvent(event);
+
     if (!activity) {
       return null;
     }
@@ -1325,46 +1524,61 @@ export function createCodexEventTranslator(
         if (trackedSubAgentsByCallId.has(activity.item.id)) {
           return [];
         }
+
         return beginCodexTrackedSubAgent(activity);
       }
+
       case "interacted": {
         if (processedSubAgentInteractionIds.has(activity.item.id)) {
           return [];
         }
+
         processedSubAgentInteractionIds.add(activity.item.id);
+
         const interactionKind = consumeCodexInteractionKind({
           callId: activity.item.id,
           providerThreadId: activity.providerThreadId,
         });
+
         if (interactionKind === "message") {
           return [];
         }
+
         const tracked = findTrackedSubAgentByAgentThreadId(
           activity.item.agentThreadId,
         );
+
         if (tracked && !tracked.terminal) {
           return [];
         }
+
         if (interactionKind === "followup") {
           return materializeCodexFollowup(activity);
         }
+
         queueUnclassifiedCodexInteraction(activity);
+
         return [];
       }
+
       case "interrupted": {
         const callId = trackedSubAgentCallIdsByAgentThreadId.get(
           activity.item.agentThreadId,
         );
+
         const tracked = callId
           ? trackedSubAgentsByCallId.get(callId)
           : undefined;
+
         if (!tracked) {
           return [];
         }
+
         const completed = completeCodexTrackedSubAgent({
           tracked,
           status: "interrupted",
         });
+
         return completed ? [completed] : [];
       }
     }
@@ -1374,29 +1588,37 @@ export function createCodexEventTranslator(
     deltas: ThreadDelta[],
   ): ThreadDelta[] {
     const completedDeltas: ThreadDelta[] = [];
+
     for (const delta of deltas) {
       completedDeltas.push(delta);
+
       if (
         delta.kind !== "turn.boundary" ||
         delta.providerTurnId === undefined
       ) {
         continue;
       }
+
       const callId = delegationParentToolCallIdsByTurnId.get(
         delta.providerTurnId,
       );
+
       const tracked = callId ? trackedSubAgentsByCallId.get(callId) : undefined;
+
       if (!tracked) {
         continue;
       }
+
       const completed = completeCodexTrackedSubAgent({
         tracked,
         status: delta.status,
       });
+
       if (completed) {
         completedDeltas.push(completed);
       }
     }
+
     return completedDeltas;
   }
 
@@ -1404,6 +1626,7 @@ export function createCodexEventTranslator(
     event: ProviderRuntimeEvent,
   ): ThreadDelta[] | null {
     const rawEvent = toCodexRawNotification(event, "rawResponseItem/completed");
+
     if (!rawEvent) {
       return null;
     }
@@ -1411,6 +1634,7 @@ export function createCodexEventTranslator(
     const paramsResult = codexRawResponseItemCompletedParamsSchema.safeParse(
       rawEvent.params,
     );
+
     if (!paramsResult.success) {
       return [];
     }
@@ -1423,15 +1647,18 @@ export function createCodexEventTranslator(
           callId: item.call_id,
           providerThreadId,
         });
+
         if (pendingActivity) {
           return item.name === "followup_task"
             ? materializeCodexFollowup(pendingActivity)
             : [];
         }
+
         if (!processedSubAgentInteractionIds.has(item.call_id)) {
           const interactionKinds =
             interactionKindsByProviderThreadId.get(providerThreadId) ??
             new Map<string, CodexInteractionKind>();
+
           interactionKinds.set(
             item.call_id,
             item.name === "followup_task" ? "followup" : "message",
@@ -1441,29 +1668,37 @@ export function createCodexEventTranslator(
             interactionKinds,
           );
         }
+
         return [];
       }
+
       if (!CODEX_SHELL_TOOL_NAMES.has(item.name)) {
         return [];
       }
+
       getRawCommandOutputState(providerThreadId).shellToolCallIds.add(
         item.call_id,
       );
+
       return [];
     }
 
     if (item.type === "function_call_output") {
       const rawCommandOutputState =
         rawCommandOutputStateByProviderThreadId.get(providerThreadId);
+
       if (!rawCommandOutputState) {
         return [];
       }
+
       if (!rawCommandOutputState.shellToolCallIds.has(item.call_id)) {
         pruneRawCommandOutputState(providerThreadId);
+
         return [];
       }
 
       const recoveredOutput = extractRecoveredCommandOutput(item.output);
+
       if (recoveredOutput.kind !== "unparseable") {
         rawCommandOutputState.capturedCommandOutputByCallId.set(
           item.call_id,
@@ -1472,17 +1707,23 @@ export function createCodexEventTranslator(
       } else {
         rawCommandOutputState.shellToolCallIds.delete(item.call_id);
       }
+
       const pendingCloseDelta =
         rawCommandOutputState.pendingCloseDeltaByCallId.get(item.call_id);
+
       if (pendingCloseDelta) {
         rawCommandOutputState.pendingCloseDeltaByCallId.delete(item.call_id);
+
         const capturedOutput = consumeCapturedCommandOutput({
           commandExecutionId: item.call_id,
           providerThreadId,
         });
+
         return [repairCommandCloseDelta(pendingCloseDelta, capturedOutput)];
       }
+
       pruneRawCommandOutputState(providerThreadId);
+
       return [];
     }
 
@@ -1505,17 +1746,22 @@ export function createCodexEventTranslator(
     providerThreadId: string | undefined,
   ): ThreadDelta[] {
     const reconciledDeltas: ThreadDelta[] = [];
+
     for (const delta of deltas) {
       if (delta.kind === "turn.boundary" && providerThreadId !== undefined) {
         const state =
           rawCommandOutputStateByProviderThreadId.get(providerThreadId);
+
         if (state) {
           reconciledDeltas.push(...state.pendingCloseDeltaByCallId.values());
         }
+
         rawCommandOutputStateByProviderThreadId.delete(providerThreadId);
       }
+
       reconciledDeltas.push(delta);
     }
+
     return reconciledDeltas;
   }
 
@@ -1526,6 +1772,7 @@ export function createCodexEventTranslator(
     const rawCommandOutputState = rawCommandOutputStateByProviderThreadId.get(
       args.providerThreadId,
     );
+
     if (!rawCommandOutputState) {
       return undefined;
     }
@@ -1534,11 +1781,13 @@ export function createCodexEventTranslator(
       rawCommandOutputState.capturedCommandOutputByCallId.get(
         args.commandExecutionId,
       );
+
     rawCommandOutputState.shellToolCallIds.delete(args.commandExecutionId);
     rawCommandOutputState.capturedCommandOutputByCallId.delete(
       args.commandExecutionId,
     );
     pruneRawCommandOutputState(args.providerThreadId);
+
     return capturedOutput;
   }
 
@@ -1561,8 +1810,10 @@ export function createCodexEventTranslator(
       if (delta.item.aggregatedOutput === undefined) {
         return delta;
       }
+
       const { aggregatedOutput: _aggregatedOutput, ...shapeWithoutOutput } =
         delta.item;
+
       return { ...delta, item: shapeWithoutOutput };
     }
 
@@ -1581,6 +1832,7 @@ export function createCodexEventTranslator(
     providerThreadId: string | undefined,
   ): ThreadDelta[] {
     const repairedDeltas: ThreadDelta[] = [];
+
     for (const delta of deltas) {
       if (
         !isCommandCloseDelta(delta) ||
@@ -1592,22 +1844,28 @@ export function createCodexEventTranslator(
       }
 
       const callId = delta.key.providerItemId;
+
       const rawCommandOutputState =
         rawCommandOutputStateByProviderThreadId.get(providerThreadId);
+
       if (!rawCommandOutputState?.capturedCommandOutputByCallId.has(callId)) {
         if (rawCommandOutputState?.shellToolCallIds.has(callId)) {
           rawCommandOutputState.pendingCloseDeltaByCallId.set(callId, delta);
           continue;
         }
+
         repairedDeltas.push(delta);
         continue;
       }
+
       const capturedOutput = consumeCapturedCommandOutput({
         commandExecutionId: callId,
         providerThreadId,
       });
+
       repairedDeltas.push(repairCommandCloseDelta(delta, capturedOutput));
     }
+
     return repairedDeltas;
   }
 
@@ -1622,6 +1880,7 @@ export function createCodexEventTranslator(
     const preferredLimitId = eventTranslationState.latestRateLimitId;
     eventTranslationState.rateLimitsByLimitId.clear();
     const snapshots = response?.rateLimitsByLimitId ?? null;
+
     if (response === null) {
       applyCodexRateLimitUpdate(eventTranslationState, {
         limitId: preferredLimitId,
@@ -1636,7 +1895,9 @@ export function createCodexEventTranslator(
         });
       }
     }
+
     eventTranslationState.latestRateLimitId = preferredLimitId;
+
     return [
       {
         kind: "provider.rateLimits",
@@ -1652,17 +1913,22 @@ export function createCodexEventTranslator(
     if (consumeResponseHandledTurnLifecycle(event)) {
       return [];
     }
+
     const closedThreadDeltas = clearClosedThreadState(event);
+
     if (closedThreadDeltas.length > 0) {
       return closedThreadDeltas;
     }
+
     const rawResponseDeltas = consumeCodexRawResponseItem(event);
+
     if (rawResponseDeltas !== null) {
       return rawResponseDeltas;
     }
 
     const providerThreadId = extractCodexProviderThreadId(event);
     const subAgentActivityDeltas = translateCodexSubAgentActivity(event);
+
     if (subAgentActivityDeltas !== null) {
       return reconcileRawCommandOutputLifecycle(
         applyRecoveredCommandOutput(subAgentActivityDeltas, providerThreadId),
@@ -1674,11 +1940,14 @@ export function createCodexEventTranslator(
       translateCodexEventToDeltas(event, eventTranslationState),
       providerThreadId,
     );
+
     const translatedDeltas = parentLinkedDeltas.flatMap((delta) =>
       attachAcceptedInputCorrelation(delta, providerThreadId),
     );
+
     const completedSubAgentDeltas =
       completeFinishedCodexSubAgentTurns(translatedDeltas);
+
     return reconcileRawCommandOutputLifecycle(
       applyRecoveredCommandOutput(completedSubAgentDeltas, providerThreadId),
       providerThreadId,
@@ -1689,6 +1958,12 @@ export function createCodexEventTranslator(
     setCodexInjectedTools(eventTranslationState, tools);
   }
 
+  function isSubAgentOpen(agentThreadId: string): boolean {
+    const tracked = findTrackedSubAgentByAgentThreadId(agentThreadId);
+
+    return tracked !== undefined && isTrackedSubAgentOpen(tracked);
+  }
+
   return {
     activateThreadGitWritableRoots,
     recoverRateLimits,
@@ -1696,6 +1971,7 @@ export function createCodexEventTranslator(
     clearExitedChildThreadState,
     configureInjectedTools,
     getThreadGitWritableRoots,
+    isSubAgentOpen,
     openTurnFromStartResponse,
     prepareTurnStart: queueNativeTurnStartClientRequestId,
     prepareWorkspaceWriteGitRoots,
@@ -1724,15 +2000,19 @@ function parseCodexSubAgentActivityEvent(
   event: ProviderRuntimeEvent,
 ): CodexSubAgentActivityEvent | null {
   const envelope = codexBridgeEnvelopeSchema.safeParse(event);
+
   if (!envelope.success || envelope.data.method !== "item/completed") {
     return null;
   }
 
   const params = envelope.data.params;
+
   if (!params) {
     return null;
   }
+
   const item = codexSubAgentActivityItemSchema.safeParse(params.item);
+
   if (
     !item.success ||
     typeof params.threadId !== "string" ||

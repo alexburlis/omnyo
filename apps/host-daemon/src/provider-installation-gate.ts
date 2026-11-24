@@ -1,9 +1,9 @@
-import { bridgeLaunchProcessKey } from "@bb/agent-runtime";
-import type { HostDaemonBridgeLaunch } from "@bb/host-daemon-contract";
+import { bridgeLaunchProcessKey } from "@omnyo/agent-runtime";
+import type { HostDaemonBridgeLaunch } from "@omnyo/host-daemon-contract";
 import type {
   ProviderInstallationRequirement,
   ProviderInstallationStatus,
-} from "@bb/provider-bridge-protocol";
+} from "@omnyo/provider-bridge-protocol";
 
 export const PROVIDER_INSTALLATION_GATE_TTL_MS = 5 * 60_000;
 
@@ -50,16 +50,20 @@ export function createProviderInstallationGate({
     probe: () => Promise<ProviderInstallationStatus>,
   ): Promise<ProviderInstallationStatus> {
     const pending = pendingByKey.get(key);
+
     if (pending !== undefined) {
       return pending;
     }
+
     const startedGeneration = generation;
+
     const started = probe()
       .then(
         (status) => {
           if (startedGeneration !== generation) {
             return probeInstallation(key, probe);
           }
+
           if (
             (status.installed || status.minimumSupportedVersion === null) &&
             !status.versionUnsupported
@@ -68,12 +72,14 @@ export function createProviderInstallationGate({
           } else {
             settledByKey.delete(key);
           }
+
           return status;
         },
         (error: unknown) => {
           if (startedGeneration !== generation) {
             return probeInstallation(key, probe);
           }
+
           settledByKey.delete(key);
           throw error;
         },
@@ -83,18 +89,23 @@ export function createProviderInstallationGate({
           pendingByKey.delete(key);
         }
       });
+
     pendingByKey.set(key, started);
+
     return started;
   }
 
   const run: ProviderInstallationGate["run"] = (key, probe) => {
     const settled = settledByKey.get(key);
+
     if (settled === undefined) {
       return probeInstallation(key, probe);
     }
+
     if (settled.expiresAt <= now()) {
       probeInstallation(key, probe).catch(() => {});
     }
+
     return Promise.resolve(settled.status);
   };
 

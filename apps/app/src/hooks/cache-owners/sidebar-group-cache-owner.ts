@@ -1,9 +1,9 @@
-import type { Host, ThreadListEntry, ThreadWithRuntime } from "@bb/domain";
+import type { Host, ThreadListEntry, ThreadWithRuntime } from "@omnyo/domain";
 import type {
   ProjectResponse,
   SidebarBootstrapResponse,
   ThreadSectionResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { QueryClient } from "@tanstack/react-query";
 import {
   allThreadQueryKeyPrefix,
@@ -31,6 +31,7 @@ function entryMutation<T extends { id: string; name: string }>(
 ) {
   const index = previous?.findIndex((entry) => entry.id === id) ?? -1;
   const original = previous?.[index];
+
   return {
     apply: (entries: T[] | undefined) =>
       name === null
@@ -40,15 +41,18 @@ function entryMutation<T extends { id: string; name: string }>(
           ),
     rollback: (entries: T[] | undefined): T[] | undefined => {
       if (!entries || !original) return entries;
+
       if (name !== null)
         return entries.map((entry) =>
           entry.id === id && entry.name === name
             ? { ...entry, name: original.name }
             : entry,
         );
+
       if (entries.some((entry) => entry.id === id)) return entries;
       const restored = [...entries];
       restored.splice(Math.min(index, restored.length), 0, original);
+
       return restored;
     },
   };
@@ -62,6 +66,7 @@ export async function beginSidebarGroupTransaction({
   mutation: GroupMutation;
 }): Promise<{ rollback: () => void; settle: () => void }> {
   const { kind, id, name } = mutation;
+
   const keys =
     kind === "host"
       ? [hostsQueryKey(), hostQueryKey(id)]
@@ -72,33 +77,42 @@ export async function beginSidebarGroupTransaction({
             ? [threadsQueryKey(), allThreadQueryKeyPrefix()]
             : []),
         ];
+
   await Promise.all(
     keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
   );
   const sidebarKey = sidebarNavigationQueryKey();
+
   const sidebar =
     queryClient.getQueryData<SidebarBootstrapResponse>(sidebarKey);
+
   const projects = entryMutation(
     queryClient.getQueryData<ProjectResponse[]>(projectsQueryKey()),
     id,
     name,
   );
+
   const sidebarProjects = entryMutation(sidebar?.projects, id, name);
   const sections = entryMutation(sidebar?.sections, id, name);
+
   const hostLists = queryClient
     .getQueriesData<Host[]>({ queryKey: hostsQueryKey() })
     .map(([queryKey, hosts]) => ({
       queryKey,
       mutation: entryMutation(hosts, id, name),
     }));
+
   const previousHost = queryClient.getQueryData<Host>(hostQueryKey(id));
+
   const previousLists =
     name === null
       ? getCachedThreadLists(queryClient, {
           queryKey: threadsQueryKey(),
         })
       : [];
+
   const affectedThreads = new Map<string, ThreadListEntry>();
+
   if (name === null) {
     for (const thread of [
       ...previousLists.flatMap(({ data }) => [
@@ -113,6 +127,7 @@ export async function beginSidebarGroupTransaction({
         affectedThreads.set(thread.id, thread);
     }
   }
+
   const previousDetails =
     kind === "section" && name === null
       ? queryClient
@@ -121,8 +136,10 @@ export async function beginSidebarGroupTransaction({
           })
           .filter(([, thread]) => thread?.sectionId === id)
       : [];
+
   const updateGroup = (rollback: boolean) => {
     const operation = rollback ? "rollback" : "apply";
+
     if (kind === "host") {
       for (const list of hostLists)
         queryClient.setQueryData<Host[]>(
@@ -131,13 +148,17 @@ export async function beginSidebarGroupTransaction({
         );
       queryClient.setQueryData<Host>(hostQueryKey(id), (host) => {
         if (!host) return host;
+
         if (!rollback) return { ...host, name };
+
         return previousHost && host.name === name
           ? { ...host, name: previousHost.name }
           : host;
       });
+
       return;
     }
+
     if (kind === "project")
       queryClient.setQueryData<ProjectResponse[]>(
         projectsQueryKey(),
@@ -161,7 +182,9 @@ export async function beginSidebarGroupTransaction({
         : current,
     );
   };
+
   updateGroup(false);
+
   if (name === null) {
     applyToCachedThreadListsAndSidebarNavigation(queryClient, (list) =>
       kind === "project"
@@ -170,15 +193,19 @@ export async function beginSidebarGroupTransaction({
             thread.sectionId === id ? { ...thread, sectionId: null } : thread,
           ),
     );
+
     for (const [queryKey] of previousDetails)
       queryClient.setQueryData<ThreadWithRuntime>(queryKey, (thread) =>
         thread ? { ...thread, sectionId: null } : thread,
       );
   }
+
   return {
     rollback: () => {
       updateGroup(true);
+
       if (name !== null) return;
+
       if (kind === "project")
         restoreCachedThreadLists(
           queryClient,
@@ -193,6 +220,7 @@ export async function beginSidebarGroupTransaction({
               : thread,
           ),
         );
+
         for (const [queryKey] of previousDetails)
           queryClient.setQueryData<ThreadWithRuntime>(queryKey, (thread) =>
             thread?.sectionId === null ? { ...thread, sectionId: id } : thread,

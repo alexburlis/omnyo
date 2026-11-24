@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
-import type { PluginInstallJob } from "@bb/server-contract";
+import type { PluginInstallJob } from "@omnyo/server-contract";
 import { pluginInstallJobsQueryKey } from "@/hooks/queries/query-keys";
 import { AddPluginDialog } from "./AddPluginDialog";
 
@@ -13,11 +13,12 @@ interface RecordedRequest {
 }
 
 function installPlanFor(url: string): unknown {
-  const params = new URL(url, "https://bb.test").searchParams;
+  const params = new URL(url, "https://omnyo.test").searchParams;
   const entryId = params.get("entryId") ?? "";
-  const marketplace = params.get("marketplace") ?? "bb-community";
-  const official =
-    marketplace === "bb-community" || marketplace === "bb-official";
+  const marketplace = params.get("marketplace") ?? "acme-plugins";
+
+  const official = marketplace === "omnyo-official";
+
   return {
     kind: "marketplace",
     entryId,
@@ -25,17 +26,13 @@ function installPlanFor(url: string): unknown {
     displayName: entryId,
     marketplace,
     marketplaceDisplayName:
-      marketplace === "bb-official"
-        ? "BB Official"
-        : marketplace === "bb-community"
-          ? "BB Community"
-          : "Acme Plugins",
+      marketplace === "omnyo-official"
+        ? "Omnyo Official"
+        : "Acme Plugins",
     publisherLabel:
-      marketplace === "bb-official"
-        ? "BB Official"
-        : marketplace === "bb-community"
-          ? "BB Community"
-          : "Acme Plugins",
+      marketplace === "omnyo-official"
+        ? "Omnyo Official"
+        : "Acme Plugins",
     official,
     author: { name: "Acme", url: "https://github.com/acme" },
     source: "git:https://github.com/acme/plugins.git@semver:^1.0.0",
@@ -60,7 +57,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const STARTED_JOB: PluginInstallJob = {
   id: "job-1",
-  target: { kind: "catalog", entryId: "linear", marketplace: "bb-official" },
+  target: { kind: "catalog", entryId: "linear", marketplace: "omnyo-official" },
   displayName: "Linear",
   state: "queued",
 };
@@ -82,18 +79,22 @@ function stubFetch(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
       requests.push({ url, init });
+
       if (
         url === "/api/v1/plugins/install" ||
         url === "/api/v1/plugin-catalog/install"
       ) {
         return jsonResponse(installBody, installStatus);
       }
+
       if (url.startsWith("/api/v1/plugin-catalog/install-plan")) {
         return jsonResponse({ plan: installPlanFor(url) });
       }
+
       return jsonResponse({ error: "not found" }, 404);
     }),
   );
+
   return requests;
 }
 
@@ -101,6 +102,7 @@ function renderDialog(
   initial?: Parameters<typeof AddPluginDialog>[0]["initial"],
 ) {
   const { wrapper } = createQueryClientTestHarness();
+
   return render(
     <AddPluginDialog open onOpenChange={() => {}} initial={initial} />,
     { wrapper },
@@ -117,10 +119,12 @@ describe("AddPluginDialog", () => {
         vi.fn(async (url: string) => {
           if (url.startsWith("/api/v1/plugin-catalog/install-plan")) {
             attempts += 1;
+
             return attempts === 1
               ? jsonResponse({ error: "Source unavailable" }, status)
               : jsonResponse({ plan: installPlanFor(url) });
           }
+
           return jsonResponse({ error: "Not found" }, 404);
         }),
       );
@@ -136,10 +140,13 @@ describe("AddPluginDialog", () => {
         source: "git:https://github.com/acme/plugins.git",
       });
       await screen.findByRole("alert");
+
       const install = screen.getByRole("button", {
         name: "Install Acme Notes",
       }) as HTMLButtonElement;
+
       expect(install.disabled).toBe(true);
+
       if (status === 503) {
         fireEvent.click(screen.getByRole("button", { name: "Retry" }));
         await vi.waitFor(() => expect(install.disabled).toBe(false));
@@ -156,10 +163,12 @@ describe("AddPluginDialog", () => {
   it("leads with and submits a pasted GitHub repository URL", async () => {
     const requests = stubFetch();
     renderDialog();
-    const source = "https://github.com/acme/bb-plugin-usage";
+    const source = "https://github.com/acme/omnyo-plugin-usage";
     const input = screen.getByLabelText("Plugin source") as HTMLInputElement;
 
-    expect(input.placeholder).toBe("https://github.com/owner/bb-plugin-name");
+    expect(input.placeholder).toBe(
+      "https://github.com/owner/omnyo-plugin-name",
+    );
     expect(screen.getByText(/GitHub repository URL/)).toBeTruthy();
     fireEvent.change(input, { target: { value: source } });
     fireEvent.click(screen.getByRole("button", { name: /install plugin/i }));
@@ -168,6 +177,7 @@ describe("AddPluginDialog", () => {
       const post = requests.find(
         (request) => request.url === "/api/v1/plugins/install",
       );
+
       expect(JSON.parse(String(post?.init?.body))).toEqual({
         source,
       });
@@ -179,9 +189,11 @@ describe("AddPluginDialog", () => {
     renderDialog();
 
     expect(screen.getByTestId("full-trust-warning")).toBeTruthy();
+
     const install = screen.getByRole("button", {
       name: /install plugin/i,
     }) as HTMLButtonElement;
+
     expect(install.disabled).toBe(true);
 
     fireEvent.change(screen.getByLabelText("Plugin source"), {
@@ -194,6 +206,7 @@ describe("AddPluginDialog", () => {
       const post = requests.find(
         (request) => request.url === "/api/v1/plugins/install",
       );
+
       expect(post).toBeDefined();
       expect(JSON.parse(String(post?.init?.body))).toEqual({
         source: "./plugins/linear",
@@ -231,57 +244,41 @@ describe("AddPluginDialog", () => {
 
   it("describes each catalog source kind truthfully", () => {
     stubFetch();
+
     const { unmount } = renderDialog({
       entryId: "linear",
       pluginId: "linear",
-      marketplace: "bb-official",
-      publisherLabel: "BB Official",
+      marketplace: "omnyo-official",
+      publisherLabel: "Omnyo Official",
       displayName: "Linear",
       icon: "Github",
       iconUrl: null,
       iconTinted: false,
       source: "builtin:linear",
     });
+
     expect(
-      screen.getByText("Install this plugin, bundled with BB."),
+      screen.getByText("Install this plugin, bundled with Omnyo."),
     ).not.toBeNull();
     unmount();
-
-    const git = renderDialog({
-      entryId: "thread-hover-cards",
-      pluginId: "thread-hover-cards",
-      marketplace: "bb-community",
-      publisherLabel: "BB Community",
-      displayName: "Thread Hover Cards",
-      icon: "Github",
-      iconUrl: null,
-      iconTinted: false,
-      source: "git:https://github.com/brsbl/bb-plugins@b173b67",
-    });
-    expect(
-      screen.getByText(
-        "Install this BB Community plugin from its listed source repository.",
-      ),
-    ).not.toBeNull();
-    expect(screen.queryByText(/bundled with BB/)).toBeNull();
-    git.unmount();
 
     renderDialog({
       entryId: "widgets",
       pluginId: "widgets",
-      marketplace: "bb-community",
-      publisherLabel: "BB Community",
+      marketplace: "acme-plugins",
+      publisherLabel: "Acme Plugins",
       displayName: "Widgets",
       icon: "Zap",
       iconUrl: null,
       iconTinted: false,
-      source: "npm:bb-plugin-widgets@^1.0.0",
+      source: "npm:omnyo-plugin-widgets@^1.0.0",
     });
     expect(
       screen.getByText(
-        "Install this BB Community plugin from its listed npm package.",
+        "Install this plugin from the source its marketplace lists.",
       ),
     ).not.toBeNull();
+    expect(screen.queryByText(/bundled with Omnyo/)).toBeNull();
   });
 
   it("shows the exact source, including a pinned npm registry", () => {
@@ -293,14 +290,15 @@ describe("AddPluginDialog", () => {
       icon: "Zap",
       iconUrl: null,
       iconTinted: false,
-      marketplace: "bb-community",
-      publisherLabel: "BB Community",
-      source: "npm:bb-plugin-widgets@^1.0.0 (registry https://npm.acme.test)",
+      marketplace: "acme-plugins",
+      publisherLabel: "Acme Plugins",
+      source:
+        "npm:omnyo-plugin-widgets@^1.0.0 (registry https://npm.acme.test)",
     });
 
     expect(
       screen.getByText(
-        "npm:bb-plugin-widgets@^1.0.0 (registry https://npm.acme.test)",
+        "npm:omnyo-plugin-widgets@^1.0.0 (registry https://npm.acme.test)",
       ),
     ).not.toBeNull();
   });
@@ -310,8 +308,8 @@ describe("AddPluginDialog", () => {
     renderDialog({
       entryId: "linear",
       pluginId: "linear",
-      marketplace: "bb-official",
-      publisherLabel: "BB Official",
+      marketplace: "omnyo-official",
+      publisherLabel: "Omnyo Official",
       displayName: "Linear",
       icon: "Github",
       iconUrl: null,
@@ -328,28 +326,31 @@ describe("AddPluginDialog", () => {
       const post = requests.find(
         (request) => request.url === "/api/v1/plugin-catalog/install",
       );
+
       expect(post).toBeDefined();
       expect(JSON.parse(String(post?.init?.body))).toEqual({
         entryId: "linear",
-        marketplace: "bb-official",
+        marketplace: "omnyo-official",
       });
     });
   });
 
   it("shows the cached marketplace icon in the confirmation", () => {
     stubFetch();
+
     const iconUrl =
-      "/api/v1/plugin-catalog/icons/bb-community/widgets?h=icon-hash";
+      "/api/v1/plugin-catalog/icons/acme-plugins/widgets?h=icon-hash";
+
     renderDialog({
       entryId: "widgets",
       pluginId: "widgets",
-      marketplace: "bb-community",
-      publisherLabel: "BB Community",
+      marketplace: "acme-plugins",
+      publisherLabel: "Acme Plugins",
       displayName: "Widgets",
       icon: null,
       iconUrl,
       iconTinted: false,
-      source: "npm:bb-plugin-widgets@1.0.0",
+      source: "npm:omnyo-plugin-widgets@1.0.0",
     });
 
     expect(document.querySelector(`img[src="${iconUrl}"]`)).not.toBeNull();
@@ -366,8 +367,8 @@ describe("AddPluginDialog", () => {
         initial={{
           entryId: "linear",
           pluginId: "linear",
-          marketplace: "bb-official",
-          publisherLabel: "BB Official",
+          marketplace: "omnyo-official",
+          publisherLabel: "Omnyo Official",
           displayName: "Linear",
           icon: null,
           iconUrl: null,
@@ -426,6 +427,7 @@ describe("AddPluginDialog", () => {
       const post = requests.find(
         (request) => request.url === "/api/v1/plugin-catalog/install",
       );
+
       expect(JSON.parse(String(post?.init?.body))).toEqual({
         entryId: "notes",
         marketplace: "acme-plugins",
@@ -445,8 +447,8 @@ describe("AddPluginDialog", () => {
     renderDialog({
       entryId: "linear",
       pluginId: "linear",
-      marketplace: "bb-official",
-      publisherLabel: "BB Official",
+      marketplace: "omnyo-official",
+      publisherLabel: "Omnyo Official",
       displayName: "Linear",
       icon: "Github",
       iconUrl: null,

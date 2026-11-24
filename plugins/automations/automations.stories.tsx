@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import {
   AgentAutomationDefinition,
+  AutomationDetailView,
   AutomationLifecycleControl,
   AutomationScriptContent,
   ScriptAutomationDefinition,
@@ -8,6 +9,7 @@ import {
 } from "./detail-view";
 import { AUTOMATION_CREATE_TEMPLATES, OverviewRow } from "./overview-view";
 import type {
+  AutomationDetailResponse,
   AutomationResponse,
   AgentEnvironment,
   AutomationRunResponse,
@@ -65,6 +67,7 @@ function StoryRow({
 }
 
 const noop = () => {};
+
 const now = new Date(2027, 0, 15, 9).getTime();
 
 function automation(
@@ -112,27 +115,27 @@ const OVERVIEW_ENTRIES: AutomationsOverviewResponse["automations"] = [
   },
   {
     automation: automation("release", "Release readiness", {
-      projectId: "proj_bb",
+      projectId: "proj_omnyo",
       lastRunStatus: "running",
       nextRunAt: now + 3_600_000,
     }),
-    project: { id: "proj_bb", name: "bb" },
+    project: { id: "proj_omnyo", name: "omnyo" },
   },
   {
     automation: automation("pending-reminder", "A pending launch reminder", {
-      projectId: "proj_bb",
+      projectId: "proj_omnyo",
       trigger: { triggerType: "once", runAt: now + 86_400_000 },
       nextRunAt: now + 86_400_000,
     }),
-    project: { id: "proj_bb", name: "bb" },
+    project: { id: "proj_omnyo", name: "omnyo" },
   },
   {
     automation: automation("dependencies", "Dependency drift", {
-      projectId: "proj_bb",
+      projectId: "proj_omnyo",
       enabled: false,
       nextRunAt: null,
     }),
-    project: { id: "proj_bb", name: "bb" },
+    project: { id: "proj_omnyo", name: "omnyo" },
   },
   {
     automation: automation("one-shot", "Prepare launch notes", {
@@ -150,6 +153,16 @@ const OVERVIEW_ENTRIES: AutomationsOverviewResponse["automations"] = [
       projectId: "proj_moss",
       lastRunStatus: "failed",
       lastError: "Host was offline",
+    }),
+    project: { id: "proj_moss", name: "Moss" },
+  },
+  {
+    automation: automation("triage-sweep", "Triage sweep", {
+      projectId: "proj_moss",
+      enabled: false,
+      nextRunAt: null,
+      lastRunStatus: "failed",
+      lastError: "Target thread thr_story_target was archived",
     }),
     project: { id: "proj_moss", name: "Moss" },
   },
@@ -178,7 +191,7 @@ const DETAIL_AUTOMATION = automation("nightly-digest", "Nightly digest", {
 
 const PROJECT_AUTOMATION: AutomationResponse = {
   ...DETAIL_AUTOMATION,
-  projectId: "proj_bb",
+  projectId: "proj_omnyo",
   lastRunAt: now,
   runCount: 3,
   lastRunStatus: "running",
@@ -194,7 +207,7 @@ const PROJECT_AUTOMATION: AutomationResponse = {
 
       workspace: {
         type: "unmanaged",
-        path: "/Users/you/Code/bb",
+        path: "/Users/you/Code/omnyo",
         branch: { kind: "existing", name: "agent/tools-hub-schedules" },
       },
     },
@@ -223,13 +236,13 @@ mkdir -p "$output_dir"
 for repository in api app docs integrations; do
   echo "Collecting $repository activity for $report_date"
   gh pr list \\
-    --repo "bb/$repository" \\
+    --repo "omnyo/$repository" \\
     --state all \\
     --json number,title,state,updatedAt \\
     > "$output_dir/$repository-$report_date.json"
 
   gh issue list \\
-    --repo "bb/$repository" \\
+    --repo "omnyo/$repository" \\
     --state all \\
     --json number,title,state,updatedAt \\
     > "$output_dir/$repository-issues-$report_date.json"
@@ -244,7 +257,7 @@ echo "Reports written to $output_dir"`,
     interpreter: "bash",
     timeoutMs: 60_000,
     env: {
-      REPORT_OUTPUT: "/tmp/bb-reports",
+      REPORT_OUTPUT: "/tmp/omnyo-reports",
       GH_HOST: "github.com",
     },
   },
@@ -256,8 +269,10 @@ function runsFor(
 ): AutomationRunResponse[] {
   const script = value.execution.mode === "script";
   const latestStartedAt = value.lastRunAt ?? now;
+
   return statuses.map((status, index) => {
     const startedAt = latestStartedAt - index * 3_600_000;
+
     return {
       id: `${value.id}_run_${index}`,
       automationId: value.id,
@@ -301,7 +316,9 @@ function PromptVariant({
 }) {
   const [execution, setExecution] = useState(value.execution);
   const [editing, setEditing] = useState(editable);
+
   if (execution.mode !== "agent") return null;
+
   return (
     <div className="w-full max-w-2xl">
       <AgentAutomationDefinition
@@ -310,7 +327,7 @@ function PromptVariant({
         personalProject={value.projectId === "proj_personal"}
         projectContextLabel={
           projectLabel ??
-          (value.projectId === "proj_personal" ? "Personal" : "bb")
+          (value.projectId === "proj_personal" ? "Personal" : "omnyo")
         }
         pending={false}
         onCancel={() => setEditing(false)}
@@ -351,9 +368,14 @@ export function OverviewRows() {
     },
     "stale-worktrees": {
       label: "Last run failed",
-      hint: "The latest run failed, but the recurring schedule remains enabled. Shows the failure indicator.",
+      hint: "The latest run failed, but the recurring schedule remains enabled. Shows the failure indicator and its reason.",
+    },
+    "triage-sweep": {
+      label: "Paused by a failure",
+      hint: "Omnyo paused the automation because its target thread was archived. The row ends with that reason.",
     },
   };
+
   return (
     <StoryCard>
       {OVERVIEW_ENTRIES.map(({ automation: value, project }) => (
@@ -465,6 +487,7 @@ export function OverviewStates() {
       message: 'No automations match "release" with these filters.',
     },
   ] as const;
+
   return (
     <StoryCard>
       {states.map(({ label, hint, state, message }) => (
@@ -487,7 +510,9 @@ function environmentVariant(
   targetThreadId?: string,
 ): AutomationResponse {
   const value = PROJECT_AUTOMATION;
+
   if (value.execution.mode !== "agent") return value;
+
   return {
     ...value,
     execution: {
@@ -619,7 +644,7 @@ export function DetailStates() {
             execution={{
               mode: "script",
               workingDirectory: { type: "project" },
-              resolvedWorkingDirectory: "/srv/projects/bb",
+              resolvedWorkingDirectory: "/srv/projects/omnyo",
               script: 'echo "Preparing report"',
               interpreter: "bash",
               timeoutMs: 60000,
@@ -660,6 +685,100 @@ export function RunStates() {
           ),
         ),
       )}
+    </StoryCard>
+  );
+}
+
+const FAILED_AUTOMATION: AutomationDetailResponse = {
+  ...automation("triage-sweep", "Triage sweep", {
+    projectId: "proj_omnyo",
+    enabled: false,
+    nextRunAt: null,
+    lastRunAt: now,
+    runCount: 2,
+    lastRunStatus: "failed",
+    lastError: "Target thread thr_story_target was archived",
+  }),
+  execution: {
+    mode: "agent",
+    prompt: "Run one pass of the Linear triage sweep.",
+    providerId: "claude-code",
+    model: "claude-fable-5",
+    reasoningLevel: "high",
+    permissionMode: "full",
+    environment: { type: "project-default" },
+    targetThreadId: "thr_story_target",
+  },
+};
+
+function failedAutomationRuns(): AutomationRunResponse[] {
+  const run = {
+    automationId: FAILED_AUTOMATION.id,
+    runMode: "agent",
+    trigger: "schedule",
+    skipReason: null,
+    output: null,
+    exitCode: null,
+  } as const;
+
+  const previous = now - 12 * 3_600_000;
+
+  return [
+    {
+      ...run,
+      id: "triage_run_failed",
+      threadId: null,
+      status: "failed",
+      error: FAILED_AUTOMATION.lastError,
+      scheduledFor: now,
+      startedAt: now,
+      finishedAt: now + 34,
+    },
+    {
+      ...run,
+      id: "triage_run_succeeded",
+      threadId: "thr_story_target",
+      status: "succeeded",
+      error: null,
+      scheduledFor: previous,
+      startedAt: previous,
+      finishedAt: previous + 60_000,
+    },
+  ];
+}
+
+export function FailureStates() {
+  return (
+    <StoryCard>
+      <StoryRow
+        label="Paused by a failed run"
+        hint="The run failed before it reached a thread, so there is no thread to open. The header and the failed run both say why."
+      >
+        <div className="w-full max-w-3xl">
+          <AutomationDetailView
+            automation={FAILED_AUTOMATION}
+            projectLabel="omnyo"
+            runsState={{
+              runs: failedAutomationRuns(),
+              nextCursor: null,
+              loading: false,
+              loadingMore: false,
+              error: null,
+              loadMore: noop,
+              retry: noop,
+            }}
+            actionPending={false}
+            editing={false}
+            onToggle={noop}
+            onEdit={noop}
+            onCancelEdit={noop}
+            onUpdateAgent={async () => {}}
+            onRunNow={noop}
+            onDelete={noop}
+            onOpenThread={noop}
+          />
+        </div>
+      </StoryRow>
     </StoryCard>
   );
 }

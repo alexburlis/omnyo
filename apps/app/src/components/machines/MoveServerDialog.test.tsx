@@ -8,13 +8,13 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { SERVER_MOVE_STEP_IDS } from "@bb/domain";
-import { BbHttpError } from "@bb/sdk/browser";
+import { SERVER_MOVE_STEP_IDS } from "@omnyo/domain";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 import type {
   ServerMoveCheckResponse,
   ServerMoveStatus,
-} from "@bb/server-contract";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/server-contract";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -41,7 +41,7 @@ function checkResponse(
     mode: "connect",
     serverUrl: null,
     requiresServerUrl: false,
-    targetDataDir: "/home/sawyer/.bb-machines/laptop",
+    targetDataDir: "/home/sawyer/.omnyo-machines/laptop",
     existingTargetServerData: null,
     items: [],
     canMove: true,
@@ -56,7 +56,7 @@ function startedMove(): ServerMoveStatus {
     mode: "connect",
     targetHostId: TARGET.id,
     targetHostName: TARGET.name,
-    serverUrl: "https://sawyer.getbb.app",
+    serverUrl: "https://sawyer.example.test",
     destinationStatusUrl: null,
     startedAt: 1,
     finishedAt: null,
@@ -76,6 +76,7 @@ function renderDialog() {
   render(<MoveServerDialog target={TARGET} onOpenChange={onOpenChange} />, {
     wrapper,
   });
+
   return { onOpenChange };
 }
 
@@ -89,7 +90,7 @@ afterEach(() => {
 });
 
 describe("MoveServerDialog", () => {
-  it("checks the machine, groups the results by severity, and starts a bb connect move", async () => {
+  it("checks the machine, groups the results by severity, and starts an Omnyo connect move", async () => {
     vi.mocked(sdk.experimental_server.checkMove).mockResolvedValue(
       checkResponse({
         items: [
@@ -116,9 +117,11 @@ describe("MoveServerDialog", () => {
     expect(
       await screen.findByRole("heading", { name: "Move the server to desk" }),
     ).toBeDefined();
+
     const warnings = await screen.findByRole("region", {
       name: "Before you move",
     });
+
     expect(within(warnings).getByText("2 turns are running")).toBeDefined();
     const info = screen.getByRole("region", { name: "Good to know" });
     expect(within(info).getByText("desk uses Europe/Berlin")).toBeDefined();
@@ -150,7 +153,7 @@ describe("MoveServerDialog", () => {
     });
   });
 
-  it("asks for the new address when the server has no bb connect handle and re-checks with it", async () => {
+  it("asks for the new address when the server has no Omnyo connect handle and re-checks with it", async () => {
     vi.mocked(sdk.experimental_server.checkMove)
       .mockResolvedValueOnce(
         checkResponse({
@@ -256,6 +259,7 @@ describe("MoveServerDialog", () => {
     const blockers = await screen.findByRole("region", {
       name: "Fix before moving",
     });
+
     expect(
       within(blockers).getByText("Port 38886 is in use on desk"),
     ).toBeDefined();
@@ -276,18 +280,18 @@ describe("MoveServerDialog", () => {
     ).toHaveBeenLastCalledWith({ targetHostId: TARGET.id, serverUrl: null });
   });
 
-  it("requires confirming that the existing bb data on the machine gets archived", async () => {
+  it("requires confirming that the existing Omnyo data on the machine gets archived", async () => {
     vi.mocked(sdk.experimental_server.checkMove).mockResolvedValue(
       checkResponse({
         existingTargetServerData: {
-          path: "/Users/sawyer/.bb",
+          path: "/Users/sawyer/.omnyo",
           sizeBytes: 5 * 1024 * 1024,
         },
         items: [
           {
             id: "existing-server-data",
             severity: "warning",
-            title: "desk already has bb server data",
+            title: "desk already has Omnyo server data",
             detail: null,
           },
         ],
@@ -299,8 +303,9 @@ describe("MoveServerDialog", () => {
     renderDialog();
 
     const confirmation = await screen.findByRole("checkbox", {
-      name: /Archive the existing bb data at \/Users\/sawyer\/\.bb/u,
+      name: /Archive the existing Omnyo data at \/Users\/sawyer\/\.omnyo/u,
     });
+
     expect(screen.getByText(/^5\.0 MB\./u)).toBeDefined();
     expect(startButton().hasAttribute("disabled")).toBe(true);
 
@@ -323,7 +328,7 @@ describe("MoveServerDialog", () => {
   it("surfaces a failed check inline and lets the user check again", async () => {
     vi.mocked(sdk.experimental_server.checkMove)
       .mockRejectedValueOnce(
-        new BbHttpError({
+        new OmnyoHttpError({
           status: 500,
           code: "host_rpc_timeout",
           message: "desk did not answer in time",
@@ -357,7 +362,7 @@ describe("MoveServerDialog", () => {
       checkResponse(),
     );
     vi.mocked(sdk.experimental_server.startMove).mockRejectedValue(
-      new BbHttpError({
+      new OmnyoHttpError({
         status: 400,
         code: "server_move_blocked",
         message: "The move is blocked",

@@ -16,10 +16,12 @@ function gitShellPath(filePath: string): string {
 }
 
 async function initBranchRepo(): Promise<string> {
-  const repoPath = await makeTempDir("bb-host-branches-repo-");
+  const repoPath = await makeTempDir("omnyo-host-branches-repo-");
   await runGitCommand(["init", "-b", "develop"], { cwd: repoPath });
-  await runGitCommand(["config", "user.name", "BB Tests"], { cwd: repoPath });
-  await runGitCommand(["config", "user.email", "bb@example.com"], {
+  await runGitCommand(["config", "user.name", "Omnyo Tests"], {
+    cwd: repoPath,
+  });
+  await runGitCommand(["config", "user.email", "omnyo@example.com"], {
     cwd: repoPath,
   });
   await fs.writeFile(path.join(repoPath, "README.md"), "hello\n", "utf8");
@@ -27,6 +29,7 @@ async function initBranchRepo(): Promise<string> {
   await runGitCommand(["commit", "-m", "Initial commit"], { cwd: repoPath });
   await runGitCommand(["branch", "main"], { cwd: repoPath });
   await runGitCommand(["branch", "release/1.2"], { cwd: repoPath });
+
   return repoPath;
 }
 
@@ -38,7 +41,7 @@ interface StaleOriginMainRepo {
 
 async function initStaleOriginMainRepo(): Promise<StaleOriginMainRepo> {
   const repoPath = await initBranchRepo();
-  const remotePath = await makeTempDir("bb-host-branches-stale-remote-");
+  const remotePath = await makeTempDir("omnyo-host-branches-stale-remote-");
   await runGitCommand(["init", "--bare"], { cwd: remotePath });
   await runGitCommand(["symbolic-ref", "HEAD", "refs/heads/main"], {
     cwd: remotePath,
@@ -52,13 +55,13 @@ async function initStaleOriginMainRepo(): Promise<StaleOriginMainRepo> {
     cwd: repoPath,
   });
 
-  const cloneParent = await makeTempDir("bb-host-branches-stale-clone-");
+  const cloneParent = await makeTempDir("omnyo-host-branches-stale-clone-");
   const clonePath = path.join(cloneParent, "repo");
   await runGitCommand(["clone", remotePath, clonePath], { cwd: cloneParent });
-  await runGitCommand(["config", "user.name", "BB Tests"], {
+  await runGitCommand(["config", "user.name", "Omnyo Tests"], {
     cwd: clonePath,
   });
-  await runGitCommand(["config", "user.email", "bb@example.com"], {
+  await runGitCommand(["config", "user.email", "omnyo@example.com"], {
     cwd: clonePath,
   });
   await fs.writeFile(path.join(clonePath, "remote.txt"), "remote\n", "utf8");
@@ -80,6 +83,7 @@ async function initStaleOriginMainRepo(): Promise<StaleOriginMainRepo> {
     ["config", "remote.origin.uploadpack", gitShellPath(uploadPackPath)],
     { cwd: repoPath },
   );
+
   return { releaseRefreshPath, refreshStartedPath, repoPath };
 }
 
@@ -105,6 +109,7 @@ async function initSshRemoteRepo(): Promise<SshRemoteRepo> {
     ["config", "core.sshCommand", gitShellPath(sshScriptPath)],
     { cwd: repoPath },
   );
+
   return { repoPath, sshLogPath };
 }
 
@@ -112,6 +117,7 @@ async function readUploadPackInvocations(
   sshLogPath: string,
 ): Promise<string[]> {
   const log = await fs.readFile(sshLogPath, "utf8").catch(() => "");
+
   return log.split("--\n").filter((entry) => entry.includes("git-upload-pack"));
 }
 
@@ -120,11 +126,14 @@ async function waitForUploadPackInvocations(
   count: number,
 ): Promise<string[]> {
   const deadline = Date.now() + 2_000;
+
   while (Date.now() < deadline) {
     const invocations = await readUploadPackInvocations(sshLogPath);
+
     if (invocations.length >= count) return invocations;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+
   throw new Error(`Expected ${count} upload-pack invocations in ${sshLogPath}`);
 }
 
@@ -133,6 +142,7 @@ async function expectResolvesWithin<T>(
   timeoutMs: number,
 ): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
+
   try {
     return await Promise.race([
       promise,
@@ -162,19 +172,23 @@ async function expectRemainsPending(
       setTimeout(() => resolve("pending"), timeoutMs);
     }),
   ]);
+
   expect(state).toBe("pending");
 }
 
 async function waitForFile(filePath: string): Promise<void> {
   const deadline = Date.now() + 2_000;
+
   while (Date.now() < deadline) {
     try {
       await fs.access(filePath);
+
       return;
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }
+
   throw new Error(`File did not appear within 2000ms: ${filePath}`);
 }
 
@@ -205,6 +219,7 @@ describe("host.inspect_git_source dispatch", () => {
   it("returns cached metadata while refreshing remotes in the background", async () => {
     const { releaseRefreshPath, refreshStartedPath, repoPath } =
       await initStaleOriginMainRepo();
+
     const harness = createHarness();
     let refreshedResult: Awaited<ReturnType<typeof dispatchOnlineRpcCommand>>;
 
@@ -220,6 +235,7 @@ describe("host.inspect_git_source dispatch", () => {
         ),
         2_000,
       );
+
       expect(result).toMatchObject({
         defaultBranch: "main",
         defaultBranchRelation: "equal",
@@ -248,7 +264,9 @@ describe("host.inspect_git_source dispatch", () => {
   it("waits for a blocking refresh before reading default-ref metadata", async () => {
     const { releaseRefreshPath, refreshStartedPath, repoPath } =
       await initStaleOriginMainRepo();
+
     const harness = createHarness();
+
     const resultPromise = dispatchOnlineRpcCommand(
       {
         type: "host.inspect_git_source",
@@ -257,6 +275,7 @@ describe("host.inspect_git_source dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     let result: Awaited<typeof resultPromise>;
 
     try {
@@ -358,7 +377,7 @@ describe("host.inspect_git_source dispatch", () => {
 
   it("inspects a bare repository root that holds sibling worktrees", async () => {
     const origin = await initBranchRepo();
-    const root = await makeTempDir("bb-host-branches-bare-root-");
+    const root = await makeTempDir("omnyo-host-branches-bare-root-");
     await runGitCommand(["clone", "--bare", origin, ".bare"], { cwd: root });
     await fs.writeFile(path.join(root, ".git"), "gitdir: ./.bare\n", "utf8");
     await runGitCommand(["worktree", "add", "main", "main"], { cwd: root });
@@ -383,7 +402,7 @@ describe("host.inspect_git_source dispatch", () => {
   });
 
   it("reports non-git directories", async () => {
-    const dirPath = await makeTempDir("bb-host-branches-nongit-");
+    const dirPath = await makeTempDir("omnyo-host-branches-nongit-");
     const harness = createHarness();
 
     const result = await dispatchOnlineRpcCommand(
@@ -407,7 +426,7 @@ describe("host.inspect_git_source dispatch", () => {
   });
 
   it("reports missing paths", async () => {
-    const parentPath = await makeTempDir("bb-host-branches-missing-parent-");
+    const parentPath = await makeTempDir("omnyo-host-branches-missing-parent-");
     const harness = createHarness();
 
     const result = await dispatchOnlineRpcCommand(
@@ -452,7 +471,7 @@ describe("host.list_branch_options dispatch", () => {
 
   it("lists multiple branches from a non-origin remote in stable order", async () => {
     const repoPath = await initBranchRepo();
-    const remotePath = await makeTempDir("bb-host-branch-options-upstream-");
+    const remotePath = await makeTempDir("omnyo-host-branch-options-upstream-");
     await runGitCommand(["init", "--bare"], { cwd: remotePath });
     await runGitCommand(["remote", "add", "upstream", remotePath], {
       cwd: repoPath,
@@ -503,13 +522,13 @@ describe("host.list_branch_options dispatch", () => {
 
   it("pins local and remote defaults before applying the page limit", async () => {
     const repoPath = await initBranchRepo();
-    const remotePath = await makeTempDir("bb-host-branch-options-origin-");
+    const remotePath = await makeTempDir("omnyo-host-branch-options-origin-");
     await runGitCommand(["init", "--bare"], { cwd: remotePath });
     await runGitCommand(["remote", "add", "origin", remotePath], {
       cwd: repoPath,
     });
-    await runGitCommand(["branch", "bb/aardvark"], { cwd: repoPath });
-    await runGitCommand(["push", "origin", "bb/aardvark", "main"], {
+    await runGitCommand(["branch", "feature/aardvark"], { cwd: repoPath });
+    await runGitCommand(["push", "origin", "feature/aardvark", "main"], {
       cwd: repoPath,
     });
     await runGitCommand(["fetch", "origin"], { cwd: repoPath });
@@ -533,7 +552,7 @@ describe("host.list_branch_options dispatch", () => {
 
   it("returns cached refs while a remote refresh continues in the background", async () => {
     const repoPath = await initBranchRepo();
-    const remotePath = await makeTempDir("bb-host-branch-options-remote-");
+    const remotePath = await makeTempDir("omnyo-host-branch-options-remote-");
     await runGitCommand(["init", "--bare"], { cwd: remotePath });
     await runGitCommand(["remote", "add", "origin", remotePath], {
       cwd: repoPath,
@@ -541,13 +560,13 @@ describe("host.list_branch_options dispatch", () => {
     await runGitCommand(["push", "origin", "main"], { cwd: repoPath });
     await runGitCommand(["fetch", "origin"], { cwd: repoPath });
 
-    const cloneParent = await makeTempDir("bb-host-branch-options-clone-");
+    const cloneParent = await makeTempDir("omnyo-host-branch-options-clone-");
     const clonePath = path.join(cloneParent, "repo");
     await runGitCommand(["clone", remotePath, clonePath], { cwd: cloneParent });
-    await runGitCommand(["config", "user.name", "BB Tests"], {
+    await runGitCommand(["config", "user.name", "Omnyo Tests"], {
       cwd: clonePath,
     });
-    await runGitCommand(["config", "user.email", "bb@example.com"], {
+    await runGitCommand(["config", "user.email", "omnyo@example.com"], {
       cwd: clonePath,
     });
     await runGitCommand(["switch", "-c", "feature/remote-only"], {
@@ -623,12 +642,13 @@ describe("host.list_branch_options dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     expect(refreshed.remoteBranches).toContain("origin/feature/remote-only");
   });
 
   it("classifies selected refs before filtering and pagination", async () => {
     const repoPath = await initBranchRepo();
-    const remotePath = await makeTempDir("bb-host-branch-options-upstream-");
+    const remotePath = await makeTempDir("omnyo-host-branch-options-upstream-");
     await runGitCommand(["init", "--bare"], { cwd: remotePath });
     await runGitCommand(["remote", "add", "upstream", remotePath], {
       cwd: repoPath,
@@ -661,7 +681,7 @@ describe("host.list_branch_options dispatch", () => {
 
   it("lists cached branches from bare project sources", async () => {
     const origin = await initBranchRepo();
-    const root = await makeTempDir("bb-host-branch-options-bare-root-");
+    const root = await makeTempDir("omnyo-host-branch-options-bare-root-");
     await runGitCommand(["clone", "--bare", origin, ".bare"], { cwd: root });
     await fs.writeFile(path.join(root, ".git"), "gitdir: ./.bare\n", "utf8");
     const harness = createHarness();
@@ -682,7 +702,7 @@ describe("host.list_branch_options dispatch", () => {
   });
 
   it("returns empty pages for non-git and missing paths", async () => {
-    const dirPath = await makeTempDir("bb-host-branch-options-nongit-");
+    const dirPath = await makeTempDir("omnyo-host-branch-options-nongit-");
     const harness = createHarness();
 
     for (const sourcePath of [dirPath, path.join(dirPath, "missing")]) {

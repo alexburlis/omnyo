@@ -1,20 +1,29 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Button } from "@bb/shared-ui/button";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   AgentSignInGuide,
   AgentStep,
+  AutomationsStep,
   DevicesStep,
   OnboardingLayout,
-  OnboardingPluginCard,
-  OnboardingPluginGrid,
-  OnboardingPluginGridSkeleton,
+  OnboardingPluginSections,
   ProjectsStep,
   type OnboardingAgent,
   type OnboardingConnectState,
   type OnboardingRepo,
 } from "./OnboardingViews";
-import type { AgentSetupState, OnboardingStepId } from "./onboarding-model";
+import {
+  ONBOARDING_STARTERS,
+  ONBOARDING_STEPS,
+  onboardingPluginGroups,
+  type OnboardingInstalledPlugin,
+  type AgentSetupState,
+  type OnboardingStepId,
+} from "./onboarding-model";
+import { OnboardingIntro } from "./OnboardingIntro";
+import { OnboardingMark } from "./OnboardingMark";
+import { OnboardingStage } from "./OnboardingStage";
 import claudeLogoUrl from "../../../../../plugins/provider-claude-code/icons/claude-code.svg";
 import codexLogoUrl from "../../../../../plugins/provider-codex/icons/codex.svg";
 import piLogoUrl from "../../../../../plugins/provider-pi/icons/pi.svg";
@@ -24,14 +33,13 @@ export default {
 };
 
 const noop = () => {};
+
 const MACHINE_NAME = "Sawyer's MacBook Pro";
-const CONNECT_URL = "https://sawyer.getbb.app";
-const MOBILE_LINKS = {
-  ios: "https://testflight.apple.com/join/example",
-  android: "https://example.com/bb-android.apk",
-};
+
+const CONNECT_URL = "https://sawyer.example.test";
 
 type AgentId = "claude-code" | "codex" | "pi";
+
 type AgentStates = Record<AgentId, AgentSetupState>;
 
 const AGENT_BASE: readonly { id: AgentId; name: string; logoUrl: string }[] = [
@@ -41,16 +49,20 @@ const AGENT_BASE: readonly { id: AgentId; name: string; logoUrl: string }[] = [
 ];
 
 const CHECKING: AgentSetupState = { status: "checking" };
+
 const INSTALL: AgentSetupState = { status: "install", canInstall: true };
+
 const SIGNED_OUT: AgentSetupState = {
   status: "signIn",
   reason: "signedOut",
   canSignIn: true,
 };
+
 const CLAUDE_READY: AgentSetupState = {
   status: "ready",
-  detail: "sawyer@acme.dev · Max (20x)",
+  detail: "sawyer@acme.dev · Ultra",
 };
+
 const CODEX_READY: AgentSetupState = {
   status: "ready",
   detail: "sawyer@acme.dev · Pro",
@@ -67,6 +79,7 @@ function FakeTerminal({ command }: { command: string }) {
 
 const CLAUDE_SIGN_IN_URL =
   "https://claude.com/cai/oauth/authorize?code=true&client_id=example";
+
 const CODEX_SIGN_IN_URL = "https://auth.openai.com/codex/device";
 
 type SignInVariant = "starting" | "guided" | "terminal";
@@ -82,10 +95,13 @@ function StorySignInGuide({
 }) {
   const [code, setCode] = useState("");
   const [submitted, setSubmitted] = useState(false);
+
   const [terminalVisible, setTerminalVisible] = useState(
     variant === "terminal",
   );
+
   const codex = agentId === "codex";
+
   return (
     <AgentSignInGuide
       agentName={agentName}
@@ -148,9 +164,9 @@ function anyReady(states: AgentStates): boolean {
 
 const REPOS: readonly OnboardingRepo[] = [
   {
-    id: "bb",
-    name: "bb",
-    path: "/Users/sawyer/projects/bb",
+    id: "Omnyo",
+    name: "Omnyo",
+    path: "/Users/sawyer/projects/omnyo",
     lastActive: "12m ago",
     remote: "get-bb/bb",
     added: false,
@@ -188,68 +204,335 @@ const REPOS: readonly OnboardingRepo[] = [
     added: false,
   },
 ];
-const DEFAULT_REPO_IDS = ["bb", "acme-web", "dotfiles"];
 
-const PLUGINS: readonly {
-  id: string;
-  name: string;
-  icon: string;
-  description: string;
-}[] = [
+const DEFAULT_REPO_IDS = ["Omnyo", "acme-web", "dotfiles"];
+
+const STAGE_CHATS: readonly { id: string; repoId: string; title: string }[] = [
+  { id: "chat-1", repoId: "Omnyo", title: "Fix flaky sidebar test" },
+  { id: "chat-2", repoId: "Omnyo", title: "Speed up cold start" },
+  { id: "chat-3", repoId: "acme-web", title: "Checkout copy pass" },
+];
+
+const PLUGINS: readonly OnboardingInstalledPlugin[] = [
   {
-    id: "browser-automation",
-    name: "Browser Automation",
-    icon: "Globe",
+    id: "inline-ui",
+    name: "Inline UI",
     description:
-      "Let BB control the in-app browser and browsers on connected machines, with inline previews for headless sessions.",
+      "Native visual blocks and polished typography inside Omnyo chat.",
+    icon: "ChartNoAxesCombined",
+    enabled: true,
   },
   {
-    id: "workflows",
-    name: "Workflows",
-    icon: "Workflow",
-    description: "Run durable, provider-independent agent workflows.",
-  },
-  {
-    id: "monaco-editor",
-    name: "File Editor",
-    icon: "Code",
+    id: "inline-vis",
+    name: "Inline Visualizations",
     description:
-      "Edit files in BB with the Monaco editor instead of the read-only preview.",
+      "Show HTML visualizations inline in assistant messages, written in the reply as a fenced block or read from a workspace or thread-storage file, and Markdown documents from a file.",
+    icon: "AppWindow",
+    enabled: true,
   },
   {
-    id: "prompt-library",
+    id: "glance",
+    name: "Glance",
+    description:
+      "A live card for every chat: status, proof and deliverables, with what changed since you last looked.",
+    icon: "Target",
+    enabled: true,
+  },
+  {
+    id: "chat-topics",
+    name: "Chat Topics",
+    description:
+      "Short chat titles from the first response, chats sorted into status sections per project and in an Inbox, and type-of-work tags.",
+    icon: "Folder",
+    enabled: true,
+  },
+  {
+    id: "omnyo--prompt-library",
     name: "Prompt Library",
-    icon: "Clock",
     description:
       "Search previous prompts, star favorites, and insert them into the composer.",
+    icon: "Clock",
+    enabled: true,
   },
   {
-    id: "agent-annotations",
-    name: "Agent Annotations",
-    icon: "MessageSquarePlus",
+    id: "omnyo--composer-predictions",
+    name: "Composer Predictions",
     description:
-      "Select elements in a Browser tab, comment on them, and add them to the prompt.",
+      "Predict the next message and archive readiness after completed chat turns.",
+    icon: "MessageSquare",
+    enabled: true,
+  },
+  {
+    id: "drafts",
+    name: "Drafts",
+    description: "Save a composer draft as a manually sent queued message.",
+    icon: "EditFile",
+    enabled: true,
+  },
+  {
+    id: "scheduled-send",
+    name: "Send Later",
+    description: "Schedule the current composer draft to send at a later time.",
+    icon: "Calendar",
+    enabled: true,
+  },
+  {
+    id: "side-chat",
+    name: "Side Chat",
+    description:
+      "Reply to messages in hidden side-chat forks rendered in a thread panel.",
+    icon: "SideChat",
+    enabled: true,
   },
   {
     id: "ask-user-question",
     name: "Ask User Question",
-    icon: "MessageQuestion",
     description:
       "Let any provider ask the user a multiple-choice question, the way Claude Code's AskUserQuestion does natively.",
+    icon: "MessageQuestion",
+    enabled: true,
+  },
+  {
+    id: "custom-instructions",
+    name: "Custom Instructions",
+    description:
+      "Add persistent custom instructions to agent tasks on this Omnyo host.",
+    icon: "EditFile",
+    enabled: true,
+  },
+  {
+    id: "local-voice",
+    name: "Dictation by Paraspeech",
+    description:
+      "Private English dictation that runs on your Mac. Needs Apple silicon and macOS 14 or later.",
+    icon: "Mic",
+    enabled: true,
+  },
+  {
+    id: "chime-local",
+    name: "Chime",
+    description:
+      "Local notification sounds that wait for unread success and all remaining work.",
+    icon: "./assets/icon.svg",
+    enabled: true,
+  },
+  {
+    id: "browser-automation",
+    name: "Browser Automation",
+    description:
+      "Let Omnyo control the in-app browser and browsers on connected machines, with inline previews for headless sessions.",
+    icon: "Globe",
+    enabled: true,
+  },
+  {
+    id: "agent-annotations",
+    name: "Agent Annotations",
+    description:
+      "Select elements in a Browser tab, comment on them, and add them to the prompt.",
+    icon: "MessageSquarePlus",
+    enabled: true,
+  },
+  {
+    id: "workflows",
+    name: "Workflow scripts",
+    description: "Run durable, provider-independent agent workflows.",
+    icon: "Workflow",
+    enabled: true,
+  },
+  {
+    id: "automations",
+    name: "Automations",
+    description: "Schedule recurring and one-shot agent or script work.",
+    icon: "Repeat",
+    enabled: true,
+  },
+  {
+    id: "pursue",
+    name: "Pursue",
+    description:
+      "Pursue a goal until an independent judge says it is met, and run durable interval loops \u2014 for any provider.",
+    icon: "Explore",
+    enabled: true,
+  },
+  {
+    id: "state-machines",
+    name: "State Machines",
+    description:
+      "Create durable cyclic workflows with finite actions, explicit transitions and human decisions.",
+    icon: "Workflow",
+    enabled: true,
+  },
+  {
+    id: "canvas",
+    name: "Canvas",
+    description:
+      "A shared canvas for each project, with linked chat boards, saved views and conversations beside the work.",
+    icon: "GridView",
+    enabled: true,
+  },
+  {
+    id: "project-actions",
+    name: "Project Actions",
+    description: "Project-wide shortcuts editable by agents.",
+    icon: "Zap",
+    enabled: true,
+  },
+  {
+    id: "secrets",
+    name: "Secrets",
+    description:
+      "Securely request credentials from a user and reconcile them into dotenv files.",
+    icon: "Lock",
+    enabled: true,
+  },
+  {
+    id: "provider-retry",
+    name: "Provider Retry",
+    description:
+      "Retry turns after transient provider overloads and subscription limits reset.",
+    icon: "ArrowReloadHorizontal",
+    enabled: true,
+  },
+  {
+    id: "omnyo--wait-sources",
+    name: "Wait Sources",
+    description:
+      "Wake waiting chats when a URL answers, a file appears or a command succeeds.",
+    icon: "Eye",
+    enabled: true,
+  },
+  {
+    id: "omnyo--git",
+    name: "Git",
+    description:
+      "Shows a thread's branch, changes, commits, and pull request in one control in the thread header.",
+    icon: "GitBranch",
+    enabled: true,
+  },
+  {
+    id: "workspace-github",
+    name: "Workspace GitHub",
+    description:
+      "Browse GitHub issues and PRs from root and nested Omnyo repositories, with explicit recent-history filters.",
+    icon: "Github",
+    enabled: true,
+  },
+  {
+    id: "tidy",
+    name: "Tidy",
+    description:
+      "Ready to archive: chats recommended by Omnyo's shared work summary. You archive them.",
+    icon: "Clean",
+    enabled: true,
+  },
+  {
+    id: "leftover-processes",
+    name: "Left Running",
+    description:
+      "See what each chat left running and stop it when the chat is archived or idle.",
+    icon: "Terminal",
+    enabled: true,
+  },
+  {
+    id: "omnyo--storage-retention",
+    name: "Storage & Retention [Experimental]",
+    description:
+      "Inspect machine storage and automatically archive or delete old threads.",
+    icon: "./icons/database-restore.svg",
+    enabled: true,
+  },
+  {
+    id: "stats",
+    name: "Stats",
+    description:
+      "Durable local agent, token, throughput and model analytics across every Omnyo chat and machine.",
+    icon: "ChartColumn",
+    enabled: true,
+  },
+  {
+    id: "omnyo--account-usage",
+    name: "Account Usage",
+    description:
+      "Show pooled Claude and Codex usage and selected-account reset credits.",
+    icon: "ChartColumn",
+    enabled: true,
+  },
+  {
+    id: "skill-discovery",
+    name: "Skill Discovery",
+    description:
+      "Find the right skill with a category tree, short descriptions, live search and source previews.",
+    icon: "Library",
+    enabled: true,
+  },
+  {
+    id: "self-improvement",
+    name: "Omnyo Customizer",
+    description:
+      "Toggle Omnyo Customizer in the footer, click any part of Omnyo, and describe the change in a new chat.",
+    icon: "./assets/improve.svg",
+    enabled: true,
+  },
+  {
+    id: "sentry",
+    name: "Sentry",
+    description:
+      "Investigate Sentry issues in local chats on the model you pick and deliver verified, reviewed fixes as pull requests.",
+    icon: "Bug",
+    enabled: true,
+  },
+  {
+    id: "keep-awake",
+    name: "Keep Awake",
+    description:
+      "Keeps selected macOS and Windows hosts awake while Omnyo is running.",
+    icon: "Coffee",
+    enabled: true,
+  },
+  {
+    id: "concurrency-limit",
+    name: "Concurrency Limit",
+    description:
+      "Control the number of concurrent threads that are running in Omnyo",
+    icon: "Limitation",
+    enabled: true,
+  },
+  {
+    id: "pdf-preview",
+    name: "PDF Preview",
+    description: "Preview PDF files with the browser's built-in viewer.",
+    icon: "FileText",
+    enabled: true,
   },
 ];
 
 function StoryWindow({
   compact = false,
+  wide = false,
+  fullscreen = false,
   children,
 }: {
   compact?: boolean;
+  wide?: boolean;
+  fullscreen?: boolean;
   children: ReactNode;
 }) {
+  if (fullscreen) {
+    return (
+      <div className="flex h-dvh w-full flex-col bg-background text-foreground">
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div
       className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-background text-foreground shadow-lg"
-      style={{ width: compact ? 390 : 960, height: 760, maxWidth: "100%" }}
+      style={{
+        width: compact ? 390 : wide ? 1400 : 960,
+        height: wide ? 860 : 760,
+        maxWidth: "100%",
+      }}
     >
       {children}
     </div>
@@ -282,6 +565,7 @@ function Gallery({ children }: { children: ReactNode }) {
 
 interface StepChromeProps {
   compact?: boolean;
+  previousStep?: OnboardingStepId | null;
   onSelectStep?: (step: OnboardingStepId) => void;
   onSkipAll?: () => void;
   onPrimary?: () => void;
@@ -313,12 +597,13 @@ function AgentFrame({
 }) {
   const ready = anyReady(states);
   const blocked = !loading && !ready;
+
   return (
     <OnboardingLayout
       step="agent"
       compact={chrome.compact}
       title="Connect a coding agent"
-      description="bb runs the agents you already use. You need one that is installed and signed in on this computer."
+      description="Omnyo runs the agents you already use. You need one that is installed and signed in on this computer."
       footerNote={
         blocked ? "Threads can't start until one agent is ready." : null
       }
@@ -327,8 +612,10 @@ function AgentFrame({
       secondaryLabel={blocked ? "Skip for now" : undefined}
       onPrimary={chrome.onPrimary ?? noop}
       onSecondary={chrome.onSecondary ?? noop}
+      steps={ONBOARDING_STEPS}
       onSelectStep={chrome.onSelectStep ?? noop}
       onSkipAll={chrome.onSkipAll ?? noop}
+      previousStep={chrome.previousStep ?? null}
     >
       <AgentStep
         machineName={machineName}
@@ -362,6 +649,7 @@ function ProjectsFrame({
   onSelectNone?: () => void;
 }) {
   const scanning = status.kind === "scanning";
+
   return (
     <OnboardingLayout
       step="projects"
@@ -379,8 +667,10 @@ function ProjectsFrame({
       onPrimary={chrome.onPrimary ?? noop}
       onSecondary={chrome.onSecondary ?? noop}
       onBack={chrome.onBack ?? noop}
+      steps={ONBOARDING_STEPS}
       onSelectStep={chrome.onSelectStep ?? noop}
       onSkipAll={chrome.onSkipAll ?? noop}
+      previousStep={chrome.previousStep ?? null}
     >
       <ProjectsStep
         status={status}
@@ -396,24 +686,14 @@ function ProjectsFrame({
   );
 }
 
-function PluginsFrame({
-  enabledIds = new Set<string>(),
-  pendingIds = new Set<string>(),
-  loading = false,
-  onToggle = noop,
-  ...chrome
-}: StepChromeProps & {
-  enabledIds?: ReadonlySet<string>;
-  pendingIds?: ReadonlySet<string>;
-  loading?: boolean;
-  onToggle?: (id: string, enabled: boolean) => void;
-}) {
+function ChatsFrame(chrome: StepChromeProps) {
   return (
     <OnboardingLayout
-      step="plugins"
+      step="chats"
+      steps={ONBOARDING_STEPS}
       compact={chrome.compact}
-      title="Make bb yours"
-      description="Most of bb is plugins. These ones are off until you want them, and you can change your mind in Plugins."
+      title="Pick up where you left off"
+      description="Bring your recent Codex and Claude Code chats into Omnyo. Each one continues where you left off; your CLI history stays as it is."
       primaryLabel="Continue"
       secondaryLabel="Skip"
       onPrimary={chrome.onPrimary ?? noop}
@@ -421,25 +701,158 @@ function PluginsFrame({
       onBack={chrome.onBack ?? noop}
       onSelectStep={chrome.onSelectStep ?? noop}
       onSkipAll={chrome.onSkipAll ?? noop}
+      previousStep={chrome.previousStep ?? null}
     >
-      <OnboardingPluginGrid compact={chrome.compact}>
-        {loading ? (
-          <OnboardingPluginGridSkeleton count={PLUGINS.length} />
-        ) : (
-          PLUGINS.map((plugin) => (
-            <OnboardingPluginCard
-              key={plugin.id}
-              name={plugin.name}
-              description={plugin.description}
-              icon={{ icon: plugin.icon, iconUrl: null, iconTinted: false }}
-              enabled={enabledIds.has(plugin.id)}
-              pending={pendingIds.has(plugin.id)}
-              unavailableReason={null}
-              onToggle={(enabled) => onToggle(plugin.id, enabled)}
-            />
-          ))
-        )}
-      </OnboardingPluginGrid>
+      <div className="rounded-lg border border-border p-4">
+        <p className="text-sm font-medium">Import chats</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          The Chat import plugin's own settings render here: 27 chats with
+          messages in the last 2 days, each listed with its project, ready to
+          import.
+        </p>
+      </div>
+    </OnboardingLayout>
+  );
+}
+
+function PluginsFrame({
+  disabledIds = new Set<string>(),
+  pendingIds = new Set<string>(),
+  loading = false,
+  onToggle = noop,
+  ...chrome
+}: StepChromeProps & {
+  disabledIds?: ReadonlySet<string>;
+  pendingIds?: ReadonlySet<string>;
+  loading?: boolean;
+  onToggle?: (id: string, enabled: boolean) => void;
+}) {
+  const sections = onboardingPluginGroups(PLUGINS).map((group) => ({
+    id: group.id,
+    label: group.label,
+    plugins: group.plugins.map((plugin) => ({
+      id: plugin.id,
+      name: plugin.name ?? plugin.id,
+      description: plugin.description,
+      icon: plugin.icon,
+      enabled: !disabledIds.has(plugin.id),
+      pending: pendingIds.has(plugin.id),
+    })),
+  }));
+
+  const onCount = PLUGINS.filter(
+    (plugin) => !disabledIds.has(plugin.id),
+  ).length;
+
+  return (
+    <OnboardingLayout
+      step="plugins"
+      compact={chrome.compact}
+      title="Recommended plugins are on"
+      description="Omnyo starts with these. Turn off anything you don't want."
+      footerNote={loading ? null : `${onCount} of ${PLUGINS.length} on`}
+      primaryLabel={
+        onCount === PLUGINS.length ? "Continue with recommended" : "Continue"
+      }
+      onPrimary={chrome.onPrimary ?? noop}
+      onBack={chrome.onBack ?? noop}
+      steps={ONBOARDING_STEPS}
+      onSelectStep={chrome.onSelectStep ?? noop}
+      onSkipAll={chrome.onSkipAll ?? noop}
+      previousStep={chrome.previousStep ?? null}
+    >
+      <OnboardingPluginSections
+        sections={loading ? null : sections}
+        compact={chrome.compact}
+        onToggle={onToggle}
+      />
+    </OnboardingLayout>
+  );
+}
+
+const STORY_STARTER_ICONS = {
+  briefing: "Coffee",
+  dependencies: "PackageReceive",
+} as const;
+
+function AutomationsFrame({
+  scheduledIds = new Set<string>(),
+  pendingIds = new Set<string>(),
+  noProject = false,
+  sentry = "hidden",
+  contentFeedQueued = false,
+  onToggleStarter = noop,
+  onToggleSentrySetup = noop,
+  onToggleContentFeed = noop,
+  ...chrome
+}: StepChromeProps & {
+  scheduledIds?: ReadonlySet<string>;
+  pendingIds?: ReadonlySet<string>;
+  noProject?: boolean;
+  sentry?: "hidden" | "detected" | "open";
+  contentFeedQueued?: boolean;
+  onToggleStarter?: (id: string, enabled: boolean) => void;
+  onToggleSentrySetup?: () => void;
+  onToggleContentFeed?: (queued: boolean) => void;
+}) {
+  return (
+    <OnboardingLayout
+      step="automations"
+      compact={chrome.compact}
+      title="Put Omnyo to work"
+      description="Each one runs on a schedule and uses your agent when it does."
+      footerNote={
+        scheduledIds.size === 0 ? null : `${scheduledIds.size} scheduled`
+      }
+      primaryLabel="Continue"
+      onPrimary={chrome.onPrimary ?? noop}
+      onBack={chrome.onBack ?? noop}
+      steps={ONBOARDING_STEPS}
+      onSelectStep={chrome.onSelectStep ?? noop}
+      onSkipAll={chrome.onSkipAll ?? noop}
+      previousStep={chrome.previousStep ?? null}
+    >
+      <AutomationsStep
+        projects={
+          noProject
+            ? []
+            : [
+                { id: "omnyo", name: "Omnyo" },
+                { id: "acme-web", name: "acme-web" },
+              ]
+        }
+        projectId={noProject ? null : "omnyo"}
+        agentName="Claude Code"
+        starters={ONBOARDING_STARTERS.map((starter) => ({
+          id: starter.id,
+          name: starter.name,
+          description: starter.description,
+          scheduleLabel: starter.scheduleLabel,
+          icon: STORY_STARTER_ICONS[starter.id],
+          enabled: scheduledIds.has(starter.id),
+          pending: pendingIds.has(starter.id),
+        }))}
+        sentry={
+          sentry === "hidden"
+            ? { status: "hidden" }
+            : {
+                status: "detected",
+                projectName: "Omnyo",
+                open: sentry === "open",
+                setup: (
+                  <p className="text-xs text-muted-foreground">
+                    The Sentry plugin's own settings render here: paste a Sentry
+                    token, then map Sentry projects to repositories.
+                  </p>
+                ),
+              }
+        }
+        contentFeedQueued={contentFeedQueued}
+        onSelectProject={noop}
+        onToggleStarter={onToggleStarter}
+        onToggleSentrySetup={onToggleSentrySetup}
+        onToggleContentFeed={onToggleContentFeed}
+      />
     </OnboardingLayout>
   );
 }
@@ -460,25 +873,26 @@ function DevicesFrame({
     <OnboardingLayout
       step="devices"
       compact={chrome.compact}
-      title="Use bb from anywhere"
+      title="Use Omnyo from anywhere"
       description="All optional. Everything here also lives in Settings → Machines."
-      primaryLabel="Start using bb"
+      primaryLabel="Start using Omnyo"
       onPrimary={chrome.onPrimary ?? noop}
       onBack={chrome.onBack ?? noop}
+      steps={ONBOARDING_STEPS}
       onSelectStep={chrome.onSelectStep ?? noop}
       onSkipAll={chrome.onSkipAll ?? noop}
+      previousStep={chrome.previousStep ?? null}
     >
       <DevicesStep
         connect={connect}
         connectSetup={
           <p className="text-xs text-muted-foreground">
-            The bb connect plugin's own settings render here: sign in to your bb
-            account, then turn on remote access.
+            The Omnyo connect plugin's own settings render here: sign in to your
+            Omnyo account, then turn on remote access.
           </p>
         }
         connectSetupOpen={connectSetupOpen}
         otherMachineCount={otherMachineCount}
-        mobileLinks={MOBILE_LINKS}
         onToggleConnectSetup={onToggleConnectSetup}
         onCopyConnectUrl={noop}
         onAddMachine={noop}
@@ -491,7 +905,7 @@ function HomeFrame() {
   return (
     <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col px-6 pt-14">
       <p className="rounded-lg border border-border px-3 py-6 text-sm text-muted-foreground">
-        The usual bb home composer goes here.
+        The usual Omnyo home composer goes here.
       </p>
     </div>
   );
@@ -520,17 +934,46 @@ function isAgentId(id: string): id is AgentId {
   return id === "claude-code" || id === "codex" || id === "pi";
 }
 
-function InteractiveFlowRun({ scenario }: { scenario: Scenario }) {
+function InteractiveFlowRun({
+  scenario,
+  fullscreen = false,
+}: {
+  scenario: Scenario;
+  fullscreen?: boolean;
+}) {
   const [view, setView] = useState<OnboardingStepId | "home">("agent");
+
+  const [viewHistory, setViewHistory] = useState<{
+    view: OnboardingStepId | "home";
+    previous: OnboardingStepId | null;
+  }>({ view, previous: null });
+
+  if (viewHistory.view !== view) {
+    setViewHistory({
+      view,
+      previous: viewHistory.view === "home" ? null : viewHistory.view,
+    });
+  }
+
   const [agentStates, setAgentStates] = useState<AgentStates | null>(null);
   const [scanning, setScanning] = useState(true);
+
   const [selectedRepoIds, setSelectedRepoIds] = useState<ReadonlySet<string>>(
     () => new Set(DEFAULT_REPO_IDS),
   );
-  const [enabledPluginIds, setEnabledPluginIds] = useState<ReadonlySet<string>>(
+
+  const [disabledPluginIds, setDisabledPluginIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+
+  const [connectSetupOpen, setConnectSetupOpen] = useState(false);
+
+  const [scheduledIds, setScheduledIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [connectSetupOpen, setConnectSetupOpen] = useState(false);
+
+  const [sentryOpen, setSentryOpen] = useState(false);
+  const [contentFeedQueued, setContentFeedQueued] = useState(false);
   const timers = useRef<number[]>([]);
 
   const later = (delayMs: number, run: () => void) => {
@@ -543,6 +986,7 @@ function InteractiveFlowRun({ scenario }: { scenario: Scenario }) {
       window.setTimeout(() => setAgentStates(scenarioStates(scenario)), 700),
       window.setTimeout(() => setScanning(false), 1500),
     );
+
     return () => {
       for (const timer of pending) window.clearTimeout(timer);
     };
@@ -554,6 +998,7 @@ function InteractiveFlowRun({ scenario }: { scenario: Scenario }) {
       current === null ? current : { ...current, [id]: state },
     );
   };
+
   const resolveAgent = (
     id: string,
     from: AgentSetupState["status"],
@@ -568,9 +1013,11 @@ function InteractiveFlowRun({ scenario }: { scenario: Scenario }) {
   };
 
   const chrome = {
+    previousStep: viewHistory.previous,
     onSelectStep: setView,
     onSkipAll: () => setView("home"),
   };
+
   const states = agentStates ?? {
     "claude-code": CHECKING,
     codex: CHECKING,
@@ -579,101 +1026,239 @@ function InteractiveFlowRun({ scenario }: { scenario: Scenario }) {
 
   if (view === "home") {
     return (
-      <StoryWindow>
+      <StoryWindow fullscreen={fullscreen}>
         <HomeFrame />
       </StoryWindow>
     );
   }
 
+  const stage = (
+    <OnboardingStage
+      className="w-[46%] shrink-0"
+      step={view}
+      machineName={MACHINE_NAME}
+      agents={AGENT_BASE.filter(
+        (agent) => agentStates?.[agent.id].status === "ready",
+      ).map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        provider: { id: agent.id, logoUrl: agent.logoUrl },
+      }))}
+      projects={REPOS.filter(
+        (repo) =>
+          view !== "agent" && (repo.added || selectedRepoIds.has(repo.id)),
+      ).map((repo) => ({
+        id: repo.id,
+        name: repo.name,
+        chats:
+          view === "chats" || view === "plugins" || view === "devices"
+            ? STAGE_CHATS.filter((chat) => chat.repoId === repo.id)
+            : [],
+      }))}
+      browserConnected={false}
+      plugins={PLUGINS.filter(
+        (plugin) => !disabledPluginIds.has(plugin.id),
+      ).map((plugin) => ({
+        id: plugin.id,
+        name: plugin.name ?? plugin.id,
+        icon: plugin.icon,
+      }))}
+      scheduled={ONBOARDING_STARTERS.filter((starter) =>
+        scheduledIds.has(starter.id),
+      ).map((starter) => ({
+        id: starter.id,
+        name: starter.name,
+        scheduleLabel: starter.scheduleLabel,
+      }))}
+      remoteAccess={false}
+      otherMachineCount={0}
+    />
+  );
+
   return (
-    <StoryWindow>
-      {view === "agent" ? (
-        <AgentFrame
-          {...chrome}
-          states={states}
-          loading={agentStates === null}
-          onPrimary={() => setView("projects")}
-          onSecondary={() => setView("projects")}
-          onSignIn={(id) => {
-            setAgent(id, { status: "signingIn" });
-            later(2400, () =>
-              resolveAgent(
-                id,
-                "signingIn",
-                id === "codex" ? CODEX_READY : CLAUDE_READY,
-              ),
-            );
-          }}
-          onInstall={(id) => {
-            setAgent(id, { status: "installing" });
-            later(1800, () => resolveAgent(id, "installing", SIGNED_OUT));
-          }}
-          onCancelSignIn={(id) => setAgent(id, SIGNED_OUT)}
-        />
-      ) : null}
-      {view === "projects" ? (
-        <ProjectsFrame
-          {...chrome}
-          status={
-            scanning
-              ? { kind: "scanning" }
-              : { kind: "results", truncated: false }
-          }
-          selectedIds={selectedRepoIds}
-          onToggle={(id) =>
-            setSelectedRepoIds((current) => {
-              const next = new Set(current);
-              if (next.has(id)) next.delete(id);
-              else next.add(id);
-              return next;
-            })
-          }
-          onSelectAll={() =>
-            setSelectedRepoIds(
-              new Set(
-                REPOS.filter((repo) => !repo.added).map((repo) => repo.id),
-              ),
-            )
-          }
-          onSelectNone={() => setSelectedRepoIds(new Set())}
-          onPrimary={() => setView("plugins")}
-          onSecondary={() => setView("plugins")}
-          onBack={() => setView("agent")}
-        />
-      ) : null}
-      {view === "plugins" ? (
-        <PluginsFrame
-          {...chrome}
-          enabledIds={enabledPluginIds}
-          onToggle={(id, enabled) =>
-            setEnabledPluginIds((current) => {
-              const next = new Set(current);
-              if (enabled) next.add(id);
-              else next.delete(id);
-              return next;
-            })
-          }
-          onPrimary={() => setView("devices")}
-          onSecondary={() => setView("devices")}
-          onBack={() => setView("projects")}
-        />
-      ) : null}
-      {view === "devices" ? (
-        <DevicesFrame
-          {...chrome}
-          connectSetupOpen={connectSetupOpen}
-          onToggleConnectSetup={() => setConnectSetupOpen((open) => !open)}
-          onPrimary={() => setView("home")}
-          onBack={() => setView("plugins")}
-        />
-      ) : null}
+    <StoryWindow wide fullscreen={fullscreen}>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {view === "agent" ? (
+            <AgentFrame
+              {...chrome}
+              states={states}
+              loading={agentStates === null}
+              onPrimary={() => setView("projects")}
+              onSecondary={() => setView("projects")}
+              onSignIn={(id) => {
+                setAgent(id, { status: "signingIn" });
+                later(2400, () =>
+                  resolveAgent(
+                    id,
+                    "signingIn",
+                    id === "codex" ? CODEX_READY : CLAUDE_READY,
+                  ),
+                );
+              }}
+              onInstall={(id) => {
+                setAgent(id, { status: "installing" });
+                later(1800, () => resolveAgent(id, "installing", SIGNED_OUT));
+              }}
+              onCancelSignIn={(id) => setAgent(id, SIGNED_OUT)}
+            />
+          ) : null}
+          {view === "projects" ? (
+            <ProjectsFrame
+              {...chrome}
+              status={
+                scanning
+                  ? { kind: "scanning" }
+                  : { kind: "results", truncated: false }
+              }
+              selectedIds={selectedRepoIds}
+              onToggle={(id) =>
+                setSelectedRepoIds((current) => {
+                  const next = new Set(current);
+
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+
+                  return next;
+                })
+              }
+              onSelectAll={() =>
+                setSelectedRepoIds(
+                  new Set(
+                    REPOS.filter((repo) => !repo.added).map((repo) => repo.id),
+                  ),
+                )
+              }
+              onSelectNone={() => setSelectedRepoIds(new Set())}
+              onPrimary={() => setView("chats")}
+              onSecondary={() => setView("chats")}
+              onBack={() => setView("agent")}
+            />
+          ) : null}
+          {view === "chats" ? (
+            <ChatsFrame
+              {...chrome}
+              onPrimary={() => setView("plugins")}
+              onSecondary={() => setView("plugins")}
+              onBack={() => setView("projects")}
+            />
+          ) : null}
+          {view === "plugins" ? (
+            <PluginsFrame
+              {...chrome}
+              disabledIds={disabledPluginIds}
+              onToggle={(id, enabled) =>
+                setDisabledPluginIds((current) => {
+                  const next = new Set(current);
+
+                  if (enabled) next.delete(id);
+                  else next.add(id);
+
+                  return next;
+                })
+              }
+              onPrimary={() => setView("automations")}
+              onBack={() => setView("chats")}
+            />
+          ) : null}
+          {view === "automations" ? (
+            <AutomationsFrame
+              {...chrome}
+              scheduledIds={scheduledIds}
+              sentry={sentryOpen ? "open" : "detected"}
+              contentFeedQueued={contentFeedQueued}
+              onToggleStarter={(id, enabled) =>
+                setScheduledIds((current) => {
+                  const next = new Set(current);
+
+                  if (enabled) next.add(id);
+                  else next.delete(id);
+
+                  return next;
+                })
+              }
+              onToggleSentrySetup={() => setSentryOpen((open) => !open)}
+              onToggleContentFeed={setContentFeedQueued}
+              onPrimary={() => setView("devices")}
+              onBack={() => setView("plugins")}
+            />
+          ) : null}
+          {view === "devices" ? (
+            <DevicesFrame
+              {...chrome}
+              connectSetupOpen={connectSetupOpen}
+              onToggleConnectSetup={() => setConnectSetupOpen((open) => !open)}
+              onPrimary={() => setView("home")}
+              onBack={() => setView("automations")}
+            />
+          ) : null}
+        </div>
+        {stage}
+      </div>
     </StoryWindow>
+  );
+}
+
+export function FullFirstRun() {
+  const [started, setStarted] = useState(false);
+  const [introPlaying, setIntroPlaying] = useState(false);
+
+  if (!started) {
+    return (
+      <div className="flex h-dvh flex-col items-center justify-center gap-6 bg-background text-foreground">
+        <OnboardingMark className="size-12 text-foreground" />
+        <Button
+          size="lg"
+          onClick={() => {
+            setStarted(true);
+            setIntroPlaying(true);
+          }}
+        >
+          Start first run
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Plays the intro with sound, then setup. Reload to start over.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <InteractiveFlowRun scenario="signedOut" fullscreen />
+      {introPlaying ? (
+        <OnboardingIntro onDone={() => setIntroPlaying(false)} />
+      ) : null}
+    </>
+  );
+}
+
+export function Intro() {
+  const [run, setRun] = useState(0);
+  const [playing, setPlaying] = useState(true);
+
+  return (
+    <div className="flex h-dvh items-center justify-center">
+      <Button
+        variant="outline"
+        onClick={() => {
+          setRun((current) => current + 1);
+          setPlaying(true);
+        }}
+      >
+        Play intro again
+      </Button>
+      {playing ? (
+        <OnboardingIntro key={run} onDone={() => setPlaying(false)} />
+      ) : null}
+    </div>
   );
 }
 
 export function InteractiveFlow() {
   const [scenario, setScenario] = useState<Scenario>("signedOut");
   const [run, setRun] = useState(0);
+
   return (
     <div className="flex flex-col items-center gap-4 p-6">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -740,7 +1325,7 @@ export function Step1AgentStates() {
       </Captioned>
       <Captioned
         label="Signing in with a pasted code (Claude Code)"
-        hint="The login command runs in a hidden terminal; bb lifts the sign-in link out of its output and types the pasted code back in."
+        hint="The login command runs in a hidden terminal; Omnyo lifts the sign-in link out of its output and types the pasted code back in."
       >
         <StoryWindow>
           <AgentFrame
@@ -878,9 +1463,24 @@ export function Step2ProjectStates() {
             selectedIds={new Set()}
             status={{
               kind: "error",
-              message: "bb couldn't scan this computer for git repos.",
+              message: "Omnyo couldn't scan this computer for git repos.",
             }}
           />
+        </StoryWindow>
+      </Captioned>
+    </Gallery>
+  );
+}
+
+export function StepChats() {
+  return (
+    <Gallery>
+      <Captioned
+        label="Chat import"
+        hint="Between Projects and Plugins. The step embeds the Chat import plugin's settings section and is hidden when that plugin is off."
+      >
+        <StoryWindow>
+          <ChatsFrame />
         </StoryWindow>
       </Captioned>
     </Gallery>
@@ -891,27 +1491,63 @@ export function Step3Plugins() {
   return (
     <Gallery>
       <Captioned
-        label="Built-in plugins that are off by default"
-        hint="Names, icons and descriptions come from the bb-official catalog."
+        label="Recommended plugins, all on"
+        hint="Every plugin a new install turns on by default, grouped; infrastructure plugins stay hidden."
       >
         <StoryWindow>
           <PluginsFrame />
         </StoryWindow>
       </Captioned>
       <Captioned
-        label="Two on, one installing"
-        hint="Browser Automation is installed from the catalog; the others are enabled in place."
+        label="Two turned off, one switching"
+        hint="Turning a plugin off applies at once; the main button drops 'with recommended'."
       >
         <StoryWindow>
           <PluginsFrame
-            enabledIds={new Set(["workflows", "prompt-library"])}
-            pendingIds={new Set(["browser-automation"])}
+            disabledIds={new Set(["sentry", "stats"])}
+            pendingIds={new Set(["canvas"])}
           />
         </StoryWindow>
       </Captioned>
-      <Captioned label="Loading" hint="Before the catalog answers.">
+      <Captioned label="Loading" hint="Before the plugin list answers.">
         <StoryWindow>
           <PluginsFrame loading />
+        </StoryWindow>
+      </Captioned>
+    </Gallery>
+  );
+}
+
+export function StepAutomations() {
+  return (
+    <Gallery>
+      <Captioned
+        label="Starters, all off"
+        hint="Sentry shows only when the chosen project uses a Sentry SDK."
+      >
+        <StoryWindow>
+          <AutomationsFrame sentry="detected" />
+        </StoryWindow>
+      </Captioned>
+      <Captioned
+        label="Briefing scheduled, Sentry connecting, Content Feed queued"
+        hint="The Content Feed setup opens when the guide finishes."
+      >
+        <StoryWindow>
+          <AutomationsFrame
+            scheduledIds={new Set(["briefing"])}
+            pendingIds={new Set(["dependencies"])}
+            sentry="open"
+            contentFeedQueued
+          />
+        </StoryWindow>
+      </Captioned>
+      <Captioned
+        label="No project yet"
+        hint="Starters need a project to run in."
+      >
+        <StoryWindow>
+          <AutomationsFrame noProject />
         </StoryWindow>
       </Captioned>
     </Gallery>
@@ -927,7 +1563,7 @@ export function Step4Devices() {
         </StoryWindow>
       </Captioned>
       <Captioned
-        label="Setting up bb connect"
+        label="Setting up Omnyo connect"
         hint="The connect plugin's settings section is embedded in the row."
       >
         <StoryWindow>
@@ -935,7 +1571,7 @@ export function Step4Devices() {
         </StoryWindow>
       </Captioned>
       <Captioned
-        label="bb connect on, another machine already connected"
+        label="Omnyo connect on, another machine already connected"
         hint="The address is copyable; Add machine opens the existing dialog."
       >
         <StoryWindow>
@@ -946,8 +1582,8 @@ export function Step4Devices() {
         </StoryWindow>
       </Captioned>
       <Captioned
-        label="bb connect plugin disabled"
-        hint="No action is offered when the plugin is off."
+        label="Omnyo connect plugin disabled"
+        hint="The browser-access row is hidden when the plugin is off."
       >
         <StoryWindow>
           <DevicesFrame connect={{ status: "unavailable" }} />

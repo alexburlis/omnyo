@@ -3,11 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { experimental_createHostEntryHarness } from "@get-bb/plugin-sdk/testing/host";
+import { experimental_createHostEntryHarness } from "@omnyo/plugin-sdk/testing/host";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCheckoutHostEntry } from "./host.js";
 
 const execFileAsync = promisify(execFile);
+
 const temporaryRoots: string[] = [];
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -15,17 +16,18 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
     cwd,
     env: {
       ...process.env,
-      GIT_AUTHOR_NAME: "bb",
-      GIT_AUTHOR_EMAIL: "bb@example.com",
-      GIT_COMMITTER_NAME: "bb",
-      GIT_COMMITTER_EMAIL: "bb@example.com",
+      GIT_AUTHOR_NAME: "omnyo",
+      GIT_AUTHOR_EMAIL: "omnyo@example.com",
+      GIT_COMMITTER_NAME: "omnyo",
+      GIT_COMMITTER_EMAIL: "omnyo@example.com",
     },
   });
+
   return result.stdout;
 }
 
 async function createRepository(): Promise<{ repo: string; dataDir: string }> {
-  const root = await mkdtemp(join(tmpdir(), "bb-checkout-plugin-"));
+  const root = await mkdtemp(join(tmpdir(), "omnyo-checkout-plugin-"));
   temporaryRoots.push(root);
   const repo = join(root, "repo");
   const dataDir = join(root, "plugin-data");
@@ -35,6 +37,7 @@ async function createRepository(): Promise<{ repo: string; dataDir: string }> {
   await writeFile(join(repo, "README.md"), "hello\n");
   await git(repo, "add", ".");
   await git(repo, "commit", "-m", "initial");
+
   return { repo, dataDir };
 }
 
@@ -63,15 +66,18 @@ describe("checkout host entry", () => {
   it("attaches to the checkout as it is", async () => {
     const { repo, dataDir } = await createRepository();
     const harness = createHarness(dataDir);
+
     const result = await harness.experimental_call("attach", {
       operationId: "plain",
       path: repo,
       branch: null,
     });
+
     expect(result).toEqual({
       status: "attached",
       path: repo,
       branchName: "main",
+      mergeBaseBranch: null,
     });
     expect(progressText(harness)).not.toContain("Using");
     await harness.experimental_dispose();
@@ -87,7 +93,12 @@ describe("checkout host entry", () => {
       path: repo,
       branch: { kind: "existing", name: "release" },
     });
-    expect(existing.status).toBe("attached");
+
+    expect(existing).toMatchObject({
+      status: "attached",
+      branchName: "release",
+      mergeBaseBranch: null,
+    });
     expect((await git(repo, "rev-parse", "--abbrev-ref", "HEAD")).trim()).toBe(
       "release",
     );
@@ -96,13 +107,70 @@ describe("checkout host entry", () => {
     const created = await harness.experimental_call("attach", {
       operationId: "new",
       path: repo,
-      branch: { kind: "new", name: "bb/feature-thr_1", baseBranch: "main" },
+      branch: { kind: "new", name: "omnyo/feature-thr_1", baseBranch: "main" },
     });
-    expect(created.status).toBe("attached");
+
+    expect(created).toMatchObject({
+      status: "attached",
+      branchName: "omnyo/feature-thr_1",
+      mergeBaseBranch: "main",
+    });
     expect((await git(repo, "rev-parse", "--abbrev-ref", "HEAD")).trim()).toBe(
-      "bb/feature-thr_1",
+      "omnyo/feature-thr_1",
     );
-    expect(progressText(harness)).toContain("Created branch bb/feature-thr_1");
+    expect(progressText(harness)).toContain(
+      "Created branch omnyo/feature-thr_1",
+    );
+    await harness.experimental_dispose();
+  });
+
+  it("takes a branch a fresh clone holds only as origin's from there", async () => {
+    const { repo, dataDir } = await createRepository();
+    await git(repo, "switch", "--create", "dev");
+    await git(repo, "commit", "--allow-empty", "-m", "on dev only");
+    await git(repo, "switch", "--create", "release", "main");
+    await git(repo, "switch", "main");
+    const clone = join(repo, "..", "clone");
+    await git(repo, "clone", "--quiet", repo, clone);
+    await git(clone, "config", "checkout.guess", "false");
+    expect((await git(clone, "branch", "--list")).trim()).toBe("* main");
+    const harness = createHarness(dataDir);
+
+    const created = await harness.experimental_call("attach", {
+      operationId: "new-from-origin",
+      path: clone,
+      branch: { kind: "new", name: "omnyo/feature-thr_2", baseBranch: "dev" },
+    });
+
+    expect(created).toMatchObject({
+      status: "attached",
+      branchName: "omnyo/feature-thr_2",
+      mergeBaseBranch: "origin/dev",
+    });
+    await expect(git(clone, "rev-parse", "--verify", "dev")).rejects.toThrow();
+    expect((await git(clone, "rev-parse", "HEAD")).trim()).toBe(
+      (await git(clone, "rev-parse", "origin/dev")).trim(),
+    );
+    await expect(
+      git(clone, "rev-parse", "--abbrev-ref", "omnyo/feature-thr_2@{upstream}"),
+    ).rejects.toThrow();
+
+    const existing = await harness.experimental_call("attach", {
+      operationId: "existing-from-origin",
+      path: clone,
+      branch: { kind: "existing", name: "release" },
+    });
+
+    expect(existing).toMatchObject({
+      status: "attached",
+      branchName: "release",
+      mergeBaseBranch: null,
+    });
+    expect(
+      (
+        await git(clone, "rev-parse", "--abbrev-ref", "release@{upstream}")
+      ).trim(),
+    ).toBe("origin/release");
     await harness.experimental_dispose();
   });
 
@@ -138,11 +206,13 @@ describe("checkout host entry", () => {
     await git(repo, "branch", "release");
     await writeFile(join(repo, "README.md"), "edited\n");
     const harness = createHarness(dataDir);
+
     const result = await harness.experimental_call("attach", {
       operationId: "dirty",
       path: repo,
       branch: { kind: "existing", name: "release" },
     });
+
     expect(result).toMatchObject({
       status: "failed",
       message: expect.stringContaining("uncommitted changes"),
@@ -179,11 +249,13 @@ describe("checkout host entry", () => {
   it("fails a plain attach on a missing directory", async () => {
     const { dataDir } = await createRepository();
     const harness = createHarness(dataDir);
+
     const result = await harness.experimental_call("attach", {
       operationId: "missing",
       path: join(dataDir, "nope"),
       branch: null,
     });
+
     expect(result).toMatchObject({
       status: "failed",
       message: expect.stringContaining("does not exist"),

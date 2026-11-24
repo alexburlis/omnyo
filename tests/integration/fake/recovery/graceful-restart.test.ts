@@ -25,6 +25,7 @@ describe.sequential("fake provider graceful recovery integration", () => {
           harness,
           "Graceful Shutdown Recovery",
         );
+
         const oldSessionId = requireSessionId(harness);
 
         await sendTextMessage(harness.api, thread.id, {

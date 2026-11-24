@@ -2,11 +2,14 @@ import {
   PendingInteractionShell,
   type PendingInteractionSourceThread,
 } from "@/components/thread/pending-interactions/PendingInteractionShell";
-import { useCallback, useMemo, useState } from "react";
-import { Button } from "@bb/shared-ui/button";
-import type { JsonValue, PendingInteraction } from "@bb/domain";
+import { Activity, useCallback, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { useMutation, useMutationState } from "@tanstack/react-query";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import type { JsonValue, PendingInteraction } from "@omnyo/domain";
 import { PluginSlotMount } from "./PluginSlotMount";
-import { Skeleton } from "@bb/shared-ui/skeleton";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
 import { resolvePendingInteraction } from "@/lib/plugin-slot-resolvers";
 import { usePluginDisplayName } from "@/lib/plugin-logos";
 import { usePluginFrontendsSettled } from "@/lib/plugin-frontend-boot-state";
@@ -43,8 +46,59 @@ export function PluginPendingInteractionComposer({
   const pluginName = usePluginDisplayName(request.pluginId);
   const pluginsSettled = usePluginFrontendsSettled();
   const stopThread = useStopThread();
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [localError, setError] = useState<string | null>(null);
+  const [localSubmitting, setSubmitting] = useState(false);
+  const inFlight = useRef<Promise<void> | null>(null);
+
+  const mutationKey = [
+    "plugin-interaction-response",
+    interaction.threadId,
+    interaction.id,
+  ];
+
+  const response = useMutation({
+    mutationKey,
+    meta: { showErrorToast: false },
+    mutationFn: (value: JsonValue) =>
+      sdk.threads.interactions
+        .respond({
+          interactionId: interaction.id,
+          threadId: interaction.threadId,
+          value,
+        })
+        .then(() => {}),
+  });
+
+  const { mutateAsync: respond } = response;
+
+  const submissions = useMutationState({
+    filters: { mutationKey, exact: true },
+    select: (entry) => ({
+      status: entry.state.status,
+      error: entry.state.error,
+    }),
+  });
+
+  const latestSubmission = submissions.at(-1) ?? response;
+
+  const submitting =
+    localSubmitting ||
+    latestSubmission.status === "pending" ||
+    latestSubmission.status === "success";
+
+  const responseError = latestSubmission.error;
+
+  const error =
+    localError ??
+    (submitting || !responseError
+      ? null
+      : responseError instanceof Error
+        ? responseError.message
+        : String(responseError));
+
+  const questionSubmitting =
+    request.pluginId === "ask-user-question" && submitting;
+
   const slot = useMemo(
     () =>
       resolvePendingInteraction(
@@ -54,28 +108,33 @@ export function PluginPendingInteractionComposer({
       ),
     [request.pluginId, request.rendererId, pendingInteractions],
   );
+
   const submit = useCallback(
-    async (value: JsonValue) => {
-      setSubmitting(true);
-      setError(null);
-      try {
-        await sdk.threads.interactions.respond({
-          interactionId: interaction.id,
-          threadId: interaction.threadId,
-          value,
-        });
-      } catch (cause) {
+    (value: JsonValue) => {
+      if (inFlight.current) return inFlight.current;
+      flushSync(() => {
+        setSubmitting(true);
+        setError(null);
+      });
+
+      const task = respond(value).catch((cause: unknown) => {
         setSubmitting(false);
-        setError(cause instanceof Error ? cause.message : String(cause));
         throw cause;
-      }
+      });
+
+      inFlight.current = task;
+
+      return task.finally(() => {
+        if (inFlight.current === task) inFlight.current = null;
+      });
     },
-    [interaction.id, interaction.threadId],
+    [respond],
   );
 
   const cancel = useCallback(async () => {
     setSubmitting(true);
     setError(null);
+
     try {
       if (origin === "provider") {
         await stopThread.mutateAsync(interaction.threadId);
@@ -91,6 +150,7 @@ export function PluginPendingInteractionComposer({
       throw cause;
     }
   }, [origin, interaction.id, interaction.threadId, stopThread]);
+
   const dismissLabel = origin === "plugin" ? "Cancel" : "Stop turn";
 
   return (
@@ -130,20 +190,31 @@ export function PluginPendingInteractionComposer({
                 </div>
               }
             >
-              <fieldset disabled={submitting}>
-                <slot.component
-                  interaction={{
-                    id: interaction.id,
-                    threadId: interaction.threadId,
-                    title: request.title,
-                    payload: request.data,
-                    createdAt: interaction.createdAt,
-                    expiresAt: interaction.expiresAt ?? null,
-                  }}
-                  submit={submit}
-                  cancel={cancel}
-                />
-              </fieldset>
+              {questionSubmitting ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 py-2 text-xs text-muted-foreground"
+                >
+                  <Icon name="Spinner" className="size-3 animate-spin" />
+                  Sending answer…
+                </div>
+              ) : null}
+              <Activity mode={questionSubmitting ? "hidden" : "visible"}>
+                <fieldset disabled={submitting} hidden={questionSubmitting}>
+                  <slot.component
+                    interaction={{
+                      id: interaction.id,
+                      threadId: interaction.threadId,
+                      title: request.title,
+                      payload: request.data,
+                      createdAt: interaction.createdAt,
+                      expiresAt: interaction.expiresAt ?? null,
+                    }}
+                    submit={submit}
+                    cancel={cancel}
+                  />
+                </fieldset>
+              </Activity>
             </PluginSlotMount>
           ) : pluginsSettled ? (
             <div className="space-y-3">

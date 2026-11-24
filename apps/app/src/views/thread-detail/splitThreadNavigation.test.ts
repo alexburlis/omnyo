@@ -30,6 +30,7 @@ function twoPaneLayout(): SplitLayout {
 
 function eightPaneLayout(): SplitLayout {
   let layout = twoPaneLayout();
+
   for (let index = 3; index <= MAX_PANES; index += 1) {
     layout = applyThreadOpenToLayout(
       layout,
@@ -37,6 +38,7 @@ function eightPaneLayout(): SplitLayout {
       "right",
     );
   }
+
   return layout;
 }
 
@@ -64,6 +66,7 @@ describe("mixed page navigation", () => {
       panelPath: "notes",
       subPath: "inbox.md",
     } as const;
+
     const before = splitPane(twoPaneLayout(), "pane-1", "bottom", plugin);
 
     const after = reconcileLayoutForContent(before, {
@@ -83,6 +86,7 @@ describe("mixed page navigation", () => {
 describe("applyThreadOpenToLayout", () => {
   it("splits from the focused pane and focuses the opened thread", () => {
     const before = twoPaneLayout();
+
     const after = applyThreadOpenToLayout(
       before,
       { projectId: "p2", threadId: "thread-3" },
@@ -97,6 +101,7 @@ describe("applyThreadOpenToLayout", () => {
 
   it("focuses an already-open thread instead of duplicating it", () => {
     const before = twoPaneLayout();
+
     const after = applyThreadOpenToLayout(
       before,
       { projectId: "p1", threadId: "thread-1" },
@@ -117,6 +122,7 @@ describe("applyThreadOpenToLayout", () => {
       dir: "row",
       sizes: Array.from({ length: MAX_PANES }, () => 1 / MAX_PANES),
     });
+
     for (let index = 5; index <= MAX_PANES; index += 1) {
       expect(
         findPaneByThread(eight.root, "p1", `thread-${index}`),
@@ -141,6 +147,7 @@ describe("applyThreadOpenToLayout", () => {
 describe("applyThreadPaneActionToLayout", () => {
   it("focuses and maximizes the targeted open thread without changing the tree", () => {
     const before = twoPaneLayout();
+
     const result = applyThreadPaneActionToLayout(
       before,
       null,
@@ -156,12 +163,14 @@ describe("applyThreadPaneActionToLayout", () => {
 
   it("restores only the targeted maximized pane and toggles it back", () => {
     const before = twoPaneLayout();
+
     const restored = applyThreadPaneActionToLayout(
       before,
       "pane-2",
       { projectId: "p1", threadId: "thread-2" },
       "restore",
     );
+
     expect(restored).toEqual({
       layout: before,
       maximizedPaneId: null,
@@ -174,6 +183,7 @@ describe("applyThreadPaneActionToLayout", () => {
       { projectId: "p1", threadId: "thread-2" },
       "toggle",
     );
+
     expect(toggled.maximizedPaneId).toBe("pane-2");
   });
 
@@ -184,6 +194,7 @@ describe("applyThreadPaneActionToLayout", () => {
     "focuses the target for %s and returns the preference",
     (action, expected) => {
       const before = twoPaneLayout();
+
       const result = applyThreadPaneActionToLayout(
         before,
         null,

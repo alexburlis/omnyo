@@ -1,14 +1,22 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { systemRow, fileReadRow } from "@/test/fixtures/thread-timeline-rows";
 import { ThreadTimelineRows } from "./ThreadTimelineRows";
 import { TimelineReasoningExpansionProvider } from "./TimelineReasoningExpansion";
 import { TimelineWorkingIndicator } from "./TimelineWorkingIndicator";
+import { ExpandableTimelineRow } from "./ExpandableTimelineRow";
 
 const reasoningId = "thread:op:reasoning:turn-1:item-1";
+
 const thought = systemRow({
   id: reasoningId,
   systemKind: "operation",
@@ -19,6 +27,7 @@ const thought = systemRow({
   startedAt: 1_000,
   completedAt: 13_000,
 });
+
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false } },
 });
@@ -72,6 +81,50 @@ function Fixture({
 afterEach(() => {
   cleanup();
   client.clear();
+  vi.useRealTimers();
+});
+
+it("updates elapsed activity from the known start time", () => {
+  vi.useFakeTimers({
+    now: 100_000,
+    toFake: ["Date", "setInterval", "clearInterval"],
+  });
+  render(
+    <TimelineWorkingIndicator label="Running command" startedAt={97_000} />,
+  );
+  expect(screen.getByText("Running command · 3s")).toBeTruthy();
+  act(() => vi.advanceTimersByTime(2_000));
+  expect(screen.getByText("Running command · 5s")).toBeTruthy();
+});
+
+it("keeps a tool open when the reader interacts with its output", () => {
+  const row = (autoExpanded: boolean) => (
+    <TimelineReasoningExpansionProvider>
+      <ExpandableTimelineRow
+        expansionKey="selected-tool"
+        autoExpanded={autoExpanded}
+        title={{
+          segments: [
+            { text: "Command", em: false, shimmer: false, truncate: true },
+          ],
+          decorations: [],
+          tone: "default",
+          action: null,
+          plain: "Command",
+        }}
+        renderBody={() => <pre>Copy this output</pre>}
+      />
+    </TimelineReasoningExpansionProvider>
+  );
+
+  const view = render(row(true));
+  fireEvent.pointerDown(screen.getByText("Copy this output"));
+  view.rerender(row(false));
+  expect(
+    screen
+      .getByRole("button", { name: "Command" })
+      .getAttribute("aria-expanded"),
+  ).toBe("true");
 });
 
 describe("reasoning disclosure lifecycle", () => {
@@ -102,12 +155,14 @@ describe("reasoning disclosure lifecycle", () => {
       const { container, rerender } = render(
         <Fixture phase="live" nested={nested} />,
       );
-      fireEvent.click(screen.getByRole("button", { name: "Thinking…" }));
+
       expect(
         screen
           .getByRole("button", { name: "Thinking…" })
           .getAttribute("aria-expanded"),
       ).toBe("true");
+      fireEvent.click(screen.getByRole("button", { name: "Thinking…" }));
+      fireEvent.click(screen.getByRole("button", { name: "Thinking…" }));
       expect(container.querySelector('[data-icon="AiBrain01"]')).toBeNull();
       rerender(<Fixture phase="completed" nested={nested} />);
       expect(
@@ -128,7 +183,7 @@ describe("reasoning disclosure lifecycle", () => {
     },
   );
 
-  it("does not inherit expansion for the next thought and omits the icon before text arrives", () => {
+  it("does not inherit a collapsed disclosure for the next thought and omits the icon before text arrives", () => {
     const { container, rerender } = render(<Fixture phase="live" text="" />);
     expect(container.querySelector('[data-icon="AiBrain01"]')).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
@@ -139,7 +194,7 @@ describe("reasoning disclosure lifecycle", () => {
       screen
         .getByRole("button", { name: "Thinking…" })
         .getAttribute("aria-expanded"),
-    ).toBe("false");
+    ).toBe("true");
   });
 });
 

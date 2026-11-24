@@ -17,12 +17,12 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const OFFICIAL = {
-  name: "bb-community",
-  displayName: "BB Community",
+  name: "omnyo-official",
+  displayName: "Omnyo Official",
   description: null,
   official: true,
-  sourceKind: "https",
-  source: "https://getbb.app/marketplace/v1/marketplace.json",
+  sourceKind: "path",
+  source: "/app/builtin-plugins",
   resolvedCommit: null,
   entryCount: 3,
   lastRefreshAt: 1_700_000_000_000,
@@ -53,21 +53,26 @@ function stubFetch(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
       requests.push({ url, init });
+
       if (url === "/api/v1/marketplaces" && init?.method !== "POST") {
         return jsonResponse({ marketplaces });
       }
+
       if (url === "/api/v1/marketplaces") {
         return addResponse;
       }
+
       if (
         url.startsWith("/api/v1/marketplaces/") &&
         init?.method === "DELETE"
       ) {
         return jsonResponse({ ok: true, convertedPluginIds: ["notes"] });
       }
+
       return jsonResponse({ error: "not found" }, 404);
     }),
   );
+
   return requests;
 }
 
@@ -95,6 +100,7 @@ describe("MarketplacesSettingsSection", () => {
           request.url === "/api/v1/marketplaces" &&
           request.init?.method === "POST",
       );
+
       expect(JSON.parse(String(post?.init?.body))).toEqual({
         source: "https://acme.test/marketplace.json",
       });
@@ -111,7 +117,7 @@ describe("MarketplacesSettingsSection", () => {
       target: { value: "git:https://github.com/acme/agent-plugins.git@main" },
     });
     fireEvent.change(screen.getByLabelText("Marketplace subdirectory"), {
-      target: { value: " bb " },
+      target: { value: " omnyo " },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
@@ -121,9 +127,10 @@ describe("MarketplacesSettingsSection", () => {
           request.url === "/api/v1/marketplaces" &&
           request.init?.method === "POST",
       );
+
       expect(JSON.parse(String(post?.init?.body))).toEqual({
         source: "git:https://github.com/acme/agent-plugins.git@main",
-        subdirectory: "bb",
+        subdirectory: "omnyo",
       });
     });
   });
@@ -137,7 +144,7 @@ describe("MarketplacesSettingsSection", () => {
       target: { value: "git:https://github.com/acme/agent-plugins.git" },
     });
     fireEvent.change(screen.getByLabelText("Marketplace subdirectory"), {
-      target: { value: "bb" },
+      target: { value: "omnyo" },
     });
     fireEvent.change(screen.getByLabelText("Marketplace source"), {
       target: { value: "https://acme.test/marketplace.json" },
@@ -151,6 +158,7 @@ describe("MarketplacesSettingsSection", () => {
           request.url === "/api/v1/marketplaces" &&
           request.init?.method === "POST",
       );
+
       expect(JSON.parse(String(post?.init?.body))).toEqual({
         source: "https://acme.test/marketplace.json",
       });
@@ -164,7 +172,7 @@ describe("MarketplacesSettingsSection", () => {
         ...ACME,
         sourceKind: "git",
         source: "git:https://acme.test/repo.git@main",
-        subdirectory: "bb",
+        subdirectory: "omnyo",
       },
     ]);
     const { wrapper } = createQueryClientTestHarness();
@@ -172,7 +180,7 @@ describe("MarketplacesSettingsSection", () => {
 
     expect(
       await screen.findByText(
-        "git:https://acme.test/repo.git@main · subdirectory bb",
+        "git:https://acme.test/repo.git@main · subdirectory omnyo",
       ),
     ).toBeTruthy();
   });
@@ -200,15 +208,15 @@ describe("MarketplacesSettingsSection", () => {
     });
   });
 
-  it("offers Remove only for marketplaces other than bb-community", async () => {
+  it("offers Remove only for marketplaces other than omnyo-official", async () => {
     stubFetch([OFFICIAL, ACME]);
     const { wrapper } = createQueryClientTestHarness();
     render(<MarketplacesSettingsSection />, { wrapper });
 
     await screen.findByText("Acme Plugins");
-    expect(screen.queryByRole("button", { name: "Remove BB Official" })).toBe(
-      null,
-    );
+    expect(
+      screen.queryByRole("button", { name: `Remove ${OFFICIAL.displayName}` }),
+    ).toBe(null);
     expect(
       screen.getByRole("button", { name: "Remove Acme Plugins" }),
     ).toBeTruthy();

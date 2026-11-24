@@ -5,10 +5,19 @@ const REACT_FIBER_PREFIXES = [
   "__reactInternalInstance$",
 ] as const;
 
+const REACT_CONTAINER_PREFIXES = [
+  "__reactContainer$",
+  "_reactListening",
+] as const;
+
 type RemoveChild = <T extends Node>(child: T) => T;
+
 type InsertBefore = <T extends Node>(node: T, child: Node | null) => T;
+
 type ReplaceChild = <T extends Node>(node: Node, child: T) => T;
+
 type AppendChild = <T extends Node>(node: T) => T;
+
 type AppendLike = (...nodes: Array<Node | string>) => void;
 
 interface InstalledGuard {
@@ -16,11 +25,17 @@ interface InstalledGuard {
 }
 
 let installed: InstalledGuard | null = null;
+
 let suppressedCount = 0;
+
 let loggedCount = 0;
+
 let refusedMoveCount = 0;
+
 let loggedRefusalCount = 0;
+
 let isolationDepth = 0;
+
 let isolationLabel: string | null = null;
 
 export function foreignDomMutationCount(): number {
@@ -35,9 +50,12 @@ function describeNode(node: Node): string {
   if (node instanceof Element) {
     const id = node.id ? `#${node.id}` : "";
     const testId = node.getAttribute("data-testid");
+
     return `<${node.localName}${id}${testId ? `[data-testid=${testId}]` : ""}>`;
   }
+
   if (node.nodeType === Node.TEXT_NODE) return "#text";
+
   return `#node(${node.nodeType})`;
 }
 
@@ -51,13 +69,24 @@ function isHierarchyRequestError(error: unknown): boolean {
   );
 }
 
-function isReactHostNode(node: Node): boolean {
+function hasOwnKeyWithPrefix(node: Node, prefixes: readonly string[]): boolean {
   for (const key of Object.getOwnPropertyNames(node)) {
-    for (const prefix of REACT_FIBER_PREFIXES) {
+    for (const prefix of prefixes) {
       if (key.startsWith(prefix)) return true;
     }
   }
+
   return false;
+}
+
+function isReactHostNode(node: Node): boolean {
+  return hasOwnKeyWithPrefix(node, REACT_FIBER_PREFIXES);
+}
+
+function isReactParent(node: Node): boolean {
+  return (
+    isReactHostNode(node) || hasOwnKeyWithPrefix(node, REACT_CONTAINER_PREFIXES)
+  );
 }
 
 function recordSuppression(
@@ -66,10 +95,11 @@ function recordSuppression(
   expectedParent: Node,
 ): void {
   suppressedCount += 1;
+
   if (loggedCount >= MAX_LOGGED_SUPPRESSIONS) return;
   loggedCount += 1;
   console.warn(
-    `[bb] ${operation}: ${describeNode(node)} is no longer a child of ${describeNode(
+    `[Omnyo] ${operation}: ${describeNode(node)} is no longer a child of ${describeNode(
       expectedParent,
     )}. Something outside React moved or removed it (a browser extension, ` +
       `plugin content script, or page translation is the usual cause); the ` +
@@ -80,14 +110,17 @@ function recordSuppression(
 
 function recordRefusedMove(node: Node, attemptedParent: Node): void {
   refusedMoveCount += 1;
+
   if (loggedRefusalCount >= MAX_LOGGED_SUPPRESSIONS) return;
   loggedRefusalCount += 1;
+
   const owner =
     isolationLabel === null
       ? "a plugin content script"
       : `plugin "${isolationLabel}"`;
+
   console.warn(
-    `[bb] ${owner} tried to move ${describeNode(node)} out of React's tree. The ` +
+    `[Omnyo] ${owner} tried to move ${describeNode(node)} out of React's tree. The ` +
       `move was blocked so the app does not crash when that node is later ` +
       `removed or reordered.`,
     { node, attemptedParent, actualParent: node.parentNode },
@@ -96,10 +129,14 @@ function recordRefusedMove(node: Node, attemptedParent: Node): void {
 
 function refusePluginReparent(node: Node, newParent: Node): boolean {
   if (isolationDepth === 0) return false;
+
   if (node.parentNode === newParent) return false;
+
   if (!isReactHostNode(node)) return false;
-  if (node.parentNode === null && isReactHostNode(newParent)) return false;
+
+  if (node.parentNode === null && isReactParent(newParent)) return false;
   recordRefusedMove(node, newParent);
+
   return true;
 }
 
@@ -114,7 +151,9 @@ function wrapCallback<Args extends unknown[], Result>(
 function enterIsolation(label?: string): string | null {
   const previousLabel = isolationLabel;
   isolationDepth += 1;
+
   if (label !== undefined) isolationLabel = label;
+
   return previousLabel;
 }
 
@@ -125,6 +164,7 @@ function leaveIsolation(previousLabel: string | null): void {
 
 export function runWithPluginDomIsolation<T>(fn: () => T, label?: string): T {
   const previousLabel = enterIsolation(label);
+
   try {
     return fn();
   } finally {
@@ -136,8 +176,10 @@ function whenAborted(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) {
       resolve();
+
       return;
     }
+
     signal.addEventListener("abort", () => resolve(), { once: true });
   });
 }
@@ -149,16 +191,20 @@ export async function runWithPluginDomIsolationAsync<T>(
 ): Promise<T> {
   const previousLabel = enterIsolation(label);
   const work = Promise.resolve().then(fn);
+
   try {
     if (signal === undefined) return await work;
+
     const winner = await Promise.race([
       work.then((value) => ({ ok: true as const, value })),
       whenAborted(signal).then(() => ({ ok: false as const })),
     ]);
+
     if (winner.ok) return winner.value;
   } finally {
     leaveIsolation(previousLabel);
   }
+
   return await work;
 }
 
@@ -168,12 +214,15 @@ function filterAppendNodes(
 ): Array<Node | string> {
   if (isolationDepth === 0) return nodes;
   const kept: Array<Node | string> = [];
+
   for (const node of nodes) {
     if (typeof node !== "string" && refusePluginReparent(node, parent)) {
       continue;
     }
+
     kept.push(node);
   }
+
   return kept;
 }
 
@@ -195,25 +244,33 @@ export function installForeignDomMutationGuard(): void {
   const nativeFragmentPrepend = DocumentFragment.prototype.prepend;
   const nativeElementReplaceChildren = Element.prototype.replaceChildren;
   const nativeDocumentReplaceChildren = Document.prototype.replaceChildren;
+
   const nativeFragmentReplaceChildren =
     DocumentFragment.prototype.replaceChildren;
+
   const nativeInsertAdjacentElement = Element.prototype.insertAdjacentElement;
+
   const nativeRangeInsertNode =
     typeof Range === "function" ? Range.prototype.insertNode : null;
+
   const nativeAddEventListener = EventTarget.prototype.addEventListener;
   const nativeRemoveEventListener = EventTarget.prototype.removeEventListener;
   const originalSetTimeout = window.setTimeout;
   const nativeSetTimeout = originalSetTimeout.bind(window);
   const originalSetInterval = window.setInterval;
   const nativeSetInterval = originalSetInterval.bind(window);
+
   const originalQueueMicrotask =
     typeof queueMicrotask === "function" ? queueMicrotask : null;
+
   const nativeQueueMicrotask =
     originalQueueMicrotask === null
       ? null
       : originalQueueMicrotask.bind(window);
+
   const NativeMutationObserver =
     typeof MutationObserver === "function" ? MutationObserver : null;
+
   const listenerWraps = new WeakMap<
     EventListenerOrEventListenerObject,
     EventListenerOrEventListenerObject
@@ -225,17 +282,22 @@ export function installForeignDomMutationGuard(): void {
   ): T {
     if (child.parentNode !== this) {
       recordSuppression("removeChild", child, this);
+
       return child;
     }
+
     try {
       nativeRemoveChild.call(this, child);
     } catch (error) {
       if (isNotFoundError(error)) {
         recordSuppression("removeChild", child, this);
+
         return child;
       }
+
       throw error;
     }
+
     return child;
   };
 
@@ -243,8 +305,10 @@ export function installForeignDomMutationGuard(): void {
     T extends Node,
   >(this: Node, node: T, child: Node | null): T {
     if (refusePluginReparent(node, this)) return node;
+
     if (child !== null && child.parentNode !== this) {
       recordSuppression("insertBefore", child, this);
+
       try {
         nativeInsertBefore.call(this, node, null);
       } catch (error) {
@@ -252,17 +316,22 @@ export function installForeignDomMutationGuard(): void {
           throw error;
         }
       }
+
       return node;
     }
+
     try {
       nativeInsertBefore.call(this, node, child);
     } catch (error) {
       if (isNotFoundError(error)) {
         recordSuppression("insertBefore", child ?? node, this);
+
         return node;
       }
+
       throw error;
     }
+
     return node;
   };
 
@@ -270,8 +339,10 @@ export function installForeignDomMutationGuard(): void {
     T extends Node,
   >(this: Node, node: Node, child: T): T {
     if (refusePluginReparent(node, this)) return child;
+
     if (child.parentNode !== this) {
       recordSuppression("replaceChild", child, this);
+
       if (node.parentNode !== this && !refusePluginReparent(node, this)) {
         try {
           nativeInsertBefore.call(this, node, null);
@@ -281,17 +352,22 @@ export function installForeignDomMutationGuard(): void {
           }
         }
       }
+
       return child;
     }
+
     try {
       nativeReplaceChild.call(this, node, child);
     } catch (error) {
       if (isNotFoundError(error)) {
         recordSuppression("replaceChild", child, this);
+
         return child;
       }
+
       throw error;
     }
+
     return child;
   };
 
@@ -301,12 +377,14 @@ export function installForeignDomMutationGuard(): void {
   ): T {
     if (refusePluginReparent(node, this)) return node;
     nativeAppendChild.call(this, node);
+
     return node;
   };
 
   const guardedParentAppend = (native: AppendLike): AppendLike =>
     function append(this: ParentNode, ...nodes: Array<Node | string>): void {
       const kept = filterAppendNodes(this, nodes);
+
       if (kept.length === 0) return;
       native.apply(this, kept);
     };
@@ -318,6 +396,7 @@ export function installForeignDomMutationGuard(): void {
     function adjacent(this: Element, ...nodes: Array<Node | string>): void {
       const parent = resolveParent(this) ?? this;
       const kept = filterAppendNodes(parent, nodes);
+
       if (kept.length === 0) return;
       native.apply(this, kept);
     };
@@ -354,6 +433,7 @@ export function installForeignDomMutationGuard(): void {
     ): void {
       native.apply(this, filterAppendNodes(this, nodes));
     };
+
   Element.prototype.replaceChildren = guardedReplaceChildren(
     nativeElementReplaceChildren,
   );
@@ -372,17 +452,21 @@ export function installForeignDomMutationGuard(): void {
       position === "beforebegin" || position === "afterend"
         ? this.parentNode
         : this;
+
     if (parent !== null && refusePluginReparent(element, parent)) return null;
+
     return nativeInsertAdjacentElement.call(this, position, element);
   };
 
   if (nativeRangeInsertNode !== null) {
     Range.prototype.insertNode = function insertNode(node: Node): void {
       const container = this.commonAncestorContainer;
+
       const parent =
         container.nodeType === Node.TEXT_NODE
           ? container.parentNode
           : container;
+
       if (parent !== null && refusePluginReparent(node, parent)) return;
       nativeRangeInsertNode.call(this, node);
     };
@@ -393,7 +477,9 @@ export function installForeignDomMutationGuard(): void {
     label: string | null,
   ): EventListenerOrEventListenerObject {
     const existing = listenerWraps.get(listener);
+
     if (existing !== undefined) return existing;
+
     const wrapped: EventListenerOrEventListenerObject =
       typeof listener === "function"
         ? wrapCallback(listener, label)
@@ -404,7 +490,9 @@ export function installForeignDomMutationGuard(): void {
                 label ?? undefined,
               ),
           };
+
     listenerWraps.set(listener, wrapped);
+
     return wrapped;
   }
 
@@ -417,8 +505,10 @@ export function installForeignDomMutationGuard(): void {
       isolationDepth > 0 && listener !== null
         ? wrapListener(listener, isolationLabel)
         : listener;
+
     nativeAddEventListener.call(this, type, scheduled, options);
   };
+
   EventTarget.prototype.removeEventListener = function removeEventListener(
     type: string,
     listener: EventListenerOrEventListenerObject | null,
@@ -426,6 +516,7 @@ export function installForeignDomMutationGuard(): void {
   ): void {
     const wrapped = listener === null ? undefined : listenerWraps.get(listener);
     nativeRemoveEventListener.call(this, type, listener, options);
+
     if (wrapped !== undefined && wrapped !== listener) {
       nativeRemoveEventListener.call(this, type, wrapped, options);
     }
@@ -436,6 +527,7 @@ export function installForeignDomMutationGuard(): void {
     label: string | null,
   ): TimerHandler {
     if (typeof handler !== "function") return handler;
+
     return function isolatedTimer(this: unknown, ...cbArgs: unknown[]) {
       return runWithPluginDomIsolation(
         () => Reflect.apply(handler, this, cbArgs),
@@ -451,6 +543,7 @@ export function installForeignDomMutationGuard(): void {
   ) => {
     const scheduled =
       isolationDepth > 0 ? wrapTimerHandler(handler, isolationLabel) : handler;
+
     return nativeSetTimeout(scheduled, timeout, ...args);
   }) as typeof setTimeout;
 
@@ -461,6 +554,7 @@ export function installForeignDomMutationGuard(): void {
   ) => {
     const scheduled =
       isolationDepth > 0 ? wrapTimerHandler(handler, isolationLabel) : handler;
+
     return nativeSetInterval(scheduled, timeout, ...args);
   }) as typeof setInterval;
 
@@ -512,16 +606,20 @@ export function installForeignDomMutationGuard(): void {
       DocumentFragment.prototype.replaceChildren =
         nativeFragmentReplaceChildren;
       Element.prototype.insertAdjacentElement = nativeInsertAdjacentElement;
+
       if (nativeRangeInsertNode !== null) {
         Range.prototype.insertNode = nativeRangeInsertNode;
       }
+
       EventTarget.prototype.addEventListener = nativeAddEventListener;
       EventTarget.prototype.removeEventListener = nativeRemoveEventListener;
       window.setTimeout = originalSetTimeout;
       window.setInterval = originalSetInterval;
+
       if (originalQueueMicrotask !== null) {
         window.queueMicrotask = originalQueueMicrotask;
       }
+
       if (NativeMutationObserver !== null) {
         window.MutationObserver = NativeMutationObserver;
       }
@@ -534,6 +632,7 @@ export function uninstallForeignDomMutationGuardForTest(): void {
     installed.restore();
     installed = null;
   }
+
   suppressedCount = 0;
   loggedCount = 0;
   refusedMoveCount = 0;

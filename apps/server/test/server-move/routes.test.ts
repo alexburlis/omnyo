@@ -1,3 +1,4 @@
+import * as fullArtifactModule from "../../src/services/server-move/full-artifact.js";
 import { createHash } from "node:crypto";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,23 +7,24 @@ import {
   HOST_DAEMON_PROTOCOL_VERSION,
   type HostDaemonOnlineRpcRequestMessage,
   type HostDaemonRpcCommand,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   extractServerArchive,
   readLastServerMoveFile,
   readServerMovedFile,
   writeLastServerMoveFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import {
   serverMoveStatusResponseSchema,
   serverMoveStatusSchema,
-} from "@bb/server-contract";
-import { setExperiments } from "@bb/db";
-import { defaultExperiments } from "@bb/domain";
-import { createDeferredPromise } from "@bb/test-helpers";
-import { afterEach, describe, expect, it } from "vitest";
+} from "@omnyo/server-contract";
+import { setExperiments } from "@omnyo/db";
+import { defaultExperiments } from "@omnyo/domain";
+import { createDeferredPromise } from "@omnyo/test-helpers";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readJson } from "../helpers/json.js";
 import {
+  createTestFullOmnyoAppArtifact,
   inspectResult,
   registerFakeDaemon,
   type FakeDaemonReply,
@@ -35,10 +37,15 @@ import {
 } from "../helpers/test-app.js";
 
 const API = "/api/v1";
+
 const OLD = "host-old";
+
 const NEW = "host-new";
+
 const WORKER = "host-worker";
+
 const DIRECT_URL = "https://desktop.example.test";
+
 const tempDirs: string[] = [];
 
 type PrepareCommand = Extract<
@@ -47,14 +54,16 @@ type PrepareCommand = Extract<
 >;
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })),
   );
 });
 
 async function makeTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "bb-server-move-routes-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-server-move-routes-"));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -109,6 +118,7 @@ describe("server move routes", () => {
     withTestHarness(async (harness) => {
       seedTopology(harness);
       setExperiments(harness.db, defaultExperiments);
+
       const gated = await Promise.all([
         postJson(harness, `${API}/server/move/check`, {
           targetHostId: NEW,
@@ -125,12 +135,14 @@ describe("server move routes", () => {
           method: "DELETE",
         }),
       ]);
+
       for (const response of gated) {
         expect(response.status).toBe(403);
         expect(await readJson(response)).toMatchObject({
           code: "server_move_experiment_disabled",
         });
       }
+
       const status = await harness.app.request(`${API}/server/move`);
       expect(status.status).toBe(200);
       expect(
@@ -138,8 +150,15 @@ describe("server move routes", () => {
       ).toEqual({ move: null, lastMove: null });
     }));
 
-  it("runs a move through the public routes, freezes writes, and serves the archive only to the target", () =>
-    withTestHarness(async (harness) => {
+  it("runs a move through the public routes, freezes writes, and serves the archive only to the target", () => {
+    vi.spyOn(
+      fullArtifactModule,
+      "createFullOmnyoAppArtifactService",
+    ).mockImplementation((args) =>
+      createTestFullOmnyoAppArtifact(args.dataDir, "0.0.0-test"),
+    );
+
+    return withTestHarness(async (harness) => {
       seedTopology(harness);
       const events: string[] = [];
       const releasePrepare = createDeferredPromise<void>();
@@ -159,19 +178,28 @@ describe("server move routes", () => {
               return {
                 ok: true,
                 result: inspectResult({
-                  bbAppVersion: harness.config.appVersion,
+                  coreVersion: harness.config.appVersion,
                 }),
               };
             case "server_move.prepare":
               received.prepare = request.command;
               await releasePrepare.promise;
+
               return {
                 ok: true,
                 result: { localServerUrl: "http://127.0.0.1:3334", pid: 42 },
               };
             case "server_move.activate":
-            case "server_move.abort":
               return { ok: true, result: { ok: true } };
+            case "server_move.abort":
+              return {
+                ok: true,
+                result: {
+                  ok: true,
+                  moveId: request.command.moveId,
+                  fenced: true,
+                },
+              };
             default:
               throw new Error(`Unexpected ${request.command.type}`);
           }
@@ -182,6 +210,7 @@ describe("server move routes", () => {
         targetHostId: NEW,
         serverUrl: DIRECT_URL,
       });
+
       expect(check.status).toBe(200);
       expect(await readJson(check)).toMatchObject({
         mode: "direct",
@@ -195,10 +224,12 @@ describe("server move routes", () => {
         stopRunningWork: true,
         archiveExistingTargetServerData: false,
       });
+
       expect(start.status).toBe(200);
       const started = serverMoveStatusSchema.parse(await readJson(start));
       await expect.poll(() => received.prepare !== null).toBe(true);
       const prepareCommand = received.prepare;
+
       if (prepareCommand === null) {
         throw new Error("The target never received prepare");
       }
@@ -208,15 +239,18 @@ describe("server move routes", () => {
         move: { moveId: started.moveId, state: "preparing", cancellable: true },
         lastMove: null,
       });
+
       const frozenWrite = await postJson(harness, `${API}/projects`, {
         name: "Blocked while moving",
       });
+
       expect(frozenWrite.status).toBe(503);
       expect(await readJson(frozenWrite)).toMatchObject({
         code: "server_moving",
-        retryable: false,
+        retryable: true,
       });
       expect((await harness.app.request(`${API}/hosts`)).status).toBe(200);
+
       for (const [path, body] of [
         ["/internal/hosts/enroll-key", {}],
         ["/internal/hosts/enroll", { hostId: "host-late", hostName: "Late" }],
@@ -224,11 +258,13 @@ describe("server move routes", () => {
         const enrollment = await postJson(harness, path, body, {
           authorization: "Bearer enroll-token",
         });
+
         expect(enrollment.status, path).toBe(503);
         expect(await readJson(enrollment)).toMatchObject({
           code: "server_moving",
         });
       }
+
       const checkDuringMove = await postJson(
         harness,
         `${API}/server/move/check`,
@@ -237,6 +273,7 @@ describe("server move routes", () => {
           serverUrl: DIRECT_URL,
         },
       );
+
       expect(checkDuringMove.status).toBe(200);
       expect(await readJson(checkDuringMove)).toMatchObject({
         canMove: false,
@@ -250,9 +287,11 @@ describe("server move routes", () => {
         `/internal/server-move/${started.moveId}/archive`,
       );
       expect((await harness.app.request(archivePath)).status).toBe(401);
+
       const forbidden = await harness.app.request(archivePath, {
         headers: daemonHeaders(WORKER),
       });
+
       expect(forbidden.status).toBe(403);
       expect(await readJson(forbidden)).toMatchObject({
         code: "server_move_download_forbidden",
@@ -270,14 +309,16 @@ describe("server move routes", () => {
       expect(
         (
           await harness.app.request(
-            `/internal/server-move/${started.moveId}/bb-app.tgz`,
+            `/internal/server-move/${started.moveId}/app-runtime.tgz`,
             { headers: daemonHeaders(NEW) },
           )
         ).status,
-      ).toBe(404);
+      ).toBe(200);
+
       const download = await harness.app.request(archivePath, {
         headers: daemonHeaders(NEW),
       });
+
       expect(download.status).toBe(200);
       expect(download.headers.get("content-length")).toBe(
         String(prepareCommand.archive.sizeBytes),
@@ -289,16 +330,19 @@ describe("server move routes", () => {
       );
       const downloaded = join(await makeTempDir(), "server.tar.gz");
       await writeFile(downloaded, archiveBytes);
+
       const manifest = await extractServerArchive({
         archivePath: downloaded,
         destinationDir: await makeTempDir(),
       });
-      expect(manifest.entries.map((entry) => entry.path)).toContain("bb.db");
+
+      expect(manifest.entries.map((entry) => entry.path)).toContain("app.db");
 
       releasePrepare.resolve();
       await expect
         .poll(async () => {
           const response = await harness.app.request(`${API}/server/move`);
+
           return serverMoveStatusResponseSchema.parse(await readJson(response))
             .move?.state;
         })
@@ -311,30 +355,36 @@ describe("server move routes", () => {
           })
         ).status,
       ).toBe(404);
+
       const cancel = await harness.app.request(`${API}/server/move/cancel`, {
         method: "POST",
       });
+
       expect(cancel.status).toBe(409);
       expect(await readJson(cancel)).toMatchObject({
         code: "server_move_not_cancellable",
       });
+
       const retry = await postJson(harness, `${API}/server/move`, {
         targetHostId: NEW,
         serverUrl: DIRECT_URL,
         stopRunningWork: true,
         archiveExistingTargetServerData: false,
       });
+
       expect(retry.status).toBe(200);
       expect(await readJson(retry)).toMatchObject({
         moveId: started.moveId,
         state: "completed",
       });
+
       const otherTarget = await postJson(harness, `${API}/server/move`, {
         targetHostId: WORKER,
         serverUrl: DIRECT_URL,
         stopRunningWork: true,
         archiveExistingTargetServerData: false,
       });
+
       expect(otherTarget.status).toBe(409);
       expect(await readJson(otherTarget)).toMatchObject({
         code: "server_move_in_progress",
@@ -345,6 +395,7 @@ describe("server move routes", () => {
         toHostId: NEW,
         serverUrl: DIRECT_URL,
       });
+
       const sessionOpen = await postJson(
         harness,
         "/internal/session/open",
@@ -354,7 +405,7 @@ describe("server move routes", () => {
           hostName: "Worker",
           hasMachineCredential: false,
           platform: "linux",
-          dataDir: "/home/me/.bb-machines/laptop",
+          dataDir: "/home/me/.omnyo-machines/laptop",
           localApiPort: 38_888,
           protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
           activeThreads: [],
@@ -362,6 +413,7 @@ describe("server move routes", () => {
         },
         daemonHeaders(WORKER),
       );
+
       expect(sessionOpen.status).toBe(410);
       expect(await readJson(sessionOpen)).toMatchObject({
         code: "server_moved",
@@ -372,12 +424,14 @@ describe("server move routes", () => {
         },
       });
       expect(events).toContain(`server.moved:${WORKER}`);
-    }));
+    });
+  });
 
   it("refuses machine credentials on every server move route", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
-      const machine = { "x-bb-gate-auth": "machine" };
+      const machine = { "x-omnyo-gate-auth": "machine" };
+
       const responses = await Promise.all([
         postJson(
           harness,
@@ -407,6 +461,7 @@ describe("server move routes", () => {
           headers: machine,
         }),
       ]);
+
       for (const response of responses) {
         expect(response.status).toBe(403);
         expect(await readJson(response)).toMatchObject({
@@ -418,6 +473,7 @@ describe("server move routes", () => {
   it("reports the last move and records old copy deletion even when the machine already removed it", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
+
       const lastMove = {
         moveId: "move-1",
         fromHostId: OLD,
@@ -427,6 +483,7 @@ describe("server move routes", () => {
         completedAt: 1_000,
         oldCopyDeletedAt: null,
       };
+
       await writeLastServerMoveFile(harness.config.dataDir, {
         version: 1,
         ...lastMove,
@@ -439,6 +496,7 @@ describe("server move routes", () => {
         `${API}/hosts/${OLD}/old-server-copy`,
         { method: "DELETE" },
       );
+
       expect(offline.status).toBe(502);
       expect(
         (await readLastServerMoveFile(harness.config.dataDir))
@@ -449,6 +507,7 @@ describe("server move routes", () => {
         `${API}/hosts/${WORKER}/old-server-copy`,
         { method: "DELETE" },
       );
+
       expect(wrongHost.status).toBe(404);
       expect(await readJson(wrongHost)).toMatchObject({
         code: "old_server_copy_not_found",
@@ -459,10 +518,12 @@ describe("server move routes", () => {
         hostId: OLD,
         handle: () => ({ ok: true, result: { deleted: false } }),
       });
+
       const deleted = await harness.app.request(
         `${API}/hosts/${OLD}/old-server-copy`,
         { method: "DELETE" },
       );
+
       expect(deleted.status).toBe(200);
       expect(await readJson(deleted)).toEqual({ deleted: false });
       expect(daemon.requests.map((request) => request.command)).toEqual([
@@ -481,23 +542,25 @@ describe("server move routes", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe("application/gzip");
       expect(response.headers.get("content-disposition")).toMatch(
-        /^attachment; filename="bb-server-\d{4}-\d{2}-\d{2}\.tar\.gz"$/u,
+        /^attachment; filename="omnyo-server-\d{4}-\d{2}-\d{2}\.tar\.gz"$/u,
       );
       const bytes = Buffer.from(await response.arrayBuffer());
-      expect(response.headers.get("x-bb-archive-sha256")).toBe(
+      expect(response.headers.get("x-omnyo-archive-sha256")).toBe(
         createHash("sha256").update(bytes).digest("hex"),
       );
       const exportPath = join(await makeTempDir(), "export.tar.gz");
       await writeFile(exportPath, bytes);
+
       const manifest = await extractServerArchive({
         archivePath: exportPath,
         destinationDir: await makeTempDir(),
       });
+
       expect(manifest).toMatchObject({
         sourceDataDir: harness.config.dataDir,
         sourceServerHostId: OLD,
       });
-      expect(manifest.entries.map((entry) => entry.path)).toContain("bb.db");
+      expect(manifest.entries.map((entry) => entry.path)).toContain("app.db");
       await expect
         .poll(
           async () =>

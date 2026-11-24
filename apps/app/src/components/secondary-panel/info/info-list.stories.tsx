@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { PanelStage } from "../ThreadMetadataContent.fixtures";
 import { ThreadMetadataCard } from "../ThreadMetadataContent";
 import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
@@ -10,7 +10,9 @@ export default {
 };
 
 const NOW = 1_800_000_000_000;
+
 const HOUR = 60 * 60 * 1000;
+
 const noop = () => {};
 
 const ROWS = Array.from({ length: 9 }, (_, index) => ({
@@ -101,6 +103,7 @@ export function Rows() {
 
 function CollapsibleSection() {
   const [collapsed, setCollapsed] = useState(true);
+
   return (
     <InfoSection
       label="Section"

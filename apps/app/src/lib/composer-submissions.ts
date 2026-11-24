@@ -1,22 +1,41 @@
-import type { PluginComposerScope } from "@get-bb/plugin-sdk";
+import type {
+  ComposerDraftSnapshot,
+  PluginComposerScope,
+} from "@omnyo/plugin-sdk";
 import { composerScopeIdentity } from "@/components/plugin/plugin-composer-host";
-import { createKeyedListeners } from "./keyed-listeners";
 
-const listeners = createKeyedListeners<string>();
+const listeners = new Map<
+  string,
+  Set<(draft?: ComposerDraftSnapshot) => void>
+>();
 
 export function subscribeComposerSubmitted(
   scope: PluginComposerScope,
-  listener: () => void,
+  listener: (draft?: ComposerDraftSnapshot) => void,
 ): () => void {
-  return listeners.subscribe(composerScopeIdentity(scope), () => {
+  const key = composerScopeIdentity(scope);
+  const entries = listeners.get(key) ?? new Set();
+  entries.add(listener);
+  listeners.set(key, entries);
+
+  return () => {
+    entries.delete(listener);
+
+    if (entries.size === 0) listeners.delete(key);
+  };
+}
+
+export function notifyComposerSubmitted(
+  scope: PluginComposerScope,
+  draft?: ComposerDraftSnapshot,
+): void {
+  for (const listener of [
+    ...(listeners.get(composerScopeIdentity(scope)) ?? []),
+  ]) {
     try {
-      listener();
+      listener(draft);
     } catch (error) {
       console.error("Composer submission listener failed", error);
     }
-  });
-}
-
-export function notifyComposerSubmitted(scope: PluginComposerScope): void {
-  listeners.notify(composerScopeIdentity(scope));
+  }
 }

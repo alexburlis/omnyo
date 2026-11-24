@@ -33,12 +33,14 @@ import {
 } from "./sidebarSplitLayout";
 
 const SIDEBAR_DIFF_TAB_ID = createGitDiffFixedPanelTab().id;
+
 const TABS = [SIDEBAR_FIXED_INFO_TAB_ID, SIDEBAR_DIFF_TAB_ID, "file-a"];
 
 function createMemoryStorage(
   initialEntries: Record<string, string>,
 ): SidebarSplitStorage & { has(key: string): boolean } {
   const entries = new Map(Object.entries(initialEntries));
+
   return {
     get length() {
       return entries.size;
@@ -57,9 +59,11 @@ function persistedStateWithPaneCount(count: number): SidebarSplitState {
     Array.from({ length: count }, (_, index) => {
       const groupId = `group-${index}`;
       const tabId = `tab-${index}`;
+
       return [groupId, { id: groupId, tabIds: [tabId], activeTabId: tabId }];
     }),
   );
+
   return {
     version: 1,
     groups,
@@ -103,6 +107,7 @@ describe("sidebar split layout", () => {
       TABS,
       SIDEBAR_FIXED_INFO_TAB_ID,
     );
+
     expect(countPanes(state.layout.root)).toBe(1);
     expect(
       getSidebarGroupForPane(state, state.layout.focusedPaneId)?.tabIds,
@@ -114,6 +119,7 @@ describe("sidebar split layout", () => {
       createSidebarSplitState(TABS, SIDEBAR_FIXED_INFO_TAB_ID),
       "file-a",
     );
+
     const withoutMaximize = parseSidebarSplitState(
       JSON.stringify(
         Object.fromEntries(
@@ -123,11 +129,13 @@ describe("sidebar split layout", () => {
       TABS,
       SIDEBAR_FIXED_INFO_TAB_ID,
     );
+
     const withNullMaximize = parseSidebarSplitState(
       JSON.stringify({ ...split, maximizedPaneId: null }),
       TABS,
       SIDEBAR_FIXED_INFO_TAB_ID,
     );
+
     expect(withoutMaximize).toEqual(split);
     expect(withNullMaximize).toEqual(split);
   });
@@ -137,10 +145,12 @@ describe("sidebar split layout", () => {
       createSidebarSplitState(TABS, SIDEBAR_FIXED_INFO_TAB_ID),
       "file-a",
     );
+
     const maximized = setSidebarPaneMaximized(
       split,
       split.layout.focusedPaneId,
     );
+
     expect(
       parseSidebarSplitState(
         serializeSidebarSplitState(maximized),
@@ -154,6 +164,7 @@ describe("sidebar split layout", () => {
       TABS,
       SIDEBAR_FIXED_INFO_TAB_ID,
     );
+
     expect(stale.layout).toEqual(split.layout);
     expect(stale.groups).toEqual(split.groups);
     expect(stale.maximizedPaneId).toBeNull();
@@ -185,6 +196,7 @@ describe("sidebar split layout", () => {
       SIDEBAR_FIXED_INFO_TAB_ID,
       { groupId: "group-restored", paneId: "pane-restored" },
     );
+
     expect(
       isCanonicalSidebarSplitState(
         differentIdentity,
@@ -197,6 +209,7 @@ describe("sidebar split layout", () => {
       [...TABS].reverse(),
       SIDEBAR_FIXED_INFO_TAB_ID,
     );
+
     expect(
       isCanonicalSidebarSplitState(reordered, TABS, SIDEBAR_FIXED_INFO_TAB_ID),
     ).toBe(false);
@@ -212,6 +225,7 @@ describe("sidebar split layout", () => {
     const boundarySplitKey = sidebarSplitStorageKey(boundaryThreadId);
     const expiredSplitKey = sidebarSplitStorageKey(expiredThreadId);
     const missingSplitKey = sidebarSplitStorageKey(missingThreadId);
+
     const storage = createMemoryStorage({
       [freshSplitKey]: "fresh-layout",
       [boundarySplitKey]: "boundary-layout",
@@ -241,15 +255,18 @@ describe("sidebar split layout", () => {
 
   it("rejects persisted layouts that exceed the shared pane cap", () => {
     const oversized = persistedStateWithPaneCount(MAX_PANES + 1);
+
     const availableTabIds = Array.from(
       { length: MAX_PANES + 1 },
       (_, index) => `tab-${index}`,
     );
+
     const parsed = parseSidebarSplitState(
       JSON.stringify(oversized),
       availableTabIds,
       "tab-0",
     );
+
     expect(isCanonicalSidebarSplitState(parsed, availableTabIds, "tab-0")).toBe(
       true,
     );
@@ -261,6 +278,7 @@ describe("sidebar split layout", () => {
       mutate: (state: SidebarSplitState) => {
         if (state.layout.root.type === "split") {
           const second = state.layout.root.children[1];
+
           if (second?.type === "pane") second.paneId = "pane-0";
         }
       },
@@ -283,6 +301,7 @@ describe("sidebar split layout", () => {
       name: "a mismatched group key and id",
       mutate: (state: SidebarSplitState) => {
         const group = state.groups["group-0"];
+
         if (group !== undefined) group.id = "group-renamed";
       },
     },
@@ -308,11 +327,13 @@ describe("sidebar split layout", () => {
     const malformed = persistedStateWithPaneCount(2);
     mutate(malformed);
     const availableTabIds = ["tab-0", "tab-1"];
+
     const parsed = parseSidebarSplitState(
       JSON.stringify(malformed),
       availableTabIds,
       "tab-0",
     );
+
     expect(isCanonicalSidebarSplitState(parsed, availableTabIds, "tab-0")).toBe(
       true,
     );
@@ -323,11 +344,13 @@ describe("sidebar split layout", () => {
       createSidebarSplitState(TABS, SIDEBAR_FIXED_INFO_TAB_ID),
       "file-a",
     );
+
     const restored = parseSidebarSplitState(
       serializeSidebarSplitState(split),
       [...TABS, "terminal-a"],
       "terminal-a",
     );
+
     expect(countPanes(restored.layout.root)).toBe(2);
     expect(
       getSidebarGroupForPane(restored, restored.layout.focusedPaneId)?.tabIds,
@@ -337,11 +360,14 @@ describe("sidebar split layout", () => {
   it("restores closed tabs to their prior visible order", () => {
     const firstTabId = "browser:first";
     const secondTabId = "browser:second";
+
     let state = createSidebarSplitState(
       [SIDEBAR_FIXED_INFO_TAB_ID, firstTabId, secondTabId],
       secondTabId,
     );
+
     const firstPlacement = getSidebarTabPlacement(state, firstTabId);
+
     if (firstPlacement === null) throw new Error("Missing first tab placement");
 
     state = reconcileSidebarSplitState(
@@ -350,6 +376,7 @@ describe("sidebar split layout", () => {
       secondTabId,
     );
     const secondPlacement = getSidebarTabPlacement(state, secondTabId);
+
     if (secondPlacement === null)
       throw new Error("Missing second tab placement");
     state = reconcileSidebarSplitState(
@@ -388,16 +415,21 @@ describe("sidebar split layout", () => {
       "terminal:term-a:none",
       "plugin-panel:side-chat:thread-a",
     ];
+
     let state = splitOff(
       createSidebarSplitState(liveTabIds, liveTabIds[1] ?? ""),
       liveTabIds[1] ?? "",
       "bottom",
     );
+
     const browserPaneId = state.layout.focusedPaneId;
+
     const sourcePane = listPanes(state.layout.root).find(
       (pane) => pane.paneId !== browserPaneId,
     );
+
     expect(sourcePane).toBeDefined();
+
     if (sourcePane === undefined) return;
     state = moveSidebarTab(
       state,
@@ -412,9 +444,11 @@ describe("sidebar split layout", () => {
       liveTabIds,
       liveTabIds[2] ?? "",
     );
+
     const restoredTabIds = listPanes(restored.layout.root).flatMap(
       (pane) => getSidebarGroupForPane(restored, pane.paneId)?.tabIds ?? [],
     );
+
     expect(new Set(restoredTabIds)).toEqual(new Set(liveTabIds));
     expect(restoredTabIds).toHaveLength(liveTabIds.length);
   });
@@ -424,6 +458,7 @@ describe("sidebar split layout", () => {
       createSidebarSplitState(TABS, SIDEBAR_FIXED_INFO_TAB_ID),
       SIDEBAR_DIFF_TAB_ID,
     );
+
     const duplicate = {
       ...split,
       groups: Object.fromEntries(
@@ -433,22 +468,27 @@ describe("sidebar split layout", () => {
         ]),
       ),
     };
+
     const reconciled = reconcileSidebarSplitState(
       duplicate,
       [SIDEBAR_FIXED_INFO_TAB_ID, SIDEBAR_DIFF_TAB_ID],
       SIDEBAR_FIXED_INFO_TAB_ID,
     );
+
     const allIds = listPanes(reconciled.layout.root).flatMap(
       (pane) => getSidebarGroupForPane(reconciled, pane.paneId)?.tabIds ?? [],
     );
+
     expect(
       allIds.filter((id) => id === SIDEBAR_FIXED_INFO_TAB_ID),
     ).toHaveLength(1);
     expect(allIds).not.toContain("file-a");
+
     const activeTabId = getSidebarGroupForPane(
       reconciled,
       reconciled.layout.focusedPaneId,
     )?.activeTabId;
+
     expect(allIds).toContain(activeTabId);
   });
 
@@ -457,15 +497,18 @@ describe("sidebar split layout", () => {
       createSidebarSplitState(TABS, SIDEBAR_FIXED_INFO_TAB_ID),
       "file-a",
     );
+
     const reconciled = reconcileSidebarSplitState(
       split,
       [SIDEBAR_FIXED_INFO_TAB_ID, SIDEBAR_DIFF_TAB_ID],
       SIDEBAR_FIXED_INFO_TAB_ID,
     );
+
     const survivor = getSidebarGroupForPane(
       reconciled,
       reconciled.layout.focusedPaneId,
     );
+
     expect(countPanes(reconciled.layout.root)).toBe(1);
     expect(survivor?.activeTabId).toBe(SIDEBAR_FIXED_INFO_TAB_ID);
   });
@@ -475,11 +518,15 @@ describe("sidebar split layout", () => {
       createSidebarSplitState([...TABS, "file-b"], SIDEBAR_FIXED_INFO_TAB_ID),
       "file-b",
     );
+
     const destinationPaneId = state.layout.focusedPaneId;
+
     const sourcePaneId = listPanes(state.layout.root).find(
       (pane) => pane.paneId !== destinationPaneId,
     )?.paneId;
+
     expect(sourcePaneId).toBeDefined();
+
     if (sourcePaneId === undefined) return;
     state = moveSidebarTab(
       state,
@@ -500,11 +547,15 @@ describe("sidebar split layout", () => {
       createSidebarSplitState([...TABS, "file-b"], SIDEBAR_FIXED_INFO_TAB_ID),
       "file-a",
     );
+
     const sourcePane = listPanes(state.layout.root).find((pane) =>
       getSidebarGroupForPane(state, pane.paneId)?.tabIds.includes("file-b"),
     );
+
     expect(sourcePane).toBeDefined();
+
     if (sourcePane === undefined) return;
+
     const collided = moveSidebarTab(
       state,
       sourcePane.paneId,
@@ -512,6 +563,7 @@ describe("sidebar split layout", () => {
       { paneId: sourcePane.paneId, zone: "bottom" },
       { groupId: "group-file-a" },
     );
+
     expect(collided).toBe(state);
   });
 
@@ -520,9 +572,11 @@ describe("sidebar split layout", () => {
       createSidebarSplitState(TABS, SIDEBAR_FIXED_INFO_TAB_ID),
       "file-a",
     );
+
     const removedPaneId = split.layout.focusedPaneId;
 
     const unsplit = removeSidebarSplit(split, removedPaneId);
+
     const survivor = getSidebarGroupForPane(
       unsplit,
       unsplit.layout.focusedPaneId,
@@ -542,11 +596,15 @@ describe("sidebar split layout", () => {
       createSidebarSplitState(TABS, SIDEBAR_FIXED_INFO_TAB_ID),
       "file-a",
     );
+
     const focusedPaneId = split.layout.focusedPaneId;
+
     const removedPaneId = listPanes(split.layout.root).find(
       (pane) => pane.paneId !== focusedPaneId,
     )?.paneId;
+
     expect(removedPaneId).toBeDefined();
+
     if (removedPaneId === undefined) return;
 
     const unsplit = removeSidebarSplit(split, removedPaneId);
@@ -573,6 +631,7 @@ describe("sidebar split layout", () => {
       createSidebarSplitState(TABS, SIDEBAR_FIXED_INFO_TAB_ID),
       "file-a",
     );
+
     const maximized = setSidebarPaneMaximized(
       split,
       split.layout.focusedPaneId,
@@ -592,12 +651,15 @@ describe("sidebar split layout", () => {
       createSidebarSplitState(TABS, SIDEBAR_FIXED_INFO_TAB_ID),
       "file-a",
     );
+
     const source = listPanes(state.layout.root).find((pane) =>
       getSidebarGroupForPane(state, pane.paneId)?.tabIds.includes(
         SIDEBAR_DIFF_TAB_ID,
       ),
     );
+
     expect(source).toBeDefined();
+
     if (source === undefined) return;
     state = moveSidebarTab(
       state,
@@ -623,11 +685,13 @@ describe("sidebar split layout", () => {
       createSidebarSplitState(TABS, SIDEBAR_FIXED_INFO_TAB_ID),
       "file-a",
     );
+
     const panes = listPanes(split.layout.root);
     const sourcePaneId = panes[0]?.paneId;
     const targetPaneId = panes[1]?.paneId;
     expect(sourcePaneId).toBeDefined();
     expect(targetPaneId).toBeDefined();
+
     if (sourcePaneId === undefined || targetPaneId === undefined) return;
 
     const moved = moveSidebarPaneToSide(
@@ -636,7 +700,9 @@ describe("sidebar split layout", () => {
       targetPaneId,
       "top",
     );
+
     expect(moved.layout.root.type).toBe("split");
+
     if (moved.layout.root.type !== "split") return;
     expect(moved.layout.root.dir).toBe("col");
     expect(moved.maximizedPaneId).toBe(sourcePaneId);
@@ -647,12 +713,14 @@ describe("sidebar split layout", () => {
       Array.from({ length: MAX_PANES + 1 }, (_, index) => `tab-${index}`),
       "tab-0",
     );
+
     for (let index = 1; index <= MAX_PANES; index += 1) {
       const sourcePane = listPanes(state.layout.root).find((pane) =>
         getSidebarGroupForPane(state, pane.paneId)?.tabIds.includes(
           `tab-${index}`,
         ),
       );
+
       if (sourcePane === undefined) continue;
       state = moveSidebarTab(
         state,
@@ -662,11 +730,15 @@ describe("sidebar split layout", () => {
         { groupId: `group-${index}` },
       );
     }
+
     expect(countPanes(state.layout.root)).toBe(MAX_PANES);
     const resized = resizeSidebarSplit(state, [], 0, 0.01);
+
     if (resized.layout.root.type !== "split") throw new Error("expected split");
+
     const pairTotal =
       (resized.layout.root.sizes[0] ?? 0) + (resized.layout.root.sizes[1] ?? 0);
+
     expect(
       (resized.layout.root.sizes[0] ?? 0) / pairTotal,
     ).toBeGreaterThanOrEqual(0.15);
@@ -677,6 +749,7 @@ describe("adjacentSidebarTab", () => {
   it("includes the new-tab control between pane groups without changing the selected tab", () => {
     const initial = createSidebarSplitState(["a", "b"], "a");
     const left = initial.layout.focusedPaneId;
+
     const state = moveSidebarTab(
       initial,
       left,
@@ -684,6 +757,7 @@ describe("adjacentSidebarTab", () => {
       { paneId: left, zone: "right" },
       { groupId: "right" },
     );
+
     const right = state.layout.focusedPaneId;
     expect(adjacentSidebarTab(state, 1, [], { focused: false })).toEqual({
       paneId: right,
@@ -714,6 +788,7 @@ describe("adjacentSidebarTab", () => {
       ["file-a", "info", "file-b", "diff"],
       "info",
     );
+
     const paneId = initial.layout.focusedPaneId;
     const state = reorderSidebarTab(initial, paneId, "file-b", "file-a");
     const fixed = ["info", "diff"];

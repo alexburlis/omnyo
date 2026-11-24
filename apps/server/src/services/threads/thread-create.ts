@@ -2,11 +2,15 @@ import { requestThreadStorageDeletion } from "./thread-lifecycle.js";
 import { seedThreadSessionOptionSelections } from "./thread-session-options.js";
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
 import {
+  createQueuedThreadMessageInTransaction,
   markThreadDeleted,
   getEnvironment,
   getProjectSourceByHost,
   getThread,
-} from "@bb/db";
+  getAppSettings,
+  setThreadExecutionOverride,
+  type DbTransaction,
+} from "@omnyo/db";
 import {
   describeSessionOptionConflict,
   modelSessionOptionConflict,
@@ -16,14 +20,21 @@ import {
   type Thread,
   type ThreadOriginKind,
   type ThreadVisibility,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   AppDeps,
   LoggedPendingInteractionWorkSessionDeps,
 } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import { ensureHostSessionReadyForWork } from "../hosts/host-lifecycle.js";
-import { buildExecutionOptions } from "./thread-commands.js";
+import {
+  buildExecutionOptions,
+  buildExecutionOptionsNow,
+} from "./thread-commands.js";
+import {
+  requestQueuedMessageDispatch,
+  requestQueuedMessageDispatchAt,
+} from "./queued-message-dispatch.js";
 import {
   copyForkSourceHistory,
   resolveThreadForkPoint,
@@ -45,6 +56,7 @@ import {
 } from "./dispatch-attempt.js";
 import { emitPluginThreadDeleted } from "../plugins/plugin-thread-events.js";
 import {
+  completeThreadHandoff,
   createThreadRecord,
   getThreadSafe,
   requirePublicProjectForThreadCreate,
@@ -59,21 +71,32 @@ import {
 } from "./thread-environment-placement.js";
 import {
   buildProviderThreadExecutionDefaults,
+  applyNewThreadApprovalDefault,
   resolveCreateThreadEnvironment,
 } from "./thread-default-policy.js";
 import { assertValidParentThread } from "./thread-parent.js";
 import {
+  machineCameFromDefault,
   type ThreadCreateServiceRequestInput,
   type ThreadCreateServiceRequest,
 } from "./thread-create-request.js";
 import { resolveDispatchAuthor } from "./dispatch-author.js";
 import { deriveForkTitle, deriveTitleFallback } from "./title-generation.js";
-import type { ThreadProvisionEnvironmentIntent } from "./thread-startup-store.js";
+import {
+  createThreadStartup,
+  saveThreadProvisionContext,
+  type ThreadProvisionEnvironmentIntent,
+} from "./thread-startup-store.js";
+import { applyLoggedThreadLifecycleEventInTransaction } from "./lifecycle-outcome.js";
+import { createClientTurnRequestId } from "./thread-events.js";
+import { scheduleThreadProvisioningAdvance } from "./thread-provisioning.js";
+import { buildThreadStatusChangeMetadata } from "./thread-runtime-display.js";
 import { resolveSystemProviderModels } from "../system/execution-options.js";
 import {
   getEnvironmentProvider,
   listEnvironmentCompositions,
 } from "../plugins/plugin-environment-provider-registry.js";
+import { recordQuietParentChildActivity } from "./quiet-parent.js";
 
 type ThreadCreateDeps = LoggedPendingInteractionWorkSessionDeps;
 
@@ -112,6 +135,7 @@ async function loadCatalogDefaultForProvider(
     hostId: args.hostId,
     providerId: args.providerId,
   });
+
   if (catalog.modelLoadError !== null) {
     return new ApiError(
       503,
@@ -123,8 +147,10 @@ async function loadCatalogDefaultForProvider(
       },
     );
   }
+
   const defaultModel =
     catalog.models.find((model) => model.isDefault) ?? catalog.models[0];
+
   if (defaultModel === undefined) {
     return new ApiError(
       503,
@@ -133,6 +159,7 @@ async function loadCatalogDefaultForProvider(
       true,
     );
   }
+
   return buildProviderThreadExecutionDefaults(deps.providerRegistry, {
     providerId: args.providerId,
     model: defaultModel.model,
@@ -153,6 +180,7 @@ async function resolveSessionOptionExecutionDefaults(
   args: ResolveSessionOptionExecutionDefaultsArgs,
 ): Promise<ProjectExecutionDefaults | null> {
   const model = args.requestedModel ?? args.executionDefaults?.model ?? null;
+
   if (
     model === null ||
     args.hostId === null ||
@@ -160,30 +188,38 @@ async function resolveSessionOptionExecutionDefaults(
   ) {
     return args.executionDefaults;
   }
+
   const catalog = await resolveSystemProviderModels(deps, {
     ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
     hostId: args.hostId,
     providerId: args.providerId,
   });
+
   if (catalog.modelLoadError !== null) {
     return args.executionDefaults;
   }
+
   const chosen = [...catalog.models, ...catalog.selectedOnlyModels].find(
     (candidate) => candidate.model === model,
   );
+
   const conflict =
     chosen === undefined
       ? null
       : modelSessionOptionConflict(chosen, args.selections);
+
   const compatible = catalog.models.filter(
     (candidate) =>
       modelSessionOptionConflict(candidate, args.selections) === null,
   );
+
   const replacement =
     compatible.find((candidate) => candidate.isDefault) ?? compatible[0];
+
   if (chosen === undefined || conflict === null || replacement === undefined) {
     return args.executionDefaults;
   }
+
   if (args.requestedModel !== null) {
     throw new ApiError(
       400,
@@ -191,12 +227,13 @@ async function resolveSessionOptionExecutionDefaults(
       `${chosen.displayName || chosen.model} cannot run with the chosen options: ${describeSessionOptionConflict(conflict)}. ${replacement.displayName || replacement.model} can.`,
     );
   }
+
   return args.executionDefaults === null
     ? null
     : { ...args.executionDefaults, model: replacement.model };
 }
 
-async function resolveCatalogExecutionDefaults(
+export async function resolveCatalogExecutionDefaults(
   deps: ThreadCreateDeps,
   args: ResolveCatalogExecutionDefaultsArgs,
 ): Promise<ProjectExecutionDefaults | null> {
@@ -214,17 +251,21 @@ async function resolveCatalogExecutionDefaults(
 
   const candidates = [args.providerId, ...args.providerFallbackCandidates];
   let lastError: ApiError | null = null;
+
   for (const providerId of candidates) {
     const result = await loadCatalogDefaultForProvider(deps, {
       ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
       hostId: args.hostId,
       providerId,
     });
+
     if (!(result instanceof ApiError)) {
       return result;
     }
+
     lastError = result;
   }
+
   throw lastError;
 }
 
@@ -232,23 +273,30 @@ function resolveForkPoint(
   deps: Pick<ThreadCreateDeps, "db" | "providerRegistry">,
   args: ResolveForkPointArgs,
 ): ThreadForkPoint | null {
-  if (args.originKind === null || args.sourceThread === null) {
+  if (args.originKind !== "fork" || args.sourceThread === null) {
     return null;
   }
+
   if (!deps.providerRegistry.supportsFork(args.providerId)) {
     return null;
   }
+
   if (args.sourceThread.providerId !== args.providerId) {
     return null;
   }
+
   const sourceEnvironmentId = args.sourceThread.environmentId;
+
   if (sourceEnvironmentId === null) {
     return null;
   }
+
   const sourceEnvironment = getEnvironment(deps.db, sourceEnvironmentId);
+
   if (sourceEnvironment === null) {
     return null;
   }
+
   return resolveThreadForkPoint(deps, {
     sourceSeqEnd: args.sourceSeqEnd,
     sourceThread: args.sourceThread,
@@ -266,10 +314,12 @@ function assertForkSourceHost(
   if (args.originKind !== "fork" || args.sourceThread === null) {
     return;
   }
+
   const sourceEnvironment =
     args.sourceThread.environmentId === null
       ? null
       : getEnvironment(deps.db, args.sourceThread.environmentId);
+
   if (sourceEnvironment !== null && args.childHostId === null) {
     throw new ApiError(
       400,
@@ -277,6 +327,7 @@ function assertForkSourceHost(
       `Fork environment must name the source thread's host (${sourceEnvironment.hostId})`,
     );
   }
+
   if (
     sourceEnvironment !== null &&
     sourceEnvironment.hostId !== args.childHostId
@@ -308,6 +359,7 @@ function projectCheckoutPathOnHost(
   hostId: string,
 ): string | undefined {
   const source = getProjectSourceByHost(deps.db, projectId, hostId);
+
   return source?.type === "local_path" ? source.path : undefined;
 }
 
@@ -342,6 +394,7 @@ function assertProjectWorkspaceCompatibility(
   request: ThreadCreateServiceRequestInput,
 ): void {
   const personalWorkspace = requestUsesPersonalWorkspace(request);
+
   if (project.kind === "personal") {
     if (
       request.environment.type !== "reuse" &&
@@ -360,6 +413,7 @@ function assertProjectWorkspaceCompatibility(
         "Personal project threads must use a personal workspace",
       );
     }
+
     return;
   }
 
@@ -380,9 +434,11 @@ function requireLiveSourceThread(
   },
 ): Thread {
   const sourceThread = getThread(deps.db, args.sourceThreadId);
+
   if (sourceThread === null) {
     throw new ApiError(400, "invalid_request", "sourceThreadId not found");
   }
+
   if (sourceThread.projectId !== args.projectId) {
     throw new ApiError(
       400,
@@ -390,6 +446,7 @@ function requireLiveSourceThread(
       "sourceThreadId must belong to the same project",
     );
   }
+
   if (sourceThread.archivedAt !== null) {
     throw new ApiError(
       400,
@@ -397,6 +454,7 @@ function requireLiveSourceThread(
       "sourceThreadId must reference an unarchived thread",
     );
   }
+
   if (sourceThread.deletedAt !== null) {
     throw new ApiError(
       400,
@@ -404,46 +462,43 @@ function requireLiveSourceThread(
       "sourceThreadId must reference a non-deleted thread",
     );
   }
+
   return sourceThread;
 }
 
-/**
- * Creates the thread row and hands its first message to the dispatch
- * checkpoint.
- *
- * This is the whole of thread creation's dispatch story now, and it replaced a
- * pair of near-identical functions — one that provisioned immediately and one
- * that queued the first turn — whose only real difference was
- * whether anything was allowed to run yet. That is a question the checkpoint
- * answers, so asking it here as well meant two code paths that had to be kept
- * in agreement about forks, execution defaults, telemetry and cleanup.
- *
- * The row inserts `pending`: created, with its provider resolved, and nothing
- * provisioned. Creation itself is unhooked — it is a cheap row — and admission
- * happens at the first message's attempt. A cleared attempt moves the thread
- * to `starting` and provisions with the message riding along; a queued one
- * leaves the thread exactly where it is, with the start context recorded so a
- * later drain (or a later server) can start it.
- */
-async function createPendingThreadAndAttemptFirstDispatch(
+type CreatePendingThreadArgs = CreateProvisioningThreadArgs & {
+  environmentIntent: ThreadProvisionEnvironmentIntent;
+  sendAt: number | undefined;
+};
+
+export interface AcceptedQueuedFirstPrompt {
+  queuedMessageId: string;
+  threadId: string;
+}
+
+export type AcceptQueuedFirstPrompt = (
+  create: (tx: DbTransaction) => AcceptedQueuedFirstPrompt,
+) => { created: boolean; threadId: string };
+
+function preparePendingThreadStart(
   deps: ThreadCreateDeps,
-  args: CreateProvisioningThreadArgs & {
-    environmentIntent: ThreadProvisionEnvironmentIntent;
-    sendAt: number | undefined;
-  },
-) {
+  args: CreatePendingThreadArgs,
+): PendingThreadStartContext {
   const environment =
     args.environmentId === null
       ? null
       : getEnvironment(deps.db, args.environmentId);
+
   if (environment !== null)
     assertEnvironmentPathAvailable(deps, { ...environment, threadId: null });
+
   if (args.request.sourceThreadId) {
     requireLiveSourceThread(deps, {
       projectId: args.request.projectId,
       sourceThreadId: args.request.sourceThreadId,
     });
   }
+
   const startContext: PendingThreadStartContext = {
     environmentIntent: args.environmentIntent,
     fork: args.fork?.descriptor ?? null,
@@ -451,25 +506,219 @@ async function createPendingThreadAndAttemptFirstDispatch(
       ? { providerInput: args.providerInput }
       : {}),
     startedOnBehalfOf: args.request.startedOnBehalfOf,
-    titleProvided: Boolean(args.request.title),
+    titleProvided:
+      Boolean(args.request.title) || args.request.originKind === "handoff",
+    machinePinned: args.request.machinePinned,
+    moveNote: null,
   };
+
   const placementHostId = hostIdForEnvironmentIntent(
     deps,
     args.environmentIntent,
   );
+
   if (placementHostId !== null)
     requireEnvironmentPlacementHost(deps, placementHostId);
+
+  return startContext;
+}
+
+function createPendingThreadWithQueuedFirstPrompt(
+  deps: ThreadCreateDeps,
+  args: CreatePendingThreadArgs,
+  accept: AcceptQueuedFirstPrompt,
+) {
+  const startContext = preparePendingThreadStart(deps, args);
+  let createdThread: ReturnType<typeof createThreadRecord> | null = null;
+  let execution: ReturnType<typeof buildExecutionOptionsNow> | null = null;
+
+  const accepted = accept((tx) => {
+    const thread = createThreadRecord(deps, {
+      request: args.request,
+      environmentId: args.environmentId,
+      startupContext: JSON.stringify({ kind: "pending", ...startContext }),
+    });
+
+    seedThreadSessionOptionSelections(deps, {
+      thread,
+      selections: args.request.sessionOptions ?? {},
+    });
+
+    const resolved = buildExecutionOptionsNow(deps, args.request, {
+      projectDefaults: args.executionDefaults,
+      hostId: hostIdForEnvironmentIntent(deps, args.environmentIntent),
+      threadId: thread.id,
+    });
+
+    const queued = createQueuedThreadMessageInTransaction(tx, {
+      threadId: thread.id,
+      content: args.request.input,
+      senderThreadId: null,
+      origin: args.request.origin,
+      originPluginId: args.request.originPluginId ?? null,
+      requestedBy: args.request.startedOnBehalfOf,
+      model: resolved.model,
+      reasoningLevel: resolved.reasoningLevel,
+      permissionMode: resolved.permissionMode,
+      serviceTier: resolved.serviceTier,
+      waitingOn:
+        args.sendAt === undefined ? { kind: "thread-busy" } : { kind: "time" },
+      sendAt: args.sendAt ?? null,
+      payload: { kind: "inline" },
+      systemNotice: null,
+      deliveryMode: "queue",
+    });
+
+    createdThread = thread;
+    execution = resolved;
+
+    return { queuedMessageId: queued.id, threadId: thread.id };
+  });
+
+  if (accepted.created && createdThread !== null && execution !== null) {
+    completeThreadHandoff(deps, createdThread);
+    rememberProjectExecutionDefaultsForCreate(deps, {
+      execution,
+      request: args.request,
+    });
+
+    if (args.sendAt === undefined) {
+      requestQueuedMessageDispatch(deps, {
+        kind: "thread-ready",
+        threadId: accepted.threadId,
+      });
+    } else {
+      requestQueuedMessageDispatchAt(deps, args.sendAt);
+    }
+  }
+
+  return { created: accepted.created, threadId: accepted.threadId };
+}
+
+function discardFailedCreate(
+  deps: ThreadCreateDeps,
+  thread: ReturnType<typeof getThreadSafe>,
+): void {
+  emitPluginThreadDeleted({
+    ...thread,
+    deletedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+
+  const deleted = markThreadDeleted(deps.db, deps.hub, {
+    threadId: thread.id,
+  });
+
+  if (deleted)
+    requestThreadStorageDeletion(
+      deps,
+      deleted,
+      deleted.environmentId
+        ? getEnvironment(deps.db, deleted.environmentId)
+        : null,
+    );
+}
+
+async function createIdleThread(
+  deps: ThreadCreateDeps,
+  args: CreatePendingThreadArgs,
+): Promise<ReturnType<typeof getThreadSafe>> {
+  preparePendingThreadStart(deps, args);
+
   const thread = createThreadRecord(deps, {
     request: args.request,
     environmentId: args.environmentId,
-    startupContext: JSON.stringify({ kind: "pending", ...startContext }),
   });
-  let execution: Awaited<ReturnType<typeof buildExecutionOptions>>;
+
+  let started: ReturnType<typeof getThreadSafe>;
+
   try {
     seedThreadSessionOptionSelections(deps, {
       thread,
       selections: args.request.sessionOptions ?? {},
     });
+
+    const execution = await buildExecutionOptions(deps, args.request, {
+      projectDefaults: args.executionDefaults,
+      hostId: hostIdForEnvironmentIntent(deps, args.environmentIntent),
+      threadId: thread.id,
+    });
+
+    setThreadExecutionOverride(deps.db, {
+      threadId: thread.id,
+      modelOverride: execution.model,
+      reasoningLevelOverride: execution.reasoningLevel,
+    });
+
+    started = deps.db.transaction(
+      (tx) => {
+        const prepared = applyLoggedThreadLifecycleEventInTransaction(
+          { db: tx, hub: deps.hub, logger: deps.logger },
+          { event: { type: "run.preparing" }, threadId: thread.id },
+        );
+
+        if (!prepared.applied) {
+          throw new Error(
+            `Idle chat could not start provisioning: ${prepared.detail}`,
+          );
+        }
+
+        saveThreadProvisionContext({
+          replace: true,
+          db: tx,
+          threadId: thread.id,
+          context: createThreadStartup({
+            clientRequestId: createClientTurnRequestId(),
+            environmentIntent: args.environmentIntent,
+            execution: null,
+            fork: null,
+            input: [],
+            initiator: "user",
+            seedWithoutRun: true,
+            silentSettle: true,
+            titleProvided: args.request.title !== undefined,
+          }),
+        });
+
+        return prepared.thread;
+      },
+      { behavior: "immediate" },
+    );
+  } catch (error) {
+    discardFailedCreate(deps, thread);
+    throw error;
+  }
+
+  deps.hub.notifyThread(
+    thread.id,
+    ["status-changed"],
+    buildThreadStatusChangeMetadata(deps, started),
+  );
+  scheduleThreadProvisioningAdvance(deps, thread.id);
+
+  return getThreadSafe(deps, thread.id);
+}
+
+async function createPendingThreadAndAttemptFirstDispatch(
+  deps: ThreadCreateDeps,
+  args: CreatePendingThreadArgs,
+) {
+  const startContext = preparePendingThreadStart(deps, args);
+
+  const thread = createThreadRecord(deps, {
+    request: args.request,
+    environmentId: args.environmentId,
+    startupContext: JSON.stringify({ kind: "pending", ...startContext }),
+  });
+
+  let execution: Awaited<ReturnType<typeof buildExecutionOptions>>;
+
+  try {
+    seedThreadSessionOptionSelections(deps, {
+      thread,
+      selections: args.request.sessionOptions ?? {},
+    });
+
     if (
       args.fork !== null &&
       args.fork.historyEndSequence !== null &&
@@ -481,11 +730,13 @@ async function createPendingThreadAndAttemptFirstDispatch(
         sourceThreadId: args.fork.sourceThreadId,
       });
     }
+
     const executionPlanArgs = {
       projectDefaults: args.executionDefaults,
       hostId: hostIdForEnvironmentIntent(deps, args.environmentIntent),
       threadId: thread.id,
     };
+
     execution = await buildExecutionOptions(
       deps,
       args.request,
@@ -508,6 +759,7 @@ async function createPendingThreadAndAttemptFirstDispatch(
       source: { kind: "inline" },
       queuePayload: { kind: "inline" },
       pluginSubmission: args.request.pluginSubmission ?? null,
+      systemNotice: null,
       startContext,
       executionDefaults: executionPlanArgs,
       origin: args.request.origin,
@@ -521,9 +773,11 @@ async function createPendingThreadAndAttemptFirstDispatch(
       deletedAt: Date.now(),
       updatedAt: Date.now(),
     });
+
     const deleted = markThreadDeleted(deps.db, deps.hub, {
       threadId: thread.id,
     });
+
     if (deleted)
       requestThreadStorageDeletion(
         deps,
@@ -534,10 +788,14 @@ async function createPendingThreadAndAttemptFirstDispatch(
       );
     throw error;
   }
+
+  completeThreadHandoff(deps, thread);
+
   rememberProjectExecutionDefaultsForCreate(deps, {
     execution,
     request: args.request,
   });
+
   return getThreadSafe(deps, thread.id);
 }
 
@@ -552,6 +810,7 @@ function resolveCreateThreadVisibility(
   if (args.requestedVisibility !== undefined) {
     return args.requestedVisibility;
   }
+
   return args.parentThread?.visibility ?? "visible";
 }
 
@@ -564,6 +823,7 @@ function resolveCreateThreadPluginMetadata(
   if (request.pluginMetadata === undefined) {
     return null;
   }
+
   if (request.originPluginId === undefined) {
     throw new ApiError(
       400,
@@ -571,6 +831,7 @@ function resolveCreateThreadPluginMetadata(
       'pluginMetadata requires origin "plugin"',
     );
   }
+
   return {
     pluginId: request.originPluginId,
     metadata: request.pluginMetadata,
@@ -583,12 +844,14 @@ export async function createThreadFromRequest(
   options: {
     providerInput?: ThreadCreateServiceRequestInput["input"];
     forkSourceEnvironmentId?: string;
+    acceptQueuedFirstPrompt?: AcceptQueuedFirstPrompt;
   } = {},
 ) {
   const project = requirePublicProjectForThreadCreate(
     deps,
     rawRequestInput.projectId,
   );
+
   if (rawRequestInput.origin === "plugin") {
     if (rawRequestInput.originPluginId === undefined) {
       throw new ApiError(
@@ -604,6 +867,20 @@ export async function createThreadFromRequest(
       'originPluginId requires origin "plugin"',
     );
   }
+
+  if (
+    rawRequestInput.pluginHome === true &&
+    (rawRequestInput.origin !== "plugin" ||
+      rawRequestInput.callerPluginId == null ||
+      rawRequestInput.originPluginId !== rawRequestInput.callerPluginId)
+  ) {
+    throw new ApiError(
+      403,
+      "plugin_required",
+      "Only a plugin can mark the chats it creates as its home chat",
+    );
+  }
+
   const pluginMetadata = resolveCreateThreadPluginMetadata(rawRequestInput);
   const requestInput = { ...rawRequestInput };
   requestInput.input = (
@@ -611,16 +888,20 @@ export async function createThreadFromRequest(
   ).input;
   assertProjectWorkspaceCompatibility(project, requestInput);
   const originKind = requestInput.originKind ?? null;
+
   const sourceThreadId =
     requestInput.sourceThreadId ??
     (originKind !== null ? requestInput.parentThreadId : undefined);
+
   const hierarchyParentThreadId =
     originKind === null ? requestInput.parentThreadId : undefined;
+
   const parentThread = hierarchyParentThreadId
     ? assertValidParentThread(deps, {
         parentThreadId: hierarchyParentThreadId,
       })
     : null;
+
   if (originKind === null && sourceThreadId !== undefined) {
     throw new ApiError(
       400,
@@ -628,24 +909,30 @@ export async function createThreadFromRequest(
       "sourceThreadId requires an originKind",
     );
   }
-  if (originKind === null && requestInput.sourceSeqEnd !== undefined) {
+
+  if (originKind !== "fork" && requestInput.sourceSeqEnd !== undefined) {
     throw new ApiError(
       400,
       "invalid_request",
-      "sourceSeqEnd requires an originKind",
+      "sourceSeqEnd requires originKind fork",
     );
   }
+
   const sourceThread = sourceThreadId
     ? requireLiveSourceThread(deps, {
         projectId: requestInput.projectId,
         sourceThreadId,
       })
     : null;
-  if (originKind !== null && sourceThread !== null) {
+
+  const forkSourceThread = originKind === "fork" ? sourceThread : null;
+
+  if (forkSourceThread !== null) {
     assertValidParentThread(deps, {
-      parentThreadId: sourceThread.id,
+      parentThreadId: forkSourceThread.id,
     });
   }
+
   if (originKind !== null && sourceThread === null) {
     throw new ApiError(
       400,
@@ -653,6 +940,7 @@ export async function createThreadFromRequest(
       "originKind requires a sourceThreadId",
     );
   }
+
   const forkSourceEnvironmentId =
     options.forkSourceEnvironmentId ??
     (originKind === "fork" &&
@@ -662,8 +950,10 @@ export async function createThreadFromRequest(
     requestInput.environment.environmentId === sourceThread.environmentId
       ? sourceThread.environmentId
       : undefined);
+
   if (requestInput.startedOnBehalfOf !== null) {
     const senderThread = sourceThread ?? parentThread;
+
     if (senderThread === null) {
       throw new ApiError(
         400,
@@ -671,6 +961,7 @@ export async function createThreadFromRequest(
         "startedOnBehalfOf requires a sourceThreadId or parentThreadId",
       );
     }
+
     if (requestInput.startedOnBehalfOf.senderThreadId !== senderThread.id) {
       throw new ApiError(
         400,
@@ -680,6 +971,7 @@ export async function createThreadFromRequest(
           : "startedOnBehalfOf.senderThreadId must match sourceThreadId",
       );
     }
+
     if (originKind === null) {
       throw new ApiError(
         400,
@@ -688,7 +980,9 @@ export async function createThreadFromRequest(
       );
     }
   }
+
   await deps.providerRegistry.whenRegistrationsSettled();
+
   const {
     executionDefaults,
     providerId,
@@ -700,6 +994,7 @@ export async function createThreadFromRequest(
     projectId: requestInput.projectId,
     providerId: requestInput.providerId,
   });
+
   const {
     originKind: _requestedOriginKind,
     parentThreadId: _requestedParentThreadId,
@@ -707,14 +1002,16 @@ export async function createThreadFromRequest(
     sourceThreadId: _requestedSourceThreadId,
     ...requestRest
   } = requestInput;
+
   const requestedEnvironment = await resolveCreateThreadEnvironment(deps, {
     parentThread:
       forkSourceEnvironmentId !== undefined
         ? null
-        : (sourceThread ?? parentThread),
+        : (forkSourceThread ?? parentThread),
     projectId: requestInput.projectId,
     requestedEnvironment: requestInput.environment,
   });
+
   if (
     requestedEnvironment.type === "provider" &&
     getEnvironmentProvider(requestedEnvironment.environmentProviderId) ===
@@ -726,6 +1023,7 @@ export async function createThreadFromRequest(
   ) {
     throw new ApiError(400, "invalid_request", "unknown environment provider");
   }
+
   const request: ThreadCreateServiceRequest = {
     ...requestRest,
     ...(hierarchyParentThreadId
@@ -739,9 +1037,14 @@ export async function createThreadFromRequest(
       requestedVisibility: requestInput.visibility,
     }),
     environment: requestedEnvironment,
+    machinePinned:
+      forkSourceThread !== null ||
+      hierarchyParentThreadId !== undefined ||
+      !machineCameFromDefault(requestInput.environment),
     providerId,
     titleFallback: deriveTitleFallback(requestInput.input),
   };
+
   if (
     request.title === undefined &&
     request.originKind === "fork" &&
@@ -750,19 +1053,20 @@ export async function createThreadFromRequest(
     sourceThread !== null
   ) {
     const forkTitle = deriveForkTitle(sourceThread);
+
     if (forkTitle !== null) {
       request.title = forkTitle;
     }
   }
+
   const resolvedEnvironment =
     requestedEnvironment.type === "provider"
       ? null
       : resolveStableThreadRequestEnvironment(deps, {
-          allowUnmanagedPersonalProjectReuseEnvironmentId:
-            forkSourceEnvironmentId,
           environment: requestedEnvironment,
           projectId: request.projectId,
         });
+
   const childHostId =
     resolvedEnvironment !== null
       ? childHostIdForResolvedEnvironment(resolvedEnvironment)
@@ -771,14 +1075,17 @@ export async function createThreadFromRequest(
           ? request.environment.machine.hostId
           : null
         : null;
+
   assertForkSourceHost(deps, {
     childHostId,
     originKind: request.originKind ?? null,
     sourceThread,
   });
+
   if (childHostId !== null) {
     await ensureHostSessionReadyForWork(deps, { hostId: childHostId });
   }
+
   const modelCatalogCwd =
     resolvedEnvironment !== null
       ? modelCatalogCwdForResolvedEnvironment(resolvedEnvironment)
@@ -790,6 +1097,7 @@ export async function createThreadFromRequest(
             request.environment.machine.hostId,
           )
         : undefined;
+
   const catalogExecutionDefaults = await resolveCatalogExecutionDefaults(deps, {
     ...(modelCatalogCwd !== undefined ? { cwd: modelCatalogCwd } : {}),
     executionDefaults,
@@ -798,12 +1106,14 @@ export async function createThreadFromRequest(
     providerFallbackCandidates,
     requestedModel,
   });
+
   if (
     catalogExecutionDefaults !== null &&
     catalogExecutionDefaults.providerId !== request.providerId
   ) {
     request.providerId = catalogExecutionDefaults.providerId;
   }
+
   const resolvedExecutionDefaults = await resolveSessionOptionExecutionDefaults(
     deps,
     {
@@ -818,15 +1128,10 @@ export async function createThreadFromRequest(
 
   const { environmentId, environmentIntent } =
     await resolveThreadEnvironmentPlacement(deps, {
-      ...(forkSourceEnvironmentId !== undefined
-        ? {
-            allowUnmanagedPersonalProjectReuseEnvironmentId:
-              forkSourceEnvironmentId,
-          }
-        : {}),
       projectId: request.projectId,
       requestedEnvironment: request.environment,
     });
+
   request.input = await resolvePromptAttachmentReferences({
     db: deps.db,
     dataDir: deps.config.dataDir,
@@ -842,7 +1147,7 @@ export async function createThreadFromRequest(
     sourceThread,
   });
 
-  if (request.originKind !== null && fork === null) {
+  if (request.originKind === "fork" && fork === null) {
     throw new ApiError(
       400,
       "fork_source_session_unavailable",
@@ -853,35 +1158,70 @@ export async function createThreadFromRequest(
   const createArgs = {
     environmentId,
     environmentIntent,
-    executionDefaults: resolvedExecutionDefaults,
+    executionDefaults: applyNewThreadApprovalDefault(deps.providerRegistry, {
+      settings: getAppSettings(deps.db),
+      providerId: request.providerId,
+      model: requestedModel ?? resolvedExecutionDefaults?.model ?? null,
+      storedDefaults: executionDefaults,
+      resolvedDefaults: resolvedExecutionDefaults,
+    }),
     fork,
     ...(options.providerInput !== undefined
       ? { providerInput: options.providerInput }
       : {}),
     request,
   };
-  const thread = await createPendingThreadAndAttemptFirstDispatch(deps, {
-    ...createArgs,
-    sendAt: request.sendAt,
-  });
+
+  let thread: ReturnType<typeof getThreadSafe>;
+
+  if (request.idle === true) {
+    thread = await createIdleThread(deps, { ...createArgs, sendAt: undefined });
+  } else if (options.acceptQueuedFirstPrompt === undefined) {
+    thread = await createPendingThreadAndAttemptFirstDispatch(deps, {
+      ...createArgs,
+      sendAt: request.sendAt,
+    });
+  } else {
+    const accepted = createPendingThreadWithQueuedFirstPrompt(
+      deps,
+      { ...createArgs, sendAt: request.sendAt },
+      options.acceptQueuedFirstPrompt,
+    );
+
+    thread = getThreadSafe(deps, accepted.threadId);
+
+    if (!accepted.created) {
+      return thread;
+    }
+  }
+
+  if (parentThread?.quiet === true)
+    recordQuietParentChildActivity(deps, {
+      parent: parentThread,
+      child: { id: thread.id, title: thread.title },
+      state: "running",
+    });
+
   deps.telemetry.capture({
     name: "thread_created",
     properties: {
       is_child_thread: parentThread !== null,
-      provider: request.providerId,
     },
   });
+
   const { initiator } = resolveDispatchAuthor({
     retrying: false,
+    systemNotice: false,
     senderThreadId: null,
     startedOnBehalfOf: request.startedOnBehalfOf,
   });
+
   if (initiator === "user" && request.input.length > 0) {
     captureUserMessageSentTelemetry(deps, {
       isChildThread: parentThread !== null,
       messageSource: "thread_create",
-      providerId: request.providerId,
     });
   }
+
   return thread;
 }

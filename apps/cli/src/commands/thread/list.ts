@@ -1,14 +1,19 @@
 import { Command } from "commander";
-import { PERSONAL_PROJECT_ID, type Thread } from "@bb/domain";
+import {
+  PERSONAL_PROJECT_ID,
+  THREAD_WORK_LABELS,
+  type ThreadListEntry,
+  type Thread,
+} from "@omnyo/domain";
 import { action } from "../../action.js";
-import { createCliBbSdk } from "../../client.js";
+import { createCliOmnyoSdk } from "../../client.js";
 import { resolveExplicitIdFlag } from "../../context-env.js";
 import {
   columnWidths,
   printBorderlessTable,
   truncateCell,
 } from "../../table.js";
-import { outputJson } from "../helpers.js";
+import { collectOption, outputJson } from "../helpers.js";
 import {
   resolveMachineHostId,
   resolveMachineTargetOption,
@@ -20,9 +25,12 @@ interface ThreadListCommandOptions {
   host?: string;
   project?: string;
   parentThread?: string;
+  thread: string[];
   archived?: boolean;
+  shelved?: boolean;
   section?: string;
   unsectioned?: boolean;
+  group?: string;
   json?: boolean;
   includeHidden?: boolean;
 }
@@ -42,27 +50,45 @@ export function registerListCommand(
     )
     .option("--host <id-or-name>", "Alias for --machine")
     .option("--parent-thread <id>", "Filter by parent thread ID")
+    .option(
+      "--thread <id>",
+      "Show only this thread ID, leaving out unknown or deleted IDs (repeatable, up to 200)",
+      collectOption,
+      [],
+    )
     .option("--section <id>", "Filter by thread section ID")
     .option("--unsectioned", "Show only threads outside sections")
+    .option("--group <id>", "Filter by chat group ID")
     .option("--archived", "Show only archived threads")
+    .option("--shelved", "Show only shelved threads, in Shelf order")
     .option("--include-hidden", "Include hidden threads")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: ThreadListCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const projectId = resolveExplicitIdFlag({
           flagName: "--project flag",
           value: opts.project,
         });
+
         const parentThreadId = resolveExplicitIdFlag({
           flagName: "--parent-thread",
           value: opts.parentThread,
         });
+
+        const threadIds = opts.thread.flatMap(
+          (value) =>
+            resolveExplicitIdFlag({ flagName: "--thread", value }) ?? [],
+        );
+
         const environmentId = resolveExplicitIdFlag({
           flagName: "--environment",
           value: opts.environment,
         });
+
         const machineTarget = resolveMachineTargetOption(opts);
+
         const hostId =
           machineTarget === undefined
             ? undefined
@@ -75,32 +101,54 @@ export function registerListCommand(
                   serverUrl: getUrl(),
                   target: machineTarget,
                 });
+
         if (opts.section && opts.unsectioned) {
           throw new Error("Cannot combine --section with --unsectioned.");
         }
+
+        if (opts.archived && opts.shelved) {
+          throw new Error("Cannot combine --archived with --shelved.");
+        }
+
         const sectionId = resolveExplicitIdFlag({
           flagName: "--section",
           value: opts.section,
         });
+
+        const groupId = resolveExplicitIdFlag({
+          flagName: "--group",
+          value: opts.group,
+        });
+
         const threads = await sdk.threads.list({
           ...(projectId ? { projectId } : {}),
           ...(environmentId ? { environmentId } : {}),
           ...(hostId ? { hostId } : {}),
           ...(parentThreadId ? { parentThreadId } : {}),
+          threadIds: threadIds.length > 0 ? threadIds : undefined,
           ...(opts.archived ? { archived: true } : {}),
+          ...(opts.shelved ? { shelved: true } : {}),
           ...(sectionId ? { sectionId } : {}),
           ...(opts.unsectioned ? { unsectioned: true } : {}),
+          ...(groupId ? { groupId } : {}),
           ...(opts.includeHidden ? { includeHidden: true } : {}),
+          experimental_includePluginHome: true,
         });
+
         if (outputJson(opts, threads)) return;
+
         if (threads.length === 0) {
           console.log("No threads found");
+
           return;
         }
+
         const projects = await sdk.projects.list({ includePersonal: false });
+
         const projectNames = new Map(
           projects.map((project) => [project.id, project.name]),
         );
+
         printThreadTable(threads, projectNames);
       }),
     );
@@ -109,7 +157,7 @@ export function registerListCommand(
 const MAX_TITLE_WIDTH = 60;
 
 function printThreadTable(
-  threads: Thread[],
+  threads: ThreadListEntry[],
   projectNames: ReadonlyMap<string, string>,
 ): void {
   const rows = threads.map((thread) => [
@@ -118,6 +166,7 @@ function printThreadTable(
     formatThreadListProject(thread, projectNames),
     formatThreadListStatus(thread),
   ]);
+
   printBorderlessTable(
     {
       head: ["ID", "Title", "Project", "Status"],
@@ -129,9 +178,12 @@ function printThreadTable(
 
 function formatThreadListTitle(thread: Thread): string {
   const title = thread.title?.trim();
+
   if (title) return title;
   const fallback = thread.titleFallback?.trim();
+
   if (fallback) return fallback;
+
   return "-";
 }
 
@@ -140,19 +192,33 @@ function formatThreadListProject(
   projectNames: ReadonlyMap<string, string>,
 ): string {
   if (thread.projectId === PERSONAL_PROJECT_ID) return "-";
+
   return projectNames.get(thread.projectId) ?? thread.projectId;
 }
 
-function formatThreadListStatus(thread: Thread): string {
+function formatThreadListStatus(thread: ThreadListEntry): string {
   const flags: string[] = [];
+
   if (thread.archivedAt !== null) {
     flags.push("archived");
   }
+
   if (thread.pinnedAt !== null) {
     flags.push("pinned");
   }
-  if (flags.length === 0) {
-    return thread.status;
+
+  if (thread.shelvedAt !== null) {
+    flags.push("shelved");
   }
-  return `${thread.status} (${flags.join(", ")})`;
+
+  if (thread.pluginHome) {
+    flags.push(`home of ${thread.originPluginId ?? "a plugin"}`);
+  }
+
+  const status =
+    thread.work === null
+      ? "Open"
+      : THREAD_WORK_LABELS[thread.work.primary.label];
+
+  return flags.length === 0 ? status : `${status} (${flags.join(", ")})`;
 }

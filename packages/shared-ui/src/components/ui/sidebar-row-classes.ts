@@ -8,8 +8,7 @@ import { cn } from "../../lib/utils";
 import { CONTEXT_SELECTION_SURFACE_CLASS } from "./context-selection";
 import { SIDEBAR_HOVER_ACTIONS_GAP_CLASS } from "./sidebar-hover-actions";
 
-export const SIDEBAR_ROW_BASE_CLASS =
-  "flex w-full items-center gap-2 rounded-md pr-0 text-sm transition-colors";
+export const SIDEBAR_ROW_BASE_CLASS = `flex w-full items-center gap-2 rounded-md pr-0 text-sm ${LIST_HOVER_TRANSITION}`;
 
 export const SIDEBAR_ROW_GLYPH_SLOT_CLASS =
   "inline-flex shrink-0 items-center justify-center text-subtle-foreground";
@@ -23,10 +22,12 @@ export const SIDEBAR_WORKING_STATUS_COLOR_CLASS = "text-muted-foreground/50";
 export const SIDEBAR_SUCCESS_STATUS_COLOR_CLASS = "text-success-foreground";
 
 export const SIDEBAR_SUCCESS_STATUS_DOT_CLASS =
-  "size-[5px] rounded-full bg-muted-foreground/60 max-md:pointer-coarse:size-1.5";
+  "size-2 rounded-full bg-success max-md:pointer-coarse:size-2.5";
 
 const SIDEBAR_THREAD_ROW_BASE_PADDING_PX = 8;
+
 const SIDEBAR_THREAD_ROW_DEPTH_STEP_PX = 24;
+
 const SIDEBAR_THREAD_ROW_GLYPH_CENTER_OFFSET_PX = 8;
 
 export const SIDEBAR_STANDARD_ROW_PADDING_CLASS = "pl-2";
@@ -68,12 +69,12 @@ export function getSidebarThreadGroupLineLeft(depth: number): number {
 export const SIDEBAR_ROW_INTERACTIVE_STATE_CLASS = `cursor-pointer ${SIDEBAR_ROW_TEXT_CLASS} hover:bg-sidebar-accent hover:text-sidebar-accent-foreground`;
 
 export const SIDEBAR_ROW_ACCENT_STATE_CLASS =
-  "bb-sidebar-accent-row has-[[data-state=open]]:bg-sidebar-accent has-[[data-sidebar-rename-anchor]:focus-visible]:bg-sidebar-accent";
+  "omnyo-sidebar-accent-row has-[[data-state=open]]:bg-sidebar-accent has-[[data-sidebar-rename-anchor]:focus-visible]:bg-sidebar-accent";
 
-export const SIDEBAR_ROW_SELECTED_STATE_CLASS = `${CONTEXT_SELECTION_SURFACE_CLASS} bb-sidebar-selected-row ${SIDEBAR_ROW_TEXT_CLASS}`;
+export const SIDEBAR_ROW_SELECTED_STATE_CLASS = `${CONTEXT_SELECTION_SURFACE_CLASS} omnyo-sidebar-selected-row ${SIDEBAR_ROW_TEXT_CLASS}`;
 
 export const SIDEBAR_ROW_OPEN_IN_SPLIT_STATE_CLASS =
-  "bb-sidebar-open-in-split-row";
+  "omnyo-sidebar-open-in-split-row";
 
 const SIDEBAR_SECTION_DROP_TARGET_BASE_CLASS =
   "pointer-events-none absolute -inset-x-1 -inset-y-0.5 z-[70] rounded-md ring-1 ring-inset";
@@ -84,7 +85,6 @@ export const SIDEBAR_SECTION_DROP_TARGET_UNCHANGED_CLASS = `${SIDEBAR_SECTION_DR
 
 export const PROJECT_LIST_ACTION_BUTTON_CLASS = cn(
   SIDEBAR_ROW_BASE_CLASS,
-  LIST_HOVER_TRANSITION,
   SIDEBAR_STANDARD_ROW_PADDING_CLASS,
   SIDEBAR_ROW_INTERACTIVE_STATE_CLASS,
   COARSE_POINTER_ROW_HEIGHT_CLASS,

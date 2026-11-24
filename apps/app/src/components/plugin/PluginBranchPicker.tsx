@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { BranchPickerProps } from "@get-bb/plugin-sdk";
+import type { BranchPickerProps } from "@omnyo/plugin-sdk";
 import { BranchPicker } from "@/components/pickers/BranchPicker";
 import { usePluginBranches } from "./usePluginBranchPickerState";
 
@@ -13,15 +13,18 @@ export function PluginBranchPicker({
   disabled,
 }: BranchPickerProps) {
   const [searchQuery, setSearchQuery] = useState("");
+
   const { branches, remoteBranches, isLoading, refresh } = usePluginBranches({
     hostId,
     projectId,
     query: searchQuery,
   });
+
   const enabled = hostId !== null && projectId !== null;
   const prefix = label === undefined ? "" : `${label} `;
   const emptyLabel = placeholder ?? "Select branch";
   const triggerLabel = value === null ? emptyLabel : `${prefix}${value}`;
+
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (open) void refresh().catch(() => undefined);

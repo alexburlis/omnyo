@@ -3,7 +3,7 @@ import {
   withProcessLocalQueuedLocks,
   type ProcessLocalQueuedLockSpec,
   type ProcessLocalQueuedLockWork,
-} from "bb-environment-provider-host/process-local-lock";
+} from "omnyo-environment-provider-host/process-local-lock";
 import { getAbsoluteGitDir, type GitProcessOptions } from "./git.js";
 
 type CheckoutMutationLockWork<T> = ProcessLocalQueuedLockWork<T>;
@@ -47,6 +47,7 @@ export async function withCheckoutMutationLock<T>(
     checkoutPath,
     async () => {
       const lock = await resolveCheckoutMutationLockSpec(checkoutPath, options);
+
       return withProcessLocalQueuedLocks({ locks: [lock], signal, work });
     },
     signal,

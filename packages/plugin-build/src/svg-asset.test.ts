@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PLUGIN_ICON_MAX_BYTES } from "@bb/domain";
+import { PLUGIN_ICON_MAX_BYTES } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   assertValidPluginCompactIconSvg,
@@ -9,17 +9,23 @@ import {
   assertValidPluginLogoSvg,
 } from "./svg-asset.js";
 
-const LABEL = 'bb.branding.experimental_icons["receipt"]';
-const LOGO = 'manifest bb.branding.logo.light ("./logo.svg")';
+const LABEL = 'omnyo.branding.experimental_icons["receipt"]';
+
+const LOGO = 'manifest omnyo.branding.logo.light ("./logo.svg")';
+
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
+
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
 function discoverFirstPartyBrandingSvgs(): string[] {
   const files: string[] = [];
+
   for (const pluginsDir of ["plugins", "examples/plugins"]) {
     for (const plugin of readdirSync(join(REPO_ROOT, pluginsDir))) {
       const iconsDir = join(REPO_ROOT, pluginsDir, plugin, "icons");
+
       if (!existsSync(iconsDir)) continue;
+
       for (const file of readdirSync(iconsDir)) {
         if (file.endsWith(".svg")) {
           files.push(`${pluginsDir}/${plugin}/icons/${file}`);
@@ -27,6 +33,7 @@ function discoverFirstPartyBrandingSvgs(): string[] {
       }
     }
   }
+
   return files.sort();
 }
 
@@ -105,7 +112,7 @@ const TOOL_EXPORTS: Array<[string, Uint8Array]> = [
   ["Latin-1 bytes", LATIN1_SVG],
 ];
 
-describe("assertValidPluginCompactIconSvg (bb.branding.icon, marketplace icons)", () => {
+describe("assertValidPluginCompactIconSvg (omnyo.branding.icon, marketplace icons)", () => {
   it("checks the document shape only: markup the response headers keep inert is accepted", () => {
     for (const svg of [
       '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>',
@@ -145,9 +152,9 @@ describe("assertValidPluginCompactIconSvg (bb.branding.icon, marketplace icons)"
     );
   });
 
-  it("rejects bytes that are not UTF-8, naming bb.branding.icon by default", () => {
+  it("rejects bytes that are not UTF-8, naming omnyo.branding.icon by default", () => {
     expect(() => assertValidPluginCompactIconSvg(LATIN1_SVG)).toThrow(
-      "manifest bb.branding.icon must contain valid UTF-8 SVG bytes",
+      "manifest omnyo.branding.icon must contain valid UTF-8 SVG bytes",
     );
   });
 });

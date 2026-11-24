@@ -5,7 +5,7 @@ import {
 import { cancelProviderEnvironmentCreation } from "../../src/services/environments/environment-engine.js";
 import { sweepProviderMachine } from "../../src/services/machines/provider-orchestration.js";
 import { stopThreadForCurrentState } from "../../src/services/threads/thread-lifecycle.js";
-import { createDeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { resolveGitCheckoutAvailability } from "../../src/services/environments/provider-availability.js";
 import { invalidateEnvironmentProviderMachineAvailability } from "../../src/services/environments/provider-machine-availability.js";
 import {
@@ -28,20 +28,20 @@ import {
   listProjectSourcesByProjectIds,
   setProjectGitRemoteUrlIfMissing,
   updateHost,
-} from "@bb/db";
-import { PERSONAL_PROJECT_ID, type JsonValue } from "@bb/domain";
+} from "@omnyo/db";
+import { PERSONAL_PROJECT_ID, type JsonValue } from "@omnyo/domain";
 import type {
   PluginDispatchEnvironmentIntent,
   PluginEnvironmentProviderDeclaration,
   PluginEnvironmentValidateDecision,
   PluginHookName,
-} from "@get-bb/plugin-sdk";
-import type { PluginEnvironmentProviderValidateContext } from "@get-bb/plugin-sdk/environment-provider";
-import type { PluginMachineProviderCreateContext } from "@get-bb/plugin-sdk/machine-provider";
+} from "@omnyo/plugin-sdk";
+import type { PluginEnvironmentProviderValidateContext } from "@omnyo/plugin-sdk/environment-provider";
+import type { PluginMachineProviderCreateContext } from "@omnyo/plugin-sdk/machine-provider";
 import {
   validatePluginEnvironmentProviderDeclaration,
   validatePluginMachineProviderDeclaration,
-} from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/plugin-sdk/internal/host-policy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiError } from "../../src/errors.js";
@@ -90,7 +90,9 @@ import {
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
 const WORKSPACE_PATH = "/tmp/environment-providers-project";
+
 const PLUGIN_ID = "sandbox";
+
 const PROVIDER_ID = "container";
 
 interface FakeTarget {
@@ -143,6 +145,7 @@ function installTargets(
       ...(fake.remove === undefined ? {} : { remove: fake.remove }),
     }),
   }));
+
   setPluginEnvironmentProviderBridge({
     listEnvironmentCompositions: () => compositions,
     listEnvironmentProviders: () => records,
@@ -159,14 +162,17 @@ function installTarget(fake: FakeTarget | null): void {
 
 function installEnvironmentIntentProbe(): PluginDispatchEnvironmentIntent[] {
   const environmentIntents: PluginDispatchEnvironmentIntent[] = [];
+
   const registry: {
     [K in PluginHookName]: PluginHookRegistration<K>[];
   } = { "message.dispatch": [] };
+
   registry["message.dispatch"].push({
     pluginId: "observer",
     handler: (context) => {
       if (context.environmentIntent !== null)
         environmentIntents.push(context.environmentIntent);
+
       return { action: "proceed" } as const;
     },
   });
@@ -178,6 +184,7 @@ function installEnvironmentIntentProbe(): PluginDispatchEnvironmentIntent[] {
     }),
     decisionTimeoutMs: 10_000,
   });
+
   return environmentIntents;
 }
 
@@ -194,10 +201,12 @@ function seedTargetFixture(
   args: { environmentProviderId?: string } = {},
 ) {
   const { host, session } = seedHostSession(harness.deps, { id: hostId });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: WORKSPACE_PATH,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
@@ -209,6 +218,7 @@ function seedTargetFixture(
           environmentProviderPluginId: PLUGIN_ID,
         }),
   });
+
   return { environment, host, project, session };
 }
 
@@ -235,6 +245,7 @@ describe("machine and environment provider composition", () => {
         remove: async () => ({ status: "removed" as const }),
       }),
     };
+
     setPluginMachineProviderBridge({
       listMachineProviders: () => [machine],
       getMachineProvider: (id) =>
@@ -274,21 +285,26 @@ describe("machine and environment provider composition", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "composition-bootstrap-failure",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       setProjectGitRemoteUrlIfMissing(
         harness.db,
         harness.hub,
         project.id,
         "https://example.test/project.git",
       );
+
       const message =
         "Machine bootstrap command failed:\nbb-machine-install: 9: node: not found\nbb-machine-install: 9: curl: not found";
+
       installCompositionMachine(async ({ report }) => {
         report.step("Bootstrapping machine");
-        report.log("bb-machine-install: 9: node: not found\n");
-        report.log("bb-machine-install: 9: curl: not found\n");
+        report.log("omnyo-machine-install: 9: node: not found\n");
+        report.log("omnyo-machine-install: 9: curl: not found\n");
+
         return { status: "failed", message };
       });
 
@@ -309,9 +325,11 @@ describe("machine and environment provider composition", () => {
       await expect
         .poll(() => getThread(harness.db, thread.id)?.status)
         .toBe("error");
+
       const entries = provisioningEvents(harness, thread.id).flatMap(
         (event) => event.entries,
       );
+
       expect(entries).toContainEqual(
         expect.objectContaining({
           key: expect.stringMatching(/^provider-step-1-/u),
@@ -335,21 +353,25 @@ describe("machine and environment provider composition", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "composition-inputs",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       setProjectGitRemoteUrlIfMissing(
         harness.db,
         harness.hub,
         project.id,
         "https://example.test/project.git",
       );
+
       const create = vi.fn(
         async (_context: PluginMachineProviderCreateContext) => ({
           status: "failed" as const,
           message: "Observed inputs",
         }),
       );
+
       installCompositionMachine(
         create,
         z.object({ imageId: z.string().trim().min(1) }),
@@ -384,21 +406,25 @@ describe("machine and environment provider composition", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "composition-default",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       setProjectGitRemoteUrlIfMissing(
         harness.db,
         harness.hub,
         project.id,
         "https://example.test/project.git",
       );
+
       const create = vi.fn(
         async (_context: PluginMachineProviderCreateContext) => ({
           status: "failed" as const,
           message: "Observed inputs",
         }),
       );
+
       installCompositionMachine(create);
 
       await createThreadFromRequest(harness.deps, {
@@ -423,20 +449,24 @@ describe("machine and environment provider composition", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "composition-wrong",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       setProjectGitRemoteUrlIfMissing(
         harness.db,
         harness.hub,
         project.id,
         "https://example.test/project.git",
       );
+
       const create = vi.fn(async () => ({
         status: "created" as const,
         name: "Test machine",
         resource: {},
       }));
+
       installCompositionMachine(create);
 
       await expect(
@@ -468,9 +498,11 @@ describe("machine and environment provider composition", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "composition-environment-first",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       setProjectGitRemoteUrlIfMissing(
         harness.db,
         harness.hub,
@@ -479,6 +511,7 @@ describe("machine and environment provider composition", () => {
       );
       const started = createDeferredPromise<void>();
       const release = createDeferredPromise<void>();
+
       const machine = {
         pluginId: "cloud",
         provider: validatePluginMachineProviderDeclaration({
@@ -491,6 +524,7 @@ describe("machine and environment provider composition", () => {
             report.log("Allocating VM\n");
             started.resolve();
             await release.promise;
+
             return {
               status: "failed" as const,
               message: "Cloud quota exceeded",
@@ -500,6 +534,7 @@ describe("machine and environment provider composition", () => {
           remove: async () => ({ status: "removed" }),
         }),
       };
+
       setPluginMachineProviderBridge({
         listMachineProviders: () => [machine],
         getMachineProvider: (id) =>
@@ -569,9 +604,11 @@ describe("machine and environment provider composition", () => {
       });
       const environment = getPreparingEnvironment(harness.db, thread.id);
       expect(environment?.hostId).toBe(machineHost?.id);
+
       if (environment === null)
         throw new Error("Missing preparing environment");
       const destroyed = createDeferredPromise<void>();
+
       const socket = {
         close() {},
         send() {
@@ -581,10 +618,12 @@ describe("machine and environment provider composition", () => {
             destroyed.resolve();
         },
       };
+
       harness.hub.subscribe(socket, {
         kind: "environment-detail",
         environmentId: environment.id,
       });
+
       try {
         release.resolve();
         await destroyed.promise;
@@ -610,12 +649,15 @@ function createTargetThread(
   },
 ) {
   const model = "model" in args ? args.model : "requested-model";
+
   const source =
     listProjectSourcesByProjectIds(harness.db, [args.projectId]).find(
       (projectSource) => projectSource.isDefault,
     ) ?? null;
+
   const sourceHostId = source?.type === "local_path" ? source.hostId : null;
   const hostId = args.hostId ?? sourceHostId ?? "host-1";
+
   return createThreadFromRequest(harness.deps, {
     environment: {
       type: "provider",
@@ -676,14 +718,18 @@ describe("shared machine preparation retention", () => {
           harness,
           "shared-machine",
         );
+
         const owner = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
         });
+
         const otherProject = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         }).project;
+
         const remove = vi.fn(async () => ({ status: "removed" as const }));
+
         const machine = {
           pluginId: "cloud",
           provider: validatePluginMachineProviderDeclaration({
@@ -699,6 +745,7 @@ describe("shared machine preparation retention", () => {
             remove,
           }),
         };
+
         setPluginMachineProviderBridge({
           listMachineProviders: () => [machine],
           getMachineProvider: (id) =>
@@ -721,10 +768,12 @@ describe("shared machine preparation retention", () => {
           provision: async () => {
             entered.resolve();
             await release.promise;
+
             return { action: "reject", message: "Setup failed" };
           },
         });
         let nextThreadId: string | null = null;
+
         try {
           const next = await createThreadFromRequest(harness.deps, {
             projectId: otherProject.id,
@@ -741,27 +790,33 @@ describe("shared machine preparation retention", () => {
             startedOnBehalfOf: null,
             ...(scheduled ? { sendAt: Date.now() + 60000 } : {}),
           });
+
           nextThreadId = next.id;
+
           if (!scheduled) await entered.promise;
           expect(getThread(harness.db, next.id)).toMatchObject({
             environmentId: null,
             status: scheduled ? "pending" : "starting",
           });
+
           const response = await harness.app.request(
             action === "archive"
               ? `/api/v1/threads/${owner.id}/archive-all`
               : `/api/v1/projects/${project.id}`,
             { method: action === "archive" ? "POST" : "DELETE" },
           );
+
           expect(response.status).toBe(200);
           await sweepProviderMachine(harness.deps, host.id);
           expect(remove).not.toHaveBeenCalled();
           expect(getHost(harness.db, host.id)?.phase).toBe("active");
+
           if (scheduled) {
             const cancelled = await harness.app.request(
               `/api/v1/threads/${next.id}/archive-all`,
               { method: "POST" },
             );
+
             expect(cancelled.status).toBe(200);
           } else {
             expect(getPreparingEnvironment(harness.db, next.id)?.status).toBe(
@@ -778,11 +833,13 @@ describe("shared machine preparation retention", () => {
               )
               .toBe("removed");
           }
+
           await sweepProviderMachine(harness.deps, host.id);
           expect(remove).toHaveBeenCalledTimes(1);
           expect(getHost(harness.db, host.id)?.phase).toBe("destroyed");
         } finally {
           release.resolve();
+
           if (nextThreadId !== null)
             await cancelProviderEnvironmentCreation(harness.deps, nextThreadId);
         }
@@ -796,13 +853,16 @@ describe("shared machine preparation retention", () => {
         harness,
         "removing-before-reservation",
       );
+
       const provision = vi.fn(() => readyAt(host));
       installTarget({ provision });
       const record = listEnvironmentProviders()[0];
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         status: "starting",
       });
+
       const context = await resolveProviderOperationContext(
         harness.deps,
         thread,
@@ -815,6 +875,7 @@ describe("shared machine preparation retention", () => {
         },
         record,
       );
+
       if (context === null) throw new Error("Missing preparation context");
       updateHost(harness.db, harness.hub, host.id, { phase: "removing" });
       expect(() =>
@@ -831,6 +892,7 @@ describe("shared machine preparation retention", () => {
         harness,
         "removing-after-validation",
       );
+
       const entered = createDeferredPromise<void>();
       const release = createDeferredPromise<void>();
       const provision = vi.fn(() => readyAt(host));
@@ -839,20 +901,25 @@ describe("shared machine preparation retention", () => {
         validate: async () => {
           entered.resolve();
           await release.promise;
+
           return { action: "accept" };
         },
       });
+
       const creating = createTargetThread(harness, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const rejected = expect(creating).rejects.toThrow(/remov/i);
+
       try {
         await entered.promise;
         updateHost(harness.db, harness.hub, host.id, { phase: "removing" });
       } finally {
         release.resolve();
       }
+
       await rejected;
       expect(provision).not.toHaveBeenCalled();
       expect(
@@ -868,10 +935,12 @@ describe("environment providers are asked inside provisioning", () => {
   it("refuses placement on a machine being removed", async () => {
     await withTestHarness(async (harness) => {
       installTarget({ provision: () => ({ action: "wait", reason: "…" }) });
+
       const { host, project } = seedTargetFixture(
         harness,
         "host-being-removed",
       );
+
       updateHost(harness.db, harness.hub, host.id, { phase: "removing" });
 
       await expect(
@@ -895,11 +964,14 @@ describe("environment providers are asked inside provisioning", () => {
           requiresProjectless: true,
         },
       ]);
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-projectless-child",
       });
+
       seedPrimaryHost(harness.deps, host.id);
       ensurePersonalProject(harness.db);
+
       const parentEnvironment = createEnvironment(harness.db, harness.hub, {
         providerOwnsPath: true,
         hostId: host.id,
@@ -915,6 +987,7 @@ describe("environment providers are asked inside provisioning", () => {
           },
         },
       });
+
       const parent = seedThread(harness.deps, {
         environmentId: parentEnvironment.id,
         projectId: PERSONAL_PROJECT_ID,
@@ -942,6 +1015,111 @@ describe("environment providers are asked inside provisioning", () => {
     });
   });
 
+  it.each([
+    { type: "project-default" as const },
+    {
+      type: "host" as const,
+      workspace: { type: "personal" as const },
+    },
+    {
+      type: "provider" as const,
+      environmentProviderId: "personal-workspace",
+      machine: {
+        type: "existing" as const,
+        hostId: "host-attached-personal-parent",
+      },
+      inputs: null,
+    },
+  ])(
+    "shares an attached-directory parent's environment with a $type child",
+    async (environment) => {
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps, {
+          id: "host-attached-personal-parent",
+        });
+
+        seedPrimaryHost(harness.deps, host.id);
+        ensurePersonalProject(harness.db);
+
+        const attachedEnvironment = createEnvironment(harness.db, harness.hub, {
+          hostId: host.id,
+          projectId: PERSONAL_PROJECT_ID,
+          path: "/tmp/attached-personal-parent",
+          providerOwnsPath: false,
+          status: "ready",
+          environmentProvider: null,
+        });
+
+        const parent = seedThread(harness.deps, {
+          environmentId: attachedEnvironment.id,
+          projectId: PERSONAL_PROJECT_ID,
+          status: "idle",
+        });
+
+        const child = await createThreadFromRequest(harness.deps, {
+          environment,
+          input: textInput("Start child"),
+          origin: "cli",
+          parentThreadId: parent.id,
+          projectId: PERSONAL_PROJECT_ID,
+          providerId: "codex",
+          model: "requested-model",
+          startedOnBehalfOf: null,
+        });
+
+        expect(getThread(harness.db, child.id)).toMatchObject({
+          environmentId: attachedEnvironment.id,
+          parentThreadId: parent.id,
+        });
+      });
+    },
+  );
+
+  it("rejects a standard project thread that reuses a personal workspace", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps, {
+        id: "host-standard-reuses-personal",
+      });
+
+      ensurePersonalProject(harness.db);
+
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+
+      const personalWorkspace = createEnvironment(harness.db, harness.hub, {
+        hostId: host.id,
+        projectId: PERSONAL_PROJECT_ID,
+        path: "/tmp/personal-workspace-reused-by-standard",
+        providerOwnsPath: true,
+        status: "ready",
+        environmentProvider: {
+          environmentProviderId: "personal-workspace",
+          instanceKey: null,
+          selection: {
+            machine: { type: "existing", hostId: host.id },
+            inputs: null,
+          },
+        },
+      });
+
+      await expect(
+        createThreadFromRequest(harness.deps, {
+          environment: { type: "reuse", environmentId: personalWorkspace.id },
+          input: textInput("Reuse a personal workspace"),
+          origin: "cli",
+          projectId: project.id,
+          providerId: "codex",
+          model: "requested-model",
+          startedOnBehalfOf: null,
+        }),
+      ).rejects.toMatchObject({
+        body: { message: "Environment belongs to a different project" },
+        status: 409,
+      });
+    });
+  });
+
   it("opens the workspace-setup block and parks the thread starting on a wait", async () => {
     await withTestHarness(async (harness) => {
       const contexts: TestEnvironmentProviderContext[] = [];
@@ -949,10 +1127,12 @@ describe("environment providers are asked inside provisioning", () => {
         inputs: CONTAINER_INPUTS,
         provision: (context) => {
           contexts.push(context);
+
           return { action: "wait", reason: "Starting container…" };
         },
       });
       const { project } = seedTargetFixture(harness, "host-target-wait");
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
         inputs: { image: "img" },
@@ -988,13 +1168,16 @@ describe("environment providers are asked inside provisioning", () => {
         inputs: z.string().transform(Number),
         provision: (context) => {
           inputs.push(context.inputs);
+
           return { action: "wait", reason: "Starting container…" };
         },
       });
+
       const { project } = seedTargetFixture(
         harness,
         "host-target-transformed-inputs",
       );
+
       await createTargetThread(harness, {
         projectId: project.id,
         inputs: "2",
@@ -1010,6 +1193,7 @@ describe("environment providers are asked inside provisioning", () => {
         harness,
         "host-target-provider-setup",
       );
+
       const producedPath = "/tmp/environment-providers-owned-setup";
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
@@ -1031,13 +1215,16 @@ describe("environment providers are asked inside provisioning", () => {
       const created = await createTargetThread(harness, {
         projectId: project.id,
       });
+
       const queued = await waitForQueuedCommand(
         harness,
         (candidate) => candidate.command.type === "environment.attach",
       );
+
       if (queued.command.type !== "environment.attach") {
         throw new Error("Expected environment.attach command");
       }
+
       const environmentId = queued.command.environmentId;
 
       const thread = getThread(harness.db, created.id);
@@ -1073,6 +1260,7 @@ describe("environment providers are asked inside provisioning", () => {
         harness,
         "host-target-provider-setup-failure",
       );
+
       const producedPath = "/tmp/environment-providers-setup-failure";
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
@@ -1092,18 +1280,21 @@ describe("environment providers are asked inside provisioning", () => {
       const created = await createTargetThread(harness, {
         projectId: project.id,
       });
+
       const queued = await waitForQueuedCommand(
         harness,
         (candidate) => candidate.command.type === "environment.attach",
       );
+
       if (queued.command.type !== "environment.attach") {
         throw new Error("Expected environment.attach command");
       }
+
       const environmentId = queued.command.environmentId;
 
       await reportQueuedCommandError(harness, queued, {
         errorCode: "setup_script_failed",
-        errorMessage: ".bb-env-setup.sh failed with exit code 7",
+        errorMessage: ".omnyo-env-setup.sh failed with exit code 7",
       });
       await vi.waitFor(() => {
         expect(getThread(harness.db, created.id)).toMatchObject({
@@ -1121,16 +1312,20 @@ describe("environment providers are asked inside provisioning", () => {
   it("attaches a ready answer through placement and tells the hook the environment intent", async () => {
     await withTestHarness(async (harness) => {
       const environmentIntents = installEnvironmentIntentProbe();
+
       const { environment, host, project, session } = seedTargetFixture(
         harness,
         "host-target-ready",
         { environmentProviderId: PROVIDER_ID },
       );
+
       let ownerThreadId: string | null = null;
+
       const refreshAssignments: Array<{
         preparationAttached: boolean;
         thread: string | null;
       }> = [];
+
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -1147,9 +1342,11 @@ describe("environment providers are asked inside provisioning", () => {
         inputs: CONTAINER_INPUTS,
         provision: (context) => {
           ownerThreadId = context.thread.id;
+
           return readyAt(host);
         },
       });
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
         inputs: { image: "img", cpus: 4 },
@@ -1185,33 +1382,42 @@ describe("environment providers are asked inside provisioning", () => {
       let ask = 0;
       const cloning = createDeferredPromise<void>();
       const ready = createDeferredPromise<void>();
+
       const { environment, host, project } = seedTargetFixture(
         harness,
         "host-target-recheck",
         { environmentProviderId: PROVIDER_ID },
       );
+
       installTarget({
         provision: async () => {
           ask += 1;
+
           if (ask === 1) {
             return { action: "wait", reason: "Starting container…" };
           }
+
           if (ask === 2) {
             await cloning.promise;
+
             return {
               action: "wait",
               reason: "Cloning repository…",
               log: "cloned 100 objects",
             };
           }
+
           await ready.promise;
+
           return { ...readyAt(host), log: "scripts/setup.sh: done" };
         },
       });
+
       try {
         const created = await createTargetThread(harness, {
           projectId: project.id,
         });
+
         await vi.waitFor(() => {
           expect(blockEntries(harness, created.id)).toContainEqual([
             "step",
@@ -1236,6 +1442,7 @@ describe("environment providers are asked inside provisioning", () => {
         });
 
         const entries = blockEntries(harness, created.id);
+
         const targetEntries = entries.filter(
           ([, text]) =>
             text.includes("container") ||
@@ -1243,6 +1450,7 @@ describe("environment providers are asked inside provisioning", () => {
             text.includes("cloned") ||
             text.includes("setup.sh"),
         );
+
         expect(targetEntries).toEqual([
           ["step", "Preparing Fake container…"],
           ["step", "Preparing Fake container…"],
@@ -1266,14 +1474,17 @@ describe("environment providers are asked inside provisioning", () => {
       const createReady = createDeferredPromise<void>();
       const firstAdvanceFinished = createDeferredPromise<void>();
       const releaseFirstAdvance = createDeferredPromise<void>();
+
       const { environment, host, project } = seedTargetFixture(
         harness,
         "host-target-overlapping-recheck",
         { environmentProviderId: PROVIDER_ID },
       );
+
       installTarget({
         provision: async () => {
           await createReady.promise;
+
           return readyAt(host);
         },
       });
@@ -1281,19 +1492,26 @@ describe("environment providers are asked inside provisioning", () => {
       let pendingAdvance: Promise<void> | null = null;
       let coalescedAdvanceCount = 0;
       harness.deps.lifecycleDedupers.threadProvisionAdvance = {
+        get size() {
+          return pendingAdvance === null ? 0 : 1;
+        },
         run(_threadId, task) {
           if (pendingAdvance !== null) {
             coalescedAdvanceCount += 1;
+
             return pendingAdvance;
           }
+
           const started = (async () => {
             await task();
             firstAdvanceFinished.resolve();
             await releaseFirstAdvance.promise;
           })();
+
           pendingAdvance = started.finally(() => {
             pendingAdvance = null;
           });
+
           return pendingAdvance;
         },
       };
@@ -1302,6 +1520,7 @@ describe("environment providers are asked inside provisioning", () => {
         const created = await createTargetThread(harness, {
           projectId: project.id,
         });
+
         await firstAdvanceFinished.promise;
         createReady.resolve();
         await vi.waitFor(() => {
@@ -1331,16 +1550,19 @@ describe("environment providers are asked inside provisioning", () => {
         harness,
         "host-target-foreign-path",
       );
+
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
         sessionId: session.id,
       });
+
       const foreign = seedEnvironment(harness.deps, {
         environmentProviderId: "git-worktree",
         hostId: host.id,
         path: "/tmp/environment-providers-foreign",
         projectId: project.id,
       });
+
       installTarget({
         provision: () => ({
           action: "ready",
@@ -1351,17 +1573,22 @@ describe("environment providers are asked inside provisioning", () => {
           },
         }),
       });
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
       });
+
       await vi.waitFor(() => {
         expect(getThread(harness.db, created.id)?.status).toBe("error");
       });
+
       const error = listEvents(harness.db, { threadId: created.id }).find(
         (event) => event.type === "system/error",
       );
+
       const detail = (JSON.parse(error?.data ?? "null") as { detail: string })
         .detail;
+
       expect(detail).toContain(`"${PROVIDER_ID}" environment provider`);
       expect(detail).toContain('"git-worktree" environment provider');
       expect(
@@ -1377,6 +1604,7 @@ describe("environment providers are asked inside provisioning", () => {
         harness,
         "host-target-refresh-branch",
       );
+
       const attached = seedEnvironment(harness.deps, {
         branchName: "main",
         environmentProviderId: PROVIDER_ID,
@@ -1390,6 +1618,7 @@ describe("environment providers are asked inside provisioning", () => {
         path: "/tmp/environment-providers-refresh-branch",
         projectId: project.id,
       });
+
       const inspected: string[] = [];
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
@@ -1421,9 +1650,11 @@ describe("environment providers are asked inside provisioning", () => {
           },
         }),
       });
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
       });
+
       await vi.waitFor(() => {
         expect(getEnvironment(harness.db, attached.id)?.branchName).toBe(
           "release",
@@ -1440,6 +1671,79 @@ describe("environment providers are asked inside provisioning", () => {
     });
   });
 
+  it.each([
+    ["records a reported base", "origin/dev", "origin/dev"],
+    ["clears the base when the provider reports none", null, null],
+    ["keeps the base when the provider omits it", undefined, "origin/old"],
+  ] as const)(
+    "on a reused host row it %s",
+    async (_label, reported, expected) => {
+      await withTestHarness(async (harness) => {
+        const { host, project, session } = seedTargetFixture(
+          harness,
+          "host-target-reused-merge-base",
+        );
+
+        const path = "/tmp/environment-providers-reused-merge-base";
+
+        const attached = seedEnvironment(harness.deps, {
+          branchName: "main",
+          mergeBaseBranch: "origin/old",
+          environmentProviderId: PROVIDER_ID,
+          environmentProviderPluginId: PLUGIN_ID,
+          hostId: host.id,
+          path,
+          projectId: project.id,
+        });
+
+        registerTestHostRpcCapture(harness, {
+          hostId: host.id,
+          sessionId: session.id,
+          gitSourceInspectionResult: {
+            isWorktree: false,
+            checkout: {
+              kind: "branch",
+              branchName: "omnyo/next-thread",
+              headSha: "def456",
+            },
+            defaultBranch: "main",
+            defaultBranchRelation: "local-ahead",
+            hasUncommittedChanges: false,
+            operation: { kind: "none" },
+            originDefaultBranch: "origin/main",
+          },
+        });
+        installTarget({
+          provision: () => ({
+            action: "ready",
+            environment: {
+              type: "host",
+              hostId: host.id,
+              path,
+              ...(reported === undefined ? {} : { mergeBaseBranch: reported }),
+            },
+          }),
+        });
+
+        const created = await createTargetThread(harness, {
+          projectId: project.id,
+        });
+
+        await vi.waitFor(() => {
+          expect(getEnvironment(harness.db, attached.id)?.branchName).toBe(
+            "omnyo/next-thread",
+          );
+        });
+        expect(getThread(harness.db, created.id)?.environmentId).toBe(
+          attached.id,
+        );
+        expect(getEnvironment(harness.db, attached.id)?.mergeBaseBranch).toBe(
+          expected,
+        );
+      });
+    },
+  );
+
   it("fails the thread with the plugin named when provision throws", async () => {
     await withTestHarness(async (harness) => {
       installTarget({
@@ -1448,17 +1752,22 @@ describe("environment providers are asked inside provisioning", () => {
         },
       });
       const { project } = seedTargetFixture(harness, "host-target-throw");
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
       });
+
       await vi.waitFor(() => {
         expect(getThread(harness.db, created.id)?.status).toBe("error");
       });
+
       const error = listEvents(harness.db, { threadId: created.id }).find(
         (event) => event.type === "system/error",
       );
+
       const detail = (JSON.parse(error?.data ?? "null") as { detail: string })
         .detail;
+
       expect(detail).toContain(PLUGIN_ID);
       expect(detail).toContain("docker daemon unreachable");
       expect(provisioningEvents(harness, created.id).at(-1)?.status).toBe(
@@ -1475,14 +1784,17 @@ describe("environment providers are asked inside provisioning", () => {
         "host-target-retry-pre-row",
         { environmentProviderId: PROVIDER_ID },
       );
+
       installTarget({
         provision: () => {
           throw new Error("temporary creation failure");
         },
       });
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
       });
+
       await vi.waitFor(() => {
         expect(getThread(harness.db, created.id)?.status).toBe("error");
       });
@@ -1491,11 +1803,13 @@ describe("environment providers are asked inside provisioning", () => {
       installTarget({
         provision: (context) => {
           asks.push(context.thread.id);
+
           return readyAt(host);
         },
       });
       const failedThread = getThread(harness.db, created.id);
       expect(failedThread).not.toBeNull();
+
       if (failedThread === null) return;
 
       const outcome = await attemptDispatch(harness.deps, {
@@ -1504,6 +1818,7 @@ describe("environment providers are asked inside provisioning", () => {
         source: { kind: "inline" },
         queuePayload: { kind: "inline" },
         pluginSubmission: null,
+        systemNotice: null,
         origin: null,
         originPluginId: null,
         startedOnBehalfOf: null,
@@ -1530,15 +1845,19 @@ describe("environment providers are asked inside provisioning", () => {
         }),
       });
       const { project } = seedTargetFixture(harness, "host-target-reject");
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
       });
+
       await vi.waitFor(() => {
         expect(getThread(harness.db, created.id)?.status).toBe("error");
       });
+
       const error = listEvents(harness.db, { threadId: created.id }).find(
         (event) => event.type === "system/error",
       );
+
       expect(
         (JSON.parse(error?.data ?? "null") as { detail: string }).detail,
       ).toBe("Choose a container image.");
@@ -1549,12 +1868,14 @@ describe("environment providers are asked inside provisioning", () => {
     await withTestHarness(async (harness) => {
       installTarget(null);
       const { project } = seedTargetFixture(harness, "host-target-missing");
+
       const failed = await createTargetThread(harness, {
         projectId: project.id,
       }).then(
         () => null,
         (error: unknown) => error,
       );
+
       expect(failed).toBeInstanceOf(ApiError);
       expect((failed as ApiError).status).toBe(400);
       expect((failed as ApiError).body.code).toBe("invalid_request");
@@ -1572,9 +1893,11 @@ describe("environment providers are asked inside provisioning", () => {
         },
       ]);
       const { project } = seedTargetFixture(harness, "host-target-checkout");
+
       const { host: bare } = seedHostSession(harness.deps, {
         id: "host-target-bare",
       });
+
       const failed = await createTargetThread(harness, {
         projectId: project.id,
         hostId: bare.id,
@@ -1582,6 +1905,7 @@ describe("environment providers are asked inside provisioning", () => {
         () => null,
         (error: unknown) => error,
       );
+
       expect(failed).toBeInstanceOf(ApiError);
       expect((failed as ApiError).body.code).toBe("invalid_request");
       expect((failed as ApiError).message).toContain("No project source");
@@ -1597,12 +1921,14 @@ describe("environment providers are asked inside provisioning", () => {
         },
       ]);
       const { project } = seedTargetFixture(harness, "host-target-projectless");
+
       const failed = await createTargetThread(harness, {
         projectId: project.id,
       }).then(
         () => null,
         (error: unknown) => error,
       );
+
       expect(failed).toBeInstanceOf(ApiError);
       expect((failed as ApiError).body.code).toBe("invalid_request");
       expect((failed as ApiError).message).toContain("no project");
@@ -1616,16 +1942,20 @@ describe("environment providers are asked inside provisioning", () => {
         provision: () => ({ action: "wait", reason: "…" }),
       });
       const { project } = seedTargetFixture(harness, "host-target-no-remote");
+
       const failed = await createTargetThread(harness, {
         projectId: project.id,
       }).then(
         () => null,
         (error: unknown) => error,
       );
+
       expect(failed).toBeInstanceOf(ApiError);
+
       if (!(failed instanceof ApiError)) {
         throw new Error("expected provider selection to be rejected");
       }
+
       expect(failed.body.code).toBe("environment_provider_rejected");
       expect(failed.message).toContain("has no git remote");
     });
@@ -1637,10 +1967,12 @@ describe("environment providers are asked inside provisioning", () => {
         requiresGitCheckout: true,
         provision: () => ({ action: "wait", reason: "…" }),
       });
+
       const { host, project, session } = seedTargetFixture(
         harness,
         "host-target-unusable-git-checkout",
       );
+
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -1654,6 +1986,7 @@ describe("environment providers are asked inside provisioning", () => {
           originDefaultBranch: null,
         },
       });
+
       const failed = await createTargetThread(harness, {
         projectId: project.id,
         hostId: host.id,
@@ -1661,10 +1994,13 @@ describe("environment providers are asked inside provisioning", () => {
         () => null,
         (error: unknown) => error,
       );
+
       expect(failed).toBeInstanceOf(ApiError);
+
       if (!(failed instanceof ApiError)) {
         throw new Error("expected provider selection to be rejected");
       }
+
       expect(failed.body.code).toBe("environment_provider_rejected");
       expect(failed.message).toContain("no usable git branch");
     });
@@ -1675,15 +2011,18 @@ describe("environment providers are asked inside provisioning", () => {
       installTarget({
         provision: () => ({ action: "wait", reason: "Creating…" }),
       });
+
       const { host, project } = seedTargetFixture(
         harness,
         "host-target-scoped",
       );
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
         hostId: host.id,
         model: undefined,
       });
+
       expect(getThread(harness.db, created.id)?.status).toBe("starting");
     });
   });
@@ -1695,6 +2034,7 @@ describe("provider validate at create time", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-inspection-dedupe",
       });
+
       const inspect = vi.fn();
       registerTestHostRpcCapture(harness.deps, {
         hostId: host.id,
@@ -1702,11 +2042,13 @@ describe("provider validate at create time", () => {
         onInspectGitSource: inspect,
       });
       const args = { hostId: host.id, path: WORKSPACE_PATH };
+
       const results = await Promise.all(
         Array.from({ length: 6 }, () =>
           resolveGitCheckoutAvailability(harness.deps, args),
         ),
       );
+
       expect(results).toHaveLength(6);
       expect(inspect).toHaveBeenCalledOnce();
       await resolveGitCheckoutAvailability(harness.deps, args);
@@ -1717,14 +2059,18 @@ describe("provider validate at create time", () => {
   it("rejects a missing implicit default before creating a thread", async () => {
     await withTestHarness(async (harness) => {
       installTargets([]);
+
       const { host, project } = seedTargetFixture(
         harness,
         "host-disabled-default",
       );
+
       seedPrimaryHost(harness.deps, host.id);
+
       const before = harness.db.$client
         .prepare("select count(*) as count from threads")
         .get();
+
       await expect(
         createThreadFromRequest(harness.deps, {
           environment: { type: "project-default" },
@@ -1752,7 +2098,9 @@ describe("provider validate at create time", () => {
       () => null,
       (error: unknown) => error,
     );
+
     expect(failed).toBeInstanceOf(ApiError);
+
     return failed as ApiError;
   }
 
@@ -1762,25 +2110,30 @@ describe("provider validate at create time", () => {
         status: "setup-required" as const,
         message: "Add sandbox credentials",
       }));
+
       const validate = vi.fn(() => ({ action: "accept" as const }));
       installTarget({
         availability,
         validate,
         provision: () => ({ action: "wait", reason: "…" }),
       });
+
       const { host, project } = seedTargetFixture(
         harness,
         "host-target-availability-refuse",
       );
+
       const threadsBefore = harness.db.$client
         .prepare("select count(*) as count from threads")
         .get();
+
       const environmentsBefore = listEnvironments(harness.db, {}).length;
 
       const failed = await createFailure(harness, {
         projectId: project.id,
         hostId: host.id,
       });
+
       expect(failed.status).toBe(409);
       expect(failed.body.code).toBe("environment_provider_rejected");
       expect(failed.message).toBe("Add sandbox credentials");
@@ -1809,10 +2162,12 @@ describe("provider validate at create time", () => {
         },
         provision: () => ({ action: "wait", reason: "…" }),
       });
+
       const { project } = seedTargetFixture(
         harness,
         "host-target-availability-error",
       );
+
       const failed = await createFailure(harness, { projectId: project.id });
       expect(failed.status).toBe(502);
       expect(failed.body.code).toBe("environment_provider_failed");
@@ -1831,19 +2186,23 @@ describe("provider validate at create time", () => {
         }),
         provision: (context) => {
           asks.push(context);
+
           return { action: "wait", reason: "…" };
         },
       });
+
       const { host, project } = seedTargetFixture(
         harness,
         "host-target-validate-refuse",
       );
+
       const before = listEnvironments(harness.db, {}).length;
 
       const failed = await createFailure(harness, {
         projectId: project.id,
         hostId: host.id,
       });
+
       expect(failed.status).toBe(409);
       expect(failed.body.code).toBe("environment_provider_rejected");
       expect(failed.message).toBe("No room left on this machine");
@@ -1861,21 +2220,25 @@ describe("provider validate at create time", () => {
         inputs: CONTAINER_INPUTS,
         validate: (context) => {
           seen.push(context);
+
           return seen.length === 1
             ? { action: "accept" }
             : { action: "refuse", message: "Validation ran after insertion" };
         },
         provision: () => ({ action: "wait", reason: "Creating…" }),
       });
+
       const { host, project } = seedTargetFixture(
         harness,
         "host-target-validate-accept",
       );
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
         hostId: host.id,
         inputs: { image: "ubuntu" },
       });
+
       expect(getThread(harness.db, created.id)?.status).toBe("starting");
       expect(seen).toHaveLength(1);
       expect(seen[0]).toMatchObject({
@@ -1895,10 +2258,12 @@ describe("provider validate at create time", () => {
           ({ action: "maybe" }) as unknown as PluginEnvironmentValidateDecision,
         provision: () => ({ action: "wait", reason: "…" }),
       });
+
       const { project } = seedTargetFixture(
         harness,
         "host-target-validate-shape",
       );
+
       const failed = await createFailure(harness, { projectId: project.id });
       expect(failed.status).toBe(502);
       expect(failed.body.code).toBe("environment_provider_failed");
@@ -1915,10 +2280,12 @@ describe("provider validate at create time", () => {
         },
         provision: () => ({ action: "wait", reason: "…" }),
       });
+
       const { project } = seedTargetFixture(
         harness,
         "host-target-validate-throw",
       );
+
       const failed = await createFailure(harness, { projectId: project.id });
       expect(failed.status).toBe(502);
       expect(failed.body.code).toBe("environment_provider_failed");
@@ -1937,7 +2304,9 @@ describe("provider inputs are parsed at create time", () => {
       () => null,
       (error: unknown) => error,
     );
+
     expect(failed).toBeInstanceOf(ApiError);
+
     return failed as ApiError;
   }
 
@@ -1948,6 +2317,7 @@ describe("provider inputs are parsed at create time", () => {
         inputs: CONTAINER_INPUTS,
         provision: (context) => {
           asks.push(context);
+
           return { action: "wait", reason: "…" };
         },
       });
@@ -1958,6 +2328,7 @@ describe("provider inputs are parsed at create time", () => {
         projectId: project.id,
         inputs: { image: "", cpus: "many" },
       });
+
       expect(failed.status).toBe(400);
       expect(failed.body.code).toBe("invalid_request");
       expect(failed.message).toContain(`"${PROVIDER_ID}"`);
@@ -1986,14 +2357,17 @@ describe("provider inputs are parsed at create time", () => {
   it("refuses inputs for a provider that declares none", async () => {
     await withTestHarness(async (harness) => {
       installTarget({ provision: () => ({ action: "wait", reason: "…" }) });
+
       const { project } = seedTargetFixture(
         harness,
         "host-target-unexpected-inputs",
       );
+
       const failed = await createFailure(harness, {
         projectId: project.id,
         inputs: { image: "img" },
       });
+
       expect(failed.status).toBe(400);
       expect(failed.body.code).toBe("invalid_request");
       expect(failed.message).toContain("takes no inputs");
@@ -2009,10 +2383,12 @@ describe("provider inputs are parsed at create time", () => {
         provision: () => ({ action: "wait", reason: "…" }),
       });
       const { project } = seedTargetFixture(harness, "host-target-throwing");
+
       const failed = await createFailure(harness, {
         projectId: project.id,
         inputs: { image: "img" },
       });
+
       expect(failed.status).toBe(502);
       expect(failed.body.code).toBe("environment_provider_failed");
       expect(failed.message).toContain(PLUGIN_ID);
@@ -2032,10 +2408,13 @@ describe("provider inputs are parsed at create time", () => {
           provision: () => ({ action: "wait", reason: "…" }),
         },
       ]);
+
       const response = await harness.app.request(
         "/api/v1/system/environment-providers",
       );
+
       expect(response.status).toBe(200);
+
       const body = (await readJson(response)) as {
         providers: Array<{
           id: string;
@@ -2043,6 +2422,7 @@ describe("provider inputs are parsed at create time", () => {
           inputs: JsonValue | null;
         }>;
       };
+
       expect(body.providers).toEqual([
         {
           machineProviderId: null,
@@ -2099,6 +2479,7 @@ describe("environment provider listing", () => {
     const response = await harness.app.request(
       `/api/v1/system/environment-providers?${query}`,
     );
+
     return (await readJson(response)) as {
       providers: Array<{
         id: string;
@@ -2116,6 +2497,7 @@ describe("environment provider listing", () => {
           id: "project-only",
           availability: () => {
             availabilityChecks.push("project-only");
+
             return { status: "available" };
           },
           provision: () => ({ action: "wait", reason: "…" }),
@@ -2125,21 +2507,25 @@ describe("environment provider listing", () => {
           requiresProjectless: true,
           availability: () => {
             availabilityChecks.push("projectless-only");
+
             return { status: "available" };
           },
           provision: () => ({ action: "wait", reason: "…" }),
         },
       ]);
+
       const { project } = seedTargetFixture(
         harness,
         "host-provider-structural-filter",
       );
+
       ensurePersonalProject(harness.db);
 
       const projectBody = await listProviders(
         harness,
         `projectId=${project.id}`,
       );
+
       expect(projectBody.providers.map((provider) => provider.id)).toEqual([
         "project-only",
       ]);
@@ -2151,6 +2537,7 @@ describe("environment provider listing", () => {
         harness,
         `projectId=${PERSONAL_PROJECT_ID}`,
       );
+
       expect(projectlessBody.providers.map((provider) => provider.id)).toEqual([
         "projectless-only",
       ]);
@@ -2185,9 +2572,11 @@ describe("environment provider listing", () => {
       const response = await harness.app.request(
         "/api/v1/system/environment-providers",
       );
+
       const body = (await readJson(response)) as {
         providers: Array<{ id: string; machineAvailability: unknown }>;
       };
+
       expect(body.providers.map((provider) => provider.id)).toEqual([
         "project-checkout",
         "git-worktree",
@@ -2205,14 +2594,17 @@ describe("environment provider listing", () => {
         status: "setup-required" as const,
         message: "Add sandbox credentials",
       }));
+
       installTarget({
         availability,
         provision: () => ({ action: "wait", reason: "…" }),
       });
+
       const { host, project } = seedTargetFixture(
         harness,
         "host-provider-availability",
       );
+
       const notifySystem = vi.spyOn(harness.hub, "notifySystem");
 
       const first = await listProviders(harness, `projectId=${project.id}`);
@@ -2232,6 +2624,7 @@ describe("environment provider listing", () => {
         harness,
         `projectId=${project.id}&hostId=${host.id}`,
       );
+
       expect(scoped.providers[0]?.availability).toEqual({
         status: "setup-required",
         message: "Add sandbox credentials",
@@ -2258,6 +2651,7 @@ describe("environment provider listing", () => {
       installTarget({
         availability: () => {
           checks += 1;
+
           return {
             status: "setup-required",
             message: "Add sandbox credentials",
@@ -2265,10 +2659,12 @@ describe("environment provider listing", () => {
         },
         provision: () => ({ action: "wait", reason: "…" }),
       });
+
       const { project } = seedTargetFixture(
         harness,
         "host-provider-availability-fresh",
       );
+
       await createTargetThread(harness, { projectId: project.id }).catch(
         () => undefined,
       );
@@ -2287,15 +2683,18 @@ describe("environment provider listing", () => {
           status: "setup-required" as const,
           message: "Configure credentials",
         }));
+
         installTarget({
           requiresGitRemote: requirement === "gitRemote",
           availability,
           provision: () => ({ action: "wait", reason: "…" }),
         });
+
         const { host, project, session } = seedTargetFixture(
           harness,
           "host-filter-requirements",
         );
+
         registerTestHostRpcCapture(harness, {
           hostId: host.id,
           sessionId: session.id,
@@ -2310,11 +2709,13 @@ describe("environment provider listing", () => {
           },
         });
         const hostId = requirement === "host" ? "missing-host" : host.id;
+
         const body = await readJson(
           await harness.app.request(
             `/api/v1/system/environment-providers?projectId=${project.id}&hostId=${hostId}`,
           ),
         );
+
         expect(body).toEqual({ providers: [] });
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(availability).not.toHaveBeenCalled();
@@ -2327,15 +2728,18 @@ describe("environment provider listing", () => {
       const availability = vi.fn(() => ({
         status: "available" as const,
       }));
+
       installTarget({
         requiresGitCheckout: true,
         availability,
         provision: () => ({ action: "wait", reason: "…" }),
       });
+
       const { host, project, session } = seedTargetFixture(
         harness,
         "host-filter-git-checkout",
       );
+
       const inspect = vi.fn();
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
@@ -2351,10 +2755,12 @@ describe("environment provider listing", () => {
           originDefaultBranch: null,
         },
       });
+
       const first = await listProviders(
         harness,
         `projectId=${project.id}&hostId=${host.id}`,
       );
+
       expect(first.providers.map((provider) => provider.id)).toEqual([
         PROVIDER_ID,
       ]);
@@ -2365,6 +2771,7 @@ describe("environment provider listing", () => {
           harness,
           `projectId=${project.id}&hostId=${host.id}`,
         );
+
         expect(later.providers[0]?.availability).toEqual({
           status: "unavailable",
           message: "This project checkout has no usable git branch.",
@@ -2383,6 +2790,7 @@ describe("environment provider listing", () => {
         provision: () => ({ action: "wait", reason: "…" }),
       });
       const host = seedHost(harness.deps, { id: "host-offline" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: WORKSPACE_PATH,
@@ -2392,6 +2800,7 @@ describe("environment provider listing", () => {
         harness,
         `projectId=${project.id}&hostId=${host.id}`,
       );
+
       expect(body.providers[0]?.machineAvailability).toEqual({
         [host.id]: null,
       });
@@ -2433,19 +2842,24 @@ describe("environment provider listing", () => {
         requiresProjectCheckout: true,
         availability: () => {
           checks += 1;
+
           return { status: "available" };
         },
         provision: () => ({ action: "wait", reason: "…" }),
       });
+
       const { host: sourceHost } = seedHostSession(harness.deps, {
         id: "host-source",
       });
+
       const { host: targetHost } = seedHostSession(harness.deps, {
         id: "host-target",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: sourceHost.id,
       });
+
       const path = `projectId=${project.id}&hostId=${targetHost.id}`;
 
       const before = await listProviders(harness, path);
@@ -2471,10 +2885,12 @@ describe("environment provider listing", () => {
       const availability = vi.fn(() => {
         throw new Error("credential service failed");
       });
+
       installTarget({
         availability,
         provision: () => ({ action: "wait", reason: "…" }),
       });
+
       const { host, project } = seedTargetFixture(
         harness,
         "host-provider-availability-error",
@@ -2487,6 +2903,7 @@ describe("environment provider listing", () => {
           harness,
           `projectId=${project.id}&hostId=${host.id}`,
         );
+
         expect(later.providers[0]?.availability).toEqual({
           status: "unavailable",
           message:
@@ -2508,10 +2925,12 @@ describe("core's worktree beside providers", () => {
         ),
       ).toEqual([`${PLUGIN_ID}:${PROVIDER_ID}`]);
       const environmentIntents = installEnvironmentIntentProbe();
+
       const { host, project, session } = seedTargetFixture(
         harness,
         "host-core-worktree",
       );
+
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -2563,6 +2982,7 @@ describe("a provider-produced environment over its life", () => {
         harness,
         "host-target-provenance",
       );
+
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -2578,16 +2998,19 @@ describe("a provider-produced environment over its life", () => {
           },
         }),
       });
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
         inputs: { image: "img" },
       });
+
       const queued = await waitForQueuedCommand(
         harness,
         (candidate) =>
           candidate.command.type === "environment.attach" &&
           candidate.command.initiator?.threadId === created.id,
       );
+
       if (queued.command.type !== "environment.attach")
         throw new Error("Expected environment.attach command");
       await reportQueuedCommandSuccess(harness, queued, {
@@ -2612,11 +3035,13 @@ describe("a provider-produced environment over its life", () => {
         environmentProviderInstanceKey: created.id,
         providerOwnsPath: true,
       });
+
       const listed = (await readJson(
         await harness.app.request(
           `/api/v1/environments?environmentProviderId=${PROVIDER_ID}&instanceKey=${created.id}`,
         ),
       )) as Array<{ id: string }>;
+
       expect(listed.map((row) => row.id)).toEqual([environmentId]);
     });
   });
@@ -2627,6 +3052,7 @@ describe("a provider-produced environment over its life", () => {
         harness,
         "host-target-attached",
       );
+
       installTarget({
         inputs: CONTAINER_INPUTS,
         provision: () => ({
@@ -2639,21 +3065,27 @@ describe("a provider-produced environment over its life", () => {
           },
         }),
       });
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
         inputs: { image: "img" },
       });
+
       await vi.waitFor(() =>
         expect(getThread(harness.db, created.id)?.environmentId).not.toBeNull(),
       );
+
       const environment = getEnvironment(
         harness.db,
         getThread(harness.db, created.id)?.environmentId ?? "",
       );
+
       expect(environment?.providerOwnsPath).toBe(false);
+
       const response = (await readJson(
         await harness.app.request(`/api/v1/environments/${environment?.id}`),
       )) as { managed: boolean; workspaceProvisionType: string | null };
+
       expect(response).toMatchObject({
         managed: false,
         workspaceProvisionType: null,
@@ -2667,6 +3099,7 @@ describe("a provider-produced environment over its life", () => {
         harness,
         "host-target-merge-base",
       );
+
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -2683,16 +3116,19 @@ describe("a provider-produced environment over its life", () => {
           },
         }),
       });
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
         inputs: { image: "img" },
       });
+
       const queued = await waitForQueuedCommand(
         harness,
         (candidate) =>
           candidate.command.type === "environment.attach" &&
           candidate.command.path === "/tmp/environment-providers-merge-base",
       );
+
       if (queued.command.type !== "environment.attach")
         throw new Error("Expected environment.attach command");
       await reportQueuedCommandSuccess(harness, queued, {
@@ -2709,10 +3145,12 @@ describe("a provider-produced environment over its life", () => {
           "ready",
         );
       });
+
       const environment = getEnvironment(
         harness.db,
         getThread(harness.db, created.id)?.environmentId ?? "",
       );
+
       expect(environment?.mergeBaseBranch).toBe("origin/main");
       expect(environment?.baseBranch).toBeNull();
     });
@@ -2725,20 +3163,25 @@ describe("a provider-produced environment over its life", () => {
         provision: () => ({ action: "wait", reason: "Starting container…" }),
         remove: async ({ pathKey }) => {
           cancelled.push(pathKey);
+
           return { status: "removed" };
         },
       });
       const { project } = seedTargetFixture(harness, "host-target-cancel");
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
       });
+
       await vi.waitFor(() =>
         expect(scheduledEnvironmentProviderAskCount()).toBe(1),
       );
+
       const response = await harness.app.request(
         `/api/v1/threads/${created.id}/stop`,
         { method: "POST" },
       );
+
       expect(response.status).toBe(200);
       await vi.waitFor(() => expect(cancelled).toEqual([created.id]));
       expect(scheduledEnvironmentProviderAskCount()).toBe(0);
@@ -2756,20 +3199,25 @@ describe("a provider-produced environment over its life", () => {
       installTarget({
         provision: (context) => {
           asks.push(context.thread.id);
+
           return { action: "wait", reason: "Starting container…" };
         },
         remove: async ({ pathKey }) => {
           cancelled.push(pathKey);
+
           return { status: "removed" };
         },
       });
       const { project } = seedTargetFixture(harness, "host-target-deleted");
+
       const created = await createTargetThread(harness, {
         projectId: project.id,
       });
+
       await vi.waitFor(() =>
         expect(scheduledEnvironmentProviderAskCount()).toBe(1),
       );
+
       const response = await harness.app.request(
         `/api/v1/threads/${created.id}`,
         {
@@ -2778,6 +3226,7 @@ describe("a provider-produced environment over its life", () => {
           body: JSON.stringify({ childThreadsConfirmed: false }),
         },
       );
+
       expect(response.status).toBe(200);
       recheckEnvironmentProviderCreations(harness.deps, PLUGIN_ID);
       await vi.waitFor(() =>
@@ -2805,6 +3254,7 @@ describe("a provider-produced environment over its life", () => {
           unarchived.push(thread.id);
         },
         emitThreadParentChanged: () => {},
+        emitThreadMaintenance: () => {},
         emitThreadDeleted: () => {},
         emitMessageQueued: () => {},
         emitMessageDispatched: () => {},
@@ -2812,20 +3262,24 @@ describe("a provider-produced environment over its life", () => {
         emitInteractionPending: () => {},
         emitTurnFailed: () => 0,
       });
+
       try {
         const { environment, host, project, session } = seedTargetFixture(
           harness,
           "host-target-unarchive",
         );
+
         registerTestHostRpcCapture(harness, {
           hostId: host.id,
           sessionId: session.id,
         });
+
         const thread = seedThread(harness.deps, {
           environmentId: environment.id,
           projectId: project.id,
           status: "idle",
         });
+
         const providerThreadId = "provider-unarchive";
         seedThreadRuntimeState(harness.deps, {
           environmentId: environment.id,
@@ -2874,14 +3328,17 @@ it("resumes a provider launch and its original request after the in-memory conte
     const { host, project } = seedTargetFixture(harness, "host-restart", {
       environmentProviderId: PROVIDER_ID,
     });
+
     let ready = false;
     installTarget({
       provision: () =>
         ready ? readyAt(host) : { action: "wait", reason: "Creating" },
     });
+
     const created = await createTargetThread(harness, {
       projectId: project.id,
     });
+
     await vi.waitFor(() =>
       expect(getPreparingEnvironment(harness.db, created.id)?.status).toBe(
         "creating",
@@ -2909,13 +3366,18 @@ it("keeps an existing request waiting when its provider is not registered", asyn
       "host-register-later",
       { environmentProviderId: PROVIDER_ID },
     );
+
     let ready = false;
+
     const provision = () =>
       ready ? readyAt(host) : ({ action: "wait", reason: "Creating" } as const);
+
     installTarget({ provision });
+
     const thread = await createTargetThread(harness, {
       projectId: project.id,
     });
+
     await vi.waitFor(() =>
       expect(getPreparingEnvironment(harness.db, thread.id)?.status).toBe(
         "creating",
@@ -2949,13 +3411,16 @@ it("stops an unattached provider creation and provisions its follow-up", async (
       provision: () => ({ action: "wait", reason: "Allocating" }),
       remove,
     });
+
     const { project, host } = seedTargetFixture(
       harness,
       "host-stop-durable-startup",
     );
+
     const created = await createTargetThread(harness, {
       projectId: project.id,
     });
+
     await vi.waitFor(() =>
       expect(getPreparingEnvironment(harness.db, created.id)?.status).toBe(
         "creating",
@@ -2975,6 +3440,7 @@ it("stops an unattached provider creation and provisions its follow-up", async (
     expect(remove).toHaveBeenCalledTimes(1);
     expect(getThread(harness.db, created.id)?.status).toBe("idle");
     installTarget({ provision: () => readyAt(host), remove });
+
     const response = await harness.app.request(
       `/api/v1/threads/${created.id}/send`,
       {
@@ -2986,12 +3452,15 @@ it("stops an unattached provider creation and provisions its follow-up", async (
         }),
       },
     );
+
     expect(response.status, await response.text()).toBe(200);
+
     const start = await waitForQueuedCommand(
       harness,
       ({ command }) =>
         command.type === "thread.start" && command.threadId === created.id,
     );
+
     expect(start.command).toMatchObject({
       input: textInput("Continue after stopping setup"),
     });

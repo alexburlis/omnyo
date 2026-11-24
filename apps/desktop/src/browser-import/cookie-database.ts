@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { DesktopBrowserImportFailureReason } from "@bb/host-daemon-contract";
+import type { DesktopBrowserImportFailureReason } from "@omnyo/host-daemon-contract";
 
 export interface ImportedCookie {
   url: string;
@@ -46,11 +46,13 @@ export function cookieScope(
 ): { url: string; domain: string | undefined } {
   const isDomainCookie = host.startsWith(".");
   const unwrappedHost = bareHost(host);
+
   const authority =
     unwrappedHost.includes(":") &&
     !(unwrappedHost.startsWith("[") && unwrappedHost.endsWith("]"))
       ? `[${unwrappedHost}]`
       : unwrappedHost;
+
   return {
     url: `${secure ? "https" : "http"}://${authority}${path}`,
     domain: isDomainCookie ? host : undefined,
@@ -63,20 +65,24 @@ export function openReadOnlyDatabase(path: string): DatabaseSync {
 
 export async function withCookieDatabaseSnapshot<T>(
   cookiePath: string,
-  use: (database: DatabaseSync) => T | Promise<T>,
+  read: (database: DatabaseSync) => T | Promise<T>,
 ): Promise<T> {
-  const directory = await mkdtemp(join(tmpdir(), "bb-cookie-import-"));
+  const directory = await mkdtemp(join(tmpdir(), "omnyo-cookie-import-"));
   const snapshotPath = join(directory, basename(cookiePath));
+
   try {
     const source = openReadOnlyDatabase(cookiePath);
+
     try {
       source.exec(`VACUUM INTO '${snapshotPath.replaceAll("'", "''")}'`);
     } finally {
       source.close();
     }
+
     const snapshot = openReadOnlyDatabase(snapshotPath);
+
     try {
-      return await use(snapshot);
+      return await read(snapshot);
     } finally {
       snapshot.close();
     }
@@ -88,10 +94,12 @@ export async function withCookieDatabaseSnapshot<T>(
 export function countRows(path: string, query: string): number | undefined {
   try {
     const database = openReadOnlyDatabase(path);
+
     try {
       const row = database.prepare(query).get() as
         | { count?: unknown }
         | undefined;
+
       return typeof row?.count === "number" ? row.count : undefined;
     } finally {
       database.close();

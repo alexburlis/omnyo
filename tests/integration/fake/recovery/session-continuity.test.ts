@@ -43,6 +43,7 @@ describe.sequential("fake provider session continuity integration", () => {
         );
 
         const eventsBefore = await getThreadEvents(harness.api, thread.id);
+
         const baselineCompletedCount = eventsBefore.filter(
           (event) => event.type === "turn/completed",
         ).length;
@@ -70,6 +71,7 @@ describe.sequential("fake provider session continuity integration", () => {
         expect(eventsAfter.length).toBeGreaterThan(eventsBefore.length);
         assertMonotonicSequences(eventsAfter);
         const messageLifecycles = new Map<string, string[]>();
+
         for (const event of eventsAfter) {
           if (
             (event.type === "item/started" ||
@@ -81,10 +83,13 @@ describe.sequential("fake provider session continuity integration", () => {
             messageLifecycles.set(event.data.item.id, lifecycle);
           }
         }
+
         expect(messageLifecycles.size).toBe(baselineCompletedCount + 1);
+
         for (const lifecycle of messageLifecycles.values()) {
           expect(lifecycle).toEqual(["item/started", "item/completed"]);
         }
+
         expect(
           eventsAfter.filter((event) => event.type === "turn/completed"),
         ).toHaveLength(baselineCompletedCount + 1);
@@ -100,6 +105,7 @@ describe.sequential("fake provider session continuity integration", () => {
           harness,
           "Old Session Rejection",
         );
+
         const oldSessionId = requireSessionId(harness);
 
         await sendTextMessage(harness.api, thread.id, {

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createConnection, type DbConnection } from "@bb/db";
+import { createConnection, type DbConnection } from "@omnyo/db";
 import { exportLegacyAutomationsForPluginImport } from "../src/legacy-automations-export.js";
 import { initDb } from "../src/db.js";
 import { testLogger } from "./helpers/test-app.js";
@@ -56,7 +56,7 @@ describe("exportLegacyAutomationsForPluginImport", () => {
   let db: DbConnection;
 
   beforeEach(async () => {
-    dataDir = await mkdtemp(join(tmpdir(), "bb-legacy-automations-"));
+    dataDir = await mkdtemp(join(tmpdir(), "omnyo-legacy-automations-"));
     db = createConnection(":memory:");
   });
 
@@ -179,6 +179,7 @@ describe("exportLegacyAutomationsForPluginImport", () => {
         "utf8",
       ),
     );
+
     expect(payload).toMatchObject({
       automations: [
         {
@@ -253,6 +254,7 @@ describe("exportLegacyAutomationsForPluginImport", () => {
         "utf8",
       ),
     );
+
     expect(payload.automations).toMatchObject([{ id: "auto_gone" }]);
     expect(payload.scripts).toEqual({});
   });

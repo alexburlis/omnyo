@@ -5,6 +5,7 @@ module.exports = function withPushConsent(config) {
     const application = AndroidConfig.Manifest.getMainApplicationOrThrow(
       mod.modResults,
     );
+
     for (const name of [
       "firebase_messaging_auto_init_enabled",
       "firebase_analytics_collection_enabled",
@@ -15,6 +16,7 @@ module.exports = function withPushConsent(config) {
         "false",
       );
     }
+
     return mod;
   });
 };

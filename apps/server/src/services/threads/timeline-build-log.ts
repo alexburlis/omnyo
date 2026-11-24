@@ -33,8 +33,10 @@ export function createSlowThreadTimelineBuildLogger(
       ) {
         return;
       }
+
       const at = Date.now();
       const lastLoggedAt = lastLoggedAtByThread.get(threadId);
+
       if (
         lastLoggedAt !== undefined &&
         at - lastLoggedAt < SLOW_THREAD_TIMELINE_BUILD_LOG_INTERVAL_MS
@@ -43,6 +45,7 @@ export function createSlowThreadTimelineBuildLogger(
           threadId,
           (suppressedByThread.get(threadId) ?? 0) + 1,
         );
+
         return;
       }
 
@@ -50,14 +53,17 @@ export function createSlowThreadTimelineBuildLogger(
       suppressedByThread.delete(threadId);
       lastLoggedAtByThread.delete(threadId);
       lastLoggedAtByThread.set(threadId, at);
+
       while (
         lastLoggedAtByThread.size >
         SLOW_THREAD_TIMELINE_BUILD_LOG_MAX_TRACKED_THREADS
       ) {
         const oldest = lastLoggedAtByThread.keys().next().value;
+
         if (oldest === undefined) {
           break;
         }
+
         lastLoggedAtByThread.delete(oldest);
         suppressedByThread.delete(oldest);
       }
@@ -78,7 +84,7 @@ export function createSlowThreadTimelineBuildLogger(
           responseRowCount: profile.responseRowCount,
           stageTimings: profile.stageTimings,
         },
-        "Thread timeline build blocked the event loop",
+        "Slow thread timeline build",
       );
     },
   };

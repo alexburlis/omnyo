@@ -5,8 +5,8 @@ import {
 import {
   createFilePreviewLineRange,
   type FilePreviewLineRange,
-} from "@bb/client-core";
-import type { WorkspaceOpenTargetId } from "@bb/host-daemon-contract";
+} from "@omnyo/client-core";
+import type { WorkspaceOpenTargetId } from "@omnyo/host-daemon-contract";
 
 export interface MarkdownPreviewLocalFileLink {
   lineRange: FilePreviewLineRange | null;
@@ -94,7 +94,9 @@ function parsePositiveInteger(value: string): number | null {
   if (!/^[0-9]+$/u.test(value)) {
     return null;
   }
+
   const parsedValue = Number(value);
+
   return Number.isSafeInteger(parsedValue) && parsedValue > 0
     ? parsedValue
     : null;
@@ -105,14 +107,18 @@ function parseLineRange({
   startValue,
 }: ParseLineRangeArgs): FilePreviewLineRange | null {
   const startLineNumber = parsePositiveInteger(startValue);
+
   if (startLineNumber === null) {
     return null;
   }
+
   const endLineNumber =
     endValue === undefined ? startLineNumber : parsePositiveInteger(endValue);
+
   if (endLineNumber === null) {
     return null;
   }
+
   return createFilePreviewLineRange({
     endLineNumber,
     startLineNumber,
@@ -123,11 +129,13 @@ function parseLineSuffix(value: string): LocalFileHrefParts | null {
   const hashLineMatch = value.match(
     /#L([0-9]+)(?:C[0-9]+)?(?:-L?([0-9]+)(?:C[0-9]+)?)?$/u,
   );
+
   if (hashLineMatch) {
     const lineRange = parseLineRange({
       endValue: hashLineMatch[2],
       startValue: hashLineMatch[1] ?? "",
     });
+
     if (lineRange === null) {
       return null;
     }
@@ -139,8 +147,10 @@ function parseLineSuffix(value: string): LocalFileHrefParts | null {
   }
 
   const hashIndex = value.indexOf("#");
+
   if (hashIndex !== -1) {
     const fragment = value.slice(hashIndex + 1);
+
     if (
       fragment.length === 0 ||
       fragment.includes("/") ||
@@ -156,11 +166,13 @@ function parseLineSuffix(value: string): LocalFileHrefParts | null {
   }
 
   const colonLineRangeMatch = value.match(/:([0-9]+)-([0-9]+)$/u);
+
   if (colonLineRangeMatch) {
     const lineRange = parseLineRange({
       endValue: colonLineRangeMatch[2],
       startValue: colonLineRangeMatch[1] ?? "",
     });
+
     if (lineRange === null) {
       return null;
     }
@@ -172,11 +184,13 @@ function parseLineSuffix(value: string): LocalFileHrefParts | null {
   }
 
   const colonLineColumnMatch = value.match(/:([0-9]+):[0-9]+$/u);
+
   if (colonLineColumnMatch) {
     const lineRange = parseLineRange({
       endValue: undefined,
       startValue: colonLineColumnMatch[1] ?? "",
     });
+
     if (lineRange === null) {
       return null;
     }
@@ -188,11 +202,13 @@ function parseLineSuffix(value: string): LocalFileHrefParts | null {
   }
 
   const colonLineMatch = value.match(/:([0-9]+)$/u);
+
   if (colonLineMatch) {
     const lineRange = parseLineRange({
       endValue: undefined,
       startValue: colonLineMatch[1] ?? "",
     });
+
     if (lineRange === null) {
       return null;
     }
@@ -210,6 +226,7 @@ function parseLineSuffix(value: string): LocalFileHrefParts | null {
 }
 
 const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/u;
+
 const FILE_URL_WINDOWS_DRIVE_PATHNAME_PATTERN = /^\/[A-Za-z]:\//u;
 
 export function isWindowsDriveLocalFilePath(path: string): boolean {
@@ -227,13 +244,16 @@ function hasLikelyFileBasename(path: string): boolean {
   const segments = isWindowsDriveLocalFilePath(path)
     ? path.split(/[\\/]/u)
     : path.split("/");
+
   const basename = segments[segments.length - 1] ?? "";
+
   return basename.startsWith(".") || basename.includes(".");
 }
 
 function hasControlCharacter(value: string): boolean {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
+
     if (codePoint !== undefined && codePoint < 0x20) {
       return true;
     }
@@ -273,6 +293,7 @@ function parseAbsoluteLocalFileHref(
   }
 
   const parsed = parseLineSuffix(safeDecodeURIComponent(href));
+
   if (
     !parsed ||
     !isValidAbsoluteLocalFilePath({
@@ -301,6 +322,7 @@ export function resolveRelativeLocalFileHref({
 
   const decodedHref = safeDecodeURIComponent(href);
   const parsedHref = parseLineSuffix(decodedHref);
+
   if (
     href.trim() !== href ||
     decodedHref.trim() !== decodedHref ||
@@ -317,6 +339,7 @@ export function resolveRelativeLocalFileHref({
 
   const normalizedBaseDir = normalizeAbsoluteFilePath({ path: baseDir });
   const normalizedRootPath = normalizeAbsoluteFilePath({ path: rootPath });
+
   if (
     normalizedBaseDir === null ||
     normalizedRootPath === null ||
@@ -332,7 +355,9 @@ export function resolveRelativeLocalFileHref({
     normalizedBaseDir === "/"
       ? `/${parsedHref.path}`
       : `${normalizedBaseDir}/${parsedHref.path}`;
+
   const normalizedHrefPath = normalizeAbsoluteFilePath({ path: joinedPath });
+
   if (
     normalizedHrefPath === null ||
     !isAbsoluteFilePathWithinRoot({
@@ -351,6 +376,7 @@ function isLinkContainedInRoot({
   rootPath,
 }: IsLinkContainedInRootArgs): MarkdownPreviewLocalFileLink | null {
   const normalizedPath = normalizeAbsoluteFilePath({ path: link.path });
+
   if (normalizedPath === null) {
     return null;
   }
@@ -372,25 +398,31 @@ function isLinkContainedInRoot({
 
 function parseLocalFileUrl(href: string): LocalFileUrlParts | null {
   let url: URL;
+
   try {
     url = new URL(href);
   } catch {
     return null;
   }
+
   if (url.search.length > 0) {
     return null;
   }
+
   const pathname = FILE_URL_WINDOWS_DRIVE_PATHNAME_PATTERN.test(url.pathname)
     ? url.pathname.slice(1)
     : url.pathname;
+
   if (url.protocol === "file:") {
     return url.host.length > 0
       ? null
       : { openTargetId: null, path: pathname + url.hash };
   }
+
   const openTargetId = EDITOR_FILE_URL_OPEN_TARGET_IDS.get(
     url.protocol.slice(0, -1),
   );
+
   if (
     openTargetId === undefined ||
     url.host !== "file" ||
@@ -400,6 +432,7 @@ function parseLocalFileUrl(href: string): LocalFileUrlParts | null {
   ) {
     return null;
   }
+
   return { openTargetId, path: pathname };
 }
 
@@ -413,14 +446,18 @@ export function parseLocalFileHref({
 
   const isUrl =
     URI_SCHEME_PATTERN.test(href) && !isWindowsDriveLocalFilePath(href);
+
   const urlParts = isUrl ? parseLocalFileUrl(href) : null;
+
   if (isUrl && urlParts === null) {
     return null;
   }
+
   const parts = parseAbsoluteLocalFileHref(
     urlParts?.path ?? href,
     absoluteLinks.kind === "trusted-host" && !isUrl,
   );
+
   const link =
     parts === null
       ? null
@@ -446,9 +483,11 @@ function buildLineRangeAnchorFragment(
   if (lineRange === null) {
     return "";
   }
+
   if (lineRange.startLineNumber === lineRange.endLineNumber) {
     return `#L${lineRange.startLineNumber}`;
   }
+
   return `#L${lineRange.startLineNumber}-L${lineRange.endLineNumber}`;
 }
 
@@ -458,10 +497,12 @@ export function buildLocalFileAnchorHref(
 ): string | undefined {
   if (link && isWindowsDriveLocalFilePath(link.path)) {
     const [drive = "", ...segments] = link.path.split(/[\\/]+/u);
+
     return `file:///${drive}/${segments
       .map(encodeURIComponent)
       .join("/")}${buildLineRangeAnchorFragment(link.lineRange)}`;
   }
+
   if (!link || !link.path.startsWith("/")) {
     return originalHref;
   }

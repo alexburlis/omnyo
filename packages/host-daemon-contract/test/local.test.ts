@@ -77,6 +77,7 @@ describe("pathsExistRequestSchema", () => {
     const result = pathsExistRequestSchema.parse({
       paths: ["/a", "/a", "/b"],
     });
+
     expect(result.paths).toEqual(["/a", "/b"]);
   });
 
@@ -93,6 +94,7 @@ describe("pathsExistRequestSchema", () => {
       { length: PATHS_EXIST_MAX_PATHS + 1 },
       (_, i) => `/p${i}`,
     );
+
     expect(() => pathsExistRequestSchema.parse({ paths: oversized })).toThrow();
   });
 });

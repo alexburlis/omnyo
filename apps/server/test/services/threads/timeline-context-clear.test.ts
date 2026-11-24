@@ -5,7 +5,7 @@ import {
   threadScope,
   turnScope,
   type Thread,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   createConnection,
   createProject,
@@ -16,7 +16,7 @@ import {
   noopNotifier,
   upsertHost,
   type DbConnection,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   buildThreadConversationOutline,
   buildThreadTimelineWithProfile,
@@ -62,23 +62,28 @@ function clientTurnRequestedEvent(
 function setup(): { db: DbConnection; thread: Thread } {
   const db = createConnection(":memory:");
   migrate(db);
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
   });
+
   return { db, thread };
 }
 
 describe("timeline context-clear epochs", () => {
   it("excludes large old events from byte budgets and rejects cursors before the boundary", () => {
     const { db, thread } = setup();
+
     try {
       insertEvents(db, noopNotifier, [
         {
@@ -109,19 +114,23 @@ describe("timeline context-clear epochs", () => {
           }),
         },
       ]);
+
       const options = {
         eventBudget: 1_000,
         includeNestedRows: true,
         includeClearedContextHistory: false,
         includeDiagnosticOperations: false,
+        compactionOfferEnabled: false,
         maxInlineOutputChars: null,
         maxSeq: 2,
       };
+
       const latest = buildThreadTimelineWithProfile(db, thread, {
         completedTurnDisplay: "collapse",
         ...options,
         page: { kind: "latest", segmentLimit: 20 },
       }).response;
+
       expect(latest.rows).toEqual([
         expect.objectContaining({
           sourceSeqStart: 2,
@@ -237,6 +246,7 @@ describe("timeline context-clear epochs", () => {
       includeNestedRows: true,
       includeClearedContextHistory: false,
       includeDiagnosticOperations: false,
+      compactionOfferEnabled: false,
       maxInlineOutputChars: null,
       maxSeq: 6,
       page: { kind: "latest", segmentLimit: 20 },
@@ -246,7 +256,9 @@ describe("timeline context-clear epochs", () => {
     expect(
       timeline.rows.map((row) => {
         if (row.kind === "conversation") return row.text;
+
         if (row.kind === "system") return row.title;
+
         return row.kind;
       }),
     ).toEqual(["Context cleared", "Newest response"]);
@@ -268,8 +280,10 @@ describe("timeline context-clear epochs", () => {
 
   it("never paginates older rows across the completed context boundary", () => {
     const { db, thread } = setup();
+
     const requestEvent = (sequence: number, value: number, text: string) =>
       clientTurnRequestedEvent(thread, sequence, value, text);
+
     insertEvents(db, noopNotifier, [
       {
         threadId: thread.id,
@@ -326,18 +340,22 @@ describe("timeline context-clear epochs", () => {
       includeNestedRows: true,
       includeClearedContextHistory: false,
       includeDiagnosticOperations: false,
+      compactionOfferEnabled: false,
       maxInlineOutputChars: null,
       maxSeq: 6,
       page: { kind: "latest", segmentLimit: 1 },
     }).response;
+
     const rowSequences: number[] = [];
 
     for (;;) {
       expect(page.contextBoundarySeq).toBe(2);
       rowSequences.push(...page.rows.map((row) => row.sourceSeqStart));
       expect(page.rows.every((row) => row.sourceSeqStart >= 2)).toBe(true);
+
       if (!page.timelinePage.hasOlderRows) break;
       const cursor = page.timelinePage.olderCursor;
+
       if (cursor === null) throw new Error("expected an older cursor");
       expect(cursor.anchorSeq).toBeGreaterThanOrEqual(2);
       page = buildThreadTimelineWithProfile(db, thread, {
@@ -346,6 +364,7 @@ describe("timeline context-clear epochs", () => {
         includeNestedRows: true,
         includeClearedContextHistory: false,
         includeDiagnosticOperations: false,
+        compactionOfferEnabled: false,
         maxInlineOutputChars: null,
         maxSeq: 6,
         page: { kind: "older", segmentLimit: 1, beforeCursor: cursor },
@@ -399,12 +418,14 @@ describe("timeline context-clear epochs", () => {
       },
       clientTurnRequestedEvent(thread, 4, 2, "Fresh task"),
     ]);
+
     const options = {
       completedTurnDisplay: "collapse" as const,
       eventBudget: 1_000,
       includeNestedRows: true,
       includeClearedContextHistory: true,
       includeDiagnosticOperations: false,
+      compactionOfferEnabled: false,
       maxInlineOutputChars: null,
       maxSeq: 4,
     };
@@ -413,24 +434,30 @@ describe("timeline context-clear epochs", () => {
       ...options,
       page: { kind: "latest", segmentLimit: 1 },
     }).response;
+
     expect(page.contextBoundarySeq).toBe(3);
     expect(page.contextWindowUsage).toBeUndefined();
     const rows: string[] = [];
+
     for (;;) {
       rows.unshift(
         ...page.rows.map((row) => {
           if (row.kind === "conversation") return row.text;
+
           if (row.kind === "system") return row.title;
+
           return row.kind;
         }),
       );
       const cursor = page.timelinePage.olderCursor;
+
       if (!page.timelinePage.hasOlderRows || cursor === null) break;
       page = buildThreadTimelineWithProfile(db, thread, {
         ...options,
         page: { kind: "older", segmentLimit: 1, beforeCursor: cursor },
       }).response;
     }
+
     expect(rows).toEqual(["Earlier task", "Context cleared", "Fresh task"]);
 
     const outlineOptions = {
@@ -438,6 +465,7 @@ describe("timeline context-clear epochs", () => {
       includeClearedContextHistory: true,
       maxSeq: 4,
     };
+
     expect(
       buildThreadConversationOutline(db, thread, outlineOptions).items.map(
         (item) => item.preview,
@@ -446,7 +474,6 @@ describe("timeline context-clear epochs", () => {
     expect(
       loadThreadConversationOutline(db, thread, {
         ...outlineOptions,
-        outlineSequence: 4,
       }).items.map((item) => item.preview),
     ).toEqual(["Earlier task", "Fresh task"]);
     expect(

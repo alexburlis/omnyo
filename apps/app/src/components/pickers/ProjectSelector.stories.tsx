@@ -7,7 +7,7 @@ export default {
 };
 
 const projects: readonly ProjectSelectorOption[] = [
-  { id: "proj_bb", name: "bb" },
+  { id: "proj_omnyo", name: "Omnyo" },
   { id: "proj_pierre", name: "pierre" },
 ];
 
@@ -20,7 +20,11 @@ export function Overview() {
         label="project selected"
         hint="trigger shows the project name + Folder icon"
       >
-        <ProjectSelector projects={projects} value="proj_bb" onChange={noop} />
+        <ProjectSelector
+          projects={projects}
+          value="proj_omnyo"
+          onChange={noop}
+        />
       </StoryRow>
       <StoryRow
         label="no project selected — required mode"
@@ -41,16 +45,90 @@ export function Overview() {
       </StoryRow>
       <StoryRow
         label="open menu"
+        hint="allowNoProject=true; click to open, or see the Open Menu story"
+      >
+        <ProjectSelectorInteractive allowNoProject defaultOpen={false} />
+      </StoryRow>
+      <StoryRow
+        label="open menu with actions"
+        hint="createProject + allowNoProject; click to open, or see the Open Menu With Actions story"
+      >
+        <ProjectSelectorInteractive
+          allowNoProject
+          createProject
+          defaultOpen={false}
+        />
+      </StoryRow>
+      <StoryRow
+        label="no projects"
+        hint="empty project list; click to open, or see the No Projects story"
+      >
+        <ProjectSelector
+          projects={[]}
+          value={null}
+          onChange={noop}
+          allowNoProject
+          createProject={{ onCreate: noop }}
+          modal={false}
+        />
+      </StoryRow>
+    </StoryCard>
+  );
+}
+
+function ProjectSelectorInteractive({
+  allowNoProject = false,
+  createProject = false,
+  defaultOpen,
+}: {
+  allowNoProject?: boolean;
+  createProject?: boolean;
+  defaultOpen: boolean;
+}) {
+  const [value, setValue] = useState<string | null>("proj_omnyo");
+
+  return (
+    <ProjectSelector
+      projects={projects}
+      value={value}
+      onChange={setValue}
+      allowNoProject={allowNoProject}
+      createProject={createProject ? { onCreate: noop } : undefined}
+      defaultOpen={defaultOpen}
+      modal={false}
+    />
+  );
+}
+
+export function OpenMenu() {
+  return (
+    <StoryCard>
+      <StoryRow
+        label="open menu"
         hint="defaultOpen + modal=false (allowNoProject=true — shows the no-project item below a separator)"
       >
-        <ProjectSelectorInteractive allowNoProject />
+        <ProjectSelectorInteractive allowNoProject defaultOpen />
       </StoryRow>
+    </StoryCard>
+  );
+}
+
+export function OpenMenuWithActions() {
+  return (
+    <StoryCard>
       <StoryRow
         label="open menu with actions"
         hint="createProject + allowNoProject share one separator below the project list"
       >
-        <ProjectSelectorInteractive allowNoProject createProject />
+        <ProjectSelectorInteractive allowNoProject createProject defaultOpen />
       </StoryRow>
+    </StoryCard>
+  );
+}
+
+export function NoProjects() {
+  return (
+    <StoryCard>
       <StoryRow
         label="no projects"
         hint='empty project list with allowNoProject=true — menu adds a "New project" item'
@@ -66,26 +144,5 @@ export function Overview() {
         />
       </StoryRow>
     </StoryCard>
-  );
-}
-
-function ProjectSelectorInteractive({
-  allowNoProject = false,
-  createProject = false,
-}: {
-  allowNoProject?: boolean;
-  createProject?: boolean;
-}) {
-  const [value, setValue] = useState<string | null>("proj_bb");
-  return (
-    <ProjectSelector
-      projects={projects}
-      value={value}
-      onChange={setValue}
-      allowNoProject={allowNoProject}
-      createProject={createProject ? { onCreate: noop } : undefined}
-      defaultOpen
-      modal={false}
-    />
   );
 }

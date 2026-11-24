@@ -28,6 +28,7 @@ function declaration(
 describe("provider declaration target-state fields", () => {
   it("carries strings, option descriptors and extension kinds through validation", () => {
     const goalSchema = z.object({ objective: z.string() });
+
     const normalized = validatePluginProviderDeclaration(
       declaration({
         strings: {
@@ -51,6 +52,7 @@ describe("provider declaration target-state fields", () => {
         },
       }),
     );
+
     expect(normalized.strings).toEqual({
       signInHint: "Run `my-agent login`.",
       expiredHint: "Session expired; run `my-agent login` again.",
@@ -144,6 +146,7 @@ describe("provider declaration target-state fields", () => {
       ["an interior dot segment", "skills/./more"],
       ["an empty segment", "skills//more"],
     ] as const;
+
     for (const [label, root] of roots) {
       expect(
         () =>
@@ -215,6 +218,7 @@ describe("provider declaration target-state fields", () => {
         experimental_resolvesNativeRoots: true,
       }),
     );
+
     expect(normalized.experimental_nativeSkillRoots).toEqual({
       project: [
         {
@@ -369,6 +373,7 @@ describe("provider declaration fields renamed in SDK 0.4.16", () => {
         experimental_resolvesNativeRoots: true,
       }),
     );
+
     expect(normalized.experimental_bridgeOptions).toEqual({ tier: "fast" });
     expect(normalized.experimental_resolvesNativeRoots).toBe(true);
   });
@@ -379,10 +384,12 @@ describe("provider declaration fields renamed in SDK 0.4.16", () => {
     ["experimental_providerInstallation", "maintenance.installation"],
   ] as const)("rejects capabilities.%s and names %s", (oldKey, newKey) => {
     const base = declaration();
+
     const stale = {
       ...base,
       capabilities: { ...base.capabilities, [oldKey]: true },
     };
+
     expect(() => validatePluginProviderDeclaration(stale)).toThrow(
       `provider "my-agent": "capabilities.${oldKey}" was moved to "${newKey}" in SDK 0.4.16`,
     );
@@ -390,11 +397,13 @@ describe("provider declaration fields renamed in SDK 0.4.16", () => {
 
   it("reports the move before the visibility rule that depends on it", () => {
     const base = declaration();
+
     const stale = {
       ...base,
       experimental_visibility: "installed" as const,
       capabilities: { ...base.capabilities, experimental_providerHealth: true },
     };
+
     expect(() => validatePluginProviderDeclaration(stale)).toThrow(
       /"capabilities.experimental_providerHealth" was moved to "maintenance.health"/,
     );
@@ -402,10 +411,12 @@ describe("provider declaration fields renamed in SDK 0.4.16", () => {
 
   it("rejects an unknown experimental_ capability", () => {
     const base = declaration();
+
     const stale = {
       ...base,
       capabilities: { ...base.capabilities, experimental_fork: "full" },
     };
+
     expect(() => validatePluginProviderDeclaration(stale)).toThrow(
       'provider "my-agent": unknown declaration field "capabilities.experimental_fork"',
     );

@@ -24,6 +24,7 @@ export function targetsResourceAction(event: {
   target: EventTarget;
 }): boolean {
   const { currentTarget, target } = event;
+
   return (
     target instanceof Element &&
     (!currentTarget.contains(target) ||
@@ -75,6 +76,7 @@ export function ResourceOverflowMenu({
           if (item.kind === "separator") {
             return <DropdownMenuSeparator key={`separator-${index}`} />;
           }
+
           const menuItem = (
             <DropdownMenuItem
               key={item.label}
@@ -89,8 +91,10 @@ export function ResourceOverflowMenu({
               onSelect={(event) => {
                 if (item.disabled) {
                   event.preventDefault();
+
                   return;
                 }
+
                 item.onSelect();
               }}
             >
@@ -107,9 +111,11 @@ export function ResourceOverflowMenu({
               <span className="min-w-0 truncate">{item.label}</span>
             </DropdownMenuItem>
           );
+
           if (!item.disabled || item.disabledReason === undefined) {
             return menuItem;
           }
+
           return (
             <TooltipProvider key={item.label} delayDuration={250}>
               <Tooltip>
@@ -168,8 +174,10 @@ export function ResourceActionButton({
               if (disabled) {
                 event.preventDefault();
                 event.stopPropagation();
+
                 return;
               }
+
               onClick();
             }}
           >
@@ -224,6 +232,7 @@ export function ResourceRow({
 }) {
   const hasLeading =
     leading !== undefined && leading !== null && leading !== false;
+
   const openButton = (
     <button
       type="button"
@@ -247,6 +256,7 @@ export function ResourceRow({
       </span>
     </button>
   );
+
   return (
     <div
       data-resource-row
@@ -300,7 +310,7 @@ export function ResourceRow({
             <span
               data-row-action
               className={cn(
-                "flex shrink-0 cursor-default items-center gap-0.5 transition-opacity",
+                "flex shrink-0 cursor-default items-center gap-0.5",
                 actionsVisibility === "hover" && [
                   "opacity-0 group-hover:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100",
                   HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS,
@@ -326,7 +336,7 @@ export function ResourceRowDetailChevron() {
     <Icon
       name="ChevronRight"
       className={cn(
-        "size-3.5 text-subtle-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
+        "size-3.5 text-subtle-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
         HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS,
       )}
       aria-hidden

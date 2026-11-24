@@ -1,9 +1,9 @@
-import type { Thread, ThreadListEntry } from "@bb/domain";
+import type { Thread, ThreadListEntry } from "@omnyo/domain";
 import {
   resolveThreadListIndicator,
   threadListIndicatorStateForThread,
-} from "@bb/client-core";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
+} from "@omnyo/client-core";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
 import { ThreadStatusGlyph } from "@/components/thread/ThreadStatusGlyph";
 import { ThreadTitle } from "@/components/thread/ThreadTitleMentions";
 import { useChildThreads, useThreads } from "@/hooks/queries/thread-queries";
@@ -26,7 +26,9 @@ export function RelatedThreadsSection({
   idleIcon,
 }: RelatedThreadsSectionProps) {
   const collapse = useInfoSectionCollapse(sectionId);
+
   if (threads.length === 0) return null;
+
   return (
     <InfoSection label={label} count={threads.length} collapse={collapse}>
       <InfoList
@@ -34,9 +36,11 @@ export function RelatedThreadsSection({
         getKey={(relatedThread) => relatedThread.id}
         renderItem={(relatedThread) => {
           const title = getThreadDisplayTitle(relatedThread);
+
           const indicator = resolveThreadListIndicator(
             threadListIndicatorStateForThread(relatedThread, false),
           );
+
           return (
             <InfoListRow
               leading={
@@ -71,6 +75,7 @@ export function ChildThreadsSection({ thread }: { thread: Thread }) {
     enabled: true,
     parentThreadId: thread.id,
   });
+
   return (
     <RelatedThreadsSection
       sectionId="childThreads"
@@ -90,6 +95,7 @@ export function ForksSection({ thread }: { thread: Thread }) {
     originKind: "fork",
     archived: false,
   });
+
   return (
     <RelatedThreadsSection
       sectionId="forks"

@@ -1,24 +1,31 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
-import type { PromptTextMention } from "@bb/domain";
-import type { PromptDraftAttachment, PromptDraftState } from "@bb/client-core";
+import type { PromptTextMention } from "@omnyo/domain";
+import type {
+  PromptDraftAttachment,
+  PromptDraftState,
+} from "@omnyo/client-core";
 import {
   arePromptDraftStatesEqual,
   emptyPromptDraftState,
   isPromptDraftEmpty,
+  withPromptImageAliasHighWater,
   parsePromptDraftStorage,
+  parseRecoverablePromptDraftStorage,
   promptDraftToInput,
-  serializePromptDraftStorage,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 
-const PROMPT_DRAFT_STORAGE_PREFIX = "bb.promptbox.contents";
-const PROMPT_DRAFT_STORAGE_VERSION = "3";
+import { assertBrowserStorageMigrationV1 } from "@/lib/legacy-browser-storage-v1";
+
+import {
+  mergeRecoveredPromptDraftV1,
+  promptDraftStorageKeyV1,
+  serializePersistedPromptDraftV1,
+  type PromptDraftScope,
+} from "@/lib/prompt-draft-recovery-v1";
+
+export type { PromptDraftScope } from "@/lib/prompt-draft-recovery-v1";
+
 const PROMPT_DRAFT_PERSIST_DEBOUNCE_MS = 250;
-
-export type PromptDraftScope =
-  | { kind: "automation-edit"; automationId: string }
-  | { kind: "new-thread" }
-  | { kind: "plugin-new-thread"; key: string }
-  | { kind: "thread"; projectId: string; threadId: string };
 
 interface PromptDraftCacheEntry {
   rawValue: string | null;
@@ -29,18 +36,20 @@ type PromptDraftListener = () => void;
 
 interface PromptDraftWriteOptions {
   persist: "immediate" | "deferred";
+  imageAliases?: "keep" | "reset";
 }
 
 const EMPTY_PROMPT_DRAFT = emptyPromptDraftState();
-const promptDraftCache = new Map<string, PromptDraftCacheEntry>();
-const promptDraftSubscribers = new Map<string, Set<PromptDraftListener>>();
-const pendingPromptDraftStorageKeys = new Set<string>();
-const promptDraftPersistTimers = new Map<string, number>();
-let promptDraftStorageObserverInitialized = false;
 
-function normalizeStorageSegment(value: string): string {
-  return encodeURIComponent(value.trim());
-}
+const promptDraftCache = new Map<string, PromptDraftCacheEntry>();
+
+const promptDraftSubscribers = new Map<string, Set<PromptDraftListener>>();
+
+const pendingPromptDraftStorageKeys = new Set<string>();
+
+const promptDraftPersistTimers = new Map<string, number>();
+
+let promptDraftStorageObserverInitialized = false;
 
 function readPromptDraft(storageKey: string | null): PromptDraftState {
   if (!storageKey || typeof window === "undefined") {
@@ -53,6 +62,7 @@ function readPromptDraft(storageKey: string | null): PromptDraftState {
 
   const rawValue = window.localStorage.getItem(storageKey);
   const cachedEntry = promptDraftCache.get(storageKey);
+
   if (cachedEntry && cachedEntry.rawValue === rawValue) {
     return cachedEntry.draft;
   }
@@ -62,11 +72,13 @@ function readPromptDraft(storageKey: string | null): PromptDraftState {
     rawValue,
     draft,
   });
+
   return draft;
 }
 
 function emitPromptDraftChange(storageKey: string): void {
   const listeners = promptDraftSubscribers.get(storageKey);
+
   if (!listeners || listeners.size === 0) return;
 
   for (const listener of listeners) {
@@ -76,6 +88,7 @@ function emitPromptDraftChange(storageKey: string): void {
 
 function clearPromptDraftPersistTimer(storageKey: string): void {
   const timerId = promptDraftPersistTimers.get(storageKey);
+
   if (timerId === undefined || typeof window === "undefined") return;
 
   window.clearTimeout(timerId);
@@ -89,15 +102,22 @@ function persistPromptDraftCache(storageKey: string): void {
   pendingPromptDraftStorageKeys.delete(storageKey);
 
   const cachedEntry = promptDraftCache.get(storageKey);
+
   if (!cachedEntry) {
     window.localStorage.removeItem(storageKey);
+
     return;
   }
 
-  const serialized = serializePromptDraftStorage(cachedEntry.draft);
+  const { draft } = cachedEntry;
+
+  const serialized = serializePersistedPromptDraftV1(draft);
+
   cachedEntry.rawValue = serialized;
+
   if (serialized === null) {
     window.localStorage.removeItem(storageKey);
+
     return;
   }
 
@@ -125,9 +145,11 @@ function schedulePromptDraftPersist(storageKey: string): void {
 
   clearPromptDraftPersistTimer(storageKey);
   pendingPromptDraftStorageKeys.add(storageKey);
+
   const timerId = window.setTimeout(() => {
     persistPromptDraftCache(storageKey);
   }, PROMPT_DRAFT_PERSIST_DEBOUNCE_MS);
+
   promptDraftPersistTimers.set(storageKey, timerId);
 }
 
@@ -145,6 +167,7 @@ function ensurePromptDraftStorageObserver(): void {
   promptDraftStorageObserverInitialized = true;
   window.addEventListener("storage", (event) => {
     if (!event.key) return;
+
     if (pendingPromptDraftStorageKeys.has(event.key)) return;
     promptDraftCache.delete(event.key);
     emitPromptDraftChange(event.key);
@@ -168,17 +191,21 @@ function subscribePromptDraft(
   ensurePromptDraftStorageObserver();
 
   let listeners = promptDraftSubscribers.get(storageKey);
+
   if (!listeners) {
     listeners = new Set();
     promptDraftSubscribers.set(storageKey, listeners);
   }
 
   listeners.add(listener);
+
   return () => {
     const existingListeners = promptDraftSubscribers.get(storageKey);
+
     if (!existingListeners) return;
 
     existingListeners.delete(listener);
+
     if (existingListeners.size === 0) {
       promptDraftSubscribers.delete(storageKey);
     }
@@ -192,15 +219,28 @@ function writePromptDraft(
 ): void {
   if (!storageKey || typeof window === "undefined") return;
 
+  const draft =
+    options.imageAliases === "reset"
+      ? value
+      : withPromptImageAliasHighWater(
+          promptDraftCache.get(storageKey)?.draft ?? null,
+          value,
+        );
+
   promptDraftCache.set(storageKey, {
     rawValue: null,
-    draft: isPromptDraftEmpty(value) ? EMPTY_PROMPT_DRAFT : value,
+    draft:
+      isPromptDraftEmpty(draft) && draft.imageAliasHighWater === undefined
+        ? EMPTY_PROMPT_DRAFT
+        : draft,
   });
+
   if (options.persist === "deferred") {
     schedulePromptDraftPersist(storageKey);
   } else {
     persistPromptDraftCache(storageKey);
   }
+
   emitPromptDraftChange(storageKey);
 }
 
@@ -221,24 +261,82 @@ function restorePromptDraftIfEmpty(
   }
 
   writePromptDraft(storageKey, value);
+
   return true;
 }
 
+function restoreFailedDraft(storageKey: string, draft: PromptDraftState): void {
+  if (isPromptDraftEmpty(draft)) return;
+
+  if (typeof window !== "undefined")
+    parseRecoverablePromptDraftStorage(window.localStorage.getItem(storageKey));
+  writePromptDraft(
+    storageKey,
+    mergeRecoveredPromptDraftV1(readPromptDraft(storageKey), draft),
+  );
+}
+
+export function restoreFailedPromptDraft(
+  scope: PromptDraftScope,
+  draft: PromptDraftState,
+  options: { requirePersistence?: true } = {},
+): void {
+  const storageKey = getPromptDraftStorageKey(scope);
+
+  if (options.requirePersistence) readPromptDraft(storageKey);
+  const previous = promptDraftCache.get(storageKey);
+  restoreFailedDraft(storageKey, draft);
+
+  if (!options.requirePersistence) return;
+
+  try {
+    const expected = promptDraftCache.get(storageKey)?.draft;
+
+    const persisted = parseRecoverablePromptDraftStorage(
+      window.localStorage.getItem(storageKey),
+    );
+
+    if (
+      expected === undefined ||
+      !arePromptDraftStatesEqual(expected, persisted)
+    )
+      throw new Error("Draft persistence was not confirmed");
+  } catch {
+    if (previous) promptDraftCache.set(storageKey, previous);
+    else promptDraftCache.delete(storageKey);
+    emitPromptDraftChange(storageKey);
+    throw new Error(
+      "Could not persist the recovered draft. Its recovery journal was retained.",
+    );
+  }
+}
+
+export function movePromptDraft(
+  sourceScope: PromptDraftScope,
+  targetScope: PromptDraftScope,
+): void {
+  const sourceKey = getPromptDraftStorageKey(sourceScope);
+  const targetKey = getPromptDraftStorageKey(targetScope);
+
+  if (sourceKey === targetKey) return;
+
+  if (typeof window !== "undefined") {
+    parseRecoverablePromptDraftStorage(window.localStorage.getItem(sourceKey));
+    parseRecoverablePromptDraftStorage(window.localStorage.getItem(targetKey));
+  }
+
+  const source = createPromptDraftController(sourceKey);
+  const draft = source.getCurrent();
+
+  if (isPromptDraftEmpty(draft)) return;
+  restoreFailedDraft(targetKey, draft);
+  source.clearIfCurrentMatches(draft);
+}
+
 function getPromptDraftStorageKey(scope: PromptDraftScope): string {
-  if (scope.kind === "automation-edit") {
-    const normalizedAutomationId = normalizeStorageSegment(scope.automationId);
-    return `${PROMPT_DRAFT_STORAGE_PREFIX}-automation-edit-${normalizedAutomationId}-${PROMPT_DRAFT_STORAGE_VERSION}`;
-  }
-  if (scope.kind === "new-thread") {
-    return `${PROMPT_DRAFT_STORAGE_PREFIX}-draft-${PROMPT_DRAFT_STORAGE_VERSION}`;
-  }
-  if (scope.kind === "plugin-new-thread") {
-    const normalizedKey = normalizeStorageSegment(scope.key);
-    return `${PROMPT_DRAFT_STORAGE_PREFIX}-plugin-draft-${normalizedKey}-${PROMPT_DRAFT_STORAGE_VERSION}`;
-  }
-  const normalizedProjectId = normalizeStorageSegment(scope.projectId);
-  const normalizedThreadId = normalizeStorageSegment(scope.threadId);
-  return `${PROMPT_DRAFT_STORAGE_PREFIX}-${normalizedProjectId}-${normalizedThreadId}-${PROMPT_DRAFT_STORAGE_VERSION}`;
+  assertBrowserStorageMigrationV1();
+
+  return promptDraftStorageKeyV1(scope);
 }
 
 export interface PromptDraftController {
@@ -258,6 +356,7 @@ export interface PromptDraftController {
   clear: () => void;
   clearIfCurrentMatches: (expectedDraft: PromptDraftState) => boolean;
   restoreIfEmpty: (nextDraft: PromptDraftState) => void;
+  restoreFailedDraft: (nextDraft: PromptDraftState) => void;
 }
 
 function createPromptDraftController(
@@ -287,9 +386,11 @@ function createPromptDraftController(
     },
     addAttachment: (attachment) => {
       const currentDraft = readPromptDraft(storageKey);
+
       const alreadyExists = currentDraft.attachments.some(
         (existingAttachment) => existingAttachment.path === attachment.path,
       );
+
       if (alreadyExists) return;
 
       writePromptDraft(storageKey, {
@@ -304,7 +405,11 @@ function createPromptDraftController(
         attachments: update(currentDraft.attachments),
       });
     },
-    clear: () => writePromptDraft(storageKey, EMPTY_PROMPT_DRAFT),
+    clear: () =>
+      writePromptDraft(storageKey, EMPTY_PROMPT_DRAFT, {
+        persist: "immediate",
+        imageAliases: "reset",
+      }),
     clearIfCurrentMatches: (expectedDraft) => {
       if (
         !arePromptDraftStatesEqual(readPromptDraft(storageKey), expectedDraft)
@@ -312,12 +417,18 @@ function createPromptDraftController(
         return false;
       }
 
-      writePromptDraft(storageKey, EMPTY_PROMPT_DRAFT);
+      writePromptDraft(storageKey, EMPTY_PROMPT_DRAFT, {
+        persist: "immediate",
+        imageAliases: "reset",
+      });
+
       return true;
     },
     restoreIfEmpty: (nextDraft) => {
       restorePromptDraftIfEmpty(storageKey, nextDraft);
     },
+    restoreFailedDraft: (nextDraft) =>
+      restoreFailedDraft(storageKey, nextDraft),
   };
 }
 
@@ -331,6 +442,7 @@ export function usePromptDraftController(
   scope: PromptDraftScope,
 ): PromptDraftController {
   const storageKey = getPromptDraftStorageKey(scope);
+
   return useMemo(() => createPromptDraftController(storageKey), [storageKey]);
 }
 
@@ -364,12 +476,13 @@ export function usePromptDraftStorage(scope: PromptDraftScope) {
   return useMemo(
     () => ({
       ...controller,
+      draft,
       value: draft.text,
       text: draft.text,
       mentions: draft.mentions,
       attachments: draft.attachments,
     }),
-    [controller, draft.attachments, draft.mentions, draft.text],
+    [controller, draft],
   );
 }
 
@@ -415,31 +528,39 @@ function createPromptDraftPresenceStore(
 } {
   let bits: ("0" | "1")[] | null = null;
   let snapshot: string | null = null;
+
   const refresh = (): string => {
     bits = subscriptions.map(({ storageKey }) =>
       readPromptDraftPresenceBit(storageKey),
     );
     snapshot = bits.join("");
+
     return snapshot;
   };
+
   return {
     getSnapshot: () => snapshot ?? refresh(),
     subscribe: (listener) => {
       snapshot = null;
       bits = null;
+
       const unsubscribe = subscriptions.map(({ storageKey }, index) =>
         subscribePromptDraft(storageKey, () => {
           const bit = readPromptDraftPresenceBit(storageKey);
+
           if (bits !== null && bits[index] === bit) return;
+
           if (bits === null) {
             refresh();
           } else {
             bits[index] = bit;
             snapshot = bits.join("");
           }
+
           listener();
         }),
       );
+
       return () => {
         for (const stopListening of unsubscribe) {
           stopListening();
@@ -455,17 +576,20 @@ export function usePromptDraftInputThreadIds(
   const subscriptions = useMemo<PromptDraftThreadSubscription[]>(() => {
     const seenStorageKeys = new Set<string>();
     const next: PromptDraftThreadSubscription[] = [];
+
     for (const thread of threads) {
       const storageKey = getPromptDraftStorageKey({
         kind: "thread",
         projectId: thread.projectId,
         threadId: thread.id,
       });
+
       if (!storageKey || seenStorageKeys.has(storageKey)) continue;
 
       seenStorageKeys.add(storageKey);
       next.push({ storageKey, threadId: thread.id });
     }
+
     return next;
   }, [threads]);
 
@@ -473,6 +597,7 @@ export function usePromptDraftInputThreadIds(
     () => createPromptDraftPresenceStore(subscriptions),
     [subscriptions],
   );
+
   const presenceSnapshot = useSyncExternalStore(
     presenceStore.subscribe,
     presenceStore.getSnapshot,
@@ -486,6 +611,7 @@ export function usePromptDraftInputThreadIds(
         threadIds.add(threadId);
       }
     });
+
     return threadIds;
   }, [presenceSnapshot, subscriptions]);
 }

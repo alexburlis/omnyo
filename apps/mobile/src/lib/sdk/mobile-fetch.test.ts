@@ -6,7 +6,7 @@ import { createMobileFetch, type ServerMovedResponse } from "./mobile-fetch";
 
 const MOVED_BODY = {
   code: "server_moved",
-  message: "This bb server moved to studio",
+  message: "This Omnyo server moved to studio",
   details: {
     serverUrl: "https://studio.tailnet.ts.net/",
     toHostName: "studio",
@@ -25,10 +25,12 @@ function setup(response: () => Response) {
   const baseFetch = vi.fn<typeof fetch>(async () => response());
   const onAuthFailure = vi.fn<(status: number) => void>();
   const onServerMoved = vi.fn<(moved: ServerMovedResponse) => void>();
+
   const mobileFetch = createMobileFetch(baseFetch, {
     onAuthFailure,
     onServerMoved,
   });
+
   return { baseFetch, mobileFetch, onAuthFailure, onServerMoved };
 }
 
@@ -113,7 +115,7 @@ describe("createMobileFetch", () => {
       jsonResponse({ code: "unauthorized" }, 401),
     );
 
-    await mobileFetch("https://bee.getbb.app/api/v1/x", {
+    await mobileFetch("https://bee.example.test/api/v1/x", {
       headers: { accept: "application/json" },
     });
 
@@ -131,6 +133,7 @@ describe("profile client registry server moves", () => {
   it("reports the moved address with the profile that received it", async () => {
     const onServerMoved =
       vi.fn<(profileId: string, moved: ServerMovedResponse) => void>();
+
     const registry = createProfileClientRegistry({
       onServerMoved,
       sdk: {
@@ -141,6 +144,7 @@ describe("profile client registry server moves", () => {
         },
       },
     });
+
     const client = registry.getClientForProfile({
       id: "laptop",
       serverUrl: "http://192.168.1.20:38886",

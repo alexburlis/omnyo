@@ -3,8 +3,8 @@ import {
   encodeClientTurnRequestIdNumber,
   threadScope,
   turnScope,
-} from "@bb/domain";
-import type { ClientTurnRequestId, Thread } from "@bb/domain";
+} from "@omnyo/domain";
+import type { ClientTurnRequestId, Thread } from "@omnyo/domain";
 import {
   createConnection,
   createProject,
@@ -13,11 +13,12 @@ import {
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
-import type { DbConnection } from "@bb/db";
+} from "@omnyo/db";
+import type { DbConnection } from "@omnyo/db";
 import { buildThreadTimelineWithProfile } from "../../../src/services/threads/timeline.js";
 
 const providerThreadId = "provider-root";
+
 const execution = {
   model: "gpt-5",
   serviceTier: "default",
@@ -32,18 +33,22 @@ const requestId = (value: number): ClientTurnRequestId =>
 function setup(): { db: DbConnection; thread: Thread } {
   const db = createConnection(":memory:");
   migrate(db);
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "claude-code",
     status: "active",
   });
+
   return { db, thread };
 }
 
@@ -57,6 +62,7 @@ function seedThreadWithEarlyHeadState(
 ): void {
   const events: Parameters<typeof insertEvents>[2] = [];
   let sequence = 0;
+
   for (let turn = 1; turn <= turns; turn += 1) {
     const turnId = `turn-${turn}`;
     const clientRequestId = requestId(turn);
@@ -144,6 +150,7 @@ function seedThreadWithEarlyHeadState(
           },
         }),
       });
+
       if (pendingCommand) {
         events.push({
           threadId: thread.id,
@@ -167,6 +174,7 @@ function seedThreadWithEarlyHeadState(
           }),
         });
       }
+
       if (runningWorkflow)
         events.push({
           threadId: thread.id,
@@ -214,19 +222,45 @@ function seedThreadWithEarlyHeadState(
       });
     }
   }
+
   insertEvents(db, noopNotifier, events);
 }
 
 const baseOptions = {
   includeClearedContextHistory: false,
   includeDiagnosticOperations: false,
+  compactionOfferEnabled: false,
   includeNestedRows: true,
   maxInlineOutputChars: null,
-  maxSeq: 0,
+  maxSeq: undefined,
   page: { kind: "latest", segmentLimit: 20 } as const,
 };
 
 describe("timeline head state under a budgeted window", () => {
+  it("treats an explicitly empty snapshot as zero after later state exists", () => {
+    const { db, thread } = setup();
+
+    try {
+      seedThreadWithEarlyHeadState(db, thread, 2, 2, true);
+
+      const empty = buildThreadTimelineWithProfile(db, thread, {
+        ...baseOptions,
+        completedTurnDisplay: "collapse",
+        eventBudget: 1500,
+        maxSeq: 0,
+      }).response;
+
+      expect(empty.maxSeq).toBe(0);
+      expect(empty.rows).toEqual([]);
+      expect(empty.goal).toBeNull();
+      expect(empty.pendingTodos).toBeNull();
+      expect(empty.activeWorkflows).toEqual([]);
+      expect(empty.contextWindowUsage).toBeUndefined();
+    } finally {
+      db.$client.close();
+    }
+  });
+
   it("keeps goal, todos, and a running workflow when the budget excludes the turn that set them", () => {
     const { db, thread } = setup();
     seedThreadWithEarlyHeadState(db, thread, 12, 60, true);
@@ -236,6 +270,7 @@ describe("timeline head state under a budgeted window", () => {
       ...baseOptions,
       eventBudget: 1_000_000,
     }).response;
+
     const budgeted = buildThreadTimelineWithProfile(db, thread, {
       completedTurnDisplay: "collapse",
       ...baseOptions,
@@ -263,12 +298,14 @@ describe("timeline head state under a budgeted window", () => {
   it("keeps historical plan state without loading intervening conversation markers", () => {
     const { db, thread } = setup();
     seedThreadWithEarlyHeadState(db, thread, 100, 1, false);
+
     const latest = buildThreadTimelineWithProfile(db, thread, {
       ...baseOptions,
       completedTurnDisplay: "collapse",
       eventBudget: 8,
       page: { kind: "latest", segmentLimit: 2 },
     });
+
     expect(
       latest.response.pendingTodos?.items.map((item) => item.text),
     ).toEqual(["Shipping the thing", "Write the docs"]);
@@ -283,12 +320,14 @@ describe("timeline head state under a budgeted window", () => {
   it("still marks an omitted older message changed by a late completion", () => {
     const { db, thread } = setup();
     seedThreadWithEarlyHeadState(db, thread, 100, 1, false, true);
+
     const options = {
       ...baseOptions,
       completedTurnDisplay: "collapse" as const,
       eventBudget: 8,
       page: { kind: "latest" as const, segmentLimit: 2 },
     };
+
     const before = buildThreadTimelineWithProfile(db, thread, options).response;
     insertEvents(db, noopNotifier, [
       {
@@ -354,6 +393,7 @@ describe("timeline head state under a budgeted window", () => {
       ...baseOptions,
       eventBudget: 100,
     }).response;
+
     expect(budgeted.pendingTodos).toBeNull();
     expect(budgeted.goal).toBeNull();
     expect(budgeted.activeWorkflows).toHaveLength(0);

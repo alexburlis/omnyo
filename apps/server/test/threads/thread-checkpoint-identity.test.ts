@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
-import { createScriptedEchoRuntime } from "@bb/agent-runtime/test";
-import { getThread, listEvents } from "@bb/db";
-import type { PromptInput, ThreadEvent } from "@bb/domain";
-import { groupHostDaemonEvents } from "@bb/host-daemon-contract";
+import { createScriptedEchoRuntime } from "@omnyo/agent-runtime/test";
+import { getThread, listEvents } from "@omnyo/db";
+import type { PromptInput, ThreadEvent } from "@omnyo/domain";
+import { groupHostDaemonEvents } from "@omnyo/host-daemon-contract";
 import { describe, expect, it, vi } from "vitest";
 import { appendClientTurnEvent } from "../../src/services/threads/thread-events.js";
 import { editThreadMessage } from "../../src/services/threads/thread-edit-message.js";
@@ -25,12 +25,14 @@ const bridgePath = fileURLToPath(
     import.meta.url,
   ),
 );
+
 const appServerPath = fileURLToPath(
   new URL(
     "../../../../plugins/provider-codex/src/bridge/fake-codex-app-server.mjs",
     import.meta.url,
   ),
 );
+
 const execution = {
   model: "test-model",
   serviceTier: "default",
@@ -38,6 +40,7 @@ const execution = {
   permissionMode: "full",
   source: "client/turn/requested",
 } as const;
+
 const options = {
   ...execution,
   permissionScope: "full",
@@ -52,37 +55,48 @@ describe("checkpoint identity through runtime, ingestion, and editing", () => {
     async (construction) => {
       await withTestHarness(async (harness) => {
         const { host, session } = seedHostSession(harness.deps);
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
           status: "ready",
         });
+
         const source = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
         });
+
         const sibling = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
         });
+
         const events: ThreadEvent[] = [];
+
         const runtime = createScriptedEchoRuntime({
           launch: { modulePath: bridgePath },
           runtime: {
             workspacePath: harness.config.dataDir,
             env: {
-              BB_CODEX_BRIDGE_APP_SERVER_COMMAND: process.execPath,
-              BB_CODEX_BRIDGE_APP_SERVER_ARGS: JSON.stringify([appServerPath]),
+              OMNYO_CODEX_BRIDGE_APP_SERVER_COMMAND: process.execPath,
+              OMNYO_CODEX_BRIDGE_APP_SERVER_ARGS: JSON.stringify([
+                appServerPath,
+              ]),
             },
             onEvent: (event) => events.push(event),
           },
         });
+
         let posted = 0;
+
         async function ingest() {
           const batch = events.slice(posted);
+
           const response = await harness.app.request(
             "/internal/session/events",
             {
@@ -96,9 +110,11 @@ describe("checkpoint identity through runtime, ingestion, and editing", () => {
               }),
             },
           );
+
           expect(response.status, await response.text()).toBe(200);
           posted = events.length;
         }
+
         const args = {
           environmentId: environment.id,
           projectId: project.id,
@@ -106,6 +122,7 @@ describe("checkpoint identity through runtime, ingestion, and editing", () => {
           options,
           threadId: source.id,
         };
+
         try {
           const original =
             construction === "fork"
@@ -117,11 +134,14 @@ describe("checkpoint identity through runtime, ingestion, and editing", () => {
                   ...args,
                   providerThreadId: "historical-source",
                 });
+
           await runtime.startThread({ ...args, threadId: sibling.id });
           await ingest();
           const requests: number[] = [];
+
           for (const text of ["first", "second"]) {
             const input: PromptInput[] = [{ type: "text", text, mentions: [] }];
+
             const request = appendClientTurnEvent(harness.deps, {
               type: "client/turn/requested",
               threadId: source.id,
@@ -134,6 +154,7 @@ describe("checkpoint identity through runtime, ingestion, and editing", () => {
               requestMethod: "turn/start",
               source: "tell",
             });
+
             requests.push(request.sequence);
             const start = events.length;
             await runtime.runTurn({
@@ -151,11 +172,15 @@ describe("checkpoint identity through runtime, ingestion, and editing", () => {
             );
             await ingest();
           }
+
           const storedCompletions = listEvents(harness.db, {
             threadId: source.id,
           }).filter((event) => event.type === "turn/completed");
+
           const thread = getThread(harness.db, source.id);
+
           if (!thread) throw new Error("Missing source thread");
+
           const edit = editThreadMessage(harness.deps, {
             environment,
             thread,
@@ -165,12 +190,15 @@ describe("checkpoint identity through runtime, ingestion, and editing", () => {
               input: [{ type: "text", text: "replacement", mentions: [] }],
             },
           });
+
           const rewind = await waitForQueuedCommand(
             harness,
             (queued) => queued.command.type === "thread.rewind.prepare",
           );
+
           if (rewind.command.type !== "thread.rewind.prepare")
             throw new Error("Expected rewind preparation");
+
           const prepared = await runtime.prepareThreadRewind({
             ...args,
             leaseId: rewind.command.leaseId,
@@ -178,6 +206,7 @@ describe("checkpoint identity through runtime, ingestion, and editing", () => {
             retainThroughProviderCheckpoint:
               rewind.command.retainThroughProviderCheckpoint,
           });
+
           await reportQueuedCommandSuccess(harness, rewind, prepared);
           await expect(edit).resolves.toMatchObject({ ok: true });
           await runtime.discardThreadRewind({

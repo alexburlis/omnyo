@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const LOCK_RETRY_MS = 25;
+
 interface NativeFileLocks {
   tryLock: (fd: number) => boolean;
   unlock: (fd: number) => void;
@@ -14,6 +15,7 @@ let loadedNativeFileLocks: NativeFileLocks | undefined;
 function loadNativeFileLocks(): NativeFileLocks {
   if (loadedNativeFileLocks !== undefined) return loadedNativeFileLocks;
   const value: unknown = createRequire(import.meta.url)("fs-native-extensions");
+
   if (
     value === null ||
     typeof value !== "object" ||
@@ -24,20 +26,24 @@ function loadNativeFileLocks(): NativeFileLocks {
   ) {
     throw new Error("Invalid fs-native-extensions module");
   }
+
   const tryLock = value.tryLock;
   const unlock = value.unlock;
   loadedNativeFileLocks = {
     tryLock: (fd) => {
       const result: unknown = Reflect.apply(tryLock, value, [fd]);
+
       if (typeof result !== "boolean") {
         throw new Error("Invalid fs-native-extensions lock result");
       }
+
       return result;
     },
     unlock: (fd) => {
       Reflect.apply(unlock, value, [fd]);
     },
   };
+
   return loadedNativeFileLocks;
 }
 
@@ -47,27 +53,56 @@ export class FileLockTimeoutError extends Error {
   }
 }
 
-export async function withFileLock<T>(args: {
-  path: string;
-  timeoutMs: number;
-  work: () => Promise<T>;
-}): Promise<T> {
+export async function withFileLock<T>(
+  args: {
+    path: string;
+    timeoutMs: number;
+    work: () => Promise<T>;
+  } & (
+    | { existingOnly: true; identity: { device: string; inode: string } }
+    | { existingOnly?: undefined; identity?: undefined }
+  ),
+): Promise<T> {
   const nativeFileLocks = loadNativeFileLocks();
-  await mkdir(dirname(args.path), { recursive: true });
-  const handle = await open(args.path, "a+", 0o600);
+
+  if (args.existingOnly !== true)
+    await mkdir(dirname(args.path), { recursive: true });
+
+  const handle = await open(
+    args.path,
+    args.existingOnly === true ? "r+" : "a+",
+    0o600,
+  );
+
   let acquired = false;
+
   try {
+    if (args.existingOnly === true) {
+      const info = await handle.stat({ bigint: true });
+
+      if (
+        !info.isFile() ||
+        info.dev.toString() !== args.identity.device ||
+        info.ino.toString() !== args.identity.inode
+      )
+        throw new Error("Existing file lock no longer has its original inode");
+    }
+
     const deadline = performance.now() + args.timeoutMs;
+
     for (;;) {
       if (nativeFileLocks.tryLock(handle.fd)) {
         acquired = true;
         break;
       }
+
       if (performance.now() >= deadline) {
         throw new FileLockTimeoutError(args.path);
       }
+
       await sleep(LOCK_RETRY_MS);
     }
+
     return await args.work();
   } finally {
     try {

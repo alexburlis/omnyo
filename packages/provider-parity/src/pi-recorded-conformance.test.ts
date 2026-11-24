@@ -1,11 +1,12 @@
 import { expect, it } from "vitest";
-import { runFirstPartyRecordedConformance } from "@bb/provider-bridge-protocol/testing";
+import { runFirstPartyRecordedConformance } from "@omnyo/provider-bridge-protocol/testing";
 
 it("reproduces every recorded pi matrix cell through the provider-pi bridge", async () => {
   const run = await runFirstPartyRecordedConformance({
     servesProvider: (providerId) => providerId === "pi",
     label: "pi",
   });
+
   expect(run.cells).toEqual([
     "fork",
     "resume",

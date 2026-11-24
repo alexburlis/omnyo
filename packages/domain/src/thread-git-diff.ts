@@ -17,6 +17,7 @@ export const workspaceDiffTargetSchema = z.discriminatedUnion("type", [
     sha: z.string().regex(/^[0-9a-f]{4,40}$/iu),
   }),
 ]);
+
 export type WorkspaceDiffTarget = z.infer<typeof workspaceDiffTargetSchema>;
 
 export const rawDiffFileStatSchema = z.object({
@@ -28,6 +29,7 @@ export const rawDiffFileStatSchema = z.object({
   binary: z.boolean(),
   origin: z.enum(["tracked", "untracked"]),
 });
+
 export type RawDiffFileStat = z.infer<typeof rawDiffFileStatSchema>;
 
 export const threadGitDiffResponseSchema = z.object({
@@ -37,4 +39,5 @@ export const threadGitDiffResponseSchema = z.object({
   files: z.string(),
   mergeBaseRef: z.string().nullable(),
 });
+
 export type ThreadGitDiffResponse = z.infer<typeof threadGitDiffResponseSchema>;

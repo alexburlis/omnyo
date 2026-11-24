@@ -5,12 +5,16 @@ import {
 } from "@/lib/document-visibility";
 
 const listeners = new Set<() => void>();
+
 let lastTickMs = 0;
+
 let intervalId: ReturnType<typeof setInterval> | null = null;
+
 let unsubscribeVisibility: (() => void) | null = null;
 
 function tick(): void {
   lastTickMs = Date.now();
+
   for (const listener of listeners) listener();
 }
 
@@ -30,8 +34,10 @@ function stopInterval(): void {
 function handleVisibilityChange(): void {
   if (!isDocumentVisible()) {
     stopInterval();
+
     return;
   }
+
   if (listeners.size > 0 && intervalId === null) {
     tick();
     startInterval();
@@ -46,9 +52,12 @@ function subscribe(listener: () => void): () => void {
     );
     startInterval();
   }
+
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
+
     if (listeners.size === 0) {
       stopInterval();
       unsubscribeVisibility?.();
@@ -59,6 +68,7 @@ function subscribe(listener: () => void): () => void {
 
 function getSnapshot(): number {
   if (lastTickMs === 0) lastTickMs = Date.now();
+
   return lastTickMs;
 }
 

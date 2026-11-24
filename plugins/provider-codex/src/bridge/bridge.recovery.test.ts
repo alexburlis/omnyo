@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { BRIDGE_NOTIFICATION_METHODS } from "@get-bb/plugin-sdk/provider-bridge";
-import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
-import type { BridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { BRIDGE_NOTIFICATION_METHODS } from "@omnyo/plugin-sdk/provider-bridge";
+import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
+import type { BridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
 import {
   FULL_ACCESS_SESSION_OPTIONS,
@@ -12,6 +12,7 @@ import {
 } from "./fake-codex-app-server-harness.js";
 
 const THREAD_ID = "thr_codex_recovery_1";
+
 const PROVIDER_THREAD_ID = "codex-recovery-session";
 
 const UNAUTHORIZED_TURN = [
@@ -57,6 +58,7 @@ const OK_TURN = [
 ];
 
 let harness: BridgeJsonRpcTestHarness;
+
 let workspaceDir: string;
 
 function stubFakeAppServer(script: Record<string, unknown>): void {
@@ -76,11 +78,14 @@ async function waitForNotification(
   predicate: (params: unknown) => boolean,
 ): Promise<unknown> {
   const deadline = Date.now() + 15_000;
+
   while (Date.now() < deadline) {
     const found = notifications(method).find(predicate);
+
     if (found !== undefined) return found;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+
   throw new Error(
     `Timed out waiting for ${method}; saw ${JSON.stringify(notifications(method))}`,
   );
@@ -89,12 +94,13 @@ async function waitForNotification(
 function threadDeltas(): unknown[] {
   return notifications("thread/delta").flatMap((params) => {
     const deltas = (params as { deltas?: unknown[] } | undefined)?.deltas;
+
     return Array.isArray(deltas) ? deltas : [];
   });
 }
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-recovery-ws-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-recovery-ws-"));
 });
 
 afterEach(async () => {
@@ -140,6 +146,7 @@ it("raises authRequired on a terminal 401 and rebuilds the child before the next
     BRIDGE_NOTIFICATION_METHODS.providerRecovery,
     () => true,
   );
+
   expect(hint).toEqual({
     threadId: THREAD_ID,
     kind: "authRequired",
@@ -175,6 +182,7 @@ it("raises authRequired on a terminal 401 and rebuilds the child before the next
   ]);
   await waitForNotification("thread/delta", (params) => {
     const deltas = (params as { deltas?: unknown[] }).deltas ?? [];
+
     return deltas.some(
       (delta) =>
         (delta as { kind?: string; status?: string }).kind ===

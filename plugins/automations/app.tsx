@@ -1,13 +1,19 @@
+import {
+  AutomationAuthoring,
+  WorkflowCopies,
+  WorkflowIntake,
+  WorkflowSetupReturn,
+} from "./workflow-panel";
 import { composerCustomization, CREATE_AUTOMATION_PROMPT } from "./composer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   definePluginApp,
-  useBbNavigate,
+  experimental_useAppNavigate,
   useRealtime,
   useRpc,
   type PluginNavPanelProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import type { automationRpcContract } from "./src/rpc.js";
 import { toast } from "sonner";
 import type {
@@ -29,6 +35,7 @@ import { PERSONAL_PROJECT_ID } from "./lib/format-schedule";
 import { buildAutomationEditThreadPrompt } from "./lib/edit-prompt";
 import { Button } from "@/components/ui/button";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
+import { Icon } from "@/components/ui/icon";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +48,7 @@ import { ResourceListState } from "@/components/ui/resource-list";
 import { cn } from "@/lib/utils";
 
 const PANEL_PATH = "automations";
+
 type OverviewEntry = AutomationsOverviewResponse["automations"][number];
 
 function errorText(error: unknown): string {
@@ -64,12 +72,14 @@ interface ParsedDetailRoute {
 
 function parseSubPath(subPath: string): ParsedDetailRoute | null {
   const parts = subPath.split("/").filter((p) => p.length > 0);
+
   if (parts.length === 2 || (parts.length === 3 && parts[2] === "edit")) {
     return {
       route: { projectId: parts[0], automationId: parts[1] },
       editing: parts[2] === "edit",
     };
   }
+
   return null;
 }
 
@@ -81,6 +91,7 @@ interface AutomationSignal {
 function asSignal(payload: unknown): AutomationSignal | null {
   if (payload === null || typeof payload !== "object") return null;
   const record = payload as { projectId?: unknown; kind?: unknown };
+
   if (
     typeof record.projectId !== "string" ||
     (record.kind !== "automations-changed" &&
@@ -88,8 +99,11 @@ function asSignal(payload: unknown): AutomationSignal | null {
   ) {
     return null;
   }
+
   return { projectId: record.projectId, kind: record.kind };
 }
+
+let lastOverviewEntries: OverviewEntry[] | null = null;
 
 function useOverview(): {
   entries: OverviewEntry[] | null;
@@ -97,10 +111,12 @@ function useOverview(): {
   refetch: () => void;
 } {
   const rpc = useRpc<typeof automationRpcContract>();
+
   const [state, setState] = useState<{
     entries: OverviewEntry[] | null;
     error: string | null;
-  }>({ entries: null, error: null });
+  }>(() => ({ entries: lastOverviewEntries, error: null }));
+
   const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestInFlightRef = useRef(false);
   const trailingRefetchRef = useRef(false);
@@ -109,28 +125,35 @@ function useOverview(): {
     function requestOverview(showLoading: boolean) {
       if (requestInFlightRef.current) {
         trailingRefetchRef.current = true;
+
         return;
       }
+
       requestInFlightRef.current = true;
-      if (showLoading) {
+      const blank = showLoading && lastOverviewEntries === null;
+
+      if (blank) {
         setState({ entries: null, error: null });
       }
+
       rpc
         .call("automations_overview")
         .then(
           (result) => {
             const data = result as AutomationsOverviewResponse;
+            lastOverviewEntries = data.automations;
             setState({ entries: data.automations, error: null });
           },
           (error: unknown) =>
             setState((current) =>
-              !showLoading && current.entries !== null
+              !blank && current.entries !== null
                 ? current
                 : { entries: null, error: errorText(error) },
             ),
         )
         .finally(() => {
           requestInFlightRef.current = false;
+
           if (trailingRefetchRef.current) {
             trailingRefetchRef.current = false;
             requestOverview(false);
@@ -139,6 +162,7 @@ function useOverview(): {
     },
     [rpc],
   );
+
   const refetch = useCallback(() => runRefetch(true), [runRefetch]);
 
   useEffect(() => {
@@ -152,20 +176,25 @@ function useOverview(): {
     },
     [],
   );
+
   const scheduleRefetch = useCallback(() => {
     if (requestInFlightRef.current) {
       trailingRefetchRef.current = true;
+
       return;
     }
+
     if (refetchTimerRef.current !== null) return;
     refetchTimerRef.current = setTimeout(() => {
       refetchTimerRef.current = null;
       runRefetch(false);
     }, 75);
   }, [runRefetch]);
+
   useRealtime("automations", (payload) => {
     if (asSignal(payload) !== null) scheduleRefetch();
   });
+
   return { ...state, refetch };
 }
 
@@ -176,10 +205,12 @@ function useAutomation(route: DetailRoute): {
 } {
   const rpc = useRpc<typeof automationRpcContract>();
   const { projectId, automationId } = route;
+
   const [state, setState] = useState<{
     automation: AutomationDetailReadResult | null;
     error: string | null;
   }>({ automation: null, error: null });
+
   const requestRef = useRef(0);
 
   const refetch = useCallback(() => {
@@ -200,14 +231,17 @@ function useAutomation(route: DetailRoute): {
   useEffect(() => {
     setState({ automation: null, error: null });
     refetch();
+
     return () => {
       requestRef.current += 1;
     };
   }, [refetch]);
   useRealtime("automations", (payload) => {
     const signal = asSignal(payload);
+
     if (signal !== null && signal.projectId === projectId) refetch();
   });
+
   return { ...state, refetch };
 }
 
@@ -224,6 +258,7 @@ function useRuns(
 ): RunsState & { loadMore: () => void; retry: () => void } {
   const rpc = useRpc<typeof automationRpcContract>();
   const { projectId, automationId } = route;
+
   const [state, setState] = useState<RunsState>({
     runs: [],
     nextCursor: null,
@@ -231,6 +266,7 @@ function useRuns(
     loadingMore: false,
     error: null,
   });
+
   const requestRef = useRef(0);
   const loadMoreInFlightRef = useRef(false);
 
@@ -270,6 +306,7 @@ function useRuns(
     ) {
       return;
     }
+
     const cursor = state.nextCursor;
     const requestId = requestRef.current;
     loadMoreInFlightRef.current = true;
@@ -303,6 +340,7 @@ function useRuns(
   }, [loadFirstPage]);
   useRealtime("automations", (payload) => {
     const signal = asSignal(payload);
+
     if (
       signal !== null &&
       signal.kind === "automation-runs-changed" &&
@@ -311,20 +349,24 @@ function useRuns(
       loadFirstPage();
     }
   });
+
   return { ...state, loadMore, retry: loadFirstPage };
 }
 
 function useMutations() {
   const rpc = useRpc<typeof automationRpcContract>();
+
   type MutationMethod =
     | "automations_pause"
     | "automations_resume"
     | "automations_run"
     | "automations_delete";
+
   const call = useCallback(
     (method: MutationMethod, route: DetailRoute) => rpc.call(method, route),
     [rpc],
   );
+
   return {
     pause: (route: DetailRoute) => call("automations_pause", route),
     resume: (route: DetailRoute) => call("automations_resume", route),
@@ -391,12 +433,14 @@ function OverviewView({
   onOpenDetail,
   activeMode,
   onModeChange,
+  libraryProjectId,
 }: {
   onOpenDetail: (route: DetailRoute, options?: { editing?: boolean }) => void;
   activeMode: AutomationCollectionMode;
   onModeChange: (mode: AutomationCollectionMode) => void;
+  libraryProjectId?: string;
 }) {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const { entries, error, refetch } = useOverview();
   const mutations = useMutations();
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
@@ -405,6 +449,7 @@ function OverviewView({
   const changeEnabled = useCallback(
     async (enabled: boolean, route: DetailRoute) => {
       const method = enabled ? "resume" : "pause";
+
       try {
         await mutations[method](route);
       } catch (rpcError: unknown) {
@@ -474,6 +519,7 @@ function OverviewView({
         onCreateViaChat={createViaChat}
         activeMode={activeMode}
         onModeChange={onModeChange}
+        libraryProjectId={libraryProjectId}
       />
       <DeleteAutomationDialog
         open={deleteTarget !== null}
@@ -498,7 +544,7 @@ function DetailView({
   initialEditing: boolean;
   onBack: () => void;
 }) {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const { automation, error, refetch } = useAutomation(route);
   const [editingRequested, setEditingRequested] = useState(initialEditing);
   const overviewState = useOverview();
@@ -509,7 +555,8 @@ function DetailView({
   const [deleting, setDeleting] = useState(false);
 
   const openThread = useCallback(
-    (threadId: string) => navigate.toThread(threadId),
+    (threadId: string) =>
+      navigate.toThread(threadId, { experimental_userInitiated: true }),
     [navigate],
   );
 
@@ -547,16 +594,20 @@ function DetailView({
 
   const openEdit = useCallback(() => {
     if (automation === null || "problem" in automation) return;
+
     if (automation.execution.mode === "agent") {
       setEditingRequested(true);
+
       return;
     }
+
     editViaThread(automation);
   }, [automation, editViaThread]);
 
   const updateAgent = useCallback(
     async (agent: AgentExecutionUpdate) => {
       setActionPending(true);
+
       try {
         await mutations.update(route, agent);
         toast.success("Automation updated");
@@ -651,6 +702,7 @@ function DetailView({
 
   const requiresPrompt =
     automation.execution.mode === "agent" && automation.execution.prompt === "";
+
   const readableAutomation: AutomationDetailResponse = automation;
 
   const overviewEntry = overviewState.entries?.find(
@@ -658,6 +710,7 @@ function DetailView({
       entry.automation.projectId === route.projectId &&
       entry.automation.id === route.automationId,
   );
+
   const projectLabel =
     overviewEntry !== undefined
       ? automationProjectLabel(overviewEntry.project)
@@ -679,7 +732,17 @@ function DetailView({
       onRunNow={() => runAction("run")}
       onDelete={() => setDeleteOpen(true)}
       onOpenThread={openThread}
-      footer={deleteDialog}
+      footer={
+        <>
+          {deleteDialog}
+          {automation.execution.mode !== "workflow" && (
+            <AutomationAuthoring
+              key={automation.updatedAt}
+              automation={automation}
+            />
+          )}
+        </>
+      }
     />
   );
 }
@@ -706,10 +769,16 @@ function AutomationsPageFrame({
 }
 
 function AutomationsPanel({ subPath }: PluginNavPanelProps) {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const parsedRoute = useMemo(() => parseSubPath(subPath), [subPath]);
+
+  const [route, first, second] = subPath.split("/");
+
   const collectionMode: AutomationCollectionMode =
-    subPath === "browse" ? "browse" : "installed";
+    route === "browse" || route === "graphs" || route === "copies"
+      ? route
+      : "installed";
+
   const openDetail = useCallback(
     (next: DetailRoute, options?: { editing?: boolean }) => {
       navigate.toPluginPanel(PANEL_PATH, {
@@ -720,18 +789,42 @@ function AutomationsPanel({ subPath }: PluginNavPanelProps) {
     },
     [navigate],
   );
+
   const backToList = useCallback(() => {
     navigate.toPluginPanel(PANEL_PATH, { subPath: "" });
   }, [navigate]);
+
   const changeCollectionMode = useCallback(
     (mode: AutomationCollectionMode) => {
       navigate.toPluginPanel(PANEL_PATH, {
-        subPath: mode === "browse" ? "browse" : "",
+        subPath: mode === "installed" ? "" : mode,
       });
     },
     [navigate],
   );
-  if (parsedRoute !== null) {
+
+  if (route === "import" || (route === "copies" && second)) {
+    return (
+      <AutomationsPageFrame fill={false}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-2 mb-3 text-muted-foreground"
+          onClick={backToList}
+        >
+          <Icon name="ChevronLeft" aria-hidden />
+          Workflows
+        </Button>
+        {route === "import" ? (
+          <WorkflowIntake shareId={first} />
+        ) : (
+          <WorkflowCopies key={subPath} projectId={first} importId={second} />
+        )}
+      </AutomationsPageFrame>
+    );
+  }
+
+  if (parsedRoute !== null && collectionMode === "installed") {
     return (
       <AutomationsPageFrame fill={false}>
         <DetailView
@@ -742,12 +835,14 @@ function AutomationsPanel({ subPath }: PluginNavPanelProps) {
       </AutomationsPageFrame>
     );
   }
+
   return (
     <AutomationsPageFrame fill>
       <OverviewView
         onOpenDetail={openDetail}
         activeMode={collectionMode}
         onModeChange={changeCollectionMode}
+        libraryProjectId={route === "copies" ? first : undefined}
       />
     </AutomationsPageFrame>
   );
@@ -755,9 +850,13 @@ function AutomationsPanel({ subPath }: PluginNavPanelProps) {
 
 export default definePluginApp((app) => {
   app.composer.customize(composerCustomization);
+  app.slots.settingsSection({
+    id: "workflow-setup-return",
+    component: WorkflowSetupReturn,
+  });
   app.slots.navPanel({
     id: "automations",
-    title: "Automations",
+    title: "Workflows",
     icon: "Repeat",
     path: PANEL_PATH,
     component: AutomationsPanel,

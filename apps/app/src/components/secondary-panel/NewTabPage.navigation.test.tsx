@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { AppCommandProvider } from "@/components/commands/AppCommandProvider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -16,10 +22,23 @@ vi.mock("@/hooks/usePluginCommandBindings", () => {
   ].map(([command, key]) => ({
     command,
     desktopOnly: false,
-    shortcut: { key, control: true, shift: true, mod: false, meta: false, alt: false },
+    shortcut: {
+      key,
+      control: true,
+      shift: true,
+      mod: false,
+      meta: false,
+      alt: false,
+    },
     when: { all: ["mainSurface"], none: ["modalOpen"] },
   }));
-  return { usePluginCommandBindings: () => ({ keybindings: bindings, defaults: bindings }) };
+
+  return {
+    usePluginCommandBindings: () => ({
+      keybindings: bindings,
+      defaults: bindings,
+    }),
+  };
 });
 
 vi.mock("@/hooks/useFileSearchSuggestions", () => {
@@ -30,6 +49,7 @@ vi.mock("@/hooks/useFileSearchSuggestions", () => {
     isDebouncing: false,
     isUnavailable: false,
   };
+
   return { useFileSearchSuggestions: () => result };
 });
 
@@ -37,14 +57,18 @@ const recentItems = [
   { source: "workspace" as const, path: "package.json", openedAt: 1 },
   { source: "workspace" as const, path: "README.md", openedAt: 1 },
 ];
+
 vi.mock("./threadRecentItems", async (importOriginal) => ({
-  ...await importOriginal<typeof import("./threadRecentItems")>(),
+  ...(await importOriginal<typeof import("./threadRecentItems")>()),
   useThreadRecentItems: () => recentItems,
 }));
 
 beforeEach(() => {
-  vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(
+    () => {},
+  );
 });
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -73,38 +97,53 @@ function mountPage({
               onGlobalTabReorder={() => {}}
               onToggleFullScreen={() => {}}
               panelStateId="new-tab-items"
-              tabs={[{ id: "new-tab", label: "New tab", restoresPlacementAfterRemoval: false }]}
-              renderPane={() => selected ? (
-                <NewTabPage
-                  autoFocus={false}
-                  currentThreadId="thr_new_tab_items"
-                  environmentId="env_1"
-                  projectId="proj_1"
-                  onAutoFocusHandled={() => {}}
-                  onSelect={onSelect}
-                  onStartTerminal={onStartTerminal}
-                  startTerminalDisabled={disabled}
-                  pluginActions={[{
-                    id: "side-chat",
-                    pluginId: "side-chat",
-                    icon: null,
-                    title: "Start side chat",
-                    onSelect: onStartSideChat,
-                  }]}
-                />
-              ) : <input aria-label="Editor" />}
+              tabs={[
+                {
+                  id: "new-tab",
+                  label: "New tab",
+                  restoresPlacementAfterRemoval: false,
+                },
+              ]}
+              renderPane={() =>
+                selected ? (
+                  <NewTabPage
+                    autoFocus={false}
+                    currentThreadId="thr_new_tab_items"
+                    environmentId="env_1"
+                    projectId="proj_1"
+                    onAutoFocusHandled={() => {}}
+                    onSelect={onSelect}
+                    onStartTerminal={onStartTerminal}
+                    startTerminalDisabled={disabled}
+                    pluginActions={[
+                      {
+                        id: "side-chat",
+                        pluginId: "side-chat",
+                        icon: null,
+                        title: "Start side chat",
+                        onSelect: onStartSideChat,
+                      },
+                    ]}
+                  />
+                ) : (
+                  <input aria-label="Editor" />
+                )
+              }
             />
           </TooltipProvider>
         </SidebarProvider>
       </AppCommandProvider>
     </Wrapper>,
   );
+
   return onSelect;
 }
 
 function move(key: "ArrowUp" | "ArrowDown") {
   const target = document.activeElement;
+
   if (!target) throw new Error("Missing focus target");
+
   return fireEvent.keyDown(target, { key, ctrlKey: true, shiftKey: true });
 }
 
@@ -115,15 +154,21 @@ it("moves focus through search, actions and recents, skipping reorder handles", 
   const sideChat = screen.getByRole("button", { name: "Start side chat" });
   const [firstRecent, lastRecent] = screen.getAllByRole("option");
   act(() => search.focus());
+
   for (const target of [terminal, sideChat, firstRecent, lastRecent, search]) {
     expect(move("ArrowDown")).toBe(false);
     expect(document.activeElement).toBe(target);
   }
+
   move("ArrowUp");
   expect(document.activeElement).toBe(lastRecent);
   expect(lastRecent?.getAttribute("aria-selected")).toBe("true");
+
   if (lastRecent) fireEvent.click(lastRecent);
-  expect(onSelect).toHaveBeenCalledWith({ source: "workspace", path: "README.md" });
+  expect(onSelect).toHaveBeenCalledWith({
+    source: "workspace",
+    path: "README.md",
+  });
 });
 
 it("skips disabled actions and follows the rendered search state", () => {
@@ -131,7 +176,9 @@ it("skips disabled actions and follows the rendered search state", () => {
   const search = screen.getByRole("combobox");
   act(() => search.focus());
   move("ArrowDown");
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Start side chat" }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Start side chat" }),
+  );
   act(() => search.focus());
   fireEvent.change(search, { target: { value: "no matching files" } });
   move("ArrowDown");
@@ -146,8 +193,12 @@ it("searches actions and opens the selected match with Enter", () => {
   mountPage({ onStartTerminal, onStartSideChat });
   const search = screen.getByRole("combobox");
   fireEvent.change(search, { target: { value: "terminal" } });
-  expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Start terminal"]);
-  expect(search.getAttribute("aria-activedescendant")).toBe("file-search-result-start-terminal");
+  expect(
+    screen.getAllByRole("option").map((option) => option.textContent),
+  ).toEqual(["Start terminal"]);
+  expect(search.getAttribute("aria-activedescendant")).toBe(
+    "file-search-result-start-terminal",
+  );
   fireEvent.keyDown(search, { key: "Enter" });
   expect(onStartTerminal).toHaveBeenCalledOnce();
 
@@ -175,10 +226,13 @@ it("shows disabled matching actions without selecting them", () => {
 it.each([
   { canNavigateTabs: false, selected: true },
   { canNavigateTabs: true, selected: false },
-])("leaves focus alone when the active panel has no navigable New tab page: %j", (options) => {
-  mountPage(options);
-  const input = screen.getByRole(options.selected ? "combobox" : "textbox");
-  act(() => input.focus());
-  move("ArrowDown");
-  expect(document.activeElement).toBe(input);
-});
+])(
+  "leaves focus alone when the active panel has no navigable New tab page: %j",
+  (options) => {
+    mountPage(options);
+    const input = screen.getByRole(options.selected ? "combobox" : "textbox");
+    act(() => input.focus());
+    move("ArrowDown");
+    expect(document.activeElement).toBe(input);
+  },
+);

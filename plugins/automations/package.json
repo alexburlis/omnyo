@@ -1,43 +1,56 @@
 {
-  "name": "bb-plugin-automations",
+  "name": "omnyo-plugin-automations",
   "version": "0.1.0",
   "description": "Schedule recurring and one-shot agent or script work.",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/automations"
+  },
   "private": true,
   "type": "module",
-  "engines": {
-    "bb": ">=0.0",
-    "bbPluginSdk": ">=0.6.0"
+  "exports": {
+    "./workflow-package": "./src/workflow-package.ts"
   },
-  "bb": {
+  "engines": {
+    "omnyo": ">=1.0.129",
+    "omnyoPluginSdk": ">=0.6.0 >=0.6.44"
+  },
+  "omnyo": {
     "name": "Automations",
     "description": "Schedule recurring and one-shot agent or script work.",
     "branding": {
       "icon": "Repeat"
     },
     "server": "./src/server.ts",
+    "host": "./src/host.ts",
     "app": "./app.tsx",
     "skills": [
       "skills"
     ]
   },
   "keywords": [
-    "bb-plugin"
+    "omnyo-plugin"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
     "test": "vitest run --config vitest.config.ts",
-    "prepare:bundled": "bb-plugin-build prepare-bundled"
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
   },
   "dependencies": {
-    "@bb/shared-ui": "workspace:*",
+    "@omnyo/shared-ui": "workspace:*",
     "cron-parser": "^5.5.0",
     "cronstrue": "^3.14.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@bb/plugin-build": "workspace:*",
-    "@get-bb/plugin-sdk": "workspace:*",
+    "@omnyo/plugin-build": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/better-sqlite3": "^7.6.12",
@@ -45,13 +58,13 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "better-sqlite3": "12.10.0",
-    "hono": "4.11.9",
+    "hono": "4.13.18",
     "jsdom": "^29.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sonner": "^1.7.4",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^4.1.1"
+    "vitest": "4.1.11"
   }
 }

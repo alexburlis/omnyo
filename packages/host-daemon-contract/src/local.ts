@@ -1,13 +1,16 @@
 import type { Hono } from "hono";
 import { hc } from "hono/client";
 import { z } from "zod";
-import type { EmptyInput, Endpoint } from "@bb/hono-typed-routes";
+import type { EmptyInput, Endpoint } from "@omnyo/hono-typed-routes";
 
 export const DEFAULT_HOST_DAEMON_LOCAL_HEALTH_PATH = "/health";
+
 export const DEFAULT_HOST_DAEMON_LOCAL_BIND_HOST = "127.0.0.1";
+
 export const DEFAULT_HOST_DAEMON_LOCAL_HEALTH_VALUE = "ok";
 
 export const workspaceOpenTargetIdSchema = z.string().trim().min(1).max(200);
+
 export type WorkspaceOpenTargetId = z.infer<typeof workspaceOpenTargetIdSchema>;
 
 const workspaceOpenTargetCapabilitiesSchema = z.object({
@@ -16,6 +19,7 @@ const workspaceOpenTargetCapabilitiesSchema = z.object({
   openFileAtLine: z.boolean(),
   openFileAtColumn: z.boolean().optional(),
 });
+
 export type WorkspaceOpenTargetCapabilities = z.infer<
   typeof workspaceOpenTargetCapabilitiesSchema
 >;
@@ -27,7 +31,9 @@ const workspaceOpenTargetKindValues = [
   "default-app",
   "native-app",
 ] as const;
+
 const workspaceOpenTargetKindSchema = z.enum(workspaceOpenTargetKindValues);
+
 export type WorkspaceOpenTargetKind = z.infer<
   typeof workspaceOpenTargetKindSchema
 >;
@@ -58,6 +64,7 @@ const workspaceOpenTargetIconSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
 export type WorkspaceOpenTargetIcon = z.infer<
   typeof workspaceOpenTargetIconSchema
 >;
@@ -70,11 +77,13 @@ export const workspaceOpenTargetSchema = z.object({
   capabilities: workspaceOpenTargetCapabilitiesSchema,
   remoteSshCapabilities: workspaceOpenTargetCapabilitiesSchema.optional(),
 });
+
 export type WorkspaceOpenTarget = z.infer<typeof workspaceOpenTargetSchema>;
 
 export const workspaceOpenTargetsResponseSchema = z.object({
   targets: z.array(workspaceOpenTargetSchema),
 });
+
 type WorkspaceOpenTargetsResponse = z.infer<
   typeof workspaceOpenTargetsResponseSchema
 >;
@@ -82,12 +91,15 @@ type WorkspaceOpenTargetsResponse = z.infer<
 export const workspaceOpenTargetsQuerySchema = z.object({
   path: z.string().min(1).optional(),
 });
+
 export type WorkspaceOpenTargetsQuery = z.infer<
   typeof workspaceOpenTargetsQuerySchema
 >;
 
 const openTargetPathSchema = z.string().min(1);
+
 const openTargetLineNumberSchema = z.number().int().positive().nullable();
+
 const openTargetColumnNumberSchema = z.number().int().positive().nullable();
 
 const openInTargetLocalContextSchema = z
@@ -108,6 +120,7 @@ const openInTargetContextSchema = z.discriminatedUnion("kind", [
   openInTargetLocalContextSchema,
   openInTargetRemoteSshContextSchema,
 ]);
+
 export type OpenInTargetContext = z.infer<typeof openInTargetContextSchema>;
 
 export const openInTargetRequestSchema = z.object({
@@ -117,11 +130,13 @@ export const openInTargetRequestSchema = z.object({
   path: openTargetPathSchema,
   targetId: workspaceOpenTargetIdSchema,
 });
+
 export type OpenInTargetRequest = z.infer<typeof openInTargetRequestSchema>;
 
 export const pickFolderResponseSchema = z.object({
   path: z.string().nullable(),
 });
+
 export type PickFolderResponse = z.infer<typeof pickFolderResponseSchema>;
 
 export const PATHS_EXIST_MAX_PATHS = 200;
@@ -133,11 +148,13 @@ export const pathsExistRequestSchema = z.object({
     .max(PATHS_EXIST_MAX_PATHS)
     .transform((paths) => Array.from(new Set(paths))),
 });
+
 export type PathsExistRequest = z.infer<typeof pathsExistRequestSchema>;
 
 export const pathsExistResponseSchema = z.object({
   existence: z.record(z.string(), z.boolean()),
 });
+
 export type PathsExistResponse = z.infer<typeof pathsExistResponseSchema>;
 
 export const hostPlatformSchema = z.enum([
@@ -147,6 +164,7 @@ export const hostPlatformSchema = z.enum([
   "win32",
   "unknown",
 ]);
+
 export type HostPlatform = z.infer<typeof hostPlatformSchema>;
 
 export const statusResponseSchema = z.object({
@@ -157,15 +175,19 @@ export const statusResponseSchema = z.object({
   supportsNativeFolderPicker: z.boolean(),
   platform: hostPlatformSchema,
 });
+
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
 
 export const healthResponseSchema = z.string().min(1);
+
 type HealthResponse = z.infer<typeof healthResponseSchema>;
 
 const providerCliKeySchema = z.string().min(1);
+
 export type ProviderCliKey = z.infer<typeof providerCliKeySchema>;
 
 const providerCliInstallOutputStreamValues = ["stdout", "stderr"] as const;
+
 const providerCliInstallOutputStreamSchema = z.enum(
   providerCliInstallOutputStreamValues,
 );
@@ -175,12 +197,15 @@ const providerCliInstallSourceValues = [
   "npmGlobal",
   "external",
 ] as const;
+
 const providerCliInstallSourceSchema = z.enum(providerCliInstallSourceValues);
 
 const providerCliInstallActionKindValues = ["install", "update"] as const;
+
 export const providerCliInstallActionKindSchema = z.enum(
   providerCliInstallActionKindValues,
 );
+
 export type ProviderCliInstallActionKind = z.infer<
   typeof providerCliInstallActionKindSchema
 >;
@@ -190,6 +215,7 @@ const providerCliInstallActionSchema = z.object({
   label: z.enum(["Install", "Update"]),
   command: z.string().min(1),
 });
+
 export type ProviderCliInstallAction = z.infer<
   typeof providerCliInstallActionSchema
 >;
@@ -209,12 +235,14 @@ const providerCliStatusSchema = z.object({
   needsUpdate: z.boolean(),
   versionUnsupported: z.boolean(),
 });
+
 export type ProviderCliStatus = z.infer<typeof providerCliStatusSchema>;
 
 export const providerCliStatusResponseSchema = z.record(
   z.string().min(1),
   providerCliStatusSchema,
 );
+
 export type ProviderCliStatusResponse = z.infer<
   typeof providerCliStatusResponseSchema
 >;
@@ -222,7 +250,9 @@ export type ProviderCliStatusResponse = z.infer<
 export const providerCliInstallRequestSchema = z.object({
   provider: providerCliKeySchema,
   actionKind: providerCliInstallActionKindSchema,
+  confirmInterruptingThreads: z.boolean().optional(),
 });
+
 export type ProviderCliInstallRequest = z.infer<
   typeof providerCliInstallRequestSchema
 >;
@@ -252,6 +282,26 @@ const providerCliInstallErrorEventSchema = z.object({
   type: z.literal("error"),
   provider: providerCliKeySchema,
   message: z.string().min(1),
+  code: z.string().min(1).optional(),
+});
+
+const providerCliInstallPhaseSchema = z.enum([
+  "pausing",
+  "waiting-for-host",
+  "installing",
+  "verifying",
+  "resuming",
+]);
+
+export type ProviderCliInstallPhase = z.infer<
+  typeof providerCliInstallPhaseSchema
+>;
+
+const providerCliInstallProgressEventSchema = z.object({
+  type: z.literal("progress"),
+  provider: providerCliKeySchema,
+  phase: providerCliInstallPhaseSchema,
+  message: z.string().min(1),
 });
 
 export const providerCliInstallEventSchema = z.discriminatedUnion("type", [
@@ -259,7 +309,9 @@ export const providerCliInstallEventSchema = z.discriminatedUnion("type", [
   providerCliInstallOutputEventSchema,
   providerCliInstallCompletedEventSchema,
   providerCliInstallErrorEventSchema,
+  providerCliInstallProgressEventSchema,
 ]);
+
 export type ProviderCliInstallEvent = z.infer<
   typeof providerCliInstallEventSchema
 >;
@@ -286,5 +338,6 @@ type HostDaemonLocalRoutes = Hono<{}, HostDaemonLocalSchema, "/">;
 
 export function createHostDaemonLocalClient(baseUrl: string) {
   const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
+
   return hc<HostDaemonLocalRoutes>(normalizedBaseUrl);
 }

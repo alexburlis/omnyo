@@ -1,4 +1,4 @@
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import type {
   EventProjectionMessage,
   EventProjection,
@@ -6,8 +6,12 @@ import type {
   EventProjectionTurn,
   EventProjectionTurnStatus,
 } from "./event-projection-types.js";
-import { requireThreadEventScopeTurnId } from "@bb/domain";
+import {
+  getThreadEventScopeTurnId,
+  requireThreadEventScopeTurnId,
+} from "@omnyo/domain";
 import { assertNever } from "./assert-never.js";
+import { normalizeTurnGitActivity } from "./turn-git-activity.js";
 import type { EventMeta } from "./event-decode.js";
 import {
   assertTerminalMessageIncludedInMessages,
@@ -15,6 +19,7 @@ import {
 } from "./apply-turn-message-detail.js";
 import { findLastTerminalTimelineMessage } from "./timeline-message-helpers.js";
 import { isExternalUserBoundaryForTurn } from "./external-user-boundaries.js";
+import { isHumanThreadInput } from "./user-message-source.js";
 
 export interface ThreadEventWithMeta {
   event: ThreadEvent;
@@ -22,6 +27,7 @@ export interface ThreadEventWithMeta {
 }
 
 type TurnCompletedEvent = Extract<ThreadEvent, { type: "turn/completed" }>;
+
 type TurnStartedEvent = Extract<ThreadEvent, { type: "turn/started" }>;
 
 interface ProjectionTurnDraft {
@@ -39,8 +45,84 @@ interface ProjectionTurnBoundsUpdate {
 }
 
 interface GroupEventProjectionTurnsArgs {
+  delegatedTurnIds: ReadonlySet<string>;
   events: ThreadEventWithMeta[];
   messages: EventProjectionMessage[];
+}
+
+export interface TimelineProjectionDiagnostic {
+  operation: "timeline-read";
+  stage: "execute";
+  failureClass: "internal";
+  outcome: "terminal";
+  reason: "missing-turn-start";
+  source: "turn/completed" | "turn/input/accepted" | "message";
+  projectionEventCount: number;
+  projectionMessageCount: number;
+  projectionStartSequence: number;
+  projectionEndSequence: number;
+  failureSequence: number;
+  turnEventCount: number;
+  turnStartCount: number;
+  eventsOrdered: boolean;
+  storedStart:
+    | "unknown"
+    | "missing"
+    | "before-window"
+    | "in-window"
+    | "after-failure";
+  storedStartSequence?: number;
+}
+
+export class MissingProjectionTurnStartedError extends Error {
+  readonly diagnostic: TimelineProjectionDiagnostic;
+
+  constructor(
+    readonly threadId: string,
+    readonly turnId: string,
+    source: TimelineProjectionDiagnostic["source"],
+    failureSequence: number,
+    args: GroupEventProjectionTurnsArgs,
+  ) {
+    super("Timeline projection is missing turn/started");
+    let projectionStartSequence = failureSequence;
+    let projectionEndSequence = failureSequence;
+    let turnEventCount = 0;
+    let turnStartCount = 0;
+    let previousSequence = 0;
+    let eventsOrdered = true;
+
+    for (const { event, meta } of args.events) {
+      projectionStartSequence = Math.min(projectionStartSequence, meta.seq);
+      projectionEndSequence = Math.max(projectionEndSequence, meta.seq);
+
+      if (meta.seq < previousSequence) eventsOrdered = false;
+      previousSequence = meta.seq;
+
+      if (getThreadEventScopeTurnId(event.scope) !== turnId) continue;
+      turnEventCount += 1;
+
+      if (event.type === "turn/started") turnStartCount += 1;
+    }
+
+    this.diagnostic = {
+      operation: "timeline-read",
+      stage: "execute",
+      failureClass: "internal",
+      outcome: "terminal",
+      reason: "missing-turn-start",
+      source,
+      projectionEventCount: args.events.length,
+      projectionMessageCount: args.messages.length,
+      projectionStartSequence,
+      projectionEndSequence,
+      failureSequence,
+      turnEventCount,
+      turnStartCount,
+      eventsOrdered,
+      storedStart: "unknown",
+    };
+  }
 }
 
 interface TurnEntryDraft {
@@ -63,6 +145,7 @@ export function getOrderedThreadEvents(
   events: readonly ThreadEventWithMeta[],
 ): ThreadEventWithMeta[] {
   let areEventsOrdered = true;
+
   for (let index = 1; index < events.length; index += 1) {
     if (events[index - 1].meta.seq > events[index].meta.seq) {
       areEventsOrdered = false;
@@ -98,6 +181,7 @@ function createProjectionTurn(
     type: event.type,
     scope: event.scope,
   });
+
   return {
     completionSequence: null,
     messages: [],
@@ -112,6 +196,7 @@ function createProjectionTurn(
       completedAt: null,
       status: "pending",
       summaryCount: 0,
+      gitActivity: null,
     },
   };
 }
@@ -161,10 +246,10 @@ function addProjectionTurnMessage(
   });
 }
 
-function isInteractionLifecycleMessage(
-  message: EventProjectionMessage,
-): boolean {
+function canGroupThreadMessageInTurn(message: EventProjectionMessage): boolean {
   switch (message.kind) {
+    case "operation":
+      return message.opType === "warning" || message.opType === "deprecation";
     case "permission-grant-lifecycle":
     case "plugin-form-lifecycle":
     case "user-question-lifecycle":
@@ -174,25 +259,30 @@ function isInteractionLifecycleMessage(
   }
 }
 
-function findTurnRunningAtSequence(
+function findRootTurnRunningAtSequence(
   turnsById: ReadonlyMap<string, ProjectionTurnDraft>,
+  delegatedTurnIds: ReadonlySet<string>,
   sequence: number,
 ): ProjectionTurnDraft | null {
   let running: ProjectionTurnDraft | null = null;
-  for (const draft of turnsById.values()) {
-    if (draft.startedSequence >= sequence) {
+
+  for (const [turnId, draft] of turnsById) {
+    if (delegatedTurnIds.has(turnId) || draft.startedSequence >= sequence) {
       continue;
     }
+
     if (
       draft.completionSequence !== null &&
       draft.completionSequence < sequence
     ) {
       continue;
     }
+
     if (running === null || draft.startedSequence > running.startedSequence) {
       running = draft;
     }
   }
+
   return running;
 }
 
@@ -201,7 +291,7 @@ function applyExternalUserBoundaries(
   messages: EventProjectionMessage[],
 ): void {
   const userMessages = messages.flatMap((message) =>
-    message.kind === "user" && message.initiator === "user"
+    message.kind === "user" && isHumanThreadInput(message)
       ? [
           {
             sequence: message.sourceSeqStart,
@@ -210,18 +300,22 @@ function applyExternalUserBoundaries(
         ]
       : [],
   );
+
   for (const [turnId, draft] of turnsById) {
     const span = {
       completionSequence: draft.completionSequence,
       sequenceStart: draft.turn.sourceSeqStart,
       turnId,
     };
+
     const boundarySeqs = new Set<number>();
+
     for (const message of userMessages) {
       if (isExternalUserBoundaryForTurn(span, message)) {
         boundarySeqs.add(message.sequence);
       }
     }
+
     if (boundarySeqs.size > 0) {
       draft.turn.externalUserBoundarySeqs = [...boundarySeqs].sort(
         (left, right) => left - right,
@@ -242,6 +336,7 @@ function createEventProjectionEntry(
   }
 
   const turnDraft = turnsById.get(draft.turnId);
+
   if (!turnDraft) {
     throw new Error(
       `Cannot build timeline projection for missing turn ${draft.turnId}`,
@@ -249,6 +344,7 @@ function createEventProjectionEntry(
   }
 
   const terminalMessage = findLastTerminalTimelineMessage(turnDraft.messages);
+
   const turn: EventProjectionTurn = {
     ...turnDraft.turn,
     summaryCount: getProjectionSummaryCount(
@@ -257,10 +353,13 @@ function createEventProjectionEntry(
     ),
     messages: turnDraft.messages,
   };
+
   if (terminalMessage) {
     turn.terminalMessage = terminalMessage;
   }
+
   assertTerminalMessageIncludedInMessages(turn);
+
   return {
     kind: "turn",
     turn,
@@ -286,9 +385,11 @@ export function groupEventProjectionTurns(
         type: event.type,
         scope: event.scope,
       });
+
       if (turnsById.has(turnId)) {
         continue;
       }
+
       turnsById.set(turnId, createProjectionTurn(event, meta));
       entryDrafts.push({
         kind: "turn",
@@ -304,13 +405,31 @@ export function groupEventProjectionTurns(
         type: event.type,
         scope: event.scope,
       });
+
       const existing = turnsById.get(turnId);
+
       if (!existing) {
-        throw new Error(
-          `Timeline projection found turn/completed without turn/started for ${turnId}`,
+        throw new MissingProjectionTurnStartedError(
+          event.threadId,
+          turnId,
+          "turn/completed",
+          meta.seq,
+          args,
         );
       }
+
       updateProjectionTurnCompletion(existing, event, meta);
+      continue;
+    }
+
+    if (event.type === "system/git-activity") {
+      const turnId = getThreadEventScopeTurnId(event.scope);
+      const existing = turnId === undefined ? undefined : turnsById.get(turnId);
+
+      if (existing) {
+        existing.turn.gitActivity = normalizeTurnGitActivity(event.activity);
+      }
+
       continue;
     }
 
@@ -319,15 +438,23 @@ export function groupEventProjectionTurns(
         type: event.type,
         scope: event.scope,
       });
+
       const existing = turnsById.get(turnId);
+
       if (!existing) {
-        throw new Error(
-          `Timeline projection found turn/input/accepted without turn/started for ${turnId}`,
+        throw new MissingProjectionTurnStartedError(
+          event.threadId,
+          turnId,
+          "turn/input/accepted",
+          meta.seq,
+          args,
         );
       }
+
       const clientRequestMeta = clientRequestMetaById.get(
         event.clientRequestId,
       );
+
       if (clientRequestMeta) {
         updateProjectionTurnBounds(existing, {
           threadId: event.threadId,
@@ -341,13 +468,19 @@ export function groupEventProjectionTurns(
 
   for (const message of args.messages) {
     if (message.scope.kind === "thread") {
-      const runningTurn = isInteractionLifecycleMessage(message)
-        ? findTurnRunningAtSequence(turnsById, message.sourceSeqStart)
+      const runningTurn = canGroupThreadMessageInTurn(message)
+        ? findRootTurnRunningAtSequence(
+            turnsById,
+            args.delegatedTurnIds,
+            message.sourceSeqStart,
+          )
         : null;
+
       if (runningTurn !== null) {
         addProjectionTurnMessage(runningTurn, message);
         continue;
       }
+
       entryDrafts.push({
         kind: "projected-message",
         message,
@@ -359,9 +492,14 @@ export function groupEventProjectionTurns(
 
     const turnId = message.scope.turnId;
     const turnDraft = turnsById.get(turnId);
+
     if (!turnDraft) {
-      throw new Error(
-        `Timeline projection found message ${message.id} for turn ${turnId} without turn/started`,
+      throw new MissingProjectionTurnStartedError(
+        message.threadId,
+        turnId,
+        "message",
+        message.sourceSeqStart,
+        args,
       );
     }
 
@@ -374,9 +512,11 @@ export function groupEventProjectionTurns(
     if (left.sourceSeqStart !== right.sourceSeqStart) {
       return left.sourceSeqStart - right.sourceSeqStart;
     }
+
     if (left.createdAt !== right.createdAt) {
       return left.createdAt - right.createdAt;
     }
+
     return 0;
   });
 

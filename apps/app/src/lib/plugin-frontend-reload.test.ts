@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import type { PluginComposerThreadRowStatus } from "@get-bb/plugin-sdk";
-import { QueryClient } from "@tanstack/react-query";
+import type { PluginComposerThreadRowStatus } from "@omnyo/plugin-sdk";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -20,6 +20,7 @@ import {
   fetchFrontendCandidates,
   reconcilePluginFrontends,
   type PluginFrontendCandidate,
+  type PluginFrontendInventoryEntry,
   type PluginFrontendReconcileDeps,
 } from "./plugin-frontend";
 import { resetPluginCssForTest, retainPluginCss } from "./plugin-css";
@@ -34,11 +35,16 @@ import {
   getPluginThreadRowStatus,
   resetPluginThreadRowStatusesForTest,
 } from "./plugin-thread-row-status";
+import {
+  clearPluginThreadRowSubtitles,
+  getPluginThreadRowSubtitle,
+} from "./plugin-thread-row-subtitle";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import { PLUGIN_PANEL_ROUTE_PATH } from "./route-paths";
 import { applyAppThemeCss } from "./themes";
 import { PluginPanelView } from "@/views/PluginPanelView";
 import { makeInstalledPlugin } from "@/test/fixtures/plugins";
+import { pluginListQueryOptions } from "@/hooks/queries/plugin-settings-queries";
 
 function candidate(
   pluginId: string,
@@ -89,6 +95,7 @@ afterEach(() => {
 
 function MountedHomepageSections() {
   const { homepageSections } = usePluginSlots();
+
   return createElement(
     "div",
     null,
@@ -105,7 +112,7 @@ function MountedHomepageSections() {
 }
 
 interface TestReconcileDeps extends PluginFrontendReconcileDeps {
-  fetchCandidates: Mock<() => Promise<PluginFrontendCandidate[]>>;
+  fetchCandidates: Mock<() => Promise<PluginFrontendInventoryEntry[]>>;
   importModule: Mock<(url: string) => Promise<unknown>>;
   removeRegistrations: Mock<typeof removePluginSlotRegistrations>;
   setRegistrations: Mock<typeof setPluginSlotRegistrations>;
@@ -114,7 +121,7 @@ interface TestReconcileDeps extends PluginFrontendReconcileDeps {
 function makeDeps(initial: PluginFrontendCandidate[] = []): TestReconcileDeps {
   return {
     fetchCandidates: vi.fn(
-      async (): Promise<PluginFrontendCandidate[]> => initial,
+      async (): Promise<PluginFrontendInventoryEntry[]> => initial,
     ),
     importModule: vi.fn(async (_url: string): Promise<unknown> =>
       pluginModule("hello"),
@@ -138,6 +145,7 @@ describe("reconcilePluginFrontends", () => {
       const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false } },
       });
+
       vi.stubGlobal(
         "fetch",
         vi.fn(
@@ -166,8 +174,79 @@ describe("reconcilePluginFrontends", () => {
     },
   );
 
+  it.each([
+    {
+      cancelledBy: "its last observer unmounting",
+      start: (queryClient: QueryClient) => {
+        const observer = new QueryObserver(
+          queryClient,
+          pluginListQueryOptions({ enabled: true }),
+        );
+
+        const unsubscribe = observer.subscribe(() => {});
+
+        return () => unsubscribe();
+      },
+    },
+    {
+      cancelledBy: "cancelQueries",
+      start: (queryClient: QueryClient) => () =>
+        void queryClient.cancelQueries(),
+    },
+  ])(
+    "fetches frontend candidates again when the shared plugin list fetch is cancelled by $cancelledBy",
+    async ({ start }) => {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+
+      const fetchMock = vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            if (fetchMock.mock.calls.length === 1) {
+              init?.signal?.addEventListener("abort", () =>
+                reject(new DOMException("Aborted", "AbortError")),
+              );
+
+              return;
+            }
+
+            resolve(
+              new Response(
+                JSON.stringify({
+                  plugins: [
+                    makeInstalledPlugin({
+                      id: "account-pool",
+                      app: {
+                        hasApp: true,
+                        bundle: candidate("account-pool", "v1").bundle,
+                      },
+                    }),
+                  ],
+                }),
+                { headers: { "content-type": "application/json" } },
+              ),
+            );
+          }),
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+
+      const cancel = start(queryClient);
+      const candidates = fetchFrontendCandidates(queryClient);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      cancel();
+
+      await expect(candidates).resolves.toEqual([
+        candidate("account-pool", "v1"),
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it("re-imports a plugin exactly once when its bundle hash changes, replacing registrations wholesale", async () => {
     const state = createPluginFrontendReconcileState();
+
     const deps = makeDeps([
       candidate("hello", "aaa"),
       candidate("other", "s1", { cssUrl: null }),
@@ -198,6 +277,7 @@ describe("reconcilePluginFrontends", () => {
       expect.objectContaining({
         homepageSections: [expect.objectContaining({ id: "section" })],
       }),
+      "bbb",
     );
     expect(deps.resetCrashedSlots).toHaveBeenCalledWith("hello");
     expect(deps.applyCss).toHaveBeenCalledWith(
@@ -218,6 +298,7 @@ describe("reconcilePluginFrontends", () => {
     );
 
     const done = reconcilePluginFrontends(state, deps);
+
     for (let tick = 0; tick < 20; tick++) await Promise.resolve();
     expect(deps.applyCss).toHaveBeenCalledWith(
       "hello",
@@ -230,17 +311,20 @@ describe("reconcilePluginFrontends", () => {
     expect(deps.setRegistrations).toHaveBeenCalledWith(
       "hello",
       expect.anything(),
+      "aaa",
     );
   });
 
   it("reloading twice leaves exactly one homepage section registered (design §9 exit criterion)", async () => {
     resetPluginSlotStoreForTest();
     const state = createPluginFrontendReconcileState();
+
     const fetchCandidates = vi.fn(
       async (): Promise<PluginFrontendCandidate[]> => [
         candidate("hello", "v1"),
       ],
     );
+
     const deps: PluginFrontendReconcileDeps = {
       fetchCandidates,
       importModule: async () => pluginModule("hello"),
@@ -287,9 +371,11 @@ describe("reconcilePluginFrontends", () => {
           title: "Cold panel",
           component: ({ subPath }) => {
             const prepared = document.head.querySelector(
-              'link[data-bb-plugin-css-preload="hello"], link[data-bb-plugin-css="hello"]',
+              'link[data-omnyo-plugin-css-preload="hello"], link[data-omnyo-plugin-css="hello"]',
             );
+
             preparedDuringRender(prepared?.getAttribute("href") ?? null);
+
             return createElement("div", null, `cold panel body:${subPath}`);
           },
         });
@@ -323,12 +409,19 @@ describe("reconcilePluginFrontends", () => {
       await reconcilePluginFrontends(state, deps);
     });
 
+    expect(preparedDuringRender).not.toHaveBeenCalled();
+    act(() => {
+      document.head
+        .querySelector('link[data-omnyo-plugin-css="hello"]')
+        ?.dispatchEvent(new Event("load"));
+    });
+
     expect(preparedDuringRender).toHaveBeenCalledWith(
       "/api/v1/plugins/hello/assets/app.css?h=cold",
     );
     expect(container.textContent).toContain("cold panel body:notes/today.md");
     expect(
-      document.head.querySelector('link[data-bb-plugin-css="hello"]'),
+      document.head.querySelector('link[data-omnyo-plugin-css="hello"]'),
     ).not.toBeNull();
 
     act(() => root.unmount());
@@ -339,9 +432,12 @@ describe("reconcilePluginFrontends", () => {
     const state = createPluginFrontendReconcileState();
     const deps = makeDeps([candidate("shell-owner", "v1")]);
     const events: string[] = [];
+
     const stylesheetIsActive = () =>
-      document.head.querySelector('link[data-bb-plugin-css="shell-owner"]') !==
-      null;
+      document.head.querySelector(
+        'link[data-omnyo-plugin-css="shell-owner"]',
+      ) !== null;
+
     deps.applyCss = applyPluginCss;
     deps.retainCss = retainPluginCss;
     deps.importModule.mockResolvedValue(
@@ -350,6 +446,7 @@ describe("reconcilePluginFrontends", () => {
           id: "shell-dom",
           mount() {
             events.push(`mount:${stylesheetIsActive()}`);
+
             return () => {
               events.push(`dispose:${stylesheetIsActive()}`);
             };
@@ -377,6 +474,7 @@ describe("reconcilePluginFrontends", () => {
     deps.removeRegistrations = vi.fn(removePluginSlotRegistrations);
     deps.importModule.mockImplementation(async (url: string) => {
       const version = /[?&]h=([^&]+)/.exec(url)?.[1] ?? "unknown";
+
       return {
         default: definePluginApp((app) => {
           app.slots.homepageSection({
@@ -388,11 +486,13 @@ describe("reconcilePluginFrontends", () => {
         }),
       };
     });
+
     const links = () => [
       ...document.head.querySelectorAll<HTMLLinkElement>(
-        'link[data-bb-plugin-css="hello"]',
+        'link[data-omnyo-plugin-css="hello"]',
       ),
     ];
+
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -401,8 +501,10 @@ describe("reconcilePluginFrontends", () => {
     await act(async () => {
       await reconcilePluginFrontends(state, deps);
     });
+    act(() => {
+      links()[0]?.dispatchEvent(new Event("load"));
+    });
     expect(container.textContent).toContain("generation v1");
-    links()[0]?.dispatchEvent(new Event("load"));
 
     deps.fetchCandidates.mockResolvedValue([candidate("hello", "v2")]);
     await act(async () => {
@@ -465,6 +567,7 @@ describe("reconcilePluginFrontends", () => {
       const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false } },
       });
+
       vi.stubGlobal(
         "fetch",
         vi.fn(
@@ -499,6 +602,7 @@ describe("reconcilePluginFrontends", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -562,9 +666,60 @@ describe("reconcilePluginFrontends", () => {
     );
     expect(deps.importModule).toHaveBeenNthCalledWith(
       2,
-      "/api/v1/plugins/hello/assets/app.js?h=v1&bb_retry=1",
+      "/api/v1/plugins/hello/assets/app.js?h=v1&omnyo_retry=1",
     );
     expect(state.records.get("hello")?.status).toBe("loaded");
+  });
+
+  it("recovers a transient thread-list import failure without another reconcile or page reload", async () => {
+    const state = createPluginFrontendReconcileState();
+    const deps = makeDeps([candidate("thread-list", "v1")]);
+    deps.setRegistrations.mockImplementation(setPluginSlotRegistrations);
+    deps.importModule
+      .mockRejectedValueOnce(
+        new TypeError("Failed to fetch dynamically imported module"),
+      )
+      .mockResolvedValue(
+        contentScriptModule((app) => {
+          app.slots.experimental_threadList({
+            id: "thread-list",
+            title: "Threads",
+            component: () => null,
+          });
+        }),
+      );
+
+    await reconcilePluginFrontends(state, deps);
+
+    expect(getPluginSlotSnapshot().threadLists).toHaveLength(1);
+    expect(state.diagnostics.get("thread-list")?.status).toBe("active");
+    expect(deps.importModule).toHaveBeenCalledTimes(2);
+    expect(deps.importModule).toHaveBeenLastCalledWith(
+      "/api/v1/plugins/thread-list/assets/app.js?h=v1&omnyo_retry=1",
+    );
+  });
+
+  it("bounds import recovery and uses new URLs on a later explicit retry", async () => {
+    const state = createPluginFrontendReconcileState();
+    const deps = makeDeps([candidate("thread-list", "v1")]);
+    deps.importModule.mockRejectedValue(new TypeError("Load failed"));
+
+    await reconcilePluginFrontends(state, deps);
+
+    expect(deps.importModule).toHaveBeenCalledTimes(2);
+    expect(state.diagnostics.get("thread-list")).toMatchObject({
+      status: "failed",
+      lastFailure: { phase: "load", message: "Load failed" },
+    });
+
+    await reconcilePluginFrontends(state, deps);
+
+    expect(deps.importModule.mock.calls.map(([url]) => url)).toEqual([
+      "/api/v1/plugins/thread-list/assets/app.js?h=v1",
+      "/api/v1/plugins/thread-list/assets/app.js?h=v1&omnyo_retry=1",
+      "/api/v1/plugins/thread-list/assets/app.js?h=v1&omnyo_retry=2",
+      "/api/v1/plugins/thread-list/assets/app.js?h=v1&omnyo_retry=3",
+    ]);
   });
 
   it("mounts once, skips repeated reconciliation, and disposes exactly once on reload and removal", async () => {
@@ -573,6 +728,7 @@ describe("reconcilePluginFrontends", () => {
     const events: string[] = [];
     deps.importModule.mockImplementation(async (url: string) => {
       const version = url.includes("h=v2") ? "v2" : "v1";
+
       return contentScriptModule((app) => {
         app.contentScripts.register({
           id: "enhance",
@@ -583,6 +739,7 @@ describe("reconcilePluginFrontends", () => {
               () => events.push(`${version}:abort`),
               { once: true },
             );
+
             return () => {
               events.push(`${version}:dispose`);
             };
@@ -615,6 +772,37 @@ describe("reconcilePluginFrontends", () => {
       "v2:abort",
       "v2:dispose",
     ]);
+  });
+
+  it("clears subtitles on deactivation and ignores retained generation setters", async () => {
+    const state = createPluginFrontendReconcileState();
+    const deps = makeDeps([candidate("glance", "v1")]);
+
+    let setter:
+      | NonNullable<
+          import("@omnyo/plugin-sdk").PluginContentScriptContext["experimental_setThreadRowSubtitle"]
+        >
+      | undefined;
+
+    deps.importModule.mockResolvedValue(
+      contentScriptModule((app) => {
+        app.contentScripts.register({
+          id: "subtitle",
+          mount(context) {
+            setter = context.experimental_setThreadRowSubtitle;
+            setter?.("thr_source", { text: "  Needs you:\n review " });
+          },
+        });
+      }),
+    );
+    await reconcilePluginFrontends(state, deps);
+    expect(getPluginThreadRowSubtitle("thr_source")).toBe("Needs you: review");
+    deps.fetchCandidates.mockResolvedValue([]);
+    await reconcilePluginFrontends(state, deps);
+    expect(getPluginThreadRowSubtitle("thr_source")).toBeNull();
+    setter?.("thr_source", { text: "Stale callback" });
+    expect(getPluginThreadRowSubtitle("thr_source")).toBeNull();
+    clearPluginThreadRowSubtitles("glance");
   });
 
   it("keeps content-script thread statuses across routes and clears them on deactivation", async () => {
@@ -650,12 +838,14 @@ describe("reconcilePluginFrontends", () => {
   it("rolls back a status from a partially mounted generation and rejects its retained setter", async () => {
     const state = createPluginFrontendReconcileState();
     const deps = makeDeps([candidate("prompt-shaper", "v1")]);
+
     let retainedSetter:
       | ((
           threadId: string,
           status: PluginComposerThreadRowStatus | null,
         ) => void)
       | undefined;
+
     deps.importModule.mockResolvedValue(
       contentScriptModule((app) => {
         app.contentScripts.register({
@@ -692,12 +882,14 @@ describe("reconcilePluginFrontends", () => {
   it("does not let a retained old-generation setter overwrite its replacement", async () => {
     const state = createPluginFrontendReconcileState();
     const deps = makeDeps([candidate("prompt-shaper", "v1")]);
+
     let oldSetter:
       | ((
           threadId: string,
           status: PluginComposerThreadRowStatus | null,
         ) => void)
       | undefined;
+
     deps.importModule.mockImplementation(async (url: string) =>
       contentScriptModule((app) => {
         app.contentScripts.register({
@@ -706,6 +898,7 @@ describe("reconcilePluginFrontends", () => {
             if (url.includes("h=v1")) {
               oldSetter = experimental_setThreadRowStatus;
             }
+
             experimental_setThreadRowStatus?.("thr_source", {
               icon: "AiContentGenerator01",
               label: url.includes("h=v1")
@@ -746,6 +939,7 @@ describe("reconcilePluginFrontends", () => {
             const setStatus = experimental_setThreadRowStatus as
               | ((threadId: unknown, status: unknown) => void)
               | undefined;
+
             setStatus?.(42, {
               icon: "AiContentGenerator01",
               label: "Invalid number id",
@@ -781,6 +975,7 @@ describe("reconcilePluginFrontends", () => {
           mount({ signal }) {
             oldSignal = signal;
             events.push("old:mount");
+
             return () => {
               events.push("old:dispose");
             };
@@ -798,12 +993,14 @@ describe("reconcilePluginFrontends", () => {
             id,
             mount() {
               events.push(`${id}:mount`);
+
               return () => {
                 events.push(`${id}:dispose`);
               };
             },
           });
         }
+
         app.contentScripts.register({
           id: "broken",
           mount() {
@@ -908,6 +1105,7 @@ describe("reconcilePluginFrontends", () => {
     expect(deps.setRegistrations).toHaveBeenCalledWith(
       "fine",
       expect.any(Object),
+      "v1",
     );
   });
 
@@ -925,6 +1123,7 @@ describe("reconcilePluginFrontends", () => {
               once: true,
             });
             await Promise.resolve();
+
             return async () => {
               events.push(`dispose:${signal.aborted}`);
               throw new Error("cleanup rejected");
@@ -948,15 +1147,18 @@ describe("reconcilePluginFrontends", () => {
     const stateB = createPluginFrontendReconcileState();
     const signals: AbortSignal[] = [];
     const cleanup = vi.fn();
+
     const module = contentScriptModule((app) => {
       app.contentScripts.register({
         id: "per-window",
         mount({ signal }) {
           signals.push(signal);
+
           return cleanup;
         },
       });
     });
+
     const depsA = makeDeps([candidate("hello", "v1")]);
     const depsB = makeDeps([candidate("hello", "v1")]);
     depsA.importModule.mockResolvedValue(module);
@@ -985,12 +1187,14 @@ describe("reconcilePluginFrontends", () => {
     const deps = makeDeps([candidate("hello", "v1")]);
     const cleanup = vi.fn();
     let resolveMount: ((dispose: () => void) => void) | undefined;
+
     let retainedSetter:
       | ((
           threadId: string,
           status: PluginComposerThreadRowStatus | null,
         ) => void)
       | undefined;
+
     deps.importModule.mockResolvedValue(
       contentScriptModule((app) => {
         app.contentScripts.register({
@@ -1002,6 +1206,7 @@ describe("reconcilePluginFrontends", () => {
               label: "Pending activation",
               tone: "running",
             });
+
             return new Promise<() => void>((resolve) => {
               resolveMount = resolve;
             });
@@ -1076,12 +1281,14 @@ describe("reconcilePluginFrontends", () => {
           id: "file-reveal-buttons",
           mount() {
             const control = document.querySelector("[data-testid='file-link']");
+
             if (
               !(control instanceof HTMLElement) ||
               control.parentNode === null
             ) {
               return;
             }
+
             const group = document.createElement("span");
             const button = document.createElement("button");
             control.parentNode.insertBefore(group, control);
@@ -1127,15 +1334,18 @@ describe("reconcilePluginFrontends", () => {
           id: "file-reveal-buttons",
           async mount() {
             await Promise.resolve();
+
             const control = document.querySelector(
               "[data-testid='async-file-link']",
             );
+
             if (
               !(control instanceof HTMLElement) ||
               control.parentNode === null
             ) {
               return;
             }
+
             const group = document.createElement("span");
             const button = document.createElement("button");
             control.parentNode.insertBefore(group, control);
@@ -1162,7 +1372,7 @@ describe("applyPluginCss", () => {
   function links(pluginId: string): HTMLLinkElement[] {
     return [
       ...document.head.querySelectorAll<HTMLLinkElement>(
-        `link[data-bb-plugin-css="${pluginId}"]`,
+        `link[data-omnyo-plugin-css="${pluginId}"]`,
       ),
     ];
   }
@@ -1170,7 +1380,7 @@ describe("applyPluginCss", () => {
   function preloads(pluginId: string): HTMLLinkElement[] {
     return [
       ...document.head.querySelectorAll<HTMLLinkElement>(
-        `link[data-bb-plugin-css-preload="${pluginId}"]`,
+        `link[data-omnyo-plugin-css-preload="${pluginId}"]`,
       ),
     ];
   }
@@ -1363,24 +1573,24 @@ describe("applyPluginCss", () => {
     ]);
   });
 
-  it("never ties app-wide bb.themes palette CSS to plugin UI mounts", async () => {
+  it("never ties app-wide omnyo.themes palette CSS to plugin UI mounts", async () => {
     vi.useFakeTimers();
     const paletteCss = ":root { --canvas: rebeccapurple; }";
     applyAppThemeCss(paletteCss);
-    const palette = document.getElementById("bb-app-theme");
+    const palette = document.getElementById("omnyo-app-theme");
     expect(palette?.textContent).toBe(paletteCss);
 
     applyPluginCss("palette-owner", "/assets/app.css?h=palette-owner");
     preloads("palette-owner")[0]?.dispatchEvent(new Event("load"));
     expect(links("palette-owner")).toHaveLength(0);
-    expect(document.getElementById("bb-app-theme")).toBe(palette);
+    expect(document.getElementById("omnyo-app-theme")).toBe(palette);
     expect(palette?.textContent).toBe(paletteCss);
 
     const release = retainPluginCss("palette-owner");
     release();
     await vi.advanceTimersByTimeAsync(1_500);
     expect(links("palette-owner")).toHaveLength(0);
-    expect(document.getElementById("bb-app-theme")).toBe(palette);
+    expect(document.getElementById("omnyo-app-theme")).toBe(palette);
     expect(palette?.textContent).toBe(paletteCss);
 
     applyAppThemeCss("");
@@ -1396,6 +1606,7 @@ describe("createPluginFrontendReconcileScheduler", () => {
   it("coalesces a burst of schedules into one run", async () => {
     vi.useFakeTimers();
     const run = vi.fn(async () => {});
+
     const scheduler = createPluginFrontendReconcileScheduler({
       run,
       debounceMs: 250,
@@ -1415,6 +1626,7 @@ describe("createPluginFrontendReconcileScheduler", () => {
     let active = 0;
     let maxActive = 0;
     let release = (): void => {};
+
     const run = vi.fn(async () => {
       active += 1;
       maxActive = Math.max(maxActive, active);
@@ -1423,6 +1635,7 @@ describe("createPluginFrontendReconcileScheduler", () => {
       });
       active -= 1;
     });
+
     const scheduler = createPluginFrontendReconcileScheduler({
       run,
       debounceMs: 250,

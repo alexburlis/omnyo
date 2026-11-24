@@ -3,8 +3,8 @@ import {
   defineCli,
   defineRpcContract,
   PluginCliError,
-  type BbPluginApi,
-} from "@get-bb/plugin-sdk";
+  type PluginApi,
+} from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import {
   defaultPreferences,
@@ -22,6 +22,7 @@ import {
 } from "./shared/preferences.js";
 
 const PREFERENCE_KV_PREFIX = "preference:";
+
 const MIGRATION_KV_KEY = "migration:ui-preferences:v1";
 
 const preferenceKeySchema = z.enum(
@@ -31,7 +32,9 @@ const preferenceKeySchema = z.enum(
 const preferenceValuesSchema = z.object(
   Object.fromEntries(
     PREFERENCE_KEYS.map((key) => [key, preferenceDefinitions[key].schema]),
-  ) as { [Key in PreferenceKey]: (typeof preferenceDefinitions)[Key]["schema"] },
+  ) as {
+    [Key in PreferenceKey]: (typeof preferenceDefinitions)[Key]["schema"];
+  },
 );
 
 export const threadListRpcContract = defineRpcContract({
@@ -40,16 +43,18 @@ export const threadListRpcContract = defineRpcContract({
     output: z.object({ preferences: preferenceValuesSchema }).strict(),
   },
   setPreference: {
-    input: z.object({ key: preferenceKeySchema, value: z.unknown() }).strict(),
-    output: z
-      .object({ key: preferenceKeySchema, value: z.unknown() })
+    input: z
+      .object({
+        key: preferenceKeySchema,
+        value: z.unknown(),
+        origin: z.string().min(1).optional(),
+      })
       .strict(),
+    output: z.object({ key: preferenceKeySchema, value: z.unknown() }).strict(),
   },
   resetPreference: {
     input: z.object({ key: preferenceKeySchema }).strict(),
-    output: z
-      .object({ key: preferenceKeySchema, value: z.unknown() })
-      .strict(),
+    output: z.object({ key: preferenceKeySchema, value: z.unknown() }).strict(),
   },
 });
 
@@ -57,17 +62,20 @@ function kvKey(key: PreferenceKey): string {
   return `${PREFERENCE_KV_PREFIX}${key}`;
 }
 
-export function createPreferenceStore(bb: BbPluginApi) {
+export function createPreferenceStore(api: PluginApi) {
   async function read<Key extends PreferenceKey>(
     key: Key,
   ): Promise<PreferenceValue<Key>> {
-    const stored = await bb.storage.kv.get<unknown>(kvKey(key));
+    const stored = await api.storage.kv.get<unknown>(kvKey(key));
+
     if (stored === undefined) return getPreferenceDefault(key);
     const parsed = parseStoredPreferenceValue(key, stored);
+
     if (parsed.success) return parsed.value;
-    bb.log.warn(
+    api.log.warn(
       `stored preference ${key} is invalid (${parsed.message}); using the default`,
     );
+
     return getPreferenceDefault(key);
   }
 
@@ -78,31 +86,42 @@ export function createPreferenceStore(bb: BbPluginApi) {
         (values as Record<PreferenceKey, unknown>)[key] = await read(key);
       }),
     );
+
     return values;
   }
 
   async function write<Key extends PreferenceKey>(
     key: Key,
     value: unknown,
+    origin: string | null,
   ): Promise<PreferenceValue<Key>> {
     const parsed = parsePreferenceValue(key, value);
+
     if (!parsed.success) {
       throw new PreferenceValidationError(key, parsed.message);
     }
-    await bb.storage.kv.set(kvKey(key), parsed.value);
-    bb.realtime.publish(PREFERENCES_CHANGED_CHANNEL, {
+
+    await api.storage.kv.set(kvKey(key), parsed.value);
+    api.realtime.publish(PREFERENCES_CHANGED_CHANNEL, {
       key,
       value: parsed.value,
+      origin,
     });
+
     return parsed.value;
   }
 
   async function reset<Key extends PreferenceKey>(
     key: Key,
   ): Promise<PreferenceValue<Key>> {
-    await bb.storage.kv.delete(kvKey(key));
+    await api.storage.kv.delete(kvKey(key));
     const value = getPreferenceDefault(key);
-    bb.realtime.publish(PREFERENCES_CHANGED_CHANNEL, { key, value });
+    api.realtime.publish(PREFERENCES_CHANGED_CHANNEL, {
+      key,
+      value,
+      origin: null,
+    });
+
     return value;
   }
 
@@ -120,42 +139,56 @@ export class PreferenceValidationError extends Error {
 }
 
 export async function migrateFromUiPreferences(
-  bb: BbPluginApi,
+  api: PluginApi,
 ): Promise<{ migrated: PreferenceKey[] }> {
-  const done = await bb.storage.kv.get<boolean>(MIGRATION_KV_KEY);
+  const done = await api.storage.kv.get<boolean>(MIGRATION_KV_KEY);
+
   if (done === true) return { migrated: [] };
   const migrated: PreferenceKey[] = [];
   let entries: Record<string, { value: unknown } | undefined>;
+
   try {
-    const response = await bb.sdk.system.uiPreferences.list();
+    const response = await api.sdk.system.uiPreferences.list();
     entries = response.preferences as Record<
       string,
       { value: unknown } | undefined
     >;
   } catch (error) {
-    bb.log.warn(
-      `could not read bb's sidebar preferences to migrate them: ${
+    api.log.warn(
+      `could not read Omnyo's sidebar preferences to migrate them: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
+
     return { migrated };
   }
+
   for (const key of PREFERENCE_KEYS) {
-    const existing = await bb.storage.kv.get<unknown>(kvKey(key));
+    const existing = await api.storage.kv.get<unknown>(kvKey(key));
+
     if (existing !== undefined) continue;
     const legacyKey = preferenceDefinitions[key].legacyKey;
+
     if (legacyKey === null) continue;
     const legacy = entries[legacyKey];
+
     if (legacy === undefined) continue;
     const parsed = parsePreferenceValue(key, legacy.value);
+
     if (!parsed.success) continue;
-    if (JSON.stringify(parsed.value) === JSON.stringify(getPreferenceDefault(key))) {
+
+    if (
+      JSON.stringify(parsed.value) === JSON.stringify(getPreferenceDefault(key))
+    ) {
       continue;
     }
-    await bb.storage.kv.set(kvKey(key), parsed.value);
+
+    await api.storage.kv.set(kvKey(key), parsed.value);
     migrated.push(key);
   }
-  await bb.storage.kv.set(MIGRATION_KV_KEY, true);
+
+  await api.storage.kv.set(MIGRATION_KV_KEY, true);
+
   return { migrated };
 }
 
@@ -180,36 +213,39 @@ const JSON_OPTION = {
   description: "Emit machine-readable JSON",
 } as const;
 
-export default async function threadListPlugin(bb: BbPluginApi) {
-  const store = createPreferenceStore(bb);
+export default async function threadListPlugin(api: PluginApi) {
+  const store = createPreferenceStore(api);
 
-  bb.rpc.register(threadListRpcContract, {
+  api.rpc.register(threadListRpcContract, {
     async listPreferences() {
       return { preferences: await store.readAll() };
     },
-    async setPreference({ key, value }) {
-      return { key, value: await store.write(key, value) };
+    async setPreference({ key, value, origin }) {
+      return { key, value: await store.write(key, value, origin ?? null) };
     },
     async resetPreference({ key }) {
       return { key, value: await store.reset(key) };
     },
   });
 
-  bb.cli.register(
+  api.cli.register(
     defineCli({
-      name: bb.pluginId,
-      summary: "Inspect and change the sidebar thread list's layout preferences",
+      name: api.pluginId,
+      summary:
+        "Inspect and change the sidebar thread list's layout preferences",
       description:
-        "Organization mode, sort, section order, hidden groups, and collapsed groups for bb's sidebar thread list. Values are JSON; a bare word is read as a string.",
+        "Organization mode, sort, section order, hidden groups, and collapsed groups for Omnyo's sidebar thread list. Values are JSON; a bare word is read as a string.",
       commands: {
         "prefs list": cliCommand({
           summary: "List every preference and its current value",
           options: { json: JSON_OPTION },
           async run(input) {
             const values = await store.readAll();
+
             if (input.options.json) {
               return { exitCode: 0, stdout: JSON.stringify(values) };
             }
+
             return {
               exitCode: 0,
               stdout: PREFERENCE_KEYS.map(
@@ -228,6 +264,7 @@ export default async function threadListPlugin(bb: BbPluginApi) {
           async run(input) {
             const key = requireCliPreferenceKey(input.positionals.key);
             const value = await store.read(key);
+
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -242,18 +279,22 @@ export default async function threadListPlugin(bb: BbPluginApi) {
             { name: "key", description: "Preference name", required: true },
             {
               name: "value",
-              description: 'JSON value, e.g. \'"machine"\' or \'["pinned","threads"]\'',
+              description:
+                'JSON value, e.g. \'"machine"\' or \'["pinned","threads"]\'',
               required: true,
             },
           ],
           options: { json: JSON_OPTION },
           async run(input) {
             const key = requireCliPreferenceKey(input.positionals.key);
+
             try {
               const value = await store.write(
                 key,
                 parseCliValue(input.positionals.value),
+                null,
               );
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -267,6 +308,7 @@ export default async function threadListPlugin(bb: BbPluginApi) {
                   hint: describePreference(key),
                 });
               }
+
               throw error;
             }
           },
@@ -280,6 +322,7 @@ export default async function threadListPlugin(bb: BbPluginApi) {
           async run(input) {
             const key = requireCliPreferenceKey(input.positionals.key);
             const value = await store.reset(key);
+
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -292,10 +335,11 @@ export default async function threadListPlugin(bb: BbPluginApi) {
     }),
   );
 
-  const { migrated } = await migrateFromUiPreferences(bb);
+  const { migrated } = await migrateFromUiPreferences(api);
+
   if (migrated.length > 0) {
-    bb.log.info(
-      `migrated sidebar preferences from bb settings: ${migrated.join(", ")}`,
+    api.log.info(
+      `migrated sidebar preferences from Omnyo settings: ${migrated.join(", ")}`,
     );
   }
 }

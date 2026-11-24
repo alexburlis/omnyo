@@ -10,8 +10,10 @@ function appendVisibleSegment(buffer: VisibleTextBuffer, text: string): void {
   if (text.length === 0) {
     return;
   }
+
   buffer.visibleChunks.push(text);
   buffer.visibleLength += text.length;
+
   if (buffer.visibleTextCache !== null) {
     buffer.visibleTextCache += text;
   }
@@ -36,9 +38,11 @@ export function appendVisibleTextBuffer(
   }
 
   const lastNewlineIndex = delta.lastIndexOf("\n");
+
   if (lastNewlineIndex === -1) {
     buffer.pendingChunks.push(delta);
     buffer.pendingLength += delta.length;
+
     return true;
   }
 
@@ -46,10 +50,12 @@ export function appendVisibleTextBuffer(
   appendVisibleSegment(buffer, delta.slice(0, lastNewlineIndex + 1));
 
   const trailingPartial = delta.slice(lastNewlineIndex + 1);
+
   if (trailingPartial.length > 0) {
     buffer.pendingChunks.push(trailingPartial);
     buffer.pendingLength += trailingPartial.length;
   }
+
   return true;
 }
 
@@ -74,6 +80,7 @@ export function setVisibleTextBuffer(
       buffer.visibleTextCache = text;
     } else {
       const lastNewlineIndex = text.lastIndexOf("\n");
+
       if (lastNewlineIndex === -1) {
         buffer.pendingChunks.push(text);
         buffer.pendingLength = text.length;
@@ -84,6 +91,7 @@ export function setVisibleTextBuffer(
         buffer.visibleTextCache = visibleText;
 
         const trailingPartial = text.slice(lastNewlineIndex + 1);
+
         if (trailingPartial.length > 0) {
           buffer.pendingChunks.push(trailingPartial);
           buffer.pendingLength = trailingPartial.length;
@@ -106,10 +114,12 @@ export function flushVisibleTextBuffer(buffer: VisibleTextBuffer): boolean {
   if (buffer.visibleTextCache !== null) {
     buffer.visibleTextCache += buffer.pendingChunks.join("");
   }
+
   buffer.visibleChunks.push(...buffer.pendingChunks);
   buffer.visibleLength += buffer.pendingLength;
   buffer.pendingChunks = [];
   buffer.pendingLength = 0;
+
   return true;
 }
 
@@ -123,9 +133,11 @@ export function getVisibleTextBufferFullText(
   buffer: VisibleTextBuffer,
 ): string {
   const visibleText = buffer.visibleTextCache ?? buffer.visibleChunks.join("");
+
   if (buffer.pendingLength === 0) {
     return visibleText;
   }
+
   return `${visibleText}${buffer.pendingChunks.join("")}`;
 }
 
@@ -135,8 +147,10 @@ export function getVisibleTextBufferText(
   if (buffer.visibleLength === 0) {
     return undefined;
   }
+
   if (buffer.visibleTextCache === null) {
     buffer.visibleTextCache = buffer.visibleChunks.join("");
   }
+
   return buffer.visibleTextCache;
 }

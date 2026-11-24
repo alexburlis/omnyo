@@ -4,7 +4,7 @@ import {
   type AppDefaultKeybindings,
   type AppKeybindingOverrides,
   type AppKeybindings,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { APP_COMMAND_GROUPS } from "./app-command-metadata";
 import {
   appShortcutFromInput,
@@ -116,6 +116,7 @@ describe("keyboard shortcut settings", () => {
       alt: false,
       shift: false,
     };
+
     expect(canAssignAppShortcut("thread.new", plainKey)).toBe(false);
     expect(canAssignAppShortcut("question.select.1", plainKey)).toBe(true);
     expect(canAssignAppShortcut("thread.new", { ...plainKey, key: "F2" })).toBe(
@@ -130,6 +131,7 @@ describe("keyboard shortcut settings", () => {
       null,
       "Win32",
     );
+
     expect(disabled).toEqual([
       { command: "thread.new", shortcut: null, platform: "windows" },
     ]);
@@ -162,7 +164,9 @@ describe("keyboard shortcut settings", () => {
         when: { all: ["mainSurface"], none: ["modalOpen"] },
       },
     ];
+
     const shortcut = defaults[0]!.shortcut;
+
     const assigned = setCommandShortcutOverride(
       [],
       "thread.rename",
@@ -246,6 +250,7 @@ it("shows compatibility bindings only on macOS and preserves their scope while e
       platform: "mac",
     },
   ];
+
   expect(
     getCommandShortcut(defaults, overrides, "thread.new", false, "MacIntel")
       ?.key,
@@ -253,12 +258,14 @@ it("shows compatibility bindings only on macOS and preserves their scope while e
   expect(
     getCommandShortcut(defaults, overrides, "thread.new", false, "Linux")?.key,
   ).toBe("n");
+
   const edited = setCommandShortcutOverride(
     overrides,
     "pane.focus.left",
     null,
     "MacIntel",
   );
+
   expect(edited.find((binding) => binding.command === "thread.new")).toEqual(
     overrides[0],
   );
@@ -275,6 +282,7 @@ it("shows compatibility bindings only on macOS and preserves their scope while e
 
 it("edits the effective platform override without losing other scopes and resets the command", () => {
   const shortcut = defaults[0]!.shortcut;
+
   const overrides: AppKeybindingOverrides = [
     { command: "thread.new", shortcut: { ...shortcut, key: "g" } },
     { command: "thread.new", platform: "mac", shortcut: null },
@@ -289,18 +297,21 @@ it("edits the effective platform override without losing other scopes and resets
       shortcut: { ...shortcut, key: "l" },
     },
   ];
+
   expect(
     getCommandShortcut(defaults, overrides, "thread.new", false, "MacIntel"),
   ).toBeNull();
   expect(
     getCommandShortcut(defaults, overrides, "thread.new", false, "Win32")?.key,
   ).toBe("w");
+
   const edited = setCommandShortcutOverride(
     overrides,
     "thread.new",
     shortcut,
     "Win32",
   );
+
   expect(edited.filter((override) => override.platform !== "windows")).toEqual(
     overrides.filter((override) => override.platform !== "windows"),
   );

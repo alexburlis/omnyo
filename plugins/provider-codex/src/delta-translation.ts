@@ -1,3 +1,4 @@
+import { experimental_importLegacyOwnedToolNameV1 as importLegacyOwnedToolNameV1 } from "@omnyo/plugin-sdk/provider-bridge";
 import {
   type ProviderErrorCategory,
   type ProviderErrorInfo,
@@ -18,16 +19,18 @@ import {
   experimental_toolPresentation as toolPresentation,
   experimental_webFetchPresentation as webFetchPresentation,
   experimental_webSearchPresentation as webSearchPresentation,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import {
   codexAsyncQuestionItemSchema,
   codexBridgeEnvelopeSchema,
   codexHandledEventSchema,
   codexHandledThreadItemSchema,
+  codexTurnCompletedClosureSchema,
   isHandledCodexMethod,
   type CodexDynamicToolCallContentItem,
   type CodexErrorInfo,
   type CodexHandledEvent,
+  type CodexKnownErrorInfo,
   type CodexHandledThreadItem,
   type CodexItemStatus,
   type CodexRateLimitSnapshot,
@@ -52,6 +55,7 @@ import {
   type CodexGoalState,
 } from "./extension-kinds.js";
 import { codexVisibilityMetadata } from "./visibility.js";
+import { z } from "zod";
 
 function assertNever(value: never): never {
   throw new Error(`Unexpected value: ${String(value)}`);
@@ -62,16 +66,11 @@ export interface CodexInjectedTool {
   presentation?: DeltaPresentation;
 }
 
-interface CodexRetryErrorContext {
-  errorInfo: CodexErrorInfo;
-  failureText: string;
-}
-
 interface CodexEventTranslationState {
   rateLimitsByLimitId: Map<string, CodexRateLimitSnapshot>;
   latestRateLimitId: string;
   injectedToolsByName: Map<string, CodexInjectedTool>;
-  retryErrorsByTurnKey: Map<string, CodexRetryErrorContext>;
+  retryErrorsByTurnKey: Map<string, Map<string, CodexErrorInfo>>;
 }
 
 export function createCodexEventTranslationState(): CodexEventTranslationState {
@@ -96,7 +95,9 @@ function clampRateLimitPercent(value: number): number {
 
 function codexWindowStatus(usedPercent: number): ProviderRateLimitStatus {
   if (usedPercent >= 100) return "blocked";
+
   if (usedPercent >= 90) return "warning";
+
   return "allowed";
 }
 
@@ -106,6 +107,7 @@ function normalizeCodexRateLimitWindow(
 ): ProviderRateLimitWindow | null {
   if (!window) return null;
   const usedPercent = clampRateLimitPercent(window.usedPercent);
+
   const label =
     window.windowDurationMins === 10_080
       ? "Weekly limit"
@@ -114,6 +116,7 @@ function normalizeCodexRateLimitWindow(
         : key === "primary"
           ? "Current session"
           : "Weekly limit";
+
   return {
     providerKey: key,
     label,
@@ -131,6 +134,7 @@ function codexReachedReasonIsActive(
       (window) => window !== null && window.usedPercent >= 100,
     );
   }
+
   if (reachedReason.includes("credits_depleted")) {
     return (
       snapshot.credits !== null &&
@@ -138,12 +142,14 @@ function codexReachedReasonIsActive(
       !snapshot.credits.hasCredits
     );
   }
+
   if (reachedReason.includes("usage_limit_reached")) {
     return (
       snapshot.individualLimit !== null &&
       snapshot.individualLimit.remainingPercent <= 0
     );
   }
+
   return false;
 }
 
@@ -164,6 +170,7 @@ function mergeCodexRateLimitSnapshot(
     planType: update.planType ?? previous?.planType ?? null,
     rateLimitReachedType: update.rateLimitReachedType ?? null,
   };
+
   if (
     merged.rateLimitReachedType === null &&
     previous?.rateLimitReachedType !== null &&
@@ -172,6 +179,7 @@ function mergeCodexRateLimitSnapshot(
   ) {
     merged.rateLimitReachedType = previous.rateLimitReachedType;
   }
+
   return merged;
 }
 
@@ -180,13 +188,16 @@ export function applyCodexRateLimitUpdate(
   update: CodexRateLimitSnapshotUpdate,
 ): CodexRateLimitSnapshot {
   const limitId = update.limitId ?? "codex";
+
   const rateLimits = mergeCodexRateLimitSnapshot(
     state.rateLimitsByLimitId.get(limitId) ?? null,
     update,
     limitId,
   );
+
   state.rateLimitsByLimitId.set(limitId, rateLimits);
   state.latestRateLimitId = limitId;
+
   return rateLimits;
 }
 
@@ -202,6 +213,7 @@ function normalizeCodexRateLimitSnapshot(
     const usedPercent = clampRateLimitPercent(
       100 - snapshot.individualLimit.remainingPercent,
     );
+
     windows.push({
       providerKey: "individual-limit",
       label: "Spend control",
@@ -211,9 +223,11 @@ function normalizeCodexRateLimitSnapshot(
   }
 
   const reachedReason = snapshot.rateLimitReachedType;
+
   const isIndividualLimitBlocked =
     snapshot.individualLimit !== null &&
     snapshot.individualLimit.remainingPercent <= 0;
+
   const kind =
     reachedReason === "rate_limit_reached"
       ? "subscription-window"
@@ -230,6 +244,7 @@ function normalizeCodexRateLimitSnapshot(
                 : snapshot.individualLimit !== null
                   ? "spend-control"
                   : "unknown";
+
   const status =
     reachedReason !== null
       ? "blocked"
@@ -240,6 +255,7 @@ function normalizeCodexRateLimitSnapshot(
           : windows.length > 0 || snapshot.credits?.hasCredits === true
             ? "allowed"
             : "unknown";
+
   const isSpendControlBlocked = snapshot.spendControlReached === true;
 
   return {
@@ -280,8 +296,10 @@ export function normalizeCodexRateLimits(
   preferredLimitId: string,
 ): ProviderRateLimitState {
   const candidates: CodexRateLimitCandidate[] = [];
+
   for (const limitId of new Set(["codex", preferredLimitId])) {
     const snapshot = state.rateLimitsByLimitId.get(limitId);
+
     if (snapshot === undefined) continue;
     const rateLimits = normalizeCodexRateLimitSnapshot(snapshot);
     candidates.push({
@@ -295,10 +313,13 @@ export function normalizeCodexRateLimits(
       rateLimits,
     });
   }
+
   let selected: CodexRateLimitCandidate | undefined;
+
   for (const candidate of candidates) {
     const { explicitlyBlocked, limitId, rateLimits } = candidate;
     const selectedExplicitlyBlocked = selected?.explicitlyBlocked ?? false;
+
     if (
       selected === undefined ||
       rateLimitStatusRank(rateLimits.status) >
@@ -318,9 +339,11 @@ export function normalizeCodexRateLimits(
       selected = candidate;
     }
   }
+
   if (selected === undefined) {
     throw new Error("Expected at least one Codex rate-limit snapshot");
   }
+
   const windows = candidates.flatMap((candidate) =>
     candidate === selected
       ? candidate.rateLimits.windows
@@ -330,12 +353,14 @@ export function normalizeCodexRateLimits(
           )
         : [],
   );
+
   return windows.length === selected.rateLimits.windows.length
     ? selected.rateLimits
     : { ...selected.rateLimits, windows };
 }
 
 type CodexErrorEvent = Extract<CodexHandledEvent, { method: "error" }>;
+
 type CodexErrorParams = CodexErrorEvent["params"];
 
 type CodexItemTranslationResult =
@@ -349,52 +374,133 @@ type CodexItemTranslationResult =
   | { kind: "ignored" }
   | { kind: "unhandled" };
 
-function getCodexErrorProviderCode(errorInfo: CodexErrorInfo): string {
+function getCodexErrorProviderCode(errorInfo: CodexKnownErrorInfo): string {
   if (typeof errorInfo === "string") {
     return errorInfo;
   }
+
   if ("httpConnectionFailed" in errorInfo) {
     return "httpConnectionFailed";
   }
+
   if ("responseStreamConnectionFailed" in errorInfo) {
     return "responseStreamConnectionFailed";
   }
+
   if ("responseStreamDisconnected" in errorInfo) {
     return "responseStreamDisconnected";
   }
+
   if ("responseTooManyFailedAttempts" in errorInfo) {
     return "responseTooManyFailedAttempts";
   }
+
   if ("activeTurnNotSteerable" in errorInfo) {
     return "activeTurnNotSteerable";
   }
+
   return assertNever(errorInfo);
 }
 
-function getCodexErrorHttpStatusCode(errorInfo: CodexErrorInfo): number | null {
+const codexRequestRejectionSchema = z.union([
+  z.object({
+    error: z.object({
+      type: z.literal("invalid_request_error"),
+      code: z.string().nullish(),
+      param: z.string().nullish(),
+    }),
+  }),
+  z.object({ detail: z.literal("Bad Request") }),
+]);
+
+const codexRequestRejectionReasons = new Map([
+  ["invalid_value", "Invalid value"],
+  ["invalid_type", "Invalid type"],
+  ["missing_required_parameter", "Missing required field"],
+  ["unsupported_parameter", "Unsupported field"],
+  ["unsupported_value", "Unsupported value"],
+  ["context_length_exceeded", "Context length exceeded"],
+]);
+
+const codexRequestRejectionFields = new Map([
+  ["input", "model input"],
+  ["max_output_tokens", "maximum output tokens"],
+  ["model", "model"],
+  ["previous_response_id", "previous response ID"],
+  ["reasoning.effort", "reasoning effort"],
+  ["service_tier", "service tier"],
+  ["tool_choice", "tool choice"],
+  ["tools", "tool definitions"],
+]);
+
+function summarizeCodexRequestRejection(message: string): string | undefined {
+  if (message.length > 16_384 || !message.trimStart().startsWith("{")) {
+    return undefined;
+  }
+
+  let body: unknown;
+
+  try {
+    body = JSON.parse(message);
+  } catch {
+    return undefined;
+  }
+
+  const parsed = codexRequestRejectionSchema.safeParse(body);
+
+  if (!parsed.success) return undefined;
+
+  const prefix = "Codex request rejected.";
+
+  if ("detail" in parsed.data) {
+    return `${prefix} The model provider did not return a reason.`;
+  }
+
+  const { code, param } = parsed.data.error;
+  const reason = code ? codexRequestRejectionReasons.get(code) : undefined;
+  const field = param ? codexRequestRejectionFields.get(param) : undefined;
+
+  if (reason && field) return `${prefix} ${reason} for ${field}.`;
+
+  if (reason) return `${prefix} ${reason}.`;
+
+  if (field) return `${prefix} The model provider flagged ${field}.`;
+
+  return `${prefix} The model provider did not return a recognized reason.`;
+}
+
+function getCodexErrorHttpStatusCode(
+  errorInfo: CodexKnownErrorInfo,
+): number | null {
   if (typeof errorInfo === "string") {
     return null;
   }
+
   if ("httpConnectionFailed" in errorInfo) {
     return errorInfo.httpConnectionFailed.httpStatusCode;
   }
+
   if ("responseStreamConnectionFailed" in errorInfo) {
     return errorInfo.responseStreamConnectionFailed.httpStatusCode;
   }
+
   if ("responseStreamDisconnected" in errorInfo) {
     return errorInfo.responseStreamDisconnected.httpStatusCode;
   }
+
   if ("responseTooManyFailedAttempts" in errorInfo) {
     return errorInfo.responseTooManyFailedAttempts.httpStatusCode;
   }
+
   if ("activeTurnNotSteerable" in errorInfo) {
     return null;
   }
+
   return assertNever(errorInfo);
 }
 
 function getProviderErrorCategory(
-  errorInfo: CodexErrorInfo,
+  errorInfo: CodexKnownErrorInfo,
 ): ProviderErrorCategory {
   if (typeof errorInfo === "string") {
     switch (errorInfo) {
@@ -403,11 +509,17 @@ function getProviderErrorCategory(
       case "sessionBudgetExceeded":
         return "budget-exceeded";
       case "usageLimitExceeded":
+      case "rateLimitExceeded":
         return "rate-limit";
       case "serverOverloaded":
+      case "flexUnavailable":
+      case "policyCapacityUnavailable":
         return "overloaded";
+      case "modelNotFound":
+        return "bad-request";
       case "cyberPolicy":
       case "misalignmentPolicyViolation":
+      case "tooManyDenials":
         return "policy";
       case "internalServerError":
         return "internal";
@@ -423,30 +535,45 @@ function getProviderErrorCategory(
         return "unknown";
     }
   }
+
   if ("httpConnectionFailed" in errorInfo) {
     return "connection-failed";
   }
+
   if ("responseStreamConnectionFailed" in errorInfo) {
     return "connection-failed";
   }
+
   if ("responseStreamDisconnected" in errorInfo) {
     return "stream-disconnected";
   }
+
   if ("responseTooManyFailedAttempts" in errorInfo) {
     return "too-many-failed-attempts";
   }
+
   if ("activeTurnNotSteerable" in errorInfo) {
     return "active-turn-not-steerable";
   }
+
   return assertNever(errorInfo);
 }
 
-function toProviderErrorInfo(
+export function toProviderErrorInfo(
   errorInfo: CodexErrorInfo | null | undefined,
 ): ProviderErrorInfo | null {
   if (!errorInfo) {
     return null;
   }
+
+  if (typeof errorInfo !== "string" && "unrecognized" in errorInfo) {
+    return {
+      category: "unknown",
+      providerCode: errorInfo.unrecognized,
+      httpStatusCode: null,
+    };
+  }
+
   return {
     category: getProviderErrorCategory(errorInfo),
     providerCode: getCodexErrorProviderCode(errorInfo),
@@ -458,14 +585,15 @@ function codexTurnKey(scope: { threadId: string; turnId?: string }): string {
   return `${scope.threadId}\0${scope.turnId ?? ""}`;
 }
 
-function takeCodexRetryError(
+function takeCodexRetryErrors(
   state: CodexEventTranslationState,
   scope: { threadId: string; turnId?: string },
-): CodexRetryErrorContext | undefined {
+): Map<string, CodexErrorInfo> | undefined {
   const key = codexTurnKey(scope);
-  const retryError = state.retryErrorsByTurnKey.get(key);
+  const retryErrors = state.retryErrorsByTurnKey.get(key);
   state.retryErrorsByTurnKey.delete(key);
-  return retryError;
+
+  return retryErrors;
 }
 
 export function clearCodexEventTranslationThreadState(
@@ -473,6 +601,7 @@ export function clearCodexEventTranslationThreadState(
   threadId: string,
 ): void {
   const prefix = codexTurnKey({ threadId });
+
   for (const key of state.retryErrorsByTurnKey.keys()) {
     if (key.startsWith(prefix)) {
       state.retryErrorsByTurnKey.delete(key);
@@ -486,29 +615,40 @@ function resolveCodexErrorInfo(
 ): CodexErrorInfo | null | undefined {
   const errorInfo = params.error.codexErrorInfo;
   const failureText = params.error.additionalDetails ?? params.error.message;
+
   if (params.willRetry === true) {
     if (errorInfo && errorInfo !== "other") {
-      state.retryErrorsByTurnKey.set(codexTurnKey(params), {
-        errorInfo,
-        failureText,
-      });
+      const key = codexTurnKey(params);
+
+      const retryErrors =
+        state.retryErrorsByTurnKey.get(key) ??
+        new Map<string, CodexErrorInfo>();
+
+      retryErrors.set(failureText, errorInfo);
+      state.retryErrorsByTurnKey.set(key, retryErrors);
     }
+
     return errorInfo;
   }
+
   if (params.willRetry !== false) {
     return errorInfo;
   }
-  const retryError = takeCodexRetryError(state, params);
-  return errorInfo === "other" && retryError?.failureText === failureText
-    ? retryError.errorInfo
+
+  const retryErrors = takeCodexRetryErrors(state, params);
+
+  return errorInfo === "other"
+    ? (retryErrors?.get(failureText) ?? errorInfo)
     : errorInfo;
 }
 
 function toRawEvent(rawEvent: JsonRpcMessage): ProviderRawEvent {
   const parsed = providerRawEventSchema.safeParse(rawEvent);
+
   if (parsed.success) {
     return parsed.data;
   }
+
   return {
     jsonrpc: "2.0",
     ...(rawEvent.id !== undefined ? { id: rawEvent.id } : {}),
@@ -531,6 +671,7 @@ function buildUnhandledCodexDeltas(
   args: CodexUnhandledDeltaArgs,
 ): ThreadDelta[] {
   const description = codexVisibilityMetadata.describeRawEvent(args.rawEvent);
+
   if (description.coverage !== "unknown" && args.rawType === undefined) {
     return [];
   }
@@ -611,9 +752,11 @@ function buildDynamicToolCallError(
   if (success !== false) {
     return undefined;
   }
+
   if (typeof result === "string" && result.trim().length > 0) {
     return result;
   }
+
   return "Dynamic tool call failed";
 }
 
@@ -645,6 +788,7 @@ function normalizeCodexSearchQueries(
       args.itemQuery,
     ]),
   );
+
   return queries.length > 0 ? queries : null;
 }
 
@@ -654,6 +798,7 @@ interface CodexUrlArgs {
 
 function normalizeCodexUrl(args: CodexUrlArgs): string | null {
   const url = collectNonEmptyStrings([args.actionUrl])[0];
+
   return url ?? null;
 }
 
@@ -676,34 +821,43 @@ function normalizeCodexWebItemShape(
         actionQuery: item.action.query,
         actionQueries: item.action.queries,
       });
+
       if (!queries) {
         return null;
       }
+
       return {
         shape: { type: "webSearch", queries },
         presentation: webSearchPresentation(queries[0]),
       };
     }
+
     case "openPage": {
       const url = normalizeCodexUrl({ actionUrl: item.action.url });
+
       if (!url) {
         return null;
       }
+
       return {
         shape: { type: "webFetch", url, pattern: null },
         presentation: webFetchPresentation(url),
       };
     }
+
     case "findInPage": {
       const url = normalizeCodexUrl({ actionUrl: item.action.url });
+
       if (!url) {
         return null;
       }
+
       return {
         shape: { type: "webFetch", url, pattern: item.action.pattern ?? null },
         presentation: webFetchPresentation(url),
       };
     }
+
     case "other":
       return null;
     default:
@@ -729,7 +883,7 @@ function toolStatusFields(status: CodexItemStatus): {
 
 const PLAN_STEPS_CHANNEL = "planSteps";
 
-const BB_TOOL_SERVER = "bb";
+const OMNYO_TOOL_SERVER = "omnyo";
 
 function isTerminalCodexItemStatus(status: CodexItemStatus): boolean {
   return status !== "inProgress";
@@ -752,6 +906,7 @@ function collabDelegationLabel(item: CodexCollabAgentToolCall): string {
   if (item.prompt !== null && item.prompt.trim().length > 0) {
     return item.prompt.trim();
   }
+
   return COLLAB_DELEGATION_VERBS[item.tool] ?? item.tool;
 }
 
@@ -760,20 +915,25 @@ function summarizeCollabAgentsStates(
 ): string | undefined {
   const lines = Object.entries(agentsStates).map(([agentThreadId, state]) => {
     const rendered = typeof state === "string" ? state : JSON.stringify(state);
+
     return `${agentThreadId}: ${rendered}`;
   });
+
   return lines.length > 0 ? lines.join("\n") : undefined;
 }
 
 function translateCodexAsyncQuestion(item: unknown): ThreadDelta[] {
   const parsed = codexAsyncQuestionItemSchema.safeParse(item);
+
   if (!parsed.success) {
     return [];
   }
+
   const state: CodexAsyncQuestionState = {
     itemId: parsed.data.id,
     questions: parsed.data.questions,
   };
+
   return [
     {
       kind: "extension.state",
@@ -788,11 +948,13 @@ function translateCodexItemShape(
   state: CodexEventTranslationState,
 ): CodexItemTranslationResult {
   const parsed = codexHandledThreadItemSchema.safeParse(item);
+
   if (!parsed.success) {
     return { kind: "unhandled" };
   }
 
   const parsedItem: CodexHandledThreadItem = parsed.data;
+
   switch (parsedItem.type) {
     case "agentMessage":
       return {
@@ -871,13 +1033,21 @@ function translateCodexItemShape(
     case "dynamicToolCall": {
       const result = extractDynamicToolCallResult(parsedItem.contentItems);
       const error = buildDynamicToolCallError(parsedItem.success, result);
-      const injected = state.injectedToolsByName.get(parsedItem.tool);
+      const legacyTool = importLegacyOwnedToolNameV1(parsedItem.tool);
+
+      const projectedTool =
+        legacyTool !== null && state.injectedToolsByName.has(legacyTool)
+          ? legacyTool
+          : parsedItem.tool;
+
+      const injected = state.injectedToolsByName.get(projectedTool);
+
       return {
         kind: "translated",
         shape: {
           type: "tool",
-          ...(injected === undefined ? {} : { server: BB_TOOL_SERVER }),
-          tool: parsedItem.tool,
+          ...(injected === undefined ? {} : { server: OMNYO_TOOL_SERVER }),
+          tool: projectedTool,
           ...(parsedItem.arguments === undefined
             ? {}
             : { args: parsedItem.arguments }),
@@ -893,12 +1063,15 @@ function translateCodexItemShape(
         ...toolStatusFields(parsedItem.status),
       };
     }
+
     case "collabAgentToolCall": {
       const presentation = collabAgentPresentation({
         tool: parsedItem.tool,
         prompt: parsedItem.prompt,
       });
+
       const childRef = parsedItem.receiverThreadIds[0];
+
       if (childRef !== undefined && childRef.length > 0) {
         return {
           kind: "translated",
@@ -917,6 +1090,7 @@ function translateCodexItemShape(
           ...toolStatusFields(parsedItem.status),
         };
       }
+
       return {
         kind: "translated",
         shape: {
@@ -937,13 +1111,16 @@ function translateCodexItemShape(
         ...toolStatusFields(parsedItem.status),
       };
     }
+
     case "subAgentActivity":
       return { kind: "ignored" };
     case "webSearch": {
       if (shouldIgnoreCodexWebItem(parsedItem)) {
         return { kind: "ignored" };
       }
+
       const translation = normalizeCodexWebItemShape(parsedItem);
+
       return translation
         ? {
             kind: "translated",
@@ -954,6 +1131,7 @@ function translateCodexItemShape(
           }
         : { kind: "unhandled" };
     }
+
     case "imageView":
       return {
         kind: "translated",
@@ -965,6 +1143,7 @@ function translateCodexItemShape(
     case "imageGeneration": {
       const path = parsedItem.savedPath ?? null;
       const prompt = parsedItem.revisedPrompt;
+
       return {
         kind: "translated",
         shape: {
@@ -984,6 +1163,7 @@ function translateCodexItemShape(
         ...toolStatusFields(parsedItem.status),
       };
     }
+
     case "reasoning":
       return {
         kind: "translated",
@@ -1017,11 +1197,43 @@ function translateCodexItemShape(
   }
 }
 
+function closeUnparsedCodexTurn(
+  state: CodexEventTranslationState,
+  rawEvent: JsonRpcMessage,
+): ThreadDelta[] | null {
+  const closure = codexTurnCompletedClosureSchema.safeParse(rawEvent);
+
+  if (!closure.success) {
+    return null;
+  }
+
+  const { threadId, turn } = closure.data.params;
+  takeCodexRetryErrors(state, { threadId, turnId: turn.id });
+
+  return [
+    ...buildUnhandledCodexDeltas({
+      rawEvent,
+      rawType: rawEvent.method,
+      providerTurnId: turn.id,
+    }),
+    {
+      kind: "turn.boundary",
+      providerTurnId: turn.id,
+      status: turn.status === undefined ? "failed" : toTurnStatus(turn.status),
+      ...(turn.error?.message
+        ? { error: { message: turn.error.message } }
+        : {}),
+      providerCheckpointId: turn.id,
+    },
+  ];
+}
+
 export function translateCodexEventToDeltas(
   event: ProviderRuntimeEvent,
   state: CodexEventTranslationState,
 ): ThreadDelta[] {
   const envelope = codexBridgeEnvelopeSchema.safeParse(event);
+
   if (!envelope.success) {
     return [];
   }
@@ -1033,19 +1245,27 @@ export function translateCodexEventToDeltas(
   };
 
   const parsed = codexHandledEventSchema.safeParse(rawEvent);
+
   if (!parsed.success) {
-    return isHandledCodexMethod(rawEvent.method)
-      ? buildUnhandledCodexDeltas({ rawEvent, rawType: rawEvent.method })
-      : buildUnhandledCodexDeltas({ rawEvent });
+    if (!isHandledCodexMethod(rawEvent.method)) {
+      return buildUnhandledCodexDeltas({ rawEvent });
+    }
+
+    return (
+      closeUnparsedCodexTurn(state, rawEvent) ??
+      buildUnhandledCodexDeltas({ rawEvent, rawType: rawEvent.method })
+    );
   }
 
   const handledEvent: CodexHandledEvent = parsed.data;
+
   switch (handledEvent.method) {
     case "account/rateLimits/updated": {
       const rateLimits = applyCodexRateLimitUpdate(
         state,
         handledEvent.params.rateLimits,
       );
+
       return [
         {
           kind: "provider.rateLimits",
@@ -1056,28 +1276,34 @@ export function translateCodexEventToDeltas(
         },
       ];
     }
+
     case "turn/started":
       return [
         { kind: "turn.open", providerTurnId: handledEvent.params.turn.id },
       ];
     case "turn/completed": {
-      takeCodexRetryError(state, {
+      takeCodexRetryErrors(state, {
         threadId: handledEvent.params.threadId,
         turnId: handledEvent.params.turn.id,
       });
+      const { error } = handledEvent.params.turn;
       const status = toTurnStatus(handledEvent.params.turn.status);
+
+      const message = error?.message
+        ? (summarizeCodexRequestRejection(error.message) ?? error.message)
+        : undefined;
+
       return [
         {
           kind: "turn.boundary",
           providerTurnId: handledEvent.params.turn.id,
           status,
-          ...(handledEvent.params.turn.error?.message
-            ? { error: { message: handledEvent.params.turn.error.message } }
-            : {}),
+          ...(message ? { error: { message } } : {}),
           providerCheckpointId: handledEvent.params.turn.id,
         },
       ];
     }
+
     case "thread/started": {
       const deltas: ThreadDelta[] = [
         { kind: "thread.started" },
@@ -1086,14 +1312,17 @@ export function translateCodexEventToDeltas(
           providerThreadId: handledEvent.params.thread.id,
         },
       ];
+
       if (handledEvent.params.thread.preview) {
         deltas.push({
           kind: "thread.name",
           name: handledEvent.params.thread.preview,
         });
       }
+
       return deltas;
     }
+
     case "thread/archived":
     case "thread/unarchived":
       return [];
@@ -1116,6 +1345,7 @@ export function translateCodexEventToDeltas(
         tokensUsed: handledEvent.params.goal.tokensUsed,
         timeUsedSeconds: handledEvent.params.goal.timeUsedSeconds,
       };
+
       return [
         {
           kind: "extension.state",
@@ -1124,6 +1354,7 @@ export function translateCodexEventToDeltas(
         },
       ];
     }
+
     case "thread/goal/cleared":
       return [
         {
@@ -1138,9 +1369,11 @@ export function translateCodexEventToDeltas(
         handledEvent.params.item,
         state,
       );
+
       if (translation.kind === "ignored") {
         return [];
       }
+
       if (translation.kind === "unhandled") {
         return buildUnhandledCodexDeltas({
           rawEvent,
@@ -1148,7 +1381,9 @@ export function translateCodexEventToDeltas(
           providerTurnId: handledEvent.params.turnId,
         });
       }
+
       const key = { providerItemId: handledEvent.params.item.id };
+
       if (handledEvent.method === "item/started") {
         return [
           {
@@ -1160,6 +1395,7 @@ export function translateCodexEventToDeltas(
           },
         ];
       }
+
       return [
         {
           kind: "item.close",
@@ -1173,6 +1409,7 @@ export function translateCodexEventToDeltas(
         ...translateCodexAsyncQuestion(handledEvent.params.item),
       ];
     }
+
     case "item/agentMessage/delta":
       return [
         {
@@ -1246,6 +1483,7 @@ export function translateCodexEventToDeltas(
       ];
     case "thread/tokenUsage/updated": {
       const { tokenUsage, turnId } = handledEvent.params;
+
       return [
         {
           kind: "usage",
@@ -1288,13 +1526,16 @@ export function translateCodexEventToDeltas(
         },
       ];
     }
+
     case "turn/plan/updated": {
       const steps = handledEvent.params.plan.map((step) => ({
         step: step.step,
         status:
           step.status === "inProgress" ? ("active" as const) : step.status,
       }));
+
       const explanation = handledEvent.params.explanation;
+
       return [
         {
           kind: "item.close",
@@ -1313,6 +1554,7 @@ export function translateCodexEventToDeltas(
         },
       ];
     }
+
     case "turn/diff/updated":
       return [
         {
@@ -1322,16 +1564,21 @@ export function translateCodexEventToDeltas(
         },
       ];
     case "error": {
+      const { message, additionalDetails } = handledEvent.params.error;
+
       const errorInfo = toProviderErrorInfo(
         resolveCodexErrorInfo(state, handledEvent.params),
       );
+
+      const summary = summarizeCodexRequestRejection(message);
+
       return [
         {
           kind: "provider.error",
           message: "Provider error",
-          detail: handledEvent.params.error.additionalDetails
-            ? `${handledEvent.params.error.message}\n${handledEvent.params.error.additionalDetails}`
-            : handledEvent.params.error.message,
+          detail:
+            summary ??
+            (additionalDetails ? `${message}\n${additionalDetails}` : message),
           ...(handledEvent.params.willRetry !== undefined
             ? { willRetry: handledEvent.params.willRetry }
             : {}),
@@ -1342,6 +1589,7 @@ export function translateCodexEventToDeltas(
         },
       ];
     }
+
     case "deprecationNotice":
       return [
         {

@@ -25,11 +25,12 @@ import { buildPinnedSidebarState } from "../model/pinned-sidebar-threads.js";
 import {
   installTestPluginRuntime,
   renderSlot,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 import { getSidebarThreadRowDroppableId } from "../rows/sidebarThreadRowDroppable.js";
 import type { SectionThreadDndState } from "./useSectionThreadDnd.js";
 
 installTestPluginRuntime();
+
 const {
   collectSectionThreadDndLookup,
   NEST_HOVER_DELAY_MS,
@@ -49,6 +50,7 @@ const updateThreadFake = vi.fn(
 );
 
 const pinThreadFake = vi.fn(async () => undefined as never);
+
 const unpinThreadFake = vi.fn(async () => undefined as never);
 
 function resolveUpdateThread(value: unknown): void {
@@ -83,6 +85,7 @@ const SECTIONS = [
   { id: "a", name: "Section A" },
   { id: "b", name: "Section B" },
 ];
+
 const ROOT_ITEMS = buildSectionThreadList(
   [
     createThread({ id: "dragged", sectionId: "a" }),
@@ -93,10 +96,12 @@ const ROOT_ITEMS = buildSectionThreadList(
   undefined,
   SECTIONS,
 );
+
 const LOOKUP = collectSectionThreadDndLookup(
   ROOT_ITEMS,
   CHRONOLOGICAL_CONTAINER_ID,
 );
+
 const SECTION_B_PARENT_KEY =
   LOOKUP.sectionParentKeyBySectionId.get("section:b");
 
@@ -122,10 +127,12 @@ function renderSectionThreadDnd(
   grouping: { groups?: boolean; containerProjectId?: string } = {},
 ) {
   const result: { current: SectionThreadDndState | null } = { current: null };
+
   const pinnedState = buildPinnedSidebarState({
     groupEnvironmentThreads: true,
     threads: pinnedThreads,
   });
+
   function Harness({ rootItems }: HarnessProps) {
     result.current = useSectionThreadDnd({
       containerId: CHRONOLOGICAL_CONTAINER_ID,
@@ -140,8 +147,10 @@ function renderSectionThreadDnd(
       pinnedRootNodes: pinnedState.rootNodes,
       onReorderPinnedThread: vi.fn(),
     });
+
     return null;
   }
+
   const slot = renderSlot(
     { component: Harness },
     { rootItems: initialRootItems },
@@ -155,6 +164,7 @@ function renderSectionThreadDnd(
       },
     },
   );
+
   return {
     inspection: slot.inspection,
     result,
@@ -182,6 +192,7 @@ describe("useSectionThreadDnd pin mutations", () => {
       pinnedAt: 42,
       sectionId: "a",
     });
+
     const { inspection, result } = renderSectionThreadDnd(ROOT_ITEMS, [pinned]);
     const props = () => result.current!.dndContextProps;
 
@@ -200,6 +211,7 @@ describe("useSectionThreadDnd pin mutations", () => {
       id: "worktree",
       isWorktree: true,
     });
+
     const rootItems = buildSectionThreadList(
       [
         createThread({ id: "parent", sectionId: "a", createdAt: 4 }),
@@ -228,10 +240,12 @@ describe("useSectionThreadDnd pin mutations", () => {
       SECTIONS,
       true,
     );
+
     const lookup = collectSectionThreadDndLookup(
       rootItems,
       CHRONOLOGICAL_CONTAINER_ID,
     );
+
     return { activeId: [...lookup.groupThreadsByItemId.keys()][0], rootItems };
   }
 
@@ -291,6 +305,7 @@ describe("useSectionThreadDnd pin mutations", () => {
       id: "worktree",
       isWorktree: true,
     });
+
     const pinnedThreads = [
       createThread({
         id: "first",
@@ -307,21 +322,27 @@ describe("useSectionThreadDnd pin mutations", () => {
         createdAt: 2,
       }),
     ];
+
     const pinnedState = buildPinnedSidebarState({
       groupEnvironmentThreads: true,
       threads: pinnedThreads,
     });
+
     const pinnedGroup = pinnedState.rootItems[0];
+
     if (pinnedGroup?.kind !== "environment") {
       throw new Error("Expected a pinned environment group");
     }
+
     const activeId = getSidebarDndItemId(pinnedGroup);
     updateThreadFake.mockResolvedValueOnce(undefined as never);
     updateThreadFake.mockResolvedValueOnce(undefined as never);
+
     const { inspection, result } = renderSectionThreadDnd(
       ROOT_ITEMS,
       pinnedThreads,
     );
+
     const props = () => result.current!.dndContextProps;
 
     act(() => props().onDragStart?.(dragStart(activeId)));
@@ -383,12 +404,15 @@ describe("useSectionThreadDnd project drop targets", () => {
     "does not offer or commit a project move onto %s",
     async (targetId) => {
       const pinned = createThread({ id: "dragged", pinnedAt: 42 });
+
       const { result, inspection } = renderSectionThreadDnd(
         rootItems,
         [pinned],
         { groups: true, containerProjectId: "personal" },
       );
+
       const props = () => result.current!.dndContextProps;
+
       const rect = {
         top: 0,
         left: 0,
@@ -397,6 +421,7 @@ describe("useSectionThreadDnd project drop targets", () => {
         right: 200,
         bottom: 28,
       };
+
       const collide = (id: string) =>
         props().collisionDetection!({
           active: { id: "dragged" },
@@ -437,8 +462,10 @@ describe("useSectionThreadDnd projection feedback loop (#1830)", () => {
     document.body.append(main, sidebar);
     const elementsFromPoint = vi.fn((): Element[] => [main]);
     document.elementsFromPoint = elementsFromPoint;
+
     try {
       const { result } = renderSectionThreadDnd();
+
       const rect = {
         top: 0,
         left: 0,
@@ -447,6 +474,7 @@ describe("useSectionThreadDnd projection feedback loop (#1830)", () => {
         right: 200,
         bottom: 28,
       };
+
       const collide = () =>
         result.current!.dndContextProps.collisionDetection!({
           active: { id: "section:a" },
@@ -488,6 +516,7 @@ describe("useSectionThreadDnd projection feedback loop (#1830)", () => {
       undefined,
       SECTIONS,
     );
+
     rerender({ rootItems: movedRootItems });
     expect(result.current?.activeThread).toBeNull();
     expect(result.current?.dragOverParentKey).toBeNull();
@@ -588,10 +617,12 @@ describe("worktree group drop collisions", () => {
       SECTIONS,
       true,
     );
+
     const lookup = collectSectionThreadDndLookup(
       rootItems,
       CHRONOLOGICAL_CONTAINER_ID,
     );
+
     const activeId = [...lookup.groupThreadsByItemId.keys()][0];
     const { result } = renderSectionThreadDnd(rootItems);
     const props = () => result.current!.dndContextProps;
@@ -616,7 +647,9 @@ describe("worktree group drop collisions", () => {
       right: 200,
       bottom: 128,
     };
+
     const targetRect = { ...sourceRect, top: 40, bottom: 68 };
+
     const sourceIds = [
       activeId,
       "first",
@@ -624,10 +657,12 @@ describe("worktree group drop collisions", () => {
       "child",
       getSidebarThreadRowDroppableId("child"),
     ];
+
     const droppableRects = new Map([
       ...sourceIds.map((id): [string, typeof sourceRect] => [id, sourceRect]),
       [CHRONOLOGICAL_CONTAINER_ID, targetRect],
     ]);
+
     for (const pointerCoordinates of [
       { x: 20, y: 114 },
       { x: 20, y: 150 },
@@ -639,10 +674,12 @@ describe("worktree group drop collisions", () => {
         droppableContainers: [...droppableRects.keys()].map((id) => ({ id })),
         pointerCoordinates,
       } as unknown as Parameters<CollisionDetection>[0]);
+
       expect(collisions.map(({ id }) => id)).toEqual([
         CHRONOLOGICAL_CONTAINER_ID,
       ]);
     }
+
     act(() =>
       props().onDragCancel?.({ active: { id: activeId } } as DragCancelEvent),
     );
@@ -660,6 +697,7 @@ describe("useSectionThreadDnd settled drop cleanup", () => {
     undefined,
     SECTIONS,
   );
+
   const withoutDraggedRootItems = buildSectionThreadList(
     [
       createThread({ id: "peer-a", sectionId: "a", createdAt: 2 }),
@@ -694,6 +732,7 @@ describe("useSectionThreadDnd settled drop cleanup", () => {
     expect(updateThreadDeferred).not.toBeNull();
     settle();
     await flushTasks();
+
     return view;
   }
 
@@ -731,6 +770,7 @@ describe("useSectionThreadDnd settled drop cleanup", () => {
     await flushTasks();
     expect(updateThreadDeferred).not.toBeNull();
     view.rerender({ rootItems: movedToBRootItems });
+
     return { ...view, props };
   }
 
@@ -775,6 +815,7 @@ describe("useSectionThreadDnd nest hover delay", () => {
     right: 200,
     bottom: 128,
   };
+
   const rowDroppableId = getSidebarThreadRowDroppableId("in-b");
 
   afterEach(() => {
@@ -785,6 +826,7 @@ describe("useSectionThreadDnd nest hover delay", () => {
     vi.useFakeTimers();
     const { result } = renderSectionThreadDnd();
     const props = () => result.current!.dndContextProps;
+
     const collide = (y: number, left = 0) =>
       props().collisionDetection!({
         active: { id: "dragged" },

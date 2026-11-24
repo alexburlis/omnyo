@@ -5,8 +5,11 @@ export function cacheFamily(key) {
     /^(node-cache-(?:Linux|macOS|Windows)-(?:x64|arm64)-pnpm)-[a-f0-9]{64}$/u.exec(
       key,
     );
+
   if (pnpm) return pnpm[1];
+
   if (key.includes("turbo-")) return "turbo";
+
   return "other";
 }
 
@@ -15,19 +18,26 @@ export function cacheCleanupPlan(
   { currentHash, defaultRef, closedRefs, now },
 ) {
   const groups = new Map();
+
   for (const cache of caches) {
     const family = cacheFamily(cache.key);
+
     if (!family.startsWith("node-cache-")) continue;
     const group = `${family}:${cache.ref}`;
+
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(cache);
   }
+
   const deletions = [];
+
   for (const entries of groups.values()) {
     entries.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
     for (const [index, cache] of entries.entries()) {
       const idleDays = (now - Date.parse(cache.last_accessed_at)) / 86_400_000;
       const ageDays = (now - Date.parse(cache.created_at)) / 86_400_000;
+
       if (closedRefs.has(cache.ref) && Math.min(idleDays, ageDays) >= 1) {
         deletions.push(cache);
       } else if (
@@ -40,18 +50,22 @@ export function cacheCleanupPlan(
       }
     }
   }
+
   return deletions;
 }
 
 export function actionsApi() {
   const repository = process.env.GITHUB_REPOSITORY;
   const token = process.env.GITHUB_TOKEN;
+
   if (!repository || !token)
     throw new Error("GITHUB_REPOSITORY and GITHUB_TOKEN are required");
   const root = `${process.env.GITHUB_API_URL ?? "https://api.github.com"}/repos/${repository}`;
+
   return async (path, method = "GET") => {
     for (let attempt = 0; ; attempt++) {
       let response;
+
       try {
         response = await fetch(`${root}/${path}`, {
           method,
@@ -62,6 +76,7 @@ export function actionsApi() {
             "x-github-api-version": "2022-11-28",
           },
         });
+
         if (response.ok)
           return response.status === 204 ? null : await response.json();
       } catch (error) {
@@ -78,11 +93,15 @@ export function actionsApi() {
         await delay(1_000 * 2 ** attempt);
         continue;
       }
+
       const retryAfter = Number(response.headers.get("retry-after"));
+
       const retryable =
         [408, 429, 500, 502, 503, 504].includes(response.status) ||
         (response.status === 403 && response.headers.has("retry-after"));
+
       await response.body?.cancel();
+
       if (method !== "GET" || attempt >= 2 || !retryable)
         throw new Error(
           `Actions API ${method} ${path}: HTTP ${response.status}`,
@@ -99,10 +118,13 @@ export function actionsApi() {
 
 export async function listActionsCaches(api) {
   const caches = new Map();
+
   for (let page = 1; page <= 100; page++) {
     const result = await api(`actions/caches?per_page=100&page=${page}`);
+
     if (!Array.isArray(result?.actions_caches))
       throw new Error("Invalid Actions cache inventory");
+
     for (const cache of result.actions_caches) {
       if (
         !Number.isSafeInteger(cache.id) ||
@@ -118,10 +140,13 @@ export async function listActionsCaches(api) {
       ) {
         throw new Error("Invalid Actions cache entry");
       }
+
       caches.set(cache.id, cache);
     }
+
     if (result.actions_caches.length < 100) return [...caches.values()];
   }
+
   throw new Error(
     "Actions cache inventory exceeded pagination limit; refusing partial cleanup",
   );
@@ -129,6 +154,7 @@ export async function listActionsCaches(api) {
 
 export function cacheUsageTable(caches) {
   const families = new Map();
+
   for (const cache of caches) {
     const family = cacheFamily(cache.key);
     const group = families.get(family) ?? { count: 0, bytes: 0 };
@@ -136,6 +162,7 @@ export function cacheUsageTable(caches) {
     group.bytes += cache.size_in_bytes;
     families.set(family, group);
   }
+
   return [
     "| Cache family | Entries | GiB |",
     "| --- | ---: | ---: |",

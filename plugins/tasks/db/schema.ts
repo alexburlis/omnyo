@@ -1,6 +1,6 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 
-type PluginDatabase = ReturnType<BbPluginApi["storage"]["database"]>;
+type PluginDatabase = ReturnType<PluginApi["storage"]["database"]>;
 
 const MIGRATIONS = [
   `
@@ -242,6 +242,7 @@ const MIGRATIONS = [
     ALTER TABLE presets DROP COLUMN service_tier;
     ALTER TABLE presets RENAME COLUMN service_tier_open TO service_tier;
   `,
+  "ALTER TABLE projects RENAME COLUMN linked_bb_project_id TO linked_app_project_id;",
 ] as const;
 
 export function initializeTasksSchema(db: PluginDatabase): void {
@@ -256,6 +257,7 @@ export function initializeTasksSchema(db: PluginDatabase): void {
   const hasVersion = db.prepare<[number], { found: number }>(
     "SELECT 1 AS found FROM schema_version WHERE version = ?",
   );
+
   const recordVersion = db.prepare<[number, string]>(
     "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
   );
@@ -263,6 +265,7 @@ export function initializeTasksSchema(db: PluginDatabase): void {
   const migrate = db.transaction(() => {
     for (const [index, sql] of MIGRATIONS.entries()) {
       const version = index + 1;
+
       if (hasVersion.get(version)) continue;
       db.exec(sql);
       recordVersion.run(version, new Date().toISOString());

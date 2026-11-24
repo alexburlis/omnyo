@@ -87,6 +87,7 @@ describe("parseWorktreeListPorcelain", () => {
       "worktree /Users/a/My Code/repo wt",
       "branch refs/heads/main",
     ]);
+
     expect(parseWorktreeListPorcelain(stdout)[0]?.path).toBe(
       nativePath("/Users/a/My Code/repo wt"),
     );
@@ -95,16 +96,16 @@ describe("parseWorktreeListPorcelain", () => {
 
 describe("selectAdoptableWorktrees", () => {
   const managedRoot =
-    "/home/u/.bb/plugins/environment-git-worktree/host-data/worktrees";
+    "/home/u/.omnyo/plugins/environment-git-worktree/host-data/worktrees";
 
-  it("keeps user-created worktrees and drops the main checkout, bare repos and bb's own", () => {
+  it("keeps user-created worktrees and drops the main checkout, bare repos and Omnyo's own", () => {
     const entries = parseWorktreeListPorcelain(
       [
         record(["worktree /code/repo", "branch refs/heads/main"]),
         record(["worktree /code/repo-feature", "branch refs/heads/feature"]),
         record([
           `worktree ${managedRoot}/thr_abc-1/repo`,
-          "branch refs/heads/bb/task",
+          "branch refs/heads/omnyo/task",
         ]),
         record(["worktree /code/bare", "bare"]),
       ].join(""),

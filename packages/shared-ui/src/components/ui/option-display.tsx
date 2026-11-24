@@ -4,12 +4,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 export const OPTION_BASE_CLASS_NAME =
   "h-8 w-fit max-w-full min-w-0 items-center justify-start gap-1 px-1 text-xs leading-tight";
+
 export const OPTION_INTERACTIVE_CLASS_NAME =
   "border-none bg-transparent shadow-none";
+
 export const OPTION_CONTENT_CLASS_NAME = "flex min-w-0 items-center gap-1.5";
+
 export const OPTION_TRIGGER_CONTENT_CLASS_NAME = "contents";
+
 export const OPTION_MENU_CONTENT_CLASS_NAME =
   "max-h-[min(var(--radix-dropdown-menu-content-available-height),calc(100dvh-0.5rem))] w-max min-w-0 max-w-96 overflow-auto overflow-x-hidden overscroll-contain";
+
 export const OPTION_MUTED_CLASS_NAME =
   "text-muted-foreground hover:text-muted-foreground";
 

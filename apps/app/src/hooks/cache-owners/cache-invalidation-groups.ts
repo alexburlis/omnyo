@@ -1,6 +1,7 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { getCachedProjectThreadListInvalidationQueryKeys } from "./query-cache";
 import {
+  allProjectCommandCatalogQueryKeyPrefix,
   allProjectPathsQueryKeyPrefix,
   allProjectSourceBranchesQueryKeyPrefix,
   allThreadConversationOutlineQueryKeyPrefix,
@@ -64,6 +65,7 @@ export function getProjectSourceDependentInvalidationQueryKeys({
     sidebarNavigationQueryKey(),
     hostPathExistenceQueryKeyPrefix(),
   ];
+
   if (!projectId) {
     return [
       ...sharedKeys,
@@ -71,11 +73,22 @@ export function getProjectSourceDependentInvalidationQueryKeys({
       allProjectSourceBranchesQueryKeyPrefix(),
     ];
   }
+
   return [
     ...sharedKeys,
     projectPathsQueryKeyPrefix(projectId),
     projectSourceBranchesQueryKeyPrefix(projectId),
   ];
+}
+
+export function resetProjectCommandCatalogQueries({
+  projectId,
+  queryClient,
+}: ProjectScopedInvalidationArgs & { queryClient: QueryClient }): void {
+  const prefix = allProjectCommandCatalogQueryKeyPrefix();
+  void queryClient.resetQueries({
+    queryKey: projectId === undefined ? prefix : [...prefix, projectId],
+  });
 }
 
 export function getThreadListInvalidationQueryKeys({
@@ -88,6 +101,7 @@ export function getThreadListInvalidationQueryKeys({
         queryClient,
       })
     : [threadsQueryKey()];
+
   return [
     ...threadListQueryKeys,
     sidebarNavigationQueryKey(),
@@ -156,6 +170,7 @@ export function getThreadQueueContentInvalidationQueryKeys({
       threadPromptHistoryQueryKeyPrefix(),
     ];
   }
+
   return [
     threadQueuedMessagesQueryKey(threadId),
     threadPromptHistoryQueryKey(threadId),

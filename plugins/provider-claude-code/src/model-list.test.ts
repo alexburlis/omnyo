@@ -102,6 +102,7 @@ describe("buildClaudeCodeModels", () => {
 
   it("maps reported effort levels, adding ultracode alongside xhigh", () => {
     const result = buildClaudeCodeModels(DISCOVERED_MODELS);
+
     const efforts = (model: string) =>
       result.models
         .find((candidate) => candidate.model === model)

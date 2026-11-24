@@ -1,5 +1,5 @@
-import type { Host } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import type { Host } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { SettingsStoryFixtures } from "../../../.ladle/settings-story-fixtures";
 import { SettingsStoryChrome } from "../../../.ladle/story-settings-chrome";
 import { MachinesSettingsSection } from "./MachinesSettingsSection";
@@ -11,11 +11,13 @@ const laptop = makeHost({
   name: "Work laptop",
   status: "disconnected",
 });
+
 const desktop = makeHost({
   id: "host_remote",
   name: "Studio desktop",
   status: "disconnected",
 });
+
 const cleanup = makeHost({
   id: "host_cleanup",
   name: "Build server",
@@ -41,12 +43,15 @@ function Machines({ hosts }: { hosts: Host[] }) {
 export function SingleOffline() {
   return <Machines hosts={[laptop, { ...desktop, status: "connected" }]} />;
 }
+
 export function MultipleOffline() {
   return <Machines hosts={[laptop, desktop]} />;
 }
+
 export function CleanupFailed() {
   return <Machines hosts={[cleanup]} />;
 }
+
 export function MixedIssues() {
   return <Machines hosts={[laptop, cleanup]} />;
 }

@@ -52,6 +52,7 @@ describe("isBareKey", () => {
     altKey: false,
     shiftKey: false,
   };
+
   it("is true only with no modifier held", () => {
     expect(isBareKey(base)).toBe(true);
     expect(isBareKey({ ...base, metaKey: true })).toBe(false);

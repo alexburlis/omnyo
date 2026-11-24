@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { getLatestThreadSequence, listQueuedThreadMessages } from "@bb/db";
+import { getLatestThreadSequence, listQueuedThreadMessages } from "@omnyo/db";
 import {
   createStandaloneBuiltinCompactCommandInput,
   turnScope,
-} from "@bb/domain";
-import type { ClientTurnRequestId } from "@bb/domain";
+} from "@omnyo/domain";
+import type { ClientTurnRequestId } from "@omnyo/domain";
 import { applyTurnCompletedEvent } from "../../src/internal/turn-completed-events.js";
+import { acceptThreadSendRequest } from "../../src/services/threads/thread-send-request.js";
 import { sendNextQueuedMessageIfPresent } from "../../src/services/threads/queued-messages.js";
 import {
+  currentWorkspaceIdentity,
   registerHostRpcResponder,
   type HostRpcHandlerResult,
   EMPTY_WORKSPACE_AGENT_CONTEXT,
@@ -29,24 +31,29 @@ function seedCompactableThread(
   args: { providerId: string; providerThreadId: string },
 ) {
   const { host, session } = seedHostSession(harness.deps);
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
   });
+
   const thread = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
     providerId: args.providerId,
     status: "idle",
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     providerThreadId: args.providerThreadId,
     threadId: thread.id,
   });
+
   return { host, session, thread };
 }
 
@@ -57,12 +64,18 @@ function registerSuccessfulTurnResponder(
   return registerHostRpcResponder(harness, {
     ...args,
     handle: ({ command }): HostRpcHandlerResult => {
+      if (command.type === "host.prepare_workspace_identity_v1") {
+        return { ok: true, result: currentWorkspaceIdentity(command.rootPath) };
+      }
+
       if (command.type === "host.read_workspace_agent_context") {
         return { ok: true, result: EMPTY_WORKSPACE_AGENT_CONTEXT };
       }
+
       if (command.type === "turn.submit") {
         return { ok: true, result: { trace: { spans: [] } } };
       }
+
       return { ok: true, result: {} };
     },
   });
@@ -106,6 +119,7 @@ describe("public thread compaction", () => {
         providerId: "pi",
         providerThreadId: "provider-thread-1",
       });
+
       const responder = registerSuccessfulTurnResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -115,13 +129,16 @@ describe("public thread compaction", () => {
         `/api/v1/threads/${thread.id}/compact`,
         { method: "POST" },
       );
+
       expect(
         response.status,
         JSON.stringify(await readJson(response.clone())),
       ).toBe(200);
+
       const turnSubmitRequests = responder.requests.filter(
         ({ command }) => command.type === "turn.submit",
       );
+
       expect(turnSubmitRequests).toHaveLength(1);
       expect(turnSubmitRequests[0]?.command).toMatchObject({
         type: "turn.submit",
@@ -143,6 +160,7 @@ describe("public thread compaction", () => {
           providerId,
           providerThreadId: "provider-thread-acp",
         });
+
         const responder = registerSuccessfulTurnResponder(harness, {
           hostId: host.id,
           sessionId: session.id,
@@ -152,13 +170,16 @@ describe("public thread compaction", () => {
           `/api/v1/threads/${thread.id}/compact`,
           { method: "POST" },
         );
+
         expect(
           response.status,
           JSON.stringify(await readJson(response.clone())),
         ).toBe(200);
+
         const turnSubmitRequests = responder.requests.filter(
           ({ command }) => command.type === "turn.submit",
         );
+
         expect(turnSubmitRequests).toHaveLength(1);
         expect(turnSubmitRequests[0]?.command).toMatchObject({
           type: "turn.submit",
@@ -179,6 +200,7 @@ describe("public thread compaction", () => {
         providerId: "pi",
         providerThreadId: "provider-thread-queue",
       });
+
       const responder = registerSuccessfulTurnResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -188,16 +210,21 @@ describe("public thread compaction", () => {
         `/api/v1/threads/${thread.id}/compact`,
         { method: "POST" },
       );
+
       expect(compactResponse.status).toBe(200);
+
       const compactRequest = responder.requests.find(
         ({ command }) => command.type === "turn.submit",
       );
+
       if (!compactRequest || compactRequest.command.type !== "turn.submit") {
         throw new Error("Expected compaction turn.submit request");
       }
+
       if (!thread.environmentId) {
         throw new Error("Expected compactable thread environment");
       }
+
       const compactionTurnId = "turn-manual-compaction";
       seedAcceptedProviderTurn(harness, {
         clientRequestId: compactRequest.command.requestId,
@@ -218,8 +245,10 @@ describe("public thread compaction", () => {
           }),
         },
       );
+
       expect(sendResponse.status).toBe(200);
       const [queuedMessage] = listQueuedThreadMessages(harness.db, thread.id);
+
       if (!queuedMessage) {
         throw new Error("Expected the send to remain queued");
       }
@@ -232,6 +261,7 @@ describe("public thread compaction", () => {
           body: JSON.stringify({ mode: "steer" }),
         },
       );
+
       expect(sendNowResponse.status).toBe(200);
       expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
       expect(
@@ -260,14 +290,19 @@ describe("public thread compaction", () => {
           status: "completed",
         },
       });
+
       const completion = applyTurnCompletedEvent(harness.deps, {
-        threadId: thread.id,
-        providerThreadId: "provider-thread-queue",
-        type: "turn/completed",
-        scope: turnScope(compactionTurnId),
-        status: "completed",
+        afterIdle: null,
+        payload: {
+          threadId: thread.id,
+          providerThreadId: "provider-thread-queue",
+          type: "turn/completed",
+          scope: turnScope(compactionTurnId),
+          status: "completed",
+        },
       });
-      expect(completion.nextStatus).toBe("idle");
+
+      expect(completion).toEqual({ kind: "settled", nextStatus: "idle" });
       expect(
         await sendNextQueuedMessageIfPresent(harness.deps, {
           threadId: thread.id,
@@ -285,17 +320,329 @@ describe("public thread compaction", () => {
     });
   });
 
+  it("compacts first and delivers the message once compaction finishes", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session, thread } = seedCompactableThread(harness, {
+        providerId: "pi",
+        providerThreadId: "provider-thread-compact-first",
+      });
+
+      const responder = registerSuccessfulTurnResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+      });
+
+      const turnSubmits = () =>
+        responder.requests.flatMap(({ command }) =>
+          command.type === "turn.submit" ? [command] : [],
+        );
+
+      const sendResponse = await harness.app.request(
+        `/api/v1/threads/${thread.id}/send`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            mode: "queue-if-active",
+            compactFirst: true as const,
+            input: [{ type: "text", text: "Continue after compacting" }],
+          }),
+        },
+      );
+
+      expect(
+        sendResponse.status,
+        JSON.stringify(await readJson(sendResponse.clone())),
+      ).toBe(200);
+      await expect(readJson(sendResponse)).resolves.toMatchObject({
+        delivery: "queued",
+      });
+      expect(turnSubmits()).toHaveLength(1);
+      expect(turnSubmits()[0]).toMatchObject({
+        input: createStandaloneBuiltinCompactCommandInput(),
+      });
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
+
+      if (!thread.environmentId) {
+        throw new Error("Expected compactable thread environment");
+      }
+
+      const compactionTurnId = "turn-compact-first";
+      seedAcceptedProviderTurn(harness, {
+        clientRequestId: turnSubmits()[0]!.requestId,
+        environmentId: thread.environmentId,
+        providerThreadId: "provider-thread-compact-first",
+        threadId: thread.id,
+        turnId: compactionTurnId,
+      });
+      seedEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: thread.environmentId,
+        providerThreadId: "provider-thread-compact-first",
+        sequence:
+          getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+        type: "turn/completed",
+        scope: turnScope(compactionTurnId),
+        data: {
+          providerThreadId: "provider-thread-compact-first",
+          status: "completed",
+        },
+      });
+      applyTurnCompletedEvent(harness.deps, {
+        afterIdle: null,
+        payload: {
+          threadId: thread.id,
+          providerThreadId: "provider-thread-compact-first",
+          type: "turn/completed",
+          scope: turnScope(compactionTurnId),
+          status: "completed",
+        },
+      });
+      expect(
+        await sendNextQueuedMessageIfPresent(harness.deps, {
+          threadId: thread.id,
+        }),
+      ).toBe(true);
+      await expect.poll(() => turnSubmits().length).toBe(2);
+      expect(turnSubmits()[1]).toMatchObject({
+        input: [{ type: "text", text: "Continue after compacting" }],
+      });
+    });
+  });
+
+  it.each(["compaction", "ordinary turn", "stale snapshot"])(
+    "queues a stale compact-first send behind an active %s",
+    async (activeKind) => {
+      await withTestHarness(async (harness) => {
+        const { host, session, thread } = seedCompactableThread(harness, {
+          providerId: "pi",
+          providerThreadId: "provider-thread-compact-first",
+        });
+
+        const responder = registerSuccessfulTurnResponder(harness, {
+          hostId: host.id,
+          sessionId: session.id,
+        });
+
+        const turnSubmits = () =>
+          responder.requests.flatMap(({ command }) =>
+            command.type === "turn.submit" ? [command] : [],
+          );
+
+        const initialInput =
+          activeKind === "compaction"
+            ? createStandaloneBuiltinCompactCommandInput()
+            : [{ type: "text" as const, text: "Initial task" }];
+
+        const initialResponse = await harness.app.request(
+          `/api/v1/threads/${thread.id}/send`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ mode: "start", input: initialInput }),
+          },
+        );
+
+        expect(initialResponse.status).toBe(200);
+
+        const payload = {
+          mode: "queue-if-active" as const,
+          compactFirst: true as const,
+          input: [
+            {
+              type: "text" as const,
+              text: "Continue after compacting",
+              mentions: [],
+            },
+          ],
+        };
+
+        if (activeKind === "stale snapshot") {
+          await expect(
+            acceptThreadSendRequest(harness.deps, { thread, payload }),
+          ).resolves.toMatchObject({ delivery: "queued" });
+        } else {
+          const sendResponse = await harness.app.request(
+            `/api/v1/threads/${thread.id}/send`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(payload),
+            },
+          );
+
+          expect(sendResponse.status).toBe(200);
+          await expect(readJson(sendResponse)).resolves.toMatchObject({
+            delivery: "queued",
+          });
+        }
+
+        expect(turnSubmits()).toHaveLength(1);
+        expect(turnSubmits()[0]).toMatchObject({
+          input: initialInput,
+        });
+        expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
+
+        if (!thread.environmentId) {
+          throw new Error("Expected compactable thread environment");
+        }
+
+        const compactionTurnId = "turn-compact-first";
+        seedAcceptedProviderTurn(harness, {
+          clientRequestId: turnSubmits()[0]!.requestId,
+          environmentId: thread.environmentId,
+          providerThreadId: "provider-thread-compact-first",
+          threadId: thread.id,
+          turnId: compactionTurnId,
+        });
+        seedEvent(harness.deps, {
+          threadId: thread.id,
+          environmentId: thread.environmentId,
+          providerThreadId: "provider-thread-compact-first",
+          sequence:
+            getLatestThreadSequence(harness.db, { threadId: thread.id }) + 1,
+          type: "turn/completed",
+          scope: turnScope(compactionTurnId),
+          data: {
+            providerThreadId: "provider-thread-compact-first",
+            status: "completed",
+          },
+        });
+        applyTurnCompletedEvent(harness.deps, {
+          afterIdle: null,
+          payload: {
+            threadId: thread.id,
+            providerThreadId: "provider-thread-compact-first",
+            type: "turn/completed",
+            scope: turnScope(compactionTurnId),
+            status: "completed",
+          },
+        });
+        expect(
+          await sendNextQueuedMessageIfPresent(harness.deps, {
+            threadId: thread.id,
+          }),
+        ).toBe(true);
+        await expect.poll(() => turnSubmits().length).toBe(2);
+        expect(turnSubmits()[1]).toMatchObject({
+          input: [{ type: "text", text: "Continue after compacting" }],
+        });
+      });
+    },
+  );
+
+  it("rejects invalid follow-up attachments before starting compaction", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session, thread } = seedCompactableThread(harness, {
+        providerId: "pi",
+        providerThreadId: "provider-thread-invalid-attachment",
+      });
+
+      const responder = registerSuccessfulTurnResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+      });
+
+      const sequenceBefore = getLatestThreadSequence(harness.db, {
+        threadId: thread.id,
+      });
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}/send`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            compactFirst: true as const,
+            mode: "queue-if-active",
+            input: [
+              {
+                type: "localFile",
+                path: "/tmp/report.txt",
+                sourceProjectId: thread.projectId,
+              },
+            ],
+          }),
+        },
+      );
+
+      expect(response.status).toBe(400);
+      await expect(readJson(response)).resolves.toMatchObject({
+        message:
+          "A source project can only be specified for an uploaded attachment",
+      });
+      expect(
+        responder.requests.filter(
+          ({ command }) => command.type === "turn.submit",
+        ),
+      ).toHaveLength(0);
+      expect(getLatestThreadSequence(harness.db, { threadId: thread.id })).toBe(
+        sequenceBefore,
+      );
+      expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(0);
+    });
+  });
+
+  it.each([
+    [{ mode: "steer" }, 400, "compactFirst cannot steer a turn"],
+    [
+      { mode: "queue-if-active", sendAt: Date.now() + 60_000 },
+      400,
+      "compactFirst cannot be scheduled with sendAt",
+    ],
+    [
+      {
+        mode: "queue-if-active",
+        input: createStandaloneBuiltinCompactCommandInput(),
+      },
+      400,
+      "compactFirst needs a message to send after compacting",
+    ],
+  ])("rejects compactFirst with %j", async (overrides, status, message) => {
+    await withTestHarness(async (harness) => {
+      const { host, session, thread } = seedCompactableThread(harness, {
+        providerId: "pi",
+        providerThreadId: "provider-thread-invalid",
+      });
+
+      const responder = registerSuccessfulTurnResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+      });
+
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}/send`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            compactFirst: true as const,
+            input: [{ type: "text", text: "hello" }],
+            ...overrides,
+          }),
+        },
+      );
+
+      expect(response.status).toBe(status);
+      await expect(readJson(response)).resolves.toMatchObject({ message });
+      expect(responder.requests).toHaveLength(0);
+    });
+  });
+
   it("rejects manual compaction for unsupported providers and active threads", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const unsupportedThread = seedThread(harness.deps, {
         projectId: project.id,
         providerId: "acp-cursor",
         status: "idle",
       });
+
       const activeThread = seedThread(harness.deps, {
         projectId: project.id,
         providerId: "codex",
@@ -306,6 +653,7 @@ describe("public thread compaction", () => {
         `/api/v1/threads/${unsupportedThread.id}/compact`,
         { method: "POST" },
       );
+
       expect(unsupportedResponse.status).toBe(409);
       await expect(readJson(unsupportedResponse)).resolves.toMatchObject({
         message: expect.stringContaining(
@@ -317,6 +665,7 @@ describe("public thread compaction", () => {
         `/api/v1/threads/${activeThread.id}/compact`,
         { method: "POST" },
       );
+
       expect(activeResponse.status).toBe(409);
       await expect(readJson(activeResponse)).resolves.toMatchObject({
         message:

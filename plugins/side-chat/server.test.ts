@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFakePluginHost,
   makeThreadResponse,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import plugin, {
   EMPTY_FORK_MAX_AGE_MS,
   EMPTY_FORK_SWEEP_PAGE_SIZE,
@@ -55,18 +55,22 @@ async function loadPlugin(sdkThreads: Record<string, unknown>) {
       },
     },
   });
+
   hosts.push(host);
-  await plugin(host.bb);
+  await plugin(host.api);
+
   return host;
 }
 
 describe("createSideChat rpc", () => {
   it("does not read the source timeline to decide whether to include the anchor", async () => {
     const timeline = vi.fn();
+
     const fork = vi.fn(
       async (_args: { agentContextSeed?: Array<{ text: string }> }) =>
         makeThreadResponse({ id: "thr_fork" }),
     );
+
     const { harness } = await loadPlugin({ timeline, fork });
 
     await harness.callRpc("createSideChat", {
@@ -83,6 +87,7 @@ describe("createSideChat rpc", () => {
 
   it("forks hidden+isolated with a seed when the anchor is an earlier message", async () => {
     const fork = vi.fn(async () => makeThreadResponse({ id: "thr_fork" }));
+
     const { harness } = await loadPlugin({
       timeline: async () =>
         timelineResult([
@@ -122,10 +127,12 @@ describe("createSideChat rpc", () => {
       new Error("HTTP 400: Cannot fork: source has no active session to clone"),
       { code: "fork_source_session_unavailable" },
     );
+
     const fork = vi
       .fn()
       .mockRejectedValueOnce(sessionUnavailable)
       .mockResolvedValueOnce(makeThreadResponse({ id: "thr_tip_fork" }));
+
     const { harness } = await loadPlugin({
       timeline: async () =>
         timelineResult([
@@ -151,6 +158,7 @@ describe("createSideChat rpc", () => {
 
   it("rethrows point-fork failures that are not missing-session errors", async () => {
     const fork = vi.fn().mockRejectedValue(new Error("HTTP 403: forbidden"));
+
     const { harness } = await loadPlugin({
       timeline: async () => timelineResult([conversationRow("latest answer")]),
       fork,
@@ -166,11 +174,38 @@ describe("createSideChat rpc", () => {
     expect(fork).toHaveBeenCalledTimes(1);
   });
 
+  it("surfaces an anchor inside a running turn instead of forking an older checkpoint", async () => {
+    const turnIncomplete = Object.assign(
+      new Error(
+        "HTTP 400: Cannot fork at sequence 3: the turn containing it has not completed",
+      ),
+      { code: "fork_source_turn_incomplete" },
+    );
+
+    const fork = vi.fn().mockRejectedValue(turnIncomplete);
+
+    const { harness } = await loadPlugin({
+      timeline: async () => timelineResult([conversationRow("latest answer")]),
+      fork,
+    });
+
+    await expect(
+      harness.callRpc("createSideChat", {
+        sourceThreadId: "thr_src",
+        sourceSeqEnd: 3,
+        anchorText: "progress note",
+      }),
+    ).rejects.toThrow("has not completed");
+    expect(fork).toHaveBeenCalledTimes(1);
+  });
+
   it("does not fall back on message text alone — only the structured code triggers it", async () => {
     const messageOnly = new Error(
       "HTTP 400: Cannot fork: source has no active session to clone",
     );
+
     const fork = vi.fn().mockRejectedValue(messageOnly);
+
     const { harness } = await loadPlugin({
       timeline: async () => timelineResult([conversationRow("latest answer")]),
       fork,
@@ -188,6 +223,7 @@ describe("createSideChat rpc", () => {
 
   it("forks from the tip without a seed or sourceSeqEnd for empty anchors", async () => {
     const fork = vi.fn(async () => makeThreadResponse({ id: "thr_fork" }));
+
     const { harness } = await loadPlugin({
       timeline: async () => timelineResult([conversationRow("latest answer")]),
       fork,
@@ -223,6 +259,7 @@ describe("empty-fork sweep", () => {
   it("leaves a pending fork alone when it becomes visible before cleanup", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const now = Date.now();
+
     const thread = makeThreadResponse({
       id: "thr_promoted",
       originKind: "fork",
@@ -230,8 +267,10 @@ describe("empty-fork sweep", () => {
       visibility: "hidden",
       createdAt: now,
     });
+
     const timeline = vi.fn(async () => timelineResult([]));
     const archive = vi.fn(async () => ({ ok: true }));
+
     const { harness } = await loadPlugin({
       list: async () => [thread],
       get: async () => thread,
@@ -239,6 +278,7 @@ describe("empty-fork sweep", () => {
       archive,
       queuedMessages: { list: async () => [] },
     });
+
     await harness.runSchedule("empty-fork-cleanup");
     thread.visibility = "visible";
     vi.setSystemTime(now + EMPTY_FORK_MAX_AGE_MS + 1);
@@ -248,9 +288,9 @@ describe("empty-fork sweep", () => {
   });
 
   it("uses a deadline index when all pending candidates are in the future", async () => {
-    const { bb, harness } = await loadPlugin({ list: async () => [] });
+    const { api, harness } = await loadPlugin({ list: async () => [] });
     await harness.runSchedule("empty-fork-cleanup");
-    const db = bb.storage.database();
+    const db = api.storage.database();
     db.prepare(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
       INSERT INTO cleanup_candidates(thread_id, created_at, due_at)
       SELECT 'future-'||x,?,? FROM n`).run(
@@ -261,13 +301,17 @@ describe("empty-fork sweep", () => {
     await harness.runSchedule("empty-fork-cleanup");
     const queries = prepare.mock.calls.map(([sql]) => sql);
     prepare.mockRestore();
+
     const candidateQuery = queries.find((sql) =>
       sql.includes("FROM cleanup_candidates"),
     );
+
     expect(candidateQuery).toBeDefined();
+
     const plan = db
       .prepare(`EXPLAIN QUERY PLAN ${candidateQuery}`)
       .all(Date.now());
+
     expect(plan).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -282,6 +326,7 @@ describe("empty-fork sweep", () => {
     async (fallback) => {
       vi.useFakeTimers({ toFake: ["Date"] });
       const createdAt = Date.now();
+
       const thread = makeThreadResponse({
         id: "thr_new",
         createdAt,
@@ -289,20 +334,26 @@ describe("empty-fork sweep", () => {
         originPluginId: PLUGIN_ID,
         visibility: "hidden",
       });
+
       const fork = vi.fn(async () => thread);
+
       if (fallback)
         fork.mockRejectedValueOnce(
           Object.assign(new Error("unavailable"), {
             code: "fork_source_session_unavailable",
           }),
         );
+
       const list = vi.fn(
         async (): Promise<ReturnType<typeof makeThreadResponse>[]> => [],
       );
+
       const archive = vi.fn(async () => {
         list.mockResolvedValue([]);
+
         return { ok: true };
       });
+
       const { harness } = await loadPlugin({
         list,
         fork,
@@ -310,6 +361,7 @@ describe("empty-fork sweep", () => {
         timeline: async () => timelineResult([]),
         queuedMessages: { list: async () => [] },
       });
+
       await harness.runSchedule("empty-fork-cleanup");
       await harness.callRpc("createSideChat", {
         sourceThreadId: "thr_source",
@@ -332,6 +384,7 @@ describe("empty-fork sweep", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const now = Date.now();
     const threads: ReturnType<typeof makeThreadResponse>[] = [];
+
     const fork = vi.fn(async () => {
       const thread = makeThreadResponse({
         id: `thr_${fork.mock.calls.length}`,
@@ -340,13 +393,18 @@ describe("empty-fork sweep", () => {
         originPluginId: PLUGIN_ID,
         visibility: "hidden",
       });
+
       threads.push(thread);
+
       return thread;
     });
+
     const timeline = vi.fn(async () => {
       throw new Error("unavailable");
     });
+
     const archive = vi.fn(async () => ({ ok: true }));
+
     const { harness } = await loadPlugin({
       list: async ({ offset = 0, limit = EMPTY_FORK_SWEEP_PAGE_SIZE }) =>
         threads.slice(offset, offset + limit),
@@ -354,13 +412,16 @@ describe("empty-fork sweep", () => {
       timeline,
       archive,
     });
+
     await harness.runSchedule("empty-fork-cleanup");
+
     for (let i = 0; i <= EMPTY_FORK_SWEEP_PAGE_SIZE; i++) {
       await harness.callRpc("createSideChat", {
         sourceThreadId: "thr_source",
         anchorText: "answer",
       });
     }
+
     await harness.runSchedule("empty-fork-cleanup");
     expect(timeline).toHaveBeenCalledTimes(EMPTY_FORK_SWEEP_PAGE_SIZE);
     await harness.runSchedule("empty-fork-cleanup");
@@ -383,26 +444,32 @@ describe("empty-fork sweep", () => {
         visibility: "hidden",
         createdAt: Date.now() - EMPTY_FORK_MAX_AGE_MS - 1,
       });
+
       const archive = vi.fn(async () => ({ ok: true }));
-      const { bb, harness } = await loadPlugin({
+
+      const { api, harness } = await loadPlugin({
         list: async () => [],
         fork: async () => thread,
         archive,
         timeline: async () => timelineResult([]),
         queuedMessages: { list: async () => [] },
       });
+
       await harness.runSchedule("empty-fork-cleanup");
       await harness.callRpc("createSideChat", {
         sourceThreadId: "thr_source",
         anchorText: "answer",
       });
-      await bb.storage.kv.set(`kept-fork:${thread.id}`, true);
+      await api.storage.kv.set(`kept-fork:${thread.id}`, true);
       expect(await harness.emitThreadEvent(event, { thread })).toEqual({
         errors: [],
       });
       await harness.runSchedule("empty-fork-cleanup");
       expect(archive).not.toHaveBeenCalled();
-      expect(await bb.storage.kv.get(`kept-fork:${thread.id}`)).toBeUndefined();
+      expect(
+        await api.storage.kv.get(`kept-fork:${thread.id}`),
+      ).toBeUndefined();
+
       if (event === "thread.archived") {
         expect(
           await harness.emitThreadEvent("thread.unarchived", { thread }),
@@ -419,6 +486,7 @@ describe("empty-fork sweep", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const now = Date.now();
     const old = now - EMPTY_FORK_MAX_AGE_MS - 60_000;
+
     const emptyOldFork = makeThreadResponse({
       id: "thr_empty_old",
       originKind: "fork",
@@ -426,6 +494,7 @@ describe("empty-fork sweep", () => {
       visibility: "hidden",
       createdAt: old,
     });
+
     const repliedOldFork = makeThreadResponse({
       id: "thr_replied_old",
       originKind: "fork",
@@ -433,6 +502,7 @@ describe("empty-fork sweep", () => {
       visibility: "hidden",
       createdAt: old,
     });
+
     const emptyYoungFork = makeThreadResponse({
       id: "thr_empty_young",
       originKind: "fork",
@@ -440,6 +510,7 @@ describe("empty-fork sweep", () => {
       visibility: "hidden",
       createdAt: now - 60_000,
     });
+
     const foreignFork = makeThreadResponse({
       id: "thr_foreign",
       originKind: "fork",
@@ -447,20 +518,24 @@ describe("empty-fork sweep", () => {
       visibility: "hidden",
       createdAt: old,
     });
+
     const list = vi.fn(async () => [
       emptyOldFork,
       repliedOldFork,
       emptyYoungFork,
       foreignFork,
     ]);
+
     const timeline = vi.fn(async ({ threadId }: { threadId: string }) =>
       threadId === "thr_replied_old"
         ? timelineResult([turnRow([conversationRow("a reply", "user")])])
         : timelineResult([conversationRow("assistant only")]),
     );
+
     const archive = vi.fn(async (_args: { threadId: string }) => ({
       ok: true,
     }));
+
     const { harness } = await loadPlugin({
       list,
       timeline,
@@ -497,6 +572,7 @@ describe("empty-fork sweep", () => {
   it("advances the page offset by the forks it left behind", async () => {
     const now = Date.now();
     const old = now - EMPTY_FORK_MAX_AGE_MS - 60_000;
+
     const firstPage = Array.from(
       { length: EMPTY_FORK_SWEEP_PAGE_SIZE },
       (_unused, index) =>
@@ -508,9 +584,11 @@ describe("empty-fork sweep", () => {
           createdAt: old,
         }),
     );
+
     const list = vi.fn(async ({ offset }: { offset?: number }) =>
       offset === 0 ? firstPage : [],
     );
+
     const { harness } = await loadPlugin({
       list,
       timeline: async ({ threadId }: { threadId: string }) =>
@@ -528,6 +606,7 @@ describe("empty-fork sweep", () => {
 
   it("keeps an old empty-timeline fork that has queued-but-unsent input", async () => {
     const now = Date.now();
+
     const fork = makeThreadResponse({
       id: "thr_queued_only",
       originKind: "fork",
@@ -535,9 +614,11 @@ describe("empty-fork sweep", () => {
       visibility: "hidden",
       createdAt: now - EMPTY_FORK_MAX_AGE_MS - 60_000,
     });
+
     const archive = vi.fn(async (_args: { threadId: string }) => ({
       ok: true,
     }));
+
     const { harness } = await loadPlugin({
       list: async () => [fork],
       timeline: async () => timelineResult([]),
@@ -555,6 +636,7 @@ describe("empty-fork sweep", () => {
   it("remembers a kept fork and stops re-reading its timeline", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const now = Date.now();
+
     const fork = makeThreadResponse({
       id: "thr_has_work",
       originKind: "fork",
@@ -562,12 +644,15 @@ describe("empty-fork sweep", () => {
       visibility: "hidden",
       createdAt: now - 60_000,
     });
+
     const timeline = vi.fn(async () =>
       timelineResult([turnRow([conversationRow("a reply", "user")])]),
     );
+
     const archive = vi.fn(async (_args: { threadId: string }) => ({
       ok: true,
     }));
+
     const { harness } = await loadPlugin({
       list: async () => [fork],
       timeline,
@@ -587,6 +672,7 @@ describe("empty-fork sweep", () => {
 
   it("retries a fork whose timeline read failed", async () => {
     const now = Date.now();
+
     const fork = makeThreadResponse({
       id: "thr_unreadable",
       originKind: "fork",
@@ -594,9 +680,11 @@ describe("empty-fork sweep", () => {
       visibility: "hidden",
       createdAt: now - EMPTY_FORK_MAX_AGE_MS - 60_000,
     });
+
     const timeline = vi.fn(async () => {
       throw new Error("timeline unavailable");
     });
+
     const { harness } = await loadPlugin({
       list: async () => [fork],
       timeline,
@@ -612,6 +700,7 @@ describe("empty-fork sweep", () => {
 
   it("fails closed when the queued-message read fails", async () => {
     const now = Date.now();
+
     const fork = makeThreadResponse({
       id: "thr_unreadable_queue",
       originKind: "fork",
@@ -619,9 +708,11 @@ describe("empty-fork sweep", () => {
       visibility: "hidden",
       createdAt: now - EMPTY_FORK_MAX_AGE_MS - 60_000,
     });
+
     const archive = vi.fn(async (_args: { threadId: string }) => ({
       ok: true,
     }));
+
     const { harness } = await loadPlugin({
       list: async () => [fork],
       timeline: async () => timelineResult([]),

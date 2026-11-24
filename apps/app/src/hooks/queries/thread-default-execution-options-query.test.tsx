@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { ResolvedThreadExecutionOptions } from "@bb/domain";
+import type { ResolvedThreadExecutionOptions } from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { threadDefaultExecutionOptionsQueryKey } from "./query-keys";
 import {
@@ -43,9 +43,11 @@ describe("useThreadDefaultExecutionOptions", () => {
   it("replays the thread's last resolution as placeholder data on the next mount", async () => {
     vi.mocked(sdk.threads.defaultExecutionOptions).mockResolvedValue(RESOLVED);
     const first = createQueryClientTestHarness();
+
     const warm = renderHook(() => useThreadDefaultExecutionOptions("thr_1"), {
       wrapper: first.wrapper,
     });
+
     await waitFor(() => expect(warm.result.current.data).toEqual(RESOLVED));
     expect(warm.result.current.isPlaceholderData).toBe(false);
     warm.unmount();
@@ -54,10 +56,12 @@ describe("useThreadDefaultExecutionOptions", () => {
       pendingForever,
     );
     const reload = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useThreadDefaultExecutionOptions("thr_1"),
       { wrapper: reload.wrapper },
     );
+
     expect(result.current.data).toEqual(RESOLVED);
     expect(result.current.isPlaceholderData).toBe(true);
     await waitFor(() =>
@@ -70,9 +74,11 @@ describe("useThreadDefaultExecutionOptions", () => {
   it("does not replay one thread's resolution for another", async () => {
     vi.mocked(sdk.threads.defaultExecutionOptions).mockResolvedValue(RESOLVED);
     const first = createQueryClientTestHarness();
+
     const warm = renderHook(() => useThreadDefaultExecutionOptions("thr_1"), {
       wrapper: first.wrapper,
     });
+
     await waitFor(() => expect(warm.result.current.data).toEqual(RESOLVED));
     warm.unmount();
 
@@ -80,10 +86,12 @@ describe("useThreadDefaultExecutionOptions", () => {
       pendingForever,
     );
     const reload = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useThreadDefaultExecutionOptions("thr_2"),
       { wrapper: reload.wrapper },
     );
+
     expect(result.current.data).toBeUndefined();
     expect(result.current.isPlaceholderData).toBe(false);
   });
@@ -91,9 +99,11 @@ describe("useThreadDefaultExecutionOptions", () => {
   it("does not remember an unresolved (null) answer", async () => {
     vi.mocked(sdk.threads.defaultExecutionOptions).mockResolvedValue(null);
     const first = createQueryClientTestHarness();
+
     const warm = renderHook(() => useThreadDefaultExecutionOptions("thr_1"), {
       wrapper: first.wrapper,
     });
+
     await waitFor(() => expect(warm.result.current.data).toBeNull());
     warm.unmount();
 
@@ -101,10 +111,12 @@ describe("useThreadDefaultExecutionOptions", () => {
       pendingForever,
     );
     const reload = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useThreadDefaultExecutionOptions("thr_1"),
       { wrapper: reload.wrapper },
     );
+
     expect(result.current.data).toBeUndefined();
   });
 
@@ -119,10 +131,12 @@ describe("useThreadDefaultExecutionOptions", () => {
       )
       .mockResolvedValue(RESOLVED);
     const { queryClient, wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useThreadDefaultExecutionOptions("thr_1"),
       { wrapper },
     );
+
     await waitFor(() =>
       expect(sdk.threads.defaultExecutionOptions).toHaveBeenCalledTimes(1),
     );
@@ -143,17 +157,19 @@ describe("useThreadDefaultExecutionOptions", () => {
 
   it("ignores a stored value that no longer matches the schema", async () => {
     window.localStorage.setItem(
-      "bb.thread-execution-options.1.thr_1",
+      "omnyo.thread-execution-options.1.thr_1",
       JSON.stringify({ model: "gpt-5.6-sol", reasoningLevel: "cosmic" }),
     );
     vi.mocked(sdk.threads.defaultExecutionOptions).mockImplementation(
       pendingForever,
     );
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useThreadDefaultExecutionOptions("thr_1"),
       { wrapper },
     );
+
     expect(result.current.data).toBeUndefined();
   });
 });

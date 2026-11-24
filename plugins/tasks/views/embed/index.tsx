@@ -2,8 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   PluginMessageDirectiveProps,
   PluginThreadPanelProps,
-} from "@get-bb/plugin-sdk";
-import { useBbNavigate, useRealtime } from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk";
+import {
+  experimental_useAppNavigate,
+  useRealtime,
+} from "@omnyo/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +17,7 @@ import { PANEL_PATH, tasksRouteToSubPath } from "../../shell/routes.js";
 import { DetailView } from "../detail/index.js";
 import { PRIORITY_LABELS, STATUS_LABELS } from "../list/lib.js";
 import { PriorityIcon, StatusIcon } from "../list/icons.js";
+import { Hint } from "../../components/hint.js";
 
 const TASK_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,9}-\d+$/;
 
@@ -56,10 +60,12 @@ function useTaskEmbed(taskKey: string): {
   const onEvent = useCallback(
     (matches: (task: Task) => boolean) => {
       const current = stateRef.current;
+
       if (current.kind !== "found" || matches(current.task)) refresh();
     },
     [refresh],
   );
+
   useRealtime("tasks:changed", (payload) => {
     const taskId = isRecord(payload) ? payload.taskId : undefined;
     onEvent((task) => typeof taskId !== "string" || taskId === task.id);
@@ -89,30 +95,35 @@ function OpenInTasksButton({
   label: string;
   subPath?: string;
 }) {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   return (
-    <Button
-      className="size-8 shrink-0"
-      size="icon"
-      variant="ghost"
-      aria-label={label}
-      onClick={() =>
-        navigate.toPluginPanel(
-          PANEL_PATH,
-          subPath === undefined ? {} : { subPath },
-        )
-      }
-    >
-      <Icon name="ArrowUpRight" className="size-4" />
-    </Button>
+    <Hint label={label}>
+      <Button
+        className="relative z-10 shrink-0 text-muted-foreground"
+        size="icon-sm"
+        variant="ghost"
+        aria-label={label}
+        onClick={() =>
+          navigate.toPluginPanel(
+            PANEL_PATH,
+            subPath === undefined ? {} : { subPath },
+          )
+        }
+      >
+        <Icon name="ArrowUpRight" className="size-4" />
+      </Button>
+    </Hint>
   );
 }
 
 function CardShell({
   dashed = false,
+  interactive = false,
   children,
 }: {
   dashed?: boolean;
+  interactive?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -120,7 +131,7 @@ function CardShell({
       className={
         dashed
           ? "my-3 flex h-11 items-center gap-1 rounded-lg border border-dashed border-border bg-surface-recessed-solid px-2"
-          : "my-3 flex h-11 items-center gap-1 rounded-lg border border-border bg-card px-2 shadow-sm transition-colors hover:bg-state-hover"
+          : `@container relative my-3 flex h-11 items-center gap-1 rounded-lg border border-border bg-card px-2 shadow-sm${interactive ? " select-none transition-colors hover:bg-state-hover" : ""}`
       }
     >
       {children}
@@ -133,14 +144,16 @@ function embedAriaLabel(task: Task): string {
     `${task.key} — ${task.title}`,
     STATUS_LABELS[task.status].toLowerCase(),
   ];
+
   if (task.priority !== "none") {
     parts.push(`${PRIORITY_LABELS[task.priority].toLowerCase()} priority`);
   }
+
   return `${parts.join(", ")} — open in side panel`;
 }
 
 export function TaskDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const taskKey = attributes.key?.trim() ?? "";
   const fallbackTitle = attributes.title?.trim() || null;
   const validKey = TASK_KEY_PATTERN.test(taskKey);
@@ -148,8 +161,14 @@ export function TaskDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
 
   if (!validKey) {
     return (
-      <div className="my-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-        Invalid task link. Expected a task key like TSK-4.
+      <div
+        role="note"
+        className="my-3 flex h-11 items-center gap-2 rounded-lg border border-surface-destructive-border bg-surface-destructive px-3 text-sm text-destructive-text"
+      >
+        <Icon name="AlertCircle" className="size-4 shrink-0" />
+        <span className="min-w-0 truncate">
+          This task link is broken. Task keys look like TSK-4.
+        </span>
       </div>
     );
   }
@@ -220,12 +239,14 @@ export function TaskDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
   }
 
   const { task } = state;
+
   const openInSidePanel = () => {
     const opened = navigate.openThreadPanel({
       actionId: "task",
       title: task.key,
       params: { taskKey: task.key },
     });
+
     if (!opened) {
       navigate.toPluginPanel(PANEL_PATH, {
         subPath: taskDetailSubPath(task.key),
@@ -234,10 +255,10 @@ export function TaskDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
   };
 
   return (
-    <CardShell>
+    <CardShell interactive>
       <button
         type="button"
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:ring-1 focus-visible:after:ring-ring"
         aria-label={embedAriaLabel(task)}
         onClick={openInSidePanel}
       >
@@ -257,10 +278,20 @@ export function TaskDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
           {task.title}
         </span>
         {task.priority !== "none" ? (
-          <span aria-hidden className="shrink-0">
+          <span
+            aria-hidden
+            className="shrink-0"
+            title={`${PRIORITY_LABELS[task.priority]} priority`}
+          >
             <PriorityIcon priority={task.priority} />
           </span>
         ) : null}
+        <span
+          aria-hidden
+          className="hidden shrink-0 rounded-full bg-state-hover px-2 py-0.5 text-xs font-medium text-muted-foreground @sm:inline"
+        >
+          {STATUS_LABELS[task.status]}
+        </span>
       </button>
       <OpenInTasksButton
         label={`Open ${task.key} in Tasks`}
@@ -275,6 +306,7 @@ function TaskEmbedPanelContent({ params }: PluginThreadPanelProps) {
     isRecord(params) && typeof params.taskKey === "string"
       ? params.taskKey
       : null;
+
   if (taskKey === null || !TASK_KEY_PATTERN.test(taskKey.trim())) {
     return (
       <div className="p-3 text-sm text-muted-foreground">
@@ -282,6 +314,7 @@ function TaskEmbedPanelContent({ params }: PluginThreadPanelProps) {
       </div>
     );
   }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pb-2">

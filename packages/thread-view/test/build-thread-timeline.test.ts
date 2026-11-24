@@ -1,4 +1,4 @@
-import { threadScope, turnScope } from "@bb/domain";
+import { threadScope, turnScope } from "@omnyo/domain";
 import type {
   ApprovalPendingInteractionResolution,
   JsonObject,
@@ -9,7 +9,7 @@ import type {
   ThreadEventFileChange,
   ThreadEventItemStatus,
   UserQuestionPendingInteractionResolution,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   TimelineApprovalWorkRow,
   ThreadContextWindowUsage,
@@ -21,7 +21,7 @@ import type {
   TimelineRow,
   TimelineSystemRow,
   TimelineToolWorkRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
   buildTimelineRowTitle,
@@ -49,6 +49,7 @@ interface ContextWindowUsageEventArgs {
 
 interface FileChangeItemEventArgs {
   changes: ThreadEventFileChange[];
+  error?: string;
   itemId?: string;
   seq: number;
   status?: ThreadEventItemStatus;
@@ -190,11 +191,14 @@ interface BackgroundTaskStartedEventArgs {
 }
 
 type BuildTimelineRowsThreadStatus = "active" | "idle";
+
 type TimelineConversationRow = Extract<TimelineRow, { kind: "conversation" }>;
+
 type TimelineDelegationWorkRow = Extract<
   TimelineRow,
   { kind: "work"; workKind: "delegation" }
 >;
+
 type TimelineWorkflowRow = Extract<
   TimelineRow,
   { kind: "work"; workKind: "workflow" }
@@ -268,6 +272,7 @@ function contextWindowUsageEvent({
 
 function fileChangeItemEvent({
   changes,
+  error,
   itemId = "file-edit-1",
   seq,
   status,
@@ -285,6 +290,7 @@ function fileChangeItemEvent({
         changes,
         status: status ?? (type === "item/completed" ? "completed" : "pending"),
         approvalStatus: null,
+        ...(error === undefined ? {} : { error }),
       },
     },
     meta: {
@@ -498,6 +504,7 @@ function backgroundTaskStartedEvent({
     skipTranscript: false,
     parentToolCallId,
   };
+
   return {
     event: {
       type: "item/started",
@@ -824,9 +831,11 @@ function fileChangeRowIdByPath(
   rows: readonly TimelineFileChangeWorkRow[],
 ): Record<string, string> {
   const idByPath: Record<string, string> = {};
+
   for (const row of rows) {
     idByPath[row.change.path] = row.id;
   }
+
   return idByPath;
 }
 
@@ -857,6 +866,7 @@ describe("buildThreadTimelineFromEvents", () => {
     "renders a %s tool call as a generic tool row: no tool-name table derives an intent",
     (tool) => {
       const toolArgs = { path: "src/app.ts", pattern: "TODO" };
+
       const rows = buildTimelineRows([
         turnStartedEvent({ seq: 1 }),
         toolCallItemEvent({ seq: 2, tool, toolArgs, type: "item/started" }),
@@ -868,11 +878,14 @@ describe("buildThreadTimelineFromEvents", () => {
           type: "item/completed",
         }),
       ]);
+
       const [row] = collectToolRows(rows);
       expect(row).toBeDefined();
+
       if (!row) {
         throw new Error(`Expected a projected ${tool} tool row`);
       }
+
       expect(
         buildTimelineRowTitle(row, {
           summaryStyle: "bundle",
@@ -892,6 +905,7 @@ describe("buildThreadTimelineFromEvents", () => {
         type: "item/completed",
       }),
     ]);
+
     const [row] = collectToolRows(rows);
     expect(row).toEqual(
       expect.objectContaining({
@@ -902,13 +916,87 @@ describe("buildThreadTimelineFromEvents", () => {
     expect(row).not.toHaveProperty("statusLabels");
   });
 
+  it("builds the same timeline with or without held-turn main-run updates", () => {
+    const build = (withMainRun: boolean) => {
+      const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+      const rows = [
+        event.turnStarted({ turnId: "turn-1" }),
+        event.assistantCompleted({ itemId: "msg-1", text: "Waiting." }),
+        ...(withMainRun
+          ? [
+              event.turnMainRunUpdated({ state: "idle" }),
+              event.turnMainRunUpdated({ state: "running" }),
+            ]
+          : []),
+        event.assistantCompleted({ itemId: "msg-2", seq: 5, text: "Done." }),
+      ];
+
+      return buildThreadTimelineFromEvents({
+        acceptedClientRequestContext: EMPTY_ACCEPTED_CLIENT_REQUEST_CONTEXT,
+        contextWindowEvents: [],
+        events: fromRows(rows),
+        options: {
+          completedTurnDisplay: "collapse",
+          includeDiagnosticOperations: true,
+          includeNestedRows: true,
+          isLatestPage: true,
+          threadName: "",
+          threadStatus: "active",
+          workspaceRoot: null,
+        },
+      });
+    };
+
+    const withMainRun = build(true);
+    expect(JSON.stringify(withMainRun.rows)).not.toContain("mainRun");
+    expect(withMainRun.rows).toEqual(build(false).rows);
+  });
+
+  it.each([2048, 2049])(
+    "preserves the full %i-character command while bounding inferred summaries",
+    (length) => {
+      const event = createTimelineEventFactory({ threadId: "thread-1" });
+      const prefix = "rg needle src; printf '%s' '";
+      const command = `${prefix}${"x".repeat(length - prefix.length - 1)}'`;
+
+      const [row] = workRowsOfKind(
+        buildTimelineRows(
+          fromRows([
+            event.turnStarted({ turnId: "turn-1" }),
+            event.commandStarted({ itemId: "bounded", command }),
+            event.commandCompleted({ itemId: "bounded", command, exitCode: 0 }),
+            event.turnCompleted({ turnId: "turn-1" }),
+          ]),
+        ),
+        "command",
+      );
+
+      if (row === undefined) throw new Error("Missing command row");
+      expect(row.command).toBe(command);
+      expect(row.activityIntents).toEqual(
+        length <= 2048
+          ? [{ type: "search", command, query: "needle", path: "src" }]
+          : [],
+      );
+      expect(
+        buildTimelineRowTitle(row, {
+          summaryStyle: "bundle",
+          workStyle: "default",
+        }).plain,
+      ).toMatch(length <= 2048 ? /^Searched for needle/ : /^Ran rg needle src/);
+    },
+  );
+
   it("hides a delivered tool result whose tool row is suppressed and shows one whose tool row is not", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const subject = (toolName: string, suppress: boolean) => ({
       kind: "tool-call" as const,
       toolName,
       suppress,
     });
+
     const fixture = renderTimelineFixture({
       events: [
         event.clientTurnRequested({ text: "start" }),
@@ -936,6 +1024,7 @@ describe("buildThreadTimelineFromEvents", () => {
     const userRows = fixture.rows.filter(
       (row) => row.kind === "conversation" && row.role === "user",
     );
+
     expect(
       userRows.map((row) => row.kind === "conversation" && row.text),
     ).toEqual(["start", "Your earlier grill_round tool call has finished."]);
@@ -944,6 +1033,7 @@ describe("buildThreadTimelineFromEvents", () => {
   it("extracts the exact active Plan turn id from the accepted input scope", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const requestId = "creq_23456789ab";
+
     const events = fromRows([
       event.clientTurnRequested({
         requestId,
@@ -977,6 +1067,7 @@ describe("buildThreadTimelineFromEvents", () => {
   it("gates plan mode on the declared plan command, not the provider id", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const requestId = "creq_3456789abc";
+
     const events = fromRows([
       event.clientTurnRequested({
         requestId,
@@ -1116,7 +1207,9 @@ describe("buildThreadTimelineFromEvents", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const parentToolCallId = "call-helper-1";
+
     const rows = buildTimelineRows(
       fromRows([
         event.turnStarted({ seq: 1 }),
@@ -1181,6 +1274,7 @@ describe("buildThreadTimelineFromEvents", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const childless: ReadonlyArray<{
       status: "failed" | "completed";
       result: string;
@@ -1198,6 +1292,7 @@ describe("buildThreadTimelineFromEvents", () => {
         verb: "Ran subagent:",
       },
     ];
+
     for (const { status, result, verb } of childless) {
       const rows = buildTimelineRows(
         fromRows([
@@ -1226,6 +1321,7 @@ describe("buildThreadTimelineFromEvents", () => {
           }),
         ]),
       );
+
       const [delegation] = collectDelegationRows(rows);
       expect(delegation, status).toMatchObject({
         id: "thread-1:delegation:toolu_agent_1",
@@ -1274,6 +1370,7 @@ describe("buildThreadTimelineFromEvents", () => {
         ]),
       ),
     );
+
     expect(childful).toHaveLength(1);
     expect(childful[0]).toMatchObject({
       id: "thread-1:delegation:toolu_agent_2",
@@ -1308,6 +1405,7 @@ describe("buildThreadTimelineFromEvents", () => {
         }),
       ]),
     );
+
     expect(collectDelegationRows(presented)).toEqual([]);
     expect(collectToolRows(presented).map((row) => row.id)).toEqual([
       "thread-1:tool:presented-agent",
@@ -1320,8 +1418,10 @@ describe("buildThreadTimelineFromEvents", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const parentToolCallId = "toolu-agent-1";
     const subagentDescription = "Build Direction A Tools hub Ladle story";
+
     const rows = buildTimelineRows([
       ...fromRows([
         event.turnStarted({ seq: 1 }),
@@ -1362,9 +1462,11 @@ describe("buildThreadTimelineFromEvents", () => {
     const [delegation] = collectDelegationRows(rows);
 
     expect(delegation).toBeDefined();
+
     if (!delegation) {
       throw new Error("Expected a delegation row");
     }
+
     expect(
       collectWorkflowRows(delegation.childRows ?? []).map(
         (row) => row.taskType,
@@ -1429,6 +1531,7 @@ describe("buildThreadTimelineFromEvents", () => {
 
   it("does not project thread-start provider-session markers as provisioning rows", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const providerSessionMarker = event.threadProvisioning({
       provisioningId: "thread-start:exec_1",
       status: "completed",
@@ -1456,6 +1559,7 @@ describe("buildThreadTimelineFromEvents", () => {
 
   it("normalizes carriage-return provisioning output in operation detail", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const rows = buildTimelineRows(
       fromRows([
         event.threadProvisioning({
@@ -1465,7 +1569,7 @@ describe("buildThreadTimelineFromEvents", () => {
               type: "output",
               key: "git-worktree-output-1",
               text: [
-                "Preparing worktree (new branch 'bb/example')\n",
+                "Preparing worktree (new branch 'omnyo/example')\n",
                 "Updating files:  44% (1017/2287)\r",
                 "Updating files:  45% (1030/2287)\r",
                 "Updating files: 100% (2287/2287), done.",
@@ -1477,13 +1581,14 @@ describe("buildThreadTimelineFromEvents", () => {
     );
 
     const [row] = rows;
+
     if (!row || row.kind !== "system") {
       throw new Error("Expected a system row");
     }
 
     expect(row.detail).toBe(
       [
-        "Preparing worktree (new branch 'bb/example')",
+        "Preparing worktree (new branch 'omnyo/example')",
         "Updating files: 100% (2287/2287), done.",
       ].join("\n"),
     );
@@ -1503,7 +1608,9 @@ describe("buildThreadTimelineFromEvents", () => {
         type: "item/completed",
       }),
     ]);
+
     const [completedRow] = collectImageViewRows(completedRows);
+
     if (!completedRow) {
       throw new Error("Expected an image view row");
     }
@@ -1526,7 +1633,9 @@ describe("buildThreadTimelineFromEvents", () => {
       ],
       "active",
     );
+
     const [pendingRow] = collectImageViewRows(pendingRows);
+
     if (!pendingRow) {
       throw new Error("Expected an image view row");
     }
@@ -1544,7 +1653,9 @@ describe("buildThreadTimelineFromEvents", () => {
       imageGenerationItemEvent({ seq: 2, type: "item/started" }),
       imageGenerationItemEvent({ seq: 3, type: "item/completed" }),
     ]);
+
     const [row] = collectImageGenerationRows(rows);
+
     if (!row) {
       throw new Error("Expected an image generation row");
     }
@@ -1598,7 +1709,9 @@ describe("buildThreadTimelineFromEvents", () => {
         meta: { id: "event-2", seq: 2, createdAt: 2 },
       },
     ]);
+
     const [row] = collectImageGenerationRows(rows);
+
     if (!row) {
       throw new Error("Expected a legacy image generation row");
     }
@@ -1735,10 +1848,12 @@ describe("buildThreadTimelineFromEvents", () => {
 
   it("keeps an accepted steer's request seq as its message seq", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const steerRequest = event.clientTurnRequested({
       target: { kind: "steer", expectedTurnId: "turn-1" },
       text: "Also check the tests",
     });
+
     const events = fromRows([
       event.turnStarted({ turnId: "turn-1" }),
       steerRequest,
@@ -1747,6 +1862,7 @@ describe("buildThreadTimelineFromEvents", () => {
         turnId: "turn-1",
       }),
     ]);
+
     const [, requestEvent, acceptedEvent] = events;
 
     const userRows = rowsOfKind(
@@ -1770,10 +1886,12 @@ describe("buildThreadTimelineFromEvents", () => {
   it("uses accepted context to suppress pending steers without rendering future accepted rows", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const turnStarted = event.turnStarted({ turnId: "turn-1" });
+
     const steerRequest = event.clientTurnRequested({
       target: { kind: "auto", expectedTurnId: "turn-1" },
       text: "Please account for the restart",
     });
+
     const acceptedContext = fromRows([
       event.inputAccepted({
         clientRequestId: steerRequest.data.requestId,
@@ -1796,12 +1914,53 @@ describe("buildThreadTimelineFromEvents", () => {
     ).toHaveLength(0);
   });
 
+  it("renders a steer the provider accepted after Omnyo marked it unconfirmed as accepted only", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+    const steerRequest = event.clientTurnRequested({
+      target: { kind: "steer", expectedTurnId: "turn-1" },
+      text: "Late confirmed steer",
+    });
+
+    const rows = buildTimelineRows(
+      fromRows([
+        event.turnStarted({ turnId: "turn-1" }),
+        steerRequest,
+        event.turnCompleted({ turnId: "turn-1" }),
+        event.clientTurnRejected({
+          requestId: steerRequest.data.requestId,
+          reason: "steer_unconfirmed",
+          message: "The turn ended before the agent confirmed this steer",
+        }),
+        event.turnStarted({ turnId: "turn-2" }),
+        event.inputAccepted({
+          clientRequestId: steerRequest.data.requestId,
+          turnId: "turn-2",
+        }),
+        event.turnCompleted({ turnId: "turn-2" }),
+      ]),
+      "idle",
+    );
+
+    const userRows = rows.filter(
+      (row) => row.kind === "conversation" && row.role === "user",
+    );
+
+    expect(userRows).toHaveLength(1);
+    expect(userRows[0]).toMatchObject({ text: "Late confirmed steer" });
+    expect(userRows[0]).not.toMatchObject({
+      turnRequest: { status: "rejected" },
+    });
+  });
+
   it("uses rejected context to render a failed steer across a page boundary", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const steerRequest = event.clientTurnRequested({
       target: { kind: "steer", expectedTurnId: "turn-1" },
       text: "Late steer",
     });
+
     const rejectedContext = fromRows([
       event.clientTurnRejected({ requestId: steerRequest.data.requestId }),
     ]);
@@ -1827,11 +1986,14 @@ describe("buildThreadTimelineFromEvents", () => {
   it("uses accepted context to classify stale steers as messages when the accepted turn is visible", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const turnStarted = event.turnStarted({ turnId: "turn-1" });
+
     const steerRequest = event.clientTurnRequested({
       target: { kind: "auto", expectedTurnId: "turn-1" },
       text: "Start a fresh attempt",
     });
+
     const fallbackTurnStarted = event.turnStarted({ turnId: "turn-2" });
+
     const acceptedContext = fromRows([
       event.inputAccepted({
         clientRequestId: steerRequest.data.requestId,
@@ -1848,6 +2010,7 @@ describe("buildThreadTimelineFromEvents", () => {
         rejectedClientRequestEvents: [],
       },
     );
+
     const userRows = rows.filter(
       (row) => row.kind === "conversation" && row.role === "user",
     );
@@ -1876,6 +2039,7 @@ describe("buildThreadTimelineFromEvents", () => {
     const assistantRows = collectConversationRows(rows).filter(
       (row) => row.role === "assistant",
     );
+
     expect(assistantRows).toEqual([
       expect.objectContaining({
         text: "Final plan text",
@@ -2057,6 +2221,7 @@ describe("buildThreadTimelineFromEvents", () => {
   it("falls back to a generic title and keeps the full message in the body when an error is too long to read inline", () => {
     const longMessage =
       "There's an issue with the selected model (opus-4.7). It may not exist or you may not have access to it. Run --model to pick a different model.";
+
     const rows = buildTimelineRows([
       turnStartedEvent({ seq: 1 }),
       providerErrorEvent({ detail: longMessage, seq: 2 }),
@@ -2168,6 +2333,7 @@ describe("buildThreadTimelineFromEvents", () => {
         meta: { id: "event-2", seq: 2, createdAt: 2 },
       },
     ]);
+
     expect(rows.filter((row) => row.kind === "work")).toEqual([
       expect.objectContaining({
         workKind: "form",
@@ -2205,6 +2371,7 @@ describe("buildThreadTimelineFromEvents", () => {
       },
       meta: { id: `event-${seq}`, seq, createdAt: seq },
     });
+
     const rows = buildTimelineRows(
       [
         turnStartedEvent({ seq: 1 }),
@@ -2235,11 +2402,15 @@ describe("buildThreadTimelineFromEvents", () => {
     const flattened = rows.flatMap((row) =>
       row.kind === "turn" ? (row.children ?? []) : [row],
     );
+
     expect(
       flattened.flatMap((row) => {
         if (row.kind !== "work") return [];
+
         if (row.workKind === "form") return [row.interactionId];
+
         if (row.workKind === "tool") return [row.toolName];
+
         return [];
       }),
     ).toEqual(["before_request", "pint-plugin", "after_request", "latest"]);
@@ -2424,6 +2595,7 @@ describe("buildThreadTimelineFromEvents", () => {
 
   it("preserves permission grant interrupted status reason on timeline rows", () => {
     const statusReason = "Thread stopped by user request";
+
     const rows = buildTimelineRows([
       turnStartedEvent({ seq: 0 }),
       permissionGrantLifecycleEvent({
@@ -2591,6 +2763,7 @@ describe("buildThreadTimelineFromEvents", () => {
       },
       meta: { id: `event-${seq}`, seq, createdAt: seq },
     });
+
     const collectFormRows = (rows: readonly TimelineRow[]) =>
       rows.filter((row) => row.kind === "work" && row.workKind === "form");
 
@@ -2645,6 +2818,7 @@ describe("buildThreadTimelineFromEvents", () => {
           freeText: "Use staging until QA signs off.",
         },
       };
+
       const rows = buildTimelineRows([
         turnStartedEvent({ seq: 0 }),
         userQuestionLifecycleEvent({
@@ -2682,6 +2856,7 @@ describe("buildThreadTimelineFromEvents", () => {
 
   it("preserves terminal user-question interrupted rows after late resolving events", () => {
     const statusReason = "Thread stopped by user request";
+
     const rows = buildTimelineRows([
       turnStartedEvent({ seq: 0 }),
       userQuestionLifecycleEvent({
@@ -2733,6 +2908,7 @@ describe("buildThreadTimelineFromEvents", () => {
           type: "item/completed",
         }),
       ]);
+
       expect(collectToolRows(rows)).toEqual([
         expect.objectContaining({ status: "completed", toolName: tool }),
       ]);
@@ -2775,19 +2951,23 @@ describe("buildThreadTimelineFromEvents", () => {
         diff: "@@ -1 +1 @@\n-old b\n+new b",
       },
     ];
+
     const reorderedChanges = [initialChanges[1], initialChanges[0]].filter(
       (change): change is ThreadEventFileChange => Boolean(change),
     );
+
     const startedEvent = fileChangeItemEvent({
       changes: initialChanges,
       seq: 1,
       type: "item/started",
     });
+
     const turnStarted = turnStartedEvent({ seq: 0 });
 
     const initialRows = collectFileChangeRows(
       buildTimelineRows([turnStarted, startedEvent]),
     );
+
     const finalRows = collectFileChangeRows(
       buildTimelineRows([
         turnStarted,
@@ -2803,6 +2983,32 @@ describe("buildThreadTimelineFromEvents", () => {
     expect(fileChangeRowIdByPath(finalRows)).toEqual(
       fileChangeRowIdByPath(initialRows),
     );
+  });
+
+  it("projects a failed file change's error onto each of its rows", () => {
+    const changes: ThreadEventFileChange[] = [
+      { path: "src/a.ts", kind: "update" },
+      { path: "src/b.ts", kind: "update", diff: "@@ -1 +1 @@\n-old\n+new" },
+    ];
+
+    const rows = collectFileChangeRows(
+      buildTimelineRows([
+        turnStartedEvent({ seq: 0 }),
+        fileChangeItemEvent({ changes, seq: 1, type: "item/started" }),
+        fileChangeItemEvent({
+          changes,
+          error: "Could not find the exact text in src/a.ts.",
+          seq: 2,
+          status: "failed",
+          type: "item/completed",
+        }),
+      ]),
+    );
+
+    expect(rows.map((row) => [row.status, row.stderr])).toEqual([
+      ["error", "Could not find the exact text in src/a.ts."],
+      ["error", "Could not find the exact text in src/a.ts."],
+    ]);
   });
 
   it("drops stale file-change rows that are missing from later provider changes", () => {
@@ -2822,7 +3028,9 @@ describe("buildThreadTimelineFromEvents", () => {
       seq: 1,
       type: "item/started",
     });
+
     const turnStarted = turnStartedEvent({ seq: 0 });
+
     const finalRows = collectFileChangeRows(
       buildTimelineRows([
         turnStarted,
@@ -2854,6 +3062,7 @@ describe("buildThreadTimelineFromEvents", () => {
       },
       meta: { id: "event-2", seq: 2, createdAt: 2 },
     };
+
     const turn2FileChange: ThreadEventWithMeta = {
       event: {
         type: "item/completed",
@@ -2912,11 +3121,13 @@ describe("buildThreadTimelineFromEvents", () => {
       output: string,
     ): ThreadEventWithMeta[] {
       const scope = turnScope(turnId);
+
       const change = {
         path: "src/a.ts",
         kind: "update" as const,
         diff: `@@ -1 +1 @@\n-old a\n+${turnId} a`,
       };
+
       return [
         {
           event: {
@@ -3008,11 +3219,13 @@ describe("buildThreadTimelineFromEvents", () => {
       seq: 1,
       type: "item/started",
     });
+
     const turnStarted = turnStartedEvent({ seq: 0 });
 
     const initialRows = collectFileChangeRows(
       buildTimelineRows([turnStarted, startedEvent]),
     );
+
     const finalRows = collectFileChangeRows(
       buildTimelineRows([
         turnStarted,
@@ -3041,7 +3254,8 @@ describe("buildThreadTimelineFromEvents", () => {
   });
 
   it("relativizes absolute file-change paths against the workspace root", () => {
-    const workspaceRoot = "/Users/dev/worktrees/env_x/bb";
+    const workspaceRoot = "/Users/dev/worktrees/env_x/omnyo";
+
     const rows = collectFileChangeRows(
       buildTimelineRows(
         [
@@ -3089,7 +3303,7 @@ describe("buildThreadTimelineFromEvents", () => {
           }),
         ],
         "idle",
-        "/Users/dev/worktrees/env_x/bb",
+        "/Users/dev/worktrees/env_x/omnyo",
       ),
     );
 
@@ -3103,7 +3317,9 @@ it("keeps a canonical disclosure ID when completed reasoning gains a delegation 
     threadId: "thread-1",
     turnId: "turn-1",
   });
+
   const parentToolCallId = "helper";
+
   const events = [
     event.turnStarted({ seq: 1 }),
     event.toolCallStarted({
@@ -3119,6 +3335,7 @@ it("keeps a canonical disclosure ID when completed reasoning gains a delegation 
       delta: "Inspect the helper.",
     }),
   ];
+
   const live = buildThreadTimelineFromEvents({
     acceptedClientRequestContext: EMPTY_ACCEPTED_CLIENT_REQUEST_CONTEXT,
     contextWindowEvents: [],
@@ -3133,6 +3350,7 @@ it("keeps a canonical disclosure ID when completed reasoning gains a delegation 
       workspaceRoot: null,
     },
   });
+
   const rows = buildTimelineRows(
     fromRows([
       ...events,
@@ -3149,6 +3367,7 @@ it("keeps a canonical disclosure ID when completed reasoning gains a delegation 
       }),
     ]),
   );
+
   const [delegation] = collectDelegationRows(rows);
   const completed = delegation?.childRows?.find((row) => row.kind === "system");
   expect(live.activeThinking?.id).toBeTruthy();

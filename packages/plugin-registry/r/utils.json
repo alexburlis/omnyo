@@ -3,7 +3,7 @@
   "name": "utils",
   "type": "registry:lib",
   "title": "utils",
-  "description": "BB lib \"utils\" — vendored from the BB app's own source (version-matched to this BB release).",
+  "description": "Omnyo lib \"utils\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
   "dependencies": [
     "clsx",
     "tailwind-merge"
@@ -11,7 +11,7 @@
   "files": [
     {
       "path": "registry/lib/utils.ts",
-      "content": "import { type ClassValue, clsx } from \"clsx\";\nimport { twMerge } from \"tailwind-merge\";\n\nexport function cn(...inputs: ClassValue[]) {\n  return twMerge(clsx(inputs));\n}\n\nexport function formatHomePathForDisplay(pathValue: string): string {\n  const homePrefix =\n    pathValue.match(/^\\/Users\\/[^/]+(?=\\/|$)/)?.[0] ??\n    pathValue.match(/^\\/home\\/[^/]+(?=\\/|$)/)?.[0] ??\n    pathValue.match(/^\\/root(?=\\/|$)/)?.[0] ??\n    pathValue.match(/^[A-Za-z]:[\\\\/]Users[\\\\/][^\\\\/]+(?=[\\\\/]|$)/i)?.[0];\n  return homePrefix === undefined\n    ? pathValue\n    : `~${pathValue.slice(homePrefix.length)}`;\n}\n",
+      "content": "import { type ClassValue, clsx } from \"clsx\";\nimport { extendTailwindMerge } from \"tailwind-merge\";\n\nconst twMerge = extendTailwindMerge({\n  extend: {\n    theme: {\n      text: [\"2xs\", \"prose\", \"lead\", \"display\", \"numeral\"],\n      shadow: [\"control\", \"control-primary\", \"card\", \"card-hover\", \"lift\"],\n    },\n  },\n});\n\nexport function cn(...inputs: ClassValue[]) {\n  return twMerge(clsx(inputs));\n}\n\nexport function formatHomePathForDisplay(pathValue: string): string {\n  const homePrefix =\n    pathValue.match(/^\\/Users\\/[^/]+(?=\\/|$)/)?.[0] ??\n    pathValue.match(/^\\/home\\/[^/]+(?=\\/|$)/)?.[0] ??\n    pathValue.match(/^\\/root(?=\\/|$)/)?.[0] ??\n    pathValue.match(/^[A-Za-z]:[\\\\/]Users[\\\\/][^\\\\/]+(?=[\\\\/]|$)/i)?.[0];\n\n  return homePrefix === undefined\n    ? pathValue\n    : `~${pathValue.slice(homePrefix.length)}`;\n}\n",
       "type": "registry:lib",
       "target": "lib/utils.ts"
     }

@@ -59,6 +59,7 @@ describe("marketplace HTTP policy", () => {
         { address: "127.0.0.1", family: 4 },
       ]);
     });
+
     const result = new Promise<LookupAddress[]>((resolve, reject) => {
       lookup(
         "marketplace.example.com",
@@ -66,12 +67,15 @@ describe("marketplace HTTP policy", () => {
         (error, addresses) => {
           if (error !== null) {
             reject(error);
+
             return;
           }
+
           resolve(addresses as LookupAddress[]);
         },
       );
     });
+
     await expect(result).rejects.toThrow(/non-public address 127\.0\.0\.1/u);
   });
 
@@ -79,6 +83,7 @@ describe("marketplace HTTP policy", () => {
     const response = new Response("{}", {
       headers: { "content-length": "1025" },
     });
+
     await expect(
       boundedResponseJson(response, 1024, "npm registry metadata"),
     ).rejects.toThrow(/exceeds 1024 bytes/u);
@@ -89,6 +94,7 @@ describe("marketplace HTTP policy", () => {
       response.writeHead(304);
       response.end();
     });
+
     await new Promise<void>((resolve) =>
       server.listen(0, "127.0.0.1", resolve),
     );
@@ -96,22 +102,27 @@ describe("marketplace HTTP policy", () => {
     const socketErrors: Error[] = [];
     const controller = new AbortController();
     let finishRequest!: () => void;
+
     const requestClosed = new Promise<void>((resolve) => {
       finishRequest = resolve;
     });
+
     const fetchMarketplace = createPublicMarketplaceFetch({
       request: (url, options, callback) => {
         const outgoing = httpRequest(
           { ...options, host: "127.0.0.1", port, path: url.pathname },
           callback,
         );
+
         outgoing.once("close", finishRequest);
         outgoing.on("socket", (socket) => {
           socket.on("error", (error: Error) => socketErrors.push(error));
         });
+
         return outgoing;
       },
     });
+
     try {
       const response = await fetchMarketplace(
         "https://marketplace.test/marketplace.json",
@@ -121,6 +132,7 @@ describe("marketplace HTTP policy", () => {
           signal: controller.signal,
         },
       );
+
       expect(response.status).toBe(304);
       await response.body?.cancel();
       await requestClosed;

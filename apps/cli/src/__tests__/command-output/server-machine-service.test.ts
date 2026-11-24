@@ -10,12 +10,12 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { readBbAppRuntimeFile } from "@bb/config/app-runtime-file";
+import { readAppRuntimeFile } from "@omnyo/config/app-runtime-file";
 import {
   readServerMovedFile,
   type ServerMovedFile,
   writeServerMovedFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import {
   collectLogPayloads,
   readlineMocks,
@@ -26,6 +26,7 @@ import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import { registerServerCommands } from "../../commands/server.js";
 
 const tempDirs: string[] = [];
+
 const children: ChildProcess[] = [];
 
 const register: CommandRegistrar = (program) =>
@@ -40,11 +41,11 @@ data_dir=$3
 case "$(uname -s)" in
   Darwin)
     mkdir -p "$HOME/Library/LaunchAgents"
-    printf '<plist><dict><key>EnvironmentVariables</key><dict><key>BB_DATA_DIR</key><string>%s</string></dict></dict></plist>\\n' "$data_dir" >"$HOME/Library/LaunchAgents/app.getbb.host-daemon.test.plist"
+    printf '<plist><dict><key>EnvironmentVariables</key><dict><key>OMNYO_DATA_DIR</key><string>%s</string></dict></dict></plist>\\n' "$data_dir" >"$HOME/Library/LaunchAgents/app.omnyo.host-daemon.test.plist"
     ;;
   *)
     mkdir -p "$HOME/.config/systemd/user"
-    printf '[Service]\\nEnvironment="BB_DATA_DIR=%s"\\n' "$data_dir" >"$HOME/.config/systemd/user/bb-host-daemon-test.service"
+    printf '[Service]\\nEnvironment="OMNYO_DATA_DIR=%s"\\n' "$data_dir" >"$HOME/.config/systemd/user/omnyo-host-daemon-test.service"
     ;;
 esac
 exit "\${FAKE_INSTALLER_EXIT:-0}"
@@ -65,15 +66,15 @@ function movedLock(): ServerMovedFile {
     fromHostId: "host-laptop",
     toHostId: "host-desktop",
     toHostName: "desktop",
-    serverUrl: "https://me.getbb.app",
+    serverUrl: "https://me.example.test",
     mode: "connect",
     connectHandle: "me",
-    oldCopyEntries: ["bb.db"],
+    oldCopyEntries: ["app.db"],
   };
 }
 
 async function createFixture(): Promise<Fixture> {
-  const root = await mkdtemp(join(tmpdir(), "bb-cli-machine-service-"));
+  const root = await mkdtemp(join(tmpdir(), "omnyo-cli-machine-service-"));
   tempDirs.push(root);
   const dataDir = join(root, "data");
   const homeDir = join(root, "home");
@@ -87,27 +88,28 @@ async function createFixture(): Promise<Fixture> {
   await writeFile(
     join(dataDir, "config.json"),
     JSON.stringify({
-      serverUrl: "https://me.getbb.app",
-      serverHeaders: { "x-bb-connect-machine": "grant-secret" },
+      serverUrl: "https://me.example.test",
+      serverHeaders: { "x-omnyo-connect-machine": "grant-secret" },
     }),
   );
   const installerPath = join(root, "install-machine.sh");
   await writeFile(installerPath, FAKE_INSTALLER);
   const installerLog = join(root, "installer.log");
   vi.stubEnv("HOME", homeDir);
-  vi.stubEnv("BB_MACHINE_INSTALLER", installerPath);
+  vi.stubEnv("OMNYO_MACHINE_INSTALLER", installerPath);
   vi.stubEnv("FAKE_INSTALLER_LOG", installerLog);
+
   return { dataDir, homeDir, installerLog, root };
 }
 
-async function startRecordedBb(fixture: Fixture): Promise<ChildProcess> {
-  const entryPath = join(fixture.root, "bb-app.js");
+async function startRecordedRuntime(fixture: Fixture): Promise<ChildProcess> {
+  const entryPath = join(fixture.root, "omnyo-app.js");
   await writeFile(entryPath, "setInterval(() => {}, 1000);\n");
   const startedAt = new Date().toISOString();
   const child = spawn(process.execPath, [entryPath], { stdio: "ignore" });
   children.push(child);
   await writeFile(
-    join(fixture.dataDir, "bb-app-runtime.json"),
+    join(fixture.dataDir, "app-runtime.json"),
     JSON.stringify({
       entryPath,
       pid: child.pid,
@@ -117,6 +119,7 @@ async function startRecordedBb(fixture: Fixture): Promise<ChildProcess> {
       version: "0.43.4",
     }),
   );
+
   return child;
 }
 
@@ -124,15 +127,16 @@ afterAll(async () => {
   for (const child of children.splice(0)) {
     child.kill("SIGKILL");
   }
+
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })),
   );
 });
 
-describe("bb server install-machine-service", () => {
+describe("Omnyo server install-machine-service", () => {
   setupCommandOutputTestEnvironment();
 
-  it("stops the bb running from the data directory and installs the service for it", async ({
+  it("stops the Omnyo running from the data directory and installs the service for it", async ({
     skip,
   }) => {
     skip(
@@ -140,9 +144,10 @@ describe("bb server install-machine-service", () => {
       "runs a POSIX shell installer for launchd/systemd",
     );
     const fixture = await createFixture();
-    const bb = await startRecordedBb(fixture);
-    const bbExit = new Promise<NodeJS.Signals | null>((resolvePromise) => {
-      bb.once("exit", (_code, signal) => resolvePromise(signal));
+    const runtime = await startRecordedRuntime(fixture);
+
+    const omnyoExit = new Promise<NodeJS.Signals | null>((resolvePromise) => {
+      runtime.once("exit", (_code, signal) => resolvePromise(signal));
     });
 
     await runCommand(
@@ -157,20 +162,20 @@ describe("bb server install-machine-service", () => {
       register,
     );
 
-    await expect(bbExit).resolves.toBe("SIGTERM");
-    await expect(readBbAppRuntimeFile(fixture.dataDir)).resolves.toBeNull();
+    await expect(omnyoExit).resolves.toBe("SIGTERM");
+    await expect(readAppRuntimeFile(fixture.dataDir)).resolves.toBeNull();
     expect(
       (await readFile(fixture.installerLog, "utf8")).trim().split("\n"),
     ).toEqual(["--adopt", "--data-dir", fixture.dataDir]);
     const result = JSON.parse(collectLogPayloads(vi.mocked(console.log))[0]!);
     expect(result).toEqual({
       dataDir: fixture.dataDir,
-      serverUrl: "https://me.getbb.app",
+      serverUrl: "https://me.example.test",
       serviceFile: expect.stringContaining(fixture.homeDir),
       toHostName: "desktop",
     });
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
-      `Stopped bb on this computer (pid ${String(bb.pid)}).`,
+      `Stopped Omnyo on this computer (pid ${String(runtime.pid)}).`,
     ]);
     expect(await readServerMovedFile(fixture.dataDir)).toEqual(movedLock());
   });
@@ -193,12 +198,12 @@ describe("bb server install-machine-service", () => {
     ).rejects.toThrow("process.exit:1");
 
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
-      `Error: ${fixture.dataDir} is not locked by a server move. This command keeps a computer connected as a machine after its bb server moved to another machine.`,
+      `Error: ${fixture.dataDir} is not locked by a server move. This command keeps a computer connected as a machine after its Omnyo server moved to another machine.`,
     ]);
     await expect(readFile(fixture.installerLog, "utf8")).rejects.toThrow();
   });
 
-  it("leaves bb running when node on the PATH is too old for the service", async ({
+  it("leaves Omnyo running when node on the PATH is too old for the service", async ({
     skip,
   }) => {
     skip(
@@ -206,7 +211,7 @@ describe("bb server install-machine-service", () => {
       "runs a POSIX shell installer for launchd/systemd",
     );
     const fixture = await createFixture();
-    const bb = await startRecordedBb(fixture);
+    const runtime = await startRecordedRuntime(fixture);
     const binDir = join(fixture.root, "bin");
     await mkdir(binDir);
     await writeFile(
@@ -230,15 +235,15 @@ describe("bb server install-machine-service", () => {
     ).rejects.toThrow("process.exit:1");
 
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
-      "Error: The background service runs bb with the node on your PATH, which is Node.js 20.18.1. Install Node.js 22.19 or newer, then run this command again.",
+      "Error: The background service runs Omnyo with the node on your PATH, which is Node.js 20.18.1. Install Node.js 22.19 or newer, then run this command again.",
     ]);
-    expect(bb.exitCode).toBeNull();
-    expect(bb.signalCode).toBeNull();
+    expect(runtime.exitCode).toBeNull();
+    expect(runtime.signalCode).toBeNull();
     await expect(readFile(fixture.installerLog, "utf8")).rejects.toThrow();
   });
 
   it.runIf(process.platform === "win32")(
-    "refuses on Windows before stopping bb or running an installer",
+    "refuses on Windows before stopping Omnyo or running an installer",
     async () => {
       const fixture = await createFixture();
 
@@ -256,7 +261,7 @@ describe("bb server install-machine-service", () => {
       ).rejects.toThrow("process.exit:1");
 
       expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
-        "Error: bb cannot install the background machine service on Windows. It is available on macOS and Linux.",
+        "Error: Omnyo cannot install the background machine service on Windows. It is available on macOS and Linux.",
       ]);
       await expect(readFile(fixture.installerLog, "utf8")).rejects.toThrow();
     },
@@ -279,15 +284,15 @@ describe("bb server install-machine-service", () => {
     ).rejects.toThrow("process.exit:1");
 
     expect(readlineMocks.question).toHaveBeenCalledWith(
-      "Stop bb on this computer and install a background service that keeps it connected to desktop? [y/N] ",
+      "Stop Omnyo on this computer and install a background service that keeps it connected to desktop? [y/N] ",
     );
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
-      "Error: The background service install failed; see the installer output above. Until it succeeds, this computer stays connected only while the bb desktop app or npx bb-app runs, so start one of them to reconnect it now.",
+      "Error: The background service install failed; see the installer output above. Until it succeeds, run the installed Omnyo desktop app or `omnyo-app` to keep this computer connected.",
     ]);
   });
 });
 
-describe("bb server unlock with a machine service", () => {
+describe("Omnyo server unlock with a machine service", () => {
   setupCommandOutputTestEnvironment();
 
   it("refuses while a background service runs this computer as a machine", async ({
@@ -309,9 +314,11 @@ describe("bb server unlock with a machine service", () => {
       ],
       register,
     );
+
     const { serviceFile } = JSON.parse(
       collectLogPayloads(vi.mocked(console.log))[0]!,
     );
+
     vi.mocked(console.error).mockClear();
 
     await expect(

@@ -42,6 +42,7 @@ describe("ParentThreadPicker", () => {
     const search = screen.getByRole("combobox", {
       name: "Search parent threads",
     });
+
     const none = screen.getByRole("option", { name: "None" });
     const codex = screen.getByRole("option", { name: "Codex Parent" });
     const frontend = screen.getByRole("option", { name: "Frontend Parent" });
@@ -84,9 +85,11 @@ describe("ParentThreadPicker", () => {
     render(picker({ onChange }));
 
     fireEvent.click(screen.getByRole("button"));
+
     const search = await screen.findByRole("combobox", {
       name: "Search parent threads",
     });
+
     fireEvent.change(search, { target: { value: "frpar" } });
 
     expect(screen.queryByRole("option", { name: /Codex Parent/u })).toBeNull();
@@ -119,11 +122,14 @@ describe("ParentThreadPicker", () => {
     render(picker());
 
     fireEvent.click(screen.getByRole("button"));
+
     const search = await screen.findByRole("combobox", {
       name: "Search parent threads",
     });
+
     const list = document.querySelector<HTMLElement>("[cmdk-list]");
     expect(list).not.toBeNull();
+
     if (list === null) return;
     list.scrollTop = 120;
 

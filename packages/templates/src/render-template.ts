@@ -18,6 +18,7 @@ function getCompiledTemplate<TTemplateId extends TemplateId>(
   templateId: TTemplateId,
 ) {
   const cached = compiledTemplateCache.get(templateId);
+
   if (cached) {
     return cached as HandlebarsTemplateDelegate<TemplateVariables[TTemplateId]>;
   }
@@ -26,10 +27,12 @@ function getCompiledTemplate<TTemplateId extends TemplateId>(
     templateBodyById[templateId],
     { noEscape: true },
   );
+
   compiledTemplateCache.set(
     templateId,
     compiled as HandlebarsTemplateDelegate<TemplateVariables[TemplateId]>,
   );
+
   return compiled;
 }
 

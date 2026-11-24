@@ -26,16 +26,15 @@ function entry(
     collections: [],
     source: `builtin:${id}`,
     repositoryUrl: null,
-    marketplace: "bb-official",
-    marketplaceDisplayName: "BB Official",
-    publisherKey: "bb-official",
-    publisherLabel: "BB Official",
+    marketplace: "omnyo-official",
+    marketplaceDisplayName: "Omnyo Official",
+    publisherKey: "omnyo-official",
+    publisherLabel: "Omnyo Official",
     official: true,
     author: null,
     installed: false,
     conflictingInstallSource: null,
     installedByDefault: false,
-    installs: null,
     compatible: true,
     incompatibleReason: null,
     ...overrides,
@@ -47,6 +46,7 @@ describe("plugin browse shelves", () => {
     const official = entry("official", {
       collections: [{ id: "z-server-first", rank: 0 }],
     });
+
     const notable = entry("notable", {
       collections: [{ id: "a-server-second", rank: 0 }],
     });
@@ -56,7 +56,7 @@ describe("plugin browse shelves", () => {
       collections: [
         {
           id: "z-server-first",
-          displayName: "BB Official",
+          displayName: "Omnyo Official",
           pluginIds: ["official"],
         },
         {
@@ -69,7 +69,7 @@ describe("plugin browse shelves", () => {
     });
 
     expect(shelves.map((shelf) => shelf.label)).toEqual([
-      "BB Official",
+      "Omnyo Official",
       "New & notable",
       "Thread Content",
     ]);
@@ -132,6 +132,7 @@ describe("plugin browse shelves", () => {
       marketplace: "first",
       collections: [{ id: "new-and-notable", rank: 0 }],
     });
+
     const second = entry("shared", {
       marketplace: "second",
       collections: [],
@@ -158,6 +159,7 @@ describe("plugin browse shelves", () => {
       category: "Themes & Appearance",
       collections: [{ id: "new-and-notable", rank: 0 }],
     });
+
     const data: PluginCatalogSearchData = {
       entries: [
         featured,

@@ -8,6 +8,7 @@ export interface SpinnerProps {
 
 export function Spinner({ size = "small", color }: SpinnerProps) {
   const { tokens } = useTheme();
+
   return (
     <ActivityIndicator size={size} color={color ?? tokens.mutedForeground} />
   );

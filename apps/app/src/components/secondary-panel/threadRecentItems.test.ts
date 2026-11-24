@@ -6,12 +6,14 @@ describe("recordRecentItem", () => {
     const items: ThreadRecentItem[] = [
       { source: "workspace", path: "src/a.ts", openedAt: 10 },
     ];
+
     const next = recordRecentItem({
       items,
       source: "thread-storage",
       path: "plans/b.md",
       openedAt: 20,
     });
+
     expect(next).toEqual([
       { source: "thread-storage", path: "plans/b.md", openedAt: 20 },
       { source: "workspace", path: "src/a.ts", openedAt: 10 },
@@ -23,12 +25,14 @@ describe("recordRecentItem", () => {
       { source: "workspace", path: "src/a.ts", openedAt: 10 },
       { source: "thread-storage", path: "plans/b.md", openedAt: 20 },
     ];
+
     const next = recordRecentItem({
       items,
       source: "workspace",
       path: "src/a.ts",
       openedAt: 30,
     });
+
     expect(next).toEqual([
       { source: "workspace", path: "src/a.ts", openedAt: 30 },
       { source: "thread-storage", path: "plans/b.md", openedAt: 20 },
@@ -39,12 +43,14 @@ describe("recordRecentItem", () => {
     const items: ThreadRecentItem[] = [
       { source: "workspace", path: "notes.md", openedAt: 10 },
     ];
+
     const next = recordRecentItem({
       items,
       source: "thread-storage",
       path: "notes.md",
       openedAt: 20,
     });
+
     expect(next).toHaveLength(2);
   });
 
@@ -54,6 +60,7 @@ describe("recordRecentItem", () => {
       { source: "workspace", path: "b", openedAt: 2 },
       { source: "workspace", path: "c", openedAt: 1 },
     ];
+
     const next = recordRecentItem({
       items,
       source: "workspace",
@@ -61,6 +68,7 @@ describe("recordRecentItem", () => {
       openedAt: 4,
       limit: 3,
     });
+
     expect(next.map((item) => item.path)).toEqual(["d", "a", "b"]);
   });
 });

@@ -1,4 +1,9 @@
 import {
+  publishThreadWorkSchema,
+  type PublishThreadWork,
+  type ThreadWorkSummary,
+} from "@omnyo/domain";
+import {
   parseThreadEventRow,
   type PromptInput,
   type PendingInteraction,
@@ -12,13 +17,24 @@ import {
   type ThreadQueuedMessage,
   type ThreadStatus,
   validatePluginMetadata,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   DEFAULT_TURN_RETRY_REASON,
+  SUBMISSION_CONTRACT_VERSION,
   threadTabsResponseSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type {
+  ImportNativeThreadRequest,
+  ImportNativeThreadResponse,
+  NativeSessionClaimsQuery,
+  NativeSessionClaimsResponse,
+  CommandProofLookupRequest,
+  CommandProofLookupResponse,
   CreateQueuedMessageRequest,
+  SubmissionAttachment,
+  SubmissionContract,
+  SubmissionReceipt,
+  SubmitRequest,
   CreateThreadRequest,
   QueuedMessageListQuery,
   EditMessageRequest,
@@ -30,6 +46,7 @@ import type {
   SendQueuedMessageResponse,
   ThreadArchiveAllResponse,
   ThreadChildSummaryResponse,
+  ThreadConversationResponse,
   ThreadConversationOutlineResponse,
   ThreadCountGroupBy,
   ThreadCountQuery,
@@ -54,6 +71,7 @@ import type {
   ThreadTabsResponse,
   ThreadTimelineResponse,
   ThreadContextResponse,
+  ThreadAutoCompactionSettingResponse,
   ThreadWithIncludesResponse,
   TimelineTurnSummaryDetailsResponse,
   ThreadOpenFile,
@@ -61,10 +79,18 @@ import type {
   PromptHistoryQuery,
   ReorderPinnedThreadRequest,
   ReorderQueuedMessageRequest,
+  ReorderShelvedThreadRequest,
   ResolveThreadMentionsRequest,
   ResolveThreadMentionsResponse,
   RetryTurnRequest,
   RetryTurnResponse,
+  ThreadStartMachineRequestInput,
+  ThreadStartMachineResponse,
+  ThreadStartMachinesResponse,
+  ThreadContinueState,
+  ThreadContinueResponse,
+  ThreadContinuationsResponse,
+  ThreadContinueAllResponse,
   SendMessageRequest,
   SendMessageResponse,
   SendQueuedMessageRequest,
@@ -77,15 +103,18 @@ import type {
   ThreadStorageFilesQuery,
   ThreadStoragePathsQuery,
   ThreadTimelineQuery,
+  ThreadConversationQuery,
   ThreadConversationOutlineQuery,
   TimelineTurnSummaryDetailsQuery,
   UpdateThreadTabsRequest,
   UpdateThreadRequest,
+  UpdateThreadResponse,
   UpdateQueuedMessageRequest,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 export const DEFAULT_THREAD_WAIT_TIMEOUT_MS = 20 * 60 * 1000;
+
 export const DEFAULT_THREAD_WAIT_POLL_INTERVAL_MS = 250;
 
 export interface ThreadListArgs {
@@ -93,16 +122,20 @@ export interface ThreadListArgs {
   environmentId?: string;
   hostId?: string;
   sectionId?: string;
+  groupId?: string;
   hasParent?: boolean;
   includeHidden?: boolean;
+  experimental_includePluginHome?: boolean;
   limit?: number;
   offset?: number;
   originKind?: ThreadListQuery["originKind"];
   originPluginId?: string;
   parentThreadId?: string;
   projectId?: string;
+  shelved?: boolean;
   signal?: AbortSignal;
   sourceThreadId?: string;
+  threadIds?: readonly string[];
   unsectioned?: boolean;
 }
 
@@ -110,17 +143,6 @@ export interface ThreadSearchArgs extends ThreadSearchQuery {
   signal?: AbortSignal;
 }
 
-/**
- * Counting is a server-side `SELECT count(*)`: a caller that only needs "how
- * many threads are running on this host" must never page rows through
- * `threads.list`, which would both cost memory and miscount past its limit.
- *
- * Every filter is genuinely absent by default. `parentThreadId` is
- * three-valued: omitted does not filter on parentage at all, the
- * `THREAD_COUNT_ROOT_PARENT` sentinel (`"none"`) counts root threads only, and
- * any other value counts that parent's children. Archived and deleted threads
- * are excluded by the route.
- */
 export interface ThreadCountArgs {
   groupBy?: ThreadCountGroupBy;
   hostId?: string;
@@ -142,97 +164,158 @@ export interface ThreadGetArgs {
 }
 
 export type ThreadGetResult = ThreadResponse | ThreadWithIncludesResponse;
+
 export type ThreadCountResult = ThreadCountResponse;
-/**
- * The threads occupying capacity right now — canonical status `starting` or
- * `active`, archived and deleted excluded, hidden included (a hidden thread
- * burns a real slot). Each row is just `id` and `hostId` — the machine whose
- * pool the thread occupies, from its environment or, before one is attached,
- * from the start intent it was admitted with; null only when neither names
- * one. Anything else a policy needs it fetches by id.
- *
- * **Exact inside the `message.dispatch` hook, a snapshot everywhere else.**
- * Hook passes are serialized under one server-wide lock and a cleared first
- * attempt commits its `pending -> starting` flip before that lock releases, so
- * a handler reading this sees every admission granted ahead of it in the same
- * burst — which is what makes "five quick creates against a limit of two" hold
- * three of them instead of admitting all five. Read from a background service,
- * a timer or a `turn.failed` listener it is an ordinary query racing with every
- * concurrent dispatch, exactly like {@link ThreadsArea.count}.
- *
- * One boundary: a warm follow-up admitted on an already-live `idle` thread
- * flips `idle -> active` inside the send transaction, just AFTER the lock
- * releases. First-dispatch admissions are exact; a burst of follow-ups to
- * distinct idle threads can momentarily under-report.
- */
+
 export type ThreadRunningResult = ThreadRunningResponse;
+
 export type ThreadListResult = ThreadListResponse;
+
 export type ThreadSearchResult = ThreadSearchResponse;
+
 export type ThreadMessageResult = ThreadMessageResponse;
+
 export type ThreadResolveMentionsResult = ResolveThreadMentionsResponse;
+
 export interface ThreadOutputResponse {
   output: string | null;
 }
+
 export type ThreadMutationResult = ThreadResponse;
+
+export type ThreadUpdateResult = UpdateThreadResponse;
+
 export type ThreadPluginMetadataResult = ThreadPluginMetadataResponse;
+
 export type PluginThreadMetadataListResult = PluginThreadMetadataListResponse;
+
 export type ThreadAncestorsListResult = ThreadAncestorsListResponse;
+
 export type ThreadDescendantsListResult = ThreadDescendantsListResponse;
+
 export type ThreadSpawnResult = ThreadResponse;
+
 export type ThreadForkResult = ThreadResponse;
+
 export type ThreadInteractionGetResult = PendingInteraction;
+
 export type ThreadInteractionListResult = ThreadPendingInteractionsResponse;
+
 export type ThreadInteractionResolveResult = PendingInteraction;
+
 export type ThreadInteractionRespondResult = PendingInteraction;
+
 export type ThreadInteractionCancelResult = PendingInteraction;
+
 export type ThreadEventsListResult = ThreadEventRow[];
+
 export type ThreadEventWaitResult = ThreadEventRow | null;
+
 export type ThreadContextResult = ThreadContextResponse;
+
+export type ThreadAutoCompactionSettingResult =
+  ThreadAutoCompactionSettingResponse;
+
 export type ThreadTimelineResult = ThreadTimelineResponse;
+
 export type ThreadArchiveResult = ThreadArchiveAllResponse;
+
 export type ThreadOpenResult = ThreadOpenResponse;
+
 export type ThreadPaneActionResult = ThreadPaneActionResponse;
+
 export type ThreadDeleteResult = { ok: true };
+
 export type ThreadSendResult = SendMessageResponse;
+
 export type ThreadRetryResult = RetryTurnResponse;
+
+export type ThreadContinueResult = ThreadContinueResponse;
+
+export type ThreadContinueAllResult = ThreadContinueAllResponse;
+
+export type ThreadContinuationStateResult = ThreadContinueState;
+
+export type ThreadContinuationsResult = ThreadContinuationsResponse;
+
 export type ThreadEditMessageResult = EditMessageResponse;
+
 export type ThreadStopResult = { ok: true };
+
 export type ThreadCompactResult = { ok: true };
+
 export type ThreadBannerActionResult = { ok: true };
+
 export type ThreadUnarchiveResult = { ok: true };
+
 export type ThreadArchiveAllResult = ThreadArchiveAllResponse;
+
 export type ThreadReadStateResult = ThreadResponse;
+
 export type ThreadRestoreEnvironmentResult = ThreadResponse;
+
 export type ThreadPinOrderResult = ThreadListResponse;
+
+export type ThreadShelfOrderResult = ThreadListResponse;
+
 export type ThreadPromptHistoryResult = PromptHistoryResponse;
+
 export type ThreadQueuedMessagesResult = ThreadQueuedMessageListResponse;
+
 export type ThreadQueuedMessageCreateResult = ThreadQueuedMessage;
+
 export type ThreadQueuedMessageUpdateResult = ThreadQueuedMessage;
+
 export type ThreadQueuedMessageDeleteResult = { ok: true };
+
+export type ThreadQueuedMessageRestoreResult = ThreadQueuedMessage;
+
 export type ThreadQueuedMessageEditHoldResult = QueuedMessageEditHoldResponse;
+
 export type ThreadQueuedMessageEditHoldReleaseResult = { ok: true };
+
 export type ThreadQueuedMessageReorderResult = ThreadQueuedMessageListResponse;
+
 export type ThreadQueuedMessageSendResult = SendQueuedMessageResponse;
+
 export type ThreadQueuedMessageGroupBoundaryResult =
   ThreadQueuedMessageListResponse;
+
 export type ThreadQueueListResult = ThreadQueuedMessageListResponse;
+
 export type ThreadTabsResult = ThreadTabsResponse;
+
 export type ThreadTabsUpdateResult = ThreadTabsResponse;
+
 export type ThreadStorageFilesResult = ThreadStorageFileListResponse;
+
 export type ThreadStorageLocationResult = ThreadStorageLocationResponse;
+
 export type ThreadStoragePathsResult = ThreadStoragePathListResponse;
+
 export type ThreadChildSummaryResult = ThreadChildSummaryResponse;
-export type ThreadDefaultExecutionOptionsResult =
-  ResolvedThreadExecutionOptions | null;
+
+export type ThreadDefaultExecutionOptionsResult = ResolvedThreadExecutionOptions | null;
+
+export type ThreadConversationResult = ThreadConversationResponse;
+
 export type ThreadConversationOutlineResult = ThreadConversationOutlineResponse;
+
 export type ThreadTimelineTurnSummaryDetailsResult =
   TimelineTurnSummaryDetailsResponse;
 
 export interface ThreadSpawnBaseArgs extends Omit<
   CreateThreadRequest,
-  "input" | "origin" | "originKind" | "startedOnBehalfOf"
+  | "input"
+  | "origin"
+  | "originKind"
+  | "startedOnBehalfOf"
+  | "idle"
+  | "pluginHome"
+  | "quiet"
 > {
   origin?: CreateThreadRequest["origin"];
+  experimental_quiet?: boolean;
   originKind?: CreateThreadRequest["originKind"];
   startedOnBehalfOf?: CreateThreadRequest["startedOnBehalfOf"];
 }
@@ -247,6 +330,12 @@ export type ThreadSpawnArgs = ThreadSpawnBaseArgs &
         input?: never;
         prompt: string;
       }
+    | {
+        input?: never;
+        prompt?: never;
+        experimental_idle: true;
+        experimental_pluginHome?: boolean;
+      }
   );
 
 export interface ThreadForkArgs extends Omit<
@@ -257,8 +346,25 @@ export interface ThreadForkArgs extends Omit<
   visibility?: ForkThreadRequest["visibility"];
 }
 
+export interface ThreadImportNativeArgs extends Omit<
+  ImportNativeThreadRequest,
+  "origin"
+> {
+  origin?: ImportNativeThreadRequest["origin"];
+  signal?: AbortSignal;
+}
+
+export type ThreadImportNativeResult = ImportNativeThreadResponse;
+
+export interface ThreadNativeSessionClaimsArgs extends NativeSessionClaimsQuery {
+  signal?: AbortSignal;
+}
+
+export type ThreadNativeSessionClaimsResult = NativeSessionClaimsResponse;
+
 export interface ThreadUpdateArgs extends UpdateThreadRequest {
   threadId: string;
+  signal?: AbortSignal;
 }
 
 export interface ThreadPluginMetadataArgs {
@@ -266,21 +372,25 @@ export interface ThreadPluginMetadataArgs {
   signal?: AbortSignal;
   threadId: string;
 }
+
 export interface PluginThreadMetadataListArgs {
   pluginId: string;
   threadIds: readonly string[];
   signal?: AbortSignal;
 }
+
 export interface ThreadAncestorsListArgs {
   threadIds: readonly string[];
   signal?: AbortSignal;
 }
+
 export interface ThreadDescendantsListArgs {
   threadIds: readonly string[];
   includeArchived?: boolean;
   includeHidden?: boolean;
   signal?: AbortSignal;
 }
+
 export interface ThreadPluginMetadataUpdateArgs {
   threadId: string;
   pluginId: string;
@@ -303,24 +413,23 @@ export interface ThreadEditMessageArgs extends EditMessageRequest {
 
 export interface ThreadRetryArgs {
   threadId: string;
-  /**
-   * The failed turn to re-submit. Omitted means the thread's most recent turn,
-   * which is the one whose failure put it in `error`; naming one asserts which
-   * failure you decided on and fails if the thread has moved on since.
-   */
+
   turnRequestId?: string;
-  /**
-   * Epoch ms to retry at. Omitted attempts the retry now — it may still queue
-   * behind a busy thread or a plugin wait, like any other dispatch.
-   */
+
   sendAt?: number;
-  /** Why the turn is being retried, shown verbatim on the queued row. */
+
   reason?: string;
+  model?: string;
 }
 
 export interface ThreadActionArgs {
   signal?: AbortSignal;
   threadId: string;
+}
+
+export interface ThreadContinueArgs extends ThreadActionArgs {
+  now?: boolean;
+  model?: string;
 }
 
 export interface ThreadStatusArgs extends ThreadActionArgs {
@@ -333,6 +442,10 @@ export interface ThreadPromptHistoryArgs extends PromptHistoryQuery {
 }
 
 export interface ThreadPinOrderArgs extends ReorderPinnedThreadRequest {
+  threadId: string;
+}
+
+export interface ThreadShelfOrderArgs extends ReorderShelvedThreadRequest {
   threadId: string;
 }
 
@@ -363,13 +476,7 @@ export interface ThreadQueuedMessageGroupBoundaryArgs extends SetQueuedMessageGr
   threadId: string;
 }
 
-/**
- * Both filters are genuinely absent by default: no filter lists every live
- * queued row in the workspace, which is what `bb thread queue list` with no
- * thread and a limiter plugin's own bookkeeping ask for.
- */
 export interface ThreadQueueListArgs {
-  /** `plugin:<id>` — every row that plugin is holding the wait on. */
   waitHolder?: QueuedMessageWaitHolder;
   signal?: AbortSignal;
   threadId?: string;
@@ -381,6 +488,11 @@ export interface ThreadStorageFilesArgs extends ThreadStorageFilesQuery {
 }
 
 export interface ThreadStoragePathsArgs extends ThreadStoragePathsQuery {
+  signal?: AbortSignal;
+  threadId: string;
+}
+
+export interface ThreadConversationArgs extends ThreadConversationQuery {
   signal?: AbortSignal;
   threadId: string;
 }
@@ -408,6 +520,11 @@ export interface ThreadOpenArgs {
 export interface ThreadPaneActionArgs {
   action: ThreadPaneAction;
   threadId: string;
+}
+
+export interface ThreadCommandProofLookupArgs extends CommandProofLookupRequest {
+  threadId: string;
+  signal?: AbortSignal;
 }
 
 export interface ThreadEventsListArgs {
@@ -499,7 +616,11 @@ export class ThreadWaitTimeoutError extends Error {
   readonly target: ThreadWaitTarget;
   readonly threadId: string;
 
-  constructor(args: { target: ThreadWaitTarget; threadId: string }) {
+  constructor(args: {
+    target: ThreadWaitTarget;
+    threadId: string;
+    pendingRetry?: ThreadQueuedMessage | null;
+  }) {
     super(formatThreadWaitTimeoutMessage(args));
     this.name = "ThreadWaitTimeoutError";
     this.target = args.target;
@@ -519,7 +640,7 @@ export class ThreadWaitUnreachableError extends Error {
   }) {
     super(
       `Thread ${args.threadId} is in status ${args.currentStatus} and will not reach idle by waiting alone. ` +
-        `Inspect it with 'bb thread show ${args.threadId}' and recover by sending a follow-up.`,
+        `Inspect it with 'omnyo thread show ${args.threadId}' and recover by sending a follow-up.`,
     );
     this.name = "ThreadWaitUnreachableError";
     this.currentStatus = args.currentStatus;
@@ -547,6 +668,26 @@ export interface ThreadEventsArea {
   wait(args: ThreadEventWaitArgs): Promise<ThreadEventWaitResult>;
 }
 
+export interface ThreadSubmissionSendArgs extends CreateQueuedMessageRequest {
+  attachments?: SubmissionAttachment[];
+  storeId?: string;
+  submissionId: string;
+  threadId: string;
+}
+
+export type ThreadSubmissionSpawnArgs = ThreadSpawnArgs & {
+  attachments?: SubmissionAttachment[];
+  storeId?: string;
+  submissionId: string;
+};
+
+export interface ThreadSubmissionsArea {
+  contract(): Promise<SubmissionContract>;
+  send(args: ThreadSubmissionSendArgs): Promise<SubmissionReceipt>;
+  spawn(args: ThreadSubmissionSpawnArgs): Promise<SubmissionReceipt>;
+  submit(request: SubmitRequest): Promise<SubmissionReceipt>;
+}
+
 export interface ThreadQueuedMessagesArea {
   create(
     args: ThreadQueuedMessageCreateArgs,
@@ -560,6 +701,9 @@ export interface ThreadQueuedMessagesArea {
   experimental_releaseEditHold(
     args: ThreadQueuedMessageTargetArgs,
   ): Promise<ThreadQueuedMessageEditHoldReleaseResult>;
+  experimental_restore(
+    args: ThreadQueuedMessageTargetArgs,
+  ): Promise<ThreadQueuedMessageRestoreResult>;
   list(args: ThreadQueuedMessageArgs): Promise<ThreadQueuedMessagesResult>;
   reorder(
     args: ThreadQueuedMessageReorderArgs,
@@ -580,15 +724,6 @@ export interface ThreadTabsArea {
   update(args: ThreadTabsUpdateArgs): Promise<ThreadTabsUpdateResult>;
 }
 
-/**
- * Queued rows across every thread.
- *
- * The per-thread list, send-now, edit, reorder and delete all live on
- * `queuedMessages`, which is where a row's own operations belong. This area
- * exists for the one question a thread-scoped list cannot answer: "what is
- * queued right now, anywhere" — a workspace-wide pending view, or a plugin
- * recovering the rows it is holding after a restart.
- */
 export interface ThreadQueueArea {
   list(args?: ThreadQueueListArgs): Promise<ThreadQueueListResult>;
 }
@@ -601,6 +736,7 @@ export interface ThreadsArea {
   cancelPlan(args: ThreadActionArgs): Promise<ThreadBannerActionResult>;
   clearContext(args: ThreadActionArgs): Promise<ThreadBannerActionResult>;
   clearGoal(args: ThreadActionArgs): Promise<ThreadBannerActionResult>;
+  conversation(args: ThreadConversationArgs): Promise<ThreadConversationResult>;
   conversationOutline(
     args: ThreadConversationOutlineArgs,
   ): Promise<ThreadConversationOutlineResult>;
@@ -610,38 +746,38 @@ export interface ThreadsArea {
   ): Promise<ThreadDefaultExecutionOptionsResult>;
   delete(args: ThreadDeleteArgs): Promise<ThreadDeleteResult>;
   editMessage(args: ThreadEditMessageArgs): Promise<ThreadEditMessageResult>;
+  experimental_lookupCommandProofs(
+    args: ThreadCommandProofLookupArgs,
+  ): Promise<CommandProofLookupResponse>;
   events: ThreadEventsArea;
   fork(args: ThreadForkArgs): Promise<ThreadForkResult>;
+  experimental_importNative(
+    args: ThreadImportNativeArgs,
+  ): Promise<ThreadImportNativeResult>;
+  experimental_nativeSessionClaims(
+    args: ThreadNativeSessionClaimsArgs,
+  ): Promise<ThreadNativeSessionClaimsResult>;
   get(args: ThreadGetArgs): Promise<ThreadGetResult>;
   getPluginMetadata(
     args: ThreadPluginMetadataArgs,
   ): Promise<ThreadPluginMetadataResult>;
-  /**
-   * `pluginId`'s metadata for each of `threadIds` (1–200 per request) that
-   * has any, as `{ threadId, metadata }` rows; archived and deleted threads
-   * included.
-   * Experimental: see docs/api_to_audit.md.
-   */
+
+  experimental_work(args: ThreadActionArgs): Promise<ThreadWorkSummary>;
+  experimental_publishWork(
+    args: ThreadActionArgs & PublishThreadWork,
+  ): Promise<ThreadWorkSummary>;
+  experimental_archiveReady(
+    args: ThreadActionArgs & { basis: string },
+  ): Promise<ThreadArchiveAllResponse>;
+
   experimental_listPluginMetadata(
     args: PluginThreadMetadataListArgs,
   ): Promise<PluginThreadMetadataListResult>;
-  /**
-   * Each of `threadIds` (1–200 per request) that exists, with `ancestorIds`
-   * from its parent up to the root (empty for a root thread); archived and
-   * deleted threads included, unknown ids omitted.
-   * Experimental: see docs/api_to_audit.md.
-   */
+
   experimental_listAncestors(
     args: ThreadAncestorsListArgs,
   ): Promise<ThreadAncestorsListResult>;
-  /**
-   * Each of `threadIds` (1–200 per request) that exists and is not deleted,
-   * with `descendantIds` for every thread below it, children first (empty
-   * for a leaf). Archived and hidden descendants are omitted unless
-   * `includeArchived` / `includeHidden` is true; threads below them are still
-   * returned. Deleted threads and unknown ids are always omitted.
-   * Experimental: see docs/api_to_audit.md.
-   */
+
   experimental_listDescendants(
     args: ThreadDescendantsListArgs,
   ): Promise<ThreadDescendantsListResult>;
@@ -663,40 +799,50 @@ export interface ThreadsArea {
     args: ThreadPromptHistoryArgs,
   ): Promise<ThreadPromptHistoryResult>;
   queuedMessages: ThreadQueuedMessagesArea;
+  submissions: ThreadSubmissionsArea;
   reorderPinned(args: ThreadPinOrderArgs): Promise<ThreadPinOrderResult>;
+  experimental_reorderShelved(
+    args: ThreadShelfOrderArgs,
+  ): Promise<ThreadShelfOrderResult>;
   resolveMentions(
     args: ThreadResolveMentionsArgs,
   ): Promise<ThreadResolveMentionsResult>;
-  /**
-   * Re-submit a failed turn. The retry is an ordinary dispatch attempt, so a
-   * `sendAt` in the future queues it on the clock and a `message.dispatch` hook
-   * can still hold it; the response says which of the two happened.
-   */
-  /**
-   * Ask the environment provider to restore the destroyed workspace of a
-   * thread and attach it; the provider decides what restoring means, such as
-   * checking the recorded branch out again. Sends fail until this runs. Starts
-   * no turn: the thread settles back to `idle` once the workspace is ready.
-   * Refused unless the thread's `canRestoreEnvironment` is true.
-   */
+
   restoreEnvironment(
     args: ThreadActionArgs,
   ): Promise<ThreadRestoreEnvironmentResult>;
+  experimental_listStartMachines(
+    args: ThreadActionArgs & { pluginId?: string },
+  ): Promise<ThreadStartMachinesResponse>;
+  experimental_moveStart(
+    args: ThreadActionArgs & ThreadStartMachineRequestInput,
+  ): Promise<ThreadStartMachineResponse>;
   retry(args: ThreadRetryArgs): Promise<ThreadRetryResult>;
+  experimental_continue(
+    args: ThreadContinueArgs,
+  ): Promise<ThreadContinueResult>;
+  experimental_continueAll(): Promise<ThreadContinueAllResult>;
+  experimental_continuationState(
+    args: ThreadActionArgs,
+  ): Promise<ThreadContinuationStateResult>;
+  experimental_continuations(args?: {
+    signal?: AbortSignal;
+  }): Promise<ThreadContinuationsResult>;
   search(args: ThreadSearchArgs): Promise<ThreadSearchResult>;
   send(args: ThreadSendArgs): Promise<ThreadSendResult>;
+  shelve(
+    args: ThreadActionArgs & {
+      experimental_onServerTiming?: (header: string | null) => void;
+    },
+  ): Promise<ThreadMutationResult>;
   spawn(args: ThreadSpawnArgs): Promise<ThreadSpawnResult>;
-  /**
-   * Stop the thread's work and release its loaded runtime. An explicit stop
-   * wins over running work: a turn the machine still runs while the thread
-   * looks idle or failed, or a turn that starts while the stop is delivered,
-   * is interrupted. The call waits for the interrupt attempt; if the machine
-   * cannot confirm it, the thread remains stopping. Inspect its status before
-   * treating the stop as confirmed.
-   */
+
   stop(args: ThreadActionArgs): Promise<ThreadStopResult>;
   tabs: ThreadTabsArea;
   context(args: ThreadStatusArgs): Promise<ThreadContextResult>;
+  experimental_setAutoCompaction(
+    args: ThreadActionArgs & { enabled: boolean },
+  ): Promise<ThreadAutoCompactionSettingResult>;
   timeline(args: ThreadTimelineArgs): Promise<ThreadTimelineResult>;
   timelineTurnSummaryDetails(
     args: ThreadTimelineTurnSummaryDetailsArgs,
@@ -706,35 +852,53 @@ export interface ThreadsArea {
   storagePaths(args: ThreadStoragePathsArgs): Promise<ThreadStoragePathsResult>;
   unarchive(args: ThreadActionArgs): Promise<ThreadUnarchiveResult>;
   unpin(args: ThreadActionArgs): Promise<ThreadMutationResult>;
-  update(args: ThreadUpdateArgs): Promise<ThreadMutationResult>;
+  unshelve(args: ThreadActionArgs): Promise<ThreadMutationResult>;
+  update(args: ThreadUpdateArgs): Promise<ThreadUpdateResult>;
   wait(args: ThreadWaitArgs): Promise<ThreadWaitResult>;
 }
 
 function listQuery(args: ThreadListArgs | undefined): ThreadListQuery {
-  return {
+  const query: ThreadListQuery = {
     ...(args?.projectId ? { projectId: args.projectId } : {}),
     ...(args?.environmentId ? { environmentId: args.environmentId } : {}),
     ...(args?.hostId ? { hostId: args.hostId } : {}),
     ...(args?.parentThreadId ? { parentThreadId: args.parentThreadId } : {}),
     ...(args?.sourceThreadId ? { sourceThreadId: args.sourceThreadId } : {}),
     ...(args?.sectionId ? { sectionId: args.sectionId } : {}),
+    ...(args?.groupId ? { groupId: args.groupId } : {}),
     ...(args?.originKind ? { originKind: args.originKind } : {}),
     ...(args?.originPluginId ? { originPluginId: args.originPluginId } : {}),
     ...(args?.archived === undefined
       ? {}
       : { archived: args.archived ? "true" : "false" }),
+    ...(args?.shelved === undefined
+      ? {}
+      : { shelved: args.shelved ? "true" : "false" }),
     ...(args?.unsectioned === undefined
       ? {}
       : { unsectioned: args.unsectioned ? "true" : "false" }),
     ...(args?.includeHidden === undefined
       ? {}
       : { includeHidden: args.includeHidden ? "true" : "false" }),
+    ...(args?.experimental_includePluginHome === undefined
+      ? {}
+      : {
+          includePluginHome: args.experimental_includePluginHome
+            ? "true"
+            : "false",
+        }),
     ...(args?.limit === undefined ? {} : { limit: String(args.limit) }),
     ...(args?.offset === undefined ? {} : { offset: String(args.offset) }),
     ...(args?.hasParent === undefined
       ? {}
       : { hasParent: args.hasParent ? "true" : "false" }),
   };
+
+  if (args?.threadIds !== undefined) {
+    query.threadIds = args.threadIds.join(",");
+  }
+
+  return query;
 }
 
 function countQuery(args: ThreadCountArgs | undefined): ThreadCountQuery {
@@ -751,31 +915,46 @@ function countQuery(args: ThreadCountArgs | undefined): ThreadCountQuery {
 }
 
 function updateJson(args: ThreadUpdateArgs): UpdateThreadRequest {
-  return {
+  const payload: UpdateThreadRequest = {
     title: args.title,
     sectionId: args.sectionId,
+    groupId: args.groupId,
     parentThreadId: args.parentThreadId,
     model: args.model,
     reasoningLevel: args.reasoningLevel,
+    serviceTier: args.serviceTier,
     sessionOptions: args.sessionOptions,
     visibility: args.visibility,
   };
+
+  if (args.experimental_titleIfUntitled) {
+    payload.experimental_titleIfUntitled = true;
+  }
+
+  if (args.experimental_pluginHome !== undefined) {
+    payload.experimental_pluginHome = args.experimental_pluginHome;
+  }
+
+  return payload;
 }
 
 function sendJson(args: ThreadSendArgs): SendMessageRequest {
   return {
+    requestId: args.requestId,
     input: args.input,
     mode: args.mode,
     model: args.model,
     permissionMode: args.permissionMode,
     reasoningLevel: args.reasoningLevel,
     senderThreadId: args.senderThreadId,
+    messageSource: args.messageSource ?? { kind: "script", label: "SDK" },
     serviceTier: args.serviceTier,
     pluginSubmission: args.pluginSubmission,
     executionInputSources: args.executionInputSources,
-    // Present ⇒ the message joins the queue waiting for the clock instead
-    // of attempting now; the response reports `delivery: "queued"`.
+
     sendAt: args.sendAt,
+    compactFirst: args.compactFirst,
+    sendNow: args.sendNow,
   };
 }
 
@@ -784,6 +963,7 @@ function retryJson(args: ThreadRetryArgs): RetryTurnRequest {
     turnRequestId: args.turnRequestId ?? null,
     sendAt: args.sendAt ?? null,
     reason: args.reason ?? DEFAULT_TURN_RETRY_REASON,
+    ...(args.model === undefined ? {} : { model: args.model }),
   };
 }
 
@@ -797,12 +977,26 @@ function queueListQuery(
 }
 
 function spawnInput(input: ThreadSpawnArgs): PromptInput[] {
+  if ("experimental_idle" in input && input.experimental_idle === true) {
+    if (input.input !== undefined || input.prompt !== undefined) {
+      throw new Error("An idle chat takes no input or prompt.");
+    }
+
+    return [];
+  }
+
   if (input.input !== undefined && input.prompt !== undefined) {
     throw new Error("Provide only one of input or prompt.");
   }
+
   if (input.input !== undefined) {
     return input.input;
   }
+
+  if (input.prompt === undefined) {
+    throw new Error("Provide input or prompt.");
+  }
+
   return [{ type: "text", text: input.prompt, mentions: [] }];
 }
 
@@ -813,10 +1007,26 @@ function spawnJson(args: ThreadSpawnArgs): CreateThreadRequest {
     originKind,
     prompt: _prompt,
     startedOnBehalfOf,
-    ...request
+    ...rest
   } = args;
+
+  const {
+    experimental_idle: idle,
+    experimental_pluginHome: pluginHome,
+    experimental_quiet: quiet,
+    ...request
+  } = {
+    experimental_idle: undefined,
+    experimental_pluginHome: undefined,
+    experimental_quiet: undefined,
+    ...rest,
+  };
+
   return {
     ...request,
+    ...(idle === true ? { idle } : {}),
+    ...(pluginHome === true ? { pluginHome } : {}),
+    ...(quiet === true ? { quiet } : {}),
     ...(args.pluginMetadata === undefined
       ? {}
       : { pluginMetadata: validatePluginMetadata(args.pluginMetadata) }),
@@ -864,29 +1074,40 @@ function searchQuery(args: ThreadSearchArgs): ThreadSearchQuery {
 }
 
 function timelineQuery(args: ThreadTimelineArgs): ThreadTimelineQuery {
-  return {
-    ...(args.deferContent !== undefined
-      ? { deferContent: args.deferContent }
-      : {}),
-    ...(args.includeNestedRows !== undefined
-      ? { includeNestedRows: args.includeNestedRows }
-      : {}),
-    ...(args.summaryOnly !== undefined
-      ? { summaryOnly: args.summaryOnly }
-      : {}),
-    ...(args.segmentLimit !== undefined
-      ? { segmentLimit: args.segmentLimit }
-      : {}),
-    ...(args.beforeAnchorSeq !== undefined
-      ? { beforeAnchorSeq: args.beforeAnchorSeq }
-      : {}),
-    ...(args.beforeAnchorId !== undefined
-      ? { beforeAnchorId: args.beforeAnchorId }
-      : {}),
-    ...(args.afterSequence !== undefined
-      ? { afterSequence: args.afterSequence }
-      : {}),
-  };
+  const query: ThreadTimelineQuery = {};
+
+  if (args.priority !== undefined) query.priority = args.priority;
+
+  if (args.deltaFormat !== undefined) query.deltaFormat = args.deltaFormat;
+
+  if (args.runtimeIdentity !== undefined)
+    query.runtimeIdentity = args.runtimeIdentity;
+
+  if (args.afterRuntimeId !== undefined)
+    query.afterRuntimeId = args.afterRuntimeId;
+
+  if (args.afterRevision !== undefined)
+    query.afterRevision = args.afterRevision;
+
+  if (args.deferContent !== undefined) query.deferContent = args.deferContent;
+
+  if (args.includeNestedRows !== undefined)
+    query.includeNestedRows = args.includeNestedRows;
+
+  if (args.summaryOnly !== undefined) query.summaryOnly = args.summaryOnly;
+
+  if (args.segmentLimit !== undefined) query.segmentLimit = args.segmentLimit;
+
+  if (args.beforeAnchorSeq !== undefined)
+    query.beforeAnchorSeq = args.beforeAnchorSeq;
+
+  if (args.beforeAnchorId !== undefined)
+    query.beforeAnchorId = args.beforeAnchorId;
+
+  if (args.afterSequence !== undefined)
+    query.afterSequence = args.afterSequence;
+
+  return query;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -896,12 +1117,15 @@ function sleep(ms: number): Promise<void> {
 function resolveThreadWaitTarget(args: ThreadWaitArgs): ThreadWaitTarget {
   const hasStatus = args.status !== undefined;
   const hasEvent = args.event !== undefined;
+
   if (hasStatus && hasEvent) {
     throw new Error("Provide only one of status or event.");
   }
+
   if (hasEvent) {
     return { kind: "event", eventType: args.event ?? "" };
   }
+
   return { kind: "status", status: args.status ?? "idle" };
 }
 
@@ -911,18 +1135,22 @@ function validateThreadWaitArgs(args: ThreadWaitArgs): {
   timeoutMs: number;
 } {
   const timeoutMs = args.timeoutMs ?? DEFAULT_THREAD_WAIT_TIMEOUT_MS;
+
   if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
     throw new RangeError(
       "Timeout must be a non-negative number of milliseconds.",
     );
   }
+
   const pollIntervalMs =
     args.pollIntervalMs ?? DEFAULT_THREAD_WAIT_POLL_INTERVAL_MS;
+
   if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 1) {
     throw new RangeError(
       "Poll interval must be a positive integer number of milliseconds.",
     );
   }
+
   return {
     pollIntervalMs,
     target: resolveThreadWaitTarget(args),
@@ -933,10 +1161,21 @@ function validateThreadWaitArgs(args: ThreadWaitArgs): {
 function formatThreadWaitTimeoutMessage(args: {
   target: ThreadWaitTarget;
   threadId: string;
+  pendingRetry?: ThreadQueuedMessage | null;
 }): string {
   if (args.target.kind === "status") {
-    return `Timed out waiting for thread ${args.threadId} to reach status ${args.target.status}.`;
+    const timedOut = `Timed out waiting for thread ${args.threadId} to reach status ${args.target.status}.`;
+
+    if (args.pendingRetry == null) return timedOut;
+
+    const retryAt =
+      args.pendingRetry.sendAt === null
+        ? "a retry is waiting to send"
+        : `a retry is scheduled for ${new Date(args.pendingRetry.sendAt).toISOString()}`;
+
+    return `${timedOut} It failed and ${retryAt}; wait again to follow it.`;
   }
+
   return `Timed out waiting for thread ${args.threadId} event ${args.target.eventType}.`;
 }
 
@@ -953,6 +1192,7 @@ function isThreadWaitTargetUnreachable(
 
 export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
   const { transport } = args;
+
   const getThread = (input: ThreadGetArgs) =>
     transport.readJson(
       transport.api.v1.threads[":id"].$get(
@@ -965,6 +1205,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         ...signalRequestArgs(input.signal),
       ),
     );
+
   const archiveAll = async (
     input: ThreadActionArgs,
   ): Promise<ThreadArchiveAllResult> =>
@@ -973,6 +1214,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         param: { id: input.threadId },
       }),
     );
+
   const events: ThreadEventsArea = {
     async list(input) {
       return transport.readJson(
@@ -995,13 +1237,17 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           ...signalRequestArgs(input.signal),
         ),
       );
+
       const statusCode: number = response.status;
+
       if (statusCode === 204) {
         return null;
       }
+
       return parseThreadEventRow(await response.json());
     },
   };
+
   const interactions: ThreadInteractionsArea = {
     async cancel(input) {
       return transport.readJson(
@@ -1057,13 +1303,64 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       );
     },
   };
+
+  const submissions: ThreadSubmissionsArea = {
+    async contract() {
+      return transport.readJson(transport.api.v1.submissions.contract.$get());
+    },
+    async send(args) {
+      const { attachments, storeId, submissionId, threadId, ...message } = args;
+
+      return submissions.submit({
+        version: SUBMISSION_CONTRACT_VERSION,
+        submissionId,
+        storeId: storeId ?? (await submissions.contract()).storeId,
+        action: {
+          kind: "thread-message",
+          threadId,
+          message: {
+            ...message,
+            messageSource: message.messageSource ?? {
+              kind: "script",
+              label: "SDK",
+            },
+          },
+        },
+        attachments: attachments ?? [],
+      });
+    },
+    async spawn(args) {
+      const { attachments, storeId, submissionId, ...thread } = args;
+
+      return submissions.submit({
+        version: SUBMISSION_CONTRACT_VERSION,
+        submissionId,
+        storeId: storeId ?? (await submissions.contract()).storeId,
+        action: { kind: "new-thread", thread: spawnJson(thread) },
+        attachments: attachments ?? [],
+      });
+    },
+    async submit(request) {
+      return transport.readJson(
+        transport.api.v1.submissions.$post({ json: request }),
+      );
+    },
+  };
+
   const queuedMessages: ThreadQueuedMessagesArea = {
     async create(input) {
       const { threadId, ...json } = input;
+
       return transport.readJson(
         transport.api.v1.threads[":id"]["queued-messages"].$post({
           param: { id: threadId },
-          json,
+          json: {
+            ...json,
+            messageSource: input.messageSource ?? {
+              kind: "script",
+              label: "SDK",
+            },
+          },
         }),
       );
     },
@@ -1078,6 +1375,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           },
         }),
       );
+
       return { ok: true };
     },
     async experimental_holdForEdit(input) {
@@ -1103,7 +1401,20 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           },
         }),
       );
+
       return { ok: true };
+    },
+    async experimental_restore(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["queued-messages"][
+          ":queuedMessageId"
+        ].restore.$post({
+          param: {
+            id: input.threadId,
+            queuedMessageId: input.queuedMessageId,
+          },
+        }),
+      );
     },
     async list(input) {
       return transport.readJson(
@@ -1139,7 +1450,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
             id: input.threadId,
             queuedMessageId: input.queuedMessageId,
           },
-          json: { mode: input.mode },
+          json: { mode: input.mode, requestId: input.requestId },
         }),
       );
     },
@@ -1159,6 +1470,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     },
     async update(input) {
       const { queuedMessageId, threadId, ...json } = input;
+
       return transport.readJson(
         transport.api.v1.threads[":id"]["queued-messages"][
           ":queuedMessageId"
@@ -1169,6 +1481,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       );
     },
   };
+
   const queue: ThreadQueueArea = {
     async list(input) {
       return transport.readJson(
@@ -1179,6 +1492,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       );
     },
   };
+
   const tabs: ThreadTabsArea = {
     async get(input) {
       const body = await transport.readJson(
@@ -1187,6 +1501,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           ...signalRequestArgs(input.signal),
         ),
       );
+
       return threadTabsResponseSchema.parse(body);
     },
     async update(input) {
@@ -1199,9 +1514,11 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           },
         }),
       );
+
       return threadTabsResponseSchema.parse(body);
     },
   };
+
   return {
     archive: archiveAll,
     archiveAll,
@@ -1209,6 +1526,25 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       return transport.readJson(
         transport.api.v1.threads[":id"]["child-summary"].$get(
           { param: { id: input.threadId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
+    async conversation(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].conversation.$get(
+          {
+            param: { id: input.threadId },
+            query: {
+              ...(input.afterSeq === undefined
+                ? {}
+                : { afterSeq: input.afterSeq }),
+              ...(input.throughSeq === undefined
+                ? {}
+                : { throughSeq: input.throughSeq }),
+              ...(input.limit === undefined ? {} : { limit: input.limit }),
+            },
+          },
           ...signalRequestArgs(input.signal),
         ),
       );
@@ -1257,15 +1593,28 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           },
         }),
       );
+
       return { ok: true };
     },
     async editMessage(input) {
       const { threadId, ...json } = input;
+
       return transport.readJson(
         transport.api.v1.threads[":id"]["edit-message"].$post({
           param: { id: threadId },
           json,
         }),
+      );
+    },
+    async experimental_lookupCommandProofs(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["command-proofs"].$post(
+          {
+            param: { id: input.threadId },
+            json: { selectors: input.selectors },
+          },
+          ...signalRequestArgs(input.signal),
+        ),
       );
     },
     events,
@@ -1277,6 +1626,36 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       );
     },
     get: getThread,
+    async experimental_work(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].work.$get(
+          { param: { id: input.threadId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
+    async experimental_publishWork(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].work.$post(
+          {
+            param: { id: input.threadId },
+            json: publishThreadWorkSchema.parse({
+              pluginId: input.pluginId,
+              contribution: input.contribution,
+            }),
+          },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
+    async experimental_archiveReady(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["archive-ready"].$post(
+          { param: { id: input.threadId }, json: { basis: input.basis } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
     async experimental_listAncestors(input) {
       return transport.readJson(
         transport.api.v1.threads.ancestors.$post(
@@ -1435,9 +1814,21 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       );
     },
     queuedMessages,
+    submissions,
     async reorderPinned(input) {
       return transport.readJson(
         transport.api.v1.threads[":id"]["pin-order"].$patch({
+          param: { id: input.threadId },
+          json: {
+            previousThreadId: input.previousThreadId,
+            nextThreadId: input.nextThreadId,
+          },
+        }),
+      );
+    },
+    async experimental_reorderShelved(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["shelf-order"].$patch({
           param: { id: input.threadId },
           json: {
             previousThreadId: input.previousThreadId,
@@ -1470,10 +1861,62 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         }),
       );
     },
+    async shelve(input) {
+      const response = await transport.resolve(
+        transport.api.v1.threads[":id"].shelve.$post({
+          param: { id: input.threadId },
+        }),
+      );
+
+      input.experimental_onServerTiming?.(
+        response.headers.get("server-timing"),
+      );
+
+      return response.json();
+    },
     async restoreEnvironment(input) {
       return transport.readJson(
         transport.api.v1.threads[":id"]["restore-environment"].$post({
           param: { id: input.threadId },
+        }),
+      );
+    },
+    async experimental_importNative(input) {
+      const { signal, origin, ...json } = input;
+
+      return transport.readJson(
+        transport.api.v1.threads.import.$post(
+          { json: { ...json, origin: origin ?? "sdk" } },
+          ...signalRequestArgs(signal),
+        ),
+      );
+    },
+    async experimental_nativeSessionClaims(input) {
+      const { signal, ...query } = input;
+
+      return transport.readJson(
+        transport.api.v1.threads["native-sessions"].$get(
+          { query },
+          ...signalRequestArgs(signal),
+        ),
+      );
+    },
+    async experimental_listStartMachines(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["start-machines"].$get({
+          param: { id: input.threadId },
+          query:
+            input.pluginId === undefined ? {} : { pluginId: input.pluginId },
+        }),
+      );
+    },
+    async experimental_moveStart(input) {
+      const { signal: _signal, threadId, initiator, ...json } = input;
+
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["start-machine"].$post({
+          param: { id: threadId },
+          json: { ...json, initiator: initiator ?? { kind: "person" } },
         }),
       );
     },
@@ -1483,6 +1926,35 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           param: { id: input.threadId },
           json: retryJson(input),
         }),
+      );
+    },
+    async experimental_continue(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].continue.$post({
+          param: { id: input.threadId },
+          query: { now: input.now ? "true" : undefined, model: input.model },
+        }),
+      );
+    },
+    async experimental_continueAll() {
+      return transport.readJson(
+        transport.api.v1.threads["continue-all"].$post(),
+      );
+    },
+    async experimental_continuationState(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].continue.$get(
+          { param: { id: input.threadId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
+    async experimental_continuations(input) {
+      return transport.readJson(
+        transport.api.v1.threads.continuations.eligible.$get(
+          undefined,
+          ...signalRequestArgs(input?.signal),
+        ),
       );
     },
     async spawn(input) {
@@ -1498,6 +1970,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           param: { id: input.threadId },
         }),
       );
+
       return { ok: true };
     },
     async compact(input) {
@@ -1506,6 +1979,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           param: { id: input.threadId },
         }),
       );
+
       return { ok: true };
     },
     async clearContext(input) {
@@ -1514,6 +1988,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           param: { id: input.threadId },
         }),
       );
+
       return { ok: true };
     },
     async cancelPlan(input) {
@@ -1522,6 +1997,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           param: { id: input.threadId },
         }),
       );
+
       return { ok: true };
     },
     async clearGoal(input) {
@@ -1530,6 +2006,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           param: { id: input.threadId },
         }),
       );
+
       return { ok: true };
     },
     tabs,
@@ -1539,6 +2016,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           { param: { id: input.threadId } },
           ...signalRequestArgs(input.signal),
         ),
+      );
+    },
+    async experimental_setAutoCompaction(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["auto-compaction"].$put({
+          param: { id: input.threadId },
+          json: { enabled: input.enabled },
+        }),
       );
     },
     async timeline(input) {
@@ -1617,6 +2102,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
           param: { id: input.threadId },
         }),
       );
+
       return { ok: true };
     },
     async unpin(input) {
@@ -1626,24 +2112,37 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         }),
       );
     },
+    async unshelve(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"].unshelve.$post({
+          param: { id: input.threadId },
+        }),
+      );
+    },
     async update(input) {
       return transport.readJson(
-        transport.api.v1.threads[":id"].$patch({
-          param: { id: input.threadId },
-          json: updateJson(input),
-        }),
+        transport.api.v1.threads[":id"].$patch(
+          {
+            param: { id: input.threadId },
+            json: updateJson(input),
+          },
+          ...signalRequestArgs(input.signal),
+        ),
       );
     },
     async wait(input) {
       const { pollIntervalMs, target, timeoutMs } =
         validateThreadWaitArgs(input);
+
       const deadline = Date.now() + timeoutMs;
+
       while (true) {
         if (target.kind === "status") {
           const thread = await getThread({
             signal: input.signal,
             threadId: input.threadId,
           });
+
           if (thread.status === target.status) {
             return {
               matched: true,
@@ -1652,31 +2151,56 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
               threadId: input.threadId,
             };
           }
-          if (isThreadWaitTargetUnreachable(thread.status, target)) {
+
+          const unreachable = isThreadWaitTargetUnreachable(
+            thread.status,
+            target,
+          );
+
+          const pendingRetry = unreachable
+            ? ((
+                await queuedMessages.list({
+                  signal: input.signal,
+                  threadId: input.threadId,
+                })
+              ).find(
+                (row) =>
+                  row.payload.kind === "retry" &&
+                  row.failureReason === null &&
+                  row.waitingOn?.kind !== "superseded",
+              ) ?? null)
+            : null;
+
+          if (unreachable && pendingRetry === null) {
             throw new ThreadWaitUnreachableError({
               currentStatus: thread.status,
               target,
               threadId: input.threadId,
             });
           }
+
           if (Date.now() >= deadline) {
             throw new ThreadWaitTimeoutError({
+              pendingRetry,
               target,
               threadId: input.threadId,
             });
           }
+
           await sleep(pollIntervalMs);
           continue;
         }
 
         const remainingMs = Math.max(0, deadline - Date.now());
         const waitMs = Math.floor(Math.min(remainingMs, 30_000));
+
         const event = await events.wait({
           signal: input.signal,
           threadId: input.threadId,
           type: target.eventType,
           waitMs: String(waitMs),
         });
+
         if (event !== null) {
           return {
             event,
@@ -1685,12 +2209,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
             threadId: input.threadId,
           };
         }
+
         if (Date.now() >= deadline) {
           throw new ThreadWaitTimeoutError({
             target,
             threadId: input.threadId,
           });
         }
+
         await sleep(pollIntervalMs);
       }
     },

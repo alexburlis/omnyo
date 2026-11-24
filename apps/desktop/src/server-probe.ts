@@ -8,6 +8,7 @@ const healthResponseSchema = z
 
 const systemConfigResponseSchema = z
   .object({
+    appVersion: z.string().min(1).optional(),
     dataDir: z.string().min(1).optional(),
     hostDaemonPort: z.number().int().min(1).max(65_535),
     voiceTranscriptionEnabled: z.boolean(),
@@ -42,13 +43,15 @@ interface UnavailableServerProbeResult {
   serverUrl: string;
 }
 
-interface ProbeBbServerArgs {
+interface ProbeOmnyoServerArgs {
+  expectedAppVersion?: string;
   fetchImpl?: ServerProbeFetch;
   serverUrl: string;
   timeoutMs: number;
 }
 
 interface WaitForCompatibleServerArgs {
+  expectedAppVersion?: string;
   fetchImpl?: ServerProbeFetch;
   intervalMs: number;
   serverUrl: string;
@@ -111,6 +114,7 @@ async function fetchJson<TValue>(
   args: FetchJsonArgs<TValue>,
 ): Promise<FetchJsonResult<TValue>> {
   const controller = new AbortController();
+
   const timeout = setTimeout(() => {
     controller.abort();
   }, args.timeoutMs);
@@ -119,6 +123,7 @@ async function fetchJson<TValue>(
     const response = await args.fetchImpl(args.url, {
       signal: controller.signal,
     });
+
     if (!response.ok) {
       return {
         kind: "http-error",
@@ -127,6 +132,7 @@ async function fetchJson<TValue>(
     }
 
     const parsed = args.schema.safeParse(await response.json());
+
     if (!parsed.success) {
       return {
         kind: "schema-error",
@@ -140,6 +146,7 @@ async function fetchJson<TValue>(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+
     return {
       kind: "network-error",
       message,
@@ -153,13 +160,15 @@ function formatFetchFailure(result: FetchJsonFailureResult): string {
   if (result.kind === "http-error") {
     return `HTTP ${result.status}`;
   }
+
   return result.message;
 }
 
-export async function probeBbServer(
-  args: ProbeBbServerArgs,
+export async function probeOmnyoServer(
+  args: ProbeOmnyoServerArgs,
 ): Promise<ServerProbeResult> {
   const fetchImpl = args.fetchImpl ?? globalThis.fetch;
+
   const healthResult = await fetchJson({
     fetchImpl,
     schema: healthResponseSchema,
@@ -214,6 +223,18 @@ export async function probeBbServer(
     };
   }
 
+  if (
+    args.expectedAppVersion !== undefined &&
+    configResult.value.appVersion !== args.expectedAppVersion
+  ) {
+    return {
+      kind: "incompatible",
+      reason:
+        "The running server is not this Omnyo build. Wait until all chats and pooled calls are idle, then manually close the running Omnyo server and reopen Omnyo.",
+      serverUrl: args.serverUrl,
+    };
+  }
+
   return {
     dataDir: configResult.value.dataDir ?? null,
     kind: "compatible",
@@ -225,6 +246,7 @@ export async function waitForCompatibleServer(
   args: WaitForCompatibleServerArgs,
 ): Promise<ServerProbeResult> {
   const deadline = Date.now() + args.timeoutMs;
+
   let lastResult: ServerProbeResult = {
     kind: "unavailable",
     reason: "Probe has not started",
@@ -232,11 +254,20 @@ export async function waitForCompatibleServer(
   };
 
   while (Date.now() <= deadline) {
-    lastResult = await probeBbServer({
-      ...(args.fetchImpl === undefined ? {} : { fetchImpl: args.fetchImpl }),
+    const probeArgs: ProbeOmnyoServerArgs = {
       serverUrl: args.serverUrl,
       timeoutMs: Math.min(args.intervalMs, 1_000),
-    });
+    };
+
+    if (args.expectedAppVersion !== undefined) {
+      probeArgs.expectedAppVersion = args.expectedAppVersion;
+    }
+
+    if (args.fetchImpl !== undefined) {
+      probeArgs.fetchImpl = args.fetchImpl;
+    }
+
+    lastResult = await probeOmnyoServer(probeArgs);
 
     if (lastResult.kind === "compatible") {
       return lastResult;
@@ -251,7 +282,7 @@ export async function waitForCompatibleServer(
 
   return {
     kind: "unavailable",
-    reason: `Timed out after ${args.timeoutMs}ms waiting for bb server. Last probe: ${lastResult.reason}`,
+    reason: `Timed out after ${args.timeoutMs}ms waiting for Omnyo server. Last probe: ${lastResult.reason}`,
     serverUrl: args.serverUrl,
   };
 }

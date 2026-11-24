@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
+
 const GENERATOR_TIMEOUT_MS = 30_000;
 
 describe("runtime export manifest generator", () => {
@@ -16,6 +17,7 @@ describe("runtime export manifest generator", () => {
         "../scripts/generate-runtime-export-manifest.mjs",
         import.meta.url,
       ).href;
+
       const source = `
       delete globalThis.navigator;
       if (typeof globalThis.navigator !== "undefined") {
@@ -24,14 +26,19 @@ describe("runtime export manifest generator", () => {
       await import(${JSON.stringify(scriptUrl)});
     `;
 
-      const outDir = await mkdtemp(path.join(tmpdir(), "bb-runtime-manifest-"));
+      const outDir = await mkdtemp(
+        path.join(tmpdir(), "omnyo-runtime-manifest-"),
+      );
+
       try {
         const outPath = path.join(outDir, "manifest.ts");
+
         const result = await execFileAsync(
           process.execPath,
           ["--input-type=module", "--eval", source, "--", "--out", outPath],
           { timeout: GENERATOR_TIMEOUT_MS },
         );
+
         expect(result.stdout).toContain(outPath);
       } finally {
         await rm(outDir, { recursive: true, force: true });

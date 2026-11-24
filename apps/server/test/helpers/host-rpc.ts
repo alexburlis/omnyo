@@ -1,3 +1,4 @@
+import path from "node:path";
 import {
   hostDaemonOnlineRpcResponseMessageSchema,
   hostDaemonServerWsMessageSchema,
@@ -5,8 +6,8 @@ import {
   type HostDaemonOnlineRpcResponseMessage,
   type HostDaemonOnlineRpcResult,
   type HostDaemonRpcResultForCommand,
-} from "@bb/host-daemon-contract";
-import type { AvailableModel } from "@bb/domain";
+} from "@omnyo/host-daemon-contract";
+import type { AvailableModel } from "@omnyo/domain";
 import type { TestAppHarness } from "./test-app.js";
 import {
   registerTestHostRpcCapture,
@@ -20,6 +21,12 @@ export const EMPTY_WORKSPACE_AGENT_CONTEXT: HostDaemonOnlineRpcResult<"host.read
     projectSkillsTruncated: false,
     sharedSkills: [],
   };
+
+export function currentWorkspaceIdentity(
+  rootPath: string,
+): HostDaemonOnlineRpcResult<"host.prepare_workspace_identity_v1"> {
+  return { status: "current", rootPath: path.join(rootPath, ".omnyo") };
+}
 
 interface ProviderModelResponse {
   models: AvailableModel[];
@@ -99,6 +106,7 @@ function buildProviderRpcResponse(
 
   const providerId = request.command.providerId;
   const error = args.modelErrorsByProviderId?.[providerId];
+
   if (error) {
     return {
       ok: false,
@@ -111,6 +119,7 @@ function buildProviderRpcResponse(
     models: [],
     selectedOnlyModels: [],
   };
+
   return { ok: true, result };
 }
 
@@ -127,6 +136,7 @@ function buildHostRpcResponse(
       result: result.result,
     });
   }
+
   return {
     type: "host-rpc.response",
     requestId: request.requestId,
@@ -142,27 +152,40 @@ export function registerHostRpcResponder(
   args: RegisterHostRpcResponderArgs,
 ): HostRpcResponder {
   const requests: HostDaemonOnlineRpcRequestMessage[] = [];
+
   const socket: TestHostRpcSocket = {
     close() {},
     send(data) {
       const message = hostDaemonServerWsMessageSchema.parse(JSON.parse(data));
+
+      if (
+        message.type === "diagnostics-policy.replace" ||
+        message.type === "command-catalog-retain"
+      )
+        return;
+
       if (message.type !== "host-rpc.request") {
         throw new Error(`Unexpected daemon websocket message ${message.type}`);
       }
+
       requests.push(message);
+
       const respond = (
         build: () => HostDaemonOnlineRpcResponseMessage,
       ): void => {
         let response: HostDaemonOnlineRpcResponseMessage;
+
         try {
           response = build();
         } catch (error) {
           response = buildTestFailureResponse(message, error);
         }
+
         harness.hub.recordHostOnlineRpcResponse({
           message: response,
           sessionId: args.sessionId,
         });
+
         if (args.restoreCommandCaptureAfterResponse) {
           registerTestHostRpcCapture(harness, {
             hostId: args.hostId,
@@ -170,25 +193,32 @@ export function registerHostRpcResponder(
           });
         }
       };
+
       let handled: HostRpcHandlerResult | Promise<HostRpcHandlerResult>;
+
       try {
         handled = args.handle(message);
       } catch (error) {
         respond(() => buildTestFailureResponse(message, error));
+
         return;
       }
+
       if (handled instanceof Promise) {
         void handled.then(
           (result) => respond(() => buildHostRpcResponse(message, result)),
           (error: unknown) =>
             respond(() => buildTestFailureResponse(message, error)),
         );
+
         return;
       }
+
       const result = handled;
       respond(() => buildHostRpcResponse(message, result));
     },
   };
+
   harness.hub.registerDaemon(args.sessionId, args.hostId, socket);
 
   return {

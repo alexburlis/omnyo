@@ -4,7 +4,7 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
     silent: "passed-only",
-    name: "bb-plugin-bb--provider-acp-next",
+    name: "omnyo-plugin-omnyo--provider-acp-next",
     include: ["*.test.ts", "*.test.tsx", "src/**/*.test.ts"],
     exclude: ["node_modules/**"],
   },

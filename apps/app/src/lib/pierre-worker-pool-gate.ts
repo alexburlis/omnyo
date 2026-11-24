@@ -16,11 +16,13 @@ export function useRequirePierreWorkerPool(required = true): boolean {
   useEffect(() => {
     request?.();
   }, [request]);
+
   return !required || gate === null ? true : gate.ready;
 }
 
 export function useRequestPierreWorkerPool(): () => void {
   const request = useContext(PierreWorkerPoolGateContext)?.request;
+
   return request ?? noop;
 }
 

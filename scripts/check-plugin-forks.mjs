@@ -25,18 +25,21 @@ import {
 } from "./lib/plugin-fork.mjs";
 
 const run = promisify(execFile);
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
 const USAGE =
   "Usage: node scripts/check-plugin-forks.mjs [plugins/<name> ...] [--keep] [--concurrency=<n>] [--changed-from=<sha>] [--shard=<index>/<count>] [--list]\n\n" +
   "Copies each forkable built-in plugin (scripts/forkable-plugins.json) out of\n" +
   "the monorepo the way a fork would: the component registry items its @/\n" +
   "imports name are written into the copy, and it installs published packages\n" +
-  "plus a packed @get-bb/plugin-sdk. Then it runs the copy's typecheck, tests,\n" +
-  "and `bb plugin build`. Plugins run --concurrency at a time (default: up to\n" +
+  "plus a packed @omnyo/plugin-sdk. Then it runs the copy's typecheck, tests,\n" +
+  "and `omnyo plugin build`. Plugins run --concurrency at a time (default: up to\n" +
   "4), and every failure is reported at the end. --changed-from selects changed\n" +
   "plugins only when every changed file belongs to a forkable plugin; shared or\n" +
   "unknown changes run all plugins. --shard partitions the selection across\n" +
   "runners (one-based index). --list prints the shard selection as JSON.";
+
 const COPY_EXCLUDED = new Set([
   "node_modules",
   "dist",
@@ -45,11 +48,14 @@ const COPY_EXCLUDED = new Set([
 ]);
 
 const args = process.argv.slice(2);
+
 if (args.includes("--help")) {
   console.log(USAGE);
   process.exit(0);
 }
+
 const keep = args.includes("--keep");
+
 for (const arg of args) {
   if (
     arg.startsWith("--") &&
@@ -61,35 +67,47 @@ for (const arg of args) {
     throw new Error(`Unknown argument: ${arg}`);
   }
 }
+
 const concurrencyArg = args.find((arg) => arg.startsWith("--concurrency="));
+
 const concurrency =
   concurrencyArg === undefined
     ? Math.min(4, availableParallelism())
     : Number(concurrencyArg.slice("--concurrency=".length));
+
 if (!Number.isInteger(concurrency) || concurrency < 1) {
   console.error(`${concurrencyArg} is not a positive integer\n\n${USAGE}`);
   process.exit(1);
 }
+
 const forkable = JSON.parse(
   await readFile(join(repoRoot, "scripts", "forkable-plugins.json"), "utf8"),
 ).plugins;
+
 const requested = args.filter((arg) => !arg.startsWith("--"));
+
 const changedFrom = args
   .find((arg) => arg.startsWith("--changed-from="))
   ?.slice("--changed-from=".length);
+
 if (changedFrom !== undefined && requested.length > 0) {
   throw new Error("Use plugin directories or --changed-from, not both.");
 }
+
 const selectedPluginDirs =
   requested.length > 0
     ? requested
     : affectedPluginForks(repoRoot, changedFrom, forkable);
+
 const shardArg = args.find((arg) => arg.startsWith("--shard="));
+
 let pluginDirs = selectedPluginDirs;
+
 if (shardArg !== undefined) {
   const match = /^--shard=([1-9]\d*)\/([1-9]\d*)$/u.exec(shardArg);
   const index = Number(match?.[1]);
   const count = Number(match?.[2]);
+
   if (
     !Number.isSafeInteger(index) ||
     !Number.isSafeInteger(count) ||
@@ -97,10 +115,12 @@ if (shardArg !== undefined) {
   ) {
     throw new Error("--shard requires an index/count with 1 <= index <= count");
   }
+
   pluginDirs = selectedPluginDirs.filter(
     (_, position) => position % count === index - 1,
   );
 }
+
 for (const pluginDir of selectedPluginDirs) {
   if (!forkable.includes(pluginDir)) {
     console.error(
@@ -114,6 +134,7 @@ if (args.includes("--list")) {
   console.log(JSON.stringify(pluginDirs));
   process.exit(0);
 }
+
 if (pluginDirs.length === 0) {
   console.log("No changed forkable plugins.");
   process.exit(0);
@@ -121,14 +142,17 @@ if (pluginDirs.length === 0) {
 
 async function step(log, label, command, commandArgs, options = {}) {
   const startedAt = Date.now();
+
   try {
     const result = await run(command, commandArgs, {
       maxBuffer: 64 * 1024 * 1024,
       ...options,
     });
+
     log.push(
       `  ${label} … ok (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`,
     );
+
     return result.stdout;
   } catch (error) {
     log.push(`  ${label} … failed`);
@@ -139,39 +163,46 @@ async function step(log, label, command, commandArgs, options = {}) {
 }
 
 function cliEnv(dataDir) {
-  const env = { ...process.env, BB_DATA_DIR: dataDir };
-  delete env.BB_CLI;
+  const env = { ...process.env, OMNYO_DATA_DIR: dataDir };
+  delete env.OMNYO_CLI;
+
   return env;
 }
 
 async function workspaceBinsFor(pluginDir, manifest) {
   const bins = new Map();
+
   for (const [name, specifier] of Object.entries(
     manifest.devDependencies ?? {},
   )) {
     if (typeof specifier !== "string" || !specifier.startsWith("workspace:")) {
       continue;
     }
+
     const dependencyManifest = JSON.parse(
       await readFile(
         join(repoRoot, pluginDir, "node_modules", name, "package.json"),
         "utf8",
       ),
     );
+
     const bin = dependencyManifest.bin;
     bins.set(
       name,
       typeof bin === "string" ? [basename(name)] : Object.keys(bin ?? {}),
     );
   }
+
   return bins;
 }
 
 async function readRegistryItems() {
   const registryDir = join(repoRoot, "packages", "plugin-registry", "r");
+
   const names = (await readdir(registryDir)).filter(
     (name) => name.endsWith(".json") && name !== "index.json",
   );
+
   return Promise.all(
     names.map(async (name) =>
       JSON.parse(await readFile(join(registryDir, name), "utf8")),
@@ -181,17 +212,21 @@ async function readRegistryItems() {
 
 async function sourceFiles(dir) {
   const files = [];
+
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     if (COPY_EXCLUDED.has(entry.name)) continue;
     const path = join(dir, entry.name);
+
     if (entry.isDirectory()) files.push(...(await sourceFiles(path)));
     else if (/\.(?:tsx?|mts|cts)$/u.test(entry.name)) files.push(path);
   }
+
   return files;
 }
 
 async function vendorRegistryItems(target) {
   const specifiers = new Set();
+
   for (const file of await sourceFiles(target)) {
     for (const specifier of registryAliasImports(
       await readFile(file, "utf8"),
@@ -199,19 +234,23 @@ async function vendorRegistryItems(target) {
       specifiers.add(specifier);
     }
   }
+
   const items = registryItemsForImports(specifiers, await readRegistryItems());
+
   for (const item of items) {
     for (const file of item.files) {
       await mkdir(dirname(join(target, file.target)), { recursive: true });
       await writeFile(join(target, file.target), file.content);
     }
   }
+
   const [registryManifest, appManifest] = await Promise.all(
     [
       join(repoRoot, "packages", "plugin-registry", "package.json"),
       join(repoRoot, "apps", "app", "package.json"),
     ].map(async (path) => JSON.parse(await readFile(path, "utf8"))),
   );
+
   return {
     items,
     packages: registryPackages(items, {
@@ -240,27 +279,32 @@ async function checkPlugin(pluginDir, workDir, sdkTarball, log) {
   log.push(
     `  registry items: ${registry.items.map((item) => item.name).join(", ")}`,
   );
+
   const tsconfig = JSON.parse(
     await readFile(join(source, "tsconfig.json"), "utf8"),
   );
+
   await writeFile(
     join(target, "tsconfig.json"),
     `${JSON.stringify(forkPluginTsconfig(tsconfig), null, 2)}\n`,
   );
+
   const manifest = JSON.parse(
     await readFile(join(source, "package.json"), "utf8"),
   );
+
   const forked = forkPluginPackageJson(manifest, {
     sdkSpecifier: `file:${sdkTarball}`,
     workspaceBinsByPackage: await workspaceBinsFor(pluginDir, manifest),
     registryDependencies: registry.packages,
   });
+
   await writeFile(
     join(target, "package.json"),
     `${JSON.stringify(forked.manifest, null, 2)}\n`,
   );
   log.push(
-    `  package.json: @get-bb/plugin-sdk from the packed SDK, registry packages in place of @bb/shared-ui${
+    `  package.json: @omnyo/plugin-sdk from the packed SDK, registry packages in place of @omnyo/shared-ui${
       forked.droppedDevDependencies.length > 0
         ? `; dropped workspace tooling ${forked.droppedDevDependencies.join(", ")}`
         : ""
@@ -282,7 +326,7 @@ async function checkPlugin(pluginDir, workDir, sdkTarball, log) {
   await step(log, "test", "npm", ["test"], { cwd: target });
   await step(
     log,
-    "bb plugin build",
+    "omnyo plugin build",
     process.execPath,
     [
       join(repoRoot, "apps", "cli", "dist", "index.js"),
@@ -290,27 +334,31 @@ async function checkPlugin(pluginDir, workDir, sdkTarball, log) {
       "build",
       target,
     ],
-    { cwd: target, env: cliEnv(join(workDir, "bb-data")) },
+    { cwd: target, env: cliEnv(join(workDir, "omnyo-data")) },
   );
-  for (const artifact of manifest.bb?.app === undefined
+
+  for (const artifact of manifest.omnyo?.app === undefined
     ? ["server.js"]
     : ["server.js", "app.js", "app.css"]) {
     await stat(join(target, "dist", artifact));
   }
 }
 
-const workDir = await mkdtemp(join(tmpdir(), "bb-plugin-fork-"));
+const workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-fork-"));
+
 if (!relative(repoRoot, workDir).startsWith("..")) {
   console.error(`${workDir} is inside the repository; set TMPDIR elsewhere`);
   process.exit(1);
 }
+
 let failed = false;
+
 try {
   console.log(`Work directory: ${workDir}`);
   const printLog = { push: (line) => console.log(line) };
   await step(
     printLog,
-    "Build @get-bb/plugin-sdk and the bb CLI",
+    "Build @omnyo/plugin-sdk and the omnyo CLI",
     "pnpm",
     [
       "exec",
@@ -318,21 +366,23 @@ try {
       "run",
       "build",
       "build:types",
-      "--filter=@get-bb/plugin-sdk",
-      "--filter=@bb/cli",
+      "--filter=@omnyo/plugin-sdk",
+      "--filter=@omnyo/cli",
       "--output-logs=errors-only",
     ],
     { cwd: repoRoot },
   );
+
   const packed = JSON.parse(
     await step(
       printLog,
-      "Pack @get-bb/plugin-sdk",
+      "Pack @omnyo/plugin-sdk",
       "npm",
       ["pack", "--json", "--ignore-scripts", "--pack-destination", workDir],
       { cwd: join(repoRoot, "packages", "plugin-sdk") },
     ),
   );
+
   const sdkTarball = join(workDir, packed[0].filename);
   const queue = [...pluginDirs];
   const failures = [];
@@ -345,22 +395,27 @@ try {
       ) {
         const log = [];
         console.log(`Checking ${pluginDir} …`);
+
         try {
           await checkPlugin(pluginDir, workDir, sdkTarball, log);
         } catch (error) {
           failures.push({ pluginDir, error });
         }
+
         console.log(`\n${pluginDir}\n${log.join("\n")}`);
       }
     }),
   );
+
   if (failures.length > 0) {
     failed = true;
+
     for (const { pluginDir, error } of failures) {
       console.error(
         `\n${pluginDir}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+
     console.error(
       `\n${failures.length} of ${pluginDirs.length} forkable plugin(s) failed: ${failures.map(({ pluginDir }) => pluginDir).join(", ")}`,
     );
@@ -377,4 +432,5 @@ try {
     await rm(workDir, { recursive: true, force: true });
   }
 }
+
 process.exit(failed ? 1 : 0);

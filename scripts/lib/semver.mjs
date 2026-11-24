@@ -1,9 +1,6 @@
-// Semver parsing, comparison, and bump derivation shared by the repo's version
-// bump scripts (scripts/bump-version.mjs for bb-app/@bb/desktop,
-// scripts/bump-plugin-sdk.mjs for @get-bb/plugin-sdk). Kept dependency-free so
-// the release workflow can run it without an install step.
 const semverPattern =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u;
+
 const numericIdentifierPattern = /^\d+$/u;
 
 function parseSemver(version) {
@@ -151,10 +148,6 @@ function deriveVersion(currentVersion, bumpType) {
   throw new Error(`Unsupported bump flag: ${bumpType}`);
 }
 
-/**
- * Resolve a CLI version argument that is either an explicit semver string or one
- * of the `--patch`/`--minor`/`--major` bump flags.
- */
 export function resolveVersionArgument({ argument, currentVersion, usage }) {
   if (
     argument === "--major" ||

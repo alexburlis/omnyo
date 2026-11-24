@@ -14,6 +14,7 @@ export function createMemorySecureStorage(
   initial: Record<string, string> = {},
 ): SecureStorageLike & { readonly entries: Map<string, string> } {
   const entries = new Map<string, string>(Object.entries(initial));
+
   return {
     entries,
     async getItem(key) {
@@ -25,6 +26,7 @@ export function createMemorySecureStorage(
           `Secure storage value for "${key}" exceeds ${SECURE_STORAGE_MAX_VALUE_BYTES} bytes`,
         );
       }
+
       entries.set(key, value);
     },
     async deleteItem(key) {

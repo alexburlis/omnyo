@@ -1,22 +1,20 @@
 import { MobileAppSection } from "@/components/settings/MobileAppSection";
 import { CliSkillsSettingsSectionContent } from "@/components/settings/CliSkillsSettingsSection";
 import { useEffect, useRef, useState } from "react";
+import { createStore, Provider as JotaiProvider } from "jotai";
 import { Route, Routes, useNavigate } from "react-router-dom";
 import {
   defaultAppTheme,
-  defaultExperiments,
   type AppTheme,
-  type Experiments,
   defaultAppSettings,
   type AppSettings,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   WorkspaceOpenTarget,
   WorkspaceOpenTargetId,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { VoiceInputSettingsSectionContent } from "@/components/settings/VoiceInputSettingsSection";
 import { ArchivedThreadsSettingsSection } from "@/components/settings/ArchivedThreadsSettingsSection";
-import { CommunitySettingsSection } from "@/components/settings/CommunitySettingsSection";
 import { KeyboardSettingsSection } from "@/components/settings/KeyboardSettingsSection";
 import { MarketplacesSettingsSection } from "@/components/settings/MarketplacesSettingsSection";
 import { MachineEnvironmentSettings } from "@/components/settings/MachineEnvironmentSettings";
@@ -28,9 +26,15 @@ import {
   useSettingsStoryRoute,
 } from "../../.ladle/story-settings-chrome";
 import {
+  SETTINGS_STORY_HIDDEN_MODELS,
+  SETTINGS_STORY_MODEL_PICKER_FAVORITES,
   SettingsStoryFixtures,
   SettingsUpdatesStory,
 } from "../../.ladle/settings-story-fixtures";
+import {
+  modelPickerFavoritesAtom,
+  modelPickerHiddenModelsAtom,
+} from "@/components/pickers/modelPickerPreferences";
 import type { ThemePreference } from "@/hooks/useTheme";
 import type { AudioInputDeviceOption } from "@/hooks/useAudioInputDevices";
 import { useAudioInputDevicePreferenceValue } from "@/lib/audio-input-device-preference";
@@ -38,14 +42,15 @@ import {
   SETTINGS_MACHINE_ROUTE_PATH,
   SETTINGS_PROJECT_ROUTE_PATH,
 } from "@/lib/route-paths";
+import { AppearanceSettingsSection } from "@/components/settings/AppearanceSettingsPage";
 import {
-  AppearanceSettingsSection,
   PrivacySettingsSection,
-  ExperimentsSettingsSection,
   GeneralSettingsSection,
+} from "@/components/settings/GeneralSettingsPage";
+import {
   LocalOpenTargetSettingsSection,
   type LocalOpenTargetSettingsSectionProps,
-} from "./SettingsView";
+} from "@/components/settings/FilesSettingsPage";
 import { MachineSettingsView } from "./MachineSettingsView";
 import { ProjectDetailSettingsView } from "./ProjectDetailSettingsView";
 import { ProvidersSettingsSection } from "@/components/settings/ProvidersSettingsSection";
@@ -111,64 +116,37 @@ const connectedTargets: WorkspaceOpenTarget[] = [
 function useSettingsStoryState() {
   const [themePreference, setThemePreference] =
     useState<ThemePreference>("system");
+
   const [appearance, setAppearance] = useState<AppTheme>({
     ...defaultAppTheme,
     faviconColor: "red",
   });
+
   const [navigateToThreadAfterCreate, setNavigateToThreadAfterCreate] =
     useState(false);
+
   const [openLinksInAppBrowser, setOpenLinksInAppBrowser] = useState(false);
   const [rewriteLocalhostLinks, setRewriteLocalhostLinks] = useState(true);
-  const [steerActiveThreadOnEnter, setSteerActiveThreadOnEnter] =
-    useState(false);
-  const [confirmThreadArchive, setConfirmThreadArchive] = useState(true);
-  const [keepHistoryAfterContextClear, setKeepHistoryAfterContextClear] =
-    useState(false);
-  const [showGitChanges, setShowGitChanges] = useState(true);
-  const [streamerMode, setStreamerMode] = useState(false);
-  const [telemetryEnabled, setTelemetryEnabled] = useState(true);
-  const [managedBranchPrefix, setManagedBranchPrefix] = useState(
-    defaultAppSettings.managedBranchPrefix,
-  );
-  const [showDiagnosticEvents, setShowDiagnosticEvents] = useState(false);
+
   const [directoryTargetId, setDirectoryTargetId] =
     useState<StoredTargetId>("finder");
+
   const [fileTargetId, setFileTargetId] =
     useState<StoredTargetId>("default-app");
-  const [experiments, setExperiments] =
-    useState<Experiments>(defaultExperiments);
 
   return {
     appearance,
     directoryTargetId,
-    experiments,
     fileTargetId,
-    managedBranchPrefix,
     navigateToThreadAfterCreate,
     openLinksInAppBrowser,
     rewriteLocalhostLinks,
-    steerActiveThreadOnEnter,
-    showGitChanges,
-    setShowGitChanges,
-    confirmThreadArchive,
-    setConfirmThreadArchive,
-    keepHistoryAfterContextClear,
-    setKeepHistoryAfterContextClear,
-    streamerMode,
-    telemetryEnabled,
-    setTelemetryEnabled,
-    showDiagnosticEvents,
     setAppearance,
     setDirectoryTargetId,
-    setExperiments,
     setFileTargetId,
-    setManagedBranchPrefix,
     setNavigateToThreadAfterCreate,
     setOpenLinksInAppBrowser,
     setRewriteLocalhostLinks,
-    setSteerActiveThreadOnEnter,
-    setStreamerMode,
-    setShowDiagnosticEvents,
     setThemePreference,
     themePreference,
   };
@@ -196,32 +174,41 @@ function GeneralSettingsStory({
 }) {
   const state = useSettingsStoryState();
 
+  const [settings, setSettings] = useState({
+    ...defaultAppSettings,
+    showGitChanges: true,
+    confirmThreadArchive: true,
+    keepHistoryAfterContextClear: false,
+    compactExpiredCache: true,
+    steerActiveThreadOnEnter: false,
+    streamerMode: false,
+    telemetryEnabled: true,
+    crashReportsEnabled: true,
+    showDiagnosticEvents: false,
+  });
+
+  function updateSettings(patch: Partial<AppSettings>) {
+    setSettings((current) => ({ ...current, ...patch }));
+  }
+
   return (
     <>
       <GeneralSettingsSection
-        showGitChanges={state.showGitChanges}
-        onShowGitChangesChange={state.setShowGitChanges}
-        confirmThreadArchive={state.confirmThreadArchive}
-        onConfirmThreadArchiveChange={state.setConfirmThreadArchive}
-        keepHistoryAfterContextClear={state.keepHistoryAfterContextClear}
-        onKeepHistoryAfterContextClearChange={
-          state.setKeepHistoryAfterContextClear
-        }
+        settings={settings}
+        disabled={false}
+        onSettingsChange={updateSettings}
         desktopBrowserAvailable={desktopBrowserAvailable}
-        generalSettingsDisabled={false}
-        managedBranchPrefix={state.managedBranchPrefix}
-        onManagedBranchPrefixChange={state.setManagedBranchPrefix}
+        onManagedBranchPrefixChange={(managedBranchPrefix) =>
+          updateSettings({ managedBranchPrefix })
+        }
         navigateToThreadAfterCreate={state.navigateToThreadAfterCreate}
         onNavigateToThreadAfterCreateChange={
           state.setNavigateToThreadAfterCreate
         }
-        onOpenLinksInAppBrowserChange={state.setOpenLinksInAppBrowser}
-        onReplaySetupGuide={() => {}}
-        onRewriteLocalhostLinksChange={state.setRewriteLocalhostLinks}
-        onSteerActiveThreadOnEnterChange={state.setSteerActiveThreadOnEnter}
         openLinksInAppBrowser={state.openLinksInAppBrowser}
+        onOpenLinksInAppBrowserChange={state.setOpenLinksInAppBrowser}
         rewriteLocalhostLinks={state.rewriteLocalhostLinks}
-        steerActiveThreadOnEnter={state.steerActiveThreadOnEnter}
+        onRewriteLocalhostLinksChange={state.setRewriteLocalhostLinks}
       />
       <CliSkillsSettingsSectionContent
         hasConnectedMachine={false}
@@ -231,13 +218,9 @@ function GeneralSettingsStory({
       />
       <VoiceInputStory />
       <PrivacySettingsSection
-        onStreamerModeChange={state.setStreamerMode}
-        telemetryEnabled={state.telemetryEnabled}
-        onTelemetryEnabledChange={state.setTelemetryEnabled}
-        streamerMode={state.streamerMode}
+        settings={settings}
         disabled={false}
-        enabled={state.showDiagnosticEvents}
-        onEnabledChange={state.setShowDiagnosticEvents}
+        onSettingsChange={updateSettings}
       />
     </>
   );
@@ -293,32 +276,34 @@ function FilePreferencesStory() {
   );
 }
 
-function ExperimentsStory() {
-  const state = useSettingsStoryState();
-
-  return (
-    <ExperimentsSettingsSection
-      disabled={false}
-      experiments={state.experiments}
-      performanceDiagnosticsAvailable={true}
-      onExperimentChange={(key, enabled) =>
-        state.setExperiments((current) => ({ ...current, [key]: enabled }))
-      }
-    />
-  );
-}
-
 function ProvidersSettingsStory() {
   const [generalSettings, setGeneralSettings] =
     useState<AppSettings>(defaultAppSettings);
+
+  const [store] = useState(() => {
+    const providersStore = createStore();
+    providersStore.set(
+      modelPickerFavoritesAtom,
+      SETTINGS_STORY_MODEL_PICKER_FAVORITES,
+    );
+    providersStore.set(
+      modelPickerHiddenModelsAtom,
+      SETTINGS_STORY_HIDDEN_MODELS,
+    );
+
+    return providersStore;
+  });
+
   return (
-    <ProvidersSettingsSection
-      disabled={false}
-      generalSettings={generalSettings}
-      onGeneralSettingsChange={(patch) =>
-        setGeneralSettings((current) => ({ ...current, ...patch }))
-      }
-    />
+    <JotaiProvider store={store}>
+      <ProvidersSettingsSection
+        disabled={false}
+        generalSettings={generalSettings}
+        onGeneralSettingsChange={(patch) =>
+          setGeneralSettings((current) => ({ ...current, ...patch }))
+        }
+      />
+    </JotaiProvider>
   );
 }
 
@@ -333,6 +318,7 @@ function SettingsStoryContent({ route }: { route: SettingsStoryRoute }) {
       </Routes>
     );
   }
+
   if (route.kind === "project") {
     return (
       <Routes>
@@ -363,12 +349,8 @@ function SettingsStoryContent({ route }: { route: SettingsStoryRoute }) {
       return <SettingsUpdatesStory />;
     case "mobile":
       return <MobileAppSection />;
-    case "experiments":
-      return <ExperimentsStory />;
     case "marketplaces":
       return <MarketplacesSettingsSection />;
-    case "community":
-      return <CommunitySettingsSection />;
     case "archived":
       return <ArchivedThreadsSettingsSection />;
     case "general":
@@ -387,9 +369,11 @@ export function FullPage() {
   useEffect(() => {
     if (initializedFromStoryPath.current) return;
     initializedFromStoryPath.current = true;
+
     const storyPath =
       new URLSearchParams(window.location.hash.slice(1)).get("settingsPath") ??
       new URLSearchParams(window.location.search).get("settingsPath");
+
     if (storyPath?.startsWith("/settings") === true) {
       navigate(storyPath, { replace: true });
     }

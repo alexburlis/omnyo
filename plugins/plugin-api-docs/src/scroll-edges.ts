@@ -11,9 +11,11 @@ export function scrollEdgeFadeStyle(
 ): { maskImage: string } | undefined {
   if (!canScrollLeft && !canScrollRight) return undefined;
   const from = canScrollLeft ? `transparent, black ${FADE}` : "black";
+
   const to = canScrollRight
     ? `black calc(100% - ${FADE}), transparent`
     : "black";
+
   return { maskImage: `linear-gradient(to right, ${from}, ${to})` };
 }
 
@@ -41,22 +43,29 @@ export function useScrollEdges(
     canScrollLeft: false,
     canScrollRight: false,
   });
+
   const sync = useCallback(() => {
     const element = ref.current;
+
     if (element) setState(scrollEdgeState(element));
   }, [ref]);
+
   useEffect(() => {
     const element = ref.current;
+
     if (!element) return;
     sync();
     const observer = new ResizeObserver(sync);
     observer.observe(element);
+
     if (element.firstElementChild) observer.observe(element.firstElementChild);
     element.addEventListener("scroll", sync, { passive: true });
+
     return () => {
       observer.disconnect();
       element.removeEventListener("scroll", sync);
     };
   }, [ref, sync]);
+
   return state;
 }

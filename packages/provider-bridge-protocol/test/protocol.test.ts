@@ -1,4 +1,4 @@
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   checkItemOpensBeforeDelta,
@@ -34,6 +34,7 @@ describe("handshake", () => {
       sessionRestore: true,
       futureCapability: { anything: true },
     });
+
     expect(parsed.sessionRestore).toBe(true);
     expect((parsed as Record<string, unknown>).futureCapability).toStrictEqual({
       anything: true,
@@ -83,6 +84,7 @@ describe("thread/stop", () => {
       providerThreadId: "p_1",
       activeTurnId: null,
     });
+
     expect(withoutIntent.success).toBe(false);
 
     const release = threadStopParamsSchema.parse({
@@ -91,18 +93,21 @@ describe("thread/stop", () => {
       intent: "release",
       activeTurnId: null,
     });
+
     expect(release.intent).toBe("release");
   });
 });
 
 describe("conformance item/opens-before-delta", () => {
   const scope = { kind: "turn", turnId: "turn_1" } as const;
+
   const base = {
     threadId: "thr_1",
     providerThreadId: "p_1",
     itemId: "item_1",
     scope,
   } as const;
+
   const delta = { ...base, delta: "hi" } as const;
 
   const started = (id: string): ThreadEvent => ({
@@ -150,6 +155,7 @@ describe("conformance item/opens-before-delta", () => {
 describe("conformance presentation/icon-namespaced-declared", () => {
   const scope = { kind: "turn", turnId: "turn_1" } as const;
   const icons = { pluginId: "echo-provider", names: ["receipt"] };
+
   const completed = (
     id: string,
     glyph: string,
@@ -181,6 +187,7 @@ describe("conformance presentation/icon-namespaced-declared", () => {
       ],
       icons,
     );
+
     expect(result.status).toBe("pass");
   });
 
@@ -189,6 +196,7 @@ describe("conformance presentation/icon-namespaced-declared", () => {
       [completed("item_1", "other-plugin/receipt")],
       icons,
     );
+
     expect(foreign.status).toBe("fail");
     expect(foreign.detail).toContain('"item_1"');
     expect(foreign.detail).toContain('"other-plugin/receipt"');
@@ -198,6 +206,7 @@ describe("conformance presentation/icon-namespaced-declared", () => {
       [completed("item_2", "echo-provider/seal")],
       icons,
     );
+
     expect(undeclared.status).toBe("fail");
     expect(undeclared.detail).toContain('"echo-provider/seal"');
     expect(undeclared.detail).toContain("declared: receipt");
@@ -210,17 +219,17 @@ describe("conformance presentation/icon-namespaced-declared", () => {
     ).toBe("fail");
   });
 
-  it("does not inspect a bb-injected tool row, whose glyph the server checks against the tool's plugin", () => {
+  it("does not inspect an Omnyo-injected tool row, whose glyph the server checks against the tool's plugin", () => {
     expect(
       checkPresentationIconsDeclared(
-        [completed("item_1", "tool-plugin/stamp", "bb")],
+        [completed("item_1", "tool-plugin/stamp", "omnyo")],
         icons,
       ).status,
     ).toBe("skipped");
     expect(
       checkPresentationIconsDeclared(
         [
-          completed("item_1", "tool-plugin/stamp", "bb"),
+          completed("item_1", "tool-plugin/stamp", "omnyo"),
           completed("item_2", "echo-provider/receipt"),
         ],
         icons,
@@ -234,6 +243,7 @@ describe("conformance presentation/icon-namespaced-declared", () => {
 
   it("inspects the thread-scoped delegation and background-task snapshots, where a background item's terminal glyph travels", () => {
     const threadScope = { kind: "thread" } as const;
+
     const delegation = (
       type: "item/delegation/progress" | "item/delegation/completed",
       glyph: string,
@@ -255,6 +265,7 @@ describe("conformance presentation/icon-namespaced-declared", () => {
       },
       scope: threadScope,
     });
+
     const backgroundTask = (
       type: "item/backgroundTask/progress" | "item/backgroundTask/completed",
       glyph: string,
@@ -319,17 +330,20 @@ describe("streaming thread event grammar", () => {
     item: { type: "agentMessage", id, text: "" },
     scope,
   });
+
   const completed = (id: string): ThreadEvent => ({
     type: "item/completed",
     ...identity,
     item: { type: "agentMessage", id, text: "done" },
     scope,
   });
+
   const turnStarted = (turnId: string): ThreadEvent => ({
     type: "turn/started",
     ...identity,
     scope: { kind: "turn", turnId },
   });
+
   const turnCompleted = (turnId: string): ThreadEvent => ({
     type: "turn/completed",
     ...identity,
@@ -339,6 +353,7 @@ describe("streaming thread event grammar", () => {
 
   function observeAll(events: ThreadEvent[]) {
     const grammar = new ThreadEventGrammar();
+
     return events.map((event) => grammar.observe(event));
   }
 
@@ -348,6 +363,7 @@ describe("streaming thread event grammar", () => {
       completed("item_1"),
       completed("item_1"),
     ]);
+
     expect(results.map((result) => result.kind)).toEqual([
       "ok",
       "ok",
@@ -375,6 +391,7 @@ describe("streaming thread event grammar", () => {
       turnCompleted("turn_1"),
       turnStarted("turn_1"),
     ]);
+
     expect(results.map((result) => result.kind)).toEqual([
       "ok",
       "ok",
@@ -434,6 +451,7 @@ describe("execution options", () => {
         providerOptions: { workflowsEnabled: false },
       },
     });
+
     expect(parsed.options.providerOptions).toStrictEqual({
       workflowsEnabled: false,
     });
@@ -447,6 +465,7 @@ describe("conformance turn/settles-without-activity", () => {
 
   function promptText(input: unknown): string {
     const first = Array.isArray(input) ? input[0] : undefined;
+
     return first !== null &&
       typeof first === "object" &&
       "text" in first &&
@@ -475,16 +494,20 @@ describe("conformance turn/settles-without-activity", () => {
     ): void => {
       turnCounter += 1;
       const accepted = { kind: "input.accepted", clientRequestId };
+
       if (zeroWork) {
         if (!options.settlesZeroWork) {
           return;
         }
+
         emit(threadId, [
           accepted,
           { kind: "turn.boundary", status: "completed", claimIfIdle: true },
         ]);
+
         return;
       }
+
       const key = { providerItemId: `item_${turnCounter}` };
       const item = { type: "agentMessage", text: "hi" };
       emit(threadId, [
@@ -502,26 +525,33 @@ describe("conformance turn/settles-without-activity", () => {
         method?: string;
         params?: Record<string, unknown>;
       };
+
       try {
         request = JSON.parse(line) as typeof request;
       } catch {
         return;
       }
+
       const { id, method, params } = request;
+
       if (id === undefined || method === undefined) return;
+
       const respond = (result: unknown): void => {
         outbox.push({ jsonrpc: "2.0", id, result });
       };
+
       switch (method) {
         case "initialize":
           respond({
             protocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
             capabilities: {},
           });
+
           return;
         case "thread/start":
         case "thread/resume":
           respond({ providerThreadId });
+
           return;
         case "turn/start": {
           const threadId = String(params?.threadId ?? "");
@@ -531,10 +561,13 @@ describe("conformance turn/settles-without-activity", () => {
             promptText(params?.input) === "/clear",
           );
           respond({});
+
           return;
         }
+
         case "thread/stop":
           respond({});
+
           return;
         default:
           outbox.push({
@@ -546,11 +579,13 @@ describe("conformance turn/settles-without-activity", () => {
     };
 
     let drained = 0;
+
     return {
       send: handleLine,
       takeMessages: () => {
         const fresh = outbox.slice(drained);
         drained = outbox.length;
+
         return fresh;
       },
     };
@@ -578,6 +613,7 @@ describe("conformance turn/settles-without-activity", () => {
           },
       timeoutMs: 300,
     });
+
     return report.results.find(
       (result) => result.id === "turn/settles-without-activity",
     );
@@ -588,6 +624,7 @@ describe("conformance turn/settles-without-activity", () => {
       settlesZeroWork: true,
       withFixture: true,
     });
+
     expect(result?.status).toBe("pass");
   });
 
@@ -596,6 +633,7 @@ describe("conformance turn/settles-without-activity", () => {
       settlesZeroWork: false,
       withFixture: true,
     });
+
     expect(result?.status).toBe("fail");
     expect(result?.detail).toContain("never emitted a terminal turn/completed");
   });
@@ -605,6 +643,7 @@ describe("conformance turn/settles-without-activity", () => {
       settlesZeroWork: true,
       withFixture: false,
     });
+
     expect(result).toBeUndefined();
   });
 });

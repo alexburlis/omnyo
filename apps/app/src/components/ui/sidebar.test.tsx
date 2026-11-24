@@ -11,7 +11,12 @@ import { memo } from "react";
 import { flushSync } from "react-dom";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { MOTION_DURATION_MS } from "@omnyo/shared-ui/motion";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import {
+  installNativeShellForTest,
+  removeNativeShellForTest,
+} from "@/test/native-shell-test-utils";
 import {
   Sidebar,
   SidebarCollapsibleBody,
@@ -28,11 +33,12 @@ import {
 
 afterEach(() => {
   cleanup();
+  removeNativeShellForTest();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
-const MOBILE_TOGGLE_SETTLE_MS = 220;
+const MOBILE_TOGGLE_SETTLE_MS = MOTION_DURATION_MS.drawer;
 
 function settleMobileToggle() {
   act(() => {
@@ -49,9 +55,11 @@ function createTouchList(...touches: Touch[]): TouchList {
     length: touches.length,
     item: (index: number) => touches[index] ?? null,
   };
+
   touches.forEach((touch, index) => {
     Object.defineProperty(touchList, index, { value: touch });
   });
+
   return touchList as unknown as TouchList;
 }
 
@@ -116,10 +124,12 @@ function renderScrollerSwipeHarness() {
   Object.defineProperty(scroller, "scrollWidth", {
     get: () => {
       scrollWidthReads += 1;
+
       return 500;
     },
   });
   Object.defineProperty(scroller, "clientWidth", { get: () => 100 });
+
   return {
     prose: screen.getByText("Wide code block"),
     getScrollWidthReads: () => scrollWidthReads,
@@ -141,6 +151,7 @@ function renderSelectableSwipeHarness() {
 
 function OptionalSidebarProbe() {
   const isShowing = useOptionalIsSidebarShowing();
+
   return <div data-sidebar-showing={String(isShowing)} />;
 }
 
@@ -156,17 +167,21 @@ describe("useIsSidebarShowing", () => {
   it("re-renders its reader only when the visible bit flips, not on every provider commit", () => {
     vi.useFakeTimers();
     const showingRenders: boolean[] = [];
+
     const ShowingReader = memo(function ShowingReader() {
       const isShowing = useIsSidebarShowing();
       showingRenders.push(isShowing);
+
       return <output data-testid="showing">{String(isShowing)}</output>;
     });
+
     function Controls() {
       const {
         openMobileSidebar,
         closeMobileSidebar,
         setSuppressMobileOpenAnimation,
       } = useSidebar();
+
       return (
         <>
           <button type="button" onClick={openMobileSidebar}>
@@ -184,6 +199,7 @@ describe("useIsSidebarShowing", () => {
         </>
       );
     }
+
     render(
       <CompactViewportOverrideProvider isCompactViewport>
         <SidebarProvider>
@@ -215,6 +231,7 @@ describe("useIsSidebarShowing", () => {
 function CollapsedRailProbe() {
   const keepsCollapsedRail = useSidebarKeepsCollapsedRail();
   const isShowing = useIsSidebarShowing();
+
   return (
     <output
       data-testid="collapsed-rail-probe"
@@ -232,6 +249,7 @@ function getDesktopSidebarParts(): {
   const gap = document.querySelector('[data-sidebar="gap"]');
   const panel = document.querySelector('[data-sidebar="panel"]');
   const root = gap?.parentElement;
+
   if (
     !(gap instanceof HTMLElement) ||
     !(panel instanceof HTMLElement) ||
@@ -239,6 +257,7 @@ function getDesktopSidebarParts(): {
   ) {
     throw new Error("Expected the desktop sidebar root, gap, and panel");
   }
+
   return { root, gap, panel };
 }
 
@@ -265,6 +284,7 @@ describe("desktop collapsed rail", () => {
     expect(root.dataset.state).toBe("collapsed");
     expect(root.dataset.collapsible).toBe("rail");
     expect(probe.dataset.showing).toBe("false");
+
     for (const part of [gap, panel]) {
       expect(part.style.getPropertyValue("--sidebar-rail-width")).toBe("52px");
       expect(part.className).toContain(
@@ -288,9 +308,11 @@ describe("desktop collapsed rail", () => {
     );
 
     const body = screen.getByTestId("body");
+
     const content = screen.getByRole("button", {
       name: "Thread row",
     }).parentElement;
+
     expect(body.hasAttribute("inert")).toBe(false);
     expect(content?.style.width).toBe("calc(281px)");
 
@@ -384,7 +406,7 @@ describe("framed desktop sidebar", () => {
     expect(inset.classList.contains("rounded-bl-xl")).toBe(true);
   });
 
-  it("keeps a lip of window frame beside and below the card", () => {
+  it("keeps a lip of window frame beside the card, the app footer below it and both clear of the safe area", () => {
     render(
       <CompactViewportOverrideProvider isCompactViewport={false}>
         <SidebarProvider framed data-testid="wrapper">
@@ -396,12 +418,36 @@ describe("framed desktop sidebar", () => {
 
     const wrapper = screen.getByTestId("wrapper");
     const inset = screen.getByTestId("inset");
-    expect(wrapper.classList.contains("pr-(--bb-window-frame-lip)")).toBe(true);
-    expect(wrapper.classList.contains("pb-(--bb-window-frame-lip)")).toBe(true);
-    expect(screen.getByTestId("panel").className).toContain(
-      "var(--bb-shell-height)_-_var(--bb-window-frame-top)_-_var(--bb-window-frame-lip)",
+    expect(
+      wrapper.classList.contains(
+        "pr-[calc(var(--omnyo-window-frame-lip)_+_env(safe-area-inset-right))]",
+      ),
+    ).toBe(true);
+    expect(wrapper.classList.contains("pt-(--omnyo-window-frame-top)")).toBe(
+      true,
     );
-    for (const edge of ["rounded-tr-xl", "rounded-br-xl", "border-r"]) {
+    expect(wrapper.className).toContain(
+      "[--omnyo-window-frame-top:calc(var(--omnyo-window-title-bar-height)_+_env(safe-area-inset-top))]",
+    );
+    expect(wrapper.classList.contains("pb-(--omnyo-window-frame-bottom)")).toBe(
+      true,
+    );
+    expect(wrapper.classList.contains("pb-(--omnyo-app-footer-height)")).toBe(
+      false,
+    );
+    expect(wrapper.className).toContain(
+      "[--omnyo-window-frame-bottom:calc(max(var(--omnyo-window-frame-lip),var(--omnyo-app-footer-height))_+_env(safe-area-inset-bottom))]",
+    );
+    expect(screen.getByTestId("panel").className).toContain(
+      "var(--omnyo-shell-height)_-_var(--omnyo-window-frame-top)_-_var(--omnyo-window-frame-bottom)",
+    );
+
+    for (const edge of [
+      "rounded-tr-xl",
+      "rounded-br-xl",
+      "border-r-[0.5px]",
+      "border-(--material-line)",
+    ]) {
       expect(inset.classList.contains(edge)).toBe(true);
     }
   });
@@ -425,6 +471,59 @@ describe("framed desktop sidebar", () => {
   });
 });
 
+describe("app footer room", () => {
+  it("shortens the desktop panel, gap and inset by the app footer height", () => {
+    render(
+      <CompactViewportOverrideProvider isCompactViewport={false}>
+        <SidebarProvider data-testid="wrapper">
+          <Sidebar data-testid="panel">Sidebar content</Sidebar>
+          <SidebarInset data-testid="inset" />
+        </SidebarProvider>
+      </CompactViewportOverrideProvider>,
+    );
+
+    const wrapper = screen.getByTestId("wrapper");
+    expect(wrapper.classList.contains("pb-(--omnyo-app-footer-height)")).toBe(
+      true,
+    );
+    expect(screen.getByTestId("panel").className).toContain(
+      "h-[calc(var(--omnyo-shell-height)_-_var(--omnyo-app-footer-height))]",
+    );
+
+    for (const inFlow of [
+      document.querySelector('[data-sidebar="gap"]'),
+      screen.getByTestId("inset"),
+    ]) {
+      expect(inFlow?.parentElement?.closest('[data-testid="wrapper"]')).toBe(
+        wrapper,
+      );
+      expect(inFlow?.classList.contains("h-full")).toBe(true);
+    }
+  });
+
+  it("keeps the compact drawer at the full shell height", () => {
+    vi.useFakeTimers();
+    render(
+      <CompactViewportOverrideProvider isCompactViewport>
+        <SidebarProvider>
+          <Sidebar>Sidebar content</Sidebar>
+          <SidebarTrigger />
+        </SidebarProvider>
+      </CompactViewportOverrideProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+    settleMobileToggle();
+
+    const drawer = document.querySelector(
+      '[data-sidebar="panel"][data-vaul-drawer-direction]',
+    );
+
+    expect(drawer?.classList.contains("h-(--omnyo-shell-height)")).toBe(true);
+    expect(drawer?.className).not.toContain("--omnyo-app-footer-height");
+  });
+});
+
 describe("SidebarTrigger", () => {
   it("uses the shared sidebar icon on every viewport", () => {
     const markup = renderToString(
@@ -442,27 +541,42 @@ describe("SidebarTrigger", () => {
 
 describe("SidebarContent", () => {
   it("owns the sidebar surface used behind transparent and sticky rows", () => {
-    render(<SidebarContent data-testid="content">Rows</SidebarContent>);
+    render(
+      <CompactViewportOverrideProvider isCompactViewport={false}>
+        <SidebarProvider framed data-testid="wrapper">
+          <Sidebar>
+            <SidebarContent data-testid="content">Rows</SidebarContent>
+          </Sidebar>
+        </SidebarProvider>
+      </CompactViewportOverrideProvider>,
+    );
 
-    expect(screen.getByTestId("content").classList).toContain("bg-sidebar");
+    expect(screen.getByTestId("wrapper").classList).toContain(
+      "bg-(--material-chrome)",
+    );
+    expect(screen.getByTestId("content").classList).not.toContain("bg-sidebar");
   });
 });
 
 function getMobilePanel(): HTMLElement | null {
   const panel = document.querySelector('[data-sidebar="panel"]');
+
   return panel instanceof HTMLElement ? panel : null;
 }
 
 const SHELF_OPEN_TRANSLATE = "360px";
+
 const SHELF_CLOSED_TRANSLATE = "0px";
 
 function getShelfRevealTranslate(): string {
   const backdrop = document.querySelector("[data-sidebar-mobile-backdrop]");
+
   return backdrop instanceof HTMLElement ? backdrop.style.translate : "";
 }
 
 function getShelfInsetTranslate(): string {
   const inset = document.querySelector('[data-sidebar="inset"]');
+
   return inset instanceof HTMLElement ? inset.style.translate : "";
 }
 
@@ -516,6 +630,7 @@ describe("mobile sidebar deferred realization", () => {
       value: (callback: () => void, options?: { timeout?: number }) => {
         idleCallback = callback;
         idleTimeout = options?.timeout;
+
         return 1;
       },
     });
@@ -523,6 +638,7 @@ describe("mobile sidebar deferred realization", () => {
       configurable: true,
       value: cancelIdle,
     });
+
     try {
       renderCompactSidebarHarness();
       expect(idleCallback).not.toBeNull();
@@ -603,9 +719,11 @@ describe("mobile sidebar deferred realization", () => {
     const wrapper = screen.getByTestId("wrapper");
     const gap = document.querySelector('[data-sidebar="gap"]');
     const panel = document.querySelector('[data-sidebar="panel"]');
+
     if (!(gap instanceof HTMLElement) || !(panel instanceof HTMLElement)) {
       throw new Error("Expected desktop gap and panel");
     }
+
     expect(gap.style.getPropertyValue("--sidebar-width")).toBe("333px");
     expect(panel.style.getPropertyValue("--sidebar-width")).toBe("333px");
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("");
@@ -632,6 +750,7 @@ describe("mobile sidebar shelf stacking", () => {
 
     const panel = getMobilePanel();
     const inset = document.querySelector('[data-sidebar="inset"]');
+
     if (!(inset instanceof HTMLElement) || panel === null) {
       throw new Error("Expected a compact panel and page inset");
     }
@@ -655,6 +774,7 @@ describe("mobile sidebar shelf stacking", () => {
     settleMobileRealization();
 
     const inset = document.querySelector('[data-sidebar="inset"]');
+
     if (!(inset instanceof HTMLElement)) {
       throw new Error("Expected a page inset");
     }
@@ -682,9 +802,11 @@ describe("mobile sidebar shelf stacking", () => {
     );
 
     const inset = document.querySelector('[data-sidebar="inset"]');
+
     if (!(inset instanceof HTMLElement)) {
       throw new Error("Expected a page inset");
     }
+
     expect(inset.dataset.sidebarShelf).toBeUndefined();
   });
 });
@@ -692,6 +814,7 @@ describe("mobile sidebar shelf stacking", () => {
 describe("mobile sidebar persistence", () => {
   it("closes from an exposed-content swipe after committing the closed state", () => {
     vi.useFakeTimers();
+    const shell = installNativeShellForTest();
     renderCompactSidebarHarness();
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
@@ -700,9 +823,11 @@ describe("mobile sidebar persistence", () => {
     const panel = getMobilePanel();
     const backdrop = screen.getByTestId("sidebar-mobile-backdrop");
     const inset = document.querySelector('[data-sidebar="inset"]');
+
     if (!(inset instanceof HTMLElement)) {
       throw new Error("Expected a page inset");
     }
+
     const shelfStatesAtDragStyleClear: string[] = [];
     const removeInsetAttribute = inset.removeAttribute.bind(inset);
     vi.spyOn(inset, "removeAttribute").mockImplementation((name) => {
@@ -711,6 +836,7 @@ describe("mobile sidebar persistence", () => {
           inset.dataset.sidebarShelf ?? "missing",
         );
       }
+
       removeInsetAttribute(name);
     });
     expect(panel?.dataset.state).toBe("open");
@@ -719,13 +845,49 @@ describe("mobile sidebar persistence", () => {
     fireTouch(window, "touchmove", createTouch(180, 164));
     fireTouchEnd(window, createTouch(180, 164));
     expect(inset.getAttribute("data-vaul-animate")).toBe("false");
+    expect(shell.messages()).toEqual([
+      { type: "haptic", kind: "impact-light" },
+    ]);
     settleMobileToggle();
 
     expect(panel?.dataset.state).toBe("closed");
+    expect(shell.messages()).toHaveLength(1);
     expect(shelfStatesAtDragStyleClear).toEqual(["closed"]);
     act(() => {
       vi.advanceTimersByTime(400);
     });
+  });
+
+  it("stays open when a drawer row gesture claims the swipe's touchmoves", () => {
+    vi.useFakeTimers();
+    render(
+      <CompactViewportOverrideProvider isCompactViewport>
+        <SidebarProvider>
+          <Sidebar>
+            <div data-testid="claimed-row">Dragged row</div>
+          </Sidebar>
+          <SidebarInset>
+            <SidebarTrigger />
+          </SidebarInset>
+        </SidebarProvider>
+      </CompactViewportOverrideProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+    settleMobileToggle();
+    settleMobileRealization();
+
+    const panel = getMobilePanel();
+    const row = screen.getByTestId("claimed-row");
+    row.addEventListener("touchmove", (event) => event.preventDefault());
+
+    fireTouch(row, "touchstart", createTouch(220, 160));
+    fireTouch(row, "touchmove", createTouch(120, 164));
+    fireTouch(row, "touchmove", createTouch(40, 168));
+    fireTouchEnd(row, createTouch(40, 168));
+    settleMobileToggle();
+
+    expect(panel?.dataset.state).toBe("open");
   });
 
   it("ignores a closing swipe from the right browser edge", () => {
@@ -775,9 +937,11 @@ describe("mobile sidebar persistence", () => {
 
     const panelParent = openPanel?.parentElement;
     const backdrop = screen.getByTestId("sidebar-mobile-backdrop");
+
     for (const sibling of panelParent?.children ?? []) {
       expect(sibling.hasAttribute("inert")).toBe(false);
     }
+
     expect(inset?.hasAttribute("inert")).toBe(false);
 
     fireEvent.click(backdrop);
@@ -823,6 +987,44 @@ describe("mobile sidebar persistence", () => {
     settleMobileToggle();
     expect(getMobilePanel()?.dataset.state).toBe("closed");
     expect(backdrop.style.pointerEvents).not.toBe("auto");
+  });
+
+  it("settles toggles without waiting for the slide when reduced motion is requested", () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }));
+    render(
+      <CompactViewportOverrideProvider isCompactViewport>
+        <SidebarProvider>
+          <Sidebar>Sidebar content</Sidebar>
+          <SidebarInset>
+            <SidebarTrigger />
+            Main content
+          </SidebarInset>
+        </SidebarProvider>
+      </CompactViewportOverrideProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(getMobilePanel()?.dataset.state).toBe("open");
+    expect(getMobilePanel()?.hasAttribute("inert")).toBe(false);
+
+    fireEvent.click(screen.getByTestId("sidebar-mobile-backdrop"));
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(getMobilePanel()?.dataset.state).toBe("closed");
   });
 
   it("keeps the pinned trigger interactive and closes on a second press", () => {
@@ -920,6 +1122,7 @@ describe("mobile sidebar persistence", () => {
 
     const trigger = screen.getByRole("button", { name: "Toggle Sidebar" });
     const panel = getMobilePanel();
+
     if (!panel) throw new Error("Expected mobile sidebar panel");
     const focusSpy = vi.spyOn(panel, "focus");
 
@@ -996,12 +1199,64 @@ describe("mobile sidebar swipe-open touch listener scoping", () => {
 
 describe("mobile sidebar interrupted swipe sessions", () => {
   it.each(["touch", "pointer"] as const)(
+    "finishes a %s swipe whose touched node remounts mid-drag",
+    (kind) => {
+      vi.useFakeTimers();
+
+      const harness = (version: number) => (
+        <CompactViewportOverrideProvider isCompactViewport>
+          <SidebarProvider>
+            <Sidebar>Sidebar content</Sidebar>
+            <SidebarInset>
+              <div key={version} data-sidebar-swipe-selectable>
+                Selectable message prose
+              </div>
+            </SidebarInset>
+          </SidebarProvider>
+        </CompactViewportOverrideProvider>
+      );
+
+      const { rerender } = render(harness(1));
+      const prose = screen.getByText("Selectable message prose");
+      const inset = document.querySelector('[data-sidebar="inset"]');
+
+      if (!(inset instanceof HTMLElement)) {
+        throw new Error("Expected a page inset");
+      }
+
+      if (kind === "touch") {
+        fireTouch(prose, "touchstart", createTouch(40, 160));
+        fireTouch(window, "touchmove", createTouch(60, 160));
+      } else {
+        firePointer(prose, "pointerdown", 40, 160);
+        firePointer(window, "pointermove", 60, 160);
+      }
+
+      rerender(harness(2));
+      expect(prose.isConnected).toBe(false);
+
+      if (kind === "touch") {
+        fireTouch(prose, "touchmove", createTouch(190, 160));
+        fireTouchEnd(prose, createTouch(190, 160));
+      } else {
+        firePointer(prose, "pointermove", 190, 160);
+        firePointer(prose, "pointerup", 190, 160);
+      }
+
+      settleMobileToggle();
+      expect(getMobilePanel()?.dataset.state).toBe("open");
+      expect(inset.style.translate).toBe("");
+    },
+  );
+
+  it.each(["touch", "pointer"] as const)(
     "recovers a %s swipe after an earlier drag loses its end event",
     (kind) => {
       vi.useFakeTimers();
       renderSelectableSwipeHarness();
       const prose = screen.getByText("Selectable message prose");
       const inset = document.querySelector('[data-sidebar="inset"]');
+
       if (!(inset instanceof HTMLElement)) {
         throw new Error("Expected a page inset");
       }
@@ -1031,6 +1286,7 @@ describe("mobile sidebar interrupted swipe sessions", () => {
     renderSelectableSwipeHarness();
     const prose = screen.getByText("Selectable message prose");
     const inset = document.querySelector('[data-sidebar="inset"]');
+
     if (!(inset instanceof HTMLElement)) {
       throw new Error("Expected a page inset");
     }
@@ -1103,6 +1359,7 @@ describe("mobile sidebar interrupted swipe sessions", () => {
 
   it("closes a short swipe that pauses before release", () => {
     vi.useFakeTimers();
+    const shell = installNativeShellForTest();
     renderSelectableSwipeHarness();
     const prose = screen.getByText("Selectable message prose");
 
@@ -1116,6 +1373,7 @@ describe("mobile sidebar interrupted swipe sessions", () => {
 
     settleMobileToggle();
     expect(getMobilePanel()?.dataset.state).toBe("closed");
+    expect(shell.messages()).toEqual([]);
   });
 
   it("keeps tracking when another finger ends during the swipe", () => {
@@ -1129,6 +1387,7 @@ describe("mobile sidebar interrupted swipe sessions", () => {
       bubbles: true,
       cancelable: true,
     });
+
     Object.defineProperties(otherFingerEnd, {
       touches: { value: createTouchList(createTouch(80, 160)) },
       changedTouches: { value: createTouchList(createTouch(200, 160, 2)) },
@@ -1170,6 +1429,7 @@ describe("mobile sidebar interrupted swipe sessions", () => {
     (kind) => {
       renderSelectableSwipeHarness();
       const prose = screen.getByText("Selectable message prose");
+
       if (kind === "pointer") {
         firePointer(prose, "pointerdown", 320, 600);
         firePointer(prose, "pointerdown", 120, 160, 2);
@@ -1181,6 +1441,7 @@ describe("mobile sidebar interrupted swipe sessions", () => {
         fireTouch(window, "touchmove", createTouch(260, 164, 2));
         fireTouchEnd(window, createTouch(260, 164, 2));
       }
+
       expect(getMobilePanel()?.dataset.state).toBe("open");
     },
   );
@@ -1304,9 +1565,11 @@ describe("mobile sidebar text-selection arbitration", () => {
     renderSelectableSwipeHarness();
     const prose = screen.getByText("Selectable message prose");
     const inset = document.querySelector('[data-sidebar="inset"]');
+
     if (!(inset instanceof HTMLElement)) {
       throw new Error("Expected a page inset");
     }
+
     selectionNode = prose.firstChild;
 
     fireTouch(prose, "touchstart", createTouch(40, 160));

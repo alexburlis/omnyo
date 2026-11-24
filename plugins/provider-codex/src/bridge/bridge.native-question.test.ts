@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
 import {
   FULL_ACCESS_SESSION_OPTIONS,
@@ -18,7 +18,7 @@ it.each([
 ])(
   "routes a Codex question with $isBlocking blocking and $cancelled cancellation",
   async ({ isBlocking, cancelled }) => {
-    const workspace = mkdtempSync(join(tmpdir(), "bb-codex-question-"));
+    const workspace = mkdtempSync(join(tmpdir(), "omnyo-codex-question-"));
     const scriptPath = join(workspace, "script.json");
     const responseLogPath = join(workspace, "responses.jsonl");
     const threadId = "thr_native_question";
@@ -71,6 +71,7 @@ it.each([
     );
     stubFakeCodexAppServer(scriptPath);
     const bridge = createBridgeJsonRpcTestHarness(handleLine);
+
     try {
       bridge.sendRequest(1, "thread/start", {
         threadId,
@@ -79,8 +80,10 @@ it.each([
         options: FULL_ACCESS_SESSION_OPTIONS,
       });
       const start = await bridge.waitForResponse(1);
+
       const providerThreadId = (start.result as { providerThreadId: string })
         .providerThreadId;
+
       bridge.sendRequest(2, "turn/start", {
         threadId,
         providerThreadId,
@@ -95,12 +98,13 @@ it.each([
           ),
         ).toBe(true);
       });
+
       const request = bridge.messages.find(
         (message) => message.method === "interaction/request",
       );
+
       expect(request?.params).toMatchObject({
         threadId,
-        providerNativeIds: true,
         payload: {
           kind: "user_question",
           questions: [
@@ -142,14 +146,17 @@ it.each([
         expect(readFileSync(responseLogPath, "utf8").trim()).not.toBe("");
       });
       const response = JSON.parse(readFileSync(responseLogPath, "utf8").trim());
+
       if (cancelled) {
         expect(response).toMatchObject({
           id: "fx-req-1",
           error: { message: "Question cancelled" },
         });
         expect(response).not.toHaveProperty("result");
+
         return;
       }
+
       expect(response).toEqual({
         jsonrpc: "2.0",
         id: "fx-req-1",

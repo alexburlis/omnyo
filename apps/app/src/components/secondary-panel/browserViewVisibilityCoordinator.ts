@@ -1,7 +1,7 @@
 import type {
-  BbDesktopBrowserApi,
-  BbDesktopBrowserTarget,
-} from "@bb/desktop-contract";
+  OmnyoDesktopBrowserApi,
+  OmnyoDesktopBrowserTarget,
+} from "@omnyo/desktop-contract";
 
 export interface BrowserViewVisibilityCoordinator {
   show(
@@ -26,35 +26,40 @@ interface RegisterBrowserViewArgs {
 }
 
 interface DestroyPersistedBrowserViewArgs {
-  desktopBrowser: BbDesktopBrowserApi;
+  desktopBrowser: OmnyoDesktopBrowserApi;
   tabId: string;
 }
 
 interface DestroyPersistedBrowserViewsForThreadArgs {
-  desktopBrowser: BbDesktopBrowserApi | null;
+  desktopBrowser: OmnyoDesktopBrowserApi | null;
   threadId: string;
 }
 
 interface DestroyPersistedBrowserViewsForEnvironmentArgs {
-  desktopBrowser: BbDesktopBrowserApi | null;
+  desktopBrowser: OmnyoDesktopBrowserApi | null;
   environmentId: string;
 }
 
 const browserViewRecords = new Map<string, BrowserViewRecord>();
-const browserViewRecreationTargets = new Map<string, BbDesktopBrowserTarget>();
+
+const browserViewRecreationTargets = new Map<
+  string,
+  OmnyoDesktopBrowserTarget
+>();
 
 export function allowBrowserViewRecreation(
   tabId: string,
-  target: BbDesktopBrowserTarget,
+  target: OmnyoDesktopBrowserTarget,
 ): void {
   browserViewRecreationTargets.set(tabId, target);
 }
 
 export function takeBrowserViewRecreation(
   tabId: string,
-  target: BbDesktopBrowserTarget,
+  target: OmnyoDesktopBrowserTarget,
 ): boolean {
   const allowedTarget = browserViewRecreationTargets.get(tabId);
+
   if (
     allowedTarget?.hostId !== target.hostId ||
     allowedTarget.instanceId !== target.instanceId ||
@@ -62,22 +67,27 @@ export function takeBrowserViewRecreation(
   ) {
     return false;
   }
+
   browserViewRecreationTargets.delete(tabId);
+
   return true;
 }
 
 export function createBrowserViewVisibilityCoordinator(
-  desktopBrowser: BbDesktopBrowserApi,
+  desktopBrowser: OmnyoDesktopBrowserApi,
 ): BrowserViewVisibilityCoordinator {
   let visibleTabId: string | null = null;
+
   return {
     show(tabId, syncBounds, options) {
       if (visibleTabId !== null && visibleTabId !== tabId) {
         desktopBrowser.setVisible({ tabId: visibleTabId, visible: false });
       }
+
       visibleTabId = tabId;
       syncBounds();
       const request = { tabId, visible: true };
+
       if (
         options?.focus === false &&
         desktopBrowser.setVisibleWithoutFocus !== undefined
@@ -91,6 +101,7 @@ export function createBrowserViewVisibilityCoordinator(
       if (visibleTabId === tabId) {
         visibleTabId = null;
       }
+
       desktopBrowser.setVisible({ tabId, visible: false });
     },
     release(tabId) {
@@ -126,7 +137,9 @@ export function destroyPersistedBrowserViewsForThread({
   if (desktopBrowser === null) {
     return;
   }
+
   const records = [...browserViewRecords.values()];
+
   for (const record of records) {
     if (record.threadId === threadId) {
       destroyPersistedBrowserView({ desktopBrowser, tabId: record.tabId });
@@ -141,7 +154,9 @@ export function destroyPersistedBrowserViewsForEnvironment({
   if (desktopBrowser === null) {
     return;
   }
+
   const records = [...browserViewRecords.values()];
+
   for (const record of records) {
     if (record.environmentId === environmentId) {
       destroyPersistedBrowserView({ desktopBrowser, tabId: record.tabId });

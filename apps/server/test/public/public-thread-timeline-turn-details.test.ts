@@ -2,12 +2,12 @@ import {
   encodeClientTurnRequestIdNumber,
   threadScope,
   turnScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   type TimelineRow,
   threadTimelineResponseSchema,
   timelineTurnSummaryDetailsResponseSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { readJson } from "../helpers/json.js";
 import { seedEvent, seedThreadFixture } from "../helpers/seed.js";
@@ -16,14 +16,105 @@ import { withTestHarness } from "../helpers/test-app.js";
 type TimelineTurnRow = Extract<TimelineRow, { kind: "turn" }>;
 
 describe("public timeline turn summary details", () => {
+  it.each([1, 2])(
+    "excludes an item completed beyond the requested range (start %s)",
+    async (sourceSeqStart) => {
+      await withTestHarness(async (harness) => {
+        const { environment, thread } = seedThreadFixture(harness);
+
+        const context = {
+          threadId: thread.id,
+          environmentId: environment.id,
+          providerThreadId: "provider-thread-1",
+          scope: turnScope("turn-1"),
+        };
+
+        seedEvent(harness.deps, {
+          ...context,
+          sequence: 1,
+          type: "turn/started",
+          data: {},
+        });
+
+        for (const [sequence, id, status] of [
+          [2, "long-command", "pending"],
+          [3, "short-command", "completed"],
+          [4, "long-command", "completed"],
+        ] as const) {
+          seedEvent(harness.deps, {
+            ...context,
+            sequence,
+            type: status === "pending" ? "item/started" : "item/completed",
+            data: {
+              item: {
+                type: "commandExecution",
+                id,
+                command: "echo done",
+                cwd: "/tmp/test",
+                status,
+                approvalStatus: null,
+                ...(status === "completed"
+                  ? { exitCode: 0, aggregatedOutput: "done" }
+                  : {}),
+              },
+            },
+          });
+        }
+
+        seedEvent(harness.deps, {
+          ...context,
+          sequence: 5,
+          type: "turn/completed",
+          data: { status: "completed" },
+        });
+
+        const load = async (start: number, end: number) => {
+          const response = await harness.app.request(
+            `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=turn-1&sourceSeqStart=${start}&sourceSeqEnd=${end}`,
+          );
+
+          expect(response.status).toBe(200);
+
+          return timelineTurnSummaryDetailsResponseSchema.parse(
+            await readJson(response),
+          ).rows;
+        };
+
+        const earlier = await load(sourceSeqStart, 3);
+        expect(earlier).toEqual([
+          expect.objectContaining({
+            kind: "work",
+            callId: "short-command",
+            status: "completed",
+          }),
+        ]);
+        const later = await load(1, 5);
+        expect(later).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              kind: "work",
+              callId: "long-command",
+              status: "completed",
+              output: "done",
+              sourceSeqStart: 2,
+              sourceSeqEnd: 4,
+            }),
+          ]),
+        );
+      });
+    },
+  );
+
   it("hydrates an interaction-only summary range before a user steer", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       const eventContext = {
         threadId: thread.id,
         environmentId: environment.id,
         providerThreadId: "provider-thread-1",
       };
+
       seedEvent(harness.deps, {
         ...eventContext,
         scope: turnScope("turn-1"),
@@ -31,6 +122,7 @@ describe("public timeline turn summary details", () => {
         type: "turn/started",
         data: {},
       });
+
       for (const [sequence, status] of [
         [2, "pending"],
         [3, "resolved"],
@@ -57,6 +149,7 @@ describe("public timeline turn summary details", () => {
           },
         });
       }
+
       const clientRequestId = encodeClientTurnRequestIdNumber({ value: 101 });
       seedEvent(harness.deps, {
         ...eventContext,
@@ -104,30 +197,40 @@ describe("public timeline turn summary details", () => {
         type: "turn/completed",
         data: { status: "completed" },
       });
+
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       const turnRow = timeline.rows.find(
         (row): row is TimelineTurnRow =>
           row.kind === "turn" && row.sourceSeqEnd === 3,
       );
+
       expect(turnRow).toMatchObject({
         turnId: "turn-1",
         sourceSeqStart: 2,
         sourceSeqEnd: 3,
       });
+
       if (!turnRow) throw new Error("Expected an interaction-only summary");
+
       const detailsResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${turnRow.turnId}&sourceSeqStart=${turnRow.sourceSeqStart}&sourceSeqEnd=${turnRow.sourceSeqEnd}`,
       );
+
       expect(detailsResponse.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(detailsResponse),
       );
+
       expect(details.rows).toEqual([
         expect.objectContaining({
           kind: "work",
@@ -148,11 +251,13 @@ describe("public timeline turn summary details", () => {
   ])("rejects turn details for $description", async ({ range }) => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       const eventContext = {
         threadId: thread.id,
         environmentId: environment.id,
         providerThreadId: "provider-thread-1",
       };
+
       for (const [sequence, turnId] of [
         [1, "turn-1"],
         [3, "turn-2"],
@@ -165,6 +270,7 @@ describe("public timeline turn summary details", () => {
           data: {},
         });
       }
+
       seedEvent(harness.deps, {
         ...eventContext,
         scope: turnScope("turn-1"),
@@ -213,9 +319,11 @@ describe("public timeline turn summary details", () => {
           },
         },
       });
+
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=turn-1&sourceSeqStart=${range}&sourceSeqEnd=${range}`,
       );
+
       expect(response.status).toBe(400);
       expect(await readJson(response)).toMatchObject({
         code: "invalid_request",

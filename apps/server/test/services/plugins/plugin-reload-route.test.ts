@@ -8,10 +8,11 @@ import {
 
 const BASE = "http://127.0.0.1:3334";
 
-const HEALTHY_SOURCE = `export default function plugin(bb: any) {
-  bb.cli.register({ name: "keeper", summary: "keeper", run() { return { exitCode: 0, stdout: "ok" }; } });
+const HEALTHY_SOURCE = `export default function plugin(api: any) {
+  api.cli.register({ name: "keeper", summary: "keeper", run() { return { exitCode: 0, stdout: "ok" }; } });
 }
 `;
+
 const BROKEN_SOURCE = `export default function plugin() { throw new Error("boom on load"); }
 `;
 
@@ -21,14 +22,14 @@ describe("POST /plugins/reload outcome", () => {
 
   beforeEach(async () => {
     harness = await createTestAppHarness();
-    rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-keeper");
+    rootDir = join(harness.config.dataDir, "fixtures", "omnyo-plugin-keeper");
     await mkdir(rootDir, { recursive: true });
     await writeFile(
       join(rootDir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-keeper",
+        name: "omnyo-plugin-keeper",
         version: "0.1.0",
-        bb: {
+        omnyo: {
           name: "Keeper",
           description: "Reload outcome fixture.",
           branding: { icon: "Zap" },
@@ -50,6 +51,7 @@ describe("POST /plugins/reload outcome", () => {
       `${BASE}/api/v1/plugins/reload?id=keeper`,
       { method: "POST" },
     );
+
     expect(response.status).toBe(200);
     const body: unknown = await response.json();
     expect(body).toMatchObject({ ok: true });
@@ -62,10 +64,12 @@ describe("POST /plugins/reload outcome", () => {
 
   it("answers ok:false with the load problem when the new sources did not load (#2029)", async () => {
     await writeFile(join(rootDir, "server.ts"), BROKEN_SOURCE);
+
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/reload?id=keeper`,
       { method: "POST" },
     );
+
     expect(response.status).toBe(422);
     const body: unknown = await response.json();
     expect(body).toMatchObject({

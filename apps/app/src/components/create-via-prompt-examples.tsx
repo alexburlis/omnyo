@@ -2,14 +2,14 @@ import {
   ResourceCreateButton,
   type ResourceCreateMenuAction,
   type ResourceCreateTemplateGroup,
-} from "@bb/shared-ui/resource-list";
-import type { IconName } from "@bb/shared-ui/icon";
+} from "@omnyo/shared-ui/resource-list";
+import type { IconName } from "@omnyo/shared-ui/icon";
 import {
   BROWSE_ARCHETYPES,
   UTILITY_EXAMPLES,
   briefPrompt,
 } from "@/components/plugin/browse-hero/browse-hero-archetypes";
-import { CREATE_PLUGIN_PROMPT, CREATE_SKILL_PROMPT } from "@bb/client-core";
+import { CREATE_PLUGIN_PROMPT, CREATE_SKILL_PROMPT } from "@omnyo/client-core";
 
 type CreateViaPromptKind = "skill" | "plugin";
 
@@ -71,6 +71,7 @@ export function getCreateExamples(kind: CreateViaPromptKind): {
   examples: CreateExample[];
 } {
   const config = CONFIG[kind];
+
   return {
     examples: config.examples.map((example) => ({
       label: example.label,
@@ -97,6 +98,7 @@ export function CreateWithTemplatesButton({
   onCreate,
 }: CreateWithTemplatesButtonProps) {
   const { examples } = getCreateExamples(kind);
+
   const templateGroups: readonly ResourceCreateTemplateGroup[] | undefined =
     kind === "plugin"
       ? [
@@ -112,6 +114,7 @@ export function CreateWithTemplatesButton({
           },
         ]
       : undefined;
+
   return (
     <ResourceCreateButton
       label={label}

@@ -1,4 +1,4 @@
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { buildThreadTimelineTurnDetailsFromEvents } from "../src/index.js";
 import {
@@ -11,11 +11,14 @@ import type { TimelineEventFactory } from "./timeline-test-harness.js";
 type TimelineFixtureEvent = ReturnType<
   TimelineEventFactory[keyof TimelineEventFactory]
 >;
+
 type TimelineTurnRow = Extract<TimelineRow, { kind: "turn" }>;
+
 type TimelineWorkRow = Extract<TimelineRow, { kind: "work" }>;
 
 interface RenderCompletedTimelineArgs {
   events: TimelineFixtureEvent[];
+  workspaceRoot?: string;
 }
 
 function renderCompletedTimeline(args: RenderCompletedTimelineArgs) {
@@ -25,6 +28,7 @@ function renderCompletedTimeline(args: RenderCompletedTimelineArgs) {
       threadStatus: "idle",
       turnMessageDetail: "summary",
     },
+    workspaceRoot: args.workspaceRoot ?? null,
   });
 }
 
@@ -32,12 +36,15 @@ function rowSignature(row: TimelineRow): string {
   if (row.kind === "conversation") {
     return `conversation:${row.role}`;
   }
+
   if (row.kind === "system") {
     return `system:${row.systemKind}`;
   }
+
   if (row.kind === "work") {
     return `work:${row.workKind}`;
   }
+
   return `turn:${row.sourceSeqStart}-${row.sourceSeqEnd}`;
 }
 
@@ -57,21 +64,26 @@ function requireOnlyTurnRow(rows: readonly TimelineRow[]): TimelineTurnRow {
   const rowsForTurns = turnRows(rows);
   expect(rowsForTurns).toHaveLength(1);
   const row = rowsForTurns[0];
+
   if (!row) {
     throw new Error("Expected one turn row");
   }
+
   return row;
 }
 
 describe("completed turn summary rendering", () => {
   it("keeps an assistant answer visible when the provider re-queries and the model answers again", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const request = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "SQLite vs Postgres for a desktop app? End with a question.",
     });
+
     const answer =
       "- SQLite is a file, zero ops.\n- Postgres needs a server.\n**Question for you**: multi-user someday?";
+
     const hookReply =
       "The verify gate is open: no fresh fast-loop verdict for HEAD, nothing actionable this turn.";
 
@@ -103,6 +115,7 @@ describe("completed turn summary rendering", () => {
 
   it("folds narration before work but keeps the answer that precedes a hook reply", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const request = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "Is the daemon command blob pruning durable?",
@@ -150,6 +163,7 @@ describe("completed turn summary rendering", () => {
 
   it("keeps turn-scoped environment directory update operations inside the completed turn summary", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const request = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "move this thread to the new worktree",
@@ -206,10 +220,12 @@ describe("completed turn summary rendering", () => {
 
   it("emits summary rows when every completed turn starts from accepted user input", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const firstRequest = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "Investigate the timeline behavior",
     });
+
     const events: TimelineFixtureEvent[] = [
       firstRequest,
       event.turnStarted({ turnId: "turn-1" }),
@@ -229,10 +245,12 @@ describe("completed turn summary rendering", () => {
       }),
       event.turnCompleted({ turnId: "turn-1" }),
     ];
+
     const secondRequest = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "Apply the focused fix",
     });
+
     events.push(
       secondRequest,
       event.turnStarted({ turnId: "turn-2" }),
@@ -257,10 +275,12 @@ describe("completed turn summary rendering", () => {
       }),
       event.turnCompleted({ turnId: "turn-2" }),
     );
+
     const thirdRequest = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "Run validation",
     });
+
     events.push(
       thirdRequest,
       event.turnStarted({ turnId: "turn-3" }),
@@ -269,7 +289,7 @@ describe("completed turn summary rendering", () => {
         turnId: "turn-3",
       }),
       event.commandCompleted({
-        command: "pnpm exec turbo run test --filter=@bb/thread-view",
+        command: "pnpm exec turbo run test --filter=@omnyo/thread-view",
         itemId: "tool-3",
         turnId: "turn-3",
       }),
@@ -305,6 +325,7 @@ describe("completed turn summary rendering", () => {
 
   it("keeps summary rows on both sides of an accepted in-turn steer", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const events: TimelineFixtureEvent[] = [
       event.turnStarted(),
       event.commandCompleted({
@@ -312,10 +333,12 @@ describe("completed turn summary rendering", () => {
         command: "pnpm test",
       }),
     ];
+
     const steerRequest = event.clientTurnRequested({
       target: { kind: "auto", expectedTurnId: "turn-1" },
       text: "Please account for the restart",
     });
+
     events.push(
       steerRequest,
       event.inputAccepted({
@@ -323,7 +346,7 @@ describe("completed turn summary rendering", () => {
       }),
       event.commandCompleted({
         itemId: "tool-after-steer",
-        command: "sqlite3 ~/.bb-dev/bb.db '.tables'",
+        command: "sqlite3 ~/.omnyo-dev/app.db '.tables'",
       }),
       event.assistantCompleted({
         itemId: "assistant-1",
@@ -353,6 +376,7 @@ describe("completed turn summary rendering", () => {
 
   it("keeps the last assistant message visible before an accepted in-turn steer", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const events: TimelineFixtureEvent[] = [
       event.turnStarted(),
       event.commandCompleted({
@@ -364,10 +388,12 @@ describe("completed turn summary rendering", () => {
         delta: "The existing server is still running.",
       }),
     ];
+
     const steerRequest = event.clientTurnRequested({
       target: { kind: "auto", expectedTurnId: "turn-1" },
       text: "Show me the icon",
     });
+
     events.push(
       steerRequest,
       event.inputAccepted({
@@ -416,10 +442,12 @@ describe("completed turn summary rendering", () => {
 
   it("splits completed turn summaries at external human new-turn boundaries", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const initialRequest = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "start the long turn",
     });
+
     const events: TimelineFixtureEvent[] = [
       initialRequest,
       event.turnStarted({ turnId: "long-turn" }),
@@ -438,10 +466,12 @@ describe("completed turn summary rendering", () => {
         turnId: "long-turn",
       }),
     ];
+
     const followUpRequest = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "new turn while the first turn is still emitting",
     });
+
     events.push(
       followUpRequest,
       event.assistantCompleted({
@@ -477,8 +507,49 @@ describe("completed turn summary rendering", () => {
     ).toEqual([["work:command"], ["work:command"]]);
   });
 
+  it("does not treat a script request as an external human turn boundary", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+    const timeline = renderCompletedTimeline({
+      events: [
+        event.turnStarted(),
+        event.commandCompleted({
+          itemId: "before-script",
+          command: "pnpm test",
+        }),
+        event.clientTurnRequested({
+          text: "The nightly check completed",
+          systemMessageKind: "external-message",
+          systemMessageSubject: {
+            kind: "message-source",
+            source: { kind: "script", label: "Nightly check" },
+          },
+          target: { kind: "new-turn" },
+        }),
+        event.commandCompleted({
+          itemId: "after-script",
+          command: "pnpm lint",
+        }),
+        event.turnCompleted(),
+      ],
+    });
+
+    expect(
+      timeline.projection.entries.flatMap((entry) =>
+        entry.kind === "turn"
+          ? [entry.turn.externalUserBoundarySeqs ?? []]
+          : [],
+      ),
+    ).toEqual([[]]);
+    expect(requireOnlyTurnRow(timeline.rows).children).toMatchObject([
+      { kind: "work", callId: "before-script" },
+      { kind: "work", callId: "after-script" },
+    ]);
+  });
+
   it("keeps provisioning rows before the initial completed turn summary", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const request = event.clientTurnRequested({
       target: { kind: "thread-start" },
       text: "start with provisioning",
@@ -531,19 +602,57 @@ describe("completed turn summary rendering", () => {
 
   it.each([
     {
-      initiator: "agent",
-      senderThreadId: "thr_parent",
-      text: "Please account for the restart",
+      label: "agent",
+      source: {
+        initiator: "agent",
+        senderThreadId: "thr_parent",
+        text: "Please account for the restart",
+      },
     },
     {
-      initiator: "system",
-      senderThreadId: null,
-      text: "[bb system] Continue after reconnect.",
+      label: "system",
+      source: {
+        initiator: "system",
+        senderThreadId: null,
+        text: "[Omnyo system] Continue after reconnect.",
+      },
+    },
+    {
+      label: "script",
+      source: {
+        initiator: "user",
+        systemMessageKind: "external-message",
+        systemMessageSubject: {
+          kind: "message-source",
+          source: { kind: "script", label: "Nightly check" },
+        },
+        text: "The check completed",
+      },
+    },
+    {
+      label: "plugin",
+      source: {
+        initiator: "user",
+        systemMessageKind: "external-message",
+        systemMessageSubject: {
+          kind: "message-source",
+          source: { kind: "plugin", pluginId: "workflows" },
+        },
+        text: "The workflow completed",
+      },
+    },
+    {
+      label: "legacy automation",
+      source: {
+        initiator: "user",
+        text: "[bb automation due:auto_nightly] Continue after check",
+      },
     },
   ] as const)(
-    "does not split completed turn summaries around accepted $initiator steers",
-    ({ initiator, senderThreadId, text }) => {
+    "does not split completed turn summaries around accepted $label steers",
+    ({ source }) => {
       const event = createTimelineEventFactory({ threadId: "thread-1" });
+
       const events: TimelineFixtureEvent[] = [
         event.turnStarted(),
         event.commandCompleted({
@@ -551,12 +660,12 @@ describe("completed turn summary rendering", () => {
           command: "pnpm test",
         }),
       ];
+
       const steerRequest = event.clientTurnRequested({
-        initiator,
-        senderThreadId,
+        ...source,
         target: { kind: "auto", expectedTurnId: "turn-1" },
-        text,
       });
+
       events.push(
         steerRequest,
         event.inputAccepted({
@@ -564,7 +673,7 @@ describe("completed turn summary rendering", () => {
         }),
         event.commandCompleted({
           itemId: "tool-after-steer",
-          command: "sqlite3 ~/.bb-dev/bb.db '.tables'",
+          command: "sqlite3 ~/.omnyo-dev/app.db '.tables'",
         }),
         event.assistantCompleted({
           itemId: "assistant-1",
@@ -633,6 +742,7 @@ describe("completed turn summary rendering", () => {
 
   it("does not synthesize empty summary rows for user-only completed turns", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const request = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "No work needed",
@@ -664,10 +774,12 @@ describe("completed turn summary rendering", () => {
 describe("flat completed turn display", () => {
   function narratedTurn() {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const request = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "Is the daemon command blob pruning durable?",
     });
+
     const liveEvents = [
       request,
       event.turnStarted(),
@@ -682,6 +794,7 @@ describe("flat completed turn display", () => {
         text: "Yes: pruning runs inside the daemon transaction.",
       }),
     ];
+
     return {
       liveEvents,
       finishedEvents: [...liveEvents, event.turnCompleted()],
@@ -700,6 +813,7 @@ describe("flat completed turn display", () => {
         turnMessageDetail: "summary",
       },
     });
+
     const finished = renderTimelineFixture({
       completedTurnDisplay: "flat",
       events: finishedEvents,
@@ -747,6 +861,7 @@ describe("flat completed turn display", () => {
   it("answers a turn details request with the flat rows instead of a missing match", () => {
     const { finishedEvents } = narratedTurn();
     const events = fromRows(finishedEvents);
+
     const detailOptions = {
       includeDiagnosticOperations: false,
       sourceSeqStart: 4,
@@ -760,6 +875,7 @@ describe("flat completed turn display", () => {
       events,
       options: { ...detailOptions, completedTurnDisplay: "flat" },
     });
+
     const collapsed = buildThreadTimelineTurnDetailsFromEvents({
       events,
       options: { ...detailOptions, completedTurnDisplay: "collapse" },
@@ -776,5 +892,265 @@ describe("flat completed turn display", () => {
     expect(
       collapsed.kind === "matched" ? rowSignatures(collapsed.rows) : [],
     ).toEqual(["conversation:assistant", "work:command"]);
+  });
+});
+
+describe("completed turn activity counts", () => {
+  it("keeps approvals out of the folded row", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+    const request = event.clientTurnRequested({
+      target: { kind: "new-turn" },
+      text: "Deploy it.",
+    });
+
+    const timeline = renderCompletedTimeline({
+      events: [
+        request,
+        event.turnStarted(),
+        event.inputAccepted({ clientRequestId: request.data.requestId }),
+        event.commandCompleted({ itemId: "tool-1", command: "pnpm build" }),
+        event.permissionGrantLifecycle({ status: "resolved" }),
+        event.commandCompleted({ itemId: "tool-2", command: "pnpm deploy" }),
+        event.assistantCompleted({ itemId: "assistant-1", text: "Deployed." }),
+        event.turnCompleted(),
+      ],
+    });
+
+    expect(topLevelWorkRows(timeline.rows).map((row) => row.workKind)).toEqual([
+      "approval",
+    ]);
+  });
+
+  it("folds machinery that follows the answer into the same row", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+    const request = event.clientTurnRequested({
+      target: { kind: "new-turn" },
+      text: "Collect the state.",
+    });
+
+    const timeline = renderCompletedTimeline({
+      events: [
+        request,
+        event.turnStarted(),
+        event.inputAccepted({ clientRequestId: request.data.requestId }),
+        event.commandCompleted({ itemId: "tool-1", command: "pnpm build" }),
+        event.assistantCompleted({
+          itemId: "assistant-1",
+          text: "I am collecting the stored state.",
+        }),
+        event.commandCompleted({ itemId: "tool-2", command: "pnpm test" }),
+        event.turnCompleted(),
+      ],
+    });
+
+    expect(topLevelWorkRows(timeline.rows)).toHaveLength(0);
+    expect(requireOnlyTurnRow(timeline.rows).activity).toEqual({
+      commands: 2,
+      failures: 0,
+      files: 0,
+      searches: 0,
+      tools: 0,
+      warnings: 0,
+    });
+  });
+
+  it("keeps work that follows a human steer below the steer", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+    const request = event.clientTurnRequested({
+      target: { kind: "new-turn" },
+      text: "Run the tests.",
+    });
+
+    const steer = event.clientTurnRequested({
+      target: { kind: "auto", expectedTurnId: "turn-1" },
+      text: "Also run lint",
+    });
+
+    const timeline = renderCompletedTimeline({
+      events: [
+        request,
+        event.turnStarted(),
+        event.inputAccepted({ clientRequestId: request.data.requestId }),
+        event.commandCompleted({ itemId: "tool-1", command: "pnpm test" }),
+        event.assistantCompleted({
+          itemId: "assistant-1",
+          text: "Tests are next",
+        }),
+        steer,
+        event.inputAccepted({ clientRequestId: steer.data.requestId }),
+        event.commandCompleted({ itemId: "tool-2", command: "pnpm lint" }),
+        event.turnCompleted(),
+      ],
+    });
+
+    expect(timeline.rows.map((row) => row.kind)).toEqual([
+      "conversation",
+      "turn",
+      "conversation",
+      "conversation",
+      "work",
+    ]);
+    expect(requireOnlyTurnRow(timeline.rows).activity?.commands).toBe(1);
+    expect(topLevelWorkRows(timeline.rows)).toMatchObject([
+      { callId: "tool-2" },
+    ]);
+  });
+
+  it("keeps work that follows an approval's answer in its own fold after the approval", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+    const request = event.clientTurnRequested({
+      target: { kind: "new-turn" },
+      text: "Deploy it.",
+    });
+
+    const timeline = renderCompletedTimeline({
+      events: [
+        request,
+        event.turnStarted(),
+        event.inputAccepted({ clientRequestId: request.data.requestId }),
+        event.commandCompleted({ itemId: "tool-1", command: "pnpm build" }),
+        event.permissionGrantLifecycle({ status: "resolved" }),
+        event.assistantCompleted({ itemId: "assistant-1", text: "Deployed." }),
+        event.commandCompleted({ itemId: "tool-2", command: "pnpm verify" }),
+        event.turnCompleted(),
+      ],
+    });
+
+    expect(
+      timeline.rows.map((row) =>
+        row.kind === "work" ? `work:${row.workKind}` : row.kind,
+      ),
+    ).toEqual([
+      "conversation",
+      "turn",
+      "work:approval",
+      "turn",
+      "conversation",
+    ]);
+    expect(turnRows(timeline.rows).map((row) => row.children)).toMatchObject([
+      [{ callId: "tool-1" }],
+      [{ callId: "tool-2" }],
+    ]);
+  });
+
+  it("counts commands, files, searches, warnings and failures on the folded row", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+    const request = event.clientTurnRequested({
+      target: { kind: "new-turn" },
+      text: "Check the build.",
+    });
+
+    const timeline = renderCompletedTimeline({
+      events: [
+        request,
+        event.turnStarted(),
+        event.inputAccepted({ clientRequestId: request.data.requestId }),
+        event.providerWarning({ summary: "Model metadata not found" }),
+        event.commandCompleted({ itemId: "tool-1", command: "pnpm build" }),
+        event.commandCompleted({
+          itemId: "tool-2",
+          command: "pnpm test",
+          exitCode: 1,
+          status: "failed",
+        }),
+        event.fileReadCompleted({
+          itemId: "read-1",
+          path: "/repo/a.ts",
+          cmd: "cat /repo/a.ts",
+        }),
+        event.fileReadCompleted({
+          itemId: "read-2",
+          path: "/repo/a.ts",
+          cmd: "cat /repo/a.ts",
+        }),
+        event.fileReadCompleted({
+          itemId: "read-3",
+          path: "/repo/b.ts",
+          cmd: "cat /repo/b.ts",
+        }),
+        event.assistantCompleted({ itemId: "assistant-1", text: "Done." }),
+        event.turnCompleted(),
+      ],
+    });
+
+    expect(requireOnlyTurnRow(timeline.rows).activity).toEqual({
+      commands: 2,
+      failures: 1,
+      files: 2,
+      searches: 0,
+      tools: 0,
+      warnings: 1,
+    });
+  });
+
+  function finishedActivity(
+    work: (event: TimelineEventFactory) => TimelineFixtureEvent[],
+    workspaceRoot?: string,
+  ) {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+    const request = event.clientTurnRequested({
+      target: { kind: "new-turn" },
+      text: "Do the work.",
+    });
+
+    return requireOnlyTurnRow(
+      renderCompletedTimeline({
+        events: [
+          request,
+          event.turnStarted(),
+          event.inputAccepted({ clientRequestId: request.data.requestId }),
+          ...work(event),
+          event.assistantCompleted({ itemId: "assistant-1", text: "Done." }),
+          event.turnCompleted(),
+        ],
+        workspaceRoot,
+      }).rows,
+    ).activity;
+  }
+
+  it("counts a file once when it is read by a relative path and edited by an absolute path", () => {
+    const activity = finishedActivity(
+      (event) => [
+        event.commandCompleted({
+          itemId: "read-1",
+          command: "sed -n 1,50p src/foo.ts",
+        }),
+        event.commandCompleted({
+          itemId: "read-2",
+          command: "sed -n 1,50p ./src/foo.ts",
+        }),
+        event.fileChangeCompleted({
+          itemId: "edit-1",
+          changes: [
+            {
+              path: "/Users/developer/projects/x/src/foo.ts",
+              kind: "update",
+              diff: "@@ -1 +1 @@\n-old\n+new",
+            },
+          ],
+        }),
+      ],
+      "/Users/developer/projects/x",
+    );
+
+    expect(activity?.files).toBe(1);
+  });
+
+  it("does not report directory listings as searches", () => {
+    const activity = finishedActivity((event) => [
+      event.commandCompleted({ itemId: "list-1", command: "ls src" }),
+      event.commandCompleted({
+        itemId: "list-2",
+        command: "find . -maxdepth 1",
+      }),
+    ]);
+
+    expect(activity).toMatchObject({ commands: 2, searches: 0 });
   });
 });

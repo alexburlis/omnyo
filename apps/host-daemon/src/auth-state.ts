@@ -5,7 +5,7 @@ import {
   hostAuthStateSchema,
   normalizeServerUrl,
   type HostAuthState,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 
 function getAuthStatePath(dataDir: string): string {
   return path.join(dataDir, HOST_AUTH_FILE_NAME);
@@ -18,13 +18,16 @@ export async function readHostAuthState(
 
   try {
     const raw = await fs.readFile(authStatePath, "utf8");
+
     return hostAuthStateSchema.parse(JSON.parse(raw));
   } catch (error) {
     const errorCode =
       error instanceof Error && "code" in error ? error.code : undefined;
+
     if (errorCode === "ENOENT") {
       return null;
     }
+
     throw error;
   }
 }
@@ -35,6 +38,7 @@ export async function writeHostAuthState(
 ): Promise<void> {
   await fs.mkdir(dataDir, { recursive: true });
   const authStatePath = getAuthStatePath(dataDir);
+
   const payload = JSON.stringify(
     {
       hostId: authState.hostId,

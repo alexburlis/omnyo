@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { expect, it, vi, onTestFinished } from "vitest";
 import {
   execPortableFile,
@@ -35,15 +38,16 @@ it.each(["stdout", "stderr"])(
 );
 
 it("does not reintroduce sanitized parent runtime settings", async () => {
-  vi.stubEnv("BB_PROCESS_PARENT_SECRET", "parent-only");
+  vi.stubEnv("OMNYO_PROCESS_PARENT_SECRET", "parent-only");
   onTestFinished(() => {
     vi.unstubAllEnvs();
   });
+
   const output = await execPortableFile(
     process.execPath,
     [
       "-e",
-      'process.stdout.write(JSON.stringify([process.env.BB_PROCESS_PARENT_SECRET ?? null, process.env.PROVIDER_TOKEN]) + "\\n");',
+      'process.stdout.write(JSON.stringify([process.env.OMNYO_PROCESS_PARENT_SECRET ?? null, process.env.PROVIDER_TOKEN]) + "\\n");',
     ],
     {
       ...options,
@@ -52,6 +56,7 @@ it("does not reintroduce sanitized parent runtime settings", async () => {
       }),
     },
   );
+
   expect(output).toEqual({
     stdout: '[null,"preserved-token"]\n',
     stderr: "",
@@ -60,6 +65,7 @@ it("does not reintroduce sanitized parent runtime settings", async () => {
 
 it("streams split UTF-8 stderr and closes stdin after writing the input", async () => {
   const chunks: string[] = [];
+
   const output = await execPortableFile(
     process.execPath,
     [
@@ -78,6 +84,7 @@ it("streams split UTF-8 stderr and closes stdin after writing the input", async 
       onStderr: (chunk) => chunks.push(chunk),
     },
   );
+
   expect(output).toEqual({ stdout: "hello 日本語", stderr: "é日本語" });
   expect(chunks.join("")).toBe("é日本語");
 });
@@ -86,14 +93,17 @@ it("cancels a command with its descendants and retains prior output", async () =
   const controller = new AbortController();
   let output = "";
   let pids: number[] = [];
+
   const isAlive = (pid: number) => {
     try {
       process.kill(pid, 0);
+
       return true;
     } catch {
       return false;
     }
   };
+
   try {
     await expect(
       execPortableFile(
@@ -113,6 +123,7 @@ it("cancels a command with its descendants and retains prior output", async () =
           signal: controller.signal,
           onStderr: (chunk) => {
             output += chunk;
+
             if (output.endsWith("\n")) {
               pids = JSON.parse(output);
               controller.abort("cancelled by caller");
@@ -135,4 +146,47 @@ it("cancels a command with its descendants and retains prior output", async () =
       if (isAlive(pid)) process.kill(pid, "SIGKILL");
     }
   }
+});
+
+it.skipIf(process.platform === "win32")(
+  "runs the first bare command on the child PATH and reports a missing one as ENOENT",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "omnyo-exec-path-"));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+
+    const dirs = ["missing", "first", "second"].map((name) => join(root, name));
+
+    for (const [index, dir] of dirs.slice(1).entries()) {
+      await mkdir(dir);
+      await writeFile(join(dir, "omnyo-probe"), `#!/bin/sh\necho ${index}\n`, {
+        mode: 0o755,
+      });
+    }
+
+    const env = { ...process.env, PATH: dirs.join(delimiter) };
+
+    await expect(
+      execPortableFile("omnyo-probe", [], { ...options, env }),
+    ).resolves.toEqual({ stdout: "0\n", stderr: "" });
+    await expect(
+      execPortableFile("omnyo-probe-absent", [], { ...options, env }),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+      syscall: "spawn omnyo-probe-absent",
+    });
+  },
+);
+
+it("installer deadline preserves confirmed process-tree termination", async () => {
+  await expect(
+    execPortableFile(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      ...options,
+      timeout: 100,
+    }),
+  ).rejects.toMatchObject({
+    killed: true,
+    treeTermination: "confirmed",
+    processGroupId: expect.any(Number),
+    processPlatform: process.platform,
+  });
 });

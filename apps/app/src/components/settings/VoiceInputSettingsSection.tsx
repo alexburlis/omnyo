@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from "react";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Popover, PopoverTrigger } from "@bb/shared-ui/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Popover, PopoverTrigger } from "@omnyo/shared-ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@omnyo/shared-ui/tooltip";
 import {
   SettingsSection,
   SettingsWithControl,
@@ -30,6 +30,7 @@ interface VoiceInputSettingsSectionContentProps {
 }
 
 const SYSTEM_DEFAULT_MICROPHONE_LABEL = "System default";
+
 const MICROPHONE_SETTING_LABEL = "Microphone";
 
 function selectedMicrophoneLabel({
@@ -44,9 +45,11 @@ function selectedMicrophoneLabel({
   if (!isSupported) {
     return "Unsupported";
   }
+
   if (preferredDeviceId === null) {
     return SYSTEM_DEFAULT_MICROPHONE_LABEL;
   }
+
   return (
     devices.find((device) => device.deviceId === preferredDeviceId)?.label ??
     SYSTEM_DEFAULT_MICROPHONE_LABEL
@@ -71,12 +74,15 @@ function microphoneSettingDescription({
   if (!isSupported) {
     return "This browser does not expose microphone devices.";
   }
+
   if (isLoading) {
     return "Loading microphones.";
   }
+
   if (errorMessage !== null) {
     return errorMessage;
   }
+
   if (devices.length === 0) {
     return (
       <>
@@ -91,12 +97,14 @@ function microphoneSettingDescription({
       </>
     );
   }
+
   if (
     preferredDeviceId !== null &&
     devices.every((device) => device.deviceId !== preferredDeviceId)
   ) {
     return "Preferred microphone is disconnected. Using another input until it reconnects.";
   }
+
   return "Used for prompt voice input.";
 }
 
@@ -109,6 +117,7 @@ export function VoiceInputSettingsSectionContent({
   preferredDeviceId,
 }: VoiceInputSettingsSectionContentProps) {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
+
   const triggerLabel = selectedMicrophoneLabel({
     devices,
     isSupported,
@@ -194,6 +203,7 @@ export function VoiceInputSettingsSectionContent({
 
 export function VoiceInputSettingsSection() {
   const preferredDeviceId = useAudioInputDevicePreferenceValue();
+
   const { devices, errorMessage, isLoading, isSupported, refresh } =
     useAudioInputDevices();
 

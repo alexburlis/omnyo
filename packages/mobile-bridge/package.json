@@ -1,5 +1,6 @@
 {
-  "name": "@bb/mobile-bridge",
+  "name": "@omnyo/mobile-bridge",
+  "private": true,
   "version": "0.0.1",
   "type": "module",
   "sideEffects": false,
@@ -20,8 +21,9 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "^4.1.1"
+    "vitest": "4.1.11"
   }
 }

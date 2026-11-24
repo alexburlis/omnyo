@@ -1,24 +1,32 @@
 import { describe, expect, it } from "vitest";
 import {
   THREAD_CONTEXT_CLEAR_OPERATION,
+  parseStoredThreadEvent,
+  threadScope,
+  turnScope,
   type CompletedTurnDisplay,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   deleteThreadEventSuffixInTransaction,
   createThread,
   noopNotifier,
-  getLatestStoredConversationOutlineSequence,
   getLatestThreadSequence,
-} from "@bb/db";
+} from "@omnyo/db";
+import {
+  captureConversationOutlineCheckpoint,
+  restoreConversationOutlineCheckpoint,
+} from "../../../src/services/threads/conversation-outline-cache.js";
 import {
   buildThreadConversationOutline,
   loadThreadConversationOutline,
 } from "../../../src/services/threads/timeline.js";
 import {
   appendRows,
+  countSelectedEventRows,
   withTestThread,
   type RowSpec,
   type TestThread,
+  PROVIDER_THREAD_ID,
 } from "../../helpers/timeline-cache-fixture.js";
 
 function started(turnId: string, parentToolCallId?: string): RowSpec {
@@ -38,16 +46,17 @@ function message(
   turnId: string,
   text: string,
   parentToolCallId?: string,
+  itemId = `message-${turnId}`,
 ): RowSpec {
   return {
     type: "item/completed",
     turnId,
-    itemId: `message-${turnId}`,
+    itemId,
     itemKind: "agentMessage",
     parentToolCallId,
     data: {
       item: {
-        id: `message-${turnId}`,
+        id: itemId,
         type: "agentMessage",
         text,
         parentToolCallId,
@@ -108,6 +117,7 @@ function seed(testThread: TestThread, count = 3): void {
     Array.from({ length: count }, (_, i) => {
       const turnId = `turn-${i}`;
       const requestId = `creq_${i.toString(8).replaceAll("0", "a").replaceAll("1", "b").padStart(10, "a")}`;
+
       return [
         request(requestId),
         started(turnId),
@@ -124,6 +134,7 @@ function nestedTurn(index: number, includeParent = true): RowSpec[] {
   const root = `nested-root-${index}`;
   const child = `nested-child-${index}`;
   const parent = `nested-call-${index}`;
+
   return [
     started(root),
     ...(includeParent ? [parentCall(root, parent)] : []),
@@ -158,13 +169,11 @@ function load(
   completedTurnDisplay: CompletedTurnDisplay = "collapse",
 ) {
   const threadId = testThread.thread.id;
+
   return loadThreadConversationOutline(testThread.db, testThread.thread, {
     completedTurnDisplay,
     includeClearedContextHistory: false,
     maxSeq: getLatestThreadSequence(testThread.db, { threadId }),
-    outlineSequence: getLatestStoredConversationOutlineSequence(testThread.db, {
-      threadId,
-    }),
   });
 }
 
@@ -180,41 +189,73 @@ function expectMatchesFull(
       maxSeq: result.maxSeq,
     }),
   );
+
   return result;
 }
 
-function countSelectedEventRows(
-  testThread: TestThread,
-  run: () => void,
-): number {
-  const raw = testThread.db.$client;
-  const originalPrepare = raw.prepare.bind(raw);
-  let count = 0;
-  Object.defineProperty(raw, "prepare", {
-    configurable: true,
-    writable: true,
-    value: (source: string) => {
-      const statement = originalPrepare(source);
-      if (source.includes('from "events"') && source.includes('"created_at"')) {
-        const originalAll = statement.all.bind(statement);
-        statement.all = function (...params: unknown[]) {
-          const rows = originalAll(...params);
-          count += rows.length;
-          return rows;
-        };
-      }
-      return statement;
-    },
-  });
-  try {
-    run();
-  } finally {
-    raw.prepare = originalPrepare;
-  }
-  return count;
+function appendValidRows(testThread: TestThread, specs: RowSpec[]): void {
+  for (const spec of specs)
+    parseStoredThreadEvent({
+      data: spec.data ?? {},
+      providerThreadId:
+        spec.providerThreadId === undefined
+          ? spec.turnId == null
+            ? null
+            : PROVIDER_THREAD_ID
+          : spec.providerThreadId,
+      scope: spec.turnId == null ? threadScope() : turnScope(spec.turnId),
+      threadId: testThread.thread.id,
+      type: spec.type,
+    });
+  appendRows(testThread, specs);
 }
 
 describe("incremental conversation outlines", () => {
+  it("keeps generated inputs out of the human conversation outline", () => {
+    withTestThread((testThread) => {
+      const human = request("creq_aaaaaaaaaa");
+      const script = request("creq_bbbbbbbbbb");
+      const agent = request("creq_cccccccccc");
+      const automation = request("creq_dddddddddd");
+
+      appendRows(testThread, [
+        human,
+        {
+          ...script,
+          data: {
+            ...script.data,
+            systemMessageKind: "external-message",
+            systemMessageSubject: {
+              kind: "message-source",
+              source: { kind: "script", label: "Nightly check" },
+            },
+          },
+        },
+        {
+          ...agent,
+          data: {
+            ...agent.data,
+            initiator: "agent",
+            senderThreadId: "thr_source",
+          },
+        },
+        {
+          ...automation,
+          data: {
+            ...automation.data,
+            input: [
+              { type: "text", text: "[bb automation due:auto_nightly] Check" },
+            ],
+          },
+        },
+      ]);
+
+      expect(expectMatchesFull(testThread).items).toMatchObject([
+        { role: "user", preview: "User request" },
+      ]);
+    });
+  });
+
   it.each(["collapse", "flat"] as const)(
     "retains completed nested history while updating the live tail (%s)",
     (display) => {
@@ -227,6 +268,7 @@ describe("incremental conversation outlines", () => {
           delta("live", "Live"),
         ]);
         expectMatchesFull(testThread, display);
+
         for (const rows of [
           [delta("live", " continued")],
           [message("live", "Finished"), completed("live")],
@@ -234,9 +276,11 @@ describe("incremental conversation outlines", () => {
           [started("next"), delta("next", "Next")],
         ]) {
           appendRows(testThread, rows);
-          const selected = countSelectedEventRows(testThread, () =>
+
+          const selected = countSelectedEventRows(testThread.db, () =>
             expectMatchesFull(testThread, display),
           );
+
           expect(selected).toBeLessThan(25);
         }
       });
@@ -260,14 +304,17 @@ describe("incremental conversation outlines", () => {
           started("live"),
           delta("live", "Live"),
         ]);
+
         const removeCompletion = () =>
           testThread.coldDb.$client
             .prepare(
               "DELETE FROM events WHERE thread_id = ? AND turn_id = ? AND type = 'turn/completed'",
             )
             .run(testThread.thread.id, "nested-child-0");
+
         if (change === "incomplete child") removeCompletion();
         expectMatchesFull(testThread);
+
         switch (change) {
           case "new child":
             appendRows(testThread, [
@@ -291,9 +338,11 @@ describe("incremental conversation outlines", () => {
             appendRows(testThread, [delta("live", "More")]);
             break;
         }
-        const selected = countSelectedEventRows(testThread, () =>
+
+        const selected = countSelectedEventRows(testThread.db, () =>
           expectMatchesFull(testThread),
         );
+
         if (change === "completion rewrite")
           expect(selected).toBeGreaterThan(100);
         else expect(selected).toBeLessThan(25);
@@ -319,6 +368,7 @@ describe("incremental conversation outlines", () => {
           delta("live", "Live"),
         ]);
         expectMatchesFull(testThread, display);
+
         for (let index = 0; index < 3; index += 1) {
           appendRows(testThread, [
             {
@@ -332,9 +382,11 @@ describe("incremental conversation outlines", () => {
             },
             delta("live", " Root update"),
           ]);
-          const selected = countSelectedEventRows(testThread, () =>
+
+          const selected = countSelectedEventRows(testThread.db, () =>
             expectMatchesFull(testThread, display),
           );
+
           expect(selected).toBeLessThan(25);
         }
       });
@@ -357,11 +409,13 @@ describe("incremental conversation outlines", () => {
           delta("live", "Live"),
         ]);
         expectMatchesFull(testThread);
+
         if (acceptance === "late") {
           appendRows(testThread, [
             accepted("creq_abcdefghij", "inherited-root"),
           ]);
         }
+
         const result = expectMatchesFull(testThread);
         expect(result.items.map((item) => item.preview)).toContain(
           "Actual root answer",
@@ -446,6 +500,7 @@ describe("incremental conversation outlines", () => {
     withTestThread((testThread) => {
       seed(testThread, 100);
       expectMatchesFull(testThread);
+
       for (const rows of [
         [delta("live", " continuation")],
         [message("live", "Final answer"), completed("live")],
@@ -458,15 +513,34 @@ describe("incremental conversation outlines", () => {
         [delta("next", " update")],
       ]) {
         appendRows(testThread, rows);
-        const count = countSelectedEventRows(testThread, () => {
+
+        const count = countSelectedEventRows(testThread.db, () => {
           load(testThread);
         });
+
         expect(count).toBeGreaterThan(0);
         expect(count).toBeLessThan(20);
         expectMatchesFull(testThread);
       }
     });
   });
+
+  it.each([{ status: "idle" }, { title: "Renamed thread" }] as const)(
+    "reads only the live tail after a metadata change (%o)",
+    (change) =>
+      withTestThread((testThread) => {
+        seed(testThread, 100);
+        expectMatchesFull(testThread);
+        testThread.thread = { ...testThread.thread, ...change };
+
+        const count = countSelectedEventRows(testThread.db, () => {
+          load(testThread);
+        });
+
+        expect(count).toBeLessThan(20);
+        expectMatchesFull(testThread);
+      }),
+  );
 
   it.each([
     "rewind",
@@ -491,11 +565,13 @@ describe("incremental conversation outlines", () => {
           delta("next-live", "Live"),
         ]);
         expectMatchesFull(testThread);
+
         switch (change) {
           case "rewind": {
             const maxSeq = getLatestThreadSequence(testThread.db, {
               threadId: testThread.thread.id,
             });
+
             testThread.db.transaction((tx) =>
               deleteThreadEventSuffixInTransaction(tx, {
                 threadId: testThread.thread.id,
@@ -509,6 +585,7 @@ describe("incremental conversation outlines", () => {
               started("replacement"),
               delta("replacement", "New"),
             ]);
+
             while (
               getLatestThreadSequence(testThread.db, {
                 threadId: testThread.thread.id,
@@ -521,8 +598,10 @@ describe("incremental conversation outlines", () => {
                 },
               ]);
             }
+
             break;
           }
+
           case "clear":
             appendRows(testThread, [
               {
@@ -590,6 +669,7 @@ describe("incremental conversation outlines", () => {
             ]);
             break;
         }
+
         expectMatchesFull(
           testThread,
           change === "display" ? "flat" : "collapse",
@@ -602,6 +682,7 @@ describe("incremental conversation outlines", () => {
       seed(testThread, 100);
       expectMatchesFull(testThread);
       const firstThread = testThread.thread;
+
       for (let index = 0; index < 16; index += 1) {
         testThread.thread = createThread(testThread.db, noopNotifier, {
           projectId: testThread.projectId,
@@ -611,15 +692,18 @@ describe("incremental conversation outlines", () => {
         seed(testThread);
         load(testThread);
       }
+
       testThread.thread = firstThread;
-      const count = countSelectedEventRows(testThread, () => {
+
+      const count = countSelectedEventRows(testThread.db, () => {
         load(testThread);
       });
+
       expect(count).toBeGreaterThan(500);
       expectMatchesFull(testThread);
       appendRows(testThread, [delta("live", " after eviction")]);
       expect(
-        countSelectedEventRows(testThread, () => {
+        countSelectedEventRows(testThread.db, () => {
           load(testThread);
         }),
       ).toBeLessThan(20);
@@ -627,10 +711,455 @@ describe("incremental conversation outlines", () => {
     });
   });
 
+  it.each(["collapse", "flat"] as const)(
+    "preserves delegation-separated responses through late lifecycle updates (%s)",
+    (display) => {
+      withTestThread((testThread) => {
+        const delegation = (
+          type: RowSpec["type"],
+          finished: boolean,
+          turnId: string | null,
+        ): RowSpec => ({
+          type,
+          turnId,
+          providerThreadId: PROVIDER_THREAD_ID,
+          itemId: "delegation-call",
+          itemKind: "delegation",
+          data: {
+            item: {
+              type: "delegation",
+              id: "delegation-call",
+              childRef: "delegated-provider",
+              label: "Investigate",
+              status: finished ? "completed" : "pending",
+              background: true,
+            },
+          },
+        });
+
+        appendRows(testThread, [
+          started("delegation-root"),
+          message("delegation-root", "A", undefined, "before-delegation"),
+          delegation("item/started", false, "delegation-root"),
+          message("delegation-root", "B", undefined, "after-delegation"),
+          completed("delegation-root"),
+          ...Array.from({ length: 50 }, (_, index) => [
+            started(`settled-${index}`),
+            message(`settled-${index}`, `Settled ${index}`),
+            completed(`settled-${index}`),
+          ]).flat(),
+          started("live"),
+          message("live", "Live"),
+        ]);
+
+        const expected = [
+          ...(display === "collapse" ? ["B"] : ["A", "B"]),
+          ...Array.from({ length: 50 }, (_, index) => `Settled ${index}`),
+          "Live",
+        ];
+
+        expect(
+          load(testThread, display).items.map((item) => item.preview),
+        ).toEqual(expected);
+        expect(
+          buildThreadConversationOutline(testThread.coldDb, testThread.thread, {
+            completedTurnDisplay: display,
+            includeClearedContextHistory: false,
+            maxSeq: getLatestThreadSequence(testThread.db, {
+              threadId: testThread.thread.id,
+            }),
+          }).items.map((item) => item.preview),
+        ).toEqual(expected);
+
+        for (const update of [
+          delegation("item/delegation/progress", false, null),
+          delegation("item/delegation/completed", true, null),
+        ]) {
+          appendRows(testThread, [update]);
+
+          const count = countSelectedEventRows(testThread.db, () => {
+            expect(
+              load(testThread, display).items.map((item) => item.preview),
+            ).toEqual(expected);
+          });
+
+          expect(count).toBeGreaterThan(0);
+          expect(count).toBeLessThanOrEqual(32);
+        }
+      });
+    },
+  );
+
+  it.each(["collapse", "flat"] as const)(
+    "retains implicit delegation ownership when its distinct provider starts later (%s)",
+    (display) => {
+      withTestThread((testThread) => {
+        appendValidRows(testThread, [
+          started("delegating-root"),
+          {
+            type: "item/started",
+            turnId: "delegating-root",
+            itemId: "implicit-delegation",
+            itemKind: "delegation",
+            data: {
+              item: {
+                type: "delegation",
+                id: "implicit-delegation",
+                childRef: "distinct-child-provider",
+                label: "Investigate",
+                status: "pending",
+                background: true,
+              },
+            },
+          },
+          message("delegating-root", "Parent answer"),
+          completed("delegating-root"),
+          ...Array.from({ length: 50 }, (_, index) => [
+            started(`separate-${index}`),
+            message(`separate-${index}`, `Separate ${index}`),
+            completed(`separate-${index}`),
+          ]).flat(),
+          started("live"),
+        ]);
+
+        const expected = [
+          "Parent answer",
+          ...Array.from({ length: 50 }, (_, index) => `Separate ${index}`),
+        ];
+
+        expect(
+          load(testThread, display).items.map((item) => item.preview),
+        ).toEqual(expected);
+        appendValidRows(testThread, [
+          {
+            ...started("implicit-child"),
+            providerThreadId: "distinct-child-provider",
+          },
+          {
+            ...message("implicit-child", "Private child answer"),
+            providerThreadId: "distinct-child-provider",
+          },
+          {
+            ...completed("implicit-child"),
+            providerThreadId: "distinct-child-provider",
+          },
+        ]);
+
+        const canonical = buildThreadConversationOutline(
+          testThread.coldDb,
+          testThread.thread,
+          {
+            completedTurnDisplay: display,
+            includeClearedContextHistory: false,
+            maxSeq: getLatestThreadSequence(testThread.db, {
+              threadId: testThread.thread.id,
+            }),
+          },
+        );
+
+        expect(canonical.items.map((item) => item.preview)).toEqual(expected);
+
+        const count = countSelectedEventRows(testThread.db, () => {
+          expect(load(testThread, display)).toEqual(canonical);
+        });
+
+        expect(count).toBeGreaterThan(0);
+        expect(count).toBeLessThanOrEqual(32);
+      });
+    },
+  );
+
+  it.each(["collapse", "flat"] as const)(
+    "retains pending same-provider delegation links across accepted roots and checkpoint restoration (%s)",
+    (display) => {
+      withTestThread((testThread) => {
+        const settled = Array.from({ length: 50 }, (_, index) => {
+          const turnId = `accepted-${index}`;
+          const requestId = `creq_${(index + 100).toString(8).replaceAll("0", "a").replaceAll("1", "b").padStart(10, "a")}`;
+
+          return [
+            request(requestId),
+            started(turnId),
+            accepted(requestId, turnId),
+            message(turnId, `Separate ${index}`),
+            completed(turnId),
+          ];
+        }).flat();
+
+        appendValidRows(testThread, [
+          started("pending-owner"),
+          {
+            type: "item/started",
+            turnId: "pending-owner",
+            itemId: "pending-delegation",
+            itemKind: "delegation",
+            data: {
+              item: {
+                type: "delegation",
+                id: "pending-delegation",
+                childRef: PROVIDER_THREAD_ID,
+                label: "Investigate",
+                status: "pending",
+                background: true,
+              },
+            },
+          },
+          message("pending-owner", "Parent answer"),
+          completed("pending-owner"),
+          ...settled,
+          request("creq_zzzzzzzzzz"),
+          started("accepted-live"),
+          accepted("creq_zzzzzzzzzz", "accepted-live"),
+        ]);
+
+        const expected = [
+          "Parent answer",
+          ...Array.from({ length: 50 }, (_, index) => [
+            "User request",
+            `Separate ${index}`,
+          ]).flat(),
+          "User request",
+        ];
+
+        expect(
+          load(testThread, display).items.map((item) => item.preview),
+        ).toEqual(expected);
+
+        const checkpoint = captureConversationOutlineCheckpoint(
+          testThread.db,
+          testThread.thread.id,
+        );
+
+        expect(checkpoint).not.toBeNull();
+        expect(
+          restoreConversationOutlineCheckpoint(
+            testThread.coldDb,
+            testThread.thread.id,
+            JSON.parse(JSON.stringify(checkpoint)),
+          ),
+        ).toBe(true);
+        appendValidRows(testThread, [
+          started("pending-child"),
+          message("pending-child", "Suppressed child answer"),
+          completed("pending-child"),
+        ]);
+
+        const canonical = buildThreadConversationOutline(
+          testThread.coldDb,
+          testThread.thread,
+          {
+            completedTurnDisplay: display,
+            includeClearedContextHistory: false,
+            maxSeq: getLatestThreadSequence(testThread.db, {
+              threadId: testThread.thread.id,
+            }),
+          },
+        );
+
+        expect(canonical.items.map((item) => item.preview)).toEqual(expected);
+        const restoredThread = { ...testThread, db: testThread.coldDb };
+        expect(load(restoredThread, display)).toEqual(canonical);
+        appendValidRows(testThread, [
+          started("after-consumption"),
+          message("after-consumption", "Root after consumed link"),
+          completed("after-consumption"),
+        ]);
+
+        const afterConsumption = buildThreadConversationOutline(
+          testThread.coldDb,
+          testThread.thread,
+          {
+            completedTurnDisplay: display,
+            includeClearedContextHistory: false,
+            maxSeq: getLatestThreadSequence(testThread.db, {
+              threadId: testThread.thread.id,
+            }),
+          },
+        );
+
+        expect(afterConsumption.items.map((item) => item.preview)).toEqual([
+          ...expected,
+          "Root after consumed link",
+        ]);
+
+        const selected = countSelectedEventRows(restoredThread.db, () => {
+          expect(load(restoredThread, display)).toEqual(afterConsumption);
+        });
+
+        expect(selected).toBeGreaterThan(0);
+        expect(selected).toBeLessThanOrEqual(32);
+      });
+    },
+  );
+
+  it("does not retain settled rejected steers in the mutable tail", () => {
+    withTestThread((testThread) => {
+      appendRows(testThread, [
+        ...Array.from({ length: 40 }, (_, index) => {
+          const turnId = `rejected-${index}`;
+          const requestId = `creq_${index.toString(8).replaceAll("0", "a").replaceAll("1", "b").padStart(10, "a")}`;
+
+          return [
+            started(turnId),
+            request(requestId, turnId),
+            {
+              type: "client/turn/rejected" as const,
+              data: {
+                requestId,
+                reason: "command_failed",
+                message: "Rejected steer",
+              },
+            },
+            message(turnId, `Answer ${index}`),
+            completed(turnId),
+          ];
+        }).flat(),
+        started("live"),
+        message("live", "Live"),
+      ]);
+
+      const expected = [
+        ...Array.from({ length: 40 }, (_, index) => [
+          "User request",
+          `Answer ${index}`,
+        ]).flat(),
+        "Live",
+      ];
+
+      expect(
+        load(testThread, "flat").items.map((item) => item.preview),
+      ).toEqual(expected);
+      appendRows(testThread, [
+        message("live", "Live continued", undefined, "continued-message"),
+      ]);
+      expected.push("Live continued");
+      expect(
+        buildThreadConversationOutline(testThread.coldDb, testThread.thread, {
+          completedTurnDisplay: "flat",
+          includeClearedContextHistory: false,
+          maxSeq: getLatestThreadSequence(testThread.db, {
+            threadId: testThread.thread.id,
+          }),
+        }).items.map((item) => item.preview),
+      ).toEqual(expected);
+
+      const count = countSelectedEventRows(testThread.db, () => {
+        expect(
+          load(testThread, "flat").items.map((item) => item.preview),
+        ).toEqual(expected);
+      });
+
+      expect(count).toBeGreaterThan(0);
+      expect(count).toBeLessThanOrEqual(32);
+    });
+  });
+
+  it("resumes a serialized checkpoint on another connection and rejects a rewrite", () => {
+    withTestThread((testThread) => {
+      seed(testThread, 100);
+      appendRows(testThread, [message("live", "Live")]);
+      load(testThread);
+
+      const checkpoint = captureConversationOutlineCheckpoint(
+        testThread.db,
+        testThread.thread.id,
+      );
+
+      expect(checkpoint).not.toBeNull();
+      expect(
+        restoreConversationOutlineCheckpoint(
+          testThread.coldDb,
+          testThread.thread.id,
+          JSON.parse(JSON.stringify(checkpoint)),
+        ),
+      ).toBe(true);
+      appendRows(testThread, [
+        message("live", "Live resumed", undefined, "resumed-message"),
+      ]);
+      expect(
+        buildThreadConversationOutline(testThread.coldDb, testThread.thread, {
+          completedTurnDisplay: "collapse",
+          includeClearedContextHistory: false,
+          maxSeq: getLatestThreadSequence(testThread.db, {
+            threadId: testThread.thread.id,
+          }),
+        })
+          .items.slice(-2)
+          .map((item) => item.preview),
+      ).toEqual(["Live", "Live resumed"]);
+      const resumedThread = { ...testThread, db: testThread.coldDb };
+
+      const selected = countSelectedEventRows(resumedThread.db, () => {
+        expect(load(resumedThread).items.at(-1)).toEqual(
+          expect.objectContaining({
+            role: "assistant",
+            preview: "Live resumed",
+          }),
+        );
+      });
+
+      expect(selected).toBeGreaterThan(0);
+      expect(selected).toBeLessThanOrEqual(32);
+      testThread.db.$client
+        .prepare(
+          "UPDATE events SET data = json_set(data, '$.item.text', 'Rewritten answer') WHERE thread_id = ? AND sequence = 4",
+        )
+        .run(testThread.thread.id);
+      const rewritten = load(resumedThread);
+      expect(rewritten.items[1]).toEqual(
+        expect.objectContaining({
+          role: "assistant",
+          preview: "Rewritten answer",
+        }),
+      );
+      expect(rewritten.items.at(-1)?.preview).toBe("Live resumed");
+    });
+  });
+
+  it("rejects invalid persisted checkpoint ranges and projection payloads", () => {
+    withTestThread((testThread) => {
+      seed(testThread);
+      load(testThread);
+
+      const checkpoint = captureConversationOutlineCheckpoint(
+        testThread.db,
+        testThread.thread.id,
+      );
+
+      expect(checkpoint).not.toBeNull();
+
+      if (checkpoint === null) throw new Error("Expected checkpoint");
+      const invalidRange = structuredClone(checkpoint);
+      invalidRange.fragments[0]!.ranges[0]!.end = checkpoint.maxSeq + 2;
+      expect(
+        restoreConversationOutlineCheckpoint(
+          testThread.coldDb,
+          testThread.thread.id,
+          invalidRange,
+        ),
+      ).toBe(false);
+      expect(
+        restoreConversationOutlineCheckpoint(
+          testThread.coldDb,
+          testThread.thread.id,
+          { ...checkpoint, version: 2 },
+        ),
+      ).toBe(false);
+      expect(
+        restoreConversationOutlineCheckpoint(
+          testThread.coldDb,
+          testThread.thread.id,
+          { ...checkpoint, rawEvents: [] },
+        ),
+      ).toBe(false);
+    });
+  });
+
   it("preserves overlapping turns and pending steers as they complete", () => {
     withTestThread((testThread) => {
       seed(testThread);
       expectMatchesFull(testThread);
+
       for (const rows of [
         [
           request("creq_abcdefghij", "live"),

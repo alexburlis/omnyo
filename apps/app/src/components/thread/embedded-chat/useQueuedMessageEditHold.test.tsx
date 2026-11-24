@@ -2,8 +2,8 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BbHttpError } from "@bb/sdk/browser";
-import { createDeferredPromise } from "@bb/test-helpers";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { useQueuedMessageEditHold } from "./useQueuedMessageEditHold";
 
 const mocks = vi.hoisted(() => ({
@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/sdk", async () => ({
-  BbHttpError: (await import("@bb/sdk/browser")).BbHttpError,
+  OmnyoHttpError: (await import("@omnyo/sdk/browser")).OmnyoHttpError,
   sdk: {
     threads: {
       queuedMessages: {
@@ -45,6 +45,7 @@ describe("useQueuedMessageEditHold", () => {
     const hold = createDeferredPromise<{ leaseMs: number }>();
     mocks.holdForEdit.mockReturnValue(hold.promise);
     const onRejected = vi.fn();
+
     const { rerender } = renderHook(
       ({ queuedMessageId }: HoldProps) =>
         useQueuedMessageEditHold({
@@ -54,6 +55,7 @@ describe("useQueuedMessageEditHold", () => {
         }),
       { initialProps: { queuedMessageId: "qmsg_1" } as HoldProps },
     );
+
     await waitFor(() => {
       expect(mocks.holdForEdit).toHaveBeenCalledWith(target);
     });
@@ -72,7 +74,7 @@ describe("useQueuedMessageEditHold", () => {
 
   it("closes the editor when a dispatch already claimed the message", async () => {
     mocks.holdForEdit.mockRejectedValue(
-      new BbHttpError({
+      new OmnyoHttpError({
         status: 409,
         code: "invalid_request",
         message: "Queued message is already being sent",

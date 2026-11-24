@@ -5,8 +5,28 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)));
+
 const publicDir = join(appDir, "public");
+
 const checkOnly = process.argv.includes("--check");
+
+if (
+  process.argv.includes("--export-base") ||
+  process.argv.includes("--export-all-base")
+) {
+  const { exportOmnyoBaseAssets } =
+    await import("./export-omnyo-base-assets.mjs");
+
+  const scratchIndex = process.argv.indexOf("--scratch-root");
+  await exportOmnyoBaseAssets({
+    root: join(appDir, "..", ".."),
+    selectedFamilies: process.argv.includes("--export-all-base")
+      ? ["root", "browser", "desktop", "mobile", "site"]
+      : ["browser"],
+    checkOnly,
+    scratchRoot: scratchIndex >= 0 ? process.argv[scratchIndex + 1] : undefined,
+  });
+}
 
 const faviconColorValues = {
   red: "#e5484d",
@@ -24,16 +44,10 @@ const icons = [
   "icon-512.png",
   "icon-192-maskable.png",
   "icon-512-maskable.png",
-  // Opaque white tile: iOS renders transparency in touch icons as black,
-  // and the system's dark/tinted home-screen treatments need a full-bleed
-  // opaque source.
+
   "apple-touch-icon.png",
 ];
 
-// Monochrome manifest icons (purpose: "monochrome") are alpha masks — the
-// platform supplies the fill color when tinting (Android themed icons,
-// notification badges) — so a single color-independent asset serves every
-// manifest variant.
 const monochromeIcons = [
   { source: "icon-192.png", target: "icon-monochrome-192.png" },
   { source: "icon-512.png", target: "icon-monochrome-512.png" },
@@ -53,19 +67,23 @@ function outputFileName(file, color) {
 
 function tintTileIcon(data, colorRgb) {
   const output = Buffer.from(data);
+
   for (let index = 0; index < output.length; index += 4) {
     const red = data[index];
     const green = data[index + 1];
     const blue = data[index + 2];
     const alpha = data[index + 3];
+
     if (alpha === 0) continue;
 
     const luma = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+
     if (luma >= 245) continue;
 
     const maskAlpha = Math.round(
       255 * Math.sqrt((245 - luma) / 245) * (alpha / 255),
     );
+
     if (maskAlpha <= 0) continue;
 
     const ratio = maskAlpha / 255;
@@ -74,6 +92,7 @@ function tintTileIcon(data, colorRgb) {
     output[index + 2] = Math.round(colorRgb[2] * ratio + 255 * (1 - ratio));
     output[index + 3] = alpha;
   }
+
   return output;
 }
 
@@ -82,6 +101,7 @@ async function generatedPng(file, hex) {
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
+
   const output = tintTileIcon(data, parseHex(hex));
 
   return sharp(output, {
@@ -111,31 +131,33 @@ function generatedManifest(baseManifest, color) {
   );
 }
 
-// Platforms use only the alpha channel of a monochrome icon as the tint
-// mask, so the glyph's darkness (against the tile's white backing) becomes
-// alpha — the same luma mask tintTileIcon uses to find glyph pixels.
 async function generatedMonochromePng(sourceFile) {
   const { data, info } = await sharp(join(publicDir, sourceFile))
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
+
   const output = Buffer.from(data);
+
   for (let index = 0; index < output.length; index += 4) {
     const luma =
       0.2126 * data[index] +
       0.7152 * data[index + 1] +
       0.0722 * data[index + 2];
+
     const maskAlpha =
       luma >= 245
         ? 0
         : Math.round(
             255 * Math.sqrt((245 - luma) / 245) * (data[index + 3] / 255),
           );
+
     output[index] = 255;
     output[index + 1] = 255;
     output[index + 2] = 255;
     output[index + 3] = maskAlpha;
   }
+
   return sharp(output, {
     raw: { width: info.width, height: info.height, channels: 4 },
   })
@@ -145,17 +167,22 @@ async function generatedMonochromePng(sourceFile) {
 
 async function writeOrCheck(fileName, content) {
   const filePath = join(publicDir, fileName);
+
   const existing = await readFile(filePath).catch((error) => {
     if (error.code === "ENOENT") return null;
     throw error;
   });
+
   if (existing?.equals(content)) return;
+
   if (checkOnly) {
     mismatches.push(fileName);
+
     return;
   }
 
   const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
+
   try {
     await writeFile(temporaryPath, content);
     await rename(temporaryPath, filePath);
@@ -194,7 +221,7 @@ if (mismatches.length > 0) {
     [
       "Generated PWA icon assets are out of date:",
       ...mismatches.map((fileName) => `  ${fileName}`),
-      "Run `pnpm --filter @bb/app generate:pwa-icons`.",
+      "Run `pnpm --filter @omnyo/app generate:pwa-icons`.",
     ].join("\n"),
   );
   process.exitCode = 1;

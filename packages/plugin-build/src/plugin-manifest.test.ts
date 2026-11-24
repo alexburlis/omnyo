@@ -6,6 +6,7 @@ import { validatePluginBuildManifest } from "./plugin-manifest.js";
 
 const SVG =
   '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h4v4z"/></svg>';
+
 const ILLUSTRATOR_SVG = `<?xml version="1.0" encoding="utf-8"?>
 <!-- Generator: Adobe Illustrator 16.0.0, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
@@ -18,7 +19,7 @@ const ILLUSTRATOR_SVG = `<?xml version="1.0" encoding="utf-8"?>
 </svg>
 `;
 
-describe("validatePluginBuildManifest: bb.branding assets", () => {
+describe("validatePluginBuildManifest: omnyo.branding assets", () => {
   const tempDirs: string[] = [];
 
   afterEach(async () => {
@@ -37,19 +38,21 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
       experimental_icons: icons,
     },
   ): Promise<{ dir: string; manifest: unknown }> {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-icons-build-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-icons-build-"));
     tempDirs.push(dir);
     await writeFile(join(dir, "server.ts"), "export default () => {};\n");
+
     for (const [relative, contents] of Object.entries(files)) {
       await mkdir(join(dir, relative, ".."), { recursive: true });
       await writeFile(join(dir, relative), contents);
     }
+
     return {
       dir,
       manifest: {
-        name: "bb-plugin-icons-fixture",
+        name: "omnyo-plugin-icons-fixture",
         version: "0.0.0",
-        bb: {
+        omnyo: {
           name: "Icons fixture",
           description: "Declares icons.",
           branding,
@@ -64,12 +67,14 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
       { receipt: "./icons/receipt.svg" },
       { "icons/receipt.svg": SVG },
     );
+
     const parsed = await validatePluginBuildManifest(
       manifest,
       dir,
       join(dir, "package.json"),
     );
-    expect(parsed.bb.branding.experimental_icons).toEqual({
+
+    expect(parsed.omnyo.branding.experimental_icons).toEqual({
       receipt: "./icons/receipt.svg",
     });
   });
@@ -90,6 +95,7 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
       { receipt: "./icons/receipt.svg" },
       { "icons/receipt.svg/inner.txt": "x" },
     );
+
     await expect(
       validatePluginBuildManifest(
         directory.manifest,
@@ -98,7 +104,10 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
       ),
     ).rejects.toThrow(/experimental_icons\["receipt"\] must point at a file/);
 
-    const outside = await mkdtemp(join(tmpdir(), "bb-plugin-icons-outside-"));
+    const outside = await mkdtemp(
+      join(tmpdir(), "omnyo-plugin-icons-outside-"),
+    );
+
     tempDirs.push(outside);
     await writeFile(join(outside, "mark.svg"), SVG);
     const escaping = await fixture({ mark: "./icons/mark.svg" });
@@ -124,6 +133,7 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
           '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>',
       },
     );
+
     await expect(
       validatePluginBuildManifest(
         scripted.manifest,
@@ -144,6 +154,7 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
       },
       { icon: "Zap", logo: { light: "./logo.svg" } },
     );
+
     await expect(
       validatePluginBuildManifest(
         scriptedLogo.manifest,
@@ -151,7 +162,7 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
         join(scriptedLogo.dir, "package.json"),
       ),
     ).rejects.toThrow(
-      /bb\.branding\.logo\.light \("\.\/logo\.svg"\) must not contain a <script> element/,
+      /omnyo\.branding\.logo\.light \("\.\/logo\.svg"\) must not contain a <script> element/,
     );
 
     const handlerDark = await fixture(
@@ -163,6 +174,7 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
       },
       { icon: "Zap", logo: { light: "./logo.svg", dark: "./logo-dark.svg" } },
     );
+
     await expect(
       validatePluginBuildManifest(
         handlerDark.manifest,
@@ -170,7 +182,7 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
         join(handlerDark.dir, "package.json"),
       ),
     ).rejects.toThrow(
-      /bb\.branding\.logo\.dark \("\.\/logo-dark\.svg"\) must not contain a <path onload> event handler attribute/,
+      /omnyo\.branding\.logo\.dark \("\.\/logo-dark\.svg"\) must not contain a <path onload> event handler attribute/,
     );
 
     const doctypeIcon = await fixture(
@@ -178,6 +190,7 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
       { "icon.svg": ILLUSTRATOR_SVG },
       { icon: "./icon.svg" },
     );
+
     await expect(
       validatePluginBuildManifest(
         doctypeIcon.manifest,
@@ -185,8 +198,9 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
         join(doctypeIcon.dir, "package.json"),
       ),
     ).rejects.toThrow(
-      /bb\.branding\.icon must not contain a doctype declaration/,
+      /omnyo\.branding\.icon must not contain a doctype declaration/,
     );
+
     const externalIcon = await fixture(
       {},
       {
@@ -195,13 +209,14 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
       },
       { icon: "./icon.svg" },
     );
+
     await expect(
       validatePluginBuildManifest(
         externalIcon.manifest,
         externalIcon.dir,
         join(externalIcon.dir, "package.json"),
       ),
-    ).resolves.toMatchObject({ bb: { branding: { icon: "./icon.svg" } } });
+    ).resolves.toMatchObject({ omnyo: { branding: { icon: "./icon.svg" } } });
 
     const artwork = await fixture(
       {},
@@ -211,6 +226,7 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
       },
       { icon: "Zap", logo: { light: "./logo.svg", dark: "./logo-dark.png" } },
     );
+
     await expect(
       validatePluginBuildManifest(
         artwork.manifest,
@@ -218,7 +234,7 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
         join(artwork.dir, "package.json"),
       ),
     ).resolves.toMatchObject({
-      bb: {
+      omnyo: {
         branding: { logo: { light: "./logo.svg", dark: "./logo-dark.png" } },
       },
     });
@@ -228,6 +244,6 @@ describe("validatePluginBuildManifest: bb.branding assets", () => {
     const { dir, manifest } = await fixture({ Receipt: "./icons/r.svg" });
     await expect(
       validatePluginBuildManifest(manifest, dir, join(dir, "package.json")),
-    ).rejects.toThrow(/bb\.branding\.experimental_icons\.Receipt/);
+    ).rejects.toThrow(/omnyo\.branding\.experimental_icons\.Receipt/);
   });
 });

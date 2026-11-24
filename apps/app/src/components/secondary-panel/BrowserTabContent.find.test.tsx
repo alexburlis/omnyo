@@ -7,20 +7,20 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH } from "@bb/desktop-contract";
+import { OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH } from "@omnyo/desktop-contract";
 import type {
-  BbDesktopBrowserApi,
-  BbDesktopBrowserFindInPageRequest,
-  BbDesktopBrowserFindResult,
-  BbDesktopBrowserState,
-  BbDesktopBrowserStopFindInPageRequest,
-} from "@bb/desktop-contract";
-import { defaultAppSettings } from "@bb/domain";
+  OmnyoDesktopBrowserApi,
+  OmnyoDesktopBrowserFindInPageRequest,
+  OmnyoDesktopBrowserFindResult,
+  OmnyoDesktopBrowserState,
+  OmnyoDesktopBrowserStopFindInPageRequest,
+} from "@omnyo/desktop-contract";
+import { defaultAppSettings } from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  createBbDesktopApi,
+  createOmnyoDesktopApi,
   createNoopDesktopBrowserApi,
-} from "@/test/bb-desktop-test-utils";
+} from "@/test/omnyo-desktop-test-utils";
 import { AppCommandProvider } from "@/components/commands/AppCommandProvider";
 import { BrowserTabContent } from "./BrowserTabContent";
 
@@ -61,36 +61,45 @@ const desktopInfo = {
 };
 
 interface FindHarness {
-  api: BbDesktopBrowserApi;
-  emitFindResult: (result: BbDesktopBrowserFindResult) => void;
-  emitState: (state: BbDesktopBrowserState) => void;
+  api: OmnyoDesktopBrowserApi;
+  emitFindResult: (result: OmnyoDesktopBrowserFindResult) => void;
+  emitState: (state: OmnyoDesktopBrowserState) => void;
   findInPage: ReturnType<
-    typeof vi.fn<(r: BbDesktopBrowserFindInPageRequest) => void>
+    typeof vi.fn<(r: OmnyoDesktopBrowserFindInPageRequest) => void>
   >;
   stopFindInPage: ReturnType<
-    typeof vi.fn<(r: BbDesktopBrowserStopFindInPageRequest) => void>
+    typeof vi.fn<(r: OmnyoDesktopBrowserStopFindInPageRequest) => void>
   >;
 }
 
 function createFindHarness(): FindHarness {
-  const stateListeners = new Set<(state: BbDesktopBrowserState) => void>();
-  const findListeners = new Set<(result: BbDesktopBrowserFindResult) => void>();
-  const findInPage = vi.fn<(r: BbDesktopBrowserFindInPageRequest) => void>();
+  const stateListeners = new Set<(state: OmnyoDesktopBrowserState) => void>();
+
+  const findListeners = new Set<
+    (result: OmnyoDesktopBrowserFindResult) => void
+  >();
+
+  const findInPage = vi.fn<(r: OmnyoDesktopBrowserFindInPageRequest) => void>();
+
   const stopFindInPage =
-    vi.fn<(r: BbDesktopBrowserStopFindInPageRequest) => void>();
-  const api: BbDesktopBrowserApi = {
+    vi.fn<(r: OmnyoDesktopBrowserStopFindInPageRequest) => void>();
+
+  const api: OmnyoDesktopBrowserApi = {
     ...createNoopDesktopBrowserApi(),
     onState(listener) {
       stateListeners.add(listener);
+
       return () => stateListeners.delete(listener);
     },
     findInPage,
     stopFindInPage,
     onFindResult(listener) {
       findListeners.add(listener);
+
       return () => findListeners.delete(listener);
     },
   };
+
   return {
     api,
     emitFindResult(result) {
@@ -105,8 +114,8 @@ function createFindHarness(): FindHarness {
 }
 
 function findResult(
-  overrides: Partial<BbDesktopBrowserFindResult> = {},
-): BbDesktopBrowserFindResult {
+  overrides: Partial<OmnyoDesktopBrowserFindResult> = {},
+): OmnyoDesktopBrowserFindResult {
   return {
     tabId: "browser:test",
     requestId: 1,
@@ -118,8 +127,8 @@ function findResult(
 }
 
 function browserState(
-  overrides: Partial<BbDesktopBrowserState> = {},
-): BbDesktopBrowserState {
+  overrides: Partial<OmnyoDesktopBrowserState> = {},
+): OmnyoDesktopBrowserState {
   return {
     tabId: "browser:test",
     url: "https://example.com/docs",
@@ -133,7 +142,8 @@ function browserState(
 }
 
 function renderBrowser(harness: FindHarness, initialUrl: string) {
-  window.bbDesktop = createBbDesktopApi(desktopInfo, harness.api);
+  window.omnyoDesktop = createOmnyoDesktopApi(desktopInfo, harness.api);
+
   return render(
     <AppCommandProvider>
       <BrowserTabContent
@@ -164,7 +174,7 @@ describe("BrowserTabContent find in page", () => {
     cleanup();
     vi.restoreAllMocks();
     window.localStorage.clear();
-    delete window.bbDesktop;
+    delete window.omnyoDesktop;
   });
 
   it("opens the find bar from the chord only while the browser pane has focus", () => {
@@ -299,14 +309,19 @@ describe("BrowserTabContent find in page", () => {
     const harness = createFindHarness();
     renderBrowser(harness, "https://example.com/docs");
     pressFindChord(screen.getByLabelText(/Address and search bar/));
-    expect(findInput().maxLength).toBe(BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH);
+    expect(findInput().maxLength).toBe(
+      OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH,
+    );
 
-    const oversized = "a".repeat(BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH + 10);
+    const oversized = "a".repeat(
+      OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH + 10,
+    );
+
     fireEvent.change(findInput(), { target: { value: oversized } });
     const sent = harness.findInPage.mock.lastCall?.[0];
-    expect(sent?.text).toHaveLength(BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH);
+    expect(sent?.text).toHaveLength(OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH);
     expect(findInput().value).toHaveLength(
-      BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH,
+      OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH,
     );
   });
 

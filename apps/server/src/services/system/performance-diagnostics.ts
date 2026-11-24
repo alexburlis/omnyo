@@ -1,8 +1,14 @@
-import { getExperiments, type DbConnection } from "@bb/db";
-import { startPerformanceDiagnostics } from "@bb/process-utils";
+import { getExperiments, type DbConnection } from "@omnyo/db";
+import { startPerformanceDiagnostics } from "@omnyo/process-utils";
 import type { ServerLogger } from "../../types.js";
 import type { NotificationHub } from "../../ws/hub.js";
 import { runEventLoopWorkSync } from "./event-loop-work.js";
+
+const activeGates = new WeakMap<DbConnection, () => boolean>();
+
+export function isPerformanceDiagnosticsEnabled(db: DbConnection): boolean {
+  return activeGates.get(db)?.() === true;
+}
 
 export async function startGatedPerformanceDiagnostics(options: {
   allowed: boolean;
@@ -13,9 +19,13 @@ export async function startGatedPerformanceDiagnostics(options: {
 }): Promise<{ isEnabled: () => boolean; stop: () => Promise<void> }> {
   let enabled = false;
   let stopped = false;
+  activeGates.set(options.db, () => enabled);
+
   let recorder: Awaited<ReturnType<typeof startPerformanceDiagnostics>> | null =
     null;
+
   let pending = Promise.resolve();
+
   const refresh = (): Promise<void> => {
     enabled =
       !stopped &&
@@ -30,6 +40,7 @@ export async function startGatedPerformanceDiagnostics(options: {
             runSynchronousWork: runEventLoopWorkSync,
           });
         }
+
         if (!enabled && recorder !== null) {
           await recorder.stop();
           recorder = null;
@@ -42,8 +53,10 @@ export async function startGatedPerformanceDiagnostics(options: {
           "Could not update server performance diagnostics",
         );
       });
+
     return pending;
   };
+
   const unsubscribe = options.allowed
     ? options.hub.onChangedMessage((message) => {
         if (
@@ -53,12 +66,15 @@ export async function startGatedPerformanceDiagnostics(options: {
           void refresh();
       })
     : () => {};
+
   await refresh();
+
   return {
     isEnabled: () => enabled,
     stop: () => {
       stopped = true;
       unsubscribe();
+
       return refresh();
     },
   };

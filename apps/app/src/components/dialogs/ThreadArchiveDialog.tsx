@@ -1,6 +1,6 @@
 import { useRef } from "react";
-import type { Thread } from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
+import type { Thread } from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
@@ -8,8 +8,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
+} from "@omnyo/shared-ui/dialog";
 import { formatChildThreadCount } from "@/lib/child-thread-copy";
+
+const INSTANT_CLOSE_CLASS_NAME = "data-[state=closed]:animate-none!";
 
 export interface ThreadArchiveDialogTarget {
   thread: Thread;
@@ -18,14 +20,14 @@ export interface ThreadArchiveDialogTarget {
 
 interface ThreadArchiveDialogProps {
   target: ThreadArchiveDialogTarget | null;
-  pending: boolean;
+  pending?: boolean;
   onOpenChange: (open: boolean) => void;
   onArchive: (target: ThreadArchiveDialogTarget) => void;
 }
 
 export function ThreadArchiveDialog({
   target,
-  pending,
+  pending = false,
   onOpenChange,
   onArchive,
 }: ThreadArchiveDialogProps) {
@@ -35,6 +37,8 @@ export function ThreadArchiveDialog({
     <Dialog open={target !== null} onOpenChange={onOpenChange}>
       <DialogContent
         ref={contentRef}
+        className={INSTANT_CLOSE_CLASS_NAME}
+        overlayClassName={INSTANT_CLOSE_CLASS_NAME}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           contentRef.current
@@ -69,6 +73,7 @@ export function ThreadArchiveDialogContent({
   onArchive,
 }: ThreadArchiveDialogContentProps) {
   const { childThreadCount } = target;
+
   const active =
     target.thread.status === "starting" ||
     target.thread.status === "active" ||
@@ -79,6 +84,7 @@ export function ThreadArchiveDialogContent({
       className="grid gap-4"
       onSubmit={(event) => {
         event.preventDefault();
+
         if (!pending) {
           onArchive(target);
         }

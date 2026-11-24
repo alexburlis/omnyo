@@ -1,4 +1,4 @@
-import type { DesktopSession } from "@bb/connect-client";
+import type { DesktopSession } from "@omnyo/connect-client";
 import { QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -35,7 +35,7 @@ const direct: DirectServerProfile = {
 const connect: ConnectServerProfile = {
   id: "c1",
   mode: "connect",
-  serverUrl: "https://bee.getbb.app",
+  serverUrl: "https://bee.example.test",
   label: "bee",
   handle: "bee",
   credential: "bbcm_one",
@@ -46,10 +46,12 @@ function fakeAppState(): AppStateLike & {
   emit(state: AppStateStatusLike): void;
 } {
   const handlers = new Set<(state: AppStateStatusLike) => void>();
+
   return {
     currentState: "active",
     addEventListener(_type, handler) {
       handlers.add(handler);
+
       return {
         remove: () => {
           handlers.delete(handler);
@@ -70,28 +72,37 @@ interface SetupOptions {
 
 function setup(options: SetupOptions = {}) {
   const sockets = createFakeSocketFactory();
+
   const socketFactory: RealtimeSocketFactory = (url) => {
     const socket = sockets(url);
     options.onSocket?.(sockets.latest());
+
     return socket;
   };
+
   const fetchResponses: Response[] = [];
   const fetchCalls = { count: 0 };
+
   const registry = createProfileClientRegistry({
     sdk: {
       fetch: async () => {
         fetchCalls.count += 1;
         const next = fetchResponses.shift() ?? options.fallbackResponse?.();
+
         if (!next) throw new TypeError("Network request failed");
+
         return next;
       },
       realtime: { socketFactory, onInvalidMessage: () => {} },
     },
   });
+
   const appState = fakeAppState();
   const fetchSession = vi.fn<() => Promise<DesktopSession>>();
   const schedulers: ReturnType<typeof createSessionScheduler>[] = [];
+
   const connector = createActiveProfileConnector({
+    isSupportedRelay: () => true,
     registry,
     appState,
     createSessionScheduler: () => {
@@ -104,15 +115,19 @@ function setup(options: SetupOptions = {}) {
         },
         fetchSession,
       });
+
       schedulers.push(scheduler);
+
       return scheduler;
     },
   });
+
   const changes: string[] = [];
   connector.subscribe(() => {
     const snap = connector.getSnapshot();
     changes.push(snap ? `${snap.profile.id}:${snap.session.status}` : "none");
   });
+
   return {
     sockets,
     registry,
@@ -135,9 +150,9 @@ function signInPage(): Response {
 function sessionCookie(value: string): DesktopSession {
   return {
     cookie: {
-      name: "bb_desktop_session",
+      name: "omnyo_desktop_session",
       value,
-      domain: ".getbb.app",
+      domain: ".example.test",
       expiresAt: Date.now() + 3_600_000,
     },
   };
@@ -206,6 +221,7 @@ describe("createActiveProfileConnector", () => {
   it("opens the socket for a connect profile only once the session is installed", async () => {
     const { sockets, fetchSession, connector } = setup();
     let resolveSession: (session: DesktopSession) => void = () => {};
+
     fetchSession.mockImplementation(
       () =>
         new Promise<DesktopSession>((resolve) => {
@@ -219,25 +235,25 @@ describe("createActiveProfileConnector", () => {
 
     resolveSession({
       cookie: {
-        name: "bb_desktop_session",
+        name: "omnyo_desktop_session",
         value: "s",
-        domain: ".getbb.app",
+        domain: ".example.test",
         expiresAt: Date.now() + 3_600_000,
       },
     });
     await flush();
     expect(connector.getSnapshot()?.session.status).toBe("authenticated");
     expect(sockets.sockets).toHaveLength(1);
-    expect(sockets.latest().url).toBe("wss://bee.getbb.app/ws");
+    expect(sockets.latest().url).toBe("wss://bee.example.test/ws");
   });
 
   it("closes the socket and stops when the credential is rejected, and rebuilds on a new credential", async () => {
     const { sockets, fetchSession, schedulers, connector } = setup();
     fetchSession.mockResolvedValueOnce({
       cookie: {
-        name: "bb_desktop_session",
+        name: "omnyo_desktop_session",
         value: "s",
-        domain: ".getbb.app",
+        domain: ".example.test",
         expiresAt: Date.now() + 3_600_000,
       },
     });
@@ -256,9 +272,9 @@ describe("createActiveProfileConnector", () => {
 
     fetchSession.mockResolvedValueOnce({
       cookie: {
-        name: "bb_desktop_session",
+        name: "omnyo_desktop_session",
         value: "s2",
-        domain: ".getbb.app",
+        domain: ".example.test",
         expiresAt: Date.now() + 3_600_000,
       },
     });
@@ -307,6 +323,7 @@ describe("createActiveProfileConnector", () => {
   it("verifies the session on a 401 from an API call and throttles plain connection failures", async () => {
     const { sockets, fetchSession, fetchResponses, connector, registry } =
       setup();
+
     fetchSession.mockResolvedValueOnce(sessionCookie("s1"));
     connector.activate(connect);
     await flush();
@@ -352,7 +369,9 @@ describe("createActiveProfileConnector", () => {
   it("refetches queries that raced the first mint once the cookie is installed, without minting again", async () => {
     const { sockets, fetchSession, fetchResponses, connector, registry } =
       setup();
+
     let resolveSession: (session: DesktopSession) => void = () => {};
+
     fetchSession.mockImplementation(
       () =>
         new Promise<DesktopSession>((resolve) => {
@@ -369,14 +388,18 @@ describe("createActiveProfileConnector", () => {
         headers: { "content-type": "text/html" },
       }),
     );
+
     const observer = new QueryObserver(client.queryClient, {
       queryKey: ["system-config"],
       queryFn: () => client.sdk.system.config(),
     });
+
     const results: string[] = [];
+
     const unsubscribe = observer.subscribe((result) => {
       results.push(result.status);
     });
+
     await vi.advanceTimersByTimeAsync(0);
     expect(observer.getCurrentResult().status).toBe("error");
     expect(fetchSession).toHaveBeenCalledTimes(1);
@@ -411,10 +434,12 @@ describe("createActiveProfileConnector", () => {
         headers: { "content-type": "text/html" },
       }),
     );
+
     const observer = new QueryObserver(client.queryClient, {
       queryKey: ["system-config"],
       queryFn: () => client.sdk.system.config(),
     });
+
     const unsubscribe = observer.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(observer.getCurrentResult().status).toBe("error");
@@ -440,6 +465,7 @@ describe("createActiveProfileConnector", () => {
         session: sessionCookie("restored"),
       },
     });
+
     connector.activate(connect);
     await flush();
     const client = registry.getClientForProfile(connect);
@@ -464,6 +490,7 @@ describe("createActiveProfileConnector", () => {
 
   it("stops re-minting after a few cycles when the gate keeps refusing freshly minted sessions, reports an error, and recovers after the cooldown", async () => {
     let gateRefuses = true;
+
     const { sockets, fetchSession, fetchCalls, connector, registry } = setup({
       fallbackResponse: () =>
         gateRefuses
@@ -482,6 +509,7 @@ describe("createActiveProfileConnector", () => {
         }, 0);
       },
     });
+
     fetchSession.mockImplementation(
       () =>
         new Promise<DesktopSession>((resolve) => {
@@ -490,10 +518,12 @@ describe("createActiveProfileConnector", () => {
     );
     connector.activate(connect);
     const client = registry.getClientForProfile(connect);
+
     const observer = new QueryObserver(client.queryClient, {
       queryKey: ["system-config"],
       queryFn: () => client.sdk.system.config(),
     });
+
     const unsubscribe = observer.subscribe(() => {});
 
     await vi.advanceTimersByTimeAsync(AUTH_FAILURE_BREAKER_COOLDOWN_MS);
@@ -504,6 +534,7 @@ describe("createActiveProfileConnector", () => {
     expect(fetchCalls.count).toBeLessThan(60);
     const tripped = connector.getSnapshot()?.session;
     expect(tripped?.status).toBe("error");
+
     if (tripped?.status !== "error") throw new Error("unreachable");
     expect(tripped.retryAt).toBeGreaterThan(Date.now());
     expect(observer.getCurrentResult().status).toBe("error");
@@ -546,6 +577,7 @@ describe("createActiveProfileConnector", () => {
   it("ignores late session events from a profile the user already left", async () => {
     const { sockets, fetchSession, connector } = setup();
     let resolveSession: (session: DesktopSession) => void = () => {};
+
     fetchSession.mockImplementation(
       () =>
         new Promise<DesktopSession>((resolve) => {
@@ -559,9 +591,9 @@ describe("createActiveProfileConnector", () => {
 
     resolveSession({
       cookie: {
-        name: "bb_desktop_session",
+        name: "omnyo_desktop_session",
         value: "s",
-        domain: ".getbb.app",
+        domain: ".example.test",
         expiresAt: Date.now() + 3_600_000,
       },
     });
@@ -569,5 +601,82 @@ describe("createActiveProfileConnector", () => {
     expect(sockets.sockets).toHaveLength(1);
     expect(connector.getSnapshot()?.profile.id).toBe(direct.id);
     expect(connector.getSnapshot()?.session).toEqual({ status: "idle" });
+  });
+
+  it("re-mints when the WebView hits the relay sign-in redirect, even right after a mint", async () => {
+    const { fetchSession, connector } = setup();
+    fetchSession.mockResolvedValue(sessionCookie("s"));
+    connector.activate(connect);
+    await flush();
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    const first = connector.getSnapshot()?.session;
+
+    connector.reportShellAuthFailure(connect.id);
+    await settle();
+    await flush();
+    expect(fetchSession).toHaveBeenCalledTimes(2);
+    const renewed = connector.getSnapshot()?.session;
+    expect(renewed).toMatchObject({ status: "authenticated", restored: false });
+    expect(renewed).not.toBe(first);
+  });
+
+  it("ignores WebView sign-in reports for a profile that is not the active relay profile", async () => {
+    const { fetchSession, connector } = setup();
+    fetchSession.mockResolvedValue(sessionCookie("s"));
+    connector.activate(connect);
+    await flush();
+
+    connector.reportShellAuthFailure("another-profile");
+    await settle();
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+
+    connector.activate(direct);
+    connector.reportShellAuthFailure(connect.id);
+    connector.reportShellAuthFailure(direct.id);
+    await settle();
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    expect(connector.getSnapshot()?.session).toEqual({ status: "idle" });
+  });
+
+  it("shows the breaker error when the relay keeps redirecting freshly minted sessions", async () => {
+    const { fetchSession, connector } = setup();
+    fetchSession.mockResolvedValue(sessionCookie("s"));
+    connector.activate(connect);
+    await flush();
+
+    for (let i = 0; i < AUTH_FAILURE_MAX_REMINTS; i += 1) {
+      connector.reportShellAuthFailure(connect.id);
+      await settle();
+      await flush();
+    }
+
+    expect(fetchSession).toHaveBeenCalledTimes(1 + AUTH_FAILURE_MAX_REMINTS);
+    connector.reportShellAuthFailure(connect.id);
+    await settle();
+    expect(fetchSession).toHaveBeenCalledTimes(1 + AUTH_FAILURE_MAX_REMINTS);
+    expect(connector.getSnapshot()?.session).toMatchObject({
+      status: "error",
+      detail: expect.stringContaining("keeps rejecting"),
+    });
+  });
+
+  it("renews the active relay session on request and leaves other profiles alone", async () => {
+    const { fetchSession, connector } = setup();
+    fetchSession.mockResolvedValue(sessionCookie("s"));
+    connector.activate(connect);
+    await flush();
+    const first = connector.getSnapshot()?.session;
+
+    await connector.renewSession(connect.id);
+    expect(fetchSession).toHaveBeenCalledTimes(2);
+    const renewed = connector.getSnapshot()?.session;
+    expect(renewed).toMatchObject({ status: "authenticated", restored: false });
+    expect(renewed).not.toBe(first);
+
+    await connector.renewSession("another-profile");
+    connector.activate(direct);
+    await connector.renewSession(direct.id);
+    await connector.renewSession(connect.id);
+    expect(fetchSession).toHaveBeenCalledTimes(2);
   });
 });

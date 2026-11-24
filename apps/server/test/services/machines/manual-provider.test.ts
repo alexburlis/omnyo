@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { defaultAppSettings } from "@bb/domain";
-import { getHost, openSession, setAppSettings } from "@bb/db";
+import { defaultAppSettings } from "@omnyo/domain";
+import { getHost, openSession, setAppSettings } from "@omnyo/db";
 import { withTestHarness } from "../../helpers/test-app.js";
 import { seedHost, seedPrimaryHost } from "../../helpers/seed.js";
 
@@ -13,6 +13,7 @@ it("creates, enrolls, and removes a manual machine by host id", async () => {
       defaultMachineAccess: "direct",
       machineServerUrl: "https://machine.example.test",
     });
+
     const response = await harness.app.request("/api/v1/hosts", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -22,6 +23,7 @@ it("creates, enrolls, and removes a manual machine by host id", async () => {
         inputs: null,
       }),
     });
+
     expect(response.status).toBe(201);
     const created = (await response.json()) as { id: string };
     await vi.waitFor(() =>
@@ -30,17 +32,22 @@ it("creates, enrolls, and removes a manual machine by host id", async () => {
         statusMessage: "Run the enrollment command shown below",
       }),
     );
+
     const commandResponse = await harness.app.request(
       `/api/v1/hosts/${created.id}/enrollment-command`,
     );
+
     expect(commandResponse.status).toBe(200);
+
     const enrollment = (await commandResponse.json()) as {
       command: string;
       expiresAt: number;
     };
+
     const credential = enrollment.command.match(
-      /X-BB-Enrollment: ([^']+)/u,
+      /X-Omnyo-Enrollment: ([^']+)/u,
     )?.[1];
+
     expect(credential).toBeTruthy();
     expect(JSON.stringify(getHost(harness.db, created.id))).not.toContain(
       credential,
@@ -50,6 +57,7 @@ it("creates, enrolls, and removes a manual machine by host id", async () => {
       hostId: created.id,
       token: credential!,
     });
+
     expect(enrolled).not.toBeNull();
     openSession(harness.db, {
       hostId: created.id,
@@ -84,6 +92,7 @@ it("creates, enrolls, and removes a manual machine by host id", async () => {
     const removed = await harness.app.request(`/api/v1/hosts/${created.id}`, {
       method: "DELETE",
     });
+
     expect({
       status: removed.status,
       body: await removed.clone().json(),

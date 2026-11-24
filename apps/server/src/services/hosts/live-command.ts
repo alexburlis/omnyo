@@ -1,11 +1,12 @@
-import { getEnvironment } from "@bb/db";
+import { providerFailureMetadataSchema } from "@omnyo/domain";
+import { getEnvironment } from "@omnyo/db";
 import { resolveHostEnvironment } from "./host-environment.js";
 import { randomUUID } from "node:crypto";
 import {
   type HostDaemonCommand,
   type HostDaemonCommandResult,
   type HostDaemonSettledCommandType,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { ApiError } from "../../errors.js";
 import {
   buildCommandResultSettlementDeps,
@@ -112,6 +113,7 @@ function commandFailureCode(error: Error): string {
   if (error instanceof ApiError) {
     return error.body.code;
   }
+
   return "live_command_failed";
 }
 
@@ -134,10 +136,15 @@ export function expectedLiveHostCommandErrorLogFields(
 ): ExpectedLiveHostCommandErrorLogFields | null {
   if (
     !(error instanceof ApiError) ||
-    !EXPECTED_LIVE_HOST_COMMAND_ERROR_CODES.has(error.body.code)
+    (!EXPECTED_LIVE_HOST_COMMAND_ERROR_CODES.has(error.body.code) &&
+      providerFailureMetadataSchema.safeParse(error.body.details).data
+        ?.expectedFailure !== true &&
+      providerFailureMetadataSchema.safeParse(error.body.details).data
+        ?.errorInfo?.category !== "rate-limit")
   ) {
     return null;
   }
+
   return {
     errorCode: error.body.code,
     errorMessage: error.body.message,
@@ -157,6 +164,9 @@ export function buildLiveHostCommandFailureReport<
     ok: false,
     errorCode: commandFailureCode(args.error),
     errorMessage: args.error.message,
+    ...(args.error instanceof ApiError
+      ? providerFailureMetadataSchema.safeParse(args.error.body.details).data
+      : undefined),
   };
 }
 
@@ -190,6 +200,7 @@ export async function runLiveHostCommandSettlement(
   ) => CommandResultSideEffectsResult,
 ): Promise<void> {
   const notificationBuffer = new NotificationBuffer();
+
   const sideEffects = deps.db.transaction(
     (tx) =>
       settle(
@@ -201,6 +212,7 @@ export async function runLiveHostCommandSettlement(
       ),
     { behavior: "immediate" },
   );
+
   notificationBuffer.flushInto(deps.hub);
   await runPostCommitActions(deps, sideEffects.postCommitActions);
 }
@@ -234,9 +246,11 @@ export async function runLiveHostCommand<
 ): Promise<HostDaemonCommandResult<TType>> {
   const execution =
     args.execution ?? createLiveHostCommandExecution(args.hostId);
+
   try {
     const call = callHostOnlineRpcForWork;
     const sourceCommand: HostDaemonCommand = args.command;
+
     const command = {
       ...args.command,
       ...(sourceCommand.type === "environment.attach"
@@ -253,12 +267,15 @@ export async function runLiveHostCommand<
           }
         : {}),
     };
+
     noteTurnTraceCommandSent({ command: sourceCommand, hostId: args.hostId });
+
     const result = await call(deps, {
       command,
       hostId: args.hostId,
       timeoutMs: args.timeoutMs,
     });
+
     noteTurnTraceCommandSettled({ command: sourceCommand, result });
     await applyLiveHostCommandReport(deps, {
       command: args.command,
@@ -270,23 +287,28 @@ export async function runLiveHostCommand<
         result,
       }),
     });
+
     return result;
   } catch (error) {
     const normalized =
       error instanceof Error ? error : new Error(String(error));
+
     noteTurnTraceCommandFailed(args.command);
+
     if (
       args.preserveOnHostUnavailable === true &&
       isHostUnavailableApiError(normalized)
     ) {
       throw normalized;
     }
+
     const failureReport = buildLiveHostCommandFailureReport({
       command: args.command,
       completedAt: Date.now(),
       error: normalized,
       execution,
     });
+
     try {
       await applyLiveHostCommandReport(deps, {
         command: args.command,
@@ -303,6 +325,7 @@ export async function runLiveHostCommand<
         "Live command failure settlement failed",
       );
     }
+
     throw normalized;
   }
 }
@@ -315,18 +338,22 @@ export function startLiveHostCommand<
 ): void {
   const execution =
     args.execution ?? createLiveHostCommandExecution(args.hostId);
+
   void runLiveHostCommand(deps, { ...args, execution })
     .catch((error) => {
       const normalized =
         error instanceof Error ? error : new Error(String(error));
+
       const handlerArgs: LiveHostCommandErrorHandlerArgs<TType> = {
         command: args.command,
         error: normalized,
         execution,
         hostId: args.hostId,
       };
+
       const expectedErrorFields =
         expectedLiveHostCommandErrorLogFields(normalized);
+
       if (expectedErrorFields !== null) {
         deps.logger.debug(
           {
@@ -335,8 +362,10 @@ export function startLiveHostCommand<
           },
           "Expected live host command failure",
         );
+
         return;
       }
+
       args.onError?.(handlerArgs);
     })
     .finally(async () => {

@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
-import type { PromptTextMention } from "@bb/domain";
-import type { ComposerEditorState } from "@get-bb/plugin-sdk/internal/composer-handle";
+import type { PromptTextMention } from "@omnyo/domain";
+import type { ComposerEditorState } from "@omnyo/plugin-sdk/internal/composer-handle";
 import type { PluginComposerHost } from "@/components/plugin/plugin-composer-host";
 import { createKeyedListeners } from "./keyed-listeners";
 
@@ -20,13 +20,17 @@ export interface ComposerEditorBridge {
 }
 
 const bridgesByKey = new Map<string, ComposerEditorBridge>();
+
 const bridgeListeners = createKeyedListeners<string>();
+
 const bridgeListListeners = new Set<() => void>();
+
 let bridgeList: readonly ComposerEditorBridge[] = [];
 
 function notifyBridge(key: string): void {
   bridgeList = [...bridgesByKey.values()];
   bridgeListeners.notify(key);
+
   for (const listener of [...bridgeListListeners]) listener();
 }
 
@@ -69,6 +73,7 @@ export function subscribeComposerEditorBridges(
   listener: () => void,
 ): () => void {
   bridgeListListeners.add(listener);
+
   return () => {
     bridgeListListeners.delete(listener);
   };
@@ -81,6 +86,8 @@ export function useComposerEditorBridge(
     (listener: () => void) => subscribeComposerEditorBridge(key, listener),
     [key],
   );
+
   const getSnapshot = useCallback(() => getComposerEditorBridge(key), [key]);
+
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

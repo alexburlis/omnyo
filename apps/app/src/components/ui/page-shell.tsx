@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { BottomAnchoredScrollBody } from "./bottom-anchored-scroll-body.js";
 import { PAGE_SHELL_CONTENT_STYLE } from "./page-shell-content-style.js";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { OverflowFade } from "./overflow-fade.js";
 
 type PageShellScrollBehavior = "bottom-anchor" | "static";
@@ -19,34 +19,56 @@ interface PageShellBaseProps {
 
 interface PageShellProps extends PageShellBaseProps {
   scrollBehavior?: PageShellScrollBehavior;
-  scrollAnchorThreadId?: string;
-}
-
-interface FooterRenderOptions {
-  maxWidthClassName: string;
-  footerClassName?: string;
+  animateFollowLatest?: boolean;
 }
 
 const SHELL_BLEED_CLASS =
   "-mx-4 -mt-4 flex h-full min-h-0 flex-1 flex-col overflow-hidden md:-mx-5 md:-mt-5";
+
 const DEFAULT_MAX_WIDTH_CLASS = "max-w-[760px]";
 
-function renderStaticFooter(
-  footer: ReactNode,
-  { maxWidthClassName, footerClassName }: FooterRenderOptions,
-) {
-  if (!footer) return null;
+export const THREAD_TIMELINE_SHELL_PROPS = {
+  shellClassName: "!mx-0 !mt-0 md:!mx-0 md:!mt-0",
+  scrollAreaClassName: "scroll-pt-4",
+  contentClassName: "gap-2 pt-4",
+  footerClassName: "chat-prompt-box",
+} as const satisfies Pick<
+  PageShellProps,
+  | "shellClassName"
+  | "scrollAreaClassName"
+  | "contentClassName"
+  | "footerClassName"
+>;
+
+export function threadPageFrameClassName(isBoundedPane: boolean): string {
+  return cn(
+    "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-clip",
+    !isBoundedPane && "-mx-4 -mb-4 -mt-4 md:-mx-5 md:-mb-5 md:-mt-5",
+  );
+}
+
+export function PageShellFooter({
+  children,
+  footerClassName,
+  maxWidthClassName = DEFAULT_MAX_WIDTH_CLASS,
+}: {
+  children: ReactNode;
+  footerClassName?: string;
+  maxWidthClassName?: string;
+}) {
+  if (!children) return null;
+
   return (
     <div className="relative shrink-0 bg-background">
       <OverflowFade placement="above" tone="background" />
       <div
         className={cn(
-          "mx-auto w-full px-4 pb-4",
+          "mx-auto w-full px-4 pb-4 max-md:px-3 max-md:pb-2",
           maxWidthClassName,
           footerClassName,
         )}
       >
-        {footer}
+        {children}
       </div>
     </div>
   );
@@ -62,12 +84,16 @@ export function PageShell({
   footerClassName,
   maxWidthClassName = DEFAULT_MAX_WIDTH_CLASS,
   scrollBehavior = "static",
-  scrollAnchorThreadId,
+  animateFollowLatest,
 }: PageShellProps) {
-  const staticFooter = renderStaticFooter(footer, {
-    maxWidthClassName,
-    footerClassName,
-  });
+  const staticFooter = footer ? (
+    <PageShellFooter
+      footerClassName={footerClassName}
+      maxWidthClassName={maxWidthClassName}
+    >
+      {footer}
+    </PageShellFooter>
+  ) : null;
 
   if (scrollBehavior === "bottom-anchor") {
     return (
@@ -78,7 +104,7 @@ export function PageShell({
           maxWidthClassName={maxWidthClassName}
           footer={staticFooter}
           scrollOverlay={scrollOverlay}
-          scrollAnchorThreadId={scrollAnchorThreadId}
+          animateFollowLatest={animateFollowLatest}
         >
           {children}
         </BottomAnchoredScrollBody>

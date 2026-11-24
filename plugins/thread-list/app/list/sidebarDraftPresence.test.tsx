@@ -8,7 +8,7 @@ const draftIds = vi.hoisted(() => ({
   current: new Set<string>() as ReadonlySet<string>,
 }));
 
-vi.mock("@get-bb/plugin-sdk/app", () => ({
+vi.mock("@omnyo/plugin-sdk/app", () => ({
   useSidebarThreadDraftIds: () => draftIds.current,
 }));
 
@@ -26,6 +26,7 @@ const CollapsedRowProbe = memo(function CollapsedRowProbe({
 }) {
   renderCounts.set(id, (renderCounts.get(id) ?? 0) + 1);
   const hasDraft = useThreadsHaveDraft(threadIds);
+
   return <span data-testid={id}>{hasDraft ? "draft" : "none"}</span>;
 });
 
@@ -64,9 +65,11 @@ describe("sidebar draft presence", () => {
 
     expect(screen.getByTestId("row_7").textContent).toBe("draft");
     expect(screen.getByTestId("row_8").textContent).toBe("none");
+
     const rowsRenderedByDraft = [...renderCounts].filter(
       ([id, count]) => count > (initialCounts.get(id) ?? 0),
     );
+
     expect(rowsRenderedByDraft.map(([id]) => id)).toEqual(["row_7"]);
   });
 
@@ -83,6 +86,7 @@ describe("sidebar draft presence", () => {
 
   it("keeps the dots while another sidebar list is still mounted", () => {
     draftIds.current = new Set(["thr_child_5"]);
+
     function TwoLists({ withSecond }: { withSecond: boolean }) {
       return (
         <>
@@ -91,6 +95,7 @@ describe("sidebar draft presence", () => {
         </>
       );
     }
+
     const view = render(<TwoLists withSecond />);
     expect(screen.getByTestId("row_5").textContent).toBe("draft");
     const rowRendersBefore = renderCounts.get("row_5");

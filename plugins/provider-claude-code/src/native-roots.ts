@@ -1,11 +1,11 @@
 import path from "node:path";
-import type { PluginProviderDeclaration } from "@get-bb/plugin-sdk";
+import type { PluginProviderDeclaration } from "@omnyo/plugin-sdk";
 import {
   experimental_filterResolvedNativeRoots,
   experimental_resolveClaudePluginRoots,
   type ExperimentalClaudePluginRootsArgs,
   type ExperimentalVendorPluginRoots,
-} from "@get-bb/plugin-sdk/host";
+} from "@omnyo/plugin-sdk/host";
 
 export const CLAUDE_NATIVE_ROOTS_DECLARATION: Pick<
   PluginProviderDeclaration,
@@ -14,9 +14,6 @@ export const CLAUDE_NATIVE_ROOTS_DECLARATION: Pick<
   | "experimental_resolvesNativeRoots"
 > = {
   experimental_nativeSkillRoots: {
-    user: [
-      { path: ".claude/skills", skipIfManifest: ".claude-plugin/plugin.json" },
-    ],
     project: [
       {
         path: ".claude/skills",
@@ -39,12 +36,14 @@ export async function resolveClaudeNativeRoots(
   args: ExperimentalClaudePluginRootsArgs,
 ): Promise<ExperimentalVendorPluginRoots> {
   const plugins = await experimental_resolveClaudePluginRoots(args);
+
   const userSkillsRoot: ClaudeResolvedRoot = {
     path: path.join(plugins.claudeDir, "skills"),
     origin: "user",
     shape: "skills",
     skipIfManifest: CLAUDE_PLUGIN_MANIFEST_MARKER,
   };
+
   const userCommandsRoot: ClaudeResolvedRoot = {
     path: path.join(plugins.claudeDir, "commands"),
     origin: "user",

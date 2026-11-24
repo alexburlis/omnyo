@@ -94,22 +94,24 @@ describe("workflow source resolution", () => {
     ).toThrow("inside the origin workspace");
   });
 
-  it("resolves names on the origin host under .bb/workflows", async () => {
+  it("resolves names on the origin host under .omnyo/workflows", async () => {
     const readFile = vi.fn(dependencies().readFile);
+
     const resolved = await resolveWorkflowSource(
       { name: "review-change" },
       { projectId: "project-1", threadId: "thread-1" },
       dependencies({ readFile }),
     );
+
     expect(readFile).toHaveBeenCalledWith({
       hostId: "host-1",
       rootPath: "/workspace/project",
-      path: "/workspace/project/.bb/workflows/review-change.js",
+      path: "/workspace/project/.omnyo/workflows/review-change.js",
     });
     expect(resolved.origin).toEqual({
       kind: "name",
       name: "review-change",
-      path: "/workspace/project/.bb/workflows/review-change.js",
+      path: "/workspace/project/.omnyo/workflows/review-change.js",
     });
   });
 
@@ -117,6 +119,7 @@ describe("workflow source resolution", () => {
     const getThreadEnvironmentId = vi.fn(async () => {
       throw new Error("origin thread was deleted");
     });
+
     const readFile = vi.fn(dependencies().readFile);
     await expect(
       resolveWorkflowSource(

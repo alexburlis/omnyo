@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { authApiKeys, authUsers } from "@bb/db";
+import { authApiKeys, authUsers } from "@omnyo/db";
+import { openSecretVault } from "@omnyo/secret-storage";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initDb } from "../src/db.js";
 import { createMachineAuthService } from "../src/services/machine-auth.js";
@@ -17,19 +18,22 @@ const testLogger = {
 };
 
 async function makeTempDir(): Promise<string> {
-  const dataDir = await mkdtemp(join(tmpdir(), "bb-machine-auth-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "omnyo-machine-auth-"));
   tempDirs.push(dataDir);
+
   return dataDir;
 }
 
 async function createMachineAuthHarness() {
   const dataDir = await makeTempDir();
   const db = initDb(":memory:");
+
   const machineAuth = await createMachineAuthService({
-    dataDir,
     db,
     logger: testLogger,
+    vault: await openSecretVault(dataDir),
   });
+
   await machineAuth.ensureReady();
 
   return {
@@ -49,9 +53,11 @@ describe("machine auth service", () => {
   it("reuses verification without database access and refreshes usage after 30 seconds", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const { db, machineAuth } = await createMachineAuthHarness();
+
     const token = await machineAuth.issueDaemonHostKey({
       hostId: "host_cached",
     });
+
     db.$client.exec(`
       CREATE TABLE usage_writes (count INTEGER NOT NULL);
       INSERT INTO usage_writes VALUES (0);
@@ -61,9 +67,11 @@ describe("machine auth service", () => {
     const startedAt = Date.now();
     expect(await machineAuth.verifyDaemonHostKey(token)).not.toBeNull();
     vi.setSystemTime(startedAt + 29_999);
+
     const results = await Promise.all(
       Array.from({ length: 12 }, () => machineAuth.verifyDaemonHostKey(token)),
     );
+
     expect(
       results.every((result) => result?.metadata.hostId === "host_cached"),
     ).toBe(true);
@@ -91,9 +99,11 @@ describe("machine auth service", () => {
   it("rejects a cached key at its expiry before the cache window ends", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const { db, machineAuth } = await createMachineAuthHarness();
+
     const token = await machineAuth.issueDaemonHostKey({
       hostId: "host_expiring",
     });
+
     const expiresAt = Date.now() + 5_000;
     db.update(authApiKeys)
       .set({ expiresAt: new Date(expiresAt) })
@@ -110,6 +120,7 @@ describe("machine auth service", () => {
     let revocation: Promise<void> | undefined;
     db.$client.function("revoke_host", () => {
       revocation = machineAuth.revokeHostAuthKeys({ hostId });
+
       return 0;
     });
     db.$client.exec(`
@@ -125,9 +136,11 @@ describe("machine auth service", () => {
 
   it("persists both usage timestamps in one write per concurrent verification", async () => {
     const { db, machineAuth } = await createMachineAuthHarness();
+
     const token = await machineAuth.issueDaemonHostKey({
       hostId: "host_usage",
     });
+
     db.update(authApiKeys)
       .set({ lastRequest: new Date(0), updatedAt: new Date(0) })
       .run();
@@ -138,9 +151,11 @@ describe("machine auth service", () => {
       BEGIN UPDATE usage_writes SET count = count + 1; END;
     `);
     const startedAt = Math.floor(Date.now() / 1000) * 1000;
+
     const results = await Promise.all(
       Array.from({ length: 12 }, () => machineAuth.verifyDaemonHostKey(token)),
     );
+
     expect(
       results.every((result) => result?.metadata.hostId === "host_usage"),
     ).toBe(true);
@@ -159,10 +174,13 @@ describe("machine auth service", () => {
     async (kind) => {
       vi.useFakeTimers({ toFake: ["Date"] });
       const { db, machineAuth } = await createMachineAuthHarness();
+
       const token = await machineAuth.issueDaemonHostKey({
         hostId: "host_rejected",
       });
+
       expect(await machineAuth.verifyDaemonHostKey(token)).not.toBeNull();
+
       if (kind === "revoked") {
         await machineAuth.revokeHostAuthKeys({ hostId: "host_rejected" });
       } else if (kind === "expired") {
@@ -171,6 +189,7 @@ describe("machine auth service", () => {
           .run();
         vi.setSystemTime(Date.now() + 30_000);
       }
+
       expect(
         await machineAuth.verifyDaemonHostKey(
           kind === "invalid" ? `${token}invalid` : token,
@@ -183,9 +202,11 @@ describe("machine auth service", () => {
     "enforces %s under concurrent verification",
     async (kind) => {
       const { db, machineAuth } = await createMachineAuthHarness();
+
       const token = await machineAuth.issueDaemonHostKey({
         hostId: "host_limited",
       });
+
       db.update(authApiKeys)
         .set(
           kind === "quota"
@@ -197,13 +218,16 @@ describe("machine auth service", () => {
               },
         )
         .run();
+
       const results = await Promise.all(
         Array.from({ length: 12 }, () =>
           machineAuth.verifyDaemonHostKey(token),
         ),
       );
+
       expect(results.filter((result) => result !== null)).toHaveLength(1);
       const stored = db.select().from(authApiKeys).get();
+
       if (kind === "rate-limit") expect(stored?.requestCount).toBe(1);
       else expect(stored?.remaining ?? 0).toBe(0);
     },
@@ -232,18 +256,22 @@ describe("machine auth service", () => {
   it("revokes older daemon host keys when a host reenrolls", async () => {
     const harness = await createMachineAuthHarness();
     const hostId = "host_reenroll";
+
     const olderKey = await harness.machineAuth.issueDaemonHostKey({
       hostId,
     });
+
     const staleKey = await harness.machineAuth.issueDaemonHostKey({
       hostId,
     });
+
     expect(
       await harness.machineAuth.verifyDaemonHostKey(olderKey),
     ).not.toBeNull();
     expect(
       await harness.machineAuth.verifyDaemonHostKey(staleKey),
     ).not.toBeNull();
+
     const joinMaterial = await harness.machineAuth.issueHostEnrollKey({
       enrollSource: "loopback",
       hostId,
@@ -255,9 +283,11 @@ describe("machine auth service", () => {
     });
 
     expect(reenrolled).not.toBeNull();
+
     if (!reenrolled) {
       throw new Error("Expected reenrollment to succeed");
     }
+
     await expect(
       harness.machineAuth.verifyDaemonHostKey(olderKey),
     ).resolves.toBeNull();
@@ -316,6 +346,7 @@ describe("machine auth service", () => {
 
   it("leaves expired non-machine api keys untouched when pruning", async () => {
     const harness = await createMachineAuthHarness();
+
     const systemUser = harness.db
       .select({
         id: authUsers.id,
@@ -324,9 +355,11 @@ describe("machine auth service", () => {
       .get();
 
     expect(systemUser?.id).toBeTruthy();
+
     if (!systemUser) {
       throw new Error("Expected machine auth system user");
     }
+
     await harness.db
       .insert(authApiKeys)
       .values({
@@ -368,5 +401,42 @@ describe("machine auth service", () => {
     expect(remainingKey).toMatchObject({
       id: "apikey_owner_cli_expired",
     });
+  });
+});
+
+describe("machine auth secret at rest", () => {
+  it("seals a legacy plaintext auth secret in place and keeps its value", async () => {
+    const dataDir = await makeTempDir();
+    const legacySecret = "a".repeat(64);
+    await writeFile(join(dataDir, "auth-secret"), `${legacySecret}\n`, {
+      mode: 0o600,
+    });
+    const vault = await openSecretVault(dataDir);
+
+    await createMachineAuthService({
+      db: initDb(":memory:"),
+      logger: testLogger,
+      vault,
+    });
+
+    const stored = await readFile(join(dataDir, "auth-secret"), "utf8");
+    expect(stored).not.toContain(legacySecret);
+    expect(vault.open(stored).trim()).toBe(legacySecret);
+  });
+
+  it("refuses an auth secret it cannot open instead of creating a new one", async () => {
+    const dataDir = await makeTempDir();
+    const otherVault = await openSecretVault(await makeTempDir());
+    const foreign = otherVault.seal("b".repeat(64));
+    await writeFile(join(dataDir, "auth-secret"), foreign, { mode: 0o600 });
+
+    await expect(
+      createMachineAuthService({
+        db: initDb(":memory:"),
+        logger: testLogger,
+        vault: await openSecretVault(dataDir),
+      }),
+    ).rejects.toMatchObject({ code: "wrong_vault" });
+    expect(await readFile(join(dataDir, "auth-secret"), "utf8")).toBe(foreign);
   });
 });

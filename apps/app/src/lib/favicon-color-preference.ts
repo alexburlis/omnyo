@@ -5,17 +5,19 @@ import {
   faviconColorPreferenceSchema,
   type FaviconColor,
   type FaviconColorPreference,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   DARK_COLOR_SCHEME_QUERY,
   getMediaQuerySnapshot,
   subscribeMediaQuery,
-} from "@bb/shared-ui/hooks/use-media-query";
+} from "@omnyo/shared-ui/hooks/use-media-query";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
+import { setDesktopAttention } from "@/lib/omnyo-desktop";
 
-export const FAVICON_COLOR_STORAGE_KEY = "bb.faviconColor";
+export const FAVICON_COLOR_STORAGE_KEY = "omnyo.faviconColor";
 
 const FAVICON_BADGES = ["none", "unread"] as const;
+
 type FaviconBadge = (typeof FAVICON_BADGES)[number];
 
 export const FAVICON_COLOR_VALUES: Record<FaviconColor, string> = {
@@ -34,6 +36,7 @@ function readCachedFaviconColor(): FaviconColorPreference {
     const parsed = faviconColorPreferenceSchema.safeParse(
       localStorage.getItem(FAVICON_COLOR_STORAGE_KEY),
     );
+
     return parsed.success ? parsed.data : defaultFaviconColor;
   } catch {
     return defaultFaviconColor;
@@ -51,6 +54,7 @@ function cacheFaviconColor(color: FaviconColorPreference): void {
 }
 
 const faviconColorAtom = atom<FaviconColorPreference>(readCachedFaviconColor());
+
 const faviconBadgeAtom = atom<FaviconBadge>("none");
 
 function setActiveFaviconColor(color: FaviconColorPreference): void {
@@ -73,6 +77,7 @@ export function useFaviconBadge(badge: FaviconBadge): void {
 
   useEffect(() => {
     setFaviconBadge(badge);
+
     return () => {
       setFaviconBadge("none");
     };
@@ -80,8 +85,11 @@ export function useFaviconBadge(badge: FaviconBadge): void {
 }
 
 const FAVICON_SIZES = [32, 16] as const;
+
 const UNREAD_BADGE_FILL = "#e00000";
+
 const WEB_MANIFEST_LINK_ID = "app-manifest";
+
 const APPLE_TOUCH_ICON_LINK_ID = "apple-touch-icon";
 
 type FaviconSize = (typeof FAVICON_SIZES)[number];
@@ -112,16 +120,19 @@ export function getFaviconGlyphHref(): string {
 
 function getFaviconVariantSuffix(): string {
   if (import.meta.env.DEV) return "-dev";
+
   return getMediaQuerySnapshot(DARK_COLOR_SCHEME_QUERY) ? "-dark" : "";
 }
 
 function getFaviconLink(size: number): HTMLLinkElement | null {
   const element = document.getElementById(`favicon-${size}`);
+
   return element instanceof HTMLLinkElement ? element : null;
 }
 
 function getDocumentLink(id: string): HTMLLinkElement | null {
   const element = document.getElementById(id);
+
   return element instanceof HTMLLinkElement ? element : null;
 }
 
@@ -141,9 +152,11 @@ function getAppleTouchIconHref(
 
 function applyInstallIconState(colorPreference: FaviconColorPreference): void {
   const manifestLink = getDocumentLink(WEB_MANIFEST_LINK_ID);
+
   if (manifestLink) manifestLink.href = getPwaManifestHref(colorPreference);
 
   const appleTouchIconLink = getDocumentLink(APPLE_TOUCH_ICON_LINK_ID);
+
   if (appleTouchIconLink) {
     appleTouchIconLink.href = getAppleTouchIconHref(colorPreference);
   }
@@ -163,12 +176,14 @@ const baseImageCache = new Map<string, Promise<HTMLImageElement>>();
 
 function loadBaseImage(src: string): Promise<HTMLImageElement> {
   const cached = baseImageCache.get(src);
+
   if (cached) return cached;
   const pending = loadImage(src);
   baseImageCache.set(src, pending);
   pending.catch(() => {
     baseImageCache.delete(src);
   });
+
   return pending;
 }
 
@@ -188,6 +203,7 @@ async function createFaviconHref({
   canvas.width = image.naturalWidth;
   canvas.height = image.naturalHeight;
   const context = canvas.getContext("2d");
+
   if (!context) throw new Error("Canvas 2D context unavailable");
   context.drawImage(image, 0, 0);
 
@@ -208,6 +224,7 @@ async function createFaviconHref({
 function getUnreadBadgeDot(width: number, height: number): UnreadBadgeDot {
   const size = Math.min(width, height);
   const scale = size / 32;
+
   return {
     centerX: 28 * scale,
     centerY: 6 * scale,
@@ -233,22 +250,29 @@ let applyToken = 0;
 
 async function applyFaviconState(state: FaviconRenderState): Promise<void> {
   const token = ++applyToken;
+
   if (getMediaQuerySnapshot(STANDALONE_DISPLAY_MODE_QUERY)) return;
   const suffix = getFaviconVariantSuffix();
+
   const links = await Promise.all(
     FAVICON_SIZES.map(async (size): Promise<RenderedFaviconLink> => {
       const baseHref = `/favicon-${size}x${size}${suffix}.png`;
+
       const href = await createFaviconHref({
         badge: state.badge,
         baseHref,
         colorPreference: state.colorPreference,
       });
+
       return { href, size };
     }),
   );
+
   if (token !== applyToken) return;
+
   for (const { href, size } of links) {
     const link = getFaviconLink(size);
+
     if (link) link.href = href;
   }
 }
@@ -259,6 +283,7 @@ export function initializeFavicon(): void {
   if (initialized || typeof window === "undefined") return;
   initialized = true;
   const store = getDefaultStore();
+
   const apply = () => {
     const colorPreference = store.get(faviconColorAtom);
     applyInstallIconState(colorPreference);
@@ -268,8 +293,21 @@ export function initializeFavicon(): void {
       colorPreference,
     }).catch(() => {});
   };
+
+  let desktopAttention: boolean | null = null;
+
+  const syncDesktopAttention = () => {
+    const active = store.get(faviconBadgeAtom) === "unread";
+
+    if (active === desktopAttention) return;
+    desktopAttention = active;
+    setDesktopAttention(active);
+  };
+
   store.sub(faviconColorAtom, apply);
   store.sub(faviconBadgeAtom, apply);
+  store.sub(faviconBadgeAtom, syncDesktopAttention);
   subscribeMediaQuery(DARK_COLOR_SCHEME_QUERY, apply);
   apply();
+  syncDesktopAttention();
 }

@@ -7,18 +7,20 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { normalizeProjectPathInput } from "@bb/domain";
-import type { HostDirectoryListing } from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
-import { EmptyState } from "@bb/shared-ui/empty-state";
-import { Icon } from "@bb/shared-ui/icon";
-import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
-import { Input } from "@bb/shared-ui/input";
+import { normalizeProjectPathInput } from "@omnyo/domain";
+import type { HostDirectoryListing } from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { DelayedLoading } from "@omnyo/shared-ui/delayed-loading";
+import { EmptyState } from "@omnyo/shared-ui/empty-state";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
+import { Input } from "@omnyo/shared-ui/input";
 import { invalidateHostDirectoryListing } from "@/hooks/cache-owners/host-directory-cache-owner";
 import { useHostDirectory } from "@/hooks/queries/host-queries";
 import { sdk } from "@/lib/sdk";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 
 interface Crumb {
   label: string;
@@ -27,13 +29,16 @@ interface Crumb {
 
 export function toBreadcrumb(directory: string): Crumb[] {
   const isWindows = /^[A-Za-z]:/.test(directory);
+
   if (!isWindows) {
     const crumbs: Crumb[] = [{ label: "/", path: "/" }];
     let accumulated = "";
+
     for (const segment of directory.split("/").filter(Boolean)) {
       accumulated = `${accumulated}/${segment}`;
       crumbs.push({ label: segment, path: accumulated });
     }
+
     return crumbs;
   }
 
@@ -41,10 +46,12 @@ export function toBreadcrumb(directory: string): Crumb[] {
   const drive = segments[0] ?? "";
   const crumbs: Crumb[] = [{ label: drive, path: `${drive}\\` }];
   let accumulated = drive;
+
   for (const segment of segments.slice(1)) {
     accumulated = `${accumulated}\\${segment}`;
     crumbs.push({ label: segment, path: accumulated });
   }
+
   return crumbs;
 }
 
@@ -52,17 +59,22 @@ export function joinHostPath(directory: string, name: string): string {
   if (/^[A-Za-z]:/.test(directory)) {
     return `${directory.replace(/[\\/]+$/, "")}\\${name}`;
   }
+
   return `${directory.replace(/\/+$/, "")}/${name}`;
 }
 
 export function getFolderNameValidationMessage(name: string): string | null {
   if (!name) return "Enter a folder name.";
+
   if (name === "." || name === "..") return "Enter a folder name.";
+
   if (/[\\/]/.test(name)) return "Folder names can't contain slashes.";
+
   return null;
 }
 
 const DIRECTORY_ENTRY_ROW_HEIGHT_PX = 28;
+
 const DIRECTORY_ENTRY_OVERSCAN_ROWS = 10;
 
 const NO_ENTRIES: HostDirectoryListing["entries"] = [];
@@ -92,6 +104,7 @@ export function RemotePathBrowser({
   const newFolderInputRef = useRef<HTMLInputElement>(null);
   const isPointerCoarse = usePointerCoarse();
   const queryClient = useQueryClient();
+
   const { data, isError, error, isPlaceholderData } = useHostDirectory(
     hostId,
     currentPath,
@@ -103,14 +116,17 @@ export function RemotePathBrowser({
   const entries = data?.entries ?? NO_ENTRIES;
   const scrollRef = useRef<HTMLDivElement>(null);
   const getScrollElement = useCallback(() => scrollRef.current, []);
+
   const estimateEntrySize = useCallback(
     () => DIRECTORY_ENTRY_ROW_HEIGHT_PX,
     [],
   );
+
   const getEntryKey = useCallback(
     (index: number) => entries[index]?.path ?? index,
     [entries],
   );
+
   const entryVirtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement,
@@ -141,6 +157,7 @@ export function RemotePathBrowser({
     ) {
       return;
     }
+
     setNewFolderName("");
     setNewFolderError(null);
     setIsCreatingFolder(true);
@@ -150,6 +167,7 @@ export function RemotePathBrowser({
     mutationFn: async ({ parent, name }: { parent: string; name: string }) => {
       const path = joinHostPath(parent, name);
       await sdk.files.mkdir({ hostId, path });
+
       return path;
     },
     onSuccess: async (path, { parent }) => {
@@ -181,12 +199,16 @@ export function RemotePathBrowser({
     ) {
       return;
     }
+
     const name = newFolderName.trim();
     const message = getFolderNameValidationMessage(name);
+
     if (message) {
       setNewFolderError(message);
+
       return;
     }
+
     setNewFolderError(null);
     createFolder.mutate({ parent: directory, name });
   };
@@ -213,10 +235,12 @@ export function RemotePathBrowser({
   const commitEditor = () => {
     const normalized = normalizeProjectPathInput(editValue);
     setIsEditing(false);
+
     if (normalized) navigateTo(normalized);
   };
 
   const interactionDisabled = disabled || createFolder.isPending;
+
   const canCreateFolderHere =
     allowCreateFolder &&
     !interactionDisabled &&
@@ -225,6 +249,7 @@ export function RemotePathBrowser({
     !isPlaceholderData;
 
   let body: ReactNode;
+
   if (isError) {
     body = (
       <EmptyState
@@ -239,12 +264,14 @@ export function RemotePathBrowser({
     );
   } else if (!data) {
     body = (
-      <EmptyState
-        icon="Spinner"
-        iconClassName="animate-spin"
-        message="Loading…"
-        className="px-2 py-3"
-      />
+      <DelayedLoading>
+        <EmptyState
+          icon="Spinner"
+          iconClassName="animate-spin"
+          message="Loading…"
+          className="px-2 py-3"
+        />
+      </DelayedLoading>
     );
   } else if (entries.length === 0) {
     body = <EmptyState message="This folder is empty." className="px-2 py-3" />;
@@ -256,7 +283,9 @@ export function RemotePathBrowser({
       >
         {entryVirtualizer.getVirtualItems().map((virtualItem) => {
           const entry = entries[virtualItem.index];
+
           if (!entry) return null;
+
           if (entry.kind === "file") {
             return (
               <li
@@ -273,6 +302,7 @@ export function RemotePathBrowser({
               </li>
             );
           }
+
           return (
             <li
               key={entry.path}
@@ -284,7 +314,7 @@ export function RemotePathBrowser({
               <button
                 type="button"
                 disabled={interactionDisabled}
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-sm hover:bg-muted disabled:pointer-events-none"
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-sm outline-none hover:bg-muted focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none"
                 onClick={() => navigateTo(entry.path)}
               >
                 <Icon
@@ -369,7 +399,8 @@ export function RemotePathBrowser({
                     type="button"
                     disabled={interactionDisabled}
                     className={cn(
-                      "rounded px-1 py-0.5 hover:bg-muted hover:text-foreground",
+                      "rounded px-1 py-0.5 outline-none hover:bg-muted hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",
+                      CONTROL_HOVER_TRANSITION,
                       index === crumbs.length - 1 &&
                         "font-medium text-foreground",
                     )}

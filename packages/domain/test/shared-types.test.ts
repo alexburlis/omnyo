@@ -59,11 +59,14 @@ describe("prompt mention command triggers", () => {
       itemId: "issues:ISS-42",
       label: "Fix login bug",
     };
+
     const parsed = promptMentionResourceSchema.safeParse(resource);
     expect(parsed.success).toBe(true);
+
     if (parsed.success) {
       expect(parsed.data).toEqual(resource);
     }
+
     expect(
       promptMentionResourceSchema.safeParse({
         kind: "plugin",

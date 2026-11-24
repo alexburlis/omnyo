@@ -4,11 +4,14 @@ import { promisify } from "node:util";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveGitCredentials, machineGitHealth } from "./git-credentials.js";
 
 const exec = promisify(execFile);
+
 const cleanup: Array<() => Promise<void>> = [];
+
 afterEach(async () => {
   for (const dispose of cleanup.splice(0)) await dispose();
 });
@@ -22,9 +25,10 @@ function gh(email: string | null = null) {
 }
 
 async function gitEnv() {
-  const home = await mkdtemp(join(tmpdir(), "bb-git-env-"));
+  const home = await mkdtemp(join(tmpdir(), "omnyo-git-env-"));
   cleanup.push(() => rm(home, { recursive: true, force: true }));
   const entries = await resolveGitCredentials(gh());
+
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
@@ -32,10 +36,12 @@ async function gitEnv() {
     GIT_CONFIG_GLOBAL: join(home, "gitconfig"),
     GIT_TERMINAL_PROMPT: "0",
   };
+
   for (const entry of entries) {
     if (typeof entry.value !== "string") throw new Error("Unresolved entry");
     env[entry.name] = entry.value;
   }
+
   return { home, env };
 }
 
@@ -57,8 +63,36 @@ function fill(
 }
 
 describe("machine Git environment", () => {
+  it("starts the identity lookup while the independent token lookup is pending", async () => {
+    const token = createDeferredPromise<string>();
+
+    const run = vi.fn((args: string[]) =>
+      args[0] === "auth"
+        ? token.promise
+        : Promise.resolve(
+            JSON.stringify({ login: "octocat", id: 123, email: null }),
+          ),
+    );
+
+    const credentials = resolveGitCredentials(run);
+
+    try {
+      expect(run.mock.calls.map(([args]) => args[0])).toEqual(["auth", "api"]);
+    } finally {
+      token.resolve("test-private-token\n");
+      await credentials;
+    }
+
+    expect(await credentials).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "GIT_AUTHOR_NAME", value: "octocat" }),
+      ]),
+    );
+  });
+
   it("lets agent-provider contributions override host credentials", async () => {
     const host = await resolveGitCredentials(gh());
+
     const provider = [
       {
         name: "GH_TOKEN",
@@ -67,6 +101,7 @@ describe("machine Git environment", () => {
         reason: "Override",
       },
     ];
+
     const merged = mergeHostAndProviderEnvironment(host, provider);
     expect(merged.filter((entry) => entry.name === "GH_TOKEN")).toEqual(
       provider,
@@ -81,9 +116,11 @@ describe("machine Git environment", () => {
   it("derives login identity and public or noreply email", async () => {
     for (const email of [null, "public@example.com"]) {
       const entries = await resolveGitCredentials(gh(email));
+
       const env = Object.fromEntries(
         entries.map((entry) => [entry.name, entry.value]),
       );
+
       expect(env.GIT_AUTHOR_NAME).toBe("octocat");
       expect(env.GIT_COMMITTER_NAME).toBe("octocat");
       expect(env.GIT_AUTHOR_EMAIL).toBe(
@@ -119,6 +156,7 @@ describe("machine Git environment", () => {
     expect(result.stdout).toContain(
       "username=x-access-token\npassword=rotated-token\n",
     );
+
     for (const input of [
       "protocol=https\nhost=github.com.attacker.example\n\n",
       "protocol=http\nhost=github.com\n\n",
@@ -140,6 +178,7 @@ describe("machine Git environment", () => {
     await exec("git", ["add", "."], { cwd: source, env });
     await exec("git", ["commit", "-m", "seed"], { cwd: source, env });
     await exec("git", ["clone", "--bare", source, bare], { env });
+
     const helper = `#!/usr/bin/env node
 const assert = require("node:assert");
 const { execFileSync, spawnSync } = require("node:child_process");
@@ -173,6 +212,7 @@ for (let line = readLine(); line !== null; line = readLine()) {
   }
 }
 `;
+
     await writeFile(join(helpers, "git-remote-https"), helper, { mode: 0o755 });
     const target = join(home, "cloned");
     await exec("git", ["clone", "git@github.com:octocat/private.git", target], {
@@ -186,6 +226,7 @@ for (let line = readLine(); line !== null; line = readLine()) {
   it("rewrites both SSH forms without storing any Git configuration", async () => {
     const { env, home } = await gitEnv();
     await exec("git", ["init", home], { env });
+
     for (const remote of [
       "git@github.com:octocat/private.git",
       "ssh://git@github.com/octocat/private.git",
@@ -194,14 +235,17 @@ for (let line = readLine(); line !== null; line = readLine()) {
         env,
         cwd: home,
       });
+
       expect(result.stdout.trim()).toBe(
         "https://github.com/octocat/private.git",
       );
     }
+
     const result = await exec("git", ["config", "--local", "--list"], {
       env,
       cwd: home,
     });
+
     expect(result.stdout).not.toContain("credential");
     expect(result.stdout).not.toContain("test-private-token");
   });
@@ -213,9 +257,11 @@ describe("server Git credential refresh", () => {
   it("shares concurrent and repeated lookups, isolates returned entries, and serves expired credentials while refreshing rotated ones in the background", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const run = gh();
+
     const results = await Promise.all(
       Array.from({ length: 20 }, () => resolveGitCredentials(run)),
     );
+
     expect(run).toHaveBeenCalledTimes(2);
     results[0]!.find((entry) => entry.name === "GH_TOKEN")!.value = "mutated";
     results[0]!.push({
@@ -259,7 +305,7 @@ describe("server Git credential refresh", () => {
     run.mockRejectedValue(new Error("unavailable"));
     expect(await resolveGitCredentials(run)).toEqual([]);
     expect(await resolveGitCredentials(run)).toEqual([]);
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(2);
     run.mockImplementation(gh());
     vi.advanceTimersByTime(5_000);
     expect(await resolveGitCredentials(run)).toEqual([]);
@@ -281,14 +327,17 @@ describe("server Git credential refresh", () => {
   it("keeps a slow lookup shared and starts its cache lifetime when it completes", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     let complete!: (token: string) => void;
+
     const token = new Promise<string>((resolve) => {
       complete = resolve;
     });
+
     const run = vi.fn(async (args: string[]) =>
       args[0] === "auth"
         ? token
         : JSON.stringify({ login: "octocat", id: 123, email: null }),
     );
+
     const first = resolveGitCredentials(run);
     vi.advanceTimersByTime(60_000);
     const second = resolveGitCredentials(run);

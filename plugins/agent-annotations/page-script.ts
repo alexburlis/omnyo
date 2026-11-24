@@ -13,10 +13,14 @@ interface AnnotationController {
   state(): AnnotationPageState;
   setTheme(theme: Record<string, string>): void;
   clear(): AnnotationPageState;
+  clearAccepted(
+    entries: Array<{ id: string; revision: number }>,
+  ): AnnotationPageState;
 }
 
 interface PinnedAnnotation {
   id: string;
+  revision: number;
   number: number;
   comment: string;
   element: Element;
@@ -24,7 +28,7 @@ interface PinnedAnnotation {
   outline: HTMLElement;
 }
 
-export const ANNOTATION_CONTROLLER_KEY = "__bbAgentAnnotations";
+export const ANNOTATION_CONTROLLER_KEY = "__omnyoAgentAnnotations";
 
 export const THEME_TOKENS = [
   "canvas",
@@ -44,19 +48,22 @@ export const THEME_TOKENS = [
 ] as const;
 
 function installAgentAnnotations(
-  bb: PageBridge | null,
+  api: PageBridge | null,
   theme: Record<string, string>,
 ): AnnotationPageState {
   const existing: AnnotationController | undefined = Reflect.get(
     globalThis,
-    "__bbAgentAnnotations",
+    "__omnyoAgentAnnotations",
   );
+
   if (existing !== undefined) {
     existing.setTheme(theme);
+
     return existing.state();
   }
 
-  const attributePrefix = "data-bb-annotation-";
+  const attributePrefix = "data-omnyo-annotation-";
+
   const attributeKeys = [
     "id",
     "class",
@@ -71,6 +78,7 @@ function installAgentAnnotations(
     "title",
     "data-testid",
   ];
+
   const styleKeys = [
     "display",
     "position",
@@ -88,39 +96,46 @@ function installAgentAnnotations(
     "border",
     "border-radius",
   ];
+
   const css = `
     .hover, .outline, .label, .pin, .editor { position: fixed; box-sizing: border-box; }
-    .hover { display: none; pointer-events: none; border: 1.5px solid var(--bb-primary); border-radius: 4px; background: color-mix(in oklab, var(--bb-primary) 10%, transparent); }
-    .outline { pointer-events: none; border: 1.5px dashed color-mix(in oklab, var(--bb-primary) 70%, transparent); border-radius: 4px; }
-    .label { display: none; pointer-events: none; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border-radius: 6px; background: var(--bb-primary); color: var(--bb-primary-foreground); font: 500 11px/16px var(--bb-font-mono, ui-monospace, monospace); }
-    .pin { pointer-events: auto; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 999px; background: var(--bb-primary); color: var(--bb-primary-foreground); font: 600 11px/20px var(--bb-font-sans, system-ui, sans-serif); text-align: center; box-shadow: 0 0 0 2px var(--bb-canvas), 0 1px 4px rgb(0 0 0 / 0.3); cursor: pointer; padding: 0; border: 0; }
-    .pin:focus-visible { outline: 2px solid var(--bb-ring); outline-offset: 2px; }
-    .editor { pointer-events: auto; width: 320px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; border: 1px solid var(--bb-border); border-radius: calc(var(--bb-radius, 0.5rem) + 4px); background: var(--bb-popover); color: var(--bb-popover-foreground); box-shadow: 0 12px 32px color-mix(in oklab, var(--bb-ink) 22%, transparent); font: 400 13px/1.4 var(--bb-font-sans, system-ui, sans-serif); }
+    .hover { display: none; pointer-events: none; border: 1.5px solid var(--omnyo-primary); border-radius: 4px; background: color-mix(in oklab, var(--omnyo-primary) 10%, transparent); }
+    .outline { pointer-events: none; border: 1.5px dashed color-mix(in oklab, var(--omnyo-primary) 70%, transparent); border-radius: 4px; }
+    .label { display: none; pointer-events: none; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border-radius: 6px; background: var(--omnyo-primary); color: var(--omnyo-primary-foreground); font: 500 11px/16px var(--omnyo-font-mono, ui-monospace, monospace); }
+    .pin { pointer-events: auto; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 999px; background: var(--omnyo-primary); color: var(--omnyo-primary-foreground); font: 600 11px/20px var(--omnyo-font-sans, system-ui, sans-serif); text-align: center; box-shadow: 0 0 0 2px var(--omnyo-canvas), 0 1px 4px rgb(0 0 0 / 0.3); cursor: pointer; padding: 0; border: 0; }
+    .pin:focus-visible { outline: 2px solid var(--omnyo-ring); outline-offset: 2px; }
+    .editor { pointer-events: auto; width: 320px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; border: 1px solid var(--omnyo-border); border-radius: calc(var(--omnyo-radius, 0.5rem) + 4px); background: var(--omnyo-popover); color: var(--omnyo-popover-foreground); box-shadow: 0 12px 32px color-mix(in oklab, var(--omnyo-ink) 22%, transparent); font: 400 13px/1.4 var(--omnyo-font-sans, system-ui, sans-serif); }
     .editor-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 0; min-width: 0; }
-    .editor-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--bb-muted-foreground); font: 500 11px/18px var(--bb-font-mono, ui-monospace, monospace); }
-    .target-tag { flex-shrink: 0; color: var(--bb-popover-foreground); background: var(--bb-state-hover); padding: 0 6px; border-radius: 5px; white-space: nowrap; }
+    .editor-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--omnyo-muted-foreground); font: 500 11px/18px var(--omnyo-font-mono, ui-monospace, monospace); }
+    .target-tag { flex-shrink: 0; color: var(--omnyo-popover-foreground); background: var(--omnyo-state-hover); padding: 0 6px; border-radius: 5px; white-space: nowrap; }
     .target-text { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    .editor-number { flex-shrink: 0; width: 18px; height: 18px; border-radius: 999px; background: var(--bb-primary); color: var(--bb-primary-foreground); font: 600 10px/18px var(--bb-font-sans, system-ui, sans-serif); text-align: center; }
-    textarea { box-sizing: border-box; display: block; width: calc(100% - 20px); min-height: 68px; max-height: 240px; resize: vertical; margin: 8px 10px 0; padding: 7px 9px; border: 1px solid var(--bb-border); border-radius: 7px; background: var(--bb-canvas); color: inherit; font: inherit; outline: none; }
-    textarea::placeholder { color: var(--bb-muted-foreground); }
-    textarea:focus { border-color: var(--bb-ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--bb-ring) 12%, transparent); }
+    .editor-number { flex-shrink: 0; width: 18px; height: 18px; border-radius: 999px; background: var(--omnyo-primary); color: var(--omnyo-primary-foreground); font: 600 10px/18px var(--omnyo-font-sans, system-ui, sans-serif); text-align: center; }
+    textarea { box-sizing: border-box; display: block; width: calc(100% - 20px); min-height: 68px; max-height: 240px; resize: vertical; margin: 8px 10px 0; padding: 7px 9px; border: 1px solid var(--omnyo-border); border-radius: 7px; background: var(--omnyo-canvas); color: inherit; font: inherit; outline: none; }
+    textarea::placeholder { color: var(--omnyo-muted-foreground); }
+    textarea:focus { border-color: var(--omnyo-ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--omnyo-ring) 12%, transparent); }
     .actions { display: flex; align-items: center; gap: 6px; padding: 8px 10px 10px; min-width: 0; }
-    button { flex-shrink: 0; white-space: nowrap; height: 28px; padding: 0 11px; border: 1px solid transparent; border-radius: 7px; font: 500 12px/16px var(--bb-font-sans, system-ui, sans-serif); cursor: pointer; }
-    button:focus-visible { outline: 2px solid var(--bb-ring); outline-offset: 1px; }
-    .cancel { margin-left: auto; border-color: var(--bb-border); background: transparent; color: inherit; }
-    .delete { padding: 0 6px; margin-left: -6px; background: transparent; color: var(--bb-muted-foreground); }
-    .delete:hover { color: var(--bb-destructive, var(--bb-ink)); background: color-mix(in oklab, var(--bb-destructive, var(--bb-ink)) 8%, transparent); }
-    .cancel:hover { background: var(--bb-state-hover); }
-    .save { background: var(--bb-primary); color: var(--bb-primary-foreground); }
+    button { flex-shrink: 0; white-space: nowrap; height: 28px; padding: 0 11px; border: 1px solid transparent; border-radius: 7px; font: 500 12px/16px var(--omnyo-font-sans, system-ui, sans-serif); cursor: pointer; }
+    button:focus-visible { outline: 2px solid var(--omnyo-ring); outline-offset: 1px; }
+    .cancel { margin-left: auto; border-color: var(--omnyo-border); background: transparent; color: inherit; }
+    .delete { padding: 0 6px; margin-left: -6px; background: transparent; color: var(--omnyo-muted-foreground); }
+    .delete:hover { color: var(--omnyo-destructive, var(--omnyo-ink)); background: color-mix(in oklab, var(--omnyo-destructive, var(--omnyo-ink)) 8%, transparent); }
+    .cancel:hover { background: var(--omnyo-state-hover); }
+    .save { background: var(--omnyo-primary); color: var(--omnyo-primary-foreground); }
     .save:hover { filter: brightness(1.08); }
     .save:disabled { opacity: 0.45; cursor: default; filter: none; }
+    .pin, .editor { animation: omnyo-annotation-in 150ms cubic-bezier(0, 0, 0.58, 1) both; }
+    @keyframes omnyo-annotation-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+    @media (prefers-reduced-motion: reduce) {
+      @keyframes omnyo-annotation-in { from { opacity: 0; } to { opacity: 1; } }
+    }
 
   `;
 
-  const host = document.createElement("bb-agent-annotations");
+  const host = document.createElement("omnyo-agent-annotations");
   host.style.cssText =
     "all: initial; position: fixed; inset: 0; z-index: 2147483647; pointer-events: none;";
   const root = host.attachShadow({ mode: "open" });
+
   if (typeof CSSStyleSheet === "function" && "adoptedStyleSheets" in root) {
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(css);
@@ -130,6 +145,7 @@ function installAgentAnnotations(
     style.textContent = css;
     root.append(style);
   }
+
   const hoverBox = part("div", "hover");
   const hoverLabel = part("div", "label");
   root.append(hoverBox, hoverLabel);
@@ -144,6 +160,7 @@ function installAgentAnnotations(
   function part(tagName: string, className: string): HTMLElement {
     const node = document.createElement(tagName);
     node.className = className;
+
     return node;
   }
 
@@ -158,7 +175,7 @@ function installAgentAnnotations(
   }
 
   function post(message: unknown): void {
-    bb?.postMessage(message);
+    api?.postMessage(message);
   }
 
   function escapeIdentifier(value: string): string {
@@ -171,15 +188,20 @@ function installAgentAnnotations(
 
   function elementName(element: Element): string {
     const id = element.id.length > 0 ? `#${element.id}` : "";
+
     const classes = Array.from(element.classList)
       .slice(0, 2)
       .map((name) => `.${name}`)
       .join("");
+
     const text = collapse(element.textContent ?? "");
+
     const label =
       element.getAttribute("aria-label") ??
       (text.length > 0 && text.length <= 40 ? text : "");
+
     const suffix = label.length > 0 ? ` "${label.slice(0, 40)}"` : "";
+
     return `${element.tagName.toLowerCase()}${id}${classes}${suffix}`.slice(
       0,
       200,
@@ -189,6 +211,7 @@ function installAgentAnnotations(
   function selectorFor(element: Element): string {
     const segments: string[] = [];
     let current: Element | null = element;
+
     while (
       current !== null &&
       current !== document.documentElement &&
@@ -202,14 +225,17 @@ function installAgentAnnotations(
         segments.unshift(`#${escapeIdentifier(current.id)}`);
         break;
       }
+
       const tagName = current.tagName;
       const parent: Element | null = current.parentElement;
+
       const siblings =
         parent === null
           ? []
           : Array.from(parent.children).filter(
               (child) => child.tagName === tagName,
             );
+
       const position = siblings.indexOf(current) + 1;
       segments.unshift(
         siblings.length > 1
@@ -218,6 +244,7 @@ function installAgentAnnotations(
       );
       current = parent;
     }
+
     return segments.join(" > ").slice(0, 2000);
   }
 
@@ -225,23 +252,30 @@ function installAgentAnnotations(
     const rect = element.getBoundingClientRect();
     const computed = getComputedStyle(element);
     const attributes: Record<string, string> = {};
+
     for (const key of attributeKeys) {
       const value = element.getAttribute(key);
+
       if (value !== null && value.length > 0) {
         attributes[key] = value.slice(0, 400);
       }
     }
+
     const styles: Record<string, string> = {};
+
     for (const key of styleKeys) {
       const value = computed.getPropertyValue(key);
+
       if (value.length > 0) {
         styles[key] = value.slice(0, 400);
       }
     }
+
     const visibleText =
       element instanceof HTMLElement && typeof element.innerText === "string"
         ? element.innerText
         : (element.textContent ?? "");
+
     return {
       tagName: element.tagName.toLowerCase().slice(0, 64),
       name: elementName(element),
@@ -267,11 +301,14 @@ function installAgentAnnotations(
 
   function showHover(element: Element | null): void {
     hovered = element;
+
     if (element === null) {
       hoverBox.style.display = "none";
       hoverLabel.style.display = "none";
+
       return;
     }
+
     const rect = element.getBoundingClientRect();
     place(hoverBox, rect);
     hoverBox.style.display = "block";
@@ -290,22 +327,27 @@ function installAgentAnnotations(
       ) {
         continue;
       }
+
       return element;
     }
+
     return null;
   }
 
   function reposition(): void {
     for (const annotation of annotations) {
       const rect = annotation.element.getBoundingClientRect();
+
       const visible =
         annotation.element.isConnected && rect.width + rect.height > 0;
+
       annotation.pin.style.display = visible ? "block" : "none";
       annotation.pin.style.left = `${rect.left}px`;
       annotation.pin.style.top = `${rect.top}px`;
       annotation.outline.style.display = visible && active ? "block" : "none";
       place(annotation.outline, rect);
     }
+
     if (hovered !== null && editor === null) {
       showHover(hovered);
     }
@@ -319,6 +361,7 @@ function installAgentAnnotations(
 
   function syncLoop(): void {
     const needed = active || annotations.length > 0;
+
     if (needed && frame === 0) {
       frame = requestAnimationFrame(tick);
     } else if (!needed && frame !== 0) {
@@ -334,12 +377,15 @@ function installAgentAnnotations(
 
   function commit(element: Element, comment: string): void {
     const trimmed = comment.trim();
+
     if (trimmed.length === 0) {
       return;
     }
+
     const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) =>
       value.toString(16).padStart(2, "0"),
     ).join("");
+
     element.setAttribute(`${attributePrefix}${id}`, "");
     const number = nextNumber;
     nextNumber += 1;
@@ -350,14 +396,17 @@ function installAgentAnnotations(
     pin.title = trimmed;
     const outline = part("div", "outline");
     root.append(outline, pin);
+
     const annotation = {
       id,
+      revision: 0,
       number,
       comment: trimmed.slice(0, 4000),
       element,
       pin,
       outline,
     };
+
     annotations.push(annotation);
     pin.addEventListener("click", () => openEditor(element, annotation));
     closeEditor();
@@ -379,8 +428,9 @@ function installAgentAnnotations(
     post({ type: "state", ...state() });
   }
 
-  function remove(annotation: PinnedAnnotation): void {
+  function remove(annotation: PinnedAnnotation, notify = true): void {
     const index = annotations.indexOf(annotation);
+
     if (index < 0) return;
     annotation.element.removeAttribute(`${attributePrefix}${annotation.id}`);
     annotation.pin.remove();
@@ -389,20 +439,31 @@ function installAgentAnnotations(
     closeEditor();
     showHover(null);
     syncLoop();
-    post({ type: "annotation-delete", id: annotation.id });
-    post({ type: "state", ...state() });
+
+    if (notify) {
+      post({ type: "annotation-delete", id: annotation.id });
+      post({ type: "state", ...state() });
+    }
   }
 
   function update(annotation: PinnedAnnotation, comment: string): void {
     const trimmed = comment.trim().slice(0, 4000);
+
     if (trimmed.length === 0) {
       return;
     }
+
     annotation.comment = trimmed;
+    annotation.revision += 1;
     annotation.pin.title = trimmed;
     closeEditor();
     showHover(null);
-    post({ type: "annotation-update", id: annotation.id, comment: trimmed });
+    post({
+      type: "annotation-update",
+      id: annotation.id,
+      comment: trimmed,
+      revision: annotation.revision,
+    });
   }
 
   function openEditor(
@@ -421,11 +482,13 @@ function installAgentAnnotations(
         : `Edit annotation ${annotation.number}`,
     );
     const header = part("div", "editor-head");
+
     if (annotation !== null) {
       const number = part("span", "editor-number");
       number.textContent = String(annotation.number);
       header.append(number);
     }
+
     const title = part("div", "editor-title");
     title.title = elementName(element);
     const tag = part("span", "target-tag");
@@ -442,10 +505,12 @@ function installAgentAnnotations(
     textarea.maxLength = 4000;
     textarea.value = annotation?.comment ?? "";
     textarea.setAttribute("aria-label", "Annotation comment");
+
     const submit = () =>
       annotation === null
         ? commit(element, textarea.value)
         : update(annotation, textarea.value);
+
     const actions = part("div", "actions");
     const cancel = part("button", "cancel");
     cancel.textContent = "Cancel";
@@ -454,29 +519,36 @@ function installAgentAnnotations(
     save.textContent = annotation === null ? "Add to prompt" : "Save";
     save.title = /Mac/.test(navigator.platform) ? "⌘+Enter" : "Ctrl+Enter";
     save.toggleAttribute("disabled", textarea.value.trim().length === 0);
+
     if (annotation !== null) {
       const deleteButton = part("button", "delete");
       deleteButton.textContent = "Delete";
       deleteButton.addEventListener("click", () => remove(annotation));
       actions.append(deleteButton);
     }
+
     actions.append(cancel, save);
     panel.append(header, textarea, actions);
     root.append(panel);
     editor = panel;
-    const panelRect = panel.getBoundingClientRect();
+    const panelRect = { width: panel.offsetWidth, height: panel.offsetHeight };
     const below = rect.bottom + 8;
+
     const preferredTop =
       below + panelRect.height <= innerHeight - 8
         ? below
         : rect.top - panelRect.height - 8;
+
     panel.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - panelRect.width - 8))}px`;
     panel.style.top = `${Math.max(8, Math.min(preferredTop, innerHeight - panelRect.height - 8))}px`;
+    panel.style.transformOrigin =
+      preferredTop === below ? "top left" : "bottom left";
     textarea.addEventListener("input", () => {
       save.toggleAttribute("disabled", textarea.value.trim().length === 0);
     });
     textarea.addEventListener("keydown", (event) => {
       event.stopPropagation();
+
       if (event.key === "Escape") {
         event.preventDefault();
         closeEditor();
@@ -489,6 +561,7 @@ function installAgentAnnotations(
     save.addEventListener("click", submit);
     panel.addEventListener("keydown", (event) => {
       event.stopPropagation();
+
       if (event.key === "Escape") {
         event.preventDefault();
         closeEditor();
@@ -502,6 +575,7 @@ function installAgentAnnotations(
     if (!active || editor !== null || event.target === host) {
       return;
     }
+
     showHover(targetAt(event.clientX, event.clientY));
   }
 
@@ -509,6 +583,7 @@ function installAgentAnnotations(
     if (!active || event.target === host) {
       return;
     }
+
     event.preventDefault();
     event.stopImmediatePropagation();
   }
@@ -517,13 +592,18 @@ function installAgentAnnotations(
     if (!active || event.target === host) {
       return;
     }
+
     event.preventDefault();
     event.stopImmediatePropagation();
+
     if (editor !== null) {
       closeEditor();
+
       return;
     }
+
     const target = targetAt(event.clientX, event.clientY);
+
     if (target !== null) {
       openEditor(target);
     }
@@ -533,12 +613,16 @@ function installAgentAnnotations(
     if (!active || event.key !== "Escape" || event.target === host) {
       return;
     }
+
     event.preventDefault();
     event.stopImmediatePropagation();
+
     if (editor !== null) {
       closeEditor();
+
       return;
     }
+
     deactivate();
     post({ type: "state", ...state() });
   }
@@ -547,6 +631,7 @@ function installAgentAnnotations(
     if (!host.isConnected) {
       document.documentElement.append(host);
     }
+
     if (!active) {
       active = true;
       window.addEventListener("pointermove", onPointerMove, true);
@@ -558,6 +643,7 @@ function installAgentAnnotations(
       reposition();
       syncLoop();
     }
+
     return state();
   }
 
@@ -575,20 +661,38 @@ function installAgentAnnotations(
       reposition();
       syncLoop();
     }
+
     return state();
   }
 
   function clear(): AnnotationPageState {
     closeEditor();
     showHover(null);
+
     for (const annotation of annotations) {
       annotation.element.removeAttribute(`${attributePrefix}${annotation.id}`);
       annotation.pin.remove();
       annotation.outline.remove();
     }
+
     annotations.length = 0;
     nextNumber = 1;
     syncLoop();
+
+    return state();
+  }
+
+  function clearAccepted(
+    entries: Array<{ id: string; revision: number }>,
+  ): AnnotationPageState {
+    for (const entry of entries) {
+      const annotation = annotations.find(
+        (item) => item.id === entry.id && item.revision === entry.revision,
+      );
+
+      if (annotation !== undefined) remove(annotation, false);
+    }
+
     return state();
   }
 
@@ -598,48 +702,61 @@ function installAgentAnnotations(
     state,
     setTheme,
     clear,
+    clearAccepted,
   };
-  Reflect.set(globalThis, "__bbAgentAnnotations", controller);
+
+  Reflect.set(globalThis, "__omnyoAgentAnnotations", controller);
   setTheme(theme);
+
   return state();
 }
 
 function probeReactComponents(annotationId: string) {
   const element = document.querySelector(
-    `[data-bb-annotation-${annotationId}]`,
+    `[data-omnyo-annotation-${annotationId}]`,
   );
+
   if (element === null) {
     return null;
   }
+
   const fiberKey = Object.keys(element).find(
     (key) =>
       key.startsWith("__reactFiber$") ||
       key.startsWith("__reactInternalInstance$"),
   );
+
   if (fiberKey === undefined) {
     return { components: [] };
   }
+
   const components: Array<{ name: string; source: string | null }> = [];
   let fiber = Reflect.get(element, fiberKey);
   let visited = 0;
+
   while (fiber && components.length < 12 && visited < 500) {
     visited += 1;
     const type = fiber.type;
+
     const candidate =
       typeof type === "function"
         ? type
         : type !== null && typeof type === "object"
           ? (type.render ?? type.type ?? type)
           : null;
+
     const name =
       candidate === null
         ? null
         : (type.displayName ?? candidate.displayName ?? candidate.name);
+
     if (typeof name === "string" && name.length > 0) {
       components.push({ name: name.slice(0, 200), source: sourceOf(fiber) });
     }
+
     fiber = fiber.return;
   }
+
   return { components };
 
   function sourceOf(node: {
@@ -647,16 +764,20 @@ function probeReactComponents(annotationId: string) {
     _debugStack?: { stack?: unknown };
   }): string | null {
     const debugSource = node._debugSource;
+
     if (debugSource !== undefined && typeof debugSource.fileName === "string") {
       return `${debugSource.fileName}:${String(debugSource.lineNumber)}`.slice(
         0,
         1000,
       );
     }
+
     const stack = node._debugStack?.stack;
+
     if (typeof stack !== "string") {
       return null;
     }
+
     const frameLine = stack
       .split("\n")
       .map((line) => line.trim())
@@ -667,7 +788,9 @@ function probeReactComponents(annotationId: string) {
             line,
           ),
       );
+
     const match = frameLine?.match(/\(?((?:https?|file):\/\/[^\s)]+)\)?$/);
+
     return (
       match?.[1]?.replace(/\?[^:]*(?=:\d+:\d+$)/, "").slice(0, 1000) ?? null
     );
@@ -675,7 +798,7 @@ function probeReactComponents(annotationId: string) {
 }
 
 export function buildActivateExpression(theme: Record<string, string>): string {
-  return `((install) => { install(bb, ${JSON.stringify(theme)}); return globalThis.${ANNOTATION_CONTROLLER_KEY}.activate(); })(${installAgentAnnotations.toString()})`;
+  return `((install) => { install(omnyo, ${JSON.stringify(theme)}); return globalThis.${ANNOTATION_CONTROLLER_KEY}.activate(); })(${installAgentAnnotations.toString()})`;
 }
 
 export function buildControllerExpression(
@@ -688,5 +811,12 @@ export function buildReactProbeExpression(annotationId: string): string {
   if (!/^[a-z0-9]+$/.test(annotationId)) {
     throw new Error(`Invalid annotation id: ${annotationId}`);
   }
+
   return `(${probeReactComponents.toString()})(${JSON.stringify(annotationId)})`;
+}
+
+export function buildClearAcceptedExpression(
+  entries: Array<{ id: string; revision: number }>,
+): string {
+  return `globalThis.${ANNOTATION_CONTROLLER_KEY} ? globalThis.${ANNOTATION_CONTROLLER_KEY}.clearAccepted(${JSON.stringify(entries)}) : { active: false, count: 0 }`;
 }

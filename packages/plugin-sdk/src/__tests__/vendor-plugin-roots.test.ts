@@ -18,12 +18,15 @@ import {
 } from "../vendor-plugin-roots.js";
 
 let tempRoot: string;
+
 let homeDir: string;
+
 let cwd: string;
+
 let claudeDir: string;
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), "bb-vendor-plugin-roots-"));
+  tempRoot = await mkdtemp(path.join(tmpdir(), "omnyo-vendor-plugin-roots-"));
   homeDir = path.join(tempRoot, "home");
   cwd = path.join(tempRoot, "workspace");
   claudeDir = path.join(homeDir, ".claude");
@@ -82,11 +85,14 @@ async function resolve(
     homeDir,
     env,
   });
+
   const parsed = experimental_nativeRootsResolveOutputSchema.safeParse({
     skills: roots.skills,
     commands: roots.commands,
   });
+
   expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+
   return roots;
 }
 
@@ -181,6 +187,7 @@ describe("experimental_resolveClaudePluginRoots", () => {
       "fallback-plugin",
       "abcdef123456",
     );
+
     const olderPluginRoot = path.join(cacheRoot, "fallback-plugin", "older");
     await writePlugin(olderPluginRoot, { name: "fallback-plugin" });
     await writePlugin(fallbackPluginRoot, {
@@ -314,6 +321,7 @@ describe("experimental_resolveClaudePluginRoots", () => {
       "market",
       "tool",
     );
+
     await installed({
       "tool@market": [
         { scope: "user", installPath: path.join(cacheRoot, "gone") },
@@ -350,6 +358,7 @@ describe("experimental_resolveClaudePluginRoots", () => {
     await writePlugin(namedRoot, { name: "manifest-name" });
     await writePlugin(idRoot, {});
     await writePlugin(bareRoot, {});
+
     for (const root of [namedRoot, idRoot, bareRoot]) {
       await mkdir(path.join(root, "commands"), { recursive: true });
     }
@@ -397,6 +406,7 @@ describe("experimental_resolveClaudePluginRoots", () => {
       name: "local-wins",
       defaultEnabled: false,
     });
+
     for (const root of [
       optOutRoot,
       reenabledRoot,
@@ -405,6 +415,7 @@ describe("experimental_resolveClaudePluginRoots", () => {
     ]) {
       await mkdir(path.join(root, "skills"), { recursive: true });
     }
+
     await writeJson(path.join(claudeDir, "settings.json"), {
       enabledPlugins: { "reenabled@market": false, "local-wins@market": true },
     });
@@ -434,6 +445,7 @@ describe("experimental_resolveClaudePluginRoots", () => {
       "project-plugin",
       "1.0.0",
     );
+
     const localPluginRoot = path.join(
       cwd,
       ".claude",
@@ -443,11 +455,13 @@ describe("experimental_resolveClaudePluginRoots", () => {
       "local-plugin",
       "1.0.0",
     );
+
     const outsidePluginRoot = path.join(
       tempRoot,
       "elsewhere",
       "outside-plugin",
     );
+
     await installed({
       "project-plugin@market": [
         { scope: "project", installPath: projectPluginRoot },
@@ -505,6 +519,7 @@ describe("experimental_resolveClaudePluginRoots", () => {
     await writeFileEnsuringDir(skillFileTarget, "---\n---\n");
     const commandsTarget = path.join(tempRoot, "shared-commands");
     await writeFileEnsuringDir(path.join(commandsTarget, "go.md"), "body");
+
     for (const pluginRoot of [userPluginRoot, projectPluginRoot]) {
       await writePlugin(pluginRoot, {
         name: path.basename(pluginRoot),

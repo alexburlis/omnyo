@@ -7,12 +7,14 @@ const EMOJI_PATTERN =
   /^(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F|[#*0-9]\uFE0F?\u20E3)/u;
 
 let wordSegmenter: Intl.Segmenter | null = null;
+
 let graphemeSegmenter: Intl.Segmenter | null = null;
 
 function words(text: string): Intl.Segments {
   wordSegmenter ??= new Intl.Segmenter(WORD_SEGMENTER_LOCALE, {
     granularity: "word",
   });
+
   return wordSegmenter.segment(text);
 }
 
@@ -20,6 +22,7 @@ function graphemes(text: string): Intl.Segments {
   graphemeSegmenter ??= new Intl.Segmenter(WORD_SEGMENTER_LOCALE, {
     granularity: "grapheme",
   });
+
   return graphemeSegmenter.segment(text);
 }
 
@@ -27,41 +30,51 @@ function graphemeWidth(grapheme: string): number {
   if (grapheme.length === 0) {
     return 0;
   }
+
   if (EMOJI_PATTERN.test(grapheme)) {
     return 2;
   }
+
   return WIDE_SCRIPT_PATTERN.test(grapheme) ? 2 : 1;
 }
 
 export function countWords(text: string): number {
   let count = 0;
+
   for (const segment of words(text)) {
     if (segment.isWordLike) {
       count += 1;
     }
   }
+
   return count;
 }
 
 export function displayWidth(text: string): number {
   let width = 0;
+
   for (const segment of graphemes(text)) {
     width += graphemeWidth(segment.segment);
   }
+
   return width;
 }
 
 export function truncateToWidth(text: string, maxWidth: number): string {
   let width = 0;
   let end = 0;
+
   for (const segment of graphemes(text)) {
     const next = width + graphemeWidth(segment.segment);
+
     if (next > maxWidth) {
       break;
     }
+
     width = next;
     end = segment.index + segment.segment.length;
   }
+
   return text.slice(0, end);
 }
 
@@ -74,14 +87,18 @@ export function truncateToWidthAtWordBoundary(
   }
 
   let end = 0;
+
   for (const segment of words(text)) {
     if (!segment.isWordLike) {
       continue;
     }
+
     const candidateEnd = segment.index + segment.segment.length;
+
     if (displayWidth(text.slice(0, candidateEnd)) > maxWidth) {
       break;
     }
+
     end = candidateEnd;
   }
 

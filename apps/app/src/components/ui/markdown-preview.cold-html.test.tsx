@@ -6,15 +6,18 @@ import { MarkdownPreview } from "./markdown-preview";
 
 const pipeline = vi.hoisted(() => {
   let release!: () => void;
+
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
+
   return { held, release, imports: 0 };
 });
 
 vi.mock("./markdown-html", async (original) => {
   pipeline.imports += 1;
   await pipeline.held;
+
   return original();
 });
 
@@ -24,6 +27,7 @@ it("keeps plain Markdown immediate and HTML safe while the real pipeline downloa
   const view = render(
     <MarkdownPreview content="**Already readable**" allowHtml />,
   );
+
   expect(screen.getByText("Already readable").tagName).toBe("STRONG");
   await act(async () => {});
   expect(pipeline.imports).toBe(0);
@@ -36,8 +40,10 @@ it("keeps plain Markdown immediate and HTML safe while the real pipeline downloa
   );
   await act(async () => {});
   expect(pipeline.imports).toBe(0);
+
   const content =
     'Still readable\n\n<video controls src="https://example.com/movie.mp4" onerror="alert(1)"></video><script>alert(1)</script>';
+
   view.rerender(<MarkdownPreview content={content} allowHtml />);
   await act(async () => {});
   expect(pipeline.imports).toBe(1);

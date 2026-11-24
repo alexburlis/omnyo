@@ -316,6 +316,7 @@ describe("claude tool-use translation (delta path)", () => {
       ): event is Extract<(typeof events)[number], { type: "item/started" }> =>
         event.type === "item/started",
     );
+
     expect(started?.item).toMatchObject({
       type: "fileChange",
       id: harness.itemId("tool-write-1"),
@@ -327,6 +328,7 @@ describe("claude tool-use translation (delta path)", () => {
         },
       ],
     });
+
     if (!started || started.item.type !== "fileChange") return;
     expect(started.item.changes[0]?.diff).toContain("+++ b/src/app.ts");
   });
@@ -409,6 +411,7 @@ describe("claude tool-use translation (delta path)", () => {
       },
       session_id: "sess-1",
     });
+
     const events = harness.translate({
       type: "user",
       message: {
@@ -428,6 +431,7 @@ describe("claude tool-use translation (delta path)", () => {
       },
       session_id: "sess-1",
     });
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -470,6 +474,7 @@ describe("claude tool-use translation (delta path)", () => {
       },
       session_id: "sess-1",
     });
+
     const events = harness.translate({
       type: "user",
       message: {
@@ -485,6 +490,7 @@ describe("claude tool-use translation (delta path)", () => {
       },
       session_id: "sess-1",
     });
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "item/delegation/completed",
@@ -618,6 +624,7 @@ describe("claude tool-use translation (delta path)", () => {
       },
       session_id: "sess-1",
     });
+
     expect(closed).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -786,6 +793,7 @@ describe("claude tool-result translation (delta path)", () => {
       },
       session_id: "sess-1",
     });
+
     const events = harness.translate({
       type: "user",
       message: {
@@ -802,6 +810,7 @@ describe("claude tool-result translation (delta path)", () => {
       },
       session_id: "sess-1",
     });
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -975,9 +984,11 @@ describe("claude tool-result translation (delta path)", () => {
       status: "completed",
       exitCode: 0,
     });
+
     if (completedEvent?.item.type !== "commandExecution") {
       throw new Error("Expected commandExecution completion");
     }
+
     expect(completedEvent.item.aggregatedOutput).toBeUndefined();
   });
 

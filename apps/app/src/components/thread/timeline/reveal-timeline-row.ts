@@ -8,23 +8,27 @@ export function revealTimelineRow(
   flash = true,
 ) {
   const options = { block: "start", inline: "nearest" } as const;
+
   if (bottomAnchor !== null) {
     bottomAnchor.scrollElementIntoView({ element, options });
   } else {
     element.scrollIntoView(options);
   }
+
   if (!flash) return;
 
   window.clearTimeout(flashTimers.get(element));
-  if (element.classList.contains("bb-search-flash")) {
-    element.classList.remove("bb-search-flash");
+
+  if (element.classList.contains("omnyo-search-flash")) {
+    element.classList.remove("omnyo-search-flash");
     void element.offsetWidth;
   }
-  element.classList.add("bb-search-flash");
+
+  element.classList.add("omnyo-search-flash");
   flashTimers.set(
     element,
     window.setTimeout(() => {
-      element.classList.remove("bb-search-flash");
+      element.classList.remove("omnyo-search-flash");
       flashTimers.delete(element);
     }, 1700),
   );

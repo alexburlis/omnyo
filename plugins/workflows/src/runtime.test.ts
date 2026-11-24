@@ -5,6 +5,7 @@ import type { WorkflowCapabilities } from "./types.js";
 describe("workflow QuickJS runtime", () => {
   it("awaits multiple concurrent host agents", async () => {
     const calls: string[] = [];
+
     const result = await executeWorkflowScript({
       args: { suffix: "!" },
       body: `
@@ -20,6 +21,7 @@ describe("workflow QuickJS runtime", () => {
           await new Promise((resolve) =>
             setTimeout(resolve, prompt === "first" ? 10 : 1),
           );
+
           return { prompt };
         },
         log: vi.fn(),
@@ -28,8 +30,8 @@ describe("workflow QuickJS runtime", () => {
     });
 
     expect(calls).toEqual([
-      'first:{"selection":null,"outputSchema":null,"title":"A","phase":null}',
-      'second:{"selection":null,"outputSchema":null,"title":"B","phase":null}',
+      'first:{"environmentId":null,"selection":null,"outputSchema":null,"title":"A","phase":null}',
+      'second:{"environmentId":null,"selection":null,"outputSchema":null,"title":"B","phase":null}',
     ]);
     expect(result).toEqual({
       values: [{ prompt: "first" }, { prompt: "second" }],
@@ -40,6 +42,7 @@ describe("workflow QuickJS runtime", () => {
   it("exposes phase and log without host capabilities leaking in", async () => {
     const log = vi.fn();
     const phase = vi.fn();
+
     const result = await executeWorkflowScript({
       args: null,
       body: `
@@ -70,6 +73,7 @@ describe("workflow QuickJS runtime", () => {
       title: string | null;
       phase: string | null;
     }> = [];
+
     const phase = vi.fn();
     await executeWorkflowScript({
       args: null,
@@ -95,6 +99,7 @@ describe("workflow QuickJS runtime", () => {
             title: options.title,
             phase: options.phase,
           });
+
           return null;
         },
         log: vi.fn(),
@@ -165,6 +170,7 @@ describe("workflow QuickJS runtime", () => {
 
   it("cancels and safely tears down un-awaited host calls", async () => {
     let settle: ((value: { late: boolean }) => void) | undefined;
+
     const result = await executeWorkflowScript({
       args: null,
       body: 'agent("slow"); return "finished";',
@@ -185,6 +191,7 @@ describe("workflow QuickJS runtime", () => {
 
   it("wakes an awaiting workflow when cancelled", async () => {
     const controller = new AbortController();
+
     const execution = executeWorkflowScript({
       args: null,
       body: 'return await agent("never");',
@@ -212,6 +219,7 @@ describe("workflow QuickJS runtime", () => {
   it("bounds agent fan-out and total calls", async () => {
     let active = 0;
     let peak = 0;
+
     const result = await executeWorkflowScript({
       args: null,
       body: `
@@ -226,6 +234,7 @@ describe("workflow QuickJS runtime", () => {
           peak = Math.max(peak, active);
           await new Promise((resolve) => setTimeout(resolve, 2));
           active -= 1;
+
           return prompt;
         },
         log: vi.fn(),
@@ -291,6 +300,7 @@ describe("workflow QuickJS runtime", () => {
   it("rejects cyclic and exotic host values", async () => {
     const cyclic: unknown[] = [];
     cyclic.push(cyclic);
+
     const capabilities = {
       agent: async () => null,
       log: vi.fn(),
@@ -315,6 +325,7 @@ describe("workflow QuickJS runtime", () => {
 
   it("treats synchronous capability throws as agent rejections", async () => {
     const calls: string[] = [];
+
     const result = await executeWorkflowScript({
       args: null,
       body: `
@@ -325,7 +336,9 @@ describe("workflow QuickJS runtime", () => {
       capabilities: {
         agent(prompt) {
           calls.push(prompt);
+
           if (prompt === "first") throw new Error("sync failure");
+
           return Promise.resolve("ok");
         },
         log: vi.fn(),
@@ -361,6 +374,7 @@ describe("workflow QuickJS runtime", () => {
 
   it("starts parallel agent calls in array order through the FIFO semaphore", async () => {
     const calls: string[] = [];
+
     const result = await executeWorkflowScript({
       args: null,
       body: `return await parallel([
@@ -372,6 +386,7 @@ describe("workflow QuickJS runtime", () => {
         async agent(prompt) {
           calls.push(prompt);
           await Promise.resolve();
+
           return prompt;
         },
         log: vi.fn(),
@@ -486,6 +501,7 @@ describe("workflow QuickJS runtime", () => {
       capabilities: {
         async agent(prompt) {
           await Promise.resolve();
+
           return prompt;
         },
         log: vi.fn(),
@@ -524,6 +540,7 @@ describe("workflow QuickJS runtime", () => {
       maxConcurrentAgents: context.limits.maxConcurrentAgents,
       schedulerSharesLimits: context.scheduler.limits === context.limits,
     }));
+
     const result = await executeWorkflowScript({
       args: null,
       body: `return await workflow("child/workflow", { answer: 42 });`,
@@ -608,6 +625,7 @@ describe("workflow QuickJS runtime", () => {
     const starts: string[] = [];
     let active = 0;
     let peak = 0;
+
     const capabilities: WorkflowCapabilities = {
       async agent(prompt) {
         starts.push(prompt);
@@ -615,6 +633,7 @@ describe("workflow QuickJS runtime", () => {
         peak = Math.max(peak, active);
         await new Promise((resolve) => setTimeout(resolve, 2));
         active -= 1;
+
         return prompt;
       },
       workflow: (_reference, childArgs, context) =>
@@ -658,6 +677,7 @@ describe("workflow QuickJS runtime", () => {
 
   it("accepts native workflow references and rejects invalid or exotic ones", async () => {
     const references: unknown[] = [];
+
     const result = await executeWorkflowScript({
       args: null,
       body: `
@@ -696,6 +716,7 @@ describe("workflow QuickJS runtime", () => {
         agent: async () => null,
         workflow: async (reference) => {
           references.push(reference);
+
           return reference;
         },
         log: vi.fn(),
@@ -773,9 +794,11 @@ describe("workflow QuickJS runtime", () => {
   it("propagates root cancellation through an executing child VM", async () => {
     const controller = new AbortController();
     let markChildStarted: (() => void) | undefined;
+
     const childStarted = new Promise<void>((resolve) => {
       markChildStarted = resolve;
     });
+
     const capabilities: WorkflowCapabilities = {
       agent: (_prompt, _options, signal) =>
         new Promise((_resolve, reject) => {
@@ -796,6 +819,7 @@ describe("workflow QuickJS runtime", () => {
       log: vi.fn(),
       phase: vi.fn(),
     };
+
     const execution = executeWorkflowScript({
       args: null,
       body: `return await workflow("child");`,
@@ -811,10 +835,13 @@ describe("workflow QuickJS runtime", () => {
   it("tears down child VM calls without disturbing the parent VM", async () => {
     const calls: string[] = [];
     let detachedAborted = false;
+
     const capabilities: WorkflowCapabilities = {
       agent: (prompt, _options, signal) => {
         calls.push(prompt);
+
         if (prompt !== "child-detached") return Promise.resolve(prompt);
+
         return new Promise((_resolve, reject) => {
           signal.addEventListener(
             "abort",
@@ -875,6 +902,7 @@ describe("workflow QuickJS runtime", () => {
   it("cancels an awaited nested workflow and closes an un-awaited one", async () => {
     const awaitedController = new AbortController();
     let fireAndForgetAborted = false;
+
     const awaited = executeWorkflowScript({
       args: null,
       body: `return await workflow("awaited");`,
@@ -893,6 +921,7 @@ describe("workflow QuickJS runtime", () => {
         phase: vi.fn(),
       },
     });
+
     awaitedController.abort();
     await expect(awaited).rejects.toThrow("Workflow cancelled");
 
@@ -915,6 +944,7 @@ describe("workflow QuickJS runtime", () => {
         phase: vi.fn(),
       },
     });
+
     expect(result).toBe("done");
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fireAndForgetAborted).toBe(true);

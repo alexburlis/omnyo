@@ -1,140 +1,108 @@
-import type { BbPluginApi, PluginAgentToolResult } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
+import { toolInputSchema } from "./contracts.js";
+import { TOOL_DESCRIPTION } from "./tool-definition.js";
 import {
-  ASK_USER_QUESTION_RENDERER_ID,
-  interactionResponseSchema,
-  toolInputSchema,
-} from "./contracts.js";
-import { TOOL_DESCRIPTION, buildTimeoutMessage } from "./tool-definition.js";
-import {
-  assertInteractionPayloadFits,
-  buildInteractionPayload,
-  buildInteractionTitle,
-  buildToolResult,
-  describeAnswers,
   validateToolInput,
+  buildInteractionPayload,
+  assertInteractionPayloadFits,
 } from "./translate.js";
 
 export const TOOL_NAME = "AskUserQuestion";
 
-const QUESTION_TIMEOUT_OPTIONS = new Map([
-  ["30 minutes", 30 * 60 * 1000],
-  ["1 hour", 60 * 60 * 1000],
-  ["4 hours", 4 * 60 * 60 * 1000],
-  ["8 hours", 8 * 60 * 60 * 1000],
-  ["24 hours", 24 * 60 * 60 * 1000],
-  ["3 days", 3 * 24 * 60 * 60 * 1000],
-  ["7 days", 7 * 24 * 60 * 60 * 1000],
-]);
-
-function questionTimeoutMs(value: string): number {
-  const timeoutMs = QUESTION_TIMEOUT_OPTIONS.get(value);
-  if (timeoutMs === undefined) {
-    throw new Error(`Unsupported question timeout: ${value}`);
-  }
-  return timeoutMs;
-}
-
-function errorResult(message: string): PluginAgentToolResult {
-  return { content: [{ type: "text", text: message }], isError: true };
-}
-
-export default function plugin(bb: BbPluginApi) {
-  const settings = bb.settings.define({
-    questionTimeout: {
-      type: "select",
-      label: "Question timeout",
-      description:
-        "How long a question card stays open waiting for your answer.",
-      options: [...QUESTION_TIMEOUT_OPTIONS.keys()],
-      default: "30 minutes",
-    },
-  });
-
-  bb.agents.registerTool({
+export default function plugin(api: PluginApi) {
+  api.agents.registerTool({
     name: TOOL_NAME,
-    description: TOOL_DESCRIPTION,
+    description: `${TOOL_DESCRIPTION}\nQuestions use Omnyo's native question panel. In a chat that another chat started or parents, the question goes to that chat instead of the owner, and its answer arrives as a message in this chat. This call returns immediately. Answers steer the running turn or resume an idle chat. A required question blocks only the dependent action; keep doing independent authorized work. Optional questions permit a reversible default. Withdraw unanswered questions that are no longer needed with omnyo question command --self using the returned id and revision. Dismissal supplies no answer or approval. Set delegable on a question only when it is a reversible choice within authority you already hold, so a rule the owner adopted may answer it; never when it asks the owner to approve pushing, publishing, deploying, releasing, submitting, sending, purchasing, deleting data, changing an external service, creating an account, or saving anything that outlives the chat.`,
     presentation: {
-      label: { pending: "Asking a question", completed: "Asked a question" },
+      label: { pending: "Asking a question", completed: "Question opened" },
       icon: { glyph: "MessageQuestion" },
       suppress: true,
     },
     parameters: toolInputSchema,
     async execute(input, ctx) {
       const invalid = validateToolInput(input);
-      if (invalid !== null) return errorResult(invalid);
 
-      const payload = buildInteractionPayload(input);
+      if (invalid !== null)
+        return {
+          content: [{ type: "text" as const, text: invalid }],
+          isError: true,
+        };
+
       try {
-        assertInteractionPayloadFits(payload);
-      } catch (error) {
-        return errorResult(
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-
-      const { questionTimeout } = await settings.get();
-      const askedAt = Date.now();
-      let result;
-      try {
-        result = await bb.ui.requestInput(
-          {
-            threadId: ctx.threadId,
-            rendererId: ASK_USER_QUESTION_RENDERER_ID,
-            title: buildInteractionTitle(payload),
-            payload,
-            timeoutMs: questionTimeoutMs(questionTimeout),
-            presentation: {
-              label: { pending: "Asking a question", completed: "Asked" },
-              icon: { glyph: "MessageQuestion" },
+        assertInteractionPayloadFits(buildInteractionPayload(input));
+      } catch (cause) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: cause instanceof Error ? cause.message : String(cause),
             },
-            describeSubmission: (value) => {
-              const parsed = interactionResponseSchema.safeParse(value);
-              if (!parsed.success) return {};
-              return describeAnswers(
-                payload,
-                buildToolResult(payload, parsed.data),
-              );
-            },
-          },
-          { signal: ctx.signal },
-        );
-      } catch (error) {
-        return errorResult(
-          `The question could not be shown (${error instanceof Error ? error.message : String(error)}). Continue with your best judgement.`,
-        );
+          ],
+          isError: true,
+        };
       }
 
-      if (result.outcome === "cancelled") {
-        return errorResult(
-          result.reason === "timeout"
-            ? buildTimeoutMessage(Date.now() - askedAt)
-            : "The user dismissed the question without answering. Proceed with your best judgement, or ask again in your reply.",
-        );
-      }
+      const result = await api.sdk.experimental_attention.command({
+        threadId: ctx.threadId,
+        command: {
+          action: "open",
+          questions: input.questions.map((question) => ({
+            key: null,
+            prompt: question.question,
+            context: null,
+            shortLabel: question.header,
+            mode: input.mode,
+            multiSelect: question.multiSelect,
+            allowFreeText: true,
+            additiveNotes: true,
+            delegable: question.delegable,
+            options: question.options.map((option, index) => ({
+              value: String.fromCharCode(97 + index),
+              label: option.label.replace(/\s*\(Recommended\)\s*$/u, ""),
+              description: option.description,
+              preview: option.preview ?? null,
+              recommended: option.label.includes("(Recommended)"),
+            })),
+          })),
+        },
+      });
 
-      const parsed = interactionResponseSchema.safeParse(result.value);
-      if (!parsed.success) {
-        return errorResult(
-          "The answer could not be read. Ask the question again in your reply instead.",
-        );
-      }
-      const toolResult = buildToolResult(payload, parsed.data);
-      if (Object.keys(toolResult.answers).length === 0) {
-        return errorResult(
-          "The user submitted no answers. Proceed with your best judgement, or ask again in your reply.",
-        );
-      }
-      return JSON.stringify(toolResult);
+      const parentThreadId: unknown = result.routedToThreadId;
+
+      if (typeof parentThreadId === "string")
+        return JSON.stringify({
+          questions: [],
+          delivery: "parent-chat",
+          parentThreadId,
+          instruction: [
+            `This chat reports to ${parentThreadId}. The question went to that chat, not the owner. Its answer arrives as a message in this chat.`,
+            input.mode === "required"
+              ? "Do not assume an answer before the dependent action. Continue independent work, or end the turn when nothing else can proceed."
+              : "Continue with your stated reversible default. A later answer from that chat steers this task.",
+            "Do not ask the owner or tell anyone to use a question panel.",
+          ].join(" "),
+        });
+
+      return JSON.stringify({
+        questions: result.questions,
+        delivery: "asynchronous",
+        instruction: [
+          input.mode === "required"
+            ? "Wait for an answer before the dependent action. Continue independent authorized work; do not assume an answer or approval."
+            : "Continue with your stated reversible default. A later answer steers this task.",
+          `If an unanswered question is no longer needed, withdraw it with omnyo question command --self --value '{"action":"withdraw","id":"<id>","revision":1}' --json, replacing id and revision with that question's returned values.`,
+        ].join(" "),
+      });
     },
   });
-
-  bb.agents.configure((context) => {
-    if (context.provider.capabilities.supportsNativeUserQuestion) {
-      return { tools: [], skills: [] };
-    }
-    return {
-      tools: [TOOL_NAME],
-      skills: [],
-    };
-  });
+  api.agents.configure((context) => ({
+    tools:
+      context.provider.capabilities.supportsNativeUserQuestion ||
+      (context.thread.experimental_visibility === "hidden" &&
+        (context.thread.parentThreadId === null ||
+          context.origin.kind !== null))
+        ? []
+        : [TOOL_NAME],
+    skills: [],
+  }));
 }

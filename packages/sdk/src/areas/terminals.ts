@@ -1,5 +1,6 @@
 import type {
   CreateTerminalRequest,
+  TerminalForegroundResponse,
   TerminalInputRequest,
   TerminalListQuery,
   TerminalListResponse,
@@ -8,7 +9,7 @@ import type {
   TerminalResizeRequest,
   TerminalSession,
   UpdateTerminalRequest,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 export interface TerminalThreadScope {
@@ -98,21 +99,36 @@ export interface TerminalOutputArgs extends TerminalTargetArgs {
   tailBytes?: TerminalOutputQuery["tailBytes"];
 }
 
+export interface TerminalForegroundArgs extends TerminalTargetArgs {
+  signal?: AbortSignal;
+}
+
 export type TerminalRestartArgs = TerminalTargetArgs;
 
 export type TerminalListResult = TerminalListResponse;
+
 export type TerminalCreateResult = TerminalSession;
+
 export type TerminalGetResult = TerminalSession;
+
 export type TerminalRenameResult = TerminalSession;
+
 export type TerminalCloseResult = TerminalSession;
+
 export type TerminalInputResult = TerminalSession;
+
 export type TerminalResizeResult = TerminalSession;
+
 export type TerminalOutputResult = TerminalOutputResponse;
+
 export type TerminalRestartResult = TerminalSession;
+
+export type TerminalForegroundResult = TerminalForegroundResponse;
 
 export interface TerminalsArea {
   close(args: TerminalCloseArgs): Promise<TerminalCloseResult>;
   create(args: TerminalCreateArgs): Promise<TerminalCreateResult>;
+  foreground(args: TerminalForegroundArgs): Promise<TerminalForegroundResult>;
   get(args: TerminalGetArgs): Promise<TerminalGetResult>;
   input(args: TerminalInputArgs): Promise<TerminalInputResult>;
   list(args: TerminalListArgs): Promise<TerminalListResult>;
@@ -132,6 +148,7 @@ function assertUnambiguousScope(
           "Thread terminal scope cannot include environment or host selectors.",
         );
       }
+
       return;
     case "environment":
       if ("threadId" in scope || "hostId" in scope || "cwd" in scope) {
@@ -139,6 +156,7 @@ function assertUnambiguousScope(
           "Environment terminal scope cannot include thread or host selectors.",
         );
       }
+
       return;
     case "host_path":
       if ("threadId" in scope || "environmentId" in scope) {
@@ -151,6 +169,7 @@ function assertUnambiguousScope(
 
 function terminalListQuery(scope: TerminalListScope): TerminalListQuery {
   assertUnambiguousScope(scope);
+
   switch (scope.kind) {
     case "thread":
       return { threadId: scope.threadId };
@@ -168,6 +187,7 @@ function terminalCreateTarget(
   scope: TerminalCreateScope,
 ): CreateTerminalRequest["target"] {
   assertUnambiguousScope(scope);
+
   switch (scope.kind) {
     case "thread":
       return { kind: "thread", threadId: scope.threadId };
@@ -228,6 +248,14 @@ export function createTerminalsArea(args: CreateSdkAreaArgs): TerminalsArea {
       );
     },
     create,
+    async foreground(input) {
+      return transport.readJson(
+        transport.api.v1.terminals[":terminalId"].foreground.$get(
+          { param: { terminalId: input.terminalId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      );
+    },
     get,
     async input(input) {
       return transport.readJson(

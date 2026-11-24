@@ -24,18 +24,21 @@ vi.mock("react-resizable-panels", async () => {
   const { dirname, join } = await import("node:path");
   const require = createRequire(import.meta.url);
   const root = dirname(require.resolve("react-resizable-panels/package.json"));
+
   return require(
     join(root, "dist/react-resizable-panels.browser.development.cjs.js"),
   );
 });
 
 const frames = new Map<number, FrameRequestCallback>();
+
 let nextFrameId = 0;
 
 beforeEach(() => {
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
     const id = ++nextFrameId;
     frames.set(id, callback);
+
     return id;
   });
   vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
@@ -64,8 +67,10 @@ function setup(secondarySize = 50, width = 800) {
   const group = createRef<ImperativePanelGroupHandle>();
   const onResize = vi.fn();
   const onDragging = vi.fn();
+
   function Harness() {
     const panel = useRef<ImperativePanelHandle>(null);
+
     const hitTargetRef = usePanelResizeSnap({
       onResize: (fraction) => {
         onResize(fraction);
@@ -73,6 +78,7 @@ function setup(secondarySize = 50, width = 800) {
       },
       onDragging,
     });
+
     return (
       <PanelGroup
         ref={group}
@@ -105,6 +111,7 @@ function setup(secondarySize = 50, width = 800) {
       </PanelGroup>
     );
   }
+
   const { unmount } = render(<Harness />);
   const previous = screen.getByTestId("previous");
   const divider = screen.getByTestId("divider");
@@ -125,6 +132,7 @@ function setup(secondarySize = 50, width = 800) {
       divider.getBoundingClientRect().right,
       ((group.current?.getLayout()[1] ?? 0) * width) / 100,
     );
+
   const down = () =>
     fireEvent.pointerDown(divider, {
       clientX: divider.getBoundingClientRect().left,
@@ -133,13 +141,16 @@ function setup(secondarySize = 50, width = 800) {
       buttons: 1,
       pointerId: 40,
     });
+
   const move = (clientX: number, buttons = 1) =>
     fireEvent.pointerMove(document.body, {
       buttons,
       clientX,
       pointerId: 40,
     });
+
   const release = () => fireEvent.pointerUp(window, { pointerId: 40 });
+
   const expectLayout = (leading: number, trailing: number) => {
     const layout = group.current?.getLayout();
     expect(layout?.[0]).toBeCloseTo(leading);
@@ -147,6 +158,7 @@ function setup(secondarySize = 50, width = 800) {
     expect(Number(previous.style.flexGrow)).toBeCloseTo(leading, 0);
     expect(Number(next.style.flexGrow)).toBeCloseTo(trailing, 0);
   };
+
   return {
     divider,
     down,
@@ -211,11 +223,13 @@ describe("usePanelResizeSnap", () => {
     (moveFirst) => {
       const h = setup();
       h.down();
+
       if (moveFirst) {
         h.move(450);
         h.move(440);
         advanceFrame();
       }
+
       act(() => h.group.current?.setLayout([60, 40]));
       h.release();
       advanceFrame();
@@ -241,6 +255,7 @@ describe("usePanelResizeSnap", () => {
         "0ms",
       );
     });
+
     if (end === "buttons") h.move(440, 0);
     else if (end === "lostpointercapture")
       fireEvent(
@@ -271,6 +286,7 @@ describe("usePanelResizeSnap", () => {
     const rawMove = vi.fn();
     document.body.addEventListener("pointermove", rawMove, true);
     document.body.addEventListener("pointerdown", rawDown, true);
+
     try {
       h.down();
       h.move(450);

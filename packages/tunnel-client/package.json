@@ -1,5 +1,5 @@
 {
-  "name": "@bb/tunnel-client",
+  "name": "@omnyo/tunnel-client",
   "version": "0.0.1",
   "type": "module",
   "private": true,
@@ -15,15 +15,15 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
-    "@bb/tunnel-contract": "workspace:*",
+    "@omnyo/tunnel-contract": "workspace:*",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^3.0.0"
+    "vitest": "4.1.11"
   }
 }

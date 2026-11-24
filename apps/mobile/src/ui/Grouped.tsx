@@ -1,5 +1,10 @@
 import { Children, Fragment, isValidElement, type ReactNode } from "react";
-import { Pressable, View } from "react-native";
+import {
+  Pressable,
+  View,
+  type AccessibilityActionEvent,
+  type AccessibilityActionInfo,
+} from "react-native";
 import { useTheme } from "@/theme/ThemeProvider";
 import { cn } from "./cn";
 import { Icon, isIconName, type IconName } from "./Icon";
@@ -15,8 +20,11 @@ import { Text } from "./Text";
 const IS_IOS = process.env.EXPO_OS === "ios";
 
 export const GROUPED_CARD_RADIUS = IS_IOS ? 10 : 16;
+
 export const GROUPED_ROW_PADDING_X = 16;
+
 const GROUPED_ROW_GAP = 12;
+
 export const ICON_BADGE_SIZE = 29;
 
 export interface IconBadgeProps {
@@ -55,6 +63,8 @@ export interface GroupedRowProps {
   trailing?: "chevron" | "checkmark" | ReactNode;
   onPress?: () => void;
   onLongPress?: () => void;
+  accessibilityActions?: readonly AccessibilityActionInfo[];
+  onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
   destructive?: boolean;
   disabled?: boolean;
   selected?: boolean;
@@ -73,6 +83,8 @@ export function GroupedRow({
   trailing,
   onPress,
   onLongPress,
+  accessibilityActions,
+  onAccessibilityAction,
   destructive = false,
   disabled = false,
   selected = trailing === "checkmark" ? true : undefined,
@@ -83,11 +95,13 @@ export function GroupedRow({
   const { tokens } = useTheme();
   const interactive = Boolean(onPress || onLongPress);
   const titleColor = destructive ? tokens.destructiveText : tokens.foreground;
+
   const leadingColor = destructive
     ? tokens.destructiveText
     : leadingTone === "primary"
       ? tokens.primary
       : tokens.foreground;
+
   const leadingNode = badge ? (
     <IconBadge icon={badge.icon} symbol={badge.symbol} color={badge.color} />
   ) : isIconName(leading) ? (
@@ -95,6 +109,7 @@ export function GroupedRow({
   ) : (
     leading
   );
+
   const trailingNode =
     trailing === "chevron" ? (
       <DisclosureChevron />
@@ -103,10 +118,12 @@ export function GroupedRow({
     ) : (
       trailing
     );
+
   const layoutClassName = cn(
     "min-h-[44px] flex-row items-center gap-3 px-4 py-3",
     disabled && "opacity-50",
   );
+
   const content = (
     <>
       {leadingNode}
@@ -137,6 +154,7 @@ export function GroupedRow({
       {trailingNode}
     </>
   );
+
   if (!interactive) {
     return (
       <View className={layoutClassName} testID={testID}>
@@ -144,6 +162,7 @@ export function GroupedRow({
       </View>
     );
   }
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -157,6 +176,8 @@ export function GroupedRow({
       disabled={disabled}
       onPress={onPress}
       onLongPress={onLongPress}
+      accessibilityActions={accessibilityActions}
+      onAccessibilityAction={onAccessibilityAction}
       testID={testID}
       className={cn(
         layoutClassName,
@@ -180,12 +201,15 @@ function rowTextInset(child: ReactNode): number {
   if (!isValidElement<{ badge?: unknown; leading?: unknown }>(child)) {
     return GROUPED_ROW_PADDING_X;
   }
+
   if (child.props.badge) {
     return GROUPED_ROW_PADDING_X + ICON_BADGE_SIZE + GROUPED_ROW_GAP;
   }
+
   if (child.props.leading !== undefined && child.props.leading !== null) {
     return GROUPED_ROW_PADDING_X + LIST_ROW_ICON_SIZE + GROUPED_ROW_GAP;
   }
+
   return GROUPED_ROW_PADDING_X;
 }
 
@@ -198,6 +222,7 @@ export function GroupedSection({
 }: GroupedSectionProps) {
   const { tokens } = useTheme();
   const rows = Children.toArray(children);
+
   return (
     <View className="gap-2" testID={testID}>
       {title ? (

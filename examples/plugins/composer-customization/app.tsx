@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { definePluginApp, useComposer } from "@get-bb/plugin-sdk/app";
+import { definePluginApp, useComposer } from "@omnyo/plugin-sdk/app";
 import "./app.css";
 
 function ComposerAction() {
@@ -32,6 +32,7 @@ function ComposerAction() {
 function ComposerBanner() {
   const composer = useComposer();
   const mentionCount = composer.draft.mentions.length;
+
   return (
     <div className="composer-reference-banner">
       {composer.isEmpty

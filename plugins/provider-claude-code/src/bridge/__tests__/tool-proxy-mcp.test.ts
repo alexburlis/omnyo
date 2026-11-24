@@ -30,9 +30,11 @@ const RESULT_SCHEMA = {
 async function connect(server: ReturnType<typeof buildBridgeMcpServer>) {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
+
   await server.instance.connect(serverTransport);
   const client = new Client({ name: "test", version: "1.0.0" });
   await client.connect(clientTransport);
+
   return client;
 }
 
@@ -41,24 +43,25 @@ describe("buildBridgeMcpServer", () => {
     const server = buildBridgeMcpServer(
       [
         {
-          name: "bb_workflow_result",
+          name: "omnyo_workflow_result",
           description: "Return the structured result.",
           inputSchema: RESULT_SCHEMA,
         },
         {
-          name: "bb_odd_tool",
+          name: "omnyo_odd_tool",
           description: "Tool registered with a non-object schema.",
           inputSchema: { type: "string" },
         },
       ],
       async () => ({ content: "unused" }),
     );
+
     const client = await connect(server);
 
     const listed = await client.listTools();
     expect(listed.tools).toHaveLength(2);
     expect(listed.tools[0]).toMatchObject({
-      name: "bb_workflow_result",
+      name: "omnyo_workflow_result",
       description: "Return the structured result.",
       inputSchema: RESULT_SCHEMA,
     });
@@ -66,46 +69,76 @@ describe("buildBridgeMcpServer", () => {
     await client.close();
   });
 
-  it("forwards tool calls with raw arguments and reports errors", async () => {
-    const calls: Array<{ toolName: string; args: Record<string, unknown> }> =
-      [];
+  it("keeps only Omnyo's question tool loaded outside tool search", async () => {
     const server = buildBridgeMcpServer(
       [
         {
-          name: "bb_workflow_result",
+          name: "AskUserQuestion",
+          description: "Ask the user.",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "omnyo_other_tool",
+          description: "Another tool.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      async () => ({ content: "unused" }),
+    );
+
+    const client = await connect(server);
+
+    const listed = await client.listTools();
+    expect(listed.tools[0]?._meta).toEqual({ "anthropic/alwaysLoad": true });
+    expect(listed.tools[1]?._meta).toBeUndefined();
+    await client.close();
+  });
+
+  it("forwards tool calls with raw arguments and reports errors", async () => {
+    const calls: Array<{ toolName: string; args: Record<string, unknown> }> =
+      [];
+
+    const server = buildBridgeMcpServer(
+      [
+        {
+          name: "omnyo_workflow_result",
           description: "Return the structured result.",
           inputSchema: RESULT_SCHEMA,
         },
       ],
       async (toolName, args) => {
         calls.push({ toolName, args });
+
         return { content: '{"accepted":true}' };
       },
     );
+
     const client = await connect(server);
 
     const result = await client.callTool({
-      name: "bb_workflow_result",
+      name: "omnyo_workflow_result",
       arguments: { value: { verdict: "merge", blockers: [] } },
     });
+
     expect(result).toMatchObject({
       content: [{ type: "text", text: '{"accepted":true}' }],
     });
     expect(result.isError).toBeUndefined();
     expect(calls).toEqual([
       {
-        toolName: "bb_workflow_result",
+        toolName: "omnyo_workflow_result",
         args: { value: { verdict: "merge", blockers: [] } },
       },
     ]);
 
     const unknown = await client.callTool({
-      name: "bb_missing",
+      name: "omnyo_missing",
       arguments: {},
     });
+
     expect(unknown).toMatchObject({
       isError: true,
-      content: [{ type: "text", text: "Unknown tool: bb_missing" }],
+      content: [{ type: "text", text: "Unknown tool: omnyo_missing" }],
     });
     await client.close();
   });
@@ -131,12 +164,14 @@ describe("buildBridgeMcpServer", () => {
         images: [{ data: "iVBORw0KGgo=", mimeType: "image/png" }],
       }),
     );
+
     const client = await connect(server);
 
     const result = await client.callTool({
       name: "browser_screenshot",
       arguments: {},
     });
+
     expect(result.content).toEqual([
       { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
     ]);

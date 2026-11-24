@@ -1,6 +1,6 @@
-import type { Host } from "@bb/domain";
-import { Icon, type BuiltinIconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import type { Host } from "@omnyo/domain";
+import { Icon, type BuiltinIconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   MachineProviderIcon,
   type MachineProviderPresentation,
@@ -31,6 +31,7 @@ export function MachineIcon({
             logoUrl: null,
           }
       : null;
+
   if (provider === null) {
     return (
       <Icon
@@ -40,6 +41,7 @@ export function MachineIcon({
       />
     );
   }
+
   return (
     <MachineProviderIcon
       provider={provider}

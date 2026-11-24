@@ -5,15 +5,15 @@ import { createStore, Provider } from "jotai";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
-  BbNavigate,
-  PluginBrowserBbSdk,
+  experimental_AppNavigate,
+  experimental_PluginBrowserSdk,
   PluginThreadAction,
   PluginThreadActionTarget,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import {
   installTestPluginRuntime,
   renderSlot,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 import { makePluginProject, sdkResult } from "../model/fixtures.js";
 import {
   preferenceValueAtom,
@@ -21,7 +21,10 @@ import {
 } from "../preferences/preferences-sync.js";
 
 installTestPluginRuntime();
-const { useBbNavigate, useSdk } = await import("@get-bb/plugin-sdk/app");
+
+const { experimental_useAppNavigate, useSdk } =
+  await import("@omnyo/plugin-sdk/app");
+
 const { moveThreadAction } = await import("./moveThreadAction.js");
 
 afterEach(() => {
@@ -42,6 +45,7 @@ function makeTarget(
     parentThreadId: null,
     archivedAt: null,
     pinnedAt: null,
+    shelvedAt: null,
     sectionId: "sec_a",
     isUnread: false,
     status: "idle",
@@ -56,13 +60,15 @@ interface Collected {
 
 function Probe({ collected }: { collected: { current: Collected | null } }) {
   const useData = moveThreadAction.useData;
+
   if (useData === undefined) throw new Error("Move reads its destinations");
   const data = useData({ threadIds: [] });
-  const sdk: PluginBrowserBbSdk = useSdk();
-  const navigate: BbNavigate = useBbNavigate();
+  const sdk: experimental_PluginBrowserSdk = useSdk();
+  const navigate: experimental_AppNavigate = experimental_useAppNavigate();
   collected.current = {
     item: (thread) => moveThreadAction.item({ thread, data, sdk, navigate }),
   };
+
   return null;
 }
 
@@ -83,6 +89,7 @@ function renderMove(
   const collected: { current: Collected | null } = { current: null };
   const unpin = vi.fn(sdkResult({ ok: true }));
   const update = vi.fn(sdkResult({ ok: true }));
+
   const slot = renderSlot(
     { component: StoreHarness },
     { children: <Probe collected={collected} />, store },
@@ -108,10 +115,13 @@ function renderMove(
       },
     },
   );
+
   const item = (thread: PluginThreadActionTarget) => {
     if (collected.current === null) throw new Error("Probe did not render");
+
     return collected.current.item(thread);
   };
+
   return {
     item,
     sdkCalls: slot.inspection.sdkCalls,
@@ -126,6 +136,7 @@ function renderMove(
 
 function run(action: PluginThreadAction | null, value: string) {
   if (action === null) throw new Error("Move is hidden");
+
   return action.run({ value, requestRename: () => {} });
 }
 

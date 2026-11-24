@@ -1,8 +1,11 @@
 import { resolve, sep } from "node:path";
 import semver from "semver";
-import { formatServerDataSize } from "@bb/domain";
-import { APP_SURFACE_DESKTOP, type AppSurface } from "@bb/config/app-surface";
-import { isLoopbackHostname } from "@bb/config/loopback";
+import { formatServerDataSize } from "@omnyo/domain";
+import {
+  APP_SURFACE_DESKTOP,
+  type AppSurface,
+} from "@omnyo/config/app-surface";
+import { isLoopbackHostname } from "@omnyo/config/loopback";
 import {
   getHost,
   getInstalledPlugin,
@@ -10,25 +13,25 @@ import {
   listPluginSchedules,
   listPublicHosts,
   listRunningThreads,
-} from "@bb/db";
-import type { ServerMoveInspectResult } from "@bb/host-daemon-contract";
+} from "@omnyo/db";
+import type { ServerMoveInspectResult } from "@omnyo/host-daemon-contract";
 import {
   listServerOwnedEntries,
   readLastServerMoveFile,
   type ServerOwnedInventory,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import type {
   ServerMoveCheckItem,
   ServerMoveCheckRequest,
   ServerMoveCheckResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { AppDeps } from "../../types.js";
 import { callHostOnlineRpc } from "../hosts/online-rpc.js";
 import { readPrimaryHostIdFromDataDir } from "../hosts/primary-host.js";
 import { machineServerUrl } from "../machines/server-access.js";
 import type {
-  FullBbAppArtifactAvailability,
-  FullBbAppArtifactService,
+  FullOmnyoAppArtifactAvailability,
+  FullOmnyoAppArtifactService,
 } from "./full-artifact.js";
 import {
   isLoopbackUrl,
@@ -42,15 +45,21 @@ import {
 import type { ServerMoveModeResolution } from "./mode.js";
 
 const DOCS_PLUGIN_ID = "simple-notes";
+
 const SUPPORTED_TARGET_PLATFORMS: ReadonlySet<string> = new Set([
   "darwin",
   "linux",
   "wsl",
 ]);
+
 const MAX_INSPECT_PATHS = 200;
+
 const MAX_LISTED_PATHS = 10;
+
 const GIB = 1024 ** 3;
+
 const DISK_HEADROOM_RATIO = 0.1;
+
 const TIGHT_DISK_SPACE_RATIO = 1.5;
 
 type HostRow = NonNullable<ReturnType<typeof getHost>>;
@@ -58,12 +67,12 @@ type HostRow = NonNullable<ReturnType<typeof getHost>>;
 type TargetVersionCheck =
   | { kind: "current" }
   | { kind: "newer" }
-  | { kind: "update"; availability: FullBbAppArtifactAvailability };
+  | { kind: "update"; availability: FullOmnyoAppArtifactAvailability };
 
 export interface ServerMoveCheckEnvironment {
   allowLoopbackServerUrl: boolean;
   deps: AppDeps;
-  fullArtifact: FullBbAppArtifactService;
+  fullArtifact: FullOmnyoAppArtifactService;
   inspectTimeoutMs: number;
   readServerDiskFreeBytes(): Promise<number | null>;
   resolveMode(): Promise<ServerMoveModeResolution>;
@@ -98,10 +107,12 @@ export function validateDirectServerUrl(
       ok: false,
       title: "Enter the new server address",
       detail:
-        "This server doesn't use bb connect, so other machines need an address like https://desktop.example.com to reach the new server.",
+        "This server doesn't use Omnyo connect, so other machines need an address like https://desktop.example.com to reach the new server.",
     };
   }
+
   let url: URL;
+
   try {
     url = new URL(value.trim());
   } catch {
@@ -111,6 +122,7 @@ export function validateDirectServerUrl(
       detail: "Use an address like https://desktop.example.com.",
     };
   }
+
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return {
       ok: false,
@@ -118,6 +130,7 @@ export function validateDirectServerUrl(
       detail: null,
     };
   }
+
   if (url.username || url.password || url.search || url.hash) {
     return {
       ok: false,
@@ -126,6 +139,7 @@ export function validateDirectServerUrl(
       detail: null,
     };
   }
+
   if (!allowLoopback && isLoopbackHostname(url.hostname)) {
     return {
       ok: false,
@@ -133,12 +147,14 @@ export function validateDirectServerUrl(
       detail: `${url.hostname} only works on the machine itself.`,
     };
   }
+
   return { ok: true, serverUrl: url.toString().replace(/\/+$/u, "") };
 }
 
 function isUnderDirectory(path: string, directory: string): boolean {
   const resolvedPath = resolve(path);
   const resolvedDirectory = resolve(directory);
+
   return (
     resolvedPath === resolvedDirectory ||
     resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
@@ -148,6 +164,7 @@ function isUnderDirectory(path: string, directory: string): boolean {
 function listPaths(paths: readonly string[]): string {
   const listed = paths.slice(0, MAX_LISTED_PATHS).join(", ");
   const remaining = paths.length - MAX_LISTED_PATHS;
+
   return remaining > 0 ? `${listed}, and ${remaining} more` : listed;
 }
 
@@ -161,16 +178,19 @@ function errorMessage(error: unknown): string {
 
 function inventorySizeBytes(inventory: ServerOwnedInventory): number {
   let total = 0;
+
   for (const entry of inventory.entries) {
     for (const file of entry.files) {
       total += file.sizeBytes;
     }
   }
+
   return total;
 }
 
 function inventoryDatabaseSizeBytes(inventory: ServerOwnedInventory): number {
   let total = 0;
+
   for (const entry of inventory.entries) {
     for (const file of entry.files) {
       if (file.sqliteDatabase) {
@@ -178,6 +198,7 @@ function inventoryDatabaseSizeBytes(inventory: ServerOwnedInventory): number {
       }
     }
   }
+
   return total;
 }
 
@@ -189,6 +210,7 @@ function requiredExportDiskBytes(
     inventoryDatabaseSizeBytes(inventory) +
     inventorySizeBytes(inventory) +
     artifactSizeBytes;
+
   return base + Math.max(GIB, Math.ceil(base * DISK_HEADROOM_RATIO));
 }
 
@@ -197,6 +219,7 @@ function requiredMoveDiskBytes(args: {
   serverDataSizeBytes: number;
 }): number {
   const base = 2 * args.serverDataSizeBytes + 2 * args.artifactSizeBytes;
+
   return base + Math.max(GIB, Math.ceil(base * DISK_HEADROOM_RATIO));
 }
 
@@ -205,8 +228,9 @@ async function checkTargetVersion(
   inspect: ServerMoveInspectResult,
 ): Promise<TargetVersionCheck> {
   const appVersion = environment.deps.config.appVersion;
-  const targetVersion = semver.valid(inspect.bbAppVersion);
+  const targetVersion = semver.valid(inspect.coreVersion);
   const serverVersion = semver.valid(appVersion);
+
   if (
     targetVersion !== null &&
     serverVersion !== null &&
@@ -214,9 +238,7 @@ async function checkTargetVersion(
   ) {
     return { kind: "newer" };
   }
-  if (inspect.serverEntryAvailable && inspect.bbAppVersion === appVersion) {
-    return { kind: "current" };
-  }
+
   return {
     kind: "update",
     availability: await environment.fullArtifact.availability(),
@@ -237,10 +259,13 @@ function appendDiskSpaceItems(args: {
   targetName: string;
 }): void {
   const free = args.inspect.diskFreeBytes;
+
   if (free === null) {
     return;
   }
+
   const required = requiredMoveDiskBytes(args);
+
   if (free < required) {
     args.items.push({
       id: "target-disk-space",
@@ -248,8 +273,10 @@ function appendDiskSpaceItems(args: {
       title: `${args.targetName} doesn't have room for the server data`,
       detail: `The move needs about ${formatServerDataSize(required)} free in ${args.inspect.dataDir}, but only ${formatServerDataSize(free)} is available. Free up space on ${args.targetName}, then check again.`,
     });
+
     return;
   }
+
   if (free < required * TIGHT_DISK_SPACE_RATIO) {
     args.items.push({
       id: "target-disk-space-tight",
@@ -269,13 +296,16 @@ function appendServerDiskSpaceItems(args: {
   serverName: string;
 }): void {
   const free = args.freeBytes;
+
   if (free === null) {
     return;
   }
+
   const required = requiredExportDiskBytes(
     args.inventory,
     args.artifactSizeBytes,
   );
+
   if (free < required) {
     args.items.push({
       id: "source-disk-space",
@@ -283,8 +313,10 @@ function appendServerDiskSpaceItems(args: {
       title: `${args.serverName} doesn't have room to export the server data`,
       detail: `The export needs about ${formatServerDataSize(required)} free in ${args.dataDir}, but only ${formatServerDataSize(free)} is available. Free up space on ${args.serverName}, then check again.`,
     });
+
     return;
   }
+
   if (free < required * TIGHT_DISK_SPACE_RATIO) {
     args.items.push({
       id: "source-disk-space-tight",
@@ -321,6 +353,7 @@ async function inspectSourceServerHost(
   ) {
     return null;
   }
+
   try {
     return await inspectHost(environment, sourceServerHost.id, []);
   } catch (error) {
@@ -328,6 +361,7 @@ async function inspectSourceServerHost(
       { err: error, hostId: sourceServerHost.id },
       "Server move check could not inspect the server machine",
     );
+
     return null;
   }
 }
@@ -345,14 +379,16 @@ function appendTargetInspectItems(args: {
   targetName: string;
 }): void {
   const { environment, inspect, items, targetName } = args;
+
   if (!SUPPORTED_TARGET_PLATFORMS.has(inspect.platform)) {
     items.push({
       id: "unsupported-platform",
       severity: "blocker",
-      title: `${targetName} can't run the bb server`,
+      title: `${targetName} can't run the Omnyo server`,
       detail: "The server runs on macOS and Linux.",
     });
   }
+
   if (inspect.dataDirHasServerData) {
     items.push(
       args.targetHasOldServerCopy
@@ -360,16 +396,17 @@ function appendTargetInspectItems(args: {
             id: "target-has-server-data",
             severity: "blocker",
             title: `The old server copy is still on ${targetName}`,
-            detail: `Delete it on ${targetName}'s page in Settings → Machines, or run bb server delete-old-copy on that machine, then check again.`,
+            detail: `Delete it on ${targetName}'s page in Settings → Machines, or run omnyo server delete-old-copy on that machine, then check again.`,
           }
         : {
             id: "target-has-server-data",
             severity: "blocker",
-            title: `${targetName} already has bb server data`,
-            detail: `${inspect.dataDir} already contains a bb database.`,
+            title: `${targetName} already has Omnyo server data`,
+            detail: `${inspect.dataDir} already contains an Omnyo database.`,
           },
     );
   }
+
   if (!inspect.portAvailable) {
     items.push({
       id: "port-unavailable",
@@ -378,6 +415,7 @@ function appendTargetInspectItems(args: {
       detail: "Stop whatever uses that port on the machine, then check again.",
     });
   }
+
   appendDiskSpaceItems({
     artifactSizeBytes: args.artifactSizeBytes,
     inspect,
@@ -385,17 +423,20 @@ function appendTargetInspectItems(args: {
     serverDataSizeBytes: args.serverDataSizeBytes,
     targetName,
   });
+
   if (inspect.existingServerData !== null) {
     items.push({
       id: "existing-target-server-data",
       severity: "warning",
-      title: `${targetName} has its own bb data`,
+      title: `${targetName} has its own Omnyo data`,
       detail: `${inspect.existingServerData.path} will be archived next to it with a .before-move date suffix. It is never merged.`,
     });
   }
+
   const missingPathPlugins = args.pathPlugins.filter(
     (plugin) => inspect.pathsExist[plugin.sourcePath] === false,
   );
+
   if (missingPathPlugins.length > 0) {
     items.push({
       id: "path-plugins-missing",
@@ -406,9 +447,11 @@ function appendTargetInspectItems(args: {
         .join(", "),
     });
   }
+
   const missingEnvPaths = args.envPaths.filter(
     (value) => inspect.pathsExist[value.path] === false,
   );
+
   if (missingEnvPaths.length > 0) {
     items.push({
       id: "env-paths-missing",
@@ -421,7 +464,9 @@ function appendTargetInspectItems(args: {
         )}. The server passes these to agents and tools, so create them on ${targetName} or update env.json after the move.`,
     });
   }
+
   const sourceInspect = args.sourceInspect;
+
   if (
     sourceInspect?.ghAuthenticated === true &&
     inspect.ghAuthenticated !== true
@@ -433,6 +478,7 @@ function appendTargetInspectItems(args: {
       detail: `Run gh auth login on ${targetName} to keep GitHub access for agents and git credentials.`,
     });
   }
+
   if (
     sourceInspect?.codexCredentialsPresent === true &&
     !inspect.codexCredentialsPresent
@@ -444,6 +490,7 @@ function appendTargetInspectItems(args: {
       detail: `Helper inference and voice use the server machine's Codex login. Sign in to Codex on ${targetName}.`,
     });
   }
+
   if (
     environment.serverTimeZone !== null &&
     inspect.timeZone !== null &&
@@ -456,10 +503,11 @@ function appendTargetInspectItems(args: {
       detail: `Schedules follow the server machine's time zone: ${environment.serverTimeZone} here, ${inspect.timeZone} on ${targetName}.`,
     });
   }
+
   items.push({
     id: "managed-config-replaced",
     severity: "info",
-    title: `This server's bb skill settings and other configuration will replace matching settings on ${targetName}`,
+    title: `This server's Omnyo skill settings and other configuration will replace matching settings on ${targetName}`,
     detail: null,
   });
 }
@@ -472,40 +520,52 @@ function appendVersionItems(args: {
   targetVersion: TargetVersionCheck;
 }): void {
   const { appVersion, targetVersion } = args;
+
   if (targetVersion.kind === "current") {
     return;
   }
+
   if (targetVersion.kind === "newer") {
     args.items.push({
       id: "target-newer-version",
       severity: "blocker",
-      title: `${args.targetName} runs a newer bb than this server`,
-      detail: `${args.targetName} runs bb ${args.inspect.bbAppVersion} and this server runs bb ${appVersion}. Update the server to bb ${args.inspect.bbAppVersion} first, then check again.`,
+      title: `${args.targetName} runs a newer Omnyo than this server`,
+      detail: `${args.targetName} runs Omnyo ${args.inspect.coreVersion} and this server runs Omnyo ${appVersion}. Update the server to Omnyo ${args.inspect.coreVersion} first, then check again.`,
     });
+
     return;
   }
+
   const availability = targetVersion.availability;
+
   if (availability.available) {
+    if (
+      args.inspect.coreVersion === appVersion &&
+      args.inspect.serverEntryAvailable
+    )
+      return;
     args.items.push({
       id: "target-update",
       severity: "info",
-      title: `bb ${availability.version} will be installed on ${args.targetName}`,
+      title: `Omnyo ${availability.version} will be installed on ${args.targetName}`,
       detail: `The update stays on ${args.targetName} even if the move is cancelled.`,
     });
+
     return;
   }
+
   args.items.push(
     args.inspect.serverEntryAvailable
       ? {
           id: "target-version",
           severity: "blocker",
-          title: `${args.targetName} runs bb ${args.inspect.bbAppVersion}, but this server runs bb ${appVersion}`,
-          detail: `Update ${args.targetName} to bb ${appVersion}. ${availability.reason}`,
+          title: "The exact Omnyo runtime artifact is unavailable",
+          detail: availability.reason,
         }
       : {
           id: "server-entry-unavailable",
           severity: "blocker",
-          title: `${args.targetName} doesn't have the bb server installed`,
+          title: `${args.targetName} doesn't have the Omnyo server installed`,
           detail: availability.reason,
         },
   );
@@ -520,6 +580,7 @@ function appendServerStateItems(args: {
 }): void {
   const { deps } = args.environment;
   const runningTurns = listRunningThreads(deps.db).length;
+
   if (runningTurns > 0) {
     args.items.push({
       id: "running-turns",
@@ -528,7 +589,9 @@ function appendServerStateItems(args: {
       detail: "Continue them with a new turn after the move.",
     });
   }
+
   const schedules = listPluginSchedules(deps.db).length;
+
   if (schedules > 0) {
     args.items.push({
       id: "plugin-schedules",
@@ -537,7 +600,9 @@ function appendServerStateItems(args: {
       detail: `${plural(schedules, "schedule", "schedules")} resume on the new server.`,
     });
   }
+
   const connectedHostIds = new Set(deps.hub.listConnectedHostIds());
+
   const offlineMachines = listPublicHosts(deps.db).filter(
     (host) =>
       host.type === "persistent" &&
@@ -545,6 +610,7 @@ function appendServerStateItems(args: {
       host.id !== args.sourceServerHostId &&
       !connectedHostIds.has(host.id),
   );
+
   if (offlineMachines.length > 0) {
     args.items.push({
       id: "offline-machines",
@@ -552,11 +618,12 @@ function appendServerStateItems(args: {
       title: `${plural(offlineMachines.length, "machine is", "machines are")} offline`,
       detail: `${offlineMachines.map((host) => host.name).join(", ")}. ${
         args.mode.mode === "connect"
-          ? "They reconnect through bb connect when they come back."
+          ? "They reconnect through Omnyo connect when they come back."
           : "They learn the new address from this computer when they come back."
       }`,
     });
   }
+
   if (getInstalledPlugin(deps.db, DOCS_PLUGIN_ID)?.enabled === true) {
     args.items.push({
       id: "docs-vaults",
@@ -566,6 +633,7 @@ function appendServerStateItems(args: {
         "Vaults that aren't bound to a machine are read from the new server machine after the move.",
     });
   }
+
   if (args.mode.mode === "connect") {
     args.items.push({
       id: "connect-address",
@@ -588,7 +656,9 @@ function appendTransportItems(args: {
   ) {
     return;
   }
+
   const address = parseHttpUrl(machineServerUrl(args.deps).url);
+
   if (
     address === null ||
     address.protocol !== "http:" ||
@@ -596,6 +666,7 @@ function appendTransportItems(args: {
   ) {
     return;
   }
+
   args.items.push({
     id: "unencrypted-transfer",
     severity: "warning",
@@ -609,9 +680,11 @@ function appendSkippedServerFileItems(args: {
   items: ServerMoveCheckItem[];
 }): void {
   const { inventory } = args;
+
   if (inventory.skippedPaths.length === 0) {
     return;
   }
+
   args.items.push({
     id: "skipped-server-files",
     severity: "warning",
@@ -630,13 +703,19 @@ function appendManagedAddressItems(args: {
   if (args.mode.mode !== "direct") {
     return;
   }
+
   const oldAddress = oldServerAddress(args.deps.db, args.managed);
+
   for (const address of args.managed.addresses) {
     const url = parseHttpUrl(address.value);
+
     if (url === null) {
       continue;
     }
-    const idPrefix = address.key === "BB_APP_URL" ? "app-url" : "external-url";
+
+    const idPrefix =
+      address.key === "OMNYO_APP_URL" ? "app-url" : "external-url";
+
     if (oldAddress !== null && url.origin === oldAddress.origin) {
       args.items.push({
         id: `${idPrefix}-rewrite`,
@@ -646,6 +725,7 @@ function appendManagedAddressItems(args: {
       });
       continue;
     }
+
     if (
       isLoopbackUrl(url) ||
       (oldAddress !== null && url.hostname === oldAddress.hostname)
@@ -655,7 +735,7 @@ function appendManagedAddressItems(args: {
         severity: "warning",
         title: `${address.key} in ${address.file} points at ${address.value}`,
         detail:
-          "The move keeps this address as it is, so it may still point at this computer. Update it after the move if devices open bb through it.",
+          "The move keeps this address as it is, so it may still point at this computer. Update it after the move if devices open Omnyo through it.",
       });
     }
   }
@@ -668,6 +748,7 @@ export async function runServerMoveCheck(
   const { deps } = environment;
   const items: ServerMoveCheckItem[] = [];
   const { request } = args;
+
   if (args.moveInProgress) {
     items.push({
       id: "move-in-progress",
@@ -676,25 +757,31 @@ export async function runServerMoveCheck(
       detail: null,
     });
   }
+
   const sourceServerHostId = readPrimaryHostIdFromDataDir({
     dataDir: deps.config.dataDir,
   });
+
   const sourceServerHost =
     sourceServerHostId === null ? null : getHost(deps.db, sourceServerHostId);
+
   const liveSourceServerHost =
     sourceServerHost?.destroyedAt === null ? sourceServerHost : null;
+
   if (liveSourceServerHost === null) {
     items.push({
       id: "server-machine-unknown",
       severity: "blocker",
       title: "This server doesn't run its own machine",
       detail:
-        "Moving the server needs the machine that runs it. Start bb with its local machine, then try again.",
+        "Moving the server needs the machine that runs it. Start Omnyo with its local machine, then try again.",
     });
   }
+
   const targetRow = getHost(deps.db, request.targetHostId);
   const targetHost = targetRow?.destroyedAt === null ? targetRow : null;
   const mode = await environment.resolveMode();
+
   const directUrl =
     mode.mode === "direct"
       ? validateDirectServerUrl(
@@ -702,12 +789,14 @@ export async function runServerMoveCheck(
           environment.allowLoopbackServerUrl,
         )
       : null;
+
   const serverUrl =
     mode.mode === "connect"
       ? mode.serverUrl
       : directUrl?.ok === true
         ? directUrl.serverUrl
         : null;
+
   const baseResponse = {
     targetHostId: request.targetHostId,
     targetHostName: targetHost?.name ?? request.targetHostId,
@@ -715,14 +804,16 @@ export async function runServerMoveCheck(
     serverUrl: serverUrl ?? request.serverUrl,
     requiresServerUrl: mode.mode === "direct",
   };
+
   if (mode.mode === "unavailable") {
     items.push({
       id: "connect-unavailable",
       severity: "blocker",
-      title: "bb connect status is unavailable",
+      title: "Omnyo connect status is unavailable",
       detail: mode.message,
     });
   }
+
   if (directUrl !== null && !directUrl.ok) {
     items.push({
       id: "server-url-required",
@@ -731,6 +822,7 @@ export async function runServerMoveCheck(
       detail: directUrl.detail,
     });
   }
+
   if (targetHost === null) {
     items.push({
       id: "target-missing",
@@ -738,6 +830,7 @@ export async function runServerMoveCheck(
       title: "The machine doesn't exist",
       detail: null,
     });
+
     return {
       mode,
       response: {
@@ -752,10 +845,12 @@ export async function runServerMoveCheck(
       targetHost: null,
     };
   }
+
   const targetName = targetHost.name;
   const managed = await readServerManagedFiles(deps.config.dataDir);
   const inventory = await listServerOwnedEntries(deps.config.dataDir);
   const targetBlockers: ServerMoveCheckItem[] = [];
+
   if (targetHost.type === "ephemeral") {
     targetBlockers.push({
       id: "target-ephemeral",
@@ -764,6 +859,7 @@ export async function runServerMoveCheck(
       detail: "Only persistent machines can run the server.",
     });
   }
+
   if (targetHost.id === sourceServerHostId) {
     targetBlockers.push({
       id: "target-is-server",
@@ -772,6 +868,7 @@ export async function runServerMoveCheck(
       detail: null,
     });
   }
+
   if (targetHost.phase !== "active") {
     targetBlockers.push({
       id: "target-not-active",
@@ -780,6 +877,7 @@ export async function runServerMoveCheck(
       detail: `The machine is ${targetHost.phase}.`,
     });
   }
+
   if (!deps.hub.hasDaemonForHost(targetHost.id)) {
     targetBlockers.push({
       id: "target-offline",
@@ -788,14 +886,18 @@ export async function runServerMoveCheck(
       detail: "Connect the machine to this server, then check again.",
     });
   }
+
   items.push(...targetBlockers);
   let inspect: ServerMoveInspectResult | null = null;
   let artifactSizeBytes = 0;
+
   if (targetBlockers.length === 0) {
     const pathPlugins = listPathInstalledPluginSources(deps.db).filter(
       (plugin) => !isUnderDirectory(plugin.sourcePath, deps.config.dataDir),
     );
+
     const envPaths = listEnvPathValues(managed.env);
+
     try {
       inspect = await inspectHost(
         environment,
@@ -815,6 +917,7 @@ export async function runServerMoveCheck(
         detail: errorMessage(error),
       });
     }
+
     if (inspect !== null) {
       const lastMove = await readLastServerMoveFile(deps.config.dataDir);
       const targetVersion = await checkTargetVersion(environment, inspect);
@@ -846,6 +949,7 @@ export async function runServerMoveCheck(
       });
     }
   }
+
   if (
     liveSourceServerHost !== null &&
     environment.serverAppSurface === APP_SURFACE_DESKTOP
@@ -855,9 +959,10 @@ export async function runServerMoveCheck(
       severity: "info",
       title: `${liveSourceServerHost.name} will keep running as a machine in the background`,
       detail:
-        "This server runs in the bb desktop app. After the move, the app installs a background service that keeps this computer connected to the new server and updates it with the server, even while the app is closed. The service needs Node.js 22.19 or newer on this computer; without it, the computer stays connected only while the app is open.",
+        "This server runs in the Omnyo desktop app. After the move, the app installs a background service that keeps this computer connected to the new server and updates it with the server, even while the app is closed. The service needs Node.js 22.19 or newer on this computer; without it, the computer stays connected only while the app is open.",
     });
   }
+
   if (liveSourceServerHost !== null) {
     appendServerDiskSpaceItems({
       artifactSizeBytes,
@@ -868,6 +973,7 @@ export async function runServerMoveCheck(
       serverName: liveSourceServerHost.name,
     });
   }
+
   appendServerStateItems({
     environment,
     items,
@@ -878,6 +984,7 @@ export async function runServerMoveCheck(
   appendTransportItems({ deps, items, mode, targetHost });
   appendSkippedServerFileItems({ inventory, items });
   appendManagedAddressItems({ deps, items, managed, mode, serverUrl });
+
   return {
     mode,
     response: {

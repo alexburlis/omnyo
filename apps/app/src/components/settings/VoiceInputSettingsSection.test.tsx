@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VoiceInputSettingsSectionContent } from "./VoiceInputSettingsSection";
 
@@ -32,6 +32,7 @@ describe("VoiceInputSettingsSectionContent", () => {
     const refreshAction = screen.getByRole("button", {
       name: "Load microphones",
     });
+
     const sectionHeader = refreshAction.parentElement?.parentElement;
     expect(sectionHeader?.classList.contains("flex-row")).toBe(true);
     expect(sectionHeader?.classList.contains("flex-col")).toBe(false);
@@ -50,6 +51,7 @@ describe("VoiceInputSettingsSectionContent", () => {
         />
       </TooltipProvider>
     );
+
     const { rerender } = render(content(devices));
     expect(screen.getByRole("button", { name: "Microphone" }).textContent).toBe(
       "Studio Display Microphone",

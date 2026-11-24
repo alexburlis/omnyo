@@ -1,4 +1,4 @@
-import type { ServerAccessStatus } from "@bb/server-contract";
+import type { ServerAccessStatus } from "@omnyo/server-contract";
 import {
   MachineAccessSettingsContent,
   type MachineAccessState,
@@ -6,7 +6,9 @@ import {
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 
 const noop = () => {};
+
 const noopAsync = async () => {};
+
 const direct = {
   id: "direct",
   displayName: "Manual",
@@ -38,6 +40,7 @@ function machineAccessState(
   overrides: Partial<MachineAccessState> = {},
 ): MachineAccessState {
   const selected = overrides.selected ?? serverAccess.defaultProviderId;
+
   return {
     access: serverAccess,
     disabled: false,
@@ -61,27 +64,35 @@ function machineAccessState(
 }
 
 const PROVIDER_SETUP_REQUIRED = access();
+
 PROVIDER_SETUP_REQUIRED.providers[0]!.availability = {
   status: "setup-required",
   message: "Set up the relay",
 };
+
 const PROVIDER_READY = access();
+
 PROVIDER_READY.providers[0]!.availability = {
   status: "available",
-  serverUrl: "https://bb.example.com",
+  serverUrl: "https://omnyo.example.com",
 };
+
 const PROVIDER_READY_WITHOUT_URL = access();
+
 const PROVIDER_UNAVAILABLE = access();
+
 PROVIDER_UNAVAILABLE.providers[0]!.availability = {
   status: "unavailable",
   message: "The relay rejected this server’s credential",
 };
+
 const DIRECT_WITH_URL = {
   ...PROVIDER_SETUP_REQUIRED,
   defaultProviderId: "direct",
-  effectiveUrl: "https://bb.example.com",
+  effectiveUrl: "https://omnyo.example.com",
   urlSource: "setting" as const,
 };
+
 const METHOD_NOT_INSTALLED = {
   ...PROVIDER_SETUP_REQUIRED,
   providers: [direct],
@@ -94,7 +105,7 @@ export default {
 
 export function Section() {
   return (
-    <StoryCard labelWidth="200px">
+    <StoryCard labelWidth="200px" className="max-w-4xl">
       <StoryRow
         label="not set up"
         hint="setup-required — no status verdict, just the explanation and a primary action"
@@ -156,7 +167,7 @@ export function Section() {
       >
         <MachineAccessSettingsContent
           machineAccess={machineAccessState(DIRECT_WITH_URL, {
-            draft: "https://bb.example.com/",
+            draft: "https://omnyo.example.com/",
             disabled: true,
             saving: true,
           })}

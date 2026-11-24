@@ -8,7 +8,8 @@ import { MemoryRouter } from "react-router-dom";
 import { z } from "zod";
 import { AppToaster } from "../src/components/AppToaster";
 import { RouteNavigationProvider } from "../src/components/ui/app-route-anchor";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
+import "@omnyo/shared-ui/icon-extended";
 import { setPreferredTheme } from "../src/hooks/useTheme";
 import {
   createDiffWorker,
@@ -33,11 +34,14 @@ function StoryModelPickerCatalog({
 }) {
   const environmentIds = useMemo(() => {
     const parsed = storyModelPickerMetaSchema.safeParse(storyMeta);
+
     return parsed.success
       ? parsed.data.modelPickerCatalog.environmentIds
       : null;
   }, [storyMeta]);
+
   if (environmentIds === null) return children;
+
   return (
     <ModelPickerStoryQueryProvider environmentIds={environmentIds}>
       {children}
@@ -47,8 +51,10 @@ function StoryModelPickerCatalog({
 
 if (typeof window !== "undefined") {
   const params = new URLSearchParams(window.location.search);
+
   if (!params.has("theme")) {
-    const stored = window.localStorage.getItem("bb.theme");
+    const stored = window.localStorage.getItem("omnyo.theme");
+
     if (stored === "light" || stored === "dark") {
       params.set("theme", stored);
       const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
@@ -67,6 +73,7 @@ export const Provider: GlobalProvider = ({
     setPreferredTheme(isDark ? "dark" : "light");
   }, [isDark]);
   const store = useMemo(() => createStore(), []);
+
   const queryClient = useMemo(
     () =>
       createAppQueryClient({

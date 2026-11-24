@@ -1,4 +1,4 @@
-import type { WorkspacePathEntry } from "@bb/server-contract";
+import type { WorkspacePathEntry } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { buildPathSuggestions } from "./usePathSuggestions";
 
@@ -10,6 +10,7 @@ interface PathEntryFixture {
 
 function makePathEntry(fixture: PathEntryFixture): WorkspacePathEntry {
   const name = fixture.path.split("/").at(-1) ?? fixture.path;
+
   return {
     kind: fixture.kind ?? "file",
     path: fixture.path,

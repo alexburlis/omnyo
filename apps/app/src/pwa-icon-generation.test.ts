@@ -10,7 +10,8 @@ const execFileAsync = promisify(execFile);
 
 it("checks generated icons during generation and rejects stale assets", async () => {
   const appDir = resolve(import.meta.dirname, "..");
-  const fixture = await mkdtemp(join(tmpdir(), "bb-pwa-icons-"));
+  const fixture = await mkdtemp(join(tmpdir(), "omnyo-pwa-icons-"));
+
   try {
     await mkdir(join(fixture, "scripts"));
     await cp(join(appDir, "public"), join(fixture, "public"), {
@@ -41,15 +42,18 @@ fs.writeFile = async (path, content, ...rest) => {
 syncBuiltinESMExports();
 `,
     );
+
     const writer = spawn(
       process.execPath,
       ["--import", pathToFileURL(preload).href, generator],
       { stdio: ["pipe", "pipe", "pipe"] },
     );
+
     let stderr = "";
     writer.stderr.on("data", (data) => {
       stderr += data;
     });
+
     const completed = new Promise<void>((resolve, reject) => {
       writer.once("error", reject);
       writer.once("exit", (code) => {
@@ -58,13 +62,16 @@ syncBuiltinESMExports();
           reject(new Error(`Icon generation exited with ${code}: ${stderr}`));
       });
     });
+
     const paused = new Promise<void>((resolve) => {
       let stdout = "";
       writer.stdout.on("data", (data) => {
         stdout += data;
+
         if (stdout.includes("write-paused")) resolve();
       });
     });
+
     try {
       await Promise.race([completed, paused]);
       await execFileAsync(process.execPath, [generator, "--check"]);
@@ -72,6 +79,7 @@ syncBuiltinESMExports();
       if (writer.exitCode === null && writer.signalCode === null) {
         writer.stdin.end("resume\n");
       }
+
       await completed;
     }
 

@@ -1,36 +1,39 @@
 import type {
-  BbDesktopInfo,
-  BbDesktopInfoChangeHandler,
-  BbDesktopInfoUnsubscribe,
-} from "@bb/desktop-contract";
+  OmnyoDesktopInfo,
+  OmnyoDesktopInfoChangeHandler,
+  OmnyoDesktopInfoUnsubscribe,
+} from "@omnyo/desktop-contract";
 
-const DESKTOP_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
-export const DESKTOP_UPDATE_ACTIVE_MIN_INTERVAL_MS = 15 * 60 * 1000;
+const DESKTOP_UPDATE_CHECK_INTERVAL_MS = 60 * 1000;
+
+export const DESKTOP_UPDATE_ACTIVE_MIN_INTERVAL_MS = 60 * 1000;
 
 export interface DesktopUpdateService {
-  checkAfterActive(): Promise<BbDesktopInfo | null>;
-  checkForUpdates(): Promise<BbDesktopInfo>;
-  getInfo(): BbDesktopInfo;
+  checkAfterActive(): Promise<OmnyoDesktopInfo | null>;
+  checkForUpdates(): Promise<OmnyoDesktopInfo>;
+  getInfo(): OmnyoDesktopInfo;
   start(): void;
   stop(): void;
-  subscribe(listener: BbDesktopInfoChangeHandler): BbDesktopInfoUnsubscribe;
+  subscribe(
+    listener: OmnyoDesktopInfoChangeHandler,
+  ): OmnyoDesktopInfoUnsubscribe;
 }
 
 interface DesktopUpdateScheduler extends DesktopUpdateService {
-  updateInfo(nextInfo: BbDesktopInfo): void;
+  updateInfo(nextInfo: OmnyoDesktopInfo): void;
 }
 
 interface CreateDesktopUpdateSchedulerArgs {
   enabled: boolean;
-  initialInfo: BbDesktopInfo;
+  initialInfo: OmnyoDesktopInfo;
   now: () => number;
   runCheck(checkedAt: string): Promise<void>;
   shouldSkipCheck?: () => boolean;
 }
 
 function areDesktopInfoValuesEqual(
-  left: BbDesktopInfo,
-  right: BbDesktopInfo,
+  left: OmnyoDesktopInfo,
+  right: OmnyoDesktopInfo,
 ): boolean {
   return (
     left.lastCheckedAt === right.lastCheckedAt &&
@@ -48,28 +51,32 @@ export function createDesktopUpdateScheduler(
   args: CreateDesktopUpdateSchedulerArgs,
 ): DesktopUpdateScheduler {
   let currentInfo = args.initialInfo;
-  let inflight: Promise<BbDesktopInfo> | null = null;
+  let inflight: Promise<OmnyoDesktopInfo> | null = null;
   let intervalHandle: ReturnType<typeof setInterval> | null = null;
   let lastAttemptedAt: number | null = null;
-  const listeners = new Set<BbDesktopInfoChangeHandler>();
+  const listeners = new Set<OmnyoDesktopInfoChangeHandler>();
 
-  function updateInfo(nextInfo: BbDesktopInfo): void {
+  function updateInfo(nextInfo: OmnyoDesktopInfo): void {
     if (areDesktopInfoValuesEqual(currentInfo, nextInfo)) {
       return;
     }
+
     currentInfo = nextInfo;
+
     for (const listener of listeners) {
       listener(currentInfo);
     }
   }
 
-  async function checkForUpdates(): Promise<BbDesktopInfo> {
+  async function checkForUpdates(): Promise<OmnyoDesktopInfo> {
     if (!args.enabled) {
       return currentInfo;
     }
+
     if (args.shouldSkipCheck?.()) {
       return currentInfo;
     }
+
     if (inflight !== null) {
       return inflight;
     }
@@ -77,10 +84,12 @@ export function createDesktopUpdateScheduler(
     const requestPromise = (async () => {
       lastAttemptedAt = args.now();
       await args.runCheck(new Date(lastAttemptedAt).toISOString());
+
       return currentInfo;
     })();
 
     inflight = requestPromise;
+
     try {
       return await requestPromise;
     } finally {
@@ -91,27 +100,31 @@ export function createDesktopUpdateScheduler(
   }
 
   return {
-    async checkAfterActive(): Promise<BbDesktopInfo | null> {
+    async checkAfterActive(): Promise<OmnyoDesktopInfo | null> {
       if (!args.enabled) {
         return null;
       }
+
       const currentTime = args.now();
+
       if (
         lastAttemptedAt !== null &&
         currentTime - lastAttemptedAt < DESKTOP_UPDATE_ACTIVE_MIN_INTERVAL_MS
       ) {
         return currentInfo;
       }
+
       return checkForUpdates();
     },
     checkForUpdates,
-    getInfo(): BbDesktopInfo {
+    getInfo(): OmnyoDesktopInfo {
       return currentInfo;
     },
     start(): void {
       if (!args.enabled || intervalHandle !== null) {
         return;
       }
+
       void checkForUpdates();
       intervalHandle = setInterval(() => {
         void checkForUpdates();
@@ -121,11 +134,15 @@ export function createDesktopUpdateScheduler(
       if (intervalHandle === null) {
         return;
       }
+
       clearInterval(intervalHandle);
       intervalHandle = null;
     },
-    subscribe(listener: BbDesktopInfoChangeHandler): BbDesktopInfoUnsubscribe {
+    subscribe(
+      listener: OmnyoDesktopInfoChangeHandler,
+    ): OmnyoDesktopInfoUnsubscribe {
       listeners.add(listener);
+
       return () => {
         listeners.delete(listener);
       };

@@ -32,9 +32,11 @@ function Pane({
   useAppCommandHandler("panel.toggle", () => {
     if (!isFocused) return false;
     onToggle();
+
     return true;
   });
   useWindowRightPanel({ isOpen, enabled: isFocused });
+
   return null;
 }
 
@@ -54,6 +56,7 @@ describe("WindowRightPanelToggle", () => {
   it("follows the focused pane's panel and toggles it through panel.toggle", () => {
     const firstToggle = vi.fn();
     const secondToggle = vi.fn();
+
     const view = render(
       <AppCommandProvider>
         <Pane isFocused isOpen onToggle={firstToggle} />

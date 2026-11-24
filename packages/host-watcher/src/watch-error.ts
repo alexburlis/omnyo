@@ -15,5 +15,6 @@ export function describeSubscribeFailure(message: string): string {
   ) {
     return `${message} (${INOTIFY_WATCH_LIMIT_HINT})`;
   }
+
   return message;
 }

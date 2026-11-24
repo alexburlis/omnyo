@@ -1,4 +1,8 @@
-import type { JsonValue, ThreadEventPlanStep } from "@bb/domain";
+import type {
+  GitActivity,
+  JsonValue,
+  ThreadEventPlanStep,
+} from "@omnyo/domain";
 import type {
   TimelineActivityIntent,
   TimelineApprovalStatus,
@@ -31,12 +35,13 @@ import type {
   TimelineWebFetchWorkRow,
   TimelineWebSearchWorkRow,
   TimelineWorkflowWorkRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type {
   SystemMessageKind,
   SystemMessageSubject,
+  ThreadMaintenanceKind,
   ThreadTurnInitiator,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 interface RowBaseOverrideArgs {
   createdAt?: number;
@@ -56,6 +61,7 @@ interface ConversationRowArgs extends RowBaseOverrideArgs {
   attachments?: TimelineConversationAttachments | null;
   id?: string;
   initiator?: ThreadTurnInitiator;
+  maintenance?: ThreadMaintenanceKind;
   role?: TimelineConversationRow["role"];
   senderThreadId?: string | null;
   seq?: number;
@@ -64,6 +70,7 @@ interface ConversationRowArgs extends RowBaseOverrideArgs {
   systemMessageKind?: SystemMessageKind;
   systemMessageSubject?: SystemMessageSubject | null;
   text: string;
+  turnGit?: GitActivity | null;
   turnId?: string | null;
   turnRequest?: TimelineConversationTurnRequest;
 }
@@ -342,20 +349,35 @@ interface CommandExitCodeArgs {
 }
 
 const DEFAULT_THREAD_ID = "thread-1";
+
 const DEFAULT_TURN_ID = "turn-1";
+
 const DEFAULT_COMMAND_ID = "command-1";
+
 const DEFAULT_CONVERSATION_ID = "conversation-1";
+
 const DEFAULT_DELEGATION_ID = "delegation-1";
+
 const DEFAULT_FILE_CHANGE_ID = "file-change-1";
+
 const DEFAULT_FILE_READ_ID = "file-read-1";
+
 const DEFAULT_SEARCH_ID = "search-1";
+
 const DEFAULT_QUESTION_ID = "question-1";
+
 const DEFAULT_SYSTEM_ID = "system-1";
+
 const DEFAULT_TOOL_ID = "tool-1";
+
 const DEFAULT_TURN_ROW_ID = "turn-summary-1";
+
 const DEFAULT_WEB_FETCH_ID = "web-fetch-1";
+
 const DEFAULT_WEB_SEARCH_ID = "web-search-1";
+
 const DEFAULT_IMAGE_VIEW_ID = "image-view-1";
+
 const DEFAULT_WORKFLOW_ID = "workflow-1";
 
 function rowSequence({ seq, sourceSeqStart }: RowSequenceArgs): number {
@@ -367,6 +389,7 @@ function completedAtFromDuration(
   durationMs: number | null | undefined,
 ): number | null {
   if (durationMs === null || durationMs === undefined) return null;
+
   return startedAt + durationMs;
 }
 
@@ -419,6 +442,7 @@ function commandExitCode({
   if (exitCode !== undefined) {
     return exitCode;
   }
+
   return status === "completed" ? 0 : null;
 }
 
@@ -433,6 +457,7 @@ function baseRow({
   turnId = DEFAULT_TURN_ID,
 }: BaseRowArgs): TimelineRowBase {
   const rowSeq = rowSequence({ seq, sourceSeqStart });
+
   return {
     id,
     threadId,
@@ -449,6 +474,7 @@ export function conversationRow({
   createdAt,
   id = DEFAULT_CONVERSATION_ID,
   initiator,
+  maintenance,
   role = "assistant",
   senderThreadId,
   seq,
@@ -459,6 +485,7 @@ export function conversationRow({
   systemMessageSubject = null,
   text,
   threadId,
+  turnGit = null,
   turnId,
   turnRequest,
 }: ConversationRowArgs): TimelineConversationRow {
@@ -472,8 +499,10 @@ export function conversationRow({
     threadId,
     turnId,
   });
+
   if (role === "user") {
     const resolvedInitiator: ThreadTurnInitiator = initiator ?? "user";
+
     return {
       ...rowBase,
       kind: "conversation",
@@ -491,13 +520,16 @@ export function conversationRow({
             : null,
       systemMessageKind,
       systemMessageSubject,
+      ...(maintenance === undefined ? {} : { maintenance }),
       turnRequest: turnRequest ?? {
+        clientRequestId: null,
         isGrouped: false,
         kind: "message",
         status: "accepted",
       },
     };
   }
+
   return {
     ...rowBase,
     kind: "conversation",
@@ -506,6 +538,7 @@ export function conversationRow({
     text,
     attachments,
     turnRequest: null,
+    turnGit,
   };
 }
 
@@ -515,7 +548,7 @@ export function commandRow({
   callId,
   command,
   createdAt,
-  cwd = "/workspace/bb",
+  cwd = "/workspace/omnyo",
   durationMs = 2_300,
   exitCode,
   id = DEFAULT_COMMAND_ID,
@@ -540,6 +573,7 @@ export function commandRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -586,6 +620,7 @@ export function toolRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -627,6 +662,7 @@ export function fileReadRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -668,6 +704,7 @@ export function searchRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -715,6 +752,7 @@ export function extensionRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -756,6 +794,7 @@ export function planStepsRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -806,6 +845,7 @@ export function fileChangeRow(
     stdout = "applied",
     turnId,
   } = args;
+
   return {
     ...baseRow({
       ...args,
@@ -850,6 +890,7 @@ export function webSearchRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -887,6 +928,7 @@ export function webFetchRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -924,6 +966,7 @@ export function imageViewRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -967,6 +1010,7 @@ export function workflowRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -1046,6 +1090,7 @@ export function approvalRow({
       },
     };
   }
+
   return {
     ...baseRow({
       createdAt,
@@ -1109,6 +1154,7 @@ export function questionRow({
 }: QuestionRowArgs = {}): TimelineQuestionWorkRow {
   const resolvedLifecycle =
     lifecycle ?? questionLifecycleFromStatus(status ?? "pending");
+
   return {
     ...baseRow({
       createdAt,
@@ -1169,14 +1215,17 @@ export function systemRow({
     detail,
     status,
   };
+
   if (systemKind !== "operation") {
     return {
       ...base,
       systemKind,
     };
   }
+
   const resolvedOperationKind =
     operationKind ?? (parentChange ? "parent-change" : "generic");
+
   const resolvedCompletedAt =
     completedAt !== undefined
       ? completedAt
@@ -1187,10 +1236,12 @@ export function systemRow({
             status === "interrupted"
           ? base.createdAt
           : null;
+
   if (resolvedOperationKind === "parent-change") {
     if (status === null) {
       throw new Error("Parent change system row requires a status");
     }
+
     return {
       ...base,
       systemKind,
@@ -1206,6 +1257,7 @@ export function systemRow({
       },
     };
   }
+
   return {
     ...base,
     systemKind,
@@ -1248,6 +1300,7 @@ export function delegationRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "work",
@@ -1289,6 +1342,7 @@ export function turnRow({
     threadId,
     turnId,
   });
+
   return {
     ...base,
     kind: "turn",

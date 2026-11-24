@@ -4,19 +4,23 @@ import {
   useId,
   useLayoutEffect,
   useRef,
+  useState,
   type CSSProperties,
 } from "react";
+import { ZoomableImage } from "./zoomable-image";
 import { createPortal } from "react-dom";
-import { Button } from "@bb/shared-ui/button";
-import { usePersistentOverlayFocus } from "@bb/shared-ui/responsive-overlay";
-import { usePortalScopeProps } from "@bb/shared-ui/lib/portal-scope";
+import { Button } from "@omnyo/shared-ui/button";
+import { MOTION_DURATION_MS } from "@omnyo/shared-ui/motion";
+import { usePersistentOverlayFocus } from "@omnyo/shared-ui/responsive-overlay";
+import { usePortalScopeProps } from "@omnyo/shared-ui/lib/portal-scope";
 import { useBrowserDimmingOverlay } from "@/hooks/useBrowserDimmingModal";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 
 type ImageLightboxKeyAction = "close" | "next" | "previous";
 
 const IMAGE_TRANSPARENCY_CHECKER_BASE =
   "color-mix(in oklch, var(--ink) 5%, var(--canvas))";
+
 const IMAGE_TRANSPARENCY_CHECKER_MARK =
   "color-mix(in oklch, var(--ink) 14%, var(--canvas))";
 
@@ -94,9 +98,11 @@ export function getWrappedImageIndex({
   if (itemCount <= 0) {
     return currentIndex;
   }
+
   if (direction === "previous") {
     return currentIndex === 0 ? itemCount - 1 : currentIndex - 1;
   }
+
   return currentIndex === itemCount - 1 ? 0 : currentIndex + 1;
 }
 
@@ -114,6 +120,41 @@ export function ImageLightbox({
   title,
 }: ImageLightboxProps) {
   const isVisible = isOpen ?? imageSrc !== null;
+  const [previousIsVisible, setPreviousIsVisible] = useState(isVisible);
+  const [isExiting, setIsExiting] = useState(false);
+  const [lastVisibleImageSrc, setLastVisibleImageSrc] = useState(imageSrc);
+  const [hasSteppedImage, setHasSteppedImage] = useState(false);
+
+  if (isVisible && imageSrc !== lastVisibleImageSrc) {
+    setLastVisibleImageSrc(imageSrc);
+
+    if (previousIsVisible && lastVisibleImageSrc !== null) {
+      setHasSteppedImage(true);
+    }
+  }
+
+  if (isVisible !== previousIsVisible) {
+    setPreviousIsVisible(isVisible);
+    setIsExiting(!isVisible);
+
+    if (isVisible) {
+      setHasSteppedImage(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!isExiting) {
+      return;
+    }
+
+    const timeout = window.setTimeout(
+      () => setIsExiting(false),
+      MOTION_DURATION_MS.fast,
+    );
+
+    return () => window.clearTimeout(timeout);
+  }, [isExiting]);
+
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   useLayoutEffect(() => {
@@ -128,6 +169,7 @@ export function ImageLightbox({
     panelRef,
     requestClose,
   });
+
   const hasNavigation =
     hasMultipleImages && onPrevious !== undefined && onNext !== undefined;
 
@@ -141,6 +183,7 @@ export function ImageLightbox({
         event,
         hasNavigation,
       });
+
       if (!action) {
         return;
       }
@@ -149,25 +192,31 @@ export function ImageLightbox({
         case "close":
           event.preventDefault();
           onClose();
+
           return;
         case "previous":
           if (!onPrevious || previousDisabled) {
             return;
           }
+
           event.preventDefault();
           onPrevious();
+
           return;
         case "next":
           if (!onNext || nextDisabled) {
             return;
           }
+
           event.preventDefault();
           onNext();
+
           return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
+
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     hasNavigation,
@@ -180,23 +229,44 @@ export function ImageLightbox({
   ]);
 
   if (!isVisible) {
-    return null;
+    if (!isExiting) {
+      return null;
+    }
+
+    return createPortal(
+      <div
+        {...scopeProps}
+        aria-hidden="true"
+        data-testid="image-lightbox-exit"
+        className="pointer-events-none fixed inset-0 z-50 flex h-dvh w-full items-center justify-center bg-black/70 p-4 animate-out fade-out-0 fill-mode-forwards"
+      >
+        {lastVisibleImageSrc ? (
+          <img
+            src={lastVisibleImageSrc}
+            alt=""
+            style={IMAGE_TRANSPARENCY_CHECKER_STYLE}
+            className="max-h-[82dvh] max-w-full object-contain"
+          />
+        ) : null}
+      </div>,
+      document.body,
+      "image-lightbox-exit",
+    );
   }
 
   return createPortal(
     <div
       ref={panelRef}
       {...scopeProps}
+      data-no-secondary-panel-swipe=""
+      data-no-sidebar-swipe=""
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
-      className="fixed inset-0 z-50 flex h-dvh w-full cursor-zoom-out items-center justify-center bg-black/70 p-4 outline-none animate-in fade-in-0 duration-150 motion-reduce:animate-none"
+      className="fixed inset-0 z-50 flex h-dvh w-full cursor-zoom-out overflow-hidden items-center justify-center bg-black/70 p-4 outline-none animate-in fade-in-0"
       onClick={(event) => {
-        if (
-          event.target === event.currentTarget ||
-          event.target instanceof HTMLImageElement
-        ) {
+        if (event.target === event.currentTarget) {
           onClose();
         }
       }}
@@ -205,11 +275,17 @@ export function ImageLightbox({
         {title}
       </h2>
       {imageSrc ? (
-        <img
+        <ZoomableImage
+          key={imageSrc}
+          className={
+            hasSteppedImage
+              ? "animate-in fade-in-0 duration-(--motion-duration-fast)"
+              : "animate-in fade-in-0 zoom-in-97"
+          }
+          checkerStyle={IMAGE_TRANSPARENCY_CHECKER_STYLE}
           src={imageSrc}
           alt={imageAlt}
-          style={IMAGE_TRANSPARENCY_CHECKER_STYLE}
-          className="max-h-[82dvh] max-w-full object-contain"
+          onClose={onClose}
         />
       ) : (
         <div
@@ -270,5 +346,6 @@ export function ImageLightbox({
       </Button>
     </div>,
     document.body,
+    "image-lightbox-dialog",
   );
 }

@@ -22,23 +22,30 @@ describe("Pierre Strict Mode recovery", () => {
     const onPostRender = vi.fn();
     const repaint = vi.fn();
     let discardedIsActive = true;
+
     const discardedRerender = vi.fn(() => {
       if (discardedIsActive) repaint();
     });
+
     const retainedRerender = vi.fn(repaint);
+
     const discardedInstance: TestPierreInstance = {
       rerender: discardedRerender,
     };
+
     const retainedInstance: TestPierreInstance = { rerender: retainedRerender };
+
     const options: TestPierreOptions = {
       label: "plugin-diff",
       onPostRender,
     };
+
     const { result, rerender } = renderHook(() =>
       usePierreStrictModeRecoveryOptions<TestPierreInstance, TestPierreOptions>(
         options,
       ),
     );
+
     const recoveredOptions = result.current;
     const node = document.createElement("diffs-container");
 

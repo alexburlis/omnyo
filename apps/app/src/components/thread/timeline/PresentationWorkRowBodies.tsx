@@ -1,14 +1,14 @@
-import type { ThreadEventPlanStep } from "@bb/domain";
-import type { TimelineRowPresentation } from "@bb/server-contract";
-import type { TimelineViewWorkRow } from "@bb/thread-view";
+import type { ThreadEventPlanStep } from "@omnyo/domain";
+import type { TimelineRowPresentation } from "@omnyo/server-contract";
+import type { TimelineViewWorkRow } from "@omnyo/thread-view";
 import {
   activityIconClass,
   activityRowClass,
   activityTextClass,
   type ActivityRowState,
-} from "@bb/shared-ui/activity-row-styles";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/activity-row-styles";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { MarkdownPreview } from "../../ui/markdown-preview.js";
 
 export function PresentationDetail({
@@ -17,9 +17,11 @@ export function PresentationDetail({
   presentation: TimelineRowPresentation | undefined;
 }) {
   const detail = presentation?.detail;
+
   if (detail === undefined || detail.trim().length === 0) {
     return null;
   }
+
   return (
     <MarkdownPreview
       content={detail}
@@ -60,6 +62,7 @@ export function PlanStepsWorkRowBody({
         {row.steps.map((step, index) => {
           const status = step.status ?? "pending";
           const activityState = PLAN_STEP_ACTIVITY_STATE[status];
+
           return (
             <li
               key={`${index}:${step.step}`}

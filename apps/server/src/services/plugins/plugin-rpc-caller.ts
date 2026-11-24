@@ -1,13 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
-  createNodeBbSdk,
+  createNodeOmnyoSdk,
   createRequestTimeoutFetch,
-  DEFAULT_BB_REQUEST_TIMEOUT_MS,
-  type BbSdk,
-} from "@bb/sdk";
-import type { ExperimentalPluginRpcCaller } from "@get-bb/plugin-sdk";
+  type OmnyoSdk,
+} from "@omnyo/sdk";
+import type { ExperimentalPluginRpcCaller } from "@omnyo/plugin-sdk";
 
-export const PLUGIN_RPC_CALLER_HEADER = "x-bb-plugin-caller";
+export const PLUGIN_RPC_CALLER_HEADER = "x-omnyo-plugin-caller";
+
+const PLUGIN_RPC_REQUEST_TIMEOUT_MS = 5 * 60_000;
 
 export interface PluginRpcCallerCredential {
   readonly token: string;
@@ -29,11 +30,13 @@ function tokenKey(token: string): string {
 
 export function createPluginRpcCallerRegistry(): PluginRpcCallerRegistry {
   const callers = new Map<string, string>();
+
   return {
     issue(pluginId) {
       const token = randomBytes(32).toString("base64url");
       const key = tokenKey(token);
       callers.set(key, pluginId);
+
       return {
         token,
         revoke() {
@@ -44,6 +47,7 @@ export function createPluginRpcCallerRegistry(): PluginRpcCallerRegistry {
     resolve(token) {
       if (token === undefined) return { ok: true, caller: { kind: "client" } };
       const pluginId = callers.get(tokenKey(token));
+
       return pluginId === undefined
         ? { ok: false }
         : { ok: true, caller: { kind: "plugin", pluginId } };
@@ -54,15 +58,17 @@ export function createPluginRpcCallerRegistry(): PluginRpcCallerRegistry {
 export function createPluginRpcCallerSdk(args: {
   baseUrl: string;
   token: string;
-}): BbSdk {
+}): OmnyoSdk {
   const timeoutFetch = createRequestTimeoutFetch({
-    timeoutMs: DEFAULT_BB_REQUEST_TIMEOUT_MS,
+    timeoutMs: PLUGIN_RPC_REQUEST_TIMEOUT_MS,
   });
-  return createNodeBbSdk({
+
+  return createNodeOmnyoSdk({
     baseUrl: args.baseUrl,
     fetch: (input, init) => {
       const headers = new Headers(init?.headers);
       headers.set(PLUGIN_RPC_CALLER_HEADER, args.token);
+
       return timeoutFetch(input, { ...init, headers });
     },
   });

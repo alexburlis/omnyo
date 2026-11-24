@@ -1,4 +1,3 @@
-import { queueSplitDownload } from "@/lib/split-prefetch";
 import { pluginDetailKeyFromRoute } from "@/components/plugin/plugin-detail-key";
 import { useMemo } from "react";
 import { disableGlobalCursorStyles } from "react-resizable-panels";
@@ -6,7 +5,7 @@ import { matchPath, Navigate, useLocation } from "react-router-dom";
 import { useAtomValue } from "jotai";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import { holdsPluginDetailPane } from "@/lib/split-layout/openPaneContentInSplit";
-import "@bb/shared-ui/icon-extended";
+import "@omnyo/shared-ui/icon-extended";
 import {
   APP_ROOT_ROUTE_PATH,
   LEGACY_PROJECT_COMPOSE_ROUTE_PATH,
@@ -14,6 +13,11 @@ import {
   PLUGIN_PANEL_ROUTE_PATH,
 } from "@/lib/route-paths";
 import type { PaneContent } from "@/lib/split-layout";
+import { usePluginSlots } from "@/lib/plugin-slots";
+import {
+  getLegacyGraphRedirect,
+  hasWorkflowsPanel,
+} from "@/lib/workflow-panel-routes";
 import { useRouteState } from "@/hooks/useRouteState";
 import { LegacyProjectComposeRedirect } from "./LegacyProjectComposeRedirect";
 import { SplitThreadArea } from "./thread-detail/SplitThreadArea";
@@ -23,20 +27,22 @@ disableGlobalCursorStyles();
 
 const ROOT_COMPOSE_CONTENT = { kind: "new-thread" } as const;
 
-queueSplitDownload("markdown-html");
-
 export default function SplitWorkspaceRoute() {
   const location = useLocation();
+  const { navPanels } = usePluginSlots();
   const { projectId, threadId, isThreadView } = useRouteState();
   const pluginMatch = matchPath(PLUGIN_PANEL_ROUTE_PATH, location.pathname);
+
   const pluginDetailMatch = matchPath(
     PLUGIN_DETAIL_ROUTE_PATH,
     location.pathname,
   );
+
   const legacyProjectMatch = matchPath(
     LEGACY_PROJECT_COMPOSE_ROUTE_PATH,
     location.pathname,
   );
+
   const pluginId = pluginMatch?.params.pluginId;
   const panelPath = pluginMatch?.params.panelPath;
   const pluginSubPath = pluginMatch?.params["*"] ?? "";
@@ -46,12 +52,15 @@ export default function SplitWorkspaceRoute() {
     if (location.pathname === APP_ROOT_ROUTE_PATH) {
       return ROOT_COMPOSE_CONTENT;
     }
+
     if (isThreadView && projectId && threadId) {
       return { kind: "thread", projectId, threadId };
     }
+
     if (detailPluginId) {
       return { kind: "plugin-detail", pluginId: detailPluginId };
     }
+
     if (pluginId && panelPath) {
       return {
         kind: "plugin-panel",
@@ -60,6 +69,7 @@ export default function SplitWorkspaceRoute() {
         subPath: pluginSubPath,
       };
     }
+
     return null;
   }, [
     detailPluginId,
@@ -75,12 +85,32 @@ export default function SplitWorkspaceRoute() {
   const layout = useAtomValue(splitLayoutAtom);
 
   const legacyProjectId = legacyProjectMatch?.params.projectId;
+
+  const graphRedirect = hasWorkflowsPanel(navPanels)
+    ? getLegacyGraphRedirect(location.pathname)
+    : null;
+
+  if (graphRedirect !== null) {
+    return (
+      <Navigate
+        to={{
+          pathname: graphRedirect,
+          search: location.search,
+          hash: location.hash,
+        }}
+        replace
+      />
+    );
+  }
+
   if (legacyProjectId) {
     return <LegacyProjectComposeRedirect projectId={legacyProjectId} />;
   }
+
   if (routeContent === null) {
     return <Navigate to={APP_ROOT_ROUTE_PATH} replace />;
   }
+
   if (
     routeContent.kind === "plugin-detail" &&
     !holdsPluginDetailPane(layout, routeContent.pluginId)
@@ -94,5 +124,6 @@ export default function SplitWorkspaceRoute() {
       />
     );
   }
+
   return <SplitThreadArea routeContent={routeContent} />;
 }

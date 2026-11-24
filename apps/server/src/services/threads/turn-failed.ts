@@ -7,23 +7,26 @@ import {
   listStoredTurnRejectedRowsByClientRequestIds,
   type DbConnection,
   type StoredThreadEventDataRow,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   providerErrorInfoSchema,
   providerRateLimitStateSchema,
+  threadEventTurnStatusSchema,
+  systemThreadInterruptedEventDataSchema,
+  systemErrorEventDataSchema,
   type ClientTurnRequestId,
   type ProviderErrorInfo,
   type ProviderRateLimitState,
   type Thread,
   type TurnRequestEventData,
-} from "@bb/domain";
-import type { PluginTurnFailedEvent } from "@get-bb/plugin-sdk";
+} from "@omnyo/domain";
+import type { PluginTurnFailedEvent } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import { parseStoredTurnRequestEvent } from "./thread-events.js";
 
-/** The message shapes the fallback query can return, by event type. */
 const providerErrorDataSchema = z.object({
   message: z.string(),
+  detail: z.string().nullish(),
   errorInfo: providerErrorInfoSchema.optional(),
 });
 
@@ -35,6 +38,18 @@ const rejectedReasonDataSchema = z.object({
   reason: z.string(),
 });
 
+const systemErrorCodeDataSchema = z.object({
+  code: z.string(),
+});
+
+const PROVIDER_PROCESS_EXITED_CODE = "provider_process_exited";
+
+const PROVIDER_PROCESS_EXITED_ERROR_INFO: ProviderErrorInfo = {
+  category: "connection-failed",
+  providerCode: PROVIDER_PROCESS_EXITED_CODE,
+  httpStatusCode: null,
+};
+
 function parseRowData(row: StoredThreadEventDataRow): unknown {
   try {
     return JSON.parse(row.data);
@@ -43,27 +58,29 @@ function parseRowData(row: StoredThreadEventDataRow): unknown {
   }
 }
 
+const terminalFailureDataSchema = z.object({
+  status: threadEventTurnStatusSchema,
+  error: z.object({ message: z.string() }).nullish(),
+});
+
+const rejectedFailureDataSchema = z.object({
+  requestId: z.string(),
+  message: z.string(),
+});
+
 export interface FailedTurnRecord {
   request: TurnRequestEventData;
   requestSequence: number;
 }
 
-/**
- * The turn whose failure just landed: the most recent request on the thread.
- *
- * A failure applies at the moment the thread leaves `active`/`starting`, and
- * nothing else can have appended a request in between — the send path only
- * appends one while dispatching, and a queue drain waits for the thread to be
- * quiescent, which this failure is what makes it. Returns null for a thread
- * that has never dispatched a turn (a start that failed before any request),
- * where there is nothing to announce and nothing for a retry to re-submit.
- */
 export function loadFailedTurn(
   db: DbConnection,
   threadId: string,
 ): FailedTurnRecord | null {
   const row = getLastStoredTurnRequestEvent(db, threadId);
+
   if (row === null) return null;
+
   try {
     return {
       request: parseStoredTurnRequestEvent(row),
@@ -74,13 +91,55 @@ export function loadFailedTurn(
   }
 }
 
-/**
- * Which attempt failed, and which request the chain started from.
- *
- * Both come off the failed request itself rather than a tally: the marker
- * written when a retry dispatched IS the counter, so restarts, re-queues and a
- * server that never saw the earlier attempts all arrive at the same number.
- */
+export function loadFailedTurnErrorMessage(
+  db: DbConnection,
+  threadId: string,
+): string | null {
+  const failed = loadFailedTurn(db, threadId);
+
+  if (failed === null && getLastStoredTurnRequestEvent(db, threadId) !== null) {
+    return null;
+  }
+
+  const afterSequence = failed?.requestSequence ?? 0;
+
+  const terminal = getLatestStoredThreadEventOfTypes(db, {
+    threadId,
+    types: ["turn/completed", "client/turn/rejected"],
+    afterSequence,
+  });
+
+  if (terminal?.type === "turn/completed") {
+    const data = terminalFailureDataSchema.safeParse(
+      parseRowData(terminal),
+    ).data;
+
+    if (data === undefined || data.status !== "failed") return null;
+
+    if (data.error?.message && data.error.message !== "Provider error")
+      return data.error.message;
+  } else if (terminal?.type === "client/turn/rejected") {
+    const data = rejectedFailureDataSchema.safeParse(
+      parseRowData(terminal),
+    ).data;
+
+    return data?.requestId === failed?.request.requestId
+      ? (data?.message ?? null)
+      : null;
+  }
+
+  const error = getLatestStoredThreadEventOfTypes(db, {
+    threadId,
+    types: ["provider/error", "system/error"],
+    afterSequence,
+  });
+
+  if (error === null) return null;
+  const data = providerErrorDataSchema.safeParse(parseRowData(error)).data;
+
+  return data?.detail?.trim() || data?.message || null;
+}
+
 export function retryChain(request: TurnRequestEventData): {
   attemptNumber: number;
   originalRequestId: ClientTurnRequestId;
@@ -91,16 +150,6 @@ export function retryChain(request: TurnRequestEventData): {
   };
 }
 
-/**
- * Whether the provider accepted the failed turn's input before the failure.
- *
- * Acceptance is the provider's own statement that the input entered its
- * conversation, recorded as the mandatory `turn/input/accepted` event keyed by
- * the request id. It is the fact that splits a failure into its two shapes:
- * accepted-then-failed means the provider holds the message (and possibly
- * partial output) that no provider rolls back, while never-accepted means the
- * request died at the door and the provider has no record of it.
- */
 export function wasFailedTurnInputAccepted(
   db: DbConnection,
   args: { threadId: string; failed: FailedTurnRecord },
@@ -114,16 +163,6 @@ export function wasFailedTurnInputAccepted(
   );
 }
 
-/**
- * The structured classification of a request the provider refused at the door.
- *
- * A rejected dispatch never produces a `provider/error` event — no provider
- * turn existed to carry one — so the typed code the runtime attached to the
- * `client/turn/rejected` row is the failure's only classification. Mapping it
- * here is what lets a retry policy see a door-rejected rate limit as the same
- * category a mid-stream one reports; unmapped reasons stay null, exactly as
- * before.
- */
 function doorRejectionErrorInfo(
   db: DbConnection,
   args: { threadId: string; failed: FailedTurnRecord },
@@ -133,9 +172,12 @@ function doorRejectionErrorInfo(
     clientRequestIds: [args.failed.request.requestId],
     afterSequence: args.failed.requestSequence,
   })[0];
+
   if (row === undefined) return null;
+
   const reason = rejectedReasonDataSchema.safeParse(parseRowData(row)).data
     ?.reason;
+
   switch (reason) {
     case "rate_limited":
       return {
@@ -149,54 +191,105 @@ function doorRejectionErrorInfo(
         providerCode: null,
         httpStatusCode: null,
       };
+    case PROVIDER_PROCESS_EXITED_CODE:
+      return PROVIDER_PROCESS_EXITED_ERROR_INFO;
     default:
       return null;
   }
 }
 
-/**
- * The `turn.failed` payload: ids and failure facts, assembled from the failed
- * turn's own records so a listener never replays the event log itself.
- *
- * Deliberately carries no thread DTO and no copy of the message. A retry is
- * asked for BY REFERENCE (`sdk.threads.retry`), so the request id is the whole
- * of what a policy needs, and a listener that wants more reads it when it uses
- * it rather than being handed a snapshot that is already aging.
- *
- * Returns null when the thread is gone or never dispatched a turn — there is
- * no failed turn to announce.
- */
+function providerExitErrorInfo(
+  db: DbConnection,
+  args: { threadId: string; failed: FailedTurnRecord },
+): ProviderErrorInfo | null {
+  const row = getLatestStoredThreadEventOfTypes(db, {
+    threadId: args.threadId,
+    types: ["system/error"],
+    afterSequence: args.failed.requestSequence,
+  });
+
+  if (row === null) return null;
+
+  return systemErrorCodeDataSchema.safeParse(parseRowData(row)).data?.code ===
+    PROVIDER_PROCESS_EXITED_CODE
+    ? PROVIDER_PROCESS_EXITED_ERROR_INFO
+    : null;
+}
+
+function hostInterruptionErrorInfo(
+  db: DbConnection,
+  args: { threadId: string; failed: FailedTurnRecord },
+): ProviderErrorInfo | null {
+  const row = getLatestStoredThreadEventOfTypes(db, {
+    threadId: args.threadId,
+    types: ["system/thread/interrupted"],
+    afterSequence: args.failed.requestSequence,
+  });
+
+  if (row === null) return null;
+
+  const interruption = systemThreadInterruptedEventDataSchema.safeParse(
+    parseRowData(row),
+  ).data;
+
+  if (interruption?.reason !== "host-daemon-restarted") return null;
+
+  return {
+    category: "connection-failed",
+    providerCode: interruption.cause ?? interruption.reason,
+    httpStatusCode: null,
+  };
+}
+
 export function buildTurnFailedEvent(
   db: DbConnection,
   threadId: string,
 ): PluginTurnFailedEvent | null {
   const thread = getThread(db, threadId);
+
   if (!thread || thread.deletedAt !== null || thread.archivedAt !== null) {
     return null;
   }
+
   const failed = loadFailedTurn(db, threadId);
+
   if (failed === null) return null;
-  // The provider's own account of the failure, when the failure happened
-  // inside a provider turn at all: it carries both the turn id and the
-  // structured classification, so one row answers two fields.
+
   const providerError = getLatestStoredThreadEventOfTypes(db, {
     threadId,
     types: ["provider/error"],
     afterSequence: failed.requestSequence,
   });
+
+  const commandFailure = getLatestStoredThreadEventOfTypes(db, {
+    threadId,
+    types: ["system/error"],
+    afterSequence: failed.requestSequence,
+  });
+
+  const commandFailureData =
+    commandFailure === null
+      ? undefined
+      : systemErrorEventDataSchema.safeParse(parseRowData(commandFailure)).data;
+
   const providerErrorInfo: ProviderErrorInfo | null =
     providerError === null
       ? null
       : (providerErrorDataSchema.safeParse(parseRowData(providerError)).data
           ?.errorInfo ?? null);
+
   return {
     threadId,
     requestId: failed.request.requestId,
     turnId: providerError?.turnId ?? null,
     errorInfo:
-      providerErrorInfo ?? doorRejectionErrorInfo(db, { threadId, failed }),
+      providerErrorInfo ??
+      commandFailureData?.errorInfo ??
+      doorRejectionErrorInfo(db, { threadId, failed }) ??
+      providerExitErrorInfo(db, { threadId, failed }) ??
+      hostInterruptionErrorInfo(db, { threadId, failed }),
     inputAccepted: wasFailedTurnInputAccepted(db, { threadId, failed }),
-    rateLimits: latestRateLimits(db, thread),
+    rateLimits: commandFailureData?.rateLimits ?? latestRateLimits(db, thread),
     attemptNumber: retryChain(failed.request).attemptNumber,
   };
 }
@@ -208,7 +301,9 @@ function latestRateLimits(
   const row = getLatestStoredRateLimitsEvent(db, {
     threadId: thread.id,
   });
+
   if (row === null) return null;
+
   return (
     rateLimitsDataSchema.safeParse(parseRowData(row)).data?.rateLimits ?? null
   );

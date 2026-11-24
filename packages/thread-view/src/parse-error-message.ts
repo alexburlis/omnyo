@@ -1,4 +1,4 @@
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import type { EventMeta } from "./event-decode.js";
 import { messageId } from "./format-helpers.js";
 import type { EventProjectionErrorMessage } from "./event-projection-types.js";
@@ -11,6 +11,7 @@ export function parseErrorMessage(
     return null;
 
   const { message, detail } = decoded;
+
   return {
     kind: "error",
     id: messageId(decoded.threadId, "error", `${meta.seq}`),

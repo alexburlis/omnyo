@@ -5,8 +5,10 @@ import { atomFamily } from "jotai-family";
 import { z } from "zod";
 import { createLocalStorageSyncStorage } from "./browser-storage";
 
-const BROWSER_HISTORY_STORAGE_PREFIX = "bb.thread.browserHistory";
+const BROWSER_HISTORY_STORAGE_PREFIX = "omnyo.thread.browserHistory";
+
 const BROWSER_HISTORY_STORAGE_VERSION = "1";
+
 const BROWSER_HISTORY_MAX_ENTRIES = 24;
 
 const browserHistoryEntrySchema = z
@@ -16,6 +18,7 @@ const browserHistoryEntrySchema = z
     visitedAt: z.number().int().nonnegative(),
   })
   .strict();
+
 const browserHistorySchema = z.array(browserHistoryEntrySchema);
 
 export type BrowserHistoryEntry = z.infer<typeof browserHistoryEntrySchema>;
@@ -40,8 +43,10 @@ const browserHistoryStorage = createLocalStorageSyncStorage<
     if (storedValue === null) {
       return initialValue;
     }
+
     try {
       const parsed = browserHistorySchema.safeParse(JSON.parse(storedValue));
+
       return parsed.success ? parsed.data : initialValue;
     } catch {
       return initialValue;
@@ -81,6 +86,7 @@ export function useBrowserHistory(
   const historyAtom = hasThreadId(threadId)
     ? browserHistoryAtomFamily(threadId)
     : disabledBrowserHistoryAtom;
+
   const [entries, setEntries] = useAtom(historyAtom);
 
   const recordVisit = useCallback(
@@ -88,13 +94,16 @@ export function useBrowserHistory(
       if (url.length === 0) {
         return;
       }
+
       setEntries((current) => {
         const next: BrowserHistoryEntry = {
           url,
           title,
           visitedAt: Date.now(),
         };
+
         const withoutDuplicate = current.filter((entry) => entry.url !== url);
+
         return [next, ...withoutDuplicate].slice(
           0,
           BROWSER_HISTORY_MAX_ENTRIES,

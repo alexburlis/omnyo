@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { promptMentionClipboardDataAttributes } from "@/components/promptbox/mentions/prompt-mention-clipboard";
 import {
   MULTI_CLICK_SELECTION_REPORT_DELAY_MS,
   SelectableMessageProse,
@@ -27,6 +28,7 @@ function makeWindowSelection({
   text: string;
 }): Selection {
   const rect = new DOMRect(10, 20, 30, 8);
+
   const range = {
     commonAncestorContainer: commonAncestorContainer ?? node,
     getBoundingClientRect: () => rect,
@@ -36,6 +38,7 @@ function makeWindowSelection({
     }),
     intersectsNode: intersectsNode ?? (() => true),
   } as unknown as Range;
+
   return {
     anchorNode: node,
     commonAncestorContainer: commonAncestorContainer ?? node,
@@ -55,6 +58,7 @@ const SHARED_SELECTION_TEXT = "shared selection phrase";
 
 function renderSharedSelectionReport(count: number) {
   const onSelect = vi.fn();
+
   const { getAllByText } = render(
     <>
       {Array.from({ length: count }, (_, index) => (
@@ -64,12 +68,16 @@ function renderSharedSelectionReport(count: number) {
       ))}
     </>,
   );
+
   const proseNodes = getAllByText(SHARED_SELECTION_TEXT);
   const firstProse = proseNodes[0];
+
   if (firstProse === undefined) {
     throw new Error("expected at least one mounted message");
   }
+
   const firstTextNode = firstProse.firstChild;
+
   if (firstTextNode === null) {
     throw new Error("expected a text node in the first message");
   }
@@ -78,22 +86,27 @@ function renderSharedSelectionReport(count: number) {
     node: firstTextNode,
     text: SHARED_SELECTION_TEXT,
   });
+
   const range = selection.getRangeAt(0);
   const toStringSpy = vi.spyOn(selection, "toString");
   const clientRectsSpy = vi.spyOn(range, "getClientRects");
   vi.spyOn(window, "getSelection").mockReturnValue(selection);
+
   return { onSelect, proseNodes, toStringSpy, clientRectsSpy };
 }
 
 function makeSelectionWithoutRange() {
   const rect = new DOMRect(10, 20, 30, 8);
+
   const range = {
     getBoundingClientRect: () => rect,
     getClientRects: () => ({ length: 1, item: () => rect }),
     intersectsNode: () => true,
   } as unknown as Range;
+
   const toStringSpy = vi.fn(() => "text");
   const clientRectsSpy = vi.spyOn(range, "getClientRects");
+
   const selection = {
     anchorNode: null,
     focusNode: null,
@@ -102,6 +115,7 @@ function makeSelectionWithoutRange() {
     rangeCount: 0,
     toString: toStringSpy,
   } as unknown as Selection;
+
   return { clientRectsSpy, selection, toStringSpy };
 }
 
@@ -111,6 +125,7 @@ function makeCollapsedSelection(textNode: Node) {
   const range = selection.getRangeAt(0);
   const toStringSpy = vi.spyOn(selection, "toString");
   const clientRectsSpy = vi.spyOn(range, "getClientRects");
+
   return { clientRectsSpy, selection, toStringSpy };
 }
 
@@ -147,6 +162,7 @@ describe("SelectableMessageProse", () => {
     const { rerender, unmount } = render(
       <SelectableMessageProse>First answer</SelectableMessageProse>,
     );
+
     const addsAfterFirstMount = countSharedListenerCalls(addSpy);
 
     rerender(
@@ -164,9 +180,72 @@ describe("SelectableMessageProse", () => {
     );
   });
 
+  it("keeps a fully highlighted mention when its label also occurs in plain text", async () => {
+    const onSelect = vi.fn();
+
+    const resource = {
+      kind: "thread",
+      threadId: "thr_build_notes",
+      label: "Build notes",
+    } as const;
+
+    const serializedText = "@thread:thr_build_notes";
+
+    const { getByTestId } = render(
+      <SelectableMessageProse onSelect={onSelect}>
+        <div data-testid="prose">
+          <p>Build notes</p>
+          <p>
+            {"See "}
+            <span
+              {...promptMentionClipboardDataAttributes({
+                resource,
+                serializedText,
+              })}
+            >
+              Build notes
+            </span>
+            {" for details."}
+          </p>
+        </div>
+      </SelectableMessageProse>,
+    );
+
+    const nativeSelection = window.getSelection()!;
+    const prose = getByTestId("prose");
+    const range = document.createRange();
+    range.selectNodeContents(prose);
+    const rect = new DOMRect(10, 20, 30, 8);
+    vi.spyOn(range, "getClientRects").mockReturnValue(
+      Object.assign([rect], {
+        item: (index: number) => (index === 0 ? rect : null),
+      }),
+    );
+    nativeSelection.removeAllRanges();
+    nativeSelection.addRange(range);
+    vi.spyOn(nativeSelection, "toString").mockReturnValue(
+      "Build notes\n\nSee Build notes for details.",
+    );
+
+    fireEvent.pointerDown(document);
+    fireEvent.pointerUp(document);
+    await waitFor(() =>
+      expect(onSelect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: "Build notes\n\nSee Build notes for details.",
+          quote: {
+            text: "Build notes\n\nSee @thread:thr_build_notes for details.",
+            mentions: [{ start: 17, end: 40, resource }],
+          },
+        }),
+      ),
+    );
+  });
+
   it("moves the reported selection between messages and clears the previous one", async () => {
     const onSelectFirst = vi.fn();
     const onSelectSecond = vi.fn();
+
     const { getByText } = render(
       <>
         <SelectableMessageProse onSelect={onSelectFirst}>
@@ -177,6 +256,7 @@ describe("SelectableMessageProse", () => {
         </SelectableMessageProse>
       </>,
     );
+
     const firstTextNode = getByText("First selectable answer").firstChild;
     const secondTextNode = getByText("Second selectable answer").firstChild;
     expect(firstTextNode).not.toBeNull();
@@ -220,11 +300,13 @@ describe("SelectableMessageProse", () => {
 
   it("reports a selection only after pointer release", async () => {
     const onSelect = vi.fn();
+
     const { getByText } = render(
       <SelectableMessageProse onSelect={onSelect}>
         Selectable answer text
       </SelectableMessageProse>,
     );
+
     const textNode = getByText("Selectable answer text").firstChild;
     expect(textNode).not.toBeNull();
     mockWindowSelection({
@@ -246,11 +328,13 @@ describe("SelectableMessageProse", () => {
 
   it("reports a touch long-press selection before pointer release", async () => {
     const onSelect = vi.fn();
+
     const { getByText } = render(
       <SelectableMessageProse onSelect={onSelect}>
         Long press selectable answer text
       </SelectableMessageProse>,
     );
+
     const target = getByText("Long press selectable answer text");
     const textNode = target.firstChild;
     expect(textNode).not.toBeNull();
@@ -271,11 +355,13 @@ describe("SelectableMessageProse", () => {
 
   it("includes the pointer release point and side when a pointer selection starts in the message", async () => {
     const onSelect = vi.fn();
+
     const { getByText } = render(
       <SelectableMessageProse onSelect={onSelect}>
         Selectable answer text
       </SelectableMessageProse>,
     );
+
     const target = getByText("Selectable answer text");
     const textNode = target.firstChild;
     expect(textNode).not.toBeNull();
@@ -300,14 +386,17 @@ describe("SelectableMessageProse", () => {
 
   it("reports a selection that updates after pointer release", async () => {
     const onSelect = vi.fn();
+
     const { getByText } = render(
       <SelectableMessageProse onSelect={onSelect}>
         Double click selectable answer text
       </SelectableMessageProse>,
     );
+
     const textNode = getByText(
       "Double click selectable answer text",
     ).firstChild;
+
     expect(textNode).not.toBeNull();
 
     fireEvent.pointerDown(document);
@@ -331,11 +420,13 @@ describe("SelectableMessageProse", () => {
   it("reports double-click selections from the message click target", async () => {
     vi.useFakeTimers();
     const onSelect = vi.fn();
+
     const { getByText } = render(
       <SelectableMessageProse onSelect={onSelect}>
         Double click target paragraph text
       </SelectableMessageProse>,
     );
+
     const target = getByText("Double click target paragraph text");
     const textNode = target.firstChild;
     expect(textNode).not.toBeNull();
@@ -363,11 +454,13 @@ describe("SelectableMessageProse", () => {
 
   it("reports triple-click selections from the message click target", async () => {
     const onSelect = vi.fn();
+
     const { getByText } = render(
       <SelectableMessageProse onSelect={onSelect}>
         Triple click selectable paragraph text
       </SelectableMessageProse>,
     );
+
     const target = getByText("Triple click selectable paragraph text");
     const textNode = target.firstChild;
     expect(textNode).not.toBeNull();
@@ -390,11 +483,13 @@ describe("SelectableMessageProse", () => {
   it("cancels a delayed double-click report when a third click completes", async () => {
     vi.useFakeTimers();
     const onSelect = vi.fn();
+
     const { getByText } = render(
       <SelectableMessageProse onSelect={onSelect}>
         Triple click replaces word selection
       </SelectableMessageProse>,
     );
+
     const target = getByText("Triple click replaces word selection");
     const textNode = target.firstChild;
     expect(textNode).not.toBeNull();
@@ -403,6 +498,7 @@ describe("SelectableMessageProse", () => {
       node: textNode!,
       text: "Triple",
     });
+
     vi.spyOn(window, "getSelection").mockImplementation(() => currentSelection);
 
     fireEvent.doubleClick(target, { detail: 2 });
@@ -431,6 +527,7 @@ describe("SelectableMessageProse", () => {
 
   it("accepts triple-click selections that spill only whitespace past the message", async () => {
     const onSelect = vi.fn();
+
     const { container, getByTestId, getByText } = render(
       <div>
         <SelectableMessageProse onSelect={onSelect}>
@@ -439,6 +536,7 @@ describe("SelectableMessageProse", () => {
         <div data-testid="message-actions">Actions</div>
       </div>,
     );
+
     const target = getByText("Boundary paragraph in agent message.");
     const textNode = target.firstChild;
     const messageNode = container.firstChild;
@@ -466,6 +564,7 @@ describe("SelectableMessageProse", () => {
 
   it("clips whitespace-only boundary spill for native copy, then restores it", () => {
     vi.useFakeTimers();
+
     const { getByTestId, getByText } = render(
       <div>
         <SelectableMessageProse>
@@ -474,6 +573,7 @@ describe("SelectableMessageProse", () => {
         <div data-testid="message-actions">Actions</div>
       </div>,
     );
+
     const target = getByText("Copy only this message.");
     const textNode = target.firstChild;
     const outsideNode = getByTestId("message-actions").firstChild;
@@ -501,6 +601,7 @@ describe("SelectableMessageProse", () => {
 
   it("clips a leading boundary spill when copy starts outside the message", () => {
     vi.useFakeTimers();
+
     const { getByText } = render(
       <div>
         <div>Earlier row</div>
@@ -509,6 +610,7 @@ describe("SelectableMessageProse", () => {
         </SelectableMessageProse>
       </div>,
     );
+
     const outside = getByText("Earlier row");
     const target = getByText("Copy this prefix.");
     const outsideText = outside.firstChild;
@@ -541,6 +643,7 @@ describe("SelectableMessageProse", () => {
         <div data-testid="following-text"> bar</div>
       </div>,
     );
+
     const target = getByText("foo bar foo");
     const outside = getByTestId("following-text");
     const targetText = target.firstChild;
@@ -572,6 +675,7 @@ describe("SelectableMessageProse", () => {
         </div>
       </div>,
     );
+
     const target = getByText("Copy text and image");
     const outside = getByTestId("following-image");
     const targetText = target.firstChild;
@@ -596,6 +700,7 @@ describe("SelectableMessageProse", () => {
         <p>Copy one of several ranges.</p>
       </SelectableMessageProse>,
     );
+
     const target = getByText("Copy one of several ranges.");
     const textNode = target.firstChild;
     expect(textNode).not.toBeNull();
@@ -603,10 +708,12 @@ describe("SelectableMessageProse", () => {
     const range = document.createRange();
     range.selectNodeContents(target);
     const setEnd = vi.spyOn(range, "setEnd");
+
     const selection = makeWindowSelection({
       node: textNode!,
       text: "Copy one of several ranges.",
     });
+
     Object.defineProperty(selection, "rangeCount", { value: 2 });
     vi.spyOn(selection, "getRangeAt").mockReturnValue(range);
     vi.spyOn(window, "getSelection").mockReturnValue(selection);
@@ -618,6 +725,7 @@ describe("SelectableMessageProse", () => {
 
   it("does not restore a copied range over a newer selection", () => {
     vi.useFakeTimers();
+
     const { getByText } = render(
       <div>
         <SelectableMessageProse>
@@ -626,6 +734,7 @@ describe("SelectableMessageProse", () => {
         <div>New selection</div>
       </div>,
     );
+
     const target = getByText("Copy this message.");
     const outside = getByText("New selection");
     const targetText = target.firstChild;
@@ -652,6 +761,7 @@ describe("SelectableMessageProse", () => {
 
   it("registers the shared pointer listeners as passive", () => {
     const addSpy = vi.spyOn(document, "addEventListener");
+
     const view = render(
       <SelectableMessageProse>Answer prose</SelectableMessageProse>,
     );
@@ -659,6 +769,7 @@ describe("SelectableMessageProse", () => {
     const optionsByType = new Map(
       addSpy.mock.calls.map(([type, , options]) => [type, options]),
     );
+
     for (const type of ["pointerdown", "pointerup", "pointercancel"]) {
       expect(optionsByType.get(type), type).toEqual({ passive: true });
     }
@@ -669,6 +780,7 @@ describe("SelectableMessageProse", () => {
   it("reads the shared selection and its rect once for a report spanning 50 messages", async () => {
     const { onSelect, proseNodes, toStringSpy, clientRectsSpy } =
       renderSharedSelectionReport(50);
+
     expect(proseNodes).toHaveLength(50);
 
     fireEvent(document, new Event("selectionchange"));
@@ -688,8 +800,10 @@ describe("SelectableMessageProse", () => {
         No range message
       </SelectableMessageProse>,
     );
+
     const { clientRectsSpy, selection, toStringSpy } =
       makeSelectionWithoutRange();
+
     vi.spyOn(window, "getSelection").mockReturnValue(selection);
 
     fireEvent(document, new Event("selectionchange"));
@@ -701,17 +815,22 @@ describe("SelectableMessageProse", () => {
 
   it("does not read the selection or its rect for a collapsed caret", async () => {
     const onSelect = vi.fn();
+
     const { getByText } = render(
       <SelectableMessageProse onSelect={onSelect}>
         Collapsed caret message
       </SelectableMessageProse>,
     );
+
     const textNode = getByText("Collapsed caret message").firstChild;
+
     if (textNode === null) {
       throw new Error("expected a text node in the message");
     }
+
     const { clientRectsSpy, selection, toStringSpy } =
       makeCollapsedSelection(textNode);
+
     vi.spyOn(window, "getSelection").mockReturnValue(selection);
 
     fireEvent(document, new Event("selectionchange"));

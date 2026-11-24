@@ -10,7 +10,7 @@ import { atom } from "jotai";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { atomFamily } from "jotai-family";
-import type { TerminalCreateTarget } from "@bb/server-contract";
+import type { TerminalCreateTarget } from "@omnyo/server-contract";
 import { createLocalStorageSyncStorage } from "./browser-storage";
 import { hasThreadId } from "./thread-id";
 import { useThreadTabs } from "@/hooks/queries/thread-tabs-query";
@@ -18,7 +18,7 @@ import {
   closeSecondaryPanelTabInState,
   setSecondaryPanelTabsInState,
   reconcileFixedPanelViewTabsInState,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import {
   EMPTY_FIXED_PANEL_TABS_STATE,
   createGitDiffFixedPanelTab,
@@ -45,6 +45,7 @@ import {
 const FIXED_PANEL_TABS_TOUCH_THROTTLE_MS = 60 * 1000;
 
 type FixedPanelTabsPanelStateId = string | null | undefined;
+
 type FixedPanelTabsSyncThreadId = string | null | undefined;
 
 type FixedPanelTabsStateUpdater = (
@@ -57,12 +58,16 @@ interface LastFixedPanelTabsTouch {
 }
 
 type FixedPanelSecondaryPanelSetter = (panel: ThreadSecondaryPanel) => void;
+
 type FixedPanelSecondaryPanelOpener = () => void;
+
 type FixedPanelSecondaryPanelCloser = () => void;
+
 type FixedPanelTerminalIdSetter = (
   terminalId: string,
   target?: TerminalCreateTarget,
 ) => void;
+
 type FixedPanelTerminalIdRemover = (terminalId: string) => void;
 
 function touchFixedPanelTabsState(
@@ -114,6 +119,7 @@ function getFixedPanelTabsStateAtom(threadId: string | null | undefined) {
 
 function buildSecondaryPanelTab(panel: ThreadSecondaryPanel): FixedPanelTab {
   if (panel === "git-diff") return createGitDiffFixedPanelTab();
+
   return createThreadInfoFixedPanelTab();
 }
 
@@ -128,13 +134,16 @@ export function upsertTerminalTab(
 ): readonly FixedPanelTab[] {
   const nextTab = createTerminalFixedPanelTab({ terminalId, target });
   const existingTab = tabs.find((tab) => tab.id === nextTab.id);
+
   if (existingTab === undefined) return [...tabs, nextTab];
+
   if (
     target === undefined ||
     (existingTab.kind === "terminal" && existingTab.target === target)
   ) {
     return tabs;
   }
+
   return tabs.map((tab) => (tab.id === nextTab.id ? nextTab : tab));
 }
 
@@ -153,6 +162,7 @@ function ensureSecondaryPanelTab(
   panel: ThreadSecondaryPanel,
 ): readonly FixedPanelTab[] {
   const tabId = getSecondaryPanelTabId(panel);
+
   return tabs.some((tab) => tab.id === tabId)
     ? tabs
     : [...tabs, buildSecondaryPanelTab(panel)];
@@ -174,6 +184,7 @@ function openFixedSecondaryPanelState(
     if (current.secondary.isOpen) {
       return current;
     }
+
     return {
       ...current,
       secondary: {
@@ -186,6 +197,7 @@ function openFixedSecondaryPanelState(
   const panel: ThreadSecondaryPanel = "thread-info";
   const tabs = ensureSecondaryPanelTab(current.secondary.tabs, panel);
   const activeTabId = getSecondaryPanelTabId(panel);
+
   return {
     ...current,
     secondary: {
@@ -202,6 +214,7 @@ function closeFixedSecondaryPanelState(
   if (!current.secondary.isOpen) {
     return current;
   }
+
   return {
     ...current,
     secondary: {
@@ -218,12 +231,14 @@ export function useFixedPanelTabsStorageMaintenance(): void {
     if (hasScheduledFixedPanelTabsStoragePrune) {
       return;
     }
+
     hasScheduledFixedPanelTabsStoragePrune = true;
     scheduleIdleFixedPanelTabsStoragePrune();
   }, []);
 }
 
 const FIXED_PANEL_TABS_STORAGE_PRUNE_IDLE_TIMEOUT_MS = 5_000;
+
 const FIXED_PANEL_TABS_STORAGE_PRUNE_FALLBACK_DELAY_MS = 1_500;
 
 function scheduleIdleFixedPanelTabsStoragePrune(): void {
@@ -232,15 +247,19 @@ function scheduleIdleFixedPanelTabsStoragePrune(): void {
       pruneFixedPanelTabsStorage({ now: Date.now() });
     } catch {}
   };
+
   if (typeof window === "undefined") {
     return;
   }
+
   if (typeof window.requestIdleCallback === "function") {
     window.requestIdleCallback(run, {
       timeout: FIXED_PANEL_TABS_STORAGE_PRUNE_IDLE_TIMEOUT_MS,
     });
+
     return;
   }
+
   window.setTimeout(run, FIXED_PANEL_TABS_STORAGE_PRUNE_FALLBACK_DELAY_MS);
 }
 
@@ -258,6 +277,7 @@ export function useFixedPanelTabsState(
   const setState = useSetAtom(stateAtom);
   const queryClient = useQueryClient();
   const resolvedThreadId = hasThreadId(syncThreadId) ? syncThreadId : null;
+
   const tabsQuery = useThreadTabs(resolvedThreadId ?? "", {
     enabled: resolvedThreadId !== null,
   });
@@ -266,21 +286,27 @@ export function useFixedPanelTabsState(
     if (resolvedThreadId === null || tabsQuery.data === undefined) {
       return;
     }
+
     if (hasPendingThreadTabsWrite(queryClient, resolvedThreadId)) {
       return;
     }
+
     if (tabsQuery.data.revision === 0 && state.secondary.tabs.length > 0) {
       scheduleLocalThreadTabsMigration({
         queryClient,
         tabs: state.secondary.tabs,
         threadId: resolvedThreadId,
       });
+
       return;
     }
+
     const current = store.get(stateAtom);
+
     const next = ensureOpenFixedPanelHasActiveTab(
       reconcileFixedPanelTabsState(current, tabsQuery.data.tabs),
     );
+
     if (next !== current) {
       setState(next);
     }
@@ -305,17 +331,21 @@ export function useUpdateFixedPanelTabsState(
   const store = useStore();
   const setState = useSetAtom(stateAtom);
   const queryClient = useQueryClient();
+
   return useCallback(
     (update: FixedPanelTabsStateUpdater) => {
       if (!hasThreadId(panelStateId)) return;
       const now = Date.now();
       const current = store.get(stateAtom);
       const next = ensureOpenFixedPanelHasActiveTab(update(current));
+
       if (next === current) {
         return;
       }
+
       const touched = touchFixedPanelTabsState(next, now);
       setState(touched);
+
       if (
         hasThreadId(syncThreadId) &&
         !areThreadTabListsEquivalent(
@@ -350,6 +380,7 @@ export function useReconciledFixedPanelTabsState({
 }): FixedPanelTabsState {
   const state = useFixedPanelTabsState(panelStateId, syncThreadId);
   const updateState = useUpdateFixedPanelTabsState(panelStateId, syncThreadId);
+
   const reconciledState = useMemo(
     () =>
       isAuthoritative
@@ -389,8 +420,10 @@ export function useTouchFixedPanelTabsState(
 ): () => void {
   const updateState = useUpdateFixedPanelTabsState(panelStateId, syncThreadId);
   const lastTouchRef = useRef<LastFixedPanelTabsTouch | null>(null);
+
   return useCallback(() => {
     const now = Date.now();
+
     if (
       lastTouchRef.current !== null &&
       lastTouchRef.current.threadId === panelStateId &&
@@ -398,6 +431,7 @@ export function useTouchFixedPanelTabsState(
     ) {
       return;
     }
+
     lastTouchRef.current = {
       threadId: panelStateId,
       touchedAt: now,
@@ -406,9 +440,11 @@ export function useTouchFixedPanelTabsState(
       if (!current.secondary.isOpen && current.secondary.tabs.length === 0) {
         return current;
       }
+
       if (now - current.lastUsedAt < FIXED_PANEL_TABS_TOUCH_THROTTLE_MS) {
         return current;
       }
+
       return { ...current };
     });
   }, [panelStateId, updateState]);
@@ -419,11 +455,13 @@ export function useSetFixedSecondaryPanelTab(
   syncThreadId: FixedPanelTabsSyncThreadId,
 ): FixedPanelSecondaryPanelSetter {
   const updateState = useUpdateFixedPanelTabsState(panelStateId, syncThreadId);
+
   return useCallback(
     (panel: ThreadSecondaryPanel) => {
       updateState((current) => {
         const tabs = ensureSecondaryPanelTab(current.secondary.tabs, panel);
         const activeTabId = getSecondaryPanelTabId(panel);
+
         if (
           tabs === current.secondary.tabs &&
           current.secondary.activeTabId === activeTabId &&
@@ -431,6 +469,7 @@ export function useSetFixedSecondaryPanelTab(
         ) {
           return current;
         }
+
         return {
           ...current,
           secondary: {
@@ -450,6 +489,7 @@ export function useCloseFixedSecondaryPanel(
   syncThreadId: FixedPanelTabsSyncThreadId,
 ): FixedPanelSecondaryPanelCloser {
   const updateState = useUpdateFixedPanelTabsState(panelStateId, syncThreadId);
+
   return useCallback(() => {
     updateState(closeFixedSecondaryPanelState);
   }, [updateState]);
@@ -460,6 +500,7 @@ export function useOpenFixedSecondaryPanel(
   syncThreadId: FixedPanelTabsSyncThreadId,
 ): FixedPanelSecondaryPanelOpener {
   const updateState = useUpdateFixedPanelTabsState(panelStateId, syncThreadId);
+
   return useCallback(() => {
     updateState(openFixedSecondaryPanelState);
   }, [updateState]);
@@ -470,6 +511,7 @@ export function useSetFixedRightTerminalActiveTerminal(
   syncThreadId: FixedPanelTabsSyncThreadId,
 ): FixedPanelTerminalIdSetter {
   const updateState = useUpdateFixedPanelTabsState(panelStateId, syncThreadId);
+
   return useCallback(
     (terminalId, target) => {
       updateState((current) =>
@@ -491,14 +533,17 @@ export function useRemoveFixedRightTerminalTab(
   onCloseLastTab?: () => void,
 ): FixedPanelTerminalIdRemover {
   const updateState = useUpdateFixedPanelTabsState(panelStateId, syncThreadId);
+
   return useCallback(
     (terminalId: string) => {
       let isPanelEmpty = false;
       updateState((current) => {
         const next = removeFixedRightTerminalTabInState(current, terminalId);
         isPanelEmpty = next.secondary.tabs.length === 0;
+
         return next;
       });
+
       if (isPanelEmpty) onCloseLastTab?.();
     },
     [onCloseLastTab, updateState],

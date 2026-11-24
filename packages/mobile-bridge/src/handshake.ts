@@ -21,6 +21,7 @@ export const NATIVE_CAPABILITIES = [
 ] as const;
 
 export const nativeCapabilitySchema = z.enum(NATIVE_CAPABILITIES);
+
 export type NativeCapability = z.infer<typeof nativeCapabilitySchema>;
 
 export const nativeShellHandshakeSchema = z
@@ -42,5 +43,6 @@ export function parseNativeShellHandshake(
   value: unknown,
 ): NativeShellHandshake | null {
   const parsed = nativeShellHandshakeSchema.safeParse(value);
+
   return parsed.success ? parsed.data : null;
 }

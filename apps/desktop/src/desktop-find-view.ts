@@ -2,11 +2,11 @@ import { WebContentsView, ipcMain, type IpcMainEvent } from "electron";
 
 import type { z } from "zod";
 import {
-  BB_DESKTOP_FIND_BAR_ACTIVATE_CHANNEL,
-  BB_DESKTOP_FIND_BAR_CLOSE_CHANNEL,
-  BB_DESKTOP_FIND_BAR_QUERY_CHANNEL,
-  BB_DESKTOP_FIND_BAR_RESULT_CHANNEL,
-  BB_DESKTOP_FIND_BAR_STEP_CHANNEL,
+  OMNYO_DESKTOP_FIND_BAR_ACTIVATE_CHANNEL,
+  OMNYO_DESKTOP_FIND_BAR_CLOSE_CHANNEL,
+  OMNYO_DESKTOP_FIND_BAR_QUERY_CHANNEL,
+  OMNYO_DESKTOP_FIND_BAR_RESULT_CHANNEL,
+  OMNYO_DESKTOP_FIND_BAR_STEP_CHANNEL,
   findBarQueryRequestSchema,
   findBarStepRequestSchema,
   type FindBarResult,
@@ -16,7 +16,7 @@ import {
   FIND_BAR_VIEW_WIDTH,
   createFindBarViewUrl,
 } from "./find-bar-view.js";
-import type { BbDesktopWindowFindRequest } from "@bb/desktop-contract";
+import type { OmnyoDesktopWindowFindRequest } from "@omnyo/desktop-contract";
 
 export interface FindViewBounds {
   height: number;
@@ -62,7 +62,7 @@ export interface FindViewHostWindow {
 export interface DesktopFindViewManager {
   open(
     hostWindow: FindViewHostWindow,
-    request: BbDesktopWindowFindRequest,
+    request: OmnyoDesktopWindowFindRequest,
   ): void;
   close(hostWindow: FindViewHostWindow): void;
   layout(hostWindow: FindViewHostWindow): void;
@@ -102,6 +102,7 @@ export function findBarViewBounds(
   topOffset: number,
 ): FindViewBounds {
   const height = Math.min(FIND_BAR_VIEW_HEIGHT, contentBounds.height);
+
   return {
     x: Math.max(0, contentBounds.width - FIND_BAR_VIEW_WIDTH),
     y: Math.max(0, Math.min(topOffset, contentBounds.height - height)),
@@ -121,9 +122,11 @@ export function createDesktopFindViewManager({
     if (observedHostIds.has(hostWindow.webContents.id)) {
       return;
     }
+
     observedHostIds.add(hostWindow.webContents.id);
     hostWindow.webContents.on("found-in-page", (_event, result) => {
       const entry = entriesByHostId.get(hostWindow.webContents.id);
+
       if (
         entry === undefined ||
         entry.activeRequestId !== result.requestId ||
@@ -131,7 +134,8 @@ export function createDesktopFindViewManager({
       ) {
         return;
       }
-      entry.view.webContents.send(BB_DESKTOP_FIND_BAR_RESULT_CHANNEL, {
+
+      entry.view.webContents.send(OMNYO_DESKTOP_FIND_BAR_RESULT_CHANNEL, {
         activeMatchOrdinal: Math.max(0, result.activeMatchOrdinal),
         matches: Math.max(0, result.matches),
       } satisfies FindBarResult);
@@ -140,12 +144,15 @@ export function createDesktopFindViewManager({
 
   function ensureEntry(hostWindow: FindViewHostWindow): FindViewEntry {
     const existing = entriesByHostId.get(hostWindow.webContents.id);
+
     if (existing !== undefined) {
       return existing;
     }
+
     const view = createFindBarView(preloadPath);
     view.setBackgroundColor("#00000000");
     void view.webContents.loadURL(createFindBarViewUrl());
+
     const entry: FindViewEntry = {
       activeRequestId: null,
       hostWebContentsId: hostWindow.webContents.id,
@@ -156,10 +163,12 @@ export function createDesktopFindViewManager({
       viewWebContentsId: view.webContents.id,
       visible: false,
     };
+
     entriesByHostId.set(hostWindow.webContents.id, entry);
     entriesByViewId.set(view.webContents.id, entry);
     hostWindow.contentView.addChildView(view);
     observeHost(hostWindow);
+
     return entry;
   }
 
@@ -171,6 +180,7 @@ export function createDesktopFindViewManager({
 
   function stopFind(entry: FindViewEntry): void {
     entry.activeRequestId = null;
+
     if (!entry.hostWindow.webContents.isDestroyed()) {
       entry.hostWindow.webContents.stopFindInPage("clearSelection");
     }
@@ -180,6 +190,7 @@ export function createDesktopFindViewManager({
     stopFind(entry);
     entry.visible = false;
     entry.view.setVisible(false);
+
     if (!entry.hostWindow.webContents.isDestroyed()) {
       entry.hostWindow.webContents.focus();
     }
@@ -189,9 +200,11 @@ export function createDesktopFindViewManager({
     entriesByHostId.delete(entry.hostWebContentsId);
     entriesByViewId.delete(entry.viewWebContentsId);
     observedHostIds.delete(entry.hostWebContentsId);
+
     if (!entry.hostWindow.isDestroyed()) {
       entry.hostWindow.contentView.removeChildView(entry.view);
     }
+
     if (!entry.view.webContents.isDestroyed()) {
       entry.view.webContents.close();
     }
@@ -208,26 +221,33 @@ export function createDesktopFindViewManager({
   ): void {
     ipcMain.on(channel, (event, payload: unknown) => {
       const entry = entryForEvent(event);
+
       if (entry === null) {
         return;
       }
+
       const parsed = schema.safeParse(payload);
+
       if (!parsed.success) {
         return;
       }
+
       run({ entry, request: parsed.data });
     });
   }
 
   registerViewCommand(
-    BB_DESKTOP_FIND_BAR_QUERY_CHANNEL,
+    OMNYO_DESKTOP_FIND_BAR_QUERY_CHANNEL,
     findBarQueryRequestSchema,
     ({ entry, request }) => {
       entry.query = request.text;
+
       if (request.text.length === 0) {
         stopFind(entry);
+
         return;
       }
+
       entry.activeRequestId = entry.hostWindow.webContents.findInPage(
         request.text,
         { forward: true, findNext: true },
@@ -236,12 +256,13 @@ export function createDesktopFindViewManager({
   );
 
   registerViewCommand(
-    BB_DESKTOP_FIND_BAR_STEP_CHANNEL,
+    OMNYO_DESKTOP_FIND_BAR_STEP_CHANNEL,
     findBarStepRequestSchema,
     ({ entry, request }) => {
       if (entry.query.length === 0) {
         return;
       }
+
       entry.activeRequestId = entry.hostWindow.webContents.findInPage(
         entry.query,
         { forward: request.forward, findNext: false },
@@ -249,11 +270,13 @@ export function createDesktopFindViewManager({
     },
   );
 
-  ipcMain.on(BB_DESKTOP_FIND_BAR_CLOSE_CHANNEL, (event) => {
+  ipcMain.on(OMNYO_DESKTOP_FIND_BAR_CLOSE_CHANNEL, (event) => {
     const entry = entryForEvent(event);
+
     if (entry === null) {
       return;
     }
+
     closeEntry(entry);
   });
 
@@ -267,27 +290,33 @@ export function createDesktopFindViewManager({
       entry.visible = true;
       entry.view.setVisible(true);
       entry.view.webContents.focus();
-      entry.view.webContents.send(BB_DESKTOP_FIND_BAR_ACTIVATE_CHANNEL);
+      entry.view.webContents.send(OMNYO_DESKTOP_FIND_BAR_ACTIVATE_CHANNEL);
     },
     close(hostWindow) {
       const entry = entriesByHostId.get(hostWindow.webContents.id);
+
       if (entry === undefined || !entry.visible) {
         return;
       }
+
       closeEntry(entry);
     },
     layout(hostWindow) {
       const entry = entriesByHostId.get(hostWindow.webContents.id);
+
       if (entry === undefined || !entry.visible) {
         return;
       }
+
       layoutEntry(entry);
     },
     releaseWindow(hostWebContentsId) {
       const entry = entriesByHostId.get(hostWebContentsId);
+
       if (entry === undefined) {
         return;
       }
+
       destroyEntry(entry);
     },
     destroyAll() {

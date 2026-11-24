@@ -6,7 +6,9 @@ export const ACP_REGISTRY_URL =
   "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 
 const REGISTRY_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/u;
+
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+
 const MAX_REGISTRY_AGENTS = 1000;
 
 const packageDistributionSchema = z
@@ -77,26 +79,33 @@ export function parseAcpRegistry(value: unknown): {
   skipped: number;
 } {
   const registry = registrySchema.safeParse(value);
+
   if (!registry.success) {
     throw new Error("The ACP registry response is not a registry document.");
   }
+
   const agents: AcpRegistryAgent[] = [];
   const seen = new Set<string>();
   let skipped = 0;
+
   for (const entry of registry.data.agents.slice(0, MAX_REGISTRY_AGENTS)) {
     const parsed = registryAgentSchema.safeParse(entry);
+
     if (!parsed.success || seen.has(parsed.data.id)) {
       skipped += 1;
       continue;
     }
+
     seen.add(parsed.data.id);
     const { npx, uvx, binary } = parsed.data.distribution;
+
     const packaged =
       npx !== undefined
         ? ({ kind: "npx", source: npx } as const)
         : uvx !== undefined
           ? ({ kind: "uvx", source: uvx } as const)
           : null;
+
     agents.push({
       id: parsed.data.id,
       name: parsed.data.name,
@@ -118,6 +127,7 @@ export function parseAcpRegistry(value: unknown): {
       binaryPlatforms: Object.keys(binary ?? {}).sort(),
     });
   }
+
   return { agents, skipped };
 }
 
@@ -127,6 +137,7 @@ export function registryAgentCustomEntry(
   if (agent.launch === null) {
     return null;
   }
+
   return {
     id: agent.id,
     displayName: agent.name,
@@ -141,6 +152,7 @@ export function registryAgentCustomEntry(
 
 function packageNameOf(spec: string): string {
   const versionSeparator = spec.lastIndexOf("@");
+
   return versionSeparator > 0 ? spec.slice(0, versionSeparator) : spec;
 }
 
@@ -151,12 +163,15 @@ function configuredPackageSpec(entry: {
   if (!Array.isArray(entry.args)) {
     return null;
   }
+
   const args = entry.args.filter(
     (arg): arg is string => typeof arg === "string",
   );
+
   if (entry.command === "npx") {
     return args.find((arg) => !arg.startsWith("-")) ?? null;
   }
+
   return entry.command === "uvx" ? (args[0] ?? null) : null;
 }
 
@@ -176,10 +191,13 @@ export interface AcpRegistryAgentView extends AcpRegistryAgent {
 
 function parseSettingEntries(settingValue: string): unknown[] {
   const trimmed = settingValue.trim();
+
   if (trimmed === "") {
     return [];
   }
+
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(trimmed);
   } catch {
@@ -187,11 +205,13 @@ function parseSettingEntries(settingValue: string): unknown[] {
       "The custom agents setting is not valid JSON. Fix it in settings before changing agents here.",
     );
   }
+
   if (!Array.isArray(parsed)) {
     throw new Error(
       "The custom agents setting must be a JSON array. Fix it in settings before changing agents here.",
     );
   }
+
   return parsed;
 }
 
@@ -199,7 +219,9 @@ function entryId(entry: unknown): string | null {
   if (typeof entry !== "object" || entry === null) {
     return null;
   }
+
   const id: unknown = Reflect.get(entry, "id");
+
   return typeof id === "string" ? id : null;
 }
 
@@ -217,19 +239,25 @@ export function describeRegistryAgents(args: {
   reservedProviderIds: ReadonlySet<string>;
 }): AcpRegistryAgentView[] {
   const configuredById = new Map<string, object>();
+
   for (const entry of readSettingEntriesLeniently(args.settingValue)) {
     const id = entryId(entry);
+
     if (id !== null && typeof entry === "object" && entry !== null) {
       configuredById.set(id, entry);
     }
   }
+
   return args.agents.map((agent) => {
     const providerId = formatCustomAcpProviderId(agent.id);
     const custom = registryAgentCustomEntry(agent);
+
     const command =
       custom === null ? null : [custom.command, ...custom.args].join(" ");
+
     const configured = configuredById.get(agent.id);
     let status: AcpRegistryAgentStatus;
+
     if (args.reservedProviderIds.has(providerId)) {
       status = "built-in";
     } else if (configured !== undefined) {
@@ -244,6 +272,7 @@ export function describeRegistryAgents(args: {
     } else {
       status = custom === null ? "manual-install" : "available";
     }
+
     return {
       ...agent,
       providerId,
@@ -259,17 +288,22 @@ export function settingWithRegistryAgent(
   agent: AcpRegistryAgent,
 ): string {
   const custom = registryAgentCustomEntry(agent);
+
   if (custom === null) {
     throw new Error(
       `${agent.name} is distributed only as a downloadable binary. Install it yourself, then add it as a custom agent with its command.`,
     );
   }
+
   const entries = parseSettingEntries(settingValue);
   const index = entries.findIndex((entry) => entryId(entry) === agent.id);
+
   if (index === -1) {
     return JSON.stringify([...entries, custom], null, 2);
   }
+
   const existing = entries[index];
+
   const merged =
     typeof existing === "object" && existing !== null
       ? {
@@ -279,6 +313,7 @@ export function settingWithRegistryAgent(
           env: { ...readEnv(existing), ...custom.env },
         }
       : custom;
+
   return JSON.stringify(
     entries.map((entry, entryIndex) => (entryIndex === index ? merged : entry)),
     null,
@@ -288,9 +323,11 @@ export function settingWithRegistryAgent(
 
 function readEnv(entry: object): Record<string, string> {
   const env: unknown = Reflect.get(entry, "env");
+
   if (typeof env !== "object" || env === null || Array.isArray(env)) {
     return {};
   }
+
   return Object.fromEntries(
     Object.entries(env).filter(
       (pair): pair is [string, string] => typeof pair[1] === "string",
@@ -301,8 +338,10 @@ function readEnv(entry: object): Record<string, string> {
 export function settingWithoutAgent(settingValue: string, id: string): string {
   const entries = parseSettingEntries(settingValue);
   const remaining = entries.filter((entry) => entryId(entry) !== id);
+
   if (remaining.length === entries.length) {
     throw new Error(`No configured agent has the id "${id}".`);
   }
+
   return remaining.length === 0 ? "" : JSON.stringify(remaining, null, 2);
 }

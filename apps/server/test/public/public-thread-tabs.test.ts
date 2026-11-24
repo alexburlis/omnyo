@@ -1,4 +1,4 @@
-import { threadTabsResponseSchema, type ThreadTab } from "@bb/server-contract";
+import { threadTabsResponseSchema, type ThreadTab } from "@omnyo/server-contract";
 import { describe, expect, it, vi } from "vitest";
 import { readJson } from "../helpers/json.js";
 import { seedThreadFixture } from "../helpers/seed.js";
@@ -104,6 +104,7 @@ describe("public thread tabs", () => {
         expectedRevision: 0,
         tabs: ALL_TAB_KINDS,
       });
+
       expect(updateResponse.status).toBe(200);
       expect(
         threadTabsResponseSchema.parse(await readJson(updateResponse)),
@@ -114,6 +115,7 @@ describe("public thread tabs", () => {
         expectedRevision: 1,
         tabs: [],
       });
+
       expect(closeResponse.status).toBe(200);
       expect(
         threadTabsResponseSchema.parse(await readJson(closeResponse)),
@@ -124,6 +126,7 @@ describe("public thread tabs", () => {
         expectedRevision: 1,
         tabs: [],
       });
+
       expect(staleResponse.status).toBe(409);
       expect(await readJson(staleResponse)).toEqual({
         code: "thread_tabs_conflict",
@@ -142,6 +145,7 @@ describe("public thread tabs", () => {
   it("omits a null hostId on the wire so strict older clients still parse", async () => {
     await withTestHarness(async (harness) => {
       const { thread } = seedThreadFixture(harness);
+
       const tabs: readonly ThreadTab[] = [
         {
           environmentId: "env_1",
@@ -182,6 +186,7 @@ describe("public thread tabs", () => {
         expectedRevision: 0,
         tabs,
       });
+
       expect(updateResponse.status).toBe(200);
       const getResponse = await getTabs(harness, thread.id);
       expect(getResponse.status).toBe(200);
@@ -193,6 +198,7 @@ describe("public thread tabs", () => {
         const wire = body as {
           tabs: Array<Record<string, unknown> & { fileOpenerOwner?: object }>;
         };
+
         expect(wire.tabs[0]).not.toHaveProperty("hostId");
         expect(wire.tabs[1]).toHaveProperty("hostId", "host_1");
         expect(wire.tabs[2]?.fileOpenerOwner).not.toHaveProperty("hostId");
@@ -204,6 +210,7 @@ describe("public thread tabs", () => {
   it("rejects duplicate tab ids and unknown threads", async () => {
     await withTestHarness(async (harness) => {
       const { thread } = seedThreadFixture(harness);
+
       const duplicateResponse = await putTabs(harness, thread.id, {
         expectedRevision: 0,
         tabs: [
@@ -211,6 +218,7 @@ describe("public thread tabs", () => {
           { id: "same", kind: "git-diff" },
         ],
       });
+
       expect(duplicateResponse.status).toBe(400);
 
       expect((await getTabs(harness, "thr_missing")).status).toBe(404);

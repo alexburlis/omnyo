@@ -1,4 +1,4 @@
-import type { ProviderErrorCategory } from "@bb/domain";
+import type { ProviderErrorCategory } from "@omnyo/domain";
 import type { EventProjectionErrorMessage } from "./event-projection-types.js";
 
 interface TimelineErrorDisplay {
@@ -43,10 +43,13 @@ function reconnectDisplay(
   if (message.detail === null) {
     return null;
   }
+
   const [first, ...rest] = message.detail.split("\n");
+
   if (first === undefined || !reconnectProgressPattern.test(first.trim())) {
     return null;
   }
+
   return { progress: first.trim(), cause: nonEmpty(rest.join("\n")) };
 }
 
@@ -54,14 +57,17 @@ export function buildTimelineErrorDisplay(
   message: EventProjectionErrorMessage,
 ): TimelineErrorDisplay {
   const reconnect = reconnectDisplay(message);
+
   if (reconnect) {
     return { title: reconnect.progress, detail: reconnect.cause };
   }
 
   const { title, detail } = resolveErrorTitleDetail(message);
+
   if (title.length <= MAX_ERROR_TITLE_LENGTH) {
     return { title, detail };
   }
+
   return {
     title: genericErrorTitle(message.rawType),
     detail: detail ?? title,
@@ -78,11 +84,13 @@ function resolveErrorTitleDetail(
   ) {
     const title =
       providerErrorCategoryTitles[message.providerErrorInfo.category];
+
     return { title, detail: detailBeyondTitle(message.detail, title) };
   }
 
   if (message.rawType === "provider/error") {
     const content = message.detail ?? message.message;
+
     return { title: content, detail: null };
   }
 
@@ -103,6 +111,7 @@ function detailBeyondTitle(
   if (detail === null || detail.trim() === title.trim()) {
     return null;
   }
+
   return detail;
 }
 
@@ -110,6 +119,8 @@ function nonEmpty(value: string | null): string | null {
   if (value === null) {
     return null;
   }
+
   const trimmed = value.trim();
+
   return trimmed.length > 0 ? trimmed : null;
 }

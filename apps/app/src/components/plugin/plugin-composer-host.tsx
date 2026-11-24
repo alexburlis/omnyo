@@ -16,13 +16,17 @@ import type {
   ComposerView,
   JsonValue,
   PluginComposerScope,
-} from "@get-bb/plugin-sdk";
-import { isComposerDraftEmpty } from "@get-bb/plugin-sdk/internal/composer-view";
-import type { PromptDraftState } from "@bb/client-core";
+} from "@omnyo/plugin-sdk";
+import { isComposerDraftEmpty } from "@omnyo/plugin-sdk/internal/composer-view";
+import type { PromptDraftState } from "@omnyo/client-core";
+import type { PromptDraftScope } from "@/hooks/usePromptDraftStorage";
+import type { ComposerSendSlot } from "@/lib/composer-send-queue";
+import type { CapturedAttachmentUploads } from "@/components/promptbox/usePendingAttachmentUploads";
 
 export interface PluginComposerHost {
   scope: PluginComposerScope;
   textEffectKey: string;
+  draftScope?: PromptDraftScope;
   getCurrent(): PromptDraftState;
   subscribeDraft(listener: () => void): () => void;
   getSelection?(): ComposerSelection;
@@ -34,6 +38,21 @@ export interface PluginComposerHost {
     options: ComposerSubmitOptions,
     pluginSubmission: { pluginId: string; data: JsonValue } | undefined,
   ): Promise<void>;
+  submitDraft?(
+    draft: PromptDraftState,
+    options: ComposerSubmitOptions,
+    pluginSubmission: { pluginId: string; data: JsonValue } | undefined,
+    sendReservation?: ComposerSendSlot,
+    capturedUploads?: CapturedAttachmentUploads | null,
+  ): Promise<void>;
+  submitVoiceDraft?(
+    draft: PromptDraftState,
+    transcript: () => Promise<string>,
+    sendReservation?: ComposerSendSlot,
+    capturedUploads?: CapturedAttachmentUploads | null,
+  ): Promise<void>;
+  reserveSubmission?(): ComposerSendSlot;
+  captureAttachments?(): CapturedAttachmentUploads | null;
   setSelection?(selection: ComposerSelection): Promise<ComposerSelection>;
 }
 
@@ -49,6 +68,7 @@ export function composerScopeIdentity(scope: PluginComposerScope): string {
 }
 
 const subscribeToNoDraft = () => () => {};
+
 const getNoDraft = () => null;
 
 export function usePluginComposerHostDraft(
@@ -56,6 +76,7 @@ export function usePluginComposerHostDraft(
 ): PromptDraftState | null {
   const subscribe = host?.subscribeDraft ?? subscribeToNoDraft;
   const getSnapshot = host?.getCurrent ?? getNoDraft;
+
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
@@ -64,9 +85,11 @@ export function useComposerHostDraftNotifier(
 ): (listener: () => void) => () => void {
   const [store] = useState(() => {
     const listeners = new Set<() => void>();
+
     return {
       subscribe: (listener: () => void) => {
         listeners.add(listener);
+
         return () => {
           listeners.delete(listener);
         };
@@ -76,28 +99,33 @@ export function useComposerHostDraftNotifier(
       },
     };
   });
+
   const previousDraftRef = useRef(draft);
   useLayoutEffect(() => {
     if (previousDraftRef.current === draft) return;
     previousDraftRef.current = draft;
     store.notify();
   }, [draft, store]);
+
   return store.subscribe;
 }
 
 function createComposerSelectionStore(key: string, initial: ComposerSelection) {
   let current = initial;
   const listeners = new Set<() => void>();
+
   return {
     key,
     getSelection: () => current,
     subscribeSelection: (listener: () => void) => {
       listeners.add(listener);
+
       return () => listeners.delete(listener);
     },
     publish: (next: ComposerSelection) => {
       if (current === next) return;
       current = next;
+
       for (const listener of [...listeners]) listener();
     },
   };
@@ -110,14 +138,18 @@ export function useComposerHostSelection(
   const [binding, setBinding] = useState(() =>
     createComposerSelectionStore(key, selection),
   );
+
   let store = binding;
+
   if (binding.key !== key) {
     store = createComposerSelectionStore(key, selection);
     setBinding(store);
   }
+
   useLayoutEffect(() => {
     store.publish(selection);
   }, [selection, store]);
+
   return store;
 }
 
@@ -175,6 +207,7 @@ export function PluginComposerViewProvider({
   value: ComposerView;
 }) {
   const { isRunning, isSubmitting } = value.run;
+
   const staticView = useMemo<PluginComposerStaticView>(
     () => ({
       scope: value.scope,
@@ -183,6 +216,7 @@ export function PluginComposerViewProvider({
     }),
     [isRunning, isSubmitting, value.layout, value.scope],
   );
+
   return (
     <PluginComposerStaticViewContext.Provider value={staticView}>
       <PluginComposerDraftViewContext.Provider value={value.draft}>
@@ -201,6 +235,7 @@ export function useOptionalPluginComposerStaticView():
 export function useOptionalPluginComposerView(): ComposerView | undefined {
   const staticView = useContext(PluginComposerStaticViewContext);
   const draft = useContext(PluginComposerDraftViewContext);
+
   return useMemo(
     () =>
       staticView === undefined || draft === undefined
@@ -220,13 +255,16 @@ interface PluginComposerHostStore {
 function createPluginComposerHostStore(): PluginComposerHostStore {
   let current: { owner: symbol; host: PluginComposerHost | null } | null = null;
   const listeners = new Set<() => void>();
+
   const notify = () => {
     for (const listener of [...listeners]) listener();
   };
+
   return {
     getSnapshot: () => current?.host ?? null,
     subscribe: (listener) => {
       listeners.add(listener);
+
       return () => listeners.delete(listener);
     },
     publish: (owner, host) => {
@@ -244,7 +282,9 @@ function createPluginComposerHostStore(): PluginComposerHostStore {
 
 const PluginComposerHostStoreContext =
   createContext<PluginComposerHostStore | null>(null);
+
 const subscribeToNoHost = () => () => {};
+
 const getNoHost = () => null;
 
 export function PluginComposerHostProvider({
@@ -267,6 +307,7 @@ export function PluginComposerHostScopeProvider({
   children: ReactNode;
 }) {
   const [store] = useState(createPluginComposerHostStore);
+
   return (
     <PluginComposerHostStoreContext.Provider value={store}>
       {children}
@@ -295,18 +336,22 @@ export function usePublishPluginComposerHost(
 export function usePluginComposerHost(): PluginComposerHost | null {
   const directHost = useContext(PluginComposerHostContext);
   const store = useContext(PluginComposerHostStoreContext);
+
   const subscribe = useCallback(
     (listener: () => void) => store?.subscribe(listener) ?? subscribeToNoHost(),
     [store],
   );
+
   const getSnapshot = useCallback(
     () => store?.getSnapshot() ?? getNoHost(),
     [store],
   );
+
   const publishedHost = useSyncExternalStore(
     subscribe,
     getSnapshot,
     getSnapshot,
   );
+
   return directHost !== undefined ? directHost : publishedHost;
 }

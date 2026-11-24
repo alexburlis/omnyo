@@ -1,17 +1,17 @@
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
-import { threadEventRowSchema, turnScope } from "@bb/domain";
+import { describe, expect, it, vi } from "vitest";
+import { threadEventRowSchema, turnScope } from "@omnyo/domain";
 import {
   COMPLETED_EVENT_OUTPUT_RETENTION_MS,
   events,
   migrateNextLegacyImageGenerationOutput,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   threadTimelineResponseSchema,
   timelineTurnSummaryDetailsResponseSchema,
   type ThreadTimelineResponse,
   type TimelineRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   TIMELINE_INLINE_OUTPUT_PREVIEW_HEAD_CHARS,
   TIMELINE_INLINE_OUTPUT_PREVIEW_TAIL_CHARS,
@@ -24,21 +24,26 @@ import { withTestHarness } from "../helpers/test-app.js";
 import type { TestAppHarness } from "../helpers/test-app.js";
 
 const BIG_OUTPUT = `HEAD${"a".repeat(TIMELINE_INLINE_OUTPUT_PREVIEW_THRESHOLD_CHARS * 3)}TAIL`;
+
 const SMALL_OUTPUT = "small output";
 
 function hasUnpairedSurrogate(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
+
     if (code >= 0xd800 && code <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
+
       if (next < 0xdc00 || next > 0xdfff) {
         return true;
       }
+
       index += 1;
     } else if (code >= 0xdc00 && code <= 0xdfff) {
       return true;
     }
   }
+
   return false;
 }
 
@@ -50,7 +55,9 @@ async function getTimeline(
   const response = await harness.app.request(
     `/api/v1/threads/${threadId}/timeline${query}`,
   );
+
   expect(response.status).toBe(200);
+
   return threadTimelineResponseSchema.parse(await readJson(response));
 }
 
@@ -61,9 +68,11 @@ function findCommandRow(rows: readonly TimelineRow[], command: string) {
       candidate.workKind === "command" &&
       candidate.command === command,
   );
+
   if (!row || row.kind !== "work" || row.workKind !== "command") {
     throw new Error(`command row ${command} not found`);
   }
+
   return row;
 }
 
@@ -79,19 +88,23 @@ function maybeFindNestedCommandRow(
     ) {
       return row;
     }
+
     const children =
       row.kind === "turn"
         ? row.children
         : row.kind === "work" && row.workKind === "delegation"
           ? row.childRows
           : null;
+
     if (children !== null) {
       const match = maybeFindNestedCommandRow(children, command);
+
       if (match !== null) {
         return match;
       }
     }
   }
+
   return null;
 }
 
@@ -100,9 +113,11 @@ function findNestedCommandRow(
   command: string,
 ): Extract<TimelineRow, { kind: "work"; workKind: "command" }> {
   const row = maybeFindNestedCommandRow(rows, command);
+
   if (row === null) {
     throw new Error(`nested command row ${command} not found`);
   }
+
   return row;
 }
 
@@ -110,12 +125,14 @@ function seedRunningTurnWithCommands(harness: TestAppHarness): {
   threadId: string;
 } {
   const { environment, thread } = seedThreadFixture(harness);
+
   const turn = {
     threadId: thread.id,
     environmentId: environment.id,
     providerThreadId: "p1",
     scope: turnScope("turn-1"),
   } as const;
+
   seedEvent(harness.deps, {
     ...turn,
     sequence: 1,
@@ -123,6 +140,7 @@ function seedRunningTurnWithCommands(harness: TestAppHarness): {
     data: {},
   });
   let sequence = 1;
+
   for (const [command, output] of [
     ["big", BIG_OUTPUT],
     ["small", SMALL_OUTPUT],
@@ -162,6 +180,7 @@ function seedRunningTurnWithCommands(harness: TestAppHarness): {
       },
     });
   }
+
   return { threadId: thread.id };
 }
 
@@ -198,18 +217,21 @@ describe("GET /threads/:id/timeline inline output preview", () => {
   it("keeps both timeline preview boundaries on complete Unicode characters", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       const turn = {
         environmentId: environment.id,
         providerThreadId: "provider-unicode-preview",
         scope: turnScope("turn-unicode-preview"),
         threadId: thread.id,
       } as const;
+
       seedEvent(harness.deps, {
         ...turn,
         data: {},
         sequence: 1,
         type: "turn/started",
       });
+
       const outputs = [
         "h".repeat(TIMELINE_INLINE_OUTPUT_PREVIEW_HEAD_CHARS - 1) +
           "😀" +
@@ -218,6 +240,7 @@ describe("GET /threads/:id/timeline inline output preview", () => {
           "😀" +
           "t".repeat(TIMELINE_INLINE_OUTPUT_PREVIEW_TAIL_CHARS - 1),
       ];
+
       for (const [index, output] of outputs.entries()) {
         seedEvent(harness.deps, {
           ...turn,
@@ -239,6 +262,7 @@ describe("GET /threads/:id/timeline inline output preview", () => {
       }
 
       const timeline = await getTimeline(harness, thread.id);
+
       for (const index of [0, 1]) {
         const row = findCommandRow(timeline.rows, `unicode preview ${index}`);
         expect(hasUnpairedSurrogate(row.output)).toBe(false);
@@ -250,11 +274,13 @@ describe("GET /threads/:id/timeline inline output preview", () => {
   it("nested-row consumers still receive the full inline output", async () => {
     await withTestHarness(async (harness) => {
       const { threadId } = seedRunningTurnWithCommands(harness);
+
       const timeline = await getTimeline(
         harness,
         threadId,
         "?includeNestedRows=true",
       );
+
       const big = findCommandRow(timeline.rows, "big");
       expect(big.outputPreview).toBeUndefined();
       expect(big.output).toBe(BIG_OUTPUT);
@@ -371,18 +397,23 @@ describe("GET /threads/:id/timeline inline output preview", () => {
         thread.id,
         "?includeNestedRows=true",
       );
+
       const turn = timeline.rows.find(
         (row) => row.kind === "turn" && row.turnId === turnId,
       );
+
       if (turn?.kind !== "turn" || turn.children === null) {
         throw new Error("Expected completed turn children");
       }
+
       const delegation = turn.children.find(
         (row) => row.kind === "work" && row.workKind === "delegation",
       );
+
       if (delegation?.kind !== "work" || delegation.workKind !== "delegation") {
         throw new Error("Expected nested delegation row");
       }
+
       const preview = findNestedCommandRow(delegation.childRows ?? [], command);
       expect(preview.output).not.toBe(output);
       expect(preview.outputPreview).toEqual({
@@ -393,10 +424,13 @@ describe("GET /threads/:id/timeline inline output preview", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${preview.turnId}&sourceSeqStart=${preview.sourceSeqStart}&sourceSeqEnd=${preview.sourceSeqEnd}&itemId=${preview.callId}`,
       );
+
       expect(response.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(response),
       );
+
       const hydrated = findNestedCommandRow(details.rows, command);
       expect(hydrated.output).toBe(output);
       expect(hydrated.outputPreview).toBeUndefined();
@@ -420,14 +454,19 @@ describe("GET /threads/:id/timeline inline output preview", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${threadId}/timeline/turn-summary-details?turnId=${big.turnId}&sourceSeqStart=${big.sourceSeqStart}&sourceSeqEnd=${big.sourceSeqEnd}&itemId=${big.callId}`,
       );
+
       expect(response.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(response),
       );
+
       const full = details.rows.find((row) => row.id === big.id);
+
       if (!full || full.kind !== "work" || full.workKind !== "command") {
         throw new Error("expected the previewed command row in details");
       }
+
       expect(full.output).toBe(BIG_OUTPUT);
     });
   });
@@ -436,12 +475,14 @@ describe("GET /threads/:id/timeline inline output preview", () => {
     await withTestHarness(async (harness) => {
       const now = Date.now();
       const { environment, thread } = seedThreadFixture(harness);
+
       const turn = {
         environmentId: environment.id,
         providerThreadId: "provider-legacy-cache",
         scope: turnScope("turn-legacy-cache"),
         threadId: thread.id,
       } as const;
+
       seedEvent(harness.deps, {
         ...turn,
         createdAt: now - COMPLETED_EVENT_OUTPUT_RETENTION_MS - 2,
@@ -484,6 +525,7 @@ describe("GET /threads/:id/timeline inline output preview", () => {
         (await getTimeline(harness, thread.id, "?includeNestedRows=true")).rows,
         "legacy cached command",
       );
+
       expect(before.output.length).toBeGreaterThan(10_000);
 
       await runPeriodicSweeps({
@@ -496,6 +538,7 @@ describe("GET /threads/:id/timeline inline output preview", () => {
         (await getTimeline(harness, thread.id, "?includeNestedRows=true")).rows,
         "legacy cached command",
       );
+
       expect(after.output.length).toBeLessThan(10_000);
       expect(after.output).toContain("output truncated by retention policy");
     });
@@ -506,12 +549,14 @@ describe("GET /threads/:id/timeline inline output preview (tool rows)", () => {
   it("previews a large tool result and row-scoped details return it whole", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       const turn = {
         threadId: thread.id,
         environmentId: environment.id,
         providerThreadId: "p1",
         scope: turnScope("turn-1"),
       } as const;
+
       seedEvent(harness.deps, {
         ...turn,
         sequence: 1,
@@ -535,13 +580,16 @@ describe("GET /threads/:id/timeline inline output preview (tool rows)", () => {
       });
 
       const timeline = await getTimeline(harness, thread.id);
+
       const row = timeline.rows.find(
         (candidate) =>
           candidate.kind === "work" && candidate.workKind === "tool",
       );
+
       if (!row || row.kind !== "work" || row.workKind !== "tool") {
         throw new Error("tool row not found");
       }
+
       expect(row.outputPreview).toBeDefined();
       expect(row.output.length).toBeLessThan(
         TIMELINE_INLINE_OUTPUT_PREVIEW_THRESHOLD_CHARS,
@@ -550,14 +598,19 @@ describe("GET /threads/:id/timeline inline output preview (tool rows)", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${row.turnId}&sourceSeqStart=${row.sourceSeqStart}&sourceSeqEnd=${row.sourceSeqEnd}&itemId=${row.callId}`,
       );
+
       expect(response.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(response),
       );
+
       const full = details.rows.find((candidate) => candidate.id === row.id);
+
       if (!full || full.kind !== "work" || full.workKind !== "tool") {
         throw new Error("expected the previewed tool row in details");
       }
+
       expect(full.outputPreview).toBeUndefined();
       expect(full.output.length).toBeGreaterThan(
         TIMELINE_INLINE_OUTPUT_PREVIEW_THRESHOLD_CHARS,
@@ -633,20 +686,26 @@ describe("GET /threads/:id/events retained output", () => {
       const rawResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/events?types=provider%2Funhandled`,
       );
+
       expect(rawResponse.status).toBe(200);
+
       const rawRows = threadEventRowSchema
         .array()
         .parse(await readJson(rawResponse));
+
       expect(rawRows).toHaveLength(1);
       expect(JSON.stringify(rawRows)).toContain(output);
 
       const detailResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${turnId}&sourceSeqStart=2&sourceSeqEnd=2`,
       );
+
       expect(detailResponse.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(detailResponse),
       );
+
       expect(details.rows).toContainEqual(
         expect.objectContaining({
           callId: "legacy-generated-image",
@@ -681,25 +740,30 @@ describe("GET /threads/:id/events retained output", () => {
         threadId: thread.id,
         type: "item/completed",
       });
+
       const stored = harness.db
         .select({ data: events.data })
         .from(events)
         .where(eq(events.threadId, thread.id))
         .get();
+
       expect(stored?.data).not.toContain(output);
 
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/events?types=item%2Fcompleted`,
       );
+
       expect(response.status).toBe(200);
       const rows = threadEventRowSchema.array().parse(await readJson(response));
       const [row] = rows;
+
       if (
         row?.type !== "item/completed" ||
         row.data.item.type !== "commandExecution"
       ) {
         throw new Error("Expected completed command event");
       }
+
       expect(row.data.item.aggregatedOutput).toBe(output);
       expect(row.data.item.truncation).toBeUndefined();
     });
@@ -709,6 +773,7 @@ describe("GET /threads/:id/events retained output", () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
       const output = "r".repeat(1024 * 1024);
+
       for (let sequence = 1; sequence <= 9; sequence += 1) {
         seedEvent(harness.deps, {
           data: {
@@ -735,6 +800,7 @@ describe("GET /threads/:id/events retained output", () => {
       const oversized = await harness.app.request(
         `/api/v1/threads/${thread.id}/events?types=item%2Fcompleted`,
       );
+
       expect(oversized.status).toBe(413);
       await expect(readJson(oversized)).resolves.toEqual({
         code: "event_data_too_large",
@@ -744,14 +810,17 @@ describe("GET /threads/:id/events retained output", () => {
       const page = await harness.app.request(
         `/api/v1/threads/${thread.id}/events?types=item%2Fcompleted&limit=1`,
       );
+
       expect(page.status).toBe(200);
       const [row] = threadEventRowSchema.array().parse(await readJson(page));
+
       if (
         row?.type !== "item/completed" ||
         row.data.item.type !== "commandExecution"
       ) {
         throw new Error("Expected completed command event");
       }
+
       expect(row.data.item.aggregatedOutput).toBe(output);
       expect(row.data.item.truncation).toBeUndefined();
     });
@@ -762,12 +831,14 @@ describe("GET /threads/:id/timeline retained output details", () => {
   it("hydrates a retained output in row-scoped details", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       const turn = {
         environmentId: environment.id,
         providerThreadId: "provider-retained-details",
         scope: turnScope("turn-retained-details"),
         threadId: thread.id,
       } as const;
+
       const output = "details-" + "d".repeat(50_000);
       seedEvent(harness.deps, {
         ...turn,
@@ -796,17 +867,22 @@ describe("GET /threads/:id/timeline retained output details", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=turn-retained-details&sourceSeqStart=2&sourceSeqEnd=2&itemId=retained-details-command`,
       );
+
       expect(response.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(response),
       );
+
       const row = details.rows.find(
         (candidate) =>
           candidate.kind === "work" && candidate.workKind === "command",
       );
+
       if (row?.kind !== "work" || row.workKind !== "command") {
         throw new Error("Expected retained details command row");
       }
+
       expect(row.output).toBe(output);
       expect(row.outputPreview).toBeUndefined();
     });
@@ -815,12 +891,14 @@ describe("GET /threads/:id/timeline retained output details", () => {
   it("keeps an oversized retained output as a preview in details", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
+
       const turn = {
         environmentId: environment.id,
         providerThreadId: "provider-oversized-retained-details",
         scope: turnScope("turn-oversized-retained-details"),
         threadId: thread.id,
       } as const;
+
       const output = "oversized-" + "o".repeat(5 * 1024 * 1024);
       seedEvent(harness.deps, {
         ...turn,
@@ -849,17 +927,22 @@ describe("GET /threads/:id/timeline retained output details", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=turn-oversized-retained-details&sourceSeqStart=2&sourceSeqEnd=2&itemId=oversized-retained-details-command`,
       );
+
       expect(response.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(response),
       );
+
       const row = details.rows.find(
         (candidate) =>
           candidate.kind === "work" && candidate.workKind === "command",
       );
+
       if (row?.kind !== "work" || row.workKind !== "command") {
         throw new Error("Expected oversized retained details command row");
       }
+
       expect(row.output).not.toBe(output);
       expect(row.output.startsWith(output.slice(0, 2_048))).toBe(true);
       expect(row.output.endsWith(output.slice(-2_048))).toBe(true);
@@ -871,16 +954,76 @@ describe("GET /threads/:id/timeline retained output details", () => {
     });
   });
 
+  it("expires a cached availability when only the retention clock changes", async () => {
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+
+    try {
+      await withTestHarness(async (harness) => {
+        const { environment, thread } = seedThreadFixture(harness);
+
+        const turn = {
+          environmentId: environment.id,
+          providerThreadId: "inert-retention-clock",
+          scope: turnScope("retention-clock-turn"),
+          threadId: thread.id,
+          createdAt: now - COMPLETED_EVENT_OUTPUT_RETENTION_MS + 100,
+        };
+
+        seedEvent(harness.deps, {
+          ...turn,
+          data: {},
+          sequence: 1,
+          type: "turn/started",
+        });
+        seedEvent(harness.deps, {
+          ...turn,
+          data: {
+            item: {
+              aggregatedOutput: "inert-" + "x".repeat(50_000),
+              approvalStatus: null,
+              command: "inert retention clock",
+              cwd: "/inert",
+              exitCode: 0,
+              id: "retention-clock-command",
+              status: "completed",
+              type: "commandExecution",
+            },
+          },
+          sequence: 2,
+          type: "item/completed",
+        });
+        const before = await getTimeline(harness, thread.id);
+        expect(
+          findCommandRow(before.rows, "inert retention clock").outputPreview
+            ?.experimental_fullOutputAvailability,
+        ).toBe("available");
+        vi.setSystemTime(now + 101);
+        const after = await getTimeline(harness, thread.id);
+        expect(after.maxSeq).toBe(before.maxSeq);
+        expect(
+          findCommandRow(after.rows, "inert retention clock").outputPreview
+            ?.experimental_fullOutputAvailability,
+        ).toBe("retention-expired");
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("marks a retained output unavailable after its retention expires", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
       const createdAt = Date.now() - COMPLETED_EVENT_OUTPUT_RETENTION_MS - 1;
+
       const turn = {
         environmentId: environment.id,
         providerThreadId: "provider-expired-retained-details",
         scope: turnScope("turn-expired-retained-details"),
         threadId: thread.id,
       } as const;
+
       const output = "expired-" + "e".repeat(50_000);
       seedEvent(harness.deps, {
         ...turn,
@@ -912,21 +1055,27 @@ describe("GET /threads/:id/timeline retained output details", () => {
         (await getTimeline(harness, thread.id)).rows,
         "cat expired retained details",
       );
+
       expect(timelineRow.outputPreview).toEqual({
         experimental_fullOutputAvailability: "retention-expired",
         totalChars: output.length,
       });
+
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=turn-expired-retained-details&sourceSeqStart=2&sourceSeqEnd=2`,
       );
+
       expect(response.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(response),
       );
+
       const detailRow = findCommandRow(
         details.rows,
         "cat expired retained details",
       );
+
       expect(detailRow.outputPreview).toEqual({
         experimental_fullOutputAvailability: "retention-expired",
         totalChars: output.length,
@@ -941,20 +1090,24 @@ describe("GET /threads/:id/timeline delegated rows", () => {
       const { environment, thread } = seedThreadFixture(harness, {
         thread: { status: "active" },
       });
+
       const turn = {
         environmentId: environment.id,
         providerThreadId: "provider-deferred",
         scope: turnScope("turn-deferred"),
         threadId: thread.id,
       } as const;
+
       const reasoning = `thinking ${"r".repeat(1_500)}`;
       const output = `output ${"o".repeat(2_000)}`;
       const diff = `@@ -1 +1 @@\n-old\n+${"d".repeat(1_500)}\n`;
       let sequence = 0;
+
       const seed = (type: "item/started" | "item/completed", item: object) => {
         sequence += 1;
         seedEvent(harness.deps, { ...turn, data: { item }, sequence, type });
       };
+
       sequence += 1;
       seedEvent(harness.deps, {
         ...turn,
@@ -1010,12 +1163,15 @@ describe("GET /threads/:id/timeline delegated rows", () => {
             row.title.length > 0 &&
             "reasoningId" in row,
         );
+
         const commandRow = rows.find(
           (row) => row.kind === "work" && row.workKind === "command",
         );
+
         const fileRow = rows.find(
           (row) => row.kind === "work" && row.workKind === "file-change",
         );
+
         if (
           reasoningRow?.kind !== "system" ||
           commandRow?.kind !== "work" ||
@@ -1025,6 +1181,7 @@ describe("GET /threads/:id/timeline delegated rows", () => {
         ) {
           throw new Error("Expected reasoning, command and file-change rows");
         }
+
         return { commandRow, fileRow, reasoningRow };
       };
 
@@ -1037,6 +1194,7 @@ describe("GET /threads/:id/timeline delegated rows", () => {
       const deferred = findRows(
         (await getTimeline(harness, thread.id, "?deferContent=true")).rows,
       );
+
       expect(deferred.reasoningRow).toMatchObject({
         contentDeferred: true,
         detail: null,
@@ -1046,6 +1204,7 @@ describe("GET /threads/:id/timeline delegated rows", () => {
         output: "",
       });
       expect(deferred.commandRow).not.toHaveProperty("outputPreview");
+
       const deferredScript = (
         await getTimeline(harness, thread.id, "?deferContent=true")
       ).rows.find(
@@ -1054,13 +1213,16 @@ describe("GET /threads/:id/timeline delegated rows", () => {
           row.workKind === "command" &&
           row.callId === "command-2",
       );
+
       expect(deferredScript).toMatchObject({
         command: script.slice(0, 300),
         contentDeferred: true,
       });
+
       if (deferredScript === undefined) {
         throw new Error("Expected the long command row");
       }
+
       expect(deferred.fileRow).toMatchObject({
         change: { diff: null, diffStats: inline.fileRow.change.diffStats },
         contentDeferred: true,
@@ -1070,20 +1232,25 @@ describe("GET /threads/:id/timeline delegated rows", () => {
         const response = await harness.app.request(
           `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${row.turnId}&sourceSeqStart=${row.sourceSeqStart}&sourceSeqEnd=${row.sourceSeqEnd}&itemId=${itemId}&deferContent=true`,
         );
+
         expect(response.status).toBe(200);
+
         return timelineTurnSummaryDetailsResponseSchema.parse(
           await readJson(response),
         ).rows;
       };
+
       expect(await loadItem(deferredScript, "command-2")).toEqual([
         expect.objectContaining({ command: script, output: "ok" }),
       ]);
+
       const [loadedReasoning] = await loadItem(
         deferred.reasoningRow,
         "reasoningId" in deferred.reasoningRow
           ? (deferred.reasoningRow.reasoningId ?? "")
           : "",
       );
+
       expect(loadedReasoning).toMatchObject({ id: deferred.reasoningRow.id });
       expect(loadedReasoning).not.toHaveProperty("contentDeferred");
       expect(
@@ -1106,13 +1273,16 @@ describe("GET /threads/:id/timeline delegated rows", () => {
       const { environment, thread } = seedThreadFixture(harness, {
         thread: { status: "active" },
       });
+
       const scope = turnScope("turn-delegated");
+
       const turn = {
         environmentId: environment.id,
         providerThreadId: "provider-delegated",
         scope,
         threadId: thread.id,
       } as const;
+
       const delegationCallId = "delegation-call";
       const commandCallId = "nested-big-command";
       seedEvent(harness.deps, {
@@ -1185,32 +1355,42 @@ describe("GET /threads/:id/timeline delegated rows", () => {
         thread.id,
         "?deferContent=true",
       );
+
       const inline = await getTimeline(harness, thread.id);
       expect(
         findNestedCommandRow(inline.rows, "nested big").outputPreview,
       ).toBeDefined();
       expect(maybeFindNestedCommandRow(settled.rows, "nested big")).toBeNull();
+
       const delegation = settled.rows.find(
         (row) => row.kind === "work" && row.workKind === "delegation",
       );
+
       if (delegation?.kind !== "work" || delegation.workKind !== "delegation") {
         throw new Error("Expected delegation row");
       }
+
       expect(delegation.childRows).toBeNull();
 
       const detailsUrl = (callId: string, sourceSeqStart = 2) =>
         `/api/v1/threads/${thread.id}/timeline/turn-summary-details?turnId=${delegation.turnId}&sourceSeqStart=${sourceSeqStart}&sourceSeqEnd=${delegation.sourceSeqEnd}&itemId=${callId}`;
+
       const childrenResponse = await harness.app.request(
         detailsUrl(delegationCallId),
       );
+
       expect(childrenResponse.status).toBe(200);
+
       const children = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(childrenResponse),
       );
+
       const previewed = findNestedCommandRow(children.rows, "nested big");
+
       const fromLaterStart = await harness.app.request(
         detailsUrl(delegationCallId, 3),
       );
+
       expect(fromLaterStart.status).toBe(200);
       expect(
         timelineTurnSummaryDetailsResponseSchema.parse(
@@ -1224,9 +1404,11 @@ describe("GET /threads/:id/timeline delegated rows", () => {
 
       const fullResponse = await harness.app.request(detailsUrl(commandCallId));
       expect(fullResponse.status).toBe(200);
+
       const full = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(fullResponse),
       );
+
       expect(full.rows).toEqual([
         expect.objectContaining({
           callId: commandCallId,

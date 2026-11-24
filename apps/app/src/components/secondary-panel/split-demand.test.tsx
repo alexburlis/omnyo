@@ -6,14 +6,13 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { startSplitPreloading } from "@/lib/split-prefetch";
 import { PanelGroup } from "react-resizable-panels";
 import {
   LazyBrowserTabDeck,
   LazyThreadSecondaryPanel,
+  preloadThreadSecondaryPanel,
 } from "./lazySecondaryPanelComponents";
 
 const imports = vi.hoisted(() => ({
@@ -24,20 +23,28 @@ const imports = vi.hoisted(() => ({
   preview: vi.fn(),
   tabs: vi.fn(),
 }));
+
 vi.mock("@/components/thread/terminal/ThreadTerminalPanel", () => {
   imports.terminal();
+
   return { ThreadTerminalPanel: () => <p>Terminal mounted</p> };
 });
+
 vi.mock("./NewTabPage", () => {
   imports.newTab();
+
   return { NewTabPage: () => <p>New tab mounted</p> };
 });
+
 vi.mock("./FilePreview", () => {
   imports.preview();
+
   return { FilePreview: () => <p>Preview mounted</p> };
 });
+
 vi.mock("./ThreadSecondaryPanelTabContent", () => {
   imports.tabs();
+
   return {
     WorkspaceFilePreviewTabContent: () => null,
     HostFilePreviewTabContent: () => null,
@@ -46,18 +53,24 @@ vi.mock("./ThreadSecondaryPanelTabContent", () => {
     ThreadStorageFilePreviewTabContent: () => null,
   };
 });
+
 vi.mock("./ThreadSecondaryPanel", () => {
   imports.panel();
+
   return { ThreadSecondaryPanel: () => <input aria-label="Panel draft" /> };
 });
+
 vi.mock("./BrowserTabDeck", () => {
   imports.browser();
+
   return { BrowserTabDeck: () => <p>Browser loaded</p> };
 });
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
 const noop = () => {};
 
 function Surface({ open, browser }: { open: boolean; browser: boolean }) {
@@ -100,15 +113,15 @@ function Surface({ open, browser }: { open: boolean; browser: boolean }) {
   );
 }
 
-it("warms the shell once preloading starts and tab code on first open without mounting hidden content", async () => {
+it("loads panels only on request and retains drafts on reopen", async () => {
   const view = render(<Surface open={false} browser={false} />);
   await act(async () => {});
   expect(imports.panel).not.toHaveBeenCalled();
-  vi.stubGlobal("requestIdleCallback", (callback: () => void) =>
-    window.setTimeout(callback, 0),
-  );
-  startSplitPreloading();
-  await waitFor(() => expect(imports.panel).toHaveBeenCalledOnce());
+
+  for (const load of Object.values(imports))
+    expect(load).not.toHaveBeenCalled();
+
+  preloadThreadSecondaryPanel();
   expect(screen.queryByRole("textbox", { name: "Panel draft" })).toBeNull();
   expect(imports.browser).not.toHaveBeenCalled();
 
@@ -116,10 +129,11 @@ it("warms the shell once preloading starts and tab code on first open without mo
   const input = await screen.findByRole("textbox", { name: "Panel draft" });
   fireEvent.change(input, { target: { value: "unsaved" } });
   expect(imports.panel).toHaveBeenCalledOnce();
-  await waitFor(() => {
-    for (const load of Object.values(imports))
-      expect(load).toHaveBeenCalledOnce();
-  });
+
+  for (const [name, load] of Object.entries(imports)) {
+    if (name !== "panel") expect(load).not.toHaveBeenCalled();
+  }
+
   expect(screen.queryByText("Browser loaded")).toBeNull();
   expect(screen.queryByText("Terminal mounted")).toBeNull();
   expect(screen.queryByText("New tab mounted")).toBeNull();

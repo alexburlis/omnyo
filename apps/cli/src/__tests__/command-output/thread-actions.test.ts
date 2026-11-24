@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import * as domain from "@bb/domain";
+import * as domain from "@omnyo/domain";
 import {
   setupCommandOutputTestEnvironment,
   collectLogLines,
@@ -16,17 +16,92 @@ interface RetryRequest {
   json: { turnRequestId: string | null; sendAt: number | null; reason: string };
 }
 
-describe("bb thread action command output", () => {
+describe("omnyo thread action command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
     registerThreadCommands(program, () => "http://server");
 
-  it("bb thread archive sends the thread id from args", async () => {
+  it.each([true, false])(
+    "omnyo thread update --title-if-untitled reports whether it applied: %s",
+    async (applied) => {
+      const currentTitle = applied
+        ? "Short generated title"
+        : "My manual title";
+
+      const update = vi.fn(async () => ({
+        id: "thread-title-1",
+        title: currentTitle,
+        experimental_titleApplied: applied,
+      }));
+
+      stubServerApi({ "v1.threads.:id.$patch": update });
+
+      await runCommand(
+        [
+          "thread",
+          "update",
+          "thread-title-1",
+          "--title",
+          "Short generated title",
+          "--title-if-untitled",
+        ],
+        register,
+      );
+
+      expect(update).toHaveBeenCalledWith({
+        param: { id: "thread-title-1" },
+        json: expect.objectContaining({
+          title: "Short generated title",
+          experimental_titleIfUntitled: true,
+        }),
+      });
+      expect(collectLogLines(vi.mocked(console.log))).toContain(
+        applied
+          ? "Thread thread-title-1 titled"
+          : "Thread thread-title-1 title unchanged",
+      );
+      expect(collectLogLines(vi.mocked(console.log))).toContain(
+        `Title: ${currentTitle}`,
+      );
+    },
+  );
+
+  it("omnyo thread update --title-if-untitled fails visibly without a server confirmation", async () => {
+    stubServerApi({
+      "v1.threads.:id.$patch": async () => ({
+        id: "thread-title-unknown",
+        title: "Current title",
+      }),
+    });
+
+    await expect(
+      runCommand(
+        [
+          "thread",
+          "update",
+          "thread-title-unknown",
+          "--title",
+          "Short generated title",
+          "--title-if-untitled",
+        ],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+    expect(collectLogLines(vi.mocked(console.error))).toContain(
+      "Error: The server did not confirm the title change. Check the chat title before retrying.",
+    );
+    expect(collectLogLines(vi.mocked(console.log))).not.toContain(
+      "Thread thread-title-unknown title unchanged",
+    );
+  });
+
+  it("omnyo thread archive sends the thread id from args", async () => {
     const archivePost = vi.fn(async () => ({
       ok: true,
       archivedThreadIds: ["thread-archive-1"],
     }));
+
     stubServerApi({ "v1.threads.:id.archive-all.$post": archivePost });
 
     await runCommand(["thread", "archive", "thread-archive-1"], register);
@@ -39,11 +114,12 @@ describe("bb thread action command output", () => {
     );
   });
 
-  it("bb thread archive reports related threads when cascading", async () => {
+  it("omnyo thread archive reports related threads when cascading", async () => {
     const archivePost = vi.fn(async () => ({
       ok: true,
       archivedThreadIds: ["thread-child-1", "thread-archive-1"],
     }));
+
     stubServerApi({ "v1.threads.:id.archive-all.$post": archivePost });
 
     await runCommand(["thread", "archive", "thread-archive-1"], register);
@@ -56,12 +132,14 @@ describe("bb thread action command output", () => {
     );
   });
 
-  it("bb thread archive --self resolves from BB_THREAD_ID", async () => {
-    vi.stubEnv("BB_THREAD_ID", "thread-archive-2");
+  it("omnyo thread archive --self resolves from OMNYO_THREAD_ID", async () => {
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-archive-2");
+
     const archivePost = vi.fn(async () => ({
       ok: true,
       archivedThreadIds: ["thread-archive-2"],
     }));
+
     stubServerApi({ "v1.threads.:id.archive-all.$post": archivePost });
 
     await runCommand(["thread", "archive", "--self"], register);
@@ -71,10 +149,11 @@ describe("bb thread action command output", () => {
     });
   });
 
-  it("bb thread archive prefixes failures with thread context", async () => {
+  it("omnyo thread archive prefixes failures with thread context", async () => {
     const archivePost = vi.fn(async () => {
       throw new Error("HTTP 404: missing");
     });
+
     stubServerApi({ "v1.threads.:id.archive-all.$post": archivePost });
 
     await expect(
@@ -89,8 +168,8 @@ describe("bb thread action command output", () => {
     });
   });
 
-  it("bb thread unarchive --self resolves from BB_THREAD_ID", async () => {
-    vi.stubEnv("BB_THREAD_ID", "thread-unarchive-1");
+  it("omnyo thread unarchive --self resolves from OMNYO_THREAD_ID", async () => {
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-unarchive-1");
     const unarchivePost = vi.fn(async () => ({ ok: true }));
     stubServerApi({ "v1.threads.:id.unarchive.$post": unarchivePost });
 
@@ -104,12 +183,13 @@ describe("bb thread action command output", () => {
     );
   });
 
-  it("bb thread edit-message targets the latest editable message by default", async () => {
+  it("omnyo thread edit-message targets the latest editable message by default", async () => {
     const submitEdit = vi.fn(async () => ({
       ok: true,
       operationId: "edit-op-server",
       requestSequence: 43,
     }));
+
     stubServerApi({
       "v1.threads.:id.edit-message.$post": submitEdit,
     });
@@ -131,13 +211,15 @@ describe("bb thread action command output", () => {
     );
   });
 
-  it("bb thread edit-message preserves an agent caller when targeting another thread", async () => {
-    vi.stubEnv("BB_THREAD_ID", "thread-agent-caller");
+  it("omnyo thread edit-message preserves an agent caller when targeting another thread", async () => {
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-agent-caller");
+
     const submitEdit = vi.fn(async () => ({
       ok: true,
       operationId: "edit-op-server",
       requestSequence: 43,
     }));
+
     stubServerApi({
       "v1.threads.:id.edit-message.$post": submitEdit,
     });
@@ -163,13 +245,15 @@ describe("bb thread action command output", () => {
     });
   });
 
-  it("bb thread edit-message accepts an explicit stale-edit guard", async () => {
-    vi.stubEnv("BB_THREAD_ID", "thread-edit-self");
+  it("omnyo thread edit-message accepts an explicit stale-edit guard", async () => {
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-edit-self");
+
     const submitEdit = vi.fn(async () => ({
       ok: true,
       operationId: "edit-op-server",
       requestSequence: 43,
     }));
+
     stubServerApi({
       "v1.threads.:id.edit-message.$post": submitEdit,
     });
@@ -201,7 +285,7 @@ describe("bb thread action command output", () => {
     });
   });
 
-  it("bb thread edit-message rejects a partially numeric request sequence", async () => {
+  it("omnyo thread edit-message rejects a partially numeric request sequence", async () => {
     const submitEdit = vi.fn();
     stubServerApi({ "v1.threads.:id.edit-message.$post": submitEdit });
 
@@ -226,13 +310,14 @@ describe("bb thread action command output", () => {
     );
   });
 
-  it("bb thread pin sends the thread id from args", async () => {
+  it("omnyo thread pin sends the thread id from args", async () => {
     const pinnedThread = fixtures.makeThread({
       id: "thread-pin-1",
       projectId: "proj-1",
       providerId: "codex",
       pinnedAt: 1,
     });
+
     const pinPost = vi.fn(async () => pinnedThread);
     stubServerApi({ "v1.threads.:id.pin.$post": pinPost });
 
@@ -246,14 +331,16 @@ describe("bb thread action command output", () => {
     );
   });
 
-  it("bb thread unpin --self resolves from BB_THREAD_ID", async () => {
-    vi.stubEnv("BB_THREAD_ID", "thread-unpin-1");
+  it("omnyo thread unpin --self resolves from OMNYO_THREAD_ID", async () => {
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-unpin-1");
+
     const unpinnedThread = fixtures.makeThread({
       id: "thread-unpin-1",
       projectId: "proj-1",
       providerId: "codex",
       pinnedAt: null,
     });
+
     const unpinPost = vi.fn(async () => unpinnedThread);
     stubServerApi({ "v1.threads.:id.unpin.$post": unpinPost });
 
@@ -267,7 +354,81 @@ describe("bb thread action command output", () => {
     );
   });
 
-  it("bb thread delete prompts before deleting", async () => {
+  it("omnyo thread shelve sends the thread id from args", async () => {
+    const shelvedThread = fixtures.makeThread({
+      id: "thread-shelve-1",
+      projectId: "proj-1",
+      providerId: "codex",
+      shelvedAt: 1,
+    });
+
+    const shelvePost = vi.fn(async () => shelvedThread);
+    stubServerApi({ "v1.threads.:id.shelve.$post": shelvePost });
+
+    await runCommand(["thread", "shelve", "thread-shelve-1"], register);
+
+    expect(shelvePost).toHaveBeenCalledWith({
+      param: { id: "thread-shelve-1" },
+    });
+    expect(collectLogLines(vi.mocked(console.log))).toContain(
+      "Thread thread-shelve-1 shelved",
+    );
+  });
+
+  it("omnyo thread unshelve --self resolves from OMNYO_THREAD_ID", async () => {
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-unshelve-1");
+
+    const unshelvedThread = fixtures.makeThread({
+      id: "thread-unshelve-1",
+      projectId: "proj-1",
+      providerId: "codex",
+      shelvedAt: null,
+    });
+
+    const unshelvePost = vi.fn(async () => unshelvedThread);
+    stubServerApi({ "v1.threads.:id.unshelve.$post": unshelvePost });
+
+    await runCommand(["thread", "unshelve", "--self"], register);
+
+    expect(unshelvePost).toHaveBeenCalledWith({
+      param: { id: "thread-unshelve-1" },
+    });
+    expect(collectLogLines(vi.mocked(console.log))).toContain(
+      "Thread thread-unshelve-1 unshelved",
+    );
+  });
+
+  it.each([
+    {
+      code: "shelve_requires_top_level",
+      message: "Only top-level threads can be shelved",
+    },
+    {
+      code: "thread_archived",
+      message: "Archived threads cannot be shelved",
+    },
+  ])(
+    "omnyo thread shelve prints the server refusal $code",
+    async ({ code, message }) => {
+      stubServerApi({
+        "v1.threads.:id.shelve.$post": async () =>
+          new Response(JSON.stringify({ code, message }), {
+            status: 409,
+            headers: { "Content-Type": "application/json" },
+          }),
+      });
+
+      await expect(
+        runCommand(["thread", "shelve", "thread-refused-1"], register),
+      ).rejects.toThrow("process.exit:1");
+
+      expect(collectLogLines(vi.mocked(console.error))).toEqual([
+        `Error: HTTP 409: ${message}`,
+      ]);
+    },
+  );
+
+  it("omnyo thread delete prompts before deleting", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-delete-1",
       projectId: "proj-1",
@@ -277,6 +438,7 @@ describe("bb thread action command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const get = vi.fn(async () => thread);
     const deleteFn = vi.fn(async () => ({ ok: true }));
     stubServerApi({
@@ -300,7 +462,7 @@ describe("bb thread action command output", () => {
     );
   });
 
-  it("bb thread delete cancels when confirmation is declined", async () => {
+  it("omnyo thread delete cancels when confirmation is declined", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-delete-2",
       projectId: "proj-1",
@@ -309,6 +471,7 @@ describe("bb thread action command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const get = vi.fn(async () => thread);
     const deleteFn = vi.fn(async () => ({ ok: true }));
     stubServerApi({
@@ -325,7 +488,7 @@ describe("bb thread action command output", () => {
     );
   });
 
-  it("bb thread delete --yes skips confirmation (requires explicit id)", async () => {
+  it("omnyo thread delete --yes skips confirmation (requires explicit id)", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-delete-3",
       projectId: "proj-1",
@@ -334,6 +497,7 @@ describe("bb thread action command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const get = vi.fn(async () => thread);
     const deleteFn = vi.fn(async () => ({ ok: true }));
     stubServerApi({
@@ -353,7 +517,7 @@ describe("bb thread action command output", () => {
     });
   });
 
-  it("bb thread delete forwards explicit child-thread confirmation", async () => {
+  it("omnyo thread delete forwards explicit child-thread confirmation", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-delete-children",
       projectId: "proj-1",
@@ -362,6 +526,7 @@ describe("bb thread action command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const get = vi.fn(async () => thread);
     const deleteFn = vi.fn(async () => ({ ok: true }));
     stubServerApi({
@@ -393,7 +558,7 @@ describe("bb thread action command output", () => {
     ["cancel-plan", "plan.cancel", "exited Plan mode"],
     ["clear-goal", "goal.clear", "cleared its Goal"],
   ])(
-    "bb thread %s posts its action without reading the thread first",
+    "omnyo thread %s posts its action without reading the thread first",
     async (command, route, output) => {
       const post = vi.fn(async () => ({ ok: true }));
       stubServerApi({ [`v1.threads.:id.${route}.$post`]: post });
@@ -408,19 +573,18 @@ describe("bb thread action command output", () => {
     },
   );
 
-  it("bb thread retry defaults the turn and the reason at the boundary", async () => {
+  it("omnyo thread retry defaults the turn and the reason at the boundary", async () => {
     const retryPost = vi.fn(async () => ({
       ok: true,
       delivery: "sent",
       turnRequestId: "creq_2222222222",
       attempt: 2,
     }));
+
     stubServerApi({ "v1.threads.:id.retry.$post": retryPost });
 
     await runCommand(["thread", "retry", "thread-retry-1"], register);
 
-    // No `--turn` means "whichever turn failed", which the server resolves;
-    // the reason is filled rather than sent as an absent field.
     expect(retryPost).toHaveBeenCalledWith({
       param: { id: "thread-retry-1" },
       json: { turnRequestId: null, sendAt: null, reason: "Retry" },
@@ -430,7 +594,7 @@ describe("bb thread action command output", () => {
     );
   });
 
-  it("bb thread retry names the turn, the instant and the reason when asked", async () => {
+  it("omnyo thread retry names the turn, the instant and the reason when asked", async () => {
     const retryPost = vi.fn(async (_request: RetryRequest) => ({
       ok: true,
       delivery: "queued",
@@ -440,6 +604,7 @@ describe("bb thread action command output", () => {
       waitingOn: { kind: "time" },
       sendAt: 1,
     }));
+
     stubServerApi({ "v1.threads.:id.retry.$post": retryPost });
 
     await runCommand(
@@ -461,8 +626,7 @@ describe("bb thread action command output", () => {
     expect(call?.param).toEqual({ id: "thread-retry-2" });
     expect(call?.json.turnRequestId).toBe("creq_3333333333");
     expect(call?.json.reason).toBe("Rate limited");
-    // `--send-at` is the same grammar `bb thread tell` uses: a duration from
-    // now becomes an absolute instant at the boundary.
+
     expect(call?.json.sendAt).toBeGreaterThan(Date.now());
     expect(collectLogLines(vi.mocked(console.log)).join("\n")).toContain(
       "retry of turn creq_3333333333 (attempt 3) queued",

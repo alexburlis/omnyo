@@ -24,6 +24,7 @@ import {
 
 function toggled<T>(values: readonly T[], value: T, checked: boolean): T[] {
   if (checked) return values.includes(value) ? [...values] : [...values, value];
+
   return values.filter((existing) => existing !== value);
 }
 
@@ -48,6 +49,7 @@ function FilterChip({
   children: ReactNode;
 }) {
   const active = selectedNames.length > 0;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -76,6 +78,7 @@ function SortChip({
   onChange: (sort: TaskSort) => void;
 }) {
   const active = sort !== "manual";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -144,8 +147,10 @@ export function ListFilterBar({
   taskCount: number | undefined;
 }) {
   const keepOpen = (event: Event) => event.preventDefault();
+
   const showLabelChip =
     labelOptions.length > 0 || filters.labelNames.length > 0;
+
   return (
     <div className="flex shrink-0 items-center gap-1.5 border-b border-border-hairline px-3.5 py-1.5">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">

@@ -5,7 +5,7 @@ import {
   THREAD_DELTA_NOTIFICATION_METHOD,
   type ThreadDelta,
   experimental_defineProviderBridge,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { z } from "zod";
 
 export const UNSOLICITED_TURN_THREAD_ID_ENV = "UNSOLICITED_TURN_THREAD_ID";
@@ -25,12 +25,15 @@ function write(message: Record<string, unknown>): void {
 
 function openUnsolicitedTurn(): void {
   const threadId = process.env[UNSOLICITED_TURN_THREAD_ID_ENV];
+
   if (threadId === undefined || threadId.length === 0) {
     return;
   }
+
   const deltas: ThreadDelta[] = [
     { kind: "turn.open", providerTurnId: "turn-1" },
   ];
+
   write({
     method: THREAD_DELTA_NOTIFICATION_METHOD,
     params: { threadId, deltas },
@@ -39,15 +42,19 @@ function openUnsolicitedTurn(): void {
 
 export function handleLine(line: string): void {
   let message: unknown;
+
   try {
     message = JSON.parse(line);
   } catch {
     return;
   }
+
   const request = requestSchema.safeParse(message);
+
   if (!request.success) {
     return;
   }
+
   if (request.data.method === BRIDGE_REQUEST_METHODS.initialize) {
     write({
       id: request.data.id,
@@ -59,8 +66,10 @@ export function handleLine(line: string): void {
       },
     });
     turnTimer ??= setInterval(openUnsolicitedTurn, 10);
+
     return;
   }
+
   write({ id: request.data.id, result: {} });
 }
 

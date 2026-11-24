@@ -1,4 +1,4 @@
-import { turnScope } from "@bb/domain";
+import { turnScope } from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   copyStoredThreadEventsInTransaction,
@@ -30,9 +30,11 @@ import type {
 
 function setup(options: CreateConnectionOptions = {}) {
   const db = createMigratedConnection(options);
+
   const host = upsertHost(db, noopNotifier, {
     name: "retained-output-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "retained-output-project",
     source: {
@@ -41,14 +43,17 @@ function setup(options: CreateConnectionOptions = {}) {
       path: "/tmp/retained-output",
     },
   });
+
   const source = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
   });
+
   const target = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
   });
+
   return { db, source, target };
 }
 
@@ -58,29 +63,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readOutput(data: string, path: string): string {
   const parsed: unknown = JSON.parse(data);
+
   if (!isRecord(parsed) || !isRecord(parsed.item)) {
     throw new Error(`Expected string output at ${path}`);
   }
+
   const output = parsed.item[path];
+
   if (typeof output !== "string") {
     throw new Error(`Expected string output at ${path}`);
   }
+
   return output;
 }
 
 function hasUnpairedSurrogate(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
+
     if (code >= 0xd800 && code <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
+
       if (next < 0xdc00 || next > 0xdfff) {
         return true;
       }
+
       index += 1;
     } else if (code >= 0xdc00 && code <= 0xdfff) {
       return true;
     }
   }
+
   return false;
 }
 
@@ -140,9 +153,11 @@ describe("retained completed-event outputs", () => {
     ]);
 
     const [stored] = listStoredEventRows(db, { threadId: source.id });
+
     if (!stored) {
       throw new Error("Expected stored image generation event");
     }
+
     expect(stored.data.length).toBeLessThan(10_000);
     expect(readOutput(stored.data, "result")).not.toBe(result);
     const [hydrated] = hydrateRetainedEventOutputRows(db, [stored], now);
@@ -155,6 +170,7 @@ describe("retained completed-event outputs", () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
     const { db, source } = setup();
+
     const output =
       "head-" +
       "x".repeat(COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS) +
@@ -186,9 +202,11 @@ describe("retained completed-event outputs", () => {
     ]);
 
     const [stored] = listStoredEventRows(db, { threadId: source.id });
+
     if (!stored) {
       throw new Error("Expected stored event");
     }
+
     const preview = readOutput(stored.data, "aggregatedOutput");
     expect(preview).not.toBe(output);
     expect(preview.startsWith(output.slice(0, 2_048))).toBe(true);
@@ -210,6 +228,7 @@ describe("retained completed-event outputs", () => {
       [stored],
       now + COMPLETED_EVENT_OUTPUT_RETENTION_MS,
     );
+
     expect(expired?.data).toBe(stored.data);
     db.$client.close();
   });
@@ -217,10 +236,12 @@ describe("retained completed-event outputs", () => {
   it("keeps both preview boundaries on complete Unicode characters", () => {
     const now = 1_800_000_000_000;
     const { db, source } = setup();
+
     const headBoundaryOutput =
       "h".repeat(COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS - 1) +
       "😀" +
       "m".repeat(COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS);
+
     const tailBoundaryOutput =
       "m".repeat(COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS) +
       "😀" +
@@ -249,14 +270,18 @@ describe("retained completed-event outputs", () => {
     );
 
     const storedRows = listStoredEventRows(db, { threadId: source.id });
+
     const previews = storedRows.map((row) =>
       readOutput(row.data, "aggregatedOutput"),
     );
+
     expect(previews).toHaveLength(2);
+
     for (const preview of previews) {
       expect(hasUnpairedSurrogate(preview)).toBe(false);
       expect(Buffer.from(preview).toString()).not.toContain("�");
     }
+
     expect(
       storedRows.map(
         (row) =>
@@ -277,9 +302,11 @@ describe("retained completed-event outputs", () => {
   it("preserves lone high and low surrogates in retained values", () => {
     const now = 1_800_000_000_000;
     const { db, source } = setup();
+
     const output =
       "head-\ud800-middle-\udc00-" +
       "x".repeat(COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS);
+
     insertEvents(db, noopNotifier, [
       {
         createdAt: now,
@@ -341,21 +368,25 @@ describe("retained completed-event outputs", () => {
         now,
       ),
     ).toEqual(stored);
+
     const [hydrated] = hydrateRetainedEventOutputRowsWithinDataByteLimit(
       db,
       stored,
       8 * 1024 * 1024,
       now,
     );
+
     expect(hydrated && readOutput(hydrated.data, "aggregatedOutput")).toBe(
       output,
     );
 
     const exactHydratedRows = hydrateRetainedEventOutputRows(db, stored, now);
+
     const exactHydratedBytes = exactHydratedRows.reduce(
       (total, row) => total + Buffer.byteLength(row.data),
       0,
     );
+
     expect(
       hydrateRetainedEventOutputRowsWithinDataByteLimit(
         db,
@@ -417,6 +448,7 @@ describe("retained completed-event outputs", () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
     const queries: SlowDbQueryLogFields[] = [];
+
     const { db, source, target } = setup({
       slowQueryLogger: {
         info(fields) {
@@ -425,10 +457,12 @@ describe("retained completed-event outputs", () => {
       },
       slowQueryThresholdMs: 0,
     });
+
     const outputs = Array.from(
       { length: 6 },
       (_, index) => `copy-${index}-` + "y".repeat(2 * 1024 * 1024),
     );
+
     insertEvents(
       db,
       noopNotifier,
@@ -493,7 +527,8 @@ describe("retained completed-event outputs", () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
     const { db, source } = setup();
-    const output = "z".repeat(50_000);
+    const output = "zé".repeat(25_000);
+
     const eventInputs: InsertEventInput[] = [1, 2].map((sequence) => ({
       createdAt: now,
       data: JSON.stringify({
@@ -511,6 +546,7 @@ describe("retained completed-event outputs", () => {
       threadId: source.id,
       type: "item/completed",
     }));
+
     insertEvents(db, noopNotifier, eventInputs);
     const previews = listStoredEventRows(db, { threadId: source.id });
 
@@ -519,7 +555,7 @@ describe("retained completed-event outputs", () => {
         expiredAtOrBefore: now + COMPLETED_EVENT_OUTPUT_RETENTION_MS,
         limit: 1,
       }),
-    ).toEqual({ deleted: 1, threadIds: [source.id] });
+    ).toEqual({ deleted: 1, deletedBytes: 75_002, threadIds: [source.id] });
     expect(listStoredEventRows(db, { threadId: source.id })).toEqual(previews);
     const hydrated = hydrateRetainedEventOutputRows(db, previews, now);
     expect(
@@ -533,6 +569,7 @@ describe("retained completed-event outputs", () => {
   it("looks up retained outputs for a thousand rows in one query", () => {
     const now = 1_800_000_000_000;
     let queries = 0;
+
     const { db, source } = setup({
       slowQueryLogger: {
         info() {
@@ -541,6 +578,7 @@ describe("retained completed-event outputs", () => {
       },
       slowQueryThresholdMs: 0,
     });
+
     const output = `head-${"x".repeat(COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS)}-tail`;
     insertTurnStartedEvents(db, {
       count: 1_000,
@@ -568,6 +606,7 @@ describe("retained completed-event outputs", () => {
     ]);
     const rows = listStoredEventRows(db, { threadId: source.id });
     const stored = rows.find((row) => row.itemKind === "commandExecution");
+
     if (!stored) throw new Error("Expected stored command event");
     expect(readOutput(stored.data, "aggregatedOutput")).not.toBe(output);
 
@@ -605,6 +644,7 @@ describe("retained completed-event outputs", () => {
   it("refuses an over-budget read before looking up retained outputs", () => {
     const now = 1_800_000_000_000;
     let queries = 0;
+
     const { db, source } = setup({
       slowQueryLogger: {
         info() {
@@ -613,16 +653,19 @@ describe("retained completed-event outputs", () => {
       },
       slowQueryThresholdMs: 0,
     });
+
     insertTurnStartedEvents(db, {
       count: 3,
       createdAt: now,
       threadId: source.id,
     });
     const rows = listStoredEventRows(db, { threadId: source.id });
+
     const storedBytes = rows.reduce(
       (total, row) => total + Buffer.byteLength(row.data),
       0,
     );
+
     expect(
       canHydrateRetainedEventOutputRowsWithinDataByteLimit(
         db,

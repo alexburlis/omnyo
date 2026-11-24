@@ -10,7 +10,9 @@ const native = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({ Platform: native.platform }));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: {} } }));
+
 vi.mock("expo-notifications", () => ({
   setAutoServerRegistrationEnabledAsync: native.autoRegistration,
   unregisterForNotificationsAsync: native.unregister,

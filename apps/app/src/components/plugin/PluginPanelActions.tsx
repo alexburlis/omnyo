@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from "react";
-import type { PluginPanelActionOpenOptions } from "@get-bb/plugin-sdk";
-import { EmptyStatePanel } from "@bb/shared-ui/empty-state";
+import type { PluginPanelActionOpenOptions } from "@omnyo/plugin-sdk";
+import { EmptyStatePanel } from "@omnyo/shared-ui/empty-state";
 import { usePluginFrontendsSettled } from "@/lib/plugin-frontend-boot-state";
 import {
   usePluginSlots,
@@ -56,20 +56,24 @@ export function createPanelActionOpenPanel({
 ) => boolean {
   return (options) => {
     let paramsJson: string | null;
+
     try {
       paramsJson = serializePluginPanelParams(options?.params);
     } catch (error) {
       console.warn(
         `[plugin:${action.pluginId}] ${slot} "${action.id}" openPanel declined: ${describeError(error)}`,
       );
+
       return false;
     }
+
     openPluginPanel({
       pluginId: action.pluginId,
       actionId: action.id,
       title: options?.title ?? action.title,
       paramsJson,
     });
+
     return true;
   };
 }
@@ -90,17 +94,22 @@ function runPluginPanelAction({
     slot: "threadPanelAction",
     openPluginPanel,
   });
+
   const warn = (error: unknown) => {
     console.warn(
       `[plugin:${action.pluginId}] threadPanelAction "${action.id}" failed: ${describeError(error)}`,
     );
   };
+
   try {
     if (action.run === undefined) {
       openPanel();
+
       return;
     }
+
     const result = action.run({ threadId, openPanel });
+
     if (result instanceof Promise) result.catch(warn);
   } catch (error) {
     warn(error);
@@ -123,17 +132,22 @@ function runPluginNewThreadPanelAction({
     slot: "experimental_newThreadPanelAction",
     openPluginPanel,
   });
+
   const warn = (error: unknown) => {
     console.warn(
       `[plugin:${action.pluginId}] experimental_newThreadPanelAction "${action.id}" failed: ${describeError(error)}`,
     );
   };
+
   try {
     if (action.run === undefined) {
       openPanel();
+
       return;
     }
+
     const result = action.run({ projectId, openPanel });
+
     if (result instanceof Promise) result.catch(warn);
   } catch (error) {
     warn(error);
@@ -148,10 +162,12 @@ export function usePluginPanelActions({
   threadId: string | null | undefined;
 }): readonly PluginPanelActionEntry[] {
   const { threadPanelActions } = usePluginSlots();
+
   return useMemo(() => {
     if (threadId === null || threadId === undefined || threadId.length === 0) {
       return [];
     }
+
     return threadPanelActions.map((action) => ({
       id: `plugin-action:${action.pluginId}:${action.id}`,
       pluginId: action.pluginId,
@@ -171,6 +187,7 @@ export function usePluginNewThreadPanelActions({
   projectId: string | null;
 }): readonly PluginPanelActionEntry[] {
   const { newThreadPanelActions } = usePluginSlots();
+
   return useMemo(
     () =>
       newThreadPanelActions.map((action) => ({
@@ -203,6 +220,7 @@ export function PluginPanelTabContent({
   fileOpenerOriginal?: ReactNode;
 }) {
   const openerId = fileOpenerIdFromActionId(tab.actionId);
+
   if (openerId !== null) {
     return (
       <FileOpenerTabContent
@@ -212,6 +230,7 @@ export function PluginPanelTabContent({
       />
     );
   }
+
   return context.kind === "thread" ? (
     <ThreadActionTabContent tab={tab} threadId={context.threadId} />
   ) : (
@@ -221,9 +240,11 @@ export function PluginPanelTabContent({
 
 function UnavailableActionTab() {
   const pluginsSettled = usePluginFrontendsSettled();
+
   if (!pluginsSettled) {
     return null;
   }
+
   return (
     <div className="p-4">
       <EmptyStatePanel className="rounded-lg p-6 text-sm">
@@ -272,13 +293,17 @@ function ThreadActionTabContent({
   threadId: string;
 }) {
   const { threadPanelActions } = usePluginSlots();
+
   const action =
     threadPanelActions.find(
       (candidate) =>
         candidate.pluginId === tab.pluginId && candidate.id === tab.actionId,
     ) ?? null;
+
   const params = usePersistedActionParams(tab);
+
   if (action === null) return <UnavailableActionTab />;
+
   return (
     <PanelActionTabFrame
       layout={action.layout}
@@ -304,13 +329,17 @@ function NewThreadActionTabContent({
   projectId: string | null;
 }) {
   const { newThreadPanelActions } = usePluginSlots();
+
   const action =
     newThreadPanelActions.find(
       (candidate) =>
         candidate.pluginId === tab.pluginId && candidate.id === tab.actionId,
     ) ?? null;
+
   const params = usePersistedActionParams(tab);
+
   if (action === null) return <UnavailableActionTab />;
+
   return (
     <PanelActionTabFrame
       layout={action.layout}
@@ -338,23 +367,30 @@ function FileOpenerTabContent({
   tab: PluginPanelFixedPanelTab;
 }) {
   const { fileOpeners } = usePluginSlots();
+
   const replacement = resolveReplacement(
     fileOpeners,
     (candidate) =>
       candidate.pluginId === tab.pluginId && candidate.id === openerId,
   );
+
   const file = useMemo(
     () => parseFileOpenerParams(tab.paramsJson),
     [tab.paramsJson],
   );
+
   const owner = tab.fileOpenerOwner;
+
   const lineRange = useMemo(() => {
     const range = owner?.tab.lineRange;
+
     return range == null ? null : { ...range };
   }, [owner]);
+
   if (file === null || owner === undefined || original === undefined) {
     return <UnavailableFileOpenerTab />;
   }
+
   return (
     <PluginReplacementSlot
       replacement={replacement}

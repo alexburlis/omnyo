@@ -1,5 +1,5 @@
 {
-  "name": "@bb/shared-ui",
+  "name": "@omnyo/shared-ui",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -8,6 +8,11 @@
       "source": "./src/components/ui/activity-row-styles.ts",
       "types": "./src/components/ui/activity-row-styles.ts",
       "default": "./src/components/ui/activity-row-styles.ts"
+    },
+    "./alert": {
+      "source": "./src/components/ui/alert.tsx",
+      "types": "./src/components/ui/alert.tsx",
+      "default": "./src/components/ui/alert.tsx"
     },
     "./avatar": {
       "source": "./src/components/ui/avatar.tsx",
@@ -28,6 +33,11 @@
       "source": "./src/components/ui/button.tsx",
       "types": "./src/components/ui/button.tsx",
       "default": "./src/components/ui/button.tsx"
+    },
+    "./card": {
+      "source": "./src/components/ui/card.tsx",
+      "types": "./src/components/ui/card.tsx",
+      "default": "./src/components/ui/card.tsx"
     },
     "./carousel": {
       "source": "./src/components/ui/carousel.tsx",
@@ -84,10 +94,25 @@
       "types": "./src/components/ui/empty-state.tsx",
       "default": "./src/components/ui/empty-state.tsx"
     },
+    "./file-drop-zone": {
+      "source": "./src/components/ui/file-drop-zone.tsx",
+      "types": "./src/components/ui/file-drop-zone.tsx",
+      "default": "./src/components/ui/file-drop-zone.tsx"
+    },
+    "./focus-ring": {
+      "source": "./src/components/ui/focus-ring.ts",
+      "types": "./src/components/ui/focus-ring.ts",
+      "default": "./src/components/ui/focus-ring.ts"
+    },
     "./hover-card": {
       "source": "./src/components/ui/hover-card.tsx",
       "types": "./src/components/ui/hover-card.tsx",
       "default": "./src/components/ui/hover-card.tsx"
+    },
+    "./meta-chip": {
+      "source": "./src/components/ui/meta-chip.tsx",
+      "types": "./src/components/ui/meta-chip.tsx",
+      "default": "./src/components/ui/meta-chip.tsx"
     },
     "./plugin-icon": {
       "source": "./src/components/ui/plugin-icon.tsx",
@@ -154,6 +179,11 @@
       "types": "./src/components/ui/popover.tsx",
       "default": "./src/components/ui/popover.tsx"
     },
+    "./progress": {
+      "source": "./src/components/ui/progress.tsx",
+      "types": "./src/components/ui/progress.tsx",
+      "default": "./src/components/ui/progress.tsx"
+    },
     "./resource-route-label": {
       "source": "./src/components/ui/resource-route-label.ts",
       "types": "./src/components/ui/resource-route-label.ts",
@@ -189,6 +219,16 @@
       "types": "./src/components/ui/responsive-overlay.tsx",
       "default": "./src/components/ui/responsive-overlay.tsx"
     },
+    "./section-header": {
+      "source": "./src/components/ui/section-header.tsx",
+      "types": "./src/components/ui/section-header.tsx",
+      "default": "./src/components/ui/section-header.tsx"
+    },
+    "./segmented-control": {
+      "source": "./src/components/ui/segmented-control.tsx",
+      "types": "./src/components/ui/segmented-control.tsx",
+      "default": "./src/components/ui/segmented-control.tsx"
+    },
     "./select": {
       "source": "./src/components/ui/select.tsx",
       "types": "./src/components/ui/select.tsx",
@@ -198,6 +238,26 @@
       "source": "./src/components/ui/skeleton.tsx",
       "types": "./src/components/ui/skeleton.tsx",
       "default": "./src/components/ui/skeleton.tsx"
+    },
+    "./status-row": {
+      "source": "./src/components/ui/status-row.tsx",
+      "types": "./src/components/ui/status-row.tsx",
+      "default": "./src/components/ui/status-row.tsx"
+    },
+    "./step-indicator": {
+      "source": "./src/components/ui/step-indicator.tsx",
+      "types": "./src/components/ui/step-indicator.tsx",
+      "default": "./src/components/ui/step-indicator.tsx"
+    },
+    "./step-transition": {
+      "source": "./src/components/ui/step-transition.tsx",
+      "types": "./src/components/ui/step-transition.tsx",
+      "default": "./src/components/ui/step-transition.tsx"
+    },
+    "./success-check": {
+      "source": "./src/components/ui/success-check.tsx",
+      "types": "./src/components/ui/success-check.tsx",
+      "default": "./src/components/ui/success-check.tsx"
     },
     "./switch": {
       "source": "./src/components/ui/switch.tsx",
@@ -229,10 +289,20 @@
       "types": "./src/components/ui/workflow-progress.tsx",
       "default": "./src/components/ui/workflow-progress.tsx"
     },
+    "./hooks/use-browser-dimming-modal": {
+      "source": "./src/hooks/useBrowserDimmingModal.ts",
+      "types": "./src/hooks/useBrowserDimmingModal.ts",
+      "default": "./src/hooks/useBrowserDimmingModal.ts"
+    },
     "./hooks/use-compact-viewport": {
       "source": "./src/components/ui/hooks/use-compact-viewport.tsx",
       "types": "./src/components/ui/hooks/use-compact-viewport.tsx",
       "default": "./src/components/ui/hooks/use-compact-viewport.tsx"
+    },
+    "./hooks/use-minute-now": {
+      "source": "./src/components/ui/hooks/use-minute-now.ts",
+      "types": "./src/components/ui/hooks/use-minute-now.ts",
+      "default": "./src/components/ui/hooks/use-minute-now.ts"
     },
     "./hooks/use-media-query": {
       "source": "./src/components/ui/hooks/use-media-query.ts",
@@ -359,7 +429,7 @@
     "clean": "rimraf tsconfig.tsbuildinfo",
     "typecheck": "tsc --noEmit"
   },
-  "bb": {
+  "omnyo": {
     "pluginTailwindContent": [
       "src/**/*"
     ]
@@ -383,7 +453,7 @@
     "vaul": "^1.1.2"
   },
   "devDependencies": {
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",

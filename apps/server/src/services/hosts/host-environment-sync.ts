@@ -6,7 +6,7 @@ export class HostEnvironmentSync {
   private readonly pending = new Map<string, number>();
 
   constructor(
-    private readonly deps: Pick<AppDeps, "db" | "hub"> & {
+    private readonly deps: Pick<AppDeps, "db" | "hub" | "vault"> & {
       config: Pick<AppDeps["config"], "dataDir">;
       logger: Pick<AppDeps["logger"], "warn">;
     },
@@ -30,10 +30,12 @@ export class HostEnvironmentSync {
 
   async snapshot(hostId: string) {
     const revision = ++this.revision;
+
     const entries = await resolveHostEnvironment(this.deps, {
       hostId,
       projectId: null,
     });
+
     return { revision, entries };
   }
 

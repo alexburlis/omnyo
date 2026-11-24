@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook } from "@testing-library/react";
-import type { Host } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import type { Host } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LocalPathSubmitParams } from "@/hooks/useLocalPathPicker";
 import { useQuickCreateProject } from "./useQuickCreateProject";
 
 const mocks = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   openPathEntry: vi.fn(),
   openPicker: vi.fn(),
   setRootComposeProjectId: vi.fn(),
+  submit: null as ((params: LocalPathSubmitParams) => void) | null,
 }));
 
 vi.mock("react-router-dom", () => ({
@@ -34,22 +36,30 @@ vi.mock("@/hooks/queries/host-queries", async (importOriginal) => ({
 }));
 
 vi.mock("@/hooks/useLocalPathPicker", () => ({
-  useLocalPathPicker: () => ({
-    isAvailable: true,
-    hostId: "host_atum",
-    hostName: "atum",
-    openPathEntry: mocks.openPathEntry,
-    openPicker: mocks.openPicker,
-    platform: "linux",
-    projectPathDialog: {
-      isOpen: false,
-      onClose: mocks.onClose,
-      onOpen: mocks.onOpen,
-      onOpenChange: mocks.onOpenChange,
-      target: null,
-    },
-    submitProjectPath: vi.fn(),
-  }),
+  useLocalPathPicker: ({
+    submit,
+  }: {
+    submit: (params: LocalPathSubmitParams) => void;
+  }) => {
+    mocks.submit = submit;
+
+    return {
+      isAvailable: true,
+      hostId: "host_atum",
+      hostName: "atum",
+      openPathEntry: mocks.openPathEntry,
+      openPicker: mocks.openPicker,
+      platform: "linux",
+      projectPathDialog: {
+        isOpen: false,
+        onClose: mocks.onClose,
+        onOpen: mocks.onOpen,
+        onOpenChange: mocks.onOpenChange,
+        target: null,
+      },
+      submitProjectPath: vi.fn(),
+    };
+  },
 }));
 
 vi.mock("@/lib/root-compose-selection", () => ({
@@ -104,5 +114,43 @@ describe("useQuickCreateProject", () => {
       "host_thoth",
       "host_sandbox",
     ]);
+  });
+
+  function createProjectThrough(
+    open: "openCreateDialog" | "openCreateDialogSelectOnly",
+  ) {
+    mocks.mutate.mockImplementation(
+      (
+        _input: unknown,
+        options: { onSuccess: (project: { id: string }) => void },
+      ) => options.onSuccess({ id: "proj_new" }),
+    );
+
+    const { result } = renderHook(() => useQuickCreateProject());
+
+    act(() => result.current[open]());
+    const [target] = mocks.openPathEntry.mock.lastCall ?? [];
+    act(() =>
+      mocks.submit?.({
+        path: "/Users/developer/projects/new-app",
+        hostId: "host_atum",
+        target,
+        closeDialog: vi.fn(),
+      }),
+    );
+  }
+
+  it("keeps the current view when the launcher creates a project", () => {
+    createProjectThrough("openCreateDialogSelectOnly");
+
+    expect(mocks.setRootComposeProjectId).toHaveBeenCalledWith("proj_new");
+    expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it("shows New chat after creating a project from elsewhere", () => {
+    createProjectThrough("openCreateDialog");
+
+    expect(mocks.setRootComposeProjectId).toHaveBeenCalledWith("proj_new");
+    expect(mocks.navigate).toHaveBeenCalledOnce();
   });
 });

@@ -7,7 +7,7 @@ import {
   type AppCommandId,
   type AppKeybindings,
   type AppShortcutInput,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 interface ResolveDesktopBrowserAppCommandArgs {
   input: AppShortcutInput;
@@ -25,8 +25,10 @@ export function resolveDesktopBrowserAppCommand({
   splitNavigationCommands = [],
 }: ResolveDesktopBrowserAppCommandArgs): AppCommandId | null {
   const isMac = keyboardPlatform(platform) === "mac";
+
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
+
     if (
       !binding ||
       !isAppKeybindingAvailableForClient(binding, {
@@ -43,6 +45,7 @@ export function resolveDesktopBrowserAppCommand({
         ))
     )
       continue;
+
     if (
       !splitNavigationEnabled &&
       (binding.command === "pane.focus.previous" ||
@@ -50,6 +53,7 @@ export function resolveDesktopBrowserAppCommand({
     ) {
       continue;
     }
+
     if (
       PANE_DIRECTION_APP_COMMAND_IDS.some(
         (command) => command === binding.command,
@@ -58,10 +62,13 @@ export function resolveDesktopBrowserAppCommand({
         !splitNavigationCommands.some((command) => command === binding.command))
     )
       continue;
+
     if (matchesAppShortcut(input, binding.shortcut, isMac)) {
       const command = appCommandIdSchema.safeParse(binding.command);
+
       if (command.success) return command.data;
     }
   }
+
   return null;
 }

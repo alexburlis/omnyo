@@ -1,8 +1,8 @@
 import { useAppCommandHandler } from "@/components/commands/AppCommandProvider";
-import { getBbDesktopInfo } from "@/lib/bb-desktop";
+import { getOmnyoDesktopInfo } from "@/lib/omnyo-desktop";
 
 export function useDataDirectoryCommand(): void {
-  const desktopApi = getBbDesktopInfo();
+  const desktopApi = getOmnyoDesktopInfo();
   const openDataDirectory = desktopApi?.openDataDirectory;
 
   useAppCommandHandler(
@@ -11,7 +11,9 @@ export function useDataDirectoryCommand(): void {
       if (openDataDirectory === undefined) {
         return false;
       }
+
       void openDataDirectory.call(desktopApi).catch(() => undefined);
+
       return true;
     },
     0,

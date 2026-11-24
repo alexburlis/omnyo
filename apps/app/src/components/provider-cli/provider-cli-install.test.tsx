@@ -2,10 +2,16 @@
 
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { ProviderCliInstallEvent } from "@bb/host-daemon-contract";
+import {
+  act,
+  cleanup,
+  render,
+  renderHook,
+  waitFor,
+} from "@testing-library/react";
+import type { ProviderCliInstallEvent } from "@omnyo/host-daemon-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BbHttpError } from "@bb/sdk/browser";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 import { sdk } from "@/lib/sdk";
 import { appToast } from "@/components/ui/app-toast";
 import {
@@ -14,10 +20,13 @@ import {
 } from "@/hooks/queries/query-keys";
 import type { ProviderCliActionableIssue } from "./provider-cli-install";
 import {
+  ProviderCliInstallLogDialogHost,
   buildProviderCliIssue,
   useProviderCliInstallRunner,
 } from "./provider-cli-install";
 import {
+  closeProviderCliInstallLog,
+  openProviderCliInstallLog,
   PROVIDER_CLI_FAILURE_LOG_MAX_BYTES,
   PROVIDER_CLI_FAILURE_MAX_ENTRIES,
   registerProviderCliInstallQueryClient,
@@ -30,8 +39,14 @@ interface DeferredInstall {
   resolve: (events: ProviderCliInstallEvent[]) => void;
 }
 
+const dialogRender = vi.hoisted(() => vi.fn());
+
 vi.mock("@/components/dialogs/ProviderCliInstallLogDialog", () => ({
-  ProviderCliInstallLogDialog: () => null,
+  ProviderCliInstallLogDialog: (props: unknown) => {
+    dialogRender(props);
+
+    return null;
+  },
 }));
 
 vi.mock("@/components/ui/app-toast", () => ({
@@ -56,9 +71,11 @@ vi.mock("@/lib/sdk", () => {
 });
 
 const installHostProviderCliMock = vi.mocked(sdk.hosts.installProviderCli);
+
 const appToastMock = vi.mocked(appToast);
 
 let pendingInstalls: DeferredInstall[] = [];
+
 let queryClient: QueryClient;
 
 function Wrapper({ children }: { children: ReactNode }) {
@@ -76,6 +93,7 @@ function issueForProvider(
 ): ProviderCliActionableIssue {
   const displayName = provider === "codex" ? "Codex" : "Claude Code";
   const executableName = provider === "codex" ? "codex" : "claude";
+
   const action = {
     kind: "update" as const,
     label: "Update" as const,
@@ -115,9 +133,11 @@ function completeInstall(
 
 function installAt(index: number): DeferredInstall {
   const install = pendingInstalls[index];
+
   if (install === undefined) {
     throw new Error(`Expected pending install at index ${index}`);
   }
+
   return install;
 }
 
@@ -142,8 +162,9 @@ afterEach(() => {
 });
 
 describe("buildProviderCliIssue", () => {
-  it("keeps an external update visible when bb cannot apply it", () => {
+  it("keeps an external update visible when Omnyo cannot apply it", () => {
     const actionable = issueForProvider("claude-code");
+
     const issue = buildProviderCliIssue({
       provider: "claude-code",
       status: {
@@ -162,6 +183,7 @@ describe("buildProviderCliIssue", () => {
 
   it("describes an update without inventing a target for an unknown channel", () => {
     const actionable = issueForProvider("claude-code");
+
     const issue = buildProviderCliIssue({
       provider: "claude-code",
       status: {
@@ -178,6 +200,60 @@ describe("buildProviderCliIssue", () => {
 });
 
 describe("useProviderCliInstallRunner", () => {
+  it("opts updates into pausing chats and shows server progress while the request is running", async () => {
+    const { result } = renderRunner();
+    act(() =>
+      result.current.startInstall({
+        hostId: "host_1",
+        issue: issueForProvider("codex"),
+      }),
+    );
+    expect(installAt(0).args.confirmInterruptingThreads).toBe(true);
+    act(() =>
+      installAt(0).args.onEvent?.({
+        type: "progress",
+        provider: "codex",
+        phase: "pausing",
+        message: "Pausing chats on this machine.",
+      }),
+    );
+    expect(result.current.runningPhase).toBe("pausing");
+    expect(result.current.runningJobKey).toBe("host_1:codex");
+    await act(async () =>
+      installAt(0).resolve([
+        {
+          type: "error",
+          provider: "codex",
+          message: "Close the terminal, then retry.",
+          code: "runtime_update_busy",
+        },
+      ]),
+    );
+    expect(result.current.runningJobKey).toBeNull();
+    expect(result.current.runningPhase).toBeNull();
+    expect(
+      result.current.failuresByJobKey.get("host_1:codex")?.logDialogState,
+    ).toMatchObject({
+      message: "Close the terminal, then retry.",
+      code: "runtime_update_busy",
+    });
+  });
+
+  it("keeps a missing CLI installation idle-safe", () => {
+    const { result } = renderRunner();
+    const issue = issueForProvider("codex");
+    act(() =>
+      result.current.startInstall({
+        hostId: "host_1",
+        issue: {
+          ...issue,
+          action: { ...issue.action, kind: "install", label: "Install" },
+        },
+      }),
+    );
+    expect(installAt(0).args.confirmInterruptingThreads).toBe(false);
+  });
+
   it("queues a second provider CLI setup behind the active one", async () => {
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderRunner();
@@ -364,7 +440,7 @@ describe("useProviderCliInstallRunner", () => {
     await waitFor(() => expect(pendingInstalls).toHaveLength(2));
     await act(async () => {
       installAt(1).reject(
-        new BbHttpError({
+        new OmnyoHttpError({
           status: 409,
           code: "provider_bridge_unavailable",
           message: "Provider bridge unavailable",
@@ -398,10 +474,12 @@ describe("useProviderCliInstallRunner", () => {
       act(() => {
         result.current.startInstall({ hostId, issue });
       });
+
       const output =
         index === PROVIDER_CLI_FAILURE_MAX_ENTRIES
           ? `first line\n${"x".repeat(PROVIDER_CLI_FAILURE_LOG_MAX_BYTES * 2)}\nlast line\n`
           : "failed\n";
+
       await act(async () => {
         installAt(index).resolve([
           {
@@ -430,12 +508,15 @@ describe("useProviderCliInstallRunner", () => {
       PROVIDER_CLI_FAILURE_MAX_ENTRIES,
     );
     expect(result.current.failuresByJobKey.has("host_0:codex")).toBe(false);
+
     const newestFailure = result.current.failuresByJobKey.get(
       `host_${PROVIDER_CLI_FAILURE_MAX_ENTRIES}:codex`,
     );
+
     if (newestFailure === undefined) {
       throw new Error("Expected the newest provider failure to be retained");
     }
+
     expect(newestFailure.logDialogState.log).toContain(
       "provider update output truncated",
     );
@@ -445,4 +526,33 @@ describe("useProviderCliInstallRunner", () => {
       new TextEncoder().encode(newestFailure.logDialogState.log).byteLength,
     ).toBeLessThanOrEqual(PROVIDER_CLI_FAILURE_LOG_MAX_BYTES);
   });
+});
+
+it("loads the log dialog on demand and retains it through close and reopen", async () => {
+  render(<ProviderCliInstallLogDialogHost />);
+  expect(dialogRender).not.toHaveBeenCalled();
+
+  const state = {
+    displayName: "Codex",
+    title: "Update failed",
+    message: "Retry after reconnecting.",
+    log: "Connection interrupted",
+  };
+
+  act(() => openProviderCliInstallLog(state));
+  await waitFor(() =>
+    expect(dialogRender).toHaveBeenLastCalledWith(
+      expect.objectContaining({ state }),
+    ),
+  );
+
+  act(() => closeProviderCliInstallLog());
+  expect(dialogRender).toHaveBeenLastCalledWith(
+    expect.objectContaining({ state: null }),
+  );
+
+  act(() => openProviderCliInstallLog(state));
+  expect(dialogRender).toHaveBeenLastCalledWith(
+    expect.objectContaining({ state }),
+  );
 });

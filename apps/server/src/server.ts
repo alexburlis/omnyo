@@ -1,3 +1,31 @@
+import { usageRequestEligible } from "@omnyo/domain/usage-telemetry";
+import { registerPreviewTransport } from "./services/previews/preview-transport.js";
+import {
+  previewStatus,
+  requirePreview,
+} from "./services/previews/managed-previews.js";
+import { requireConnectedHostSession } from "./services/lib/entity-lookup.js";
+import { registerPreviewRoutes } from "./routes/previews.js";
+import { registerInboxRoutes } from "./routes/inbox.js";
+import {
+  registerThreadWorkRevisions,
+  setThreadWorkContributorStates,
+} from "./services/threads/thread-work.js";
+import { WebUpdateService } from "./services/system/web-update.js";
+import { registerWebUpdateRoutes } from "./routes/web-update.js";
+import { isServerRestartDraining } from "./services/system/server-update-drain.js";
+import { z } from "zod";
+import {
+  observeDirectProof,
+  confirmDirectPrimary,
+} from "./services/machines/direct-access-state.js";
+import { getAuthenticatedDaemon } from "./internal/auth.js";
+import {
+  type ServerMaintenance,
+  createServerMaintenance,
+} from "./services/maintenance/server-maintenance.js";
+import { registerServerMaintenanceRoutes } from "./routes/server-maintenance.js";
+import { originAdoptionControlPathV1 } from "./services/maintenance/origin-adoption-v1.js";
 import { createPluginUpdateJobs } from "./services/plugins/plugin-update-jobs.js";
 import { registerPluginUpdateJobRoutes } from "./routes/plugin-update-jobs.js";
 import { recheckEnvironmentProvisioning } from "./services/threads/thread-environment-providers.js";
@@ -7,6 +35,7 @@ import {
   windowsInstallerFailureScript,
 } from "./services/machines/manual-enrollment-command.js";
 import { reconnectBootstrapForCredential } from "./services/machines/reconnect.js";
+import { readEnrollmentHeaderV1 } from "./services/machines/enrollment-header-v1.js";
 import { getMachineEnrollmentService } from "./services/machines/machine-services.js";
 import { withManualMachineProvider } from "./services/machines/manual-provider.js";
 import { registerDesktopBrowserRoutes } from "./routes/desktop-browsers.js";
@@ -16,21 +45,27 @@ import {
 } from "./install-machine-asset.js";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, lstat } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
-import { extname, join, resolve } from "node:path";
+import { extname, join, resolve, sep } from "node:path";
 import { Hono } from "hono";
-import { terminalWebSocketQuerySchema } from "@bb/server-contract";
+import { terminalWebSocketQuerySchema } from "@omnyo/server-contract";
 import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import type { ServerAppDeps } from "./types.js";
 import { ApiError, createServerErrorHandler } from "./errors.js";
 import { registerEnvironmentRoutes } from "./routes/environments.js";
 import { registerFileRoutes } from "./routes/files.js";
+import { registerPrivateUpdateFeedRoutes } from "./routes/private-update-feed.js";
+import { registerShortEnrollmentRoutes } from "./routes/short-enrollment.js";
 import { registerHostRoutes } from "./routes/hosts.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerThreadSectionRoutes } from "./routes/thread-sections.js";
+import { registerThreadGroupRoutes } from "./routes/thread-groups.js";
 import { registerSystemRoutes } from "./routes/system.js";
+import { registerWebErrorReportingRoutes } from "./routes/web-error-reporting.js";
+import { registerBootRoutes } from "./routes/boot.js";
 import { registerUiPreferenceRoutes } from "./routes/ui-preferences.js";
 import { registerTerminalRoutes } from "./routes/terminals.js";
 import { registerThreadRoutes } from "./routes/threads/index.js";
@@ -58,6 +93,7 @@ import {
   setServerAccessBridge,
   setServerAccessRecheckHandler,
 } from "./services/plugins/plugin-server-access-registry.js";
+import { setPluginEventSourceBridge } from "./services/plugins/plugin-event-source-registry.js";
 import { setPluginMachineProviderBridge } from "./services/plugins/plugin-machine-provider-registry.js";
 import { invalidateEnvironmentProviderMachineAvailability } from "./services/environments/provider-machine-availability.js";
 import { requestQueuedMessageDispatch } from "./services/threads/queued-message-dispatch.js";
@@ -74,10 +110,11 @@ import {
 } from "./internal/auth.js";
 import {
   captureTrustedRemoteAddress,
-  resolveRequestAppSurface,
+  guardAnonymousGateRequests,
+  getGateAuthKind,
 } from "./request-context.js";
 import { runEventLoopWork } from "./services/system/event-loop-work.js";
-import { runWithTelemetryAppSurface } from "./services/system/telemetry.js";
+import { runWithUsageRequest } from "./services/system/telemetry.js";
 import {
   onClientSocketClose,
   onClientSocketMessage,
@@ -89,27 +126,32 @@ import {
   onDaemonSocketOpen,
   validateDaemonWebSocket,
 } from "./ws/daemon-protocol.js";
-import { roundDurationMs } from "@bb/process-utils";
+import { roundDurationMs } from "@omnyo/process-utils";
 import {
   onTerminalSocketClose,
   onTerminalSocketMessage,
   onTerminalSocketOpen,
 } from "./ws/terminal-protocol.js";
 import {
-  createBbAppArtifactService,
-  type BbAppArtifactService,
-} from "./services/install/bb-app-artifact.js";
-import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
+  createHostArtifactSignatureReader,
+  createOmnyoAppArtifactService,
+  type OmnyoAppArtifactService,
+} from "./services/install/omnyo-app-artifact.js";
+import { HOST_DAEMON_PROTOCOL_VERSION } from "@omnyo/host-daemon-contract";
 import {
   createPluginCatalogService,
   type PluginCatalogService,
 } from "./services/plugin-catalog/plugin-catalog-service.js";
-import { callHostRetryableOnlineRpcForWork } from "./services/hosts/online-rpc.js";
+import {
+  callHostOnlineRpc,
+  callHostRetryableOnlineRpcForWork,
+} from "./services/hosts/online-rpc.js";
 import { requestMatchesEntityTag } from "./services/hosts/daemon-file-response.js";
 import {
   allowedAppOrigins,
   browserRequestProblem,
   requestHostProblem,
+  originAdoptionRequestUrlV1,
 } from "./browser-request-guard.js";
 import {
   callPluginHostRpc,
@@ -117,10 +159,11 @@ import {
 } from "./services/plugins/plugin-host-rpc.js";
 
 const PLUGIN_WIRE_HTTP_PATH = /^\/api\/v1\/plugins\/[^/]+\/http(?:\/|$)/u;
+
 import { rankAcceptedAssetEncodings } from "./asset-content-encoding.js";
 import { apiJsonCompression } from "./api-response-compression.js";
-import { APP_SURFACE_WEB, type AppSurface } from "@bb/config/app-surface";
-import type { ServerBindHost } from "@bb/config/server";
+import { APP_SURFACE_WEB, type AppSurface } from "@omnyo/config/app-surface";
+import type { ServerBindHost } from "@omnyo/config/server";
 import { registerServerMoveRoutes } from "./routes/server-move.js";
 import {
   INTERNAL_SERVER_MOVE_PENDING_PATH,
@@ -138,13 +181,18 @@ import {
   serverMoveWriteFreezeMiddleware,
 } from "./services/server-move/freeze.js";
 import { isServerMoveSnapshotFenced } from "./services/server-move/freeze-state.js";
+import { hostDaemonEnrollRequestSchema } from "@omnyo/host-daemon-contract";
+import { serverMovingError } from "./services/server-move/freeze-state.js";
 import {
   createManualServerImportCompletion,
   type PendingServerMove,
 } from "./services/server-move/pending-boot.js";
+import { buildThreadListEntry } from "./services/threads/thread-runtime-display.js";
 
 type CloseWebSockets = () => Promise<void>;
+
 type NodeWebSocketServer = ReturnType<typeof createNodeWebSocket>["wss"];
+
 type WebSocketCloseError = Error | undefined;
 
 interface ServerApp {
@@ -154,6 +202,8 @@ interface ServerApp {
   pluginService: PluginService;
   pluginCatalogService: PluginCatalogService;
   serverMove: ServerMoveCoordinator;
+  maintenance: ServerMaintenance;
+  webUpdate: WebUpdateService;
 }
 
 interface CloseWebSocketServerArgs {
@@ -176,6 +226,7 @@ function normalizeInternalAuthPath(path: string): string {
   if (path === "/") {
     return path;
   }
+
   return path.replace(/\/+$/u, "");
 }
 
@@ -189,11 +240,12 @@ export interface ServerMoveAppOptions {
 }
 
 interface CreateAppOptions {
-  bbAppArtifactService?: BbAppArtifactService;
+  appArtifactService?: OmnyoAppArtifactService;
   serverMove?: ServerMoveAppOptions;
   slowApiRequestLogThresholdMs?: number;
   performanceDiagnosticsEnabled?: () => boolean;
   staticDir?: string;
+  retainedStaticDirs?: string[];
 }
 
 interface StaticResponseHeadersArgs {
@@ -205,16 +257,25 @@ interface StaticResponseHeadersArgs {
 }
 
 const STATIC_INDEX_CACHE_CONTROL = "no-cache";
+
 const STATIC_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
 const STATIC_PUBLIC_FILE_CACHE_CONTROL = "public, max-age=86400";
+
 const WEB_SOCKET_SHUTDOWN_CODE = 1001;
+
 const WEB_SOCKET_SHUTDOWN_FORCE_CLOSE_MS = 1_000;
+
 const WEB_SOCKET_SHUTDOWN_REASON = "server-shutdown";
+
 const SLOW_API_REQUEST_LOG_THRESHOLD_MS = 1_000;
+
 const THREAD_EVENT_WAIT_PATH_PATTERN =
   /^\/api\/v1\/threads\/[^/]+\/events\/wait$/u;
+
 const PLUGIN_APP_ASSET_PATH_PATTERN =
   /^\/api\/v1\/(?:plugins\/[^/]+\/assets|plugin-app-assets\/[a-f0-9]{16})\/app\.(?:js|css)$/u;
+
 const PRECOMPRESSED_STATIC_FILES = [
   { encoding: "br", extension: ".br" },
   { encoding: "gzip", extension: ".gz" },
@@ -230,6 +291,7 @@ function shouldLogSlowApiRequest(args: ShouldLogSlowApiRequestArgs): boolean {
   if (args.durationMs < args.thresholdMs) {
     return false;
   }
+
   return !THREAD_EVENT_WAIT_PATH_PATTERN.test(args.path);
 }
 
@@ -237,26 +299,39 @@ function staticCacheControlForPath(urlPath: string): string {
   if (urlPath.startsWith("/assets/")) {
     return STATIC_ASSET_CACHE_CONTROL;
   }
+
   if (urlPath.endsWith(".html")) {
     return STATIC_INDEX_CACHE_CONTROL;
   }
+
   return STATIC_PUBLIC_FILE_CACHE_CONTROL;
 }
+
+const APP_SHELL_FRAME_ANCESTORS = "frame-ancestors 'self'";
 
 function createStaticResponseHeaders(args: StaticResponseHeadersArgs): Headers {
   const headers = new Headers();
   headers.set("content-type", args.contentType);
   headers.set("cache-control", staticCacheControlForPath(args.urlPath));
+
+  if (args.contentType.startsWith("text/html")) {
+    headers.set("content-security-policy", APP_SHELL_FRAME_ANCESTORS);
+    headers.set("x-frame-options", "SAMEORIGIN");
+  }
+
   if (args.etag !== undefined) {
     headers.set("etag", args.etag);
   }
+
   if (args.contentEncoding !== undefined) {
     headers.set("content-encoding", args.contentEncoding);
     headers.set("vary", "Accept-Encoding");
   }
+
   if (args.contentLength !== undefined) {
     headers.set("content-length", String(args.contentLength));
   }
+
   return headers;
 }
 
@@ -269,6 +344,7 @@ async function shellEtag(filePath: string): Promise<string | undefined> {
   try {
     const fileStat = await stat(filePath);
     const cached = shellEtagCache.get(filePath);
+
     if (
       cached !== undefined &&
       cached.size === fileStat.size &&
@@ -276,15 +352,18 @@ async function shellEtag(filePath: string): Promise<string | undefined> {
     ) {
       return cached.etag;
     }
+
     const digest = createHash("sha256")
       .update(await readFile(filePath))
       .digest("hex");
+
     const etag = `W/"${digest.slice(0, 32)}"`;
     shellEtagCache.set(filePath, {
       etag,
       mtimeMs: fileStat.mtimeMs,
       size: fileStat.size,
     });
+
     return etag;
   } catch {
     return undefined;
@@ -306,7 +385,156 @@ const STATIC_MIME_TYPES: Record<string, string> = {
   ".map": "application/json",
 };
 
-export function registerStaticAppRoutes(app: Hono, staticDir: string): void {
+const originBundleRootV1 = fileURLToPath(
+  new URL("./assets/origin-adoption-v1/", import.meta.url),
+);
+
+const originBundleManifestSchemaV1 = z
+  .object({
+    version: z.literal(1),
+    files: z
+      .array(
+        z
+          .object({
+            path: z.string(),
+            file: z
+              .string()
+              .regex(
+                /^(?:origin-adoption-v1\.html|assets\/[A-Za-z0-9_-]+-[A-Za-z0-9_-]{8,}\.js)$/u,
+              ),
+            sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+            bytes: z
+              .number()
+              .int()
+              .positive()
+              .max(2 * 1024 * 1024),
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(16),
+  })
+  .strict();
+
+async function originBundleManifestV1(directory: string) {
+  const manifestPath = join(directory, "manifest.json");
+
+  const [rootInfo, assetsInfo, manifestInfo] = await Promise.all([
+    lstat(directory),
+    lstat(join(directory, "assets")),
+    lstat(manifestPath),
+  ]);
+
+  if (
+    !rootInfo.isDirectory() ||
+    rootInfo.isSymbolicLink() ||
+    !assetsInfo.isDirectory() ||
+    assetsInfo.isSymbolicLink() ||
+    !manifestInfo.isFile() ||
+    manifestInfo.isSymbolicLink() ||
+    manifestInfo.size > 16384
+  )
+    throw new Error("Neutral origin bundle filesystem owner changed");
+
+  const manifest = originBundleManifestSchemaV1.parse(
+    JSON.parse(await readFile(manifestPath, "utf8")),
+  );
+
+  if (
+    new Set(manifest.files.map((value) => value.path)).size !==
+      manifest.files.length ||
+    manifest.files.filter((value) => value.file === "origin-adoption-v1.html")
+      .length !== 1 ||
+    manifest.files.some(
+      (value) =>
+        value.path !==
+        (value.file === "origin-adoption-v1.html"
+          ? "/" + value.file
+          : "/origin-adoption-v1/" + value.file),
+    )
+  )
+    throw new Error(
+      "Neutral origin bundle manifest does not match its finite owner",
+    );
+
+  return manifest;
+}
+
+export function registerOriginAdoptionStaticRoutesV1(
+  app: Hono,
+  owner: ServerMaintenance["originAdoption"],
+  directory = originBundleRootV1,
+) {
+  const serve = async (
+    context: Parameters<typeof originAdoptionRequestUrlV1>[0],
+  ) => {
+    const url = originAdoptionRequestUrlV1(context);
+
+    if (
+      url === null ||
+      !(await owner.permitsRequest(
+        url,
+        context.req.method,
+        context.req.header("origin"),
+      ))
+    )
+      throw new ApiError(
+        403,
+        "origin_adoption_origin",
+        "The selected held origin transfer is unavailable",
+      );
+    const target = new URL(url);
+    const manifest = await originBundleManifestV1(directory);
+
+    const selected = manifest.files.find(
+      (value) => value.path === target.pathname,
+    );
+
+    if (selected === undefined)
+      throw new ApiError(
+        404,
+        "not_found",
+        "The origin transfer asset is unlisted",
+      );
+    const path = join(directory, selected.file);
+    const info = await lstat(path);
+    const bytes = await readFile(path);
+
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      info.size !== selected.bytes ||
+      bytes.length !== selected.bytes ||
+      createHash("sha256").update(bytes).digest("hex") !== selected.sha256
+    )
+      throw new ApiError(
+        409,
+        "origin_adoption_asset",
+        "The selected origin transfer asset changed",
+      );
+
+    return new Response(bytes, {
+      headers: {
+        "content-type": selected.file.endsWith(".html")
+          ? "text/html; charset=utf-8"
+          : "text/javascript; charset=utf-8",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+      },
+    });
+  };
+
+  app.get("/origin-adoption-v1.html", serve);
+  app.get("/origin-adoption-v1/*", serve);
+}
+
+export function registerStaticAppRoutes(
+  app: Hono,
+  staticDir: string,
+  retainedStaticDirs: string[] = [],
+  webUpdate?: WebUpdateService,
+  threadBootstrapAssetUrls?: () => readonly string[],
+): void {
   const root = resolve(staticDir);
 
   const serveStaticAppFile = async (args: {
@@ -320,6 +548,7 @@ export function registerStaticAppRoutes(app: Hono, staticDir: string): void {
       args.contentType === "text/html"
         ? await shellEtag(args.filePath)
         : undefined;
+
     if (
       etag !== undefined &&
       requestMatchesEntityTag(args.ifNoneMatchHeader, etag)
@@ -327,15 +556,19 @@ export function registerStaticAppRoutes(app: Hono, staticDir: string): void {
       const headers = new Headers();
       headers.set("cache-control", staticCacheControlForPath(args.urlPath));
       headers.set("etag", etag);
+
       return new Response(null, { status: 304, headers });
     }
+
     const precompressedFile = await findPrecompressedStaticFile({
       acceptEncodingHeader: args.acceptEncodingHeader,
       contentType: args.contentType,
       filePath: args.filePath,
     });
+
     if (precompressedFile !== null) {
       const content = await readFile(precompressedFile.filePath);
+
       return new Response(content, {
         headers: createStaticResponseHeaders({
           contentEncoding: precompressedFile.encoding,
@@ -346,7 +579,9 @@ export function registerStaticAppRoutes(app: Hono, staticDir: string): void {
         }),
       });
     }
+
     const content = await readFile(args.filePath);
+
     return new Response(content, {
       headers: createStaticResponseHeaders({
         contentType: args.contentType,
@@ -356,35 +591,124 @@ export function registerStaticAppRoutes(app: Hono, staticDir: string): void {
     });
   };
 
+  if (webUpdate)
+    app.post("/_omnyo/web-client/:id/release", async (context) => {
+      await webUpdate.releaseClient(context.req.param("id"));
+
+      return new Response(null, {
+        status: 204,
+        headers: { "cache-control": "no-store" },
+      });
+    });
+
+  const bindClient = async (
+    response: Response,
+    lease: string | null | undefined,
+  ): Promise<Response> => {
+    if (!lease) return response;
+
+    if (!(response.headers.get("content-type") ?? "").startsWith("text/html")) {
+      await webUpdate?.releaseClient(lease);
+
+      return response;
+    }
+
+    const content = await response.text();
+    const script = `<script>addEventListener("pagehide",function(e){if(!e.persisted)navigator.sendBeacon("/_omnyo/web-client/${lease}/release","")})</script>`;
+    const headers = new Headers(response.headers);
+    headers.delete("content-encoding");
+    headers.delete("etag");
+    headers.set("content-length", String(Buffer.byteLength(content + script)));
+    headers.set("cache-control", "private, no-store");
+
+    return new Response(content + script, { status: response.status, headers });
+  };
+
   app.get("*", async (context) => {
     const urlPath = context.req.path === "/" ? "/index.html" : context.req.path;
-    const filePath = join(root, urlPath);
-    if (!filePath.startsWith(root)) {
-      return context.notFound();
-    }
-    try {
-      const fileStat = await stat(filePath);
-      if (fileStat.isFile()) {
-        return await serveStaticAppFile({
-          acceptEncodingHeader: context.req.header("accept-encoding"),
-          contentType:
-            STATIC_MIME_TYPES[extname(filePath)] ?? "application/octet-stream",
-          filePath,
-          ifNoneMatchHeader: context.req.header("if-none-match"),
-          urlPath,
-        });
+
+    const web = await webUpdate?.roots(
+      !urlPath.startsWith("/assets/") &&
+        (extname(urlPath) === ".html" || extname(urlPath) === ""),
+    );
+
+    const shellRoot = web?.shell ?? root;
+
+    const roots = urlPath.startsWith("/assets/")
+      ? [
+          shellRoot,
+          ...(web ? [web.assets] : []),
+          root,
+          ...retainedStaticDirs.map((directory) => resolve(directory)),
+        ]
+      : [shellRoot];
+
+    for (const assetRoot of roots) {
+      const filePath = join(assetRoot, urlPath);
+
+      if (!filePath.startsWith(`${assetRoot}${sep}`)) return context.notFound();
+
+      try {
+        const fileStat = await stat(filePath);
+
+        if (fileStat.isFile()) {
+          const response = await serveStaticAppFile({
+            acceptEncodingHeader: web?.clientLease
+              ? undefined
+              : context.req.header("accept-encoding"),
+            contentType:
+              STATIC_MIME_TYPES[extname(filePath)] ??
+              "application/octet-stream",
+            filePath,
+            ifNoneMatchHeader: web?.clientLease
+              ? undefined
+              : context.req.header("if-none-match"),
+            urlPath,
+          });
+
+          if (web?.sourceCommit && extname(filePath) === ".html")
+            response.headers.set("x-omnyo-web-source", web.sourceCommit);
+
+          return bindClient(response, web?.clientLease);
+        }
+      } catch (cause) {
+        if (
+          !z.object({ code: z.enum(["ENOENT", "ENOTDIR"]) }).safeParse(cause)
+            .success
+        )
+          throw cause;
       }
-    } catch {}
+    }
+
     if (urlPath.startsWith("/assets/")) {
       return context.notFound();
     }
-    return serveStaticAppFile({
-      acceptEncodingHeader: context.req.header("accept-encoding"),
+
+    const response = await serveStaticAppFile({
+      acceptEncodingHeader: web?.clientLease
+        ? undefined
+        : context.req.header("accept-encoding"),
       contentType: "text/html",
-      filePath: join(root, "index.html"),
-      ifNoneMatchHeader: context.req.header("if-none-match"),
+      filePath: join(shellRoot, "index.html"),
+      ifNoneMatchHeader: web?.clientLease
+        ? undefined
+        : context.req.header("if-none-match"),
       urlPath: "/index.html",
     });
+
+    if (web?.sourceCommit)
+      response.headers.set("x-omnyo-web-source", web.sourceCommit);
+
+    if (/^\/(?:projects\/[^/]+\/)?threads\/[^/]+\/?$/u.test(context.req.path)) {
+      for (const url of threadBootstrapAssetUrls?.() ?? []) {
+        response.headers.append(
+          "link",
+          `<${url}>; rel=modulepreload; crossorigin=anonymous`,
+        );
+      }
+    }
+
+    return bindClient(response, web?.clientLease);
   });
 }
 
@@ -418,8 +742,10 @@ async function findPrecompressedStaticFile(args: {
     PRECOMPRESSED_STATIC_FILES,
   )) {
     const encodedFilePath = `${args.filePath}${candidate.extension}`;
+
     try {
       const encodedStat = await stat(encodedFilePath);
+
       if (encodedStat.isFile()) {
         return {
           contentLength: encodedStat.size,
@@ -444,14 +770,18 @@ function closeWebSocketServer(args: CloseWebSocketServerArgs): Promise<void> {
         client.terminate();
       }
     }, args.forceCloseAfterMs);
+
     forceCloseTimeout.unref();
 
     args.server.close((error: WebSocketCloseError) => {
       clearTimeout(forceCloseTimeout);
+
       if (error) {
         reject(error);
+
         return;
       }
+
       resolvePromise();
     });
   });
@@ -462,17 +792,32 @@ export function createApp(
   options?: CreateAppOptions,
 ): ServerApp {
   const app = new Hono();
+
+  registerThreadWorkRevisions(deps.db, deps.hub);
+
+  deps.hub.setThreadListEntryResolver((threadId) =>
+    buildThreadListEntry(deps, threadId),
+  );
+
   const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({
     app,
   });
+
   const slowApiRequestLogThresholdMs =
     options?.slowApiRequestLogThresholdMs ?? SLOW_API_REQUEST_LOG_THRESHOLD_MS;
-  const bbAppArtifactService =
-    options?.bbAppArtifactService ??
-    createBbAppArtifactService({
+
+  const omnyoAppArtifactService =
+    options?.appArtifactService ??
+    createOmnyoAppArtifactService({
       dataDir: deps.config.dataDir,
       serverEntryUrl: import.meta.url,
     });
+
+  const hostArtifactSignatures = createHostArtifactSignatureReader({
+    dataDir: deps.config.dataDir,
+    logger: deps.logger,
+  });
+
   const serverMoveOptions: ServerMoveAppOptions = options?.serverMove ?? {
     appSurface: APP_SURFACE_WEB,
     bindHost: null,
@@ -486,48 +831,151 @@ export function createApp(
       );
     },
   };
+
   const pendingServerMove = serverMoveOptions.pending;
 
+  app.post("/api/v1/threads/:id/shelve", async (context, next) => {
+    const startedAt = performance.now();
+    await next();
+
+    if (context.res.ok) {
+      const durationMs = roundDurationMs(performance.now() - startedAt);
+      context.res.headers.append(
+        "server-timing",
+        `omnyo_shelve;dur=${durationMs};desc="${randomUUID()}"`,
+      );
+    }
+  });
+  app.use("*", async (context, next) => {
+    const signal = context.req.raw.signal;
+    await next();
+
+    if (signal.aborted) await context.res.body?.cancel(signal.reason);
+  });
+  app.use("*", guardAnonymousGateRequests);
   app.use("*", async (context, next) => {
     const problem = requestHostProblem(context, deps);
+
     if (problem !== null) {
-      throw new ApiError(problem.status, "forbidden_host", problem.error);
+      const migrationUrl = originAdoptionRequestUrlV1(context);
+
+      if (
+        migrationUrl === null ||
+        !(await maintenance.originAdoption.permitsRequest(
+          migrationUrl,
+          context.req.method,
+          context.req.header("origin"),
+        ))
+      )
+        throw new ApiError(problem.status, "forbidden_host", problem.error);
     }
+
     return next();
   });
   app.use("*", async (context, next) => {
     captureTrustedRemoteAddress(context);
-    return runWithTelemetryAppSurface(resolveRequestAppSurface(context), next);
+
+    return runWithUsageRequest(
+      {
+        proof: context.req.header("x-omnyo-analytics-consent"),
+        activity:
+          context.req.method === "POST" &&
+          (context.req.path === "/api/v1/threads" ||
+            /^\/api\/v1\/threads\/[^/]+\/(send|queued-messages)$/.test(
+              context.req.path,
+            )),
+        interactive:
+          usageRequestEligible(context.req.path, context.req.method) &&
+          context.req.header("x-omnyo-user-activity") === "1" &&
+          !context.req.header("x-omnyo-caller-thread-id") &&
+          !context.req.header("x-omnyo-automation-id") &&
+          !context.req.header("x-omnyo-automation-run-id") &&
+          !context.req.header("x-omnyo-caller-plugin") &&
+          getGateAuthKind(context) !== "machine",
+      },
+      async () => {
+        const operation =
+          context.req.method === "POST" &&
+          context.req.path === "/api/v1/threads"
+            ? "new_chat"
+            : context.req.method === "POST" &&
+                /^\/api\/v1\/threads\/[^/]+\/(send|queued-messages)$/.test(
+                  context.req.path,
+                )
+              ? "message"
+              : null;
+
+        const startedAt = performance.now();
+
+        try {
+          await next();
+        } finally {
+          if (operation) {
+            const elapsed = performance.now() - startedAt;
+            deps.telemetry.capture({
+              name: "operation_finished",
+              properties: {
+                operation,
+                outcome: context.res.status < 400 ? "accepted" : "failed",
+                latency:
+                  elapsed < 1000
+                    ? "under_1s"
+                    : elapsed < 5000
+                      ? "1_to_5s"
+                      : elapsed < 30000
+                        ? "5_to_30s"
+                        : "over_30s",
+              },
+            });
+          }
+        }
+      },
+    );
   });
   app.use("*", async (context, next) => {
     const path = context.req.path;
+
     if (!path.startsWith("/api/v1/") && !path.startsWith("/internal/")) {
       return next();
     }
+
     return runEventLoopWork(`${context.req.method} ${path}`, next);
   });
-  app.use(
-    "*",
-    cors({
-      origin: (origin, context) => {
-        if (context.req.path === "/health") {
-          return "*";
-        }
-        const allowedCorsOrigins = allowedAppOrigins(deps);
-        const requestOrigin = new URL(context.req.url).origin;
-        if (origin === requestOrigin || allowedCorsOrigins.has(origin)) {
-          return origin;
-        }
-        return null;
-      },
-    }),
-  );
+
+  const appCors = cors({
+    origin: (origin, context) => {
+      if (context.req.path === "/health") {
+        return "*";
+      }
+
+      const allowedCorsOrigins = allowedAppOrigins(deps);
+      const requestOrigin = new URL(context.req.url).origin;
+
+      if (origin === requestOrigin || allowedCorsOrigins.has(origin)) {
+        return origin;
+      }
+
+      return null;
+    },
+  });
+
+  const assetCors = cors({ origin: "*", allowMethods: ["GET", "HEAD"] });
+
+  app.use("*", (context, next) => {
+    if (context.req.path.startsWith("/preview-content/")) return next();
+
+    return (context.req.path.startsWith("/assets/") ? assetCors : appCors)(
+      context,
+      next,
+    );
+  });
   const compressResponse = compress();
   const compressApiJson = apiJsonCompression();
   app.use("*", (context, next) => {
     if (PLUGIN_APP_ASSET_PATH_PATTERN.test(context.req.path)) {
       return next();
     }
+
     return compressResponse(context, async () => {
       await compressApiJson(context, next);
     });
@@ -538,6 +986,7 @@ export function createApp(
       dataDir: deps.config.dataDir,
       pending: pendingServerMove,
     });
+
     return context.json({
       ok: true,
       ...(deps.config.launchId === undefined
@@ -547,21 +996,41 @@ export function createApp(
     });
   });
   app.get("/install.sh", async (context) => {
+    const enrollment = readEnrollmentHeaderV1(context.req.raw.headers);
+
+    if (enrollment.kind === "invalid") {
+      return new Response(
+        "echo 'This enrollment command has already been used, replaced, or expired. Generate a new command in Omnyo.' >&2\nexit 1\n",
+        {
+          status: 403,
+          headers: {
+            "cache-control": "no-store",
+            "content-type": "text/x-shellscript; charset=utf-8",
+          },
+        },
+      );
+    }
+
     const script = await readFile(INSTALL_MACHINE_SCRIPT_PATH, "utf8");
-    const credential = context.req.header("X-BB-Enrollment");
+
+    const credential =
+      enrollment.kind === "credential" ? enrollment.credential : undefined;
+
     let bootstrap =
       credential === undefined
         ? null
         : await getMachineEnrollmentService(deps).pendingBootstrapForCredential(
             credential,
           );
+
     if (credential !== undefined && bootstrap === null) {
       try {
         bootstrap = await reconnectBootstrapForCredential(deps, credential);
       } catch (error) {
         deps.logger.warn({ error }, "Could not refresh machine access");
+
         return new Response(
-          "echo 'Could not refresh machine access. Run the command again, or generate a new one in bb.' >&2\nexit 1\n",
+          "echo 'Could not refresh machine access. Run the command again, or generate a new one in Omnyo.' >&2\nexit 1\n",
           {
             status: 503,
             headers: {
@@ -572,9 +1041,10 @@ export function createApp(
         );
       }
     }
+
     if (credential !== undefined && bootstrap === null) {
       return new Response(
-        "echo 'This enrollment command has already been used, replaced, or expired. Generate a new command in bb.' >&2\nexit 1\n",
+        "echo 'This enrollment command has already been used, replaced, or expired. Generate a new command in Omnyo.' >&2\nexit 1\n",
         {
           status: 403,
           headers: {
@@ -584,6 +1054,7 @@ export function createApp(
         },
       );
     }
+
     return new Response(
       bootstrap === null ? script : enrolledInstallerScript(script, bootstrap),
       {
@@ -599,40 +1070,59 @@ export function createApp(
       "cache-control": "no-store",
       "content-type": "text/plain; charset=utf-8",
     };
-    const credential = context.req.header("X-BB-Enrollment");
-    if (credential === undefined) {
+
+    const enrollment = readEnrollmentHeaderV1(context.req.raw.headers);
+
+    if (enrollment.kind === "invalid") {
       return new Response(
         windowsInstallerFailureScript(
-          "This installer needs an enrollment command. Generate one in bb under Settings, Machines.",
+          "This enrollment command has already been used, replaced, or expired. Generate a new command in Omnyo.",
         ),
         { headers },
       );
     }
+
+    const credential =
+      enrollment.kind === "credential" ? enrollment.credential : undefined;
+
+    if (credential === undefined) {
+      return new Response(
+        windowsInstallerFailureScript(
+          "This installer needs an enrollment command. Generate one in Omnyo under Settings, Machines.",
+        ),
+        { headers },
+      );
+    }
+
     let bootstrap =
       await getMachineEnrollmentService(deps).pendingBootstrapForCredential(
         credential,
       );
+
     if (bootstrap === null) {
       try {
         bootstrap = await reconnectBootstrapForCredential(deps, credential);
       } catch (error) {
         deps.logger.warn({ error }, "Could not refresh machine access");
+
         return new Response(
           windowsInstallerFailureScript(
-            "Could not refresh machine access. Run the command again, or generate a new one in bb.",
+            "Could not refresh machine access. Run the command again, or generate a new one in Omnyo.",
           ),
           { headers },
         );
       }
     }
+
     if (bootstrap === null) {
       return new Response(
         windowsInstallerFailureScript(
-          "This enrollment command has already been used, replaced, or expired. Generate a new command in bb.",
+          "This enrollment command has already been used, replaced, or expired. Generate a new command in Omnyo.",
         ),
         { headers },
       );
     }
+
     return new Response(
       enrolledWindowsInstallerScript(
         await readFile(INSTALL_MACHINE_WINDOWS_SCRIPT_PATH, "utf8"),
@@ -641,33 +1131,74 @@ export function createApp(
       { headers },
     );
   });
+  registerShortEnrollmentRoutes(app, deps, {
+    shell: () => readFile(INSTALL_MACHINE_SCRIPT_PATH, "utf8"),
+    windows: () => readFile(INSTALL_MACHINE_WINDOWS_SCRIPT_PATH, "utf8"),
+  });
+  registerPrivateUpdateFeedRoutes(app, deps.config.dataDir, deps.logger);
   app.get("/install/version", async (context) => {
-    return context.json({
-      version: await bbAppArtifactService.getVersion(),
+    const [version, artifact] = await Promise.all([
+      omnyoAppArtifactService.getVersion(),
+      omnyoAppArtifactService.getArtifact(),
+    ]);
+
+    const signature = await hostArtifactSignatures.read({
+      version,
       protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+      digest: artifact.digest,
+    });
+
+    return context.json({
+      version,
+      protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+      artifactDigest: artifact.digest,
+      artifactSignature: signature?.signature ?? null,
+      artifactSignatureKeyId: signature?.keyId ?? null,
     });
   });
-  app.get("/install/bb-app.tgz", async (context) => {
+  app.get("/install/omnyo-app.tgz", async (context) => {
     try {
-      const artifact = await bbAppArtifactService.getArtifact();
+      const [version, artifact] = await Promise.all([
+        omnyoAppArtifactService.getVersion(),
+        omnyoAppArtifactService.getArtifact(),
+      ]);
+
+      const signature = await hostArtifactSignatures.read({
+        version,
+        protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+        digest: artifact.digest,
+      });
+
       const etag = `"sha256-${artifact.digest}"`;
+
       const headers = {
         "cache-control": "public, max-age=300",
         "content-type": "application/gzip",
         etag,
-        "x-bb-artifact-sha256": artifact.digest,
+        "x-omnyo-artifact-sha256": artifact.digest,
+        ...(signature === null
+          ? {}
+          : {
+              "x-omnyo-artifact-signature": signature.signature,
+              "x-omnyo-artifact-signature-key-id": signature.keyId,
+            }),
       };
+
       if (context.req.header("if-none-match") === etag) {
         return new Response(null, { headers, status: 304 });
       }
+
       const tarball = await readFile(artifact.path);
+
       return new Response(tarball, {
         headers: { ...headers, "content-length": String(artifact.size) },
       });
     } catch (error) {
       const diagnosticId = randomUUID();
+
       const code =
         error instanceof Error && "code" in error ? error.code : undefined;
+
       const reason =
         code === "ENOENT"
           ? "A required server package file or packaging tool is missing."
@@ -676,10 +1207,12 @@ export function createApp(
             : code === "ENOSPC"
               ? "The server ran out of disk space while preparing the host package."
               : "The server could not build or read its host package.";
+
       deps.logger.error(
         { err: error, diagnosticId },
         "Host package download failed",
       );
+
       return context.json(
         {
           code: "host_package_unavailable",
@@ -691,13 +1224,26 @@ export function createApp(
       );
     }
   });
+  app.get("/install/*", (context) =>
+    context.json(
+      {
+        code: "install_route_not_served",
+        message:
+          "This Omnyo server does not serve this install path. Machines download /install/omnyo-app.tgz.",
+      },
+      410,
+      { "cache-control": "no-store" },
+    ),
+  );
   app.use("/api/v1/*", async (context, next) => {
     const startedAt = performance.now();
     await next();
     const durationMs = performance.now() - startedAt;
     const path = context.req.path;
+
     const diagnosticsEnabled =
       options?.performanceDiagnosticsEnabled?.() ?? false;
+
     if (
       shouldLogSlowApiRequest({
         durationMs,
@@ -708,6 +1254,7 @@ export function createApp(
       const log = diagnosticsEnabled
         ? deps.logger.info.bind(deps.logger)
         : deps.logger.debug.bind(deps.logger);
+
       log(
         {
           durationMs: roundDurationMs(durationMs),
@@ -721,29 +1268,37 @@ export function createApp(
   });
   app.use("/internal/*", async (context, next) => {
     const normalizedPath = normalizeInternalAuthPath(context.req.path);
+
     if (normalizedPath === "/internal/hosts/enroll-key") {
       return next();
     }
+
     if (normalizedPath === "/internal/hosts/enroll") {
       return next();
     }
+
     if (normalizedPath === "/internal/ws") {
       return next();
     }
+
     if (normalizedPath === INTERNAL_SERVER_MOVE_PENDING_PATH) {
       return next();
     }
+
     try {
       const daemon = await verifyAuthenticatedDaemon(
         deps,
         context.req.header("authorization"),
       );
+
       setAuthenticatedDaemon(context, daemon);
     } catch {
       return unauthorizedResponse();
     }
+
     return next();
   });
+
   const pluginService = createPluginService({
     machineEnrollments: getMachineEnrollmentService(deps),
     db: deps.db,
@@ -752,6 +1307,7 @@ export function createApp(
     telemetry: deps.telemetry,
     pendingInteractions: deps.pendingInteractions,
     dataDir: deps.config.dataDir,
+    vault: deps.vault,
     appVersion: deps.config.appVersion,
     getAppUrl: () => deps.config.appUrl ?? null,
     sharedPorts: deps.sharedPorts,
@@ -778,27 +1334,26 @@ export function createApp(
         pluginId,
       });
     },
-    // `bb.experimental_hooks.recheck()`: a plugin whose wait condition
-    // may have changed asks core to re-attempt the plugin-queued rows. Core
-    // owns the walk, the coalescing and the pacing; the plugin owns knowing
-    // when to ask.
+
     requestQueueDrain: () => {
       requestQueuedMessageDispatch(deps, { kind: "plugin-recheck" });
     },
     watchBuiltinPluginSources:
-      process.env.BB_MANAGED_DEV_BUILTIN_PLUGIN_HOT_RELOAD === "1",
+      process.env.OMNYO_MANAGED_DEV_BUILTIN_PLUGIN_HOT_RELOAD === "1",
   });
-  // Messages queued while a thread awaited user interaction stop waiting once
-  // that interaction settles (#1650); the idle drain then delivers them.
+
   deps.pendingInteractions.setThreadInteractionSettledListener((threadId) => {
     requestQueuedMessageDispatch(deps, {
       kind: "interaction-settled",
       threadId,
     });
   });
+  setThreadWorkContributorStates(deps.db, () =>
+    pluginService.getThreadWorkContributorStates(),
+  );
+
   setPluginThreadEventEmitter(pluginService.events);
-  // Bridge the dispatch pipeline to this service's hooks. Until this runs
-  // there are no hooks, which is exactly the zero-overhead path.
+
   setPluginHookProvider(pluginService.hooks);
   setPluginEnvironmentProviderBridge(pluginService.environmentProviders);
   setEnvironmentProvisioningRecheckHandler((threadId) =>
@@ -811,6 +1366,7 @@ export function createApp(
     ),
   );
   setServerAccessBridge(pluginService.serverAccessProviders);
+  setPluginEventSourceBridge(pluginService.eventSources);
   setServerAccessRecheckHandler(() => {
     deps.hub.notifySystem(["config-changed"]);
   });
@@ -819,8 +1375,9 @@ export function createApp(
     deps.hub.notifySystem(["config-changed"]);
     void recheckEnvironmentProviderCreations(deps, pluginId);
   });
-  // Bridge runtime-config assembly to plugin skills + context (§4.4).
+
   setPluginAgentContributions(pluginService);
+
   const serverMove = createServerMoveCoordinator(
     createDefaultServerMoveEnvironment({
       appSurface: serverMoveOptions.appSurface,
@@ -832,20 +1389,77 @@ export function createApp(
       serverEntryUrl: import.meta.url,
     }),
   );
+
   if (serverMoveOptions.restoredRun !== null) {
     serverMove.restore(serverMoveOptions.restoredRun);
   }
+
+  const maintenance = createServerMaintenance(deps, pluginService, {
+    originAdoptionAssets: async () =>
+      (await originBundleManifestV1(originBundleRootV1)).files.map(
+        (value) => value.path,
+      ),
+  });
+
+  registerOriginAdoptionStaticRoutesV1(app, maintenance.originAdoption);
+
+  if (
+    pendingServerMove !== null ||
+    serverMoveOptions.manualImportPending ||
+    serverMove.isFrozen() ||
+    maintenance.isHeld()
+  ) {
+    pluginService.reconcileFrozenBoot();
+  }
+
   const serverMoveFreezeState = {
-    isFrozen: () => pendingServerMove !== null || serverMove.isFrozen(),
+    isFrozen: () =>
+      pendingServerMove !== null ||
+      serverMove.isFrozen() ||
+      maintenance.isHeld(),
   };
+
   const daemonWriteFreezeState = {
     isFrozen: () =>
-      pendingServerMove !== null || isServerMoveSnapshotFenced(deps.db),
+      pendingServerMove !== null ||
+      isServerMoveSnapshotFenced(deps.db) ||
+      maintenance.isHeld(),
   };
+
   app.use("/api/v1/*", serverMoveFreezeMiddleware(serverMoveFreezeState));
-  for (const path of ["/internal/hosts/enroll", "/internal/hosts/enroll-key"]) {
-    app.use(path, serverMoveWriteFreezeMiddleware(serverMoveFreezeState));
-  }
+
+  app.use(
+    "/internal/hosts/enroll-key",
+    serverMoveWriteFreezeMiddleware(serverMoveFreezeState),
+  );
+  app.use("/internal/hosts/enroll", async (context, next) => {
+    if (!serverMoveFreezeState.isFrozen()) return next();
+
+    const payload = hostDaemonEnrollRequestSchema.safeParse(
+      await context.req.raw
+        .clone()
+        .json()
+        .catch(() => null),
+    );
+
+    if (
+      pendingServerMove !== null ||
+      !payload.success ||
+      !maintenance.canEnrollStartupTarget(payload.data.hostId)
+    )
+      throw serverMovingError();
+
+    const releaseAdmission = maintenance.reserveStartupEnrollment(
+      payload.data.hostId,
+    );
+
+    try {
+      await next();
+    } finally {
+      releaseAdmission();
+    }
+  });
+
   for (const path of [
     "/internal/session/events",
     "/internal/session/tool-call",
@@ -854,44 +1468,87 @@ export function createApp(
   ]) {
     app.use(path, serverMoveWriteFreezeMiddleware(daemonWriteFreezeState));
   }
+
   const publicApi = new Hono();
   publicApi.use("*", async (context, next) => {
     if (PLUGIN_WIRE_HTTP_PATH.test(context.req.path)) {
       return next();
     }
+
     const problem = browserRequestProblem(context, deps);
+
     if (problem !== null) {
-      throw new ApiError(problem.status, "forbidden_origin", problem.error);
+      const migrationUrl = originAdoptionRequestUrlV1(context);
+
+      const migrationControl =
+        context.req.method === "POST" &&
+        context.req.path === originAdoptionControlPathV1 &&
+        context.req
+          .header("content-type")
+          ?.split(";", 1)[0]
+          ?.trim()
+          .toLowerCase() === "application/json" &&
+        migrationUrl !== null &&
+        (await maintenance.originAdoption.permitsRequest(
+          migrationUrl,
+          context.req.method,
+          context.req.header("origin"),
+        ));
+
+      if (!migrationControl)
+        throw new ApiError(problem.status, "forbidden_origin", problem.error);
     }
+
     return next();
   });
+
   const pluginCatalogService = createPluginCatalogService({
     db: deps.db,
     appVersion: deps.config.appVersion,
-    marketplaceUrl: deps.config.marketplaceUrl,
     dataDir: deps.config.dataDir,
     plugins: pluginService,
     notifyCatalogChanged: () => deps.hub.notifySystem(["plugins-changed"]),
     warn: (message) => deps.logger.warn(message),
   });
+
   registerProjectRoutes(publicApi, deps);
   registerPromptHistoryRoutes(publicApi, deps);
   registerThreadSectionRoutes(publicApi, deps);
+  registerThreadGroupRoutes(publicApi, deps);
   registerFileRoutes(publicApi, deps);
   registerHostRoutes(publicApi, deps, pluginService);
   registerDesktopBrowserRoutes(publicApi, deps);
   registerTerminalRoutes(publicApi, deps);
+  registerPreviewRoutes(publicApi, deps);
   registerEnvironmentRoutes(publicApi, deps);
-  registerThreadRoutes(publicApi, deps);
+  registerThreadRoutes(publicApi, deps, maintenance, pluginService);
   registerQueueRoutes(publicApi, deps);
+  registerInboxRoutes(publicApi, deps);
   registerSystemRoutes(publicApi, deps, pluginService);
+  registerWebErrorReportingRoutes(publicApi, deps);
+  registerBootRoutes(publicApi, {
+    dataDir: deps.config.dataDir,
+    dispatch: (request, env) => app.fetch(request, env),
+  });
+
+  const webUpdate = new WebUpdateService(
+    deps.config.dataDir,
+    options?.staticDir,
+    () => isServerRestartDraining(deps.db),
+    () => deps.hub.notifySystem(["web-generation-changed"]),
+  );
+
+  registerWebUpdateRoutes(publicApi, webUpdate);
   registerUiPreferenceRoutes(publicApi, deps);
+
   const pluginInstallJobs = createPluginInstallJobs({
     notifyChanged: () => deps.hub.notifySystem(["plugin-install-jobs-changed"]),
   });
+
   const pluginUpdateJobs = createPluginUpdateJobs({
     notifyChanged: () => deps.hub.notifySystem(["plugin-update-jobs-changed"]),
   });
+
   registerPluginUpdateJobRoutes(publicApi, pluginUpdateJobs);
   registerPluginInstallJobRoutes(publicApi, pluginInstallJobs);
   registerPluginCatalogRoutes(
@@ -909,6 +1566,100 @@ export function createApp(
   );
   registerSkillsRegistryRoutes(publicApi, deps);
   registerServerMoveRoutes(publicApi, deps, serverMove);
+  registerServerMaintenanceRoutes(publicApi, maintenance);
+
+  const previewTransport = registerPreviewTransport(
+    app,
+    {
+      logger: deps.logger,
+      resolveBinding: async (id) => {
+        const row = requirePreview(deps, id);
+        const state = await previewStatus(deps, id);
+
+        if (state.state !== "online" || state.runId === null) {
+          deps.logger.warn(
+            {
+              previewId: id,
+              hostId: row.hostId,
+              runId: state.runId,
+              state: state.state,
+              detailCategory:
+                state.detail ===
+                "Server process ownership could not be checked."
+                  ? "ownership"
+                  : state.detail ===
+                      "Could not check the preview on its computer"
+                    ? "host-rpc"
+                    : state.state,
+            },
+            "Preview binding not ready",
+          );
+          throw new ApiError(
+            503,
+            "preview_not_ready",
+            state.detail ?? "The preview is not running",
+          );
+        }
+
+        return {
+          id: row.id,
+          hostId: row.hostId,
+          sessionId: requireConnectedHostSession(deps, row.hostId).id,
+          runId: state.runId,
+          localUrl: row.url,
+        };
+      },
+      validateBinding: async (expected) => {
+        const row = requirePreview(deps, expected.id);
+        const session = requireConnectedHostSession(deps, row.hostId);
+
+        if (
+          row.hostId !== expected.hostId ||
+          session.id !== expected.sessionId ||
+          new URL(row.url).origin !== new URL(expected.localUrl).origin
+        )
+          throw new ApiError(
+            409,
+            "preview_run_changed",
+            "The preview server changed. Reopen the preview from Omnyo.",
+            false,
+          );
+      },
+      call: async (binding, command, timeoutMs) => {
+        const startedAt = performance.now();
+
+        try {
+          return await callHostOnlineRpc(deps, {
+            hostId: binding.hostId,
+            command,
+            timeoutMs,
+          });
+        } catch (error) {
+          deps.logger.warn(
+            {
+              previewId: binding.id,
+              runId: binding.runId,
+              hostId: binding.hostId,
+              expectedSessionId: binding.sessionId,
+              liveSessionId: deps.hub.getDaemonSessionIdForHost(binding.hostId),
+              commandType: command.type,
+              connectionId:
+                "connectionId" in command ? command.connectionId : null,
+              elapsedMs: Math.round(performance.now() - startedAt),
+              errorCode:
+                error instanceof ApiError ? error.body.code : "unexpected",
+            },
+            "Preview host RPC failed",
+          );
+          throw error;
+        }
+      },
+      browserProblem: (context) =>
+        browserRequestProblem(context, deps, { requireJsonForMutation: true }),
+    },
+    upgradeWebSocket,
+  );
+
   app.route("/api/v1", publicApi);
   app.use("/api/v1/*", () => {
     throw new ApiError(404, "not_found", "Not found");
@@ -939,6 +1690,7 @@ export function createApp(
     context: Parameters<typeof browserRequestProblem>[0],
   ): void => {
     const problem = browserRequestProblem(context, deps);
+
     if (problem !== null) {
       throw new ApiError(
         problem.status,
@@ -953,6 +1705,7 @@ export function createApp(
     "/ws",
     upgradeWebSocket((context) => {
       assertBrowserWebSocketAllowed(context);
+
       return {
         onOpen: (_event, socket) => onClientSocketOpen(deps.hub, socket),
         onMessage: (event, socket) =>
@@ -966,11 +1719,13 @@ export function createApp(
     "/ws/terminals/:terminalId",
     upgradeWebSocket((context) => {
       assertBrowserWebSocketAllowed(context);
-      const terminalId = context.req.param("terminalId");
+      const terminalId = z.string().parse(context.req.param("terminalId"));
+
       const query = terminalWebSocketQuerySchema.safeParse({
         outputAcks: context.req.query("outputAcks"),
         sinceSeq: context.req.query("sinceSeq"),
       });
+
       if (!query.success) {
         throw new ApiError(
           400,
@@ -978,6 +1733,7 @@ export function createApp(
           "Terminal websocket sinceSeq must be a non-negative integer and outputAcks must be 0 or 1",
         );
       }
+
       return {
         onOpen: (_event, socket) =>
           onTerminalSocketOpen(deps, {
@@ -1001,6 +1757,47 @@ export function createApp(
     }),
   );
 
+  app.post("/internal/server-access/direct-proof", async (context) => {
+    const input = z
+      .object({ challenge: z.string().min(1), instanceId: z.string().min(1) })
+      .strict()
+      .parse(await context.req.json());
+
+    return context.json(
+      observeDirectProof(
+        deps,
+        {
+          ...getAuthenticatedDaemon(context),
+          challenge: input.challenge,
+          instanceId: input.instanceId,
+        },
+        "http",
+      ),
+    );
+  });
+  app.get(
+    "/internal/server-access/direct-proof/ws",
+    upgradeWebSocket((context) => {
+      const input = {
+        ...getAuthenticatedDaemon(context),
+        challenge: context.req.query("challenge") ?? "",
+        instanceId: context.req.query("instanceId") ?? "",
+      };
+
+      return {
+        onOpen: (_event, socket) => {
+          try {
+            const receipt = observeDirectProof(deps, input, "ws");
+            socket.send(JSON.stringify(receipt));
+            socket.close(1000);
+          } catch {
+            socket.close(1008, "direct-proof-refused");
+          }
+        },
+      };
+    }),
+  );
+
   app.get(
     "/internal/ws",
     upgradeWebSocket(async (context) => {
@@ -1009,12 +1806,17 @@ export function createApp(
         protocolHeader: context.req.header("sec-websocket-protocol"),
         sessionId: context.req.query("sessionId") ?? null,
       });
+
       return {
-        onOpen: (_event, socket) =>
-          onDaemonSocketOpen(deps, {
-            ...websocketContext,
-            socket,
-          }),
+        onOpen: (_event, socket) => {
+          confirmDirectPrimary(
+            deps,
+            websocketContext.hostId,
+            websocketContext.sessionId,
+            context.req.header("x-omnyo-direct-proof"),
+          );
+          onDaemonSocketOpen(deps, { ...websocketContext, socket });
+        },
         onMessage: (event, socket) =>
           onDaemonSocketMessage(
             deps,
@@ -1033,22 +1835,32 @@ export function createApp(
   );
 
   if (options?.staticDir) {
-    registerStaticAppRoutes(app, options.staticDir);
+    registerStaticAppRoutes(
+      app,
+      options.staticDir,
+      options.retainedStaticDirs,
+      webUpdate,
+      () => pluginService.getThreadBootstrapAssetUrls(),
+    );
   } else {
-    app.get("/", (context) => context.text("bb server"));
+    app.get("/", (context) => context.text("Omnyo server"));
   }
 
   return {
     app,
-    closeWebSockets: () =>
-      closeWebSocketServer({
+    closeWebSockets: async () => {
+      await previewTransport.dispose();
+      await closeWebSocketServer({
         forceCloseAfterMs: WEB_SOCKET_SHUTDOWN_FORCE_CLOSE_MS,
         reason: WEB_SOCKET_SHUTDOWN_REASON,
         server: wss,
-      }),
+      });
+    },
     injectWebSocket,
     pluginService,
+    maintenance,
     pluginCatalogService,
     serverMove,
+    webUpdate,
   };
 }

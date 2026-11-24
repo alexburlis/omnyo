@@ -41,6 +41,7 @@ describe("plugin catalog categories", () => {
       { id: "tasks-and-workflows", displayName: "Tasks & Workflows" },
     ]);
     expect(PLUGIN_CATALOG_CATEGORIES).toHaveLength(16);
+
     for (const category of PLUGIN_CATALOG_CATEGORIES) {
       expect(category.description).not.toHaveLength(0);
       expect(pluginCatalogCategory(category.id)).toBe(category);

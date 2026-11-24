@@ -1,4 +1,4 @@
-import type { ThreadEvent } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import type { ThreadEvent } from "@omnyo/plugin-sdk/provider-bridge/testing";
 
 export function threadScope(): ThreadEvent["scope"] {
   return { kind: "thread" };

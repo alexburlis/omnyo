@@ -22,6 +22,7 @@ afterEach(cleanup);
 
 it("requests full command output while the terminal renderer is still downloading", async () => {
   const { wrapper: Wrapper } = createQueryClientTestHarness();
+
   const row = {
     ...commandRow({
       id: "cmd_big",

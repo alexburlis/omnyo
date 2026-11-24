@@ -1,6 +1,10 @@
+import { importLegacyTasksBrowserKeyV1 } from "../shared/legacy-browser-key-v1.js";
 import type { TaskViewMode } from "./routes.js";
 
-export const VIEW_PREFERENCE_STORAGE_KEY = "bb-tasks:view-preferences";
+export const VIEW_PREFERENCE_STORAGE_KEY = "tasks:view-preferences";
+
+const LEGACY_VIEW_PREFERENCE_STORAGE_KEY_V1 = "bb-tasks:view-preferences";
+
 export const VIEW_PREFERENCE_VERSION = 1 as const;
 
 const DEFAULT_VIEW_MODE: TaskViewMode = "list";
@@ -22,10 +26,17 @@ interface ParsedStorage {
 }
 
 function readStorage(): ParsedStorage | null {
+  importLegacyTasksBrowserKeyV1(
+    LEGACY_VIEW_PREFERENCE_STORAGE_KEY_V1,
+    VIEW_PREFERENCE_STORAGE_KEY,
+  );
+
   try {
     const raw = window.localStorage.getItem(VIEW_PREFERENCE_STORAGE_KEY);
+
     if (raw === null) return null;
     const parsed: unknown = JSON.parse(raw);
+
     if (
       parsed === null ||
       typeof parsed !== "object" ||
@@ -33,18 +44,23 @@ function readStorage(): ParsedStorage | null {
     ) {
       return null;
     }
+
     const record = parsed as Record<string, unknown>;
+
     const version =
       typeof record.version === "number" && Number.isFinite(record.version)
         ? record.version
         : null;
+
     if (version !== null && version < VIEW_PREFERENCE_VERSION) return null;
+
     const projects =
       record.projects !== null &&
       typeof record.projects === "object" &&
       !Array.isArray(record.projects)
         ? (record.projects as Record<string, unknown>)
         : {};
+
     return {
       lastUsed: asViewMode(record.lastUsed),
       projects,
@@ -57,7 +73,9 @@ function readStorage(): ParsedStorage | null {
 
 export function loadViewMode(projectId: string): TaskViewMode {
   const document = readStorage();
+
   if (document === null) return DEFAULT_VIEW_MODE;
+
   return (
     asViewMode(document.projects[projectId]) ??
     document.lastUsed ??
@@ -68,18 +86,24 @@ export function loadViewMode(projectId: string): TaskViewMode {
 export function storeViewMode(projectId: string, view: TaskViewMode): void {
   try {
     const existing = readStorage();
+
     if (existing?.isFutureVersion) return;
     const projects: Record<string, TaskViewMode> = {};
+
     for (const [id, value] of Object.entries(existing?.projects ?? {})) {
       const mode = asViewMode(value);
+
       if (mode !== null) projects[id] = mode;
     }
+
     projects[projectId] = view;
+
     const document: StoredDocumentV1 = {
       version: VIEW_PREFERENCE_VERSION,
       lastUsed: view,
       projects,
     };
+
     window.localStorage.setItem(
       VIEW_PREFERENCE_STORAGE_KEY,
       JSON.stringify(document),

@@ -1,14 +1,19 @@
 import { Buffer } from "node:buffer";
+import { stripVTControlCharacters } from "node:util";
 import { Command, Option } from "commander";
-import { TERMINAL_DATA_MAX_BYTES } from "@bb/domain";
-import type { TerminalCreateScope, TerminalListScope } from "@bb/sdk";
-import { createNodeWebsocketFactory } from "@bb/sdk/node-websocket";
+import { TERMINAL_DATA_MAX_BYTES } from "@omnyo/domain";
+import type {
+  TerminalCreateScope,
+  TerminalForegroundResult,
+  TerminalListScope,
+} from "@omnyo/sdk";
+import { createNodeWebsocketFactory } from "@omnyo/sdk/node-websocket";
 import {
   terminalServerMessageSchema,
   type TerminalSession,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { action, CliExitError, CliUsageError } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { terminalScopeHint } from "../context-hints.js";
 import { durationHelp, parseDurationMs } from "../duration.js";
 import { columnWidths, printBorderlessTable } from "../table.js";
@@ -16,7 +21,9 @@ import { outputJson } from "./helpers.js";
 import { resolveMachineHostId, resolveMachineTargetOption } from "./machine.js";
 
 const DEFAULT_COLS = 80;
+
 const DEFAULT_ROWS = 24;
+
 const TERMINAL_WAIT_TIMEOUT_EXIT_CODE = 124;
 
 interface TerminalJsonOptions {
@@ -95,10 +102,12 @@ export function registerTerminalCommands(
       .option("--json", "Print machine-readable JSON output"),
   ).action(
     action(async (opts: TerminalListOptions) => {
-      const sdk = createCliBbSdk(getUrl());
+      const sdk = createCliOmnyoSdk(getUrl());
+
       const result = await sdk.terminals.list({
         scope: await resolveTerminalListScope(opts, getUrl()),
       });
+
       if (outputJson(opts, result)) return;
       printTerminalTable(result.sessions);
     }),
@@ -120,11 +129,13 @@ export function registerTerminalCommands(
       .option("--json", "Print machine-readable JSON output"),
   ).action(
     action(async (commandParts: string[], opts: TerminalStartOptions) => {
-      const sdk = createCliBbSdk(getUrl());
+      const sdk = createCliOmnyoSdk(getUrl());
+
       const resolvedStart = resolveTerminalStart({
         commandOption: opts.command,
         commandParts,
       });
+
       const session = await sdk.terminals.create({
         cols: parsePositiveInteger(opts.cols, DEFAULT_COLS, "--cols"),
         rows: parsePositiveInteger(opts.rows, DEFAULT_ROWS, "--rows"),
@@ -132,8 +143,10 @@ export function registerTerminalCommands(
         title: opts.title,
         start: resolvedStart,
       });
+
       if (outputJson(opts, session)) return;
       console.log(`Created terminal ${session.id} (${session.title})`);
+
       if (opts.attach) {
         await attachTerminal({
           baseUrl: getUrl(),
@@ -149,11 +162,27 @@ export function registerTerminalCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (terminalId: string, opts: TerminalJsonOptions) => {
-        const session = await createCliBbSdk(getUrl()).terminals.get({
+        const session = await createCliOmnyoSdk(getUrl()).terminals.get({
           terminalId,
         });
+
         if (outputJson(opts, session)) return;
         console.log(JSON.stringify(session, null, 2));
+      }),
+    );
+
+  terminal
+    .command("foreground <terminalId>")
+    .description("Show the command running in a terminal, if any")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (terminalId: string, opts: TerminalJsonOptions) => {
+        const foreground = await createCliOmnyoSdk(
+          getUrl(),
+        ).terminals.foreground({ terminalId });
+
+        if (outputJson(opts, foreground)) return;
+        console.log(formatTerminalForeground(foreground));
       }),
     );
 
@@ -164,12 +193,15 @@ export function registerTerminalCommands(
     .action(
       action(async (terminalId: string, opts: TerminalJsonOptions) => {
         if (opts.json) {
-          const session = await createCliBbSdk(getUrl()).terminals.get({
+          const session = await createCliOmnyoSdk(getUrl()).terminals.get({
             terminalId,
           });
+
           outputJson(opts, session);
+
           return;
         }
+
         await attachTerminal({
           baseUrl: getUrl(),
           terminalId,
@@ -187,17 +219,20 @@ export function registerTerminalCommands(
     .action(
       action(async (terminalId: string, opts: TerminalSendOptions) => {
         const data = await resolveSendData(opts);
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         let session: TerminalSession | null = null;
+
         for (const chunk of chunkTerminalInput(data)) {
           session = await sdk.terminals.input({
             terminalId,
             dataBase64: chunk.toString("base64"),
           });
         }
+
         if (session === null) {
           throw new CliExitError("Terminal input cannot be empty", 1);
         }
+
         if (outputJson(opts, session)) return;
         console.log(`Sent input to terminal ${terminalId}`);
       }),
@@ -211,12 +246,14 @@ export function registerTerminalCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (terminalId: string, opts: TerminalResizeOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const session = await sdk.terminals.resize({
           terminalId,
           cols: parseRequiredPositiveInteger(opts.cols, "--cols"),
           rows: parseRequiredPositiveInteger(opts.rows, "--rows"),
         });
+
         if (outputJson(opts, session)) return;
         console.log(
           `Resized terminal ${terminalId} to ${session.cols}x${session.rows}`,
@@ -234,13 +271,16 @@ export function registerTerminalCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (terminalId: string, opts: TerminalOutputOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const output = await sdk.terminals.output({
           terminalId,
           ...terminalOutputQuery(opts),
         });
+
         if (outputJson(opts, output)) return;
         writeOutputChunks(output.chunks);
+
         if (output.status === "exited") {
           console.error(describeTerminalExit(terminalId, output.exitCode));
         }
@@ -250,10 +290,13 @@ export function registerTerminalCommands(
   terminal
     .command("wait <terminalId>")
     .description("Wait for terminal output or exit")
-    .option("--contains <text>", "Wait until output contains text")
+    .option(
+      "--contains <text>",
+      "Wait until output contains text, ignoring terminal escapes",
+    )
     .option(
       "--regex <pattern>",
-      "Wait until output matches a regular expression",
+      "Wait until output matches a regular expression, ignoring terminal escapes",
     )
     .option("--exit", "Wait until the terminal exits")
     .option("--from-start", "Include existing scrollback from sequence 0")
@@ -273,6 +316,7 @@ export function registerTerminalCommands(
           opts,
           terminalId,
         });
+
         if (outputJson(opts, result)) return;
         console.log(
           result.matched === "exit"
@@ -293,10 +337,11 @@ export function registerTerminalCommands(
           title: string,
           opts: TerminalJsonOptions,
         ) => {
-          const session = await createCliBbSdk(getUrl()).terminals.rename({
+          const session = await createCliOmnyoSdk(getUrl()).terminals.rename({
             terminalId,
             title,
           });
+
           if (outputJson(opts, session)) return;
           console.log(`Renamed terminal ${terminalId} to ${session.title}`);
         },
@@ -309,9 +354,10 @@ export function registerTerminalCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (terminalId: string, opts: TerminalJsonOptions) => {
-        const session = await createCliBbSdk(getUrl()).terminals.restart({
+        const session = await createCliOmnyoSdk(getUrl()).terminals.restart({
           terminalId,
         });
+
         if (outputJson(opts, session)) return;
         console.log(`Restarted terminal ${terminalId} as ${session.id}`);
       }),
@@ -325,10 +371,11 @@ export function registerTerminalCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (terminalId: string, opts: TerminalCloseOptions) => {
-        const session = await createCliBbSdk(getUrl()).terminals.close({
+        const session = await createCliOmnyoSdk(getUrl()).terminals.close({
           terminalId,
           mode: opts.ifClean ? "if-clean" : "force",
         });
+
         if (outputJson(opts, session)) return;
         console.log(`Closed terminal ${terminalId}`);
       }),
@@ -338,7 +385,21 @@ export function registerTerminalCommands(
     const targetsTerminalId = command.registeredArguments.some(
       (argument) => argument.name() === "terminalId",
     );
+
     if (targetsTerminalId) acceptRedundantTerminalScopeOptions(command);
+  }
+}
+
+function formatTerminalForeground(
+  foreground: TerminalForegroundResult,
+): string {
+  switch (foreground.state) {
+    case "idle":
+      return "Idle at the shell prompt";
+    case "busy":
+      return `Running: ${foreground.command ?? "a command"}`;
+    case "unknown":
+      return "Unknown: this computer cannot report the running command";
   }
 }
 
@@ -372,15 +433,19 @@ async function resolveTerminalListScope(
     machine,
     thread: opts.thread,
   });
+
   if (opts.cwd !== undefined && machine === undefined) {
     throw new Error("--cwd can only be used with --machine or --host.");
   }
+
   if (opts.thread !== undefined) {
     return { kind: "thread", threadId: opts.thread };
   }
+
   if (opts.environment !== undefined) {
     return { kind: "environment", environmentId: opts.environment };
   }
+
   return {
     kind: "host_path",
     hostId: await resolveMachineHostId({
@@ -396,7 +461,9 @@ async function resolveTerminalCreateScope(
   serverUrl: string,
 ): Promise<TerminalCreateScope> {
   const scope = await resolveTerminalListScope(opts, serverUrl);
+
   if (scope.kind !== "host_path") return scope;
+
   return { ...scope, cwd: scope.cwd ?? null };
 }
 
@@ -417,6 +484,7 @@ function assertExactlyOneTerminalScope(args: {
   const count = [args.thread, args.environment, args.machine].filter(
     (value) => value !== undefined,
   ).length;
+
   if (count !== 1) {
     throw new CliUsageError({
       code: count === 0 ? "missing_required" : "invalid_value",
@@ -436,16 +504,21 @@ function resolveTerminalStart(args: {
       "Provide either --command or positional command args, not both",
     );
   }
+
   if (args.commandOption !== undefined) {
     const command = args.commandOption.trim();
+
     if (command.length === 0) {
       throw new Error("--command must not be empty");
     }
+
     return { mode: "command", command };
   }
+
   if (args.commandParts.length > 0) {
     return { mode: "argv", argv: [...args.commandParts] };
   }
+
   return { mode: "shell" };
 }
 
@@ -455,14 +528,17 @@ function parsePositiveInteger(
   label: string,
 ): number {
   if (value === undefined) return fallback;
+
   return parseRequiredPositiveInteger(value, label);
 }
 
 function parseRequiredPositiveInteger(value: string, label: string): number {
   const parsed = Number.parseInt(value, 10);
+
   if (!Number.isFinite(parsed) || parsed <= 0 || String(parsed) !== value) {
     throw new Error(`${label} must be a positive integer`);
   }
+
   return parsed;
 }
 
@@ -473,9 +549,11 @@ export async function resolveSendData(
   if (opts.text !== undefined && opts.stdin) {
     throw new Error("Provide only one of --text or --stdin");
   }
+
   if (opts.text === undefined && !opts.stdin) {
     throw new Error("Provide one of --text or --stdin");
   }
+
   const baseData =
     opts.text !== undefined
       ? Buffer.from(opts.text, "utf8")
@@ -485,6 +563,7 @@ export async function resolveSendData(
           stdin.on("error", reject);
           stdin.on("end", () => resolve(Buffer.concat(chunks)));
         });
+
   return opts.enter
     ? Buffer.concat([baseData, Buffer.from("\r", "utf8")])
     : baseData;
@@ -516,23 +595,28 @@ function terminalOutputQuery(opts: TerminalOutputOptions) {
 
 function parseNonNegativeInteger(value: string, label: string): number {
   const parsed = Number.parseInt(value, 10);
+
   if (!Number.isFinite(parsed) || parsed < 0 || String(parsed) !== value) {
     throw new Error(`${label} must be a non-negative integer`);
   }
+
   return parsed;
 }
 
 function printTerminalTable(sessions: TerminalSession[]): void {
   if (sessions.length === 0) {
     console.log("No terminal sessions found");
+
     return;
   }
+
   const rows = sessions.map((session) => [
     session.id,
     session.title,
     session.status,
     `${session.cols}x${session.rows}`,
   ]);
+
   printBorderlessTable(
     {
       head: ["ID", "Title", "Status", "Size"],
@@ -561,6 +645,7 @@ function terminalWebsocketUrl(args: {
   )}`;
   url.search = "";
   url.hash = "";
+
   return url.href;
 }
 
@@ -578,23 +663,32 @@ async function attachTerminal(args: {
       terminalId: args.terminalId,
     }),
   );
+
   let detachPrefix = false;
   const previousRawMode = process.stdin.isRaw;
+
   const onInput = (chunk: Buffer) => {
     if (chunk.length === 1 && chunk[0] === 0x02) {
       detachPrefix = true;
+
       return;
     }
+
     if (detachPrefix) {
       detachPrefix = false;
+
       if (chunk.length === 1 && chunk[0] === 0x64) {
         socket.close();
+
         return;
       }
+
       sendTerminalInput(socket, Buffer.from([0x02]));
     }
+
     sendTerminalInput(socket, chunk);
   };
+
   const onResize = () => {
     socket.send(
       JSON.stringify({
@@ -604,18 +698,21 @@ async function attachTerminal(args: {
       }),
     );
   };
+
   await new Promise<void>((resolve, reject) => {
     socket.onopen = () => {
       process.stdin.setRawMode(true);
       process.stdin.resume();
       onResize();
     };
+
     socket.onerror = () => reject(new Error("Terminal websocket failed"));
     socket.onclose = () => resolve();
     socket.onmessage = (event) => {
       const message = terminalServerMessageSchema.parse(
         JSON.parse(String(event.data)),
       );
+
       switch (message.type) {
         case "attached":
         case "pong":
@@ -623,15 +720,19 @@ async function attachTerminal(args: {
           return;
         case "output":
           process.stdout.write(Buffer.from(message.chunk.dataBase64, "base64"));
+
           return;
         case "exited":
           socket.close();
+
           return;
         case "error":
           reject(new Error(message.message));
+
           return;
       }
     };
+
     process.stdin.on("data", onInput);
     process.stdout.on("resize", onResize);
   }).finally(() => {
@@ -644,6 +745,7 @@ async function attachTerminal(args: {
 
 function chunkTerminalInput(data: Buffer): Buffer[] {
   const chunks: Buffer[] = [];
+
   for (
     let offset = 0;
     offset < data.byteLength;
@@ -656,6 +758,7 @@ function chunkTerminalInput(data: Buffer): Buffer[] {
       ),
     );
   }
+
   return chunks;
 }
 
@@ -671,6 +774,7 @@ function sendTerminalInput(socket: { send(data: string): void }, data: Buffer) {
 }
 
 const TERMINAL_WAIT_MATCH_WINDOW_CHARS = 256 * 1024;
+
 const TERMINAL_WAIT_EXIT_TAIL_CHARS = 2000;
 
 interface TerminalWaitResult {
@@ -703,28 +807,34 @@ async function waitForTerminal(args: {
   const hasContains = args.opts.contains !== undefined;
   const hasRegex = args.opts.regex !== undefined;
   const hasExit = args.opts.exit === true;
+
   if ([hasContains, hasRegex, hasExit].filter(Boolean).length !== 1) {
     throw new CliUsageError({
       code: "missing_required",
-      hint: `For example: bb terminal wait ${args.terminalId} --exit, or --contains "ready".`,
+      hint: `For example: omnyo terminal wait ${args.terminalId} --exit, or --contains "ready".`,
       message: "Provide exactly one of --contains, --regex, or --exit",
     });
   }
-  const sdk = createCliBbSdk(args.baseUrl);
+
+  const sdk = createCliOmnyoSdk(args.baseUrl);
+
   const timeoutMs = parseDurationMs({
     allowZero: false,
     defaultUnit: "s",
     label: "--timeout",
     value: args.opts.timeout ?? "30s",
   });
+
   const pollIntervalMs = parseDurationMs({
     allowZero: false,
     defaultUnit: "ms",
     label: "--poll-interval",
     value: args.opts.pollInterval ?? "500ms",
   });
+
   const deadline = Date.now() + timeoutMs;
   let nextSeq = args.opts.fromStart ? 0 : undefined;
+
   const regex =
     args.opts.regex === undefined ? null : new RegExp(args.opts.regex, "u");
 
@@ -734,23 +844,27 @@ async function waitForTerminal(args: {
       limitChunks: 1,
       tailBytes: 1,
     });
+
     if (currentOutput.status === "exited") {
       throw new CliExitError(
         `${describeTerminalExit(args.terminalId, currentOutput.exitCode)} before this wait started, so no new output will arrive.`,
         TERMINAL_WAIT_TIMEOUT_EXIT_CODE,
         {
           code: "terminal_exited",
-          hint: `Match its existing output with --from-start, or read it with \`bb terminal output ${args.terminalId}\`.`,
+          hint: `Match its existing output with --from-start, or read it with \`omnyo terminal output ${args.terminalId}\`.`,
         },
       );
     }
+
     nextSeq = currentOutput.nextSeq;
   }
 
   let seen = "";
+
   while (Date.now() <= deadline) {
     if (hasExit) {
       const session = await sdk.terminals.get({ terminalId: args.terminalId });
+
       if (session.status === "exited") {
         return {
           exitCode: session.exitCode,
@@ -759,6 +873,7 @@ async function waitForTerminal(args: {
           terminalId: args.terminalId,
         };
       }
+
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       continue;
     }
@@ -768,12 +883,16 @@ async function waitForTerminal(args: {
       ...terminalOutputQuery(args.opts),
       ...(nextSeq !== undefined ? { sinceSeq: nextSeq } : {}),
     });
+
     nextSeq = output.nextSeq;
     const searched = `${seen}${decodeChunks(output.chunks)}`;
     seen = searched.slice(-TERMINAL_WAIT_MATCH_WINDOW_CHARS);
+
+    const plainText = stripVTControlCharacters(searched);
+
     if (
       args.opts.contains !== undefined &&
-      searched.includes(args.opts.contains)
+      plainText.includes(args.opts.contains)
     ) {
       return {
         exitCode: output.exitCode,
@@ -782,7 +901,8 @@ async function waitForTerminal(args: {
         terminalId: args.terminalId,
       };
     }
-    if (regex && regex.test(searched)) {
+
+    if (regex && regex.test(plainText)) {
       return {
         exitCode: output.exitCode,
         matched: args.opts.regex ?? "",
@@ -790,6 +910,7 @@ async function waitForTerminal(args: {
         terminalId: args.terminalId,
       };
     }
+
     if (output.status === "exited") {
       const tail = seen.slice(-TERMINAL_WAIT_EXIT_TAIL_CHARS).trimEnd();
       throw new CliExitError(
@@ -799,19 +920,21 @@ async function waitForTerminal(args: {
           code: "terminal_exited",
           hint:
             tail.length === 0
-              ? `It printed nothing after this wait started. Read everything with \`bb terminal output ${args.terminalId}\`.`
+              ? `It printed nothing after this wait started. Read everything with \`omnyo terminal output ${args.terminalId}\`.`
               : `Last output:\n${tail}`,
         },
       );
     }
+
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
+
   throw new CliExitError(
     `Timed out waiting for terminal ${args.terminalId}`,
     TERMINAL_WAIT_TIMEOUT_EXIT_CODE,
     {
       code: "timeout",
-      hint: `Read what it has printed so far with \`bb terminal output ${args.terminalId} --tail-bytes 4000\`.`,
+      hint: `Read what it has printed so far with \`omnyo terminal output ${args.terminalId} --tail-bytes 4000\`.`,
     },
   );
 }

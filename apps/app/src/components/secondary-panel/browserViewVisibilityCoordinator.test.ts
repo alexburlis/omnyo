@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { BbDesktopBrowserApi } from "@bb/desktop-contract";
-import { createNoopDesktopBrowserApi } from "@/test/bb-desktop-test-utils";
+import type { OmnyoDesktopBrowserApi } from "@omnyo/desktop-contract";
+import { createNoopDesktopBrowserApi } from "@/test/omnyo-desktop-test-utils";
 import {
   createBrowserViewVisibilityCoordinator,
   destroyPersistedBrowserViewsForEnvironment,
@@ -15,7 +15,7 @@ interface VisibilityCall {
 }
 
 interface RecordingApi {
-  api: BbDesktopBrowserApi;
+  api: OmnyoDesktopBrowserApi;
   detachments: string[];
   visibility: VisibilityCall[];
 }
@@ -23,7 +23,8 @@ interface RecordingApi {
 function createRecordingApi(): RecordingApi {
   const detachments: string[] = [];
   const visibility: VisibilityCall[] = [];
-  const api: BbDesktopBrowserApi = {
+
+  const api: OmnyoDesktopBrowserApi = {
     ...createNoopDesktopBrowserApi(),
     detach(tabId) {
       detachments.push(tabId);
@@ -32,6 +33,7 @@ function createRecordingApi(): RecordingApi {
       visibility.push({ tabId: request.tabId, visible: request.visible });
     },
   };
+
   return { api, detachments, visibility };
 }
 
@@ -56,7 +58,8 @@ describe("browserViewVisibilityCoordinator", () => {
 
   it("syncs bounds before showing", () => {
     const order: string[] = [];
-    const api: BbDesktopBrowserApi = {
+
+    const api: OmnyoDesktopBrowserApi = {
       ...createNoopDesktopBrowserApi(),
       setVisible(request) {
         if (request.visible) {
@@ -64,6 +67,7 @@ describe("browserViewVisibilityCoordinator", () => {
         }
       },
     };
+
     const coordinator = createBrowserViewVisibilityCoordinator(api);
 
     coordinator.show("a", () => order.push("bounds:a"));

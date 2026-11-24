@@ -1,4 +1,4 @@
-import { environments, hasStoredSpawnAgentToolCall, threads } from "@bb/db";
+import { environments, hasStoredSpawnAgentToolCall, threads } from "@omnyo/db";
 import { and, eq, isNull } from "drizzle-orm";
 import {
   PromptInput,
@@ -11,12 +11,12 @@ import {
   ClientTurnRequestId,
   EnvironmentStatus,
   promptInputHasCommandMention,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   type HostDaemonCommand,
   type ThreadStopIntent,
   type TurnSubmitTarget,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { AppDeps, LoggedWorkSessionDeps } from "../../types.js";
 import type { CommandResultSideEffectsDeps } from "../../internal/command-result-side-effects.js";
 import { ApiError } from "../../errors.js";
@@ -37,7 +37,7 @@ import {
 } from "./thread-runtime-config.js";
 import {
   buildExistingThreadExecutionInput,
-  resolveExistingThreadExecutionPlan,
+  resolveExistingThreadExecutionPlanNow,
   type ExistingThreadExecutionInputRequest,
 } from "./thread-execution-plan.js";
 import { clampPermissionModeToHost } from "../hosts/permission-ceiling.js";
@@ -160,9 +160,11 @@ function providerSupportsThreadRename(
   providerId: string,
 ): boolean {
   const registration = registry.get(providerId);
+
   if (!registration) {
     return true;
   }
+
   return registration.info.capabilities.supportsThreadRename;
 }
 
@@ -171,9 +173,11 @@ function providerSupportsThreadArchiveForwarding(
   providerId: string,
 ): boolean {
   const registration = registry.get(providerId);
+
   if (!registration) {
     return false;
   }
+
   return registration.info.capabilities.supportsThreadArchive;
 }
 
@@ -182,7 +186,9 @@ function resolvePromptMode(
   args: { input: PromptInput[]; providerId: string },
 ): PromptMode | undefined {
   const planCommand = resolveProviderPlanCommand(registry, args.providerId);
+
   if (planCommand === null) return undefined;
+
   return promptInputHasCommandMention(args.input, {
     trigger: planCommand.trigger,
     name: planCommand.name,
@@ -199,10 +205,12 @@ function toRuntimeExecutionOptions(
     permissionMode: args.execution.permissionMode,
     providerId: args.providerId,
   });
+
   const promptMode = resolvePromptMode(args.deps.providerRegistry, {
     input: args.input,
     providerId: args.providerId,
   });
+
   const providerOptions =
     args.deps.providerRegistry.get(args.providerId)?.deriveProviderOptions({
       threadId: args.threadId,
@@ -211,10 +219,12 @@ function toRuntimeExecutionOptions(
       permissionMode,
       ...(promptMode !== undefined ? { promptMode } : {}),
     }) ?? {};
+
   const sessionOptions = resolvePendingThreadSessionOptions(
     args.deps.db,
     args.threadId,
   );
+
   const base = {
     model: args.execution.model,
     serviceTier: args.execution.serviceTier,
@@ -223,6 +233,7 @@ function toRuntimeExecutionOptions(
     ...(Object.keys(sessionOptions).length > 0 ? { sessionOptions } : {}),
     providerOptions,
   };
+
   if (permissionMode === "full") {
     return {
       ...base,
@@ -232,6 +243,7 @@ function toRuntimeExecutionOptions(
       permissionEscalation: null,
     };
   }
+
   if (permissionMode === "auto") {
     return {
       ...base,
@@ -241,6 +253,7 @@ function toRuntimeExecutionOptions(
       permissionEscalation: args.permissionEscalation,
     };
   }
+
   return {
     ...base,
     permissionMode: "accept-edits",
@@ -255,7 +268,15 @@ export async function buildExecutionOptions(
   request: ExecutionOptionsRequest,
   args: BuildExecutionOptionsArgs,
 ): Promise<ResolvedThreadExecutionOptions> {
-  const plan = await resolveExistingThreadExecutionPlan(deps, {
+  return buildExecutionOptionsNow(deps, request, args);
+}
+
+export function buildExecutionOptionsNow(
+  deps: Pick<AppDeps, "db" | "hub" | "providerRegistry">,
+  request: ExecutionOptionsRequest,
+  args: BuildExecutionOptionsArgs,
+): ResolvedThreadExecutionOptions {
+  const plan = resolveExistingThreadExecutionPlanNow(deps, {
     ...(args.projectDefaults !== undefined
       ? { projectDefaults: args.projectDefaults }
       : {}),
@@ -264,6 +285,7 @@ export async function buildExecutionOptions(
     input: buildExistingThreadExecutionInput(request),
     threadId: args.threadId,
   });
+
   return plan.resolvedExecution;
 }
 
@@ -272,12 +294,15 @@ export async function buildThreadStartCommand(
   args: ThreadStartCommandArgs,
 ): Promise<Extract<HostDaemonCommand, { type: "thread.start" }>> {
   await deps.providerRegistry.whenRegistrationsSettled();
+
   const runtimeContext = await resolveThreadRuntimeCommandConfig(deps, {
     thread: args.thread,
     environment: args.environment,
     model: args.execution.model,
   });
+
   const bridgeLaunch = requireBridgeLaunchForProviderId(deps, args.providerId);
+
   return {
     type: "thread.start",
     environmentId: args.environment.id,
@@ -317,6 +342,7 @@ function buildPreparedTurnSubmitCommandPayload(
     args.deps,
     args.runtimeContext.providerId,
   );
+
   return {
     type: "turn.submit",
     environmentId: args.environmentId,
@@ -364,16 +390,19 @@ export async function prepareTurnSubmitCommandPayload(
   args: PrepareTurnSubmitCommandPayloadArgs,
 ): Promise<PreparedTurnSubmitCommandPayload> {
   await deps.providerRegistry.whenRegistrationsSettled();
+
   const providerThreadId = requireProviderThreadId(
     args.providerThreadId ??
       requireDispatchableProviderThreadId(deps, args.thread.id),
     args.thread.id,
   );
+
   const runtimeContext = await resolveThreadRuntimeCommandConfig(deps, {
     thread: args.thread,
     environment: args.environment,
     model: args.execution.model,
   });
+
   return buildPreparedTurnSubmitCommandPayload({
     deps,
     environmentId: args.environment.id,
@@ -422,6 +451,7 @@ function threadHasLiveChildren(
     )
     .limit(1)
     .get();
+
   return row !== undefined;
 }
 
@@ -460,11 +490,13 @@ export function dispatchArchivedThreadProviderArchiveCommand(
     .from(threads)
     .where(eq(threads.id, args.threadId))
     .get();
+
   if (!thread || thread.archivedAt === null || thread.deletedAt !== null) {
     return false;
   }
 
   const providerThreadId = getLastProviderThreadId(deps, thread.id);
+
   if (!providerThreadId || !thread.environmentId) {
     return false;
   }
@@ -474,9 +506,11 @@ export function dispatchArchivedThreadProviderArchiveCommand(
     .from(environments)
     .where(eq(environments.id, thread.environmentId))
     .get();
+
   if (!environment) {
     return false;
   }
+
   if (environment.status !== "ready") {
     return false;
   }
@@ -500,6 +534,7 @@ export function dispatchArchivedThreadProviderArchiveCommand(
   if (!environment.path) {
     return false;
   }
+
   const workspaceContext = workspaceContextFromPath({
     path: environment.path,
   });
@@ -508,6 +543,7 @@ export function dispatchArchivedThreadProviderArchiveCommand(
     deps,
     thread.providerId,
   );
+
   if (bridgeLaunch === null) {
     return false;
   }
@@ -531,6 +567,7 @@ export function dispatchArchivedThreadProviderArchiveCommand(
       );
     },
   });
+
   return true;
 }
 
@@ -546,6 +583,7 @@ export function dispatchThreadUnarchiveCommand(
   ) {
     return false;
   }
+
   if (args.environment.status !== "ready") {
     return false;
   }
@@ -554,6 +592,7 @@ export function dispatchThreadUnarchiveCommand(
     deps,
     args.thread.providerId,
   );
+
   if (bridgeLaunch === null) {
     return false;
   }
@@ -576,6 +615,7 @@ export function dispatchThreadUnarchiveCommand(
       );
     },
   });
+
   return true;
 }
 

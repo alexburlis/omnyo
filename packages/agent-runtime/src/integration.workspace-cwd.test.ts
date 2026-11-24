@@ -23,6 +23,7 @@ for (const providerId of providers) {
       const ctx = createTestRuntime(providerId, {
         onInteractiveRequest: createApprovalResolution,
       });
+
       const workspaceMarkerName = `workspace-marker-${randomUUID()}.txt`;
       const parentMarkerName = `parent-marker-${randomUUID()}.txt`;
       const workspaceToken = `WORKSPACE_${randomUUID()}`;
@@ -39,11 +40,13 @@ for (const providerId of providers) {
 
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId,
           preset: "full",
         });
+
         await ctx.runtime.startThread({
           environmentId: "env-1",
           threadId,
@@ -73,6 +76,7 @@ for (const providerId of providers) {
           threadId,
           predicate: () => {
             const outputs = getCompletedCommandOutputs(ctx.events);
+
             return (
               (outputs.includes(workspaceToken) &&
                 outputs.includes(parentToken)) ||

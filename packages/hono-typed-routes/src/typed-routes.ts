@@ -50,8 +50,11 @@ type WithInputHandler<E, Input, Path extends string> = (
 ) => HandlerReturn;
 
 type MethodKey = "$get" | "$post" | "$patch" | "$delete" | "$put";
+
 type HttpMethod = "get" | "post" | "patch" | "delete" | "put";
+
 type InputSource = "json" | "query";
+
 type RuntimeInputSource = InputSource | "none" | "form";
 
 type TypedRegister<Schema, MKey extends MethodKey> = <
@@ -98,15 +101,18 @@ interface TypedRoutesOptions {
 type ValidationMessageFromZodError = (error: ZodError) => string;
 
 const zodV4MissingInputMessagePrefix = "Invalid input: expected ";
+
 const zodV4MissingInputMessageSuffix = ", received undefined";
 
 const validationMessageFromZodError: ValidationMessageFromZodError = (
   error,
 ) => {
   const issue = error.issues[0];
+
   if (!issue) {
     return "Invalid request";
   }
+
   if (
     issue.code === "invalid_type" &&
     issue.input === undefined &&
@@ -115,6 +121,7 @@ const validationMessageFromZodError: ValidationMessageFromZodError = (
   ) {
     return "Required";
   }
+
   return issue.message;
 };
 
@@ -141,6 +148,7 @@ export function typedRoutes<Schema>(
       const handler = maybeHandler!;
       (app as any)[method](path, async (c: Context) => {
         let input: unknown;
+
         if (inputSource === "query") {
           input = c.req.query();
         } else {
@@ -150,15 +158,19 @@ export function typedRoutes<Schema>(
             throw makeError("Invalid JSON request body");
           }
         }
+
         let parsed: unknown;
+
         try {
           parsed = schema.parse(input);
         } catch (error) {
           if (error instanceof ZodError) {
             throw makeError(validationMessageFromZodError(error));
           }
+
           throw error;
         }
+
         return handler(c, parsed);
       });
     }
@@ -180,8 +192,10 @@ export function typedRoutes<Schema>(
         descriptor.request.schema,
         handler,
       );
+
       return;
     }
+
     register(method, descriptor.request.source, descriptor.path, handler);
   }
 
@@ -191,10 +205,13 @@ export function typedRoutes<Schema>(
     args: [string | RouteDefinition, ...any[]],
   ): void {
     const firstArg = args[0];
+
     if (typeof firstArg === "string") {
       register(method, inputSource, firstArg, args[1], args[2]);
+
       return;
     }
+
     registerDescriptor(method, firstArg, args[1]);
   }
 

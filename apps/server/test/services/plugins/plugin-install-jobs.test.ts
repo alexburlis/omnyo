@@ -4,7 +4,7 @@ import {
   pluginInstallJobStartResponseSchema,
   type InstalledPlugin,
   type PluginInstallJob,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   commitInstall,
   PluginInstallCancelledError,
@@ -18,6 +18,7 @@ import {
 } from "../../helpers/test-app.js";
 
 const BASE = "http://127.0.0.1:3334";
+
 let PLUGIN: InstalledPlugin;
 
 beforeAll(async () => {
@@ -28,11 +29,14 @@ beforeAll(async () => {
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => {};
+
   let reject: (error: unknown) => void = () => {};
+
   const promise = new Promise<T>((res, rej) => {
     resolve = res;
     reject = rej;
   });
+
   return { promise, resolve, reject };
 }
 
@@ -55,11 +59,13 @@ describe("plugin install jobs", () => {
       displayName: "a",
       run: () => first.promise,
     });
+
     const b = jobs.start({
       target: sourceTarget("npm:b"),
       displayName: "b",
       run: second,
     });
+
     const repeat = jobs.start({
       target: sourceTarget("npm:a"),
       displayName: "a",
@@ -87,6 +93,7 @@ describe("plugin install jobs", () => {
       displayName: "a",
       run: () => first.promise,
     });
+
     const queued = jobs.start({
       target: sourceTarget("npm:b"),
       displayName: "b",
@@ -109,6 +116,7 @@ describe("plugin install jobs", () => {
     async ({ outcome, expected }) => {
       const jobs = createPluginInstallJobs({ notifyChanged: () => {} });
       const run = deferred<InstalledPlugin>();
+
       const job = jobs.start({
         target: sourceTarget("npm:a"),
         displayName: "a",
@@ -116,6 +124,7 @@ describe("plugin install jobs", () => {
       });
 
       expect(jobs.cancel(job.id)?.state).toBe("cancelling");
+
       if (outcome === "rejects") run.reject(new PluginInstallCancelledError());
       else run.resolve(PLUGIN);
 
@@ -127,10 +136,12 @@ describe("plugin install jobs", () => {
 
   it("reports a failure with its message and forgets finished jobs after ten minutes", async () => {
     let now = 0;
+
     const jobs = createPluginInstallJobs({
       notifyChanged: () => {},
       now: () => now,
     });
+
     const job = jobs.start({
       target: sourceTarget("npm:a"),
       displayName: "a",
@@ -160,9 +171,11 @@ describe("install cancellation", () => {
   it("kills the running install command and its children when the install is cancelled", async () => {
     const controller = new AbortController();
     const started = Date.now();
+
     const command = runCancellableInstall(controller.signal, () =>
       runInstallCommand(process.execPath, sleeper),
     );
+
     setTimeout(() => controller.abort(), 50);
 
     await expect(command).rejects.toBeInstanceOf(PluginInstallCancelledError);
@@ -181,6 +194,7 @@ describe("install cancellation", () => {
       runCancellableInstall(committed.signal, async () => {
         commitInstall();
         committed.abort();
+
         return runInstallCommand(process.execPath, ["-e", "1"]);
       }),
     ).resolves.toBe("");
@@ -205,9 +219,11 @@ describe("plugin install routes", () => {
       const response = await postInstall(h.app, { prefer: "respond-async" });
 
       expect(response.status).toBe(202);
+
       const { job } = pluginInstallJobStartResponseSchema.parse(
         await response.json(),
       );
+
       let listed: PluginInstallJob | undefined;
       await vi.waitFor(async () => {
         const list = await h.app.request(`${BASE}/api/v1/plugins/install-jobs`);

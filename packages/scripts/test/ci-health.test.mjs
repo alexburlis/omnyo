@@ -7,6 +7,7 @@ import {
 
 const time = (seconds) =>
   new Date(Date.UTC(2026, 9, 7, 0, 0, seconds)).toISOString();
+
 const job = (id, name, attempt, conclusion, start, end, steps = []) => ({
   id,
   name,
@@ -16,6 +17,7 @@ const job = (id, name, attempt, conclusion, start, end, steps = []) => ({
   completed_at: time(end),
   steps,
 });
+
 const run = (id, attempt, conclusion, jobs) => ({
   id,
   run_attempt: attempt,
@@ -34,6 +36,7 @@ it("separates first-attempt latency from retries and counts failure incidents by
     started_at: time(10),
     completed_at: time(20),
   };
+
   const report = summarizeCiHealth([
     run(1, 1, "success", [
       job(1, "Select CI checks", 1, "success", 10, 20),
@@ -53,6 +56,7 @@ it("separates first-attempt latency from retries and counts failure incidents by
     run(4, 1, "cancelled", [job(10, "Windows", 1, "cancelled", 10, 30)]),
     run(5, 1, null, []),
   ]);
+
   expect(report.durationSeconds).toEqual({ count: 1, median: 150, p90: 150 });
   expect(report.runnerMinutes.median).toBe(3.5);
   expect(report.rerunRuns).toBe(2);
@@ -99,11 +103,14 @@ it("handles an empty window without inventing timings", () => {
 
 it("fetches all job attempts and marks truncated or malformed inventory incomplete", async () => {
   const calls = [];
+
   const runs = await collectCiHealth(
     async (path) => {
       calls.push(path);
+
       if (path.startsWith("actions/workflows/"))
         return { total_count: 1, workflow_runs: [run(1, 2, "success", [])] };
+
       return {
         jobs: [
           job(1, "test", 1, "failure", 0, 10),
@@ -115,8 +122,10 @@ it("fetches all job attempts and marks truncated or malformed inventory incomple
     time(3_600),
     () => {},
   );
+
   expect(calls[1]).toContain("filter=all");
   expect(summarizeCiHealth(runs.runs).recoveredRuns).toBe(1);
+
   for (const data of [
     { total_count: 1_001, workflow_runs: [] },
     { total_count: 1, workflow_runs: [{ id: "wrong" }] },
@@ -127,6 +136,7 @@ it("fetches all job attempts and marks truncated or malformed inventory incomple
       time(3_600),
       () => {},
     );
+
     expect(evidence.inventoryComplete).toBe(false);
     expect(evidence.errors).toHaveLength(1);
   }
@@ -134,6 +144,7 @@ it("fetches all job attempts and marks truncated or malformed inventory incomple
 
 it("checkpoints incomplete evidence and excludes a partly fetched run without discarding other runs", async () => {
   const checkpoints = [];
+
   const evidence = await collectCiHealth(
     async (path) => {
       if (path.startsWith("actions/workflows/"))
@@ -144,9 +155,12 @@ it("checkpoints incomplete evidence and excludes a partly fetched run without di
             { ...run(2, 1, "success", []), event: "push" },
           ],
         };
+
       if (path.includes("runs/2/"))
         return { jobs: [job(101, "build", 1, "success", 10, 50)] };
+
       if (path.endsWith("page=2")) throw new Error("upstream unavailable");
+
       return {
         jobs: Array.from({ length: 100 }, (_, index) =>
           job(index + 1, `test-${index}`, 1, "success", 10, 20),
@@ -157,6 +171,7 @@ it("checkpoints incomplete evidence and excludes a partly fetched run without di
     time(3_600),
     (snapshot) => checkpoints.push(structuredClone(snapshot)),
   );
+
   expect(checkpoints[0].runs).toHaveLength(2);
   expect(checkpoints.at(-1)).toEqual(evidence);
   expect(evidence.inventoryComplete).toBe(true);

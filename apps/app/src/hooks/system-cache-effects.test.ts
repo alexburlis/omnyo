@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { QueryObserver } from "@tanstack/react-query";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import type { ThreadTimelineResponse } from "@omnyo/server-contract";
+import { createDeferredPromise } from "@omnyo/test-helpers";
+import { toolRow } from "@/test/fixtures/thread-timeline-rows";
+import { makeThreadTimelineResponse } from "@/test/fixtures/thread-responses";
 import { createAppQueryClient } from "@/lib/query-client";
 import {
   environmentDiffFilesQueryKey,
@@ -8,6 +12,7 @@ import {
   hostsQueryKey,
   sidebarNavigationQueryKey,
   systemProvidersQueryKey,
+  systemProviderCatalogQueryKey,
   systemExecutionOptionsQueryKey,
   systemVersionQueryKey,
   terminalsQueryKey,
@@ -75,12 +80,14 @@ function observeIdleQuery(
   queryKey: QueryKey,
 ): ObservedQuery {
   const queryFn = vi.fn<() => Promise<string>>().mockResolvedValue("loaded");
+
   const observer = new QueryObserver(queryClient, {
     queryKey,
     queryFn,
     refetchOnWindowFocus: false,
     staleTime: Infinity,
   });
+
   return {
     queryFn,
     unsubscribe: observer.subscribe(() => {}),
@@ -104,36 +111,47 @@ describe("system cache effects", () => {
     const threadKey = threadQueryKey("thread-1");
     const threadBootstrapKey = threadDetailBootstrapQueryKey("thread-1");
     const timelineKey = threadTimelineQueryKey("thread-1");
+    const providerCatalogKey = systemProviderCatalogQueryKey();
+
     const conversationOutlineKey = threadConversationOutlineQueryKey(
       "thread-1",
       "user",
     );
+
     const queuedMessagesKey = threadQueuedMessagesQueryKey("thread-1");
     const promptHistoryKey = threadPromptHistoryQueryKey("thread-1");
+
     const pendingInteractionsKey =
       threadPendingInteractionsQueryKey("thread-1");
+
     const threadSearchKey = threadSearchQueryKey({
       limitPerGroup: 20,
       query: "needle",
     });
+
     const defaultExecutionOptionsKey =
       threadDefaultExecutionOptionsQueryKey("thread-1");
+
     const threadHostFilePreviewKey = threadHostFilePreviewQueryKey(
       "thread-1",
       "env-1",
       "/tmp/log.txt",
     );
+
     const executionOptionsKey = scopedSystemExecutionOptionsKey({
       environmentId: "env-1",
     });
+
     const terminalsKey = terminalsQueryKey({
       kind: "thread",
       threadId: "thread-1",
     });
+
     const sidebarNavigationKey = sidebarNavigationQueryKey();
     queryClient.setQueryData(threadKey, { id: "thread-1" });
     queryClient.setQueryData(threadBootstrapKey, { id: "thread-1" });
     queryClient.setQueryData(timelineKey, { rows: [] });
+    queryClient.setQueryData(providerCatalogKey, []);
     queryClient.setQueryData(conversationOutlineKey, { items: [] });
     queryClient.setQueryData(queuedMessagesKey, []);
     queryClient.setQueryData(promptHistoryKey, []);
@@ -170,6 +188,9 @@ describe("system cache effects", () => {
       true,
     );
     expect(queryClient.getQueryState(timelineKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(providerCatalogKey)?.isInvalidated).toBe(
+      true,
+    );
     expect(
       queryClient.getQueryState(conversationOutlineKey)?.isInvalidated,
     ).toBe(true);
@@ -211,7 +232,7 @@ describe("system cache effects", () => {
       source: "npm",
       updateAvailable: true,
       isDevelopment: false,
-      upgradeCommand: "npx bb-app@latest",
+      upgradeCommand: "npx omnyo-app@latest",
     });
 
     invalidateRealtimeQueriesAfterServerReconnect({
@@ -225,6 +246,7 @@ describe("system cache effects", () => {
   it("refetches active thread bundle queries together after reconnect", async () => {
     const queryClient = createCacheEffectQueryClient();
     queryClient.mount();
+
     const activeThreadQueries = [
       observeIdleQuery(queryClient, threadQueryKey("thread-1")),
       observeIdleQuery(queryClient, threadDetailBootstrapQueryKey("thread-1")),
@@ -257,17 +279,185 @@ describe("system cache effects", () => {
     for (const query of activeThreadQueries) {
       query.unsubscribe();
     }
+
     queryClient.unmount();
     queryClient.clear();
   });
 
-  it("leaves queries fetched after the disconnect watermark alone and keeps in-flight fetches", async () => {
+  it.each(
+    (["initial connect", "reconnect"] as const).flatMap((connection) =>
+      (
+        [
+          "settled during gap",
+          "cached read in flight",
+          "initial read in flight",
+        ] as const
+      ).map((snapshotState) => ({ connection, snapshotState })),
+    ),
+  )(
+    "refreshes a tool completion after $connection with a $snapshotState snapshot",
+    async ({ connection, snapshotState }) => {
+      const queryClient = createCacheEffectQueryClient();
+      queryClient.mount();
+      const timelineKey = threadTimelineQueryKey("thread-tool");
+
+      const pending = makeThreadTimelineResponse({
+        rows: [
+          toolRow({
+            id: "card-save",
+            toolName: "glance_set",
+            status: "pending",
+            startedAt: 1_000,
+            durationMs: null,
+            sourceSeqStart: 1499,
+            sourceSeqEnd: 1499,
+          }),
+        ],
+        maxSeq: 1499,
+      });
+
+      const completed = makeThreadTimelineResponse({
+        rows: [
+          toolRow({
+            id: "card-save",
+            toolName: "glance_set",
+            status: "completed",
+            startedAt: 1_000,
+            durationMs: 15_154,
+            sourceSeqStart: 1499,
+            sourceSeqEnd: 1500,
+          }),
+        ],
+        maxSeq: 1500,
+      });
+
+      const staleRead = createDeferredPromise<ThreadTimelineResponse>();
+
+      const queryFn = vi
+        .fn<() => Promise<ThreadTimelineResponse>>()
+        .mockReturnValueOnce(staleRead.promise)
+        .mockResolvedValue(completed);
+
+      if (snapshotState !== "initial read in flight") {
+        queryClient.setQueryData(timelineKey, pending, {
+          updatedAt: Date.now() - 500,
+        });
+      }
+
+      const observer = new QueryObserver(queryClient, {
+        queryKey: timelineKey,
+        queryFn,
+        refetchOnWindowFocus: false,
+        staleTime: Infinity,
+      });
+
+      const unsubscribe = observer.subscribe(() => {});
+      const reading = observer.refetch();
+      const disconnectedAt = Date.now();
+
+      try {
+        expect(queryFn).toHaveBeenCalledTimes(1);
+
+        if (snapshotState === "settled during gap") {
+          staleRead.resolve(pending);
+          await reading;
+          expect(
+            queryClient.getQueryState(timelineKey)?.dataUpdatedAt,
+          ).toBeGreaterThanOrEqual(disconnectedAt);
+        }
+
+        if (connection === "initial connect") {
+          invalidateRealtimeQueriesFetchedBeforeInitialConnect({
+            queryClient,
+            connectedAt: disconnectedAt,
+          });
+        } else {
+          invalidateRealtimeQueriesAfterServerReconnect({
+            queryClient,
+            disconnectedAt,
+          });
+        }
+
+        await vi.waitFor(() => {
+          expect(observer.getCurrentResult().data?.rows[0]).toMatchObject({
+            status: "completed",
+            completedAt: 16_154,
+          });
+        });
+        expect(queryFn).toHaveBeenCalledTimes(2);
+        staleRead.resolve(pending);
+        await reading;
+        expect(observer.getCurrentResult().data?.rows[0]).toMatchObject({
+          status: "completed",
+          completedAt: 16_154,
+        });
+      } finally {
+        staleRead.resolve(pending);
+        unsubscribe();
+        queryClient.unmount();
+        queryClient.clear();
+      }
+    },
+  );
+
+  it.each(["initial connect", "reconnect"] as const)(
+    "replaces an unobserved timeline prefetch after %s",
+    async (connection) => {
+      const queryClient = createCacheEffectQueryClient();
+      queryClient.mount();
+      const queryKey = threadTimelineQueryKey("thread-prefetch");
+      const staleRead = createDeferredPromise<string>();
+
+      const queryFn = vi
+        .fn<() => Promise<string>>()
+        .mockReturnValueOnce(staleRead.promise)
+        .mockResolvedValue("completed");
+
+      const options = { queryKey, queryFn, staleTime: Infinity };
+      const prefetch = queryClient.prefetchQuery(options);
+      const watermark = Date.now();
+      let unsubscribe = () => {};
+
+      try {
+        expect(queryFn).toHaveBeenCalledTimes(1);
+        expect(queryClient.getQueryCache().find({ queryKey })?.isActive()).toBe(
+          false,
+        );
+
+        if (connection === "initial connect") {
+          invalidateRealtimeQueriesFetchedBeforeInitialConnect({
+            queryClient,
+            connectedAt: watermark,
+          });
+        } else {
+          invalidateRealtimeQueriesAfterServerReconnect({
+            queryClient,
+            disconnectedAt: watermark,
+          });
+        }
+
+        staleRead.resolve("pending");
+        await prefetch;
+        const observer = new QueryObserver(queryClient, options);
+        unsubscribe = observer.subscribe(() => {});
+        await vi.waitFor(() => {
+          expect(observer.getCurrentResult().data).toBe("completed");
+        });
+        expect(queryFn).toHaveBeenCalledTimes(2);
+      } finally {
+        staleRead.resolve("pending");
+        unsubscribe();
+        queryClient.unmount();
+        queryClient.clear();
+      }
+    },
+  );
+
+  it("leaves inactive queries fetched after the disconnect watermark alone", () => {
     const queryClient = createCacheEffectQueryClient();
-    queryClient.mount();
     const disconnectedAt = Date.now();
     const staleKey = threadQueryKey("thread-stale");
     const freshKey = threadQueryKey("thread-fresh");
-    const inFlightKey = threadTimelineQueryKey("thread-in-flight");
     queryClient.setQueryData(
       staleKey,
       { id: "thread-stale" },
@@ -279,40 +469,12 @@ describe("system cache effects", () => {
       { updatedAt: disconnectedAt + 500 },
     );
 
-    let resolveInFlight: ((value: string) => void) | undefined;
-    const inFlightQueryFn = vi.fn(
-      () =>
-        new Promise<string>((resolve) => {
-          resolveInFlight = resolve;
-        }),
-    );
-    const inFlightObserver = new QueryObserver(queryClient, {
-      queryKey: inFlightKey,
-      queryFn: inFlightQueryFn,
-      refetchOnWindowFocus: false,
-      staleTime: Infinity,
-    });
-    const unsubscribeInFlight = inFlightObserver.subscribe(() => {});
-    await vi.waitFor(() =>
-      expect(inFlightObserver.getCurrentResult().fetchStatus).toBe("fetching"),
-    );
-
     invalidateRealtimeQueriesAfterServerReconnect({
       disconnectedAt,
       queryClient,
     });
-
     expect(queryClient.getQueryState(staleKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(freshKey)?.isInvalidated).toBe(false);
-    expect(inFlightQueryFn).toHaveBeenCalledTimes(1);
-    resolveInFlight?.("loaded");
-    await vi.waitFor(() =>
-      expect(inFlightObserver.getCurrentResult().data).toBe("loaded"),
-    );
-    expect(inFlightQueryFn).toHaveBeenCalledTimes(1);
-
-    unsubscribeInFlight();
-    queryClient.unmount();
     queryClient.clear();
   });
 
@@ -320,16 +482,19 @@ describe("system cache effects", () => {
     const queryClient = createCacheEffectQueryClient();
     queryClient.mount();
     const erroredKey = threadStorageLocationQueryKey("thread-1");
+
     const queryFn = vi
       .fn<() => Promise<string>>()
       .mockRejectedValueOnce(new Error("server restarting"))
       .mockResolvedValue("loaded");
+
     const observer = new QueryObserver(queryClient, {
       queryKey: erroredKey,
       queryFn,
       refetchOnWindowFocus: false,
       staleTime: Infinity,
     });
+
     const unsubscribe = observer.subscribe(() => {});
     await vi.waitFor(() =>
       expect(observer.getCurrentResult().isError).toBe(true),
@@ -377,12 +542,14 @@ describe("system cache effects", () => {
   it("refetches an active diff TOC query but evicts the observer-less patch cache after reconnect", async () => {
     const queryClient = createCacheEffectQueryClient();
     const diffFilesKey = environmentDiffFilesQueryKey("env-1", "all", "main");
+
     const diffPatchKey = environmentDiffPatchQueryKey(
       "env-1",
       "all",
       "main",
       "file.ts",
     );
+
     queryClient.setQueryData(diffFilesKey, {
       outcome: "available",
       files: [],
@@ -394,17 +561,20 @@ describe("system cache effects", () => {
       patch: "diff --git a/file.ts b/file.ts\n",
       truncated: false,
     });
+
     const diffFilesQueryFn = vi.fn(async () => ({
       outcome: "available" as const,
       files: [],
       shortstat: "",
       mergeBaseRef: "base-ref",
     }));
+
     const diffFilesObserver = new QueryObserver(queryClient, {
       queryKey: diffFilesKey,
       queryFn: diffFilesQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeDiffFiles = diffFilesObserver.subscribe(() => {});
     diffFilesQueryFn.mockClear();
 

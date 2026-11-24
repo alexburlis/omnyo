@@ -14,8 +14,11 @@ export function classifyFixtureFidelity({
   replacement,
 }) {
   if (!spatialOwner) return "none";
+
   if (outcome || replacement) return "flow";
+
   if (transient) return "state";
+
   return "anchor";
 }
 
@@ -25,9 +28,11 @@ function uniqueSorted(values) {
 
 function requireValue(argv, index, flag) {
   const value = argv[index + 1];
+
   if (value === undefined || value.startsWith("--")) {
     throw new Error(`${flag} requires a value`);
   }
+
   return value;
 }
 
@@ -46,6 +51,7 @@ export function parseScaffoldArgs(argv) {
 
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
+
     switch (flag) {
       case "--id":
         input.id = requireValue(argv, index, flag);
@@ -92,16 +98,21 @@ function validateInput(input) {
   if (!input.id || !/^[a-z][a-z0-9-]*$/.test(input.id)) {
     throw new Error("--id must be lowercase kebab-case");
   }
+
   if (!input.title?.trim()) throw new Error("--title is required");
+
   if (!input.groupId || !/^[a-z][a-z0-9-]*$/.test(input.groupId)) {
     throw new Error("--group must be lowercase kebab-case");
   }
+
   if (input.apiSymbols.length === 0) {
     throw new Error("at least one --api-symbol is required");
   }
+
   if (input.spatialOwner && input.sourcePaths.length === 0) {
     throw new Error("spatial surfaces require at least one --source");
   }
+
   if (
     !input.spatialOwner &&
     (input.transient || input.outcome || input.replacement)
@@ -115,6 +126,7 @@ function validateInput(input) {
 export function buildSurfaceEntryScaffold(input) {
   validateInput(input);
   const fidelity = classifyFixtureFidelity(input);
+
   const sourcePaths = uniqueSorted(
     input.sourcePaths.map((path) => path.replaceAll("\\", "/")),
   );
@@ -124,7 +136,7 @@ export function buildSurfaceEntryScaffold(input) {
     surface: {
       id: input.id,
       title: input.title.trim(),
-      summary: `TODO: Describe where ${input.title.trim()} appears in bb. With this, a plugin can:`,
+      summary: `TODO: Describe where ${input.title.trim()} appears in Omnyo. With this, a plugin can:`,
       bullets: [
         "TODO: Describe the first user-visible capability",
         "TODO: Describe the second user-visible capability",
@@ -154,7 +166,7 @@ export function renderSurfaceEntryScaffold(input) {
 
 function usage() {
   return `Usage:
-  pnpm exec turbo run scaffold:surface-entry --filter=bb-plugin-plugin-api-docs -- \\
+  pnpm exec turbo run scaffold:surface-entry --filter=omnyo-plugin-plugin-api-docs -- \\
     --id <surface-id> --title <title> --group <group-id> \\
     --source <repo-path> --api-symbol <SDK-symbol> \\
     [--transient] [--outcome] [--replacement] [--no-spatial-owner]

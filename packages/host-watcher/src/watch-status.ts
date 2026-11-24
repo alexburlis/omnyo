@@ -11,6 +11,8 @@ export function watchWorkspaceStatus(
     onReady: args.onReady,
     onWatchError: args.onWatchError,
   });
+
   watcher.start();
+
   return () => watcher.dispose();
 }

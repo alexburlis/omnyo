@@ -2,21 +2,51 @@
 
 import { LazyMarkdownHtml } from "@/components/ui/lazy-markdown-html";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vitest";
+import type { ServerRuntimeIdentity } from "@omnyo/server-contract";
+
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import { ThreadTimelineNavigationProvider } from "@/components/thread/timeline/ThreadTimelineNavigationContext";
+import { sdk } from "@/lib/sdk";
+import {
+  threadDetailBootstrapQueryKey,
+  threadTimelineQueryKey,
+} from "@/hooks/queries/query-keys";
+import {
+  makeThreadResponse,
+  makeThreadTimelineResponse,
+} from "@/test/fixtures/thread-responses";
 import { pluginSdkAppImplementation } from "./plugin-sdk-app-impl";
+import * as ladlePluginSdkApp from "../../.ladle/plugin-sdk-app";
 import { AppNavigationHostProvider } from "./app-navigation-host";
+import {
+  installNativeShellForTest,
+  removeNativeShellForTest,
+} from "@/test/native-shell-test-utils";
 
 beforeAll(() => LazyMarkdownHtml.preload());
 
 afterEach(cleanup);
 
 describe("plugin SDK Markdown", () => {
-  it("uses the surrounding thread detail navigation for file and web links", () => {
+  it("uses the surrounding thread detail navigation for file and web links", async () => {
     const onOpenLink = vi.fn(() => false);
     const openUrl = vi.fn(() => true);
     const onOpenLocalFileLink = vi.fn(() => true);
@@ -37,7 +67,7 @@ describe("plugin SDK Markdown", () => {
       </AppNavigationHostProvider>,
     );
 
-    const fileLink = screen.getByRole("link", { name: "README" });
+    const fileLink = await screen.findByRole("link", { name: "README" });
     expect(fileLink.getAttribute("href")).toBe("file:///workspace/README.md");
     fireEvent.click(fileLink);
     expect(onOpenLocalFileLink).toHaveBeenCalledWith({
@@ -58,11 +88,12 @@ describe("plugin SDK Markdown", () => {
 
   it.each(["workspace", "thread-storage"] as const)(
     "resolves nested %s document destinations independently of message context",
-    (kind) => {
+    async (kind) => {
       const openFilePreview = vi.fn(() => true);
       const openUrl = vi.fn(() => true);
       const Markdown = pluginSdkAppImplementation.Markdown;
       const rootPath = kind === "workspace" ? "/workspace" : "/storage";
+
       const target =
         kind === "workspace"
           ? {
@@ -75,11 +106,13 @@ describe("plugin SDK Markdown", () => {
               threadId: "thr_document",
               path: "reports/nested/report.md",
             };
+
       const props = {
         content:
           '[Sibling](sibling.md#L2-L4) ![Chart](../chart%20one.svg) [Parent](../summary.md) [Missing](missing.md) [Web](https://example.com)\n\n<video src="../clip.mp4" controls title="Clip"></video>',
         experimental_document: { target, rootPath, threadId: "thr_document" },
       };
+
       render(
         <AppNavigationHostProvider capabilities={{ openFilePreview, openUrl }}>
           <ThreadTimelineNavigationProvider
@@ -96,7 +129,7 @@ describe("plugin SDK Markdown", () => {
           </ThreadTimelineNavigationProvider>
         </AppNavigationHostProvider>,
       );
-      fireEvent.click(screen.getByRole("link", { name: "Sibling" }));
+      fireEvent.click(await screen.findByRole("link", { name: "Sibling" }));
       expect(openFilePreview).toHaveBeenLastCalledWith({
         target: { ...target, path: "reports/nested/sibling.md" },
         location: { kind: "range", startLine: 2, endLine: 4 },
@@ -128,7 +161,7 @@ describe("plugin SDK Markdown", () => {
     },
   );
 
-  it("keeps escaping relative paths out of file navigation and preserves absolute links", () => {
+  it("keeps escaping relative paths out of file navigation and preserves absolute links", async () => {
     const openFilePreview = vi.fn(() => true);
     const onOpenLocalFileLink = vi.fn(() => true);
     const Markdown = pluginSdkAppImplementation.Markdown;
@@ -157,6 +190,7 @@ describe("plugin SDK Markdown", () => {
         </ThreadTimelineNavigationProvider>
       </AppNavigationHostProvider>,
     );
+    await screen.findByRole("link", { name: "Escape" });
     expect(
       screen.getByRole("link", { name: "Escape" }).getAttribute("href"),
     ).toBe("../../../outside.md");
@@ -175,7 +209,7 @@ describe("plugin SDK Markdown", () => {
     ).toBe("/api/v1/threads/thr_document/host-files/outside.svg");
   });
 
-  it("routes web links without requiring a thread navigation context", () => {
+  it("routes web links without requiring a thread navigation context", async () => {
     const openUrl = vi.fn(() => true);
     const Markdown = pluginSdkAppImplementation.Markdown;
     render(
@@ -183,43 +217,169 @@ describe("plugin SDK Markdown", () => {
         <Markdown content="[Docs](https://example.com/docs)" />
       </AppNavigationHostProvider>,
     );
-    fireEvent.click(screen.getByRole("link", { name: "Docs" }));
+    fireEvent.click(await screen.findByRole("link", { name: "Docs" }));
     expect(openUrl).toHaveBeenCalledWith({ url: "https://example.com/docs" });
   });
 });
 
 describe("plugin SDK navigation components", () => {
-  it("sends navigate.openUrl to the navigation host", () => {
-    const openUrl = vi.fn(() => true);
-    const results: boolean[] = [];
+  it("routes experimental thread-open prefetch through the route query cache", async () => {
+    const runtimeStatus = vi
+      .spyOn(sdk.server, "runtimeIdentity")
+      .mockResolvedValue({
+        runtimeId: "runtime-prefetch",
+      } satisfies ServerRuntimeIdentity);
+
+    onTestFinished(() => runtimeStatus.mockRestore());
+
+    const thread = {
+      ...makeThreadResponse({
+        id: "thr_prefetch",
+        projectId: "proj_prefetch",
+        environmentId: null,
+        title: "Prefetch",
+        titleFallback: "Prefetch",
+        latestAttentionAt: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+      environment: null,
+      host: null,
+    };
+
+    const getThread = vi.spyOn(sdk.threads, "get").mockResolvedValue(thread);
+
+    const getTimeline = vi
+      .spyOn(sdk.threads, "timeline")
+      .mockResolvedValue(makeThreadTimelineResponse());
+
+    const queryClient = new QueryClient();
+
     function Probe() {
-      const navigate = pluginSdkAppImplementation.useBbNavigate();
+      const navigate = pluginSdkAppImplementation.experimental_useAppNavigate();
+
       return (
         <button
           type="button"
-          onClick={() => {
-            results.push(navigate.openUrl("https://example.com/a"));
-          }}
+          onClick={() =>
+            navigate.experimental_prefetchThreadOpen("thr_prefetch")
+          }
         >
-          Open
+          Warm thread
         </button>
       );
     }
+
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={queryClient}>
         <MemoryRouter>
-          <AppNavigationHostProvider capabilities={{ openUrl }}>
-            <PluginSlotMount pluginId="demo" slotKind="test" slotId="probe">
-              <Probe />
-            </PluginSlotMount>
-          </AppNavigationHostProvider>
+          <PluginSlotMount pluginId="demo" slotKind="test" slotId="probe">
+            <Probe />
+          </PluginSlotMount>
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    expect(results).toEqual([true]);
-    expect(openUrl).toHaveBeenCalledWith({ url: "https://example.com/a" });
+    fireEvent.click(screen.getByRole("button", { name: "Warm thread" }));
+
+    await waitFor(() => {
+      expect(getThread).toHaveBeenCalledTimes(1);
+      expect(getTimeline).toHaveBeenCalledTimes(1);
+    });
+    expect(
+      queryClient.getQueryData(threadDetailBootstrapQueryKey("thr_prefetch")),
+    ).toMatchObject({ id: "thr_prefetch" });
+    expect(
+      queryClient.getQueryData(threadTimelineQueryKey("thr_prefetch")),
+    ).toMatchObject({ rows: [] });
   });
+
+  it("plays chat tap feedback before loading the chat and leaves programmatic opens quiet", () => {
+    const shell = installNativeShellForTest();
+    onTestFinished(removeNativeShellForTest);
+
+    const getThread = vi
+      .spyOn(sdk.threads, "get")
+      .mockImplementation(() => new Promise(() => {}));
+
+    onTestFinished(() => getThread.mockRestore());
+
+    function Probe() {
+      const navigate = pluginSdkAppImplementation.experimental_useAppNavigate();
+      const tapOptions = { split: false, experimental_userInitiated: true };
+
+      return (
+        <>
+          <button type="button" onClick={() => navigate.toThread("thr_next")}>
+            Redirect
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate.toThread("thr_next", tapOptions)}
+          >
+            Open chat
+          </button>
+        </>
+      );
+    }
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <PluginSlotMount pluginId="demo" slotKind="test" slotId="probe">
+            <Probe />
+          </PluginSlotMount>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Redirect" }));
+    expect(shell.messages()).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
+    expect(shell.messages()).toEqual([
+      { type: "haptic", kind: "impact-light" },
+    ]);
+  });
+
+  it.each([
+    ["application", pluginSdkAppImplementation],
+    ["Ladle", ladlePluginSdkApp],
+  ] as const)(
+    "sends %s navigate.openUrl to the navigation host",
+    (_owner, implementation) => {
+      const openUrl = vi.fn(() => true);
+      const results: boolean[] = [];
+
+      function Probe() {
+        const navigate = implementation.experimental_useAppNavigate();
+
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              results.push(navigate.openUrl("https://example.com/a"));
+            }}
+          >
+            Open
+          </button>
+        );
+      }
+
+      render(
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>
+            <AppNavigationHostProvider capabilities={{ openUrl }}>
+              <PluginSlotMount pluginId="demo" slotKind="test" slotId="probe">
+                <Probe />
+              </PluginSlotMount>
+            </AppNavigationHostProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Open" }));
+      expect(results).toEqual([true]);
+      expect(openUrl).toHaveBeenCalledWith({ url: "https://example.com/a" });
+    },
+  );
 
   it("exposes the file link through the real runtime", () => {
     const openFilePreview = vi.fn(() => true);

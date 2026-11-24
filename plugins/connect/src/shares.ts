@@ -3,7 +3,7 @@ import type {
   PluginHosts,
   PluginKvStorage,
   PluginLogger,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import {
   ShareHostNotFoundError,
   type ShareHost,
@@ -13,7 +13,7 @@ import {
   connectPublicProtocol,
   deriveConnectBaseUrl,
   type ConnectCredential,
-} from "@bb/connect-client";
+} from "@omnyo/connect-client";
 import type { ShareListing } from "./types.js";
 
 export const SHARES_KV_KEY = "shares";
@@ -25,6 +25,7 @@ const persistedShareSchema = z
     createdAt: z.number(),
   })
   .strict();
+
 const sharesContainerSchema = z.record(z.string(), z.unknown());
 
 interface RestoredShare {
@@ -53,11 +54,13 @@ export function parseSharePort(raw: unknown): number {
       : typeof raw === "string" && raw.trim() !== ""
         ? Number(raw)
         : Number.NaN;
+
   if (!Number.isInteger(asNumber) || asNumber < 1 || asNumber > 65535) {
     throw new SharePortError(
       `Invalid port "${String(raw)}": must be an integer between 1 and 65535`,
     );
   }
+
   return asNumber;
 }
 
@@ -66,6 +69,7 @@ export type ShareIdentity = Pick<ConnectCredential, "serverUrl" | "handle">;
 export function sharePublicUrl(identity: ShareIdentity, port: number): string {
   const base = deriveConnectBaseUrl(identity.serverUrl);
   const url = new URL(base);
+
   return `${url.protocol}//${identity.handle}--${port}.${url.host}`;
 }
 
@@ -86,7 +90,9 @@ export function shareLoopbackHost(port: number): string {
 
 export function serverOwnPort(loopbackBaseUrl: string): number {
   const url = new URL(loopbackBaseUrl);
+
   if (url.port) return Number(url.port);
+
   return url.protocol === "https:" ? 443 : 80;
 }
 
@@ -120,7 +126,9 @@ function compareListings(a: ShareListing, b: ShareListing): number {
 
 function sharedPortErrorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
+
   if ("code" in error && typeof error.code === "string") return error.code;
+
   if (
     "body" in error &&
     typeof error.body === "object" &&
@@ -130,6 +138,7 @@ function sharedPortErrorCode(error: unknown): string | undefined {
   ) {
     return error.body.code;
   }
+
   return undefined;
 }
 
@@ -149,8 +158,10 @@ export class ShareRegistry {
 
   async load(): Promise<void> {
     if (this.loaded) return;
+
     if (this.loading) return this.loading;
     this.loading = this.loadOnce();
+
     try {
       await this.loading;
       this.loaded = true;
@@ -162,31 +173,41 @@ export class ShareRegistry {
   private async loadOnce(): Promise<void> {
     const raw = await this.options.kv.get<unknown>(SHARES_KV_KEY);
     const next = new Map<string, RestoredShare>();
+
     if (raw === undefined) {
       this.shares = next;
+
       return;
     }
+
     const record = sharesContainerSchema.safeParse(raw);
+
     if (!record.success) {
       this.options.log.warn("ignoring malformed shared-port registry");
       this.shares = next;
+
       return;
     }
+
     for (const [storageKey, rawEntry] of Object.entries(record.data)) {
       try {
         const parsed = persistedShareSchema.safeParse(rawEntry);
+
         if (!parsed.success) {
           this.options.log.warn(
             `skipping malformed shared-port entry "${storageKey}": ${z.prettifyError(parsed.error)}`,
           );
           continue;
         }
+
         const hostId = parsed.data.hostId ?? null;
+
         const share: RestoredShare = {
           hostId,
           port: parsed.data.port,
           createdAt: parsed.data.createdAt,
         };
+
         next.set(restoredShareKey(hostId, share.port), share);
       } catch (error) {
         this.options.log.warn(
@@ -194,6 +215,7 @@ export class ShareRegistry {
         );
       }
     }
+
     this.shares = next;
     this.lastListings = [...next.values()]
       .map((share) => this.seededListing(share))
@@ -214,20 +236,25 @@ export class ShareRegistry {
   hasServerPort(port: number): boolean {
     for (const share of this.shares.values()) {
       if (share.port !== port) continue;
+
       if (share.hostId === null || share.hostId === this.serverHostId) {
         return true;
       }
     }
+
     return false;
   }
 
   async list(hostId?: string): Promise<ShareListing[]> {
     await this.load();
+
     const listings = await Promise.all(
       [...this.shares.values()].map((share) => this.resolveListing(share)),
     );
+
     listings.sort(compareListings);
     this.lastListings = listings;
+
     return hostId === undefined
       ? listings
       : listings.filter((share) => share.hostId === hostId);
@@ -240,47 +267,58 @@ export class ShareRegistry {
   async add(port: number, host: ShareHost): Promise<ShareListing> {
     await this.load();
     const validated = parseSharePort(port);
+
     if (
       host.isServer &&
       validated === serverOwnPort(this.options.getLoopbackBaseUrl())
     ) {
       throw new SharePortError(
-        `Cannot share port ${validated}: that is the bb server's own port — the bare handle URL already serves bb`,
+        `Cannot share port ${validated}: that is the Omnyo server's own port — the bare handle URL already serves Omnyo`,
       );
     }
+
     if (this.options.getIdentity() === null) {
       throw new SharePortError(
-        "this bb isn't signed in to a bb account — run `bb account login`, then share again",
+        "this Omnyo isn't signed in to an Omnyo account — run `omnyo account login`, then share again",
       );
     }
+
     if (host.isServer) this.serverHostId = host.id;
+
     const existing = [...this.shares.values()].find(
       (share) =>
         share.port === validated &&
         (share.hostId === host.id || (share.hostId === null && host.isServer)),
     );
+
     if (existing) {
       const listing = await this.resolveListing(existing, host);
       this.updateSnapshot(listing, existing.hostId === null);
+
       return listing;
     }
 
     const url = await this.urlFor(host, validated);
     const key = shareKey(host.id, validated);
+
     const share: RestoredShare = {
       hostId: host.id,
       port: validated,
       createdAt: Date.now(),
     };
+
     this.shares.set(key, share);
+
     try {
       if (!host.isServer) this.declare(host.id);
       await this.persist();
     } catch (error) {
       this.shares.delete(key);
+
       if (!host.isServer) this.restoreDeclaration(host.id);
       throw error;
     }
+
     const listing: ShareListing = {
       hostId: host.id,
       hostName: host.name,
@@ -288,8 +326,10 @@ export class ShareRegistry {
       createdAt: share.createdAt,
       url,
     };
+
     this.updateSnapshot(listing, false);
     this.options.onChange?.();
+
     return listing;
   }
 
@@ -297,33 +337,42 @@ export class ShareRegistry {
     await this.load();
     const validated = parseSharePort(port);
     const selector = hostSelector.trim();
+
     if (selector.length === 0) {
       throw new SharePortError("--host requires a name or id");
     }
+
     const resolved = await this.findForRemoval(validated, selector);
+
     if (!resolved) {
       return { removed: false, hostId: selector, hostName: selector };
     }
+
     const { key, share } = resolved;
     let host: ShareHost | undefined;
+
     try {
       host = await this.resolveHost(share);
     } catch {}
+
     const publicHostId = host?.id ?? share.hostId ?? selector;
     const hostName = host?.name ?? "removed host";
     this.shares.delete(key);
+
     try {
       await this.persist();
     } catch (error) {
       this.shares.set(key, share);
       throw error;
     }
+
     const declarationHostId =
       host?.isServer === false
         ? host.id
         : host === undefined && share.hostId !== null
           ? share.hostId
           : undefined;
+
     if (declarationHostId !== undefined) {
       try {
         this.declare(declarationHostId);
@@ -333,15 +382,18 @@ export class ShareRegistry {
         );
       }
     }
+
     const removedListingIds = this.snapshotAliases(
       publicHostId,
       share.hostId === null,
     );
+
     this.lastListings = this.lastListings.filter(
       (entry) =>
         !(entry.port === validated && removedListingIds.has(entry.hostId)),
     );
     this.options.onChange?.();
+
     return { removed: true, hostId: publicHostId, hostName };
   }
 
@@ -355,6 +407,7 @@ export class ShareRegistry {
         );
       }
     }
+
     this.declaredMachineHostIds.clear();
   }
 
@@ -363,12 +416,15 @@ export class ShareRegistry {
   ): Promise<void> {
     if (!isActivationCurrent() || this.options.getIdentity() === null) return;
     const serverHostId = await this.options.hostResolver.serverHostId();
+
     if (!isActivationCurrent()) return;
     this.serverHostId = serverHostId;
     await this.normalizeLegacyShares(serverHostId);
     let firstError: unknown;
+
     for (const hostId of this.machineHostIds()) {
       if (!isActivationCurrent()) return;
+
       try {
         this.declare(hostId);
       } catch (error) {
@@ -376,30 +432,38 @@ export class ShareRegistry {
           await this.pruneHost(hostId);
           continue;
         }
+
         firstError ??= error;
         this.options.log.warn(
           `failed to declare shared ports for host ${hostId}: ${errorMessage(error)}`,
         );
       }
     }
+
     if (firstError !== undefined) throw firstError;
   }
 
   async pruneHost(hostId: string): Promise<void> {
     await this.load();
+
     const removedShares = [...this.shares].filter(
       ([, share]) => share.hostId === hostId,
     );
+
     if (removedShares.length === 0) return;
+
     for (const [key] of removedShares) this.shares.delete(key);
+
     try {
       await this.persist();
     } catch (error) {
       for (const [key, share] of removedShares) {
         if (!this.shares.has(key)) this.shares.set(key, share);
       }
+
       throw error;
     }
+
     this.declaredMachineHostIds.delete(hostId);
     this.lastListings = this.lastListings.filter(
       (entry) => entry.hostId !== hostId,
@@ -410,6 +474,7 @@ export class ShareRegistry {
   private async isRemovedHost(hostId: string): Promise<boolean> {
     try {
       await this.options.hostResolver.byId(hostId);
+
       return false;
     } catch (error) {
       return error instanceof ShareHostNotFoundError;
@@ -418,16 +483,21 @@ export class ShareRegistry {
 
   private async normalizeLegacyShares(serverHostId: string): Promise<void> {
     let changed = false;
+
     for (const [key, share] of [...this.shares]) {
       if (share.hostId !== null) continue;
       this.shares.delete(key);
       const canonicalKey = shareKey(serverHostId, share.port);
+
       if (!this.shares.has(canonicalKey)) {
         this.shares.set(canonicalKey, { ...share, hostId: serverHostId });
       }
+
       changed = true;
     }
+
     if (!changed) return;
+
     try {
       await this.persist();
     } catch (error) {
@@ -439,18 +509,23 @@ export class ShareRegistry {
 
   private snapshotAliases(hostId: string, wasLegacy: boolean): Set<string> {
     const aliases = new Set([hostId]);
+
     if (wasLegacy || hostId === this.serverHostId) {
       aliases.add(UNRESOLVED_SERVER_HOST_ID);
+
       if (this.serverHostId !== null) aliases.add(this.serverHostId);
     }
+
     return aliases;
   }
 
   private updateSnapshot(listing: ShareListing, wasLegacy: boolean): void {
     const aliases = this.snapshotAliases(listing.hostId, wasLegacy);
+
     const next = this.lastListings.filter(
       (entry) => !(entry.port === listing.port && aliases.has(entry.hostId)),
     );
+
     next.push(listing);
     next.sort(compareListings);
     this.lastListings = next;
@@ -461,9 +536,12 @@ export class ShareRegistry {
     knownHost?: ShareHost,
   ): Promise<ShareListing> {
     let host = knownHost;
+
     try {
       host ??= await this.resolveHost(share);
+
       if (host.isServer) this.serverHostId = host.id;
+
       return {
         hostId: host.id,
         hostName: host.name,
@@ -507,8 +585,9 @@ export class ShareRegistry {
 
   private unavailableReason(share: RestoredShare, error: unknown): string {
     if (error instanceof ShareHostNotFoundError) {
-      return `Host ${error.hostId} was removed. Run \`bb connect unexpose ${share.port} --host ${error.hostId}\` to prune this share.`;
+      return `Host ${error.hostId} was removed. Run \`omnyo connect unexpose ${share.port} --host ${error.hostId}\` to prune this share.`;
     }
+
     return error instanceof SharePortError
       ? error.message
       : `Share URL unavailable: ${errorMessage(error)}`;
@@ -516,28 +595,34 @@ export class ShareRegistry {
 
   private async urlFor(host: ShareHost, port: number): Promise<string> {
     if (host.isServer) return this.serverUrl(port);
+
     try {
       const identity = await this.options.hosts.ensureSharedPortTunnel(host.id);
+
       return machineSharePublicUrl(identity, port);
     } catch (error) {
       const prefix = `Cannot share port ${port} from host "${host.name}" (${host.id})`;
       const code = sharedPortErrorCode(error);
+
       if (code === "connect_host_unenrolled") {
         throw new SharePortError(
-          `${prefix}: this host has no bb connect machine credential. Enroll it via Connect in Settings > Machines.`,
+          `${prefix}: this host has no Omnyo connect machine credential. Enroll it via Connect in Settings > Machines.`,
         );
       }
+
       if (code === "connect_host_offline" || code === "host_unavailable") {
         throw new SharePortError(
           `${prefix}: this host is not connected right now. Bring the host online and try again.`,
         );
       }
+
       throw new SharePortError(`${prefix}: ${errorMessage(error)}`);
     }
   }
 
   private serverUrl(port: number): string {
     const identity = this.options.getIdentity();
+
     return identity
       ? sharePublicUrl(identity, port)
       : `http://127.0.0.1:${port}`;
@@ -562,7 +647,9 @@ export class ShareRegistry {
   ): Promise<{ key: string; share: RestoredShare } | undefined> {
     for (const [key, share] of this.shares) {
       if (share.port !== port) continue;
+
       if (share.hostId === selector) return { key, share };
+
       if (
         share.hostId === null &&
         (selector === this.serverHostId ||
@@ -571,11 +658,15 @@ export class ShareRegistry {
         return { key, share };
       }
     }
+
     const matches: Array<{ key: string; share: RestoredShare }> = [];
+
     for (const [key, share] of this.shares) {
       if (share.port !== port) continue;
+
       try {
         const host = await this.resolveHost(share);
+
         if (
           host.id === selector ||
           host.name.toLocaleLowerCase() === selector.toLocaleLowerCase()
@@ -584,11 +675,13 @@ export class ShareRegistry {
         }
       } catch {}
     }
+
     if (matches.length > 1) {
       throw new SharePortError(
         `host name "${selector}" is ambiguous; pass a host id`,
       );
     }
+
     return matches[0];
   }
 
@@ -597,7 +690,9 @@ export class ShareRegistry {
       .filter((share) => share.hostId === hostId)
       .map((share) => share.port)
       .sort((a, b) => a - b);
+
     this.options.hosts.declareSharedPorts(hostId, ports);
+
     if (ports.length === 0) {
       this.declaredMachineHostIds.delete(hostId);
     } else {
@@ -618,20 +713,25 @@ export class ShareRegistry {
   private async persist(): Promise<void> {
     if (this.shares.size === 0) {
       await this.options.kv.delete(SHARES_KV_KEY);
+
       return;
     }
+
     const map: Record<string, unknown> = {};
+
     for (const share of this.shares.values()) {
       const storageKey =
         share.hostId === null
           ? String(share.port)
           : shareKey(share.hostId, share.port);
+
       map[storageKey] = {
         ...(share.hostId === null ? {} : { hostId: share.hostId }),
         port: share.port,
         createdAt: share.createdAt,
       };
     }
+
     await this.options.kv.set(SHARES_KV_KEY, map);
   }
 }

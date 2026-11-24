@@ -1,4 +1,4 @@
-import { fuzzyMatchText } from "@bb/fuzzy-match";
+import { fuzzyMatchText } from "@omnyo/fuzzy-match";
 
 interface SearchPickerOptionsArgs<T> {
   options: readonly T[];
@@ -14,6 +14,7 @@ export function searchPickerOptions<T>({
   getAliases,
 }: SearchPickerOptionsArgs<T>): readonly T[] {
   const normalizedQuery = query.trim();
+
   if (normalizedQuery.length === 0) {
     return options;
   }

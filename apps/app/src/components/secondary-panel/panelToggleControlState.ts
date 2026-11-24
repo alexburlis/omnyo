@@ -40,6 +40,7 @@ export function resolveConversationCollapseControl({
   const action: PanelToggleAction = isConversationCollapsed
     ? "exit-full-screen"
     : "enter-full-screen";
+
   return {
     ...PANEL_TOGGLE_ACTION_PRESENTATION[action],
     onClick: onToggleConversationCollapse,

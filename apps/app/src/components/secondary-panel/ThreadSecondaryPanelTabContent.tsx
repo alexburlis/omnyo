@@ -1,13 +1,16 @@
 import { type ReactNode, useEffect, useMemo } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { DiffPresentation } from "@/components/code/code-rendering";
-import type { WorkspaceDiffTarget } from "@bb/domain";
+import type { WorkspaceDiffTarget } from "@omnyo/domain";
 import type { MarkdownLinkRouting } from "@/components/ui/markdown-link-routing.js";
-import { Skeleton } from "@bb/shared-ui/skeleton";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
 import { DiffLoadingSkeleton } from "@/components/code/code-loading-skeletons";
-import { BbDiffSplit } from "@/components/code/BbDiffSplit";
+import { OmnyoDiffSplit } from "@/components/code/OmnyoDiffSplit";
 import { useRequestPierreWorkerPool } from "@/lib/pierre-worker-pool-gate";
-import { EmptyStatePanel } from "@bb/shared-ui/empty-state";
+import { Alert, AlertDescription, AlertTitle } from "@omnyo/shared-ui/alert";
+import { Button } from "@omnyo/shared-ui/button";
+import { EmptyStateBlock } from "@omnyo/shared-ui/empty-state";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
 import {
   useEnvironmentDiffFiles,
   useEnvironment,
@@ -33,8 +36,8 @@ import type {
   FilePreview,
   FilePreviewLineRange,
   WorkspaceFilePreviewStatusLabel,
-} from "@bb/client-core";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/client-core";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { PANEL_SCROLL_SLOT_CLASS } from "./panelChromeClasses";
 import { DiffFilesPanel } from "./git-diff/DiffFilesPanel";
 import { clearDiffFileCardStates } from "./git-diff/diffFilesStore";
@@ -147,25 +150,108 @@ function GitDiffMessageSlot({ children }: { children: ReactNode }) {
   );
 }
 
+function GitDiffStateMessage({
+  icon,
+  title,
+  description,
+  tone = "neutral",
+  role,
+  actions,
+}: {
+  icon: IconName;
+  title: string;
+  description: ReactNode;
+  tone?: "neutral" | "error";
+  role?: "alert" | "status";
+  actions?: ReactNode;
+}) {
+  return (
+    <GitDiffMessageSlot>
+      <div role={role} className="flex min-h-full flex-col justify-center">
+        <EmptyStateBlock
+          icon={icon}
+          tone={tone}
+          title={title}
+          description={description}
+          actions={actions}
+          className="py-14"
+        />
+      </div>
+    </GitDiffMessageSlot>
+  );
+}
+
+function gitDiffNoChangesCopy(target: WorkspaceDiffTarget | undefined): {
+  title: string;
+  description: string;
+} {
+  switch (target?.type) {
+    case "branch_committed":
+      return {
+        title: "No committed changes on this branch",
+        description: `Changes committed on this branch that ${target.mergeBaseBranch} doesn’t have yet show up here.`,
+      };
+    case "all":
+      return {
+        title: `No changes compared with ${target.mergeBaseBranch}`,
+        description: `Committed and uncommitted changes against ${target.mergeBaseBranch} show up here.`,
+      };
+    case "commit":
+      return {
+        title: "This commit changes no files",
+        description: "Pick another commit to see its changes.",
+      };
+    case undefined:
+      return {
+        title: "No changes to show",
+        description: "Changes in this chat’s workspace show up here.",
+      };
+    case "uncommitted":
+      return {
+        title: "No uncommitted changes",
+        description:
+          "Edits in this workspace that aren’t committed yet show up here.",
+      };
+  }
+}
+
+function GitDiffNoChangesMessage({
+  target,
+}: {
+  target: WorkspaceDiffTarget | undefined;
+}) {
+  const copy = gitDiffNoChangesCopy(target);
+
+  return (
+    <GitDiffStateMessage
+      icon="CircleCheck"
+      title={copy.title}
+      description={copy.description}
+    />
+  );
+}
+
 export function GitDiffLoadingSkeleton() {
   return (
     <GitDiffMessageSlot>
       <div className="space-y-2 pt-2" role="status" aria-label="Loading diff">
-      {Array.from({ length: GIT_DIFF_SKELETON_FILE_COUNT }).map((_, index) => (
-        <div
-          key={`git-diff-skeleton-${index}`}
-          className="overflow-clip rounded-lg border border-border bg-background"
-        >
-          <div className="flex h-8 items-center justify-between gap-2 py-1.5 pl-2 pr-3">
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              <Skeleton className="size-4 shrink-0 rounded-sm" />
-              <Skeleton className="h-3 w-48 max-w-full rounded-sm" />
+        {Array.from({ length: GIT_DIFF_SKELETON_FILE_COUNT }).map(
+          (_, index) => (
+            <div
+              key={`git-diff-skeleton-${index}`}
+              className="overflow-clip rounded-lg border border-border bg-background"
+            >
+              <div className="flex h-8 items-center justify-between gap-2 py-1.5 pl-2 pr-3">
+                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <Skeleton className="size-4 shrink-0 rounded-sm" />
+                  <Skeleton className="h-3 w-48 max-w-full rounded-sm" />
+                </div>
+                <Skeleton className="h-3 w-14 shrink-0 rounded-sm" />
+              </div>
+              <DiffLoadingSkeleton />
             </div>
-            <Skeleton className="h-3 w-14 shrink-0 rounded-sm" />
-          </div>
-          <DiffLoadingSkeleton />
-        </div>
-      ))}
+          ),
+        )}
       </div>
     </GitDiffMessageSlot>
   );
@@ -186,12 +272,15 @@ export function GitDiffTabContent({
 }: GitDiffTabContentProps) {
   const isQueryEnabled =
     isPanelOpen && Boolean(environmentId) && target !== undefined;
+
   const {
     data: diffFilesResponse,
     dataUpdatedAt: diffFilesUpdatedAt,
     isLoading: isDiffFilesLoading,
     isPlaceholderData: isDiffFilesPlaceholder,
     error: diffFilesError,
+    isFetching: isDiffFilesFetching,
+    refetch: refetchDiffFiles,
   } = useEnvironmentDiffFiles(environmentId ?? "", {
     enabled: isQueryEnabled,
     target,
@@ -201,11 +290,13 @@ export function GitDiffTabContent({
     diffFilesResponse?.outcome === "available"
       ? diffFilesResponse.mergeBaseRef
       : null;
+
   const diffIdentity = buildGitDiffIdentity({
     environmentId,
     mergeBaseRef,
     target,
   });
+
   const onRequestFileContents = useDiffFileContentsRequester({
     environmentId,
     target,
@@ -218,7 +309,7 @@ export function GitDiffTabContent({
   const requestDiffWorkers = useRequestPierreWorkerPool();
   useEffect(() => {
     if (!isPanelOpen) return;
-    void BbDiffSplit.preload();
+    void OmnyoDiffSplit.preload();
     requestDiffWorkers();
   }, [isPanelOpen, requestDiffWorkers]);
 
@@ -233,46 +324,56 @@ export function GitDiffTabContent({
 
   if (diffFilesError && diffFilesResponse === undefined) {
     return (
-      <GitDiffMessageSlot>
-        <div className="rounded-lg border border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive">
-          <p>
-            {diffFilesError instanceof Error
-              ? diffFilesError.message
-              : "Failed to load git diff"}
-          </p>
-        </div>
-      </GitDiffMessageSlot>
+      <GitDiffStateMessage
+        icon="AlertTriangle"
+        tone="error"
+        role="alert"
+        title="Couldn’t load the changes"
+        description={
+          diffFilesError instanceof Error && diffFilesError.message.trim()
+            ? diffFilesError.message
+            : "Something went wrong while reading this workspace’s Git changes."
+        }
+        actions={
+          isQueryEnabled ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={isDiffFilesFetching}
+              onClick={() => {
+                void refetchDiffFiles();
+              }}
+            >
+              <Icon name="RotateCcw" aria-hidden />
+              {isDiffFilesFetching ? "Trying again…" : "Try again"}
+            </Button>
+          ) : undefined
+        }
+      />
     );
   }
 
   if (diffFilesResponse === undefined) {
-    return (
-      <GitDiffMessageSlot>
-        <EmptyStatePanel className="rounded-lg">
-          No diff to display.
-        </EmptyStatePanel>
-      </GitDiffMessageSlot>
-    );
+    return <GitDiffNoChangesMessage target={target} />;
   }
 
   if (diffFilesResponse.outcome === "unavailable") {
     return (
-      <GitDiffMessageSlot>
-        <div className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-muted-foreground">
-          <p className="font-medium text-foreground">Workspace unavailable</p>
-          <p className="mt-1 leading-5">{diffFilesResponse.failure.message}</p>
-        </div>
-      </GitDiffMessageSlot>
+      <GitDiffStateMessage
+        icon="FolderUnknown"
+        title="Workspace unavailable"
+        description={diffFilesResponse.failure.message}
+      />
     );
   }
 
   if (diffFilesResponse.outcome === "not_applicable") {
     return (
-      <GitDiffMessageSlot>
-        <div className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-muted-foreground">
-          <p className="mt-1 leading-5">{diffFilesResponse.message}</p>
-        </div>
-      </GitDiffMessageSlot>
+      <GitDiffStateMessage
+        icon="GitBranch"
+        title="No Git changes to show"
+        description={diffFilesResponse.message}
+      />
     );
   }
 
@@ -281,25 +382,21 @@ export function GitDiffTabContent({
     !environmentId ||
     target === undefined
   ) {
-    return (
-      <GitDiffMessageSlot>
-        <EmptyStatePanel className="rounded-lg">
-          No diff to display.
-        </EmptyStatePanel>
-      </GitDiffMessageSlot>
-    );
+    return <GitDiffNoChangesMessage target={target} />;
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {diffFilesResponse.truncated ? (
-        <div
-          role="status"
-          className="mx-4 mb-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-xs text-muted-foreground"
-        >
-          Showing the first {diffFilesResponse.files.length} changed files.
-          Additional changes are omitted.
-        </div>
+        <Alert className="mx-4 mb-2 w-auto" role="status">
+          <Icon name="Info" aria-hidden />
+          <AlertTitle className="text-xs">
+            Showing the first {diffFilesResponse.files.length} changed files
+          </AlertTitle>
+          <AlertDescription className="text-xs">
+            There are more changes than this panel can list.
+          </AlertDescription>
+        </Alert>
       ) : null}
       <DiffFilesPanel
         environmentId={environmentId}
@@ -344,17 +441,21 @@ export function WorkspaceFilePreviewTabContent({
       markdownLinkRouting?.localImage === undefined,
     staleTime: 5_000,
   });
+
   const workspaceFilePreviewQuery = useEnvironmentFilePreview(
     environmentId,
     activePath,
     source,
     { enabled: isPanelOpen },
   );
+
   const environmentRootPath = environmentQuery.data?.path ?? null;
+
   const resolvedMarkdownLinkRouting = useMemo(() => {
     if (source === null || !environmentId) {
       return markdownLinkRouting;
     }
+
     return buildMarkdownFileImageRouting({
       path: activePath,
       rootPath: environmentRootPath,
@@ -411,6 +512,7 @@ export function ProjectFilePreviewTabContent({
     { environmentId, hostId },
     { enabled: isPanelOpen },
   );
+
   const resolvedMarkdownLinkRouting = useMemo(() => {
     return buildMarkdownFileImageRouting({
       path: activePath,
@@ -435,6 +537,10 @@ export function ProjectFilePreviewTabContent({
       {...filePreviewQueryProps(projectFilePreviewQuery)}
       activePath={activePath}
       copyPath={copyPath}
+      htmlPreviewUrl={buildProjectFileContentUrl(projectId, activePath, {
+        environmentId,
+        hostId,
+      })}
       lineRange={lineRange}
       markdownLinkRouting={resolvedMarkdownLinkRouting}
       onSelectionAddToChat={onSelectionAddToChat}
@@ -461,6 +567,7 @@ export function HostFilePreviewTabContent({
     activePath,
     { enabled: isPanelOpen },
   );
+
   const resolvedMarkdownLinkRouting = useMemo(() => {
     return buildMarkdownFileImageRouting({
       path: activePath,
@@ -499,6 +606,7 @@ export function HostScopedFilePreviewTabContent({
   const hostFilePreviewQuery = useHostFilePreview(hostId, activePath, {
     enabled: isPanelOpen,
   });
+
   const markdownLinkRouting = useMemo(() => {
     return buildMarkdownHostFileImageRouting({
       path: activePath,
@@ -506,6 +614,7 @@ export function HostScopedFilePreviewTabContent({
       hostId,
     });
   }, [activePath, hostId]);
+
   return (
     <SecondaryPanelFilePreview
       {...filePreviewQueryProps(hostFilePreviewQuery)}
@@ -535,6 +644,7 @@ export function ThreadStorageFilePreviewTabContent({
     activePath,
     { enabled: isPanelOpen },
   );
+
   const resolvedMarkdownLinkRouting = useMemo(() => {
     return buildMarkdownFileImageRouting({
       path: activePath,

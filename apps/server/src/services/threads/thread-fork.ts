@@ -1,7 +1,7 @@
-import { getEnvironment, getThread } from "@bb/db";
-import type { EnvironmentRow } from "@bb/db";
-import type { PromptInput, Thread } from "@bb/domain";
-import type { ForkThreadRequest } from "@bb/server-contract";
+import { getEnvironment, getThread } from "@omnyo/db";
+import type { EnvironmentRow } from "@omnyo/db";
+import type { PromptInput, Thread } from "@omnyo/domain";
+import type { ForkThreadRequest } from "@omnyo/server-contract";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import { resolveExistingThreadPermissionMode } from "./thread-execution-plan.js";
@@ -15,9 +15,11 @@ function requireForkSourceThread(
   sourceThreadId: string,
 ): Thread {
   const sourceThread = getThread(deps.db, sourceThreadId);
+
   if (!sourceThread || sourceThread.deletedAt !== null) {
     throw new ApiError(404, "thread_not_found", "Source thread not found");
   }
+
   if (sourceThread.archivedAt !== null) {
     throw new ApiError(
       400,
@@ -25,6 +27,7 @@ function requireForkSourceThread(
       "Cannot fork an archived source thread",
     );
   }
+
   return sourceThread;
 }
 
@@ -49,6 +52,7 @@ function requireSourceEnvironment(
     sourceThread.environmentId === null
       ? null
       : getEnvironment(deps.db, sourceThread.environmentId);
+
   if (!environment || environment.status !== "ready" || !environment.path) {
     throw new ApiError(
       400,
@@ -56,12 +60,14 @@ function requireSourceEnvironment(
       "Source thread must have a ready environment to fork",
     );
   }
+
   return environment;
 }
 
 export async function createThreadForkFromRequest(
   deps: ThreadForkDeps,
   request: ForkThreadRequest,
+  launchedByThreadId: string | null = null,
 ) {
   const sourceThread = requireForkSourceThread(deps, request.sourceThreadId);
   requireForkCapableProvider(deps, sourceThread);
@@ -70,6 +76,7 @@ export async function createThreadForkFromRequest(
   const visibleInput = request.input ?? [];
   const agentContextSeed = request.agentContextSeed ?? [];
   const input: PromptInput[] = [...agentContextSeed, ...visibleInput];
+
   const isSeedOnlyIdleFork =
     visibleInput.length === 0 && agentContextSeed.length > 0;
 
@@ -105,6 +112,7 @@ export async function createThreadForkFromRequest(
         ? {}
         : { sourceSeqEnd: request.sourceSeqEnd }),
       lifecycleOwnerThreadId: request.lifecycleOwnerThreadId,
+      ...(launchedByThreadId === null ? {} : { launchedByThreadId }),
       sourceThreadId: sourceThread.id,
       startedOnBehalfOf: isSeedOnlyIdleFork
         ? { initiator: "agent", senderThreadId: sourceThread.id }

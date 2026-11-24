@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import {
   access,
   mkdir,
+  open,
   realpath,
   rename,
   rm,
   rmdir,
-  writeFile,
 } from "node:fs/promises";
 import {
   basename,
@@ -29,16 +29,30 @@ export async function writeFileAtomically(
 ): Promise<void> {
   const directory = dirname(args.path);
   await mkdir(directory, { recursive: true });
+
   const temporaryPath = join(
     directory,
     `.${basename(args.path)}.${process.pid}.${randomUUID()}.tmp`,
   );
+
   try {
-    await writeFile(temporaryPath, args.content, {
-      encoding: "utf8",
-      mode: args.mode,
-    });
+    const file = await open(temporaryPath, "wx", args.mode);
+
+    try {
+      await file.writeFile(args.content, "utf8");
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+
     await rename(temporaryPath, args.path);
+    const parent = await open(directory, "r");
+
+    try {
+      await parent.sync();
+    } finally {
+      await parent.close();
+    }
   } catch (error) {
     await rm(temporaryPath, { force: true });
     throw error;
@@ -48,6 +62,7 @@ export async function writeFileAtomically(
 export async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
+
     return true;
   } catch {
     return false;
@@ -58,11 +73,13 @@ export function expandHomePath(path: string, homeDir: string): string {
   if (path === "~") {
     return homeDir;
   }
+
   return path.startsWith("~/") ? join(homeDir, path.slice(2)) : path;
 }
 
 export async function canonicalPath(path: string): Promise<string> {
   const resolved = resolve(path);
+
   try {
     return await realpath(resolved);
   } catch {
@@ -78,6 +95,7 @@ export async function isSameOrInsidePath(
     await canonicalPath(root),
     await canonicalPath(candidate),
   );
+
   return (
     relativePath === "" ||
     (relativePath !== ".." &&

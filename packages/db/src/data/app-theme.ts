@@ -3,7 +3,7 @@ import {
   defaultAppTheme,
   defaultFaviconColor,
   type FaviconColorPreference,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { DbConnection } from "../connection.js";
 import { appTheme } from "../schema.js";
 
@@ -19,7 +19,9 @@ export function getStoredThemeId(db: DbConnection): string {
   return row?.themeId ?? defaultAppTheme.themeId;
 }
 
-export function getStoredFaviconColor(db: DbConnection): FaviconColorPreference {
+export function getStoredFaviconColor(
+  db: DbConnection,
+): FaviconColorPreference {
   const row = db
     .select({ faviconColor: appTheme.faviconColor })
     .from(appTheme)

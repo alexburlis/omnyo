@@ -11,6 +11,7 @@ import { cn } from "../../../lib/utils";
 
 function withTooltip(control: ReactNode, tooltip: ReactNode | undefined) {
   if (tooltip === undefined) return control;
+
   return (
     <TooltipProvider delayDuration={250}>
       <Tooltip>
@@ -47,6 +48,7 @@ export function ResourceInstallControl({
   onAction: () => void;
 }) {
   const countId = useId();
+
   const control = (
     <Button
       type="button"
@@ -89,6 +91,7 @@ export function ResourceInstallControl({
       )}
     </Button>
   );
+
   return withTooltip(control, presentation === "label" ? undefined : tooltip);
 }
 

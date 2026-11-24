@@ -5,10 +5,11 @@ import {
   createNodeVerifiedProcessOps,
   stopVerifiedProcess,
   type VerifiedProcessOps,
-} from "@bb/config/verified-process-stop";
+} from "@omnyo/config/verified-process-stop";
 import { z } from "zod";
 
 const OWNED_RUNTIME_PID_FILE_NAME = "owned-runtime.json";
+
 const KILL_TIMEOUT_MS = 3_000;
 
 const ownedRuntimePidFileSchema = z.object({
@@ -92,11 +93,14 @@ export async function writeOwnedRuntimePidFile(
     serverUrl: args.serverUrl,
     startedAt: new Date().toISOString(),
   };
+
   await mkdir(args.userDataPath, { recursive: true });
+
   const temporaryPath = join(
     args.userDataPath,
     `.${OWNED_RUNTIME_PID_FILE_NAME}.${process.pid}.${randomUUID()}.tmp`,
   );
+
   try {
     await writeFile(
       temporaryPath,
@@ -124,7 +128,9 @@ export async function readOwnedRuntimePidFile(
       ownedRuntimePidFilePath(args.userDataPath),
       "utf8",
     );
+
     const parsed = ownedRuntimePidFileSchema.safeParse(JSON.parse(rawPidFile));
+
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
@@ -135,6 +141,7 @@ export async function reapStaleOwnedRuntime(
   args: ReapStaleOwnedRuntimeArgs,
 ): Promise<ReapStaleOwnedRuntimeResult> {
   const processOps = args.processOps ?? createNodeVerifiedProcessOps();
+
   const pidFile = await readOwnedRuntimePidFile({
     userDataPath: args.userDataPath,
   });
@@ -155,6 +162,7 @@ export async function reapStaleOwnedRuntime(
 
   if (stopResult.kind === "not-running") {
     await clearOwnedRuntimePidFile({ userDataPath: args.userDataPath });
+
     return {
       kind: "cleared-stale-pid-file",
       pid: pidFile.pid,
@@ -177,6 +185,7 @@ export async function reapStaleOwnedRuntime(
   }
 
   await clearOwnedRuntimePidFile({ userDataPath: args.userDataPath });
+
   return {
     kind: "reaped",
     pid: pidFile.pid,

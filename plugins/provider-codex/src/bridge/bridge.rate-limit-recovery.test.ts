@@ -6,8 +6,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   experimental_assembleCapturedThreadEvents as assembleCapturedThreadEvents,
   experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
-import type { BridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
+import type { BridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
 import {
   FULL_ACCESS_SESSION_OPTIONS,
@@ -15,11 +15,13 @@ import {
 } from "./fake-codex-app-server-harness.js";
 
 const THREAD_ID = "thr_quota_hydration";
+
 let harness: BridgeJsonRpcTestHarness;
+
 let workspaceDir: string;
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-quota-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-quota-"));
   harness = createBridgeJsonRpcTestHarness(handleLine);
 });
 
@@ -62,14 +64,17 @@ it.each([
           }
         : {}),
     };
+
     const scriptPath = join(workspaceDir, "script.json");
     const requestLogPath = join(workspaceDir, "requests.jsonl");
     const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+
     const recovered = {
       limitId: "codex",
       primary: { usedPercent: 100, windowDurationMins: 300, resetsAt },
       rateLimitReachedType: "rate_limit_reached",
     };
+
     const native =
       outcome === "native"
         ? recovered
@@ -82,6 +87,7 @@ it.each([
                 rateLimitReachedType: "workspace_member_credits_depleted",
               }
             : { limitId: "codex", primary: null, secondary: null };
+
     const error = {
       message: "Original provider failure",
       codexErrorInfo:
@@ -90,6 +96,7 @@ it.each([
           : "usageLimitExceeded",
       additionalDetails: null,
     };
+
     writeFileSync(
       scriptPath,
       JSON.stringify({
@@ -158,6 +165,7 @@ it.each([
       }),
     );
     stubFakeCodexAppServer(scriptPath);
+
     const requests = () =>
       readFileSync(requestLogPath, "utf8")
         .trim()
@@ -165,6 +173,7 @@ it.each([
         .map((line) =>
           z.object({ method: z.string() }).parse(JSON.parse(line)),
         );
+
     harness.sendRequest(1, "thread/start", {
       threadId: THREAD_ID,
       cwd: workspaceDir,
@@ -175,9 +184,11 @@ it.each([
     expect(requests().some((r) => r.method === "account/rateLimits/read")).toBe(
       false,
     );
+
     const { providerThreadId } = z
       .object({ providerThreadId: z.string() })
       .parse(response.result);
+
     harness.sendRequest(2, "turn/start", {
       threadId: THREAD_ID,
       providerThreadId,
@@ -186,6 +197,7 @@ it.each([
       options,
     });
     await harness.waitForResponse(2);
+
     if (outcome === "release") {
       await vi.waitFor(() =>
         expect(
@@ -204,8 +216,10 @@ it.each([
           (e) => e.type === "turn/completed",
         ),
       ).toEqual([]);
+
       return;
     }
+
     await vi.waitFor(
       () =>
         expect(
@@ -217,16 +231,20 @@ it.each([
     );
     const events = assembleCapturedThreadEvents(harness.messages, "codex");
     const completed = events.findIndex((e) => e.type === "turn/completed");
+
     const quotas = events
       .slice(0, completed)
       .filter((e) => e.type === "provider/rateLimits/updated");
+
     const shouldRead = !["native", "credits", "other-error", "pooled"].includes(
       outcome,
     );
+
     expect(
       requests().filter((r) => r.method === "account/rateLimits/read"),
     ).toHaveLength(shouldRead ? 1 : 0);
     expect(quotas.length).toBeGreaterThan(0);
+
     if (["native", "recover", "expired", "model-bucket"].includes(outcome))
       expect(quotas.at(-1)).toMatchObject({
         rateLimits: {
@@ -234,6 +252,7 @@ it.each([
           windows: [{ resetsAtMs: resetsAt * 1000 }],
         },
       });
+
     if (["error", "timeout", "no-update-error", "pooled"].includes(outcome))
       expect(quotas.at(-1)).toMatchObject({
         rateLimits: { status: "unknown", windows: [] },

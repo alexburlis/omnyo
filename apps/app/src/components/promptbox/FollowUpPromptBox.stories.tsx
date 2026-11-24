@@ -1,23 +1,18 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import type {
-  Environment,
-  Host,
   PermissionMode,
   PromptMentionResource,
   PromptTextMention,
   ThreadQueuedMessage,
   WorkspaceStatus,
-} from "@bb/domain";
-import { makeThreadQueuedMessage } from "@bb/test-helpers/domain-fixtures";
-import {
-  formatEnvironmentDisplay,
-  type EnvironmentDisplayHostContext,
-} from "@bb/core-ui";
-import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@bb/client-core";
+} from "@omnyo/domain";
+import { makeThreadQueuedMessage } from "@omnyo/test-helpers/domain-fixtures";
+import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@omnyo/client-core";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import type {
   SystemExecutionOptionsModelLoadError,
   ThreadContextWindowUsage,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   FollowUpPromptBox,
   type FollowUpSubmitMode,
@@ -26,10 +21,6 @@ import {
   getFollowUpPromptPlaceholder,
   getCompactFollowUpPromptPlaceholder,
 } from "@/components/promptbox/follow-up-placeholder";
-import {
-  findEnvironmentDisplayProvider,
-  getEnvironmentSummaryChrome,
-} from "@/lib/environment-workspace-display";
 import {
   INERT_TYPEAHEAD_COMMAND_CONFIG,
   type AttachmentsConfig,
@@ -42,21 +33,14 @@ import type {
   QueuedMessageInlineEditor,
 } from "@/components/promptbox/banner/LazyQueuedMessagesList";
 import { QueuedMessagesList } from "@/components/promptbox/banner/QueuedMessagesList";
-import { ThreadEnvironmentSummary } from "@/components/promptbox/ThreadEnvironmentSummary";
-import {
-  formatWorkspaceCheckoutDisplay,
-  type WorkspaceCheckoutDisplay,
-} from "@/lib/workspace-checkout-display";
+import type { CompactBeforeSendOffer } from "@/components/promptbox/CompactBeforeSendChip";
 import type { PickerOption } from "@/components/pickers/OptionPicker";
 import { selectWorkspaceChangedFilesSection } from "@/components/workspace/workspace-change-summary";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 import { ModelPickerStoryQueryProvider } from "../../../.ladle/model-picker-query-provider";
 import {
-  makeEnvironment,
   makeExecutionControlsProps,
   useInteractiveExecutionControls,
-  STORY_ENVIRONMENT_PROVIDERS,
-  PROJECT_NAMES,
   STORY_PROVIDER_OPTIONS,
 } from "../../../.ladle/story-fixtures";
 import type {
@@ -64,15 +48,16 @@ import type {
   ExecutionPermissionConfig,
 } from "@/components/promptbox/ExecutionControls";
 import { PageShell } from "@/components/ui/page-shell.js";
-import { promptDraftToInput, type PromptDraftState } from "@bb/client-core";
-import { queuedInputToDraft } from "@bb/client-core";
+import { promptDraftToInput, type PromptDraftState } from "@omnyo/client-core";
+import { queuedInputToDraft } from "@omnyo/client-core";
 
 export default {
   title: "promptbox/Follow Up Prompt Box",
 };
 
 const noop = () => {};
-const STORY_BRANCH_NAME = "bb/design-system-polish";
+
+const STORY_BRANCH_NAME = "omnyo/design-system-polish";
 
 const baseExecution = makeExecutionControlsProps({
   provider: {
@@ -81,6 +66,7 @@ const baseExecution = makeExecutionControlsProps({
     hasMultiple: true,
   },
 });
+
 const codexModelLoadError = {
   providerId: "codex",
   code: "failed",
@@ -114,167 +100,6 @@ const promptActions: readonly PromptBoxAction[] = [
   },
 ];
 
-interface EnvironmentSummaryArgs {
-  environment: Environment;
-  host: EnvironmentDisplayHostContext;
-  projectName?: string | null;
-  machineName?: string;
-  hasMultipleMachines?: boolean;
-  hostType?: Host["type"];
-  branchName?: string;
-  environmentCheckout?: WorkspaceCheckoutDisplay;
-}
-
-function makeEnvironmentSummary({
-  environment,
-  host,
-  projectName = PROJECT_NAMES.bb,
-  machineName,
-  hasMultipleMachines = false,
-  hostType = "persistent",
-  branchName,
-  environmentCheckout,
-}: EnvironmentSummaryArgs): ReactNode {
-  const providerLookup = findEnvironmentDisplayProvider(
-    STORY_ENVIRONMENT_PROVIDERS,
-    environment.environmentProviderId,
-  );
-  const display = formatEnvironmentDisplay({
-    environment,
-    host,
-    providerLookup,
-  });
-  const chrome = getEnvironmentSummaryChrome({
-    display,
-    providerLookup,
-    hasMultipleMachines,
-    host:
-      machineName === undefined
-        ? null
-        : { name: machineName, type: hostType, machineProviderId: null },
-    machineProviders: undefined,
-  });
-  const checkoutDisplay =
-    environmentCheckout ??
-    (branchName
-      ? formatWorkspaceCheckoutDisplay({
-          checkout: {
-            kind: "branch",
-            branchName,
-            headSha: null,
-          },
-        })
-      : undefined);
-  return (
-    <ThreadEnvironmentSummary
-      projectName={projectName ?? undefined}
-      environmentLabel={chrome.environmentLabel}
-      environmentCompactLabel={chrome.environmentCompactLabel}
-      environmentIcon={chrome.environmentIcon}
-      environmentProviderName={chrome.environmentProviderName}
-      environmentHost={chrome.environmentHost}
-      environmentMachineProvider={chrome.environmentMachineProvider}
-      environmentCheckout={checkoutDisplay}
-      onCreateNewThreadInEnvironment={
-        environment.status === "ready" && environment.path !== null
-          ? noop
-          : undefined
-      }
-    />
-  );
-}
-
-const localEnvironmentDisplayHost: EnvironmentDisplayHostContext = {
-  locality: "local",
-  identity: null,
-};
-
-const remoteEnvironmentDisplayHost: EnvironmentDisplayHostContext = {
-  locality: "remote",
-  identity: null,
-};
-
-const localEnvironmentSummary: ReactNode = makeEnvironmentSummary({
-  environment: makeEnvironment({
-    status: "ready",
-  }),
-  host: localEnvironmentDisplayHost,
-  branchName: STORY_BRANCH_NAME,
-});
-
-const multiMachineEnvironmentSummary: ReactNode = makeEnvironmentSummary({
-  environment: makeEnvironment({
-    status: "ready",
-  }),
-  host: localEnvironmentDisplayHost,
-  machineName: "Build Mac mini",
-  hasMultipleMachines: true,
-  branchName: STORY_BRANCH_NAME,
-});
-
-const sandboxWorktreeEnvironmentSummary: ReactNode = makeEnvironmentSummary({
-  environment: makeEnvironment({
-    environmentProviderId: "git-worktree",
-    status: "ready",
-  }),
-  host: remoteEnvironmentDisplayHost,
-  machineName: "Modal sandbox",
-  hostType: "ephemeral",
-  branchName: STORY_BRANCH_NAME,
-});
-
-const namedLocalEnvironmentSummary: ReactNode = makeEnvironmentSummary({
-  environment: makeEnvironment({
-    name: "Linked review tree",
-    status: "ready",
-  }),
-  host: localEnvironmentDisplayHost,
-  machineName: "Bersabel's MacBook Pro",
-  hasMultipleMachines: true,
-  branchName: STORY_BRANCH_NAME,
-});
-
-const detachedWorktreeEnvironmentSummary: ReactNode = makeEnvironmentSummary({
-  environment: makeEnvironment({
-    environmentProviderId: "git-worktree",
-    status: "ready",
-  }),
-  host: localEnvironmentDisplayHost,
-  machineName: "Bersabel's MacBook Pro",
-  environmentCheckout: formatWorkspaceCheckoutDisplay({
-    checkout: {
-      kind: "detached",
-      headSha: "abcdef1234567890",
-    },
-  }),
-});
-
-const provisioningEnvironmentSummary: ReactNode = makeEnvironmentSummary({
-  environment: makeEnvironment({
-    path: null,
-    status: "provisioning",
-  }),
-  host: localEnvironmentDisplayHost,
-});
-
-const personalEnvironmentSummary: ReactNode = makeEnvironmentSummary({
-  environment: makeEnvironment({
-    environmentProviderId: "personal-workspace",
-    branchName: null,
-    status: "ready",
-  }),
-  host: localEnvironmentDisplayHost,
-  projectName: null,
-});
-
-const destroyedEnvironmentSummary: ReactNode = makeEnvironmentSummary({
-  environment: makeEnvironment({
-    path: null,
-    status: "destroyed",
-  }),
-  host: localEnvironmentDisplayHost,
-});
-
 const usage: ThreadContextWindowUsage = {
   usedTokens: 32_400,
   modelContextWindow: 128_000,
@@ -285,6 +110,7 @@ const typeaheadBase: TypeaheadConfig = {
   mention: {
     results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
     isLoading: false,
+    isRefreshing: false,
     isError: false,
     onQueryChange: noop,
   },
@@ -319,9 +145,11 @@ function storyMention(
   { token, resource }: StoryMentionSpec,
 ): PromptTextMention {
   const start = text.indexOf(token);
+
   if (start < 0) {
     throw new Error(`Missing story mention token: ${token}`);
   }
+
   return {
     start,
     end: start + token.length,
@@ -407,6 +235,7 @@ const dirtyWorkspaceStatus: WorkspaceStatus = {
     insertions: 128,
     deletions: 24,
     lineStatsComplete: true,
+    fileCount: 3,
   },
   branch: {
     currentBranch: STORY_BRANCH_NAME,
@@ -427,19 +256,9 @@ const contextBannerElement: ReactNode = dirtyContextBannerSection ? (
   <ThreadPromptContextBanner
     archivedSection={null}
     environmentGoneSection={null}
-    gitSection={{
-      changedFiles: dirtyContextBannerSection,
-      mergeBase: {
-        branch: "main",
-        options: ["main", "develop", "release/2026-05"],
-        onChange: noop,
-      },
-      onPromptBannerFileClick: noop,
-    }}
-    gitSectionPending={false}
     parentThreadSection={null}
+    continuedInSection={null}
     childThreadsSection={null}
-    pullRequestSection={null}
     expandedSection={null}
     onToggleSection={noop}
   />
@@ -449,11 +268,9 @@ const archivedContextBannerElement: ReactNode = (
   <ThreadPromptContextBanner
     archivedSection={{ archivedAt: 1_731_456_000_000 }}
     environmentGoneSection={null}
-    gitSection={null}
-    gitSectionPending={false}
     parentThreadSection={null}
+    continuedInSection={null}
     childThreadsSection={null}
-    pullRequestSection={null}
     expandedSection={null}
     onToggleSection={noop}
   />
@@ -463,11 +280,9 @@ const environmentGoneContextBannerElement: ReactNode = (
   <ThreadPromptContextBanner
     archivedSection={null}
     environmentGoneSection={{ status: "destroyed" }}
-    gitSection={null}
-    gitSectionPending={false}
     parentThreadSection={null}
+    continuedInSection={null}
     childThreadsSection={null}
-    pullRequestSection={null}
     expandedSection={null}
     onToggleSection={noop}
   />
@@ -535,8 +350,8 @@ interface RowConfig {
   isFollowUpSubmitting?: boolean;
   threadRuntimeDisplayStatus?: FollowUpComposerRuntimeStatus;
   promptPlaceholder?: string;
-  environmentSummary?: ReactNode | null;
   contextWindowUsage?: ThreadContextWindowUsage | null;
+  compactBeforeSend?: CompactBeforeSendOffer | null;
   stack?: ReactNode | null;
   queuedMessages?: readonly ThreadQueuedMessage[];
   collapseResetKey?: string;
@@ -575,8 +390,8 @@ function Row({
   isFollowUpSubmitting = false,
   threadRuntimeDisplayStatus = "idle",
   promptPlaceholder,
-  environmentSummary = localEnvironmentSummary,
   contextWindowUsage = null,
+  compactBeforeSend = null,
   stack = null,
   queuedMessages: initialQueuedMessages,
   collapseResetKey = "thr_demo",
@@ -588,22 +403,28 @@ function Row({
 }: RowConfig) {
   const [message, setMessage] = useState(initialMessage);
   const [queueExpanded, setQueueExpanded] = useState(true);
+
   const [mentionRanges, setMentionRanges] =
     useState<PromptTextMention[]>(initialMentions);
+
   const [storyQueuedMessages, setStoryQueuedMessages] = useState(
     initialQueuedMessages ?? [],
   );
+
   const [inlineEditingQueuedMessage, setInlineEditingQueuedMessage] = useState<{
     draft: PromptDraftState;
     queuedMessageId: string;
     queuedMessageIndex: number;
   } | null>(null);
+
   const resolvedPlaceholder =
     promptPlaceholder ??
     getFollowUpPromptPlaceholder(threadRuntimeDisplayStatus);
+
   const resolvedCompactPlaceholder =
     promptPlaceholder ??
     getCompactFollowUpPromptPlaceholder(threadRuntimeDisplayStatus);
+
   const handleChangeMessage = (
     nextMessage: string,
     nextMentions: PromptTextMention[],
@@ -611,6 +432,7 @@ function Row({
     setMessage(nextMessage);
     setMentionRanges(nextMentions);
   };
+
   const handleChangeInlineMessage = useCallback(
     (nextMessage: string, nextMentions: PromptTextMention[]) => {
       setInlineEditingQueuedMessage((current) =>
@@ -628,14 +450,17 @@ function Row({
     },
     [],
   );
+
   const dismissInlineEditor = useCallback(() => {
     setInlineEditingQueuedMessage(null);
   }, []);
+
   const handleEditQueuedMessage = useCallback(
     ({ queuedMessageId, queuedMessageIndex }: QueuedMessageEditRequest) => {
       const queuedMessage = storyQueuedMessages.find(
         (candidate) => candidate.id === queuedMessageId,
       );
+
       if (!queuedMessage) return;
       setInlineEditingQueuedMessage({
         draft: queuedInputToDraft(queuedMessage.content),
@@ -645,9 +470,11 @@ function Row({
     },
     [storyQueuedMessages],
   );
+
   const handleSubmit = useCallback(() => {
     if (!inlineEditingQueuedMessage) return;
     const input = promptDraftToInput(inlineEditingQueuedMessage.draft);
+
     if (input.length === 0) return;
     setStoryQueuedMessages((current) =>
       current.map((queuedMessage) =>
@@ -658,6 +485,7 @@ function Row({
     );
     dismissInlineEditor();
   }, [dismissInlineEditor, inlineEditingQueuedMessage]);
+
   const inlineEditor = useMemo<QueuedMessageInlineEditor | undefined>(
     () =>
       inlineEditingQueuedMessage
@@ -667,7 +495,9 @@ function Row({
             content: (
               <FollowUpPromptBox
                 attachments={attachmentsBase}
+                attention={null}
                 stack={null}
+                queuedMessageCount={0}
                 composer={{
                   history: {
                     currentDraft: inlineEditingQueuedMessage.draft,
@@ -687,7 +517,6 @@ function Row({
                   submitMode: { kind: "ready" },
                   threadRuntimeDisplayStatus,
                 }}
-                environmentSummary={null}
                 contextWindowUsage={null}
                 execution={execution}
                 executionReadOnly
@@ -716,6 +545,7 @@ function Row({
       collapseResetKey,
     ],
   );
+
   const queueElement =
     initialQueuedMessages === undefined ? null : (
       <QueuedMessagesList
@@ -744,6 +574,7 @@ function Row({
         }
       />
     );
+
   const resolvedStack = queueElement ? (
     <>
       {stack}
@@ -752,11 +583,14 @@ function Row({
   ) : (
     stack
   );
+
   return (
     <PromptStage>
       <FollowUpPromptBox
         attachments={attachmentsBase}
+        attention={null}
         stack={resolvedStack}
+        queuedMessageCount={0}
         composer={
           hideComposer
             ? null
@@ -784,8 +618,8 @@ function Row({
                 threadRuntimeDisplayStatus,
               }
         }
-        environmentSummary={environmentSummary}
         contextWindowUsage={contextWindowUsage}
+        compactBeforeSend={compactBeforeSend}
         execution={execution}
         permission={permission}
         activePromptMode={activePromptMode}
@@ -809,13 +643,35 @@ function StackedCardsWithPillsRow() {
       stack={contextBannerElement}
       queuedMessages={queuedMessages}
       contextWindowUsage={usage}
-      environmentSummary={multiMachineEnvironmentSummary}
+    />
+  );
+}
+
+const expiredCacheUsage: ThreadContextWindowUsage = {
+  usedTokens: 331_000,
+  modelContextWindow: 1_000_000,
+  estimated: false,
+};
+
+function CompactBeforeSendRow() {
+  const [compactFirst, setCompactFirst] = useState(true);
+
+  return (
+    <Row
+      submitMode={{ kind: "ready" }}
+      contextWindowUsage={expiredCacheUsage}
+      compactBeforeSend={{
+        compactFirst,
+        tokens: expiredCacheUsage.usedTokens,
+        onCompactFirstChange: setCompactFirst,
+      }}
     />
   );
 }
 
 function InteractiveRow() {
   const execution = useInteractiveExecutionControls(baseExecution);
+
   return (
     <ModelPickerStoryQueryProvider>
       <Row submitMode={{ kind: "ready" }} execution={execution} />
@@ -849,7 +705,6 @@ export function Overview() {
               loadFailed: false,
             },
           }}
-          environmentSummary={namedLocalEnvironmentSummary}
         />
       </StoryRow>
       <StoryRow
@@ -870,7 +725,6 @@ export function Overview() {
               loadError: codexModelLoadError,
             },
           }}
-          environmentSummary={multiMachineEnvironmentSummary}
         />
       </StoryRow>
       <StoryRow label="no models" hint="locked provider with empty catalog">
@@ -888,15 +742,16 @@ export function Overview() {
               loadError: null,
             },
           }}
-          environmentSummary={detachedWorktreeEnvironmentSummary}
         />
       </StoryRow>
+      <StoryRow
+        label="prompt cache expired"
+        hint="click the chip to switch between compacting first and keeping the full history"
+      >
+        <CompactBeforeSendRow />
+      </StoryRow>
       <StoryRow label="with promptbox context banner">
-        <Row
-          submitMode={{ kind: "ready" }}
-          stack={contextBannerElement}
-          environmentSummary={localEnvironmentSummary}
-        />
+        <Row submitMode={{ kind: "ready" }} stack={contextBannerElement} />
       </StoryRow>
       <StoryRow
         label="archived: composer hidden"
@@ -951,58 +806,23 @@ export function Overview() {
         <Row
           submitMode={{ kind: "queue", onStop: noop }}
           threadRuntimeDisplayStatus="starting"
-          environmentSummary={provisioningEnvironmentSummary}
         />
       </StoryRow>
     </StoryCard>
   );
 }
 
-export function EnvironmentSummary() {
+export function CompactStatusTray() {
   return (
-    <StoryCard>
-      <StoryRow
-        label="ready · one machine"
-        hint="provider name; the machine is unambiguous so it stays hidden"
-      >
-        {localEnvironmentSummary}
-      </StoryRow>
-      <StoryRow
-        label="ready · personal workspace"
-        hint="no project chip, no branch; the provider names the environment"
-      >
-        {personalEnvironmentSummary}
-      </StoryRow>
-      <StoryRow
-        label="ready · second machine"
-        hint="machine name once more than one machine exists"
-      >
-        {multiMachineEnvironmentSummary}
-      </StoryRow>
-      <StoryRow
-        label="ready · worktree on a sandbox"
-        hint="an ephemeral host is ambiguous, so it is named"
-      >
-        {sandboxWorktreeEnvironmentSummary}
-      </StoryRow>
-      <StoryRow
-        label="ready · named environment"
-        hint="a custom name wins over both machine and provider"
-      >
-        {namedLocalEnvironmentSummary}
-      </StoryRow>
-      <StoryRow
-        label="ready · detached worktree"
-        hint="provider icon · detached commit checkout"
-      >
-        {detachedWorktreeEnvironmentSummary}
-      </StoryRow>
-      <StoryRow
-        label="destroyed environment"
-        hint="lifecycle label replaces the provider name"
-      >
-        {destroyedEnvironmentSummary}
-      </StoryRow>
-    </StoryCard>
+    <CompactViewportOverrideProvider isCompactViewport>
+      <div className="mx-auto flex min-h-[28rem] w-full max-w-[390px] flex-col justify-end p-3">
+        <Row
+          submitMode={{ kind: "queue", onStop: noop }}
+          threadRuntimeDisplayStatus="active"
+          stack={contextBannerElement}
+          queuedMessages={queuedMessages.slice(0, 2)}
+        />
+      </div>
+    </CompactViewportOverrideProvider>
   );
 }

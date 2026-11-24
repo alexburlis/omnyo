@@ -9,19 +9,19 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type {
-  BbDesktopBrowserApi,
-  BbDesktopBrowserAttachRequest,
-  BbDesktopBrowserSetBoundsRequest,
-  BbDesktopBrowserSetVisibleRequest,
-  BbDesktopBrowserState,
-} from "@bb/desktop-contract";
+  OmnyoDesktopBrowserApi,
+  OmnyoDesktopBrowserAttachRequest,
+  OmnyoDesktopBrowserSetBoundsRequest,
+  OmnyoDesktopBrowserSetVisibleRequest,
+  OmnyoDesktopBrowserState,
+} from "@omnyo/desktop-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 import {
-  createBbDesktopApi,
+  createOmnyoDesktopApi,
   createNoopDesktopBrowserApi,
-} from "@/test/bb-desktop-test-utils";
-import { POINTER_COARSE_QUERY } from "@bb/shared-ui/hooks/use-pointer-coarse";
+} from "@/test/omnyo-desktop-test-utils";
+import { POINTER_COARSE_QUERY } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import { sdk } from "@/lib/sdk";
 import { BrowserTabDeck } from "./BrowserTabDeck";
 import { BrowserTabLifecycleObserver } from "./BrowserTabLifecycleObserver";
@@ -31,24 +31,24 @@ import {
 } from "./browserViewVisibilityCoordinator";
 
 type BrowserCall =
-  | { type: "attach"; request: BbDesktopBrowserAttachRequest }
+  | { type: "attach"; request: OmnyoDesktopBrowserAttachRequest }
   | { type: "detach"; tabId: string }
-  | { type: "setBounds"; request: BbDesktopBrowserSetBoundsRequest }
-  | { type: "setVisible"; request: BbDesktopBrowserSetVisibleRequest }
+  | { type: "setBounds"; request: OmnyoDesktopBrowserSetBoundsRequest }
+  | { type: "setVisible"; request: OmnyoDesktopBrowserSetVisibleRequest }
   | {
       type: "setVisibleWithoutFocus";
-      request: BbDesktopBrowserSetVisibleRequest;
+      request: OmnyoDesktopBrowserSetVisibleRequest;
     };
 
 interface RecordingBrowserApi {
-  api: BbDesktopBrowserApi;
+  api: OmnyoDesktopBrowserApi;
   calls: BrowserCall[];
   detachments: string[];
-  attachments: BbDesktopBrowserAttachRequest[];
-  bounds: BbDesktopBrowserSetBoundsRequest[];
-  emitState: (state: BbDesktopBrowserState) => void;
-  visibility: BbDesktopBrowserSetVisibleRequest[];
-  visibilityWithoutFocus: BbDesktopBrowserSetVisibleRequest[];
+  attachments: OmnyoDesktopBrowserAttachRequest[];
+  bounds: OmnyoDesktopBrowserSetBoundsRequest[];
+  emitState: (state: OmnyoDesktopBrowserState) => void;
+  visibility: OmnyoDesktopBrowserSetVisibleRequest[];
+  visibilityWithoutFocus: OmnyoDesktopBrowserSetVisibleRequest[];
 }
 
 const BROWSER_PANEL_RECT = new DOMRect(12, 24, 420, 260);
@@ -75,13 +75,14 @@ function makeBrowserTab(id: string, url: string): BrowserFixedPanelTab {
 
 function createRecordingBrowserApi(): RecordingBrowserApi {
   const calls: BrowserCall[] = [];
-  const attachments: BbDesktopBrowserAttachRequest[] = [];
-  const bounds: BbDesktopBrowserSetBoundsRequest[] = [];
+  const attachments: OmnyoDesktopBrowserAttachRequest[] = [];
+  const bounds: OmnyoDesktopBrowserSetBoundsRequest[] = [];
   const detachments: string[] = [];
-  const stateListeners: Array<(state: BbDesktopBrowserState) => void> = [];
-  const visibility: BbDesktopBrowserSetVisibleRequest[] = [];
-  const visibilityWithoutFocus: BbDesktopBrowserSetVisibleRequest[] = [];
-  const api: BbDesktopBrowserApi = {
+  const stateListeners: Array<(state: OmnyoDesktopBrowserState) => void> = [];
+  const visibility: OmnyoDesktopBrowserSetVisibleRequest[] = [];
+  const visibilityWithoutFocus: OmnyoDesktopBrowserSetVisibleRequest[] = [];
+
+  const api: OmnyoDesktopBrowserApi = {
     ...createNoopDesktopBrowserApi(),
     attach(request) {
       attachments.push(request);
@@ -105,14 +106,17 @@ function createRecordingBrowserApi(): RecordingBrowserApi {
     },
     onState(listener) {
       stateListeners.push(listener);
+
       return () => {
         const index = stateListeners.indexOf(listener);
+
         if (index >= 0) {
           stateListeners.splice(index, 1);
         }
       };
     },
   };
+
   return {
     api,
     calls,
@@ -129,8 +133,8 @@ function createRecordingBrowserApi(): RecordingBrowserApi {
   };
 }
 
-function installDesktopBrowser(api: BbDesktopBrowserApi): void {
-  window.bbDesktop = createBbDesktopApi(desktopInfo, api);
+function installDesktopBrowser(api: OmnyoDesktopBrowserApi): void {
+  window.omnyoDesktop = createOmnyoDesktopApi(desktopInfo, api);
 }
 
 function createMatchMedia(
@@ -156,6 +160,7 @@ function renderBrowserDeck({
   url?: string;
 }) {
   const tab = makeBrowserTab("tab-url", url);
+
   return render(
     <BrowserTabDeck
       browserTabs={[tab]}
@@ -181,8 +186,10 @@ function lastCallIndex(
 ): number {
   for (let index = calls.length - 1; index >= 0; index -= 1) {
     const call = calls[index];
+
     if (call !== undefined && predicate(call)) return index;
   }
+
   return -1;
 }
 
@@ -191,13 +198,14 @@ describe("BrowserTabLifecycleObserver", () => {
     cleanup();
     vi.restoreAllMocks();
     resetBrowserViewPersistence();
-    delete window.bbDesktop;
+    delete window.omnyoDesktop;
   });
 
   it("destroys a closed browser view exactly once without an active deck", async () => {
     const { api, detachments, visibility } = createRecordingBrowserApi();
     installDesktopBrowser(api);
     const tab = makeBrowserTab("tab-closed", "https://example.com");
+
     const view = render(
       <BrowserTabLifecycleObserver browserTabs={[tab]} threadId="thread-1" />,
     );
@@ -235,7 +243,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
     vi.restoreAllMocks();
     resetBrowserViewPersistence();
     window.localStorage.clear();
-    delete window.bbDesktop;
+    delete window.omnyoDesktop;
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       writable: true,
@@ -252,6 +260,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
     instanceId: "instance-1",
     generation: "generation-1",
   };
+
   const renderTargetDeck = (browserTab: BrowserFixedPanelTab) => (
     <BrowserTabDeck
       browserTabs={[browserTab]}
@@ -262,6 +271,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
       onUpdate={() => {}}
     />
   );
+
   const savedTab = (saved: Partial<typeof desktopTarget>) => ({
     ...makeBrowserTab("native-tab", "https://example.com/saved"),
     desktopTarget: { ...desktopTarget, ...saved },
@@ -294,12 +304,12 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
       "listInstances",
     ).mockResolvedValue({
       instances: [
-        { ...desktopTarget, label: "BB window 1" },
-        { ...desktopTarget, instanceId: "elsewhere", label: "BB window 2" },
+        { ...desktopTarget, label: "Omnyo window 1" },
+        { ...desktopTarget, instanceId: "elsewhere", label: "Omnyo window 2" },
       ],
     });
     render(renderTargetDeck(savedTab({ instanceId: "elsewhere" })));
-    await screen.findByText("This tab is open in another bb window");
+    await screen.findByText("This tab is open in another Omnyo window");
     expect(attachments).toEqual([]);
   });
 
@@ -318,13 +328,15 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
       });
       const tab = savedTab({ instanceId: "elsewhere" });
       const view = render(renderTargetDeck(tab));
-      await screen.findByText("This tab is open in another bb window");
+      await screen.findByText("This tab is open in another Omnyo window");
       expect(attachments).toEqual([]);
       list.mockResolvedValue({
         instances: [{ ...desktopTarget, label: "Current" }],
       });
+
       const selected =
         action === "retry" ? tab : { ...tab, id: "another-saved-tab" };
+
       if (action === "retry")
         fireEvent.click(screen.getByRole("button", { name: "Try again" }));
       else view.rerender(renderTargetDeck(selected));
@@ -345,7 +357,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
       sdk.experimental_desktopBrowsers,
       "listInstances",
     ).mockResolvedValue({
-      instances: [{ ...desktopTarget, label: "BB window 1" }],
+      instances: [{ ...desktopTarget, label: "Omnyo window 1" }],
     });
     render(renderTargetDeck(savedTab({ instanceId: "closed-window" })));
     await waitFor(() => expect(attachments).toHaveLength(1));
@@ -355,7 +367,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
     });
     expect(attachments[0]?.existingOnly).toBeUndefined();
     expect(
-      screen.queryByText("This tab is open in another bb window"),
+      screen.queryByText("This tab is open in another Omnyo window"),
     ).toBeNull();
   });
 
@@ -367,7 +379,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
       sdk.experimental_desktopBrowsers,
       "listInstances",
     ).mockResolvedValue({
-      instances: [{ ...desktopTarget, label: "BB window 1" }],
+      instances: [{ ...desktopTarget, label: "Omnyo window 1" }],
     });
     const orphan = savedTab({ instanceId: "closed-window" });
     const view = render(renderTargetDeck(orphan));
@@ -396,18 +408,20 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
 
   it("waits for the desktop connection after a relaunch instead of falling back", async () => {
     const { api, attachments } = createRecordingBrowserApi();
+
     const getTarget = vi
       .fn<() => Promise<typeof desktopTarget | null>>()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
       .mockResolvedValue(desktopTarget);
+
     api.getTarget = getTarget;
     installDesktopBrowser(api);
     vi.spyOn(
       sdk.experimental_desktopBrowsers,
       "listInstances",
     ).mockResolvedValue({
-      instances: [{ ...desktopTarget, label: "BB window 1" }],
+      instances: [{ ...desktopTarget, label: "Omnyo window 1" }],
     });
     render(renderTargetDeck(savedTab({ instanceId: "closed-window" })));
     expect(screen.queryByText("Reconnecting to this tab")).toBeNull();
@@ -433,6 +447,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
 
   it("stops checking after about a minute and lets the user try again", async () => {
     vi.useFakeTimers();
+
     try {
       const { api } = createRecordingBrowserApi();
       const getTarget = vi.fn(async () => null);
@@ -457,13 +472,15 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
     const { api, attachments } = createRecordingBrowserApi();
     api.getTarget = async () => desktopTarget;
     installDesktopBrowser(api);
+
     const listInstances = vi
       .spyOn(sdk.experimental_desktopBrowsers, "listInstances")
       .mockRejectedValueOnce(new Error("host busy"))
       .mockRejectedValueOnce(new Error("host busy"))
       .mockResolvedValue({
-        instances: [{ ...desktopTarget, label: "BB window 1" }],
+        instances: [{ ...desktopTarget, label: "Omnyo window 1" }],
       });
+
     render(renderTargetDeck(savedTab({ instanceId: "closed-window" })));
     await waitFor(() => expect(attachments).toHaveLength(1), { timeout: 3000 });
     expect(listInstances).toHaveBeenCalledTimes(3);
@@ -504,18 +521,23 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
 
   it("recreates an explicitly reopened page once when its owning desktop activates it", async () => {
     const { api, attachments } = createRecordingBrowserApi();
+
     const desktopTarget = {
       hostId: "host-1",
       instanceId: "instance-1",
       generation: "generation-1",
     };
+
     api.getTarget = async () => desktopTarget;
     installDesktopBrowser(api);
+
     const tab = {
       ...makeBrowserTab("reopened-native-tab", "https://latest.example"),
       desktopTarget,
     };
+
     allowBrowserViewRecreation(tab.id, desktopTarget);
+
     const deck = (activeBrowserTabId: string | null) => (
       <BrowserTabDeck
         browserTabs={[tab]}
@@ -526,6 +548,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
         onUpdate={() => {}}
       />
     );
+
     const view = render(deck(null));
     await act(async () => {});
     expect(attachments).toEqual([]);
@@ -548,6 +571,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
       visibility,
       visibilityWithoutFocus,
     } = createRecordingBrowserApi();
+
     installDesktopBrowser(api);
 
     const view = renderBrowserDeck({ canShowNativeBrowserView: false });
@@ -585,10 +609,12 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
     });
 
     const attachIndex = callIndex(calls, (call) => call.type === "attach");
+
     const boundsIndex = callIndex(
       calls,
       (call) => call.type === "setBounds" && call.request.tabId === "tab-url",
     );
+
     const showIndex = callIndex(
       calls,
       (call) =>
@@ -626,6 +652,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
         visible: false,
       });
     });
+
     const hideIndex = lastCallIndex(
       calls,
       (call) =>
@@ -648,12 +675,15 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
       const visibleShows = visibilityWithoutFocus.filter(
         (request) => request.visible,
       );
+
       expect(visibleShows).toHaveLength(2);
     });
+
     const restoredBoundsIndex = lastCallIndex(
       calls,
       (call) => call.type === "setBounds" && call.request.tabId === "tab-url",
     );
+
     const restoredShowIndex = lastCallIndex(
       calls,
       (call) =>
@@ -661,6 +691,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
         call.request.tabId === "tab-url" &&
         call.request.visible,
     );
+
     expect(hideIndex).toBeGreaterThan(showIndex);
     expect(restoredBoundsIndex).toBeGreaterThan(hideIndex);
     expect(restoredShowIndex).toBeGreaterThan(restoredBoundsIndex);
@@ -690,6 +721,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
   it("shows an unfocused split view without moving native focus", async () => {
     const { api, attachments, visibility, visibilityWithoutFocus } =
       createRecordingBrowserApi();
+
     installDesktopBrowser(api);
 
     render(
@@ -717,9 +749,11 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
   it("focuses the address bar when an empty browser tab requests focus", () => {
     const { api } = createRecordingBrowserApi();
     installDesktopBrowser(api);
+
     const focusSpy = vi
       .spyOn(HTMLInputElement.prototype, "focus")
       .mockImplementation(() => {});
+
     const tab = makeBrowserTab("tab-url", "");
 
     render(
@@ -744,6 +778,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
     installDesktopBrowser(api);
     const consumed = vi.fn();
     const tab = makeBrowserTab("tab-new", "");
+
     const renderTab = (saved: boolean) => (
       <BrowserTabDeck
         browserTabs={[saved ? { ...tab, desktopTarget } : tab]}
@@ -756,11 +791,14 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
         onUpdate={() => {}}
       />
     );
+
     const view = render(renderTab(false));
     await waitFor(() => expect(consumed).toHaveBeenCalled());
+
     const address = screen.getByRole("textbox", {
       name: /Address and search bar/,
     });
+
     expect(document.activeElement).toBe(address);
     fireEvent.change(address, { target: { value: "google.co" } });
 
@@ -777,6 +815,7 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
   it("shows a neutral page state and hides the native view after a main-frame load error", async () => {
     const { api, emitState, visibility, visibilityWithoutFocus } =
       createRecordingBrowserApi();
+
     installDesktopBrowser(api);
 
     renderBrowserDeck({
@@ -802,8 +841,8 @@ describe("BrowserTabDeck native browser first-show ordering", () => {
       });
     });
 
-    expect(await screen.findByText("Server not reachable")).toBeTruthy();
-    expect(screen.getByText(/Start the server, then reload\./)).toBeTruthy();
+    expect(await screen.findByText("Can’t reach localhost:12843")).toBeTruthy();
+    expect(screen.getByText(/Start the server for this project/)).toBeTruthy();
     expect(screen.getByText("ERR_BLOCKED_BY_CLIENT")).toBeTruthy();
 
     await waitFor(() => {

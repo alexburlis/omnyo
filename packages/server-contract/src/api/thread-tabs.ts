@@ -2,16 +2,25 @@ import { z } from "zod";
 import { terminalCreateTargetSchema } from "./terminals.js";
 
 const THREAD_TAB_ID_MAX_LENGTH = 4_194_304;
+
 const THREAD_TAB_PATH_MAX_LENGTH = 32_768;
+
 const THREAD_TAB_TITLE_MAX_LENGTH = 1_024;
+
 const THREAD_TAB_URL_MAX_LENGTH = 4_096;
+
 const THREAD_TAB_PARAMS_MAX_LENGTH = 1_048_576;
+
 const THREAD_TAB_SOURCE_MESSAGE_MAX_LENGTH = 2_097_152;
+
 const THREAD_TAB_LIST_MAX_LENGTH = 200;
+
 const THREAD_TABS_JSON_MAX_LENGTH = 8_388_608;
 
 const threadTabIdSchema = z.string().min(1).max(THREAD_TAB_ID_MAX_LENGTH);
+
 const threadTabPathSchema = z.string().min(1).max(THREAD_TAB_PATH_MAX_LENGTH);
+
 const threadTabLineRangeSchema = z
   .object({
     endLineNumber: z.number().int().positive(),
@@ -19,6 +28,7 @@ const threadTabLineRangeSchema = z
   })
   .strict()
   .refine((range) => range.startLineNumber <= range.endLineNumber);
+
 const threadTabEnvironmentFileSourceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("working-tree") }).strict(),
   z.object({ kind: z.literal("head") }).strict(),
@@ -81,6 +91,7 @@ export const threadTabFileOpenerOwnerSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
 export type ThreadTabFileOpenerOwner = z.infer<
   typeof threadTabFileOpenerOwnerSchema
 >;
@@ -179,6 +190,7 @@ export const threadTabSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
 export type ThreadTab = z.infer<typeof threadTabSchema>;
 
 export const threadTabsSchema = z
@@ -191,7 +203,9 @@ export const threadTabsSchema = z
         message: "Thread tabs payload is too large",
       });
     }
+
     const seenIds = new Set<string>();
+
     for (const [index, tab] of tabs.entries()) {
       if (seenIds.has(tab.id)) {
         context.addIssue({
@@ -200,6 +214,7 @@ export const threadTabsSchema = z
           path: [index, "id"],
         });
       }
+
       seenIds.add(tab.id);
     }
   });
@@ -210,7 +225,9 @@ export const threadTabsResponseSchema = z
     tabs: threadTabsSchema,
   })
   .strict();
+
 export type ThreadTabsResponse = z.infer<typeof threadTabsResponseSchema>;
+
 export type ThreadTabsWireResponse = z.input<typeof threadTabsResponseSchema>;
 
 export const updateThreadTabsRequestSchema = z
@@ -219,6 +236,7 @@ export const updateThreadTabsRequestSchema = z
     tabs: threadTabsSchema,
   })
   .strict();
+
 export type UpdateThreadTabsRequest = z.infer<
   typeof updateThreadTabsRequestSchema
 >;

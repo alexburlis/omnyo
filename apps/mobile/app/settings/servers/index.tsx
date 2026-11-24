@@ -1,3 +1,5 @@
-import { ServersScreen } from "@/screens";
+import { Redirect } from "expo-router";
 
-export default ServersScreen;
+export default function ServersRoute() {
+  return <Redirect href="/settings/device" />;
+}

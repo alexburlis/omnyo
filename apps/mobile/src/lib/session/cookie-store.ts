@@ -1,4 +1,4 @@
-import type { DesktopSession } from "@bb/connect-client";
+import type { DesktopSession } from "@omnyo/connect-client";
 
 export interface SessionCookieSpec {
   name: string;
@@ -20,6 +20,7 @@ export interface CookieStoreLike {
 
 function cookieDomainMatches(domain: string, host: string): boolean {
   const bare = domain.replace(/^\./u, "").toLowerCase();
+
   return host === bare || host.endsWith(`.${bare}`);
 }
 
@@ -29,11 +30,13 @@ export function sessionCookieSpec(
 ): SessionCookieSpec {
   const { cookie } = session;
   const url = new URL(serverUrl);
+
   if (!cookieDomainMatches(cookie.domain, url.hostname)) {
     throw new Error(
       `Desktop-session cookie domain ${cookie.domain} does not match ${url.hostname}`,
     );
   }
+
   return {
     name: cookie.name,
     value: cookie.value,

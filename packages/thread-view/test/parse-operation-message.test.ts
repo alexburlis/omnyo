@@ -5,7 +5,7 @@ import type {
   SystemThreadProvisioningStatus,
   ThreadEvent,
   ThreadEventRow,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   finalizeOperationMessage,
   interruptOperationMessage,
@@ -18,6 +18,7 @@ import {
 } from "./timeline-test-harness.js";
 
 const THREAD_ID = "thr_fixauth";
+
 const THREAD_NAME = "Fix auth bug";
 
 function factory() {
@@ -27,9 +28,11 @@ function factory() {
 function operationTitleFor(row: ThreadEventRow, threadName: string): string {
   const { event, meta } = decodeThreadEventRow(row);
   const message = parseOperationMessage(event, meta, { threadName });
+
   if (message === null || message.kind !== "operation") {
     throw new Error(`expected operation message, got ${message?.kind ?? null}`);
   }
+
   return message.title;
 }
 
@@ -38,6 +41,7 @@ function provisioningTitle(
   threadName: string,
 ): string {
   const row = factory().threadProvisioning({ status, entries: [] });
+
   return operationTitleFor(row, threadName);
 }
 
@@ -47,6 +51,7 @@ function interruptedTitle(
   cause?: "host-connection-lost",
 ): string {
   const row = factory().systemThreadInterrupted({ reason, cause });
+
   return operationTitleFor(row, threadName);
 }
 
@@ -72,6 +77,7 @@ function ownershipTitle(
       previousParentThreadTitle: parents.previousParentThreadTitle,
     },
   });
+
   return operationTitleFor(row, threadName);
 }
 
@@ -91,6 +97,7 @@ describe("parseOperationMessage operation titles", () => {
         },
       ],
     };
+
     const message = parseOperationMessage(
       event,
       {
@@ -117,7 +124,9 @@ describe("parseOperationMessage operation titles", () => {
       const row = factory().providerUnhandled({
         providerId: "acp-my-agent",
       });
+
       const { event, meta } = decodeThreadEventRow(row);
+
       const message = parseOperationMessage(event, meta, {
         includeDiagnosticOperations: true,
         providerDisplayName: "My Agent",
@@ -134,7 +143,9 @@ describe("parseOperationMessage operation titles", () => {
       const row = factory().providerUnhandled({
         providerId: "acp-my-agent",
       });
+
       const { event, meta } = decodeThreadEventRow(row);
+
       const message = parseOperationMessage(event, meta, {
         includeDiagnosticOperations: true,
         threadName: THREAD_NAME,
@@ -189,6 +200,7 @@ describe("parseOperationMessage operation titles", () => {
       message:
         "Earlier chat is hidden from the active timeline. Durable history and workspace are unchanged.",
     });
+
     const { event, meta } = decodeThreadEventRow(row);
 
     expect(
@@ -253,13 +265,17 @@ describe("parseOperationMessage operation titles", () => {
         status: "active",
         entries: [],
       });
+
       const { event, meta } = decodeThreadEventRow(row);
+
       const message = parseOperationMessage(event, meta, {
         threadName: THREAD_NAME,
       });
+
       if (message === null || message.kind !== "operation") {
         throw new Error("expected operation message");
       }
+
       return message;
     }
 
@@ -281,5 +297,7 @@ describe("parseOperationMessage operation titles", () => {
 });
 
 it("explains an intentional machine removal without suggesting a daemon failure", () => {
-  expect(interruptedTitle("host-removed", THREAD_NAME)).toBe("Stopped because the machine was removed");
+  expect(interruptedTitle("host-removed", THREAD_NAME)).toBe(
+    "Stopped because the machine was removed",
+  );
 });

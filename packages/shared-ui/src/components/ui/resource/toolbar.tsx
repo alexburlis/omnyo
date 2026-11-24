@@ -87,13 +87,17 @@ export function ResourceToolbar({
     const toolbar = toolbarRef.current;
     const individualControls = individualControlsRef.current;
     const search = searchRef.current;
+
     if (!toolbar || !individualControls || !search || !compact) return;
     let previousWidth = 0;
+
     const measure = () => {
       const width = toolbar.getBoundingClientRect().width;
+
       if (width === 0) return;
       const widthChanged = previousWidth !== width;
       previousWidth = width;
+
       if (
         !widthChanged &&
         controlsRef.current?.querySelector('[aria-haspopup][data-state="open"]')
@@ -102,17 +106,21 @@ export function ResourceToolbar({
       const gap = Number.parseFloat(getComputedStyle(toolbar).columnGap) || 0;
       const searchWidth = Number.parseFloat(getComputedStyle(search).flexBasis);
       const actionWidth = actionRef.current?.getBoundingClientRect().width ?? 0;
+
       const requiredWidth =
         searchWidth +
         individualControls.getBoundingClientRect().width +
         actionWidth +
         gap * (actionRef.current ? 2 : 1);
+
       const next = hasCombinedControls && width < requiredWidth;
+
       const controlsWidth = next
         ? (controlsRef.current
             ?.querySelector("[data-resource-combined-controls]")
             ?.getBoundingClientRect().width ?? 0)
         : individualControls.getBoundingClientRect().width;
+
       setSearchCondensed(
         expandSearchOnFocus &&
           (next ||
@@ -122,6 +130,7 @@ export function ResourceToolbar({
               gap * (actionRef.current ? 2 : 1) <
               searchWidth),
       );
+
       if (combinedRef.current === next) return;
       restoreControlFocus.current = Boolean(
         controlsRef.current?.contains(document.activeElement) ||
@@ -130,23 +139,29 @@ export function ResourceToolbar({
       combinedRef.current = next;
       setCombined(next);
     };
+
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(toolbar);
     observer.observe(individualControls);
+
     if (controlsRef.current) observer.observe(controlsRef.current);
+
     if (actionRef.current) observer.observe(actionRef.current);
     let frame = 0;
+
     const menuObserver = new MutationObserver(() => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(measure);
     });
+
     if (controlsRef.current)
       menuObserver.observe(controlsRef.current, {
         attributes: true,
         attributeFilter: ["data-state"],
         subtree: true,
       });
+
     return () => {
       observer.disconnect();
       menuObserver.disconnect();
@@ -180,6 +195,7 @@ export function ResourceToolbar({
         aria-label={searchLabel ?? searchPlaceholder}
         onSubmit={(event) => {
           event.preventDefault();
+
           if (searchExpanded || (expandSearchOnFocus && isCompactViewport))
             collapseSearch();
           else searchInputRef.current?.focus();
@@ -221,6 +237,7 @@ export function ResourceToolbar({
               enterKeyHint={expandSearchOnFocus ? "search" : undefined}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing) return;
+
                 if (event.key === "Enter") {
                   event.preventDefault();
                   event.currentTarget.form?.requestSubmit();
@@ -456,11 +473,13 @@ function nextSelectedValues(
 ): string[] | null {
   if (option.disabled) return null;
   const next = new Set(selectedValues);
+
   if (checked) {
     next.add(option.id);
   } else {
     next.delete(option.id);
   }
+
   return [...next];
 }
 
@@ -482,10 +501,13 @@ export function ResourceMultiSelectMenuItems({
   showHeading?: boolean;
 }) {
   const selected = new Set(selectedValues);
+
   function updateValue(option: ResourceOption, checked: boolean) {
     const next = nextSelectedValues(option, checked, selectedValues);
+
     if (next !== null) onChange(next);
   }
+
   return (
     <>
       {showHeading ? (
@@ -562,14 +584,17 @@ export function ResourceMultiSelectMenu({
   const selected = new Set(selectedValues);
   const activeOptions = options.filter((option) => selected.has(option.id));
   const activeSelectedCount = activeOptions.length;
+
   const selectionSummary =
     activeSelectedCount === 0
       ? "All"
       : activeOptions.map((option) => option.label).join(", ");
+
   const triggerLabel =
     activeSelectedCount === 0
       ? label
       : `${label}: ${activeSelectedCount} selected`;
+
   const triggerTooltip = `${label}: ${selectionSummary}`;
 
   return (
@@ -621,22 +646,28 @@ export function ResourceFilterMenu({
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+
   const renderedGroups = groups
     .filter((group) => group.options.length > 0)
     .map((group) => {
       const selected = new Set(group.selectedValues);
+
       const activeOptions = group.options.filter((option) =>
         selected.has(option.id),
       );
+
       return { group, selected, activeOptions };
     });
+
   const activeSummaries = renderedGroups
     .filter(({ activeOptions }) => activeOptions.length > 0)
     .map(
       ({ group, activeOptions }) =>
         `${group.label}: ${activeOptions.map((option) => option.label).join(", ")}`,
     );
+
   const hasActiveFilter = activeSummaries.length > 0;
+
   const triggerLabel = hasActiveFilter
     ? `Filters: ${activeSummaries.join("; ")}`
     : "Filters";
@@ -686,6 +717,7 @@ export function ResourceFilterMenu({
                       checked === true,
                       group.selectedValues,
                     );
+
                     if (next === null) return;
                     group.onChange(next);
                   }}
@@ -762,6 +794,7 @@ export function ResourceSortMenuItems({
       )}
       {options.map((option) => {
         const selected = option.id === value;
+
         return (
           <DropdownMenuItem
             key={option.id}
@@ -770,6 +803,7 @@ export function ResourceSortMenuItems({
             aria-checked={selected}
             onSelect={(event) => {
               event.preventDefault();
+
               if (option.disabled) return;
               onChange(option.id);
             }}
@@ -848,6 +882,7 @@ export function ResourceSortMenu({
   const [open, setOpen] = useState(false);
   const selectedOption = options.find((option) => option.id === value);
   const directionLabel = direction === "asc" ? "ascending" : "descending";
+
   const sortStateLabel =
     selectedOption === undefined
       ? `Sort: ${placeholderLabel}`
@@ -923,6 +958,7 @@ export function ResourceCreateButton({
   const groups: readonly ResourceCreateTemplateGroup[] = templateGroups ?? [
     { label: "Examples", templates },
   ];
+
   const createButton = (
     <Button
       aria-label={label}
@@ -935,6 +971,7 @@ export function ResourceCreateButton({
       <span>{label}</span>
     </Button>
   );
+
   return (
     <div className="flex shrink-0 items-stretch">
       {compactWhenNarrow ? (

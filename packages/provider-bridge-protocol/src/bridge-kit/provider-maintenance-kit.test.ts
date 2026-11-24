@@ -15,17 +15,20 @@ import {
 
 describe("provider maintenance kit", () => {
   it("reads a CLI version through a native launcher after closing stdin", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "bb cli version é-"));
+    const dir = await mkdtemp(path.join(tmpdir(), "omnyo cli version é-"));
+
     try {
       const script = path.join(dir, "version.cjs");
       await writeFile(
         script,
         'require("node:fs").readFileSync(0); console.log("tool 1.2.3");',
       );
+
       const executable = path.join(
         dir,
         process.platform === "win32" ? "version.cmd" : "version",
       );
+
       await writeFile(
         executable,
         process.platform === "win32"
@@ -124,7 +127,10 @@ describe("provider maintenance kit", () => {
     ["0.5.0-01", " >&2"],
     ["1.2.3-beta..1", ""],
   ])("returns null when --version reports %s", async (version, redirect) => {
-    const dir = await mkdtemp(path.join(tmpdir(), "bb-cli-invalid-version-"));
+    const dir = await mkdtemp(
+      path.join(tmpdir(), "omnyo-cli-invalid-version-"),
+    );
+
     try {
       const executable = path.join(dir, "invalid-version-cli");
       await writeFile(

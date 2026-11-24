@@ -1,3 +1,10 @@
+import {
+  stageBuiltinPluginArtifact,
+  verifyBuiltinPluginArtifact,
+} from "./builtin-plugin-artifacts.js";
+import type { PluginManifest } from "./manifest.js";
+import type { PluginApplyUpdateRequest } from "@omnyo/server-contract";
+import type { BundledPluginRegistration } from "./builtin-registry.js";
 import semver from "semver";
 import {
   getInstalledPlugin,
@@ -7,7 +14,7 @@ import {
   setInstalledPluginUpdateState,
   type InstalledPluginRow,
   type PluginGitSelector,
-} from "@bb/db";
+} from "@omnyo/db";
 import { gitSelectorForRow } from "./git-source-intent.js";
 import {
   gitArtifactCacheDir,
@@ -17,6 +24,7 @@ import {
 import { readPluginManifest } from "./manifest.js";
 import {
   createNpmResolverRun,
+  GitLookupUnavailableError,
   type NpmResolverRun,
   resolveGitRef,
   resolveGitUpdate,
@@ -46,17 +54,19 @@ import {
   pluginUpdateCheckEntrySchema,
   type PluginSourceDetail,
   type PluginUpdateCheckEntry,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type {
   PluginApplyUpdateOutcome,
   PluginServiceDeps,
 } from "./plugin-service-internal.js";
 
 const PLUGIN_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000;
+
 const UPDATE_CHECK_CONCURRENCY = 4;
 
 function npmRunForRow(row: InstalledPluginRow): NpmResolverRun {
   const registry = row.provenance === "catalog" ? row.sourceNpmRegistry : null;
+
   return registry === null
     ? createNpmResolverRun({
         fetch: (input, init) =>
@@ -74,11 +84,19 @@ export interface PluginUpdates {
   stopPeriodicUpdateChecks(): Promise<void>;
   listUpdateResults(): PluginUpdateCheckEntry[];
   getSource(id: string): Promise<PluginSourceDetail | undefined>;
-  applyUpdate(id: string): Promise<PluginApplyUpdateOutcome>;
+  applyUpdate(
+    id: string,
+    request?: PluginApplyUpdateRequest,
+  ): Promise<PluginApplyUpdateOutcome>;
 }
 
 interface PluginUpdatesContext {
   deps: PluginServiceDeps;
+  bundledPlugins: readonly BundledPluginRegistration[];
+  checkCompatibility: (manifest: PluginManifest) => string | undefined;
+  activateManagedUpdate: ReturnType<
+    typeof createPluginActivation
+  >["activateManagedUpdate"];
   registrationMutationKey: string;
   withLifecycleLock: <T>(id: string, fn: () => Promise<T>) => Promise<T>;
   withPluginOperationLock: <T>(id: string, fn: () => Promise<T>) => Promise<T>;
@@ -112,6 +130,7 @@ export function createPluginUpdates(
     runArtifactGc,
     safeModeActivationRefusal,
   } = context;
+
   const now = deps.now ?? Date.now;
   const gitCandidateProbeCache = new Map<string, GitCandidateProbeResult>();
 
@@ -125,11 +144,13 @@ export function createPluginUpdates(
     resolution: PluginUpdateResolution,
   ): PluginUpdateCheckEntry {
     const dev = resolution.devMode ? { devMode: true as const } : {};
+
     const packagedDetail =
       resolution.packagedBuildProblems !== undefined &&
       resolution.packagedBuildProblems.length > 0
         ? `dev mode selected this candidate; a packaged build would reject it: ${problemMessages(resolution.packagedBuildProblems).join("; ")}`
         : undefined;
+
     const blocked =
       resolution.outcome === "incompatible"
         ? {
@@ -142,6 +163,7 @@ export function createPluginUpdates(
               reasons: problemMessages(resolution.blocked.reasons),
             }
           : undefined;
+
     const common = {
       id,
       outcome: resolution.outcome,
@@ -150,12 +172,15 @@ export function createPluginUpdates(
       ...(blocked ? { blocked } : {}),
       ...(packagedDetail ? { detail: packagedDetail } : {}),
     };
+
     if (resolution.outcome === "update-available") {
       return { ...common, candidate: resolution.candidate };
     }
+
     if (resolution.outcome === "unavailable") {
       return { ...common, detail: resolution.detail };
     }
+
     return common;
   }
 
@@ -166,6 +191,7 @@ export function createPluginUpdates(
       newestIncompatibleVersion: entry.blocked?.version ?? null,
       statusDetail: JSON.stringify(entry),
     });
+
     if (!changed) {
       throw new Error(`plugin "${entry.id}" disappeared during update check`);
     }
@@ -178,8 +204,10 @@ export function createPluginUpdates(
   }): Promise<"tag" | "branch" | "unknown"> {
     if (args.commit === null) return "unknown";
     const parsed = parsePluginSource(`git:${args.url}@${args.commit}`);
+
     if (parsed.kind !== "git") return "unknown";
     let checkoutDir: string;
+
     try {
       checkoutDir = gitArtifactCacheDir(
         deps.dataDir,
@@ -189,6 +217,7 @@ export function createPluginUpdates(
     } catch {
       return "unknown";
     }
+
     const hasRef = async (candidate: string): Promise<boolean> => {
       try {
         await runInstallCommand("git", [
@@ -199,14 +228,19 @@ export function createPluginUpdates(
           "--quiet",
           candidate,
         ]);
+
         return true;
       } catch {
         return false;
       }
     };
+
     if (await hasRef(`refs/tags/${args.ref}`)) return "tag";
+
     if (await hasRef(`refs/remotes/origin/${args.ref}`)) return "branch";
+
     if (await hasRef(`refs/heads/${args.ref}`)) return "branch";
+
     return "unknown";
   }
 
@@ -219,32 +253,40 @@ export function createPluginUpdates(
     if (row.sourceGitUrl === null) {
       throw new Error(`plugin "${row.id}" has corrupt normalized git state`);
     }
+
     const url = row.sourceGitUrl;
     const selector = gitSelectorForRow(row);
+
     if (selector !== null) return { outcome: "resolved", url, selector };
+
     if (row.sourceGitRequestedRef === null) {
       throw new Error(`plugin "${row.id}" has corrupt normalized git state`);
     }
+
     const ref = row.sourceGitRequestedRef;
     const classified = await resolveGitRef({ url, ref });
+
     if (classified.outcome === "unavailable") return classified;
+
     if (classified.refKind === "branch") {
       const evidence = await legacyGitRefEvidence({
         url,
         commit: row.gitResolvedCommit,
         ref,
       });
+
       if (evidence !== "branch") {
         return {
           outcome: "unavailable",
           detail:
             `security check failed: ${url} now publishes "${ref}" as a branch, but this install ` +
             `${evidence === "tag" ? "recorded it as a tag" : "has no local record of its ref kind"}. ` +
-            `bb keeps the plugin pinned to ${row.gitResolvedCommit ?? "its recorded commit"} rather than ` +
+            `Omnyo keeps the plugin pinned to ${row.gitResolvedCommit ?? "its recorded commit"} rather than ` +
             "tracking that branch. Remove the plugin and install it again to accept the new ref",
         };
       }
     }
+
     if (
       !setInstalledPluginSourceClassification(deps.db, row.id, {
         kind: "git",
@@ -253,6 +295,7 @@ export function createPluginUpdates(
     ) {
       throw new Error(`plugin "${row.id}" disappeared during normalization`);
     }
+
     return {
       outcome: "resolved",
       url,
@@ -266,11 +309,13 @@ export function createPluginUpdates(
     candidateTag: string | undefined;
   }): PluginGitSelector {
     if (args.selector.kind === "ref") return args.selector;
+
     if (args.candidateTag === undefined) {
       throw new Error(
         `git candidate for ${args.candidateCommit} carries no resolved release tag`,
       );
     }
+
     return { ...args.selector, resolvedTag: args.candidateTag };
   }
 
@@ -279,19 +324,11 @@ export function createPluginUpdates(
     npmRun: NpmResolverRun;
   }): Promise<PluginUpdateResolution> {
     const installed = installedUpdateVersion(args.row);
+
     if (args.row.sourceKind === "path" || args.row.sourceKind === "builtin") {
       return { outcome: "pinned", current: installed };
     }
-    if (
-      args.row.sourceKind === "npm" &&
-      args.row.sourceNpmRegistry?.includes("bb-source=github-release")
-    ) {
-      return {
-        outcome: "unavailable",
-        detail:
-          "installed from the retired remote marketplace — remove it and reinstall from Plugins → Browse plugins to switch to the bundled copy",
-      };
-    }
+
     if (args.row.sourceKind === "npm") {
       return resolveNpmUpdate({
         intent: npmIntentForRow(args.row),
@@ -300,14 +337,18 @@ export function createPluginUpdates(
         run: args.npmRun,
       });
     }
+
     if (args.row.gitResolvedCommit === null) {
       throw new Error(
         `plugin "${args.row.id}" has corrupt normalized git state`,
       );
     }
+
     const intent = await classifiedGitIntentForRow(args.row);
+
     if (intent.outcome === "unavailable") return intent;
     const row = args.row;
+
     const probeGitCandidate: GitCandidateProbe = async (candidate) => {
       const cacheKey = JSON.stringify([
         row.id,
@@ -316,13 +357,17 @@ export function createPluginUpdates(
         candidate.commit,
         deps.appVersion,
       ]);
+
       const cached = gitCandidateProbeCache.get(cacheKey);
+
       if (cached !== undefined) return cached;
+
       const probed = await stageGitCandidate({
         row,
         commit: candidate.commit,
         promote: false,
       });
+
       const result: GitCandidateProbeResult =
         probed.outcome === "valid"
           ? {
@@ -331,27 +376,35 @@ export function createPluginUpdates(
               packagedBuildProblems: probed.packagedBuildProblems,
             }
           : probed;
+
       if (result.outcome !== "invalid") {
         gitCandidateProbeCache.set(cacheKey, result);
       }
+
       return result;
     };
+
     const remote = await resolveGitUpdate({
       url: intent.url,
       intent: intent.selector,
       currentCommit: args.row.gitResolvedCommit,
       probeCandidate: probeGitCandidate,
     });
+
     if (remote.outcome !== "update-available") return remote;
+
     if (intent.selector.kind === "range") return remote;
+
     const staged = await stageGitCandidate({
       row: args.row,
       commit: remote.candidate.version,
       promote: false,
     });
+
     if (staged.outcome === "invalid") {
       return { outcome: "unavailable", detail: staged.detail };
     }
+
     if (staged.outcome === "incompatible") {
       return {
         outcome: "incompatible",
@@ -361,6 +414,7 @@ export function createPluginUpdates(
         ...(staged.devMode ? { devMode: true } : {}),
       };
     }
+
     return {
       ...remote,
       ...(staged.devMode ? { devMode: true } : {}),
@@ -375,8 +429,10 @@ export function createPluginUpdates(
     ((delayMs: number, onElapsed: () => void) => {
       const timer = setTimeout(onElapsed, delayMs);
       timer.unref();
+
       return () => clearTimeout(timer);
     });
+
   let cancelPeriodicCheck: (() => void) | null = null;
   let periodicChecksStopped = true;
   let inFlightSweep: Promise<PluginUpdateCheckEntry[]> | null = null;
@@ -387,21 +443,27 @@ export function createPluginUpdates(
         (row) => row.sourceKind !== "path" && row.sourceKind !== "builtin",
       )
       .map((row) => row.lastUpdateCheckAt);
+
     if (stamps.length === 0) return PLUGIN_UPDATE_CHECK_INTERVAL_MS;
+
     if (stamps.includes(null)) return 0;
     const oldest = Math.min(...stamps.filter((stamp) => stamp !== null));
+
     return Math.max(0, PLUGIN_UPDATE_CHECK_INTERVAL_MS - (now() - oldest));
   }
 
   async function runPeriodicCheck(): Promise<void> {
     if (periodicChecksStopped) return;
+
     if (isServerMoveFrozen(deps.db)) {
       cancelPeriodicCheck = scheduleUpdateCheck(
         SERVER_MOVE_FROZEN_RETRY_MS,
         runPeriodicCheck,
       );
+
       return;
     }
+
     try {
       await updates.checkForUpdates();
     } catch (error: unknown) {
@@ -422,31 +484,46 @@ export function createPluginUpdates(
     rows.sort((a, b) => a.id.localeCompare(b.id));
     const results: PluginUpdateCheckEntry[] = [];
     let next = 0;
+
     const worker = async () => {
       while (next < rows.length) {
         const index = next++;
         const row = rows[index] as InstalledPluginRow;
         results[index] = await withLifecycleLock(row.id, async () => {
           const current = getInstalledPlugin(deps.db, row.id);
+
           if (!current) {
             throw new Error(
               `plugin "${row.id}" disappeared during update check`,
             );
           }
-          const resolution = await resolveUpdateForRow({
-            row: current,
-            npmRun: npmRunForRow(current),
-          });
+
+          let resolution: PluginUpdateResolution;
+
+          try {
+            resolution = await resolveUpdateForRow({
+              row: current,
+              npmRun: npmRunForRow(current),
+            });
+          } catch (error) {
+            if (!(error instanceof GitLookupUnavailableError)) throw error;
+
+            resolution = { outcome: "unavailable", detail: error.message };
+          }
+
           const checked = checkEntryFromResolution(
             current.id,
             installedUpdateVersion(current),
             resolution,
           );
+
           persistUpdateEntry(checked);
+
           return checked;
         });
       }
     };
+
     await Promise.all(
       Array.from(
         { length: Math.min(UPDATE_CHECK_CONCURRENCY, rows.length) },
@@ -454,6 +531,7 @@ export function createPluginUpdates(
       ),
     );
     notifyPluginsChanged();
+
     return results;
   }
 
@@ -477,12 +555,16 @@ export function createPluginUpdates(
     checkForUpdates(id) {
       if (id !== undefined) {
         const row = getInstalledPlugin(deps.db, id);
+
         if (!row) throw new Error(`unknown plugin "${id}"`);
+
         return checkRows([row]);
       }
+
       inFlightSweep ??= checkRows(listInstalledPlugins(deps.db)).finally(() => {
         inFlightSweep = null;
       });
+
       return inFlightSweep;
     },
 
@@ -501,7 +583,9 @@ export function createPluginUpdates(
               detail: "updates have not been checked yet",
             };
           }
+
           let json: unknown;
+
           try {
             json = JSON.parse(row.updateStatusDetail);
           } catch {
@@ -509,22 +593,28 @@ export function createPluginUpdates(
               `plugin "${row.id}" has corrupt persisted update state`,
             );
           }
+
           const parsed = pluginUpdateCheckEntrySchema.safeParse(json);
+
           if (!parsed.success || parsed.data.id !== row.id) {
             throw new Error(
               `plugin "${row.id}" has corrupt persisted update state`,
             );
           }
+
           return parsed.data;
         });
     },
 
     async getSource(id) {
       const row = getInstalledPlugin(deps.db, id);
+
       if (row === undefined) return undefined;
       const manifest = await readPluginManifest(row.rootDir).catch(() => null);
       const artifacts = listRecentPluginArtifacts(deps.db, id, 10);
+
       return {
+        activeArtifactId: row.activeArtifactId,
         requested: row.source,
         resolved: installedUpdateVersion(row).display,
         ...(row.sourceGitSubdirectory === null
@@ -543,28 +633,34 @@ export function createPluginUpdates(
           ? {}
           : { registry: row.sourceNpmRegistry }),
         engines: {
-          ...(manifest?.bbEngineRange === undefined
+          ...(manifest?.coreEngineRange === undefined
             ? {}
-            : { bb: manifest.bbEngineRange }),
-          ...(manifest?.bbPluginSdkRange === undefined
+            : { omnyo: manifest.coreEngineRange }),
+          ...(manifest?.pluginSdkRange === undefined
             ? {}
-            : { bbPluginSdk: manifest.bbPluginSdkRange }),
+            : { omnyoPluginSdk: manifest.pluginSdkRange }),
         },
         installedAt: row.installedAt,
         history: artifacts.map((artifact) => ({
           version:
             artifact.sourceKind === "npm"
               ? (artifact.npmResolvedVersion ?? "unknown")
-              : (artifact.gitResolvedCommit ?? "unknown"),
+              : artifact.sourceKind === "builtin"
+                ? `builtin:${artifact.contentHash ?? artifact.id}`
+                : artifact.sourceKind === "path"
+                  ? `path:${artifact.contentHash ?? artifact.id}`
+                  : (artifact.gitResolvedCommit ?? "unknown"),
           activatedAt: artifact.validatedAt ?? artifact.updatedAt,
         })),
       };
     },
 
-    async applyUpdate(id) {
+    async applyUpdate(id, request = {}) {
       return withPluginOperationLock(REGISTRATION_MUTATION_KEY, async () => {
         const row = getInstalledPlugin(deps.db, id);
+
         if (!row) return { ok: false, error: `unknown plugin "${id}"` };
+
         const safeModeRefusal = safeModeActivationRefusal({
           pluginId: id,
           provenance: row.provenance,
@@ -572,17 +668,98 @@ export function createPluginUpdates(
             row.sourceKind === "builtin" ? row.sourceBuiltinName : null,
           action: "update",
         });
+
         if (safeModeRefusal !== null) {
           return { ok: false, error: safeModeRefusal };
         }
+
         const from = installedUpdateVersion(row);
+
+        if (request.bundledCandidate !== undefined) {
+          const candidate = request.bundledCandidate;
+
+          const bundled = context.bundledPlugins.find(
+            (plugin) =>
+              plugin.pluginId === id && plugin.name === row.sourceBuiltinName,
+          );
+
+          if (row.sourceKind !== "builtin" || bundled === undefined)
+            return {
+              ok: false,
+              error:
+                "Only an installed canonical bundled plugin accepts a bundled candidate",
+            };
+
+          if (
+            row.version !== candidate.expectedVersion ||
+            row.activeArtifactId !== candidate.expectedArtifactId
+          )
+            return {
+              ok: false,
+              error: "Bundled plugin registration changed before update",
+            };
+
+          try {
+            const staged = await stageBuiltinPluginArtifact({
+              db: deps.db,
+              dataDir: deps.dataDir,
+              row,
+              bundledRootDir: bundled.rootDir,
+              candidate,
+              checkCompatibility: context.checkCompatibility,
+            });
+
+            await context.activateManagedUpdate({
+              row,
+              ...staged,
+              source: row.source,
+              sourceIntent: { kind: "builtin", name: bundled.name },
+              exactResolution: { kind: "builtin" },
+              beforePersist: () =>
+                verifyBuiltinPluginArtifact({
+                  db: deps.db,
+                  dataDir: deps.dataDir,
+                  row: {
+                    ...row,
+                    rootDir: staged.rootDir,
+                    version: staged.manifest.version,
+                    activeArtifactId: staged.artifactId,
+                  },
+                }),
+            });
+
+            return {
+              ok: true,
+              result: {
+                applied: true,
+                from,
+                to: {
+                  version: staged.manifest.version,
+                  display: staged.manifest.version,
+                },
+                outcome: "updated",
+              },
+            };
+          } catch (error) {
+            return {
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          } finally {
+            await runArtifactGc();
+          }
+        }
+
         const npmRun = npmRunForRow(row);
+
         const selectionNpmIntent =
           row.sourceKind === "npm" ? npmIntentForRow(row) : undefined;
+
         const resolution = await resolveUpdateForRow({
           row,
           npmRun,
         });
+
         const checked = checkEntryFromResolution(id, from, resolution);
         persistUpdateEntry(checked);
 
@@ -591,23 +768,27 @@ export function createPluginUpdates(
             ok: false,
             error:
               row.sourceKind === "path"
-                ? `plugin "${id}" is a local path source with no update channel; edit it in place and run \`bb plugin reload ${id}\`, or move it with \`bb plugin install path:<new directory>\` (settings, secrets, and schedules are kept)`
+                ? `plugin "${id}" is a local path source with no update channel; edit it in place and run \`omnyo plugin reload ${id}\`, run \`omnyo plugin relocate <old folder> <new folder>\` if its folder moved, or install it from another folder with \`omnyo plugin install path:<new directory>\` (settings, secrets, and schedules are kept)`
                 : `plugin "${id}" is pinned by its source intent; remove and reinstall it with an npm range, a git branch, or a git semver range to track updates`,
           };
         }
+
         if (resolution.outcome === "incompatible") {
           return {
             ok: false,
             error: `${resolution.newest.display} is incompatible: ${problemMessages(resolution.reasons).join("; ")}`,
           };
         }
+
         if (resolution.outcome === "unavailable") {
           return { ok: false, error: resolution.detail };
         }
+
         const to =
           resolution.outcome === "update-available"
             ? resolution.candidate
             : from;
+
         if (resolution.outcome === "current") {
           return {
             ok: true,
@@ -626,20 +807,25 @@ export function createPluginUpdates(
               appVersion: deps.appVersion,
               run: npmRun,
             });
+
             if (selected.outcome !== "selected") {
               throw new Error(
                 `npm candidate changed during update: ${selected.outcome}`,
               );
             }
+
             if (selected.candidate.version !== to.version) {
               throw new Error(
                 `npm candidate changed during update: resolved ${to.version}, selected ${selected.candidate.version}`,
               );
             }
+
             const activationRow = getInstalledPlugin(deps.db, id);
+
             if (activationRow === undefined) {
               throw new Error(`plugin "${id}" disappeared before activation`);
             }
+
             await applyNpmCandidate({
               row: activationRow,
               selectionIntent: selectionNpmIntent,
@@ -650,13 +836,17 @@ export function createPluginUpdates(
             resolution.outcome === "update-available"
           ) {
             const activationRow = getInstalledPlugin(deps.db, id);
+
             if (activationRow === undefined) {
               throw new Error(`plugin "${id}" disappeared before activation`);
             }
+
             const intent = await classifiedGitIntentForRow(activationRow);
+
             if (intent.outcome === "unavailable") {
               return { ok: false, error: intent.detail };
             }
+
             const staged = await stageGitCandidate({
               row: activationRow,
               commit: resolution.candidate.version,
@@ -667,11 +857,13 @@ export function createPluginUpdates(
                 candidateTag: resolution.candidateGitTag,
               }),
             });
+
             if (staged.outcome !== "valid") {
               const detail =
                 staged.outcome === "invalid"
                   ? staged.detail
                   : problemMessages(staged.reasons).join("; ");
+
               return { ok: false, error: `update refused: ${detail}` };
             }
           }
@@ -688,8 +880,10 @@ export function createPluginUpdates(
               },
             };
           }
+
           throw error;
         }
+
         await removeUnusedPluginArtifacts({
           db: deps.db,
           dataDir: deps.dataDir,
@@ -698,9 +892,11 @@ export function createPluginUpdates(
         });
         await runArtifactGc();
         const updatedRow = getInstalledPlugin(deps.db, id);
+
         if (!updatedRow) {
           throw new Error(`plugin "${id}" disappeared after update`);
         }
+
         const updatedVersion = installedUpdateVersion(updatedRow);
         persistUpdateEntry(
           checkEntryFromResolution(id, updatedVersion, {
@@ -711,6 +907,7 @@ export function createPluginUpdates(
               : {}),
           }),
         );
+
         return {
           ok: true,
           result: {
@@ -723,5 +920,6 @@ export function createPluginUpdates(
       });
     },
   };
+
   return updates;
 }

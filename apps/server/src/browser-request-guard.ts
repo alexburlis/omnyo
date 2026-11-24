@@ -2,11 +2,12 @@ import { isIP } from "node:net";
 import {
   buildLocalAppOrigins,
   type BuildLocalAppOriginsArgs,
-} from "@bb/config/local-app-origins";
+} from "@omnyo/config/local-app-origins";
 import type { ServerRuntimeConfig } from "./types.js";
 
 interface BrowserRequestGuardDeps {
-  config: Pick<ServerRuntimeConfig, "serverPort" | "appUrl" | "devAppPort">;
+  config: Pick<ServerRuntimeConfig, "serverPort" | "appUrl" | "devAppPort"> &
+    Partial<Pick<ServerRuntimeConfig, "appAliasOrigins">>;
 }
 
 export interface BrowserRequestProblem {
@@ -30,38 +31,48 @@ export function allowedAppOrigins(deps: BrowserRequestGuardDeps): Set<string> {
   const args: BuildLocalAppOriginsArgs = {
     serverPort: deps.config.serverPort,
   };
+
   if (deps.config.appUrl !== undefined) {
     args.appUrl = deps.config.appUrl;
   }
+
   if (deps.config.devAppPort !== undefined) {
     args.devAppPort = deps.config.devAppPort;
   }
-  return new Set(
-    buildLocalAppOrigins(args).filter(
+
+  return new Set([
+    ...buildLocalAppOrigins(args).filter(
       (origin) => origin.startsWith("http://") || origin.startsWith("https://"),
     ),
-  );
+    ...(deps.config.appAliasOrigins ?? []),
+  ]);
 }
 
 function knownAppPorts(deps: BrowserRequestGuardDeps): Set<number> {
   const ports = new Set<number>([deps.config.serverPort]);
+
   if (deps.config.devAppPort !== undefined) {
     ports.add(deps.config.devAppPort);
   }
+
   return ports;
 }
 
 export function effectivePort(url: URL): number | null {
   if (url.port.length > 0) {
     const port = Number(url.port);
+
     return Number.isInteger(port) ? port : null;
   }
+
   if (url.protocol === "http:") {
     return 80;
   }
+
   if (url.protocol === "https:") {
     return 443;
   }
+
   return null;
 }
 
@@ -69,8 +80,10 @@ function parseRequestHost(host: string, protocol: string): URL | null {
   if (!/^(?:\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::[0-9]+)?$/iu.test(host)) {
     return null;
   }
+
   try {
     const url = new URL(`${protocol}//${host}`);
+
     return effectivePort(url) !== 0 &&
       url.username.length === 0 &&
       url.password.length === 0 &&
@@ -89,6 +102,7 @@ function isTrustedHostname(
   deps: BrowserRequestGuardDeps,
 ): boolean {
   const address = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
+
   return (
     hostname === "localhost" ||
     isIP(address) !== 0 ||
@@ -104,19 +118,22 @@ export function requestHostProblem(
 ): BrowserRequestProblem | null {
   const host = context.req.header("host") ?? new URL(context.req.url).host;
   const target = parseRequestHost(host, "http:");
+
   if (target !== null && isTrustedHostname(target.hostname, deps)) {
     return null;
   }
+
   return {
     status: 403,
     error:
-      'Host must be localhost, an IP address, or the hostname configured in BB_APP_URL. To allow your custom hostname, run "npx bb-app config set BB_APP_URL https://bb.example.com" on the machine running BB (including the desktop app), replacing https://bb.example.com with your app URL, then reload this page.',
+      'Host must be localhost, an IP address, or a hostname configured in OMNYO_APP_URL or OMNYO_APP_ALIAS_URLS. To allow your custom hostname, run "omnyo-app config set OMNYO_APP_URL https://omnyo.example.com" on the machine running Omnyo (including the desktop app), replacing https://omnyo.example.com with your app URL, then reload this page.',
   };
 }
 
 function requestTargets(context: BrowserRequestContext): URL[] {
   const requestUrl = new URL(context.req.url);
   const targets = [requestUrl];
+
   const forwardedProtocol =
     context.req.header("x-forwarded-proto")?.split(",", 1)[0]?.trim() ||
     requestUrl.protocol.replace(/:$/u, "");
@@ -128,11 +145,14 @@ function requestTargets(context: BrowserRequestContext): URL[] {
     if (rawHost === undefined || rawHost.length === 0) {
       continue;
     }
+
     const target = parseRequestHost(rawHost, `${forwardedProtocol}:`);
+
     if (target !== null) {
       targets.push(target);
     }
   }
+
   return targets;
 }
 
@@ -142,11 +162,13 @@ function isTrustedOrigin(
   origin: string,
 ): boolean {
   let originUrl: URL;
+
   try {
     originUrl = new URL(origin);
   } catch {
     return false;
   }
+
   if (
     originUrl.origin !== origin ||
     (originUrl.protocol !== "http:" && originUrl.protocol !== "https:")
@@ -161,11 +183,13 @@ function isTrustedOrigin(
   const targets = requestTargets(context).filter((target) =>
     isTrustedHostname(target.hostname, deps),
   );
+
   if (targets.some((target) => target.origin === originUrl.origin)) {
     return true;
   }
 
   const originPort = effectivePort(originUrl);
+
   if (originPort === null || !knownAppPorts(deps).has(originPort)) {
     return false;
   }
@@ -185,14 +209,16 @@ export function browserRequestProblem(
   options: BrowserRequestGuardOptions = {},
 ): BrowserRequestProblem | null {
   const origin = context.req.header("origin");
+
   if (origin !== undefined && !isTrustedOrigin(context, deps, origin)) {
     return {
       status: 403,
-      error: `origin "${origin}" is not a local BB app origin`,
+      error: `origin "${origin}" is not a local Omnyo app origin`,
     };
   }
 
   const method = context.req.method.toUpperCase();
+
   if (
     options.requireJsonForMutation === true &&
     method !== "GET" &&
@@ -207,4 +233,27 @@ export function browserRequestProblem(
   }
 
   return null;
+}
+
+export function originAdoptionRequestUrlV1(
+  context: BrowserRequestContext,
+): string | null {
+  const request = new URL(context.req.url);
+  const host = context.req.header("host") ?? request.host;
+
+  const protocol =
+    context.req.header("x-forwarded-proto") ?? request.protocol.slice(0, -1);
+
+  if (
+    protocol !== "https" ||
+    ![
+      "bb.alexburlis.com",
+      "bb.alexburlis.com:443",
+      "app.example.invalid",
+      "app.example.invalid:443",
+    ].includes(host)
+  )
+    return null;
+
+  return `https://${host}${request.pathname}`;
 }

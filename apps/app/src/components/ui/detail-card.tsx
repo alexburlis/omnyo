@@ -1,6 +1,6 @@
 import { type CSSProperties, type ReactNode, type UIEventHandler } from "react";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 export const DETAIL_ROW_ICON_CLASS =
   "size-3 shrink-0 text-subtle-foreground max-md:pointer-coarse:size-4";
@@ -22,7 +22,9 @@ export function DetailRowIconLabel({
 
 export const DETAIL_GRID_CLASS =
   "grid grid-cols-[var(--detail-label-width,96px)_minmax(0,1fr)] gap-x-3";
+
 const DETAIL_LABEL_CLASS = "m-0 text-xs leading-5 text-muted-foreground";
+
 const DETAIL_VALUE_CLASS = "m-0 min-w-0 text-xs leading-5 text-foreground";
 
 type DetailRowOrientation = "horizontal" | "vertical";
@@ -33,6 +35,7 @@ function labelWidthStyle(
   if (!labelWidth) {
     return undefined;
   }
+
   return { "--detail-label-width": labelWidth } as CSSProperties;
 }
 
@@ -47,6 +50,7 @@ interface DetailCardProps {
 }
 
 const DETAIL_CARD_BASE_CLASS = "flex flex-col gap-1";
+
 const DETAIL_CARD_CARD_CLASS =
   "rounded-md border border-border bg-surface-raised px-2 py-1";
 

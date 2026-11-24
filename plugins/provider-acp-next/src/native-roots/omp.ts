@@ -1,5 +1,5 @@
 import path from "node:path";
-import { experimental_resolveClaudePluginRoots } from "@get-bb/plugin-sdk/host";
+import { experimental_resolveClaudePluginRoots } from "@omnyo/plugin-sdk/host";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { resolveOpenCodeConfigDir } from "./opencode.js";
@@ -21,7 +21,9 @@ import {
 } from "./shared.js";
 
 const OMP_DIR_NAME = ".omp";
+
 const PI_DIR_NAME = ".pi";
+
 const OMP_PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 const ompSkillConfigSchema = z
@@ -60,6 +62,7 @@ export function resolveOmpAgentDir(
     env.OMP_PROFILE !== undefined
       ? env.OMP_PROFILE.trim()
       : env.PI_PROFILE?.trim();
+
   if (
     profile &&
     profile !== "default" &&
@@ -67,6 +70,7 @@ export function resolveOmpAgentDir(
   ) {
     return path.join(homeDir, OMP_DIR_NAME, "profiles", profile, "agent");
   }
+
   return resolveConfiguredHomeDirectory(
     homeDir,
     env.PI_CODING_AGENT_DIR,
@@ -80,10 +84,12 @@ async function resolveOmpConfiguredSkillRoots(
 ): Promise<AcpResolvedSkillRoot[]> {
   const cwd = args.cwd ?? args.homeDir;
   const agentDir = resolveOmpAgentDir(args.homeDir, args.env);
+
   const userConfigPaths = [
     path.join(agentDir, "config.yml"),
     path.join(agentDir, "config.yaml"),
   ];
+
   const configPaths = [
     ...(args.cwd === null
       ? []
@@ -99,29 +105,35 @@ async function resolveOmpConfiguredSkillRoots(
       }),
     ),
   ];
+
   const projectRootPath =
     args.cwd === null
       ? null
       : (await resolveProjectAncestorDirectories(args.cwd)).projectRootPath;
+
   let customDirectories: string[] = [];
   let customOrigin: ResolvedRootOrigin = "user";
+
   for (const configPath of userConfigPaths) {
     const config = await readParsedFile(
       configPath,
       parseYaml,
       ompSkillConfigSchema,
     );
+
     if (config !== null) {
       customDirectories = config.skills?.customDirectories ?? [];
       break;
     }
   }
+
   for (const configPath of configPaths) {
     const config = await readParsedFile(
       configPath,
       parseYaml,
       ompSkillConfigSchema,
     );
+
     if (config?.skills?.customDirectories !== undefined) {
       customDirectories = config.skills.customDirectories;
       customOrigin =
@@ -131,6 +143,7 @@ async function resolveOmpConfiguredSkillRoots(
           : "user";
     }
   }
+
   return customDirectories.map((configuredPath) =>
     configuredSkillRoot({
       origin: customOrigin,
@@ -147,8 +160,10 @@ async function resolveOmpConfiguredSkillRoots(
 
 export const resolveOmpNativeRoots: AcpNativeRootsResolver = async (args) => {
   const agentDir = resolveOmpAgentDir(args.homeDir, args.env);
+
   const userRoot = (rootPath: string): AcpResolvedSkillRoot =>
     skillsRoot({ origin: "user", path: rootPath, recursive: false });
+
   return {
     skills: [
       userRoot(path.join(agentDir, "skills")),

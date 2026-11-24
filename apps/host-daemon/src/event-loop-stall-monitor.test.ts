@@ -23,8 +23,9 @@ describe("host event-loop stall monitor", () => {
     vi.clearAllMocks();
   });
 
-  it("suppresses histogram delays accumulated while the system was suspended", () => {
+  it("reports long histogram delays with suspension uncertainty", () => {
     vi.useFakeTimers();
+    perfHooksMock.histogram.max = 600_000_000_000;
     let now = 0;
     const logger = { warn: vi.fn() };
     const monitor = startEventLoopStallMonitor({ logger, now: () => now });
@@ -32,7 +33,19 @@ describe("host event-loop stall monitor", () => {
     now = 300_000;
     vi.advanceTimersByTime(5_000);
 
-    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+      {
+        intervalMs: 5_000,
+        maxDelayMs: 600_000,
+        meanDelayMs: 1,
+        p99DelayMs: 1,
+        resolutionMs: 20,
+        sampleGapMs: 300_000,
+        suspensionPossible: true,
+        thresholdMs: 500,
+      },
+      "Host daemon event loop stalled",
+    );
     expect(perfHooksMock.histogram.reset).toHaveBeenCalledOnce();
     monitor.stop();
   });

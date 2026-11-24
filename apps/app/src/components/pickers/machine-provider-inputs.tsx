@@ -3,8 +3,8 @@ import {
   usePluginSlots,
   type PluginMachineProviderInputsSlot,
 } from "@/lib/plugin-slots";
-import type { JsonValue } from "@bb/domain";
-import type { PluginMachineProviderInputsChange } from "@get-bb/plugin-sdk";
+import type { JsonValue } from "@omnyo/domain";
+import type { PluginMachineProviderInputsChange } from "@omnyo/plugin-sdk";
 import { useCallback, useState, type ReactNode } from "react";
 
 export interface MachineProviderInputsDescriptor {
@@ -28,6 +28,7 @@ function findRegistration(
   slots: readonly PluginMachineProviderInputsSlot[],
 ): PluginMachineProviderInputsSlot | undefined {
   if (provider === null || provider.inputs === null) return undefined;
+
   return slots.find(
     (slot) =>
       slot.machineProviderId === provider.id &&
@@ -50,14 +51,18 @@ export function useMachineProviderInputs({
 } {
   const slots = usePluginSlots().machineProviderInputs;
   const registration = findRegistration(provider, slots);
+
   const scopeKey =
     provider === null
       ? ""
       : `${provider.pluginId}\0${provider.id}\0${JSON.stringify(initialValue ?? null)}`;
+
   const [state, setState] = useState<ScopedMachineProviderInputsState | null>(
     null,
   );
+
   const activeState = state?.scopeKey === scopeKey ? state : null;
+
   const defaultValue =
     provider?.inputs === null || provider === null
       ? null
@@ -66,7 +71,9 @@ export function useMachineProviderInputs({
         : provider.acceptsEmptyInputs
           ? EMPTY_MACHINE_PROVIDER_INPUTS
           : null;
+
   const value = activeState?.value ?? defaultValue;
+
   const reportCrash = useCallback(() => {
     if (provider === null) return;
     setState({
@@ -75,11 +82,13 @@ export function useMachineProviderInputs({
       blockedReason: `${provider.displayName} input control crashed.`,
     });
   }, [provider, scopeKey, value]);
+
   const handleChange = useCallback(
     (next: PluginMachineProviderInputsChange) => {
       setState((current) => {
         const currentValue =
           current?.scopeKey === scopeKey ? current.value : defaultValue;
+
         if (next.status === "blocked") {
           if (
             current?.scopeKey === scopeKey &&
@@ -87,12 +96,14 @@ export function useMachineProviderInputs({
           ) {
             return current;
           }
+
           return {
             scopeKey,
             value: currentValue,
             blockedReason: next.reason,
           };
         }
+
         if (
           current?.scopeKey === scopeKey &&
           current.blockedReason === null &&
@@ -100,11 +111,13 @@ export function useMachineProviderInputs({
         ) {
           return current;
         }
+
         return { scopeKey, value: next.value, blockedReason: null };
       });
     },
     [defaultValue, scopeKey],
   );
+
   const blockedReason =
     provider === null || provider.inputs === null
       ? null
@@ -115,10 +128,13 @@ export function useMachineProviderInputs({
           : value === null
             ? `Configure ${provider.displayName}.`
             : null;
+
   if (provider === null || registration === undefined) {
     return { value, blockedReason, control: null };
   }
+
   const InputsComponent = registration.component;
+
   return {
     value,
     blockedReason,

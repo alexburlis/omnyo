@@ -23,18 +23,22 @@ export function derivePrefix(name: string): string {
     .replace(/[^A-Z0-9]+/g, " ")
     .split(" ")
     .filter(Boolean);
+
   const raw =
     words.length >= 2
       ? words.map((word) => word[0]).join("")
       : (words[0] ?? "").slice(0, 3);
+
   return raw.replace(/^[0-9]+/, "").slice(0, 10);
 }
 
 export function describeCreateProjectError(error: unknown): string {
   const message = errorMessage(error);
+
   if (message.includes("UNIQUE") && message.includes("prefix")) {
     return "That prefix is already used by another project.";
   }
+
   return message;
 }
 

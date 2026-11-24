@@ -8,13 +8,13 @@ import {
 import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import { registerProviderCommands } from "../../commands/provider.js";
 
-describe("bb provider command output", () => {
+describe("omnyo provider command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
     registerProviderCommands(program, () => "http://server");
 
-  it("bb provider list renders the shared borderless table", async () => {
+  it("omnyo provider list renders the shared borderless table", async () => {
     const get = vi.fn(async () => [{ id: "openai", displayName: "OpenAI" }]);
     stubServerApi({ "v1.system.providers.$get": get });
 
@@ -27,10 +27,11 @@ describe("bb provider command output", () => {
     ]);
   });
 
-  it("bb provider list resolves a machine and preserves portable JSON output", async () => {
+  it("omnyo provider list resolves a machine and preserves portable JSON output", async () => {
     const getProviders = vi.fn(async () => [
       { id: "acp-remote", displayName: "Remote ACP" },
     ]);
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [
         {
@@ -39,6 +40,7 @@ describe("bb provider command output", () => {
           status: "connected",
           lastSeenAt: 1,
           lastRejectedProtocolVersion: null,
+          runtimeVersion: null,
           createdAt: 1,
           updatedAt: 1,
         },
@@ -63,7 +65,7 @@ describe("bb provider command output", () => {
     ]);
   });
 
-  it("bb provider models includes a matching selected-only model", async () => {
+  it("omnyo provider models includes a matching selected-only model", async () => {
     const get = vi.fn(async () => ({
       providers: [],
       models: [
@@ -82,6 +84,7 @@ describe("bb provider command output", () => {
       ],
       modelLoadError: null,
     }));
+
     stubServerApi({ "v1.system.execution-options.$get": get });
 
     await runCommand(
@@ -108,13 +111,14 @@ describe("bb provider command output", () => {
     ]);
   });
 
-  it("bb provider models routes through an environment", async () => {
+  it("omnyo provider models routes through an environment", async () => {
     const get = vi.fn(async () => ({
       providers: [],
       models: [],
       selectedOnlyModels: [],
       modelLoadError: null,
     }));
+
     stubServerApi({ "v1.system.execution-options.$get": get });
 
     await runCommand(
@@ -128,7 +132,7 @@ describe("bb provider command output", () => {
     expect(collectLogPayloads(vi.mocked(console.log))).toEqual(["[]"]);
   });
 
-  it("bb provider models reports a model-load failure and its detail on stderr", async () => {
+  it("omnyo provider models reports a model-load failure and its detail on stderr", async () => {
     const get = vi.fn(async () => ({
       providers: [],
       models: [],
@@ -136,20 +140,66 @@ describe("bb provider command output", () => {
       modelLoadError: {
         providerId: "codex",
         code: "failed",
-        detail: "bb could not find the Codex CLI on this machine.",
+        detail: "Omnyo could not find the Codex CLI on this machine.",
       },
     }));
+
     stubServerApi({ "v1.system.execution-options.$get": get });
 
     await runCommand(["provider", "models", "codex"], register);
 
     expect(vi.mocked(console.error).mock.calls).toEqual([
       ["Could not load models for codex (failed)"],
-      ["  bb could not find the Codex CLI on this machine."],
+      ["  Omnyo could not find the Codex CLI on this machine."],
     ]);
     expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
       "No models available",
     ]);
+  });
+
+  it("omnyo provider models prints the account notice on stderr until it expires", async () => {
+    const notice = (until: number | null) => ({
+      providers: [],
+      models: [],
+      selectedOnlyModels: [],
+      modelLoadError: null,
+      modelNotice: {
+        providerId: "codex",
+        message: "OpenAI used up",
+        detail: "Showing openai2@",
+        until,
+      },
+    });
+
+    stubServerApi({
+      "v1.system.execution-options.$get": vi.fn(async () => notice(null)),
+    });
+    await runCommand(["provider", "models", "codex"], register);
+
+    expect(vi.mocked(console.error).mock.calls).toEqual([
+      ["OpenAI used up · Showing openai2@"],
+    ]);
+
+    vi.mocked(console.error).mockClear();
+    stubServerApi({
+      "v1.system.execution-options.$get": vi.fn(async () =>
+        notice(Date.now() + 2 * 60 * 60 * 1000),
+      ),
+    });
+    await runCommand(["provider", "models", "codex"], register);
+
+    const [line] = vi.mocked(console.error).mock.calls.map(([text]) => text);
+    expect(line).toMatch(/^OpenAI used up until .+ · Showing openai2@$/u);
+
+    vi.mocked(console.error).mockClear();
+    stubServerApi({
+      "v1.system.execution-options.$get": vi.fn(async () =>
+        notice(Date.now() - 1000),
+      ),
+    });
+    await runCommand(["provider", "models", "codex"], register);
+
+    expect(vi.mocked(console.error).mock.calls).toEqual([]);
   });
 
   it("rejects simultaneous machine and environment selectors", async () => {

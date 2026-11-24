@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { ProviderCliInstallAction } from "@bb/host-daemon-contract";
+import { useQueryClient } from "@tanstack/react-query";
+import type { SystemAppUpdateStatus } from "@omnyo/server-contract";
+import type { ProviderCliInstallAction } from "@omnyo/host-daemon-contract";
 import { SettingsStoryFixtures } from "../../../.ladle/settings-story-fixtures";
 import {
   HOST_IDS,
@@ -15,12 +17,14 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { useLocation } from "react-router-dom";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import { MachinesSettingsSection } from "@/components/settings/MachinesSettingsSection";
 import { SettingsStoryChrome } from "../../../.ladle/story-settings-chrome";
 import { AppLayoutSidebar } from "@/components/layout/AppLayoutSidebar";
+import { systemAppUpdateQueryKey } from "@/hooks/queries/query-keys";
 import { sdk } from "@/lib/sdk";
 import { SidebarUpdatesBadge } from "./SidebarUpdatesBadge";
+import { AppUpdateHost } from "@/components/app-update/AppUpdateHost";
 
 export default { title: "sidebar/Updates badge" };
 
@@ -29,12 +33,14 @@ const action: ProviderCliInstallAction = {
   label: "Update",
   command: "codex update",
 };
+
 const status = makeProviderCliStatus("codex", {
   currentVersion: "0.150.0",
   latestVersion: "0.151.0",
   needsUpdate: true,
   installAction: action,
 });
+
 const issue: ProviderCliActionableIssue = {
   provider: "codex",
   status,
@@ -61,6 +67,7 @@ function ActiveProviderUpdate() {
   useEffect(() => {
     const originalInstallProviderCli = sdk.hosts.installProviderCli;
     let finishInstall: (() => void) | null = null;
+
     const startTimer = window.setTimeout(() => {
       sdk.hosts.installProviderCli = () =>
         new Promise((resolve) => {
@@ -89,6 +96,116 @@ function ActiveProviderUpdate() {
   return <BadgeStage />;
 }
 
+const privateUpdate: SystemAppUpdateStatus = {
+  activity: { phase: "idle" },
+  available: {
+    channel: "private",
+    commit: "b".repeat(40),
+    commitCount: null,
+    subjects: [],
+    version: "0.46.170+private.1",
+  },
+  blocked: null,
+  current: { commit: null, version: "0.46.169+private.1" },
+  installsWhenIdle: false,
+  lastResult: null,
+  newTurnsPausedForUpdate: false,
+  runningThreadCount: 3,
+  support: { kind: "supported", mode: "private" },
+};
+
+function SeedOmnyoUpdate({
+  initialStatus = privateUpdate,
+}: {
+  initialStatus?: SystemAppUpdateStatus;
+}) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const originalApply = sdk.system.applyAppUpdate;
+    const originalStatus = sdk.system.appUpdate;
+    let current = initialStatus;
+    sdk.system.appUpdate = async () => current;
+    sdk.system.applyAppUpdate = async () => {
+      current = {
+        ...privateUpdate,
+        activity: {
+          output: [],
+          phase: "preparing",
+          startedAt: new Date().toISOString(),
+          step: "Pausing chats",
+          targetVersion: "0.46.170+private.1",
+        },
+      };
+
+      return current;
+    };
+
+    queryClient.setQueryData(systemAppUpdateQueryKey(), initialStatus);
+
+    return () => {
+      sdk.system.applyAppUpdate = originalApply;
+      sdk.system.appUpdate = originalStatus;
+    };
+  }, [initialStatus, queryClient]);
+
+  return null;
+}
+
+export function OmnyoUpdateNow() {
+  return (
+    <BadgeStage>
+      <SeedOmnyoUpdate />
+    </BadgeStage>
+  );
+}
+
+const waitingUpdate: SystemAppUpdateStatus = {
+  ...privateUpdate,
+  activity: {
+    code: "runtime_update_busy",
+    output: ["The worker is finishing interrupted chat work."],
+    phase: "preparing",
+    startedAt: "2026-11-01T06:20:00.000Z",
+    step: "Waiting for worker",
+    targetVersion: "0.46.170+private.1",
+  },
+  newTurnsPausedForUpdate: true,
+  runningThreadCount: 0,
+};
+
+export function OmnyoUpdateWaitingForWorker() {
+  return (
+    <BadgeStage>
+      <SeedOmnyoUpdate initialStatus={waitingUpdate} />
+    </BadgeStage>
+  );
+}
+
+const failedUpdate: SystemAppUpdateStatus = {
+  ...privateUpdate,
+  lastResult: {
+    acknowledged: true,
+    errorCode: "runtime_update_busy",
+    finishedAt: "2026-11-01T06:24:56.542Z",
+    from: privateUpdate.current,
+    id: "update-worker-busy",
+    logTail: [],
+    message: "The worker did not finish stopping. Chats resumed automatically.",
+    outcome: "failed",
+    phase: "prepare",
+    to: { commit: null, version: "0.46.170+private.1" },
+  },
+};
+
+export function OmnyoUpdateFailed() {
+  return (
+    <BadgeStage>
+      <SeedOmnyoUpdate initialStatus={failedUpdate} />
+      <AppUpdateHost />
+    </BadgeStage>
+  );
+}
+
 export function ProviderUpdateAvailable() {
   return <BadgeStage />;
 }
@@ -101,6 +218,7 @@ export function MachineNotices() {
   const [offlineCount, setOfflineCount] = useState(2);
   const [lastSeenAt, setLastSeenAt] = useState(Date.now);
   const { pathname } = useLocation();
+
   const hosts = useMemo(
     () =>
       ["Work laptop", "Studio desktop"].map((name, index) =>
@@ -128,7 +246,7 @@ export function MachineNotices() {
             mode="app"
             isResizing={false}
             onResizeMouseDown={() => {}}
-            settingsRoutePath="/settings/machines"
+            settingsToggleRoutePath="/settings/machines"
           />
           <SidebarInset>
             <main className="space-y-6 p-6">

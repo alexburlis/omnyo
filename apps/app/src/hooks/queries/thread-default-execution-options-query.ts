@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import type { ResolvedThreadExecutionOptions } from "@bb/domain";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
+import type { ResolvedThreadExecutionOptions } from "@omnyo/domain";
 import { sdk } from "@/lib/sdk";
 import {
   readCachedThreadExecutionOptions,
@@ -10,6 +10,7 @@ import { useThreadDetailRealtimeSubscription } from "@/hooks/useRealtimeSubscrip
 import { requireThreadId } from "./query-helpers";
 import { threadDefaultExecutionOptionsQueryKey } from "./query-keys";
 import { REALTIME_OWNED_NO_FOCUS_QUERY_POLICY } from "./query-policies";
+import { isPendingChatId } from "@/lib/pending-chat-creations";
 
 export {
   allThreadDefaultExecutionOptionsQueryKeyPrefix,
@@ -30,20 +31,39 @@ async function fetchThreadDefaultExecutionOptions(
     threadId,
     signal,
   });
+
   if (options !== null && !signal?.aborted) {
     writeCachedThreadExecutionOptions(
       threadExecutionOptionsCacheKey(threadId),
       options,
     );
   }
+
   return options;
+}
+
+export function prefetchThreadDefaultExecutionOptions(
+  queryClient: QueryClient,
+  threadId: string,
+): Promise<void> {
+  if (isPendingChatId(threadId)) return Promise.resolve();
+
+  return queryClient.prefetchQuery({
+    queryKey: threadDefaultExecutionOptionsQueryKey(threadId),
+    queryFn: ({ signal }) =>
+      fetchThreadDefaultExecutionOptions(threadId, signal),
+    staleTime: 30_000,
+    gcTime: 60 * 60_000,
+  });
 }
 
 export function useThreadDefaultExecutionOptions(
   id: string,
   options?: ThreadDefaultExecutionOptionsQueryOptions,
 ) {
-  const enabled = (options?.enabled ?? true) && Boolean(id);
+  const enabled =
+    (options?.enabled ?? true) && Boolean(id) && !isPendingChatId(id);
+
   useThreadDetailRealtimeSubscription(id, { enabled });
 
   return useQuery<ResolvedThreadExecutionOptions | null>({
@@ -56,7 +76,8 @@ export function useThreadDefaultExecutionOptions(
     enabled,
     refetchOnMount: options?.refetchOnMount ?? true,
     ...REALTIME_OWNED_NO_FOCUS_QUERY_POLICY,
-    staleTime: options?.staleTime,
+    staleTime: options?.staleTime ?? 30_000,
+    gcTime: 60 * 60_000,
     placeholderData: () =>
       id
         ? (readCachedThreadExecutionOptions(

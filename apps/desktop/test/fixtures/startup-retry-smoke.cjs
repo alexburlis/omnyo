@@ -1,22 +1,47 @@
 const assert = require("node:assert/strict");
+
 const { createServer } = require("node:http");
+
 const { writeFile } = require("node:fs/promises");
+
 const { join } = require("node:path");
+
 const { app, ipcMain } = require("electron");
 
-app.setName("bb-dev");
+app.setName("omnyo-dev");
 
-const desktopRoot = process.env.BB_STARTUP_SMOKE_APP_PATH;
+const desktopRoot = process.env.OMNYO_STARTUP_SMOKE_APP_PATH;
+
 app.setVersion(require(join(desktopRoot, "package.json")).version);
-const scenario = process.env.BB_STARTUP_SMOKE_SCENARIO ?? "custom";
-const channel = "bb-desktop:startup-action";
+
+const scenario = process.env.OMNYO_STARTUP_SMOKE_SCENARIO ?? "custom";
+
+const channel = "omnyo-desktop:startup-action";
+
 const loads = [];
+
 let contents;
+
 let recovered = false;
+
 let mintCount = 0;
+
+let gatewayFailures = 0;
+
+let markStartupPrepared;
+
+const startupPrepared = new Promise((resolve) => {
+  markStartupPrepared = resolve;
+});
+
+const electronReady = app.whenReady.bind(app);
+
+app.whenReady = () =>
+  Promise.all([electronReady(), startupPrepared]).then(() => undefined);
 
 async function until(check) {
   const deadline = Date.now() + 10_000;
+
   while (!(await check())) {
     assert.ok(Date.now() < deadline, "Timed out waiting for startup recovery");
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -25,7 +50,11 @@ async function until(check) {
 
 async function run() {
   const server = createServer((request, response) => {
-    if (scenario === "fatal") {
+    if (scenario === "transient" && !recovered) {
+      gatewayFailures += 1;
+      response.writeHead(502);
+      response.end();
+    } else if (scenario === "fatal") {
       response.writeHead(503);
       response.end();
     } else if (request.url === "/health") {
@@ -33,6 +62,7 @@ async function run() {
     } else if (request.url === "/api/v1/system/config") {
       response.end(
         JSON.stringify({
+          appVersion: app.getVersion(),
           hostDaemonPort: 38887,
           voiceTranscriptionEnabled: false,
         }),
@@ -41,6 +71,7 @@ async function run() {
       request.url === "/api/v1/plugins/connect/rpc/createDesktopSession"
     ) {
       mintCount += 1;
+
       if (!recovered) {
         response.writeHead(503);
         response.end();
@@ -52,7 +83,7 @@ async function run() {
               cookie: {
                 domain: "127.0.0.1",
                 expiresAt: Date.now() + 3600_000,
-                name: "bb_session",
+                name: "omnyo_session",
                 value: "synthetic-retry-cookie",
               },
             },
@@ -63,17 +94,21 @@ async function run() {
       response.writeHead(404);
       response.end();
     } else {
+      if (scenario === "custom" && !recovered) response.statusCode = 404;
       response.setHeader("Content-Type", "text/html");
       response.end("<h1>Recovered</h1>");
     }
   });
+
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port;
   const serverUrl = `http://127.0.0.1:${port}`;
-  if (scenario === "custom") {
+
+  if (scenario === "transient") {
     await new Promise((resolve) => server.close(resolve));
   }
-  process.env.BB_SERVER_PORT = String(port);
+
+  process.env.OMNYO_SERVER_PORT = String(port);
   await writeFile(
     join(app.getPath("userData"), "server-target.json"),
     JSON.stringify(
@@ -92,28 +127,47 @@ async function run() {
           : { target: "custom", customServerUrl: serverUrl },
     ),
   );
-  app.setAppPath(desktopRoot);
-  app.on("browser-window-created", (_event, window) => {
-    contents = window.webContents;
-    const loadURL = contents.loadURL.bind(contents);
-    contents.loadURL = (url, options) => {
-      loads.push(url);
-      return loadURL(url, options);
-    };
-  });
-  require(join(desktopRoot, "dist/main.js"));
+  markStartupPrepared();
+
+  if (scenario === "transient") {
+    await until(
+      () =>
+        contents?.getURL().startsWith("data:") &&
+        contents.executeJavaScript(
+          'document.querySelector("h1")?.textContent === "Reconnecting to Omnyo"',
+        ),
+    );
+    await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+    await until(() => gatewayFailures > 0);
+    recovered = true;
+    await until(() => contents.getURL() === `${serverUrl}/`);
+    await until(() =>
+      contents.executeJavaScript(
+        'document.querySelector("h1")?.textContent === "Recovered"',
+      ),
+    );
+    server.close();
+    console.log("STARTUP_RETRY_SMOKE_OK");
+    app.exit(0);
+
+    return;
+  }
+
   const errorTitle =
     scenario === "fatal"
       ? "Port conflict"
       : scenario === "connect"
-        ? "Could not authenticate with bb Connect"
-        : "Could not reach this bb server";
+        ? "Could not authenticate with Omnyo Connect"
+        : "Could not reach this Omnyo server";
+
   const hasError = () =>
     contents?.getURL().startsWith("data:") &&
     contents.executeJavaScript(
       `document.querySelector("h1")?.textContent === ${JSON.stringify(errorTitle)}`,
     );
+
   await until(hasError);
+
   if (scenario === "fatal") {
     assert.equal(
       await contents.executeJavaScript(
@@ -132,10 +186,12 @@ async function run() {
     server.close();
     console.log("STARTUP_RETRY_SMOKE_OK");
     app.exit(0);
+
     return;
   }
+
   assert.equal(
-    await contents.executeJavaScript("typeof window.bbDesktop"),
+    await contents.executeJavaScript("typeof window.omnyoDesktop"),
     "object",
   );
   assert.deepEqual(
@@ -195,9 +251,7 @@ async function run() {
   await contents.executeJavaScript('document.querySelector("button").click()');
   await until(() => loads.length > failedRetry);
   await until(hasError);
-  if (scenario === "custom") {
-    await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
-  }
+
   recovered = true;
   const before = loads.length;
   const previousMints = mintCount;
@@ -214,18 +268,22 @@ async function run() {
   console.log(
     JSON.stringify({ scenario, retryLoads: retryLoads.length, mintCount }),
   );
+
   if (scenario === "connect") {
     assert.equal(
       mintCount - previousMints,
       1,
       "Concurrent retries must mint one fresh session",
     );
+
     const cookies = await contents.session.cookies.get({
       url: serverUrl,
-      name: "bb_session",
+      name: "omnyo_session",
     });
+
     assert.equal(cookies[0]?.value, "synthetic-retry-cookie");
   }
+
   assert.equal(
     retryLoads.length,
     1,
@@ -243,6 +301,20 @@ async function run() {
   console.log("STARTUP_RETRY_SMOKE_OK");
   app.exit(0);
 }
+
+app.setAppPath(desktopRoot);
+
+app.on("browser-window-created", (_event, window) => {
+  contents = window.webContents;
+  const loadURL = contents.loadURL.bind(contents);
+  contents.loadURL = (url, options) => {
+    loads.push(url);
+
+    return loadURL(url, options);
+  };
+});
+
+require(join(desktopRoot, "dist/main.js"));
 
 run().catch((error) => {
   console.error(error);

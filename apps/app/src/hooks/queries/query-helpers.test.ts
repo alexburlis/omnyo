@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadListEntry, WorkspaceStatus } from "@bb/domain";
+import type { ThreadListEntry, WorkspaceStatus } from "@omnyo/domain";
 import {
   makeWorkspaceMergeBase,
   makeWorkspaceStatus,
   makeWorkspaceWorkingTree,
-} from "@bb/test-helpers";
+} from "@omnyo/test-helpers";
 import type {
   EnvironmentDiffBranchesResponse,
   EnvironmentStatusResponse,
@@ -12,7 +12,7 @@ import type {
   SidebarBootstrapResponse,
   ThreadResponse,
   ThreadTimelineResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   makeProjectWithThreadsResponse,
   makeSidebarBootstrapResponse,
@@ -43,8 +43,13 @@ import {
 } from "./query-placeholders";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { HttpError } from "@/lib/api";
-import { BbHttpError } from "@/lib/sdk";
-import { isTransientReadError, requireEnabledQueryArg } from "./query-helpers";
+import { OmnyoHttpError } from "@/lib/sdk";
+import {
+  isTransientReadError,
+  requireEnabledQueryArg,
+  shouldRetryTransientReadQuery,
+  TRANSIENT_READ_RETRY_DELAY_MS,
+} from "./query-helpers";
 
 describe("requireEnabledQueryArg", () => {
   it("keeps a numeric zero rather than treating it as missing", () => {
@@ -69,6 +74,62 @@ describe("requireEnabledQueryArg", () => {
 });
 
 describe("isTransientReadError", () => {
+  const httpErrors = [
+    {
+      name: "HttpError",
+      create: (status: number, body: unknown) =>
+        new HttpError({ status, body, message: "History changed" }),
+    },
+    {
+      name: "OmnyoHttpError",
+      create: (status: number, body: unknown) =>
+        new OmnyoHttpError({
+          status,
+          body,
+          message: "History changed",
+          code: "history_read_invalidated",
+        }),
+    },
+  ];
+
+  it.each(httpErrors)(
+    "respects explicit retryability for $name within the existing bound",
+    ({ create }) => {
+      const error = create(503, {
+        code: "history_read_invalidated",
+        retryable: true,
+      });
+
+      expect(isTransientReadError(error)).toBe(false);
+      expect(shouldRetryTransientReadQuery(0, error)).toBe(true);
+      expect(shouldRetryTransientReadQuery(1, error)).toBe(true);
+      expect(shouldRetryTransientReadQuery(2, error)).toBe(false);
+      expect(TRANSIENT_READ_RETRY_DELAY_MS).toBe(250);
+    },
+  );
+
+  it.each(httpErrors)(
+    "does not infer retryability from status or malformed $name bodies",
+    ({ create }) => {
+      for (const status of [400, 401, 403, 404, 429, 503]) {
+        for (const body of [
+          undefined,
+          null,
+          [],
+          "retryable",
+          { retryable: "true" },
+          { retryable: 1 },
+          { retryable: false },
+          {},
+        ]) {
+          expect(shouldRetryTransientReadQuery(0, create(status, body))).toBe(
+            false,
+          );
+        }
+      }
+    },
+  );
+
   it("matches browser transport failures but not HTTP responses", () => {
     expect(isTransientReadError(new TypeError("Failed to fetch"))).toBe(true);
     expect(isTransientReadError(new TypeError("Load failed"))).toBe(true);
@@ -80,7 +141,7 @@ describe("isTransientReadError", () => {
     ).toBe(false);
     expect(
       isTransientReadError(
-        new BbHttpError({
+        new OmnyoHttpError({
           status: 404,
           message: "Not found",
           body: { error: "Not found" },
@@ -191,6 +252,7 @@ function makeThreadTimelineResponse(
 describe("resolveEnvironmentWorkStatusPlaceholder", () => {
   it("reuses previous work status only for the same thread query", () => {
     const previousStatus = makeStatusResponse("clean");
+
     const previousNotApplicableStatus: EnvironmentStatusResponse = {
       outcome: "not_applicable",
       reason: "non_git_environment",
@@ -270,6 +332,7 @@ describe("resolveThreadTimelinePlaceholder", () => {
         createdAt: 1,
         attachments: null,
         turnRequest: null,
+        turnGit: null,
       },
     ]);
 
@@ -534,10 +597,12 @@ describe("optimisticallyInsertThread", () => {
 
   it("projects queued work into the thread list and sidebar immediately", () => {
     const { queryClient } = createQueryClientTestHarness();
+
     const threadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     queryClient.setQueryData(threadListKey, []);
     queryClient.setQueryData(
       sidebarNavigationQueryKey(),
@@ -562,10 +627,12 @@ describe("optimisticallyInsertThread", () => {
 
   it("adds queued work without replacing newer realtime row state", () => {
     const { queryClient } = createQueryClientTestHarness();
+
     const threadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     queryClient.setQueryData(threadListKey, []);
     queryClient.setQueryData(
       sidebarNavigationQueryKey(),
@@ -587,9 +654,11 @@ describe("optimisticallyInsertThread", () => {
 
     const listThread =
       queryClient.getQueryData<ThreadListEntry[]>(threadListKey)?.[0];
+
     const sidebarThread = queryClient.getQueryData<SidebarBootstrapResponse>(
       sidebarNavigationQueryKey(),
     )?.projects[0]?.threads[0];
+
     expect(listThread?.runtime.displayStatus).toBe("active");
     expect(listThread?.queuedWork).toBe("waiting");
     expect(sidebarThread?.runtime.displayStatus).toBe("active");
@@ -598,12 +667,14 @@ describe("optimisticallyInsertThread", () => {
 
   it("respects the originKind filter when inserting source-derived threads", () => {
     const { queryClient } = createQueryClientTestHarness();
+
     const forkListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
       sourceThreadId: "source-1",
       originKind: "fork",
     });
+
     queryClient.setQueryData(forkListKey, []);
 
     optimisticallyInsertThread(

@@ -23,8 +23,9 @@ import type { UpsertInstalledPluginInput } from "../../src/data/plugins.js";
 import { installedPlugins } from "../../src/schema.js";
 import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
-const SOURCE_ROOT = "/home/me/.bb";
-const TARGET_ROOT = "/home/me/.bb-machines/old-server";
+const SOURCE_ROOT = "/home/me/.omnyo";
+
+const TARGET_ROOT = "/home/me/.omnyo-machines/old-server";
 
 function pathPlugin(
   id: string,
@@ -64,8 +65,8 @@ function seedPluginPaths(db: DbConnection): void {
     db,
     pathPlugin(
       "sibling-prefix",
-      "/home/me/.bb-machines/other/plugin",
-      "/home/me/.bb-machines/other/plugin",
+      "/home/me/.omnyo-machines/other/plugin",
+      "/home/me/.omnyo-machines/other/plugin",
     ),
   );
   upsertInstalledPlugin(
@@ -92,7 +93,7 @@ function seedPluginPaths(db: DbConnection): void {
     npmResolvedVersion: "1.0.0",
     gitResolvedCommit: null,
     gitCheckoutRoot: null,
-    path: "/var/cache/bb/artifact.tgz",
+    path: "/var/cache/omnyo/artifact.tgz",
     integrity: "sha512-x",
     contentHash: null,
     validationResult: "valid",
@@ -111,17 +112,18 @@ function seedPluginPaths(db: DbConnection): void {
     status: "ready",
     rollbackCandidateVersion: null,
     rollbackSourceFingerprint: null,
-    rollbackBbVersion: null,
+    rollbackCoreVersion: "1.2.3+private.4",
     rollbackSdkVersion: null,
     rollbackDetail: null,
     createdAt: 1,
     retainedUntil: 2,
     updatedAt: 1,
   });
+
   for (const [name, sourceKind, manifestUrl] of [
     ["local-path", "path", `${SOURCE_ROOT}/marketplaces/local`],
     ["https-lookalike", "https", `${SOURCE_ROOT}/marketplaces/not-a-path`],
-    ["bundled", "path", "/opt/bb-app/plugins"],
+    ["bundled", "path", "/opt/omnyo-app/plugins"],
   ] as const) {
     upsertPluginMarketplace(db, {
       name,
@@ -131,7 +133,6 @@ function seedPluginPaths(db: DbConnection): void {
       sourceGitSubdirectory: null,
       sourceGitCommit: null,
       manifestJson: "{}",
-      statsJson: null,
       etag: null,
       lastModified: null,
       lastSuccessfulRefreshAt: null,
@@ -189,8 +190,8 @@ describe("server move data helpers", () => {
       },
       {
         id: "sibling-prefix",
-        rootDir: "/home/me/.bb-machines/other/plugin",
-        sourcePath: "/home/me/.bb-machines/other/plugin",
+        rootDir: "/home/me/.omnyo-machines/other/plugin",
+        sourcePath: "/home/me/.omnyo-machines/other/plugin",
       },
     ]);
     expect(
@@ -205,9 +206,12 @@ describe("server move data helpers", () => {
       },
     ]);
     expect(listPluginArtifacts(db, "outside")[0]?.path).toBe(
-      "/var/cache/bb/artifact.tgz",
+      "/var/cache/omnyo/artifact.tgz",
     );
-    expect(listPluginStateSnapshots(db, "server-owned")[0]).toMatchObject({
+    const snapshot = listPluginStateSnapshots(db, "server-owned")[0];
+    expect(snapshot).not.toHaveProperty("rollbackBbVersion");
+    expect(snapshot).toMatchObject({
+      rollbackCoreVersion: "1.2.3+private.4",
       snapshotPath: `${TARGET_ROOT}/plugins/snapshots/server-owned/1`,
       databasePath: `${TARGET_ROOT}/plugins/snapshots/server-owned/1/data.db`,
       statePath: `${TARGET_ROOT}/plugins/snapshots/server-owned/1/host-state.json`,
@@ -221,7 +225,7 @@ describe("server move data helpers", () => {
     ).toMatchObject({
       "local-path": `${TARGET_ROOT}/marketplaces/local`,
       "https-lookalike": `${SOURCE_ROOT}/marketplaces/not-a-path`,
-      bundled: "/opt/bb-app/plugins",
+      bundled: "/opt/omnyo-app/plugins",
     });
 
     expect(
@@ -286,7 +290,10 @@ describe("server move data helpers", () => {
         sourceServerHostId: "old-server",
         now,
       }),
-    ).toEqual({ targetHostBecameServer: true, sourceServerHostBecameManual: true });
+    ).toEqual({
+      targetHostBecameServer: true,
+      sourceServerHostBecameManual: true,
+    });
     expect(getHost(db, "target")).toMatchObject({
       machineProviderId: null,
       resource: null,
@@ -326,6 +333,7 @@ describe("server move data helpers", () => {
   it("counts applied migrations only on migrated databases", () => {
     expect(countAppliedMigrations(db)).toBeGreaterThan(100);
     const fresh = createConnection(":memory:");
+
     try {
       expect(countAppliedMigrations(fresh)).toBe(0);
     } finally {

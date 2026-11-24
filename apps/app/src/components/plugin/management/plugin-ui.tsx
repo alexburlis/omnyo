@@ -1,9 +1,18 @@
-import { pluginInstallBadge } from "@bb/domain/plugin-install-badge";
-import { PluginBrandIcon } from "@bb/shared-ui/plugin-icon";
+import { pluginInstallBadge } from "@omnyo/domain/plugin-install-badge";
+import { PluginBrandIcon } from "@omnyo/shared-ui/plugin-icon";
 import { useState, type ReactNode } from "react";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { ResourceIconFrame } from "@bb/shared-ui/resource-list";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@omnyo/shared-ui/collapsible";
+import { Icon } from "@omnyo/shared-ui/icon";
+import {
+  CONTROL_HOVER_TRANSITION,
+  DISCLOSURE_CHEVRON_TRANSITION,
+} from "@omnyo/shared-ui/motion";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { ResourceIconFrame } from "@omnyo/shared-ui/resource-list";
 import { PluginIcon } from "@/components/plugin/PluginIcon";
 import { usePreferredTheme } from "@/hooks/useTheme";
 import type { PluginListItem } from "@/hooks/queries/plugin-settings-queries";
@@ -24,15 +33,10 @@ export const SUCCESS_TEXT_STYLE = {
   color: "color-mix(in oklab, var(--success) 80%, var(--ink))",
 } as const;
 
-const PLUGIN_INSTALL_COUNT_FORMATTER = new Intl.NumberFormat(undefined, {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
 export type PluginInstallCountPresentation = {
   display: string;
   accessibleLabel: string;
-  tone: "count" | "new" | "builtin";
+  tone: "new" | "builtin";
 };
 
 export function pluginInstallCountPresentation(
@@ -40,7 +44,9 @@ export function pluginInstallCountPresentation(
   now: number = Date.now(),
 ): PluginInstallCountPresentation | undefined {
   const badge = pluginInstallBadge(entry, now);
+
   if (badge === null) return undefined;
+
   if (badge.kind === "builtin") {
     return {
       display: "Built in",
@@ -48,18 +54,8 @@ export function pluginInstallCountPresentation(
       tone: "builtin",
     };
   }
-  if (badge.kind === "new") {
-    return { display: "New", accessibleLabel: "New", tone: "new" };
-  }
-  return countPresentation(badge.installs);
-}
 
-function countPresentation(installs: number): PluginInstallCountPresentation {
-  return {
-    display: PLUGIN_INSTALL_COUNT_FORMATTER.format(installs),
-    accessibleLabel: `${installs.toLocaleString()} ${installs === 1 ? "install" : "installs"}`,
-    tone: "count",
-  };
+  return { display: "New", accessibleLabel: "New", tone: "new" };
 }
 
 export const NEW_TEXT_STYLE = { color: "var(--file-accent)" } as const;
@@ -117,7 +113,9 @@ const PLUGIN_CATEGORY_ICONS: Record<string, string> = {
 export function pluginCatalogCategoryIconName(
   categoryId: string | undefined,
 ): string | undefined {
-  return categoryId === undefined ? undefined : PLUGIN_CATEGORY_ICONS[categoryId];
+  return categoryId === undefined
+    ? undefined
+    : PLUGIN_CATEGORY_ICONS[categoryId];
 }
 
 export function PluginCategoryIcon({
@@ -129,7 +127,9 @@ export function PluginCategoryIcon({
 }) {
   const iconName = pluginCatalogCategoryIconName(categoryId);
   const accentToken = pluginCatalogCategoryAccentToken(categoryId);
+
   if (iconName === undefined || accentToken === undefined) return null;
+
   return (
     <Icon
       name={iconName}
@@ -150,11 +150,14 @@ export function PluginLogo({
   className: string;
 }) {
   const theme = usePreferredTheme();
+
   const logoUrl =
     theme === "dark" && plugin.logoDarkUrl !== null
       ? plugin.logoDarkUrl
       : plugin.logoUrl;
+
   const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
+
   if (logoUrl === null || logoUrl === failedLogoUrl) {
     return (
       <span
@@ -173,6 +176,7 @@ export function PluginLogo({
       </span>
     );
   }
+
   return (
     <img
       src={logoUrl}
@@ -275,31 +279,38 @@ export function DetailsDisclosure({
   className,
 }: DetailsDisclosureProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+
   return (
-    <div
+    <Collapsible
+      open={expanded}
+      onOpenChange={setExpanded}
       className={cn(
         "overflow-hidden rounded-lg border border-border-seam text-xs",
         className,
       )}
     >
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-2 bg-muted/40 px-3 py-2 text-left text-muted-foreground hover:text-foreground"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
+      <CollapsibleTrigger
+        className={cn(
+          "flex w-full items-center justify-between gap-2 bg-muted/40 px-3 py-2 text-left text-muted-foreground hover:text-foreground",
+          CONTROL_HOVER_TRANSITION,
+        )}
       >
         <span className="min-w-0 truncate">{summary}</span>
         <Icon
           name="ChevronDown"
-          className={cn("size-3.5 shrink-0", expanded && "rotate-180")}
+          className={cn(
+            "size-3.5 shrink-0",
+            DISCLOSURE_CHEVRON_TRANSITION,
+            expanded && "rotate-180",
+          )}
         />
-      </button>
-      {expanded ? (
+      </CollapsibleTrigger>
+      <CollapsibleContent>
         <div className="border-t border-border-seam px-3 py-2.5">
           {children}
         </div>
-      ) : null}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -325,10 +336,14 @@ export function KeyValueGrid({
 export function FullTrustWarning() {
   return (
     <p
-      className="flex items-start gap-1.5 text-2xs leading-snug text-subtle-foreground"
+      className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-5 text-foreground"
       data-testid="full-trust-warning"
     >
-      <Icon name="Lock" className="mt-0.5 size-3 shrink-0" />
+      <Icon
+        name="Lock"
+        aria-hidden
+        className="mt-0.5 size-3.5 shrink-0 text-warning-text"
+      />
       <span>
         Plugins run as full-trust code with access to your computer. Only
         install from sources you trust.
@@ -352,7 +367,7 @@ export function RollbackNote({
       <Icon name="RotateCcw" className="mt-0.5 size-3.5 shrink-0" />
       <span>
         Your plugin data is snapshotted first — if {toVersion} fails to start,
-        bb restores {fromVersion} and its data automatically.
+        Omnyo restores {fromVersion} and its data automatically.
       </span>
     </div>
   );

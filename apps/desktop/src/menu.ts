@@ -5,44 +5,62 @@ import {
   type BaseWindow,
   type MenuItemConstructorOptions,
 } from "electron";
-import type { BbDesktopZoomCommand } from "@bb/desktop-contract";
+import type { OmnyoDesktopZoomCommand } from "@omnyo/desktop-contract";
 import type { ApplicationMenuAccelerators } from "./desktop-menu-shortcuts.js";
 import type { ConnectServerSyncSkipReason } from "./connect-server-sync.js";
 import { BUILTIN_SERVER_NAME } from "./server-target.js";
 
 const SERVER_DAEMON_LOGS_MENU_LABEL = "Server & Daemon Logs";
+
 const OPEN_NEW_TAB_MENU_LABEL = "New Tab";
+
 const REOPEN_CLOSED_TAB_MENU_LABEL = "Reopen Closed Tab";
+
 const NEW_THREAD_MENU_LABEL = "New Thread";
+
 const NEW_WINDOW_MENU_LABEL = "New Window";
+
 const CLOSE_WINDOW_MENU_LABEL = "Close Window";
+
 const OPEN_SETTINGS_MENU_LABEL = "Settings…";
+
 const VIEW_LICENSE_MENU_LABEL = "View License";
-const LICENSE_URL = "https://github.com/get-bb/bb/blob/main/LICENSE";
-const UNINSTALL_MENU_LABEL = "How to Uninstall bb";
-const UNINSTALL_URL = "https://getbb.app/uninstall";
+
+const LICENSE_URL = "https://github.com/example/omnyo/blob/main/LICENSE";
+
 const TOGGLE_DEVELOPER_TOOLS_MENU_LABEL = "Toggle Developer Tools";
+
 const TOGGLE_DEVELOPER_TOOLS_ACCELERATOR = "Command+Option+I";
+
 const RELOAD_ACCELERATOR = "CommandOrControl+R";
+
 const FORCE_RELOAD_ACCELERATOR = "CommandOrControl+Shift+R";
+
 const DESKTOP_SETTINGS_MENU_LABEL = "Desktop Settings";
+
 const SERVER_MENU_LABEL = "Server";
-const DESKTOP_SETTINGS_SERVER_MENU_ITEM_ID = "bb-desktop-settings-server-menu";
-const WINDOW_SERVER_MENU_ITEM_ID = "bb-server-menu";
+
+const DESKTOP_SETTINGS_SERVER_MENU_ITEM_ID =
+  "omnyo-desktop-settings-server-menu";
+
+const WINDOW_SERVER_MENU_ITEM_ID = "omnyo-server-menu";
+
 const SERVER_MENU_ITEM_IDS = [
   DESKTOP_SETTINGS_SERVER_MENU_ITEM_ID,
   WINDOW_SERVER_MENU_ITEM_ID,
 ];
+
 export const SET_SERVER_URL_MENU_LABEL = "Set Server URL…";
+
 export const CONNECT_SERVERS_SKIPPED_MENU_LABELS: Record<
   ConnectServerSyncSkipReason,
   string
 > = {
-  "no-credential": "No Connect servers — sign in to bb Connect",
+  "no-credential": "No Connect servers — sign in to Omnyo Connect",
   "not-paired": `No Connect servers — Connect not paired on ${BUILTIN_SERVER_NAME}`,
   "plugin-disabled": "No Connect servers — Connect plugin disabled",
-  unauthorized: "No Connect servers — sign in to bb Connect again",
-  unavailable: "No Connect servers — could not reach bb Connect",
+  unauthorized: "No Connect servers — sign in to Omnyo Connect again",
+  unavailable: "No Connect servers — could not reach Omnyo Connect",
 };
 
 interface ApplicationMenuServerItem {
@@ -55,6 +73,7 @@ export interface InstallApplicationMenuArgs {
   accelerators: ApplicationMenuAccelerators;
   isMac: boolean;
   openAbout(): void;
+  version: string;
   openNewTab(): void;
   openNewThread(): void;
   openSettings(): void;
@@ -63,7 +82,7 @@ export interface InstallApplicationMenuArgs {
     browserWindow: BaseWindow | undefined,
     ignoreCache: boolean,
   ): void;
-  zoomFocusedPage(command: BbDesktopZoomCommand): void;
+  zoomFocusedPage(command: OmnyoDesktopZoomCommand): void;
   closeWindowOrSideTab(browserWindow: BaseWindow | undefined): void;
   createNewWindow(): void;
   openServerDaemonLogs(): void;
@@ -113,7 +132,9 @@ export function createServerMenuItems(
       type: "radio" as const,
     }),
   );
+
   const skipReason = args.connectServersSkipReason;
+
   return [
     ...serverItems,
     ...(skipReason === null
@@ -224,8 +245,10 @@ export function buildApplicationMenuTemplate(
               if (args.isMac) {
                 Menu.sendActionToFirstResponder("performClose:");
               }
+
               return;
             }
+
             args.closeWindowOrSideTab(browserWindow);
           },
           label: CLOSE_WINDOW_MENU_LABEL,
@@ -292,6 +315,8 @@ export function buildApplicationMenuTemplate(
             args.zoomFocusedPage("out");
           },
         },
+        { type: "separator" },
+        { role: "togglefullscreen" },
         ...createServerDaemonLogsMenuItems(args),
       ],
     },
@@ -315,15 +340,16 @@ export function buildApplicationMenuTemplate(
       role: "help",
       submenu: [
         {
+          label: `Version ${args.version}`,
+          click() {
+            args.openAbout();
+          },
+        },
+        { type: "separator" },
+        {
           label: VIEW_LICENSE_MENU_LABEL,
           click: () => {
             void shell.openExternal(LICENSE_URL);
-          },
-        },
-        {
-          label: UNINSTALL_MENU_LABEL,
-          click: () => {
-            void shell.openExternal(UNINSTALL_URL);
           },
         },
       ],
@@ -334,6 +360,7 @@ export function buildApplicationMenuTemplate(
 export function installApplicationMenu(args: InstallApplicationMenuArgs): void {
   const menu = Menu.buildFromTemplate(buildApplicationMenuTemplate(args));
   const onServerMenuWillShow = args.onServerMenuWillShow;
+
   if (onServerMenuWillShow !== undefined) {
     for (const id of SERVER_MENU_ITEM_IDS) {
       menu.getMenuItemById(id)?.submenu?.on("menu-will-show", () => {
@@ -341,5 +368,6 @@ export function installApplicationMenu(args: InstallApplicationMenuArgs): void {
       });
     }
   }
+
   Menu.setApplicationMenu(menu);
 }

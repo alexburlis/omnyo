@@ -1,4 +1,4 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 
 export interface QueuedRetry {
   id: string;
@@ -7,12 +7,13 @@ export interface QueuedRetry {
 }
 
 export async function listQueuedRetries(
-  bb: BbPluginApi,
+  api: PluginApi,
   threadId?: string,
 ): Promise<QueuedRetry[]> {
-  const rows = await bb.sdk.threads.queue.list(
+  const rows = await api.sdk.threads.queue.list(
     threadId === undefined ? {} : { threadId },
   );
+
   return rows
     .filter((row) => row.payload.kind === "retry")
     .map((row) => ({
@@ -23,9 +24,10 @@ export async function listQueuedRetries(
 }
 
 export async function findQueuedRetry(
-  bb: BbPluginApi,
+  api: PluginApi,
   threadId: string,
 ): Promise<QueuedRetry | null> {
-  const rows = await listQueuedRetries(bb, threadId);
+  const rows = await listQueuedRetries(api, threadId);
+
   return rows[0] ?? null;
 }

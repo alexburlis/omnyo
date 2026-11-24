@@ -35,6 +35,7 @@ function settledStatus(
     case "plan-steps":
     case "extension": {
       const status = itemStatusToExecStatus(payload.status);
+
       return status === "pending" ? "completed" : status;
     }
   }
@@ -147,22 +148,27 @@ function mergeWebActivityMessage(
   const scopeFields = turnId
     ? eventProjectionMessageTurnScopeFields(turnId)
     : eventProjectionMessageThreadScopeFields();
+
   if (!areThreadEventScopesEqual(target.scope, scopeFields.scope)) {
     throw new Error(
       `Cannot merge ${target.kind} messages with different scopes for call ${payload.callId}`,
     );
   }
+
   target.sourceSeqEnd = Math.max(target.sourceSeqEnd, meta.seq);
   target.createdAt = Math.max(target.createdAt, meta.createdAt);
+
   if (!target.parentToolCallId && payload.parentToolCallId) {
     target.parentToolCallId = payload.parentToolCallId;
   }
+
   if (payload.presentation) {
     target.presentation = payload.presentation;
   }
 
   if (target.kind === "web-search" && payload.itemKind === "web-search") {
     target.queries = payload.queries;
+
     return;
   }
 
@@ -170,11 +176,13 @@ function mergeWebActivityMessage(
     target.url = payload.url;
     target.prompt = payload.prompt;
     target.pattern = payload.pattern;
+
     return;
   }
 
   if (target.kind === "image-view" && payload.itemKind === "image-view") {
     target.path = payload.path;
+
     return;
   }
 
@@ -186,12 +194,14 @@ function mergeWebActivityMessage(
     target.path = payload.path;
     target.error = payload.error;
     target.transparentBackground = payload.transparentBackground;
+
     return;
   }
 
   if (target.kind === "file-read" && payload.itemKind === "file-read") {
     target.path = payload.path;
     target.cmd = payload.cmd;
+
     return;
   }
 
@@ -200,12 +210,14 @@ function mergeWebActivityMessage(
     target.query = payload.query;
     target.path = payload.path;
     target.cmd = payload.cmd;
+
     return;
   }
 
   if (target.kind === "plan-steps" && payload.itemKind === "plan-steps") {
     target.steps = payload.steps;
     target.explanation = payload.explanation;
+
     return;
   }
 
@@ -222,6 +234,7 @@ function settleWebActivityMessage(
   payload: WebActivityLifecycleEvent,
 ): void {
   const status = settledStatus(payload);
+
   if (
     target.kind === "web-search" ||
     target.kind === "web-fetch" ||
@@ -231,6 +244,7 @@ function settleWebActivityMessage(
   } else {
     target.status = status;
   }
+
   target.completedAt = meta.createdAt;
 }
 
@@ -240,11 +254,13 @@ function resolveActiveWebActivity(
   payload: WebActivityLifecycleEvent,
 ): { activityKey: string; active: ViewWebActivityMessage | null } | null {
   const activityKey = buildWebActivityKey(payload.itemKind, payload.callId);
+
   if (state.toolActivity.finalizedWebActivityCallIds.has(activityKey)) {
     return null;
   }
 
   const active = state.toolActivity.activeCell;
+
   if (
     isWebActivityMessage(active) &&
     active.callId === payload.callId &&
@@ -261,6 +277,7 @@ function resolveActiveWebActivity(
   ) {
     return { activityKey, active };
   }
+
   return { activityKey, active: null };
 }
 
@@ -272,12 +289,14 @@ export function onWebActivityBegin(
   payload: WebActivityLifecycleEvent,
 ): void {
   const resolved = resolveActiveWebActivity(state, meta, payload);
+
   if (!resolved) {
     return;
   }
 
   if (resolved.active) {
     mergeWebActivityMessage(resolved.active, meta, turnId, payload);
+
     return;
   }
 
@@ -299,16 +318,19 @@ export function onWebActivityEnd(
   payload: WebActivityLifecycleEvent,
 ): void {
   const resolved = resolveActiveWebActivity(state, meta, payload);
+
   if (!resolved) {
     return;
   }
 
   const { activityKey, active } = resolved;
+
   if (active) {
     mergeWebActivityMessage(active, meta, turnId, payload);
     settleWebActivityMessage(active, meta, payload);
     flushActiveToolCell(state);
     state.toolActivity.finalizedWebActivityCallIds.add(activityKey);
+
     return;
   }
 
@@ -317,6 +339,7 @@ export function onWebActivityEnd(
   const conflictingHistoryMatch = findWebActivityInHistoryCells(state, {
     callId: payload.callId,
   });
+
   if (
     conflictingHistoryMatch &&
     conflictingHistoryMatch.kind !== payload.itemKind
@@ -328,10 +351,12 @@ export function onWebActivityEnd(
     callId: payload.callId,
     itemKind: payload.itemKind,
   });
+
   if (historyMatch) {
     mergeWebActivityMessage(historyMatch, meta, turnId, payload);
     settleWebActivityMessage(historyMatch, meta, payload);
     state.toolActivity.finalizedWebActivityCallIds.add(activityKey);
+
     return;
   }
 
@@ -342,6 +367,7 @@ export function onWebActivityEnd(
     payload,
     settledStatus(payload),
   );
+
   completedMessage.id = messageId(
     threadId,
     completedMessage.kind,

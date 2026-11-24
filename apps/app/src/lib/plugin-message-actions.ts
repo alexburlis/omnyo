@@ -2,9 +2,9 @@ import type {
   PluginComposerApi,
   PluginMessageActionContext,
   ThreadChatMessageReference,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import type { PluginComposerHost } from "@/components/plugin/plugin-composer-host";
-import { createComposerHandleBinding } from "@get-bb/plugin-sdk/internal/composer-handle";
+import { createComposerHandleBinding } from "@omnyo/plugin-sdk/internal/composer-handle";
 import { detachedComposerController } from "./plugin-composer-handle";
 import type { MarkdownMessageDirectiveOpenThreadPanel } from "@/components/ui/markdown-message-directives";
 import type { PluginMessageActionSlot } from "./plugin-slots";
@@ -24,9 +24,11 @@ function messageActionComposer(
   host: PluginComposerHost | null,
 ): PluginComposerApi | null {
   if (host === null) return null;
+
   if (host.scope.kind !== "thread" || host.scope.threadId !== threadId) {
     return null;
   }
+
   return createComposerHandleBinding(
     host.textEffectKey,
     detachedComposerController(pluginId, host, "a message action's"),
@@ -50,12 +52,15 @@ export function runPluginMessageAction({
         console.warn(
           `[plugin:${slot.pluginId}] messageAction "${slot.id}" openPanel declined: this surface has no thread side panel`,
         );
+
         return false;
       }
+
       return openThreadPanel({ ...options, pluginId: slot.pluginId });
     },
     composer: messageActionComposer(slot.pluginId, threadId, composerHost),
   };
+
   const warn = (error: unknown) => {
     console.warn(
       `[plugin:${slot.pluginId}] messageAction "${slot.id}" failed: ${
@@ -63,8 +68,10 @@ export function runPluginMessageAction({
       }`,
     );
   };
+
   try {
     const result = slot.run(context);
+
     if (result instanceof Promise) {
       result.catch(warn);
     }

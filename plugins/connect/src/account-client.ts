@@ -1,7 +1,7 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
-export const ACCOUNT_PLUGIN_ID = "bb-account";
+export const ACCOUNT_PLUGIN_ID = "omnyo-account";
 
 const accountSchema = z.object({
   userId: z.string(),
@@ -90,7 +90,7 @@ const connectCredentialResultSchema = z.object({
 
 export class AccountUnavailableError extends Error {
   constructor(detail: string) {
-    super(`bb account isn't running (${detail})`);
+    super(`Omnyo account isn't running (${detail})`);
     this.name = "AccountUnavailableError";
   }
 }
@@ -99,11 +99,13 @@ function httpStatusOf(error: unknown): number | null {
   if (typeof error !== "object" || error === null || !("status" in error)) {
     return null;
   }
+
   return typeof error.status === "number" ? error.status : null;
 }
 
 export function accountErrorCode(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
+
   return message.replace(/^HTTP \d+: /u, "");
 }
 
@@ -128,7 +130,7 @@ export interface AccountClient {
 }
 
 export function createAccountClient(
-  getSdk: () => BbPluginApi["sdk"],
+  getSdk: () => PluginApi["sdk"],
 ): AccountClient {
   async function call<T>(
     method: string,
@@ -146,6 +148,7 @@ export function createAccountClient(
       });
     } catch (error) {
       const status = httpStatusOf(error);
+
       if (
         status === 503 &&
         typeof error === "object" &&
@@ -155,26 +158,28 @@ export function createAccountClient(
       ) {
         throw error;
       }
+
       if (status === 503 || status === 404) {
         throw new AccountUnavailableError(`HTTP ${status}`);
       }
+
       throw error;
     }
   }
 
   return {
     status: (signal) =>
-      call("bb-account.v1.status", {}, accountStatusSchema, signal),
+      call("omnyo-account.v1.status", {}, accountStatusSchema, signal),
     waitForStatusChange: (afterRevision, signal) =>
       call(
-        "bb-account.v1.waitForStatusChange",
+        "omnyo-account.v1.waitForStatusChange",
         { afterRevision },
         accountStatusSchema,
         signal,
       ),
     fetch: (request) =>
       call(
-        "bb-account.v1.fetch",
+        "omnyo-account.v1.fetch",
         {
           target: request.target,
           method: request.method,
@@ -184,18 +189,18 @@ export function createAccountClient(
         fetchResultSchema,
       ),
     adoptConnectCredential: (input) =>
-      call("bb-account.v1.adoptConnectCredential", input, adoptResultSchema),
+      call("omnyo-account.v1.adoptConnectCredential", input, adoptResultSchema),
     connectCredential: async () =>
       (
         await call(
-          "bb-account.v1.connectCredential",
+          "omnyo-account.v1.connectCredential",
           {},
           connectCredentialResultSchema,
         )
       ).credential,
     confirmRefusedCredential: (credential) =>
       call(
-        "bb-account.v1.confirmRefusedCredential",
+        "omnyo-account.v1.confirmRefusedCredential",
         { credential },
         accountStatusSchema,
       ),

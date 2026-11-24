@@ -2,11 +2,11 @@
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Environment } from "@bb/domain";
+import type { Environment } from "@omnyo/domain";
 import { StrictMode, useState, type ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useUpdateEnvironment } from "@/hooks/mutations/environment-mutations";
-import { makeEnvironment } from "@bb/test-helpers/domain-fixtures";
+import { makeEnvironment } from "@omnyo/test-helpers/domain-fixtures";
 import { useEnvironmentMergeBase } from "./useEnvironmentMergeBase";
 import { useGitDiffPanel } from "./useGitDiffPanel";
 import { useGitDiffPanelState } from "./useGitDiffPanelState";
@@ -27,6 +27,7 @@ vi.mock("../../../hooks/queries/environment-queries", () => ({
       environmentId,
       selectedBranch: options?.selectedBranch,
     });
+
     return { data: undefined, isFetching: false };
   },
   useEnvironmentWorkStatus: () => ({
@@ -57,7 +58,7 @@ function makeMergeBaseEnvironment(
 ): Environment {
   return makeEnvironment({
     baseBranch: null,
-    branchName: `bb/${id}`,
+    branchName: `omnyo/${id}`,
     createdAt: 1,
     hostId: "host-1",
     id,
@@ -78,6 +79,7 @@ function TestRoot({ children }: { children: ReactNode }) {
         },
       }),
   );
+
   return (
     <StrictMode>
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -87,6 +89,7 @@ function TestRoot({ children }: { children: ReactNode }) {
 
 function useMergeBaseOwner(environment: Environment, threadId: string) {
   const updateEnvironment = useUpdateEnvironment();
+
   const panel = useGitDiffPanel({
     activeSecondaryTab: null,
     clearActiveFileTabs: noop,
@@ -97,12 +100,14 @@ function useMergeBaseOwner(environment: Environment, threadId: string) {
     setThreadSecondaryPanel: noop,
     threadId,
   });
+
   const { effectiveMergeBaseBranch } = useEnvironmentMergeBase({
     environment,
     selectedMergeBaseBranch: panel.selectedMergeBaseBranch,
     setSelectedMergeBaseBranch: panel.setSelectedMergeBaseBranch,
     updateEnvironment,
   });
+
   const diffState = useGitDiffPanelState({
     environmentId: environment.id,
     isDiffPanelActive: true,
@@ -111,6 +116,7 @@ function useMergeBaseOwner(environment: Environment, threadId: string) {
     pendingGitDiffScrollPath: panel.pendingGitDiffScrollPath,
     requestedMergeBaseBranch: effectiveMergeBaseBranch,
   });
+
   return { ...diffState, ...panel, effectiveMergeBaseBranch };
 }
 
@@ -123,9 +129,11 @@ afterEach(cleanup);
 it("keeps production merge-base owners independent through close and reopen", async () => {
   const leftEnvironment = makeMergeBaseEnvironment("env-left", "main");
   const rightEnvironment = makeMergeBaseEnvironment("env-right", "release");
+
   const left = renderHook(() => useMergeBaseOwner(leftEnvironment, "left"), {
     wrapper: TestRoot,
   });
+
   const right = renderHook(() => useMergeBaseOwner(rightEnvironment, "right"), {
     wrapper: TestRoot,
   });
@@ -142,6 +150,7 @@ it("keeps production merge-base owners independent through close and reopen", as
     () => useMergeBaseOwner(rightEnvironment, "right"),
     { wrapper: TestRoot },
   );
+
   await waitFor(() => {
     expect(left.result.current.effectiveMergeBaseBranch).toBe("main");
     expect(reopenedRight.result.current.effectiveMergeBaseBranch).toBe(
@@ -164,10 +173,12 @@ it("keeps production merge-base owners independent through close and reopen", as
 it("never queries a new environment with the previous environment branch", async () => {
   const environmentA = makeMergeBaseEnvironment("env-a", "branch-a");
   const environmentB = makeMergeBaseEnvironment("env-b", "branch-b");
+
   const owner = renderHook(
     ({ environment }) => useMergeBaseOwner(environment, "switching"),
     { initialProps: { environment: environmentA }, wrapper: TestRoot },
   );
+
   await waitFor(() =>
     expect(owner.result.current.effectiveMergeBaseBranch).toBe("branch-a"),
   );
@@ -178,9 +189,11 @@ it("never queries a new environment with the previous environment branch", async
   await waitFor(() =>
     expect(owner.result.current.effectiveMergeBaseBranch).toBe("branch-b"),
   );
+
   const environmentBRequests = mergeBaseBranchRequests.filter(
     ({ environmentId }) => environmentId === "env-b",
   );
+
   expect(environmentBRequests.length).toBeGreaterThan(0);
   expect(
     environmentBRequests.every(
@@ -192,6 +205,7 @@ it("never queries a new environment with the previous environment branch", async
 it("does not revive an unconsumed file intent after navigating away and back", () => {
   const environmentA = makeMergeBaseEnvironment("env-a", "branch-a");
   const environmentB = makeMergeBaseEnvironment("env-b", "branch-b");
+
   const owner = renderHook(
     ({ environment, threadId }) => useMergeBaseOwner(environment, threadId),
     {
@@ -216,6 +230,7 @@ it("keeps delayed file and commit intents with the owner that requested them", a
       useMergeBaseOwner(makeMergeBaseEnvironment("env-left", "main"), "left"),
     { wrapper: TestRoot },
   );
+
   const right = renderHook(
     () =>
       useMergeBaseOwner(

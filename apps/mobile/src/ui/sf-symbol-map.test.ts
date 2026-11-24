@@ -15,34 +15,43 @@ const MAX_SF_SYMBOLS_VERSION = "4.2";
 function sfSymbolCatalog(): Map<string, string> {
   const require = createRequire(import.meta.url);
   const packageJson = require.resolve("sf-symbols-typescript/package.json");
+
   const source = readFileSync(
     join(dirname(packageJson), "dist", "index.d.ts"),
     "utf8",
   );
+
   const catalog = new Map<string, string>();
   let version: string | null = null;
+
   for (const line of source.split("\n")) {
     const block = line.match(/^export type SFSymbols(\d+)_(\d+) =/);
+
     if (block) {
       version = `${block[1]}.${block[2]}`;
       continue;
     }
+
     const entry = line.match(/^\s*\|\s*'([^']+)'/);
+
     if (entry && version && !catalog.has(entry[1])) {
       catalog.set(entry[1], version);
     }
   }
+
   return catalog;
 }
 
 function versionTuple(version: string): [number, number] {
   const [major = "0", minor = "0"] = version.split(".");
+
   return [Number(major), Number(minor)];
 }
 
 function isAtMost(version: string, limit: string): boolean {
   const [major, minor] = versionTuple(version);
   const [limitMajor, limitMinor] = versionTuple(limit);
+
   return major < limitMajor || (major === limitMajor && minor <= limitMinor);
 }
 
@@ -51,7 +60,9 @@ describe("SF_SYMBOL_MAP", () => {
     const unmapped = Object.keys(ICON_MAP).filter(
       (name) => !isIconName(name) || sfSymbolFor(name) === undefined,
     );
+
     expect(unmapped).toEqual([]);
+
     for (const key of Object.keys(SF_SYMBOL_MAP)) {
       expect(isIconName(key), key).toBe(true);
     }
@@ -61,12 +72,15 @@ describe("SF_SYMBOL_MAP", () => {
     const catalog = sfSymbolCatalog();
     expect(catalog.size).toBeGreaterThan(4000);
     const problems: string[] = [];
+
     for (const [name, symbol] of Object.entries(SF_SYMBOL_MAP)) {
       if (!/^[a-z0-9]+(\.[a-z0-9]+)*$/.test(symbol)) {
         problems.push(`${name}: "${symbol}" is not a bare symbol name`);
         continue;
       }
+
       const since = catalog.get(symbol);
+
       if (since === undefined) {
         problems.push(`${name}: "${symbol}" is not in the SF Symbols catalog`);
       } else if (!isAtMost(since, MAX_SF_SYMBOLS_VERSION)) {
@@ -75,6 +89,7 @@ describe("SF_SYMBOL_MAP", () => {
         );
       }
     }
+
     expect(problems).toEqual([]);
   });
 

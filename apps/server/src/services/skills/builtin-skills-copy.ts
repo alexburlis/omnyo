@@ -13,8 +13,11 @@ interface ResolveBuiltinSkillsRootPathArgs {
 }
 
 export const BUILTIN_SKILLS_DIRECTORY_NAME = "builtin-skills";
-const BUILTIN_SKILLS_SENTINEL_PATH = path.join("bb-cli", "SKILL.md");
+
+const BUILTIN_SKILLS_SENTINEL_PATH = path.join("omnyo-cli", "SKILL.md");
+
 const BUILTIN_SKILLS_COPY_MODE = fsConstants.COPYFILE_FICLONE;
+
 const builtinSkillsModuleDir = path.dirname(fileURLToPath(import.meta.url));
 
 function hasBuiltinSkillsRoot(skillsRootPath: string): boolean {
@@ -32,9 +35,11 @@ export function resolveBuiltinSkillsRootPathForModuleDir(
       ? "skills"
       : BUILTIN_SKILLS_DIRECTORY_NAME,
   );
+
   if (!hasBuiltinSkillsRoot(skillsRootPath)) {
     throw new Error(`Missing built-in skills at ${skillsRootPath}`);
   }
+
   return skillsRootPath;
 }
 
@@ -43,10 +48,10 @@ export function resolveBuiltinSkillsRootPath(): string {
     moduleDir: existsSync(
       path.resolve(
         builtinSkillsModuleDir,
-        "../../../../../plugins/bb-guide/skills",
+        "../../../../../plugins/omnyo-guide/skills",
       ),
     )
-      ? path.resolve(builtinSkillsModuleDir, "../../../../../plugins/bb-guide")
+      ? path.resolve(builtinSkillsModuleDir, "../../../../../plugins/omnyo-guide")
       : builtinSkillsModuleDir,
   });
 }

@@ -11,6 +11,7 @@ describe("plugin panel JSON boundaries", () => {
       flags: [true, false, null],
       nested: { count: 2 },
     };
+
     const serialized = serializePluginPanelParams(value);
 
     expect(parsePersistedPluginPanelParams(serialized)).toEqual(value);

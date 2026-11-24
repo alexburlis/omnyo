@@ -19,16 +19,17 @@ import {
   queuedThreadMessages,
   threads,
   updateQueuedThreadMessage,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   encodeClientTurnRequestIdNumber,
   canonicalProjectAttachmentPath,
   projectAttachmentPaths,
   threadScope,
   type PromptInput,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   copyProjectAttachments,
+  retainProjectAttachments,
   storeAttachment,
   resolvePromptAttachmentReferences,
 } from "../../src/services/projects/attachments.js";
@@ -54,14 +55,18 @@ const input = (path: string): PromptInput[] => [{ type: "localFile", path }];
 async function completeBackfill(h: TestAppHarness, projectId: string) {
   for (let count = 0; count < 200; count += 1) {
     await runProjectAttachmentBackfill(h.deps, UNTIMED_BACKFILL_LIMITS);
+
     const state = h.db
       .select()
       .from(projectAttachmentBackfills)
       .where(eq(projectAttachmentBackfills.projectId, projectId))
       .get();
+
     if (state?.error) throw new Error(state.error);
+
     if (state?.phase === "done") return;
   }
+
   throw new Error("Backfill did not complete");
 }
 
@@ -87,12 +92,73 @@ function ageUploads(h: TestAppHarness, projectId: string) {
 }
 
 describe("project attachment accounting", () => {
+  it("retains a Glance-only image in its source project until its cross-project owner and fork are deleted", async () => {
+    await withTestHarness(async (h) => {
+      const owner = seedThreadFixture(h);
+      const source = seedThreadFixture(h);
+      const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+      const file = await storeAttachment(
+        h.db,
+        h.config.dataDir,
+        source.project.id,
+        new File([bytes], "visual-only.png", { type: "image/png" }),
+      );
+
+      await retainProjectAttachments(
+        h.db,
+        h.config.dataDir,
+        source.project.id,
+        owner.thread.id,
+        [file.path],
+      );
+      await retainProjectAttachments(
+        h.db,
+        h.config.dataDir,
+        source.project.id,
+        owner.thread.id,
+        [file.path],
+      );
+
+      const fork = seedThread(h.deps, {
+        projectId: owner.project.id,
+        sourceThreadId: owner.thread.id,
+        originKind: "fork",
+      });
+
+      await completeBackfill(h, source.project.id);
+      ageUploads(h, source.project.id);
+      expect(
+        (await pruneProjectAttachments(h.deps, source.project.id))
+          .reclaimedCount,
+      ).toBe(0);
+      h.db.delete(threads).where(eq(threads.id, owner.thread.id)).run();
+      expect(
+        (await pruneProjectAttachments(h.deps, source.project.id))
+          .reclaimedCount,
+      ).toBe(0);
+      expect(
+        new Uint8Array(
+          await readFile(
+            join(h.config.dataDir, "attachments", source.project.id, file.path),
+          ),
+        ),
+      ).toEqual(bytes);
+      h.db.delete(threads).where(eq(threads.id, fork.id)).run();
+      expect(
+        (await pruneProjectAttachments(h.deps, source.project.id))
+          .reclaimedCount,
+      ).toBe(1);
+    });
+  });
+
   it("retries after a failure selecting the next backfill project", async () => {
     await withTestHarness(async (h) => {
       const { project } = seedThreadFixture(h);
       h.db.$client.exec(
         "ALTER TABLE project_attachment_backfills RENAME TO unavailable_attachment_backfills",
       );
+
       try {
         await expect(
           runProjectAttachmentBackfill(h.deps, UNTIMED_BACKFILL_LIMITS),
@@ -102,6 +168,7 @@ describe("project attachment accounting", () => {
           "ALTER TABLE unavailable_attachment_backfills RENAME TO project_attachment_backfills",
         );
       }
+
       await completeBackfill(h, project.id);
     });
   });
@@ -111,17 +178,21 @@ describe("project attachment accounting", () => {
       const { project, thread } = seedThreadFixture(h);
       const a = await upload(h, project.id, "a.txt");
       const b = await upload(h, project.id, "b.txt");
+
       const queued = seedQueuedMessage(h.deps, {
         threadId: thread.id,
         content: input(a.path),
         sendAt: Date.now() + 30 * 24 * 3600_000,
       });
+
       const result = updateQueuedThreadMessage(h.db, h.hub, {
+        execution: null,
         id: queued.id,
         threadId: thread.id,
         expectedUpdatedAt: queued.updatedAt,
         content: input(b.path),
       });
+
       expect(result.kind).toBe("updated");
       acquireProjectAttachmentOwnership(
         h.db,
@@ -133,6 +204,7 @@ describe("project attachment accounting", () => {
       );
       expect(
         updateQueuedThreadMessage(h.db, h.hub, {
+          execution: null,
           id: queued.id,
           threadId: thread.id,
           expectedUpdatedAt: queued.updatedAt,
@@ -140,11 +212,13 @@ describe("project attachment accounting", () => {
         }).kind,
       ).toBe("stale");
       deleteQueuedThreadMessage(h.db, h.hub, queued.id);
+
       const fork = seedThread(h.deps, {
         projectId: project.id,
         sourceThreadId: thread.id,
         originKind: "fork",
       });
+
       h.db
         .update(threads)
         .set({ deletedAt: Date.now() })
@@ -305,6 +379,7 @@ describe("project attachment accounting", () => {
   it("backfills legacy events, queues, and both history scopes while keeping cleanup gated", async () => {
     await withTestHarness(async (h) => {
       const { project, thread } = seedThreadFixture(h);
+
       const paths = [
         "event.txt",
         "queue.txt",
@@ -312,8 +387,10 @@ describe("project attachment accounting", () => {
         "history-project.txt",
         "orphan.txt",
       ];
+
       const dir = join(h.config.dataDir, "attachments", project.id);
       await mkdir(dir, { recursive: true });
+
       for (const path of paths) await writeFile(join(dir, path), path);
       h.db
         .insert(events)
@@ -327,15 +404,18 @@ describe("project attachment accounting", () => {
           createdAt: 1,
         })
         .run();
+
       const queued = seedQueuedMessage(h.deps, {
         threadId: thread.id,
         content: [{ type: "text", text: "legacy", mentions: [] }],
       });
+
       h.db
         .update(queuedThreadMessages)
         .set({ content: JSON.stringify(input("queue.txt")) })
         .where(eq(queuedThreadMessages.id, queued.id))
         .run();
+
       for (const [i, scope] of (["thread", "project"] as const).entries())
         h.db
           .insert(promptHistoryEntries)
@@ -522,7 +602,9 @@ describe("project attachment accounting", () => {
       const { project, thread } = seedThreadFixture(h);
       const file = await upload(h, project.id);
       const row = getProjectAttachment(h.db, project.id, file.path);
+
       if (!row) throw new Error("Missing uploaded inventory");
+
       const pending = join(
         h.config.dataDir,
         "attachments",
@@ -530,6 +612,7 @@ describe("project attachment accounting", () => {
         ".pending",
         row.id,
       );
+
       await mkdir(
         join(h.config.dataDir, "attachments", project.id, ".pending"),
         { recursive: true },
@@ -582,16 +665,20 @@ describe("project attachment accounting", () => {
   it("bounds backfill work on large histories while accepting queued messages", async () => {
     const eventCount = 4_000;
     const inputEventInterval = 20;
+
     const batchLimits = {
       elapsedBudgetMs: Number.POSITIVE_INFINITY,
       maxSteps: 5,
     };
+
     await withTestHarness(async (h) => {
       const { project, thread } = seedThreadFixture(h, {
         thread: { status: "active" },
       });
+
       const file = await upload(h, project.id);
       const output = JSON.stringify({ message: "x".repeat(4096) });
+
       const request = JSON.stringify({
         input: input(file.path),
         direction: "outbound",
@@ -609,9 +696,11 @@ describe("project attachment accounting", () => {
           source: "client/turn/requested",
         },
       });
+
       const insert = h.db.$client.prepare(
         "INSERT INTO events (id, thread_id, scope_kind, sequence, type, data, created_at) VALUES (?, ?, 'thread', ?, ?, ?, 1)",
       );
+
       h.db.$client.transaction(() => {
         for (let n = 1; n <= eventCount; n += 1)
           insert.run(
@@ -624,24 +713,29 @@ describe("project attachment accounting", () => {
             n % inputEventInterval === 0 ? request : output,
           );
       })();
+
       const plan = h.db.$client
         .prepare(
           "EXPLAIN QUERY PLAN SELECT data, sequence FROM events WHERE thread_id = ? AND type = 'client/turn/requested' AND sequence > ? ORDER BY sequence LIMIT 1",
         )
         .all(thread.id, 0);
+
       expect(JSON.stringify(plan)).toContain("events_thread_type_sequence_idx");
       const batchMs: number[] = [];
       const queueMs: number[] = [];
       let yields = 0;
+
       const timer = setInterval(() => {
         yields += 1;
       }, 1);
+
       try {
         for (let n = 0; n < 200; n += 1) {
           const started = performance.now();
           await runProjectAttachmentBackfill(h.deps, batchLimits);
           batchMs.push(performance.now() - started);
           const queueStarted = performance.now();
+
           const response = await h.app.request(
             `/api/v1/threads/${thread.id}/queued-messages`,
             {
@@ -650,8 +744,10 @@ describe("project attachment accounting", () => {
               body: JSON.stringify({ input: input(file.path) }),
             },
           );
+
           expect(response.status, await response.text()).toBe(201);
           queueMs.push(performance.now() - queueStarted);
+
           if (
             ensureProjectAttachmentBackfill(h.db, project.id).phase === "done"
           )
@@ -660,6 +756,7 @@ describe("project attachment accounting", () => {
       } finally {
         clearInterval(timer);
       }
+
       expect(ensureProjectAttachmentBackfill(h.db, project.id).phase).toBe(
         "done",
       );
@@ -668,8 +765,10 @@ describe("project attachment accounting", () => {
       expect(h.db.select().from(projectAttachmentThreads).all()).toHaveLength(
         1,
       );
+
       const p95 = (values: number[]) =>
         [...values].sort((a, b) => a - b)[Math.floor(values.length * 0.95)];
+
       console.log(
         JSON.stringify({
           attachmentBackfillBenchmark: {

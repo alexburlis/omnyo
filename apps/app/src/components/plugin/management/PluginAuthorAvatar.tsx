@@ -1,6 +1,6 @@
-import { Avatar, AvatarFallback, AvatarImage } from "@bb/shared-ui/avatar";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { BbLogo } from "@/components/ui/bb-logo";
+import { Avatar, AvatarFallback, AvatarImage } from "@omnyo/shared-ui/avatar";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { OmnyoLogo } from "@/components/ui/omnyo-logo";
 
 function authorInitials(name: string): string {
   const initials = name
@@ -9,6 +9,7 @@ function authorInitials(name: string): string {
     .slice(0, 2)
     .map((part) => part[0]?.toLocaleUpperCase() ?? "")
     .join("");
+
   return initials === "" ? "?" : initials;
 }
 
@@ -16,14 +17,15 @@ export function PluginAuthorAvatar({
   name,
   github,
   size,
-  official = false,
+  omnyoLogo = false,
 }: {
   name: string;
   github: string | null;
   size: "detail" | "page";
-  official?: boolean;
+  omnyoLogo?: boolean;
 }) {
-  const githubUsername = github ?? (official ? "get-bb" : null);
+  const githubUsername = omnyoLogo ? null : github;
+
   return (
     <Avatar
       role="img"
@@ -50,7 +52,7 @@ export function PluginAuthorAvatar({
           size === "detail" ? "text-2xs" : "text-xs",
         )}
       >
-        {official ? <BbLogo className="size-4/5" /> : authorInitials(name)}
+        {omnyoLogo ? <OmnyoLogo className="size-4/5" /> : authorInitials(name)}
       </AvatarFallback>
     </Avatar>
   );

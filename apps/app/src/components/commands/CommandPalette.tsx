@@ -1,12 +1,13 @@
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { defineSplit } from "@/lib/define-split";
 import { useCallback, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   pluginCommandId,
   pluginCommandIdSchema,
   type KeyboardCommandId,
-} from "@bb/domain";
-import { Dialog, DialogContent, DialogTitle } from "@bb/shared-ui/dialog";
+} from "@omnyo/domain";
+import { Dialog, DialogContent, DialogTitle } from "@omnyo/shared-ui/dialog";
 import {
   useAppCommandHandler,
   useIndexedAppCommandHandlers,
@@ -42,7 +43,6 @@ const ThreadSearchPaletteMode = defineSplit({
       (module) => module.ThreadSearchPaletteMode,
     ),
   loading: (props) => <ThreadSearchPalettePlaceholder {...props} />,
-  tier: "preload",
 });
 
 const THREAD_SEARCH_ACTION_ID = paletteActionIdForCommand("thread.search");
@@ -71,13 +71,17 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [actions, setActions] = useState<readonly PaletteAction[]>([]);
   const [searchingThreads, setSearchingThreads] = useState(false);
+
   const [installedPlugins, setInstalledPlugins] = useState<
     readonly PluginSettingsCandidate[]
   >([]);
+
   const [recents, setRecents] = useState<readonly string[]>(() =>
     readPaletteRecents(),
   );
+
   const pluginSlots = usePluginSlots();
+
   const pluginCommandIds = useMemo(
     () =>
       pluginSlots.commandPaletteActions.map((command) =>
@@ -85,7 +89,9 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
       ),
     [pluginSlots.commandPaletteActions],
   );
+
   const pluginShortcuts = useAppCommandShortcuts(pluginCommandIds);
+
   const appPluginCommands = useMemo(
     () =>
       pluginSlots.commandPaletteActions.filter(
@@ -93,6 +99,7 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
       ),
     [pluginSlots.commandPaletteActions],
   );
+
   const composerPluginCommands = useMemo(
     () =>
       pluginSlots.commandPaletteActions.filter(
@@ -100,6 +107,7 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
       ),
     [pluginSlots.commandPaletteActions],
   );
+
   const appPluginCommandIds = useMemo(
     () =>
       appPluginCommands.map((command) =>
@@ -107,21 +115,27 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
       ),
     [appPluginCommands],
   );
+
   useIndexedAppCommandHandlers(appPluginCommandIds, (index) => {
     const slot = appPluginCommands[index];
+
     if (!slot) return false;
+
     const action = buildPluginPaletteActions({
       slots: [slot],
       threadId,
       projectId,
       openThreadPanel: getActiveThreadPanelOpener(),
     })[0];
+
     if (!action) return false;
     action.run();
+
     return true;
   });
   const openTargetRef = useRef<EventTarget | null>(null);
-  const pendingRunRef = useRef<(() => void) | null>(null);
+  const actionMovedFocusRef = useRef(false);
+  const ranActionRef = useRef(false);
 
   const buildActions = useCallback(
     (target: EventTarget | null) => [
@@ -180,6 +194,7 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
     prepareOpen(target);
     setSearchingThreads(false);
     setOpen(true);
+
     return true;
   });
 
@@ -190,6 +205,7 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
       prepareOpen(target);
       setSearchingThreads(true);
       setOpen(true);
+
       return true;
     },
     100,
@@ -198,44 +214,71 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
   const shortcutActions = useMemo(() => {
     const byId = new Map(actions.map((action) => [action.id, action]));
     const byCommand = new Map<KeyboardCommandId, PaletteAction>();
+
     for (const command of PALETTE_COMMAND_IDS) {
       const action = byId.get(paletteActionIdForCommand(command));
+
       if (action) byCommand.set(command, action);
     }
+
     for (const command of pluginCommandIds) {
       const action = byId.get(command);
+
       if (action) byCommand.set(command, action);
     }
+
     return byCommand;
   }, [actions, pluginCommandIds]);
 
-  const chooseAction = useCallback((action: PaletteAction) => {
-    setRecents((current) => recordPaletteRecent(current, action.id));
-    if (action.id === THREAD_SEARCH_ACTION_ID) {
-      action.run();
-      return;
-    }
-    pendingRunRef.current = action.run;
-    setOpen(false);
+  const closeAndRun = useCallback((run: () => void) => {
+    ranActionRef.current = true;
+    flushSync(() => setOpen(false));
+    run();
   }, []);
 
-  const runAfterClose = useCallback((run: () => void) => {
-    pendingRunRef.current = run;
-    setOpen(false);
+  const chooseAction = useCallback(
+    (action: PaletteAction) => {
+      setRecents((current) => recordPaletteRecent(current, action.id));
+
+      if (action.id === THREAD_SEARCH_ACTION_ID) {
+        action.run();
+
+        return;
+      }
+
+      closeAndRun(action.run);
+    },
+    [closeAndRun],
+  );
+
+  const handleCloseAutoFocus = useCallback((event: Event) => {
+    const active = document.activeElement;
+
+    const moved =
+      ranActionRef.current &&
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      !(event.target instanceof Node && event.target.contains(active));
+
+    actionMovedFocusRef.current = moved;
+
+    if (moved) event.preventDefault();
   }, []);
 
   const handleAfterCloseAutoFocus = useCallback(() => {
-    const pending = pendingRunRef.current;
-    pendingRunRef.current = null;
     const target = openTargetRef.current;
-    if (target instanceof HTMLElement && target.isConnected) {
+    const movedFocus = actionMovedFocusRef.current;
+    actionMovedFocusRef.current = false;
+    ranActionRef.current = false;
+
+    if (!movedFocus && target instanceof HTMLElement && target.isConnected) {
       target.focus({ preventScroll: true });
     }
-    pending?.();
   }, []);
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     setOpen(nextOpen);
+
     if (!nextOpen) {
       setSearchingThreads(false);
       setQuery("");
@@ -253,7 +296,9 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
         hideCloseButton
         aria-describedby={undefined}
         compactContentClassName="h-[min(32rem,80dvh)]"
-        className={`top-[12%] max-w-[640px] translate-y-0 gap-0 p-0 shadow-lg sm:rounded-xl ${isCompact ? "min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)]" : ""}`}
+        overlayClassName="omnyo-spotlight-backdrop"
+        className={`omnyo-spotlight top-[12%] max-w-[640px] translate-y-0 gap-0 p-0 shadow-lg sm:rounded-xl ${isCompact ? "min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)]" : ""}`}
+        onCloseAutoFocus={handleCloseAutoFocus}
         onAfterCloseAutoFocus={handleAfterCloseAutoFocus}
         onKeyDownCapture={(event) => {
           if (
@@ -263,18 +308,24 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
           ) {
             return;
           }
+
           const command = runner.getShortcutCommand(event.nativeEvent, [
             "palette.open",
             ...shortcutActions.keys(),
           ]);
+
           if (command === null) return;
           event.preventDefault();
           event.stopPropagation();
+
           if (command === "palette.open") {
             runner.dispatch(command, openTargetRef.current);
+
             return;
           }
+
           const action = shortcutActions.get(command);
+
           if (action) chooseAction(action);
         }}
         onEscapeKeyDown={(event) => {
@@ -301,7 +352,7 @@ export function CommandPalette({ threadId, projectId }: CommandPaletteProps) {
             query={query}
             onQueryChange={setQuery}
             onExit={exitMode}
-            runAfterClose={runAfterClose}
+            runAndClose={closeAndRun}
           />
         )}
       </DialogContent>

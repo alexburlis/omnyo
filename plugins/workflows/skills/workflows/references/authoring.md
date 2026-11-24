@@ -42,11 +42,41 @@ or unevaluated schemas, structured enum values, or unknown keywords. The same
 subset and size/node/depth protections apply to metadata input/output schemas
 and per-agent result schemas; rejection errors identify the unsafe schema path.
 
+## Place a worker in an existing environment
+
+`agent(prompt, { environmentId: "env_existing" })` runs that call in an existing,
+ready environment of the same project. The environment supplies its machine and
+workspace; there is no machine selector, provisioning, or fallback to the origin.
+Provider/model/reasoning and permission ceilings still inherit from the origin
+unless the complete explicit model tuple is provided. The selected provider and
+model must be available in the target environment.
+
+```js
+const check = await agent("Run the platform checks", {
+  environmentId: args.checkEnvironmentId,
+  title: "Platform checks",
+});
+return check;
+```
+
+Use `omnyo environment list` to discover existing environments. Literal targets and
+model tuples are validated together before execution; dynamic targets are checked
+when the call runs. Missing, retiring, destroyed or unavailable targets fail
+visibly. Target changes invalidate replay from that call onward. Omitted or
+explicit-origin placement keeps the existing replay identity. Source files,
+nested workflow lookup and completion notifications stay at the origin.
+
+Captures and other files that must cross machines must use project attachments;
+a host-local path is not transferred by placement. The workflow inspector and
+`omnyo workflows history` report the actual environment, host and workspace. Older
+history identifies its origin environment but leaves unknown host/path fields
+empty.
+
 ## Script body hooks
 
-- `agent(prompt: string, opts?)`: spawn a BB worker. Without `schema`, returns
+- `agent(prompt: string, opts?)`: spawn an Omnyo worker. Without `schema`, returns
   its final text as a string. With `schema` (a JSON Schema), the worker is forced
-  to call `bb_workflow_result` and `agent()` returns the validated value — no
+  to call `omnyo_workflow_result` and `agent()` returns the validated value — no
   parsing needed. `opts.label` overrides the display label. `opts.phase`
   explicitly assigns this agent to a progress group; use this inside
   `pipeline()`/`parallel()` stages to avoid races on the global `phase()` state —
@@ -68,7 +98,7 @@ and per-agent result schemas; rejection errors identify the unsafe schema path.
 - `phase(title: string)`: start a new phase; subsequent `agent()` calls are
   grouped under this title. An agent-level `phase` overrides only that call and
   does not change the current phase.
-- `args`: the value passed as `bb_workflow_run`'s `args` input, verbatim. Pass
+- `args`: the value passed as `omnyo_workflow_run`'s `args` input, verbatim. Pass
   arrays/objects as actual JSON values, NOT as a JSON-encoded string. Use this to
   parameterize named workflows — for example, pass a research question, target
   path, or config object directly instead of via a side-channel file.
@@ -95,8 +125,8 @@ stamp results after the workflow returns, and for randomness vary the agent
 prompt/label by index. No filesystem, shell, network, imports, or Node.js API
 access.
 
-Workers spawned by `agent()` are normal BB threads and retain the tools and
-workspace access allowed by their BB permission mode. The QuickJS script itself
+Workers spawned by `agent()` are normal Omnyo threads and retain the tools and
+workspace access allowed by their Omnyo permission mode. The QuickJS script itself
 never receives that access.
 
 ## Agent selection
@@ -118,7 +148,7 @@ await agent("Inspect the implementation", {
 });
 ```
 
-BB validates the tuple against the live provider/model catalog immediately
+Omnyo validates the tuple against the live provider/model catalog immediately
 before spawning the worker. A provider disappearing between authoring and
 execution fails the call instead of silently substituting another model.
 
@@ -151,15 +181,15 @@ const review = await agent("Return a severity-ranked review", {
 });
 ```
 
-Native `label` is an alias for BB's existing `title`, and native `schema` is an
-alias for BB's existing `outputSchema`. Either spelling remains supported.
+Native `label` is an alias for Omnyo's existing `title`, and native `schema` is an
+alias for Omnyo's existing `outputSchema`. Either spelling remains supported.
 `label` and `title` must match exactly when both are present; `schema` and
 `outputSchema` must be structurally identical, with object key order ignored.
 The canonical structured-result field is `outputSchema`. `phase`, `label`, and
 `title` are display-only.
 
-That worker receives only the `bb_workflow_result` plugin tool. It MUST call the
+That worker receives only the `omnyo_workflow_result` plugin tool. It MUST call the
 tool exactly once at the end of its response with `{ value: ... }` to provide
-the structured output. BB validates the value with Ajv. The initial invalid
+the structured output. Omnyo validates the value with Ajv. The initial invalid
 attempt gets at most two corrective retries; a third invalid submission fails
 the call. There is no hidden normalization-agent pass.

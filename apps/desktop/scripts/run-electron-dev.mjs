@@ -5,19 +5,24 @@ import { fileURLToPath } from "node:url";
 import {
   resolveCurrentDevInstanceConfig,
   toDevProcessEnv,
-} from "@bb/config/runtime";
+} from "@omnyo/config/runtime";
 import { forwardSignalsAndMirrorExit } from "./child-process-helpers.mjs";
 
 const require = createRequire(import.meta.url);
+
 const electronBinary = require("electron");
+
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+
 const repoRoot = resolve(scriptDirectory, "..", "..", "..");
 
 function resolveDesktopUserDataDir(env, dataDir) {
-  const rawUserDataDir = env.BB_DESKTOP_USER_DATA_DIR?.trim();
+  const rawUserDataDir = env.OMNYO_DESKTOP_USER_DATA_DIR?.trim();
+
   if (rawUserDataDir === undefined || rawUserDataDir.length === 0) {
     return join(dataDir, "desktop");
   }
+
   return resolve(rawUserDataDir);
 }
 
@@ -28,21 +33,20 @@ function createElectronAppEnv(env, config) {
     baseEnv: env,
     config,
   });
-  childEnv.BB_DESKTOP_NODE_EXEC_PATH = process.execPath;
+
+  childEnv.OMNYO_DESKTOP_NODE_EXEC_PATH = process.execPath;
   delete childEnv.ELECTRON_RUN_AS_NODE;
+
   return childEnv;
 }
 
-// Detect whether `pnpm dev` is already serving the Vite app on its port. When it
-// is, the desktop shell loads that URL (live source + HMR) instead of the built
-// UI; when it is not, the desktop falls back to starting its own bb-app runtime.
 async function isViteDevServerReachable(appUrl) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), VITE_PROBE_TIMEOUT_MS);
+
   try {
-    // Any HTTP response (even a non-2xx) means something is listening; only a
-    // network error (nothing bound to the port) counts as unreachable.
     await fetch(appUrl, { method: "GET", signal: controller.signal });
+
     return true;
   } catch {
     return false;
@@ -52,34 +56,42 @@ async function isViteDevServerReachable(appUrl) {
 }
 
 const devConfig = resolveCurrentDevInstanceConfig(repoRoot);
+
 const childEnv = createElectronAppEnv(process.env, devConfig);
+
 const dataDir = devConfig.dataDir;
+
 const desktopUserDataDir = resolveDesktopUserDataDir(childEnv, dataDir);
 
 const appUrl = `http://localhost:${devConfig.ports.appPort}`;
+
 const viteReachable = await isViteDevServerReachable(appUrl);
+
 if (viteReachable) {
-  childEnv.BB_DESKTOP_APP_URL = appUrl;
+  childEnv.OMNYO_DESKTOP_APP_URL = appUrl;
 }
 
-process.stdout.write(`@bb/desktop: instance ${devConfig.instanceId}\n`);
-process.stdout.write(`@bb/desktop: data ${dataDir}\n`);
+process.stdout.write(`@omnyo/desktop: instance ${devConfig.instanceId}\n`);
+
+process.stdout.write(`@omnyo/desktop: data ${dataDir}\n`);
+
 process.stdout.write(
-  `@bb/desktop: server http://127.0.0.1:${devConfig.ports.serverPort}\n`,
+  `@omnyo/desktop: server http://127.0.0.1:${devConfig.ports.serverPort}\n`,
 );
+
 process.stdout.write(
-  `@bb/desktop: daemon http://127.0.0.1:${devConfig.ports.hostDaemonPort}\n`,
+  `@omnyo/desktop: daemon http://127.0.0.1:${devConfig.ports.hostDaemonPort}\n`,
 );
+
 process.stdout.write(
   viteReachable
-    ? `@bb/desktop: app ${appUrl} (Vite dev server — live reload)\n`
-    : `@bb/desktop: app (own bb-app runtime — no Vite dev server on ${appUrl})\n`,
+    ? `@omnyo/desktop: app ${appUrl} (Vite dev server — live reload)\n`
+    : `@omnyo/desktop: app (own Omnyo runtime — no Vite dev server on ${appUrl})\n`,
 );
-process.stdout.write(`@bb/desktop: user-data ${desktopUserDataDir}\n`);
 
-// Extra Chromium/Electron switches for dev automation (e.g.
-// BB_DESKTOP_ELECTRON_ARGS="--remote-debugging-port=9223" for CDP-driven QA).
-const extraElectronArgs = (process.env.BB_DESKTOP_ELECTRON_ARGS ?? "")
+process.stdout.write(`@omnyo/desktop: user-data ${desktopUserDataDir}\n`);
+
+const extraElectronArgs = (process.env.OMNYO_DESKTOP_ELECTRON_ARGS ?? "")
   .split(" ")
   .map((arg) => arg.trim())
   .filter((arg) => arg.length > 0);

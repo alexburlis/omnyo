@@ -1,6 +1,6 @@
 /// <reference types="vitest/jsdom" />
 
-import "@bb/shared-ui/icon-extended";
+import "@omnyo/shared-ui/icon-extended";
 
 if (typeof globalThis.navigator === "undefined") {
   Object.defineProperty(globalThis, "navigator", {
@@ -109,8 +109,18 @@ if (
   typeof document !== "undefined" &&
   typeof document.elementFromPoint !== "function"
 ) {
+  let lastPressTarget: Element | null = null;
+
+  const recordPressTarget = (event: Event) => {
+    lastPressTarget = event.target instanceof Element ? event.target : null;
+  };
+
+  document.addEventListener("pointerdown", recordPressTarget, true);
+  document.addEventListener("touchstart", recordPressTarget, true);
   document.elementFromPoint = function elementFromPointPolyfill() {
-    return document.body;
+    return lastPressTarget?.isConnected === true
+      ? lastPressTarget
+      : document.body;
   };
 }
 
@@ -126,6 +136,7 @@ if (typeof window !== "undefined" && !window.IntersectionObserver) {
       return [];
     }
   }
+
   window.IntersectionObserver =
     IntersectionObserverPolyfill as unknown as typeof IntersectionObserver;
 }

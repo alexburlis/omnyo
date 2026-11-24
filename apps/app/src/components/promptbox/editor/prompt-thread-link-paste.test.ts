@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { GENERATED_ID_ALPHABET, PERSONAL_PROJECT_ID } from "@bb/domain";
-import type { ResolveThreadMentionsResponse } from "@bb/server-contract";
+import { GENERATED_ID_ALPHABET, PERSONAL_PROJECT_ID } from "@omnyo/domain";
+import type { ResolveThreadMentionsResponse } from "@omnyo/server-contract";
 import { Editor } from "@tiptap/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promptEditorExtensions } from "./prompt-editor-extensions";
@@ -16,15 +16,22 @@ import {
   promptThreadLinkPasteKey,
 } from "./prompt-thread-link-paste";
 
-const origin = "https://brsbl.getbb.app";
+const origin = "https://brsbl.example.test";
+
 const projectId = "proj_khiw2za95v";
+
 const threadId = "thr_86mb5jjzi9";
+
 const secondId = "thr_2222222222";
+
 const url = `${origin}/projects/${projectId}/threads/${threadId}`;
+
 const secondUrl = `${origin}/projects/${projectId}/threads/${secondId}`;
+
 const editors: Editor[] = [];
 
 type Resolution = ResolveThreadMentionsResponse[number];
+
 type PasteOptions = Parameters<typeof createPromptThreadLinkPasteExtension>[0];
 
 function resolution(id = threadId, project = projectId): Resolution {
@@ -33,9 +40,11 @@ function resolution(id = threadId, project = projectId): Resolution {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((settle) => {
     resolve = settle;
   });
+
   return { promise, resolve };
 }
 
@@ -48,14 +57,16 @@ function createEditor({
     extensions: [
       ...promptEditorExtensions({ getPlaceholder: () => "" }),
       createPromptThreadLinkPasteExtension({
-        getOrigin: () => origin,
+        getOrigins: () => [origin],
         getCachedThread,
         resolveThreads,
       }),
     ],
     content: promptEditorContentFromValue({ text, mentions: [] }),
   });
+
   editors.push(editor);
+
   return editor;
 }
 
@@ -82,6 +93,7 @@ afterEach(() => {
   for (const editor of editors.splice(0)) {
     if (!editor.isDestroyed) editor.destroy();
   }
+
   vi.useRealTimers();
 });
 
@@ -99,6 +111,7 @@ describe("pasted thread link conversion", () => {
       const editor = createEditor({ resolveThreads: () => pending.promise });
       await paste(editor, url);
       editor.view.dispatch(editor.state.tr.insertText(suffix, 1 + url.length));
+
       if (prefix) editor.view.dispatch(editor.state.tr.insertText(prefix, 1));
       pending.resolve([resolution()]);
       await vi.advanceTimersByTimeAsync(0);
@@ -110,15 +123,19 @@ describe("pasted thread link conversion", () => {
   );
   it("converts one paste atomically and replays exact URL and selection history", async () => {
     const pending = deferred<Resolution[]>();
+
     const resolveThreads = vi.fn(
       (_ids: string[], _signal: AbortSignal) => pending.promise,
     );
+
     const original = "Before selected after";
+
     const editor = createEditor({
       text: original,
       getCachedThread: (id) => (id === threadId ? resolution(id) : null),
       resolveThreads,
     });
+
     editor.commands.setTextSelection({ from: 8, to: 16 });
     const pasted = `😀 (${url}/), ${secondUrl} and ${url}. https://example.com`;
     await paste(editor, pasted);
@@ -169,9 +186,11 @@ describe("pasted thread link conversion", () => {
 
   it("maps boundary edits and the current caret while permanently excluding edited or removed occurrences", async () => {
     const pending = deferred<Resolution[]>();
+
     const resolveThreads = vi.fn(
       (_ids: string[], _signal: AbortSignal) => pending.promise,
     );
+
     const editor = createEditor({ resolveThreads });
     await paste(editor, `${url} and ${url} then ${url}`);
     editor.view.dispatch(editor.state.tr.insertText("📎 ", 1));
@@ -205,19 +224,24 @@ describe("pasted thread link conversion", () => {
     "aborts pending lookup on %s and ignores its late result",
     async (action) => {
       const pending = deferred<Resolution[]>();
+
       const resolveThreads = vi.fn(
         (_ids: string[], _signal: AbortSignal) => pending.promise,
       );
+
       const editor = createEditor({ resolveThreads });
       await paste(editor, url);
       const signal = resolveThreads.mock.calls[0]![1];
+
       if (action === "undo") editor.commands.undo();
+
       if (action === "cancel") {
         cancelPromptThreadLinkPaste(editor);
         editor.commands.setContent(
           promptEditorContentFromValue({ text: url, mentions: [] }),
         );
       }
+
       if (action === "destroy") editor.destroy();
       const updates = vi.fn();
       editor.on("update", updates);
@@ -226,6 +250,7 @@ describe("pasted thread link conversion", () => {
       pending.resolve([resolution()]);
       await vi.advanceTimersByTimeAsync(2_000);
       expect(updates).not.toHaveBeenCalled();
+
       if (action !== "destroy") {
         expect(value(editor)).toEqual({
           text: action === "undo" ? "" : url,
@@ -239,22 +264,29 @@ describe("pasted thread link conversion", () => {
     const ids = Array.from({ length: 34 }, (_, index) => {
       const high =
         GENERATED_ID_ALPHABET[Math.floor(index / GENERATED_ID_ALPHABET.length)];
+
       const low = GENERATED_ID_ALPHABET[index % GENERATED_ID_ALPHABET.length];
+
       return `thr_22222222${high}${low}`;
     });
+
     const stalled = deferred<Resolution[]>();
+
     const resolveThreads = vi.fn((batch: string[], _signal: AbortSignal) =>
       batch.length === 32
         ? Promise.resolve(batch.map((id) => resolution(id)))
         : stalled.promise,
     );
+
     const editor = createEditor({
       getCachedThread: (id) => (id === ids[0] ? resolution(id) : null),
       resolveThreads,
     });
+
     const pasted = ids
       .map((id) => `${origin}/projects/${projectId}/threads/${id}`)
       .join(" ");
+
     await paste(editor, pasted);
     expect(resolveThreads.mock.calls.map(([batch]) => batch.length)).toEqual([
       32, 1,
@@ -286,6 +318,7 @@ describe("pasted thread link conversion", () => {
     const personal = `${origin}/threads/${personalId}`;
     const wrongProjectless = `${origin}/threads/${wrongProjectlessId}`;
     const missing = `${origin}/projects/${projectId}/threads/${absentId}`;
+
     const editor = createEditor({
       resolveThreads: async () => [
         resolution(threadId, "proj_2222222222"),
@@ -293,6 +326,7 @@ describe("pasted thread link conversion", () => {
         resolution(wrongProjectlessId),
       ],
     });
+
     await paste(
       editor,
       [mismatched, personal, wrongProjectless, missing].join(" "),
@@ -318,6 +352,7 @@ describe("pasted thread link conversion", () => {
     const resolveThreads = vi.fn(async () => {
       throw new Error("offline");
     });
+
     const editor = createEditor({ resolveThreads });
     await paste(editor, url);
     await vi.advanceTimersByTimeAsync(2_000);

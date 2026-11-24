@@ -14,6 +14,7 @@ function memoryStorage(
   data: Map<string, string>;
 } {
   const data = new Map(Object.entries(initial));
+
   return {
     data,
     getString: (key) => data.get(key),

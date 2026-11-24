@@ -5,7 +5,7 @@ import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import type {
   DesktopBrowserImportSourceId,
   DesktopBrowserImportSourceProfile,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { countRows } from "./cookie-database.js";
 
 export type BrowserImportEngine = "chromium" | "firefox" | "safari";
@@ -72,8 +72,10 @@ function chromiumSource(input: {
     userDataDirectory: (context) => {
       if (context.platform === "darwin")
         return macApplicationSupport(context, ...input.macSegments);
+
       if (context.platform === "linux" && input.linuxSegments)
         return join(linuxConfigDirectory(context), ...input.linuxSegments);
+
       return undefined;
     },
   };
@@ -234,7 +236,9 @@ export function resolveProfilePath(
   profileDirectory: string,
 ): string | undefined {
   const root = definition.userDataDirectory(context);
+
   if (root === undefined) return undefined;
+
   return isAbsolute(profileDirectory)
     ? profileDirectory
     : join(root, profileDirectory);
@@ -249,11 +253,15 @@ export function cookieDatabaseCandidatePaths(
   profileDirectory: string,
 ): string[] {
   const profilePath = resolveProfilePath(definition, context, profileDirectory);
+
   if (profilePath === undefined) return [];
+
   if (definition.engine === "firefox")
     return [join(profilePath, "cookies.sqlite")];
+
   if (definition.engine === "safari")
     return [join(profilePath, "Cookies.binarycookies")];
+
   return [
     join(profilePath, "Network", "Cookies"),
     join(profilePath, "Cookies"),
@@ -280,6 +288,7 @@ export async function resolveCookieDatabase(
   )) {
     if (await isRegularFile(candidate)) return candidate;
   }
+
   return undefined;
 }
 
@@ -288,28 +297,37 @@ export function parseFirefoxProfiles(
   root: string,
 ): DesktopBrowserImportSourceProfile[] {
   const profiles: DesktopBrowserImportSourceProfile[] = [];
+
   let current: { name?: string; path?: string; isRelative?: string } | null =
     null;
+
   const flush = () => {
     if (current?.path) {
       const candidate = current.path;
+
       const isRelative =
         current.isRelative === undefined || current.isRelative === "1";
+
       const validIsRelative =
         current.isRelative === undefined || /^[01]$/.test(current.isRelative);
+
       if (validIsRelative && !candidate.includes("\u0000")) {
         let directory: string | undefined;
+
         if (isRelative) {
           if (!isAbsolute(candidate)) {
             const resolved = resolve(root, candidate);
             const rel = relative(root, resolved);
+
             const escapesRoot =
               rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+
             if (!escapesRoot) directory = normalize(candidate);
           }
         } else if (isAbsolute(candidate)) {
           directory = normalize(candidate);
         }
+
         if (directory !== undefined)
           profiles.push({
             directory,
@@ -317,25 +335,35 @@ export function parseFirefoxProfiles(
           });
       }
     }
+
     current = null;
   };
+
   for (const rawLine of ini.split(/\r?\n/)) {
     const line = rawLine.trim();
+
     if (line.startsWith("[")) {
       flush();
       current = /^\[Profile\d+\]$/i.test(line) ? {} : null;
       continue;
     }
+
     if (!current) continue;
     const separator = line.indexOf("=");
+
     if (separator === -1) continue;
     const key = line.slice(0, separator).trim().toLowerCase();
     const value = line.slice(separator + 1).trim();
+
     if (key === "name") current.name = value;
+
     if (key === "path") current.path = value;
+
     if (key === "isrelative") current.isRelative = value;
   }
+
   flush();
+
   return profiles;
 }
 
@@ -353,30 +381,129 @@ export function parseChromiumLocalStateProfiles(
   contents: string,
 ): DesktopBrowserImportSourceProfile[] {
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(contents);
   } catch {
     return [];
   }
+
   if (typeof parsed !== "object" || parsed === null) return [];
   const profile = (parsed as { profile?: unknown }).profile;
+
   if (typeof profile !== "object" || profile === null) return [];
   const infoCache = (profile as { info_cache?: unknown }).info_cache;
+
   if (typeof infoCache !== "object" || infoCache === null) return [];
   const profiles: DesktopBrowserImportSourceProfile[] = [];
+
   for (const [directory, info] of Object.entries(
     infoCache as Record<string, unknown>,
   )) {
     if (!isSafeProfileDirectory(directory)) continue;
+
     const name =
       typeof info === "object" &&
       info !== null &&
       typeof (info as { name?: unknown }).name === "string"
         ? (info as { name: string }).name.trim()
         : "";
+
     profiles.push({ directory, name: name || directory });
   }
+
   return profiles;
+}
+
+export function parseChromiumLastUsedProfile(
+  contents: string,
+): string | undefined {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(contents);
+  } catch {
+    return undefined;
+  }
+
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const profile = (parsed as { profile?: unknown }).profile;
+
+  if (typeof profile !== "object" || profile === null) return undefined;
+  const lastUsed = (profile as { last_used?: unknown }).last_used;
+
+  return typeof lastUsed === "string" && isSafeProfileDirectory(lastUsed)
+    ? lastUsed
+    : undefined;
+}
+
+export function parseFirefoxDefaultProfile(ini: string): string | undefined {
+  let section = "";
+  let profilePath: string | undefined;
+  let profileIsDefault = false;
+  let installDefault: string | undefined;
+  let markedDefault: string | undefined;
+
+  const closeProfile = () => {
+    if (profileIsDefault && profilePath !== undefined)
+      markedDefault ??= profilePath;
+    profilePath = undefined;
+    profileIsDefault = false;
+  };
+
+  for (const rawLine of ini.split(/\r?\n/)) {
+    const line = rawLine.trim();
+
+    if (line.startsWith("[")) {
+      closeProfile();
+      section = line.toLowerCase();
+      continue;
+    }
+
+    const separator = line.indexOf("=");
+
+    if (separator === -1) continue;
+    const key = line.slice(0, separator).trim().toLowerCase();
+    const value = line.slice(separator + 1).trim();
+
+    if (section.startsWith("[install") && key === "default" && value)
+      installDefault ??= value;
+
+    if (!/^\[profile\d+\]$/.test(section)) continue;
+
+    if (key === "path" && value) profilePath = value;
+
+    if (key === "default") profileIsDefault = value === "1";
+  }
+
+  closeProfile();
+  const selected = installDefault ?? markedDefault;
+
+  return selected === undefined || selected.includes("\u0000")
+    ? undefined
+    : normalize(selected);
+}
+
+export async function readPreferredProfileDirectory(
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+): Promise<string | undefined> {
+  if (definition.engine === "safari") return ".";
+  const root = definition.userDataDirectory(context);
+
+  if (root === undefined) return undefined;
+
+  if (definition.engine === "firefox") {
+    const ini = await readTextFile(join(root, "profiles.ini"));
+
+    return ini === undefined ? undefined : parseFirefoxDefaultProfile(ini);
+  }
+
+  const localState = await readTextFile(join(root, "Local State"));
+
+  return localState === undefined
+    ? undefined
+    : parseChromiumLastUsedProfile(localState);
 }
 
 async function countProfileCookies(
@@ -385,8 +512,10 @@ async function countProfileCookies(
   directory: string,
 ): Promise<number | undefined> {
   const database = await resolveCookieDatabase(definition, context, directory);
+
   if (database === undefined || definition.engine === "safari")
     return undefined;
+
   return countRows(
     database,
     definition.engine === "firefox"
@@ -407,6 +536,7 @@ async function withCookieCounts(
         context,
         profile.directory,
       );
+
       return cookieCount === undefined ? profile : { ...profile, cookieCount };
     }),
   );
@@ -436,15 +566,19 @@ async function scanForProfiles(
 ): Promise<DesktopBrowserImportSourceProfile[]> {
   const entries = await listDirectory(root);
   const found: DesktopBrowserImportSourceProfile[] = [];
+
   for (const entry of entries.filter(isSafeProfileDirectory)) {
     const directory = toDirectory(entry);
+
     const database = await resolveCookieDatabase(
       definition,
       context,
       directory,
     );
+
     if (database !== undefined) found.push({ directory, name: entry });
   }
+
   return found;
 }
 
@@ -454,8 +588,10 @@ async function listSafariProfiles(
   const profiles: DesktopBrowserImportSourceProfile[] = [
     { directory: ".", name: "Safari" },
   ];
+
   const stores = join(root, "..", "WebKit", "WebsiteDataStore");
   const entries = await listDirectory(stores);
+
   for (const entry of entries
     .filter((entry) =>
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -464,9 +600,11 @@ async function listSafariProfiles(
     )
     .sort()) {
     const directory = normalize(join(stores, entry, "Cookies"));
+
     if (await isRegularFile(join(directory, "Cookies.binarycookies")))
       profiles.push({ directory, name: `Profile ${entry.slice(0, 8)}` });
   }
+
   return profiles;
 }
 
@@ -476,23 +614,29 @@ async function listSourceProfilesInDirectory(
   root: string,
 ): Promise<DesktopBrowserImportSourceProfile[]> {
   if (definition.engine === "safari") return listSafariProfiles(root);
+
   if (definition.engine === "firefox") {
     const ini = await readTextFile(join(root, "profiles.ini"));
     const declared = ini === undefined ? [] : parseFirefoxProfiles(ini, root);
     const scoped = { ...definition, userDataDirectory: () => root };
     const withDatabase: DesktopBrowserImportSourceProfile[] = [];
+
     for (const profile of declared) {
       const database = await resolveCookieDatabase(
         scoped,
         context,
         profile.directory,
       );
+
       if (database !== undefined) withDatabase.push(profile);
     }
+
     if (withDatabase.length > 0)
       return withCookieCounts(scoped, context, withDatabase);
+
     const fallbackDirectory =
       context.platform === "linux" ? root : join(root, "Profiles");
+
     return withCookieCounts(
       scoped,
       context,
@@ -501,12 +645,16 @@ async function listSourceProfilesInDirectory(
       ),
     );
   }
+
   const localState = await readTextFile(join(root, "Local State"));
+
   const declared =
     localState === undefined ? [] : parseChromiumLocalStateProfiles(localState);
+
   if (declared.length > 0)
     return withCookieCounts(definition, context, declared);
   const direct = await resolveCookieDatabase(definition, context, ".");
+
   return withCookieCounts(definition, context, [
     ...(direct === undefined
       ? []
@@ -524,22 +672,29 @@ export async function listSourceProfiles(
       ...definition.discoveredProfiles,
     ]);
   const root = definition.userDataDirectory(context);
+
   if (root === undefined) return [];
+
   if (definition.id !== "firefox" || context.platform !== "linux")
     return listSourceProfilesInDirectory(definition, context, root);
+
   const roots = [
     root,
     join(context.home, "snap", "firefox", "common", ".mozilla", "firefox"),
   ];
+
   const profiles = new Map<string, DesktopBrowserImportSourceProfile>();
+
   for (const directory of roots) {
     const found = await listSourceProfilesInDirectory(
       definition,
       context,
       directory,
     );
+
     for (const profile of found) {
       const absolute = resolve(directory, profile.directory);
+
       if (!profiles.has(absolute))
         profiles.set(
           absolute,
@@ -547,6 +702,7 @@ export async function listSourceProfiles(
         );
     }
   }
+
   return [...profiles.values()];
 }
 
@@ -564,6 +720,7 @@ export const probeProcess: ProcessProbe = async (pid) => {
     )
       return null;
   }
+
   return new Promise((resolve) => {
     execFile(
       "ps",
@@ -572,8 +729,10 @@ export const probeProcess: ProcessProbe = async (pid) => {
       (error, stdout) => {
         if (error) {
           resolve(stdout.trim().length > 0 ? stdout.trim() : "");
+
           return;
         }
+
         resolve(stdout.trim());
       },
     );
@@ -587,6 +746,7 @@ function normalizeHost(host: string): string {
 function parseLockPid(pidText: string): number | undefined {
   if (!/^\d+$/.test(pidText)) return undefined;
   const pid = Number(pidText);
+
   return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
 }
 
@@ -596,6 +756,7 @@ function matchesBrowser(
 ): boolean {
   if (processNames.length === 0) return true;
   const haystack = command.toLowerCase();
+
   return processNames.some((name) => haystack.includes(name.toLowerCase()));
 }
 
@@ -605,8 +766,11 @@ export async function lockOwnerIsBrowser(
   probe: ProcessProbe,
 ): Promise<boolean> {
   const command = await probe(pid);
+
   if (command === null) return false;
+
   if (command === "") return true;
+
   return matchesBrowser(command, processNames);
 }
 
@@ -617,14 +781,19 @@ export async function chromiumSingletonLockIsHeld(
   probe: ProcessProbe,
 ): Promise<boolean> {
   const separator = target.lastIndexOf("-");
+
   if (separator <= 0) return true;
   const host = target.slice(0, separator);
   const pid = parseLockPid(target.slice(separator + 1));
+
   if (pid === undefined) return true;
   const owner = await probe(pid);
+
   if (owner === null) return false;
+
   if (normalizeHost(host) !== normalizeHost(currentHost))
     return owner !== "" && matchesBrowser(owner, processNames);
+
   return owner === "" || matchesBrowser(owner, processNames);
 }
 
@@ -634,9 +803,12 @@ export async function firefoxSymlinkLockIsHeld(
   probe: ProcessProbe,
 ): Promise<boolean> {
   const separator = target.lastIndexOf(":");
+
   if (separator < 0) return true;
   const pid = parseLockPid(target.slice(separator + 1).replace(/^\+/, ""));
+
   if (pid === undefined) return true;
+
   return lockOwnerIsBrowser(pid, processNames, probe);
 }
 
@@ -678,9 +850,11 @@ export async function firefoxParentLockIsHeld(
   } catch {
     return false;
   }
+
   for (const pid of await openFiles(lockPath)) {
     if (await lockOwnerIsBrowser(pid, processNames, probe)) return true;
   }
+
   return false;
 }
 
@@ -691,11 +865,16 @@ export async function isSourceRunning(
   openFiles: OpenFileProbe = probeOpenFile,
 ): Promise<boolean> {
   const root = definition.userDataDirectory(context);
+
   if (root === undefined) return false;
+
   if (definition.engine === "safari") return false;
+
   if (definition.engine === "chromium") {
     const target = await readLinkTarget(join(root, "SingletonLock"));
+
     if (target === undefined) return false;
+
     return chromiumSingletonLockIsHeld(
       target,
       hostname(),
@@ -703,20 +882,25 @@ export async function isSourceRunning(
       probe,
     );
   }
+
   const profiles = await listSourceProfiles(definition, context);
+
   for (const profile of profiles) {
     const directory = resolveProfilePath(
       definition,
       context,
       profile.directory,
     );
+
     if (directory === undefined) continue;
     const target = await readLinkTarget(join(directory, "lock"));
+
     if (
       target !== undefined &&
       (await firefoxSymlinkLockIsHeld(target, definition.processNames, probe))
     )
       return true;
+
     if (
       await firefoxParentLockIsHeld(
         join(directory, ".parentlock"),
@@ -727,6 +911,7 @@ export async function isSourceRunning(
     )
       return true;
   }
+
   return false;
 }
 
@@ -735,6 +920,7 @@ export async function isSourceInstalled(
   context: BrowserImportPathContext,
 ): Promise<boolean> {
   const profiles = await listSourceProfiles(definition, context);
+
   for (const profile of profiles) {
     if (
       (await resolveCookieDatabase(definition, context, profile.directory)) !==
@@ -742,6 +928,7 @@ export async function isSourceInstalled(
     )
       return true;
   }
+
   return false;
 }
 
@@ -750,6 +937,7 @@ export async function resolveInstalledAppPath(
   context: BrowserImportPathContext,
 ): Promise<string | undefined> {
   if (context.platform !== "darwin") return undefined;
+
   for (const name of definition.macAppNames ?? []) {
     for (const root of [
       "/Applications",
@@ -758,6 +946,7 @@ export async function resolveInstalledAppPath(
       "/System/Cryptexes/App/System/Applications",
     ]) {
       const candidate = join(root, name);
+
       try {
         if ((await stat(candidate)).isDirectory()) return candidate;
       } catch {
@@ -765,5 +954,6 @@ export async function resolveInstalledAppPath(
       }
     }
   }
+
   return undefined;
 }

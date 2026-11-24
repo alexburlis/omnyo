@@ -5,8 +5,8 @@ import {
 import type {
   ProviderCliStatus,
   ProviderCliStatusResponse,
-} from "@bb/host-daemon-contract";
-import type { ProviderInfo } from "@bb/domain";
+} from "@omnyo/host-daemon-contract";
+import type { ProviderInfo } from "@omnyo/domain";
 import { ZodError } from "zod";
 import type { WorkSessionDeps } from "../../types.js";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
@@ -22,7 +22,9 @@ import { mapProviderMaintenanceRequests } from "./provider-maintenance-concurren
 export const PROVIDER_INSTALLATION_STATUS_TIMEOUT_MS = 70_000;
 
 type InstallationProvider = Pick<ProviderInfo, "displayName" | "id">;
+
 type ProviderInstallationStatus = Omit<ProviderCliStatus, "displayName">;
+
 type PreparedProviderInstallationRequest = (
   timeoutMs: number,
 ) => Promise<ProviderInstallationStatus | null>;
@@ -38,6 +40,7 @@ interface ProviderInstallationAggregationOptions {
 
 function canOmitProviderInstallationStatusError(error: unknown): boolean {
   if (error instanceof ZodError) return true;
+
   return (
     error instanceof ApiError &&
     !isHostUnavailableApiError(error) &&
@@ -53,18 +56,24 @@ export async function aggregateProviderInstallations(
     providers,
     async (provider): Promise<[string, ProviderCliStatus] | null> => {
       const request = options.prepare(provider);
+
       if (request === null) return null;
       const remainingMs = options.deadlineMs - options.now();
+
       if (remainingMs <= 0) {
         options.onDeadlineExceeded(provider);
+
         return null;
       }
+
       const status = await request(Math.min(COMMAND_TIMEOUT_MS, remainingMs));
+
       return status === null
         ? null
         : [provider.id, { displayName: provider.displayName, ...status }];
     },
   );
+
   return Object.fromEntries(
     entries.filter(
       (entry): entry is [string, ProviderCliStatus] => entry !== null,
@@ -79,6 +88,7 @@ const statusCaches = new WeakMap<
 
 function providerStatusCache(deps: WorkSessionDeps) {
   let cache = statusCaches.get(deps.db);
+
   if (!cache) {
     cache = createAsyncTtlMemo<string, ProviderInstallationStatus>({
       maxEntries: 1_024,
@@ -98,22 +108,38 @@ function providerStatusCache(deps: WorkSessionDeps) {
       }
     });
   }
+
   return cache;
 }
 
 export async function getProviderInstallations(
   deps: WorkSessionDeps,
-  args: { hostId: string },
+  args: { hostId: string; strict?: boolean },
 ): Promise<ProviderCliStatusResponse> {
   const deadline = Date.now() + PROVIDER_INSTALLATION_STATUS_TIMEOUT_MS;
-  const providers = await listSystemProviderInfos(deps, {
-    hostId: args.hostId,
-    capability: "installation",
-  });
+
+  const providers = args.strict
+    ? deps.providerRegistry
+        .list()
+        .filter(
+          (entry) =>
+            entry.info.maintenance.installation &&
+            !deps.providerRegistry.disabledProviderIds().has(entry.info.id),
+        )
+        .map((entry) => entry.info)
+    : await listSystemProviderInfos(deps, {
+        hostId: args.hostId,
+        capability: "installation",
+      });
+
   return aggregateProviderInstallations(providers, {
     deadlineMs: deadline,
     now: Date.now,
     onDeadlineExceeded: (provider) => {
+      if (args.strict)
+        throw new Error(
+          `Provider installation status deadline exceeded for ${provider.id}`,
+        );
       deps.logger.warn(
         {
           failure: "aggregate_deadline_exceeded",
@@ -125,7 +151,10 @@ export async function getProviderInstallations(
     },
     prepare: (provider) => {
       const bridgeLaunch = resolveBridgeLaunchForProviderId(deps, provider.id);
+
       if (bridgeLaunch === null) {
+        if (args.strict)
+          throw new Error(`Provider bridge unavailable for ${provider.id}`);
         deps.logger.warn(
           {
             failure: "bridge_unavailable",
@@ -134,8 +163,10 @@ export async function getProviderInstallations(
           },
           "Failed to load provider installation status; omitting provider",
         );
+
         return null;
       }
+
       return async (timeoutMs) => {
         try {
           return await providerStatusCache(deps).run(
@@ -152,9 +183,12 @@ export async function getProviderInstallations(
               }),
           );
         } catch (error) {
+          if (args.strict) throw error;
+
           if (!canOmitProviderInstallationStatusError(error)) {
             throw error;
           }
+
           deps.logger.warn(
             {
               failure: "status_request_failed",
@@ -163,6 +197,7 @@ export async function getProviderInstallations(
             },
             "Failed to load provider installation status; omitting provider",
           );
+
           return null;
         }
       };
@@ -171,32 +206,41 @@ export async function getProviderInstallations(
 }
 
 const installationTails = new WeakMap<object, Map<string, Promise<void>>>();
+
 export async function serializeProviderInstallation<T>(
   deps: WorkSessionDeps,
   hostId: string,
   run: () => Promise<T>,
 ): Promise<T> {
   let hosts = installationTails.get(deps.db);
+
   if (!hosts) {
     hosts = new Map();
     installationTails.set(deps.db, hosts);
   }
+
   const previous = hosts.get(hostId) ?? Promise.resolve();
   let release: () => void = () => {};
+
   const tail = new Promise<void>((resolve) => {
     release = resolve;
   });
+
   hosts.set(hostId, tail);
   await previous;
   const cache = providerStatusCache(deps);
+
   const invalidate = () =>
     cache.invalidateWhere((key) => key.startsWith(`${hostId} `));
+
   invalidate();
+
   try {
     return await run();
   } finally {
     invalidate();
     release();
+
     if (hosts.get(hostId) === tail) hosts.delete(hostId);
   }
 }

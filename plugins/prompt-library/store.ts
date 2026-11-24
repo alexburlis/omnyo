@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { BbPluginApi, ComposerDraft } from "@get-bb/plugin-sdk";
+import type { PluginApi, ComposerDraft } from "@omnyo/plugin-sdk";
 import { promptSchema } from "./contract.js";
 
-type PluginDatabase = ReturnType<BbPluginApi["storage"]["database"]>;
+type PluginDatabase = ReturnType<PluginApi["storage"]["database"]>;
 
 export const STARRED_PROMPT_MIGRATIONS = [
   `CREATE TABLE starred_prompts (
@@ -30,6 +30,7 @@ interface StarredPromptRecord {
 
 function fromRecord(record: StarredPromptRecord): StarredPrompt {
   const { text, mentions } = promptSchema.parse(JSON.parse(record.prompt_json));
+
   return {
     id: record.id,
     prompt: { text, mentions },
@@ -53,17 +54,21 @@ export function createStarredPromptStore(
        FROM starred_prompts
       ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC`,
   );
+
   const findByTextStatement = db.prepare<[string], StarredPromptRecord>(
     `SELECT id, prompt_json, created_at, last_used_at
        FROM starred_prompts WHERE text = ?`,
   );
+
   const insertStatement = db.prepare(
     `INSERT INTO starred_prompts (id, prompt_json, text, created_at, last_used_at)
      VALUES (?, ?, ?, ?, NULL)`,
   );
+
   const deleteStatement = db.prepare(
     `DELETE FROM starred_prompts WHERE id = ?`,
   );
+
   const markUsedStatement = db.prepare(
     `UPDATE starred_prompts SET last_used_at = ? WHERE id = ?`,
   );
@@ -73,9 +78,11 @@ export function createStarredPromptStore(
     star({ text, mentions }, now) {
       if (text.trim().length === 0) return null;
       const existing = findByTextStatement.get(text);
+
       if (existing !== undefined) return fromRecord(existing);
       const id = `prompt_${randomUUID()}`;
       insertStatement.run(id, JSON.stringify({ text, mentions }), text, now);
+
       return {
         id,
         prompt: { text, mentions },

@@ -6,14 +6,14 @@ import {
   type ReactNode,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import type { ProjectResponse } from "@bb/server-contract";
+import type { ProjectResponse } from "@omnyo/server-contract";
 import { useRouteState } from "@/hooks/useRouteState";
 import {
   useAddLocalProjectSource,
   useDeleteProject,
   useUpdateProject,
 } from "@/hooks/mutations/project-mutations";
-import { useDialogState } from "@bb/shared-ui/use-dialog-state";
+import { useDialogState } from "@omnyo/shared-ui/use-dialog-state";
 import {
   useLocalPathPicker,
   type LocalPathSubmitParams,
@@ -41,11 +41,13 @@ const ProjectActionsContext = createContext<ProjectActionsContextValue | null>(
 
 export function useProjectActions(): ProjectActionsContextValue {
   const value = useContext(ProjectActionsContext);
+
   if (!value) {
     throw new Error(
       "useProjectActions must be used within a <ProjectActionsProvider>",
     );
   }
+
   return value;
 }
 
@@ -81,6 +83,7 @@ export function ProjectActionsProvider({
     },
     [addLocalSourceMutate],
   );
+
   const addLocalSourcePicker = useLocalPathPicker({
     isPending: addLocalSource.isPending,
     submit: addLocalSourceSubmit,
@@ -115,18 +118,14 @@ export function ProjectActionsProvider({
       deleteProjectMutate(projectId, {
         onSuccess: () => {
           closeDeleteDialog();
+
           if (routeProjectId === projectId) {
             navigate(getRootComposeRoutePath(), { replace: true });
           }
         },
       });
     },
-    [
-      closeDeleteDialog,
-      deleteProjectMutate,
-      navigate,
-      routeProjectId,
-    ],
+    [closeDeleteDialog, deleteProjectMutate, navigate, routeProjectId],
   );
 
   const requestAddLocalPath = useCallback(

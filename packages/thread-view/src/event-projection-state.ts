@@ -1,4 +1,4 @@
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import type {
   BuildEventProjectionMessagesOptions,
   EventProjectionMessage,
@@ -35,6 +35,10 @@ import {
 } from "./reasoning-lifecycle-projection.js";
 import { shouldPreservePendingMessages } from "./user-message-parsing.js";
 import type { BackgroundTaskProjectionState } from "./background-task-projection.js";
+import {
+  getVisibleTextBufferText,
+  type VisibleTextBuffer,
+} from "./visible-text-buffer.js";
 
 export interface CompactionTurnFinalization {
   status: CompactionTurnFinalizationStatus;
@@ -45,14 +49,17 @@ type TurnPendingFinalizationStatus = Extract<
   EventProjectionTurnStatus,
   "interrupted"
 >;
+
 interface TurnPendingFinalization {
   completedAt: number;
   status: TurnPendingFinalizationStatus;
 }
+
 export interface PendingDelegationTurnLink {
   callId: string;
   parentTurnId: string;
 }
+
 type TurnCompletedStatus = Extract<
   ThreadEvent,
   { type: "turn/completed" }
@@ -100,6 +107,7 @@ export interface ProjectionState
 
 export function createProjectionState(): ProjectionState {
   const messages: EventProjectionMessage[] = [];
+
   return {
     ...createOperationProjectionState(messages),
     seenUserKeys: new Set(),
@@ -123,10 +131,45 @@ export function createProjectionState(): ProjectionState {
   };
 }
 
+function compactProjectionTextBuffer(buffer: VisibleTextBuffer): void {
+  const visibleText = getVisibleTextBufferText(buffer);
+  buffer.visibleChunks = visibleText === undefined ? [] : [visibleText];
+
+  if (buffer.pendingChunks.length > 1) {
+    buffer.pendingChunks = [buffer.pendingChunks.join("")];
+  }
+}
+
+export function copyProjectionStateForSnapshot(
+  state: ProjectionState,
+): ProjectionState {
+  for (const buffers of [
+    state.assistantTextBuffersByKey,
+    state.reasoningTextBuffersByKey,
+    state.fileEditStdoutBuffersByScopedCallKey,
+  ]) {
+    for (const buffer of buffers.values()) {
+      compactProjectionTextBuffer(buffer);
+    }
+  }
+
+  for (const calls of [
+    state.toolActivity.runningCallsById,
+    state.toolActivity.pendingOutputsByCallId,
+  ]) {
+    for (const call of calls.values()) {
+      compactProjectionTextBuffer(call.outputBuffer);
+    }
+  }
+
+  return structuredClone(state);
+}
+
 function closeOpenTurns(state: ProjectionState): void {
   for (const turnId of state.openTurnIds) {
     state.closedTurnIds.add(turnId);
   }
+
   state.openTurnIds.clear();
 }
 
@@ -137,12 +180,14 @@ export function onTurnStarted(state: ProjectionState, turnId: string): void {
 export function onTurnCompleted(args: CompleteTurnArgs): void {
   args.state.closedTurnIds.add(args.turnId);
   args.state.openTurnIds.delete(args.turnId);
+
   if (args.status === "interrupted") {
     args.state.pendingFinalizationByTurnId.set(args.turnId, {
       completedAt: args.meta.createdAt,
       status: "interrupted",
     });
   }
+
   finalizeOpenReasoningLifecyclesForTurn({
     meta: args.meta,
     state: args.state,
@@ -158,12 +203,14 @@ export function onThreadInterrupted(args: ThreadInterruptedArgs): void {
     meta: args.meta,
     threadId: args.threadId,
   });
+
   for (const turnId of args.state.openTurnIds) {
     args.state.pendingFinalizationByTurnId.set(turnId, {
       completedAt: args.meta.createdAt,
       status: "interrupted",
     });
   }
+
   closeOpenTurns(args.state);
   finalizeOpenReasoningLifecycles({
     meta: args.meta,
@@ -191,10 +238,13 @@ function finalizePendingMessages(args: FinalizeProjectionMessagesArgs): void {
   const shouldPreservePending = shouldPreservePendingMessages(
     args.options?.threadStatus,
   );
+
   const shouldFinalizeBufferedAssistants =
     args.options?.threadStatus !== undefined && !shouldPreservePending;
+
   if (shouldPreservePending) {
     flushActiveToolCell(args.state);
+
     return;
   }
 
@@ -218,6 +268,7 @@ function finalizePendingMessages(args: FinalizeProjectionMessagesArgs): void {
 
   for (const message of args.state.messages) {
     if (message.kind !== "operation") continue;
+
     if (
       args.options?.threadStatus === "idle" &&
       message.opType === "compaction" &&
@@ -226,6 +277,7 @@ function finalizePendingMessages(args: FinalizeProjectionMessagesArgs): void {
     ) {
       continue;
     }
+
     finalizeOperationMessage(message, args.options);
   }
 
@@ -239,6 +291,7 @@ function getMessageTurnFinalization(
   if (message.scope.kind !== "turn") {
     return null;
   }
+
   return pendingFinalizationByTurnId.get(message.scope.turnId) ?? null;
 }
 
@@ -261,27 +314,32 @@ function finalizePendingMessageForInterruptedTurn(
       if (message.status === "pending") {
         message.status = "interrupted";
       }
+
       return;
     case "operation":
       interruptOperationMessage(message);
+
       return;
     case "permission-grant-lifecycle":
       if (message.status === "pending") {
         message.status = "interrupted";
         message.lifecycle = "interrupted";
       }
+
       return;
     case "user-question-lifecycle":
       if (message.status === "pending") {
         message.status = "interrupted";
         message.lifecycle = "interrupted";
       }
+
       return;
     case "plugin-form-lifecycle":
       if (message.status === "pending") {
         message.status = "interrupted";
         message.lifecycle = "cancelled";
       }
+
       return;
     case "assistant-text":
     case "delegation":
@@ -308,9 +366,11 @@ function finalizeInterruptedTurnPendingMessages(state: ProjectionState): void {
       message,
       state.pendingFinalizationByTurnId,
     );
+
     if (!finalization) {
       continue;
     }
+
     finalizePendingMessageForInterruptedTurn(message, finalization);
   }
 }

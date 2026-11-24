@@ -2,14 +2,36 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { Host } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import type { Host } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
+import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@omnyo/client-core";
+import { INERT_TYPEAHEAD_COMMAND_CONFIG } from "./PromptBoxInternal";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   SystemEnvironmentProvider,
   SystemMachineProvider,
-} from "@bb/server-contract";
-import { EnvironmentSlot, ProjectlessMachineSlot } from "./NewThreadPromptBox";
+} from "@omnyo/server-contract";
+import {
+  EnvironmentSlot,
+  NewThreadPromptBoxUI,
+  ProjectlessMachineSlot,
+} from "./NewThreadPromptBox";
+
+vi.mock("@/components/promptbox/dock/NewChatDock", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/components/promptbox/dock/NewChatDock")
+  >()),
+  NewChatDock: () => <div data-testid="launcher-dock" />,
+  NewChatStageDock: () => <div data-testid="stage-dock" />,
+}));
+
+vi.mock("@/components/sidebar/ProjectFace", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/components/sidebar/ProjectFace")
+  >()),
+  ProjectIcon: () => <span data-testid="project-icon" />,
+}));
 
 const host = makeHost({
   id: "host_test",
@@ -19,6 +41,207 @@ const host = makeHost({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+});
+
+describe("NewThreadPromptBoxUI stage input type", () => {
+  const STAGE_LINE_HEIGHT = "leading-(--text-lead--line-height)";
+
+  function renderDocked(dockLayout: "launcher" | "stage") {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TooltipProvider>
+          <NewThreadPromptBoxUI
+            value=""
+            mentionRanges={[]}
+            onChange={vi.fn()}
+            onSubmit={vi.fn()}
+            isSubmitting={false}
+            disabled={false}
+            history={{
+              currentDraft: { text: "", mentions: [], attachments: [] },
+              entries: [],
+              onSelectEntry: vi.fn(),
+            }}
+            typeahead={{
+              mention: {
+                results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
+                isLoading: false,
+                isRefreshing: false,
+                isError: false,
+                onQueryChange: vi.fn(),
+              },
+              command: INERT_TYPEAHEAD_COMMAND_CONFIG,
+            }}
+            attachments={{ items: [], pendingUploads: [], isAttaching: false }}
+            mentionMenuPlacement="bottom"
+            modeConfig={{
+              environment: {
+                value: "",
+                sources: [],
+                host: null,
+                isLocal: false,
+              },
+              worktree: { value: null, options: [], onChange: vi.fn() },
+              permission: {
+                options: [],
+                onChange: vi.fn(),
+                supported: false,
+              },
+            }}
+            project={{ projects: [], value: "proj_a", onChange: vi.fn() }}
+            dock={{
+              where: {
+                machine: { kind: "unresolved" },
+                workspace: { kind: "checkout" },
+              },
+              defaultThreadMachineId: null,
+              rankedProjectIds: [],
+              select: vi.fn(),
+            }}
+            dockLayout={dockLayout}
+            execution={{
+              catalog: { providers: [], verified: true, modelOptions: [] },
+              provider: {},
+              model: {
+                selected: "",
+                options: [],
+                moreOptions: [],
+                isLoading: false,
+                loadFailed: false,
+                onChange: vi.fn(),
+              },
+              reasoning: { value: "medium", options: [], onChange: vi.fn() },
+              selection: { onChange: vi.fn() },
+            }}
+          />
+        </TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    const editorScroll = document.querySelector(
+      "[data-promptbox-editor-scroll]",
+    );
+
+    const shell = editorScroll?.closest("[data-promptbox-shell]");
+
+    if (!(shell instanceof HTMLElement)) throw new Error("Composer missing");
+
+    return shell.className.split(/\s+/u);
+  }
+
+  it("sets the home stage input at the lead size and its 24px line height", () => {
+    const classes = renderDocked("stage");
+
+    expect(screen.getByTestId("stage-dock")).toBeTruthy();
+    expect(classes).toContain("[&_[data-promptbox-editor-scroll]]:text-lead");
+    expect(classes).toContain(
+      `[&_[data-promptbox-editor-scroll]]:${STAGE_LINE_HEIGHT}`,
+    );
+    expect(classes).toContain(
+      `[&_[data-promptbox-editor-scroll]_.ProseMirror]:${STAGE_LINE_HEIGHT}`,
+    );
+    expect(classes).toContain(
+      `[&_[data-promptbox-suggestion]]:${STAGE_LINE_HEIGHT}`,
+    );
+  });
+
+  it("leaves the launcher composer at its own type", () => {
+    const classes = renderDocked("launcher");
+
+    expect(screen.getByTestId("launcher-dock")).toBeTruthy();
+    expect(classes.some((name) => name.includes("text-lead"))).toBe(false);
+  });
+});
+
+describe("NewThreadPromptBoxUI attachment submission", () => {
+  it.each(["", "Review this image"])(
+    "submits immediately while an image uploads with prompt %j",
+    (value) => {
+      const onSubmit = vi.fn();
+      const file = new File(["image"], "screenshot.png", { type: "image/png" });
+
+      render(
+        <QueryClientProvider client={new QueryClient()}>
+          <TooltipProvider>
+            <NewThreadPromptBoxUI
+              value={value}
+              mentionRanges={[]}
+              onChange={vi.fn()}
+              onSubmit={onSubmit}
+              isSubmitting={false}
+              disabled={false}
+              history={{
+                currentDraft: { text: value, mentions: [], attachments: [] },
+                entries: [],
+                onSelectEntry: vi.fn(),
+              }}
+              typeahead={{
+                mention: {
+                  results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
+                  isLoading: false,
+                  isRefreshing: false,
+                  isError: false,
+                  onQueryChange: vi.fn(),
+                },
+                command: INERT_TYPEAHEAD_COMMAND_CONFIG,
+              }}
+              attachments={{
+                items: [],
+                pendingUploads: [
+                  {
+                    id: "image-upload",
+                    file,
+                  },
+                ],
+                isAttaching: true,
+              }}
+              mentionMenuPlacement="bottom"
+              modeConfig={{
+                environment: {
+                  value: "",
+                  sources: [],
+                  host: null,
+                  isLocal: false,
+                },
+                worktree: { value: null, options: [], onChange: vi.fn() },
+                permission: {
+                  options: [],
+                  onChange: vi.fn(),
+                  supported: false,
+                },
+              }}
+              execution={{
+                catalog: { providers: [], verified: true, modelOptions: [] },
+                provider: {},
+                model: {
+                  selected: "",
+                  options: [],
+                  moreOptions: [],
+                  isLoading: false,
+                  loadFailed: false,
+                  onChange: vi.fn(),
+                },
+                reasoning: { value: "medium", options: [], onChange: vi.fn() },
+                selection: { onChange: vi.fn() },
+              }}
+            />
+          </TooltipProvider>
+        </QueryClientProvider>,
+      );
+
+      const submit = document.querySelector(
+        "button[data-promptbox-submit-action]",
+      );
+
+      if (!(submit instanceof HTMLButtonElement))
+        throw new Error("Submit button missing");
+      expect(submit).toHaveProperty("disabled", false);
+      fireEvent.click(submit);
+      expect(onSubmit).toHaveBeenCalledOnce();
+      fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+      expect(onSubmit).toHaveBeenCalledTimes(2);
+    },
+  );
 });
 
 describe("ProjectlessMachineSlot", () => {
@@ -91,7 +314,7 @@ describe("ProjectlessMachineSlot", () => {
     expect(screen.queryByRole("button", { name: "Machine" })).toBeNull();
   });
 
-  it("renders no chip with a single host", () => {
+  it("keeps the selected machine discoverable with a single host", () => {
     render(
       <ProjectlessMachineSlot
         environment={makeEnvironment({
@@ -104,7 +327,7 @@ describe("ProjectlessMachineSlot", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Machine" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Machine" })).toBeTruthy();
   });
 
   it("counts provider-made machines in the projectless machine chip", () => {
@@ -114,6 +337,7 @@ describe("ProjectlessMachineSlot", () => {
       type: "ephemeral",
       machineProviderId: "modal-sandbox",
     });
+
     render(
       <ProjectlessMachineSlot
         environment={makeEnvironment({
@@ -283,6 +507,7 @@ describe("EnvironmentSlot", () => {
         worktree={makeWorktree()}
       />,
     );
+
     expect(screen.getByRole("button", { name: "Environment" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Machine" })).toBeNull();
     rerender(
@@ -360,11 +585,14 @@ describe("EnvironmentSlot", () => {
         projectless: false,
       },
     };
+
     const environment = makeEnvironment({
       value: "reuse:env_personal",
       providers: [personalProvider, projectProvider],
     });
+
     const queryClient = new QueryClient();
+
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
         <EnvironmentSlot
@@ -374,6 +602,7 @@ describe("EnvironmentSlot", () => {
         />
       </QueryClientProvider>,
     );
+
     const trigger = screen.getAllByRole("button", { name: "Environment" })[0];
     fireEvent.click(trigger!);
     expect(screen.getByRole("dialog", { name: "Environment" })).toBeTruthy();
@@ -399,7 +628,9 @@ describe("EnvironmentSlot", () => {
       providers: [personalProvider],
       isLoading: true,
     });
+
     const queryClient = new QueryClient();
+
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
         <EnvironmentSlot
@@ -409,6 +640,7 @@ describe("EnvironmentSlot", () => {
         />
       </QueryClientProvider>,
     );
+
     const trigger = screen.getByRole("button", { name: "Environment" });
     fireEvent.click(trigger);
     expect(screen.getByRole("dialog", { name: "Environment" })).toBeTruthy();

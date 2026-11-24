@@ -1,5 +1,5 @@
 import { createContext, type ReactNode } from "react";
-import type { WorkspaceOpenTarget } from "@bb/host-daemon-contract";
+import type { WorkspaceOpenTarget } from "@omnyo/host-daemon-contract";
 import type { MarkdownPreviewLinkHandler } from "./markdown-link.js";
 import type {
   MarkdownAbsoluteLocalFileLinkRouting,
@@ -62,6 +62,7 @@ export interface MarkdownLocalImageRouting {
 }
 
 export interface MarkdownLinkRouting {
+  previewThreadId?: string;
   localFile?: MarkdownLocalFileLinkRouting;
   localImage?: MarkdownLocalImageRouting;
   onOpenLink?: MarkdownPreviewLinkHandler;

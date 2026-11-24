@@ -35,18 +35,22 @@ export function parseProviderBridgeEntry(
       problem: `exports no "${PROVIDER_BRIDGE_EXPORT_NAME}"`,
     };
   }
+
   const candidate = value as Partial<ProviderBridgeEntry>;
+
   if (candidate.experimental_apiVersion !== 1) {
     return {
       entry: null,
       problem: `exports "${PROVIDER_BRIDGE_EXPORT_NAME}" with unsupported apiVersion ${String(candidate.experimental_apiVersion)} (expected 1) — build it with experimental_defineProviderBridge()`,
     };
   }
+
   if (typeof candidate.handleLine !== "function") {
     return {
       entry: null,
       problem: `exports "${PROVIDER_BRIDGE_EXPORT_NAME}" without a handleLine function`,
     };
   }
+
   return { entry: candidate as ProviderBridgeEntry, problem: null };
 }

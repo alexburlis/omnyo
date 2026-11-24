@@ -4,9 +4,11 @@ import { createPendingToolCallTracker } from "./pending-tool-call-tracker.js";
 
 function createTracker() {
   const sent: BridgeToolCallRequest[] = [];
+
   const tracker = createPendingToolCallTracker({
     sendToolCall: (request) => sent.push(request),
   });
+
   return { sent, tracker };
 }
 
@@ -49,6 +51,7 @@ describe("createPendingToolCallTracker", () => {
 
   it("settles a pending call from an error response", async () => {
     const { tracker } = createTracker();
+
     const result = tracker.forwardToolCall({
       arguments: {},
       providerThreadId: "provider-1",
@@ -83,11 +86,13 @@ describe("createPendingToolCallTracker", () => {
       threadId: "thread-1",
       toolName: "my_tool",
     });
+
     const response = {
       jsonrpc: "2.0",
       id: 1,
       result: { success: true, contentItems: [] },
     } as const;
+
     expect(tracker.handleToolCallResponse(response)).toBe(true);
     expect(tracker.handleToolCallResponse(response)).toBe(false);
   });
@@ -96,6 +101,7 @@ describe("createPendingToolCallTracker", () => {
     const { tracker } = createTracker();
     const sessionA = {};
     const sessionB = {};
+
     const resultA = tracker.forwardToolCall({
       arguments: {},
       providerThreadId: "provider-a",
@@ -103,6 +109,7 @@ describe("createPendingToolCallTracker", () => {
       threadId: "thread-a",
       toolName: "my_tool",
     });
+
     const resultB = tracker.forwardToolCall({
       arguments: {},
       providerThreadId: "provider-b",
@@ -143,6 +150,7 @@ describe("createPendingToolCallTracker send failures", () => {
         throw new Error("transport closed");
       },
     });
+
     const scope = {};
 
     const result = await tracker.forwardToolCall({
@@ -152,14 +160,17 @@ describe("createPendingToolCallTracker send failures", () => {
       threadId: "thread-1",
       toolName: "my_tool",
     });
+
     expect(result).toEqual({ content: "transport closed", isError: true });
 
     tracker.resolvePendingToolCalls(scope, "closing");
+
     const response = tracker.handleToolCallResponse({
       jsonrpc: "2.0",
       id: 1,
       result: { content: "late" },
     });
+
     expect(response).toBe(false);
   });
 });

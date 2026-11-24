@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { makeHost as host } from "@bb/test-helpers/domain-fixtures";
+import { makeHost as host } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectPathDialog } from "./ProjectPathDialog";
 
@@ -34,12 +34,15 @@ vi.mock("@/components/dialogs/RemotePathBrowser", () => ({
 }));
 
 const atum = host({ id: "host_atum", name: "atum" });
+
 const kunst = host({ id: "host_kunst", name: "Kunst" });
+
 const offline = host({
   id: "host_offline",
   name: "Offline Mac",
   status: "disconnected",
 });
+
 const offlineKunst = host({ ...kunst, status: "disconnected" });
 
 afterEach(() => {

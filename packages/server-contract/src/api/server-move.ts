@@ -2,7 +2,7 @@ import {
   lastServerMoveSchema,
   serverMoveModeSchema,
   serverMoveStepIdSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { z } from "zod";
 
 export const serverMoveStepStatusSchema = z.enum([
@@ -12,6 +12,7 @@ export const serverMoveStepStatusSchema = z.enum([
   "failed",
   "skipped",
 ]);
+
 export type ServerMoveStepStatus = z.infer<typeof serverMoveStepStatusSchema>;
 
 export const serverMoveStepSchema = z
@@ -21,6 +22,7 @@ export const serverMoveStepSchema = z
     message: z.string().nullable(),
   })
   .strict();
+
 export type ServerMoveStep = z.infer<typeof serverMoveStepSchema>;
 
 export const serverMoveStateSchema = z.enum([
@@ -31,6 +33,7 @@ export const serverMoveStateSchema = z.enum([
   "failed",
   "cancelled",
 ]);
+
 export type ServerMoveState = z.infer<typeof serverMoveStateSchema>;
 
 export const serverMoveStatusSchema = z
@@ -55,6 +58,7 @@ export const serverMoveStatusSchema = z
     cancellable: z.boolean(),
   })
   .strict();
+
 export type ServerMoveStatus = z.infer<typeof serverMoveStatusSchema>;
 
 export const serverMoveStatusResponseSchema = z
@@ -63,6 +67,7 @@ export const serverMoveStatusResponseSchema = z
     lastMove: lastServerMoveSchema.nullable(),
   })
   .strict();
+
 export type ServerMoveStatusResponse = z.infer<
   typeof serverMoveStatusResponseSchema
 >;
@@ -73,6 +78,7 @@ export const serverMoveCheckRequestSchema = z
     serverUrl: z.string().min(1).nullable(),
   })
   .strict();
+
 export type ServerMoveCheckRequest = z.infer<
   typeof serverMoveCheckRequestSchema
 >;
@@ -82,6 +88,7 @@ export const serverMoveCheckSeveritySchema = z.enum([
   "warning",
   "info",
 ]);
+
 export type ServerMoveCheckSeverity = z.infer<
   typeof serverMoveCheckSeveritySchema
 >;
@@ -94,6 +101,7 @@ export const serverMoveCheckItemSchema = z
     detail: z.string().nullable(),
   })
   .strict();
+
 export type ServerMoveCheckItem = z.infer<typeof serverMoveCheckItemSchema>;
 
 export const serverMoveCheckResponseSchema = z
@@ -115,6 +123,7 @@ export const serverMoveCheckResponseSchema = z
     canMove: z.boolean(),
   })
   .strict();
+
 export type ServerMoveCheckResponse = z.infer<
   typeof serverMoveCheckResponseSchema
 >;
@@ -125,8 +134,13 @@ export const serverMoveStartRequestSchema = z
     serverUrl: z.string().min(1).nullable(),
     stopRunningWork: z.literal(true),
     archiveExistingTargetServerData: z.boolean(),
+    startupOwnership: z
+      .object({ id: z.string().min(1), ownerId: z.string().min(1) })
+      .strict()
+      .optional(),
   })
   .strict();
+
 export type ServerMoveStartRequest = z.infer<
   typeof serverMoveStartRequestSchema
 >;
@@ -136,6 +150,7 @@ export const deleteOldServerCopyResponseSchema = z
     deleted: z.boolean(),
   })
   .strict();
+
 export type DeleteOldServerCopyResponse = z.infer<
   typeof deleteOldServerCopyResponseSchema
 >;

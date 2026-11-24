@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { WorkspaceDiffTarget } from "@bb/domain";
+import type { WorkspaceDiffTarget } from "@omnyo/domain";
 import {
   DIFF_PATCH_MAX_PATHS_PER_REQUEST,
   type DiffPatchEntry,
   type EnvironmentDiffPatchResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { sdk } from "@/lib/sdk";
-import { extractErrorMessage } from "@bb/core-ui";
+import { extractErrorMessage } from "@omnyo/core-ui";
 import {
   type PatchQueryIdentity,
   getDiffPatchEvictionGeneration,
@@ -41,10 +41,15 @@ interface UseEnvironmentDiffPatchesArgs {
 }
 
 type RequestDiffPatchPaths = (args: RequestDiffPatchPathsArgs) => void;
+
 type GetDiffPatchState = (path: string) => DiffPatchState;
+
 export type RetryDiffPatchPath = (path: string) => void;
+
 export type LoadDiffPatchPath = (path: string) => void;
+
 type SeedDiffPatchEntries = (entries: DiffPatchEntry[]) => void;
+
 type PruneDiffPatchEntries = (paths: readonly string[]) => void;
 
 interface UseEnvironmentDiffPatchesResult {
@@ -77,6 +82,7 @@ function abortPatchRequests(controllers: Set<AbortController>): void {
   for (const controller of controllers) {
     controller.abort();
   }
+
   controllers.clear();
 }
 
@@ -87,18 +93,22 @@ function isAbortError(error: unknown): boolean {
 function dedupeOrderedPaths(args: PendingPaths): string[] {
   const seen = new Set<string>();
   const ordered: string[] = [];
+
   for (const path of [...args.visible, ...args.overscan]) {
     if (seen.has(path)) {
       continue;
     }
+
     seen.add(path);
     ordered.push(path);
   }
+
   return ordered;
 }
 
 function chunkPaths(paths: string[]): string[][] {
   const pages: string[][] = [];
+
   for (
     let index = 0;
     index < paths.length;
@@ -106,6 +116,7 @@ function chunkPaths(paths: string[]): string[][] {
   ) {
     pages.push(paths.slice(index, index + DIFF_PATCH_MAX_PATHS_PER_REQUEST));
   }
+
   return pages;
 }
 
@@ -121,6 +132,7 @@ function patchPageError(
       return response.failure.message;
     default: {
       const _exhaustive: never = response;
+
       return _exhaustive;
     }
   }
@@ -148,6 +160,7 @@ export function useEnvironmentDiffPatches(
     visible: [],
     overscan: [],
   });
+
   const targetIdentityRef = useRef(targetIdentity);
   const inFlightRef = useRef(inFlight);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -160,20 +173,24 @@ export function useEnvironmentDiffPatches(
   useEffect(() => {
     targetIdentityRef.current = targetIdentity;
     pendingPathsRef.current = { visible: [], overscan: [] };
+
     if (debounceTimerRef.current !== null) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
+
     abortPatchRequests(abortControllersRef.current);
     setInFlight(EMPTY_IN_FLIGHT);
   }, [targetIdentity]);
 
   useEffect(() => {
     const abortControllers = abortControllersRef.current;
+
     return () => {
       if (debounceTimerRef.current !== null) {
         clearTimeout(debounceTimerRef.current);
       }
+
       abortPatchRequests(abortControllers);
     };
   }, []);
@@ -182,6 +199,7 @@ export function useEnvironmentDiffPatches(
     if (!environmentId) {
       return;
     }
+
     return retainDiffPatchQueries({ queryClient, environmentId });
   }, [environmentId, queryClient]);
 
@@ -194,9 +212,11 @@ export function useEnvironmentDiffPatches(
       if (!environmentId || target === undefined) {
         return;
       }
+
       const evictionGeneration = getDiffPatchEvictionGeneration(environmentId);
       const controller = new AbortController();
       abortControllersRef.current.add(controller);
+
       try {
         const response = await sdk.environments.diffPatch({
           environmentId,
@@ -204,12 +224,15 @@ export function useEnvironmentDiffPatches(
           paths,
           signal: controller.signal,
         });
+
         if (controller.signal.aborted) {
           return;
         }
+
         if (targetIdentityRef.current !== generationTarget) {
           return;
         }
+
         if (
           getDiffPatchEvictionGeneration(environmentId) !==
             evictionGeneration ||
@@ -218,10 +241,13 @@ export function useEnvironmentDiffPatches(
           setInFlight((previous) =>
             clearLoading(previous, paths, freshnessGeneration),
           );
+
           return;
         }
+
         if (response.outcome === "available") {
           const returnedPaths = new Set<string>();
+
           for (const entry of response.patches) {
             writeDiffPatchEntry({
               queryClient,
@@ -231,6 +257,7 @@ export function useEnvironmentDiffPatches(
             });
             returnedPaths.add(entry.path);
           }
+
           setInFlight((previous) =>
             settlePage({
               previous,
@@ -253,9 +280,11 @@ export function useEnvironmentDiffPatches(
         if (isAbortError(caught) || controller.signal.aborted) {
           return;
         }
+
         if (targetIdentityRef.current !== generationTarget) {
           return;
         }
+
         if (
           getDiffPatchEvictionGeneration(environmentId) !==
             evictionGeneration ||
@@ -264,10 +293,13 @@ export function useEnvironmentDiffPatches(
           setInFlight((previous) =>
             clearLoading(previous, paths, freshnessGeneration),
           );
+
           return;
         }
+
         const message =
           extractErrorMessage(caught) ?? "Failed to load file diff";
+
         setInFlight((previous) =>
           settlePage({
             previous,
@@ -285,16 +317,20 @@ export function useEnvironmentDiffPatches(
 
   const dispatchPending = useCallback(() => {
     debounceTimerRef.current = null;
+
     if (!environmentId || target === undefined) {
       return;
     }
+
     if (targetIdentityRef.current !== targetIdentity) {
       return;
     }
+
     const ordered = dedupeOrderedPaths(pendingPathsRef.current);
 
     const currentFreshnessGeneration =
       getDiffPatchFreshnessGeneration(environmentId);
+
     const toFetch = ordered.filter((path) => {
       if (
         readDiffPatchEntry({ queryClient, identity, path }) !== undefined &&
@@ -302,6 +338,7 @@ export function useEnvironmentDiffPatches(
       ) {
         return false;
       }
+
       if (
         isLoadingForCurrentGeneration(
           inFlightRef.current.loading,
@@ -311,12 +348,14 @@ export function useEnvironmentDiffPatches(
       ) {
         return false;
       }
+
       if (
         inFlightRef.current.errors.get(path)?.generation ===
         currentFreshnessGeneration
       ) {
         return false;
       }
+
       return true;
     });
 
@@ -339,9 +378,11 @@ export function useEnvironmentDiffPatches(
         visible: args.visible,
         overscan: args.overscan,
       };
+
       if (debounceTimerRef.current !== null) {
         clearTimeout(debounceTimerRef.current);
       }
+
       debounceTimerRef.current = setTimeout(
         dispatchPending,
         PATCH_REQUEST_DEBOUNCE_MS,
@@ -374,12 +415,14 @@ export function useEnvironmentDiffPatches(
     (path: string) => {
       const currentFreshnessGeneration =
         getDiffPatchFreshnessGeneration(environmentId);
+
       if (
         readDiffPatchEntry({ queryClient, identity, path }) !== undefined &&
         isDiffPatchEntryFresh({ queryClient, identity, path })
       ) {
         return;
       }
+
       if (
         isLoadingForCurrentGeneration(
           inFlightRef.current.loading,
@@ -391,6 +434,7 @@ export function useEnvironmentDiffPatches(
       ) {
         return;
       }
+
       loadPathNow(path);
     },
     [environmentId, queryClient, identity, loadPathNow],
@@ -399,6 +443,7 @@ export function useEnvironmentDiffPatches(
   const getPatchState = useCallback(
     (path: string): DiffPatchState => {
       const cached = readDiffPatchEntry({ queryClient, identity, path });
+
       if (cached !== undefined) {
         return {
           status: "loaded",
@@ -406,15 +451,19 @@ export function useEnvironmentDiffPatches(
           truncated: cached.truncated,
         };
       }
+
       const error = inFlight.errors.get(path);
+
       if (
         error?.generation === getDiffPatchFreshnessGeneration(environmentId)
       ) {
         return { status: "error", error: error.message };
       }
+
       if (inFlight.loading.has(path)) {
         return { status: "loading" };
       }
+
       return IDLE_STATE;
     },
     [queryClient, identity, inFlight, environmentId],
@@ -423,20 +472,24 @@ export function useEnvironmentDiffPatches(
   const seedInitialPatches = useCallback(
     (entries: DiffPatchEntry[]) => {
       let changed = false;
+
       for (const entry of entries) {
         const previous = readDiffPatchEntry({
           queryClient,
           identity,
           path: entry.path,
         });
+
         if (
           previous?.patch !== entry.patch ||
           previous.truncated !== entry.truncated
         ) {
           changed = true;
         }
+
         writeDiffPatchEntry({ queryClient, identity, entry });
       }
+
       if (changed) {
         setPatchCacheRevision((revision) => revision + 1);
       }
@@ -468,10 +521,12 @@ function markLoading(
 ): InFlightState {
   const loading = new Map(previous.loading);
   const errors = new Map(previous.errors);
+
   for (const path of paths) {
     loading.set(path, loadingGeneration);
     errors.delete(path);
   }
+
   return { loading, errors };
 }
 
@@ -481,6 +536,7 @@ function isLoadingForCurrentGeneration(
   currentEvictionGeneration: number,
 ): boolean {
   const loadingGeneration = loading.get(path);
+
   return (
     loadingGeneration !== undefined &&
     loadingGeneration >= currentEvictionGeneration
@@ -506,10 +562,12 @@ function settlePage({
 }: SettlePageArgs): InFlightState {
   const loading = new Map(previous.loading);
   const errors = new Map(previous.errors);
+
   for (const path of paths) {
     if (loading.get(path) === loadingGeneration) {
       loading.delete(path);
     }
+
     if (error !== undefined) {
       errors.set(path, { generation: loadingGeneration, message: error });
     } else if (returnedPaths !== undefined && !returnedPaths.has(path)) {
@@ -521,6 +579,7 @@ function settlePage({
       errors.delete(path);
     }
   }
+
   return { loading, errors };
 }
 
@@ -528,8 +587,10 @@ function clearError(previous: InFlightState, path: string): InFlightState {
   if (!previous.errors.has(path)) {
     return previous;
   }
+
   const errors = new Map(previous.errors);
   errors.delete(path);
+
   return { loading: previous.loading, errors };
 }
 
@@ -541,11 +602,14 @@ function clearLoading(
   if (!paths.some((path) => previous.loading.get(path) === loadingGeneration)) {
     return previous;
   }
+
   const loading = new Map(previous.loading);
+
   for (const path of paths) {
     if (loading.get(path) === loadingGeneration) {
       loading.delete(path);
     }
   }
+
   return { loading, errors: previous.errors };
 }

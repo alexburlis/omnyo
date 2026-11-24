@@ -1,7 +1,7 @@
 import {
   type DynamicTool,
   experimental_buildBridgeToolCallContent,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
@@ -9,7 +9,8 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { BB_BRIDGE_MCP_SERVER_NAME } from "../tool-classification.js";
+import { CLAUDE_USER_QUESTION_TOOL_NAME } from "../interactive-contract.js";
+import { OMNYO_BRIDGE_MCP_SERVER_NAME } from "../tool-classification.js";
 
 type BridgeToolCallContent =
   | { type: "text"; text: string }
@@ -29,19 +30,25 @@ export function buildBridgeMcpServer(
   forwardToolCall: ToolCallForwarder,
 ): McpSdkServerConfigWithInstance {
   const toolsByName = new Map(dynamicTools.map((def) => [def.name, def]));
+
   const instance = new McpServer(
-    { name: BB_BRIDGE_MCP_SERVER_NAME, version: "1.0.0" },
+    { name: OMNYO_BRIDGE_MCP_SERVER_NAME, version: "1.0.0" },
     { capabilities: { tools: {} } },
   );
+
   instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: dynamicTools.map((def) => ({
       name: def.name,
       description: def.description,
       inputSchema: normalizeInputSchema(def.inputSchema),
+      ...(def.name === CLAUDE_USER_QUESTION_TOOL_NAME
+        ? { _meta: { "anthropic/alwaysLoad": true } }
+        : {}),
     })),
   }));
   instance.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const def = toolsByName.get(request.params.name);
+
     if (def === undefined) {
       return {
         content: [
@@ -53,22 +60,29 @@ export function buildBridgeMcpServer(
         isError: true,
       };
     }
+
     const result = await forwardToolCall(
       def.name,
       request.params.arguments ?? {},
     );
+
     return {
       content: experimental_buildBridgeToolCallContent(result),
       ...(result.isError ? { isError: true } : {}),
     };
   });
-  return { type: "sdk", name: BB_BRIDGE_MCP_SERVER_NAME, instance };
+
+  return { type: "sdk", name: OMNYO_BRIDGE_MCP_SERVER_NAME, instance };
 }
 
-export function getAllowedToolNames(dynamicTools: DynamicTool[]): string[] {
-  return dynamicTools.map(
-    (def) => `mcp__${BB_BRIDGE_MCP_SERVER_NAME}__${def.name}`,
-  );
+export function getBridgeToolName(name: string): string {
+  return `mcp__${OMNYO_BRIDGE_MCP_SERVER_NAME}__${name}`;
+}
+
+export function getAllowedToolNames(
+  dynamicTools: readonly DynamicTool[],
+): string[] {
+  return dynamicTools.map((def) => getBridgeToolName(def.name));
 }
 
 function normalizeInputSchema(
@@ -82,5 +96,6 @@ function normalizeInputSchema(
   ) {
     return inputSchema as Record<string, unknown> & { type: "object" };
   }
+
   return { type: "object" };
 }

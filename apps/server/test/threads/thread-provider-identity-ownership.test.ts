@@ -1,5 +1,5 @@
-import { listEvents, listQueuedThreadMessages } from "@bb/db";
-import { threadScope, turnScope, type PromptInput } from "@bb/domain";
+import { listEvents, listQueuedThreadMessages } from "@omnyo/db";
+import { threadScope, turnScope, type PromptInput } from "@omnyo/domain";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../src/errors.js";
 import { runQueuedMessageDispatch } from "../../src/services/threads/queued-message-dispatch.js";
@@ -10,6 +10,7 @@ import {
 } from "../helpers/commands.js";
 import {
   type HostRpcHandlerResult,
+  currentWorkspaceIdentity,
   registerHostRpcResponder,
   EMPTY_WORKSPACE_AGENT_CONTEXT,
 } from "../helpers/host-rpc.js";
@@ -27,31 +28,38 @@ import {
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
 const OWN_SESSION = "session-alpha";
+
 const FOREIGN_SESSION = "session-beta";
+
 const BATCH_AT = 1_787_775_164_121;
 
 function seedThreads(harness: TestAppHarness) {
   const { host, session } = seedHostSession(harness.deps);
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: "/tmp/identity-ownership",
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: "/tmp/identity-ownership",
     status: "ready",
   });
+
   const first = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
     status: "idle",
   });
+
   const second = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
     status: "idle",
   });
+
   return { environment, first, host, second, session };
 }
 
@@ -104,6 +112,7 @@ function seedArchivedConcurrentStartPair(
     createdAt: BATCH_AT,
     sequence: 3,
   });
+
   for (const threadId of [args.earlyId, args.lateId]) {
     seedThreadIdentity(harness.deps, {
       threadId,
@@ -113,6 +122,7 @@ function seedArchivedConcurrentStartPair(
       sequence: 6,
     });
   }
+
   seedStampedTurn(harness, {
     createdAt: BATCH_AT + 119,
     environmentId: args.environmentId,
@@ -184,17 +194,20 @@ async function expectProviderSessionUnavailable(
     () => null,
     (reason: unknown) => reason,
   );
+
   expect(error).toBeInstanceOf(ApiError);
+
   if (!(error instanceof ApiError)) {
     return;
   }
+
   expect(error.status).toBe(409);
   expect(error.body).toMatchObject({
     code: "provider_session_unavailable",
     details,
   });
   expect(error.body.message).toContain(
-    "Clear context (/clear or bb thread clear) for a new session; history is kept.",
+    "Clear context (/clear or omnyo thread clear) for a new session; history is kept.",
   );
 }
 
@@ -206,6 +219,7 @@ describe("provider session ownership on dispatch", () => {
         first: owner,
         second: contaminated,
       } = seedThreads(harness);
+
       seedThreadIdentity(harness.deps, {
         threadId: owner.id,
         environmentId: environment.id,
@@ -242,6 +256,7 @@ describe("provider session ownership on dispatch", () => {
           candidate.command.type === "turn.submit" &&
           candidate.command.threadId === contaminated.id,
       );
+
       expect(queued.command).toMatchObject({
         type: "turn.submit",
         resumeContext: { providerThreadId: OWN_SESSION },
@@ -300,6 +315,7 @@ describe("provider session ownership on dispatch", () => {
         second: contaminated,
         session,
       } = seedThreads(harness);
+
       seedThreadIdentity(harness.deps, {
         threadId: owner.id,
         environmentId: environment.id,
@@ -314,6 +330,7 @@ describe("provider session ownership on dispatch", () => {
         createdAt: BATCH_AT + 140,
         sequence: 1,
       });
+
       const responder = registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -328,6 +345,11 @@ describe("provider session ownership on dispatch", () => {
               };
             case "turn.submit":
               return { ok: true, result: { trace: { spans: [] } } };
+            case "host.prepare_workspace_identity_v1":
+              return {
+                ok: true,
+                result: currentWorkspaceIdentity(command.rootPath),
+              };
             case "host.read_workspace_agent_context":
               return { ok: true, result: EMPTY_WORKSPACE_AGENT_CONTEXT };
             default:
@@ -335,6 +357,7 @@ describe("provider session ownership on dispatch", () => {
           }
         },
       });
+
       const eventsBefore = listEvents(harness.db, {
         threadId: contaminated.id,
       });
@@ -363,6 +386,7 @@ describe("provider session ownership on dispatch", () => {
         thread: contaminated,
       });
       await sendUserMessage(harness, { environment, thread: contaminated });
+
       const dispatchedFor = (threadId: string) =>
         responder.requests
           .map(({ command }) => command)
@@ -372,6 +396,7 @@ describe("provider session ownership on dispatch", () => {
                 command.type === "turn.submit") &&
               command.threadId === threadId,
           );
+
       await vi.waitFor(() => {
         expect(dispatchedFor(contaminated.id)).toHaveLength(1);
       });
@@ -421,11 +446,13 @@ describe("provider session ownership on dispatch", () => {
           claimantThreadIds: [early.id],
         },
       );
+
       for (const type of ["thread.start", "turn.submit"] as const) {
         for (const threadId of [early.id, late.id]) {
           expect(listQueuedThreadCommands(harness, type, threadId)).toEqual([]);
         }
       }
+
       expect(listEvents(harness.db, { threadId: early.id })).toEqual(
         earlyEvents,
       );
@@ -441,6 +468,7 @@ describe("provider session ownership on dispatch", () => {
         earlyId: early.id,
         lateId: late.id,
       });
+
       const queued = seedQueuedMessage(harness.deps, {
         threadId: early.id,
         content: textInput("Queued follow-up"),
@@ -454,8 +482,9 @@ describe("provider session ownership on dispatch", () => {
       const [row] = listQueuedThreadMessages(harness.db, early.id);
       expect(row?.id).toBe(queued.id);
       expect(row?.failureReason).toBe(
-        "Another thread claimed this thread's provider session in the same millisecond, so bb will not guess whose it is. Clear context (/clear or bb thread clear) for a new session; history is kept.",
+        "Another thread claimed this thread's provider session in the same millisecond, so Omnyo will not guess whose it is. Clear context (/clear or omnyo thread clear) for a new session; history is kept.",
       );
+
       for (const type of ["thread.start", "turn.submit"] as const) {
         expect(listQueuedThreadCommands(harness, type, early.id)).toEqual([]);
       }

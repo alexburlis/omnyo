@@ -45,6 +45,7 @@ interface UseSidebarModeSectionOrderArgs {
   hasThreadsSection?: boolean;
   mode: SidebarOrganizationMode;
   showPinnedSection: boolean;
+  showShelfSection: boolean;
 }
 
 interface UseSidebarModeSectionOrderResult {
@@ -58,14 +59,17 @@ export function useSidebarModeSectionOrder({
   hasThreadsSection,
   mode,
   showPinnedSection,
+  showShelfSection,
 }: UseSidebarModeSectionOrderArgs): UseSidebarModeSectionOrderResult {
   const config = MODE_SECTION_ORDER_CONFIG[mode];
   const [storedOrder, setStoredOrder] = useAtom(config.atom);
   const hiddenGroups = useAtomValue(sidebarHiddenGroupsAtom);
+
   const hiddenGroupIds = useMemo(
     () => new Set<string>(hiddenGroups),
     [hiddenGroups],
   );
+
   const persistedOrder = useMemo(
     () =>
       normalizeSidebarSectionOrder({
@@ -82,15 +86,18 @@ export function useSidebarModeSectionOrder({
       storedOrder,
     ],
   );
+
   const order = useMemo(
     () =>
       persistedOrder.filter(
         (sectionId) =>
           (sectionId !== "pinned" || showPinnedSection) &&
+          (sectionId !== "shelf" || showShelfSection) &&
           !hiddenGroupIds.has(sectionId),
       ),
-    [hiddenGroupIds, persistedOrder, showPinnedSection],
+    [hiddenGroupIds, persistedOrder, showPinnedSection, showShelfSection],
   );
+
   const onOrderChange = useCallback(
     (nextOrder: SidebarSectionId[]) => {
       const nextIds = new Set(nextOrder);
@@ -103,6 +110,7 @@ export function useSidebarModeSectionOrder({
               id.slice(config.entityKind.length + 1),
             ),
           );
+
         const fullOrder = normalizeSidebarSectionOrder({
           storedOrder: current,
           entitySectionIds: [...entitySectionIds, ...storedEntityIds],
@@ -111,6 +119,7 @@ export function useSidebarModeSectionOrder({
           hasThreadsSection:
             hasThreadsSection !== false || current.includes("threads"),
         });
+
         return (
           reorderStoredOrder({
             order: fullOrder,
@@ -122,5 +131,6 @@ export function useSidebarModeSectionOrder({
     },
     [config, entitySectionIds, hasThreadsSection, setStoredOrder],
   );
+
   return { onOrderChange, order, persistedOrder };
 }

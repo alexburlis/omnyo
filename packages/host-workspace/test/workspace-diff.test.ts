@@ -4,22 +4,26 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Workspace } from "../src/workspace.js";
 import { runGit } from "../src/git.js";
-import type { RawDiffFileStat, WorkspaceDiffTarget } from "@bb/domain";
+import type { RawDiffFileStat, WorkspaceDiffTarget } from "@omnyo/domain";
 
 const tempDirs: string[] = [];
 
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
+
   return dir;
 }
 
 async function initRepo(): Promise<string> {
-  const repoPath = await makeTempDir("bb-diff-repo-");
+  const repoPath = await makeTempDir("omnyo-diff-repo-");
   await runGit(["init", "-b", "main"], { cwd: repoPath });
-  await runGit(["config", "user.name", "BB Tests"], { cwd: repoPath });
-  await runGit(["config", "user.email", "bb@example.com"], { cwd: repoPath });
+  await runGit(["config", "user.name", "Omnyo Tests"], { cwd: repoPath });
+  await runGit(["config", "user.email", "omnyo@example.com"], {
+    cwd: repoPath,
+  });
   await runGit(["config", "core.autocrlf", "false"], { cwd: repoPath });
+
   return repoPath;
 }
 
@@ -55,16 +59,20 @@ async function removeFileAfterTemporaryPathspecWrite<T>(
 ): Promise<T> {
   const originalWriteFile = fs.writeFile.bind(fs);
   let removed = false;
+
   const writeFile = vi
     .spyOn(fs, "writeFile")
     .mockImplementation(async (...args) => {
       const result = await originalWriteFile(...args);
+
       if (!removed && path.basename(String(args[0])) === "pathspec") {
         removed = true;
         await fs.rm(path.join(repoPath, relativePath));
       }
+
       return result;
     });
+
   try {
     return await work();
   } finally {
@@ -88,6 +96,7 @@ async function fullDiffSectionFor(
 ): Promise<string> {
   const full = await workspace.getDiff({ target });
   const sections = splitFullDiff(full.diff);
+
   return sections.get(newPath) ?? "";
 }
 
@@ -96,11 +105,13 @@ function splitFullDiff(combinedDiff: string): Map<string, string> {
   const lines = combinedDiff.split("\n");
   let currentPath: string | null = null;
   let currentLines: string[] = [];
+
   const flush = (): void => {
     if (currentPath !== null) {
       byPath.set(currentPath, formatDiffSection(currentLines));
     }
   };
+
   for (const line of lines) {
     if (line.startsWith("diff --git ")) {
       flush();
@@ -110,22 +121,28 @@ function splitFullDiff(combinedDiff: string): Map<string, string> {
       currentLines = [line];
       continue;
     }
+
     if (currentPath !== null) {
       currentLines.push(line);
     }
   }
+
   flush();
+
   return byPath;
 }
 
 function formatDiffSection(lines: string[]): string {
   let end = lines.length;
+
   while (end > 0 && lines[end - 1] === "") {
     end -= 1;
   }
+
   if (end === 0) {
     return "";
   }
+
   return `${lines.slice(0, end).join("\n")}\n`;
 }
 
@@ -144,15 +161,18 @@ describe("Workspace.diffFiles", () => {
     await runGit(["add", "staged.txt"], { cwd: repoPath });
     await write(repoPath, "untracked.txt", "untracked pending\n");
     const workspace = new Workspace(repoPath);
+
     const statusBefore = await runGit(["status", "--porcelain=v1"], {
       cwd: repoPath,
     });
 
     const diff = await workspace.getDiff({ target: UNCOMMITTED });
+
     const files = await workspace.diffFiles({
       target: UNCOMMITTED,
       maxFiles: 5000,
     });
+
     const patches = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths: ["staged.txt", "untracked.txt"],
@@ -186,9 +206,11 @@ describe("Workspace.diffFiles", () => {
         patch: expect.stringContaining("untracked pending"),
       }),
     ]);
+
     const statusAfter = await runGit(["status", "--porcelain=v1"], {
       cwd: repoPath,
     });
+
     expect(statusAfter.stdout).toBe(statusBefore.stdout);
   });
 
@@ -204,6 +226,7 @@ describe("Workspace.diffFiles", () => {
     await runGit(["add", "added.txt"], { cwd: repoPath });
 
     const workspace = new Workspace(repoPath);
+
     const result = await workspace.diffFiles({
       target: UNCOMMITTED,
       maxFiles: 5000,
@@ -243,6 +266,7 @@ describe("Workspace.diffFiles", () => {
     await commitAll(repoPath, "rename");
 
     const workspace = new Workspace(repoPath);
+
     const result = await workspace.diffFiles({
       target: { type: "commit", sha: "HEAD" },
       maxFiles: 5000,
@@ -263,6 +287,7 @@ describe("Workspace.diffFiles", () => {
     await fs.symlink("target.txt", path.join(repoPath, "thing"));
 
     const workspace = new Workspace(repoPath);
+
     const result = await workspace.diffFiles({
       target: UNCOMMITTED,
       maxFiles: 5000,
@@ -284,6 +309,7 @@ describe("Workspace.diffFiles", () => {
     );
 
     const workspace = new Workspace(repoPath);
+
     const result = await workspace.diffFiles({
       target: UNCOMMITTED,
       maxFiles: 5000,
@@ -305,6 +331,7 @@ describe("Workspace.diffFiles", () => {
     await write(repoPath, "untracked.txt", "fresh\ncontent\n");
 
     const workspace = new Workspace(repoPath);
+
     const result = await workspace.diffFiles({
       target: UNCOMMITTED,
       maxFiles: 5000,
@@ -333,6 +360,7 @@ describe("Workspace.diffFiles", () => {
     await runGit(["sparse-checkout", "set", "inside"], { cwd: repoPath });
     await write(repoPath, "outside/new.txt", "outside\ncone\n");
     const workspace = new Workspace(repoPath);
+
     const statusBefore = await runGit(["status", "--porcelain=v1"], {
       cwd: repoPath,
     });
@@ -355,9 +383,11 @@ describe("Workspace.diffFiles", () => {
       expect.objectContaining({ additions: 2, origin: "untracked" }),
     );
     expect(patches[0]?.patch).toContain("+outside");
+
     const statusAfter = await runGit(["status", "--porcelain=v1"], {
       cwd: repoPath,
     });
+
     expect(statusAfter.stdout).toBe(statusBefore.stdout);
   });
 
@@ -414,10 +444,13 @@ describe("Workspace.diffFiles", () => {
 
   it("returns an exact truncated tracked slice after bounded enumeration", async () => {
     const repoPath = await initRepo();
+
     for (let index = 0; index < 5; index += 1) {
       await write(repoPath, `tracked-${index}.txt`, `base ${index}\n`);
     }
+
     await commitAll(repoPath, "base");
+
     for (let index = 0; index < 5; index += 1) {
       await write(repoPath, `tracked-${index}.txt`, `changed ${index}\n`);
     }
@@ -469,11 +502,13 @@ describe("Workspace.diffFiles", () => {
   it("keeps full-diff add/delete classification when a truncated slice is below the rename limit", async () => {
     const repoPath = await initRepo();
     await runGit(["config", "diff.renameLimit", "15"], { cwd: repoPath });
+
     const originalContents = Array.from({ length: 20 }, (_unused, index) =>
       [`identity ${index}`, ...Array.from({ length: 40 }, () => "shared")]
         .join("\n")
         .concat("\n"),
     );
+
     for (let index = 0; index < originalContents.length; index += 1) {
       const pair = String(index).padStart(2, "0");
       await write(
@@ -482,6 +517,7 @@ describe("Workspace.diffFiles", () => {
         originalContents[index] ?? "",
       );
     }
+
     await commitAll(repoPath, "base");
 
     for (let index = 0; index < originalContents.length; index += 1) {
@@ -493,6 +529,7 @@ describe("Workspace.diffFiles", () => {
       );
       await fs.rm(path.join(repoPath, `pair-${pair}-a.txt`));
     }
+
     await runGit(["add", "-A"], { cwd: repoPath });
 
     const result = await new Workspace(repoPath).diffFiles({
@@ -502,6 +539,7 @@ describe("Workspace.diffFiles", () => {
 
     expect(result.truncated).toBe(true);
     expect(result.files).toHaveLength(10);
+
     for (const file of result.files) {
       if (file.statusLetter === "D") {
         expect(file).toMatchObject({ additions: 0, deletions: 41 });
@@ -513,6 +551,7 @@ describe("Workspace.diffFiles", () => {
         });
       }
     }
+
     expect(result.shortstat).toContain("10 files changed");
     expect(result.shortstat).toContain("210 insertions(+)");
     expect(result.shortstat).toContain("205 deletions(-)");
@@ -527,6 +566,7 @@ describe("Workspace.diffFiles", () => {
     await write(repoPath, "untracked.txt", "loose\n");
 
     const workspace = new Workspace(repoPath);
+
     const result = await workspace.diffFiles({
       target: { type: "commit", sha: "HEAD" },
       maxFiles: 5000,
@@ -550,11 +590,13 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "beta.txt", "x\nY\n");
 
     const workspace = new Workspace(repoPath);
+
     const expected = await fullDiffSectionFor(
       workspace,
       UNCOMMITTED,
       "alpha.txt",
     );
+
     const patches = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths: ["alpha.txt"],
@@ -586,10 +628,12 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "alpha.txt", "1\nTWO\n3\n");
 
     const workspace = new Workspace(repoPath);
+
     const perFileBinary = await runGit(
       ["diff", "--no-ext-diff", "--binary", "-M", "HEAD", "--", "logo.png"],
       { cwd: repoPath },
     );
+
     const patches = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths: ["logo.png", "alpha.txt"],
@@ -611,6 +655,7 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, untrackedPath, "new\nfile\nhere\n");
 
     const workspace = new Workspace(repoPath);
+
     const patches = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths: [untrackedPath],
@@ -658,11 +703,13 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "untracked.txt", "alpha\nbeta\n");
 
     const workspace = new Workspace(repoPath);
+
     const expected = await fullDiffSectionFor(
       workspace,
       UNCOMMITTED,
       "untracked.txt",
     );
+
     const patches = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths: ["untracked.txt"],
@@ -680,6 +727,7 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "untracked.txt", "loose\n");
 
     const workspace = new Workspace(repoPath);
+
     const patches = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths: ["untracked.txt", "tracked.txt"],
@@ -704,6 +752,7 @@ describe("Workspace.diffPatch", () => {
 
     const workspace = new Workspace(repoPath);
     const budget = 16 * 1024;
+
     const patches = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths: ["huge.txt"],
@@ -722,13 +771,16 @@ describe("Workspace.diffPatch", () => {
   it("bounds every entry of a page whose raw combined diff exceeds the 16 MB default buffer", async () => {
     const repoPath = await initRepo();
     const fileCount = 6;
+
     for (let index = 0; index < fileCount; index += 1) {
       await write(repoPath, `big-${index}.txt`, "seed\n");
     }
+
     await commitAll(repoPath, "base");
 
     const longLine = "z".repeat(5 * 1024 * 1024);
     const paths: string[] = [];
+
     for (let index = 0; index < fileCount; index += 1) {
       const relativePath = `big-${index}.txt`;
       await write(repoPath, relativePath, `${longLine}-${index}\n`);
@@ -737,6 +789,7 @@ describe("Workspace.diffPatch", () => {
 
     const workspace = new Workspace(repoPath);
     const budget = 64 * 1024;
+
     const patches = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths,
@@ -744,6 +797,7 @@ describe("Workspace.diffPatch", () => {
     });
 
     expect(patches.map((entry) => entry.path)).toEqual(paths);
+
     for (const entry of patches) {
       expect(entry.truncated).toBe(true);
       expect(entry.patch.length).toBeGreaterThan(0);
@@ -767,6 +821,7 @@ describe("Workspace.diffPatch", () => {
       type: "branch_committed",
       mergeBaseBranch: "main",
     };
+
     const workspace = new Workspace(repoPath);
 
     const expectedRename = await fullDiffSectionFor(
@@ -774,6 +829,7 @@ describe("Workspace.diffPatch", () => {
       target,
       "after.txt",
     );
+
     const expectedMod = await fullDiffSectionFor(workspace, target, "mod.txt");
 
     const patches = await workspace.diffPatch({
@@ -795,6 +851,7 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "real.txt", "a\nb\n");
 
     const workspace = new Workspace(repoPath);
+
     const patches = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths: ["real.txt", "does-not-exist.txt"],
@@ -836,6 +893,7 @@ describe("Workspace.diffPatch", () => {
       target,
       "new name.txt",
     );
+
     const patches = await workspace.diffPatch({
       target,
       paths: ["new name.txt"],
@@ -861,11 +919,13 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "normal.txt", "one\nTWO\nthree\nfour\n");
 
     const workspace = new Workspace(repoPath);
+
     const expectedSpace = await fullDiffSectionFor(
       workspace,
       UNCOMMITTED,
       "my file.txt",
     );
+
     const expectedNormal = await fullDiffSectionFor(
       workspace,
       UNCOMMITTED,
@@ -921,6 +981,7 @@ describe("Workspace.diffPatch", () => {
       target,
       "after.txt",
     );
+
     const expectedEdit = await fullDiffSectionFor(
       workspace,
       target,
@@ -956,6 +1017,7 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "café.txt", "un\nDEUX\ntrois\nquatre\n");
 
     const workspace = new Workspace(repoPath);
+
     const patches = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths: ["café.txt"],
@@ -979,11 +1041,13 @@ describe("Workspace.diffPatch", () => {
     await write(repoPath, "multibyte.txt", multibyteBody);
 
     const workspace = new Workspace(repoPath);
+
     const [full] = await workspace.diffPatch({
       target: UNCOMMITTED,
       paths: ["multibyte.txt"],
       maxBytesPerFile: BIG_BUDGET,
     });
+
     const fullPatch = full?.patch ?? "";
     const fullBytes = Buffer.from(fullPatch, "utf8");
     const leadOffset = fullBytes.indexOf(0xe4);
@@ -1007,5 +1071,179 @@ describe("Workspace.diffPatch", () => {
           .toString("utf8"),
       ).toBe(entry?.patch);
     }
+  });
+});
+
+describe("remote-only merge bases", () => {
+  it("resolves the base through origin across status and diff reads", async () => {
+    const repoPath = await initRepo();
+    await write(repoPath, "README.md", "base\n");
+    await commitAll(repoPath, "base");
+    await runGit(["update-ref", "refs/remotes/origin/main", "main"], {
+      cwd: repoPath,
+    });
+    await runGit(
+      ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"],
+      { cwd: repoPath },
+    );
+    await runGit(["checkout", "-b", "feature"], { cwd: repoPath });
+    await runGit(["branch", "-D", "main"], { cwd: repoPath });
+    await write(repoPath, "committed.txt", "branch change\n");
+    await commitAll(repoPath, "Feature change");
+    await write(repoPath, "README.md", "pending change\n");
+    const workspace = new Workspace(repoPath);
+    const target = { type: "all", mergeBaseBranch: "main" } as const;
+
+    const files = await workspace.diffFiles({ target, maxFiles: 100 });
+
+    expect(files.files.map((file) => file.path).sort()).toEqual([
+      "README.md",
+      "committed.txt",
+    ]);
+    expect(await workspace.getDiff({ target })).toEqual(
+      await workspace.getDiff({
+        target: { ...target, mergeBaseBranch: "origin/main" },
+      }),
+    );
+
+    const committed = await workspace.diffFiles({
+      target: { type: "branch_committed", mergeBaseBranch: "main" },
+      maxFiles: 100,
+    });
+
+    expect(committed.files.map((file) => file.path)).toEqual(["committed.txt"]);
+
+    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+
+    expect(status.mergeBase?.aheadCount).toBe(1);
+    expect(status.mergeBase?.files.map((file) => file.path)).toEqual([
+      "committed.txt",
+    ]);
+
+    await runGit(["branch", "main", "HEAD"], { cwd: repoPath });
+
+    expect(
+      (await workspace.getStatus({ mergeBaseBranch: "main" })).mergeBase
+        ?.aheadCount,
+    ).toBe(0);
+  });
+});
+
+describe("trailing local merge bases", () => {
+  async function initRepoWithTrailingMain(): Promise<{
+    repoPath: string;
+    staleMain: string;
+  }> {
+    const repoPath = await initRepo();
+    await write(repoPath, "README.md", "base\n");
+    await commitAll(repoPath, "base");
+
+    const staleMain = (
+      await runGit(["rev-parse", "HEAD"], { cwd: repoPath })
+    ).stdout.trim();
+
+    await write(repoPath, "base.txt", "new base\n");
+    await commitAll(repoPath, "Base update");
+    await runGit(["update-ref", "refs/remotes/origin/main", "HEAD"], {
+      cwd: repoPath,
+    });
+
+    return { repoPath, staleMain };
+  }
+
+  async function cutFeatureFromOrigin(
+    repoPath: string,
+    staleMain: string,
+  ): Promise<void> {
+    await runGit(["checkout", "-b", "feature"], { cwd: repoPath });
+    await runGit(["update-ref", "refs/heads/main", staleMain], {
+      cwd: repoPath,
+    });
+    await write(repoPath, "feature.txt", "feature\n");
+    await commitAll(repoPath, "Feature");
+  }
+
+  async function committedPaths(
+    workspace: Workspace,
+    mergeBaseBranch: string,
+  ): Promise<string[]> {
+    const committed = await workspace.diffFiles({
+      target: { type: "branch_committed", mergeBaseBranch },
+      maxFiles: 100,
+    });
+
+    return committed.files.map((file) => file.path).sort();
+  }
+
+  it("uses origin's base branch when the local one only trails it", async () => {
+    const { repoPath, staleMain } = await initRepoWithTrailingMain();
+    await cutFeatureFromOrigin(repoPath, staleMain);
+    const workspace = new Workspace(repoPath);
+
+    expect(await committedPaths(workspace, "main")).toEqual(["feature.txt"]);
+    expect(
+      (
+        await workspace.getDiff({
+          target: { type: "branch_committed", mergeBaseBranch: "main" },
+        })
+      ).diff,
+    ).not.toContain("base.txt");
+    expect(
+      (
+        await workspace.getDiff({
+          target: {
+            type: "branch_committed",
+            mergeBaseBranch: "refs/heads/main",
+          },
+        })
+      ).diff,
+    ).toContain("base.txt");
+
+    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+
+    expect(status.mergeBase?.aheadCount).toBe(1);
+    expect(status.mergeBase?.behindCount).toBe(0);
+    expect(status.mergeBase?.files.map((file) => file.path)).toEqual([
+      "feature.txt",
+    ]);
+
+    const localStatus = await workspace.getStatus({
+      mergeBaseBranch: "refs/heads/main",
+    });
+
+    expect(localStatus.mergeBase?.aheadCount).toBe(2);
+  });
+
+  it("keeps a local base branch that diverged from origin", async () => {
+    const { repoPath, staleMain } = await initRepoWithTrailingMain();
+    await cutFeatureFromOrigin(repoPath, staleMain);
+    await runGit(["checkout", "main"], { cwd: repoPath });
+    await write(repoPath, "local.txt", "local base\n");
+    await commitAll(repoPath, "Local base");
+    await runGit(["checkout", "feature"], { cwd: repoPath });
+    const workspace = new Workspace(repoPath);
+
+    expect(await committedPaths(workspace, "main")).toEqual([
+      "base.txt",
+      "feature.txt",
+    ]);
+
+    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+
+    expect(status.mergeBase?.aheadCount).toBe(2);
+    expect(status.mergeBase?.behindCount).toBe(1);
+  });
+
+  it("reports a checked-out local base branch as behind origin", async () => {
+    const { repoPath, staleMain } = await initRepoWithTrailingMain();
+    await runGit(["reset", "--hard", staleMain], { cwd: repoPath });
+    const workspace = new Workspace(repoPath);
+
+    expect(await committedPaths(workspace, "main")).toEqual([]);
+
+    const status = await workspace.getStatus({ mergeBaseBranch: "main" });
+
+    expect(status.mergeBase?.aheadCount).toBe(0);
+    expect(status.mergeBase?.behindCount).toBe(1);
   });
 });

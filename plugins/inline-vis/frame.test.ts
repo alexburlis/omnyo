@@ -13,14 +13,16 @@ import {
   frameThemesEqual,
   readFrameContentHeight,
   readFrameLinkRequest,
+  readFrameScrollInput,
 } from "./frame";
 
 const theme = frameTheme("dark", (token) =>
   token === "--background" ? " oklch(0.2 0 0) " : `value-of(${token})`,
 );
+
 const options = {
   theme,
-  baseHref: "http://bb.test/api/v1/files/charts/a.html",
+  baseHref: "http://omnyo.test/api/v1/files/charts/a.html",
 };
 
 it("reads every variable from an app token and adds the chart series", () => {
@@ -41,12 +43,15 @@ it("reads every variable from an app token and adds the chart series", () => {
 it("puts the theme, the base URL and the bootstrap first in the head", () => {
   const page =
     "<!doctype html><html><head><title>t</title><style>:root{--x:1}</style></head><body>hi</body></html>";
+
   const framed = frameDocument(page, options);
   const head = framed.indexOf("<head>") + "<head>".length;
+
   const base = framed.indexOf(
-    '<base href="http://bb.test/api/v1/files/charts/a.html">',
+    '<base href="http://omnyo.test/api/v1/files/charts/a.html">',
   );
-  const themeStyle = framed.indexOf('<style id="bb-theme">');
+
+  const themeStyle = framed.indexOf('<style id="omnyo-theme">');
   const script = framed.indexOf("<script>");
   const own = framed.indexOf("<style>:root{--x:1}</style>");
   expect(framed.indexOf('<meta charset="utf-8">')).toBe(head);
@@ -77,12 +82,13 @@ it("gives a page without a head one, and keeps a page's own base", () => {
 it("is not fooled by a head tag inside a comment, script or template", () => {
   const page =
     "<!-- <head> --><script>var s = '<head>';</script><template><head></head></template><html><body>x</body></html>";
+
   const framed = frameDocument(page, options);
   expect(
     framed.startsWith("<!-- <head> --><script>var s = '<head>';</script>"),
   ).toBe(true);
   expect(framed).toContain('<html><head><meta charset="utf-8">');
-  expect(framed.match(/id="bb-theme"/g)).toHaveLength(1);
+  expect(framed.match(/id="omnyo-theme"/g)).toHaveLength(1);
 });
 
 it("keeps a theme value or a font rule from closing the style element", () => {
@@ -90,11 +96,13 @@ it("keeps a theme value or a font rule from closing the style element", () => {
     appearance: "light" as const,
     variables: { "--background": "red;}</style><script>alert(1)</script>" },
   };
+
   const framed = frameDocument("<p>x</p>", {
     ...options,
     theme: hostile,
     fontCss: "@font-face{}</style><script>alert(2)</script>",
   });
+
   expect(framed).not.toContain("alert(1)</script>");
   expect(framed).not.toContain("</style><script>alert(2)");
   expect(framed.match(/<script>/g)).toHaveLength(2);
@@ -106,6 +114,7 @@ it("fits the frame to the page, under the agent's cap", () => {
     contentHeight: undefined,
     remembered: undefined,
   };
+
   expect(frameHeight(none)).toBe(FRAME_HEIGHT_BEFORE_FIRST_REPORT);
   expect(frameHeight({ ...none, requested: 480 })).toBe(480);
   expect(frameHeight({ ...none, remembered: 600 })).toBe(600);
@@ -129,20 +138,25 @@ it("reads a page's messages and ignores anything else", () => {
     method: "ui/notifications/size-changed",
     params: { height },
   });
+
   expect(readFrameContentHeight(size(420))).toBe(420);
+
   for (const data of [size(0), size("420"), size(Infinity), null, "x", {}]) {
     expect(readFrameContentHeight(data)).toBeUndefined();
   }
-  const link = (url: unknown, id: unknown = "bb-link-1") => ({
+
+  const link = (url: unknown, id: unknown = "omnyo-link-1") => ({
     jsonrpc: "2.0",
     id,
     method: "ui/open-link",
     params: { url },
   });
+
   expect(readFrameLinkRequest(link("https://example.com/a"))).toEqual({
-    id: "bb-link-1",
+    id: "omnyo-link-1",
     url: "https://example.com/a",
   });
+
   for (const data of [
     link("javascript:alert(1)"),
     link("file:///etc/passwd"),
@@ -151,6 +165,30 @@ it("reads a page's messages and ignores anything else", () => {
   ]) {
     expect(readFrameLinkRequest(data)).toBeUndefined();
   }
+
+  const scroll = (params: unknown) => ({
+    jsonrpc: "2.0",
+    method: "omnyo/notifications/scroll-input",
+    params,
+  });
+
+  expect(readFrameScrollInput(scroll({ kind: "wheel", deltaY: -3 }))).toEqual({
+    kind: "wheel",
+    deltaY: -3,
+  });
+  expect(readFrameScrollInput(scroll({ kind: "touch" }))).toEqual({
+    kind: "touch",
+  });
+
+  for (const data of [
+    scroll({ kind: "wheel" }),
+    scroll({ kind: "wheel", deltaY: NaN }),
+    scroll({ kind: "pinch" }),
+    size(420),
+  ]) {
+    expect(readFrameScrollInput(data)).toBeUndefined();
+  }
+
   expect(frameResult(7)).toEqual({ jsonrpc: "2.0", id: 7, result: {} });
   expect(frameThemeMessage(theme)).toMatchObject({
     method: "ui/notifications/host-context-changed",
@@ -166,7 +204,10 @@ it("ships a bootstrap that reports the page size and applies a theme sent by the
   const host = { postMessage: (data: unknown) => posted.push(data) };
   const pageWindow = Object.assign(new EventTarget(), { parent: host });
   new Function("window", "document", script)(pageWindow, page);
-  const themeStyle = () => page.getElementById("bb-theme")?.textContent ?? "";
+
+  const themeStyle = () =>
+    page.getElementById("omnyo-theme")?.textContent ?? "";
+
   const send = (data: unknown, source: unknown) => {
     pageWindow.dispatchEvent(
       Object.assign(new Event("message"), { data, source }),
@@ -185,6 +226,15 @@ it("ships a bootstrap that reports the page size and applies a theme sent by the
   const light = frameTheme("light", (token) =>
     token === "--background" ? "white;}body{display:none" : "",
   );
+
+  posted.length = 0;
+  pageWindow.dispatchEvent(Object.assign(new Event("wheel"), { deltaY: -40 }));
+  pageWindow.dispatchEvent(new Event("touchmove"));
+  expect(posted.map(readFrameScrollInput)).toEqual([
+    { kind: "wheel", deltaY: -40 },
+    { kind: "touch" },
+  ]);
+
   send(frameThemeMessage(light), pageWindow);
   expect(themeStyle()).toContain(":root{color-scheme:dark;");
 

@@ -2,7 +2,7 @@ import type {
   ThreadTimelinePendingTodoItem,
   ThreadTimelinePendingTodoItemStatus,
   ThreadTimelinePendingTodos,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { AnimatedDisclosureBody } from "@/components/promptbox/banner/AnimatedBody";
 import {
   PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
@@ -10,32 +10,28 @@ import {
   PromptStackCard,
 } from "@/components/promptbox/banner/PromptStackCard";
 import {
+  PromptStackDisclosureChevron,
+  useOwnerRevealedIds,
+} from "@/components/promptbox/banner/prompt-stack-header";
+import {
   activityIconClass,
   activityRowClass,
   activityTextClass,
-  type ActivityRowState,
-} from "@bb/shared-ui/activity-row-styles";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/activity-row-styles";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { getStaggerItemProps } from "@omnyo/shared-ui/motion";
+import { Progress } from "@omnyo/shared-ui/progress";
 import {
   PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
-  PromptStackHoverChevron,
   useDisclosureFocusHandoff,
-} from "@bb/shared-ui/prompt-stack-disclosure";
+} from "@omnyo/shared-ui/prompt-stack-disclosure";
+import { StatusBadge } from "@omnyo/shared-ui/status-row";
 
 const STATUS_SORT_RANK: Record<ThreadTimelinePendingTodoItemStatus, number> = {
   in_progress: 0,
   pending: 1,
   completed: 2,
-};
-
-const STATUS_ACTIVITY_STATE: Record<
-  ThreadTimelinePendingTodoItemStatus,
-  ActivityRowState
-> = {
-  in_progress: "active",
-  pending: "pending",
-  completed: "completed",
 };
 
 interface ThreadTodoCardProps {
@@ -45,24 +41,36 @@ interface ThreadTodoCardProps {
 }
 
 const BODY_ID = "thread-todo-card-body";
+
 const TOGGLE_ID = "thread-todo-card-toggle";
+
 const TODO_HEADER_BUTTON_CLASS = activityRowClass(
   "active",
   PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
 );
-const TODO_ACTIVE_ROW_CLASS = "shadow-none ring-0";
-const TODO_ACTIVE_ICON_CLASS = "text-foreground";
+
+const STATUS_TEXT_CLASS: Record<ThreadTimelinePendingTodoItemStatus, string> = {
+  in_progress: "font-medium text-foreground",
+  pending: "text-muted-foreground",
+  completed: "text-subtle-foreground line-through decoration-border",
+};
 
 function getTodoSummary(items: readonly ThreadTimelinePendingTodoItem[]): {
+  completed: number;
+  total: number;
   visible: string;
   aria: string;
 } {
   let completedCount = 0;
+
   for (const item of items) {
     if (item.status === "completed") completedCount += 1;
   }
+
   return {
-    visible: `${completedCount}/${items.length} complete`,
+    completed: completedCount,
+    total: items.length,
+    visible: `${completedCount} of ${items.length} done`,
     aria: `${completedCount} of ${items.length} ${
       items.length === 1 ? "item" : "items"
     } complete`,
@@ -74,30 +82,29 @@ function TodoStatusIcon({
 }: {
   status: ThreadTimelinePendingTodoItemStatus;
 }) {
-  const className = "size-3.5 shrink-0";
-  const activityState = STATUS_ACTIVITY_STATE[status];
   switch (status) {
     case "in_progress":
       return (
-        <Icon
-          name="Square"
-          className={cn(className, TODO_ACTIVE_ICON_CLASS)}
+        <span
           aria-hidden="true"
-        />
+          className="flex size-3.5 shrink-0 items-center justify-center rounded-full border-[1.5px] border-foreground"
+        >
+          <span className="size-1.5 rounded-full bg-foreground" />
+        </span>
       );
     case "completed":
       return (
         <Icon
-          name="Check"
-          className={cn(className, activityIconClass(activityState))}
+          name="CircleCheck"
+          className="size-3.5 shrink-0 text-subtle-foreground"
           aria-hidden="true"
         />
       );
     case "pending":
       return (
         <Icon
-          name="Square"
-          className={cn(className, activityIconClass(activityState))}
+          name="Circle"
+          className="size-3.5 shrink-0 text-subtle-foreground"
           aria-hidden="true"
         />
       );
@@ -106,38 +113,48 @@ function TodoStatusIcon({
 
 function TodoBody({
   items,
+  revealedIds,
 }: {
   items: readonly ThreadTimelinePendingTodoItem[];
+  revealedIds: ReadonlySet<string> | null;
 }) {
   const ordered = [...items].sort(
     (a, b) => STATUS_SORT_RANK[a.status] - STATUS_SORT_RANK[b.status],
   );
+
   return (
-    <ul className="max-h-40 space-y-1 overflow-y-auto px-2.5 pb-2 pt-2">
-      {ordered.map((item) => {
-        const activityState = STATUS_ACTIVITY_STATE[item.status];
-        const isActive = activityState === "active";
+    <ul className="max-h-40 space-y-0.5 overflow-y-auto px-3 pb-2 pt-1.5">
+      {ordered.map((item, index) => {
+        const stagger = getStaggerItemProps(
+          index,
+          ordered.length,
+          revealedIds?.has(item.id) ?? false,
+        );
+
         return (
           <li
             key={item.id}
-            className={activityRowClass(
-              activityState,
-              cn(
-                "flex min-w-0 items-center gap-2 text-xs",
-                isActive && TODO_ACTIVE_ROW_CLASS,
-              ),
+            className={cn(
+              "flex min-h-6 min-w-0 items-center gap-2 text-xs",
+              stagger.className,
             )}
+            style={stagger.style}
           >
             <TodoStatusIcon status={item.status} />
             <span
-              className={activityTextClass(
-                activityState,
+              className={cn(
                 "min-w-0 flex-1 truncate",
+                STATUS_TEXT_CLASS[item.status],
               )}
               title={item.text}
             >
               {item.text}
             </span>
+            {item.status === "in_progress" ? (
+              <StatusBadge tone="active" className="h-4 px-1.5 text-2xs">
+                In progress
+              </StatusBadge>
+            ) : null}
           </li>
         );
       })}
@@ -152,10 +169,18 @@ export function ThreadTodoCard({
 }: ThreadTodoCardProps) {
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
   const items = pendingTodos?.items ?? [];
+
+  const revealedIds = useOwnerRevealedIds(
+    isExpanded,
+    items.map((item) => item.id),
+  );
+
   if (items.length === 0) {
     return null;
   }
+
   const summary = getTodoSummary(items);
+
   return (
     <PromptStackCard
       ariaLabel="To-do list"
@@ -184,12 +209,26 @@ export function ThreadTodoCard({
           <span
             className={activityTextClass(
               "active",
-              "min-w-0 flex-1 truncate text-left",
+              "shrink-0 text-left font-medium",
             )}
           >
+            To-dos
+          </span>
+          <span className="min-w-0 truncate text-left tabular-nums text-muted-foreground">
             {summary.visible}
           </span>
-          <PromptStackHoverChevron isExpanded={isExpanded} />
+          <span className="ml-auto flex shrink-0 items-center gap-2.5 pl-2">
+            <Progress
+              aria-hidden="true"
+              className="h-1 w-14"
+              value={
+                summary.total === 0
+                  ? 0
+                  : Math.round((summary.completed / summary.total) * 100)
+              }
+            />
+            <PromptStackDisclosureChevron isExpanded={isExpanded} />
+          </span>
         </button>
       </div>
       <AnimatedDisclosureBody
@@ -201,7 +240,7 @@ export function ThreadTodoCard({
         collapseRef={focus.collapseRef}
         onCollapse={focus.onCollapseClick}
       >
-        <TodoBody items={items} />
+        <TodoBody items={items} revealedIds={revealedIds} />
       </AnimatedDisclosureBody>
     </PromptStackCard>
   );

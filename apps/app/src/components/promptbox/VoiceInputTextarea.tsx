@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
-import { cn } from "@bb/shared-ui/lib/utils";
-import type { VoiceInputTextareaProps } from "@bb/shared-ui/voice-input-textarea";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import type { VoiceInputTextareaProps } from "@omnyo/shared-ui/voice-input-textarea";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
-import { transcribeVoiceInput } from "@/lib/api";
+import { prepareVoiceInput, transcribeVoiceInput } from "@/lib/api";
 import { WaveformVisualizer } from "./WaveformVisualizer";
 import { VoiceInputButton } from "./VoiceInputButton";
 
@@ -30,6 +30,7 @@ export function VoiceInputTextarea({
   });
   useEffect(() => {
     mountedRef.current = true;
+
     return () => {
       mountedRef.current = false;
       latestRef.current.onVoiceInputActiveChange?.(false);
@@ -37,12 +38,19 @@ export function VoiceInputTextarea({
   }, []);
 
   const voice = useVoiceInput({
-    onTranscribe: async ({ file, signal }) => {
+    onPrepare: prepareVoiceInput,
+    onTranscribe: async ({ file, signal, recordingId, attempt }) => {
       if (!mountedRef.current)
         throw new DOMException("Cancelled", "AbortError");
-      const result = await transcribeVoiceInput(file, undefined, signal);
+
+      const result = await transcribeVoiceInput(file, undefined, signal, {
+        recordingId,
+        attempt,
+      });
+
       if (!mountedRef.current)
         throw new DOMException("Cancelled", "AbortError");
+
       return result.text;
     },
     onTranscript: (transcript) => {
@@ -57,7 +65,12 @@ export function VoiceInputTextarea({
   }, [voice.isListening]);
 
   return (
-    <div className="relative">
+    <div
+      className="relative"
+      data-voice-input-idle={
+        voice.isSupported && !voice.isListening ? "" : undefined
+      }
+    >
       <textarea
         {...props}
         value={value}
@@ -69,9 +82,9 @@ export function VoiceInputTextarea({
         )}
       />
       {voice.isSupported ? (
-        <div className="absolute inset-x-1 bottom-1 flex items-center justify-end gap-2">
+        <div className="pointer-events-none absolute inset-x-1 bottom-1 flex items-center justify-end gap-2">
           {voice.isListening ? (
-            <>
+            <div className="flex min-w-0 flex-1 items-center gap-2 animate-in fade-in-0 slide-in-from-bottom-1 zoom-in-[0.985]">
               <Button
                 type="button"
                 size="icon"
@@ -81,7 +94,7 @@ export function VoiceInputTextarea({
                     ? "Cancel transcription"
                     : "Cancel recording"
                 }
-                className="size-8 rounded-full p-0 max-md:pointer-coarse:size-10"
+                className="pointer-events-auto size-8 rounded-full p-0 max-md:pointer-coarse:size-10"
                 onClick={voice.cancel}
                 disabled={disabled}
               >
@@ -105,9 +118,9 @@ export function VoiceInputTextarea({
                     ? "Transcribing voice input"
                     : "Stop and add text"
                 }
-                className="size-8 rounded-md p-0 max-md:pointer-coarse:size-10"
+                className="pointer-events-auto size-8 rounded-md p-0 max-md:pointer-coarse:size-10"
                 disabled={disabled || voice.isProcessing}
-                onClick={voice.stop}
+                onClick={() => voice.stop()}
               >
                 <Icon
                   name={voice.isProcessing ? "Spinner" : "Square"}
@@ -118,7 +131,7 @@ export function VoiceInputTextarea({
                   }
                 />
               </Button>
-            </>
+            </div>
           ) : (
             <TooltipProvider>
               <VoiceInputButton
@@ -127,7 +140,7 @@ export function VoiceInputTextarea({
                 size="icon"
                 variant="ghost"
                 aria-label="Start voice input"
-                className="size-8 rounded-md p-0 max-md:pointer-coarse:size-10"
+                className="pointer-events-auto size-8 rounded-md p-0 max-md:pointer-coarse:size-10"
                 disabled={disabled}
                 onClick={() => {
                   if (document.activeElement instanceof HTMLElement)

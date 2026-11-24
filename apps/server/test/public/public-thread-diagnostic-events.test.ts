@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { setAppSettings, findTimelineWindowBudgetFloorSequence } from "@bb/db";
-import { defaultAppSettings, threadScope } from "@bb/domain";
-import { threadTimelineResponseSchema } from "@bb/server-contract";
+import { setAppSettings, findTimelineWindowBudgetFloorSequence } from "@omnyo/db";
+import { defaultAppSettings, threadScope } from "@omnyo/domain";
+import { threadTimelineResponseSchema } from "@omnyo/server-contract";
 import { readJson } from "../helpers/json.js";
 import { seedEvent, seedThreadFixture } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
@@ -12,11 +12,13 @@ describe("diagnostic timeline visibility", () => {
     async (isDevelopment) => {
       await withTestHarness({ isDevelopment }, async (harness) => {
         const { thread } = seedThreadFixture(harness);
+
         const common = {
           threadId: thread.id,
           providerThreadId: "provider-session",
           scope: threadScope(),
         };
+
         seedEvent(harness.deps, {
           ...common,
           sequence: 1,
@@ -50,18 +52,23 @@ describe("diagnostic timeline visibility", () => {
             summary: "A configuration needs attention",
           },
         });
+
         const readTitles = async () => {
           const response = await harness.app.request(
             `/api/v1/threads/${thread.id}/timeline`,
           );
+
           expect(response.status).toBe(200);
+
           const timeline = threadTimelineResponseSchema.parse(
             await readJson(response),
           );
+
           return timeline.rows.flatMap((row) =>
             row.kind === "system" ? [row.title] : [],
           );
         };
+
         expect(await readTitles()).toEqual(["Configuration warning"]);
         setAppSettings(harness.db, {
           ...defaultAppSettings,
@@ -82,18 +89,23 @@ describe("diagnostic timeline visibility", () => {
 it("excludes hidden diagnostics from rows and budgets while advancing the history snapshot", async () => {
   await withTestHarness(async (harness) => {
     const { thread } = seedThreadFixture(harness);
+
     const common = {
       threadId: thread.id,
       providerThreadId: "provider-session",
       scope: threadScope(),
     };
+
     const readTimeline = async () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(response.status).toBe(200);
+
       return threadTimelineResponseSchema.parse(await readJson(response));
     };
+
     seedEvent(harness.deps, {
       ...common,
       sequence: 1,
@@ -140,6 +152,7 @@ it("excludes hidden diagnostics from rows and budgets while advancing the histor
         excludeDiagnosticEvents: true,
       }),
     ).toBeUndefined();
+
     for (const [sequence, subtype] of [
       [4, "model_fallback"],
       [5, "model_refusal_fallback"],
@@ -165,6 +178,7 @@ it("excludes hidden diagnostics from rows and budgets while advancing the histor
         },
       });
     }
+
     const visible = await readTimeline();
     expect(visible.maxSeq).toBe(5);
     expect(

@@ -7,13 +7,15 @@ import {
 import {
   CHROME_ROW_HEIGHT_CLASS,
   MACOS_COLLAPSED_TOP_LEFT_RESERVE_CLASS,
-} from "@/lib/bb-desktop";
+} from "@/lib/omnyo-desktop";
 
 describe("secondary panel native browser bounds settling", () => {
-  it("recognizes the flex transitions that move the panel back to its restored position", () => {
-    expect(isSecondaryPanelLayoutTransition("flex-grow")).toBe(true);
-    expect(isSecondaryPanelLayoutTransition("flex-basis")).toBe(true);
+  it("recognizes the transitions that move the panel to its settled position", () => {
+    expect(isSecondaryPanelLayoutTransition("translate")).toBe(true);
+    expect(isSecondaryPanelLayoutTransition("flex-grow")).toBe(false);
+    expect(isSecondaryPanelLayoutTransition("flex-basis")).toBe(false);
     expect(isSecondaryPanelLayoutTransition("opacity")).toBe(false);
+    expect(isSecondaryPanelLayoutTransition("visibility")).toBe(false);
   });
 });
 

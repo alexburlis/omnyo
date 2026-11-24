@@ -3,11 +3,17 @@ import {
   hostStorageListResponseSchema,
   hostStorageRemoveOrphansResponseSchema,
   hostStorageRetryWorktreeCleanupResponseSchema,
+  hostStorageRemoveExternalWorktreesResponseSchema,
+  externalWorktreeSkipReasonSchema,
+  maintenanceKindSchema,
+  entryCleanupInputSchema,
+  entryCleanupStatusSchema,
 } from "./storage-types.js";
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 const daysSchema = z.number().int().min(1).max(3650).nullable();
+
 export const policySchema = z
   .object({
     archiveAfterDays: daysSchema,
@@ -16,31 +22,48 @@ export const policySchema = z
     deleteDevDataOnCheckoutRemoval: z.boolean().default(false),
   })
   .strict();
+
 export type Policy = z.infer<typeof policySchema>;
+
 export const runSchema = z.object({
   ranAt: z.number(),
   archivedCount: z.number().int().nonnegative(),
   deletedCount: z.number().int().nonnegative(),
   failedCount: z.number().int().nonnegative(),
 });
+
 export type Run = z.infer<typeof runSchema>;
+
 export const stateSchema = z.object({
   policy: policySchema,
   lastRun: runSchema.nullable(),
 });
+
 export type State = z.infer<typeof stateSchema>;
+
 export const previewSchema = z.object({
   archiveCount: z.number().int().nonnegative(),
   deleteCount: z.number().int().nonnegative(),
 });
+
 export type Preview = z.infer<typeof previewSchema>;
+
 const machineInput = z.object({ hostId: z.string().min(1) }).strict();
+
 export const storageRpc = defineRpcContract({
+  startEntryCleanup: {
+    input: entryCleanupInputSchema,
+    output: z.object({ id: z.string() }),
+  },
+  entryCleanup: {
+    input: z.object({ id: z.string() }).strict(),
+    output: entryCleanupStatusSchema,
+  },
   startCleanup: {
     input: z
       .object({
         hostId: z.string().min(1),
-        kind: z.enum(["orphans", "development", "worktrees"]),
+        kind: maintenanceKindSchema,
       })
       .strict(),
     output: z.null(),
@@ -56,6 +79,35 @@ export const storageRpc = defineRpcContract({
   retryWorktreeCleanup: {
     input: machineInput,
     output: hostStorageRetryWorktreeCleanupResponseSchema,
+  },
+  removeExternalWorktrees: {
+    input: z.union([
+      z.object({ hostId: z.string().min(1), paths: z.null() }).strict(),
+      z
+        .object({
+          hostId: z.string().min(1),
+          paths: z.array(z.string().min(1)).min(1).max(500),
+          force: z.boolean(),
+        })
+        .strict(),
+    ]),
+    output: hostStorageRemoveExternalWorktreesResponseSchema,
+  },
+  startRemoveExternalWorktree: {
+    input: z
+      .object({
+        hostId: z.string().min(1),
+        path: z.string().min(1),
+        force: z.boolean(),
+      })
+      .strict(),
+    output: z.discriminatedUnion("state", [
+      z.object({ state: z.literal("started") }),
+      z.object({
+        state: z.literal("skipped"),
+        reasons: z.array(externalWorktreeSkipReasonSchema).min(1),
+      }),
+    ]),
   },
   startClearLargeFiles: {
     input: z.object({ hostId: z.string().min(1).nullable() }).strict(),

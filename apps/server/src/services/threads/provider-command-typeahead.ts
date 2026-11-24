@@ -2,10 +2,13 @@ import {
   providerCommandSectionRank,
   type CommandListResponse,
   type ProviderCommand,
-} from "@bb/server-contract";
-import type { HostProviderCommand } from "@bb/host-daemon-contract";
+} from "@omnyo/server-contract";
+import type { HostProviderCommand } from "@omnyo/host-daemon-contract";
 import type { ProviderRegistration } from "../providers/provider-registry.js";
-import type { ResolvedSkillCatalogEntry } from "../skills/injected-skills.js";
+import type {
+  ResolvedSkillCatalogEntry,
+  SkillMetadataSource,
+} from "../skills/injected-skills.js";
 
 const BUILT_IN_PROVIDER_COMMANDS: ProviderCommand[] = [
   {
@@ -23,6 +26,14 @@ const BUILT_IN_PROVIDER_COMMANDS: ProviderCommand[] = [
     argumentHint: null,
   },
 ];
+
+export function builtinProviderCommands(
+  includeCompact: boolean,
+): ProviderCommand[] {
+  return BUILT_IN_PROVIDER_COMMANDS.filter(
+    (command) => command.name !== "compact" || includeCompact,
+  );
+}
 
 function providerComposerHasSkillsAction(
   composerActions: readonly { kind: string }[],
@@ -46,8 +57,13 @@ function toProviderCommand(command: HostProviderCommand): ProviderCommand {
   };
 }
 
-function toSkillCommand(entry: ResolvedSkillCatalogEntry): ProviderCommand {
+type CommandSkillEntry =
+  | ResolvedSkillCatalogEntry
+  | ResolvedSkillCatalogEntry<SkillMetadataSource>;
+
+function toSkillCommand(entry: CommandSkillEntry): ProviderCommand {
   const { provenance, runtimeSource } = entry;
+
   return {
     name: runtimeSource.name,
     source: "skill",
@@ -60,13 +76,16 @@ function toSkillCommand(entry: ResolvedSkillCatalogEntry): ProviderCommand {
 
 function dedupeBySourceAndName(commands: ProviderCommand[]): ProviderCommand[] {
   const byKey = new Map<string, ProviderCommand>();
+
   for (const command of commands) {
     const key = `${command.source} ${command.name}`;
     const existing = byKey.get(key);
+
     if (!existing || commandOriginRank(command) > commandOriginRank(existing)) {
       byKey.set(key, command);
     }
   }
+
   return [...byKey.values()];
 }
 
@@ -84,16 +103,18 @@ function commandOriginRank(command: ProviderCommand): number {
 function compareCommands(a: ProviderCommand, b: ProviderCommand): number {
   const bySection =
     providerCommandSectionRank(a) - providerCommandSectionRank(b);
+
   if (bySection !== 0) {
     return bySection;
   }
+
   return a.name.localeCompare(b.name);
 }
 
 interface BuildCommandListResponseArgs {
   commands: HostProviderCommand[];
   includeBuiltinCompact: boolean;
-  skillCatalog: readonly ResolvedSkillCatalogEntry[];
+  skillCatalog: readonly CommandSkillEntry[];
 }
 
 export function buildCommandListResponse(
@@ -101,9 +122,7 @@ export function buildCommandListResponse(
 ): CommandListResponse {
   return {
     commands: dedupeBySourceAndName([
-      ...BUILT_IN_PROVIDER_COMMANDS.filter(
-        (command) => command.name !== "compact" || args.includeBuiltinCompact,
-      ),
+      ...builtinProviderCommands(args.includeBuiltinCompact),
       ...args.skillCatalog.map(toSkillCommand),
       ...args.commands.map(toProviderCommand),
     ]).sort(compareCommands),

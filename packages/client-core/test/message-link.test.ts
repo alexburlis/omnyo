@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import { getMessageLinkPath, parseMessageLink } from "../src/index.js";
 
 describe("message links", () => {
@@ -10,13 +10,14 @@ describe("message links", () => {
         threadId: "thr_abc",
         seq: 42,
       });
+
       expect(path).toBe(
         projectId === PERSONAL_PROJECT_ID
           ? "/threads/thr_abc#msg=42"
           : "/projects/proj_abc/threads/thr_abc#msg=42",
       );
       expect(parseMessageLink(path)).toEqual({ threadId: "thr_abc", seq: 42 });
-      expect(parseMessageLink(`https://someone.getbb.app${path}`)).toEqual({
+      expect(parseMessageLink(`https://someone.example.test${path}`)).toEqual({
         threadId: "thr_abc",
         seq: 42,
       });

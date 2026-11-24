@@ -3,7 +3,7 @@
 import { MemoryRouter } from "react-router-dom";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { PluginInstallJob } from "@bb/server-contract";
+import type { PluginInstallJob } from "@omnyo/server-contract";
 import { makeInstalledPlugin } from "@/test/fixtures/plugins";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { appToast } from "@/components/ui/app-toast";
@@ -16,7 +16,7 @@ import { PluginInstallJobsHost } from "./PluginInstallJobsHost";
 
 const BASE = {
   id: "job-1",
-  target: { kind: "catalog", entryId: "notes", marketplace: "bb-community" },
+  target: { kind: "catalog", entryId: "notes", marketplace: "acme-plugins" },
   displayName: "Notes",
 } as const;
 
@@ -39,6 +39,7 @@ function renderHost(initial: PluginInstallJob[]) {
   const { wrapper, queryClient } = createQueryClientTestHarness({
     queries: { staleTime: Infinity },
   });
+
   queryClient.setQueryData(pluginInstallJobsQueryKey(), initial);
   render(
     <MemoryRouter>
@@ -46,6 +47,7 @@ function renderHost(initial: PluginInstallJob[]) {
     </MemoryRouter>,
     { wrapper },
   );
+
   return {
     queryClient,
     publish: (jobs: PluginInstallJob[]) =>
@@ -82,6 +84,7 @@ it("replaces the progress toast with the result once a watched install finishes"
 it("stays quiet about installs that finished before it was watching", async () => {
   const success = vi.spyOn(appToast, "success").mockReturnValue("toast");
   const error = vi.spyOn(appToast, "error").mockReturnValue("toast");
+
   const { publish } = renderHost([
     { ...BASE, state: "succeeded", plugin: PLUGIN },
     { ...BASE, id: "job-2", state: "failed", error: "boom" },
@@ -100,6 +103,7 @@ it("reports each failure and cancellation once", async () => {
   vi.spyOn(appToast, "loading").mockReturnValue("toast");
   const error = vi.spyOn(appToast, "error").mockReturnValue("toast");
   const message = vi.spyOn(appToast, "message").mockReturnValue("toast");
+
   const { publish } = renderHost([
     { ...BASE, state: "running" },
     { ...BASE, id: "job-2", state: "queued" },
@@ -109,6 +113,7 @@ it("reports each failure and cancellation once", async () => {
     { ...BASE, state: "failed", error: "npm install failed" },
     { ...BASE, id: "job-2", state: "cancelled" },
   ];
+
   await publish(finished);
   await publish([...finished]);
 

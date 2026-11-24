@@ -2,9 +2,9 @@ import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadServerConfig } from "@bb/config/server";
-import { describe, expect, it } from "vitest";
-import { startHttpListener } from "../../src/start-server.js";
+import { loadServerConfig } from "@omnyo/config/server";
+import { describe, expect, it, vi } from "vitest";
+import { startHttpListener } from "../../src/http-listener.js";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 
@@ -50,22 +50,25 @@ describe("server startup diagnostics", () => {
   ])("$name", async ({ bindHost, expectedAddress }) => {
     const serverConfig = loadServerConfig({
       env: {
-        BB_DATA_DIR: "/tmp/bb-server-listener-test",
-        BB_HOST_DAEMON_PORT: "49162",
-        ...(bindHost === undefined ? {} : { BB_SERVER_BIND_HOST: bindHost }),
-        BB_SERVER_PORT: "49161",
+        OMNYO_DATA_DIR: "/tmp/omnyo-server-listener-test",
+        OMNYO_HOST_DAEMON_PORT: "49162",
+        ...(bindHost === undefined ? {} : { OMNYO_SERVER_BIND_HOST: bindHost }),
+        OMNYO_SERVER_PORT: "49161",
         NODE_ENV: "development",
       },
     });
+
     const server = startHttpListener({
       fetch: () => new Response("ok"),
-      serverConfig: { ...serverConfig, BB_SERVER_PORT: 0 },
+      logger: { info: vi.fn() },
+      serverConfig: { ...serverConfig, OMNYO_SERVER_PORT: 0 },
     });
 
     try {
       if (!server.listening) {
         await once(server, "listening");
       }
+
       expect(server.address()).toMatchObject({
         address: expectedAddress,
         family: "IPv4",
@@ -75,8 +78,10 @@ describe("server startup diagnostics", () => {
         server.close((error) => {
           if (error) {
             rejectClose(error);
+
             return;
           }
+
           resolveClose();
         });
       });

@@ -1,4 +1,4 @@
-import { createMobileAppReleaseService } from "../services/install/mobile-app-releases.js";
+import { effectiveCrashReportsEnabled } from "../services/system/diagnostics-policy.js";
 import {
   setMachineEnvironmentVariable,
   deleteMachineEnvironmentVariable,
@@ -8,9 +8,18 @@ import {
   replaceMachineEnvironment,
 } from "../services/machines/environment-settings.js";
 import { getGateAuthKind } from "../request-context.js";
+import {
+  APP_SURFACE_HEADER_NAME,
+  parseRequestAppSurface,
+} from "@omnyo/config/app-surface";
 import { serverAccessStatus } from "../services/machines/server-access.js";
 import {
+  builtinProviderCommands,
+  providerHasCommandSurface,
+} from "../services/threads/provider-command-typeahead.js";
+import {
   getAppSettings,
+  getHost,
   getAppKeybindingOverrides,
   getExperiments,
   getStoredFaviconColor,
@@ -20,7 +29,7 @@ import {
   setAppKeybindingOverrides,
   setExperiments,
   setStoredAppearance,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   applyAppKeybindingOverrides,
   appSettingsSchema,
@@ -30,13 +39,18 @@ import {
   resolveCodeTheme,
   type AppKeybindingOverrides,
   type AppTheme,
-} from "@bb/domain";
+} from "@omnyo/domain";
+import {
+  sendProcessBugReport,
+  setProcessErrorReportingEnabled,
+} from "@omnyo/process-utils/error-reporting";
 import {
   publicApiRoutes,
+  voiceTranscriptionContextSchema,
   typedRoutes,
   type PublicApiSchema,
   type SystemEnvironmentProvider,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { Hono } from "hono";
 import {
   hashedAssetCacheControl,
@@ -55,6 +69,7 @@ import {
 import type { ServerAppDeps, ServerRuntimeConfig } from "../types.js";
 import type { PluginService } from "../services/plugins/plugin-service.js";
 import { ApiError } from "../errors.js";
+import { readMultipartFormData } from "./multipart-form-data.js";
 import {
   buildAiServicesView,
   testAiService,
@@ -64,6 +79,7 @@ import {
   resolveVoiceTranscriptionEnabled,
   transcribeVoiceInput,
 } from "../services/ai/voice-transcription.js";
+import { prepareVoiceInput } from "../services/ai/voice-prepare.js";
 import {
   listSystemProviderInfos,
   resolveSystemExecutionOptions,
@@ -129,12 +145,15 @@ function resolveSystemServerUrl(
 
   const requestUrl = new URL(request.url);
   const forwardedHost = firstForwardedValue(request.header("x-forwarded-host"));
+
   if (forwardedHost === undefined) return requestUrl.origin;
 
   const forwardedProtocol =
     firstForwardedValue(request.header("x-forwarded-proto")) ??
     requestUrl.protocol.replace(/:$/u, "");
+
   const forwardedUrl = new URL(`${forwardedProtocol}://${forwardedHost}`);
+
   if (
     config.isDevelopment &&
     config.devAppPort !== undefined &&
@@ -142,6 +161,7 @@ function resolveSystemServerUrl(
   ) {
     forwardedUrl.port = String(config.serverPort);
   }
+
   return forwardedUrl.origin;
 }
 
@@ -153,15 +173,10 @@ export function registerSystemRoutes(
   const { get, post, put, del } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
+
   const routes = publicApiRoutes.system;
 
   const themeRoot = resolveThemeRootPath(deps.config.dataDir);
-
-  const mobileAppReleases = createMobileAppReleaseService();
-  get(routes.mobileAppReleases, async (context) => {
-    context.header("cache-control", "no-store");
-    return context.json(await mobileAppReleases());
-  });
 
   get(routes.attention, (context) =>
     context.json({ hasAttention: hasActiveThreadAttention(deps.db) }),
@@ -175,6 +190,7 @@ export function registerSystemRoutes(
         { err: error },
         "Stored keyboard shortcut overrides are invalid; using defaults",
       );
+
       return [];
     }
   }
@@ -184,6 +200,7 @@ export function registerSystemRoutes(
     faviconColor: AppTheme["faviconColor"],
   ): Promise<AppTheme> {
     const pluginCss = await pluginService.readThemeCss(themeId);
+
     if (pluginCss !== null) {
       return {
         themeId,
@@ -195,19 +212,33 @@ export function registerSystemRoutes(
         ),
       };
     }
+
     return resolveAppTheme(themeRoot, themeId, faviconColor);
   }
 
   async function buildSystemConfigResponse(serverUrl: string) {
     const keybindingOverrides = readAppKeybindingOverrides();
     const primaryHostId = resolvePrimaryHostId(deps);
+
     const localHelperPorts = [
       ...new Set([
         deps.config.hostDaemonPort,
         ...deps.hub.listDaemonLocalApiPorts(),
       ]),
     ];
+
     return {
+      commandDefaultsByProvider: Object.fromEntries(
+        deps.providerRegistry
+          .list()
+          .filter(providerHasCommandSurface)
+          .map((registration) => [
+            registration.info.id,
+            builtinProviderCommands(
+              registration.serverCapabilities.supportsManualCompaction,
+            ),
+          ]),
+      ),
       generalSettings: compatibleGeneralSettings(),
       serverAccess: await serverAccessStatus(deps),
       keybindings: applyAppKeybindingOverrides(
@@ -236,21 +267,31 @@ export function registerSystemRoutes(
           : deps.hub.getDaemonPlatformForHost(primaryHostId),
       voiceTranscriptionEnabled: resolveVoiceTranscriptionEnabled(deps),
       dataDir: deps.config.dataDir,
+      appVersion: deps.config.appVersion,
+      diagnostics: {
+        release: deps.config.appVersion,
+        ...(deps.config.errorReportingDsn === undefined
+          ? {}
+          : { sentryDsn: deps.config.errorReportingDsn }),
+      },
     };
   }
 
   get(routes.config, async (context) => {
     const serverUrl = resolveSystemServerUrl(context.req, deps.config);
+
     return context.json(await buildSystemConfigResponse(serverUrl));
   });
 
   function compatibleGeneralSettings() {
     const settings = getAppSettings(deps.db);
+
     return {
       ...settings,
       showUnhandledProviderEvents: settings.showDiagnosticEvents,
     };
   }
+
   post(routes.setMachineEnvironmentVariable, async (context, payload) => {
     if (getGateAuthKind(context) === "machine")
       throw new ApiError(
@@ -258,14 +299,10 @@ export function registerSystemRoutes(
         "forbidden",
         "Machine credentials cannot change global environment settings",
       );
-    await setMachineEnvironmentVariable(
-      deps.db,
-      deps.config.dataDir,
-      payload,
-      null,
-    );
+    await setMachineEnvironmentVariable(deps.db, deps.vault, payload, null);
     deps.lifecycleDedupers.providerModelCatalogs.markAllStale();
     deps.hub.notifySystem(["config-changed"]);
+
     return context.json(await machineEnvironmentView(deps.db));
   });
 
@@ -279,6 +316,7 @@ export function registerSystemRoutes(
     await deleteMachineEnvironmentVariable(deps.db, payload.name, null);
     deps.lifecycleDedupers.providerModelCatalogs.markAllStale();
     deps.hub.notifySystem(["config-changed"]);
+
     return context.json(await machineEnvironmentView(deps.db));
   });
 
@@ -292,28 +330,71 @@ export function registerSystemRoutes(
         "forbidden",
         "Machine credentials cannot change global environment settings",
       );
-    await replaceMachineEnvironment(deps.db, deps.config.dataDir, payload);
+    await replaceMachineEnvironment(deps.db, deps.vault, payload);
     deps.lifecycleDedupers.providerModelCatalogs.markAllStale();
     deps.hub.notifySystem(["config-changed"]);
+
     return context.json(await machineEnvironmentView(deps.db));
   });
 
   put(routes.generalSettings, (context, payload) => {
     const { showUnhandledProviderEvents, ...settings } = payload;
     const current = getAppSettings(deps.db);
+
+    if (
+      settings.usageConsent !== undefined &&
+      JSON.stringify(settings.usageConsent) !==
+        JSON.stringify(current.usageConsent)
+    ) {
+      throw new ApiError(
+        400,
+        "invalid_request",
+        "Change usage choices through the dedicated usage consent control.",
+      );
+    }
+
     const diagnosticValue =
       "showDiagnosticEvents" in settings
         ? settings.showDiagnosticEvents
         : undefined;
+
     const updatedSettings = appSettingsSchema.parse({
       ...settings,
+      autoUpdateProviderClisOnStartup:
+        settings.autoUpdateProviderClisOnStartup ??
+        current.autoUpdateProviderClisOnStartup,
+      defaultThreadMachineId:
+        settings.defaultThreadMachineId === undefined
+          ? current.defaultThreadMachineId
+          : settings.defaultThreadMachineId,
+      defaultPermissionMode:
+        settings.defaultPermissionMode ?? current.defaultPermissionMode,
+      modelPermissionModes:
+        settings.modelPermissionModes ?? current.modelPermissionModes,
       allowFastServiceTier:
         settings.allowFastServiceTier ?? current.allowFastServiceTier,
+      providerAllowFastServiceTier:
+        settings.providerAllowFastServiceTier ??
+        current.providerAllowFastServiceTier,
       telemetryEnabled: settings.telemetryEnabled ?? current.telemetryEnabled,
+      usageConsent:
+        settings.telemetryEnabled === false
+          ? {
+              ...current.usageConsent,
+              count: "declined",
+              product: "declined",
+              countSource: "settings",
+              productSource: "settings",
+            }
+          : current.usageConsent,
+      crashReportsEnabled:
+        settings.crashReportsEnabled ?? current.crashReportsEnabled,
       showGitChanges: settings.showGitChanges ?? current.showGitChanges,
       keepHistoryAfterContextClear:
         settings.keepHistoryAfterContextClear ??
         current.keepHistoryAfterContextClear,
+      compactExpiredCache:
+        settings.compactExpiredCache ?? current.compactExpiredCache,
       confirmThreadArchive:
         settings.confirmThreadArchive ?? current.confirmThreadArchive,
       onboardingCompletedAt:
@@ -327,35 +408,112 @@ export function registerSystemRoutes(
           ? showUnhandledProviderEvents
           : diagnosticValue,
     });
-    setAppSettings(deps.db, updatedSettings);
-    if (current.telemetryEnabled && !updatedSettings.telemetryEnabled) {
-      deps.telemetry.capture({ name: "telemetry_disabled" });
+
+    if (
+      updatedSettings.defaultThreadMachineId !== null &&
+      updatedSettings.defaultThreadMachineId !== current.defaultThreadMachineId
+    ) {
+      const machine = getHost(deps.db, updatedSettings.defaultThreadMachineId);
+
+      if (
+        !machine ||
+        machine.destroyedAt !== null ||
+        machine.type !== "persistent"
+      ) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "Choose an existing persistent machine for new chats.",
+        );
+      }
     }
+
+    setAppSettings(deps.db, updatedSettings);
+
     deps.telemetry.setEnabled(updatedSettings.telemetryEnabled);
+    setProcessErrorReportingEnabled(effectiveCrashReportsEnabled(deps));
+
     deps.hub.notifySystem(["config-changed"]);
+
     return context.json(compatibleGeneralSettings());
+  });
+
+  get(routes.usageStatus, (context) =>
+    context.json(
+      deps.telemetry.status(context.req.header("x-omnyo-analytics-consent")),
+    ),
+  );
+  get(routes.usagePreview, (context) => context.json(deps.telemetry.preview()));
+  post(routes.usageConsent, (context, payload) => {
+    if (getGateAuthKind(context) === "machine")
+      throw new ApiError(
+        403,
+        "forbidden",
+        "Machines cannot grant usage consent",
+      );
+
+    const result = deps.telemetry.choose(
+      payload,
+      payload.proof ?? context.req.header("x-omnyo-analytics-consent"),
+    );
+
+    deps.hub.notifySystem(["config-changed"]);
+
+    return context.json(result);
+  });
+  post(routes.usageErase, async (context, payload) => {
+    if (getGateAuthKind(context) === "machine")
+      throw new ApiError(
+        403,
+        "forbidden",
+        "Machines cannot change usage consent",
+      );
+
+    return context.json(await deps.telemetry.erase(payload.proof));
   });
 
   post(routes.recordTelemetryEvent, (context, payload) => {
     deps.telemetry.capture(payload);
+
     return context.json({ ok: true });
+  });
+
+  post(routes.reportBug, async (context, payload) => {
+    const result = await sendProcessBugReport(payload);
+
+    if (result.status === "failed") {
+      throw new ApiError(
+        502,
+        "bug_report_failed",
+        result.reason === "timeout"
+          ? "Sentry did not answer in time. Try again."
+          : "Sentry did not accept the report. Try again.",
+        true,
+      );
+    }
+
+    return context.json(result);
   });
 
   put(routes.keyboardSettings, (context, payload) => {
     setAppKeybindingOverrides(deps.db, payload);
     deps.hub.notifySystem(["config-changed"]);
+
     return context.json(getAppKeybindingOverrides(deps.db));
   });
 
   put(routes.experiments, (context, payload) => {
     setExperiments(deps.db, payload);
     deps.hub.notifySystem(["config-changed"]);
+
     return context.json(getExperiments(deps.db));
   });
 
   async function requireKnownTheme(themeId: string): Promise<void> {
     if (isBuiltInThemeId(themeId)) return;
+
     if ((await pluginService.readThemeCss(themeId)) !== null) return;
+
     if (!customThemeNameSchema.safeParse(themeId).success) {
       throw new ApiError(
         400,
@@ -363,6 +521,7 @@ export function registerSystemRoutes(
         `Invalid theme id '${themeId}'.`,
       );
     }
+
     if (readCustomThemeCss(themeRoot, themeId) === null) {
       throw new ApiError(
         404,
@@ -377,12 +536,14 @@ export function registerSystemRoutes(
     await requireKnownTheme(themeId);
     setStoredAppearance(deps.db, { themeId, faviconColor });
     deps.hub.notifySystem(["config-changed"]);
+
     return context.json(await resolveSelectedTheme(themeId, faviconColor));
   });
 
   get(routes.resolveTheme, async (context) => {
     const themeId = context.req.param("id");
     await requireKnownTheme(themeId);
+
     return context.json(
       await resolveSelectedTheme(themeId, getStoredFaviconColor(deps.db)),
     );
@@ -402,11 +563,12 @@ export function registerSystemRoutes(
 
   post(routes.reloadConfig, async (context) => {
     try {
-      await deps.bbAppManagedConfig.reload({ notify: true });
+      await deps.managedAppConfig.reload({ notify: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new ApiError(422, "invalid_config", message);
     }
+
     return context.json({ ok: true });
   });
 
@@ -430,6 +592,7 @@ export function registerSystemRoutes(
       query.projectId === undefined
         ? null
         : requirePublicProject(deps.db, query.projectId);
+
     return context.json({
       providers: (
         await Promise.all(
@@ -444,14 +607,19 @@ export function registerSystemRoutes(
               const leftIndex = LEADING_ENVIRONMENT_PROVIDER_IDS.indexOf(
                 left.provider.id,
               );
+
               const rightIndex = LEADING_ENVIRONMENT_PROVIDER_IDS.indexOf(
                 right.provider.id,
               );
+
               if (leftIndex !== -1 || rightIndex !== -1) {
                 if (leftIndex === -1) return 1;
+
                 if (rightIndex === -1) return -1;
+
                 return leftIndex - rightIndex;
               }
+
               return (
                 left.provider.displayName.localeCompare(
                   right.provider.displayName,
@@ -470,6 +638,7 @@ export function registerSystemRoutes(
               ) {
                 return null;
               }
+
               const machineAvailability =
                 query.projectId === undefined
                   ? {}
@@ -479,6 +648,7 @@ export function registerSystemRoutes(
                         ? {}
                         : { hostId: query.hostId }),
                     });
+
               return {
                 machineProviderId: null,
                 id: record.provider.id,
@@ -518,10 +688,13 @@ export function registerSystemRoutes(
                       const record = getEnvironmentProvider(
                         composition.environmentProviderId,
                       );
+
                       const machine = getMachineProvider(
                         composition.machineProviderId,
                       );
+
                       if (!record || !machine) return null;
+
                       if (
                         project !== null &&
                         (record.provider.requires.projectCheckout ||
@@ -529,12 +702,14 @@ export function registerSystemRoutes(
                         project.gitRemoteUrl === null
                       )
                         return null;
+
                       if (
                         project !== null &&
                         record.provider.requires.projectless !==
                           (project.id === PERSONAL_PROJECT_ID)
                       )
                         return null;
+
                       return {
                         id: composition.id,
                         displayName: composition.displayName,
@@ -602,6 +777,7 @@ export function registerSystemRoutes(
 
   get(routes.providerCatalog, async (context) => {
     await deps.providerRegistry.whenRegistrationsSettled();
+
     return context.json(providerManagementCatalog(deps, pluginService));
   });
   put(routes.providerEnabled, async (context, payload) =>
@@ -617,6 +793,7 @@ export function registerSystemRoutes(
 
   get(routes.providerLogo, async (context) => {
     const providerId = context.req.param("id");
+
     const registration = providerId.startsWith("environment:")
       ? (getEnvironmentProvider(providerId.slice("environment:".length)) ??
         listEnvironmentCompositions().find(
@@ -626,6 +803,7 @@ export function registerSystemRoutes(
       : providerId.startsWith("machine:")
         ? getMachineProvider(providerId.slice("machine:".length))
         : deps.providerRegistry.get(providerId);
+
     if (registration?.icon !== undefined) {
       return pluginImageResponse(
         context,
@@ -633,6 +811,7 @@ export function registerSystemRoutes(
         hashedAssetCacheControl(context.req.query("h"), registration.icon.hash),
       );
     }
+
     throw new ApiError(
       404,
       "provider_logo_not_found",
@@ -669,12 +848,73 @@ export function registerSystemRoutes(
     ),
   );
 
+  post(routes.attachmentDiagnostic, (context, diagnostic) => {
+    deps.logger.warn(
+      {
+        ...diagnostic,
+        appSurface:
+          parseRequestAppSurface(context.req.header(APP_SURFACE_HEADER_NAME)) ??
+          "api",
+        serverVersion: deps.config.appVersion,
+      },
+      "Attachment upload diagnostic",
+    );
+
+    return context.json({ ok: true as const });
+  });
+
+  post(routes.voiceDiagnostic, (context, diagnostic) => {
+    if (!effectiveCrashReportsEnabled(deps)) {
+      return context.json({ ok: true as const });
+    }
+
+    const fields = {
+      ...diagnostic,
+      appSurface:
+        parseRequestAppSurface(context.req.header(APP_SURFACE_HEADER_NAME)) ??
+        "api",
+      serverVersion: deps.config.appVersion,
+    };
+
+    if (diagnostic.outcome === "failed")
+      deps.logger.warn(fields, "Voice input diagnostic");
+    else deps.logger.info(fields, "Voice input diagnostic");
+
+    return context.json({ ok: true as const });
+  });
+
+  post(routes.voicePrepare, (context) => {
+    prepareVoiceInput(deps, { reason: "requested" });
+
+    return context.json({ ok: true as const });
+  });
+
   post(routes.voiceTranscription, async (context) => {
-    const formData = await context.req.formData();
+    const formData = await readMultipartFormData(context.req);
     const file = formData.get("file");
+
     if (!(file instanceof File)) {
       throw new ApiError(400, "invalid_request", "Audio file is required");
     }
+
+    const hasDiagnostic =
+      formData.has("recordingId") || formData.has("attempt");
+
+    const diagnostic = hasDiagnostic
+      ? voiceTranscriptionContextSchema.safeParse({
+          recordingId: formData.get("recordingId"),
+          attempt: Number(formData.get("attempt")),
+        })
+      : null;
+
+    if (diagnostic && !diagnostic.success) {
+      throw new ApiError(
+        400,
+        "invalid_request",
+        "Invalid voice diagnostic context",
+      );
+    }
+
     return context.json({
       text: await transcribeVoiceInput(deps, {
         file,
@@ -683,6 +923,7 @@ export function registerSystemRoutes(
             ? String(formData.get("prompt"))
             : undefined,
         signal: context.req.raw.signal,
+        diagnostic: diagnostic?.success ? diagnostic.data : undefined,
       }),
     });
   });
@@ -706,6 +947,7 @@ export function registerSystemRoutes(
 
   post(routes.applyAppUpdate, async (context, body) => {
     assertAppUpdateAllowed(context);
+
     return context.json(
       await deps.appUpdate.apply({
         confirmInterruptingThreads: body.confirmInterruptingThreads,
@@ -715,9 +957,16 @@ export function registerSystemRoutes(
 
   post(routes.acknowledgeAppUpdate, async (context, body) => {
     assertAppUpdateAllowed(context);
+
     return context.json(
       await deps.appUpdate.acknowledgeResult({ id: body.id }),
     );
+  });
+
+  post(routes.cancelAppUpdate, async (context) => {
+    assertAppUpdateAllowed(context);
+
+    return context.json(await deps.appUpdate.cancel());
   });
 }
 
@@ -728,7 +977,7 @@ function assertAppUpdateAllowed(
     throw new ApiError(
       403,
       "forbidden",
-      "Machine credentials cannot update the bb server",
+      "Machine credentials cannot update the Omnyo server",
     );
   }
 }

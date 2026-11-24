@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 async function createRouteHarness(bytes: Uint8Array) {
-  const directory = await mkdtemp(join(tmpdir(), "bb-host-artifact-route-"));
+  const directory = await mkdtemp(join(tmpdir(), "omnyo-host-artifact-route-"));
   tempDirs.push(directory);
   const path = join(directory, "host.js");
   await writeFile(path, bytes);
@@ -34,6 +34,7 @@ async function createRouteHarness(bytes: Uint8Array) {
   const app = new Hono();
   app.onError(createServerErrorHandler(testLogger));
   registerInternalPluginHostArtifactRoutes(app, { pluginHostArtifacts });
+
   return { app, digest, getHostArtifact, path };
 }
 
@@ -42,6 +43,7 @@ describe("internal plugin host artifact routes", () => {
     const bytes = Buffer.from(
       "export default { experimental_apiVersion: 1 };\n",
     );
+
     const { app, digest, getHostArtifact } = await createRouteHarness(bytes);
 
     const response = await app.request(`/plugins/git/host/${digest}`);
@@ -73,6 +75,7 @@ describe("internal plugin host artifact routes", () => {
     const { app, getHostArtifact } = await createRouteHarness(
       Buffer.from("artifact"),
     );
+
     const staleDigest = "0".repeat(64);
 
     const response = await app.request(`/plugins/git/host/${staleDigest}`);
@@ -85,6 +88,7 @@ describe("internal plugin host artifact routes", () => {
     const { app, digest, path } = await createRouteHarness(
       Buffer.from("artifact"),
     );
+
     await rm(path);
 
     const response = await app.request(`/plugins/git/host/${digest}`);
@@ -97,6 +101,7 @@ describe("internal plugin host artifact routes", () => {
       const response = await harness.app.request(
         `/internal/plugins/git/host/${"0".repeat(64)}`,
       );
+
       expect(response.status).toBe(401);
     });
   });

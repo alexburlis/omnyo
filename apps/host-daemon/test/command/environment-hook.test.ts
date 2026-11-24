@@ -12,15 +12,16 @@ afterEach(cleanupTempDirs);
 
 it("streams hook output and cancels the process before the run RPC settles", async () => {
   const harness = createHarness();
-  const path = await makeTempDir("bb-hook-dispatch-");
+  const path = await makeTempDir("omnyo-hook-dispatch-");
   await writeFile(
-    join(path, ".bb-env-setup.sh"),
+    join(path, ".omnyo-env-setup.sh"),
     "echo running-hook\nsleep 120\n",
   );
   const output: string[] = [];
   const options = harness.dispatchOptions({ dataDir: path });
   options.emitEnvironmentHookProgress = (message) => {
     output.push(message.entry.text);
+
     if (message.entry.text === "running-hook")
       void dispatchOnlineRpcCommand(
         {
@@ -30,6 +31,7 @@ it("streams hook output and cancels the process before the run RPC settles", asy
         options,
       );
   };
+
   await expect(
     dispatchOnlineRpcCommand(
       {
@@ -45,16 +47,17 @@ it("streams hook output and cancels the process before the run RPC settles", asy
     ),
   ).rejects.toThrow("cancelled");
   expect(output).toContain("running-hook");
-  expect(output).toContain(".bb-env-setup.sh cancelled");
+  expect(output).toContain(".omnyo-env-setup.sh cancelled");
 });
 
 it("reconciles running and completed hook IDs without executing a second shell", async () => {
-  const path = await makeTempDir("bb-hook-resume-");
+  const path = await makeTempDir("omnyo-hook-resume-");
   await writeFile(
-    join(path, ".bb-env-setup.sh"),
+    join(path, ".omnyo-env-setup.sh"),
     "echo once >> marker\nwhile [ ! -f proceed ]; do sleep 0.05; done\n",
   );
   const options = createHarness().dispatchOptions({ dataDir: path });
+
   const command = {
     type: "environment.hook.run" as const,
     contributedEnv: [],
@@ -64,14 +67,17 @@ it("reconciles running and completed hook IDs without executing a second shell",
     kind: "setup" as const,
     timeoutMs: 5000,
   };
+
   const first = dispatchOnlineRpcCommand(command, options);
   await expect
     .poll(async () => readFile(join(path, "marker"), "utf8").catch(() => ""))
     .toBe("once\n");
+
   const resumed = dispatchOnlineRpcCommand(
     { ...command, resumeOnly: true },
     options,
   );
+
   await writeFile(join(path, "proceed"), "");
   await Promise.all([first, resumed]);
   await dispatchOnlineRpcCommand({ ...command, resumeOnly: true }, options);
@@ -79,8 +85,8 @@ it("reconciles running and completed hook IDs without executing a second shell",
 });
 
 it("rejects unknown recovery and cancels delayed dispatch within this daemon", async () => {
-  const path = await makeTempDir("bb-hook-unknown-");
-  await writeFile(join(path, ".bb-env-setup.sh"), "echo unsafe > marker\n");
+  const path = await makeTempDir("omnyo-hook-unknown-");
+  await writeFile(join(path, ".omnyo-env-setup.sh"), "echo unsafe > marker\n");
   const options = createHarness().dispatchOptions({ dataDir: path });
   await expect(
     dispatchOnlineRpcCommand(
@@ -120,12 +126,13 @@ it("rejects unknown recovery and cancels delayed dispatch within this daemon", a
 });
 
 it("reports unknown after daemon memory is lost without rerunning the script", async () => {
-  const path = await makeTempDir("bb-hook-daemon-restart-");
+  const path = await makeTempDir("omnyo-hook-daemon-restart-");
   await writeFile(
-    join(path, ".bb-env-setup.sh"),
+    join(path, ".omnyo-env-setup.sh"),
     "echo started > started\nsleep 120\necho unsafe > completed\n",
   );
   const firstOptions = createHarness().dispatchOptions({ dataDir: path });
+
   const command = {
     type: "environment.hook.run" as const,
     contributedEnv: [],
@@ -135,13 +142,16 @@ it("reports unknown after daemon memory is lost without rerunning the script", a
     kind: "setup" as const,
     timeoutMs: 5000,
   };
+
   const running = dispatchOnlineRpcCommand(command, firstOptions).catch(
     () => undefined,
   );
+
   await expect
     .poll(async () => readFile(join(path, "started"), "utf8").catch(() => ""))
     .toBe("started\n");
   const restored = createHarness().dispatchOptions({ dataDir: path });
+
   try {
     await expect(
       dispatchOnlineRpcCommand({ ...command, resumeOnly: true }, restored),
@@ -160,22 +170,24 @@ it("reports unknown after daemon memory is lost without rerunning the script", a
     );
     await running;
   }
+
   await expect(readFile(join(path, "completed"))).rejects.toThrow();
 });
 
 it.each(["setup", "teardown"] as const)(
   "injects %s contributions and forwards progress as-is",
   async (kind) => {
-    const path = await makeTempDir("bb-hook-environment-");
+    const path = await makeTempDir("omnyo-hook-environment-");
     const secret = "hook-secret-fixture";
     await writeFile(
-      join(path, `.bb-env-${kind}.sh`),
+      join(path, `.omnyo-env-${kind}.sh`),
       'test "$HOOK_PLAIN" = configured || exit 1\nprintf "%s" "$GH_TOKEN" > received\nprintf "%s\\n" "$GH_TOKEN"\nexit 1\n',
     );
     const options = createHarness().dispatchOptions({ dataDir: path });
     const output: string[] = [];
     options.emitEnvironmentHookProgress = (message) =>
       output.push(message.entry.text);
+
     const command = {
       type: "environment.hook.run" as const,
       contributedEnv: [
@@ -198,6 +210,7 @@ it.each(["setup", "teardown"] as const)(
       kind,
       timeoutMs: 5000,
     };
+
     if (kind === "setup")
       await expect(dispatchOnlineRpcCommand(command, options)).rejects.toThrow(
         "exit code 1",
@@ -212,9 +225,9 @@ it.each(["setup", "teardown"] as const)(
 it.each(["setup", "teardown"] as const)(
   "streams multiline contributed environment values from %s hook lines",
   async (kind) => {
-    const path = await makeTempDir("bb-hook-multiline-");
+    const path = await makeTempDir("omnyo-hook-multiline-");
     await writeFile(
-      join(path, `.bb-env-${kind}.sh`),
+      join(path, `.omnyo-env-${kind}.sh`),
       'printf "%s\\n" "$MULTILINE" | while IFS= read -r line; do printf "%s\\n" "$line"; sleep 0.05; done\nprintf "%s\\n" "$MULTILINE" | while IFS= read -r line; do printf "%s\\n" "$line"; sleep 0.05; done >&2\n',
     );
     const output: string[] = [];
@@ -222,6 +235,7 @@ it.each(["setup", "teardown"] as const)(
     options.emitEnvironmentHookProgress = (message) => {
       output.push(message.entry.text);
     };
+
     await dispatchOnlineRpcCommand(
       {
         type: "environment.hook.run",
@@ -246,9 +260,9 @@ it.each(["setup", "teardown"] as const)(
 );
 
 it("applies hook NODE_ENV and PATH contributions after sanitizing inherited state", async () => {
-  const path = await makeTempDir("bb-hook-overrides-");
+  const path = await makeTempDir("omnyo-hook-overrides-");
   await writeFile(
-    join(path, ".bb-env-setup.sh"),
+    join(path, ".omnyo-env-setup.sh"),
     'printf "NODE_ENV=%s\\nPATH=%s\\n" "$NODE_ENV" "$PATH"; sleep 0.1\n',
   );
   const output: string[] = [];
@@ -256,10 +270,12 @@ it("applies hook NODE_ENV and PATH contributions after sanitizing inherited stat
   options.emitEnvironmentHookProgress = (message) => {
     output.push(message.entry.text);
   };
+
   const contributedPath =
     process.platform === "win32"
       ? `C:\\review-toolchain;${process.env.PATH ?? ""}`
       : "/review-toolchain:/usr/bin:/bin";
+
   const contributedEnv = Object.entries({
     NODE_ENV: "production",
     PATH: contributedPath,
@@ -269,6 +285,7 @@ it("applies hook NODE_ENV and PATH contributions after sanitizing inherited stat
     source: { core: "machine-environment" as const },
     reason: "test",
   }));
+
   await dispatchOnlineRpcCommand(
     {
       type: "environment.hook.run",
@@ -282,6 +299,7 @@ it("applies hook NODE_ENV and PATH contributions after sanitizing inherited stat
     options,
   );
   expect(output).toContain("NODE_ENV=production");
+
   if (process.platform === "win32") {
     expect(output).toContainEqual(
       expect.stringMatching(/^PATH=[^:]*:\/c\/review-toolchain:/u),

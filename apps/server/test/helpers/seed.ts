@@ -11,20 +11,21 @@ import {
   createProject,
   createThread,
   openSession,
+  setPluginKvValue,
   threads,
   upsertHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   HOST_DAEMON_PROTOCOL_VERSION,
   HOST_ID_FILE_NAME,
   type HostPlatform,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   encodeClientTurnRequestIdNumber,
   parseStoredThreadEvent,
   threadScope,
   turnScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   EnvironmentProviderSelection,
   EnvironmentStatus,
@@ -39,7 +40,7 @@ import type {
   ThreadOriginKind,
   ThreadStatus,
   ThreadVisibility,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { AppDeps } from "../../src/types.js";
 import { ARCHIVE_UNDO_GRACE_MS } from "../../src/constants.js";
 import { registerTestHostRpcCapture } from "./commands.js";
@@ -100,6 +101,7 @@ export function seedHostSession(
 ) {
   const host = seedHost(deps, args);
   const session = seedSession(deps, host.id, { platform: args.platform });
+
   return { host, session };
 }
 
@@ -119,16 +121,18 @@ export function seedSession(
     hostId,
     instanceId: options.instanceId ?? "instance-1",
     hostName: "Test Host",
-    dataDir: `/tmp/bb-host-data/${hostId}`,
+    dataDir: `/tmp/omnyo-host-data/${hostId}`,
     protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
     heartbeatIntervalMs: 5_000,
     leaseTimeoutMs: 30_000,
   });
+
   deps.hub.recordDaemonSessionPlatform(
     session.id,
     options.platform ?? "darwin",
   );
   registerTestHostRpcCapture(deps, { hostId, sessionId: session.id });
+
   return session;
 }
 
@@ -144,9 +148,11 @@ export function seedProjectWithSource(
       path: args.path ?? "/tmp/test-project",
     },
   });
+
   if (source.type !== "local_path") {
     throw new Error("seedProjectWithSource expected a local_path source");
   }
+
   return { project, source };
 }
 
@@ -189,7 +195,7 @@ export function seedEnvironment(
           },
         }
       : {}),
-    branchName: args.branchName !== undefined ? args.branchName : "bb/test",
+    branchName: args.branchName !== undefined ? args.branchName : "omnyo/test",
     baseBranch: args.baseBranch !== undefined ? args.baseBranch : null,
     defaultBranch:
       args.defaultBranch !== undefined ? args.defaultBranch : "main",
@@ -208,6 +214,7 @@ export function seedThread(
     parentThreadId?: string | null;
     sourceThreadId?: string | null;
     lifecycleOwnerThreadId?: string | null;
+    launchedByThreadId?: string | null;
     originKind?: ThreadOriginKind | null;
     originPluginId?: string | null;
     titleFallback?: string | null;
@@ -224,6 +231,7 @@ export function seedThread(
     parentThreadId: args.parentThreadId ?? null,
     sourceThreadId: args.sourceThreadId ?? null,
     lifecycleOwnerThreadId: args.lifecycleOwnerThreadId ?? null,
+    launchedByThreadId: args.launchedByThreadId ?? null,
     originKind: args.originKind ?? null,
     originPluginId: args.originPluginId ?? null,
     visibility: args.visibility ?? "visible",
@@ -246,16 +254,19 @@ export function seedThreadFixture(
 ) {
   const { host, session } = seedHostSession(harness.deps, args.session);
   const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     ...args.environment,
   });
+
   const thread = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
     ...args.thread,
   });
+
   return { host, session, project, environment, thread };
 }
 
@@ -269,7 +280,7 @@ export function seedQueuedMessage(
     permissionMode?: PermissionMode;
     senderThreadId?: string | null;
     serviceTier?: string;
-    /** Defaults to a row with no wait: an ordinary queued message. */
+
     waitingOn?: QueuedMessageWaitingOn | null;
     sendAt?: number | null;
   },
@@ -304,6 +315,7 @@ export function seedEvent<TType extends ThreadEventType>(
     threadId: args.threadId,
     type: args.type,
   });
+
   seedStoredEvent(deps, { ...args, ...deriveStoredEventItemFields(event) });
 }
 
@@ -436,6 +448,28 @@ export function seedStoredEvent(
       data: JSON.stringify(args.data),
     },
   ]);
+}
+
+export function seedChatCompletionReport(
+  db: AppDeps["db"],
+  threadId: string,
+  turnId: string,
+  requestSeq: number,
+): void {
+  setPluginKvValue(
+    db,
+    "omnyo--composer-predictions",
+    `completion-report:v1:${threadId}`,
+    JSON.stringify({
+      turnId,
+      requestSeq,
+      report: {
+        status: "complete",
+        outcome: "The requested plan is delivered.",
+        evidence: "The plan's acceptance checks passed.",
+      },
+    }),
+  );
 }
 
 export function expireArchiveUndoGrace(

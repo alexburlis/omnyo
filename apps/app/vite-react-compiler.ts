@@ -29,6 +29,10 @@ const transformResult = z
   })
   .strict();
 
+const COMPILER_INCOMPATIBLE_HOOKS = "useForm|useReactTable|useVirtualizer";
+
+const HOOK_NAME_PATTERN = `^(?:experimental_)?((?!(?:${COMPILER_INCOMPATIBLE_HOOKS})$)use[A-Z0-9].*)$`;
+
 function digest(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -36,6 +40,7 @@ function digest(value: string) {
 export function containsWorktreePath(serialized: string, root: string) {
   return [root, root.replaceAll("\\", "/")].some((value) => {
     const encoded = JSON.stringify(value).slice(1, -1);
+
     return (
       serialized.includes(encoded) ||
       serialized.includes(JSON.stringify(encoded).slice(1, -1))
@@ -53,7 +58,9 @@ export function compilerTransformKey(
 ) {
   if (!isAbsolute(id)) return null;
   const localId = relative(root, id);
+
   if (localId.startsWith("..") || isAbsolute(localId)) return null;
+
   return digest(
     JSON.stringify([namespace, localId, code, moduleType, environment]),
   );
@@ -80,18 +87,37 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
     };
   }
 > {
-  const plugin = await babel({ presets: [reactCompilerPreset()] });
+  const plugin = await babel({
+    presets: [
+      {
+        ...reactCompilerPreset(),
+        preset: () => ({
+          plugins: [
+            [
+              "babel-plugin-react-compiler",
+              { environment: { hookPattern: HOOK_NAME_PATTERN } },
+            ],
+          ],
+        }),
+      },
+    ],
+  });
+
   const transform = plugin.transform;
+
   if (!transform || typeof transform === "function") {
     throw new Error("Expected the Babel plugin's filtered transform hook");
   }
+
   const handler = transform.handler;
+
   if (
     !("configResolved" in plugin) ||
     typeof plugin.configResolved !== "function"
   ) {
     throw new Error("Expected the Babel plugin's configResolved hook");
   }
+
   const configResolved = plugin.configResolved;
   const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
   let cache: { directory: string; namespace: string } | null = null;
@@ -99,13 +125,15 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
   const stats = { hits: 0, misses: 0 };
   plugin.configResolved = async function (this: void, config: ResolvedConfig) {
     await configResolved.call(this, config);
+
     if (
-      config.command !== "build" ||
+      (config.command !== "build" && !process.env.VITEST) ||
       process.env.ENABLE_REACT_COMPILER_TIMINGS === "1" ||
       process.env.BABEL_SHOW_CONFIG_FOR
     )
       return;
     let directory: string;
+
     try {
       const { stdout } = await promisify(execFile)(
         "git",
@@ -115,10 +143,12 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
           encoding: "utf8",
         },
       );
-      directory = resolve(stdout.trim(), "bb-cache/react-compiler");
+
+      directory = resolve(stdout.trim(), "omnyo-cache/react-compiler");
     } catch {
       directory = resolve(config.cacheDir, "react-compiler");
     }
+
     const files = [
       ...new Set([
         resolve(root, "package.json"),
@@ -128,14 +158,14 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
         ...config.configFileDependencies,
       ]),
     ].sort((a, b) => relative(root, a).localeCompare(relative(root, b)));
+
     const dependencies = await Promise.all(
-      files.map(
-        async (file): Promise<[string, string]> => [
-          relative(root, file),
-          await readFile(file, "utf8"),
-        ],
-      ),
+      files.map(async (file): Promise<[string, string]> => [
+        relative(root, file),
+        await readFile(file, "utf8"),
+      ]),
     );
+
     cache = {
       directory: cacheDirectory ?? directory,
       namespace: compilerCacheNamespace({
@@ -153,6 +183,7 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
       }),
     };
   };
+
   transform.handler = async function (code, id, options) {
     const key =
       cache &&
@@ -164,13 +195,18 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
         options?.moduleType ?? "js",
         this.environment.name,
       );
+
     if (!cache || !key) return handler.call(this, code, id, options);
+
     try {
       const entry = await cacache.get(cache.directory, key);
+
       const result = transformResult.parse(
         JSON.parse(entry.data.toString("utf8")),
       );
+
       stats.hits++;
+
       return result;
     } catch (error) {
       if (
@@ -180,6 +216,7 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
       ) {
         try {
           const entry = await cacache.get.info(cache.directory, key);
+
           if (entry) await cacache.rm.content(cache.directory, entry.integrity);
         } catch (error) {
           if (!warned) {
@@ -190,11 +227,14 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
           }
         }
       }
+
       stats.misses++;
       const result = await handler.call(this, code, id, options);
       const parsed = transformResult.safeParse(result);
+
       if (parsed.success) {
         const serialized = JSON.stringify(parsed.data);
+
         if (!containsWorktreePath(serialized, root)) {
           try {
             await cacache.put(cache.directory, key, serialized);
@@ -208,10 +248,13 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
           }
         }
       }
+
       return result;
     }
   };
+
   const buildEnd = plugin.buildEnd;
+
   return {
     ...plugin,
     api: { compilerCache: stats },
@@ -220,7 +263,8 @@ export async function cachedReactCompiler(cacheDirectory?: string): Promise<
         await (
           typeof buildEnd === "function" ? buildEnd : buildEnd.handler
         ).apply(this, args);
-      if (cache)
+
+      if (cache && !process.env.VITEST)
         console.info(
           `React Compiler cache: ${stats.hits} hits, ${stats.misses} misses`,
         );

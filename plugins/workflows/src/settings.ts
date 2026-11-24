@@ -1,8 +1,8 @@
 import type {
-  BbPluginApi,
+  PluginApi,
   PluginSettingDescriptors,
   PluginSettingsValues,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 interface IntegerField {
@@ -46,6 +46,7 @@ const INTEGER_FIELDS = Object.freeze({
 
 function boundedIntegerSchema(field: IntegerField) {
   const rangeMessage = `${field.label} must be from ${field.minimum} through ${field.maximum}`;
+
   return z
     .number()
     .int(`${field.label} must be a whole number`)
@@ -139,9 +140,11 @@ export function parseStoredWorkflowSettings(value: unknown): WorkflowSettings {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Workflow settings snapshot must be an object");
   }
+
   const object = value as Record<string, unknown>;
   const expected = Object.keys(INTEGER_FIELDS);
   const actual = Object.keys(object);
+
   if (
     expected.some((key) => !Object.hasOwn(object, key)) ||
     actual.some(
@@ -152,15 +155,19 @@ export function parseStoredWorkflowSettings(value: unknown): WorkflowSettings {
   ) {
     throw new Error("Workflow settings snapshot has unexpected fields");
   }
+
   const stored = Object.fromEntries(
     expected.map((key) => {
       const value = object[key];
+
       if (typeof value !== "number" || !Number.isSafeInteger(value)) {
         throw new Error(`Workflow settings snapshot.${key} must be an integer`);
       }
+
       return [key, value];
     }),
   ) as WorkflowSettings;
+
   return validateWorkflowSettings(stored);
 }
 
@@ -173,14 +180,16 @@ interface WorkflowSettingsHandle {
 }
 
 export function registerWorkflowSettings(
-  bb: Pick<BbPluginApi, "settings">,
+  api: Pick<PluginApi, "settings">,
 ): WorkflowSettingsHandle {
-  const handle = bb.settings.define(WORKFLOW_SETTING_DESCRIPTORS);
+  const handle = api.settings.define(WORKFLOW_SETTING_DESCRIPTORS);
   let lastValid = DEFAULT_WORKFLOW_SETTINGS;
+
   return {
     async get() {
       const validated = validateWorkflowSettings(await handle.get());
       lastValid = validated;
+
       return validated;
     },
     onChange(listener, onInvalid) {
@@ -188,9 +197,11 @@ export function registerWorkflowSettings(
         try {
           const validatedNext = validateWorkflowSettings(next);
           let parsedPrevious = lastValid;
+
           try {
             parsedPrevious = validateWorkflowSettings(previous);
           } catch {}
+
           lastValid = validatedNext;
           listener(validatedNext, parsedPrevious);
         } catch (error) {

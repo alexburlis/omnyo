@@ -1,6 +1,6 @@
 import { hostPathEquals } from "./host-path-sql.js";
 import { and, count, eq, inArray, ne } from "drizzle-orm";
-import type { ProjectSource } from "@bb/domain";
+import type { ProjectSource } from "@omnyo/domain";
 import type { DbConnection } from "../connection.js";
 import type { DbNotifier } from "../notifier.js";
 import { projectSources } from "../schema.js";
@@ -23,6 +23,7 @@ export function toProjectSource(row: ProjectSourceRow): ProjectSource {
   if (!row.hostId || !row.path) {
     throw new Error(`Invalid local_path project source row: ${row.id}`);
   }
+
   return {
     id: row.id,
     projectId: row.projectId,
@@ -43,11 +44,13 @@ export function createProjectSource(
   const row = db.transaction((tx) => {
     const now = Date.now();
     const id = createProjectSourceId();
+
     const existingSources = tx
       .select({ id: projectSources.id })
       .from(projectSources)
       .where(eq(projectSources.projectId, input.projectId))
       .all();
+
     const shouldBeDefault =
       input.isDefault === true || existingSources.length === 0;
 
@@ -74,7 +77,9 @@ export function createProjectSource(
       .returning()
       .get();
   });
+
   notifier.notifyProject(input.projectId, ["project-sources-changed"]);
+
   return toProjectSource(row);
 }
 
@@ -94,10 +99,7 @@ export function listProjectSourcesByProjectIds(
     .map(toProjectSource);
 }
 
-export function listProjectSourcesByHost(
-  db: DbConnection,
-  hostId: string,
-) {
+export function listProjectSourcesByHost(db: DbConnection, hostId: string) {
   return db
     .select()
     .from(projectSources)
@@ -165,18 +167,22 @@ export function updateProjectSource(
       .from(projectSources)
       .where(eq(projectSources.id, id))
       .get();
+
     if (!existing) {
       return null;
     }
 
     const now = Date.now();
+
     if (input.isDefault) {
       tx.update(projectSources)
         .set({ isDefault: false, updatedAt: now })
         .where(eq(projectSources.projectId, existing.projectId))
         .run();
     }
+
     const { isDefault: _isDefault, ...rest } = input;
+
     const updatedRow =
       tx
         .update(projectSources)
@@ -193,11 +199,13 @@ export function updateProjectSource(
       ? { projectId: existing.projectId, row: updatedRow }
       : null;
   });
+
   if (!updated) {
     return null;
   }
 
   notifier.notifyProject(updated.projectId, ["project-sources-changed"]);
+
   return toProjectSource(updated.row);
 }
 
@@ -217,6 +225,7 @@ export function getProjectSourceByHost(
         ),
       )
       .get() ?? null;
+
   return source ? toProjectSource(source) : null;
 }
 
@@ -231,12 +240,14 @@ export function deleteProjectSource(
       .from(projectSources)
       .where(eq(projectSources.id, id))
       .get();
+
     if (!existing) {
       return null;
     }
 
     const now = Date.now();
     tx.delete(projectSources).where(eq(projectSources.id, id)).run();
+
     if (existing.isDefault) {
       const replacement =
         tx
@@ -244,6 +255,7 @@ export function deleteProjectSource(
           .from(projectSources)
           .where(eq(projectSources.projectId, existing.projectId))
           .get() ?? null;
+
       if (replacement) {
         tx.update(projectSources)
           .set({ isDefault: true, updatedAt: now })
@@ -256,19 +268,36 @@ export function deleteProjectSource(
           .run();
       }
     }
+
     return existing.projectId;
   });
+
   if (!deleted) {
     return false;
   }
 
   notifier.notifyProject(deleted, ["project-sources-changed"]);
+
   return true;
 }
 
-
-export function projectSourceOwnsPath(db: DbConnection, projectId: string, hostId: string, path: string): boolean {
-  return db.select({ ownsPath: projectSources.ownsPath }).from(projectSources).where(and(
-    eq(projectSources.projectId, projectId), eq(projectSources.hostId, hostId), hostPathEquals(projectSources.path, path),
-  )).get()?.ownsPath ?? false;
+export function projectSourceOwnsPath(
+  db: DbConnection,
+  projectId: string,
+  hostId: string,
+  path: string,
+): boolean {
+  return (
+    db
+      .select({ ownsPath: projectSources.ownsPath })
+      .from(projectSources)
+      .where(
+        and(
+          eq(projectSources.projectId, projectId),
+          eq(projectSources.hostId, hostId),
+          hostPathEquals(projectSources.path, path),
+        ),
+      )
+      .get()?.ownsPath ?? false
+  );
 }

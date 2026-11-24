@@ -1,12 +1,10 @@
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   resolveDevInstanceConfig,
   resolveInheritedDevSkillsRootPaths,
   toDevProcessEnv,
-} from "@bb/config/runtime";
+} from "@omnyo/config/runtime";
 import {
   createStartWorktreeCommand,
   resolveDevCloud,
@@ -14,7 +12,6 @@ import {
   STAGING_CLOUD_URL,
   toDevLaunchProcessEnv,
 } from "../src/commands/run-dev.js";
-import { migrateLegacyDevData } from "../src/lib/legacy-dev-data-migration.js";
 import {
   expectedDevDataDir,
   expectedDevInstanceId,
@@ -22,39 +19,14 @@ import {
   expectedDevServerUrl,
 } from "./dev-instance-expectations.js";
 
-const tempDirs: string[] = [];
-
-async function makeTempDir(prefix: string): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
-  tempDirs.push(dir);
-  return dir;
-}
-
-async function pathExists(pathToCheck: string): Promise<boolean> {
-  try {
-    await fs.access(pathToCheck);
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
-}
-
-afterEach(async () => {
+afterEach(() => {
   vi.restoreAllMocks();
-  await Promise.all(
-    tempDirs
-      .splice(0)
-      .map((dir) => fs.rm(dir, { recursive: true, force: true })),
-  );
 });
 
 describe("run-dev", () => {
   it("derives stable data and ports from a managed checkout", () => {
     const homeDir = "/Users/tester";
-    const repoRoot = "/Users/tester/.bb-dev/projects/env_q7e5i54kxt/bb";
+    const repoRoot = "/Users/tester/.omnyo-dev/projects/env_q7e5i54kxt/omnyo";
     const config = resolveDevInstanceConfig({ homeDir, repoRoot });
 
     expect(config.instanceId).toBe(
@@ -80,6 +52,7 @@ describe("run-dev", () => {
       [7998, "/repo/port-57923"],
       [7999, "/repo/port-7517"],
     ]);
+
     const portsByOffset = new Map(
       [...rootsByOffset].map(([offset, repoRoot]) => [
         offset,
@@ -104,7 +77,7 @@ describe("run-dev", () => {
 
   it("uses the home-relative checkout path for non-managed checkout paths", () => {
     const homeDir = "/Users/tester";
-    const repoRoot = "/Users/tester/src/work/bb-feature-copy";
+    const repoRoot = "/Users/tester/src/work/omnyo-feature-copy";
 
     const config = resolveDevInstanceConfig({ homeDir, repoRoot });
 
@@ -116,11 +89,12 @@ describe("run-dev", () => {
   it("overrides instance selectors while preserving unrelated environment", () => {
     const config = resolveDevInstanceConfig({
       homeDir: "/Users/tester",
-      repoRoot: "/Users/tester/.bb-dev/projects/env_q7e5i54kxt/bb",
+      repoRoot: "/Users/tester/.omnyo-dev/projects/env_q7e5i54kxt/omnyo",
     });
+
     const baseEnv: NodeJS.ProcessEnv = {
-      BB_DATA_DIR: "/Users/tester/.bb-dev",
-      BB_SERVER_PORT: "3334",
+      OMNYO_DATA_DIR: "/Users/tester/.omnyo-dev",
+      OMNYO_SERVER_PORT: "3334",
       NODE_ENV: "production",
       OPENAI_API_KEY: "test-key",
     };
@@ -129,100 +103,153 @@ describe("run-dev", () => {
 
     expect(env.OPENAI_API_KEY).toBe("test-key");
     expect(env.NODE_ENV).toBe("development");
-    expect(env.BB_DATA_DIR).toBe(config.dataDir);
-    expect(env.BB_SERVER_PORT).toBe(String(config.ports.serverPort));
-    expect(env.BB_SERVER_URL).toBe(config.serverUrl);
-    expect(env.BB_HOST_DAEMON_PORT).toBe(String(config.ports.hostDaemonPort));
-    expect(env.BB_DEV_APP_PORT).toBe(String(config.ports.appPort));
-    expect(env.BB_DEV_CONNECT_BASE_URL).toBe(
-      `http://bb.localhost:${config.ports.cloudPort}`,
+    expect(env.OMNYO_DATA_DIR).toBe(config.dataDir);
+    expect(env.OMNYO_SERVER_PORT).toBe(String(config.ports.serverPort));
+    expect(env.OMNYO_SERVER_URL).toBe(config.serverUrl);
+    expect(env.OMNYO_HOST_DAEMON_PORT).toBe(
+      String(config.ports.hostDaemonPort),
+    );
+    expect(env.OMNYO_DEV_APP_PORT).toBe(String(config.ports.appPort));
+    expect(env.OMNYO_DEV_CONNECT_BASE_URL).toBe(
+      `http://omnyo.localhost:${config.ports.cloudPort}`,
     );
   });
 
-  it("inherits parent bb skills for managed worktree dev apps", () => {
+  it("gives dev servers a key-file vault unless the caller chose a key store", () => {
+    const config = resolveDevInstanceConfig({
+      homeDir: "/Users/tester",
+      repoRoot: "/Users/tester/src/omnyo",
+    });
+
+    expect(toDevProcessEnv({ baseEnv: {}, config }).OMNYO_VAULT_KEY_STORE).toBe(
+      "key-file",
+    );
+    expect(
+      toDevProcessEnv({
+        baseEnv: { OMNYO_VAULT_KEY_STORE: "keychain" },
+        config,
+      }).OMNYO_VAULT_KEY_STORE,
+    ).toBe("keychain");
+  });
+
+  it("hands dev children the instance selectors over inherited legacy names", () => {
+    const config = resolveDevInstanceConfig({
+      homeDir: "/Users/tester",
+      repoRoot: "/Users/tester/src/omnyo",
+    });
+
+    const env = toDevProcessEnv({
+      baseEnv: {
+        BB_LOG_LEVEL: "debug",
+        OMNYO_DATA_DIR: "/Users/tester/.omnyo",
+        OMNYO_LOG_LEVEL: "debug",
+        OMNYO_SERVER_PORT: "3334",
+        OMNYO_SERVER_URL: "http://127.0.0.1:3334",
+      },
+      config,
+    });
+
+    expect(env).toMatchObject({
+      OMNYO_DATA_DIR: config.dataDir,
+      OMNYO_LOG_LEVEL: "debug",
+      OMNYO_SERVER_PORT: String(config.ports.serverPort),
+      OMNYO_SERVER_URL: config.serverUrl,
+    });
+  });
+
+  it("inherits parent Omnyo skills for managed worktree dev apps", () => {
     const homeDir = path.resolve("/Users/tester");
+
     const repoRoot = path.join(
       homeDir,
-      ".bb-dev/code-bb-abc123/worktrees/env_feature/bb",
+      ".omnyo-dev/code-omnyo-abc123/worktrees/env_feature/omnyo",
     );
+
     const config = resolveDevInstanceConfig({
       homeDir,
       repoRoot,
     });
 
     const inheritedSkillsRootPaths = [
-      path.join(homeDir, ".bb-dev", "code-bb-abc123", "skills"),
-      path.join(homeDir, ".bb", "skills"),
+      path.join(homeDir, ".omnyo-dev", "code-omnyo-abc123", "skills"),
+      path.join(homeDir, ".omnyo", "skills"),
     ];
+
     expect(resolveInheritedDevSkillsRootPaths({ homeDir, repoRoot })).toEqual(
       inheritedSkillsRootPaths,
     );
     expect(toDevProcessEnv({ baseEnv: {}, config })).toMatchObject({
-      BB_INHERITED_SKILLS_ROOTS: inheritedSkillsRootPaths.join(path.delimiter),
+      OMNYO_INHERITED_SKILLS_ROOTS: inheritedSkillsRootPaths.join(
+        path.delimiter,
+      ),
     });
   });
 
-  it("dedupes inherited bb skills for prod-managed worktree dev apps", () => {
+  it("dedupes inherited Omnyo skills for prod-managed worktree dev apps", () => {
     const homeDir = path.resolve("/Users/tester");
-    const repoRoot = path.join(homeDir, ".bb/worktrees/env_feature/bb");
+    const repoRoot = path.join(homeDir, ".omnyo/worktrees/env_feature/omnyo");
+
     const config = resolveDevInstanceConfig({
       homeDir,
       repoRoot,
     });
 
     expect(resolveInheritedDevSkillsRootPaths({ homeDir, repoRoot })).toEqual([
-      path.join(homeDir, ".bb", "skills"),
+      path.join(homeDir, ".omnyo", "skills"),
     ]);
     expect(toDevProcessEnv({ baseEnv: {}, config })).toMatchObject({
-      BB_INHERITED_SKILLS_ROOTS: path.join(homeDir, ".bb", "skills"),
+      OMNYO_INHERITED_SKILLS_ROOTS: path.join(homeDir, ".omnyo", "skills"),
     });
   });
 
-  it("inherits prod bb skills for ordinary checkout dev apps", () => {
+  it("inherits prod Omnyo skills for ordinary checkout dev apps", () => {
     const homeDir = path.resolve("/Users/tester");
-    const repoRoot = path.join(homeDir, "src", "bb");
+    const repoRoot = path.join(homeDir, "src", "omnyo");
+
     const config = resolveDevInstanceConfig({
       homeDir,
       repoRoot,
     });
 
     expect(resolveInheritedDevSkillsRootPaths({ homeDir, repoRoot })).toEqual([
-      path.join(homeDir, ".bb", "skills"),
+      path.join(homeDir, ".omnyo", "skills"),
     ]);
     expect(toDevProcessEnv({ baseEnv: {}, config })).toMatchObject({
-      BB_INHERITED_SKILLS_ROOTS: path.join(homeDir, ".bb", "skills"),
+      OMNYO_INHERITED_SKILLS_ROOTS: path.join(homeDir, ".omnyo", "skills"),
     });
   });
 
   it("strips parent thread context from dev child processes", () => {
     const config = resolveDevInstanceConfig({
       homeDir: "/Users/tester",
-      repoRoot: "/Users/tester/src/bb",
+      repoRoot: "/Users/tester/src/omnyo",
     });
+
     const baseEnv: NodeJS.ProcessEnv = {
-      BB_ENVIRONMENT_ID: "env_parent",
-      BB_PROJECT_ID: "proj_parent",
-      BB_THREAD_ID: "thr_parent",
-      BB_THREAD_STORAGE: "/Users/tester/.bb/thread-storage/thr_parent",
+      OMNYO_ENVIRONMENT_ID: "env_parent",
+      OMNYO_PROJECT_ID: "proj_parent",
+      OMNYO_THREAD_ID: "thr_parent",
+      OMNYO_THREAD_STORAGE: "/Users/tester/.omnyo/thread-storage/thr_parent",
     };
 
     const env = toDevProcessEnv({ baseEnv, config });
 
-    expect(env.BB_ENVIRONMENT_ID).toBeUndefined();
-    expect(env.BB_THREAD_ID).toBeUndefined();
-    expect(env.BB_THREAD_STORAGE).toBeUndefined();
-    expect(env.BB_PROJECT_ID).toBe("proj_parent");
+    expect(env.OMNYO_ENVIRONMENT_ID).toBeUndefined();
+    expect(env.OMNYO_THREAD_ID).toBeUndefined();
+    expect(env.OMNYO_THREAD_STORAGE).toBeUndefined();
+    expect(env.OMNYO_PROJECT_ID).toBe("proj_parent");
   });
 
   it("passes the account pool marker to a nested dev server", () => {
     const config = resolveDevInstanceConfig({
       homeDir: "/Users/tester",
-      repoRoot: "/Users/tester/src/bb",
+      repoRoot: "/Users/tester/src/omnyo",
     });
+
     const baseEnv: NodeJS.ProcessEnv = {
-      BB_ACCOUNT_POOL_PARENT_URL:
+      OMNYO_ACCOUNT_POOL_PARENT_URL:
         "http://127.0.0.1:38886/api/v1/plugins/account-pool/http",
-      BB_ACCOUNT_POOL_PARENT_TOKEN: "parent-hub-token",
+      OMNYO_ACCOUNT_POOL_PARENT_TOKEN: "parent-hub-token",
       ANTHROPIC_BASE_URL:
         "http://127.0.0.1:38886/api/v1/plugins/account-pool/http",
       ANTHROPIC_AUTH_TOKEN: "parent-hub-token",
@@ -230,12 +257,12 @@ describe("run-dev", () => {
 
     const env = toDevProcessEnv({ baseEnv, config });
 
-    expect(env.BB_ACCOUNT_POOL_PARENT_URL).toBe(
+    expect(env.OMNYO_ACCOUNT_POOL_PARENT_URL).toBe(
       "http://127.0.0.1:38886/api/v1/plugins/account-pool/http",
     );
-    expect(env.BB_ACCOUNT_POOL_PARENT_TOKEN).toBe("parent-hub-token");
+    expect(env.OMNYO_ACCOUNT_POOL_PARENT_TOKEN).toBe("parent-hub-token");
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe("parent-hub-token");
-    expect(env.BB_SERVER_URL).toBe(config.serverUrl);
+    expect(env.OMNYO_SERVER_URL).toBe(config.serverUrl);
   });
 
   it("runs the production-style source launcher for worktree start", () => {
@@ -249,7 +276,7 @@ describe("run-dev", () => {
       "--conditions=source",
       "--import",
       "tsx",
-      path.resolve(import.meta.dirname, "../../..", "scripts/start-bb.mjs"),
+      path.resolve(import.meta.dirname, "../../..", "scripts/start-omnyo.mjs"),
       "--worktree-runtime-policy",
     ]);
   });
@@ -262,10 +289,10 @@ describe("run-dev", () => {
     );
   });
 
-  it("points bb account and Connect at staging only for pnpm dev --staging", () => {
+  it("points Omnyo account and Connect at staging only for pnpm dev --staging", () => {
     const config = resolveDevInstanceConfig({
       homeDir: "/Users/tester",
-      repoRoot: "/Users/tester/src/bb",
+      repoRoot: "/Users/tester/src/omnyo",
     });
 
     expect(resolveDevCloud({ staging: false, mode: "vite" })).toBe("local");
@@ -279,29 +306,30 @@ describe("run-dev", () => {
         cloud: "staging",
         config,
         mode: "vite",
-      }).BB_DEV_CONNECT_BASE_URL,
+      }).OMNYO_DEV_CONNECT_BASE_URL,
     ).toBe(STAGING_CLOUD_URL);
     expect(
       toDevLaunchProcessEnv({
-        baseEnv: { BB_DEV_CONNECT_BASE_URL: STAGING_CLOUD_URL },
+        baseEnv: { OMNYO_DEV_CONNECT_BASE_URL: STAGING_CLOUD_URL },
         cloud: "local",
         config,
         mode: "vite",
-      }).BB_DEV_CONNECT_BASE_URL,
-    ).toBe(`http://bb.localhost:${config.ports.cloudPort}`);
+      }).OMNYO_DEV_CONNECT_BASE_URL,
+    ).toBe(`http://omnyo.localhost:${config.ports.cloudPort}`);
   });
 
   it("uses production serving with checkout-specific dev selectors", () => {
     const config = resolveDevInstanceConfig({
       homeDir: "/Users/tester",
-      repoRoot: "/Users/tester/src/bb",
+      repoRoot: "/Users/tester/src/omnyo",
     });
 
     const env = toDevLaunchProcessEnv({
       baseEnv: {
-        BB_DATA_DIR: "/Users/tester/.bb",
-        BB_DEV_APP_PORT: "5173",
-        BB_TELEMETRY: "true",
+        OMNYO_DATA_DIR: "/Users/tester/.omnyo",
+        OMNYO_DEV_APP_PORT: "5173",
+        OMNYO_SENTRY_DSN: "https://public@sentry.example.test/1",
+        OMNYO_TELEMETRY: "true",
         NODE_ENV: "development",
         OPENAI_API_KEY: "test-key",
       },
@@ -311,222 +339,32 @@ describe("run-dev", () => {
     });
 
     expect(env).toMatchObject({
-      BB_DATA_DIR: config.dataDir,
-      BB_HOST_DAEMON_PORT: String(config.ports.hostDaemonPort),
-      BB_SERVER_PORT: String(config.ports.serverPort),
-      BB_SERVER_URL: config.serverUrl,
-      BB_TELEMETRY: "false",
+      OMNYO_DATA_DIR: config.dataDir,
+      OMNYO_HOST_DAEMON_PORT: String(config.ports.hostDaemonPort),
+      OMNYO_SENTRY_DSN: "",
+      OMNYO_SERVER_PORT: String(config.ports.serverPort),
+      OMNYO_SERVER_URL: config.serverUrl,
+      OMNYO_TELEMETRY: "false",
       NODE_ENV: "production",
       OPENAI_API_KEY: "test-key",
     });
-    expect(env.BB_DEV_APP_PORT).toBeUndefined();
+    expect(env.OMNYO_DEV_APP_PORT).toBeUndefined();
   });
 
-  it("migrates legacy flat dev data into the checkout instance", async () => {
-    const homeDir = await makeTempDir("bb-dev-home-");
-    const legacyDataDir = path.join(homeDir, ".bb-dev");
+  it("keeps worktree serving choices for canonical names", () => {
     const config = resolveDevInstanceConfig({
-      homeDir,
-      repoRoot: path.join(homeDir, "src", "bb"),
-    });
-    await fs.mkdir(path.join(legacyDataDir, "logs"), { recursive: true });
-    await fs.mkdir(path.join(legacyDataDir, "attachments", "proj_test"), {
-      recursive: true,
-    });
-    await fs.mkdir(path.join(legacyDataDir, "worktrees", "env_old", "bb"), {
-      recursive: true,
-    });
-    await fs.mkdir(path.join(legacyDataDir, "dev-supervisors"), {
-      recursive: true,
-    });
-    await fs.writeFile(path.join(legacyDataDir, "bb.db"), "db", "utf8");
-    await fs.writeFile(
-      path.join(legacyDataDir, "bb.db.backup-20260515-160305"),
-      "backup",
-      "utf8",
-    );
-    await fs.writeFile(
-      path.join(legacyDataDir, "auth-secret"),
-      "secret",
-      "utf8",
-    );
-    await fs.writeFile(
-      path.join(legacyDataDir, "attachments", "proj_test", "screenshot.png"),
-      "image",
-      "utf8",
-    );
-    await fs.writeFile(path.join(legacyDataDir, "daemon.lock"), "lock", "utf8");
-    await fs.writeFile(
-      path.join(legacyDataDir, "dev-supervisors", "server.pid"),
-      "not-a-pid",
-      "utf8",
-    );
-    const output = { write: vi.fn() };
-
-    const result = await migrateLegacyDevData({ config, output });
-
-    expect(result).toEqual({
-      migratedEntries: [
-        "attachments",
-        "auth-secret",
-        "bb.db",
-        "bb.db.backup-20260515-160305",
-        "logs",
-      ],
-    });
-    await expect(
-      fs.readFile(path.join(config.dataDir, "bb.db"), "utf8"),
-    ).resolves.toBe("db");
-    await expect(
-      fs.readFile(path.join(config.dataDir, "auth-secret"), "utf8"),
-    ).resolves.toBe("secret");
-    await expect(
-      fs.readFile(
-        path.join(config.dataDir, "attachments", "proj_test", "screenshot.png"),
-        "utf8",
-      ),
-    ).resolves.toBe("image");
-    await expect(
-      fs.access(path.join(legacyDataDir, "worktrees", "env_old", "bb")),
-    ).resolves.toBeUndefined();
-    await expect(
-      fs.access(path.join(legacyDataDir, "dev-supervisors", "server.pid")),
-    ).resolves.toBeUndefined();
-    await expect(
-      fs.access(path.join(legacyDataDir, "daemon.lock")),
-    ).resolves.toBeUndefined();
-    expect(output.write).toHaveBeenCalledWith(
-      expect.stringContaining(
-        `Migrated legacy dev data into ${config.dataDir}`,
-      ),
-    );
-  });
-
-  it("skips migration when the target instance already has data", async () => {
-    const homeDir = await makeTempDir("bb-dev-home-");
-    const legacyDataDir = path.join(homeDir, ".bb-dev");
-    const config = resolveDevInstanceConfig({
-      homeDir,
-      repoRoot: path.join(homeDir, "src", "bb"),
-    });
-    await fs.mkdir(legacyDataDir, { recursive: true });
-    await fs.mkdir(config.dataDir, { recursive: true });
-    await fs.writeFile(path.join(legacyDataDir, "bb.db"), "legacy", "utf8");
-    await fs.writeFile(path.join(config.dataDir, "bb.db"), "target", "utf8");
-
-    await expect(migrateLegacyDevData({ config })).resolves.toEqual({
-      migratedEntries: [],
-      skippedReason: "target-exists",
-    });
-    await expect(
-      fs.readFile(path.join(legacyDataDir, "bb.db"), "utf8"),
-    ).resolves.toBe("legacy");
-    await expect(
-      fs.readFile(path.join(config.dataDir, "bb.db"), "utf8"),
-    ).resolves.toBe("target");
-  });
-
-  it("skips migration when legacy dev data is absent", async () => {
-    const homeDir = await makeTempDir("bb-dev-home-");
-    const config = resolveDevInstanceConfig({
-      homeDir,
-      repoRoot: path.join(homeDir, "src", "bb"),
+      homeDir: "/Users/tester",
+      repoRoot: "/Users/tester/src/omnyo",
     });
 
-    await expect(migrateLegacyDevData({ config })).resolves.toEqual({
-      migratedEntries: [],
-      skippedReason: "legacy-data-not-found",
+    const child = toDevLaunchProcessEnv({
+      baseEnv: { OMNYO_DEV_APP_PORT: "5173", OMNYO_TELEMETRY: "true" },
+      cloud: "local",
+      config,
+      mode: "worktree",
     });
-    expect(await pathExists(config.dataDir)).toBe(false);
-  });
 
-  it("skips migration when legacy dev data has no migratable entries", async () => {
-    const homeDir = await makeTempDir("bb-dev-home-");
-    const legacyDataDir = path.join(homeDir, ".bb-dev");
-    const config = resolveDevInstanceConfig({
-      homeDir,
-      repoRoot: path.join(homeDir, "src", "bb"),
-    });
-    await fs.mkdir(legacyDataDir, { recursive: true });
-    await fs.writeFile(path.join(legacyDataDir, "daemon.lock"), "lock", "utf8");
-
-    await expect(migrateLegacyDevData({ config })).resolves.toEqual({
-      migratedEntries: [],
-      skippedReason: "legacy-data-empty",
-    });
-    expect(await pathExists(config.dataDir)).toBe(false);
-  });
-
-  it("rolls back already moved entries when migration rename fails", async () => {
-    const homeDir = await makeTempDir("bb-dev-home-");
-    const legacyDataDir = path.join(homeDir, ".bb-dev");
-    const config = resolveDevInstanceConfig({
-      homeDir,
-      repoRoot: path.join(homeDir, "src", "bb"),
-    });
-    await fs.mkdir(legacyDataDir, { recursive: true });
-    await fs.writeFile(
-      path.join(legacyDataDir, "auth-secret"),
-      "secret",
-      "utf8",
-    );
-    await fs.writeFile(path.join(legacyDataDir, "bb.db"), "db", "utf8");
-    const renameCalls: string[] = [];
-    const renameWithInjectedFailure = vi.fn(
-      async (sourcePath: string, targetPath: string): Promise<void> => {
-        renameCalls.push(path.basename(sourcePath));
-        if (renameCalls.length === 1) {
-          await fs.rename(sourcePath, targetPath);
-          return;
-        }
-
-        throw new Error("injected rename failure");
-      },
-    );
-
-    await expect(
-      migrateLegacyDevData({
-        config,
-        dependencies: {
-          rename: renameWithInjectedFailure,
-        },
-      }),
-    ).rejects.toThrow("injected rename failure");
-
-    expect(renameCalls).toEqual(["auth-secret", "bb.db"]);
-    await expect(
-      fs.readFile(path.join(legacyDataDir, "auth-secret"), "utf8"),
-    ).resolves.toBe("secret");
-    await expect(
-      fs.readFile(path.join(legacyDataDir, "bb.db"), "utf8"),
-    ).resolves.toBe("db");
-    expect(await pathExists(config.dataDir)).toBe(false);
-  });
-
-  it("does not migrate legacy data while a legacy dev supervisor is running", async () => {
-    const homeDir = await makeTempDir("bb-dev-home-");
-    const legacyDataDir = path.join(homeDir, ".bb-dev");
-    const config = resolveDevInstanceConfig({
-      homeDir,
-      repoRoot: path.join(homeDir, "src", "bb"),
-    });
-    await fs.mkdir(path.join(legacyDataDir, "dev-supervisors"), {
-      recursive: true,
-    });
-    await fs.writeFile(path.join(legacyDataDir, "bb.db"), "db", "utf8");
-    await fs.writeFile(
-      path.join(legacyDataDir, "dev-supervisors", "server.pid"),
-      `${process.pid}\n`,
-      "utf8",
-    );
-
-    await expect(migrateLegacyDevData({ config })).resolves.toEqual({
-      migratedEntries: [],
-      skippedReason: "legacy-dev-process-running",
-    });
-    await expect(
-      fs.readFile(path.join(legacyDataDir, "bb.db"), "utf8"),
-    ).resolves.toBe("db");
-    expect(await pathExists(config.dataDir)).toBe(false);
+    expect(child.OMNYO_TELEMETRY).toBe("false");
+    expect(child.OMNYO_DEV_APP_PORT).toBeUndefined();
   });
 });

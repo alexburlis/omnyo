@@ -1,289 +1,191 @@
+import { experimental_threadIndicators } from "@omnyo/plugin-sdk/app";
 import type {
   PluginSidebarThread,
   PluginSidebarThreadIndicator,
   PluginSidebarThreadRowStatus,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 
-type ThreadStatusShape = Pick<
-  PluginSidebarThread,
-  "status" | "isUnread" | "parentThreadId"
->;
-type ThreadRuntimeShape = Pick<PluginSidebarThread, "runtimeStatus">;
-type ThreadActivityStateShape = Pick<PluginSidebarThread, "activity">;
+type WorkSummary = NonNullable<PluginSidebarThread["experimental_work"]>;
 
-const RUNNING_RUNTIME_STATUSES: Record<
-  PluginSidebarThread["runtimeStatus"],
-  boolean
-> = {
-  active: true,
-  provisioning: true,
-  starting: true,
-  stopping: true,
-  error: false,
-  idle: false,
-  pending: false,
-  "waiting-for-host": false,
-};
-
-const DONE_THREAD_STATUSES: Record<PluginSidebarThread["status"], boolean> = {
-  error: true,
-  idle: true,
-  active: false,
-  starting: false,
-  stopping: false,
-  pending: false,
-};
-
-export function isRuntimeBusyThread(thread: ThreadRuntimeShape): boolean {
-  return RUNNING_RUNTIME_STATUSES[thread.runtimeStatus] ?? false;
-}
-
-function hasActiveWorkflowActivity(thread: ThreadActivityStateShape): boolean {
-  return thread.activity.workflows > 0;
-}
-
-function hasActiveBackgroundAgentActivity(
-  thread: ThreadActivityStateShape,
-): boolean {
-  return thread.activity.backgroundAgents > 0;
-}
-
-function hasActiveBackgroundCommandActivity(
-  thread: ThreadActivityStateShape,
-): boolean {
-  return thread.activity.backgroundCommands > 0;
-}
-
-function hasActivePlanModeActivity(thread: ThreadActivityStateShape): boolean {
-  return thread.activity.planMode > 0;
-}
-
-function hasActiveGoalActivity(thread: ThreadActivityStateShape): boolean {
-  return thread.activity.goals > 0;
-}
-
-function isBusyThread(
-  thread: ThreadRuntimeShape & ThreadActivityStateShape,
-): boolean {
-  return (
-    isRuntimeBusyThread(thread) ||
-    hasActiveWorkflowActivity(thread) ||
-    hasActiveBackgroundAgentActivity(thread) ||
-    hasActiveBackgroundCommandActivity(thread) ||
-    hasActivePlanModeActivity(thread) ||
-    hasActiveGoalActivity(thread)
-  );
-}
-
-export interface ThreadListIndicatorState {
-  hasPendingInteraction: boolean;
-  hasUnsubmittedDraft: boolean;
-  hasUnreadError: boolean;
-  hasUnreadSuccess: boolean;
-  isBackgroundAgentActive: boolean;
-  isBackgroundCommandActive: boolean;
-  isGoalActive: boolean;
-  isPlanModeActive: boolean;
-  isRuntimeActive: boolean;
-  isWorkflowActive: boolean;
-  queuedWork: PluginSidebarThread["queuedWork"];
-}
+export type ThreadListIndicatorState = Parameters<
+  typeof experimental_threadIndicators.resolve
+>[0];
 
 export type ThreadListIndicatorKind = PluginSidebarThreadIndicator;
 
-const THREAD_LIST_INDICATOR_LABELS: Record<
-  Exclude<ThreadListIndicatorKind, "none">,
-  string
-> = {
-  "unread-error": "Unread thread failed",
-  "waiting-for-input": "Thread needs user input",
-  "working-draft": "Thread working with unsubmitted draft",
-  workflow: "Workflow running",
-  "background-agent": "Background agent running",
-  "background-command": "Background command running",
-  "plan-mode": "Plan mode active",
-  goal: "Goal active",
-  runtime: "Thread working",
-  "queued-failed": "Queued message failed to send",
-  "queued-waiting": "Thread has a message waiting to send",
-  draft: "Thread has unsubmitted draft",
-  "unread-success": "Unread thread succeeded",
-};
+export function resolveThreadListIndicator(
+  state: ThreadListIndicatorState,
+): ThreadListIndicatorKind {
+  if (
+    state.work?.primary.label !== "needs-you" &&
+    (state.work?.optionalInput.length ?? 0) > 0
+  )
+    return "input-welcome";
+
+  return experimental_threadIndicators.resolve(state);
+}
 
 export function getThreadListIndicatorLabel(
   kind: ThreadListIndicatorKind,
 ): string | null {
-  return kind === "none" ? null : THREAD_LIST_INDICATOR_LABELS[kind];
+  return kind === "input-welcome"
+    ? "Open decision; the agent can continue"
+    : experimental_threadIndicators.label(kind);
+}
+
+export const hasThreadListWorkingActivity =
+  experimental_threadIndicators.working;
+
+export function strongestThreadWorkSummary(
+  summaries: readonly (WorkSummary | null | undefined)[],
+): WorkSummary | null {
+  const strongest = experimental_threadIndicators.strongest(summaries);
+
+  const optionalInput = new Map(
+    summaries.flatMap((summary) =>
+      (summary?.optionalInput ?? []).map((input) => [input.id, input] as const),
+    ),
+  );
+
+  if (optionalInput.size === 0) return strongest;
+
+  const selected = strongest ?? summaries.find((summary) => summary != null);
+
+  if (selected === null || selected === undefined) return null;
+
+  const activity = new Map(
+    summaries.flatMap((summary) =>
+      (summary?.activity ?? []).map((entry) => [entry.id, entry] as const),
+    ),
+  );
+
+  return {
+    ...selected,
+    optionalInput: [...optionalInput.values()],
+    activity: [...activity.values()],
+  };
 }
 
 interface ThreadStatusResolution {
   accessibleLabel: string | null;
   indicatorKind: ThreadListIndicatorKind;
   rowStatusIsVisible: boolean;
+  rowStatus: PluginSidebarThreadRowStatus | null;
 }
+
+export const STOPPING_ROW_STATUS: PluginSidebarThreadRowStatus = {
+  icon: "Square",
+  label: "Stopping",
+  tone: "default",
+};
 
 export function resolveThreadStatus(
   state: ThreadListIndicatorState,
   rowStatus: PluginSidebarThreadRowStatus | null,
+  stopping = false,
 ): ThreadStatusResolution {
+  if (stopping && hasThreadListWorkingActivity(state))
+    return {
+      accessibleLabel: STOPPING_ROW_STATUS.label,
+      indicatorKind: "none",
+      rowStatusIsVisible: true,
+      rowStatus: STOPPING_ROW_STATUS,
+    };
+
   const indicatorKind = resolveThreadListIndicator(state);
+
   const rowStatusIsVisible =
     rowStatus !== null &&
-    indicatorKind !== "runtime" &&
-    indicatorKind !== "unread-error" &&
-    indicatorKind !== "waiting-for-input";
+    (indicatorKind === "open" ||
+      indicatorKind === "none" ||
+      indicatorKind === "draft");
+
   return {
     accessibleLabel: rowStatusIsVisible
       ? rowStatus.label
-      : getThreadListIndicatorLabel(indicatorKind),
+      : indicatorKind === "input-welcome"
+        ? hasThreadListWorkingActivity(state)
+          ? "Open decision; work is running"
+          : getThreadListIndicatorLabel(indicatorKind)
+        : (state.work?.primary.reason.text ?? "Work status unavailable."),
     indicatorKind,
     rowStatusIsVisible,
+    rowStatus: rowStatusIsVisible ? rowStatus : null,
   };
-}
-
-export function hasThreadListWorkingActivity(
-  state: ThreadListIndicatorState,
-  hasRunningPluginStatus = false,
-): boolean {
-  return (
-    state.isRuntimeActive ||
-    state.isWorkflowActive ||
-    state.isBackgroundAgentActive ||
-    state.isBackgroundCommandActive ||
-    state.isPlanModeActive ||
-    state.isGoalActive ||
-    hasRunningPluginStatus
-  );
 }
 
 export function threadListIndicatorStateForThread(
-  thread: ThreadStatusShape &
-    ThreadRuntimeShape &
-    ThreadActivityStateShape &
-    Pick<PluginSidebarThread, "hasPendingInteraction" | "queuedWork">,
+  thread: Pick<PluginSidebarThread, "experimental_work">,
   hasUnsubmittedDraft: boolean,
 ): ThreadListIndicatorState {
-  const unreadDone = isUnreadDoneThread(thread);
-  return {
-    hasPendingInteraction: thread.hasPendingInteraction,
-    hasUnsubmittedDraft,
-    hasUnreadError: unreadDone && thread.status === "error",
-    hasUnreadSuccess: unreadDone && thread.status !== "error",
-    isBackgroundAgentActive: hasActiveBackgroundAgentActivity(thread),
-    isBackgroundCommandActive: hasActiveBackgroundCommandActivity(thread),
-    isGoalActive: hasActiveGoalActivity(thread),
-    queuedWork: thread.queuedWork,
-    isPlanModeActive: hasActivePlanModeActivity(thread),
-    isRuntimeActive: isRuntimeBusyThread(thread),
-    isWorkflowActive: hasActiveWorkflowActivity(thread),
-  };
-}
-
-export function resolveThreadListIndicator(
-  state: ThreadListIndicatorState,
-): ThreadListIndicatorKind {
-  if (state.hasUnreadError) return "unread-error";
-  if (state.hasPendingInteraction) return "waiting-for-input";
-
-  const hasActiveWork = hasThreadListWorkingActivity(state);
-  if (state.hasUnsubmittedDraft && hasActiveWork) return "working-draft";
-  if (state.isPlanModeActive) return "plan-mode";
-  if (state.isGoalActive) return "goal";
-  if (state.isRuntimeActive) return "runtime";
-  if (state.isWorkflowActive) return "workflow";
-  if (state.isBackgroundAgentActive) return "background-agent";
-  if (state.isBackgroundCommandActive) return "background-command";
-  if (state.queuedWork === "failed") return "queued-failed";
-  if (state.hasUnreadSuccess) return "unread-success";
-  if (state.queuedWork === "waiting") return "queued-waiting";
-  if (state.hasUnsubmittedDraft) return "draft";
-  return "none";
+  return { work: thread.experimental_work ?? null, hasUnsubmittedDraft };
 }
 
 export interface CollapsedChildActivity {
   threadIds: readonly string[];
-  pending: boolean;
-  working: boolean;
-  runtimeWorking: boolean;
-  workflow: boolean;
-  backgroundAgent: boolean;
-  backgroundCommand: boolean;
-  planMode: boolean;
-  goal: boolean;
+  work: WorkSummary | null;
+  parentRowWork: readonly (WorkSummary | null)[];
+  summaries: readonly WorkSummary[];
   unread: boolean;
   unreadError: boolean;
 }
 
 export const NO_COLLAPSED_CHILD_ACTIVITY: CollapsedChildActivity = {
   threadIds: [],
-  pending: false,
-  working: false,
-  runtimeWorking: false,
-  workflow: false,
-  backgroundAgent: false,
-  backgroundCommand: false,
-  planMode: false,
-  goal: false,
+  work: null,
+  parentRowWork: [],
+  summaries: [],
   unread: false,
   unreadError: false,
 };
 
-type ThreadActivityShape = ThreadStatusShape &
-  ThreadRuntimeShape &
-  Pick<PluginSidebarThread, "id" | "activity" | "hasPendingInteraction">;
-
 export function getCollapsedChildActivity(
-  threads: readonly ThreadActivityShape[],
+  threads: readonly Pick<
+    PluginSidebarThread,
+    "id" | "status" | "parentThreadId" | "isUnread" | "experimental_work"
+  >[],
 ): CollapsedChildActivity {
-  const threadIds: string[] = [];
-  let pending = false;
-  let working = false;
-  let runtimeWorking = false;
-  let workflow = false;
-  let backgroundAgent = false;
-  let backgroundCommand = false;
-  let planMode = false;
-  let goal = false;
-  let unread = false;
-  let unreadError = false;
-  for (const thread of threads) {
-    threadIds.push(thread.id);
-    const childUnreadDone = isUnreadDoneThread(thread);
-    if (childUnreadDone && thread.status === "error") {
-      unreadError = true;
-    } else if (childUnreadDone) {
-      unread = true;
-    }
+  const summaries = threads.flatMap((thread) =>
+    thread.experimental_work === null || thread.experimental_work === undefined
+      ? []
+      : [thread.experimental_work],
+  );
 
-    if (thread.hasPendingInteraction) {
-      pending = true;
-    }
-    if (isBusyThread(thread)) working = true;
-    if (isRuntimeBusyThread(thread)) runtimeWorking = true;
-    if (hasActiveWorkflowActivity(thread)) workflow = true;
-    if (hasActiveBackgroundAgentActivity(thread)) backgroundAgent = true;
-    if (hasActiveBackgroundCommandActivity(thread)) backgroundCommand = true;
-    if (hasActivePlanModeActivity(thread)) planMode = true;
-    if (hasActiveGoalActivity(thread)) goal = true;
-  }
   return {
-    threadIds,
-    pending,
-    working,
-    runtimeWorking,
-    workflow,
-    backgroundAgent,
-    backgroundCommand,
-    planMode,
-    goal,
-    unread,
-    unreadError,
+    threadIds: threads.map((thread) => thread.id),
+    work: strongestThreadWorkSummary(
+      threads.map((thread) => thread.experimental_work),
+    ),
+    parentRowWork: threads.flatMap((thread) =>
+      parentRowChildWork(thread.experimental_work ?? null),
+    ),
+    summaries,
+    unread: threads.some(
+      (thread) => isUnreadThread(thread) && thread.status !== "error",
+    ),
+    unreadError: threads.some(
+      (thread) => isUnreadThread(thread) && thread.status === "error",
+    ),
   };
 }
 
-export function isUnreadDoneThread(thread: ThreadStatusShape): boolean {
-  if (thread.parentThreadId != null) {
-    return false;
-  }
-  return (DONE_THREAD_STATUSES[thread.status] ?? false) && thread.isUnread;
+function parentRowChildWork(work: WorkSummary | null): (WorkSummary | null)[] {
+  if (work === null) return [null];
+
+  if (work.primary.label === "needs-you") return [];
+
+  return [
+    work.optionalInput.length === 0 ? work : { ...work, optionalInput: [] },
+  ];
+}
+
+export function isUnreadThread(
+  thread: Pick<PluginSidebarThread, "isUnread" | "experimental_work">,
+): boolean {
+  return (
+    thread.isUnread &&
+    !hasThreadListWorkingActivity(
+      threadListIndicatorStateForThread(thread, false),
+    )
+  );
 }

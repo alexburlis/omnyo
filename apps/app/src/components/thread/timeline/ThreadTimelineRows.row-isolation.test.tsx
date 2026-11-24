@@ -13,11 +13,14 @@ const renderedMessageTexts = vi.hoisted(() => [] as string[]);
 vi.mock("./ConversationMessageContent.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("./ConversationMessageContent.js")>();
+
   const Actual = actual.ConversationMessageContent;
+
   return {
     ...actual,
     ConversationMessageContent: (props: ComponentProps<typeof Actual>) => {
       renderedMessageTexts.push(props.text);
+
       return createElement(Actual, props);
     },
   };
@@ -43,6 +46,7 @@ describe("ThreadTimelineRows row isolation", () => {
   it("re-renders only the rows whose mobile action display flips when a message is appended", () => {
     const queryClient = new QueryClient();
     const rows = Array.from({ length: 12 }, (_, index) => assistantRow(index));
+
     const renderTimeline = (timelineRows: typeof rows) => (
       <MemoryRouter>
         <QueryClientProvider client={queryClient}>
@@ -55,6 +59,7 @@ describe("ThreadTimelineRows row isolation", () => {
         </QueryClientProvider>
       </MemoryRouter>
     );
+
     const view = render(renderTimeline(rows));
     expect(renderedMessageTexts).toHaveLength(12);
     renderedMessageTexts.length = 0;

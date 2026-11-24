@@ -1,4 +1,4 @@
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import { ThreadTimelineRows } from "@/components/thread/timeline";
 import { systemRow } from "@/test/fixtures/thread-timeline-rows";
 import { StoryCard, StoryRow } from "../../../../../.ladle/story-card";
@@ -31,11 +31,11 @@ const provisioningPending: TimelineRow = systemRow({
   detail:
     "Creating worktree (305ms)\n" +
     "HEAD is now at 37eeec85 Refactor timeline row titles\n" +
-    "Preparing worktree (new branch 'bb/investigate-thread-timeline-load-thr_sjgc9pafri')\n" +
+    "Preparing worktree (new branch 'omnyo/investigate-thread-timeline-load-thr_sjgc9pafri')\n" +
     "Created worktree (305ms)\n" +
-    "Using workspace: /Users/michael/.bb-dev/worktrees/env_etyr7f84cg/bb\n" +
-    "Running .bb-env-setup.sh\n" +
-    "[bb-env-setup] Running: pnpm install\n" +
+    "Using workspace: /Users/michael/.omnyo-dev/worktrees/env_etyr7f84cg/omnyo\n" +
+    "Running .omnyo-env-setup.sh\n" +
+    "[omnyo-env-setup] Running: pnpm install\n" +
     "Scope: all 35 workspace projects\n" +
     "Lockfile is up to date, resolution step is skipped\n" +
     "Progress: resolved 1094, reused 1093, downloaded 0, added 877",
@@ -56,9 +56,9 @@ const provisioningCompleted: TimelineRow = systemRow({
   title: "Provisioned thread",
   detail:
     "Created worktree (305ms)\n" +
-    "Using workspace: /Users/michael/.bb-dev/worktrees/env_etyr7f84cg/bb\n" +
-    ".bb-env-setup.sh finished (8.2s)\n" +
-    "Using branch: bb/investigate-thread-timeline-load-thr_sjgc9pafri (37eeec8)\n" +
+    "Using workspace: /Users/michael/.omnyo-dev/worktrees/env_etyr7f84cg/omnyo\n" +
+    ".omnyo-env-setup.sh finished (8.2s)\n" +
+    "Using branch: omnyo/investigate-thread-timeline-load-thr_sjgc9pafri (37eeec8)\n" +
     "Provisioned thread (8.7s)",
   status: "completed",
   completedAt: 1778027670469,
@@ -554,6 +554,7 @@ export function SummaryOverflow() {
         "config.json",
     ],
   ];
+
   return (
     <StoryCard>
       {summaries.map(([label, title]) => (

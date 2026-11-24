@@ -1,4 +1,4 @@
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import {
   ThreadTimelineRows,
   type ThreadTimelineRowsProps,
@@ -15,10 +15,14 @@ function TimelineStage({ children }: { children: React.ReactNode }) {
 }
 
 const THREAD_ID = "thr_image_view";
+
 const TURN_ID = "019e88bb-c6df-75f0-9b3a-f9e7722595c8";
+
 const STARTED_AT = 1780410615740;
+
 const TRANSPARENT_IMAGE_PATH =
   "/tmp/sightglass-quote-merge-check/transparent-overlay.png";
+
 const SAMPLE_IMAGE_URL =
   "data:image/svg+xml;utf8," +
   encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760">
@@ -46,6 +50,7 @@ const SAMPLE_IMAGE_URL =
   <rect x="866" y="530" width="250" height="20" rx="4" fill="#d1d5db"/>
   <rect x="866" y="590" width="296" height="20" rx="4" fill="#d1d5db"/>
 </svg>`);
+
 const TRANSPARENT_IMAGE_URL =
   "data:image/svg+xml;utf8," +
   encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">

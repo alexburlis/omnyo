@@ -9,10 +9,7 @@ type ServiceTierProviderSource = Pick<ProviderInfo, "serviceTiers"> & {
   capabilities: Pick<ProviderInfo["capabilities"], "supportsServiceTier">;
 };
 
-type ServiceTierModelSource = Pick<
-  AvailableModel,
-  "supportedServiceTiers"
->;
+type ServiceTierModelSource = Pick<AvailableModel, "supportedServiceTiers">;
 
 export function providerServiceTierOptions(
   provider: ServiceTierProviderSource | null | undefined,
@@ -20,6 +17,7 @@ export function providerServiceTierOptions(
   if (!provider?.capabilities.supportsServiceTier) {
     return [];
   }
+
   return (provider.serviceTiers ?? []).filter(
     (tier) => tier.id !== DEFAULT_SERVICE_TIER,
   );
@@ -31,16 +29,22 @@ export function resolveServiceTierOptions(args: {
 }): ProviderOptionDescriptor[] {
   const declared = providerServiceTierOptions(args.provider);
   const supported = args.model?.supportedServiceTiers;
+
   if (supported === undefined) {
     return declared;
   }
+
   const supportedById = new Map(supported.map((tier) => [tier.id, tier]));
+
   return declared.flatMap((tier) => {
     const modelTier = supportedById.get(tier.id);
+
     if (modelTier === undefined) {
       return [];
     }
+
     const description = modelTier.description ?? tier.description;
+
     return [
       {
         id: tier.id,

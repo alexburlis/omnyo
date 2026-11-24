@@ -1,13 +1,13 @@
 import { useState } from "react";
-import type { Host, LastServerMove } from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
+import type { Host, LastServerMove } from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { ConfirmDeleteDialog } from "@bb/shared-ui/confirm-delete-dialog";
+} from "@omnyo/shared-ui/dialog";
+import { ConfirmDeleteDialog } from "@omnyo/shared-ui/confirm-delete-dialog";
 import { appToast } from "@/components/ui/app-toast";
 import {
   SettingsRow,
@@ -32,7 +32,8 @@ export function oldServerCopyDescription(
   host: Host,
   lastMove: LastServerMove,
 ): string {
-  const base = `The server moved from ${host.name} to ${lastMove.toHostName}. The old server data is still on ${host.name}, locked so bb won't start a server from it. Keep it as a backup, or delete it once the new server works.`;
+  const base = `The server moved from ${host.name} to ${lastMove.toHostName}. The old server data is still on ${host.name}, locked so Omnyo won't start a server from it. Keep it as a backup, or delete it once the new server works.`;
+
   return host.status === "connected"
     ? base
     : `${base} ${host.name} has to be online to delete it.`;

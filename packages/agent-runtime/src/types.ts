@@ -1,4 +1,5 @@
 import type {
+  RetainedProviderSession,
   PermissionMode,
   AvailableModel,
   ClientTurnRequestId,
@@ -11,17 +12,19 @@ import type {
   ProviderFork,
   ProviderRecoveryKind,
   RuntimeThreadExecutionOptions,
+  ServiceTier,
   ThreadEvent,
   ToolCallRequest,
   ToolCallResponse,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   ProviderHealthResult,
   ProviderInstallationRunResult,
   ProviderInstallationStatus,
   ProviderUsageResult,
   SkillsConfigureRoot,
-} from "@bb/provider-bridge-protocol";
+} from "@omnyo/provider-bridge-protocol";
+import type { RuntimeOpenBackgroundWork } from "./runtime-background-work-state.js";
 
 export type AgentRuntimeShellEnvironment = Record<string, string>;
 
@@ -41,6 +44,7 @@ export type AgentRuntimeSkillRoot = SkillsConfigureRoot;
 export interface AgentRuntimeProcessExitThreadState {
   activeTurnId: string | null;
   pendingTurnStart: boolean;
+  pendingRequestId?: ClientTurnRequestId;
   providerThreadId: string | null;
   threadId: string;
 }
@@ -66,8 +70,8 @@ export interface AgentRuntimeOptions {
   threadStorageRootPath?: string;
 
   bridgeBundleDir?: string;
+  containProviderProcess?: (pid: number) => Promise<void>;
   turnStartWatchdog?: { thresholdMs?: number; intervalMs?: number };
-  rateLimitRetry?: { delaysMs?: readonly number[] };
   threadCreation?: { requestTimeoutMs?: number };
 
   skillRoots?: readonly AgentRuntimeSkillRoot[];
@@ -84,6 +88,8 @@ export interface AgentRuntimeOptions {
   ) => Promise<PendingInteractionResolution>;
 
   onStderr?: (line: string, threadId?: string) => void;
+
+  onThreadDetached?: (info: { providerId: string; threadId: string }) => void;
 
   onProcessExit?: (info: AgentRuntimeProcessExitInfo) => void;
 
@@ -137,6 +143,7 @@ export interface StartThreadArgs {
   fork?: {
     sourceProviderThreadId: string;
     sourceProviderCheckpointId?: string;
+    restoreArchivedSource?: boolean;
   };
 }
 
@@ -197,6 +204,8 @@ export interface RunTurnArgs {
   instructions?: string;
 }
 
+export type RunTurnResult = { status: "started" } | { status: "unconfirmed" };
+
 export interface SteerTurnArgs {
   threadId: string;
   expectedTurnId: string;
@@ -216,7 +225,14 @@ interface SteerTurnStaleResult {
   activeTurnId: string | null;
 }
 
-export type SteerTurnResult = SteerTurnAppliedResult | SteerTurnStaleResult;
+interface SteerTurnUnconfirmedResult {
+  status: "unconfirmed";
+}
+
+export type SteerTurnResult =
+  | SteerTurnAppliedResult
+  | SteerTurnStaleResult
+  | SteerTurnUnconfirmedResult;
 
 export interface StopThreadArgs {
   threadId: string;
@@ -253,6 +269,7 @@ export interface ReapedIdleProviderSession {
 
 export interface ReapIdleProviderSessionsResult {
   reapedSessions: ReapedIdleProviderSession[];
+  retainedSessions: RetainedProviderSession[];
 }
 
 export interface RenameThreadArgs {
@@ -282,6 +299,7 @@ export interface ListModelsArgs {
   providerId: string;
   bridgeLaunch: AgentRuntimeBridgeLaunch;
   cwd?: string;
+  contributedEnv?: readonly AgentRuntimeContributedEnvEntry[];
 }
 
 interface ProviderMaintenanceArgs {
@@ -308,11 +326,16 @@ export interface AgentRuntime {
 
   resumeThread(args: ResumeThreadArgs): Promise<ResumeThreadResult>;
 
-  runTurn(args: RunTurnArgs): Promise<void>;
+  runTurn(args: RunTurnArgs): Promise<RunTurnResult>;
 
   steerTurn(args: SteerTurnArgs): Promise<SteerTurnResult>;
 
   stopThread(args: StopThreadArgs): Promise<StopThreadResult>;
+
+  setThreadSpeed(args: {
+    threadId: string;
+    serviceTier: ServiceTier;
+  }): Promise<void>;
 
   clearThreadGoal(args: ClearThreadGoalArgs): Promise<{ cleared: boolean }>;
 
@@ -359,6 +382,8 @@ export interface AgentRuntime {
   getLiveThreadIds(): string[];
 
   hasOpenBackgroundWork(): boolean;
+
+  listOpenBackgroundWork(): RuntimeOpenBackgroundWork[];
 
   shutdown(): Promise<void>;
 }

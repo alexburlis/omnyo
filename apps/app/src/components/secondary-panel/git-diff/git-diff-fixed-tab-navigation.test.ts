@@ -10,6 +10,7 @@ describe("createGitDiffFixedTabDestination", () => {
     const openCommit = vi.fn();
     const openFile = vi.fn();
     const openOrdinary = vi.fn();
+
     const destination = createGitDiffFixedTabDestination({
       eligible: true,
       openCommit,
@@ -37,12 +38,14 @@ describe("createGitDiffFixedTabDestination", () => {
 
   it("declines every target while Changes is ineligible", () => {
     const openOrdinary = vi.fn();
+
     const destination = createGitDiffFixedTabDestination({
       eligible: false,
       openCommit: vi.fn(),
       openFile: vi.fn(),
       openOrdinary,
     });
+
     expect(destination.open(undefined)).toBe(false);
     expect(openOrdinary).not.toHaveBeenCalled();
   });

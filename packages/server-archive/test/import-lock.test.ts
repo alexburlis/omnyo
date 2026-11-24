@@ -8,7 +8,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { withFileLock } from "@bb/config/file-lock";
+import { withFileLock } from "@omnyo/config/file-lock";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   extractServerArchive,
@@ -20,6 +20,7 @@ import {
 
 const lockAttempts = vi.hoisted(() => {
   const waiters = new Map<string, () => void>();
+
   return {
     notify(lockPath: string): void {
       waiters.get(lockPath)?.();
@@ -32,8 +33,10 @@ const lockAttempts = vi.hoisted(() => {
   };
 });
 
-vi.mock("@bb/config/file-lock", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@bb/config/file-lock")>();
+vi.mock("@omnyo/config/file-lock", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@omnyo/config/file-lock")>();
+
   return {
     ...actual,
     withFileLock<T>(args: {
@@ -42,6 +45,7 @@ vi.mock("@bb/config/file-lock", async (importOriginal) => {
       work: () => Promise<T>;
     }): Promise<T> {
       lockAttempts.notify(args.path);
+
       return actual.withFileLock(args);
     },
   };
@@ -50,8 +54,9 @@ vi.mock("@bb/config/file-lock", async (importOriginal) => {
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "bb-server-lock-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "omnyo-server-lock-"));
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 
@@ -85,11 +90,11 @@ async function stageImport(): Promise<{
   manifest: ServerArchiveManifest;
 }> {
   const sourceDataDir = await makeTempDir();
-  await writeDataFile(sourceDataDir, "bb.db", "server database");
+  await writeDataFile(sourceDataDir, "app.db", "server database");
   await writeDataFile(
     sourceDataDir,
     "config.json",
-    JSON.stringify({ config: { BB_LOG_LEVEL: "info" } }),
+    JSON.stringify({ config: { OMNYO_LOG_LEVEL: "info" } }),
   );
   await writeDataFile(
     sourceDataDir,
@@ -110,7 +115,7 @@ async function stageImport(): Promise<{
       })),
     manifest: {
       createdAt: 1,
-      bbVersion: "0.43.1",
+      appVersion: "0.43.1",
       protocolVersion: 209,
       migrationCount: 142,
       sourceDataDir,
@@ -119,10 +124,12 @@ async function stageImport(): Promise<{
     },
   });
   const stagingDir = path.join(workDir, "staging");
+
   const manifest = await extractServerArchive({
     archivePath,
     destinationDir: stagingDir,
   });
+
   return { stagingDir, manifest };
 }
 
@@ -130,13 +137,17 @@ async function holdLock(
   lockPath: string,
 ): Promise<{ release: () => void; released: Promise<void> }> {
   let release: () => void = () => undefined;
+
   const releaseRequested = new Promise<void>((resolve) => {
     release = resolve;
   });
+
   let acquired: () => void = () => undefined;
+
   const lockAcquired = new Promise<void>((resolve) => {
     acquired = resolve;
   });
+
   const released = withFileLock({
     path: lockPath,
     timeoutMs: 1_000,
@@ -145,18 +156,20 @@ async function holdLock(
       await releaseRequested;
     },
   });
+
   await lockAcquired;
+
   return { release, released };
 }
 
 describe("installImportedServerFiles managed file locks", () => {
-  it("waits for another bb command's config.json lock and merges what that command wrote", async () => {
+  it("waits for another omnyo command's config.json lock and merges what that command wrote", async () => {
     const { stagingDir, manifest } = await stageImport();
     const dataDir = await makeTempDir();
     await writeDataFile(
       dataDir,
       "config.json",
-      JSON.stringify({ config: { BB_APP_URL: "https://target.example" } }),
+      JSON.stringify({ config: { OMNYO_APP_URL: "https://target.example" } }),
     );
     const lockPath = path.join(dataDir, ".config.json.lock");
     const lock = await holdLock(lockPath);
@@ -168,16 +181,18 @@ describe("installImportedServerFiles managed file locks", () => {
       manifest,
       localServerUrl: null,
     });
+
     const firstOutcome = await Promise.race([
       attempted.then(() => "waiting on the lock" as const),
       install.then(() => "finished" as const),
     ]);
+
     const configWhileLocked = await readDataJson(dataDir, "config.json");
     const entriesWhileLocked = await readdir(dataDir);
     await writeDataFile(
       dataDir,
       "config.json",
-      JSON.stringify({ config: { BB_APP_URL: "https://changed.example" } }),
+      JSON.stringify({ config: { OMNYO_APP_URL: "https://changed.example" } }),
     );
     lock.release();
     await lock.released;
@@ -185,16 +200,19 @@ describe("installImportedServerFiles managed file locks", () => {
 
     expect(firstOutcome).toBe("waiting on the lock");
     expect(configWhileLocked).toEqual({
-      config: { BB_APP_URL: "https://target.example" },
+      config: { OMNYO_APP_URL: "https://target.example" },
     });
-    expect(entriesWhileLocked).not.toContain("bb.db");
+    expect(entriesWhileLocked).not.toContain("app.db");
     expect(await readDataJson(dataDir, "config.json")).toEqual({
-      config: { BB_APP_URL: "https://changed.example", BB_LOG_LEVEL: "info" },
+      config: {
+        OMNYO_APP_URL: "https://changed.example",
+        OMNYO_LOG_LEVEL: "info",
+      },
     });
-    expect(await readdir(dataDir)).toContain("bb.db");
+    expect(await readdir(dataDir)).toContain("app.db");
   });
 
-  it("waits for another bb command's env.json lock and merges what that command wrote", async () => {
+  it("waits for another omnyo command's env.json lock and merges what that command wrote", async () => {
     const { stagingDir, manifest } = await stageImport();
     const dataDir = await makeTempDir();
     await writeDataFile(
@@ -212,10 +230,12 @@ describe("installImportedServerFiles managed file locks", () => {
       manifest,
       localServerUrl: null,
     });
+
     const firstOutcome = await Promise.race([
       attempted.then(() => "waiting on the lock" as const),
       install.then(() => "finished" as const),
     ]);
+
     const envWhileLocked = await readDataJson(dataDir, "env.json");
     const configWhileLocked = await readDataJson(dataDir, "config.json");
     const entriesWhileLocked = await readdir(dataDir);
@@ -230,11 +250,11 @@ describe("installImportedServerFiles managed file locks", () => {
 
     expect(firstOutcome).toBe("waiting on the lock");
     expect(envWhileLocked).toEqual({ env: { TARGET_ONLY: "1" } });
-    expect(configWhileLocked).toEqual({ config: { BB_LOG_LEVEL: "info" } });
-    expect(entriesWhileLocked).not.toContain("bb.db");
+    expect(configWhileLocked).toEqual({ config: { OMNYO_LOG_LEVEL: "info" } });
+    expect(entriesWhileLocked).not.toContain("app.db");
     expect(await readDataJson(dataDir, "env.json")).toEqual({
       env: { SOURCE_ONLY: "1", TARGET_ONLY: "2" },
     });
-    expect(await readdir(dataDir)).toContain("bb.db");
+    expect(await readdir(dataDir)).toContain("app.db");
   });
 });

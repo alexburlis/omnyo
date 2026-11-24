@@ -1,6 +1,6 @@
-import type { HostDaemonBridgeLaunch } from "@bb/host-daemon-contract";
-import type { ProviderInstallationStatus } from "@bb/provider-bridge-protocol";
-import { createDeferredPromise } from "@bb/test-helpers";
+import type { HostDaemonBridgeLaunch } from "@omnyo/host-daemon-contract";
+import type { ProviderInstallationStatus } from "@omnyo/provider-bridge-protocol";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { describe, expect, it, vi } from "vitest";
 import {
   createProviderInstallationGate,
@@ -56,10 +56,12 @@ function status(
 describe("createProviderInstallationGate", () => {
   it("never remembers an unsupported status", async () => {
     const gate = createProviderInstallationGate({ ttlMs: 1_000, now: () => 0 });
+
     const unsupported = status({
       currentVersion: "0.135.0",
       versionUnsupported: true,
     });
+
     const probe = vi
       .fn<() => Promise<ProviderInstallationStatus>>()
       .mockResolvedValueOnce(unsupported)
@@ -73,6 +75,7 @@ describe("createProviderInstallationGate", () => {
 
   it("never remembers a not-installed status from a bridge with a minimum version", async () => {
     const gate = createProviderInstallationGate({ ttlMs: 1_000, now: () => 0 });
+
     const notInstalled = status({
       installed: false,
       executablePath: null,
@@ -84,10 +87,12 @@ describe("createProviderInstallationGate", () => {
         command: "npm i -g @openai/codex",
       },
     });
+
     const tooOld = status({
       currentVersion: "0.135.0",
       versionUnsupported: true,
     });
+
     const probe = vi
       .fn<() => Promise<ProviderInstallationStatus>>()
       .mockResolvedValueOnce(notInstalled)
@@ -101,6 +106,7 @@ describe("createProviderInstallationGate", () => {
 
   it("remembers a not-installed status from a bridge with no minimum version", async () => {
     const gate = createProviderInstallationGate({ ttlMs: 1_000, now: () => 0 });
+
     const notInstalled = status({
       executableName: "claude",
       executablePath: null,
@@ -111,6 +117,7 @@ describe("createProviderInstallationGate", () => {
       npmPackageName: "@anthropic-ai/claude-code",
       npmGlobalPackageVersion: null,
     });
+
     const probe = vi.fn(async () => notInstalled);
 
     await expect(gate.run("claude", probe)).resolves.toEqual(notInstalled);
@@ -137,6 +144,7 @@ describe("createProviderInstallationGate", () => {
 
   it("retries after a rejected probe instead of storing or retaining it", async () => {
     const gate = createProviderInstallationGate({ ttlMs: 1_000, now: () => 0 });
+
     const probe = vi
       .fn<() => Promise<ProviderInstallationStatus>>()
       .mockRejectedValueOnce(new Error("bridge unavailable"))
@@ -153,6 +161,7 @@ describe("createProviderInstallationGate", () => {
   it("retries an in-flight probe that is interrupted by invalidation", async () => {
     const gate = createProviderInstallationGate({ ttlMs: 1_000, now: () => 0 });
     const staleProbe = createDeferredPromise<ProviderInstallationStatus>();
+
     const probe = vi
       .fn<() => Promise<ProviderInstallationStatus>>()
       .mockReturnValueOnce(staleProbe.promise)
@@ -168,11 +177,14 @@ describe("createProviderInstallationGate", () => {
 
   it("revalidates in the background once the remembered status expires", async () => {
     let currentTime = 0;
+
     const gate = createProviderInstallationGate({
       ttlMs: 100,
       now: () => currentTime,
     });
+
     const revalidation = createDeferredPromise<ProviderInstallationStatus>();
+
     const probe = vi
       .fn<() => Promise<ProviderInstallationStatus>>()
       .mockResolvedValueOnce(status())
@@ -198,15 +210,19 @@ describe("createProviderInstallationGate", () => {
 
   it("forgets the remembered status when revalidation reports an unsupported version", async () => {
     let currentTime = 0;
+
     const gate = createProviderInstallationGate({
       ttlMs: 100,
       now: () => currentTime,
     });
+
     const unsupported = status({
       currentVersion: "0.135.0",
       versionUnsupported: true,
     });
+
     const revalidation = createDeferredPromise<ProviderInstallationStatus>();
+
     const probe = vi
       .fn<() => Promise<ProviderInstallationStatus>>()
       .mockResolvedValueOnce(status())
@@ -225,11 +241,14 @@ describe("createProviderInstallationGate", () => {
 
   it("forgets the remembered status when revalidation fails", async () => {
     let currentTime = 0;
+
     const gate = createProviderInstallationGate({
       ttlMs: 100,
       now: () => currentTime,
     });
+
     const revalidation = createDeferredPromise<ProviderInstallationStatus>();
+
     const probe = vi
       .fn<() => Promise<ProviderInstallationStatus>>()
       .mockResolvedValueOnce(status())
@@ -262,6 +281,7 @@ describe("createProviderInstallationGate", () => {
   it("replaces a stale in-flight answer after the gate is cleared", async () => {
     const gate = createProviderInstallationGate({ ttlMs: 1_000, now: () => 0 });
     const staleProbe = createDeferredPromise<ProviderInstallationStatus>();
+
     const probe = vi
       .fn<() => Promise<ProviderInstallationStatus>>()
       .mockReturnValueOnce(staleProbe.promise)

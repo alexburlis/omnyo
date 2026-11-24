@@ -1,10 +1,12 @@
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-export const PI_BRIDGE_SESSION_DIR_ENV = "BB_PI_BRIDGE_SESSION_DIR";
+export const PI_BRIDGE_SESSION_DIR_ENV = "OMNYO_PI_BRIDGE_SESSION_DIR";
+
+const PI_BRIDGE_SESSION_DIR_NAME = "pi-bridge-sessions";
 
 interface ResolvePiBridgeSessionDirArgs {
   env: NodeJS.ProcessEnv;
+  bridgeDataDir: string | null;
 }
 
 interface ResolvePiSessionFilePathArgs extends ResolvePiBridgeSessionDirArgs {
@@ -15,18 +17,28 @@ export function resolvePiBridgeSessionDir(
   args: ResolvePiBridgeSessionDirArgs,
 ): string {
   const configuredSessionDir = args.env[PI_BRIDGE_SESSION_DIR_ENV]?.trim();
+
   if (configuredSessionDir) {
     return resolve(configuredSessionDir);
   }
 
-  return join(homedir(), ".bb", "pi-bridge-sessions");
+  if (args.bridgeDataDir === null) {
+    throw new Error(
+      `Pi bridge session directory is unavailable: the bridge has not started and ${PI_BRIDGE_SESSION_DIR_ENV} is unset`,
+    );
+  }
+
+  return join(args.bridgeDataDir, PI_BRIDGE_SESSION_DIR_NAME);
 }
 
 export function resolvePiSessionFilePath(
   args: ResolvePiSessionFilePathArgs,
 ): string {
   return join(
-    resolvePiBridgeSessionDir({ env: args.env }),
+    resolvePiBridgeSessionDir({
+      env: args.env,
+      bridgeDataDir: args.bridgeDataDir,
+    }),
     `${sanitizeSessionKey(args.threadId)}.jsonl`,
   );
 }

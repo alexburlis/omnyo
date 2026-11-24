@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { ExperimentalFileOpenOptions } from "@get-bb/plugin-sdk";
+import type { ExperimentalFileOpenOptions } from "@omnyo/plugin-sdk";
 import { appToast } from "@/components/ui/app-toast";
 import { useLocalOpenTargets } from "@/hooks/useLocalOpenTargets";
 import { useResolvedLiveFileTarget } from "@/hooks/useResolvedLiveFileTarget";
@@ -13,9 +13,11 @@ export function AppFileExternalNavigationDispatcher({
   onSettled: () => void;
 }) {
   const didSettleRef = useRef(false);
+
   const resolvedTarget = useResolvedLiveFileTarget(intent.target, {
     enabled: true,
   });
+
   const { isLoading: areLocalTargetsLoading, openPathInPreferredFileTarget } =
     useLocalOpenTargets({
       enabled: resolvedTarget.status === "available",
@@ -32,14 +34,18 @@ export function AppFileExternalNavigationDispatcher({
     ) {
       return;
     }
+
     didSettleRef.current = true;
     onSettled();
+
     if (resolvedTarget.status === "unavailable") {
       appToast.error("Failed to open file externally", {
         description: "The file target is not available on its declared host.",
       });
+
       return;
     }
+
     const location = getExperimentalFileLocationStart(intent.location);
     void openPathInPreferredFileTarget({
       columnNumber: location.columnNumber,

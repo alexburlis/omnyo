@@ -34,30 +34,38 @@ export function useNeighborReorderSortable<Item>({
   onReorder,
 }: UseNeighborReorderSortableArgs<Item>): UseNeighborReorderSortableResult<Item> {
   const [optimisticOrder, setOptimisticOrder] = useState<string[] | null>(null);
+
   const renderedItems = useMemo(() => {
     if (!optimisticOrder) {
       return items;
     }
 
     const itemsById = new Map<string, Item>();
+
     for (const item of items) {
       itemsById.set(getId(item), item);
     }
 
     const orderedItems: Item[] = [];
+
     for (const id of optimisticOrder) {
       const item = itemsById.get(id);
+
       if (item === undefined) {
         return items;
       }
+
       orderedItems.push(item);
     }
+
     return orderedItems;
   }, [getId, items, optimisticOrder]);
+
   const itemIds = useMemo(
     () => renderedItems.map((item) => getId(item)),
     [getId, renderedItems],
   );
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       if (disabled) {
@@ -65,6 +73,7 @@ export function useNeighborReorderSortable<Item>({
       }
 
       const { active, over } = event;
+
       if (
         !over ||
         typeof active.id !== "string" ||
@@ -74,11 +83,13 @@ export function useNeighborReorderSortable<Item>({
       }
 
       const orderItems = renderedItems.map((item) => ({ id: getId(item) }));
+
       const request = buildNeighborReorderRequest({
         activeId: active.id,
         overId: over.id,
         items: orderItems,
       });
+
       if (!request) {
         return;
       }
@@ -87,6 +98,7 @@ export function useNeighborReorderSortable<Item>({
         items: orderItems,
         request,
       }).map((item) => item.id);
+
       flushSync(() => {
         setOptimisticOrder(nextOrder);
       });

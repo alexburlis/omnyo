@@ -1,14 +1,25 @@
 const { execFileSync, spawn } = require("node:child_process");
+
+const { createHash } = require("node:crypto");
+
 const { chmod, cp, readFile, readdir, writeFile } = require("node:fs/promises");
+
 const { createRequire } = require("node:module");
+
 const path = require("node:path");
+
+const { pathToFileURL } = require("node:url");
 
 const desktopPackageRoot = path.resolve(__dirname, "..");
 
 const NODE_MODULES_DIRECTORY = "node_modules";
+
 const NODE_PTY_PACKAGE_NAME = "node-pty";
+
 const BETTER_SQLITE3_PACKAGE_NAME = "better-sqlite3";
+
 const PARCEL_WATCHER_PACKAGE_NAME = "@parcel/watcher";
+
 const PACKAGED_NATIVE_PACKAGE_NAMES = [
   NODE_PTY_PACKAGE_NAME,
   BETTER_SQLITE3_PACKAGE_NAME,
@@ -16,20 +27,24 @@ const PACKAGED_NATIVE_PACKAGE_NAMES = [
 ];
 
 const NODE_PTY_PREBUILD_PLATFORMS = ["darwin-arm64", "darwin-x64"];
+
 const NODE_PTY_SPAWN_HELPER_RELATIVE_PATHS = [
   path.join("build", "Release", "spawn-helper"),
   ...NODE_PTY_PREBUILD_PLATFORMS.map((platform) =>
     path.join("prebuilds", platform, "spawn-helper"),
   ),
 ];
+
 const NODE_PTY_ASAR_HELPER_PATH_REWRITE =
   "helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');";
+
 const NODE_PTY_IDEMPOTENT_ASAR_HELPER_PATH_REWRITE =
   "helperPath = helperPath.replace(/app\\.asar(?!\\.unpacked)/g, 'app.asar.unpacked');";
 
 async function isDirectory(directoryPath) {
   try {
     const entry = await readdir(directoryPath, { withFileTypes: true });
+
     return Array.isArray(entry);
   } catch {
     return false;
@@ -38,11 +53,13 @@ async function isDirectory(directoryPath) {
 
 function packageNameForNodeModulesDirectory(directoryPath) {
   const parentDirectory = path.dirname(directoryPath);
+
   if (path.basename(parentDirectory) === NODE_MODULES_DIRECTORY) {
     return path.basename(directoryPath);
   }
 
   const nodeModulesDirectory = path.dirname(parentDirectory);
+
   if (
     path.basename(nodeModulesDirectory) === NODE_MODULES_DIRECTORY &&
     path.basename(parentDirectory).startsWith("@")
@@ -60,11 +77,13 @@ async function findPackageDirectories(rootPath, packageNames) {
 
   while (pending.length > 0) {
     const directoryPath = pending.pop();
+
     if (directoryPath === undefined) {
       continue;
     }
 
     let entries;
+
     try {
       entries = await readdir(directoryPath, { withFileTypes: true });
     } catch {
@@ -78,10 +97,12 @@ async function findPackageDirectories(rootPath, packageNames) {
 
       const childPath = path.join(directoryPath, entry.name);
       const packageName = packageNameForNodeModulesDirectory(childPath);
+
       if (packageName !== undefined && packageNameSet.has(packageName)) {
         matches.get(packageName).push(childPath);
         continue;
       }
+
       pending.push(childPath);
     }
   }
@@ -96,6 +117,7 @@ async function chmodIfPresent(filePath, mode) {
     if (error && error.code === "ENOENT") {
       return;
     }
+
     throw error;
   }
 }
@@ -106,11 +128,13 @@ async function patchNodePtyHelperPath(packageDirectory) {
     "lib",
     "unixTerminal.js",
   );
+
   const source = await readFile(unixTerminalPath, "utf8");
 
   if (source.includes(NODE_PTY_IDEMPOTENT_ASAR_HELPER_PATH_REWRITE)) {
     return;
   }
+
   if (!source.includes(NODE_PTY_ASAR_HELPER_PATH_REWRITE)) {
     throw new Error(
       `Unable to patch ${NODE_PTY_PACKAGE_NAME} helper path rewrite in ${unixTerminalPath}`,
@@ -153,6 +177,7 @@ async function runPrebuildInstall(packageDirectory, prebuildArguments) {
   const requireFromPackage = createRequire(
     path.join(packageDirectory, "package.json"),
   );
+
   const prebuildInstallBinPath = requireFromPackage.resolve(
     "prebuild-install/bin.js",
   );
@@ -166,6 +191,7 @@ async function runPrebuildInstall(packageDirectory, prebuildArguments) {
         stdio: "inherit",
       },
     );
+
     child.on("error", () => resolveExitCode(1));
     child.on("close", resolveExitCode);
   });
@@ -184,15 +210,19 @@ async function prepareBetterSqlite3PackageDirectory(packageDirectory, options) {
   const packageJson = JSON.parse(
     await readFile(path.join(packageDirectory, "package.json"), "utf8"),
   );
+
   const supportsLegacyPrebuild =
     typeof packageJson.dependencies?.["prebuild-install"] === "string";
+
   const canVerify =
     options.platform === process.platform &&
     options.arch === process.arch &&
     options.electronVersion === resolveElectronVersion();
+
   const electron = createRequire(path.join(desktopPackageRoot, "package.json"))(
     "electron",
   );
+
   const verify = () =>
     execFileSync(
       electron,
@@ -207,18 +237,22 @@ async function prepareBetterSqlite3PackageDirectory(packageDirectory, options) {
         timeout: 30_000,
       },
     );
+
   if (canVerify) {
     try {
       verify();
+
       return;
     } catch (error) {
       if (!supportsLegacyPrebuild) throw error;
     }
   }
+
   await runPrebuildInstall(
     packageDirectory,
     resolveBetterSqlite3PrebuildArguments(options),
   );
+
   if (canVerify) verify();
 }
 
@@ -238,18 +272,22 @@ function resolveWorkspaceParcelWatcherDirectory(packageName, fromDirectory) {
 
 async function prepareParcelWatcherPackageDirectory(packageDirectory, options) {
   const platformPackageName = parcelWatcherPlatformPackageName(options);
+
   if (platformPackageName === undefined) {
     return;
   }
+
   const packagedPlatformDirectory = path.join(
     path.dirname(packageDirectory),
     path.basename(platformPackageName),
   );
+
   if (!(await isDirectory(packagedPlatformDirectory))) {
     const workspaceWatcherDirectory = resolveWorkspaceParcelWatcherDirectory(
       PARCEL_WATCHER_PACKAGE_NAME,
-      path.join(desktopPackageRoot, NODE_MODULES_DIRECTORY, "bb-app"),
+      path.join(desktopPackageRoot, NODE_MODULES_DIRECTORY, "omnyo-app"),
     );
+
     await cp(
       resolveWorkspaceParcelWatcherDirectory(
         platformPackageName,
@@ -259,6 +297,7 @@ async function prepareParcelWatcherPackageDirectory(packageDirectory, options) {
       { dereference: true, recursive: true },
     );
   }
+
   if (
     options.platform !== process.platform ||
     options.arch !== process.arch ||
@@ -266,9 +305,11 @@ async function prepareParcelWatcherPackageDirectory(packageDirectory, options) {
   ) {
     return;
   }
+
   const electron = createRequire(path.join(desktopPackageRoot, "package.json"))(
     "electron",
   );
+
   execFileSync(
     electron,
     ["-e", "require(process.argv[1]);", packagedPlatformDirectory],
@@ -289,16 +330,17 @@ async function preparePackagedNativeModules(appOutDir, options = {}) {
     appOutDir,
     PACKAGED_NATIVE_PACKAGE_NAMES,
   );
+
   const nodePtyDirectories = packageDirectories.get(NODE_PTY_PACKAGE_NAME);
+
   if (nodePtyDirectories.length === 0) {
     throw new Error(
       `Unable to find ${NODE_PTY_PACKAGE_NAME} under ${appOutDir}`,
     );
   }
+
   await Promise.all(nodePtyDirectories.map(prepareNodePtyPackageDirectory));
 
-  // The Electron target is only known on the real afterPack path. Standalone
-  // invocations (e.g. tests, manual node-pty repair) omit it and skip the fetch.
   if (options.electronVersion === undefined) {
     return { betterSqlite3Directories: [], nodePtyDirectories };
   }
@@ -306,11 +348,13 @@ async function preparePackagedNativeModules(appOutDir, options = {}) {
   const betterSqlite3Directories = packageDirectories.get(
     BETTER_SQLITE3_PACKAGE_NAME,
   );
+
   if (betterSqlite3Directories.length === 0) {
     throw new Error(
       `Unable to find ${BETTER_SQLITE3_PACKAGE_NAME} under ${appOutDir}`,
     );
   }
+
   await Promise.all(
     betterSqlite3Directories.map((packageDirectory) =>
       prepareBetterSqlite3PackageDirectory(packageDirectory, {
@@ -324,11 +368,13 @@ async function preparePackagedNativeModules(appOutDir, options = {}) {
   const parcelWatcherDirectories = packageDirectories.get(
     PARCEL_WATCHER_PACKAGE_NAME,
   );
+
   if (parcelWatcherDirectories.length === 0) {
     throw new Error(
       `Unable to find ${PARCEL_WATCHER_PACKAGE_NAME} under ${appOutDir}`,
     );
   }
+
   await Promise.all(
     parcelWatcherDirectories.map((packageDirectory) =>
       prepareParcelWatcherPackageDirectory(packageDirectory, {
@@ -346,6 +392,7 @@ function resolveElectronVersion() {
   const requireFromDesktop = createRequire(
     path.join(desktopPackageRoot, "package.json"),
   );
+
   return requireFromDesktop("electron/package.json").version;
 }
 
@@ -353,22 +400,48 @@ function resolveArchName(context) {
   try {
     const { Arch } = require("electron-builder");
     const archName = Arch[context.arch];
+
     if (typeof archName === "string") {
       return archName;
     }
-  } catch {
-    // electron-builder is only resolvable inside the build process; fall back to
-    // the host architecture, which matches single-arch builds on a native host.
-  }
+  } catch {}
+
   return process.arch;
+}
+
+async function restorePackagedRuntimeDependencyManifests(
+  runtimeRoot,
+  sourceRoot,
+  runtimeIdentity,
+) {
+  for (const file of runtimeIdentity.files) {
+    if (
+      !file.path.endsWith("/package.json") ||
+      !file.path.includes(`/${NODE_MODULES_DIRECTORY}/`)
+    )
+      continue;
+
+    const bytes = await readFile(
+      path.join(sourceRoot, ...file.path.split("/")),
+    );
+
+    if (createHash("sha256").update(bytes).digest("hex") !== file.sha256)
+      throw new Error(
+        `Runtime dependency manifest differs from its identity: ${file.path}`,
+      );
+
+    await writeFile(path.join(runtimeRoot, ...file.path.split("/")), bytes);
+  }
 }
 
 async function afterPack(context) {
   const arch = resolveArchName(context);
   const platform = context.electronPlatformName ?? process.platform;
+
   if (platform !== process.platform || arch !== process.arch) {
     throw new Error("Packaged npm verification requires a native target host");
   }
+
   await preparePackagedNativeModules(context.appOutDir, {
     arch,
     electronVersion: resolveElectronVersion(),
@@ -376,6 +449,7 @@ async function afterPack(context) {
   });
   const { smokePackagedNpm } = await import("./smoke-packaged-npm.mjs");
   const productName = context.packager.appInfo.productFilename;
+
   const appBinary =
     platform === "darwin"
       ? path.join(
@@ -391,7 +465,83 @@ async function afterPack(context) {
             ? `${productName}.exe`
             : context.packager.executableName,
         );
+
   await smokePackagedNpm(appBinary);
+
+  const resourcesPath =
+    platform === "darwin"
+      ? path.join(
+          context.appOutDir,
+          `${productName}.app`,
+          "Contents",
+          "Resources",
+        )
+      : path.join(context.appOutDir, "resources");
+
+  const runtimeRoot = path.join(
+    resourcesPath,
+    "app.asar.unpacked",
+    "node_modules",
+    "omnyo-app",
+  );
+
+  const { readRuntimeIdentity, verifyRuntimeIdentity } = await import(
+    pathToFileURL(
+      path.join(runtimeRoot, "dist", "runtime-identity-verifier.js"),
+    ).href
+  );
+
+  const runtimeIdentity = await readRuntimeIdentity(runtimeRoot);
+  await restorePackagedRuntimeDependencyManifests(
+    runtimeRoot,
+    path.join(desktopPackageRoot, NODE_MODULES_DIRECTORY, "omnyo-app"),
+    runtimeIdentity,
+  );
+  await verifyRuntimeIdentity(runtimeRoot, runtimeIdentity);
+
+  const desktopPackage = JSON.parse(
+    await readFile(path.join(desktopPackageRoot, "package.json"), "utf8"),
+  );
+
+  if (
+    desktopPackage.version !== runtimeIdentity.runtimeVersion ||
+    context.packager.appInfo.version !==
+      require("semver").clean(runtimeIdentity.runtimeVersion)
+  )
+    throw new Error("Private desktop and runtime versions differ");
+
+  const { writePrivateUpdateCacheMetadata } =
+    await import("./private-update-cache.mjs");
+
+  await writePrivateUpdateCacheMetadata(
+    resourcesPath,
+    context.packager.appInfo.id,
+    platform,
+  );
+
+  if (platform === "win32") {
+    const { createHash } = require("node:crypto");
+    const executable = path.basename(appBinary);
+    await writeFile(
+      path.join(resourcesPath, "private-update-identity.json"),
+      JSON.stringify({
+        schema: 1,
+        appId: context.packager.appInfo.id,
+        version: context.packager.appInfo.version.split("+")[0],
+        runtimeVersion: runtimeIdentity.runtimeVersion,
+        protocolVersion: runtimeIdentity.hostDaemonProtocolVersion,
+        runtimeSha256: runtimeIdentity.runtimeSha256,
+        executable,
+        executableSha256: createHash("sha256")
+          .update(await readFile(appBinary))
+          .digest("hex"),
+        desktopSha256: createHash("sha256")
+          .update(await readFile(path.join(resourcesPath, "app.asar")))
+          .digest("hex"),
+      }) + "\n",
+      { mode: 0o644 },
+    );
+  }
 }
 
 function parseStandaloneArguments(argv) {
@@ -400,26 +550,33 @@ function parseStandaloneArguments(argv) {
 
   for (const argument of argv) {
     const electronVersionMatch = argument.match(/^--electron-version=(.+)$/);
+
     if (electronVersionMatch) {
       options.electronVersion = electronVersionMatch[1];
       continue;
     }
+
     const archMatch = argument.match(/^--arch=(.+)$/);
+
     if (archMatch) {
       options.arch = archMatch[1];
       continue;
     }
+
     const platformMatch = argument.match(/^--platform=(.+)$/);
+
     if (platformMatch) {
       options.platform = platformMatch[1];
       continue;
     }
+
     appOutDir = argument;
   }
 
   if (options.arch === undefined) {
     options.arch = process.arch;
   }
+
   if (options.platform === undefined) {
     options.platform = process.platform;
   }
@@ -431,6 +588,7 @@ async function main() {
   const { appOutDir, options } = parseStandaloneArguments(
     process.argv.slice(2),
   );
+
   if (appOutDir === undefined || appOutDir.length === 0) {
     throw new Error(
       "Usage: node apps/desktop/scripts/prepare-native-modules.cjs <appOutDir> " +
@@ -442,7 +600,12 @@ async function main() {
 }
 
 module.exports = afterPack;
+
 module.exports.parseStandaloneArguments = parseStandaloneArguments;
+
+module.exports.restorePackagedRuntimeDependencyManifests =
+  restorePackagedRuntimeDependencyManifests;
+
 module.exports.resolveBetterSqlite3PrebuildArguments =
   resolveBetterSqlite3PrebuildArguments;
 
@@ -450,6 +613,7 @@ if (require.main === module) {
   main().catch((error) => {
     const message =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
+
     process.stderr.write(`${message}\n`);
     process.exitCode = 1;
   });

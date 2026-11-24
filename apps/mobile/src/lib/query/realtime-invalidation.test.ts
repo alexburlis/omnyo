@@ -7,21 +7,26 @@ import { systemConfigQueryKey } from "./query-keys";
 
 function setup() {
   const factory = createFakeSocketFactory();
+
   const realtime = createMobileRealtime({
     url: "ws://x/ws",
     socketFactory: factory,
     onInvalidMessage: () => {},
   });
+
   const queryClient = new QueryClient();
   const invalidated: string[] = [];
+
   const invalidateSpy = vi
     .spyOn(queryClient, "invalidateQueries")
     .mockImplementation(async (filters) => {
       invalidated.push(filters?.queryKey ? hashKey(filters.queryKey) : "*");
     });
+
   const handle = installRealtimeInvalidation(queryClient, realtime);
   realtime.connect();
   factory.latest().open();
+
   return { factory, realtime, queryClient, invalidated, invalidateSpy, handle };
 }
 
@@ -36,6 +41,7 @@ describe("installRealtimeInvalidation", () => {
   it("coalesces a burst of host and system frames into one system config invalidation", () => {
     const { factory, invalidated } = setup();
     const socket = factory.latest();
+
     for (let i = 0; i < 20; i++) {
       socket.receive(
         JSON.stringify(
@@ -55,6 +61,7 @@ describe("installRealtimeInvalidation", () => {
       );
       vi.advanceTimersByTime(5);
     }
+
     expect(invalidated).toEqual([]);
     vi.advanceTimersByTime(49);
     expect(invalidated).toEqual([hashKey(systemConfigQueryKey())]);
@@ -98,20 +105,25 @@ describe("installRealtimeInvalidation", () => {
     const { factory, queryClient, invalidateSpy } = setup();
     invalidateSpy.mockRestore();
     queryClient.setQueryData(["stale"], { id: "stale" });
+
     const staleQuery = queryClient.getQueryCache().find({
       queryKey: ["stale"],
     });
+
     vi.advanceTimersByTime(10_000);
     factory.latest().drop();
     const disconnectedAt = Date.now();
     vi.advanceTimersByTime(500);
     queryClient.setQueryData(["fresh"], { id: "fresh" });
+
     const freshQuery = queryClient.getQueryCache().find({
       queryKey: ["fresh"],
     });
+
     const spy = vi
       .spyOn(queryClient, "invalidateQueries")
       .mockImplementation(async () => {});
+
     vi.advanceTimersByTime(500);
     factory.latest().open();
 
@@ -120,6 +132,7 @@ describe("installRealtimeInvalidation", () => {
     expect(options).toEqual({ cancelRefetch: false });
     expect(filters?.queryKey).toBeUndefined();
     const predicate = filters?.predicate;
+
     if (!predicate || !staleQuery || !freshQuery) throw new Error("setup");
     expect(staleQuery.state.dataUpdatedAt).toBeLessThan(disconnectedAt);
     expect(freshQuery.state.dataUpdatedAt).toBeGreaterThan(disconnectedAt);

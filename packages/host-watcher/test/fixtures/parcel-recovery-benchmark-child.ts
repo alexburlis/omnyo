@@ -9,8 +9,9 @@ import { RESCAN_REQUIRED_MESSAGE } from "../../src/watch-recovery.js";
 import type { ParentToChildMessage } from "../../src/parcel-subprocess/messages.js";
 import { createParcelChildHandler } from "../../src/parcel-subprocess/parcel-child-handler.js";
 
-const faultRoot = process.env.BB_WATCHER_BENCHMARK_FAULT_ROOT;
-const triggerPath = process.env.BB_WATCHER_BENCHMARK_TRIGGER_PATH;
+const faultRoot = process.env.OMNYO_WATCHER_BENCHMARK_FAULT_ROOT;
+
+const triggerPath = process.env.OMNYO_WATCHER_BENCHMARK_TRIGGER_PATH;
 
 if (!faultRoot || !triggerPath) {
   throw new Error("Watcher recovery benchmark fault paths are required");
@@ -40,6 +41,7 @@ function sendTelemetry(
 }
 
 let affectedSubscriptionEpoch = 0;
+
 let armedSubscriptionEpoch = 0;
 
 const benchmarkParcel: ParcelWatcherBackend = {
@@ -48,6 +50,7 @@ const benchmarkParcel: ParcelWatcherBackend = {
     const isAffected = normalizedDir === path.resolve(faultRoot);
     const subscriptionEpoch = isAffected ? (affectedSubscriptionEpoch += 1) : 0;
     sendTelemetry("native-subscribe-start", normalizedDir);
+
     const subscription = await realParcelWatcher.subscribe(
       dir,
       (error, events) => {
@@ -55,12 +58,15 @@ const benchmarkParcel: ParcelWatcherBackend = {
           const eventPath = path.isAbsolute(event.path)
             ? path.normalize(event.path)
             : path.resolve(dir, event.path);
+
           return eventPath === canonicalTriggerPath;
         });
+
         if (!error && isAffected && includesTrigger) {
           if (subscriptionEpoch !== armedSubscriptionEpoch) {
             return;
           }
+
           armedSubscriptionEpoch = 0;
           sendTelemetry("fault-injected", normalizedDir);
           callback(
@@ -69,16 +75,21 @@ const benchmarkParcel: ParcelWatcherBackend = {
             ),
             [],
           );
+
           return;
         }
+
         callback(error, events);
       },
       opts,
     );
+
     if (isAffected) {
       armedSubscriptionEpoch = subscriptionEpoch;
     }
+
     sendTelemetry("native-subscribe-ready", normalizedDir);
+
     return {
       async unsubscribe() {
         sendTelemetry("native-unsubscribe-start", normalizedDir);
@@ -97,6 +108,7 @@ const handler = createParcelChildHandler({
   listEntries: async (dir) => {
     const entries = await fs.readdir(dir);
     sendTelemetry("list-entries-complete", path.resolve(dir), entries.length);
+
     return entries;
   },
 });

@@ -1,7 +1,7 @@
 import { useAtom } from "jotai";
 import { createBooleanPreferenceAtom } from "./browser-storage";
 
-const OPEN_LINKS_IN_APP_BROWSER_STORAGE_KEY = "bb.openLinksInAppBrowser";
+const OPEN_LINKS_IN_APP_BROWSER_STORAGE_KEY = "omnyo.openLinksInAppBrowser";
 
 const OPEN_LINKS_IN_APP_BROWSER_DEFAULT = true;
 
@@ -32,9 +32,11 @@ export function resolveUrlOpenTarget({
   if (!isHttpOrHttpsUrl(url)) {
     return "unhandled";
   }
+
   if (desktopBrowserAvailable && openLinksInAppBrowser) {
     return "in-app-browser";
   }
+
   return "external-browser";
 }
 
@@ -54,9 +56,11 @@ export function openUrlByPreference({
   switch (target) {
     case "in-app-browser":
       openInAppBrowser(url);
+
       return true;
     case "external-browser":
       openExternalBrowser(url);
+
       return true;
     case "unhandled":
       return false;

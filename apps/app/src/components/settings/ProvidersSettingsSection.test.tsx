@@ -10,10 +10,10 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SystemProviderCatalogEntry } from "@bb/server-contract";
-import type { ProviderInfo } from "@bb/domain";
-import { defaultAppSettings } from "@bb/domain";
-import { makeProviderInfo } from "@bb/test-helpers/domain-fixtures";
+import type { SystemProviderCatalogEntry } from "@omnyo/server-contract";
+import type { ProviderInfo } from "@omnyo/domain";
+import { defaultAppSettings } from "@omnyo/domain";
+import { makeProviderInfo } from "@omnyo/test-helpers/domain-fixtures";
 import {
   ProvidersSettingsSection,
   reorderProviderIds,
@@ -28,10 +28,19 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/queries/system-queries", () => ({
   useSystemProviders: () => ({ data: mocks.providers, isPending: false }),
   useSystemProviderCatalog: () => ({ data: mocks.catalog, isPending: false }),
+  useSystemExecutionOptions: () => ({
+    data: { models: [], selectedOnlyModels: [] },
+    isPending: false,
+    isError: false,
+  }),
 }));
 
 vi.mock("@/hooks/mutations/provider-mutations", () => ({
   useSetProviderEnabled: () => ({ mutate: mocks.setEnabled, isPending: false }),
+}));
+
+vi.mock("./ModelPickerSettings", () => ({
+  ModelPickerSettings: () => null,
 }));
 
 function render(ui: ReactElement) {
@@ -70,24 +79,46 @@ afterEach(() => {
 });
 
 describe("ProvidersSettingsSection", () => {
-  it("shows the server-wide fast tier setting and saves changes", () => {
-    mocks.providers = [];
+  it("saves faster tiers independently for capable providers", () => {
+    mocks.providers = [
+      provider("codex", "Codex"),
+      provider("claude-code", "Claude Code"),
+      provider("other", "Other"),
+    ];
+
+    for (const entry of mocks.providers.slice(0, 2))
+      entry.capabilities.supportsServiceTier = true;
     const onChange = vi.fn();
     render(
       <ProvidersSettingsSection
         disabled={false}
-        generalSettings={{ ...defaultAppSettings, allowFastServiceTier: false }}
+        generalSettings={{
+          ...defaultAppSettings,
+          allowFastServiceTier: false,
+          providerAllowFastServiceTier: { codex: true },
+        }}
         onGeneralSettingsChange={onChange}
       />,
     );
 
-    const control = screen.getByRole("switch", {
-      name: "Allow faster service tiers",
+    const codex = screen.getByRole("switch", {
+      name: "Allow faster Codex service tiers",
     });
-    expect(control.getAttribute("aria-checked")).toBe("false");
-    fireEvent.click(control);
+
+    const claude = screen.getByRole("switch", {
+      name: "Allow faster Claude Code service tiers",
+    });
+
+    expect(codex.getAttribute("aria-checked")).toBe("true");
+    expect(claude.getAttribute("aria-checked")).toBe("false");
+    expect(
+      screen.queryByRole("switch", {
+        name: "Allow faster Other service tiers",
+      }),
+    ).toBeNull();
+    fireEvent.click(claude);
     expect(onChange).toHaveBeenCalledWith({
-      allowFastServiceTier: true,
+      providerAllowFastServiceTier: { codex: true, "claude-code": true },
     });
   });
 
@@ -109,6 +140,7 @@ describe("ProvidersSettingsSection", () => {
     const providersSection = screen
       .getByRole("heading", { name: "Providers" })
       .closest("section");
+
     if (providersSection === null) throw new Error("Providers section missing");
     const rows = within(providersSection).getAllByText(/Alpha|Beta|Gamma/);
     expect(rows.map((row) => row.textContent)).toEqual([
@@ -121,22 +153,35 @@ describe("ProvidersSettingsSection", () => {
     const reorderHandles = screen.getAllByRole("button", {
       name: /Reorder (Alpha|Beta|Gamma)/,
     });
+
     expect(reorderHandles).toHaveLength(3);
     expect(reorderHandles[0]?.parentElement?.className).toContain(
       "group/provider-row",
     );
 
+    openActions("Alpha");
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Make default" })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
     openActions("Gamma");
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Default" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make default" }));
     expect(onChange).toHaveBeenLastCalledWith({
       defaultProviderId: "gamma",
     });
   });
 
-  it("marks an unavailable provider and blocks it as the default", () => {
+  it("says why a provider is unavailable, links its plugin and blocks it as the default", () => {
     mocks.providers = [
       provider("alpha", "Alpha"),
-      { ...provider("beta", "Beta"), available: false },
+      {
+        ...provider("beta", "Beta"),
+        pluginId: "beta-plugin",
+        available: false,
+      },
     ];
     render(
       <ProvidersSettingsSection
@@ -145,11 +190,15 @@ describe("ProvidersSettingsSection", () => {
         onGeneralSettingsChange={vi.fn()}
       />,
     );
-    expect(screen.getByText("Unavailable")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("link", { name: "Plugin didn't load" })
+        .getAttribute("href"),
+    ).toBe("/settings/plugins/beta-plugin");
     openActions("Beta");
     expect(
       screen
-        .getByRole("menuitemcheckbox", { name: "Default" })
+        .getByRole("menuitem", { name: "Make default" })
         .getAttribute("aria-disabled"),
     ).toBe("true");
   });
@@ -163,10 +212,12 @@ describe("ProvidersSettingsSection", () => {
       provider("codex", "Codex"),
     ];
     const onChange = vi.fn();
+
     const generalSettings = {
       ...defaultAppSettings,
       providerCompletedTurnDisplay: { codex: "flat" as const },
     };
+
     render(
       <ProvidersSettingsSection
         disabled={false}
@@ -178,27 +229,22 @@ describe("ProvidersSettingsSection", () => {
     const claudeSwitch = screen.getByRole("switch", {
       name: "Collapse finished Claude Code turns",
     });
+
     const codexSwitch = screen.getByRole("switch", {
       name: "Collapse finished Codex turns",
     });
-    const configuration = screen
-      .getByRole("heading", { name: "Configuration" })
+
+    const collapse = screen
+      .getByRole("heading", { name: "Collapse finished turns" })
       .closest("section");
-    if (configuration === null)
-      throw new Error("Configuration section missing");
+
+    if (collapse === null) throw new Error("Collapse section missing");
     expect(
-      within(configuration).getByText("Collapse finished turns"),
-    ).toBeTruthy();
-    expect(
-      within(configuration).getByRole("switch", {
-        name: "Allow faster service tiers",
-      }),
-    ).toBeTruthy();
-    expect(
-      within(configuration).getByRole("switch", {
+      within(collapse).getByRole("switch", {
         name: "Collapse finished Codex turns",
       }),
     ).toBe(codexSwitch);
+    expect(screen.queryByRole("heading", { name: "Fast mode" })).toBeNull();
     expect(claudeSwitch.getAttribute("aria-checked")).toBe("false");
     expect(codexSwitch.getAttribute("aria-checked")).toBe("false");
 
@@ -238,9 +284,11 @@ describe("ProvidersSettingsSection", () => {
         onGeneralSettingsChange={vi.fn()}
       />,
     );
+
     const section = screen
       .getByRole("heading", { name: "Providers" })
       .closest("section")!;
+
     expect(
       within(section)
         .getAllByText(/^(Codex|Claude Code)$/)
@@ -252,8 +300,17 @@ describe("ProvidersSettingsSection", () => {
     expect(
       section.querySelector('[data-provider-logo="/claude.svg"]'),
     ).not.toBeNull();
-    openActions("Claude Code");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Enable" }));
+    expect(
+      screen.queryByRole("button", { name: "Actions for Claude Code" }),
+    ).toBeNull();
+
+    const disabledGroup = screen.getByRole("group", {
+      name: "Disabled providers",
+    });
+
+    fireEvent.click(
+      within(disabledGroup).getByRole("button", { name: "Enable Claude Code" }),
+    );
     expect(mocks.setEnabled).toHaveBeenCalledWith({
       providerId: "claude-code",
       enabled: true,

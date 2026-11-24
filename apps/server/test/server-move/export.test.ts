@@ -10,23 +10,26 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { createConnection, getHost, setExperiments } from "@bb/db";
-import { defaultExperiments } from "@bb/domain";
-import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
+import { createConnection, getHost, setExperiments } from "@omnyo/db";
+import { defaultExperiments } from "@omnyo/domain";
+import { HOST_DAEMON_PROTOCOL_VERSION } from "@omnyo/host-daemon-contract";
 import {
   extractServerArchive,
   serverMovedFileSchema,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
+import { isSealed, writeSecretFile } from "@omnyo/secret-storage";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exportServerArchive } from "../../src/services/server-move/export.js";
+import { SERVER_EXPORT_FREE_SPACE } from "../../src/services/server-move/export-snapshot.js";
 import { seedHost } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
 
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "bb-server-move-export-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-server-move-export-"));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -54,7 +57,11 @@ describe("server archive export", () => {
       seedHost(harness.deps, { id: "host-old", name: "Laptop" });
       await writeDataFile(dataDir, "config.json", '{"config":{}}\n');
       await writeDataFile(dataDir, "attachments/project-1/notes.txt", "notes");
-      await writeDataFile(dataDir, "plugins/tasks/secrets/token", "secret");
+      await writeSecretFile(
+        harness.deps.vault,
+        join(dataDir, "plugins", "tasks", "secrets", "token"),
+        "secret",
+      );
       await writeDataFile(dataDir, "plugins/tasks/host-data/cache.txt", "x");
       await writeDataFile(dataDir, "plugins/tasks/logs/plugin.log", "x");
       await writeDataFile(dataDir, "host-id", "host-old\n");
@@ -75,6 +82,7 @@ describe("server archive export", () => {
         .prepare("INSERT INTO items (name) VALUES (?)")
         .run("written only to the WAL");
       const workDir = join(dataDir, "server-move", "move-1");
+
       try {
         expect(existsSync(`${pluginDatabasePath}-wal`)).toBe(true);
 
@@ -83,9 +91,11 @@ describe("server archive export", () => {
           dataDir,
           db: harness.db,
           fileName: "server.tar.gz",
+          freeSpace: SERVER_EXPORT_FREE_SPACE,
           logger: harness.deps.logger,
           now: 1_700_000_000_000,
           sourceServerHostId: "host-old",
+          vault: harness.deps.vault,
           workDir,
         });
 
@@ -113,12 +123,14 @@ describe("server archive export", () => {
         ).toEqual(archive.oldCopyEntries);
 
         const destination = await makeTempDir();
+
         const manifest = await extractServerArchive({
           archivePath: archive.path,
           destinationDir: destination,
         });
+
         expect(manifest).toMatchObject({
-          bbVersion: harness.config.appVersion,
+          appVersion: harness.config.appVersion,
           createdAt: 1_700_000_000_000,
           protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
           sourceDataDir: dataDir,
@@ -129,13 +141,14 @@ describe("server archive export", () => {
         const paths = manifest.entries.map((entry) => entry.path);
         expect(paths).toEqual(
           expect.arrayContaining([
-            "bb.db",
+            "app.db",
             "config.json",
             "attachments/project-1/notes.txt",
             "plugins/tasks/data.db",
             "plugins/tasks/secrets/token",
           ]),
         );
+
         for (const hostOwned of [
           "host-id",
           "auth.json",
@@ -149,13 +162,31 @@ describe("server archive export", () => {
         ]) {
           expect(paths).not.toContain(hostOwned);
         }
+
         expect(paths.some((path) => path.startsWith("server-move"))).toBe(
           false,
         );
+        expect(existsSync(join(dataDir, "vault", "vault.json"))).toBe(true);
+        expect(paths.some((path) => path.startsWith("vault/"))).toBe(false);
+        expect(
+          await readFile(
+            join(destination, "files", "plugins", "tasks", "secrets", "token"),
+            "utf8",
+          ),
+        ).toBe("secret");
+        expect(
+          isSealed(
+            await readFile(join(destination, "files", "auth-secret"), "utf8"),
+          ),
+        ).toBe(false);
+        expect(
+          isSealed(await readFile(join(dataDir, "auth-secret"), "utf8")),
+        ).toBe(true);
 
         const importedDb = createConnection(
-          join(destination, "files", "bb.db"),
+          join(destination, "files", "app.db"),
         );
+
         try {
           expect(getHost(importedDb, "host-old")).toMatchObject({
             name: "Laptop",
@@ -163,10 +194,12 @@ describe("server archive export", () => {
         } finally {
           importedDb.$client.close();
         }
+
         const importedPluginDatabase = new Database(
           join(destination, "files", "plugins", "tasks", "data.db"),
           { readonly: true },
         );
+
         try {
           expect(
             importedPluginDatabase.prepare("SELECT name FROM items").all(),
@@ -188,9 +221,11 @@ describe("server archive export", () => {
         dataDir: harness.config.dataDir,
         db: harness.db,
         fileName: "server.tar.gz",
+        freeSpace: SERVER_EXPORT_FREE_SPACE,
         logger: harness.deps.logger,
         now: 1_700_000_000_000,
         sourceServerHostId: null,
+        vault: harness.deps.vault,
         workDir: join(harness.config.dataDir, "server-export", "export-1"),
       });
 
@@ -198,6 +233,7 @@ describe("server archive export", () => {
         archivePath: archive.path,
         destinationDir: await makeTempDir(),
       });
+
       expect(manifest.serverMoveExperiment).toBe(true);
     }));
 });

@@ -2,8 +2,8 @@ import {
   createAsyncTtlMemo,
   type AsyncTtlMemo,
 } from "../lib/async-ttl-memo.js";
-import type { EnvironmentChangeKind } from "@bb/domain";
-import type { HostDaemonOnlineRpcResult } from "@bb/host-daemon-contract";
+import type { EnvironmentChangeKind } from "@omnyo/domain";
+import type { HostDaemonOnlineRpcResult } from "@omnyo/host-daemon-contract";
 import type { ServerChangedMessage } from "../../ws/hub.js";
 
 const IGNORED_ENVIRONMENT_CHANGES: ReadonlySet<EnvironmentChangeKind> = new Set(
@@ -53,6 +53,7 @@ export class EnvironmentReadCache<
 }
 
 const WORKSPACE_STATUS_CACHE_TTL_MS = 3_000;
+
 const WORKSPACE_PULL_REQUEST_CACHE_TTL_MS = 10_000;
 
 interface WorkspaceReadCachesDeps {
@@ -108,15 +109,20 @@ export class WorkspaceReadCaches {
       const relevantChanges = message.changes.filter(
         (change) => !IGNORED_ENVIRONMENT_CHANGES.has(change),
       );
+
       if (relevantChanges.length === 0) {
         return;
       }
+
       this.status.invalidateEnvironment(message.id);
+
       if (relevantChanges.some((change) => change !== "work-status-changed")) {
         this.pullRequest.invalidateEnvironment(message.id);
       }
+
       return;
     }
+
     if (
       message.entity === "host" &&
       message.changes.some(

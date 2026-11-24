@@ -1,9 +1,7 @@
 import {
   memo,
   useCallback,
-  useLayoutEffect,
   useMemo,
-  useRef,
   useState,
   type KeyboardEvent,
 } from "react";
@@ -15,34 +13,26 @@ import {
   type AppDefaultKeybindings,
   type AppKeybindingOverrides,
   type AppShortcut,
-} from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { Input } from "@bb/shared-ui/input";
-import { Switch } from "@bb/shared-ui/switch";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { APP_COMMAND_GROUPS } from "@/lib/app-command-metadata";
+} from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Input } from "@omnyo/shared-ui/input";
+import { Switch } from "@omnyo/shared-ui/switch";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   areAppShortcutsEqual,
-  appShortcutFromInput,
-  canAssignAppShortcut,
   getCommandShortcut,
   getShortcutConflicts,
   isAppCommandAvailableForClient,
-  resetCommandShortcutOverride,
-  setCommandShortcutOverride,
+  readRecordedShortcut,
 } from "@/lib/keyboard-shortcut-settings";
 import {
   browserPlatform,
   presentAppShortcut,
   appShortcutMatchesQuery,
 } from "@/lib/app-keybindings";
-import {
-  useUpdateGeneralSettings,
-  useUpdateKeyboardSettings,
-} from "@/hooks/mutations/settings-mutations";
-import { pluginCommandId } from "@bb/domain";
-import { usePluginCommandBindings } from "@/hooks/usePluginCommandBindings";
+import { useUpdateGeneralSettings } from "@/hooks/mutations/settings-mutations";
+import { useAppShortcutEditor } from "@/hooks/useAppShortcutEditor";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 import {
   SettingsBadge,
@@ -50,13 +40,13 @@ import {
   SettingsWithControl,
 } from "@/components/ui/settings-section";
 import { AppCommandShortcutPill } from "@/components/commands/AppCommandShortcutHint";
-import { getBbDesktopInfo } from "@/lib/bb-desktop";
 
-const EMPTY_OVERRIDES: AppKeybindingOverrides = [];
 const SETTINGS_SHORTCUT_PILL_CLASS =
   "rounded-none bg-transparent px-0 py-0 text-foreground opacity-100";
+
 const SETTINGS_DEFAULT_SHORTCUT_CLASS =
   "bg-muted/40 px-1.5 py-0.5 text-foreground opacity-100";
+
 const SETTINGS_SEGMENTED_DEFAULT_SHORTCUT_CLASS =
   "rounded-none border-l border-border bg-transparent px-1.5 py-0.5 text-foreground opacity-100";
 
@@ -92,28 +82,33 @@ const ShortcutRecorder = memo(
   }: ShortcutRecorderProps) {
     const platform = browserPlatform();
     const [error, setError] = useState<string | null>(null);
+
     const shortcutPresentation =
       shortcut === null ? null : presentAppShortcut(shortcut, platform);
+
     const formattedShortcut = shortcutPresentation?.label ?? "unassigned";
 
     function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
       if (!recording) return;
       event.preventDefault();
       event.stopPropagation();
-      if (event.key === "Escape") {
+
+      const recorded = readRecordedShortcut(event, command, platform);
+
+      if (recorded.kind === "cancel") {
         setError(null);
         onRecordingChange(null);
+
         return;
       }
-      const next = appShortcutFromInput(event, platform);
-      if (next === null) {
-        setError("Press a non-modifier key.");
+
+      if (recorded.kind === "error") {
+        setError(recorded.message);
+
         return;
       }
-      if (!canAssignAppShortcut(command, next)) {
-        setError("Use Command, Control, or Alt with a key.");
-        return;
-      }
+
+      const next = recorded.shortcut;
       setError(null);
       onChange(command, next);
       onRecordingChange(null);
@@ -233,15 +228,18 @@ function buildKeyboardCommandRowModel({
     isDesktop,
     platform,
   );
+
   const customized =
     findAppKeybindingOverride(
       overrides,
       command,
       keyboardPlatform(platform),
     ) !== undefined;
+
   const commandBindings = defaults.filter(
     (binding) => binding.command === command,
   );
+
   const webDefaultShortcut = getCommandShortcut(
     defaults,
     [],
@@ -249,6 +247,7 @@ function buildKeyboardCommandRowModel({
     false,
     platform,
   );
+
   const desktopDefaultShortcut = getCommandShortcut(
     defaults,
     [],
@@ -256,15 +255,18 @@ function buildKeyboardCommandRowModel({
     true,
     platform,
   );
+
   const availableOnClient = isAppCommandAvailableForClient(
     defaults,
     command,
     isDesktop,
     platform,
   );
+
   const desktopOnly =
     commandBindings.length > 0 &&
     commandBindings.every((binding) => binding.desktopOnly);
+
   const conflicts = customized
     ? getShortcutConflicts(defaults, overrides, command, isDesktop, platform)
     : [];
@@ -339,7 +341,9 @@ const KeyboardCommandRow = memo(
       shortcut,
       webDefaultShortcut,
     } = model;
+
     const metadata = model;
+
     const splitDefaults =
       webDefaultShortcut !== null &&
       desktopDefaultShortcut !== null &&
@@ -349,6 +353,7 @@ const KeyboardCommandRow = memo(
             { label: "Desktop", shortcut: desktopDefaultShortcut },
           ]
         : null;
+
     const sharedDefaultShortcut =
       splitDefaults === null
         ? (webDefaultShortcut ?? desktopDefaultShortcut)
@@ -368,7 +373,7 @@ const KeyboardCommandRow = memo(
             {desktopOnly ? <SettingsBadge>Desktop</SettingsBadge> : null}
             {customized ? <SettingsBadge>Custom</SettingsBadge> : null}
           </div>
-          <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
+          <p className="mt-0.5 text-xs leading-snug text-subtle-foreground">
             {metadata.description}
           </p>
           {splitDefaults !== null || sharedDefaultShortcut !== null ? (
@@ -376,7 +381,7 @@ const KeyboardCommandRow = memo(
               aria-label={`${splitDefaults === null ? "Default shortcut" : "Default shortcuts"} for ${metadata.label}`}
               className="mt-1.5 flex flex-wrap items-center gap-1.5"
             >
-              <span className="text-xs text-subtle-foreground/75">
+              <span className="text-xs text-subtle-foreground">
                 {splitDefaults === null ? "Default:" : "Defaults:"}
               </span>
               {sharedDefaultShortcut !== null ? (
@@ -469,62 +474,31 @@ const KeyboardCommandRow = memo(
 export function KeyboardSettingsSection() {
   const systemConfig = useSystemConfig();
   const updateGeneralSettings = useUpdateGeneralSettings();
+
   const {
+    assignCommand,
+    commandGroups,
+    defaultConflicts,
+    defaults,
+    disabled,
+    isDesktop,
     isPending: isKeyboardSettingsPending,
-    mutate: mutateKeyboardSettings,
-  } = useUpdateKeyboardSettings();
-  const isDesktop = getBbDesktopInfo() !== null;
-  const platform = browserPlatform();
+    labels,
+    overrides,
+    pendingAssignment,
+    pendingCommand,
+    platform,
+    resetCommands,
+    setPendingAssignment,
+  } = useAppShortcutEditor();
+
   const generalSettings =
     systemConfig.data?.generalSettings ?? defaultAppSettings;
-  const {
-    defaults,
-    commands,
-    conflicts: defaultConflicts,
-  } = usePluginCommandBindings();
-  const commandGroups = useMemo(
-    () => [
-      ...APP_COMMAND_GROUPS,
-      {
-        label: "Plugin commands",
-        commands: commands.map((command) => ({
-          command: pluginCommandId(command.pluginId, command.id),
-          label: command.title,
-          description: `Plugin: ${command.pluginId}`,
-        })),
-      },
-    ],
-    [commands],
-  );
-  const labels = useMemo(
-    () =>
-      new Map<KeyboardCommandId, string>(
-        commandGroups.flatMap((group) =>
-          group.commands.map(
-            (command) => [command.command, command.label] as const,
-          ),
-        ),
-      ),
-    [commandGroups],
-  );
-  const [pendingAssignment, setPendingAssignment] = useState<{
-    command: KeyboardCommandId;
-    shortcut: AppShortcut;
-    conflicts: KeyboardCommandId[];
-  } | null>(null);
-  const serverOverrides =
-    systemConfig.data?.keybindingOverrides ?? EMPTY_OVERRIDES;
-  const serverOverridesKey = JSON.stringify(serverOverrides);
-  const [draft, setDraft] = useState<{
-    sourceKey: string;
-    value: AppKeybindingOverrides;
-  }>(() => ({ sourceKey: serverOverridesKey, value: serverOverrides }));
-  const overrides =
-    draft.sourceKey === serverOverridesKey ? draft.value : serverOverrides;
+
   const [recordingCommand, setRecordingCommand] =
     useState<KeyboardCommandId | null>(null);
+
   const [search, setSearch] = useState("");
-  const pendingCommandRef = useRef<KeyboardCommandId | null>(null);
 
   const commandRowModels = useMemo(
     () =>
@@ -563,7 +537,9 @@ export function KeyboardSettingsSection() {
   const shortcutMatches = useCallback(
     (command: KeyboardCommandId, query: string): boolean => {
       const model = commandRowModels.get(command);
+
       if (model === undefined) return false;
+
       return [
         model.shortcut,
         model.webDefaultShortcut,
@@ -577,11 +553,14 @@ export function KeyboardSettingsSection() {
 
   const visibleGroups = useMemo(() => {
     const query = search.trim().toLowerCase();
+
     if (query.length === 0) return commandGroups;
+
     const commands = commandGroups
       .flatMap((group) =>
         group.commands.map((metadata) => {
           const label = metadata.label.toLowerCase();
+
           const rank = [
             label === query,
             label.startsWith(query),
@@ -590,123 +569,33 @@ export function KeyboardSettingsSection() {
             metadata.command.toLowerCase().includes(query),
             metadata.description.toLowerCase().includes(query),
           ].findIndex(Boolean);
+
           return { metadata, rank };
         }),
       )
       .filter(({ rank }) => rank !== -1)
       .sort((left, right) => left.rank - right.rank)
       .map(({ metadata }) => metadata);
+
     return commands.length === 0 ? [] : [{ label: "Search results", commands }];
   }, [commandGroups, search, shortcutMatches]);
 
-  const latestSettingsRef = useRef({
-    defaults,
-    isDesktop,
-    overrides,
-    platform,
-    serverOverridesKey,
-  });
-  useLayoutEffect(() => {
-    latestSettingsRef.current = {
-      defaults,
-      isDesktop,
-      overrides,
-      platform,
-      serverOverridesKey,
-    };
-  }, [defaults, isDesktop, overrides, platform, serverOverridesKey]);
-
-  const applyOverrides = useCallback(
-    (
-      next: AppKeybindingOverrides,
-      pending: KeyboardCommandId | null,
-      previous: AppKeybindingOverrides,
-      sourceKey: string,
-    ) => {
-      pendingCommandRef.current = pending;
-      setDraft({ sourceKey, value: next });
-      mutateKeyboardSettings(next, {
-        onError: () => setDraft({ sourceKey, value: previous }),
-      });
-    },
-    [mutateKeyboardSettings],
-  );
-
-  const assignCommand = useCallback(
-    (
-      command: KeyboardCommandId,
-      shortcut: AppShortcut | null,
-      replace: boolean,
-    ) => {
-      const current = latestSettingsRef.current;
-      let next = setCommandShortcutOverride(
-        current.overrides,
-        command,
-        shortcut,
-        current.platform,
-      );
-      const conflicts = getShortcutConflicts(
-        current.defaults,
-        next,
-        command,
-        current.isDesktop,
-        current.platform,
-      );
-      if (shortcut !== null && conflicts.length > 0 && !replace) {
-        setPendingAssignment({ command, shortcut, conflicts });
-        return;
-      }
-      if (replace) {
-        for (const conflict of conflicts) {
-          next = setCommandShortcutOverride(
-            next,
-            conflict,
-            null,
-            current.platform,
-          );
-        }
-      }
-      setPendingAssignment(null);
-      applyOverrides(
-        next,
-        command,
-        current.overrides,
-        current.serverOverridesKey,
-      );
-    },
-    [applyOverrides],
-  );
   const updateCommand = useCallback(
-    (command: KeyboardCommandId, shortcut: AppShortcut | null) =>
-      assignCommand(command, shortcut, false),
+    (command: KeyboardCommandId, shortcut: AppShortcut | null) => {
+      assignCommand(command, shortcut, false);
+    },
     [assignCommand],
   );
 
   const resetCommand = useCallback(
-    (command: KeyboardCommandId) => {
-      const current = latestSettingsRef.current;
-      const next = resetCommandShortcutOverride(
-        current.overrides,
-        command,
-        current.platform,
-      );
-      applyOverrides(
-        next,
-        command,
-        current.overrides,
-        current.serverOverridesKey,
-      );
-    },
-    [applyOverrides],
+    (command: KeyboardCommandId) => resetCommands([command]),
+    [resetCommands],
   );
 
-  const pendingCommand = isKeyboardSettingsPending
-    ? pendingCommandRef.current
-    : null;
-  const disabled = systemConfig.data === undefined || isKeyboardSettingsPending;
   const customizedCommands = [...commandRowModels.values()].filter(
     (row) => row.availableOnClient && row.customized,
   );
+
   const hasOverrides = customizedCommands.length > 0;
 
   return (
@@ -716,16 +605,7 @@ export function KeyboardSettingsSection() {
         <Button
           disabled={disabled || !hasOverrides}
           onClick={() =>
-            applyOverrides(
-              customizedCommands.reduce(
-                (next, row) =>
-                  resetCommandShortcutOverride(next, row.command, platform),
-                overrides,
-              ),
-              null,
-              overrides,
-              serverOverridesKey,
-            )
+            resetCommands(customizedCommands.map((row) => row.command))
           }
           size="sm"
           type="button"
@@ -734,7 +614,7 @@ export function KeyboardSettingsSection() {
           Reset all
         </Button>
       }
-      description="Click a shortcut, then press its new keys. Changes sync to every bb window."
+      description="Click a shortcut, then press its new keys. Changes sync to every Omnyo window."
       title="Keyboard shortcuts"
     >
       <div className="space-y-5">
@@ -812,7 +692,9 @@ export function KeyboardSettingsSection() {
               <div className="divide-y divide-border">
                 {group.commands.map((metadata) => {
                   const model = commandRowModels.get(metadata.command);
+
                   if (model === undefined) return null;
+
                   return (
                     <KeyboardCommandRow
                       key={metadata.command}

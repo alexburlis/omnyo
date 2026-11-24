@@ -3,8 +3,8 @@ import {
   setAppSettings,
   updateHost,
   upsertProjectExecutionDefaults,
-} from "@bb/db";
-import type { PermissionMode } from "@bb/domain";
+} from "@omnyo/db";
+import type { PermissionMode } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   buildExistingThreadExecutionInput,
@@ -31,18 +31,22 @@ describe("thread execution plan input sources", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-fast-tier-setting",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
       });
+
       upsertProjectExecutionDefaults(harness.deps.db, {
         projectId: project.id,
         providerId: "codex",
@@ -51,6 +55,7 @@ describe("thread execution plan input sources", () => {
         permissionMode: "auto",
         serviceTier: "fast",
       });
+
       const resolve = (
         input: ReturnType<typeof buildExistingThreadExecutionInput>,
       ) =>
@@ -75,6 +80,21 @@ describe("thread execution plan input sources", () => {
         allowFastServiceTier: true,
       });
       expect((await resolve({})).resolvedExecution.serviceTier).toBe("fast");
+      setAppSettings(harness.db, {
+        ...getAppSettings(harness.db),
+        allowFastServiceTier: false,
+        providerAllowFastServiceTier: { codex: true, "claude-code": false },
+      });
+      expect((await resolve({})).resolvedExecution.serviceTier).toBe("fast");
+      setAppSettings(harness.db, {
+        ...getAppSettings(harness.db),
+        allowFastServiceTier: true,
+        providerAllowFastServiceTier: { codex: false, "claude-code": true },
+      });
+      expect(
+        (await resolve({ serviceTier: { source: "explicit", value: "fast" } }))
+          .resolvedExecution.serviceTier,
+      ).toBe("default");
     });
   });
 
@@ -83,18 +103,22 @@ describe("thread execution plan input sources", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-open-tier",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
       });
+
       upsertProjectExecutionDefaults(harness.deps.db, {
         projectId: project.id,
         providerId: "codex",
@@ -103,6 +127,7 @@ describe("thread execution plan input sources", () => {
         permissionMode: "auto",
         serviceTier: "turbo",
       });
+
       const resolve = (
         input: ReturnType<typeof buildExistingThreadExecutionInput>,
       ) =>
@@ -145,18 +170,22 @@ describe("thread execution plan input sources", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-no-tier",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "pi",
       });
+
       upsertProjectExecutionDefaults(harness.deps.db, {
         projectId: project.id,
         providerId: "pi",
@@ -165,6 +194,7 @@ describe("thread execution plan input sources", () => {
         permissionMode: "full",
         serviceTier: "fast",
       });
+
       const resolve = (
         input: ReturnType<typeof buildExistingThreadExecutionInput>,
       ) =>
@@ -239,9 +269,11 @@ describe("thread execution plan input sources", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-source-aware-create-defaults",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       upsertProjectExecutionDefaults(harness.deps.db, {
         projectId: project.id,
         providerId: "codex",
@@ -260,6 +292,7 @@ describe("thread execution plan input sources", () => {
           providerId: "pi",
         },
       );
+
       const legacyExplicitValue = resolveProjectExecutionDefaultsForCreate(
         harness.deps,
         {
@@ -268,6 +301,7 @@ describe("thread execution plan input sources", () => {
           providerId: "pi",
         },
       );
+
       const clientPreferredProvider = resolveProjectExecutionDefaultsForCreate(
         harness.deps,
         {
@@ -293,6 +327,7 @@ describe("thread execution plan input sources", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-source-aware-standard-product-defaults",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
@@ -313,6 +348,7 @@ describe("thread execution plan input sources", () => {
     });
   });
 });
+
 describe("machine permission ceiling", () => {
   async function seedCappedThread(
     harness: TestAppHarness,
@@ -322,24 +358,29 @@ describe("machine permission ceiling", () => {
     updateHost(harness.db, harness.hub, host.id, {
       maxPermissionMode: args.maxPermissionMode,
     });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const environment = seedEnvironment(harness.deps, {
       hostId: host.id,
       projectId: project.id,
     });
+
     const thread = seedThread(harness.deps, {
       projectId: project.id,
       environmentId: environment.id,
       providerId: args.providerId,
     });
+
     seedThreadRuntimeState(harness.deps, {
       environmentId: environment.id,
       permissionMode: "full",
       providerThreadId: `provider-${args.id}`,
       threadId: thread.id,
     });
+
     return thread;
   }
 

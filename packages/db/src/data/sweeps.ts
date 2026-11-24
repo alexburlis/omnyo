@@ -18,19 +18,27 @@ import {
 export const CLOSED_SESSION_ROW_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 const COMPLETED_EVENT_OUTPUT_MIGRATION_CURSOR_VERSION = 1;
+
 const COMPLETED_EVENT_OUTPUT_MIGRATION_COMPLETED_AT = -1;
+
 export const DEFAULT_CLOSED_SESSION_PRUNE_BATCH_SIZE = 1_000;
+
 export const DEFAULT_COMPLETED_EVENT_OUTPUT_MIGRATION_SCAN_LIMIT = 25;
+
 export const DEFAULT_LEGACY_IMAGE_GENERATION_MIGRATION_SCAN_LIMIT = 250;
+
 export const MAX_COMPLETED_EVENT_OUTPUT_MIGRATION_EVENT_DATA_BYTES =
   8 * 1024 * 1024;
 
 const COMPLETED_EVENT_OUTPUT_MIGRATION_CURSOR_POLICY =
   "legacy_completed_event_output_sidecar";
+
 const COMPLETED_EVENT_OUTPUT_MIGRATION_WINDOW_POLICY =
   "legacy_completed_event_output_sidecar_window";
+
 const LEGACY_IMAGE_GENERATION_MIGRATION_CURSOR_POLICY =
   "legacy_image_generation_output_sidecar";
+
 const LEGACY_IMAGE_GENERATION_MIGRATION_WINDOW_POLICY =
   "legacy_image_generation_output_sidecar_window";
 
@@ -38,14 +46,18 @@ const LEGACY_IMAGE_GENERATION_TARGET: RetainedEventOutputTarget = (() => {
   const target = RETAINED_EVENT_OUTPUT_TARGETS.find(
     (target) => target.itemKind === "imageGeneration",
   );
+
   if (!target) {
     throw new Error("Missing retained image generation output target");
   }
+
   return target;
 })();
 
 type ClosedSessionState = "closed";
+
 type ClosedSessionDeleteParameters = [ClosedSessionState, number, number];
+
 type CompletedEventOutputScanParameters = [
   "item/completed",
   RetainedEventOutputTarget["itemKind"],
@@ -54,6 +66,7 @@ type CompletedEventOutputScanParameters = [
   string,
   number,
 ];
+
 type CompletedEventOutputCandidateParameters = [
   "item/completed",
   RetainedEventOutputTarget["itemKind"],
@@ -70,6 +83,7 @@ type CompletedEventOutputCandidateParameters = [
   string,
   number,
 ];
+
 interface CompletedEventOutputScanCursor {
   lastCreatedAt: number;
   lastEventId: string;
@@ -117,6 +131,7 @@ interface CompletedEventOutputMigrationStrategy {
 }
 
 type LegacyImageGenerationScanParameters = [string, number];
+
 type LegacyImageGenerationCandidateParameters = [
   string,
   string,
@@ -208,6 +223,7 @@ function getCompletedEventOutputScanState(
 ): CompletedEventOutputScanState {
   const cursorId = buildCompletedEventOutputCursorId(args, cursorPolicy);
   const windowId = buildCompletedEventOutputCursorId(args, windowPolicy);
+
   const rows = db
     .select({
       id: maintenanceScanCursors.id,
@@ -218,6 +234,7 @@ function getCompletedEventOutputScanState(
     .from(maintenanceScanCursors)
     .where(inArray(maintenanceScanCursors.id, [cursorId, windowId]))
     .all();
+
   const rowsById = new Map(rows.map((row) => [row.id, row]));
   const cursor = rowsById.get(cursorId);
   const window = rowsById.get(windowId);
@@ -268,6 +285,7 @@ function findCompletedEventOutputCandidate(
 ): CompletedEventOutputCandidateRow | undefined {
   const valuePath = `$.item.${args.outputPath}`;
   const truncationPath = `$.item.truncation.${args.outputPath}`;
+
   return db.$client
     .prepare<
       CompletedEventOutputCandidateParameters,
@@ -319,6 +337,7 @@ function listLegacyImageGenerationScanRows(
   if (args.limit <= 0) {
     return [];
   }
+
   return db.$client
     .prepare<LegacyImageGenerationScanParameters, CompletedEventOutputScanRow>(
       `
@@ -458,10 +477,13 @@ function persistCompletedEventOutputMigrationPosition(
     },
     cursorPolicy,
   );
+
   if (sameCompletedEventOutputScanPosition(position, window)) {
     clearCompletedEventOutputMigrationWindow(db, args, windowPolicy);
+
     return;
   }
+
   advanceCompletedEventOutputMigrationCursor(
     db,
     {
@@ -556,13 +578,16 @@ function migrateNextCompletedEventOutput(
   if (args.limit <= 0) {
     return emptyCompletedEventOutputMigrationResult("idle", 0);
   }
+
   const state = getCompletedEventOutputScanState(
     db,
     args,
     strategy.cursorPolicy,
     strategy.windowPolicy,
   );
+
   const cursor = state.cursor;
+
   if (cursor.lastCreatedAt === COMPLETED_EVENT_OUTPUT_MIGRATION_COMPLETED_AT) {
     return emptyCompletedEventOutputMigrationResult("complete", 0);
   }
@@ -571,9 +596,12 @@ function migrateNextCompletedEventOutput(
     state.window && completedEventOutputScanPositionAfter(state.window, cursor)
       ? state.window
       : null;
+
   let initialWindowScanRows: number | null = null;
+
   if (!window) {
     const rows = strategy.listScanRows(db, args, cursor);
+
     if (rows.length === 0) {
       if (cursor.lastCreatedAt === 0 && cursor.lastEventId === "") {
         if (state.window) {
@@ -583,8 +611,10 @@ function migrateNextCompletedEventOutput(
             strategy.windowPolicy,
           );
         }
+
         return emptyCompletedEventOutputMigrationResult("idle", 0);
       }
+
       db.transaction(
         (tx) => {
           advanceCompletedEventOutputMigrationCursor(
@@ -605,12 +635,16 @@ function migrateNextCompletedEventOutput(
         },
         { behavior: "immediate" },
       );
+
       return emptyCompletedEventOutputMigrationResult("complete", 0);
     }
+
     const lastRow = rows.at(-1);
+
     if (!lastRow) {
       throw new Error(strategy.missingScanRowError);
     }
+
     window = {
       lastCreatedAt: lastRow.created_at,
       lastEventId: lastRow.id,
@@ -620,6 +654,7 @@ function migrateNextCompletedEventOutput(
   }
 
   const candidate = strategy.findCandidate(db, args, cursor, window);
+
   const candidatePosition = candidate
     ? {
         lastCreatedAt: candidate.scan_created_at,
@@ -627,7 +662,9 @@ function migrateNextCompletedEventOutput(
         updatedAt: args.migratedAt,
       }
     : window;
+
   const scanRows = initialWindowScanRows ?? 0;
+
   if (!candidate) {
     db.transaction(
       (tx) =>
@@ -641,10 +678,12 @@ function migrateNextCompletedEventOutput(
         ),
       { behavior: "immediate" },
     );
+
     return emptyCompletedEventOutputMigrationResult("scanned", scanRows);
   }
 
   const prepared = strategy.prepare(candidate, args);
+
   if (!prepared.retainedOutput) {
     db.transaction(
       (tx) =>
@@ -658,8 +697,10 @@ function migrateNextCompletedEventOutput(
         ),
       { behavior: "immediate" },
     );
+
     return emptyCompletedEventOutputMigrationResult("scanned", scanRows);
   }
+
   const retainedOutput = prepared.retainedOutput;
   const retained = retainedOutput.expiresAt > args.migratedAt;
   db.transaction(
@@ -671,18 +712,26 @@ function migrateNextCompletedEventOutput(
           and(eq(events.id, candidate.id), eq(events.data, candidate.data)),
         )
         .run();
+
       if (update.changes !== 1) {
         throw new Error(strategy.eventChangedError);
       }
+
       if (prepared.data !== candidate.data)
-        markThreadPruningPolicyWork(tx, [candidate.thread_id], "resolved-items");
+        markThreadPruningPolicyWork(
+          tx,
+          [candidate.thread_id],
+          "resolved-items",
+        );
       bumpThreadEventRewriteGeneration(candidate.thread_id);
+
       if (retained) {
         insertPreparedRetainedEventOutput(tx, {
           eventId: candidate.id,
           output: retainedOutput,
         });
       }
+
       persistCompletedEventOutputMigrationPosition(
         tx,
         args,

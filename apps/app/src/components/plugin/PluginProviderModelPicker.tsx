@@ -1,17 +1,17 @@
-import {
-  reconcileServiceTier,
-  type ProviderOptionDescriptor,
-} from "@bb/domain";
+import { reconcileServiceTier } from "@omnyo/domain";
 import { useCallback, useEffect, useMemo } from "react";
 import type {
   ExperimentalProviderModelPickerProps,
   ExperimentalProviderModelPickerValue,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { ModelReasoningPicker } from "@/components/pickers/ModelReasoningPicker";
+import type { ModelPickerOption } from "@/components/pickers/model-picker-option";
 import {
-  formatModelLabel,
-  useThreadCreationOptions,
-} from "@/hooks/useThreadCreationOptions";
+  rowOffersReasoningLevel,
+  type ModelPickerSelection,
+} from "@/components/pickers/model-picker-selection";
+import { useModelPickerCatalogs } from "@/components/pickers/useModelPickerCatalogs";
+import { useThreadCreationOptions } from "@/hooks/useThreadCreationOptions";
 import { resolvePluginExecutionRouting } from "./plugin-execution-routing";
 
 function selectionKey(value: ExperimentalProviderModelPickerValue): string {
@@ -22,6 +22,8 @@ function selectionKey(value: ExperimentalProviderModelPickerValue): string {
     value.serviceTier ?? "",
   ].join("\0");
 }
+
+function ignoreProviderCycle(): void {}
 
 export function PluginProviderModelPicker({
   value,
@@ -36,7 +38,9 @@ export function PluginProviderModelPicker({
     () => resolvePluginExecutionRouting(routing),
     [routing],
   );
+
   const controlledKey = `${resolvedRouting.key}\0${selectionKey(value)}`;
+
   const controller = useThreadCreationOptions({
     scope: "component-local",
     initialProviderId: value.providerId,
@@ -45,6 +49,15 @@ export function PluginProviderModelPicker({
     initialServiceTier: value.serviceTier,
     resetKey: controlledKey,
     resolveProviderRouting: () => resolvedRouting.query,
+  });
+
+  const siblingCatalogs = useModelPickerCatalogs({
+    routing: controller.executionOptionsRouting,
+    providers: controller.providers,
+    selectedProviderId: controller.selectedProviderId,
+    enabled: allowProviderChange && disabled !== true,
+    sessionOptionSelectionsForProvider:
+      controller.sessionOptionSelectionsForProvider,
   });
 
   const emit = useCallback(
@@ -63,6 +76,7 @@ export function PluginProviderModelPicker({
     ) {
       return;
     }
+
     emit({
       providerId: controller.selectedProviderId,
       model: controller.selectedModel,
@@ -80,6 +94,86 @@ export function PluginProviderModelPicker({
     emit,
   ]);
 
+  const verifiedRows = useCallback(
+    (providerId: string): readonly ModelPickerOption[] | null => {
+      if (providerId === controller.selectedProviderId) {
+        return controller.modelCatalogIsVerified
+          ? [...controller.catalogModelOptions, ...controller.moreModelOptions]
+          : null;
+      }
+
+      if (!allowProviderChange) return null;
+
+      const catalog = siblingCatalogs.find(
+        (candidate) => candidate.providerId === providerId,
+      );
+
+      return catalog?.status === "verified"
+        ? [...catalog.catalogModelOptions, ...catalog.moreModelOptions]
+        : null;
+    },
+    [
+      allowProviderChange,
+      controller.catalogModelOptions,
+      controller.modelCatalogIsVerified,
+      controller.moreModelOptions,
+      controller.selectedProviderId,
+      siblingCatalogs,
+    ],
+  );
+
+  const handleSelectionChange = useCallback(
+    (selection: ModelPickerSelection): boolean => {
+      const row = verifiedRows(selection.providerId)?.find(
+        (candidate) => candidate.value === selection.model,
+      );
+
+      if (row === undefined || row.disabled === true) return false;
+
+      if (
+        row.reasoningOptions.length > 0 &&
+        !rowOffersReasoningLevel(row, selection.reasoningLevel)
+      ) {
+        return false;
+      }
+
+      const providerHasServiceTiers =
+        controller.providers.find(
+          (provider) => provider.id === selection.providerId,
+        )?.capabilities.supportsServiceTier ?? false;
+
+      const requestedServiceTier = selection.serviceTier ?? value.serviceTier;
+
+      const offeredServiceTiers =
+        controller.serviceTierSupportByProvider[selection.providerId] === true
+          ? row.serviceTierOptions
+          : [];
+
+      emit({
+        providerId: selection.providerId,
+        model: selection.model,
+        reasoningLevel: selection.reasoningLevel,
+        ...(providerHasServiceTiers && requestedServiceTier !== undefined
+          ? {
+              serviceTier: reconcileServiceTier(
+                requestedServiceTier,
+                offeredServiceTiers,
+              ),
+            }
+          : {}),
+      });
+
+      return true;
+    },
+    [
+      controller.providers,
+      controller.serviceTierSupportByProvider,
+      emit,
+      value.serviceTier,
+      verifiedRows,
+    ],
+  );
+
   const handleModelChange = useCallback(
     (model: string) => {
       if (!controller.modelCatalogIsVerified) return;
@@ -87,6 +181,7 @@ export function PluginProviderModelPicker({
     },
     [controller],
   );
+
   const handleReasoningChange = useCallback(
     (
       reasoningLevel: ExperimentalProviderModelPickerValue["reasoningLevel"],
@@ -103,6 +198,7 @@ export function PluginProviderModelPicker({
     },
     [controller, emit],
   );
+
   const handleServiceTierChange = useCallback(
     (
       serviceTier: NonNullable<
@@ -115,6 +211,7 @@ export function PluginProviderModelPicker({
       ) {
         return;
       }
+
       emit({
         providerId: controller.selectedProviderId,
         model: controller.selectedModel,
@@ -124,57 +221,35 @@ export function PluginProviderModelPicker({
     },
     [controller, emit],
   );
-  const handleProviderPreviewResolved = useCallback(
-    (selection: {
-      providerId: string;
-      model: string;
-      reasoningLevel: ExperimentalProviderModelPickerValue["reasoningLevel"];
-      supportsServiceTier: boolean;
-      serviceTierOptions: readonly ProviderOptionDescriptor[];
-    }) => {
-      emit({
-        providerId: selection.providerId,
-        model: selection.model,
-        reasoningLevel: selection.reasoningLevel,
-        ...(selection.supportsServiceTier && value.serviceTier !== undefined
-          ? {
-              serviceTier: reconcileServiceTier(
-                value.serviceTier,
-                selection.serviceTierOptions,
-              ),
-            }
-          : {}),
-      });
-    },
-    [emit, value.serviceTier],
-  );
 
   return (
     <ModelReasoningPicker
+      providers={controller.providers}
       providerOptions={controller.providerOptions}
       providerRouting={controller.executionOptionsRouting}
       selectedProviderId={controller.selectedProviderId}
-      onSelectedProviderChange={allowProviderChange ? () => {} : undefined}
-      onProviderPreviewResolved={
-        allowProviderChange ? handleProviderPreviewResolved : undefined
+      onSelectedProviderChange={
+        allowProviderChange ? ignoreProviderCycle : undefined
       }
-      requireVerifiedProviderPreview={allowProviderChange}
+      onSelectionChange={handleSelectionChange}
       hasMultipleProviders={controller.hasMultipleProviders}
       modelValue={controller.selectedModel}
       modelOptions={controller.modelOptions}
       moreModelOptions={controller.moreModelOptions}
+      catalogModelOptions={controller.catalogModelOptions}
+      modelCatalogIsVerified={controller.modelCatalogIsVerified}
+      requireVerifiedCatalog
       modelIsLoading={controller.isLoadingModels}
       modelLoadFailed={controller.modelLoadFailed}
       modelLoadError={controller.modelLoadError}
+      modelNotice={controller.modelNotice}
       onModelChange={handleModelChange}
-      formatModelLabel={formatModelLabel}
       reasoningValue={controller.reasoningLevel}
       reasoningOptions={controller.reasoningOptions}
       onReasoningChange={handleReasoningChange}
       serviceTierValue={controller.serviceTier}
       serviceTierOptions={controller.serviceTierOptions}
       onServiceTierChange={handleServiceTierChange}
-      serviceTierSupportByProvider={controller.serviceTierSupportByProvider}
       commandShortcutsEnabled={false}
       align={align}
       disabled={disabled}

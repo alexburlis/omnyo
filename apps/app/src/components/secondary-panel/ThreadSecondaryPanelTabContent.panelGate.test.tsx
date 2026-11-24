@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import type { WorkspaceDiffTarget } from "@bb/domain";
-import type { EnvironmentDiffFilesResponse } from "@bb/server-contract";
+import type { WorkspaceDiffTarget } from "@omnyo/domain";
+import type { EnvironmentDiffFilesResponse } from "@omnyo/server-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   environmentDiffFilesQueryKeyPrefix,
@@ -25,6 +25,7 @@ vi.mock("@/lib/sdk", () => ({
 
 vi.mock("@pierre/diffs/react", async () => {
   const React = await import("react");
+
   return {
     File: () => null,
     VirtualizerContext: React.createContext(undefined),
@@ -33,6 +34,7 @@ vi.mock("@pierre/diffs/react", async () => {
 });
 
 const ENVIRONMENT_ID = "env-1";
+
 const TARGET: WorkspaceDiffTarget = { type: "all", mergeBaseBranch: "main" };
 
 const emptyDiff: EnvironmentDiffFilesResponse = {
@@ -45,6 +47,7 @@ const emptyDiff: EnvironmentDiffFilesResponse = {
 };
 
 const PREVIEW_PATH = "src/index.ts";
+
 const fetchMock = vi.fn(
   async () =>
     new Response("export const answer = 42;\n", {
@@ -66,6 +69,7 @@ describe("GitDiffTabContent panel gating", () => {
   it("fetches the diff TOC only while the panel is open, and refetches once on reopen", async () => {
     vi.mocked(sdk.environments.diffFiles).mockResolvedValue(emptyDiff);
     const { queryClient, wrapper: Wrapper } = createQueryClientTestHarness();
+
     const renderTab = (isPanelOpen: boolean) => (
       <Wrapper>
         <GitDiffTabContent
@@ -108,6 +112,7 @@ describe("GitDiffTabContent panel gating", () => {
 describe("WorkspaceFilePreviewTabContent panel gating", () => {
   it("does not refetch an invalidated preview while the panel is closed", async () => {
     const { queryClient, wrapper: Wrapper } = createQueryClientTestHarness();
+
     const renderTab = (isPanelOpen: boolean) => (
       <Wrapper>
         <WorkspaceFilePreviewTabContent
@@ -145,6 +150,7 @@ describe("WorkspaceFilePreviewTabContent panel gating", () => {
 describe("HostScopedFilePreviewTabContent panel gating", () => {
   it("does not start or refetch a host read while the retained panel is closed", async () => {
     const { queryClient, wrapper: Wrapper } = createQueryClientTestHarness();
+
     const renderTab = (isPanelOpen: boolean) => (
       <Wrapper>
         <HostScopedFilePreviewTabContent

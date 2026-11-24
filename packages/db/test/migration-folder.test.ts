@@ -7,8 +7,12 @@ import { resolveMigrationsFolderForModuleDir } from "../src/migrate.js";
 const tempDirs: string[] = [];
 
 function createTempDir(): string {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bb-db-migrations-"));
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omnyo-db-migrations-"),
+  );
+
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 

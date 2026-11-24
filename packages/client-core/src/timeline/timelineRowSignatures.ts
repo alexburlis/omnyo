@@ -1,18 +1,20 @@
 import type {
   TimelineActivityIntent,
   TimelineRowPresentation,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   assertNever,
   type ThreadTimelineViewRow,
   type TimelineViewWorkRow,
-} from "@bb/thread-view";
+} from "@omnyo/thread-view";
 
 type TimelineRowSignaturePart = boolean | number | string | null | undefined;
 
 function signaturePart(value: TimelineRowSignaturePart): string {
   if (value === null) return "<null>";
+
   if (value === undefined) return "<undefined>";
+
   return String(value);
 }
 
@@ -54,6 +56,7 @@ function activityIntentsSignature(
 }
 
 const rowSignatureCache = new WeakMap<ThreadTimelineViewRow, string>();
+
 const rowsSignatureCache = new WeakMap<
   readonly ThreadTimelineViewRow[],
   string
@@ -63,9 +66,11 @@ export function timelineRowsSignature(
   rows: readonly ThreadTimelineViewRow[],
 ): string {
   const cached = rowsSignatureCache.get(rows);
+
   if (cached !== undefined) return cached;
   const signature = rows.map(timelineRowRenderSignature).join("\u001e");
   rowsSignatureCache.set(rows, signature);
+
   return signature;
 }
 
@@ -86,6 +91,7 @@ function presentationSignature(
   presentation: TimelineRowPresentation | undefined,
 ): string | null {
   if (!presentation) return null;
+
   return joinSignatureParts([
     presentation.label.pending,
     presentation.label.completed,
@@ -329,14 +335,17 @@ function timelineWorkRowRenderSignature(row: TimelineViewWorkRow): string {
 
 export function timelineRowRenderSignature(row: ThreadTimelineViewRow): string {
   const cached = rowSignatureCache.get(row);
+
   if (cached !== undefined) return cached;
   const signature = computeTimelineRowRenderSignature(row);
   rowSignatureCache.set(row, signature);
+
   return signature;
 }
 
 function computeTimelineRowRenderSignature(row: ThreadTimelineViewRow): string {
   const baseSignature = timelineRowBaseSignature(row);
+
   switch (row.kind) {
     case "conversation":
       return joinSignatureParts([
@@ -347,6 +356,9 @@ function computeTimelineRowRenderSignature(row: ThreadTimelineViewRow): string {
         row.attachments?.localFiles,
         row.attachments?.localImages,
         row.attachments?.webImages,
+        row.role === "assistant" && row.turnGit
+          ? JSON.stringify(row.turnGit)
+          : null,
       ]);
     case "system":
       if (row.systemKind === "operation") {
@@ -374,6 +386,7 @@ function computeTimelineRowRenderSignature(row: ThreadTimelineViewRow): string {
           row.detail,
         ]);
       }
+
       return joinSignatureParts([
         baseSignature,
         row.status,
@@ -393,8 +406,15 @@ function computeTimelineRowRenderSignature(row: ThreadTimelineViewRow): string {
         baseSignature,
         row.status,
         row.summaryCount,
+        row.activity?.commands,
+        row.activity?.files,
+        row.activity?.searches,
+        row.activity?.tools,
+        row.activity?.warnings,
+        row.activity?.failures,
         row.completedAt,
         row.children ? timelineRowsSignature(row.children) : null,
+        row.absorbedRows ? timelineRowsSignature(row.absorbedRows) : null,
       ]);
     case "work":
       return timelineWorkRowRenderSignature(row);

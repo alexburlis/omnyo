@@ -7,10 +7,12 @@ import type {
   ModelFamily,
   PoolProvider,
 } from "./contracts.js";
+import type { ModelRejectionInspection } from "./model-compatibility.js";
 import { retryAfterMilliseconds } from "./quota.js";
 import type { AccountStore, QuotaStore } from "./store.js";
 
 const OAUTH_REFRESH_TIMEOUT_MS = 15_000;
+
 const OAUTH_REFRESH_WINDOW_MS = 5 * 60 * 1_000;
 
 const oauthErrorCodeSchema = z.enum([
@@ -27,11 +29,13 @@ const oauthErrorCodeSchema = z.enum([
   "refresh_token_reused",
   "refresh_token_invalidated",
 ]);
+
 const oauthErrorDescriptionSchema = z.enum([
   "Refresh token expired",
   "Refresh token revoked",
   "Invalid refresh token",
 ]);
+
 const oauthErrorSchema = z.object({
   error: z.union([
     oauthErrorCodeSchema,
@@ -62,6 +66,7 @@ export interface AdapterSecretContext {
 }
 
 export interface AdapterUsageContext {
+  signal?: AbortSignal;
   account: Account;
   freshSecret: () => Promise<AccountSecret>;
   accounts: AccountStore;
@@ -70,29 +75,24 @@ export interface AdapterUsageContext {
   now: () => number;
 }
 
-export interface ImportedProviderAccount {
-  label: string;
-  email: string | null;
-  accountUuid?: string;
-  codexAccountId?: string;
-  subscriptionType: string | null;
-  rateLimitTier: string | null;
-  secret: Extract<AccountSecret, { kind: "oauth" }>;
-}
-
 export interface ProviderAdapter {
   provider: PoolProvider;
   upstreamName: string;
-  importAccount(): Promise<ImportedProviderAccount>;
   parseRequest(
     body: Uint8Array,
     headers: Headers,
   ): {
     family: ModelFamily;
+    model: string | null;
+    serviceTier: string | null;
     affinityId: string | null;
     parentAffinityId: string | null;
-    forAccount: (account: Account) => Uint8Array;
   };
+  inspectModelRejection(
+    response: Response,
+    model: string,
+    signal: AbortSignal,
+  ): Promise<ModelRejectionInspection>;
   upstreamUrl(request: Request, settings: AccountPoolConfig): URL;
   requestHeaders(
     inbound: Headers,
@@ -122,6 +122,7 @@ export function oauthSecretDueForRefresh(
   context: AdapterSecretContext,
 ): Extract<AccountSecret, { kind: "oauth" }> | null {
   const secret = context.secret;
+
   if (
     secret.kind !== "oauth" ||
     (!context.forceRefresh &&
@@ -130,6 +131,7 @@ export function oauthSecretDueForRefresh(
   ) {
     return null;
   }
+
   return secret;
 }
 
@@ -140,13 +142,17 @@ export async function fetchOAuthRefresh(
 ): Promise<string> {
   const signal = AbortSignal.timeout(OAUTH_REFRESH_TIMEOUT_MS);
   let onTimeout = () => {};
+
   const timedOut = new Promise<never>((_resolve, reject) => {
     onTimeout = () => reject(signal.reason);
+
     if (signal.aborted) onTimeout();
     else signal.addEventListener("abort", onTimeout, { once: true });
   });
+
   try {
     let response: Response;
+
     try {
       response = await Promise.race([
         context
@@ -162,6 +168,7 @@ export async function fetchOAuthRefresh(
           .then((result) => {
             if (signal.aborted)
               void result.body?.cancel().catch(() => undefined);
+
             return result;
           }),
         timedOut,
@@ -172,18 +179,23 @@ export async function fetchOAuthRefresh(
         0,
       );
     }
+
     if (!response.ok) {
       const retryAfterMs = retryAfterMilliseconds(
         response.headers.get("retry-after"),
         context.now(),
       );
+
       const detail = await oauthRefreshErrorDetail(response, timedOut);
       const message = `OAuth refresh failed with HTTP ${response.status}.${detail}`;
+
       if (response.status === 400 || response.status === 401) {
         throw new OAuthRefreshError(message);
       }
+
       throw new TransientOAuthRefreshError(message, retryAfterMs);
     }
+
     try {
       return await Promise.race([response.text(), timedOut]);
     } catch {
@@ -206,37 +218,49 @@ async function oauthRefreshErrorDetail(
     response.body === null
   ) {
     void response.body?.cancel().catch(() => undefined);
+
     return "";
   }
+
   const reader = response.body.getReader();
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   const deadline = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(
       () => reject(new Error("OAuth error body timed out")),
       1_000,
     );
   });
+
   try {
     const bytes: Uint8Array[] = [];
     let size = 0;
+
     while (true) {
       const chunk = await Promise.race([reader.read(), timedOut, deadline]);
+
       if (chunk.done) break;
       size += chunk.value.byteLength;
+
       if (size > 4_096) return "";
       bytes.push(chunk.value);
     }
+
     const parsed = oauthErrorSchema.safeParse(
       JSON.parse(Buffer.concat(bytes).toString("utf8")),
     );
+
     if (!parsed.success) return "";
+
     const code =
       typeof parsed.data.error === "string"
         ? parsed.data.error
         : parsed.data.error.code;
+
     const description = oauthErrorDescriptionSchema.safeParse(
       parsed.data.error_description,
     );
+
     return ` ${code}${description.success ? `: ${description.data}` : ""}.`;
   } catch {
     return "";
@@ -251,18 +275,22 @@ export function parseOAuthRefreshResponse<T>(
   schema: z.ZodType<T>,
 ): T {
   let payload: unknown;
+
   try {
     payload = JSON.parse(text);
   } catch {
     payload = undefined;
   }
+
   const parsed = schema.safeParse(payload);
+
   if (!parsed.success) {
     throw new TransientOAuthRefreshError(
       "OAuth refresh returned an unreadable response.",
       0,
     );
   }
+
   return parsed.data;
 }
 
@@ -272,8 +300,10 @@ export function filterRequestHeaders(
   prefixes: readonly string[],
 ): Headers {
   const headers = new Headers();
+
   for (const [name, value] of inbound) {
     const normalized = name.toLowerCase();
+
     if (
       allowed.has(normalized) ||
       prefixes.some((prefix) => normalized.startsWith(prefix))
@@ -281,6 +311,7 @@ export function filterRequestHeaders(
       headers.append(name, value);
     }
   }
+
   return headers;
 }
 
@@ -291,14 +322,18 @@ export function mountedUpstreamUrl(
 ): URL {
   const requestUrl = new URL(request.url);
   const mountedPath = requestUrl.pathname.indexOf("/http/");
+
   const rawPath =
     mountedPath < 0
       ? requestUrl.pathname
       : requestUrl.pathname.slice(mountedPath + 5);
+
   const normalizedPath = rawPath.replace(/^\//u, "");
+
   const upstreamPath = normalizedPath.startsWith(stripPrefix)
     ? normalizedPath.slice(stripPrefix.length)
     : normalizedPath;
+
   return new URL(
     upstreamPath + requestUrl.search,
     upstreamBaseUrl.endsWith("/") ? upstreamBaseUrl : `${upstreamBaseUrl}/`,

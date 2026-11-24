@@ -1,56 +1,100 @@
+import { readFileSync } from "node:fs";
+import {
+  formatAppConfigPath,
+  parseAppManagedConfig,
+} from "./managed-app-config.js";
 import { resolveEnvLoader, type EnvLoaderArgs } from "./env.js";
 import { loadHostDaemonPortValue } from "./ports.js";
 import {
-  BB_LOOPBACK_HOST,
-  BB_PROD_HOST_DAEMON_PORT,
-  BB_PROD_SERVER_PORT,
+  OMNYO_LOOPBACK_HOST,
+  OMNYO_PROD_HOST_DAEMON_PORT,
+  OMNYO_PROD_SERVER_PORT,
+  resolveConfiguredDataDir,
+  resolveProdDataDir,
 } from "./runtime.js";
 import { loadServerUrlValue } from "./server-url.js";
+import { readEnvironmentValue } from "./omnyo-environment.js";
 
 export interface CliConfig {
-  BB_HOST_DAEMON_PORT: number;
-  BB_SERVER_URL: string;
+  OMNYO_HOST_DAEMON_PORT: number;
+  OMNYO_SERVER_URL: string;
 }
 
 interface LoadCliConfigArgs extends EnvLoaderArgs {
   repoRoot?: string;
 }
 
-const DEFAULT_CLI_SERVER_URL = `http://${BB_LOOPBACK_HOST}:${BB_PROD_SERVER_PORT}`;
+const DEFAULT_CLI_SERVER_URL = `http://${OMNYO_LOOPBACK_HOST}:${OMNYO_PROD_SERVER_PORT}`;
 
 function hasConfiguredValue(env: NodeJS.ProcessEnv, key: string): boolean {
-  return env[key] !== undefined;
+  return readEnvironmentValue({ env, name: key }) !== undefined;
 }
 
 export function loadCliConfig(args: LoadCliConfigArgs = {}): CliConfig {
   const loader = resolveEnvLoader(args);
   const useDevDefaults = loader.mode === "dev" && args.repoRoot !== undefined;
-  const serverUrl =
-    hasConfiguredValue(loader.env, "BB_SERVER_URL") || useDevDefaults
-      ? loadServerUrlValue({
-          ...args,
+  let serverUrl: string;
+
+  if (hasConfiguredValue(loader.env, "OMNYO_SERVER_URL") || useDevDefaults) {
+    try {
+      serverUrl = loadServerUrlValue({
+        ...args,
+        env: loader.env,
+        homeDir: loader.context.homeDir,
+        mode: loader.mode,
+      });
+    } catch {
+      throw new Error(
+        readEnvironmentValue({
           env: loader.env,
-          homeDir: loader.context.homeDir,
-          mode: loader.mode,
-        })
-      : loadServerUrlValue({
-          ...args,
-          env: loader.env,
-          homeDir: loader.context.homeDir,
-          mode: loader.mode,
-          serverUrl: DEFAULT_CLI_SERVER_URL,
-        });
+          name: "OMNYO_SERVER_URL",
+        })?.trim() === ""
+          ? "OMNYO_SERVER_URL must not be empty"
+          : "Invalid OMNYO_SERVER_URL; expected a non-empty URL",
+      );
+    }
+  } else {
+    const configPath = formatAppConfigPath(
+      resolveConfiguredDataDir({
+        env: loader.env,
+        homeDir: loader.context.homeDir,
+        defaultDataDir: resolveProdDataDir({ homeDir: loader.context.homeDir }),
+      }),
+    );
+
+    try {
+      const config = parseAppManagedConfig(
+        JSON.parse(readFileSync(configPath, "utf8")),
+      );
+
+      serverUrl = loadServerUrlValue({
+        serverUrl: config.serverUrl ?? DEFAULT_CLI_SERVER_URL,
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        serverUrl = DEFAULT_CLI_SERVER_URL;
+      } else {
+        throw new Error(
+          `Cannot load saved Omnyo CLI server selection from ${configPath}`,
+        );
+      }
+    }
+  }
 
   return {
-    BB_HOST_DAEMON_PORT:
-      hasConfiguredValue(loader.env, "BB_HOST_DAEMON_PORT") || useDevDefaults
+    OMNYO_HOST_DAEMON_PORT:
+      hasConfiguredValue(loader.env, "OMNYO_HOST_DAEMON_PORT") || useDevDefaults
         ? loadHostDaemonPortValue({
             ...args,
             env: loader.env,
             homeDir: loader.context.homeDir,
             mode: loader.mode,
           })
-        : BB_PROD_HOST_DAEMON_PORT,
-    BB_SERVER_URL: serverUrl,
+        : OMNYO_PROD_HOST_DAEMON_PORT,
+    OMNYO_SERVER_URL: serverUrl,
   };
 }

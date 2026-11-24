@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
-import type { ThreadContextWindowUsage } from "@bb/server-contract";
+import type { ThreadContextWindowUsage } from "@omnyo/server-contract";
 import { ThreadContextWindowCard } from "./ThreadContextWindowIndicator";
 
 afterEach(cleanup);
@@ -31,14 +31,17 @@ it("shows details when a snapshot arrives and removes them when only aggregate u
       ],
     },
   };
+
   const aggregateUsage = {
     usedTokens: usage.usedTokens,
     modelContextWindow: usage.modelContextWindow,
     estimated: usage.estimated,
   };
+
   const { rerender } = render(
     <ThreadContextWindowCard usage={aggregateUsage} />,
   );
+
   expect(screen.getByText("10% used")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Show details" })).toBeNull();
   rerender(<ThreadContextWindowCard usage={usage} />);
@@ -56,6 +59,7 @@ it("shows the session cost only when the provider reports one", () => {
     modelContextWindow: 10000,
     estimated: false,
   };
+
   const { rerender } = render(<ThreadContextWindowCard usage={usage} />);
   expect(screen.queryByText("Session cost")).toBeNull();
   rerender(

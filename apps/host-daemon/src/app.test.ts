@@ -1,22 +1,26 @@
+import * as processErrorReporting from "@omnyo/process-utils/error-reporting";
 import fs from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import type { AgentRuntime, AgentRuntimeOptions } from "@bb/agent-runtime";
+import type { AgentRuntime, AgentRuntimeOptions } from "@omnyo/agent-runtime";
+import { createScriptedEchoRuntime } from "@omnyo/agent-runtime/test";
 import {
   threadScope,
   turnScope,
   type PendingInteractionCreate,
   type ToolCallRequest,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   hostDaemonEventBatchRequestSchema,
   hostDaemonInteractiveInterruptRequestSchema,
+  type HostDaemonInteractiveRequestKey,
   type HostDaemonInteractiveRequestResponse,
   type HostDaemonContributedEnvEntry,
-} from "@bb/host-daemon-contract";
-import type { HostWatcher } from "@bb/host-watcher";
-import { createDeferredPromise } from "@bb/test-helpers";
+} from "@omnyo/host-daemon-contract";
+import type { HostWatcher } from "@omnyo/host-watcher";
+import { setProcessErrorReportingEnabled } from "@omnyo/process-utils/error-reporting";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DISPATCH_TEST_BRIDGE_LAUNCH,
@@ -28,6 +32,7 @@ import {
   startIdleProviderSessionReaper,
   type HostDaemonApp,
 } from "./app.js";
+import { InteractiveRequestRegistry } from "./interactive-request-registry.js";
 import type { HostDaemonLogger } from "./logger.js";
 import type {
   RuntimeManagerReapIdleProviderSessionsArgs,
@@ -51,12 +56,15 @@ interface FetchRecorder {
 
 interface CreateFetchRecorderArgs {
   machineEnvironment?: HostDaemonContributedEnvEntry[];
-  onToolCallSignal?: (signal: AbortSignal | null | undefined) => void;
+  toolCallResponse?: (
+    signal: AbortSignal | null | undefined,
+  ) => Promise<Response>;
   inactiveSessionOnFirstEventPost?: boolean;
   interactiveRequestError?: Error;
   interactiveRequestResponse?: HostDaemonInteractiveRequestResponse;
   interruptResponses?: Array<() => Response>;
   retiredEnvironmentIds?: string[];
+  endedInteractiveRequestsOnReconnect?: HostDaemonInteractiveRequestKey[];
   sessionIds?: string[];
 }
 
@@ -90,6 +98,7 @@ function createLogger() {
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -97,20 +106,25 @@ function readFetchUrl(input: RequestInfo | URL): URL {
   if (typeof input === "string") {
     return new URL(input);
   }
+
   if (input instanceof URL) {
     return input;
   }
+
   return new URL(input.url);
 }
 
 function readFetchBody(init: RequestInit | undefined): string | null {
   const body = init?.body;
+
   if (body === undefined || body === null) {
     return null;
   }
+
   if (typeof body === "string") {
     return body;
   }
+
   throw new Error("Expected string request body");
 }
 
@@ -121,26 +135,34 @@ function createFetchRecorder(
   let eventPostCount = 0;
   let interruptCount = 0;
   let sessionOpenCount = 0;
+
   const fetchFn: FetchFn = async (input, init) => {
     const url = readFetchUrl(input);
+
     const request = {
       body: readFetchBody(init),
       method: init?.method ?? "GET",
       pathname: url.pathname,
     };
+
     requests.push(request);
 
-    if (url.pathname === "/internal/session/tool-call")
-      args.onToolCallSignal?.(init?.signal);
+    if (url.pathname === "/internal/session/tool-call") {
+      if (args.toolCallResponse) return args.toolCallResponse(init?.signal);
+    }
+
     if (url.pathname === "/internal/session/open") {
       const sessionId =
         args.sessionIds?.[sessionOpenCount] ??
         args.sessionIds?.at(-1) ??
         "session-app-test";
+
       sessionOpenCount += 1;
+
       return Response.json(
         {
           sessionId,
+          diagnosticsPolicy: { revision: 0, crashReportsEnabled: false },
           machineEnvironment: {
             revision: 0,
             entries: args.machineEnvironment ?? [],
@@ -148,12 +170,18 @@ function createFetchRecorder(
           heartbeatIntervalMs: 30000,
           leaseTimeoutMs: 90000,
           retiredEnvironmentIds: args.retiredEnvironmentIds ?? [],
+          endedInteractiveRequests:
+            sessionOpenCount > 1
+              ? (args.endedInteractiveRequestsOnReconnect ?? [])
+              : [],
         },
         { status: 201 },
       );
     }
+
     if (url.pathname === "/internal/session/events") {
       eventPostCount += 1;
+
       if (args.inactiveSessionOnFirstEventPost && eventPostCount === 1) {
         return Response.json(
           {
@@ -164,29 +192,36 @@ function createFetchRecorder(
           { status: 401 },
         );
       }
+
       return Response.json({
         acceptedEvents: [],
         rejectedEvents: [],
       });
     }
+
     if (url.pathname === "/internal/session/interactive-request") {
       if (args.interactiveRequestError) {
         throw args.interactiveRequestError;
       }
+
       const response: HostDaemonInteractiveRequestResponse =
         args.interactiveRequestResponse ?? {
           outcome: "created",
           interactionId: "pint_app_test",
           status: "pending",
         };
+
       return Response.json(response);
     }
+
     if (url.pathname === "/internal/session/interactive-request/interrupt") {
       const scripted = args.interruptResponses?.[interruptCount];
       interruptCount += 1;
+
       if (scripted) {
         return scripted();
       }
+
       return Response.json({
         ok: true,
         interactionIds: ["pint_app_test"],
@@ -220,6 +255,7 @@ function createOpeningWebSocket(
 ): CreateReconnectingWebSocket {
   return (urlProvider) => {
     let readyState = 0;
+
     const socket: ReconnectingWebSocketLike = {
       get readyState() {
         return readyState;
@@ -234,6 +270,7 @@ function createOpeningWebSocket(
       }),
       reconnect: vi.fn(),
     };
+
     const openSocket = async () => {
       await urlProvider();
       queueMicrotask(() => {
@@ -241,6 +278,7 @@ function createOpeningWebSocket(
         socket.onopen?.({ type: "open" });
       });
     };
+
     socket.reconnect = vi.fn(() => {
       readyState = 3;
       socket.onclose?.({ code: 1000, reason: "test-reconnect" });
@@ -248,6 +286,7 @@ function createOpeningWebSocket(
     });
     onCreate?.(socket);
     void openSocket();
+
     return socket;
   };
 }
@@ -265,13 +304,16 @@ function createFakeRuntime(): AgentRuntime {
     async resumeThread() {
       return { providerThreadId: "provider-thread-app-test" };
     },
-    async runTurn() {},
+    async runTurn() {
+      return { status: "started" };
+    },
     async steerTurn() {
       return { status: "steered" };
     },
     async stopThread() {
       return { providerCheckpointId: null };
     },
+    async setThreadSpeed() {},
     async clearThreadGoal() {
       return { cleared: true };
     },
@@ -309,7 +351,7 @@ function createFakeRuntime(): AgentRuntime {
       return null;
     },
     async reapIdleProviderSessions() {
-      return { reapedSessions: [] };
+      return { reapedSessions: [], retainedSessions: [] };
     },
     hasThread() {
       return false;
@@ -319,6 +361,9 @@ function createFakeRuntime(): AgentRuntime {
     },
     hasOpenBackgroundWork() {
       return false;
+    },
+    listOpenBackgroundWork() {
+      return [];
     },
     async shutdown() {},
   };
@@ -392,12 +437,31 @@ async function createAppFixture(
     closeMachineAuthProxy?: () => Promise<void>;
     createWebSocket?: CreateReconnectingWebSocket;
     exitProcess?: (code: number) => void;
+    uncertainInstaller?: boolean;
+    createRuntime?: (options: AgentRuntimeOptions) => AgentRuntime;
   } = {},
 ): Promise<HostDaemonAppFixture> {
-  const dataDir = await makeTempDir("bb-host-daemon-app-test-");
+  const dataDir = await makeTempDir("omnyo-host-daemon-app-test-");
+
+  if (options.uncertainInstaller)
+    await fs.writeFile(
+      path.join(dataDir, "host-daemon-update-attempt.json"),
+      JSON.stringify({
+        attemptedAt: Date.now(),
+        attemptCount: 1,
+        protocolVersion: 999,
+        version: "9.0.0+private.1",
+        installer: {
+          treeTermination: "unverified",
+          processGroupId: null,
+          processPlatform: process.platform,
+        },
+      }),
+    );
   const fetchRecorder = createFetchRecorder(args);
   const logger = createLogger();
   const runtimeOptions: RuntimeOptionsRef = { current: null };
+
   const app = await createHostDaemonApp({
     dataDir,
     serverUrl: "http://127.0.0.1:3334",
@@ -408,9 +472,10 @@ async function createAppFixture(
     logger,
     releaseLock: async () => undefined,
     localApiConfig: null,
-    createRuntime: (options) => {
-      runtimeOptions.current = options;
-      return createFakeRuntime();
+    createRuntime: (runtimeArgs) => {
+      runtimeOptions.current = runtimeArgs;
+
+      return options.createRuntime?.(runtimeArgs) ?? createFakeRuntime();
     },
     fetchFn: fetchRecorder.fetchFn,
     createWebSocket: options.createWebSocket ?? createOpeningWebSocket(),
@@ -430,9 +495,297 @@ async function createAppFixture(
 }
 
 describe("createHostDaemonApp", () => {
+  it.each([1, 2])(
+    "interrupts only the stopped thread's interactive waiter with %i provider threads",
+    async (threadCount) => {
+      const interruptedThreads = vi.spyOn(
+        InteractiveRequestRegistry.prototype,
+        "interruptThreads",
+      );
+
+      const runtimeRef: {
+        current: ReturnType<typeof createScriptedEchoRuntime> | null;
+      } = { current: null };
+
+      const pending = new Map<string, Promise<unknown>>();
+
+      const { app, fetchRecorder } = await createAppFixture(
+        {},
+        {
+          createRuntime: (options) => {
+            const onInteractiveRequest = options.onInteractiveRequest;
+
+            if (!onInteractiveRequest)
+              throw new Error("Expected interaction callback");
+
+            const runtime = createScriptedEchoRuntime({
+              runtime: {
+                ...options,
+                onInteractiveRequest: (request) => {
+                  const waiter = onInteractiveRequest(request);
+                  pending.set(request.threadId, waiter);
+
+                  return waiter;
+                },
+              },
+            });
+
+            runtimeRef.current = runtime;
+
+            return runtime;
+          },
+        },
+      );
+
+      try {
+        await app.connection.start();
+        await app.runtimeManager.ensureEnvironment({
+          environmentId: "env-stop-interaction",
+          workspacePath: await makeTempDir("omnyo-stop-interaction-"),
+        });
+        const runtime = runtimeRef.current;
+
+        if (!runtime) throw new Error("Expected real runtime");
+
+        const options = {
+          model: "test-model",
+          serviceTier: "default",
+          reasoningLevel: "medium",
+          providerOptions: {},
+          permissionMode: "full",
+          permissionScope: "full",
+          approvalReviewer: null,
+          permissionEscalation: null,
+        } as const;
+
+        for (let i = 1; i <= threadCount; i++) {
+          const threadId = `stop-interaction-${i}`;
+          await runtime.startThread({
+            environmentId: "env-stop-interaction",
+            threadId,
+            projectId: "p1",
+            providerId: "fake",
+            options,
+          });
+          await runtime.runTurn({
+            clientRequestId: `creq_22222222${i === 1 ? "4h" : "4j"}`,
+            threadId,
+            input: [
+              { type: "text", text: "approve:command ship it", mentions: [] },
+            ],
+            options,
+          });
+        }
+
+        await vi.waitFor(() => expect(pending.size).toBe(threadCount));
+        expect(runtime.listRunningProviders()).toHaveLength(1);
+        const stoppedWaiter = pending.get("stop-interaction-1");
+
+        if (!stoppedWaiter) throw new Error("Expected stopped thread waiter");
+        let stoppedError: unknown = null;
+        void stoppedWaiter.catch((error: unknown) => {
+          stoppedError = error;
+        });
+        let peerSettled = false;
+        void pending.get("stop-interaction-2")?.then(
+          () => {
+            peerSettled = true;
+          },
+          () => {
+            peerSettled = true;
+          },
+        );
+        await runtime.stopThread({ threadId: "stop-interaction-1" });
+        await vi.waitFor(() => expect(stoppedError).toBeInstanceOf(Error), {
+          timeout: 500,
+        });
+        expect(stoppedError).toHaveProperty(
+          "message",
+          'Provider "fake" detached thread while awaiting user interaction',
+        );
+        expect(peerSettled).toBe(false);
+        const registry = interruptedThreads.mock.contexts[0];
+
+        if (!(registry instanceof InteractiveRequestRegistry))
+          throw new Error("Expected live interaction registry");
+        expect(registry.getDirectAccessActivityCount()).toBe(threadCount - 1);
+        expect(runtime.listRunningProviders()).toHaveLength(threadCount - 1);
+        await vi.waitFor(() =>
+          expect(
+            fetchRecorder.requests.filter(
+              (record) =>
+                record.pathname ===
+                "/internal/session/interactive-request/interrupt",
+            ),
+          ).toHaveLength(1),
+        );
+
+        const interrupt = fetchRecorder.requests.find(
+          (record) =>
+            record.pathname ===
+            "/internal/session/interactive-request/interrupt",
+        );
+
+        if (!interrupt?.body) throw new Error("Expected interrupt envelope");
+        expect(
+          hostDaemonInteractiveInterruptRequestSchema.parse(
+            JSON.parse(interrupt.body),
+          ),
+        ).toMatchObject({
+          providerId: "fake",
+          threadIds: ["stop-interaction-1"],
+          requests: [{ threadId: "stop-interaction-1" }],
+        });
+      } finally {
+        await app.daemon.shutdown("test", 0);
+      }
+    },
+  );
+  it("restores uncertain installer admission before connecting without stealing a foreign owner", async () => {
+    const { app } = await createAppFixture({}, { uncertainInstaller: true });
+
+    try {
+      const denied = await app.router.handleOnlineRpcRequest({
+        type: "host-rpc.request",
+        requestId: "foreign-startup-hold",
+        command: {
+          type: "runtime_update.acquire",
+          ownerId: "foreign-owner",
+          closePluginLeases: [],
+        },
+      });
+
+      expect(denied.ok).toBe(false);
+
+      const own = await app.router.handleOnlineRpcRequest({
+        type: "host-rpc.request",
+        requestId: "own-startup-hold",
+        command: {
+          type: "runtime_update.acquire",
+          ownerId: "self-update:instance-app-test",
+          closePluginLeases: [],
+        },
+      });
+
+      expect(own).toMatchObject({ ok: true, result: { held: true } });
+    } finally {
+      await app.daemon.shutdown("test", 0);
+    }
+  });
+
+  it.each([
+    { hold: "runtime_update_held", kind: "terminal.open" },
+    { hold: "runtime_update_held", kind: "terminal.attach" },
+    { hold: "direct_access_held", kind: "terminal.open" },
+    { hold: "direct_access_held", kind: "terminal.attach" },
+  ] as const)(
+    "settles $kind with an expected $hold admission refusal",
+    async ({ hold, kind }) => {
+      let socket: ReconnectingWebSocketLike | undefined;
+
+      const { app, logger } = await createAppFixture(
+        {},
+        {
+          createWebSocket: createOpeningWebSocket((opened) => {
+            socket = opened;
+          }),
+        },
+      );
+
+      try {
+        await app.connection.start();
+
+        if (!socket) throw new Error("Expected test socket");
+
+        const held = await app.router.handleOnlineRpcRequest({
+          type: "host-rpc.request",
+          requestId: "hold-before-terminal",
+          command:
+            hold === "runtime_update_held"
+              ? {
+                  type: "runtime_update.acquire",
+                  ownerId: "terminal-admission-test",
+                  closePluginLeases: [],
+                }
+              : {
+                  type: "server_access.probe_direct",
+                  challenge: "terminal-admission-test",
+                  instanceId: "test-coordinator",
+                  serverUrl: "https://direct.example.test",
+                },
+        });
+
+        if (hold === "runtime_update_held")
+          expect(held).toMatchObject({ ok: true, result: { held: true } });
+        else expect(held).toMatchObject({ ok: false });
+        logger.warn.mockClear();
+        logger.error.mockClear();
+        const send = vi.spyOn(socket, "send");
+        const terminalId = "term-admission-test";
+        const requestId = "terminal-admission-request";
+
+        const message =
+          kind === "terminal.open"
+            ? {
+                type: kind,
+                terminalId,
+                requestId,
+                target: { kind: "host_path", cwd: null },
+                cols: 80,
+                rows: 24,
+                start: { mode: "shell" },
+              }
+            : {
+                type: kind,
+                terminalId,
+                requestId,
+                sinceSeq: 0,
+                tailBytes: 1000,
+              };
+
+        expect(() =>
+          socket?.onmessage?.({ data: JSON.stringify(message) }),
+        ).not.toThrow();
+        await vi.waitFor(() =>
+          expect(
+            send.mock.calls.map(([data]) => JSON.parse(String(data))),
+          ).toContainEqual({
+            type: "terminal.error",
+            terminalId,
+            requestId,
+            code: hold,
+            message:
+              hold === "runtime_update_held"
+                ? "Worker admission is held for a private runtime update"
+                : "Worker admission is held for direct access handoff",
+          }),
+        );
+        expect(logger.warn).not.toHaveBeenCalled();
+        expect(logger.error).not.toHaveBeenCalled();
+      } finally {
+        await app.router.handleOnlineRpcRequest({
+          type: "host-rpc.request",
+          requestId: "release-terminal-hold",
+          command:
+            hold === "runtime_update_held"
+              ? {
+                  type: "runtime_update.release",
+                  ownerId: "terminal-admission-test",
+                }
+              : {
+                  type: "server_access.release_direct_probe",
+                  challenge: "terminal-admission-test",
+                },
+        });
+        await app.daemon.shutdown("test", 0);
+      }
+    },
+  );
+
   it("installs machine variables into the daemon and child processes before work, then removes overrides live", async () => {
     vi.stubEnv("MACHINE_DAEMON_TEST", "original");
     let socket: ReconnectingWebSocketLike | undefined;
+
     const { app } = await createAppFixture(
       {
         machineEnvironment: [
@@ -450,12 +803,14 @@ describe("createHostDaemonApp", () => {
         }),
       },
     );
+
     const readChild = () =>
       execFileSync(
         process.execPath,
         ["-e", "process.stdout.write(process.env.MACHINE_DAEMON_TEST)"],
         { encoding: "utf8" },
       );
+
     try {
       await app.daemon.start();
       expect(process.env.MACHINE_DAEMON_TEST).toBe("configured");
@@ -466,6 +821,7 @@ describe("createHostDaemonApp", () => {
       expect(app.runtimeManager.getShellEnv().MACHINE_DAEMON_TEST).toBe(
         "configured",
       );
+
       if (!socket) throw new Error("Expected daemon socket");
       socket.onmessage?.({
         data: JSON.stringify({
@@ -484,9 +840,54 @@ describe("createHostDaemonApp", () => {
     }
   });
 
+  it("waits for fresh server diagnostics policy and disables on disconnect", async () => {
+    let socket: ReconnectingWebSocketLike | undefined;
+
+    const replacePolicy = vi.spyOn(
+      processErrorReporting,
+      "setProcessErrorReportingEnabled",
+    );
+
+    const { app, fetchRecorder, logger } = await createAppFixture(
+      {},
+      {
+        createWebSocket: createOpeningWebSocket((created) => {
+          socket = created;
+        }),
+      },
+    );
+
+    try {
+      await app.daemon.start();
+
+      expect(replacePolicy).toHaveBeenLastCalledWith(false);
+      expect(
+        fetchRecorder.requests.some(
+          (request) => request.pathname === "/internal/session/open",
+        ),
+      ).toBe(true);
+
+      if (!socket) throw new Error("Expected daemon socket");
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: "diagnostics-policy.replace",
+          policy: { revision: 1, crashReportsEnabled: true },
+        }),
+      });
+      expect(replacePolicy).toHaveBeenLastCalledWith(true);
+      socket.onclose?.({ code: 1000, reason: "test" });
+      expect(replacePolicy).toHaveBeenLastCalledWith(false);
+      expect(logger.error).not.toHaveBeenCalled();
+    } finally {
+      await app.daemon.shutdown("test", 0);
+      setProcessErrorReportingEnabled(true);
+    }
+  });
+
   it("acknowledges machine shutdown, cleans up, and exits", async () => {
     let socket: ReconnectingWebSocketLike | undefined;
     const exitProcess = vi.fn();
+
     const { app, dataDir } = await createAppFixture(
       {},
       {
@@ -496,7 +897,9 @@ describe("createHostDaemonApp", () => {
         exitProcess,
       },
     );
+
     await app.daemon.start();
+
     if (socket === undefined) throw new Error("Expected daemon socket");
 
     socket.onmessage?.({ data: JSON.stringify({ type: "machine.shutdown" }) });
@@ -507,6 +910,7 @@ describe("createHostDaemonApp", () => {
     ).resolves.toBeUndefined();
     expect(socket.send).toHaveBeenCalledWith(
       JSON.stringify({ type: "machine.shutdown-ack" }),
+      expect.any(Function),
     );
     expect(exitProcess).toHaveBeenCalledWith(0);
   });
@@ -521,10 +925,11 @@ describe("createHostDaemonApp", () => {
   });
 
   it("refreshes runtime shell env before provider model listing", async () => {
-    const dataDir = await makeTempDir("bb-host-daemon-app-models-");
+    const dataDir = await makeTempDir("omnyo-host-daemon-app-models-");
     const fetchRecorder = createFetchRecorder();
     const logger = createLogger();
     const runtimeOptions: RuntimeOptionsRef = { current: null };
+
     const model = {
       id: "cursor-model",
       model: "cursor-model",
@@ -534,14 +939,17 @@ describe("createHostDaemonApp", () => {
       defaultReasoningEffort: "medium" as const,
       isDefault: true,
     };
+
     const listModels = vi.fn<AgentRuntime["listModels"]>(async () => ({
       models: [model],
       selectedOnlyModels: [],
     }));
+
     const resolveRuntimeShellEnv = vi.fn(async () => ({
       PATH: "/shell/bin:/usr/bin",
-      BB_SERVER_URL: "http://127.0.0.1:3334",
+      OMNYO_SERVER_URL: "http://127.0.0.1:3334",
     }));
+
     const app = await createHostDaemonApp({
       dataDir,
       serverUrl: "http://127.0.0.1:3334",
@@ -558,6 +966,7 @@ describe("createHostDaemonApp", () => {
       resolveRuntimeShellEnv,
       createRuntime: (options) => {
         runtimeOptions.current = options;
+
         return createFakeRuntimeWithModelList(listModels);
       },
       fetchFn: fetchRecorder.fetchFn,
@@ -572,6 +981,14 @@ describe("createHostDaemonApp", () => {
           type: "provider.list_models",
           providerId: "cursor",
           bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+          contributedEnv: [
+            {
+              name: "CODEX_OPENAI_BASE_URL",
+              value: { serverPath: "/api/v1/plugins/account-pool/http/v1" },
+              source: { plugin: "account-pool" },
+              reason: "Routed through the Account Pooler hub",
+            },
+          ],
           cwd: "/tmp/worktree",
         },
       });
@@ -591,7 +1008,7 @@ describe("createHostDaemonApp", () => {
           },
           shellEnv: {
             PATH: "/shell/bin:/usr/bin",
-            BB_SERVER_URL: "http://127.0.0.1:3334",
+            OMNYO_SERVER_URL: "http://127.0.0.1:3334",
           },
         }),
       );
@@ -601,6 +1018,14 @@ describe("createHostDaemonApp", () => {
         bridgeLaunch: {
           ...dispatchTestRuntimeBridgeLaunch(dataDir),
         },
+        contributedEnv: [
+          {
+            name: "CODEX_OPENAI_BASE_URL",
+            value: { serverPath: "/api/v1/plugins/account-pool/http/v1" },
+            source: { plugin: "account-pool" },
+            reason: "Routed through the Account Pooler hub",
+          },
+        ],
       });
 
       await expect(
@@ -611,6 +1036,7 @@ describe("createHostDaemonApp", () => {
             type: "provider.list_models",
             providerId: "cursor",
             bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+            contributedEnv: [],
           },
         }),
       ).resolves.toMatchObject({
@@ -624,10 +1050,11 @@ describe("createHostDaemonApp", () => {
   });
 
   it("reuses freshly resolved startup shell env for immediate model listing", async () => {
-    const dataDir = await makeTempDir("bb-host-daemon-app-startup-env-");
+    const dataDir = await makeTempDir("omnyo-host-daemon-app-startup-env-");
     const fetchRecorder = createFetchRecorder();
     const logger = createLogger();
     const runtimeOptions: RuntimeOptionsRef = { current: null };
+
     const model = {
       id: "codex-model",
       model: "codex-model",
@@ -637,14 +1064,17 @@ describe("createHostDaemonApp", () => {
       defaultReasoningEffort: "medium" as const,
       isDefault: true,
     };
+
     const listModels = vi.fn<AgentRuntime["listModels"]>(async () => ({
       models: [model],
       selectedOnlyModels: [],
     }));
+
     const resolveRuntimeShellEnv = vi.fn(async () => ({
       PATH: "/slow-shell/bin:/usr/bin",
-      BB_SERVER_URL: "http://127.0.0.1:3334",
+      OMNYO_SERVER_URL: "http://127.0.0.1:3334",
     }));
+
     const app = await createHostDaemonApp({
       dataDir,
       serverUrl: "http://127.0.0.1:3334",
@@ -657,13 +1087,14 @@ describe("createHostDaemonApp", () => {
       localApiConfig: null,
       runtimeShellEnv: {
         PATH: "/startup/bin:/usr/bin",
-        BB_SERVER_URL: "http://127.0.0.1:3334",
+        OMNYO_SERVER_URL: "http://127.0.0.1:3334",
       },
       runtimeShellEnvResolvedAtMs: 1_000,
       resolveRuntimeShellEnv,
       nowMs: () => 1_500,
       createRuntime: (options) => {
         runtimeOptions.current = options;
+
         return createFakeRuntimeWithModelList(listModels);
       },
       fetchFn: fetchRecorder.fetchFn,
@@ -679,6 +1110,7 @@ describe("createHostDaemonApp", () => {
             type: "provider.list_models",
             providerId: "codex",
             bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+            contributedEnv: [],
           },
         }),
       ).resolves.toMatchObject({
@@ -700,9 +1132,12 @@ describe("createHostDaemonApp", () => {
 
   it("runs the idle provider session reaper on a non-overlapping interval", async () => {
     const logger = createLogger();
+
     const firstReap =
       createDeferredPromise<RuntimeManagerReapIdleProviderSessionsResult>();
+
     const failure = new Error("reaper failed");
+
     const queuedReaps: Array<
       () => Promise<RuntimeManagerReapIdleProviderSessionsResult>
     > = [
@@ -711,21 +1146,26 @@ describe("createHostDaemonApp", () => {
         throw failure;
       },
     ];
+
     const reapIdleProviderSessions = vi.fn(
       (
         _args: RuntimeManagerReapIdleProviderSessionsArgs,
       ): Promise<RuntimeManagerReapIdleProviderSessionsResult> => {
         const next = queuedReaps.shift();
+
         return next
           ? next()
           : Promise.resolve({
               reapedSessions: [],
+              retainedSessions: [],
             });
       },
     );
+
     let nowMs = 1_000;
     let intervalCallback: (() => void) | null = null;
     let cleared = false;
+
     const timer: ReturnType<
       StartIdleProviderSessionReaperArgsForTest["setIntervalFn"]
     > = {
@@ -734,16 +1174,20 @@ describe("createHostDaemonApp", () => {
       }),
       unref: vi.fn(),
     };
+
     const setIntervalFn = vi.fn<
       StartIdleProviderSessionReaperArgsForTest["setIntervalFn"]
     >((callback, _intervalMs) => {
       intervalCallback = callback;
+
       return timer;
     });
+
     const triggerTick = (): void => {
       if (!intervalCallback || cleared) {
         return;
       }
+
       intervalCallback();
     };
 
@@ -752,18 +1196,20 @@ describe("createHostDaemonApp", () => {
       nowMs: () => nowMs,
       runtimeManager: {
         reapIdleProviderSessions,
+        recordHousekeepingStatus: vi.fn(),
       },
+      readMemoryPressure: async () => ({ status: "observed", level: "normal" }),
       setIntervalFn,
     });
 
-    expect(setIntervalFn).toHaveBeenCalledWith(expect.any(Function), 300_000);
+    expect(setIntervalFn).toHaveBeenCalledWith(expect.any(Function), 60_000);
     expect(timer.unref).toHaveBeenCalledTimes(1);
 
     triggerTick();
     await settleReaperPromiseChain();
     expect(reapIdleProviderSessions).toHaveBeenCalledTimes(1);
     expect(reapIdleProviderSessions).toHaveBeenNthCalledWith(1, {
-      idleForMs: 1_800_000,
+      idleForMs: 600_000,
       nowMs: 1_000,
     });
 
@@ -772,6 +1218,7 @@ describe("createHostDaemonApp", () => {
     expect(reapIdleProviderSessions).toHaveBeenCalledTimes(1);
 
     firstReap.resolve({
+      retainedSessions: [],
       reapedSessions: [
         {
           environmentId: "env-reaped",
@@ -802,7 +1249,7 @@ describe("createHostDaemonApp", () => {
     await settleReaperPromiseChain();
     expect(reapIdleProviderSessions).toHaveBeenCalledTimes(2);
     expect(reapIdleProviderSessions).toHaveBeenNthCalledWith(2, {
-      idleForMs: 1_800_000,
+      idleForMs: 600_000,
       nowMs: 2_000,
     });
     expect(logger.warn).toHaveBeenCalledWith(
@@ -823,6 +1270,7 @@ describe("createHostDaemonApp", () => {
       inactiveSessionOnFirstEventPost: true,
       sessionIds: ["session-app-test-1", "session-app-test-2"],
     });
+
     try {
       await app.connection.start();
 
@@ -856,24 +1304,104 @@ describe("createHostDaemonApp", () => {
     }
   });
 
+  it("reports an open provider question on reconnect and ends it when the server closed it", async () => {
+    const request = createCommandApprovalRequest();
+
+    const key = {
+      threadId: request.threadId,
+      providerId: request.providerId,
+      providerThreadId: request.providerThreadId,
+      providerRequestId: request.providerRequestId,
+    };
+
+    const { app, fetchRecorder, runtimeOptions } = await createAppFixture({
+      inactiveSessionOnFirstEventPost: true,
+      sessionIds: ["session-app-test-1", "session-app-test-2"],
+      endedInteractiveRequestsOnReconnect: [key],
+    });
+
+    try {
+      await app.connection.start();
+      await app.runtimeManager.ensureEnvironment({
+        environmentId: "env-app-ended-question",
+        workspacePath: await makeTempDir("omnyo-host-daemon-app-ended-"),
+      });
+      const options = runtimeOptions.current;
+
+      if (!options?.onInteractiveRequest) {
+        throw new Error("Expected runtime callbacks to be captured");
+      }
+
+      const pending = options.onInteractiveRequest(request);
+
+      const rejection = expect(pending).rejects.toMatchObject({
+        code: "interactive_request_ended",
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          fetchRecorder.requests.filter(
+            (record) =>
+              record.pathname === "/internal/session/interactive-request",
+          ),
+        ).toHaveLength(1);
+      });
+
+      app.eventSink.emit({
+        threadId: request.threadId,
+        event: {
+          type: "turn/started",
+          threadId: request.threadId,
+          providerThreadId: request.providerThreadId,
+          scope: turnScope(request.turnId),
+        },
+      });
+
+      await rejection;
+
+      const reopened = fetchRecorder.requests
+        .filter((record) => record.pathname === "/internal/session/open")
+        .map((record) => JSON.parse(record.body ?? "{}"));
+
+      expect(reopened[1]).toMatchObject({
+        openThreadWork: [
+          {
+            threadId: request.threadId,
+            backgroundItemIds: [],
+            interactiveRequests: [key],
+          },
+        ],
+      });
+    } finally {
+      await app.daemon.shutdown("test", 0);
+    }
+  });
+
   it("forgets server-retired loaded environments when opening a session", async () => {
-    const dataDir = await makeTempDir("bb-host-daemon-app-retired-");
+    const dataDir = await makeTempDir("omnyo-host-daemon-app-retired-");
+
     const workspacePath = await makeTempDir(
-      "bb-host-daemon-retired-workspace-",
+      "omnyo-host-daemon-retired-workspace-",
     );
+
     const logger = createLogger();
+
     const fetchRecorder = createFetchRecorder({
       retiredEnvironmentIds: ["env-app-retired"],
     });
+
     const stopWatchingStatus = vi.fn(async () => undefined);
+
     const runtime = {
       ...createFakeRuntime(),
       shutdown: vi.fn(async () => undefined),
     } satisfies AgentRuntime;
+
     const hostWatcher = {
       watchWorkspace: vi.fn(() => stopWatchingStatus),
-      watchThreadStorageRoot: vi.fn(() => () => undefined),
+      watchThreadStorage: vi.fn(() => () => undefined),
     } satisfies HostWatcher;
+
     const app = await createHostDaemonApp({
       dataDir,
       serverUrl: "http://127.0.0.1:3334",
@@ -902,9 +1430,11 @@ describe("createHostDaemonApp", () => {
       expect(app.runtimeManager.get("env-app-retired")).toBeUndefined();
       expect(stopWatchingStatus).not.toHaveBeenCalled();
       expect(runtime.shutdown).toHaveBeenCalledTimes(1);
+
       const openSessionBody = fetchRecorder.requests
         .filter((request) => request.pathname === "/internal/session/open")
         .map((request) => JSON.parse(request.body ?? "{}"));
+
       expect(openSessionBody[0]).toMatchObject({
         localApiPort: null,
         loadedEnvironments: [{ environmentId: "env-app-retired" }],
@@ -916,15 +1446,18 @@ describe("createHostDaemonApp", () => {
 
   it("logs raw stderr for unexpected provider process exits", async () => {
     const { app, logger, runtimeOptions } = await createAppFixture();
+
     try {
       const workspacePath = await makeTempDir(
-        "bb-host-daemon-app-log-workspace-",
+        "omnyo-host-daemon-app-log-workspace-",
       );
+
       await app.runtimeManager.ensureEnvironment({
         environmentId: "env-app-provider-exit-log",
         workspacePath,
       });
       const options = runtimeOptions.current;
+
       if (!options?.onProcessExit) {
         throw new Error("Expected process exit callback to be captured");
       }
@@ -962,16 +1495,19 @@ describe("createHostDaemonApp", () => {
 
   it("posts a failure event when a provider exits before turn/started", async () => {
     const { app, fetchRecorder, runtimeOptions } = await createAppFixture();
+
     try {
       const workspacePath = await makeTempDir(
-        "bb-host-daemon-app-pending-turn-exit-",
+        "omnyo-host-daemon-app-pending-turn-exit-",
       );
+
       await app.connection.start();
       await app.runtimeManager.ensureEnvironment({
         environmentId: "env-app-pending-turn-exit",
         workspacePath,
       });
       const options = runtimeOptions.current;
+
       if (!options?.onProcessExit) {
         throw new Error("Expected process exit callback to be captured");
       }
@@ -983,6 +1519,7 @@ describe("createHostDaemonApp", () => {
             threadId: "thr_pending_turn_exit",
             activeTurnId: null,
             pendingTurnStart: true,
+            pendingRequestId: "creq_2222222262",
             providerThreadId: "provider-pending-turn-exit",
           },
         ],
@@ -999,13 +1536,16 @@ describe("createHostDaemonApp", () => {
           ),
         ).toHaveLength(1);
       });
+
       const eventRequest = fetchRecorder.requests.find(
         (request) => request.pathname === "/internal/session/events",
       );
+
       const payload = hostDaemonEventBatchRequestSchema.parse(
         JSON.parse(eventRequest?.body ?? "{}"),
       );
-      expect(payload).toEqual({
+
+      expect(payload).toMatchObject({
         sessionId: "session-app-test",
         eventGroups: [
           {
@@ -1016,12 +1556,14 @@ describe("createHostDaemonApp", () => {
                 threadId: "thr_pending_turn_exit",
                 scope: threadScope(),
                 code: "provider_process_exited",
+                requestId: "creq_2222222262",
                 message:
                   'Provider "claude-code" exited unexpectedly with code 1',
               },
             ],
           },
         ],
+        firstEventIndex: 1,
       });
     } finally {
       await app.daemon.shutdown("test", 0);
@@ -1030,14 +1572,19 @@ describe("createHostDaemonApp", () => {
 
   it("interrupts pending interactive requests when an expected provider exit affects their threads", async () => {
     const { app, fetchRecorder, runtimeOptions } = await createAppFixture();
+
     try {
-      const workspacePath = await makeTempDir("bb-host-daemon-app-workspace-");
+      const workspacePath = await makeTempDir(
+        "omnyo-host-daemon-app-workspace-",
+      );
+
       await app.connection.start();
       await app.runtimeManager.ensureEnvironment({
         environmentId: "env-app-interactive",
         workspacePath,
       });
       const options = runtimeOptions.current;
+
       if (!options?.onInteractiveRequest || !options.onProcessExit) {
         throw new Error("Expected runtime callbacks to be captured");
       }
@@ -1056,6 +1603,7 @@ describe("createHostDaemonApp", () => {
       const pendingRejection = expect(pending).rejects.toThrow(
         'Provider "codex" exited while awaiting user interaction',
       );
+
       options.onProcessExit({
         providerId: "codex",
         threads: [
@@ -1082,17 +1630,21 @@ describe("createHostDaemonApp", () => {
           ),
         ).toHaveLength(1);
       });
+
       const interruptRequest = fetchRecorder.requests.find(
         (record) =>
           record.pathname === "/internal/session/interactive-request/interrupt",
       );
+
       if (!interruptRequest?.body) {
         throw new Error("Expected interactive interrupt request body");
       }
+
       const payload = hostDaemonInteractiveInterruptRequestSchema.parse(
         JSON.parse(interruptRequest.body),
       );
-      expect(payload).toEqual({
+
+      expect(payload).toMatchObject({
         sessionId: "session-app-test",
         providerId: "codex",
         threadIds: [request.threadId],
@@ -1103,7 +1655,99 @@ describe("createHostDaemonApp", () => {
     }
   });
 
-  it("drops an interactive interrupt the server rejects instead of retrying it ahead of later interrupts", async () => {
+  it("admits an idle update after provider exit while its interaction notice awaits delivery", async () => {
+    const { app, runtimeOptions, fetchRecorder } = await createAppFixture({
+      interruptResponses: [() => new Response("offline", { status: 503 })],
+    });
+
+    let acquiredOwner: string | null = null;
+
+    try {
+      await app.connection.start();
+      await app.runtimeManager.ensureEnvironment({
+        environmentId: "env-app-ended-notice",
+        workspacePath: await makeTempDir("omnyo-host-daemon-app-workspace-"),
+      });
+      const options = runtimeOptions.current;
+
+      if (!options?.onInteractiveRequest || !options.onProcessExit) {
+        throw new Error("Expected runtime callbacks to be captured");
+      }
+
+      const request = createCommandApprovalRequest();
+      const pending = options.onInteractiveRequest(request);
+      const rejected = expect(pending).rejects.toThrow("exited while awaiting");
+      await vi.waitFor(() =>
+        expect(
+          fetchRecorder.requests.filter(
+            (entry) =>
+              entry.pathname === "/internal/session/interactive-request",
+          ),
+        ).toHaveLength(1),
+      );
+      options.onProcessExit({
+        providerId: request.providerId,
+        threads: [
+          {
+            threadId: request.threadId,
+            activeTurnId: request.turnId,
+            pendingTurnStart: false,
+            providerThreadId: request.providerThreadId,
+          },
+        ],
+        code: null,
+        expected: true,
+        signal: "SIGTERM",
+        stderr: null,
+      });
+      await rejected;
+
+      const restartResponse = await app.router.handleOnlineRpcRequest({
+        type: "host-rpc.request",
+        requestId: "restart-after-exit",
+        command: {
+          type: "runtime_update.acquire",
+          ownerId: "restart-owner-test",
+          closePluginLeases: [],
+        },
+      });
+
+      if (restartResponse.ok) acquiredOwner = "restart-owner-test";
+      expect(restartResponse).toMatchObject({ ok: false });
+
+      const updateOwner = "self-update:instance-app-test";
+
+      const response = await app.router.handleOnlineRpcRequest({
+        type: "host-rpc.request",
+        requestId: "idle-update-after-exit",
+        command: {
+          type: "runtime_update.acquire",
+          ownerId: updateOwner,
+          closePluginLeases: [],
+        },
+      });
+
+      if (response.ok) acquiredOwner = updateOwner;
+      expect(response).toMatchObject({ ok: true, result: { held: true } });
+    } finally {
+      try {
+        if (acquiredOwner !== null) {
+          await app.router.handleOnlineRpcRequest({
+            type: "host-rpc.request",
+            requestId: "release-idle-update-after-exit",
+            command: {
+              type: "runtime_update.release",
+              ownerId: acquiredOwner,
+            },
+          });
+        }
+      } finally {
+        await app.daemon.shutdown("test", 0);
+      }
+    }
+  });
+
+  it("retains a rejected interactive interrupt without retrying it ahead of later interrupts", async () => {
     const { app, fetchRecorder, logger, runtimeOptions } =
       await createAppFixture({
         interruptResponses: [
@@ -1117,16 +1761,19 @@ describe("createHostDaemonApp", () => {
             ),
         ],
       });
+
     try {
       await app.connection.start();
       await app.runtimeManager.ensureEnvironment({
         environmentId: "env-app-rejected-interrupt",
-        workspacePath: await makeTempDir("bb-host-daemon-app-workspace-"),
+        workspacePath: await makeTempDir("omnyo-host-daemon-app-workspace-"),
       });
       const options = runtimeOptions.current;
+
       if (!options?.onProcessExit) {
         throw new Error("Expected runtime callbacks to be captured");
       }
+
       const exitThread = (threadId: string) =>
         options.onProcessExit?.({
           providerId: "codex",
@@ -1143,6 +1790,7 @@ describe("createHostDaemonApp", () => {
           signal: "SIGTERM",
           stderr: null,
         });
+
       const interruptedThreadIds = () =>
         fetchRecorder.requests
           .filter(
@@ -1163,7 +1811,7 @@ describe("createHostDaemonApp", () => {
           expect.objectContaining({
             threadIds: ["thr_app_rejected_interrupt"],
           }),
-          "Dropped pending interactive interrupt request the server rejected",
+          "Retained pending interactive interrupt request the server rejected",
         );
       });
 
@@ -1181,20 +1829,24 @@ describe("createHostDaemonApp", () => {
 
   it("backs off between retries of an interactive interrupt that fails transiently", async () => {
     const unavailable = () => new Response("offline", { status: 503 });
+
     const { app, fetchRecorder, runtimeOptions } = await createAppFixture({
       interruptResponses: [unavailable, unavailable, unavailable],
     });
+
     try {
       await app.connection.start();
       await app.runtimeManager.ensureEnvironment({
         environmentId: "env-app-transient-interrupt",
-        workspacePath: await makeTempDir("bb-host-daemon-app-workspace-"),
+        workspacePath: await makeTempDir("omnyo-host-daemon-app-workspace-"),
       });
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       const options = runtimeOptions.current;
+
       if (!options?.onProcessExit) {
         throw new Error("Expected runtime callbacks to be captured");
       }
+
       const interruptAttempts = () =>
         fetchRecorder.requests.filter(
           (record) =>
@@ -1238,83 +1890,129 @@ describe("createHostDaemonApp", () => {
     }
   });
 
-  it("forwards the runtime cancellation signal through the daemon tool callback", async () => {
-    let signal: AbortSignal | null | undefined;
-    const { app, runtimeOptions } = await createAppFixture({
-      onToolCallSignal: (value) => {
-        signal = value;
-      },
-    });
-    try {
-      const workspacePath = await makeTempDir("bb-host-daemon-app-abort-");
-      await app.runtimeManager.ensureEnvironment({
-        environmentId: "env-abort",
-        workspacePath,
-      });
-      await app.connection.start();
+  it.each(["before forwarding", "during forwarding"])(
+    "does not log a cancelled dynamic tool call %s",
+    async (timing) => {
+      const started = createDeferredPromise<void>();
       const controller = new AbortController();
-      const callback = runtimeOptions.current?.onToolCall;
-      if (!callback) throw new Error("Tool callback missing");
-      await expect(
-        callback(createToolCallRequest(), controller.signal),
-      ).rejects.toThrow("Failed to call tool");
-      controller.abort();
-      expect(signal?.aborted).toBe(true);
-    } finally {
-      await app.daemon.shutdown("test", 0);
-    }
-  });
 
-  it("logs stack-bearing fields for dynamic tool forwarding failures", async () => {
-    const { app, logger, runtimeOptions } = await createAppFixture();
-    try {
-      const workspacePath = await makeTempDir("bb-host-daemon-app-tool-");
-      await app.runtimeManager.ensureEnvironment({
-        environmentId: "env-app-tool",
-        workspacePath,
-      });
-      await app.connection.start();
-      const options = runtimeOptions.current;
-      if (!options?.onToolCall) {
-        throw new Error("Expected tool call callback to be captured");
+      const { app, logger, fetchRecorder, runtimeOptions } =
+        await createAppFixture({
+          toolCallResponse: async (signal) => {
+            if (!signal) throw new Error("Tool cancellation signal missing");
+            started.resolve();
+
+            return new Promise<Response>((_resolve, reject) => {
+              signal.addEventListener("abort", () => reject(signal.reason), {
+                once: true,
+              });
+            });
+          },
+        });
+
+      try {
+        const workspacePath = await makeTempDir("omnyo-host-daemon-app-abort-");
+        await app.runtimeManager.ensureEnvironment({
+          environmentId: "env-abort",
+          workspacePath,
+        });
+        await app.connection.start();
+        const callback = runtimeOptions.current?.onToolCall;
+
+        if (!callback) throw new Error("Tool callback missing");
+
+        if (timing === "before forwarding") controller.abort();
+        const pending = callback(createToolCallRequest(), controller.signal);
+
+        const rejected = expect(pending).rejects.toMatchObject({
+          name: "AbortError",
+        });
+
+        if (timing === "during forwarding") {
+          await started.promise;
+          controller.abort();
+        }
+
+        await rejected;
+        expect(logger.error).not.toHaveBeenCalled();
+        expect(
+          fetchRecorder.requests.filter(
+            (request) => request.pathname === "/internal/session/tool-call",
+          ),
+        ).toHaveLength(timing === "before forwarding" ? 0 : 1);
+      } finally {
+        await app.daemon.shutdown("test", 0);
       }
+    },
+  );
 
-      const request = createToolCallRequest();
-      await expect(options.onToolCall(request)).rejects.toThrow(
-        "Failed to call tool",
-      );
+  it.each([false, true])(
+    "logs stack-bearing fields for dynamic tool forwarding failures when the signal is aborted: %s",
+    async (aborted) => {
+      const controller = new AbortController();
 
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.objectContaining({
-          callId: request.callId,
-          err: expect.any(Error),
-          providerThreadId: request.providerThreadId,
-          threadId: request.threadId,
-          tool: request.tool,
-          turnId: request.turnId,
-        }),
-        "Failed to forward dynamic tool call to server",
-      );
-    } finally {
-      await app.daemon.shutdown("test", 0);
-    }
-  });
+      const { app, logger, runtimeOptions } = await createAppFixture({
+        toolCallResponse: async () => {
+          if (aborted) controller.abort();
+
+          return new Response("tool forwarding failed", { status: 500 });
+        },
+      });
+
+      try {
+        const workspacePath = await makeTempDir("omnyo-host-daemon-app-tool-");
+        await app.runtimeManager.ensureEnvironment({
+          environmentId: "env-app-tool",
+          workspacePath,
+        });
+        await app.connection.start();
+        const options = runtimeOptions.current;
+
+        if (!options?.onToolCall) {
+          throw new Error("Expected tool call callback to be captured");
+        }
+
+        const request = createToolCallRequest();
+        await expect(
+          options.onToolCall(request, controller.signal),
+        ).rejects.toThrow("Failed to call tool");
+
+        expect(logger.error).toHaveBeenCalledWith(
+          expect.objectContaining({
+            callId: request.callId,
+            err: expect.any(Error),
+            providerThreadId: request.providerThreadId,
+            threadId: request.threadId,
+            tool: request.tool,
+            turnId: request.turnId,
+          }),
+          "Failed to forward dynamic tool call to server",
+        );
+      } finally {
+        await app.daemon.shutdown("test", 0);
+      }
+    },
+  );
 
   it("logs stack-bearing fields for unexpected interactive forwarding failures", async () => {
     const registrationError = new Error("registration transport failed");
+
     const { app, logger, runtimeOptions } = await createAppFixture({
       interactiveRequestError: registrationError,
     });
+
     try {
       const workspacePath = await makeTempDir(
-        "bb-host-daemon-app-interactive-error-",
+        "omnyo-host-daemon-app-interactive-error-",
       );
+
       await app.runtimeManager.ensureEnvironment({
         environmentId: "env-app-interactive-error",
         workspacePath,
       });
       await app.connection.start();
       const options = runtimeOptions.current;
+
       if (!options?.onInteractiveRequest) {
         throw new Error("Expected interactive request callback to be captured");
       }
@@ -1347,16 +2045,19 @@ describe("createHostDaemonApp", () => {
         reason: "Ask User Question feature is disabled",
       },
     });
+
     try {
       const workspacePath = await makeTempDir(
-        "bb-host-daemon-app-rejected-interactive-",
+        "omnyo-host-daemon-app-rejected-interactive-",
       );
+
       await app.runtimeManager.ensureEnvironment({
         environmentId: "env-app-rejected-interactive",
         workspacePath,
       });
       await app.connection.start();
       const options = runtimeOptions.current;
+
       if (!options?.onInteractiveRequest) {
         throw new Error("Expected interactive request callback to be captured");
       }

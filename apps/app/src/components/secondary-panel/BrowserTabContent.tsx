@@ -5,40 +5,47 @@ import {
   useMemo,
   useRef,
   useState,
+  type FocusEvent,
   type FormEvent,
   type RefObject,
   type ReactNode,
 } from "react";
 import type {
-  BbDesktopBrowserApi,
-  BbDesktopBrowserControl,
-  BbDesktopBrowserFindInPageRequest,
-  BbDesktopBrowserState,
-  BbDesktopBrowserTarget,
-  BbDesktopBrowserViewportBounds,
-  BbDesktopBrowserViewBounds,
-} from "@bb/desktop-contract";
+  OmnyoDesktopBrowserApi,
+  OmnyoDesktopBrowserControl,
+  OmnyoDesktopBrowserFindInPageRequest,
+  OmnyoDesktopBrowserState,
+  OmnyoDesktopBrowserTarget,
+  OmnyoDesktopBrowserViewportBounds,
+  OmnyoDesktopBrowserViewBounds,
+} from "@omnyo/desktop-contract";
 import {
-  BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH,
-  clampBbDesktopBrowserViewBounds,
-} from "@bb/desktop-contract";
+  OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH,
+  clampOmnyoDesktopBrowserViewBounds,
+} from "@omnyo/desktop-contract";
 import {
   COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
   COARSE_POINTER_TEXT_SM_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { Icon } from "@bb/shared-ui/icon";
-import { getBbDesktopInfo, getDesktopBrowserApi } from "@/lib/bb-desktop";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@omnyo/shared-ui/tooltip";
+import { getOmnyoDesktopInfo, getDesktopBrowserApi } from "@/lib/omnyo-desktop";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   getBrowserUrlSecurity,
-  getBrowserUrlHost,
   resolveBrowserAddressInput,
 } from "@/lib/browser-url";
 import { useBrowserHistory } from "@/lib/browser-history";
 import { BROWSER_VIEW_BOUNDS_SYNC_EVENT } from "@/lib/browser-view-bounds-sync";
 import { useIsBrowserDimmingModalOpen } from "@/hooks/useBrowserDimmingModal";
-import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   BrowserChromeIconButton,
   BrowserFindBar,
@@ -46,23 +53,28 @@ import {
 } from "./BrowserFindBar";
 import { BrowserNewTabScreen } from "./BrowserNewTabScreen";
 import {
+  BrowserStatePage,
+  describeBrowserPageLoadError,
+} from "./BrowserStatePage";
+import {
   registerBrowserView,
   takeBrowserViewRecreation,
   type BrowserViewVisibilityCoordinator,
 } from "./browserViewVisibilityCoordinator";
+import { useIsBrowserViewOccluded } from "./useIsBrowserViewOccluded";
 import { SECONDARY_PANEL_TOP_CHROME_BACKGROUND_CLASS } from "./panelChromeClasses";
 import type { UpdateBrowserTabArgs } from "./useThreadFileTabs";
 import {
   useAppCommandHandler,
   useAppCommandShortcut,
 } from "@/components/commands/AppCommandProvider";
+import { appCommandTarget } from "@/lib/app-command-targets";
 import type { AppShortcutPresentation } from "@/lib/app-keybindings";
-import { isLocalOnlyUrl } from "@/lib/loopback-hostname";
 import { PluginBrowserToolbarActions } from "@/components/plugin/PluginBrowserToolbarActions";
 
 interface BrowserTabContentProps {
   tabId: string;
-  desktopTarget?: BbDesktopBrowserTarget;
+  desktopTarget?: OmnyoDesktopBrowserTarget;
   existingOnly?: true;
   initialUrl: string;
   addressFocusRequest: BrowserAddressFocusRequest | null;
@@ -84,7 +96,7 @@ export interface BrowserAddressFocusRequest {
 interface BrowserChromeProps {
   addressDraft: string;
   isEditing: boolean;
-  state: BbDesktopBrowserState | null;
+  state: OmnyoDesktopBrowserState | null;
   currentUrl: string;
   addressInputRef: RefObject<HTMLInputElement | null>;
   onAddressChange: (value: string) => void;
@@ -105,8 +117,8 @@ interface BrowserViewBoundsFromElementArgs {
 }
 
 interface BrowserViewBoundsEqualArgs {
-  a: BbDesktopBrowserViewBounds;
-  b: BbDesktopBrowserViewBounds;
+  a: OmnyoDesktopBrowserViewBounds;
+  b: OmnyoDesktopBrowserViewBounds;
 }
 
 interface SyncBrowserViewPlacementArgs {
@@ -126,14 +138,14 @@ interface BrowserPageLoadErrorProps {
   url: string;
 }
 
-const EMPTY_BROWSER_VIEW_BOUNDS: BbDesktopBrowserViewBounds = {
+const EMPTY_BROWSER_VIEW_BOUNDS: OmnyoDesktopBrowserViewBounds = {
   x: 0,
   y: 0,
   width: 0,
   height: 0,
 };
 
-function roundedBoundsFromRect(rect: DOMRect): BbDesktopBrowserViewBounds {
+function roundedBoundsFromRect(rect: DOMRect): OmnyoDesktopBrowserViewBounds {
   return {
     x: Math.round(rect.left),
     y: Math.round(rect.top),
@@ -142,7 +154,7 @@ function roundedBoundsFromRect(rect: DOMRect): BbDesktopBrowserViewBounds {
   };
 }
 
-function browserViewportBounds(): BbDesktopBrowserViewportBounds {
+function browserViewportBounds(): OmnyoDesktopBrowserViewportBounds {
   return {
     width: window.innerWidth,
     height: window.innerHeight,
@@ -151,8 +163,8 @@ function browserViewportBounds(): BbDesktopBrowserViewportBounds {
 
 function browserViewBoundsFromElement(
   args: BrowserViewBoundsFromElementArgs,
-): BbDesktopBrowserViewBounds {
-  return clampBbDesktopBrowserViewBounds({
+): OmnyoDesktopBrowserViewBounds {
+  return clampOmnyoDesktopBrowserViewBounds({
     bounds: roundedBoundsFromRect(args.element.getBoundingClientRect()),
     viewport: browserViewportBounds(),
   });
@@ -165,19 +177,6 @@ function browserViewBoundsEqual(args: BrowserViewBoundsEqualArgs): boolean {
     args.a.width === args.b.width &&
     args.a.height === args.b.height
   );
-}
-
-function browserPageLoadErrorTitle(args: {
-  errorText: string;
-  url: string;
-}): string {
-  if (isLocalOnlyUrl(args.url)) {
-    return "Server not reachable";
-  }
-  if (args.errorText.includes("ERR_BLOCKED_BY_CLIENT")) {
-    return "Page blocked";
-  }
-  return "Page unavailable";
 }
 
 function BrowserChrome({
@@ -201,6 +200,7 @@ function BrowserChrome({
   const isLoading = state?.isLoading ?? false;
   const security = getBrowserUrlSecurity(currentUrl);
   const addressValue = isEditing ? addressDraft : currentUrl;
+
   return (
     <div
       role="region"
@@ -211,11 +211,7 @@ function BrowserChrome({
         SECONDARY_PANEL_TOP_CHROME_BACKGROUND_CLASS,
       )}
     >
-      <div
-        className={cn(
-          "absolute inset-x-0 top-0 flex h-11 translate-y-0 items-center gap-1 py-1.5 pl-2 pr-4 opacity-100 max-md:pointer-coarse:h-[52px]",
-        )}
-      >
+      <div className="absolute inset-x-0 top-0 flex h-11 items-center gap-1 py-1.5 pl-2 pr-4 max-md:pointer-coarse:h-[52px]">
         <BrowserChromeIconButton
           icon="ChevronLeft"
           label="Go back"
@@ -232,10 +228,14 @@ function BrowserChrome({
           icon={isLoading ? "X" : "RotateCcw"}
           label={isLoading ? "Stop loading" : "Reload"}
           shortcut={isLoading ? null : reloadShortcut}
+          command={isLoading ? undefined : "browser.reload"}
           onClick={onReloadOrStop}
         />
         <form onSubmit={onSubmit} className="min-w-0 flex-1">
-          <div className="flex h-8 items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 max-md:pointer-coarse:h-10">
+          <div
+            {...appCommandTarget("browser.focusLocation")}
+            className="flex h-8 items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 max-md:pointer-coarse:h-10"
+          >
             {security === "secure" ? (
               <Icon
                 name="Lock"
@@ -294,11 +294,20 @@ function BrowserChrome({
           disabled={currentUrl.length === 0}
           onClick={onOpenExternal}
         />
-        {isLoading ? (
-          <span className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden">
-            <span className="block h-full w-1/3 animate-pulse bg-ring/70 motion-reduce:animate-none" />
-          </span>
-        ) : null}
+        <span
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden transition-opacity duration-(--motion-duration-fast)",
+            isLoading ? "opacity-100" : "opacity-0",
+          )}
+        >
+          <span
+            className={cn(
+              "block h-full w-1/3 animate-indeterminate-progress bg-ring/70",
+              !isLoading && "[animation-play-state:paused]",
+            )}
+          />
+        </span>
       </div>
     </div>
   );
@@ -306,23 +315,11 @@ function BrowserChrome({
 
 function BrowserUnavailable() {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-      <span className="flex size-11 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground">
-        <Icon name="Globe" className="size-6" aria-hidden />
-      </span>
-      <div className="text-sm font-medium text-foreground">
-        Browser tabs need the desktop app
-      </div>
-      <p
-        className={cn(
-          "max-w-xs text-muted-foreground",
-          COARSE_POINTER_TEXT_SM_CLASS,
-        )}
-      >
-        The in-app web browser runs in the bb desktop app. Open this thread
-        there to browse the web.
-      </p>
-    </div>
+    <BrowserStatePage
+      icon="Laptop"
+      title="Browser tabs need the desktop app"
+      description="The in-app browser runs in the Omnyo desktop app. Open this chat there to browse the web."
+    />
   );
 }
 
@@ -332,51 +329,86 @@ function BrowserPageLoadError({
   onRetry,
   url,
 }: BrowserPageLoadErrorProps) {
-  const host = getBrowserUrlHost(url);
-  const title = browserPageLoadErrorTitle({ errorText, url });
-  const message = isLocalOnlyUrl(url)
-    ? `The browser could not reach ${host || "this local server"}. Start the server, then reload.`
-    : "The browser could not load this page. Try reloading or opening it externally.";
+  const copy = describeBrowserPageLoadError({ errorText, url });
 
   return (
-    <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-      <div className="flex w-full max-w-sm flex-col items-center gap-3">
-        <span className="flex size-11 items-center justify-center rounded-lg border border-border bg-surface-recessed text-muted-foreground">
-          <Icon name="Globe" className="size-6" aria-hidden />
-        </span>
-        <div>
-          <p className="text-sm font-medium text-foreground">{title}</p>
-          <p
-            className={cn(
-              "mt-1 text-muted-foreground",
-              COARSE_POINTER_TEXT_SM_CLASS,
-            )}
-          >
-            {message}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onRetry}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-state-hover"
-          >
-            <Icon name="RotateCcw" className="size-3.5" aria-hidden />
-            Reload
-          </button>
-          <button
-            type="button"
-            onClick={onOpenExternal}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground"
-          >
-            <Icon name="ExternalLink" className="size-3.5" aria-hidden />
-            Open externally
-          </button>
-        </div>
-        <p className="max-w-full truncate pt-1 font-mono text-[11px] text-subtle-foreground">
-          {errorText}
+    <div role="alert" className="h-full">
+      <BrowserStatePage
+        icon={copy.icon}
+        tone="error"
+        title={copy.title}
+        description={copy.description}
+        detailLabel="Error"
+        detail={errorText}
+        actions={
+          <>
+            <Button type="button" size="sm" onClick={onRetry}>
+              <Icon name="RotateCcw" aria-hidden />
+              Try again
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onOpenExternal}
+            >
+              <Icon name="ExternalLink" aria-hidden />
+              Open in your browser
+            </Button>
+          </>
+        }
+      />
+    </div>
+  );
+}
+
+function BrowserControlBanner({
+  controllerLabel,
+  onStop,
+  onTakeOver,
+}: {
+  controllerLabel: string;
+  onStop: () => void;
+  onTakeOver: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      className="flex shrink-0 items-center gap-2.5 border-b border-border bg-surface-recessed px-3 py-2"
+    >
+      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-state-hover text-foreground">
+        <Icon name="Bot" className="size-3.5" aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-foreground">
+          {controllerLabel} is using this tab
+        </p>
+        <p className="truncate text-xs text-muted-foreground">
+          Clicks and typing here could interrupt it.
         </p>
       </div>
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="button" variant="ghost" size="xs" onClick={onStop}>
+              End control
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            Take this tab away from {controllerLabel}. The agent keeps running.
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="button" variant="soft" size="xs" onClick={onTakeOver}>
+              Take over
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            Take this tab away from {controllerLabel} and start using it.
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   );
 }
@@ -399,46 +431,57 @@ export function BrowserTabContent({
   const locationShortcut = useAppCommandShortcut("browser.focusLocation");
   const reloadShortcut = useAppCommandShortcut("browser.reload");
   const findShortcut = useAppCommandShortcut("browser.find");
-  const desktopBrowser = useMemo<BbDesktopBrowserApi | null>(
+
+  const desktopBrowser = useMemo<OmnyoDesktopBrowserApi | null>(
     () => getDesktopBrowserApi(),
     [],
   );
+
   const contentRef = useRef<HTMLDivElement>(null);
   const addressInputRef = useRef<HTMLInputElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const isPointerCoarse = usePointerCoarse();
   const isCompactViewport = useIsCompactViewport();
+
   const {
     entries: recent,
     recordVisit,
     clear: clearRecent,
   } = useBrowserHistory(threadId);
 
-  const [state, setState] = useState<BbDesktopBrowserState | null>(null);
-  const [control, setControl] = useState<BbDesktopBrowserControl | null>(null);
+  const [state, setState] = useState<OmnyoDesktopBrowserState | null>(null);
+
+  const [control, setControl] = useState<OmnyoDesktopBrowserControl | null>(
+    null,
+  );
+
   useEffect(() => {
     let current = true;
     let receivedEvent = false;
     setControl(null);
+
     const accept = (next: {
       tabId: string;
       threadId: string;
-      control: BbDesktopBrowserControl | null;
+      control: OmnyoDesktopBrowserControl | null;
     }) => {
       if (current && next.tabId === tabId && next.threadId === threadId)
         setControl(next.control);
     };
+
     const unsubscribe = desktopBrowser?.onControl?.((next) => {
       if (next.tabId !== tabId || next.threadId !== threadId) return;
       receivedEvent = true;
       accept(next);
     });
+
     void desktopBrowser
       ?.getControl?.(tabId)
       .then((next) => {
         if (next !== null && !receivedEvent) accept(next);
       })
       .catch(() => undefined);
+
     return () => {
       current = false;
       unsubscribe?.();
@@ -452,9 +495,11 @@ export function BrowserTabContent({
   const isFindOpenRef = useRef(false);
   isFindOpenRef.current = isFindOpen;
   const [findQuery, setFindQuery] = useState("");
+
   const [findMatches, setFindMatches] = useState<BrowserFindMatches | null>(
     null,
   );
+
   const [resizeSnapshotUrl, setResizeSnapshotUrl] = useState<string | null>(
     null,
   );
@@ -466,8 +511,10 @@ export function BrowserTabContent({
   const initialUrlRef = useRef(initialUrl);
   const existingOnlyRef = useRef(existingOnly);
   const desktopTargetRef = useRef(desktopTarget);
+
   const [attachedBrowserViewIdentity, setAttachedBrowserViewIdentity] =
     useState<BrowserViewAttachIdentity | null>(null);
+
   const isBrowserViewAttached =
     attachedBrowserViewIdentity !== null &&
     attachedBrowserViewIdentity.environmentId === environmentId &&
@@ -475,28 +522,39 @@ export function BrowserTabContent({
     attachedBrowserViewIdentity.threadId === threadId;
 
   const hasPage = currentUrl.length > 0;
+
   const supportsNativePaneFocus =
     desktopBrowser?.focus !== undefined &&
     desktopBrowser.onFocus !== undefined &&
     desktopBrowser.setVisibleWithoutFocus !== undefined;
+
   const pageLoadErrorText = state?.errorText ?? null;
   const hasPageLoadError = pageLoadErrorText !== null && hasPage;
   const isBrowserDimmingModalOpen = useIsBrowserDimmingModalOpen();
-  const lastSentBoundsRef = useRef<BbDesktopBrowserViewBounds | null>(null);
+
+  const isBrowserViewOccluded = useIsBrowserViewOccluded(
+    contentRef,
+    desktopBrowser !== null && hasPage,
+  );
+
+  const lastSentBoundsRef = useRef<OmnyoDesktopBrowserViewBounds | null>(null);
 
   const readBounds = useCallback(() => {
     const element = contentRef.current;
+
     if (element === null) {
       return null;
     }
+
     return browserViewBoundsFromElement({ element });
   }, []);
 
   const sendBounds = useCallback(
-    (bounds: BbDesktopBrowserViewBounds) => {
+    (bounds: OmnyoDesktopBrowserViewBounds) => {
       if (desktopBrowser === null) {
         return;
       }
+
       lastSentBoundsRef.current = bounds;
       desktopBrowser.setBounds({ tabId, bounds });
     },
@@ -506,10 +564,13 @@ export function BrowserTabContent({
   const syncPlacement = useCallback(
     ({ force }: SyncBrowserViewPlacementArgs) => {
       const bounds = readBounds();
+
       if (bounds === null) {
         return;
       }
+
       const lastSentBounds = lastSentBoundsRef.current;
+
       if (
         !force &&
         lastSentBounds !== null &&
@@ -517,6 +578,7 @@ export function BrowserTabContent({
       ) {
         return;
       }
+
       sendBounds(bounds);
     },
     [readBounds, sendBounds],
@@ -533,6 +595,7 @@ export function BrowserTabContent({
   const syncInitialBounds = useCallback(() => {
     const bounds = readBounds();
     lastSentBoundsRef.current = bounds;
+
     return bounds ?? EMPTY_BROWSER_VIEW_BOUNDS;
   }, [readBounds]);
 
@@ -540,13 +603,16 @@ export function BrowserTabContent({
     if (desktopBrowser === null) {
       return;
     }
+
     const initialBounds = syncInitialBounds();
     const mountUrl = initialUrlRef.current;
     registerBrowserView({ environmentId, tabId, threadId });
     const target = desktopTargetRef.current;
+
     const attachExistingOnly =
       existingOnlyRef.current === true &&
       (target === undefined || !takeBrowserViewRecreation(tabId, target));
+
     desktopBrowser.attach({
       tabId,
       threadId,
@@ -557,11 +623,13 @@ export function BrowserTabContent({
     });
     setAttachedBrowserViewIdentity({ environmentId, tabId, threadId });
 
-    let lastSeenState: BbDesktopBrowserState | null = null;
+    let lastSeenState: OmnyoDesktopBrowserState | null = null;
+
     const unsubscribe = desktopBrowser.onState((nextState) => {
       if (nextState.tabId !== tabId) {
         return;
       }
+
       if (
         lastSeenState !== null &&
         (lastSeenState.url !== nextState.url ||
@@ -569,6 +637,7 @@ export function BrowserTabContent({
       ) {
         setFindMatches(null);
       }
+
       lastSeenState = nextState;
       setState(nextState);
       setCurrentUrl(nextState.url);
@@ -577,6 +646,7 @@ export function BrowserTabContent({
         url: nextState.url,
         title: nextState.title,
       });
+
       if (!nextState.isLoading && nextState.url.length > 0) {
         recordVisitRef.current({
           url: nextState.url,
@@ -589,6 +659,7 @@ export function BrowserTabContent({
       if (snapshot.tabId !== tabId) {
         return;
       }
+
       setResizeSnapshotUrl(snapshot.dataUrl);
     });
 
@@ -596,6 +667,7 @@ export function BrowserTabContent({
       if (result.tabId !== tabId) {
         return;
       }
+
       setFindMatches({
         activeMatchOrdinal: result.activeMatchOrdinal,
         matches: result.matches,
@@ -606,9 +678,11 @@ export function BrowserTabContent({
       unsubscribe();
       unsubscribeSnapshot?.();
       unsubscribeFindResult?.();
+
       if (isFindOpenRef.current) {
         desktopBrowser.stopFindInPage?.({ tabId, action: "clearSelection" });
       }
+
       visibilityCoordinator?.release(tabId);
     };
   }, [
@@ -622,13 +696,17 @@ export function BrowserTabContent({
 
   useEffect(() => {
     const element = contentRef.current;
+
     if (element === null || desktopBrowser === null) {
       return;
     }
+
     const observer = new ResizeObserver(() => {
       syncBoundsIfChanged();
     });
+
     observer.observe(element);
+
     return () => {
       observer.disconnect();
     };
@@ -660,24 +738,30 @@ export function BrowserTabContent({
     hasPage &&
     !hasPageLoadError &&
     isBrowserViewAttached &&
-    !isBrowserDimmingModalOpen;
+    !isBrowserDimmingModalOpen &&
+    !isBrowserViewOccluded;
+
   useLayoutEffect(() => {
     if (visibilityCoordinator === null) {
       return;
     }
+
     if (isViewVisible) {
       visibilityCoordinator.show(tabId, syncBounds, {
         focus: false,
       });
+
       return () => {
         visibilityCoordinator.hide(tabId);
       };
     }
+
     visibilityCoordinator.hide(tabId);
   }, [visibilityCoordinator, tabId, isViewVisible, syncBounds]);
 
   useLayoutEffect(() => {
     if (!isPageFocusPending) return;
+
     if (
       !canShowNativeBrowserView ||
       !canHandleBrowserCommands ||
@@ -685,8 +769,10 @@ export function BrowserTabContent({
       isBrowserDimmingModalOpen
     ) {
       setIsPageFocusPending(false);
+
       return;
     }
+
     if (!isViewVisible) return;
     setIsPageFocusPending(false);
     desktopBrowser?.focus?.(tabId);
@@ -705,6 +791,7 @@ export function BrowserTabContent({
     if (desktopBrowser?.onFocus === undefined || onNativeFocus === undefined) {
       return;
     }
+
     return desktopBrowser.onFocus((focusedTabId) => {
       if (focusedTabId === tabId) onNativeFocus();
     });
@@ -714,21 +801,26 @@ export function BrowserTabContent({
     if (addressFocusRequest === null) {
       return;
     }
+
     if (addressFocusRequest.tabId !== tabId) {
       return;
     }
+
     if (isPointerCoarse) {
       onAddressFocusRequestConsumed?.(addressFocusRequest);
+
       return;
     }
 
     setAddressDraft(currentUrl);
     setIsEditing(true);
     addressInputRef.current?.focus({ preventScroll: true });
+
     const frame = requestAnimationFrame(() => {
       addressInputRef.current?.focus({ preventScroll: true });
       onAddressFocusRequestConsumed?.(addressFocusRequest);
     });
+
     return () => cancelAnimationFrame(frame);
   }, [
     addressFocusRequest,
@@ -741,9 +833,11 @@ export function BrowserTabContent({
   const navigateToInput = useCallback(
     (rawInput: string) => {
       const url = resolveBrowserAddressInput(rawInput);
+
       if (url === null) {
         return;
       }
+
       setCurrentUrl(url);
       setIsEditing(false);
       addressInputRef.current?.blur();
@@ -766,11 +860,17 @@ export function BrowserTabContent({
     setIsEditing(true);
   }, [currentUrl]);
 
+  const handleStartPromptFocusAddress = useCallback(() => {
+    addressInputRef.current?.focus();
+  }, []);
+
   const handleReloadOrStop = useCallback(() => {
     if (state?.isLoading ?? false) {
       desktopBrowser?.stop(tabId);
+
       return;
     }
+
     desktopBrowser?.reload(tabId);
   }, [desktopBrowser, state?.isLoading, tabId]);
 
@@ -783,6 +883,7 @@ export function BrowserTabContent({
       addressInputRef.current?.focus({ preventScroll: true });
       addressInputRef.current?.select();
     });
+
     return true;
   }, [canHandleBrowserCommands, currentUrl, desktopBrowser]);
 
@@ -795,7 +896,7 @@ export function BrowserTabContent({
     hasPage;
 
   const runFind = useCallback(
-    (args: Omit<BbDesktopBrowserFindInPageRequest, "tabId">) => {
+    (args: Omit<OmnyoDesktopBrowserFindInPageRequest, "tabId">) => {
       desktopBrowser?.findInPage?.({ tabId, ...args });
     },
     [desktopBrowser, tabId],
@@ -816,12 +917,19 @@ export function BrowserTabContent({
 
   const handleFindQueryChange = useCallback(
     (rawQuery: string) => {
-      const query = rawQuery.slice(0, BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH);
+      const query = rawQuery.slice(
+        0,
+        OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH,
+      );
+
       setFindQuery(query);
+
       if (query.length === 0) {
         clearFind();
+
         return;
       }
+
       runFind({ text: query, forward: true, newSession: true });
     },
     [clearFind, runFind],
@@ -845,10 +953,13 @@ export function BrowserTabContent({
   const handleOpenFind = useCallback((): boolean => {
     if (!canFindInPage) return false;
     setIsFindOpen(true);
+
     if (findQuery.length > 0) {
       runFind({ text: findQuery, forward: true, newSession: true });
     }
+
     focusFindInput();
+
     return true;
   }, [canFindInPage, findQuery, focusFindInput, runFind]);
 
@@ -866,22 +977,61 @@ export function BrowserTabContent({
       if (!canHandleBrowserCommands || desktopBrowser === null || !hasPage) {
         return false;
       }
+
       desktopBrowser.reload(tabId);
+
       return true;
     },
     100,
   );
 
   const handleOpenExternal = useCallback(() => {
-    getBbDesktopInfo()?.openExternalUrl(currentUrl);
+    getOmnyoDesktopInfo()?.openExternalUrl(currentUrl);
   }, [currentUrl]);
+
+  const hasHostFocusRef = useRef(false);
+
+  const handleHostFocus = useCallback(() => {
+    hasHostFocusRef.current = true;
+    desktopBrowser?.setHostFocus?.(tabId);
+  }, [desktopBrowser, tabId]);
+
+  const handleHostBlur = useCallback(
+    (event: FocusEvent<HTMLDivElement>) => {
+      if (
+        event.relatedTarget instanceof Node &&
+        event.currentTarget.contains(event.relatedTarget)
+      ) {
+        return;
+      }
+
+      hasHostFocusRef.current = false;
+      desktopBrowser?.setHostFocus?.(null);
+    },
+    [desktopBrowser],
+  );
+
+  useEffect(
+    () => () => {
+      if (hasHostFocusRef.current) {
+        hasHostFocusRef.current = false;
+        desktopBrowser?.setHostFocus?.(null);
+      }
+    },
+    [desktopBrowser, tabId],
+  );
 
   if (desktopBrowser === null) {
     return <BrowserUnavailable />;
   }
 
   return (
-    <div data-app-browser className="flex h-full min-h-0 flex-col">
+    <div
+      data-app-browser
+      className="flex h-full min-h-0 flex-col"
+      onFocus={handleHostFocus}
+      onBlur={handleHostBlur}
+    >
       <BrowserChrome
         addressDraft={addressDraft}
         isEditing={isEditing}
@@ -912,31 +1062,14 @@ export function BrowserTabContent({
         }
       />
       {control !== null ? (
-        <div
-          role="status"
-          className="flex shrink-0 items-center gap-3 border-b border-border bg-surface-recessed px-3 py-2 text-xs"
-        >
-          <span className="min-w-0 flex-1 truncate">
-            {control.controllerLabel} is controlling this tab
-          </span>
-          <button
-            type="button"
-            className="rounded px-2 py-1 hover:bg-state-hover"
-            onClick={() => desktopBrowser.releaseControl?.(tabId)}
-          >
-            Stop
-          </button>
-          <button
-            type="button"
-            className="rounded px-2 py-1 hover:bg-state-hover"
-            onClick={() => {
-              desktopBrowser.releaseControl?.(tabId);
-              desktopBrowser.focus?.(tabId);
-            }}
-          >
-            Take over
-          </button>
-        </div>
+        <BrowserControlBanner
+          controllerLabel={control.controllerLabel}
+          onStop={() => desktopBrowser.releaseControl?.(tabId)}
+          onTakeOver={() => {
+            desktopBrowser.releaseControl?.(tabId);
+            desktopBrowser.focus?.(tabId);
+          }}
+        />
       ) : null}
       {isFindOpen ? (
         <BrowserFindBar
@@ -963,6 +1096,8 @@ export function BrowserTabContent({
             onNavigateInput={navigateToInput}
             recent={recent}
             onClearRecent={clearRecent}
+            onFocusAddress={handleStartPromptFocusAddress}
+            showStartPrompt={!hasPage}
           />
         )}
         {hasPage && resizeSnapshotUrl !== null ? (

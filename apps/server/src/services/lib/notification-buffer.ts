@@ -5,8 +5,13 @@ import type {
   SystemChangeKind,
   ThreadChangeKind,
   ThreadChangeMetadata,
-} from "@bb/domain";
-import type { DbNotifier } from "@bb/db";
+} from "@omnyo/domain";
+import type { DbNotifier, DbTransaction } from "@omnyo/db";
+
+export interface BufferedTransaction {
+  tx: DbTransaction;
+  notifications: NotificationBuffer;
+}
 
 interface BufferedNotification {
   flush(notifier: DbNotifier): void;

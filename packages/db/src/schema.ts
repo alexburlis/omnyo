@@ -10,13 +10,24 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
-import { threadStatusValues } from "@bb/domain/thread-status";
-import { startedOnBehalfOfInitiatorValues } from "@bb/domain/started-on-behalf-of";
-import { threadCreateOriginValues } from "@bb/domain/thread-create-origin";
-import { threadOriginKindValues } from "@bb/domain/thread-origin-kind";
-import { threadVisibilityValues } from "@bb/domain/thread-visibility";
+import type { QueuedMessageDeliveryMode } from "@omnyo/domain";
+import { threadStatusValues } from "@omnyo/domain/thread-status";
+import { startedOnBehalfOfInitiatorValues } from "@omnyo/domain/started-on-behalf-of";
+import { threadCreateOriginValues } from "@omnyo/domain/thread-create-origin";
+import { threadOriginKindValues } from "@omnyo/domain/thread-origin-kind";
+import { threadVisibilityValues } from "@omnyo/domain/thread-visibility";
 import type {
   EnvironmentProviderSelection,
+  InboxConditionKind,
+  InboxFailureState,
+  InboxOwnerInputKind,
+  InboxOwnerInputState,
+  InboxProducerKind,
+  InboxProposalKind,
+  InboxReceiptCause,
+  InboxWaitCreator,
+  InboxWaitKind,
+  InboxWaitStatus,
   JsonValue,
   EnvironmentStatus,
   FaviconColorPreference,
@@ -36,7 +47,7 @@ import type {
   ThreadEventScopeKind,
   ThreadEventType,
   ProjectKind,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { RetainedEventOutputPath } from "./retained-event-output.js";
 
 export const authUsers = sqliteTable(
@@ -130,6 +141,10 @@ export const hosts = sqliteTable(
       .$type<PermissionMode>()
       .notNull()
       .default("full"),
+    availability: text("availability")
+      .$type<"available" | "away">()
+      .notNull()
+      .default("available"),
     destroyedAt: integer("destroyed_at"),
     lastSeenAt: integer("last_seen_at"),
     lastRejectedProtocolVersion: integer("last_rejected_protocol_version"),
@@ -149,6 +164,22 @@ export const hosts = sqliteTable(
   ],
 );
 
+export const serverAccessRetirements = sqliteTable(
+  "server_access_retirements",
+  {
+    hostId: text("host_id")
+      .primaryKey()
+      .references(() => hosts.id, { onDelete: "cascade" }),
+    providerId: text("provider_id"),
+    grantId: text("grant_id"),
+    acquisitionKey: text("acquisition_key").notNull(),
+    serverUrl: text("server_url").notNull(),
+    challenge: text("challenge").notNull(),
+    primaryProofRuntimeId: text("primary_proof_runtime_id"),
+    createdAt: integer("created_at").notNull(),
+  },
+);
+
 export const projects = sqliteTable(
   "projects",
   {
@@ -156,6 +187,7 @@ export const projects = sqliteTable(
     kind: text("kind").$type<ProjectKind>().notNull().default("standard"),
     name: text("name").notNull(),
     gitRemoteUrl: text("git_remote_url"),
+    customIcon: text("custom_icon"),
     sortKey: text("sort_key").notNull().default("V"),
     deletedAt: integer("deleted_at"),
     createdAt: integer("created_at").notNull(),
@@ -344,10 +376,13 @@ export const pluginArtifacts = sqliteTable(
   {
     id: text("id").primaryKey(),
     pluginId: text("plugin_id").notNull(),
-    sourceKind: text("source_kind", { enum: ["npm", "git"] }).notNull(),
+    sourceKind: text("source_kind", {
+      enum: ["npm", "git", "builtin", "path"],
+    }).notNull(),
     npmResolvedVersion: text("npm_resolved_version"),
     gitResolvedCommit: text("git_resolved_commit"),
     gitCheckoutRoot: text("git_checkout_root"),
+    bundledRootDir: text("bundled_root_dir"),
     path: text("path").notNull(),
     integrity: text("integrity"),
     contentHash: text("content_hash"),
@@ -371,7 +406,6 @@ export const pluginMarketplaces = sqliteTable("plugin_marketplaces", {
   sourceGitSubdirectory: text("source_git_subdirectory"),
   sourceGitCommit: text("source_git_commit"),
   manifestJson: text("manifest_json").notNull(),
-  statsJson: text("stats_json"),
   etag: text("etag"),
   lastModified: text("last_modified"),
   lastSuccessfulRefreshAt: integer("last_successful_refresh_at"),
@@ -420,7 +454,7 @@ export const pluginStateSnapshots = sqliteTable(
     }).notNull(),
     rollbackCandidateVersion: text("rollback_candidate_version"),
     rollbackSourceFingerprint: text("rollback_source_fingerprint"),
-    rollbackBbVersion: text("rollback_bb_version"),
+    rollbackCoreVersion: text("rollback_core_version"),
     rollbackSdkVersion: text("rollback_sdk_version"),
     rollbackDetail: text("rollback_detail"),
     createdAt: integer("created_at").notNull(),
@@ -610,9 +644,13 @@ export const threads = sqliteTable(
     sectionId: text("section_id").references(() => threadSections.id, {
       onDelete: "set null",
     }),
+    groupId: text("group_id").references(() => threadGroups.id, {
+      onDelete: "set null",
+    }),
     status: text("status", { enum: threadStatusValues })
       .notNull()
       .default("starting"),
+    statusChangedAt: integer("status_changed_at").notNull().default(0),
     startupContext: text("startup_context"),
     parentThreadId: text("parent_thread_id").references(
       (): AnySQLiteColumn => threads.id,
@@ -621,6 +659,10 @@ export const threads = sqliteTable(
     lifecycleOwnerThreadId: text("lifecycle_owner_thread_id").references(
       (): AnySQLiteColumn => threads.id,
       { onDelete: "restrict" },
+    ),
+    launchedByThreadId: text("launched_by_thread_id").references(
+      (): AnySQLiteColumn => threads.id,
+      { onDelete: "set null" },
     ),
     sourceThreadId: text("source_thread_id").references(
       (): AnySQLiteColumn => threads.id,
@@ -633,13 +675,20 @@ export const threads = sqliteTable(
     visibility: text("visibility", { enum: threadVisibilityValues })
       .notNull()
       .default("visible"),
+    pluginHome: integer("plugin_home", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    quiet: integer("quiet", { mode: "boolean" }).notNull().default(false),
     archivedAt: integer("archived_at"),
     pinnedAt: integer("pinned_at"),
     pinSortKey: text("pin_sort_key"),
+    shelvedAt: integer("shelved_at"),
+    shelfSortKey: text("shelf_sort_key"),
     deletedAt: integer("deleted_at"),
     storageDeletedAt: integer("storage_deleted_at"),
     lastReadAt: integer("last_read_at"),
     latestAttentionAt: integer("latest_attention_at").notNull(),
+    lastMessageAt: integer("last_message_at"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
@@ -655,8 +704,12 @@ export const threads = sqliteTable(
     index("threads_pin_sort_idx")
       .on(table.archivedAt, table.deletedAt, table.pinSortKey, table.id)
       .where(sql`${table.pinnedAt} IS NOT NULL`),
+    index("threads_shelf_sort_idx")
+      .on(table.archivedAt, table.deletedAt, table.shelvedAt, table.id)
+      .where(sql`${table.shelvedAt} IS NOT NULL`),
     index("threads_environment_idx").on(table.environmentId),
     index("threads_lifecycle_owner_idx").on(table.lifecycleOwnerThreadId),
+    index("threads_launched_by_idx").on(table.launchedByThreadId),
     index("threads_parent_idx").on(table.parentThreadId),
     index("threads_source_origin_idx").on(
       table.sourceThreadId,
@@ -672,6 +725,7 @@ export const threads = sqliteTable(
       table.deletedAt,
       table.id,
     ),
+    index("threads_group_idx").on(table.groupId),
     index("threads_archived_status_idx").on(table.archivedAt, table.status),
     index("threads_deleted_cleanup_idx")
       .on(table.deletedAt)
@@ -684,6 +738,14 @@ export const threads = sqliteTable(
     index("threads_active_maintenance_idx")
       .on(table.status)
       .where(sql`${table.deletedAt} IS NULL`),
+    index("threads_search_rank_idx").on(
+      table.deletedAt,
+      table.visibility,
+      table.archivedAt,
+      table.updatedAt,
+      table.id,
+      table.title,
+    ),
   ],
 );
 
@@ -697,6 +759,27 @@ export const threadPluginMetadata = sqliteTable(
     metadataJson: text("metadata_json").notNull(),
   },
   (table) => [primaryKey({ columns: [table.threadId, table.pluginId] })],
+);
+
+export const nativeThreadImports = sqliteTable(
+  "native_thread_imports",
+  {
+    threadId: text("thread_id")
+      .primaryKey()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    hostId: text("host_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    sourceProviderThreadId: text("source_provider_thread_id").notNull(),
+    sourcePath: text("source_path").notNull(),
+    importedAt: integer("imported_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("native_thread_imports_source_idx").on(
+      table.hostId,
+      table.providerId,
+      table.sourceProviderThreadId,
+    ),
+  ],
 );
 
 export const threadTabs = sqliteTable("thread_tabs", {
@@ -717,6 +800,20 @@ export const threadSections = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [uniqueIndex("thread_sections_name_idx").on(table.name)],
+);
+
+export const threadGroups = sqliteTable(
+  "thread_groups",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [index("thread_groups_project_idx").on(table.projectId)],
 );
 
 export const threadSearchSegments = sqliteTable(
@@ -755,6 +852,44 @@ export const threadConversationOutlines = sqliteTable(
     projectionKey: text("projection_key").notNull(),
     itemsJson: text("items_json").notNull(),
   },
+);
+
+export const threadHistoryEpochs = sqliteTable("thread_history_epochs", {
+  threadId: text("thread_id")
+    .primaryKey()
+    .references(() => threads.id, { onDelete: "cascade" }),
+  epoch: text("epoch").notNull(),
+  rewriteEpoch: text("rewrite_epoch").notNull().default(""),
+  highWaterSequence: integer("high_water_sequence").notNull().default(0),
+});
+
+export const threadTimelineRecords = sqliteTable(
+  "thread_timeline_records",
+  {
+    key: text("key").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["page", "root"] }).notNull(),
+    body: text("body").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at"),
+  },
+  (table) => [
+    index("thread_timeline_records_created_key_idx").on(
+      table.createdAt,
+      table.key,
+    ),
+    check(
+      "thread_timeline_records_kind_check",
+      sql`${table.kind} IN ('page', 'root')`,
+    ),
+    check(
+      "thread_timeline_records_byte_size_check",
+      sql`${table.byteSize} >= 0`,
+    ),
+  ],
 );
 
 export const threadDynamicContextFileStates = sqliteTable(
@@ -988,27 +1123,17 @@ export const queuedThreadMessages = sqliteTable(
   "queued_thread_messages",
   {
     id: text("id").primaryKey(),
-    // JSON `{ kind, subject }` when this row is one of core's own system
-    // notices rather than somebody's message; NULL for every ordinary row.
-    // Owned by the server, which is the only thing that writes or reads it.
+
     systemNotice: text("system_notice"),
     threadId: text("thread_id")
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
     senderThreadId: text("sender_thread_id"),
-    // How the dispatch this row was queued from was requested, and the plugin
-    // that requested it. On the row rather than read from the request, so a
-    // drained re-attempt decides on the same provenance its first attempt saw.
-    // Both NULL for a send, a retry, a system notice and every row written
-    // before these columns existed: only a thread's first dispatch has one.
+
     origin: text("origin", { enum: threadCreateOriginValues }),
     originPluginId: text("origin_plugin_id"),
-    // Set together: the thread that asked for the dispatch this row was queued
-    // from, and what it counts as. Distinct from `sender_thread_id`, which is
-    // the sender of a message to an existing thread and drives the agent
-    // message prefix — a thread-start has a requester and no message sender,
-    // so without these a drained first message reads as one the user typed.
+
     requestedByInitiator: text("requested_by_initiator", {
       enum: startedOnBehalfOfInitiatorValues,
     }),
@@ -1020,59 +1145,32 @@ export const queuedThreadMessages = sqliteTable(
     groupWithNext: integer("group_with_next", { mode: "boolean" })
       .notNull()
       .default(false),
-    // Epoch ms this row is scheduled to attempt dispatch. NULL means "as soon
-    // as the other waits clear", which is what an ordinary queued row is.
+
     sendAt: integer("send_at"),
-    // JSON `QueuedMessageWaitingOn`: the typed reason this row is queued.
-    // NULL for a plain queued row that is simply next in line behind the
-    // running turn — including every row written before waits were typed, for
-    // which inventing a reason would be a lie.
-    //
-    // A plugin wait's authored reason lives HERE and nowhere else. There is
-    // deliberately no `wait_reason` column: nothing queries on the reason, and
-    // every read that renders it already has the whole row in hand.
+
     waitingOn: text("waiting_on"),
-    // Denormalized `plugin:<id>` owner of a plugin wait, NULL otherwise.
-    // Unlike the reason, this IS queried — the orphan sweep and the
-    // per-plugin release both need "every row this plugin holds" as an
-    // indexed equality lookup, which JSON cannot serve. Written only by the
-    // same statement that writes `waiting_on`, derived from it, so the two
-    // cannot drift.
+
     waitHolder: text("wait_holder").$type<QueuedMessageWaitHolder>(),
-    // Why this row's last DRAIN attempt failed outright, NULL when it has not
-    // failed one. Its own column rather than a shape inside `waiting_on`
-    // because writing a wait rewrites that column wholesale on every attempt, which
-    // would erase a failure recorded there before anybody could read it. The
-    // row stays waiting on whatever it was waiting on; this only says what went
-    // wrong the last time the drain tried to send it.
+
     failureReason: text("failure_reason"),
-    // How many drain attempts in a row have failed, and when the next
-    // automatic one may run. Together they make a failure a bounded retry
-    // instead of a terminal state: the condition that failed a dispatch is
-    // usually the one a restart just created, so the row goes again on a
-    // widening delay and only stops when the budget is spent. `next_attempt_at`
-    // NULL beside a non-NULL `failure_reason` IS that spent budget — the row
-    // now waits for a person. A fresh, successful statement of the row's wait
-    // resets both, because the attempt that wrote it learned something newer
-    // than the failure did.
+
     failureCount: integer("failure_count").notNull().default(0),
     nextAttemptAt: integer("next_attempt_at"),
+    overridesFailureId: text("overrides_failure_id"),
     payloadKind: text("payload_kind")
       .$type<QueuedMessagePayloadKind>()
       .notNull()
       .default("inline"),
-    // Set together, and only on a `retry` row: the ORIGINAL request this row
-    // re-submits, which attempt it is (2 is the first retry), and why it is
-    // being retried in the retrier's words ("Rate limited").
-    //
-    // The reason is a column of the retry rather than part of `waiting_on`
-    // because a retry can wait on the clock, on a plugin, or on nothing, and
-    // the reason outlives all three: it is a fact about the retry, not about
-    // what is currently holding it, so a re-queue that rewrites the wait must
-    // not erase it.
+
     retryOfTurnRequestId: text("retry_of_turn_request_id"),
     retryAttempt: integer("retry_attempt"),
     retryReason: text("retry_reason"),
+    deliveryMode: text("delivery_mode")
+      .$type<QueuedMessageDeliveryMode>()
+      .notNull()
+      .default("steer"),
+    coalesceKey: text("coalesce_key"),
+    coalesceState: text("coalesce_state"),
     claimedAt: integer("claimed_at"),
     claimToken: text("claim_token"),
     editHeldUntil: integer("edit_held_until"),
@@ -1081,6 +1179,9 @@ export const queuedThreadMessages = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [
+    index("queued_thread_messages_coalesce_idx")
+      .on(table.threadId, table.coalesceKey)
+      .where(sql`${table.coalesceKey} IS NOT NULL`),
     index("queued_thread_messages_thread_created_idx").on(
       table.threadId,
       table.createdAt,
@@ -1091,20 +1192,35 @@ export const queuedThreadMessages = sqliteTable(
       table.sortKey,
       table.id,
     ),
-    // The due-scheduled sweep: "every unclaimed row whose send_at has
-    // arrived", ordered by when it came due. Partial on the two liveness
-    // predicates so the index holds only rows the sweep can actually act on.
+
     index("queued_thread_messages_due_idx")
       .on(table.sendAt, table.id)
       .where(
         sql`${table.sendAt} IS NOT NULL AND ${table.claimedAt} IS NULL AND ${table.claimToken} IS NULL`,
       ),
-    // Plugin-holder lookup for the orphan sweep and per-plugin release.
+
     index("queued_thread_messages_wait_holder_idx")
       .on(table.waitHolder, table.id)
       .where(sql`${table.waitHolder} IS NOT NULL`),
   ],
 );
+
+export const dispatchedQueuedThreadMessages = sqliteTable(
+  "dispatched_queued_thread_messages",
+  {
+    queuedMessageId: text("queued_message_id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    dispatchedAt: integer("dispatched_at").notNull(),
+  },
+  (table) => [
+    index("dispatched_queued_thread_messages_dispatched_at_idx").on(
+      table.dispatchedAt,
+    ),
+  ],
+);
+
 export const hostDaemonSessions = sqliteTable(
   "host_daemon_sessions",
   {
@@ -1142,6 +1258,39 @@ export const hostDaemonSessions = sqliteTable(
       table.id,
     ),
   ],
+);
+
+export const daemonEventReceipts = sqliteTable(
+  "daemon_event_receipts",
+  {
+    hostId: text("host_id")
+      .notNull()
+      .references(() => hosts.id, { onDelete: "cascade" }),
+    instanceId: text("instance_id").notNull(),
+    lastEventIndex: integer("last_event_index").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.hostId, table.instanceId] })],
+);
+
+export const coordinatorStore = sqliteTable("coordinator_store", {
+  singleton: integer("singleton").primaryKey(),
+  storeId: text("store_id").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const submissionReceipts = sqliteTable(
+  "submission_receipts",
+  {
+    actorKey: text("actor_key").notNull(),
+    submissionId: text("submission_id").notNull(),
+    action: text("action").$type<"thread-message" | "new-thread">().notNull(),
+    intentDigest: text("intent_digest").notNull(),
+    threadId: text("thread_id").notNull(),
+    queuedMessageId: text("queued_message_id").notNull(),
+    acceptedAt: integer("accepted_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.actorKey, table.submissionId] })],
 );
 
 export const providerModelCatalogs = sqliteTable(
@@ -1202,10 +1351,314 @@ export const terminalSessions = sqliteTable(
       table.environmentId,
       table.status,
     ),
+    index("terminal_sessions_status_thread_idx").on(
+      table.status,
+      table.threadId,
+    ),
     index("terminal_sessions_host_status_idx").on(table.hostId, table.status),
     index("terminal_sessions_daemon_session_idx").on(table.daemonSessionId),
   ],
 );
+
+export const threadQuestions = sqliteTable(
+  "thread_questions",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    question: text("question").notNull(),
+    mode: text("mode").$type<"required" | "optional">().notNull(),
+    key: text("key"),
+    state: text("state")
+      .$type<"open" | "answered" | "skipped" | "withdrawn">()
+      .notNull(),
+    answer: text("answer"),
+    queuedMessageId: text("queued_message_id"),
+    answeredBy: text("answered_by"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("thread_questions_thread_state_idx").on(table.threadId, table.state),
+  ],
+);
+
+export const threadCallbacks = sqliteTable(
+  "thread_callbacks",
+  {
+    threadId: text("thread_id")
+      .primaryKey()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    sourceThreadId: text("source_thread_id"),
+    sourceTitle: text("source_title").notNull(),
+    reason: text("reason").notNull(),
+    createdAt: integer("created_at").notNull(),
+    afterSeq: integer("after_seq").notNull(),
+    matchText: text("match_text").notNull(),
+  },
+  (table) => [index("thread_callbacks_source_idx").on(table.sourceThreadId)],
+);
+
+export const threadOwnerInputs = sqliteTable(
+  "thread_owner_inputs",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<InboxOwnerInputKind>().notNull(),
+    state: text("state").$type<InboxOwnerInputState>().notNull(),
+    requestId: text("request_id"),
+    queuedMessageId: text("queued_message_id"),
+    turnId: text("turn_id"),
+    receiptId: text("receipt_id"),
+    producerId: text("producer_id"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("thread_owner_inputs_thread_state_idx").on(
+      table.threadId,
+      table.state,
+    ),
+    index("thread_owner_inputs_request_idx").on(table.requestId),
+    index("thread_owner_inputs_queued_idx").on(table.queuedMessageId),
+    index("thread_owner_inputs_turn_idx").on(table.threadId, table.turnId),
+  ],
+);
+
+export const threadWaits = sqliteTable(
+  "thread_waits",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    generation: integer("generation").notNull(),
+    kind: text("kind").$type<InboxWaitKind>().notNull(),
+    status: text("status").$type<InboxWaitStatus>().notNull(),
+    readiness: text("readiness").$type<"all" | "any">().notNull(),
+    createdBy: text("created_by").$type<InboxWaitCreator>().notNull(),
+    automationId: text("automation_id"),
+    ownerAccepted: integer("owner_accepted", { mode: "boolean" }).notNull(),
+    forText: text("for_text").notNull(),
+    resumeText: text("resume_text"),
+    marker: text("marker").notNull(),
+    deadline: integer("deadline"),
+    chainStartAt: integer("chain_start_at").notNull(),
+    nextCheckAt: integer("next_check_at"),
+    checkIntervalMs: integer("check_interval_ms"),
+    checkCount: integer("check_count").notNull(),
+    reminderAt: integer("reminder_at"),
+    reminderReceiptId: text("reminder_receipt_id"),
+    questionId: text("question_id"),
+    questionRevision: integer("question_revision"),
+    coversReceiptIds: text("covers_receipt_ids").notNull(),
+    proposalKind: text("proposal_kind").$type<InboxProposalKind>(),
+    proposalReceiptId: text("proposal_receipt_id"),
+    afterWaitId: text("after_wait_id"),
+    dispatchKey: text("dispatch_key"),
+    dispatchQueuedMessageId: text("dispatch_queued_message_id"),
+    dispatchRequestId: text("dispatch_request_id"),
+    closedReason: text("closed_reason"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    closedAt: integer("closed_at"),
+  },
+  (table) => [
+    uniqueIndex("thread_waits_key_generation_idx").on(
+      table.threadId,
+      table.key,
+      table.generation,
+    ),
+    uniqueIndex("thread_waits_dispatch_key_idx").on(table.dispatchKey),
+    index("thread_waits_thread_status_idx").on(table.threadId, table.status),
+    index("thread_waits_status_deadline_idx").on(table.status, table.deadline),
+    index("thread_waits_marker_idx").on(table.marker),
+    index("thread_waits_dispatch_request_idx").on(table.dispatchRequestId),
+    index("thread_waits_dispatch_queued_idx").on(table.dispatchQueuedMessageId),
+  ],
+);
+
+export const threadWaitConditions = sqliteTable(
+  "thread_wait_conditions",
+  {
+    waitId: text("wait_id")
+      .notNull()
+      .references(() => threadWaits.id, { onDelete: "cascade" }),
+    conditionKey: text("condition_key").notNull(),
+    kind: text("kind").$type<InboxConditionKind>().notNull(),
+    target: text("target"),
+    label: text("label").notNull(),
+    state: text("state").$type<"pending" | "met">().notNull(),
+    afterSeq: integer("after_seq"),
+    result: text("result"),
+    metAt: integer("met_at"),
+    stallWokenAt: integer("stall_woken_at"),
+    stallReceiptId: text("stall_receipt_id"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.waitId, table.conditionKey] }),
+    index("thread_wait_conditions_target_idx").on(table.kind, table.target),
+  ],
+);
+
+export const threadWaitResults = sqliteTable(
+  "thread_wait_results",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    marker: text("marker").notNull(),
+    waitId: text("wait_id"),
+    sourceThreadId: text("source_thread_id"),
+    text: text("text").notNull(),
+    late: integer("late", { mode: "boolean" }).notNull(),
+    receivedAt: integer("received_at").notNull(),
+    consumedAt: integer("consumed_at"),
+  },
+  (table) => [
+    index("thread_wait_results_marker_idx").on(table.marker),
+    index("thread_wait_results_thread_idx").on(table.threadId),
+  ],
+);
+
+export const threadReceipts = sqliteTable(
+  "thread_receipts",
+  {
+    id: text("id").primaryKey(),
+    rootThreadId: text("root_thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    threadId: text("thread_id").notNull(),
+    seq: integer("seq").notNull(),
+    cause: text("cause").$type<InboxReceiptCause>().notNull(),
+    summary: text("summary").notNull(),
+    outcomeRef: text("outcome_ref"),
+    waitId: text("wait_id"),
+    coveredInputIds: text("covered_input_ids").notNull(),
+    handledAt: integer("handled_at"),
+    handledByMoveId: text("handled_by_move_id"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("thread_receipts_root_handled_idx").on(
+      table.rootThreadId,
+      table.handledAt,
+    ),
+    uniqueIndex("thread_receipts_root_seq_idx").on(
+      table.rootThreadId,
+      table.seq,
+    ),
+  ],
+);
+
+export const threadMoves = sqliteTable(
+  "thread_moves",
+  {
+    id: text("id").primaryKey(),
+    rootThreadId: text("root_thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    handledReceiptIds: text("handled_receipt_ids").notNull(),
+    writeSet: text("write_set").notNull(),
+    createdAt: integer("created_at").notNull(),
+    undoneAt: integer("undone_at"),
+  },
+  (table) => [index("thread_moves_created_idx").on(table.createdAt)],
+);
+
+export const threadFailures = sqliteTable(
+  "thread_failures",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    turnId: text("turn_id"),
+    requestId: text("request_id"),
+    waitId: text("wait_id"),
+    state: text("state").$type<InboxFailureState>().notNull(),
+    reason: text("reason").notNull(),
+    decisionDeadline: integer("decision_deadline"),
+    retryQueuedMessageId: text("retry_queued_message_id"),
+    receiptId: text("receipt_id"),
+    incidentKey: text("incident_key"),
+    incidentLabel: text("incident_label"),
+    resetAt: integer("reset_at"),
+    resolvedBy: text("resolved_by"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    resolvedAt: integer("resolved_at"),
+  },
+  (table) => [
+    index("thread_failures_thread_state_idx").on(table.threadId, table.state),
+    index("thread_failures_state_deadline_idx").on(
+      table.state,
+      table.decisionDeadline,
+    ),
+  ],
+);
+
+export const threadProducers = sqliteTable(
+  "thread_producers",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<InboxProducerKind>().notNull(),
+    pluginId: text("plugin_id").notNull(),
+    label: text("label").notNull(),
+    status: text("status").$type<"active" | "ended">().notNull(),
+    heldTurnId: text("held_turn_id"),
+    heldSummary: text("held_summary"),
+    heldUntil: integer("held_until"),
+    endedReason: text("ended_reason"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    endedAt: integer("ended_at"),
+  },
+  (table) => [
+    index("thread_producers_thread_status_idx").on(
+      table.threadId,
+      table.status,
+    ),
+    index("thread_producers_held_idx").on(table.heldUntil),
+  ],
+);
+
+export const threadTurnMarks = sqliteTable(
+  "thread_turn_marks",
+  {
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull(),
+    waitId: text("wait_id"),
+    waitGeneration: integer("wait_generation"),
+    evaluation: integer("evaluation", { mode: "boolean" }).notNull(),
+    rearmed: integer("rearmed", { mode: "boolean" }).notNull(),
+    metCondition: text("met_condition"),
+    afterWaitId: text("after_wait_id"),
+    endedOwnerWaitIds: text("ended_owner_wait_ids").notNull(),
+    createdAt: integer("created_at").notNull(),
+    endedAt: integer("ended_at"),
+    endedOutcome: text("ended_outcome"),
+  },
+  (table) => [primaryKey({ columns: [table.threadId, table.turnId] })],
+);
+
+export const threadAttentionImports = sqliteTable("thread_attention_imports", {
+  pluginId: text("plugin_id").primaryKey(),
+  importedAt: integer("imported_at").notNull(),
+});
 
 export const pendingInteractions = sqliteTable(
   "pending_interactions",
@@ -1359,4 +1812,36 @@ export const projectAttachmentBackfills = sqliteTable(
     attemptedAt: integer("attempted_at").notNull(),
     error: text("error"),
   },
+);
+
+export const managedPreviews = sqliteTable(
+  "managed_previews",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    environmentId: text("environment_id")
+      .notNull()
+      .references(() => environments.id, { onDelete: "cascade" }),
+    hostId: text("host_id")
+      .notNull()
+      .references(() => hosts.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    endpoint: text("endpoint").notNull(),
+    cwd: text("cwd").notNull(),
+    argv: text("argv", { mode: "json" }).$type<string[]>().notNull(),
+    readinessPath: text("readiness_path").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("managed_previews_environment_endpoint_idx").on(
+      table.environmentId,
+      table.endpoint,
+    ),
+    index("managed_previews_thread_idx").on(table.threadId),
+  ],
 );

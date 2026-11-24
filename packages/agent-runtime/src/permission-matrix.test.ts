@@ -6,7 +6,7 @@ import {
   permissionEscalationValues,
   permissionModeValues,
   runtimePermissionPolicySchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   ApprovalPendingInteractionPayload,
   PendingInteractionApprovalDecision,
@@ -14,13 +14,13 @@ import type {
   PermissionEscalation,
   PermissionMode,
   RuntimePermissionPolicy,
-} from "@bb/domain";
-import { bridgeCapabilitiesSchema } from "@bb/provider-bridge-protocol";
+} from "@omnyo/domain";
+import { bridgeCapabilitiesSchema } from "@omnyo/provider-bridge-protocol";
 import {
   parseJsonRpcLine,
   shouldAutoDenyInteractiveRequest,
-} from "@bb/provider-bridge-protocol/bridge-kit";
-import type { JsonRpcMessage } from "@bb/provider-bridge-protocol/bridge-kit";
+} from "@omnyo/provider-bridge-protocol/bridge-kit";
+import type { JsonRpcMessage } from "@omnyo/provider-bridge-protocol/bridge-kit";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
@@ -39,6 +39,7 @@ const POLICY_KEYS = [
   "auto/deny",
   "full/-",
 ] as const;
+
 type PolicyKey = (typeof POLICY_KEYS)[number];
 
 const SUBJECT_KINDS = [
@@ -48,12 +49,15 @@ const SUBJECT_KINDS = [
   "plan",
   "tool_use",
 ] as const;
+
 type SubjectKind = (typeof SUBJECT_KINDS)[number];
 
 const ENFORCERS = ["runtime", "provider"] as const;
+
 type Enforcer = (typeof ENFORCERS)[number];
 
 const DENY_AVAILABILITY = ["deny-available", "deny-unavailable"] as const;
+
 type DenyAvailability = (typeof DENY_AVAILABILITY)[number];
 
 type CellKey = `${PolicyKey}|${SubjectKind}|${Enforcer}|${DenyAvailability}`;
@@ -168,26 +172,34 @@ type SameUnion<A, B> = [A] extends [B]
     ? true
     : false
   : false;
+
 const policyKeyCoversPolicyUnion: SameUnion<
   PolicyKey,
   | `${Extract<RuntimePermissionPolicy, { permissionEscalation: PermissionEscalation }>["permissionMode"]}/${PermissionEscalation}`
   | `${Extract<RuntimePermissionPolicy, { permissionEscalation: null }>["permissionMode"]}/-`
 > = true;
+
 const subjectKindCoversUnion: SameUnion<
   SubjectKind,
   PendingInteractionApprovalSubject["kind"]
 > = true;
+
 const enforcerCoversUnion: SameUnion<
   Enforcer,
   BridgeProtocolAdapter["approvalEnforcedBy"]
 > = true;
+
 const permissionModeCoversUnion: SameUnion<
   PolicyKey extends `${infer Mode}/${string}` ? Mode : never,
   PermissionMode
 > = true;
+
 void policyKeyCoversPolicyUnion;
+
 void subjectKindCoversUnion;
+
 void enforcerCoversUnion;
+
 void permissionModeCoversUnion;
 
 function policyFor(key: PolicyKey): RuntimePermissionPolicy {
@@ -288,19 +300,24 @@ function adapterFor(enforcer: Enforcer): BridgeProtocolAdapter {
     additionalWorkspaceWriteRoots: [],
     bridgeLaunch: createScriptedEchoLaunch(),
   });
+
   const [initialize] = adapter.buildPostInitializeRequests();
+
   if (initialize === undefined) {
     throw new Error("bridge adapter exposes no initialize handshake");
   }
+
   initialize.onResult({
     protocolVersion: 2,
     capabilities: { grammarVersions: [3, 3], approvalEnforcedBy: enforcer },
   });
+
   if (adapter.approvalEnforcedBy !== enforcer) {
     throw new Error(
       `handshake did not set approvalEnforcedBy=${enforcer} (got ${adapter.approvalEnforcedBy})`,
     );
   }
+
   return adapter;
 }
 
@@ -325,6 +342,7 @@ const jsonRpcResponseSchema = z.union([
   z.object({ result: z.object({ decision: z.string() }).passthrough() }),
   z.object({ error: z.object({ message: z.string() }).passthrough() }),
 ]);
+
 type JsonRpcResponse = z.infer<typeof jsonRpcResponseSchema>;
 
 interface CellResult {
@@ -342,31 +360,38 @@ function startEchoChild(): EchoChild {
     "-e",
     "process.stdin.pipe(process.stdout)",
   ]);
+
   if (!child.stdout) {
     throw new Error("echo child has no stdout");
   }
+
   const lines: string[] = [];
   const waiters: Array<(line: string) => void> = [];
   readline.createInterface({ input: child.stdout }).on("line", (line) => {
     const waiter = waiters.shift();
+
     if (waiter) {
       waiter(line);
     } else {
       lines.push(line);
     }
   });
+
   return {
     child,
     nextLine: () => {
       const queued = lines.shift();
+
       if (queued !== undefined) {
         return Promise.resolve(queued);
       }
+
       return new Promise((resolve, reject) => {
         const timer = setTimeout(
           () => reject(new Error("no JSON-RPC response within 5s")),
           5_000,
         );
+
         waiters.push((line) => {
           clearTimeout(timer);
           resolve(line);
@@ -385,14 +410,17 @@ async function runCell(
   availability: DenyAvailability,
 ): Promise<CellResult> {
   const payload = buildPayload(kind, availability);
+
   const onInteractiveRequest = vi.fn(async () => ({
     decision: "allow_once" as const,
     grantedPermissions: null,
   }));
+
   const executionOptions: AgentRuntimeExecutionOptions = {
     ...fullRuntimeOptions,
     ...policyFor(policyKey),
   };
+
   const rawRequest = interactionRequest(requestId, payload);
   handleRuntimeProviderRequest({
     toolCalls: new RuntimeToolCalls(),
@@ -414,9 +442,11 @@ async function runCell(
     resolveThreadId: () => "thread-1",
   });
   const parsed = parseJsonRpcLine((await echo.nextLine()).trim());
+
   if (parsed.kind !== "response") {
     throw new Error(`expected a JSON-RPC response, got ${parsed.kind}`);
   }
+
   return {
     forwarded: onInteractiveRequest.mock.calls.length,
     response: jsonRpcResponseSchema.parse(parsed.parsed),
@@ -425,6 +455,7 @@ async function runCell(
 
 function classify(result: CellResult): Outcome {
   const { response } = result;
+
   if ("error" in response) {
     if (
       response.error.message.includes(
@@ -433,15 +464,20 @@ function classify(result: CellResult): Outcome {
     ) {
       return "encode-error";
     }
+
     throw new Error(`unexpected JSON-RPC error: ${response.error.message}`);
   }
+
   const { decision } = response.result;
+
   if (decision === "deny" && result.forwarded === 0) {
     return "auto-deny";
   }
+
   if (decision === "allow_once" && result.forwarded === 1) {
     return "forward";
   }
+
   throw new Error(
     `unclassifiable response ${JSON.stringify(response.result)} (forwarded ${result.forwarded})`,
   );
@@ -467,6 +503,7 @@ describe("permission decision matrix", () => {
         `subject kind ${kind}`,
       ).toBe(true);
     }
+
     expect(
       bridgeCapabilitiesSchema.shape.approvalEnforcedBy.def.innerType.options,
     ).toEqual([...ENFORCERS]);
@@ -487,6 +524,7 @@ describe("permission decision matrix", () => {
       ...permissionEscalationValues,
       null,
     ];
+
     expect(
       escalations.map((permissionEscalation) => [
         permissionEscalation,
@@ -515,6 +553,7 @@ describe("permission decision matrix", () => {
       "%s × %s × %s × %s",
       async (policyKey, kind, enforcer, availability) => {
         const key: CellKey = `${policyKey}|${kind}|${enforcer}|${availability}`;
+
         const result = await runCell(
           echo,
           nextRequestId++,
@@ -523,6 +562,7 @@ describe("permission decision matrix", () => {
           enforcer,
           availability,
         );
+
         expect(classify(result)).toBe(EXPECTED[key]);
       },
     );

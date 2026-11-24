@@ -1,5 +1,6 @@
 {
-  "name": "@bb/sdk",
+  "name": "@omnyo/sdk",
+  "private": true,
   "version": "0.0.1",
   "type": "module",
   "exports": {
@@ -16,6 +17,12 @@
       "types": "./src/core.ts",
       "import": "./dist/core.js",
       "default": "./dist/core.js"
+    },
+    "./explore": {
+      "source": "./src/explore.ts",
+      "types": "./src/explore.ts",
+      "import": "./dist/explore.js",
+      "default": "./dist/explore.js"
     },
     "./browser": {
       "source": "./src/browser.ts",
@@ -44,21 +51,21 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
-    "@bb/config": "workspace:*",
-    "@bb/core-ui": "workspace:*",
-    "@bb/domain": "workspace:*",
-    "@bb/host-daemon-contract": "workspace:*",
-    "@bb/server-contract": "workspace:*",
-    "@bb/templates": "workspace:*",
+    "@omnyo/config": "workspace:*",
+    "@omnyo/core-ui": "workspace:*",
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/host-daemon-contract": "workspace:*",
+    "@omnyo/server-contract": "workspace:*",
+    "@omnyo/templates": "workspace:*",
     "ws": "^8.19.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^4.1.1"
+    "vitest": "4.1.11"
   }
 }

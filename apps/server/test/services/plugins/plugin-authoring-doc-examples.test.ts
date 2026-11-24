@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const SKILL_ROOT = fileURLToPath(
   new URL(
-    "../../../../../plugins/bb-guide/skills/bb-plugin-authoring/",
+    "../../../../../plugins/omnyo-guide/skills/omnyo-plugin-authoring",
     import.meta.url,
   ),
 );
@@ -18,13 +18,16 @@ function readSkillTree(directory = SKILL_ROOT): string {
     .sort((left, right) => left.name.localeCompare(right.name))
     .flatMap((entry) => {
       const entryPath = join(directory, entry.name);
+
       if (entry.isDirectory()) return readSkillTree(entryPath);
+
       return entry.name.endsWith(".md") ? readFileSync(entryPath, "utf8") : [];
     })
     .join("\n");
 }
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..", "..", "..");
+
 const pluginSdkEntry = join(
   repoRoot,
   "packages",
@@ -32,6 +35,7 @@ const pluginSdkEntry = join(
   "src",
   "index.ts",
 );
+
 const tsc = join(repoRoot, "node_modules", "typescript-7", "bin", "tsc");
 
 interface SdkReference {
@@ -45,8 +49,10 @@ interface SdkFence {
   line: number;
 }
 
-const SDK_CALL = /bb\.sdk\.([A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*)\s*\(/g;
-const SDK_CALL_IN_SOURCE = /bb\.sdk\.[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*\s*\(/;
+const SDK_CALL = /api\.sdk\.([A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*)\s*\(/g;
+
+const SDK_CALL_IN_SOURCE = /api\.sdk\.[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*\s*\(/;
+
 const TYPESCRIPT_FENCE = /```(?:ts|typescript)([^\n]*)\n([\s\S]*?)```/g;
 
 function skillLine(skill: string, index: number): number {
@@ -55,29 +61,37 @@ function skillLine(skill: string, index: number): number {
 
 function sdkReferences(skill: string): SdkReference[] {
   const found = new Map<string, SdkReference>();
+
   for (const match of skill.matchAll(SDK_CALL)) {
     const path = match[1];
+
     if (path === undefined) continue;
     found.set(path, { path, line: skillLine(skill, match.index) });
   }
+
   return [...found.values()];
 }
 
 function sdkFences(skill: string): SdkFence[] {
   const found: SdkFence[] = [];
+
   for (const match of skill.matchAll(TYPESCRIPT_FENCE)) {
     const [, rawMode, source] = match;
+
     if (source === undefined || !SDK_CALL_IN_SOURCE.test(source)) continue;
     const mode = rawMode?.trim() ?? "";
+
     if (mode !== "" && mode !== "create-thread-handler") {
       throw new Error(`Unsupported SDK example mode: ${mode}`);
     }
+
     found.push({
       mode: mode === "create-thread-handler" ? mode : "function",
       source,
       line: skillLine(skill, match.index),
     });
   }
+
   return found;
 }
 
@@ -93,15 +107,15 @@ function probeSource(
   fences: readonly SdkFence[],
 ): string {
   return [
-    `import type { BbPluginApi } from "@get-bb/plugin-sdk";`,
-    `type Sdk = BbPluginApi["sdk"];`,
+    `import type { PluginApi } from "@omnyo/plugin-sdk";`,
+    `type Sdk = PluginApi["sdk"];`,
     `type Callable = (...args: never[]) => unknown;`,
     `type AssertCallable<F extends Callable> = F;`,
     ...references.map(
       (reference) =>
         `type SdkReferenceAtLine${reference.line} = AssertCallable<Sdk${typeIndex(reference.path)}>;`,
     ),
-    `declare const bb: BbPluginApi;`,
+    `declare const api: PluginApi;`,
     `type SpawnArgs = Parameters<Sdk["threads"]["spawn"]>[0];`,
     `declare const projectId: SpawnArgs["projectId"];`,
     `declare const threadId: Parameters<Sdk["threads"]["get"]>[0]["threadId"];`,
@@ -131,16 +145,16 @@ const PROBE_TSCONFIG = {
     noEmit: true,
     skipLibCheck: true,
     types: [],
-    paths: { "@get-bb/plugin-sdk": [pluginSdkEntry] },
+    paths: { "@omnyo/plugin-sdk": [pluginSdkEntry] },
   },
   files: ["probe.ts"],
 };
 
-describe("bb-plugin-authoring skill examples", () => {
+describe("omnyo-plugin-authoring skill examples", () => {
   let workDir: string;
 
   beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-doc-examples-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-doc-examples-"));
   });
 
   afterEach(async () => {
@@ -168,6 +182,7 @@ describe("bb-plugin-authoring skill examples", () => {
     const result = spawnSync(process.execPath, [tsc, "--project", workDir], {
       encoding: "utf8",
     });
+
     if (result.error !== undefined) throw result.error;
     expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
   }, 60_000);

@@ -4,34 +4,61 @@ import {
   useRealtime,
   useRpc,
   type StandardSchemaV1InferOutput,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { MAX_LIMIT_VALUE, parseLimitValue } from "./limits.js";
+import {
+  formatNeed,
+  hostSetting,
+  NEED_TOKENS,
+  parseNeedToken,
+  type Need,
+} from "./overflow.js";
 import type { concurrencyLimitRpcContract } from "./server.js";
 
 type ConfigurationView = StandardSchemaV1InferOutput<
   (typeof concurrencyLimitRpcContract)["getConfiguration"]["output"]
 >;
+
 type ConfigurationInput = Pick<
   ConfigurationView,
-  "globalLimit" | "hostOverrides"
+  "globalLimit" | "hostOverrides" | "overflow"
 >;
+
+type HostView = ConfigurationView["hosts"][number];
+
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 const CONFIGURATION_CHANGED_CHANNEL = "configuration-changed";
+
 const GLOBAL_FIELD = "global";
+
+const NEEDS_FIELD_PREFIX = "needs:";
+
+const OS_LABELS = { macos: "macOS", windows: "Windows", linux: "Linux" };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function needsText(needs: readonly Need[] | null): string {
+  return needs === null ? "" : needs.map(formatNeed).join(", ");
 }
 
 function draftsFor(view: ConfigurationView): Record<string, string> {
   const drafts: Record<string, string> = {
     [GLOBAL_FIELD]: view.globalLimit === null ? "" : String(view.globalLimit),
   };
+
   for (const host of view.hosts) {
     drafts[host.id] = host.override === null ? "" : String(host.override);
   }
+
+  for (const project of view.projects) {
+    drafts[`${NEEDS_FIELD_PREFIX}${project.id}`] = needsText(project.needs);
+  }
+
   return drafts;
 }
 
@@ -39,9 +66,54 @@ function parseDraft(
   raw: string,
 ): { ok: true; value: number | null } | { ok: false } {
   const trimmed = raw.trim();
+
   if (trimmed === "") return { ok: true, value: null };
   const value = parseLimitValue(trimmed);
+
   return value === null ? { ok: false } : { ok: true, value };
+}
+
+function parseNeedsDraft(
+  raw: string,
+): { ok: true; value: Need[] | null } | { ok: false } {
+  const tokens = raw
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token) => token !== "");
+
+  if (tokens.length === 0) return { ok: true, value: null };
+  const needs: Need[] = [];
+
+  for (const token of tokens) {
+    const need = parseNeedToken(token);
+
+    if (need === null) return { ok: false };
+    needs.push(need);
+  }
+
+  return { ok: true, value: needs };
+}
+
+function describeHost(host: HostView): string {
+  const parts: string[] = [];
+
+  if (host.availableParallelism !== null) {
+    parts.push(`${host.availableParallelism} processors`);
+  }
+
+  if (host.facts !== null) {
+    parts.push(`${OS_LABELS[host.facts.os]} ${host.facts.arch}`);
+
+    if (host.facts.tools.xcode) parts.push("Xcode");
+
+    if (host.facts.tools.nvidiaGpu !== null) {
+      parts.push(host.facts.tools.nvidiaGpu);
+    }
+  }
+
+  if (host.status === "disconnected") parts.push("Offline");
+
+  return parts.length === 0 ? "Detecting processors…" : parts.join(" · ");
 }
 
 function ConcurrencyLimitSettings() {
@@ -79,6 +151,7 @@ function ConcurrencyLimitSettings() {
   useEffect(() => {
     activeRef.current = true;
     refetch();
+
     return () => {
       activeRef.current = false;
     };
@@ -89,8 +162,10 @@ function ConcurrencyLimitSettings() {
     savingRef.current = true;
     setSaveState("saving");
     setError(null);
+
     try {
       const saved = await rpc.call("setConfiguration", next);
+
       if (!activeRef.current) return;
       applyView(saved);
       setSaveState("saved");
@@ -103,42 +178,115 @@ function ConcurrencyLimitSettings() {
     }
   }
 
+  function current(): ConfigurationInput | null {
+    if (view === null) return null;
+
+    return {
+      globalLimit: view.globalLimit,
+      hostOverrides: view.hostOverrides,
+      overflow: view.overflow,
+    };
+  }
+
   function changeDraft(field: string, value: string): void {
-    setDrafts((current) => ({ ...current, [field]: value }));
+    setDrafts((existing) => ({ ...existing, [field]: value }));
+
     if (invalidField === field) setInvalidField(null);
   }
 
   function commitGlobal(): void {
-    if (view === null) return;
+    const base = current();
+
+    if (base === null) return;
     const parsed = parseDraft(drafts[GLOBAL_FIELD] ?? "");
+
     if (!parsed.ok) {
       setInvalidField(GLOBAL_FIELD);
+
       return;
     }
-    if (parsed.value === view.globalLimit) return;
-    void save({
-      globalLimit: parsed.value,
-      hostOverrides: view.hostOverrides,
-    });
+
+    if (parsed.value === base.globalLimit) return;
+    void save({ ...base, globalLimit: parsed.value });
   }
 
   function commitHost(hostId: string): void {
-    if (view === null) return;
+    const base = current();
+
+    if (base === null) return;
     const parsed = parseDraft(drafts[hostId] ?? "");
+
     if (!parsed.ok) {
       setInvalidField(hostId);
+
       return;
     }
-    const existing = view.hostOverrides.find(
+
+    const existing = base.hostOverrides.find(
       (override) => override.hostId === hostId,
     );
+
     if (parsed.value === (existing?.limit ?? null)) return;
-    const hostOverrides = view.hostOverrides.filter(
+
+    const hostOverrides = base.hostOverrides.filter(
       (override) => override.hostId !== hostId,
     );
+
     if (parsed.value !== null)
       hostOverrides.push({ hostId, limit: parsed.value });
-    void save({ globalLimit: view.globalLimit, hostOverrides });
+    void save({ ...base, hostOverrides });
+  }
+
+  function setOverflowEnabled(enabled: boolean): void {
+    const base = current();
+
+    if (base === null) return;
+    void save({ ...base, overflow: { ...base.overflow, enabled } });
+  }
+
+  function setTakesOverflow(hostId: string, takesOverflow: boolean): void {
+    const base = current();
+
+    if (base === null) return;
+    const setting = hostSetting(base.overflow, hostId);
+
+    const hosts = base.overflow.hosts.filter((host) => host.hostId !== hostId);
+
+    if (!takesOverflow || setting.tags.length > 0) {
+      hosts.push({ ...setting, takesOverflow });
+    }
+
+    void save({ ...base, overflow: { ...base.overflow, hosts } });
+  }
+
+  function commitNeeds(projectId: string): void {
+    const base = current();
+
+    if (base === null) return;
+    const field = `${NEEDS_FIELD_PREFIX}${projectId}`;
+    const parsed = parseNeedsDraft(drafts[field] ?? "");
+
+    if (!parsed.ok) {
+      setInvalidField(field);
+
+      return;
+    }
+
+    const existing =
+      base.overflow.projectNeeds.find((entry) => entry.projectId === projectId)
+        ?.needs ?? null;
+
+    if (needsText(parsed.value) === needsText(existing)) return;
+
+    const projectNeeds = base.overflow.projectNeeds.filter(
+      (entry) => entry.projectId !== projectId,
+    );
+
+    if (parsed.value !== null) {
+      projectNeeds.push({ projectId, needs: parsed.value });
+    }
+
+    void save({ ...base, overflow: { ...base.overflow, projectNeeds } });
   }
 
   if (view === null) {
@@ -157,7 +305,12 @@ function ConcurrencyLimitSettings() {
   }
 
   const disabled = saveState === "saving";
-  const validationMessage = `Use a whole number from 0 to ${MAX_LIMIT_VALUE}, or leave blank.`;
+  const overflowOn = view.overflow.enabled;
+
+  const validationMessage =
+    invalidField?.startsWith(NEEDS_FIELD_PREFIX) === true
+      ? `Use ${NEED_TOKENS}, separated by commas, or leave blank.`
+      : `Use a whole number from 0 to ${MAX_LIMIT_VALUE}, or leave blank.`;
 
   return (
     <div className="w-full space-y-5">
@@ -188,6 +341,24 @@ function ConcurrencyLimitSettings() {
         />
       </div>
 
+      <div className="flex items-start justify-between gap-6 border-t border-border/60 pt-4 pr-2">
+        <div className="min-w-0">
+          <h3 className="text-sm font-medium text-foreground">
+            Start waiting chats on a free machine
+          </h3>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Only new chats move, to a machine that meets the project's needs.
+          </p>
+        </div>
+        <Switch
+          checked={overflowOn}
+          size="default"
+          aria-label="Start waiting chats on a free machine"
+          disabled={disabled}
+          onCheckedChange={setOverflowEnabled}
+        />
+      </div>
+
       <div className="border-t border-border/60 pt-4">
         <h3 className="text-sm font-medium text-foreground">Host limits</h3>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
@@ -204,20 +375,14 @@ function ConcurrencyLimitSettings() {
               {view.hosts.map((host) => (
                 <div
                   key={host.id}
-                  className="flex min-h-14 items-center gap-3 rounded-md px-2 py-2 hover:bg-accent/50"
+                  className="flex min-h-14 items-center gap-3 rounded-md px-2 py-2"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-foreground">
                       {host.name}
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      {host.status === "disconnected"
-                        ? host.availableParallelism === null
-                          ? "Offline"
-                          : `${host.availableParallelism} processors · Offline`
-                        : host.availableParallelism === null
-                          ? "Detecting processors…"
-                          : `${host.availableParallelism} processors`}
+                    <div className="truncate text-xs text-muted-foreground">
+                      {describeHost(host)}
                     </div>
                   </div>
                   <Input
@@ -240,12 +405,62 @@ function ConcurrencyLimitSettings() {
                       if (event.key === "Enter") event.currentTarget.blur();
                     }}
                   />
+                  {overflowOn ? (
+                    <Switch
+                      checked={host.takesOverflow}
+                      size="default"
+                      aria-label={`${host.name} takes waiting chats from full machines`}
+                      disabled={disabled}
+                      onCheckedChange={(takesOverflow) =>
+                        setTakesOverflow(host.id, takesOverflow)
+                      }
+                    />
+                  ) : null}
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {overflowOn ? (
+        <div className="border-t border-border/60 pt-4">
+          <h3 className="text-sm font-medium text-foreground">Project needs</h3>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Blank keeps chats on machines with the same system.
+          </p>
+
+          <div className="ml-2 mt-2 space-y-1 border-l border-border/60 pl-2">
+            {view.projects.map((project) => {
+              const field = `${NEEDS_FIELD_PREFIX}${project.id}`;
+
+              return (
+                <div
+                  key={project.id}
+                  className="flex min-h-12 items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent/50"
+                >
+                  <div className="min-w-0 flex-1 truncate text-sm text-foreground">
+                    {project.name}
+                  </div>
+                  <Input
+                    aria-label={`${project.name} needs`}
+                    aria-invalid={invalidField === field}
+                    className="w-56 shrink-0"
+                    disabled={disabled}
+                    placeholder="Same system"
+                    value={drafts[field] ?? ""}
+                    onBlur={() => commitNeeds(project.id)}
+                    onChange={(event) => changeDraft(field, event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex min-h-5 justify-end" aria-live="polite">
         {invalidField !== null ? (

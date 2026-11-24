@@ -6,6 +6,7 @@ function editorWithText(
   options: { caret?: number; empty?: boolean } = {},
 ): Parameters<typeof findActiveTrigger>[0] {
   const caret = options.caret ?? text.length;
+
   return {
     state: {
       selection: {

@@ -1,6 +1,5 @@
 import { ApiError } from "../../errors.js";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
@@ -8,16 +7,20 @@ import {
   environmentVariables,
   type DbConnection,
   type DbQueryConnection,
-} from "@bb/db";
-import { readOrCreateSecretFile } from "@bb/secret-storage";
+} from "@omnyo/db";
+import {
+  readOrCreateSecretFile,
+  readSecretFile,
+  type SecretVault,
+} from "@omnyo/secret-storage";
 import {
   machineEnvironmentNameSchema,
   type MachineEnvironmentReplace,
   type MachineEnvironmentSet,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { runSerialized } from "../lib/async-deduper.js";
+import { MACHINE_ENVIRONMENT_KEY_FILE_NAME } from "../system/server-vault.js";
 
-const keyFile = "machine-environment-key";
 const encryptedSchema = z.object({
   encryptionVersion: z.union([z.literal(1), z.literal(2)]),
   projectId: z.string().nullable(),
@@ -25,7 +28,9 @@ const encryptedSchema = z.object({
   ciphertext: z.string(),
   note: z.string().nullable(),
 });
+
 type EncryptedVariable = z.infer<typeof encryptedSchema>;
+
 const locks = new WeakMap<DbConnection, Promise<unknown>>();
 
 function scope(projectId: string | null) {
@@ -34,21 +39,37 @@ function scope(projectId: string | null) {
     : eq(environmentVariables.projectId, projectId);
 }
 
-async function encryptionKey(dataDir: string, allowCreate: boolean) {
+async function readEncryptionKeyText(
+  vault: SecretVault,
+  allowCreate: boolean,
+): Promise<string | undefined> {
+  if (allowCreate)
+    return readOrCreateSecretFile(vault, {
+      fileName: MACHINE_ENVIRONMENT_KEY_FILE_NAME,
+      bytes: 32,
+      encoding: "hex",
+    });
+
+  return (
+    await readSecretFile(
+      vault,
+      join(vault.dataDir, MACHINE_ENVIRONMENT_KEY_FILE_NAME),
+    )
+  )?.trim();
+}
+
+async function encryptionKey(vault: SecretVault, allowCreate: boolean) {
   try {
-    const value = allowCreate
-      ? await readOrCreateSecretFile({
-          dataDir,
-          fileName: keyFile,
-          bytes: 32,
-          encoding: "hex",
-        })
-      : (await readFile(join(dataDir, keyFile), "utf8")).trim();
-    if (!/^[a-f0-9]{64}$/u.test(value)) throw new Error("Invalid key");
+    const value = await readEncryptionKeyText(vault, allowCreate);
+
+    if (value === undefined || !/^[a-f0-9]{64}$/u.test(value))
+      throw new Error("Invalid key");
+
     return Buffer.from(value, "hex");
-  } catch {
+  } catch (error) {
     throw new Error(
       "Machine environment encryption key is unavailable; restore it from backup.",
+      { cause: error },
     );
   }
 }
@@ -72,10 +93,12 @@ function encrypt(
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   cipher.setAAD(associatedData(row));
+
   const encrypted = Buffer.concat([
     cipher.update(input.value, "utf8"),
     cipher.final(),
   ]);
+
   return {
     encryptionVersion: row.encryptionVersion,
     projectId,
@@ -88,21 +111,25 @@ function encrypt(
 }
 
 export async function decryptMachineEnvironment(
-  dataDir: string,
+  vault: SecretVault,
   row: EncryptedVariable,
 ): Promise<string> {
-  const key = await encryptionKey(dataDir, false);
+  const key = await encryptionKey(vault, false);
+
   try {
     if (row.encryptionVersion === 1 && row.projectId !== null)
       throw new Error("Invalid legacy scope");
     const encrypted = Buffer.from(row.ciphertext, "base64");
+
     const cipher = createDecipheriv(
       "aes-256-gcm",
       key,
       encrypted.subarray(0, 12),
     );
+
     cipher.setAAD(associatedData(row));
     cipher.setAuthTag(encrypted.subarray(12, 28));
+
     return Buffer.concat([
       cipher.update(encrypted.subarray(28)),
       cipher.final(),
@@ -136,18 +163,19 @@ export function readMachineEnvironment(
     .map((row) => encryptedSchema.parse(row));
 }
 
-async function keyForWrite(db: DbConnection, dataDir: string) {
+async function keyForWrite(db: DbConnection, vault: SecretVault) {
   const existing = db
     .select({ id: environmentVariables.id })
     .from(environmentVariables)
     .limit(1)
     .get();
-  return encryptionKey(dataDir, existing === undefined);
+
+  return encryptionKey(vault, existing === undefined);
 }
 
 export function replaceMachineEnvironment(
   db: DbConnection,
-  dataDir: string,
+  vault: SecretVault,
   input: MachineEnvironmentReplace,
   projectId: string | null = null,
 ): Promise<void> {
@@ -155,25 +183,33 @@ export function replaceMachineEnvironment(
     const currentByName = new Map(
       readMachineEnvironment(db, projectId).map((row) => [row.name, row]),
     );
+
     const key = input.variables.some((variable) => variable.value !== null)
-      ? await keyForWrite(db, dataDir)
+      ? await keyForWrite(db, vault)
       : null;
+
     const replacements = input.variables.map((variable) => {
       if (variable.value !== null) {
         if (key === null) throw new Error("Missing machine environment key");
+
         return encrypt(key, { ...variable, value: variable.value }, projectId);
       }
+
       const existing = currentByName.get(variable.name);
+
       if (!existing)
         throw new ApiError(
           409,
           "invalid_request",
           `No saved value for ${variable.name}; reload settings and retry`,
         );
+
       return { ...existing, note: variable.note };
     });
+
     db.transaction((tx) => {
       tx.delete(environmentVariables).where(scope(projectId)).run();
+
       for (const row of replacements) save(tx, row);
     });
   });
@@ -181,12 +217,12 @@ export function replaceMachineEnvironment(
 
 export function setMachineEnvironmentVariable(
   db: DbConnection,
-  dataDir: string,
+  vault: SecretVault,
   input: MachineEnvironmentSet,
   projectId: string | null,
 ): Promise<void> {
   return runSerialized(locks, db, async () => {
-    const row = encrypt(await keyForWrite(db, dataDir), input, projectId);
+    const row = encrypt(await keyForWrite(db, vault), input, projectId);
     db.transaction((tx) => save(tx, row));
   });
 }

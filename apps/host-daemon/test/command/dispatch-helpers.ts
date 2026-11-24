@@ -8,30 +8,42 @@ import type {
   AgentRuntime,
   AgentRuntimeBridgeLaunch,
   AgentRuntimeProviderSession,
-} from "@bb/agent-runtime";
+} from "@omnyo/agent-runtime";
 import type {
   ClientTurnRequestId,
   AvailableModel,
   DynamicTool,
   GitHostPullRequest,
   PromptInput,
-} from "@bb/domain";
-import type { HostDaemonBridgeLaunch } from "@bb/host-daemon-contract";
-import { makeWorkspaceMergeBase, makeWorkspaceStatus } from "@bb/test-helpers";
+} from "@omnyo/domain";
+import type { HostDaemonBridgeLaunch } from "@omnyo/host-daemon-contract";
+import {
+  makeWorkspaceMergeBase,
+  makeWorkspaceStatus,
+} from "@omnyo/test-helpers";
 import type {
   HostWorkspace,
   ProvisionWorkspaceArgs,
   PullRequestActionOptions,
-} from "@bb/host-workspace";
+} from "@omnyo/host-workspace";
 import { RuntimeManager } from "../../src/runtime-manager.js";
 import type { CommandDispatchOptions } from "../../src/command-dispatch-support.js";
+import { WorkspaceReadCoalescer } from "../../src/workspace-read-coalescer.js";
+import type { EventSink } from "../../src/event-sink.js";
 import type { FetchProjectAttachment } from "../../src/project-attachments.js";
+import { IsolatedFilesystemMutator } from "../../src/workspace-read-client.js";
 
 const tempDirs: string[] = [];
+
+const openFilesystemMutators: IsolatedFilesystemMutator[] = [];
+
 const execFileAsync = promisify(execFile);
-export const noopEventSink: CommandDispatchOptions["eventSink"] = {
+
+export const noopEventSink: CommandDispatchOptions["eventSink"] &
+  Pick<EventSink, "markThrough"> = {
   emit: () => undefined,
   flush: async () => undefined,
+  markThrough: () => 0,
 };
 
 export const silentLogger: CommandDispatchOptions["logger"] = {
@@ -152,6 +164,7 @@ export function createFakeWorkspace(pathname: string) {
     pullRequestLookupError: null,
     pullRequestLookupShellPath: undefined,
   };
+
   const workspace: FakeHostWorkspace = {
     path: pathname,
     isGitRepo: true,
@@ -189,6 +202,7 @@ export function createFakeWorkspace(pathname: string) {
     },
     async getStatus(options?: { mergeBaseBranch?: string }) {
       state.statusReads += 1;
+
       return makeWorkspaceStatus({
         mergeBase: options?.mergeBaseBranch
           ? makeWorkspaceMergeBase({
@@ -206,6 +220,7 @@ export function createFakeWorkspace(pathname: string) {
         | { type: "commit"; sha: string };
     }) {
       state.lastDiffTarget = options?.target;
+
       return {
         diff: "",
         truncated: false,
@@ -227,12 +242,14 @@ export function createFakeWorkspace(pathname: string) {
     },
     async getPullRequest(options) {
       state.pullRequestLookupShellPath = options?.shellPath;
+
       if (state.pullRequestLookupError !== null) {
         return {
           outcome: "unavailable" as const,
           message: state.pullRequestLookupError,
         };
       }
+
       return state.pullRequest === null
         ? { outcome: "none" as const }
         : { outcome: "found" as const, pullRequest: state.pullRequest };
@@ -243,6 +260,7 @@ export function createFakeWorkspace(pathname: string) {
     },
     async commit(options: { message: string; noVerify: boolean }) {
       state.lastCommitMessage = options.message;
+
       return {
         commitSha: "commit-1",
         commitSubject: options.message,
@@ -284,12 +302,16 @@ export function createFakeRuntime() {
     unarchivedProviderThreadId: undefined,
     unarchivedThreadId: undefined,
   };
+
   const activeTurnsByThreadId = new Map<string, string>();
+
   const providerSessionsByThreadId = new Map<
     string,
     AgentRuntimeProviderSession
   >();
+
   let nextTurnNumber = 1;
+
   const threadControls: FakeRuntimeThreadControls = {
     clearProviderSession(threadId) {
       providerSessionsByThreadId.delete(threadId);
@@ -304,12 +326,14 @@ export function createFakeRuntime() {
           providerThreadId: `provider-${threadId}`,
         });
       }
+
       activeTurnsByThreadId.set(threadId, turnId);
     },
     setProviderSession(threadId, session) {
       providerSessionsByThreadId.set(threadId, session);
     },
   };
+
   const runtime: AgentRuntime = {
     async ensureProvider() {},
     async startThread(args) {
@@ -323,9 +347,11 @@ export function createFakeRuntime() {
         providerId: args.providerId,
         providerThreadId: `provider-${args.threadId}`,
       });
+
       if (args.input && args.input.length > 0) {
         activeTurnsByThreadId.set(args.threadId, `turn-${nextTurnNumber++}`);
       }
+
       return { providerThreadId: `provider-${args.threadId}` };
     },
     async prepareThreadRewind(args) {
@@ -339,12 +365,15 @@ export function createFakeRuntime() {
       state.resumedEnvironmentId = args.environmentId;
       state.resumedThreadId = args.threadId;
       state.resumedProviderThreadId = args.providerThreadId;
+
       const providerThreadId =
         args.providerThreadId ?? `provider-${args.threadId}`;
+
       providerSessionsByThreadId.set(args.threadId, {
         providerId: args.providerId,
         providerThreadId,
       });
+
       return { providerThreadId };
     },
     async runTurn(args) {
@@ -354,19 +383,24 @@ export function createFakeRuntime() {
       state.ranTurnClientRequestId = args.clientRequestId;
       state.ranTurnInput = args.input;
       activeTurnsByThreadId.set(args.threadId, `turn-${nextTurnNumber++}`);
+
+      return { status: "started" };
     },
     async steerTurn(args) {
       state.steeredTurnId = args.expectedTurnId;
       state.steeredClientRequestId = args.clientRequestId;
       state.steeredTurnInstructions = args.instructions;
+
       return { status: "steered" };
     },
     async stopThread(args) {
       state.stoppedThreadId = args.threadId;
       activeTurnsByThreadId.delete(args.threadId);
       providerSessionsByThreadId.delete(args.threadId);
+
       return { providerCheckpointId: null };
     },
+    async setThreadSpeed() {},
     async clearThreadGoal() {
       return { cleared: true };
     },
@@ -400,7 +434,7 @@ export function createFakeRuntime() {
       return providerSessionsByThreadId.get(threadId) ?? null;
     },
     async reapIdleProviderSessions() {
-      return { reapedSessions: [] };
+      return { reapedSessions: [], retainedSessions: [] };
     },
     hasThread(threadId) {
       return providerSessionsByThreadId.has(threadId);
@@ -410,6 +444,9 @@ export function createFakeRuntime() {
     },
     hasOpenBackgroundWork() {
       return false;
+    },
+    listOpenBackgroundWork() {
+      return [];
     },
     async listModels() {
       return {
@@ -451,21 +488,28 @@ export function createHarness(
   const { workspace, state: workspaceState } = createFakeWorkspace(
     args.workspacePath ?? "/tmp/env-1",
   );
+
   workspace.getCurrentBranch = async () => args.currentBranch ?? "main";
   workspace.isWorktree = args.isWorktree ?? false;
   let provisionedWorkspace: HostWorkspace = workspace;
   const { runtime, state: runtimeState, threadControls } = createFakeRuntime();
   const provisions: ProvisionWorkspaceArgs[] = [];
+  const filesystemMutators = new Map<string, IsolatedFilesystemMutator>();
+
   const manager = new RuntimeManager({
     provisionWorkspace: async (options) => {
       provisions.push(options);
+
       if ("path" in options && options.path !== workspace.path) {
         return createFakeWorkspace(options.path).workspace;
       }
+
       return provisionedWorkspace;
     },
     createRuntime: () => runtime,
   });
+
+  const workspaceReads = createTestWorkspaceReads(manager);
 
   return {
     manager,
@@ -481,19 +525,40 @@ export function createHarness(
     dispatchOptions(
       overrides: { dataDir?: string; threadStorageRootPath?: string } = {},
     ): CommandDispatchOptions {
+      const dataDir = overrides.dataDir ?? DISPATCH_TEST_DATA_DIR;
+      let filesystemMutator = filesystemMutators.get(dataDir);
+
+      if (filesystemMutator === undefined) {
+        filesystemMutator = new IsolatedFilesystemMutator({ dataDir });
+        filesystemMutators.set(dataDir, filesystemMutator);
+        openFilesystemMutators.push(filesystemMutator);
+      }
+
       return {
-        dataDir: overrides.dataDir ?? DISPATCH_TEST_DATA_DIR,
+        dataDir,
         logger: silentLogger,
         eventSink: noopEventSink,
         fetchProjectAttachment: unexpectedProjectAttachmentFetch,
         fetchPluginHostArtifact: fetchDispatchTestArtifact,
         ...unexpectedProviderMaintenance,
+        filesystemMutator,
         runtimeManager: manager,
+        workspaceReads,
         threadStorageRootPath:
-          overrides.threadStorageRootPath ?? "/tmp/bb-test-thread-storage",
+          overrides.threadStorageRootPath ?? "/tmp/omnyo-test-thread-storage",
       };
     },
   };
+}
+
+export function createTestWorkspaceReads(
+  runtimeManager: RuntimeManager,
+): WorkspaceReadCoalescer {
+  return new WorkspaceReadCoalescer({
+    now: Date.now,
+    environmentPath: (environmentId) => runtimeManager.get(environmentId)?.path,
+    realpath: (workspacePath) => fs.realpath(workspacePath),
+  });
 }
 
 export function makeDispatchOptions(
@@ -507,7 +572,8 @@ export function makeDispatchOptions(
     fetchProjectAttachment: unexpectedProjectAttachmentFetch,
     fetchPluginHostArtifact: fetchDispatchTestArtifact,
     ...unexpectedProviderMaintenance,
-    threadStorageRootPath: "/tmp/bb-test-thread-storage",
+    threadStorageRootPath: "/tmp/omnyo-test-thread-storage",
+    workspaceReads: createTestWorkspaceReads(overrides.runtimeManager),
     ...overrides,
   };
 }
@@ -515,6 +581,7 @@ export function makeDispatchOptions(
 export async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -526,6 +593,9 @@ export async function runGitCommand(
 }
 
 export async function cleanupTempDirs(): Promise<void> {
+  await Promise.all(
+    openFilesystemMutators.splice(0).map((mutator) => mutator.dispose()),
+  );
   await Promise.all(
     tempDirs.splice(0).map((dir) =>
       fs.rm(dir, {
@@ -541,10 +611,12 @@ export async function cleanupTempDirs(): Promise<void> {
 export const DISPATCH_TEST_ARTIFACT_BYTES = Buffer.from(
   "export const bridge = true;\n",
 );
+
 const DISPATCH_TEST_ARTIFACT_DIGEST = createHash("sha256")
   .update(DISPATCH_TEST_ARTIFACT_BYTES)
   .digest("hex");
-const DISPATCH_TEST_DATA_DIR = "/tmp/bb-test-data";
+
+const DISPATCH_TEST_DATA_DIR = "/tmp/omnyo-test-data";
 
 export const fetchDispatchTestArtifact = async (): Promise<Uint8Array> =>
   new Uint8Array(DISPATCH_TEST_ARTIFACT_BYTES);

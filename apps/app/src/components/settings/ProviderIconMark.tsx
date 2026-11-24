@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import type { ProviderInfo } from "@bb/domain";
+import type { ProviderInfo } from "@omnyo/domain";
 import { getProviderIconTintStyle } from "@/lib/provider-icon";
 
 interface ProviderIconMarkProps {
@@ -14,9 +14,11 @@ export function ProviderIconMark({
   className,
 }: ProviderIconMarkProps) {
   const tintStyle = getProviderIconTintStyle(provider);
+
   if (tintStyle === undefined) {
     return <Mark className={className} />;
   }
+
   return (
     <span
       className="contents"

@@ -6,6 +6,7 @@ export function BackToAppCommandHandler({ routePath }: { routePath: string }) {
 
   useAppCommandHandler("app.back", () => {
     void navigate(routePath);
+
     return true;
   });
 

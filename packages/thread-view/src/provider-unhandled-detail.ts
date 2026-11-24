@@ -1,4 +1,4 @@
-import type { ProviderUnhandledEvent } from "@bb/domain";
+import type { ProviderUnhandledEvent } from "@omnyo/domain";
 
 const HUMANIZED_EVENT_TOKEN_MAP: Record<string, string> = {
   api: "API",
@@ -21,9 +21,11 @@ function splitCamelCaseToken(token: string): string[] {
 function humanizeEventToken(token: string): string {
   const normalized = token.toLowerCase();
   const mapped = HUMANIZED_EVENT_TOKEN_MAP[normalized];
+
   if (mapped) {
     return mapped;
   }
+
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
@@ -32,6 +34,7 @@ function humanizeRawType(rawType: string): string {
     .split(/[:/._-]+/u)
     .flatMap((token) => splitCamelCaseToken(token))
     .filter((token) => token.length > 0);
+
   return tokens.map((token) => humanizeEventToken(token)).join(" ");
 }
 

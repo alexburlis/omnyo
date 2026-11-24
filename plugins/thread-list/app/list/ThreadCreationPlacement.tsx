@@ -18,6 +18,7 @@ export function ThreadCreationPlacementScope({
 
 export function useThreadCreationPlacement(sectionWhenUnpinned: string | null) {
   const group = useContext(PlacementGroupContext);
+
   return {
     pinned: group === "pinned",
     sectionId:

@@ -65,4 +65,30 @@ describe("ThreadMachineStatusBanner", () => {
     expect(screen.getByRole("status").textContent).toBe(status);
     expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
   });
+
+  it("names a failed resume and keeps the reason visible beside Try again", () => {
+    const onResume = vi.fn();
+    render(
+      <ThreadMachineStatusBanner
+        host={{
+          name: "Modal sandbox ugxe6e",
+          type: "ephemeral",
+          machineProviderId: provider.id,
+        }}
+        provider={provider}
+        phase="suspended"
+        error="Modal is temporarily unavailable."
+        onResume={onResume}
+      />,
+    );
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "Couldn’t resume the machine",
+    );
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Modal is temporarily unavailable.",
+    );
+    screen.getByRole("button", { name: "Try again" }).click();
+    expect(onResume).toHaveBeenCalledTimes(1);
+  });
 });

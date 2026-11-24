@@ -42,7 +42,7 @@ describe("ThreadPromptModeCard", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "Plan" }).textContent,
+      screen.getByRole("button", { name: /^Plan mode/ }).textContent,
     ).not.toContain("inspect the failing command");
   });
 
@@ -75,9 +75,11 @@ describe("ThreadPromptModeCard", () => {
     );
 
     const exit = screen.getByRole("button", { name: "Exit plan mode" });
+
     const controls = screen.getByRole("group", {
       name: "Plan mode controls",
     });
+
     expect(exit.parentElement).toBe(controls);
     expect(exit.hasAttribute("disabled")).toBe(true);
     expect(screen.getByLabelText("Prompt mode")).not.toBeNull();

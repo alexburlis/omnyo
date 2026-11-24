@@ -23,17 +23,21 @@ function shellProgramName(shell: string): string {
   const basename = shell.includes("\\")
     ? path.win32.basename(shell)
     : path.posix.basename(shell);
+
   return basename.toLowerCase().replace(/\.exe$/u, "");
 }
 
 export function terminalShellKind(shell: string): TerminalShellKind {
   const programName = shellProgramName(shell);
+
   if (programName === "pwsh" || programName === "powershell") {
     return "powershell";
   }
+
   if (programName === "cmd") {
     return "cmd";
   }
+
   return "posix";
 }
 
@@ -42,7 +46,9 @@ const POWERSHELL_EXIT_CODE_SUFFIX =
 
 function quotePosixArgument(value: string): string {
   if (value.length === 0) return "''";
+
   if (/^[A-Za-z0-9_@%+=:,./-]+$/u.test(value)) return value;
+
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
@@ -52,6 +58,7 @@ function quotePowerShellArgument(value: string): string {
 
 function quoteCmdArgument(value: string): string {
   if (/^[A-Za-z0-9_@+=:,.\\/-]+$/u.test(value)) return value;
+
   return `"${value.replaceAll('"', '""')}"`;
 }
 
@@ -62,6 +69,7 @@ export function terminalStartCommandText(
   if (start.mode === "command") {
     return start.command;
   }
+
   switch (kind) {
     case "powershell":
       return `& ${start.argv.map(quotePowerShellArgument).join(" ")}`;
@@ -77,10 +85,13 @@ export function terminalShellArgs(args: {
   start: TerminalShellStart;
 }): string[] {
   const kind = terminalShellKind(args.shell);
+
   if (args.start.mode === "shell") {
     return kind === "powershell" ? ["-NoLogo"] : [];
   }
+
   const commandText = terminalStartCommandText(kind, args.start);
+
   switch (kind) {
     case "powershell":
       return [
@@ -99,6 +110,7 @@ export function terminalShellTitle(shell: string): string {
   const basename = shell.includes("\\")
     ? path.win32.basename(shell)
     : path.posix.basename(shell);
+
   return basename.replace(/\.exe$/iu, "") || "Terminal";
 }
 
@@ -106,26 +118,34 @@ export async function resolveWindowsTerminalShell(
   args: ResolveWindowsTerminalShellArgs,
 ): Promise<string> {
   const searchPath = args.env.PATH ?? args.env.Path ?? "";
+
   for (const directory of searchPath.split(path.win32.delimiter)) {
     if (directory.length === 0) {
       continue;
     }
+
     const candidate = path.win32.join(directory, "pwsh.exe");
+
     if (await args.fileExists(candidate)) {
       return candidate;
     }
   }
+
   const systemRoot = args.env.SystemRoot ?? args.env.SYSTEMROOT;
+
   if (systemRoot !== undefined && systemRoot.length > 0) {
     const windowsPowerShell = path.win32.join(
       systemRoot,
       WINDOWS_POWERSHELL_RELATIVE_PATH,
     );
+
     if (await args.fileExists(windowsPowerShell)) {
       return windowsPowerShell;
     }
   }
+
   const commandInterpreter = args.env.ComSpec ?? args.env.COMSPEC;
+
   return commandInterpreter !== undefined && commandInterpreter.length > 0
     ? commandInterpreter
     : "cmd.exe";

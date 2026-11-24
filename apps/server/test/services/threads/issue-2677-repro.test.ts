@@ -1,10 +1,10 @@
 import { and, eq } from "drizzle-orm";
-import { events, getThread } from "@bb/db";
-import { turnRequestEventDataSchema, turnScope } from "@bb/domain";
+import { events, getThread } from "@omnyo/db";
+import { turnRequestEventDataSchema, turnScope } from "@omnyo/domain";
 import {
   groupHostDaemonEvents,
   type HostDaemonEventEnvelope,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { describe, expect, it } from "vitest";
 import { queueChildThreadTurnNotificationBestEffort } from "../../../src/services/threads/child-thread-notifications.js";
 import { sendThreadMessage } from "../../../src/services/threads/thread-send.js";
@@ -38,34 +38,41 @@ function seedFamily(harness: TestAppHarness, suffix: string): FamilyFixture {
   const { host, session } = seedHostSession(harness.deps, {
     id: `host-${suffix}`,
   });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
   });
+
   const parent = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
     title: "Parent",
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     providerThreadId: `provider-parent-${suffix}`,
     threadId: parent.id,
   });
+
   const child = seedThread(harness.deps, {
     environmentId: environment.id,
     parentThreadId: parent.id,
     projectId: project.id,
     title: "Child",
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     providerThreadId: `provider-child-${suffix}`,
     threadId: child.id,
   });
+
   return {
     child,
     environment,
@@ -105,6 +112,7 @@ function parentSystemMessageKinds(
     .all()
     .flatMap((row) => {
       const data = turnRequestEventDataSchema.parse(JSON.parse(row.data));
+
       return data.initiator === "system" && data.systemMessageKind
         ? [data.systemMessageKind]
         : [];
@@ -128,12 +136,14 @@ describe("child outcome reconciliation", () => {
         thread: fixture.child,
         trigger: "user",
       });
+
       const queued = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "turn.submit" &&
           command.threadId === fixture.child.id,
       );
+
       if (queued.command.type !== "turn.submit") {
         throw new Error("Expected a turn submission");
       }
@@ -144,6 +154,7 @@ describe("child outcome reconciliation", () => {
       });
       expect(getThread(harness.db, fixture.child.id)?.status).toBe("active");
       const turnId = "turn-late-acceptance";
+
       const response = await postEventBatch({
         harness,
         sessionId: fixture.sessionId,
@@ -169,10 +180,11 @@ describe("child outcome reconciliation", () => {
           },
         ],
       });
+
       expect(response.status).toBe(200);
       expect(getThread(harness.db, fixture.child.id)?.status).toBe("active");
 
-      await flushChildThreadNotifications();
+      await flushChildThreadNotifications(harness);
 
       expect(getThread(harness.db, fixture.child.id)?.status).toBe("active");
       expect(parentSystemMessageKinds(harness, fixture.parent.id)).toEqual([]);
@@ -182,6 +194,7 @@ describe("child outcome reconciliation", () => {
   it("keeps one outcome when the same child is queued twice", async () => {
     await withChildThreadNotificationClock(async (harness) => {
       const fixture = seedFamily(harness, "duplicate");
+
       for (let index = 0; index < 2; index += 1) {
         await queueChildThreadTurnNotificationBestEffort(harness.deps, {
           childThread: fixture.child,
@@ -190,7 +203,7 @@ describe("child outcome reconciliation", () => {
         });
       }
 
-      await flushChildThreadNotifications();
+      await flushChildThreadNotifications(harness);
 
       expect(parentSystemMessageKinds(harness, fixture.parent.id)).toEqual([
         "child-failed",

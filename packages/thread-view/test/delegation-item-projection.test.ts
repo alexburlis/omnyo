@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import {
   createTimelineEventFactory,
   renderTimelineFixture,
@@ -22,6 +22,7 @@ function findDelegationRow(
     ) {
       return row;
     }
+
     if (row.kind === "turn" && row.children) {
       const nested = row.children.find(
         (child): child is TimelineDelegationRow =>
@@ -29,9 +30,11 @@ function findDelegationRow(
           child.workKind === "delegation" &&
           child.callId === callId,
       );
+
       if (nested) return nested;
     }
   }
+
   throw new Error(`no delegation row for ${callId}`);
 }
 
@@ -40,10 +43,12 @@ describe("delegation item projection", () => {
     "keeps %s child compactions inside the delegation and root compactions in the main feed",
     (mode) => {
       const event = createTimelineEventFactory({ threadId: "thread-1" });
+
       const childScope = {
         turnId: "child-turn",
         ...(mode === "inherited" ? {} : { parentToolCallId: "call-1" }),
       };
+
       const timeline = renderTimelineFixture({
         events: [
           event.turnStarted({ turnId: "parent-turn", createdAt: 0 }),
@@ -84,6 +89,7 @@ describe("delegation item projection", () => {
           turnMessageDetail: "full",
         },
       });
+
       const delegation = findDelegationRow(timeline.rows, "call-1");
       expect(delegation.childRows).toContainEqual(
         expect.objectContaining({
@@ -94,15 +100,18 @@ describe("delegation item projection", () => {
           completedAt: 5_000,
         }),
       );
+
       const rootRows = timeline.rows.flatMap((row) =>
         row.kind === "turn" ? (row.children ?? []) : [row],
       );
+
       const compactions = rootRows.filter(
         (row) =>
           row.kind === "system" &&
           row.systemKind === "operation" &&
           row.operationKind === "compaction",
       );
+
       expect(compactions).toHaveLength(1);
       expect(compactions[0]).toMatchObject({
         startedAt: 4_000,
@@ -113,6 +122,7 @@ describe("delegation item projection", () => {
 
   it("renders a delegation item as a delegation row with its child content nested", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "parent-turn", createdAt: 0 }),
@@ -167,6 +177,7 @@ describe("delegation item projection", () => {
         child.kind === "conversation" ? child.text : child.kind,
       ),
     ).toContain("README says hello.");
+
     const rootConversationTexts = timeline.rows.flatMap((row) =>
       row.kind === "turn"
         ? (row.children ?? []).flatMap((child) =>
@@ -176,11 +187,13 @@ describe("delegation item projection", () => {
           ? [row.text]
           : [],
     );
+
     expect(rootConversationTexts).not.toContain("README says hello.");
   });
 
   it("keeps a delegation pending across the settled parent turn", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderTimelineFixture({
       events: [
         event.turnStarted({ turnId: "parent-turn", createdAt: 0 }),
@@ -198,6 +211,7 @@ describe("delegation item projection", () => {
         turnMessageDetail: "full",
       },
     });
+
     expect(findDelegationRow(timeline.rows, "call-1")).toEqual(
       expect.objectContaining({
         status: "pending",
@@ -215,6 +229,7 @@ describe("delegation item projection", () => {
       const event = createTimelineEventFactory({ threadId: "thread-1" });
       const reviewer = { childRef: "reviewer", label: "/root/review" };
       const checker = { childRef: "checker", label: "/root/review/check" };
+
       const reviewerRound = (round: number, at: number) => [
         event.delegationStarted({
           turnId: "parent-turn",
@@ -265,6 +280,7 @@ describe("delegation item projection", () => {
           createdAt: at + 20,
         }),
       ];
+
       const timeline = renderTimelineFixture({
         events: [
           event.turnStarted({ turnId: "parent-turn", createdAt: 0 }),
@@ -304,11 +320,14 @@ describe("delegation item projection", () => {
       ): TimelineDelegationRow[] =>
         rows.flatMap((row) => {
           if (row.kind === "turn") return delegationRows(row.children ?? []);
+
           if (row.kind === "work" && row.workKind === "delegation") {
             return [row, ...delegationRows(row.childRows ?? [])];
           }
+
           return [];
         });
+
       expect(delegationRows(timeline.rows).map((row) => row.callId)).toEqual([
         "review",
         "check",
@@ -316,10 +335,12 @@ describe("delegation item projection", () => {
       expect(findDelegationRow(timeline.rows, "review")).toEqual(
         expect.objectContaining({ status, completedAt }),
       );
+
       const check = findDelegationRow(
         findDelegationRow(timeline.rows, "review").childRows ?? [],
         "check",
       );
+
       expect(check).toEqual(
         expect.objectContaining({
           status: "completed",

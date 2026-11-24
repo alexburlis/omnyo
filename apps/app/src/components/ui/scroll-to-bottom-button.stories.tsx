@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
+import { Button } from "@omnyo/shared-ui/button";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 import { ScrollToBottomButton } from "./scroll-to-bottom-button";
 
@@ -43,6 +44,36 @@ export function Overview() {
         <ButtonStage>
           <ScrollToBottomButton visible={false} active onClick={noop} />
         </ButtonStage>
+      </StoryRow>
+    </StoryCard>
+  );
+}
+
+export function ShowAndHide() {
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <StoryCard labelWidth="180px">
+      <StoryRow
+        label="toggle"
+        hint="Show rises 6 px and fades in over base on ease-out; hide fades and drops over fast."
+      >
+        <div className="flex items-end gap-4">
+          <ButtonStage>
+            <ScrollToBottomButton
+              visible={visible}
+              onClick={() => setVisible(false)}
+            />
+          </ButtonStage>
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="scroll-to-bottom-toggle"
+            onClick={() => setVisible((value) => !value)}
+          >
+            {visible ? "Hide" : "Show"}
+          </Button>
+        </div>
       </StoryRow>
     </StoryCard>
   );

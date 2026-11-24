@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { ProjectBranchesResponse } from "@bb/server-contract";
+import type { ProjectBranchesResponse } from "@omnyo/server-contract";
 import { readProjectBranchOptions } from "@/lib/project-branch-options";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -55,6 +55,7 @@ describe("useProjectSourceBranches", () => {
       () => useProjectSourceBranches("project-1", "host-1"),
       { wrapper },
     );
+
     await waitFor(() => {
       expect(readProjectBranchOptions).toHaveBeenCalledTimes(1);
     });
@@ -92,6 +93,7 @@ describe("useProjectSourceBranches", () => {
     const [query] = queryClient.getQueryCache().findAll({
       queryKey: projectSourceBranchesQueryKeyPrefix("project-1"),
     });
+
     expect(query?.options).toEqual(
       expect.objectContaining({
         refetchOnWindowFocus: false,
@@ -117,6 +119,7 @@ describe("useProjectSourceBranches", () => {
       () => useProjectSourceBranches("project-1", "host-1"),
       { wrapper },
     );
+
     await waitFor(() => {
       expect(result.current.isFetching).toBe(false);
     });
@@ -163,6 +166,7 @@ describe("useProjectSourceBranches", () => {
       () => useProjectSourceBranches("project-1", "host-1"),
       { wrapper },
     );
+
     await waitFor(() => {
       expect(readProjectBranchOptions).toHaveBeenCalledTimes(1);
     });
@@ -200,6 +204,7 @@ describe("useProjectSourceBranches", () => {
     const { wrapper } = createQueryClientTestHarness({
       queries: { retry: 1, retryDelay: 0 },
     });
+
     vi.mocked(readProjectBranchOptions).mockResolvedValueOnce(INITIAL_BRANCHES);
     vi.mocked(sdk.projects.branches)
       .mockRejectedValueOnce(new Error("Failed to fetch"))
@@ -212,6 +217,7 @@ describe("useProjectSourceBranches", () => {
       () => useProjectSourceBranches("project-1", "host-1"),
       { wrapper },
     );
+
     await waitFor(() => {
       expect(readProjectBranchOptions).toHaveBeenCalledTimes(1);
     });

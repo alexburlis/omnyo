@@ -4,7 +4,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getActiveSecondaryPanelTab } from "@bb/client-core";
+import { getActiveSecondaryPanelTab } from "@omnyo/client-core";
 import { useFixedPanelTabsState } from "@/lib/fixed-panel-tabs";
 import {
   createEmptyFixedPanelTabsState,
@@ -32,9 +32,9 @@ import {
 import { makeTerminalSession as terminalSession } from "@/test/fixtures/terminal-sessions";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 import {
-  createBbDesktopApi,
+  createOmnyoDesktopApi,
   createNoopDesktopBrowserApi,
-} from "@/test/bb-desktop-test-utils";
+} from "@/test/omnyo-desktop-test-utils";
 
 const syncMocks = vi.hoisted(() => ({
   scheduleLocalThreadTabsMigration: vi.fn(),
@@ -49,6 +49,7 @@ vi.mock("@/hooks/queries/thread-tabs-query", () => ({
 vi.mock("@/lib/thread-tabs-sync", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/lib/thread-tabs-sync")>();
+
   return {
     ...actual,
     hasPendingThreadTabsWrite: () => false,
@@ -89,6 +90,7 @@ function requirePluginPanelTab(
       `Expected an active plugin panel tab, got ${tab?.kind ?? "none"}`,
     );
   }
+
   return tab;
 }
 
@@ -102,7 +104,7 @@ afterEach(() => {
   syncMocks.scheduleLocalThreadTabsMigration.mockClear();
   syncMocks.scheduleThreadTabsPersistence.mockClear();
   syncMocks.useThreadTabs.mockClear();
-  delete window.bbDesktop;
+  delete window.omnyoDesktop;
 });
 
 describe("useThreadFileTabs recently closed tabs", () => {
@@ -112,9 +114,10 @@ describe("useThreadFileTabs recently closed tabs", () => {
       instanceId: "instance-1",
       generation: "generation-1",
     };
+
     const browser = createNoopDesktopBrowserApi();
     browser.getTarget = async () => desktopTarget;
-    window.bbDesktop = createBbDesktopApi(
+    window.omnyoDesktop = createOmnyoDesktopApi(
       {
         lastCheckedAt: null,
         latestVersion: null,
@@ -149,6 +152,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
         }),
       }),
     );
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId,
@@ -158,6 +162,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
         terminalSessions: undefined,
       }),
     );
+
     act(() => result.current.openTab({ kind: "new-tab" }));
     act(() => {
       result.current.closeTab("new-tab:new-tab:none");
@@ -184,6 +189,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       storageFiles: undefined,
       terminalSessions: undefined,
     };
+
     const useMixedHistory = () => {
       const details = usePluginDetailPanelState(
         params.panelStateId,
@@ -194,8 +200,10 @@ describe("useThreadFileTabs recently closed tabs", () => {
           fileOwnerThreadId: params.syncThreadId,
         }),
       );
+
       return { details, tabs: useThreadFileTabsWithActiveTab(params) };
     };
+
     const first = renderThreadHook(useMixedHistory);
     let browserId = "";
     act(() => {
@@ -324,9 +332,11 @@ describe("useThreadFileTabs recently closed tabs", () => {
       storageFiles: undefined,
       terminalSessions: undefined,
     };
+
     const rendered = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab(params),
     );
+
     let tabId = "";
     act(() => {
       tabId =
@@ -351,6 +361,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab(params),
     );
+
     act(() => {
       expect(result.current.reopenClosedTab()).toBe(true);
     });
@@ -428,6 +439,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
         terminalSessions: undefined,
       }),
     );
+
     const fileRequest = {
       kind: "workspace-file-preview" as const,
       tab: {
@@ -463,6 +475,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       ],
       truncated: false,
     };
+
     const { result, rerender } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: "recently-closed-storage",
@@ -570,12 +583,14 @@ describe("useThreadFileTabs recently closed tabs", () => {
 
   it("keeps an open storage tab when the inventory is truncated", () => {
     const threadId = "storage-truncated-open-tab";
+
     const storageTab = createThreadStorageFilePreviewFixedPanelTab({
       environmentId: "env_1",
       isPinned: false,
       tab: { lineRange: null, path: "after-page-one.md" },
       threadId,
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: storageTab.id,
@@ -584,6 +599,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
       },
       lastUsedAt: Date.now(),
     });
+
     window.localStorage.setItem(
       getFixedPanelTabsStateStorageKey({ threadId }),
       serializeFixedPanelTabsState({ state }),
@@ -648,6 +664,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
         projectHostId: "host_1",
         projectId: "proj_1",
       };
+
       const { result, rerender } = renderThreadHook(() =>
         useThreadFileTabs({
           panelStateId: `recently-closed-${dimension}`,
@@ -691,6 +708,7 @@ describe("useThreadFileTabs recently closed tabs", () => {
 
   it("restores the nearest history entry owned by the current context", () => {
     let environmentId = "env_1";
+
     const { result, rerender } = renderThreadHook(() =>
       useThreadFileTabs({
         panelStateId: "recently-closed-context-order",
@@ -781,12 +799,15 @@ describe("useThreadFileTabs terminal pruning", () => {
 
   it("drops terminal tabs whose sessions exited", async () => {
     const threadId = "terminal-prune-exited";
+
     const exitedTab = createTerminalFixedPanelTab({
       terminalId: "term_exited",
     });
+
     const runningTab = createTerminalFixedPanelTab({
       terminalId: "term_running",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: runningTab.id,
@@ -795,6 +816,7 @@ describe("useThreadFileTabs terminal pruning", () => {
       },
       lastUsedAt: Date.now(),
     });
+
     window.localStorage.setItem(
       getFixedPanelTabsStateStorageKey({ threadId }),
       serializeFixedPanelTabsState({ state }),
@@ -827,6 +849,7 @@ describe("useThreadFileTabs terminal pruning", () => {
 describe("useThreadFileTabs active owners", () => {
   it("restores a project opener from its persisted file source", () => {
     const panelStateId = "restored-project-file-opener";
+
     const openerTab = buildFileOpenerPanelTab(
       { id: "pdf", pluginId: "pdf-preview" },
       {
@@ -852,6 +875,7 @@ describe("useThreadFileTabs active owners", () => {
         threadId: null,
       },
     );
+
     window.localStorage.setItem(
       getFixedPanelTabsStateStorageKey({ threadId: panelStateId }),
       serializeFixedPanelTabsState({
@@ -886,6 +910,7 @@ describe("useThreadFileTabs active owners", () => {
 
   it("returns owner ids for an active restored host file tab", () => {
     const threadId = "root-compose-ownerful";
+
     const hostTab = createHostFilePreviewFixedPanelTab({
       environmentId: "env_file",
       tab: {
@@ -894,6 +919,7 @@ describe("useThreadFileTabs active owners", () => {
       },
       threadId: "thr_file",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: hostTab.id,
@@ -902,6 +928,7 @@ describe("useThreadFileTabs active owners", () => {
       },
       lastUsedAt: Date.now(),
     });
+
     window.localStorage.setItem(
       getFixedPanelTabsStateStorageKey({ threadId }),
       serializeFixedPanelTabsState({ state }),
@@ -929,6 +956,7 @@ describe("useThreadFileTabs active owners", () => {
 
   it("backfills owner ids for an active legacy storage file tab", async () => {
     const threadId = "root-compose-legacy-storage";
+
     const legacyStorageTab = {
       id: "thread-storage-file-preview:artifact.txt:none",
       isPinned: false,
@@ -936,6 +964,7 @@ describe("useThreadFileTabs active owners", () => {
       lineRange: null,
       path: "artifact.txt",
     };
+
     window.localStorage.setItem(
       getFixedPanelTabsStateStorageKey({ threadId }),
       JSON.stringify({
@@ -973,6 +1002,7 @@ describe("useThreadFileTabs active owners", () => {
 
   it("returns owner ids for an active restored storage file tab", () => {
     const threadId = "root-compose-ownerful-storage";
+
     const storageTab = createThreadStorageFilePreviewFixedPanelTab({
       environmentId: "env_file",
       isPinned: false,
@@ -982,6 +1012,7 @@ describe("useThreadFileTabs active owners", () => {
       },
       threadId: "thr_file",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: storageTab.id,
@@ -990,6 +1021,7 @@ describe("useThreadFileTabs active owners", () => {
       },
       lastUsedAt: Date.now(),
     });
+
     window.localStorage.setItem(
       getFixedPanelTabsStateStorageKey({ threadId }),
       serializeFixedPanelTabsState({ state }),
@@ -1019,6 +1051,7 @@ describe("useThreadFileTabs active owners", () => {
 describe("useThreadFileTabs plugin panel tabs", () => {
   it("opens, focuses identical re-opens (title refreshed), and opens siblings for new params", () => {
     const threadId = "plugin-panel-open";
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: threadId,
@@ -1079,6 +1112,7 @@ describe("useThreadFileTabs plugin panel tabs", () => {
 
   it("replaces a transient new-tab like the other launchers", () => {
     const threadId = "plugin-panel-replace-new-tab";
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: threadId,
@@ -1088,6 +1122,7 @@ describe("useThreadFileTabs plugin panel tabs", () => {
         terminalSessions: undefined,
       }),
     );
+
     act(() => result.current.openTab({ kind: "new-tab" }));
     expect(result.current.activeTab?.kind).toBe("new-tab");
     act(() =>
@@ -1128,6 +1163,7 @@ describe("useThreadFileTabs file opener diversion", () => {
 
   it("automatically diverts matching working-tree files to the opener tab", () => {
     registerNotesOpener();
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: "opener-divert",
@@ -1156,10 +1192,12 @@ describe("useThreadFileTabs file opener diversion", () => {
       actionId: "file-opener:editor",
       title: "todo.md",
     });
+
     const params = JSON.parse(firstTab.paramsJson ?? "null") as {
       path: string;
       source: { kind: string; environmentId: string | null };
     };
+
     expect(params.path).toBe("notes/todo.md");
     expect(params.source).toMatchObject({
       kind: "workspace",
@@ -1195,6 +1233,7 @@ describe("useThreadFileTabs file opener diversion", () => {
 
   it("refreshes an identical target in the active opener tab", () => {
     registerNotesOpener();
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: "opener-repeat",
@@ -1204,6 +1243,7 @@ describe("useThreadFileTabs file opener diversion", () => {
         terminalSessions: undefined,
       }),
     );
+
     const open = () =>
       result.current.openTab({
         kind: "workspace-file-preview",
@@ -1214,6 +1254,7 @@ describe("useThreadFileTabs file opener diversion", () => {
           statusLabel: null,
         },
       });
+
     act(open);
     const first = requirePluginPanelTab(result.current.activeTab);
     act(open);
@@ -1228,6 +1269,7 @@ describe("useThreadFileTabs file opener diversion", () => {
 
   it("preserves native host and thread-storage preview state", () => {
     registerNotesOpener();
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: "opener-owner-context",
@@ -1293,6 +1335,7 @@ describe("useThreadFileTabs file opener diversion", () => {
 
   it("keeps the built-in preview for ref snapshots and unmatched extensions", () => {
     registerNotesOpener();
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: "opener-skip",
@@ -1334,6 +1377,7 @@ describe("useThreadFileTabs file opener diversion", () => {
 
   it("diverts a workspace file picked from the file search", () => {
     registerNotesOpener();
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: "opener-search",
@@ -1358,10 +1402,12 @@ describe("useThreadFileTabs file opener diversion", () => {
       actionId: "file-opener:editor",
       title: "todo.md",
     });
+
     const params = JSON.parse(pluginTab.paramsJson ?? "null") as {
       path: string;
       source: { kind: string; environmentId: string | null };
     };
+
     expect(params.path).toBe("notes/todo.md");
     expect(params.source).toMatchObject({
       kind: "workspace",
@@ -1375,6 +1421,7 @@ describe("useThreadFileTabs file opener diversion", () => {
 
   it("diverts a thread-storage file picked from the file search", () => {
     registerNotesOpener();
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: "opener-storage-search",
@@ -1442,10 +1489,11 @@ describe("useThreadFileTabs file opener diversion", () => {
 
   it("keeps the built-in preview when Settings pins it", () => {
     window.localStorage.setItem(
-      "bb.fileOpenerByExtension",
+      "omnyo.fileOpenerByExtension",
       JSON.stringify({ md: "__builtin__" }),
     );
     registerNotesOpener();
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: "opener-built-in",
@@ -1474,6 +1522,7 @@ describe("useThreadFileTabs file opener diversion", () => {
 
   it("honors per-open viewer overrides in both directions", () => {
     registerNotesOpener();
+
     const { result } = renderThreadHook(() =>
       useThreadFileTabsWithActiveTab({
         panelStateId: "opener-override",

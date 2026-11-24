@@ -5,7 +5,7 @@ import {
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
   encodeFrame,
-} from "@bb/tunnel-contract";
+} from "@omnyo/tunnel-contract";
 import { TunnelSession } from "../src/session.js";
 
 class FakeTunnel extends EventEmitter {
@@ -26,11 +26,13 @@ describe("tunnel traffic snapshot", () => {
 
   it("reports in-flight streams, bytes each way, and how long each direction has been quiet", () => {
     const tunnel = new FakeTunnel();
+
     const session = new TunnelSession({
       tunnel: tunnel as unknown as NodeWebSocket,
       log: { warn: () => {} },
       resolveOrigin: () => ({ kind: "unregistered" }),
     });
+
     session.start();
     expect(session.snapshot(Date.now())).toEqual({
       openHttpStreams: 0,
@@ -52,6 +54,7 @@ describe("tunnel traffic snapshot", () => {
         hasBody: true,
       }),
     );
+
     tunnel.emit("message", openFrame, true);
     vi.advanceTimersByTime(20_000);
     tunnel.emit("message", Buffer.from(HEARTBEAT_RESPONSE), false);

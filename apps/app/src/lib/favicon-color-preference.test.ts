@@ -2,7 +2,7 @@
 
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultAppTheme } from "@bb/domain";
+import { defaultAppTheme } from "@omnyo/domain";
 import {
   FAVICON_COLOR_STORAGE_KEY,
   useFaviconColorSync,
@@ -112,11 +112,13 @@ describe("favicon rendering", () => {
     module.initializeFavicon();
 
     const initialProps: { badge: "none" | "unread" } = { badge: "unread" };
+
     const { rerender, unmount } = renderHook(
       ({ badge }: { badge: "none" | "unread" }) =>
         module.useFaviconBadge(badge),
       { initialProps },
     );
+
     await waitFor(() => expect(FakeImage.created).toBe(2));
 
     rerender({ badge: "none" });
@@ -124,6 +126,29 @@ describe("favicon rendering", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(FakeImage.created).toBe(2);
     unmount();
+  });
+
+  it("mirrors attention dot changes to the desktop Dock once each", async () => {
+    stubDisplayMode(false);
+    vi.stubGlobal("Image", FakeImage);
+    const setAttention = vi.fn();
+    vi.stubGlobal("omnyoDesktop", { setAttention });
+    const module = await loadFreshModule();
+    module.initializeFavicon();
+
+    const initialProps: { badge: "none" | "unread" } = { badge: "unread" };
+
+    const { rerender, unmount } = renderHook(
+      ({ badge }: { badge: "none" | "unread" }) =>
+        module.useFaviconBadge(badge),
+      { initialProps },
+    );
+
+    rerender({ badge: "unread" });
+    rerender({ badge: "none" });
+    unmount();
+
+    expect(setAttention.mock.calls).toEqual([[false], [true], [false]]);
   });
 
   it("skips favicon image work in standalone display mode", async () => {

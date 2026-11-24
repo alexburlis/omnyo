@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useBbNavigate } from "@get-bb/plugin-sdk/app";
+import { experimental_useAppNavigate } from "@omnyo/plugin-sdk/app";
 
 export const PANEL_PATH = "tasks";
 
@@ -31,15 +31,23 @@ export function parseTasksRoute(rawSubPath: string): TasksRoute {
   const query = queryIndex === -1 ? "" : subPath.slice(queryIndex + 1);
   const segments = path.split("/").filter((segment) => segment.length > 0);
   const head = segments[0];
+
   if (head === undefined || head === "all") return { kind: "all" };
+
   if (head === "active") return { kind: "active" };
+
   if (head === "manage") return { kind: "manage" };
+
   if (head === "task") {
     const taskKey = segments[1];
+
     if (taskKey !== undefined) return { kind: "task", taskKey };
+
     return { kind: "all" };
   }
+
   const view = new URLSearchParams(query).get("view");
+
   return {
     kind: "project",
     projectId: head,
@@ -69,7 +77,8 @@ export interface TasksNavigation {
 }
 
 export function useTasksNavigation(): TasksNavigation {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   return useMemo(
     () => ({
       go: (route, options) => {

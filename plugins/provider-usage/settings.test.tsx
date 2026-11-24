@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import type { UsageMachine, UsageProvider } from "./usage-schema.js";
 
 afterEach(cleanup);
@@ -20,7 +20,7 @@ function account(id: string, providerId = "codex"): UsageProvider {
     usage: {
       status: "ok",
       accountEmail: `${id}@example.com`,
-      planLabel: "Max (20x)",
+      planLabel: "Ultra",
       windows: [
         {
           label: "Weekly limit",
@@ -32,6 +32,7 @@ function account(id: string, providerId = "codex"): UsageProvider {
     },
   };
 }
+
 const machine = (id: string, providers: UsageProvider[]): UsageMachine => ({
   id,
   displayName: id === "source:pool" ? "Account Pooler" : "My machine",
@@ -42,6 +43,7 @@ const machine = (id: string, providers: UsageProvider[]): UsageMachine => ({
 
 it("fetches all providers only in the selected source and keeps grouped accounts, icons, labels and reset times", async () => {
   const app = await loadPluginApp(() => import("./app"));
+
   const result = {
     machines: [
       machine("host", [account("local")]),
@@ -52,15 +54,18 @@ it("fetches all providers only in the selected source and keeps grouped accounts
       ]),
     ],
   };
+
   const slot = renderSlot(
     app.settingsSections[0]!,
     {},
     { rpc: { getUsage: () => result } },
   );
+
   await waitFor(() =>
     expect(slot.getByLabelText("Reload usage data")).toBeTruthy(),
   );
-  expect(slot.getAllByRole("heading", { name: "Codex" })).toHaveLength(2);
+  expect(slot.getAllByRole("heading", { name: "Codex" })).toHaveLength(1);
+  expect(slot.getByText("2 accounts")).toBeTruthy();
   expect(slot.getByText("first@example.com")).toBeTruthy();
   expect(slot.getByText("second@example.com")).toBeTruthy();
   expect(slot.queryByText("local@example.com")).toBeNull();
@@ -84,6 +89,7 @@ it("fetches all providers only in the selected source and keeps grouped accounts
 
 it("uses machine usage when the pool is disabled", async () => {
   const app = await loadPluginApp(() => import("./app"));
+
   const slot = renderSlot(
     app.settingsSections[0]!,
     {},
@@ -93,6 +99,7 @@ it("uses machine usage when the pool is disabled", async () => {
       },
     },
   );
+
   await slot.findByText("local@example.com");
   await waitFor(() => expect(slot.rpcCalls).toHaveLength(2));
   expect(slot.rpcCalls[1]?.input).toMatchObject({
@@ -103,6 +110,7 @@ it("uses machine usage when the pool is disabled", async () => {
 
 it("keeps an enabled empty pool selected without fetching machine quotas", async () => {
   const app = await loadPluginApp(() => import("./app"));
+
   const slot = renderSlot(
     app.settingsSections[0]!,
     {},
@@ -117,6 +125,7 @@ it("keeps an enabled empty pool selected without fetching machine quotas", async
       },
     },
   );
+
   await slot.findByText(/No accounts report usage yet/);
   expect(slot.rpcCalls).toHaveLength(1);
   expect(slot.queryByText("local@example.com")).toBeNull();
@@ -125,16 +134,19 @@ it("keeps an enabled empty pool selected without fetching machine quotas", async
 it("renders loading and a friendly transport error without exposing raw errors", async () => {
   const app = await loadPluginApp(() => import("./app"));
   let reject!: (error: Error) => void;
+
   const pending = new Promise<never>((_, fail) => {
     reject = fail;
   });
+
   const slot = renderSlot(
     app.settingsSections[0]!,
     {},
     { rpc: { getUsage: () => pending } },
   );
+
   expect(slot.getByText("Loading usage…")).toBeTruthy();
-  reject(new Error("Unexpected token 'b', bb connect..."));
+  reject(new Error("Unexpected token 'o', omnyo connect..."));
   await slot.findByText("Couldn’t load usage.");
   expect(
     slot.queryByRole("button", { name: "Retry usage refresh" }),
@@ -145,6 +157,7 @@ it("renders loading and a friendly transport error without exposing raw errors",
 it("retains measured accounts when reloading fails", async () => {
   const app = await loadPluginApp(() => import("./app"));
   let failed = false;
+
   const slot = renderSlot(
     app.settingsSections[0]!,
     {},
@@ -152,11 +165,13 @@ it("retains measured accounts when reloading fails", async () => {
       rpc: {
         getUsage: () => {
           if (failed) throw new Error("private transport detail");
+
           return { machines: [machine("source:pool", [account("first")])] };
         },
       },
     },
   );
+
   await waitFor(() =>
     expect(slot.getByLabelText("Reload usage data")).toBeTruthy(),
   );
@@ -172,6 +187,7 @@ it("shows pending measurements without inventing usage, then reports an unavaila
   const resource = { ...account("pending"), usage: null };
   let finish!: () => void;
   let calls = 0;
+
   const slot = renderSlot(
     app.settingsSections[0]!,
     {},
@@ -183,6 +199,7 @@ it("shows pending measurements without inventing usage, then reports an unavaila
           await new Promise<void>((resolve) => {
             finish = resolve;
           });
+
           return {
             machines: [
               {
@@ -195,6 +212,7 @@ it("shows pending measurements without inventing usage, then reports an unavaila
       },
     },
   );
+
   await slot.findByText("Loading usage…");
   expect(slot.queryByText("0% used")).toBeNull();
   finish();
@@ -216,6 +234,7 @@ it("keeps authentication and plans without limits distinct from loading and erro
     planLabel: null,
     windows: [],
   };
+
   const slot = renderSlot(
     app.settingsSections[0]!,
     {},
@@ -227,6 +246,7 @@ it("keeps authentication and plans without limits distinct from loading and erro
       },
     },
   );
+
   await slot.findByText("Sign in again.");
   expect(slot.getByText("Session expired.")).toBeTruthy();
   expect(

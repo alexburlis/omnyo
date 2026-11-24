@@ -1,5 +1,5 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 
-export default function replacementLabBeta(bb: BbPluginApi) {
-  bb.log.info("Replacement Lab Beta loaded");
+export default function replacementLabBeta(api: PluginApi) {
+  api.log.info("Replacement Lab Beta loaded");
 }

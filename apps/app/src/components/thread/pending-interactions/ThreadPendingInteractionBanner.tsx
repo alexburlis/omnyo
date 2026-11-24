@@ -9,8 +9,8 @@ import {
   describePendingInteractionToolUse,
   formatPendingInteractionSubjectDetailLines,
   type PendingInteractionToolUseAsk,
-} from "@bb/core-ui";
-import { extractShellCommandFromString } from "@bb/thread-view";
+} from "@omnyo/core-ui";
+import { extractShellCommandFromString } from "@omnyo/thread-view";
 import {
   isPluginPendingInteraction,
   type ApprovalPendingInteractionPayload,
@@ -19,26 +19,30 @@ import {
   type PendingInteractionApprovalSubject,
   type PendingInteractionResolution,
   type PendingInteractionUserQuestionQuestion,
-} from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { MarkdownPreview } from "@/components/ui/markdown-preview.js";
 import { getDetailScrollMaxHeightClass } from "@/components/ui/detail-scroll-size.js";
 import { UserQuestionAnswerForm } from "@/components/thread/user-questions/UserQuestionInteractionContent.js";
 import { useResolveThreadPendingInteraction } from "@/hooks/mutations/thread-interaction-mutations";
 import { PluginPendingInteractionComposer } from "@/components/plugin/PluginPendingInteractionComposer";
 import {
+  blocksTurn,
   classifyInteractionRequest,
   type InteractionRequestView,
 } from "./interaction-request";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
+import { shellHaptic } from "@/lib/native-shell/native-shell";
 import {
   presentationIconName,
   presentationTintStyle,
 } from "@/components/thread/timeline/presentation-display";
 import { PluginCompactIconMask } from "@/components/plugin/PluginIcon";
 import { usePluginIconUrl } from "@/lib/plugin-logos";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 
 interface ThreadPendingInteractionBannersProps {
   interactions: readonly PendingInteraction[];
@@ -81,6 +85,7 @@ interface ApprovalSubject {
 }
 
 const COMMAND_PREVIEW_LINE_COUNT = 4;
+
 const APPROVAL_DECISION_ORDER: Record<
   PendingInteractionApprovalDecision,
   number
@@ -110,13 +115,17 @@ export function ThreadPendingInteractionBanners({
   sourceThread,
   threadId,
 }: ThreadPendingInteractionBannersProps) {
+  const isCompactViewport = useIsCompactViewport();
+
   return interactions.map((interaction, index) => (
     <PendingInteractionBanner
       key={interaction.id}
       interaction={interaction}
       sourceThread={sourceThread}
       threadId={threadId}
-      collapsedByDefault={index > 0}
+      collapsedByDefault={
+        index > 0 || (isCompactViewport && !blocksTurn(interaction))
+      }
     />
   ));
 }
@@ -128,6 +137,7 @@ function PendingInteractionBanner({
   collapsedByDefault,
 }: PendingInteractionBannerProps) {
   const request = classifyInteractionRequest(interaction);
+
   if (request.family === "approval") {
     return (
       <ApprovalPendingInteractionBanner
@@ -140,6 +150,7 @@ function PendingInteractionBanner({
       />
     );
   }
+
   switch (request.kind) {
     case "user_question":
       return (
@@ -199,9 +210,13 @@ function useApprovalDecisionSubmission({
   interaction,
   threadId,
 }: UseApprovalDecisionSubmissionArgs): ApprovalDecisionSubmission {
-  const resolvePendingInteraction =
-    useResolveThreadPendingInteraction(threadId);
+  const resolvePendingInteraction = useResolveThreadPendingInteraction(
+    threadId,
+    interaction.id,
+  );
+
   const isResolving = interaction.status === "resolving";
+
   const errorMessage = resolvePendingInteraction.error
     ? getMutationErrorMessage({
         error: resolvePendingInteraction.error,
@@ -209,6 +224,7 @@ function useApprovalDecisionSubmission({
         lifecycleOperation: "resolve_interaction",
       })
     : null;
+
   const submitDecision = (
     decision: PendingInteractionApprovalDecision,
   ): void => {
@@ -216,10 +232,13 @@ function useApprovalDecisionSubmission({
       interaction,
       decision,
     );
+
+    shellHaptic("impact-medium");
     void resolvePendingInteraction
       .mutateAsync({ threadId, interactionId: interaction.id, resolution })
-      .catch(() => {});
+      .catch(() => shellHaptic("error"));
   };
+
   return {
     errorMessage,
     loadingDecision: isResolving
@@ -243,8 +262,10 @@ function PlanReviewRequestBanner({
       interaction,
       threadId,
     });
+
   const { approval } = request;
   const { plan, planFilePath } = request.review;
+
   return (
     <PendingInteractionShell
       label="Plan review"
@@ -289,6 +310,7 @@ function PlanReviewRequestBanner({
 
 function unwrapBacktickedCommand(command: string): string {
   const trimmed = command.trim();
+
   return trimmed.length > 2 &&
     trimmed.startsWith("`") &&
     trimmed.endsWith("`") &&
@@ -311,6 +333,7 @@ function ApprovalPendingInteractionBanner({
       interaction,
       threadId,
     });
+
   const view = useMemo(
     () => buildApprovalSubject({ interaction, payload, subject }),
     [interaction, payload, subject],
@@ -388,6 +411,7 @@ function ApprovalDecisionButtons({
     (left, right) =>
       APPROVAL_DECISION_ORDER[left] - APPROVAL_DECISION_ORDER[right],
   );
+
   return denyFirst.map((decision, index) => (
     <ApprovalDecisionButton
       key={decision}
@@ -419,9 +443,11 @@ function ApprovalDecisionButton({
   subjectKind,
 }: ApprovalDecisionButtonProps) {
   const label = labelForApprovalDecision(decision, subjectKind);
+
   const spinner = isLoading ? (
     <Icon name="Spinner" className="size-3 animate-spin" />
   ) : null;
+
   return (
     <Button
       type="button"
@@ -456,6 +482,7 @@ function approvalResolutionDecision(
   if (!resolution || "kind" in resolution) {
     return null;
   }
+
   return resolution.decision;
 }
 
@@ -482,6 +509,7 @@ function ApprovalDetailList({
 
 function ToolUseAskCard({ ask }: { ask: PendingInteractionToolUseAsk }) {
   const iconUrl = usePluginIconUrl(ask.icon.glyph);
+
   return (
     <div
       className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card px-3 py-2"
@@ -522,21 +550,26 @@ function ToolUseAskCard({ ask }: { ask: PendingInteractionToolUseAsk }) {
 
 function CommandPreview({
   command,
+  cwd,
   detailLines,
 }: {
   command: string;
+  cwd: string | null;
   detailLines: readonly string[];
 }) {
   const [showsAllLines, setShowsAllLines] = useState(false);
   const lines = command.split("\n");
+
   const hiddenLineCount = Math.max(
     0,
     lines.length - COMMAND_PREVIEW_LINE_COUNT,
   );
+
   const visibleCommand =
     showsAllLines || hiddenLineCount === 0
       ? command
       : lines.slice(0, COMMAND_PREVIEW_LINE_COUNT).join("\n");
+
   return (
     <div
       className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card"
@@ -554,7 +587,10 @@ function CommandPreview({
         <button
           type="button"
           onClick={() => setShowsAllLines((value) => !value)}
-          className="block w-full border-t border-border px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground"
+          className={cn(
+            "block w-full border-t border-border px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground",
+            CONTROL_HOVER_TRANSITION,
+          )}
         >
           {showsAllLines
             ? "Show less"
@@ -562,6 +598,22 @@ function CommandPreview({
               ? "Show 1 more line"
               : `Show ${hiddenLineCount} more lines`}
         </button>
+      ) : null}
+      {cwd ? (
+        <div
+          className="flex min-w-0 items-center gap-1.5 border-t border-border px-3 py-1.5 text-xs"
+          title={cwd}
+        >
+          <Icon
+            name="Folder"
+            className="size-3.5 shrink-0 text-subtle-foreground"
+            aria-hidden="true"
+          />
+          <span className="shrink-0 text-subtle-foreground">Runs in</span>
+          <span className="min-w-0 truncate font-mono text-muted-foreground">
+            {cwd}
+          </span>
+        </div>
       ) : null}
       {detailLines.length > 0 ? (
         <ApprovalDetailList
@@ -581,11 +633,13 @@ function buildApprovalSubject({
   switch (subject.kind) {
     case "command": {
       const rawCommand = subject.command;
+
       const command = rawCommand
         ? unwrapBacktickedCommand(
             extractShellCommandFromString(rawCommand) ?? rawCommand,
           )
         : null;
+
       const detailLines = formatPendingInteractionSubjectDetailLines(
         interaction,
       )
@@ -595,20 +649,25 @@ function buildApprovalSubject({
             line !== `Action: ${rawCommand}` &&
             line !== `Action: ${command}`,
         )
-        .map((line) =>
-          line.startsWith("Cwd: ") ? line.slice("Cwd: ".length) : line,
-        );
+        .filter((line) => !line.startsWith("Cwd: "));
+
       return {
         title: payload.reason ?? "Do you want to run this command?",
         body: command ? (
-          <CommandPreview command={command} detailLines={detailLines} />
+          <CommandPreview
+            command={command}
+            cwd={subject.cwd ?? null}
+            detailLines={detailLines}
+          />
         ) : null,
       };
     }
+
     case "file_change":
     case "permission_grant": {
       const detailLines =
         formatPendingInteractionSubjectDetailLines(interaction);
+
       return {
         title:
           payload.reason ??
@@ -624,13 +683,16 @@ function buildApprovalSubject({
           ) : null,
       };
     }
+
     case "tool_use": {
       const ask = describePendingInteractionToolUse({ ...payload, subject });
+
       return {
         title: ask.title,
         body: <ToolUseAskCard ask={ask} />,
       };
     }
+
     default:
       return assertNever(subject);
   }
@@ -643,6 +705,7 @@ function labelForApprovalDecision(
   if (subjectKind === "plan") {
     return decision === "deny" ? "Keep planning" : "Approve plan";
   }
+
   switch (decision) {
     case "allow_once":
       return "Allow once";

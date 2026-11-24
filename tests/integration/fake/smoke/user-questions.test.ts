@@ -1,8 +1,8 @@
 import {
   isUserQuestionPendingInteraction,
   type PendingInteractionResolution,
-} from "@bb/domain";
-import type { TimelineQuestionWorkRow, TimelineRow } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { TimelineQuestionWorkRow, TimelineRow } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
   getThreadOutput,
@@ -30,14 +30,17 @@ function collectQuestionRows(
   rows: readonly TimelineRow[],
 ): TimelineQuestionWorkRow[] {
   const questionRows: TimelineQuestionWorkRow[] = [];
+
   for (const row of rows) {
     if (isQuestionWorkRow(row)) {
       questionRows.push(row);
     }
+
     if (row.kind === "turn" && row.children) {
       questionRows.push(...collectQuestionRows(row.children));
     }
   }
+
   return questionRows;
 }
 
@@ -48,6 +51,7 @@ describe.sequential("fake provider user-question integration", () => {
         harness,
         "User Question Smoke",
       );
+
       const { thread } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -68,21 +72,27 @@ describe.sequential("fake provider user-question integration", () => {
 
       const interactions = await listThreadInteractions(harness.api, thread.id);
       const interaction = interactions.find(isUserQuestionPendingInteraction);
+
       if (!interaction) {
         throw new Error("Expected a pending user-question interaction");
       }
+
       expect(interaction.status).toBe("pending");
 
       const question = interaction.payload.questions[0];
+
       if (!question) {
         throw new Error("Expected a user-question payload question");
       }
+
       const stagingOption = question.options?.find(
         (option) => option.value === "staging",
       );
+
       if (!stagingOption) {
         throw new Error("Expected the fake provider staging option");
       }
+
       expect(question.prompt).toBe(
         "Which deployment path should the fake provider use?",
       );
@@ -96,12 +106,14 @@ describe.sequential("fake provider user-question integration", () => {
           },
         },
       } satisfies PendingInteractionResolution;
+
       const resolvingInteraction = await resolveThreadInteraction({
         api: harness.api,
         threadId: thread.id,
         interactionId: interaction.id,
         resolution,
       });
+
       expect(resolvingInteraction.status).toBe("resolving");
 
       await waitForThreadStatus(
@@ -121,9 +133,11 @@ describe.sequential("fake provider user-question integration", () => {
       const timeline = await getThreadTimeline(harness.api, thread.id, {
         includeNestedRows: true,
       });
+
       const questionRow = collectQuestionRows(timeline.rows).find(
         (row) => row.interactionId === interaction.id,
       );
+
       expect(questionRow).toMatchObject({
         lifecycle: "answered",
         answers: resolution.answers,

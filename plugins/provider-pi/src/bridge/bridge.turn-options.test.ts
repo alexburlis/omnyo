@@ -5,7 +5,7 @@ import { z } from "zod";
 import type {
   BridgeJsonRpcObject,
   BridgeJsonRpcOutputMessage,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import {
   FULL_PERMISSION_OPTIONS,
   type FakePiBridgeHarness,
@@ -19,6 +19,7 @@ const MINI = {
   model: "fake-provider/fake-mini",
   reasoningLevel: "medium",
 };
+
 const FULL_MODEL = { ...MINI, model: "fake-provider/fake-model" };
 
 const sessionReplacedParamsSchema = z.object({
@@ -32,7 +33,7 @@ let harness: FakePiBridgeHarness;
 
 beforeEach(async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-turn-options-",
+    prefix: "omnyo-pi-turn-options-",
     initialize: true,
   });
 }, 30_000);
@@ -66,10 +67,15 @@ function providerThreadIdFor(threadId: string): string {
         message.method === "thread/identity" &&
         (message.params as { threadId?: unknown }).threadId === threadId,
     );
+
   const providerThreadId = (identity?.params as { providerThreadId?: unknown })
     .providerThreadId;
+
   expect(typeof providerThreadId).toBe("string");
-  if (typeof providerThreadId !== "string") throw new Error("missing provider thread identity");
+
+  if (typeof providerThreadId !== "string")
+    throw new Error("missing provider thread identity");
+
   return providerThreadId;
 }
 
@@ -93,10 +99,12 @@ it(
   async () => {
     const threadId = "thr_turn_options_env";
     const envLog = join(harness.workspaceDir, "env.log");
+
     const options = (marker: string) => ({
       ...MINI,
       envVars: { FAKE_PI_ENV_LOG: envLog, FAKE_PI_ENV_MARKER: marker },
     });
+
     await harness.startThread(threadId, { options: options("first") });
 
     expect(
@@ -123,7 +131,9 @@ it(
     const threadId = "thr_turn_options_model";
     const start = await harness.startThread(threadId, { options: MINI });
     const originalProviderThreadId = providerThreadIdFor(threadId);
-    expect(start.result).toMatchObject({ providerThreadId: originalProviderThreadId });
+    expect(start.result).toMatchObject({
+      providerThreadId: originalProviderThreadId,
+    });
 
     expect((await turnStart(1, threadId, "first", MINI)).error).toBeUndefined();
     let seen = await harness.waitForTurnBoundary(threadId, 0);
@@ -220,6 +230,7 @@ it(
       ],
       options: FULL_MODEL,
     });
+
     expect(compaction.result).toMatchObject({ threadId });
 
     await harness.waitForDelta(
@@ -303,6 +314,7 @@ it(
       input: [{ type: "text", text: "steered", mentions: [] }],
       options: FULL_MODEL,
     });
+
     expect(steer.result).toMatchObject({ threadId });
     expect(sessionReplacements(threadId)).toEqual([]);
   },

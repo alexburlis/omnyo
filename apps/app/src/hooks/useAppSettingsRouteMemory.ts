@@ -33,14 +33,17 @@ export function useAppSettingsRouteMemory(): AppSettingsRouteMemory {
   const currentRoutePath = getLocationRoutePath(location);
   const isSettingsRoute = isSettingsRoutePath(location.pathname);
   const isCurrentToolsRoute = isToolsRoutePath(location.pathname);
+
   const lastAppRoutePathRef = useRef(
     isSettingsRoute ? getRootComposeRoutePath() : currentRoutePath,
   );
+
   const lastCoreAppRoutePathRef = useRef(
     isSettingsRoute || isCurrentToolsRoute
       ? getRootComposeRoutePath()
       : currentRoutePath,
   );
+
   const lastSettingsRoutePathRef = useRef(
     isSettingsRoute ? currentRoutePath : SETTINGS_ROUTE_PATH,
   );
@@ -48,12 +51,16 @@ export function useAppSettingsRouteMemory(): AppSettingsRouteMemory {
   useEffect(() => {
     if (isSettingsRoute) {
       lastSettingsRoutePathRef.current = currentRoutePath;
+
       return;
     }
+
     lastAppRoutePathRef.current = currentRoutePath;
+
     if (isCurrentToolsRoute) {
       return;
     }
+
     lastCoreAppRoutePathRef.current = currentRoutePath;
   }, [currentRoutePath, isCurrentToolsRoute, isSettingsRoute]);
 

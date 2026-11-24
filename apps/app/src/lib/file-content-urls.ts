@@ -1,4 +1,8 @@
-import type { EnvironmentFilePreviewSource } from "@bb/client-core";
+import type {
+  ProjectAttachmentContentQuery,
+  ThreadHostFileQuery,
+} from "@omnyo/server-contract";
+import type { EnvironmentFilePreviewSource } from "@omnyo/client-core";
 import { apiClient, toRelativeUrl } from "./api-server";
 
 function encodePathSegments(path: string): string {
@@ -16,6 +20,7 @@ interface PathClassificationArgs {
 }
 
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/u;
+
 const URL_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z0-9+.-]*:/u;
 
 export function isAbsoluteLocalPath({ path }: PathClassificationArgs): boolean {
@@ -36,11 +41,12 @@ export function isProjectAttachmentPath({
 export function buildProjectAttachmentContentUrl(
   projectId: string,
   path: string,
+  thumbnailWidth?: ProjectAttachmentContentQuery["thumbnailWidth"],
 ): string {
   return toRelativeUrl(
     apiClient.projects[":id"].attachments.content.$url({
       param: { id: projectId },
-      query: { path },
+      query: { path, thumbnailWidth },
     }),
   );
 }
@@ -57,7 +63,9 @@ export function buildProjectFileContentUrl(
       path,
     );
   }
+
   const filePath = encodePathSegments(path);
+
   return toRelativeUrl(
     routing.hostId === null
       ? apiClient.projects[":id"].files[":filePath{.+}"].$url({
@@ -75,6 +83,7 @@ export function buildEnvironmentFileContentUrl(
   path: string,
 ): string {
   const filePath = encodePathSegments(path);
+
   if (source.kind === "working-tree") {
     return toRelativeUrl(
       apiClient.environments[":id"].files[":filePath{.+}"].$url({
@@ -82,6 +91,7 @@ export function buildEnvironmentFileContentUrl(
       }),
     );
   }
+
   return toRelativeUrl(
     apiClient.environments[":id"].revisions[":ref"].files[":filePath{.+}"].$url(
       {
@@ -109,10 +119,12 @@ export function buildThreadStorageRawContentUrl(
 export function buildThreadHostFileContentUrl(
   threadId: string,
   absolutePath: string,
+  thumbnailWidth?: ThreadHostFileQuery["thumbnailWidth"],
 ): string {
   return toRelativeUrl(
     apiClient.threads[":id"]["host-files"][":filePath{.+}"].$url({
       param: { id: threadId, filePath: encodeHostFilePath(absolutePath) },
+      query: { thumbnailWidth },
     }),
   );
 }

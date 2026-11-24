@@ -6,9 +6,11 @@ import type { PushSubscriptionsApi } from "./push-subscriptions-api";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((r) => {
     resolve = r;
   });
+
   return { promise, resolve };
 }
 
@@ -16,6 +18,7 @@ function setup() {
   const store = createPushStore(createMemoryPushStorage());
   const tokenGate = deferred<string>();
   let tokenListener: ((deviceToken: string) => void) | null = null;
+
   const notifications: PushNotificationsModule = {
     projectId: "eas",
     platform: "android",
@@ -25,12 +28,14 @@ function setup() {
     unregisterDevicePushToken: vi.fn(async () => undefined),
     addTokenListener(listener) {
       tokenListener = listener;
+
       return () => {
         tokenListener = null;
       };
     },
     setBadgeCount: async () => undefined,
   };
+
   const api = {
     register: vi.fn<PushSubscriptionsApi["register"]>(async () => ({
       subscriptionId: "sub_1",
@@ -38,8 +43,18 @@ function setup() {
     unregister: vi.fn<PushSubscriptionsApi["unregister"]>(
       async () => undefined,
     ),
-    list: vi.fn<PushSubscriptionsApi["list"]>(async () => []),
+    list: vi.fn<PushSubscriptionsApi["list"]>(async () => [
+      {
+        id: "sub_1",
+        platform: "android",
+        deviceLabel: "phone",
+        createdAt: 1,
+        lastSeenAt: 1,
+        tokenSuffix: "tok",
+      },
+    ]),
   };
+
   const controller = createPushRegistrationController({
     notifications,
     api,
@@ -47,6 +62,7 @@ function setup() {
     deviceLabel: "phone",
     now: () => 1,
   });
+
   return {
     store,
     notifications,
@@ -120,6 +136,7 @@ describe("createPushRegistrationController", () => {
   it("ignores repeated device token events and events caused by an active sync", async () => {
     const { controller, store, notifications, tokenGate, emitDeviceToken } =
       setup();
+
     store.setEnabled(profile.id, true);
     tokenGate.resolve("expo-token");
     await controller.sync(profile);

@@ -1,5 +1,5 @@
-import type { WorkspaceFileStatusKind } from "@bb/domain";
-import type { IconName } from "@bb/shared-ui/icon";
+import type { WorkspaceFileStatusKind } from "@omnyo/domain";
+import type { IconName } from "@omnyo/shared-ui/icon";
 
 export interface FileStatusGlyph {
   icon: IconName;

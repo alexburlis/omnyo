@@ -16,11 +16,16 @@ describe("product-map surfaces", () => {
   it("keeps app-window annotations in column-major visual reading order", () => {
     const ordered = [
       "nav-panel",
+      "sidebar-entry",
       "thread-row-status",
       "thread-list",
+      "sidebar-footer-card",
       "sidebar-footer",
+      "title-bar-center",
+      "thread-companion",
       "thread-header",
       "thread-actions",
+      "thread-view",
       "timeline-renderers",
       "message-directives",
       "code-fence-renderers",
@@ -33,6 +38,7 @@ describe("product-map surfaces", () => {
       "app-overlay",
       "content-scripts",
     ];
+
     expect(surfaceIds("app-shell")).toEqual(ordered);
   });
 
@@ -50,6 +56,7 @@ describe("product-map surfaces", () => {
       "provider-picker",
       "composer-actions",
     ];
+
     expect(surfaceIds("composer")).toEqual(ordered);
   });
 
@@ -57,6 +64,7 @@ describe("product-map surfaces", () => {
     const all = SURFACE_GROUPS.flatMap((group) =>
       group.surfaces.map((surface) => surface.id),
     );
+
     expect(new Set(all).size).toBe(all.length);
     expect(SURFACES_BY_ID.size).toBe(all.length);
   });
@@ -94,9 +102,11 @@ describe("product-map surfaces", () => {
 
   it("clusters every headless surface into exactly one named section", () => {
     const headless = groupById.get("headless" as never);
+
     const sectioned = (headless?.sections ?? []).flatMap(
       (section) => section.surfaceIds,
     );
+
     expect([...sectioned].sort()).toEqual(surfaceIds("headless").sort());
     expect(new Set(sectioned).size).toBe(sectioned.length);
     expect(surfaceIds("headless")).toEqual(sectioned);
@@ -106,6 +116,7 @@ describe("product-map surfaces", () => {
 describe("surface cross-references", () => {
   it("points every [label](id) at a real surface", () => {
     const dangling: string[] = [];
+
     for (const group of SURFACE_GROUPS) {
       for (const surface of group.surfaces) {
         for (const copy of [surface.summary, ...surface.bullets]) {
@@ -113,6 +124,7 @@ describe("surface cross-references", () => {
             if (!SURFACES_BY_ID.has(id)) {
               dangling.push(`${surface.id}: "${id}"`);
             }
+
             if (id === surface.id) {
               dangling.push(`${surface.id}: references itself`);
             }
@@ -120,6 +132,7 @@ describe("surface cross-references", () => {
         }
       }
     }
+
     expect(dangling).toEqual([]);
   });
 });
@@ -136,7 +149,7 @@ describe("surface card copy", () => {
         "experimental_useCheckoutState",
       ]),
     );
-    expect(environmentProviders?.firstParty).toContain("Project checkout");
+    expect(environmentProviders?.firstParty).toContain("Project Checkout");
 
     const eventCopy = SURFACES_BY_ID.get("thread-events")?.bullets.join(" ");
     expect(eventCopy).toContain("unarchived");
@@ -176,9 +189,13 @@ describe("surface card copy", () => {
         );
         expect(surface.bullets.length, surface.id).toBeGreaterThanOrEqual(2);
         expect(surface.bullets.length, surface.id).toBeLessThanOrEqual(4);
+
         for (const bullet of surface.bullets) {
           expect(bullet.trim().length, surface.id).toBeGreaterThan(0);
-          expect(bullet.length, `${surface.id}: "${bullet}"`).toBeLessThanOrEqual(100);
+          expect(
+            bullet.length,
+            `${surface.id}: "${bullet}"`,
+          ).toBeLessThanOrEqual(100);
           expect(bullet, `${surface.id}: "${bullet}"`).not.toMatch(/^Can\b/);
           expect(bullet, `${surface.id}: "${bullet}"`).not.toMatch(
             /experimental_|\b[a-z]+[A-Z]\w*|\w\(/,

@@ -8,11 +8,11 @@ import {
   HOST_DAEMON_PROTOCOL_VERSION,
   createHostDaemonLocalClient,
   type WorkspaceOpenTarget,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { startLocalApiServer, type LocalApiServer } from "./local-api.js";
 import { resolveHostPlatform } from "./host-platform.js";
 import type { HostDaemonLocalApiConfig } from "./local-api-config.js";
-import { WorkspaceOpenTargetError } from "@bb/local-open-targets";
+import { WorkspaceOpenTargetError } from "@omnyo/local-open-targets";
 
 describe("local API server", () => {
   let server: LocalApiServer | null = null;
@@ -32,6 +32,124 @@ describe("local API server", () => {
   afterEach(async () => {
     await server?.close();
     server = null;
+  });
+
+  it("authenticates disconnected worker management and binds updates to its instance", async () => {
+    const requestUpdate = vi.fn(async () => "updated" as const);
+
+    const target = {
+      version: "0.46.62+private.1",
+      protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+      artifactDigest: "a".repeat(64),
+    };
+
+    const status = {
+      managementVersion: 1 as const,
+      hostId: "host-1",
+      instanceId: "instance-1",
+      connected: false,
+      protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+      runtimeVersion: "0.46.61+private.1",
+      serverUrl: "https://server.test",
+      automaticUpdates: true,
+      pluginBlockers: [],
+      admission: {
+        activity: null,
+        holdOwner: null,
+        held: false,
+        directProbe: false,
+        activation: false,
+        blockers: ["activity_unknown"],
+      },
+      update: {
+        phase: "idle" as const,
+        target: null,
+        reason: null,
+        retryAt: null,
+      },
+    };
+
+    server = await startLocalApiServer({
+      hostId: "host-1",
+      localApiConfig: createLocalApiConfig(),
+      serverUrl: "https://server.test",
+      serverPort: 443,
+      getConnected: () => false,
+      management: {
+        hostKey: "<test-host-key>",
+        getStatus: () => status,
+        requestUpdate,
+      },
+    });
+    const base = `http://localhost:${server.port}/management/v1`;
+
+    const headers = {
+      authorization: "Bearer <test-host-key>",
+      "content-type": "application/json",
+    };
+
+    expect((await fetch(`${base}/status`)).status).toBe(401);
+    expect(
+      (
+        await fetch(`${base}/status`, {
+          headers: { authorization: "Bearer other-key" },
+        })
+      ).status,
+    ).toBe(401);
+    const observed = await fetch(`${base}/status`, { headers });
+    expect(observed.status).toBe(200);
+    expect(await observed.json()).toEqual(status);
+
+    const request = {
+      expectedHostId: "host-1",
+      expectedInstanceId: "instance-1",
+      target,
+    };
+
+    expect(
+      (
+        await fetch(`${base}/update`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            ...request,
+            expectedInstanceId: "stale-instance",
+          }),
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await fetch(`${base}/update`, {
+          method: "POST",
+          headers: { ...headers, origin: "https://foreign.test" },
+          body: JSON.stringify(request),
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await fetch(`${base}/update`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            ...request,
+            target: { ...target, artifactDigest: "bad" },
+          }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(requestUpdate).not.toHaveBeenCalled();
+
+    const updated = await fetch(`${base}/update`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(request),
+    });
+
+    expect(updated.status).toBe(200);
+    expect(requestUpdate).toHaveBeenCalledExactlyOnceWith(target);
+    expect((await updated.json()).result).toBe("updated");
   });
 
   it("rejects a foreign browser origin instead of only withholding CORS", async () => {
@@ -61,6 +179,7 @@ describe("local API server", () => {
           targetId: "vscode",
         }),
       });
+
       return response.status;
     }
 
@@ -94,18 +213,18 @@ describe("local API server", () => {
     server = await startLocalApiServer({
       hostId: "host-remote",
       localApiConfig: createLocalApiConfig(),
-      serverUrl: "https://remote-bb.example.test/projects/proj_1",
+      serverUrl: "https://remote-omnyo.example.test/projects/proj_1",
       serverPort: 0,
       getConnected: () => true,
     });
 
     const response = await fetch(`http://localhost:${server.port}/status`, {
-      headers: { Origin: "https://remote-bb.example.test" },
+      headers: { Origin: "https://remote-omnyo.example.test" },
     });
 
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBe(
-      "https://remote-bb.example.test",
+      "https://remote-omnyo.example.test",
     );
   });
 
@@ -138,6 +257,7 @@ describe("local API server", () => {
             resolve(response.statusCode ?? 0);
           },
         );
+
         request.once("error", reject);
         request.end(
           JSON.stringify({
@@ -177,6 +297,7 @@ describe("local API server", () => {
       devAppPort: 5173,
       getConnected: () => true,
     });
+
     const client = createHostDaemonLocalClient(
       `http://localhost:${server.port}`,
     );
@@ -202,6 +323,7 @@ describe("local API server", () => {
       occupied.listen(0, "127.0.0.1", resolve);
     });
     const address = occupied.address();
+
     if (address === null || typeof address === "string") {
       throw new Error("Expected occupied test server to have a TCP address");
     }
@@ -229,7 +351,10 @@ describe("local API server", () => {
   });
 
   it("lists workspace open targets and delegates target-aware open requests", async () => {
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "bb-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "omnyo-workspace-"),
+    );
+
     const targets: WorkspaceOpenTarget[] = [
       {
         capabilities: {
@@ -250,6 +375,7 @@ describe("local API server", () => {
         label: "Finder",
       },
     ];
+
     const listWorkspaceOpenTargets = vi.fn(async () => targets);
     const openInTarget = vi.fn(async () => undefined);
 
@@ -263,6 +389,7 @@ describe("local API server", () => {
       listWorkspaceOpenTargets,
       openInTarget,
     });
+
     const client = createHostDaemonLocalClient(
       `http://localhost:${server.port}`,
     );
@@ -270,6 +397,7 @@ describe("local API server", () => {
     const targetsResponse = await client["workspace-open-targets"].$get({
       query: {},
     });
+
     await client["open-in-target"].$post({
       json: {
         context: { kind: "local" },
@@ -294,12 +422,12 @@ describe("local API server", () => {
   });
 
   it("allows configured remote origins and resolves remote SSH open requests", async () => {
-    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-client-config-"));
+    const dataDir = await mkdtemp(path.join(tmpdir(), "omnyo-client-config-"));
     await writeFile(
       path.join(dataDir, "client.json"),
       JSON.stringify({
         servers: {
-          "https://remote-bb.example.test": {
+          "https://remote-omnyo.example.test": {
             hosts: {
               host_remote: {
                 sshAuthority: "devbox",
@@ -323,6 +451,7 @@ describe("local API server", () => {
         getConnected: () => true,
         openInTarget,
       });
+
       const client = createHostDaemonLocalClient(
         `http://localhost:${server.port}`,
       );
@@ -331,19 +460,20 @@ describe("local API server", () => {
         `http://localhost:${server.port}/workspace-open-targets?path=/tmp/file.ts`,
         {
           headers: {
-            Origin: "https://remote-bb.example.test",
+            Origin: "https://remote-omnyo.example.test",
           },
         },
       );
+
       expect(corsResponse.headers.get("access-control-allow-origin")).toBe(
-        "https://remote-bb.example.test",
+        "https://remote-omnyo.example.test",
       );
 
       const response = await client["open-in-target"].$post({
         json: {
           context: {
             kind: "remote-ssh",
-            serverOrigin: "https://remote-bb.example.test/projects/proj_1",
+            serverOrigin: "https://remote-omnyo.example.test/projects/proj_1",
             hostId: "host_remote",
           },
           columnNumber: 4,
@@ -367,12 +497,12 @@ describe("local API server", () => {
   });
 
   it("returns setup guidance for remote SSH opens without a mapping", async () => {
-    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-client-config-"));
+    const dataDir = await mkdtemp(path.join(tmpdir(), "omnyo-client-config-"));
     await writeFile(
       path.join(dataDir, "client.json"),
       JSON.stringify({
         servers: {
-          "https://remote-bb.example.test": {
+          "https://remote-omnyo.example.test": {
             hosts: {},
           },
         },
@@ -390,6 +520,7 @@ describe("local API server", () => {
         devAppPort: 5173,
         getConnected: () => true,
       });
+
       const client = createHostDaemonLocalClient(
         `http://localhost:${server.port}`,
       );
@@ -398,7 +529,7 @@ describe("local API server", () => {
         json: {
           context: {
             kind: "remote-ssh",
-            serverOrigin: "https://remote-bb.example.test",
+            serverOrigin: "https://remote-omnyo.example.test",
             hostId: "host_missing",
           },
           columnNumber: null,
@@ -410,7 +541,7 @@ describe("local API server", () => {
 
       expect(response.status).toBe(400);
       expect(await response.text()).toContain(
-        "bb-app client ssh-target set https://remote-bb.example.test <ssh-target>",
+        "omnyo-app client ssh-target set https://remote-omnyo.example.test <ssh-target>",
       );
     } finally {
       await rm(dataDir, { recursive: true, force: true });
@@ -424,6 +555,7 @@ describe("local API server", () => {
         message: "Workspace open target is unavailable: VS Code",
       });
     });
+
     server = await startLocalApiServer({
       hostId: "host-1",
       localApiConfig: createLocalApiConfig(),
@@ -433,6 +565,7 @@ describe("local API server", () => {
       getConnected: () => true,
       openInTarget,
     });
+
     const client = createHostDaemonLocalClient(
       `http://localhost:${server.port}`,
     );

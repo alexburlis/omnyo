@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest";
-import type { PluginProviderOptionsContext } from "@get-bb/plugin-sdk";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import type { PluginProviderOptionsContext } from "@omnyo/plugin-sdk";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import claudeCodePlugin from "../server.js";
 
 function loadClaudeCodePlugin() {
   const host = createFakePluginHost({ pluginId: "provider-claude-code" });
-  claudeCodePlugin(host.bb);
+  claudeCodePlugin(host.api);
+
   const declaration = host.harness.registrations.providerRegistrations.find(
     (entry) => entry.id === "claude-code",
   );
+
   if (declaration === undefined) {
     throw new Error("expected Claude Code to be registered");
   }
+
   return { declaration, host };
 }
 
@@ -20,9 +23,11 @@ function providerOptions(
   settings: PluginProviderOptionsContext["settings"],
 ) {
   const deriveProviderOptions = declaration.deriveProviderOptions;
+
   if (deriveProviderOptions === undefined) {
     throw new Error("expected Claude Code provider options");
   }
+
   return deriveProviderOptions({
     threadId: "thread-1",
     projectId: "project-1",
@@ -33,18 +38,22 @@ function providerOptions(
 }
 
 describe("the Claude Code provider settings", () => {
-  it.each(["chromeEnabled", "disable1MContext"])(
-    "keeps %s off by default and derives an explicit opt-in",
-    (key) => {
-      const { declaration, host } = loadClaudeCodePlugin();
+  it.each([
+    "chromeEnabled",
+    "disable1MContext",
+    "allowModelFallback",
+    "fullAccessApprovalsEnabled",
+  ])("keeps %s off by default and derives an explicit opt-in", (key) => {
+    const { declaration, host } = loadClaudeCodePlugin();
 
-      expect(host.harness.registrations.settingsDescriptors[key]).toMatchObject(
-        { type: "boolean", default: false },
-      );
-      expect(providerOptions(declaration, {})[key]).toBe(false);
-      expect(providerOptions(declaration, { [key]: true })[key]).toBe(true);
-    },
-  );
+    expect(host.harness.registrations.settingsDescriptors[key]).toMatchObject({
+      type: "boolean",
+      default: false,
+    });
+    expect(providerOptions(declaration, {})[key]).toBe(false);
+    expect(providerOptions(declaration, { [key]: true })[key]).toBe(true);
+    expect(providerOptions(declaration, { [key]: "true" })[key]).toBe(false);
+  });
 
   it("keeps the Claude Code sandbox on by default and derives an explicit opt-out", () => {
     const { declaration, host } = loadClaudeCodePlugin();

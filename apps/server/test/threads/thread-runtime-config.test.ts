@@ -1,20 +1,24 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createDeferredPromise } from "@omnyo/test-helpers";
+import * as workspaceAgentContext from "../../src/services/threads/workspace-agent-context.js";
+import * as hostEnvironment from "../../src/services/hosts/host-environment.js";
 import {
+  archiveThread,
   markThreadDeleted,
   setExperiments,
   setThreadExecutionOverride,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   defaultExperiments,
   encodeClientTurnRequestIdNumber,
   normalizeProviderNativeRoots,
-} from "@bb/domain";
-import { validatePluginProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
-import type { PluginAgentConfigurationContext } from "@get-bb/plugin-sdk";
+} from "@omnyo/domain";
+import { validatePluginProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
+import type { PluginAgentConfigurationContext } from "@omnyo/plugin-sdk";
 import { buildPluginProviderRegistration } from "../../src/services/providers/plugin-provider-registration.js";
-import type { DiscoveredSkill } from "@bb/host-daemon-contract";
+import type { DiscoveredSkill } from "@omnyo/host-daemon-contract";
 import { setPluginAgentContributions } from "../../src/services/plugins/plugin-agent-contributions.js";
 import { readSkillTreeManifest } from "../../src/services/skills/injected-skills.js";
 import type { PluginAgentToolContribution } from "../../src/services/plugins/plugin-service.js";
@@ -65,6 +69,7 @@ async function writeRuntimeSkill(args: WriteRuntimeSkillArgs): Promise<string> {
     ].join("\n"),
     "utf8",
   );
+
   return sourceRootPath;
 }
 
@@ -87,9 +92,9 @@ async function writeDataDirAgentInstructions(
 async function writeWorkspaceAgentInstructions(
   args: WriteWorkspaceAgentInstructionsArgs,
 ): Promise<void> {
-  const bbDir = path.join(args.workspacePath, ".bb");
-  await mkdir(bbDir, { recursive: true });
-  await writeFile(path.join(bbDir, "AGENTS.md"), args.content, "utf8");
+  const omnyoDir = path.join(args.workspacePath, ".omnyo");
+  await mkdir(omnyoDir, { recursive: true });
+  await writeFile(path.join(omnyoDir, "AGENTS.md"), args.content, "utf8");
 }
 
 function registerRemoteRuntimeFileResponder(
@@ -105,12 +110,23 @@ function registerRemoteRuntimeFileResponder(
     hostId: args.hostId,
     sessionId: args.sessionId,
     handle: ({ command }) => {
+      if (command.type === "host.prepare_workspace_identity_v1") {
+        return {
+          ok: true,
+          result: {
+            status: "current",
+            rootPath: path.posix.join(command.rootPath, ".omnyo"),
+          },
+        };
+      }
+
       if (command.type === "host.read_workspace_agent_context") {
         const skillsRootPath = path.posix.join(
           command.rootPath,
-          ".bb",
+          ".omnyo",
           "skills",
         );
+
         const projectSkills = [...args.files.entries()]
           .map(([filePath, content]) => ({
             segments: path.posix
@@ -132,10 +148,12 @@ function registerRemoteRuntimeFileResponder(
           .sort((left, right) =>
             left.directoryName.localeCompare(right.directoryName),
           );
+
         const agentInstructions =
           args.files
-            .get(path.posix.join(command.rootPath, ".bb", "AGENTS.md"))
+            .get(path.posix.join(command.rootPath, ".omnyo", "AGENTS.md"))
             ?.trim() || null;
+
         return {
           ok: true,
           result: {
@@ -146,12 +164,112 @@ function registerRemoteRuntimeFileResponder(
           },
         };
       }
+
       throw new Error(`Unexpected remote runtime RPC ${command.type}`);
     },
   });
 }
 
 describe("thread runtime config", () => {
+  it("prepares the environment concurrently and admits workspace identity before reading instructions", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-runtime-parallel",
+      });
+
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+        path: "/tmp/runtime-parallel",
+      });
+
+      const thread = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+      });
+
+      const preparationStarted = createDeferredPromise<void>();
+      const preparation = createDeferredPromise<void>();
+      const workspaceStarted = createDeferredPromise<void>();
+      const gate = createDeferredPromise<void>();
+
+      const responder = registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: async ({ command }) => {
+          if (command.type === "host.prepare_workspace_identity_v1") {
+            preparationStarted.resolve();
+            await preparation.promise;
+
+            return {
+              ok: true,
+              result: {
+                status: "current",
+                rootPath: "/tmp/runtime-parallel/.omnyo",
+              },
+            };
+          }
+
+          if (command.type === "host.read_workspace_agent_context")
+            return {
+              ok: true,
+              result: {
+                agentInstructions: null,
+                projectSkills: [],
+                projectSkillsTruncated: false,
+                sharedSkills: [],
+              },
+            };
+          throw new Error("Unexpected workspace preparation fixture RPC");
+        },
+      });
+
+      const readWorkspace = workspaceAgentContext.readWorkspaceAgentContext;
+
+      const workspace = vi
+        .spyOn(workspaceAgentContext, "readWorkspaceAgentContext")
+        .mockImplementation(async (...args) => {
+          workspaceStarted.resolve();
+          await gate.promise;
+
+          return readWorkspace(...args);
+        });
+
+      const env = vi.spyOn(hostEnvironment, "resolveHostEnvironment");
+
+      const pending = resolveThreadRuntimeCommandConfig(harness.deps, {
+        environment,
+        thread,
+        model: "gpt-5",
+      });
+
+      try {
+        expect(env).toHaveBeenCalled();
+        await preparationStarted.promise;
+        expect(workspace).not.toHaveBeenCalled();
+        preparation.resolve();
+        await workspaceStarted.promise;
+        expect(env).toHaveBeenCalled();
+      } finally {
+        preparation.resolve();
+        gate.resolve();
+        await pending;
+        workspace.mockRestore();
+        env.mockRestore();
+        responder.unregister();
+      }
+
+      expect(responder.requests.map(({ command }) => command.type)).toEqual([
+        "host.prepare_workspace_identity_v1",
+        "host.read_workspace_agent_context",
+      ]);
+    });
+  });
+
   it("carries a configured ACP agent's launch spec on thread start and turn submit", async () => {
     await withTestHarness(
       {
@@ -175,24 +293,29 @@ describe("thread runtime config", () => {
         const { host } = seedHostSession(harness.deps, {
           id: "host-runtime-custom-acp",
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
           path: "/tmp/custom-acp",
         });
+
         const thread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
           providerId: "acp-custom",
         });
+
         seedThreadRuntimeState(harness.deps, {
           environmentId: environment.id,
           providerThreadId: "provider-custom",
           threadId: thread.id,
         });
+
         const execution = {
           model: "model-a",
           permissionMode: "accept-edits",
@@ -200,6 +323,7 @@ describe("thread runtime config", () => {
           serviceTier: "default",
           source: "client/turn/requested",
         } as const;
+
         const expectedSpec = {
           displayName: "Custom ACP",
           command: "custom-agent",
@@ -225,6 +349,7 @@ describe("thread runtime config", () => {
           syncGeneratedTitle: false,
           thread,
         });
+
         expect(startCommand.bridgeLaunch.providerOptions).toMatchObject({
           acpLaunchSpec: expectedSpec,
         });
@@ -248,6 +373,7 @@ describe("thread runtime config", () => {
             thread,
           },
         );
+
         expect(submitCommand.bridgeLaunch.providerOptions).toMatchObject({
           acpLaunchSpec: expectedSpec,
         });
@@ -313,24 +439,29 @@ describe("thread runtime config", () => {
         const { host } = seedHostSession(harness.deps, {
           id: `host-runtime-known-${providerId}`,
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
           path: "/tmp/known-acp",
         });
+
         const thread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
           providerId,
         });
+
         seedThreadRuntimeState(harness.deps, {
           environmentId: environment.id,
           providerThreadId: `provider-${providerId}`,
           threadId: thread.id,
         });
+
         const execution = {
           model: requestedModel,
           permissionMode: "accept-edits",
@@ -351,6 +482,7 @@ describe("thread runtime config", () => {
           syncGeneratedTitle: false,
           thread,
         });
+
         expect(startCommand.bridgeLaunch.providerOptions).toMatchObject({
           acpLaunchSpec: expectedSpec,
         });
@@ -374,6 +506,7 @@ describe("thread runtime config", () => {
             thread,
           },
         );
+
         expect(submitCommand.bridgeLaunch.providerOptions).toMatchObject({
           acpLaunchSpec: expectedSpec,
         });
@@ -426,13 +559,16 @@ describe("thread runtime config", () => {
         const { host } = seedHostSession(harness.deps, {
           id: `host-runtime-${childProviderId}-${parentProviderId ?? "root"}`,
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
         });
+
         const parentThread =
           parentProviderId === null
             ? null
@@ -441,6 +577,7 @@ describe("thread runtime config", () => {
                 environmentId: environment.id,
                 providerId: parentProviderId,
               });
+
         const thread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
@@ -464,17 +601,21 @@ describe("thread runtime config", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-runtime-managed-child-project-default-permission-mode",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const parentThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       const childThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -506,23 +647,28 @@ describe("thread runtime config", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-runtime-child-parent-execution-permission-mode",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const parentThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       seedThreadRuntimeState(harness.deps, {
         threadId: parentThread.id,
         environmentId: environment.id,
         providerThreadId: "provider-parent-permission-mode",
         permissionMode: "accept-edits",
       });
+
       const childThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -562,29 +708,35 @@ describe("thread runtime config", () => {
         const { host } = seedHostSession(harness.deps, {
           id: "host-runtime-child-full-mode",
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
         });
+
         const parentThread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
         });
+
         seedThreadRuntimeState(harness.deps, {
           threadId: parentThread.id,
           environmentId: environment.id,
           providerThreadId: "provider-parent-auto",
           permissionMode: "auto",
         });
+
         const childThread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
           parentThreadId: parentThread.id,
           providerId,
         });
+
         if (modeSource === "recorded") {
           seedThreadRuntimeState(harness.deps, {
             threadId: childThread.id,
@@ -613,20 +765,25 @@ describe("thread runtime config", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-runtime-deleted-parent-permission-mode",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const deletedParent = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       markThreadDeleted(harness.db, harness.hub, {
         threadId: deletedParent.id,
       });
+
       const childThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -658,13 +815,16 @@ describe("thread runtime config", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-runtime-permission-mode-workspace-write",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -685,13 +845,16 @@ describe("thread runtime config", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-runtime-permission-mode-unsupported",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -715,13 +878,16 @@ describe("thread runtime config", () => {
         const { host } = seedHostSession(harness.deps, {
           id: `host-runtime-pi-${reasoningLevel}-reasoning`,
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
         });
+
         const thread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
@@ -748,13 +914,16 @@ describe("thread runtime config", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-runtime-reasoning-level-unsupported",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -775,38 +944,55 @@ describe("thread runtime config", () => {
 
   it("serializes injected skill sources into new thread start commands", async () => {
     await withTestHarness(async (harness) => {
+      const registration = harness.deps.providerRegistry.get("codex");
+
+      if (registration === null) throw new Error("Codex fixture is missing");
+
+      harness.deps.pluginHostArtifacts.set(
+        registration.pluginId,
+        stubHostArtifact(registration.pluginId),
+      );
+
       const sourceRootPath = await writeRuntimeSkill({
         name: "release-notes",
         rootPath: path.join(harness.config.dataDir, "skills"),
       });
+
       await writeRuntimeSkill({
-        name: "bb-cli",
+        name: "omnyo-cli",
         rootPath: harness.config.builtinSkillsRootPath,
       });
+
       const workspacePath = path.join(
         harness.config.dataDir,
         "runtime-skill-workspace",
       );
+
       const projectSourceRootPath = await writeRuntimeSkill({
         name: "project-helper",
-        rootPath: path.join(workspacePath, ".bb", "skills"),
+        rootPath: path.join(workspacePath, ".omnyo", "skills"),
       });
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-runtime-injected-skills",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: workspacePath,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
       });
+
       const execution = await buildExecutionOptions(
         harness.deps,
         { model: "gpt-5" },
@@ -852,9 +1038,11 @@ describe("thread runtime config", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-provider-options",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -866,6 +1054,7 @@ describe("thread runtime config", () => {
           environmentId: environment.id,
           providerId,
         });
+
         const execution = await buildExecutionOptions(
           harness.deps,
           {
@@ -878,6 +1067,7 @@ describe("thread runtime config", () => {
           },
           { threadId: thread.id },
         );
+
         return buildThreadStartCommand(harness.deps, {
           environment,
           execution,
@@ -903,8 +1093,10 @@ describe("thread runtime config", () => {
 
       const claudeCode = await build("claude-code");
       expect(claudeCode.options.providerOptions).toEqual({
+        allowModelFallback: false,
         chromeEnabled: false,
         disable1MContext: false,
+        fullAccessApprovalsEnabled: false,
         memoryEnabled: true,
         providerSubagentsEnabled: true,
         sandboxEnabled: true,
@@ -919,6 +1111,7 @@ describe("thread runtime config", () => {
   it("runs the owning plugin's options hook with the command context", async () => {
     await withTestHarness(async (harness) => {
       const pluginId = "provider-hooked";
+
       const registration = buildPluginProviderRegistration({
         iconHash: null,
         available: true,
@@ -951,6 +1144,7 @@ describe("thread runtime config", () => {
         }),
         readSettings: () => ({ verbose: true }),
       });
+
       harness.deps.providerRegistry.register({
         ...registration,
         pluginId,
@@ -964,18 +1158,22 @@ describe("thread runtime config", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-provider-hook",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "hooked",
       });
+
       const command = await buildThreadStartCommand(harness.deps, {
         environment,
         execution: {
@@ -1013,18 +1211,22 @@ describe("thread runtime config", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-runtime-claude-plan",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "claude-code",
       });
+
       const input = [
         {
           type: "text" as const,
@@ -1077,6 +1279,7 @@ describe("thread runtime config", () => {
         environmentId: environment.id,
         providerId: "pi",
       });
+
       const piCommand = await buildThreadStartCommand(harness.deps, {
         environment,
         execution: {
@@ -1095,6 +1298,7 @@ describe("thread runtime config", () => {
         syncGeneratedTitle: false,
         thread: piThread,
       });
+
       expect(piCommand.options.promptMode).toBeUndefined();
     });
   });
@@ -1104,13 +1308,16 @@ describe("thread runtime config", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-runtime-execution-override",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -1128,6 +1335,7 @@ describe("thread runtime config", () => {
         {},
         { threadId: thread.id },
       );
+
       expect(execution.model).toBe("claude-opus-4-8");
       expect(execution.reasoningLevel).toBe("high");
 
@@ -1136,25 +1344,252 @@ describe("thread runtime config", () => {
         { model: "claude-sonnet-4-6", reasoningLevel: "low" },
         { threadId: thread.id },
       );
+
       expect(oneOff.model).toBe("claude-sonnet-4-6");
       expect(oneOff.reasoningLevel).toBe("low");
     });
   });
 
+  it.each(["codex", "claude-code"])(
+    "preserves portable received context on fresh and resumed %s sessions without personal instructions",
+    async (providerId) => {
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps, {
+          id: `host-context-${providerId}`,
+        });
+
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+        });
+
+        const environment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+          path: `/tmp/synthetic-context-${providerId}`,
+        });
+
+        const thread = seedThread(harness.deps, {
+          projectId: project.id,
+          environmentId: environment.id,
+          providerId,
+        });
+
+        seedThreadRuntimeState(harness.deps, {
+          environmentId: environment.id,
+          providerThreadId: "synthetic-resumed-session",
+          threadId: thread.id,
+        });
+
+        const execution = {
+          model: "synthetic-model",
+          permissionMode: "accept-edits",
+          reasoningLevel: "medium",
+          serviceTier: "default",
+          source: "client/turn/requested",
+        } as const;
+
+        const start = await buildThreadStartCommand(harness.deps, {
+          environment,
+          execution,
+          fork: null,
+          permissionEscalation: "ask",
+          input: textInput("Complete the synthetic scoped request"),
+          projectId: project.id,
+          providerId,
+          requestId: encodeClientTurnRequestIdNumber({ value: 101 }),
+          syncGeneratedTitle: false,
+          thread,
+        });
+
+        const resume = await prepareTurnSubmitCommandPayload(harness.deps, {
+          environment,
+          execution,
+          permissionEscalation: "ask",
+          input: textInput("Continue the same synthetic request"),
+          target: { mode: "start" },
+          thread,
+        });
+
+        expect(start.instructions).toContain(
+          "Omnyo owns native questions and callback dependencies",
+        );
+        expect(start.instructions).toContain(
+          "Use omnyo question list --self --json to inspect questions.",
+        );
+        expect(start.instructions).not.toContain("This chat reports to");
+        expect(start.instructions).toContain(
+          "A wait does not start work or schedule a reply",
+        );
+        expect(start.instructions).not.toContain(
+          "The following user instructions come from",
+        );
+        expect(start.instructions).not.toContain(
+          "The following instructions come from the Omnyo plugin",
+        );
+        expect(start.instructions).toBe(resume.resumeContext.instructions);
+        expect(start.dynamicTools).toEqual(resume.resumeContext.dynamicTools);
+        expect(start.instructionMode).toBe(
+          resume.resumeContext.instructionMode,
+        );
+        expect(start.input).toEqual(
+          textInput("Complete the synthetic scoped request"),
+        );
+        expect(resume.input).toEqual(
+          textInput("Continue the same synthetic request"),
+        );
+      });
+    },
+  );
+
+  it("tells a child chat that its parent chat answers its questions", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps, {
+        id: "host-child-question-instructions",
+      });
+
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+        path: "/tmp/synthetic-child-question-instructions",
+      });
+
+      const parent = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+      });
+
+      const child = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+        parentThreadId: parent.id,
+      });
+
+      const start = await buildThreadStartCommand(harness.deps, {
+        environment,
+        execution: {
+          model: "synthetic-model",
+          permissionMode: "accept-edits",
+          reasoningLevel: "medium",
+          serviceTier: "default",
+          source: "client/turn/requested",
+        },
+        fork: null,
+        permissionEscalation: "ask",
+        input: textInput("Check the layout"),
+        projectId: project.id,
+        providerId: "codex",
+        requestId: encodeClientTurnRequestIdNumber({ value: 102 }),
+        syncGeneratedTitle: false,
+        thread: child,
+      });
+
+      expect(start.instructions).toContain(
+        `This chat reports to ${parent.id}, the chat that started or parents it. That chat answers its questions; the owner never sees them.`,
+      );
+      expect(start.instructions).toContain(
+        "Logins, credentials, manual edits and approvals also go to that chat",
+      );
+      expect(start.instructions).toContain(
+        "A wait does not start work or schedule a reply",
+      );
+      expect(start.instructions).not.toContain(
+        "Omnyo owns native questions and callback dependencies",
+      );
+      expect(start.instructions).not.toContain(
+        "require the appropriate input UI",
+      );
+    });
+  });
+
+  it.each([
+    { launcher: "live", reportsToLauncher: true },
+    { launcher: "archived", reportsToLauncher: false },
+  ] as const)(
+    "routes questions of a chat another chat launched to that $launcher launcher",
+    async ({ launcher, reportsToLauncher }) => {
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps, {
+          id: `host-launched-question-${launcher}`,
+        });
+
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+        });
+
+        const environment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+          path: `/tmp/synthetic-launched-question-${launcher}`,
+        });
+
+        const launchingThread = seedThread(harness.deps, {
+          projectId: project.id,
+          environmentId: environment.id,
+        });
+
+        const launched = seedThread(harness.deps, {
+          projectId: project.id,
+          environmentId: environment.id,
+          launchedByThreadId: launchingThread.id,
+        });
+
+        if (launcher === "archived")
+          archiveThread(harness.deps.db, harness.deps.hub, launchingThread.id);
+
+        const start = await buildThreadStartCommand(harness.deps, {
+          environment,
+          execution: {
+            model: "synthetic-model",
+            permissionMode: "accept-edits",
+            reasoningLevel: "medium",
+            serviceTier: "default",
+            source: "client/turn/requested",
+          },
+          fork: null,
+          permissionEscalation: "ask",
+          input: textInput("Run the study"),
+          projectId: project.id,
+          providerId: "codex",
+          requestId: encodeClientTurnRequestIdNumber({ value: 103 }),
+          syncGeneratedTitle: false,
+          thread: launched,
+        });
+
+        expect(
+          start.instructions.includes(
+            `This chat reports to ${launchingThread.id}`,
+          ),
+        ).toBe(reportsToLauncher);
+        expect(
+          start.instructions.includes(
+            "Omnyo owns native questions and callback dependencies",
+          ),
+        ).toBe(!reportsToLauncher);
+      });
+    },
+  );
+
   it("resolves the workspace, storage path, and environment directory dynamic tool", async () => {
     await withTestHarness(async (harness) => {
       const hostId = "host-runtime";
       seedHostSession(harness.deps, { id: hostId });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId,
         path: "/tmp/runtime-project-root",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId,
         projectId: project.id,
         path: "/tmp/runtime-project-root",
         environmentProviderId: "project-checkout",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -1163,6 +1598,7 @@ describe("thread runtime config", () => {
       const pluginContexts: Array<
         Omit<PluginAgentConfigurationContext, "pluginMetadata">
       > = [];
+
       setPluginAgentContributions({
         listSkillRootContributions: () => [],
         listAgentTools: () => [],
@@ -1175,6 +1611,7 @@ describe("thread runtime config", () => {
         resolveMention: async () => ({ ok: false, error: "unused" }),
         resolveAgentConfiguration: async (args) => {
           pluginContexts.push(args.context);
+
           return {
             tools: [],
             selectedSkillIdsByPlugin: new Map(),
@@ -1182,6 +1619,7 @@ describe("thread runtime config", () => {
           };
         },
       });
+
       const runtimeConfig = await resolveThreadRuntimeCommandConfig(
         harness.deps,
         {
@@ -1195,11 +1633,12 @@ describe("thread runtime config", () => {
           },
         },
       );
+
       setPluginAgentContributions(undefined);
 
       expect(runtimeConfig.workspacePath).toBe("/tmp/runtime-project-root");
       expect(runtimeConfig.threadStoragePath).toBe(
-        `/tmp/bb-host-data/${hostId}/thread-storage/${thread.id}`,
+        `/tmp/omnyo-host-data/${hostId}/thread-storage/${thread.id}`,
       );
       expect(runtimeConfig.dynamicTools).toEqual([
         expect.objectContaining({
@@ -1210,10 +1649,10 @@ describe("thread runtime config", () => {
         }),
       ]);
       expect(runtimeConfig.instructions).not.toContain(
-        "You are working inside bb, an agentic IDE",
+        "You are working inside Omnyo, an agentic IDE",
       );
-      expect(runtimeConfig.instructions).not.toContain("bb status");
-      expect(runtimeConfig.instructions).not.toContain("bb guide");
+      expect(runtimeConfig.instructions).not.toContain("omnyo status");
+      expect(runtimeConfig.instructions).not.toContain("omnyo guide");
       expect(runtimeConfig.instructions).not.toContain("Markdown links");
       expect(runtimeConfig.instructions).toContain(
         "update_environment_directory",
@@ -1224,24 +1663,28 @@ describe("thread runtime config", () => {
     });
   });
 
-  it("reads workspace .bb/AGENTS.md from a non-primary host", async () => {
+  it("reads workspace .omnyo/AGENTS.md from a non-primary host", async () => {
     await withTestHarness(async (harness) => {
       const { host: primary } = seedHostSession(harness.deps, {
         id: "host-runtime-agents-primary",
       });
+
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-runtime-agents-remote",
       });
+
       seedPrimaryHost(harness.deps, primary.id);
       setExperiments(harness.db, {
         ...defaultExperiments,
       });
       const workspacePath = "/remote/runtime-agents-workspace";
+
       const agentInstructionsPath = path.posix.join(
         workspacePath,
-        ".bb",
+        ".omnyo",
         "AGENTS.md",
       );
+
       const responder = registerRemoteRuntimeFileResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -1252,15 +1695,18 @@ describe("thread runtime config", () => {
           ],
         ]),
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: workspacePath,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: workspacePath,
       });
+
       const thread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
@@ -1279,6 +1725,10 @@ describe("thread runtime config", () => {
         "# Remote Rules\n\nRead me from the remote daemon.",
       );
       expect(responder.requests.map(({ command }) => command)).toEqual([
+        {
+          type: "host.prepare_workspace_identity_v1",
+          rootPath: workspacePath,
+        },
         expect.objectContaining({
           type: "host.read_workspace_agent_context",
           rootPath: workspacePath,
@@ -1287,14 +1737,16 @@ describe("thread runtime config", () => {
     });
   });
 
-  it("treats a missing remote workspace .bb/AGENTS.md as null", async () => {
+  it("treats a missing remote workspace .omnyo/AGENTS.md as null", async () => {
     await withTestHarness(async (harness) => {
       const { host: primary } = seedHostSession(harness.deps, {
         id: "host-runtime-missing-agents-primary",
       });
+
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-runtime-missing-agents-remote",
       });
+
       seedPrimaryHost(harness.deps, primary.id);
       setExperiments(harness.db, {
         ...defaultExperiments,
@@ -1305,15 +1757,18 @@ describe("thread runtime config", () => {
         sessionId: session.id,
         files: new Map(),
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: workspacePath,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: workspacePath,
       });
+
       const thread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
@@ -1325,7 +1780,7 @@ describe("thread runtime config", () => {
       );
 
       expect(runtimeConfig.instructions).not.toContain(
-        "The following workspace instructions come from .bb/AGENTS.md:",
+        "The following workspace instructions come from .omnyo/AGENTS.md:",
       );
     });
   });
@@ -1335,21 +1790,26 @@ describe("thread runtime config", () => {
       const { host: primary } = seedHostSession(harness.deps, {
         id: "host-runtime-skills-primary",
       });
+
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-runtime-skills-remote",
       });
+
       seedPrimaryHost(harness.deps, primary.id);
       setExperiments(harness.db, {
         ...defaultExperiments,
       });
       const workspacePath = "/remote/runtime-skills-workspace";
+
       const skillRootPath = path.posix.join(
         workspacePath,
-        ".bb",
+        ".omnyo",
         "skills",
         "remote-review",
       );
+
       const skillFilePath = path.posix.join(skillRootPath, "SKILL.md");
+
       const responder = registerRemoteRuntimeFileResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -1367,15 +1827,18 @@ describe("thread runtime config", () => {
           ],
         ]),
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: workspacePath,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: workspacePath,
       });
+
       const thread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
@@ -1395,6 +1858,10 @@ describe("thread runtime config", () => {
         skillFilePath,
       });
       expect(responder.requests.map(({ command }) => command)).toEqual([
+        {
+          type: "host.prepare_workspace_identity_v1",
+          rootPath: workspacePath,
+        },
         expect.objectContaining({
           type: "host.read_workspace_agent_context",
           rootPath: workspacePath,
@@ -1415,7 +1882,9 @@ describe("thread runtime config", () => {
         const { host, session } = seedHostSession(harness.deps, {
           id: "host-runtime-shared-skills",
         });
+
         const workspacePath = "/remote/runtime-shared-skills";
+
         const skillFilePath = path.posix.join(
           workspacePath,
           ".agents",
@@ -1423,6 +1892,7 @@ describe("thread runtime config", () => {
           "portable-review",
           "SKILL.md",
         );
+
         const responder = registerRemoteRuntimeFileResponder(harness, {
           hostId: host.id,
           sessionId: session.id,
@@ -1438,15 +1908,18 @@ describe("thread runtime config", () => {
             },
           ],
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
           path: workspacePath,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
           path: workspacePath,
         });
+
         const thread = seedThread(harness.deps, {
           environmentId: environment.id,
           projectId: project.id,
@@ -1467,6 +1940,10 @@ describe("thread runtime config", () => {
           skillFilePath,
         });
         expect(responder.requests.map(({ command }) => command)).toMatchObject([
+          {
+            type: "host.prepare_workspace_identity_v1",
+            rootPath: workspacePath,
+          },
           {
             type: "host.read_workspace_agent_context",
             includeAgentInstructions: true,
@@ -1491,24 +1968,29 @@ describe("thread runtime config", () => {
     await withTestHarness(async (harness) => {
       const hostId = "host-runtime-data-dir-agents-md";
       seedHostSession(harness.deps, { id: hostId });
+
       const workspacePath = path.join(
         harness.config.dataDir,
         "data-dir-agents-md-workspace",
       );
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId,
         path: workspacePath,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId,
         projectId: project.id,
         path: workspacePath,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
       });
+
       await writeDataDirAgentInstructions({
         content: "# User Rules\n\nPrefer concise progress updates.\n",
         dataDir: harness.config.dataDir,
@@ -1534,10 +2016,13 @@ describe("thread runtime config", () => {
       );
 
       expect(runtimeConfig.instructionMode).toBe("append");
+
       const userSource =
         "The following user instructions come from <dataDir>/AGENTS.md:";
+
       const workspaceSource =
-        "The following workspace instructions come from .bb/AGENTS.md:";
+        "The following workspace instructions come from .omnyo/AGENTS.md:";
+
       expect(runtimeConfig.instructions).toContain(userSource);
       expect(runtimeConfig.instructions).toContain(
         "Prefer concise progress updates.",
@@ -1587,24 +2072,29 @@ describe("thread runtime config", () => {
       await withTestHarness(async (harness) => {
         const hostId = "host-runtime-plugin-instr";
         seedHostSession(harness.deps, { id: hostId });
+
         const workspacePath = path.join(
           harness.config.dataDir,
           "plugin-instr-workspace",
         );
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId,
           path: workspacePath,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId,
           projectId: project.id,
           path: workspacePath,
         });
+
         const thread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
           providerId: "codex",
         });
+
         await writeDataDirAgentInstructions({
           content: "# User Rules\n\nPrefer concise progress updates.\n",
           dataDir: harness.config.dataDir,
@@ -1646,11 +2136,14 @@ describe("thread runtime config", () => {
         );
 
         const toolHeader =
-          'The following instructions come from the BB plugin "tooldemo" for its tool "demo_lookup":';
+          'The following instructions come from the Omnyo plugin "tooldemo" for its tool "demo_lookup":';
+
         const pluginHeader =
-          'The following instructions come from the BB plugin "connect":';
+          'The following instructions come from the Omnyo plugin "connect":';
+
         const dataDirHeader =
           "The following user instructions come from <dataDir>/AGENTS.md:";
+
         const instructions = runtimeConfig.instructions;
         expect(instructions).toContain(toolHeader);
         expect(instructions).toContain("Call demo_lookup before guessing.");
@@ -1672,21 +2165,25 @@ describe("thread runtime config", () => {
       await withTestHarness(async (harness) => {
         const hostId = "host-runtime-plugin-instr-edge";
         seedHostSession(harness.deps, { id: hostId });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId,
           path: "/tmp/runtime-plugin-instr-edge",
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId,
           projectId: project.id,
           path: "/tmp/runtime-plugin-instr-edge",
         });
+
         const thread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
         });
 
-        const longBody = "x".repeat(5000);
+        const globalInstructions = "g".repeat(15_700);
+        const longBody = "x".repeat(40_000);
         stubContributions({
           instructions: [
             {
@@ -1702,6 +2199,10 @@ describe("thread runtime config", () => {
               provider: () => {
                 throw new Error("provider boom");
               },
+            },
+            {
+              pluginId: "global",
+              provider: () => globalInstructions,
             },
             {
               pluginId: "verbose",
@@ -1730,24 +2231,25 @@ describe("thread runtime config", () => {
 
         const instructions = runtimeConfig.instructions;
         expect(instructions).not.toContain(
-          'The following instructions come from the BB plugin "nuller":',
+          'The following instructions come from the Omnyo plugin "nuller":',
         );
         expect(instructions).not.toContain(
-          'The following instructions come from the BB plugin "blank":',
+          'The following instructions come from the Omnyo plugin "blank":',
         );
         expect(instructions).not.toContain(
-          'The following instructions come from the BB plugin "boom":',
+          'The following instructions come from the Omnyo plugin "boom":',
         );
         expect(instructions).toContain(
-          'The following instructions come from the BB plugin "verbose":',
+          'The following instructions come from the Omnyo plugin "verbose":',
         );
         expect(instructions).toContain(
-          'The following instructions come from the BB plugin "ok":',
+          'The following instructions come from the Omnyo plugin "ok":',
         );
         expect(instructions).toContain("still contributes");
         expect(instructions).not.toContain(longBody);
-        expect(instructions).toContain("x".repeat(4096));
-        expect(instructions).not.toContain("x".repeat(4097));
+        expect(instructions).toContain(globalInstructions);
+        expect(instructions).toContain("x".repeat(32_768));
+        expect(instructions).not.toContain("x".repeat(32_769));
       });
     });
   });

@@ -21,6 +21,7 @@ import {
   type ModalSandboxClient,
   type ModalSandboxClientFactory,
   type ModalSandboxHandle,
+  ModalOwnershipError,
 } from "./client.js";
 import type {
   SandboxBackend,
@@ -73,7 +74,9 @@ export interface ModalSandboxBackendDeps {
 }
 
 const MODAL_API_RETRY_LIMIT = 3;
+
 const MODAL_API_RETRY_MS = 1_000;
+
 const SNAPSHOT_TIMEOUT_MS = 300_000;
 
 function requireRestorableSnapshot(resource: ModalMachineResource): string {
@@ -85,9 +88,11 @@ function requireRestorableSnapshot(resource: ModalMachineResource): string {
       "Modal compute is missing. Refusing automatic recovery from a potentially stale snapshot.",
     );
   }
+
   if (resource.snapshotImageId === null) {
     throw new Error("The Modal sandbox has no restorable snapshot.");
   }
+
   return resource.snapshotImageId;
 }
 
@@ -96,20 +101,25 @@ function resolveLaunchSelection(
   options: Awaited<ReturnType<ModalLaunchOptionsStore["get"]>>,
 ): { preset: SandboxPreset | null; image: ModalImage } {
   const presetName = inputs.preset ?? options.presets[0]?.name;
+
   const preset =
     presetName === undefined
       ? null
       : (options.presets.find((entry) => entry.name === presetName) ?? null);
+
   if (presetName !== undefined && preset === null) {
     throw new Error(
       `The Modal sandbox preset "${presetName}" is not configured.`,
     );
   }
+
   const imageName = inputs.image ?? options.images[0]?.name;
   const image = options.images.find((entry) => entry.name === imageName);
+
   if (image === undefined) {
     throw new Error(`The Modal image "${imageName ?? ""}" is not configured.`);
   }
+
   return { preset, image };
 }
 
@@ -120,19 +130,25 @@ export function createModalSandboxBackend(
 
   async function requireSettings(): Promise<ResolvedSettings> {
     const resolved = await deps.currentSettings();
+
     if (!resolved.ok) throw new Error(resolved.message);
+
     return resolved.settings;
   }
 
   function clientFor(resolved: ResolvedSettings): ModalSandboxClient {
     const token = `${resolved.tokenId}:${resolved.tokenSecret}`;
+
     if (cachedClient?.token === token) return cachedClient.client;
     cachedClient?.client.close();
+
     const client = deps.clientFactory({
       tokenId: resolved.tokenId,
       tokenSecret: resolved.tokenSecret,
     });
+
     cachedClient = { token, client };
+
     return client;
   }
 
@@ -145,7 +161,12 @@ export function createModalSandboxBackend(
         return await operation();
       } catch (error) {
         signal.throwIfAborted();
-        if (attempt >= MODAL_API_RETRY_LIMIT) throw error;
+
+        if (
+          error instanceof ModalOwnershipError ||
+          attempt >= MODAL_API_RETRY_LIMIT
+        )
+          throw error;
         await deps.sleep(MODAL_API_RETRY_MS * attempt);
       }
     }
@@ -156,15 +177,19 @@ export function createModalSandboxBackend(
     resolved: ResolvedSettings,
   ): Promise<ModalSandboxHandle | null> {
     const client = clientFor(resolved);
+
     if (resource.accountIdentity !== (await client.accountIdentity())) {
       throw new Error(
         "Restore the machine’s pinned Modal account before lifecycle operations",
       );
     }
+
     if (resource.sandboxId !== null) {
-      const byId = await client.fromId(resource.sandboxId);
+      const byId = await client.fromId(resource.sandboxId, resource.key);
+
       if (byId !== null) return byId;
     }
+
     return client.fromName(resource.appName, resource.key);
   }
 
@@ -174,12 +199,15 @@ export function createModalSandboxBackend(
     checkpoint?: (resource: ModalMachineResource) => Promise<void>,
   ): Promise<ModalMachineResource> {
     const client = clientFor(resolved);
+
     if (resource.accountIdentity !== (await client.accountIdentity())) {
       throw new Error(
         "Restore the machine’s pinned Modal account before snapshot cleanup",
       );
     }
+
     let current = resource;
+
     for (const imageId of resource.pendingSnapshotImageIds) {
       if (imageId === resource.snapshotImageId) continue;
       await client.deleteSnapshot(imageId);
@@ -191,6 +219,7 @@ export function createModalSandboxBackend(
       };
       await checkpoint?.(current);
     }
+
     return current;
   }
 
@@ -215,6 +244,7 @@ export function createModalSandboxBackend(
     },
     async availability() {
       const resolved = await deps.currentSettings();
+
       return resolved.ok
         ? { status: "available" }
         : { status: "setup-required", message: resolved.message };
@@ -222,6 +252,7 @@ export function createModalSandboxBackend(
     async validate(inputs) {
       try {
         resolveLaunchSelection(inputs, await deps.launchOptions.get());
+
         return { action: "accept" };
       } catch (error) {
         return { action: "refuse", message: errorMessage(error) };
@@ -230,13 +261,22 @@ export function createModalSandboxBackend(
     async create(context) {
       const resolved = await requireSettings();
       const client = clientFor(resolved);
+
       const selection = resolveLaunchSelection(
         context.inputs,
         await deps.launchOptions.get(),
       );
+
       context.signal.throwIfAborted();
+
       const accountIdentity = await retryModalApi(
         () => client.accountIdentity(),
+        context.signal,
+      );
+
+      context.signal.throwIfAborted();
+      await retryModalApi(
+        () => client.validateOwnership(resolved.appName, context.key),
         context.signal,
       );
       context.signal.throwIfAborted();
@@ -246,6 +286,7 @@ export function createModalSandboxBackend(
           : `Using the ${selection.image.name} Modal image…`,
       );
       const selectedImage = selection.image;
+
       const imageId =
         selectedImage.source === "image-id"
           ? selectedImage.imageId
@@ -260,10 +301,13 @@ export function createModalSandboxBackend(
                 }),
               context.signal,
             );
+
       context.signal.throwIfAborted();
       context.report.step("Creating the sandbox…");
+
       const sandbox = await retryModalApi(async () => {
         const existing = await client.fromName(resolved.appName, context.key);
+
         return (
           existing ??
           client.create({
@@ -274,42 +318,50 @@ export function createModalSandboxBackend(
             cpu: selection.preset?.cpu ?? DEFAULT_SANDBOX_SIZE.cpu,
             memoryMiB:
               selection.preset?.memoryMiB ?? DEFAULT_SANDBOX_SIZE.memoryMiB,
-            tags: { bbMachineKey: context.key },
+            tags: { omnyoMachineKey: context.key },
           })
         );
       }, context.signal);
+
       context.report.log(
         `Modal sandbox ${sandbox.sandboxId} uses image ${imageId}\n`,
       );
+
       const resource: ModalMachineResource = {
         imageId,
         accountIdentity,
         appName: resolved.appName,
         cpu: selection.preset?.cpu ?? DEFAULT_SANDBOX_SIZE.cpu,
-        memoryMiB: selection.preset?.memoryMiB ?? DEFAULT_SANDBOX_SIZE.memoryMiB,
+        memoryMiB:
+          selection.preset?.memoryMiB ?? DEFAULT_SANDBOX_SIZE.memoryMiB,
         key: context.key,
         sandboxId: sandbox.sandboxId,
         snapshotImageId: null,
         snapshotSandboxId: null,
         pendingSnapshotImageIds: [],
       };
+
       await context.checkpoint(resource);
       context.signal.throwIfAborted();
+
       return { resource, executor: createModalSandboxExecutor(sandbox) };
     },
     async reconcileCleanup(context: SandboxOperationContext & { key: string }) {
       const resolved = await requireSettings();
       context.signal.throwIfAborted();
       const client = clientFor(resolved);
+
       for await (const sandbox of client.listByKey(context.key)) {
         context.signal.throwIfAborted();
         await sandbox.terminate();
-        if ((await client.fromId(sandbox.sandboxId)) !== null) {
+
+        if ((await client.fromId(sandbox.sandboxId, context.key)) !== null) {
           throw new Error(
             "The Modal allocation is still present; retry cleanup.",
           );
         }
       }
+
       context.signal.throwIfAborted();
     },
     async suspend(
@@ -317,23 +369,29 @@ export function createModalSandboxBackend(
     ): Promise<ModalMachineResource> {
       const resolved = await requireSettings();
       const sandbox = await findSandbox(context.resource, resolved);
+
       if (sandbox === null) {
         requireRestorableSnapshot(context.resource);
+
         return deletePendingSnapshots(
           context.resource,
           resolved,
           context.checkpoint,
         );
       }
+
       context.report.step("Snapshotting the filesystem…");
       const snapshotStartedAt = deps.now();
+
       const snapshotImageId = await sandbox.snapshotFilesystem({
         timeoutMs: SNAPSHOT_TIMEOUT_MS,
         ttlMs: null,
       });
+
       context.report.log(
         `Saved Modal filesystem snapshot ${snapshotImageId} in ${deps.now() - snapshotStartedAt} ms`,
       );
+
       const checkpoint = {
         ...context.resource,
         snapshotImageId,
@@ -348,6 +406,7 @@ export function createModalSandboxBackend(
           ]),
         ],
       } satisfies ModalMachineResource;
+
       await context.checkpoint(checkpoint);
       await sandbox.terminate();
       context.report.log(
@@ -355,12 +414,15 @@ export function createModalSandboxBackend(
       );
       const suspended = { ...checkpoint, sandboxId: null };
       await context.checkpoint(suspended);
+
       return deletePendingSnapshots(suspended, resolved, context.checkpoint);
     },
     async resume(context) {
       const resolved = await requireSettings();
-      let resource = await deletePendingSnapshots(context.resource, resolved);
+      let resource = context.resource;
       let sandbox = await findSandbox(resource, resolved);
+      resource = await deletePendingSnapshots(resource, resolved);
+
       if (sandbox === null) {
         const snapshotImageId = requireRestorableSnapshot(resource);
         context.report.step("Restoring the sandbox…");
@@ -371,14 +433,16 @@ export function createModalSandboxBackend(
           timeoutMs: SANDBOX_LIFETIME_MS,
           cpu: resource.cpu,
           memoryMiB: resource.memoryMiB,
-          tags: { bbMachineKey: resource.key },
+          tags: { omnyoMachineKey: resource.key },
         });
         context.report.log(
           `Restored Modal sandbox ${sandbox.sandboxId} from image ${snapshotImageId}\n`,
         );
       }
+
       resource = { ...resource, sandboxId: sandbox.sandboxId };
       await context.checkpoint(resource);
+
       return { resource, executor: createModalSandboxExecutor(sandbox) };
     },
     async remove(
@@ -388,9 +452,11 @@ export function createModalSandboxBackend(
       const sandbox = await findSandbox(context.resource, resolved);
       await sandbox?.terminate();
       const snapshots = new Set(context.resource.pendingSnapshotImageIds);
+
       if (context.resource.snapshotImageId !== null) {
         snapshots.add(context.resource.snapshotImageId);
       }
+
       for (const imageId of snapshots) {
         await clientFor(resolved).deleteSnapshot(imageId);
       }
@@ -404,9 +470,12 @@ export function createModalSandboxBackend(
     },
     async connectionStatus() {
       const resolved = await deps.currentSettings();
+
       if (!resolved.ok) return { available: false, message: resolved.message };
+
       try {
         await clientFor(resolved.settings).accountIdentity();
+
         return {
           available: true,
           message: `Connected to Modal (${resolved.settings.appName})`,
@@ -417,11 +486,13 @@ export function createModalSandboxBackend(
     },
     async debugContext() {
       const settings = await requireSettings();
+
       return { client: clientFor(settings), settings };
     },
     async inspect(resource) {
       const resolved = await requireSettings();
       const sandbox = await findSandbox(resource, resolved);
+
       const observation =
         sandbox === null
           ? null
@@ -430,11 +501,13 @@ export function createModalSandboxBackend(
               appName: resource.appName,
               key: resource.key,
             });
+
       const state: "running" | "suspended" | "missing" = observation?.running
         ? "running"
         : resource.sandboxId === null && resource.snapshotImageId !== null
           ? "suspended"
           : "missing";
+
       return {
         summary:
           state === "missing"

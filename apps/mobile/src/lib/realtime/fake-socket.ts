@@ -62,17 +62,21 @@ export interface FakeSocketFactory extends RealtimeSocketFactory {
 
 export function createFakeSocketFactory(): FakeSocketFactory {
   const sockets: FakeSocket[] = [];
+
   return Object.assign(
     (url: string) => {
       const socket = new FakeSocket(url);
       sockets.push(socket);
+
       return socket;
     },
     {
       sockets,
       latest(): FakeSocket {
         const socket = sockets[sockets.length - 1];
+
         if (!socket) throw new Error("no socket created yet");
+
         return socket;
       },
     },

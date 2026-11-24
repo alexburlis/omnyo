@@ -68,7 +68,9 @@ export function spawnPortablePipedProcess(
     ...request,
     stdio: ["pipe", "pipe", "pipe"],
   });
+
   assertPortablePipedProcess(child);
+
   return child;
 }
 
@@ -79,6 +81,8 @@ export function spawnPortableOutputProcess(
     ...request,
     stdio: ["ignore", "pipe", "pipe"],
   });
+
   assertPortableOutputProcess(child);
+
   return child;
 }

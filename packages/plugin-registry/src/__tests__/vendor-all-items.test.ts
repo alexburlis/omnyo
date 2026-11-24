@@ -10,11 +10,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildPluginApp, resolvePluginBuildToolchain } from "@bb/plugin-build";
+import {
+  buildPluginApp,
+  resolvePluginBuildToolchain,
+} from "@omnyo/plugin-build";
 
 function testToolchain() {
   return resolvePluginBuildToolchain(
-    path.join(os.tmpdir(), "bb-toolchain-unused"),
+    path.join(os.tmpdir(), "omnyo-toolchain-unused"),
   );
 }
 
@@ -23,7 +26,9 @@ const packageRoot = path.join(
   "..",
   "..",
 );
+
 const registryDir = path.join(packageRoot, "r");
+
 let fixtureDir: string;
 
 interface RegistryItemFile {
@@ -45,31 +50,38 @@ afterAll(async () => {
 });
 
 describe("plugin component registry", () => {
-  it("every item vendors into a plugin that bb plugin build compiles", async () => {
+  it("every item vendors into a plugin that omnyo plugin build compiles", async () => {
     const itemNames: string[] = [];
+
     for (const fileName of (await readdir(registryDir)).sort()) {
       if (fileName === "index.json") continue;
+
       const item = JSON.parse(
         await readFile(path.join(registryDir, fileName), "utf8"),
       ) as RegistryItem;
+
       itemNames.push(item.name);
+
       for (const file of item.files ?? []) {
         const target = path.join(fixtureDir, file.target);
         await mkdir(path.dirname(target), { recursive: true });
         await writeFile(target, file.content);
       }
     }
+
     expect(itemNames.length).toBeGreaterThanOrEqual(50);
 
     const uiFiles = (
       await readdir(path.join(fixtureDir, "components", "ui"))
     ).filter((name) => name.endsWith(".tsx") || name.endsWith(".ts"));
+
     const imports = uiFiles
       .map(
         (name, i) =>
           `import * as m${i} from "./components/ui/${name.replace(/\.tsx?$/, "")}";`,
       )
       .join("\n");
+
     await writeFile(
       path.join(fixtureDir, "app.tsx"),
       `${imports}\n` +
@@ -82,10 +94,10 @@ describe("plugin component registry", () => {
       path.join(fixtureDir, "package.json"),
       JSON.stringify(
         {
-          name: "bb-plugin-registry-fixture",
+          name: "omnyo-plugin-registry-fixture",
           version: "0.0.0",
           type: "module",
-          bb: {
+          omnyo: {
             name: "Registry vendor fixture",
             description:
               "Verify every registry item can be vendored and bundled.",
@@ -124,15 +136,17 @@ describe("plugin component registry", () => {
     );
 
     const js = await readFile(result.jsPath, "utf8");
-    expect(js).toContain("globalThis.__bbPluginRuntime");
+    expect(js).toContain("globalThis.__omnyoPluginRuntime");
+
     for (const slot of ["radixDialog", "radixAlertDialog", "vaul"]) {
       expect(js).toContain(`.${slot}`);
     }
+
     expect(js).not.toMatch(/from\s*["']react["']/);
 
     const css = await readFile(result.cssPath, "utf8");
     expect(css).toContain(
-      ":where([data-bb-plugin=registry-fixture],[data-bb-plugin-root]:not([data-bb-plugin]))",
+      ":where([data-omnyo-plugin=registry-fixture],[data-omnyo-plugin-root]:not([data-omnyo-plugin]))",
     );
     expect(css).toMatch(/var\(--background\)/);
   });

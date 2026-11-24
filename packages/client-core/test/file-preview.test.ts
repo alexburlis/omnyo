@@ -18,6 +18,7 @@ describe("file-preview", () => {
       path: "notes.txt",
       url: "/files/notes.txt",
     });
+
     const detectedUtf8Preview = buildFilePreview({
       contentBytes: new TextEncoder().encode('{"ok":true}\n'),
       mimeType: "application/octet-stream",
@@ -104,6 +105,7 @@ describe("file-preview", () => {
       path: "broken.txt",
       url: "/files/broken.txt",
     });
+
     const binaryPreview = buildFilePreview({
       contentBytes: Uint8Array.from([0, 1, 2, 3]),
       mimeType: "application/octet-stream",
@@ -228,12 +230,14 @@ describe("file-preview", () => {
       path: "docs/notes.md",
       url: "/files/docs/notes.md",
     });
+
     const markdownByMime = buildFilePreview({
       contentBytes: new TextEncoder().encode("# Notes\n"),
       mimeType: "text/markdown",
       path: "docs/notes",
       url: "/files/docs/notes",
     });
+
     const plainText = buildFilePreview({
       contentBytes: new TextEncoder().encode("# Notes\n"),
       mimeType: "text/plain",
@@ -253,12 +257,14 @@ describe("file-preview", () => {
       path: "reports/scores.csv",
       url: "/files/reports/scores.csv",
     });
+
     const csvByMime = buildFilePreview({
       contentBytes: new TextEncoder().encode("name,score\nAda,10\n"),
       mimeType: "text/csv",
       path: "reports/scores",
       url: "/files/reports/scores",
     });
+
     const plainText = buildFilePreview({
       contentBytes: new TextEncoder().encode("name,score\nAda,10\n"),
       mimeType: "text/plain",

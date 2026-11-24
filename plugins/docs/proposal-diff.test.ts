@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import Table from "@tiptap/extension-table";
+import { Table } from "@tiptap/extension-table";
 import TableRow from "@tiptap/extension-table-row";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
@@ -10,11 +10,12 @@ import { TextSelection } from "@tiptap/pm/state";
 import { afterEach, describe, expect, it } from "vitest";
 import { createProposalDiff, proposalDiffKey } from "./proposal-diff";
 
-const editors: Editor[] = [];
+const editors: Array<{ editor: Editor; element: HTMLElement }> = [];
+
 afterEach(() => {
-  for (const editor of editors.splice(0)) {
+  for (const { editor, element } of editors.splice(0)) {
     editor.destroy();
-    editor.options.element.remove();
+    element.remove();
   }
 });
 
@@ -22,6 +23,7 @@ function fixture(before: string, after: string) {
   let base: ProseMirrorNode | null = null;
   const element = document.createElement("div");
   document.body.append(element);
+
   const editor = new Editor({
     element,
     extensions: [
@@ -34,9 +36,11 @@ function fixture(before: string, after: string) {
     ],
     content: before,
   });
-  editors.push(editor);
+
+  editors.push({ editor, element });
   base = editor.state.doc;
   editor.commands.setContent(after);
+
   return {
     editor,
     clear: () => {
@@ -60,6 +64,7 @@ describe("proposal decorations", () => {
       "<p>A <strong>simple place</strong> for ideas.</p>",
       "<p>A <strong>calmer space</strong> for ideas.</p>",
     );
+
     expect(removed(editor)).toBe("simple place");
     expect(
       editor.view.dom.querySelector("[data-proposal-removed] strong"),
@@ -81,6 +86,7 @@ describe("proposal decorations", () => {
       "<h2>Heading</h2><p>Remove this block.</p><p>Unchanged tail.</p>",
       "<p>New introduction.</p><h2>Heading</h2><p>Unchanged tail.</p>",
     );
+
     expect(removed(editor)).toBe("Remove this block.");
     expect(
       editor.view.dom.querySelector("[data-proposal-added]")?.textContent,
@@ -98,6 +104,7 @@ describe("proposal decorations", () => {
       "<ul><li><p>old item</p></li></ul><pre><code>before()</code></pre><table><tr><td><p>plain</p></td></tr></table>",
       "<ul><li><p>new item</p></li></ul><pre><code>after()</code></pre><table><tr><td><p><strong>plain</strong></p></td></tr></table>",
     );
+
     expect(editor.getHTML()).toContain("<ul><li><p>new item</p></li></ul>");
     expect(editor.getHTML()).toContain("<pre><code>after()</code></pre>");
     expect(editor.getHTML()).toContain("<strong>plain</strong>");
@@ -114,6 +121,7 @@ describe("proposal decorations", () => {
       "<p>A simple place.</p>",
       "<p>A calmer space.</p>",
     );
+
     editor.view.dispatch(
       editor.state.tr
         .setSelection(TextSelection.create(editor.state.doc, 6))
@@ -130,6 +138,7 @@ describe("proposal decorations", () => {
     const { editor } = fixture("<p>A old B</p>", "<p>A B</p>");
     const deleted = editor.view.dom.querySelector("[data-proposal-removed]");
     expect(deleted).not.toBeNull();
+
     if (!deleted) return;
     const position = editor.view.posAtDOM(deleted, 0);
     editor.view.dispatch(
@@ -139,12 +148,14 @@ describe("proposal decorations", () => {
     );
     const current = editor.view.dom.querySelector("[data-proposal-removed]");
     const selection = document.getSelection();
+
     if (!current || !selection) throw new Error("Missing selection fixture");
     const range = document.createRange();
     range.setStartAfter(current);
     range.collapse(true);
     selection.removeAllRanges();
     selection.addRange(range);
+
     const press = () =>
       editor.view.someProp("handleKeyDown", (handler) =>
         handler(
@@ -152,12 +163,14 @@ describe("proposal decorations", () => {
           new KeyboardEvent("keydown", { key: "Backspace" }),
         ),
       );
+
     expect(press()).toBe(true);
     expect(editor.state.doc.textContent).toBe("A B");
     expect(proposalDiffKey.getState(editor.state)?.beforeDeletion).toBe(
       position,
     );
     const next = editor.view.dom.querySelector("[data-proposal-removed]");
+
     if (!next) throw new Error("Missing deletion");
     range.setStartBefore(next);
     range.collapse(true);
@@ -174,6 +187,7 @@ describe("proposal decorations", () => {
       `<p>${"a".repeat(12000)}</p>`,
       `<p>${"b".repeat(12000)}</p>`,
     );
+
     expect(removed(editor)).toBe("a".repeat(12000));
     expect(editor.state.doc.textContent).toBe("b".repeat(12000));
     expect(editor.getHTML()).not.toContain("data-proposal");

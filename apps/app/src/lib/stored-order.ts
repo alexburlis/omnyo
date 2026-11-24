@@ -1,4 +1,4 @@
-import { arrayMove } from "@bb/client-core";
+import { arrayMove } from "@omnyo/client-core";
 
 interface ArrangeByStoredOrderArgs<TItem> {
   items: readonly TItem[];
@@ -20,15 +20,19 @@ export function arrangeByStoredOrder<TItem>({
   const ordered: TItem[] = [];
   const normalizedOrder: string[] = [];
   const seen = new Set<string>();
+
   for (const id of storedOrder) {
     if (seen.has(id)) continue;
     seen.add(id);
     normalizedOrder.push(id);
     const item = byId.get(id);
+
     if (item) ordered.push(item);
   }
+
   for (const item of items) {
     const id = getId(item);
+
     if (seen.has(id)) continue;
     seen.add(id);
     normalizedOrder.push(id);
@@ -41,10 +45,7 @@ export function arrangeByStoredOrder<TItem>({
 type ReorderStoredOrderArgs<TId extends string> = {
   order: readonly TId[];
   visibleIds: readonly TId[];
-} & (
-  | { activeId: string; overId: string }
-  | { nextVisibleIds: readonly TId[] }
-);
+} & ({ activeId: string; overId: string } | { nextVisibleIds: readonly TId[] });
 
 export function reorderStoredOrder<TId extends string>(
   args: ReorderStoredOrderArgs<TId>,
@@ -52,8 +53,10 @@ export function reorderStoredOrder<TId extends string>(
   const { order, visibleIds } = args;
   const visibleSet = new Set(visibleIds);
   let nextVisible: readonly TId[];
+
   if ("nextVisibleIds" in args) {
     nextVisible = args.nextVisibleIds;
+
     if (
       nextVisible.length !== visibleIds.length ||
       new Set(nextVisible).size !== visibleSet.size ||
@@ -65,10 +68,13 @@ export function reorderStoredOrder<TId extends string>(
   } else {
     const from = visibleIds.findIndex((id) => id === args.activeId);
     const to = visibleIds.findIndex((id) => id === args.overId);
+
     if (from === -1 || to === -1 || from === to) return null;
     nextVisible = arrayMove(visibleIds, from, to);
   }
+
   let cursor = 0;
+
   return order.map((id) => (visibleSet.has(id) ? nextVisible[cursor++] : id));
 }
 

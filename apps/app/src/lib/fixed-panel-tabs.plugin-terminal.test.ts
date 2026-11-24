@@ -29,7 +29,9 @@ describe("plugin right-panel Terminal tabs", () => {
       pluginId: "tasks",
       title: "Navigation",
     });
+
     const terminal = createTerminalFixedPanelTab({ terminalId: "term_2" });
+
     const after = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://example.com",

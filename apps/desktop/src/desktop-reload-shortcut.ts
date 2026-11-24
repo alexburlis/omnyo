@@ -25,5 +25,6 @@ export function resolveDesktopReloadShortcut(
   ) {
     return null;
   }
+
   return input.shift ? "force-reload" : "reload";
 }

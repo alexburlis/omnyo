@@ -23,9 +23,11 @@ function renderBatchMessage(args: {
   items: ChildThreadTurnNotificationBatchItem[];
 }): string {
   const [input] = buildChildThreadTurnStatusBatchInput(args);
+
   if (!input || input.type !== "text") {
     throw new Error("Expected one text input");
   }
+
   return input.text;
 }
 
@@ -134,7 +136,7 @@ describe("child thread notifications", () => {
 
     expect(message).toContain(
       [
-        "[bb system]",
+        "[Omnyo system]",
         "",
         "Child thread updates:",
         "",
@@ -172,9 +174,11 @@ describe("child thread notifications", () => {
 
     expect(input).toHaveLength(1);
     const [textInput] = input;
+
     if (!textInput || textInput.type !== "text") {
       throw new Error("Expected one text input");
     }
+
     expect(textInput).toEqual({
       type: "text",
       text: expect.stringContaining("@thread:thr_child_one"),
@@ -212,6 +216,7 @@ describe("child thread notifications", () => {
 
   it("does not render raw title suffixes next to rich thread mentions", () => {
     const nestedToken = "@thread:thr_child_two";
+
     const input = buildChildThreadTurnStatusBatchInput({
       items: [
         {
@@ -237,6 +242,7 @@ describe("child thread notifications", () => {
 
     expect(input).toHaveLength(1);
     const [textInput] = input;
+
     if (!textInput || textInput.type !== "text") {
       throw new Error("Expected one text input");
     }
@@ -351,9 +357,11 @@ describe("child thread notifications", () => {
 
     expect(input).toHaveLength(1);
     const [textInput] = input;
+
     if (!textInput || textInput.type !== "text") {
       throw new Error("Expected one text input");
     }
+
     const threadMention = "@thread:thr_child";
     const mentionStart = textInput.text.indexOf(threadMention);
     expect(textInput.mentions).toEqual([
@@ -383,6 +391,7 @@ describe("child thread notifications", () => {
     });
 
     const [textInput] = input;
+
     if (!textInput || textInput.type !== "text") {
       throw new Error("Expected one text input");
     }

@@ -28,10 +28,13 @@ export function buildMarkdownMessageLinkRouting({
   }
 
   const routing: MarkdownLinkRouting = {};
+
   if (onOpenLink !== undefined) {
     routing.onOpenLink = onOpenLink;
   }
+
   if (threadId !== undefined) {
+    routing.previewThreadId = threadId;
     routing.localImage = {
       absolutePaths: { kind: "trusted-host" },
       resolveSrc: ({ path }) => buildThreadHostFileContentUrl(threadId, path),
@@ -45,18 +48,22 @@ export function buildMarkdownMessageLinkRouting({
           }),
     };
   }
+
   if (onOpenLocalFileLink !== undefined) {
     const localFile: MarkdownLocalFileLinkRouting = {
       absoluteLinks: { kind: "trusted-host" },
       onOpenLink: onOpenLocalFileLink,
     };
+
     if (workspaceRootPath !== undefined) {
       localFile.relativeLinks = {
         baseDir: workspaceRootPath,
         rootPath: workspaceRootPath,
       };
     }
+
     routing.localFile = localFile;
   }
+
   return routing;
 }

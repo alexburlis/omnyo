@@ -2,7 +2,7 @@ import {
   GENERATED_ID_ALPHABET,
   GENERATED_ID_SUFFIX_LENGTH,
   isRawThreadId,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 export interface PastedThreadLink {
   from: number;
@@ -19,15 +19,17 @@ const threadPathPattern = new RegExp(
 
 function parseThreadLink(
   text: string,
-  origin: string,
+  origins: readonly string[],
 ): Pick<PastedThreadLink, "threadId" | "projectId"> | null {
   const parts = /^https?:\/\/([^/]+)(\/[^?#]*)$/iu.exec(text);
+
   if (parts === null || /[@\\]/u.test(parts[1]!)) return null;
   const path = threadPathPattern.exec(parts[2]!);
+
   if (path === null || !isRawThreadId(path[2]!)) return null;
 
   try {
-    if (new URL(text).origin !== origin) return null;
+    if (!origins.includes(new URL(text).origin)) return null;
   } catch {
     return null;
   }
@@ -37,31 +39,36 @@ function parseThreadLink(
 
 export function findPastedThreadLinkCandidates({
   text,
-  origin,
+  origins,
   offset = 0,
   allowMarkdownSuffix = true,
 }: {
   text: string;
-  origin: string;
+  origins: readonly string[];
   offset?: number;
   allowMarkdownSuffix?: boolean;
 }): PastedThreadLink[] {
   const links: PastedThreadLink[] = [];
+
   for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/giu)) {
     const previous = text[match.index - 1];
+
     if (
       previous !== undefined &&
       /[\p{Letter}\p{Number}_/@\\=+%:.-]/u.test(previous)
     ) {
       continue;
     }
+
     const value = match[0].replace(
       allowMarkdownSuffix
         ? /[.,;:!)\]}*_~\u2019\u201d\u2026\u3002\uff0c\uff01\uff1b\uff1a\uff1f]+$/u
         : /[.,;:!)\]}\u2019\u201d\u2026\u3002\uff0c\uff01\uff1b\uff1a\uff1f]+$/u,
       "",
     );
-    const identity = parseThreadLink(value, origin);
+
+    const identity = parseThreadLink(value, origins);
+
     if (identity === null) continue;
     links.push({
       from: offset + match.index,
@@ -70,5 +77,6 @@ export function findPastedThreadLinkCandidates({
       ...identity,
     });
   }
+
   return links;
 }

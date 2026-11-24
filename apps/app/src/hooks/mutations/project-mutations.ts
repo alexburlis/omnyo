@@ -5,7 +5,7 @@ import type {
   ReorderProjectRequest,
   UpdateProjectRequest,
   UploadedPromptAttachment,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { sdk } from "@/lib/sdk";
 import { registerLocalAttachmentPreview } from "@/lib/attachment-local-previews";
 import {
@@ -45,6 +45,7 @@ interface ReorderProjectMutationRequest extends ReorderProjectRequest {
 }
 
 interface UploadPromptAttachmentRequest {
+  signal?: AbortSignal;
   projectId: string;
   file: File;
 }
@@ -216,12 +217,16 @@ export function useUploadPromptAttachment() {
     mutationFn: async ({
       projectId,
       file,
+      signal,
     }: UploadPromptAttachmentRequest): Promise<UploadedPromptAttachment> => {
       const uploaded = await sdk.projects.attachments.upload({
         projectId,
         clientFile: file,
+        signal,
       });
+
       registerLocalAttachmentPreview(uploaded.path, file);
+
       return uploaded;
     },
     retry: false,

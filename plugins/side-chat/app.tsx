@@ -1,5 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { EmptyStateBlock } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import {
   definePluginApp,
@@ -10,9 +12,10 @@ import {
   type PluginThreadPanelActionContext,
   type PluginThreadPanelProps,
   type ThreadChatMessageAction,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 
 const PLUGIN_ID = "side-chat";
+
 const PANEL_ACTION_ID = "side-chat";
 
 const PANEL_TAB_TITLE = "Side chat";
@@ -28,7 +31,9 @@ export function parsePanelParams(value: unknown): SideChatPanelParams | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
+
   const record = value as Record<string, unknown>;
+
   if (
     typeof record.threadId !== "string" ||
     record.threadId.length === 0 ||
@@ -37,6 +42,7 @@ export function parsePanelParams(value: unknown): SideChatPanelParams | null {
   ) {
     return null;
   }
+
   return {
     threadId: record.threadId,
     sourceThreadId: record.sourceThreadId,
@@ -61,11 +67,13 @@ async function callBackendRpc(
       body: JSON.stringify(input ?? null),
     },
   );
+
   const body = (await response.json().catch(() => null)) as {
     ok?: unknown;
     result?: unknown;
     error?: unknown;
   } | null;
+
   if (!response.ok || body?.ok !== true) {
     const structuredMessage =
       typeof body?.error === "object" &&
@@ -73,10 +81,12 @@ async function callBackendRpc(
       typeof (body.error as { message?: unknown }).message === "string"
         ? String((body.error as { message: string }).message)
         : null;
+
     throw new Error(
       structuredMessage ?? `rpc "${method}" failed (HTTP ${response.status})`,
     );
   }
+
   return body.result;
 }
 
@@ -88,6 +98,7 @@ function createdThreadId(result: unknown): string {
   ) {
     return (result as { threadId: string }).threadId;
   }
+
   throw new Error("Plugin returned an unexpected createSideChat response.");
 }
 
@@ -114,15 +125,18 @@ function openKey({
 function openSideChat(args: OpenSideChatArgs): Promise<void> {
   const key = openKey(args);
   const pending = inFlightOpens.get(key);
+
   if (pending !== undefined) {
     return pending;
   }
+
   const run = createAndOpenSideChat(args);
   inFlightOpens.set(key, run);
   run.then(
     () => inFlightOpens.delete(key),
     () => inFlightOpens.delete(key),
   );
+
   return run;
 }
 
@@ -133,6 +147,7 @@ async function createAndOpenSideChat({
   openPanel,
 }: OpenSideChatArgs): Promise<void> {
   let threadId: string;
+
   try {
     threadId = createdThreadId(
       await callBackendRpc("createSideChat", {
@@ -149,6 +164,7 @@ async function createAndOpenSideChat({
     );
     throw error;
   }
+
   openPanel({
     title: PANEL_TAB_TITLE,
     params: {
@@ -162,37 +178,35 @@ async function createAndOpenSideChat({
 
 function ReplyingTo({ anchorText }: { anchorText: string }) {
   const trimmed = anchorText.trim();
+  const quoteId = useId();
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
+
   const measureRef = useCallback((node: HTMLDivElement | null) => {
     if (node !== null) {
       setOverflows(node.scrollHeight > node.clientHeight + 1);
     }
   }, []);
+
   if (trimmed.length === 0) {
     return null;
   }
+
   const clamped = !expanded;
+
   return (
-    <div className="mx-1 mb-2 flex flex-col items-start gap-1">
-      <span className="text-xs leading-none text-muted-foreground">
+    <figure className="mx-1 mb-3 flex max-w-full flex-col gap-1.5 rounded-lg border border-border bg-surface-recessed px-2.5 pt-2 pb-2">
+      <figcaption className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <Icon
           name="CornerDownRight"
-          className="mr-1 inline-block size-3 align-middle"
+          aria-hidden="true"
+          className="size-3.5 shrink-0"
         />
         Replying to
-      </span>
-      <div
-        className={`max-w-full rounded-md bg-surface-recessed p-1.5 text-xs leading-5 text-foreground ${
-          overflows ? "cursor-pointer" : ""
-        }`}
-        role={overflows ? "button" : undefined}
-        title={
-          overflows ? (expanded ? "Collapse" : "Show full message") : undefined
-        }
-        onClick={overflows ? () => setExpanded((value) => !value) : undefined}
-      >
+      </figcaption>
+      <blockquote className="max-w-full border-l-2 border-border pl-2.5 text-xs leading-5 text-foreground">
         <div
+          id={quoteId}
           ref={measureRef}
           className={
             clamped
@@ -208,8 +222,25 @@ function ReplyingTo({ anchorText }: { anchorText: string }) {
             className="text-xs leading-5 [&_blockquote]:my-1 [&_h1]:mb-1 [&_h1]:mt-0 [&_h1]:text-sm [&_h2]:mb-1 [&_h2]:mt-0 [&_h2]:text-sm [&_h3]:mb-1 [&_h3]:mt-0 [&_h3]:text-xs [&_li]:mb-0 [&_ol]:mb-1 [&_p]:mb-1 [&_ul]:mb-1"
           />
         </div>
-      </div>
-    </div>
+      </blockquote>
+      {overflows ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="-ml-2 self-start text-muted-foreground"
+          aria-expanded={expanded}
+          aria-controls={quoteId}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <Icon
+            name={expanded ? "ChevronUp" : "ChevronDown"}
+            aria-hidden="true"
+          />
+          {expanded ? "Show less" : "Show full message"}
+        </Button>
+      ) : null}
+    </figure>
   );
 }
 
@@ -220,32 +251,40 @@ function SideChatPanel({ params }: PluginThreadPanelProps) {
   const sourceThreadId = parsed?.sourceThreadId ?? null;
 
   const sendToMain = useCallback(
-    async (message: { text: string; threadId: string }) => {
+    (message: { text: string; threadId: string }) => {
       if (sourceThreadId === null || sideChatThreadId === null) return;
       const text = message.text.trim();
+
       if (text.length === 0) return;
-      try {
-        await sdk.threads.queuedMessages.create({
-          threadId: sourceThreadId,
-          input: [{ type: "text", text, mentions: [] }],
-          senderThreadId: sideChatThreadId,
-        });
-        toast.success("Sent to main thread");
-      } catch (error) {
+
+      const sent = sdk.threads.queuedMessages.create({
+        threadId: sourceThreadId,
+        input: [{ type: "text", text, mentions: [] }],
+        senderThreadId: sideChatThreadId,
+      });
+
+      const id = toast.success("Sent to main thread");
+      sent.catch((error: unknown) => {
         toast.error(
           `Failed to send to main thread: ${
             error instanceof Error ? error.message : String(error)
           }`,
+          { id },
         );
-      }
+      });
     },
     [sdk, sideChatThreadId, sourceThreadId],
   );
 
   if (parsed === null) {
     return (
-      <div className="p-3 text-sm text-muted-foreground" role="alert">
-        This side chat tab is missing its thread reference.
+      <div role="alert" className="flex h-full items-center justify-center">
+        <EmptyStateBlock
+          icon="AlertCircle"
+          tone="error"
+          title="This side chat can’t open"
+          description="This side chat tab is missing its thread reference. Close the tab and start the side chat again from the message."
+        />
       </div>
     );
   }

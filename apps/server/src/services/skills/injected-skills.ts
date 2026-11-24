@@ -3,35 +3,18 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import matter from "gray-matter";
-import { resolveDataDirSkillsRootPath } from "@bb/config/skill-storage-paths";
-import type { HostDaemonInjectedSkillSource } from "@bb/host-daemon-contract";
+import { resolveDataDirSkillsRootPath } from "@omnyo/config/skill-storage-paths";
+import type { HostDaemonInjectedSkillSource } from "@omnyo/host-daemon-contract";
 import { z } from "zod";
+import { injectedSkillMetadataSchema as skillFrontmatterSchema } from "@omnyo/domain";
 import type { ServerLogger } from "../../types.js";
 import { isFsErrorWithCode } from "../lib/fs-errors.js";
 import { joinHostPathSegments } from "../lib/host-path.js";
 import { REGISTRY_SKILL_PROVENANCE_FILE_NAME } from "./registry-skill-provenance.js";
 
 const SKILL_FILE_NAME = "SKILL.md";
-const SKILL_NAME_PATTERN = /^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
-const SKILL_FRONTMATTER_DELIMITER = "---";
 
-const skillFrontmatterSchema = z
-  .object({
-    name: z
-      .string()
-      .max(64)
-      .regex(
-        SKILL_NAME_PATTERN,
-        "Skill name must use lowercase letters, numbers, and single hyphens",
-      ),
-    description: z
-      .string()
-      .max(1024)
-      .refine((value) => value.trim().length > 0, {
-        message: "Skill description must be non-empty",
-      }),
-  })
-  .passthrough();
+const SKILL_FRONTMATTER_DELIMITER = "---";
 
 export interface ResolveInjectedSkillSourcesArgs {
   additionalSkillsRootPaths?: readonly string[];
@@ -56,8 +39,10 @@ export function discoverPluginSkillIds(
   },
 ): ReadonlyMap<string, readonly string[]> {
   const idsByPlugin = new Map<string, Set<string>>();
+
   for (const { pluginId, rootPath } of args.pluginSkillRoots) {
     const ids = idsByPlugin.get(pluginId) ?? new Set<string>();
+
     for (const source of readSkillsRoot({
       logger,
       skillTreeRegistry: args.skillTreeRegistry,
@@ -66,8 +51,10 @@ export function discoverPluginSkillIds(
     })) {
       ids.add(source.name);
     }
+
     idsByPlugin.set(pluginId, ids);
   }
+
   return new Map(
     [...idsByPlugin].map(([pluginId, ids]) => [
       pluginId,
@@ -76,15 +63,27 @@ export function discoverPluginSkillIds(
   );
 }
 
-type SkillCatalogProvenance =
+export type SkillCatalogProvenance =
   | { kind: "builtin" }
   | { kind: "plugin"; pluginId: string }
   | { kind: "project" }
   | { kind: "user" };
 
-export interface ResolvedSkillCatalogEntry {
+export interface SkillMetadataSource {
+  kind: "metadata";
+  sourceType: HostDaemonInjectedSkillSource["sourceType"];
+  name: string;
+  description: string;
+  sourceRootPath: string;
+}
+
+type CatalogSource = HostDaemonInjectedSkillSource | SkillMetadataSource;
+
+export interface ResolvedSkillCatalogEntry<
+  T extends CatalogSource = HostDaemonInjectedSkillSource,
+> {
   provenance: SkillCatalogProvenance;
-  runtimeSource: HostDaemonInjectedSkillSource;
+  runtimeSource: T;
 }
 
 interface ResolveServerOwnedSkillCatalogEntriesArgs {
@@ -98,6 +97,7 @@ export type ProjectInjectedSkillSource = Extract<
   HostDaemonInjectedSkillSource,
   { kind: "workspace-path" }
 >;
+
 export type SharedInjectedSkillSource = Extract<
   HostDaemonInjectedSkillSource,
   { kind: "host-path" }
@@ -160,7 +160,7 @@ interface InvalidSkillLogArgs extends SkillCandidateSource {
 }
 
 interface SkillCollisionLogArgs {
-  colliding: readonly HostDaemonInjectedSkillSource[];
+  colliding: readonly CatalogSource[];
   logger: ServerLogger;
   name: string;
 }
@@ -173,13 +173,25 @@ function compactZodIssues(issues: z.ZodIssue[]): string {
 
 function hasSupportedFrontmatterDelimiter(content: string): boolean {
   const trimmed = content.trimStart();
+
   return (
     trimmed.startsWith(`${SKILL_FRONTMATTER_DELIMITER}\n`) ||
     trimmed.startsWith(`${SKILL_FRONTMATTER_DELIMITER}\r\n`)
   );
 }
 
+const REPORTED_INVALID_SKILL_LIMIT = 1_000;
+
+const reportedInvalidSkills = new Set<string>();
+
 function logInvalidSkill(args: InvalidSkillLogArgs): void {
+  const key = [args.sourceType, args.candidatePath, args.reason].join("\0");
+
+  if (reportedInvalidSkills.has(key)) return;
+
+  if (reportedInvalidSkills.size >= REPORTED_INVALID_SKILL_LIMIT)
+    reportedInvalidSkills.clear();
+  reportedInvalidSkills.add(key);
   args.logger.warn(
     {
       candidatePath: args.candidatePath,
@@ -220,6 +232,7 @@ function collectSkillTreeEntries(
   currentPath = rootPath,
 ): SkillTreeEntry[] {
   const entries: SkillTreeEntry[] = [];
+
   for (const entry of fs
     .readdirSync(currentPath, { withFileTypes: true })
     .sort(sortDirentsByName)) {
@@ -229,24 +242,30 @@ function collectSkillTreeEntries(
     ) {
       continue;
     }
+
     const entryPath = path.join(currentPath, entry.name);
     const stat = fs.lstatSync(entryPath);
+
     if (stat.isSymbolicLink()) {
       throw new Error(`Skill tree contains a symlink: ${entryPath}`);
     }
+
     if (stat.isDirectory()) {
       entries.push(...collectSkillTreeEntries(rootPath, entryPath));
       continue;
     }
+
     if (!stat.isFile()) {
       throw new Error(`Skill tree entry is not a regular file: ${entryPath}`);
     }
+
     entries.push({
       bytes: fs.readFileSync(entryPath),
       mode: stat.mode & 0o777,
       path: normalizeRelativePath(path.relative(rootPath, entryPath)),
     });
   }
+
   return entries;
 }
 
@@ -255,6 +274,7 @@ export function hashSkillTreeEntries(
 ): string {
   const hash = createHash("sha256");
   hash.update("bb-skill-tree-v1");
+
   for (const entry of [...entries].sort((left, right) =>
     compareStringsByCodePoint(left.path, right.path),
   )) {
@@ -267,15 +287,17 @@ export function hashSkillTreeEntries(
     hash.update("\0");
     hash.update(entry.bytes);
   }
+
   return hash.digest("hex");
 }
 
 export function readSkillTreeManifest(rootPath: string): SkillTreeManifest {
   const entries = collectSkillTreeEntries(rootPath);
+
   return { entries, treeHash: hashSkillTreeEntries(entries) };
 }
 
-function sourceRootPath(source: HostDaemonInjectedSkillSource): string {
+function sourceRootPath(source: CatalogSource): string {
   return source.kind === "tree"
     ? `skill-tree:${source.treeHash}`
     : source.sourceRootPath;
@@ -290,6 +312,7 @@ function readSkillCandidate(
 ): HostDaemonInjectedSkillSource | null {
   const skillFilePath = toSkillFilePath(args.candidatePath);
   let skillFileStat;
+
   try {
     skillFileStat = fs.lstatSync(skillFilePath);
   } catch (error) {
@@ -298,8 +321,10 @@ function readSkillCandidate(
         ...args,
         reason: "Missing SKILL.md",
       });
+
       return null;
     }
+
     throw error;
   }
 
@@ -308,26 +333,32 @@ function readSkillCandidate(
       ...args,
       reason: "SKILL.md is a symlink",
     });
+
     return null;
   }
+
   if (!skillFileStat.isFile()) {
     logInvalidSkill({
       ...args,
       reason: "SKILL.md is not a regular file",
     });
+
     return null;
   }
 
   const content = fs.readFileSync(skillFilePath, "utf8");
+
   if (!hasSupportedFrontmatterDelimiter(content)) {
     logInvalidSkill({
       ...args,
       reason: "SKILL.md frontmatter must start with a plain --- delimiter",
     });
+
     return null;
   }
 
   let parsed;
+
   try {
     parsed = matter(content);
   } catch (error) {
@@ -338,15 +369,18 @@ function readSkillCandidate(
           ? error.message
           : "Invalid SKILL.md frontmatter",
     });
+
     return null;
   }
 
   const frontmatter = skillFrontmatterSchema.safeParse(parsed.data);
+
   if (!frontmatter.success) {
     logInvalidSkill({
       ...args,
       reason: compactZodIssues(frontmatter.error.issues),
     });
+
     return null;
   }
 
@@ -355,10 +389,12 @@ function readSkillCandidate(
       ...args,
       reason: "Frontmatter name must match the skill directory name",
     });
+
     return null;
   }
 
   let manifest: SkillTreeManifest;
+
   try {
     manifest = readSkillTreeManifest(args.candidatePath);
   } catch (error) {
@@ -367,9 +403,12 @@ function readSkillCandidate(
       reason:
         error instanceof Error ? error.message : "Unable to read skill tree",
     });
+
     return null;
   }
+
   args.skillTreeRegistry.register(manifest.treeHash, args.candidatePath);
+
   return {
     kind: "tree",
     sourceType: args.sourceType,
@@ -395,10 +434,12 @@ export function resolveProjectSkillSourceFromContent(
       reason: "SKILL.md frontmatter must start with a plain --- delimiter",
       sourceType: "project",
     });
+
     return null;
   }
 
   let parsed;
+
   try {
     parsed = matter(args.content);
   } catch (error) {
@@ -411,10 +452,12 @@ export function resolveProjectSkillSourceFromContent(
           : "Invalid SKILL.md frontmatter",
       sourceType: "project",
     });
+
     return null;
   }
 
   const frontmatter = skillFrontmatterSchema.safeParse(parsed.data);
+
   if (!frontmatter.success) {
     logInvalidSkill({
       candidatePath: args.candidatePath,
@@ -422,8 +465,10 @@ export function resolveProjectSkillSourceFromContent(
       reason: compactZodIssues(frontmatter.error.issues),
       sourceType: "project",
     });
+
     return null;
   }
+
   if (frontmatter.data.name !== args.directoryName) {
     logInvalidSkill({
       candidatePath: args.candidatePath,
@@ -431,6 +476,7 @@ export function resolveProjectSkillSourceFromContent(
       reason: "Frontmatter name must match the skill directory name",
       sourceType: "project",
     });
+
     return null;
   }
 
@@ -448,12 +494,14 @@ function readSkillsRoot(
   args: SkillRootScanArgs,
 ): HostDaemonInjectedSkillSource[] {
   let rootStat;
+
   try {
     rootStat = fs.lstatSync(args.skillsRootPath);
   } catch (error) {
     if (error instanceof Error && isFsErrorWithCode(error, "ENOENT")) {
       return [];
     }
+
     throw error;
   }
 
@@ -465,8 +513,10 @@ function readSkillsRoot(
       },
       "Skipping symlinked injected skills root",
     );
+
     return [];
   }
+
   if (!rootStat.isDirectory()) {
     args.logger.warn(
       {
@@ -475,6 +525,7 @@ function readSkillsRoot(
       },
       "Skipping non-directory injected skills root",
     );
+
     return [];
   }
 
@@ -483,10 +534,12 @@ function readSkillsRoot(
       withFileTypes: true,
     })
     .sort(sortDirentsByName);
+
   const sources: HostDaemonInjectedSkillSource[] = [];
 
   for (const entry of entries) {
     const candidatePath = path.join(args.skillsRootPath, entry.name);
+
     if (entry.isSymbolicLink()) {
       logInvalidSkill({
         ...args,
@@ -495,6 +548,7 @@ function readSkillsRoot(
       });
       continue;
     }
+
     if (!entry.isDirectory()) {
       logInvalidSkill({
         ...args,
@@ -503,6 +557,7 @@ function readSkillsRoot(
       });
       continue;
     }
+
     const source = readSkillCandidate({
       candidatePath,
       directoryName: entry.name,
@@ -510,6 +565,7 @@ function readSkillsRoot(
       skillTreeRegistry: args.skillTreeRegistry,
       sourceType: args.sourceType,
     });
+
     if (source) {
       sources.push(source);
     }
@@ -534,6 +590,7 @@ export function resolveServerOwnedSkillCatalogEntries(
     provenance: { kind: "builtin" } as const,
     runtimeSource,
   }));
+
   const user = readSkillsRoot({
     logger: args.logger,
     skillTreeRegistry: args.skillTreeRegistry,
@@ -543,25 +600,30 @@ export function resolveServerOwnedSkillCatalogEntries(
     provenance: { kind: "user" } as const,
     runtimeSource,
   }));
+
   return [...builtin, ...user];
 }
 
-interface ExcludeOverriddenLowerPriorityUserSourcesArgs {
-  higherPrioritySources: readonly HostDaemonInjectedSkillSource[];
-  lowerPrioritySources: readonly HostDaemonInjectedSkillSource[];
+interface ExcludeOverriddenLowerPriorityUserSourcesArgs<
+  T extends CatalogSource,
+> {
+  higherPrioritySources: readonly T[];
+  lowerPrioritySources: readonly T[];
 }
 
-function excludeOverriddenLowerPriorityUserSources(
+function excludeOverriddenLowerPriorityUserSources<T extends CatalogSource>(
   logger: ServerLogger,
-  args: ExcludeOverriddenLowerPriorityUserSourcesArgs,
-): HostDaemonInjectedSkillSource[] {
+  args: ExcludeOverriddenLowerPriorityUserSourcesArgs<T>,
+): T[] {
   const higherPriorityNames = new Set(
     args.higherPrioritySources.map((source) => source.name),
   );
+
   return args.lowerPrioritySources.filter((source) => {
     if (!higherPriorityNames.has(source.name)) {
       return true;
     }
+
     logger.debug(
       {
         name: source.name,
@@ -569,30 +631,36 @@ function excludeOverriddenLowerPriorityUserSources(
       },
       "Lower-priority injected skill overridden by higher-priority skill",
     );
+
     return false;
   });
 }
 
-function excludeCollisions(
+function excludeCollisions<T extends CatalogSource>(
   logger: ServerLogger,
-  sources: readonly HostDaemonInjectedSkillSource[],
-): HostDaemonInjectedSkillSource[] {
-  const byName = new Map<string, HostDaemonInjectedSkillSource[]>();
+  sources: readonly T[],
+): T[] {
+  const byName = new Map<string, T[]>();
+
   for (const source of sources) {
     const existing = byName.get(source.name) ?? [];
     existing.push(source);
     byName.set(source.name, existing);
   }
 
-  const resolved: HostDaemonInjectedSkillSource[] = [];
+  const resolved: T[] = [];
+
   for (const [name, entries] of byName) {
     if (entries.length === 1) {
       const source = entries[0];
+
       if (source) {
         resolved.push(source);
       }
+
       continue;
     }
+
     logSkillCollision({
       colliding: entries,
       logger,
@@ -610,13 +678,6 @@ export function resolveSkillCatalogEntries(
   args: ResolveInjectedSkillSourcesArgs,
 ): ResolvedSkillCatalogEntry[] {
   const { skillTreeRegistry } = args;
-  const projectSources = [...(args.projectSkillSources ?? [])];
-  const sharedProjectSources = (args.sharedSkillSources ?? []).filter(
-    (source) => source.sourceType === "shared-project",
-  );
-  const sharedUserSources = (args.sharedSkillSources ?? []).filter(
-    (source) => source.sourceType === "shared-user",
-  );
 
   const dataDirSources = readSkillsRoot({
     logger,
@@ -624,6 +685,7 @@ export function resolveSkillCatalogEntries(
     skillsRootPath: resolveDataDirSkillsRootPath(args.dataDir),
     sourceType: "data-dir",
   });
+
   const inheritedSourceGroups = (args.additionalSkillsRootPaths ?? []).map(
     (skillsRootPath) =>
       readSkillsRoot({
@@ -634,25 +696,6 @@ export function resolveSkillCatalogEntries(
       }),
   );
 
-  const configuredUserSources = [
-    ...dataDirSources,
-    ...excludeOverriddenLowerPriorityUserSources(logger, {
-      higherPrioritySources: dataDirSources,
-      lowerPrioritySources: sharedUserSources,
-    }),
-  ];
-  const userSources = inheritedSourceGroups.reduce<
-    HostDaemonInjectedSkillSource[]
-  >(
-    (higherPrioritySources, lowerPrioritySources) => [
-      ...higherPrioritySources,
-      ...excludeOverriddenLowerPriorityUserSources(logger, {
-        higherPrioritySources,
-        lowerPrioritySources,
-      }),
-    ],
-    configuredUserSources,
-  );
   const pluginSourceGroups = (args.pluginSkillRoots ?? []).map(
     ({ pluginId, rootPath }) => ({
       pluginId,
@@ -668,9 +711,58 @@ export function resolveSkillCatalogEntries(
       ),
     }),
   );
-  const pluginSources = pluginSourceGroups.reduce<
-    HostDaemonInjectedSkillSource[]
-  >(
+
+  return mergeSkillCatalogEntries(logger, {
+    projectSources: args.projectSkillSources ?? [],
+    sharedSources: args.sharedSkillSources ?? [],
+    dataDirSources,
+    inheritedSourceGroups,
+    pluginSourceGroups,
+  });
+}
+
+export function mergeSkillCatalogEntries<T extends CatalogSource>(
+  logger: ServerLogger,
+  args: {
+    projectSources: readonly T[];
+    sharedSources: readonly T[];
+    dataDirSources: T[];
+    inheritedSourceGroups: T[][];
+    pluginSourceGroups: { pluginId: string; sources: T[] }[];
+  },
+): ResolvedSkillCatalogEntry<T>[] {
+  const projectSources = [...args.projectSources];
+
+  const sharedProjectSources = args.sharedSources.filter(
+    (source) => source.sourceType === "shared-project",
+  );
+
+  const sharedUserSources = args.sharedSources.filter(
+    (source) => source.sourceType === "shared-user",
+  );
+
+  const { dataDirSources, inheritedSourceGroups, pluginSourceGroups } = args;
+
+  const configuredUserSources = [
+    ...dataDirSources,
+    ...excludeOverriddenLowerPriorityUserSources(logger, {
+      higherPrioritySources: dataDirSources,
+      lowerPrioritySources: sharedUserSources,
+    }),
+  ];
+
+  const userSources = inheritedSourceGroups.reduce<T[]>(
+    (higherPrioritySources, lowerPrioritySources) => [
+      ...higherPrioritySources,
+      ...excludeOverriddenLowerPriorityUserSources(logger, {
+        higherPrioritySources,
+        lowerPrioritySources,
+      }),
+    ],
+    configuredUserSources,
+  );
+
+  const pluginSources = pluginSourceGroups.reduce<T[]>(
     (higherPrioritySources, { sources: lowerPrioritySources }) => [
       ...higherPrioritySources,
       ...excludeOverriddenLowerPriorityUserSources(logger, {
@@ -680,6 +772,7 @@ export function resolveSkillCatalogEntries(
     ],
     [],
   );
+
   const activePluginSources = excludeOverriddenLowerPriorityUserSources(
     logger,
     {
@@ -687,11 +780,14 @@ export function resolveSkillCatalogEntries(
       lowerPrioritySources: pluginSources,
     },
   );
+
   const globalSources = excludeCollisions(logger, [
     ...userSources,
     ...activePluginSources,
   ]);
+
   const activeProjectSources = excludeCollisions(logger, projectSources);
+
   const activeSharedProjectSources = excludeOverriddenLowerPriorityUserSources(
     logger,
     {
@@ -699,28 +795,32 @@ export function resolveSkillCatalogEntries(
       lowerPrioritySources: excludeCollisions(logger, sharedProjectSources),
     },
   );
+
   const projectTierSources = [
     ...activeProjectSources,
     ...activeSharedProjectSources,
   ];
+
   const projectNames = new Set(projectTierSources.map((source) => source.name));
 
-  const provenanceBySource = new Map<
-    HostDaemonInjectedSkillSource,
-    SkillCatalogProvenance
-  >();
+  const provenanceBySource = new Map<T, SkillCatalogProvenance>();
+
   for (const source of projectSources) {
     provenanceBySource.set(source, { kind: "project" });
   }
+
   for (const source of sharedProjectSources) {
     provenanceBySource.set(source, { kind: "project" });
   }
+
   for (const source of sharedUserSources) {
     provenanceBySource.set(source, { kind: "user" });
   }
+
   for (const source of [...dataDirSources, ...inheritedSourceGroups.flat()]) {
     provenanceBySource.set(source, { kind: "user" });
   }
+
   for (const group of pluginSourceGroups) {
     for (const source of group.sources) {
       provenanceBySource.set(source, {
@@ -740,9 +840,11 @@ export function resolveSkillCatalogEntries(
     .sort((left, right) => compareStringsByCodePoint(left.name, right.name))
     .map((runtimeSource) => {
       const provenance = provenanceBySource.get(runtimeSource);
+
       if (provenance === undefined) {
         throw new Error(`Missing skill provenance for ${runtimeSource.name}`);
       }
+
       return { provenance, runtimeSource };
     });
 }

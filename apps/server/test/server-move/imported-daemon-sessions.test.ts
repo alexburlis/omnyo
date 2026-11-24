@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { getSessionById, getThread, listEvents } from "@bb/db";
-import { threadScope, turnScope } from "@bb/domain";
+import { getSessionById, getThread, listEvents } from "@omnyo/db";
+import { threadScope, turnScope } from "@omnyo/domain";
 import {
   writeServerImportFile,
   type ServerImportFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import { describe, expect, it } from "vitest";
 import { disconnectImportedDaemonSessions } from "../../src/internal/session-owner-side-effects.js";
 import { applyServerImportAtBoot } from "../../src/services/server-move/pending-boot.js";
@@ -22,6 +22,7 @@ import {
 } from "../helpers/test-app.js";
 
 const TASK_ITEM_ID = "task:wf-1";
+
 const PROVIDER_THREAD_ID = "claude-session-1";
 
 const MANUAL_IMPORT: ServerImportFile = {
@@ -29,11 +30,11 @@ const MANUAL_IMPORT: ServerImportFile = {
   kind: "manual",
   moveId: null,
   activationToken: null,
-  sourceDataDir: "/home/old/.bb",
+  sourceDataDir: "/home/old/.omnyo",
   sourceServerHostId: null,
   targetHostId: null,
   serverUrl: null,
-  importedEntries: ["bb.db"],
+  importedEntries: ["app.db"],
   createdAt: 1,
   fixupsAppliedAt: null,
 };
@@ -102,15 +103,18 @@ describe("daemon sessions in an imported server snapshot", () => {
         environment,
         thread: activeThread,
       } = seedThreadFixture(harness, { thread: { status: "active" } });
+
       seedTurnStarted(harness.deps, {
         environmentId: environment.id,
         threadId: activeThread.id,
         turnId: "turn-live-1",
       });
+
       const idleThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       seedOpenBackgroundTask(harness, {
         environmentId: environment.id,
         threadId: idleThread.id,
@@ -120,6 +124,7 @@ describe("daemon sessions in an imported server snapshot", () => {
 
       const boot = await applyServerImportAtBoot({
         dataDir: harness.config.dataDir,
+        vault: harness.deps.vault,
         db: harness.db,
         logger: testLogger,
         now: 1_000,
@@ -163,10 +168,12 @@ describe("daemon sessions in an imported server snapshot", () => {
 
       const nextBoot = await applyServerImportAtBoot({
         dataDir: harness.config.dataDir,
+        vault: harness.deps.vault,
         db: harness.db,
         logger: testLogger,
         now: 2_000,
       });
+
       expect(nextBoot.importedDaemonSessions).toEqual([]);
     });
   });
@@ -176,6 +183,7 @@ describe("daemon sessions in an imported server snapshot", () => {
       fileURLToPath(new URL("../../src/start-server.ts", import.meta.url)),
       "utf8",
     );
+
     const disconnect = source.indexOf("disconnectImportedDaemonSessions(");
 
     expect(disconnect).toBeGreaterThan(source.indexOf("createApp("));

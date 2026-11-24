@@ -11,7 +11,7 @@ import {
   experimental_createDeltaAssembler as createDeltaAssembler,
   type DeltaAssembler,
   type ThreadEvent,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import {
   createPiDeltaTranslator,
   createPiModelContextWindowResolverFrom,
@@ -23,6 +23,7 @@ const builtinCatalogResolver = createPiModelContextWindowResolverFrom(
 );
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
 const FIXTURES = resolve(__dirname, "./__fixtures__/pi");
 
 function threadScope(): ThreadEvent["scope"] {
@@ -33,9 +34,12 @@ function turnScope(turnId: string): ThreadEvent["scope"] {
   return { kind: "turn", turnId };
 }
 
-const THREAD_ID = "bb-thread-1";
+const THREAD_ID = "omnyo-thread-1";
+
 const ENTROPY = "pi-test";
+
 const TURN_ID_PATTERN = /^pi-test-t\d+$/;
+
 const ITEM_ID_PATTERN = /^pi-test-i\d+$/;
 
 function loadFixture(name: string): AgentSessionEvent {
@@ -63,11 +67,13 @@ function createHarness(options?: {
     resolveModelContextWindow:
       options?.resolveModelContextWindow ?? builtinCatalogResolver,
   });
+
   const assembler = createDeltaAssembler({
     providerId: "pi",
     entropyPrefix: ENTROPY,
     textDeltaFlushMs: 0,
   });
+
   return {
     assembler,
     translate(event, context) {
@@ -184,11 +190,12 @@ function agentMessageDeltaId(events: ThreadEvent[]): string | undefined {
     ): event is Extract<ThreadEvent, { type: "item/agentMessage/delta" }> =>
       event.type === "item/agentMessage/delta",
   );
+
   return delta?.itemId;
 }
 
 describe("pi delta translation equivalence", () => {
-  it("keeps turn_start as internal noise while agent_start owns the bb turn", () => {
+  it("keeps turn_start as internal noise while agent_start owns the Omnyo turn", () => {
     const harness = createHarness();
     harness.translate(loadFixture("agent-start.json"));
 
@@ -199,7 +206,7 @@ describe("pi delta translation equivalence", () => {
     expect(events).toEqual([]);
   });
 
-  it("agent_start opens exactly one bb turn", () => {
+  it("agent_start opens exactly one Omnyo turn", () => {
     const harness = createHarness();
     const events = harness.translate(loadFixture("agent-start.json"));
     expect(events).toEqual([
@@ -237,6 +244,75 @@ describe("pi delta translation equivalence", () => {
       }),
     );
     expect(events.some((event) => event.type === "provider/error")).toBe(false);
+  });
+
+  it("completes each assistant message at its own message_end, once", () => {
+    const harness = createHarness();
+    harness.translate(loadFixture("agent-start.json"));
+
+    const assistant = (text: string) => {
+      const message = {
+        role: "assistant",
+        content: [{ type: "text", text }],
+        stopReason: "stop",
+      };
+
+      const events = [
+        ...harness.translate({ type: "message_start", message }),
+        ...harness.translate({
+          type: "message_update",
+          message,
+          assistantMessageEvent: {
+            type: "text_delta",
+            contentIndex: 0,
+            delta: text,
+          },
+        }),
+        ...harness.translate({ type: "message_end", message }),
+      ];
+
+      return { message, events };
+    };
+
+    const completedMessages = (events: ThreadEvent[]) =>
+      events.flatMap((event) =>
+        event.type === "item/completed" && event.item.type === "agentMessage"
+          ? [event.item]
+          : [],
+      );
+
+    const first = assistant("Checking the workspace.");
+    expect(completedMessages(first.events)).toEqual([
+      expect.objectContaining({
+        id: agentMessageDeltaId(first.events),
+        text: "Checking the workspace.",
+      }),
+    ]);
+
+    harness.translate(
+      createPiBashStartEvent({ command: "pwd", toolCallId: "tool-1" }),
+    );
+    harness.translate(loadFixture("tool-execution-end-bash.json"));
+    const last = assistant("The workspace is ready.");
+
+    const end = harness.translate({
+      type: "agent_end",
+      messages: [first.message, last.message],
+    });
+
+    expect(completedMessages(last.events)).toEqual([
+      expect.objectContaining({
+        id: agentMessageDeltaId(last.events),
+        text: "The workspace is ready.",
+      }),
+    ]);
+    expect(agentMessageDeltaId(last.events)).not.toBe(
+      agentMessageDeltaId(first.events),
+    );
+    expect(completedMessages(end)).toEqual([]);
+    expect(end).toContainEqual(
+      expect.objectContaining({ type: "turn/completed", status: "completed" }),
+    );
   });
 
   it("completes extension-triggered turns when agent_end includes string custom content", () => {
@@ -297,6 +373,7 @@ describe("pi delta translation equivalence", () => {
     const harness = createHarness();
     harness.translate(sdkMessage(loadFixture("agent-start.json")));
     const turnId = harness.openTurnId();
+
     const message = createPiCustomMessage({
       content:
         '<process_event kind="success" process_id="proc_551c">Process completed successfully</process_event>',
@@ -305,6 +382,7 @@ describe("pi delta translation equivalence", () => {
     const startEvents = harness.translate(
       sdkMessage({ type: "message_start", message }),
     );
+
     const endEvents = harness.translate(
       sdkMessage({ type: "message_end", message }),
     );
@@ -376,10 +454,12 @@ describe("pi delta translation equivalence", () => {
     expect(harness.openTurnId()).toBe("");
 
     harness.translate(sdkMessage(loadFixture("agent-start.json")));
+
     const hiddenMessage = createPiCustomMessage({
       content: "hidden",
       display: false,
     });
+
     expect(
       harness.translate(
         sdkMessage({ type: "message_start", message: hiddenMessage }),
@@ -394,6 +474,7 @@ describe("pi delta translation equivalence", () => {
 
   it("agent_end preserves the checkpoint when Pi assistant stop errors fail the turn", () => {
     const harness = createHarness();
+
     const quotaMessage =
       '400 {"type":"error","error":{"type":"invalid_request_error","message":"You\'re out of extra usage. Add more at claude.ai/settings/usage and keep going."},"request_id":"req_011CajgGfxCAhmznZJw7t6Br"}';
 
@@ -413,6 +494,11 @@ describe("pi delta translation equivalence", () => {
         scope: turnScope(turnId),
         message: "Provider error",
         detail: quotaMessage,
+        errorInfo: {
+          category: "bad-request",
+          providerCode: null,
+          httpStatusCode: 400,
+        },
       },
       {
         type: "turn/completed",
@@ -434,6 +520,7 @@ describe("pi delta translation equivalence", () => {
     const retryEvents = harness.translate(
       createPiAgentErrorEvent("temporary provider failure", true),
     );
+
     const completedEvents = harness.translate(
       loadFixture("agent-end-with-message.json"),
     );
@@ -553,11 +640,14 @@ describe("pi delta translation equivalence", () => {
     errorMessage?: string;
   }) {
     const harness = createHarness();
+
     const started = harness.translate({
       type: "compaction_start",
       reason: "manual",
     } satisfies AgentSessionEvent);
+
     const turnId = harness.openTurnId();
+
     const completed = harness.translate({
       type: "compaction_end",
       reason: "manual",
@@ -565,6 +655,7 @@ describe("pi delta translation equivalence", () => {
       willRetry: false,
       ...args,
     } satisfies AgentSessionEvent);
+
     return { completed, started, turnId };
   }
 
@@ -656,6 +747,7 @@ describe("pi delta translation equivalence", () => {
 
   it("compaction_end without a known turn is unhandled", () => {
     const harness = createHarness();
+
     const events = harness.translate({
       type: "compaction_end",
       reason: "threshold",
@@ -707,6 +799,7 @@ describe("pi delta translation equivalence", () => {
 
     const deltaEvents = harness.translate(createTextDeltaEvent());
     const deltaItemId = agentMessageDeltaId(deltaEvents);
+
     const completedEvents = harness.translate(
       loadFixture("agent-end-with-message.json"),
     );
@@ -747,6 +840,7 @@ describe("pi delta translation equivalence", () => {
     const endEvents = harness.translate(
       loadFixture("agent-end-with-message.json"),
     );
+
     const completed = endEvents.find(
       (event) =>
         event.type === "item/completed" && event.item.type === "agentMessage",
@@ -756,6 +850,7 @@ describe("pi delta translation equivalence", () => {
     expect(postItemId).toMatch(ITEM_ID_PATTERN);
     expect(preItemId).not.toBe(postItemId);
     expect(completed).toBeDefined();
+
     if (
       completed?.type === "item/completed" &&
       completed.item.type === "agentMessage"
@@ -776,6 +871,7 @@ describe("pi delta translation equivalence", () => {
         delta: "Thinking through the edit.",
       },
     } as AgentSessionEvent);
+
     const reasoningDelta = deltaEvents.find(
       (
         event,
@@ -846,8 +942,10 @@ describe("pi delta translation equivalence", () => {
         }),
       }),
     ]);
+
     const startedId =
       events[0]?.type === "item/started" ? events[0].item.id : "";
+
     expect(harness.assembler.getProviderItemId(THREAD_ID, startedId)).toBe(
       "tc_01a2b3c4d5e6f7g8h9i0j1k2",
     );
@@ -856,10 +954,12 @@ describe("pi delta translation equivalence", () => {
   it("keeps the call's own cwd over the session's", () => {
     const harness = createHarness();
     harness.translate(loadFixture("agent-start.json"));
+
     const events = harness.translate(
       loadFixture("tool-execution-start-bash.json"),
       { threadId: THREAD_ID, cwd: "/work/tree" },
     );
+
     expect(events[0]).toMatchObject({
       type: "item/started",
       item: { type: "commandExecution", cwd: "/Users/developer/project" },
@@ -869,6 +969,7 @@ describe("pi delta translation equivalence", () => {
   it("never fabricates a command item without a cwd, on start or on a close without start", () => {
     const harness = createHarness();
     harness.translate(loadFixture("agent-start.json"));
+
     const started = harness.translate(
       sdkMessage({
         type: "tool_execution_start",
@@ -877,10 +978,12 @@ describe("pi delta translation equivalence", () => {
         args: { command: "ls" },
       }),
     );
+
     expect(started[0]).toMatchObject({
       type: "item/started",
       item: { type: "toolCall" },
     });
+
     const closed = harness.translate(
       sdkMessage({
         type: "tool_execution_end",
@@ -890,6 +993,7 @@ describe("pi delta translation equivalence", () => {
         isError: false,
       }),
     );
+
     expect(
       closed.some(
         (event) =>
@@ -927,17 +1031,21 @@ describe("pi delta translation equivalence", () => {
       (event) =>
         event.type === "item/started" && event.item.type === "commandExecution",
     );
+
     if (started?.type !== "item/started") {
       throw new Error("expected a commandExecution item/started");
     }
+
     expect(started.item.parentToolCallId).toBeDefined();
     expect(started.item.parentToolCallId).not.toBe("agent-parent-1");
+
     const parentEvents = harness.translate({
       type: "tool_execution_start",
       toolCallId: "agent-parent-1",
       toolName: "spawn_agent",
       args: {},
     } as AgentSessionEvent);
+
     expect(parentEvents).toContainEqual(
       expect.objectContaining({
         type: "item/started",
@@ -1110,10 +1218,12 @@ describe("pi delta translation equivalence", () => {
       (event): event is Extract<ThreadEvent, { type: "item/started" }> =>
         event.type === "item/started",
     );
+
     expect(started?.item).toMatchObject({
       type: "fileChange",
       status: "pending",
     });
+
     if (!started || started.item.type !== "fileChange") return;
     expect(started.item.changes[0]).toMatchObject({
       path: "src/app.ts",
@@ -1144,11 +1254,13 @@ describe("pi delta translation equivalence", () => {
       (event): event is Extract<ThreadEvent, { type: "item/started" }> =>
         event.type === "item/started",
     );
+
     expect(started?.item).toMatchObject({
       type: "fileChange",
       status: "pending",
       changes: [{ path: "src/app.ts", kind: "update" }],
     });
+
     if (!started || started.item.type !== "fileChange") return;
     expect(started.item.changes[0]?.diff).toBeUndefined();
   });
@@ -1168,11 +1280,13 @@ describe("pi delta translation equivalence", () => {
       (event): event is Extract<ThreadEvent, { type: "item/started" }> =>
         event.type === "item/started",
     );
+
     expect(started?.item).toMatchObject({
       type: "fileChange",
       status: "pending",
       changes: [{ path: "src/app.ts", kind: "add" }],
     });
+
     if (!started || started.item.type !== "fileChange") return;
     expect(started.item.changes[0]?.diff).toContain("+++ b/src/app.ts");
   });
@@ -1208,9 +1322,11 @@ describe("pi delta translation equivalence", () => {
   it("tool_execution_end emits item/completed under the started item's id", () => {
     const harness = createHarness();
     harness.translate(loadFixture("agent-start.json"));
+
     const started = harness.translate(
       loadFixture("tool-execution-start-bash.json"),
     );
+
     const startedId =
       started[0]?.type === "item/started" ? started[0].item.id : "";
 
@@ -1304,12 +1420,14 @@ describe("pi delta translation equivalence", () => {
   it("maps bash tool execution updates to command output deltas", () => {
     const harness = createHarness();
     harness.translate(loadFixture("agent-start.json"));
+
     const started = harness.translate({
       type: "tool_execution_start",
       toolCallId: "tool-bash-1",
       toolName: "bash",
       args: { command: "printf 'FIRST\\nSECOND\\n'", cwd: "/repo" },
     } as AgentSessionEvent);
+
     const startedId =
       started[0]?.type === "item/started" ? started[0].item.id : "";
 
@@ -1408,6 +1526,7 @@ describe("pi delta translation equivalence", () => {
         command: "printf 'FIRST\\nSECOND\\n'",
       }),
     );
+
     const events = harness.translate(
       createPiBashUpdateEvent({
         threadId: THREAD_ID,
@@ -1538,9 +1657,11 @@ describe("pi delta translation equivalence", () => {
       status: "completed",
       exitCode: 0,
     });
+
     if (completedEvent?.item.type !== "commandExecution") {
       throw new Error("Expected commandExecution completion");
     }
+
     expect(completedEvent.item.aggregatedOutput).toBeUndefined();
   });
 
@@ -1604,6 +1725,7 @@ describe("pi delta translation equivalence", () => {
     (counts, expected) => {
       const harness = createHarness();
       harness.translate(loadFixture("agent-start.json"));
+
       const events = harness.translate({
         type: "agent_end",
         messages: [
@@ -1614,9 +1736,11 @@ describe("pi delta translation equivalence", () => {
           },
         ],
       });
+
       const event = events.find(
         (event) => event.type === "thread/tokenUsage/updated",
       );
+
       expect(event).toBeDefined();
       expect(event?.tokenUsage.last).toMatchObject(expected);
       expect(
@@ -1630,12 +1754,48 @@ describe("pi delta translation equivalence", () => {
     },
   );
 
+  it("reports the prompt cache TTL of the latest cache write across turns", () => {
+    const harness = createHarness();
+
+    const turns: [Record<string, unknown>, number | undefined][] = [
+      [{ cacheWrite: 9 }, undefined],
+      [{ cacheWrite: 9, cacheWrite1h: 9 }, 3_600_000],
+      [{ cacheWrite: 0, cacheWrite1h: 0 }, 3_600_000],
+      [{ cacheWrite: 9, cacheWrite1h: 0 }, 300_000],
+      [{ cacheWrite: 9, cacheWrite1h: "invalid" }, 300_000],
+    ];
+
+    const reported = turns.map(([cache]) => {
+      harness.translate(loadFixture("agent-start.json"));
+
+      const event = harness
+        .translate({
+          type: "agent_end",
+          messages: [
+            {
+              role: "assistant",
+              content: [],
+              usage: { input: 80, output: 20, ...cache },
+            },
+          ],
+        })
+        .find((event) => event.type === "thread/tokenUsage/updated");
+
+      expect(event?.tokenUsage.last.inputTokens).toBe(80);
+
+      return event?.tokenUsage.promptCacheTtlMs;
+    });
+
+    expect(reported).toEqual(turns.map(([, ttl]) => ttl));
+  });
+
   it.each(["cacheRead", "cacheWrite"])(
     "invalid %s cannot discard Pi completion or valid usage",
     (field) => {
       for (const invalid of [-1, null, "invalid", Infinity, NaN]) {
         const harness = createHarness();
         harness.translate(loadFixture("agent-start.json"));
+
         const events = harness.translate({
           type: "agent_end",
           providerCheckpointId: "checkpoint-cache",
@@ -1653,6 +1813,7 @@ describe("pi delta translation equivalence", () => {
             },
           ],
         });
+
         expect(events).toContainEqual(
           expect.objectContaining({
             type: "item/completed",
@@ -1666,13 +1827,16 @@ describe("pi delta translation equivalence", () => {
           }),
         );
         expect(harness.openTurnId()).toBe("");
+
         const event = events.find(
           (event) => event.type === "thread/tokenUsage/updated",
         );
+
         const validCounts =
           field === "cacheRead"
             ? { cacheWriteInputTokens: 9 }
             : { cacheReadInputTokens: 31 };
+
         expect(event?.tokenUsage.last).toEqual({
           totalTokens: field === "cacheRead" ? 109 : 131,
           inputTokens: 80,
@@ -1688,6 +1852,7 @@ describe("pi delta translation equivalence", () => {
   it("invalid cache counts in earlier messages cannot discard Pi error settlement", () => {
     const harness = createHarness();
     harness.translate(loadFixture("agent-start.json"));
+
     const events = harness.translate({
       type: "agent_end",
       messages: [
@@ -1701,6 +1866,7 @@ describe("pi delta translation equivalence", () => {
         },
       ],
     });
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "provider/error",
@@ -1719,11 +1885,13 @@ describe("pi delta translation equivalence", () => {
     });
 
     harness.translate(loadFixture("agent-start.json"));
+
     const firstTurnEvents = harness.translate(
       loadFixture("agent-end-with-message.json"),
     );
 
     harness.translate(loadFixture("agent-start.json"));
+
     const secondTurnEvents = harness.translate(
       loadFixture("agent-end-with-message.json"),
     );
@@ -1734,6 +1902,7 @@ describe("pi delta translation equivalence", () => {
       ): event is Extract<ThreadEvent, { type: "thread/tokenUsage/updated" }> =>
         event.type === "thread/tokenUsage/updated",
     );
+
     const secondTokenUsage = secondTurnEvents.find(
       (
         event,
@@ -1812,6 +1981,7 @@ describe("pi delta translation equivalence", () => {
     harness.translate(loadFixture("agent-end-with-message.json"));
 
     harness.translate(loadFixture("agent-start.json"));
+
     const events = harness.translate({
       type: "tool_execution_end",
       toolCallId: "tool-bash-1",
@@ -1834,6 +2004,7 @@ describe("pi delta translation equivalence", () => {
 
   it("prompt-settled settles only a turn owed to accepted input", () => {
     const harness = createHarness();
+
     const settled = {
       jsonrpc: "2.0",
       method: "pi/prompt/settled",
@@ -1864,6 +2035,7 @@ describe("pi delta translation equivalence", () => {
     (stopReason) => {
       const harness = createHarness();
       harness.translate(loadFixture("agent-start.json"));
+
       const events = harness.translate(
         sdkMessage({
           type: "agent_end",
@@ -1873,6 +2045,7 @@ describe("pi delta translation equivalence", () => {
           ],
         }),
       );
+
       expect(events).toContainEqual(
         expect.objectContaining({ type: "turn/completed", status: "failed" }),
       );
@@ -1895,6 +2068,7 @@ describe("pi delta translation equivalence", () => {
     const translator = createPiDeltaTranslator({
       resolveModelContextWindow: builtinCatalogResolver,
     });
+
     const initial = translator.translate(
       sdkMessage({
         type: "agent_end",
@@ -1909,8 +2083,10 @@ describe("pi delta translation equivalence", () => {
         ],
       }),
     );
+
     expect(initial.some((delta) => delta.kind === "turn.boundary")).toBe(false);
     expect(initial.filter((delta) => delta.kind === "usage")).toHaveLength(1);
+
     const settled = translator.translate(
       sdkMessage({
         type: "agent_end",
@@ -1926,6 +2102,7 @@ describe("pi delta translation equivalence", () => {
         ],
       }),
     );
+
     expect(settled).toEqual([
       expect.objectContaining({
         kind: "turn.boundary",
@@ -1939,6 +2116,7 @@ describe("pi delta translation equivalence", () => {
     const translator = createPiDeltaTranslator({
       resolveModelContextWindow: builtinCatalogResolver,
     });
+
     const failedAttempt = translator.translate(
       sdkMessage({
         type: "agent_end",
@@ -1954,6 +2132,7 @@ describe("pi delta translation equivalence", () => {
         ],
       }),
     );
+
     expect(failedAttempt).toEqual([]);
     expect(
       translator.translate(
@@ -1970,6 +2149,11 @@ describe("pi delta translation equivalence", () => {
         kind: "provider.error",
         message: "Provider error",
         detail: "original prompt failed",
+        errorInfo: {
+          category: "unknown",
+          providerCode: null,
+          httpStatusCode: null,
+        },
       },
     ]);
   });
@@ -1978,6 +2162,7 @@ describe("pi delta translation equivalence", () => {
     const translator = createPiDeltaTranslator({
       resolveModelContextWindow: builtinCatalogResolver,
     });
+
     const compaction = translator.translate(
       sdkMessage({
         type: "compaction_end",
@@ -1987,6 +2172,7 @@ describe("pi delta translation equivalence", () => {
         errorMessage: "overflow recovery exhausted",
       }),
     );
+
     expect(
       compaction.filter((delta) => delta.kind === "provider.error"),
     ).toEqual([
@@ -2018,9 +2204,11 @@ describe("pi delta translation equivalence", () => {
       const translator = createPiDeltaTranslator({
         resolveModelContextWindow: builtinCatalogResolver,
       });
+
       const deltas = translator.translate(
         sdkMessage({ type: "agent_end", aborted, messages: [] }),
       );
+
       expect(deltas).toContainEqual(
         expect.objectContaining({ kind: "turn.boundary", status: "failed" }),
       );

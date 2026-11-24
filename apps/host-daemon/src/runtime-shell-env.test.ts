@@ -6,7 +6,7 @@ import {
   createUserShellPathResolver,
   prepareRuntimeShellEnv,
   resolvePowerShellExecutionPolicyDefault,
-  resolveLocalBbExecutablePath,
+  resolveLocalOmnyoExecutablePath,
   type SpawnUserShellEnv,
   type SpawnUserShellEnvArgs,
   type UserShellEnvSpawnResult,
@@ -17,6 +17,7 @@ const tempDirs: string[] = [];
 async function makeTempDir(prefix: string): Promise<string> {
   const directoryPath = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(directoryPath);
+
   return directoryPath;
 }
 
@@ -57,6 +58,7 @@ async function withPlatform<T>(
     process,
     "platform",
   );
+
   if (!originalDescriptor) {
     throw new Error("Expected process.platform descriptor");
   }
@@ -76,8 +78,8 @@ async function withPlatform<T>(
 async function createFakeCliPackage(
   options: FakeCliPackageOptions = {},
 ): Promise<FakeCliPackage> {
-  const cliPackageRoot = await makeTempDir("bb-cli-package-");
-  const executablePath = options.executablePath ?? "./dist/bin/bb";
+  const cliPackageRoot = await makeTempDir("omnyo-cli-package-");
+  const executablePath = options.executablePath ?? "./dist/bin/omnyo";
   const cliEntryPath = path.resolve(cliPackageRoot, executablePath);
   const cliRuntimePath = path.resolve(cliPackageRoot, "dist/index.js");
 
@@ -85,7 +87,7 @@ async function createFakeCliPackage(
     await fs.mkdir(path.dirname(cliEntryPath), { recursive: true });
     await fs.writeFile(
       cliEntryPath,
-      "#!/usr/bin/env node\nprocess.stdout.write('bb')\n",
+      "#!/usr/bin/env node\nprocess.stdout.write('omnyo')\n",
       { mode: options.executable ? 0o755 : 0o644 },
     );
     await fs.chmod(cliEntryPath, options.executable ? 0o755 : 0o644);
@@ -93,7 +95,11 @@ async function createFakeCliPackage(
 
   if (options.writeRuntime) {
     await fs.mkdir(path.dirname(cliRuntimePath), { recursive: true });
-    await fs.writeFile(cliRuntimePath, "process.stdout.write('bb')\n", "utf8");
+    await fs.writeFile(
+      cliRuntimePath,
+      "process.stdout.write('omnyo')\n",
+      "utf8",
+    );
   }
 
   return {
@@ -117,10 +123,10 @@ function createShellEnvSpawnResult(
 function createMarkedShellEnvOutput(pathValue: string): string {
   return [
     "shell startup noise",
-    "__BB_SHELL_ENV_START__",
+    "__OMNYO_SHELL_ENV_START__",
     "USER=test-user",
     `PATH=${pathValue}`,
-    "__BB_SHELL_ENV_END__",
+    "__OMNYO_SHELL_ENV_END__",
     "shell shutdown noise",
   ].join("\n");
 }
@@ -130,14 +136,17 @@ function createFakeShellEnvSpawn(
 ): FakeShellEnvSpawn {
   const calls: SpawnUserShellEnvArgs[] = [];
   const results = [...args.results];
+
   return {
     calls,
     async spawn(spawnArgs) {
       calls.push(spawnArgs);
       const result = results.shift();
+
       if (!result) {
         throw new Error("Unexpected shell env spawn");
       }
+
       return result;
     },
   };
@@ -154,7 +163,21 @@ afterEach(async () => {
   );
 });
 
-describe("resolveLocalBbExecutablePath", () => {
+describe("resolveLocalOmnyoExecutablePath", () => {
+  it("resolves the canonical installed source CLI entry by default", async () => {
+    const { cliRuntimePath } = await createFakeCliPackage({
+      writeRuntime: true,
+    });
+
+    const expected = await fs.realpath(
+      new URL("../../cli/bin/omnyo", import.meta.url),
+    );
+
+    await expect(
+      resolveLocalOmnyoExecutablePath({ cliRuntimePath }),
+    ).resolves.toBe(expected);
+  });
+
   it("returns the built CLI executable path", async () => {
     const { cliEntryPath, cliRuntimePath } = await createFakeCliPackage({
       executable: true,
@@ -162,7 +185,7 @@ describe("resolveLocalBbExecutablePath", () => {
     });
 
     await expect(
-      resolveLocalBbExecutablePath({
+      resolveLocalOmnyoExecutablePath({
         cliExecutablePath: cliEntryPath,
         cliRuntimePath,
       }),
@@ -175,12 +198,12 @@ describe("resolveLocalBbExecutablePath", () => {
     });
 
     await expect(
-      resolveLocalBbExecutablePath({
+      resolveLocalOmnyoExecutablePath({
         cliExecutablePath: cliEntryPath,
         cliRuntimePath,
       }),
     ).rejects.toThrow(
-      `Missing built bb CLI runtime at ${cliRuntimePath}. Build @bb/cli before starting the host daemon.`,
+      `Missing built Omnyo CLI runtime at ${cliRuntimePath}. Build @omnyo/cli before starting the host daemon.`,
     );
   });
 
@@ -190,11 +213,11 @@ describe("resolveLocalBbExecutablePath", () => {
     });
 
     await expect(
-      resolveLocalBbExecutablePath({
+      resolveLocalOmnyoExecutablePath({
         cliExecutablePath: cliEntryPath,
       }),
     ).rejects.toThrow(
-      `Missing built bb CLI entry at ${cliEntryPath}. Build @bb/cli before starting the host daemon.`,
+      `Missing built Omnyo CLI entry at ${cliEntryPath}. Build @omnyo/cli before starting the host daemon.`,
     );
   });
 
@@ -206,11 +229,11 @@ describe("resolveLocalBbExecutablePath", () => {
       });
 
       await expect(
-        resolveLocalBbExecutablePath({
+        resolveLocalOmnyoExecutablePath({
           cliExecutablePath: cliEntryPath,
         }),
       ).rejects.toThrow(
-        `Resolved bb CLI entry is not executable: ${cliEntryPath}. Build @bb/cli before starting the host daemon.`,
+        `Resolved Omnyo CLI entry is not executable: ${cliEntryPath}. Build @omnyo/cli before starting the host daemon.`,
       );
     },
   );
@@ -222,7 +245,7 @@ describe("resolveLocalBbExecutablePath", () => {
 
     await expect(
       withPlatform("win32", () =>
-        resolveLocalBbExecutablePath({
+        resolveLocalOmnyoExecutablePath({
           cliExecutablePath: cliEntryPath,
         }),
       ),
@@ -232,7 +255,7 @@ describe("resolveLocalBbExecutablePath", () => {
 
 describe("createUserShellPathResolver", () => {
   it("settles when the shell env probe times out even if the shell ignores SIGTERM", async () => {
-    const shellDir = await makeTempDir("bb-shell-timeout-");
+    const shellDir = await makeTempDir("omnyo-shell-timeout-");
     const shellPath = path.join(shellDir, "ignore-term-shell");
     await fs.writeFile(
       shellPath,
@@ -260,6 +283,7 @@ describe("createUserShellPathResolver", () => {
 
   it("loads PATH from the configured interactive login shell", async () => {
     const shellPath = "/root/.local/bin:/usr/local/bin:/usr/bin";
+
     const fakeSpawn = createFakeShellEnvSpawn({
       results: [
         createShellEnvSpawnResult({
@@ -282,7 +306,7 @@ describe("createUserShellPathResolver", () => {
         command: "/usr/bin/bash",
         args: [
           "-ilc",
-          "printf '%s\\n' __BB_SHELL_ENV_START__; env; printf '%s\\n' __BB_SHELL_ENV_END__",
+          "printf '%s\\n' __OMNYO_SHELL_ENV_START__; env; printf '%s\\n' __OMNYO_SHELL_ENV_END__",
         ],
         env: { SHELL: "/usr/bin/bash", PATH: "/usr/bin" },
         timeoutMs: 1234,
@@ -292,6 +316,7 @@ describe("createUserShellPathResolver", () => {
 
   it("falls back to a non-interactive login shell when the interactive probe fails", async () => {
     const shellPath = "/home/me/.local/bin:/usr/bin";
+
     const fakeSpawn = createFakeShellEnvSpawn({
       results: [
         createShellEnvSpawnResult({
@@ -320,6 +345,7 @@ describe("createUserShellPathResolver", () => {
 
   it("retains the previous PATH when a refreshed interactive probe fails", async () => {
     const interactivePath = "/home/me/.local/bin:/usr/bin";
+
     const fakeSpawn = createFakeShellEnvSpawn({
       results: [
         createShellEnvSpawnResult({
@@ -466,37 +492,37 @@ describe("createUserShellPathResolver", () => {
 
 describe("prepareRuntimeShellEnv", () => {
   it("uses the daemon proxy URL without exporting its machine credential", () => {
-    vi.stubEnv("BB_CONNECT_MACHINE_CREDENTIAL", "bbcm_durable_secret");
+    vi.stubEnv("OMNYO_CONNECT_MACHINE_CREDENTIAL", "bbcm_durable_secret");
 
     const env = prepareRuntimeShellEnv({
-      bbExecutableDirectory: "/tmp/bb-bin",
+      cliExecutableDirectory: "/tmp/omnyo-bin",
       inheritedPath: "/usr/bin",
       serverUrl: "http://127.0.0.1:43123",
     });
 
-    expect(env.BB_SERVER_URL).toBe("http://127.0.0.1:43123");
-    expect(env).not.toHaveProperty("BB_CONNECT_MACHINE_CREDENTIAL");
+    expect(env.OMNYO_SERVER_URL).toBe("http://127.0.0.1:43123");
+    expect(env).not.toHaveProperty("OMNYO_CONNECT_MACHINE_CREDENTIAL");
   });
 
-  it("prepends the configured bb executable directory to PATH and sets BB_CLI", () => {
+  it("prepends the configured CLI executable directory to PATH and sets OMNYO_CLI", () => {
     expect(
       prepareRuntimeShellEnv({
-        bbExecutableDirectory: "/tmp/bb-bin",
+        cliExecutableDirectory: "/tmp/omnyo-bin",
         hostDaemonPort: 3002,
         inheritedPath: "/usr/bin",
         serverUrl: "http://127.0.0.1:3334",
       }),
     ).toEqual({
-      PATH: `/tmp/bb-bin${delimiter}/usr/bin`,
-      BB_CLI: path.resolve("/tmp/bb-bin", "bb"),
-      BB_SERVER_URL: "http://127.0.0.1:3334",
-      BB_HOST_DAEMON_PORT: "3002",
+      PATH: `/tmp/omnyo-bin${delimiter}/usr/bin`,
+      OMNYO_CLI: path.resolve("/tmp/omnyo-bin", "omnyo"),
+      OMNYO_SERVER_URL: "http://127.0.0.1:3334",
+      OMNYO_HOST_DAEMON_PORT: "3002",
     });
   });
 
   it("sets the PowerShell execution policy it is given and none otherwise", () => {
     const options = {
-      bbExecutableDirectory: "C:\\bb",
+      cliExecutableDirectory: "C:\\omnyo",
       inheritedPath: "C:\\Windows",
       serverUrl: "http://127.0.0.1:43123",
     };
@@ -515,17 +541,17 @@ describe("prepareRuntimeShellEnv", () => {
     );
   });
 
-  it("uses an explicit bbExecutablePath for BB_CLI", () => {
+  it("uses an explicit cliExecutablePath for OMNYO_CLI", () => {
     expect(
       prepareRuntimeShellEnv({
-        bbExecutableDirectory: "/tmp/bb-bin",
-        bbExecutablePath: "/opt/custom/bb",
+        cliExecutableDirectory: "/tmp/omnyo-bin",
+        cliExecutablePath: "/opt/custom/agent-cli",
         inheritedPath: "/usr/bin",
         serverUrl: "http://127.0.0.1:3334",
       }),
     ).toMatchObject({
-      BB_CLI: "/opt/custom/bb",
-      PATH: `/tmp/bb-bin${delimiter}/usr/bin`,
+      OMNYO_CLI: "/opt/custom/agent-cli",
+      PATH: `/tmp/omnyo-bin${delimiter}/usr/bin`,
     });
   });
 
@@ -534,35 +560,36 @@ describe("prepareRuntimeShellEnv", () => {
 
     expect(
       prepareRuntimeShellEnv({
-        bbExecutableDirectory: "/tmp/bb-bin",
+        cliExecutableDirectory: "/tmp/omnyo-bin",
         hostDaemonPort: 3002,
         serverUrl: "http://127.0.0.1:3334",
       }),
     ).toEqual({
-      PATH: `/tmp/bb-bin${delimiter}/usr/local/bin:/usr/bin`,
-      BB_CLI: path.resolve("/tmp/bb-bin", "bb"),
-      BB_SERVER_URL: "http://127.0.0.1:3334",
-      BB_HOST_DAEMON_PORT: "3002",
+      PATH: `/tmp/omnyo-bin${delimiter}/usr/local/bin:/usr/bin`,
+      OMNYO_CLI: path.resolve("/tmp/omnyo-bin", "omnyo"),
+      OMNYO_SERVER_URL: "http://127.0.0.1:3334",
+      OMNYO_HOST_DAEMON_PORT: "3002",
     });
   });
 
   it("omits the host daemon port when the local API is disabled", () => {
     expect(
       prepareRuntimeShellEnv({
-        bbExecutableDirectory: "/tmp/bb-bin",
+        cliExecutableDirectory: "/tmp/omnyo-bin",
         inheritedPath: "/usr/bin",
         serverUrl: "http://127.0.0.1:3334",
       }),
     ).toEqual({
-      PATH: `/tmp/bb-bin${delimiter}/usr/bin`,
-      BB_CLI: path.resolve("/tmp/bb-bin", "bb"),
-      BB_SERVER_URL: "http://127.0.0.1:3334",
+      PATH: `/tmp/omnyo-bin${delimiter}/usr/bin`,
+      OMNYO_CLI: path.resolve("/tmp/omnyo-bin", "omnyo"),
+      OMNYO_SERVER_URL: "http://127.0.0.1:3334",
     });
   });
 });
 
 describe("resolvePowerShellExecutionPolicyDefault", () => {
   const notConfigured = createShellEnvSpawnResult({ status: 1, stdout: "" });
+
   const windowsEnv = {
     PATH: "C:\\Windows\\system32;C:\\Program Files\\PowerShell\\7\\",
     SystemRoot: "C:\\Windows",
@@ -573,6 +600,7 @@ describe("resolvePowerShellExecutionPolicyDefault", () => {
     const fakeSpawn = createFakeShellEnvSpawn({
       results: [notConfigured, notConfigured],
     });
+
     const readPaths: string[] = [];
 
     await expect(
@@ -581,6 +609,7 @@ describe("resolvePowerShellExecutionPolicyDefault", () => {
         platform: "win32",
         readTextFile: async (filePath) => {
           readPaths.push(filePath);
+
           return null;
         },
         spawnUserShellEnv: fakeSpawn.spawn,

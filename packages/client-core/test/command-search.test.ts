@@ -62,6 +62,7 @@ describe("command search", () => {
       "image-compressor",
       "Resize screenshots before an accessibility audit",
     );
+
     const nameMatch = skill("accessibility-audit");
     expect(search([descriptionMatch, nameMatch], "audit")).toEqual([
       nameMatch,
@@ -82,23 +83,28 @@ describe("command search", () => {
 
   it("ranks fuzzy matches across sections while keeping each section contiguous", () => {
     const skillMatch = skill("deploy-kubernetes-resources");
+
     const skillDescription = skill(
       "deployment-glossary",
       "Explain the dkr deployment shorthand",
     );
+
     const projectMatch: ProviderCommandSuggestion = {
       ...skill("debug-kernel-restart"),
       source: "command",
       origin: "project",
     };
+
     const userMatch: ProviderCommandSuggestion = {
       ...skill("docker"),
       source: "command",
     };
+
     const userDescription: ProviderCommandSuggestion = {
       ...skill("release-checklist", "Check dkr deployment prerequisites"),
       source: "command",
     };
+
     const catalog = [
       skillDescription,
       userDescription,

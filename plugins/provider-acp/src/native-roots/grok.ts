@@ -3,7 +3,7 @@ import {
   experimental_resolveClaudePluginRoots,
   experimental_resolveVendorPluginRoots,
   type ExperimentalVendorPlugin,
-} from "@get-bb/plugin-sdk/host";
+} from "@omnyo/plugin-sdk/host";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 import type {
@@ -26,8 +26,11 @@ import {
 } from "./shared.js";
 
 const GROK_DIR_NAME = ".grok";
+
 const CLAUDE_DIR_NAME = ".claude";
+
 const CLAUDE_PLUGIN_MANIFEST_MARKER = ".claude-plugin/plugin.json";
+
 const CURSOR_DIR_NAME = ".cursor";
 
 const grokSkillConfigSchema = z
@@ -54,6 +57,7 @@ const grokSkillConfigSchema = z
       .optional(),
   })
   .passthrough();
+
 type GrokSkillConfig = z.infer<typeof grokSkillConfigSchema>;
 
 const grokPluginManifestSchema = z
@@ -64,6 +68,7 @@ const grokPluginManifestSchema = z
     commands: z.union([z.string(), z.array(z.string())]).optional(),
   })
   .passthrough();
+
 type GrokPluginManifest = z.infer<typeof grokPluginManifestSchema>;
 
 const grokInstalledPluginRegistrySchema = z
@@ -95,12 +100,15 @@ function grokCompatEnabled(
   environmentValue: string | undefined,
 ): boolean {
   const normalized = environmentValue?.trim().toLowerCase();
+
   if (normalized === "true" || normalized === "1") {
     return true;
   }
+
   if (normalized === "false" || normalized === "0") {
     return false;
   }
+
   return configured ?? true;
 }
 
@@ -135,10 +143,12 @@ async function resolveGrokConfiguredSkillRoots(
   config: GrokSkillConfig | null,
 ): Promise<AcpResolvedSkillRoot[]> {
   const cwd = args.cwd ?? args.homeDir;
+
   const projectRootPath =
     args.cwd === null
       ? null
       : (await resolveProjectAncestorDirectories(args.cwd)).projectRootPath;
+
   return (config?.skills?.paths ?? []).map((configuredPath) => {
     const skillPath = resolveConfiguredPath({
       basePath: cwd,
@@ -146,11 +156,13 @@ async function resolveGrokConfiguredSkillRoots(
       homeDir: args.homeDir,
       value: configuredPath,
     });
+
     const origin: ResolvedRootOrigin =
       projectRootPath !== null &&
       isPathWithinDirectory(projectRootPath, skillPath)
         ? "project"
         : "user";
+
     return configuredSkillRoot({ origin, recursive: true, skillPath });
   });
 }
@@ -167,10 +179,12 @@ async function readGrokPluginManifest(
       path.join(pluginRootPath, relativePath),
       grokPluginManifestSchema,
     );
+
     if (manifest !== null) {
       return manifest;
     }
   }
+
   return null;
 }
 
@@ -195,12 +209,14 @@ async function resolveGrokPlugin(
   const pluginName = manifest?.name ?? path.basename(candidate.pluginRootPath);
   const enabled = config?.plugins?.enabled ?? [];
   const disabled = config?.plugins?.disabled ?? [];
+
   if (
     grokPluginListMatches(disabled, pluginName) ||
     (!candidate.autoEnabled && !grokPluginListMatches(enabled, pluginName))
   ) {
     return null;
   }
+
   return {
     rootPath: candidate.pluginRootPath,
     name: pluginName,
@@ -214,8 +230,10 @@ async function resolveGrokPluginSkillRoots(
   config: GrokSkillConfig | null,
 ): Promise<AcpResolvedSkillRoot[]> {
   const candidates: GrokPluginCandidate[] = [];
+
   if (args.cwd !== null) {
     const { directories } = await resolveProjectAncestorDirectories(args.cwd);
+
     for (const directoryPath of directories) {
       for (const pluginDirectoryName of [GROK_DIR_NAME, CLAUDE_DIR_NAME]) {
         for (const pluginRootPath of await childDirectoryPaths(
@@ -230,6 +248,7 @@ async function resolveGrokPluginSkillRoots(
       }
     }
   }
+
   for (const pluginsPath of [
     path.join(resolveGrokDir(args.homeDir, args.env), "plugins"),
     path.join(args.homeDir, CLAUDE_DIR_NAME, "plugins"),
@@ -240,6 +259,7 @@ async function resolveGrokPluginSkillRoots(
   }
 
   const cwd = args.cwd ?? args.homeDir;
+
   for (const configuredPath of config?.plugins?.paths ?? []) {
     candidates.push({
       autoEnabled: true,
@@ -254,6 +274,7 @@ async function resolveGrokPluginSkillRoots(
   }
 
   const configuredInstallDirectory = config?.plugins?.install_dir;
+
   const installDirectory = configuredInstallDirectory
     ? resolveConfiguredPath({
         basePath: cwd,
@@ -262,10 +283,12 @@ async function resolveGrokPluginSkillRoots(
         value: configuredInstallDirectory,
       })
     : path.join(resolveGrokDir(args.homeDir, args.env), "installed-plugins");
+
   const registry = await readJsonFile(
     path.join(installDirectory, "registry.json"),
     grokInstalledPluginRegistrySchema,
   );
+
   for (const repo of Object.values(registry?.repos ?? {})) {
     for (const plugin of Object.values(repo.plugins)) {
       candidates.push({
@@ -280,21 +303,27 @@ async function resolveGrokPluginSkillRoots(
 
   const plugins: ExperimentalVendorPlugin[] = [];
   const seen = new Set<string>();
+
   for (const candidate of candidates) {
     const key = path.resolve(candidate.pluginRootPath);
+
     if (seen.has(key)) {
       continue;
     }
+
     seen.add(key);
     const plugin = await resolveGrokPlugin(candidate, config);
+
     if (plugin !== null) {
       plugins.push(plugin);
     }
   }
+
   const roots = await experimental_resolveVendorPluginRoots({
     plugins,
     layout: "grok",
   });
+
   return roots.skills;
 }
 
@@ -304,14 +333,17 @@ export const resolveGrokNativeRoots: AcpNativeRootsResolver = async (args) => {
     parseToml,
     grokSkillConfigSchema,
   );
+
   const claudeCompat = grokCompatEnabled(
     config?.compat?.claude?.skills,
     args.env.GROK_CLAUDE_SKILLS_ENABLED,
   );
+
   const cursorCompat = grokCompatEnabled(
     config?.compat?.cursor?.skills,
     args.env.GROK_CURSOR_SKILLS_ENABLED,
   );
+
   return {
     skills: [
       skillsRoot({

@@ -1,5 +1,6 @@
 import type { NativeShellHandshake } from "./handshake.js";
 import { NATIVE_BRIDGE_GLOBAL } from "./version.js";
+import { LEGACY_NATIVE_BRIDGE_GLOBAL_V1 } from "./legacy-native-global-v1.js";
 
 export interface NativeShellApi extends NativeShellHandshake {
   post(message: unknown): void;
@@ -19,15 +20,21 @@ function encodeForScript(value: unknown): string {
 export function buildBridgeInjectionScript(
   handshake: NativeShellHandshake,
 ): string {
+  const encodedHandshake = encodeForScript(handshake);
+
   return `
 (function () {
+  var legacy = window[${JSON.stringify(LEGACY_NATIVE_BRIDGE_GLOBAL_V1)}];
+  if (legacy && typeof legacy === "object" && legacy.native) {
+    throw new Error("Legacy native bridge requires an Omnyo native update");
+  }
   try {
     var root = window.${NATIVE_BRIDGE_GLOBAL} = window.${NATIVE_BRIDGE_GLOBAL} || {};
     if (root.native && root.native.__installed) {
-      root.native.__apply(${encodeForScript(handshake)});
+      root.native.__apply(${encodedHandshake});
       return;
     }
-    var handshake = ${encodeForScript(handshake)};
+    var handshake = ${encodedHandshake};
     var listeners = [];
     var pending = {};
     var nextId = 0;

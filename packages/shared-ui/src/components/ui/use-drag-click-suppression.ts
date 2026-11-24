@@ -18,6 +18,7 @@ export function useDragClickSuppression(): UseDragClickSuppressionResult {
     if (timeoutRef.current === null) {
       return;
     }
+
     window.clearTimeout(timeoutRef.current);
     timeoutRef.current = null;
   }, []);
@@ -45,7 +46,9 @@ export function useDragClickSuppression(): UseDragClickSuppressionResult {
       if (!suppressClickRef.current) {
         return false;
       }
+
       clearSuppression();
+
       return true;
     }, [clearSuppression]);
 
@@ -54,12 +57,14 @@ export function useDragClickSuppression(): UseDragClickSuppressionResult {
       if (!consumeDragClickSuppression()) {
         return;
       }
+
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
     };
 
     document.addEventListener("click", handleDocumentClick, true);
+
     return () => {
       document.removeEventListener("click", handleDocumentClick, true);
     };

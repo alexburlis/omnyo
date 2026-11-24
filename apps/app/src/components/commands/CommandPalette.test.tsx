@@ -10,11 +10,12 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { makeThreadWorkSummary } from "@omnyo/test-helpers/domain-fixtures";
 import { createStore, Provider } from "jotai";
 import { paletteThreadLifecyclesAtom } from "@/lib/command-palette/palette-preferences";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import { MAX_PANES, type SplitLayout } from "@/lib/split-layout";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   defaultAppSettings,
   type AppCommandId,
@@ -22,10 +23,10 @@ import {
   type AppKeybinding,
   type AppKeybindingOverrides,
   type ThreadListEntry,
-} from "@bb/domain";
-import type { ThreadSearchResponse } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { ThreadSearchResponse } from "@omnyo/server-contract";
 import type { ThreadArchiveFilter } from "@/lib/thread-lifecycle-filter";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { AppCommandProvider, useAppCommandHandler } from "./AppCommandProvider";
 import {
   removePluginSlotRegistrations,
@@ -36,16 +37,13 @@ import {
   setPluginLogoUrls,
 } from "@/lib/plugin-logos";
 import { CommandPalette } from "./CommandPalette";
+import "./ThreadSearchPaletteMode";
 import {
   resetPluginThreadRowStatusesForTest,
   setPluginThreadRowStatus,
 } from "@/lib/plugin-thread-row-status";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
-import { collectPluginAppRegistrations } from "@get-bb/plugin-sdk/internal/plugin-app-collector";
-
-beforeAll(async () => {
-  await import("./ThreadSearchPaletteMode");
-});
+import { collectPluginAppRegistrations } from "@omnyo/plugin-sdk/internal/plugin-app-collector";
 
 const PALETTE_SHORTCUT = {
   key: "p",
@@ -116,17 +114,21 @@ const testState = vi.hoisted(() => ({
     name: string | null;
   }>,
 }));
+
 const modeState = vi.hoisted(() => ({
   activeRecents: [] as ThreadListEntry[],
   archivedRecents: [] as ThreadListEntry[],
   threadDraftIds: new Set<string>(),
   searchResponse: undefined as ThreadSearchResponse | undefined,
+  searchListeners: new Set<() => void>(),
   recentLoading: false,
   recentError: false,
   searchLoading: false,
   searchError: false,
 }));
+
 const routeNavigateMock = vi.hoisted(() => vi.fn());
+
 const openThreadInSplitMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/split-layout/openThreadInSplit", () => ({
@@ -138,6 +140,7 @@ function expectClasses(
   ...classNames: string[]
 ): void {
   expect(element).toBeTruthy();
+
   for (const className of classNames) {
     expect(element?.classList.contains(className)).toBe(true);
   }
@@ -148,6 +151,7 @@ function expectNoClasses(
   ...classNames: string[]
 ): void {
   expect(element).toBeTruthy();
+
   for (const className of classNames) {
     expect(element?.classList.contains(className)).toBe(false);
   }
@@ -163,6 +167,7 @@ function expectAttribute(
   value?: string,
 ): void {
   expect(element).toBeTruthy();
+
   if (value === undefined) {
     expect(element?.hasAttribute(name)).toBe(true);
   } else {
@@ -195,8 +200,8 @@ vi.mock("@/hooks/queries/system-queries", () => ({
   }),
 }));
 
-vi.mock("@/lib/bb-desktop", () => ({
-  getBbDesktopInfo: () => null,
+vi.mock("@/lib/omnyo-desktop", () => ({
+  getOmnyoDesktopInfo: () => null,
 }));
 
 vi.mock("@/hooks/useHostDaemon", () => ({
@@ -215,6 +220,7 @@ vi.mock("@/lib/app-query-client", () => ({
 }));
 
 vi.mock("@/components/ui/app-route-anchor", () => ({
+  useActivatedRouteNavigate: () => routeNavigateMock,
   useRouteNavigate: () => routeNavigateMock,
 }));
 
@@ -252,10 +258,26 @@ vi.mock("@/hooks/queries/palette-thread-queries", () => ({
 vi.mock("@/hooks/queries/thread-queries", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/hooks/queries/thread-queries")>();
+
+  const { useSyncExternalStore } = await import("react");
+
+  const subscribeToSearchResponse = (listener: () => void) => {
+    modeState.searchListeners.add(listener);
+
+    return () => {
+      modeState.searchListeners.delete(listener);
+    };
+  };
+
+  const searchResponseSnapshot = () => modeState.searchResponse;
+
   return {
     ...actual,
     useThreadSearch: ({ query }: { query: string }) => ({
-      data: modeState.searchResponse,
+      data: useSyncExternalStore(
+        subscribeToSearchResponse,
+        searchResponseSnapshot,
+      ),
       debouncedQuery: query.trim(),
       hasSearchableQuery: query.trim().length >= 2,
       isDebouncing: false,
@@ -270,13 +292,16 @@ function Handler({ command }: { command: AppCommandId }) {
   useAppCommandHandler(command, ({ target }) => {
     testState.calls.push(command);
     testState.targets.push(target);
+
     return true;
   });
+
   return null;
 }
 
 function LocationProbe() {
   const location = useLocation();
+
   return <output data-testid="location">{location.pathname}</output>;
 }
 
@@ -288,12 +313,14 @@ function makeThread(
 ): ThreadListEntry {
   return {
     id,
+    work: null,
     projectId: "project-1",
     environmentId: null,
     providerId: "codex",
     title: `Title ${id}`,
     titleFallback: `Title ${id}`,
     sectionId: null,
+    groupId: null,
     status: "idle",
     parentThreadId: null,
     lifecycleOwnerThreadId: null,
@@ -301,12 +328,17 @@ function makeThread(
     originKind: null,
     originPluginId: null,
     visibility: "visible",
+    pluginHome: false,
+    quiet: false,
     archivedAt: null,
     pinnedAt: null,
     pinSortKey: null,
+    shelfSortKey: null,
+    shelvedAt: null,
     deletedAt: null,
     lastReadAt: null,
     latestAttentionAt: 1,
+    lastMessageAt: null,
     createdAt: 1,
     updatedAt: threadUpdatedAt,
     activity: {
@@ -315,6 +347,7 @@ function makeThread(
       activeBackgroundCommandCount: 0,
       activePlanModeCount: 0,
       activeGoalCount: 0,
+      activeSubagentCount: 0,
     },
     hasPendingInteraction: false,
     environmentHostId: null,
@@ -342,7 +375,8 @@ function renderPalette({
   const store = createStore();
   store.set(splitLayoutAtom, layout);
   store.set(paletteThreadLifecyclesAtom, lifecycles);
-  const tree = () => (
+
+  const result = render(
     <Provider store={store}>
       <CompactViewportOverrideProvider isCompactViewport={compact}>
         <MemoryRouter>
@@ -362,11 +396,20 @@ function renderPalette({
           </AppCommandProvider>
         </MemoryRouter>
       </CompactViewportOverrideProvider>
-    </Provider>
+    </Provider>,
   );
-  const result = render(tree());
+
   screen.getByTestId("origin").focus();
-  return { ...result, store, rerenderPalette: () => result.rerender(tree()) };
+
+  return { ...result, store };
+}
+
+function deliverSearchResponse(response: ThreadSearchResponse) {
+  act(() => {
+    modeState.searchResponse = response;
+
+    for (const listener of modeState.searchListeners) listener();
+  });
 }
 
 function openPalette(): KeyboardEvent {
@@ -377,7 +420,9 @@ function openPalette(): KeyboardEvent {
     bubbles: true,
     cancelable: true,
   });
+
   (document.activeElement ?? window).dispatchEvent(event);
+
   return event;
 }
 
@@ -388,16 +433,22 @@ function openThreadSearch(): KeyboardEvent {
     bubbles: true,
     cancelable: true,
   });
+
   (document.activeElement ?? window).dispatchEvent(event);
+
   return event;
 }
 
 const searchField = () => screen.getByRole("combobox");
+
 const commandList = () => screen.getByRole("listbox", { name: "Commands" });
+
 const bucketGroup = (name: string) =>
   within(commandList()).getByRole("group", { name });
+
 const optionTitles = () =>
   screen.getAllByRole("option").map((option) => option.textContent);
+
 const selectedOption = () =>
   screen
     .getAllByRole("option")
@@ -466,6 +517,7 @@ describe("CommandPalette", () => {
         ),
       ).toHaveLength(1);
       expect(document.querySelector("[data-palette-footer]")).toBeNull();
+
       if (activation === "click") fireEvent.click(button);
       else
         fireEvent.keyDown(searchField(), {
@@ -489,6 +541,7 @@ describe("CommandPalette", () => {
       modeState.activeRecents = [
         makeThread(reason === "already open" ? "origin" : "selected"),
       ];
+
       const layout: SplitLayout =
         reason === "pane limit"
           ? {
@@ -509,6 +562,7 @@ describe("CommandPalette", () => {
               focusedPaneId: "pane-0",
             }
           : splitLayout;
+
       renderPalette({
         compact: reason === "compact",
         layout: reason === "no workspace" ? null : layout,
@@ -518,14 +572,22 @@ describe("CommandPalette", () => {
       expect(
         screen.queryByRole("button", { name: "Open in split" }),
       ).toBeNull();
+
       if (reason === "compact") {
         expect(document.querySelector("kbd")).toBeNull();
+
         const close = screen.getByRole("button", {
           name: "Return to commands",
         });
+
         act(() => close.focus());
-        expectText(await screen.findByRole("tooltip"), "Return to commands");
-        expect(screen.getByRole("tooltip").textContent).not.toContain("Esc");
+        expectText(
+          await screen.findByRole("tooltip", { hidden: true }),
+          "Return to commands",
+        );
+        expect(
+          screen.getByRole("tooltip", { hidden: true }).textContent,
+        ).not.toContain("Esc");
       }
     },
   );
@@ -538,8 +600,10 @@ describe("CommandPalette", () => {
     renderPalette({ layout: splitLayout });
     openThreadSearch();
     await screen.findByRole("option", { name: /Title origin/ });
+
     const reservedColumns = () =>
       document.querySelectorAll('button[aria-label="Open in split"]');
+
     expect(reservedColumns()).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Open in split" })).toBeNull();
     fireEvent.keyDown(searchField(), { key: "ArrowDown" });
@@ -618,6 +682,7 @@ describe("CommandPalette", () => {
     "runs an available shortcut from %s even with no matches, after closing and restoring focus",
     async (mode) => {
       renderPalette();
+
       if (mode === "commands") openPalette();
       else openThreadSearch();
       await waitFor(() => expect(searchField()).toBeTruthy());
@@ -656,6 +721,7 @@ describe("CommandPalette", () => {
     expect(fireEvent.keyDown(searchField(), { key: "a", ctrlKey: true })).toBe(
       true,
     );
+
     for (const ignored of [{ repeat: true }, { isComposing: true }]) {
       fireEvent.keyDown(searchField(), {
         key: "o",
@@ -664,6 +730,7 @@ describe("CommandPalette", () => {
         ...ignored,
       });
     }
+
     expect(testState.calls).toEqual([]);
     fireEvent.keyDown(searchField(), {
       key: "o",
@@ -680,7 +747,7 @@ describe("CommandPalette", () => {
       setPluginSlotRegistrations(
         "linear",
         collectPluginAppRegistrations({
-          __bbPluginApp: true,
+          __omnyoPluginApp: true,
           setup(app) {
             app.commands.register({
               id: "open-issue",
@@ -736,10 +803,12 @@ describe("CommandPalette", () => {
     expect(
       within(commandList()).queryByRole("group", { name: "Plugins" }),
     ).toBeNull();
+
     for (const [index, label] of ["Threads", "Actions", "Settings"].entries()) {
       const header = within(groups[index] as HTMLElement).getByText(label, {
         selector: "div",
       });
+
       expectClasses(
         header,
         "px-2",
@@ -750,6 +819,7 @@ describe("CommandPalette", () => {
       );
       expectNoClasses(header, "bg-muted/30", "opacity-60");
     }
+
     expectClasses(commandList(), "p-1");
     expectClasses(commandList().parentElement, "overflow-hidden");
     expectClasses(
@@ -774,12 +844,8 @@ describe("CommandPalette", () => {
       "px-3",
       "py-1",
     );
-    expectClasses(
-      searchField(),
-      "placeholder:text-subtle-foreground",
-      "placeholder:font-light",
-      "placeholder:opacity-70",
-    );
+    expectClasses(searchField(), "placeholder:text-subtle-foreground");
+    expectNoClasses(searchField(), "placeholder:opacity-70");
     expectClasses(commandList().parentElement, "bg-background");
     expect(
       commandList().querySelectorAll("[data-palette-scroll-sentinel]"),
@@ -788,6 +854,7 @@ describe("CommandPalette", () => {
     const rootFooter = screen
       .getByTestId("command-palette")
       .querySelector("[data-palette-footer]");
+
     expect(rootFooter).toBeNull();
     const rootDescriptionId = searchField().getAttribute("aria-describedby");
     expect(rootDescriptionId).not.toBeNull();
@@ -802,9 +869,11 @@ describe("CommandPalette", () => {
       expect.stringContaining("Search threads"),
       expect.stringContaining("Next thread"),
     ]);
+
     for (const row of threadRows) {
       expect(within(row).queryByText("Threads")).toBeNull();
     }
+
     const searchThreadsRow = threadRows[1] as HTMLElement;
     expectClasses(searchThreadsRow.querySelector("kbd"), "bg-state-hover/50");
     expectNoClasses(searchThreadsRow.querySelector("kbd"), "opacity-60");
@@ -820,9 +889,11 @@ describe("CommandPalette", () => {
     expect(actionRows[1]?.textContent).not.toContain("Workspace");
     expect(actionRows[2]?.textContent).not.toContain("Composer and models");
     expect(actionRows[3]?.textContent).toContain("Browser");
+
     for (const row of [...threadRows, ...actionRows]) {
       expectClasses(row, "px-2", "py-1.5", "min-h-8");
     }
+
     expect(commandList().querySelector("[data-icon]")).toBeNull();
     expectClasses(threadRows[0], "bg-state-hover", "text-foreground");
     expectAttribute(actionRows[0], "data-palette-action-kind", "terminal");
@@ -856,9 +927,11 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("button", { name: "Thread scope" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Open in split" })).toBeNull();
     expect(document.querySelector("[data-palette-footer]")).toBeNull();
+
     const threadInput = screen.getByRole("combobox", {
       name: "Search threads",
     });
+
     const threadDescriptionId = threadInput.getAttribute("aria-describedby");
     expect(threadDescriptionId).not.toBeNull();
     expectText(
@@ -890,6 +963,7 @@ describe("CommandPalette", () => {
     const clearMode = screen.getByRole("button", {
       name: "Return to commands",
     });
+
     expect(clearMode.querySelector('[data-icon="X"]')).not.toBeNull();
     expectClasses(
       clearMode,
@@ -920,10 +994,13 @@ describe("CommandPalette", () => {
     const searchCommand = within(bucketGroup("Threads"))
       .getAllByRole("option")
       .find((row) => row.textContent?.includes("Search threads"));
+
     fireEvent.click(searchCommand as HTMLElement);
+
     const clearAfterCommand = await screen.findByRole("button", {
       name: "Return to commands",
     });
+
     fireEvent.click(clearAfterCommand);
     await waitFor(() =>
       expect(
@@ -945,11 +1022,14 @@ describe("CommandPalette", () => {
       openThreadSearch();
       await screen.findByRole("combobox", { name: "Search threads" });
       fireEvent.change(searchField(), { target: { value: query } });
+
       const message = await screen.findByText(
         query === "" ? "No threads" : "No matching threads",
       );
+
       expectClasses(message.parentElement, "justify-center", "px-3", "py-4");
-      expectClasses(message, "text-xs", "text-subtle-foreground/60");
+      expectClasses(message, "text-xs", "text-subtle-foreground");
+      expectNoClasses(message, "text-subtle-foreground/60");
       expect(
         message.parentElement?.querySelector('[data-icon="MessageSquare"]'),
       ).not.toBeNull();
@@ -958,11 +1038,13 @@ describe("CommandPalette", () => {
       expect(screen.queryByRole("option")).toBeNull();
       const results = screen.getByRole("listbox", { name: "Threads" });
       expect(within(results).queryAllByRole("group")).toHaveLength(0);
+
       for (const heading of ["Recent", "Threads", "Archived"]) {
         expect(
           within(results).queryByText(heading, { exact: true }),
         ).toBeNull();
       }
+
       expect(searchField().hasAttribute("aria-activedescendant")).toBe(false);
       expect(palette.querySelector("[data-palette-footer]")).toBeNull();
       fireEvent.keyDown(searchField(), { key: "Enter" });
@@ -1001,9 +1083,11 @@ describe("CommandPalette", () => {
   it("explains Escape at the mode exit control without adding a footer hint", async () => {
     renderPalette();
     openThreadSearch();
+
     const close = await screen.findByRole("button", {
       name: "Return to commands",
     });
+
     act(() => close.focus());
     expectText(await screen.findByRole("tooltip"), "Return to commands (Esc)");
     expect(document.querySelector("[data-palette-footer]")).toBeNull();
@@ -1014,6 +1098,7 @@ describe("CommandPalette", () => {
   it("returns from an empty thread query with Backspace", async () => {
     renderPalette();
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
@@ -1067,6 +1152,7 @@ describe("CommandPalette", () => {
     expect(results.querySelectorAll('[data-icon="Folder"]')).toHaveLength(3);
     expectClasses(results, "p-1");
     expectClasses(within(results).getByText("Active"), "px-2", "py-1");
+
     for (const row of rows) {
       const metadata = row.querySelector("[data-palette-thread-metadata]");
       expectText(metadata, "Palette project");
@@ -1083,9 +1169,11 @@ describe("CommandPalette", () => {
     modeState.archivedRecents = [makeThread("archived", { archivedAt: 1 })];
     const { store } = renderPalette();
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
+
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expectText(selectedOption(), "Title selected");
     act(() => store.set(paletteThreadLifecyclesAtom, ["archived", "active"]));
@@ -1107,15 +1195,19 @@ describe("CommandPalette", () => {
     const { store } = renderPalette();
     openThreadSearch();
     await screen.findByRole("combobox", { name: "Search threads" });
+
     const trigger = screen.getByRole("button", {
       name: "Filter and sort: Active, Relevance",
     });
+
     expectClasses(trigger, "text-subtle-foreground");
     act(() => trigger.focus());
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
     const archived = await screen.findByRole("menuitemcheckbox", {
       name: "Archived",
     });
+
     act(() => archived.focus());
     fireEvent.keyDown(archived, { key: "Enter" });
     expect(store.get(paletteThreadLifecyclesAtom)).toEqual([
@@ -1141,9 +1233,11 @@ describe("CommandPalette", () => {
           status: index === 1 ? "pending" : "idle",
         }),
       );
+
       const archived = Array.from({ length: 4 }, (_, index) =>
         makeThread(`archived-${index}`, { archivedAt: 1 }),
       );
+
       modeState.activeRecents = active;
       modeState.archivedRecents = archived;
       modeState.searchResponse = {
@@ -1158,9 +1252,11 @@ describe("CommandPalette", () => {
       };
       const { store } = renderPalette({ lifecycles: ["active", "archived"] });
       openThreadSearch();
+
       const input = await screen.findByRole("combobox", {
         name: "Search threads",
       });
+
       fireEvent.change(input, { target: { value: query } });
       expect(screen.queryByRole("group", { name: "Drafts" })).toBeNull();
       expect(
@@ -1200,7 +1296,17 @@ describe("CommandPalette", () => {
       title: "Matching active thread",
       lastReadAt: Date.now(),
     });
-    const archived = makeThread("archived", { archivedAt: Date.now() });
+
+    const archived = makeThread("archived", {
+      archivedAt: Date.now(),
+      work: makeThreadWorkSummary({
+        primary: {
+          label: "ready-to-archive",
+          reason: { code: "complete", text: "Ready to archive" },
+        },
+      }),
+    });
+
     modeState.searchResponse = {
       active: {
         total: 1,
@@ -1222,9 +1328,11 @@ describe("CommandPalette", () => {
     };
     renderPalette({ lifecycles: ["active", "archived"] });
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
+
     fireEvent.change(input, { target: { value: "match" } });
     const results = screen.getByRole("listbox", { name: "Threads" });
     const rows = within(results).getAllByRole("option");
@@ -1232,15 +1340,16 @@ describe("CommandPalette", () => {
     const match = rows[0].querySelector("mark");
     expectText(match, "Matching");
     expectClasses(match, "bg-[var(--sidebar-search-match)]", "text-foreground");
-    expectClasses(match?.closest(".bb-thread-title"), "text-foreground");
+    expectClasses(match?.closest(".omnyo-thread-title"), "text-foreground");
     expect(
-      within(rows[1]).getByRole("img", { name: "Unread thread succeeded" }),
+      within(rows[1]).getByRole("img", { name: "Ready to archive" }),
     ).toBeTruthy();
     expect(results.querySelector('[data-icon="Archive"]')).toBeNull();
     expectClasses(within(results).getByText("Active"), "px-2", "py-1");
     expectClasses(within(results).getByText("Archived"), "px-2", "py-1");
     const groups = within(results).getAllByRole("group");
     expect(groups).toHaveLength(2);
+
     for (const [index, name] of ["Active", "Archived"].entries()) {
       const group = within(results).getByRole("group", { name });
       expect(within(group).getAllByRole("option")).toEqual([rows[index]]);
@@ -1249,27 +1358,29 @@ describe("CommandPalette", () => {
       expect(group.hasAttribute("tabindex")).toBe(false);
       expect(label.hasAttribute("tabindex")).toBe(false);
     }
+
     expect(
       rows[1].querySelector("[data-palette-thread-metadata]")?.textContent,
     ).toBe("Palette project · just now");
     expect(within(results).queryByText("Recent")).toBeNull();
     expect(
       results.querySelectorAll("[data-palette-thread-status]"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
+    expect(within(rows[0]).getByRole("img", { name: "Done" })).toBeTruthy();
     expect(
       rows[1].querySelector("[data-palette-thread-details]")?.lastElementChild,
-    ).toBe(
-      within(rows[1]).getByRole("img", { name: "Unread thread succeeded" }),
-    );
+    ).toBe(within(rows[1]).getByRole("img", { name: "Ready to archive" }));
   });
 
   it("caps mixed matches, expands sections independently, and resets on query changes", async () => {
     const active = Array.from({ length: 8 }, (_, index) =>
       makeThread(`active-${index}`),
     );
+
     const archived = Array.from({ length: 8 }, (_, index) =>
       makeThread(`archived-${index}`, { archivedAt: Date.now() }),
     );
+
     modeState.activeRecents = active;
     modeState.searchResponse = {
       active: {
@@ -1283,9 +1394,11 @@ describe("CommandPalette", () => {
     };
     renderPalette({ lifecycles: ["active", "archived"] });
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
+
     expect(screen.getAllByRole("option")).toHaveLength(7);
     expect(screen.getByText("Show more")).toBeTruthy();
     fireEvent.change(input, { target: { value: "match" } });
@@ -1303,9 +1416,11 @@ describe("CommandPalette", () => {
     ]);
     expect(within(archivedGroup).getAllByRole("option")).toHaveLength(4);
     expectClasses(activeGroup, "not-last:mb-2");
+
     const more = within(activeGroup).getByRole("option", {
       name: "Show more threads",
     });
+
     expectClasses(more, "text-xs", "text-subtle-foreground");
     expectNoClasses(more, "font-medium");
     expectClasses(
@@ -1315,6 +1430,7 @@ describe("CommandPalette", () => {
       "text-subtle-foreground",
     );
     expect(more.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+
     for (let index = 0; index < 6; index++)
       fireEvent.keyDown(input, { key: "ArrowDown" });
     expectClasses(more.parentElement, "bg-state-hover", "text-foreground");
@@ -1358,11 +1474,13 @@ describe("CommandPalette", () => {
         updatedAt: Date.now() - index,
       }),
     );
-    const { rerenderPalette } = renderPalette();
+    renderPalette();
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
+
     fireEvent.change(input, { target: { value: "f" } });
     expect(optionTitles()).toHaveLength(6);
     expect(
@@ -1371,7 +1489,7 @@ describe("CommandPalette", () => {
     fireEvent.change(input, { target: { value: "fix" } });
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expectText(selectedOption(), "Fix 1");
-    modeState.searchResponse = {
+    deliverSearchResponse({
       active: {
         total: 2,
         results: [
@@ -1400,8 +1518,7 @@ describe("CommandPalette", () => {
         ],
       },
       archived: { total: 0, results: [] },
-    };
-    rerenderPalette();
+    });
     expect(optionTitles()).toEqual([
       expect.stringContaining("Fix 0"),
       expect.stringContaining("Fix 1"),
@@ -1417,7 +1534,7 @@ describe("CommandPalette", () => {
     await waitFor(() =>
       expect(routeNavigateMock).toHaveBeenCalledWith(
         "/projects/project-1/threads/fix-2",
-        { state: { searchMessageSeq: 12, searchThreadId: "fix-2" } },
+        { state: undefined },
       ),
     );
   });
@@ -1430,16 +1547,19 @@ describe("CommandPalette", () => {
         updatedAt: Date.now() - index,
       }),
     );
-    const { rerenderPalette } = renderPalette();
+    renderPalette();
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
+
     fireEvent.change(input, { target: { value: "fx" } });
+
     for (let index = 0; index < 5; index++)
       fireEvent.keyDown(input, { key: "ArrowDown" });
     expectText(selectedOption(), "Fix 5");
-    modeState.searchResponse = {
+    deliverSearchResponse({
       active: {
         total: 1,
         results: [
@@ -1457,8 +1577,7 @@ describe("CommandPalette", () => {
         ],
       },
       archived: { total: 0, results: [] },
-    };
-    rerenderPalette();
+    });
     expectText(selectedOption(), "Fix 5");
     fireEvent.keyDown(input, { key: "ArrowUp" });
     expectText(selectedOption(), "Fix 4");
@@ -1475,20 +1594,22 @@ describe("CommandPalette", () => {
     );
   });
 
-  it("puts an exact title match first even when the server ranks message matches above it", async () => {
+  it("puts an exact title match first and opens it at the latest message even when the server ranks message matches above it", async () => {
     const now = Date.now();
+
     const thread = (id: string, title: string, minutesAgo: number) =>
       makeThread(id, {
         title,
         lastReadAt: now,
         updatedAt: now - minutesAgo * 60_000,
       });
+
     const mossPlugins = thread("moss-plugins", "Moss plugins", 600);
     const sceneSeed = thread("scene-seed", "SceneSeed", 5);
     const briefs = thread("briefs", "Briefs & Action Cards", 10);
     const contentPlan = thread("content", "Content strategy and calendar", 20);
     const blogPost = thread("blog", "Plugins blog post", 30);
-    const mossEditor = thread("moss-editor", "Moss editor in bb", 40);
+    const mossEditor = thread("moss-editor", "Moss editor in Omnyo", 40);
     modeState.activeRecents = [
       sceneSeed,
       briefs,
@@ -1497,6 +1618,7 @@ describe("CommandPalette", () => {
       mossEditor,
       mossPlugins,
     ];
+
     const message = (text: string, term: string, sourceSeq: number) => ({
       sourceKind: "assistant_message" as const,
       text,
@@ -1508,6 +1630,7 @@ describe("CommandPalette", () => {
       ],
       sourceSeq,
     });
+
     modeState.searchResponse = {
       active: {
         total: 5,
@@ -1536,7 +1659,7 @@ describe("CommandPalette", () => {
             thread: mossPlugins,
             matches: [
               message(
-                "Command: git reset --hard origin/bb/moss-viewer-plugin",
+                "Command: git reset --hard origin/omnyo/moss-viewer-plugin",
                 "moss",
                 88,
               ),
@@ -1565,6 +1688,7 @@ describe("CommandPalette", () => {
     };
     renderPalette();
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
@@ -1574,17 +1698,19 @@ describe("CommandPalette", () => {
       screen
         .getAllByRole("option")
         .slice(0, 2)
-        .map((option) => option.querySelector(".bb-thread-title")?.textContent)
+        .map(
+          (option) => option.querySelector(".omnyo-thread-title")?.textContent,
+        )
         .sort(),
-    ).toEqual(["Moss editor in bb", "Moss plugins"]);
+    ).toEqual(["Moss editor in Omnyo", "Moss plugins"]);
 
     fireEvent.change(input, { target: { value: "moss plugins" } });
     const [first] = screen.getAllByRole("option");
     expect(first.getAttribute("aria-selected")).toBe("true");
-    expect(first.querySelector(".bb-thread-title")?.textContent).toBe(
+    expect(first.querySelector(".omnyo-thread-title")?.textContent).toBe(
       "Moss plugins",
     );
-    expect(first.querySelector(".bb-thread-title mark")?.textContent).toBe(
+    expect(first.querySelector(".omnyo-thread-title mark")?.textContent).toBe(
       "Moss plugins",
     );
     expectText(
@@ -1595,7 +1721,7 @@ describe("CommandPalette", () => {
     await waitFor(() =>
       expect(routeNavigateMock).toHaveBeenCalledWith(
         "/projects/project-1/threads/moss-plugins",
-        { state: { searchMessageSeq: 88, searchThreadId: "moss-plugins" } },
+        { state: undefined },
       ),
     );
   });
@@ -1605,9 +1731,11 @@ describe("CommandPalette", () => {
     modeState.searchError = true;
     renderPalette();
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
+
     fireEvent.change(input, { target: { value: "fix" } });
     expect(optionTitles()).toEqual([expect.stringContaining("Fix it")]);
     expect(screen.queryByText("Couldn’t load threads")).toBeNull();
@@ -1619,13 +1747,17 @@ describe("CommandPalette", () => {
     modeState.activeRecents = [makeThread("other", { title: "Unrelated" })];
     renderPalette();
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
+
     fireEvent.change(input, { target: { value: "pal" } });
+
     const metadata = screen
       .getByRole("option", { name: /Unrelated/ })
       .querySelector("[data-palette-thread-metadata]");
+
     expect(metadata?.querySelector("mark")?.textContent).toBe("Pal");
   });
 
@@ -1638,9 +1770,11 @@ describe("CommandPalette", () => {
       modeState.activeRecents = [makeThread("fix", { title: "Fix it" })];
       renderPalette({ lifecycles: [...lifecycles] });
       openThreadSearch();
+
       const input = await screen.findByRole("combobox", {
         name: "Search threads",
       });
+
       fireEvent.change(input, { target: { value: "z" } });
       await screen.findByText(message);
       expect(screen.queryByRole("option")).toBeNull();
@@ -1655,6 +1789,7 @@ describe("CommandPalette", () => {
           archivedAt: lifecycle === "archived" ? Date.now() : null,
         }),
       );
+
       modeState.searchResponse = {
         active: { total: 0, results: [] },
         archived: { total: 0, results: [] },
@@ -1665,9 +1800,11 @@ describe("CommandPalette", () => {
       };
       renderPalette({ lifecycles: [lifecycle] });
       openThreadSearch();
+
       const input = await screen.findByRole("combobox", {
         name: "Search threads",
       });
+
       fireEvent.change(input, { target: { value: "match" } });
       expect(screen.getAllByRole("group")).toHaveLength(1);
       const rows = screen.getAllByRole("option");
@@ -1706,9 +1843,11 @@ describe("CommandPalette", () => {
     };
     renderPalette({ lifecycles: ["active", "archived"] });
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
+
     fireEvent.change(input, { target: { value: "match" } });
 
     const results = screen.getByRole("listbox", { name: "Threads" });
@@ -1744,26 +1883,47 @@ describe("CommandPalette", () => {
   });
 
   it.each(["", "match"])(
-    "shows only meaningful status after left-aligned metadata for query '%s'",
+    "shows authoritative work status after left-aligned metadata for query '%s'",
     async (query) => {
       const threads = [
         makeThread("idle", { lastReadAt: Date.now() }),
         makeThread("working", {
           lastReadAt: Date.now(),
+          work: makeThreadWorkSummary({
+            primary: {
+              label: "working",
+              reason: { code: "turn", text: "Working" },
+            },
+          }),
           runtime: {
             displayStatus: "active",
           },
         }),
         makeThread("draft", { lastReadAt: Date.now() }),
-        makeThread("waiting", { hasPendingInteraction: true }),
+        makeThread("waiting", {
+          hasPendingInteraction: true,
+          work: makeThreadWorkSummary({
+            primary: {
+              label: "needs-you",
+              reason: { code: "input", text: "Needs input" },
+            },
+          }),
+        }),
         makeThread("workflow", {
           lastReadAt: Date.now(),
+          work: makeThreadWorkSummary({
+            primary: {
+              label: "working",
+              reason: { code: "workflow", text: "Workflow running" },
+            },
+          }),
           activity: {
             ...makeThread("workflow").activity,
             activeWorkflowCount: 1,
           },
         }),
       ];
+
       modeState.threadDraftIds.add("draft");
       modeState.activeRecents = threads;
       modeState.searchResponse = {
@@ -1775,39 +1935,50 @@ describe("CommandPalette", () => {
       };
       renderPalette();
       openThreadSearch();
+
       const input = await screen.findByRole("combobox", {
         name: "Search threads",
       });
+
       fireEvent.change(input, { target: { value: query } });
       const results = screen.getByRole("listbox", { name: "Threads" });
       await waitFor(() =>
         expect(within(results).getAllByRole("option")).toHaveLength(5),
       );
+
       const idleRow = within(results).getByRole("option", {
         name: /Title idle/,
       });
-      expect(within(idleRow).queryByRole("img")).toBeNull();
-      expect(idleRow.querySelector("[data-palette-thread-status]")).toBeNull();
+
+      expect(within(idleRow).getByRole("img", { name: "Done" })).toBeTruthy();
+      expect(
+        idleRow.querySelector("[data-palette-thread-status]"),
+      ).toBeTruthy();
       expect(
         idleRow.querySelector("[data-palette-thread-details]")?.children,
-      ).toHaveLength(1);
+      ).toHaveLength(3);
+
       for (const [title, label, icon] of [
-        ["Title working", "Thread working", "Loading"],
+        ["Title working", "Working", null],
         ["Title draft", "Thread has unsubmitted draft", "Edit"],
-        ["Title waiting", "Thread needs user input", "CircleQuestion"],
-        ["Title workflow", "Workflow running", "Workflow"],
-      ]) {
+        ["Title waiting", "Needs you", "CircleQuestion"],
+        ["Title workflow", "Working", null],
+      ] satisfies [string, string, string | null][]) {
         const row = within(results).getByRole("option", {
           name: new RegExp(title),
         });
+
         const status = within(row).getByRole("img", { name: label });
         const details = row.querySelector("[data-palette-thread-details]");
+
         const metadata = details?.querySelector(
           "[data-palette-thread-metadata]",
         );
+
         const separator = details?.querySelector(
           "[data-palette-thread-status-separator]",
         );
+
         expect(details?.firstElementChild).toBe(metadata);
         expect(metadata?.nextElementSibling).toBe(separator);
         expectText(separator, "·");
@@ -1815,16 +1986,13 @@ describe("CommandPalette", () => {
         expect(separator?.nextElementSibling).toBe(status);
         expectClasses(status, "size-3.5", "shrink-0", "cursor-default");
         expectClasses(
-          status.querySelector(`[data-icon="${icon}"]`),
+          icon === null
+            ? status.querySelector(".omnyo-working-orb")?.parentElement
+            : status.querySelector(`[data-icon="${icon}"]`),
           "size-3.5",
         );
         expect(status.hasAttribute("tabindex")).toBe(false);
         expect(status.closest('button, [role="button"]')).toBeNull();
-        expect(
-          status
-            .querySelector(".animate-shine-icon")
-            ?.closest('[aria-hidden="true"]') ?? null,
-        ).toBeNull();
         const projectIcon = metadata?.querySelector('[data-icon="Folder"]');
         expectClasses(projectIcon, "size-3.5");
         expect(projectIcon?.getAttribute("aria-hidden")).toBe("true");
@@ -1832,6 +2000,7 @@ describe("CommandPalette", () => {
           row.querySelector("[data-palette-thread-metadata]")?.textContent,
         ).toContain("Palette project");
       }
+
       expect(within(results).getByText("Active")).toBeTruthy();
       expect(within(results).queryByText("Archived")).toBeNull();
     },
@@ -1840,19 +2009,29 @@ describe("CommandPalette", () => {
   it("uses live plugin status with the sidebar's attention priority", async () => {
     modeState.activeRecents = [
       makeThread("plugin", { lastReadAt: Date.now() }),
-      makeThread("waiting", { hasPendingInteraction: true }),
+      makeThread("waiting", {
+        hasPendingInteraction: true,
+        work: makeThreadWorkSummary({
+          primary: {
+            label: "needs-you",
+            reason: { code: "input", text: "Needs input" },
+          },
+        }),
+      }),
     ];
+
     const pluginStatus = {
       icon: "Check",
       label: "Checks passed",
       tone: "success" as const,
     };
+
     setPluginThreadRowStatus("waiting", "checks", pluginStatus);
     renderPalette();
     openThreadSearch();
     await screen.findByRole("combobox", { name: "Search threads" });
     const row = screen.getByRole("option", { name: /Title plugin/ });
-    expect(within(row).queryByRole("img")).toBeNull();
+    expect(within(row).getByRole("img", { name: "Done" })).toBeTruthy();
     act(() => setPluginThreadRowStatus("plugin", "checks", pluginStatus));
     const status = within(row).getByRole("img", { name: "Checks passed" });
     expectClasses(status.querySelector('[data-icon="Check"]'), "size-3.5");
@@ -1860,7 +2039,7 @@ describe("CommandPalette", () => {
       within(screen.getByRole("option", { name: /Title waiting/ })).getByRole(
         "img",
         {
-          name: "Thread needs user input",
+          name: "Needs you",
         },
       ),
     ).toBeTruthy();
@@ -1873,7 +2052,7 @@ describe("CommandPalette", () => {
       ),
     ).toBeNull();
     act(() => resetPluginThreadRowStatusesForTest());
-    expect(within(row).queryByRole("img")).toBeNull();
+    expect(within(row).getByRole("img", { name: "Done" })).toBeTruthy();
   });
 
   it("opens an archived message match with its anchor", async () => {
@@ -1900,9 +2079,11 @@ describe("CommandPalette", () => {
     };
     renderPalette({ lifecycles: ["archived"] });
     openThreadSearch();
+
     const input = await screen.findByRole("combobox", {
       name: "Search threads",
     });
+
     fireEvent.change(input, { target: { value: "matching" } });
     const results = screen.getByRole("listbox", { name: "Threads" });
     expect(within(results).getByText("Archived")).toBeTruthy();
@@ -1918,7 +2099,7 @@ describe("CommandPalette", () => {
       "matching",
     );
     const option = screen.getByRole("option");
-    expect(option.querySelector(".bb-thread-title")?.textContent).toBe(
+    expect(option.querySelector(".omnyo-thread-title")?.textContent).toBe(
       "Title archived-message",
     );
     const excerpt = option.querySelector("[data-palette-thread-excerpt]");
@@ -1931,6 +2112,7 @@ describe("CommandPalette", () => {
       searchMessageSeq: 42,
       searchThreadId: "archived-message",
     };
+
     await waitFor(() => expect(screen.queryByRole("combobox")).toBeNull());
     expect(routeNavigateMock).toHaveBeenCalledWith(
       "/projects/project-1/threads/archived-message",
@@ -2008,17 +2190,20 @@ describe("CommandPalette", () => {
       await waitFor(() => expect(searchField()).toBeTruthy());
       fireEvent.keyDown(searchField(), { key: "ArrowDown" });
       fireEvent.keyDown(searchField(), { key: "ArrowDown" });
+
       const activeDescendant = searchField().getAttribute(
         "aria-activedescendant",
       );
 
       fireEvent.compositionStart(searchField());
+
       const composingKey = new KeyboardEvent("keydown", {
         key,
         isComposing: true,
         bubbles: true,
         cancelable: true,
       });
+
       fireEvent(searchField(), composingKey);
 
       expect(composingKey.defaultPrevented).toBe(false);
@@ -2030,12 +2215,14 @@ describe("CommandPalette", () => {
       expect(testState.calls).toEqual([]);
 
       fireEvent.compositionEnd(searchField());
+
       if (key !== "Enter") {
         const navigation = new KeyboardEvent("keydown", {
           key,
           bubbles: true,
           cancelable: true,
         });
+
         fireEvent(searchField(), navigation);
 
         expect(navigation.defaultPrevented).toBe(true);
@@ -2058,12 +2245,14 @@ describe("CommandPalette", () => {
     );
     const input = searchField();
     fireEvent.compositionStart(input);
+
     const confirmation = new KeyboardEvent("keydown", {
       key: "Enter",
       isComposing: true,
       bubbles: true,
       cancelable: true,
     });
+
     fireEvent(input, confirmation);
 
     expect(confirmation.defaultPrevented).toBe(false);
@@ -2071,11 +2260,13 @@ describe("CommandPalette", () => {
     expect(testState.calls).toEqual([]);
 
     fireEvent.compositionEnd(input);
+
     const activation = new KeyboardEvent("keydown", {
       key: "Enter",
       bubbles: true,
       cancelable: true,
     });
+
     fireEvent(input, activation);
 
     expect(activation.defaultPrevented).toBe(true);
@@ -2113,6 +2304,7 @@ describe("CommandPalette", () => {
 
   it("keeps app shortcuts working after a shortcut closes the palette", async () => {
     renderPalette();
+
     const pressThreadNew = () =>
       fireEvent.keyDown(document.activeElement ?? window, {
         key: "o",
@@ -2137,6 +2329,7 @@ describe("CommandPalette", () => {
       Element.prototype,
       "scrollIntoView",
     ) as unknown as ReturnType<typeof vi.fn>;
+
     renderPalette();
     openPalette();
     await waitFor(() => expect(searchField()).toBeTruthy());
@@ -2163,7 +2356,7 @@ describe("CommandPalette", () => {
       setPluginSlotRegistrations(
         "linear",
         collectPluginAppRegistrations({
-          __bbPluginApp: true,
+          __omnyoPluginApp: true,
           setup(app) {
             const registration = {
               id: "open-issue",
@@ -2172,6 +2365,7 @@ describe("CommandPalette", () => {
                 testState.calls.push("plugin-ran");
               },
             };
+
             if (entryPoint === "commands") app.commands.register(registration);
             else app.slots.commandPaletteAction(registration);
           },
@@ -2193,8 +2387,9 @@ describe("CommandPalette", () => {
   it("dispatches defaults and overrides, respects availability, and unregisters disabled commands", async () => {
     let available = true;
     const run = vi.fn();
+
     const registrations = collectPluginAppRegistrations({
-      __bbPluginApp: true,
+      __omnyoPluginApp: true,
       setup(app) {
         app.commands.register({
           id: "open-issue",
@@ -2205,6 +2400,7 @@ describe("CommandPalette", () => {
         });
       },
     });
+
     setPluginSlotRegistrations("linear", registrations);
     const view = renderPalette();
     fireEvent.keyDown(window, { key: "i", ctrlKey: true, shiftKey: true });
@@ -2340,6 +2536,7 @@ describe("CommandPalette", () => {
       "option",
       { name: "Linear settings" },
     );
+
     expect(pluginSettingsRow.textContent).not.toContain("Plugin settings");
 
     fireEvent.change(searchField(), {
@@ -2455,9 +2652,11 @@ describe("CommandPalette", () => {
     fireEvent.change(searchField(), { target: { value: "zzzzz" } });
 
     await waitFor(() =>
-      expect(screen.getByText("No matching commands")).toBeTruthy(),
+      expect(screen.getByText("No commands match “zzzzz”")).toBeTruthy(),
     );
-    expectClasses(screen.getByText("No matching commands"), "px-3", "py-4");
+    expect(
+      screen.getByText("No commands match “zzzzz”").closest('[role="status"]'),
+    ).not.toBeNull();
     fireEvent.keyDown(searchField(), { key: "Enter" });
     expect(testState.calls).toEqual([]);
   });

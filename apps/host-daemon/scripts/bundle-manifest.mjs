@@ -2,7 +2,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
+
 const packageRoot = resolve(scriptsDir, "..");
+
 const workspaceRoot = resolve(packageRoot, "..", "..");
 
 const NODE_ESM_REQUIRE_BANNER = [
@@ -17,14 +19,23 @@ const NODE_ESM_REQUIRE_BANNER = [
 export const bundleTargets = [
   {
     banner: NODE_ESM_REQUIRE_BANNER,
+    entryPoint: resolve(packageRoot, "src", "workspace-observer-child.ts"),
+    label: "workspace observer child",
+    outfile: resolve(packageRoot, "dist", "omnyo-workspace-observer-child.mjs"),
+  },
+  {
+    banner: NODE_ESM_REQUIRE_BANNER,
+    entryPoint: resolve(packageRoot, "src", "workspace-read-child.ts"),
+    label: "workspace read child",
+    outfile: resolve(packageRoot, "dist", "omnyo-workspace-read-child.mjs"),
+  },
+  {
+    banner: NODE_ESM_REQUIRE_BANNER,
     entryPoint: resolve(packageRoot, "src", "index.ts"),
     label: "daemon",
     outfile: resolve(packageRoot, "dist", "daemon-bundle.mjs"),
   },
   {
-    // The bootstrap the runtime spawns for EVERY bridge: it imports the
-    // bridge module out of a `bb.host` artifact and owns the process
-    // boundary.
     banner: NODE_ESM_REQUIRE_BANNER,
     entryPoint: resolve(
       workspaceRoot,
@@ -34,30 +45,47 @@ export const bundleTargets = [
       "bridge-worker-entry.ts",
     ),
     label: "provider bridge worker",
-    outfile: resolve(packageRoot, "dist", "bb-provider-bridge-worker.mjs"),
+    outfile: resolve(packageRoot, "dist", "omnyo-provider-bridge-worker.mjs"),
   },
   {
-    // Forked child that runs a plugin's `bb.host` entry (plugin-host-manager.ts).
-    // Emitted next to the daemon bundle so defaultWorkerEntryPath resolves it as
-    // a sibling in the packaged app.
     banner: NODE_ESM_REQUIRE_BANNER,
     entryPoint: resolve(packageRoot, "src", "plugin-host-worker.ts"),
     label: "plugin host worker",
-    outfile: resolve(packageRoot, "dist", "bb-plugin-host-worker.mjs"),
+    outfile: resolve(packageRoot, "dist", "omnyo-plugin-host-worker.mjs"),
+  },
+  {
+    banner: NODE_ESM_REQUIRE_BANNER,
+    entryPoint: resolve(
+      packageRoot,
+      "src",
+      "command-handlers",
+      "file-search-worker.ts",
+    ),
+    label: "file search worker",
+    outfile: resolve(packageRoot, "dist", "omnyo-file-search-worker.mjs"),
+  },
+  {
+    banner: NODE_ESM_REQUIRE_BANNER,
+    entryPoint: resolve(
+      workspaceRoot,
+      "packages",
+      "process-utils",
+      "src",
+      "process-launcher-worker.ts",
+    ),
+    label: "process launcher worker",
+    outfile: resolve(packageRoot, "dist", "omnyo-process-launcher-worker.mjs"),
   },
   {
     banner: NODE_ESM_REQUIRE_BANNER,
     entryPoint: resolve(workspaceRoot, "apps", "cli", "src", "index.ts"),
     executable: true,
-    label: "bb cli",
-    outfile: resolve(packageRoot, "dist", "bb"),
-    // The CLI `import()`s each command group on demand; chunks land in
-    // dist/bb-chunks, which packages/bb-app ships next to this entry.
+    label: "omnyo cli",
+    outfile: resolve(packageRoot, "dist", "omnyo"),
+
     splitting: true,
   },
   {
-    // Forked child that runs @parcel/watcher in isolation (BB_WATCHER_SUBPROCESS=1).
-    // Emitted next to the daemon bundle so fork-channel resolves it as a sibling.
     banner: NODE_ESM_REQUIRE_BANNER,
     entryPoint: resolve(
       workspaceRoot,
@@ -68,6 +96,6 @@ export const bundleTargets = [
       "parcel-child-entry.ts",
     ),
     label: "parcel watcher child",
-    outfile: resolve(packageRoot, "dist", "bb-parcel-watcher-child.mjs"),
+    outfile: resolve(packageRoot, "dist", "omnyo-parcel-watcher-child.mjs"),
   },
 ];

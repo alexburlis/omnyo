@@ -1,4 +1,4 @@
-import { getThreadEventScopeTurnId } from "@bb/domain";
+import { getThreadEventScopeTurnId } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { getThreadEvents, sendTextMessage } from "../../helpers/api.js";
 import {
@@ -19,6 +19,7 @@ describe.sequential("fake provider tool-call integration", () => {
         harness,
         "Tool Call Turn Repair",
       );
+
       const { thread } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -30,12 +31,14 @@ describe.sequential("fake provider tool-call integration", () => {
       await sendTextMessage(harness.api, thread.id, {
         text: "call_tool_unresolved:notify_user",
       });
+
       const completedEvent = await waitForEventType(
         harness.api,
         thread.id,
         "turn/completed",
         TURN_TIMEOUT_MS,
       );
+
       await waitForThreadStatus(
         harness.api,
         thread.id,
@@ -44,16 +47,19 @@ describe.sequential("fake provider tool-call integration", () => {
       );
 
       const resolvedTurnId = getThreadEventScopeTurnId(completedEvent.scope);
+
       if (!resolvedTurnId) {
         throw new Error("Expected completed tool turn to be turn-scoped");
       }
 
       const events = await getThreadEvents(harness.api, thread.id);
+
       const turnStartedEvent = events.find(
         (event) =>
           event.type === "turn/started" &&
           getThreadEventScopeTurnId(event.scope) === resolvedTurnId,
       );
+
       if (!turnStartedEvent) {
         throw new Error(
           `Expected turn/started for resolved turn ${resolvedTurnId}`,

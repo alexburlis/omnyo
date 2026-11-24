@@ -6,7 +6,7 @@ import {
   normalizeProviderCommandOutput,
   textBlockSchema,
   toNonNegativeNumber,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   claudeAssistantUsageMessageSchema,
@@ -63,7 +63,9 @@ interface ClaudeCommandExecutionOutputArgs {
 const CLAUDE_EMPTY_BASH_OUTPUT_PLACEHOLDERS = [
   "(Bash completed with no output)",
 ] as const;
+
 const LARGE_CLAUDE_CONTEXT_WINDOW = 1_000_000;
+
 const LARGE_CLAUDE_CONTEXT_MODELS = new Set([
   "best",
   "claude-fable-5",
@@ -77,9 +79,11 @@ export function getNestedParentToolUseId(message: unknown): string | undefined {
   if (typeof message !== "object" || message === null) {
     return undefined;
   }
+
   if (!("parent_tool_use_id" in message)) {
     return undefined;
   }
+
   return typeof message.parent_tool_use_id === "string"
     ? message.parent_tool_use_id
     : undefined;
@@ -89,6 +93,7 @@ function parseMessageContent(
   message: ParseClaudeMessageContentArgs,
 ): ClaudeMessageContentBlock[] {
   const parsed = messageContentSchema.safeParse(message.message);
+
   return parsed.success ? (parsed.data.content ?? []) : [];
 }
 
@@ -96,11 +101,15 @@ export function extractAssistantText(
   message: ClaudeAssistantMessage,
 ): string | undefined {
   const chunks: string[] = [];
+
   for (const block of parseMessageContent(message)) {
     const text = textBlockSchema.safeParse(block);
+
     if (text.success) chunks.push(text.data.text);
   }
+
   const joined = chunks.join("\n").trim();
+
   return joined.length > 0 ? joined : undefined;
 }
 
@@ -108,8 +117,10 @@ export function extractToolUses(
   message: ClaudeAssistantMessage,
 ): ClaudeToolUseBlockData[] {
   const uses: ClaudeToolUseBlockData[] = [];
+
   for (const block of parseMessageContent(message)) {
     const tool = toolUseBlockSchema.safeParse(block);
+
     if (tool.success)
       uses.push({
         id: tool.data.id,
@@ -117,6 +128,7 @@ export function extractToolUses(
         input: tool.data.input,
       });
   }
+
   return uses;
 }
 
@@ -124,17 +136,21 @@ export function extractStreamTextDelta(
   message: ClaudeStreamEventMessage,
 ): string | undefined {
   const parsed = streamEventSchema.safeParse(message.event);
+
   if (!parsed.success) return undefined;
 
   if (parsed.data.type === "content_block_delta") {
     if (parsed.data.delta.type !== "text_delta") {
       return undefined;
     }
+
     return parsed.data.delta.text || undefined;
   }
+
   if (parsed.data.content_block.type !== "text") {
     return undefined;
   }
+
   return parsed.data.content_block.text || undefined;
 }
 
@@ -142,17 +158,21 @@ export function extractStreamThinkingDelta(
   message: ClaudeStreamEventMessage,
 ): string | undefined {
   const parsed = streamEventSchema.safeParse(message.event);
+
   if (!parsed.success) return undefined;
 
   if (parsed.data.type === "content_block_delta") {
     if (parsed.data.delta.type !== "thinking_delta") {
       return undefined;
     }
+
     return parsed.data.delta.thinking || undefined;
   }
+
   if (parsed.data.content_block.type !== "thinking") {
     return undefined;
   }
+
   return parsed.data.content_block.thinking || undefined;
 }
 
@@ -160,12 +180,15 @@ export function extractThinkingBlocks(
   message: ClaudeAssistantMessage,
 ): string[] {
   const thinkingBlocks: string[] = [];
+
   for (const block of parseMessageContent(message)) {
     const thinkingBlock = thinkingBlockSchema.safeParse(block);
+
     if (thinkingBlock.success && thinkingBlock.data.thinking.length > 0) {
       thinkingBlocks.push(thinkingBlock.data.thinking);
     }
   }
+
   return thinkingBlocks;
 }
 
@@ -173,8 +196,10 @@ export function extractToolResults(
   message: ClaudeUserMessage,
 ): ClaudeToolResultBlockData[] {
   const results: ClaudeToolResultBlockData[] = [];
+
   for (const block of parseMessageContent(message)) {
     const result = toolResultBlockSchema.safeParse(block);
+
     if (result.success) {
       results.push({
         toolUseId: result.data.tool_use_id,
@@ -185,6 +210,7 @@ export function extractToolResults(
       });
     }
   }
+
   return results;
 }
 
@@ -194,9 +220,11 @@ function combineClaudeProcessOutput(
   if (streams.stdout.length === 0) {
     return streams.stderr.length > 0 ? streams.stderr : undefined;
   }
+
   if (streams.stderr.length === 0) {
     return streams.stdout;
   }
+
   return streams.stdout.endsWith("\n")
     ? `${streams.stdout}${streams.stderr}`
     : `${streams.stdout}\n${streams.stderr}`;
@@ -209,6 +237,7 @@ export function extractClaudeCommandExecutionOutput(
     text: extractResultText(args.content),
     emptyPlaceholders: CLAUDE_EMPTY_BASH_OUTPUT_PLACEHOLDERS,
   });
+
   if (args.toolUseResult !== null) {
     if (typeof args.toolUseResult === "string") {
       return (
@@ -218,6 +247,7 @@ export function extractClaudeCommandExecutionOutput(
         }) ?? normalizedContentOutput
       );
     }
+
     return (
       combineClaudeProcessOutput({
         stdout: args.toolUseResult.stdout ?? "",
@@ -225,13 +255,19 @@ export function extractClaudeCommandExecutionOutput(
       }) ?? normalizedContentOutput
     );
   }
+
   return normalizedContentOutput;
 }
 
 interface ClaudeResultTokenUsage {
   last: ThreadEventTokenUsageBreakdown;
   modelContextWindow: number | null;
+  promptCacheTtlMs: number | undefined;
 }
+
+const CLAUDE_ONE_HOUR_CACHE_TTL_MS = 60 * 60_000;
+
+const CLAUDE_FIVE_MINUTE_CACHE_TTL_MS = 5 * 60_000;
 
 export function extractClaudeResultTokenUsage(
   message: ClaudeResultMessage | SDKResultMessage,
@@ -239,6 +275,7 @@ export function extractClaudeResultTokenUsage(
   const parsed = sdkUsageSchema.safeParse(message.usage);
   const last = parsed.success ? toTokenUsageBreakdown(parsed.data) : undefined;
   const parsedModelUsage = claudeModelUsageSchema.safeParse(message.modelUsage);
+
   const modelContextWindow = parsedModelUsage.success
     ? extractModelContextWindow(parsedModelUsage.data)
     : null;
@@ -256,6 +293,9 @@ export function extractClaudeResultTokenUsage(
       reasoningOutputTokens: 0,
     },
     modelContextWindow,
+    promptCacheTtlMs: parsed.success
+      ? toPromptCacheTtlMs(parsed.data)
+      : undefined,
   };
 }
 
@@ -265,10 +305,12 @@ export function extractClaudeContextWindowUsage(
   const parsedModelUsage = claudeModelUsageSchema.safeParse(
     args.message.modelUsage,
   );
+
   const modelContextWindow = parsedModelUsage.success
     ? (extractModelContextWindow(parsedModelUsage.data) ??
       args.fallbackModelContextWindow)
     : args.fallbackModelContextWindow;
+
   const usedTokens = args.latestRequestContextTokens ?? null;
 
   if (usedTokens === null && modelContextWindow === null) {
@@ -288,11 +330,26 @@ export function extractClaudeRequestContextTokens(
   const parsedMessage = claudeAssistantUsageMessageSchema.safeParse(
     message.message,
   );
+
   if (!parsedMessage.success || !parsedMessage.data.usage) {
     return null;
   }
 
   return toClaudeCurrentContextTokens(parsedMessage.data.usage);
+}
+
+export function extractClaudeRequestPromptCacheTtlMs(
+  message: ClaudeAssistantMessage,
+): number | undefined {
+  const parsedMessage = claudeAssistantUsageMessageSchema.safeParse(
+    message.message,
+  );
+
+  if (!parsedMessage.success || !parsedMessage.data.usage) {
+    return undefined;
+  }
+
+  return toPromptCacheTtlMs(parsedMessage.data.usage);
 }
 
 function toTokenUsageBreakdown(
@@ -301,9 +358,11 @@ function toTokenUsageBreakdown(
   const inputTokens = toNonNegativeNumber(usage.input_tokens);
   const outputTokens = toNonNegativeNumber(usage.output_tokens);
   const cacheReadTokens = toNonNegativeNumber(usage.cache_read_input_tokens);
+
   const cacheCreationTokens = toNonNegativeNumber(
     usage.cache_creation_input_tokens,
   );
+
   const cachedInputTokens = cacheReadTokens + cacheCreationTokens;
 
   return {
@@ -321,6 +380,20 @@ function toTokenUsageBreakdown(
   };
 }
 
+function toPromptCacheTtlMs(usage: ClaudeSdkUsage): number | undefined {
+  const writes = usage.cache_creation;
+
+  if (toNonNegativeNumber(writes?.ephemeral_1h_input_tokens) > 0) {
+    return CLAUDE_ONE_HOUR_CACHE_TTL_MS;
+  }
+
+  if (toNonNegativeNumber(writes?.ephemeral_5m_input_tokens) > 0) {
+    return CLAUDE_FIVE_MINUTE_CACHE_TTL_MS;
+  }
+
+  return undefined;
+}
+
 function toClaudeCurrentContextTokens(usage: ClaudeSdkUsage): number | null {
   return (
     toNonNegativeNumber(usage.input_tokens) +
@@ -335,15 +408,19 @@ function extractModelContextWindow(
   if (!modelUsage) return null;
 
   let largestContextWindow: number | null = null;
+
   for (const [model, usage] of Object.entries(modelUsage)) {
     const reportedContextWindow = toPositiveNumber(usage.contextWindow);
+
     if (reportedContextWindow === undefined) continue;
 
     const modelContextWindow = resolveClaudeModelContextWindowHint(model);
+
     const contextWindow =
       modelContextWindow === null
         ? reportedContextWindow
         : Math.max(reportedContextWindow, modelContextWindow);
+
     if (largestContextWindow === null || contextWindow > largestContextWindow) {
       largestContextWindow = contextWindow;
     }
@@ -361,5 +438,6 @@ export function resolveClaudeModelContextWindowHint(
   ) {
     return LARGE_CLAUDE_CONTEXT_WINDOW;
   }
+
   return null;
 }

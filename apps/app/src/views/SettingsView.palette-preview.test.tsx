@@ -2,9 +2,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultAppTheme } from "@bb/domain";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { AppearanceSettingsSection } from "./SettingsView";
+import { defaultAppTheme } from "@omnyo/domain";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import { AppearanceSettingsSection } from "@/components/settings/AppearanceSettingsPage";
 
 afterEach(async () => {
   cleanup();
@@ -47,6 +47,7 @@ function renderSection({ compact = false } = {}) {
     />,
     compact ? { wrapper: CompactViewport } : undefined,
   );
+
   return {
     onAppearanceThemeChange,
     onAppearanceThemePrefetch,
@@ -58,6 +59,7 @@ async function openPaletteMenu() {
   fireEvent.pointerDown(screen.getByRole("button", { name: "Palette" }), {
     button: 0,
   });
+
   return screen.findByRole("menu");
 }
 
@@ -129,6 +131,7 @@ describe("palette hover preview", () => {
   it("keeps the preview in place after selecting a palette so the commit does not flash", async () => {
     const { onAppearanceThemeChange, onAppearanceThemePreview } =
       renderSection();
+
     await openPaletteMenu();
 
     const item = screen.getByRole("menuitem", { name: /Nord/u });

@@ -1,5 +1,5 @@
-import type { RawDiffFileStat } from "@bb/domain";
-import type { DiffFileEntry } from "@bb/server-contract";
+import type { RawDiffFileStat } from "@omnyo/domain";
+import type { DiffFileEntry } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
   DIFF_FILE_AUTO_LOAD_MAX_CHANGED_LINES,
@@ -48,6 +48,7 @@ describe("rawDiffFileStatToEntry", () => {
         origin: "untracked",
       }),
     );
+
     expect(entry).toMatchObject<Partial<DiffFileEntry>>({
       path: "src/a.ts",
       additions: 3,
@@ -67,6 +68,7 @@ describe("rawDiffFileStatToEntry", () => {
         deletions: 1,
       }),
     );
+
     expect(entry.changeKind).toBe("renamed");
     expect(entry.previousPath).toBe("src/old.ts");
     expect(entry.loadMode).toBe("auto");
@@ -112,6 +114,7 @@ describe("rawDiffFileStatToEntry", () => {
         const entry = rawDiffFileStatToEntry(
           makeStat({ additions, deletions }),
         );
+
         expect(entry.loadMode).toBe(expected);
       },
     );
@@ -120,6 +123,7 @@ describe("rawDiffFileStatToEntry", () => {
       const entry = rawDiffFileStatToEntry(
         makeStat({ binary: true, additions: 0, deletions: 0 }),
       );
+
       expect(entry.loadMode).toBe("on_demand");
     });
 
@@ -131,6 +135,7 @@ describe("rawDiffFileStatToEntry", () => {
           deletions: 0,
         }),
       );
+
       expect(entry.loadMode).toBe("too_large");
     });
   });
@@ -144,6 +149,7 @@ describe("selectInitialPatchPaths", () => {
       makeEntry({ path: "c.ts", loadMode: "auto" }),
       makeEntry({ path: "d.ts", loadMode: "too_large" }),
     ]);
+
     expect(paths).toEqual(["a.ts", "c.ts"]);
   });
 
@@ -152,6 +158,7 @@ describe("selectInitialPatchPaths", () => {
       { length: DIFF_FILES_INLINE_PATCH_MAX_FILES },
       (_, i) => makeEntry({ path: `f${i}.ts`, loadMode: "auto" }),
     );
+
     expect(selectInitialPatchPaths(files)).toHaveLength(
       DIFF_FILES_INLINE_PATCH_MAX_FILES,
     );
@@ -162,6 +169,7 @@ describe("selectInitialPatchPaths", () => {
       { length: DIFF_FILES_INLINE_PATCH_MAX_FILES + 1 },
       (_, i) => makeEntry({ path: `f${i}.ts`, loadMode: "auto" }),
     );
+
     expect(selectInitialPatchPaths(files)).toEqual([]);
   });
 

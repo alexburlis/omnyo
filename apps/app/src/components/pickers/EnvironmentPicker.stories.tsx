@@ -1,5 +1,5 @@
-import type { ProjectSource } from "@bb/domain";
-import type { SystemEnvironmentProvider } from "@bb/server-contract";
+import type { ProjectSource } from "@omnyo/domain";
+import type { SystemEnvironmentProvider } from "@omnyo/server-contract";
 import modalLogoUrl from "../../../../../plugins/environment-modal-sandbox/modal-logo.svg?url";
 import { EnvironmentPickerUI } from "./EnvironmentPicker";
 import { ProjectSelector } from "./ProjectSelector";
@@ -12,11 +12,14 @@ import {
 } from "../../../.ladle/story-fixtures";
 
 const localHost = makeHost({ id: HOST_IDS.local });
+
 const remoteHost = makeHost({ id: HOST_IDS.local, name: "studio-mac-mini" });
+
 const longRemoteHost = makeHost({
   id: HOST_IDS.local,
   name: "studio-mac-mini-with-a-very-long-tailnet-host-name-for-launch-testing",
 });
+
 const offlineHost = makeHost({
   id: HOST_IDS.local,
   name: "studio-mac-mini",
@@ -41,7 +44,7 @@ function makeSource(id: string, hostId: string, path: string): ProjectSource {
 }
 
 const localProjectSources: readonly ProjectSource[] = [
-  makeSource("src_local", HOST_IDS.local, "/Users/michael/Projects/bb"),
+  makeSource("src_local", HOST_IDS.local, "/Users/michael/Projects/omnyo"),
 ];
 
 const noop = () => {};
@@ -149,7 +152,7 @@ export function Overview() {
       </StoryRow>
       <StoryRow
         label="long host"
-        hint="open menu wraps the host label inside the menu"
+        hint="the open menu wraps the host label; click to open, or see the Long Host Menu story"
       >
         <EnvironmentPickerUI
           value="provider:project-checkout"
@@ -159,13 +162,12 @@ export function Overview() {
           providers={STORY_ENVIRONMENT_PROVIDERS}
           selectedProviderHostId={HOST_IDS.local}
           onSelectProvider={noop}
-          defaultOpen
           modal={false}
         />
       </StoryRow>
       <StoryRow
         label="open menu"
-        hint="defaultOpen + modal=false — local host, online: the full set of options enabled"
+        hint="local host, online: the full set of options enabled; click to open, or see the Open Menu story"
       >
         <EnvironmentPickerUI
           value="provider:project-checkout"
@@ -175,7 +177,6 @@ export function Overview() {
           providers={STORY_ENVIRONMENT_PROVIDERS}
           selectedProviderHostId={HOST_IDS.local}
           onSelectProvider={noop}
-          defaultOpen
           modal={false}
         />
       </StoryRow>
@@ -189,8 +190,8 @@ const machineHosts = [
 ];
 
 const machineSources: readonly ProjectSource[] = [
-  makeSource("src_local", HOST_IDS.local, "/Users/michael/Projects/bb"),
-  makeSource("src_remote", HOST_IDS.remote, "/home/michael/bb"),
+  makeSource("src_local", HOST_IDS.local, "/Users/michael/Projects/omnyo"),
+  makeSource("src_remote", HOST_IDS.remote, "/home/michael/omnyo"),
 ];
 
 const offlineBuildHost = makeHost({
@@ -199,18 +200,21 @@ const offlineBuildHost = makeHost({
   status: "disconnected",
   lastSeenAt: Date.now() - 2 * 60 * 60 * 1000,
 });
+
 const unconfiguredOfficeHost = makeHost({
   id: "host_office",
   name: "Office Mac Studio",
 });
+
 const contextualMachineHosts = [
   ...machineHosts,
   offlineBuildHost,
   unconfiguredOfficeHost,
 ];
+
 const contextualMachineSources: readonly ProjectSource[] = [
   ...machineSources,
-  makeSource("src_build", offlineBuildHost.id, "/srv/bb"),
+  makeSource("src_build", offlineBuildHost.id, "/srv/omnyo"),
 ];
 
 export function MachineMenu() {
@@ -298,24 +302,32 @@ export function ManyMachines() {
   const hosts = Array.from({ length: 12 }, (_, index) =>
     makeHost({ id: `host_scroll_${index}`, name: `Machine ${index + 1}` }),
   );
+
   return (
-    <EnvironmentPickerUI
-      value="provider:project-checkout"
-      sources={hosts.map((host, index) =>
-        makeSource(`src_scroll_${index}`, host.id, "/projects/bb"),
-      )}
-      host={hosts[0] ?? null}
-      isLocal={false}
-      providers={STORY_ENVIRONMENT_PROVIDERS}
-      onSelectProvider={noop}
-      machines={{
-        hosts,
-        localDaemonHostId: null,
-        primaryHostId: hosts[0]?.id ?? null,
-      }}
-      defaultOpen
-      modal={false}
-    />
+    <StoryCard>
+      <StoryRow
+        label="many machines"
+        hint="twelve connected hosts; the machine list scrolls inside the menu"
+      >
+        <EnvironmentPickerUI
+          value="provider:project-checkout"
+          sources={hosts.map((host, index) =>
+            makeSource(`src_scroll_${index}`, host.id, "/projects/omnyo"),
+          )}
+          host={hosts[0] ?? null}
+          isLocal={false}
+          providers={STORY_ENVIRONMENT_PROVIDERS}
+          onSelectProvider={noop}
+          machines={{
+            hosts,
+            localDaemonHostId: null,
+            primaryHostId: hosts[0]?.id ?? null,
+          }}
+          defaultOpen
+          modal={false}
+        />
+      </StoryRow>
+    </StoryCard>
   );
 }
 
@@ -415,6 +427,7 @@ export function MachineSearchReuse() {
   const hosts = Array.from({ length: 12 }, (_, index) =>
     makeHost({ id: `host_scroll_${index}`, name: `Machine ${index + 1}` }),
   );
+
   return (
     <StoryCard>
       <StoryRow
@@ -424,7 +437,7 @@ export function MachineSearchReuse() {
         <EnvironmentPickerUI
           value="provider:project-checkout"
           sources={hosts.map((host, index) =>
-            makeSource(`src_scroll_${index}`, host.id, "/projects/bb"),
+            makeSource(`src_scroll_${index}`, host.id, "/projects/omnyo"),
           )}
           host={hosts[0] ?? null}
           isLocal={false}
@@ -470,7 +483,7 @@ export function IconAlignment() {
     <StoryCard>
       <StoryRow label="Project selector reference">
         <ProjectSelector
-          projects={[{ id: "proj_demo", name: "bb" }]}
+          projects={[{ id: "proj_demo", name: "Omnyo" }]}
           value="proj_demo"
           onChange={noop}
         />
@@ -499,6 +512,52 @@ export function IconAlignment() {
           />
         </StoryRow>
       ))}
+    </StoryCard>
+  );
+}
+
+export function LongHostMenu() {
+  return (
+    <StoryCard>
+      <StoryRow
+        label="long host"
+        hint="open menu wraps the host label inside the menu"
+      >
+        <EnvironmentPickerUI
+          value="provider:project-checkout"
+          sources={localProjectSources}
+          host={longRemoteHost}
+          isLocal={false}
+          providers={STORY_ENVIRONMENT_PROVIDERS}
+          selectedProviderHostId={HOST_IDS.local}
+          onSelectProvider={noop}
+          defaultOpen
+          modal={false}
+        />
+      </StoryRow>
+    </StoryCard>
+  );
+}
+
+export function OpenMenu() {
+  return (
+    <StoryCard>
+      <StoryRow
+        label="open menu"
+        hint="defaultOpen + modal=false — local host, online: the full set of options enabled"
+      >
+        <EnvironmentPickerUI
+          value="provider:project-checkout"
+          sources={localProjectSources}
+          host={localHost}
+          isLocal
+          providers={STORY_ENVIRONMENT_PROVIDERS}
+          selectedProviderHostId={HOST_IDS.local}
+          onSelectProvider={noop}
+          defaultOpen
+          modal={false}
+        />
+      </StoryRow>
     </StoryCard>
   );
 }

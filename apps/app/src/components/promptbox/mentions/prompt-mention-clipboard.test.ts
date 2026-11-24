@@ -43,6 +43,7 @@ describe("serializedTextForPromptMentionResource", () => {
 describe("parsePromptMentionClipboardElement", () => {
   it("preserves the typed trigger for a plugin mention copied from a pill", () => {
     const element = document.createElement("span");
+
     const resource = {
       kind: "plugin" as const,
       pluginId: "github",
@@ -50,6 +51,7 @@ describe("parsePromptMentionClipboardElement", () => {
       itemId: "issue:owner/repo#42",
       label: "#42 Fix login bug",
     };
+
     for (const [key, value] of Object.entries(
       promptMentionClipboardDataAttributes({
         resource,
@@ -67,6 +69,7 @@ describe("parsePromptMentionClipboardElement", () => {
 
   it("rejects plugin mention clipboard text that does not match the resource label", () => {
     const element = document.createElement("span");
+
     for (const [key, value] of Object.entries(
       promptMentionClipboardDataAttributes({
         resource: {

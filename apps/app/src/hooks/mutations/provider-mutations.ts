@@ -4,6 +4,7 @@ import { applyProviderAvailabilityChange } from "../cache-owners/system-cache-ef
 
 export function useSetProviderEnabled() {
   const queryClient = useQueryClient();
+
   return useMutation({
     meta: { errorMessage: "Could not change provider availability." },
     mutationFn: (args: { providerId: string; enabled: boolean }) =>

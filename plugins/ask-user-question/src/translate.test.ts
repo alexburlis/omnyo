@@ -12,7 +12,9 @@ import {
 
 function parseInput(input: unknown) {
   const parsed = toolInputSchema.safeParse(input);
+
   if (!parsed.success) throw new Error(`invalid fixture: ${parsed.error}`);
+
   return parsed.data;
 }
 
@@ -107,6 +109,7 @@ describe("buildInteractionPayload", () => {
         ],
       }),
     );
+
     expect(
       payload.questions[0]?.options.map((option) => option.preview),
     ).toEqual([undefined, undefined]);
@@ -127,6 +130,7 @@ describe("buildInteractionPayload", () => {
         ],
       }),
     );
+
     expect(payload.questions[0]?.options[0]?.preview).toBeUndefined();
     expect(payload.questions[0]?.options[1]?.preview).toBe("a | b");
   });
@@ -152,6 +156,7 @@ describe("assertInteractionPayloadFits", () => {
         ],
       }),
     );
+
     expect(() => assertInteractionPayloadFits(payload)).not.toThrow();
     expect(
       new TextEncoder().encode(JSON.stringify(payload)).length,
@@ -168,6 +173,7 @@ describe("buildInteractionTitle", () => {
         ],
       }),
     );
+
     expect(buildInteractionTitle(single)).toBe("Database");
 
     const multiple = buildInteractionPayload(
@@ -178,6 +184,7 @@ describe("buildInteractionTitle", () => {
         ],
       }),
     );
+
     expect(buildInteractionTitle(multiple)).toBe("2 questions");
   });
 });
@@ -260,6 +267,7 @@ describe("buildToolResult", () => {
         ],
       }),
     );
+
     const result = buildToolResult(single, {
       answers: { q0: { selected: [], freeText: "DuckDB" } },
     });

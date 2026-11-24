@@ -1,11 +1,18 @@
 import { Buffer } from "node:buffer";
-import type { HostDaemonOnlineRpcResultByType } from "@bb/host-daemon-contract";
+import type {
+  HostDaemonOnlineRpcResultByType,
+  HostReadFileIfNoneMatch,
+} from "@omnyo/host-daemon-contract";
 import { ApiError } from "../../errors.js";
 
 const OCTET_STREAM_MIME_TYPE = "application/octet-stream";
+
+const SHA256_ENTITY_TAG_PATTERN = /^"([a-f0-9]{64})"$/u;
+
 const REVALIDATE_CACHE_CONTROL = "private, no-cache";
 
 type HostReadFileResult = HostDaemonOnlineRpcResultByType["host.read_file"];
+
 export type DaemonFileReadResult =
   | HostReadFileResult
   | HostDaemonOnlineRpcResultByType["host.read_file_relative"];
@@ -19,6 +26,10 @@ function daemonFileEntityTag(result: DaemonFileReadResult): string {
   return `"${result.sha256}"`;
 }
 
+function entityTagOpaque(tag: string): string {
+  return tag.trim().replace(/^W\//u, "");
+}
+
 export function requestMatchesEntityTag(
   ifNoneMatch: string | undefined,
   entityTag: string,
@@ -26,12 +37,36 @@ export function requestMatchesEntityTag(
   if (ifNoneMatch === undefined) {
     return false;
   }
+
   const trimmed = ifNoneMatch.trim();
+
   if (trimmed === "*") {
     return true;
   }
-  const opaque = (tag: string): string => tag.trim().replace(/^W\//u, "");
-  return trimmed.split(",").map(opaque).includes(opaque(entityTag));
+
+  return trimmed
+    .split(",")
+    .map(entityTagOpaque)
+    .includes(entityTagOpaque(entityTag));
+}
+
+export function parseDaemonIfNoneMatch(
+  ifNoneMatch: string | undefined,
+): HostReadFileIfNoneMatch | undefined {
+  if (ifNoneMatch === undefined) {
+    return undefined;
+  }
+
+  if (ifNoneMatch.trim() === "*") {
+    return { kind: "any" };
+  }
+
+  const values = ifNoneMatch
+    .split(",")
+    .map((tag) => SHA256_ENTITY_TAG_PATTERN.exec(entityTagOpaque(tag))?.[1])
+    .filter((value): value is string => value !== undefined);
+
+  return values.length > 0 ? { kind: "sha256", values } : undefined;
 }
 
 export function requireDaemonFileContentResult(
@@ -40,6 +75,7 @@ export function requireDaemonFileContentResult(
   if ("notModified" in result) {
     throw new Error("Unconditional daemon file read returned not modified");
   }
+
   return result;
 }
 
@@ -48,29 +84,32 @@ function buildFileContentHeaders(
   options: CreateDaemonFileContentResponseOptions,
 ): Headers {
   const headers = new Headers(options.headers);
+
   if (!headers.has("content-type")) {
     headers.set("content-type", result.mimeType ?? OCTET_STREAM_MIME_TYPE);
   }
+
   if (!headers.has("cache-control")) {
     headers.set("cache-control", REVALIDATE_CACHE_CONTROL);
   }
+
   headers.set("etag", daemonFileEntityTag(result));
+
   if (result.modifiedAtMs !== undefined) {
     headers.set("last-modified", new Date(result.modifiedAtMs).toUTCString());
   }
+
   return headers;
 }
 
-function decodeDaemonFileContent(result: DaemonFileReadResult): ArrayBuffer {
+function decodeDaemonFileContent(
+  result: DaemonFileReadResult,
+): Buffer<ArrayBuffer> {
   if ("notModified" in result) {
     throw new Error("Cannot decode a not-modified daemon file result");
   }
-  const bytes =
-    result.contentEncoding === "utf8"
-      ? Buffer.from(result.content, "utf8")
-      : Buffer.from(result.content, "base64");
-  const view = Uint8Array.from(bytes);
-  return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+
+  return Buffer.from(result.content, result.contentEncoding);
 }
 
 export function createDaemonFileContentResponse(
@@ -78,14 +117,17 @@ export function createDaemonFileContentResponse(
   options: CreateDaemonFileContentResponseOptions = {},
 ): Response {
   const headers = buildFileContentHeaders(result, options);
+
   if (
     "notModified" in result ||
     requestMatchesEntityTag(options.ifNoneMatch, daemonFileEntityTag(result))
   ) {
     return new Response(null, { status: 304, headers });
   }
+
   const content = decodeDaemonFileContent(result);
   headers.set("content-length", String(content.byteLength));
+
   return new Response(content, {
     status: 200,
     headers,
@@ -105,6 +147,7 @@ export function remapDaemonFileRouteError(error: unknown): never {
       error.body.retryable,
     );
   }
+
   if (error.body.code === "invalid_path") {
     throw new ApiError(
       400,
@@ -113,6 +156,7 @@ export function remapDaemonFileRouteError(error: unknown): never {
       error.body.retryable,
     );
   }
+
   if (error.body.code === "file_too_large") {
     throw new ApiError(
       413,
@@ -121,5 +165,6 @@ export function remapDaemonFileRouteError(error: unknown): never {
       error.body.retryable,
     );
   }
+
   throw error;
 }

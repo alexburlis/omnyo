@@ -45,6 +45,7 @@ describe("parsePluginRowPresentation", () => {
   ])("accepts $name", ({ value, expected }) => {
     const parsed = parsePluginRowPresentation('tool "tool_x"', value);
     expect(parsed).toEqual(expected);
+
     if (value !== undefined) {
       expect(parsed).not.toBe(value);
     }

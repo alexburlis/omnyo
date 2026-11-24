@@ -1,7 +1,7 @@
-import type { Host } from "@bb/domain";
+import type { Host } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
-import type { EnvironmentDisplayInfo } from "@bb/core-ui";
-import type { SystemEnvironmentProvider } from "@bb/server-contract";
+import type { EnvironmentDisplayInfo } from "@omnyo/core-ui";
+import type { SystemEnvironmentProvider } from "@omnyo/server-contract";
 import {
   findEnvironmentDisplayProvider,
   getEnvironmentDisplayIconName,
@@ -103,14 +103,17 @@ function makeDisplay(
 }
 
 const noProviderLookup = findEnvironmentDisplayProvider([], null);
+
 const worktreeProviderLookup = findEnvironmentDisplayProvider(
   [worktreeProvider],
   "git-worktree",
 );
+
 const personalProviderLookup = findEnvironmentDisplayProvider(
   [personalProvider],
   "personal-workspace",
 );
+
 const containerProviderLookup = findEnvironmentDisplayProvider(
   [machineContainerProvider],
   "container",

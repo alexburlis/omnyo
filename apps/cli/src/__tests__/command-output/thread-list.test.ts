@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import * as domain from "@bb/domain";
+import * as domain from "@omnyo/domain";
 import {
   setupCommandOutputTestEnvironment,
   collectLogPayloads,
@@ -10,13 +10,42 @@ import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import * as fixtures from "../helpers/command-output-fixtures.js";
 import { registerThreadCommands } from "../../commands/thread/index.js";
 
-describe("bb thread list command output", () => {
+function makeThreadListEntry(
+  overrides: Parameters<typeof fixtures.makeThread>[0],
+): domain.ThreadListEntry {
+  return {
+    ...fixtures.makeThread(overrides),
+    runtime: { displayStatus: "idle" },
+    work: null,
+    activity: {
+      activeWorkflowCount: 0,
+      activeBackgroundAgentCount: 0,
+      activeBackgroundCommandCount: 0,
+      activePlanModeCount: 0,
+      activeGoalCount: 0,
+      activeSubagentCount: 0,
+    },
+    queuedWork: "none",
+    pinSortKey: null,
+    shelfSortKey: null,
+    hasPendingInteraction: false,
+    environmentHostId: null,
+    environmentName: null,
+    environmentBranchName: null,
+    environmentPath: null,
+    environmentProviderId: null,
+    environmentIsWorktree: null,
+    environmentWorkspaceDisplayKind: "other",
+  };
+}
+
+describe("omnyo thread list command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
     registerThreadCommands(program, () => "http://server");
 
-  it("bb thread list supports parent-thread filtering", async () => {
+  it("omnyo thread list supports parent-thread filtering", async () => {
     const list = vi.fn(async () => []);
     stubServerApi({ "v1.threads.$get": list });
 
@@ -40,7 +69,21 @@ describe("bb thread list command output", () => {
     });
   });
 
-  it("bb thread list accepts a removed machine ID without looking it up among active machines", async () => {
+  it("omnyo thread list narrows to repeated --thread IDs", async () => {
+    const list = vi.fn(async () => []);
+    stubServerApi({ "v1.threads.$get": list });
+
+    await runCommand(
+      ["thread", "list", "--thread", "thr_a", "--thread", "thr_b", "--json"],
+      register,
+    );
+
+    expect(list).toHaveBeenCalledWith({
+      query: { threadIds: "thr_a,thr_b" },
+    });
+  });
+
+  it("omnyo thread list accepts a removed machine ID without looking it up among active machines", async () => {
     const list = vi.fn(async () => []);
     const hosts = vi.fn(async () => []);
     stubServerApi({
@@ -57,7 +100,7 @@ describe("bb thread list command output", () => {
     expect(hosts).not.toHaveBeenCalled();
   });
 
-  it("bb thread list opts into hidden threads explicitly", async () => {
+  it("omnyo thread list opts into hidden threads explicitly", async () => {
     const list = vi.fn(async () => []);
     stubServerApi({ "v1.threads.$get": list });
 
@@ -68,7 +111,32 @@ describe("bb thread list command output", () => {
     });
   });
 
-  it("bb thread list rejects invalid parent-thread values", async () => {
+  it("omnyo thread list --shelved asks for shelved threads only", async () => {
+    const list = vi.fn(async () => []);
+    stubServerApi({ "v1.threads.$get": list });
+
+    await runCommand(["thread", "list", "--shelved", "--json"], register);
+
+    expect(list).toHaveBeenCalledWith({
+      query: { shelved: "true" },
+    });
+  });
+
+  it("omnyo thread list refuses --archived with --shelved", async () => {
+    const list = vi.fn(async () => []);
+    stubServerApi({ "v1.threads.$get": list });
+
+    await expect(
+      runCommand(["thread", "list", "--archived", "--shelved"], register),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(console.error).toHaveBeenCalledWith(
+      "Error: Cannot combine --archived with --shelved.",
+    );
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("omnyo thread list rejects invalid parent-thread values", async () => {
     const list = vi.fn(async () => []);
     stubServerApi({ "v1.threads.$get": list });
 
@@ -97,19 +165,25 @@ describe("bb thread list command output", () => {
       flag: "archived",
       stamp: { archivedAt: 1 },
       table:
-        "ID                 Title  Project  Status         \n-----------------  -----  -------  ---------------\nthread-archived-1  -      Alpha    idle (archived)",
+        "ID                 Title  Project  Status         \n-----------------  -----  -------  ---------------\nthread-archived-1  -      Alpha    Open (archived)",
     },
     {
       flag: "pinned",
       stamp: { pinnedAt: 1 },
       table:
-        "ID               Title  Project  Status       \n---------------  -----  -------  -------------\nthread-pinned-1  -      Alpha    idle (pinned)",
+        "ID               Title  Project  Status       \n---------------  -----  -------  -------------\nthread-pinned-1  -      Alpha    Open (pinned)",
+    },
+    {
+      flag: "shelved",
+      stamp: { shelvedAt: 1 },
+      table:
+        "ID                Title  Project  Status        \n----------------  -----  -------  --------------\nthread-shelved-1  -      Alpha    Open (shelved)",
     },
   ])(
-    "bb thread list renders $flag status in the shared borderless table",
+    "omnyo thread list renders $flag status in the shared borderless table",
     async ({ flag, stamp, table }) => {
       const list = vi.fn(async () => [
-        fixtures.makeThread({
+        makeThreadListEntry({
           id: `thread-${flag}-1`,
           projectId: "proj-1",
           providerId: "codex",
@@ -119,6 +193,7 @@ describe("bb thread list command output", () => {
           ...stamp,
         }),
       ]);
+
       stubServerApi({
         "v1.threads.$get": list,
         "v1.projects.$get": async () => [{ id: "proj-1", name: "Alpha" }],
@@ -137,9 +212,9 @@ describe("bb thread list command output", () => {
     },
   );
 
-  it("bb thread list hides the personal project label", async () => {
+  it("omnyo thread list hides the personal project label", async () => {
     const list = vi.fn(async () => [
-      fixtures.makeThread({
+      makeThreadListEntry({
         id: "thread-personal-1",
         projectId: domain.PERSONAL_PROJECT_ID,
         providerId: "codex",
@@ -148,12 +223,13 @@ describe("bb thread list command output", () => {
         updatedAt: 1,
       }),
     ]);
+
     stubServerApi({
       "v1.threads.$get": list,
       "v1.projects.$get": async () => [],
     });
 
-    vi.stubEnv("BB_PROJECT_ID", undefined);
+    vi.stubEnv("OMNYO_PROJECT_ID", undefined);
     await runCommand(["thread", "list"], register);
 
     expect(list).toHaveBeenCalledWith({
@@ -161,14 +237,14 @@ describe("bb thread list command output", () => {
     });
     expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
       "",
-      "ID                 Title  Project  Status      \n-----------------  -----  -------  ------------\nthread-personal-1  -      -        idle        ",
+      "ID                 Title  Project  Status      \n-----------------  -----  -------  ------------\nthread-personal-1  -      -        Open        ",
       "",
     ]);
   });
 
-  it("bb thread list prints the thread title, fallback, and project name (#1648)", async () => {
+  it("omnyo thread list prints the thread title, fallback, and project name (#1648)", async () => {
     const list = vi.fn(async () => [
-      fixtures.makeThread({
+      makeThreadListEntry({
         id: "thr_a9niqhjj9c",
         projectId: "proj_bsst4jxfwv",
         providerId: "codex",
@@ -178,7 +254,7 @@ describe("bb thread list command output", () => {
         createdAt: 1,
         updatedAt: 1,
       }),
-      fixtures.makeThread({
+      makeThreadListEntry({
         id: "thr_uwfzqywzsz",
         projectId: "proj_bsst4jxfwv",
         providerId: "codex",
@@ -188,7 +264,7 @@ describe("bb thread list command output", () => {
         createdAt: 1,
         updatedAt: 1,
       }),
-      fixtures.makeThread({
+      makeThreadListEntry({
         id: "thr_unknownproj",
         projectId: "proj_missing",
         providerId: "codex",
@@ -199,6 +275,7 @@ describe("bb thread list command output", () => {
         updatedAt: 1,
       }),
     ]);
+
     const projects = vi.fn(async () => [{ id: "proj_bsst4jxfwv", name: "qa" }]);
     stubServerApi({ "v1.threads.$get": list, "v1.projects.$get": projects });
 
@@ -217,12 +294,12 @@ describe("bb thread list command output", () => {
     expect(output).toContain(`${"x".repeat(59)}…`);
     expect(output).not.toContain("x".repeat(60));
     expect(output).toMatch(
-      /thr_a9niqhjj9c\s+Investigate flaky login test\s+qa\s+idle/,
+      /thr_a9niqhjj9c\s+Investigate flaky login test\s+qa\s+Open/,
     );
-    expect(output).toMatch(/thr_unknownproj\s+x+…\s+proj_missing\s+idle/);
+    expect(output).toMatch(/thr_unknownproj\s+x+…\s+proj_missing\s+Open/);
   });
 
-  it("bb thread list --json does not fetch projects", async () => {
+  it("omnyo thread list --json does not fetch projects", async () => {
     const list = vi.fn(async () => []);
     const projects = vi.fn(async () => []);
     stubServerApi({ "v1.threads.$get": list, "v1.projects.$get": projects });
@@ -232,13 +309,13 @@ describe("bb thread list command output", () => {
     expect(projects).not.toHaveBeenCalled();
   });
 
-  it("bb thread list does not infer parent-thread from BB_THREAD_ID", async () => {
+  it("omnyo thread list does not infer parent-thread from OMNYO_THREAD_ID", async () => {
     const list = vi.fn(async () => []);
 
     stubServerApi({ "v1.threads.$get": list });
 
-    vi.stubEnv("BB_PROJECT_ID", "proj-env");
-    vi.stubEnv("BB_THREAD_ID", "thread-current");
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-env");
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-current");
     await runCommand(["thread", "list"], register);
 
     expect(list).toHaveBeenCalledWith({

@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   BRIDGE_RECORDING_PROCESS_SCOPE,
   createBridgeRecorder,
@@ -11,17 +11,19 @@ import {
 } from "./bridge-recorder.js";
 
 function recordingFixture() {
-  const dir = mkdtempSync(join(tmpdir(), "bb-bridge-recorder-"));
+  const dir = mkdtempSync(join(tmpdir(), "omnyo-bridge-recorder-"));
   const recorder = createBridgeRecorder({ dir });
   onTestFinished(() => {
     recorder.close();
     rmSync(dir, { recursive: true, force: true });
   });
+
   const readLane = (scope: string, direction: string): BridgeRecordingEntry[] =>
     readFileSync(join(dir, scope, `${direction}.ndjson`), "utf8")
       .split("\n")
       .filter((line) => line.length > 0)
       .map((line) => JSON.parse(line) as BridgeRecordingEntry);
+
   return { dir, readLane, recorder };
 }
 
@@ -111,6 +113,7 @@ describe("bridge recorder", () => {
       2,
       undefined,
     ]);
+
     const all = [
       ...readLane(BRIDGE_RECORDING_PROCESS_SCOPE, "runtime→bridge"),
       ...readLane(BRIDGE_RECORDING_PROCESS_SCOPE, "bridge→runtime"),
@@ -119,6 +122,7 @@ describe("bridge recorder", () => {
     ]
       .sort((left, right) => left.seq - right.seq)
       .map((entry) => entry.seq);
+
     expect(all).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
@@ -153,5 +157,52 @@ describe("bridge recorder", () => {
     splitter.push("this line is far too long");
     splitter.push(" and keeps going\nafter\n");
     expect(lines).toEqual(["short", "after"]);
+  });
+
+  it("keeps a line exactly at the cap and counts multi-byte characters per line", () => {
+    const lines: string[] = [];
+    const splitter = createRecordingLineSplitter((line) => lines.push(line), 8);
+    splitter.push("1234");
+    splitter.push("5678\n");
+    splitter.push("1234");
+    splitter.push("56789");
+    splitter.push("\n");
+    splitter.push("\u00e9\u00e9");
+    splitter.push("\u00e9\u00e9\n");
+    splitter.push("\u00e9\u00e9");
+    splitter.push("\u00e9\u00e9\u00e9");
+    splitter.push("\n");
+    splitter.push("ok\n");
+    expect(lines).toEqual(["12345678", "\u00e9".repeat(4), "ok"]);
+  });
+
+  it("measures each chunk once instead of the whole pending line", () => {
+    const spy = vi.spyOn(Buffer, "byteLength");
+
+    try {
+      const lines: string[] = [];
+
+      const splitter = createRecordingLineSplitter(
+        (line) => lines.push(line),
+        1024 * 1024,
+      );
+
+      for (let index = 0; index < 200; index += 1) {
+        splitter.push("x".repeat(1024));
+      }
+
+      splitter.push("\n");
+
+      const measuredBytes = spy.mock.calls.reduce(
+        (total, [value]) =>
+          total + (typeof value === "string" ? value.length : 0),
+        0,
+      );
+
+      expect(lines).toEqual(["x".repeat(200 * 1024)]);
+      expect(measuredBytes).toBeLessThanOrEqual(2 * 200 * 1024);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

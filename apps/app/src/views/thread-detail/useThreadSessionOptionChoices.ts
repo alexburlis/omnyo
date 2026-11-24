@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { ThreadTimelineSessionOption } from "@bb/server-contract";
+import type { ThreadTimelineSessionOption } from "@omnyo/server-contract";
 import type {
   SessionOptionChoice,
   SessionOptionChoices,
@@ -24,14 +24,17 @@ export function useThreadSessionOptionChoices(args: {
   choose: (optionId: string, value: SessionOptionChoice) => void;
 } {
   const { threadId, options } = args;
+
   const { mutate } = useUpdateThread({
     errorMessage: "Failed to change the agent option.",
   });
+
   const [optimistic, setOptimistic] = useState<OptimisticChoices>({
     threadId,
     options,
     choices: NO_CHOICES,
   });
+
   const choices =
     optimistic.threadId === threadId && optimistic.options === options
       ? optimistic.choices
@@ -55,7 +58,9 @@ export function useThreadSessionOptionChoices(args: {
               ) {
                 return current;
               }
+
               const { [optionId]: _failed, ...rest } = current.choices;
+
               return { ...current, choices: rest };
             });
           },

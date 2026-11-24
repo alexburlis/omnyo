@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
-import type { BridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
-import type { ThreadDelta } from "@get-bb/plugin-sdk/provider-bridge";
+import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
+import type { BridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
+import type { ThreadDelta } from "@omnyo/plugin-sdk/provider-bridge";
 
 import { handleLine } from "./bridge.js";
 import {
@@ -15,6 +15,7 @@ import {
 const THREAD_ID = "thr_child_exit_open_work";
 
 let harness: BridgeJsonRpcTestHarness;
+
 let workspaceDir: string;
 
 type DelegationLifecycle = Extract<
@@ -24,14 +25,18 @@ type DelegationLifecycle = Extract<
 
 function delegationDeltas(): DelegationLifecycle[] {
   const found: DelegationLifecycle[] = [];
+
   for (const message of harness.messages) {
     if (message.method !== "thread/delta") continue;
+
     const params = message.params as
       | { threadId?: unknown; deltas?: unknown }
       | undefined;
+
     if (params?.threadId !== THREAD_ID || !Array.isArray(params.deltas)) {
       continue;
     }
+
     for (const delta of params.deltas as ThreadDelta[]) {
       if (
         (delta.kind === "item.open" || delta.kind === "item.close") &&
@@ -41,6 +46,7 @@ function delegationDeltas(): DelegationLifecycle[] {
       }
     }
   }
+
   return found;
 }
 
@@ -48,18 +54,21 @@ async function waitForDelegationDeltas(
   predicate: (deltas: DelegationLifecycle[]) => boolean,
 ): Promise<DelegationLifecycle[]> {
   const deadline = Date.now() + 15_000;
+
   while (Date.now() < deadline) {
     const deltas = delegationDeltas();
+
     if (predicate(deltas)) return deltas;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+
   throw new Error(
     `Timed out waiting for delegation deltas (saw ${JSON.stringify(delegationDeltas())})`,
   );
 }
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-child-exit-ws-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-child-exit-ws-"));
   stubFakeCodexAppServer();
   harness = createBridgeJsonRpcTestHarness(handleLine);
 });
@@ -86,9 +95,11 @@ it("settles the open delegation as failed when the app-server child dies", async
     options: { ...FULL_ACCESS_SESSION_OPTIONS },
   });
   const startResponse = await harness.waitForResponse(1);
+
   const providerThreadId = (
     startResponse.result as { providerThreadId: string } | undefined
   )?.providerThreadId;
+
   if (typeof providerThreadId !== "string") {
     throw new Error(`thread/start failed: ${JSON.stringify(startResponse)}`);
   }
@@ -107,6 +118,7 @@ it("settles the open delegation as failed when the app-server child dies", async
       all.some((delta) => delta.kind === "item.open") &&
       all.at(-1)?.kind === "item.close",
   );
+
   const open = deltas.find((delta) => delta.kind === "item.open");
   const close = deltas.at(-1);
   expect(open?.item.type).toBe("delegation");

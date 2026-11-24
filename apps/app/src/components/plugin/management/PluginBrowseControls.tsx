@@ -5,16 +5,20 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@bb/shared-ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@omnyo/shared-ui/popover";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   ResourceControlButton,
   ResourceMultiSelectMenu,
@@ -23,7 +27,7 @@ import {
   ResourceSortMenuItems,
   ResourceToolbar,
   type ResourceOption,
-} from "@bb/shared-ui/resource-list";
+} from "@omnyo/shared-ui/resource-list";
 import { useScrollOverflowState } from "@/components/thread/timeline/useScrollOverflowState";
 import type {
   PluginBrowseSort,
@@ -34,13 +38,11 @@ import type {
 const PLUGIN_BROWSE_SORTS = [
   "name",
   "recently-added",
-  "most-installed",
 ] as const satisfies readonly PluginBrowseSort[];
 
 const PLUGIN_BROWSE_SORT_LABELS: Record<PluginBrowseSort, string> = {
   name: "Name",
   "recently-added": "Published",
-  "most-installed": "Installs",
 };
 
 const PLUGIN_BROWSE_SORT_ICONS: Record<
@@ -49,7 +51,6 @@ const PLUGIN_BROWSE_SORT_ICONS: Record<
 > = {
   name: { asc: "SortingAZ02", desc: "SortingZA01" },
   "recently-added": { asc: "ClockArrowUp", desc: "ClockArrowDown" },
-  "most-installed": { asc: "SortingOneNine", desc: "SortingNineOne" },
 };
 
 const PLUGIN_BROWSE_SORT_DIRECTIONS: Record<
@@ -58,17 +59,16 @@ const PLUGIN_BROWSE_SORT_DIRECTIONS: Record<
 > = {
   name: { asc: "A–Z", desc: "Z–A" },
   "recently-added": { asc: "Oldest first", desc: "Newest first" },
-  "most-installed": { asc: "Fewest first", desc: "Most first" },
 };
 
 export function pluginBrowseSortOptions(
-  hasInstallCounts: boolean,
   selected: PluginBrowseSort | null = null,
   direction: PluginBrowseSortDirection = "asc",
 ) {
   return PLUGIN_BROWSE_SORTS.map((sort) => {
     const optionDirection =
       sort === selected ? direction : sort === "name" ? "asc" : "desc";
+
     return {
       id: sort,
       label: PLUGIN_BROWSE_SORT_LABELS[sort],
@@ -78,7 +78,6 @@ export function pluginBrowseSortOptions(
           className="size-4"
         />
       ),
-      disabled: sort === "most-installed" && !hasInstallCounts,
     };
   });
 }
@@ -90,7 +89,6 @@ export function PluginCollectionToolbar({
   showCategoryFilter = true,
   sort,
   sortDirection,
-  installsKnown,
   changeSearchParams,
   searchPlaceholder = "Search plugins",
   action,
@@ -109,10 +107,10 @@ export function PluginCollectionToolbar({
   showCategoryFilter?: boolean;
   sort: PluginBrowseSort | null;
   sortDirection: PluginBrowseSortDirection;
-  installsKnown: boolean;
   changeSearchParams: (change: (next: URLSearchParams) => void) => void;
 }) {
   const search = usePluginSearchDraft(query, changeSearchParams);
+
   const sortProps = {
     value: sort,
     direction: sortDirection,
@@ -120,7 +118,7 @@ export function PluginCollectionToolbar({
     clearInFooter: true,
     showHeading: false,
     placeholderLabel: "Default",
-    options: pluginBrowseSortOptions(installsKnown, sort, sortDirection),
+    options: pluginBrowseSortOptions(sort, sortDirection),
     onChange: (value: string) =>
       changeSearchParams((next) => {
         if (value === sort) {
@@ -136,15 +134,18 @@ export function PluginCollectionToolbar({
         next.delete("direction");
       }),
   };
+
   const categoryProps = {
     value: selectedCategories,
     options: categoryOptions,
     onChange: (values: string[]) =>
       changeSearchParams((next) => {
         next.delete("category");
+
         for (const value of values) next.append("category", value);
       }),
   };
+
   const sourceProps = sourceFilter
     ? {
         ...sourceFilter,
@@ -155,14 +156,17 @@ export function PluginCollectionToolbar({
         showHeading: false,
       }
     : null;
+
   const sortIcon =
     sort === null
       ? "ArrowUpDown"
       : PLUGIN_BROWSE_SORT_ICONS[sort][sortDirection];
+
   const sortSummary =
     sort === null
       ? "Default"
       : `${PLUGIN_BROWSE_SORT_LABELS[sort]} · ${PLUGIN_BROWSE_SORT_DIRECTIONS[sort][sortDirection]}`;
+
   const controls = [
     ...(showCategoryFilter
       ? [
@@ -251,14 +255,18 @@ function usePluginSearchDraft(
   changeSearchParams: (change: (next: URLSearchParams) => void) => void,
 ) {
   const [draft, setDraft] = useState(query);
+
   const [synced, setSynced] = useState<{
     query: string;
     pending: readonly string[];
   }>({ query, pending: [] });
+
   const timerRef = useRef<number | null>(null);
+
   if (query !== synced.query) {
     const pendingIndex = synced.pending.indexOf(query);
     setSynced({ query, pending: synced.pending.slice(pendingIndex + 1) });
+
     if (pendingIndex === -1) setDraft(query);
   }
 
@@ -285,10 +293,13 @@ function usePluginSearchDraft(
   const change = (value: string) => {
     setDraft(value);
     cancelPending();
+
     if (value === "") {
       commit(value);
+
       return;
     }
+
     timerRef.current = window.setTimeout(
       () => commit(value),
       SEARCH_COMMIT_DELAY_MS,
@@ -317,14 +328,17 @@ function PluginControlsMenu({
   const contentRef = useRef<HTMLDivElement>(null);
   const returnPageRef = useRef<string | null>(null);
   const page = pages.find((candidate) => candidate.id === pageId);
+
   const activeLabels = pages
     .filter((candidate) => candidate.active)
     .map((candidate) => `${candidate.label}: ${candidate.summary}`);
 
   useEffect(() => {
     if (!open) return;
+
     const frame = requestAnimationFrame(() => {
       const content = contentRef.current;
+
       if (pageId) {
         content
           ?.querySelector<HTMLElement>(
@@ -340,6 +354,7 @@ function PluginControlsMenu({
           ?.focus();
       }
     });
+
     return () => cancelAnimationFrame(frame);
   }, [open, pageId]);
 
@@ -348,7 +363,8 @@ function PluginControlsMenu({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) {
+
+        if (next) {
           setPageId(null);
           returnPageRef.current = null;
         }
@@ -445,14 +461,18 @@ type PluginCategoryFilterProps = {
 export function PluginBrowseCategoryFilter(props: PluginCategoryFilterProps) {
   const { options, value } = props;
   const [open, setOpen] = useState(false);
+
   const selectedOptions = value.flatMap((selectedId) => {
     const option = options.find((candidate) => candidate.id === selectedId);
+
     return option === undefined ? [] : [option];
   });
+
   const accessibleSelectionLabel =
     selectedOptions.length === 0
       ? "All categories"
       : selectedOptions.map((option) => option.label).join(", ");
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -472,7 +492,7 @@ export function PluginBrowseCategoryFilter(props: PluginCategoryFilterProps) {
         mobileTitle="Filter plugins by category"
         className="w-72 p-1.5 md:p-0.5"
       >
-        {open ? <PluginCategoryOptions {...props} /> : null}
+        <PluginCategoryOptions {...props} />
       </PopoverContent>
     </Popover>
   );
@@ -486,6 +506,7 @@ function PluginCategoryOptions({
   const [scrollbarScrolling, setScrollbarScrolling] = useState(false);
   const selected = new Set(value);
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+
   const {
     scrollRef: listRef,
     topSentinelRef,
@@ -495,6 +516,7 @@ function PluginCategoryOptions({
     enabled: listElement !== null,
     measureOverflow: true,
   });
+
   const attachList = useCallback(
     (node: HTMLDivElement | null) => {
       listRef.current = node;
@@ -502,12 +524,14 @@ function PluginCategoryOptions({
     },
     [listRef],
   );
+
   const scrollbarIdleRef = useRef<number | null>(null);
 
   useEffect(() => {
     const animationFrame = requestAnimationFrame(() =>
       categoryOptionElements(listRef.current)[0]?.focus(),
     );
+
     return () => cancelAnimationFrame(animationFrame);
   }, [listRef]);
 
@@ -524,9 +548,11 @@ function PluginCategoryOptions({
     _event: React.UIEvent<HTMLDivElement>,
   ) => {
     setScrollbarScrolling(true);
+
     if (scrollbarIdleRef.current !== null) {
       window.clearTimeout(scrollbarIdleRef.current);
     }
+
     scrollbarIdleRef.current = window.setTimeout(() => {
       scrollbarIdleRef.current = null;
       setScrollbarScrolling(false);
@@ -539,6 +565,7 @@ function PluginCategoryOptions({
 
   const toggle = (optionId: string) => {
     const next = new Set(value);
+
     if (next.has(optionId)) next.delete(optionId);
     else next.add(optionId);
     onChange([...next]);
@@ -623,13 +650,16 @@ function focusCategoryOption(
 ) {
   const options = categoryOptionElements(listbox);
   const index = options.indexOf(event.currentTarget);
+
   if (index < 0) return;
   let nextIndex: number | null = null;
+
   if (event.key === "ArrowDown")
     nextIndex = Math.min(index + 1, options.length - 1);
   else if (event.key === "ArrowUp") nextIndex = Math.max(index - 1, 0);
   else if (event.key === "Home") nextIndex = 0;
   else if (event.key === "End") nextIndex = options.length - 1;
+
   if (nextIndex === null) return;
   event.preventDefault();
   event.stopPropagation();
@@ -640,5 +670,6 @@ function categoryOptionElements(
   listbox: HTMLDivElement | null,
 ): HTMLButtonElement[] {
   if (listbox === null) return [];
+
   return [...listbox.querySelectorAll<HTMLButtonElement>('[role="option"]')];
 }

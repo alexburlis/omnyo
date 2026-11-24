@@ -30,6 +30,7 @@ describe("secondary panel tab-strip edge fades", () => {
         disconnect() {}
       },
     );
+
     const tabStrip = (usesDesktopChrome: boolean) =>
       createElement(SecondaryPanelTabStrip, {
         activeTabId: null,
@@ -38,6 +39,7 @@ describe("secondary panel tab-strip edge fades", () => {
         usesDesktopChrome,
         isPanelOpen: true,
       });
+
     const view = render(tabStrip(true));
     const viewport = view.container.querySelector(".no-scrollbar");
     expect(viewport?.className).toContain("[app-region:no-drag]");
@@ -57,6 +59,7 @@ describe("secondary panel tab-strip edge fades", () => {
         disconnect() {}
       },
     );
+
     const { getByRole } = render(
       createElement(SecondaryPanelTabStrip, {
         activeTabId: "file-preview",
@@ -114,6 +117,7 @@ describe("secondary panel tab-strip edge fades", () => {
     let animationFrameCallback: FrameRequestCallback | undefined;
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       animationFrameCallback = callback;
+
       return 1;
     });
     vi.stubGlobal(
@@ -151,12 +155,15 @@ describe("secondary panel tab-strip edge fades", () => {
     );
 
     const viewport = container.querySelector(".no-scrollbar");
+
     const content = container.querySelector(
       "[data-secondary-panel-tab-content]",
     );
+
     const strip = container.querySelector(
       '[data-testid="secondary-panel-tab-strip"]',
     );
+
     expect(content).not.toBeNull();
     expect(strip).not.toBeNull();
     expect(observed).toContain(strip);
@@ -169,12 +176,15 @@ describe("secondary panel tab-strip edge fades", () => {
         .querySelector("[data-overflow-fade='left']")
         ?.classList.contains("w-6"),
     ).toBe(true);
+
     const leftButton = container.querySelector<HTMLButtonElement>(
       '[aria-label="Scroll tabs left"]',
     );
+
     const rightButton = container.querySelector<HTMLButtonElement>(
       '[aria-label="Scroll tabs right"]',
     );
+
     expect(leftButton?.classList.contains("w-0")).toBe(true);
     expect(rightButton?.classList.contains("w-0")).toBe(true);
 
@@ -201,12 +211,13 @@ describe("secondary panel tab-strip edge fades", () => {
     const scrollRegion = container.querySelector(
       "[data-secondary-panel-tab-scroll-region]",
     );
+
     expect(strip?.children[0]).toBe(leftButton);
     expect(strip?.children[1]).toBe(scrollRegion);
     expect(strip?.children[2]).toBe(rightButton);
     expect(leftButton?.classList.contains("absolute")).toBe(false);
     expect(rightButton?.classList.contains("absolute")).toBe(false);
-    expect(leftButton?.classList.contains("w-0")).toBe(true);
+    expect(leftButton?.classList.contains("w-5")).toBe(true);
     expect(rightButton?.classList.contains("w-5")).toBe(true);
     expect(leftButton?.classList.contains("opacity-0")).toBe(true);
     expect(leftButton?.tabIndex).toBe(-1);
@@ -231,7 +242,8 @@ describe("secondary panel tab-strip edge fades", () => {
     viewport!.scrollLeft = 120;
     fireEvent.scroll(viewport!);
     act(() => animationFrameCallback?.(0));
-    expect(rightButton?.classList.contains("w-0")).toBe(true);
+    expect(rightButton?.classList.contains("w-5")).toBe(true);
+    expect(rightButton?.classList.contains("opacity-0")).toBe(true);
     expect(leftButton?.classList.contains("w-5")).toBe(true);
     expect(rightButton?.getAttribute("aria-hidden")).toBe("true");
     expect(leftButton?.getAttribute("aria-hidden")).toBe("false");
@@ -293,8 +305,10 @@ function renderCloseMenuStrip(tabs: SecondaryPanelTabStripProps["tabs"]) {
 describe("secondary panel tab close menu", () => {
   it("selects other tabs and tabs to the right, skipping pinned tabs", () => {
     const tabs = makeCloseMenuTabs([0, 3]);
+
     const closeIds = (tabId: string, scope: "self" | "others" | "right") =>
       secondaryPanelTabsToClose(tabs, tabId, scope).map((tab) => tab.tab.id);
+
     expect(closeIds("tab-1", "others")).toEqual(["tab-2"]);
     expect(closeIds("tab-1", "right")).toEqual(["tab-2"]);
     expect(closeIds("tab-0", "self")).toEqual([]);

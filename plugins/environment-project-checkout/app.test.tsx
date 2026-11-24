@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import { PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
 
 const app = await loadPluginApp(() => import("./app"));
+
 const { readCheckoutInputs } = await import("./app");
 
 afterEach(() => {
@@ -17,15 +18,18 @@ function inputsSlot() {
       candidate.environmentProviderId ===
       PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID,
   );
+
   if (registration === undefined) {
     throw new Error("the checkout inputs control was not registered");
   }
+
   return registration;
 }
 
 describe("checkout inputs control", () => {
   it("selects a remote branch before the new machine exists", async () => {
     const onChange = vi.fn();
+
     const slot = renderSlot(
       inputsSlot(),
       {
@@ -41,6 +45,7 @@ describe("checkout inputs control", () => {
         },
       },
     );
+
     const trigger = slot.getByRole("combobox", { name: "Branch" });
     expect(trigger.textContent).toContain("Default branch");
     expect(trigger.hasAttribute("disabled")).toBe(false);
@@ -73,6 +78,7 @@ describe("checkout inputs control", () => {
       value: null,
       onChange: vi.fn(),
     });
+
     expect(
       slot.getByRole("combobox", { name: "Branch" }).textContent,
     ).toContain("Current (main)");
@@ -85,6 +91,7 @@ describe("checkout inputs control", () => {
       value: { branch: { kind: "existing", name: "release" } },
       onChange: vi.fn(),
     });
+
     expect(
       slot.getByRole("combobox", { name: "Branch" }).textContent,
     ).toContain("Checkout:release");
@@ -97,6 +104,7 @@ describe("checkout inputs control", () => {
       value: { branch: { kind: "new", baseBranch: "origin/main" } },
       onChange: vi.fn(),
     });
+
     const chipText = slot.getByRole("combobox", { name: "Branch" }).textContent;
     expect(chipText).toContain("New branch from");
     expect(chipText).toContain("origin/main");
@@ -104,6 +112,7 @@ describe("checkout inputs control", () => {
 
   it("keeps a seeded path while the branch changes", async () => {
     const onChange = vi.fn();
+
     const slot = renderSlot(
       inputsSlot(),
       {
@@ -114,6 +123,7 @@ describe("checkout inputs control", () => {
       },
       { branchesState: { branches: ["main", "release"] } },
     );
+
     fireEvent.click(slot.getByRole("combobox", { name: "Branch" }));
     fireEvent.click(await slot.findByRole("button", { name: "Checkout" }));
     fireEvent.click(await slot.findByRole("button", { name: "release" }));
@@ -125,6 +135,7 @@ describe("checkout inputs control", () => {
       },
     });
     cleanup();
+
     const cleared = renderSlot(inputsSlot(), {
       projectId: "project-1",
       target: { kind: "existing-host", hostId: "host-a" },
@@ -134,6 +145,7 @@ describe("checkout inputs control", () => {
       },
       onChange,
     });
+
     fireEvent.click(cleared.getByRole("combobox", { name: "Branch" }));
     fireEvent.click(await cleared.findByTitle("Current: main"));
     expect(onChange).toHaveBeenLastCalledWith({
@@ -144,6 +156,7 @@ describe("checkout inputs control", () => {
 
   it("selects a searched existing branch with Enter and closes", async () => {
     const onChange = vi.fn();
+
     const slot = renderSlot(
       inputsSlot(),
       {
@@ -154,12 +167,15 @@ describe("checkout inputs control", () => {
       },
       { branchesState: { branches: ["main", "release"] } },
     );
+
     const trigger = slot.getByRole("combobox", { name: "Branch" });
     fireEvent.click(trigger);
     fireEvent.click(await slot.findByRole("button", { name: "Checkout" }));
+
     const search = await slot.findByRole("textbox", {
       name: "Search branches",
     });
+
     fireEvent.change(search, { target: { value: "release" } });
     fireEvent.keyDown(search, { key: "Enter" });
     expect(onChange).toHaveBeenLastCalledWith({
@@ -171,6 +187,7 @@ describe("checkout inputs control", () => {
 
   it("selects a searched new-branch base with Enter and closes", async () => {
     const onChange = vi.fn();
+
     const slot = renderSlot(
       inputsSlot(),
       {
@@ -181,11 +198,14 @@ describe("checkout inputs control", () => {
       },
       { branchesState: { branches: ["main", "release"] } },
     );
+
     const trigger = slot.getByRole("combobox", { name: "Branch" });
     fireEvent.click(trigger);
+
     const search = await slot.findByRole("textbox", {
       name: "Search branches",
     });
+
     fireEvent.change(search, { target: { value: "release" } });
     fireEvent.keyDown(search, { key: "Enter" });
     expect(onChange).toHaveBeenLastCalledWith({
@@ -197,6 +217,7 @@ describe("checkout inputs control", () => {
 
   it("reports the checkout blocker through the inputs channel", async () => {
     const onChange = vi.fn();
+
     const slot = renderSlot(
       inputsSlot(),
       {
@@ -210,6 +231,7 @@ describe("checkout inputs control", () => {
         checkoutState: { dirty: true },
       },
     );
+
     await waitFor(() => {
       expect(onChange).toHaveBeenCalledWith({
         status: "blocked",
@@ -226,9 +248,7 @@ describe("checkout inputs control", () => {
     expect(newBranch?.getAttribute("title")).toBe(
       "Checkout blocked by uncommitted changes",
     );
-    expect(
-      slot.getByRole("status").textContent,
-    ).toBe(
+    expect(slot.getByRole("status").textContent).toBe(
       "Commit or stash the uncommitted changes in this checkout to create or switch branches.",
     );
     expect(slot.queryByRole("button", { name: "release" })).toBeNull();
@@ -250,6 +270,7 @@ describe("checkout inputs control", () => {
         },
       },
     );
+
     fireEvent.click(slot.getByRole("combobox", { name: "Branch" }));
     expect(
       (await slot.findByRole("button", { name: "Checkout" })).hasAttribute(
@@ -263,6 +284,7 @@ describe("checkout inputs control", () => {
 
   it("matches the checkout menu structure and enters new-branch mode in place", async () => {
     const onChange = vi.fn();
+
     const slot = renderSlot(
       inputsSlot(),
       {
@@ -278,6 +300,7 @@ describe("checkout inputs control", () => {
         },
       },
     );
+
     const trigger = slot.getByRole("combobox", { name: "Branch" });
     fireEvent.click(trigger);
 

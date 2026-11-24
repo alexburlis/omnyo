@@ -1,7 +1,10 @@
 const ORDER_KEY_ALPHABET =
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
 const FIRST_DIGIT = 0;
+
 const LAST_DIGIT = ORDER_KEY_ALPHABET.length - 1;
+
 const MINIMUM_GAP = 1;
 
 interface CreateOrderKeyAfterArgs {
@@ -23,21 +26,29 @@ const ORDER_KEY_DIGITS = new Map(
 
 function requireOrderKeyDigit(index: number): string {
   const digit = ORDER_KEY_ALPHABET[index];
+
   if (digit === undefined) {
     throw new Error(`Invalid order key digit index: ${index}`);
   }
+
   return digit;
 }
 
-function getOrderKeyDigit(key: string, index: number, fallback: number): number {
+function getOrderKeyDigit(
+  key: string,
+  index: number,
+  fallback: number,
+): number {
   if (index >= key.length) {
     return fallback;
   }
 
   const digit = ORDER_KEY_DIGITS.get(key[index] ?? "");
+
   if (digit === undefined) {
     throw new Error(`Invalid order key digit: ${key[index]}`);
   }
+
   return digit;
 }
 
@@ -61,6 +72,7 @@ function assertCandidateOrderKey({
   if (previousKey !== null && candidateKey <= previousKey) {
     throw new Error("Generated order key must sort after previous order key");
   }
+
   if (nextKey !== null && candidateKey >= nextKey) {
     throw new Error("Generated order key must sort before next order key");
   }
@@ -73,9 +85,11 @@ export function createOrderKeyBetween({
   if (previousKey !== null) {
     assertValidOrderKey(previousKey);
   }
+
   if (nextKey !== null) {
     assertValidOrderKey(nextKey);
   }
+
   if (previousKey !== null && nextKey !== null && previousKey >= nextKey) {
     throw new Error("Previous order key must sort before next order key");
   }
@@ -88,6 +102,7 @@ export function createOrderKeyBetween({
       previousKey === null
         ? FIRST_DIGIT
         : getOrderKeyDigit(previousKey, index, FIRST_DIGIT);
+
     const nextDigit =
       nextKey === null
         ? LAST_DIGIT
@@ -98,6 +113,7 @@ export function createOrderKeyBetween({
       const candidateKey = `${prefix}${requireOrderKeyDigit(midpoint)}`;
 
       assertCandidateOrderKey({ candidateKey, previousKey, nextKey });
+
       return candidateKey;
     }
 

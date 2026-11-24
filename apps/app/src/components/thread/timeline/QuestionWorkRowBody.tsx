@@ -1,9 +1,9 @@
 import type {
   PendingInteractionUserAnswer,
   PendingInteractionUserQuestionQuestion,
-} from "@bb/domain";
-import type { TimelineQuestionViewWorkRow } from "@bb/thread-view";
-import { formatPendingInteractionUserQuestionOptionLabel } from "@bb/core-ui";
+} from "@omnyo/domain";
+import type { TimelineQuestionViewWorkRow } from "@omnyo/thread-view";
+import { formatPendingInteractionUserQuestionOptionLabel } from "@omnyo/core-ui";
 
 interface QuestionWorkRowBodyProps {
   row: TimelineQuestionViewWorkRow;
@@ -18,6 +18,7 @@ export function QuestionWorkRowBody({ row }: QuestionWorkRowBodyProps) {
   if (row.lifecycle !== "answered" && row.lifecycle !== "resolving") {
     return null;
   }
+
   return (
     <div className="space-y-3 text-xs leading-snug">
       {row.questions.map((question) => (
@@ -36,6 +37,7 @@ function AnsweredQuestionRow({ question, answer }: AnsweredQuestionRowProps) {
     answer?.selected.map((value) =>
       formatPendingInteractionUserQuestionOptionLabel({ question, value }),
     ) ?? [];
+
   const freeText = answer?.freeText ?? null;
   const hasContent = selectedLabels.length > 0 || freeText !== null;
 

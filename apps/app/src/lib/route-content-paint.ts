@@ -1,5 +1,7 @@
 let painted = false;
+
 let resolvePainted: (() => void) | null = null;
+
 let paintedPromise = new Promise<void>((resolve) => {
   resolvePainted = resolve;
 });

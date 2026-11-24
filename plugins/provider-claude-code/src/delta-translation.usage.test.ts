@@ -19,13 +19,16 @@ describe("claude usage and fixture translation (delta path)", () => {
       const harness = createClaudeDeltaHarness();
       harness.translate(loadFixture("assistant-text.json"));
       const fixture = loadFixture("result-success.json");
+
       const events = harness.translate({
         ...fixture,
         usage: { input_tokens: 80, output_tokens: 20, ...counts },
       });
+
       const event = events.find(
         (event) => event.type === "thread/tokenUsage/updated",
       );
+
       expect(event).toBeDefined();
       expect(event?.tokenUsage.last).toMatchObject(expected);
       expect(
@@ -39,14 +42,135 @@ describe("claude usage and fixture translation (delta path)", () => {
     },
   );
 
+  it("reports the prompt cache TTL of the latest cache write across turns", () => {
+    const harness = createClaudeDeltaHarness();
+    const fixture = loadFixture("result-success.json");
+
+    const turns: [unknown, number | undefined][] = [
+      [undefined, undefined],
+      [
+        { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 9 },
+        3_600_000,
+      ],
+      [
+        { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+        3_600_000,
+      ],
+      [{ ephemeral_5m_input_tokens: 9, ephemeral_1h_input_tokens: 0 }, 300_000],
+      ["malformed", 300_000],
+    ];
+
+    const reported = turns.map(([cacheCreation]) => {
+      harness.translate(loadFixture("assistant-text.json"));
+
+      const event = harness
+        .translate({
+          ...fixture,
+          usage: {
+            input_tokens: 80,
+            output_tokens: 20,
+            cache_creation_input_tokens: 9,
+            cache_creation: cacheCreation,
+          },
+        })
+        .find((event) => event.type === "thread/tokenUsage/updated");
+
+      expect(event?.tokenUsage.last.inputTokens).toBe(80);
+
+      return event?.tokenUsage.promptCacheTtlMs;
+    });
+
+    expect(reported).toEqual(turns.map(([, ttl]) => ttl));
+  });
+
+  it.each([
+    [
+      "the last main-thread request wrote only the 5-minute tier",
+      [
+        { parentToolCallId: undefined, fiveMinute: 0, oneHour: 4_000 },
+        { parentToolCallId: undefined, fiveMinute: 700, oneHour: 0 },
+      ],
+      300_000,
+    ],
+    [
+      "the last main-thread request wrote the 1-hour tier",
+      [
+        { parentToolCallId: undefined, fiveMinute: 700, oneHour: 0 },
+        { parentToolCallId: undefined, fiveMinute: 0, oneHour: 4_000 },
+      ],
+      3_600_000,
+    ],
+    [
+      "only a subagent request wrote the 1-hour tier afterwards",
+      [
+        { parentToolCallId: undefined, fiveMinute: 700, oneHour: 0 },
+        { parentToolCallId: "toolu_agent", fiveMinute: 0, oneHour: 4_000 },
+      ],
+      300_000,
+    ],
+  ])(
+    "reports the prompt cache TTL of the turn's last request when %s",
+    (_name, requests, expectedTtl) => {
+      const harness = createClaudeDeltaHarness();
+      const fixture = loadFixture("result-success.json");
+
+      for (const request of requests) {
+        harness.translate(
+          {
+            type: "assistant",
+            message: {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "text", text: "Working." }],
+              usage: {
+                input_tokens: 3,
+                output_tokens: 10,
+                cache_read_input_tokens: 1_000,
+                cache_creation_input_tokens:
+                  request.fiveMinute + request.oneHour,
+                cache_creation: {
+                  ephemeral_5m_input_tokens: request.fiveMinute,
+                  ephemeral_1h_input_tokens: request.oneHour,
+                },
+              },
+            },
+            parent_tool_use_id: request.parentToolCallId ?? null,
+          },
+          request.parentToolCallId === undefined
+            ? undefined
+            : { parentToolCallId: request.parentToolCallId },
+        );
+      }
+
+      const event = harness
+        .translate({
+          ...fixture,
+          usage: {
+            input_tokens: 6,
+            output_tokens: 20,
+            cache_read_input_tokens: 2_000,
+            cache_creation_input_tokens: 4_700,
+            cache_creation: {
+              ephemeral_5m_input_tokens: 700,
+              ephemeral_1h_input_tokens: 4_000,
+            },
+          },
+        })
+        .find((event) => event.type === "thread/tokenUsage/updated");
+
+      expect(event?.tokenUsage.promptCacheTtlMs).toBe(expectedTtl);
+    },
+  );
+
   it("emits context-window usage on a top-level assistant message", () => {
     const harness = createClaudeDeltaHarness();
-    const threadId = "bb-thread-1";
+    const threadId = "omnyo-thread-1";
 
     harness.translator.setClaudeModelContextWindowHint(
       threadId,
       "claude-opus-4-7[1m]",
     );
+
     const events = harness.translate(
       {
         type: "assistant",
@@ -82,7 +206,7 @@ describe("claude usage and fixture translation (delta path)", () => {
 
   it("does not use nested assistant usage as the parent context window", () => {
     const harness = createClaudeDeltaHarness();
-    const threadId = "bb-thread-1";
+    const threadId = "omnyo-thread-1";
 
     harness.translator.setClaudeModelContextWindowHint(
       threadId,
@@ -123,6 +247,7 @@ describe("claude usage and fixture translation (delta path)", () => {
       },
       { threadId, parentToolCallId: "parent-tool-1" },
     );
+
     expect(nestedEvents).not.toContainEqual(
       expect.objectContaining({
         type: "thread/contextWindowUsage/updated",
@@ -304,10 +429,10 @@ describe("claude usage and fixture translation (delta path)", () => {
     const harness = createClaudeDeltaHarness();
 
     harness.translate(loadFixture("assistant-text.json"), {
-      threadId: "bb-thread-1",
+      threadId: "omnyo-thread-1",
     });
     harness.translate(loadFixture("result-success.json"), {
-      threadId: "bb-thread-1",
+      threadId: "omnyo-thread-1",
     });
     harness.translate(
       {
@@ -317,7 +442,7 @@ describe("claude usage and fixture translation (delta path)", () => {
         session_id: "session-1",
       },
       {
-        threadId: "bb-thread-1",
+        threadId: "omnyo-thread-1",
       },
     );
 
@@ -341,7 +466,7 @@ describe("claude usage and fixture translation (delta path)", () => {
         session_id: "session-1",
       },
       {
-        threadId: "bb-thread-1",
+        threadId: "omnyo-thread-1",
       },
     );
 
@@ -361,11 +486,13 @@ describe("claude usage and fixture translation (delta path)", () => {
     const harness = createClaudeDeltaHarness();
 
     harness.translate(loadFixture("assistant-text.json"));
+
     const firstTurnEvents = harness.translate(
       loadFixture("result-success.json"),
     );
 
     harness.translate(loadFixture("assistant-text.json"));
+
     const secondTurnEvents = harness.translate(
       loadFixture("result-success.json"),
     );
@@ -378,6 +505,7 @@ describe("claude usage and fixture translation (delta path)", () => {
         { type: "thread/tokenUsage/updated" }
       > => event.type === "thread/tokenUsage/updated",
     );
+
     const secondTokenUsage = secondTurnEvents.find(
       (
         event,
@@ -412,11 +540,11 @@ describe("claude usage and fixture translation (delta path)", () => {
     const harness = createClaudeDeltaHarness();
 
     harness.translator.setClaudeModelContextWindowHint(
-      "bb-thread-1",
+      "omnyo-thread-1",
       "claude-opus-4-7[1m]",
     );
     harness.translate(loadFixture("assistant-text.json"), {
-      threadId: "bb-thread-1",
+      threadId: "omnyo-thread-1",
     });
 
     const events = harness.translate(
@@ -439,7 +567,7 @@ describe("claude usage and fixture translation (delta path)", () => {
         session_id: "session-1",
       },
       {
-        threadId: "bb-thread-1",
+        threadId: "omnyo-thread-1",
       },
     );
 
@@ -459,7 +587,7 @@ describe("claude usage and fixture translation (delta path)", () => {
     const harness = createClaudeDeltaHarness();
 
     harness.translate(loadFixture("assistant-text.json"), {
-      threadId: "bb-thread-unknown",
+      threadId: "omnyo-thread-unknown",
     });
 
     const events = harness.translate(
@@ -482,7 +610,7 @@ describe("claude usage and fixture translation (delta path)", () => {
         session_id: "session-1",
       },
       {
-        threadId: "bb-thread-unknown",
+        threadId: "omnyo-thread-unknown",
       },
     );
 
@@ -502,14 +630,14 @@ describe("claude usage and fixture translation (delta path)", () => {
     const harness = createClaudeDeltaHarness();
 
     harness.translate(loadFixture("assistant-text.json"), {
-      threadId: "bb-thread-1",
+      threadId: "omnyo-thread-1",
     });
     harness.translate(loadFixture("result-success.json"), {
-      threadId: "bb-thread-1",
+      threadId: "omnyo-thread-1",
     });
 
     harness.translate(loadFixture("assistant-text.json"), {
-      threadId: "bb-thread-1",
+      threadId: "omnyo-thread-1",
     });
 
     const events = harness.translate(
@@ -532,7 +660,7 @@ describe("claude usage and fixture translation (delta path)", () => {
         session_id: "session-1",
       },
       {
-        threadId: "bb-thread-1",
+        threadId: "omnyo-thread-1",
       },
     );
 

@@ -11,5 +11,6 @@ export function getProjectScopedStorageKey(
   if (!projectId || projectId.trim().length === 0) {
     return storageKeyPrefix;
   }
+
   return `${storageKeyPrefix}-${normalizeStorageSegment(projectId)}-${PROJECT_SCOPED_STORAGE_VERSION}`;
 }

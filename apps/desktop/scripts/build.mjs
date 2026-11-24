@@ -1,12 +1,24 @@
+import { publicBetaCollectionPlugins } from "../../../scripts/public-beta-collection.mjs";
+import { compileDesktopProtectedStoreConsumersV1 } from "./prepare-protected-store-consumers.mjs";
 import { execFileSync } from "node:child_process";
-import { readFile, rm } from "node:fs/promises";
+import { copyFile, readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { build } from "esbuild";
-import { resolveDesktopReleaseChannel } from "./desktop-release-channel.mjs";
+import {
+  desktopBuildSelection,
+  resolveDesktopReleaseChannel,
+} from "./desktop-release-channel.mjs";
 
 const packageRoot = process.cwd();
-const distDir = resolve(packageRoot, "dist");
+
+const desktopReleaseChannel = resolveDesktopReleaseChannel(process.env);
+
+const selection = desktopBuildSelection(desktopReleaseChannel);
+
+const distDir = resolve(packageRoot, selection.outputDirectory);
+
 const packageJsonPath = resolve(packageRoot, "package.json");
+
 const pluginSdkPackageJsonPath = resolve(
   packageRoot,
   "..",
@@ -18,6 +30,7 @@ const pluginSdkPackageJsonPath = resolve(
 
 function readPackageVersion(packageJsonText, label) {
   const packageJson = JSON.parse(packageJsonText);
+
   if (
     typeof packageJson !== "object" ||
     packageJson === null ||
@@ -26,20 +39,18 @@ function readPackageVersion(packageJsonText, label) {
   ) {
     throw new Error(`${label} must define a version`);
   }
+
   return packageJson.version;
 }
 
-/**
- * The About panel reports the commit a build came from. A tarball checkout or
- * a shallow CI clone can have no usable git metadata, so an unknown commit is
- * reported as such rather than failing the build.
- */
 function readBuildCommit(env) {
   const injected =
-    env.BB_DESKTOP_COMMIT?.trim() ?? env.GITHUB_SHA?.trim() ?? "";
+    env.OMNYO_DESKTOP_COMMIT?.trim() ?? env.GITHUB_SHA?.trim() ?? "";
+
   if (injected.length > 0) {
     return injected;
   }
+
   try {
     return execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: packageRoot,
@@ -52,10 +63,12 @@ function readBuildCommit(env) {
 }
 
 function readBuildDate(env) {
-  const injected = env.BB_DESKTOP_BUILD_DATE?.trim() ?? "";
+  const injected = env.OMNYO_DESKTOP_BUILD_DATE?.trim() ?? "";
+
   if (injected.length > 0) {
     return injected;
   }
+
   return new Date().toISOString();
 }
 
@@ -65,25 +78,28 @@ const desktopVersion = readPackageVersion(
   await readFile(packageJsonPath, "utf8"),
   "apps/desktop/package.json",
 );
+
 const pluginSdkVersion = readPackageVersion(
   await readFile(pluginSdkPackageJsonPath, "utf8"),
   "packages/plugin-sdk/package.json",
 );
-const desktopReleaseChannel = resolveDesktopReleaseChannel(process.env);
+
 const desktopCommit = readBuildCommit(process.env);
+
 const desktopBuildDate = readBuildDate(process.env);
 
 const commonOptions = {
   bundle: true,
+  plugins: publicBetaCollectionPlugins(),
   define: {
-    "process.env.BB_DESKTOP_BUILD_DATE": JSON.stringify(desktopBuildDate),
-    "process.env.BB_DESKTOP_COMMIT": JSON.stringify(desktopCommit),
-    "process.env.BB_DESKTOP_PLUGIN_SDK_VERSION":
+    "process.env.OMNYO_DESKTOP_BUILD_DATE": JSON.stringify(desktopBuildDate),
+    "process.env.OMNYO_DESKTOP_COMMIT": JSON.stringify(desktopCommit),
+    "process.env.OMNYO_DESKTOP_PLUGIN_SDK_VERSION":
       JSON.stringify(pluginSdkVersion),
-    "process.env.BB_DESKTOP_RELEASE_CHANNEL": JSON.stringify(
+    "process.env.OMNYO_DESKTOP_RELEASE_CHANNEL": JSON.stringify(
       desktopReleaseChannel,
     ),
-    "process.env.BB_DESKTOP_VERSION": JSON.stringify(desktopVersion),
+    "process.env.OMNYO_DESKTOP_VERSION": JSON.stringify(desktopVersion),
   },
   legalComments: "none",
   platform: "node",
@@ -92,12 +108,59 @@ const commonOptions = {
 };
 
 await Promise.all([
+  ...(selection.privateContinuity
+    ? [
+        compileDesktopProtectedStoreConsumersV1(packageRoot, distDir),
+        build({
+          ...commonOptions,
+          entryPoints: [
+            resolve(packageRoot, "src", "desktop-profile-adoption-v1.ts"),
+          ],
+          format: "cjs",
+          define: {
+            ...commonOptions.define,
+            "import.meta.url": "__omnyoProfileRuntimeAnchor",
+          },
+          banner: {
+            js: 'const __omnyoProfileRuntimeAnchor = require("node:url").pathToFileURL(require("node:path").resolve(__dirname, "../node_modules/omnyo-app/package.json")).href;',
+          },
+          outfile: resolve(distDir, "desktop-profile-adoption-v1.cjs"),
+        }),
+        build({
+          ...commonOptions,
+          entryPoints: [
+            resolve(
+              packageRoot,
+              "src",
+              "desktop-profile-continuity-entry-v2.ts",
+            ),
+          ],
+          external: ["electron", "original-fs"],
+          format: "cjs",
+          define: {
+            ...commonOptions.define,
+            "import.meta.url": "__omnyoContinuityRuntimeAnchor",
+          },
+          banner: {
+            js: 'const __omnyoContinuityRuntimeAnchor = require("node:url").pathToFileURL(require("node:path").resolve(__dirname, "../node_modules/omnyo-app/package.json")).href;',
+          },
+          outfile: resolve(distDir, "desktop-profile-continuity-entry-v2.cjs"),
+        }),
+      ]
+    : []),
+  build({
+    ...commonOptions,
+    bundle: false,
+    entryPoints: [resolve(packageRoot, "src", "startup.ts")],
+    format: "cjs",
+    outfile: resolve(distDir, "main.js"),
+  }),
   build({
     ...commonOptions,
     entryPoints: [resolve(packageRoot, "src", "main.ts")],
-    external: ["electron"],
+    external: ["electron", "original-fs", "@aws-sdk/client-s3"],
     format: "cjs",
-    outfile: resolve(distDir, "main.js"),
+    outfile: resolve(distDir, "desktop-main.cjs"),
   }),
   build({
     ...commonOptions,
@@ -145,11 +208,23 @@ await Promise.all([
   }),
   build({
     ...commonOptions,
-    entryPoints: [resolve(packageRoot, "src", "bb-app-bridge.ts")],
-    external: ["bb-app", "bb-app/*"],
+    entryPoints: [resolve(packageRoot, "src", "omnyo-app-bridge.mts")],
+    external: ["omnyo-app", "omnyo-app/*"],
     format: "esm",
-    outfile: resolve(distDir, "bb-app-bridge.mjs"),
+    outfile: resolve(distDir, "omnyo-app-bridge.mjs"),
   }),
 ]);
 
-process.stdout.write("@bb/desktop: built Electron entries\n");
+if (selection.privateContinuity)
+  await copyFile(
+    resolve(
+      packageRoot,
+      "..",
+      "..",
+      "scripts",
+      "private-electron-trust-probe.cjs",
+    ),
+    resolve(distDir, "private-electron-trust-probe.cjs"),
+  );
+
+process.stdout.write("@omnyo/desktop: built Electron entries\n");

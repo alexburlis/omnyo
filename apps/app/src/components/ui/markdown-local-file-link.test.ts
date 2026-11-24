@@ -9,6 +9,7 @@ import {
 const TRUSTED_HOST_ABSOLUTE_LINKS = {
   kind: "trusted-host",
 } satisfies MarkdownAbsoluteLocalFileLinkRouting;
+
 const CONTAINED_WORKSPACE_ABSOLUTE_LINKS = {
   kind: "contained",
   rootPath: "/workspace",
@@ -111,7 +112,7 @@ describe("parseLocalFileHref", () => {
   it("parses editor file URLs with the editor that should open them", () => {
     expect(
       [
-        "devin://file/Users/me/.bb/artifacts/thr_1/review.diff",
+        "devin://file/Users/me/.omnyo/artifacts/thr_1/review.diff",
         "windsurf://file/Users/me/app.ts:12",
         "vscode://file/Users/me/My%20Notes.md:12:3",
         "VSCODE-INSIDERS://file/Users/me/app.ts",
@@ -126,7 +127,7 @@ describe("parseLocalFileHref", () => {
       {
         lineRange: null,
         openTargetId: "devin-desktop",
-        path: "/Users/me/.bb/artifacts/thr_1/review.diff",
+        path: "/Users/me/.omnyo/artifacts/thr_1/review.diff",
       },
       {
         lineRange: { startLineNumber: 12, endLineNumber: 12 },
@@ -262,6 +263,7 @@ describe("parseLocalFileHref", () => {
       path: "/workspace/app.ts",
       lineRange: null,
     });
+
     for (const href of [
       "/workspace/with#hash/app.ts:12",
       "/workspace/app.ts#bad/fragment",
@@ -492,6 +494,7 @@ describe("Windows drive paths", () => {
       kind: "contained",
       rootPath: "C:\\src\\repo",
     } as const;
+
     expect(
       parseLocalFileHref({
         absoluteLinks: contained,

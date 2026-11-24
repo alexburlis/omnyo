@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { defaultAppSettings, type AppSettings } from "@bb/domain";
+import { defaultAppSettings, type AppSettings } from "@omnyo/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingGate } from "./OnboardingGate";
 
@@ -12,9 +12,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/queries/system-queries", () => ({
   useSystemConfig: mocks.useSystemConfig,
 }));
+
 vi.mock("@/hooks/mutations/settings-mutations", () => ({
   useUpdateGeneralSettings: () => ({ mutate: mocks.mutate }),
 }));
+
 vi.mock("./OnboardingFlow", () => ({
   OnboardingFlow: ({
     initialStep,
@@ -44,6 +46,7 @@ function renderGate() {
       <div>App shell</div>
     </OnboardingGate>,
   );
+
   return { view };
 }
 
@@ -57,6 +60,15 @@ afterEach(() => {
 });
 
 describe("OnboardingGate", () => {
+  it("shows progress while the setup guide module loads", async () => {
+    configWith({ onboardingCompletedAt: null });
+    renderGate();
+
+    expect(screen.getByRole("status").textContent).toBe("Opening Omnyo…");
+    expect(await screen.findByText("Setup guide at agent")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("shows the setup guide instead of the app on a server that has never been set up", async () => {
     configWith({ onboardingCompletedAt: null });
 
@@ -115,9 +127,10 @@ describe("OnboardingGate", () => {
     expect(await screen.findByText("Setup guide at agent")).toBeTruthy();
   });
 
-  it("holds a first-time browser blank until settings load, but boots a returning browser straight into the app", () => {
+  it("shows progress until first-time settings load, but boots a returning browser straight into the app", () => {
     mocks.useSystemConfig.mockReturnValue({ data: undefined, isError: false });
     const first = renderGate();
+    expect(screen.getByRole("status").textContent).toBe("Opening Omnyo…");
     expect(screen.queryByText("App shell")).toBeNull();
     first.view.unmount();
 

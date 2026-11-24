@@ -7,14 +7,7 @@ Usage notes:
 
 Reserve this for decisions where the user's answer changes what you do next — not for choices with a conventional default or facts you can verify in the codebase yourself. In those cases pick the obvious option, mention it in your response, and proceed.
 
-Preview feature:
-Use the optional \`preview\` field on options when presenting concrete artifacts that users need to visually compare:
-- ASCII mockups of UI layouts or components
-- Code snippets showing different implementations
-- Diagram variations
-- Configuration examples
-
-Preview content is rendered as markdown in a monospace box. Multi-line text with newlines is supported. The preview is revealed beneath an option once it is selected. Do not use previews for simple preference questions where labels and descriptions suffice. Note: previews are only supported for single-select questions (not multiSelect).
+For visual decisions, put the actual design in each single-select option's preview. Use a Markdown image such as ![Launchpad layout](/absolute/path/launchpad.png) or an HTTPS image URL. For formatted comparisons use a short HTML fragment starting with a tag, such as <h3>Launchpad</h3><ul><li>Open reviews</li></ul>. The panel sanitizes HTML. Use an image for designs that depend on custom CSS. Plain text and code keep their spacing. The preview appears beneath the selected option. Omit it for choices that labels and descriptions explain.
 `;
 
 export const TOO_FEW_OPTIONS_MESSAGE =

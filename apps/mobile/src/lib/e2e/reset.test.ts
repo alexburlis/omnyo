@@ -11,16 +11,19 @@ describe("resetAppState", () => {
   it("removes every profile, clears the index, disposes clients, and wipes preferences", async () => {
     const storage = createMemorySecureStorage();
     const seed = createProfileStore({ storage });
+
     const a = await seed.addProfile({
       mode: "direct",
       serverUrl: "http://127.0.0.1:1",
       label: "a",
     });
+
     const b = await seed.addProfile({
       mode: "direct",
       serverUrl: "http://127.0.0.1:2",
       label: "b",
     });
+
     await seed.setActiveProfile(b.id);
 
     const profileStore = createProfileStore({ storage });
@@ -49,10 +52,10 @@ describe("resetAppState", () => {
 describe("e2e mode flags", () => {
   it("wipes on launch only with the explicit env, and accepts the deep link in dev builds", () => {
     expect(shouldResetOnLaunch({})).toBe(false);
-    expect(shouldResetOnLaunch({ EXPO_PUBLIC_BB_E2E: "1" })).toBe(true);
-    expect(shouldResetOnLaunch({ EXPO_PUBLIC_BB_E2E: "true" })).toBe(false);
+    expect(shouldResetOnLaunch({ EXPO_PUBLIC_OMNYO_E2E: "1" })).toBe(true);
+    expect(shouldResetOnLaunch({ EXPO_PUBLIC_OMNYO_E2E: "true" })).toBe(false);
     expect(isE2eModeEnabled({}, false)).toBe(false);
     expect(isE2eModeEnabled({}, true)).toBe(true);
-    expect(isE2eModeEnabled({ EXPO_PUBLIC_BB_E2E: "1" }, false)).toBe(true);
+    expect(isE2eModeEnabled({ EXPO_PUBLIC_OMNYO_E2E: "1" }, false)).toBe(true);
   });
 });

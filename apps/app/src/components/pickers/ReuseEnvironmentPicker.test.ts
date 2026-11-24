@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SystemEnvironmentProvider } from "@bb/server-contract";
+import type { SystemEnvironmentProvider } from "@omnyo/server-contract";
 import {
   filterReuseThreadOptions,
   reuseThreadOptionDisplay,
@@ -30,7 +30,7 @@ const option: ReuseThreadOption = {
   environmentId: "env_1",
   branchName: "main",
   name: null,
-  path: "/workspace/bb",
+  path: "/workspace/omnyo",
   environmentProviderId: "project-checkout",
   hostName: "Michael-M4",
   threads: [],
@@ -55,21 +55,25 @@ describe("filterReuseThreadOptions", () => {
   const byBranch: ReuseThreadOption = {
     ...option,
     environmentId: "env_branch",
-    branchName: "bb/payment-retry",
+    branchName: "omnyo/payment-retry",
   };
+
   const byThread: ReuseThreadOption = {
     ...option,
     environmentId: "env_thread",
-    branchName: "bb/unrelated",
+    branchName: "omnyo/unrelated",
     threads: [{ id: "thr_1", title: "Fix the payment retry" }],
   };
+
   const byMachine: ReuseThreadOption = {
     ...option,
     environmentId: "env_machine",
-    branchName: "bb/other",
+    branchName: "omnyo/other",
     hostName: "build-box",
   };
+
   const options = [byBranch, byThread, byMachine];
+
   const ids = (matched: readonly ReuseThreadOption[]) =>
     matched.map((entry) => entry.environmentId);
 

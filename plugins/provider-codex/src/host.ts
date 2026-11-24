@@ -1,10 +1,10 @@
 import os from "node:os";
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import {
   experimental_defineHostEntry,
   experimental_nativeRootsHostContract,
   type ExperimentalNativeRootsResolveAnswer,
-} from "@get-bb/plugin-sdk/host";
+} from "@omnyo/plugin-sdk/host";
 import {
   completeCodexInference,
   transcribeCodexVoice,
@@ -45,6 +45,7 @@ export default experimental_defineHostEntry({
     "codex.ai.status": async (): Promise<CodexAiStatus> => {
       try {
         await readCodexAuthCredentials();
+
         return { ready: true };
       } catch (error) {
         return {

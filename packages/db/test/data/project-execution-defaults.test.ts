@@ -10,9 +10,11 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup() {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "defaults-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "defaults-project",
     source: {
@@ -21,6 +23,7 @@ function setup() {
       path: "/tmp/defaults-project",
     },
   });
+
   return { db, project };
 }
 

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { HostDaemonOnlineRpcResult } from "@bb/host-daemon-contract";
-import { sanitizeInheritedChildProcessEnv } from "@bb/process-utils";
+import type { HostDaemonOnlineRpcResult } from "@omnyo/host-daemon-contract";
+import { sanitizeInheritedChildProcessEnv } from "@omnyo/process-utils";
 import { ExpectedCommandDispatchError } from "../command-dispatch-support.js";
 
 const execFileAsync = promisify(execFile);
@@ -17,6 +17,7 @@ export async function pickHostFolder(): Promise<
   }
 
   let stdout: string;
+
   try {
     const result = await execFileAsync(
       "osascript",
@@ -28,6 +29,7 @@ export async function pickHostFolder(): Promise<
         env: sanitizeInheritedChildProcessEnv({ env: process.env }),
       },
     );
+
     stdout = result.stdout;
   } catch (error) {
     throw new ExpectedCommandDispatchError(
@@ -37,5 +39,6 @@ export async function pickHostFolder(): Promise<
   }
 
   const selectedPath = stdout.trim();
+
   return { path: selectedPath === "" ? null : selectedPath.replace(/\/$/, "") };
 }

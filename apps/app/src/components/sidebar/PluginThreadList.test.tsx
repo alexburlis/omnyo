@@ -6,20 +6,29 @@ import {
   render,
   screen,
 } from "@testing-library/react";
+import { createStore, Provider as JotaiProvider } from "jotai";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PluginThreadListProps } from "@get-bb/plugin-sdk";
+import type { PluginThreadListProps } from "@omnyo/plugin-sdk";
 import { resetAllCrashedPluginSlotsForTest } from "@/components/plugin/PluginSlotMount";
 import { SidebarProvider } from "@/components/ui/sidebar.js";
+import { sidebarNavigationQueryKey } from "@/hooks/queries/query-keys";
+import {
+  makeProjectWithThreadsResponse,
+  makeSidebarBootstrapResponse,
+} from "@/test/fixtures/projects";
 import {
   markPluginFrontendsSettled,
   resetPluginFrontendBootStateForTest,
 } from "@/lib/plugin-frontend-boot-state";
 import type { ResolvedReplacement } from "@/lib/plugin-slot-resolvers";
 import type { PluginThreadListSlot } from "@/lib/plugin-slots";
+import * as pluginFrontend from "@/lib/plugin-frontend-lazy";
 import { PluginThreadList } from "./PluginThreadList";
 
 const toast = vi.hoisted(() => ({ error: vi.fn() }));
+
 vi.mock("@/components/ui/app-toast", () => ({ appToast: toast }));
 
 function pluginReplacement(
@@ -38,16 +47,34 @@ function pluginReplacement(
 }
 
 function renderList(replacement: ResolvedReplacement<PluginThreadListSlot>) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+  });
+
+  queryClient.setQueryData(
+    sidebarNavigationQueryKey(),
+    makeSidebarBootstrapResponse({
+      projects: [
+        makeProjectWithThreadsResponse({ id: "proj_web", name: "Web" }),
+      ],
+    }),
+  );
+
   return render(
-    <MemoryRouter>
-      <SidebarProvider>
-        <PluginThreadList replacement={replacement} onNavigate={() => {}} />
-      </SidebarProvider>
-    </MemoryRouter>,
+    <JotaiProvider store={createStore()}>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SidebarProvider>
+            <PluginThreadList replacement={replacement} onNavigate={() => {}} />
+          </SidebarProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </JotaiProvider>,
   );
 }
 
 beforeEach(() => {
+  localStorage.clear();
   resetPluginFrontendBootStateForTest();
   toast.error.mockClear();
 });
@@ -60,6 +87,10 @@ afterEach(() => {
 
 describe("PluginThreadList", () => {
   it("shows the loading placeholder until plugin frontends have booted, then the missing state", () => {
+    const reconcile = vi
+      .spyOn(pluginFrontend, "schedulePluginFrontendReconcile")
+      .mockImplementation(() => {});
+
     const { container } = renderList({ kind: "owner" });
     expect(
       container.querySelector('[data-thread-list-placeholder="loading"]'),
@@ -73,10 +104,11 @@ describe("PluginThreadList", () => {
       container.querySelector('[data-thread-list-placeholder="missing"]'),
     ).not.toBeNull();
     expect(screen.getByRole("status").textContent).toContain(
-      "No thread list plugin is enabled.",
+      "Thread list unavailable.",
     );
     expect(screen.queryByRole("link")).toBeNull();
-    expect(screen.queryByRole("button")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(reconcile).toHaveBeenCalledTimes(1);
   });
 
   it("renders the plugin list with the host props and no delegation component", () => {
@@ -84,6 +116,7 @@ describe("PluginThreadList", () => {
     renderList(
       pluginReplacement((props) => {
         seen.push(props);
+
         return <div data-testid="plugin-list">plugin list</div>;
       }),
     );
@@ -93,18 +126,41 @@ describe("PluginThreadList", () => {
       activeThreadId: null,
       activeProjectId: null,
       isCompactViewport: false,
+      experimental_scope: { kind: "inbox" },
       searchQuery: "",
     });
     expect("Original" in (seen[0] ?? {})).toBe(false);
+  });
+
+  it("passes the stored project scope to the list", () => {
+    localStorage.setItem(
+      "omnyo.sidebar.scope",
+      JSON.stringify({ kind: "project", projectId: "proj_web" }),
+    );
+    const seen: PluginThreadListProps[] = [];
+    renderList(
+      pluginReplacement((props) => {
+        seen.push(props);
+
+        return null;
+      }),
+    );
+
+    expect(seen.at(-1)?.experimental_scope).toEqual({
+      kind: "project",
+      projectId: "proj_web",
+    });
   });
 
   it("replaces a crashed list with the crashed placeholder and remounts on reload", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
     let shouldCrash = true;
+
     const { container } = renderList(
       pluginReplacement(() => {
         if (shouldCrash) throw new Error("boom");
+
         return <div data-testid="plugin-list">recovered</div>;
       }),
     );

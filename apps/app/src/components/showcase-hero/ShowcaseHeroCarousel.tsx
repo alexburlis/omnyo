@@ -9,9 +9,13 @@ import {
   type CSSProperties,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { usePrefersReducedMotion } from "@bb/shared-ui/hooks/use-media-query";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  MOTION_DURATION_MS,
+  TRANSITION_FALLBACK_SLACK_MS,
+  usePrefersReducedMotion,
+} from "@omnyo/shared-ui/motion";
 import { PluginNewThreadComposer } from "@/components/plugin/PluginNewThreadComposer";
 import { useCreateThread } from "@/hooks/mutations/thread-runtime-mutations";
 import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
@@ -75,6 +79,7 @@ export function ShowcaseHeroCarousel({
   const reducedMotion = usePrefersReducedMotion();
   const navigate = useNavigate();
   const createThread = useCreateThread();
+
   const promptDraft = useMemo(
     () =>
       getPromptDraftAccessor({
@@ -83,6 +88,7 @@ export function ShowcaseHeroCarousel({
       }),
     [composer.draftKey],
   );
+
   const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [interacting, setInteracting] = useState(false);
   const [documentHidden, setDocumentHidden] = useState(false);
@@ -91,7 +97,17 @@ export function ShowcaseHeroCarousel({
   const tabsRef = useRef<HTMLDivElement>(null);
 
   const composing = composerSeed !== null;
+  const [composerMounted, setComposerMounted] = useState(composing);
+  const [heldSeed, setHeldSeed] = useState(composerSeed);
+
+  if (composing && !composerMounted) setComposerMounted(true);
+
+  if (composerSeed !== null && composerSeed !== heldSeed) {
+    setHeldSeed(composerSeed);
+  }
+
   const active = archetypes[activeIndex] ?? archetypes[0];
+
   const paused =
     !autoplay || reducedMotion || interacting || composing || documentHidden;
 
@@ -100,8 +116,20 @@ export function ShowcaseHeroCarousel({
     const update = () => setDocumentHidden(document.hidden);
     update();
     document.addEventListener("visibilitychange", update);
+
     return () => document.removeEventListener("visibilitychange", update);
   }, []);
+
+  useEffect(() => {
+    if (composing || !composerMounted) return;
+
+    const timer = window.setTimeout(
+      () => setComposerMounted(false),
+      MOTION_DURATION_MS.fast + TRANSITION_FALLBACK_SLACK_MS,
+    );
+
+    return () => window.clearTimeout(timer);
+  }, [composing, composerMounted]);
 
   const composerActions = useMemo(
     () =>
@@ -111,7 +139,9 @@ export function ShowcaseHeroCarousel({
       }),
     [promptDraft],
   );
+
   const composingRef = useRef(false);
+
   const setSeedAndNotify = useCallback(
     (seed: string | null, options?: { replaceDraft?: boolean }) => {
       if (seed !== null && options?.replaceDraft === true) {
@@ -120,12 +150,16 @@ export function ShowcaseHeroCarousel({
           mentions: [],
         });
       }
+
       const willCompose = seed !== null;
+
       if (composingRef.current !== willCompose) {
         composingRef.current = willCompose;
         onComposingChange?.(willCompose);
       }
+
       setComposerSeed(seed);
+
       if (seed !== null) setComposerKey((current) => current + 1);
     },
     [onComposingChange, composerActions],
@@ -134,12 +168,14 @@ export function ShowcaseHeroCarousel({
   const handledRequestNonce = useRef<number | null>(null);
   useEffect(() => {
     if (composerDisabled) return;
+
     if (
       openRequest === null ||
       openRequest.nonce === handledRequestNonce.current
     ) {
       return;
     }
+
     handledRequestNonce.current = openRequest.nonce;
     // oxlint-disable-next-line react/set-state-in-effect
     setSeedAndNotify(
@@ -152,27 +188,32 @@ export function ShowcaseHeroCarousel({
 
   useEffect(() => {
     if (paused) return;
+
     const timer = window.setTimeout(() => {
       setActiveIndex((current) => (current + 1) % archetypes.length);
     }, SLIDE_MS);
+
     return () => window.clearTimeout(timer);
   }, [activeIndex, archetypes.length, paused]);
 
   const focusTab = useCallback((index: number) => {
     const tabs =
       tabsRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
+
     tabs?.[index]?.focus();
   }, []);
 
   const handleTabKeyDown = (event: React.KeyboardEvent) => {
     const last = archetypes.length - 1;
     let next: number | null = null;
+
     if (event.key === "ArrowRight")
       next = activeIndex === last ? 0 : activeIndex + 1;
     else if (event.key === "ArrowLeft")
       next = activeIndex === 0 ? last : activeIndex - 1;
     else if (event.key === "Home") next = 0;
     else if (event.key === "End") next = last;
+
     if (next === null) return;
     event.preventDefault();
     setActiveIndex(next);
@@ -202,7 +243,7 @@ export function ShowcaseHeroCarousel({
           className={cn(
             "inline-block",
             !reducedMotion &&
-              "animate-in fade-in slide-in-from-bottom-1 duration-500",
+              "animate-in fade-in slide-in-from-bottom-1 duration-(--motion-duration-slow)",
           )}
           style={{
             color: composing
@@ -221,8 +262,12 @@ export function ShowcaseHeroCarousel({
         <div
           className={cn(
             "relative [grid-area:1/1]",
-            !reducedMotion &&
-              "transition-[opacity,transform,filter] duration-300 ease-out",
+            !reducedMotion && [
+              "transition-[opacity,scale,filter]",
+              composing
+                ? "duration-(--motion-duration-base)"
+                : "duration-(--motion-duration-slow)",
+            ],
             composing
               ? "pointer-events-none scale-[0.97] opacity-0 blur-[2px]"
               : "scale-100 opacity-100 blur-0",
@@ -231,20 +276,23 @@ export function ShowcaseHeroCarousel({
         >
           {archetypes.map((archetype, index) => {
             const position = ORBIT_POSITIONS[index];
+
             if (position === undefined) return null;
             const isActive = index === activeIndex;
+
             return (
               <button
                 key={archetype.id}
                 type="button"
                 tabIndex={-1}
                 aria-hidden="true"
+                data-paused={paused}
                 onClick={() => setActiveIndex(index)}
                 style={
                   {
                     ...position,
-                    "--bb-hero-drift-duration": `${6 + index * 0.7}s`,
-                    "--bb-hero-drift-delay": `${index * 0.45}s`,
+                    "--omnyo-hero-drift-duration": `${6 + index * 0.7}s`,
+                    "--omnyo-hero-drift-delay": `${index * 0.45}s`,
                     background: isActive
                       ? accentTint(archetype.accentToken, 12)
                       : "var(--canvas)",
@@ -257,9 +305,9 @@ export function ShowcaseHeroCarousel({
                   } as CSSProperties
                 }
                 className={cn(
-                  "bb-hero-chip absolute z-10 hidden max-w-[9rem] cursor-pointer items-center gap-1.5",
+                  "omnyo-hero-chip absolute z-10 hidden max-w-[9rem] cursor-pointer items-center gap-1.5",
                   "rounded-lg border px-2 py-1.5 text-2xs font-medium shadow-sm @[50rem]:flex",
-                  "transition-[opacity,transform,background-color,border-color] duration-500",
+                  "[transition:opacity_var(--motion-duration-fast)_var(--motion-ease-standard),color_var(--motion-duration-slow)_var(--motion-ease-standard),background-color_var(--motion-duration-slow)_var(--motion-ease-standard),border-color_var(--motion-duration-slow)_var(--motion-ease-standard)]",
                   isActive ? "opacity-100" : "opacity-70 hover:opacity-100",
                 )}
               >
@@ -281,18 +329,20 @@ export function ShowcaseHeroCarousel({
           />
         </div>
 
-        {composing ? (
+        {composerMounted ? (
           <div
+            inert={!composing}
             className={cn(
               "z-20 self-center [grid-area:1/1]",
-              !reducedMotion &&
-                "animate-in fade-in slide-in-from-bottom-2 duration-300",
+              composing
+                ? "animate-in fade-in-0 slide-in-from-bottom-2 duration-(--motion-duration-slow)"
+                : "animate-out fade-out-0 slide-out-to-bottom-2 fill-mode-forwards duration-(--motion-duration-fast)",
             )}
           >
             <div className="mx-auto w-full max-w-[44rem]">
               <PluginNewThreadComposer
                 key={composerKey}
-                initialPrompt={composerSeed ?? undefined}
+                initialPrompt={heldSeed ?? undefined}
                 placeholder={composer.placeholder}
                 draftKey={composer.draftKey}
                 focusRequest={composerKey}
@@ -310,6 +360,7 @@ export function ShowcaseHeroCarousel({
                     executionInputSources: request.executionInputSources,
                     environment: request.environment,
                   });
+
                   navigate(
                     getThreadRoutePath({
                       projectId: thread.projectId ?? request.projectId,
@@ -334,6 +385,7 @@ export function ShowcaseHeroCarousel({
           >
             {archetypes.map((archetype, index) => {
               const isActive = index === activeIndex;
+
               return (
                 <button
                   key={archetype.id}
@@ -350,7 +402,7 @@ export function ShowcaseHeroCarousel({
                 >
                   <span
                     className={cn(
-                      "block h-1 overflow-hidden rounded-full transition-all duration-300",
+                      "block h-1 overflow-hidden rounded-full transition-[width,background-color] duration-(--motion-duration-base) ease-smooth motion-reduce:transition-none",
                       isActive ? "w-10" : "w-4",
                     )}
                     style={{
@@ -363,10 +415,10 @@ export function ShowcaseHeroCarousel({
                       <span
                         key={`${archetype.id}-${activeIndex}`}
                         data-paused={paused}
-                        className="bb-hero-progress-fill block h-full w-full"
+                        className="omnyo-hero-progress-fill block h-full w-full"
                         style={
                           {
-                            "--bb-hero-slide-duration": `${SLIDE_MS}ms`,
+                            "--omnyo-hero-slide-duration": `${SLIDE_MS}ms`,
                             background: `var(${archetype.accentToken})`,
                           } as CSSProperties
                         }

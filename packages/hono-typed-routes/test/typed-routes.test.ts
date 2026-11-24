@@ -37,12 +37,14 @@ function createApp() {
   app.onError((error, context) => {
     return context.json({ message: error.message }, 400);
   });
+
   return app;
 }
 
 describe("typedRoutes", () => {
   it("parses GET query inputs instead of requiring a JSON body", async () => {
     const app = createApp();
+
     const { get } = typedRoutes<TestSchema>(app, {
       onValidationError: (message) => new Error(message),
     });
@@ -62,6 +64,7 @@ describe("typedRoutes", () => {
 
   it("supports GET handlers with no query schema", async () => {
     const app = createApp();
+
     const { get } = typedRoutes<TestSchema>(app, {
       onValidationError: (message) => new Error(message),
     });
@@ -75,6 +78,7 @@ describe("typedRoutes", () => {
 
   it("registers descriptor routes with their request schema", async () => {
     const app = createApp();
+
     const { get } = typedRoutes<DescriptorTestSchema>(app, {
       onValidationError: (message) => new Error(message),
     });

@@ -1,6 +1,6 @@
 ---
 name: prompt-library
-description: Search prompt history and manage starred reusable prompts in BB.
+description: Search prompt history and manage starred reusable prompts in Omnyo.
 ---
 
 # Prompt library
@@ -37,17 +37,17 @@ thread is deleted.
 
 ## CLI and SDK
 
-- `bb prompts search [query...] [--project ID | --thread ID] [--composer new-thread|follow-up] [--json]`; `--composer` defaults to `follow-up`
-- `bb prompts list [--json]`
-- `bb prompts star <text...> [--json]`
-- `bb prompts unstar <id> [--json]`
+- `omnyo prompts search [query...] [--project ID | --thread ID] [--composer new-thread|follow-up] [--json]`; `--composer` defaults to `follow-up`
+- `omnyo prompts list [--json]`
+- `omnyo prompts star <text...> [--json]`
+- `omnyo prompts unstar <id> [--json]`
 
-Use `bb.sdk.plugins.callRpc({ pluginId: "bb--prompt-library", method, input })`:
+Use `api.sdk.plugins.callRpc({ pluginId: "omnyo--prompt-library", method, input })`:
 `search` takes `{ query, scope: "thread" | "project" | "global", projectId, threadId, composer: "new-thread" | "follow-up" }`
 with nullable IDs and returns `{ prompts }`, each row with `kind: "starred" | "recent"`; `star` takes `{ prompt: { text, mentions } }`; `unstar` and
 `markUsed` take `{ id }`.
 
 The bundled plugin is disabled by default. Enable it in Settings → Plugins or
-with `bb plugin enable bb--prompt-library`. Its Search prompts shortcut is
+with `omnyo plugin enable omnyo--prompt-library`. Its Search prompts shortcut is
 rebindable in Keyboard Settings. Plugins can page through the same core history
-with `bb.sdk.experimental_promptHistory.list({ cursor, limit })`.
+with `api.sdk.experimental_promptHistory.list({ cursor, limit })`.

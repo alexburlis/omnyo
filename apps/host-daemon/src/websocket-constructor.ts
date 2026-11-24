@@ -6,14 +6,12 @@ interface NodeWebSocketConstructor {
 
 export function createNodeWebSocketConstructor(
   headers: Record<string, string> | undefined,
+  onCreated: (socket: NodeWebSocket) => void,
 ): NodeWebSocketConstructor {
-  if (!headers) {
-    return NodeWebSocket;
-  }
-
   return class HeaderAwareWebSocket extends NodeWebSocket {
     constructor(address: string | URL, protocols?: string | string[]) {
       super(address, protocols, { headers });
+      onCreated(this);
     }
   };
 }

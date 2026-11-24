@@ -2,14 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   ExperimentalSidebarFooterDisclosureController,
   PluginSidebarFooterActionContext,
-} from "@get-bb/plugin-sdk";
-import { getCollectedSidebarFooterItems } from "@get-bb/plugin-sdk/internal/plugin-app-collector";
-import { loadPluginApp } from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk";
+import { getCollectedSidebarFooterItems } from "@omnyo/plugin-sdk/internal/plugin-app-collector";
+import { loadPluginApp } from "@omnyo/plugin-sdk/testing/app";
 import {
   collectPluginAppRegistrations,
   definePluginApp,
   isPluginAppDefinition,
 } from "./plugin-app-definition";
+import { resolveFileOpenerReplacement } from "./plugin-slot-resolvers";
 
 function Component() {
   return null;
@@ -20,7 +21,7 @@ describe("definePluginApp", () => {
     const definition = definePluginApp(() => {});
     expect(isPluginAppDefinition(definition)).toBe(true);
     expect(isPluginAppDefinition({})).toBe(false);
-    expect(isPluginAppDefinition({ __bbPluginApp: true })).toBe(false);
+    expect(isPluginAppDefinition({ __omnyoPluginApp: true })).toBe(false);
     expect(isPluginAppDefinition(null)).toBe(false);
   });
 
@@ -43,8 +44,54 @@ describe("collectPluginAppRegistrations — experimental_appOverlay", () => {
         component: Component,
       });
     });
+
     const malformed = definePluginApp((app) => {
       app.slots.experimental_appOverlay({
+        id: "office",
+        component: null as never,
+      });
+    });
+
+    expect(() => collectPluginAppRegistrations(duplicate)).toThrow(
+      'duplicate id "office"',
+    );
+    expect(() => collectPluginAppRegistrations(malformed)).toThrow(
+      '"component" must be a React component function',
+    );
+  });
+});
+
+describe("collectPluginAppRegistrations — experimental_sidebarFooterCard", () => {
+  it("collects an additive footer card through the SDK test harness", async () => {
+    const definition = definePluginApp((app) => {
+      app.slots.experimental_sidebarFooterCard({
+        id: "usage",
+        component: Component,
+      });
+    });
+
+    expect(
+      collectPluginAppRegistrations(definition).sidebarFooterCards,
+    ).toEqual([{ id: "usage", component: Component }]);
+    expect((await loadPluginApp(definition)).sidebarFooterCards).toEqual([
+      { id: "usage", component: Component },
+    ]);
+  });
+
+  it("rejects duplicate ids and malformed components", () => {
+    const duplicate = definePluginApp((app) => {
+      app.slots.experimental_sidebarFooterCard({
+        id: "office",
+        component: Component,
+      });
+      app.slots.experimental_sidebarFooterCard({
+        id: "office",
+        component: Component,
+      });
+    });
+
+    const malformed = definePluginApp((app) => {
+      app.slots.experimental_sidebarFooterCard({
         id: "office",
         component: null as never,
       });
@@ -75,6 +122,7 @@ describe("collectPluginAppRegistrations — experimental_threadAction", () => {
         item,
       });
     });
+
     expect(collectPluginAppRegistrations(definition).threadActions).toEqual([
       {
         id: "notifications",
@@ -105,6 +153,7 @@ describe("collectPluginAppRegistrations — experimental_threadAction", () => {
         item,
       });
     });
+
     expect(() => collectPluginAppRegistrations(definition)).toThrow(/"a"/);
   });
 
@@ -126,6 +175,7 @@ describe("collectPluginAppRegistrations — experimental_threadAction", () => {
         typeof app.slots.experimental_threadAction
       >[0]);
     });
+
     expect(() => collectPluginAppRegistrations(definition)).toThrow(message);
   });
 });
@@ -139,6 +189,7 @@ describe("collectPluginAppRegistrations — experimental_threadHeaderAction", ()
         component: Component,
       });
     });
+
     expect(
       collectPluginAppRegistrations(definition).threadHeaderActions,
     ).toEqual([{ id: "subagents", title: "Subagents", component: Component }]);
@@ -157,6 +208,7 @@ describe("collectPluginAppRegistrations — experimental_threadHeaderAction", ()
         component: Component,
       });
     });
+
     expect(() => collectPluginAppRegistrations(definition)).toThrow(
       /subagents/,
     );
@@ -175,6 +227,7 @@ describe("collectPluginAppRegistrations — experimental_threadHeaderAction", ()
         component: Component,
       });
     });
+
     const collected = collectPluginAppRegistrations(definition);
     expect(collected.threadLists).toHaveLength(1);
     expect(collected.threadHeaderActions).toHaveLength(1);
@@ -187,7 +240,54 @@ describe("collectPluginAppRegistrations — experimental_threadHeaderAction", ()
         component: Component,
       } as never);
     });
+
     expect(() => collectPluginAppRegistrations(definition)).toThrow(/title/);
+  });
+});
+
+describe("collectPluginAppRegistrations — experimental_threadView", () => {
+  it("collects a thread view", () => {
+    const definition = definePluginApp((app) => {
+      app.slots.experimental_threadView({
+        id: "canvas",
+        title: "Canvas",
+        component: Component,
+      });
+    });
+
+    expect(collectPluginAppRegistrations(definition).threadViews).toEqual([
+      { id: "canvas", title: "Canvas", component: Component },
+    ]);
+  });
+
+  it("rejects two thread views with the same id", () => {
+    const definition = definePluginApp((app) => {
+      app.slots.experimental_threadView({
+        id: "canvas",
+        title: "One",
+        component: Component,
+      });
+      app.slots.experimental_threadView({
+        id: "canvas",
+        title: "Two",
+        component: Component,
+      });
+    });
+
+    expect(() => collectPluginAppRegistrations(definition)).toThrow(/canvas/);
+  });
+
+  it("rejects a missing component", () => {
+    const definition = definePluginApp((app) => {
+      app.slots.experimental_threadView({
+        id: "canvas",
+        title: "Canvas",
+      } as never);
+    });
+
+    expect(() => collectPluginAppRegistrations(definition)).toThrow(
+      /component/,
+    );
   });
 });
 
@@ -200,6 +300,7 @@ describe("collectPluginAppRegistrations — experimental_browserToolbarAction", 
         component: Component,
       });
     });
+
     expect(
       collectPluginAppRegistrations(definition).browserToolbarActions,
     ).toEqual([{ id: "annotate", title: "Annotate", component: Component }]);
@@ -218,6 +319,7 @@ describe("collectPluginAppRegistrations — experimental_browserToolbarAction", 
         component: Component,
       });
     });
+
     expect(() => collectPluginAppRegistrations(definition)).toThrow(/annotate/);
   });
 });
@@ -274,6 +376,7 @@ describe("collectPluginAppRegistrations — experimental_threadList", () => {
         component: Component,
       });
     });
+
     expect(() => collectPluginAppRegistrations(definition)).toThrow(/inbox/);
   });
 
@@ -284,6 +387,7 @@ describe("collectPluginAppRegistrations — experimental_threadList", () => {
         title: "Inbox",
       } as never);
     });
+
     expect(() => collectPluginAppRegistrations(definition)).toThrow();
   });
 });
@@ -293,9 +397,11 @@ describe("collectPluginAppRegistrations — experimental_sidebarFooter", () => {
     let disclosure: ExperimentalSidebarFooterDisclosureController | null = null;
     const onActivate = vi.fn();
     const openPluginDetails = vi.fn();
+
     const legacyRun = vi.fn(
       ({ openSettings }: PluginSidebarFooterActionContext) => openSettings(),
     );
+
     const definition = definePluginApp((app) => {
       app.experimental_sidebarFooter.register({
         kind: "action",
@@ -322,6 +428,7 @@ describe("collectPluginAppRegistrations — experimental_sidebarFooter", () => {
     const registrations = collectPluginAppRegistrations(definition);
     const sidebarFooterItems = getCollectedSidebarFooterItems(registrations);
     expect(sidebarFooterItems).not.toBeNull();
+
     if (sidebarFooterItems === null)
       throw new Error("expected collected sidebar footer items");
     expect(registrations.experimentalSidebarFooterItems).toHaveLength(2);
@@ -351,6 +458,7 @@ describe("collectPluginAppRegistrations — experimental_sidebarFooter", () => {
     ]);
     const compatibilityItem = sidebarFooterItems[1];
     expect(compatibilityItem?.kind).toBe("action");
+
     if (compatibilityItem?.kind !== "action")
       throw new Error("expected action");
     compatibilityItem.onActivate({ openPluginDetails });
@@ -398,6 +506,7 @@ describe("collectPluginAppRegistrations — experimental_sidebarFooter", () => {
         component: Component,
       });
     });
+
     collectPluginAppRegistrations(definition);
 
     const staleDefinition = definePluginApp((app) => {
@@ -410,6 +519,7 @@ describe("collectPluginAppRegistrations — experimental_sidebarFooter", () => {
         providerId: "coupled-provider",
       } as never);
     });
+
     expect(() => collectPluginAppRegistrations(staleDefinition)).toThrow(
       /unknown field "providerId"/,
     );
@@ -417,10 +527,77 @@ describe("collectPluginAppRegistrations — experimental_sidebarFooter", () => {
 });
 
 describe("collectPluginAppRegistrations", () => {
+  it.each(["design_board", "workspace-file"])(
+    "registers and resolves a file opener for %s",
+    (extension) => {
+      const definition = definePluginApp((app) => {
+        app.slots.fileOpener({
+          id: "viewer",
+          title: "Viewer",
+          extensions: [extension],
+          component: Component,
+        });
+      });
+
+      const collected = collectPluginAppRegistrations(definition);
+
+      const registrations = collected.fileOpeners.map((registration) => ({
+        ...registration,
+        pluginId: "extension-viewer",
+        generation: 1,
+      }));
+
+      expect(collected.fileOpeners).toEqual([
+        {
+          id: "viewer",
+          title: "Viewer",
+          extensions: [extension],
+          component: Component,
+        },
+      ]);
+      expect(
+        resolveFileOpenerReplacement({
+          registrations,
+          path: `project/file.${extension.toUpperCase()}`,
+        }),
+      ).toEqual({ kind: "plugin", registration: registrations[0] });
+    },
+  );
+
+  it.each([
+    "_board",
+    "board_",
+    "-board",
+    "board-",
+    "design__board",
+    "design--board",
+    "design_-board",
+    "design_BOARD",
+    "design.board",
+    "design/board",
+    "design board",
+  ])("rejects a malformed file opener extension %s", (extension) => {
+    const definition = definePluginApp((app) => {
+      app.slots.fileOpener({
+        id: "viewer",
+        title: "Viewer",
+        extensions: [extension],
+        component: Component,
+      });
+    });
+
+    expect(() => collectPluginAppRegistrations(definition)).toThrow(
+      /extensions must be lowercase alphanumerics/,
+    );
+  });
+
   it("produces the same complete registration set in the app and test runtimes", async () => {
     const run = () => {};
+
     const mount = () => {};
+
     const match = () => [];
+
     const definition = definePluginApp((app) => {
       app.slots.homepageSection({
         id: "home",
@@ -525,7 +702,9 @@ describe("collectPluginAppRegistrations", () => {
 
   it("collects every slot kind as plain data", () => {
     const run = () => {};
+
     const mount = () => {};
+
     const definition = definePluginApp((app) => {
       app.slots.homepageSection({
         id: "issues",
@@ -676,6 +855,7 @@ describe("collectPluginAppRegistrations", () => {
 
   it("rejects invalid composer customizations individually while siblings survive", () => {
     const rejected = vi.fn<(reason: string) => void>();
+
     const definition = definePluginApp((app) => {
       app.composer.customize({ id: "valid-first" });
       app.composer.customize({ id: "has space" });
@@ -705,6 +885,7 @@ describe("collectPluginAppRegistrations", () => {
 
   it("isolates malformed and duplicate nested composer contributions", () => {
     const rejected = vi.fn<(reason: string) => void>();
+
     const definition = definePluginApp((app) => {
       app.composer.customize({
         id: "malformed-array",
@@ -763,6 +944,7 @@ describe("collectPluginAppRegistrations", () => {
 
   it("does not reserve nested ids for malformed contributions", () => {
     const rejected = vi.fn<(reason: string) => void>();
+
     const definition = definePluginApp((app) => {
       app.composer.customize({
         id: "reused-after-malformed",
@@ -1121,6 +1303,7 @@ describe("collectPluginAppRegistrations", () => {
     function Accessory() {
       return null;
     }
+
     const definition = definePluginApp((app) => {
       app.slots.navPanel({
         id: "board",
@@ -1131,6 +1314,7 @@ describe("collectPluginAppRegistrations", () => {
         headerContent: Accessory,
       });
     });
+
     expect(
       collectPluginAppRegistrations(definition).navPanels[0],
     ).toMatchObject({
@@ -1142,6 +1326,7 @@ describe("collectPluginAppRegistrations", () => {
     function SidebarAccessory() {
       return null;
     }
+
     const definition = definePluginApp((app) => {
       app.slots.navPanel({
         id: "board",
@@ -1152,10 +1337,30 @@ describe("collectPluginAppRegistrations", () => {
         experimental_sidebarAccessory: SidebarAccessory,
       });
     });
+
     expect(
       collectPluginAppRegistrations(definition).navPanels[0],
     ).toMatchObject({
       experimental_sidebarAccessory: SidebarAccessory,
     });
+  });
+});
+
+describe("project sidebar registration", () => {
+  it("rejects duplicate owner IDs", () => {
+    const definition = definePluginApp((app) => {
+      app.slots.experimental_projectSidebarItems({
+        id: "tree",
+        useItems: () => [],
+      });
+      app.slots.experimental_projectSidebarItems({
+        id: "tree",
+        useItems: () => [],
+      });
+    });
+
+    expect(() => collectPluginAppRegistrations(definition)).toThrow(
+      'duplicate id "tree"',
+    );
   });
 });

@@ -71,9 +71,11 @@ function agent(id: string) {
   const found = parseAcpRegistry(REGISTRY).agents.find(
     (candidate) => candidate.id === id,
   );
+
   if (found === undefined) {
     throw new Error(`fixture has no ${id}`);
   }
+
   return found;
 }
 
@@ -100,6 +102,7 @@ describe("ACP registry", () => {
     const entries = ["claude-acp", "auggie", "fast-agent"].map((id) =>
       registryAgentCustomEntry(agent(id)),
     );
+
     expect(entries).toEqual([
       {
         id: "claude-acp",
@@ -144,6 +147,7 @@ describe("ACP registry", () => {
         args: ["--acp"],
       },
     ]);
+
     const statuses = Object.fromEntries(
       describeRegistryAgents({
         agents: parseAcpRegistry(REGISTRY).agents,
@@ -151,6 +155,7 @@ describe("ACP registry", () => {
         reservedProviderIds: new Set(["acp-fast-agent"]),
       }).map((view) => [view.id, view.status]),
     );
+
     expect(statuses).toEqual({
       "claude-acp": "update-available",
       auggie: "added",
@@ -187,9 +192,11 @@ describe("ACP registry", () => {
       },
       JSON.parse(added)[0],
     ]);
+
     const updated = JSON.parse(
       settingWithRegistryAgent(handEdited, agent("auggie")),
     );
+
     expect(updated).toHaveLength(2);
     expect(updated[0]).toEqual({
       id: "auggie",

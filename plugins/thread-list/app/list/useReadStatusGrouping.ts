@@ -1,53 +1,97 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { atom, useAtom, useAtomValue, useSetAtom } from "jotai";
+import { useEffect, useMemo, useState } from "react";
+import { useAtomValue } from "jotai";
 import type { SidebarThread } from "../model/sidebar-thread.js";
 import type { ThreadComparator } from "../model/project-thread-groups.js";
 import {
-  collapseParentThreads,
   createThreadUnreadPredicate,
   groupComparatorByReadStatus,
   type HeldReadStatus,
 } from "../model/read-status-grouping.js";
-import {
-  collapsedThreadIdsAtom,
-  sidebarGroupByReadStatusAtom,
-} from "../preferences/atoms.js";
+import { sidebarGroupByReadStatusAtom } from "../preferences/atoms.js";
 
-const threadsExpandedWhileGroupedAtom = atom<readonly string[]>([]);
-let lastHeldReadStatus: HeldReadStatus | null = null;
+interface ReadStatusHold {
+  threadId: string;
+  heldUnread: boolean | null;
+  observedUnread: boolean;
+  observedAttentionAt: number;
+}
+
+let lastReadStatusHold: ReadStatusHold | null = null;
+
+function nextReadStatusHold(
+  hold: ReadStatusHold | null,
+  thread: SidebarThread,
+): ReadStatusHold {
+  if (hold?.threadId !== thread.id) {
+    return {
+      threadId: thread.id,
+      heldUnread: thread.isUnread,
+      observedUnread: thread.isUnread,
+      observedAttentionAt: thread.latestAttentionAt,
+    };
+  }
+
+  if (
+    hold.observedUnread === thread.isUnread &&
+    hold.observedAttentionAt === thread.latestAttentionAt
+  ) {
+    return hold;
+  }
+
+  const hasNewAttention = hold.observedAttentionAt !== thread.latestAttentionAt;
+  const markedUnread = !hold.observedUnread && thread.isUnread;
+
+  return {
+    threadId: thread.id,
+    heldUnread: hasNewAttention
+      ? (hold.heldUnread ?? hold.observedUnread)
+      : markedUnread
+        ? null
+        : hold.heldUnread,
+    observedUnread: thread.isUnread,
+    observedAttentionAt: thread.latestAttentionAt,
+  };
+}
 
 export function useHeldReadStatus(
   threads: readonly SidebarThread[],
   selectedThreadId: string | undefined,
 ): HeldReadStatus | null {
-  const [held, setHeld] = useState<HeldReadStatus | null>(() =>
-    lastHeldReadStatus?.threadId === selectedThreadId
-      ? lastHeldReadStatus
+  const [hold, setHold] = useState<ReadStatusHold | null>(() =>
+    lastReadStatusHold?.threadId === selectedThreadId
+      ? lastReadStatusHold
       : null,
   );
+
   useEffect(() => {
-    lastHeldReadStatus = held;
-  }, [held]);
-  if (held?.threadId === selectedThreadId) {
-    return held;
-  }
+    lastReadStatusHold = hold;
+  }, [hold]);
+
   const thread =
     selectedThreadId === undefined
       ? undefined
       : threads.find((candidate) => candidate.id === selectedThreadId);
-  const next = thread
-    ? { threadId: thread.id, isUnread: thread.isUnread }
-    : null;
-  if (next !== null || held !== null) {
-    setHeld(next);
-  }
-  return next;
-}
 
-function toggleId(ids: readonly string[], id: string): string[] {
-  return ids.includes(id)
-    ? ids.filter((current) => current !== id)
-    : [...ids, id];
+  const next = thread
+    ? nextReadStatusHold(hold, thread)
+    : hold?.threadId === selectedThreadId
+      ? hold
+      : null;
+
+  if (next !== hold) {
+    setHold(next);
+  }
+
+  const heldThreadId = next?.threadId ?? null;
+  const heldUnread = next?.heldUnread ?? null;
+
+  return useMemo(
+    () =>
+      heldThreadId === null || heldUnread === null
+        ? null
+        : { threadId: heldThreadId, isUnread: heldUnread },
+    [heldThreadId, heldUnread],
+  );
 }
 
 export function useReadStatusGrouping({
@@ -61,12 +105,7 @@ export function useReadStatusGrouping({
 }) {
   const groupByReadStatus = useAtomValue(sidebarGroupByReadStatusAtom);
   const heldReadStatus = useHeldReadStatus(threads, selectedThreadId);
-  const [collapsedThreadIdList, setCollapsedThreadIdList] = useAtom(
-    collapsedThreadIdsAtom,
-  );
-  const [expandedWhileGrouped, setExpandedWhileGrouped] = useAtom(
-    threadsExpandedWhileGroupedAtom,
-  );
+
   const groupedComparator = useMemo(
     () =>
       groupByReadStatus
@@ -77,50 +116,6 @@ export function useReadStatusGrouping({
         : comparator,
     [comparator, groupByReadStatus, heldReadStatus],
   );
-  const collapsedThreadIds = useMemo(
-    () =>
-      groupByReadStatus
-        ? collapseParentThreads(threads, expandedWhileGrouped)
-        : new Set(collapsedThreadIdList),
-    [collapsedThreadIdList, expandedWhileGrouped, groupByReadStatus, threads],
-  );
-  const toggleThreadCollapsed = useCallback(
-    (threadId: string) => {
-      if (groupByReadStatus) {
-        setExpandedWhileGrouped((current) => toggleId(current, threadId));
-      } else {
-        setCollapsedThreadIdList((current) => toggleId(current, threadId));
-      }
-    },
-    [groupByReadStatus, setCollapsedThreadIdList, setExpandedWhileGrouped],
-  );
-  return {
-    comparator: groupedComparator,
-    collapsedThreadIds,
-    toggleThreadCollapsed,
-  };
-}
 
-export function useExpandThreadAncestors() {
-  const groupByReadStatus = useAtomValue(sidebarGroupByReadStatusAtom);
-  const setCollapsedThreadIdList = useSetAtom(collapsedThreadIdsAtom);
-  const setExpandedWhileGrouped = useSetAtom(threadsExpandedWhileGroupedAtom);
-  return useCallback(
-    (threadIds: ReadonlySet<string>, fromNavigation: boolean) => {
-      if (!groupByReadStatus) {
-        setCollapsedThreadIdList((current) =>
-          current.some((id) => threadIds.has(id))
-            ? current.filter((id) => !threadIds.has(id))
-            : current,
-        );
-      } else if (fromNavigation) {
-        setExpandedWhileGrouped((current) =>
-          [...threadIds].every((id) => current.includes(id))
-            ? current
-            : [...new Set([...current, ...threadIds])],
-        );
-      }
-    },
-    [groupByReadStatus, setCollapsedThreadIdList, setExpandedWhileGrouped],
-  );
+  return { comparator: groupedComparator };
 }

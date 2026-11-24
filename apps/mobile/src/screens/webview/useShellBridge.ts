@@ -5,7 +5,7 @@ import {
   type NativeScreen,
   type PageToShellMessage,
   type ShellToPageEvent,
-} from "@bb/mobile-bridge";
+} from "@omnyo/mobile-bridge";
 import { useCallback, useMemo, useRef } from "react";
 import { Linking, Platform, Share } from "react-native";
 import type { WebView, WebViewMessageEvent } from "react-native-webview";
@@ -51,35 +51,44 @@ export function useShellBridge(
       switch (message.type) {
         case "ready":
           callbacksRef.current.onReady(message.path);
+
           return;
         case "title":
           callbacksRef.current.onPath(message.path);
+
           return;
         case "haptic":
           haptic(message.kind);
+
           return;
         case "badge":
           updateAppBadgeCount(message.count);
+
           return;
         case "open-native":
           callbacksRef.current.onOpenNative(message.screen);
+
           return;
         case "open-external": {
           if (!isExternallyOpenable(message.url)) return;
           await Linking.openURL(message.url).catch(() => undefined);
+
           return;
         }
+
         case "request": {
           if (message.request.kind === "share") {
             const payload = buildBridgeSharePayload(
               Platform.OS,
               message.request.payload,
             );
+
             try {
               const result = await Share.share(
                 payload.content,
                 payload.options,
               );
+
               respond(message.id, {
                 ok: true,
                 result: { shared: result.action !== Share.dismissedAction },
@@ -91,6 +100,7 @@ export function useShellBridge(
               });
             }
           }
+
           return;
         }
       }
@@ -101,11 +111,14 @@ export function useShellBridge(
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
       const parsed = parsePageToShellMessage(event.nativeEvent.data);
+
       if (!parsed.ok) {
         if (__DEV__)
           console.warn("shell bridge dropped a message", parsed.reason);
+
         return;
       }
+
       if (__DEV__) console.log("shell bridge", JSON.stringify(parsed.message));
       void handle(parsed.message);
     },

@@ -3,23 +3,25 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type ReactNode,
   type UIEvent,
 } from "react";
 import {
   providerCommandSection,
   type ProviderCommandSection,
-} from "@bb/server-contract";
-import { directoryFromPath } from "@bb/thread-view";
+} from "@omnyo/server-contract";
+import { directoryFromPath } from "@omnyo/thread-view";
 import { promptMentionResourceFromSuggestion } from "@/components/promptbox/editor/prompt-editor-serialization";
 import { promptCommandIconName } from "@/components/promptbox/mentions/prompt-mention-display";
 import { PromptMentionIcon } from "@/components/promptbox/mentions/PromptMentionIcon";
 import { shouldLoadMoreCommandResults } from "@/components/promptbox/mentions/mention-menu-scroll";
 import { PluginIcon } from "@/components/plugin/PluginIcon";
-import { Icon } from "@bb/shared-ui/icon";
-import { Pill } from "@bb/shared-ui/pill";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Pill } from "@omnyo/shared-ui/pill";
+import { SECTION_TITLE_CLASS } from "@omnyo/shared-ui/section-header";
 import { TruncateStart } from "@/components/ui/truncate-start.js";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   ThreadTitle,
   useThreadTitleDisplayText,
@@ -31,7 +33,7 @@ import {
   type ProviderCommandSuggestion,
   type ThreadMentionRelation,
   type TypeaheadMenuState,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import { CHILD_THREAD_NOUN } from "@/lib/child-thread-copy";
 
 export type TypeaheadSuggestion =
@@ -40,14 +42,17 @@ export type TypeaheadSuggestion =
 
 interface MentionMenuProps {
   state: TypeaheadMenuState;
+  commandErrorMessage?: string | null;
   selectedIndex: number;
   onApply: (item: TypeaheadSuggestion) => void;
   onDismiss?: () => void;
   onCommandLoadMore?: () => void;
+  findSkills?: { selected: boolean; open(): void };
 }
 
 interface MentionResultsProps {
   results: OrderedMentionSuggestions;
+  refreshing: boolean;
   selectedIndex: number;
   onApply: (item: TypeaheadSuggestion) => void;
   onDismiss?: () => void;
@@ -79,9 +84,11 @@ function groupSections<TKind extends string, TItem>(args: {
   sectionLabel: (kind: TKind) => string;
 }): MenuSection<TKind, TItem>[] {
   const sectionsByKind = new Map<TKind, MenuSection<TKind, TItem>>();
+
   for (const [index, item] of args.suggestions.entries()) {
     const kind = args.sectionKind(item);
     const existing = sectionsByKind.get(kind);
+
     if (existing) {
       existing.items.push({ item, index });
       continue;
@@ -98,12 +105,14 @@ function groupSections<TKind extends string, TItem>(args: {
 }
 
 type PathMentionSuggestion = Extract<PromptMentionSuggestion, { kind: "path" }>;
+
 type SecondaryContextKind = "path" | "project";
 
 function getPathSectionLabel(item: PathMentionSuggestion): string {
   if (item.source === "thread-storage") {
     return "Thread storage";
   }
+
   return "Workspace";
 }
 
@@ -133,6 +142,7 @@ function threadMentionRelationLabel(
 function ThreadRelationPill({ relation }: { relation: ThreadMentionRelation }) {
   const label = THREAD_MENTION_RELATION_LABEL[relation];
   const compactLabel = THREAD_MENTION_RELATION_COMPACT_LABEL[relation];
+
   return (
     <Pill variant="secondary" size="sm">
       {label === compactLabel ? (
@@ -153,6 +163,7 @@ function getMentionTitle(item: PromptMentionSuggestion): string {
   if (item.kind === "thread") {
     const title = item.title || item.path;
     const relationLabel = threadMentionRelationLabel(item.relation);
+
     return [title, item.projectName, relationLabel]
       .filter((part): part is string => part !== undefined && part !== null)
       .join(" · ");
@@ -181,6 +192,7 @@ function getMentionKey(item: PromptMentionSuggestion): string {
   if (item.kind === "path") {
     return JSON.stringify([item.kind, item.source, item.entryKind, item.path]);
   }
+
   if (item.kind === "plugin") {
     return JSON.stringify([
       item.kind,
@@ -189,15 +201,19 @@ function getMentionKey(item: PromptMentionSuggestion): string {
       item.itemId,
     ]);
   }
+
   if (item.kind === "thread") {
     return JSON.stringify([item.kind, item.threadId]);
   }
+
   if (item.kind === "project") {
     return JSON.stringify([item.kind, item.projectId]);
   }
+
   if (item.kind === "attachment") {
     return JSON.stringify([item.kind, item.path]);
   }
+
   return JSON.stringify([item.kind, item.sectionId]);
 }
 
@@ -207,9 +223,11 @@ function getCommandSectionLabel(kind: CommandSectionKind): string {
   if (kind === "agent-command") {
     return "Commands";
   }
+
   if (kind === "skill") {
     return "Skills";
   }
+
   return kind === "project-command" ? "Project commands" : "User commands";
 }
 
@@ -225,6 +243,7 @@ function getCommandIcon(item: ProviderCommandSuggestion): ReactNode {
       />
     );
   }
+
   return (
     <Icon
       name={promptCommandIconName(item)}
@@ -288,6 +307,7 @@ function SuggestionRow({
   itemRefs,
 }: SuggestionRowProps) {
   const isSelected = index === selectedIndex;
+
   return (
     <button
       ref={(element) => {
@@ -333,6 +353,7 @@ function ThreadSuggestionRow({
 }) {
   const threadTitle = item.title || "Untitled thread";
   const displayTitle = useThreadTitleDisplayText(threadTitle);
+
   return (
     <SuggestionRow
       {...rowProps}
@@ -383,9 +404,11 @@ function MenuStatusRow({
 
 function MenuSectionHeader({
   label,
+  refreshing = false,
   onDismiss,
 }: {
   label: string;
+  refreshing?: boolean;
   onDismiss?: () => void;
 }) {
   return (
@@ -394,10 +417,19 @@ function MenuSectionHeader({
         "sticky top-0 z-10 bg-background text-xs text-muted-foreground",
         onDismiss
           ? "flex h-11 items-center justify-between pl-3 pr-1"
-          : "px-3 pb-1 pt-1.5",
+          : "flex items-center px-3 pb-1 pt-1.5",
       )}
     >
-      <span>{label}</span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className={SECTION_TITLE_CLASS}>{label}</span>
+        <span
+          role="status"
+          aria-label={refreshing ? "Updating results" : undefined}
+          className={cn("flex", !refreshing && "invisible")}
+        >
+          <Icon name="Spinner" className="size-3 animate-spin" aria-hidden />
+        </span>
+      </span>
       {onDismiss ? <CloseSuggestionsButton onDismiss={onDismiss} /> : null}
     </div>
   );
@@ -405,6 +437,7 @@ function MenuSectionHeader({
 
 function MentionResults({
   results,
+  refreshing,
   selectedIndex,
   onApply,
   onDismiss,
@@ -424,6 +457,7 @@ function MentionResults({
         <div key={group.key}>
           <MenuSectionHeader
             label={group.label}
+            refreshing={groupIndex === 0 && refreshing}
             onDismiss={groupIndex === 0 ? onDismiss : undefined}
           />
           <div className="flex flex-col gap-px px-1">
@@ -570,6 +604,7 @@ function typeaheadResultsLength(state: TypeaheadMenuState): number {
       ? state.state.results.suggestions.length
       : 0;
   }
+
   return state.state.kind === "results" ? state.state.suggestions.length : 0;
 }
 
@@ -577,6 +612,14 @@ function mentionResults(state: TypeaheadMenuState): OrderedMentionSuggestions {
   return state.trigger === "mention" && state.state.kind === "results"
     ? state.state.results
     : EMPTY_ORDERED_MENTION_SUGGESTIONS;
+}
+
+function mentionResultsRefreshing(state: TypeaheadMenuState): boolean {
+  return (
+    state.trigger === "mention" &&
+    state.state.kind === "results" &&
+    state.state.refreshing
+  );
 }
 
 function commandSuggestions(
@@ -589,18 +632,31 @@ function commandSuggestions(
 
 export function MentionMenu({
   state,
+  commandErrorMessage,
   selectedIndex,
   onApply,
   onDismiss,
   onCommandLoadMore,
+  findSkills,
 }: MentionMenuProps) {
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const allCommands = commandSuggestions(state);
+  const [page, setPage] = useState({ items: allCommands, count: 40 });
+
+  const visibleCount = Math.max(
+    selectedIndex + 1,
+    page.items === allCommands ? page.count : 40,
+  );
+
+  const visibleCommands = useMemo(
+    () => allCommands.slice(0, visibleCount),
+    [allCommands, visibleCount],
+  );
+
   const handleScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
-      if (onCommandLoadMore === undefined) {
-        return;
-      }
       const target = event.currentTarget;
+
       if (
         shouldLoadMoreCommandResults({
           trigger: state.trigger,
@@ -609,10 +665,12 @@ export function MentionMenu({
           clientHeight: target.clientHeight,
         })
       ) {
-        onCommandLoadMore();
+        if (state.trigger === "command")
+          setPage({ items: allCommands, count: visibleCount + 40 });
+        onCommandLoadMore?.();
       }
     },
-    [onCommandLoadMore, state.trigger],
+    [onCommandLoadMore, state.trigger, allCommands, visibleCount],
   );
 
   const innerState = state.state;
@@ -625,6 +683,7 @@ export function MentionMenu({
   useEffect(() => {
     if (resultsLength === 0) return;
     const selectedItem = itemRefs.current[selectedIndex];
+
     if (!selectedItem) return;
     selectedItem.scrollIntoView({ block: "nearest" });
   }, [resultsLength, selectedIndex]);
@@ -632,34 +691,87 @@ export function MentionMenu({
   return (
     <div className="@container/mention-menu flex max-h-(--promptbox-typeahead-max-height) flex-col overflow-hidden rounded-md border border-border bg-popover text-popover-foreground">
       <div className="max-h-48 min-h-0 overflow-y-auto" onScroll={handleScroll}>
+        {state.trigger === "command" &&
+        innerState.kind === "results" &&
+        commandErrorMessage ? (
+          <MenuStatusRow className="text-muted-foreground">
+            {commandErrorMessage}
+          </MenuStatusRow>
+        ) : null}
+        {state.trigger === "command" &&
+        state.state.kind === "results" &&
+        state.state.isUpdating ? (
+          <MenuStatusRow className="text-muted-foreground">
+            <Icon
+              name="Spinner"
+              className="size-3.5 shrink-0 animate-spin text-subtle-foreground"
+              aria-hidden="true"
+            />
+            <span>Some commands are not ready yet.</span>
+            <span className="truncate text-subtle-foreground">
+              They appear here once they load.
+            </span>
+          </MenuStatusRow>
+        ) : null}
         {innerState.kind === "hint" ? (
           <MenuStatusRow
             onDismiss={onDismiss}
             className="text-muted-foreground"
           >
-            Type to search mentions
+            <Icon
+              name="Search"
+              className="size-3.5 shrink-0 text-subtle-foreground"
+              aria-hidden="true"
+            />
+            <span>Type to search mentions</span>
           </MenuStatusRow>
         ) : innerState.kind === "loading" ? (
           <MenuStatusRow
             onDismiss={onDismiss}
             className="text-muted-foreground"
           >
-            <Icon name="Spinner" className="size-3.5 animate-spin" />
-            <span>
-              {state.trigger === "command"
-                ? "Searching commands…"
-                : "Searching mentions…"}
-            </span>
+            <Icon
+              name="Spinner"
+              className="size-3.5 shrink-0 animate-spin text-subtle-foreground"
+              aria-hidden="true"
+            />
+            {state.trigger === "command" ? (
+              <>
+                <span>Some commands are not ready yet.</span>
+                <span className="truncate text-subtle-foreground">
+                  They appear here once they load.
+                </span>
+              </>
+            ) : (
+              <span>Searching mentions…</span>
+            )}
           </MenuStatusRow>
         ) : innerState.kind === "error" ? (
-          <MenuStatusRow onDismiss={onDismiss} className="text-destructive">
-            {state.trigger === "command"
-              ? "Failed to load commands"
-              : "Failed to load suggestions"}
+          <MenuStatusRow
+            onDismiss={onDismiss}
+            className="text-destructive-text"
+          >
+            <Icon
+              name="AlertCircle"
+              className="size-3.5 shrink-0"
+              aria-hidden="true"
+            />
+            <span
+              className="truncate"
+              title={
+                state.trigger === "command"
+                  ? (commandErrorMessage ?? undefined)
+                  : undefined
+              }
+            >
+              {state.trigger === "command"
+                ? (commandErrorMessage ?? "Failed to load commands")
+                : "Failed to load suggestions"}
+            </span>
           </MenuStatusRow>
         ) : state.trigger === "command" ? (
           <CommandResults
-            suggestions={commandSuggestions(state)}
+            suggestions={visibleCommands}
             selectedIndex={selectedIndex}
             onApply={onApply}
             itemRefs={itemRefs}
@@ -668,6 +780,7 @@ export function MentionMenu({
         ) : (
           <MentionResults
             results={mentionResults(state)}
+            refreshing={mentionResultsRefreshing(state)}
             selectedIndex={selectedIndex}
             onApply={onApply}
             itemRefs={itemRefs}
@@ -675,6 +788,25 @@ export function MentionMenu({
           />
         )}
       </div>
+      {findSkills ? (
+        <button
+          type="button"
+          aria-current={findSkills.selected || undefined}
+          className={cn(
+            "flex shrink-0 items-center gap-2 border-t border-border px-2.5 py-2 text-left text-sm hover:bg-muted",
+            findSkills.selected && "bg-muted",
+          )}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={findSkills.open}
+        >
+          <Icon
+            name="Search"
+            className="size-3.5 shrink-0"
+            aria-hidden="true"
+          />
+          Find skills
+        </button>
+      ) : null}
     </div>
   );
 }

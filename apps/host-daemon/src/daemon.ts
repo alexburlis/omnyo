@@ -1,4 +1,7 @@
-import { HOST_DAEMON_RESTART_EXIT_CODE } from "@bb/config/machine-service";
+import {
+  HOST_DAEMON_RESTART_EXIT_CODE,
+  HOST_DAEMON_SERVICE_INSTALL_EXIT_CODE,
+} from "@omnyo/config/machine-service";
 import type { HostDaemonLogger } from "./logger.js";
 import { normalizeCaughtError } from "./error-utils.js";
 
@@ -25,7 +28,11 @@ interface CreateDaemonOptions {
   shutdownExitGraceMs?: number;
 }
 
-export type HostDaemonExitCode = 0 | 1 | typeof HOST_DAEMON_RESTART_EXIT_CODE;
+export type HostDaemonExitCode =
+  | 0
+  | 1
+  | typeof HOST_DAEMON_RESTART_EXIT_CODE
+  | typeof HOST_DAEMON_SERVICE_INSTALL_EXIT_CODE;
 
 export interface HostDaemon {
   readonly identity: HostDaemonIdentity;
@@ -48,6 +55,7 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
   let shutdownExitCode: HostDaemonExitCode = 0;
 
   let resolveStopped: (() => void) | undefined;
+
   const stopped = new Promise<void>((resolve) => {
     resolveStopped = resolve;
   });
@@ -59,6 +67,7 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
     for (const [signal, listener] of listeners) {
       signalSource.off(signal, listener);
     }
+
     listeners.clear();
   }
 
@@ -74,12 +83,14 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
 
   function armShutdownExitWatchdog(): void {
     const exitProcess = options.exitProcess;
+
     if (!exitProcess) {
       return;
     }
 
     const graceMs =
       options.shutdownExitGraceMs ?? DEFAULT_SHUTDOWN_EXIT_GRACE_MS;
+
     shutdownExitWatchdog = setTimeout(() => {
       shutdownExitWatchdog = null;
       options.logger.error(
@@ -97,13 +108,16 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
 
   function exitAfterCleanShutdown(): void {
     const exitProcess = options.exitProcess;
+
     if (startupFailed || !exitProcess) {
       return;
     }
+
     if (shutdownExitWatchdog !== null) {
       clearTimeout(shutdownExitWatchdog);
       shutdownExitWatchdog = null;
     }
+
     exitProcess(shutdownExitCode);
   }
 
@@ -112,6 +126,7 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
     exitCode: HostDaemonExitCode,
   ): Promise<void> {
     requestProcessExit(reason, exitCode);
+
     if (stopPromise) {
       return stopPromise;
     }
@@ -126,6 +141,7 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
       );
 
       let failure: Error | null = null;
+
       const steps = [
         {
           name: "flushEvents",
@@ -194,15 +210,18 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
             );
           });
         };
+
         listeners.set(signal, listener);
         signalSource.on(signal, listener);
       }
 
       try {
         await options.onStart?.();
+
         if (stopPromise) {
           return;
         }
+
         started = true;
         options.logger.info(
           { identity: options.identity },
@@ -211,8 +230,10 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
       } catch (error) {
         if (stopPromise) {
           await stop("startup-interrupted", 0).catch(() => undefined);
+
           return;
         }
+
         startupFailed = true;
         await stop("startup-failed", 1).catch(() => undefined);
         throw error;
@@ -221,6 +242,7 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
     shutdown,
     async waitUntilStopped(): Promise<void> {
       await stopped;
+
       if (stopFailure) {
         throw stopFailure;
       }

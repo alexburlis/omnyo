@@ -36,11 +36,13 @@ export function validateScheduleDefinition(args: {
   timezone: string;
 }): void {
   const fields = args.cron.trim().split(/\s+/u);
+
   if (fields.length !== CRON_FIELD_COUNT) {
     throw new ScheduleValidationError(
       "Cron expression must have exactly 5 fields (minute hour day-of-month month day-of-week)",
     );
   }
+
   assertValidTimezone(args.timezone);
   parseExpression({
     cron: args.cron,
@@ -55,6 +57,7 @@ export function computeNextScheduledTime(args: {
   timezone: string;
 }): number {
   validateScheduleDefinition({ cron: args.cron, timezone: args.timezone });
+
   return parseExpression(args).next().getTime();
 }
 
@@ -77,10 +80,13 @@ export function computeInitialNextRunAt(args: {
   now: number;
 }): number | null {
   if (!args.enabled) return null;
+
   if (args.trigger.triggerType === "once") {
     validateOnceDefinition({ runAt: args.trigger.runAt, now: args.now });
+
     return args.trigger.runAt;
   }
+
   return computeNextScheduledTime({
     cron: args.trigger.cron,
     timezone: args.trigger.timezone,

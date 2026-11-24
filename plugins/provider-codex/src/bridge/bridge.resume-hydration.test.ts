@@ -1,13 +1,8 @@
-import {
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
 import {
   FULL_ACCESS_SESSION_OPTIONS,
@@ -15,14 +10,17 @@ import {
 } from "./fake-codex-app-server-harness.js";
 
 const THREAD_ID = "thr_resume_hydration";
+
 const PROVIDER_THREAD_ID = "codex-resume-hydration";
 
 let harness: ReturnType<typeof createBridgeJsonRpcTestHarness>;
+
 let workspaceDir: string;
+
 let requestLogPath: string;
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-resume-hydration-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-resume-hydration-"));
   requestLogPath = join(workspaceDir, "requests.jsonl");
   const scriptPath = join(workspaceDir, "script.json");
   writeFileSync(scriptPath, JSON.stringify({ requestLogPath }), "utf8");
@@ -58,6 +56,7 @@ it("excludes turn history when it resumes a Codex thread", async () => {
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
+
   expect(requests).toContainEqual({
     method: "thread/resume",
     params: expect.objectContaining({ excludeTurns: true }),

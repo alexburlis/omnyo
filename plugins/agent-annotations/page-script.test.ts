@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pageMessageSchema } from "./annotations.js";
 import {
   buildActivateExpression,
+  buildClearAcceptedExpression,
   buildControllerExpression,
   buildReactProbeExpression,
 } from "./page-script.js";
@@ -11,15 +12,17 @@ interface Bridge {
   postMessage(data: unknown): void;
 }
 
-function evaluate(expression: string, bb: Bridge | null): unknown {
-  return new Function("bb", `return (${expression});`)(bb);
+function evaluate(expression: string, api: Bridge | null): unknown {
+  return new Function("omnyo", `return (${expression});`)(api);
 }
 
 function shadowRoot(): ShadowRoot {
-  const root = document.querySelector("bb-agent-annotations")?.shadowRoot;
+  const root = document.querySelector("omnyo-agent-annotations")?.shadowRoot;
+
   if (root === null || root === undefined) {
     throw new Error("Expected the annotation overlay to be mounted.");
   }
+
   return root;
 }
 
@@ -27,6 +30,7 @@ function requireElement<T extends Element>(element: T | null): T {
   if (element === null) {
     throw new Error("Expected element to exist.");
   }
+
   return element;
 }
 
@@ -44,12 +48,54 @@ beforeEach(() => {
 
 afterEach(() => {
   evaluate(buildControllerExpression("deactivate"), null);
-  Reflect.deleteProperty(globalThis, "__bbAgentAnnotations");
-  document.querySelector("bb-agent-annotations")?.remove();
+  Reflect.deleteProperty(globalThis, "__omnyoAgentAnnotations");
+  document.querySelector("omnyo-agent-annotations")?.remove();
   Reflect.deleteProperty(document, "elementsFromPoint");
 });
 
 describe("agent annotations page script", () => {
+  it("clears only an accepted unchanged pin and preserves a later edit", () => {
+    const messages: unknown[] = [];
+    const bridge: Bridge = { postMessage: (data) => messages.push(data) };
+    evaluate(buildActivateExpression({}), bridge);
+    button.click();
+    const root = shadowRoot();
+    const input = requireElement(root.querySelector("textarea"));
+    input.value = "Original";
+    input.dispatchEvent(new Event("input"));
+    requireElement(root.querySelector<HTMLButtonElement>(".save")).click();
+    const created = pageMessageSchema.parse(messages[0]);
+
+    if (created.type !== "annotation") throw new Error("Expected annotation");
+    requireElement(root.querySelector<HTMLButtonElement>(".pin")).click();
+    const edited = requireElement(root.querySelector("textarea"));
+    edited.value = "Edited while sending";
+    edited.dispatchEvent(new Event("input"));
+    requireElement(root.querySelector<HTMLButtonElement>(".save")).click();
+    expect(
+      evaluate(
+        buildClearAcceptedExpression([
+          { id: created.annotation.id, revision: 0 },
+        ]),
+        bridge,
+      ),
+    ).toEqual({ active: true, count: 1 });
+    expect(root.querySelector(".pin")?.getAttribute("title")).toBe(
+      "Edited while sending",
+    );
+    expect(
+      evaluate(
+        buildClearAcceptedExpression([
+          { id: created.annotation.id, revision: 1 },
+        ]),
+        bridge,
+      ),
+    ).toEqual({ active: true, count: 0 });
+    expect(root.querySelector(".pin")).toBeNull();
+    expect(
+      messages.map((message) => pageMessageSchema.parse(message).type),
+    ).not.toContain("annotation-delete");
+  });
   it("selects the clicked element, captures a comment, and posts its context", () => {
     const messages: unknown[] = [];
     const bridge: Bridge = { postMessage: (data) => messages.push(data) };
@@ -58,7 +104,7 @@ describe("agent annotations page script", () => {
 
     expect(
       evaluate(
-        buildActivateExpression({ "--bb-primary": "oklch(0.27 0 0)" }),
+        buildActivateExpression({ "--omnyo-primary": "oklch(0.27 0 0)" }),
         bridge,
       ),
     ).toEqual({ active: true, count: 0 });
@@ -99,11 +145,13 @@ describe("agent annotations page script", () => {
     });
     expect(parsed[1]).toEqual({ type: "state", active: true, count: 1 });
     const first = parsed[0];
+
     if (first?.type !== "annotation") {
       throw new Error("Expected an annotation message first.");
     }
+
     expect(
-      button.hasAttribute(`data-bb-annotation-${first.annotation.id}`),
+      button.hasAttribute(`data-omnyo-annotation-${first.annotation.id}`),
     ).toBe(true);
     expect(root.querySelector(".pin")?.textContent).toBe("1");
     expect(root.querySelector(".editor")).toBeNull();
@@ -120,6 +168,7 @@ describe("agent annotations page script", () => {
     input.dispatchEvent(new Event("input"));
     requireElement(root.querySelector<HTMLButtonElement>(".save")).click();
     const created = pageMessageSchema.parse(messages[0]);
+
     if (created.type !== "annotation") throw new Error("Expected annotation");
     evaluate(buildControllerExpression("deactivate"), bridge);
     const pin = requireElement(root.querySelector<HTMLButtonElement>(".pin"));
@@ -138,6 +187,7 @@ describe("agent annotations page script", () => {
       type: "annotation-update",
       id: created.annotation.id,
       comment: "Updated",
+      revision: 1,
     });
     expect(pin.title).toBe("Updated");
     expect(root.querySelectorAll(".pin")).toHaveLength(1);
@@ -168,11 +218,14 @@ describe("agent annotations page script", () => {
     input.dispatchEvent(new Event("input"));
     requireElement(root.querySelector<HTMLButtonElement>(".save")).click();
     const created = pageMessageSchema.parse(messages[0]);
+
     if (created.type !== "annotation") throw new Error("Expected annotation");
     requireElement(root.querySelector<HTMLButtonElement>(".pin")).click();
+
     const remove = Array.from(root.querySelectorAll("button")).find(
       (node) => node.textContent === "Delete",
     );
+
     if (!remove) throw new Error("Expected delete action");
     remove.click();
     expect(messages.slice(-2)).toEqual([
@@ -180,7 +233,7 @@ describe("agent annotations page script", () => {
       { type: "state", active: true, count: 0 },
     ]);
     expect(
-      button.hasAttribute(`data-bb-annotation-${created.annotation.id}`),
+      button.hasAttribute(`data-omnyo-annotation-${created.annotation.id}`),
     ).toBe(false);
     expect(root.querySelector(".pin")).toBeNull();
     expect(root.querySelector(".editor")).toBeNull();
@@ -207,13 +260,18 @@ describe("agent annotations page script", () => {
       active: true,
       count: 0,
     });
-    expect(document.querySelectorAll("bb-agent-annotations")).toHaveLength(1);
+    expect(document.querySelectorAll("omnyo-agent-annotations")).toHaveLength(
+      1,
+    );
   });
 
   it("reads React component names and debug sources from DOM fibers", () => {
-    button.setAttribute("data-bb-annotation-abc123", "");
+    button.setAttribute("data-omnyo-annotation-abc123", "");
+
     function SubmitButton() {}
+
     function CheckoutCard() {}
+
     Reflect.set(button, "__reactFiber$x1y2", {
       type: "button",
       return: {

@@ -3,7 +3,8 @@ import {
   dynamicToolSchema,
   instructionModeSchema,
   promptInputSchema,
-} from "@bb/domain";
+  serviceTierSchema,
+} from "@omnyo/domain";
 import { z } from "zod";
 import { bridgeExecutionOptionsSchema } from "./execution-options.js";
 
@@ -23,6 +24,7 @@ export const BRIDGE_REQUEST_METHODS = {
   threadArchive: "thread/archive",
   threadUnarchive: "thread/unarchive",
   threadGoalClear: "thread/goal/clear",
+  threadSpeedSet: "thread/speed/set",
   turnStart: "turn/start",
   turnSteer: "turn/steer",
   skillsConfigure: "skills/configure",
@@ -38,7 +40,10 @@ const sessionConstructionFields = {
 };
 
 export const modelListParamsSchema = z
-  .object({ cwd: z.string().min(1).optional() })
+  .object({
+    cwd: z.string().min(1).optional(),
+    envVars: z.record(z.string(), z.string()).optional(),
+  })
   .passthrough();
 
 export const threadStartParamsSchema = z
@@ -80,9 +85,16 @@ const threadRefParams = z
   .passthrough();
 
 export const threadDiscardParamsSchema = threadRefParams;
+
 export const threadArchiveParamsSchema = threadRefParams;
+
 export const threadUnarchiveParamsSchema = threadRefParams;
+
 export const threadGoalClearParamsSchema = threadRefParams;
+
+export const threadSpeedSetParamsSchema = threadRefParams.extend({
+  serviceTier: serviceTierSchema,
+});
 
 export const threadNameSetParamsSchema = z
   .object({

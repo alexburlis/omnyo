@@ -1,4 +1,4 @@
-import type { JsonValue } from "@get-bb/plugin-sdk";
+import type { JsonValue } from "@omnyo/plugin-sdk";
 import type { AppFixedTabDestination } from "@/lib/app-fixed-tab-navigation";
 import type { AppFixedTabReference } from "@/lib/app-navigation-host";
 
@@ -17,7 +17,9 @@ function normalizeGitDiffFixedTabTarget(
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
+
   const keys = Object.keys(value);
+
   if (
     value.kind === "file" &&
     keys.length === 2 &&
@@ -28,6 +30,7 @@ function normalizeGitDiffFixedTabTarget(
   ) {
     return { kind: value.kind, path: value.path };
   }
+
   if (
     value.kind === "commit" &&
     keys.length === 2 &&
@@ -38,6 +41,7 @@ function normalizeGitDiffFixedTabTarget(
   ) {
     return { kind: value.kind, sha: value.sha };
   }
+
   return null;
 }
 
@@ -56,14 +60,20 @@ export function createGitDiffFixedTabDestination({
     tab: GIT_DIFF_FIXED_TAB_REFERENCE,
     open(target) {
       if (!eligible) return false;
+
       if (target === undefined) {
         openOrdinary();
+
         return true;
       }
+
       const normalized = normalizeGitDiffFixedTabTarget(target);
+
       if (normalized === null) return false;
+
       if (normalized.kind === "file") openFile(normalized.path);
       else openCommit(normalized.sha);
+
       return true;
     },
   };

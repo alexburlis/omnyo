@@ -1,7 +1,7 @@
 import {
   type ProviderErrorCategory,
   type ProviderErrorInfo,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import type {
   ClaudeAssistantMessageError,
   ClaudeResultSubtype,
@@ -11,6 +11,7 @@ interface BuildClaudeProviderErrorInfoArgs {
   code?: ClaudeAssistantMessageError;
   httpStatusCode?: number | null;
   resultSubtype?: string;
+  detail?: string;
 }
 
 function getProviderErrorCategoryFromHttpStatus(
@@ -19,21 +20,27 @@ function getProviderErrorCategoryFromHttpStatus(
   if (httpStatusCode === 402) {
     return "billing";
   }
+
   if (httpStatusCode === 401 || httpStatusCode === 403) {
     return "unauthorized";
   }
+
   if (httpStatusCode === 429) {
     return "rate-limit";
   }
+
   if (httpStatusCode === 529) {
     return "overloaded";
   }
+
   if (httpStatusCode >= 400 && httpStatusCode < 500) {
     return "bad-request";
   }
+
   if (httpStatusCode >= 500 && httpStatusCode < 600) {
     return "internal";
   }
+
   return "unknown";
 }
 
@@ -104,10 +111,13 @@ function getClaudeProviderCode(
   if (args.code !== undefined) {
     return args.code;
   }
+
   const resultSubtype = parseClaudeResultSubtype(args.resultSubtype);
+
   if (resultSubtype && resultSubtype !== "success") {
     return resultSubtype;
   }
+
   return null;
 }
 
@@ -116,6 +126,7 @@ export function buildClaudeProviderErrorInfo(
 ): ProviderErrorInfo | null {
   const httpStatusCode = args.httpStatusCode ?? null;
   const resultSubtype = parseClaudeResultSubtype(args.resultSubtype);
+
   const category =
     args.code !== undefined
       ? getProviderErrorCategoryFromClaudeCode(args.code, httpStatusCode)
@@ -124,7 +135,20 @@ export function buildClaudeProviderErrorInfo(
         : resultSubtype
           ? getProviderErrorCategoryFromClaudeResultSubtype(resultSubtype)
           : "unknown";
+
   const providerCode = getClaudeProviderCode(args);
+
+  if (category === "unknown" && httpStatusCode === null) {
+    const dnsErrorCode = args.detail?.match(/\b(?:ENOTFOUND|EAI_AGAIN)\b/)?.[0];
+
+    if (dnsErrorCode !== undefined)
+      return {
+        category: "connection-failed",
+        providerCode: dnsErrorCode,
+        httpStatusCode,
+      };
+  }
+
   if (
     category === "unknown" &&
     providerCode === null &&

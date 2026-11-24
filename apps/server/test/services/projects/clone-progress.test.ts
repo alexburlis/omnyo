@@ -7,8 +7,10 @@ it("coalesces bursts, skips duplicates, and flushes the final update on disposal
   vi.useFakeTimers();
   const log = vi.fn();
   const progress = createCloneProgressReporter({ log, step: log });
+
   try {
     progress.report.log("start");
+
     for (let i = 0; i < 1000; i++)
       progress.report.log(`Receiving objects: ${i}`);
     expect(log).toHaveBeenCalledTimes(1);
@@ -23,6 +25,7 @@ it("coalesces bursts, skips duplicates, and flushes the final update on disposal
   } finally {
     progress.dispose();
   }
+
   const final = createCloneProgressReporter({ log, step: log });
   final.report.log("start");
   final.report.log("done");

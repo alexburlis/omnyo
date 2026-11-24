@@ -1,10 +1,10 @@
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import {
   isBackgroundAgentTaskType,
   isBackgroundCommandTaskType,
   LOCAL_WORKFLOW_TASK_TYPE,
   requireThreadEventScopeTurnId,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { parseCompactionLifecycleEvent } from "./compaction-lifecycle.js";
 import {
   parseBackgroundTaskLifecycleEvent,
@@ -34,7 +34,9 @@ import {
   getOrderedThreadEvents,
   type ThreadEventWithMeta,
 } from "./group-event-projection-turns.js";
+
 export type { ThreadEventWithMeta } from "./group-event-projection-turns.js";
+
 import { shouldSuppressLowValueToolCall } from "./tool-call-suppression.js";
 import {
   buildAcceptedClientRequestById,
@@ -71,7 +73,7 @@ import {
   upsertProvisioningOperation,
   upsertThreadOperationMessage,
 } from "./operation-projection.js";
-import type { ActiveThinking } from "@bb/domain";
+import type { ActiveThinking } from "@omnyo/domain";
 import type {
   BuildEventProjectionMessagesOptions,
   BuildEventProjectionOptions,
@@ -82,6 +84,7 @@ import type {
 import { getMessageStartedAt } from "./format-helpers.js";
 import {
   createProjectionState,
+  copyProjectionStateForSnapshot,
   finalizeProjectionState,
   flushProjectionBufferedOutputs,
   flushProjectionBufferedOutputsAfterTurnCompleted,
@@ -96,6 +99,7 @@ import { buildProjectionActiveThinking } from "./reasoning-lifecycle-projection.
 import { projectAssistantAndReasoningEvent } from "./assistant-event-projection.js";
 
 type ProjectedUserMessage = Extract<EventProjectionMessage, { kind: "user" }>;
+
 interface ClientTurnRequestedWithMeta {
   event: Extract<ThreadEvent, { type: "client/turn/requested" }>;
   meta: ThreadEventWithMeta["meta"];
@@ -117,6 +121,7 @@ interface BuildFlatProjectionDataResult {
   activeThinking: ActiveThinking | null;
   activeWorkflows: EventProjectionWorkflowMessage[];
   activeBackgroundCommands: EventProjectionWorkflowMessage[];
+  delegatedTurnIds: ReadonlySet<string>;
   messages: EventProjectionMessage[];
 }
 
@@ -124,15 +129,32 @@ interface BuildDetailedProjectionArgs {
   activeThinking: ActiveThinking | null;
   activeWorkflows: EventProjectionWorkflowMessage[];
   activeBackgroundCommands: EventProjectionWorkflowMessage[];
+  delegatedTurnIds: ReadonlySet<string>;
   events: ThreadEventWithMeta[];
   messages: EventProjectionMessage[];
   turnMessageDetail: BuildEventProjectionOptions["turnMessageDetail"];
+}
+
+interface ProjectionEventContext {
+  acceptedClientRequestById: ReturnType<typeof buildAcceptedClientRequestById>;
+  clientRequestById: ReturnType<typeof buildClientTurnRequestById>;
+  rejectedClientRequestIds: ReturnType<typeof buildRejectedClientRequestIds>;
+  selectedStartedTurnIds: ReturnType<typeof buildSelectedStartedTurnIds>;
+  acceptedRootClientTurnIds: ReturnType<typeof buildAcceptedRootClientTurnIds>;
+}
+
+export interface EventProjectionCheckpoint {
+  context: ProjectionEventContext;
+  events: ThreadEventWithMeta[];
+  options: BuildEventProjectionOptions;
+  state: ProjectionState;
 }
 
 function selectActiveWorkflowMessages(
   messages: readonly EventProjectionMessage[],
 ): EventProjectionWorkflowMessage[] {
   const running: EventProjectionWorkflowMessage[] = [];
+
   for (const message of messages) {
     if (
       message.kind !== "workflow" ||
@@ -142,8 +164,10 @@ function selectActiveWorkflowMessages(
     ) {
       continue;
     }
+
     running.push(message);
   }
+
   return running.sort(
     (a, b) => getMessageStartedAt(b) - getMessageStartedAt(a),
   );
@@ -187,12 +211,15 @@ function buildCallMessageById(
   messages: readonly EventProjectionMessage[],
 ): ReadonlyMap<string, EventProjectionCallMessage> {
   const byId = new Map<string, EventProjectionCallMessage>();
+
   for (const message of messages) {
     if (!isEventProjectionCallMessage(message)) {
       continue;
     }
+
     byId.set(message.callId, message);
   }
+
   return byId;
 }
 
@@ -203,7 +230,9 @@ function isDirectBackgroundTaskForCurrentAgent(
   if (!message.parentToolCallId) {
     return true;
   }
+
   const spawningCall = callMessageById.get(message.parentToolCallId);
+
   return spawningCall ? spawningCall.parentToolCallId === undefined : true;
 }
 
@@ -217,7 +246,9 @@ function getBackgroundAgentModel(
   ) {
     return null;
   }
+
   const spawningCall = callMessageById.get(message.parentToolCallId);
+
   return spawningCall?.kind === "delegation"
     ? (spawningCall.model ?? null)
     : null;
@@ -229,12 +260,16 @@ function getBackgroundTaskFamilyId(
   if (message.familyId !== null) {
     return `family:${message.familyId}`;
   }
+
   const itemId = message.itemId;
   const generationMatch = /#(\d+)$/.exec(itemId);
+
   if (!generationMatch) {
     return itemId;
   }
+
   const generation = Number(generationMatch[1]);
+
   return Number.isSafeInteger(generation) && generation > 1
     ? itemId.slice(0, -generationMatch[0].length)
     : itemId;
@@ -245,6 +280,7 @@ function enrichBackgroundAgentModels(
   callMessageById: ReadonlyMap<string, EventProjectionCallMessage>,
 ): void {
   const modelByTaskFamilyId = new Map<string, string>();
+
   for (const message of messages) {
     if (
       message.kind !== "workflow" ||
@@ -254,12 +290,15 @@ function enrichBackgroundAgentModels(
     }
 
     const taskFamilyId = getBackgroundTaskFamilyId(message);
+
     const model =
       getBackgroundAgentModel(message, callMessageById) ??
       message.model ??
       modelByTaskFamilyId.get(taskFamilyId) ??
       null;
+
     message.model = model;
+
     if (model !== null) {
       modelByTaskFamilyId.set(taskFamilyId, model);
     }
@@ -272,14 +311,18 @@ function getRootSpawningCallId(
 ): string | undefined {
   let callId = message.parentToolCallId;
   const visited = new Set<string>();
+
   while (callId && !visited.has(callId)) {
     visited.add(callId);
     const call = callMessageById.get(callId);
+
     if (!call?.parentToolCallId) {
       return callId;
     }
+
     callId = call.parentToolCallId;
   }
+
   return undefined;
 }
 
@@ -288,6 +331,7 @@ function selectActiveBackgroundCommandMessages(
   callMessageById: ReadonlyMap<string, EventProjectionCallMessage>,
 ): EventProjectionWorkflowMessage[] {
   const representedRootCallIds = new Set<string>();
+
   for (const message of messages) {
     if (
       message.kind === "workflow" &&
@@ -299,19 +343,24 @@ function selectActiveBackgroundCommandMessages(
       representedRootCallIds.add(message.parentToolCallId);
     }
   }
+
   const running: EventProjectionWorkflowMessage[] = [];
+
   for (const message of messages) {
     const isDirect =
       message.kind === "workflow" &&
       isDirectBackgroundTaskForCurrentAgent(message, callMessageById);
+
     const rootSpawningCallId =
       message.kind === "workflow"
         ? getRootSpawningCallId(message, callMessageById)
         : undefined;
+
     const isRepresentedByActiveParent =
       !isDirect &&
       rootSpawningCallId !== undefined &&
       representedRootCallIds.has(rootSpawningCallId);
+
     if (
       message.kind !== "workflow" ||
       message.taskType === LOCAL_WORKFLOW_TASK_TYPE ||
@@ -322,8 +371,10 @@ function selectActiveBackgroundCommandMessages(
     ) {
       continue;
     }
+
     running.push(message);
   }
+
   return running.sort(
     (a, b) => getMessageStartedAt(b) - getMessageStartedAt(a),
   );
@@ -333,27 +384,36 @@ function buildClientTurnRequestById(
   events: ThreadEventWithMeta[],
 ): Map<string, ClientTurnRequestedWithMeta> {
   const requestById = new Map<string, ClientTurnRequestedWithMeta>();
+
   for (const eventWithMeta of events) {
     if (eventWithMeta.event.type !== "client/turn/requested") {
       continue;
     }
+
     requestById.set(eventWithMeta.event.requestId, {
       event: eventWithMeta.event,
       meta: eventWithMeta.meta,
     });
   }
+
   return requestById;
 }
 
 function buildRejectedClientRequestIds(
   events: ThreadEventWithMeta[],
+  acceptedClientRequestById: ReadonlyMap<string, unknown>,
 ): ReadonlySet<string> {
   const requestIds = new Set<string>();
+
   for (const { event } of events) {
-    if (event.type === "client/turn/rejected") {
+    if (
+      event.type === "client/turn/rejected" &&
+      !acceptedClientRequestById.has(event.requestId)
+    ) {
       requestIds.add(event.requestId);
     }
   }
+
   return requestIds;
 }
 
@@ -361,10 +421,12 @@ function buildSelectedStartedTurnIds(
   events: ThreadEventWithMeta[],
 ): ReadonlySet<string> {
   const turnIds = new Set<string>();
+
   for (const { event } of events) {
     if (event.type !== "turn/started") {
       continue;
     }
+
     turnIds.add(
       requireThreadEventScopeTurnId({
         type: event.type,
@@ -372,6 +434,7 @@ function buildSelectedStartedTurnIds(
       }),
     );
   }
+
   return turnIds;
 }
 
@@ -380,17 +443,21 @@ function buildAcceptedRootClientTurnIds(
   clientRequestById: ReadonlyMap<string, ClientTurnRequestedWithMeta>,
 ): ReadonlySet<string> {
   const turnIds = new Set<string>();
+
   for (const { event } of events) {
     if (event.type !== "turn/input/accepted") {
       continue;
     }
+
     const request = clientRequestById.get(event.clientRequestId);
+
     if (
       request?.event.target.kind !== "new-turn" &&
       request?.event.target.kind !== "thread-start"
     ) {
       continue;
     }
+
     turnIds.add(
       requireThreadEventScopeTurnId({
         type: event.type,
@@ -398,6 +465,7 @@ function buildAcceptedRootClientTurnIds(
       }),
     );
   }
+
   return turnIds;
 }
 
@@ -412,9 +480,11 @@ function canUseAcceptedClientRequestForVisibleProjection(
       if (decoded.target.expectedTurnId === null) {
         return true;
       }
+
       if (acceptedClientRequest.turnId === decoded.target.expectedTurnId) {
         return true;
       }
+
       return selectedStartedTurnIds.has(acceptedClientRequest.turnId);
     case "new-turn":
     case "thread-start":
@@ -427,9 +497,11 @@ function appendProjectedUserMessage(
   projectedClientUser: ProjectedUserMessage,
 ): void {
   const key = projectedClientUser.id;
+
   if (state.seenUserKeys.has(key)) {
     return;
   }
+
   state.seenUserKeys.add(key);
   flushToolActivityBeforeNonToolMessage(state);
   state.messages.push(projectedClientUser);
@@ -454,6 +526,7 @@ function enqueuePendingDelegationTurnLink(
   if (!providerThreadId || !parentTurnId) {
     return;
   }
+
   if (state.delegatedTurnLinkCallIds.has(callId)) {
     return;
   }
@@ -461,10 +534,12 @@ function enqueuePendingDelegationTurnLink(
   const pendingLinks =
     state.pendingDelegationTurnLinksByProviderThreadId.get(providerThreadId) ??
     [];
+
   const link: PendingDelegationTurnLink = {
     callId,
     parentTurnId,
   };
+
   pendingLinks.push(link);
   state.pendingDelegationTurnLinksByProviderThreadId.set(
     providerThreadId,
@@ -481,31 +556,38 @@ function consumePendingDelegationTurnLink(
   if (!providerThreadId) {
     return undefined;
   }
+
   if (state.delegationParentToolCallIdsByTurnId.has(turnId)) {
     return state.delegationParentToolCallIdsByTurnId.get(turnId);
   }
 
   const pendingLinks =
     state.pendingDelegationTurnLinksByProviderThreadId.get(providerThreadId);
+
   if (!pendingLinks || pendingLinks.length === 0) {
     return undefined;
   }
 
   while (pendingLinks.length > 0) {
     const pendingLink = pendingLinks.shift();
+
     if (!pendingLink || pendingLink.parentTurnId === turnId) {
       continue;
     }
+
     if (pendingLinks.length === 0) {
       state.pendingDelegationTurnLinksByProviderThreadId.delete(
         providerThreadId,
       );
     }
+
     state.delegationParentToolCallIdsByTurnId.set(turnId, pendingLink.callId);
+
     return pendingLink.callId;
   }
 
   state.pendingDelegationTurnLinksByProviderThreadId.delete(providerThreadId);
+
   return undefined;
 }
 
@@ -523,11 +605,13 @@ function shouldUseExplicitEventParentToolCallId({
   if (!parentToolCallId) {
     return false;
   }
+
   if (!isAcceptedRootClientTurn) {
     return true;
   }
+
   return (
-    typeof eventTurnId !== "string" ||
+    eventTurnId === undefined ||
     state.suppressedAcceptedRootParentToolCallIdsByTurnId.get(eventTurnId) !==
       parentToolCallId
   );
@@ -542,6 +626,7 @@ function getCompactionTurnFinalization(
       detail: decoded.detail ?? decoded.message,
     };
   }
+
   if (
     decoded.type === "provider/warning" &&
     decoded.category === "compaction-skipped"
@@ -551,46 +636,80 @@ function getCompactionTurnFinalization(
       detail: decoded.details ?? decoded.summary,
     };
   }
+
   if (decoded.type === "turn/completed" && decoded.status === "failed") {
     return {
       status: "error",
       detail: decoded.error?.message,
     };
   }
+
   if (decoded.type === "turn/completed" && decoded.status === "interrupted") {
     return {
       status: "interrupted",
       detail: decoded.error?.message,
     };
   }
+
   return undefined;
 }
 
-function buildFlatProjectionData(
+function createProjectionEventContext(
   args: BuildFlatProjectionDataArgs,
-): BuildFlatProjectionDataResult {
-  const state = createProjectionState();
-
+): ProjectionEventContext {
   const orderedEvents = args.events;
+
   const acceptedClientRequestById = buildAcceptedClientRequestById({
     context: args.acceptedClientRequestContext,
     events: orderedEvents,
   });
+
   const clientRequestById = buildClientTurnRequestById(orderedEvents);
-  const rejectedClientRequestIds = buildRejectedClientRequestIds(orderedEvents);
+
+  const rejectedClientRequestIds = buildRejectedClientRequestIds(
+    orderedEvents,
+    acceptedClientRequestById,
+  );
+
   const selectedStartedTurnIds = buildSelectedStartedTurnIds(orderedEvents);
+
   const acceptedRootClientTurnIds = buildAcceptedRootClientTurnIds(
     orderedEvents,
     clientRequestById,
   );
-  for (const { event: decoded, meta } of orderedEvents) {
+
+  return {
+    acceptedClientRequestById,
+    clientRequestById,
+    rejectedClientRequestIds,
+    selectedStartedTurnIds,
+    acceptedRootClientTurnIds,
+  };
+}
+
+function applyProjectionEvents(
+  args: BuildFlatProjectionDataArgs,
+  state: ProjectionState,
+  context: ProjectionEventContext,
+): void {
+  const {
+    acceptedClientRequestById,
+    clientRequestById,
+    rejectedClientRequestIds,
+    selectedStartedTurnIds,
+    acceptedRootClientTurnIds,
+  } = context;
+
+  for (const { event: decoded, meta } of args.events) {
     const eventType = decoded.type;
     const eventTurnId = getEventTurnId(decoded);
     const eventProviderThreadId = getEventProviderThreadId(decoded);
+
     const isAcceptedRootClientTurn =
-      typeof eventTurnId === "string" &&
-      acceptedRootClientTurnIds.has(eventTurnId);
+      eventTurnId !== undefined && acceptedRootClientTurnIds.has(eventTurnId);
+
     const decodedEventParentToolCallId = getEventParentToolCallId(decoded);
+
     if (
       decoded.type === "turn/started" &&
       isAcceptedRootClientTurn &&
@@ -601,6 +720,7 @@ function buildFlatProjectionData(
         decodedEventParentToolCallId,
       );
     }
+
     const explicitEventParentToolCallId =
       shouldUseExplicitEventParentToolCallId({
         eventTurnId,
@@ -616,6 +736,7 @@ function buildFlatProjectionData(
         type: decoded.type,
         scope: decoded.scope,
       });
+
       if (isAcceptedRootClientTurn) {
         state.delegationParentToolCallIdsByTurnId.delete(turnId);
       } else {
@@ -624,6 +745,7 @@ function buildFlatProjectionData(
           eventProviderThreadId,
           turnId,
         );
+
         if (explicitEventParentToolCallId) {
           state.delegationParentToolCallIdsByTurnId.set(
             turnId,
@@ -636,6 +758,7 @@ function buildFlatProjectionData(
           );
         }
       }
+
       onTurnStarted(state, turnId);
     }
 
@@ -652,6 +775,7 @@ function buildFlatProjectionData(
           : undefined));
 
     const compactionTurnFinalization = getCompactionTurnFinalization(decoded);
+
     if (compactionTurnFinalization) {
       const settledPendingCompaction = finalizeOpenCompactionsForTurn({
         state,
@@ -661,6 +785,7 @@ function buildFlatProjectionData(
         status: compactionTurnFinalization.status,
         detail: compactionTurnFinalization.detail,
       });
+
       if (settledPendingCompaction && decoded.type === "provider/warning") {
         continue;
       }
@@ -672,6 +797,7 @@ function buildFlatProjectionData(
           type: decoded.type,
           scope: decoded.scope,
         });
+
         onTurnCompleted({
           meta,
           state,
@@ -694,9 +820,11 @@ function buildFlatProjectionData(
 
     if (decoded.type === "turn/input/accepted") {
       const clientRequest = clientRequestById.get(decoded.clientRequestId);
+
       const acceptedClientRequest = acceptedClientRequestById.get(
         decoded.clientRequestId,
       );
+
       const acceptedSteers =
         clientRequest && acceptedClientRequest
           ? parseAcceptedSteersFromClientRequest({
@@ -706,15 +834,18 @@ function buildFlatProjectionData(
               options: args.options,
             })
           : [];
+
       for (const acceptedSteer of acceptedSteers) {
         appendProjectedUserMessage(state, acceptedSteer);
       }
+
       continue;
     }
 
     if (decoded.type === "client/turn/rejected") {
       const clientRequest = clientRequestById.get(decoded.requestId);
-      if (clientRequest) {
+
+      if (clientRequest && rejectedClientRequestIds.has(decoded.requestId)) {
         for (const rejectedMessage of parseRejectedUsersFromClientRequest({
           decoded: clientRequest.event,
           requestMeta: clientRequest.meta,
@@ -724,6 +855,7 @@ function buildFlatProjectionData(
           appendProjectedUserMessage(state, rejectedMessage);
         }
       }
+
       continue;
     }
 
@@ -738,6 +870,7 @@ function buildFlatProjectionData(
       decoded.type === "client/turn/requested"
         ? acceptedClientRequestById.get(decoded.requestId)
         : undefined;
+
     const visibleProjectionAcceptedClientRequest =
       acceptedClientRequest &&
       decoded.type === "client/turn/requested" &&
@@ -748,26 +881,31 @@ function buildFlatProjectionData(
       )
         ? acceptedClientRequest
         : undefined;
+
     const usersFromClientRequest = parseUsersFromClientRequest({
       acceptedClientRequest: visibleProjectionAcceptedClientRequest,
       decoded,
       meta,
       options: args.options,
     });
+
     if (usersFromClientRequest.length > 0) {
       for (const userFromClientRequest of usersFromClientRequest) {
         appendProjectedUserMessage(state, userFromClientRequest);
       }
+
       continue;
     }
 
     const providerUserMessage = parseProviderUserMessage(decoded, meta);
+
     if (providerUserMessage) {
       appendProjectedUserMessage(state, providerUserMessage);
       continue;
     }
 
     const legacyUserMessage = parseLegacyUserMessage(decoded, meta);
+
     if (legacyUserMessage) {
       flushToolActivityBeforeNonToolMessage(state);
       state.messages.push(legacyUserMessage);
@@ -797,6 +935,7 @@ function buildFlatProjectionData(
       meta,
       eventParentToolCallId,
     );
+
     if (execEvent) {
       if (execEvent.kind === "begin") {
         onExecBegin(state, meta, decoded.threadId, eventTurnId, execEvent.call);
@@ -811,6 +950,7 @@ function buildFlatProjectionData(
       } else {
         onExecEnd(state, meta, decoded.threadId, eventTurnId, execEvent.call);
       }
+
       continue;
     }
 
@@ -823,8 +963,10 @@ function buildFlatProjectionData(
       meta,
       eventParentToolCallId,
     );
+
     if (toolCallEvent) {
       const delegationChildRef = getDelegationChildRef(decoded);
+
       if (toolCallEvent.kind !== "output") {
         if (toolCallEvent.call.kind === "delegation" && eventTurnId) {
           state.delegationTurnIdsByCallId.set(
@@ -832,6 +974,7 @@ function buildFlatProjectionData(
             eventTurnId,
           );
         }
+
         if (delegationChildRef !== undefined) {
           if (
             delegationChildRef === eventProviderThreadId ||
@@ -851,6 +994,7 @@ function buildFlatProjectionData(
           }
         }
       }
+
       if (toolCallEvent.kind === "begin") {
         onExecBegin(
           state,
@@ -876,6 +1020,7 @@ function buildFlatProjectionData(
           toolCallEvent.call,
         );
       }
+
       continue;
     }
 
@@ -883,6 +1028,7 @@ function buildFlatProjectionData(
       decoded,
       eventParentToolCallId,
     );
+
     if (webActivityEvent) {
       if (webActivityEvent.kind === "begin") {
         onWebActivityBegin(
@@ -901,10 +1047,12 @@ function buildFlatProjectionData(
           webActivityEvent,
         );
       }
+
       continue;
     }
 
     const fileEdit = parseFileEditFromItemEvent(decoded, eventParentToolCallId);
+
     if (fileEdit) {
       flushToolActivityBeforeNonToolMessage(state);
       upsertFileEdit(state, meta, decoded.threadId, eventTurnId, fileEdit);
@@ -916,8 +1064,10 @@ function buildFlatProjectionData(
       meta,
       eventParentToolCallId,
     );
+
     if (compactionEvent) {
       flushToolActivityBeforeNonToolMessage(state);
+
       if (compactionEvent.kind === "begin") {
         onCompactionBegin(
           state,
@@ -935,6 +1085,7 @@ function buildFlatProjectionData(
           compactionEvent,
         );
       }
+
       continue;
     }
 
@@ -943,8 +1094,10 @@ function buildFlatProjectionData(
       providerDisplayName: args.options?.providerDisplayName,
       threadName: args.options?.threadName ?? "",
     });
+
     if (operation) {
       flushToolActivityBeforeNonToolMessage(state);
+
       if (
         operation.kind === "operation" &&
         operation.opType === "thread-provisioning"
@@ -952,40 +1105,74 @@ function buildFlatProjectionData(
         upsertProvisioningOperation(state, operation);
         continue;
       }
+
       if (operation.kind === "operation" && operation.opType === "operation") {
         upsertThreadOperationMessage(state, operation);
         continue;
       }
+
       if (operation.kind === "permission-grant-lifecycle") {
         upsertPermissionGrantLifecycleMessage(state, operation);
         continue;
       }
+
       if (operation.kind === "user-question-lifecycle") {
         upsertUserQuestionLifecycleMessage(state, operation);
         continue;
       }
+
       if (operation.kind === "plugin-form-lifecycle") {
         upsertPluginFormLifecycleMessage(state, operation);
         continue;
       }
+
       state.messages.push(operation);
       continue;
     }
 
     const error = parseErrorMessage(decoded, meta);
+
     if (error) {
       flushToolActivityBeforeNonToolMessage(state);
       state.messages.push(error);
       continue;
     }
   }
+}
 
+function nestDelegatedTurnMessages(
+  messages: EventProjectionMessage[],
+  parentToolCallIdsByTurnId: ReadonlyMap<string, string>,
+): EventProjectionMessage[] {
+  return messages.map((message) => {
+    if (message.parentToolCallId || message.scope.kind !== "turn") {
+      return message;
+    }
+
+    const parentToolCallId = parentToolCallIdsByTurnId.get(
+      message.scope.turnId,
+    );
+
+    return parentToolCallId ? { ...message, parentToolCallId } : message;
+  });
+}
+
+function materializeFlatProjectionData(
+  args: BuildFlatProjectionDataArgs,
+  state: ProjectionState,
+): BuildFlatProjectionDataResult {
   finalizeProjectionState({ state, options: args.options });
+
   const messages = sortEventProjectionMessagesBySource(
-    normalizeProvisioningFailures(orderedEvents, state.messages),
+    nestDelegatedTurnMessages(
+      normalizeProvisioningFailures(args.events, state.messages),
+      state.delegationParentToolCallIdsByTurnId,
+    ),
   );
+
   const callMessageById = buildCallMessageById(messages);
   enrichBackgroundAgentModels(messages, callMessageById);
+
   return {
     activeThinking: args.includeActiveThinking
       ? buildProjectionActiveThinking(state, args.options?.threadStatus)
@@ -995,17 +1182,29 @@ function buildFlatProjectionData(
       messages,
       callMessageById,
     ),
+    delegatedTurnIds: new Set(state.delegationParentToolCallIdsByTurnId.keys()),
     messages,
   };
+}
+
+function buildFlatProjectionData(
+  args: BuildFlatProjectionDataArgs,
+): BuildFlatProjectionDataResult {
+  const state = createProjectionState();
+  applyProjectionEvents(args, state, createProjectionEventContext(args));
+
+  return materializeFlatProjectionData(args, state);
 }
 
 function buildDetailedProjection(
   args: BuildDetailedProjectionArgs,
 ): EventProjection {
   const projection = groupEventProjectionTurns({
+    delegatedTurnIds: args.delegatedTurnIds,
     events: args.events,
     messages: args.messages,
   });
+
   const semanticProjection = normalizeEventProjection({
     ...projection,
     state: {
@@ -1014,10 +1213,101 @@ function buildDetailedProjection(
       activeBackgroundCommands: args.activeBackgroundCommands,
     },
   });
+
   return applyProjectionTurnMessageDetail(
     semanticProjection,
     args.turnMessageDetail,
   );
+}
+
+function isProjectionTextOutputDelta(event: ThreadEvent): boolean {
+  return (
+    event.type === "item/agentMessage/delta" ||
+    event.type === "item/commandExecution/outputDelta" ||
+    event.type === "item/fileChange/outputDelta"
+  );
+}
+
+export function createEventProjectionCheckpoint(
+  events: ThreadEventWithMeta[],
+  options: BuildEventProjectionOptions,
+): EventProjectionCheckpoint {
+  const orderedEvents = getOrderedThreadEvents(events);
+
+  const args: BuildFlatProjectionDataArgs = {
+    acceptedClientRequestContext:
+      options.acceptedClientRequestContext ??
+      EMPTY_ACCEPTED_CLIENT_REQUEST_CONTEXT,
+    events: orderedEvents,
+    includeActiveThinking: true,
+    options,
+  };
+
+  const context = createProjectionEventContext(args);
+  const state = createProjectionState();
+  applyProjectionEvents(args, state, context);
+
+  return {
+    context,
+    events: orderedEvents.filter(
+      ({ event }) => !isProjectionTextOutputDelta(event),
+    ),
+    options,
+    state,
+  };
+}
+
+export function appendEventProjectionCheckpoint(
+  checkpoint: EventProjectionCheckpoint,
+  events: ThreadEventWithMeta[],
+): boolean {
+  if (
+    !events.every(
+      ({ event }) =>
+        isProjectionTextOutputDelta(event) &&
+        event.scope.kind === "turn" &&
+        getEventParentToolCallId(event) === undefined,
+    )
+  ) {
+    return false;
+  }
+
+  applyProjectionEvents(
+    {
+      acceptedClientRequestContext:
+        checkpoint.options.acceptedClientRequestContext ??
+        EMPTY_ACCEPTED_CLIENT_REQUEST_CONTEXT,
+      events,
+      includeActiveThinking: true,
+      options: checkpoint.options,
+    },
+    checkpoint.state,
+    checkpoint.context,
+  );
+
+  return true;
+}
+
+export function materializeEventProjectionCheckpoint(
+  checkpoint: EventProjectionCheckpoint,
+): EventProjection {
+  const flatProjection = materializeFlatProjectionData(
+    {
+      acceptedClientRequestContext:
+        checkpoint.options.acceptedClientRequestContext ??
+        EMPTY_ACCEPTED_CLIENT_REQUEST_CONTEXT,
+      events: checkpoint.events,
+      includeActiveThinking: true,
+      options: checkpoint.options,
+    },
+    copyProjectionStateForSnapshot(checkpoint.state),
+  );
+
+  return buildDetailedProjection({
+    ...flatProjection,
+    events: checkpoint.events,
+    turnMessageDetail: checkpoint.options.turnMessageDetail,
+  });
 }
 
 function buildFullEventProjection(
@@ -1032,10 +1322,12 @@ function buildFullEventProjection(
     includeActiveThinking: true,
     options,
   });
+
   return buildDetailedProjection({
     activeThinking: flatProjection.activeThinking,
     activeWorkflows: flatProjection.activeWorkflows,
     activeBackgroundCommands: flatProjection.activeBackgroundCommands,
+    delegatedTurnIds: flatProjection.delegatedTurnIds,
     events,
     messages: flatProjection.messages,
     turnMessageDetail: options.turnMessageDetail,
@@ -1058,6 +1350,7 @@ export function buildEventProjectionEntries(
   }
 
   const orderedEvents = getOrderedThreadEvents(events);
+
   const flatProjection = buildFlatProjectionData({
     acceptedClientRequestContext:
       options.acceptedClientRequestContext ??
@@ -1066,10 +1359,12 @@ export function buildEventProjectionEntries(
     includeActiveThinking: false,
     options,
   });
+
   return buildDetailedProjection({
     activeThinking: null,
     activeWorkflows: flatProjection.activeWorkflows,
     activeBackgroundCommands: flatProjection.activeBackgroundCommands,
+    delegatedTurnIds: flatProjection.delegatedTurnIds,
     events: orderedEvents,
     messages: flatProjection.messages,
     turnMessageDetail: options.turnMessageDetail,
@@ -1092,5 +1387,6 @@ export function buildEventProjection(
   }
 
   const orderedEvents = getOrderedThreadEvents(events);
+
   return buildFullEventProjection(orderedEvents, options);
 }

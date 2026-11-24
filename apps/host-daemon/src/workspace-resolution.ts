@@ -3,9 +3,9 @@ import type {
   WorkspaceContext,
   WorkspaceResolutionFailure,
   WorkspaceResolutionFailureCode,
-} from "@bb/host-daemon-contract";
-import { workspaceResolutionFailureCodeSchema } from "@bb/host-daemon-contract";
-import { WorkspaceError } from "@bb/host-workspace";
+} from "@omnyo/host-daemon-contract";
+import { workspaceResolutionFailureCodeSchema } from "@omnyo/host-daemon-contract";
+import { WorkspaceError } from "@omnyo/host-workspace";
 import type { RuntimeEntry, RuntimeManager } from "./runtime-manager.js";
 import {
   CommandDispatchError,
@@ -56,7 +56,9 @@ function isPermissionDeniedError(
   if (!(error instanceof Error)) {
     return false;
   }
+
   const code = Reflect.get(error, "code");
+
   return code === "EACCES" || code === "EPERM";
 }
 
@@ -64,6 +66,15 @@ export function workspaceResolutionFailureFromError(
   args: WorkspaceResolutionFailureFromErrorArgs,
 ): WorkspaceResolutionFailure {
   const { error, workspacePath } = args;
+
+  if (isPermissionDeniedError(error)) {
+    return {
+      code: "permission_denied",
+      message: error.message,
+      workspacePath,
+    };
+  }
+
   if (
     error instanceof WorkspaceError ||
     error instanceof CommandDispatchError
@@ -76,13 +87,7 @@ export function workspaceResolutionFailureFromError(
       workspacePath,
     };
   }
-  if (isPermissionDeniedError(error)) {
-    return {
-      code: "permission_denied",
-      message: error.message,
-      workspacePath,
-    };
-  }
+
   if (error instanceof Error && error.message.trim().length > 0) {
     return {
       code: "unknown",
@@ -90,6 +95,7 @@ export function workspaceResolutionFailureFromError(
       workspacePath,
     };
   }
+
   return {
     code: "unknown",
     message: "Unknown workspace resolution failure",
@@ -114,12 +120,14 @@ export async function resolveWorkspaceForCommand(
       },
       args.runtimeManager,
     );
+
     if (args.requireGit === true && !entry.workspace.isGitRepo) {
       const workspace = await args.runtimeManager.refreshEnvironmentWorkspace({
         environmentId: args.environmentId,
         provision: { path: args.workspaceContext.workspacePath },
         workspacePath: args.workspaceContext.workspacePath,
       });
+
       if (!workspace.isGitRepo) {
         return {
           ok: false,
@@ -131,6 +139,7 @@ export async function resolveWorkspaceForCommand(
         };
       }
     }
+
     return { ok: true, entry };
   } catch (error) {
     return {
@@ -147,9 +156,11 @@ export async function requireResolvedWorkspaceForCommand(
   args: ResolveWorkspaceForCommandArgs,
 ): Promise<RuntimeEntry> {
   const resolution = await resolveWorkspaceForCommand(args);
+
   if (resolution.ok) {
     return resolution.entry;
   }
+
   throw new ExpectedCommandDispatchError(
     resolution.failure.code,
     resolution.failure.message,

@@ -19,6 +19,7 @@ export function isJsonInvocation(
   const args = argv.slice(2);
   const terminator = args.indexOf("--");
   const scanned = terminator === -1 ? args : args.slice(0, terminator);
+
   return scanned.some(
     (arg, index) =>
       arg === "--json" ||

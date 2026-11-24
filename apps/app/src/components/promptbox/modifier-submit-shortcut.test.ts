@@ -8,6 +8,7 @@ import {
 function mockPlatform(platform: string): () => void {
   const originalNavigator = globalThis.navigator;
   vi.stubGlobal("navigator", { ...originalNavigator, platform });
+
   return () => vi.unstubAllGlobals();
 }
 
@@ -24,6 +25,7 @@ describe("modifier submit shortcut", () => {
       altKey: false,
       shiftKey: false,
     };
+
     expect(isModifierSubmitKeyEvent({ ...base, ctrlKey: true })).toBe(true);
     expect(isModifierSubmitKeyEvent({ ...base, metaKey: true })).toBe(true);
     expect(isModifierSubmitKeyEvent(base)).toBe(false);

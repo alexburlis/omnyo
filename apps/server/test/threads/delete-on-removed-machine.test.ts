@@ -1,4 +1,4 @@
-import { getThread } from "@bb/db";
+import { getThread } from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import { runThreadLifecycleSweep } from "../../src/services/system/periodic-sweeps.js";
 import { listQueuedThreadCommands } from "../helpers/commands.js";
@@ -19,13 +19,16 @@ describe("thread deletion on a removed machine", () => {
       const primary = seedHost(harness.deps, { id: "host_primary" });
       seedPrimaryHost(harness.deps, primary.id);
       const host = seedHost(harness.deps, { id: "host_removed" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
@@ -35,6 +38,7 @@ describe("thread deletion on a removed machine", () => {
       const removed = await harness.app.request(`${API}/hosts/${host.id}`, {
         method: "DELETE",
       });
+
       expect(removed.status).toBe(200);
 
       const deleted = await harness.app.request(`${API}/threads/${thread.id}`, {
@@ -42,6 +46,7 @@ describe("thread deletion on a removed machine", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ childThreadsConfirmed: false }),
       });
+
       expect(deleted.status).toBe(200);
       await runThreadLifecycleSweep(harness.deps);
 

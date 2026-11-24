@@ -1,12 +1,14 @@
 declare module "ws" {
   import { EventEmitter } from "node:events";
-  import type { IncomingMessage } from "node:http";
+  import type { IncomingMessage, Server } from "node:http";
   import type { Duplex } from "node:stream";
 
   export type RawData = string | Buffer | ArrayBuffer | Buffer[];
 
   export interface ClientOptions {
     headers?: Record<string, string>;
+    handshakeTimeout?: number;
+    maxPayload?: number;
   }
 
   export class WebSocket extends EventEmitter {
@@ -20,7 +22,12 @@ declare module "ws" {
     readonly readyState: number;
     readonly bufferedAmount: number;
     readonly protocol: string;
-    send(data: string | Buffer | Uint8Array): void;
+    send(data: RawData | Uint8Array, callback?: (error?: Error) => void): void;
+    send(
+      data: RawData | Uint8Array,
+      options: { binary?: boolean; compress?: boolean },
+      callback?: (error?: Error) => void,
+    ): void;
     close(code?: number, reason?: string): void;
     terminate(): void;
     on(event: "open", listener: () => void): this;
@@ -41,7 +48,15 @@ declare module "ws" {
 
   export class WebSocketServer extends EventEmitter {
     clients: Set<WebSocket>;
-    constructor(options?: { noServer?: boolean; maxPayload?: number });
+    constructor(options?: {
+      noServer?: boolean;
+      maxPayload?: number;
+      server?: Server;
+    });
+    on(
+      event: "connection",
+      listener: (socket: WebSocket, request: IncomingMessage) => void,
+    ): this;
     handleUpgrade(
       request: IncomingMessage,
       socket: Duplex,

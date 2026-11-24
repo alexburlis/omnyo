@@ -1,11 +1,11 @@
 import { and, eq } from "drizzle-orm";
-import { events } from "@bb/db";
+import { events } from "@omnyo/db";
 import {
   turnRequestEventDataSchema,
   type SystemMessageKind,
   type SystemMessageSubject,
   type ThreadEventTurnStatus,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   queueChildThreadNeedsAttentionNotificationBestEffort,
@@ -35,16 +35,19 @@ function seedParentFixture(
 ): ParentFixture {
   const { host } = seedHostSession(harness.deps, { id: hostId });
   const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: `/tmp/${hostId}-environment`,
   });
+
   const parent = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
     title: "Manager",
   });
+
   seedThreadRuntimeState(harness.deps, {
     threadId: parent.id,
     environmentId: environment.id,
@@ -52,6 +55,7 @@ function seedParentFixture(
     inputText: "Manage things",
     model: "fake-model",
   });
+
   return {
     hostId: host.id,
     parentThreadId: parent.id,
@@ -70,6 +74,7 @@ async function waitForStampedSystemMessage(
   timeoutMs = 4_000,
 ): Promise<StampedSystemMessage> {
   const deadline = Date.now() + timeoutMs;
+
   while (Date.now() < deadline) {
     const rows = harness.db
       .select()
@@ -82,8 +87,10 @@ async function waitForStampedSystemMessage(
       )
       .orderBy(events.sequence)
       .all();
+
     for (const row of rows) {
       const data = turnRequestEventDataSchema.parse(JSON.parse(row.data));
+
       if (data.initiator === "system") {
         return {
           systemMessageKind: data.systemMessageKind ?? "unlabeled",
@@ -91,8 +98,10 @@ async function waitForStampedSystemMessage(
         };
       }
     }
+
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+
   throw new Error("Timed out waiting for a stamped system message");
 }
 
@@ -110,6 +119,7 @@ describe("Family B emit-site discriminator stamping", () => {
     it(`stamps a single ${turnStatus} child outcome as ${expectedKind}`, async () => {
       await withTestHarness(async (harness) => {
         const fixture = seedParentFixture(harness, `host-child-${turnStatus}`);
+
         const child = seedThread(harness.deps, {
           projectId: fixture.projectId,
           title: "Worker child",
@@ -126,6 +136,7 @@ describe("Family B emit-site discriminator stamping", () => {
           harness,
           fixture.parentThreadId,
         );
+
         expect(stamped.systemMessageKind).toBe(expectedKind);
         expect(stamped.systemMessageSubject).toEqual({
           kind: "thread",
@@ -140,6 +151,7 @@ describe("Family B emit-site discriminator stamping", () => {
   it("stamps a needs-attention notification as child-needs-attention", async () => {
     await withTestHarness(async (harness) => {
       const fixture = seedParentFixture(harness, "host-child-attention");
+
       const child = seedThread(harness.deps, {
         projectId: fixture.projectId,
         title: "Blocked child",
@@ -156,6 +168,7 @@ describe("Family B emit-site discriminator stamping", () => {
         harness,
         fixture.parentThreadId,
       );
+
       expect(stamped.systemMessageKind).toBe("child-needs-attention");
       expect(stamped.systemMessageSubject).toEqual({
         kind: "thread",
@@ -168,6 +181,7 @@ describe("Family B emit-site discriminator stamping", () => {
   it("stamps ownership assignment as ownership-assigned naming the child", async () => {
     await withTestHarness(async (harness) => {
       const fixture = seedParentFixture(harness, "host-ownership-assign");
+
       const child = seedThread(harness.deps, {
         projectId: fixture.projectId,
         title: "Assigned child",
@@ -183,6 +197,7 @@ describe("Family B emit-site discriminator stamping", () => {
         harness,
         fixture.parentThreadId,
       );
+
       expect(stamped.systemMessageKind).toBe("ownership-assigned");
       expect(stamped.systemMessageSubject).toEqual({
         kind: "thread",
@@ -195,6 +210,7 @@ describe("Family B emit-site discriminator stamping", () => {
   it("stamps ownership removal as ownership-removed naming the child", async () => {
     await withTestHarness(async (harness) => {
       const fixture = seedParentFixture(harness, "host-ownership-remove");
+
       const child = seedThread(harness.deps, {
         projectId: fixture.projectId,
         title: "Released child",
@@ -210,6 +226,7 @@ describe("Family B emit-site discriminator stamping", () => {
         harness,
         fixture.parentThreadId,
       );
+
       expect(stamped.systemMessageKind).toBe("ownership-removed");
       expect(stamped.systemMessageSubject).toEqual({
         kind: "thread",

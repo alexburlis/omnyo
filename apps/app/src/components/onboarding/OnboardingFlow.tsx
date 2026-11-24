@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { z } from "zod";
+import { getPluginPanelRoutePath } from "@/lib/route-paths";
 import {
   findLocalPathProjectSourceForHost,
   isActiveTerminalSessionStatus,
-  mobileAppDownloads,
-} from "@bb/domain";
-import type { TerminalOutputChunk, TerminalSession } from "@bb/server-contract";
-import { useMediaQuery } from "@bb/shared-ui/hooks/use-media-query";
+} from "@omnyo/domain";
+import type {
+  TerminalOutputChunk,
+  TerminalSession,
+} from "@omnyo/server-contract";
+import { useMediaQuery } from "@omnyo/shared-ui/hooks/use-media-query";
 import { AddMachineDialog } from "@/components/dialogs/AddMachineDialog";
 import { ProjectPathDialog } from "@/components/dialogs/ProjectPathDialog";
 import { PluginSettingsSections } from "@/components/plugin/PluginSettingsSections";
@@ -23,27 +27,19 @@ import {
 } from "@/components/provider-cli/provider-cli-install-store";
 import { ThreadTerminalView } from "@/components/thread/terminal/ThreadTerminalView";
 import { appToast } from "@/components/ui/app-toast";
-import { applyPluginInstallJob } from "@/hooks/cache-owners/plugin-cache-owner";
 import { useCreateProject } from "@/hooks/mutations/project-mutations";
 import {
   useHostDiscoveredRepos,
   useHosts,
   usePrimaryHost,
 } from "@/hooks/queries/host-queries";
-import {
-  usePluginCatalogSearch,
-  type PluginCatalogSearchEntry,
-} from "@/hooks/queries/plugin-catalog-queries";
-import {
-  startCatalogPluginInstall,
-  useCatalogEntryInstallJob,
-} from "@/hooks/queries/plugin-install-job-queries";
 import { usePluginList } from "@/hooks/queries/plugin-settings-queries";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
 import { terminalOutputTailQueryKey } from "@/hooks/queries/query-keys";
 import {
   useHostProviderCliStatus,
   useSystemConfig,
+  useSystemExecutionOptions,
   useSystemProviderStates,
   useSystemProviders,
 } from "@/hooks/queries/system-queries";
@@ -55,9 +51,9 @@ import { useDesktopWindowState } from "@/hooks/useDesktopWindowState";
 import { useHostDaemon } from "@/hooks/useHostDaemon";
 import { useQuickCreateProjectController } from "@/hooks/useQuickCreateProject";
 import {
-  getBbDesktopInfo,
+  getOmnyoDesktopInfo,
   shouldReserveMacosTrafficLights,
-} from "@/lib/bb-desktop";
+} from "@/lib/omnyo-desktop";
 import { decodeBase64Bytes } from "@/lib/base64-bytes";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
 import { sdk } from "@/lib/sdk";
@@ -66,22 +62,35 @@ import { openUrlInExternalBrowser } from "@/lib/url-open-routing";
 import {
   AgentSignInGuide,
   AgentStep,
+  AutomationsStep,
   DevicesStep,
   OnboardingLayout,
-  OnboardingPluginCard,
-  OnboardingPluginGrid,
-  OnboardingPluginGridSkeleton,
+  OnboardingPluginSections,
   ProjectsStep,
   type OnboardingAgent,
   type OnboardingRepo,
+  type OnboardingStepChrome as StepChrome,
 } from "./OnboardingViews";
 import {
+  OnboardingBrowserStep,
+  browserLoginApi,
+} from "./OnboardingBrowserStep";
+import {
+  AUTOMATIONS_PLUGIN_ID,
+  CHAT_IMPORTER_PLUGIN_ID,
   CONNECT_PLUGIN_ID,
-  ONBOARDING_PLUGINS,
-  ONBOARDING_PLUGIN_MARKETPLACE,
+  ONBOARDING_STARTERS,
+  SENTRY_MANIFEST_FILES,
+  SENTRY_PLUGIN_ID,
+  starterAutomationInput,
+  usesSentrySdk,
+  type OnboardingStarterId,
+  adjacentOnboardingStep,
   connectAccessUrl,
   defaultSelectedRepoPaths,
   hasReadyAgent,
+  onboardingPluginGroups,
+  onboardingSteps,
   parseSignInOutput,
   resolveAgentSetupState,
   resolveSignInCommand,
@@ -92,18 +101,30 @@ import {
   recordTelemetryEvent,
   type OnboardingEntry,
 } from "./onboarding-telemetry";
+import { OnboardingIntro } from "./OnboardingIntro";
+import {
+  OnboardingStageContainer,
+  type OnboardingProjectDraft,
+} from "./OnboardingStageContainer";
+import { useLeaveOnNavigation } from "./useLeaveOnNavigation";
 
 const SIGN_IN_POLL_INTERVAL_MS = 3_000;
+
 const SIGN_IN_TERMINAL_COLS = 200;
+
 const SIGN_IN_TERMINAL_ROWS = 14;
+
 const SIGN_IN_OUTPUT_POLL_INTERVAL_MS = 1_000;
+
 const SIGN_IN_OUTPUT_TAIL_BYTES = 64 * 1024;
+
 const SIGN_IN_TERMINAL_FALLBACK_DELAY_MS = 6_000;
+
 const INSTALL_FAILED_MESSAGE = "Install failed";
-const PLUGIN_TOGGLE_SETTLE_TIMEOUT_MS = 10_000;
 
 function decodeTerminalChunks(chunks: readonly TerminalOutputChunk[]): string {
   const decoder = new TextDecoder();
+
   return chunks
     .map((chunk) =>
       decoder.decode(decodeBase64Bytes(chunk.dataBase64), { stream: true }),
@@ -144,7 +165,9 @@ function AgentSignInContainer({
     gcTime: 0,
     retry: false,
   });
+
   const output = outputQuery.data;
+
   const guide = useMemo(
     () =>
       output === undefined
@@ -152,6 +175,7 @@ function AgentSignInContainer({
         : parseSignInOutput(decodeTerminalChunks(output.chunks)),
     [output],
   );
+
   const [code, setCode] = useState("");
   const [codeSubmitted, setCodeSubmitted] = useState(false);
   const [terminalChoice, setTerminalChoice] = useState<boolean | null>(null);
@@ -161,13 +185,16 @@ function AgentSignInContainer({
       () => setFallbackDue(true),
       SIGN_IN_TERMINAL_FALLBACK_DELAY_MS,
     );
+
     return () => window.clearTimeout(timer);
   }, []);
+
   const terminalVisible =
     terminalChoice ?? (fallbackDue && (guide === null || guide.url === null));
 
   const exited =
     output !== undefined && !isActiveTerminalSessionStatus(output.status);
+
   const exitCode = output?.exitCode ?? null;
   useEffect(() => {
     if (exited) onExit(exitCode);
@@ -175,6 +202,7 @@ function AgentSignInContainer({
 
   const submitCode = () => {
     const trimmed = code.trim();
+
     if (trimmed.length === 0) return;
     setCodeSubmitted(true);
     sdk.terminals
@@ -214,13 +242,6 @@ function AgentSignInContainer({
   );
 }
 
-interface StepChrome {
-  compact: boolean;
-  reserveMacosTrafficLights: boolean;
-  onSelectStep: (step: OnboardingStepId) => void;
-  onSkipAll: () => void;
-}
-
 async function closeAbandonedSignInTerminals({
   hostId,
   title,
@@ -231,10 +252,12 @@ async function closeAbandonedSignInTerminals({
   const listing = await sdk.terminals
     .list({ scope: { kind: "host_path", hostId } })
     .catch(() => null);
+
   const abandoned = (listing?.sessions ?? []).filter(
     (session) =>
       session.title === title && isActiveTerminalSessionStatus(session.status),
   );
+
   await Promise.all(
     abandoned.map((session) =>
       sdk.terminals
@@ -270,31 +293,45 @@ function AgentStepContainer({
     enabled: hostId !== null,
     ...(hostId === null ? {} : { hostId }),
   });
+
   const providersQuery = useSystemProviders(
     hostId === null ? { enabled: false } : { hostId },
   );
+
   const cliStatusQuery = useHostProviderCliStatus({ hostId });
   const installRunner = useProviderCliInstallRunner();
   const { isLocalDaemonHost } = useHostDaemon();
   const createTerminal = useCreateTerminal();
   const closeTerminal = useCloseTerminal();
   const [signIn, setSignIn] = useState<SignInSession | null>(null);
+
   const [signInFailedProviderId, setSignInFailedProviderId] = useState<
     string | null
   >(null);
+
   const signInRef = useRef<SignInSession | null>(null);
   const { refetch: refetchStates } = statesQuery;
   const { mutate: closeTerminalMutate } = closeTerminal;
   const { mutateAsync: createTerminalAsync } = createTerminal;
 
   const endSignIn = useCallback(
-    (outcome: "ready" | "exited" | "failed" | "cancelled" = "cancelled") => {
+    (
+      outcome: "ready" | "exited" | "failed" | "cancelled" = "cancelled",
+      failureReason?: "nonzero_exit" | "unknown",
+    ) => {
       const current = signInRef.current;
+
       if (current === null) return;
       signInRef.current = null;
       recordTelemetryEvent({
         name: "onboarding_sign_in",
-        properties: { entry, outcome },
+        properties: {
+          entry,
+          outcome,
+          ...(outcome === "failed"
+            ? { failure_reason: failureReason ?? "unknown" }
+            : {}),
+        },
       });
       setSignIn(null);
       closeTerminalMutate({ mode: "force", terminalId: current.session.id });
@@ -315,28 +352,37 @@ function AgentStepContainer({
   const handleSignInExit = useCallback(
     (exitCode: number | null) => {
       const current = signInRef.current;
+
       if (current !== null && exitCode !== 0) {
         setSignInFailedProviderId(current.providerId);
       }
-      endSignIn(exitCode === 0 ? "exited" : "failed");
+
+      endSignIn(
+        exitCode === 0 ? "exited" : "failed",
+        exitCode === null ? "unknown" : "nonzero_exit",
+      );
     },
     [endSignIn],
   );
 
   useEffect(() => {
     if (signIn === null) return;
+
     const interval = window.setInterval(() => {
       void refetchStates();
     }, SIGN_IN_POLL_INTERVAL_MS);
+
     return () => window.clearInterval(interval);
   }, [refetchStates, signIn]);
 
   const states = statesQuery.data?.providers;
   const signingInProviderId = signIn?.providerId ?? null;
+
   const signingInProviderReady =
     signingInProviderId !== null &&
     states?.find((state) => state.providerId === signingInProviderId)
       ?.status === "ready";
+
   useEffect(() => {
     if (signingInProviderReady) endSignIn("ready");
   }, [endSignIn, signingInProviderReady]);
@@ -351,10 +397,14 @@ function AgentStepContainer({
     requestedMethod?: SignInMethod,
   ) => {
     const state = states?.find((entry) => entry.providerId === providerId);
+
     if (hostId === null || !state) return;
+
     const method =
       requestedMethod ?? (isLocalDaemonHost(hostId) ? "local" : "remote");
+
     const command = resolveSignInCommand(state, method === "local");
+
     if (command === null) return;
     endSignIn();
     setSignInFailedProviderId(null);
@@ -367,6 +417,7 @@ function AgentStepContainer({
     const title = `Sign in to ${state.displayName}`;
     await closeAbandonedSignInTerminals({ hostId, title });
     let session: TerminalSession;
+
     try {
       session = await createTerminalAsync({
         cols: SIGN_IN_TERMINAL_COLS,
@@ -378,10 +429,16 @@ function AgentStepContainer({
     } catch {
       recordTelemetryEvent({
         name: "onboarding_sign_in",
-        properties: { entry, outcome: "failed" },
+        properties: {
+          entry,
+          outcome: "failed",
+          failure_reason: "start_rejected",
+        },
       });
+
       return;
     }
+
     if (signInRequestRef.current !== request) {
       recordTelemetryEvent({
         name: "onboarding_sign_in",
@@ -390,8 +447,10 @@ function AgentStepContainer({
       void sdk.terminals
         .close({ mode: "force", terminalId: session.id })
         .catch(() => null);
+
       return;
     }
+
     const next: SignInSession = {
       providerId,
       session,
@@ -401,23 +460,28 @@ function AgentStepContainer({
         state.loginCommand !== null &&
         state.localLoginCommand !== state.loginCommand,
     };
+
     signInRef.current = next;
     setSignIn(next);
   };
 
   const startInstall = (providerId: string) => {
     const status = cliStatusQuery.data?.[providerId];
+
     if (hostId === null || status === undefined) return;
     const issue = buildProviderCliIssue({ provider: providerId, status });
+
     if (issue === null || !hasProviderCliAction(issue)) return;
     installRunner.startInstall({ hostId, issue });
   };
 
   const viewInstallLog = (providerId: string) => {
     if (hostId === null) return;
+
     const failure = installRunner.failuresByJobKey.get(
       providerCliJobKey(hostId, providerId),
     );
+
     if (failure === undefined) return;
     openProviderCliInstallLog(failure.logDialogState);
   };
@@ -429,8 +493,10 @@ function AgentStepContainer({
           const info = providersQuery.data?.find(
             (provider) => provider.id === health.providerId,
           );
+
           const jobKey = providerCliJobKey(hostId, health.providerId);
           const signingIn = signIn?.providerId === health.providerId;
+
           return {
             id: health.providerId,
             name: health.displayName,
@@ -478,12 +544,13 @@ function AgentStepContainer({
 
   const agentReady = hasReadyAgent(states);
   const agentBlocked = agents === null ? statesQuery.isError : !agentReady;
+
   return (
     <OnboardingLayout
       {...chrome}
       step="agent"
       title="Connect a coding agent"
-      description="bb runs the agents you already use. You need one that is installed and signed in on this computer."
+      description="Omnyo runs the agents you already use. You need one that is installed and signed in on this computer."
       footerNote={
         agentBlocked ? "Threads can't start until one agent is ready." : null
       }
@@ -516,6 +583,7 @@ function ProjectsStepContainer({
   onBack,
   onContinue,
   onSkip,
+  onDraftChange,
 }: {
   chrome: StepChrome;
   hostId: string | null;
@@ -523,6 +591,7 @@ function ProjectsStepContainer({
   onBack: () => void;
   onContinue: () => void;
   onSkip: () => void;
+  onDraftChange: (draft: readonly OnboardingProjectDraft[]) => void;
 }) {
   const reposQuery = useHostDiscoveredRepos(hostId);
   const createProject = useCreateProject();
@@ -535,6 +604,7 @@ function ProjectsStepContainer({
 
   const { refetch: refetchRepos } = reposQuery;
   const navigationProjects = navigationQuery.data?.projects;
+
   const hostProjects = useMemo(
     () =>
       hostId === null
@@ -544,13 +614,16 @@ function ProjectsStepContainer({
               project.sources,
               hostId,
             );
+
             return source === undefined
               ? []
               : [{ id: project.id, name: project.name, path: source.path }];
           }),
     [hostId, navigationProjects],
   );
+
   const scannedRepos = reposQuery.data?.repos;
+
   const discovered = useMemo(
     () =>
       scannedRepos?.map((repo) =>
@@ -565,19 +638,35 @@ function ProjectsStepContainer({
       ),
     [hostProjects, scannedRepos],
   );
+
   const selectedPaths = useMemo(() => {
     const importable = new Set(
       (discovered ?? [])
         .filter((repo) => repo.projectId === null)
         .map((repo) => repo.path),
     );
+
     const chosen = selection ?? defaultSelectedRepoPaths(discovered ?? [], now);
+
     return new Set([...chosen].filter((path) => importable.has(path)));
   }, [discovered, now, selection]);
+
+  const draft = useMemo(
+    () =>
+      (discovered ?? [])
+        .filter((repo) => selectedPaths.has(repo.path))
+        .map((repo) => ({ id: repo.path, name: repo.name })),
+    [discovered, selectedPaths],
+  );
+
+  useEffect(() => onDraftChange(draft), [draft, onDraftChange]);
+  useEffect(() => () => onDraftChange([]), [onDraftChange]);
+
   const repos = useMemo((): OnboardingRepo[] => {
     const discoveredPaths = new Set(
       (discovered ?? []).map((repo) => repo.path),
     );
+
     return [
       ...hostProjects
         .filter(
@@ -610,10 +699,13 @@ function ProjectsStepContainer({
 
   const importSelected = async () => {
     if (hostId === null || discovered === undefined) return;
+
     const chosen = discovered.filter(
       (repo) => repo.projectId === null && selectedPaths.has(repo.path),
     );
+
     setImporting(true);
+
     try {
       for (const repo of chosen) {
         await createProject.mutateAsync({
@@ -627,10 +719,12 @@ function ProjectsStepContainer({
       setImporting(false);
       void refetchRepos();
     }
+
     onContinue();
   };
 
   const scanning = hostId === null || reposQuery.isPending || rescanning;
+
   return (
     <OnboardingLayout
       {...chrome}
@@ -659,7 +753,7 @@ function ProjectsStepContainer({
             : reposQuery.isError
               ? {
                   kind: "error",
-                  message: "bb couldn't scan this computer for git repos.",
+                  message: "Omnyo couldn't scan this computer for git repos.",
                 }
               : { kind: "results", truncated: reposQuery.data.truncated }
         }
@@ -667,6 +761,7 @@ function ProjectsStepContainer({
         selectedIds={selectedPaths}
         onToggle={(path) => {
           const next = new Set(selectedPaths);
+
           if (next.has(path)) next.delete(path);
           else next.add(path);
           setSelection(next);
@@ -701,151 +796,357 @@ function ProjectsStepContainer({
   );
 }
 
-function PluginCardContainer({
-  entry,
-  enabled,
-  onChanged,
-}: {
-  entry: PluginCatalogSearchEntry;
-  enabled: boolean;
-  onChanged: () => Promise<void>;
-}) {
-  const queryClient = useQueryClient();
-  const setPluginEnabled = useSetPluginEnabled();
-  const installJob = useCatalogEntryInstallJob(entry);
-  const [working, setWorking] = useState(false);
-  const [target, setTarget] = useState<boolean | null>(null);
-  if (target !== null && target === enabled) {
-    setTarget(null);
-  }
-  const busy = working || installJob !== null;
-  const settling = target !== null && target !== enabled;
-  useEffect(() => {
-    if (!settling || busy) return;
-    const timer = window.setTimeout(
-      () => setTarget(null),
-      PLUGIN_TOGGLE_SETTLE_TIMEOUT_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [busy, settling]);
-
-  const toggle = async (next: boolean) => {
-    setTarget(next);
-    setWorking(true);
-    try {
-      if (next && !entry.installed) {
-        const job = await startCatalogPluginInstall(fetch, {
-          entryId: entry.entryId,
-          marketplace: entry.marketplace,
-        });
-        applyPluginInstallJob({ queryClient, job });
-      } else {
-        await setPluginEnabled(entry.pluginId, next);
-      }
-      await onChanged();
-    } catch (error) {
-      setTarget(null);
-      appToast.error(
-        error instanceof Error
-          ? error.message
-          : `Failed to update ${entry.displayName}.`,
-      );
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  return (
-    <OnboardingPluginCard
-      name={entry.displayName}
-      description={entry.description}
-      icon={{
-        icon: entry.icon,
-        iconUrl: entry.iconUrl,
-        iconTinted: entry.iconTinted,
-      }}
-      enabled={target ?? enabled}
-      pending={busy || settling}
-      unavailableReason={
-        entry.installed || entry.compatible
-          ? null
-          : (entry.incompatibleReason ?? "Not available on this server.")
-      }
-      onToggle={(next) => void toggle(next)}
-    />
-  );
-}
-
 function PluginsStepContainer({
   chrome,
   onBack,
   onContinue,
-  onSkip,
 }: {
   chrome: StepChrome;
   onBack: () => void;
   onContinue: () => void;
-  onSkip: () => void;
 }) {
-  const catalogQuery = usePluginCatalogSearch("", { enabled: true });
   const listQuery = usePluginList({ enabled: true });
-  const { refetch: refetchCatalog } = catalogQuery;
+  const setPluginEnabled = useSetPluginEnabled();
   const { refetch: refetchList } = listQuery;
-  const refresh = useCallback(async () => {
-    await Promise.all([refetchCatalog(), refetchList()]);
-  }, [refetchCatalog, refetchList]);
 
-  const installedPlugins = listQuery.data?.plugins;
-  const installedCount = installedPlugins?.length ?? 0;
-  useEffect(() => {
-    void refetchCatalog();
-  }, [installedCount, refetchCatalog]);
+  const [targets, setTargets] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map(),
+  );
 
-  const entries = useMemo(() => {
-    const all = catalogQuery.data?.entries;
-    if (all === undefined) return null;
-    return ONBOARDING_PLUGINS.flatMap(({ entryId }) => {
-      const entry = all.find(
-        (candidate) =>
-          candidate.marketplace === ONBOARDING_PLUGIN_MARKETPLACE &&
-          candidate.entryId === entryId,
+  const installed = listQuery.data?.plugins;
+
+  const groups =
+    installed === undefined ? null : onboardingPluginGroups(installed);
+
+  const toggle = async (pluginId: string, enabled: boolean) => {
+    setTargets((current) => new Map(current).set(pluginId, enabled));
+
+    try {
+      await setPluginEnabled(pluginId, enabled);
+      await refetchList();
+    } catch (error) {
+      appToast.error(
+        error instanceof Error ? error.message : "Couldn't change that plugin.",
       );
-      return entry === undefined ? [] : [entry];
-    });
-  }, [catalogQuery.data?.entries]);
+    } finally {
+      setTargets((current) => {
+        const next = new Map(current);
+        next.delete(pluginId);
+
+        return next;
+      });
+    }
+  };
+
+  const sections =
+    groups === null
+      ? null
+      : groups.map((group) => ({
+          id: group.id,
+          label: group.label,
+          plugins: group.plugins.map((plugin) => ({
+            id: plugin.id,
+            name: plugin.name ?? plugin.id,
+            description: plugin.description,
+            icon: plugin.icon,
+            enabled: targets.get(plugin.id) ?? plugin.enabled,
+            pending: targets.has(plugin.id),
+          })),
+        }));
+
+  const rows = sections?.flatMap((section) => section.plugins) ?? [];
+  const onCount = rows.filter((plugin) => plugin.enabled).length;
+  const allOn = rows.length > 0 && onCount === rows.length;
 
   return (
     <OnboardingLayout
       {...chrome}
       step="plugins"
-      title="Make bb yours"
-      description="Most of bb is plugins. These ones are off until you want them, and you can change your mind in Plugins."
+      title="Recommended plugins are on"
+      description="Omnyo starts with these. Turn off anything you don't want."
+      footerNote={
+        sections === null || rows.length === 0
+          ? null
+          : `${onCount} of ${rows.length} on`
+      }
+      primaryLabel={allOn ? "Continue with recommended" : "Continue"}
+      primaryDisabled={targets.size > 0}
+      onPrimary={onContinue}
+      onBack={onBack}
+    >
+      <OnboardingPluginSections
+        sections={sections}
+        compact={chrome.compact}
+        onToggle={(pluginId, enabled) => void toggle(pluginId, enabled)}
+      />
+    </OnboardingLayout>
+  );
+}
+
+const STARTER_ICONS: Record<OnboardingStarterId, string> = {
+  briefing: "Coffee",
+  dependencies: "PackageReceive",
+};
+
+const createdAutomationSchema = z.object({ id: z.string().min(1) });
+
+const deletedAutomationSchema = z.object({ ok: z.literal(true) });
+
+export type ScheduledStarters = Partial<
+  Record<OnboardingStarterId, { projectId: string; automationId: string }>
+>;
+
+function decodeFileContent(file: {
+  content: string;
+  contentEncoding?: string;
+}): string {
+  if (file.contentEncoding !== "base64") return file.content;
+
+  return new TextDecoder().decode(decodeBase64Bytes(file.content));
+}
+
+function AutomationsStepContainer({
+  chrome,
+  hostId,
+  scheduled,
+  contentFeedQueued,
+  sentryEnabled,
+  onScheduledChange,
+  onContentFeedQueuedChange,
+  onBack,
+  onContinue,
+}: {
+  chrome: StepChrome;
+  hostId: string | null;
+  scheduled: ScheduledStarters;
+  contentFeedQueued: boolean;
+  sentryEnabled: boolean;
+  onScheduledChange: (
+    update: (current: ScheduledStarters) => ScheduledStarters,
+  ) => void;
+  onContentFeedQueuedChange: (queued: boolean) => void;
+  onBack: () => void;
+  onContinue: () => void;
+}) {
+  const navigationProjects = useSidebarNavigation().data?.projects;
+  const [chosenProjectId, setChosenProjectId] = useState<string | null>(null);
+
+  const [pending, setPending] = useState<ReadonlySet<OnboardingStarterId>>(
+    () => new Set(),
+  );
+
+  const [sentryOpen, setSentryOpen] = useState(false);
+
+  const projects = (hostId === null ? [] : (navigationProjects ?? [])).flatMap(
+    (project) => {
+      const source =
+        hostId === null
+          ? undefined
+          : findLocalPathProjectSourceForHost(project.sources, hostId);
+
+      return source === undefined
+        ? []
+        : [{ id: project.id, name: project.name, path: source.path }];
+    },
+  );
+
+  const project =
+    projects.find((entry) => entry.id === chosenProjectId) ??
+    projects[0] ??
+    null;
+
+  const statesQuery = useSystemProviderStates({
+    enabled: hostId !== null,
+    poll: false,
+    ...(hostId === null ? {} : { hostId }),
+  });
+
+  const readyAgent =
+    statesQuery.data?.providers.find((state) => state.status === "ready") ??
+    null;
+
+  const modelsQuery = useSystemExecutionOptions({
+    enabled: hostId !== null && readyAgent !== null,
+    ...(hostId === null ? {} : { hostId }),
+    ...(readyAgent === null ? {} : { providerId: readyAgent.providerId }),
+  });
+
+  const defaultModel =
+    modelsQuery.data?.models.find((model) => model.isDefault)?.model ?? null;
+
+  const sentryQuery = useQuery({
+    queryKey: ["onboarding", "sentry-sdk", hostId, project?.path ?? null],
+    enabled: sentryEnabled && hostId !== null && project !== null,
+    staleTime: Infinity,
+    queryFn: async ({ signal }) => {
+      if (hostId === null || project === null) return false;
+
+      const manifests = await Promise.all(
+        SENTRY_MANIFEST_FILES.map((file) =>
+          sdk.files
+            .read({ hostId, path: `${project.path}/${file}`, signal })
+            .then(
+              (result) => ({ file, content: decodeFileContent(result) }),
+              () => null,
+            ),
+        ),
+      );
+
+      return usesSentrySdk(
+        manifests.flatMap((manifest) => (manifest === null ? [] : [manifest])),
+      );
+    },
+  });
+
+  const toggleStarter = async (id: OnboardingStarterId, enabled: boolean) => {
+    const starter = ONBOARDING_STARTERS.find((entry) => entry.id === id);
+    const existing = scheduled[id];
+
+    if (starter === undefined) return;
+    setPending((current) => new Set(current).add(id));
+
+    try {
+      if (enabled && existing === undefined) {
+        if (
+          hostId === null ||
+          project === null ||
+          readyAgent === null ||
+          defaultModel === null
+        )
+          return;
+
+        const created = await sdk.plugins.callRpc({
+          pluginId: AUTOMATIONS_PLUGIN_ID,
+          method: "automations_create",
+          input: starterAutomationInput({
+            starter,
+            projectId: project.id,
+            hostId,
+            providerId: readyAgent.providerId,
+            model: defaultModel,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }),
+          outputSchema: createdAutomationSchema,
+        });
+
+        onScheduledChange((current) => ({
+          ...current,
+          [id]: { projectId: project.id, automationId: created.id },
+        }));
+      } else if (!enabled && existing !== undefined) {
+        await sdk.plugins.callRpc({
+          pluginId: AUTOMATIONS_PLUGIN_ID,
+          method: "automations_delete",
+          input: existing,
+          outputSchema: deletedAutomationSchema,
+        });
+        onScheduledChange((current) => {
+          const next = { ...current };
+          delete next[id];
+
+          return next;
+        });
+      }
+    } catch (error) {
+      appToast.error(
+        error instanceof Error
+          ? error.message
+          : `Couldn't change ${starter.name}.`,
+      );
+    } finally {
+      setPending((current) => {
+        const next = new Set(current);
+        next.delete(id);
+
+        return next;
+      });
+    }
+  };
+
+  const agentName =
+    readyAgent === null || defaultModel === null
+      ? null
+      : readyAgent.displayName;
+
+  const scheduledCount = Object.keys(scheduled).length;
+
+  return (
+    <OnboardingLayout
+      {...chrome}
+      step="automations"
+      title="Put Omnyo to work"
+      description="Each one runs on a schedule and uses your agent when it does."
+      footerNote={scheduledCount === 0 ? null : `${scheduledCount} scheduled`}
+      primaryLabel="Continue"
+      primaryDisabled={pending.size > 0}
+      onPrimary={onContinue}
+      onBack={onBack}
+    >
+      <AutomationsStep
+        projects={projects}
+        projectId={project?.id ?? null}
+        agentName={agentName}
+        starters={ONBOARDING_STARTERS.map((starter) => ({
+          id: starter.id,
+          name: starter.name,
+          description: starter.description,
+          scheduleLabel: starter.scheduleLabel,
+          icon: STARTER_ICONS[starter.id],
+          enabled: scheduled[starter.id] !== undefined,
+          pending: pending.has(starter.id),
+        }))}
+        sentry={
+          sentryQuery.data === true && project !== null
+            ? {
+                status: "detected",
+                projectName: project.name,
+                open: sentryOpen,
+                setup: <PluginSettingsSections pluginId={SENTRY_PLUGIN_ID} />,
+              }
+            : { status: "hidden" }
+        }
+        contentFeedQueued={contentFeedQueued}
+        onSelectProject={setChosenProjectId}
+        onToggleStarter={(id, enabled) => {
+          const starter = ONBOARDING_STARTERS.find((entry) => entry.id === id);
+
+          if (starter !== undefined) void toggleStarter(starter.id, enabled);
+        }}
+        onToggleSentrySetup={() => setSentryOpen((open) => !open)}
+        onToggleContentFeed={onContentFeedQueuedChange}
+      />
+    </OnboardingLayout>
+  );
+}
+
+function ChatsStepContainer({
+  chrome,
+  onBack,
+  onContinue,
+  onLeave,
+  onSkip,
+}: {
+  chrome: StepChrome;
+  onBack: () => void;
+  onContinue: () => void;
+  onLeave: () => void;
+  onSkip: () => void;
+}) {
+  useLeaveOnNavigation(onLeave);
+
+  return (
+    <OnboardingLayout
+      {...chrome}
+      step="chats"
+      title="Pick up where you left off"
+      description="Bring your recent Codex and Claude Code chats into Omnyo. Each one continues where you left off; your CLI history stays as it is."
       primaryLabel="Continue"
       secondaryLabel="Skip"
       onPrimary={onContinue}
       onSecondary={onSkip}
       onBack={onBack}
     >
-      <OnboardingPluginGrid compact={chrome.compact}>
-        {entries === null ? (
-          <OnboardingPluginGridSkeleton count={ONBOARDING_PLUGINS.length} />
-        ) : (
-          entries.map((entry) => (
-            <PluginCardContainer
-              key={entry.entryId}
-              entry={entry}
-              enabled={
-                entry.installed &&
-                (installedPlugins?.find(
-                  (plugin) => plugin.id === entry.pluginId,
-                )?.enabled ??
-                  false)
-              }
-              onChanged={refresh}
-            />
-          ))
-        )}
-      </OnboardingPluginGrid>
+      <PluginSettingsSections pluginId={CHAT_IMPORTER_PLUGIN_ID} />
     </OnboardingLayout>
   );
 }
@@ -867,12 +1168,8 @@ function DevicesStepContainer({
   const hostsQuery = useHosts();
   const [connectSetupOpen, setConnectSetupOpen] = useState(false);
   const [addMachineOpen, setAddMachineOpen] = useState(false);
-  const location = useLocation();
-  const [initialPathname] = useState(location.pathname);
-  const navigatedAway = location.pathname !== initialPathname;
-  useEffect(() => {
-    if (navigatedAway) onLeave();
-  }, [navigatedAway, onLeave]);
+  useLeaveOnNavigation(onLeave);
+
   const otherMachineCount = (hostsQuery.data ?? []).filter(
     (host) => host.id !== hostId,
   ).length;
@@ -881,9 +1178,9 @@ function DevicesStepContainer({
     <OnboardingLayout
       {...chrome}
       step="devices"
-      title="Use bb from anywhere"
+      title="Use Omnyo from anywhere"
       description="All optional. Everything here also lives in Settings → Machines."
-      primaryLabel="Start using bb"
+      primaryLabel="Start using Omnyo"
       onPrimary={onFinish}
       onBack={onBack}
     >
@@ -892,7 +1189,6 @@ function DevicesStepContainer({
         connectSetup={<PluginSettingsSections pluginId={CONNECT_PLUGIN_ID} />}
         connectSetupOpen={connectSetupOpen}
         otherMachineCount={otherMachineCount}
-        mobileLinks={mobileAppDownloads}
         onToggleConnectSetup={() => setConnectSetupOpen((open) => !open)}
         onCopyConnectUrl={(url) => void copyToClipboardWithToast(url)}
         onAddMachine={() => setAddMachineOpen(true)}
@@ -905,12 +1201,23 @@ function DevicesStepContainer({
   );
 }
 
-const STEP_ORDER: readonly OnboardingStepId[] = [
-  "agent",
-  "projects",
-  "plugins",
-  "devices",
-];
+const INTRO_PLAYED_STORAGE_KEY = "omnyo.onboarding.intro-played";
+
+function readIntroPlayed(): boolean {
+  try {
+    return window.sessionStorage.getItem(INTRO_PLAYED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberIntroPlayed(): void {
+  try {
+    window.sessionStorage.setItem(INTRO_PLAYED_STORAGE_KEY, "1");
+  } catch {
+    return;
+  }
+}
 
 export function OnboardingFlow({
   initialStep,
@@ -922,34 +1229,69 @@ export function OnboardingFlow({
   onClose: () => void;
 }) {
   const [step, setStep] = useState(initialStep);
+
+  const [previousStep, setPreviousStep] = useState<OnboardingStepId | null>(
+    null,
+  );
+
+  const [introPlaying, setIntroPlaying] = useState(
+    () => entry === "first_run" && !readIntroPlayed(),
+  );
+
+  const [projectDraft, setProjectDraft] = useState<
+    readonly OnboardingProjectDraft[]
+  >([]);
+
+  const [browserConnected, setBrowserConnected] = useState(false);
+
+  const [scheduledStarters, setScheduledStarters] = useState<ScheduledStarters>(
+    {},
+  );
+
+  const [contentFeedQueued, setContentFeedQueued] = useState(false);
+  const navigate = useNavigate();
+
+  const showStep = (next: OnboardingStepId) => {
+    setPreviousStep(step);
+    setStep(next);
+  };
+
   const navigationProjects = useSidebarNavigation().data?.projects;
+
   const [projectIdsAtOpen, setProjectIdsAtOpen] =
     useState<ReadonlySet<string> | null>(null);
+
   if (projectIdsAtOpen === null && navigationProjects !== undefined) {
     setProjectIdsAtOpen(
       new Set(navigationProjects.map((project) => project.id)),
     );
   }
+
   const primaryHost = usePrimaryHost();
   const hostId = primaryHost?.id ?? null;
   useHostDiscoveredRepos(hostId);
+
   const agentStatesQuery = useSystemProviderStates({
     enabled: hostId !== null,
     poll: false,
     ...(hostId === null ? {} : { hostId }),
   });
+
   const agentStates = agentStatesQuery.data?.providers;
   const agentStateRef = useRef<string | null>(null);
   useEffect(() => {
     if (agentStates === undefined && !agentStatesQuery.isError) return;
     const knownStates = agentStatesQuery.isError ? undefined : agentStates;
+
     const hasUnknown =
       knownStates?.some((state) => state.status === "unknown") ?? true;
+
     const installed =
       knownStates?.some(
         (state) =>
           state.status !== "not_installed" && state.status !== "unknown",
       ) ?? false;
+
     const properties = {
       entry,
       agent_installed: installed ? true : hasUnknown ? null : false,
@@ -959,7 +1301,9 @@ export function OnboardingFlow({
           ? null
           : false,
     };
+
     const key = JSON.stringify(properties);
+
     if (agentStateRef.current === key) return;
     agentStateRef.current = key;
     recordTelemetryEvent({ name: "onboarding_agent_state", properties });
@@ -989,9 +1333,11 @@ export function OnboardingFlow({
     });
   }, [entry, step]);
   const finishedRef = useRef(false);
+
   const close = (outcome: "completed" | "skipped") => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+
     if (outcome === "skipped") {
       recordTelemetryEvent({
         name: "onboarding_step_skipped",
@@ -1003,28 +1349,69 @@ export function OnboardingFlow({
         properties: { step, entry },
       });
     }
+
     recordTelemetryEvent({
       name: "onboarding_finished",
       properties: { outcome, entry, last_step: step },
     });
+
+    if (contentFeedQueued) {
+      void navigate(
+        getPluginPanelRoutePath({
+          pluginId: AUTOMATIONS_PLUGIN_ID,
+          path: "automations",
+          subPath: "import",
+        }),
+      );
+    }
+
     onClose();
   };
+
   const compact = useMediaQuery("(max-width: 640px)");
-  const [desktopInfo] = useState(getBbDesktopInfo);
+  const showStage = useMediaQuery("(min-width: 1100px)");
+  const [desktopInfo] = useState(getOmnyoDesktopInfo);
+  const [browserLogins] = useState(() => browserLoginApi(desktopInfo));
   const windowState = useDesktopWindowState();
+
+  const pluginListQuery = usePluginList({ enabled: true });
+  const pluginList = pluginListQuery.data?.plugins;
+
+  const chatImporterEnabled =
+    pluginList === undefined
+      ? !pluginListQuery.isError
+      : pluginList.some(
+          (plugin) => plugin.id === CHAT_IMPORTER_PLUGIN_ID && plugin.enabled,
+        );
+
+  const pluginEnabled = (pluginId: string) =>
+    pluginList?.some((plugin) => plugin.id === pluginId && plugin.enabled) ??
+    false;
+
+  const steps = onboardingSteps({
+    browserLogins: browserLogins !== null,
+    chatImporterEnabled,
+    automationsEnabled: pluginEnabled(AUTOMATIONS_PLUGIN_ID),
+  });
+
   const chrome: StepChrome = {
     compact,
     reserveMacosTrafficLights: shouldReserveMacosTrafficLights({
       desktopInfo,
       windowState,
     }),
-    onSelectStep: setStep,
+    steps,
+    previousStep,
+    onSelectStep: showStep,
     onSkipAll: () => close("skipped"),
   };
-  const goTo = (offset: number) => () => {
-    const next = STEP_ORDER[STEP_ORDER.indexOf(step) + offset];
-    if (next !== undefined) setStep(next);
+
+  const goTo = (direction: 1 | -1) => () => {
+    const next = adjacentOnboardingStep({ steps, step, direction });
+
+    if (next !== null) showStep(next);
   };
+
   const advance = (outcome: "completed" | "skipped") => () => {
     recordTelemetryEvent({
       name:
@@ -1036,48 +1423,131 @@ export function OnboardingFlow({
     goTo(1)();
   };
 
-  switch (step) {
-    case "agent":
-      return (
-        <AgentStepContainer
-          chrome={chrome}
-          entry={entry}
-          hostId={hostId}
-          hostName={primaryHost?.name ?? null}
-          onContinue={advance(
-            hasReadyAgent(agentStates) ? "completed" : "skipped",
-          )}
+  const stepContent = () => {
+    switch (step) {
+      case "agent":
+        return (
+          <AgentStepContainer
+            chrome={chrome}
+            entry={entry}
+            hostId={hostId}
+            hostName={primaryHost?.name ?? null}
+            onContinue={advance(
+              hasReadyAgent(agentStates) ? "completed" : "skipped",
+            )}
+          />
+        );
+      case "projects":
+        return (
+          <ProjectsStepContainer
+            chrome={chrome}
+            hostId={hostId}
+            projectIdsAtOpen={projectIdsAtOpen}
+            onBack={goTo(-1)}
+            onContinue={advance("completed")}
+            onSkip={advance("skipped")}
+            onDraftChange={setProjectDraft}
+          />
+        );
+      case "chats":
+        return (
+          <ChatsStepContainer
+            chrome={chrome}
+            onBack={goTo(-1)}
+            onContinue={advance("completed")}
+            onLeave={() => close("completed")}
+            onSkip={advance("skipped")}
+          />
+        );
+      case "browser":
+        return browserLogins === null ? null : (
+          <OnboardingBrowserStep
+            chrome={chrome}
+            browser={browserLogins}
+            permissionNote={
+              desktopInfo?.platform === "macos"
+                ? "If macOS asks, choose Always Allow so Omnyo stays in sync."
+                : null
+            }
+            onBack={goTo(-1)}
+            onContinue={advance("completed")}
+            onSkip={advance("skipped")}
+            onConnectedChange={setBrowserConnected}
+          />
+        );
+      case "plugins":
+        return (
+          <PluginsStepContainer
+            chrome={chrome}
+            onBack={goTo(-1)}
+            onContinue={advance("completed")}
+          />
+        );
+      case "automations":
+        return (
+          <AutomationsStepContainer
+            chrome={chrome}
+            hostId={hostId}
+            scheduled={scheduledStarters}
+            contentFeedQueued={contentFeedQueued}
+            sentryEnabled={pluginEnabled(SENTRY_PLUGIN_ID)}
+            onScheduledChange={setScheduledStarters}
+            onContentFeedQueuedChange={setContentFeedQueued}
+            onBack={goTo(-1)}
+            onContinue={advance(
+              Object.keys(scheduledStarters).length > 0 || contentFeedQueued
+                ? "completed"
+                : "skipped",
+            )}
+          />
+        );
+      case "devices":
+        return (
+          <DevicesStepContainer
+            chrome={chrome}
+            hostId={hostId}
+            onBack={goTo(-1)}
+            onFinish={() => close("completed")}
+            onLeave={() => close("skipped")}
+          />
+        );
+    }
+  };
+
+  return (
+    <>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">{stepContent()}</div>
+        {showStage && !compact ? (
+          <OnboardingStageContainer
+            className="w-[46%] shrink-0"
+            step={step}
+            hostId={hostId}
+            hostName={primaryHost?.name ?? null}
+            projectDraft={projectDraft}
+            browserConnected={browserConnected}
+            scheduled={ONBOARDING_STARTERS.flatMap((starter) =>
+              scheduledStarters[starter.id] === undefined
+                ? []
+                : [
+                    {
+                      id: starter.id,
+                      name: starter.name,
+                      scheduleLabel: starter.scheduleLabel,
+                    },
+                  ],
+            )}
+          />
+        ) : null}
+      </div>
+      {introPlaying ? (
+        <OnboardingIntro
+          onDone={() => {
+            rememberIntroPlayed();
+            setIntroPlaying(false);
+          }}
         />
-      );
-    case "projects":
-      return (
-        <ProjectsStepContainer
-          chrome={chrome}
-          hostId={hostId}
-          projectIdsAtOpen={projectIdsAtOpen}
-          onBack={goTo(-1)}
-          onContinue={advance("completed")}
-          onSkip={advance("skipped")}
-        />
-      );
-    case "plugins":
-      return (
-        <PluginsStepContainer
-          chrome={chrome}
-          onBack={goTo(-1)}
-          onContinue={advance("completed")}
-          onSkip={advance("skipped")}
-        />
-      );
-    case "devices":
-      return (
-        <DevicesStepContainer
-          chrome={chrome}
-          hostId={hostId}
-          onBack={goTo(-1)}
-          onFinish={() => close("completed")}
-          onLeave={() => close("skipped")}
-        />
-      );
-  }
+      ) : null}
+    </>
+  );
 }

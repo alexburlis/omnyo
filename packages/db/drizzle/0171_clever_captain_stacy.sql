@@ -1,0 +1,1 @@
+ALTER TABLE `thread_questions` ADD `answered_by` text;

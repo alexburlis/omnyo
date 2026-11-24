@@ -28,9 +28,11 @@ export function useSetPluginEnabled() {
   return useCallback(
     async (pluginId: string, enabled: boolean, onNavigate?: () => void) => {
       await setPluginEnabled(fetch, pluginId, enabled);
+
       if (enabled) return;
       const current = store.get(splitLayoutAtom);
       let next = current;
+
       if (next !== null) {
         for (const pane of listPanes(next.root)) {
           if (
@@ -44,10 +46,12 @@ export function useSetPluginEnabled() {
               : removePane(next, pane.paneId);
         }
       }
+
       flushSync(() => {
         if (next !== current) {
           store.set(splitLayoutAtom, next);
           const maximized = store.get(maximizedPaneIdAtom);
+
           if (
             maximized !== null &&
             (next === null ||
@@ -57,6 +61,7 @@ export function useSetPluginEnabled() {
             store.set(maximizedPaneIdAtom, null);
           }
         }
+
         if (
           getPluginPanelRoutePluginId(currentLocation.current.pathname) ===
           pluginId

@@ -1,7 +1,7 @@
 import {
   typedRoutes,
   type HostDaemonInternalSchema,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { Hono } from "hono";
 import { ApiError } from "../errors.js";
 import type { AppDeps } from "../types.js";
@@ -20,23 +20,30 @@ export function registerInternalPluginHostArtifactRoutes(
       "plugin_host_artifact_not_found",
       "Host artifact not found",
     );
+
     const pluginId = context.req.param("pluginId");
     const digest = context.req.param("digest");
+
     if (!DIGEST_PATTERN.test(digest)) {
       throw notFound;
     }
+
     const artifact = deps.pluginHostArtifacts.get(pluginId);
+
     if (artifact === undefined || artifact.digest !== digest) {
       throw notFound;
     }
+
     const response = await hostArtifactFileResponse({
       path: artifact.path,
       byteLength: artifact.byteLength,
       digest,
     });
+
     if (response === null) {
       throw notFound;
     }
+
     return response;
   });
 }

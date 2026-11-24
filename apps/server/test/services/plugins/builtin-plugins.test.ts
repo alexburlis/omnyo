@@ -1,9 +1,12 @@
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import {
   cp,
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   stat,
   utimes,
@@ -12,19 +15,34 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createConnection,
   getInstalledPluginRegistration,
+  getPluginKvValue,
   getPluginSettingsValues,
   listPluginSchedules,
   migrate,
   setPluginSettingsValues,
+  setPluginKvValue,
+  upsertHost,
   upsertPluginSchedule,
   type DbConnection,
-} from "@bb/db";
-import { PLUGIN_SDK_MAJOR, PLUGIN_SDK_VERSION } from "@bb/domain";
-import type { Logger } from "@bb/logger";
+} from "@omnyo/db";
+import { HOST_ID_FILE_NAME } from "@omnyo/host-daemon-contract";
+import {
+  writeLastServerMoveFile,
+  writeMaintenanceHold,
+} from "@omnyo/server-archive";
+import {
+  PLUGIN_RUNTIME_ABI,
+  PLUGIN_SDK_MAJOR,
+  PLUGIN_SDK_PACKAGE_NAME,
+  PLUGIN_SDK_VERSION,
+} from "@omnyo/domain";
+import { copyPluginRuntime } from "@omnyo/plugin-build";
+import type { Logger } from "@omnyo/logger";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
 import {
   createPluginService,
@@ -33,30 +51,37 @@ import {
   type PluginService,
 } from "../../../src/services/plugins/plugin-service.js";
 import {
-  accountPoolDefaultEnabled,
   BUILTIN_PLUGINS,
   OFFICIAL_PLUGINS,
   resolveBuiltinPluginRootPath,
+  type BundledPluginRegistration,
 } from "../../../src/services/plugins/builtin-registry.js";
-import { copyPluginRuntime } from "@bb/plugin-build";
-import { testLogger } from "../../helpers/test-app.js";
+import { createTestAppHarness, testLogger } from "../../helpers/test-app.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
+import { createServerMaintenance } from "../../../src/services/maintenance/server-maintenance.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
+
   return { ...actual, rm: vi.fn(actual.rm) };
 });
 
 const logger = testLogger as unknown as Logger;
+
 const testDir = dirname(fileURLToPath(import.meta.url));
+
+const runPluginBuild = promisify(execFile);
+
 const fixtureRoot = resolve(
   testDir,
   "..",
   "..",
   "fixtures",
   "plugins",
-  "bb-plugin-builtin-fixture",
+  "omnyo-plugin-builtin-fixture",
 );
+
 const globals = globalThis as Record<string, unknown>;
 
 function loadCount(): number {
@@ -67,6 +92,22 @@ function packagedLoadCount(): number {
   return (globals.__packagedBuiltinLoads as number | undefined) ?? 0;
 }
 
+function packagedArtifactMeta(name: string) {
+  return {
+    sdkMajor: PLUGIN_SDK_MAJOR,
+    sdkVersion: PLUGIN_SDK_VERSION,
+    artifactFormatVersion: 2,
+    sdkPackage: PLUGIN_SDK_PACKAGE_NAME,
+    runtimeAbi: PLUGIN_RUNTIME_ABI,
+    pluginId: name,
+    pluginVersion: "0.1.0",
+    builtWith: {
+      coreVersion: "0.0.0-test",
+      pluginSdkVersion: PLUGIN_SDK_VERSION,
+    },
+  };
+}
+
 async function writePackagedBuiltinSource(
   workDir: string,
   names: readonly string[],
@@ -74,6 +115,7 @@ async function writePackagedBuiltinSource(
   sourceModuleDir: string;
 }> {
   const sourceModuleDir = join(workDir, "source-module");
+
   for (const name of names) {
     const sourceRoot = join(sourceModuleDir, "builtin-plugins", name);
     const usesPluginOwnedIcon = name === "automations";
@@ -85,10 +127,10 @@ async function writePackagedBuiltinSource(
       join(sourceRoot, "package.json"),
       JSON.stringify(
         {
-          name: `bb-plugin-${name}`,
+          name: `omnyo-plugin-${name}`,
           version: "0.1.0",
           type: "module",
-          bb: {
+          omnyo: {
             name,
             description: `${name} builtin plugin fixture.`,
             branding: {
@@ -110,20 +152,29 @@ async function writePackagedBuiltinSource(
     );
     await writeFile(
       join(sourceRoot, "src", "server.ts"),
-      `throw new Error("packaged builtin should not load source");\n`,
+      `export default function plugin() {
+  globalThis.__packagedBuiltinLoads = (globalThis.__packagedBuiltinLoads ?? 0) + 1;
+}\n`,
     );
     await writeFile(
       join(sourceRoot, "app.tsx"),
-      `throw new Error("packaged builtin should not build app source");\n`,
+      `import "./app.css"; export default {};\n`,
     );
+    await writeFile(
+      join(sourceRoot, "app.css"),
+      ".builtin-fixture { min-width: 73px; }\n",
+    );
+
     if (usesPluginOwnedIcon) {
       await mkdir(join(sourceRoot, "assets"), { recursive: true });
       await writeFile(join(sourceRoot, "assets", "icon.svg"), "<svg/>\n");
     }
+
     if (usesDeclaredIcons) {
       await mkdir(join(sourceRoot, "icons"), { recursive: true });
       await writeFile(join(sourceRoot, "icons", "cursor.svg"), "<svg/>\n");
     }
+
     await writeFile(
       join(sourceRoot, "dist", "server.js"),
       `export default function plugin() {
@@ -133,46 +184,98 @@ async function writePackagedBuiltinSource(
     );
     await writeFile(
       join(sourceRoot, "dist", "server.meta.json"),
-      `${JSON.stringify(
-        { sdkMajor: PLUGIN_SDK_MAJOR, sdkVersion: PLUGIN_SDK_VERSION },
-        null,
-        2,
-      )}\n`,
+      `${JSON.stringify(packagedArtifactMeta(name), null, 2)}\n`,
     );
     await writeFile(join(sourceRoot, "dist", "app.js"), `export default {};\n`);
     await writeFile(join(sourceRoot, "dist", "app.css"), `/* built */\n`);
     await writeFile(
       join(sourceRoot, "dist", "app.meta.json"),
-      `${JSON.stringify(
-        { sdkMajor: PLUGIN_SDK_MAJOR, sdkVersion: PLUGIN_SDK_VERSION },
-        null,
-        2,
-      )}\n`,
+      `${JSON.stringify(packagedArtifactMeta(name), null, 2)}\n`,
     );
     await writeFile(
       join(sourceRoot, "skills", name, "SKILL.md"),
       `---\nname: ${name}\n---\n`,
     );
   }
+
   return { sourceModuleDir };
 }
 
 async function copyPackagedBuiltinRuntime(
   workDir: string,
   names: readonly string[],
+  fromProducer = false,
 ): Promise<{ targetRoot: string }> {
   const { sourceModuleDir } = await writePackagedBuiltinSource(workDir, names);
   const targetRoot = join(workDir, "builtin-plugins");
+
   for (const name of names) {
-    await copyPluginRuntime({
-      sourceRoot: join(sourceModuleDir, "builtin-plugins", name),
-      targetDir: join(targetRoot, name),
+    const sourceRoot = join(sourceModuleDir, "builtin-plugins", name);
+
+    if (!fromProducer) {
+      const targetDir = join(targetRoot, name);
+      await copyPluginRuntime({ sourceRoot, targetDir });
+      const manifestPath = join(targetDir, "package.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      manifest.omnyo.app = "./dist/app.js";
+      await writeFile(manifestPath, JSON.stringify(manifest));
+
+      continue;
+    }
+
+    await runPluginBuild(
+      process.execPath,
+      [
+        resolve(
+          testDir,
+          "../../../../../packages/plugin-build/bin/omnyo-plugin-build.mjs",
+        ),
+        "prepare-bundled",
+      ],
+      {
+        cwd: sourceRoot,
+        timeout: 10_000,
+      },
+    );
+    await cp(join(sourceRoot, ".bundled-runtime"), join(targetRoot, name), {
+      recursive: true,
     });
   }
+
   return { targetRoot };
 }
 
-function createService(args: {
+async function runtimeInventory(
+  root: string,
+  prefix = "",
+): Promise<[string, string][]> {
+  const inventory: [string, string][] = [];
+
+  for (const entry of (await readdir(root, { withFileTypes: true })).sort(
+    (a, b) => a.name.localeCompare(b.name),
+  )) {
+    const relative = prefix + entry.name;
+    const file = join(root, entry.name);
+
+    if (entry.isDirectory()) {
+      inventory.push(
+        [relative + "/", "directory"],
+        ...(await runtimeInventory(file, relative + "/")),
+      );
+    } else {
+      inventory.push([
+        relative,
+        createHash("sha256")
+          .update(await readFile(file))
+          .digest("hex"),
+      ]);
+    }
+  }
+
+  return inventory;
+}
+
+async function createService(args: {
   dataDir: string;
   db: DbConnection;
   builtinName?: string;
@@ -182,7 +285,8 @@ function createService(args: {
   pluginId?: string;
   rootDir?: string;
   watchBuiltinPluginSources?: boolean;
-}): PluginService {
+  bundledPlugins?: BundledPluginRegistration[];
+}): Promise<PluginService> {
   return createPluginService({
     aiServices: createAiServiceRegistry(),
     telemetry: createNoopTelemetryService(),
@@ -194,9 +298,11 @@ function createService(args: {
     },
     logger,
     dataDir: args.dataDir,
+    vault: await openSecretVault(args.dataDir),
     appVersion: "0.9.0",
     bundledPlugins:
-      args.includeBuiltin === false
+      args.bundledPlugins ??
+      (args.includeBuiltin === false
         ? []
         : [
             {
@@ -206,7 +312,7 @@ function createService(args: {
               rootDir: args.rootDir ?? fixtureRoot,
               defaultEnabled: args.defaultEnabled ?? true,
             },
-          ],
+          ]),
     watchBuiltinPluginSources: args.watchBuiltinPluginSources,
     loadTimeoutMs: 2000,
   });
@@ -231,6 +337,7 @@ describe("builtin plugin reconciliation", () => {
         this.emit("close");
       }
     }
+
     const watcher = new FakeSourceWatcher();
     const errors: string[] = [];
     let loopDisposals = 0;
@@ -248,6 +355,7 @@ describe("builtin plugin reconciliation", () => {
       ),
       { code: "ENOSPC" },
     );
+
     expect(() => watcher.emit("error", failure)).not.toThrow();
 
     expect(errors).toEqual([failure.message]);
@@ -255,42 +363,30 @@ describe("builtin plugin reconciliation", () => {
   });
 
   beforeEach(async () => {
+    service = undefined;
     delete globals.__builtinFixtureLoads;
     delete globals.__packagedBuiltinLoads;
     delete globals.__hotBuiltinServerVersion;
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-builtin-plugins-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-builtin-plugins-"));
   });
 
   it("keeps official plugins bundled but out of the auto-install builtins", () => {
     const optionalNames = OFFICIAL_PLUGINS.map((plugin) => plugin.name);
     expect(optionalNames).toEqual([
       "environment-modal-sandbox",
-      "browser-automation",
-      "github",
       "docs",
       "memory",
       "tasks",
       "theme-preview",
     ]);
+
     for (const name of optionalNames) {
       expect(BUILTIN_PLUGINS.map((plugin) => plugin.name)).not.toContain(name);
     }
-    expect(OFFICIAL_PLUGINS.every((plugin) => !plugin.autoInstall)).toBe(true);
-  });
 
-  it("enables the account pooler only when a parent bb server pool is present", () => {
-    expect(accountPoolDefaultEnabled({})).toBe(false);
-    expect(accountPoolDefaultEnabled({ BB_ACCOUNT_POOL_PARENT_URL: "" })).toBe(
-      false,
-    );
-    expect(
-      accountPoolDefaultEnabled({
-        BB_ACCOUNT_POOL_PARENT_URL:
-          "http://127.0.0.1:38886/api/v1/plugins/account-pool/http",
-      }),
-    ).toBe(true);
+    expect(OFFICIAL_PLUGINS.every((plugin) => !plugin.autoInstall)).toBe(true);
   });
 
   afterEach(async () => {
@@ -300,7 +396,7 @@ describe("builtin plugin reconciliation", () => {
   });
 
   it("installs and loads a declared builtin on a fresh database", async () => {
-    service = createService({ db, dataDir: join(workDir, "data") });
+    service = await createService({ db, dataDir: join(workDir, "data") });
 
     await service.start();
 
@@ -329,10 +425,221 @@ describe("builtin plugin reconciliation", () => {
     );
   });
 
-  it("removes a builtin and its data once bb no longer bundles it", async () => {
+  it.each(["held", "releasing"] as const)(
+    "resumes relocated builtins after a persisted %s migration restart without changing configured plugins",
+    async (phase) => {
+      const harness = await createTestAppHarness();
+      const dataDir = join(workDir, "data");
+      const databasePath = join(workDir, "app.db");
+      const oldRuntime = join(workDir, "old-mac-app");
+      const currentRuntime = join(workDir, "current-runtime");
+      const names = ["automations", "provider-acp"];
+      const old = await copyPackagedBuiltinRuntime(oldRuntime, names);
+
+      const current = await copyPackagedBuiltinRuntime(currentRuntime, [
+        ...names,
+        "composer-predictions",
+      ]);
+
+      const legacy = await copyPackagedBuiltinRuntime(join(workDir, "legacy"), [
+        "composer-predictions",
+      ]);
+
+      const replacementManifest = join(
+        current.targetRoot,
+        "composer-predictions",
+        "package.json",
+      );
+
+      const replacement = JSON.parse(
+        await readFile(replacementManifest, "utf8"),
+      );
+
+      replacement.name = "omnyo-plugin-omnyo--composer-predictions";
+      await writeFile(replacementManifest, JSON.stringify(replacement));
+
+      const registrations = (root: string): BundledPluginRegistration[] =>
+        names.map((name) => ({
+          name,
+          pluginId: name,
+          autoInstall: true,
+          defaultEnabled: true,
+          rootDir: join(root, name),
+        }));
+
+      db.$client.close();
+      db = createConnection(databasePath);
+      migrate(db);
+      await mkdir(dataDir, { recursive: true });
+
+      try {
+        service = await createService({
+          db,
+          dataDir,
+          bundledPlugins: registrations(old.targetRoot),
+        });
+        await service.start();
+        await service.setEnabled("provider-acp", false);
+        await service.installPath(
+          join(legacy.targetRoot, "composer-predictions"),
+        );
+        setPluginSettingsValues(db, "automations", { mode: "preserved" });
+        setPluginKvValue(db, "automations", "opaque", "opaque\u0000state\n");
+        setPluginKvValue(db, "provider-acp", "opaque", "disabled-state");
+
+        const secret = join(
+          dataDir,
+          "plugins",
+          "automations",
+          "secrets",
+          "fixture",
+        );
+
+        await mkdir(dirname(secret), { recursive: true });
+        await writeFile(secret, "fixture-owned-secret");
+
+        const before = [
+          "automations",
+          "provider-acp",
+          "composer-predictions",
+        ].map((id) => getInstalledPluginRegistration(db, id));
+
+        await service.stop();
+        db.$client.close();
+        db = createConnection(databasePath);
+        await rm(oldRuntime, { recursive: true });
+        const hostId = "host_builtin_resume_fixture";
+        const moveId = "move_builtin_resume_fixture";
+        upsertHost(db, harness.hub, { id: hostId, name: "Target" });
+        await writeFile(join(dataDir, HOST_ID_FILE_NAME), hostId);
+        await writeLastServerMoveFile(dataDir, {
+          version: 1,
+          moveId,
+          fromHostId: "host_source_fixture",
+          fromHostName: "Source",
+          toHostId: hostId,
+          toHostName: "Target",
+          completedAt: Date.now(),
+          oldCopyDeletedAt: null,
+        });
+        await writeMaintenanceHold(dataDir, {
+          version: 1,
+          id: moveId,
+          ownerId: moveId,
+          kind: "migration",
+          phase,
+          serverHostId: hostId,
+          createdAt: Date.now(),
+          artifact: null,
+        });
+        service = await createService({
+          db,
+          dataDir,
+          bundledPlugins: [
+            ...registrations(current.targetRoot),
+            {
+              name: "composer-predictions",
+              pluginId: "omnyo--composer-predictions",
+              autoInstall: true,
+              defaultEnabled: true,
+              rootDir: join(current.targetRoot, "composer-predictions"),
+            },
+          ],
+        });
+
+        const maintenance = createServerMaintenance(
+          { ...harness.deps, db, config: { ...harness.config, dataDir } },
+          service,
+        );
+
+        const loadsBeforeRelease = packagedLoadCount();
+        expect(getInstalledPluginRegistration(db, "automations")).toEqual(
+          before[0],
+        );
+        await expect(
+          maintenance.release({
+            id: moveId,
+            ownerId: "wrong-owner",
+            expectedServerHostId: hostId,
+          }),
+        ).rejects.toMatchObject({
+          body: { code: "maintenance_ownership_mismatch" },
+        });
+        expect(maintenance.status().hold?.phase).toBe(phase);
+        await expect(
+          maintenance.release({
+            id: moveId,
+            ownerId: moveId,
+            expectedServerHostId: hostId,
+          }),
+        ).resolves.toEqual({ released: true, id: moveId });
+        expect(maintenance.status().hold).toBeNull();
+        expect(packagedLoadCount() - loadsBeforeRelease).toBe(2);
+        expect(service.list()).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: "automations",
+              enabled: true,
+              status: "running",
+            }),
+            expect.objectContaining({
+              id: "provider-acp",
+              enabled: false,
+              status: "disabled",
+            }),
+            expect.objectContaining({
+              id: "composer-predictions",
+              enabled: true,
+              status: "running",
+            }),
+          ]),
+        );
+        expect(
+          getInstalledPluginRegistration(db, "omnyo--composer-predictions"),
+        ).toBeUndefined();
+
+        for (const [index, id] of [
+          "automations",
+          "provider-acp",
+          "composer-predictions",
+        ].entries()) {
+          const row = getInstalledPluginRegistration(db, id);
+          expect({
+            ...row,
+            rootDir: before[index]?.rootDir,
+            updatedAt: before[index]?.updatedAt,
+          }).toEqual(before[index]);
+        }
+
+        for (const name of names) {
+          expect(getInstalledPluginRegistration(db, name)?.rootDir).toBe(
+            join(current.targetRoot, name),
+          );
+        }
+
+        expect(getPluginSettingsValues(db, "automations")).toEqual({
+          mode: "preserved",
+        });
+        expect(getPluginKvValue(db, "automations", "opaque")).toBe(
+          "opaque\u0000state\n",
+        );
+        expect(getPluginKvValue(db, "provider-acp", "opaque")).toBe(
+          "disabled-state",
+        );
+        expect(await readFile(secret, "utf8")).toBe("fixture-owned-secret");
+      } finally {
+        await service?.stop();
+        service = undefined;
+        await harness.cleanup();
+        harness.db.$client.close();
+      }
+    },
+  );
+
+  it("removes a builtin and its data once Omnyo no longer bundles it", async () => {
     const dataDir = join(workDir, "data");
     const secretsDir = join(dataDir, "plugins", "builtin-fixture", "secrets");
-    service = createService({ db, dataDir });
+    service = await createService({ db, dataDir });
     await service.start();
     expect(service.list()[0]?.isOrphanedBuiltin).toBe(false);
     await service.stop();
@@ -346,7 +653,7 @@ describe("builtin plugin reconciliation", () => {
     await mkdir(secretsDir, { recursive: true });
     await writeFile(join(secretsDir, "token"), "secret");
 
-    service = createService({ db, dataDir, includeBuiltin: false });
+    service = await createService({ db, dataDir, includeBuiltin: false });
     await service.start();
 
     expect(service.list()).toEqual([]);
@@ -358,7 +665,7 @@ describe("builtin plugin reconciliation", () => {
     await expect(stat(secretsDir)).rejects.toThrow();
     await service.stop();
 
-    service = createService({ db, dataDir });
+    service = await createService({ db, dataDir });
     await service.start();
 
     expect(service.list()).toMatchObject([
@@ -369,7 +676,7 @@ describe("builtin plugin reconciliation", () => {
   it("retries orphaned builtin cleanup after secret removal fails", async () => {
     const dataDir = join(workDir, "data");
     const secretsDir = join(dataDir, "plugins", "builtin-fixture", "secrets");
-    service = createService({ db, dataDir });
+    service = await createService({ db, dataDir });
     await service.start();
     await service.stop();
     await mkdir(secretsDir, { recursive: true });
@@ -379,23 +686,26 @@ describe("builtin plugin reconciliation", () => {
       await vi.importActual<typeof import("node:fs/promises")>(
         "node:fs/promises",
       );
+
     let failed = false;
     vi.mocked(rm).mockImplementation(async (...args) => {
       if (!failed && args[0] === secretsDir) {
         failed = true;
         throw new Error("secret removal failed");
       }
+
       return actual.rm(...args);
     });
+
     try {
-      service = createService({ db, dataDir, includeBuiltin: false });
+      service = await createService({ db, dataDir, includeBuiltin: false });
       await expect(service.start()).rejects.toThrow("secret removal failed");
       expect(
         getInstalledPluginRegistration(db, "builtin-fixture"),
       ).toBeDefined();
       expect(await readFile(join(secretsDir, "token"), "utf8")).toBe("secret");
 
-      service = createService({ db, dataDir, includeBuiltin: false });
+      service = await createService({ db, dataDir, includeBuiltin: false });
       await service.start();
       expect(
         getInstalledPluginRegistration(db, "builtin-fixture"),
@@ -409,22 +719,25 @@ describe("builtin plugin reconciliation", () => {
   it("backfills every legacy source form once while preserving registration state", async () => {
     const sha = "0123456789abcdef0123456789abcdef01234567";
     const legacyRoot = join(workDir, "missing-legacy-root");
+
     const legacyRows = [
       ["legacy-path", `path:${fixtureRoot}`, 1, 101],
       ["legacy-builtin", "builtin:fixture", 0, 102],
       ["legacy-npm", "npm:bb-plugin-legacy@1.2.3", 1, 103],
       ["legacy-git", `git:github.com/acme/bb-plugin-legacy@${sha}`, 0, 104],
     ] as const;
+
     const insert = db.$client.prepare(
       `INSERT INTO plugins
        (id, source, root_dir, version, enabled, removed_at, installed_at, updated_at)
        VALUES (?, ?, ?, '0.1.0', ?, ?, 10, 20)`,
     );
+
     for (const [id, source, enabled, removedAt] of legacyRows) {
       insert.run(id, source, legacyRoot, enabled, removedAt);
     }
 
-    service = createService({ db, dataDir: join(workDir, "data") });
+    service = await createService({ db, dataDir: join(workDir, "data") });
     await service.start();
 
     expect(getInstalledPluginRegistration(db, "legacy-path")).toMatchObject({
@@ -462,8 +775,9 @@ describe("builtin plugin reconciliation", () => {
     const once = legacyRows.map(([id]) =>
       getInstalledPluginRegistration(db, id),
     );
+
     await service.stop();
-    service = createService({ db, dataDir: join(workDir, "data") });
+    service = await createService({ db, dataDir: join(workDir, "data") });
     await service.start();
     expect(
       legacyRows.map(([id]) => getInstalledPluginRegistration(db, id)),
@@ -484,7 +798,7 @@ describe("builtin plugin reconciliation", () => {
         join(workDir, "missing-plugin-root"),
       );
 
-    service = createService({ db, dataDir: join(workDir, "data") });
+    service = await createService({ db, dataDir: join(workDir, "data") });
     await service.start();
 
     expect(
@@ -497,7 +811,7 @@ describe("builtin plugin reconciliation", () => {
   });
 
   it("installs a default-disabled builtin without loading it", async () => {
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       defaultEnabled: false,
@@ -521,7 +835,7 @@ describe("builtin plugin reconciliation", () => {
     expect(loadCount()).toBe(1);
 
     await service.stop();
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       defaultEnabled: false,
@@ -536,7 +850,7 @@ describe("builtin plugin reconciliation", () => {
   it.each([false, true])(
     "follows a changed default for a builtin the user never toggled (initial default: %s)",
     async (initialDefault) => {
-      service = createService({
+      service = await createService({
         db,
         dataDir: join(workDir, "data"),
         defaultEnabled: initialDefault,
@@ -552,7 +866,7 @@ describe("builtin plugin reconciliation", () => {
       expect(loadCount()).toBe(initialDefault ? 1 : 0);
       await service.stop();
 
-      service = createService({
+      service = await createService({
         db,
         dataDir: join(workDir, "data"),
         defaultEnabled: !initialDefault,
@@ -571,7 +885,7 @@ describe("builtin plugin reconciliation", () => {
   );
 
   it("keeps a builtin the user turned off disabled when its default turns on", async () => {
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       defaultEnabled: false,
@@ -581,7 +895,7 @@ describe("builtin plugin reconciliation", () => {
     await service.setEnabled("builtin-fixture", false);
     await service.stop();
 
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       defaultEnabled: true,
@@ -602,27 +916,38 @@ describe("builtin plugin reconciliation", () => {
         ]),
       ),
     ).toMatchObject({
-      "prompt-library": false,
+      "prompt-library": true,
       "plugin-api-tester": false,
       "monaco-editor": false,
       "plugin-api-docs": false,
-      workflows: false,
-      "provider-usage": true,
+      workflows: true,
+      "ask-user-question": true,
+      "agent-annotations": true,
+      "storage-retention": true,
+      "browser-automation": true,
+      "provider-acp": false,
+      "provider-pi": false,
+      "provider-usage": false,
       "concurrency-limit": true,
       "scheduled-send": true,
       drafts: true,
       "provider-retry": true,
       "push-notifications": true,
+      "account-pool": true,
+      "account-usage": true,
+      "omnyo-account": true,
+      connect: true,
+      "chat-importer": true,
     });
   });
 
   it.each([
-    ["provider-usage", "bb--provider-usage"],
+    ["provider-usage", "omnyo--provider-usage"],
     ["provider-retry", "provider-retry"],
   ])(
     "runs the real %s builtin on a fresh database",
     async (builtinName, pluginId) => {
-      service = createService({
+      service = await createService({
         db,
         dataDir: join(workDir, "data"),
         builtinName,
@@ -643,7 +968,7 @@ describe("builtin plugin reconciliation", () => {
   );
 
   it("loads the real side-chat builtin source", async () => {
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       builtinName: "side-chat",
@@ -665,14 +990,14 @@ describe("builtin plugin reconciliation", () => {
   });
 
   it("keeps a builtin tombstoned after remove and restart", async () => {
-    service = createService({ db, dataDir: join(workDir, "data") });
+    service = await createService({ db, dataDir: join(workDir, "data") });
     await service.start();
 
     await expect(service.remove("builtin-fixture")).resolves.toBe(true);
     expect(service.list()).toEqual([]);
     await service.stop();
 
-    service = createService({ db, dataDir: join(workDir, "data") });
+    service = await createService({ db, dataDir: join(workDir, "data") });
     await service.start();
 
     expect(service.list()).toEqual([]);
@@ -680,9 +1005,9 @@ describe("builtin plugin reconciliation", () => {
   });
 
   it("refreshes the builtin row when the bundled package version changes", async () => {
-    const mutableRoot = join(workDir, "bb-plugin-builtin-fixture");
+    const mutableRoot = join(workDir, "omnyo-plugin-builtin-fixture");
     await cp(fixtureRoot, mutableRoot, { recursive: true });
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       rootDir: mutableRoot,
@@ -693,10 +1018,10 @@ describe("builtin plugin reconciliation", () => {
     await writeFile(
       join(mutableRoot, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-builtin-fixture",
+        name: "omnyo-plugin-builtin-fixture",
         version: "0.2.0",
         type: "module",
-        bb: {
+        omnyo: {
           name: "Builtin fixture",
           description: "Builtin plugin fixture.",
           branding: { icon: "Zap" },
@@ -705,7 +1030,7 @@ describe("builtin plugin reconciliation", () => {
       }),
     );
 
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       rootDir: mutableRoot,
@@ -715,6 +1040,7 @@ describe("builtin plugin reconciliation", () => {
     const entry = service
       .list()
       .find((plugin) => plugin.id === "builtin-fixture");
+
     expect(entry?.source).toBe("builtin:fixture");
     expect(entry?.version).toBe("0.2.0");
     expect(entry?.status).toBe("running");
@@ -722,7 +1048,7 @@ describe("builtin plugin reconciliation", () => {
   });
 
   it("lists and runs a builtin plugin's CLI contribution", async () => {
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
     });
@@ -745,15 +1071,15 @@ describe("builtin plugin reconciliation", () => {
   });
 
   it("hot-reloads a source-layout builtin server instead of a compatible dist artifact", async () => {
-    const mutableRoot = join(workDir, "bb-plugin-hot-server-builtin");
+    const mutableRoot = join(workDir, "omnyo-plugin-hot-server-builtin");
     await mkdir(join(mutableRoot, "dist"), { recursive: true });
     await writeFile(
       join(mutableRoot, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-hot-server-builtin",
+        name: "omnyo-plugin-hot-server-builtin",
         version: "0.1.0",
         type: "module",
-        bb: {
+        omnyo: {
           name: "Hot server builtin",
           description: "Hot server builtin plugin fixture.",
           branding: { icon: "Zap" },
@@ -776,7 +1102,7 @@ describe("builtin plugin reconciliation", () => {
         sdkVersion: PLUGIN_SDK_VERSION,
       }),
     );
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       builtinName: "hot-server",
@@ -791,25 +1117,27 @@ describe("builtin plugin reconciliation", () => {
       'export default function plugin() { globalThis.__hotBuiltinServerVersion = "after"; }\n',
     );
     let deadline = Date.now() + 40_000;
+
     while (
       globals.__hotBuiltinServerVersion !== "after" &&
       Date.now() < deadline
     ) {
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
     }
+
     expect(globals.__hotBuiltinServerVersion).toBe("after");
   }, 50_000);
 
   it("rebuilds a source-layout builtin app changed while the server was stopped", async () => {
-    const mutableRoot = join(workDir, "bb-plugin-stale-app-builtin");
+    const mutableRoot = join(workDir, "omnyo-plugin-stale-app-builtin");
     await mkdir(mutableRoot, { recursive: true });
     await writeFile(
       join(mutableRoot, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-stale-app-builtin",
+        name: "omnyo-plugin-stale-app-builtin",
         version: "0.1.0",
         type: "module",
-        bb: {
+        omnyo: {
           name: "Stale app builtin",
           description: "Stale app builtin plugin fixture.",
           branding: { icon: "Zap" },
@@ -828,7 +1156,7 @@ describe("builtin plugin reconciliation", () => {
     );
     const labelPath = join(mutableRoot, "label.ts");
     await writeFile(labelPath, 'export const label = "before";\n');
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       builtinName: "stale-app",
@@ -850,7 +1178,7 @@ describe("builtin plugin reconciliation", () => {
       oldArtifactTime,
       oldArtifactTime,
     );
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       builtinName: "stale-app",
@@ -866,15 +1194,15 @@ describe("builtin plugin reconciliation", () => {
   }, 30_000);
 
   it("surfaces builtin app build failures in status until the next successful build", async () => {
-    const mutableRoot = join(workDir, "bb-plugin-hot-app-builtin");
+    const mutableRoot = join(workDir, "omnyo-plugin-hot-app-builtin");
     await mkdir(mutableRoot, { recursive: true });
     await writeFile(
       join(mutableRoot, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-hot-app-builtin",
+        name: "omnyo-plugin-hot-app-builtin",
         version: "0.1.0",
         type: "module",
-        bb: {
+        omnyo: {
           name: "Hot app builtin",
           description: "Hot app builtin plugin fixture.",
           branding: { icon: "Zap" },
@@ -891,7 +1219,7 @@ describe("builtin plugin reconciliation", () => {
       join(mutableRoot, "app.tsx"),
       "export default function App() { return <div>before</div>; }\n",
     );
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       builtinName: "hot-app",
@@ -908,6 +1236,7 @@ describe("builtin plugin reconciliation", () => {
     );
     let deadline = Date.now() + 20_000;
     let failed = service.list()[0];
+
     while (
       !failed?.statusDetail?.includes("frontend bundle build failed") &&
       Date.now() < deadline
@@ -915,6 +1244,7 @@ describe("builtin plugin reconciliation", () => {
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
       failed = service.list()[0];
     }
+
     expect(failed?.status).toBe("running");
     expect(failed?.statusDetail).toContain("frontend bundle build failed");
     expect(failed?.app.bundle?.hash).toBe(before?.hash);
@@ -925,6 +1255,7 @@ describe("builtin plugin reconciliation", () => {
     );
     deadline = Date.now() + 20_000;
     let after = service.list()[0];
+
     while (
       (after?.statusDetail !== null ||
         after.app.bundle?.hash === before?.hash) &&
@@ -933,6 +1264,7 @@ describe("builtin plugin reconciliation", () => {
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
       after = service.list()[0];
     }
+
     expect(after?.statusDetail).toBeNull();
     expect(after?.app.bundle?.hash).not.toBe(before?.hash);
     await expect(
@@ -941,7 +1273,7 @@ describe("builtin plugin reconciliation", () => {
   }, 90_000);
 
   it("rejects unknown builtin install sources clearly", async () => {
-    service = createService({ db, dataDir: join(workDir, "data") });
+    service = await createService({ db, dataDir: join(workDir, "data") });
 
     await expect(
       service.install("builtin:missing", { kind: "root" }),
@@ -949,12 +1281,16 @@ describe("builtin plugin reconciliation", () => {
   });
 
   it("installs and loads a packaged builtin whose source files are omitted", async () => {
-    const { targetRoot } = await copyPackagedBuiltinRuntime(workDir, [
-      "automations",
-    ]);
-    const copiedRoot = join(targetRoot, "automations");
+    const { targetRoot } = await copyPackagedBuiltinRuntime(
+      workDir,
+      ["automations"],
+      true,
+    );
 
-    service = createService({
+    const copiedRoot = join(targetRoot, "automations");
+    const inventory = await runtimeInventory(copiedRoot);
+
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       builtinName: "automations",
@@ -978,12 +1314,14 @@ describe("builtin plugin reconciliation", () => {
       },
     ]);
     expect(packagedLoadCount()).toBe(1);
+    expect(await runtimeInventory(copiedRoot)).toEqual(inventory);
   });
 
   it("registers but does not load a packaged builtin with stale backend metadata", async () => {
     const { targetRoot } = await copyPackagedBuiltinRuntime(workDir, [
       "automations",
     ]);
+
     const incompatibleMajor = PLUGIN_SDK_MAJOR + 1;
     const copiedRoot = join(targetRoot, "automations");
     await writeFile(
@@ -995,7 +1333,7 @@ describe("builtin plugin reconciliation", () => {
     );
     const before = packagedLoadCount();
 
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       builtinName: "automations",
@@ -1010,19 +1348,23 @@ describe("builtin plugin reconciliation", () => {
         version: "0.1.0",
         enabled: true,
         status: "incompatible",
-        statusDetail: `server artifact for plugin "automations" was built for SDK major ${incompatibleMajor}, running SDK major is ${PLUGIN_SDK_MAJOR}; rebuild the server artifact with this bb version`,
+        statusDetail: `server artifact for plugin "automations" was built for SDK major ${incompatibleMajor}, running SDK major is ${PLUGIN_SDK_MAJOR}; rebuild the server artifact with this Omnyo version`,
       },
     ]);
     expect(packagedLoadCount()).toBe(before);
   });
 
   it("explicitly installs a packaged builtin without rebuilding its app bundle", async () => {
-    const { targetRoot } = await copyPackagedBuiltinRuntime(workDir, [
-      "automations",
-    ]);
-    const copiedRoot = join(targetRoot, "automations");
+    const { targetRoot } = await copyPackagedBuiltinRuntime(
+      workDir,
+      ["automations"],
+      true,
+    );
 
-    service = createService({
+    const copiedRoot = join(targetRoot, "automations");
+    const inventory = await runtimeInventory(copiedRoot);
+
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       builtinName: "automations",
@@ -1035,9 +1377,7 @@ describe("builtin plugin reconciliation", () => {
       id: "automations",
       status: "running",
     });
-    await expect(
-      readFile(join(copiedRoot, "dist", "app.css"), "utf8"),
-    ).resolves.toBe("/* built */\n");
+    expect(await runtimeInventory(copiedRoot)).toEqual(inventory);
   });
 });
 
@@ -1045,7 +1385,7 @@ describe("builtin plugin packaging", () => {
   let workDir: string;
 
   beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), "bb-builtin-plugin-copy-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-builtin-plugin-copy-"));
   });
 
   afterEach(async () => {
@@ -1060,11 +1400,13 @@ describe("builtin plugin packaging", () => {
     ]);
 
     const copiedRoot = join(targetRoot, "automations");
+
     const packageJson = JSON.parse(
       await readFile(join(copiedRoot, "package.json"), "utf8"),
     );
+
     expect(packageJson).toMatchObject({
-      bb: {
+      omnyo: {
         server: "./dist/server.js",
         app: "./dist/app.js",
         skills: ["skills"],

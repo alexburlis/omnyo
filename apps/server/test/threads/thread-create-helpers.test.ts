@@ -8,8 +8,8 @@ import {
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
-import { DEFAULT_MANAGED_BRANCH_PREFIX } from "@bb/domain";
+} from "@omnyo/db";
+import { DEFAULT_MANAGED_BRANCH_PREFIX } from "@omnyo/domain";
 import { ApiError } from "../../src/errors.js";
 import {
   buildSuggestedBranchName,
@@ -41,7 +41,7 @@ describe("buildSuggestedBranchName", () => {
         title: null,
         threadId: "thr_abc123def456",
       }),
-    ).toBe("bb/thr_abc123def456");
+    ).toBe("omnyo/thr_abc123def456");
   });
 
   it("includes a sanitized slug before the full thread ID", () => {
@@ -51,7 +51,7 @@ describe("buildSuggestedBranchName", () => {
         title: "Fix login flow!",
         threadId: "thr_abc123def456",
       }),
-    ).toBe("bb/fix-login-flow-thr_abc123def456");
+    ).toBe("omnyo/fix-login-flow-thr_abc123def456");
   });
 
   it("falls back to the full thread ID when the slug is empty after sanitizing", () => {
@@ -61,7 +61,7 @@ describe("buildSuggestedBranchName", () => {
         title: "!!!",
         threadId: "thr_abc123def456",
       }),
-    ).toBe("bb/thr_abc123def456");
+    ).toBe("omnyo/thr_abc123def456");
   });
 
   it("applies a configured prefix to both branch name shapes", () => {
@@ -97,9 +97,11 @@ describe("createThreadRecord", () => {
     "preserves placement at creation for %j",
     (mode) => {
       const db = createConnection(":memory:");
+
       try {
         migrate(db);
         const host = upsertHost(db, noopNotifier, { name: "Test" });
+
         const { project } = createProject(db, noopNotifier, {
           name: "Test",
           source: {
@@ -108,10 +110,13 @@ describe("createThreadRecord", () => {
             path: "/tmp/placement",
           },
         });
+
         const section = createThreadSection(db, noopNotifier, {
           name: "Managers",
         });
+
         if (section.status !== "created") throw new Error("Expected section");
+
         const thread = createThreadRecord(
           { db, hub: noopNotifier },
           {
@@ -119,6 +124,7 @@ describe("createThreadRecord", () => {
             request: {
               ...mode,
               environment: { type: "reuse", environmentId: "env_unused" },
+              machinePinned: true,
               sectionId: section.section.id,
               pinned: true,
               input: [],
@@ -132,6 +138,7 @@ describe("createThreadRecord", () => {
             },
           },
         );
+
         expect(thread.sectionId).toBe(section.section.id);
         expect(thread.pinnedAt).not.toBeNull();
         expect(thread.pinSortKey).not.toBeNull();
@@ -143,12 +150,15 @@ describe("createThreadRecord", () => {
 
   it("returns section_not_found when the section is stale by create time", () => {
     const db = createConnection(":memory:");
+
     try {
       migrate(db);
       const deps = { db, hub: noopNotifier };
+
       const host = upsertHost(db, noopNotifier, {
         name: "Test Host",
       });
+
       const { project } = createProject(db, noopNotifier, {
         name: "Test Project",
         source: {
@@ -157,6 +167,7 @@ describe("createThreadRecord", () => {
           type: "local_path",
         },
       });
+
       const environment = createEnvironment(db, noopNotifier, {
         providerOwnsPath: false,
         hostId: host.id,
@@ -164,12 +175,15 @@ describe("createThreadRecord", () => {
         projectId: project.id,
         status: "ready",
       });
+
       const sectionResult = createThreadSection(db, noopNotifier, {
         name: "Race",
       });
+
       if (sectionResult.status !== "created") {
         throw new Error("Expected section fixture to be created");
       }
+
       deleteThreadSection(db, noopNotifier, {
         id: sectionResult.section.id,
       });
@@ -182,6 +196,7 @@ describe("createThreadRecord", () => {
               environmentId: environment.id,
               type: "reuse",
             },
+            machinePinned: true,
             sectionId: sectionResult.section.id,
             input: [],
             origin: "app",

@@ -4,7 +4,7 @@ import {
   type AppDefaultKeybinding,
   type AppShortcut,
   type KeyboardCommandId,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   resolvePluginCommandDefaults,
   shortcutsConflict,
@@ -19,6 +19,7 @@ const shortcut: AppShortcut = {
   alt: false,
   shift: true,
 };
+
 function binding(
   command: KeyboardCommandId,
   keys: AppShortcut | null = shortcut,
@@ -37,6 +38,7 @@ describe("plugin command keybindings", () => {
       binding("plugin:first/open"),
       binding("plugin:second/open"),
     ];
+
     for (const ordered of [defaults, [...defaults].reverse()]) {
       const result = resolvePluginCommandDefaults(ordered, [], false, "Linux");
       expect(applyAppKeybindingOverrides(result.defaults, [])).toEqual([]);
@@ -51,6 +53,7 @@ describe("plugin command keybindings", () => {
       binding("thread.new", { ...shortcut, mod: false, meta: true }),
       binding("plugin:first/open"),
     ];
+
     const mac = resolvePluginCommandDefaults(defaults, [], false, "MacIntel");
     expect(mac.defaults[1]?.shortcut).toBeNull();
     expect(mac.defaults[0]?.shortcut).not.toBeNull();
@@ -67,13 +70,16 @@ describe("plugin command keybindings", () => {
       binding("plugin:first/open"),
       binding("plugin:second/open"),
     ];
+
     const overrides = [{ command: "plugin:second/open" as const, shortcut }];
+
     const result = resolvePluginCommandDefaults(
       defaults,
       overrides,
       false,
       "Linux",
     );
+
     expect(
       applyAppKeybindingOverrides(result.defaults, overrides).map(
         (entry) => entry.command,
@@ -83,12 +89,14 @@ describe("plugin command keybindings", () => {
 
   it("preserves disabled-plugin overrides when editing another command", () => {
     const overrides = [{ command: "plugin:disabled/open" as const, shortcut }];
+
     const next = setCommandShortcutOverride(
       overrides,
       "thread.new",
       { ...shortcut, key: "n" },
       "Linux",
     );
+
     expect(next).toContainEqual(overrides[0]);
     expect(next).toHaveLength(2);
   });

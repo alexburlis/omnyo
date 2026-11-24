@@ -1,8 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { EMPTY_PLUGIN_UPDATE_STATE } from "@/hooks/queries/plugin-settings-queries";
-import { PluginRowSignalView } from "./PluginRowSignal";
+import { ResourceIconFrame } from "@omnyo/shared-ui/resource-list";
+import { PluginRowSignalView, PluginSignalLogo } from "./PluginRowSignal";
 import { UpdatePluginDialog } from "./UpdatePluginDialog";
+import { PluginLogo } from "./plugin-ui";
 import { makePluginListItem } from "@/test/fixtures/plugins";
 
 export default {
@@ -15,14 +17,14 @@ const GIT_PLUGIN = makePluginListItem({
   id: "prompt-shaper",
   source:
     "git:https://github.com/brsbl/bb-plugins.git@1c6bb2e8ad3551466981e7eb027cc4b1f3428cac",
-  rootDir: "/home/user/.bb/plugins/prompt-shaper",
+  rootDir: "/home/user/.omnyo/plugins/prompt-shaper",
   description: "Enhance a rough composer draft before sending it.",
   name: "Prompt Improver",
   icon: "AiContentGenerator01",
   app: { hasApp: true, bundle: null },
   provenance: "catalog",
   catalogEntryId: "prompt-shaper",
-  publisherLabel: "BB Community",
+  publisherLabel: "Acme Plugins",
   sourceDisplay: "git · github.com/brsbl/bb-plugins",
   updateState: { ...EMPTY_PLUGIN_UPDATE_STATE, availableVersion: FULL_HASH },
 });
@@ -72,12 +74,29 @@ export const UpdateStates = () => (
         onStatusClick={() => {}}
       />
     </StateRow>
+    <StateRow label="Status badge on the plugin logo">
+      <PluginSignalLogo
+        signal={{
+          kind: "status",
+          icon: "AlertTriangle",
+          label: "Update failed",
+          tone: "error",
+          detail: "Rolled back to 0.1.0",
+        }}
+        onStatusClick={() => {}}
+      >
+        <ResourceIconFrame className="size-6 rounded border border-border bg-muted/40 text-muted-foreground">
+          {() => <PluginLogo plugin={GIT_PLUGIN} className="size-4" />}
+        </ResourceIconFrame>
+      </PluginSignalLogo>
+    </StateRow>
   </div>
 );
 
 export const UpdateDialogShortHash = () => {
   const [queryClient] = useState(() => new QueryClient());
   const [open, setOpen] = useState(true);
+
   return (
     <QueryClientProvider client={queryClient}>
       <div className="p-4">

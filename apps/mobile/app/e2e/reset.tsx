@@ -18,12 +18,14 @@ export default function E2eResetRoute() {
       .catch((cause: unknown) => {
         if (!cancelled) setError(String(cause));
       });
+
     return () => {
       cancelled = true;
     };
   }, [router]);
 
   if (!e2eModeEnabled) return <Redirect href="/" />;
+
   return (
     <View
       className="flex-1 items-center justify-center gap-3 bg-background"

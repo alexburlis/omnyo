@@ -1,14 +1,14 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { experimental_nativeRootsResolveOutputSchema } from "@get-bb/plugin-sdk/host";
+import { experimental_nativeRootsResolveOutputSchema } from "@omnyo/plugin-sdk/host";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { resolvePiNativeRoots } from "./native-roots.js";
 
 let homeDir: string;
 
 beforeEach(() => {
-  homeDir = mkdtempSync(join(tmpdir(), "bb-pi-native-roots-"));
+  homeDir = mkdtempSync(join(tmpdir(), "omnyo-pi-native-roots-"));
 });
 
 afterEach(() => {
@@ -26,6 +26,7 @@ async function resolvedSkillPaths(
   const answer = await resolvePiNativeRoots({ homeDir, env });
   const parsed = experimental_nativeRootsResolveOutputSchema.parse(answer);
   expect(parsed.commands).toEqual([]);
+
   for (const root of parsed.skills) {
     expect(root).toMatchObject({
       origin: "user",
@@ -33,6 +34,7 @@ async function resolvedSkillPaths(
       namePrefix: "",
     });
   }
+
   return parsed.skills.map((root) => root.path);
 }
 

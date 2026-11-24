@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bbDesktopBrowserAttachRequestSchema } from "@bb/desktop-contract";
+import { omnyoDesktopBrowserAttachRequestSchema } from "@omnyo/desktop-contract";
 import {
   evaluatePopupRate,
   isAllowedBrowserUrl,
@@ -28,7 +28,7 @@ describe("isAllowedBrowserUrl", () => {
 describe("browser IPC payload schemas", () => {
   it("rejects legacy layout fields in attach requests", () => {
     expect(
-      bbDesktopBrowserAttachRequestSchema.safeParse({
+      omnyoDesktopBrowserAttachRequestSchema.safeParse({
         threadId: "thread-1",
         tabId: "browser:abc",
         url: "",
@@ -45,11 +45,13 @@ describe("evaluatePopupRate", () => {
 
   it("allows popups up to the cap, then blocks within the window", () => {
     let timestamps: number[] = [];
+
     for (const now of [0, 100, 200]) {
       const decision = evaluatePopupRate({ ...args, timestamps, now });
       expect(decision.allowed).toBe(true);
       timestamps = decision.timestamps;
     }
+
     const blocked = evaluatePopupRate({ ...args, timestamps, now: 300 });
     expect(blocked.allowed).toBe(false);
     expect(blocked.timestamps).toHaveLength(3);

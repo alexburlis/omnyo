@@ -7,11 +7,22 @@ import {
   PROJECT_CHANGE_KINDS,
   SYSTEM_CHANGE_KINDS,
   THREAD_CHANGE_KINDS,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { QueryClient } from "@tanstack/react-query";
-import { makeEnvironment } from "@bb/test-helpers/domain-fixtures";
+import type { CommandCatalogResponse } from "@omnyo/server-contract";
+import { createDeferredPromise } from "@omnyo/test-helpers";
+import {
+  makeEnvironment,
+  makeThreadListEntry,
+} from "@omnyo/test-helpers/domain-fixtures";
 import { createAppQueryClient } from "@/lib/query-client";
+import { invalidateProjectSourceQueries } from "./cache-owners/mutation-cache-effects";
+import { makeThreadResponse } from "@/test/fixtures/thread-responses";
 import { hasThreadTimelineUnseenEvents } from "./cache-owners/thread-timeline-unseen-events";
+import {
+  INBOX_SNAPSHOT_QUERY_KEY,
+  INBOX_SNAPSHOT_QUERY_POLICY,
+} from "./cache-owners/inbox-snapshot-cache-owner";
 import {
   archivedThreadsListQueryKey,
   environmentDiffFilesQueryKey,
@@ -22,18 +33,21 @@ import {
   hostPathExistenceQueryKey,
   hostsQueryKey,
   projectPathsQueryKey,
-  projectCommandsQueryKey,
+  projectCommandCatalogQueryKey,
   projectFilePreviewQueryKey,
   projectPromptHistoryQueryKey,
   projectSourceBranchesQueryKey,
   projectsQueryKey,
   serverMoveStatusQueryKey,
+  shelvedThreadsListQueryKey,
   systemAppUpdateQueryKey,
   sidebarNavigationQueryKey,
   systemConfigQueryKey,
   systemExecutionOptionsQueryKey,
   systemProvidersQueryKey,
+  systemProviderCatalogQueryKey,
   threadDefaultExecutionOptionsQueryKey,
+  threadPluginBootstrapQueryKey,
   threadConversationOutlineQueryKey,
   threadQueuedMessagesQueryKey,
   threadListQueryKey,
@@ -70,6 +84,7 @@ const PROJECT_PROMPT_HISTORY_THREAD_CHANGES = [
   "thread-deleted",
   "archived-changed",
 ] as const;
+
 const NON_PROJECT_PROMPT_HISTORY_THREAD_CHANGES = [
   "parent-changed",
   "read-state-changed",
@@ -99,22 +114,26 @@ const NO_THREAD_ACTIVITY = {
   activeBackgroundCommandCount: 0,
   activeGoalCount: 0,
   activePlanModeCount: 0,
+  activeSubagentCount: 0,
   activeWorkflowCount: 0,
 } as const;
 
 function createFakeVisibility(): FakeVisibility {
   let visible = true;
   const listeners = new Set<() => void>();
+
   return {
     isDocumentVisible: () => visible,
     subscribe: (listener) => {
       listeners.add(listener);
+
       return () => {
         listeners.delete(listener);
       };
     },
     setVisible: (nextVisible) => {
       visible = nextVisible;
+
       for (const listener of listeners) {
         listener();
       }
@@ -134,9 +153,11 @@ function createRealtimeEffectsTestContext(
     },
     showMutationErrorToasts: false,
   });
+
   const effects = createRealtimeCacheEffects({ queryClient, visibility });
   const firstProjectHistoryKey = projectPromptHistoryQueryKey("project-1");
   const secondProjectHistoryKey = projectPromptHistoryQueryKey("project-2");
+
   const terminalKey = terminalsQueryKey({
     kind: "thread",
     threadId: "thr_1",
@@ -156,6 +177,167 @@ function createRealtimeEffectsTestContext(
 }
 
 describe("createRealtimeCacheEffects", () => {
+  it("catches up command readiness after an initial snapshot is already in flight", async () => {
+    vi.useFakeTimers();
+    const { effects, queryClient } = createRealtimeEffectsTestContext();
+
+    const key = projectCommandCatalogQueryKey(
+      "project-1",
+      "codex",
+      "env-1",
+      null,
+    );
+
+    const preparing: CommandCatalogResponse = {
+      state: "preparing",
+      commands: [],
+    };
+
+    const ready: CommandCatalogResponse = {
+      state: "ready",
+      commands: [
+        {
+          name: "project-check",
+          source: "command",
+          origin: "project",
+          description: null,
+          argumentHint: null,
+        },
+      ],
+    };
+
+    const firstSnapshot = createDeferredPromise<CommandCatalogResponse>();
+    const signals: AbortSignal[] = [];
+
+    const queryFn = vi.fn(({ signal }: { signal: AbortSignal }) => {
+      signals.push(signal);
+
+      return signals.length === 1
+        ? firstSnapshot.promise
+        : Promise.resolve(ready);
+    });
+
+    const observer = new QueryObserver(queryClient, {
+      queryKey: key,
+      queryFn,
+      staleTime: Infinity,
+    });
+
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(queryFn).toHaveBeenCalledTimes(1);
+
+      effects.handleChanged({
+        type: "changed",
+        entity: "system",
+        changes: ["command-catalog-changed"],
+      });
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(signals[0]?.aborted).toBe(false);
+
+      firstSnapshot.resolve(preparing);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(observer.getCurrentResult().data).toEqual(ready);
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      expect(signals[0]?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(queryFn).toHaveBeenCalledTimes(2);
+    } finally {
+      unsubscribe();
+      effects.dispose();
+      queryClient.clear();
+    }
+  });
+
+  it.each([
+    "environment-created",
+    "environment-deleted",
+    "metadata-changed",
+    "status-changed",
+  ] as const)(
+    "drops commands from the previous workspace after %s",
+    (change) => {
+      vi.useFakeTimers();
+      const { effects, queryClient } = createRealtimeEffectsTestContext();
+
+      const changed = projectCommandCatalogQueryKey(
+        "project-1",
+        "codex",
+        "env-1",
+        null,
+      );
+
+      const other = projectCommandCatalogQueryKey(
+        "project-1",
+        "codex",
+        "env-2",
+        null,
+      );
+
+      const data = { state: "ready", commands: [{ name: "old-workspace" }] };
+      queryClient.setQueryData(changed, data);
+      queryClient.setQueryData(other, data);
+
+      effects.handleChanged({
+        type: "changed",
+        entity: "environment",
+        id: "env-1",
+        changes: [change],
+      });
+      vi.advanceTimersByTime(250);
+
+      expect(queryClient.getQueryData(changed)).toBeUndefined();
+      expect(queryClient.getQueryData(other)).toEqual(data);
+      effects.dispose();
+      queryClient.clear();
+    },
+  );
+
+  it.each(["realtime", "mutation"] as const)(
+    "drops only the affected project's command rows after a %s source change",
+    (origin) => {
+      const { effects, queryClient } = createRealtimeEffectsTestContext();
+
+      const changed = projectCommandCatalogQueryKey(
+        "project-1",
+        "codex",
+        null,
+        "host-1",
+      );
+
+      const other = projectCommandCatalogQueryKey(
+        "project-2",
+        "codex",
+        null,
+        "host-1",
+      );
+
+      const data = { state: "ready", commands: [{ name: "old-workspace" }] };
+      queryClient.setQueryData(changed, data);
+      queryClient.setQueryData(other, data);
+
+      if (origin === "mutation") {
+        invalidateProjectSourceQueries({ queryClient, projectId: "project-1" });
+      } else {
+        effects.handleChanged({
+          type: "changed",
+          entity: "project",
+          id: "project-1",
+          changes: ["project-sources-changed"],
+        });
+      }
+
+      expect(queryClient.getQueryData(changed)).toBeUndefined();
+      expect(queryClient.getQueryData(other)).toEqual(data);
+      effects.dispose();
+      queryClient.clear();
+    },
+  );
+
   it.each(
     [
       threadStorageFilesQueryKey("thread-1"),
@@ -167,17 +349,21 @@ describe("createRealtimeCacheEffects", () => {
     "recovers a failed active $queryKey query when the host reconnects",
     async ({ queryKey }) => {
       const { effects, queryClient } = createRealtimeEffectsTestContext();
+
       const queryFn = vi
         .fn<() => Promise<string>>()
         .mockRejectedValueOnce(new Error("Host is paused."))
         .mockResolvedValue("loaded");
+
       const observer = new QueryObserver(queryClient, {
         queryKey,
         queryFn,
         staleTime: Infinity,
         refetchOnWindowFocus: false,
       });
+
       const unsubscribe = observer.subscribe(() => {});
+
       try {
         await vi.waitFor(() =>
           expect(observer.getCurrentResult().isError).toBe(true),
@@ -218,9 +404,9 @@ describe("createRealtimeCacheEffects", () => {
       projectPathsQueryKey("project-1", null, "host-b", "src", 8, true, true),
     );
     expect(
-      projectCommandsQueryKey("project-1", "codex", null, "host-a"),
+      projectCommandCatalogQueryKey("project-1", "codex", null, "host-a"),
     ).not.toEqual(
-      projectCommandsQueryKey("project-1", "codex", null, "host-b"),
+      projectCommandCatalogQueryKey("project-1", "codex", null, "host-b"),
     );
     expect(
       projectFilePreviewQueryKey("project-1", null, "host-a", "README.md"),
@@ -250,9 +436,14 @@ describe("createRealtimeCacheEffects", () => {
     ["host", HOST_CHANGE_KINDS, REALTIME_HOST_CHANGE_REGISTRY],
     ["system", SYSTEM_CHANGE_KINDS, REALTIME_SYSTEM_CHANGE_REGISTRY],
   ])(
-    "maps every realtime %s change to at least one dirty handler",
-    (_entity, changeKinds, registry) => {
+    "handles every realtime %s change or explicitly leaves the current web generation alone",
+    (entity, changeKinds, registry) => {
       for (const changeKind of changeKinds) {
+        if (entity === "system" && changeKind === "web-generation-changed") {
+          expect(registry[changeKind]).toEqual({ dirty: [] });
+          continue;
+        }
+
         expect(registry[changeKind]?.dirty.length ?? 0).toBeGreaterThan(0);
       }
     },
@@ -317,20 +508,24 @@ describe("createRealtimeCacheEffects", () => {
       threadActions: [],
       mentionProviders: [],
     });
-    const commandsKey = projectCommandsQueryKey(
+
+    const commandsKey = projectCommandCatalogQueryKey(
       "project-1",
       "codex",
       "environment-1",
       null,
     );
-    queryClient.setQueryData(commandsKey, { commands: [] });
+
+    queryClient.setQueryData(commandsKey, { state: "ready", commands: [] });
     const providersKey = systemProvidersQueryKey({ hostId: "host-1" });
     queryClient.setQueryData(providersKey, []);
+
     const executionOptionsKey = systemExecutionOptionsQueryKey({
       environmentId: "environment-1",
       hostId: "host-1",
       providerId: "codex",
     });
+
     queryClient.setQueryData(executionOptionsKey, {});
     const environmentProvidersKey = systemEnvironmentProvidersQueryKey();
     queryClient.setQueryData(environmentProvidersKey, []);
@@ -357,19 +552,24 @@ describe("createRealtimeCacheEffects", () => {
   it("refreshes cached access configuration when an installed plugin is disabled", async () => {
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const key = systemConfigQueryKey();
+
     const initial = {
       serverAccess: {
         providers: [{ id: "relay", availability: { status: "available" } }],
       },
     };
+
     const removed = { serverAccess: { providers: [] } };
     queryClient.setQueryData(key, initial);
+
     const observer = new QueryObserver(queryClient, {
       queryKey: key,
       queryFn: async () => removed,
       staleTime: Infinity,
     });
+
     const unsubscribe = observer.subscribe(() => {});
+
     try {
       effects.handleChanged({
         type: "changed",
@@ -388,12 +588,16 @@ describe("createRealtimeCacheEffects", () => {
   it("invalidates provider pickers on provider registration changes", () => {
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const providersKey = systemProvidersQueryKey({ hostId: "host-1" });
+    const providerCatalogKey = systemProviderCatalogQueryKey();
     queryClient.setQueryData(providersKey, []);
+    queryClient.setQueryData(providerCatalogKey, []);
+
     const executionOptionsKey = systemExecutionOptionsQueryKey({
       environmentId: "environment-1",
       hostId: "host-1",
       providerId: "codex",
     });
+
     queryClient.setQueryData(executionOptionsKey, {});
 
     effects.handleChanged({
@@ -403,6 +607,9 @@ describe("createRealtimeCacheEffects", () => {
     });
 
     expect(queryClient.getQueryState(providersKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(providerCatalogKey)?.isInvalidated).toBe(
+      true,
+    );
     expect(queryClient.getQueryState(executionOptionsKey)?.isInvalidated).toBe(
       true,
     );
@@ -414,6 +621,7 @@ describe("createRealtimeCacheEffects", () => {
       primaryHostId: string | null,
     ) {
       queryClient.setQueryData(systemConfigQueryKey(), { primaryHostId });
+
       for (const [id, hostId] of [
         ["env-a", "host-a"],
         ["env-b", "host-b"],
@@ -423,6 +631,7 @@ describe("createRealtimeCacheEffects", () => {
           makeEnvironment({ id, hostId }),
         );
       }
+
       const keys = Object.entries({
         hostA: { environmentId: null, hostId: "host-a" },
         hostB: { environmentId: null, hostId: "host-b" },
@@ -437,9 +646,11 @@ describe("createRealtimeCacheEffects", () => {
             systemExecutionOptionsQueryKey({ ...routing, providerId: "codex" }),
           ] as const,
       );
+
       for (const [, queryKey] of keys) {
         queryClient.setQueryData(queryKey, {});
       }
+
       return () =>
         keys
           .filter(
@@ -523,6 +734,7 @@ describe("createRealtimeCacheEffects", () => {
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const configKey = systemConfigQueryKey();
     const timelineKey = threadTimelineQueryKey("thr_1");
+
     const summaryKey = threadTimelineTurnSummaryDetailsQueryKey({
       itemId: null,
       threadId: "thr_1",
@@ -530,6 +742,7 @@ describe("createRealtimeCacheEffects", () => {
       sourceSeqStart: 1,
       sourceSeqEnd: 2,
     });
+
     queryClient.setQueryData(configKey, {});
     queryClient.setQueryData(timelineKey, {});
     queryClient.setQueryData(summaryKey, {});
@@ -537,6 +750,7 @@ describe("createRealtimeCacheEffects", () => {
     const environmentKeys = [null, "project-a", "project-b"].map((projectId) =>
       machineEnvironmentQueryKey(projectId),
     );
+
     for (const key of environmentKeys) queryClient.setQueryData(key, {});
 
     effects.handleChanged({
@@ -548,6 +762,7 @@ describe("createRealtimeCacheEffects", () => {
     expect(queryClient.getQueryState(configKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(timelineKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(summaryKey)?.isInvalidated).toBe(true);
+
     for (const key of environmentKeys)
       expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
     effects.dispose();
@@ -557,6 +772,7 @@ describe("createRealtimeCacheEffects", () => {
     "invalidates all cached project prompt histories for %s thread events",
     (change) => {
       vi.useFakeTimers();
+
       const {
         effects,
         firstProjectHistoryKey,
@@ -593,6 +809,7 @@ describe("createRealtimeCacheEffects", () => {
 
   it("uses thread project metadata to invalidate only the affected project prompt history", () => {
     vi.useFakeTimers();
+
     const {
       effects,
       firstProjectHistoryKey,
@@ -620,23 +837,59 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
+  it("invalidates the shelved list when another client shelves or unshelves a thread", () => {
+    vi.useFakeTimers();
+    const { effects, queryClient } = createRealtimeEffectsTestContext();
+    const shelvedListKey = shelvedThreadsListQueryKey();
+
+    const otherProjectListKey = threadListQueryKey({
+      archived: false,
+      projectId: "project-2",
+    });
+
+    queryClient.setQueryData(shelvedListKey, { pageParams: [0], pages: [[]] });
+    queryClient.setQueryData(otherProjectListKey, []);
+
+    effects.handleChanged({
+      type: "changed",
+      entity: "thread",
+      id: "thr_1",
+      metadata: { projectId: "project-1" },
+      changes: ["shelf-state-changed"],
+    });
+
+    vi.advanceTimersByTime(50);
+
+    expect(queryClient.getQueryState(shelvedListKey)?.isInvalidated).toBe(true);
+    expect(
+      queryClient.getQueryState(otherProjectListKey)?.isInvalidated,
+    ).not.toBe(true);
+
+    effects.dispose();
+  });
+
   it("uses thread project metadata to invalidate affected project and global thread lists", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const firstProjectThreadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     const firstProjectArchivedThreadListKey = archivedThreadsListQueryKey({
       projectId: "project-1",
     });
+
     const secondProjectThreadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-2",
     });
+
     const globalActiveThreadListKey = threadListQueryKey({
       archived: false,
     });
+
     queryClient.setQueryData(firstProjectThreadListKey, []);
     queryClient.setQueryData(firstProjectArchivedThreadListKey, []);
     queryClient.setQueryData(secondProjectThreadListKey, []);
@@ -672,10 +925,12 @@ describe("createRealtimeCacheEffects", () => {
   it("invalidates cached thread search results only once a turn completes, not on every appended batch", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const threadSearchKey = threadSearchQueryKey({
       limitPerGroup: 20,
       query: "needle",
     });
+
     queryClient.setQueryData(threadSearchKey, {
       active: { results: [], total: 0 },
       archived: { results: [], total: 0 },
@@ -716,31 +971,39 @@ describe("createRealtimeCacheEffects", () => {
   it("refreshes an open search once per flush without aborting the request in flight, then once it settles", async () => {
     vi.useFakeTimers();
     const visibility = createFakeVisibility();
+
     const { effects, queryClient } =
       createRealtimeEffectsTestContext(visibility);
+
     const threadSearchKey = threadSearchQueryKey({
       limitPerGroup: 20,
       query: "needle",
     });
+
     const signals: AbortSignal[] = [];
     const resolveFetches: Array<(value: unknown) => void> = [];
+
     const searchQueryFn = vi.fn(({ signal }: { signal: AbortSignal }) => {
       signals.push(signal);
+
       return new Promise((resolve) => {
         resolveFetches.push(resolve);
       });
     });
+
     const searchObserver = new QueryObserver(queryClient, {
       queryKey: threadSearchKey,
       queryFn: searchQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeSearch = searchObserver.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(searchQueryFn).toHaveBeenCalledTimes(1);
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
     visibility.setVisible(false);
+
     for (const threadId of ["thr_1", "thr_2"]) {
       effects.handleChanged({
         type: "changed",
@@ -750,6 +1013,7 @@ describe("createRealtimeCacheEffects", () => {
         changes: ["events-appended"],
       });
     }
+
     visibility.setVisible(true);
     await vi.advanceTimersByTimeAsync(0);
 
@@ -758,7 +1022,8 @@ describe("createRealtimeCacheEffects", () => {
         JSON.stringify(filters?.queryKey) ===
         JSON.stringify([threadSearchKey[0]]),
     );
-    expect(searchInvalidations).toHaveLength(1);
+
+    expect(searchInvalidations).toHaveLength(2);
     expect(searchInvalidations[0]?.[1]).toEqual({ cancelRefetch: false });
     expect(signals[0]?.aborted).toBe(false);
     expect(searchQueryFn).toHaveBeenCalledTimes(1);
@@ -788,32 +1053,40 @@ describe("createRealtimeCacheEffects", () => {
   it("refetches an in-flight search once it settles after a status change instead of aborting it", async () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const threadSearchKey = threadSearchQueryKey({
       limitPerGroup: 20,
       query: "needle",
     });
+
     const idleResponse = {
       active: { results: [{ id: "thr_1", status: "idle" }], total: 1 },
       archived: { results: [], total: 0 },
     };
+
     const activeResponse = {
       active: { results: [{ id: "thr_1", status: "active" }], total: 1 },
       archived: { results: [], total: 0 },
     };
+
     queryClient.setQueryData(threadSearchKey, idleResponse);
     const signals: AbortSignal[] = [];
     const resolveFetches: Array<(value: unknown) => void> = [];
+
     const searchQueryFn = vi.fn(({ signal }: { signal: AbortSignal }) => {
       signals.push(signal);
+
       return new Promise((resolve) => {
         resolveFetches.push(resolve);
       });
     });
+
     const searchObserver = new QueryObserver(queryClient, {
       queryKey: threadSearchKey,
       queryFn: searchQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeSearch = searchObserver.subscribe(() => {});
     void searchObserver.refetch();
     await vi.advanceTimersByTimeAsync(0);
@@ -828,6 +1101,7 @@ describe("createRealtimeCacheEffects", () => {
         statusChange: {
           activity: NO_THREAD_ACTIVITY,
           latestAttentionAt: 100,
+          lastMessageAt: null,
           runtime: {
             displayStatus: "active",
           },
@@ -867,7 +1141,7 @@ describe("createRealtimeCacheEffects", () => {
     { cachedSequence: 2, isBehind: false },
     { cachedSequence: 3, isBehind: false },
   ])(
-    "compares unviewed timeline sequence $cachedSequence with the notified sequence without refetching",
+    "compares unviewed timeline sequence $cachedSequence with the notified sequence without invalidating or refetching it mid-turn",
     async ({ cachedSequence, isBehind }) => {
       vi.useFakeTimers();
       const { effects, queryClient } = createRealtimeEffectsTestContext();
@@ -877,15 +1151,18 @@ describe("createRealtimeCacheEffects", () => {
         rows: [],
         maxSeq: cachedSequence,
       });
+
       const viewedTimelineQueryFn = vi.fn(async () => ({
         rows: [],
         maxSeq: 2,
       }));
+
       const viewedObserver = new QueryObserver(queryClient, {
         queryKey: viewedTimelineKey,
         queryFn: viewedTimelineQueryFn,
         staleTime: Infinity,
       });
+
       const unsubscribeViewed = viewedObserver.subscribe(() => {});
       await vi.advanceTimersByTimeAsync(0);
       viewedTimelineQueryFn.mockClear();
@@ -904,29 +1181,33 @@ describe("createRealtimeCacheEffects", () => {
           changes: ["events-appended"],
         });
       }
+
       await vi.advanceTimersByTimeAsync(50);
 
       expect(
         queryClient.getQueryState(unviewedTimelineKey)?.isInvalidated,
-      ).toBe(true);
+      ).toBe(false);
       expect(hasThreadTimelineUnseenEvents(queryClient, "thr_unviewed")).toBe(
         isBehind,
       );
       expect(hasThreadTimelineUnseenEvents(queryClient, "thr_viewed")).toBe(
         false,
       );
+
       const unviewedInvalidations = invalidateSpy.mock.calls.filter(
         ([filters]) =>
           JSON.stringify(filters?.queryKey) ===
           JSON.stringify(threadTimelineQueryKeyPrefix("thr_unviewed")),
       );
-      expect(unviewedInvalidations).toHaveLength(1);
-      expect(unviewedInvalidations[0]?.[0]?.refetchType).toBe("none");
+
+      expect(unviewedInvalidations).toHaveLength(0);
+
       const viewedInvalidations = invalidateSpy.mock.calls.filter(
         ([filters]) =>
           JSON.stringify(filters?.queryKey) ===
           JSON.stringify(threadTimelineQueryKeyPrefix("thr_viewed")),
       );
+
       expect(viewedInvalidations).toHaveLength(1);
       expect(viewedInvalidations[0]?.[0]?.refetchType).toBeUndefined();
       expect(viewedTimelineQueryFn).toHaveBeenCalledTimes(1);
@@ -945,16 +1226,19 @@ describe("createRealtimeCacheEffects", () => {
     const outlineKey = threadConversationOutlineQueryKey(threadId, "user");
     const timelineQueryFn = vi.fn(async () => ({ rows: [] }));
     const outlineQueryFn = vi.fn(async () => ({ items: [], maxSeq: 1 }));
+
     const timelineObserver = new QueryObserver(queryClient, {
       queryKey: timelineKey,
       queryFn: timelineQueryFn,
       staleTime: Infinity,
     });
+
     const outlineObserver = new QueryObserver(queryClient, {
       queryKey: outlineKey,
       queryFn: outlineQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeTimeline = timelineObserver.subscribe(() => {});
     const unsubscribeOutline = outlineObserver.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
@@ -996,20 +1280,113 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
+  it.each([
+    { changes: ["title-changed"], metadata: {}, fallback: "refetch" },
+    { changes: ["queue-changed"], metadata: {}, fallback: "refetch" },
+    { changes: ["interactions-changed"], metadata: {}, fallback: "refetch" },
+    { changes: ["environment-changed"], metadata: {}, fallback: "refetch" },
+    { changes: ["read-state-changed"], metadata: {}, fallback: "stale" },
+    {
+      changes: ["events-appended"],
+      metadata: { backgroundActivityChanged: true },
+      fallback: "refetch",
+    },
+  ] as const)(
+    "applies the thread list entry from $changes instead of refetching the sidebar",
+    async ({ changes, metadata, fallback }) => {
+      vi.useFakeTimers();
+      const { effects, queryClient } = createRealtimeEffectsTestContext();
+
+      const cached = makeThreadListEntry({
+        id: "thr_1",
+        projectId: "project-1",
+        title: "Old title",
+      });
+
+      const sidebarQueryFn = vi.fn(async () => ({
+        sections: [],
+        personalProject: { id: "personal", threads: [] },
+        projects: [{ id: "project-1", threads: [cached] }],
+      }));
+
+      const observer = new QueryObserver(queryClient, {
+        queryKey: sidebarNavigationQueryKey(),
+        queryFn: sidebarQueryFn,
+        staleTime: Infinity,
+      });
+
+      const unsubscribe = observer.subscribe(() => {});
+      await vi.advanceTimersByTimeAsync(0);
+      sidebarQueryFn.mockClear();
+
+      const listEntry = {
+        ...cached,
+        title: "New title",
+        queuedWork: "waiting" as const,
+        hasPendingInteraction: true,
+      };
+
+      effects.handleChanged({
+        type: "changed",
+        entity: "thread",
+        id: "thr_1",
+        metadata: { ...metadata, projectId: "project-1", listEntry },
+        changes: [...changes],
+      });
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      expect(sidebarQueryFn).not.toHaveBeenCalled();
+      expect(
+        queryClient.getQueryState(sidebarNavigationQueryKey())?.isInvalidated,
+      ).toBe(false);
+      expect(observer.getCurrentResult().data?.projects[0]?.threads[0]).toEqual(
+        listEntry,
+      );
+
+      effects.handleChanged({
+        type: "changed",
+        entity: "thread",
+        id: "thr_1",
+        metadata: {
+          ...metadata,
+          projectId: "project-1",
+          listEntry: { ...listEntry, sectionId: "section-1" },
+        },
+        changes: [...changes],
+      });
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      if (fallback === "refetch") {
+        expect(sidebarQueryFn).toHaveBeenCalledTimes(1);
+      } else {
+        expect(
+          queryClient.getQueryState(sidebarNavigationQueryKey())?.isInvalidated,
+        ).toBe(true);
+      }
+
+      unsubscribe();
+      effects.dispose();
+    },
+  );
+
   it("marks archived thread lists stale without refetching them for status changes", async () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const activeListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     const archivedListKey = archivedThreadsListQueryKey({
       projectId: "project-1",
     });
+
     const globalArchivedListKey = archivedThreadsListQueryKey({});
     const activeListQueryFn = vi.fn(async () => []);
     const archivedListQueryFn = vi.fn(async () => []);
     const globalArchivedListQueryFn = vi.fn(async () => []);
+
     const observers = [
       new QueryObserver(queryClient, {
         queryKey: activeListKey,
@@ -1027,9 +1404,11 @@ describe("createRealtimeCacheEffects", () => {
         staleTime: Infinity,
       }),
     ];
+
     const unsubscribers = observers.map((observer) =>
       observer.subscribe(() => {}),
     );
+
     await vi.advanceTimersByTimeAsync(0);
     activeListQueryFn.mockClear();
     archivedListQueryFn.mockClear();
@@ -1046,6 +1425,8 @@ describe("createRealtimeCacheEffects", () => {
       await vi.advanceTimersByTimeAsync(50);
     }
 
+    expect(activeListQueryFn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(activeListQueryFn).toHaveBeenCalledTimes(2);
     expect(archivedListQueryFn).not.toHaveBeenCalled();
     expect(globalArchivedListQueryFn).not.toHaveBeenCalled();
@@ -1070,6 +1451,7 @@ describe("createRealtimeCacheEffects", () => {
     for (const unsubscribe of unsubscribers) {
       unsubscribe();
     }
+
     effects.dispose();
   });
 
@@ -1079,11 +1461,14 @@ describe("createRealtimeCacheEffects", () => {
       vi.useFakeTimers();
       const { effects, queryClient } = createRealtimeEffectsTestContext();
       const pullRequestKey = environmentPullRequestQueryKey("env-1");
+
       const nextPullRequest = {
         outcome: "available",
         pullRequest: { number: 42 },
       };
+
       const pullRequestQueryFn = vi.fn(async () => nextPullRequest);
+
       if (cacheSource === "thread detail") {
         queryClient.setQueryData(threadQueryKey("thr_1"), {
           environmentId: "env-1",
@@ -1099,12 +1484,15 @@ describe("createRealtimeCacheEffects", () => {
           ],
         });
       }
+
       queryClient.setQueryData(pullRequestKey, { outcome: "absent" });
+
       const pullRequestObserver = new QueryObserver(queryClient, {
         queryFn: pullRequestQueryFn,
         queryKey: pullRequestKey,
         staleTime: Infinity,
       });
+
       const unsubscribePullRequest = pullRequestObserver.subscribe(() => {});
 
       effects.handleChanged({
@@ -1127,10 +1515,12 @@ describe("createRealtimeCacheEffects", () => {
   it("invalidates cached thread search results when environment metadata changes", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const threadSearchKey = threadSearchQueryKey({
       limitPerGroup: 20,
       query: "branch-label",
     });
+
     queryClient.setQueryData(threadSearchKey, {
       active: { results: [], total: 0 },
       archived: { results: [], total: 0 },
@@ -1154,14 +1544,17 @@ describe("createRealtimeCacheEffects", () => {
   it("falls back to invalidating all cached thread lists when a thread list event has no project metadata", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const firstProjectThreadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     const secondProjectThreadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-2",
     });
+
     queryClient.setQueryData(firstProjectThreadListKey, []);
     queryClient.setQueryData(secondProjectThreadListKey, []);
 
@@ -1188,6 +1581,7 @@ describe("createRealtimeCacheEffects", () => {
     "does not invalidate cached project prompt histories for %s thread events",
     (change) => {
       vi.useFakeTimers();
+
       const {
         effects,
         firstProjectHistoryKey,
@@ -1219,10 +1613,12 @@ describe("createRealtimeCacheEffects", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const threadKey = threadQueryKey("thr_1");
+
     const threadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     const sidebarNavigationKey = sidebarNavigationQueryKey();
     queryClient.setQueryData(threadKey, { id: "thr_1" });
     queryClient.setQueryData(threadListKey, []);
@@ -1235,30 +1631,37 @@ describe("createRealtimeCacheEffects", () => {
     );
     const threadQueryFn = vi.fn(async () => null);
     const threadListQueryFn = vi.fn(async () => []);
+
     const sidebarNavigationQueryFn = vi.fn(async () => ({
       projects: [],
       personalProject: { threads: [] },
     }));
+
     const threadObserver = new QueryObserver(queryClient, {
       queryKey: threadKey,
       queryFn: threadQueryFn,
       staleTime: Infinity,
     });
+
     const threadListObserver = new QueryObserver(queryClient, {
       queryKey: threadListKey,
       queryFn: threadListQueryFn,
       staleTime: Infinity,
     });
+
     const sidebarNavigationObserver = new QueryObserver(queryClient, {
       queryKey: sidebarNavigationKey,
       queryFn: sidebarNavigationQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeThread = threadObserver.subscribe(() => {});
     const unsubscribeThreadList = threadListObserver.subscribe(() => {});
+
     const unsubscribeSidebarNavigation = sidebarNavigationObserver.subscribe(
       () => {},
     );
+
     threadQueryFn.mockClear();
     threadListQueryFn.mockClear();
     sidebarNavigationQueryFn.mockClear();
@@ -1290,12 +1693,14 @@ describe("createRealtimeCacheEffects", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const diffFilesKey = environmentDiffFilesQueryKey("env-1", "all", "main");
+
     const diffPatchKey = environmentDiffPatchQueryKey(
       "env-1",
       "all",
       "main",
       "file.ts",
     );
+
     const workStatusKey = environmentWorkStatusQueryKey("env-1", "main");
     queryClient.setQueryData(diffFilesKey, {
       outcome: "available",
@@ -1309,23 +1714,28 @@ describe("createRealtimeCacheEffects", () => {
       truncated: false,
     });
     queryClient.setQueryData(workStatusKey, null);
+
     const diffFilesQueryFn = vi.fn(async () => ({
       outcome: "available" as const,
       files: [],
       shortstat: "",
       mergeBaseRef: "base-ref",
     }));
+
     const workStatusQueryFn = vi.fn(async () => null);
+
     const diffFilesObserver = new QueryObserver(queryClient, {
       queryKey: diffFilesKey,
       queryFn: diffFilesQueryFn,
       staleTime: Infinity,
     });
+
     const workStatusObserver = new QueryObserver(queryClient, {
       queryKey: workStatusKey,
       queryFn: workStatusQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeDiffFiles = diffFilesObserver.subscribe(() => {});
     const unsubscribeWorkStatus = workStatusObserver.subscribe(() => {});
     diffFilesQueryFn.mockClear();
@@ -1357,11 +1767,13 @@ describe("createRealtimeCacheEffects", () => {
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const pullRequestKey = environmentPullRequestQueryKey("env-1");
     const pullRequestQueryFn = vi.fn(async () => ({ outcome: "absent" }));
+
     const pullRequestObserver = new QueryObserver(queryClient, {
       queryFn: pullRequestQueryFn,
       queryKey: pullRequestKey,
       staleTime: Infinity,
     });
+
     const unsubscribePullRequest = pullRequestObserver.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     pullRequestQueryFn.mockClear();
@@ -1389,17 +1801,21 @@ describe("createRealtimeCacheEffects", () => {
     const workStatusKey = environmentWorkStatusQueryKey("env-1", "main");
     const signals: AbortSignal[] = [];
     const resolveFetches: Array<(value: unknown) => void> = [];
+
     const workStatusQueryFn = vi.fn(({ signal }: { signal: AbortSignal }) => {
       signals.push(signal);
+
       return new Promise((resolve) => {
         resolveFetches.push(resolve);
       });
     });
+
     const workStatusObserver = new QueryObserver(queryClient, {
       queryKey: workStatusKey,
       queryFn: workStatusQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeWorkStatus = workStatusObserver.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(workStatusQueryFn).toHaveBeenCalledTimes(1);
@@ -1444,10 +1860,12 @@ describe("createRealtimeCacheEffects", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const threadKey = threadQueryKey("thr_1");
+
     const storagePreviewKey = threadStorageFilePreviewQueryKey(
       "thr_1",
       "notes.md",
     );
+
     const initialStoragePreview = {
       kind: "text",
       content: "old",
@@ -1455,6 +1873,7 @@ describe("createRealtimeCacheEffects", () => {
       path: "notes.md",
       url: "/old",
     };
+
     const nextStoragePreview = {
       kind: "text",
       content: "new",
@@ -1462,20 +1881,24 @@ describe("createRealtimeCacheEffects", () => {
       path: "notes.md",
       url: "/new",
     };
+
     queryClient.setQueryData(threadKey, {
       id: "thr_1",
       environmentId: "env-1",
     });
     queryClient.setQueryData(storagePreviewKey, initialStoragePreview);
     const storagePreviewQueryFn = vi.fn(async () => nextStoragePreview);
+
     const storagePreviewObserver = new QueryObserver(queryClient, {
       queryKey: storagePreviewKey,
       queryFn: storagePreviewQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeStoragePreview = storagePreviewObserver.subscribe(
       () => {},
     );
+
     storagePreviewQueryFn.mockClear();
 
     effects.handleChanged({
@@ -1498,10 +1921,12 @@ describe("createRealtimeCacheEffects", () => {
   it("refetches active thread storage preview queries when a thread environment changes", async () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const storagePreviewKey = threadStorageFilePreviewQueryKey(
       "thr_1",
       "notes.md",
     );
+
     const initialStoragePreview = {
       kind: "text",
       content: "old",
@@ -1509,6 +1934,7 @@ describe("createRealtimeCacheEffects", () => {
       path: "notes.md",
       url: "/old",
     };
+
     const nextStoragePreview = {
       kind: "text",
       content: "new",
@@ -1516,16 +1942,20 @@ describe("createRealtimeCacheEffects", () => {
       path: "notes.md",
       url: "/new",
     };
+
     queryClient.setQueryData(storagePreviewKey, initialStoragePreview);
     const storagePreviewQueryFn = vi.fn(async () => nextStoragePreview);
+
     const storagePreviewObserver = new QueryObserver(queryClient, {
       queryKey: storagePreviewKey,
       queryFn: storagePreviewQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeStoragePreview = storagePreviewObserver.subscribe(
       () => {},
     );
+
     storagePreviewQueryFn.mockClear();
 
     effects.handleChanged({
@@ -1549,6 +1979,7 @@ describe("createRealtimeCacheEffects", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const defaultOptionsKey = threadDefaultExecutionOptionsQueryKey("thr_1");
+
     const initialDefaults = {
       model: "gpt-5",
       permissionMode: "auto",
@@ -1556,6 +1987,7 @@ describe("createRealtimeCacheEffects", () => {
       serviceTier: "default",
       source: "client/turn/requested",
     };
+
     const nextDefaults = {
       model: "gpt-5.5",
       permissionMode: "accept-edits",
@@ -1563,16 +1995,20 @@ describe("createRealtimeCacheEffects", () => {
       serviceTier: "default",
       source: "client/turn/requested",
     };
+
     queryClient.setQueryData(defaultOptionsKey, initialDefaults);
     const defaultOptionsQueryFn = vi.fn(async () => nextDefaults);
+
     const defaultOptionsObserver = new QueryObserver(queryClient, {
       queryKey: defaultOptionsKey,
       queryFn: defaultOptionsQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeDefaultOptions = defaultOptionsObserver.subscribe(
       () => {},
     );
+
     defaultOptionsQueryFn.mockClear();
 
     effects.handleChanged({
@@ -1596,12 +2032,15 @@ describe("createRealtimeCacheEffects", () => {
     const key = threadDefaultExecutionOptionsQueryKey("thr_1");
     const signals: AbortSignal[] = [];
     const pending: Array<(value: { serviceTier: string }) => void> = [];
+
     const queryFn = vi.fn(({ signal }: { signal: AbortSignal }) => {
       signals.push(signal);
+
       return new Promise<{ serviceTier: string }>((resolve) =>
         pending.push(resolve),
       );
     });
+
     const observer = new QueryObserver(queryClient, { queryKey: key, queryFn });
     const unsubscribe = observer.subscribe(() => {});
     effects.handleChanged({
@@ -1633,7 +2072,7 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
-  it("keeps timeline invalidations debounced when status-changed rides the same publish", () => {
+  it("refreshes timeline immediately when status-changed rides the same publish", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const threadKey = threadQueryKey("thr_1");
@@ -1659,9 +2098,7 @@ describe("createRealtimeCacheEffects", () => {
     });
 
     expect(queryClient.getQueryState(threadKey)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(timelineKey)?.isInvalidated).not.toBe(
-      true,
-    );
+    expect(queryClient.getQueryState(timelineKey)?.isInvalidated).toBe(true);
 
     vi.advanceTimersByTime(50);
     expect(queryClient.getQueryState(timelineKey)?.isInvalidated).toBe(true);
@@ -1718,14 +2155,17 @@ describe("createRealtimeCacheEffects", () => {
   it("applies an id-less immediate change with undefined metadata like the global flush path", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const projectAListKey = threadListQueryKey({
       archived: false,
       projectId: "project-a",
     });
+
     const projectBListKey = threadListQueryKey({
       archived: false,
       projectId: "project-b",
     });
+
     queryClient.setQueryData(projectAListKey, []);
     queryClient.setQueryData(projectBListKey, []);
 
@@ -1752,6 +2192,7 @@ describe("createRealtimeCacheEffects", () => {
     const threadKey = threadQueryKey("thr_1");
     const timelineKey = threadTimelineQueryKey("thr_1");
     const promptHistoryKey = threadPromptHistoryQueryKey("thr_1");
+
     const turnDetailsKey = threadTimelineTurnSummaryDetailsQueryKey({
       itemId: null,
       threadId: "thr_1",
@@ -1759,6 +2200,7 @@ describe("createRealtimeCacheEffects", () => {
       sourceSeqStart: 1,
       sourceSeqEnd: 5,
     });
+
     queryClient.setQueryData(threadKey, { id: "thr_1" });
     queryClient.setQueryData(promptHistoryKey, []);
     queryClient.setQueryData(turnDetailsKey, { rows: [] });
@@ -1846,17 +2288,21 @@ describe("createRealtimeCacheEffects", () => {
     const timelineKey = threadTimelineQueryKey("thr_1");
     const signals: AbortSignal[] = [];
     const resolveFetches: Array<(value: unknown) => void> = [];
+
     const timelineQueryFn = vi.fn(({ signal }: { signal: AbortSignal }) => {
       signals.push(signal);
+
       return new Promise((resolve) => {
         resolveFetches.push(resolve);
       });
     });
+
     const timelineObserver = new QueryObserver(queryClient, {
       queryKey: timelineKey,
       queryFn: timelineQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeTimeline = timelineObserver.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(timelineQueryFn).toHaveBeenCalledTimes(1);
@@ -1922,17 +2368,21 @@ describe("createRealtimeCacheEffects", () => {
     const timelineKey = threadTimelineQueryKey("thr_1");
     const signals: AbortSignal[] = [];
     const resolveFetches: Array<(value: unknown) => void> = [];
+
     const timelineQueryFn = vi.fn(({ signal }: { signal: AbortSignal }) => {
       signals.push(signal);
+
       return new Promise((resolve) => {
         resolveFetches.push(resolve);
       });
     });
+
     const timelineObserver = new QueryObserver(queryClient, {
       queryKey: timelineKey,
       queryFn: timelineQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeTimeline = timelineObserver.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(timelineQueryFn).toHaveBeenCalledTimes(1);
@@ -2045,32 +2495,40 @@ describe("createRealtimeCacheEffects", () => {
   it("uses thread project metadata to mark only affected project thread lists stale for read-state changes", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const firstProjectThreadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     const secondProjectThreadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-2",
     });
+
     queryClient.setQueryData(firstProjectThreadListKey, []);
     queryClient.setQueryData(secondProjectThreadListKey, []);
     const firstProjectThreadListQueryFn = vi.fn(async () => []);
     const secondProjectThreadListQueryFn = vi.fn(async () => []);
+
     const firstProjectThreadListObserver = new QueryObserver(queryClient, {
       queryKey: firstProjectThreadListKey,
       queryFn: firstProjectThreadListQueryFn,
       staleTime: Infinity,
     });
+
     const secondProjectThreadListObserver = new QueryObserver(queryClient, {
       queryKey: secondProjectThreadListKey,
       queryFn: secondProjectThreadListQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeFirstProjectThreadList =
       firstProjectThreadListObserver.subscribe(() => {});
+
     const unsubscribeSecondProjectThreadList =
       secondProjectThreadListObserver.subscribe(() => {});
+
     firstProjectThreadListQueryFn.mockClear();
     secondProjectThreadListQueryFn.mockClear();
 
@@ -2102,10 +2560,12 @@ describe("createRealtimeCacheEffects", () => {
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const threadKey = threadQueryKey("thr_1");
     const timelineKey = threadTimelineQueryKey("thr_1");
+
     const threadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     const sidebarNavigationKey = sidebarNavigationQueryKey();
     queryClient.setQueryData(threadKey, { id: "thr_1" });
     queryClient.setQueryData(timelineKey, {
@@ -2152,9 +2612,7 @@ describe("createRealtimeCacheEffects", () => {
         ?.threads.at(0)?.hasPendingInteraction,
     ).toBe(true);
     expect(queryClient.getQueryState(threadKey)?.isInvalidated).not.toBe(true);
-    expect(queryClient.getQueryState(timelineKey)?.isInvalidated).not.toBe(
-      true,
-    );
+    expect(queryClient.getQueryState(timelineKey)?.isInvalidated).toBe(true);
 
     effects.dispose();
   });
@@ -2162,33 +2620,42 @@ describe("createRealtimeCacheEffects", () => {
   it("patches cached thread list status from notification metadata instead of refetching the sidebar bootstrap", async () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const threadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     const sidebarNavigationKey = sidebarNavigationQueryKey();
+
     const idleRow = {
       activity: NO_THREAD_ACTIVITY,
       archivedAt: null,
       id: "thr_1",
       latestAttentionAt: 100,
+      lastMessageAt: null,
       runtime: { displayStatus: "idle" },
       status: "idle",
       updatedAt: 100,
     };
+
     const otherRow = {
       activity: NO_THREAD_ACTIVITY,
       id: "thr_2",
       latestAttentionAt: 50,
+      lastMessageAt: null,
       runtime: { displayStatus: "idle" },
       status: "idle",
       updatedAt: 50,
     };
+
     const threadListQueryFn = vi.fn(async () => [idleRow, otherRow]);
+
     const sidebarQueryFn = vi.fn(async () => ({
       projects: [{ threads: [idleRow, otherRow] }],
       personalProject: { threads: [] },
     }));
+
     const observers = [
       new QueryObserver(queryClient, {
         queryKey: threadListKey,
@@ -2201,9 +2668,11 @@ describe("createRealtimeCacheEffects", () => {
         staleTime: Infinity,
       }),
     ];
+
     const unsubscribers = observers.map((observer) =>
       observer.subscribe(() => {}),
     );
+
     await vi.advanceTimersByTimeAsync(0);
     expect(sidebarQueryFn).toHaveBeenCalledTimes(1);
     expect(threadListQueryFn).toHaveBeenCalledTimes(1);
@@ -2211,12 +2680,14 @@ describe("createRealtimeCacheEffects", () => {
     const statusChange = {
       activity: { ...NO_THREAD_ACTIVITY, activePlanModeCount: 1 },
       latestAttentionAt: 100,
+      lastMessageAt: null,
       runtime: {
         displayStatus: "active",
       },
       status: "active",
       updatedAt: 200,
     } as const;
+
     effects.handleChanged({
       type: "changed",
       entity: "thread",
@@ -2231,18 +2702,25 @@ describe("createRealtimeCacheEffects", () => {
     expect(
       queryClient.getQueryState(sidebarNavigationKey)?.isInvalidated,
     ).not.toBe(true);
+
     const sidebarThreads = queryClient.getQueryData<{
       projects: { threads: (typeof idleRow)[] }[];
     }>(sidebarNavigationKey)?.projects[0]?.threads;
-    expect(sidebarThreads?.[0]).toEqual({ ...idleRow, ...statusChange });
+
+    expect(sidebarThreads?.[0]).toEqual({
+      ...idleRow,
+      ...statusChange,
+      work: null,
+    });
     expect(sidebarThreads?.[1]).toBe(otherRow);
     expect(
       queryClient.getQueryData<(typeof idleRow)[]>(threadListKey)?.[0],
-    ).toEqual({ ...idleRow, ...statusChange });
+    ).toEqual({ ...idleRow, ...statusChange, work: null });
 
     for (const unsubscribe of unsubscribers) {
       unsubscribe();
     }
+
     effects.dispose();
   });
 
@@ -2250,15 +2728,18 @@ describe("createRealtimeCacheEffects", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const sidebarNavigationKey = sidebarNavigationQueryKey();
+
     const sidebarQueryFn = vi.fn(async () => ({
       projects: [{ threads: [{ id: "thr_1", status: "idle" }] }],
       personalProject: { threads: [] },
     }));
+
     const observer = new QueryObserver(queryClient, {
       queryKey: sidebarNavigationKey,
       queryFn: sidebarQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribe = observer.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(sidebarQueryFn).toHaveBeenCalledTimes(1);
@@ -2295,16 +2776,19 @@ describe("createRealtimeCacheEffects", () => {
   it("refetches a project list and its forks list once each for a bare status change", async () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
+
     const projectListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     const forksListKey = threadListQueryKey({
       archived: false,
       originKind: "fork",
       projectId: "project-1",
       sourceThreadId: "thr_1",
     });
+
     const createListQueryFn = () =>
       vi.fn(
         () =>
@@ -2312,18 +2796,22 @@ describe("createRealtimeCacheEffects", () => {
             setTimeout(() => resolve([]), 20);
           }),
       );
+
     const projectQueryFn = createListQueryFn();
     const forksQueryFn = createListQueryFn();
+
     const projectObserver = new QueryObserver(queryClient, {
       queryKey: projectListKey,
       queryFn: projectQueryFn,
       staleTime: Infinity,
     });
+
     const forksObserver = new QueryObserver(queryClient, {
       queryKey: forksListKey,
       queryFn: forksQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribeProject = projectObserver.subscribe(() => {});
     const unsubscribeForks = forksObserver.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(20);
@@ -2351,25 +2839,31 @@ describe("createRealtimeCacheEffects", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const sidebarNavigationKey = sidebarNavigationQueryKey();
+
     const idleRow = {
       activity: NO_THREAD_ACTIVITY,
       id: "thr_1",
       latestAttentionAt: 100,
+      lastMessageAt: null,
       runtime: { displayStatus: "idle" },
       status: "idle",
       updatedAt: 100,
     };
+
     const stoppedRow = { ...idleRow, updatedAt: 300 };
     let serverRow = idleRow;
+
     const sidebarQueryFn = vi.fn(async () => ({
       projects: [{ threads: [serverRow] }],
       personalProject: { threads: [] },
     }));
+
     const observer = new QueryObserver(queryClient, {
       queryKey: sidebarNavigationKey,
       queryFn: sidebarQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribe = observer.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(sidebarQueryFn).toHaveBeenCalledTimes(1);
@@ -2383,6 +2877,7 @@ describe("createRealtimeCacheEffects", () => {
         statusChange: {
           activity: NO_THREAD_ACTIVITY,
           latestAttentionAt: 100,
+          lastMessageAt: null,
           runtime: {
             displayStatus: "active",
           },
@@ -2424,22 +2919,27 @@ describe("createRealtimeCacheEffects", () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const sidebarNavigationKey = sidebarNavigationQueryKey();
+
     const idleRow = {
       activity: NO_THREAD_ACTIVITY,
       id: "thr_1",
       latestAttentionAt: 100,
+      lastMessageAt: null,
       runtime: { displayStatus: "idle" },
       status: "idle",
       updatedAt: 100,
     };
+
     const activeRow = {
       ...idleRow,
       runtime: { displayStatus: "active" },
       status: "active",
       updatedAt: 200,
     };
+
     let activated = false;
     const responses: { activated: boolean; resolve: () => void }[] = [];
+
     const sidebarQueryFn = vi.fn(
       () =>
         new Promise<{
@@ -2457,11 +2957,13 @@ describe("createRealtimeCacheEffects", () => {
           });
         }),
     );
+
     const observer = new QueryObserver(queryClient, {
       queryKey: sidebarNavigationKey,
       queryFn: sidebarQueryFn,
       staleTime: Infinity,
     });
+
     const unsubscribe = observer.subscribe(() => {});
     responses.shift()?.resolve();
     await vi.advanceTimersByTimeAsync(0);
@@ -2488,6 +2990,7 @@ describe("createRealtimeCacheEffects", () => {
         statusChange: {
           activity: NO_THREAD_ACTIVITY,
           latestAttentionAt: 100,
+          lastMessageAt: null,
           runtime: {
             displayStatus: "active",
           },
@@ -2519,14 +3022,17 @@ describe("createRealtimeCacheEffects", () => {
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const threadKey = threadQueryKey("thr_1");
     const timelineKey = threadTimelineQueryKey("thr_1");
+
     const firstProjectThreadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-1",
     });
+
     const secondProjectThreadListKey = threadListQueryKey({
       archived: false,
       projectId: "project-2",
     });
+
     queryClient.setQueryData(threadKey, { id: "thr_1" });
     queryClient.setQueryData(firstProjectThreadListKey, []);
     queryClient.setQueryData(secondProjectThreadListKey, []);
@@ -2616,9 +3122,11 @@ describe("createRealtimeCacheEffects", () => {
   it("invalidates project source dependent queries for the changed project", () => {
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const projectsKey = projectsQueryKey();
+
     const localPathKey = hostPathExistenceQueryKey("host-1", [
       "/workspace/project",
     ]);
+
     const firstProjectPathsKey = projectPathsQueryKey(
       "project-1",
       null,
@@ -2628,6 +3136,7 @@ describe("createRealtimeCacheEffects", () => {
       true,
       true,
     );
+
     const secondProjectPathsKey = projectPathsQueryKey(
       "project-2",
       null,
@@ -2637,14 +3146,17 @@ describe("createRealtimeCacheEffects", () => {
       true,
       true,
     );
+
     const firstProjectSourceBranchesKey = projectSourceBranchesQueryKey(
       "project-1",
       "host-1",
     );
+
     const secondProjectSourceBranchesKey = projectSourceBranchesQueryKey(
       "project-2",
       "host-1",
     );
+
     queryClient.setQueryData(projectsKey, []);
     queryClient.setQueryData(localPathKey, []);
     queryClient.setQueryData(firstProjectPathsKey, []);
@@ -2677,11 +3189,12 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
-  it("marks only the timeline and loaded turn details stale when an unviewed thread's history is compacted", async () => {
+  it("marks the timeline stale and purges loaded turn details when an unviewed thread's history is compacted", async () => {
     vi.useFakeTimers();
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const timelineKey = threadTimelineQueryKey("thr_1");
     const outlineKey = threadConversationOutlineQueryKey("thr_1", "user");
+
     const turnDetailsKey = threadTimelineTurnSummaryDetailsQueryKey({
       itemId: null,
       threadId: "thr_1",
@@ -2689,12 +3202,15 @@ describe("createRealtimeCacheEffects", () => {
       sourceSeqStart: 1,
       sourceSeqEnd: 2,
     });
+
     const threadKey = threadQueryKey("thr_1");
     const sidebarNavigationKey = sidebarNavigationQueryKey();
+
     const threadSearchKey = threadSearchQueryKey({
       limitPerGroup: 20,
       query: "needle",
     });
+
     const promptHistoryKey = threadPromptHistoryQueryKey("thr_1");
     queryClient.setQueryData(timelineKey, { rows: [] });
     queryClient.setQueryData(outlineKey, { items: [] });
@@ -2719,7 +3235,9 @@ describe("createRealtimeCacheEffects", () => {
     await vi.advanceTimersByTimeAsync(50);
 
     expect(queryClient.getQueryState(timelineKey)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(turnDetailsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryData(turnDetailsKey)).toBeUndefined();
+    expect(queryClient.getQueryState(turnDetailsKey)).toBeUndefined();
+
     for (const queryKey of [
       outlineKey,
       threadKey,
@@ -2733,8 +3251,40 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
+  it("removes cached thread content when a remote deletion is confirmed", async () => {
+    vi.useFakeTimers();
+    const { effects, queryClient } = createRealtimeEffectsTestContext();
+    const timelineKey = threadTimelineQueryKey("thr_1");
+
+    const turnDetailsKey = threadTimelineTurnSummaryDetailsQueryKey({
+      itemId: null,
+      threadId: "thr_1",
+      turnId: "turn_1",
+      sourceSeqStart: 1,
+      sourceSeqEnd: 2,
+    });
+
+    queryClient.setQueryData(timelineKey, { rows: [{ id: "stale-row" }] });
+    queryClient.setQueryData(turnDetailsKey, {
+      pages: [{ rows: [{ id: "stale-detail" }] }],
+    });
+
+    effects.handleChanged({
+      type: "changed",
+      entity: "thread",
+      id: "thr_1",
+      changes: ["thread-deleted"],
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(queryClient.getQueryData(timelineKey)).toBeUndefined();
+    expect(queryClient.getQueryData(turnDetailsKey)).toBeUndefined();
+    effects.dispose();
+  });
+
   it("invalidates cached thread terminals for terminal changes", () => {
     vi.useFakeTimers();
+
     const { effects, queryClient, terminalKey } =
       createRealtimeEffectsTestContext();
 
@@ -2767,6 +3317,316 @@ describe("createRealtimeCacheEffects", () => {
     });
   });
 
+  it.each([
+    "status",
+    "plugins",
+    "signal",
+    "resume",
+    "reconnect",
+    "unrelated-signal",
+    "legacy-signal",
+    "hidden-status",
+  ])("refreshes the relevant readiness snapshots for %s", (trigger) => {
+    const visibility = createFakeVisibility();
+
+    const { effects, queryClient } =
+      createRealtimeEffectsTestContext(visibility);
+
+    const firstKey = threadPluginBootstrapQueryKey("readiness-a");
+    const secondKey = threadPluginBootstrapQueryKey("readiness-b");
+    const legacyKey = threadPluginBootstrapQueryKey("legacy");
+
+    for (const [queryKey, pluginId, marked] of [
+      [firstKey, "gate-a", true],
+      [secondKey, "gate-b", true],
+      [legacyKey, "legacy-gate", false],
+    ] satisfies [
+      ReturnType<typeof threadPluginBootstrapQueryKey>,
+      string,
+      boolean,
+    ][]) {
+      queryClient.setQueryData(
+        queryKey,
+        {
+          experimental_pluginData: [
+            {
+              pluginId,
+              method: "readiness",
+              ...(marked ? { dispatchReadiness: true } : {}),
+              outcome: {
+                ok: true,
+                result: { action: "wait", reason: "No slots" },
+              },
+            },
+          ],
+        },
+        { updatedAt: Date.now() + 1000 },
+      );
+    }
+
+    if (trigger === "status" || trigger === "hidden-status") {
+      if (trigger === "hidden-status") visibility.setVisible(false);
+      effects.handleChanged({
+        type: "changed",
+        entity: "thread",
+        id: "another-thread",
+        changes: ["status-changed"],
+      });
+    } else if (trigger === "plugins")
+      effects.handleChanged({
+        type: "changed",
+        entity: "system",
+        changes: ["plugins-changed"],
+      });
+    else if (trigger === "resume") effects.handleResumed();
+    else if (trigger === "reconnect")
+      effects.handleConnected({
+        reconnected: true,
+        disconnectedAt: Date.now(),
+      });
+    else
+      effects.handlePluginSignal({
+        type: "plugin-signal",
+        pluginId: trigger === "legacy-signal" ? "legacy-gate" : "gate-a",
+        channel:
+          trigger === "unrelated-signal"
+            ? "some-other-change"
+            : "dispatch-readiness-changed",
+        payload: null,
+      });
+
+    const allMarked = [
+      "status",
+      "plugins",
+      "resume",
+      "reconnect",
+      "hidden-status",
+    ].includes(trigger);
+
+    expect(queryClient.getQueryState(firstKey)?.isInvalidated).toBe(
+      allMarked || trigger === "signal",
+    );
+    expect(queryClient.getQueryState(secondKey)?.isInvalidated).toBe(allMarked);
+    expect(queryClient.getQueryState(legacyKey)?.isInvalidated).toBe(
+      trigger === "plugins",
+    );
+    effects.dispose();
+    queryClient.clear();
+  });
+
+  it.each(["active", "prefetch"])(
+    "refreshes marked readiness after a signal during the initial bootstrap %s read",
+    async (kind) => {
+      const { effects, queryClient } = createRealtimeEffectsTestContext();
+      const queryKey = threadPluginBootstrapQueryKey("initial-readiness");
+
+      const snapshot = (action: "proceed" | "wait") => ({
+        ...makeThreadResponse({ id: "initial-readiness" }),
+        experimental_pluginData: [
+          {
+            pluginId: "gate-a",
+            method: "readiness",
+            dispatchReadiness: true,
+            outcome: {
+              ok: true,
+              result:
+                action === "proceed"
+                  ? { action }
+                  : { action, reason: "Slots filled during load" },
+            },
+          },
+        ],
+      });
+
+      let resolveInitial: (
+        value: ReturnType<typeof snapshot>,
+      ) => void = () => {};
+
+      const queryFn = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<ReturnType<typeof snapshot>>((resolve) => {
+              resolveInitial = resolve;
+            }),
+        )
+        .mockResolvedValue(snapshot("wait"));
+
+      const observer = new QueryObserver(queryClient, {
+        queryKey,
+        queryFn,
+        staleTime: Infinity,
+      });
+
+      const unsubscribe =
+        kind === "active" ? observer.subscribe(() => {}) : () => {};
+
+      const prefetch =
+        kind === "prefetch"
+          ? queryClient.prefetchQuery({
+              queryKey,
+              queryFn,
+              staleTime: Infinity,
+            })
+          : Promise.resolve();
+
+      try {
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1));
+        effects.handlePluginSignal({
+          type: "plugin-signal",
+          pluginId: "gate-a",
+          channel: "dispatch-readiness-changed",
+          payload: null,
+        });
+        resolveInitial(snapshot("proceed"));
+
+        if (kind === "prefetch") {
+          await prefetch;
+          expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true);
+          expect(queryFn).toHaveBeenCalledTimes(1);
+        } else {
+          await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2));
+          await vi.waitFor(() =>
+            expect(observer.getCurrentResult().data).toMatchObject({
+              experimental_pluginData: [
+                {
+                  outcome: {
+                    result: {
+                      action: "wait",
+                      reason: "Slots filled during load",
+                    },
+                  },
+                },
+              ],
+            }),
+          );
+        }
+      } finally {
+        resolveInitial(snapshot("proceed"));
+        unsubscribe();
+        effects.dispose();
+        queryClient.clear();
+      }
+    },
+  );
+
+  it.each(["visible", "hidden"])(
+    "loads newly enabled readiness metadata after a %s plugin catalogue change",
+    async (mode) => {
+      const visibility = createFakeVisibility();
+
+      const { effects, queryClient } =
+        createRealtimeEffectsTestContext(visibility);
+
+      const queryKey = threadPluginBootstrapQueryKey("new-readiness");
+      const thread = makeThreadResponse({ id: "new-readiness" });
+      queryClient.setQueryData(queryKey, {
+        ...thread,
+        experimental_pluginData: [],
+      });
+
+      const queryFn = vi.fn(async () => ({
+        ...thread,
+        experimental_pluginData: [
+          {
+            pluginId: "new-gate",
+            method: "readiness",
+            dispatchReadiness: true,
+            outcome: {
+              ok: true,
+              result: { action: "wait", reason: "Newly enabled limit" },
+            },
+          },
+        ],
+      }));
+
+      const observer = new QueryObserver(queryClient, {
+        queryKey,
+        queryFn,
+        staleTime: Infinity,
+      });
+
+      const unsubscribe = observer.subscribe(() => {});
+
+      try {
+        if (mode === "hidden") visibility.setVisible(false);
+        effects.handleChanged({
+          type: "changed",
+          entity: "system",
+          changes: ["plugins-changed"],
+        });
+
+        if (mode === "hidden") {
+          expect(queryFn).not.toHaveBeenCalled();
+          visibility.setVisible(true);
+        }
+
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1));
+        await vi.waitFor(() =>
+          expect(observer.getCurrentResult().data).toMatchObject({
+            experimental_pluginData: [
+              {
+                dispatchReadiness: true,
+                outcome: { result: { action: "wait" } },
+              },
+            ],
+          }),
+        );
+      } finally {
+        unsubscribe();
+        effects.dispose();
+        queryClient.clear();
+      }
+    },
+  );
+
+  it.each(
+    ["initial connection", "reconnect", "resume"].flatMap((trigger) =>
+      ["needs-you", "ready-to-archive"].map((previous) => ({
+        trigger,
+        previous,
+      })),
+    ),
+  )(
+    "refreshes missed Inbox $previous state after $trigger",
+    async ({ trigger, previous }) => {
+      const { effects, queryClient } = createRealtimeEffectsTestContext();
+      const fetch = vi.fn().mockResolvedValue(previous);
+
+      const observer = new QueryObserver(queryClient, {
+        queryKey: INBOX_SNAPSHOT_QUERY_KEY,
+        queryFn: fetch,
+        ...INBOX_SNAPSHOT_QUERY_POLICY,
+      });
+
+      const unsubscribe = observer.subscribe(() => {});
+
+      try {
+        await vi.waitFor(() =>
+          expect(observer.getCurrentResult().data).toBe(previous),
+        );
+        fetch.mockResolvedValue("working");
+
+        if (trigger === "initial connection")
+          effects.handleConnected({ reconnected: false });
+        else if (trigger === "reconnect")
+          effects.handleConnected({
+            reconnected: true,
+            disconnectedAt: Date.now(),
+          });
+        else effects.handleResumed();
+
+        await vi.waitFor(() =>
+          expect(observer.getCurrentResult().data).toBe("working"),
+        );
+      } finally {
+        unsubscribe();
+        effects.dispose();
+        queryClient.clear();
+      }
+    },
+  );
+
   it("applies the reconnect watermark from the connected event", () => {
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     const disconnectedAt = Date.now();
@@ -2790,9 +3650,10 @@ describe("createRealtimeCacheEffects", () => {
     effects.dispose();
   });
 
-  it("refetches only active timeline, thread, and sidebar queries on resume without cancelling in-flight fetches", async () => {
+  it("refetches active chat queries on resume without cancelling in-flight fetches", async () => {
     const { effects, queryClient } = createRealtimeEffectsTestContext();
     let resolveTimeline: (value: string) => void = () => {};
+
     const timelineFn = vi
       .fn<() => Promise<string>>()
       .mockResolvedValueOnce("timeline-1")
@@ -2802,9 +3663,11 @@ describe("createRealtimeCacheEffects", () => {
             resolveTimeline = resolve;
           }),
       );
+
     const threadFn = vi.fn<() => Promise<string>>().mockResolvedValue("t");
     const sidebarFn = vi.fn<() => Promise<string>>().mockResolvedValue("s");
     const projectsFn = vi.fn<() => Promise<string>>().mockResolvedValue("p");
+
     const observers = [
       { queryKey: threadTimelineQueryKey("thr_1"), queryFn: timelineFn },
       { queryKey: threadQueryKey("thr_1"), queryFn: threadFn },
@@ -2819,11 +3682,14 @@ describe("createRealtimeCacheEffects", () => {
           refetchOnWindowFocus: false,
         }),
     );
+
     const unsubscribes = observers.map((observer) =>
       observer.subscribe(() => {}),
     );
+
     const inactiveTimelineKey = threadTimelineQueryKey("thr_inactive");
     queryClient.setQueryData(inactiveTimelineKey, "cached");
+
     try {
       await vi.waitFor(() =>
         expect(
@@ -2850,22 +3716,27 @@ describe("createRealtimeCacheEffects", () => {
       for (const unsubscribe of unsubscribes) {
         unsubscribe();
       }
+
       effects.dispose();
     }
   });
 
   it("skips the resume refetch while the document is hidden", () => {
     const visibility = createFakeVisibility();
+
     const { effects, queryClient } =
       createRealtimeEffectsTestContext(visibility);
+
     const sidebarFn = vi.fn<() => Promise<string>>().mockResolvedValue("s");
     queryClient.setQueryData(sidebarNavigationQueryKey(), "cached");
+
     const observer = new QueryObserver<string>(queryClient, {
       queryKey: sidebarNavigationQueryKey(),
       queryFn: sidebarFn,
       staleTime: Infinity,
       refetchOnWindowFocus: false,
     });
+
     const unsubscribe = observer.subscribe(() => {});
     visibility.setVisible(false);
 
@@ -2877,11 +3748,13 @@ describe("createRealtimeCacheEffects", () => {
   });
 
   describe("while the document is hidden", () => {
-    it("merges thread changes and flushes them once on visible", () => {
+    it("invalidates thread messages and status before the document becomes visible", () => {
       vi.useFakeTimers();
       const visibility = createFakeVisibility();
+
       const { effects, queryClient } =
         createRealtimeEffectsTestContext(visibility);
+
       const threadKey = threadQueryKey("thr_1");
       const timelineKey = threadTimelineQueryKey("thr_1");
       const sidebarNavigationKey = sidebarNavigationQueryKey();
@@ -2907,11 +3780,11 @@ describe("createRealtimeCacheEffects", () => {
       });
       vi.advanceTimersByTime(1000);
 
-      expect(queryClient.getQueryState(threadKey)?.isInvalidated).toBe(false);
-      expect(queryClient.getQueryState(timelineKey)?.isInvalidated).toBe(false);
+      expect(queryClient.getQueryState(threadKey)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(timelineKey)?.isInvalidated).toBe(true);
       expect(
         queryClient.getQueryState(sidebarNavigationKey)?.isInvalidated,
-      ).toBe(false);
+      ).toBe(true);
 
       visibility.setVisible(true);
 
@@ -2923,22 +3796,27 @@ describe("createRealtimeCacheEffects", () => {
       effects.dispose();
     });
 
-    it("writes a carried status into the open thread and sidebar row without refetching", () => {
+    it("patches carried status while invalidating the hidden thread", () => {
       vi.useFakeTimers();
       const visibility = createFakeVisibility();
+
       const { effects, queryClient } =
         createRealtimeEffectsTestContext(visibility);
+
       const threadKey = threadQueryKey("thr_1");
       const sidebarNavigationKey = sidebarNavigationQueryKey();
+
       const activeThread = {
         id: "thr_1",
         lastReadAt: 100,
         latestAttentionAt: 100,
+        lastMessageAt: null,
         runtime: { displayStatus: "active" },
         status: "active",
         title: "Thread",
         updatedAt: 100,
       };
+
       queryClient.setQueryData(threadKey, activeThread);
       queryClient.setQueryData(sidebarNavigationKey, {
         projects: [
@@ -2946,9 +3824,11 @@ describe("createRealtimeCacheEffects", () => {
         ],
         personalProject: { threads: [] },
       });
+
       const idleChange = {
         activity: NO_THREAD_ACTIVITY,
         latestAttentionAt: 300,
+        lastMessageAt: null,
         runtime: { displayStatus: "idle" },
         status: "idle",
         updatedAt: 300,
@@ -2965,17 +3845,15 @@ describe("createRealtimeCacheEffects", () => {
 
       expect(queryClient.getQueryData(threadKey)).toEqual({
         ...activeThread,
-        latestAttentionAt: 300,
-        runtime: { displayStatus: "idle" },
-        status: "idle",
-        updatedAt: 300,
+        ...idleChange,
+        work: null,
       });
       expect(
         queryClient.getQueryData<{
           projects: { threads: { latestAttentionAt: number }[] }[];
         }>(sidebarNavigationKey)?.projects[0]?.threads[0]?.latestAttentionAt,
       ).toBe(300);
-      expect(queryClient.getQueryState(threadKey)?.isInvalidated).toBe(false);
+      expect(queryClient.getQueryState(threadKey)?.isInvalidated).toBe(true);
 
       effects.handleChanged({
         type: "changed",
@@ -3005,17 +3883,22 @@ describe("createRealtimeCacheEffects", () => {
     it("refetches when a bare status-changed follows one that carried the row", () => {
       vi.useFakeTimers();
       const visibility = createFakeVisibility();
+
       const { effects, queryClient } =
         createRealtimeEffectsTestContext(visibility);
+
       const sidebarNavigationKey = sidebarNavigationQueryKey();
+
       const idleRow = {
         activity: NO_THREAD_ACTIVITY,
         id: "thr_1",
         latestAttentionAt: 100,
+        lastMessageAt: null,
         runtime: { displayStatus: "idle" },
         status: "idle",
         updatedAt: 100,
       };
+
       queryClient.setQueryData(sidebarNavigationKey, {
         projects: [{ threads: [idleRow] }],
         personalProject: { threads: [] },
@@ -3031,6 +3914,7 @@ describe("createRealtimeCacheEffects", () => {
           statusChange: {
             activity: NO_THREAD_ACTIVITY,
             latestAttentionAt: 100,
+            lastMessageAt: null,
             runtime: {
               displayStatus: "active",
             },
@@ -3062,8 +3946,10 @@ describe("createRealtimeCacheEffects", () => {
     it("still resyncs the sidebar when a hidden flush precedes the reconnect", () => {
       vi.useFakeTimers();
       const visibility = createFakeVisibility();
+
       const { effects, queryClient } =
         createRealtimeEffectsTestContext(visibility);
+
       const sidebarNavigationKey = sidebarNavigationQueryKey();
       queryClient.setQueryData(sidebarNavigationKey, {
         projects: [
@@ -3073,6 +3959,7 @@ describe("createRealtimeCacheEffects", () => {
                 activity: NO_THREAD_ACTIVITY,
                 id: "thr_1",
                 latestAttentionAt: 100,
+                lastMessageAt: null,
                 runtime: {
                   displayStatus: "idle",
                 },
@@ -3098,6 +3985,7 @@ describe("createRealtimeCacheEffects", () => {
           statusChange: {
             activity: NO_THREAD_ACTIVITY,
             latestAttentionAt: 200,
+            lastMessageAt: null,
             runtime: {
               displayStatus: "active",
             },
@@ -3117,11 +4005,13 @@ describe("createRealtimeCacheEffects", () => {
       effects.dispose();
     });
 
-    it("holds a debounce that elapses hidden and non-thread changes until visible", async () => {
+    it("flushes thread changes while hidden and defers non-thread changes until visible", async () => {
       vi.useFakeTimers();
       const visibility = createFakeVisibility();
+
       const { effects, queryClient } =
         createRealtimeEffectsTestContext(visibility);
+
       const timelineKey = threadTimelineQueryKey("thr_1");
       const workStatusKey = environmentWorkStatusQueryKey("env-1", "main");
       const projectsKey = projectsQueryKey();
@@ -3157,7 +4047,7 @@ describe("createRealtimeCacheEffects", () => {
       });
       await vi.advanceTimersByTimeAsync(1000);
 
-      expect(queryClient.getQueryState(timelineKey)?.isInvalidated).toBe(false);
+      expect(queryClient.getQueryState(timelineKey)?.isInvalidated).toBe(true);
       expect(queryClient.getQueryState(workStatusKey)?.isInvalidated).toBe(
         false,
       );

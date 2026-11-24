@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readdir,
+  readFile,
   realpath,
   rm,
   symlink,
@@ -11,17 +12,21 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { experimental_createHostEntryHarness } from "@get-bb/plugin-sdk/testing/host";
+import { experimental_createHostEntryHarness } from "@omnyo/plugin-sdk/testing/host";
 import { afterEach, describe, expect, it } from "vitest";
 import { createWorktreeHostEntry } from "./host.js";
+import { removeWorktree } from "./host/worktree.js";
 
 const execFileAsync = promisify(execFile);
+
 const temporaryRoots: string[] = [];
 
 function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -33,12 +38,13 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
     cwd,
     env: {
       ...process.env,
-      GIT_AUTHOR_NAME: "bb",
-      GIT_AUTHOR_EMAIL: "bb@example.com",
-      GIT_COMMITTER_NAME: "bb",
-      GIT_COMMITTER_EMAIL: "bb@example.com",
+      GIT_AUTHOR_NAME: "omnyo",
+      GIT_AUTHOR_EMAIL: "omnyo@example.com",
+      GIT_COMMITTER_NAME: "omnyo",
+      GIT_COMMITTER_EMAIL: "omnyo@example.com",
     },
   });
+
   return result.stdout;
 }
 
@@ -47,7 +53,7 @@ async function createSourceRepository(repositoryName = "repo"): Promise<{
   sourcePath: string;
   dataDir: string;
 }> {
-  const root = await mkdtemp(join(tmpdir(), "bb-worktree-plugin-"));
+  const root = await mkdtemp(join(tmpdir(), "omnyo-worktree-plugin-"));
   temporaryRoots.push(root);
   const sourcePath = join(root, repositoryName);
   const dataDir = join(root, "plugin-data");
@@ -57,6 +63,7 @@ async function createSourceRepository(repositoryName = "repo"): Promise<{
   await writeFile(join(sourcePath, "README.md"), "hello\n");
   await git(sourcePath, "add", ".");
   await git(sourcePath, "commit", "-m", "initial");
+
   return { root, sourcePath, dataDir };
 }
 
@@ -65,7 +72,7 @@ async function createDetachedSingleBranchRepository(): Promise<{
   sourcePath: string;
   dataDir: string;
 }> {
-  const root = await mkdtemp(join(tmpdir(), "bb-worktree-plugin-detached-"));
+  const root = await mkdtemp(join(tmpdir(), "omnyo-worktree-plugin-detached-"));
   temporaryRoots.push(root);
   const originPath = join(root, "origin");
   const sourcePath = join(root, "repo");
@@ -86,6 +93,7 @@ async function createDetachedSingleBranchRepository(): Promise<{
     originPath,
     sourcePath,
   );
+
   return { root, sourcePath, dataDir };
 }
 
@@ -124,6 +132,674 @@ afterEach(async () => {
 });
 
 describe("worktree host entry", () => {
+  it("automatic worktree cleanup preserves a real consumer without stopping it", async () => {
+    const { sourcePath, dataDir } = await createSourceRepository();
+    const harness = createHarness(dataDir);
+
+    const created = await harness.experimental_call(
+      "create",
+      createInput({
+        operationId: "consumer-create",
+        sourcePath,
+        pathKey: "consumer",
+        branchName: "omnyo/consumer",
+      }),
+    );
+
+    if (created.status !== "created") throw new Error(created.message);
+
+    const child = spawn(
+      process.execPath,
+      ["-e", "setTimeout(() => {}, 30000)"],
+      { cwd: created.path, stdio: "ignore" },
+    );
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once("spawn", resolve);
+        child.once("error", reject);
+      });
+      await expect(
+        removeWorktree({ path: created.path, stopWorkspaceProcesses: false }),
+      ).rejects.toThrow(/Cannot remove/u);
+      expect(isPidAlive(child.pid ?? 0)).toBe(true);
+      expect(existsSync(created.path)).toBe(true);
+      expect(existsSync(`${created.path}.completed`)).toBe(true);
+    } finally {
+      child.kill("SIGKILL");
+      await new Promise((resolve) => child.once("exit", resolve));
+      await harness.experimental_dispose();
+    }
+  });
+
+  it.each([false, true])(
+    "retires a fresh pnpm worktree only when there is no extra ignored artifact (artifact: %s)",
+    async (hasArtifact) => {
+      const { sourcePath, dataDir } = await createSourceRepository();
+      const setupScript = new URL("../../.omnyo-env-setup.sh", import.meta.url);
+
+      const { packageManager } = JSON.parse(
+        await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+      );
+
+      await mkdir(join(sourcePath, "dependency"));
+      await Promise.all([
+        writeFile(join(sourcePath, ".gitignore"), "node_modules/\n*.tgz\n"),
+        writeFile(
+          join(sourcePath, "pnpm-lock.yaml"),
+          [
+            "lockfileVersion: '9.0'",
+            "settings:",
+            "  autoInstallPeers: true",
+            "  excludeLinksFromLockfile: false",
+            "importers:",
+            "  .:",
+            "    dependencies:",
+            "      worktree-fixture-dependency:",
+            "        specifier: link:./dependency",
+            "        version: link:dependency",
+            "",
+          ].join("\n"),
+        ),
+        writeFile(
+          join(sourcePath, "package.json"),
+          JSON.stringify({
+            name: "worktree-fixture",
+            packageManager,
+            dependencies: {
+              "worktree-fixture-dependency": "link:./dependency",
+            },
+          }),
+        ),
+        writeFile(
+          join(sourcePath, "dependency/package.json"),
+          JSON.stringify({
+            name: "worktree-fixture-dependency",
+            version: "1.0.0",
+          }),
+        ),
+      ]);
+      await git(sourcePath, "add", ".");
+      await git(sourcePath, "commit", "-m", "add offline pnpm fixture");
+      const worktree = join(dataDir, "worktrees", "pnpm", "repo");
+      await mkdir(join(dataDir, "worktrees", "pnpm"), { recursive: true });
+      const branchName = "omnyo/pnpm-fixture";
+      await git(sourcePath, "worktree", "add", "-b", branchName, worktree);
+      const worktreePath = await realpath(worktree);
+      const harness = createHarness(dataDir);
+
+      try {
+        const head = await git(worktreePath, "rev-parse", "HEAD");
+
+        const dependencyPath = join(
+          worktreePath,
+          "node_modules/worktree-fixture-dependency/package.json",
+        );
+
+        await execFileAsync(
+          "bash",
+          [
+            fileURLToPath(
+              new URL("../../.omnyo-env-setup.sh", import.meta.url),
+            ),
+          ],
+          {
+            cwd: worktreePath,
+            env: {
+              ...process.env,
+              COREPACK_ENABLE_NETWORK: "0",
+              npm_config_offline: "true",
+            },
+          },
+        );
+        expect(existsSync(dependencyPath)).toBe(true);
+
+        const artifact = join(worktreePath, "node_modules", "keep.tgz");
+
+        if (hasArtifact) await writeFile(artifact, "unique artifact\n");
+
+        const removed = await harness.experimental_call("remove", {
+          operationId: "remove-pnpm",
+          pathKey: "pnpm",
+          path: worktreePath,
+        });
+
+        expect(removed.status).toBe(hasArtifact ? "failed" : "removed");
+        expect(existsSync(worktreePath)).toBe(hasArtifact);
+        expect(
+          (await git(sourcePath, "worktree", "list", "--porcelain")).includes(
+            `worktree ${worktreePath}`,
+          ),
+        ).toBe(hasArtifact);
+        expect(await git(sourcePath, "rev-parse", branchName)).toBe(head);
+
+        if (hasArtifact) {
+          expect(await readFile(artifact, "utf8")).toBe("unique artifact\n");
+          expect(existsSync(dependencyPath)).toBe(true);
+        }
+      } finally {
+        await harness.experimental_dispose();
+      }
+    },
+  );
+
+  it.each(["untracked", "ignored", "detached", "locked", "broken"])(
+    "preserves worktree and completion marker when removal is unsafe: %s",
+    async (state) => {
+      const { sourcePath, dataDir } = await createSourceRepository();
+      const harness = createHarness(dataDir);
+
+      try {
+        const created = await harness.experimental_call(
+          "create",
+          createInput({
+            operationId: "create-preservation",
+            sourcePath,
+            pathKey: "preservation",
+            branchName: "omnyo/preservation",
+          }),
+        );
+
+        if (created.status !== "created") throw new Error(created.message);
+        const marker = `${created.path}.completed`;
+        const markerBytes = await readFile(marker, "utf8");
+
+        if (state === "untracked") {
+          await writeFile(join(created.path, "unique.txt"), "unique work\n");
+        } else if (state === "ignored") {
+          await writeFile(join(created.path, ".gitignore"), "unique.txt\n");
+          await git(created.path, "add", ".gitignore");
+          await git(created.path, "commit", "-m", "ignore fixture");
+          await writeFile(join(created.path, "unique.txt"), "ignored work\n");
+        } else if (state === "detached") {
+          await git(created.path, "checkout", "--detach");
+          await git(
+            created.path,
+            "commit",
+            "--allow-empty",
+            "-m",
+            "unique tip",
+          );
+        } else if (state === "locked") {
+          await git(sourcePath, "worktree", "lock", created.path);
+        } else {
+          await writeFile(join(created.path, ".git"), "gitdir: missing\n");
+        }
+
+        const result = await harness.experimental_call("remove", {
+          operationId: "remove-preservation",
+          pathKey: "preservation",
+          path: created.path,
+        });
+
+        expect(result.status).toBe("failed");
+        expect(existsSync(created.path)).toBe(true);
+        expect(await readFile(marker, "utf8")).toBe(markerBytes);
+      } finally {
+        await harness.experimental_dispose();
+      }
+    },
+  );
+
+  it.each([
+    "refs/worktree/saved",
+    "refs/bisect/saved",
+    "refs/rewritten/saved",
+    "MERGE_HEAD",
+  ])("keeps clean worktrees with local Git state: %s", async (state) => {
+    const { sourcePath, dataDir } = await createSourceRepository();
+    const harness = createHarness(dataDir);
+
+    try {
+      const created = await harness.experimental_call(
+        "create",
+        createInput({
+          operationId: "create-state",
+          sourcePath,
+          pathKey: "saved-state",
+          branchName: "omnyo/saved-state",
+        }),
+      );
+
+      if (created.status !== "created") throw new Error(created.message);
+
+      const savedCommit = (
+        await git(
+          created.path,
+          "commit-tree",
+          "HEAD^{tree}",
+          "-p",
+          "HEAD",
+          "-m",
+          "saved",
+        )
+      ).trim();
+
+      if (state === "MERGE_HEAD") {
+        await git(created.path, "merge", "--no-ff", "--no-commit", savedCommit);
+      } else {
+        await git(created.path, "update-ref", state, savedCommit);
+      }
+
+      const gitDir = (
+        await git(created.path, "rev-parse", "--absolute-git-dir")
+      ).trim();
+
+      expect(await git(created.path, "status", "--porcelain")).toBe("");
+      expect((await git(created.path, "rev-parse", state)).trim()).toBe(
+        savedCommit,
+      );
+      expect(
+        (await git(sourcePath, "rev-parse", "omnyo/saved-state")).trim(),
+      ).toBe((await git(created.path, "rev-parse", "HEAD")).trim());
+
+      const result = await harness.experimental_call("remove", {
+        operationId: "remove-state",
+        pathKey: "saved-state",
+        path: created.path,
+      });
+
+      expect({
+        status: result.status,
+        worktreeExists: existsSync(created.path),
+        metadataExists: existsSync(gitDir),
+      }).toEqual({
+        status: "failed",
+        worktreeExists: true,
+        metadataExists: true,
+      });
+      expect((await git(created.path, "rev-parse", state)).trim()).toBe(
+        savedCommit,
+      );
+
+      if (state === "MERGE_HEAD") {
+        await git(created.path, "merge", "--abort");
+      } else {
+        await git(created.path, "update-ref", "-d", state);
+      }
+
+      const resolvedRemoval = await harness.experimental_call("remove", {
+        operationId: "remove-resolved-state",
+        pathKey: "saved-state",
+        path: created.path,
+      });
+
+      if (resolvedRemoval.status === "failed")
+        throw new Error(resolvedRemoval.message);
+      expect(resolvedRemoval).toEqual({ status: "removed" });
+      expect(existsSync(created.path)).toBe(false);
+    } finally {
+      await harness.experimental_dispose();
+    }
+  });
+
+  it.each(["main", "release", "origin/main", "refs/heads/main"])(
+    "resolves and fetches a stale named base %s",
+    async (base) => {
+      const { root, sourcePath, dataDir } = await createSourceRepository();
+      const clone = join(root, "clone");
+      await git(sourcePath, "branch", "release");
+      await git(root, "clone", sourcePath, clone);
+      const oldHead = (await git(clone, "rev-parse", "HEAD")).trim();
+      await git(clone, "branch", "release", "origin/release");
+      await writeFile(join(sourcePath, "README.md"), "remote advance\n");
+      await git(sourcePath, "commit", "-am", "advance remote");
+      await git(sourcePath, "branch", "-f", "release", "HEAD");
+      const remoteHead = (await git(sourcePath, "rev-parse", "HEAD")).trim();
+
+      const result = await createHarness(dataDir).experimental_call("create", {
+        ...createInput({
+          operationId: "stale-base",
+          sourcePath: clone,
+          pathKey: "stale-base",
+          branchName: "omnyo/child",
+        }),
+        baseBranch: { kind: "named", name: base },
+      });
+
+      expect(result.status).toBe("created");
+
+      if (result.status !== "created") throw new Error(result.message);
+      expect((await git(result.path, "rev-parse", "HEAD")).trim()).toBe(
+        base.startsWith("refs/heads/") ? oldHead : remoteHead,
+      );
+      expect((await git(clone, "rev-parse", "main")).trim()).toBe(oldHead);
+    },
+  );
+
+  it.each([
+    ["ahead", "main"],
+    ["diverged", "main"],
+    ["ahead", "release"],
+    ["diverged", "release"],
+    ["ahead", "origin/main"],
+    ["diverged", "refs/heads/main"],
+    ["ahead", "default"],
+    ["diverged", "default"],
+  ])("preserves local commits for %s with base %s", async (relation, base) => {
+    const { root, sourcePath, dataDir } = await createSourceRepository();
+    const clone = join(root, "clone");
+    await git(sourcePath, "branch", "release");
+    await git(root, "clone", sourcePath, clone);
+    await writeFile(join(clone, "local.txt"), "local work\n");
+    await git(clone, "add", ".");
+    await git(clone, "commit", "-m", "local work");
+    await git(clone, "branch", "release");
+    const localHead = (await git(clone, "rev-parse", "HEAD")).trim();
+
+    if (relation === "diverged") {
+      await writeFile(join(sourcePath, "remote.txt"), "remote work\n");
+      await git(sourcePath, "add", ".");
+      await git(sourcePath, "commit", "-m", "remote work");
+      await git(sourcePath, "branch", "-f", "release", "HEAD");
+      await git(clone, "fetch", "origin");
+    }
+
+    const remoteHead = (await git(sourcePath, "rev-parse", "HEAD")).trim();
+    const harness = createHarness(dataDir);
+
+    try {
+      const result = await harness.experimental_call("create", {
+        ...createInput({
+          operationId: "local-work",
+          sourcePath: clone,
+          pathKey: "local-work",
+          branchName: "omnyo/child",
+        }),
+        baseBranch:
+          base === "default"
+            ? { kind: "default" }
+            : { kind: "named", name: base },
+      });
+
+      expect(result.status).toBe("created");
+
+      if (result.status !== "created") throw new Error(result.message);
+      expect((await git(result.path, "rev-parse", "HEAD")).trim()).toBe(
+        base === "origin/main" ? remoteHead : localHead,
+      );
+    } finally {
+      await harness.experimental_dispose();
+    }
+  });
+
+  it.each([
+    ["equal", "main"],
+    ["behind", "main"],
+    ["equal", "default"],
+    ["behind", "default"],
+    ["remote-only", "release"],
+  ])(
+    "uses the last fetched remote when the fetch fails for %s with base %s",
+    async (relation, base) => {
+      const { root, sourcePath, dataDir } = await createSourceRepository();
+      const clone = join(root, "clone");
+      await git(sourcePath, "branch", "release");
+      await git(root, "clone", sourcePath, clone);
+      const localHead = (await git(clone, "rev-parse", "HEAD")).trim();
+
+      if (relation === "behind" || relation === "remote-only") {
+        await writeFile(join(sourcePath, "README.md"), "remote advance\n");
+        await git(sourcePath, "commit", "-am", "advance remote");
+        await git(sourcePath, "branch", "-f", "release", "HEAD");
+        await git(clone, "fetch", "origin");
+      }
+
+      const lastFetched = base === "release" ? "origin/release" : "origin/main";
+
+      const lastFetchedHead = (
+        await git(clone, "rev-parse", lastFetched)
+      ).trim();
+
+      await git(clone, "remote", "set-url", "origin", join(root, "missing"));
+      const harness = createHarness(dataDir);
+
+      try {
+        const result = await harness.experimental_call("create", {
+          ...createInput({
+            operationId: "offline",
+            sourcePath: clone,
+            pathKey: "offline",
+            branchName: "omnyo/offline",
+          }),
+          baseBranch:
+            base === "default"
+              ? { kind: "default" }
+              : { kind: "named", name: base },
+        });
+
+        expect(result).toMatchObject({
+          status: "created",
+          baseBranch: lastFetched,
+        });
+
+        if (result.status !== "created") throw new Error(result.message);
+        expect((await git(result.path, "rev-parse", "HEAD")).trim()).toBe(
+          lastFetchedHead,
+        );
+        expect((await git(clone, "rev-parse", "main")).trim()).toBe(localHead);
+
+        const progress = progressText(harness);
+
+        expect(progress).toContain(`Failed to fetch ${lastFetched}`);
+        expect(progress).toContain(
+          `Using the last fetched ${lastFetched} (${lastFetchedHead.slice(0, 7)}`,
+        );
+      } finally {
+        await harness.experimental_dispose();
+      }
+    },
+  );
+
+  it.each([
+    ["main", "main"],
+    ["default", null],
+  ] as const)(
+    "keeps a local base that is ahead without fetching for base %s",
+    async (base, reportedBase) => {
+      const { root, sourcePath, dataDir } = await createSourceRepository();
+      const clone = join(root, "clone");
+      await git(root, "clone", sourcePath, clone);
+      await writeFile(join(clone, "local.txt"), "local work\n");
+      await git(clone, "add", ".");
+      await git(clone, "commit", "-m", "local work");
+      const localHead = (await git(clone, "rev-parse", "HEAD")).trim();
+      await git(clone, "remote", "set-url", "origin", join(root, "missing"));
+      const harness = createHarness(dataDir);
+
+      try {
+        const result = await harness.experimental_call("create", {
+          ...createInput({
+            operationId: "offline-ahead",
+            sourcePath: clone,
+            pathKey: "offline-ahead",
+            branchName: "omnyo/offline-ahead",
+          }),
+          baseBranch:
+            base === "default"
+              ? { kind: "default" }
+              : { kind: "named", name: base },
+        });
+
+        expect(result).toMatchObject({
+          status: "created",
+          baseBranch: reportedBase,
+        });
+
+        if (result.status !== "created") throw new Error(result.message);
+        expect((await git(result.path, "rev-parse", "HEAD")).trim()).toBe(
+          localHead,
+        );
+        expect(progressText(harness)).not.toMatch(/fetch/iu);
+      } finally {
+        await harness.experimental_dispose();
+      }
+    },
+  );
+
+  it("fails when an explicit remote base cannot be fetched", async () => {
+    const { root, sourcePath, dataDir } = await createSourceRepository();
+    const clone = join(root, "clone");
+    await git(root, "clone", sourcePath, clone);
+    await git(clone, "remote", "set-url", "origin", join(root, "missing"));
+    const harness = createHarness(dataDir);
+
+    try {
+      const result = await harness.experimental_call("create", {
+        ...createInput({
+          operationId: "offline-explicit",
+          sourcePath: clone,
+          pathKey: "offline-explicit",
+          branchName: "omnyo/offline-explicit",
+        }),
+        baseBranch: { kind: "named", name: "origin/main" },
+      });
+
+      expect(result).toMatchObject({
+        status: "failed",
+        message: expect.stringContaining("git fetch"),
+      });
+      expect(progressText(harness)).not.toContain("Using the last fetched");
+      expect(
+        existsSync(join(dataDir, "worktrees", "offline-explicit", "clone")),
+      ).toBe(false);
+    } finally {
+      await harness.experimental_dispose();
+    }
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "cancels a create whose base fetch is still running",
+    async () => {
+      const { root, sourcePath, dataDir } = await createSourceRepository();
+      const clone = join(root, "clone");
+      await git(root, "clone", sourcePath, clone);
+      const sshPidPath = join(root, "ssh.pid");
+      const sshPath = join(root, "hanging-ssh");
+      await writeFile(
+        sshPath,
+        `#!/bin/sh\necho $$ > "${sshPidPath}"\nexec sleep 30\n`,
+        { mode: 0o755 },
+      );
+      await git(clone, "config", "core.sshCommand", sshPath);
+      await git(
+        clone,
+        "remote",
+        "set-url",
+        "origin",
+        "ssh://omnyo.invalid/repo",
+      );
+      const harness = createHarness(dataDir);
+      const controller = new AbortController();
+
+      const created = harness
+        .experimental_call(
+          "create",
+          {
+            ...createInput({
+              operationId: "cancelled-fetch",
+              sourcePath: clone,
+              pathKey: "cancelled-fetch",
+              branchName: "omnyo/cancelled-fetch",
+            }),
+            baseBranch: { kind: "named", name: "main" },
+          },
+          { signal: controller.signal },
+        )
+        .catch((error: unknown) => error);
+
+      await expect
+        .poll(() => existsSync(sshPidPath), { timeout: 10_000 })
+        .toBe(true);
+      controller.abort();
+      expect(await created).toBeInstanceOf(Error);
+      expect(progressText(harness)).not.toContain("Using the last fetched");
+      expect(
+        existsSync(join(dataDir, "worktrees", "cancelled-fetch", "clone")),
+      ).toBe(false);
+      await harness.experimental_dispose();
+    },
+  );
+
+  it.each([
+    { existingBranch: false, branchMode: "reset" },
+    { existingBranch: false, branchMode: "reuse-existing" },
+    { existingBranch: true, branchMode: "reuse-existing" },
+    { existingBranch: true, branchMode: "reset" },
+  ] as const)(
+    "creates with a locked config (existing=$existingBranch, mode=$branchMode)",
+    async ({ existingBranch, branchMode }) => {
+      const { sourcePath, dataDir } = await createSourceRepository();
+      await git(sourcePath, "remote", "add", "origin", sourcePath);
+      await git(sourcePath, "fetch", "origin");
+      await git(sourcePath, "config", "branch.autoSetupMerge", "always");
+      await git(sourcePath, "config", "core.autocrlf", "true");
+      const branchName = "omnyo/config-lock";
+
+      if (existingBranch) {
+        await git(
+          sourcePath,
+          "update-ref",
+          "refs/remotes/origin/published",
+          "HEAD",
+        );
+        await git(
+          sourcePath,
+          "branch",
+          "--track",
+          branchName,
+          "origin/published",
+        );
+      }
+
+      const configPath = join(sourcePath, ".git", "config");
+      const originalConfig = await readFile(configPath, "utf8");
+      const lockPath = `${configPath}.lock`;
+      await writeFile(lockPath, "another Git writer\n");
+      const harness = createHarness(dataDir);
+
+      try {
+        const result = await harness.experimental_call("create", {
+          ...createInput({
+            operationId: "config-lock",
+            sourcePath,
+            pathKey: "config-lock",
+            branchName,
+          }),
+          branchMode,
+          baseBranch: { kind: "named", name: "origin/main" },
+        });
+
+        expect(result.status).toBe("created");
+
+        if (result.status !== "created") throw new Error(result.message);
+        expect(
+          (await readFile(join(result.path, "README.md"), "utf8")).replace(
+            /\r\n/gu,
+            "\n",
+          ),
+        ).toBe("hello\n");
+        expect(await git(result.path, "rev-parse", "HEAD")).toBe(
+          await git(sourcePath, "rev-parse", "origin/main"),
+        );
+        expect(
+          (
+            await git(
+              result.path,
+              "for-each-ref",
+              "--format=%(upstream:short)",
+              `refs/heads/${branchName}`,
+            )
+          ).trim(),
+        ).toBe(existingBranch ? "origin/published" : "");
+        expect(await readFile(lockPath, "utf8")).toBe("another Git writer\n");
+        expect(await readFile(configPath, "utf8")).toBe(originalConfig);
+      } finally {
+        await harness.experimental_dispose();
+      }
+    },
+  );
+
   it("resolves adoption paths with trailing slashes and symlink aliases", async () => {
     const { root, sourcePath, dataDir } = await createSourceRepository();
     const worktreePath = join(root, "feature");
@@ -154,6 +830,7 @@ describe("worktree host entry", () => {
     expect(
       await harness.experimental_call("listWorktrees", { sourcePath }),
     ).toEqual({ worktrees: [] });
+
     for (const [index, target] of [sourcePath, worktreePath].entries()) {
       const aliasPath = join(root, `alias-${index}`);
       await symlink(target, aliasPath, "junction");
@@ -228,21 +905,25 @@ describe("worktree host entry", () => {
     async (_label, repositoryName, expectedLeaf) => {
       const { sourcePath, dataDir } =
         await createSourceRepository(repositoryName);
+
       const harness = createHarness(dataDir);
       const pathKey = "special-name";
+
       const result = await harness.experimental_call(
         "create",
         createInput({
           operationId: "create-special",
           sourcePath,
           pathKey,
-          branchName: "bb/special-name",
+          branchName: "omnyo/special-name",
         }),
       );
+
       expect(result).toMatchObject({
         status: "created",
         path: join(dataDir, "worktrees", pathKey, expectedLeaf),
       });
+
       if (result.status !== "created") throw new Error(result.message);
       expect(existsSync(join(result.path, "README.md"))).toBe(true);
       expect(
@@ -265,19 +946,24 @@ describe("worktree host entry", () => {
       "Windows cannot start a process whose working directory is longer than MAX_PATH",
     );
     const repositoryName = "repository".repeat(24);
+
     const { sourcePath, dataDir } =
       await createSourceRepository(repositoryName);
+
     const harness = createHarness(dataDir);
+
     const result = await harness.experimental_call(
       "create",
       createInput({
         operationId: "long-name",
         sourcePath,
         pathKey: "long-name",
-        branchName: "bb/long-name",
+        branchName: "omnyo/long-name",
       }),
     );
+
     expect(result.status).toBe("created");
+
     if (result.status !== "created") throw new Error(result.message);
     expect(Buffer.byteLength(basename(result.path), "utf8")).toBe(200);
     expect(basename(result.path)).toMatch(/-[a-f0-9]{16}$/u);
@@ -288,7 +974,9 @@ describe("worktree host entry", () => {
   it("provisions the same specially named repository concurrently", async () => {
     const { sourcePath, dataDir } =
       await createSourceRepository("Concurrent Repo");
+
     const harness = createHarness(dataDir);
+
     const [first, second] = await Promise.all([
       harness.experimental_call(
         "create",
@@ -296,7 +984,7 @@ describe("worktree host entry", () => {
           operationId: "concurrent-first",
           sourcePath,
           pathKey: "concurrent-1",
-          branchName: "bb/concurrent-1",
+          branchName: "omnyo/concurrent-1",
         }),
       ),
       harness.experimental_call(
@@ -305,13 +993,16 @@ describe("worktree host entry", () => {
           operationId: "concurrent-second",
           sourcePath,
           pathKey: "concurrent-2",
-          branchName: "bb/concurrent-2",
+          branchName: "omnyo/concurrent-2",
         }),
       ),
     ]);
+
     expect(first.status).toBe("created");
     expect(second.status).toBe("created");
+
     if (first.status !== "created") throw new Error(first.message);
+
     if (second.status !== "created") throw new Error(second.message);
     expect(first.path).not.toBe(second.path);
     expect(basename(first.path)).toBe(basename(second.path));
@@ -319,6 +1010,46 @@ describe("worktree host entry", () => {
     expect(existsSync(join(second.path, "README.md"))).toBe(true);
     await harness.experimental_dispose();
   });
+
+  it.skipIf(process.platform === "win32")(
+    "settles a cancelled create promptly when Git's children are still running",
+    async () => {
+      const { root, sourcePath, dataDir } = await createSourceRepository();
+      const hookPidPath = join(root, "hook.pid");
+      const hookPath = join(sourcePath, ".git", "hooks", "post-checkout");
+      await writeFile(
+        hookPath,
+        `#!/bin/sh\necho $$ > "${hookPidPath}"\nexec sleep 30\n`,
+        { mode: 0o755 },
+      );
+      const harness = createHarness(dataDir);
+      const controller = new AbortController();
+
+      const created = harness
+        .experimental_call(
+          "create",
+          createInput({
+            operationId: "cancelled-create",
+            sourcePath,
+            pathKey: "cancelled",
+            branchName: "omnyo/cancelled",
+          }),
+          { signal: controller.signal },
+        )
+        .catch((error) => error);
+
+      await expect
+        .poll(() => existsSync(hookPidPath), { timeout: 10_000 })
+        .toBe(true);
+      const hookPid = Number((await readFile(hookPidPath, "utf8")).trim());
+      const abortedAt = performance.now();
+      controller.abort();
+      expect(await created).toBeInstanceOf(Error);
+      expect(performance.now() - abortedAt).toBeLessThan(3_000);
+      await expect.poll(() => isPidAlive(hookPid)).toBe(false);
+      await harness.experimental_dispose();
+    },
+  );
 
   it("creates a worktree on a named base under the path-key directory", async () => {
     const { sourcePath, dataDir } = await createSourceRepository();
@@ -329,44 +1060,51 @@ describe("worktree host entry", () => {
     await git(sourcePath, "commit", "-m", "release only");
     await git(sourcePath, "checkout", "main");
     const harness = createHarness(dataDir);
+
     const result = await harness.experimental_call("create", {
       operationId: "named",
       sourcePath,
       pathKey: "thr_1",
-      branchName: "bb/named-thr_1",
+      branchName: "omnyo/named-thr_1",
       baseBranch: { kind: "named", name: "release" },
       branchMode: "reset",
     });
+
     expect(result).toMatchObject({
       status: "created",
       path: join(dataDir, "worktrees", "thr_1", "repo"),
       baseBranch: "release",
     });
+
     if (result.status !== "created") throw new Error(result.message);
     expect(existsSync(join(result.path, "release.txt"))).toBe(true);
     expect(
       (await git(result.path, "rev-parse", "--abbrev-ref", "HEAD")).trim(),
-    ).toBe("bb/named-thr_1");
+    ).toBe("omnyo/named-thr_1");
     await harness.experimental_dispose();
   });
 
   it("creates on an explicit base from a detached single-branch checkout", async () => {
     const { sourcePath, dataDir } =
       await createDetachedSingleBranchRepository();
+
     const harness = createHarness(dataDir);
+
     const result = await harness.experimental_call("create", {
       operationId: "detached",
       sourcePath,
       pathKey: "thr_detached",
-      branchName: "bb/detached-thr",
+      branchName: "omnyo/detached-thr",
       baseBranch: { kind: "named", name: "v1.0" },
       branchMode: "reset",
     });
+
     expect(result).toMatchObject({
       status: "created",
       path: join(dataDir, "worktrees", "thr_detached", "repo"),
       baseBranch: "v1.0",
     });
+
     if (result.status !== "created") throw new Error(result.message);
     expect(existsSync(join(result.path, "README.md"))).toBe(true);
     await harness.experimental_dispose();
@@ -375,23 +1113,28 @@ describe("worktree host entry", () => {
   it("re-runs create with the same path key without replacing a valid worktree", async () => {
     const { sourcePath, dataDir } =
       await createSourceRepository("Restartable Repo");
+
     const input = createInput({
       operationId: "first",
       sourcePath,
       pathKey: "same-path-key",
-      branchName: "bb/restart",
+      branchName: "omnyo/restart",
     });
+
     const firstHarness = createHarness(dataDir);
     const first = await firstHarness.experimental_call("create", input);
+
     if (first.status !== "created") throw new Error(first.message);
     await writeFile(join(first.path, "survives.txt"), "kept\n");
     await firstHarness.experimental_dispose();
 
     const restartedHarness = createHarness(dataDir);
+
     const resumed = await restartedHarness.experimental_call("create", {
       ...input,
       operationId: "resumed",
     });
+
     expect(resumed).toEqual(first);
     expect(existsSync(join(first.path, "survives.txt"))).toBe(true);
     await restartedHarness.experimental_dispose();
@@ -401,13 +1144,13 @@ describe("worktree host entry", () => {
     const { root, sourcePath, dataDir } = await createSourceRepository();
     const setupMarker = join(root, "setup.marker");
     await writeFile(
-      join(sourcePath, ".bb-env-setup.sh"),
+      join(sourcePath, ".omnyo-env-setup.sh"),
       `#!/usr/bin/env bash\necho resumed > ${setupMarker}\n`,
     );
     await git(sourcePath, "add", ".");
     await git(sourcePath, "commit", "-m", "add setup script");
     const pathKey = "interrupted";
-    const branchName = "bb/interrupted";
+    const branchName = "omnyo/interrupted";
     const targetPath = join(dataDir, "worktrees", pathKey, "repo");
     await mkdir(join(dataDir, "worktrees", pathKey), { recursive: true });
     await git(
@@ -421,6 +1164,7 @@ describe("worktree host entry", () => {
     );
 
     const harness = createHarness(dataDir);
+
     const resumed = await harness.experimental_call(
       "create",
       createInput({
@@ -433,37 +1177,42 @@ describe("worktree host entry", () => {
 
     expect(resumed).toMatchObject({ status: "created", path: targetPath });
     expect(existsSync(setupMarker)).toBe(false);
-    expect(progressText(harness)).not.toContain("Running .bb-env-setup.sh");
+    expect(progressText(harness)).not.toContain("Running .omnyo-env-setup.sh");
     await harness.experimental_dispose();
   });
 
   it("replaces an invalid target before recreating the expected branch", async () => {
     const { sourcePath, dataDir } = await createSourceRepository();
     const harness = createHarness(dataDir);
+
     const input = createInput({
       operationId: "first",
       sourcePath,
       pathKey: "replace",
-      branchName: "bb/expected",
+      branchName: "omnyo/expected",
     });
+
     const first = await harness.experimental_call("create", input);
+
     if (first.status !== "created") throw new Error(first.message);
     await git(first.path, "checkout", "-b", "wrong-branch");
+
     const replaced = await harness.experimental_call("create", {
       ...input,
       operationId: "retry",
     });
+
     expect(replaced.status).toBe("created");
     expect(
       (await git(first.path, "rev-parse", "--abbrev-ref", "HEAD")).trim(),
-    ).toBe("bb/expected");
+    ).toBe("omnyo/expected");
     await harness.experimental_dispose();
   });
 
   it("leaves setup execution to core", async () => {
     const { sourcePath, dataDir } = await createSourceRepository();
     await writeFile(
-      join(sourcePath, ".bb-env-setup.sh"),
+      join(sourcePath, ".omnyo-env-setup.sh"),
       "#!/usr/bin/env bash\necho setup-line-one\necho setup-line-two\n",
     );
     await git(sourcePath, "add", ".");
@@ -476,11 +1225,11 @@ describe("worktree host entry", () => {
           operationId: "setup",
           sourcePath,
           pathKey: "thr_3",
-          branchName: "bb/setup-thr_3",
+          branchName: "omnyo/setup-thr_3",
         }),
       ),
     ).toMatchObject({ status: "created" });
-    expect(progressText(harness)).not.toContain("Running .bb-env-setup.sh");
+    expect(progressText(harness)).not.toContain("Running .omnyo-env-setup.sh");
     expect(progressText(harness)).not.toContain("setup-line-one");
     expect(progressText(harness)).not.toContain("setup-line-two");
     expect(
@@ -494,26 +1243,30 @@ describe("worktree host entry", () => {
   it("leaves a dirty earlier attempt alone when it holds the branch", async () => {
     const { sourcePath, dataDir } = await createSourceRepository();
     const harness = createHarness(dataDir);
+
     const first = await harness.experimental_call(
       "create",
       createInput({
         operationId: "first",
         sourcePath,
         pathKey: "thr_7",
-        branchName: "bb/dirty-thr_7",
+        branchName: "omnyo/dirty-thr_7",
       }),
     );
+
     if (first.status !== "created") throw new Error(first.message);
     await writeFile(join(first.path, "notes.txt"), "work in progress\n");
+
     const retry = await harness.experimental_call(
       "create",
       createInput({
         operationId: "retry",
         sourcePath,
         pathKey: "thr_7-2",
-        branchName: "bb/dirty-thr_7",
+        branchName: "omnyo/dirty-thr_7",
       }),
     );
+
     expect(retry).toMatchObject({
       status: "failed",
       message: expect.stringContaining("uncommitted changes"),
@@ -531,22 +1284,25 @@ describe("worktree host entry", () => {
     );
     const { root, sourcePath, dataDir } = await createSourceRepository();
     await writeFile(
-      join(sourcePath, ".bb-env-teardown.sh"),
+      join(sourcePath, ".omnyo-env-teardown.sh"),
       `#!/usr/bin/env bash\necho teardown-ran > ${join(root, "teardown.marker")}\necho tearing-down\n`,
     );
     await git(sourcePath, "add", ".");
     await git(sourcePath, "commit", "-m", "add teardown script");
     const harness = createHarness(dataDir);
+
     const created = await harness.experimental_call(
       "create",
       createInput({
         operationId: "create",
         sourcePath,
         pathKey: "thr_6",
-        branchName: "bb/teardown-thr_6",
+        branchName: "omnyo/teardown-thr_6",
       }),
     );
+
     if (created.status !== "created") throw new Error(created.message);
+
     const lingering = spawn(
       process.execPath,
       ["-e", "setTimeout(() => {}, 300_000)"],
@@ -556,12 +1312,15 @@ describe("worktree host entry", () => {
         stdio: "ignore",
       },
     );
+
     lingering.unref();
+
     const removed = await harness.experimental_call("remove", {
       operationId: "remove",
       pathKey: "thr_6",
       path: created.path,
     });
+
     const lingeringAlive = isPidAlive(lingering.pid ?? 0);
     lingering.kill("SIGKILL");
     expect(removed).toEqual({ status: "removed" });

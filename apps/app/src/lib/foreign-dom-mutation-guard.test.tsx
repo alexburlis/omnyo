@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { act } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -79,12 +80,14 @@ describe("foreign DOM mutation guard", () => {
 
   function wrapLikeFileReveal(control: HTMLElement): HTMLElement {
     const parent = control.parentNode;
+
     if (parent === null) throw new Error("control has no parent");
     const group = document.createElement("span");
     const button = document.createElement("button");
     button.type = "button";
     parent.insertBefore(group, control);
     group.append(control, button);
+
     return group;
   }
 
@@ -92,6 +95,7 @@ describe("foreign DOM mutation guard", () => {
     const errors: Error[] = [];
     const container = document.createElement("div");
     document.body.appendChild(container);
+
     const root = createRoot(container, {
       onUncaughtError: (error) => {
         errors.push(error instanceof Error ? error : new Error(String(error)));
@@ -128,6 +132,7 @@ describe("foreign DOM mutation guard", () => {
     run(() => root.render(<List items={["src/a.ts", "src/c.ts"]} />));
     run(() => root.unmount());
     container.remove();
+
     return errors;
   }
 
@@ -194,6 +199,7 @@ describe("foreign DOM mutation guard", () => {
           }
         }
       });
+
       observer.observe(hostList!, { childList: true });
     }, "file-reveal");
 
@@ -289,9 +295,55 @@ describe("foreign DOM mutation guard", () => {
     container.remove();
   });
 
+  it("lets React commit into its root and portal containers while an async plugin mount is pending", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    installForeignDomMutationGuard();
+
+    const container = document.createElement("div");
+    const portalTarget = document.createElement("div");
+    document.body.append(container, portalTarget);
+    const root = createRoot(container);
+    act(() => {
+      root.render(<span data-testid="before-mount" />);
+    });
+
+    let finishMount: () => void = () => undefined;
+
+    const mount = runWithPluginDomIsolationAsync(
+      () => new Promise<void>((resolve) => (finishMount = resolve)),
+      "slow-mount",
+    );
+
+    await act(async () => {
+      root.render(
+        <>
+          <div data-testid="overlays" />
+          {createPortal(<div data-testid="portal-child" />, portalTarget)}
+        </>,
+      );
+    });
+
+    expect(container.querySelector("[data-testid='overlays']")).toBeInstanceOf(
+      HTMLDivElement,
+    );
+    expect(
+      portalTarget.querySelector("[data-testid='portal-child']"),
+    ).toBeInstanceOf(HTMLDivElement);
+    expect(pluginHostNodeMoveRefusalCount()).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+
+    finishMount();
+    await mount;
+    act(() => root.unmount());
+    container.remove();
+    portalTarget.remove();
+  });
+
   it("preserves MutationObserver subclass identity", () => {
     installForeignDomMutationGuard();
+
     class ExtraObserver extends MutationObserver {}
+
     const observer = new ExtraObserver(() => undefined);
     expect(observer).toBeInstanceOf(ExtraObserver);
     expect(observer).toBeInstanceOf(MutationObserver);

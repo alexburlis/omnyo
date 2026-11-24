@@ -1,4 +1,4 @@
-import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
+import type { PluginApi, PluginRpcHandlers } from "@omnyo/plugin-sdk";
 import {
   createTasksStore,
   type Attachment as StoredAttachment,
@@ -59,8 +59,8 @@ export interface TasksApiStore {
   sidebarSummary(): SidebarProjectSummary[];
 }
 
-export function createStore(bb: BbPluginApi): TasksApiStore {
-  const database = bb.storage.database();
+export function createStore(api: PluginApi): TasksApiStore {
+  const database = api.storage.database();
   const tasks = createTasksStore(database);
 
   return {
@@ -70,12 +70,15 @@ export function createStore(bb: BbPluginApi): TasksApiStore {
     },
     taskLabelIds(taskIds: readonly string[]): Map<string, string[]> {
       const labelsByTask = new Map<string, string[]>();
+
       for (const taskId of taskIds) labelsByTask.set(taskId, []);
 
       for (let offset = 0; offset < taskIds.length; offset += 500) {
         const ids = taskIds.slice(offset, offset + 500);
+
         if (ids.length === 0) continue;
         const placeholders = ids.map(() => "?").join(", ");
+
         const rows = database
           .prepare<string[], TaskLabelIdRow>(
             `
@@ -86,9 +89,11 @@ export function createStore(bb: BbPluginApi): TasksApiStore {
             `,
           )
           .all(...ids);
+
         for (const row of rows)
           labelsByTask.get(row.task_id)?.push(row.label_id);
       }
+
       return labelsByTask;
     },
     projectTaskCount(projectId: string): number {
@@ -171,25 +176,25 @@ function taskFailure(error: TasksDomainFailure) {
 }
 
 export function publishTasksChanged(
-  bb: BbPluginApi,
+  api: PluginApi,
   taskId: string,
   projectId: string,
 ): void {
   const payload: TasksChangedEvent = { taskId, projectId };
-  bb.realtime.publish("tasks:changed", payload);
+  api.realtime.publish("tasks:changed", payload);
 }
 
 export function publishProjectsChanged(
-  bb: BbPluginApi,
+  api: PluginApi,
   projectId: string | null,
 ): void {
   const payload: ProjectsChangedEvent = { projectId };
-  bb.realtime.publish("projects:changed", payload);
+  api.realtime.publish("projects:changed", payload);
 }
 
-export function publishCommentsChanged(bb: BbPluginApi, taskId: string): void {
+export function publishCommentsChanged(api: PluginApi, taskId: string): void {
   const payload: CommentsChangedEvent = { taskId };
-  bb.realtime.publish("comments:changed", payload);
+  api.realtime.publish("comments:changed", payload);
 }
 
 function apiTask(store: TasksApiStore, task: StoredTask): Task {
@@ -201,6 +206,7 @@ function apiTask(store: TasksApiStore, task: StoredTask): Task {
 
 function apiTasks(store: TasksApiStore, tasks: StoredTask[]): Task[] {
   const labelsByTask = store.taskLabelIds(tasks.map((task) => task.id));
+
   return tasks.map((task) => ({
     ...task,
     labelIds: labelsByTask.get(task.id) ?? [],
@@ -214,24 +220,29 @@ function validateTaskParent(
   ownTaskId?: string,
 ): void {
   if (parentTaskId === null) return;
+
   if (parentTaskId === ownTaskId) {
     fail("task_parent_invalid", "A task cannot be its own parent");
   }
 
   const parent = store.tasks.getTask(parentTaskId);
+
   if (!parent) throw new Error(`Task not found: ${parentTaskId}`);
+
   if (parent.projectId !== projectId) {
     fail(
       "subtask_project_mismatch",
       "A sub-task must belong to the same project as its parent",
     );
   }
+
   if (parent.parentTaskId !== null) {
     fail(
       "subtask_depth_exceeded",
       "Tasks support at most one level of sub-tasks",
     );
   }
+
   if (ownTaskId && store.tasks.listSubtasks(ownTaskId).length > 0) {
     fail(
       "subtask_depth_exceeded",
@@ -247,6 +258,7 @@ function validateTaskLabels(
 ): void {
   for (const labelId of labelIds) {
     const label = store.tasks.getLabel(labelId);
+
     if (!label || label.projectId !== projectId) {
       fail(
         "label_project_mismatch",
@@ -264,10 +276,13 @@ function replaceTaskLabels(
   const current = new Set(
     store.tasks.listTaskLabels(taskId).map((link) => link.labelId),
   );
+
   const next = new Set(labelIds);
+
   for (const labelId of current) {
     if (!next.has(labelId)) store.tasks.removeTaskLabel(taskId, labelId);
   }
+
   for (const labelId of next) {
     if (!current.has(labelId)) store.tasks.addTaskLabel(taskId, labelId);
   }
@@ -279,6 +294,7 @@ function labelsChanged(
 ): boolean {
   if (before.length !== after.length) return true;
   const afterSet = new Set(after);
+
   return before.some((labelId) => !afterSet.has(labelId));
 }
 
@@ -291,6 +307,7 @@ function labelChangeBody(
     .listLabelsForTask(taskId)
     .map((label) => label.name)
     .sort((left, right) => left.localeCompare(right));
+
   return names.length === 0
     ? `Labels cleared by ${authorName}`
     : `Labels changed to ${names.join(", ")} by ${authorName}`;
@@ -343,26 +360,30 @@ interface AgentThreadInfo {
 }
 
 async function resolveAgentThreadInfo(
-  bb: BbPluginApi,
+  api: PluginApi,
   comments: readonly StoredComment[],
 ): Promise<Map<string, AgentThreadInfo>> {
   const threadIds = new Set<string>();
+
   for (const comment of comments) {
     if (comment.kind === "agent" && comment.threadId !== null) {
       threadIds.add(comment.threadId);
     }
   }
+
   const infos = new Map<string, AgentThreadInfo>();
   await Promise.all(
     [...threadIds].map(async (threadId) => {
       try {
-        const thread = await bb.sdk.threads.get({ threadId });
+        const thread = await api.sdk.threads.get({ threadId });
         const isSideChat = isSideChatShapedThread(thread);
+
         const title = isSideChat
           ? undefined
           : [thread.title, thread.titleFallback].find(
               (candidate) => candidate !== null && candidate.trim() !== "",
             );
+
         infos.set(threadId, {
           title: title ?? null,
           providerId: thread.providerId,
@@ -370,24 +391,29 @@ async function resolveAgentThreadInfo(
       } catch {}
     }),
   );
+
   return infos;
 }
 
 async function resolveProviderBadges(
-  bb: BbPluginApi,
+  api: PluginApi,
   threadInfo: ReadonlyMap<string, AgentThreadInfo>,
 ): Promise<Map<string, CommentProvider>> {
   const providerIds = new Set(
     [...threadInfo.values()].map((info) => info.providerId),
   );
+
   const badges = new Map<string, CommentProvider>();
+
   if (providerIds.size === 0) return badges;
-  let providers: Awaited<ReturnType<typeof bb.sdk.providers.list>>;
+  let providers: Awaited<ReturnType<typeof api.sdk.providers.list>>;
+
   try {
-    providers = await bb.sdk.providers.list();
+    providers = await api.sdk.providers.list();
   } catch {
     return badges;
   }
+
   for (const provider of providers) {
     if (providerIds.has(provider.id)) {
       badges.set(provider.id, {
@@ -399,6 +425,7 @@ async function resolveProviderBadges(
       });
     }
   }
+
   return badges;
 }
 
@@ -414,7 +441,7 @@ interface CreateCommentInput {
 }
 
 export async function createComment(
-  bb: BbPluginApi,
+  api: PluginApi,
   store: TasksApiStore,
   input: CreateCommentInput,
 ): Promise<StoredComment> {
@@ -429,29 +456,34 @@ export async function createComment(
     }),
   );
 
-  publishCommentsChanged(bb, input.taskId);
+  publishCommentsChanged(api, input.taskId);
+
   if (!input.notify) return comment;
 
   const deliver = async (): Promise<StoredComment> => {
-    const notifiedCount = await deliverCommentToLatestAgent(bb, store.tasks, {
+    const notifiedCount = await deliverCommentToLatestAgent(api, store.tasks, {
       taskId: comment.taskId,
       commentId: comment.id,
       body: comment.body,
       authorName: comment.authorName,
     });
+
     const updated = store.transaction(() =>
       store.tasks.updateComment(comment.id, { notifiedCount }),
     );
-    publishCommentsChanged(bb, input.taskId);
+
+    publishCommentsChanged(api, input.taskId);
+
     return updated;
   };
 
   if (input.awaitDelivery) return deliver();
   void deliver().catch((error) => {
-    bb.log.warn(
+    api.log.warn(
       `failed to update comment notification ${comment.id}: ${errorMessage(error)}`,
     );
   });
+
   return comment;
 }
 
@@ -469,6 +501,7 @@ async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let nextIndex = 0;
+
   const workers = Array.from(
     { length: Math.min(limit, items.length) },
     async () => {
@@ -479,12 +512,14 @@ async function mapWithConcurrency<T, R>(
       }
     },
   );
+
   await Promise.all(workers);
+
   return results;
 }
 
 async function listTaskPullRequests(
-  bb: BbPluginApi,
+  api: PluginApi,
   store: TasksApiStore,
   taskId: string,
 ): Promise<TaskPullRequestsResult> {
@@ -495,9 +530,10 @@ async function listTaskPullRequests(
   await Promise.all(
     taskThreads.map(async (taskThread) => {
       try {
-        const thread = await bb.sdk.threads.get({
+        const thread = await api.sdk.threads.get({
           threadId: taskThread.threadId,
         });
+
         if (!thread.environmentId) return;
         const group = threadIdsByEnvironment.get(thread.environmentId) ?? [];
         group.push(taskThread.threadId);
@@ -514,21 +550,27 @@ async function listTaskPullRequests(
     PULL_REQUEST_LOOKUP_CONCURRENCY,
     async ([environmentId, threadIds]) => {
       let result: Awaited<
-        ReturnType<BbPluginApi["sdk"]["environments"]["pullRequest"]>
+        ReturnType<PluginApi["sdk"]["environments"]["pullRequest"]>
       >;
+
       try {
-        result = await bb.sdk.environments.pullRequest({ environmentId });
+        result = await api.sdk.environments.pullRequest({ environmentId });
       } catch {
         for (const threadId of threadIds) unavailable.add(threadId);
+
         return;
       }
+
       if (result.outcome === "unavailable") {
         for (const threadId of threadIds) unavailable.add(threadId);
+
         return;
       }
+
       if (result.outcome === "absent") return;
       const { pullRequest } = result;
       const existing = byUrl.get(pullRequest.url);
+
       if (!existing) {
         byUrl.set(pullRequest.url, {
           url: pullRequest.url,
@@ -538,9 +580,12 @@ async function listTaskPullRequests(
           updatedAt: pullRequest.updatedAt,
           threadIds: [...threadIds],
         });
+
         return;
       }
+
       const threadIdUnion = [...existing.threadIds, ...threadIds];
+
       if (pullRequest.updatedAt.localeCompare(existing.updatedAt) > 0) {
         byUrl.set(pullRequest.url, {
           url: pullRequest.url,
@@ -559,8 +604,10 @@ async function listTaskPullRequests(
   const threadOrder = new Map(
     taskThreads.map((taskThread, index) => [taskThread.threadId, index]),
   );
+
   const orderByThread = (threadId: string) =>
     threadOrder.get(threadId) ?? Number.MAX_SAFE_INTEGER;
+
   const pullRequests = [...byUrl.values()].map((pullRequest) => ({
     ...pullRequest,
     threadIds: [...pullRequest.threadIds].sort(
@@ -579,32 +626,39 @@ async function listTaskPullRequests(
 }
 
 export function registerHandlers(
-  bb: BbPluginApi,
+  api: PluginApi,
   store: TasksApiStore,
 ): PluginRpcHandlers<typeof tasksRpcContract> {
   return {
     createFolder(input) {
       const folder = store.tasks.createFolder(input);
-      publishProjectsChanged(bb, null);
+      publishProjectsChanged(api, null);
+
       return { folder };
     },
     renameFolder(input) {
       const folder = store.tasks.updateFolder(input.folderId, {
         name: input.name,
       });
-      publishProjectsChanged(bb, null);
+
+      publishProjectsChanged(api, null);
+
       return { folder };
     },
     moveFolder(input) {
       const folder = store.tasks.updateFolder(input.folderId, {
         parentFolderId: input.parentFolderId,
       });
-      publishProjectsChanged(bb, null);
+
+      publishProjectsChanged(api, null);
+
       return { folder };
     },
     deleteFolder(input) {
       const result = store.tasks.deleteFolder(input.folderId);
-      if (result.deleted) publishProjectsChanged(bb, null);
+
+      if (result.deleted) publishProjectsChanged(api, null);
+
       return result;
     },
     listFolders() {
@@ -612,13 +666,15 @@ export function registerHandlers(
     },
     createProject(input) {
       const project = store.tasks.createProject(input);
-      publishProjectsChanged(bb, project.id);
+      publishProjectsChanged(api, project.id);
+
       return { project };
     },
     updateProject(input) {
       const { projectId, ...changes } = input;
       const project = store.tasks.updateProject(projectId, changes);
-      publishProjectsChanged(bb, project.id);
+      publishProjectsChanged(api, project.id);
+
       return { project };
     },
     renameProjectPrefix(input) {
@@ -629,10 +685,13 @@ export function registerHandlers(
             `Project prefix is already in use: ${input.prefix}`,
           );
         }
+
         const project = store.tasks.updateProject(input.projectId, {
           prefix: input.prefix,
         });
-        publishProjectsChanged(bb, project.id);
+
+        publishProjectsChanged(api, project.id);
+
         return { ok: true, project };
       } catch (error) {
         if (error instanceof TasksDomainFailure) return taskFailure(error);
@@ -647,15 +706,19 @@ export function registerHandlers(
             "A project must be empty before it can be deleted; pass force: true to delete its tasks",
           );
         }
+
         const taskIds = store.tasks
           .listTasks({ projectId: input.projectId })
           .map((task) => task.id);
+
         const attachments = attachmentsForTasks(store.tasks, taskIds);
         const deleted = store.tasks.deleteProject(input.projectId);
+
         if (deleted) {
-          await removeAttachmentBlobs(bb, store.tasks, attachments);
-          publishProjectsChanged(bb, input.projectId);
+          await removeAttachmentBlobs(api, store.tasks, attachments);
+          publishProjectsChanged(api, input.projectId);
         }
+
         return { ok: true, deleted };
       } catch (error) {
         if (error instanceof TasksDomainFailure) return taskFailure(error);
@@ -669,6 +732,7 @@ export function registerHandlers(
       try {
         validateTaskParent(store, input.projectId, input.parentTaskId);
         validateTaskLabels(store, input.projectId, input.labelIds);
+
         const task = store.transaction(() => {
           const created = store.tasks.createTask({
             projectId: input.projectId,
@@ -679,10 +743,14 @@ export function registerHandlers(
             dueDate: input.dueDate,
             parentTaskId: input.parentTaskId,
           });
+
           replaceTaskLabels(store, created.id, input.labelIds);
+
           return apiTask(store, created);
         });
-        publishTasksChanged(bb, task.id, task.projectId);
+
+        publishTasksChanged(api, task.id, task.projectId);
+
         return { ok: true, task };
       } catch (error) {
         if (error instanceof TasksDomainFailure) return taskFailure(error);
@@ -691,21 +759,27 @@ export function registerHandlers(
     },
     getTask(input) {
       const task = store.tasks.getTask(input.taskId);
+
       return { task: task ? apiTask(store, task) : null };
     },
     getTaskByKey(input) {
       const task = store.tasks.getTaskByKey(input.taskKey);
+
       return { task: task ? apiTask(store, task) : null };
     },
     updateTask(input) {
       try {
         const current = store.tasks.getTask(input.taskId);
+
         if (!current) throw new Error(`Task not found: ${input.taskId}`);
+
         const parentTaskId =
           input.parentTaskId === undefined
             ? current.parentTaskId
             : input.parentTaskId;
+
         validateTaskParent(store, current.projectId, parentTaskId, current.id);
+
         if (input.labelIds) {
           validateTaskLabels(store, current.projectId, input.labelIds);
         }
@@ -714,6 +788,7 @@ export function registerHandlers(
           const beforeLabelIds = store.tasks
             .listTaskLabels(current.id)
             .map((link) => link.labelId);
+
           const updated = store.tasks.updateTask(current.id, {
             title: input.title,
             description: input.description,
@@ -722,21 +797,25 @@ export function registerHandlers(
             dueDate: input.dueDate,
             parentTaskId: input.parentTaskId,
           });
+
           if (input.labelIds) {
             replaceTaskLabels(store, current.id, input.labelIds);
           }
 
           const bodies: string[] = [];
+
           if (updated.status !== current.status) {
             bodies.push(
               `Status changed to ${displayName(updated.status)} by ${input.authorName}`,
             );
           }
+
           if (updated.priority !== current.priority) {
             bodies.push(
               `Priority changed to ${displayName(updated.priority)} by ${input.authorName}`,
             );
           }
+
           if (updated.dueDate !== current.dueDate) {
             bodies.push(
               updated.dueDate === null
@@ -744,20 +823,25 @@ export function registerHandlers(
                 : `Due date changed to ${updated.dueDate} by ${input.authorName}`,
             );
           }
+
           if (input.labelIds && labelsChanged(beforeLabelIds, input.labelIds)) {
             bodies.push(labelChangeBody(store, current.id, input.authorName));
           }
+
           writeSystemComments(store, current.id, input.authorName, bodies);
+
           return {
             task: apiTask(store, updated),
             systemCommentsWritten: bodies.length,
           };
         });
 
-        publishTasksChanged(bb, result.task.id, result.task.projectId);
+        publishTasksChanged(api, result.task.id, result.task.projectId);
+
         if (result.systemCommentsWritten > 0) {
-          publishCommentsChanged(bb, result.task.id);
+          publishCommentsChanged(api, result.task.id);
         }
+
         return { ok: true, task: result.task };
       } catch (error) {
         if (error instanceof TasksDomainFailure) return taskFailure(error);
@@ -769,13 +853,16 @@ export function registerHandlers(
       const subtasks = task ? store.tasks.listSubtasks(task.id) : [];
       const attachments = attachmentsForTasks(store.tasks, [input.taskId]);
       const deleted = store.tasks.deleteTask(input.taskId);
+
       if (deleted && task) {
-        await removeAttachmentBlobs(bb, store.tasks, attachments);
-        publishTasksChanged(bb, task.id, task.projectId);
+        await removeAttachmentBlobs(api, store.tasks, attachments);
+        publishTasksChanged(api, task.id, task.projectId);
+
         for (const subtask of subtasks) {
-          publishTasksChanged(bb, subtask.id, subtask.projectId);
+          publishTasksChanged(api, subtask.id, subtask.projectId);
         }
       }
+
       return { deleted };
     },
     listTasks(input) {
@@ -791,6 +878,7 @@ export function registerHandlers(
         limit: input.limit,
         cursor: input.cursor,
       });
+
       return {
         tasks: apiTasks(store, page.tasks),
         nextCursor: page.nextCursor,
@@ -798,53 +886,69 @@ export function registerHandlers(
     },
     boardMove(input) {
       const current = store.tasks.getTask(input.taskId);
+
       if (!current) throw new Error(`Task not found: ${input.taskId}`);
+
       const result = store.transaction(() => {
         const moved = store.tasks.updatePosition(current.id, {
           status: input.status,
           beforeTaskId: input.beforeTaskId,
           afterTaskId: input.afterTaskId,
         });
+
         const statusChanged = moved.status !== current.status;
+
         if (statusChanged) {
           writeSystemComments(store, current.id, input.authorName, [
             `Status changed to ${displayName(moved.status)} by ${input.authorName}`,
           ]);
         }
+
         return { task: apiTask(store, moved), statusChanged };
       });
-      publishTasksChanged(bb, result.task.id, result.task.projectId);
-      if (result.statusChanged) publishCommentsChanged(bb, result.task.id);
+
+      publishTasksChanged(api, result.task.id, result.task.projectId);
+
+      if (result.statusChanged) publishCommentsChanged(api, result.task.id);
+
       return { ok: true, task: result.task };
     },
     moveTaskToProject(input) {
       const current = store.tasks.getTask(input.taskId);
+
       if (!current) throw new Error(`Task not found: ${input.taskId}`);
+
       const result = store.transaction(() => {
         const outcome = store.tasks.moveTaskToProject(
           current.id,
           input.projectId,
         );
+
         for (const { previousKey, task } of outcome.moved) {
           writeSystemComments(store, task.id, input.authorName, [
             `Moved from ${previousKey} to ${task.key} by ${input.authorName}`,
           ]);
         }
+
         return { task: apiTask(store, outcome.task), moved: outcome.moved };
       });
+
       if (result.moved.length > 0) {
-        publishTasksChanged(bb, current.id, current.projectId);
-        publishTasksChanged(bb, result.task.id, result.task.projectId);
-        publishProjectsChanged(bb, result.task.projectId);
+        publishTasksChanged(api, current.id, current.projectId);
+        publishTasksChanged(api, result.task.id, result.task.projectId);
+        publishProjectsChanged(api, result.task.projectId);
+
         for (const { task } of result.moved) {
-          publishCommentsChanged(bb, task.id);
+          publishCommentsChanged(api, task.id);
         }
       }
+
       return { ok: true, task: result.task };
     },
     createLabel(input) {
       const label = store.tasks.createLabel(input);
-      publishProjectsChanged(bb, label.projectId);
+      publishProjectsChanged(api, label.projectId);
+
       return { label };
     },
     updateLabel(input) {
@@ -852,20 +956,24 @@ export function registerHandlers(
         name: input.name,
         color: input.color,
       });
-      publishProjectsChanged(bb, label.projectId);
+
+      publishProjectsChanged(api, label.projectId);
+
       return { label };
     },
     deleteLabel(input) {
       const label = store.tasks.getLabel(input.labelId);
       const deleted = store.tasks.deleteLabel(input.labelId);
-      if (deleted && label) publishProjectsChanged(bb, label.projectId);
+
+      if (deleted && label) publishProjectsChanged(api, label.projectId);
+
       return { deleted };
     },
     listLabels(input) {
       return { labels: store.tasks.listLabels(input.projectId) };
     },
     async createComment(input) {
-      const comment = await createComment(bb, store, {
+      const comment = await createComment(api, store, {
         taskId: input.taskId,
         kind: "user",
         authorName: "You",
@@ -875,18 +983,21 @@ export function registerHandlers(
         notify: input.notify,
         awaitDelivery: false,
       });
+
       return { comment };
     },
     async listComments(input) {
       const comments = store.tasks.listComments(input.taskId);
-      const threadInfo = await resolveAgentThreadInfo(bb, comments);
-      const providerBadges = await resolveProviderBadges(bb, threadInfo);
+      const threadInfo = await resolveAgentThreadInfo(api, comments);
+      const providerBadges = await resolveProviderBadges(api, threadInfo);
+
       return {
         comments: comments.map((comment) => {
           const info =
             comment.kind === "agent" && comment.threadId !== null
               ? threadInfo.get(comment.threadId)
               : undefined;
+
           return {
             ...comment,
             threadTitle: info?.title ?? null,
@@ -913,6 +1024,7 @@ export function registerHandlers(
             : store.tasks.listAttachmentsForTaskComments(
                 input.commentsOfTaskId,
               );
+
       return {
         attachments: attachments.map(attachmentMetadata),
       };
@@ -920,13 +1032,14 @@ export function registerHandlers(
     async deleteAttachment(input) {
       try {
         const attachment = await deleteAttachmentById(
-          bb,
+          api,
           store.tasks,
           input.attachmentId,
           {
             removeDescriptionReferences: input.removeDescriptionReferences,
           },
         );
+
         return attachment
           ? {
               ok: true,
@@ -944,6 +1057,7 @@ export function registerHandlers(
             },
           };
         }
+
         throw error;
       }
     },
@@ -951,34 +1065,41 @@ export function registerHandlers(
       return { taskThreads: store.tasks.listTaskThreads(input.taskId) };
     },
     async listTaskPullRequests(input) {
-      return listTaskPullRequests(bb, store, input.taskId);
+      return listTaskPullRequests(api, store, input.taskId);
     },
     createPreset(input) {
       const preset = store.tasks.createPreset({ ...input, builtin: false });
-      publishProjectsChanged(bb, null);
+      publishProjectsChanged(api, null);
+
       return { preset };
     },
     updatePreset(input) {
       const { presetId, ...changes } = input;
+
       const preset = store.tasks.updatePreset(
         presetId,
         changes.environmentKind === "project-default"
           ? { ...changes, baseBranch: null, machineId: null }
           : changes,
       );
-      publishProjectsChanged(bb, null);
+
+      publishProjectsChanged(api, null);
+
       return { preset };
     },
     deletePreset(input) {
       const deleted = store.tasks.deletePreset(input.presetId);
-      if (deleted) publishProjectsChanged(bb, null);
+
+      if (deleted) publishProjectsChanged(api, null);
+
       return { deleted };
     },
     listPresets() {
       return { presets: store.tasks.listPresets() };
     },
     async listMachines() {
-      const machines = await bb.sdk.hosts.list();
+      const machines = await api.sdk.hosts.list();
+
       return {
         machines: machines.map((machine) => ({
           id: machine.id,
@@ -989,28 +1110,32 @@ export function registerHandlers(
     async searchThreads(input) {
       const query = input.query.trim();
       const limit = Math.min(input.limit ?? MAX_THREAD_SEARCH_RESULTS, 10);
+
       const candidates =
         query.length >= 2
-          ? await bb.sdk.threads.search({
+          ? await api.sdk.threads.search({
               query,
               limitPerGroup: String(MAX_THREAD_SEARCH_RESULTS),
             })
           : null;
+
       const threads = candidates
         ? [...candidates.active.results, ...candidates.archived.results].map(
             (result) => result.thread,
           )
         : (
-            await bb.sdk.threads.list({
+            await api.sdk.threads.list({
               limit: MAX_THREAD_SEARCH_RESULTS,
             })
           ).filter((thread) => {
             if (query.length === 0) return true;
             const title = thread.title ?? thread.titleFallback ?? "";
+
             return title
               .toLocaleLowerCase()
               .includes(query.toLocaleLowerCase());
           });
+
       return {
         threads: threads
           .sort((left, right) => right.updatedAt - left.updatedAt)
@@ -1022,10 +1147,11 @@ export function registerHandlers(
           })),
       };
     },
-    async listBbProjects() {
-      const projects = await bb.sdk.projects.list({ includePersonal: true });
+    async listAppProjects() {
+      const projects = await api.sdk.projects.list({ includePersonal: true });
+
       return {
-        bbProjects: projects.map((project) => ({
+        appProjects: projects.map((project) => ({
           id: project.id,
           name: project.name,
         })),
@@ -1040,6 +1166,6 @@ export function registerHandlers(
   };
 }
 
-export function registerTasksApi(bb: BbPluginApi, store: TasksApiStore): void {
-  bb.rpc.register(tasksRpcContract, registerHandlers(bb, store));
+export function registerTasksApi(api: PluginApi, store: TasksApiStore): void {
+  api.rpc.register(tasksRpcContract, registerHandlers(api, store));
 }

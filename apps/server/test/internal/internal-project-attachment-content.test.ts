@@ -16,17 +16,21 @@ describe("internal project attachment content", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-attachment-content",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       const attachmentPath = "network-tab.har";
       await mkdir(join(harness.config.dataDir, "attachments", project.id), {
         recursive: true,
@@ -56,16 +60,20 @@ describe("internal project attachment content", () => {
       const hostA = seedHostSession(harness.deps, {
         id: "host-attachment-content-a",
       });
+
       const hostB = seedHostSession(harness.deps, {
         id: "host-attachment-content-b",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: hostA.host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: hostA.host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -87,13 +95,16 @@ describe("internal project attachment content", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-attachment-content-project-mismatch",
       });
+
       const { project: threadProject } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: threadProject.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: threadProject.id,
         environmentId: environment.id,

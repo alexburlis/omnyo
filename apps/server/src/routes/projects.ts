@@ -8,6 +8,10 @@ import {
 } from "../services/machines/environment-storage.js";
 import { getGateAuthKind } from "../request-context.js";
 import {
+  APP_SURFACE_HEADER_NAME,
+  parseRequestAppSurface,
+} from "@omnyo/config/app-surface";
+import {
   countProjectSources,
   findOrCreateProjectByLocalPathSource,
   getPersonalProject,
@@ -17,8 +21,10 @@ import {
   getProjectSourceByHost,
   getProjectSourceForProject,
   listProjectExecutionDefaultsByProjectIds,
+  listActiveProjects,
   listPublicProjects,
   listProjectSourcesByProjectIds,
+  listThreadGroups,
   listThreadSections,
   listThreadsWithPendingInteractionStateForProjects,
   reorderProject,
@@ -26,7 +32,7 @@ import {
   updateProjectSource,
   setProjectGitRemoteUrlIfMissing,
   type ReorderProjectResult,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   projectListIncludeOptionSchema,
   publicApiRoutes,
@@ -37,14 +43,18 @@ import {
   type ProjectResponse,
   type ProjectWithThreadsResponse,
   type PublicApiSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { AppDeps } from "../types.js";
 import { COMMAND_TIMEOUT_MS } from "../constants.js";
 import { ApiError } from "../errors.js";
+import { readMultipartFormData } from "./multipart-form-data.js";
 import {
   copyProjectAttachments,
-  readAttachment,
+  readAttachmentMetadata,
+  readAttachmentBytes,
+  retainProjectAttachments,
   storeAttachment,
 } from "../services/projects/attachments.js";
 import {
@@ -53,7 +63,11 @@ import {
   requirePublicProject,
   requirePublicStandardProject,
 } from "../services/lib/entity-lookup.js";
-import { isWindowsHostPath, PROMPT_HISTORY_ENTRY_LIMIT } from "@bb/domain";
+import {
+  isWindowsHostPath,
+  PROMPT_HISTORY_ENTRY_LIMIT,
+  PROMPT_ATTACHMENT_MAX_BYTES,
+} from "@omnyo/domain";
 import { toThreadListEntryResponses } from "../services/threads/thread-runtime-display.js";
 import { callHostRetryableOnlineRpc } from "../services/hosts/online-rpc.js";
 import {
@@ -69,11 +83,8 @@ import {
   writeProjectSkill,
 } from "../services/skills/skill-listing.js";
 import { requestMatchesEntityTag } from "../services/hosts/daemon-file-response.js";
+import { prepareAttachmentThumbnail } from "../services/lib/lossless-thumbnails.js";
 import { parseBoundedPositiveOptionalInteger } from "../services/lib/validation.js";
-import {
-  buildCommandListResponse,
-  providerHasCommandSurface,
-} from "../services/threads/provider-command-typeahead.js";
 import {
   beginProjectDeletion,
   requestProjectDeletionAdvance,
@@ -90,16 +101,6 @@ import {
   parseBranchListLimit,
 } from "./branch-list-query.js";
 import { parseFileListLimit } from "./file-list-query.js";
-import { resolveSkillCatalog } from "../services/skills/skill-catalog.js";
-import {
-  readWorkspaceAgentContext,
-  type WorkspaceAgentContext,
-} from "../services/threads/workspace-agent-context.js";
-import { resolveSharedSkills } from "../services/skills/shared-skills.js";
-import {
-  providerHasNativeRootSurface,
-  scanProviderNativeRoots,
-} from "../services/providers/native-roots.js";
 import { assertUsableHostId } from "../services/hosts/primary-host.js";
 import {
   resolveProjectCommandWorkspace,
@@ -107,6 +108,7 @@ import {
 } from "../services/projects/project-workspace.js";
 
 type ProjectResponseProjectFields = Omit<ProjectResponse, "sources">;
+
 const ATTACHMENT_CONTENT_CACHE_CONTROL = "private, immutable, max-age=31536000";
 
 function toProjectResponseProjectFields(
@@ -117,6 +119,7 @@ function toProjectResponseProjectFields(
     kind: project.kind,
     name: project.name,
     gitRemoteUrl: project.gitRemoteUrl,
+    customIcon: project.customIcon ?? null,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
   };
@@ -129,16 +132,20 @@ function buildProjectResponsesFromRows(
   if (projects.length === 0) {
     return [];
   }
+
   const sourcesByProjectId = new Map<string, ProjectResponse["sources"]>();
+
   for (const source of listProjectSourcesByProjectIds(
     deps.db,
     projects.map((project) => project.id),
   )) {
     const projectSources = sourcesByProjectId.get(source.projectId);
+
     if (projectSources) {
       projectSources.push(source);
       continue;
     }
+
     sourcesByProjectId.set(source.projectId, [source]);
   }
 
@@ -155,6 +162,7 @@ function buildProjectResponses(
   const projects = projectId
     ? [requirePublicStandardProject(deps.db, projectId)]
     : listPublicProjects(deps.db);
+
   return buildProjectResponsesFromRows(deps, projects);
 }
 
@@ -166,11 +174,12 @@ function listDiscoverableProjects(
   deps: AppDeps,
   options: ProjectListOptions,
 ): ProjectResponseProjectFields[] {
-  const projects = listPublicProjects(deps.db);
   if (!options.includePersonal) {
-    return projects;
+    return listPublicProjects(deps.db);
   }
+
   const personalProject = getPersonalProject(deps.db);
+
   if (!personalProject) {
     throw new ApiError(
       500,
@@ -178,7 +187,8 @@ function listDiscoverableProjects(
       "Personal project is not initialized",
     );
   }
-  return [personalProject, ...projects];
+
+  return listActiveProjects(deps.db);
 }
 
 function toProjectOrderResponse(
@@ -202,12 +212,15 @@ function parseProjectListIncludes(
   query: ProjectListQuery,
 ): Set<ProjectListIncludeOption> {
   const includes = new Set<ProjectListIncludeOption>();
+
   if (!query.include) {
     return includes;
   }
+
   for (const value of query.include.split(",")) {
     includes.add(projectListIncludeOptionSchema.parse(value));
   }
+
   return includes;
 }
 
@@ -227,25 +240,32 @@ function buildProjectsWithThreadsResponseFromRows(
 ): ProjectWithThreadsResponse[] {
   const projects = buildProjectResponsesFromRows(deps, projectRows);
   const projectIds = projects.map((project) => project.id);
+
   const threadRows = listThreadsWithPendingInteractionStateForProjects(
     deps.db,
-    { archived: false, projectIds },
+    { archived: false, shelved: false, projectIds },
   );
+
   const threadResponses = toThreadListEntryResponses(deps, {
     threads: threadRows,
   });
+
   const threadsByProjectId = new Map<
     string,
     ProjectWithThreadsResponse["threads"]
   >();
+
   for (const thread of threadResponses) {
     const projectThreads = threadsByProjectId.get(thread.projectId);
+
     if (projectThreads) {
       projectThreads.push(thread);
       continue;
     }
+
     threadsByProjectId.set(thread.projectId, [thread]);
   }
+
   const defaultsByProjectId = listProjectExecutionDefaultsByProjectIds(
     deps.db,
     { projectIds },
@@ -260,6 +280,7 @@ function buildProjectsWithThreadsResponseFromRows(
 
 function buildSidebarBootstrapResponse(deps: AppDeps) {
   const personalProject = getPersonalProject(deps.db);
+
   if (!personalProject) {
     throw new ApiError(
       500,
@@ -267,10 +288,13 @@ function buildSidebarBootstrapResponse(deps: AppDeps) {
       "Personal project is not initialized",
     );
   }
-  const personalProjectResponse = buildProjectsWithThreadsResponseFromRows(
-    deps,
-    [personalProject],
-  )[0];
+
+  const [personalProjectResponse, ...projects] =
+    buildProjectsWithThreadsResponseFromRows(deps, [
+      personalProject,
+      ...listPublicProjects(deps.db),
+    ]);
+
   if (!personalProjectResponse) {
     throw new ApiError(
       500,
@@ -278,12 +302,12 @@ function buildSidebarBootstrapResponse(deps: AppDeps) {
       "Personal project response was not built",
     );
   }
+
   return {
     sections: listThreadSections(deps.db),
-    projects: buildProjectsWithThreadsResponseFromRows(
-      deps,
-      listPublicProjects(deps.db),
-    ),
+    groups: listThreadGroups(deps.db),
+    orderedProjectIds: listActiveProjects(deps.db).map((project) => project.id),
+    projects,
     personalProject: personalProjectResponse,
   };
 }
@@ -298,9 +322,11 @@ function requireProjectSource(
   args: RequireProjectSourceArgs,
 ) {
   const source = getProjectSourceForProject(deps.db, args);
+
   if (!source) {
     throw new ApiError(404, "invalid_request", "Project source not found");
   }
+
   return source;
 }
 
@@ -309,10 +335,13 @@ function assertPathMatchesHostPlatform(
   args: { hostId: string; path: string },
 ): void {
   const platform = deps.hub.getDaemonPlatformForHost(args.hostId);
+
   if (platform === null || platform === "unknown") {
     return;
   }
+
   const isWindowsPath = isWindowsHostPath(args.path);
+
   if (platform === "win32" && !isWindowsPath) {
     throw new ApiError(
       400,
@@ -320,6 +349,7 @@ function assertPathMatchesHostPlatform(
       "This machine uses Windows paths. Use an absolute path like C:\\Users\\me\\repo.",
     );
   }
+
   if (platform !== "win32" && isWindowsPath) {
     throw new ApiError(
       400,
@@ -339,12 +369,14 @@ async function inspectProjectGitRemoteBestEffort(
       timeoutMs: COMMAND_TIMEOUT_MS,
       command: { type: "project.inspect", path: args.path },
     });
+
     return inspection.gitRemoteUrl;
   } catch (error) {
     deps.logger.warn(
       { err: error, hostId: args.hostId, path: args.path },
       "Unable to inspect project source; continuing without a Git remote anchor",
     );
+
     return null;
   }
 }
@@ -353,6 +385,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
   const { get, post, put, patch, del } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
+
   const routes = publicApiRoutes.projects;
   del(routes.deleteMachineEnvironmentVariable, async (context, payload) => {
     if (getGateAuthKind(context) === "machine")
@@ -364,6 +397,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     const project = requirePublicProject(deps.db, context.req.param("id"));
     await deleteMachineEnvironmentVariable(deps.db, payload.name, project.id);
     deps.hub.notifySystem(["config-changed"]);
+
     return context.json(
       await projectMachineEnvironmentView(deps.db, project.id),
     );
@@ -379,11 +413,12 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     const project = requirePublicProject(deps.db, context.req.param("id"));
     await setMachineEnvironmentVariable(
       deps.db,
-      deps.config.dataDir,
+      deps.vault,
       payload,
       project.id,
     );
     deps.hub.notifySystem(["config-changed"]);
+
     return context.json(
       await projectMachineEnvironmentView(deps.db, project.id),
     );
@@ -397,13 +432,9 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         "Machine credentials cannot change project environment settings",
       );
     const project = requirePublicProject(deps.db, context.req.param("id"));
-    await replaceMachineEnvironment(
-      deps.db,
-      deps.config.dataDir,
-      payload,
-      project.id,
-    );
+    await replaceMachineEnvironment(deps.db, deps.vault, payload, project.id);
     deps.hub.notifySystem(["config-changed"]);
+
     return context.json(
       await projectMachineEnvironmentView(deps.db, project.id),
     );
@@ -411,6 +442,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
 
   get(routes.machineEnvironment, async (context) => {
     const project = requirePublicProject(deps.db, context.req.param("id"));
+
     return context.json(
       await projectMachineEnvironmentView(deps.db, project.id),
     );
@@ -418,12 +450,15 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
 
   get(routes.list, (context, query) => {
     const includes = parseProjectListIncludes(query);
+
     const options: ProjectListOptions = {
       includePersonal: query.includePersonal === "true",
     };
+
     if (includes.has("threads")) {
       return context.json(buildProjectsWithThreadsResponse(deps, options));
     }
+
     return context.json(
       buildProjectResponsesFromRows(
         deps,
@@ -438,19 +473,24 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
 
   post(routes.create, async (context, payload) => {
     const { source } = payload;
+
     if (source.type === "local_path") {
       requireNonDestroyedHostWithStatus(deps, source.hostId);
       assertUsableHostId(deps, { hostId: source.hostId });
       assertPathMatchesHostPlatform(deps, source);
     }
+
     const existingProject = getPublicProjectByLocalPathSource(deps.db, source);
+
     if (existingProject) {
       return context.json(
         buildProjectResponses(deps, existingProject.id)[0],
         201,
       );
     }
+
     const gitRemoteUrl = await inspectProjectGitRemoteBestEffort(deps, source);
+
     const { project } = findOrCreateProjectByLocalPathSource(
       deps.db,
       deps.hub,
@@ -459,6 +499,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         source,
       },
     );
+
     if (gitRemoteUrl !== null) {
       setProjectGitRemoteUrlIfMissing(
         deps.db,
@@ -467,6 +508,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         gitRemoteUrl,
       );
     }
+
     return context.json(buildProjectResponses(deps, project.id)[0], 201);
   });
 
@@ -481,12 +523,14 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
   get(routes.defaultExecutionOptions, (context) => {
     const projectId = context.req.param("id");
     requirePublicProject(deps.db, projectId);
+
     return context.json(getProjectExecutionDefaults(deps.db, { projectId }));
   });
 
   get(routes.promptHistory, (context, query) => {
     const projectId = context.req.param("id");
     requirePublicProject(deps.db, projectId);
+
     const limit = parseBoundedPositiveOptionalInteger({
       defaultValue: PROMPT_HISTORY_ENTRY_LIMIT,
       max: PROMPT_HISTORY_ENTRY_LIMIT,
@@ -504,21 +548,25 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
 
   patch(routes.update, async (context, payload) => {
     requirePublicStandardProject(deps.db, context.req.param("id"));
+
     const project = updateProject(
       deps.db,
       deps.hub,
       context.req.param("id"),
       payload,
     );
+
     if (!project) {
       throw new ApiError(404, "project_not_found", "Project not found");
     }
+
     return context.json(buildProjectResponses(deps, project.id)[0]);
   });
 
   patch(routes.reorder, async (context, payload) => {
     const projectId = context.req.param("id");
-    requirePublicStandardProject(deps.db, projectId);
+    requirePublicProject(deps.db, projectId);
+
     return context.json(
       toProjectOrderResponse(
         deps,
@@ -536,6 +584,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
   del(routes.delete, async (context) => {
     const id = context.req.param("id");
     const project = requireProject(deps.db, id);
+
     if (project.kind === "personal") {
       throw new ApiError(
         409,
@@ -543,8 +592,10 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         "The personal project cannot be deleted",
       );
     }
+
     beginProjectDeletion(deps, { projectId: id });
     requestProjectDeletionAdvance(deps, { projectId: id });
+
     return context.json({ ok: true });
   });
 
@@ -553,17 +604,21 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     const project = requirePublicStandardProject(deps.db, projectId);
     requireNonDestroyedHostWithStatus(deps, payload.hostId);
     assertUsableHostId(deps, { hostId: payload.hostId });
+
     if (getProjectSourceByHost(deps.db, projectId, payload.hostId)) {
       throw projectSourceHostConflict();
     }
+
     const requestedPath =
       payload.type === "clone" ? payload.targetPath : payload.path;
+
     if (requestedPath !== undefined) {
       assertPathMatchesHostPlatform(deps, {
         hostId: payload.hostId,
         path: requestedPath,
       });
     }
+
     const source =
       payload.type === "clone"
         ? await cloneProjectSourceOnHost(deps, {
@@ -584,18 +639,22 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
               payload,
             ),
           });
+
     return context.json(source, 201);
   });
 
   patch(routes.updateSource, async (context, payload) => {
     const projectId = context.req.param("id");
     const project = requirePublicStandardProject(deps.db, projectId);
+
     const existing = requireProjectSource(deps, {
       projectId,
       sourceId: context.req.param("sourceId"),
     });
+
     if (existing.type === "local_path") {
       assertUsableHostId(deps, { hostId: existing.hostId });
+
       if (payload.path) {
         assertPathMatchesHostPlatform(deps, {
           hostId: existing.hostId,
@@ -603,6 +662,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         });
       }
     }
+
     if (payload.type !== existing.type) {
       throw new ApiError(
         400,
@@ -610,6 +670,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         `Source type mismatch: source is ${existing.type} but request specifies ${payload.type}`,
       );
     }
+
     const source = updateProjectSource(
       deps.db,
       deps.hub,
@@ -619,14 +680,17 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         ...(payload.isDefault ? { isDefault: payload.isDefault } : {}),
       },
     );
+
     if (!source) {
       throw new ApiError(404, "invalid_request", "Project source not found");
     }
+
     if (project.gitRemoteUrl === null && source.type === "local_path") {
       const gitRemoteUrl = await inspectProjectGitRemoteBestEffort(
         deps,
         source,
       );
+
       if (gitRemoteUrl !== null) {
         setProjectGitRemoteUrlIfMissing(
           deps.db,
@@ -636,20 +700,24 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         );
       }
     }
+
     return context.json(source);
   });
 
   del(routes.deleteSource, (context) => {
     const projectId = context.req.param("id");
     const project = requireProject(deps.db, projectId);
+
     if (project.kind !== "standard") {
       throw new ApiError(404, "project_not_found", "Project not found");
     }
+
     requireProjectSource(deps, {
       projectId,
       sourceId: context.req.param("sourceId"),
     });
     const sourceCount = countProjectSources(deps.db, { projectId });
+
     if (sourceCount <= 1 && project.deletedAt === null) {
       throw new ApiError(
         409,
@@ -657,14 +725,17 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         "Cannot delete the last source of a project",
       );
     }
+
     const deleted = deleteProjectSource(
       deps.db,
       deps.hub,
       context.req.param("sourceId"),
     );
+
     if (!deleted) {
       throw new ApiError(404, "invalid_request", "Project source not found");
     }
+
     return context.json({ ok: true });
   });
 
@@ -679,11 +750,13 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       environmentId: query.environmentId,
       hostId: query.hostId,
     });
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId: target.hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
       command: {
         type: "host.list_files",
+        followRootSymlink: false,
         path: target.path,
         ...(query.query ? { query: query.query } : {}),
         limit,
@@ -692,6 +765,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         excludeNames: [...DEFAULT_PATH_LIST_EXCLUDE_NAMES],
       },
     });
+
     return context.json({ files: result.files, truncated: result.truncated });
   });
 
@@ -706,10 +780,12 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       environmentId: query.environmentId,
       hostId: query.hostId,
     });
+
     const inclusion = parsePathKindInclusion({
       includeFiles: query.includeFiles,
       includeDirectories: query.includeDirectories,
     });
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId: target.hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -725,77 +801,38 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         excludeNames: [...DEFAULT_PATH_LIST_EXCLUDE_NAMES],
       },
     });
+
     return context.json({ paths: result.paths, truncated: result.truncated });
   });
 
-  get(routes.commands, async (context, query) => {
-    const projectId = context.req.param("id");
-    requirePublicProject(deps.db, projectId);
-
-    const registration = deps.providerRegistry.get(query.provider);
-    if (registration === null || !providerHasCommandSurface(registration)) {
-      return context.json({ commands: [] });
-    }
-
-    const workspace = resolveProjectCommandWorkspace(deps, {
-      projectId,
-      environmentId: query.environmentId,
-      hostId: query.hostId,
-    });
-    const listProviderCommands = async () => {
-      if (!providerHasNativeRootSurface(registration)) {
-        return { commands: [] };
-      }
-      return scanProviderNativeRoots(deps, {
-        type: "host.list_commands",
-        registration,
-        hostId: workspace.hostId,
-        cwd: workspace.cwd,
-      });
-    };
-    const readWorkspaceSkills = async (): Promise<
-      Pick<WorkspaceAgentContext, "projectSkillSources" | "sharedSkills">
-    > =>
-      workspace.cwd === null
-        ? {
-            projectSkillSources: [],
-            sharedSkills: await resolveSharedSkills(deps, {
-              hostId: workspace.hostId,
-              cwd: null,
-            }),
-          }
-        : readWorkspaceAgentContext(deps, {
-            hostId: workspace.hostId,
-            workspacePath: workspace.cwd,
-            includeAgentInstructions: false,
-          });
-    const [result, workspaceSkills] = await Promise.all([
-      listProviderCommands(),
-      readWorkspaceSkills(),
-    ]);
-    const skillCatalog = resolveSkillCatalog(deps, {
-      projectSkillSources: workspaceSkills.projectSkillSources,
-      sharedSkillSources: workspaceSkills.sharedSkills.runtimeSources,
-    });
-    return context.json(
-      buildCommandListResponse({
-        commands: result.commands,
-        includeBuiltinCompact: deps.providerRegistry.supportsManualCompaction(
-          query.provider,
-        ),
-        skillCatalog,
+  get(routes.commands, async (context, query) =>
+    context.json(
+      await deps.commandCatalogs.complete({
+        ...query,
+        projectId: context.req.param("id"),
       }),
-    );
-  });
+    ),
+  );
+  get(routes.commandCatalog, (context, query) =>
+    context.json(
+      deps.commandCatalogs.snapshot({
+        ...query,
+        projectId: context.req.param("id"),
+      }),
+    ),
+  );
 
   const requireProjectSkillWorkspace = (
     projectId: string,
     environmentId: string | null,
+    hostId?: string,
   ) => {
     requirePublicProject(deps.db, projectId);
+
     return resolveProjectCommandWorkspace(deps, {
       projectId,
       environmentId: environmentId ?? undefined,
+      hostId,
     });
   };
 
@@ -803,8 +840,11 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     const workspace = requireProjectSkillWorkspace(
       context.req.param("id"),
       query.environmentId,
+      query.hostId,
     );
+
     const skills = await listProjectSkills(deps, { workspace });
+
     return context.json({ skills });
   });
 
@@ -813,10 +853,14 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       context.req.param("id"),
       payload.environmentId,
     );
+
     const deletedPath = await deleteProjectSkill(deps, {
       skillId: payload.skillId,
       workspace,
     });
+
+    deps.commandCatalogs.invalidateProject(context.req.param("id"));
+
     return context.json({ deletedPath });
   });
 
@@ -825,11 +869,13 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       context.req.param("id"),
       query.environmentId,
     );
+
     const content = await readProjectSkill(deps, {
       skillId: query.skillId,
       path: query.path,
       workspace,
     });
+
     return context.json(content);
   });
 
@@ -838,6 +884,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       context.req.param("id"),
       query.environmentId,
     );
+
     return context.json(
       await listProjectSkillFiles(deps, {
         skillId: query.skillId,
@@ -851,12 +898,16 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       context.req.param("id"),
       payload.environmentId,
     );
+
     const result = await writeProjectSkill(deps, {
       skillId: payload.skillId,
       content: payload.content,
       revision: payload.revision,
       workspace,
     });
+
+    deps.commandCatalogs.invalidateProject(context.req.param("id"));
+
     return context.json(result);
   });
 
@@ -871,8 +922,10 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       projectId,
       hostId: query.hostId,
     });
+
     const branchQuery = normalizeBranchQuery(query.query);
     const selectedBranch = normalizeBranchQuery(query.selectedBranch);
+
     const inspectionPromise = callHostRetryableOnlineRpc(deps, {
       hostId: source.hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -882,6 +935,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         remoteRefresh,
       },
     });
+
     const readBranchOptions = () =>
       callHostRetryableOnlineRpc(deps, {
         hostId: source.hostId,
@@ -895,15 +949,19 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
           remoteRefresh: "none",
         },
       });
+
     const branchOptionsPromise =
       remoteRefresh === "background"
         ? readBranchOptions()
         : inspectionPromise.then(readBranchOptions);
+
     const [inspection, branchOptions] = await Promise.all([
       inspectionPromise,
       branchOptionsPromise,
     ]);
+
     const result = { ...inspection, ...branchOptions };
+
     return {
       ...result,
       defaultWorktreeBaseBranch: resolveDefaultWorktreeBaseBranch(result),
@@ -921,13 +979,28 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     ),
   );
 
+  app.post(
+    routes.uploadAttachment.path,
+    bodyLimit({
+      maxSize: PROMPT_ATTACHMENT_MAX_BYTES + 2 * 1024 * 1024,
+      onError: () => {
+        throw new ApiError(
+          413,
+          "invalid_request",
+          "Attachment upload exceeds the 35MB attachment limit",
+        );
+      },
+    }),
+  );
   post(routes.uploadAttachment, async (context) => {
     requirePublicProject(deps.db, context.req.param("id"));
-    const formData = await context.req.formData();
+    const formData = await readMultipartFormData(context.req);
     const fields = [...formData.keys()];
+
     if (fields.length === 0) {
       throw new ApiError(400, "invalid_request", "Attachment file is required");
     }
+
     if (fields.length !== 1 || fields[0] !== "file") {
       throw new ApiError(
         400,
@@ -935,10 +1008,13 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         'Attachment upload accepts exactly one multipart field named "file"',
       );
     }
+
     const file = formData.get("file");
+
     if (!(file instanceof File)) {
       throw new ApiError(400, "invalid_request", "Attachment file is required");
     }
+
     if (file.name.trim().length === 0) {
       throw new ApiError(
         400,
@@ -946,6 +1022,30 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
         "Attachment filename is required",
       );
     }
+
+    if (file.size === 0) {
+      deps.logger.warn(
+        {
+          projectId: context.req.param("id"),
+          mimeType: file.type || null,
+          extension:
+            /\.([a-z0-9]{1,16})$/iu.exec(file.name)?.[1]?.toLowerCase() ?? null,
+          appSurface:
+            parseRequestAppSurface(
+              context.req.header(APP_SURFACE_HEADER_NAME),
+            ) ?? "api",
+          serverVersion: deps.config.appVersion,
+        },
+        "Rejected empty attachment upload",
+      );
+
+      throw new ApiError(
+        400,
+        "attachment_empty",
+        "The attachment arrived empty. Copy it again and paste.",
+      );
+    }
+
     return context.json(
       await storeAttachment(
         deps.db,
@@ -968,21 +1068,48 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
       targetProjectId,
       payload.paths,
     );
+
+    return context.json({ ok: true as const });
+  });
+
+  post(routes.retainAttachments, async (context, payload) => {
+    await retainProjectAttachments(
+      deps.db,
+      deps.config.dataDir,
+      context.req.param("id"),
+      payload.threadId,
+      payload.paths,
+    );
+
     return context.json({ ok: true as const });
   });
 
   get(routes.attachmentContent, async (context, query) => {
     requirePublicProject(deps.db, context.req.param("id"));
-    const attachment = await readAttachment(
+
+    const metadata = await readAttachmentMetadata(
       deps.config.dataDir,
       context.req.param("id"),
       query.path,
     );
+
+    const thumbnail =
+      query.thumbnailWidth === undefined
+        ? null
+        : await prepareAttachmentThumbnail(
+            metadata,
+            Number(query.thumbnailWidth),
+            deps.logger,
+          );
+
+    const attachment = thumbnail ?? metadata;
+
     const headers = new Headers({
       "cache-control": ATTACHMENT_CONTENT_CACHE_CONTROL,
       "content-type": attachment.mimeType ?? "application/octet-stream",
       etag: attachment.etag,
     });
+
     if (
       requestMatchesEntityTag(
         context.req.header("if-none-match"),
@@ -991,8 +1118,11 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
     ) {
       return new Response(null, { status: 304, headers });
     }
-    headers.set("content-length", String(attachment.content.byteLength));
-    return new Response(new Uint8Array(attachment.content), {
+
+    const content = thumbnail?.content ?? (await readAttachmentBytes(metadata));
+    headers.set("content-length", String(content.byteLength));
+
+    return new Response(new Uint8Array(content), {
       status: 200,
       headers,
     });

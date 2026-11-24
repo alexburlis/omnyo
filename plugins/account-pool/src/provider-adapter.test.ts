@@ -54,10 +54,13 @@ describe("OAuth refresh transport", () => {
     "preserves HTTP rejection classification with a %s JSON error body",
     async (body) => {
       const controller = new AbortController();
+
       const timeout = vi
         .spyOn(AbortSignal, "timeout")
         .mockReturnValue(controller.signal);
+
       const cancel = vi.fn(() => new Promise<void>(() => {}));
+
       try {
         const stream = new ReadableStream<Uint8Array>({
           start(streamController) {
@@ -79,6 +82,7 @@ describe("OAuth refresh transport", () => {
           },
           cancel,
         });
+
         const refresh = fetchOAuthRefresh(
           {
             fetch: async () =>
@@ -91,16 +95,19 @@ describe("OAuth refresh transport", () => {
           "https://auth.example/token",
           { refresh_token: "refresh-secret" },
         );
+
         if (body === "pending") {
           await new Promise<void>((resolve) => setImmediate(resolve));
           controller.abort(new DOMException("Timed out", "TimeoutError"));
         }
+
         await expect(refresh).rejects.toMatchObject({
           message: "OAuth refresh failed with HTTP 400.",
         });
         await expect(refresh).rejects.not.toBeInstanceOf(
           TransientOAuthRefreshError,
         );
+
         if (body === "pending") expect(cancel).toHaveBeenCalledOnce();
       } finally {
         timeout.mockRestore();
@@ -131,9 +138,11 @@ describe("OAuth refresh transport", () => {
     "bounds a %s transport that ignores abort",
     async (stage) => {
       const controller = new AbortController();
+
       const timeout = vi
         .spyOn(AbortSignal, "timeout")
         .mockReturnValue(controller.signal);
+
       try {
         const refresh = fetchOAuthRefresh(
           {
@@ -146,6 +155,7 @@ describe("OAuth refresh transport", () => {
           "https://auth.example/token",
           { refresh_token: "refresh" },
         );
+
         await new Promise<void>((resolve) => setImmediate(resolve));
         controller.abort(
           new DOMException("OAuth request timed out", "TimeoutError"),
@@ -172,18 +182,22 @@ describe("OAuth refresh transport", () => {
     "cancels HTTP $status responses before classifying them",
     async ({ status, transient }) => {
       const cancel = vi.fn();
+
       const response = new Response(new ReadableStream({ cancel }), {
         status,
         headers: { "retry-after": "120" },
       });
+
       const refresh = fetchOAuthRefresh(
         { fetch: async () => response, now: () => 1_800_000_000_000 },
         "https://auth.example/token",
         { refresh_token: "refresh" },
       );
+
       await expect(refresh).rejects.toThrow(
         `OAuth refresh failed with HTTP ${status}.`,
       );
+
       if (transient) {
         await expect(refresh).rejects.toBeInstanceOf(
           TransientOAuthRefreshError,
@@ -194,6 +208,7 @@ describe("OAuth refresh transport", () => {
           TransientOAuthRefreshError,
         );
       }
+
       expect(cancel).toHaveBeenCalledTimes(1);
     },
   );
@@ -205,6 +220,7 @@ describe("OAuth refresh transport", () => {
         {
           fetch: async () => {
             if (stage === "request") throw new TypeError("fetch failed");
+
             return new Response(
               new ReadableStream({
                 start(controller) {
@@ -218,6 +234,7 @@ describe("OAuth refresh transport", () => {
         "https://auth.example/token",
         { refresh_token: "refresh" },
       );
+
       await expect(refresh).rejects.toBeInstanceOf(TransientOAuthRefreshError);
     },
   );
@@ -236,16 +253,20 @@ describe("OAuth refresh transport", () => {
 
   it("times out a pending OAuth request independently of its callers", async () => {
     const controller = new AbortController();
+
     const timeout = vi
       .spyOn(AbortSignal, "timeout")
       .mockReturnValue(controller.signal);
+
     try {
       const refresh = fetchOAuthRefresh(
         {
           fetch: async (_input, init) => {
             const signal = init?.signal;
+
             if (signal === null || signal === undefined)
               return Response.json({});
+
             return new Promise<Response>((_resolve, reject) => {
               signal.addEventListener("abort", () => reject(signal.reason), {
                 once: true,
@@ -257,6 +278,7 @@ describe("OAuth refresh transport", () => {
         "https://auth.example/token",
         { refresh_token: "refresh" },
       );
+
       controller.abort(
         new DOMException("OAuth request timed out", "TimeoutError"),
       );

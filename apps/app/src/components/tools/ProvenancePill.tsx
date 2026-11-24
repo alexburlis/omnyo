@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
-import { Pill } from "@bb/shared-ui/pill";
+import { Pill } from "@omnyo/shared-ui/pill";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
+} from "@omnyo/shared-ui/tooltip";
 
 export function ProvenancePill({
   label,
@@ -31,7 +31,9 @@ export function ProvenancePill({
       </Pill>
     </span>
   );
+
   if (tooltip === undefined) return badge;
+
   return (
     <TooltipProvider delayDuration={250}>
       <Tooltip>

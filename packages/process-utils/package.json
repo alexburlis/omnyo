@@ -1,5 +1,6 @@
 {
-  "name": "@bb/process-utils",
+  "name": "@omnyo/process-utils",
+  "private": true,
   "version": "0.0.1",
   "type": "module",
   "exports": {
@@ -7,6 +8,26 @@
       "source": "./src/index.ts",
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./error-reporting": {
+      "source": "./src/error-reporting.ts",
+      "types": "./src/error-reporting.ts",
+      "default": "./src/error-reporting.ts"
+    },
+    "./error-reporting-privacy": {
+      "source": "./src/error-reporting-privacy.ts",
+      "types": "./src/error-reporting-privacy.ts",
+      "default": "./src/error-reporting-privacy.ts"
+    },
+    "./web-error-reporting-privacy": {
+      "source": "./src/web-error-reporting-privacy.ts",
+      "types": "./src/web-error-reporting-privacy.ts",
+      "default": "./src/web-error-reporting-privacy.ts"
+    },
+    "./split-asset-attempt": {
+      "source": "./src/split-asset-attempt.ts",
+      "types": "./src/split-asset-attempt.ts",
+      "default": "./src/split-asset-attempt.ts"
     }
   },
   "types": "./src/index.ts",
@@ -17,16 +38,18 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
+    "@omnyo/domain": "workspace:*",
+    "@sentry/core": "11.10.0",
     "cross-spawn": "^7.0.6",
     "execa": "9.6.1",
     "which-command": "0.1.0"
   },
   "devDependencies": {
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@types/cross-spawn": "^6.0.6",
     "@types/node": "^22.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^4.1.1"
+    "vitest": "4.1.11"
   }
 }

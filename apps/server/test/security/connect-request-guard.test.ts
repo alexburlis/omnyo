@@ -6,27 +6,32 @@ import {
   encodeFrame,
   type Frame,
   type HeaderPair,
-} from "@bb/tunnel-contract";
-import { TunnelSession } from "@bb/tunnel-client";
+} from "@omnyo/tunnel-contract";
+import { TunnelSession } from "@omnyo/tunnel-client";
 import {
   startTestServer,
   type RunningTestServer,
 } from "../helpers/test-app.js";
 
 let server: RunningTestServer | undefined;
+
 let gateway: WebSocketServer | undefined;
+
 let client: WebSocket | undefined;
+
 let session: TunnelSession | undefined;
 
 afterEach(async () => {
   session?.dispose();
   client?.terminate();
+
   if (gateway !== undefined) {
     for (const socket of gateway.clients) socket.terminate();
     await new Promise<void>((resolve, reject) => {
       gateway!.close((error) => (error ? reject(error) : resolve()));
     });
   }
+
   await server?.close();
 });
 
@@ -35,11 +40,14 @@ it("carries Connect HTTP and WebSocket requests through the host guard", async (
   gateway = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(gateway, "listening");
   const address = gateway.address();
+
   if (address === null || typeof address === "string")
     throw new Error("Expected TCP listener");
+
   const connected = new Promise<WebSocket>((resolve) =>
     gateway!.once("connection", resolve),
   );
+
   client = new WebSocket(`ws://127.0.0.1:${address.port}`);
   await once(client, "open");
   const relay = await connected;
@@ -49,18 +57,20 @@ it("carries Connect HTTP and WebSocket requests through the host guard", async (
     log: { warn: () => {} },
     resolveOrigin: () => ({
       kind: "ok",
-      resolved: { origin: baseUrl, publicOrigin: "https://bee.getbb.app" },
+      resolved: { origin: baseUrl, publicOrigin: "https://bee.example.test" },
     }),
   });
   session.start();
   const frames: Frame[] = [];
   relay.on("message", (data: Buffer) => frames.push(decodeFrame(data)));
+
   const headers: HeaderPair[] = [
-    ["Host", "bee.getbb.app"],
-    ["Origin", "https://bee.getbb.app"],
-    ["X-Forwarded-Host", "bee.getbb.app"],
+    ["Host", "bee.example.test"],
+    ["Origin", "https://bee.example.test"],
+    ["X-Forwarded-Host", "bee.example.test"],
     ["X-Forwarded-Proto", "https"],
   ];
+
   relay.send(
     encodeFrame({
       type: "open-http",
@@ -84,7 +94,7 @@ it("carries Connect HTTP and WebSocket requests through the host guard", async (
       streamId: 2,
       method: "GET",
       path: "/api/v1/threads",
-      headers: [["Host", "bee.getbb.app"]],
+      headers: [["Host", "bee.example.test"]],
       hasBody: false,
     }),
   );
@@ -118,7 +128,7 @@ it("carries Connect HTTP and WebSocket requests through the host guard", async (
       method: "GET",
       path: "/api/v1/threads",
       headers: [
-        ["Host", "bee.getbb.app"],
+        ["Host", "bee.example.test"],
         ["Origin", "https://attacker.example"],
       ],
       hasBody: false,

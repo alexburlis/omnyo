@@ -14,6 +14,7 @@ interface BuiltProviderBridge {
 
 function isBuiltProviderBridge(value: unknown): value is BuiltProviderBridge {
   if (typeof value !== "object" || value === null) return false;
+
   return (
     Reflect.get(value, "experimental_apiVersion") === 1 &&
     typeof Reflect.get(value, "handleLine") === "function"
@@ -29,6 +30,7 @@ interface BuiltHostEntry {
 
 function isBuiltHostEntry(value: unknown): value is BuiltHostEntry {
   if (typeof value !== "object" || value === null) return false;
+
   return (
     Reflect.get(value, "experimental_apiVersion") === 1 &&
     typeof Reflect.get(value, "handlers") === "object"
@@ -50,6 +52,7 @@ describe("builtin host artifacts", () => {
     const root = await mkdtemp(join(repositoryRoot, ".builtin-host-test-"));
     tempDirs.push(root);
     const source = join(repositoryRoot, "plugins", "keep-awake");
+
     for (const fileName of [
       "package.json",
       "server.ts",
@@ -58,19 +61,25 @@ describe("builtin host artifacts", () => {
     ]) {
       await cp(join(source, fileName), join(root, fileName));
     }
+
     await symlink(
       join(source, "node_modules"),
       join(root, "node_modules"),
       "dir",
     );
+
     const toolchain = await resolvePluginBuildToolchain(
       join(repositoryRoot, "node_modules", ".unused-toolchain"),
     );
+
     const built = await buildPluginHost(root, "0.9.0-test", toolchain);
+
     const imported: unknown = await import(
       `${pathToFileURL(built.jsPath).href}?test=${Date.now()}`
     );
+
     const entry = Reflect.get(Object(imported), "default");
+
     if (!isBuiltHostEntry(entry)) {
       throw new Error("Keep Awake did not build a valid host entry");
     }
@@ -110,9 +119,11 @@ describe("builtin host artifacts", () => {
       const root = await mkdtemp(join(repositoryRoot, ".builtin-host-test-"));
       tempDirs.push(root);
       const source = join(repositoryRoot, "plugins", pluginDir);
+
       for (const fileName of ["package.json", "server.ts"]) {
         await cp(join(source, fileName), join(root, fileName));
       }
+
       await cp(join(source, "src"), join(root, "src"), { recursive: true });
       await cp(join(source, "icons"), join(root, "icons"), { recursive: true });
       await symlink(
@@ -120,17 +131,22 @@ describe("builtin host artifacts", () => {
         join(root, "node_modules"),
         "dir",
       );
+
       const toolchain = await resolvePluginBuildToolchain(
         join(repositoryRoot, "node_modules", ".unused-toolchain"),
       );
+
       const built = await buildPluginHost(root, "0.9.0-test", toolchain);
+
       const imported: unknown = await import(
         `${pathToFileURL(built.jsPath).href}?test=${Date.now()}`
       );
+
       const bridge = Reflect.get(
         Object(imported),
         "experimental_providerBridge",
       );
+
       expect(isBuiltProviderBridge(bridge)).toBe(true);
       const entry = Reflect.get(Object(imported), "default");
       const contract = Reflect.get(Object(entry), "contract");

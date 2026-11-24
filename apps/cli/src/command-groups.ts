@@ -26,6 +26,26 @@ function group<Module>(
 
 export const CORE_COMMAND_GROUPS: readonly CommandGroup[] = [
   group(
+    "question",
+    () => import("./commands/attention.js"),
+    (m) => (program, deps) => m.registerAttentionCommands(program, deps.getUrl),
+  ),
+  group(
+    "callback",
+    () => import("./commands/attention.js"),
+    (m) => (program, deps) => m.registerAttentionCommands(program, deps.getUrl),
+  ),
+  group(
+    "inbox",
+    () => import("./commands/inbox.js"),
+    (m) => (program, deps) => m.registerInboxCommands(program, deps.getUrl),
+  ),
+  group(
+    "wait",
+    () => import("./commands/wait.js"),
+    (m) => (program, deps) => m.registerWaitCommands(program, deps.getUrl),
+  ),
+  group(
     "browser",
     () => import("./commands/browser.js"),
     (m) => (program, deps) => m.registerBrowserCommands(program, deps.getUrl),
@@ -78,6 +98,11 @@ export const CORE_COMMAND_GROUPS: readonly CommandGroup[] = [
     (m) => (program, deps) => m.registerTerminalCommands(program, deps.getUrl),
   ),
   group(
+    "preview",
+    () => import("./commands/preview.js"),
+    (m) => (program, deps) => m.registerPreviewCommands(program, deps.getUrl),
+  ),
+  group(
     "thread",
     () => import("./commands/thread/index.js"),
     (m) => (program, deps) => m.registerThreadCommands(program, deps.getUrl),
@@ -121,9 +146,19 @@ export const CORE_COMMAND_GROUPS: readonly CommandGroup[] = [
     (m) => (program) => m.registerGuideCommand(program),
   ),
   group(
+    "explore",
+    () => import("./commands/explore.js"),
+    (m) => (program) => m.registerExploreCommand(program),
+  ),
+  group(
     "diagnostics",
     () => import("./commands/diagnostics.js"),
     (m) => (program) => m.registerDiagnosticsCommands(program),
+  ),
+  group(
+    "bug",
+    () => import("./commands/bug.js"),
+    (m) => (program, deps) => m.registerBugCommands(program, deps.getUrl),
   ),
   group(
     "voice",
@@ -137,6 +172,7 @@ export function selectCommandGroups(
 ): readonly CommandGroup[] {
   if (firstArg === "--version" || firstArg === "-V") return [];
   const match = CORE_COMMAND_GROUPS.find((entry) => entry.name === firstArg);
+
   return match === undefined ? CORE_COMMAND_GROUPS : [match];
 }
 
@@ -145,7 +181,10 @@ export function pluginProxyCandidate(
   knownCommandNames: ReadonlySet<string>,
 ): string | null {
   if (firstArg === undefined || firstArg.length === 0) return null;
+
   if (firstArg.startsWith("-")) return null;
+
   if (knownCommandNames.has(firstArg)) return null;
+
   return firstArg;
 }

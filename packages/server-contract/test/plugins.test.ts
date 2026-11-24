@@ -6,9 +6,29 @@ import {
   pluginCatalogSearchResultSchema,
   pluginCatalogStatusSchema,
   pluginSettingDescriptorSchema,
+  pluginSourceDetailSchema,
 } from "../src/index.js";
 
 describe("plugin contracts", () => {
+  it("carries only canonical plugin engine fields across the source API", () => {
+    const source = {
+      requested: "npm:omnyo-plugin-notes@^1",
+      resolved: "1.2.0",
+      engines: { omnyo: ">=1", omnyoPluginSdk: "^0.6" },
+      history: [],
+    };
+
+    expect(pluginSourceDetailSchema.parse(source).engines).toEqual(
+      source.engines,
+    );
+    expect(
+      pluginSourceDetailSchema.safeParse({
+        ...source,
+        engines: { bb: ">=1", bbPluginSdk: "^0.6" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts finite number setting descriptors", () => {
     expect(
       pluginSettingDescriptorSchema.parse({
@@ -51,6 +71,7 @@ describe("plugin contracts", () => {
       includedPluginCount: 8,
       optionalPluginCount: 5,
     };
+
     expect(pluginCatalogStatusSchema.parse(status)).toEqual(status);
     expect(
       pluginCatalogStatusSchema.parse({ ...status, lastError: null }),
@@ -91,6 +112,7 @@ describe("plugin contracts", () => {
       compatible: true,
       incompatibleReason: null,
     };
+
     expect(pluginCatalogSearchResultSchema.parse(required)).toMatchObject({
       screenshots: [],
       collections: [],

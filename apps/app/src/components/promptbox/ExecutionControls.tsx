@@ -1,21 +1,28 @@
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import type {
   PermissionMode,
+  ProviderInfo,
   ProviderOptionDescriptor,
   ReasoningLevel,
   ServiceTier,
-} from "@bb/domain";
+  SessionOptionSelections,
+} from "@omnyo/domain";
 import type {
   SystemExecutionOptionsModelLoadError,
+  SystemExecutionOptionsModelNotice,
   SystemProvidersQuery,
-} from "@bb/server-contract";
-import { formatModelLabel } from "@/hooks/useThreadCreationOptions";
+} from "@omnyo/server-contract";
+import type {
+  ModelPickerPresentation,
+  ModelPickerSelects,
+} from "@/components/pickers/ModelFavoritesBar";
 import {
   ModelReasoningPicker,
   type ModelReasoningPickerHandoff,
 } from "@/components/pickers/ModelReasoningPicker";
 import { type PickerOption } from "@/components/pickers/OptionPicker";
 import type { ModelPickerOption } from "@/components/pickers/model-picker-option";
+import type { ModelPickerSelection } from "@/components/pickers/model-picker-selection";
 import type { ProviderPickerOption } from "@/components/pickers/model-brand-prefix";
 import type {
   SessionOptionChoice,
@@ -29,6 +36,9 @@ interface ExecutionProviderConfig {
   selectedId?: string;
   onChange?: (value: string) => void;
   hasMultiple?: boolean;
+  sessionOptionSelectionsForProvider?: (
+    providerId: string,
+  ) => SessionOptionSelections;
 }
 
 interface ExecutionModelConfig {
@@ -39,6 +49,7 @@ interface ExecutionModelConfig {
   isLoading: boolean;
   loadFailed: boolean;
   loadError?: SystemExecutionOptionsModelLoadError | null;
+  notice?: SystemExecutionOptionsModelNotice | null;
   onChange: (value: string) => void;
 }
 
@@ -46,7 +57,6 @@ interface ExecutionServiceTierConfig {
   value?: ServiceTier;
   onChange: (value: ServiceTier | undefined) => void;
   supported: boolean;
-  supportByProvider?: Record<string, boolean>;
   options: readonly ProviderOptionDescriptor[];
 }
 
@@ -63,6 +73,16 @@ export interface ExecutionPermissionConfig {
   supported: boolean;
 }
 
+export interface ExecutionSelectionConfig {
+  onChange: (selection: ModelPickerSelection) => void;
+}
+
+export interface ExecutionCatalogConfig {
+  providers: readonly ProviderInfo[];
+  verified: boolean;
+  modelOptions: readonly ModelPickerOption[];
+}
+
 export interface ExecutionAgentOptionsConfig {
   sections: readonly SessionOptionMenuSection[];
   onChange: (optionId: string, value: SessionOptionChoice) => void;
@@ -70,27 +90,47 @@ export interface ExecutionAgentOptionsConfig {
 
 export interface ExecutionControlsProps {
   providerRouting?: SystemProvidersQuery;
+  catalog: ExecutionCatalogConfig;
   provider: ExecutionProviderConfig;
   model: ExecutionModelConfig;
   serviceTier?: ExecutionServiceTierConfig;
   agentOptions?: ExecutionAgentOptionsConfig;
   reasoning: ExecutionReasoningConfig;
+  selection: ExecutionSelectionConfig;
+  favoriteChips?: boolean;
   handoff?: ModelReasoningPickerHandoff;
   disabled?: boolean;
+  presentation?: ModelPickerPresentation;
+  selects?: ModelPickerSelects;
 }
 
 export const ExecutionControls = memo(function ExecutionControls({
+  catalog,
   provider,
   providerRouting,
   model,
   serviceTier,
   agentOptions,
   reasoning,
+  selection,
+  favoriteChips = false,
   handoff,
   disabled,
+  presentation = "footer",
+  selects,
 }: ExecutionControlsProps) {
   const handleServiceTierChange = serviceTier?.onChange ?? (() => {});
   const selectedProviderId = provider.selectedId ?? "";
+  const applySelection = selection.onChange;
+
+  const handleSelectionChange = useCallback(
+    (next: ModelPickerSelection): boolean => {
+      applySelection(next);
+
+      return true;
+    },
+    [applySelection],
+  );
 
   const canSwitchProviders = Boolean(
     provider.hasMultiple &&
@@ -98,6 +138,7 @@ export const ExecutionControls = memo(function ExecutionControls({
     provider.options &&
     provider.options.length > 1,
   );
+
   const showModelPicker =
     model.isLoading ||
     model.loadFailed ||
@@ -110,6 +151,7 @@ export const ExecutionControls = memo(function ExecutionControls({
     <>
       {showModelPicker ? (
         <ModelReasoningPicker
+          providers={catalog.providers}
           providerOptions={provider.options ?? []}
           providerRouting={providerRouting}
           selectedProviderId={selectedProviderId}
@@ -118,14 +160,17 @@ export const ExecutionControls = memo(function ExecutionControls({
           modelValue={model.active?.model ?? model.selected}
           modelOptions={model.options}
           moreModelOptions={model.moreOptions}
+          catalogModelOptions={catalog.modelOptions}
+          modelCatalogIsVerified={catalog.verified}
           modelIsLoading={model.isLoading}
           modelLoadFailed={model.loadFailed}
           modelLoadError={model.loadError}
+          modelNotice={model.notice}
           onModelChange={model.onChange}
-          formatModelLabel={formatModelLabel}
           reasoningValue={reasoning.value}
           reasoningOptions={reasoning.options}
           onReasoningChange={reasoning.onChange}
+          onSelectionChange={handleSelectionChange}
           serviceTierValue={serviceTier?.value}
           serviceTierOptions={
             serviceTier?.supported
@@ -133,12 +178,17 @@ export const ExecutionControls = memo(function ExecutionControls({
               : EMPTY_SERVICE_TIER_OPTIONS
           }
           onServiceTierChange={handleServiceTierChange}
-          serviceTierSupportByProvider={serviceTier?.supportByProvider}
+          sessionOptionSelectionsForProvider={
+            provider.sessionOptionSelectionsForProvider
+          }
           agentSections={agentOptions?.sections}
           onAgentOptionChange={agentOptions?.onChange}
           muted
+          showFavoriteChips={favoriteChips}
           disabled={disabled}
           handoff={handoff}
+          presentation={presentation}
+          selects={selects}
         />
       ) : null}
     </>

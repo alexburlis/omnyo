@@ -1,7 +1,9 @@
 import {
+  desktopBrowserCookieSyncSourceSchema,
   desktopBrowserImportSelectionSchema,
   desktopBrowserNavigationUrlSchema,
-} from "@bb/host-daemon-contract";
+  desktopRendererProfileDurationSchema,
+} from "@omnyo/host-daemon-contract";
 import { z } from "zod";
 
 const id = z.string().min(1).max(256);
@@ -9,6 +11,7 @@ const id = z.string().min(1).max(256);
 export const desktopBrowserHostRequestSchema = z
   .object({ hostId: id })
   .strict();
+
 export const desktopBrowserScopeSchema = desktopBrowserHostRequestSchema
   .extend({
     instanceId: id,
@@ -16,9 +19,11 @@ export const desktopBrowserScopeSchema = desktopBrowserHostRequestSchema
     threadId: id,
   })
   .strict();
+
 export const desktopBrowserTabRequestSchema = desktopBrowserScopeSchema
   .extend({ tabId: id })
   .strict();
+
 export const desktopBrowserCreateRequestSchema = desktopBrowserScopeSchema
   .extend({
     url: desktopBrowserNavigationUrlSchema
@@ -27,6 +32,7 @@ export const desktopBrowserCreateRequestSchema = desktopBrowserScopeSchema
     presentation: z.enum(["hidden", "reveal"]).default("hidden"),
   })
   .strict();
+
 export const desktopBrowserAcquireRequestSchema = desktopBrowserScopeSchema
   .extend({
     tabIds: z
@@ -38,33 +44,62 @@ export const desktopBrowserAcquireRequestSchema = desktopBrowserScopeSchema
     ttlMs: z.number().int().min(1000).max(1800000).default(300000),
   })
   .strict();
+
 export const desktopBrowserLeaseRequestSchema = desktopBrowserScopeSchema
   .extend({ leaseId: id })
   .strict();
+
 export const desktopBrowserInstanceRequestSchema =
   desktopBrowserHostRequestSchema
     .extend({ instanceId: id, generation: id })
     .strict();
+
+export const desktopRendererProfileRequestSchema =
+  desktopBrowserInstanceRequestSchema
+    .extend({ durationMs: desktopRendererProfileDurationSchema })
+    .strict();
+
+export type ExperimentalDesktopRendererProfileInput = z.input<
+  typeof desktopRendererProfileRequestSchema
+>;
+
+export type ExperimentalDesktopRendererProfileRequest = z.infer<
+  typeof desktopRendererProfileRequestSchema
+>;
+
+export type ExperimentalDesktopRendererProfile =
+  import("@omnyo/host-daemon-contract").DesktopRendererProfile;
+
 export const desktopBrowserImportCookiesRequestSchema =
   desktopBrowserInstanceRequestSchema
     .extend(desktopBrowserImportSelectionSchema.shape)
     .strict();
 
+export const desktopBrowserCookieSyncConfigureRequestSchema =
+  desktopBrowserInstanceRequestSchema
+    .extend({ source: desktopBrowserCookieSyncSourceSchema.nullable() })
+    .strict();
+
 export type ExperimentalDesktopBrowserHostRequest = z.infer<
   typeof desktopBrowserHostRequestSchema
 >;
+
 export type ExperimentalDesktopBrowserScope = z.infer<
   typeof desktopBrowserScopeSchema
 >;
+
 export type ExperimentalDesktopBrowserTabRequest = z.infer<
   typeof desktopBrowserTabRequestSchema
 >;
+
 export type ExperimentalDesktopBrowserCreateRequest = z.infer<
   typeof desktopBrowserCreateRequestSchema
 >;
+
 export type ExperimentalDesktopBrowserAcquireRequest = z.infer<
   typeof desktopBrowserAcquireRequestSchema
 >;
+
 export type ExperimentalDesktopBrowserLeaseRequest = z.infer<
   typeof desktopBrowserLeaseRequestSchema
 >;
@@ -72,9 +107,11 @@ export type ExperimentalDesktopBrowserLeaseRequest = z.infer<
 export type ExperimentalDesktopBrowserCreateInput = z.input<
   typeof desktopBrowserCreateRequestSchema
 >;
+
 export type ExperimentalDesktopBrowserAcquireInput = z.input<
   typeof desktopBrowserAcquireRequestSchema
 >;
+
 export type ExperimentalDesktopBrowserLease =
   ExperimentalDesktopBrowserScope & {
     leaseId: string;
@@ -82,32 +119,49 @@ export type ExperimentalDesktopBrowserLease =
     controllerLabel: string;
     expiresAt: number;
   };
+
 export type ExperimentalDesktopBrowserInstances = {
-  instances: (import("@bb/host-daemon-contract").DesktopBrowserInstance & {
+  instances: (import("@omnyo/host-daemon-contract").DesktopBrowserInstance & {
     hostId: string;
   })[];
 };
+
 export type ExperimentalDesktopBrowserTabs =
-  import("@bb/host-daemon-contract").DesktopBrowserResult<"desktop.browser.list_tabs">;
+  import("@omnyo/host-daemon-contract").DesktopBrowserResult<"desktop.browser.list_tabs">;
+
 export type ExperimentalDesktopBrowserCreated =
-  import("@bb/host-daemon-contract").DesktopBrowserResult<"desktop.browser.create_tab">;
+  import("@omnyo/host-daemon-contract").DesktopBrowserResult<"desktop.browser.create_tab">;
+
 export type ExperimentalDesktopBrowserCapture =
-  import("@bb/host-daemon-contract").DesktopBrowserResult<"desktop.browser.capture_tab">;
+  import("@omnyo/host-daemon-contract").DesktopBrowserResult<"desktop.browser.capture_tab">;
+
 export type ExperimentalDesktopBrowserConnection = {
   hostId: string;
   wsEndpoint: string;
   expiresAt: number;
 };
+
 export type ExperimentalDesktopBrowserInstanceRequest = z.infer<
   typeof desktopBrowserInstanceRequestSchema
 >;
+
 export type ExperimentalDesktopBrowserImportCookiesRequest = z.infer<
   typeof desktopBrowserImportCookiesRequestSchema
 >;
+
 export type ExperimentalDesktopBrowserImportCookiesInput = z.input<
   typeof desktopBrowserImportCookiesRequestSchema
 >;
+
 export type ExperimentalDesktopBrowserImportSources =
-  import("@bb/host-daemon-contract").DesktopBrowserResult<"desktop.browser.list_import_sources">;
+  import("@omnyo/host-daemon-contract").DesktopBrowserResult<"desktop.browser.list_import_sources">;
+
 export type ExperimentalDesktopBrowserImportOutcome =
-  import("@bb/host-daemon-contract").DesktopBrowserResult<"desktop.browser.import_cookies">;
+  import("@omnyo/host-daemon-contract").DesktopBrowserResult<"desktop.browser.import_cookies">;
+
+export type ExperimentalDesktopBrowserCookieSyncConfigureRequest = z.infer<
+  typeof desktopBrowserCookieSyncConfigureRequestSchema
+>;
+
+export type ExperimentalDesktopBrowserCookieSyncStatus =
+  import("@omnyo/host-daemon-contract").DesktopBrowserCookieSyncStatus;

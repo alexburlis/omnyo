@@ -9,16 +9,16 @@ import {
   getEnvironment,
   getThread,
   updateThread,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   canonicalizeHostPath,
   isAbsoluteHostPath,
   isHostPathRoot,
   turnScope,
-} from "@bb/domain";
-import type { DynamicTool, Thread, ToolCallResponse } from "@bb/domain";
+} from "@omnyo/domain";
+import type { DynamicTool, Thread, ToolCallResponse } from "@omnyo/domain";
 import type { AppDeps } from "../../types.js";
-import { runLiveHostCommand } from "../hosts/live-command.js";
+import { runTrackedEnvironmentAttach } from "../environments/environment-engine.js";
 import { appendThreadEventInTransaction } from "./thread-events.js";
 import { buildEnvironmentProvisionCommand } from "./thread-create-helpers.js";
 import { findHostDataDir } from "../lib/entity-lookup.js";
@@ -38,7 +38,7 @@ const updateEnvironmentDirectoryInputSchema = z
 export const UPDATE_ENVIRONMENT_DIRECTORY_TOOL: DynamicTool = {
   name: UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
   description:
-    "Move this bb thread to a different working directory for subsequent turns. Use this when the user asks to switch to a new checkout, worktree, or local directory. The path must be an absolute existing directory on the current host. The tool reuses this project's existing bb environment for that host/path, otherwise it creates an unmanaged environment after validating the path. Another project may hold its own environment for the same directory; that is allowed, except for a bb-managed worktree owned by another project, which this tool refuses. After a successful switch, stop the current turn because the running provider cwd will not change until the next turn.",
+    "Move this Omnyo thread to a different working directory for subsequent turns. Use this when the user asks to switch to a new checkout, worktree, or local directory. The path must be an absolute existing directory on the current host. The tool reuses this project's existing Omnyo environment for that host/path, otherwise it creates an unmanaged environment after validating the path. Another project may hold its own environment for the same directory; that is allowed, except for an Omnyo-managed worktree owned by another project, which this tool refuses. After a successful switch, stop the current turn because the running provider cwd will not change until the next turn.",
   inputSchema: {
     type: "object",
     properties: {
@@ -100,12 +100,15 @@ function validateDirectoryPath(path: string): string | null {
   if (!isAbsoluteHostPath(path)) {
     return "Path must be an absolute path on the current host.";
   }
+
   if (isHostPathRoot(path)) {
     return "Path must name a project directory, not the filesystem root.";
   }
+
   if (path.includes("\0")) {
     return "Path must not contain NUL bytes.";
   }
+
   return null;
 }
 
@@ -113,9 +116,11 @@ function threadWritableFailure(thread: Thread): string | null {
   if (thread.deletedAt !== null) {
     return "Cannot update the environment directory for a deleted thread.";
   }
+
   if (thread.archivedAt !== null) {
     return "Cannot update the environment directory for an archived thread.";
   }
+
   return null;
 }
 
@@ -127,11 +132,13 @@ function resolveReadyEnvironment(
       failure: `Environment at this path is ${environment.status}, not ready.`,
     };
   }
+
   if (!environment.path) {
     return {
       failure: "Environment at this path does not have a resolved directory.",
     };
   }
+
   return {
     ...environment,
     path: environment.path,
@@ -156,6 +163,7 @@ function attachReadyEnvironment(
   const result = deps.db.transaction(
     (tx): AttachEnvironmentResult => {
       const latestThread = getThread(tx, args.thread.id);
+
       if (!latestThread || latestThread.deletedAt !== null) {
         return {
           kind: "thread_unavailable",
@@ -164,6 +172,7 @@ function attachReadyEnvironment(
       }
 
       const writableFailure = threadWritableFailure(latestThread);
+
       if (writableFailure) {
         return { kind: "thread_unavailable", message: writableFailure };
       }
@@ -198,6 +207,7 @@ function attachReadyEnvironment(
           },
         },
       });
+
       return { kind: "attached", changed: true };
     },
     { behavior: "immediate" },
@@ -230,6 +240,7 @@ async function provisionUnmanagedEnvironmentForPath(
     status: "provisioning",
     environmentProvider: null,
   });
+
   const command = buildEnvironmentProvisionCommand({
     environmentId: environment.id,
     hostId: args.currentEnvironment.hostId,
@@ -239,26 +250,31 @@ async function provisionUnmanagedEnvironmentForPath(
   });
 
   try {
-    await runLiveHostCommand(deps, {
+    await runTrackedEnvironmentAttach(deps, {
       hostId: args.currentEnvironment.hostId,
       command,
       timeoutMs: UPDATE_ENVIRONMENT_DIRECTORY_TIMEOUT_MS,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+
     return toolCallFailure(
       `Could not update environment directory to ${args.path}: ${message}`,
     );
   }
 
   const readyEnvironment = getEnvironment(deps.db, environment.id);
+
   if (!readyEnvironment) {
     return toolCallFailure("Prepared environment no longer exists.");
   }
+
   const ready = resolveReadyEnvironment(readyEnvironment);
+
   if ("failure" in ready) {
     return toolCallFailure(ready.failure);
   }
+
   return ready;
 }
 
@@ -267,6 +283,7 @@ export async function handleUpdateEnvironmentDirectoryToolCall(
   args: HandleUpdateEnvironmentDirectoryToolCallArgs,
 ): Promise<ToolCallResponse> {
   const input = updateEnvironmentDirectoryInputSchema.safeParse(args.input);
+
   if (!input.success) {
     return toolCallFailure(
       "Invalid arguments. Provide an object with an absolute path string.",
@@ -275,11 +292,13 @@ export async function handleUpdateEnvironmentDirectoryToolCall(
 
   const normalizedPath = normalizeDirectoryPath(input.data.path);
   const pathFailure = validateDirectoryPath(normalizedPath);
+
   if (pathFailure) {
     return toolCallFailure(pathFailure);
   }
 
   const writableFailure = threadWritableFailure(args.thread);
+
   if (writableFailure) {
     return toolCallFailure(writableFailure);
   }
@@ -310,26 +329,32 @@ export async function handleUpdateEnvironmentDirectoryToolCall(
     args.currentEnvironment.hostId,
     normalizedPath,
   );
+
   let createdEnvironment = false;
   let targetEnvironment: ReadyEnvironment;
 
   if (existingEnvironment) {
     const ready = resolveReadyEnvironment(existingEnvironment);
+
     if ("failure" in ready) {
       return toolCallFailure(ready.failure);
     }
+
     targetEnvironment = ready;
   } else {
     const dataDir = findHostDataDir(deps, args.currentEnvironment.hostId);
+
     const refusal = suppliedWorkspacePathRefusal(deps.db, {
       dataDir,
       hostId: args.currentEnvironment.hostId,
       path: normalizedPath,
       projectId: args.thread.projectId,
     });
+
     if (refusal !== null) {
       return toolCallFailure(`${refusal}. Use a different directory.`);
     }
+
     const provisionedEnvironment = await provisionUnmanagedEnvironmentForPath(
       deps,
       {
@@ -342,11 +367,13 @@ export async function handleUpdateEnvironmentDirectoryToolCall(
     if ("success" in provisionedEnvironment) {
       return provisionedEnvironment;
     }
+
     targetEnvironment = provisionedEnvironment;
     createdEnvironment = true;
   }
 
   let attachResult: AttachEnvironmentResult;
+
   try {
     assertEnvironmentPathAvailable(deps, {
       ...targetEnvironment,

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { withHarness } from "../../helpers/harness.js";
 import { createReadyThread } from "./shared.js";
@@ -23,9 +23,11 @@ describe.sequential("personal workspace plugin integration", () => {
           inputs: null,
         });
         const workspacePath = first.environment.path;
+
         if (workspacePath === null) {
           throw new Error("Personal workspace path was not assigned");
         }
+
         expect(workspacePath).toContain(
           path.join(
             "plugins",

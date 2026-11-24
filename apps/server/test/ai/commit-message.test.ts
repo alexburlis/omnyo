@@ -35,9 +35,11 @@ function registerCodex(
 
 async function commitThroughRoute(harness: TestAppHarness): Promise<string> {
   const { host } = seedHostSession(harness.deps);
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
@@ -58,6 +60,7 @@ async function commitThroughRoute(harness: TestAppHarness): Promise<string> {
       command.type === "workspace.status" &&
       command.environmentId === environment.id,
   );
+
   await reportQueuedCommandSuccess(harness, statusCommand, {
     outcome: "available",
     workspaceStatus: {
@@ -70,6 +73,7 @@ async function commitThroughRoute(harness: TestAppHarness): Promise<string> {
         hasUncommittedChanges: true,
         insertions: 1,
         lineStatsComplete: true,
+        fileCount: 0,
         state: "dirty_uncommitted",
       },
     },
@@ -81,6 +85,7 @@ async function commitThroughRoute(harness: TestAppHarness): Promise<string> {
       command.type === "workspace.diff" &&
       command.environmentId === environment.id,
   );
+
   await reportQueuedCommandSuccess(harness, diffCommand, {
     outcome: "available",
     diff: {
@@ -98,10 +103,12 @@ async function commitThroughRoute(harness: TestAppHarness): Promise<string> {
       command.type === "workspace.commit" &&
       command.environmentId === environment.id,
   );
+
   const message =
     commitCommand.command.type === "workspace.commit"
       ? commitCommand.command.message
       : "";
+
   await reportQueuedCommandSuccess(harness, commitCommand, {
     commitSha: "abc123",
     commitSubject: message,
@@ -114,6 +121,7 @@ async function commitThroughRoute(harness: TestAppHarness): Promise<string> {
     commitSubject: message,
     ok: true,
   });
+
   return message;
 }
 
@@ -147,6 +155,7 @@ describe("commit message generation", () => {
         harness.deps,
         commitMessageArgs,
       );
+
       expect(message?.length).toBeLessThanOrEqual(72);
       expect(message).toMatch(/^feat: add an extremely long commit subject/u);
     });
@@ -181,7 +190,7 @@ describe("commit message generation", () => {
         throw new Error("Codex request failed");
       });
       await expect(commitThroughRoute(harness)).resolves.toBe(
-        "bb: automated commit",
+        "omnyo: automated commit",
       );
     });
   });

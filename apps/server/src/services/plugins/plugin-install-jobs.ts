@@ -3,7 +3,7 @@ import type {
   InstalledPlugin,
   PluginInstallJob,
   PluginInstallJobTarget,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { runCancellableInstall } from "./install-cancellation.js";
 
 const FINISHED_JOB_RETENTION_MS = 10 * 60_000;
@@ -58,6 +58,7 @@ export function createPluginInstallJobs(deps: {
 
   function pruneFinished(): void {
     const cutoff = now() - FINISHED_JOB_RETENTION_MS;
+
     for (const [id, entry] of entries) {
       if (entry.finishedAt !== null && entry.finishedAt <= cutoff) {
         entries.delete(id);
@@ -67,25 +68,31 @@ export function createPluginInstallJobs(deps: {
 
   function update(entry: JobEntry, job: PluginInstallJob): void {
     entry.job = job;
+
     if (!isActive(job)) {
       entry.finishedAt = now();
       entry.settle(job);
     }
+
     deps.notifyChanged();
   }
 
   function pump(): void {
     if (current !== null) return;
+
     const next = [...entries.values()].find(
       (entry) => entry.job.state === "queued",
     );
+
     if (next === undefined) return;
     current = next;
+
     const base = {
       id: next.job.id,
       target: next.job.target,
       displayName: next.job.displayName,
     };
+
     update(next, { ...base, state: "running" });
     void runCancellableInstall(next.controller.signal, next.run)
       .then(
@@ -112,14 +119,18 @@ export function createPluginInstallJobs(deps: {
     start({ target, displayName, run }) {
       pruneFinished();
       const key = targetKey(target);
+
       const duplicate = [...entries.values()].find(
         (entry) => entry.key === key && isActive(entry.job),
       );
+
       if (duplicate !== undefined) return duplicate.job;
       let settle: (job: PluginInstallJob) => void = () => {};
+
       const settled = new Promise<PluginInstallJob>((resolve) => {
         settle = resolve;
       });
+
       const entry: JobEntry = {
         job: { id: randomUUID(), target, displayName, state: "queued" },
         key,
@@ -129,9 +140,11 @@ export function createPluginInstallJobs(deps: {
         settled,
         settle,
       };
+
       entries.set(entry.job.id, entry);
       deps.notifyChanged();
       pump();
+
       return entry.job;
     },
     settled(id) {
@@ -139,16 +152,20 @@ export function createPluginInstallJobs(deps: {
     },
     get(id) {
       pruneFinished();
+
       return entries.get(id)?.job;
     },
     list() {
       pruneFinished();
+
       return [...entries.values()].map((entry) => entry.job);
     },
     cancel(id) {
       const entry = entries.get(id);
+
       if (entry === undefined) return undefined;
       const { job } = entry;
+
       if (job.state === "queued") {
         entry.controller.abort();
         update(entry, {
@@ -161,6 +178,7 @@ export function createPluginInstallJobs(deps: {
         entry.controller.abort();
         update(entry, { ...job, state: "cancelling" });
       }
+
       return entry.job;
     },
   };

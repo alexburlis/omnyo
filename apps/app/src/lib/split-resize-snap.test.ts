@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSplitResizeSnapSession } from "./split-resize-snap";
 
 const SNAP_CAPTURE_PX = 12;
+
 const SNAP_RELEASE_PX = 30;
 
 function rect({
@@ -40,6 +41,7 @@ function divider(bounds: DOMRect, gridBounds: DOMRect): HTMLElement {
   split.appendChild(element);
   grid.appendChild(split);
   document.body.appendChild(grid);
+
   return element;
 }
 
@@ -53,22 +55,25 @@ describe("split resize snapping", () => {
       rect({ left: 500 }),
       rect({ height: 600, left: 100, width: 800 }),
     );
+
     const session = createSplitResizeSnapSession(source, "x", {
       boundaryIndex: 1,
       childCount: 2,
     });
 
-    expect(session.resolve({ start: 100, end: 900, pointer: 100 }).fraction).toBe(
-      0.15,
-    );
+    expect(
+      session.resolve({ start: 100, end: 900, pointer: 100 }).fraction,
+    ).toBe(0.15);
     session.clear();
+
     const opposite = createSplitResizeSnapSession(source, "x", {
       boundaryIndex: 1,
       childCount: 2,
     });
-    expect(opposite.resolve({ start: 100, end: 900, pointer: 900 }).fraction).toBe(
-      0.85,
-    );
+
+    expect(
+      opposite.resolve({ start: 100, end: 900, pointer: 900 }).fraction,
+    ).toBe(0.85);
     opposite.clear();
   });
 
@@ -77,6 +82,7 @@ describe("split resize snapping", () => {
       rect({ left: 650 }),
       rect({ height: 600, left: 100, top: 50, width: 800 }),
     );
+
     const session = createSplitResizeSnapSession(source, "x", {
       boundaryIndex: 1,
       childCount: 3,
@@ -93,9 +99,11 @@ describe("split resize snapping", () => {
       fraction: 266 / 799,
       snapped: true,
     });
+
     const guide = document.querySelector<HTMLElement>(
       "[data-split-resize-snap-guide]",
     );
+
     expect(guide?.dataset.splitResizeSnapGuide).toBe("x");
     expect(guide?.style.left).toBe("366.5px");
     expect(guide?.style.top).toBe("50px");
@@ -110,6 +118,7 @@ describe("split resize snapping", () => {
       rect({ height: 1, left: 0, top: 600, width: 900 }),
       rect({ height: 800, left: 40, top: 100, width: 900 }),
     );
+
     const session = createSplitResizeSnapSession(source, "y", {
       boundaryIndex: 3,
       childCount: 4,
@@ -126,9 +135,11 @@ describe("split resize snapping", () => {
       fraction: 199.75 / 399,
       snapped: true,
     });
+
     const guide = document.querySelector<HTMLElement>(
       "[data-split-resize-snap-guide]",
     );
+
     expect(guide?.dataset.splitResizeSnapGuide).toBe("y");
     expect(guide?.style.left).toBe("40px");
     expect(guide?.style.top).toBe("700.25px");
@@ -140,6 +151,7 @@ describe("split resize snapping", () => {
       rect({ left: 500 }),
       rect({ left: 100, width: 800 }),
     );
+
     const session = createSplitResizeSnapSession(source, "x", {
       boundaryIndex: 1,
       childCount: 2,
@@ -165,6 +177,7 @@ describe("split resize snapping", () => {
         start: 100,
       }).snapped,
     ).toBe(true);
+
     const result = session.resolve({
       end: 900,
       pointer: 500 + SNAP_RELEASE_PX + 2,
@@ -184,6 +197,7 @@ describe("split resize snapping", () => {
       rect({ left: 500 }),
       rect({ left: 100, width: 800 }),
     );
+
     const session = createSplitResizeSnapSession(source, "x", {
       boundaryIndex: 1,
       childCount: 2,
@@ -226,6 +240,7 @@ describe("split resize snapping", () => {
       rect({ left: 500 }),
       rect({ left: 100, width: 800 }),
     );
+
     const session = createSplitResizeSnapSession(source, "x", {
       boundaryIndex: 1,
       childCount: 2,
@@ -251,10 +266,13 @@ describe("split resize snapping", () => {
       rect({ left: 500 }),
       rect({ left: 100, width: 800 }),
     );
+
     const grid = source.closest<HTMLElement>("[data-split-resize-grid-root]");
+
     if (grid === null) throw new Error("Expected a split resize grid root");
     const sourceRect = vi.spyOn(source, "getBoundingClientRect");
     const gridRect = vi.spyOn(grid, "getBoundingClientRect");
+
     const session = createSplitResizeSnapSession(source, "x", {
       boundaryIndex: 1,
       childCount: 2,

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { Host } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import type { Host } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MachinePickerUI } from "./MachinePicker";
+import { expectNonmodalPicker } from "@/test/nonmodal-picker";
 import type { MachineProviderPresentation } from "@/components/plugin/MachineProviderIcon";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -13,11 +14,13 @@ const thisMachine = makeHost({
   id: "host_local",
   name: "MacBook Pro",
 });
+
 const studio = makeHost({
   ...thisMachine,
   id: "host_studio",
   name: "Mac Studio",
 });
+
 const devVm = makeHost({
   ...thisMachine,
   id: "host_vm",
@@ -25,6 +28,7 @@ const devVm = makeHost({
   status: "disconnected",
   lastSeenAt: Date.now() - 2 * HOUR_MS,
 });
+
 const manyHosts = [
   thisMachine,
   studio,
@@ -60,6 +64,24 @@ function renderMachineMenu(overrides?: {
 }
 
 describe("MachinePickerUI", () => {
+  it("keeps the page interactive and closes when focus leaves", async () => {
+    render(
+      <MachinePickerUI
+        hosts={[thisMachine, studio]}
+        localDaemonHostId={thisMachine.id}
+        primaryHostId={thisMachine.id}
+        selectedHostId={thisMachine.id}
+        onChange={vi.fn()}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Machine" });
+    await expectNonmodalPicker({
+      trigger,
+      open: () => fireEvent.click(trigger),
+      content: () => screen.queryByText("Mac Studio"),
+    });
+  });
+
   it("shows search only when there are more than five machines", () => {
     const result = render(
       <MachinePickerUI
@@ -71,6 +93,7 @@ describe("MachinePickerUI", () => {
         modal={false}
       />,
     );
+
     fireEvent.click(screen.getByRole("button", { name: "Machine" }));
 
     expect(
@@ -143,7 +166,7 @@ describe("MachinePickerUI", () => {
       { target: { value: "missing" } },
     );
     expect(list.scrollTop).toBe(0);
-    expect(screen.getByText("No machines found")).toBeTruthy();
+    expect(screen.getByText("No machines match “missing”")).toBeTruthy();
   });
 
   it("names the selected machine in the trigger and badges this machine in the menu", () => {
@@ -186,6 +209,7 @@ describe("MachinePickerUI", () => {
       type: "ephemeral",
       machineProviderId: "modal-sandbox",
     });
+
     renderMachineMenu({
       hosts: [thisMachine, studio, modalHost],
       selectedHostId: modalHost.id,

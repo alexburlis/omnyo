@@ -2,6 +2,7 @@ import { z } from "zod";
 import { permissionModeSchema } from "./shared-types.js";
 
 const hostStatusValues = ["connected", "disconnected"] as const;
+
 export const hostStatusSchema = z.enum(hostStatusValues);
 
 export const machineLifecycleSchema = z.object({
@@ -24,10 +25,16 @@ export const machineLifecycleSchema = z.object({
     })
     .nullable(),
 });
+
 export type MachineLifecycle = z.infer<typeof machineLifecycleSchema>;
 
 export const hostTypeSchema = z.enum(["persistent", "ephemeral"]);
+
 export type HostType = z.infer<typeof hostTypeSchema>;
+
+export const hostAvailabilitySchema = z.enum(["available", "away"]);
+
+export type HostAvailability = z.infer<typeof hostAvailabilitySchema>;
 
 export const hostSchema = z.object({
   id: z.string(),
@@ -37,9 +44,12 @@ export const hostSchema = z.object({
   machineProviderId: z.string().nullable(),
   lifecycle: machineLifecycleSchema,
   maxPermissionMode: permissionModeSchema,
+  availability: hostAvailabilitySchema,
   lastSeenAt: z.number().nullable(),
   lastRejectedProtocolVersion: z.number().int().positive().nullable(),
+  runtimeVersion: z.string().min(1).nullable().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
+
 export type Host = z.infer<typeof hostSchema>;

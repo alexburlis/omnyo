@@ -14,6 +14,7 @@ export function createThreadInfoFixedTabDestination(
     open(target) {
       if (target !== undefined) return false;
       open();
+
       return true;
     },
   };

@@ -4,8 +4,8 @@ import {
   runtimePermissionPolicySchema,
   runtimePermissionScopeValues,
   threadTurnInitiatorSchema,
-} from "@bb/domain";
-import type { RuntimePermissionPolicy, ThreadTurnInitiator } from "@bb/domain";
+} from "@omnyo/domain";
+import type { RuntimePermissionPolicy, ThreadTurnInitiator } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { resolvePermissionEscalation } from "../../src/services/threads/thread-runtime-config.js";
 
@@ -36,9 +36,11 @@ describe("permission escalation by turn initiator", () => {
 });
 
 const approvalReviewerValues = ["user", "automatic"] as const;
+
 type ReviewerFromPolicy = NonNullable<
   RuntimePermissionPolicy["approvalReviewer"]
 >;
+
 const reviewerValuesCoverUnion: [
   (typeof approvalReviewerValues)[number],
 ] extends [ReviewerFromPolicy]
@@ -46,9 +48,11 @@ const reviewerValuesCoverUnion: [
     ? true
     : false
   : false = true;
+
 void reviewerValuesCoverUnion;
 
 const ESCALATION_INPUTS = [...permissionEscalationValues, null] as const;
+
 const REVIEWER_INPUTS = [...approvalReviewerValues, null] as const;
 
 type PolicyCell =

@@ -7,15 +7,17 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
-import { QuestionForm } from "@bb/shared-ui/question-form";
+import { QuestionForm } from "@/components/ui/question-form";
 import type {
   Question,
   QuestionAnswer,
-} from "@bb/shared-ui/question-form-state";
+} from "@omnyo/shared-ui/question-form-state";
 import { ThreadQuestionFormHost } from "./ThreadQuestionFormHost";
 import { AppCommandProvider } from "@/components/commands/AppCommandProvider";
-import { defaultAppSettings } from "@bb/domain";
+import { defaultAppSettings } from "@omnyo/domain";
+
 type InteractionPayload = { questions: Question[] };
+
 type InteractionResponse = { answers: Record<string, QuestionAnswer> };
 
 vi.mock("@/hooks/useVoiceInput", () => ({ useVoiceInput: vi.fn() }));
@@ -40,8 +42,11 @@ vi.mock("@/hooks/queries/system-queries", () => ({
     },
   }),
 }));
-vi.mock("@/lib/bb-desktop", () => ({ getBbDesktopInfo: () => null }));
+
+vi.mock("@/lib/omnyo-desktop", () => ({ getOmnyoDesktopInfo: () => null }));
+
 const pane = vi.hoisted(() => ({ isFocused: true }));
+
 vi.mock("@/views/thread-detail/PaneContext", () => ({
   useOptionalPaneContext: () => pane,
 }));
@@ -136,25 +141,70 @@ function getButtonByText(
   text: string,
 ): HTMLButtonElement {
   const button = slot.getByText(text).closest("button");
+
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error(`${text} is not rendered inside a button`);
   }
+
   return button;
 }
 
 describe("answering a single-select question", () => {
+  it("keeps review content visible while changing a decision and submitting notes", async () => {
+    const submit = vi.fn(async () => {});
+    const context = "Hi Alex,\n\nHere is the complete draft.\n\nBest,\nSam";
+
+    const question: Question = {
+      ...singleSelect.questions[0]!,
+      context,
+      additiveNotes: true,
+    };
+
+    const slot = render({ questions: [question] }, { submit });
+
+    const content = slot.getByText(
+      "Hi Alex, Here is the complete draft. Best, Sam",
+    );
+
+    expect(content.textContent).toBe(context);
+    expect(slot.getByText("Embedded, zero setup.")).toBeTruthy();
+    fireEvent.click(getButtonByText(slot, "Postgres"));
+    fireEvent.click(getButtonByText(slot, "SQLite"));
+    expect(content.textContent).toBe(context);
+    expect(getButtonByText(slot, "SQLite").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    fireEvent.click(getButtonByText(slot, "Add a note or your own answer"));
+    fireEvent.change(slot.getByLabelText("Database answer"), {
+      target: { value: "Please shorten the second paragraph." },
+    });
+    await act(async () => {
+      fireEvent.click(slot.getByText("Submit answer"));
+    });
+    expect(submit).toHaveBeenCalledWith({
+      answers: {
+        q0: {
+          selected: ["q0o1"],
+          freeText: "Please shorten the second paragraph.",
+        },
+      },
+    });
+  });
+
   it("isolates interactions and ignores corrupt drafts or changed questions", () => {
     const firstKey = "thr_isolation:pint_first";
     const secondKey = "thr_isolation:pint_second";
+
     try {
       const first = render(singleSelect, { draftKey: firstKey });
       fireEvent.click(getButtonByText(first, "SQLite"));
       first.unmount();
       const second = render(singleSelect, { draftKey: secondKey });
       expect(
-        getButtonByText(second, "SQLite").getAttribute("aria-pressed"),
+        getButtonByText(second, "SQLite").getAttribute("aria-checked"),
       ).toBe("false");
       second.unmount();
+
       const changed = render(
         {
           questions: [
@@ -163,28 +213,29 @@ describe("answering a single-select question", () => {
         },
         { draftKey: firstKey },
       );
+
       expect(
-        getButtonByText(changed, "SQLite").getAttribute("aria-pressed"),
+        getButtonByText(changed, "SQLite").getAttribute("aria-checked"),
       ).toBe("false");
       changed.unmount();
       window.localStorage.setItem(
-        `bb.question-draft.v1:${firstKey}`,
+        `omnyo.question-draft.v1:${firstKey}`,
         "not JSON",
       );
       const corrupt = render(singleSelect, { draftKey: firstKey });
       expect(
-        getButtonByText(corrupt, "SQLite").getAttribute("aria-pressed"),
+        getButtonByText(corrupt, "SQLite").getAttribute("aria-checked"),
       ).toBe("false");
       fireEvent.click(getButtonByText(corrupt, "SQLite"));
       corrupt.unmount();
       const repaired = render(singleSelect, { draftKey: firstKey });
       expect(
-        getButtonByText(repaired, "SQLite").getAttribute("aria-pressed"),
+        getButtonByText(repaired, "SQLite").getAttribute("aria-checked"),
       ).toBe("true");
       repaired.unmount();
     } finally {
-      window.localStorage.removeItem(`bb.question-draft.v1:${firstKey}`);
-      window.localStorage.removeItem(`bb.question-draft.v1:${secondKey}`);
+      window.localStorage.removeItem(`omnyo.question-draft.v1:${firstKey}`);
+      window.localStorage.removeItem(`omnyo.question-draft.v1:${secondKey}`);
     }
   });
 
@@ -194,7 +245,9 @@ describe("answering a single-select question", () => {
       .mockImplementation(() => {
         throw new DOMException("Storage is full", "QuotaExceededError");
       });
+
     const draftKey = "thr_quota:pint_quota";
+
     try {
       const slot = render(singleSelect, { draftKey });
       fireEvent.click(getButtonByText(slot, "Other…"));
@@ -210,7 +263,7 @@ describe("answering a single-select question", () => {
       restored.unmount();
     } finally {
       storage.mockRestore();
-      window.localStorage.removeItem(`bb.question-draft.v1:${draftKey}`);
+      window.localStorage.removeItem(`omnyo.question-draft.v1:${draftKey}`);
     }
   });
 
@@ -218,7 +271,7 @@ describe("answering a single-select question", () => {
     const submit = vi.fn(async () => undefined);
     const slot = render(singleSelect, { submit });
     fireEvent.keyDown(document.body, { key: "2" });
-    expect(getButtonByText(slot, "SQLite").getAttribute("aria-pressed")).toBe(
+    expect(getButtonByText(slot, "SQLite").getAttribute("aria-checked")).toBe(
       "true",
     );
     fireEvent.keyDown(document.activeElement ?? document.body, {
@@ -231,6 +284,7 @@ describe("answering a single-select question", () => {
     const submit = vi.fn(async () => undefined);
     render(singleSelect, { submit });
     fireEvent.keyDown(document.body, { key: "2" });
+
     for (const modifier of [
       "shiftKey",
       "ctrlKey",
@@ -243,6 +297,7 @@ describe("answering a single-select question", () => {
         [modifier]: true,
       });
     }
+
     expect(submit).not.toHaveBeenCalled();
   });
 
@@ -259,13 +314,43 @@ describe("answering a single-select question", () => {
     expect(submit).toHaveBeenCalledTimes(1);
   });
 
+  it("holds the surrounding layout while measuring a growing note", () => {
+    const slot = render(singleSelect);
+    fireEvent.keyDown(document.body, { key: "3" });
+    const textarea = slot.getByLabelText("Database answer");
+    const parent = textarea.parentElement!;
+    const heldHeights: string[] = [];
+
+    Object.defineProperty(parent, "offsetHeight", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(textarea, "scrollHeight", {
+      configurable: true,
+      get: () => {
+        heldHeights.push(parent.style.minHeight);
+
+        return 120;
+      },
+    });
+
+    fireEvent.change(textarea, { target: { value: "A longer note" } });
+
+    expect(heldHeights).toEqual(["200px"]);
+    expect(parent.style.minHeight).toBe("");
+    expect(textarea.style.height).toBe("120px");
+  });
+
   it("submits the selected option value", () => {
     const submit = vi.fn<(value: InteractionResponse) => Promise<void>>(
       async () => undefined,
     );
+
     const slot = render(singleSelect, { submit });
 
-    expect(slot.getAllByText("Which database should we use?")).toHaveLength(2);
+    expect(
+      slot.getByRole("radiogroup", { name: "Which database should we use?" }),
+    ).toBeTruthy();
     fireEvent.click(getButtonByText(slot, "SQLite"));
     fireEvent.click(getButtonByText(slot, "Submit answer"));
 
@@ -279,7 +364,7 @@ describe("answering a single-select question", () => {
     pane.isFocused = false;
     const slot = render(singleSelect);
     fireEvent.keyDown(window, { key: "1" });
-    expect(getButtonByText(slot, "Postgres").getAttribute("aria-pressed")).toBe(
+    expect(getButtonByText(slot, "Postgres").getAttribute("aria-checked")).toBe(
       "false",
     );
   });
@@ -309,6 +394,7 @@ describe("answering a single-select question", () => {
     const submit = vi.fn<(value: InteractionResponse) => Promise<void>>(
       async () => undefined,
     );
+
     const slot = render(singleSelect, { submit });
 
     fireEvent.click(getButtonByText(slot, "Postgres"));
@@ -327,6 +413,7 @@ describe("answering a single-select question", () => {
     const submit = vi.fn<(value: InteractionResponse) => Promise<void>>(
       async () => undefined,
     );
+
     const slot = render(singleSelect, { submit });
 
     fireEvent.keyDown(window, { key: "2" });
@@ -345,9 +432,50 @@ describe("answering a single-select question", () => {
 
     fireEvent.keyDown(textarea, { key: "1" });
 
-    expect(getButtonByText(slot, "Postgres").getAttribute("aria-pressed")).toBe(
+    expect(getButtonByText(slot, "Postgres").getAttribute("aria-checked")).toBe(
       "false",
     );
+  });
+});
+
+describe("additive notes", () => {
+  it("keeps the note as a separate toggle that never replaces the chosen option", async () => {
+    const submit = vi.fn(async () => {});
+
+    const slot = render(
+      {
+        questions: [
+          {
+            ...singleSelect.questions[0]!,
+            additiveNotes: true,
+          },
+        ],
+      },
+      { submit },
+    );
+
+    fireEvent.click(getButtonByText(slot, "SQLite"));
+    const note = getButtonByText(slot, "Add a note or your own answer");
+    expect(note.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(note);
+    expect(getButtonByText(slot, "SQLite").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(
+      getButtonByText(slot, "Remove note").getAttribute("aria-pressed"),
+    ).toBe("true");
+
+    fireEvent.change(slot.getByRole("textbox", { name: "Database answer" }), {
+      target: { value: "Keep it local" },
+    });
+    await act(async () => {
+      fireEvent.click(getButtonByText(slot, "Submit answer"));
+    });
+
+    expect(submit).toHaveBeenCalledWith({
+      answers: { q0: { selected: ["q0o1"], freeText: "Keep it local" } },
+    });
   });
 });
 
@@ -379,10 +507,96 @@ describe("multi-select and multi-question flows", () => {
     ],
   };
 
+  it.each(["click", "number key"] as const)(
+    "advances a single choice after a short beat via %s and retains it when going back",
+    (method) => {
+      vi.useFakeTimers();
+
+      try {
+        const submit = vi.fn(async () => undefined);
+
+        const slot = render(
+          {
+            questions: multi.questions.map((question) => ({
+              ...question,
+              shortLabel: "Rule?",
+              multiSelect: false,
+            })),
+          },
+          { submit },
+        );
+
+        expect(slot.getByText("Rule? 1")).toBeTruthy();
+        expect(slot.getByText("Rule? 2")).toBeTruthy();
+
+        if (method === "click")
+          fireEvent.click(getButtonByText(slot, "Metrics"));
+        else fireEvent.keyDown(document.body, { key: "1" });
+        expect(slot.getByText("1 of 2")).toBeTruthy();
+        act(() => vi.advanceTimersByTime(1000));
+        expect(slot.getByText("2 of 2")).toBeTruthy();
+        expect(getButtonByText(slot, "Rule? 1").textContent).toContain(
+          "Metrics",
+        );
+        fireEvent.click(getButtonByText(slot, "Back"));
+        expect(
+          slot
+            .getByRole("radio", { name: "Metrics" })
+            .getAttribute("aria-checked"),
+        ).toBe("true");
+        fireEvent.click(getButtonByText(slot, "Next"));
+        fireEvent.click(getButtonByText(slot, "SQLite"));
+        act(() => vi.advanceTimersByTime(1000));
+        expect(slot.getByText("2 of 2")).toBeTruthy();
+        expect(submit).not.toHaveBeenCalled();
+        fireEvent.keyDown(document.activeElement ?? document.body, {
+          key: "Enter",
+        });
+        expect(submit).toHaveBeenCalledExactlyOnceWith({
+          answers: { q0: { selected: ["q0o0"] }, q1: { selected: ["q1o1"] } },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each(["multiple choices", "free text"] as const)(
+    "keeps %s on the current question until explicit navigation",
+    (method) => {
+      vi.useFakeTimers();
+
+      try {
+        const slot = render(multi);
+
+        if (method === "multiple choices") {
+          fireEvent.click(getButtonByText(slot, "Metrics"));
+          fireEvent.keyDown(document.body, { key: "2" });
+        } else {
+          fireEvent.click(getButtonByText(slot, "Other…"));
+          fireEvent.change(slot.getByLabelText("Extras answer"), {
+            target: { value: "A custom answer" },
+          });
+        }
+
+        act(() => vi.advanceTimersByTime(1000));
+        expect(slot.getByText("1 of 2")).toBeTruthy();
+        fireEvent.click(getButtonByText(slot, "Next"));
+        expect(slot.getByText("2 of 2")).toBeTruthy();
+        expect(
+          slot.getByRole("button", { name: "Submit 1 answer" }),
+        ).toHaveProperty("disabled", true);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("restores partial selections, free text, and the current question after navigation and from saved storage", () => {
     const draftKey = "thr_draft:pint_draft";
-    const storageKey = `bb.question-draft.v1:${draftKey}`;
+    const storageKey = `omnyo.question-draft.v1:${draftKey}`;
     const original = window.localStorage.getItem(storageKey);
+
     try {
       const slot = render(multi, { draftKey });
       fireEvent.click(getButtonByText(slot, "Metrics"));
@@ -412,7 +626,10 @@ describe("multi-select and multi-question flows", () => {
       const saved = window.localStorage.getItem(storageKey);
       expect(saved).not.toBeNull();
       const freshKey = "thr_draft:pint_reloaded";
-      window.localStorage.setItem(`bb.question-draft.v1:${freshKey}`, saved!);
+      window.localStorage.setItem(
+        `omnyo.question-draft.v1:${freshKey}`,
+        saved!,
+      );
       const reloaded = render(multi, { draftKey: freshKey });
       expect(
         getButtonByText(reloaded, "Metrics").getAttribute("aria-pressed"),
@@ -423,7 +640,7 @@ describe("multi-select and multi-question flows", () => {
         "  DuckDB\nwith extensions  ",
       );
       reloaded.unmount();
-      window.localStorage.removeItem(`bb.question-draft.v1:${freshKey}`);
+      window.localStorage.removeItem(`omnyo.question-draft.v1:${freshKey}`);
     } finally {
       if (original === null) window.localStorage.removeItem(storageKey);
       else window.localStorage.setItem(storageKey, original);
@@ -434,12 +651,14 @@ describe("multi-select and multi-question flows", () => {
     "retains drafts on failed %s and clears them only after success",
     async (action) => {
       const draftKey = `thr_draft:pint_${action}`;
-      const storageKey = `bb.question-draft.v1:${draftKey}`;
+      const storageKey = `omnyo.question-draft.v1:${draftKey}`;
       const original = window.localStorage.getItem(storageKey);
+
       try {
         const handler = vi.fn<() => Promise<void>>(async () => {
           throw new Error("offline");
         });
+
         const slot = render(singleSelect, { draftKey, [action]: handler });
         fireEvent.click(getButtonByText(slot, "SQLite"));
         const buttonLabel = action === "submit" ? "Submit answer" : "Cancel";
@@ -448,6 +667,7 @@ describe("multi-select and multi-question flows", () => {
         );
         slot.unmount();
         let finish: () => void = () => {};
+
         handler.mockImplementation(
           () =>
             new Promise<void>((resolve) => {
@@ -456,7 +676,7 @@ describe("multi-select and multi-question flows", () => {
         );
         const restored = render(singleSelect, { draftKey, [action]: handler });
         expect(
-          getButtonByText(restored, "SQLite").getAttribute("aria-pressed"),
+          getButtonByText(restored, "SQLite").getAttribute("aria-checked"),
         ).toBe("true");
         fireEvent.click(getButtonByText(restored, buttonLabel));
         expect(window.localStorage.getItem(storageKey)).not.toBeNull();
@@ -465,7 +685,7 @@ describe("multi-select and multi-question flows", () => {
         expect(window.localStorage.getItem(storageKey)).toBeNull();
         const cleared = render(singleSelect, { draftKey });
         expect(
-          getButtonByText(cleared, "SQLite").getAttribute("aria-pressed"),
+          getButtonByText(cleared, "SQLite").getAttribute("aria-checked"),
         ).toBe("false");
         cleared.unmount();
       } finally {
@@ -479,12 +699,14 @@ describe("multi-select and multi-question flows", () => {
     "keeps answers on screen and locks the form after a successful %s",
     async (action) => {
       const draftKey = `thr_draft:pint_settled_${action}`;
-      const storageKey = `bb.question-draft.v1:${draftKey}`;
+      const storageKey = `omnyo.question-draft.v1:${draftKey}`;
+
       try {
         const slot = render(singleSelect, {
           draftKey,
           [action]: async () => {},
         });
+
         fireEvent.click(getButtonByText(slot, "SQLite"));
         const buttonLabel = action === "submit" ? "Submit answer" : "Cancel";
         await act(async () =>
@@ -492,7 +714,7 @@ describe("multi-select and multi-question flows", () => {
         );
         expect(window.localStorage.getItem(storageKey)).toBeNull();
         expect(
-          getButtonByText(slot, "SQLite").getAttribute("aria-pressed"),
+          getButtonByText(slot, "SQLite").getAttribute("aria-checked"),
         ).toBe("true");
         expect(getButtonByText(slot, "Submit answer").disabled).toBe(true);
         expect(getButtonByText(slot, "Cancel").disabled).toBe(true);
@@ -524,6 +746,7 @@ describe("multi-select and multi-question flows", () => {
     const submit = vi.fn<(value: InteractionResponse) => Promise<void>>(
       async () => undefined,
     );
+
     const slot = render(multi, { submit });
 
     expect(slot.getByText("1 of 2")).toBeTruthy();
@@ -533,7 +756,7 @@ describe("multi-select and multi-question flows", () => {
 
     expect(slot.getByText("2 of 2")).toBeTruthy();
     fireEvent.click(getButtonByText(slot, "Postgres"));
-    fireEvent.click(getButtonByText(slot, "Submit answer"));
+    fireEvent.click(getButtonByText(slot, "Submit 2 answers"));
 
     expect(submit).toHaveBeenCalledTimes(1);
     expect(submit.mock.calls[0]?.[0]).toEqual({
@@ -590,6 +813,7 @@ describe("question answer dictation", () => {
       onTranscript: vi.fn(),
       onTranscribe: vi.fn(),
     });
+
     vi.mocked(useVoiceInput).mockReturnValue({
       ...idle,
       state: "transcribing",

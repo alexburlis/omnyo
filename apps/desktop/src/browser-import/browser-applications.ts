@@ -25,6 +25,7 @@ function applicationNames(names: readonly (string | undefined)[]): string[] {
         .flatMap((name) => {
           if (!name) return [];
           const normalized = name.trim().replace(/^\./, "").toLowerCase();
+
           return [normalized, normalized.replace(/ browser$/, "")];
         })
         .filter((name) => name.length > 0 && !/[\/\\\u0000-\u001f]/.test(name)),
@@ -37,18 +38,24 @@ export function parseMacBrowserApplication(
   appName: string,
 ): string[] | undefined {
   let value: unknown;
+
   try {
     value = JSON.parse(json);
   } catch {
     return undefined;
   }
+
   const parsed = macApplicationSchema.safeParse(value);
+
   if (!parsed.success) return undefined;
   const info = parsed.data;
+
   const schemes = new Set(
     info.CFBundleURLTypes?.flatMap((type) => type.CFBundleURLSchemes ?? []),
   );
+
   if (!schemes.has("http") || !schemes.has("https")) return undefined;
+
   return applicationNames([
     appName,
     info.CFBundleName,
@@ -64,18 +71,24 @@ export function parseLinuxBrowserApplication(
 ): string[] | undefined {
   const fields = new Map<string, string>();
   let inEntry = false;
+
   for (const rawLine of contents.split(/\r?\n/)) {
     const line = rawLine.trim();
+
     if (line.startsWith("[")) {
       inEntry = line === "[Desktop Entry]";
       continue;
     }
+
     if (!inEntry || line.startsWith("#")) continue;
     const separator = line.indexOf("=");
+
     if (separator > 0)
       fields.set(line.slice(0, separator), line.slice(separator + 1));
   }
+
   const types = new Set(fields.get("MimeType")?.split(";"));
+
   if (
     fields.get("Type") !== "Application" ||
     fields.get("Hidden") === "true" ||
@@ -84,6 +97,7 @@ export function parseLinuxBrowserApplication(
     !types.has("x-scheme-handler/https")
   )
     return undefined;
+
   return applicationNames([
     desktopName,
     fields.get("Name"),
@@ -109,6 +123,7 @@ export async function listBrowserStorageNames(
   run: CommandRunner = runCommand,
 ): Promise<Set<string>> {
   const result = new Set<string>();
+
   if (context.platform === "darwin") {
     for (const root of [
       join(context.home, "Applications"),
@@ -123,16 +138,20 @@ export async function listBrowserStorageNames(
           "-",
           join(root, entry, "Contents", "Info.plist"),
         ]);
+
         if (!plist.ok) continue;
+
         const names = parseMacBrowserApplication(
           plist.stdout,
           basename(entry, ".app"),
         );
+
         for (const name of names ?? []) result.add(name);
       }
     }
   } else if (context.platform === "linux") {
     const seen = new Set<string>();
+
     for (const root of [
       join(context.home, ".local", "share", "applications"),
       join(
@@ -152,13 +171,17 @@ export async function listBrowserStorageNames(
       for (const entry of await entries(root, ".desktop")) {
         if (seen.has(entry)) continue;
         seen.add(entry);
+
         try {
           const path = join(root, entry);
+
           if ((await stat(path)).size > 1024 * 1024) continue;
+
           const names = parseLinuxBrowserApplication(
             await readFile(path, "utf8"),
             basename(entry, ".desktop"),
           );
+
           for (const name of names ?? []) result.add(name);
         } catch {
           continue;
@@ -166,5 +189,6 @@ export async function listBrowserStorageNames(
       }
     }
   }
+
   return result;
 }

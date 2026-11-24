@@ -1,8 +1,8 @@
 import { useAppCommandHandler } from "@/components/commands/AppCommandProvider";
-import { getBbDesktopInfo } from "@/lib/bb-desktop";
+import { getOmnyoDesktopInfo } from "@/lib/omnyo-desktop";
 
 export function useWindowReloadCommand(): void {
-  const desktopApi = getBbDesktopInfo();
+  const desktopApi = getOmnyoDesktopInfo();
   const reloadWindow = desktopApi?.reloadWindow;
 
   useAppCommandHandler(
@@ -11,7 +11,9 @@ export function useWindowReloadCommand(): void {
       if (reloadWindow === undefined) {
         return false;
       }
+
       reloadWindow.call(desktopApi);
+
       return true;
     },
     0,

@@ -1,4 +1,4 @@
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import { ThreadTimelineRows } from "@/components/thread/timeline";
 import {
   commandRow,
@@ -24,9 +24,11 @@ const baseProps = {
 
 function workSummaryId(children: readonly TimelineRow[]): string {
   const first = children[0];
+
   if (!first) {
     throw new Error("Cannot compute work-summary id for empty children");
   }
+
   return [
     first.threadId,
     first.turnId ?? "thread",
@@ -42,6 +44,7 @@ type ExplorationRowArgs = { callId: string; seq: number } & (
 );
 
 const THREAD_ID = "thr_zeb7z9afmw";
+
 const TURN_ID = "019dd185-ef12-7d50-aa48-47882e9c8aaf";
 
 const closingAssistantMessage: TimelineRow = conversationRow({
@@ -53,7 +56,7 @@ const closingAssistantMessage: TimelineRow = conversationRow({
   startedAt: 1777337356000,
   createdAt: 1777337356000,
   role: "assistant",
-  text: "—",
+  text: "Moved the active-thinking state into the projection pass and verified the build.",
   attachments: null,
 });
 
@@ -68,7 +71,7 @@ const commandTurboBuild: TimelineRow = commandRow({
   status: "completed",
   callId: "call_buildDomainCoreUi",
   command:
-    "pnpm exec turbo run build --filter=@bb/domain --filter=@bb/core-ui --filter=@bb/server-contract --concurrency=1",
+    "pnpm exec turbo run build --filter=@omnyo/domain --filter=@omnyo/core-ui --filter=@omnyo/server-contract --concurrency=1",
   cwd: null,
   source: null,
   output: "",
@@ -89,7 +92,7 @@ const commandTurboTestServer: TimelineRow = commandRow({
   status: "completed",
   callId: "call_testServer",
   command:
-    "pnpm exec turbo run test --filter=@bb/server --only --concurrency=1 -- --run test/threads/timeline-service.test.ts",
+    "pnpm exec turbo run test --filter=@omnyo/server --only --concurrency=1 -- --run test/threads/timeline-service.test.ts",
   cwd: null,
   source: null,
   output: "",
@@ -110,7 +113,7 @@ const commandTurboTestCoreUi: TimelineRow = commandRow({
   status: "completed",
   callId: "call_testCoreUi",
   command:
-    "pnpm exec turbo run test --filter=@bb/core-ui --concurrency=1 -- --run test/to-view-messages.assistant-streams.test.ts",
+    "pnpm exec turbo run test --filter=@omnyo/core-ui --concurrency=1 -- --run test/to-view-messages.assistant-streams.test.ts",
   cwd: null,
   source: null,
   output: "",
@@ -131,7 +134,7 @@ const commandTurboBuildForce: TimelineRow = commandRow({
   status: "completed",
   callId: "call_buildForce",
   command:
-    "pnpm exec turbo run build --filter=@bb/domain --filter=@bb/core-ui --force --concurrency=1",
+    "pnpm exec turbo run build --filter=@omnyo/domain --filter=@omnyo/core-ui --force --concurrency=1",
   cwd: null,
   source: null,
   output: "",
@@ -303,6 +306,7 @@ function explorationRow(args: ExplorationRowArgs): TimelineRow {
     callId: args.callId,
     durationMs: 50,
   };
+
   switch (args.kind) {
     case "read":
       return fileReadRow({

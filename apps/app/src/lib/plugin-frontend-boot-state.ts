@@ -3,9 +3,13 @@ import { useSyncExternalStore } from "react";
 type PluginFrontendBootPhase = "idle" | "booting" | "complete";
 
 let phase: PluginFrontendBootPhase = "idle";
+
 let settleFloorReached = false;
+
 let serverPluginsStarting = false;
+
 let reconcilePending = false;
+
 const listeners = new Set<() => void>();
 
 function notify(): void {
@@ -44,6 +48,7 @@ export function setPluginFrontendReconcilePending(pending: boolean): void {
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };

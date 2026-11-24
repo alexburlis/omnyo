@@ -5,12 +5,13 @@ import {
   type EnvironmentRow,
   type DbTransaction,
   type DbNotifier,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   threadScope,
   type ProvisioningTranscriptEntry,
   type Thread,
-} from "@bb/domain";
+} from "@omnyo/domain";
+import { z } from "zod";
 import type {
   AppDeps,
   LoggedPendingInteractionWorkSessionDeps,
@@ -21,6 +22,7 @@ import {
   advanceEnvironmentProvisioning,
   cancelProviderEnvironmentCreation,
 } from "../environments/environment-engine.js";
+import { DEFAULT_ENVIRONMENT_PROVIDER_ID } from "../environments/environment-provider-ids.js";
 import { runtimeErrorLogFields } from "../lib/error-log-fields.js";
 import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
 import {
@@ -42,6 +44,7 @@ import { isParentNotifiableChildThread } from "./thread-parent.js";
 import { queueChildThreadTurnNotificationBestEffort } from "./child-thread-notifications.js";
 
 export type ThreadProvisioningDeps = CommandResultSideEffectsDeps;
+
 interface EnsureWorkspaceReadyEventArgs {
   entries: ProvisioningTranscriptEntry[];
   environmentId: string;
@@ -65,6 +68,7 @@ export function ensureWorkspaceReadyEventInTransaction(
 ): boolean {
   const thread = getThread(deps.db, args.threadId);
   const context = getThreadProvisionContext(deps.db, args.threadId);
+
   if (
     thread?.status !== "starting" ||
     thread.deletedAt !== null ||
@@ -72,7 +76,9 @@ export function ensureWorkspaceReadyEventInTransaction(
     thread.environmentId !== args.environmentId
   )
     return false;
+
   if (context.state.workspaceReadyEventSequence !== null) return true;
+
   const appendedSequence =
     context.state.provisionEventSequence === null
       ? null
@@ -83,6 +89,7 @@ export function ensureWorkspaceReadyEventInTransaction(
           status: "active",
           entries: args.entries,
         });
+
   context.state.workspaceReadyEventSequence = appendedSequence;
   saveThreadProvisionContext({
     replace: false,
@@ -90,6 +97,7 @@ export function ensureWorkspaceReadyEventInTransaction(
     threadId: thread.id,
     context,
   });
+
   if (appendedSequence !== null)
     deps.hub.notifyThread(thread.id, ["events-appended"], {
       timelineSequence: getLatestThreadSequence(deps.db, {
@@ -97,6 +105,7 @@ export function ensureWorkspaceReadyEventInTransaction(
       }),
       eventTypes: ["system/thread-provisioning"],
     });
+
   return true;
 }
 
@@ -105,12 +114,14 @@ interface FailThreadProvisioningArgs {
   environmentId: string | null;
   thread: Thread;
 }
+
 export function failThreadProvisioning(
   deps: ThreadProvisioningDeps,
   args: FailThreadProvisioningArgs,
 ): void {
   const context = getThreadProvisionContext(deps.db, args.thread.id);
   clearThreadProvisionSchedule(args.thread.id);
+
   if (
     context !== null &&
     context.state.environmentId === null &&
@@ -132,6 +143,7 @@ export function failThreadProvisioning(
       ],
     });
   }
+
   requestQueuedMessageDispatch(deps, {
     kind: "provisioning-ended",
     threadId: args.thread.id,
@@ -144,16 +156,19 @@ export function failThreadProvisioning(
     detail: args.detail,
     scope: threadScope(),
   });
+
   const outcome = applyLoggedThreadLifecycleEvent(deps, {
     event: { type: "run.failed" },
     threadId: args.thread.id,
   });
+
   void cancelProviderEnvironmentCreation(deps, args.thread.id).catch((error) =>
     deps.logger.warn(
       { threadId: args.thread.id, error },
       "Failed environment preparation cleanup will retry",
     ),
   );
+
   if (outcome.applied) queueChildSetupFailureNotification(deps, args.thread);
 }
 
@@ -170,6 +185,24 @@ export function queueChildSetupFailureNotification(
   });
 }
 
+const existingCheckoutInputsSchema = z.object({
+  branch: z.object({ kind: z.literal("existing") }).optional(),
+});
+
+function requiresTitleBeforeEnvironment(
+  intent: ThreadProvisionContext["request"]["environmentIntent"],
+): boolean {
+  if (intent.type !== "provider") return false;
+
+  if (
+    intent.environmentProviderId !==
+    DEFAULT_ENVIRONMENT_PROVIDER_ID.projectCheckout
+  )
+    return true;
+
+  return !existingCheckoutInputsSchema.safeParse(intent.inputs).success;
+}
+
 export async function ensureThreadProvisionEnvironmentReady(
   deps: ThreadProvisioningDeps,
   args: { context: ThreadProvisionContext; thread: Thread },
@@ -179,11 +212,13 @@ export async function ensureThreadProvisionEnvironmentReady(
   thread: Thread;
 } | null> {
   const { context, thread } = args;
+
   if (
     context.state.environmentId === null &&
     context.state.provisionEventSequence === null
   ) {
     const intent = context.request.environmentIntent;
+
     if (
       intent.type === "provider" ||
       getEnvironment(deps.db, intent.environmentId)?.status !== "ready"
@@ -212,7 +247,8 @@ export async function ensureThreadProvisionEnvironmentReady(
         context,
       });
     }
-    if (context.request.environmentIntent.type === "provider") {
+
+    if (requiresTitleBeforeEnvironment(intent)) {
       if (!context.request.titleProvided)
         await inferThreadMetadata(deps, {
           input: context.request.input,
@@ -232,18 +268,23 @@ export async function ensureThreadProvisionEnvironmentReady(
             if (!metadata.titleApplied || !metadata.title) {
               return;
             }
+
             const titledThread = getThread(deps.db, thread.id);
+
             const environment = titledThread?.environmentId
               ? getEnvironment(deps.db, titledThread.environmentId)
               : null;
+
             if (
               !titledThread ||
+              titledThread.title !== metadata.title ||
               !environment ||
               (titledThread.status !== "active" &&
                 titledThread.status !== "idle")
             ) {
               return;
             }
+
             dispatchThreadRenameCommand(deps, {
               environment: {
                 id: environment.id,
@@ -266,14 +307,17 @@ export async function ensureThreadProvisionEnvironmentReady(
       }
     }
   }
+
   if (
     getThreadProvisionContext(deps.db, thread.id)?.state.provisioningId !==
     context.state.provisioningId
   )
     return null;
   let environment: EnvironmentRow | null;
+
   if (context.request.environmentIntent.type === "provider") {
     const result = await resolveEnvironmentProvider(deps, { context, thread });
+
     if (result.kind === "waiting") return null;
     environment = result.environment;
   } else {
@@ -282,6 +326,7 @@ export async function ensureThreadProvisionEnvironmentReady(
       context.request.environmentIntent.environmentId,
     );
   }
+
   if (environment === null)
     throw new ApiError(404, "environment_not_found", "Environment not found");
   await advanceEnvironmentProvisioning(deps, {
@@ -289,6 +334,7 @@ export async function ensureThreadProvisionEnvironmentReady(
     threadId: thread.id,
   });
   const attached = getThreadProvisionContext(deps.db, thread.id);
+
   if (attached === null || attached.state.environmentId !== environment.id)
     return null;
 

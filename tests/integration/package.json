@@ -1,34 +1,35 @@
 {
-  "name": "@bb/integration-tests",
+  "name": "@omnyo/integration-tests",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
+    "test:local-server-move": "vitest run --config vitest.local-move.config.ts",
     "test:integration": "vitest run --config vitest.real-provider.config.ts",
     "e2e:mobile-backend": "cross-env NODE_ENV=test node --conditions=source --import tsx mobile-e2e/backend.ts",
     "e2e:mobile-connect-stub": "node --import tsx mobile-e2e/connect-stub.ts"
   },
   "dependencies": {
-    "@bb/config": "workspace:*",
-    "@bb/db": "workspace:*",
-    "@bb/domain": "workspace:*",
-    "@bb/host-daemon": "workspace:*",
-    "@bb/host-daemon-contract": "workspace:*",
-    "@bb/server": "workspace:*",
-    "@bb/server-contract": "workspace:*",
-    "@bb/test-helpers": "workspace:*",
-    "@hono/node-server": "^1.19.11",
-    "drizzle-orm": "^0.38.4",
+    "@omnyo/config": "workspace:*",
+    "@omnyo/db": "workspace:*",
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/host-daemon": "workspace:*",
+    "@omnyo/host-daemon-contract": "workspace:*",
+    "@omnyo/server": "workspace:*",
+    "@omnyo/server-contract": "workspace:*",
+    "@omnyo/test-helpers": "workspace:*",
+    "@hono/node-server": "1.19.15",
+    "drizzle-orm": "0.45.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "better-sqlite3": "12.10.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^4.1.1"
+    "vitest": "4.1.11"
   }
 }

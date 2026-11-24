@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AppKeybindings } from "@bb/domain";
+import type { AppKeybindings } from "@omnyo/domain";
 import { resolveDesktopBrowserAppCommand } from "../src/desktop-browser-shortcuts.js";
 
 const keybindings: AppKeybindings = [
@@ -47,6 +47,7 @@ describe("resolveDesktopBrowserAppCommand", () => {
         shift: true,
       },
     };
+
     const input = {
       key: "ArrowRight",
       code: "ArrowRight",
@@ -55,6 +56,7 @@ describe("resolveDesktopBrowserAppCommand", () => {
       metaKey: true,
       shiftKey: true,
     };
+
     expect(
       resolveDesktopBrowserAppCommand({
         input,
@@ -82,6 +84,7 @@ describe("resolveDesktopBrowserAppCommand", () => {
         },
         when: { all: ["mainSurface", "macPlatform"], none: [] },
       };
+
       const args = {
         input: {
           key: "ArrowRight",
@@ -96,6 +99,7 @@ describe("resolveDesktopBrowserAppCommand", () => {
         splitNavigationEnabled: true,
         splitNavigationCommands: [command],
       };
+
       expect(resolveDesktopBrowserAppCommand(args)).toBeNull();
       expect(
         resolveDesktopBrowserAppCommand({
@@ -124,6 +128,7 @@ describe("resolveDesktopBrowserAppCommand", () => {
       command: "pane.focus.down",
       shortcut: { ...keybindings[0]!.shortcut, key: "ArrowDown", shift: true },
     };
+
     const args = {
       input: {
         key: "ArrowDown",
@@ -137,6 +142,7 @@ describe("resolveDesktopBrowserAppCommand", () => {
       keybindings: [binding],
       splitNavigationEnabled: true,
     };
+
     expect(resolveDesktopBrowserAppCommand(args)).toBeNull();
     expect(
       resolveDesktopBrowserAppCommand({
@@ -249,10 +255,12 @@ describe("resolveDesktopBrowserAppCommand", () => {
       },
       when: { all: ["mainSurface", "browserFocus"], none: [] },
     };
+
     const focusBinding: AppKeybindings[number] = {
       ...reloadBinding,
       command: "browser.focusLocation",
     };
+
     expect(
       resolveDesktopBrowserAppCommand({
         input: {

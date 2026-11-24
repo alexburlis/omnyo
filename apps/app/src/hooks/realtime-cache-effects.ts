@@ -1,5 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { assertNever } from "@bb/core-ui";
+import type { PluginSignal } from "@omnyo/server-contract";
+import { getCachedDispatchReadinessQueryKeys } from "./cache-owners/dispatch-readiness-cache-owner";
+import { assertNever } from "@omnyo/core-ui";
 import {
   createDebouncedCallbackScheduler,
   type ChangedMessage,
@@ -10,7 +12,7 @@ import {
   type ThreadEventType,
   type ThreadChangeMetadata,
   type ThreadChangeKind,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   invalidateRealtimeQueriesAfterServerReconnect,
   invalidateRealtimeQueriesFetchedBeforeInitialConnect,
@@ -28,6 +30,8 @@ import {
   createFlushOncePredicate,
   disposeTrailingActiveRefetches,
   executeRealtimeDirtyHandlers,
+  invalidateQueryKeysWithoutCancelingActiveFetches,
+  invalidateQueryKeysWithoutRefetch,
   REALTIME_ENVIRONMENT_CHANGE_REGISTRY,
   REALTIME_HOST_CHANGE_REGISTRY,
   REALTIME_PROJECT_CHANGE_REGISTRY,
@@ -61,7 +65,9 @@ const {
   debounceMs: INVALIDATION_DEBOUNCE_MS,
   maxWaitMs: INVALIDATION_MAX_WAIT_MS,
 } = resolveThreadInvalidationDebounce(detectCoarsePointer());
+
 const ENVIRONMENT_INVALIDATION_DEBOUNCE_MS = 250;
+
 const ENVIRONMENT_INVALIDATION_MAX_WAIT_MS = 500;
 
 type RealtimeConnectedEvent =
@@ -73,6 +79,7 @@ interface RealtimeCacheEffects {
   handleChanged: (message: ChangedMessage) => void;
   handleConnected: (event: RealtimeConnectedEvent) => void;
   handleResumed: () => void;
+  handlePluginSignal: (signal: PluginSignal) => void;
 }
 
 export interface RealtimeCacheEffectsVisibility {
@@ -120,9 +127,11 @@ function mergeEventTypes(
   if (!current) {
     return next;
   }
+
   if (!next) {
     return current;
   }
+
   return Array.from(new Set([...current, ...next]));
 }
 
@@ -138,36 +147,55 @@ function mergeThreadChangeMetadata({
   statusChanged,
 }: MergeThreadChangeMetadataArgs): ThreadChangeMetadata {
   const eventTypes = mergeEventTypes(current?.eventTypes, next.eventTypes);
+
   const backgroundActivityChanged =
     next.backgroundActivityChanged ?? current?.backgroundActivityChanged;
+
   const hasPendingInteraction =
     next.hasPendingInteraction ?? current?.hasPendingInteraction;
+
   const projectId = next.projectId ?? current?.projectId;
+
+  const listEntry = next.listEntry ?? current?.listEntry;
+
   const statusChange = statusChanged
     ? next.statusChange
     : (next.statusChange ?? current?.statusChange);
+
   const metadata: ThreadChangeMetadata = {};
+
   const sequences = [current?.timelineSequence, next.timelineSequence].filter(
     (sequence): sequence is number => sequence !== undefined,
   );
+
   if (sequences.length > 0) {
     metadata.timelineSequence = Math.max(...sequences);
   }
+
   if (eventTypes) {
     metadata.eventTypes = eventTypes;
   }
+
   if (backgroundActivityChanged !== undefined) {
     metadata.backgroundActivityChanged = backgroundActivityChanged;
   }
+
   if (hasPendingInteraction !== undefined) {
     metadata.hasPendingInteraction = hasPendingInteraction;
   }
+
   if (projectId !== undefined) {
     metadata.projectId = projectId;
   }
+
+  if (listEntry !== undefined) {
+    metadata.listEntry = listEntry;
+  }
+
   if (statusChange !== undefined) {
     metadata.statusChange = statusChange;
   }
+
   return metadata;
 }
 
@@ -191,10 +219,12 @@ function mergeThreadChanges({
   threadId,
 }: MergeThreadChangesArg): void {
   let entry = state.changedThreadKinds.get(threadId);
+
   if (!entry) {
     entry = new Set<ThreadChangeKind>();
     state.changedThreadKinds.set(threadId, entry);
   }
+
   for (const change of changes) {
     entry.add(change);
   }
@@ -205,6 +235,7 @@ function flushThreadInvalidations(
   state: ThreadChangeState,
 ): void {
   const flushOnce = createFlushOncePredicate();
+
   for (const changeKind of state.globalChangeKinds) {
     executeRealtimeDirtyHandlers({
       context: {
@@ -213,6 +244,7 @@ function flushThreadInvalidations(
         timelineSequence: undefined,
         flushOnce,
         hasPendingInteraction: undefined,
+        listEntry: undefined,
         projectId: undefined,
         queryClient,
         statusChange: undefined,
@@ -224,6 +256,7 @@ function flushThreadInvalidations(
 
   for (const [threadId, changeKinds] of state.changedThreadKinds) {
     const metadata = state.metadataByThreadId.get(threadId);
+
     for (const changeKind of changeKinds) {
       executeRealtimeDirtyHandlers({
         context: {
@@ -232,6 +265,7 @@ function flushThreadInvalidations(
           timelineSequence: metadata?.timelineSequence,
           flushOnce,
           hasPendingInteraction: metadata?.hasPendingInteraction,
+          listEntry: metadata?.listEntry,
           projectId: metadata?.projectId,
           queryClient,
           statusChange: metadata?.statusChange,
@@ -265,7 +299,9 @@ function applyImmediateThreadChanges({
         statusChanged: changes.includes("status-changed"),
       })
     : undefined;
+
   const flushOnce = createFlushOncePredicate();
+
   for (const changeKind of changes) {
     executeRealtimeDirtyHandlers({
       context: {
@@ -274,6 +310,7 @@ function applyImmediateThreadChanges({
         timelineSequence: merged?.timelineSequence,
         flushOnce,
         hasPendingInteraction: merged?.hasPendingInteraction,
+        listEntry: merged?.listEntry,
         projectId: merged?.projectId,
         queryClient,
         statusChange: merged?.statusChange,
@@ -299,6 +336,7 @@ function recordThreadChange(
       threadId: message.id,
     });
     const statusChanged = message.changes.includes("status-changed");
+
     if (message.metadata || statusChanged) {
       state.metadataByThreadId.set(
         message.id,
@@ -309,6 +347,7 @@ function recordThreadChange(
         }),
       );
     }
+
     return;
   }
 
@@ -356,10 +395,12 @@ function mergeInto<K, V>(
   values: readonly V[],
 ): void {
   let entry = target.get(key);
+
   if (!entry) {
     entry = new Set<V>();
     target.set(key, entry);
   }
+
   addAll(entry, values);
 }
 
@@ -383,21 +424,36 @@ export function createRealtimeCacheEffects({
   queryClient,
   visibility = DEFAULT_VISIBILITY,
 }: RealtimeCacheEffectsOptions): RealtimeCacheEffects {
+  const refreshDispatchReadiness = (
+    pluginId: string | null,
+    includeAll = false,
+  ): void => {
+    const queryKeys = getCachedDispatchReadinessQueryKeys({
+      queryClient,
+      pluginId,
+      includeAll,
+    });
+
+    if (visibility.isDocumentVisible())
+      invalidateQueryKeysWithoutCancelingActiveFetches({
+        queryClient,
+        queryKeys,
+        includeInactive: true,
+      });
+    else invalidateQueryKeysWithoutRefetch({ queryClient, queryKeys });
+  };
+
   const threadChangeState = createThreadChangeState();
-  let hasDeferredThreadChanges = false;
   const deferredNonThreadChanges = createDeferredNonThreadChanges();
+
   const invalidationScheduler = createDebouncedCallbackScheduler({
     debounceMs: INVALIDATION_DEBOUNCE_MS,
     maxWaitMs: INVALIDATION_MAX_WAIT_MS,
     onFlush: () => {
-      if (!visibility.isDocumentVisible()) {
-        hasDeferredThreadChanges = true;
-        return;
-      }
-      hasDeferredThreadChanges = false;
       flushThreadInvalidations(queryClient, threadChangeState);
     },
   });
+
   const environmentInvalidator = createBufferedEnvironmentInvalidator({
     debounceMs: ENVIRONMENT_INVALIDATION_DEBOUNCE_MS,
     flushChangedEnvironmentIds: (changedEnvironments) => {
@@ -409,8 +465,10 @@ export function createRealtimeCacheEffects({
             changeKinds,
           );
         }
+
         return;
       }
+
       for (const { changeKinds, environmentId } of changedEnvironments) {
         invalidateRealtimeEnvironmentChange({
           changeKinds,
@@ -433,6 +491,7 @@ export function createRealtimeCacheEffects({
       });
     }
   };
+
   const applyProjectChanges = (
     projectId: string | undefined,
     changeKinds: Iterable<ProjectChangeKind>,
@@ -444,14 +503,17 @@ export function createRealtimeCacheEffects({
       });
     }
   };
+
   const applySystemChanges = (
     changeKinds: Iterable<SystemChangeKind>,
   ): void => {
     for (const changeKind of changeKinds) {
       const rule = REALTIME_SYSTEM_CHANGE_REGISTRY[changeKind];
+
       if (!rule) {
         continue;
       }
+
       executeRealtimeDirtyHandlers({
         context: { queryClient },
         handlers: rule.dirty,
@@ -463,24 +525,27 @@ export function createRealtimeCacheEffects({
     if (hasDeferredNonThreadChanges(deferredNonThreadChanges)) {
       const { environmentKindsById, hostKinds, projectKindsById, systemKinds } =
         deferredNonThreadChanges;
+
       for (const [environmentId, changeKinds] of environmentKindsById) {
         environmentInvalidator.markChanged(
           environmentId,
           Array.from(changeKinds),
         );
       }
+
       applyHostChanges(undefined, hostKinds);
+
       for (const [projectId, changeKinds] of projectKindsById) {
         applyProjectChanges(projectId, changeKinds);
       }
+
+      if (systemKinds.has("plugins-changed"))
+        refreshDispatchReadiness(null, true);
       applySystemChanges(systemKinds);
       environmentKindsById.clear();
       hostKinds.clear();
       projectKindsById.clear();
       systemKinds.clear();
-    }
-    if (hasDeferredThreadChanges) {
-      invalidationScheduler.flush();
     }
   };
 
@@ -500,28 +565,43 @@ export function createRealtimeCacheEffects({
     },
     handleChanged: (message) => {
       const documentVisible = visibility.isDocumentVisible();
+
+      if (
+        (message.entity === "thread" &&
+          message.changes.some(
+            (kind) =>
+              kind === "status-changed" ||
+              kind === "thread-created" ||
+              kind === "thread-deleted" ||
+              kind === "archived-changed" ||
+              kind === "environment-changed",
+          )) ||
+        (message.entity === "system" &&
+          message.changes.includes("plugins-changed"))
+      )
+        refreshDispatchReadiness(null, message.entity === "system");
+
       switch (message.entity) {
         case "thread": {
           if (message.id) {
             applyRealtimeThreadPatches(message.changes, {
               hasPendingInteraction: message.metadata?.hasPendingInteraction,
+              listEntry: message.metadata?.listEntry,
               queryClient,
               statusChange: message.metadata?.statusChange,
               threadId: message.id,
             });
           }
-          if (!documentVisible) {
-            recordThreadChange(threadChangeState, message);
-            hasDeferredThreadChanges = true;
-            break;
-          }
+
           if (message.metadata?.eventTypes?.includes("turn/completed")) {
             recordThreadChange(threadChangeState, message);
             invalidationScheduler.flush();
             break;
           }
+
           const { debounced, immediate } =
             partitionThreadChangesByFlushPriority(message.changes);
+
           if (debounced) {
             recordThreadChange(threadChangeState, {
               ...message,
@@ -529,6 +609,7 @@ export function createRealtimeCacheEffects({
             });
             invalidationScheduler.schedule();
           }
+
           if (immediate) {
             applyImmediateThreadChanges({
               changes: immediate,
@@ -537,12 +618,15 @@ export function createRealtimeCacheEffects({
               queryClient,
             });
           }
+
           break;
         }
+
         case "environment":
           if (!message.id) {
             break;
           }
+
           if (!documentVisible) {
             mergeInto(
               deferredNonThreadChanges.environmentKindsById,
@@ -551,6 +635,7 @@ export function createRealtimeCacheEffects({
             );
             break;
           }
+
           environmentInvalidator.markChanged(message.id, message.changes);
           break;
         case "host":
@@ -558,6 +643,7 @@ export function createRealtimeCacheEffects({
             addAll(deferredNonThreadChanges.hostKinds, message.changes);
             break;
           }
+
           applyHostChanges(message.id, message.changes);
           break;
         case "project":
@@ -569,6 +655,7 @@ export function createRealtimeCacheEffects({
             );
             break;
           }
+
           applyProjectChanges(message.id, message.changes);
           break;
         case "system":
@@ -576,6 +663,7 @@ export function createRealtimeCacheEffects({
             addAll(deferredNonThreadChanges.systemKinds, message.changes);
             break;
           }
+
           applySystemChanges(message.changes);
           break;
         default:
@@ -583,14 +671,18 @@ export function createRealtimeCacheEffects({
       }
     },
     handleConnected: (event) => {
+      refreshDispatchReadiness(null);
       applySystemChanges(["plugins-changed"]);
+
       if (event.reconnected) {
         invalidateRealtimeQueriesAfterServerReconnect({
           disconnectedAt: event.disconnectedAt,
           queryClient,
         });
+
         return;
       }
+
       refetchErroredRealtimeQueriesOnInitialConnect({ queryClient });
       invalidateRealtimeQueriesFetchedBeforeInitialConnect({
         connectedAt: Date.now(),
@@ -601,7 +693,14 @@ export function createRealtimeCacheEffects({
       if (!visibility.isDocumentVisible()) {
         return;
       }
+
+      refreshDispatchReadiness(null);
       refetchActiveRealtimeQueriesOnResume({ queryClient });
+    },
+    handlePluginSignal: (signal) => {
+      if (signal.channel !== "dispatch-readiness-changed") return;
+
+      refreshDispatchReadiness(signal.pluginId);
     },
   };
 }

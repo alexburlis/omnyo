@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Host, PermissionMode } from "@bb/domain";
+import type { Host, HostAvailability, PermissionMode } from "@omnyo/domain";
 import { apiClient } from "@/lib/api-server";
 import { request } from "@/lib/api";
 import { sdk } from "@/lib/sdk";
@@ -71,6 +71,26 @@ export function useUpdateHostPermissionCeiling() {
   });
 }
 
+interface SetHostAvailabilityRequest {
+  hostId: string;
+  availability: HostAvailability;
+}
+
+export function useSetHostAvailability() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    meta: {
+      showErrorToast: false,
+    },
+    mutationFn: ({ hostId, availability }: SetHostAvailabilityRequest) =>
+      sdk.hosts.experimental_setAvailability({ hostId, availability }),
+    onSuccess: () => {
+      invalidateHostListQueries({ queryClient });
+    },
+  });
+}
+
 export function useRetryHostUpdate() {
   return useMutation({
     mutationFn: (hostId: string) => sdk.hosts.retryUpdate({ hostId }),
@@ -81,6 +101,7 @@ function useHostLifecycleMutation<Result>(
   mutationFn: (hostId: string) => Promise<Result>,
 ) {
   const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn,
     onSuccess: () => {

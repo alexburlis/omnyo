@@ -29,7 +29,7 @@ import {
   installTestPluginRuntime,
   renderSlot,
   type PluginSdkTestFakes,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 import {
   collapsedSidebarSectionIdsAtom,
   sidebarCollapsedMachinesAtom,
@@ -42,13 +42,16 @@ import {
 import type { OrganizationMode as SidebarOrganizationMode } from "../../shared/preferences.js";
 import {
   makeSidebarThread,
+  makeSidebarWork,
   sdkResult,
+  withDisabledWorkflowsSdk,
   type SidebarThreadOverrides,
 } from "../model/fixtures.js";
 
 vi.mock("../model/machine-thread-groups.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../model/machine-thread-groups.js")>();
+
   return {
     ...actual,
     buildMachineThreadGroups: vi.fn(actual.buildMachineThreadGroups),
@@ -56,8 +59,10 @@ vi.mock("../model/machine-thread-groups.js", async (importOriginal) => {
 });
 
 installTestPluginRuntime();
+
 const { ActiveSidebarModeSections, MachineModeSections } =
   await import("./ProjectList.js");
+
 const { useSidebarModeSectionOrder } =
   await import("./useSidebarModeSectionOrder.js");
 
@@ -79,11 +84,13 @@ function getModeOrderProbeConfig(mode: SidebarOrganizationMode): {
 
 function ModeOrderProbe({ mode }: { mode: SidebarOrganizationMode }) {
   const config = getModeOrderProbeConfig(mode);
+
   const { order } = useSidebarModeSectionOrder({
     mode,
     entitySectionIds: config.entitySectionIds,
     hasThreadsSection: config.hasThreadsSection,
     showPinnedSection: true,
+    showShelfSection: false,
   });
 
   return <div data-testid={`${mode}-order`}>{order.join(",")}</div>;
@@ -116,6 +123,7 @@ function ActiveModeOrderProbe({
 
 function StoredActiveModeOrderProbe() {
   const mode = useAtomValue(sidebarOrganizationModeAtom);
+
   return <ActiveModeOrderProbe mode={mode} />;
 }
 
@@ -125,6 +133,7 @@ function makeThread(overrides: SidebarThreadOverrides = {}): SidebarThread {
     projectId: "proj_machine",
     title: "Machine activity",
     titleFallback: "Machine activity",
+    experimental_work: makeSidebarWork("working"),
     status: "active",
     lastReadAt: 1,
     latestAttentionAt: 2,
@@ -152,11 +161,15 @@ function MachineModeProbe({
   const [collapsedSectionIds, setCollapsedSectionIds] = useAtom(
     collapsedSidebarSectionIdsAtom,
   );
+
   const collapsedSectionIdSet = useMemo(
     () => new Set(collapsedSectionIds),
     [collapsedSectionIds],
   );
+
   const handleToggleCollapsed = (id: CollapsibleSidebarSectionId) => {
+    if (id === "shelf") return;
+
     setCollapsedSectionIds((current) =>
       current.includes(id)
         ? current.filter((sectionId) => sectionId !== id)
@@ -178,14 +191,14 @@ function MachineModeProbe({
         pinnedThreads={[]}
         onReorderPinnedThread={vi.fn()}
         threadsSection={{ label: "Threads" }}
+        shelfSection={{ label: "Shelf", content: null }}
+        showShelfSection={false}
         collapsedSectionIds={collapsedSectionIdSet}
-        collapsedThreadIds={new Set()}
         collapsedEnvironmentIds={new Set()}
         compareThreads={() => 0}
         renderSectionDisplayOptions={() => null}
         isSectionDisplayOptionsOpen={() => false}
         onToggleCollapsed={handleToggleCollapsed}
-        onToggleThreadCollapsed={vi.fn()}
         onToggleEnvironmentCollapsed={vi.fn()}
         selectedThreadId={selectedThreadId}
       />
@@ -242,7 +255,7 @@ function renderMachineMode(
               : null,
         })),
       },
-      sdk,
+      sdk: withDisabledWorkflowsSdk(sdk),
     },
   );
 }
@@ -258,9 +271,11 @@ describe("sidebar organization mode sections", () => {
     store.set(sidebarSectionOrderAtom, ["threads", "project:a", "pinned"]);
     store.set(sidebarManualSectionOrderAtom, ["section:stale"]);
     store.set(sidebarMachineSectionOrderAtom, ["machine:stale"]);
+
     const renderChronological = vi.fn(() => (
       <ModeOrderProbe mode="chronological" />
     ));
+
     const renderMachine = vi.fn(() => <MachineModeProbe />);
     const renderProject = vi.fn(() => <ModeOrderProbe mode="project" />);
 
@@ -341,6 +356,7 @@ describe("sidebar organization mode sections", () => {
     const hostUpdate = vi.fn(sdkResult({ ok: true }));
     store.set(sidebarMachineSectionOrderAtom, ["machine:host_rename"]);
     store.set(sidebarCollapsedMachinesAtom, ["host_rename"]);
+
     const { sdkCalls } = renderMachineMode(
       store,
       [makeThread({ host: { id: "host_rename", name: "host_rename" } })],
@@ -371,10 +387,12 @@ describe("sidebar organization mode sections", () => {
     const { sdkCalls } = renderMachineMode(store, [makeThread()]);
     fireEvent.doubleClick(screen.getByTitle("No machine"));
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(sdkCalls).toEqual([]);
+    expect(sdkCalls.filter((call) => call.method === "hosts.update")).toEqual(
+      [],
+    );
   });
 
-  it("surfaces shared runtime activity for a collapsed machine section", () => {
+  it("surfaces server-reported work for a collapsed machine section", () => {
     const store = createStore();
     store.set(sidebarMachineSectionOrderAtom, ["machine:no-machine"]);
     store.set(sidebarCollapsedMachinesAtom, ["no-machine"]);
@@ -387,7 +405,7 @@ describe("sidebar organization mode sections", () => {
         document.querySelectorAll("[data-thread-status-glyph]"),
         (glyph) => glyph.getAttribute("data-thread-status-glyph"),
       ),
-    ).toEqual(["plan-mode"]);
+    ).toEqual(["runtime"]);
   });
 
   it("marks More and the hidden section as the breadcrumb to the selected thread", async () => {
@@ -433,7 +451,7 @@ describe("sidebar organization mode sections", () => {
 
     const more = screen.getByRole("button", { name: "More machines" });
     expect(
-      more.querySelector('[data-thread-status-glyph="plan-mode"]'),
+      more.querySelector('[data-thread-status-glyph="runtime"]'),
     ).not.toBeNull();
     expect(screen.queryByText("No machine")).toBeNull();
     expect(screen.queryByText("Machine activity")).toBeNull();
@@ -444,7 +462,7 @@ describe("sidebar organization mode sections", () => {
     fireEvent.keyDown(section, { key: "ArrowRight" });
     expect(await screen.findByText("Machine activity")).not.toBeNull();
     expect(
-      more.querySelector('[data-thread-status-glyph="plan-mode"]'),
+      more.querySelector('[data-thread-status-glyph="runtime"]'),
     ).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Add to list" }));
 

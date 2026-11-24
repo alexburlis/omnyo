@@ -13,6 +13,7 @@ function completion(overrides: Record<string, unknown> = {}) {
     type: "imageGeneration",
     ...overrides,
   };
+
   return {
     item,
     value: {
@@ -60,6 +61,7 @@ describe("legacy image generation completion", () => {
       savedPath: undefined,
       transparentBackground: null,
     });
+
     expect(parseLegacyImageGenerationCompletion(value)).toMatchObject({
       status: "failed",
       path: null,

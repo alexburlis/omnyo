@@ -36,6 +36,23 @@ describe("isMarkdownCodeBlock", () => {
     );
   });
 
+  it("keeps inline math inline while KaTeX is still loading", () => {
+    expect(
+      isMarkdownCodeBlock({
+        className: "language-math math-inline",
+        codeText: "E = mc^2",
+        language: "math",
+      }),
+    ).toBe(false);
+    expect(
+      isMarkdownCodeBlock({
+        className: "language-math math-display",
+        codeText: "x^2",
+        language: "math",
+      }),
+    ).toBe(true);
+  });
+
   it("keeps inline code containing mermaid as inline code", () => {
     expect(isMarkdownCodeBlock({ codeText: "mermaid", language: null })).toBe(
       false,

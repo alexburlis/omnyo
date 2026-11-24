@@ -35,6 +35,7 @@ function cacheInput(): WorkflowCallCacheInput {
 describe("workflow call cache identity", () => {
   it("is deterministic and independent of recursive object key order", () => {
     const first = cacheInput();
+
     const second: WorkflowCallCacheInput = {
       executionSemantics: {
         maxRepairAttempts: 2,
@@ -155,6 +156,7 @@ describe("workflow call cache identity", () => {
 
   it("ignores display-only title, label, and phase properties", () => {
     const input = cacheInput();
+
     const decorated = {
       ...input,
       title: "Visible worker title",
@@ -203,10 +205,12 @@ describe("canonical JSON", () => {
 
   it("rejects accessors without invoking them", () => {
     let invoked = false;
+
     const value = Object.defineProperty({}, "answer", {
       enumerable: true,
       get() {
         invoked = true;
+
         return 42;
       },
     });
@@ -224,6 +228,7 @@ describe("canonical JSON", () => {
 
   it("rejects exotic prototypes and forbidden prototype keys", () => {
     expect(() => canonicalizeJson(new Date(0))).toThrow("plain objects");
+
     for (const key of ["__proto__", "constructor", "prototype"]) {
       const value = Object.create(null);
       Object.defineProperty(value, key, { enumerable: true, value: 1 });
@@ -249,14 +254,49 @@ describe("workflow call result reuse", () => {
       "failed",
       "cancelled",
     ];
+
     for (const status of nonReusableStatuses) {
       expect(reusableSuccessfulResult({ status, result: "stale" })).toEqual({
         reusable: false,
       });
     }
+
     expect(
       reusableSuccessfulResult({ status: "succeeded", result: null }),
     ).toEqual({ reusable: false });
     expect(reusableSuccessfulResult(null)).toEqual({ reusable: false });
   });
+});
+
+it("binds cross-environment identity to environment, machine and workspace, including the suffix", () => {
+  const origin = cacheInput();
+
+  const placement = {
+    environmentId: "env-target",
+    hostId: "host-target",
+    workspacePath: "C:\\workspace",
+  };
+
+  const targetKey = computeWorkflowCallCacheKey({ ...origin, placement });
+  expect(computeWorkflowCallCacheKey({ ...origin, placement: null })).toBe(
+    computeWorkflowCallCacheKey(origin),
+  );
+
+  for (const changed of [
+    { ...placement, environmentId: "env-other" },
+    { ...placement, hostId: "host-other" },
+    { ...placement, workspacePath: "C:\\other" },
+  ]) {
+    const changedKey = computeWorkflowCallCacheKey({
+      ...origin,
+      placement: changed,
+    });
+
+    expect(changedKey).not.toBe(targetKey);
+    expect(
+      computeWorkflowCallCacheKey({ ...origin, previousCacheKey: changedKey }),
+    ).not.toBe(
+      computeWorkflowCallCacheKey({ ...origin, previousCacheKey: targetKey }),
+    );
+  }
 });

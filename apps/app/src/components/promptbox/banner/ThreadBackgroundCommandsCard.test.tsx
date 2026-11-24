@@ -13,10 +13,11 @@ import {
   backgroundCommandRow,
   workflowRow,
 } from "@/test/fixtures/thread-timeline-rows";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { ThreadBackgroundCommandsCard } from "./ThreadBackgroundCommandsCard";
 
 let resizeObserverCallback: ResizeObserverCallback | null = null;
+
 let resizeObserver: TestResizeObserver | null = null;
 
 class TestResizeObserver implements ResizeObserver {
@@ -34,9 +35,11 @@ function reportCardWidth(target: Element, width: number): void {
   if (!resizeObserverCallback || !resizeObserver) {
     throw new Error("Expected the background card to observe its width.");
   }
+
   const callback = resizeObserverCallback;
   const observer = resizeObserver;
   const size: ResizeObserverSize = { inlineSize: width, blockSize: 32 };
+
   const entry: ResizeObserverEntry = {
     target,
     contentRect: new DOMRect(0, 0, width, 32),
@@ -44,6 +47,7 @@ function reportCardWidth(target: Element, width: number): void {
     contentBoxSize: [size],
     devicePixelContentBoxSize: [size],
   };
+
   act(() => callback([entry], observer));
 }
 
@@ -62,6 +66,7 @@ describe("ThreadBackgroundCommandsCard", () => {
 
     function CompactCard() {
       const [isExpanded, setIsExpanded] = useState(false);
+
       return (
         <CompactViewportOverrideProvider isCompactViewport>
           <ThreadBackgroundCommandsCard
@@ -85,6 +90,7 @@ describe("ThreadBackgroundCommandsCard", () => {
     const toggle = screen.getByRole("button", {
       name: "Running 1 background command",
     });
+
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(setIntervalSpy).not.toHaveBeenCalled();
 
@@ -130,6 +136,7 @@ describe("ThreadBackgroundCommandsCard", () => {
 
     function CompactCard() {
       const [isExpanded, setIsExpanded] = useState(false);
+
       return (
         <CompactViewportOverrideProvider isCompactViewport>
           <ThreadBackgroundCommandsCard
@@ -156,6 +163,7 @@ describe("ThreadBackgroundCommandsCard", () => {
     const toggle = screen.getByRole("button", {
       name: "Running 1 background agent",
     });
+
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.click(toggle);
@@ -190,7 +198,8 @@ describe("ThreadBackgroundCommandsCard", () => {
     const item = screen.getByLabelText(
       `Background agent: ${description} · Model haiku`,
     );
-    expect(item.textContent).toContain("Running background agent:");
+
+    expect(item.textContent).toContain("Background agent");
     expect(item.textContent).toContain(description);
     expect(screen.getByTitle("Model: haiku").textContent).toBe("haiku");
     expect(screen.queryByRole("button")).toBeNull();

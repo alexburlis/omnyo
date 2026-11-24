@@ -7,6 +7,7 @@ import {
 } from "./pasted-thread-link-candidates";
 
 const markdownParser = unified().use(remarkParse).freeze();
+
 const protectedNodeTypes = new Set<Nodes["type"]>([
   "blockquote",
   "code",
@@ -21,15 +22,15 @@ const protectedNodeTypes = new Set<Nodes["type"]>([
 
 export function findPastedThreadLinks({
   text,
-  origin,
+  origins,
 }: {
   text: string;
-  origin: string;
+  origins: readonly string[];
 }): PastedThreadLink[] {
   if (
     findPastedThreadLinkCandidates({
       text,
-      origin,
+      origins,
       offset: 0,
       allowMarkdownSuffix: true,
     }).length === 0
@@ -38,16 +39,19 @@ export function findPastedThreadLinks({
   }
 
   const links: PastedThreadLink[] = [];
+
   const collect = (node: Nodes): void => {
     if (protectedNodeTypes.has(node.type)) return;
+
     if (node.type === "text") {
       const from = node.position?.start.offset;
       const to = node.position?.end.offset;
+
       if (from !== undefined && to !== undefined) {
         links.push(
           ...findPastedThreadLinkCandidates({
             text: text.slice(from, to),
-            origin,
+            origins,
             offset: from,
             allowMarkdownSuffix: false,
           }),
@@ -57,6 +61,8 @@ export function findPastedThreadLinks({
       for (const child of node.children) collect(child);
     }
   };
+
   collect(markdownParser.parse(text));
+
   return links;
 }

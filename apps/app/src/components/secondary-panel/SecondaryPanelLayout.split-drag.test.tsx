@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   PaneContext,
   type PaneContextValue,
@@ -11,6 +11,7 @@ import { beginSplitDrag, decideThreadDrop } from "@/lib/split-drag";
 import { SecondaryPanelLayout } from "./SecondaryPanelLayout";
 
 const noop = () => {};
+
 const context: PaneContextValue = {
   paneId: "pane-test",
   isFocused: true,
@@ -65,10 +66,12 @@ it.each([false, true])(
         return new DOMRect(200, 0, this === workspace ? 1000 : width, 600);
       },
     );
+
     const originalHitTest = Object.getOwnPropertyDescriptor(
       document,
       "elementsFromPoint",
     );
+
     Object.defineProperty(document, "elementsFromPoint", {
       configurable: true,
       value: () => [chat],
@@ -82,6 +85,7 @@ it.each([false, true])(
         decideThreadDrop({ zone, threadAlreadyOpen: false, atMaxPanes: false }),
       onDrop,
     });
+
     try {
       fireEvent(
         window,

@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { getAppKeybindingOverrides } from "@bb/db";
+import { getAppKeybindingOverrides } from "@omnyo/db";
 import {
   PANE_FOCUS_APP_COMMAND_IDS,
+  RAIL_JUMP_APP_COMMAND_IDS,
   THREAD_JUMP_APP_COMMAND_IDS,
   applyAppKeybindingOverrides,
   appKeybindingOverridesSchema,
   isAppKeybindingAvailableForClient,
   matchesAppShortcut,
-} from "@bb/domain";
-import { systemConfigResponseSchema } from "@bb/server-contract";
+} from "@omnyo/domain";
+import { systemConfigResponseSchema } from "@omnyo/server-contract";
 import { DEFAULT_APP_KEYBINDINGS } from "../../src/services/system/app-keybindings.js";
 import { readJson } from "../helpers/json.js";
 import { withTestHarness } from "../helpers/test-app.js";
@@ -25,6 +26,7 @@ function shortcutIdentity(
   isMac: boolean,
 ): string {
   const { shortcut } = binding;
+
   return JSON.stringify({
     key: shortcut.key.toLowerCase(),
     meta: shortcut.meta || (shortcut.mod && isMac),
@@ -40,6 +42,7 @@ function bindingContextsOverlap(
 ): boolean {
   const leftAll = new Set(left.when.all);
   const rightAll = new Set(right.when.all);
+
   return (
     !left.when.none.some((context) => rightAll.has(context)) &&
     !right.when.none.some((context) => leftAll.has(context))
@@ -67,16 +70,20 @@ describe("app keybindings", () => {
           },
         },
       ];
+
       const response = await harness.app.request("/api/v1/settings/keyboard", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(overrides),
       });
+
       expect(response.status).toBe(200);
       expect(getAppKeybindingOverrides(harness.db)).toEqual(overrides);
+
       const config = systemConfigResponseSchema.parse(
         await readJson(await harness.app.request("/api/v1/system/config")),
       );
+
       expect(config.keybindingOverrides).toEqual(overrides);
       expect(
         config.keybindings.some(
@@ -96,6 +103,7 @@ describe("app keybindings", () => {
       const binding = DEFAULT_APP_KEYBINDINGS.find(
         (item) => item.command === command,
       );
+
       expect(binding).toMatchObject({
         desktopOnly: false,
         shortcut: { key, mod: true, control: true, shift: false, alt: false },
@@ -107,6 +115,7 @@ describe("app keybindings", () => {
   it("preserves non-Mac Ctrl arrow editing while keeping navigation rebindable", () => {
     const defaults = applyAppKeybindingOverrides(DEFAULT_APP_KEYBINDINGS, []);
     const client = { isDesktop: false, isMac: false, platform: "linux" };
+
     for (const key of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
       for (const shiftKey of [false, true]) {
         const input = {
@@ -117,6 +126,7 @@ describe("app keybindings", () => {
           altKey: false,
           shiftKey,
         };
+
         expect(
           defaults.filter(
             (binding) =>
@@ -126,7 +136,9 @@ describe("app keybindings", () => {
         ).toEqual([]);
       }
     }
+
     const command = "panel.nextTab";
+
     const custom = {
       key: "ArrowRight",
       mod: false,
@@ -135,6 +147,7 @@ describe("app keybindings", () => {
       alt: true,
       shift: false,
     };
+
     const bindings = applyAppKeybindingOverrides(DEFAULT_APP_KEYBINDINGS, [
       { command, shortcut: custom },
     ]).filter(
@@ -142,6 +155,7 @@ describe("app keybindings", () => {
         binding.command === command &&
         isAppKeybindingAvailableForClient(binding, client),
     );
+
     expect(bindings).toHaveLength(1);
     expect(bindings[0]?.shortcut).toEqual(custom);
   });
@@ -163,6 +177,7 @@ describe("app keybindings", () => {
         },
       ]),
     );
+
     const input = {
       key: "[",
       code: "BracketLeft",
@@ -171,6 +186,7 @@ describe("app keybindings", () => {
       altKey: false,
       shiftKey: false,
     };
+
     expect(
       [...bindings]
         .reverse()
@@ -184,12 +200,14 @@ describe("app keybindings", () => {
       DEFAULT_APP_KEYBINDINGS,
       [],
     );
+
     const actualCollisions = new Set<string>();
 
     for (const client of DEFAULT_KEYBINDING_CLIENTS) {
       const availableBindings = assignedDefaults.filter((binding) =>
         isAppKeybindingAvailableForClient(binding, client),
       );
+
       for (const [index, left] of availableBindings.entries()) {
         for (const right of availableBindings.slice(index + 1)) {
           if (
@@ -200,6 +218,7 @@ describe("app keybindings", () => {
           ) {
             continue;
           }
+
           actualCollisions.add(
             `${client.name}:${commandPair(left.command, right.command)}`,
           );
@@ -207,14 +226,7 @@ describe("app keybindings", () => {
       }
     }
 
-    const intentionalCommandPairs = PANE_FOCUS_APP_COMMAND_IDS.map(
-      (paneCommand, index) =>
-        commandPair(paneCommand, THREAD_JUMP_APP_COMMAND_IDS[index]),
-    );
-    const allowedCollisions = DEFAULT_KEYBINDING_CLIENTS.flatMap((client) =>
-      intentionalCommandPairs.map((pair) => `${client.name}:${pair}`),
-    );
-    expect([...actualCollisions].sort()).toEqual(allowedCollisions.sort());
+    expect([...actualCollisions]).toEqual([]);
   });
 
   it("serves validated explicit defaults from system config", async () => {
@@ -222,16 +234,20 @@ describe("app keybindings", () => {
       const response = await harness.app.request("/api/v1/system/config");
       expect(response.status).toBe(200);
       const config = systemConfigResponseSchema.parse(await readJson(response));
+
       const assignedDefaultKeybindings = applyAppKeybindingOverrides(
         config.defaultKeybindings,
         [],
       );
+
       expect(config.keybindingOverrides).toEqual([]);
       expect(assignedDefaultKeybindings).toEqual(config.keybindings);
+
       for (const command of [
         "thread.rename",
         "thread.archive",
         "panel.fullScreen.toggle",
+        ...THREAD_JUMP_APP_COMMAND_IDS,
       ] as const) {
         expect(
           config.defaultKeybindings.find(
@@ -246,9 +262,11 @@ describe("app keybindings", () => {
           config.keybindings.some((binding) => binding.command === command),
         ).toBe(false);
       }
+
       for (const command of [
         "pane.focus.previous",
         "pane.focus.next",
+        ...PANE_FOCUS_APP_COMMAND_IDS,
       ] as const) {
         expect(
           config.defaultKeybindings.find(
@@ -266,6 +284,7 @@ describe("app keybindings", () => {
           config.keybindings.some((binding) => binding.command === command),
         ).toBe(false);
       }
+
       expect(
         config.keybindings
           .filter((binding) => binding.command === "thread.new")
@@ -284,6 +303,17 @@ describe("app keybindings", () => {
         desktopOnly: true,
         shortcut: { key: "n", mod: true, shift: true },
       });
+      expect(
+        config.keybindings.filter(
+          (binding) => binding.command === "thread.shelve",
+        ),
+      ).toMatchObject([
+        {
+          desktopOnly: false,
+          shortcut: { key: "f", mod: true, shift: true, alt: false },
+          when: { all: ["mainSurface"], none: ["modalOpen"] },
+        },
+      ]);
       expect(
         config.keybindings.find((binding) => binding.command === "app.back"),
       ).toMatchObject({
@@ -336,7 +366,7 @@ describe("app keybindings", () => {
           shift: true,
           when: {
             all: ["mainSurface", "webSurface"],
-            none: ["modalOpen"],
+            none: ["modalOpen", "macPlatform"],
           },
         },
         {
@@ -345,7 +375,15 @@ describe("app keybindings", () => {
           mod: true,
           control: false,
           shift: true,
-          when: { all: ["mainSurface"], none: ["modalOpen"] },
+          when: { all: ["mainSurface"], none: ["modalOpen", "macPlatform"] },
+        },
+        {
+          desktopOnly: false,
+          key: "ArrowUp",
+          mod: true,
+          control: false,
+          shift: false,
+          when: { all: ["mainSurface", "macPlatform"], none: ["modalOpen"] },
         },
       ]);
       expect(
@@ -368,7 +406,7 @@ describe("app keybindings", () => {
           shift: true,
           when: {
             all: ["mainSurface", "webSurface"],
-            none: ["modalOpen"],
+            none: ["modalOpen", "macPlatform"],
           },
         },
         {
@@ -377,9 +415,18 @@ describe("app keybindings", () => {
           mod: true,
           control: false,
           shift: true,
-          when: { all: ["mainSurface"], none: ["modalOpen"] },
+          when: { all: ["mainSurface"], none: ["modalOpen", "macPlatform"] },
+        },
+        {
+          desktopOnly: false,
+          key: "ArrowDown",
+          mod: true,
+          control: false,
+          shift: false,
+          when: { all: ["mainSurface", "macPlatform"], none: ["modalOpen"] },
         },
       ]);
+
       for (const [command, key] of [
         ["history.back", "["],
         ["history.forward", "]"],
@@ -409,9 +456,67 @@ describe("app keybindings", () => {
           },
         ]);
       }
+
+      const outsideInputs = {
+        all: ["mainSurface"],
+        none: ["modalOpen", "editableFocus", "terminalFocus", "browserFocus"],
+      };
+
       expect(
         assignedDefaultKeybindings
-          .filter((binding) => binding.command.startsWith("thread.jump."))
+          .filter((binding) => binding.command.startsWith("edit."))
+          .map((binding) => ({
+            command: binding.command,
+            key: binding.shortcut.key,
+            mod: binding.shortcut.mod,
+            control: binding.shortcut.control,
+            shift: binding.shortcut.shift,
+            when: binding.when,
+          })),
+      ).toEqual([
+        {
+          command: "edit.undo",
+          key: "z",
+          mod: true,
+          control: false,
+          shift: false,
+          when: outsideInputs,
+        },
+        {
+          command: "edit.redo",
+          key: "z",
+          mod: true,
+          control: false,
+          shift: true,
+          when: outsideInputs,
+        },
+        {
+          command: "edit.redo",
+          key: "y",
+          mod: false,
+          control: true,
+          shift: false,
+          when: {
+            all: ["mainSurface"],
+            none: [...outsideInputs.none, "macPlatform"],
+          },
+        },
+        {
+          command: "edit.redo",
+          key: "y",
+          mod: true,
+          control: false,
+          shift: false,
+          when: {
+            all: ["mainSurface", "macPlatform"],
+            none: outsideInputs.none,
+          },
+        },
+      ]);
+
+      expect(
+        assignedDefaultKeybindings
+          .filter((binding) => binding.command.startsWith("rail.jump."))
           .map((binding) => ({
             command: binding.command,
             desktopOnly: binding.desktopOnly,
@@ -422,7 +527,7 @@ describe("app keybindings", () => {
             when: binding.when,
           })),
       ).toEqual(
-        THREAD_JUMP_APP_COMMAND_IDS.flatMap((command, index) => [
+        RAIL_JUMP_APP_COMMAND_IDS.flatMap((command, index) => [
           {
             command,
             desktopOnly: false,
@@ -473,22 +578,52 @@ describe("app keybindings", () => {
         assignedDefaultKeybindings.find(
           (binding) => binding.command === "composer.focus",
         ),
-      ).toMatchObject({
-        desktopOnly: false,
-        shortcut: { key: "c", mod: true, shift: true },
-        when: {
-          all: ["mainSurface", "promptAvailable"],
-          none: ["modalOpen", "terminalFocus", "browserFocus"],
+      ).toBeUndefined();
+      expect(
+        assignedDefaultKeybindings.filter(
+          (binding) =>
+            binding.shortcut.key === "c" &&
+            binding.shortcut.mod &&
+            binding.shortcut.shift,
+        ),
+      ).toMatchObject([
+        {
+          command: "thread.copyLink",
+          desktopOnly: false,
+          when: {
+            all: ["mainSurface"],
+            none: ["modalOpen", "terminalFocus", "browserFocus"],
+          },
         },
-      });
+      ]);
+      expect(
+        assignedDefaultKeybindings.filter(
+          (binding) =>
+            binding.shortcut.key === "g" &&
+            binding.shortcut.mod &&
+            !binding.shortcut.shift,
+        ),
+      ).toMatchObject([
+        {
+          command: "thread.group",
+          desktopOnly: false,
+          when: {
+            all: ["mainSurface", "chatSelection"],
+            none: ["modalOpen"],
+          },
+        },
+      ]);
+
       const composerWhen = {
         all: ["mainSurface", "promptAvailable"],
         none: ["modalOpen", "terminalFocus", "browserFocus"],
       };
+
       const pickerOpenWhen = {
         all: ["mainSurface", "modelPickerOpen"],
         none: [],
       };
+
       const altChord = (
         command: string,
         key: string,
@@ -506,6 +641,7 @@ describe("app keybindings", () => {
         },
         when,
       });
+
       expect(
         assignedDefaultKeybindings
           .filter((binding) => binding.command.startsWith("modelPicker.cycle"))
@@ -591,44 +727,6 @@ describe("app keybindings", () => {
             none: ["modalOpen"],
           },
         })),
-        ...PANE_FOCUS_APP_COMMAND_IDS.flatMap((command, index) => [
-          {
-            command,
-            desktopOnly: false,
-            key: String(index + 1),
-            mod: false,
-            control: true,
-            shift: false,
-            when: {
-              all: ["mainSurface", "splitActive", "webSurface", "macPlatform"],
-              none: ["modalOpen"],
-            },
-          },
-          {
-            command,
-            desktopOnly: false,
-            key: String(index + 1),
-            mod: true,
-            control: false,
-            shift: true,
-            when: {
-              all: ["mainSurface", "splitActive", "webSurface"],
-              none: ["modalOpen", "macPlatform"],
-            },
-          },
-          {
-            command,
-            desktopOnly: true,
-            key: String(index + 1),
-            mod: true,
-            control: false,
-            shift: false,
-            when: {
-              all: ["mainSurface", "splitActive"],
-              none: ["modalOpen"],
-            },
-          },
-        ]),
         {
           command: "pane.maximize.toggle",
           desktopOnly: false,
@@ -656,8 +754,7 @@ describe("app keybindings", () => {
         "thread.new",
         "thread.previous",
         "thread.next",
-        ...THREAD_JUMP_APP_COMMAND_IDS,
-        ...PANE_FOCUS_APP_COMMAND_IDS,
+        ...RAIL_JUMP_APP_COMMAND_IDS,
         "panel.reopenClosedTab",
         "browser.focusLocation",
         "browser.reload",
@@ -678,15 +775,18 @@ describe("app keybindings", () => {
         alt: false,
         shift: true,
       };
+
       const overrides = [
         { command: "thread.new" as const, shortcut },
         { command: "modelPicker.toggle" as const, shortcut },
       ];
+
       const response = await harness.app.request("/api/v1/settings/keyboard", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(overrides),
       });
+
       expect(response.status).toBe(200);
       expect(
         appKeybindingOverridesSchema.parse(await readJson(response)),
@@ -694,9 +794,11 @@ describe("app keybindings", () => {
       expect(getAppKeybindingOverrides(harness.db)).toEqual(overrides);
 
       const configResponse = await harness.app.request("/api/v1/system/config");
+
       const config = systemConfigResponseSchema.parse(
         await readJson(configResponse),
       );
+
       expect(config.keybindingOverrides).toEqual(overrides);
       expect(
         config.keybindings.find((binding) => binding.command === "thread.new"),
@@ -724,17 +826,21 @@ describe("app keybindings", () => {
         alt: false,
         shift: true,
       };
+
       const response = await harness.app.request("/api/v1/settings/keyboard", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify([{ command: "thread.rename", shortcut }]),
       });
+
       expect(response.status).toBe(200);
 
       const configResponse = await harness.app.request("/api/v1/system/config");
+
       const config = systemConfigResponseSchema.parse(
         await readJson(configResponse),
       );
+
       expect(
         config.keybindings.filter(
           (binding) => binding.command === "thread.rename",
@@ -757,12 +863,15 @@ describe("app keybindings", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify([{ command: "panel.newTab", shortcut: null }]),
       });
+
       expect(response.status).toBe(200);
 
       const configResponse = await harness.app.request("/api/v1/system/config");
+
       const config = systemConfigResponseSchema.parse(
         await readJson(configResponse),
       );
+
       expect(
         config.keybindings.some(
           (binding) => binding.command === "panel.newTab",
@@ -786,6 +895,7 @@ describe("app keybindings", () => {
         alt: false,
         shift: false,
       };
+
       const response = await harness.app.request("/api/v1/settings/keyboard", {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -794,6 +904,7 @@ describe("app keybindings", () => {
           { command: "thread.new", shortcut },
         ]),
       });
+
       expect(response.status).toBe(400);
     });
   });
@@ -824,6 +935,7 @@ it.each(["left", "right", "up", "down"] as const)(
   (direction) => {
     const command = `pane.focus.${direction}` as const;
     const key = `Arrow${direction[0].toUpperCase()}${direction.slice(1)}`;
+
     const overrides = appKeybindingOverridesSchema.parse([
       {
         command,
@@ -838,6 +950,7 @@ it.each(["left", "right", "up", "down"] as const)(
         },
       },
     ]);
+
     const input = {
       key,
       code: key,
@@ -846,6 +959,7 @@ it.each(["left", "right", "up", "down"] as const)(
       altKey: false,
       shiftKey: true,
     };
+
     for (const client of DEFAULT_KEYBINDING_CLIENTS) {
       const effective = applyAppKeybindingOverrides(
         DEFAULT_APP_KEYBINDINGS,
@@ -855,11 +969,14 @@ it.each(["left", "right", "up", "down"] as const)(
           binding.command === command &&
           isAppKeybindingAvailableForClient(binding, client),
       );
+
       expect(effective).toHaveLength(client.isMac ? 1 : 0);
+
       if (client.isMac)
         expect(matchesAppShortcut(input, effective[0]!.shortcut, true)).toBe(
           true,
         );
+
       const reset = applyAppKeybindingOverrides(
         DEFAULT_APP_KEYBINDINGS,
         [],
@@ -868,7 +985,9 @@ it.each(["left", "right", "up", "down"] as const)(
           binding.command === command &&
           isAppKeybindingAvailableForClient(binding, client),
       );
+
       expect(reset).toHaveLength(client.isMac ? 1 : 0);
+
       if (client.isMac) {
         expect(matchesAppShortcut(input, reset[0]!.shortcut, true)).toBe(false);
         expect(
@@ -887,6 +1006,7 @@ it("resolves platform overrides before general bindings regardless of ordering",
   const base = DEFAULT_APP_KEYBINDINGS.find(
     (binding) => binding.command === "thread.search",
   )!;
+
   const shortcut = {
     key: "g",
     mod: true,
@@ -895,6 +1015,7 @@ it("resolves platform overrides before general bindings regardless of ordering",
     alt: false,
     shift: false,
   };
+
   const overrides = appKeybindingOverridesSchema.parse([
     { command: "thread.search", shortcut },
     {
@@ -904,8 +1025,10 @@ it("resolves platform overrides before general bindings regardless of ordering",
     },
     { command: "thread.search", platform: "linux", shortcut: null },
   ]);
+
   for (const ordered of [overrides, [...overrides].reverse()]) {
     const bindings = applyAppKeybindingOverrides([base], ordered);
+
     for (const [platform, keys] of [
       ["MacIntel", ["g"]],
       ["Win32", ["w"]],
@@ -923,6 +1046,7 @@ it("resolves platform overrides before general bindings regardless of ordering",
       ).toEqual(keys);
     }
   }
+
   expect(
     appKeybindingOverridesSchema.safeParse([...overrides, overrides[1]])
       .success,

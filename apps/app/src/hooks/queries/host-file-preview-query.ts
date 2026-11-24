@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { loadFilePreview } from "@/lib/api";
 import { buildHostFileContentUrl } from "@/lib/file-content-urls";
-import type { FilePreview } from "@bb/client-core";
+import type { FilePreview } from "@omnyo/client-core";
 import type { QueryOptions } from "./query-helpers";
 import { hostFilePreviewQueryKey } from "./query-keys";
 import { HEAVY_PAYLOAD_QUERY_POLICY } from "./query-policies";
@@ -41,7 +41,9 @@ const HOST_MEDIA_PREVIEW_TYPES = new Map<string, HostMediaPreviewType>([
 
 function getHostMediaPreviewType(name: string): HostMediaPreviewType | null {
   const extensionIndex = name.lastIndexOf(".");
+
   if (extensionIndex <= 0) return null;
+
   return (
     HOST_MEDIA_PREVIEW_TYPES.get(name.slice(extensionIndex).toLowerCase()) ??
     null
@@ -55,20 +57,25 @@ export function useHostFilePreview(
 ) {
   const enabled =
     (options?.enabled ?? true) && hostId !== null && path !== null;
+
   const activeHostId = enabled ? hostId : null;
   const activePath = enabled ? path : null;
+
   return useQuery<FilePreview>({
     queryKey: hostFilePreviewQueryKey(activeHostId, activePath),
     queryFn: async ({ signal }) => {
       if (activeHostId === null || activePath === null) {
         throw new Error("Host file preview target is incomplete");
       }
+
       const name = activePath.split(/[\\/]/u).at(-1) ?? activePath;
       const url = buildHostFileContentUrl(activeHostId, activePath);
       const mediaPreviewType = getHostMediaPreviewType(name);
+
       if (mediaPreviewType !== null) {
         return { ...mediaPreviewType, name, path: activePath, url };
       }
+
       return loadFilePreview({ name, path: activePath, url }, signal);
     },
     enabled,

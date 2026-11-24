@@ -1,7 +1,7 @@
-import type { JsonObject } from "@bb/domain";
+import type { JsonObject } from "@omnyo/domain";
 import { describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
-import { createBbSdk } from "../src/core.js";
+import { createOmnyoSdk } from "../src/core.js";
 import type { FetchImplementation } from "../src/response.js";
 import { createHttpTransport } from "../src/transport-http.js";
 
@@ -13,21 +13,25 @@ interface RecordedRequest {
 
 function createRecordingSdk() {
   const requests: RecordedRequest[] = [];
+
   const fetch = vi.fn<FetchImplementation>(async (input, init) => {
     requests.push({
       url: String(input),
       method: init?.method,
       body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
     });
+
     return Response.json({ ok: true });
   });
-  const sdk = createBbSdk({
+
+  const sdk = createOmnyoSdk({
     transport: createHttpTransport({
-      baseUrl: "http://bb.test",
+      baseUrl: "http://omnyo.test",
       fetch,
       runtime: "node",
     }),
   });
+
   return { fetch, requests, sdk };
 }
 
@@ -45,12 +49,12 @@ describe("thread plugin metadata transport", () => {
 
     expect(requests).toEqual([
       {
-        url: "http://bb.test/api/v1/threads/t/plugin-metadata?pluginId=p",
+        url: "http://omnyo.test/api/v1/threads/t/plugin-metadata?pluginId=p",
         method: "GET",
         body: undefined,
       },
       {
-        url: "http://bb.test/api/v1/threads/t/plugin-metadata",
+        url: "http://omnyo.test/api/v1/threads/t/plugin-metadata",
         method: "PATCH",
         body: { pluginId: "p", set: { nested: { value: 1 } }, remove: ["old"] },
       },

@@ -17,6 +17,7 @@ function ElementVirtualizer({
     getScrollElement: () => scrollElement,
     onChange,
   });
+
   return null;
 }
 
@@ -26,6 +27,7 @@ function WindowVirtualizer({ onChange }: { onChange: () => void }) {
     estimateSize: () => 32,
     onChange,
   });
+
   return null;
 }
 
@@ -42,6 +44,7 @@ describe("virtualizer scroll lifecycle", () => {
       vi.useFakeTimers();
       const onChange = vi.fn();
       const scrollElement = document.createElement("div");
+
       const rendered = render(
         target === "element" ? (
           <ElementVirtualizer
@@ -52,6 +55,7 @@ describe("virtualizer scroll lifecycle", () => {
           <WindowVirtualizer onChange={onChange} />
         ),
       );
+
       fireEvent.scroll(target === "element" ? scrollElement : window);
       expect(vi.getTimerCount()).toBeGreaterThan(0);
 

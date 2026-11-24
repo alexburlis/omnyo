@@ -3,17 +3,17 @@ import {
   bridgeCapabilitiesSchema,
   bridgeExecutionOptionsSchema,
   providerRecoveryNotificationSchema,
-} from "@bb/provider-bridge-protocol";
+} from "@omnyo/provider-bridge-protocol";
 import {
   providerRecoveryKindValues,
   threadEventDelegationItemSchema,
   threadEventItemPresentationSchema,
   type ThreadEventItemPresentation,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   timelineCommandWorkRowSchema,
   type TimelineCommandWorkRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import type { PluginAppSlots } from "../app-contract.js";
@@ -73,6 +73,7 @@ type DeclarationGapKeys = {
     K in keyof typeof REGISTRATION_FIELDS
   ]: (typeof REGISTRATION_FIELDS)[K] extends Gap ? K : never;
 }[keyof typeof REGISTRATION_FIELDS];
+
 type DeclarationGapsNotLanded = Extract<
   DeclarationGapKeys,
   keyof PluginProviderDeclaration | keyof PluginProviderCapabilities
@@ -155,6 +156,7 @@ const TIMELINE_ROW_FIELDS = {
   },
   presentation: "presentation",
 } as const satisfies Record<string, keyof TimelineCommandWorkRow | Gap>;
+
 type TimelineRowGapsNotLanded = Extract<
   "payload",
   keyof TimelineCommandWorkRow
@@ -170,16 +172,20 @@ function extractTsBlocks(markdown: string): string[] {
 
 function fieldNames(block: string): string[] {
   const names = new Set<string>();
+
   for (const rawLine of block.split("\n")) {
     const line = rawLine.replace(/\/\/.*$/u, "");
     const match = /^\s*\{?\s*([A-Za-z_][A-Za-z0-9_]*)\??\s*[:(]/u.exec(line);
+
     if (match?.[1]) names.add(match[1]);
   }
+
   return [...names].sort();
 }
 
 function bareFieldNames(block: string): string[] {
   const body = block.replace(/\/\/.*$/gmu, "").split("&")[0] ?? "";
+
   return [
     ...new Set(
       [...body.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\??(?=\s*(?:,|:|\}))/gu)].map(
@@ -203,20 +209,25 @@ function gapKeys(map: Record<string, unknown>): string[] {
 
 function schemaKeys(schema: z.ZodType): Set<string> {
   const def = schema._zod.def;
+
   if (def.type === "object") {
     const shape = Reflect.get(def, "shape");
+
     return new Set(
       typeof shape === "object" && shape !== null ? Object.keys(shape) : [],
     );
   }
+
   if (def.type === "intersection") {
     const left = Reflect.get(def, "left");
     const right = Reflect.get(def, "right");
+
     return new Set([
       ...(left ? schemaKeys(left as z.ZodType) : []),
       ...(right ? schemaKeys(right as z.ZodType) : []),
     ]);
   }
+
   return new Set();
 }
 
@@ -239,10 +250,13 @@ function expectLandedPresent(
 ): void {
   const missing = landedKeys(map).filter((key) => {
     const path = map[key];
+
     if (isGap(path) || path === undefined) return false;
     const root = path.split(".")[0] ?? path;
+
     return !present.has(root);
   });
+
   expect(
     missing,
     `${where}: the doc names these fields but the schema no longer has them`,
@@ -254,7 +268,7 @@ describe("guardrail G10: docs/provider-plugin-api.md matches the contract", () =
     const blocks = extractTsBlocks(await readFile(DOC_URL, "utf8"));
     const headings = blocks.map((block) => block.split("\n")[0]?.trim());
     expect(headings).toEqual([
-      "bb.providers.register({",
+      "api.providers.register({",
       "export const experimental_providerBridge = experimental_defineProviderBridge({",
       "{",
       "{ model, serviceTier?, reasoningLevel, promptMode?, sessionOptions?,",
@@ -262,7 +276,7 @@ describe("guardrail G10: docs/provider-plugin-api.md matches the contract", () =
       "{ childRef: string, label: string, status: ItemStatus,",
       "presentation: {",
       "TimelineRow { kind: string, payload, presentation }",
-      "app.slots.experimental_timelineRenderer({ kind, component })",
+      "app.slots.experimental_timelineRenderer({ kind, component });",
     ]);
   });
 
@@ -274,7 +288,7 @@ describe("guardrail G10: docs/provider-plugin-api.md matches the contract", () =
     expectTypeOf<DeclarationGapsNotLanded>().toBeNever();
   });
 
-  it("§2 the bridge entry point is exported from @get-bb/plugin-sdk/provider-bridge", () => {
+  it("§2 the bridge entry point is exported from @omnyo/plugin-sdk/provider-bridge", () => {
     expect(typeof providerBridgeSdk.experimental_defineProviderBridge).toBe(
       "function",
     );
@@ -299,6 +313,7 @@ describe("guardrail G10: docs/provider-plugin-api.md matches the contract", () =
     const [, , handshake, executionOptions, recovery] = extractTsBlocks(
       await readFile(DOC_URL, "utf8"),
     );
+
     expect(fieldNames(handshake ?? "")).toEqual(
       Object.keys(HANDSHAKE_FIELDS).sort(),
     );
@@ -329,9 +344,11 @@ describe("guardrail G10: docs/provider-plugin-api.md matches the contract", () =
     );
     const recoveryKeys = schemaKeys(providerRecoveryNotificationSchema);
     expectLandedPresent(RECOVERY_FIELDS, recoveryKeys, "provider/recovery");
+
     const documentedKinds = [...recoveryBlock.matchAll(/"([A-Za-z]+)"/gu)]
       .map((match) => match[1])
       .sort();
+
     expect(documentedKinds).toEqual([...providerRecoveryKindValues].sort());
   });
 
@@ -339,6 +356,7 @@ describe("guardrail G10: docs/provider-plugin-api.md matches the contract", () =
     const [, , , , , delegation, presentation] = extractTsBlocks(
       await readFile(DOC_URL, "utf8"),
     );
+
     expect(fieldNames((delegation ?? "").replaceAll(",", ",\n"))).toEqual(
       Object.keys(DELEGATION_FIELDS).sort(),
     );

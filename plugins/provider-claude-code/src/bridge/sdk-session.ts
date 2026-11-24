@@ -14,7 +14,7 @@ import {
 import {
   experimental_isProviderBridgeRecording,
   experimental_recordProviderChildIo,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import type { ClaudePermissionMode } from "../interactive-contract.js";
 import {
   isMissingClaudeCliMessage,
@@ -35,6 +35,7 @@ export interface SdkSessionOptions {
   hooks?: Options["hooks"];
   mcpServers?: Record<string, McpSdkServerConfigWithInstance>;
   allowedTools?: string[];
+  disallowedTools?: string[];
   canUseTool?: CanUseTool;
   env?: NodeJS.ProcessEnv;
   pathToClaudeCodeExecutable?: Options["pathToClaudeCodeExecutable"];
@@ -61,6 +62,7 @@ export type ClaudeMutableFlagSettings = {
 };
 
 type SdkSessionMessageHandler = (message: SDKMessage) => void;
+
 type SdkSessionDoneHandler = (error?: unknown) => void;
 
 interface QueuedSdkInputMessage {
@@ -97,14 +99,17 @@ export function isBypassPermissionsAvailable(): boolean {
 
 function appendBoundedText(args: AppendBoundedTextArgs): string {
   const next = `${args.current}${args.chunk}`;
+
   if (next.length <= SDK_STDERR_TAIL_MAX_CHARS) {
     return next;
   }
+
   return next.slice(next.length - SDK_STDERR_TAIL_MAX_CHARS);
 }
 
 function getErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
+
   return isMissingClaudeCliMessage(message)
     ? missingClaudeCliGuidance()
     : message;
@@ -113,9 +118,11 @@ function getErrorMessage(error: unknown): string {
 function buildSdkDoneErrorMessage(args: BuildSdkDoneErrorMessageArgs): string {
   const errorMessage = getErrorMessage(args.error);
   const stderrTail = args.stderrTail.trim();
+
   if (stderrTail.length === 0 || errorMessage.includes(stderrTail)) {
     return errorMessage;
   }
+
   return `${errorMessage}\n\nClaude Code stderr:\n${stderrTail}`;
 }
 
@@ -131,10 +138,12 @@ function spawnRecordedClaudeProcess(args: {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
+
   child.stderr?.setEncoding("utf8").on("data", (data: string) => {
     args.onStderr(data);
   });
   experimental_recordProviderChildIo(child, { threadId: args.threadId });
+
   return child as SpawnedProcess;
 }
 
@@ -142,6 +151,7 @@ function buildSdkPermissionOptions(
   args: BuildSdkPermissionOptionsArgs,
 ): SdkPermissionOptions {
   const permissionMode = args.permissionMode ?? "default";
+
   if (!args.allowBypassPermissions) {
     return { permissionMode };
   }
@@ -201,10 +211,6 @@ export class SdkSession {
     await this.query?.applyFlagSettings(settings);
   }
 
-  async getContextUsage(): Promise<unknown> {
-    return this.query ? this.query.getContextUsage() : null;
-  }
-
   async setModel(model: string | undefined): Promise<void> {
     await this.query?.setModel(model);
     this.options.model = model;
@@ -217,8 +223,10 @@ export class SdkSession {
     await this.query?.applyFlagSettings(args.settings);
     this.options.effort = args.effort;
     const { effortLevel: _effortLevel, ...sessionSettings } = args.settings;
+
     const currentSettings =
       typeof this.options.settings === "object" ? this.options.settings : {};
+
     this.options.settings = {
       ...currentSettings,
       ...sessionSettings,
@@ -233,17 +241,21 @@ export class SdkSession {
     }
 
     this.stderrTail = "";
+
     const permissionOptions = buildSdkPermissionOptions({
       allowBypassPermissions: this.options.allowBypassPermissions,
       permissionMode: this.options.permissionMode,
     });
+
     const onStderr = (data: string): void => {
       this.stderrTail = appendBoundedText({
         current: this.stderrTail,
         chunk: data,
       });
     };
+
     const recordThreadId = this.options.recordThreadId;
+
     const sdkOptions: Options = {
       abortController: this.abortController,
       cwd: this.options.cwd,
@@ -269,6 +281,9 @@ export class SdkSession {
         : {}),
       ...(this.options.allowedTools
         ? { allowedTools: this.options.allowedTools }
+        : {}),
+      ...(this.options.disallowedTools
+        ? { disallowedTools: this.options.disallowedTools }
         : {}),
       ...(this.options.canUseTool
         ? { canUseTool: this.options.canUseTool }
@@ -327,7 +342,9 @@ export class SdkSession {
     }
 
     let resolveConsumed = (): void => {};
+
     let rejectConsumed = (_error: Error): void => {};
+
     const consumed = new Promise<void>((resolve, reject) => {
       resolveConsumed = resolve;
       rejectConsumed = reject;
@@ -338,6 +355,7 @@ export class SdkSession {
       this.inputResolve = null;
       resolve({ value: message, done: false });
       resolveConsumed();
+
       return consumed;
     }
 
@@ -346,6 +364,7 @@ export class SdkSession {
       rejectConsumed,
       resolveConsumed,
     });
+
     return consumed;
   }
 
@@ -363,12 +382,15 @@ export class SdkSession {
     this.rejectQueuedInputs("Claude SDK session closed before input consumed");
 
     const query = this.query;
+
     if (!query) {
       this.resolveInputDone();
+
       return;
     }
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
+
     try {
       await Promise.race([
         this.interruptAndDrain(query),
@@ -399,21 +421,27 @@ export class SdkSession {
 
   private createInputIterable(): AsyncIterable<SDKUserMessage> {
     const self = this;
+
     return {
       [Symbol.asyncIterator]() {
         return {
           async next(): Promise<IteratorResult<SDKUserMessage>> {
             if (self.inputQueue.length > 0) {
               const queued = self.inputQueue.shift();
+
               if (!queued) {
                 return { value: undefined, done: true };
               }
+
               queued.resolveConsumed();
+
               return { value: queued.message, done: false };
             }
+
             if (self.inputDone) {
               return { value: undefined, done: true };
             }
+
             return new Promise<IteratorResult<SDKUserMessage>>((resolve) => {
               self.inputResolve = resolve;
             });
@@ -424,6 +452,7 @@ export class SdkSession {
               "Claude SDK input iterator closed before input consumed",
             );
             self.resolveInputDone();
+
             return { value: undefined, done: true };
           },
         };
@@ -440,24 +469,35 @@ export class SdkSession {
 
   private rejectQueuedInputs(message: string): void {
     const error = new Error(message);
+
     while (this.inputQueue.length > 0) {
       const queued = this.inputQueue.shift();
+
       if (!queued) {
         return;
       }
+
       queued.rejectConsumed(error);
     }
   }
 
   private async consumeStream(): Promise<void> {
     const q = this.query;
+
     if (!q) return;
+
+    let sessionAnnounced = false;
 
     try {
       for await (const message of q) {
-        this.captureSessionId(message);
+        if (message.type === "system" && message.subtype === "init") {
+          sessionAnnounced = true;
+        }
+
+        if (sessionAnnounced) this.captureSessionId(message);
         this.onMessage(message);
       }
+
       this.onDone();
     } catch (error) {
       this.onDone(
@@ -473,6 +513,7 @@ export class SdkSession {
       this.rejectQueuedInputs("Claude SDK stream ended before input consumed");
       this.resolveInputDone();
       this.query = undefined;
+
       if (this.complete) {
         this.complete();
         this.complete = null;
@@ -483,6 +524,7 @@ export class SdkSession {
   private captureSessionId(message: SDKMessage): void {
     const { session_id } = message;
     const providerThreadId = session_id?.trim() ?? "";
+
     if (providerThreadId.length > 0) {
       this.sessionId = providerThreadId;
     }

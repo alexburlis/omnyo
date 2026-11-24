@@ -6,10 +6,12 @@ it("exhausts the initial construction and eight transient-auth retries determini
     { length: 9 },
     (_, index) => new Error(`mismatch ${index + 1}`),
   );
+
   const attempt = vi.fn(async () => ({
     ok: false as const,
     error: errors[attempt.mock.calls.length - 1]!,
   }));
+
   const discardFailedAttempt = vi.fn();
   const waitBeforeRetry = vi.fn(async () => undefined);
 

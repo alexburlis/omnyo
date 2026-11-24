@@ -4,11 +4,12 @@ import {
 } from "../helpers/environment-provider.js";
 import {
   PERSONAL_PROJECT_ID,
+  defaultAppSettings,
   type GitSourceInspection,
   type ProjectExecutionDefaults,
   type Thread,
-} from "@bb/domain";
-import { createEnvironment } from "@bb/db";
+} from "@omnyo/domain";
+import { createEnvironment, getAppSettings, setAppSettings } from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import {
   resolveCreateThreadEnvironment,
@@ -16,6 +17,7 @@ import {
   resolveProjectDefaultThreadEnvironment,
   resolveThreadDefaultPermissionMode,
   resolveThreadExecutionPermissionMode,
+  applyNewThreadApprovalDefault,
 } from "../../src/services/threads/thread-default-policy.js";
 import { createProviderRegistryService } from "../../src/services/providers/provider-registry.js";
 import {
@@ -24,6 +26,7 @@ import {
 } from "../helpers/provider-registry.js";
 import { registerHostRpcResponder } from "../helpers/host-rpc.js";
 import {
+  seedHost,
   seedHostSession,
   seedPrimaryHost,
   seedProjectWithSource,
@@ -32,10 +35,79 @@ import { withTestHarness } from "../helpers/test-app.js";
 
 const registry = await createTestProviderRegistry();
 
+describe("new chat approval defaults", () => {
+  const settings = {
+    ...defaultAppSettings,
+    defaultPermissionMode: "accept-edits" as const,
+    modelPermissionModes: { codex: { "gpt-5": "full" as const } },
+  };
+
+  it("replaces generated catalog approval with the selected model default", () => {
+    expect(
+      applyNewThreadApprovalDefault(registry, {
+        settings,
+        providerId: "codex",
+        model: "gpt-5",
+        storedDefaults: null,
+        resolvedDefaults: makeDefaults({ permissionMode: "auto" }),
+      })?.permissionMode,
+    ).toBe("full");
+  });
+
+  it("retains the actual project choice above the configured model default", () => {
+    expect(
+      applyNewThreadApprovalDefault(registry, {
+        settings,
+        providerId: "codex",
+        model: "gpt-5",
+        storedDefaults: makeDefaults({ permissionMode: "accept-edits" }),
+        resolvedDefaults: makeDefaults({ permissionMode: "auto" }),
+      })?.permissionMode,
+    ).toBe("accept-edits");
+  });
+
+  it("leaves explicit and managed-parent approvals above new chat defaults", () => {
+    const defaults = applyNewThreadApprovalDefault(registry, {
+      settings,
+      providerId: "codex",
+      model: "gpt-5",
+      storedDefaults: null,
+      resolvedDefaults: null,
+    });
+
+    const inherited = {
+      thread: makeThread({ parentThreadId: "thr-parent-1" }),
+      parentThread: makeParentThread(),
+      parentThreadExecutionPermissionMode: "accept-edits" as const,
+      projectExecutionPermissionMode: defaults?.permissionMode,
+    };
+
+    expect(resolveThreadExecutionPermissionMode(registry, inherited)).toBe(
+      "accept-edits",
+    );
+    expect(
+      resolveThreadExecutionPermissionMode(registry, {
+        ...inherited,
+        requestedPermissionMode: "auto",
+      }),
+    ).toBe("auto");
+  });
+
+  it("does not apply new defaults to an existing chat's recorded execution", () => {
+    expect(
+      resolveThreadExecutionPermissionMode(registry, {
+        thread: makeThread(),
+        lastExecutionPermissionMode: "accept-edits",
+      }),
+    ).toBe("accept-edits");
+  });
+});
+
 type PolicyTestThread = Pick<
   Thread,
   "originKind" | "parentThreadId" | "projectId" | "providerId"
 >;
+
 type PolicyTestParentThread = Pick<
   Thread,
   | "archivedAt"
@@ -113,9 +185,11 @@ describe("resolveCreateThreadExecutionDefaults", () => {
       providerOrder: ["pi", "claude-code"],
       defaultProviderId: null as string | null,
     };
+
     const userRegistry = createProviderRegistryService({
       readUserProviderPreferences: () => preferences,
     });
+
     await registerFirstPartyProviders(userRegistry);
 
     expect(userRegistry.list().map((entry) => entry.info.id)).toEqual([
@@ -153,9 +227,11 @@ describe("resolveCreateThreadExecutionDefaults", () => {
       providerOrder: ["pi", "claude-code"],
       defaultProviderId: "codex" as string | null,
     };
+
     const userRegistry = createProviderRegistryService({
       readUserProviderPreferences: () => preferences,
     });
+
     await registerFirstPartyProviders(userRegistry);
 
     expect(
@@ -268,6 +344,7 @@ describe("resolveCreateThreadEnvironment", () => {
   ) {
     return withTestHarness((harness) => {
       installFakeGitWorktreeProvider();
+
       return resolveCreateThreadEnvironment(harness.deps, args);
     });
   }
@@ -329,13 +406,16 @@ describe("resolveCreateThreadEnvironment", () => {
   it("uses a fresh worktree on the parent's machine for a project child", async () => {
     await withTestHarness(async (harness) => {
       installFakeGitWorktreeProvider();
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-project-child",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/project-child-source",
       });
+
       const parentEnvironment = createEnvironment(harness.db, harness.hub, {
         projectId: project.id,
         hostId: host.id,
@@ -344,6 +424,7 @@ describe("resolveCreateThreadEnvironment", () => {
         status: "ready",
         environmentProvider: null,
       });
+
       await expect(
         resolveCreateThreadEnvironment(harness.deps, {
           parentThread: makeParentThread({
@@ -367,6 +448,7 @@ describe("resolveCreateThreadEnvironment", () => {
       type: "host",
       workspace: { type: "personal" },
     } as const;
+
     await expect(
       resolveEnvironment({
         parentThread: makeParentThread({
@@ -460,6 +542,7 @@ describe("resolveCreateThreadEnvironment", () => {
       await withTestHarness(async (harness) => {
         installFakeGitWorktreeProvider();
         const { host } = seedHostSession(harness.deps, { id: "host-1" });
+
         const parentEnvironment = createEnvironment(harness.db, harness.hub, {
           projectId: PERSONAL_PROJECT_ID,
           hostId: host.id,
@@ -468,6 +551,7 @@ describe("resolveCreateThreadEnvironment", () => {
           status: "ready",
           environmentProvider: null,
         });
+
         await expect(
           resolveCreateThreadEnvironment(harness.deps, {
             parentThread: makeParentThread({
@@ -534,14 +618,18 @@ describe("resolveCreateThreadEnvironment", () => {
   it("gives a sub-thread of a project with no commits a worktree of the source", async () => {
     await withTestHarness(async (harness) => {
       installFakeGitWorktreeProvider();
+
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-default-order",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/default-order-source",
       });
+
       const parentEnvironment = createEnvironment(harness.db, harness.hub, {
         projectId: project.id,
         hostId: host.id,
@@ -550,6 +638,7 @@ describe("resolveCreateThreadEnvironment", () => {
         status: "ready",
         environmentProvider: null,
       });
+
       registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -587,17 +676,74 @@ describe("resolveCreateThreadEnvironment", () => {
 });
 
 describe("resolveProjectDefaultThreadEnvironment", () => {
+  it.each([true, false])(
+    "honors the configured machine and never falls back when connected=%s",
+    async (connected) => {
+      await withTestHarness(async (harness) => {
+        installFakePersonalWorkspaceProvider();
+
+        const { host: server } = seedHostSession(harness.deps, {
+          id: "server",
+        });
+
+        seedPrimaryHost(harness.deps, server.id);
+
+        const preferred = connected
+          ? seedHostSession(harness.deps, { id: "mac-pro" }).host
+          : seedHost(harness.deps, { id: "mac-pro" });
+
+        setAppSettings(harness.db, {
+          ...getAppSettings(harness.db),
+          defaultThreadMachineId: preferred.id,
+        });
+
+        const result = resolveCreateThreadEnvironment(harness.deps, {
+          projectId: PERSONAL_PROJECT_ID,
+          parentThread: null,
+          requestedEnvironment: { type: "project-default" },
+        });
+
+        if (connected) {
+          await expect(result).resolves.toMatchObject({
+            machine: { type: "existing", hostId: "mac-pro" },
+          });
+        } else {
+          await expect(result).rejects.toMatchObject({
+            body: { code: "host_unavailable" },
+          });
+        }
+
+        await expect(
+          resolveCreateThreadEnvironment(harness.deps, {
+            projectId: PERSONAL_PROJECT_ID,
+            parentThread: null,
+            requestedEnvironment: {
+              type: "provider",
+              environmentProviderId: "personal-workspace",
+              machine: { type: "existing", hostId: server.id },
+              inputs: null,
+            },
+          }),
+        ).resolves.toMatchObject({ machine: { hostId: server.id } });
+      });
+    },
+  );
+
   it("uses a worktree for a Git project", async () => {
     await withTestHarness(async (harness) => {
       installFakeGitWorktreeProvider();
+
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-git-default",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/git-default-source",
       });
+
       registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -637,11 +783,14 @@ describe("resolveProjectDefaultThreadEnvironment", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-non-git-default",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/non-git-default-source",
       });
+
       registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -675,9 +824,11 @@ describe("resolveProjectDefaultThreadEnvironment", () => {
   it("uses the personal workspace with no project", async () => {
     await withTestHarness(async (harness) => {
       installFakePersonalWorkspaceProvider();
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-personal-default",
       });
+
       seedPrimaryHost(harness.deps, host.id);
 
       await expect(

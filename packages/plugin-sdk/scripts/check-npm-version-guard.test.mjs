@@ -6,8 +6,9 @@ const version = "0.5.0";
 
 const files = {
   "README.md": "# sdk\n",
-  "bundled-types/bb-plugin-sdk.d.ts": "export declare const a: string;\n",
-  "bundled-types/bb-plugin-sdk-app.d.ts": "export declare const b: number;\n",
+  "bundled-types/omnyo-plugin-sdk.d.ts": "export declare const a: string;\n",
+  "bundled-types/omnyo-plugin-sdk-app.d.ts":
+    "export declare const b: number;\n",
   "dist/index.js": "export const a = 'a';\n",
   "dist/app.js": "export const b = 1;\n",
 };
@@ -18,8 +19,8 @@ const manifest = {
   peerDependencies: { react: "^19.0.0" },
   peerDependenciesMeta: { react: { optional: true } },
   publishConfig: { access: "public" },
-  repository: { type: "git", url: "git+https://example.invalid/bb.git" },
-  types: "./bundled-types/bb-plugin-sdk.d.ts",
+  repository: { type: "git", url: "git+https://example.invalid/omnyo.git" },
+  types: "./bundled-types/omnyo-plugin-sdk.d.ts",
 };
 
 const local = { kind: "packed", files, manifest };
@@ -39,6 +40,7 @@ describe("decideNpmVersionGuard", () => {
       local: { kind: "not-needed", files: {}, manifest: {} },
       registry: { kind: "package-not-found" },
     });
+
     expect(decision).toMatchObject({ status: "pass", exitCode: 0 });
   });
 
@@ -48,6 +50,7 @@ describe("decideNpmVersionGuard", () => {
       local: { kind: "not-needed", files: {}, manifest: {} },
       registry: { kind: "version-not-found" },
     });
+
     expect(decision).toMatchObject({
       status: "pass",
       exitCode: 0,
@@ -61,18 +64,19 @@ describe("decideNpmVersionGuard", () => {
       local,
       registry: publishedRegistry({
         files: {
-          "bundled-types/bb-plugin-sdk.d.ts":
+          "bundled-types/omnyo-plugin-sdk.d.ts":
             "export declare const a: string;\r\n\r\n",
           "dist/index.js": "export const a = 'a';",
         },
         manifest: {
           repository: {
-            url: "git+https://example.invalid/bb.git",
+            url: "git+https://example.invalid/omnyo.git",
             type: "git",
           },
         },
       }),
     });
+
     expect(decision).toMatchObject({
       status: "pass",
       exitCode: 0,
@@ -88,6 +92,7 @@ describe("decideNpmVersionGuard", () => {
         files: { "dist/index.js": "export const a = 'stale';\n" },
       }),
     });
+
     expect(decision).toMatchObject({
       status: "fail",
       exitCode: 1,
@@ -102,15 +107,16 @@ describe("decideNpmVersionGuard", () => {
       local,
       registry: publishedRegistry({
         files: {
-          "bundled-types/bb-plugin-sdk-app.d.ts":
+          "bundled-types/omnyo-plugin-sdk-app.d.ts":
             "export declare const b: boolean;\n",
         },
       }),
     });
+
     expect(decision).toMatchObject({
       status: "fail",
       exitCode: 1,
-      changedFiles: ["bundled-types/bb-plugin-sdk-app.d.ts"],
+      changedFiles: ["bundled-types/omnyo-plugin-sdk-app.d.ts"],
     });
     expect(decision.message).toContain("plugin-sdk-version.ts");
   });
@@ -118,11 +124,13 @@ describe("decideNpmVersionGuard", () => {
   it("fails when a packed file is added or removed", () => {
     const withoutReadme = publishedRegistry();
     delete withoutReadme.files["README.md"];
+
     const decision = decideNpmVersionGuard({
       version,
       local,
       registry: withoutReadme,
     });
+
     expect(decision).toMatchObject({
       status: "fail",
       exitCode: 1,
@@ -141,6 +149,7 @@ describe("decideNpmVersionGuard", () => {
         },
       }),
     });
+
     expect(decision).toMatchObject({ status: "fail", exitCode: 1 });
     expect(decision.changedFiles).toEqual([
       "package.json (exports)",
@@ -160,6 +169,7 @@ describe("decideNpmVersionGuard", () => {
         },
       }),
     });
+
     expect(decision).toMatchObject({ status: "pass", exitCode: 0 });
   });
 
@@ -169,6 +179,7 @@ describe("decideNpmVersionGuard", () => {
       local,
       registry: { kind: "network-error", message: "ENOTFOUND" },
     });
+
     expect(decision).toMatchObject({ status: "error", exitCode: 2 });
     expect(decision.message).toContain("could not reach registry");
   });
@@ -179,6 +190,7 @@ describe("decideNpmVersionGuard", () => {
       local: { kind: "pack-failed", message: "turbo build failed: boom" },
       registry: publishedRegistry(),
     });
+
     expect(decision).toMatchObject({
       status: "error",
       exitCode: 2,

@@ -1,35 +1,50 @@
-import type { ReactNode } from "react";
-import type { ExperimentalProviderIconProps } from "@get-bb/plugin-sdk/app";
-import { Button } from "@bb/shared-ui/button";
-import { Checkbox } from "@bb/shared-ui/checkbox";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { ResourceBrowseGrid } from "@bb/shared-ui/resource-list";
-import { Switch } from "@bb/shared-ui/switch";
-import { cn } from "@bb/shared-ui/lib/utils";
+import "./onboarding-brand.css";
+
+import type { CSSProperties, ReactNode } from "react";
+import type { ExperimentalProviderIconProps } from "@omnyo/plugin-sdk/app";
+import { Button } from "@omnyo/shared-ui/button";
+import { Checkbox } from "@omnyo/shared-ui/checkbox";
 import {
-  PluginAuthorByline,
-  PluginCard,
-} from "@/components/plugin/management/PluginCard";
-import { CatalogEntryIconChip } from "@/components/plugin/management/plugin-ui";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@omnyo/shared-ui/dropdown-menu";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { Switch } from "@omnyo/shared-ui/switch";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { PluginIcon } from "@/components/plugin/PluginIcon";
 import { ProviderIcon } from "@/components/plugin/ProviderIcon";
+import { BrowserSourceIcon } from "@/components/settings/BrowserSourceIcon";
 import {
   MACOS_APP_REGION_NO_DRAG_CLASS,
   MACOS_WINDOW_DRAG_CLASS,
-} from "@/lib/bb-desktop";
-import {
-  ONBOARDING_STEPS,
-  type AgentSetupState,
-  type OnboardingStepId,
-  type SignInGuide,
+} from "@/lib/omnyo-desktop";
+import type {
+  AgentSetupState,
+  OnboardingStep,
+  OnboardingStepId,
+  SignInGuide,
 } from "./onboarding-model";
-import bbLogoUrl from "../../../../../assets/bb-logo.svg";
+import { OnboardingMark } from "./OnboardingMark";
 
-const CONTENT_COLUMN_CLASS = "mx-auto w-full max-w-[600px] px-6";
+const CONTENT_COLUMN_CLASS = "mx-auto w-full max-w-[560px] px-6";
+
+export interface OnboardingStepChrome {
+  compact: boolean;
+  reserveMacosTrafficLights: boolean;
+  steps: readonly OnboardingStep[];
+  previousStep: OnboardingStepId | null;
+  onSelectStep: (step: OnboardingStepId) => void;
+  onSkipAll: () => void;
+}
 
 interface OnboardingLayoutProps {
   step: OnboardingStepId;
+  steps: readonly OnboardingStep[];
   compact?: boolean;
   reserveMacosTrafficLights?: boolean;
+  previousStep?: OnboardingStepId | null;
   title: string;
   description: ReactNode;
   children: ReactNode;
@@ -45,10 +60,124 @@ interface OnboardingLayoutProps {
   onSkipAll: () => void;
 }
 
+type ProgressMotion = "fill" | "complete" | "retract" | "reopen";
+
+function progressMotion(
+  index: number,
+  activeIndex: number,
+  previousIndex: number,
+): ProgressMotion | undefined {
+  if (previousIndex === -1 || previousIndex === activeIndex) return undefined;
+
+  if (previousIndex < activeIndex) {
+    if (index === activeIndex) return "fill";
+
+    if (index >= previousIndex && index < activeIndex) return "complete";
+
+    return undefined;
+  }
+
+  if (index === activeIndex) return "reopen";
+
+  if (index > activeIndex && index <= previousIndex) return "retract";
+
+  return undefined;
+}
+
+function OnboardingProgress({
+  steps,
+  activeIndex,
+  previousIndex,
+  compact,
+  onSelectStep,
+}: {
+  steps: readonly OnboardingStep[];
+  activeIndex: number;
+  previousIndex: number;
+  compact: boolean;
+  onSelectStep: (step: OnboardingStepId) => void;
+}) {
+  return (
+    <nav
+      aria-label="Setup steps"
+      className="omnyo-onboarding-steps flex min-w-0 flex-1 items-center justify-center gap-1.5"
+    >
+      {steps.map((entry, index) => {
+        const done = index < activeIndex;
+        const active = index === activeIndex;
+        const motion = progressMotion(index, activeIndex, previousIndex);
+
+        const stagger =
+          motion === "retract"
+            ? previousIndex - index
+            : motion === "complete"
+              ? index - previousIndex
+              : 0;
+
+        return (
+          <button
+            key={entry.id}
+            type="button"
+            disabled={!done}
+            aria-current={active ? "step" : undefined}
+            aria-label={`Step ${index + 1}: ${entry.label}`}
+            onClick={() => onSelectStep(entry.id)}
+            data-motion={motion}
+            style={{ "--step-stagger": stagger } as CSSProperties}
+            className={cn(
+              "group/step flex flex-col gap-1.5 rounded-sm pt-1 text-left text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              compact ? "w-8" : "w-20",
+              MACOS_APP_REGION_NO_DRAG_CLASS,
+              active && "text-foreground",
+              done && "text-subtle-foreground hover:text-foreground",
+              !active && !done && "text-muted-foreground",
+            )}
+          >
+            {compact ? null : (
+              <span className="flex items-center truncate">
+                {done || motion === "reopen" ? (
+                  <span
+                    aria-hidden
+                    className="omnyo-onboarding-step-check flex w-4 shrink-0 overflow-hidden"
+                  >
+                    <Icon
+                      name="Check"
+                      aria-hidden
+                      className="size-3 shrink-0 text-success"
+                    />
+                  </span>
+                ) : null}
+                <span className="truncate">{entry.label}</span>
+              </span>
+            )}
+            <span
+              aria-hidden
+              className="relative h-0.5 w-full rounded-full bg-border"
+            >
+              <span
+                data-filled={done || active}
+                className={cn(
+                  "omnyo-onboarding-step-fill absolute inset-0 rounded-full bg-foreground",
+                  done && "opacity-50 group-hover/step:opacity-100",
+                )}
+              />
+              {motion === "fill" ? (
+                <span className="omnyo-onboarding-step-comet" />
+              ) : null}
+            </span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
 export function OnboardingLayout({
   step,
+  steps,
   compact = false,
   reserveMacosTrafficLights = false,
+  previousStep = null,
   title,
   description,
   children,
@@ -63,7 +192,9 @@ export function OnboardingLayout({
   onSelectStep,
   onSkipAll,
 }: OnboardingLayoutProps) {
-  const activeIndex = ONBOARDING_STEPS.findIndex((entry) => entry.id === step);
+  const activeIndex = steps.findIndex((entry) => entry.id === step);
+  const revealStep = previousStep !== null;
+
   return (
     <div
       data-testid="onboarding"
@@ -77,53 +208,18 @@ export function OnboardingLayout({
             : "pl-4",
         )}
       >
-        <img
-          src={bbLogoUrl}
-          alt="bb"
-          draggable={false}
-          className="h-5 w-6 shrink-0 select-none object-contain dark:invert"
+        <OnboardingMark className="size-5 shrink-0 text-foreground" />
+        <OnboardingProgress
+          steps={steps}
+          activeIndex={activeIndex}
+          previousIndex={
+            previousStep === null
+              ? -1
+              : steps.findIndex((entry) => entry.id === previousStep)
+          }
+          compact={compact}
+          onSelectStep={onSelectStep}
         />
-        <nav
-          aria-label="Setup steps"
-          className="flex min-w-0 flex-1 items-center justify-center gap-1"
-        >
-          {ONBOARDING_STEPS.map((entry, index) => {
-            const done = index < activeIndex;
-            const active = index === activeIndex;
-            return (
-              <button
-                key={entry.id}
-                type="button"
-                disabled={!done}
-                aria-current={active ? "step" : undefined}
-                onClick={() => onSelectStep(entry.id)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                  MACOS_APP_REGION_NO_DRAG_CLASS,
-                  active && "text-foreground",
-                  done && "text-subtle-foreground hover:bg-state-hover",
-                  !active && !done && "text-muted-foreground",
-                )}
-              >
-                <span
-                  className={cn(
-                    "flex size-5 items-center justify-center rounded-full text-xs tabular-nums",
-                    active && "bg-foreground text-background",
-                    done && "bg-success text-background",
-                    !active && !done && "border border-border",
-                  )}
-                >
-                  {done ? (
-                    <Icon name="Check" aria-hidden className="size-3" />
-                  ) : (
-                    index + 1
-                  )}
-                </span>
-                {compact && !active ? null : <span>{entry.label}</span>}
-              </button>
-            );
-          })}
-        </nav>
         <Button
           variant="ghost"
           size="sm"
@@ -138,15 +234,32 @@ export function OnboardingLayout({
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div
+          key={step}
           className={cn(
             CONTENT_COLUMN_CLASS,
-            "flex flex-col gap-6",
-            compact ? "py-4" : "py-6",
+            "flex flex-col",
+            compact ? "gap-6 py-4" : "min-h-full justify-center gap-8 py-12",
+            revealStep &&
+              "animate-in fade-in-0 slide-in-from-bottom-1.5 duration-(--motion-duration-base) ease-out",
           )}
         >
-          <div className="flex flex-col gap-1.5">
-            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-            <p className="text-sm text-muted-foreground">{description}</p>
+          <div className="flex flex-col gap-2">
+            <h1
+              className={cn(
+                "text-balance font-semibold tracking-tight",
+                compact ? "text-2xl" : "text-display",
+              )}
+            >
+              {title}
+            </h1>
+            <p
+              className={cn(
+                "text-pretty text-muted-foreground",
+                compact ? "text-sm" : "text-base",
+              )}
+            >
+              {description}
+            </p>
           </div>
           {children}
         </div>
@@ -170,7 +283,7 @@ export function OnboardingLayout({
             </Button>
           ) : null}
           <Button
-            size="sm"
+            className="min-w-28"
             disabled={primaryDisabled || primaryBusy}
             onClick={onPrimary}
           >
@@ -236,17 +349,20 @@ function AgentRow({
   onCancelSignIn,
 }: AgentRowHandlers & { agent: OnboardingAgent }) {
   const { state } = agent;
+
   return (
-    <li className="px-3 py-3" data-agent-id={agent.id}>
+    <li className="px-4 py-3.5" data-agent-id={agent.id}>
       <div className="flex items-center gap-3">
-        <ProviderIcon
-          providerKind="agent"
-          provider={agent.provider}
-          className={cn(
-            "size-6",
-            state.status === "install" && "text-muted-foreground",
-          )}
-        />
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border-hairline bg-surface-recessed">
+          <ProviderIcon
+            providerKind="agent"
+            provider={agent.provider}
+            className={cn(
+              "size-5",
+              state.status === "install" && "text-muted-foreground",
+            )}
+          />
+        </span>
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="text-sm font-medium">{agent.name}</span>
           <span
@@ -266,8 +382,8 @@ function AgentRow({
           />
         ) : null}
         {state.status === "ready" ? (
-          <span className="flex items-center gap-1.5 text-xs font-medium text-success">
-            <Icon name="CircleCheck" aria-hidden className="size-4" />
+          <span className="flex items-center gap-1 rounded-full bg-success/12 py-1 pl-1.5 pr-2.5 text-xs font-medium text-success">
+            <Icon name="CircleCheck" aria-hidden className="size-3.5" />
             Ready
           </span>
         ) : null}
@@ -354,10 +470,10 @@ export function AgentStep({
         )}
       </div>
       {agents === null ? (
-        <ul className="divide-y divide-border-hairline rounded-lg border border-border">
+        <ul className="divide-y divide-border-hairline overflow-hidden rounded-xl border border-border bg-card shadow-xs">
           {[0, 1, 2].map((index) => (
-            <li key={index} className="flex items-center gap-3 px-3 py-3">
-              <span className="size-6 rounded-md bg-state-hover" />
+            <li key={index} className="flex items-center gap-3 px-4 py-3.5">
+              <span className="size-10 rounded-lg bg-state-hover" />
               <span className="flex flex-1 flex-col gap-1.5">
                 <span className="h-3 w-28 rounded-sm bg-state-hover" />
                 <span className="h-2.5 w-40 rounded-sm bg-state-hover" />
@@ -366,14 +482,14 @@ export function AgentStep({
           ))}
         </ul>
       ) : (
-        <ul className="divide-y divide-border-hairline rounded-lg border border-border">
+        <ul className="divide-y divide-border-hairline overflow-hidden rounded-xl border border-border bg-card shadow-xs">
           {agents.map((agent) => (
             <AgentRow key={agent.id} agent={agent} {...rowHandlers} />
           ))}
         </ul>
       )}
       <p className="text-xs text-muted-foreground">
-        Don't see your agent? bb picks up other ACP agents, such as opencode,
+        Don't see your agent? Omnyo picks up other ACP agents, such as opencode,
         once they are installed.
       </p>
     </div>
@@ -414,6 +530,7 @@ export function AgentSignInGuide({
   const url = guide?.url ?? null;
   const userCode = guide?.userCode ?? null;
   const acceptsPastedCode = guide?.acceptsPastedCode ?? false;
+
   return (
     <div className="mt-3 overflow-hidden rounded-md border border-border bg-surface-recessed">
       <div className="flex flex-col gap-3 p-3">
@@ -512,7 +629,7 @@ export function AgentSignInGuide({
         <span className="min-w-0 flex-1">
           {codeSubmitted
             ? "Finishing sign-in…"
-            : "bb continues on its own as soon as you're signed in."}
+            : "Omnyo continues on its own as soon as you're signed in."}
         </span>
         {alternateLabel === null ? null : (
           <button
@@ -577,9 +694,9 @@ export function ProjectsStep({
           <Icon name="Spinner" aria-hidden className="size-3.5 animate-spin" />
           Looking for git repos you've touched recently…
         </div>
-        <ul className="divide-y divide-border-hairline rounded-lg border border-border">
+        <ul className="divide-y divide-border-hairline overflow-hidden rounded-xl border border-border bg-card shadow-xs">
           {[0, 1, 2, 3].map((index) => (
-            <li key={index} className="flex items-center gap-3 px-3 py-3">
+            <li key={index} className="flex items-center gap-3 px-4 py-3">
               <span className="size-4 rounded-sm bg-state-hover" />
               <span className="flex flex-1 flex-col gap-1.5">
                 <span className="h-3 w-32 rounded-sm bg-state-hover" />
@@ -603,7 +720,7 @@ export function ProjectsStep({
         <p className="text-sm text-muted-foreground">
           {status.kind === "error"
             ? status.message
-            : "bb didn't find a git repo you've worked in over the last 30 days."}
+            : "Omnyo didn't find a git repo you've worked in over the last 30 days."}
         </p>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={onRetry}>
@@ -619,6 +736,7 @@ export function ProjectsStep({
   }
 
   const selectableCount = repos.filter((repo) => !repo.added).length;
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -640,12 +758,12 @@ export function ProjectsStep({
           Select none
         </button>
       </div>
-      <ul className="divide-y divide-border-hairline rounded-lg border border-border">
+      <ul className="divide-y divide-border-hairline overflow-hidden rounded-xl border border-border bg-card shadow-xs">
         {repos.map((repo) => (
           <li key={repo.id}>
             <label
               className={cn(
-                "flex items-center gap-3 px-3 py-2.5",
+                "flex items-center gap-3 px-4 py-3",
                 repo.added
                   ? "text-muted-foreground"
                   : "cursor-pointer hover:bg-state-hover",
@@ -695,104 +813,347 @@ export function ProjectsStep({
   );
 }
 
-export function OnboardingPluginGrid({
-  compact = false,
-  children,
+export interface OnboardingPluginRow {
+  id: string;
+  name: string;
+  description: string | null;
+  icon: string | null;
+  enabled: boolean;
+  pending: boolean;
+}
+
+export interface OnboardingPluginSection {
+  id: string;
+  label: string;
+  plugins: readonly OnboardingPluginRow[];
+}
+
+function OnboardingPluginTile({
+  plugin,
+  onToggle,
 }: {
-  compact?: boolean;
-  children: ReactNode;
+  plugin: OnboardingPluginRow;
+  onToggle: (id: string, enabled: boolean) => void;
 }) {
   return (
-    <div className="flex flex-col gap-4">
-      <ResourceBrowseGrid
-        className={cn("w-full gap-2", compact ? "grid-cols-1" : "grid-cols-2")}
+    <label
+      title={plugin.description ?? undefined}
+      className={cn(
+        "flex min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 shadow-xs hover:bg-state-hover",
+        plugin.pending && "cursor-progress",
+      )}
+    >
+      <span
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-lg border border-border-hairline bg-surface-recessed transition-opacity duration-(--motion-duration-fast) ease-standard",
+          !plugin.enabled && "opacity-50",
+        )}
       >
-        {children}
-      </ResourceBrowseGrid>
-      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Icon name="Puzzle" aria-hidden className="size-3.5 shrink-0" />
-        Want something that isn't here? Ask an agent to build a plugin at any
-        time.
-      </p>
+        <PluginIcon
+          pluginId={plugin.id}
+          icon={plugin.icon}
+          className="size-4 text-subtle-foreground"
+        />
+      </span>
+      <span
+        className={cn(
+          "flex min-w-0 flex-1 flex-col transition-opacity duration-(--motion-duration-fast) ease-standard",
+          !plugin.enabled && "opacity-60",
+        )}
+      >
+        <span className="truncate text-sm font-medium">{plugin.name}</span>
+        {plugin.description === null ? null : (
+          <span className="truncate text-xs text-muted-foreground">
+            {plugin.description}
+          </span>
+        )}
+      </span>
+      {plugin.pending ? (
+        <Icon
+          name="Spinner"
+          aria-hidden
+          className="size-3.5 shrink-0 animate-spin text-muted-foreground"
+        />
+      ) : null}
+      <Switch
+        checked={plugin.enabled}
+        disabled={plugin.pending}
+        onCheckedChange={(next) => onToggle(plugin.id, next)}
+        aria-label={`${plugin.name} on`}
+      />
+    </label>
+  );
+}
+
+export function OnboardingPluginSections({
+  sections,
+  compact = false,
+  onToggle,
+}: {
+  sections: readonly OnboardingPluginSection[] | null;
+  compact?: boolean;
+  onToggle: (id: string, enabled: boolean) => void;
+}) {
+  if (sections === null) {
+    return (
+      <div
+        className={cn("grid gap-2", compact ? "grid-cols-1" : "grid-cols-2")}
+      >
+        {Array.from({ length: 8 }, (_, index) => (
+          <div
+            key={index}
+            className="flex items-center gap-3 rounded-xl border border-border px-3 py-2.5"
+          >
+            <span className="size-8 rounded-lg bg-state-hover" />
+            <span className="flex flex-1 flex-col gap-1.5">
+              <span className="h-3 w-24 rounded-sm bg-state-hover" />
+              <span className="h-2.5 w-32 rounded-sm bg-state-hover" />
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      {sections.map((section) => (
+        <section key={section.id} className="flex flex-col gap-2">
+          <h2 className="text-xs font-medium text-muted-foreground">
+            {section.label}
+          </h2>
+          <div
+            className={cn(
+              "grid gap-2",
+              compact ? "grid-cols-1" : "grid-cols-2",
+            )}
+          >
+            {section.plugins.map((plugin) => (
+              <OnboardingPluginTile
+                key={plugin.id}
+                plugin={plugin}
+                onToggle={onToggle}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
 
-export function OnboardingPluginGridSkeleton({ count }: { count: number }) {
+export interface OnboardingStarterCard {
+  id: string;
+  name: string;
+  description: string;
+  scheduleLabel: string;
+  icon: IconName;
+  enabled: boolean;
+  pending: boolean;
+}
+
+export type OnboardingSentryCard =
+  | { status: "hidden" }
+  | {
+      status: "detected";
+      projectName: string;
+      open: boolean;
+      setup: ReactNode;
+    };
+
+interface AutomationsStepProps {
+  projects: readonly { id: string; name: string }[];
+  projectId: string | null;
+  agentName: string | null;
+  starters: readonly OnboardingStarterCard[];
+  sentry: OnboardingSentryCard;
+  contentFeedQueued: boolean;
+  onSelectProject: (id: string) => void;
+  onToggleStarter: (id: string, enabled: boolean) => void;
+  onToggleSentrySetup: () => void;
+  onToggleContentFeed: (queued: boolean) => void;
+}
+
+function AutomationRow({
+  icon,
+  title,
+  badge,
+  description,
+  muted = false,
+  action,
+  children,
+}: {
+  icon: IconName;
+  title: string;
+  badge?: string;
+  description: string;
+  muted?: boolean;
+  action: ReactNode;
+  children?: ReactNode;
+}) {
   return (
-    <>
-      {Array.from({ length: count }, (_, index) => (
-        <div
-          key={index}
-          className="flex min-h-36 flex-col gap-3 rounded-xl border border-border p-3"
+    <li className="px-4 py-3.5">
+      <div className="flex items-center gap-3">
+        <span
+          className={cn(
+            "flex size-10 shrink-0 items-center justify-center rounded-lg border border-border-hairline bg-surface-recessed",
+            muted && "opacity-50",
+          )}
         >
-          <span className="h-4 w-32 rounded-sm bg-state-hover" />
-          <span className="h-3 w-full rounded-sm bg-state-hover" />
-          <span className="h-3 w-2/3 rounded-sm bg-state-hover" />
+          <Icon
+            name={icon}
+            aria-hidden
+            className="size-5 text-subtle-foreground"
+          />
+        </span>
+        <div
+          className={cn("flex min-w-0 flex-1 flex-col", muted && "opacity-60")}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-medium">{title}</span>
+            {badge === undefined ? null : (
+              <span className="shrink-0 truncate rounded-full border border-border-hairline px-2 py-0.5 text-2xs text-muted-foreground">
+                {badge}
+              </span>
+            )}
+          </span>
+          <span className="text-xs text-muted-foreground">{description}</span>
         </div>
-      ))}
-    </>
+        {action}
+      </div>
+      {children}
+    </li>
   );
 }
 
-interface OnboardingPluginCardProps {
-  name: string;
-  description: string;
-  icon: { icon: string | null; iconUrl: string | null; iconTinted: boolean };
-  enabled: boolean;
-  pending: boolean;
-  unavailableReason: string | null;
-  onToggle: (enabled: boolean) => void;
-}
+export function AutomationsStep({
+  projects,
+  projectId,
+  agentName,
+  starters,
+  sentry,
+  contentFeedQueued,
+  onSelectProject,
+  onToggleStarter,
+  onToggleSentrySetup,
+  onToggleContentFeed,
+}: AutomationsStepProps) {
+  const project = projects.find((entry) => entry.id === projectId) ?? null;
 
-export function OnboardingPluginCard({
-  name,
-  description,
-  icon,
-  enabled,
-  pending,
-  unavailableReason,
-  onToggle,
-}: OnboardingPluginCardProps) {
-  const disabled = pending || unavailableReason !== null;
+  const blocked =
+    project === null
+      ? "Add a project to schedule these."
+      : agentName === null
+        ? "Connect an agent to schedule these."
+        : null;
+
   return (
-    <PluginCard
-      leading={
-        <CatalogEntryIconChip compact entry={{ displayName: name, ...icon }} />
-      }
-      title={name}
-      description={unavailableReason ?? description}
-      byline={
-        <PluginAuthorByline name="BB Official" github={null} official>
-          BB Official
-        </PluginAuthorByline>
-      }
-      footerAction={
-        <span className="flex items-center gap-2">
-          {pending ? (
-            <Icon
-              name="Spinner"
-              aria-hidden
-              className="size-3.5 animate-spin"
-            />
-          ) : enabled ? (
-            "On"
-          ) : (
-            "Off"
-          )}
-          <Switch
-            checked={enabled}
-            disabled={disabled}
-            onCheckedChange={onToggle}
-            aria-label={`Enable ${name}`}
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Icon name="Folder" aria-hidden className="size-3.5" />
+        {project === null ? (
+          <span>No project yet</span>
+        ) : (
+          <span className="flex min-w-0 items-center gap-1">
+            <span>Runs in</span>
+            {projects.length > 1 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex items-center gap-0.5 rounded-sm font-medium text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    {project.name}
+                    <Icon name="ChevronDown" aria-hidden className="size-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56">
+                  {projects.map((entry) => (
+                    <DropdownMenuItem
+                      key={entry.id}
+                      onSelect={() => onSelectProject(entry.id)}
+                    >
+                      {entry.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <span className="font-medium text-foreground">
+                {project.name}
+              </span>
+            )}
+            {agentName === null ? null : <span>with {agentName}</span>}
+          </span>
+        )}
+      </div>
+      <ul className="divide-y divide-border-hairline overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+        {starters.map((starter) => (
+          <AutomationRow
+            key={starter.id}
+            icon={starter.icon}
+            title={starter.name}
+            description={`${starter.description} ${starter.scheduleLabel}.`}
+            muted={blocked !== null}
+            action={
+              <span className="flex shrink-0 items-center gap-2">
+                {starter.pending ? (
+                  <Icon
+                    name="Spinner"
+                    aria-hidden
+                    className="size-3.5 animate-spin text-muted-foreground"
+                  />
+                ) : null}
+                <Switch
+                  checked={starter.enabled}
+                  disabled={blocked !== null || starter.pending}
+                  onCheckedChange={(next) => onToggleStarter(starter.id, next)}
+                  aria-label={`Schedule ${starter.name}`}
+                />
+              </span>
+            }
           />
-        </span>
-      }
-      openLabel={`${enabled ? "Turn off" : "Turn on"} ${name}`}
-      onOpen={() => {
-        if (!disabled) onToggle(!enabled);
-      }}
-    />
+        ))}
+        {sentry.status === "detected" ? (
+          <AutomationRow
+            icon="Bug"
+            title="Fix Sentry errors"
+            badge={`${sentry.projectName} uses Sentry`}
+            description="Investigates new errors and prepares reviewed fixes."
+            action={
+              <Button size="sm" variant="outline" onClick={onToggleSentrySetup}>
+                {sentry.open ? "Hide" : "Connect"}
+              </Button>
+            }
+          >
+            {sentry.open ? (
+              <div className="mt-3 rounded-md border border-border p-3">
+                {sentry.setup}
+              </div>
+            ) : null}
+          </AutomationRow>
+        ) : null}
+        <AutomationRow
+          icon="News01"
+          title="Weekly Content Feed"
+          description={
+            contentFeedQueued
+              ? "Its setup opens when you finish."
+              : "Seven reviewed drafts a week from your product facts."
+          }
+          action={
+            <Switch
+              checked={contentFeedQueued}
+              onCheckedChange={onToggleContentFeed}
+              aria-label="Set up Weekly Content Feed when setup finishes"
+            />
+          }
+        />
+      </ul>
+      {blocked === null ? null : (
+        <p className="text-xs text-muted-foreground">{blocked}</p>
+      )}
+    </div>
   );
 }
 
@@ -834,13 +1195,15 @@ function DeviceRow({
   children,
 }: DeviceRowProps) {
   return (
-    <li className="px-3 py-3">
+    <li className="px-4 py-3.5">
       <div className="flex items-center gap-3">
-        <Icon
-          name={icon}
-          aria-hidden
-          className="size-5 shrink-0 text-subtle-foreground"
-        />
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border-hairline bg-surface-recessed">
+          <Icon
+            name={icon}
+            aria-hidden
+            className="size-5 text-subtle-foreground"
+          />
+        </span>
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="text-sm font-medium">{title}</span>
           <span className="text-xs text-muted-foreground">{description}</span>
@@ -862,7 +1225,6 @@ interface DevicesStepProps {
   connectSetup: ReactNode;
   connectSetupOpen: boolean;
   otherMachineCount: number;
-  mobileLinks: { ios: string; android: string };
   onToggleConnectSetup: () => void;
   onCopyConnectUrl: (url: string) => void;
   onAddMachine: () => void;
@@ -873,43 +1235,43 @@ export function DevicesStep({
   connectSetup,
   connectSetupOpen,
   otherMachineCount,
-  mobileLinks,
   onToggleConnectSetup,
   onCopyConnectUrl,
   onAddMachine,
 }: DevicesStepProps) {
   return (
-    <ul className="divide-y divide-border-hairline rounded-lg border border-border">
-      <DeviceRow
-        icon="ComputerCloud"
-        title="Open bb from any browser"
-        description={
-          connect.status === "unavailable"
-            ? "bb connect is turned off on this server. Enable its plugin to get a private getbb.app address."
-            : "bb connect gives this bb a private getbb.app address that only you can open."
-        }
-        action={
-          connect.status === "on" ? (
-            <span className="flex items-center gap-1.5 text-xs font-medium text-success">
-              <Icon name="CircleCheck" aria-hidden className="size-4" />
-              On
-            </span>
-          ) : connect.status === "off" ? (
-            <Button size="sm" variant="outline" onClick={onToggleConnectSetup}>
-              {connectSetupOpen ? "Hide" : "Set up"}
-            </Button>
-          ) : null
-        }
-      >
-        {connect.status === "on" ? (
-          <CopyableLine value={connect.url} onCopy={onCopyConnectUrl} />
-        ) : null}
-        {connect.status === "off" && connectSetupOpen ? (
-          <div className="mt-3 rounded-md border border-border p-3">
-            {connectSetup}
-          </div>
-        ) : null}
-      </DeviceRow>
+    <ul className="divide-y divide-border-hairline overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+      {connect.status === "unavailable" ? null : (
+        <DeviceRow
+          icon="ComputerCloud"
+          title="Open Omnyo from any browser"
+          description="Omnyo connect gives this Omnyo a private address that only you can open."
+          action={
+            connect.status === "on" ? (
+              <span className="flex items-center gap-1 rounded-full bg-success/12 py-1 pl-1.5 pr-2.5 text-xs font-medium text-success">
+                <Icon name="CircleCheck" aria-hidden className="size-3.5" />
+                On
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onToggleConnectSetup}
+              >
+                {connectSetupOpen ? "Hide" : "Set up"}
+              </Button>
+            )
+          }
+        >
+          {connect.status === "on" ? (
+            <CopyableLine value={connect.url} onCopy={onCopyConnectUrl} />
+          ) : connectSetupOpen ? (
+            <div className="mt-3 rounded-md border border-border p-3">
+              {connectSetup}
+            </div>
+          ) : null}
+        </DeviceRow>
+      )}
       <DeviceRow
         icon="Laptop"
         title="Add another machine"
@@ -924,25 +1286,96 @@ export function DevicesStep({
           </Button>
         }
       />
-      <DeviceRow
-        icon="Smartphone"
-        title="Get the mobile app"
-        description="Get a push when a thread needs you."
-        action={
-          <span className="flex items-center gap-2">
-            <Button size="sm" variant="outline" asChild>
-              <a href={mobileLinks.ios} target="_blank" rel="noreferrer">
-                iOS
-              </a>
-            </Button>
-            <Button size="sm" variant="outline" asChild>
-              <a href={mobileLinks.android} target="_blank" rel="noreferrer">
-                Android
-              </a>
-            </Button>
-          </span>
-        }
-      />
     </ul>
+  );
+}
+
+export interface BrowserLoginChoice {
+  key: string;
+  browserName: string;
+  profileName: string;
+  icon: string | null;
+}
+
+export interface BrowserStepProps {
+  selected: BrowserLoginChoice | null;
+  choices: readonly BrowserLoginChoice[];
+  selectedIsDefault: boolean;
+  connected: boolean;
+  error: string | null;
+  disabled: boolean;
+  onSelect: (key: string) => void;
+}
+
+export function BrowserStep({
+  selected,
+  choices,
+  selectedIsDefault,
+  connected,
+  error,
+  disabled,
+  onSelect,
+}: BrowserStepProps) {
+  if (selected === null)
+    return (
+      <p className="text-sm text-muted-foreground">
+        No browser on this computer can share its logins yet.
+      </p>
+    );
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-3 rounded-lg border border-border px-4 py-3">
+        <BrowserSourceIcon
+          source={{
+            name: selected.browserName,
+            ...(selected.icon === null ? {} : { icon: selected.icon }),
+          }}
+          className="size-8 rounded-md"
+        />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">
+            {selected.browserName} · {selected.profileName}
+          </p>
+          <p
+            className={cn(
+              "text-xs",
+              connected ? "text-success" : "text-muted-foreground",
+            )}
+          >
+            {connected
+              ? "Connected"
+              : selectedIsDefault
+                ? "Your default browser"
+                : "Browser profile"}
+          </p>
+        </div>
+        {choices.length > 1 && !connected ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="ghost" disabled={disabled}>
+                Change
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              {choices.map((choice) => (
+                <DropdownMenuItem
+                  key={choice.key}
+                  onSelect={() => onSelect(choice.key)}
+                >
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate">{choice.browserName}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {choice.profileName}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+      </div>
+      {error ? <p className="text-sm text-destructive-text">{error}</p> : null}
+    </div>
   );
 }

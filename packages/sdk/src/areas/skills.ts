@@ -1,10 +1,15 @@
 import {
+  registrySkillCommitRequestSchema,
   registrySkillDetailSchema,
   registrySkillEntriesRequestSchema,
   registrySkillEntriesResponseSchema,
+  registrySkillFileSchema,
+  registrySkillInstalledSchema,
   registrySkillInstallRequestSchema,
   registrySkillInstallResponseSchema,
   registryRepositoryStarsSchema,
+  registrySkillStageFileRequestSchema,
+  registrySkillStageSchema,
   registrySkillSchema,
   registrySkillsPageSchema,
   type DeleteSkillRequest,
@@ -12,12 +17,14 @@ import {
   type RegistrySkill,
   type RegistrySkillDetail,
   type RegistrySkillEntriesResponse,
+  type RegistrySkillFile,
   type RegistrySkillInstallResponse,
+  type RegistrySkillStage,
   type RegistrySkillsPage,
   type SkillContentResponse,
   type SkillFilesResponse,
   type SkillListResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 export interface SkillWorkspaceArgs {
@@ -26,6 +33,7 @@ export interface SkillWorkspaceArgs {
 }
 
 export interface SkillListArgs extends SkillWorkspaceArgs {
+  hostId?: string;
   signal?: AbortSignal;
 }
 
@@ -76,10 +84,21 @@ export interface RegistryRepositoryArgs extends AbortableArgs {
 
 export interface RegistrySkillInstallArgs {
   registrySkillId: string;
+  treeDigest?: string;
+}
+
+export interface RegistrySkillReviewArgs extends RegistrySkillIdArgs {
+  treeDigest: string;
+}
+
+export interface RegistrySkillReviewFileArgs extends RegistrySkillReviewArgs {
+  path: string;
 }
 
 export interface SkillsRegistryArea {
+  commit(args: RegistrySkillReviewArgs): Promise<RegistrySkillInstallResponse>;
   detail(args: RegistrySkillSourceArgs): Promise<RegistrySkillDetail>;
+  discardStage(args: RegistrySkillReviewArgs): Promise<void>;
   entries(
     args: RegistrySkillEntriesArgs,
   ): Promise<RegistrySkillEntriesResponse>;
@@ -87,10 +106,13 @@ export interface SkillsRegistryArea {
   install(
     args: RegistrySkillInstallArgs,
   ): Promise<RegistrySkillInstallResponse>;
+  isInstalled(args: RegistrySkillReviewArgs): Promise<boolean>;
   repositoryStars(
     args: RegistryRepositoryArgs,
   ): Promise<RegistryRepositoryStars>;
   search(args?: RegistrySkillsSearchArgs): Promise<RegistrySkillsPage>;
+  stage(args: RegistrySkillIdArgs): Promise<RegistrySkillStage>;
+  stageFile(args: RegistrySkillReviewFileArgs): Promise<RegistrySkillFile>;
 }
 
 export interface SkillsArea {
@@ -113,18 +135,56 @@ export function createSkillsArea(args: CreateSdkAreaArgs): SkillsArea {
     init?: RequestInit,
   ): Promise<T> {
     const baseUrl = transport.baseUrl.replace(/\/$/u, "");
+
     const response = await transport.resolve(
       transport.fetch(`${baseUrl}${path}`, init),
     );
+
     return schema.parse(await response.json());
   }
 
+  function jsonPost(body: unknown, signal?: AbortSignal): RequestInit {
+    return {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    };
+  }
+
+  function reviewedSkillBody({
+    registrySkillId,
+    treeDigest,
+  }: RegistrySkillReviewArgs) {
+    return registrySkillCommitRequestSchema.parse({
+      registrySkillId,
+      treeDigest,
+    });
+  }
+
   const registry: SkillsRegistryArea = {
+    async commit(input) {
+      return requestParsed(
+        "/api/v1/skills-registry/commit",
+        registrySkillInstallResponseSchema,
+        jsonPost(reviewedSkillBody(input), input.signal),
+      );
+    },
+    async discardStage(input) {
+      const baseUrl = transport.baseUrl.replace(/\/$/u, "");
+      await transport.resolve(
+        transport.fetch(
+          `${baseUrl}/api/v1/skills-registry/stage/discard`,
+          jsonPost(reviewedSkillBody(input), input.signal),
+        ),
+      );
+    },
     async detail(input) {
       const query = new URLSearchParams({
         source: input.source,
         skillId: input.skillId,
       });
+
       return requestParsed(
         `/api/v1/skills-registry/detail?${query.toString()}`,
         registrySkillDetailSchema,
@@ -135,6 +195,7 @@ export function createSkillsArea(args: CreateSdkAreaArgs): SkillsArea {
       const body = registrySkillEntriesRequestSchema.parse({
         ids: [...input.registrySkillIds],
       });
+
       return requestParsed(
         "/api/v1/skills-registry/entries",
         registrySkillEntriesResponseSchema,
@@ -148,6 +209,7 @@ export function createSkillsArea(args: CreateSdkAreaArgs): SkillsArea {
     },
     async get(input) {
       const query = new URLSearchParams({ id: input.registrySkillId });
+
       return requestParsed(
         `/api/v1/skills-registry/entry?${query.toString()}`,
         registrySkillSchema,
@@ -155,19 +217,31 @@ export function createSkillsArea(args: CreateSdkAreaArgs): SkillsArea {
       );
     },
     async install(input) {
-      const body = registrySkillInstallRequestSchema.parse(input);
+      if (input.treeDigest !== undefined) {
+        return registry.commit({
+          registrySkillId: input.registrySkillId,
+          treeDigest: input.treeDigest,
+        });
+      }
+
       return requestParsed(
         "/api/v1/skills-registry/install",
         registrySkillInstallResponseSchema,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        },
+        jsonPost(registrySkillInstallRequestSchema.parse(input)),
       );
+    },
+    async isInstalled(input) {
+      const result = await requestParsed(
+        "/api/v1/skills-registry/installed",
+        registrySkillInstalledSchema,
+        jsonPost(reviewedSkillBody(input), input.signal),
+      );
+
+      return result.installed;
     },
     async repositoryStars(input) {
       const query = new URLSearchParams({ source: input.source });
+
       return requestParsed(
         `/api/v1/skills-registry/repository-stars?${query.toString()}`,
         registryRepositoryStarsSchema,
@@ -179,11 +253,43 @@ export function createSkillsArea(args: CreateSdkAreaArgs): SkillsArea {
         page: String(input.page ?? 0),
         perPage: String(input.perPage ?? 24),
       });
-      if (input.query?.trim()) query.set("q", input.query.trim());
+
+      const value = input.query?.trim();
+
+      return value
+        ? requestParsed(
+            `/api/v1/skills-registry/search?${query.toString()}`,
+            registrySkillsPageSchema,
+            jsonPost({ query: value }, input.signal),
+          )
+        : requestParsed(
+            `/api/v1/skills-registry?${query.toString()}`,
+            registrySkillsPageSchema,
+            { signal: input.signal },
+          );
+    },
+    async stage({ registrySkillId, signal }) {
       return requestParsed(
-        `/api/v1/skills-registry?${query.toString()}`,
-        registrySkillsPageSchema,
-        { signal: input.signal },
+        "/api/v1/skills-registry/stage",
+        registrySkillStageSchema,
+        jsonPost(
+          registrySkillInstallRequestSchema.parse({ registrySkillId }),
+          signal,
+        ),
+      );
+    },
+    async stageFile({ registrySkillId, treeDigest, path, signal }) {
+      return requestParsed(
+        "/api/v1/skills-registry/stage/file",
+        registrySkillFileSchema,
+        jsonPost(
+          registrySkillStageFileRequestSchema.parse({
+            registrySkillId,
+            treeDigest,
+            path,
+          }),
+          signal,
+        ),
       );
     },
   };
@@ -209,7 +315,10 @@ export function createSkillsArea(args: CreateSdkAreaArgs): SkillsArea {
         transport.api.v1.projects[":id"].skills.$get(
           {
             param: { id: input.projectId },
-            query: { environmentId: input.environmentId ?? "" },
+            query: {
+              environmentId: input.environmentId ?? "",
+              hostId: input.hostId,
+            },
           },
           ...signalRequestArgs(input.signal),
         ),
@@ -235,6 +344,7 @@ export function createSkillsArea(args: CreateSdkAreaArgs): SkillsArea {
         skillId: input.skillId,
         environmentId: input.environmentId,
       };
+
       return transport.readJson(
         transport.api.v1.projects[":id"].skills.$delete({
           param: { id: input.projectId },

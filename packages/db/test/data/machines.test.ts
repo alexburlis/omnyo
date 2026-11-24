@@ -19,27 +19,48 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 function setup() {
   const db = createMigratedConnection();
   const host = upsertHost(db, noopNotifier, { name: "test-host" });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   return { db, host, project };
 }
 
 describe("machine provisioning state", () => {
   it("selects unfinished provider machines through creation, suspension and removal", () => {
     const { db, host } = setup();
+
     try {
-      updateHost(db, noopNotifier, host.id, { machineProviderId: "test-machine" });
+      updateHost(db, noopNotifier, host.id, {
+        machineProviderId: "test-machine",
+      });
       const other = upsertHost(db, noopNotifier, { name: "other-provider" });
-      updateHost(db, noopNotifier, other.id, { machineProviderId: "other-machine" });
-      for (const phase of ["creating", "active", "suspending", "suspended", "resuming", "removing"] as const) {
+      updateHost(db, noopNotifier, other.id, {
+        machineProviderId: "other-machine",
+      });
+
+      for (const phase of [
+        "creating",
+        "active",
+        "suspending",
+        "suspended",
+        "resuming",
+        "removing",
+      ] as const) {
         updateHost(db, noopNotifier, host.id, { phase });
-        expect(listProviderMachines(db, "test-machine").map((row) => row.id)).toEqual([host.id]);
+        expect(
+          listProviderMachines(db, "test-machine").map((row) => row.id),
+        ).toEqual([host.id]);
       }
+
       updateHost(db, noopNotifier, host.id, { phase: "destroyed" });
       expect(listProviderMachines(db, "test-machine")).toEqual([]);
-      updateHost(db, noopNotifier, host.id, { phase: "active", destroyedAt: 1 });
+      updateHost(db, noopNotifier, host.id, {
+        phase: "active",
+        destroyedAt: 1,
+      });
       expect(listProviderMachines(db, "test-machine")).toEqual([]);
     } finally {
       db.$client.close();
@@ -48,20 +69,24 @@ describe("machine provisioning state", () => {
 
   it("distinguishes starting launches from live threads retained until archive", () => {
     const { db, host, project } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
       status: "starting",
     });
+
     updateHost(db, noopNotifier, host.id, { launchKey: thread.id });
 
     expect(machineHasLiveThreadLaunch(db, host.id)).toBe(true);
     expect(machineHasStartingThreadLaunch(db, host.id)).toBe(true);
+
     for (const status of ["active", "idle", "error"] as const) {
       db.update(threads).set({ status }).where(eq(threads.id, thread.id)).run();
       expect(machineHasStartingThreadLaunch(db, host.id)).toBe(false);
       expect(machineHasLiveThreadLaunch(db, host.id)).toBe(true);
     }
+
     archiveThread(db, noopNotifier, thread.id);
     expect(machineHasLiveThreadLaunch(db, host.id)).toBe(false);
     expect(machineHasStartingThreadLaunch(db, host.id)).toBe(false);
@@ -69,6 +94,7 @@ describe("machine provisioning state", () => {
 
   it("finds a provisioning environment on the host until it is ready", () => {
     const { db, host, project } = setup();
+
     const environment = createEnvironment(db, noopNotifier, {
       projectId: project.id,
       hostId: host.id,
@@ -92,16 +118,19 @@ describe("pending machine ownership", () => {
     "retains persisted %s placement after reloading the database",
     (kind) => {
       const { db, host, project } = setup();
+
       try {
         const thread = createThread(db, noopNotifier, {
           projectId: project.id,
           providerId: "codex",
           status: kind === "pending" ? "pending" : "starting",
         });
+
         const environmentIntent = {
           type: "provider",
           machine: { type: "existing", hostId: host.id },
         };
+
         db.update(threads)
           .set({
             startupContext: JSON.stringify(
@@ -113,11 +142,13 @@ describe("pending machine ownership", () => {
           .where(eq(threads.id, thread.id))
           .run();
         const restored = createConnection(db.$client.serialize());
+
         try {
           expect(machineHasPendingThreads(restored, host.id)).toBe(true);
           expect(machineHasPendingThreads(restored, "different-host")).toBe(
             false,
           );
+
           for (const patch of [
             { status: "error" },
             { status: "idle" },
@@ -147,12 +178,14 @@ describe("pending machine ownership", () => {
 
   it("retains a preparing owner through ready-before-attachment but releases orphan or cancelled preparation", () => {
     const { db, host, project } = setup();
+
     try {
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         status: "starting",
       });
+
       const environment = createEnvironment(db, noopNotifier, {
         projectId: project.id,
         hostId: host.id,
@@ -161,10 +194,12 @@ describe("pending machine ownership", () => {
         providerOwnsPath: false,
         environmentProvider: null,
       });
+
       db.update(environments)
         .set({ ownerThreadId: thread.id })
         .where(eq(environments.id, environment.id))
         .run();
+
       for (const status of ["creating", "provisioning", "ready"] as const) {
         db.update(environments)
           .set({ status })
@@ -172,6 +207,7 @@ describe("pending machine ownership", () => {
           .run();
         expect(machineHasPendingThreads(db, host.id)).toBe(true);
       }
+
       db.update(environments)
         .set({ teardownStatus: "running" })
         .where(eq(environments.id, environment.id))
@@ -181,6 +217,7 @@ describe("pending machine ownership", () => {
         .set({ teardownStatus: null })
         .where(eq(environments.id, environment.id))
         .run();
+
       for (const patch of [
         { status: "pending" },
         { status: "error" },
@@ -199,6 +236,7 @@ describe("pending machine ownership", () => {
           .run();
         expect(machineHasPendingThreads(db, host.id)).toBe(false);
       }
+
       db.delete(threads).where(eq(threads.id, thread.id)).run();
       expect(machineHasPendingThreads(db, host.id)).toBe(false);
     } finally {
@@ -208,6 +246,7 @@ describe("pending machine ownership", () => {
 
   it("finds an unattached pending reuse intent without retaining failed or destroyed workspaces", () => {
     const { db, host, project } = setup();
+
     try {
       const environment = createEnvironment(db, noopNotifier, {
         projectId: project.id,
@@ -217,11 +256,13 @@ describe("pending machine ownership", () => {
         providerOwnsPath: false,
         environmentProvider: null,
       });
+
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         status: "pending",
       });
+
       db.update(threads)
         .set({
           startupContext: JSON.stringify({
@@ -233,6 +274,7 @@ describe("pending machine ownership", () => {
         .run();
       expect(machineHasPendingThreads(db, host.id)).toBe(true);
       const oldHost = upsertHost(db, noopNotifier, { name: "previous-host" });
+
       const oldEnvironment = createEnvironment(db, noopNotifier, {
         projectId: project.id,
         hostId: oldHost.id,
@@ -241,11 +283,13 @@ describe("pending machine ownership", () => {
         providerOwnsPath: false,
         environmentProvider: null,
       });
+
       db.update(environments)
         .set({ ownerThreadId: thread.id })
         .where(eq(environments.id, oldEnvironment.id))
         .run();
       expect(machineHasPendingThreads(db, oldHost.id)).toBe(false);
+
       for (const status of ["error", "destroyed"] as const) {
         db.update(environments)
           .set({ status })

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { ProjectBranchesResponse } from "@bb/server-contract";
+import type { ProjectBranchesResponse } from "@omnyo/server-contract";
 import { readProjectBranchOptions } from "@/lib/project-branch-options";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -60,10 +60,12 @@ describe("usePluginBranches", () => {
   it("uses the project source for branch suggestions before a host exists", async () => {
     const { wrapper } = createQueryClientTestHarness();
     vi.mocked(readProjectBranchOptions).mockResolvedValue(BRANCHES);
+
     const { result } = renderHook(
       () => usePluginBranches({ hostId: null, projectId: "project-1" }),
       { wrapper },
     );
+
     await waitFor(() => expect(result.current.branches).toEqual(["release"]));
     expect(readProjectBranchOptions).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -121,11 +123,13 @@ describe("usePluginBranches", () => {
   it("only requests branches for the query a typist settles on", async () => {
     const { wrapper } = createQueryClientTestHarness();
     vi.mocked(readProjectBranchOptions).mockResolvedValue(BRANCHES);
+
     const { rerender } = renderHook(
       ({ query }: { query: string }) =>
         usePluginBranches({ hostId: "host-1", projectId: "project-1", query }),
       { wrapper, initialProps: { query: "" } },
     );
+
     await waitFor(() =>
       expect(readProjectBranchOptions).toHaveBeenCalledTimes(1),
     );
@@ -133,6 +137,7 @@ describe("usePluginBranches", () => {
     for (const query of ["r", "re", "rel", "rele", "relea", "releas"]) {
       rerender({ query });
     }
+
     rerender({ query: "release" });
 
     await waitFor(() =>

@@ -1,4 +1,4 @@
-const PLUGIN_ID = "bb--provider-acp-next";
+import { PLUGIN_ID } from "./plugin-id.js";
 
 export const REGISTRY_ICON_AGENT_IDS: readonly string[] = [
   "agoragentic-acp",

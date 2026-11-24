@@ -14,16 +14,17 @@ interface CliResult {
   stdout: string;
 }
 
-describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
+describe.skipIf(process.platform === "win32")("omnyo entrypoint errors", () => {
   let server: Server;
   let serverUrl: string;
   let dataDir: string;
   const pluginRuns: string[] = [];
 
   beforeAll(async () => {
-    dataDir = mkdtempSync(join(tmpdir(), "bb-cli-entry-"));
+    dataDir = mkdtempSync(join(tmpdir(), "omnyo-cli-entry-"));
     server = createServer((request, response) => {
       response.setHeader("content-type", "application/json");
+
       if (request.url === "/api/v1/plugins/contributions") {
         response.end(
           JSON.stringify({
@@ -35,15 +36,17 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
                 {
                   name: "add",
                   summary: "Add",
-                  usage: `bb ${name} add --name NAME`,
+                  usage: `omnyo ${name} add --name NAME`,
                 },
               ],
               rendersHelp: name === "spec",
             })),
           }),
         );
+
         return;
       }
+
       if (request.url === "/api/v1/plugins/fixture-spec/cli") {
         pluginRuns.push("spec");
         request.resume();
@@ -51,31 +54,39 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
           JSON.stringify({
             exitCode: 0,
             stdout:
-              "Usage: bb spec add --name NAME\n  --name NAME  at most 80 characters\n",
+              "Usage: omnyo spec add --name NAME\n  --name NAME  at most 80 characters\n",
             stderr: "",
           }),
         );
+
         return;
       }
+
       if (request.url === "/api/v1/plugins/fixture-failing/cli") {
         request.resume();
         response.end(
           JSON.stringify({ exitCode: 3, stdout: "", stderr: "nope\n" }),
         );
+
         return;
       }
+
       if (request.url === "/api/v1/plugins/fixture-legacy/cli") {
         pluginRuns.push("legacy");
         request.resume();
         response.end(
           JSON.stringify({ exitCode: 0, stdout: "ran", stderr: "" }),
         );
+
         return;
       }
+
       if (request.url === "/api/v1/plugins") {
         response.end(JSON.stringify({ plugins: [] }));
+
         return;
       }
+
       if (request.url?.startsWith("/api/v1/hosts")) {
         response.end(
           JSON.stringify([
@@ -100,8 +111,10 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
             },
           ]),
         );
+
         return;
       }
+
       response.statusCode = 404;
       response.end("{}");
     });
@@ -109,9 +122,11 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
       server.listen(0, "127.0.0.1", resolve),
     );
     const address = server.address();
+
     if (address === null || typeof address === "string") {
       throw new Error("Fixture server did not bind to a TCP port");
     }
+
     serverUrl = `http://127.0.0.1:${address.port}`;
   });
 
@@ -128,15 +143,17 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
   ): Promise<CliResult> {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      BB_CLI_REEXEC: "1",
-      BB_DATA_DIR: dataDir,
-      BB_SERVER_URL: serverUrl,
-      BB_PROJECT_ID: "proj_fixture",
-      BB_THREAD_ID: "thr_fixture",
+      OMNYO_CLI_REEXEC: "1",
+      OMNYO_DATA_DIR: dataDir,
+      OMNYO_SERVER_URL: serverUrl,
+      OMNYO_PROJECT_ID: "proj_fixture",
+      OMNYO_THREAD_ID: "thr_fixture",
       ...envOverrides,
     };
-    delete env.BB_CLI;
-    delete env.BB_ENVIRONMENT_ID;
+
+    delete env.OMNYO_CLI;
+    delete env.OMNYO_ENVIRONMENT_ID;
+
     return new Promise((resolve) => {
       execFile(
         process.execPath,
@@ -149,6 +166,7 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
               : typeof error.code === "number"
                 ? error.code
                 : 1;
+
           resolve({ exitCode, stderr, stdout });
         },
       );
@@ -164,7 +182,7 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
       [
         "error: required option '--project <id>' not specified",
         "This thread's project is proj_fixture; add --project proj_fixture.",
-        "Usage: bb thread spawn [options]",
+        "Usage: omnyo thread spawn [options]",
         "",
       ].join("\n"),
     );
@@ -208,7 +226,7 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
     expect(result.stderr).toContain("Commands: list, enable, disable, models");
   }, 30_000);
 
-  it("runs bb machine for bb host when no plugin owns that name", async () => {
+  it("runs omnyo machine for omnyo host when no plugin owns that name", async () => {
     const result = await runCli(["host", "list", "--json"]);
 
     expect(result.exitCode).toBe(0);
@@ -220,20 +238,22 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
     const legacy = await runCli(["legacy", "add", "--help"]);
 
     expect(spec.stdout).toContain("at most 80 characters");
-    expect(legacy.stdout).toBe("bb legacy add --name NAME\n");
+    expect(legacy.stdout).toBe("omnyo legacy add --name NAME\n");
     expect(pluginRuns).toEqual(["spec"]);
   }, 30_000);
 
   it("records a failed plugin command by its declared name only", async () => {
     const result = await runCli(["failing", "add", "--name", "a secret"], {
-      BB_CLI_ERROR_LOG: "1",
+      OMNYO_CLI_ERROR_LOG: "1",
     });
 
     expect(result.exitCode).toBe(3);
+
     const logged = readFileSync(
       join(dataDir, "logs", "cli-errors.jsonl"),
       "utf8",
     );
+
     expect(logged).not.toContain("secret");
     expect(JSON.parse(logged.trim().split("\n").at(-1) ?? "{}")).toMatchObject({
       code: "plugin_command_failed",
@@ -244,17 +264,18 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
 
   it("still answers help for a soft alias when the server is down", async () => {
     const result = await runCli(["hosts", "--help"], {
-      BB_SERVER_URL: "http://127.0.0.1:1",
+      OMNYO_SERVER_URL: "http://127.0.0.1:1",
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("Usage: bb machine");
+    expect(result.stdout).toContain("Usage: omnyo machine");
   }, 30_000);
 
   it("prints the JSON envelope when the server is down", async () => {
     const pluginCommand = await runCli(["memory", "catalog", "--json"], {
-      BB_SERVER_URL: "http://127.0.0.1:1",
+      OMNYO_SERVER_URL: "http://127.0.0.1:1",
     });
+
     expect(pluginCommand.exitCode).toBe(1);
     expect(JSON.parse(pluginCommand.stdout)).toMatchObject({
       ok: false,
@@ -262,8 +283,9 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
     });
 
     const aliased = await runCli(["hosts", "list", "--json"], {
-      BB_SERVER_URL: "http://127.0.0.1:1",
+      OMNYO_SERVER_URL: "http://127.0.0.1:1",
     });
+
     expect(aliased.exitCode).toBe(1);
     expect(JSON.parse(aliased.stdout)).toMatchObject({ ok: false });
   }, 60_000);
@@ -271,14 +293,16 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
   it("never records the inline value of an unknown option", async () => {
     const result = await runCli(
       ["thread", "list", "--api-token=SYNTHETIC_SECRET", "--json"],
-      { BB_CLI_ERROR_LOG: "1" },
+      { OMNYO_CLI_ERROR_LOG: "1" },
     );
 
     expect(result.exitCode).toBe(1);
+
     const logged = readFileSync(
       join(dataDir, "logs", "cli-errors.jsonl"),
       "utf8",
     );
+
     expect(logged).not.toContain("SYNTHETIC_SECRET");
     expect(JSON.parse(logged.trim().split("\n").at(-1) ?? "{}")).toMatchObject({
       code: "unknown_option",
@@ -290,14 +314,16 @@ describe.skipIf(process.platform === "win32")("bb entrypoint errors", () => {
   it("records the failure without any argument values", async () => {
     const result = await runCli(
       ["thread", "tell", "thr_other", "a secret message", "--bogus-flag"],
-      { BB_CLI_ERROR_LOG: "1" },
+      { OMNYO_CLI_ERROR_LOG: "1" },
     );
 
     expect(result.exitCode).toBe(1);
+
     const logged = readFileSync(
       join(dataDir, "logs", "cli-errors.jsonl"),
       "utf8",
     );
+
     expect(logged).not.toContain("secret");
     expect(logged).not.toContain("thr_other");
     expect(JSON.parse(logged.trim().split("\n").at(-1) ?? "{}")).toMatchObject({

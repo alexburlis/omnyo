@@ -6,14 +6,15 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { experimental_Icon as Icon } from "@get-bb/plugin-sdk/app";
+import { experimental_Icon as Icon } from "@omnyo/plugin-sdk/app";
+import { Button } from "@/components/ui/button";
 import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@/components/ui/hover-reveal";
 import { cn } from "@/lib/utils";
 import {
   definePluginApp,
   experimental_usePluginId,
   Markdown,
-  useBbContext,
+  experimental_useAppContext,
   useComposer,
   useRpc,
   type ComposerDraft,
@@ -21,7 +22,7 @@ import {
   type ComposerInsertPart,
   type PluginComposerScope,
   type StandardSchemaV1InferOutput,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import {
   promptScopeSchema,
   type PromptScope,
@@ -45,7 +46,9 @@ type Row =
   | { kind: "recent"; key: string; row: RecentPromptRow };
 
 const TWO_PANE_MIN_WIDTH = 560;
+
 const SEARCH_TIMEOUT_MS = 5_000;
+
 const SLOW_SEARCH_MS = 300;
 
 const SCOPE_LABELS: Record<PromptScope, string> = {
@@ -72,6 +75,7 @@ function readStickyScope(pluginId: string, kind: ComposerKind): PromptScope {
   const stored = promptScopeSchema.safeParse(
     window.localStorage.getItem(scopeStorageKey(pluginId, kind)),
   );
+
   return stored.success && scopesFor(kind).includes(stored.data)
     ? stored.data
     : "global";
@@ -92,12 +96,17 @@ function scopeTargets(
 
 function formatAge(timestamp: number, now: number): string {
   const minutes = Math.floor((now - timestamp) / 60_000);
+
   if (minutes < 1) return "just now";
+
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
+
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
+
   if (days < 30) return `${days}d ago`;
+
   return new Date(timestamp).toLocaleDateString();
 }
 
@@ -113,22 +122,27 @@ function isStarShortcut(event: ReactKeyboardEvent): boolean {
 function insertParts(prompt: ComposerDraft): ComposerInsertPart[] {
   const parts: ComposerInsertPart[] = [];
   let cursor = 0;
+
   for (const mention of [...prompt.mentions].sort(
     (left, right) => left.from - right.from,
   )) {
     if (mention.from < cursor) continue;
+
     if (mention.from > cursor)
       parts.push(prompt.text.slice(cursor, mention.from));
     parts.push(mention);
     cursor = mention.to;
   }
+
   if (cursor < prompt.text.length) parts.push(prompt.text.slice(cursor));
+
   return parts;
 }
 
 function Snippet({ snippet }: { snippet: PromptSnippet }) {
   const parts: ReactNode[] = [];
   let cursor = 0;
+
   for (const [start, end] of snippet.highlights) {
     if (start > cursor) parts.push(snippet.text.slice(cursor, start));
     parts.push(
@@ -138,7 +152,9 @@ function Snippet({ snippet }: { snippet: PromptSnippet }) {
     );
     cursor = end;
   }
+
   parts.push(snippet.text.slice(cursor));
+
   return <span className="w-full truncate text-foreground">{parts}</span>;
 }
 
@@ -154,21 +170,26 @@ function PromptLibraryPopup() {
   const composer = useComposer();
   const rpc = useRpc<typeof promptLibraryRpcContract>();
   const pluginId = experimental_usePluginId();
-  const context = useBbContext();
+  const context = experimental_useAppContext();
   const kind = composerKind(composer.scope);
   const targets = scopeTargets(composer.scope, context.projectId);
+
   const availableScopes = scopesFor(kind).filter(
     (scope) =>
       (scope !== "thread" || targets.threadId !== null) &&
       (scope !== "project" || targets.projectId !== null),
   );
+
   const [query, setQuery] = useState("");
+
   const [preferredScope, setPreferredScope] = useState(() =>
     readStickyScope(pluginId, kind),
   );
+
   const scope = availableScopes.includes(preferredScope)
     ? preferredScope
     : "global";
+
   const [result, setResult] = useState<SearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadCount, setReloadCount] = useState(0);
@@ -182,12 +203,16 @@ function PromptLibraryPopup() {
 
   useEffect(() => {
     const root = rootRef.current;
+
     if (root === null) return;
+
     const measure = () =>
       setTwoPane(root.getBoundingClientRect().width >= TWO_PANE_MIN_WIDTH);
+
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(root);
+
     return () => observer.disconnect();
   }, []);
 
@@ -195,6 +220,7 @@ function PromptLibraryPopup() {
     let pending = true;
     let timeout: number | undefined;
     let slow: number | undefined;
+
     const finish = (apply: () => void) => {
       if (!pending) return;
       pending = false;
@@ -203,6 +229,7 @@ function PromptLibraryPopup() {
       setIsSlowSearch(false);
       apply();
     };
+
     const handle = window.setTimeout(
       async () => {
         setError(null);
@@ -211,6 +238,7 @@ function PromptLibraryPopup() {
           () => finish(() => setError("Loading prompts timed out. Try again.")),
           SEARCH_TIMEOUT_MS,
         );
+
         try {
           const next = await rpc.call("search", {
             query,
@@ -219,6 +247,7 @@ function PromptLibraryPopup() {
             threadId: targets.threadId,
             composer: kind,
           });
+
           finish(() => setResult({ ...next, query }));
         } catch (cause: unknown) {
           finish(() =>
@@ -228,6 +257,7 @@ function PromptLibraryPopup() {
       },
       query.length === 0 ? 0 : 60,
     );
+
     return () => {
       pending = false;
       window.clearTimeout(handle);
@@ -245,11 +275,14 @@ function PromptLibraryPopup() {
   ]);
 
   const draftText = composer.draft.text.trim();
+
   const draftIsStarred =
     result?.prompts.some(
       (row) => row.kind === "starred" && row.prompt.text.trim() === draftText,
     ) ?? false;
+
   const ranked = result !== null && result.query.trim().length > 0;
+
   const rows: Row[] = [
     ...(draftText.length > 0 && !draftIsStarred && query.length === 0
       ? [{ kind: "star-draft", key: "star-draft" } as const]
@@ -258,18 +291,23 @@ function PromptLibraryPopup() {
       const key = ranked
         ? `prompt:${row.prompt.text}`
         : `${row.kind}:${row.id}`;
+
       return row.kind === "starred"
         ? { kind: "starred", key, row }
         : { kind: "recent", key, row };
     }),
   ];
+
   const activeIndex = Math.max(
     rows.findIndex((row) => row.key === highlightedKey),
     0,
   );
+
   const activeRow = rows[activeIndex];
   const activeKey = activeRow?.key ?? null;
+
   if (highlightedKey !== activeKey) setHighlightedKey(activeKey);
+
   const previewRow = twoPane
     ? activeRow
     : rows.find((row) => row.key === previewKey);
@@ -326,22 +364,27 @@ function PromptLibraryPopup() {
     } else {
       composer.insert(insertParts(prompt));
     }
+
     composer.experimental_closePopup();
   };
 
   const activate = (row: Row) => {
     if (row.kind === "star-draft") {
       starPrompt(composer.draft);
+
       return;
     }
+
     if (row.kind === "starred") {
       void rpc.call("markUsed", { id: row.row.id }).catch(() => {});
     }
+
     insertPrompt(row.row.prompt);
   };
 
   const choose = (row: Row) => {
     setHighlightedKey(row.key);
+
     if (row.kind === "star-draft") {
       activate(row);
     } else {
@@ -351,17 +394,22 @@ function PromptLibraryPopup() {
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     const row = rows[activeIndex];
+
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
+
       if (rows.length === 0) return;
       const step = event.key === "ArrowDown" ? 1 : -1;
       const next = rows[(activeIndex + step + rows.length) % rows.length];
+
       if (next !== undefined) setHighlightedKey(next.key);
     } else if (event.key === "Enter") {
       event.preventDefault();
+
       if (row !== undefined) activate(row);
     } else if (event.key === "Escape") {
       event.preventDefault();
+
       if (previewKey !== null && !twoPane) {
         setPreviewKey(null);
       } else {
@@ -371,13 +419,16 @@ function PromptLibraryPopup() {
       event.preventDefault();
       const index = availableScopes.indexOf(scope);
       const step = event.shiftKey ? -1 : 1;
+
       const next =
         availableScopes[
           (index + step + availableScopes.length) % availableScopes.length
         ];
+
       if (next !== undefined) changeScope(next);
     } else if (isStarShortcut(event)) {
       event.preventDefault();
+
       if (row !== undefined) toggleStar(row);
     }
   };
@@ -404,6 +455,7 @@ function PromptLibraryPopup() {
     const selected = index === activeIndex;
     const starred = isStarred(row);
     const meta = metaFor(row);
+
     return (
       <div
         ref={(element) => {
@@ -412,13 +464,13 @@ function PromptLibraryPopup() {
         role="option"
         aria-selected={selected}
         className={cn(
-          "group flex items-center gap-1 rounded px-2 py-1.5 text-xs",
+          "group relative flex select-none items-center gap-1 rounded px-2 py-1.5 text-xs",
           selected ? "bg-state-active" : "hover:bg-state-hover",
         )}
       >
         <button
           type="button"
-          className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left"
+          className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left after:absolute after:inset-0 after:rounded after:content-['']"
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => choose(row)}
         >
@@ -443,8 +495,8 @@ function PromptLibraryPopup() {
             aria-pressed={starred}
             title={starred ? "Unstar" : "Star prompt"}
             className={cn(
-              "flex size-6 shrink-0 items-center justify-center rounded text-subtle-foreground hover:text-foreground",
-              !selected && [
+              "relative flex size-6 shrink-0 items-center justify-center rounded text-subtle-foreground hover:text-foreground",
+              !(selected || starred) && [
                 "opacity-0 group-hover:opacity-100",
                 HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS,
               ],
@@ -465,15 +517,19 @@ function PromptLibraryPopup() {
   const starredStart = ranked
     ? -1
     : rows.findIndex((row) => row.kind === "starred");
+
   const recentStart = ranked
     ? -1
     : rows.findIndex((row) => row.kind === "recent");
 
   const renderPreview = (row: Row) => {
     const starred = isStarred(row);
+
     const content =
       row.kind === "star-draft" ? composer.draft.text : row.row.prompt.text;
+
     const meta = metaFor(row);
+
     return (
       <div
         className="flex min-h-0 min-w-0 flex-1 flex-col"
@@ -481,40 +537,45 @@ function PromptLibraryPopup() {
         role="region"
       >
         {twoPane ? null : (
-          <div className="flex items-center border-b border-border px-1 py-1">
-            <button
+          <div className="flex items-center border-b border-border px-1.5 py-1">
+            <Button
               type="button"
-              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground"
+              variant="ghost"
+              size="xs"
+              className="text-muted-foreground"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => setPreviewKey(null)}
             >
               <Icon name="ArrowLeft" className="size-3.5" />
               Back
-            </button>
+            </Button>
           </div>
         )}
         <div key={row.key} className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
           <Markdown content={content} className="text-sm" />
         </div>
-        <div className="flex items-center gap-2 border-t border-border px-3 py-1.5">
+        <div className="flex items-center gap-1.5 border-t border-border px-3 py-2">
           <span className="min-w-0 flex-1 truncate text-xs text-subtle-foreground">
             {meta ?? `${content.length.toLocaleString()} characters`}
           </span>
           {row.kind === "star-draft" ? (
-            <button
+            <Button
               type="button"
-              className="rounded bg-state-active px-2 py-1 text-xs text-foreground hover:bg-state-hover"
+              size="xs"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => activate(row)}
             >
+              <Icon name="Star" className="size-3.5" />
               Star draft
-            </button>
+            </Button>
           ) : (
             <>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="xs"
                 aria-pressed={starred}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground"
+                className={starred ? undefined : "text-muted-foreground"}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => toggleStar(row)}
               >
@@ -523,15 +584,15 @@ function PromptLibraryPopup() {
                   className={cn("size-3.5", starred && "fill-current")}
                 />
                 {starred ? "Starred" : "Star"}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="rounded bg-state-active px-2 py-1 text-xs text-foreground hover:bg-state-hover"
+                size="xs"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => activate(row)}
               >
                 Insert
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -591,16 +652,24 @@ function PromptLibraryPopup() {
         </div>
       </div>
       {error !== null ? (
-        <div role="alert" className="flex items-center gap-2 px-3 py-2 text-xs">
-          <span className="flex-1 text-destructive">{error}</span>
-          <button
+        <div
+          role="alert"
+          className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs"
+        >
+          <Icon
+            name="AlertCircle"
+            className="size-3.5 shrink-0 text-destructive-text"
+          />
+          <span className="min-w-0 flex-1 text-destructive-text">{error}</span>
+          <Button
             type="button"
-            className="rounded px-2 py-1 text-foreground hover:bg-state-hover"
+            variant="soft"
+            size="xs"
             onMouseDown={(event) => event.preventDefault()}
             onClick={reload}
           >
             Retry
-          </button>
+          </Button>
         </div>
       ) : null}
       <div className="flex h-80 min-h-0">
@@ -618,14 +687,33 @@ function PromptLibraryPopup() {
               error === null ? (
                 <div
                   role="status"
-                  className="px-3 py-2 text-xs text-muted-foreground"
+                  className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground"
                 >
+                  <Icon
+                    name="Spinner"
+                    className="size-3.5 shrink-0 animate-spin text-subtle-foreground"
+                  />
                   Loading prompts…
                 </div>
               ) : null
             ) : rows.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-muted-foreground">
-                No prompts found
+              <div className="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
+                <span className="flex size-8 items-center justify-center rounded-full bg-state-hover text-muted-foreground">
+                  <Icon
+                    name={query.trim() === "" ? "Clock" : "Search"}
+                    className="size-4"
+                  />
+                </span>
+                <span className="text-sm font-medium text-foreground">
+                  No prompts found
+                </span>
+                <span className="max-w-60 text-xs text-muted-foreground">
+                  {query.trim() === ""
+                    ? "Prompts you send show up here. Star one to keep it at the top."
+                    : scope === "global" || !availableScopes.includes("global")
+                      ? "Try a shorter or different word."
+                      : "Try a different word, or switch to All to search every project."}
+                </span>
               </div>
             ) : (
               rows.map((row, index) => (

@@ -40,7 +40,7 @@ export interface PluginStateSnapshotRow {
     | "failed";
   rollbackCandidateVersion: string | null;
   rollbackSourceFingerprint: string | null;
-  rollbackBbVersion: string | null;
+  rollbackCoreVersion: string | null;
   rollbackSdkVersion: string | null;
   rollbackDetail: string | null;
   createdAt: number;
@@ -53,6 +53,7 @@ export function createPluginStateSnapshot(
   snapshot: PluginStateSnapshotRow,
 ): PluginStateSnapshotRow {
   db.insert(pluginStateSnapshots).values(snapshot).run();
+
   return snapshot;
 }
 
@@ -72,9 +73,12 @@ export function listPluginStateSnapshots(
   pluginId?: string,
 ): PluginStateSnapshotRow[] {
   const query = db.select().from(pluginStateSnapshots);
-  return (pluginId === undefined
-    ? query
-    : query.where(eq(pluginStateSnapshots.pluginId, pluginId)))
+
+  return (
+    pluginId === undefined
+      ? query
+      : query.where(eq(pluginStateSnapshots.pluginId, pluginId))
+  )
     .orderBy(asc(pluginStateSnapshots.createdAt), asc(pluginStateSnapshots.id))
     .all();
 }
@@ -98,7 +102,7 @@ export function setPluginStateSnapshotRollbackPending(
   rollback: {
     candidateVersion: string;
     sourceFingerprint: string;
-    bbVersion: string;
+    coreVersion: string;
     sdkVersion: string;
     detail: string;
     updatedAt: number;
@@ -111,7 +115,7 @@ export function setPluginStateSnapshotRollbackPending(
         status: "rollback-pending",
         rollbackCandidateVersion: rollback.candidateVersion,
         rollbackSourceFingerprint: rollback.sourceFingerprint,
-        rollbackBbVersion: rollback.bbVersion,
+        rollbackCoreVersion: rollback.coreVersion,
         rollbackSdkVersion: rollback.sdkVersion,
         rollbackDetail: rollback.detail,
         updatedAt: rollback.updatedAt,
@@ -166,10 +170,8 @@ export function deletePluginStateSnapshot(
   id: string,
 ): boolean {
   return (
-    db
-      .delete(pluginStateSnapshots)
-      .where(eq(pluginStateSnapshots.id, id))
-      .run().changes > 0
+    db.delete(pluginStateSnapshots).where(eq(pluginStateSnapshots.id, id)).run()
+      .changes > 0
   );
 }
 
@@ -184,14 +186,19 @@ export function replacePluginSnapshotState(
 ): void {
   db.transaction((tx) => {
     tx.delete(pluginKv).where(eq(pluginKv.pluginId, pluginId)).run();
-    tx.delete(pluginSettings).where(eq(pluginSettings.pluginId, pluginId)).run();
+    tx.delete(pluginSettings)
+      .where(eq(pluginSettings.pluginId, pluginId))
+      .run();
     tx.delete(pluginSchedules)
       .where(eq(pluginSchedules.pluginId, pluginId))
       .run();
+
     if (state.kv.length > 0) tx.insert(pluginKv).values(state.kv).run();
+
     if (state.settings.length > 0) {
       tx.insert(pluginSettings).values(state.settings).run();
     }
+
     if (state.schedules.length > 0) {
       tx.insert(pluginSchedules).values(state.schedules).run();
     }
@@ -209,10 +216,12 @@ export function listGarbageCollectablePluginArtifacts(
     .select({ id: installedPlugins.id })
     .from(installedPlugins)
     .where(eq(installedPlugins.activeArtifactId, pluginArtifacts.id));
+
   const pendingRollback = inArray(pluginStateSnapshots.status, [
     "rollback-pending",
     "restoring",
   ]);
+
   const retainingSnapshot = db
     .select({ id: pluginStateSnapshots.id })
     .from(pluginStateSnapshots)
@@ -230,6 +239,7 @@ export function listGarbageCollectablePluginArtifacts(
         ),
       ),
     );
+
   return db
     .select()
     .from(pluginArtifacts)

@@ -1,5 +1,5 @@
-import type { MachineBootstrapApi } from "@get-bb/plugin-sdk";
-import type { PluginMachineProviderProgress } from "@get-bb/plugin-sdk/machine-provider";
+import type { MachineBootstrapApi } from "@omnyo/plugin-sdk";
+import type { PluginMachineProviderProgress } from "@omnyo/plugin-sdk/machine-provider";
 import type { EnrollmentBootstrap, MachineEnrollments } from "./enrollments.js";
 import { readFile } from "node:fs/promises";
 import { INSTALL_MACHINE_SCRIPT_PATH } from "../../install-machine-asset.js";
@@ -7,13 +7,13 @@ import { INSTALL_MACHINE_SCRIPT_PATH } from "../../install-machine-asset.js";
 const installerScript = `
 set -eu
 umask 077
-BB_ENROLLMENT=$(cat)
-export BB_ENROLLMENT
+OMNYO_ENROLLMENT=$(cat)
+export OMNYO_ENROLLMENT
 installer_url=$1
 installer_file=$(mktemp)
 trap 'rm -f "$installer_file"' EXIT HUP INT TERM
-node -e 'for (const [name,value] of Object.entries(JSON.parse(process.env.BB_ENROLLMENT).headers ?? {})) console.log("header = " + JSON.stringify(name + ": " + value))' | curl --config - --fail --silent --show-error --location --connect-timeout 10 --max-time 60 "$installer_url" > "$installer_file"
-sh "$installer_file" --bootstrap-env BB_ENROLLMENT
+node -e 'for (const [name,value] of Object.entries(JSON.parse(process.env.OMNYO_ENROLLMENT).headers ?? {})) console.log("header = " + JSON.stringify(name + ": " + value))' | curl --config - --fail --silent --show-error --max-redirs 0 --connect-timeout 10 --max-time 60 "$installer_url" > "$installer_file"
+sh "$installer_file" --bootstrap-env OMNYO_ENROLLMENT
 `;
 
 function installerCommand(bootstrap: EnrollmentBootstrap) {
@@ -22,7 +22,7 @@ function installerCommand(bootstrap: EnrollmentBootstrap) {
       "sh",
       "-c",
       installerScript,
-      "bb-machine-install",
+      "omnyo-machine-install",
       new URL("/install.sh", bootstrap.serverUrl).href,
     ],
     stdin: JSON.stringify(bootstrap),
@@ -34,16 +34,21 @@ const installerSource = readFile(INSTALL_MACHINE_SCRIPT_PATH, "utf8");
 function createOutputReporter(report: PluginMachineProviderProgress) {
   let pending = "";
   const tail: string[] = [];
+
   const emit = (line: string, terminated: boolean): void => {
     report.log(line + (terminated ? "\n" : ""));
     tail.push(line);
+
     if (tail.length > 20) tail.shift();
   };
+
   return {
     onOutput(chunk: string): void {
       pending += chunk;
+
       for (;;) {
         const match = /\r\n|\r|\n/u.exec(pending);
+
         if (match === null) return;
         emit(pending.slice(0, match.index), true);
         pending = pending.slice(match.index + match[0].length);
@@ -76,22 +81,27 @@ export function createMachineBootstrapApi(
     async bootstrap(request) {
       request.signal.throwIfAborted();
       request.report.step("Preparing machine enrollment");
+
       try {
         const enrollment = await enrollments.prepare({
           key: request.key,
           signal: request.signal,
         });
+
         request.signal.throwIfAborted();
         request.report.step(
           enrollment.state === "enrolled"
             ? "Starting enrolled machine"
             : "Bootstrapping machine",
         );
+
         const execution = await (enrollment.state === "enrolled"
           ? installerStartCommand(enrollment.hostId)
           : installerCommand(enrollment.bootstrap));
+
         const output = createOutputReporter(request.report);
         let result;
+
         try {
           result = await request.executor.exec({
             ...execution,
@@ -103,7 +113,9 @@ export function createMachineBootstrapApi(
           request.signal.throwIfAborted();
           throw new Error("Machine bootstrap command failed");
         }
+
         output.finish();
+
         if (result.exitCode !== 0) throw new Error(output.failureMessage());
         request.signal.throwIfAborted();
         request.report.step("Waiting for machine connection");
@@ -112,6 +124,7 @@ export function createMachineBootstrapApi(
           timeoutMs: 120_000,
           signal: request.signal,
         });
+
         return { hostId: enrollment.hostId };
       } catch (error) {
         enrollments.clearPending(request.key);

@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const PLUGIN_LOG_MAX_BYTES = 5 * 1024 * 1024;
+
 const PLUGIN_LOG_FILE = "plugin.log";
+
 const PLUGIN_LOG_ROTATED_FILE = "plugin.log.1";
 
 type PluginLogLevel = "debug" | "info" | "warn" | "error";
@@ -22,11 +24,13 @@ export function appendPluginLogLine(
     const dir = pluginLogsDir(dataDir, pluginId);
     mkdirSync(dir, { recursive: true });
     const file = join(dir, PLUGIN_LOG_FILE);
+
     try {
       if (statSync(file).size > PLUGIN_LOG_MAX_BYTES) {
         renameSync(file, join(dir, PLUGIN_LOG_ROTATED_FILE));
       }
     } catch {}
+
     const line = JSON.stringify({ ts: Date.now(), level, message });
     appendFileSync(file, `${line}\n`, "utf8");
   } catch {}
@@ -43,10 +47,12 @@ export async function readPluginLogTail(
 ): Promise<string[]> {
   const dir = pluginLogsDir(dataDir, pluginId);
   const lines: string[] = [];
+
   for (const name of [PLUGIN_LOG_ROTATED_FILE, PLUGIN_LOG_FILE]) {
     try {
       lines.push(...splitLines(await readFile(join(dir, name), "utf8")));
     } catch {}
   }
+
   return tail <= 0 ? [] : lines.slice(-tail);
 }

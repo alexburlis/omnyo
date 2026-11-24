@@ -3,10 +3,14 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import ts from "typescript";
-import * as pluginSdkApp from "@get-bb/plugin-sdk/app";
+import * as pluginSdkApp from "@omnyo/plugin-sdk/app";
 import {
-  type BbPluginApi,
+  type PluginApi,
   type ExperimentalAppOverlayProps,
+  type ExperimentalSidebarFooterCardProps,
+  type ExperimentalTitleBarCenterProps,
+  type ExperimentalSidebarEntryRegistration,
+  type ExperimentalThreadCompanionProps,
   type PluginAppBuilder,
   type PluginAppSlots,
   type PluginContentScriptContext,
@@ -41,19 +45,22 @@ import {
   type PluginSidebarFooterActionRegistration,
   type PluginThreadEventPayloads,
   type PluginThreadPanelProps,
+  type PluginThreadViewProps,
   type ThreadChatMessageAction,
   type ThreadChatProps,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 
 const FRONTEND_RUNTIME_EXPORT_NAMES = Object.keys(pluginSdkApp).sort();
+
 const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
 
 const SKILL_ROOT = fileURLToPath(
   new URL(
-    "../../../../../plugins/bb-guide/skills/bb-plugin-authoring/",
+    "../../../../../plugins/omnyo-guide/skills/omnyo-plugin-authoring",
     import.meta.url,
   ),
 );
+
 const SKILL_PATH = join(SKILL_ROOT, "SKILL.md");
 
 function readSkillTree(directory = SKILL_ROOT): string {
@@ -61,7 +68,9 @@ function readSkillTree(directory = SKILL_ROOT): string {
     .sort((left, right) => left.name.localeCompare(right.name))
     .flatMap((entry) => {
       const entryPath = join(directory, entry.name);
+
       if (entry.isDirectory()) return readSkillTree(entryPath);
+
       return entry.name.endsWith(".md") ? readFileSync(entryPath, "utf8") : [];
     })
     .join("\n");
@@ -107,9 +116,11 @@ const appModule = readFileSync(
   join(REPO_ROOT, "packages/plugin-sdk/src/app.ts"),
   "utf8",
 );
+
 const rpcTypeBlock = appModule.match(
   /export type \{([\s\S]*?)\} from "\.\/rpc-contract\.js";/,
 )?.[1];
+
 if (!rpcTypeBlock) throw new Error("The app RPC type export block is missing");
 
 const FRONTEND_TYPE_EXPORT_NAMES = [
@@ -139,12 +150,12 @@ const FRONTEND_TEST_EXPORT_NAMES = [
 );
 
 const PUBLIC_PLUGIN_SDK_EXPORT_NAMES = [
-  "bb-plugin-sdk.d.ts",
-  "bb-plugin-sdk-provider-bridge.d.ts",
-  "bb-plugin-sdk-provider-bridge-testing.d.ts",
-  "bb-plugin-sdk-provider-bridge-acp.d.ts",
-  "bb-plugin-sdk-host.d.ts",
-  "bb-plugin-sdk-testing.d.ts",
+  "omnyo-plugin-sdk.d.ts",
+  "omnyo-plugin-sdk-provider-bridge.d.ts",
+  "omnyo-plugin-sdk-provider-bridge-testing.d.ts",
+  "omnyo-plugin-sdk-provider-bridge-acp.d.ts",
+  "omnyo-plugin-sdk-host.d.ts",
+  "omnyo-plugin-sdk-testing.d.ts",
 ].flatMap((filename) =>
   declarationExportNames(
     readFileSync(
@@ -154,7 +165,7 @@ const PUBLIC_PLUGIN_SDK_EXPORT_NAMES = [
   ),
 );
 
-const BB_PLUGIN_API_KEYS = [
+const OMNYO_PLUGIN_API_KEYS = [
   "pluginId",
   "log",
   "settings",
@@ -176,17 +187,22 @@ const BB_PLUGIN_API_KEYS = [
   "experimental_environments",
   "experimental_machines",
   "experimental_serverAccess",
+  "experimental_eventSources",
+  "experimental_secrets",
+  "experimental_reportError",
   "sdk",
   "onDispose",
   "onInstall",
-] as const satisfies readonly (keyof BbPluginApi)[];
+] as const satisfies readonly (keyof PluginApi)[];
 
 type MissingApiKey = Exclude<
-  keyof BbPluginApi,
-  (typeof BB_PLUGIN_API_KEYS)[number]
+  keyof PluginApi,
+  (typeof OMNYO_PLUGIN_API_KEYS)[number]
 >;
+
 const _assertAllApiKeysListed: MissingApiKey extends never ? true : never =
   true;
+
 void _assertAllApiKeysListed;
 
 const SETTING_DESCRIPTOR_TYPES = [
@@ -201,9 +217,11 @@ type MissingSettingType = Exclude<
   PluginSettingDescriptor["type"],
   (typeof SETTING_DESCRIPTOR_TYPES)[number]
 >;
+
 const _assertAllSettingTypesListed: MissingSettingType extends never
   ? true
   : never = true;
+
 void _assertAllSettingTypesListed;
 
 const HTTP_AUTH_MODES = [
@@ -216,13 +234,21 @@ type MissingAuthMode = Exclude<
   PluginHttpAuthMode,
   (typeof HTTP_AUTH_MODES)[number]
 >;
+
 const _assertAllAuthModesListed: MissingAuthMode extends never ? true : never =
   true;
+
 void _assertAllAuthModesListed;
 
 const THREAD_EVENT_PAYLOAD_FIELDS = {
-  "experimental_thread.events": ["thread", "sequence"],
+  "experimental_thread.events": [
+    "thread",
+    "sequence",
+    "experimental_eventTypes",
+    "experimental_coveredSequence",
+  ],
   "experimental_thread.parentChanged": ["thread", "previousParentThreadId"],
+  "experimental_thread.maintenance": ["thread", "phase", "outcome"],
   "experimental_terminal.input": ["terminal"],
   "experimental_host.deleted": ["host"],
   "experimental_environment.removed": ["removal"],
@@ -258,15 +284,23 @@ type MissingThreadEventField = {
     (typeof THREAD_EVENT_PAYLOAD_FIELDS)[E][number]
   >;
 }[keyof PluginThreadEventPayloads];
+
 const _assertAllThreadEventFieldsListed: MissingThreadEventField extends never
   ? true
   : never = true;
+
 void _assertAllThreadEventFieldsListed;
 
 type SlotPropsByName = {
+  experimental_projectSidebarItems: Parameters<
+    PluginAppSlots["experimental_projectSidebarItems"]
+  >[0];
   homepageSection: PluginHomepageSectionProps;
   settingsSection: PluginSettingsSectionProps;
   experimental_appOverlay: ExperimentalAppOverlayProps;
+  experimental_sidebarFooterCard: ExperimentalSidebarFooterCardProps;
+  experimental_titleBarCenter: ExperimentalTitleBarCenterProps;
+  experimental_sidebarEntry: ExperimentalSidebarEntryRegistration;
   navPanel: PluginNavPanelProps;
   threadPanelAction: PluginThreadPanelProps;
   experimental_newThreadPanelAction: PluginNewThreadPanelProps;
@@ -274,6 +308,8 @@ type SlotPropsByName = {
   sidebarFooterAction: PluginSidebarFooterActionProps;
   experimental_threadList: PluginThreadListProps;
   experimental_threadHeaderAction: PluginThreadHeaderActionProps;
+  experimental_threadCompanion: ExperimentalThreadCompanionProps;
+  experimental_threadView: PluginThreadViewProps;
   experimental_threadAction: PluginThreadActionItemInput<unknown>;
   experimental_browserToolbarAction: ExperimentalPluginBrowserToolbarActionProps;
   fileOpener: PluginFileOpenerProps;
@@ -290,7 +326,9 @@ type SlotPropsByName = {
 };
 
 type MissingSlot = Exclude<keyof PluginAppSlots, keyof SlotPropsByName>;
+
 const _assertAllSlotsListed: MissingSlot extends never ? true : never = true;
+
 void _assertAllSlotsListed;
 
 const APP_BUILDER_FIELDS = [
@@ -306,9 +344,11 @@ type MissingAppBuilderField = Exclude<
   keyof PluginAppBuilder,
   (typeof APP_BUILDER_FIELDS)[number]
 >;
+
 const _assertAllAppBuilderFieldsListed: MissingAppBuilderField extends never
   ? true
   : never = true;
+
 void _assertAllAppBuilderFieldsListed;
 
 const CONTENT_SCRIPT_CONTEXT_FIELDS = [
@@ -316,15 +356,18 @@ const CONTENT_SCRIPT_CONTEXT_FIELDS = [
   "generation",
   "signal",
   "experimental_setThreadRowStatus",
+  "experimental_setThreadRowSubtitle",
 ] as const satisfies readonly (keyof PluginContentScriptContext)[];
 
 type MissingContentScriptContextField = Exclude<
   keyof PluginContentScriptContext,
   (typeof CONTENT_SCRIPT_CONTEXT_FIELDS)[number]
 >;
+
 const _assertAllContentScriptContextFieldsListed: MissingContentScriptContextField extends never
   ? true
   : never = true;
+
 void _assertAllContentScriptContextFieldsListed;
 
 const CONTENT_SCRIPT_REGISTRATION_FIELDS = [
@@ -336,15 +379,28 @@ type MissingContentScriptRegistrationField = Exclude<
   keyof PluginContentScriptRegistration,
   (typeof CONTENT_SCRIPT_REGISTRATION_FIELDS)[number]
 >;
+
 const _assertAllContentScriptRegistrationFieldsListed: MissingContentScriptRegistrationField extends never
   ? true
   : never = true;
+
 void _assertAllContentScriptRegistrationFieldsListed;
 
 const FRONTEND_SLOT_PROP_FIELDS = {
+  experimental_projectSidebarItems: ["id", "useItems"],
   homepageSection: ["projectId"],
   settingsSection: [],
   experimental_appOverlay: [],
+  experimental_sidebarFooterCard: ["experimental_placement"],
+  experimental_titleBarCenter: [],
+  experimental_sidebarEntry: [
+    "id",
+    "title",
+    "icon",
+    "panel",
+    "tooltip",
+    "useStatus",
+  ],
   navPanel: ["subPath"],
   threadPanelAction: ["threadId", "params"],
   experimental_newThreadPanelAction: ["projectId", "params"],
@@ -354,12 +410,22 @@ const FRONTEND_SLOT_PROP_FIELDS = {
     "activeThreadId",
     "activeProjectId",
     "isCompactViewport",
+    "experimental_scope",
     "onNavigate",
     "searchQuery",
   ],
   experimental_threadHeaderAction: [
     "threadId",
     "projectId",
+    "isCompactViewport",
+  ],
+  experimental_threadCompanion: ["threadId", "projectId", "placement"],
+  experimental_threadView: [
+    "threadId",
+    "projectId",
+    "defaultView",
+    "transcript",
+    "composer",
     "isCompactViewport",
   ],
   experimental_threadAction: ["thread", "data", "sdk", "navigate"],
@@ -429,9 +495,11 @@ type MissingSlotPropField = {
     (typeof FRONTEND_SLOT_PROP_FIELDS)[S][number]
   >;
 }[keyof SlotPropsByName];
+
 const _assertAllSlotPropFieldsListed: MissingSlotPropField extends never
   ? true
   : never = true;
+
 void _assertAllSlotPropFieldsListed;
 
 const NAV_PANEL_REGISTRATION_FIELDS = [
@@ -449,9 +517,11 @@ type MissingNavPanelRegistrationField = Exclude<
   keyof PluginNavPanelRegistration,
   (typeof NAV_PANEL_REGISTRATION_FIELDS)[number]
 >;
+
 const _assertAllNavPanelRegistrationFieldsListed: MissingNavPanelRegistrationField extends never
   ? true
   : never = true;
+
 void _assertAllNavPanelRegistrationFieldsListed;
 
 const SIDEBAR_FOOTER_ACTION_REGISTRATION_FIELDS = [
@@ -465,9 +535,11 @@ type MissingSidebarFooterActionRegistrationField = Exclude<
   keyof PluginSidebarFooterActionRegistration,
   (typeof SIDEBAR_FOOTER_ACTION_REGISTRATION_FIELDS)[number]
 >;
+
 const _assertAllSidebarFooterActionRegistrationFieldsListed: MissingSidebarFooterActionRegistrationField extends never
   ? true
   : never = true;
+
 void _assertAllSidebarFooterActionRegistrationFieldsListed;
 
 const MESSAGE_ACTION_REGISTRATION_FIELDS = [
@@ -481,9 +553,11 @@ type MissingMessageActionRegistrationField = Exclude<
   keyof PluginMessageActionRegistration,
   (typeof MESSAGE_ACTION_REGISTRATION_FIELDS)[number]
 >;
+
 const _assertAllMessageActionRegistrationFieldsListed: MissingMessageActionRegistrationField extends never
   ? true
   : never = true;
+
 void _assertAllMessageActionRegistrationFieldsListed;
 
 const MESSAGE_REFERENCE_FIELDS = [
@@ -499,9 +573,11 @@ type MissingMessageReferenceField = Exclude<
   keyof ThreadChatMessageReference,
   (typeof MESSAGE_REFERENCE_FIELDS)[number]
 >;
+
 const _assertAllMessageReferenceFieldsListed: MissingMessageReferenceField extends never
   ? true
   : never = true;
+
 void _assertAllMessageReferenceFieldsListed;
 
 const COMMAND_PALETTE_ACTION_REGISTRATION_FIELDS = [
@@ -516,13 +592,16 @@ type MissingCommandPaletteActionRegistrationField = Exclude<
   keyof PluginCommandRegistration,
   (typeof COMMAND_PALETTE_ACTION_REGISTRATION_FIELDS)[number]
 >;
+
 const _assertAllCommandPaletteActionRegistrationFieldsListed: MissingCommandPaletteActionRegistrationField extends never
   ? true
   : never = true;
+
 void _assertAllCommandPaletteActionRegistrationFieldsListed;
 
 const THREAD_CHAT_PROP_FIELDS = [
   "threadId",
+  "experimental_conversation",
   "variant",
   "layout",
   "focusRequest",
@@ -530,15 +609,18 @@ const THREAD_CHAT_PROP_FIELDS = [
   "className",
   "leadingContent",
   "messageActions",
+  "experimental_placeholder",
 ] as const satisfies readonly (keyof ThreadChatProps)[];
 
 type MissingThreadChatPropField = Exclude<
   keyof ThreadChatProps,
   (typeof THREAD_CHAT_PROP_FIELDS)[number]
 >;
+
 const _assertAllThreadChatPropFieldsListed: MissingThreadChatPropField extends never
   ? true
   : never = true;
+
 void _assertAllThreadChatPropFieldsListed;
 
 const THREAD_CHAT_MESSAGE_ACTION_FIELDS = [
@@ -553,12 +635,14 @@ type MissingThreadChatMessageActionField = Exclude<
   keyof ThreadChatMessageAction,
   (typeof THREAD_CHAT_MESSAGE_ACTION_FIELDS)[number]
 >;
+
 const _assertAllThreadChatMessageActionFieldsListed: MissingThreadChatMessageActionField extends never
   ? true
   : never = true;
+
 void _assertAllThreadChatMessageActionFieldsListed;
 
-describe("bb-plugin-authoring skill", () => {
+describe("omnyo-plugin-authoring skill", () => {
   const skillEntry = readFileSync(SKILL_PATH, "utf8");
   const skill = readSkillTree();
 
@@ -566,10 +650,13 @@ describe("bb-plugin-authoring skill", () => {
     const source = readReference("backend-machines.md").match(
       /```ts\n([\s\S]*?)```/u,
     )?.[1];
+
     expect(source).toBeDefined();
+
     const filename = fileURLToPath(
       new URL("./machine-guide-example.ts", import.meta.url),
     );
+
     const options: ts.CompilerOptions = {
       strict: true,
       noEmit: true,
@@ -578,6 +665,7 @@ describe("bb-plugin-authoring skill", () => {
       module: ts.ModuleKind.NodeNext,
       moduleResolution: ts.ModuleResolutionKind.NodeNext,
     };
+
     const host = ts.createCompilerHost(options);
     const readSource = host.getSourceFile.bind(host);
     host.getSourceFile = (
@@ -600,18 +688,18 @@ describe("bb-plugin-authoring skill", () => {
   });
 
   it("has frontmatter naming the skill after its directory", () => {
-    expect(skillEntry).toMatch(/^---\nname: bb-plugin-authoring\n/);
+    expect(skillEntry).toMatch(/^---\nname: omnyo-plugin-authoring\n/);
   });
 
-  it("documents every BbPluginApi property", () => {
-    for (const key of BB_PLUGIN_API_KEYS) {
-      expect(skill, `bb.${key} is not documented in the skill`).toContain(
-        `bb.${key}`,
+  it("documents every PluginApi property", () => {
+    for (const key of OMNYO_PLUGIN_API_KEYS) {
+      expect(skill, `api.${key} is not documented in the skill`).toContain(
+        `api.${key}`,
       );
     }
   });
 
-  it("documents every @get-bb/plugin-sdk/app runtime export", () => {
+  it("documents every @omnyo/plugin-sdk/app runtime export", () => {
     for (const name of FRONTEND_RUNTIME_EXPORT_NAMES) {
       expect(skill, `${name} is not documented in the skill`).toContain(name);
     }
@@ -627,7 +715,7 @@ describe("bb-plugin-authoring skill", () => {
     );
   });
 
-  it("accounts for every @get-bb/plugin-sdk/app type export", () => {
+  it("accounts for every @omnyo/plugin-sdk/app type export", () => {
     for (const name of FRONTEND_TYPE_EXPORT_NAMES) {
       expect(skill, `${name} is not documented in the skill`).toContain(name);
     }
@@ -669,18 +757,21 @@ describe("bb-plugin-authoring skill", () => {
         field,
       );
     }
+
     for (const field of CONTENT_SCRIPT_CONTEXT_FIELDS) {
       expect(
         skill,
         `content-script context.${field} is not documented`,
       ).toContain(field);
     }
+
     for (const field of CONTENT_SCRIPT_REGISTRATION_FIELDS) {
       expect(
         skill,
         `content-script registration.${field} is not documented`,
       ).toContain(field);
     }
+
     expect(skill).toContain("not a security sandbox");
     expect(skill).toContain("reverse registration order");
   });
@@ -708,6 +799,7 @@ describe("bb-plugin-authoring skill", () => {
       expect(skill, `${event} is not documented in the skill`).toContain(
         `"${event}"`,
       );
+
       for (const field of fields) {
         expect(
           skill,
@@ -720,6 +812,7 @@ describe("bb-plugin-authoring skill", () => {
   it("keeps environment app symbols and composer and event guidance current", () => {
     const frontendIndex = readReference("frontend-api-index.md");
     const backendIndex = readReference("backend-api-index.md");
+
     const appSymbols = [
       "experimental_BranchPicker",
       "BranchPickerProps",
@@ -733,6 +826,7 @@ describe("bb-plugin-authoring skill", () => {
       "PluginEnvironmentProviderInputsProps",
       "PluginEnvironmentProviderInputsRegistration",
     ];
+
     for (const symbol of appSymbols) {
       expect(frontendIndex).toContain(`\`${symbol}\``);
       expect(backendIndex).not.toContain(`\`${symbol}\``);
@@ -766,6 +860,7 @@ describe("bb-plugin-authoring skill", () => {
         `sidebarFooterAction registration field "${field}" is not documented in the skill`,
       ).toContain(field);
     }
+
     expect(skill).toContain("openSettings");
   });
 
@@ -776,6 +871,7 @@ describe("bb-plugin-authoring skill", () => {
         `messageAction registration field "${field}" is not documented in the skill`,
       ).toContain(field);
     }
+
     for (const field of MESSAGE_REFERENCE_FIELDS) {
       expect(
         skill,
@@ -804,6 +900,7 @@ describe("bb-plugin-authoring skill", () => {
 
   it("documents every ThreadChat message-action field", () => {
     expect(skill).toContain("ThreadChatMessageAction");
+
     for (const field of THREAD_CHAT_MESSAGE_ACTION_FIELDS) {
       expect(
         skill,
@@ -813,9 +910,9 @@ describe("bb-plugin-authoring skill", () => {
   });
 
   it("documents the explicit plugin branding contract", () => {
-    expect(skill).toContain("bb.name");
-    expect(skill).toContain("bb.description");
-    expect(skill).toContain("bb.branding");
+    expect(skill).toContain("omnyo.name");
+    expect(skill).toContain("omnyo.description");
+    expect(skill).toContain("omnyo.branding");
     expect(skill).toContain("logo.light");
     expect(skill).toContain("logo.dark");
     expect(skill).toContain("no root logo auto-detection");
@@ -823,8 +920,8 @@ describe("bb-plugin-authoring skill", () => {
     expect(skill).toContain("branding.icon");
     expect(skill).toContain("./assets/icon.svg");
     expect(skill).toContain("CSS mask");
-    expect(skill).toContain("canonical BB icon name");
-    expect(skill).toContain("BB reuses this icon on roomy");
+    expect(skill).toContain("canonical Omnyo icon name");
+    expect(skill).toContain("Omnyo reuses this icon on roomy");
     expect(skill).toContain("Logo-only");
     expect(skill).toContain("manifests remain supported");
     expect(skill).toContain("Do not duplicate");
@@ -835,6 +932,7 @@ describe("bb-plugin-authoring skill", () => {
       expect(skill, `slot ${slot} is not documented in the skill`).toContain(
         slot,
       );
+
       for (const field of fields) {
         expect(
           skill,

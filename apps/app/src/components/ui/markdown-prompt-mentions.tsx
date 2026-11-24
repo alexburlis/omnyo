@@ -1,21 +1,24 @@
-import { normalizePromptTextMentions } from "@bb/client-core";
+import { normalizePromptTextMentions } from "@omnyo/client-core";
 import type { ComponentType } from "react";
 import type { Nodes, Parent, PhrasingContent, Text } from "mdast";
 import type {} from "mdast-util-to-hast";
 import { visit } from "unist-util-visit";
-import type { PromptTextMention } from "@bb/domain";
+import type { PromptTextMention } from "@omnyo/domain";
 import { PromptMentionPill } from "@/components/thread/timeline/ConversationMessageMentions.js";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import { replaceTextMatches } from "./markdown-text-matches.js";
 
 const SENTINEL_OPEN = String.fromCharCode(0xe000);
+
 const SENTINEL_CLOSE = String.fromCharCode(0xe001);
+
 const PROMPT_MENTION_PATTERN = new RegExp(
   `${SENTINEL_OPEN}(\\d+)${SENTINEL_CLOSE}`,
   "gu",
 );
 
-const PROMPT_MENTION_HAST_NAME = "bb-prompt-mention";
+const PROMPT_MENTION_HAST_NAME = "omnyo-prompt-mention";
+
 const PROMPT_MENTION_INDEX_PROPERTY = "dataMentionIndex";
 
 function promptMentionSentinel(index: number): string {
@@ -37,6 +40,7 @@ export function substitutePromptMentions(
   mentions: readonly PromptTextMention[],
 ): SubstitutePromptMentionsResult {
   const normalized = normalizePromptTextMentions(mentions, text.length);
+
   if (normalized.length === 0) {
     return { content: text, mentions: [] };
   }
@@ -44,10 +48,12 @@ export function substitutePromptMentions(
   const indexed: IndexedPromptMention[] = [];
   let content = "";
   let cursor = 0;
+
   for (const mention of normalized) {
     if (mention.start < cursor) {
       continue;
     }
+
     content += text.slice(cursor, mention.start);
     content += promptMentionSentinel(indexed.length);
     indexed.push({
@@ -56,7 +62,9 @@ export function substitutePromptMentions(
     });
     cursor = mention.end;
   }
+
   content += text.slice(cursor);
+
   return { content, mentions: indexed };
 }
 
@@ -74,6 +82,7 @@ function promptMentionNode(index: number): Text {
 function splitTextNodeOnMentions(node: Text): PhrasingContent[] {
   return replaceTextMatches(node, PROMPT_MENTION_PATTERN, (match) => {
     const index = match[1] === undefined ? Number.NaN : Number(match[1]);
+
     return Number.isInteger(index) ? promptMentionNode(index) : null;
   });
 }
@@ -84,11 +93,15 @@ export function remarkPromptMentions() {
       if (parent === undefined || index === undefined) {
         return;
       }
+
       const replacements = splitTextNodeOnMentions(node);
+
       if (replacements.length === 1 && replacements[0] === node) {
         return;
       }
+
       parent.children.splice(index, 1, ...replacements);
+
       return index + replacements.length;
     });
   };
@@ -100,6 +113,7 @@ export interface MarkdownPromptMentions {
 }
 
 interface BuildPromptMentionComponentArgs {
+  interactive?: boolean;
   mentions: readonly IndexedPromptMention[];
   resolveMentionLink?: PromptMentionLinkResolver;
 }
@@ -111,26 +125,32 @@ interface PromptMentionElementProps {
 declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
-      "bb-prompt-mention": PromptMentionElementProps;
+      "omnyo-prompt-mention": PromptMentionElementProps;
     }
   }
 }
 
 export function buildPromptMentionComponent({
+  interactive = true,
   mentions,
   resolveMentionLink,
 }: BuildPromptMentionComponentArgs): ComponentType<PromptMentionElementProps> {
   function PromptMentionElement(props: PromptMentionElementProps) {
     const rawIndex = props["data-mention-index"];
+
     if (rawIndex === undefined) {
       return null;
     }
+
     const mention = mentions[Number(rawIndex)];
+
     if (mention === undefined) {
       return null;
     }
+
     return (
       <PromptMentionPill
+        interactive={interactive}
         resource={mention.resource}
         resolveMentionLink={resolveMentionLink}
         serializedText={mention.serializedText}

@@ -1,7 +1,9 @@
 export type ThemeMode = "light" | "dark";
+
 export type ThemeModePreference = ThemeMode | "system";
 
-export const THEME_PREFERENCE_STORAGE_KEY = "bb.theme";
+export const THEME_PREFERENCE_STORAGE_KEY = "omnyo.theme";
+
 const DEFAULT_THEME_PREFERENCE: ThemeModePreference = "system";
 
 export interface ThemePreferenceStorage {
@@ -33,8 +35,10 @@ export function writeThemePreference(
 ): void {
   if (preference === DEFAULT_THEME_PREFERENCE) {
     storage.remove(THEME_PREFERENCE_STORAGE_KEY);
+
     return;
   }
+
   storage.set(THEME_PREFERENCE_STORAGE_KEY, preference);
 }
 
@@ -43,5 +47,6 @@ export function resolveThemeMode(
   systemScheme: string | null | undefined,
 ): ThemeMode {
   if (preference !== "system") return preference;
+
   return systemScheme === "dark" ? "dark" : "light";
 }

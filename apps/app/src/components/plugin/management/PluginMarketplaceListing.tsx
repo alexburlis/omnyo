@@ -7,19 +7,21 @@ import {
   CarouselNext,
   CarouselPrevious,
   type CarouselApi,
-} from "@bb/shared-ui/carousel";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/carousel";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   ResourceDefinitionSection,
   ResourceListPanel,
   ResourceRow,
   ResourceRowDetailChevron,
-} from "@bb/shared-ui/resource-list";
+} from "@omnyo/shared-ui/resource-list";
+import type { PluginCatalogAuthor } from "@omnyo/server-contract";
 import type { PluginCatalogSearchEntry } from "@/hooks/queries/plugin-catalog-queries";
 import { PluginOverviewMarkdown } from "@/components/plugin/management/PluginOverviewMarkdown";
 import { getPluginsRoutePath } from "@/lib/route-paths";
 import { PluginCardAuthorName } from "./PluginCard";
+import { PluginOfficialBadge } from "./PluginOfficialBadge";
 import { catalogEntryDetailKey } from "./installed-plugin-catalog";
 import {
   CatalogEntryIconChip,
@@ -37,7 +39,12 @@ export function PluginMarketplaceByline({
 }: {
   entry: Pick<
     PluginCatalogSearchEntry,
-    "author" | "marketplace" | "publisherLabel" | "category" | "categoryId"
+    | "author"
+    | "marketplace"
+    | "publisherLabel"
+    | "official"
+    | "category"
+    | "categoryId"
   >;
 }) {
   return (
@@ -45,10 +52,14 @@ export function PluginMarketplaceByline({
       <span className="min-w-0 truncate">
         <PluginCardAuthorName entry={entry} />
       </span>
+      {entry.official ? <PluginOfficialBadge /> : null}
       {entry.category === undefined ||
       pluginCatalogCategoryIconName(entry.categoryId) === undefined ? null : (
         <span className="flex min-w-0 shrink-[100] items-center gap-1">
-          <PluginCategoryIcon categoryId={entry.categoryId} className="size-3" />
+          <PluginCategoryIcon
+            categoryId={entry.categoryId}
+            className="size-3"
+          />
           <Link
             to={{
               pathname: getPluginsRoutePath(),
@@ -86,6 +97,56 @@ export function PluginDetailMetadataItem({
   );
 }
 
+function ExternalLinkContent({ url, label }: { url: string; label: string }) {
+  return (
+    <>
+      {url.startsWith("https://github.com/") ? (
+        <Icon
+          name="GithubLogo"
+          className="size-4.5 shrink-0 fill-current [&_*]:stroke-0"
+          aria-hidden
+        />
+      ) : null}
+      <span className="truncate">{label}</span>
+      <Icon name="ExternalLink" className="size-3.5 shrink-0" aria-hidden />
+      <span className="sr-only">Opens in a new tab</span>
+    </>
+  );
+}
+
+export function PluginAuthorExternalLink({
+  author,
+}: {
+  author: PluginCatalogAuthor;
+}) {
+  if (author.url === null) return <>{author.name}</>;
+
+  return (
+    <a
+      href={author.url}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex max-w-full items-center gap-1 rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      <ExternalLinkContent url={author.url} label={author.name} />
+    </a>
+  );
+}
+
+export function PluginDetailAuthorItem({
+  author,
+}: {
+  author: PluginCatalogAuthor | null;
+}) {
+  if (author === null) return null;
+
+  return (
+    <PluginDetailMetadataItem label="Author">
+      <PluginAuthorExternalLink author={author} />
+    </PluginDetailMetadataItem>
+  );
+}
+
 export function PluginMarketplaceDetailMetadata({
   entry,
 }: {
@@ -93,7 +154,8 @@ export function PluginMarketplaceDetailMetadata({
 }) {
   return (
     <>
-      {entry.marketplace === "bb-official" ? null : (
+      <PluginDetailAuthorItem author={entry.author} />
+      {entry.marketplace === "omnyo-official" ? null : (
         <PluginDetailMetadataItem label="Marketplace">
           {entry.marketplaceDisplayName}
         </PluginDetailMetadataItem>
@@ -113,31 +175,29 @@ export function PluginMarketplaceDetailMetadata({
   );
 }
 
+export function PluginRepositoryLink({ url }: { url: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex max-w-full items-center gap-1.5 rounded-sm text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    >
+      <ExternalLinkContent url={url} label={formatUrlLabel(url)} />
+    </a>
+  );
+}
+
 export function PluginMarketplaceSource({
   entry,
 }: {
   entry: Pick<PluginCatalogSearchEntry, "repositoryUrl">;
 }) {
   if (entry.repositoryUrl === null) return null;
+
   return (
     <ResourceDefinitionSection label="Source">
-      <a
-        href={entry.repositoryUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex max-w-full items-center gap-1.5 rounded-sm text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      >
-        {entry.repositoryUrl.startsWith("https://github.com/") ? (
-          <Icon
-            name="GithubLogo"
-            className="size-4.5 shrink-0 fill-current [&_*]:stroke-0"
-            aria-hidden
-          />
-        ) : null}
-        <span className="truncate">{formatUrlLabel(entry.repositoryUrl)}</span>
-        <Icon name="ExternalLink" className="size-3.5 shrink-0" aria-hidden />
-        <span className="sr-only">Opens in a new tab</span>
-      </a>
+      <PluginRepositoryLink url={entry.repositoryUrl} />
     </ResourceDefinitionSection>
   );
 }
@@ -157,12 +217,15 @@ function PluginScreenshotGallery({
     updateSelection();
     api.on("select", updateSelection);
     api.on("reInit", updateSelection);
+
     return () => {
       api.off("select", updateSelection);
       api.off("reInit", updateSelection);
     };
   }, [api]);
+
   if (entry.screenshots.length === 0) return null;
+
   return (
     <>
       <Carousel
@@ -209,7 +272,7 @@ function PluginScreenshotGallery({
               key={screenshot}
               aria-hidden
               className={cn(
-                "h-1 rounded-full transition-[width,background-color]",
+                "h-1 rounded-full transition-[width,background-color] duration-(--motion-duration-base) ease-smooth motion-reduce:transition-none",
                 index === selectedIndex
                   ? "w-4 bg-foreground/70"
                   : "w-2 bg-border",
@@ -264,8 +327,9 @@ export function PluginMarketplaceListingSections({
     <>
       <PluginMarketplaceOverview entry={entry} />
       <PluginMarketplaceSource entry={entry} />
-      {entry.marketplace === "bb-official" &&
-      entry.publishedAt === undefined ? null : (
+      {entry.marketplace === "omnyo-official" &&
+      entry.publishedAt === undefined &&
+      entry.author === null ? null : (
         <ResourceDefinitionSection label="Details">
           <PluginDetailMetadata>
             <PluginMarketplaceDetailMetadata entry={entry} />
@@ -286,6 +350,7 @@ export function PluginMoreFromAuthorSection({
   onOpenPlugin: (pluginId: string) => void;
 }) {
   const authorKey = pluginMarketplaceAuthorKey(entry);
+
   const moreEntries = useMemo(
     () =>
       authorKey === null
@@ -305,7 +370,9 @@ export function PluginMoreFromAuthorSection({
             .slice(0, 4),
     [authorKey, catalogEntries, entry.entryId, entry.marketplace],
   );
+
   if (moreEntries.length === 0) return null;
+
   return (
     <ResourceDefinitionSection label="More from this author">
       <ResourceListPanel className="py-0">

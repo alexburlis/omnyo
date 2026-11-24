@@ -1,6 +1,6 @@
-import { ensurePersonalProject, listEnvironments } from "@bb/db";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
-import type { PluginEnvironmentProviderValidateContext } from "@get-bb/plugin-sdk/environment-provider";
+import { ensurePersonalProject, listEnvironments } from "@omnyo/db";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
+import type { PluginEnvironmentProviderValidateContext } from "@omnyo/plugin-sdk/environment-provider";
 import { describe, expect, it } from "vitest";
 import { createThreadFromRequest } from "../../src/services/threads/thread-create.js";
 import { DEFAULT_ENVIRONMENT_PROVIDER_ID } from "../../src/services/environments/environment-provider-ids.js";
@@ -29,7 +29,9 @@ describe("thread creation on a path another project already uses", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-shared-workspace-path",
       });
+
       ensurePersonalProject(harness.deps.db);
+
       const personalEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: PERSONAL_PROJECT_ID,
@@ -62,9 +64,11 @@ describe("thread creation on a path another project already uses", () => {
           queued.command.type === "thread.start" &&
           queued.command.threadId === thread.id,
       );
+
       const projectEnvironments = listEnvironments(harness.deps.db, {
         projectId: project.id,
       });
+
       expect(projectEnvironments).toHaveLength(1);
       expect(projectEnvironments[0]?.id).not.toBe(personalEnvironment.id);
       expect(projectEnvironments[0]?.path).toBe(SHARED_PATH);
@@ -87,6 +91,7 @@ describe("thread creation on a path another project already uses", () => {
         inputs: checkoutProviderInputsSchema,
         validate: (context) => {
           validated.push(context);
+
           return {
             action: "refuse",
             message:
@@ -95,19 +100,23 @@ describe("thread creation on a path another project already uses", () => {
         },
         decide: () => ({ action: "wait", reason: "…" }),
       });
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-shared-checkout",
       });
+
       const { project: busyProject } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Busy Project",
         path: SHARED_PATH,
       });
+
       const busyEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: busyProject.id,
         path: SHARED_PATH,
       });
+
       seedThread(harness.deps, {
         projectId: busyProject.id,
         environmentId: busyEnvironment.id,
@@ -159,11 +168,14 @@ describe("thread creation on a path another project already uses", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-managed-alias",
       });
-      const worktreePath = "/tmp/bb-worktrees/env_owner/repo";
+
+      const worktreePath = "/tmp/omnyo-worktrees/env_owner/repo";
+
       const { project: owner } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Owning Project",
       });
+
       seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: owner.id,
@@ -191,7 +203,7 @@ describe("thread creation on a path another project already uses", () => {
           providerId: "codex",
           startedOnBehalfOf: null,
         }),
-      ).rejects.toThrow("bb-managed workspace owned by another project");
+      ).rejects.toThrow("Omnyo-managed workspace owned by another project");
 
       expect(
         listEnvironments(harness.deps.db, { projectId: project.id }),
@@ -204,10 +216,12 @@ describe("thread creation on a path another project already uses", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-pending-managed",
       });
+
       const { project: owner } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Owning Project",
       });
+
       const pending = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: owner.id,
@@ -239,7 +253,7 @@ describe("thread creation on a path another project already uses", () => {
           providerId: "codex",
           startedOnBehalfOf: null,
         }),
-      ).rejects.toThrow("inside bb-managed storage");
+      ).rejects.toThrow("inside Omnyo-managed storage");
 
       expect(
         listEnvironments(harness.deps.db, { projectId: project.id }),
@@ -252,11 +266,13 @@ describe("thread creation on a path another project already uses", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-two-projects-one-checkout",
       });
+
       const { project: first } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "First Project",
         path: SHARED_PATH,
       });
+
       const firstEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: first.id,
@@ -292,9 +308,11 @@ describe("thread creation on a path another project already uses", () => {
           queued.command.type === "thread.start" &&
           queued.command.threadId === thread.id,
       );
+
       const secondEnvironments = listEnvironments(harness.deps.db, {
         projectId: second.id,
       });
+
       expect(secondEnvironments).toHaveLength(1);
       expect(secondEnvironments[0]?.id).not.toBe(firstEnvironment.id);
       expect(secondEnvironments[0]?.path).toBe(SHARED_PATH);
@@ -305,15 +323,17 @@ describe("thread creation on a path another project already uses", () => {
 describe("attaching to a path that already has an environment", () => {
   const MANAGED_PATH = "/tmp/managed-worktree-repo";
 
-  it("keeps bb's ownership of a managed workspace a later thread attaches to", async () => {
+  it("keeps Omnyo's ownership of a managed workspace a later thread attaches to", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-adopt-managed",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Adopting Project",
       });
+
       const managed = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -322,6 +342,7 @@ describe("attaching to a path that already has an environment", () => {
         environmentProviderId: DEFAULT_ENVIRONMENT_PROVIDER_ID.gitWorktree,
         environmentProviderPluginId: "environment-git-worktree",
       });
+
       installFakeEnvironmentProvider({
         id: DEFAULT_ENVIRONMENT_PROVIDER_ID.gitWorktree,
         pluginId: "environment-git-worktree",
@@ -356,6 +377,7 @@ describe("attaching to a path that already has an environment", () => {
         providerId: "codex",
         startedOnBehalfOf: null,
       });
+
       await waitForQueuedCommand(
         harness,
         (queued) =>
@@ -366,6 +388,7 @@ describe("attaching to a path that already has an environment", () => {
       const attached = listEnvironments(harness.deps.db, {
         projectId: project.id,
       }).find((environment) => environment.path === MANAGED_PATH);
+
       expect(attached?.id).toBe(managed.id);
       expect(attached?.providerOwnsPath).toBe(true);
     });

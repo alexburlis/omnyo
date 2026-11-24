@@ -1,4 +1,4 @@
-import type { ProvisioningTranscriptEntry } from "@bb/domain";
+import type { ProvisioningTranscriptEntry } from "@omnyo/domain";
 import type {
   EventProjectionOperationMessage,
   EventProjectionProvisioningMetadata,
@@ -11,11 +11,14 @@ export function readProvisioningTranscript(
   if (!Array.isArray(entries) || entries.length === 0) return undefined;
 
   const result: EventProjectionProvisioningTranscriptEntry[] = [];
+
   for (const entry of entries) {
     const key = entry.key.trim();
+
     if (!key) continue;
 
     const text = entry.text.trim();
+
     if (!text) continue;
 
     if (entry.type === "step") {
@@ -72,6 +75,7 @@ function mergeTranscriptEntries(
   incoming: EventProjectionProvisioningTranscriptEntry[] | undefined,
 ): EventProjectionProvisioningTranscriptEntry[] | undefined {
   const result = existing?.map((entry) => ({ ...entry })) ?? [];
+
   for (const entry of incoming ?? []) {
     const existingStepIndex =
       entry.type === "step"
@@ -80,12 +84,14 @@ function mergeTranscriptEntries(
               candidate.type === "step" && candidate.key === entry.key,
           )
         : -1;
+
     if (existingStepIndex === -1) {
       result.push({ ...entry });
     } else {
       result[existingStepIndex] = { ...entry };
     }
   }
+
   return result.length > 0 ? result : undefined;
 }
 
@@ -96,6 +102,7 @@ export function mergeProvisioningMetadata(
   if (!incoming) {
     return existing ? { ...existing } : undefined;
   }
+
   if (!existing) {
     return {
       ...incoming,
@@ -111,6 +118,7 @@ export function mergeProvisioningMetadata(
     existing.transcript,
     incoming.transcript,
   );
+
   return {
     environmentId: incoming.environmentId ?? existing.environmentId,
     provisioningId: incoming.provisioningId,

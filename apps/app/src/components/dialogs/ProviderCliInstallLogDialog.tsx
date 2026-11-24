@@ -5,17 +5,20 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { CopyButton } from "@/components/ui/copy-button";
+} from "@omnyo/shared-ui/dialog";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { useClipboardCopy } from "@/lib/clipboard";
 
 export interface ProviderCliInstallLogDialogState {
   displayName: string;
   log: string;
   message: string;
   title: string;
+  code?: string | null;
 }
 
-interface ProviderCliInstallLogDialogProps {
+export interface ProviderCliInstallLogDialogProps {
   state: ProviderCliInstallLogDialogState | null;
   onClose: () => void;
 }
@@ -31,6 +34,7 @@ export function ProviderCliInstallLogDialog({
   const renderedStateRef = useRef<ProviderCliInstallLogDialogState | null>(
     state,
   );
+
   const isOpen = state !== null;
 
   if (state !== null) {
@@ -60,22 +64,52 @@ export function ProviderCliInstallLogDialog({
 export function ProviderCliInstallLogDialogContent({
   state,
 }: ProviderCliInstallLogDialogContentProps) {
+  const { copied, copy } = useClipboardCopy({
+    text: state.log,
+    successMessage: `${state.displayName} setup log copied`,
+  });
+
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{state.title}</DialogTitle>
-        <DialogDescription>{state.message}</DialogDescription>
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            aria-hidden
+            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-surface-destructive text-destructive-text ring-1 ring-surface-destructive-border"
+          >
+            <Icon name="AlertCircle" className="size-4" />
+          </span>
+          <div className="min-w-0 space-y-1">
+            <DialogTitle>{state.title}</DialogTitle>
+            <DialogDescription>
+              {state.message}
+              {state.code ? (
+                <span className="mt-1.5 block w-fit rounded-sm bg-state-hover px-1.5 py-0.5 font-mono text-xs text-foreground">
+                  {state.code}
+                </span>
+              ) : null}
+            </DialogDescription>
+          </div>
+        </div>
       </DialogHeader>
 
-      <div className="relative overflow-hidden rounded-md border bg-background">
-        <CopyButton
-          text={state.log}
-          label="Copy setup log"
-          successMessage={`${state.displayName} setup log copied`}
-          className="absolute right-2 top-2 z-10 opacity-70 transition-opacity hover:opacity-100 focus-visible:opacity-100"
-          iconClassName="size-3"
-        />
-        <pre className="max-h-80 min-h-32 overflow-auto p-3 pr-12 text-xs whitespace-pre-wrap break-words text-foreground">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface-recessed">
+        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <Icon name="Terminal" aria-hidden className="size-3.5" />
+            Command output
+          </span>
+          <Button
+            type="button"
+            size="xs"
+            variant="soft"
+            onClick={() => void copy()}
+          >
+            <Icon name={copied ? "Check" : "Copy"} aria-hidden />
+            {copied ? "Copied" : "Copy log"}
+          </Button>
+        </div>
+        <pre className="max-h-80 min-h-32 overflow-auto p-3 font-mono text-xs leading-5 whitespace-pre-wrap break-words text-foreground">
           {state.log}
         </pre>
       </div>

@@ -2,17 +2,22 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createConnection,
   getInstalledPluginRegistration,
+  getPluginSettingsValues,
   migrate,
-  upsertInstalledPlugin,
+  setPluginSettingsValues,
   type DbConnection,
-} from "@bb/db";
-import type { Logger } from "@bb/logger";
-import { derivePluginId } from "@bb/domain";
+} from "@omnyo/db";
+import type { Logger } from "@omnyo/logger";
+import { derivePluginId } from "@omnyo/domain";
+import { registerPluginRoutes } from "../../../src/routes/plugins.js";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
+import { createPluginInstallJobs } from "../../../src/services/plugins/plugin-install-jobs.js";
+import { createPluginUpdateJobs } from "../../../src/services/plugins/plugin-update-jobs.js";
 import {
   createPluginService,
   type PluginService,
@@ -25,17 +30,21 @@ import {
 import { readPluginManifest } from "../../../src/services/plugins/manifest.js";
 import { testLogger } from "../../helpers/test-app.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
+
 const testDir = dirname(fileURLToPath(import.meta.url));
+
 const fixtureRoot = resolve(
   testDir,
   "..",
   "..",
   "fixtures",
   "plugins",
-  "bb-plugin-builtin-fixture",
+  "omnyo-plugin-builtin-fixture",
 );
+
 const globals = globalThis as Record<string, unknown>;
 
 function loadCount(): number {
@@ -55,11 +64,11 @@ function officialEntry(
   };
 }
 
-function createService(args: {
+async function createService(args: {
   dataDir: string;
   db: DbConnection;
   bundled: BundledPluginRegistration[];
-}): PluginService {
+}): Promise<PluginService> {
   return createPluginService({
     aiServices: createAiServiceRegistry(),
     telemetry: createNoopTelemetryService(),
@@ -71,10 +80,24 @@ function createService(args: {
     },
     logger,
     dataDir: args.dataDir,
+    vault: await openSecretVault(args.dataDir),
     appVersion: "0.9.0",
     bundledPlugins: args.bundled,
     loadTimeoutMs: 2000,
   });
+}
+
+function createRoutes(db: DbConnection, service: PluginService): Hono {
+  const app = new Hono();
+  registerPluginRoutes(
+    app,
+    { config: { serverPort: 3334 }, db, hub: { notifyThread: () => {} } },
+    service,
+    createPluginInstallJobs({ notifyChanged: () => {} }),
+    createPluginUpdateJobs({ notifyChanged: () => {} }),
+  );
+
+  return app;
 }
 
 describe("official plugin registry invariants", () => {
@@ -103,7 +126,7 @@ describe("store-installed official plugins", () => {
     delete globals.__builtinFixtureLoads;
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-community-plugins-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-community-plugins-"));
   });
 
   afterEach(async () => {
@@ -113,7 +136,7 @@ describe("store-installed official plugins", () => {
   });
 
   it("does not auto-install a bundled official plugin at startup", async () => {
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       bundled: [officialEntry()],
@@ -125,7 +148,7 @@ describe("store-installed official plugins", () => {
   });
 
   it("installs on demand with catalog provenance and survives reconcile", async () => {
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       bundled: [officialEntry()],
@@ -150,7 +173,7 @@ describe("store-installed official plugins", () => {
     );
 
     await service.stop();
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       bundled: [officialEntry()],
@@ -161,61 +184,8 @@ describe("store-installed official plugins", () => {
     ]);
   });
 
-  it.each([true, false])(
-    "moves old BB Community provenance to BB Official when autoInstall is %s",
-    async (autoInstall) => {
-      upsertInstalledPlugin(db, {
-        id: "builtin-fixture",
-        source: "builtin:fixture",
-        provenance: {
-          kind: "catalog",
-          marketplace: "bb-community",
-          entryId: "fixture",
-        },
-        sourceIntent: { kind: "builtin", name: "fixture" },
-        exactResolution: { kind: "builtin" },
-        updateState: {
-          lastCheckAt: null,
-          availableCompatibleVersion: null,
-          newestIncompatibleVersion: null,
-          statusDetail: null,
-        },
-        activeArtifactId: null,
-        rootDir: fixtureRoot,
-        version: "0.1.0",
-        enabled: true,
-        enabledFollowsDefault: false,
-      });
-      service = createService({
-        db,
-        dataDir: join(workDir, "data"),
-        bundled: [officialEntry({ autoInstall })],
-      });
-
-      await service.start();
-
-      expect(
-        getInstalledPluginRegistration(db, "builtin-fixture"),
-      ).toMatchObject({
-        provenance: "catalog",
-        catalogEntryId: "fixture",
-        catalogMarketplaceName: "bb-official",
-      });
-      expect(service.list()).toMatchObject([
-        {
-          id: "builtin-fixture",
-          provenance: "catalog",
-          catalogEntryId: "fixture",
-          catalogMarketplaceName: "bb-official",
-          publisherLabel: "BB Official",
-          status: "running",
-        },
-      ]);
-    },
-  );
-
   it("keeps a removed official plugin uninstalled across restarts", async () => {
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       bundled: [officialEntry()],
@@ -227,7 +197,7 @@ describe("store-installed official plugins", () => {
     expect(service.list()).toEqual([]);
     await service.stop();
 
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       bundled: [officialEntry()],
@@ -241,7 +211,7 @@ describe("store-installed official plugins", () => {
   });
 
   it("keeps an installed plugin while moving it from included to optional", async () => {
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       bundled: [officialEntry({ autoInstall: true })],
@@ -252,7 +222,7 @@ describe("store-installed official plugins", () => {
     ]);
     await service.stop();
 
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       bundled: [officialEntry({ autoInstall: false })],
@@ -264,7 +234,7 @@ describe("store-installed official plugins", () => {
   });
 
   it("explicitly installs a missing included plugin with its builtin provenance", async () => {
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       bundled: [officialEntry({ autoInstall: true, defaultEnabled: false })],
@@ -292,13 +262,124 @@ describe("store-installed official plugins", () => {
   });
 
   it("rejects unknown official plugin names", async () => {
-    service = createService({
+    service = await createService({
       db,
       dataDir: join(workDir, "data"),
       bundled: [officialEntry()],
     });
     await expect(service.installOfficialPlugin("missing")).rejects.toThrow(
       'unknown official plugin "missing"',
+    );
+  });
+});
+
+describe("removing bundled plugins", () => {
+  let db: DbConnection;
+  let workDir: string;
+  let service: PluginService | undefined;
+
+  beforeEach(async () => {
+    delete globals.__builtinFixtureLoads;
+    db = createConnection(":memory:");
+    migrate(db);
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-bundled-removal-"));
+  });
+
+  afterEach(async () => {
+    await service?.stop();
+    db.$client.close();
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  async function startWith(entry: BundledPluginRegistration): Promise<{
+    service: PluginService;
+    app: Hono;
+  }> {
+    service = await createService({
+      db,
+      dataDir: join(workDir, "data"),
+      bundled: [entry],
+    });
+    await service.start();
+
+    return { service, app: createRoutes(db, service) };
+  }
+
+  it("refuses to remove an included core plugin and keeps it running", async () => {
+    const started = await startWith(officialEntry({ autoInstall: true }));
+    setPluginSettingsValues(db, "builtin-fixture", { retained: "value" });
+
+    const response = await started.app.request("/plugins/builtin-fixture", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error:
+        '"builtin-fixture" is part of Omnyo core, so it can be disabled but not removed.',
+    });
+    expect(
+      getInstalledPluginRegistration(db, "builtin-fixture")?.removedAt,
+    ).toBeNull();
+    expect(getPluginSettingsValues(db, "builtin-fixture")).toEqual({
+      retained: "value",
+    });
+    expect(started.service.list()).toMatchObject([
+      { id: "builtin-fixture", status: "running", removable: false },
+    ]);
+  });
+
+  it("keeps the unknown-plugin response for an id that is not installed", async () => {
+    const started = await startWith(officialEntry({ autoInstall: true }));
+
+    const response = await started.app.request("/plugins/missing", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: "unknown plugin",
+    });
+  });
+
+  it("refuses to remove a core plugin that was first installed from the store", async () => {
+    const storeOnly = await startWith(officialEntry());
+    await storeOnly.service.installOfficialPlugin("fixture");
+    await storeOnly.service.stop();
+
+    const started = await startWith(officialEntry({ autoInstall: true }));
+
+    expect(started.service.list()).toMatchObject([
+      { id: "builtin-fixture", provenance: "catalog", removable: false },
+    ]);
+
+    const response = await started.app.request("/plugins/builtin-fixture", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(409);
+    expect(
+      getInstalledPluginRegistration(db, "builtin-fixture")?.removedAt,
+    ).toBeNull();
+  });
+
+  it("lists an orphaned builtin row as not removable", async () => {
+    const started = await startWith(officialEntry({ autoInstall: true }));
+    await started.service.stop();
+
+    service = await createService({
+      db,
+      dataDir: join(workDir, "data"),
+      bundled: [],
+    });
+
+    expect(service.list()).toMatchObject([
+      { id: "builtin-fixture", isOrphanedBuiltin: true, removable: false },
+    ]);
+    expect(service.removalRefusal("builtin-fixture")).toBe(
+      '"builtin-fixture" is part of Omnyo core, so it can be disabled but not removed.',
     );
   });
 });

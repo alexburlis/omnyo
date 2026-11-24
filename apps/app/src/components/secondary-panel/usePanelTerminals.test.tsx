@@ -1,12 +1,21 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type {
   TerminalCreateTarget,
   TerminalSession,
-} from "@bb/server-contract";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { BbHttpError, sdk } from "@/lib/sdk";
+} from "@omnyo/server-contract";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TerminalCloseConfirmHost } from "@/components/thread/terminal/terminal-close-guard";
+import { OmnyoHttpError, sdk } from "@/lib/sdk";
 import {
   createNewTabFixedPanelTab,
   createTerminalFixedPanelTab,
@@ -27,9 +36,12 @@ const commandHandlers = vi.hoisted(
 
 vi.mock("@/lib/sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sdk")>();
+
   return {
     ...actual,
-    sdk: { terminals: { create: vi.fn(), close: vi.fn() } },
+    sdk: {
+      terminals: { create: vi.fn(), close: vi.fn(), foreground: vi.fn() },
+    },
   };
 });
 
@@ -114,7 +126,15 @@ const SURFACES: readonly SurfaceCase[] = [
 const PANEL_STATE_ID = "panel-terminals-contract";
 
 function renderSurface(surface: SurfaceCase, isFocused = true) {
-  const { wrapper } = createQueryClientTestHarness();
+  const { wrapper: QueryWrapper } = createQueryClientTestHarness();
+
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryWrapper>
+      {children}
+      <TerminalCloseConfirmHost />
+    </QueryWrapper>
+  );
+
   return renderHook(
     () => ({
       terminals: usePanelTerminals({
@@ -147,8 +167,13 @@ function activeTerminalId(
   const active = state.secondary.tabs.find(
     (tab) => tab.id === state.secondary.activeTabId,
   );
+
   return active?.kind === "terminal" ? active.terminalId : null;
 }
+
+beforeEach(() => {
+  vi.mocked(sdk.terminals.foreground).mockResolvedValue({ state: "idle" });
+});
 
 afterEach(() => {
   cleanup();
@@ -185,6 +210,7 @@ describe.each(SURFACES)("panel terminals on the $name", (surface) => {
 
     act(() => {
       expect(result.current.terminals.open(exited)).toBe(false);
+
       if (surface.foreign !== null) {
         expect(result.current.terminals.open(surface.foreign)).toBe(false);
       }
@@ -243,12 +269,15 @@ describe.each(SURFACES)("panel terminals on the $name", (surface) => {
   it("removes each tab only after its overlapping close succeeds", async () => {
     let finishFirstClose!: (session: TerminalSession) => void;
     let finishSecondClose!: (session: TerminalSession) => void;
+
     const firstClose = new Promise<TerminalSession>((resolve) => {
       finishFirstClose = resolve;
     });
+
     const secondClose = new Promise<TerminalSession>((resolve) => {
       finishSecondClose = resolve;
     });
+
     vi.mocked(sdk.terminals.close)
       .mockReturnValueOnce(firstClose)
       .mockReturnValueOnce(secondClose);
@@ -293,11 +322,49 @@ describe.each(SURFACES)("panel terminals on the $name", (surface) => {
     });
   });
 
+  it("asks before closing a terminal that is still running a command", async () => {
+    vi.mocked(sdk.terminals.foreground).mockResolvedValue({
+      state: "busy",
+      command: "npm run dev",
+    });
+    vi.mocked(sdk.terminals.close).mockResolvedValue({
+      ...surface.own,
+      status: "exited",
+    });
+    const { result } = renderSurface(surface);
+    act(() => {
+      result.current.terminals.open(surface.own);
+    });
+
+    act(() => result.current.terminals.close(surface.own.id));
+    await screen.findByText(
+      "npm run dev is still running. Closing the terminal stops it.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Close terminal?")).toBeNull(),
+    );
+    expect(sdk.terminals.close).not.toHaveBeenCalled();
+    expect(terminalTabIds(result.current.state)).toEqual([surface.own.id]);
+
+    act(() => result.current.terminals.close(surface.own.id));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Close terminal" }),
+    );
+    await waitFor(() => {
+      expect(terminalTabIds(result.current.state)).toEqual([]);
+    });
+    expect(sdk.terminals.close).toHaveBeenCalledWith({
+      mode: "force",
+      terminalId: surface.own.id,
+    });
+  });
+
   it("removes the tab of a terminal that no longer exists and keeps it when closing fails", async () => {
     vi.mocked(sdk.terminals.close).mockImplementation(({ terminalId }) =>
       Promise.reject(
         terminalId === surface.own.id
-          ? new BbHttpError({
+          ? new OmnyoHttpError({
               status: 404,
               code: "terminal_not_found",
               message: "Terminal session not found",
@@ -306,7 +373,7 @@ describe.each(SURFACES)("panel terminals on the $name", (surface) => {
                 message: "Terminal session not found",
               },
             })
-          : new BbHttpError({
+          : new OmnyoHttpError({
               status: 503,
               code: "host_unavailable",
               message: "Host is not connected",

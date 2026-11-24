@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { ThreadTimelineModelFallback } from "@bb/domain";
-import { Icon } from "@bb/shared-ui/icon";
+import type { ThreadTimelineModelFallback } from "@omnyo/domain";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { PromptStackCard } from "@/components/promptbox/banner/PromptStackCard";
 import { rawStringLocalStorage } from "@/lib/browser-storage";
 
@@ -10,7 +10,7 @@ interface ThreadModelFallbackCardProps {
 }
 
 function dismissalStorageKey(threadId: string): string {
-  return `bb.thread.model-fallback-dismissed.${threadId}`;
+  return `omnyo.thread.model-fallback-dismissed.${threadId}`;
 }
 
 function modelLabel(model: string): string {
@@ -18,16 +18,21 @@ function modelLabel(model: string): string {
     .replace(/^(?:anthropic[-/])?claude-/i, "")
     .split("-")
     .filter(Boolean);
+
   const versionStart = parts.findIndex((part) => /^\d+$/.test(part));
   const nameParts = versionStart === -1 ? parts : parts.slice(0, versionStart);
   const versionParts = versionStart === -1 ? [] : parts.slice(versionStart);
+
   const name = nameParts
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+
   const [major, minor, ...qualifiers] = versionParts;
+
   const version = major
     ? [minor ? `${major}.${minor}` : major, ...qualifiers].join(" ")
     : "";
+
   return [name, version].filter(Boolean).join(" ") || model;
 }
 
@@ -37,6 +42,7 @@ export function ThreadModelFallbackCard({
 }: ThreadModelFallbackCardProps) {
   const occurrence = String(fallback.sourceSeq);
   const storageKey = dismissalStorageKey(threadId);
+
   const [dismissedOccurrence, setDismissedOccurrence] = useState(() =>
     rawStringLocalStorage.getItem(storageKey, ""),
   );

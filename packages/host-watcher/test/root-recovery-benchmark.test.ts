@@ -6,7 +6,7 @@ import path from "node:path";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { createDebouncedCallbackScheduler } from "@bb/domain";
+import { createDebouncedCallbackScheduler } from "@omnyo/domain";
 import {
   disposeParcelWatcherBackend,
   setParcelWatcherBackend,
@@ -23,31 +23,49 @@ import {
 } from "../src/parcel-subprocess/parcel-watcher-proxy.js";
 
 const BENCHMARK_ENABLED =
-  process.env.BB_WATCHER_ROOT_RECOVERY_BENCHMARK === "1";
+  process.env.OMNYO_WATCHER_ROOT_RECOVERY_BENCHMARK === "1";
+
 const ROOT_COUNTS: readonly number[] = [57, 100];
+
 const DIRECTORY_COUNT_PER_ROOT = 8;
+
 const FILE_COUNT_PER_DIRECTORY = 16;
+
 const FILE_SIZE_BYTES = 4 * 1024;
+
 const FILE_COUNT_PER_ROOT =
   DIRECTORY_COUNT_PER_ROOT * FILE_COUNT_PER_DIRECTORY + 1;
+
 const BYTE_COUNT_PER_ROOT = FILE_COUNT_PER_ROOT * FILE_SIZE_BYTES;
+
 const TOP_LEVEL_ENTRY_COUNT_PER_ROOT = DIRECTORY_COUNT_PER_ROOT + 1;
+
 const TREE_ENTRY_COUNT_PER_ROOT =
   TOP_LEVEL_ENTRY_COUNT_PER_ROOT +
   DIRECTORY_COUNT_PER_ROOT * FILE_COUNT_PER_DIRECTORY;
+
 const DOWNSTREAM_DEBOUNCE_MS = 75;
+
 const DOWNSTREAM_MAX_WAIT_MS = 500;
+
 const LOAD_BURST_MS = 8;
+
 const LOAD_YIELD_MS = 8;
+
 const DEFAULT_ITERATIONS = 20;
+
 const DEFAULT_WARMUP_ITERATIONS = 2;
+
 const RECOVERY_TIMEOUT_MS = 30_000;
+
 const QUIESCENCE_MS = 100;
+
 const benchmarkChildPath = fileURLToPath(
   new URL("./fixtures/parcel-recovery-benchmark-child.ts", import.meta.url),
 );
 
 type LoadMode = "controlled-cpu" | "idle";
+
 type RecoveryKind = "global-restart" | "targeted-subscription";
 
 interface BenchmarkTelemetryMessage {
@@ -178,6 +196,7 @@ function isBenchmarkTelemetryMessage(
   ) {
     return false;
   }
+
   return [
     "fault-injected",
     "list-entries-complete",
@@ -250,14 +269,17 @@ class RecoveryObserver {
     if (!this.measuring) {
       return;
     }
+
     if (message.kind === "subscribe") {
       this.counters.proxySubscribeMessages += 1;
+
       if (message.rescan === true) {
         this.counters.proxyReplaySubscriptions += 1;
       }
     } else if (message.kind === "unsubscribe") {
       this.counters.proxyUnsubscribeMessages += 1;
     }
+
     this.signal();
   }
 
@@ -265,10 +287,12 @@ class RecoveryObserver {
     if (!this.measuring) {
       return;
     }
+
     if (message.kind === "events") {
       this.counters.childEventBatches += 1;
       this.counters.childEvents += message.events.length;
     }
+
     this.signal();
   }
 
@@ -276,10 +300,13 @@ class RecoveryObserver {
     if (message.event === "native-subscribe-ready") {
       this.initialNativeReadyRoots.add(path.resolve(message.rootPath));
     }
+
     if (!this.measuring) {
       this.signal();
+
       return;
     }
+
     switch (message.event) {
       case "fault-injected":
         this.counters.faultInjections += 1;
@@ -301,6 +328,7 @@ class RecoveryObserver {
         this.counters.nativeUnsubscribeStarts += 1;
         break;
     }
+
     this.signal();
   }
 
@@ -313,6 +341,7 @@ class RecoveryObserver {
     if (!this.measuring) {
       return;
     }
+
     this.counters.hostEventBatches += 1;
     this.counters.hostEvents += eventCount;
     this.signal();
@@ -322,6 +351,7 @@ class RecoveryObserver {
     if (!this.measuring) {
       return;
     }
+
     this.counters.rescanNotifications += 1;
     this.signal();
   }
@@ -330,6 +360,7 @@ class RecoveryObserver {
     if (!this.measuring) {
       return;
     }
+
     this.counters.watchErrors += 1;
     this.fail(error);
   }
@@ -338,15 +369,18 @@ class RecoveryObserver {
     if (!this.measuring) {
       return;
     }
+
     this.counters.downstreamScans += 1;
     this.counters.downstreamBytesRead += result.bytes;
     this.counters.downstreamEntriesProcessed += result.entries;
     this.counters.downstreamFilesRead += result.files;
+
     if (rootIndex === 0) {
       this.counters.affectedDownstreamScans += 1;
     } else {
       this.counters.unaffectedDownstreamScans += 1;
     }
+
     this.signal();
   }
 
@@ -362,19 +396,23 @@ class RecoveryObserver {
           new Error(`${label} timed out: ${JSON.stringify(this.counters)}`),
         );
       }, timeoutMs);
+
       const check = () => {
         if (this.failure) {
           clearTimeout(timeout);
           this.listeners.delete(check);
           reject(this.failure);
+
           return;
         }
+
         if (predicate()) {
           clearTimeout(timeout);
           this.listeners.delete(check);
           resolve();
         }
       };
+
       this.listeners.add(check);
       check();
     });
@@ -405,10 +443,12 @@ class ControlledCpuLoad {
 
   async stop(): Promise<void> {
     this.stopped = true;
+
     if (this.timer !== null) {
       clearTimeout(this.timer);
       this.timer = null;
     }
+
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
@@ -416,36 +456,46 @@ class ControlledCpuLoad {
     if (this.stopped) {
       return;
     }
+
     const deadline = performance.now() + LOAD_BURST_MS;
+
     while (performance.now() < deadline) {
       createHash("sha256").update(this.payload).digest();
       this.cycles += 1;
     }
+
     this.timer = setTimeout(() => this.runBurst(), LOAD_YIELD_MS);
   }
 }
 
 function parsePositiveInteger(name: string, fallback: number): number {
   const raw = process.env[name];
+
   if (raw === undefined) {
     return fallback;
   }
+
   const parsed = Number.parseInt(raw, 10);
+
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(`${name} must be a positive integer`);
   }
+
   return parsed;
 }
 
 async function createFixture(rootCount: number): Promise<Fixture> {
   const baseDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), `bb-watcher-root-recovery-${rootCount}-`),
+    path.join(os.tmpdir(), `omnyo-watcher-root-recovery-${rootCount}-`),
   );
+
   const roots: string[] = [];
+
   for (let rootIndex = 0; rootIndex < rootCount; rootIndex += 1) {
     const rootPath = path.join(baseDir, `root-${rootIndex}`);
     roots.push(rootPath);
     await fs.mkdir(rootPath);
+
     for (
       let directoryIndex = 0;
       directoryIndex < DIRECTORY_COUNT_PER_ROOT;
@@ -454,6 +504,7 @@ async function createFixture(rootCount: number): Promise<Fixture> {
       const directoryPath = path.join(rootPath, `dir-${directoryIndex}`);
       await fs.mkdir(directoryPath);
       const writes: Promise<void>[] = [];
+
       for (
         let fileIndex = 0;
         fileIndex < FILE_COUNT_PER_DIRECTORY;
@@ -467,13 +518,16 @@ async function createFixture(rootCount: number): Promise<Fixture> {
           ),
         );
       }
+
       await Promise.all(writes);
     }
+
     await fs.writeFile(
       path.join(rootPath, "fault-trigger.bin"),
       Buffer.alloc(FILE_SIZE_BYTES, rootIndex % 251),
     );
   }
+
   return {
     baseDir,
     roots,
@@ -494,24 +548,32 @@ async function scanTree(rootPath: string): Promise<TreeScanResult> {
   let bytes = 0;
   let entries = 0;
   let files = 0;
+
   while (directories.length > 0) {
     const directory = directories.pop();
+
     if (!directory) {
       break;
     }
+
     const children = (
       await fs.readdir(directory, { withFileTypes: true })
     ).sort((left, right) => left.name.localeCompare(right.name));
+
     entries += children.length;
+
     for (const child of children) {
       const childPath = path.join(directory, child.name);
+
       if (child.isDirectory()) {
         directories.push(childPath);
         continue;
       }
+
       if (!child.isFile()) {
         continue;
       }
+
       const data = await fs.readFile(childPath);
       hash.update(childPath);
       hash.update(data);
@@ -519,7 +581,9 @@ async function scanTree(rootPath: string): Promise<TreeScanResult> {
       files += 1;
     }
   }
+
   hash.digest();
+
   return { bytes, entries, files };
 }
 
@@ -529,16 +593,19 @@ function createInstrumentedChannel(
   triggerPath: string,
 ): ChildChannel {
   observer.recordChildSpawn();
+
   const child = fork(benchmarkChildPath, [], {
     env: {
       ...process.env,
-      BB_WATCHER_BENCHMARK_FAULT_ROOT: faultRoot,
-      BB_WATCHER_BENCHMARK_TRIGGER_PATH: triggerPath,
+      OMNYO_WATCHER_BENCHMARK_FAULT_ROOT: faultRoot,
+      OMNYO_WATCHER_BENCHMARK_TRIGGER_PATH: triggerPath,
     },
     execArgv: ["--import", "tsx"],
     stdio: ["ignore", "inherit", "inherit", "ipc"],
   });
+
   const channel = createChildChannel(child);
+
   return {
     send(message) {
       observer.recordParentMessage(message);
@@ -547,10 +614,13 @@ function createInstrumentedChannel(
     onMessage(listener) {
       channel.onMessage((message) => {
         const boundaryMessage: unknown = message;
+
         if (isBenchmarkTelemetryMessage(boundaryMessage)) {
           observer.recordTelemetry(boundaryMessage);
+
           return;
         }
+
         observer.recordChildMessage(message);
         listener(message);
       });
@@ -567,6 +637,7 @@ function createInstrumentedChannel(
 function triggerPayload(sequence: number): Buffer {
   const payload = Buffer.alloc(FILE_SIZE_BYTES, sequence % 251);
   payload.writeUInt32BE(sequence, 0);
+
   return payload;
 }
 
@@ -575,6 +646,7 @@ function expectedGlobalRecovery(
   fixture: Fixture,
 ): boolean {
   const counters = observer.counters;
+
   return (
     counters.childRestarts === 1 &&
     counters.proxySubscribeMessages === fixture.rootCount &&
@@ -602,6 +674,7 @@ function expectedTargetedRecovery(
   fixture: Fixture,
 ): boolean {
   const counters = observer.counters;
+
   return (
     counters.childRestarts === 0 &&
     counters.proxySubscribeMessages === 1 &&
@@ -631,6 +704,7 @@ async function runIteration(args: {
 }): Promise<IterationResult> {
   const { fixture, loadMode, sequence } = args;
   const observer = new RecoveryObserver();
+
   const proxy = createParcelWatcherProxy({
     spawnChannel: () =>
       createInstrumentedChannel(
@@ -639,12 +713,15 @@ async function runIteration(args: {
         fixture.triggerPath,
       ),
   });
+
   setParcelWatcherBackend(proxy);
   const hostWatcher = createParcelHostWatcher();
   const watchPathRoot = hostWatcher.watchPathRoot;
+
   if (!watchPathRoot) {
     throw new Error("Host watcher path-root support is required");
   }
+
   const schedulers: ReturnType<typeof createDebouncedCallbackScheduler>[] = [];
   const stops: Array<() => void | Promise<void>> = [];
   const setupStartedAt = performance.now();
@@ -654,9 +731,11 @@ async function runIteration(args: {
   try {
     for (let rootIndex = 0; rootIndex < fixture.roots.length; rootIndex += 1) {
       const rootPath = fixture.roots[rootIndex];
+
       if (!rootPath) {
         throw new Error(`Missing fixture root ${rootIndex}`);
       }
+
       const scheduler = createDebouncedCallbackScheduler({
         debounceMs: DOWNSTREAM_DEBOUNCE_MS,
         maxWaitMs: DOWNSTREAM_MAX_WAIT_MS,
@@ -672,11 +751,13 @@ async function runIteration(args: {
                   `Unexpected tree scan for ${rootPath}: ${JSON.stringify(result)}`,
                 );
               }
+
               observer.recordDownstreamScan(rootIndex, result);
             })
             .catch((error: unknown) => observer.fail(error));
         },
       });
+
       schedulers.push(scheduler);
       stops.push(
         watchPathRoot({
@@ -734,6 +815,7 @@ async function runIteration(args: {
       observer.counters.childRestarts === 1
         ? "global-restart"
         : "targeted-subscription";
+
     await observer.waitFor("settled watcher recovery", () =>
       recoveryKind === "global-restart"
         ? expectedGlobalRecovery(observer, fixture)
@@ -741,12 +823,15 @@ async function runIteration(args: {
     );
     const recoveryLatencyMs = performance.now() - recoveryStartedAt;
     eventLoopDelay.disable();
+
     const eventLoopUtilization = performance.eventLoopUtilization(
       eventLoopUtilizationStart,
     );
+
     if (cpuLoad) {
       await cpuLoad.stop();
     }
+
     const countersAtSettlement = JSON.stringify(observer.counters);
     await new Promise<void>((resolve) => setTimeout(resolve, QUIESCENCE_MS));
     expect(JSON.stringify(observer.counters)).toBe(countersAtSettlement);
@@ -758,6 +843,7 @@ async function runIteration(args: {
     expect(observer.counters.nativeUnsubscribeStarts).toBe(
       observer.counters.nativeUnsubscribeReady,
     );
+
     if (recoveryKind === "global-restart") {
       expect(expectedGlobalRecovery(observer, fixture)).toBe(true);
       expect(observer.counters.rescanNotifications).toBe(0);
@@ -770,6 +856,7 @@ async function runIteration(args: {
       expect(observer.counters.affectedDownstreamScans).toBe(2);
       expect(observer.counters.unaffectedDownstreamScans).toBe(0);
     }
+
     observer.stopMeasuring();
 
     return {
@@ -787,12 +874,15 @@ async function runIteration(args: {
     };
   } finally {
     eventLoopDelay.disable();
+
     if (cpuLoad) {
       await cpuLoad.stop();
     }
+
     for (const scheduler of schedulers) {
       scheduler.dispose();
     }
+
     await Promise.all(stops.map(async (stop) => stop()));
     disposeParcelWatcherBackend();
   }
@@ -800,14 +890,18 @@ async function runIteration(args: {
 
 function percentile(values: readonly number[], quantile: number): number {
   const sorted = [...values].sort((left, right) => left - right);
+
   const index = Math.min(
     sorted.length - 1,
     Math.max(0, Math.ceil(sorted.length * quantile) - 1),
   );
+
   const value = sorted[index];
+
   if (value === undefined) {
     throw new Error("Benchmark distribution requires samples");
   }
+
   return value;
 }
 
@@ -825,10 +919,13 @@ function summarize(
   samples: readonly IterationResult[],
 ): ScenarioSummary {
   const first = samples[0];
+
   if (!first) {
     throw new Error("Benchmark summary requires samples");
   }
+
   const counts = JSON.stringify(first.counters);
+
   return {
     counts: first.counters,
     countsDeterministic: samples.every(
@@ -858,19 +955,22 @@ describe.runIf(BENCHMARK_ENABLED)("root watcher recovery benchmark", () => {
     "measures settled recovery through real subprocess and filesystem work",
     async () => {
       const iterations = parsePositiveInteger(
-        "BB_WATCHER_BENCHMARK_ITERATIONS",
+        "OMNYO_WATCHER_BENCHMARK_ITERATIONS",
         DEFAULT_ITERATIONS,
       );
+
       const warmupIterations = parsePositiveInteger(
-        "BB_WATCHER_BENCHMARK_WARMUPS",
+        "OMNYO_WATCHER_BENCHMARK_WARMUPS",
         DEFAULT_WARMUP_ITERATIONS,
       );
+
       const raw: IterationResult[] = [];
       const summary: ScenarioSummary[] = [];
       let sequence = 1;
 
       for (const rootCount of ROOT_COUNTS) {
         const fixture = await createFixture(rootCount);
+
         try {
           for (const loadMode of [
             "idle",
@@ -880,17 +980,21 @@ describe.runIf(BENCHMARK_ENABLED)("root watcher recovery benchmark", () => {
               await runIteration({ fixture, loadMode, sequence });
               sequence += 1;
             }
+
             const samples: IterationResult[] = [];
+
             for (let index = 0; index < iterations; index += 1) {
               const sample = await runIteration({
                 fixture,
                 loadMode,
                 sequence,
               });
+
               sequence += 1;
               samples.push(sample);
               raw.push(sample);
             }
+
             const scenario = summarize(rootCount, loadMode, samples);
             expect(scenario.countsDeterministic).toBe(true);
             expect(
@@ -926,13 +1030,16 @@ describe.runIf(BENCHMARK_ENABLED)("root watcher recovery benchmark", () => {
         summary,
         warmupIterations,
       };
-      const outputPath = process.env.BB_WATCHER_BENCHMARK_OUTPUT;
+
+      const outputPath = process.env.OMNYO_WATCHER_BENCHMARK_OUTPUT;
+
       if (outputPath) {
         await fs.writeFile(
           outputPath,
           `${JSON.stringify(document, null, 2)}\n`,
         );
       }
+
       process.stdout.write(
         `WATCHER_ROOT_RECOVERY_BENCHMARK ${JSON.stringify({
           fixture: document.fixture,

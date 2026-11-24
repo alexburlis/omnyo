@@ -90,6 +90,7 @@ function itemRepresentativeId(item: ProjectThreadItem): string {
     case "environment":
       return item.group.nodes[0].thread.id;
     case "section":
+    case "chatGroup":
       return item.group.id;
   }
 }
@@ -100,12 +101,14 @@ const apple = thread({
   createdAt: 100,
   latestAttentionAt: 100,
 });
+
 const banana = thread({
   id: "thr_b",
   title: "Banana",
   createdAt: 200,
   latestAttentionAt: 200,
 });
+
 const cherry = thread({
   id: "thr_c",
   title: "Cherry",
@@ -149,17 +152,12 @@ describe("getSidebarThreadComparator", () => {
       ];
 
       expect(
-        order(
-          getSidebarThreadComparator(sort, "ascending"),
-          entries,
-        ),
+        order(getSidebarThreadComparator(sort, "ascending"), entries),
       ).toEqual(["active_old", "active_new", "idle_old", "idle_new"]);
+
       for (const direction of ["default", "descending"] as const) {
         expect(
-          order(
-            getSidebarThreadComparator(sort, direction),
-            entries,
-          ),
+          order(getSidebarThreadComparator(sort, direction), entries),
         ).toEqual(["active_new", "active_old", "idle_new", "idle_old"]);
       }
     },
@@ -205,11 +203,13 @@ describe("getSidebarThreadComparator", () => {
       title: "Alpha target",
       titleFallback: "Alpha target",
     });
+
     const zuluTarget = thread({
       id: "thr_target_a",
       title: "Zulu target",
       titleFallback: "Zulu target",
     });
+
     const resolvedFirst = resolved(
       thread({
         id: "thr_sort_z",
@@ -217,6 +217,7 @@ describe("getSidebarThreadComparator", () => {
       }),
       `Alpha section Alpha project ${alphaTarget.title}`,
     );
+
     const resolvedLast = resolved(
       thread({
         id: "thr_sort_a",
@@ -241,6 +242,7 @@ describe("getSidebarThreadComparator", () => {
       title: "Zulu environment",
       titleFallback: "Zulu environment",
     });
+
     const environmentRepresentative = resolved(
       thread({
         id: "thr_env_a",
@@ -249,6 +251,7 @@ describe("getSidebarThreadComparator", () => {
       }),
       zuluTarget.title ?? "",
     );
+
     const plainThread = thread({ id: "thr_plain", title: "Apple thread" });
     const comparator = getSidebarThreadComparator("alpha");
 
@@ -288,11 +291,14 @@ describe("getSidebarThreadComparator", () => {
       title: "Same label",
       titleFallback: "Same label",
     });
+
     const comparator = getSidebarThreadComparator("alpha");
+
     const laterId = resolved(
       thread({ id: "thr_z", title: "@thread:thr_target" }),
       sameTarget.title ?? "",
     );
+
     const earlierId = resolved(
       thread({ id: "thr_a", title: "@thread:thr_target" }),
       sameTarget.title ?? "",

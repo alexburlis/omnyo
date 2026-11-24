@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { PluginTimelineRendererProps } from "@get-bb/plugin-sdk";
+import type { PluginTimelineRendererProps } from "@omnyo/plugin-sdk";
 import {
   commandRow,
   ECHO_RECEIPT_PRESENTATION,
@@ -64,6 +64,7 @@ describe("presentation-driven timeline rows", () => {
     const row = extensionRow({
       presentation: { ...ECHO_RECEIPT_PRESENTATION, icon: { glyph: "Check" } },
     });
+
     const markup = toMarkup(
       <ThreadTimelineRows
         threadId="thr_main"
@@ -73,6 +74,7 @@ describe("presentation-driven timeline rows", () => {
         initialExpanded={new Set([row.id])}
       />,
     );
+
     expect(markup).toContain("Wrote receipt");
     expect(markup).toContain("hello world");
     expect(markup).toContain('data-icon="Check"');
@@ -103,6 +105,7 @@ describe("presentation-driven timeline rows", () => {
         ]}
       />,
     );
+
     expect(markup).toContain("Ran JavaScript");
     expect(markup).toContain("Compute primes");
     expect(markup).toContain('data-icon="Code"');
@@ -121,6 +124,7 @@ describe("presentation-driven timeline rows", () => {
         tone: "destructive" as const,
       },
     };
+
     const markup = toMarkup(
       <ThreadTimelineRows
         threadId="thr_main"
@@ -149,6 +153,7 @@ describe("presentation-driven timeline rows", () => {
         ]}
       />,
     );
+
     expect(markup.match(/data-icon="SquareUnlock02"/g) ?? []).toHaveLength(2);
     expect(markup).toContain('aria-label="Outside of sandbox"');
     expect(markup).toContain('title="Outside of sandbox"');
@@ -157,8 +162,10 @@ describe("presentation-driven timeline rows", () => {
 
   it("draws a plugin-declared icon as a tinted mask when the inventory has it, else the per-kind glyph", () => {
     const row = extensionRow();
+
     const iconUrl =
       "/api/v1/plugins/echo-provider/assets/icons/receipt.svg?h=abc";
+
     setPluginLogoUrls(
       new Map([
         [
@@ -174,6 +181,7 @@ describe("presentation-driven timeline rows", () => {
         ],
       ]),
     );
+
     const withIcon = toMarkup(
       <ThreadTimelineRows
         threadId="thr_main"
@@ -182,11 +190,13 @@ describe("presentation-driven timeline rows", () => {
         timelineRows={[row]}
       />,
     );
+
     expect(withIcon).toContain(`data-plugin-icon-asset="${iconUrl}"`);
     expect(withIcon).toContain("light-dark(#047857, #6ee7b7)");
     expect(withIcon).not.toContain('data-icon="Puzzle"');
 
     resetPluginLogoStoreForTest();
+
     const withoutIcon = toMarkup(
       <ThreadTimelineRows
         threadId="thr_main"
@@ -195,6 +205,7 @@ describe("presentation-driven timeline rows", () => {
         timelineRows={[row]}
       />,
     );
+
     expect(withoutIcon).not.toContain("data-plugin-icon-asset");
     expect(withoutIcon).toContain('data-icon="Puzzle"');
   });
@@ -216,6 +227,7 @@ describe("presentation-driven timeline rows", () => {
         ]}
       />,
     );
+
     expect(markup).toContain('data-icon="Puzzle"');
     expect(markup).not.toContain("url(javascript");
   });
@@ -249,6 +261,7 @@ describe("plugin timeline renderers", () => {
     Original,
   }: PluginTimelineRendererProps) {
     const receipt = payload as { prompt: string; itemCount: number };
+
     return (
       <div data-testid="receipt-renderer">
         <span>
@@ -290,6 +303,7 @@ describe("plugin timeline renderers", () => {
     function ToolRenderer({ row }: PluginTimelineRendererProps) {
       return <div data-testid="tool-renderer">{row.toolName}</div>;
     }
+
     setPluginSlotRegistrations(
       "echo-provider",
       registrationSet({
@@ -327,6 +341,7 @@ describe("plugin timeline renderers", () => {
     function Boom(): never {
       throw new Error("renderer exploded");
     }
+
     setPluginSlotRegistrations(
       "echo-provider",
       registrationSet({

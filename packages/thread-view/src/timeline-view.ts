@@ -10,9 +10,10 @@ import type {
   TimelineSystemRow,
   TimelineTurnRow,
   TimelineWorkRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { assertNever } from "./assert-never.js";
 import { parseSentThreadMessage } from "./tool-call-parsing.js";
+import { foldActivityCommandRows } from "./timeline-activity.js";
 import {
   getFileChangeAction,
   type FileChangeAction,
@@ -48,6 +49,7 @@ export type TimelineQuestionViewWorkRow = Extract<
   TimelineViewWorkRow,
   { workKind: "question" }
 >;
+
 export type TimelineViewWorkflowWorkRow = Extract<
   TimelineViewWorkRow,
   { workKind: "workflow" }
@@ -88,6 +90,7 @@ export type TimelineWorkSummaryRow =
 
 export interface TimelineViewTurnRow extends Omit<TimelineTurnRow, "children"> {
   children: ThreadTimelineViewRow[] | null;
+  absorbedRows?: TimelineViewSourceRow[];
 }
 
 export type ThreadTimelineViewRow =
@@ -167,12 +170,15 @@ function countExplorationIntents(
     switch (intent.type) {
       case "read": {
         const identity = getExploredFileIdentity(intent);
+
         if (identity) {
           exploredFileIdentities.add(identity);
           noteExplorationKind("files");
         }
+
         break;
       }
+
       case "list_files":
         counts.lists += 1;
         noteExplorationKind("lists");
@@ -198,6 +204,7 @@ function summarizeTimelineWork(
 ): TimelineWorkSummaryCounts {
   const explorationKindOrder: TimelineExplorationKind[] = [];
   const seenExplorationKinds = new Set<TimelineExplorationKind>();
+
   const noteExplorationKind = (kind: TimelineExplorationKind) => {
     if (!seenExplorationKinds.has(kind)) {
       seenExplorationKinds.add(kind);
@@ -225,6 +232,7 @@ function summarizeTimelineWork(
     imageViews: 0,
     explorationKindOrder,
   };
+
   const exploredFileIdentities = new Set<string>();
   const createdFileIdentities = new Set<string>();
   const deletedFileIdentities = new Set<string>();
@@ -244,6 +252,7 @@ function summarizeTimelineWork(
         } else {
           counts.commands += 1;
         }
+
         break;
       case "tool":
         counts.tools += 1;
@@ -278,6 +287,7 @@ function summarizeTimelineWork(
             renamedFileIdentities.add(getFileChangeIdentity(row));
             break;
         }
+
         break;
       case "web-fetch":
         counts.webFetches += 1;
@@ -314,6 +324,7 @@ function summarizeTimelineWork(
     counts.deletedFiles +
     counts.editedFiles +
     counts.renamedFiles;
+
   return counts;
 }
 
@@ -334,6 +345,7 @@ function explorationDetail(counts: TimelineWorkSummaryCounts): string | null {
       }
     })
     .filter((part): part is string => part !== null);
+
   return parts.length === 0 ? null : parts.join(", ");
 }
 
@@ -347,11 +359,13 @@ function approvalStatusSummaryLabel(
 
   for (const row of rows) {
     let rowApprovalStatus: "waiting_for_approval" | "denied";
+
     switch (row.workKind) {
       case "command":
         if (row.approvalStatus === null) {
           return null;
         }
+
         rowApprovalStatus = row.approvalStatus;
         commands += 1;
         break;
@@ -359,6 +373,7 @@ function approvalStatusSummaryLabel(
         if (row.approvalStatus === null) {
           return null;
         }
+
         rowApprovalStatus = row.approvalStatus;
         fileChanges += 1;
         break;
@@ -366,6 +381,7 @@ function approvalStatusSummaryLabel(
         if (row.approvalStatus === null) {
           return null;
         }
+
         rowApprovalStatus = row.approvalStatus;
         tools += 1;
         break;
@@ -403,6 +419,7 @@ function approvalStatusSummaryLabel(
     fileChanges > 0 ? plural(fileChanges, "file change") : null,
     tools > 0 ? plural(tools, "tool") : null,
   ].filter((detail): detail is string => detail !== null);
+
   const detail = details.join(", ");
 
   return status === "denied"
@@ -450,12 +467,15 @@ function getOrderedSummaryCategories(
   rows: readonly TimelineViewWorkRow[],
 ): TimelineWorkSummaryCategory[] {
   const categories: TimelineWorkSummaryCategory[] = [];
+
   for (const row of rows) {
     const category = getTimelineWorkSummaryCategory(row);
+
     if (category && !categories.includes(category)) {
       categories.push(category);
     }
   }
+
   return categories;
 }
 
@@ -492,14 +512,17 @@ function fileChangeSummaryPhrase(
 
   if (present.length === 1) {
     const { action, count } = present[0]!;
+
     const verb = active
       ? FILE_CHANGE_VERBS_PRESENT[action]
       : FILE_CHANGE_VERBS_PAST[action];
+
     return `${verb} ${plural(count, "file")}`;
   }
 
   const total = present.reduce((sum, p) => sum + p.count, 0);
   const verb = active ? "Editing" : "Edited";
+
   return `${verb} ${plural(total, "file")}`;
 }
 
@@ -592,14 +615,18 @@ function webResearchSummaryPhrase(
   active: boolean,
 ): string | null {
   const parts: string[] = [];
+
   if (counts.webSearches > 0) {
     parts.push(plural(counts.webSearches, "search query", "search queries"));
   }
+
   if (counts.webFetches > 0) {
     parts.push(plural(counts.webFetches, "web page"));
   }
+
   if (parts.length === 0) return null;
   const verb = active ? "Researching" : "Researched";
+
   return `${verb} ${parts.join(", ")}`;
 }
 
@@ -609,6 +636,7 @@ function imageViewSummaryPhrase(
 ): string | null {
   if (counts.imageViews === 0) return null;
   const verb = active ? "Viewing" : "Viewed";
+
   return `${verb} ${plural(counts.imageViews, "image")}`;
 }
 
@@ -618,6 +646,7 @@ function imageGenerationSummaryPhrase(
 ): string | null {
   if (counts.imageGenerations === 0) return null;
   const verb = active ? "Generating" : "Generated";
+
   return `${verb} ${plural(counts.imageGenerations, "image")}`;
 }
 
@@ -632,6 +661,7 @@ export function buildTimelineWorkSummaryLabelParts(
 ): TimelineWorkSummaryLabelParts {
   const work = row.children.filter((child) => child.kind === "work");
   const approvalSummaryLabel = approvalStatusSummaryLabel(work);
+
   if (approvalSummaryLabel !== null) {
     return splitVerbAndRest(approvalSummaryLabel);
   }
@@ -660,14 +690,17 @@ export function buildTimelineWorkSummaryLabel(
   options: { active: boolean } = { active: false },
 ): string {
   const { verb, rest } = buildTimelineWorkSummaryLabelParts(row, options);
+
   return rest.length === 0 ? verb : `${verb} ${rest}`;
 }
 
 function splitVerbAndRest(label: string): TimelineWorkSummaryLabelParts {
   const spaceIndex = label.indexOf(" ");
+
   if (spaceIndex === -1) {
     return { verb: label, rest: "" };
   }
+
   return {
     verb: label.slice(0, spaceIndex),
     rest: label.slice(spaceIndex + 1),
@@ -681,12 +714,15 @@ function mergeTimelineStatus(
   if (left === "error" || right === "error") {
     return "error";
   }
+
   if (left === "pending" || right === "pending") {
     return "pending";
   }
+
   if (left === "interrupted" || right === "interrupted") {
     return "interrupted";
   }
+
   return "completed";
 }
 
@@ -694,6 +730,7 @@ function summarizeRange(
   children: readonly TimelineWorkSummaryChild[],
 ): TimelineWorkSummaryRange {
   const first = children[0];
+
   if (!first) {
     throw new Error("Cannot summarize an empty timeline activity run");
   }
@@ -711,6 +748,7 @@ function summarizeRange(
     startedAt = Math.min(startedAt, child.startedAt);
     createdAt = Math.max(createdAt, child.createdAt);
     status = mergeTimelineStatus(status, child.status);
+
     if (turnId !== child.turnId) {
       turnId = null;
     }
@@ -741,6 +779,7 @@ function isSummarizableActivityRow(
   ) {
     return true;
   }
+
   return (
     row.kind === "work" &&
     row.workKind !== "approval" &&
@@ -752,9 +791,11 @@ function isSummarizableActivityRow(
 
 function isTimelineStepBoundary(row: ThreadTimelineViewRow): boolean {
   if (row.kind !== "conversation") return false;
+
   if (row.role === "user" && row.turnRequest.status === "pending") {
     return false;
   }
+
   return true;
 }
 
@@ -797,55 +838,70 @@ function dedupeBundleChildIntents(
 ): TimelineWorkSummaryChild[] {
   let lastEmittedKey: string | null = null;
   const out: TimelineWorkSummaryChild[] = [];
+
   for (const child of children) {
     if (child.kind === "system") {
       lastEmittedKey = null;
       out.push(child);
       continue;
     }
+
     if (child.workKind === "file-read" || child.workKind === "search") {
       const [intent] = timelineRowActivityIntents(child);
+
       const key = intent
         ? getTimelineActivityIntentDetailDedupeKey(intent)
         : null;
+
       if (key !== null && key === lastEmittedKey) {
         continue;
       }
+
       lastEmittedKey = key;
       out.push(child);
       continue;
     }
+
     if (child.workKind !== "command" || child.activityIntents.length === 0) {
       lastEmittedKey = null;
       out.push(child);
       continue;
     }
+
     const wasExploration = hasTimelineExplorationIntent(child);
     const filtered: TimelineActivityIntent[] = [];
+
     for (const intent of child.activityIntents) {
       if (intent.type === "unknown") {
         filtered.push(intent);
         continue;
       }
+
       const key = getTimelineActivityIntentDetailDedupeKey(intent);
+
       if (key !== null && key === lastEmittedKey) {
         continue;
       }
+
       filtered.push(intent);
       lastEmittedKey = key;
     }
+
     if (filtered.length === child.activityIntents.length) {
       out.push(child);
       continue;
     }
+
     if (
       wasExploration &&
       !filtered.some((intent) => intent.type !== "unknown")
     ) {
       continue;
     }
+
     out.push({ ...child, activityIntents: filtered });
   }
+
   return out;
 }
 
@@ -853,6 +909,7 @@ function buildStepSummaryRow(
   children: TimelineWorkSummaryChild[],
 ): TimelineStepSummaryRow {
   const dedupedChildren = dedupeBundleChildIntents(children);
+
   return {
     ...summarizeRange(dedupedChildren),
     kind: "step-summary",
@@ -864,6 +921,7 @@ function buildBundleSummaryRow(
   children: TimelineWorkSummaryChild[],
 ): TimelineBundleSummaryRow {
   const dedupedChildren = dedupeBundleChildIntents(children);
+
   return {
     ...summarizeRange(dedupedChildren),
     kind: "bundle-summary",
@@ -875,12 +933,15 @@ function closeOpenStepAtBoundary(
   work: TimelineWorkSummaryChild[],
 ): ThreadTimelineViewRow[] {
   if (work.length === 0) return [];
+
   if (!work.some((row) => row.kind === "work")) return work;
+
   if (work.length === 1) {
     return work.map((row) =>
       row.kind === "work" ? { ...row, inClosedStep: true } : row,
     );
   }
+
   return [buildStepSummaryRow(work)];
 }
 
@@ -896,15 +957,19 @@ function flushOpenStepAsBundles(
 
   const groups: Group[] = [];
   const leadingThoughts: TimelineWorkSummaryChild[] = [];
+
   for (const row of work) {
     if (row.kind === "system") {
       const last = groups[groups.length - 1];
+
       if (last) last.rows.push(row);
       else leadingThoughts.push(row);
       continue;
     }
+
     const concept = rowConcept(row);
     const last = groups[groups.length - 1];
+
     if (last && last.concept === concept) {
       last.rows.push(row);
     } else {
@@ -913,6 +978,7 @@ function flushOpenStepAsBundles(
   }
 
   const out: ThreadTimelineViewRow[] = [...leadingThoughts];
+
   for (const group of groups) {
     if (group.rows.length === 1) {
       out.push(group.rows[0]!);
@@ -920,16 +986,22 @@ function flushOpenStepAsBundles(
       out.push(buildBundleSummaryRow(group.rows));
     }
   }
+
   return out;
 }
 
-type TimelineViewRowsCache = WeakMap<
-  readonly TimelineRow[],
-  ThreadTimelineViewRow[]
->;
+interface TimelineViewRowsCache {
+  openRows: WeakMap<readonly TimelineRow[], ThreadTimelineViewRow[]>;
+  closedRows: WeakMap<readonly TimelineRow[], ThreadTimelineViewRow[]>;
+  convertedRows: WeakMap<TimelineRow, ThreadTimelineViewRow>;
+}
 
 export function createTimelineViewRowsCache(): TimelineViewRowsCache {
-  return new WeakMap();
+  return {
+    openRows: new WeakMap(),
+    closedRows: new WeakMap(),
+    convertedRows: new WeakMap(),
+  };
 }
 
 function toTimelineViewWorkRow(
@@ -940,14 +1012,23 @@ function toTimelineViewWorkRow(
     return row;
   }
 
+  const previous = cache.convertedRows.get(row);
+
+  if (previous?.kind === "work" && previous.workKind === "delegation")
+    return previous;
   const closedScope = row.status !== "pending";
-  return {
+
+  const converted: TimelineViewDelegationWorkRow = {
     ...row,
     childRows:
       row.childRows === null
         ? null
         : buildTimelineViewRows(row.childRows, { cache, closedScope }),
   };
+
+  cache.convertedRows.set(row, converted);
+
+  return converted;
 }
 
 function toTimelineViewRow(
@@ -960,8 +1041,12 @@ function toTimelineViewRow(
       return row;
     case "work":
       return toTimelineViewWorkRow(row, cache);
-    case "turn":
-      return {
+    case "turn": {
+      const previous = cache.convertedRows.get(row);
+
+      if (previous) return previous;
+
+      const converted: ThreadTimelineViewRow = {
         ...row,
         children: row.children
           ? buildTimelineViewRows(row.children, {
@@ -970,6 +1055,12 @@ function toTimelineViewRow(
             })
           : null,
       };
+
+      cache.convertedRows.set(row, converted);
+
+      return converted;
+    }
+
     default:
       return assertNever(row);
   }
@@ -985,12 +1076,20 @@ export function buildTimelineViewRows(
   options: BuildTimelineViewRowsOptions = {},
 ): ThreadTimelineViewRow[] {
   const cache = options.cache;
-  if (cache) {
-    const cached = cache.get(rows);
+  const scopeCache = options.closedScope ? cache?.closedRows : cache?.openRows;
+
+  if (scopeCache) {
+    const cached = scopeCache.get(rows);
+
     if (cached) return cached;
   }
+
   const childCache = cache ?? createTimelineViewRowsCache();
-  const viewRows = rows.map((row) => toTimelineViewRow(row, childCache));
+
+  const viewRows = foldActivityCommandRows(rows).map((row) =>
+    toTimelineViewRow(row, childCache),
+  );
+
   const result: ThreadTimelineViewRow[] = [];
   let openStep: TimelineWorkSummaryChild[] = [];
 
@@ -999,23 +1098,26 @@ export function buildTimelineViewRows(
       openStep.push(row);
       continue;
     }
+
     if (isTimelineStepBoundary(row)) {
       result.push(...closeOpenStepAtBoundary(openStep));
       openStep = [];
       result.push(row);
       continue;
     }
+
     result.push(...flushOpenStepAsBundles(openStep));
     openStep = [];
     result.push(row);
   }
+
   if (options.closedScope) {
     result.push(...closeOpenStepAtBoundary(openStep));
   } else {
     result.push(...flushOpenStepAsBundles(openStep));
   }
-  if (cache) {
-    cache.set(rows, result);
-  }
+
+  scopeCache?.set(rows, result);
+
   return result;
 }

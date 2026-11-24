@@ -14,6 +14,7 @@ describe("completed reasoning duration", () => {
     ({ completedAt, title }) => {
       const event = createTimelineEventFactory({ threadId: "thread-1" });
       const persistedAt = 4_000;
+
       const timeline = renderTimelineFixture({
         events: [
           event.turnStarted({ createdAt: 0 }),
@@ -44,6 +45,7 @@ describe("completed reasoning duration", () => {
           message.kind === "operation" &&
           message.detail === "Checked the projection.",
       );
+
       expect(reasoning).toMatchObject({
         completedAt,
         startedAt: persistedAt,

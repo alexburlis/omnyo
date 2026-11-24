@@ -30,6 +30,7 @@ function installAppFocusEvents(): void {
   if (appFocusEventsInstalled) {
     return;
   }
+
   appFocusEventsInstalled = true;
 
   focusManager.setEventListener((handleFocus) => {
@@ -58,20 +59,26 @@ export function installAppQueryClientBrowserEvents(
   }
 
   const fetchController = createBrowserLifecycleFetchController(queryClient);
+
   const handlePageHide = () => {
     fetchController.suspend();
   };
+
   const handlePageShow = () => {
     fetchController.resume();
   };
+
   const handleWindowFocus = () => {
     fetchController.resume();
   };
+
   const handleVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
       fetchController.suspend();
+
       return;
     }
+
     if (document.visibilityState === "visible") {
       fetchController.resume();
     }
@@ -109,6 +116,7 @@ export function createAppQueryClient(
         }
 
         const meta = getMutationErrorMeta(mutation.meta);
+
         if (meta.showErrorToast === false) {
           return;
         }

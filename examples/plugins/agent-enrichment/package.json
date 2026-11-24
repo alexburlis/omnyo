@@ -1,13 +1,13 @@
 {
-  "name": "bb-plugin-agent-enrichment",
+  "name": "omnyo-plugin-agent-enrichment",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "engines": {
-    "bb": ">=0.0",
-    "bbPluginSdk": ">=0.4.3"
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.4.3 >=0.6.44"
   },
-  "bb": {
+  "omnyo": {
     "name": "Agent enrichment",
     "description": "Demonstrate plugin-provided agent tools, skills, settings, and mentions.",
     "branding": {
@@ -16,7 +16,7 @@
     "server": "./server.ts"
   },
   "keywords": [
-    "bb-plugin"
+    "omnyo-plugin"
   ],
   "dependencies": {
     "zod": "^4.0.0"

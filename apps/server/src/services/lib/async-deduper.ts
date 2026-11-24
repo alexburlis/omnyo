@@ -1,8 +1,10 @@
 export interface AsyncDeduper<TKey, TValue> {
+  readonly size: number;
   run(key: TKey, task: () => Promise<TValue>): Promise<TValue>;
 }
 
 export interface AsyncRerunner<TKey> {
+  readonly size: number;
   run(key: TKey, task: () => Promise<void>): Promise<void>;
 }
 
@@ -10,8 +12,12 @@ export function createAsyncDeduper<TKey, TValue>(): AsyncDeduper<TKey, TValue> {
   const pendingByKey = new Map<TKey, Promise<TValue>>();
 
   return {
+    get size() {
+      return pendingByKey.size;
+    },
     run(key, task) {
       const pendingTask = pendingByKey.get(key);
+
       if (pendingTask) {
         return pendingTask;
       }
@@ -21,7 +27,9 @@ export function createAsyncDeduper<TKey, TValue>(): AsyncDeduper<TKey, TValue> {
           pendingByKey.delete(key);
         }
       });
+
       pendingByKey.set(key, startedTask);
+
       return startedTask;
     },
   };
@@ -39,6 +47,7 @@ export async function runSerialized<TKey, TValue>(
   const previous = locks.get(key) ?? Promise.resolve();
   const current = previous.catch(() => {}).then(operation);
   locks.set(key, current);
+
   try {
     return await current;
   } finally {
@@ -51,46 +60,60 @@ export function createKeyedLock<TKey>(): <TValue>(
   operation: () => Promise<TValue>,
 ) => Promise<TValue> {
   const locks = new Map<TKey, Promise<unknown>>();
+
   return (key, operation) => runSerialized(locks, key, operation);
 }
 
 export function createAsyncRerunner<TKey>(): AsyncRerunner<TKey> {
   type Task = () => Promise<void>;
+
   type State = {
     nextTask: Task | null;
     promise: Promise<void>;
   };
+
   const pendingByKey = new Map<TKey, State>();
 
   return {
+    get size() {
+      return pendingByKey.size;
+    },
     run(key, task) {
       const pending = pendingByKey.get(key);
+
       if (pending !== undefined) {
         pending.nextTask = task;
+
         return pending.promise;
       }
 
       let resolveCompletion: (() => void) | null = null;
       let rejectCompletion: ((reason?: unknown) => void) | null = null;
+
       const completion = new Promise<void>((resolve, reject) => {
         resolveCompletion = resolve;
         rejectCompletion = reject;
       });
+
       if (resolveCompletion === null || rejectCompletion === null) {
         throw new Error("Failed to create rerunner completion promise");
       }
+
       const state: State = {
         nextTask: null,
         promise: completion,
       };
+
       pendingByKey.set(key, state);
 
       const drain = async (firstTask: Task): Promise<void> => {
         let failed = false;
         let firstError: unknown;
         let nextTask: Task | null = firstTask;
+
         while (nextTask !== null) {
           state.nextTask = null;
+
           try {
             await nextTask();
           } catch (error) {
@@ -99,16 +122,21 @@ export function createAsyncRerunner<TKey>(): AsyncRerunner<TKey> {
               firstError = error;
             }
           }
+
           nextTask = state.nextTask;
         }
+
         if (pendingByKey.get(key) === state) {
           pendingByKey.delete(key);
         }
+
         if (failed) {
           throw firstError;
         }
       };
+
       void drain(task).then(resolveCompletion, rejectCompletion);
+
       return completion;
     },
   };

@@ -1,4 +1,4 @@
-import type { GitCheckoutRef } from "@bb/domain";
+import type { GitCheckoutRef } from "@omnyo/domain";
 
 const SHORT_SHA_LENGTH = 7;
 
@@ -46,6 +46,7 @@ export function formatWorkspaceCheckoutDisplay({
           title: "Detached HEAD",
         };
       }
+
       return {
         copyErrorMessage: "Failed to copy commit SHA",
         copyLabel: "Copy commit SHA",

@@ -28,27 +28,33 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@bb/shared-ui/context-menu";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+} from "@omnyo/shared-ui/context-menu";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   OverflowFade,
   type OverflowFadeTone,
 } from "@/components/ui/overflow-fade";
 import { TabPill } from "@/components/ui/tab-pill";
-import { useDragClickSuppression } from "@bb/shared-ui/use-drag-click-suppression";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { useDragClickSuppression } from "@omnyo/shared-ui/use-drag-click-suppression";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  getSortableDropAnimation,
+  getSortableTransition,
+  prefersReducedMotion,
+  usePrefersReducedMotion,
+} from "@omnyo/shared-ui/motion";
 import {
   MACOS_APP_REGION_NO_DRAG_CLASS,
   MACOS_WINDOW_NO_DRAG_CLASS,
-} from "@/lib/bb-desktop";
+} from "@/lib/omnyo-desktop";
 import type {
   SecondaryPanelRenderableTab,
   SecondaryPanelTabReorderHandler,
@@ -101,15 +107,18 @@ export function secondaryPanelTabsToClose(
   scope: SecondaryPanelTabCloseScope,
 ): SecondaryPanelRenderableTab[] {
   const index = tabs.findIndex((tab) => tab.tab.id === tabId);
+
   if (index === -1) {
     return [];
   }
+
   const candidates =
     scope === "self"
       ? tabs.slice(index, index + 1)
       : scope === "right"
         ? tabs.slice(index + 1)
         : tabs.filter((tab) => tab.tab.id !== tabId);
+
   return candidates.filter((tab) => !tab.isPinned);
 }
 
@@ -142,28 +151,43 @@ export function SecondaryPanelTabStrip({
   const activeTabRef = useRef<HTMLDivElement>(null);
   const leftScrollButtonRef = useRef<HTMLButtonElement>(null);
   const rightScrollButtonRef = useRef<HTMLButtonElement>(null);
+
   const [overflow, setOverflow] = useState<TabStripOverflowState>(
     INITIAL_OVERFLOW_STATE,
   );
+
   const maxScrollLeftRef = useRef(0);
   const hasOverflowRef = useRef(false);
   const scrollFrameRef = useRef<number | null>(null);
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+
   const {
     beginDragClickSuppression,
     clearDragClickSuppressionSoon,
     consumeDragClickSuppression,
   } = useDragClickSuppression();
+
   const dragDisabled = tabs.length < 2;
+
   const mouseSensor = useSensor(MouseSensor, {
     activationConstraint: { distance: 4 },
   });
+
   const touchSensor = useSensor(
     isPanelOpen && !dragDisabled ? TouchSensor : InertTouchSensor,
     { activationConstraint: { delay: 200, tolerance: 6 } },
   );
+
   const sensors = useSensors(mouseSensor, touchSensor);
+  const reducedMotion = usePrefersReducedMotion();
+
+  const dropAnimation = useMemo(
+    () => getSortableDropAnimation(reducedMotion),
+    [reducedMotion],
+  );
+
   const tabIds = useMemo(() => tabs.map((tab) => tab.tab.id), [tabs]);
+
   const draggingTab =
     draggingTabId === null
       ? null
@@ -171,16 +195,20 @@ export function SecondaryPanelTabStrip({
 
   const applyEdgeFlags = useCallback(() => {
     const viewport = viewportRef.current;
+
     if (viewport === null) {
       return;
     }
+
     const maxScrollLeft = maxScrollLeftRef.current;
     const hasOverflow = hasOverflowRef.current;
     const isScrollable = hasOverflow && maxScrollLeft > EDGE_EPSILON_PX;
     const { scrollLeft } = viewport;
     const canScrollLeft = isScrollable && scrollLeft > EDGE_EPSILON_PX;
+
     const canScrollRight =
       isScrollable && scrollLeft < maxScrollLeft - EDGE_EPSILON_PX;
+
     setOverflow((prev) =>
       prev.hasOverflow === hasOverflow &&
       prev.canScrollLeft === canScrollLeft &&
@@ -194,11 +222,14 @@ export function SecondaryPanelTabStrip({
     const strip = stripRef.current;
     const viewport = viewportRef.current;
     const content = contentRef.current;
+
     if (strip === null || viewport === null || content === null) {
       return;
     }
+
     const hasOverflow =
       content.scrollWidth > strip.clientWidth + EDGE_EPSILON_PX;
+
     hasOverflowRef.current = hasOverflow;
     maxScrollLeftRef.current = hasOverflow
       ? Math.max(0, viewport.scrollWidth - viewport.clientWidth)
@@ -208,30 +239,39 @@ export function SecondaryPanelTabStrip({
 
   useEffect(() => {
     const viewport = viewportRef.current;
+
     if (viewport === null) {
       return;
     }
+
     const handleScroll = () => {
       if (scrollFrameRef.current !== null) {
         return;
       }
+
       scrollFrameRef.current = window.requestAnimationFrame(() => {
         scrollFrameRef.current = null;
         applyEdgeFlags();
       });
     };
+
     viewport.addEventListener("scroll", handleScroll, { passive: true });
     const resizeObserver = new ResizeObserver(measureCapacity);
+
     if (stripRef.current !== null) {
       resizeObserver.observe(stripRef.current);
     }
+
     resizeObserver.observe(viewport);
+
     if (contentRef.current !== null) {
       resizeObserver.observe(contentRef.current);
     }
+
     return () => {
       viewport.removeEventListener("scroll", handleScroll);
       resizeObserver.disconnect();
+
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current);
         scrollFrameRef.current = null;
@@ -240,25 +280,25 @@ export function SecondaryPanelTabStrip({
   }, [applyEdgeFlags, measureCapacity]);
 
   useEffect(() => {
-    measureCapacity();
-  }, [tabs, measureCapacity]);
-
-  useEffect(() => {
     void document.fonts?.ready?.then(() => measureCapacity());
   }, [measureCapacity]);
 
   useLayoutEffect(() => {
     const activeTabElement = activeTabRef.current;
+
     if (activeTabElement === null) {
       return;
     }
+
     activeTabElement.scrollIntoView({ inline: "nearest", block: "nearest" });
   }, [activeTabId, overflow.hasOverflow]);
 
   useLayoutEffect(() => {
     const focusedElement = document.activeElement;
+
     const activeTabButton =
       activeTabRef.current?.querySelector<HTMLButtonElement>("button") ?? null;
+
     if (
       !overflow.canScrollLeft &&
       focusedElement === leftScrollButtonRef.current
@@ -267,8 +307,10 @@ export function SecondaryPanelTabStrip({
         ? rightScrollButtonRef.current
         : activeTabButton
       )?.focus();
+
       return;
     }
+
     if (
       !overflow.canScrollRight &&
       focusedElement === rightScrollButtonRef.current
@@ -282,9 +324,11 @@ export function SecondaryPanelTabStrip({
 
   useEffect(() => {
     const viewport = viewportRef.current;
+
     if (viewport === null) {
       return;
     }
+
     const handleWheel = (event: WheelEvent) => {
       if (
         event.deltaY === 0 ||
@@ -292,25 +336,33 @@ export function SecondaryPanelTabStrip({
       ) {
         return;
       }
+
       const maxScrollLeft = maxScrollLeftRef.current;
+
       if (maxScrollLeft <= EDGE_EPSILON_PX) {
         return;
       }
+
       const { scrollLeft } = viewport;
+
       const canScrollInWheelDirection =
         event.deltaY > 0
           ? scrollLeft < maxScrollLeft - EDGE_EPSILON_PX
           : scrollLeft > EDGE_EPSILON_PX;
+
       if (!canScrollInWheelDirection) {
         return;
       }
+
       viewport.scrollLeft = Math.min(
         maxScrollLeft,
         Math.max(0, scrollLeft + event.deltaY),
       );
       event.preventDefault();
     };
+
     viewport.addEventListener("wheel", handleWheel, { passive: false });
+
     return () => {
       viewport.removeEventListener("wheel", handleWheel);
     };
@@ -319,7 +371,7 @@ export function SecondaryPanelTabStrip({
   const scrollByStep = useCallback((direction: -1 | 1) => {
     viewportRef.current?.scrollBy({
       left: direction * CHEVRON_SCROLL_STEP_PX,
-      behavior: "smooth",
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
     });
   }, []);
 
@@ -330,31 +382,39 @@ export function SecondaryPanelTabStrip({
     },
     [beginDragClickSuppression],
   );
+
   const handleDragCancel = useCallback(() => {
     setDraggingTabId(null);
     clearDragClickSuppressionSoon();
   }, [clearDragClickSuppressionSoon]);
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       setDraggingTabId(null);
       clearDragClickSuppressionSoon();
+
       if (!event.over) {
         return;
       }
+
       const activeTabId = String(event.active.id);
       const overTabId = String(event.over.id);
+
       if (activeTabId === overTabId) {
         return;
       }
+
       onReorderTab({ activeTabId, overTabId });
     },
     [clearDragClickSuppressionSoon, onReorderTab],
   );
+
   const handleClickCapture = useCallback<MouseEventHandler<HTMLDivElement>>(
     (event) => {
       if (!consumeDragClickSuppression()) {
         return;
       }
+
       event.preventDefault();
       event.stopPropagation();
     },
@@ -362,15 +422,19 @@ export function SecondaryPanelTabStrip({
   );
 
   const isCompactViewport = useIsCompactViewport();
+
   const handleCloseTabs = useCallback(
     (tabId: string, scope: SecondaryPanelTabCloseScope) => {
       const tabsToClose = secondaryPanelTabsToClose(tabs, tabId, scope);
+
       const closesActiveTab = tabsToClose.some(
         (tab) => tab.tab.id === activeTabId,
       );
+
       if (scope !== "self" && closesActiveTab) {
         tabs.find((tab) => tab.tab.id === tabId)?.onSelect();
       }
+
       for (const tab of tabsToClose) {
         tab.onClose();
       }
@@ -379,9 +443,13 @@ export function SecondaryPanelTabStrip({
   );
 
   const noDragClass = usesDesktopChrome ? MACOS_WINDOW_NO_DRAG_CLASS : null;
+
   const chevronNoDragClass = usesDesktopChrome
     ? MACOS_APP_REGION_NO_DRAG_CLASS
     : null;
+
+  const reservesScrollSlots = overflow.canScrollLeft || overflow.canScrollRight;
+
   const dndTabs = useMemo(
     () => (
       <DndContext
@@ -411,7 +479,10 @@ export function SecondaryPanelTabStrip({
           ))}
         </SortableContext>
         {createPortal(
-          <DragOverlay className="cursor-grabbing">
+          <DragOverlay
+            className="cursor-grabbing"
+            dropAnimation={dropAnimation}
+          >
             {draggingTab === null ? null : (
               <PanelTab
                 isActive={draggingTab.tab.id === activeTabId}
@@ -437,6 +508,7 @@ export function SecondaryPanelTabStrip({
       handleCloseTabs,
       draggingTab,
       activeTabId,
+      dropAnimation,
     ],
   );
 
@@ -450,6 +522,7 @@ export function SecondaryPanelTabStrip({
         buttonRef={leftScrollButtonRef}
         direction="left"
         canScroll={overflow.canScrollLeft}
+        reservesSlot={reservesScrollSlots}
         className={chevronNoDragClass}
         onClick={() => scrollByStep(-1)}
       />
@@ -491,6 +564,7 @@ export function SecondaryPanelTabStrip({
         buttonRef={rightScrollButtonRef}
         direction="right"
         canScroll={overflow.canScrollRight}
+        reservesSlot={reservesScrollSlots}
         className={chevronNoDragClass}
         onClick={() => scrollByStep(1)}
       />
@@ -513,18 +587,23 @@ function SortablePanelTab({
     useSortable({
       id: tab.tab.id,
       disabled: dragDisabled,
+      transition: getSortableTransition(usePrefersReducedMotion()),
     });
+
   const { onPointerDown: sortablePointerDown, ...sortableListeners } =
     listeners ?? {};
+
   const setTabRef = useCallback(
     (element: HTMLDivElement | null) => {
       setNodeRef(element);
+
       if (isActive) {
         activeTabRef.current = element;
       }
     },
     [activeTabRef, isActive, setNodeRef],
   );
+
   const style = useMemo<CSSProperties>(
     () => ({
       transform: CSS.Translate.toString(transform),
@@ -534,10 +613,13 @@ function SortablePanelTab({
   );
 
   const tabId = tab.tab.id;
+
   const canCloseSelf =
     secondaryPanelTabsToClose(tabs, tabId, "self").length > 0;
+
   const canCloseOthers =
     secondaryPanelTabsToClose(tabs, tabId, "others").length > 0;
+
   const canCloseRight =
     secondaryPanelTabsToClose(tabs, tabId, "right").length > 0;
 
@@ -591,6 +673,7 @@ interface TabStripScrollButtonProps {
   buttonRef: RefObject<HTMLButtonElement | null>;
   direction: "left" | "right";
   canScroll: boolean;
+  reservesSlot: boolean;
   className: string | null;
   onClick: () => void;
 }
@@ -599,10 +682,12 @@ function TabStripScrollButton({
   buttonRef,
   direction,
   canScroll,
+  reservesSlot,
   className,
   onClick,
 }: TabStripScrollButtonProps) {
   const label = direction === "left" ? "Scroll tabs left" : "Scroll tabs right";
+
   return (
     <Button
       ref={buttonRef}
@@ -615,10 +700,10 @@ function TabStripScrollButton({
       onClick={onClick}
       className={cn(
         "z-20 shrink-0 bg-sidebar text-muted-foreground/70 shadow-none hover:bg-surface-raised-solid hover:text-foreground focus-visible:bg-sidebar",
-        canScroll
+        reservesSlot
           ? TAB_STRIP_SCROLL_BUTTON_CLASS
           : "h-7 w-0 overflow-hidden p-0 max-md:pointer-coarse:h-9",
-        "transition-opacity",
+        "transition-[color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,scale,opacity]",
         canScroll
           ? "pointer-events-auto opacity-100"
           : "pointer-events-none opacity-0",
@@ -639,6 +724,7 @@ function PanelTab({
 }) {
   const title =
     tab.statusLabel === null ? tab.label : `${tab.label} (${tab.statusLabel})`;
+
   return (
     <TabPill
       label={tab.label}

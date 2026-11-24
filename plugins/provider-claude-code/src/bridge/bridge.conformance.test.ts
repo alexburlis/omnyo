@@ -10,8 +10,8 @@ import {
   experimental_captureBridgeJsonRpcOutput as captureBridgeJsonRpcOutput,
   experimental_formatConformanceReport as formatConformanceReport,
   experimental_runBridgeConformance as runBridgeConformance,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
-import type { CapturedBridgeJsonRpcOutput } from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
+import type { CapturedBridgeJsonRpcOutput } from "@omnyo/plugin-sdk/provider-bridge/testing";
 
 const { forkSessionMock, queryMock } = vi.hoisted(() => ({
   forkSessionMock: vi.fn(),
@@ -43,14 +43,17 @@ let scriptedTurnCounter = 0;
 function createScriptedClaudeQuery(call: ScriptedClaudeQueryCall) {
   const sessionId =
     call.options.resume ?? call.options.sessionId ?? "scripted-session";
+
   const outputQueue: SDKMessage[] = [];
   let closed = false;
   let notify: (() => void) | null = null;
+
   const wake = (): void => {
     const pending = notify;
     notify = null;
     pending?.();
   };
+
   const push = (message: SDKMessage): void => {
     outputQueue.push(message);
     wake();
@@ -71,6 +74,7 @@ function createScriptedClaudeQuery(call: ScriptedClaudeQueryCall) {
         );
         continue;
       }
+
       scriptedTurnCounter += 1;
       const text = `hello from turn ${scriptedTurnCounter}`;
       push(
@@ -108,6 +112,7 @@ function createScriptedClaudeQuery(call: ScriptedClaudeQueryCall) {
         }),
       );
     }
+
     closed = true;
     wake();
   })().catch(() => {
@@ -119,12 +124,15 @@ function createScriptedClaudeQuery(call: ScriptedClaudeQueryCall) {
     next: async (): Promise<IteratorResult<SDKMessage>> => {
       for (;;) {
         const message = outputQueue.shift();
+
         if (message !== undefined) {
           return { value: message, done: false };
         }
+
         if (closed) {
           return { value: undefined, done: true };
         }
+
         await new Promise<void>((resolveTick) => {
           notify = resolveTick;
         });
@@ -133,6 +141,7 @@ function createScriptedClaudeQuery(call: ScriptedClaudeQueryCall) {
     return: async (): Promise<IteratorResult<SDKMessage>> => {
       closed = true;
       wake();
+
       return { value: undefined, done: true };
     },
   };
@@ -154,12 +163,13 @@ function createScriptedClaudeQuery(call: ScriptedClaudeQueryCall) {
 }
 
 let output: CapturedBridgeJsonRpcOutput;
+
 let workspaceDir: string;
 
 beforeEach(() => {
   vi.clearAllMocks();
   scriptedTurnCounter = 0;
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-claude-conformance-ws-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-claude-conformance-ws-"));
   queryMock.mockImplementation((call: ScriptedClaudeQueryCall) =>
     createScriptedClaudeQuery(call),
   );

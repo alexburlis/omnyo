@@ -3,7 +3,7 @@ import type {
   PermissionMode,
   ReasoningLevel,
   ServiceTier,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import path from "node:path";
 
 import {
@@ -13,7 +13,7 @@ import {
   type AcpBridgeReasoningCli,
 } from "./bridge-protocol.js";
 import { cursorParameterizedSelection } from "./cursor-model-selection.js";
-import type { AcpLaunchSpec } from "./launch-spec.js";
+import type { AcpLaunchSpec } from "@omnyo/provider-bridge-protocol/acp/launch-spec";
 
 export interface AcpSessionExecutionOptions {
   model?: string | undefined;
@@ -87,6 +87,7 @@ function sanitizeAcpSkillDescription(description: string): string {
     .replace(/\s+/gu, " ")
     .replace(/[<>]/gu, "")
     .trim();
+
   return sanitized.length > 0 ? sanitized : "(description unavailable)";
 }
 
@@ -104,17 +105,19 @@ function buildAcpSkillsInstructions(
         skill.name,
         "SKILL.md",
       );
+
       return `- ${skill.name}: ${sanitizeAcpSkillDescription(skill.description)} (SKILL.md: ${skillFilePath})`;
     });
   });
+
   if (skillLines.length === 0) {
     return undefined;
   }
 
   return [
-    "bb skills are reusable instruction folders. When the current task matches a listed skill description, read that skill's SKILL.md at the absolute path before proceeding; you may read supporting files in the same skill directory that SKILL.md references. If a listed path does not exist, the list is stale and should be ignored.",
+    "Omnyo skills are reusable instruction folders. When the current task matches a listed skill description, read that skill's SKILL.md at the absolute path before proceeding; you may read supporting files in the same skill directory that SKILL.md references. If a listed path does not exist, the list is stale and should be ignored.",
     "",
-    "Available bb skills:",
+    "Available Omnyo skills:",
     ...skillLines,
   ].join("\n");
 }
@@ -124,9 +127,11 @@ function buildAcpSessionInstructions(
 ): string | undefined {
   const baseInstructions = options.instructions?.trim();
   const skillsInstructions = buildAcpSkillsInstructions(options.skillRoots);
+
   const instructions = [baseInstructions, skillsInstructions].filter(
     (value): value is string => value !== undefined && value.length > 0,
   );
+
   return instructions.length > 0 ? instructions.join("\n\n") : undefined;
 }
 
@@ -144,6 +149,7 @@ function buildAcpModelListCommand(
   if (!launchSpec.modelCli || launchSpec.modelCli.listArgs.length === 0) {
     return undefined;
   }
+
   return {
     command: launchSpec.command,
     args: [...launchSpec.modelCli.listArgs],
@@ -182,9 +188,11 @@ export function buildAcpModelListParams(
   const primaryModels = [
     ...(options.primaryModels ?? launchSpec?.modelCli?.primaryModels ?? []),
   ];
+
   const reasoningProbePriorityModelIds = [
     ...options.reasoningProbePriorityModelIds,
   ];
+
   if (launchSpec === null) {
     return {
       primaryModels,
@@ -192,8 +200,10 @@ export function buildAcpModelListParams(
       parameterizedModelPicker: options.parameterizedModelPicker,
     };
   }
+
   const listCommand = buildAcpModelListCommand(launchSpec);
   const agent = buildAcpModelDiscoveryAgentCommand(launchSpec);
+
   return {
     ...(listCommand !== undefined ? { listCommand } : {}),
     ...(agent !== undefined ? { agent } : {}),
@@ -225,6 +235,7 @@ export function buildAcpModelSelectionParams(
     parameterizedModelPicker,
     dialectId,
   );
+
   return {
     ...(modelSelection !== undefined ? { modelSelection } : {}),
     ...(launchSpec.reasoningCli !== undefined &&
@@ -245,9 +256,11 @@ function buildAcpModelSelection(
 ): AcpModelSelection | undefined {
   const model = options.model;
   const listCommand = buildAcpModelListCommand(launchSpec);
+
   if (!model || model === ACP_DEFAULT_MODEL_ID) {
     return undefined;
   }
+
   if (
     parameterizedModelPicker ||
     !listCommand ||
@@ -262,6 +275,7 @@ function buildAcpModelSelection(
               ? { reasoningLevel: options.reasoningLevel }
               : {}),
           };
+
     return {
       ...modelSelection,
       ...(parameterizedModelPicker && options.serviceTier !== undefined
@@ -269,6 +283,7 @@ function buildAcpModelSelection(
         : {}),
     };
   }
+
   return {
     listCommand,
     selectFlag: launchSpec.modelCli.selectFlag,
@@ -300,15 +315,18 @@ export function buildAcpSessionParams(
   const { options, launchSpec } = args;
   const instructions = buildAcpSessionInstructions(options);
   const cwd = launchSpec.cwd ?? args.cwd;
+
   const envVars = {
     ...launchSpec.env,
     ...(options.envVars ?? {}),
   };
+
   if (options.permissionMode === "auto") {
     throw new Error(
       `Provider "${args.providerLabel}" does not support permission mode "auto".`,
     );
   }
+
   return {
     threadId: args.threadId,
     cwd,

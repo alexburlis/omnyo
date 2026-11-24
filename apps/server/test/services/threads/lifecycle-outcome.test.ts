@@ -12,7 +12,7 @@ import {
   openSession,
   upsertHost,
   type DbConnection,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   changedMessageSchema,
   formatClientTurnRequestIdSuffix,
@@ -21,7 +21,7 @@ import {
   type PromptInput,
   type ThreadChangedMessage,
   type ThreadStatus,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { applyLoggedThreadLifecycleEvent } from "../../../src/services/threads/lifecycle-outcome.js";
 import { NotificationHub } from "../../../src/ws/hub.js";
 import { createMockHubSocket } from "../../helpers/mock-hub-socket.js";
@@ -35,6 +35,7 @@ const NO_ACTIVITY = {
   activeBackgroundCommandCount: 0,
   activeGoalCount: 0,
   activePlanModeCount: 0,
+  activeSubagentCount: 0,
   activeWorkflowCount: 0,
 };
 
@@ -119,14 +120,17 @@ function setup(status: ThreadStatus): Setup {
   const db = createConnection(":memory:");
   migrate(db);
   const hub = new NotificationHub();
+
   const host = upsertHost(db, noopNotifier, {
     id: "host-lifecycle-outcome",
     name: "Lifecycle Outcome Host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "Lifecycle Outcome Project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/lifecycle" },
   });
+
   const environment = createEnvironment(db, noopNotifier, {
     providerOwnsPath: false,
     hostId: host.id,
@@ -134,12 +138,14 @@ function setup(status: ThreadStatus): Setup {
     path: "/tmp/lifecycle/env",
     status: "ready",
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     environmentId: environment.id,
     providerId: "codex",
     status,
   });
+
   return {
     db,
     hostId: host.id,
@@ -159,6 +165,7 @@ function connectDaemon(db: DbConnection, hub: NotificationHub, hostId: string) {
     heartbeatIntervalMs: 5_000,
     leaseTimeoutMs: 30_000,
   });
+
   hub.registerDaemon(session.id, hostId, { close() {}, send() {} });
 }
 
@@ -166,13 +173,17 @@ function lastThreadListMessage(
   messages: readonly string[],
 ): ThreadChangedMessage {
   const last = messages.at(-1);
+
   if (last === undefined) {
     throw new Error("no realtime message was broadcast");
   }
+
   const message = changedMessageSchema.parse(JSON.parse(last));
+
   if (message.entity !== "thread") {
     throw new Error(`expected a thread message, got ${message.entity}`);
   }
+
   return message;
 }
 
@@ -205,6 +216,7 @@ describe("applyLoggedThreadLifecycleEvent", () => {
           },
           activity: NO_ACTIVITY,
           latestAttentionAt: row?.latestAttentionAt,
+          lastMessageAt: row?.lastMessageAt,
           updatedAt: row?.updatedAt,
         },
       },

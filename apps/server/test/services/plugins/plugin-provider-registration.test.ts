@@ -1,5 +1,5 @@
 import { setPluginEnvironmentProviderBridge } from "../../../src/services/plugins/plugin-environment-provider-registry.js";
-import { systemEnvironmentProvidersResponseSchema } from "@bb/server-contract";
+import { systemEnvironmentProvidersResponseSchema } from "@omnyo/server-contract";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +25,7 @@ async function writePlugin(
     JSON.stringify({
       name: options.name,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Provider fixture",
         description: "Provider registration plugin fixture.",
         branding: {
@@ -40,6 +40,7 @@ async function writePlugin(
     }),
   );
   await writeFile(join(rootDir, "server.ts"), options.serverSource);
+
   if (withBridge) {
     await writeFile(
       join(rootDir, "bridge.ts"),
@@ -47,12 +48,13 @@ async function writePlugin(
         "export const experimental_providerBridge = { experimental_apiVersion: 1, handleLine: () => undefined };\n",
     );
   }
+
   return rootDir;
 }
 
 const REGISTER_PROVIDER_SOURCE = (id: string): string => `
-  export default function plugin(bb: any) {
-    bb.providers.register({
+  export default function plugin(api: any) {
+    api.providers.register({
       id: ${JSON.stringify(id)},
       displayName: "My Remote Agent",
       icon: "./icons/agent.svg",
@@ -72,11 +74,11 @@ const REGISTER_PROVIDER_SOURCE = (id: string): string => `
   }
 `;
 
-describe("bb.providers.register (server)", () => {
+describe("api.providers.register (server)", () => {
   let workDir: string;
 
   beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-provider-test-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-provider-test-"));
   });
 
   afterEach(async () => {
@@ -87,10 +89,12 @@ describe("bb.providers.register (server)", () => {
   it("adds the provider to the composed listing and removes it when the plugin is disabled", async () => {
     await withTestHarness(async (harness) => {
       const notifySystem = vi.spyOn(harness.deps.hub, "notifySystem");
+
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-remote-agent",
+        name: "omnyo-plugin-remote-agent",
         serverSource: REGISTER_PROVIDER_SOURCE("my-remote-agent"),
       });
+
       const entry = await harness.pluginService.installPath(rootDir);
       expect(entry.status).toBe("running");
       expect(notifySystem).toHaveBeenCalledWith([
@@ -155,10 +159,11 @@ describe("bb.providers.register (server)", () => {
   it("keeps a failed provider in the listing as unavailable", async () => {
     await withTestHarness(async (harness) => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-failed-agent",
+        name: "omnyo-plugin-failed-agent",
         serverSource: REGISTER_PROVIDER_SOURCE("failed-agent"),
         bridgeSource: 'import "missing-provider-runtime";\n',
       });
+
       const entry = await harness.pluginService.installPath(rootDir);
 
       expect(entry.status).toBe("error");
@@ -202,9 +207,10 @@ describe("bb.providers.register (server)", () => {
   it("re-registers wholesale on reload instead of colliding with itself", async () => {
     await withTestHarness(async (harness) => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-reload-agent",
+        name: "omnyo-plugin-reload-agent",
         serverSource: REGISTER_PROVIDER_SOURCE("reload-agent"),
       });
+
       const entry = await harness.pluginService.installPath(rootDir);
       expect(entry.status).toBe("running");
       expect(harness.deps.providerRegistry.get("reload-agent")).not.toBeNull();
@@ -215,9 +221,11 @@ describe("bb.providers.register (server)", () => {
       expect(reloaded).toMatchObject({
         pluginId: entry.id,
       });
+
       const listed = harness.deps.providerRegistry
         .list()
         .filter((candidate) => candidate.info.id === "reload-agent");
+
       expect(listed).toHaveLength(1);
     });
   });
@@ -227,26 +235,28 @@ describe("bb.providers.register (server)", () => {
     async (icon) => {
       await withTestHarness(async (harness) => {
         const rootDir = await writePlugin(workDir, {
-          name: "bb-plugin-legacy-environments",
+          name: "omnyo-plugin-legacy-environments",
           withBridge: false,
-          serverSource: `export default function(bb) {
-          bb.experimental_machines.register({
+          serverSource: `export default function(api) {
+          api.experimental_machines.register({
             id: "legacy-machine", displayName: "Legacy machine", description: "Create a test machine.", icon: ${JSON.stringify(icon)},
             create: async () => ({ status: "failed", message: "unused" }),
             reconcileCleanup: async () => ({ status: "removed" }), remove: async () => ({ status: "removed" })
           });
-          bb.experimental_environments.register({
+          api.experimental_environments.register({
             id: "legacy-workspace", displayName: "Legacy workspace",
             create: async () => ({ status: "failed", message: "unused" }), remove: async () => ({ status: "removed" })
           });
-          bb.experimental_environments.register({
+          api.experimental_environments.register({
             id: "legacy-composition", displayName: "Legacy composition",
             machineProviderId: "legacy-machine", environmentProviderId: "legacy-workspace"
           });
         }`,
         });
+
         const svg =
           '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><path d="M0 0h4v4z"/></svg>';
+
         await mkdir(join(rootDir, "icons"), { recursive: true });
         await writeFile(join(rootDir, "icons/agent.svg"), svg);
         const entry = await harness.pluginService.installPath(rootDir);
@@ -254,19 +264,25 @@ describe("bb.providers.register (server)", () => {
         setPluginEnvironmentProviderBridge(
           harness.pluginService.environmentProviders,
         );
+
         const response = await harness.app.request(
           "/api/v1/system/environment-providers",
         );
+
         expect(response.status).toBe(200);
+
         const { providers } = systemEnvironmentProvidersResponseSchema.parse(
           await response.json(),
         );
+
         expect(
           providers.find((provider) => provider.id === "legacy-workspace"),
         ).toMatchObject({ description: null, icon: null, logoUrl: null });
+
         const composition = providers.find(
           (provider) => provider.id === "legacy-composition",
         );
+
         expect(composition).toMatchObject({
           description: null,
           icon: "FolderUnknown",
@@ -281,13 +297,15 @@ describe("bb.providers.register (server)", () => {
     async (icon) => {
       await withTestHarness(async (harness) => {
         const rootDir = await writePlugin(workDir, {
-          name: "bb-plugin-marked-environment",
+          name: "omnyo-plugin-marked-environment",
           withBridge: false,
           icons: { mark: "./icons/agent.svg" },
-          serverSource: `export default function plugin(bb) { bb.experimental_environments.register({ id: "marked-environment", displayName: "Marked", description: "Prepare a marked workspace.", icon: ${JSON.stringify(icon)}, create: async () => ({ status: "failed", message: "waiting" }), remove: async () => ({ status: "removed" }) }); }`,
+          serverSource: `export default function plugin(api) { api.experimental_environments.register({ id: "marked-environment", displayName: "Marked", description: "Prepare a marked workspace.", icon: ${JSON.stringify(icon)}, create: async () => ({ status: "failed", message: "waiting" }), remove: async () => ({ status: "removed" }) }); }`,
         });
+
         const svg =
           '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><path d="M0 0h4v4z"/></svg>';
+
         await mkdir(join(rootDir, "icons"), { recursive: true });
         await writeFile(join(rootDir, "icons/agent.svg"), svg);
         const entry = await harness.pluginService.installPath(rootDir);
@@ -295,15 +313,19 @@ describe("bb.providers.register (server)", () => {
         setPluginEnvironmentProviderBridge(
           harness.pluginService.environmentProviders,
         );
+
         const response = await harness.app.request(
           "http://127.0.0.1:3334/api/v1/system/environment-providers",
         );
+
         const { providers } = systemEnvironmentProvidersResponseSchema.parse(
           await response.json(),
         );
+
         const provider = providers.find(
           (provider) => provider.id === "marked-environment",
         );
+
         expect(provider).toMatchObject({
           description: "Prepare a marked workspace.",
           icon,
@@ -311,10 +333,13 @@ describe("bb.providers.register (server)", () => {
         expect(provider?.logoUrl).toContain(
           "environment%3Amarked-environment/logo?h=",
         );
+
         if (provider?.logoUrl == null) throw new Error("Missing logo URL");
+
         const logo = await harness.app.request(
           `http://127.0.0.1:3334${provider.logoUrl}`,
         );
+
         expect(logo.status).toBe(200);
         expect(logo.headers.get("x-content-type-options")).toBe("nosniff");
         expect(logo.headers.get("cache-control")).toBe(
@@ -328,9 +353,10 @@ describe("bb.providers.register (server)", () => {
   it("serves a path-shaped icon through the provider logo route with untrusted-image headers", async () => {
     await withTestHarness(async (harness) => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-marked-agent",
+        name: "omnyo-plugin-marked-agent",
         serverSource: REGISTER_PROVIDER_SOURCE("marked-agent"),
       });
+
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><style>.a{fill:#f00}</style><path class="a" d="M0 0h4v4z"/></svg>`;
       await mkdir(join(rootDir, "icons"), { recursive: true });
       await writeFile(join(rootDir, "icons", "agent.svg"), svg);
@@ -340,6 +366,7 @@ describe("bb.providers.register (server)", () => {
       const logo = await harness.app.request(
         "http://127.0.0.1:3334/api/v1/system/providers/marked-agent/logo",
       );
+
       expect(logo.status).toBe(200);
       expect(logo.headers.get("content-type")).toBe("image/svg+xml");
       expect(logo.headers.get("x-content-type-options")).toBe("nosniff");
@@ -354,9 +381,10 @@ describe("bb.providers.register (server)", () => {
   it("serves a path-shaped icon as declared even when it carries an event handler", async () => {
     await withTestHarness(async (harness) => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-scripted-agent",
+        name: "omnyo-plugin-scripted-agent",
         serverSource: REGISTER_PROVIDER_SOURCE("scripted-agent"),
       });
+
       const svg = `<svg xmlns="http://www.w3.org/2000/svg"><path onload="x()" d="M0 0"/></svg>`;
       await mkdir(join(rootDir, "icons"), { recursive: true });
       await writeFile(join(rootDir, "icons", "agent.svg"), svg);
@@ -369,6 +397,7 @@ describe("bb.providers.register (server)", () => {
       const logo = await harness.app.request(
         "http://127.0.0.1:3334/api/v1/system/providers/scripted-agent/logo",
       );
+
       expect(logo.status).toBe(200);
       expect(logo.headers.get("content-type")).toBe("image/svg+xml");
       expect(logo.headers.get("x-content-type-options")).toBe("nosniff");
@@ -382,10 +411,11 @@ describe("bb.providers.register (server)", () => {
   it("refuses a declaration with no bridge to run on", async () => {
     await withTestHarness(async (harness) => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-bridgeless-agent",
+        name: "omnyo-plugin-bridgeless-agent",
         serverSource: REGISTER_PROVIDER_SOURCE("bridgeless-agent"),
         withBridge: false,
       });
+
       const entry = await harness.pluginService.installPath(rootDir);
 
       expect(entry.status).toBe("error");
@@ -403,9 +433,10 @@ describe("bb.providers.register (server)", () => {
   it("rejects a live id claimed by another plugin as a load failure", async () => {
     await withTestHarness(async (harness) => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-shadow-codex",
+        name: "omnyo-plugin-shadow-codex",
         serverSource: REGISTER_PROVIDER_SOURCE("codex"),
       });
+
       const entry = await harness.pluginService.installPath(rootDir);
       expect(entry.status).toBe("error");
       expect(entry.statusDetail).toContain(

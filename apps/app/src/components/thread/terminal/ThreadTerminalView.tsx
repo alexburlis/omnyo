@@ -20,14 +20,13 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@bb/shared-ui/context-menu";
-import { TERMINAL_DATA_MAX_BYTES } from "@bb/domain";
-import { useMediaQuery } from "@bb/shared-ui/hooks/use-media-query";
+} from "@omnyo/shared-ui/context-menu";
+import { useMediaQuery } from "@omnyo/shared-ui/hooks/use-media-query";
 import { appToast } from "@/components/ui/app-toast";
 import type {
   TerminalServerMessage,
   TerminalSession,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { useAppThemeEpoch } from "@/hooks/useAppTheme";
 import { usePreferredTheme } from "@/hooks/useTheme";
 import type { MarkdownPreviewLinkHandler } from "@/components/ui/markdown-link";
@@ -44,13 +43,15 @@ import {
 } from "@/components/thread/timeline/SelectableMessageProse.js";
 import { TimelineSelectionMenu } from "@/components/thread/timeline/TimelineSelectionMenu.js";
 import { buildTerminalWebSocketUrl } from "./terminal-websocket-url";
-import { TerminalWebSocketTransport } from "@bb/client-core";
+import { encodeTerminalInputChunks } from "@/lib/terminal-input-encoding";
+import { TerminalWebSocketTransport } from "@omnyo/client-core";
 import { TerminalLinkOpenDialog } from "./TerminalLinkOpenDialog";
 import { TerminalMobileControls } from "./TerminalMobileControls";
 import {
   applyTerminalControl,
   encodeTerminalArrow,
 } from "./terminal-mobile-input";
+import { forwardLateImeInput } from "./terminal-late-ime-input";
 import {
   createTerminalOsc8LinkHandler,
   requestTerminalLinkOpen,
@@ -59,10 +60,15 @@ import {
 
 export const TERMINAL_FONT_FAMILY =
   '"JetBrainsMono Nerd Font Mono", "MesloLGS NF", "Symbols Nerd Font Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
+
 const TERMINAL_FONT_CSS_VARIABLE = "--font-terminal";
+
 const TERMINAL_UNICODE_VERSION = "11";
+
 export const TERMINAL_ALLOW_PROPOSED_API = true;
+
 const TERMINAL_TOUCH_FOCUS_MAX_DURATION_MS = 700;
+
 const TERMINAL_TOUCH_FOCUS_MOVEMENT_THRESHOLD_PX = 10;
 
 type TerminalFitScheduler = () => void;
@@ -83,9 +89,11 @@ export function shouldFocusTerminalAfterAsyncMount({
   if (!isPanelOpen) {
     return false;
   }
+
   if (focusMovedDuringMount && currentFocusIsAvailable) {
     return false;
   }
+
   return hasExplicitFocusRequest || !currentFocusIsAvailable;
 }
 
@@ -94,9 +102,11 @@ interface WebglRendererAddon extends ITerminalAddon {
 }
 
 type TerminalAddonLoader = Pick<XTermTerminal, "loadAddon">;
+
 interface TerminalWebglAddonModule {
   WebglAddon: new () => WebglRendererAddon;
 }
+
 type TerminalWebglAddonImporter = () => Promise<TerminalWebglAddonModule>;
 
 export async function loadOptionalTerminalWebglAddon(
@@ -115,6 +125,7 @@ export function loadTerminalWebglRenderer(
 ): boolean {
   let addon: WebglRendererAddon | null = null;
   let contextLossDisposable: IDisposable | null = null;
+
   try {
     addon = createAddon();
     contextLossDisposable = addon.onContextLoss(() => {
@@ -122,10 +133,12 @@ export function loadTerminalWebglRenderer(
       addon?.dispose();
     });
     terminal.loadAddon(addon);
+
     return true;
   } catch {
     contextLossDisposable?.dispose();
     addon?.dispose();
+
     return false;
   }
 }
@@ -164,9 +177,11 @@ export function startTerminalTouchFocusGesture(
   startedAt: number,
 ): TerminalTouchFocusGesture | null {
   const touch = touches.length === 1 ? touches[0] : undefined;
+
   if (touch === undefined) {
     return null;
   }
+
   return {
     identifier: touch.identifier,
     maximumMovementPx: 0,
@@ -180,6 +195,7 @@ export function updateTerminalTouchFocusGesture(
   touches: readonly TerminalTouchPoint[],
 ): TerminalTouchFocusGesture | null {
   const touch = touches.length === 1 ? touches[0] : undefined;
+
   if (
     gesture === null ||
     touch === undefined ||
@@ -187,6 +203,7 @@ export function updateTerminalTouchFocusGesture(
   ) {
     return null;
   }
+
   return {
     ...gesture,
     maximumMovementPx: Math.max(
@@ -206,14 +223,18 @@ export function focusTerminalFromTouchRelease({
   if (remainingTouchCount !== 0) {
     return false;
   }
+
   const completedGesture = updateTerminalTouchFocusGesture(
     gesture,
     changedTouches,
   );
+
   if (completedGesture === null) {
     return false;
   }
+
   const duration = releasedAt - completedGesture.startedAt;
+
   if (
     duration < 0 ||
     duration >= TERMINAL_TOUCH_FOCUS_MAX_DURATION_MS ||
@@ -222,7 +243,9 @@ export function focusTerminalFromTouchRelease({
   ) {
     return false;
   }
+
   focus();
+
   return true;
 }
 
@@ -248,10 +271,13 @@ function readResolvedCssColor(
   const raw = getComputedStyle(document.documentElement)
     .getPropertyValue(varName)
     .trim();
+
   if (!raw) {
     return undefined;
   }
+
   probe.style.color = raw;
+
   return getComputedStyle(probe).color;
 }
 
@@ -261,6 +287,7 @@ export function resolveTerminalFontFamily(
   get: TerminalCssVariableReader,
 ): string {
   const value = get(TERMINAL_FONT_CSS_VARIABLE)?.trim();
+
   return value || TERMINAL_FONT_FAMILY;
 }
 
@@ -296,6 +323,7 @@ function buildTerminalTheme(): ITheme {
   if (typeof document === "undefined") {
     return {};
   }
+
   const probe = document.createElement("span");
   probe.style.position = "absolute";
   probe.style.visibility = "hidden";
@@ -304,6 +332,7 @@ function buildTerminalTheme(): ITheme {
   const get = (name: string) => readResolvedCssColor(probe, name);
   const theme = buildTerminalThemeFromCssColors(get);
   probe.remove();
+
   return theme;
 }
 
@@ -311,6 +340,7 @@ function readTerminalFontFamily(): string {
   if (typeof document === "undefined") {
     return TERMINAL_FONT_FAMILY;
   }
+
   return resolveTerminalFontFamily((name) =>
     getComputedStyle(document.documentElement).getPropertyValue(name),
   );
@@ -324,8 +354,10 @@ export function applyTerminalFontFamily(
   if (terminal.options.fontFamily === fontFamily) {
     return false;
   }
+
   terminal.options.fontFamily = fontFamily;
   scheduleFit();
+
   return true;
 }
 
@@ -342,6 +374,16 @@ export function forceTerminalFontMeasurement(
   terminal.refresh(0, terminal.rows - 1);
 }
 
+function fontFaceKey(fontFace: FontFace): string {
+  return [
+    fontFace.family,
+    fontFace.style,
+    fontFace.weight,
+    fontFace.stretch,
+    fontFace.unicodeRange,
+  ].join("\u0000");
+}
+
 export function observeTerminalFontLoading(
   fontSet: Pick<
     FontFaceSet,
@@ -350,21 +392,48 @@ export function observeTerminalFontLoading(
   onFontsLoaded: () => void,
 ): () => void {
   let disposed = false;
+  const measuredFontFaces = new Set<string>();
+
   const refresh = () => {
     if (!disposed) {
       onFontsLoaded();
     }
   };
-  fontSet.addEventListener("loadingdone", refresh);
+
+  const handleLoadingDone = (event: FontFaceSetLoadEvent) => {
+    let loadedNewFontFace = false;
+
+    for (const fontFace of event.fontfaces) {
+      const key = fontFaceKey(fontFace);
+
+      if (!measuredFontFaces.has(key)) {
+        measuredFontFaces.add(key);
+        loadedNewFontFace = true;
+      }
+    }
+
+    if (loadedNewFontFace) {
+      refresh();
+    }
+  };
+
+  fontSet.addEventListener("loadingdone", handleLoadingDone);
   void fontSet.ready.then(refresh);
+
   return () => {
     disposed = true;
-    fontSet.removeEventListener("loadingdone", refresh);
+    fontSet.removeEventListener("loadingdone", handleLoadingDone);
   };
 }
 
+export type TerminalInputInterceptor = (
+  data: string,
+  forward: () => void,
+) => boolean;
+
 interface ThreadTerminalViewProps {
   autoFocus: boolean;
+  interceptInput?: TerminalInputInterceptor;
   isPanelOpen: boolean;
   onAutoFocusHandled?: () => void;
   onOpenLink?: MarkdownPreviewLinkHandler;
@@ -379,6 +448,7 @@ type TerminalTitleChangeHandler = (title: string) => void;
 type TerminalConnectionNotice = "reconnecting" | "reconnected";
 
 const TERMINAL_RECONNECTING_NOTICE_DELAY_MS = 1_000;
+
 const TERMINAL_RECONNECTED_NOTICE_DURATION_MS = 1_500;
 
 interface WriteTerminalStatusArgs {
@@ -402,6 +472,7 @@ interface TerminalOutputWriteArgs {
 
 interface ForwardTerminalDataArgs {
   data: string;
+  interceptInput?: TerminalInputInterceptor;
   onInput: (dataBase64: string) => void;
   replayWriteState: TerminalReplayWriteState;
   sessionStatus: TerminalSession["status"];
@@ -427,6 +498,7 @@ interface TerminalReplayWriteState {
 }
 
 type TerminalSessionStatusNotice = "exited";
+
 type TerminalSessionStatusNoticeRef = {
   current: TerminalSessionStatusNotice | null;
 };
@@ -441,36 +513,9 @@ interface HandleTerminalServerMessageArgs {
   terminal: XTermTerminal;
 }
 
-function encodeBytesBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
-}
-
-export function encodeTerminalInputChunks(value: string): string[] {
-  const bytes = new TextEncoder().encode(value);
-  const chunks: string[] = [];
-  for (
-    let offset = 0;
-    offset < bytes.byteLength;
-    offset += TERMINAL_DATA_MAX_BYTES
-  ) {
-    chunks.push(
-      encodeBytesBase64(
-        bytes.subarray(
-          offset,
-          Math.min(offset + TERMINAL_DATA_MAX_BYTES, bytes.byteLength),
-        ),
-      ),
-    );
-  }
-  return chunks;
-}
-
 export function forwardTerminalData({
   data,
+  interceptInput,
   onInput,
   replayWriteState,
   sessionStatus,
@@ -482,9 +527,15 @@ export function forwardTerminalData({
     return;
   }
 
-  for (const dataBase64 of encodeTerminalInputChunks(data)) {
-    onInput(dataBase64);
-  }
+  const forward = () => {
+    for (const dataBase64 of encodeTerminalInputChunks(data)) {
+      onInput(dataBase64);
+    }
+  };
+
+  if (interceptInput?.(data, forward) === true) return;
+
+  forward();
 }
 
 function hasVisibleTerminalSize({
@@ -494,6 +545,7 @@ function hasVisibleTerminalSize({
   const entry = entries?.[0];
   const width = entry?.contentRect.width ?? containerElement.clientWidth;
   const height = entry?.contentRect.height ?? containerElement.clientHeight;
+
   return width > 0 && height > 0;
 }
 
@@ -507,6 +559,7 @@ function buildTerminalSelection({
   text: string;
 }): MessageProseSelection | null {
   const trimmedText = text.trim();
+
   if (trimmedText.length === 0) {
     return null;
   }
@@ -518,10 +571,12 @@ function buildTerminalSelection({
         ? containerElement.getBoundingClientRect()
         : new DOMRect(anchor.point.x, anchor.point.y, 0, 0),
   };
+
   if (anchor !== null) {
     selection.anchorPoint = anchor.point;
     selection.anchorSide = anchor.side;
   }
+
   return selection;
 }
 
@@ -542,6 +597,7 @@ function writeTerminalSessionStatusNotice({
       if (lastNotice.current === "exited") {
         return;
       }
+
       lastNotice.current = "exited";
       writeTerminalStatus({
         terminal,
@@ -550,11 +606,13 @@ function writeTerminalSessionStatusNotice({
             ? "Terminal exited"
             : `Terminal exited with code ${session.exitCode}`,
       });
+
       return;
     case "starting":
     case "running":
     case "disconnected":
       lastNotice.current = null;
+
       return;
   }
 }
@@ -566,6 +624,7 @@ function openTerminalWebLink({
   if (onOpenLink({ href: uri })) {
     return;
   }
+
   openUrlInExternalBrowser(uri);
 }
 
@@ -588,6 +647,7 @@ export function writeTerminalOutput({
 }: TerminalOutputWriteArgs): void {
   if (!isReplay) {
     terminal.write(data, onParsed);
+
     return;
   }
 
@@ -611,11 +671,13 @@ function handleTerminalServerMessage({
     case "attached":
       onSessionChange?.(message.session);
       setReplayNextSeq(message.nextSeq);
+
       return;
     case "pong":
       return;
     case "session-updated":
       onSessionChange?.(message.session);
+
       return;
     case "output": {
       const nextSeq = message.chunk.seq + 1;
@@ -626,13 +688,16 @@ function handleTerminalServerMessage({
         replayWriteState,
         terminal,
       });
+
       return;
     }
+
     case "error":
       writeTerminalStatus({
         terminal,
         text: `Terminal error: ${message.message}`,
       });
+
       return;
     case "exited":
       onSessionChange?.(message.session);
@@ -643,12 +708,14 @@ function handleTerminalServerMessage({
             ? "Terminal exited"
             : `Terminal exited with code ${message.session.exitCode}`,
       });
+
       return;
   }
 }
 
 export function ThreadTerminalView({
   autoFocus,
+  interceptInput,
   isPanelOpen,
   onAutoFocusHandled,
   onOpenLink,
@@ -660,24 +727,34 @@ export function ThreadTerminalView({
   const isTouchDevice = useMediaQuery("(pointer: coarse)");
   const [controlActive, setControlActive] = useState(false);
   const controlActiveRef = useRef(false);
+  const interceptInputRef = useRef(interceptInput);
+  interceptInputRef.current = interceptInput;
+
   const changeControlActive = (active: boolean) => {
     controlActiveRef.current = active;
     setControlActive(active);
   };
+
   const [terminalReady, setTerminalReady] = useState(false);
+
   const [activeSelection, setActiveSelection] =
     useState<MessageProseSelection | null>(null);
+
   const [hoveredTerminalLink, setHoveredTerminalLink] =
     useState<TerminalLinkTarget | null>(null);
+
   const [pendingTerminalLink, setPendingTerminalLink] =
     useState<TerminalLinkTarget | null>(null);
+
   const [connectionNotice, setConnectionNotice] =
     useState<TerminalConnectionNotice | null>(null);
+
   const [contextMenuState, setContextMenuState] =
     useState<TerminalContextMenuState>({
       link: null,
       selectionText: "",
     });
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTermTerminal | null>(null);
   const hoveredTerminalLinkRef = useRef<TerminalLinkTarget | null>(null);
@@ -685,15 +762,19 @@ export function ThreadTerminalView({
   const pointerStartPointRef = useRef<SelectionAnchorPoint | null>(null);
   const touchFocusGestureRef = useRef<TerminalTouchFocusGesture | null>(null);
   const lastPointerReleaseAnchorRef = useRef<SelectionAnchor | null>(null);
+
   const onSessionChangeRef = useRef<
     ((session: TerminalSession) => void) | undefined
   >(onSessionChange);
+
   const onTitleChangeRef = useRef<TerminalTitleChangeHandler | undefined>(
     onTitleChange,
   );
+
   const onAutoFocusHandledRef = useRef<(() => void) | undefined>(
     onAutoFocusHandled,
   );
+
   const autoFocusRef = useRef(autoFocus);
   const isPanelOpenRef = useRef(isPanelOpen);
   const sessionStatusRef = useRef<TerminalSession["status"]>(session.status);
@@ -703,10 +784,12 @@ export function ThreadTerminalView({
   const preferredTheme = usePreferredTheme();
   const appThemeEpoch = useAppThemeEpoch();
   const appNavigation = useAppNavigationHost();
+
   const handleOpenLinkByPreference = useCallback<MarkdownPreviewLinkHandler>(
     ({ href }) => appNavigation.openUrl({ url: href }),
     [appNavigation],
   );
+
   const effectiveOnOpenLink = onOpenLink ?? handleOpenLinkByPreference;
   const onOpenLinkRef = useRef<MarkdownPreviewLinkHandler>(effectiveOnOpenLink);
 
@@ -723,10 +806,13 @@ export function ThreadTerminalView({
     (anchor: SelectionAnchor | null) => {
       const terminal = terminalRef.current;
       const container = containerRef.current;
+
       if (!terminal || !container) {
         setActiveSelection(null);
+
         return;
       }
+
       setActiveSelection(
         buildTerminalSelection({
           anchor,
@@ -818,6 +904,7 @@ export function ThreadTerminalView({
         pointerStartPointRef.current,
         { clientX: event.clientX, clientY: event.clientY },
       );
+
       lastPointerReleaseAnchorRef.current = anchor;
       pointerIsDownRef.current = false;
       pointerStartPointRef.current = null;
@@ -885,6 +972,7 @@ export function ThreadTerminalView({
 
   useEffect(() => {
     const container = containerRef.current;
+
     if (!container) {
       return;
     }
@@ -896,15 +984,19 @@ export function ThreadTerminalView({
     let terminal: XTermTerminal | null = null;
     let fitAddon: FitAddon | null = null;
     let replayNextSeq: number | null = null;
+
     const replayWriteState: TerminalReplayWriteState = {
       suppressedWriteCount: 0,
     };
+
     let resizeAnimationFrame: number | null = null;
     let connectionNoticeTimeout: ReturnType<typeof setTimeout> | null = null;
     let selectionAnimationFrame: number | null = null;
     let resizeObserver: ResizeObserver | null = null;
     let selectionChangeDisposable: { dispose: () => void } | null = null;
+    let lateImeInputDisposable: { dispose: () => void } | null = null;
     let stopObservingFonts: (() => void) | null = null;
+
     const reportDocumentVisibility = () => {
       transport?.setVisible(document.visibilityState === "visible");
     };
@@ -918,16 +1010,20 @@ export function ThreadTerminalView({
         import("@xterm/addon-web-links"),
         import("@xterm/addon-unicode11"),
       ]);
+
       const webglAddonModulePromise = loadOptionalTerminalWebglAddon(
         () => import("@xterm/addon-webgl"),
       );
+
       const [
         { Terminal },
         { FitAddon: LoadedFitAddon },
         { WebLinksAddon },
         { Unicode11Addon },
       ] = await requiredModulesPromise;
+
       const webglAddonModule = await webglAddonModulePromise;
+
       if (disposed) {
         return;
       }
@@ -962,6 +1058,7 @@ export function ThreadTerminalView({
             if (event.button !== 0) {
               return;
             }
+
             requestOpenTerminalLink({ source: "detected-url", uri });
           },
           {
@@ -974,50 +1071,63 @@ export function ThreadTerminalView({
           },
         ),
       );
+
       if (webglAddonModule !== null) {
         loadTerminalWebglRenderer(
           terminal,
           () => new webglAddonModule.WebglAddon(),
         );
       }
+
       terminal.open(containerElement);
+      lateImeInputDisposable = forwardLateImeInput(terminal);
       writeTerminalSessionStatusNotice({
         lastNotice: lastStatusNoticeRef,
         session: sessionRef.current,
         terminal,
       });
+
       const fitTerminal = () => {
         if (!fitAddon || !terminal) {
           return;
         }
+
         if (!hasVisibleTerminalSize({ containerElement })) {
           return;
         }
+
         fitAddon.fit();
         transport?.sendResize(terminal.cols, terminal.rows);
       };
+
       const scheduleFit: TerminalFitScheduler = () => {
         if (resizeAnimationFrame !== null) {
           return;
         }
+
         resizeAnimationFrame = window.requestAnimationFrame(() => {
           resizeAnimationFrame = null;
           fitTerminal();
         });
       };
+
       fitTerminal();
       const fontSet = document.fonts;
+
       if (fontSet !== undefined) {
         stopObservingFonts = observeTerminalFontLoading(fontSet, () => {
           if (terminal === null) {
             return;
           }
+
           forceTerminalFontMeasurement(terminal);
           scheduleFit();
         });
       }
+
       scheduleFitRef.current = scheduleFit;
       const currentActiveElement = document.activeElement;
+
       if (
         shouldFocusTerminalAfterAsyncMount({
           currentFocusIsAvailable:
@@ -1036,21 +1146,25 @@ export function ThreadTerminalView({
       const activeTerminal = terminal;
       let reconnecting = false;
       let reconnectingNoticeVisible = false;
+
       const clearConnectionNoticeTimeout = () => {
         if (connectionNoticeTimeout !== null) {
           clearTimeout(connectionNoticeTimeout);
           connectionNoticeTimeout = null;
         }
       };
+
       const activeTransport = new TerminalWebSocketTransport({
         onConnectionState: (state) => {
           if (disposed) {
             return;
           }
+
           if (state === "reconnecting") {
             if (reconnecting) {
               return;
             }
+
             reconnecting = true;
             clearConnectionNoticeTimeout();
             setConnectionNotice(null);
@@ -1059,10 +1173,13 @@ export function ThreadTerminalView({
               reconnectingNoticeVisible = true;
               setConnectionNotice("reconnecting");
             }, TERMINAL_RECONNECTING_NOTICE_DELAY_MS);
+
             return;
           }
+
           reconnecting = false;
           clearConnectionNoticeTimeout();
+
           if (state === "attached" && reconnectingNoticeVisible) {
             setConnectionNotice("reconnected");
             connectionNoticeTimeout = setTimeout(() => {
@@ -1072,6 +1189,7 @@ export function ThreadTerminalView({
           } else {
             setConnectionNotice(null);
           }
+
           reconnectingNoticeVisible = false;
         },
         onInputOverflow: (maxBytes) => {
@@ -1111,21 +1229,26 @@ export function ThreadTerminalView({
           !disposed && sessionStatusRef.current === "running",
         url: buildTerminalWebSocketUrl({ terminalId: session.id }),
       });
+
       transport = activeTransport;
       activeTransport.sendResize(activeTerminal.cols, activeTerminal.rows);
       reportDocumentVisibility();
       document.addEventListener("visibilitychange", reportDocumentVisibility);
       activeTransport.start();
+
       const sendTerminalInput = (dataBase64: string) =>
         activeTransport.sendInput(dataBase64);
+
       activeTerminal.onData((data) => {
         if (controlActiveRef.current) {
           data = applyTerminalControl(data);
           controlActiveRef.current = false;
           setControlActive(false);
         }
+
         forwardTerminalData({
           data,
+          interceptInput: interceptInputRef.current,
           onInput: sendTerminalInput,
           replayWriteState,
           sessionStatus: sessionStatusRef.current,
@@ -1136,20 +1259,25 @@ export function ThreadTerminalView({
         if (replayWriteState.suppressedWriteCount > 0) {
           return;
         }
+
         if (sessionStatusRef.current !== "running") {
           return;
         }
+
         onTitleChangeRef.current?.(title);
       });
+
       const scheduleSelectionReport = () => {
         if (pointerIsDownRef.current || selectionAnimationFrame !== null) {
           return;
         }
+
         selectionAnimationFrame = window.requestAnimationFrame(() => {
           selectionAnimationFrame = null;
           reportTerminalSelection(lastPointerReleaseAnchorRef.current);
         });
       };
+
       selectionChangeDisposable = activeTerminal.onSelectionChange(
         scheduleSelectionReport,
       );
@@ -1158,6 +1286,7 @@ export function ThreadTerminalView({
         if (!hasVisibleTerminalSize({ containerElement, entries })) {
           return;
         }
+
         scheduleFit();
       });
       resizeObserver.observe(containerElement);
@@ -1176,18 +1305,23 @@ export function ThreadTerminalView({
       setControlActive(false);
       setTerminalReady(false);
       stopObservingFonts?.();
+
       if (resizeAnimationFrame !== null) {
         window.cancelAnimationFrame(resizeAnimationFrame);
       }
+
       if (selectionAnimationFrame !== null) {
         window.cancelAnimationFrame(selectionAnimationFrame);
       }
+
       if (connectionNoticeTimeout !== null) {
         clearTimeout(connectionNoticeTimeout);
       }
+
       setConnectionNotice(null);
       resizeObserver?.disconnect();
       selectionChangeDisposable?.dispose();
+      lateImeInputDisposable?.dispose();
       document.removeEventListener(
         "visibilitychange",
         reportDocumentVisibility,
@@ -1209,19 +1343,24 @@ export function ThreadTerminalView({
     if (!isPanelOpen || !autoFocus) {
       return;
     }
+
     const terminal = terminalRef.current;
+
     if (terminal !== null) {
       terminal.focus();
       onAutoFocusHandledRef.current?.();
     }
+
     scheduleFitRef.current?.();
   }, [autoFocus, isPanelOpen]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
+
     if (!terminal) {
       return;
     }
+
     writeTerminalSessionStatusNotice({
       lastNotice: lastStatusNoticeRef,
       session,
@@ -1231,9 +1370,11 @@ export function ThreadTerminalView({
 
   useEffect(() => {
     const terminal = terminalRef.current;
+
     if (!terminal) {
       return;
     }
+
     applyTerminalFontFamily(terminal, readTerminalFontFamily(), () =>
       scheduleFitRef.current?.(),
     );
@@ -1248,8 +1389,10 @@ export function ThreadTerminalView({
         : connectionNotice === "reconnected"
           ? "Reconnected"
           : null;
+
   const contextMenuLink = contextMenuState.link;
   const contextMenuSelectionText = contextMenuState.selectionText;
+
   const hasTerminalContextMenuTarget =
     hoveredTerminalLink !== null || activeSelection !== null;
 
@@ -1281,7 +1424,7 @@ export function ThreadTerminalView({
             {connectionNoticeText !== null ? (
               <div
                 role="status"
-                className="pointer-events-none absolute top-2 right-2 rounded-md border border-border bg-popover px-2 py-1 text-xs text-muted-foreground shadow-sm"
+                className="pointer-events-none absolute top-2 right-2 rounded-md border border-border bg-popover px-2 py-1 text-xs text-muted-foreground shadow-sm animate-in fade-in-0 duration-(--motion-duration-base) ease-out"
               >
                 {connectionNoticeText}
               </div>
@@ -1346,10 +1489,12 @@ export function ThreadTerminalView({
           disabled={!terminalReady || session.status !== "running"}
           onControlChange={(active) => {
             changeControlActive(active);
+
             if (active) terminalRef.current?.focus();
           }}
           onArrow={(key) => {
             const terminal = terminalRef.current;
+
             if (!terminal) return;
             changeControlActive(false);
             terminal.input(
@@ -1365,19 +1510,25 @@ export function ThreadTerminalView({
           }}
           onKeyboardToggle={() => {
             const terminal = terminalRef.current;
+
             if (!terminal) return;
+
             if (document.activeElement === terminal.textarea) terminal.blur();
             else terminal.focus();
           }}
           onPaste={() => {
             const terminal = terminalRef.current;
+
             if (!terminal) return;
+
             if (!navigator.clipboard?.readText) {
               appToast.error(
                 "Clipboard unavailable. Use your keyboard’s Paste action.",
               );
+
               return;
             }
+
             void navigator.clipboard
               .readText()
               .then((text) => {

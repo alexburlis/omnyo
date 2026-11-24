@@ -1,30 +1,40 @@
-import type { UsageMeasurement } from "./usage-source-contract.js";
+import type { experimental_providerUsageSourceV1 } from "@omnyo/plugin-sdk/provider-usage";
+import type { z } from "zod";
+
+type UsageMeasurement = z.infer<
+  typeof experimental_providerUsageSourceV1.usageMeasurementSchema
+>;
 
 export function normalizeUsageMeasurement(
   measurement: UsageMeasurement,
 ): UsageMeasurement {
   if (measurement.usage.status !== "ok") return measurement;
   const usage = measurement.usage;
+
   const labels: Record<string, string> = {
     free: "Free",
     go: "Go",
     plus: "Plus",
     pro: "Pro",
     max: "Max",
+    ultra: "Ultra",
     team: "Team",
     business: "Business",
     enterprise: "Enterprise",
     education: "Education",
     edu: "Education",
   };
+
   const plan = usage.plan;
   const planName = plan ? labels[plan.id] : undefined;
+
   const windowLabels = {
     "five-hour": "Five-hour limit",
     daily: "Daily limit",
     weekly: "Weekly limit",
     custom: "",
   };
+
   return {
     ...measurement,
     usage: {
@@ -57,14 +67,18 @@ export function selectUsageResources<T>(
 ): T[] {
   const result: T[] = [];
   const known = new Map<string, number>();
+
   for (const resource of resources) {
     const identity = identify(resource);
+
     if (!identity.accountKey) {
       result.push(resource);
       continue;
     }
+
     const key = JSON.stringify([identity.providerId, identity.accountKey]);
     const index = known.get(key);
+
     if (index === undefined) {
       known.set(key, result.length);
       result.push(resource);
@@ -74,5 +88,6 @@ export function selectUsageResources<T>(
     )
       result[index] = resource;
   }
+
   return result;
 }

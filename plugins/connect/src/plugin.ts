@@ -1,4 +1,4 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { createAccountClient } from "./account-client.js";
 import { AccountLink } from "./account-link.js";
 import { resolveDefaultConnectBaseUrl } from "./base-url.js";
@@ -32,51 +32,53 @@ export interface ConnectPluginOptions {
 }
 
 export function createConnectPlugin(options: ConnectPluginOptions = {}) {
-  return async function plugin(bb: BbPluginApi): Promise<void> {
-    const settings = bb.settings.define({
+  return async function plugin(api: PluginApi): Promise<void> {
+    const settings = api.settings.define({
       remoteAccess: {
         type: "boolean",
         label: "Remote access",
         description:
-          "Keep this bb reachable at its getbb.app address while it is signed in to your bb account. Turning it off keeps the account signed in.",
+          "Keep this Omnyo reachable at its omnyo.link address while it is signed in to your Omnyo account. Turning it off keeps the account signed in.",
         default: true,
       },
       sendRemoteInstructions: {
         type: "boolean",
         label: "Tell agents about remote access",
         description:
-          "When you use BB remotely, tell agents to share servers through Connect. Applies to new agent sessions.",
+          "When there is recent remote activity, remind agents how to share managed preview links. Applies to new agent sessions.",
         default: true,
       },
     });
+
     let currentSettings = await settings.get();
-    const account = createAccountClient(() => bb.sdk);
+    const account = createAccountClient(() => api.sdk);
     const hosted = new HostedConnectApi(account);
     let tunnel!: ConnectTunnel;
-    const hostResolver = new ShareHostResolver(() => bb.sdk);
+    const hostResolver = new ShareHostResolver(() => api.sdk);
+
     const getLoopbackBaseUrl = () =>
       resolveLocalCloudLoopbackUrl(
         tunnel.getIdentity()?.serverUrl,
-        process.env.BB_DEV_APP_PORT,
-      ) ?? bb.server.loopbackBaseUrl;
+        process.env.OMNYO_DEV_APP_PORT,
+      ) ?? api.server.loopbackBaseUrl;
 
     const shares = new ShareRegistry({
-      kv: bb.storage.kv,
-      hosts: bb.hosts,
+      kv: api.storage.kv,
+      hosts: api.hosts,
       hostResolver,
       getLoopbackBaseUrl,
       getIdentity: () => tunnel.getIdentity(),
-      log: bb.log,
+      log: api.log,
       onChange: () => {
-        bb.realtime.publish(CONNECT_REALTIME_CHANNEL, tunnel.status());
+        api.realtime.publish(CONNECT_REALTIME_CHANNEL, tunnel.status());
       },
     });
 
-    bb.events.on("experimental_host.deleted", async ({ host }) => {
+    api.events.on("experimental_host.deleted", async ({ host }) => {
       await shares.pruneHost(host.id);
     });
 
-    const recheckServerAccess = createServerAccessRecheck(bb);
+    const recheckServerAccess = createServerAccessRecheck(api);
     tunnel = new ConnectTunnel({
       shares,
       readCredential: () => account.connectCredential(),
@@ -85,9 +87,9 @@ export function createConnectPlugin(options: ConnectPluginOptions = {}) {
       defaultBaseUrl: resolveDefaultConnectBaseUrl(process.env),
       enabled: currentSettings.remoteAccess,
       getLoopbackBaseUrl,
-      log: bb.log,
+      log: api.log,
       onStatusChange: (status) => {
-        bb.realtime.publish(CONNECT_REALTIME_CHANNEL, status);
+        api.realtime.publish(CONNECT_REALTIME_CHANNEL, status);
         recheckServerAccess(status);
       },
     });
@@ -100,16 +102,17 @@ export function createConnectPlugin(options: ConnectPluginOptions = {}) {
       async set(enabled) {
         await settings.experimental_set({ remoteAccess: enabled });
         tunnel.setEnabled(enabled);
+
         return tunnel.refreshStatus();
       },
     };
 
-    await registerServerAccess(bb, {
+    await registerServerAccess(api, {
       cloud: createServerAccessCloud(hosted),
       status: () => tunnel.status(),
     });
 
-    bb.rpc.register(
+    api.rpc.register(
       connectRpcContract,
       createRpcHandlers({
         tunnel,
@@ -119,7 +122,7 @@ export function createConnectPlugin(options: ConnectPluginOptions = {}) {
       }),
     );
     registerConnectCli({
-      bb,
+      api: api,
       tunnel,
       account,
       hosted,
@@ -127,38 +130,45 @@ export function createConnectPlugin(options: ConnectPluginOptions = {}) {
       remoteAccess,
     });
 
-    bb.agents.contributeInstructions(() => {
+    api.agents.contributeInstructions(() => {
       if (!currentSettings.sendRemoteInstructions) return null;
       const status = tunnel.status();
+
       if (!status.paired || !status.enabled || status.url === null) return null;
+
       const recent =
         status.remoteClients > 0 ||
         (status.lastRemoteActivityAt !== null &&
           Date.now() - status.lastRemoteActivityAt <
             REMOTE_ACTIVITY_INSTRUCTIONS_MS);
+
       if (!recent) return null;
+
       return (
-        `The user is currently viewing this bb remotely at ${status.url}. ` +
-        "Port shares work from a thread on any enrolled host: when you start an HTTP server they should see, run `bb connect expose <port>` from that thread. " +
-        "The command returns the correct public URL for the thread's host; give it to them as a markdown link because a localhost URL will not work remotely."
+        "For a dev server the user should open in Omnyo, register it as a managed preview for this chat using `omnyo preview register` and start it with `omnyo preview restart`. " +
+        "Once it is ready, post a Markdown link to the original loopback URL, including the page path. Omnyo opens it directly on the owning device and routes it through a private preview for other viewers. " +
+        "See `omnyo guide previews` for the commands. Use Connect port shares only when the user asks for a link to open outside Omnyo."
       );
     });
 
+    const copyStore = createCredentialCopyStore(
+      api.storage.kv,
+      api.experimental_secrets,
+    );
+
+    await copyStore.migrate();
+
     const link = new AccountLink({
       account,
-      copy: new CredentialCopy({
-        account,
-        store: createCredentialCopyStore(bb.storage.kv),
-        log: bb.log,
-      }),
-      log: bb.log,
+      copy: new CredentialCopy({ account, store: copyStore, log: api.log }),
+      log: api.log,
       onAccount: (next) => tunnel.setAccount(next),
       ...(options.accountRetryMinMs === undefined
         ? {}
         : { retryMinMs: options.accountRetryMinMs }),
     });
 
-    bb.background.service("tunnel", {
+    api.background.service("tunnel", {
       async start(signal) {
         await tunnel.start();
         await link.run(signal);

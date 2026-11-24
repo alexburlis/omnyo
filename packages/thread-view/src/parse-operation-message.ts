@@ -7,15 +7,17 @@ import type {
   PluginInteractionLifecycle,
   ThreadEventItemPresentation,
   UserQuestionInteractionLifecycle,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   THREAD_CONTEXT_CLEAR_OPERATION,
+  THREAD_ACTIVITY_OPERATION,
   THREAD_CONTEXT_CLEARED_DETAIL,
+  threadActivitySchema,
   isApprovalInteractionLifecycle,
   isPluginInteractionLifecycle,
   isUserQuestionInteractionLifecycle,
   ownershipChangeOperationMetadataSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { assertNever } from "./assert-never.js";
 import { getCompactionKey } from "./compaction-lifecycle.js";
 import { OWNERSHIP_CHANGE_VERBS } from "./family-a-verbs.js";
@@ -42,6 +44,10 @@ import type {
   EventProjectionPluginFormLifecycleMessage,
 } from "./event-projection-types.js";
 import { getProviderModelFallbackData } from "./model-fallback-extraction.js";
+import {
+  threadActivityDetail,
+  threadActivityTitle,
+} from "./timeline-activity.js";
 
 type ParseOperationMessageOptions = Pick<
   BuildEventProjectionMessagesOptions,
@@ -50,6 +56,7 @@ type ParseOperationMessageOptions = Pick<
 
 function withThreadName(threadName: string, verb: string): string {
   const name = threadName.trim();
+
   return name.length > 0 ? `${name} ${verb}` : capitalize(verb);
 }
 
@@ -69,6 +76,9 @@ function normalizeThreadOperationKind(
   rawOperation: string,
 ): EventProjectionThreadOperationKind {
   if (rawOperation === "ownership_change") return "ownership_change";
+
+  if (rawOperation === THREAD_ACTIVITY_OPERATION) return "activity";
+
   return "other";
 }
 
@@ -93,28 +103,46 @@ function createThreadOperationMetadata(
   decoded: Extract<ThreadEvent, { type: "system/operation" }>,
 ): EventProjectionThreadOperationMetadata {
   const operation = normalizeThreadOperationKind(decoded.operation);
+
   const base = {
     rawOperation: decoded.operation,
     status: normalizeThreadOperationStatus(decoded.status),
     rawStatus: decoded.status,
     operationId: decoded.operationId,
   };
+
   if (operation === "ownership_change") {
     const parsedMetadata = decoded.metadata
       ? ownershipChangeOperationMetadataSchema.safeParse(decoded.metadata)
       : null;
+
     return {
       ...base,
       operation,
       metadata: parsedMetadata?.success ? parsedMetadata.data : null,
     };
   }
+
+  if (operation === "activity") {
+    const parsedActivity = decoded.metadata
+      ? threadActivitySchema.safeParse(decoded.metadata)
+      : null;
+
+    return {
+      ...base,
+      operation,
+      activity: parsedActivity?.success ? parsedActivity.data : null,
+    };
+  }
+
   return {
     ...base,
     operation,
     ...(decoded.metadata ? { metadata: decoded.metadata } : {}),
   };
 }
+
+export const APP_UPDATE_INTERRUPTION_TITLE = "Stopped for an Omnyo update";
 
 function threadInterruptedTitle(
   reason: SystemThreadInterruptedReason,
@@ -123,11 +151,14 @@ function threadInterruptedTitle(
   if (cause === "host-connection-lost") {
     return "Stopped — connection to host was lost";
   }
+
   switch (reason) {
     case "host-removed":
       return "Stopped because the machine was removed";
     case "manual-stop":
       return "Stopped manually";
+    case "app-update":
+      return APP_UPDATE_INTERRUPTION_TITLE;
     case "host-daemon-restarted":
       return "Stopped — host daemon restarted";
     case "provider-turn-idle":
@@ -146,6 +177,7 @@ function ownershipTitleWithParent(
     parentTitle !== null && parentTitle.trim().length > 0
       ? parentTitle.trim()
       : "parent";
+
   return withThreadName(threadName, `${verb} ${parent}`);
 }
 
@@ -156,6 +188,7 @@ function ownershipChangeOperationTitle(
   switch (meta.status) {
     case "completed": {
       const action = meta.metadata?.action;
+
       switch (action) {
         case "assign":
           return ownershipTitleWithParent(
@@ -181,6 +214,7 @@ function ownershipChangeOperationTitle(
           return assertNever(action);
       }
     }
+
     case "failed":
       return "Ownership change failed";
     default:
@@ -197,6 +231,10 @@ function threadOperationTitle(
   switch (meta.operation) {
     case "ownership_change":
       return ownershipChangeOperationTitle(meta, threadName);
+    case "activity":
+      return meta.activity === null
+        ? "Activity"
+        : threadActivityTitle(meta.activity);
     case "other":
       if (
         meta.rawOperation === THREAD_CONTEXT_CLEAR_OPERATION &&
@@ -204,6 +242,7 @@ function threadOperationTitle(
       ) {
         return "Context cleared";
       }
+
       return `${capitalize(meta.rawOperation.replace(/_/g, " "))} ${
         meta.rawStatus
       }`;
@@ -216,6 +255,7 @@ function threadOperationStatus(
   meta: EventProjectionThreadOperationMetadata | null,
 ): EventProjectionOperationMessage["status"] {
   if (!meta) return undefined;
+
   switch (meta.status) {
     case "requested":
     case "queued":
@@ -285,6 +325,7 @@ function permissionGrantScope(
   interaction: ApprovalInteractionLifecycle,
 ): EventProjectionPermissionGrantGrantScope | null {
   const decision = interaction.resolution?.decision;
+
   switch (decision) {
     case "allow_once":
       return "turn";
@@ -305,6 +346,7 @@ function buildPermissionGrantLifecycleMessage(
   meta: EventMeta,
 ): EventProjectionPermissionGrantLifecycleMessage {
   const lifecycle = permissionGrantLifecycle(interaction);
+
   return {
     kind: "permission-grant-lifecycle",
     id: messageId(decoded.threadId, "approval", interaction.id),
@@ -366,6 +408,7 @@ function buildUserQuestionLifecycleMessage(
   meta: EventMeta,
 ): EventProjectionUserQuestionLifecycleMessage {
   const lifecycle = userQuestionLifecycle(interaction);
+
   return {
     kind: "user-question-lifecycle",
     id: messageId(decoded.threadId, "question", interaction.id),
@@ -426,7 +469,9 @@ function pluginFormPresentation(
     },
     icon: { glyph: "Toolbox" },
   };
+
   const description = interaction.resolution?.description;
+
   return {
     ...base,
     ...(description?.title === undefined ? {} : { title: description.title }),
@@ -442,6 +487,7 @@ function buildPluginFormLifecycleMessage(
   meta: EventMeta,
 ): EventProjectionPluginFormLifecycleMessage {
   const lifecycle = pluginFormLifecycle(interaction);
+
   return {
     kind: "plugin-form-lifecycle",
     id: messageId(decoded.threadId, "form", interaction.id),
@@ -473,16 +519,21 @@ function buildInteractionLifecycleMessage(
   | EventProjectionPluginFormLifecycleMessage
   | null {
   const { interaction } = decoded;
+
   if (isUserQuestionInteractionLifecycle(interaction)) {
     return buildUserQuestionLifecycleMessage(decoded, interaction, meta);
   }
+
   if (isPluginInteractionLifecycle(interaction)) {
     return buildPluginFormLifecycleMessage(decoded, interaction, meta);
   }
+
   if (!isApprovalInteractionLifecycle(interaction)) {
     return null;
   }
+
   const subject = interaction.payload.subject;
+
   return subject.kind === "permission_grant"
     ? buildPermissionGrantLifecycleMessage(decoded, interaction, subject, meta)
     : null;
@@ -497,6 +548,7 @@ function op(
   const completedAt = isTerminalOperationStatus(fields.status)
     ? meta.createdAt
     : null;
+
   return {
     kind: "operation",
     id: messageId(decoded.threadId, "op", `${idKey}:${meta.seq}`),
@@ -547,6 +599,7 @@ export function parseOperationMessage(
   | null {
   const threadName = options?.threadName ?? "";
   const modelFallback = getProviderModelFallbackData(decoded);
+
   if (modelFallback !== null) {
     return op(decoded, meta, "warning", {
       opType: "warning",
@@ -585,11 +638,14 @@ export function parseOperationMessage(
             : "plugin" in entry.source
               ? entry.source.plugin
               : entry.source.core;
-        const value = typeof entry.value === "string" ? entry.value : "••••••";
+
+        const value = "••••••";
         const reason = entry.reason ? ` — ${entry.reason}` : "";
+
         return `${entry.name}=${value} (${source})${reason}`;
       })
       .join("\n");
+
     return op(decoded, meta, "provider-environment", {
       opType: "provider-environment",
       title: "Provider environment resolved",
@@ -602,11 +658,13 @@ export function parseOperationMessage(
     const category = decoded.category;
     const isDeprecation = category === "deprecation";
     const isConfig = category === "config";
+
     const title = isDeprecation
       ? "Deprecation notice"
       : isConfig
         ? "Configuration warning"
         : decoded.summary?.trim() || "Warning";
+
     const detail = (
       isDeprecation || isConfig
         ? [decoded.summary, decoded.details]
@@ -614,6 +672,7 @@ export function parseOperationMessage(
     )
       .filter((line): line is string => Boolean(line))
       .join("\n");
+
     return op(decoded, meta, isDeprecation ? "deprecation" : "warning", {
       opType: isDeprecation ? "deprecation" : "warning",
       title,
@@ -643,11 +702,14 @@ export function parseOperationMessage(
 
   if (decoded.type === "system/thread-provisioning") {
     const { status, environmentId, provisioningId } = decoded;
+
     if (provisioningId.startsWith("thread-start:")) {
       return null;
     }
+
     const transcript = readProvisioningTranscript(decoded.entries);
     const operationStatus = provisioningOperationStatus(status);
+
     return op(decoded, meta, "thread-provisioning", {
       opType: "thread-provisioning",
       title: provisioningTitleForStatus(operationStatus),
@@ -679,11 +741,16 @@ export function parseOperationMessage(
       typeof decoded.metadata?.branch === "string"
         ? decoded.metadata.branch
         : undefined;
+
     const messageDetail =
-      decoded.operation === THREAD_CONTEXT_CLEAR_OPERATION &&
-      decoded.status === "completed"
-        ? THREAD_CONTEXT_CLEARED_DETAIL
-        : decoded.message.trim();
+      threadOperation.operation === "activity" &&
+      threadOperation.activity !== null
+        ? threadActivityDetail(threadOperation.activity)
+        : decoded.operation === THREAD_CONTEXT_CLEAR_OPERATION &&
+            decoded.status === "completed"
+          ? THREAD_CONTEXT_CLEARED_DETAIL
+          : decoded.message.trim();
+
     const detailParts = [
       messageDetail.length > 0 && messageDetail !== title
         ? messageDetail
@@ -740,15 +807,19 @@ export function interruptOperationMessage(
   switch (message.opType) {
     case "operation":
       message.title = "Operation interrupted";
+
       return;
     case "thread-provisioning":
       message.title = provisioningTitleForStatus("interrupted");
+
       return;
     case "compaction":
       message.title = "Context compaction interrupted";
+
       return;
     case "context-clear":
       message.title = "Context clear interrupted";
+
       return;
     default:
       return;
@@ -767,6 +838,7 @@ export function finalizeOperationMessage(
         message.status = "error";
         message.title = provisioningTitleForStatus("error");
         message.completedAt = message.createdAt;
+
         return;
       default:
         break;

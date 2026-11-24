@@ -41,24 +41,31 @@ function gatePierreDiffComponent<
   function PierreWorkerPoolGatedDiff(props: P) {
     const ready = useRequirePierreWorkerPool();
     const options = usePierreStrictModeRecoveryOptions(props.options);
+
     return (
       <PierreWorkerPoolBoundary>
         {ready ? <Component {...props} options={options} /> : null}
       </PierreWorkerPoolBoundary>
     );
   }
+
   PierreWorkerPoolGatedDiff.displayName = `PierreWorkerPoolGated(${name})`;
+
   return PierreWorkerPoolGatedDiff;
 }
 
 type CodeViewProps = ComponentPropsWithoutRef<typeof CodeView>;
+
 type CodeViewHandle = ElementRef<typeof CodeView>;
+
 type FileProps = ComponentPropsWithoutRef<typeof File>;
+
 type UnresolvedFileProps = ComponentPropsWithoutRef<typeof UnresolvedFile>;
 
 function GatedFile(props: FileProps) {
   const ready = useRequirePierreWorkerPool();
   const options = usePierreStrictModeRecoveryOptions(props.options);
+
   return (
     <PierreWorkerPoolBoundary>
       {ready ? <File {...props} options={options} /> : null}
@@ -69,6 +76,7 @@ function GatedFile(props: FileProps) {
 function GatedUnresolvedFile(props: UnresolvedFileProps) {
   const ready = useRequirePierreWorkerPool();
   const options = usePierreStrictModeRecoveryOptions(props.options);
+
   return (
     <PierreWorkerPoolBoundary>
       {ready ? <UnresolvedFile {...props} options={options} /> : null}
@@ -79,6 +87,7 @@ function GatedUnresolvedFile(props: UnresolvedFileProps) {
 const GatedCodeView = forwardRef<CodeViewHandle, CodeViewProps>(
   function PierreWorkerPoolGatedCodeView(props, ref) {
     const ready = useRequirePierreWorkerPool();
+
     return (
       <PierreWorkerPoolBoundary>
         {ready ? <CodeView {...props} ref={ref} /> : null}

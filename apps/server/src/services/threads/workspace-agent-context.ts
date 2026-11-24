@@ -19,6 +19,15 @@ export interface WorkspaceAgentContext {
   sharedSkills: ResolvedSharedSkills;
 }
 
+export function workspaceProjectSkillReadPolicy() {
+  return {
+    limit: 1000,
+    maxFileBytes: 10 * 1024 * 1024,
+    maxContentBytes: 32 * 1024 * 1024,
+    excludeNames: [...DEFAULT_PATH_LIST_EXCLUDE_NAMES],
+  };
+}
+
 export async function readWorkspaceAgentContext(
   deps: LoggedWorkSessionDeps,
   args: {
@@ -34,32 +43,32 @@ export async function readWorkspaceAgentContext(
       type: "host.read_workspace_agent_context",
       rootPath: args.workspacePath,
       includeAgentInstructions: args.includeAgentInstructions,
-      projectSkillRead: {
-        limit: 1_000,
-        maxFileBytes: 10 * 1024 * 1024,
-        maxContentBytes: 32 * 1024 * 1024,
-        excludeNames: [...DEFAULT_PATH_LIST_EXCLUDE_NAMES],
-      },
+      projectSkillRead: workspaceProjectSkillReadPolicy(),
       sharedSkillRoots: sharedSkillNativeRoots(deps),
     },
   });
+
   const skillsRootPath = joinHostPathSegments(
     args.workspacePath,
-    ".bb",
+    ".omnyo",
     "skills",
   );
+
   if (result.projectSkillsTruncated) {
     deps.logger.warn(
       { skillsRootPath, limit: result.projectSkills.length },
       "Project skill enumeration reached the skill count limit",
     );
   }
+
   const projectSkillSources: ProjectInjectedSkillSource[] = [];
+
   for (const skill of result.projectSkills) {
     const candidatePath = joinHostPathSegments(
       skillsRootPath,
       skill.directoryName,
     );
+
     if (skill.kind !== "file") {
       deps.logger.warn(
         {
@@ -74,15 +83,18 @@ export async function readWorkspaceAgentContext(
       );
       continue;
     }
+
     const source = resolveProjectSkillSourceFromContent(deps.logger, {
       candidatePath,
       content: skill.content,
       directoryName: skill.directoryName,
     });
+
     if (source) {
       projectSkillSources.push(source);
     }
   }
+
   return {
     agentInstructions: result.agentInstructions,
     projectSkillSources,

@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { performance } from "node:perf_hooks";
-import { roundDurationMs } from "@bb/process-utils";
+import { roundDurationMs } from "@omnyo/process-utils";
 
 interface EventLoopWorkFrame {
   blocksEventLoop: boolean;
@@ -11,7 +11,6 @@ interface EventLoopWorkFrame {
 }
 
 interface CompletedEventLoopWork {
-  blocksEventLoop: boolean;
   durationMs: number;
   cpuMs: number | null;
   label: string;
@@ -27,9 +26,13 @@ interface EventLoopWorkSnapshot {
 }
 
 const activeFrames = new Map<number, EventLoopWorkFrame>();
+
 const currentFrameId = new AsyncLocalStorage<number>();
-const completedInWindow: CompletedEventLoopWork[] = [];
+
+let longestSynchronousWork: CompletedEventLoopWork | null = null;
+
 let nextFrameId = 1;
+
 let lastCompleted: CompletedEventLoopWork | null = null;
 
 function enterEventLoopWork(label: string, blocksEventLoop: boolean): number {
@@ -42,39 +45,53 @@ function enterEventLoopWork(label: string, blocksEventLoop: boolean): number {
     parentId: currentFrameId.getStore() ?? null,
     startedAt: performance.now(),
   });
+
   return id;
 }
 
 function leaveEventLoopWork(id: number, cpuMs: number | null): void {
   const frame = activeFrames.get(id);
   activeFrames.delete(id);
+
   if (frame === undefined) {
     return;
   }
+
   const completed: CompletedEventLoopWork = {
-    blocksEventLoop: frame.blocksEventLoop,
     cpuMs,
     durationMs: performance.now() - frame.startedAt,
     label: frame.label,
   };
+
   lastCompleted = completed;
-  completedInWindow.push(completed);
+
+  if (
+    frame.blocksEventLoop &&
+    (longestSynchronousWork === null ||
+      completed.durationMs > longestSynchronousWork.durationMs)
+  )
+    longestSynchronousWork = completed;
 }
 
 function formatLineage(root: EventLoopWorkFrame): string {
   const labels: string[] = [root.label];
   let parentId = root.id;
+
   for (;;) {
     const children: EventLoopWorkFrame[] = [...activeFrames.values()]
       .filter((frame) => frame.parentId === parentId)
       .sort((left, right) => left.id - right.id);
+
     const child = children[0];
+
     if (child === undefined) {
       break;
     }
+
     labels.push(child.label);
     parentId = child.id;
   }
+
   return labels.join(" > ");
 }
 
@@ -82,29 +99,19 @@ function formatActiveWork(): string | null {
   if (activeFrames.size === 0) {
     return null;
   }
+
   const roots = [...activeFrames.values()]
     .filter(
       (frame) => frame.parentId === null || !activeFrames.has(frame.parentId),
     )
     .sort((left, right) => left.id - right.id);
+
   return roots.map((root) => formatLineage(root)).join(" | ");
 }
 
-function selectLongestSynchronousWork(): CompletedEventLoopWork | null {
-  let longest: CompletedEventLoopWork | null = null;
-  for (const completed of completedInWindow) {
-    if (!completed.blocksEventLoop) {
-      continue;
-    }
-    if (longest === null || completed.durationMs > longest.durationMs) {
-      longest = completed;
-    }
-  }
-  return longest;
-}
-
 function getEventLoopWorkSnapshot(): EventLoopWorkSnapshot {
-  const longest = selectLongestSynchronousWork();
+  const longest = longestSynchronousWork;
+
   return {
     inFlightWorkAtObservation: formatActiveWork(),
     lastCompletedWork: lastCompleted?.label ?? null,
@@ -120,15 +127,30 @@ function getEventLoopWorkSnapshot(): EventLoopWorkSnapshot {
   };
 }
 
+export function currentEventLoopWorkLabel(): string | null {
+  const labels: string[] = [];
+  let frame = activeFrames.get(currentFrameId.getStore() ?? 0);
+
+  while (frame !== undefined) {
+    labels.push(frame.label);
+    frame =
+      frame.parentId === null ? undefined : activeFrames.get(frame.parentId);
+  }
+
+  return labels.length === 0 ? null : labels.reverse().join(" > ");
+}
+
 export function takeEventLoopWorkWindowSnapshot(): EventLoopWorkSnapshot {
   const snapshot = getEventLoopWorkSnapshot();
-  completedInWindow.length = 0;
+  longestSynchronousWork = null;
+
   return snapshot;
 }
 
 export function runEventLoopWorkSync<T>(label: string, work: () => T): T {
   const id = enterEventLoopWork(label, true);
   const cpuStart = process.threadCpuUsage();
+
   return currentFrameId.run(id, () => {
     try {
       return work();
@@ -144,6 +166,7 @@ export async function runEventLoopWork<T>(
   work: () => Promise<T> | T,
 ): Promise<T> {
   const id = enterEventLoopWork(label, false);
+
   return currentFrameId.run(id, async () => {
     try {
       return await work();
@@ -155,7 +178,7 @@ export async function runEventLoopWork<T>(
 
 export function resetEventLoopWorkForTests(): void {
   activeFrames.clear();
-  completedInWindow.length = 0;
+  longestSynchronousWork = null;
   lastCompleted = null;
   nextFrameId = 1;
 }

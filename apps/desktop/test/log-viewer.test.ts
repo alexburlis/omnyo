@@ -1,3 +1,4 @@
+import { deferred } from "./fixtures/deferred.js";
 import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,12 +26,14 @@ interface CreateTestLogLineArgs {
 }
 
 const tempDirs: TempDir[] = [];
+
 const tailers: LogTailer[] = [];
 
 async function createTempDir(): Promise<TempDir> {
-  const path = await mkdtemp(join(tmpdir(), "bb-desktop-log-viewer-"));
+  const path = await mkdtemp(join(tmpdir(), "omnyo-desktop-log-viewer-"));
   const tempDir = { path };
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 
@@ -38,8 +41,10 @@ afterEach(async () => {
   while (tailers.length > 0) {
     tailers.pop()?.stop();
   }
+
   while (tempDirs.length > 0) {
     const tempDir = tempDirs.pop();
+
     if (tempDir !== undefined) {
       await rm(tempDir.path, { force: true, recursive: true });
     }
@@ -49,10 +54,12 @@ afterEach(async () => {
 async function waitFor(args: WaitForArgs): Promise<void> {
   const timeoutMs = args.timeoutMs ?? 5_000;
   const startedAt = Date.now();
+
   while (!args.predicate()) {
     if (Date.now() - startedAt > timeoutMs) {
       throw new Error("Timed out waiting for condition");
     }
+
     await new Promise((resolvePromise) => {
       setTimeout(resolvePromise, 25);
     });
@@ -62,6 +69,7 @@ async function waitFor(args: WaitForArgs): Promise<void> {
 function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -132,6 +140,53 @@ describe("formatLogLine", () => {
 });
 
 describe("log viewer", () => {
+  it.each([false, true])(
+    "waits for shell PATH before tailing and honors a stop while waiting: %s",
+    async (stopBeforeReady) => {
+      const tempDir = await createTempDir();
+      const lines: LogViewerLine[] = [];
+      const shell = deferred();
+      await writeFile(join(tempDir.path, "server.1.log"), "after-path\n");
+
+      const tailer = createLogTailer({
+        logDir: tempDir.path,
+        shellPathReady: shell.promise,
+        onLines(next) {
+          lines.push(...next);
+        },
+      });
+
+      tailers.push(tailer);
+      let started = false;
+
+      const start = tailer.start().then(() => {
+        started = true;
+      });
+
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(started).toBe(false);
+        expect(tailer.processIds()).toEqual([]);
+        expect(lines).toEqual([]);
+
+        if (stopBeforeReady) tailer.stop();
+      } finally {
+        shell.resolve();
+        await start;
+      }
+
+      if (stopBeforeReady) {
+        expect(tailer.processIds()).toEqual([]);
+        expect(lines).toEqual([]);
+      } else {
+        await waitFor({
+          predicate: () =>
+            lines.some((line) => line.text === "[server] after-path"),
+        });
+      }
+    },
+  );
+
   it("selects the newest matching server log file", async () => {
     const tempDir = await createTempDir();
     const firstServerLog = join(tempDir.path, "server.1.log");
@@ -167,12 +222,15 @@ describe("log viewer", () => {
     const tempDir = await createTempDir();
     const lines: LogViewerLine[] = [];
     await writeFile(join(tempDir.path, "server.1.log"), "");
+
     const tailer = createLogTailer({
+      shellPathReady: Promise.resolve(),
       logDir: tempDir.path,
       onLines(newLines) {
         lines.push(...newLines);
       },
     });
+
     tailers.push(tailer);
     await tailer.start();
 
@@ -190,12 +248,15 @@ describe("log viewer", () => {
     const tempDir = await createTempDir();
     const lines: LogViewerLine[] = [];
     await writeFile(join(tempDir.path, "server.1.log"), "first\n");
+
     const tailer = createLogTailer({
+      shellPathReady: Promise.resolve(),
       logDir: tempDir.path,
       onLines(newLines) {
         lines.push(...newLines);
       },
     });
+
     tailers.push(tailer);
     await tailer.start();
     await waitFor({
@@ -222,10 +283,13 @@ describe("log viewer", () => {
       const tempDir = await createTempDir();
       await writeFile(join(tempDir.path, "server.1.log"), "");
       await writeFile(join(tempDir.path, "host-daemon.1.log"), "");
+
       const tailer = createLogTailer({
+        shellPathReady: Promise.resolve(),
         logDir: tempDir.path,
         onLines() {},
       });
+
       tailers.push(tailer);
       await tailer.start();
 
@@ -249,6 +313,7 @@ describe("log viewer", () => {
       maxLines: 10_000,
       onFlush() {},
     });
+
     const lines = Array.from({ length: 11_000 }, (_value, index) =>
       createTestLogLine({ index }),
     );
@@ -264,6 +329,7 @@ describe("log viewer", () => {
 
   it("batches appended lines before flushing to the renderer", async () => {
     const flushedBatches: LogViewerLine[][] = [];
+
     const buffer = createLogLineBuffer({
       flushIntervalMs: 25,
       flushLineCount: 10,

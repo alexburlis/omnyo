@@ -13,19 +13,24 @@ import {
   loadPluginApp,
   renderSlot,
   type RenderSlotOptions,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 
 const app = await loadPluginApp(() => import("./app"));
+
 const docsRegistration = app.navPanels[0]!;
+
 const navigationView = docsRegistration.fixedTabs?.[0]!;
+
 const navigationRegistration = {
   ...docsRegistration,
   component: navigationView.component,
 };
+
 const rangeGetBoundingClientRectDescriptor = Object.getOwnPropertyDescriptor(
   Range.prototype,
   "getBoundingClientRect",
 );
+
 const rangeGetClientRectsDescriptor = Object.getOwnPropertyDescriptor(
   Range.prototype,
   "getClientRects",
@@ -67,6 +72,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+
   if (rangeGetBoundingClientRectDescriptor) {
     Object.defineProperty(
       Range.prototype,
@@ -76,6 +82,7 @@ afterEach(() => {
   } else {
     Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
   }
+
   if (rangeGetClientRectsDescriptor) {
     Object.defineProperty(
       Range.prototype,
@@ -157,9 +164,11 @@ function listNotesResultForVault(
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((next) => {
     resolve = next;
   });
+
   return { promise, resolve };
 }
 
@@ -203,6 +212,7 @@ function renderDocument(
 
 function makeDataTransfer(path: string) {
   let storedPath = path;
+
   return {
     effectAllowed: "none",
     dropEffect: "none",
@@ -244,7 +254,7 @@ describe("Docs nav panel", () => {
     });
   });
 
-  it("renders navigation in the BB-owned right-panel view without custom chrome", async () => {
+  it("renders navigation in the Omnyo-owned right-panel view without custom chrome", async () => {
     const slot = renderSlot(
       navigationRegistration,
       { subPath: "personal" },
@@ -254,6 +264,7 @@ describe("Docs nav panel", () => {
     const toolbar = await slot.findByRole("toolbar", {
       name: "Notes sidebar actions",
     });
+
     slot.getByRole("navigation", { name: "Notes" });
     expect(slot.container.querySelector("aside")).toBeNull();
     expect(slot.queryByRole("separator")).toBeNull();
@@ -270,12 +281,14 @@ describe("Docs nav panel", () => {
 
   it("keeps one shared request across page and navigation Strict Mode replay", async () => {
     let requests = 0;
+
     const StrictDocsSurfaces = (props: { subPath: string }) => (
       <StrictMode>
         <docsRegistration.component {...props} />
         <navigationView.component {...props} />
       </StrictMode>
     );
+
     const slot = renderSlot(
       { ...navigationRegistration, component: StrictDocsSurfaces },
       { subPath: "personal" },
@@ -283,6 +296,7 @@ describe("Docs nav panel", () => {
         rpc: {
           listNotes: () => {
             requests += 1;
+
             return listNotesResult([]);
           },
         },
@@ -296,6 +310,7 @@ describe("Docs nav panel", () => {
 
   it("shows an initial notebook error and lets the user retry", async () => {
     let requests = 0;
+
     const slot = renderSlot(
       navigationRegistration,
       { subPath: "personal" },
@@ -303,7 +318,9 @@ describe("Docs nav panel", () => {
         rpc: {
           listNotes: () => {
             requests += 1;
+
             if (requests === 1) throw new Error("Host unavailable");
+
             return listNotesResult([]);
           },
         },
@@ -349,9 +366,11 @@ describe("Docs nav panel", () => {
     );
 
     await slot.findByText("Child note");
+
     const rows = [
       ...slot.getByRole("navigation").querySelectorAll("button"),
     ].map((node) => node.textContent?.trim());
+
     expect(rows.indexOf("Child note")).toBe(rows.indexOf("projects") + 1);
     expect(rows.indexOf("Sibling note")).toBeGreaterThan(
       rows.indexOf("Child note"),
@@ -392,6 +411,7 @@ describe("Docs nav panel", () => {
   it("syncs the editor workspace to vault changes from panel navigation and history", async () => {
     const panel = docsRegistration;
     const PanelContent = panel.component;
+
     const slot = renderSlot(
       panel,
       { subPath: "personal/one.md" },
@@ -402,6 +422,7 @@ describe("Docs nav panel", () => {
             const vaultId = input?.vaultId ?? "personal";
             const name = vaultId === "work" ? "Work" : "Personal";
             const path = vaultId === "work" ? "two.md" : "one.md";
+
             return {
               ...listNotesResult([
                 {
@@ -421,6 +442,7 @@ describe("Docs nav panel", () => {
           },
           readNote: (rawInput: unknown) => {
             const input = rawInput as { vaultId: string };
+
             return {
               content: `# ${input.vaultId === "work" ? "Work" : "Personal"}`,
               sha256: input.vaultId,
@@ -429,11 +451,13 @@ describe("Docs nav panel", () => {
           preparePreview: () => preview,
           renameToTitle: (rawInput: unknown) => {
             const input = rawInput as { path: string };
+
             return { path: input.path };
           },
         },
       },
     );
+
     await slot.findByText("Personal");
 
     slot.rerender(<PanelContent subPath="work/two.md" />);
@@ -456,7 +480,9 @@ describe("Docs nav panel", () => {
       vaultId: string;
       resolve: (value: ReturnType<typeof listNotesResult>) => void;
     };
+
     const pending: PendingNotebook[] = [];
+
     const notebook = (vaultId: string) => ({
       ...listNotesResult([
         {
@@ -487,16 +513,19 @@ describe("Docs nav panel", () => {
         rootPath: `/vaults/${vaultId}`,
       },
     });
+
     const rpc = {
       listNotes: (rawInput: unknown) => {
         const input = rawInput as { vaultId?: string } | undefined;
         const vaultId = input?.vaultId ?? "personal";
+
         return new Promise<ReturnType<typeof listNotesResult>>((resolve) => {
           pending.push({ vaultId, resolve });
         });
       },
       readNote: (rawInput: unknown) => {
         const input = rawInput as { vaultId: string };
+
         return {
           content: `# ${input.vaultId === "work" ? "Work document" : "Personal document"}`,
           sha256: input.vaultId,
@@ -506,21 +535,26 @@ describe("Docs nav panel", () => {
       createNote: () => ({ path: "created.md" }),
       renameToTitle: (rawInput: unknown) => {
         const input = rawInput as { path: string };
+
         return { path: input.path };
       },
     };
+
     const page = renderSlot(
       docsRegistration,
       { subPath: "personal/personal.md" },
       { rpc },
     );
+
     const navigation = renderSlot(
       navigationRegistration,
       { subPath: "personal/personal.md" },
       { rpc },
     );
+
     await waitFor(() => expect(pending).toHaveLength(1));
     expect(pending.map((request) => request.vaultId)).toEqual(["personal"]);
+
     for (const request of pending.splice(0))
       request.resolve(notebook("personal"));
     await page.findByText("Personal document");
@@ -541,6 +575,7 @@ describe("Docs nav panel", () => {
     await waitFor(() => expect(pending).toHaveLength(1));
     const workRequests = pending.splice(0);
     expect(workRequests.map((request) => request.vaultId)).toEqual(["work"]);
+
     for (const request of workRequests) request.resolve(notebook("work"));
     await page.findByText("Work document");
     await navigation.findByText("Work note");
@@ -548,6 +583,7 @@ describe("Docs nav panel", () => {
     for (const request of latePersonalRequests) {
       request.resolve(notebook("personal"));
     }
+
     await act(async () => undefined);
     expect(page.queryByText("Personal document")).toBeNull();
     expect(navigation.queryByText("Personal note")).toBeNull();
@@ -567,6 +603,7 @@ describe("Docs nav panel", () => {
     const requests: Array<{
       resolve(value: ReturnType<typeof listNotesResult>): void;
     }> = [];
+
     const slot = renderSlot(
       navigationRegistration,
       { subPath: "personal" },
@@ -615,10 +652,13 @@ describe("Docs nav panel", () => {
       outcome: "written";
       sha256: string;
     }>();
+
     const pendingWorkNotebook =
       deferred<ReturnType<typeof listNotesResultForVault>>();
+
     let workNotebookRequested = false;
     const PanelContent = docsRegistration.component;
+
     const slot = renderSlot(
       docsRegistration,
       { subPath: "personal/personal.md" },
@@ -626,10 +666,13 @@ describe("Docs nav panel", () => {
         rpc: {
           listNotes: (rawInput: unknown) => {
             const input = rawInput as { vaultId?: string } | undefined;
+
             if (input?.vaultId === "work") {
               workNotebookRequested = true;
+
               return pendingWorkNotebook.promise;
             }
+
             return listNotesResultForVault(
               "personal",
               "personal.md",
@@ -638,6 +681,7 @@ describe("Docs nav panel", () => {
           },
           readNote: (rawInput: unknown) => {
             const input = rawInput as { vaultId: string };
+
             return {
               content:
                 input.vaultId === "work"
@@ -650,6 +694,7 @@ describe("Docs nav panel", () => {
           saveNote: () => pendingSave.promise,
           renameToTitle: (rawInput: unknown) => {
             const input = rawInput as { vaultId: string; path: string };
+
             return {
               path:
                 input.vaultId === "personal"
@@ -660,6 +705,7 @@ describe("Docs nav panel", () => {
         },
       },
     );
+
     const body = await slot.findByText("Personal body");
     body.textContent = "Edited personal body";
     fireEvent.input(body);
@@ -700,9 +746,12 @@ describe("Docs nav panel", () => {
 
   it("ignores obsolete refresh and navigation after deferred note creation", async () => {
     const pendingCreate = deferred<{ path: string }>();
+
     const pendingWorkNotebook =
       deferred<ReturnType<typeof listNotesResultForVault>>();
+
     let workNotebookRequested = false;
+
     const slot = renderSlot(
       navigationRegistration,
       { subPath: "personal/personal.md" },
@@ -710,10 +759,13 @@ describe("Docs nav panel", () => {
         rpc: {
           listNotes: (rawInput: unknown) => {
             const input = rawInput as { vaultId?: string } | undefined;
+
             if (input?.vaultId === "work") {
               workNotebookRequested = true;
+
               return pendingWorkNotebook.promise;
             }
+
             return listNotesResultForVault(
               "personal",
               "personal.md",
@@ -724,6 +776,7 @@ describe("Docs nav panel", () => {
         },
       },
     );
+
     await slot.findByText("Personal note");
     fireEvent.click(slot.getByRole("button", { name: "New note" }));
     await waitFor(() =>
@@ -761,6 +814,7 @@ describe("Docs nav panel", () => {
 
   it("only shows host status when the selected vault is unavailable", async () => {
     const available = listNotesResult([]);
+
     const unavailable = {
       ...available,
       vault: { ...available.vault, hostId: "host_remote" },
@@ -772,6 +826,7 @@ describe("Docs nav panel", () => {
         { id: "host_remote", name: "Remote Mac", status: "disconnected" },
       ],
     };
+
     const slot = renderSlot(
       navigationRegistration,
       { subPath: "personal" },
@@ -784,9 +839,11 @@ describe("Docs nav panel", () => {
 
   it("keeps task checkboxes aligned with the first line of their text", async () => {
     const existingStyles = document.head.querySelector(
-      "style[data-bb-simple-notes-styles]",
+      "style[data-omnyo-simple-notes-styles]",
     );
+
     if (existingStyles) existingStyles.textContent = "stale editor styles";
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "personal/tasks.md" },
@@ -814,9 +871,11 @@ describe("Docs nav panel", () => {
     await slot.findByText("One task");
     expect(slot.queryByRole("button", { name: "Add image" })).toBeNull();
     expect(slot.container.querySelector('input[type="file"]')).toBeNull();
+
     const styles = document.head.querySelector(
-      "style[data-bb-simple-notes-styles]",
+      "style[data-omnyo-simple-notes-styles]",
     );
+
     expect(styles?.textContent).not.toBe("stale editor styles");
     expect(styles?.textContent).toContain("align-items: flex-start");
     expect(styles?.textContent).toContain("height: 1.7em");
@@ -829,60 +888,127 @@ describe("Docs nav panel", () => {
     );
   });
 
-  it("renders and autosaves editable Markdown tables", async () => {
+  it.each([
+    {
+      name: "tables",
+      markdown: "| Project | State |\n| --- | --- |\n| Docs | Ready |",
+      selector: "td p",
+      expected: "| Plans | Ready |",
+    },
+    {
+      name: "table code pipes and image-only cells",
+      markdown:
+        "| Project | Code | Image |\n| --- | --- | --- |\n| Docs | `a\\|b` | ![icon](https://example.com/icon.png) |",
+      selector: "td p",
+      expected: "| Plans | `a\\|b` | ![icon](https://example.com/icon.png) |",
+    },
+    {
+      name: "tight task lists",
+      markdown: "- [ ] Docs\n- [x] Ready",
+      selector: "li p",
+      expected: "- [ ] Plans\n- [x] Ready",
+    },
+  ])(
+    "renders and autosaves $name",
+    async ({ name, markdown, selector, expected }) => {
+      const saveNote = vi.fn((_input: unknown) => ({
+        outcome: "written",
+        sha256: "next-sha",
+      }));
+
+      const slot = renderSlot(
+        app.navPanels[0]!,
+        { subPath: `personal/${name}.md` },
+        {
+          rpc: {
+            listNotes: () =>
+              listNotesResult([
+                {
+                  path: `${name}.md`,
+                  title: "Status",
+                  preview: "Docs Ready",
+                  modifiedAtMs: 1,
+                },
+              ]),
+            readNote: () => ({
+              content: `# Status\n\n${markdown}`,
+              sha256: "sha",
+            }),
+            preparePreview: () => preview,
+            renameToTitle: () => ({ path: `${name}.md` }),
+            saveNote,
+          },
+        },
+      );
+
+      await slot.findByText("Docs");
+      const table = slot.container.querySelector("table");
+
+      if (table) {
+        expect(table.querySelector("th")?.textContent).toBe("Project");
+        expect(table.closest(".tableWrapper")).toBeTruthy();
+        expect(table.closest('[contenteditable="true"]')).toBeTruthy();
+
+        const styles = document.head.querySelector(
+          "style[data-omnyo-simple-notes-styles]",
+        );
+
+        expect(styles?.textContent).toContain("border-collapse: collapse");
+        expect(styles?.textContent).toContain("column-resize-handle");
+      }
+
+      const firstBodyCell = slot.container.querySelector(selector);
+      expect(firstBodyCell).toBeTruthy();
+      firstBodyCell!.textContent = "Plans";
+      fireEvent.input(firstBodyCell!);
+      await waitFor(() => expect(saveNote).toHaveBeenCalled(), {
+        timeout: 2_000,
+      });
+      expect(saveNote.mock.calls.at(-1)?.[0]).toMatchObject({
+        content: expect.stringContaining(expected),
+      });
+    },
+  );
+
+  it("preserves video HTML when autosaving an unrelated prose edit", async () => {
+    const video = `<div style="margin-block: 1rem;">
+  <video src="/rewinding-agents/partial-payments.mp4" autoplay loop muted playsinline preload="metadata" poster="/rewinding-agents/partial-payments-poster.jpg" width="1920" height="1080" aria-label="Two agents implement partial payments; rewinding Agent A preserves Agent B’s payment" style="width: 100%; height: auto; display: block; border-radius: 0.5rem;"></video>
+</div>`;
+
     const saveNote = vi.fn((_input: unknown) => ({
       outcome: "written",
       sha256: "next-sha",
     }));
+
     const slot = renderSlot(
       app.navPanels[0]!,
-      { subPath: "personal/status.md" },
+      { subPath: "personal/wiki-page.md" },
       {
         rpc: {
-          listNotes: () =>
-            listNotesResult([
-              {
-                path: "status.md",
-                title: "Status",
-                preview: "Docs Ready",
-                modifiedAtMs: 1,
-              },
-            ]),
+          listNotes: () => listNotesResult([]),
           readNote: () => ({
-            content:
-              "# Status\n\n| Project | State |\n| --- | --- |\n| Docs | Ready |",
+            content: `# Wiki page\n\n${video}\n\nOriginal body.`,
             sha256: "sha",
           }),
           preparePreview: () => preview,
-          renameToTitle: () => ({ path: "status.md" }),
+          renameToTitle: () => ({ path: "wiki-page.md" }),
           saveNote,
         },
       },
     );
 
-    await slot.findByText("Ready");
-    const table = slot.container.querySelector("table");
-    expect(table).toBeTruthy();
-    expect(table?.querySelector("th")?.textContent).toBe("Project");
-    expect(table?.querySelector("td")?.textContent).toBe("Docs");
-    expect(table?.closest(".tableWrapper")).toBeTruthy();
-    expect(table?.closest('[contenteditable="true"]')).toBeTruthy();
-
-    const styles = document.head.querySelector(
-      "style[data-bb-simple-notes-styles]",
-    );
-    expect(styles?.textContent).toContain("border-collapse: collapse");
-    expect(styles?.textContent).toContain("column-resize-handle");
-
-    const firstBodyCell = table?.querySelector("td p");
-    expect(firstBodyCell).toBeTruthy();
-    firstBodyCell!.textContent = "Plans";
-    fireEvent.input(firstBodyCell!);
+    const body = await slot.findByText("Original body.");
+    expect(slot.container.querySelector(".tiptap video")).toBeNull();
+    body.textContent = "Edited body.";
+    fireEvent.input(body);
     await waitFor(() => expect(saveNote).toHaveBeenCalled(), {
       timeout: 2_000,
     });
     expect(saveNote.mock.calls.at(-1)?.[0]).toMatchObject({
-      content: expect.stringContaining("| Plans | Ready |"),
+      content: expect.stringContaining(video),
+    });
+    expect(saveNote.mock.calls.at(-1)?.[0]).toMatchObject({
+      content: expect.stringContaining("Edited body."),
     });
   });
 
@@ -893,10 +1019,12 @@ describe("Docs nav panel", () => {
       "type: knowledge\r\n",
       "---\r\n",
     ].join("");
+
     const saveNote = vi.fn((_input: unknown) => ({
       outcome: "written",
       sha256: "next-sha",
     }));
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "personal/wiki-page.md" },
@@ -941,6 +1069,7 @@ describe("Docs nav panel", () => {
 
   it("keeps a leading thematic break visible in the editor", async () => {
     const content = "---\n\nSome intro text.\n\n---\n\nMore text.\n";
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "personal/break.md" },
@@ -1269,6 +1398,7 @@ describe("Docs nav panel", () => {
 
   it("opens HTML Docs directive cards in the thread panel or full editor", () => {
     const openThreadPanel = vi.fn(() => true);
+
     const slot = renderDocument("plans/release.html", "Release plan", {
       openThreadPanel,
     });
@@ -1295,15 +1425,18 @@ describe("Docs nav panel", () => {
 
   it("shows cached document content immediately when returning to a thread", async () => {
     const file = { content: "Keep this draft visible.", sha256: "saved-sha" };
+
     const readNote = vi
       .fn<() => Promise<typeof file>>()
       .mockResolvedValue(file);
+
     const render = () =>
       renderDocument("cached-draft.md", "Cached draft", {
         rpc: {
           readNote,
         },
       });
+
     const first = render();
     await first.findByText(file.content);
     await act(async () => {
@@ -1316,6 +1449,7 @@ describe("Docs nav panel", () => {
       }),
     );
     const returned = render();
+
     try {
       expect(
         returned.getByRole("textbox", { name: "Document content" }).textContent,
@@ -1329,12 +1463,14 @@ describe("Docs nav panel", () => {
         });
       });
     }
+
     await returned.findByText("Fresh content from disk.");
   });
 
   it("truncates tall inline documents and restores editing when they shrink", async () => {
     let height = 600;
     let resize = () => {};
+
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -1345,10 +1481,13 @@ describe("Docs nav panel", () => {
         disconnect() {}
       },
     );
+
     const bounds = vi
       .spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(() => new DOMRect(0, 0, 600, height));
+
     const openThreadPanel = vi.fn(() => true);
+
     try {
       const slot = renderDocument("tall-inline.md", "Tall document", {
         openThreadPanel,
@@ -1356,9 +1495,11 @@ describe("Docs nav panel", () => {
           readNote: () => ({ content: "A long document.", sha256: "tall-sha" }),
         },
       });
+
       const button = await slot.findByRole("button", {
         name: "Open Tall document in tab",
       });
+
       const editor = slot.getByRole("textbox", { name: "Document content" });
       await waitFor(() => {
         expect(editor.getAttribute("contenteditable")).toBe("false");
@@ -1390,12 +1531,15 @@ describe("Docs nav panel", () => {
 
   it("edits Markdown inline and opens the same document in a tab", async () => {
     const openThreadPanel = vi.fn(() => true);
+
     const slot = renderDocument("inline-header.md", "Inline header", {
       openThreadPanel,
     });
+
     const editor = await slot.findByRole("textbox", {
       name: "Document content",
     });
+
     expect(editor.getAttribute("contenteditable")).toBe("true");
     fireEvent.focus(editor);
     expect(slot.queryByText("Editing")).toBeNull();
@@ -1422,6 +1566,7 @@ describe("Docs nav panel", () => {
         readNote: () => ({ content: "Email body.", sha256: "original-sha" }),
       },
     });
+
     await slot.findByRole("textbox", { name: "Document content" });
     fireEvent.click(slot.getByRole("button", { name: "Ask for changes" }));
     await waitFor(() =>
@@ -1453,11 +1598,14 @@ describe("Docs nav panel", () => {
         status: action === "reject" ? "pending" : "undone",
         resolvedSha256: action === "reject" ? null : "original-sha",
       };
+
       let resolution = deferred<void>();
+
       const resolveProposal = vi
         .fn()
         .mockImplementationOnce(async () => {
           await resolution.promise;
+
           return {
             ...pending,
             version: pending.version + 1,
@@ -1466,16 +1614,20 @@ describe("Docs nav panel", () => {
         })
         .mockImplementationOnce(async () => {
           await resolution.promise;
+
           return {
             ...pending,
             version: pending.version + 2,
             status: "pending",
           };
         });
+
       const slot = renderDocument(pending.path, "Proposal", {
         rpc: { readProposal: () => pending, resolveProposal },
       });
+
       const steps = action === "reject" ? ["Reject", "Undo"] : ["Redo"];
+
       for (const [index, label] of steps.entries()) {
         const button = await slot.findByRole("button", { name: label });
         expect(button.textContent).toBe("");
@@ -1499,9 +1651,11 @@ describe("Docs nav panel", () => {
           action: label.toLowerCase(),
           expectedVersion: pending.version + index,
         });
+
         if (label === "Reject")
           expect(slot.queryByRole("button", { name: "Accept" })).toBeNull();
       }
+
       expect(slot.getByRole("button", { name: "Accept" })).toBeTruthy();
       expect(slot.getByRole("button", { name: "Reject" })).toBeTruthy();
       expect(
@@ -1512,6 +1666,7 @@ describe("Docs nav panel", () => {
 
   it("parses rich proposal baselines in an inert document and scopes refreshes", async () => {
     const parse = vi.spyOn(ProseMirrorDOMParser.prototype, "parse");
+
     const pending = {
       vaultId: "personal",
       path: "scoped-inline.md",
@@ -1522,23 +1677,31 @@ describe("Docs nav panel", () => {
       status: "pending",
       resolvedSha256: null,
     };
+
     const readNote = vi.fn(() => ({
       content: pending.baseContent,
       sha256: "original-sha",
     }));
+
     const slot = renderDocument(pending.path, "Scoped example", {
       rpc: {
         readNote,
         readProposal: () => pending,
       },
     });
+
     await slot.findByRole("textbox", { name: "Document content" });
+
     const baselines = parse.mock.calls
       .map(([root]) => root)
       .filter((root) =>
-        root.textContent?.includes("Original formatted baseline"),
+        root.textContent?.includes(
+          "Original <strong>formatted baseline</strong>",
+        ),
       );
+
     expect(baselines.length).toBeGreaterThan(0);
+
     for (const root of baselines)
       expect(root.ownerDocument?.defaultView).toBeNull();
     expect(slot.container.querySelector("strong")?.textContent).toBe(
@@ -1579,6 +1742,7 @@ describe("Docs nav panel", () => {
 
   it("opens a chosen document from the unconfigured Document panel", async () => {
     const openThreadPanel = vi.fn(() => true);
+
     const slot = renderSlot(
       app.threadPanelActions[0]!,
       { threadId: "thr_1", params: null },
@@ -1597,6 +1761,7 @@ describe("Docs nav panel", () => {
         },
       },
     );
+
     fireEvent.click(await slot.findByRole("button", { name: "Launch 50%" }));
     expect(openThreadPanel).toHaveBeenCalledWith({
       actionId: "document",
@@ -1649,6 +1814,7 @@ describe("Docs nav panel", () => {
 
   it("preserves the file opener host through autosave, conflict overwrite, and reload", async () => {
     let conflict = true;
+
     const slot = renderSlot(
       app.fileOpeners[0]!,
       {
@@ -1720,9 +1886,11 @@ describe("Docs nav panel", () => {
     await waitFor(() =>
       expect(slot.queryByText("Changed on disk.")).toBeNull(),
     );
+
     const writes = slot.rpcCalls.filter(
       (call) => call.method === "saveOpenedFile",
     );
+
     expect(writes).toHaveLength(2);
     expect(writes[1]?.input).toEqual({
       source: {
@@ -1751,6 +1919,7 @@ describe("Docs nav panel", () => {
     "opens sandboxed HTML in the %s",
     async (surface) => {
       const path = "dashboards/metrics.html";
+
       const options = {
         rpc: {
           listNotes: () =>
@@ -1764,6 +1933,7 @@ describe("Docs nav panel", () => {
           preparePreview: () => preview,
         },
       } satisfies RenderSlotOptions;
+
       const slot =
         surface === "panel"
           ? renderSlot(
@@ -1779,6 +1949,7 @@ describe("Docs nav panel", () => {
               { subPath: `personal/${path}` },
               options,
             );
+
       await waitFor(() => {
         const iframe = slot.container.querySelector("iframe");
         expect(iframe?.getAttribute("src")).toBe(

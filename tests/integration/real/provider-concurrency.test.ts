@@ -34,13 +34,16 @@ describe("real provider concurrency integration", () => {
           harness,
           providerId: "codex",
         });
+
         const claudeExecution = await resolveExecutionOptions({
           harness,
           providerId: "claude-code",
         });
+
         const project = await createProjectFixture(harness, {
           name: "Real Concurrent Providers",
         });
+
         const codexThread = await createReadyHostThread(harness, {
           execution: codexExecution,
           projectId: project.id,
@@ -48,6 +51,7 @@ describe("real provider concurrency integration", () => {
           timeoutMs: TURN_TIMEOUT_MS,
           workspace: { type: "managed-worktree" },
         });
+
         const claudeThread = await createReadyHostThread(harness, {
           execution: claudeExecution,
           projectId: project.id,

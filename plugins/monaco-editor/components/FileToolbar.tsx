@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { experimental_copyToClipboard } from "@get-bb/plugin-sdk/app";
+import { experimental_copyToClipboard } from "@omnyo/plugin-sdk/app";
 import { cn } from "@/lib/utils";
 
 export type SaveIndicator = "clean" | "dirty" | "saving" | "error";
@@ -70,12 +70,14 @@ function SaveDot({ indicator }: { indicator: SaveIndicator }) {
   if (indicator === "clean") {
     return <span className="size-4 shrink-0" aria-hidden />;
   }
+
   const label =
     indicator === "saving"
       ? "Saving…"
       : indicator === "error"
         ? "Could not save — unsaved changes"
         : "Unsaved changes";
+
   return (
     <span
       className="flex size-4 shrink-0 items-center justify-center"
@@ -86,7 +88,8 @@ function SaveDot({ indicator }: { indicator: SaveIndicator }) {
       <span
         className={cn(
           "size-2 rounded-full transition-colors",
-          indicator === "saving" && "animate-pulse bg-foreground",
+          indicator === "saving" &&
+            "animate-pulse bg-foreground [animation-delay:200ms] motion-reduce:animate-none",
           indicator === "dirty" && "bg-foreground",
           indicator === "error" && "bg-destructive",
         )}
@@ -110,9 +113,12 @@ function CopyablePath({ path }: { path: string }) {
     void experimental_copyToClipboard({ text: path }).then((copiedPath) => {
       if (!copiedPath) {
         toast.error("Failed to copy file path");
+
         return;
       }
+
       setCopied(true);
+
       if (timerRef.current !== null) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
       toast.success("File path copied");
@@ -207,6 +213,7 @@ function TreeIcon() {
 
 function FileGlyph({ path, className }: { path: string; className?: string }) {
   const kind = glyphKindForPath(path);
+
   if (kind === "code") {
     return (
       <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
@@ -220,6 +227,7 @@ function FileGlyph({ path, className }: { path: string; className?: string }) {
       </svg>
     );
   }
+
   if (kind === "data") {
     return (
       <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
@@ -233,6 +241,7 @@ function FileGlyph({ path, className }: { path: string; className?: string }) {
       </svg>
     );
   }
+
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
       <path
@@ -282,8 +291,11 @@ function glyphKindForPath(path: string): "code" | "data" | "doc" {
   const name = path.split("/").at(-1) ?? path;
   const dotIndex = name.lastIndexOf(".");
   const extension = dotIndex <= 0 ? "" : name.slice(dotIndex + 1).toLowerCase();
+
   if (DATA_EXTENSIONS.has(extension)) return "data";
+
   if (DOC_EXTENSIONS.has(extension)) return "doc";
+
   return "code";
 }
 

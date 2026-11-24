@@ -17,8 +17,10 @@ function fakeProcess(): Omit<
 } {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
+
   let closeListener: ((exitCode: number | null, signal: null) => void) | null =
     null;
+
   return {
     stdout,
     stderr,
@@ -37,6 +39,7 @@ function fakeProcess(): Omit<
 
 async function readEvents(stream: ReadableStream<Uint8Array>) {
   const text = await new Response(stream).text();
+
   return text
     .trim()
     .split("\n")
@@ -47,9 +50,11 @@ async function readEvents(stream: ReadableStream<Uint8Array>) {
 describe("streamProviderInstallation", () => {
   it("executes the provider plan and streams process output", async () => {
     const process = fakeProcess();
+
     const spawner: ProviderInstallationProcessSpawner = {
       spawn: vi.fn(() => process),
     };
+
     const stream = streamProviderInstallation({
       providerId: "example-provider",
       plan: {
@@ -59,6 +64,7 @@ describe("streamProviderInstallation", () => {
       },
       processSpawner: spawner,
     });
+
     process.stdout.write("working\n");
     process.close(0);
 
@@ -90,11 +96,13 @@ describe("streamProviderInstallation", () => {
 
   it("allows only one installation process at a time", async () => {
     const firstProcess = fakeProcess();
+
     const first = streamProviderInstallation({
       providerId: "first",
       plan: { command: "one", args: [], displayCommand: "one" },
       processSpawner: { spawn: () => firstProcess },
     });
+
     expect(() =>
       streamProviderInstallation({
         providerId: "second",
@@ -106,11 +114,13 @@ describe("streamProviderInstallation", () => {
     await readEvents(first);
 
     const secondProcess = fakeProcess();
+
     const second = streamProviderInstallation({
       providerId: "second",
       plan: { command: "two", args: [], displayCommand: "two" },
       processSpawner: { spawn: () => secondProcess },
     });
+
     secondProcess.close(0);
     await readEvents(second);
   });

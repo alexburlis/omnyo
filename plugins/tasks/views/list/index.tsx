@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Label, Task } from "../../shared/contract.js";
+import { toast } from "sonner";
+import type { Label, Task, TaskStatus } from "../../shared/contract.js";
+import { useCollapsedSections } from "../../shared/collapsed-sections.js";
+import { getStaggerItemProps } from "@/components/ui/motion";
 import { errorMessage } from "../../shared/errors.js";
 import { useProjects, useTasksRpc } from "../../shell/data.js";
 import { useTasksNavigation } from "../../shell/routes.js";
 import { NewTaskDialog } from "../manage/new-task-dialog.js";
-import { DetailToasts, useDetailToasts } from "../detail/toast.js";
 import { EmptyState } from "../../components/empty-state.js";
 import { Button } from "@/components/ui/button";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
@@ -25,7 +27,7 @@ import {
 } from "./list-preference.js";
 import { sortTasks } from "../../shared/sort.js";
 import type { TaskSort } from "../../shared/pagination.js";
-import { StatusIcon } from "./icons.js";
+import { StatusGroupHeader } from "./status-group.js";
 import {
   listScrollScopeKey,
   useListScrollRestoration,
@@ -72,36 +74,69 @@ function LoadingRows() {
 export function ListView({ projectId, activeOnly = false }: ListViewProps) {
   const navigation = useTasksNavigation();
   const rpc = useTasksRpc();
+
   const openTask = useCallback(
     (taskKey: string) => navigation.go({ kind: "task", taskKey }),
     [navigation],
   );
+
   const projects = useProjects();
-  const { toasts, push, dismiss } = useDetailToasts();
   const preferenceScope = listPreferenceScope(projectId, activeOnly);
+
   const [preference, setPreference] = useState<ListPreference>(() =>
     loadListPreference(preferenceScope),
   );
+
   useEffect(() => {
     setPreference(loadListPreference(preferenceScope));
   }, [preferenceScope]);
   const filters = preference.filters;
   const sort = preference.sort;
+
   const setFilters = (next: ListFilterState) => {
     setPreference((current) => {
       const updated: ListPreference = { filters: next, sort: current.sort };
       storeListPreference(preferenceScope, updated);
+
       return updated;
     });
   };
+
   const setSort = (next: TaskSort) => {
     setPreference((current) => {
       const updated: ListPreference = { filters: current.filters, sort: next };
       storeListPreference(preferenceScope, updated);
+
       return updated;
     });
   };
+
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const sections = useCollapsedSections(`list:${preferenceScope}`);
+  const [revealing, setRevealing] = useState<TaskStatus | null>(null);
+  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (revealTimer.current !== null) clearTimeout(revealTimer.current);
+    },
+    [],
+  );
+
+  const setGroupOpen = (status: TaskStatus, open: boolean) => {
+    sections.setOpen(status, open);
+
+    if (revealTimer.current !== null) clearTimeout(revealTimer.current);
+    revealTimer.current = null;
+
+    if (!open) {
+      setRevealing(null);
+
+      return;
+    }
+
+    setRevealing(status);
+    revealTimer.current = setTimeout(() => setRevealing(null), 600);
+  };
 
   const labelProjectIds = useMemo(
     () =>
@@ -110,14 +145,19 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
         : (projects.data ?? []).map((project) => project.id),
     [projectId, projects.data],
   );
+
   const labels = useLabels(labelProjectIds);
+
   const labelOptions = useMemo(
     () => labelFilterOptions(labels.data ?? []),
     [labels.data],
   );
+
   const labelIds = useMemo((): readonly string[] | null => {
     if (filters.labelNames.length === 0) return null;
+
     if (labels.data === undefined) return null;
+
     return selectedLabelIds(labelOptions, filters.labelNames);
   }, [filters.labelNames, labelOptions, labels.data]);
 
@@ -126,22 +166,31 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
     priorities: filters.priorities,
     labelIds,
   });
+
   const meta = useTaskListMeta(projectId);
-  const edits = useListTaskEdits(tasksQuery.data, (message) => push(message));
+
+  const edits = useListTaskEdits(tasksQuery.data, (message) =>
+    toast.error(message),
+  );
 
   const labelsById = useMemo(
     () => new Map((labels.data ?? []).map((label) => [label.id, label])),
     [labels.data],
   );
+
   const labelsByProject = useMemo(() => {
     const map = new Map<string, Label[]>();
+
     for (const label of labels.data ?? []) {
       const bucket = map.get(label.projectId);
+
       if (bucket) bucket.push(label);
       else map.set(label.projectId, [label]);
     }
+
     return map;
   }, [labels.data]);
+
   const moveToProject = useCallback(
     (task: Task, targetProjectId: string) => {
       rpc
@@ -151,13 +200,14 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
         })
         .then(
           (result) => {
-            if (!result.ok) push(result.error.message);
+            if (!result.ok) toast.error(result.error.message);
           },
-          (error: unknown) => push(errorMessage(error)),
+          (error: unknown) => toast.error(errorMessage(error)),
         );
     },
-    [rpc, push],
+    [rpc],
   );
+
   const projectsById = useMemo(
     () =>
       new Map((projects.data ?? []).map((project) => [project.id, project])),
@@ -166,6 +216,7 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
 
   const displayTasks = useMemo(() => {
     if (tasksQuery.data === undefined) return undefined;
+
     return editedTasks(tasksQuery.data, edits.entries).filter((task) =>
       matchesFilters(
         task,
@@ -181,6 +232,7 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
     filters.priorities,
     labelIds,
   ]);
+
   const groups = useMemo(
     () => groupTasksByStatus(sortTasks(displayTasks ?? [], sort)),
     [displayTasks, sort],
@@ -203,6 +255,7 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
   useEffect(() => {
     const routeScopeJustChanged = previousRouteScope.current !== routeScope;
     previousRouteScope.current = routeScope;
+
     if (!routeScopeJustChanged && !tasksQuery.isLoading) {
       setSettledRouteScope(routeScope);
     }
@@ -214,8 +267,11 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
   });
 
   const viewport = useRowWindowViewport(scrollRef, groups);
+
   const ranges = rowWindows({
-    counts: groups.map((group) => group.tasks.length),
+    counts: groups.map((group) =>
+      sections.isOpen(group.status) ? group.tasks.length : 0,
+    ),
     headerHeight: viewport.headerHeight,
     rowHeight: viewport.rowHeight,
     scrollTop: viewport.scrollTop,
@@ -223,6 +279,7 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
   });
 
   let body: React.ReactNode;
+
   if (
     routeScopeChanged ||
     tasksQuery.data === undefined ||
@@ -232,8 +289,15 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
       !routeScopeChanged && tasksQuery.error !== null ? (
         <EmptyState
           icon="AlertCircle"
+          tone="error"
           title="Couldn't load tasks"
           description={tasksQuery.error}
+          action={
+            <Button size="sm" variant="outline" onClick={tasksQuery.refresh}>
+              <Icon name="RotateCcw" className="size-3.5" />
+              Try again
+            </Button>
+          }
         />
       ) : (
         <LoadingRows />
@@ -280,43 +344,57 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
     }
   } else {
     body = groups.map((group, groupIndex) => {
-      const [start, end] = ranges[groupIndex] ?? [0, group.tasks.length];
+      const open = sections.isOpen(group.status);
+
+      const [start, end] = open
+        ? (ranges[groupIndex] ?? [0, group.tasks.length])
+        : [0, 0];
+
       const hiddenAbove = start * viewport.rowHeight;
       const hiddenBelow = (group.tasks.length - end) * viewport.rowHeight;
+      const visibleTasks = open ? group.tasks.slice(start, end) : [];
+      const staggerCount = Math.min(visibleTasks.length, 12);
+      const staggering = revealing === group.status;
+      const bodyId = `tasks-status-group-${group.status}`;
+
       return (
-        <section key={group.status}>
-          <div
-            data-status-group-header={group.status}
-            className="sticky top-0 z-20 isolate flex items-center gap-2 border-b border-border-hairline bg-background px-3.5 pb-1.5 pt-2.5 text-sm font-semibold"
-          >
-            <StatusIcon status={group.status} />
-            {STATUS_LABELS[group.status]}
-            <span className="text-xs font-normal tabular-nums text-subtle-foreground">
-              {group.tasks.length}
-            </span>
+        <section key={group.status} aria-label={STATUS_LABELS[group.status]}>
+          <StatusGroupHeader
+            status={group.status}
+            count={group.tasks.length}
+            open={open}
+            onOpenChange={(next) => setGroupOpen(group.status, next)}
+            controlsId={bodyId}
+          />
+          <div id={bodyId} hidden={!open}>
+            {hiddenAbove > 0 ? (
+              <div aria-hidden style={{ height: hiddenAbove }} />
+            ) : null}
+            {visibleTasks.map((task, index) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                meta={meta.data?.get(task.id)}
+                project={projectsById.get(task.projectId)}
+                showProject={showProject}
+                labelsById={labelsById}
+                projectLabels={labelsByProject.get(task.projectId) ?? NO_LABELS}
+                projects={projects.data ?? []}
+                onMoveToProject={moveToProject}
+                onEdit={edits.edit}
+                onOpen={openTask}
+                pending={edits.pending.has(task.id)}
+                {...getStaggerItemProps(
+                  index,
+                  staggerCount,
+                  staggering && index < staggerCount,
+                )}
+              />
+            ))}
+            {open && hiddenBelow > 0 ? (
+              <div aria-hidden style={{ height: hiddenBelow }} />
+            ) : null}
           </div>
-          {hiddenAbove > 0 ? (
-            <div aria-hidden style={{ height: hiddenAbove }} />
-          ) : null}
-          {group.tasks.slice(start, end).map((task) => (
-            <TaskRow
-              key={task.id}
-              task={task}
-              meta={meta.data?.get(task.id)}
-              project={projectsById.get(task.projectId)}
-              showProject={showProject}
-              labelsById={labelsById}
-              projectLabels={labelsByProject.get(task.projectId) ?? NO_LABELS}
-              projects={projects.data ?? []}
-              onMoveToProject={moveToProject}
-              onEdit={edits.edit}
-              onOpen={openTask}
-              pending={edits.pending.has(task.id)}
-            />
-          ))}
-          {hiddenBelow > 0 ? (
-            <div aria-hidden style={{ height: hiddenBelow }} />
-          ) : null}
         </section>
       );
     });
@@ -343,7 +421,6 @@ export function ListView({ projectId, activeOnly = false }: ListViewProps) {
         onOpenChange={setNewTaskOpen}
         projectId={projectId}
       />
-      <DetailToasts toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }

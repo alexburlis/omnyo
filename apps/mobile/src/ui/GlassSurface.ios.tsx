@@ -14,6 +14,7 @@ function useLiquidGlass(): boolean {
   if (liquidGlass === null) {
     liquidGlass = isLiquidGlassAvailable() && isGlassEffectAPIAvailable();
   }
+
   return liquidGlass;
 }
 
@@ -34,6 +35,7 @@ export function GlassSurface({
       </Animated.View>
     );
   }
+
   return (
     <AnimatedGlassView
       layout={layout}

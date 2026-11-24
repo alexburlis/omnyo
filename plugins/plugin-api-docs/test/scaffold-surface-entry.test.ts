@@ -84,6 +84,7 @@ describe("surface-entry scaffold", () => {
       "--transient",
       "--outcome",
     ]);
+
     const reordered = parseScaffoldArgs([
       "--outcome",
       "--transient",

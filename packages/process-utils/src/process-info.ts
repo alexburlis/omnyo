@@ -13,7 +13,9 @@ export async function readProcessIdentity(
   pid: number,
 ): Promise<ProcessIdentity | null> {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+
   if (process.platform === "win32") return readWindowsProcess(pid);
+
   try {
     const { stdout } = await execFileAsync(
       "ps",
@@ -23,9 +25,12 @@ export async function readProcessIdentity(
         maxBuffer: 1024 * 1024,
       },
     );
+
     const match = stdout.trim().match(/^(\S+)\s+([\s\S]+)$/u);
+
     if (match === null) return null;
     const elapsed = parseElapsedSeconds(match[1] ?? "");
+
     return {
       command: match[2] ?? null,
       startedAt: elapsed === null ? null : Date.now() - elapsed * 1_000,
@@ -62,9 +67,11 @@ async function readWindowsProcess(pid: number) {
         maxBuffer: 1024 * 1024,
       },
     );
+
     pending.child.stdin?.end();
     const { stdout } = await pending;
     const value: unknown = JSON.parse(stdout);
+
     if (
       typeof value !== "object" ||
       value === null ||
@@ -75,6 +82,7 @@ async function readWindowsProcess(pid: number) {
       !Number.isFinite(value.startedAt)
     )
       return null;
+
     return { command: value.command, startedAt: value.startedAt };
   } catch {
     return null;
@@ -85,12 +93,15 @@ export function parseElapsedSeconds(rawElapsed: string): number | null {
   const match = rawElapsed
     .trim()
     .match(/^(?:(?:(\d+)-)?(\d+):)?(\d{1,2}):(\d{2})$/u);
+
   if (match === null) {
     return null;
   }
+
   const days = Number(match[1] ?? "0");
   const hours = Number(match[2] ?? "0");
   const minutes = Number(match[3]);
   const seconds = Number(match[4]);
+
   return ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
 }

@@ -9,12 +9,12 @@ import {
   noopNotifier,
   updateThread,
   upsertHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import { eq } from "drizzle-orm";
 import {
   hostDaemonServerWsMessageSchema,
   type HostDaemonServerWsMessage,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { describe, expect, it } from "vitest";
 import { NotificationHub } from "../../src/ws/hub.js";
 import { WatchInterestCoordinator } from "../../src/ws/watch-interests.js";
@@ -34,16 +34,20 @@ function setup(queries?: string[]) {
         }
       : undefined,
   );
+
   migrate(db);
   const hub = new NotificationHub();
   const watchInterests = new WatchInterestCoordinator({ db, hub });
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   const environment = createEnvironment(db, noopNotifier, {
     providerOwnsPath: false,
     projectId: project.id,
@@ -51,6 +55,7 @@ function setup(queries?: string[]) {
     path: "/tmp/test-workspace",
     status: "ready",
   });
+
   return { db, environment, host, hub, project, watchInterests };
 }
 
@@ -58,9 +63,11 @@ function lastDaemonMessage(socket: {
   messages: string[];
 }): HostDaemonServerWsMessage {
   const message = socket.messages[socket.messages.length - 1];
+
   if (!message) {
     throw new Error("Expected daemon message");
   }
+
   return hostDaemonServerWsMessageSchema.parse(JSON.parse(message));
 }
 
@@ -182,6 +189,7 @@ describe("WatchInterestCoordinator", () => {
 
   it("omits unresolved workspace targets from snapshots", () => {
     const { db, host, project, watchInterests } = setup();
+
     const unready = createEnvironment(db, noopNotifier, {
       providerOwnsPath: false,
       projectId: project.id,
@@ -189,6 +197,7 @@ describe("WatchInterestCoordinator", () => {
       path: "/tmp/unready",
       status: "provisioning",
     });
+
     const destroyed = createEnvironment(db, noopNotifier, {
       providerOwnsPath: false,
       projectId: project.id,
@@ -196,6 +205,7 @@ describe("WatchInterestCoordinator", () => {
       path: "/tmp/destroyed",
       status: "destroyed",
     });
+
     const socket = createMockHubSocket();
 
     watchInterests.subscribe(socket, {
@@ -216,6 +226,7 @@ describe("WatchInterestCoordinator", () => {
     const { db, host, hub, project, watchInterests } = setup();
     const daemonSocket = createMockHubSocket();
     const socket = createMockHubSocket();
+
     const environment = createEnvironment(db, noopNotifier, {
       providerOwnsPath: false,
       projectId: project.id,
@@ -223,6 +234,7 @@ describe("WatchInterestCoordinator", () => {
       path: "/tmp/later-ready",
       status: "provisioning",
     });
+
     hub.registerDaemon("session-1", host.id, daemonSocket);
 
     watchInterests.subscribe(socket, {
@@ -287,11 +299,13 @@ describe("WatchInterestCoordinator", () => {
 
   it("resolves thread-detail subscriptions to the owning thread storage target", () => {
     const { db, environment, host, project, watchInterests } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       environmentId: environment.id,
       providerId: "codex",
     });
+
     const socket = createMockHubSocket();
 
     watchInterests.subscribe(socket, {
@@ -314,11 +328,13 @@ describe("WatchInterestCoordinator", () => {
     const { db, environment, host, hub, project, watchInterests } = setup();
     const daemonSocket = createMockHubSocket();
     const socket = createMockHubSocket();
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       environmentId: null,
       providerId: "codex",
     });
+
     hub.registerDaemon("session-1", host.id, daemonSocket);
 
     watchInterests.subscribe(socket, {
@@ -344,9 +360,12 @@ describe("WatchInterestCoordinator", () => {
   });
   it("batches a refresh while removing moved, archived and destroyed targets from their previous hosts", () => {
     const queries: string[] = [];
+
     const { db, environment, host, hub, project, watchInterests } =
       setup(queries);
+
     const otherHost = upsertHost(db, noopNotifier, { name: "other-host" });
+
     const otherEnvironment = createEnvironment(db, noopNotifier, {
       providerOwnsPath: false,
       projectId: project.id,
@@ -354,16 +373,19 @@ describe("WatchInterestCoordinator", () => {
       path: "/tmp/other-workspace",
       status: "ready",
     });
+
     const firstDaemon = createMockHubSocket();
     const secondDaemon = createMockHubSocket();
     hub.registerDaemon("first", host.id, firstDaemon);
     hub.registerDaemon("second", otherHost.id, secondDaemon);
     const socket = createMockHubSocket();
+
     for (const target of [environment, otherEnvironment])
       watchInterests.subscribe(socket, {
         kind: "environment-detail",
         environmentId: target.id,
       });
+
     const watched = Array.from({ length: 12 }, (_, index) =>
       createThread(db, noopNotifier, {
         projectId: project.id,
@@ -371,6 +393,7 @@ describe("WatchInterestCoordinator", () => {
         providerId: "test-provider",
       }),
     );
+
     for (const thread of watched)
       watchInterests.subscribe(socket, {
         kind: "thread-detail",
@@ -402,9 +425,11 @@ describe("WatchInterestCoordinator", () => {
         environmentId: thread.environmentId,
       })),
     });
+
     const generation = watchInterests.reconcileWatchSetForHost(
       otherHost.id,
     ).generation;
+
     hub.notifyEnvironment(environment.id, ["metadata-changed"]);
     expect(
       watchInterests.reconcileWatchSetForHost(otherHost.id).generation,

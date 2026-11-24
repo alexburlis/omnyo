@@ -3,7 +3,7 @@ import type {
   PluginHomepageSectionProps,
   PluginMessageDirectiveProps,
   PluginNavPanelProps,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import {
   beginPluginSlotBatch,
   getPluginSlotSnapshot,
@@ -17,9 +17,11 @@ import { makePluginRegistrationSet as registrationSet } from "@/test/fixtures/pl
 function SectionComponent(_props: Partial<PluginHomepageSectionProps>) {
   return null;
 }
+
 function PanelComponent(_props: PluginNavPanelProps) {
   return null;
 }
+
 function DirectiveComponent(_props: PluginMessageDirectiveProps) {
   return null;
 }
@@ -280,6 +282,7 @@ describe("plugin slot batches", () => {
 
   it("flushes on the hold timer so a slow plugin cannot starve the others", () => {
     vi.useFakeTimers();
+
     try {
       const listener = vi.fn();
       const unsubscribe = subscribePluginSlots(listener);

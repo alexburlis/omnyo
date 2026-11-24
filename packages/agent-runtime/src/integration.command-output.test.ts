@@ -30,6 +30,7 @@ for (const providerId of providers) {
 
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId,
@@ -58,6 +59,7 @@ for (const providerId of providers) {
           threadId,
           predicate: () => {
             const outputs = getCompletedCommandOutputs(ctx.events);
+
             return (
               (outputs.includes("FIRST") &&
                 outputs.includes("SECOND") &&

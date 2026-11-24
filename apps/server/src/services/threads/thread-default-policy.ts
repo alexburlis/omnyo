@@ -5,19 +5,25 @@ import type {
   RecordedPermissionMode,
   ReasoningLevel,
   Thread,
-} from "@bb/domain";
-import { getEnvironment } from "@bb/db";
+  AppSettings,
+} from "@omnyo/domain";
+import { getAppSettings, getEnvironment } from "@omnyo/db";
 import { DEFAULT_ENVIRONMENT_PROVIDER_ID } from "../environments/environment-provider-ids.js";
-import { DEFAULT_SERVICE_TIER, PERSONAL_PROJECT_ID } from "@bb/domain";
+import {
+  DEFAULT_SERVICE_TIER,
+  PERSONAL_PROJECT_ID,
+  newThreadPermissionMode,
+} from "@omnyo/domain";
 import type {
   EnvironmentArgs,
   ProviderEnvironmentArgs,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
 import type { WorkSessionDeps } from "../../types.js";
 import type { ProviderRegistryService } from "../providers/provider-registry.js";
 import { ApiError } from "../../errors.js";
 import { callHostRetryableOnlineRpc } from "../hosts/online-rpc.js";
+import { requireConnectedHostSession } from "../lib/entity-lookup.js";
 import { requireConnectedPrimaryHostId } from "../hosts/primary-host.js";
 import { resolveProjectWorkspaceTarget } from "../projects/project-workspace.js";
 import { resolveDefaultWorktreeBaseBranch } from "../projects/worktree-base-branch.js";
@@ -35,6 +41,7 @@ function listDefaultProviderIdCandidates(
   registry: ProviderRegistryService,
 ): string[] {
   const disabled = registry.disabledProviderIds();
+
   const available = registry
     .list()
     .filter(
@@ -42,15 +49,19 @@ function listDefaultProviderIdCandidates(
         registration.info.available && !disabled.has(registration.info.id),
     )
     .map((registration) => registration.info.id);
+
   const preferred = registry.getUserDefaultProviderId();
+
   if (preferred !== null && available.includes(preferred)) {
     return [preferred, ...available.filter((id) => id !== preferred)];
   }
+
   return available;
 }
 
 function requireDefaultProviderId(registry: ProviderRegistryService): string {
   const providerId = listDefaultProviderIdCandidates(registry)[0];
+
   if (providerId === undefined) {
     throw new ApiError(
       409,
@@ -58,6 +69,7 @@ function requireDefaultProviderId(registry: ProviderRegistryService): string {
       "No agent provider is enabled. Enable an agent provider in Settings → Providers to start a thread.",
     );
   }
+
   return providerId;
 }
 
@@ -108,6 +120,7 @@ type CreateThreadEnvironment =
   | EnvironmentArgs
   | ProviderEnvironmentArgs
   | { type: "project-default" };
+
 export type ResolvedCreateThreadEnvironment = Exclude<
   CreateThreadEnvironment,
   { type: "project-default" }
@@ -149,6 +162,7 @@ function requireHostEnvironmentId(
   if (environment.hostId !== undefined) {
     return environment.hostId;
   }
+
   throw new Error("Host environment is missing hostId");
 }
 
@@ -165,6 +179,7 @@ function resolveSupportedPermissionMode(
   args: ResolveSupportedPermissionModeArgs,
 ): PermissionMode {
   const permissionModes = registry.getSupportedPermissionModes(args.providerId);
+
   if (!permissionModes) {
     return args.preferredPermissionMode;
   }
@@ -172,12 +187,15 @@ function resolveSupportedPermissionMode(
   if (permissionModes.includes(args.preferredPermissionMode)) {
     return args.preferredPermissionMode;
   }
+
   if (permissionModes.includes(DEFAULT_PERMISSION_MODE)) {
     return DEFAULT_PERMISSION_MODE;
   }
+
   if (permissionModes.includes("full")) {
     return "full";
   }
+
   return permissionModes[0] ?? DEFAULT_PERMISSION_MODE;
 }
 
@@ -186,20 +204,25 @@ export function resolveCreateThreadExecutionDefaults(
   args: ResolveCreateThreadExecutionDefaultsArgs,
 ): CreateThreadExecutionDefaultsResolved {
   const disabled = registry.disabledProviderIds();
+
   const storedProviderId =
     args.storedDefaults !== null &&
     !disabled.has(args.storedDefaults.providerId)
       ? args.storedDefaults.providerId
       : undefined;
+
   const isProductDefault =
     args.requestedProviderId === undefined && storedProviderId === undefined;
+
   const defaultCandidates = isProductDefault
     ? listDefaultProviderIdCandidates(registry)
     : [];
+
   const providerId =
     args.requestedProviderId ??
     storedProviderId ??
     requireDefaultProviderId(registry);
+
   if (disabled.has(providerId)) {
     throw new ApiError(
       409,
@@ -207,7 +230,9 @@ export function resolveCreateThreadExecutionDefaults(
       `Provider "${providerId}" is disabled. Enable it in Settings → Providers.`,
     );
   }
+
   const registration = registry.get(providerId);
+
   if (registration !== null && !registration.info.available) {
     throw new ApiError(
       409,
@@ -218,6 +243,7 @@ export function resolveCreateThreadExecutionDefaults(
 
   const storedDefaults =
     args.storedDefaults?.providerId === providerId ? args.storedDefaults : null;
+
   return {
     executionDefaults: storedDefaults,
     providerId,
@@ -246,6 +272,36 @@ export function buildProviderThreadExecutionDefaults(
   };
 }
 
+export function applyNewThreadApprovalDefault(
+  registry: ProviderRegistryService,
+  args: {
+    settings: Pick<
+      AppSettings,
+      "defaultPermissionMode" | "modelPermissionModes"
+    >;
+    providerId: string;
+    model: string | null;
+    storedDefaults: ProjectExecutionDefaults | null;
+    resolvedDefaults: ProjectExecutionDefaults | null;
+  },
+): ProjectExecutionDefaults | null {
+  if (args.model === null) return args.resolvedDefaults;
+
+  const defaults =
+    args.resolvedDefaults ??
+    buildProviderThreadExecutionDefaults(registry, {
+      providerId: args.providerId,
+      model: args.model,
+    });
+
+  return {
+    ...defaults,
+    permissionMode:
+      args.storedDefaults?.permissionMode ??
+      newThreadPermissionMode(args.settings, args.providerId, args.model),
+  };
+}
+
 function requireDefaultEnvironmentProvider(id: string): string {
   if (getEnvironmentProvider(id) === undefined) {
     throw new ApiError(
@@ -254,6 +310,7 @@ function requireDefaultEnvironmentProvider(id: string): string {
       `The default environment provider "${id}" is unavailable. Enable its plugin or explicitly choose another environment.`,
     );
   }
+
   return id;
 }
 
@@ -261,6 +318,12 @@ export async function resolveProjectDefaultThreadEnvironment(
   deps: WorkSessionDeps,
   args: { projectId: string },
 ): Promise<ResolvedCreateThreadEnvironment> {
+  const hostId =
+    getAppSettings(deps.db).defaultThreadMachineId ??
+    requireConnectedPrimaryHostId(deps);
+
+  requireConnectedHostSession(deps, hostId);
+
   if (args.projectId === PERSONAL_PROJECT_ID) {
     return {
       type: "provider",
@@ -269,17 +332,17 @@ export async function resolveProjectDefaultThreadEnvironment(
       ),
       machine: {
         type: "existing",
-        hostId: requireConnectedPrimaryHostId(deps),
+        hostId,
       },
       inputs: null,
     };
   }
 
-  const hostId = requireConnectedPrimaryHostId(deps);
   const source = resolveProjectWorkspaceTarget(deps, {
     hostId,
     projectId: args.projectId,
   });
+
   const checkout = await callHostRetryableOnlineRpc(deps, {
     hostId,
     timeoutMs: COMMAND_TIMEOUT_MS,
@@ -289,7 +352,9 @@ export async function resolveProjectDefaultThreadEnvironment(
       remoteRefresh: "background",
     },
   });
+
   const baseBranch = resolveDefaultWorktreeBaseBranch(checkout);
+
   if (baseBranch === null) {
     return {
       type: "provider",
@@ -317,6 +382,7 @@ export async function resolveCreateThreadEnvironment(
 ): Promise<ResolvedCreateThreadEnvironment> {
   const parentThread = args.parentThread;
   const hasLiveParent = isLiveParentThread({ parentThread });
+
   if (
     hasLiveParent &&
     parentThread?.projectId === PERSONAL_PROJECT_ID &&
@@ -326,7 +392,9 @@ export async function resolveCreateThreadEnvironment(
     if (!parentThread.environmentId) {
       throw new Error("Personal parent thread is missing an environment");
     }
+
     const requestedEnvironment = args.requestedEnvironment;
+
     const requestedMachine: ProviderEnvironmentArgs["machine"] =
       requestedEnvironment.type === "provider"
         ? requestedEnvironment.machine
@@ -334,6 +402,7 @@ export async function resolveCreateThreadEnvironment(
             requestedEnvironment.hostId !== undefined
           ? { type: "existing", hostId: requestedEnvironment.hostId }
           : undefined;
+
     if (
       requestedMachine === undefined ||
       (requestedMachine.type === "existing" &&
@@ -343,6 +412,7 @@ export async function resolveCreateThreadEnvironment(
       return { type: "reuse", environmentId: parentThread.environmentId };
     }
   }
+
   if (
     hasLiveParent &&
     parentThread?.projectId === args.projectId &&
@@ -352,13 +422,16 @@ export async function resolveCreateThreadEnvironment(
     if (!parentThread.environmentId) {
       throw new Error("Parent thread is missing an environment");
     }
+
     const parentEnvironment = getEnvironment(
       deps.db,
       parentThread.environmentId,
     );
+
     if (parentEnvironment === null) {
       throw new Error("Parent thread environment is missing");
     }
+
     return {
       type: "provider",
       environmentProviderId: requireDefaultEnvironmentProvider(
@@ -368,6 +441,7 @@ export async function resolveCreateThreadEnvironment(
       inputs: worktreeProviderInputs({ kind: "default" }),
     };
   }
+
   const environment =
     args.requestedEnvironment.type === "project-default"
       ? await resolveProjectDefaultThreadEnvironment(deps, {
@@ -405,6 +479,7 @@ export async function resolveCreateThreadEnvironment(
       inputs: worktreeProviderInputs({ kind: "default" }),
     };
   }
+
   if (
     hasLiveParent &&
     environment.type === "provider" &&
@@ -442,6 +517,7 @@ export function resolveThreadExecutionPermissionMode(
   if (args.requestedPermissionMode) {
     return args.requestedPermissionMode;
   }
+
   if (args.lastExecutionPermissionMode) {
     return normalizeRecordedPermissionMode(args.lastExecutionPermissionMode);
   }
@@ -461,6 +537,7 @@ export function resolveThreadExecutionPermissionMode(
   const defaultPermissionMode = resolveThreadDefaultPermissionMode(registry, {
     thread: args.thread,
   });
+
   return args.projectExecutionPermissionMode ?? defaultPermissionMode;
 }
 

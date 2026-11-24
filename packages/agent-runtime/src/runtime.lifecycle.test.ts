@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
+import { JsonRpcRequestTimeoutError } from "@omnyo/provider-bridge-protocol/bridge-kit";
 import { promptTextInput } from "./test/prompt-input.js";
 import {
   createScriptedEchoLaunch,
@@ -25,7 +26,7 @@ describe("createAgentRuntime lifecycle", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "bb-runtime-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "omnyo-runtime-test-"));
   });
 
   afterEach(() => {
@@ -56,12 +57,15 @@ describe("createAgentRuntime lifecycle", () => {
       "uses the construction deadline for thread/$method (requestTimeoutMs=$requestTimeoutMs)",
       async ({ method, requestTimeoutMs, advanceMs, timesOut }) => {
         const realSetTimeout = setTimeout;
+
         const sleepReal = (ms: number): Promise<void> =>
           new Promise((resolve) => {
             realSetTimeout(resolve, ms);
           });
+
         vi.useFakeTimers();
         const record = createScriptedEchoRequestRecord();
+
         const runtime = createScriptedEchoRuntime({
           runtime: {
             workspacePath: tmpDir,
@@ -71,7 +75,9 @@ describe("createAgentRuntime lifecycle", () => {
           },
           launch: { scripted: { startDelayMs: 1_500 } },
         });
+
         let settled = false;
+
         const threadArgs = {
           environmentId: "env-1",
           threadId: "t1",
@@ -79,6 +85,7 @@ describe("createAgentRuntime lifecycle", () => {
           providerId: "fake",
           options: fullRuntimeOptions,
         };
+
         const construction =
           method === "start"
             ? runtime.startThread(threadArgs)
@@ -86,10 +93,12 @@ describe("createAgentRuntime lifecycle", () => {
                 ...threadArgs,
                 providerThreadId: "prov-1",
               });
+
         const constructionOutcome = construction.then(
           (result) => ({ status: "resolved" as const, result }),
           (error: unknown) => ({ status: "rejected" as const, error }),
         );
+
         void constructionOutcome.then(() => {
           settled = true;
         });
@@ -103,14 +112,16 @@ describe("createAgentRuntime lifecycle", () => {
             if (attempt >= 1_000) {
               throw new Error(`The bridge never received thread/${method}`);
             }
+
             await sleepReal(10);
           }
+
           await vi.advanceTimersByTimeAsync(advanceMs);
 
           if (timesOut) {
             expect(await constructionOutcome).toEqual({
               status: "rejected",
-              error: new Error(`JSON-RPC request timed out: thread/${method}`),
+              error: new JsonRpcRequestTimeoutError(`thread/${method}`),
             });
             expect(runtime.hasThread("t1")).toBe(false);
             expect(runtime.getProviderSession("t1")).toBeNull();
@@ -130,6 +141,7 @@ describe("createAgentRuntime lifecycle", () => {
 
     it("fails session construction when the thread/start result carries no providerThreadId", async () => {
       const record = createScriptedEchoRequestRecord();
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -164,6 +176,7 @@ describe("createAgentRuntime lifecycle", () => {
 
     it("fails session construction when the thread/resume result carries no providerThreadId", async () => {
       const record = createScriptedEchoRequestRecord();
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -200,6 +213,7 @@ describe("createAgentRuntime lifecycle", () => {
 
     it("forgets a thread whose thread/resume request was rejected", async () => {
       const record = createScriptedEchoRequestRecord();
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -214,6 +228,7 @@ describe("createAgentRuntime lifecycle", () => {
           },
         },
       });
+
       const resume = {
         environmentId: "env-1",
         threadId: "t1",
@@ -253,6 +268,7 @@ describe("createAgentRuntime lifecycle", () => {
       const record = createScriptedEchoRequestRecord();
       const events: ThreadEvent[] = [];
       const threadStorageRootPath = join(tmpDir, "thread-storage");
+
       const contributedEnv = [
         {
           name: "PATH",
@@ -266,18 +282,26 @@ describe("createAgentRuntime lifecycle", () => {
           source: { plugin: "env-test" },
           reason: "Use the authenticated server proxy",
         },
+        {
+          name: "ANTHROPIC_AUTH_TOKEN",
+          value: "synthetic-runtime-plugin-value",
+          source: { plugin: "env-test" },
+          reason: "Synthetic authentication contribution",
+        },
       ] as const;
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
           threadStorageRootPath,
           env: record.env,
           shellEnv: {
-            PATH: "/tmp/bb-bin:/usr/bin",
-            BB_HOST_DAEMON_PORT: "3002",
-            BB_PROJECT_ID: "wrong-project",
-            BB_SERVER_URL: "http://127.0.0.1:3334",
-            BB_THREAD_ID: "wrong-thread",
+            PATH: "/tmp/omnyo-bin:/usr/bin",
+            OMNYO_HOST_DAEMON_PORT: "3002",
+            OMNYO_PROJECT_ID: "wrong-project",
+            OMNYO_SERVER_URL: "http://127.0.0.1:3334",
+            OMNYO_THREAD_ID: "wrong-thread",
+            OMNYO_ACCOUNT_POOL_PARENT_TOKEN: "synthetic-runtime-shell-value",
           },
           onEvent: (event) => events.push(event),
         },
@@ -302,12 +326,14 @@ describe("createAgentRuntime lifecycle", () => {
             envVars: {
               PATH: "/plugin/bin",
               AUTH_PROXY_URL: "http://127.0.0.1:3334/plugins/env-test/auth",
-              BB_HOST_DAEMON_PORT: "3002",
-              BB_PROJECT_ID: "p1",
-              BB_SERVER_URL: "http://127.0.0.1:3334",
-              BB_THREAD_STORAGE: join(threadStorageRootPath, "t1"),
-              BB_THREAD_ID: "t1",
-              BB_ENVIRONMENT_ID: "env-1",
+              ANTHROPIC_AUTH_TOKEN: "synthetic-runtime-plugin-value",
+              OMNYO_ACCOUNT_POOL_PARENT_TOKEN: "synthetic-runtime-shell-value",
+              OMNYO_HOST_DAEMON_PORT: "3002",
+              OMNYO_PROJECT_ID: "p1",
+              OMNYO_SERVER_URL: "http://127.0.0.1:3334",
+              OMNYO_THREAD_STORAGE: join(threadStorageRootPath, "t1"),
+              OMNYO_THREAD_ID: "t1",
+              OMNYO_ENVIRONMENT_ID: "env-1",
             },
           }),
         }),
@@ -319,18 +345,31 @@ describe("createAgentRuntime lifecycle", () => {
           {
             name: "PATH",
             source: { plugin: "env-test" },
-            value: "/plugin/bin",
+            value: { masked: true },
             reason: "Use the plugin toolchain",
           },
           {
             name: "AUTH_PROXY_URL",
             source: { plugin: "env-test" },
-            value: "http://127.0.0.1:3334/plugins/env-test/auth",
+            value: { masked: true },
             reason: "Use the authenticated server proxy",
           },
         ]),
       });
-      expect(JSON.stringify(events)).toContain("/plugins/env-test/auth");
+
+      const diagnostic = events.find(
+        (event) => event.type === "provider.env-resolved",
+      );
+
+      expect(JSON.stringify(diagnostic)).not.toContain(
+        "synthetic-runtime-plugin-value",
+      );
+      expect(JSON.stringify(diagnostic)).not.toContain(
+        "synthetic-runtime-shell-value",
+      );
+      expect(JSON.stringify(diagnostic)).not.toContain(
+        "/plugins/env-test/auth",
+      );
 
       await runtime.runTurn({
         clientRequestId: "creq_222222224c",
@@ -349,6 +388,7 @@ describe("createAgentRuntime lifecycle", () => {
     it("reinjects rotated machine credentials on the next turn and resume", async () => {
       const record = createScriptedEchoRequestRecord();
       const events: ThreadEvent[] = [];
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -356,6 +396,7 @@ describe("createAgentRuntime lifecycle", () => {
           onEvent: (event) => events.push(event),
         },
       });
+
       const credentials = (value: string) => [
         {
           name: "GH_TOKEN",
@@ -364,6 +405,7 @@ describe("createAgentRuntime lifecycle", () => {
           reason: "Server gh login",
         },
       ];
+
       try {
         await runtime.startThread({
           environmentId: "env-1",
@@ -433,6 +475,7 @@ describe("createAgentRuntime lifecycle", () => {
     it("removes project overrides from a reused runtime on the next turn", async () => {
       const record = createScriptedEchoRequestRecord();
       const events: ThreadEvent[] = [];
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -440,6 +483,7 @@ describe("createAgentRuntime lifecycle", () => {
           onEvent: (event) => events.push(event),
         },
       });
+
       try {
         await runtime.startThread({
           environmentId: "env-project",
@@ -467,7 +511,7 @@ describe("createAgentRuntime lifecycle", () => {
           contributedEnv: [],
         });
         const options = record.last("turn/start")?.params?.options;
-        expect(options).toHaveProperty("envVars.BB_PROJECT_ID", "project-a");
+        expect(options).toHaveProperty("envVars.OMNYO_PROJECT_ID", "project-a");
         expect(options).not.toHaveProperty("envVars.PROJECT_SECRET");
         expect(
           JSON.stringify(
@@ -482,6 +526,7 @@ describe("createAgentRuntime lifecycle", () => {
     it("drops unresolved server paths without preventing thread start", async () => {
       const record = createScriptedEchoRequestRecord();
       const events: ThreadEvent[] = [];
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -527,7 +572,7 @@ describe("createAgentRuntime lifecycle", () => {
             source: { plugin: "env-test" },
             value: { masked: true },
             reason:
-              "Use the authenticated server proxy (dropped: no BB_SERVER_URL)",
+              "Use the authenticated server proxy (dropped: no OMNYO_SERVER_URL)",
           },
         ]),
       });
@@ -545,6 +590,7 @@ describe("createAgentRuntime lifecycle", () => {
 
     it("does not configure provider skills unless skill roots are supplied", async () => {
       const record = createScriptedEchoRequestRecord();
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -570,15 +616,18 @@ describe("createAgentRuntime lifecycle", () => {
     it("configures provider skills from runtime skill roots before thread start", async () => {
       const record = createScriptedEchoRequestRecord();
       const skillRootPath = join(tmpDir, "skill-root");
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
           env: record.env,
           skillRoots: [
             {
-              id: "bb-cli",
+              id: "omnyo-cli",
               path: skillRootPath,
-              skills: [{ name: "bb-cli", description: "Use the bb CLI." }],
+              skills: [
+                { name: "omnyo-cli", description: "Use the omnyo CLI." },
+              ],
             },
           ],
           onEvent: () => undefined,
@@ -596,9 +645,9 @@ describe("createAgentRuntime lifecycle", () => {
       expect(record.last("skills/configure")?.params).toEqual({
         roots: [
           {
-            id: "bb-cli",
+            id: "omnyo-cli",
             path: skillRootPath,
-            skills: [{ name: "bb-cli", description: "Use the bb CLI." }],
+            skills: [{ name: "omnyo-cli", description: "Use the omnyo CLI." }],
           },
         ],
       });
@@ -614,6 +663,7 @@ describe("createAgentRuntime lifecycle", () => {
 
     it("carries changed settings on the next turn without rebuilding the session", async () => {
       const record = createScriptedEchoRequestRecord();
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -700,14 +750,15 @@ describe("createAgentRuntime lifecycle", () => {
 
     it("passes the workspace cwd when resuming a thread", async () => {
       const record = createScriptedEchoRequestRecord();
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
           env: record.env,
           shellEnv: {
-            PATH: "/tmp/bb-bin:/usr/bin",
-            BB_HOST_DAEMON_PORT: "3002",
-            BB_SERVER_URL: "http://127.0.0.1:3334",
+            PATH: "/tmp/omnyo-bin:/usr/bin",
+            OMNYO_HOST_DAEMON_PORT: "3002",
+            OMNYO_SERVER_URL: "http://127.0.0.1:3334",
           },
           onEvent: () => undefined,
         },
@@ -731,12 +782,12 @@ describe("createAgentRuntime lifecycle", () => {
           cwd: tmpDir,
           options: expect.objectContaining({
             envVars: {
-              PATH: "/tmp/bb-bin:/usr/bin",
-              BB_HOST_DAEMON_PORT: "3002",
-              BB_SERVER_URL: "http://127.0.0.1:3334",
-              BB_PROJECT_ID: "p1",
-              BB_THREAD_ID: "t1",
-              BB_ENVIRONMENT_ID: "env-1",
+              PATH: "/tmp/omnyo-bin:/usr/bin",
+              OMNYO_HOST_DAEMON_PORT: "3002",
+              OMNYO_SERVER_URL: "http://127.0.0.1:3334",
+              OMNYO_PROJECT_ID: "p1",
+              OMNYO_THREAD_ID: "t1",
+              OMNYO_ENVIRONMENT_ID: "env-1",
             },
           }),
         }),
@@ -750,6 +801,7 @@ describe("createAgentRuntime lifecycle", () => {
     it("drops replayed completed turn starts before emitting to consumers", async () => {
       const events: ThreadEvent[] = [];
       const stderr: string[] = [];
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -800,6 +852,7 @@ describe("createAgentRuntime lifecycle", () => {
 
     it("runs the initial turn when startThread includes input", async () => {
       const events: ThreadEvent[] = [];
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -830,6 +883,7 @@ describe("createAgentRuntime lifecycle", () => {
 
     it("does not start a turn until input is sent separately", async () => {
       const events: ThreadEvent[] = [];
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -876,6 +930,7 @@ describe("createAgentRuntime lifecycle", () => {
     it("preserves active turn state when the stop request fails", async () => {
       const events: ThreadEvent[] = [];
       const record = createScriptedEchoRequestRecord();
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -904,6 +959,7 @@ describe("createAgentRuntime lifecycle", () => {
         input: [promptTextInput({ text: "delay:500" })],
         options: fullRuntimeOptions,
       });
+
       const { turnId } = await waitForThreadTurnStarted({
         events,
         providerId: "fake",
@@ -935,6 +991,7 @@ describe("createAgentRuntime lifecycle", () => {
 
     it("retires the provider after thread stop and starts it for resume", async () => {
       const events: ThreadEvent[] = [];
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -949,6 +1006,7 @@ describe("createAgentRuntime lifecycle", () => {
         providerId: "fake",
         options: fullRuntimeOptions,
       });
+
       expect(runtime.listRunningProviders()).toEqual(["fake"]);
       expect(runtime.hasThread("t1")).toBe(true);
       expect(runtime.getProviderSession("t1")).toEqual({
@@ -990,6 +1048,7 @@ describe("createAgentRuntime lifecycle", () => {
     it("resolves waitForActiveTurn and rejects a competing start while active", async () => {
       const events: ThreadEvent[] = [];
       const record = createScriptedEchoRequestRecord();
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -1007,15 +1066,17 @@ describe("createAgentRuntime lifecycle", () => {
       });
       expect(runtime.getActiveTurnId("t1")).toBeNull();
 
-      const pendingTurnId = runtime.waitForActiveTurn("t1", {
-        timeoutMs: 5_000,
-      });
       await runtime.runTurn({
         clientRequestId: "creq_222222223t",
         threadId: "t1",
         input: [promptTextInput({ text: "delay:500" })],
         options: fullRuntimeOptions,
       });
+
+      const pendingTurnId = runtime.waitForActiveTurn("t1", {
+        timeoutMs: 5_000,
+      });
+
       const { turnId } = await waitForThreadTurnStarted({
         events,
         providerId: "fake",
@@ -1040,8 +1101,148 @@ describe("createAgentRuntime lifecycle", () => {
       await runtime.shutdown();
     });
 
+    it("resolves waitForActiveTurn with null at once when no turn is starting", async () => {
+      const runtime = createScriptedEchoRuntime({
+        runtime: {
+          workspacePath: tmpDir,
+          onEvent: () => {},
+        },
+      });
+
+      try {
+        await runtime.startThread({
+          environmentId: "env-1",
+          threadId: "t1",
+          projectId: "p1",
+          providerId: "fake",
+          options: fullRuntimeOptions,
+        });
+        expect(runtime.hasThread("t1")).toBe(true);
+
+        const startedAt = performance.now();
+        await expect(
+          runtime.waitForActiveTurn("t1", { timeoutMs: 60_000 }),
+        ).resolves.toBeNull();
+        expect(performance.now() - startedAt).toBeLessThan(1_000);
+      } finally {
+        await runtime.shutdown();
+      }
+    });
+
+    it("waits for a turn whose runTurn call has not reached the provider yet", async () => {
+      const events: ThreadEvent[] = [];
+
+      const runtime = createScriptedEchoRuntime({
+        runtime: {
+          workspacePath: tmpDir,
+          onEvent: (event) => events.push(event),
+        },
+      });
+
+      try {
+        await runtime.startThread({
+          environmentId: "env-1",
+          threadId: "t1",
+          projectId: "p1",
+          providerId: "fake",
+          options: fullRuntimeOptions,
+        });
+
+        const run = runtime.runTurn({
+          clientRequestId: "creq_222222224e",
+          threadId: "t1",
+          input: [promptTextInput({ text: "delay:500" })],
+          options: fullRuntimeOptions,
+        });
+
+        const awaitedTurnId = runtime.waitForActiveTurn("t1", {
+          timeoutMs: 5_000,
+        });
+
+        await run;
+
+        const { turnId } = await waitForThreadTurnStarted({
+          events,
+          providerId: "fake",
+          runtime,
+          threadId: "t1",
+        });
+
+        await expect(awaitedTurnId).resolves.toBe(turnId);
+      } finally {
+        await runtime.shutdown();
+      }
+    });
+
+    it("resolves waitForActiveTurn with null once an in-flight operation ends without a turn", async () => {
+      const runtime = createScriptedEchoRuntime({
+        runtime: {
+          workspacePath: tmpDir,
+          onEvent: () => {},
+        },
+      });
+
+      try {
+        const start = runtime.startThread({
+          environmentId: "env-1",
+          threadId: "t1",
+          projectId: "p1",
+          providerId: "fake",
+          options: fullRuntimeOptions,
+        });
+
+        const startedAt = performance.now();
+
+        const awaitedTurnId = runtime.waitForActiveTurn("t1", {
+          timeoutMs: 60_000,
+        });
+
+        await start;
+
+        await expect(awaitedTurnId).resolves.toBeNull();
+        expect(performance.now() - startedAt).toBeLessThan(5_000);
+      } finally {
+        await runtime.shutdown();
+      }
+    });
+
+    it("keeps waiting for the active turn while a turn start is pending", async () => {
+      const runtime = createScriptedEchoRuntime({
+        runtime: {
+          workspacePath: tmpDir,
+          onEvent: () => {},
+        },
+        launch: { scripted: { swallowTurnStart: true } },
+      });
+
+      try {
+        await runtime.startThread({
+          environmentId: "env-1",
+          threadId: "t1",
+          projectId: "p1",
+          providerId: "fake",
+          options: fullRuntimeOptions,
+        });
+        await runtime.runTurn({
+          clientRequestId: "creq_222222224c",
+          threadId: "t1",
+          input: [promptTextInput({ text: "wait for first event" })],
+          options: fullRuntimeOptions,
+        });
+
+        const startedAt = performance.now();
+        await expect(
+          runtime.waitForActiveTurn("t1", { timeoutMs: 300 }),
+        ).resolves.toBeNull();
+        expect(performance.now() - startedAt).toBeGreaterThanOrEqual(250);
+      } finally {
+        await runtime.shutdown();
+      }
+    });
+
     it("reports pending work and rejects a competing start before the first event", async () => {
       const record = createScriptedEchoRequestRecord();
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -1090,7 +1291,9 @@ describe("createAgentRuntime lifecycle", () => {
           workspacePath: tmpDir,
           onEvent: () => {},
         },
-        launch: { scripted: { exitAfter: "thread/start" } },
+        launch: {
+          scripted: { swallowTurnStart: true, exitAfter: "turn/start" },
+        },
       });
 
       await runtime.startThread({
@@ -1100,6 +1303,13 @@ describe("createAgentRuntime lifecycle", () => {
         providerId: "fake",
         options: fullRuntimeOptions,
       });
+      await runtime.runTurn({
+        clientRequestId: "creq_222222224d",
+        threadId: "t1",
+        input: [promptTextInput({ text: "never starts" })],
+        options: fullRuntimeOptions,
+      });
+
       const pendingTurnId = runtime.waitForActiveTurn("t1", {
         timeoutMs: 30_000,
       });
@@ -1112,6 +1322,7 @@ describe("createAgentRuntime lifecycle", () => {
 
     it("carries changed settings and instructions on later run turns", async () => {
       const record = createScriptedEchoRequestRecord();
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -1154,6 +1365,7 @@ describe("createAgentRuntime lifecycle", () => {
     it("carries changed settings and instructions on steer turns", async () => {
       const record = createScriptedEchoRequestRecord();
       const events: ThreadEvent[] = [];
+
       const runtime = createScriptedEchoRuntime({
         runtime: {
           workspacePath: tmpDir,
@@ -1177,12 +1389,14 @@ describe("createAgentRuntime lifecycle", () => {
         options: { ...fullRuntimeOptions, model: "fake-model" },
         instructions: "Initial instructions",
       });
+
       const { turnId } = await waitForThreadTurnStarted({
         events,
         providerId: "fake",
         runtime,
         threadId: "t1",
       });
+
       const methodsBeforeSteer = recordedMethods(record).length;
 
       await runtime.steerTurn({

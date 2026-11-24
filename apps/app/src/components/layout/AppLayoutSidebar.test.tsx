@@ -9,7 +9,8 @@ import {
 } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { MOTION_DURATION_MS } from "@omnyo/shared-ui/motion";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   SidebarProvider,
   SidebarTrigger,
@@ -20,17 +21,19 @@ import {
   type AppLayoutSidebarMode,
 } from "./AppLayoutSidebar";
 
-vi.mock("@/views/useMobileRecentsThreadReveal", () => ({
-  useMobileRecentsThreadReveal: () => {},
-}));
-
 const mountCounts = vi.hoisted(() => ({ appSidebar: 0 }));
 
 vi.mock("@/components/sidebar/AppSidebar", async () => {
   const { Sidebar } = await vi.importActual<
     typeof import("@/components/ui/sidebar")
   >("@/components/ui/sidebar");
+
   const { useEffect } = await vi.importActual<typeof import("react")>("react");
+
+  const { useSidebarFooterState } = await vi.importActual<
+    typeof import("@/components/sidebar/SidebarFooterState")
+  >("@/components/sidebar/SidebarFooterState");
+
   return {
     AppSidebar: ({
       isBodyHidden,
@@ -46,11 +49,14 @@ vi.mock("@/components/sidebar/AppSidebar", async () => {
       alternateBody: ReactNode;
       railFooter: ReactNode;
     }) => {
+      const footer = useSidebarFooterState();
+
       useEffect(() => {
         mountCounts.appSidebar += 1;
       }, []);
+
       return (
-        <Sidebar>
+        <Sidebar data-footer-customizing={footer.isCustomizing}>
           {renderRail({ isOpen: false, onOpenChange: () => {} })}
           <div data-testid="app-sidebar-body" hidden={isBodyHidden}>
             App sidebar
@@ -93,7 +99,7 @@ vi.mock("@/components/tools/ResourceSidebar", () => ({
   ),
 }));
 
-const MOBILE_TOGGLE_SETTLE_MS = 220;
+const MOBILE_TOGGLE_SETTLE_MS = MOTION_DURATION_MS.drawer;
 
 function settleMobileToggle() {
   act(() => {
@@ -103,17 +109,21 @@ function settleMobileToggle() {
 
 function getMobilePanel(): HTMLElement {
   const panel = document.querySelector('[data-sidebar="panel"]');
+
   if (!(panel instanceof HTMLElement)) {
     throw new Error("Expected the mobile sidebar panel");
   }
+
   return panel;
 }
 
 function getShelfRevealTranslate(): string {
   const backdrop = document.querySelector("[data-sidebar-mobile-backdrop]");
+
   if (!(backdrop instanceof HTMLElement)) {
     throw new Error("Expected the mobile sidebar backdrop");
   }
+
   return backdrop.style.translate;
 }
 
@@ -124,6 +134,7 @@ function getAppSidebarBody(): HTMLElement {
 function SidebarModeHarness() {
   const [mode, setMode] = useState<AppLayoutSidebarMode>("app");
   const closeMobileSidebar = useCloseMobileSidebar();
+
   const navigate = (nextMode: AppLayoutSidebarMode) => {
     closeMobileSidebar();
     setMode(nextMode);
@@ -150,7 +161,7 @@ function SidebarModeHarness() {
         mode={mode}
         onResizeMouseDown={() => {}}
         isResizing={false}
-        settingsRoutePath="/settings"
+        settingsToggleRoutePath="/settings"
       />
       <SidebarTrigger />
     </>

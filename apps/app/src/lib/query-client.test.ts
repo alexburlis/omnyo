@@ -21,18 +21,21 @@ describe("createAppQueryClient", () => {
       },
       showMutationErrorToasts: false,
     });
+
     queryClient.mount();
 
     const queryFn = vi
       .fn<() => Promise<string>>()
       .mockRejectedValueOnce(new Error("mobile page restore interrupted fetch"))
       .mockResolvedValueOnce("loaded");
+
     const observer = new QueryObserver(queryClient, {
       queryKey: ["mobile-restore"],
       queryFn,
       refetchOnWindowFocus: true,
       staleTime: 60_000,
     });
+
     const unsubscribe = observer.subscribe(() => {});
 
     await vi.waitFor(() => {
@@ -60,11 +63,13 @@ describe("createAppQueryClient", () => {
       },
       showMutationErrorToasts: false,
     });
+
     const lifecycleEvents = installAppQueryClientBrowserEvents(queryClient);
     queryClient.mount();
 
     const signals: AbortSignal[] = [];
     const resolveFetches: Array<(value: string) => void> = [];
+
     const queryFn = vi.fn(
       ({ signal }: { signal: AbortSignal }) =>
         new Promise<string>((resolve, reject) => {
@@ -79,12 +84,14 @@ describe("createAppQueryClient", () => {
           );
         }),
     );
+
     const observer = new QueryObserver(queryClient, {
       queryKey: ["mobile-suspend"],
       queryFn,
       refetchOnWindowFocus: true,
       staleTime: 60_000,
     });
+
     const unsubscribe = observer.subscribe(() => {});
 
     await vi.waitFor(() => {
@@ -126,14 +133,17 @@ describe("createAppQueryClient", () => {
       },
       showMutationErrorToasts: false,
     });
+
     queryClient.mount();
 
     const queryFn = vi.fn(() => Promise.resolve("data"));
+
     const observer = new QueryObserver(queryClient, {
       queryKey: ["focus-ungated"],
       queryFn,
       staleTime: 0,
     });
+
     const unsubscribe = observer.subscribe(() => {});
 
     await vi.waitFor(() => {
@@ -152,6 +162,7 @@ describe("createAppQueryClient", () => {
 
   it("skips the default focus refetch while the gate reports realtime coverage", async () => {
     let realtimeConnected = true;
+
     const queryClient = createAppQueryClient({
       defaultOptions: {
         queries: {
@@ -161,14 +172,17 @@ describe("createAppQueryClient", () => {
       shouldRefetchOnWindowFocus: () => !realtimeConnected,
       showMutationErrorToasts: false,
     });
+
     queryClient.mount();
 
     const queryFn = vi.fn(() => Promise.resolve("data"));
+
     const observer = new QueryObserver(queryClient, {
       queryKey: ["focus-gated"],
       queryFn,
       staleTime: 0,
     });
+
     const unsubscribe = observer.subscribe(() => {});
 
     await vi.waitFor(() => {
@@ -200,14 +214,17 @@ describe("createAppQueryClient", () => {
       },
       showMutationErrorToasts: false,
     });
+
     queryClient.mount();
 
     const queryFn = vi.fn(() => Promise.resolve("data"));
+
     const observer = new QueryObserver(queryClient, {
       queryKey: ["reconnect-ungated"],
       queryFn,
       staleTime: 0,
     });
+
     const unsubscribe = observer.subscribe(() => {});
 
     await vi.waitFor(() => {
@@ -227,6 +244,7 @@ describe("createAppQueryClient", () => {
 
   it("skips the default reconnect refetch while the gate reports realtime coverage", async () => {
     let realtimeConnected = true;
+
     const queryClient = createAppQueryClient({
       defaultOptions: {
         queries: {
@@ -236,14 +254,17 @@ describe("createAppQueryClient", () => {
       shouldRefetchOnWindowFocus: () => !realtimeConnected,
       showMutationErrorToasts: false,
     });
+
     queryClient.mount();
 
     const queryFn = vi.fn(() => Promise.resolve("data"));
+
     const observer = new QueryObserver(queryClient, {
       queryKey: ["reconnect-gated"],
       queryFn,
       staleTime: 0,
     });
+
     const unsubscribe = observer.subscribe(() => {});
 
     await vi.waitFor(() => {
@@ -277,10 +298,12 @@ describe("createAppQueryClient", () => {
       },
       showMutationErrorToasts: false,
     });
+
     const lifecycleEvents = installAppQueryClientBrowserEvents(queryClient);
     queryClient.mount();
 
     const resolveFetches: Array<(value: string) => void> = [];
+
     const queryFn = vi.fn(
       ({ signal }: { signal: AbortSignal }) =>
         new Promise<string>((resolve, reject) => {
@@ -294,20 +317,24 @@ describe("createAppQueryClient", () => {
           );
         }),
     );
+
     const observer = new QueryObserver(queryClient, {
       queryKey: ["realtime-owned-first-load"],
       queryFn,
       refetchOnWindowFocus: false,
       staleTime: 60_000,
     });
+
     const unsubscribe = observer.subscribe(() => {});
     const settledFn = vi.fn(() => Promise.resolve("settled"));
+
     const settledObserver = new QueryObserver(queryClient, {
       queryKey: ["settled"],
       queryFn: settledFn,
       refetchOnWindowFocus: false,
       staleTime: 60_000,
     });
+
     const unsubscribeSettled = settledObserver.subscribe(() => {});
 
     await vi.waitFor(() => {

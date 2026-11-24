@@ -1,4 +1,4 @@
-import type { SystemMachineProvider } from "@bb/server-contract";
+import type { SystemMachineProvider } from "@omnyo/server-contract";
 import modalLogoUrl from "../../../../../../plugins/environment-modal-sandbox/modal-logo.svg?url";
 import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
 import { ResponsiveStage } from "./banner-story-stages";
@@ -78,7 +78,7 @@ export function States() {
       </StoryRow>
       <StoryRow
         label="resume failed"
-        hint="the error stays with the status and offers Retry"
+        hint="the failure is named in the header and the reason stays visible under it, with Try again"
       >
         <ResponsiveStage>
           <ThreadMachineStatusBanner
@@ -94,7 +94,10 @@ export function States() {
           />
         </ResponsiveStage>
       </StoryRow>
-      <StoryRow label="long machine name">
+      <StoryRow
+        label="long machine name"
+        hint="the banner names the state, not the machine, so a long host name leaves it unchanged"
+      >
         <ResponsiveStage>
           <PausedMachine hostName="Production dashboard development sandbox" />
         </ResponsiveStage>

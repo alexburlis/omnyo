@@ -29,6 +29,7 @@ function withAccountServerUrls(
   credential: ConnectCredential,
 ): AccountServerWithUrl[] {
   const base = deriveConnectBaseUrl(credential.serverUrl);
+
   return servers.map((server) => ({
     ...server,
     url: serverUrlForHandle(base, server.handle),
@@ -41,10 +42,12 @@ async function fetchAccountServers(
 ): Promise<AccountServer[]> {
   const url = `${credential.serverUrl.replace(/\/$/, "")}/api/connect/servers`;
   let res: Response;
+
   try {
     res = await fetchImpl(url, {
       method: "GET",
-      headers: { "x-bb-connect-machine": credential.credential },
+      redirect: "error",
+      headers: { "x-omnyo-connect-machine": credential.credential },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -57,6 +60,7 @@ async function fetchAccountServers(
       `List servers failed (${res.status}): not authorized`,
     );
   }
+
   if (!res.ok) {
     throw new ConnectListError(
       "network",
@@ -65,6 +69,7 @@ async function fetchAccountServers(
   }
 
   let raw: unknown;
+
   try {
     raw = await res.json();
   } catch {
@@ -75,12 +80,14 @@ async function fetchAccountServers(
   }
 
   const parsed = accountServersResponseSchema.safeParse(raw);
+
   if (!parsed.success) {
     throw new ConnectListError(
       "invalid_response",
       "List servers response failed schema validation",
     );
   }
+
   return parsed.data.servers;
 }
 
@@ -92,5 +99,6 @@ export async function listAccountServers(
     await fetchAccountServers(credential, fetchImpl),
     credential,
   );
+
   return { servers, selfHandle: credential.handle };
 }

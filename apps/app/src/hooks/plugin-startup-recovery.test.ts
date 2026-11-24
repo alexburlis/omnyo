@@ -15,12 +15,14 @@ import { definePluginApp } from "@/lib/plugin-app-definition";
 import { makeInstalledPlugin } from "@/test/fixtures/plugins";
 
 const scheduled = vi.hoisted(() => ({ run: () => {} }));
+
 vi.mock("@/lib/plugin-frontend-lazy", () => ({
   schedulePluginFrontendReconcile: () => scheduled.run(),
 }));
 
 afterEach(() => {
   scheduled.run = () => {};
+
   vi.unstubAllGlobals();
 });
 
@@ -30,6 +32,7 @@ it.each(["initial connect", "reconnect", "reload notification"])(
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: Infinity } },
     });
+
     const plugins = ["first", "second"].map((id) =>
       makeInstalledPlugin({
         id,
@@ -47,6 +50,7 @@ it.each(["initial connect", "reconnect", "reload notification"])(
         },
       }),
     );
+
     queryClient.setQueryData(
       pluginListQueryKey(true),
       plugins.map((plugin) => ({
@@ -59,6 +63,7 @@ it.each(["initial connect", "reconnect", "reload notification"])(
     vi.stubGlobal("fetch", fetch);
     const state = createPluginFrontendReconcileState();
     const register = vi.fn();
+
     const deps: PluginFrontendReconcileDeps = {
       fetchCandidates: () => fetchFrontendCandidates(queryClient),
       importModule: async () => ({ default: definePluginApp(() => {}) }),
@@ -71,6 +76,7 @@ it.each(["initial connect", "reconnect", "reload notification"])(
       warn: () => {},
       routePluginId: () => null,
     };
+
     const effects = createRealtimeCacheEffects({ queryClient });
     let reconcile = Promise.resolve();
     scheduled.run = () => {
@@ -78,10 +84,12 @@ it.each(["initial connect", "reconnect", "reload notification"])(
         reconcilePluginFrontends(state, deps),
       );
     };
+
     try {
       await reconcilePluginFrontends(state, deps);
       expect(register).not.toHaveBeenCalled();
       expect(fetch).not.toHaveBeenCalled();
+
       if (trigger === "reload notification") {
         effects.handleChanged({
           type: "changed",
@@ -95,6 +103,7 @@ it.each(["initial connect", "reconnect", "reload notification"])(
             : { reconnected: false },
         );
       }
+
       await reconcile;
       expect([...state.activeGenerations.keys()].sort()).toEqual([
         "first",

@@ -1,6 +1,6 @@
 import { statfs } from "node:fs/promises";
-import type { AppSurface } from "@bb/config/app-surface";
-import type { ServerBindHost } from "@bb/config/server";
+import type { AppSurface } from "@omnyo/config/app-surface";
+import type { ServerBindHost } from "@omnyo/config/server";
 import type {
   AppDeps,
   LoggedPendingInteractionWorkSessionDeps,
@@ -14,14 +14,17 @@ import type {
   ServerMoveTimings,
 } from "./coordinator.js";
 import { exportServerArchive } from "./export.js";
-import { createFullBbAppArtifactService } from "./full-artifact.js";
+import { SERVER_EXPORT_FREE_SPACE } from "./export-snapshot.js";
+import { createFullOmnyoAppArtifactService } from "./full-artifact.js";
 import { CONNECT_HOLD_SOURCES } from "./connect-hold.js";
 import { resolveServerMoveMode } from "./mode.js";
 import { stopRunningServerWork } from "./stop-work.js";
 
 export const SERVER_MOVE_ALLOW_LOOPBACK_URL_ENV =
-  "BB_SERVER_MOVE_ALLOW_LOOPBACK_URL";
-export const SERVER_MOVE_TARGET_PORT_ENV = "BB_SERVER_MOVE_TARGET_PORT";
+  "OMNYO_SERVER_MOVE_ALLOW_LOOPBACK_URL";
+
+export const SERVER_MOVE_TARGET_PORT_ENV = "OMNYO_SERVER_MOVE_TARGET_PORT";
+
 const SERVER_MOVE_ARCHIVE_FILE_NAME = "server.tar.gz";
 
 export const SERVER_MOVE_TIMINGS: ServerMoveTimings = {
@@ -52,6 +55,7 @@ export async function readDiskFreeBytes(path: string): Promise<number | null> {
   try {
     const stats = await statfs(path);
     const free = Number(stats.bavail) * Number(stats.bsize);
+
     return Number.isSafeInteger(free) && free >= 0 ? free : null;
   } catch {
     return null;
@@ -66,15 +70,19 @@ export function parseServerMoveTargetPort(
   env: NodeJS.ProcessEnv,
 ): number | null {
   const raw = env[SERVER_MOVE_TARGET_PORT_ENV];
+
   if (raw === undefined || raw.trim().length === 0) {
     return null;
   }
+
   const port = Number(raw);
+
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error(
       `${SERVER_MOVE_TARGET_PORT_ENV} must be a port between 1 and 65535`,
     );
   }
+
   return port;
 }
 
@@ -83,12 +91,14 @@ export function resumeServerMoveDeferredWork(
 ): void {
   for (const hostId of deps.hub.listConnectedHostIds()) {
     const daemonSessionId = deps.hub.getDaemonSessionIdForHost(hostId);
+
     if (daemonSessionId !== null) {
       deps.terminalSessions.reconcileDisconnectedHostTerminals({
         daemonSessionId,
         hostId,
       });
     }
+
     requestQueuedMessageDispatch(deps, { hostId, kind: "host-connected" });
     void resumeEnvironmentProvisioningForHost(deps, { hostId }).catch(
       (error: unknown) => {
@@ -106,6 +116,7 @@ export function createDefaultServerMoveEnvironment(
 ): ServerMoveEnvironment {
   const { deps, pluginService } = args;
   const targetPortOverride = parseServerMoveTargetPort(args.env);
+
   return {
     allowLoopbackServerUrl: allowsLoopbackServerMoveUrl(args.env),
     bindHost: args.bindHost,
@@ -116,24 +127,27 @@ export function createDefaultServerMoveEnvironment(
         dataDir: deps.config.dataDir,
         db: deps.db,
         fileName: SERVER_MOVE_ARCHIVE_FILE_NAME,
+        freeSpace: SERVER_EXPORT_FREE_SPACE,
         logger: deps.logger,
         now: Date.now(),
         sourceServerHostId: exportArgs.sourceServerHostId,
+        vault: deps.vault,
         workDir: exportArgs.workDir,
       }),
-    fullArtifact: createFullBbAppArtifactService({
+    fullArtifact: createFullOmnyoAppArtifactService({
       dataDir: deps.config.dataDir,
       serverEntryUrl: args.serverEntryUrl,
     }),
     now: Date.now,
     plugins: {
       resumeSuspended: async () => {
-        await pluginService.resumeSuspendedPlugins();
+        await pluginService.resumeMaintenancePlugins();
       },
       setSchedulesPaused: (paused) => pluginService.setSchedulesPaused(paused),
       stop: () => pluginService.stop(),
       suspendAllButConnect: async () => {
         await pluginService.suspendPlugins({
+          strict: true,
           keep: (plugin) =>
             CONNECT_HOLD_SOURCES.some((source) => source === plugin.source),
         });
@@ -147,6 +161,7 @@ export function createDefaultServerMoveEnvironment(
         hostId,
         signal,
       });
+
       return { serverUrl: grant.serverUrl, headers: grant.headers ?? {} };
     },
     resumeDeferredWork: () => resumeServerMoveDeferredWork(deps),

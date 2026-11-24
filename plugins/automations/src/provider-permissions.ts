@@ -1,9 +1,9 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import type { AgentEnvironment, PermissionMode } from "./rpc-types.js";
 
 type ProviderPermissionApi = {
   sdk: {
-    providers: Pick<BbPluginApi["sdk"]["providers"], "list">;
+    providers: Pick<PluginApi["sdk"]["providers"], "list">;
   };
 };
 
@@ -17,23 +17,27 @@ export function providerRoutingForEnvironment(
   if (environment.type === "reuse") {
     return { environmentId: environment.environmentId };
   }
+
   if (environment.type === "host" && environment.hostId !== undefined) {
     return { hostId: environment.hostId };
   }
+
   return {};
 }
 
 export async function resolvePermissionMode(
-  bb: ProviderPermissionApi,
+  api: ProviderPermissionApi,
   providerId: string,
   requested: PermissionMode | undefined,
   routing: ProviderRouting = {},
 ): Promise<PermissionMode> {
-  const providers = await bb.sdk.providers.list(routing);
+  const providers = await api.sdk.providers.list(routing);
   const provider = providers.find((candidate) => candidate.id === providerId);
+
   if (provider === undefined || provider.available === false) {
     throw new Error(`Provider ${providerId} is not available.`);
   }
+
   if (
     requested !== undefined &&
     !provider.capabilities.permissionModes.includes(requested)
@@ -42,13 +46,17 @@ export async function resolvePermissionMode(
       `Permission mode ${requested} is not supported by provider ${providerId}.`,
     );
   }
+
   if (requested !== undefined) return requested;
+
   if (provider.capabilities.permissionModes.includes("auto")) {
     return "auto";
   }
+
   if (provider.capabilities.permissionModes.includes("full")) {
     return "full";
   }
+
   throw new Error(
     `Provider ${providerId} has no supported default permission mode.`,
   );

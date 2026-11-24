@@ -1,4 +1,8 @@
 import {
+  experimental_importLegacyOwnedToolNameV1 as importLegacyOwnedToolNameV1,
+  experimental_LEGACY_BRIDGE_MCP_SERVER_V1 as LEGACY_BRIDGE_MCP_SERVER_V1,
+} from "@omnyo/plugin-sdk/provider-bridge";
+import {
   type DeltaItemShape,
   type DeltaPresentation,
   type ThreadEventPlanStep,
@@ -10,7 +14,7 @@ import {
   experimental_webSearchPresentation as webSearchPresentation,
   toOptionalRecord,
   toOptionalString,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { z } from "zod";
 import {
   builtinToolPresentation,
@@ -38,9 +42,9 @@ export interface ClaudeInjectedTool {
   presentation?: DeltaPresentation;
 }
 
-export const BB_BRIDGE_MCP_SERVER_NAME = "bb-bridge";
+export const OMNYO_BRIDGE_MCP_SERVER_NAME = "omnyo-bridge";
 
-const BB_TOOL_SERVER = "bb";
+const OMNYO_TOOL_SERVER = "omnyo";
 
 const claudeBackgroundFlagSchema = z
   .object({ run_in_background: z.boolean().optional() })
@@ -111,15 +115,20 @@ export function parseClaudeBashCommand(
   input: unknown,
 ): ClaudeBashCommand | null {
   const parsed = bashArgsSchema.safeParse(input);
+
   if (!parsed.success) {
     return null;
   }
+
   const command = toOptionalString(parsed.data.command);
+
   if (!command) {
     return null;
   }
+
   const background = claudeBackgroundFlagSchema.safeParse(input);
   const sandboxOverride = claudeSandboxOverrideFlagSchema.safeParse(input);
+
   return {
     command,
     cwd: toOptionalString(parsed.data.cwd) ?? null,
@@ -137,6 +146,7 @@ export function getClaudeFileEditPath(args: ClaudeFileEditArgs): string | null {
 
 function genericTool(toolName: string, args: unknown): ClaudeClassifiedTool {
   const toolArguments = toOptionalRecord(args);
+
   return {
     shape: {
       type: "tool",
@@ -153,9 +163,11 @@ export function parseClaudeMcpToolName(
   toolName: string,
 ): { server: string; tool: string } | null {
   const match = MCP_TOOL_NAME_PATTERN.exec(toolName);
+
   if (!match?.[1] || !match[2]) {
     return null;
   }
+
   return { server: match[1], tool: match[2] };
 }
 
@@ -165,6 +177,7 @@ function mcpTool(
   args: unknown,
 ): ClaudeClassifiedTool {
   const toolArguments = toOptionalRecord(args);
+
   return {
     shape: {
       type: "tool",
@@ -188,20 +201,27 @@ export function todoWritePlanSteps(
   args: unknown,
 ): ThreadEventPlanStep[] | null {
   const parsed = claudeTodoWriteArgsSchema.safeParse(args);
+
   if (!parsed.success) {
     return null;
   }
+
   const steps: ThreadEventPlanStep[] = [];
+
   for (const todo of parsed.data.todos) {
     const status = PLAN_STEP_STATUSES[todo.status];
+
     if (status === undefined) continue;
+
     const text =
       status === "active" && todo.activeForm !== undefined
         ? todo.activeForm.trim()
         : todo.content.trim();
+
     if (text.length === 0) continue;
     steps.push({ step: text, status });
   }
+
   return steps;
 }
 
@@ -211,17 +231,22 @@ function classifyFileChange(
   args: unknown,
 ): ClaudeClassifiedTool {
   const parsed = claudeFileEditArgsSchema.safeParse(args);
+
   if (!parsed.success) {
     return genericTool(toolName, args);
   }
+
   const path = getClaudeFileEditPath(parsed.data);
+
   if (!path) {
     return {
       shape: { type: "tool", tool: toolName, args: parsed.data },
       presentation: fileChangePresentation({ verb, path: null }),
     };
   }
+
   const newText = parsed.data.new_string ?? parsed.data.content;
+
   return {
     shape: {
       type: "fileChange",
@@ -245,9 +270,11 @@ function classifyMultiEdit(
   args: unknown,
 ): ClaudeClassifiedTool {
   const parsed = claudeMultiEditArgsSchema.safeParse(args);
+
   if (!parsed.success) {
     return classifyFileChange(toolName, "edit", args);
   }
+
   return {
     shape: {
       type: "fileChange",
@@ -270,9 +297,11 @@ function classifyNotebookEdit(
   args: unknown,
 ): ClaudeClassifiedTool {
   const parsed = claudeNotebookEditArgsSchema.safeParse(args);
+
   if (!parsed.success) {
     return genericTool(toolName, args);
   }
+
   return {
     shape: {
       type: "fileChange",
@@ -299,15 +328,19 @@ function classifyDelegation(
   args: unknown,
 ): ClaudeClassifiedTool {
   const parsed = claudeAgentArgsSchema.safeParse(args);
+
   if (!parsed.success) {
     return genericTool(toolName, args);
   }
+
   const description =
     toOptionalString(parsed.data.description) ??
     toOptionalString(parsed.data.prompt)?.split("\n", 1)[0]?.trim() ??
     toOptionalString(parsed.data.subagent_type) ??
     toolName;
+
   const background = parsed.data.run_in_background === true;
+
   return {
     shape: {
       type: "delegation",
@@ -324,17 +357,18 @@ function classifyDelegation(
   };
 }
 
-function bbTool(
+function omnyoTool(
   tool: string,
   args: unknown,
   injected: ClaudeInjectedTool | undefined,
 ): ClaudeClassifiedTool {
   const toolArguments = toOptionalRecord(args);
+
   return {
     shape: {
       type: "tool",
       tool,
-      server: BB_TOOL_SERVER,
+      server: OMNYO_TOOL_SERVER,
       ...(toolArguments ? { args: toolArguments } : {}),
     },
     presentation: injected?.presentation ?? toolPresentation(tool),
@@ -349,9 +383,11 @@ export function classifyClaudeToolUse(args: {
   sandboxEnabled: boolean;
 }): ClaudeClassifiedTool {
   const { toolName, toolUseId, input, sandboxEnabled } = args;
+
   switch (toolName) {
     case "Bash": {
       const command = parseClaudeBashCommand(input);
+
       return command
         ? {
             shape: {
@@ -366,12 +402,15 @@ export function classifyClaudeToolUse(args: {
           }
         : genericTool(toolName, input);
     }
+
     case "Read": {
       const parsed = claudeReadArgsSchema.safeParse(input);
+
       const path = parsed.success
         ? (toOptionalString(parsed.data.file_path) ??
           toOptionalString(parsed.data.path))
         : undefined;
+
       return path
         ? {
             shape: { type: "fileRead", path },
@@ -379,19 +418,25 @@ export function classifyClaudeToolUse(args: {
           }
         : genericTool(toolName, input);
     }
+
     case "Grep":
     case "Glob": {
       const parsed = claudeSearchArgsSchema.safeParse(input);
+
       const query = parsed.success
         ? toOptionalString(parsed.data.pattern)
         : undefined;
+
       if (!query) {
         return genericTool(toolName, input);
       }
+
       const mode = toolName === "Grep" ? "content" : "path";
+
       const path = parsed.success
         ? toOptionalString(parsed.data.path)
         : undefined;
+
       return {
         shape: {
           type: "search",
@@ -402,6 +447,7 @@ export function classifyClaudeToolUse(args: {
         presentation: searchPresentation({ mode, query }),
       };
     }
+
     case "Edit":
       return classifyFileChange(toolName, "edit", input);
     case "Write":
@@ -412,9 +458,11 @@ export function classifyClaudeToolUse(args: {
       return classifyNotebookEdit(toolName, input);
     case "WebSearch": {
       const parsed = claudeWebSearchArgsSchema.safeParse(input);
+
       const query = parsed.success
         ? toOptionalString(parsed.data.query)
         : undefined;
+
       return query
         ? {
             shape: { type: "webSearch", queries: [query] },
@@ -422,11 +470,14 @@ export function classifyClaudeToolUse(args: {
           }
         : genericTool(toolName, input);
     }
+
     case "WebFetch": {
       const parsed = claudeWebFetchArgsSchema.safeParse(input);
+
       const url = parsed.success
         ? toOptionalString(parsed.data.url)
         : undefined;
+
       return url
         ? {
             shape: {
@@ -441,22 +492,39 @@ export function classifyClaudeToolUse(args: {
           }
         : genericTool(toolName, input);
     }
+
     case "Agent":
     case "Task":
       return classifyDelegation(toolName, toolUseId, input);
     case "TodoWrite": {
       const classified = genericTool(toolName, input);
       const planSteps = todoWritePlanSteps(input);
+
       return planSteps === null ? classified : { ...classified, planSteps };
     }
+
     default: {
       const mcp = parseClaudeMcpToolName(toolName);
+
       if (mcp === null) {
         return genericTool(toolName, input);
       }
-      if (mcp.server === BB_BRIDGE_MCP_SERVER_NAME) {
-        return bbTool(mcp.tool, input, args.injectedTools.get(mcp.tool));
+
+      if (mcp.server === OMNYO_BRIDGE_MCP_SERVER_NAME) {
+        return omnyoTool(mcp.tool, input, args.injectedTools.get(mcp.tool));
       }
+
+      const legacyTool =
+        mcp.server === LEGACY_BRIDGE_MCP_SERVER_V1
+          ? importLegacyOwnedToolNameV1(mcp.tool)
+          : null;
+
+      const injected =
+        legacyTool === null ? undefined : args.injectedTools.get(legacyTool);
+
+      if (legacyTool !== null && injected !== undefined)
+        return omnyoTool(legacyTool, input, injected);
+
       return mcpTool(mcp.server, mcp.tool, input);
     }
   }
@@ -470,6 +538,7 @@ export function classifyClaudeToolResultFallback(
     if (sessionCwd === undefined || sessionCwd.length === 0) {
       return genericTool(toolName, {});
     }
+
     return {
       shape: { type: "command", command: "", cwd: sessionCwd },
       presentation: commandPresentation({
@@ -479,6 +548,7 @@ export function classifyClaudeToolResultFallback(
       }),
     };
   }
+
   if (
     toolName === "Edit" ||
     toolName === "Write" ||
@@ -498,6 +568,7 @@ export function classifyClaudeToolResultFallback(
       }),
     };
   }
+
   return genericTool(toolName ?? "unknown", undefined);
 }
 

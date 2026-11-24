@@ -1,12 +1,16 @@
-import { createConnection, migrate } from "../../src/index.js";
-import type { DbConnection } from "../../src/index.js";
-import type { CreateConnectionOptions } from "../../src/connection.js";
+import { createConnection } from "../../src/connection.js";
+import type {
+  DbConnection,
+  CreateConnectionOptions,
+} from "../../src/connection.js";
+import { migrate } from "../../src/migrate.js";
 
 let migratedTemplate: Buffer | null = null;
 
 function getMigratedTemplate(): Buffer {
   if (migratedTemplate === null) {
     const db = createConnection(":memory:");
+
     try {
       migrate(db);
       migratedTemplate = db.$client.serialize();

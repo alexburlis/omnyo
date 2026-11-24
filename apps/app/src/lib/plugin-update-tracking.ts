@@ -1,8 +1,9 @@
-const KEY = "bb.watched-plugin-updates";
+const KEY = "omnyo.watched-plugin-updates";
 
 function watched(): string[] {
   try {
     const value: unknown = JSON.parse(sessionStorage.getItem(KEY) ?? "[]");
+
     return Array.isArray(value)
       ? value.filter((id): id is string => typeof id === "string")
       : [];
@@ -17,7 +18,9 @@ export function isWatchedPluginUpdate(id: string): boolean {
 
 export function trackPluginUpdate(id: string, active: boolean): void {
   const ids = watched().filter((candidate) => candidate !== id);
+
   if (active) ids.push(id);
+
   try {
     sessionStorage.setItem(KEY, JSON.stringify(ids.slice(-100)));
   } catch {}

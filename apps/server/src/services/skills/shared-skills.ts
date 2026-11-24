@@ -5,9 +5,9 @@ import {
   normalizeProviderNativeRoots,
   providerNativeRootsAreEmpty,
   type ProviderNativeRoots,
-} from "@bb/domain";
-import type { DiscoveredSkill } from "@bb/host-daemon-contract";
-import type { SkillSummary } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { DiscoveredSkill } from "@omnyo/host-daemon-contract";
+import type { SkillSummary } from "@omnyo/server-contract";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { callHostRetryableOnlineRpc } from "../hosts/online-rpc.js";
@@ -29,9 +29,11 @@ function toSharedSkill(
   skill: DiscoveredSkill,
 ): { runtimeSource: SharedInjectedSkillSource; summary: SkillSummary } | null {
   const sourceType = skill.rootKind;
+
   if (sourceType !== "shared-user" && sourceType !== "shared-project") {
     return null;
   }
+
   if (skill.description === null) {
     deps.logger.warn(
       {
@@ -41,8 +43,10 @@ function toSharedSkill(
       },
       "Skipping invalid shared skill",
     );
+
     return null;
   }
+
   return {
     runtimeSource: {
       kind: "host-path",
@@ -77,15 +81,17 @@ export async function resolveSharedSkills(
   args: { hostId: string; cwd: string | null },
 ): Promise<ResolvedSharedSkills> {
   const roots = sharedSkillNativeRoots(deps);
+
   if (providerNativeRootsAreEmpty(roots)) {
     return { runtimeSources: [], summaries: [] };
   }
+
   const result = await callHostRetryableOnlineRpc(deps, {
     hostId: args.hostId,
     timeoutMs: COMMAND_TIMEOUT_MS,
     command: {
       type: "host.list_skills",
-      providerId: "bb-shared",
+      providerId: "omnyo-shared",
       cwd: args.cwd,
       nativeRoots: {
         skills: roots,
@@ -94,6 +100,7 @@ export async function resolveSharedSkills(
       },
     },
   });
+
   return toResolvedSharedSkills(deps, result.skills);
 }
 
@@ -103,9 +110,12 @@ export function toResolvedSharedSkills(
 ): ResolvedSharedSkills {
   const resolved: Array<NonNullable<ReturnType<typeof toSharedSkill>>> = [];
   const names = new Set<string>();
+
   for (const skill of skills) {
     const entry = toSharedSkill(deps, skill);
+
     if (entry === null) continue;
+
     if (names.has(entry.runtimeSource.name)) {
       deps.logger.debug(
         {
@@ -116,9 +126,11 @@ export function toResolvedSharedSkills(
       );
       continue;
     }
+
     names.add(entry.runtimeSource.name);
     resolved.push(entry);
   }
+
   return {
     runtimeSources: resolved.map((entry) => entry.runtimeSource),
     summaries: resolved.map((entry) => entry.summary),

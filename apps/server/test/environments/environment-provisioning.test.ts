@@ -4,7 +4,7 @@ import {
   getThread,
   listEvents,
   threads,
-} from "@bb/db";
+} from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../src/errors.js";
 import { runStartupRecoverySweep } from "../../src/services/system/periodic-sweeps.js";
@@ -25,12 +25,14 @@ describe("environment reprovisioning", () => {
       const host = seedHost(harness.deps, {
         id: "host-thread-create-offline",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-create-offline-project",
       });
 
       let thrownError: ApiError | null = null;
+
       try {
         await createThreadFromRequest(harness.deps, {
           startedOnBehalfOf: null,
@@ -73,9 +75,11 @@ describe("environment reprovisioning", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-orphaned-env-provision",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -83,11 +87,13 @@ describe("environment reprovisioning", () => {
         environmentProviderId: "personal-workspace",
         isGitRepo: false,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "starting",
       });
+
       await runStartupRecoverySweep(harness.deps);
 
       expect(getEnvironment(harness.db, environment.id)?.status).toBe("error");

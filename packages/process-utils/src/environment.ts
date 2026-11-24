@@ -7,20 +7,30 @@ export function sanitizeInheritedChildProcessEnv(
   args: SanitizeInheritedChildProcessEnvArgs,
 ): NodeJS.ProcessEnv {
   const sanitizedEnv: NodeJS.ProcessEnv = {};
+
   for (const [key, value] of Object.entries(args.env)) {
     if (value === undefined) {
       continue;
     }
+
     const normalizedKey =
       process.platform === "win32" ? key.toUpperCase() : key;
-    if (normalizedKey === "NODE_ENV" || normalizedKey.startsWith("BB_")) {
+
+    if (
+      normalizedKey === "NODE_ENV" ||
+      normalizedKey.startsWith("OMNYO_") ||
+      normalizedKey === "PI_OMNYO_TOOLS_FILE"
+    ) {
       continue;
     }
+
     sanitizedEnv[normalizedKey === "PATH" ? "PATH" : key] = value;
   }
+
   if (args.shellPath !== undefined) {
     sanitizedEnv.PATH = args.shellPath;
   }
+
   return sanitizedEnv;
 }
 
@@ -34,10 +44,13 @@ export function omitNpmScriptPolicyEnv(
   env: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const childEnv: NodeJS.ProcessEnv = {};
+
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) continue;
+
     if (NPM_SCRIPT_POLICY_ENV_KEYS.has(key.toLowerCase())) continue;
     childEnv[key] = value;
   }
+
   return childEnv;
 }

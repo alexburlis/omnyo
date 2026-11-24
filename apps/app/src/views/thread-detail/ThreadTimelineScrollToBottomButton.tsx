@@ -7,6 +7,7 @@ export function ThreadTimelineScrollToBottomButton({
   active: boolean;
 }) {
   const bottomAnchor = useBottomAnchoredScroll();
+
   if (!bottomAnchor) return null;
 
   return (

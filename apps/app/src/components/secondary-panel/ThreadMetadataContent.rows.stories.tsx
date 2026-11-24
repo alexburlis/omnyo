@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { EnvironmentDisplayHostContext } from "@bb/core-ui";
+import type { EnvironmentDisplayHostContext } from "@omnyo/core-ui";
 import {
   ParentSelectorRow,
   EnvironmentRow,
@@ -197,7 +197,7 @@ export function WorkspacePath() {
         <RowStage>
           <WorkspacePathRow
             environment={makeEnvironment({
-              path: "/Users/michael/.bb-dev/worktrees/env_demo/bb",
+              path: "/Users/michael/.omnyo-dev/worktrees/env_demo/omnyo",
             })}
           />
         </RowStage>
@@ -206,7 +206,7 @@ export function WorkspacePath() {
         <RowStage>
           <WorkspacePathRow
             environment={makeEnvironment({
-              path: "/Users/michael/.bb-dev/worktrees/env_7m3cieyz6q/bb/apps/app/src/components/right-panel",
+              path: "/Users/michael/.omnyo-dev/worktrees/env_7m3cieyz6q/omnyo/apps/app/src/components/right-panel",
             })}
           />
         </RowStage>
@@ -215,7 +215,7 @@ export function WorkspacePath() {
         <RowStage>
           <WorkspacePathRow
             environment={makeEnvironment({
-              path: "/srv/repos/bb-linked-worktree",
+              path: "/srv/repos/omnyo-linked-worktree",
             })}
           />
         </RowStage>
@@ -224,7 +224,7 @@ export function WorkspacePath() {
         <RowStage>
           <WorkspacePathRow
             environment={makeEnvironment({
-              path: "/Users/michael/Projects/bb",
+              path: "/Users/michael/Projects/omnyo",
             })}
           />
         </RowStage>
@@ -323,6 +323,7 @@ export function MergeBase() {
 
 export function PullRequest() {
   const readyPullRequest = makePullRequest();
+
   const passingPullRequest = makePullRequest({
     mergeability: {
       state: "unknown",
@@ -331,6 +332,7 @@ export function PullRequest() {
     },
     attention: "none",
   });
+
   const noChecksPullRequest = makePullRequest({
     checks: {
       state: "no_checks",
@@ -345,6 +347,7 @@ export function PullRequest() {
     },
     attention: "none",
   });
+
   const unknownChecksPullRequest = makePullRequest({
     checks: {
       state: "unknown",
@@ -364,6 +367,7 @@ export function PullRequest() {
     },
     attention: "none",
   });
+
   const failingPullRequest = makePullRequest({
     checks: {
       state: "failing",
@@ -374,6 +378,7 @@ export function PullRequest() {
     },
     attention: "checks_failed",
   });
+
   const pendingPullRequest = makePullRequest({
     checks: {
       state: "pending",
@@ -384,6 +389,7 @@ export function PullRequest() {
     },
     attention: "checks_pending",
   });
+
   const changesRequestedPullRequest = makePullRequest({
     review: {
       state: "changes_requested",
@@ -391,6 +397,7 @@ export function PullRequest() {
     },
     attention: "changes_requested",
   });
+
   const reviewRequestedPullRequest = makePullRequest({
     review: {
       state: "review_requested",
@@ -398,6 +405,7 @@ export function PullRequest() {
     },
     attention: "review_requested",
   });
+
   const conflictsPullRequest = makePullRequest({
     mergeability: {
       state: "conflicts",
@@ -406,6 +414,7 @@ export function PullRequest() {
     },
     attention: "conflicts",
   });
+
   const blockedPullRequest = makePullRequest({
     mergeability: {
       state: "blocked",
@@ -414,16 +423,19 @@ export function PullRequest() {
     },
     attention: "blocked",
   });
+
   const draftMergeability = {
     state: "draft",
     mergeStateStatus: "DRAFT",
     mergeable: "UNKNOWN",
   } as const;
+
   const draftPassingPullRequest = makePullRequest({
     state: "draft",
     mergeability: draftMergeability,
     attention: "draft",
   });
+
   const draftFailingPullRequest = makePullRequest({
     state: "draft",
     checks: {
@@ -436,6 +448,7 @@ export function PullRequest() {
     mergeability: draftMergeability,
     attention: "checks_failed",
   });
+
   const draftNoChecksPullRequest = makePullRequest({
     state: "draft",
     checks: {
@@ -448,6 +461,7 @@ export function PullRequest() {
     mergeability: draftMergeability,
     attention: "draft",
   });
+
   const draftUnknownChecksPullRequest = makePullRequest({
     state: "draft",
     checks: {
@@ -460,6 +474,7 @@ export function PullRequest() {
     mergeability: draftMergeability,
     attention: "draft",
   });
+
   const draftPullRequest = makePullRequest({
     state: "draft",
     checks: {
@@ -472,6 +487,7 @@ export function PullRequest() {
     mergeability: draftMergeability,
     attention: "draft",
   });
+
   const draftChangesRequestedPullRequest = makePullRequest({
     state: "draft",
     review: {
@@ -481,14 +497,17 @@ export function PullRequest() {
     mergeability: draftMergeability,
     attention: "changes_requested",
   });
+
   const mergedPullRequest = makePullRequest({
     state: "merged",
     attention: "merged",
   });
+
   const closedPullRequest = makePullRequest({
     state: "closed",
     attention: "closed",
   });
+
   return (
     <StoryCard>
       <StoryRow label="open, ready to merge">
@@ -624,11 +643,13 @@ export function GitStatus() {
                 baseRef: "main",
                 aheadCount: 5,
                 behindCount: 0,
+                squashMergeCheckComplete: true,
                 hasCommittedUnmergedChanges: true,
                 commits: [],
                 insertions: 0,
                 deletions: 0,
                 lineStatsComplete: true,
+                fileCount: 0,
                 files: [],
               },
             })}
@@ -647,11 +668,13 @@ export function GitStatus() {
                 baseRef: "main",
                 aheadCount: 0,
                 behindCount: 3,
+                squashMergeCheckComplete: true,
                 hasCommittedUnmergedChanges: false,
                 commits: [],
                 insertions: 0,
                 deletions: 0,
                 lineStatsComplete: true,
+                fileCount: 0,
                 files: [],
               },
             })}
@@ -670,11 +693,13 @@ export function GitStatus() {
                 baseRef: "main",
                 aheadCount: 4,
                 behindCount: 2,
+                squashMergeCheckComplete: true,
                 hasCommittedUnmergedChanges: true,
                 commits: [],
                 insertions: 0,
                 deletions: 0,
                 lineStatsComplete: true,
+                fileCount: 0,
                 files: [],
               },
             })}
@@ -694,6 +719,7 @@ export function GitStatus() {
                 insertions: 0,
                 deletions: 0,
                 lineStatsComplete: false,
+                fileCount: 3,
                 files: [
                   {
                     path: "scratch.md",
@@ -768,11 +794,13 @@ export function Commits() {
                 baseRef: "main",
                 aheadCount: STORY_AHEAD_COMMITS.length,
                 behindCount: 0,
+                squashMergeCheckComplete: true,
                 hasCommittedUnmergedChanges: true,
                 commits: STORY_AHEAD_COMMITS,
                 insertions: 0,
                 deletions: 0,
                 lineStatsComplete: true,
+                fileCount: 0,
                 files: [],
               },
             })}

@@ -4,18 +4,20 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
-const LOGGER_IMPORT_SPECIFIER = "@bb/logger";
+const LOGGER_IMPORT_SPECIFIER = "@omnyo/logger";
 
 const tempDirs: string[] = [];
 
 function createTempDir(): string {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bb-logger-"));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "omnyo-logger-"));
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 
 async function importFreshLogger() {
   vi.resetModules();
+
   return import("../src/index.js");
 }
 
@@ -29,6 +31,7 @@ async function runLoggerInSubprocess(args: {
   dataDir: string;
   component: string;
   message: string;
+  stdoutFd?: number;
   timestampMs: number;
   timezone: string;
 }): Promise<SubprocessLoggerResult> {
@@ -50,9 +53,10 @@ async function runLoggerInSubprocess(args: {
 
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
-    BB_DATA_DIR: args.dataDir,
+    OMNYO_DATA_DIR: args.dataDir,
     TZ: args.timezone,
   };
+
   delete childEnv.VITEST;
 
   return new Promise((resolve, reject) => {
@@ -61,18 +65,18 @@ async function runLoggerInSubprocess(args: {
       ["--conditions=source", "--import", "tsx", "-e", script],
       {
         env: childEnv,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", args.stdoutFd ?? "pipe", "pipe"],
       },
     );
 
     let stdout = "";
     let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
       stdout += chunk;
     });
-    child.stderr.on("data", (chunk: string) => {
+    child.stderr?.on("data", (chunk: string) => {
       stderr += chunk;
     });
     child.once("error", reject);
@@ -87,10 +91,12 @@ async function waitFor(
   timeoutMs = 5_000,
 ): Promise<void> {
   const startedAt = Date.now();
+
   while (!predicate()) {
     if (Date.now() - startedAt > timeoutMs) {
       throw new Error("Timed out waiting for logger output");
     }
+
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
@@ -110,10 +116,12 @@ function getComponentLogFiles(logDir: string, component: string): string[] {
         left.match(/\.(\d+)\.log$/u)?.[1] ?? "0",
         10,
       );
+
       const rightIndex = Number.parseInt(
         right.match(/\.(\d+)\.log$/u)?.[1] ?? "0",
         10,
       );
+
       return leftIndex - rightIndex;
     });
 }
@@ -124,6 +132,7 @@ function readComponentLogLines(
 ): Array<Record<string, unknown>> {
   return getComponentLogFiles(logDir, component).flatMap((entry) => {
     const contents = fs.readFileSync(path.join(logDir, entry), "utf8").trim();
+
     if (!contents) {
       return [];
     }
@@ -143,6 +152,7 @@ afterEach(() => {
 
 afterAll(async () => {
   await new Promise((resolve) => setTimeout(resolve, 250));
+
   for (const tempDir of tempDirs.splice(0)) {
     fs.rmSync(tempDir, { force: true, recursive: true });
   }
@@ -152,7 +162,7 @@ describe("createLogger", () => {
   it("rotates files when the active log exceeds the configured size", async () => {
     const dataDir = createTempDir();
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("BB_DATA_DIR", dataDir);
+    vi.stubEnv("OMNYO_DATA_DIR", dataDir);
 
     const { createLogger } = await importFreshLogger();
     const logger = createLogger({ component: "server" });
@@ -168,6 +178,50 @@ describe("createLogger", () => {
     );
 
     expect(getComponentLogFiles(logDir, "server").length).toBeGreaterThan(1);
+  });
+
+  it("keeps the most recently written rotated files from earlier processes regardless of their numbers", async () => {
+    const dataDir = createTempDir();
+    const logDir = path.join(dataDir, "logs");
+    fs.mkdirSync(logDir, { recursive: true });
+
+    const hoursAgoByFile = {
+      "server.1.log": 1,
+      "server.104.log": 2,
+      "server.2.log": 3,
+      "server.3.log": 4,
+      "server.103.log": 5,
+      "server.100.log": 6,
+      "server.101.log": 7,
+      "server.102.log": 8,
+    };
+
+    for (const [entry, hoursAgo] of Object.entries(hoursAgoByFile)) {
+      const filePath = path.join(logDir, entry);
+      fs.writeFileSync(filePath, "");
+      const mtime = new Date(Date.now() - hoursAgo * 60 * 60 * 1000);
+      fs.utimesSync(filePath, mtime, mtime);
+    }
+
+    fs.writeFileSync(path.join(logDir, "server-stdio.log"), "capture");
+    fs.writeFileSync(path.join(logDir, "host-daemon.1.log"), "");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OMNYO_DATA_DIR", dataDir);
+
+    const { createLogger } = await importFreshLogger();
+    createLogger({ component: "server" });
+
+    expect(getComponentLogFiles(logDir, "server")).toEqual([
+      "server.1.log",
+      "server.2.log",
+      "server.3.log",
+      "server.103.log",
+      "server.104.log",
+    ]);
+    expect(fs.readFileSync(path.join(logDir, "server-stdio.log"), "utf8")).toBe(
+      "capture",
+    );
+    expect(fs.existsSync(path.join(logDir, "host-daemon.1.log"))).toBe(true);
   });
 
   it("delivers log lines to both the file and the process stdout in worker mode", async () => {
@@ -198,13 +252,42 @@ describe("createLogger", () => {
     });
   });
 
+  it("keeps log lines out of stdout when stdout is a plain file", async () => {
+    const dataDir = createTempDir();
+    const logDir = path.join(dataDir, "logs");
+    const stdoutPath = path.join(dataDir, "server-stdio.log");
+    const message = `stdout-file-${Date.now()}`;
+    const stdoutFd = fs.openSync(stdoutPath, "a");
+
+    try {
+      const result = await runLoggerInSubprocess({
+        component: "behavior-check",
+        dataDir,
+        message,
+        stdoutFd,
+        timestampMs: Date.parse("2026-08-08T02:53:23.000Z"),
+        timezone: "UTC",
+      });
+
+      expect(result.exitCode).toBe(0);
+    } finally {
+      fs.closeSync(stdoutFd);
+    }
+
+    expect(fs.readFileSync(stdoutPath, "utf8")).toBe("");
+    expect(readComponentLogLines(logDir, "behavior-check")).toMatchObject([
+      { msg: message },
+    ]);
+  });
+
   it("uses an explicit data directory when provided", async () => {
     const envDataDir = createTempDir();
     const explicitDataDir = createTempDir();
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("BB_DATA_DIR", envDataDir);
+    vi.stubEnv("OMNYO_DATA_DIR", envDataDir);
 
     const { createLogger } = await importFreshLogger();
+
     const logger = createLogger({
       component: "host-daemon",
       dataDir: explicitDataDir,
@@ -232,7 +315,7 @@ describe("createLogger", () => {
   it("serializes nested error causes", async () => {
     const dataDir = createTempDir();
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("BB_DATA_DIR", dataDir);
+    vi.stubEnv("OMNYO_DATA_DIR", dataDir);
 
     const { createLogger } = await importFreshLogger();
     const logger = createLogger({ component: "server" });

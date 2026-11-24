@@ -136,6 +136,7 @@ function Calendar({
               : orientation === "right"
                 ? "ChevronRight"
                 : "ChevronDown";
+
           return <Icon name={name} className={cn("size-4", className)} />;
         },
         DayButton: CalendarDayButton,

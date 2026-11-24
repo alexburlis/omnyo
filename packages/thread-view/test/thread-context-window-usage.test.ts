@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { threadScope, type ContextSnapshot } from "@bb/domain";
+import { threadScope, type ContextSnapshot } from "@omnyo/domain";
 import type { ThreadEventWithMeta } from "../src/build-event-projection.js";
 import { extractThreadContextWindowUsage } from "../src/thread-context-window-usage.js";
 
@@ -41,6 +41,7 @@ function event(
     },
   };
 }
+
 const first = event(1, {
   usedTokens: 100,
   modelContextWindow: 1_000,
@@ -121,6 +122,7 @@ describe("auto-compact display window", () => {
     autoCompactAtTokens: 230_000,
     categories: [],
   };
+
   const captured = event(1, {
     usedTokens: 128_000,
     modelContextWindow: 256_000,
@@ -132,6 +134,7 @@ describe("auto-compact display window", () => {
     expect(extractThreadContextWindowUsage(events)?.modelContextWindow).toBe(
       256_000,
     );
+
     for (const [seq, usedTokens] of [
       [2, 140_000],
       [3, 150_000],
@@ -143,11 +146,13 @@ describe("auto-compact display window", () => {
         estimated: true,
       });
     }
+
     const nextSnapshot = {
       ...compactSnapshot,
       usedTokens: 160_000,
       contextWindowTokens: 300_000,
     };
+
     events.push(
       event(4, {
         usedTokens: 160_000,
@@ -170,12 +175,14 @@ describe("auto-compact display window", () => {
         usedTokens: 160_000,
         modelContextWindow: 1_000_000,
       });
+
       if (
         boundary === "session" &&
         update.event.type === "thread/contextWindowUsage/updated"
       ) {
         update.event.providerThreadId = "session-2";
       }
+
       const middle =
         boundary === "disabled"
           ? event(2, {
@@ -189,6 +196,7 @@ describe("auto-compact display window", () => {
               },
             })
           : event(2, { usedTokens: null, modelContextWindow: null });
+
       expect(
         extractThreadContextWindowUsage(
           boundary === "session"

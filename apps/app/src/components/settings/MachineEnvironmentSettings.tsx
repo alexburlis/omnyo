@@ -2,9 +2,9 @@ import { nanoid } from "nanoid";
 import { Link } from "react-router-dom";
 import { OptionPicker } from "@/components/pickers/OptionPicker";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { useState, type ReactNode } from "react";
-import { Switch } from "@bb/shared-ui/switch";
+import { Switch } from "@omnyo/shared-ui/switch";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 import { useUpdateGeneralSettings } from "@/hooks/mutations/settings-mutations";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,9 +12,11 @@ import {
   machineEnvironmentSetSchema,
   type MachineEnvironmentList,
   type MachineEnvironmentVariable,
-} from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
-import { Input } from "@bb/shared-ui/input";
+} from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { DelayedLoading } from "@omnyo/shared-ui/delayed-loading";
+import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
+import { Input } from "@omnyo/shared-ui/input";
 import { sdk } from "@/lib/sdk";
 import { SettingsSection } from "@/components/ui/settings-section";
 import { getSettingsSectionRoutePath } from "@/components/settings/settings-sections";
@@ -42,6 +44,7 @@ export function MachineEnvironmentSettings() {
   const [scope, setScope] = useState(GLOBAL_SCOPE);
   const projects = useSidebarNavigation().data?.projects ?? [];
   const selected = projects.find((project) => project.id === scope) ?? null;
+
   return (
     <ScopedMachineEnvironmentSettings
       key={selected?.id ?? GLOBAL_SCOPE}
@@ -81,6 +84,7 @@ export function ScopedMachineEnvironmentSettings({
   const queryClient = useQueryClient();
   const settings = useSystemConfig().data?.generalSettings;
   const updateSettings = useUpdateGeneralSettings();
+
   const query = useQuery({
     queryKey: machineEnvironmentQueryKey(projectId),
     queryFn: async () =>
@@ -88,6 +92,7 @@ export function ScopedMachineEnvironmentSettings({
         ? { ...(await sdk.system.machineEnvironment()), inheritedVariables: [] }
         : sdk.projects.machineEnvironment({ projectId }),
   });
+
   const save = async (rows: readonly DraftRow[]) => {
     const input = {
       variables: rows.map((row) => ({
@@ -96,9 +101,11 @@ export function ScopedMachineEnvironmentSettings({
         note: row.note,
       })),
     };
+
     if (projectId === null) await sdk.system.replaceMachineEnvironment(input);
     else await sdk.projects.replaceMachineEnvironment({ ...input, projectId });
   };
+
   return (
     <MachineEnvironmentSettingsContent
       key={projectId ?? GLOBAL_SCOPE}
@@ -156,6 +163,7 @@ export function MachineEnvironmentSettingsContent({
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+
   const rows =
     draft ??
     (environment?.variables ?? []).map((row) => ({
@@ -163,20 +171,24 @@ export function MachineEnvironmentSettingsContent({
       id: row.name,
       nameLocked: true,
     }));
+
   const issues = rows.map((row) => {
     if (rows.filter((other) => other.name === row.name).length > 1)
       return "Variable name already exists.";
+
     const result = machineEnvironmentSetSchema.safeParse({
       name: row.name,
       value: row.value ?? "",
       note: row.note,
     });
+
     return result.success
       ? null
       : !row.name
         ? "Enter a variable name."
         : "Use uppercase letters, numbers, and underscores; start with a letter or underscore.";
   });
+
   const mutation = useMutation({
     mutationFn: () => onSave(rows),
     onSuccess: async () => {
@@ -192,13 +204,16 @@ export function MachineEnvironmentSettingsContent({
       );
     },
   });
+
   const disabled = environment === null || mutation.isPending;
   const saved = environment?.variables ?? [];
+
   const isDirty =
     draft !== null &&
     (draft.length !== saved.length ||
       draft.some((row, index) => {
         const base = saved[index];
+
         return (
           base === undefined ||
           base.name !== row.name ||
@@ -206,10 +221,12 @@ export function MachineEnvironmentSettingsContent({
           row.value !== null
         );
       }));
+
   const change = (id: string, patch: Partial<DraftRow>) => {
     setDraft(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
     setError(null);
   };
+
   const addRow = () =>
     setDraft([
       ...rows,
@@ -222,11 +239,14 @@ export function MachineEnvironmentSettingsContent({
         note: null,
       },
     ]);
+
   const importRows = (entries: readonly ParsedEnvEntry[]) => {
     const next = [...rows];
+
     for (const entry of entries) {
       const index = next.findIndex((row) => row.name === entry.name);
       const existing = index === -1 ? undefined : next[index];
+
       if (existing) next[index] = { ...existing, value: entry.value };
       else
         next.push({
@@ -238,17 +258,21 @@ export function MachineEnvironmentSettingsContent({
           note: null,
         });
     }
+
     setDraft(next);
     setError(null);
   };
+
   const override = (variable: MachineEnvironmentVariable) =>
     setDraft([
       ...rows,
       { ...variable, id: variable.name, nameLocked: true, value: "" },
     ]);
+
   const inherited = projectScope ? inheritedVariables : [];
   const inheritedNames = new Set(inherited.map((variable) => variable.name));
   const entries: EnvironmentEntry[] = [];
+
   for (const variable of inherited) {
     const index = rows.findIndex((row) => row.name === variable.name);
     const row = rows[index];
@@ -258,24 +282,31 @@ export function MachineEnvironmentSettingsContent({
         : { kind: "inherited", variable },
     );
   }
+
   rows.forEach((row, index) => {
     if (!inheritedNames.has(row.name))
       entries.push({ kind: "row", row, index, overridesGlobal: false });
   });
   const git = environment?.builtInGit;
+
   const gitOverridden =
     rows.some((row) => row.name === "GH_TOKEN") ||
     inheritedNames.has("GH_TOKEN");
+
   return (
     <SettingsSection
       title="Environment variables"
-      description="Global variables are available to BB-managed processes on every connected machine. Project variables override them for work in that project."
+      description="Global variables are available to managed processes on every connected machine. Project variables override them for work in that project."
       bodyClassName="space-y-8"
     >
       <div className="space-y-5">
         {scopeControl}
         {environment === null && !loadFailed && (
-          <p className="text-xs text-subtle-foreground">Loading…</p>
+          <div className="min-h-4">
+            <DelayedLoading>
+              <p className="text-xs text-subtle-foreground">Loading…</p>
+            </DelayedLoading>
+          </div>
         )}
         {(environment !== null || loadFailed) && (
           <MachineEnvironmentAutomaticRow
@@ -336,8 +367,10 @@ export function MachineEnvironmentSettingsContent({
                 onToggleReveal={() =>
                   setVisible((current) => {
                     const next = new Set(current);
+
                     if (next.has(entry.row.id)) next.delete(entry.row.id);
                     else next.add(entry.row.id);
+
                     return next;
                   })
                 }
@@ -414,13 +447,17 @@ export function MachineEnvironmentSettingsContent({
 
 const ROW_GRID_CLASS_NAME =
   "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 @min-[32rem]/variable:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]";
+
 const ROW_CAPTION_CLASS_NAME = "text-xs leading-snug text-subtle-foreground";
+
+const DIMMED_TRANSITION_CLASS_NAME =
+  "transition-opacity duration-(--motion-duration-base)";
 
 function GlobalSettingsLink() {
   return (
     <Link
       to={getSettingsSectionRoutePath("environment-variables")}
-      className="rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className={`rounded-sm underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${CONTROL_HOVER_TRANSITION}`}
     >
       global settings
     </Link>
@@ -457,17 +494,18 @@ export function MachineEnvironmentAutomaticRow({
 }) {
   const dimmed = !enabled || overridden;
   const missing = git?.status === "not logged in";
+
   return (
     <div className="@container/variable space-y-2">
       <div className={ROW_GRID_CLASS_NAME}>
         <Input
-          className={`col-span-2 font-mono @min-[32rem]/variable:col-span-1 ${dimmed ? "opacity-50" : ""}`}
+          className={`col-span-2 font-mono @min-[32rem]/variable:col-span-1 ${DIMMED_TRANSITION_CLASS_NAME} ${dimmed ? "opacity-50" : ""}`}
           aria-label="Automatic variable name"
           value="GH_TOKEN"
           readOnly
         />
         <Input
-          className={`font-mono ${dimmed ? "opacity-50" : ""}`}
+          className={`font-mono ${DIMMED_TRANSITION_CLASS_NAME} ${dimmed ? "opacity-50" : ""}`}
           aria-label="Automatic GH_TOKEN value"
           value={git?.status === "logged in" ? "••••••••" : ""}
           placeholder={
@@ -501,7 +539,9 @@ export function MachineEnvironmentAutomaticRow({
           )}
         </div>
       </div>
-      <p className={`${ROW_CAPTION_CLASS_NAME} ${dimmed ? "opacity-50" : ""}`}>
+      <p
+        className={`${ROW_CAPTION_CLASS_NAME} ${DIMMED_TRANSITION_CLASS_NAME} ${dimmed ? "opacity-50" : ""}`}
+      >
         <RowScope>Automatic</RowScope>
         <span
           role={missing && !overridden ? "alert" : "status"}

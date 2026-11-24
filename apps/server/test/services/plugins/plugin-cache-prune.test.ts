@@ -13,8 +13,8 @@ import {
   migrate,
   upsertInstalledPlugin,
   type DbConnection,
-} from "@bb/db";
-import type { Logger } from "@bb/logger";
+} from "@omnyo/db";
+import type { Logger } from "@omnyo/logger";
 import {
   garbageCollectPluginArtifacts,
   prunePluginCache,
@@ -27,9 +27,12 @@ import {
 } from "../../../src/services/plugins/plugin-service.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
 import { testLogger } from "../../helpers/test-app.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
+
 const run = promisify(execFile);
+
 const MIB = 1024 * 1024;
 
 async function exists(path: string): Promise<boolean> {
@@ -86,7 +89,7 @@ describe("plugin cache pruning", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    dataDir = await mkdtemp(join(tmpdir(), "bb-plugin-prune-"));
+    dataDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-prune-"));
     gitRepoCache = join(
       dataDir,
       "plugins",
@@ -138,7 +141,7 @@ describe("plugin cache pruning", () => {
       status,
       rollbackCandidateVersion: status === "ready" ? null : "candidate",
       rollbackSourceFingerprint: status === "ready" ? null : "source",
-      rollbackBbVersion: status === "ready" ? null : "1.0.0",
+      rollbackCoreVersion: status === "ready" ? null : "1.0.0",
       rollbackSdkVersion: status === "ready" ? null : "0.6.0",
       rollbackDetail: status === "ready" ? null : "failed",
       createdAt: Date.now(),
@@ -147,13 +150,91 @@ describe("plugin cache pruning", () => {
     });
   }
 
+  it("applies cache budgets to the current plan and chooses the larger eligible root", async () => {
+    const smallCommit = "b".repeat(40);
+    const largeCommit = "c".repeat(40);
+    const small = join(gitRepoCache, smallCommit);
+    const large = join(gitRepoCache, largeCommit);
+    await fill(small, 1024);
+    await fill(large, 64 * 1024);
+    gitArtifact("small", smallCommit, small);
+    gitArtifact("large", largeCommit, large);
+    const base = { db, dataDir, warn: () => {} };
+    const preview = await prunePluginCache({ ...base, dryRun: true });
+
+    const largeBytes = preview.removed.find(
+      (entry) => entry.path === large,
+    )?.bytes;
+
+    expect(largeBytes).toBeGreaterThan(0);
+
+    const result = await prunePluginCache({
+      ...base,
+      dryRun: false,
+      maxItems: 1,
+      maxBytes: largeBytes,
+    });
+
+    expect(result.removed.map((entry) => entry.path)).toEqual([large]);
+    expect(result.budget).toEqual({ maxItems: 1, maxBytes: largeBytes });
+    expect(await exists(large)).toBe(false);
+    expect(await exists(small)).toBe(true);
+    expect(listPluginArtifacts(db, "pruned").map((entry) => entry.id)).toEqual([
+      "small",
+    ]);
+
+    const limited = await prunePluginCache({
+      ...base,
+      dryRun: false,
+      maxBytes: 1,
+    });
+
+    expect(limited.removed).toEqual([]);
+    expect(limited.budget).toEqual({ maxItems: null, maxBytes: 1 });
+    expect(await exists(join(small, "payload"))).toBe(true);
+  });
+
+  it("keeps a shared checkout group intact when it exceeds the remaining item budget", async () => {
+    const groupedCommit = "b".repeat(40);
+    const singleCommit = "c".repeat(40);
+    const grouped = join(gitRepoCache, groupedCommit);
+    const single = join(gitRepoCache, singleCommit);
+    await fill(join(grouped, "first"), 64 * 1024);
+    await fill(join(grouped, "second"), 64 * 1024);
+    await fill(single, 1024);
+    gitArtifact("first", groupedCommit, join(grouped, "first"));
+    gitArtifact("second", groupedCommit, join(grouped, "second"));
+    gitArtifact("single", singleCommit, single);
+
+    const result = await prunePluginCache({
+      db,
+      dataDir,
+      warn: () => {},
+      dryRun: false,
+      maxItems: 1,
+    });
+
+    expect(result.removed.map((entry) => entry.path)).toEqual([single]);
+    expect(await exists(join(grouped, "first", "payload"))).toBe(true);
+    expect(await exists(join(grouped, "second", "payload"))).toBe(true);
+    expect(await exists(single)).toBe(false);
+    expect(
+      listPluginArtifacts(db, "pruned")
+        .map((entry) => entry.id)
+        .sort(),
+    ).toEqual(["first", "second"]);
+  });
+
   it("deletes unused versions inside their retention window and keeps everything in use", async () => {
     const commit = (letter: string) => letter.repeat(40);
+
     for (const letter of ["a", "b", "c", "d", "e"]) {
       await fill(join(gitRepoCache, commit(letter)));
     }
+
     const temporary = join(gitRepoCache, `${commit("b")}.staging`);
     await fill(temporary);
+
     const npmOrphan = join(
       dataDir,
       "plugins",
@@ -163,6 +244,7 @@ describe("plugin cache pruning", () => {
       "pkg",
       "1.0.0",
     );
+
     const npmStaging = join(
       dataDir,
       "plugins",
@@ -171,6 +253,7 @@ describe("plugin cache pruning", () => {
       "other",
       "2.0.0.staging",
     );
+
     await fill(npmOrphan);
     await fill(npmStaging);
     gitArtifact("active", commit("a"), join(gitRepoCache, commit("a")));
@@ -191,6 +274,7 @@ describe("plugin cache pruning", () => {
     snapshot("ready", "replaced", "ready");
     snapshot("pending", "pending", "rollback-pending");
     const warnings: string[] = [];
+
     const prune = (dryRun: boolean) =>
       prunePluginCache({
         db,
@@ -213,12 +297,15 @@ describe("plugin cache pruning", () => {
 
     const pruned = await prune(false);
     expect(pruned).toEqual({ ...preview, dryRun: false });
+
     for (const removed of [commit("b"), commit("e")]) {
       expect(await exists(join(gitRepoCache, removed))).toBe(false);
     }
+
     expect(
       await exists(join(dataDir, "plugins", "cache", "npm", "@scope")),
     ).toBe(false);
+
     for (const kept of [
       join(gitRepoCache, commit("a")),
       join(gitRepoCache, commit("c")),
@@ -228,6 +315,7 @@ describe("plugin cache pruning", () => {
     ]) {
       expect(await exists(join(kept, "payload"))).toBe(true);
     }
+
     expect(
       listPluginArtifacts(db, "pruned")
         .map((artifact) => artifact.id)
@@ -241,6 +329,7 @@ describe("plugin cache pruning", () => {
     "%s preserves cache paths overlapping installed path plugins",
     async (operation) => {
       const protectedRoots: string[] = [];
+
       for (const { letter, subdirectory, localSubdirectory } of [
         { letter: "a", subdirectory: "", localSubdirectory: "plugins/local" },
         {
@@ -261,12 +350,14 @@ describe("plugin cache pruning", () => {
         await fill(artifactRoot);
         await fill(rootDir);
         gitArtifact(letter, commit, artifactRoot);
+
         if (letter === "d") {
           const siblingRoot = join(checkout, "plugins", "two");
           await fill(siblingRoot);
           gitArtifact("sibling", commit, siblingRoot);
           protectedRoots.push(artifactRoot, siblingRoot);
         }
+
         upsertInstalledPlugin(db, {
           id: `local-${letter}`,
           source: `path:${rootDir}`,
@@ -287,6 +378,7 @@ describe("plugin cache pruning", () => {
         });
         protectedRoots.push(rootDir);
       }
+
       const unusedCommit = "c".repeat(40);
       const unusedRoot = join(gitRepoCache, unusedCommit);
       await fill(unusedRoot);
@@ -312,6 +404,7 @@ describe("plugin cache pruning", () => {
       for (const root of protectedRoots) {
         expect(await exists(join(root, "payload"))).toBe(true);
       }
+
       expect(await exists(unusedRoot)).toBe(false);
       expect(listPluginArtifacts(db, "pruned").map(({ id }) => id)).toEqual([
         "a",
@@ -362,10 +455,10 @@ describe("git plugin cache lifecycle", () => {
     await writeFile(
       join(repo, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-cached",
+        name: "omnyo-plugin-cached",
         version,
         type: "module",
-        bb: {
+        omnyo: {
           name: "Cached fixture",
           description: "Plugin cache fixture.",
           branding: { icon: "Zap" },
@@ -375,17 +468,18 @@ describe("git plugin cache lifecycle", () => {
     );
     await writeFile(
       join(repo, "server.ts"),
-      `export default function plugin(bb: any) { bb.log.info(${JSON.stringify(version)}); }`,
+      `export default function plugin(api: any) { api.log.info(${JSON.stringify(version)}); }`,
     );
     await git(["add", "-A"]);
     await git(["commit", "-qm", version]);
+
     return git(["rev-parse", "HEAD"]);
   }
 
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-cache-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-cache-"));
     repo = join(workDir, "repo");
     await mkdir(repo, { recursive: true });
     await git(["init", "-q", "-b", "main"]);
@@ -403,6 +497,7 @@ describe("git plugin cache lifecycle", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "1.0.0",
       loadTimeoutMs: 2000,
       stabilizationWindowMs: 0,
@@ -418,10 +513,13 @@ describe("git plugin cache lifecycle", () => {
 
   function activeRoot(): string {
     const registration = getInstalledPluginRegistration(db, "cached");
+
     const artifact = listPluginArtifacts(db, "cached").find(
       (candidate) => candidate.id === registration?.activeArtifactId,
     );
+
     if (artifact === undefined) throw new Error("missing active artifact");
+
     return artifact.path;
   }
 

@@ -7,5 +7,6 @@ export function dispatchPromptEditorTransaction(
 ): boolean {
   if (transaction === null) return false;
   editor.view.dispatch(transaction);
+
   return true;
 }

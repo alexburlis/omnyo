@@ -1,4 +1,4 @@
-import type { WorkspaceFile } from "@bb/server-contract";
+import type { WorkspaceFile } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
   buildThreadStorageTree,
@@ -34,6 +34,7 @@ describe("buildThreadStorageTree", () => {
     const tree = buildThreadStorageTree(
       files("b.md", "notes/10.md", "a.md", "notes/2.md", "Archive/x.md"),
     );
+
     expect(visiblePaths(tree, ["notes"])).toEqual([
       "Archive",
       "notes",
@@ -48,6 +49,7 @@ describe("buildThreadStorageTree", () => {
     const tree = buildThreadStorageTree(
       files("qa/shots/after/a.png", "qa/shots/after/b.png", "qa/shots/c.png"),
     );
+
     expect(tree).toMatchObject([
       {
         kind: "folder",
@@ -87,6 +89,7 @@ describe("flattenThreadStorageNode", () => {
     const tree = buildThreadStorageTree(
       files("logs/1.txt", "logs/2.txt", "logs/3.txt", "logs/4.txt"),
     );
+
     expect(visiblePaths(tree, ["logs"])).toEqual([
       "logs",
       "  1.txt",
@@ -106,6 +109,7 @@ describe("flattenThreadStorageNode", () => {
     const tree = buildThreadStorageTree(
       files("logs/1.txt", "logs/2.txt", "logs/3.txt"),
     );
+
     expect(visiblePaths(tree, ["logs"])).toEqual([
       "logs",
       "  1.txt",

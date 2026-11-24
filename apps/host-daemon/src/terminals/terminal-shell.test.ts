@@ -8,6 +8,7 @@ import {
 } from "./terminal-shell.js";
 
 const POWERSHELL_7 = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+
 const WINDOWS_POWERSHELL =
   "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 
@@ -43,6 +44,7 @@ describe("terminal shell policy", () => {
       mode: "argv",
       argv: ["C:\\Program Files\\tool.exe", "hello world", "it's", ""],
     } as const;
+
     expect(terminalStartCommandText("powershell", start)).toBe(
       "& 'C:\\Program Files\\tool.exe' 'hello world' 'it''s' ''",
     );
@@ -86,6 +88,7 @@ describe("terminal shell policy", () => {
       SystemRoot: "C:\\Windows",
       ComSpec: "C:\\Windows\\System32\\cmd.exe",
     };
+
     const existing = (paths: string[]) => async (filePath: string) =>
       paths.includes(filePath);
 

@@ -4,7 +4,8 @@ import { StringDecoder } from "node:string_decoder";
 import type { Readable, Writable } from "node:stream";
 import { MAX_JSON_RPC_LINE_BYTES } from "./bounded-line-reader.js";
 
-export const PROVIDER_BRIDGE_RECORD_DIR_ENV = "BB_PROVIDER_BRIDGE_RECORD_DIR";
+export const PROVIDER_BRIDGE_RECORD_DIR_ENV =
+  "OMNYO_PROVIDER_BRIDGE_RECORD_DIR";
 
 export const BRIDGE_RECORDING_DIRECTIONS = [
   "runtime→bridge",
@@ -67,32 +68,47 @@ export function createRecordingLineSplitter(
 ): { push: (chunk: string | Uint8Array) => void } {
   const decoder = new StringDecoder("utf8");
   let pending = "";
+  let pendingBytes = 0;
   let discarding = false;
+
   return {
     push(chunk) {
       const text =
         typeof chunk === "string" ? chunk : decoder.write(Buffer.from(chunk));
+
       let start = 0;
+
       for (;;) {
         const newlineIndex = text.indexOf("\n", start);
+
         if (newlineIndex === -1) {
           break;
         }
+
         if (!discarding) {
           const line = pending + text.slice(start, newlineIndex);
           onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
         }
+
         discarding = false;
         pending = "";
+        pendingBytes = 0;
         start = newlineIndex + 1;
       }
+
       if (discarding) {
         return;
       }
-      pending += text.slice(start);
-      if (Buffer.byteLength(pending) > maxLineBytes) {
+
+      const tail = text.slice(start);
+
+      pending += tail;
+      pendingBytes += Buffer.byteLength(tail);
+
+      if (pendingBytes > maxLineBytes) {
         discarding = true;
         pending = "";
+        pendingBytes = 0;
       }
     },
   };
@@ -102,7 +118,9 @@ function safeScopeSegment(threadId: string | null): string {
   if (threadId === null || threadId === "") {
     return BRIDGE_RECORDING_PROCESS_SCOPE;
   }
+
   const sanitized = threadId.replace(/[^A-Za-z0-9_.-]+/g, "-");
+
   return sanitized === "" || sanitized.startsWith("_")
     ? `t-${sanitized}`
     : sanitized;
@@ -116,27 +134,34 @@ interface ParsedRuntimeLine {
 
 function parseRuntimeLine(line: string): ParsedRuntimeLine | null {
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(line);
   } catch {
     return null;
   }
+
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return null;
   }
+
   const record = parsed as Record<string, unknown>;
+
   const id =
     typeof record.id === "string" || typeof record.id === "number"
       ? record.id
       : undefined;
+
   const method = typeof record.method === "string" ? record.method : undefined;
   const params = record.params;
+
   const threadId =
     typeof params === "object" &&
     params !== null &&
     typeof (params as Record<string, unknown>).threadId === "string"
       ? ((params as Record<string, unknown>).threadId as string)
       : undefined;
+
   return { id, method, threadId };
 }
 
@@ -156,16 +181,21 @@ export function createBridgeRecorder(args: { dir: string }): BridgeRecorder {
   function fdFor(scope: string, direction: BridgeRecordingDirection): number {
     const key = `${scope}\u0000${direction}`;
     const existing = fds.get(key);
+
     if (existing !== undefined) {
       return existing;
     }
+
     const scopeDir = join(dir, scope);
     mkdirSync(scopeDir, { recursive: true });
+
     const fd = openSync(
       join(scopeDir, bridgeRecordingFileName(direction)),
       "a",
     );
+
     fds.set(key, fd);
+
     return fd;
   }
 
@@ -173,7 +203,9 @@ export function createBridgeRecorder(args: { dir: string }): BridgeRecorder {
     if (closed) {
       return;
     }
+
     seq += 1;
+
     const entry: BridgeRecordingEntry = {
       ts: Date.now(),
       run,
@@ -181,6 +213,7 @@ export function createBridgeRecorder(args: { dir: string }): BridgeRecorder {
       dir: recordArgs.direction,
       line: recordArgs.line,
     };
+
     try {
       writeSync(
         fdFor(safeScopeSegment(recordArgs.threadId), recordArgs.direction),
@@ -201,8 +234,10 @@ export function createBridgeRecorder(args: { dir: string }): BridgeRecorder {
   ): void {
     const parsed = parseRuntimeLine(line);
     let threadId: string | null = parsed?.threadId ?? null;
+
     if (parsed !== null && parsed.id !== undefined) {
       const key = pendingKey(parsed.id);
+
       if (parsed.method !== undefined) {
         (direction === "runtime→bridge"
           ? runtimeRequestThreads
@@ -213,13 +248,16 @@ export function createBridgeRecorder(args: { dir: string }): BridgeRecorder {
           direction === "runtime→bridge"
             ? bridgeRequestThreads
             : runtimeRequestThreads;
+
         const owner = pending.get(key);
+
         if (owner !== undefined) {
           pending.delete(key);
           threadId = owner;
         }
       }
     }
+
     record({ direction, line, threadId });
   }
 
@@ -228,6 +266,7 @@ export function createBridgeRecorder(args: { dir: string }): BridgeRecorder {
     scope: { threadId: string | null },
   ): void {
     const { stdin, stdout } = child;
+
     if (stdout) {
       const splitter = createRecordingLineSplitter((line) =>
         record({
@@ -236,8 +275,10 @@ export function createBridgeRecorder(args: { dir: string }): BridgeRecorder {
           threadId: scope.threadId,
         }),
       );
+
       stdout.on("data", (chunk: Buffer | string) => splitter.push(chunk));
     }
+
     if (stdin) {
       const splitter = createRecordingLineSplitter((line) =>
         record({
@@ -246,12 +287,14 @@ export function createBridgeRecorder(args: { dir: string }): BridgeRecorder {
           threadId: scope.threadId,
         }),
       );
+
       const originalWrite = stdin.write.bind(stdin);
       stdin.write = ((
         chunk: string | Uint8Array,
         ...rest: unknown[]
       ): boolean => {
         splitter.push(chunk);
+
         return (originalWrite as (...args: unknown[]) => boolean)(
           chunk,
           ...rest,
@@ -266,17 +309,19 @@ export function createBridgeRecorder(args: { dir: string }): BridgeRecorder {
     recordChildIo,
     close() {
       closed = true;
+
       for (const fd of fds.values()) {
         try {
           closeSync(fd);
         } catch {}
       }
+
       fds.clear();
     },
   };
 }
 
-const RECORDER_GLOBAL_KEY = Symbol.for("bb.providerBridgeRecorder");
+const RECORDER_GLOBAL_KEY = Symbol.for("omnyo.providerBridgeRecorder");
 
 interface RecorderGlobalSlot {
   recorder: BridgeRecorder | null;
@@ -284,25 +329,31 @@ interface RecorderGlobalSlot {
 }
 
 function globalSlot(): RecorderGlobalSlot {
-  const holder = globalThis as unknown as Record<symbol, RecorderGlobalSlot>;
+  const holder = globalThis as Record<symbol, RecorderGlobalSlot>;
   const existing = holder[RECORDER_GLOBAL_KEY];
+
   if (existing !== undefined) {
     return existing;
   }
+
   const slot: RecorderGlobalSlot = { recorder: null, resolved: false };
   holder[RECORDER_GLOBAL_KEY] = slot;
+
   return slot;
 }
 
 export function getBridgeRecorder(): BridgeRecorder | null {
   const slot = globalSlot();
+
   if (!slot.resolved) {
     slot.resolved = true;
     const dir = process.env[PROVIDER_BRIDGE_RECORD_DIR_ENV];
+
     if (dir !== undefined && dir.trim() !== "") {
       slot.recorder = createBridgeRecorder({ dir: dir.trim() });
     }
   }
+
   return slot.recorder;
 }
 

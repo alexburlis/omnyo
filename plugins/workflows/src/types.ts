@@ -1,10 +1,12 @@
 type JsonPrimitive = string | number | boolean | null;
+
 export type JsonValue =
   | JsonPrimitive
   | JsonValue[]
   | { [key: string]: JsonValue };
 
 export type JsonObject = { [key: string]: JsonValue };
+
 export type JsonSchema = boolean | JsonObject;
 
 interface ExplicitModelSelection {
@@ -14,6 +16,7 @@ interface ExplicitModelSelection {
 }
 
 export interface WorkflowAgentOptions {
+  environmentId: string | null;
   selection: ExplicitModelSelection | null;
   outputSchema: JsonSchema | null;
   title: string | null;

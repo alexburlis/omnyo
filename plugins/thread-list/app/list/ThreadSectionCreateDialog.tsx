@@ -55,25 +55,31 @@ function ThreadSectionDialogContent({
 }: ThreadSectionDialogContentProps) {
   const inputId = useId();
   const [name, setName] = useState("");
+
   const [hiddenErrorMessage, setHiddenErrorMessage] = useState<string | null>(
     null,
   );
+
   const { validationMessage, validate, clearMessage } = useNameValidation({
     emptyMessage: "Section name cannot be empty.",
   });
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
     if (pending) return;
 
     const trimmedName = validate(name);
+
     if (trimmedName === null) return;
 
     setHiddenErrorMessage(null);
     onSubmit(trimmedName);
   };
+
   const displayedServerMessage =
     errorMessage && hiddenErrorMessage !== errorMessage ? errorMessage : null;
+
   const displayedMessage = validationMessage ?? displayedServerMessage;
 
   return (

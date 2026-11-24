@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
-import { isBackgroundAgentTaskType } from "@bb/domain";
-import type { TimelineWorkflowWorkRow } from "@bb/server-contract";
+import { isBackgroundAgentTaskType } from "@omnyo/domain";
+import type { TimelineWorkflowWorkRow } from "@omnyo/server-contract";
 import { useResizeObserver } from "usehooks-ts";
 import { AnimatedDisclosureBody } from "@/components/promptbox/banner/AnimatedBody";
 import {
@@ -9,25 +9,31 @@ import {
   PromptStackCard,
 } from "@/components/promptbox/banner/PromptStackCard";
 import { LiveDurationText } from "@/components/thread/timeline/LiveDurationText";
-import { Icon } from "@bb/shared-ui/icon";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   activityIconClass,
   activityMetaClass,
   activityRowClass,
   activityTextClass,
-} from "@bb/shared-ui/activity-row-styles";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/activity-row-styles";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { getStaggerItemProps } from "@omnyo/shared-ui/motion";
 import {
   PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
-  PromptStackCountSlot,
-  PromptStackHoverChevron,
   useDisclosureFocusHandoff,
-} from "@bb/shared-ui/prompt-stack-disclosure";
+} from "@omnyo/shared-ui/prompt-stack-disclosure";
+import {
+  PromptStackTrailing,
+  useOwnerRevealedIds,
+} from "@/components/promptbox/banner/prompt-stack-header";
 
 const BODY_ID = "thread-background-commands-card-body";
+
 const TOGGLE_ID = "thread-background-commands-card-toggle";
+
 const COMPACT_PROMPT_SHELL_MAX_WIDTH_REM = 34;
+
 const DEFAULT_ROOT_FONT_SIZE_PX = 16;
 
 function isCompactPromptShellWidth(width: number): boolean {
@@ -37,45 +43,42 @@ function isCompactPromptShellWidth(width: number): boolean {
       : Number.parseFloat(
           window.getComputedStyle(document.documentElement).fontSize,
         );
+
   const rootFontSize = Number.isFinite(parsedRootFontSize)
     ? parsedRootFontSize
     : DEFAULT_ROOT_FONT_SIZE_PX;
+
   return width <= COMPACT_PROMPT_SHELL_MAX_WIDTH_REM * rootFontSize;
 }
 
 interface BackgroundActivityDisplay {
   icon: "Terminal" | "UserRoundPlus";
   label: string;
-  runningPrefix: string;
 }
 
 function backgroundActivityDisplay(
   row: TimelineWorkflowWorkRow,
 ): BackgroundActivityDisplay {
   if (isBackgroundAgentTaskType(row.taskType)) {
-    return {
-      icon: "UserRoundPlus",
-      label: "Background agent",
-      runningPrefix: "Running background agent:",
-    };
+    return { icon: "UserRoundPlus", label: "Background agent" };
   }
-  return {
-    icon: "Terminal",
-    label: "Background command",
-    runningPrefix: "Running background command:",
-  };
+
+  return { icon: "Terminal", label: "Background command" };
 }
 
 function backgroundActivityGroupLabel(
   rows: readonly TimelineWorkflowWorkRow[],
 ): string {
   const hasAgent = rows.some((row) => isBackgroundAgentTaskType(row.taskType));
+
   const hasCommand = rows.some(
     (row) => !isBackgroundAgentTaskType(row.taskType),
   );
+
   if (hasAgent && hasCommand) {
     return "Background activity";
   }
+
   return hasAgent ? "Background agents" : "Background commands";
 }
 
@@ -88,6 +91,7 @@ function backgroundActivityAriaLabel(
   label = backgroundActivityDisplay(row).label,
 ): string {
   const model = backgroundActivityModel(row);
+
   return model
     ? `${label}: ${row.description} · Model ${model}`
     : `${label}: ${row.description}`;
@@ -99,13 +103,17 @@ function compactBackgroundActivityLabel(
   const agentCount = rows.filter((row) =>
     isBackgroundAgentTaskType(row.taskType),
   ).length;
+
   const commandCount = rows.length - agentCount;
+
   if (commandCount === 0) {
     return `Running ${agentCount} background agent${agentCount === 1 ? "" : "s"}`;
   }
+
   if (agentCount === 0) {
     return `Running ${commandCount} background command${commandCount === 1 ? "" : "s"}`;
   }
+
   return `Running ${rows.length} background activities`;
 }
 
@@ -118,18 +126,19 @@ function BackgroundActivitySummary({
 }) {
   const display = backgroundActivityDisplay(row);
   const model = backgroundActivityModel(row);
+
   return (
-    <span className="flex min-w-0 flex-1 items-center gap-1 text-left">
+    <span className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
       <span
         className={cn(
           "shrink-0 whitespace-nowrap",
-          activityMetaClass("active"),
+          activityTextClass("active"),
         )}
       >
-        {display.runningPrefix}
+        {display.label}
       </span>
       <span
-        className={cn("min-w-0 truncate", activityTextClass("active"))}
+        className="min-w-0 truncate text-muted-foreground"
         title={row.description}
       >
         {row.description}
@@ -171,6 +180,12 @@ export function ThreadBackgroundCommandsCard({
   const cardRef = useRef<HTMLElement>(null!);
   const [isCompactCard, setIsCompactCard] = useState<boolean | null>(null);
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
+
+  const revealedIds = useOwnerRevealedIds(
+    isExpanded,
+    commands.map((row) => row.id),
+  );
+
   useResizeObserver({
     ref: cardRef,
     box: "border-box",
@@ -183,9 +198,11 @@ export function ThreadBackgroundCommandsCard({
     },
   });
   const primary = commands[0];
+
   if (!primary) {
     return null;
   }
+
   const others = commands.slice(1);
   const hasMore = others.length > 0;
   const useCompactSummary = isCompactCard ?? isCompactViewport;
@@ -234,12 +251,15 @@ export function ThreadBackgroundCommandsCard({
                 <span className="min-w-0 flex-1 truncate text-left font-medium">
                   {compactLabel}
                 </span>
-                <PromptStackHoverChevron isExpanded={isExpanded} />
+                <PromptStackTrailing isExpanded={isExpanded} />
               </>
             ) : (
               <>
                 <BackgroundActivitySummary row={primary} showDuration={false} />
-                <PromptStackCountSlot count={others.length} />
+                <PromptStackTrailing
+                  isExpanded={isExpanded}
+                  moreCount={others.length}
+                />
               </>
             )}
           </button>
@@ -270,31 +290,38 @@ export function ThreadBackgroundCommandsCard({
           collapseRef={focus.collapseRef}
           onCollapse={focus.onCollapseClick}
         >
-          <div className="flex flex-col gap-0.5 py-1">
-            {expandedRows.map((row) => {
+          <div className="flex flex-col gap-0.5 py-1.5">
+            {expandedRows.map((row, index) => {
               const display = backgroundActivityDisplay(row);
               const model = backgroundActivityModel(row);
+
+              const stagger = getStaggerItemProps(
+                index,
+                expandedRows.length,
+                revealedIds?.has(row.id) ?? false,
+              );
+
               return (
                 <div
                   key={row.id}
                   className={cn(
-                    "flex min-w-0 gap-1.5 px-3 py-0.5 text-xs",
+                    "flex min-h-6 min-w-0 gap-2 px-3 py-0.5 text-xs",
                     useCompactSummary ? "items-start" : "items-center",
+                    stagger.className,
                   )}
+                  style={stagger.style}
                 >
                   <span className="flex h-[1lh] shrink-0 items-center">
                     <Icon
                       name={display.icon}
-                      className="size-3.5 text-muted-foreground/60"
+                      className="size-3.5 text-subtle-foreground"
                       aria-hidden="true"
                     />
                   </span>
                   <span
                     className={cn(
-                      "min-w-0 flex-1 text-muted-foreground",
-                      useCompactSummary
-                        ? "line-clamp-2 break-all"
-                        : "truncate",
+                      "min-w-0 flex-1 text-foreground",
+                      useCompactSummary ? "line-clamp-2 break-all" : "truncate",
                     )}
                     title={row.description}
                   >

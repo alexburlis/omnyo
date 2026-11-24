@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 import { useSystemMachineProviders } from "@/hooks/queries/machine-provider-queries";
 import { getSettingsRoutePath } from "@/lib/route-paths";
@@ -16,10 +16,13 @@ export function PluginMachineServerAccessNotice({
 }) {
   const { providers } = useSystemMachineProviders();
   const access = useSystemConfig().data?.serverAccess;
+
   const ownsMachineProvider = (providers ?? []).some(
     (provider) => provider.pluginId === pluginId,
   );
+
   if (!ownsMachineProvider) return null;
+
   return (
     <MachineServerAccessNoticeContent
       reason={machineServerAccessBlockedReason(access)}
@@ -33,6 +36,7 @@ export function MachineServerAccessNoticeContent({
   reason: string | null;
 }) {
   if (reason === null) return null;
+
   return (
     <div className="@container w-full">
       <div

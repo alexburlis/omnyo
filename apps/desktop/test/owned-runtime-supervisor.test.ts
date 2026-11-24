@@ -11,6 +11,7 @@ const writeControl = vi.hoisted(() => ({
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs/promises")>();
+
   return {
     ...original,
     writeFile: async (...args: Parameters<typeof original.writeFile>) => {
@@ -19,6 +20,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         writeControl.onStarted();
         await writeControl.pauseUntil;
       }
+
       await original.writeFile(...args);
     },
   };
@@ -27,7 +29,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 import type {
   VerifiedProcessOps,
   WaitForProcessExitArgs,
-} from "@bb/config/verified-process-stop";
+} from "@omnyo/config/verified-process-stop";
 import {
   readOwnedRuntimePidFile,
   reapStaleOwnedRuntime,
@@ -51,15 +53,17 @@ interface CreateFakeProcessOpsArgs {
 const tempDirs: TempDir[] = [];
 
 async function createTempDir(): Promise<TempDir> {
-  const path = await mkdtemp(join(tmpdir(), "bb-desktop-supervisor-"));
+  const path = await mkdtemp(join(tmpdir(), "omnyo-desktop-supervisor-"));
   const tempDir = { path };
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 
 function createFakeProcessOps(args: CreateFakeProcessOpsArgs): FakeProcessOps {
   let running = args.running;
   const killedSignals: NodeJS.Signals[] = [];
+
   const ops: VerifiedProcessOps = {
     isRunning() {
       return running;
@@ -75,15 +79,19 @@ function createFakeProcessOps(args: CreateFakeProcessOpsArgs): FakeProcessOps {
       return !running;
     },
   };
+
   return { killedSignals, ops };
 }
 
 afterEach(async () => {
   writeControl.enabled = false;
   writeControl.onStarted = (): void => {};
+
   writeControl.pauseUntil = Promise.resolve();
+
   while (tempDirs.length > 0) {
     const tempDir = tempDirs.pop();
+
     if (tempDir !== undefined) {
       await rm(tempDir.path, { force: true, recursive: true });
     }
@@ -94,21 +102,26 @@ describe("owned runtime supervisor", () => {
   it("does not publish incomplete pid file JSON", async () => {
     const tempDir = await createTempDir();
     let releaseWrite = (): void => {};
+
     writeControl.pauseUntil = new Promise<void>((resolve) => {
       releaseWrite = resolve;
     });
+
     const writeStarted = new Promise<void>((resolve) => {
       writeControl.onStarted = resolve;
     });
+
     writeControl.enabled = true;
 
     const writePromise = writeOwnedRuntimePidFile({
-      bridgePath: "/tmp/app/resources/app.asar.unpacked/bb-app-bridge.mjs",
+      bridgePath: "/tmp/app/resources/app.asar.unpacked/omnyo-app-bridge.mjs",
       pid: 12345,
       serverUrl: "http://127.0.0.1:38886",
       userDataPath: tempDir.path,
     });
+
     await writeStarted;
+
     const [observation] = await Promise.allSettled([
       readFile(join(tempDir.path, "owned-runtime.json"), "utf8").then((raw) =>
         JSON.parse(raw),
@@ -125,17 +138,18 @@ describe("owned runtime supervisor", () => {
     await expect(
       readOwnedRuntimePidFile({ userDataPath: tempDir.path }),
     ).resolves.toMatchObject({
-      bridgePath: "/tmp/app/resources/app.asar.unpacked/bb-app-bridge.mjs",
+      bridgePath: "/tmp/app/resources/app.asar.unpacked/omnyo-app-bridge.mjs",
       pid: 12345,
       serverUrl: "http://127.0.0.1:38886",
     });
   });
 
-  it("reaps a stale Electron-owned bb-app bridge process", async () => {
+  it("reaps a stale Electron-owned omnyo-app bridge process", async () => {
     const tempDir = await createTempDir();
-    const bridgePath = "/Applications/bb.app/bb-app-bridge.mjs";
+    const bridgePath = "/Applications/Omnyo.app/omnyo-app-bridge.mjs";
+
     const fakeProcessOps = createFakeProcessOps({
-      command: `/Applications/bb.app/Contents/MacOS/bb ${bridgePath}`,
+      command: `/Applications/Omnyo.app/Contents/MacOS/Omnyo ${bridgePath}`,
       running: true,
     });
 
@@ -165,7 +179,8 @@ describe("owned runtime supervisor", () => {
 
   it("does not kill a PID that no longer matches the owned bridge command", async () => {
     const tempDir = await createTempDir();
-    const bridgePath = "/Applications/bb.app/bb-app-bridge.mjs";
+    const bridgePath = "/Applications/Omnyo.app/omnyo-app-bridge.mjs";
+
     const fakeProcessOps = createFakeProcessOps({
       command: "/usr/bin/vim",
       running: true,
@@ -191,7 +206,8 @@ describe("owned runtime supervisor", () => {
 
   it("clears a stale pid file when the process is already gone", async () => {
     const tempDir = await createTempDir();
-    const bridgePath = "/Applications/bb.app/bb-app-bridge.mjs";
+    const bridgePath = "/Applications/Omnyo.app/omnyo-app-bridge.mjs";
+
     const fakeProcessOps = createFakeProcessOps({
       command: null,
       running: false,

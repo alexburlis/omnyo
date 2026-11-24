@@ -1,4 +1,4 @@
-import { hostDaemonEnrollResponseSchema } from "@bb/host-daemon-contract";
+import { hostDaemonEnrollResponseSchema } from "@omnyo/host-daemon-contract";
 
 interface EnrollHostArgs {
   fetchFn?: typeof fetch;
@@ -20,9 +20,11 @@ function buildEnrollUrl(serverUrl: string): string {
 
 function summarizeErrorDetail(detail: string): string {
   const compact = detail.replace(/\s+/gu, " ").trim();
+
   if (compact.length <= 200) {
     return compact;
   }
+
   return `${compact.slice(0, 197)}...`;
 }
 
@@ -30,6 +32,7 @@ export async function enrollDaemonHost(
   args: EnrollHostArgs,
 ): Promise<EnrollHostResult> {
   const fetchFn = args.fetchFn ?? fetch;
+
   const response = await fetchFn(buildEnrollUrl(args.serverUrl), {
     method: "POST",
     headers: {

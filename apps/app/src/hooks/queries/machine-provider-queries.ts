@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { SystemMachineProvider } from "@bb/server-contract";
+import type { SystemMachineProvider } from "@omnyo/server-contract";
 import { sdk } from "@/lib/sdk";
 import { SERVER_SESSION_QUERY_POLICY } from "./query-policies";
 import { systemMachineProvidersQueryKey } from "./query-keys";
@@ -14,6 +14,7 @@ export function useSystemMachineProviders(): {
     queryFn: () => sdk.hosts.experimental_listProviders(),
     ...SERVER_SESSION_QUERY_POLICY,
   });
+
   return {
     providers: result.isError ? NO_MACHINE_PROVIDERS : result.data,
   };

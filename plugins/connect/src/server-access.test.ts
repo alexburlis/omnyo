@@ -2,20 +2,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFakePluginHost,
   type FakePluginHost,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import {
   createServerAccessRecheck,
   registerServerAccess,
   type ServerAccessCloud,
 } from "./server-access.js";
 
-const SERVER_URL = "https://test.getbb.app";
+const SERVER_URL = "https://test.omnyo.link";
+
 const request = {
   key: "launch-key",
   hostId: "host-pending",
   signal: new AbortController().signal,
 };
+
 const key = "server-access-grant:host-pending";
+
+const secretName = "server-access-grant/host-pending";
+
 const hosts: FakePluginHost[] = [];
 
 interface CloudOptions {
@@ -29,11 +34,13 @@ function fakeCloud(options: CloudOptions = {}) {
   let failRevoke = false;
   let minted = 0;
   let redeemed = 0;
+
   const cloud: ServerAccessCloud = {
     createMachineCode: vi.fn(
       options.mint ??
         (async () => {
           minted += 1;
+
           return {
             code: minted === 1 ? "PRIVATE-CODE" : `CODE-${minted}`,
             expiresAt: Date.now() + 600_000,
@@ -57,6 +64,7 @@ function fakeCloud(options: CloudOptions = {}) {
           redeemed += 1;
           const machineId = redeemed === 1 ? "cloud-id" : `device-${redeemed}`;
           active.add(machineId);
+
           return {
             credential: "bbcm_private",
             machineId,
@@ -65,6 +73,7 @@ function fakeCloud(options: CloudOptions = {}) {
         }),
     ),
   };
+
   return {
     cloud,
     active,
@@ -93,12 +102,14 @@ async function setup(
     pluginId: "connect",
     sdk: { hosts: { get: async () => ({ connectMachineId: null }) } },
   });
+
   hosts.push(host);
   await options.beforeInit?.(host);
-  await registerServerAccess(host.bb, {
+  await registerServerAccess(host.api, {
     cloud,
     status: options.status ?? signedIn(),
   });
+
   return host;
 }
 
@@ -107,16 +118,26 @@ async function restart(
   cloud: ServerAccessCloud,
   status = signedIn(),
 ) {
-  const restarted = await host.harness.lifecycle.reload((bb) =>
-    registerServerAccess(bb, { cloud, status }),
+  const restarted = await host.harness.lifecycle.reload((api) =>
+    registerServerAccess(api, { cloud, status }),
   );
+
   hosts.push(restarted);
+
   return restarted;
+}
+
+async function storedGrant(host: FakePluginHost): Promise<unknown> {
+  const value = await host.api.experimental_secrets.get(secretName);
+
+  return value === undefined ? undefined : JSON.parse(value);
 }
 
 function provider(host: FakePluginHost) {
   const p = host.harness.registrations.serverAccessProviders.get("connect");
+
   if (!p) throw new Error("Missing provider");
+
   return p;
 }
 
@@ -128,22 +149,26 @@ afterEach(async () => {
 describe("Connect server-owned machine access", () => {
   it("declares picker copy", async () => {
     const host = await setup(fakeCloud().cloud);
-    expect(provider(host).description).toBe("Use a private getbb.app address.");
+    expect(provider(host).description).toBe(
+      "Use a private omnyo.link address.",
+    );
   });
 
   it("asks to sign in or turn remote access on before offering machine access", async () => {
     const { cloud } = fakeCloud();
+
     const signedOut = await setup(cloud, {
       status: signedIn({ paired: false }),
     });
+
     expect(provider(signedOut).availability()).toEqual({
       status: "setup-required",
-      message: "Sign in to your bb account to use bb connect",
+      message: "Sign in to your Omnyo account to use Omnyo connect",
     });
     const off = await setup(cloud, { status: signedIn({ enabled: false }) });
     expect(provider(off).availability()).toEqual({
       status: "setup-required",
-      message: "Turn on remote access with bb connect on",
+      message: "Turn on remote access with omnyo connect on",
     });
     const on = await setup(cloud);
     expect(provider(on).availability()).toEqual({
@@ -156,13 +181,14 @@ describe("Connect server-owned machine access", () => {
     const api = fakeCloud();
     const original = await setup(api.cloud);
     const grant = await provider(original).acquire(request);
+
     if ("status" in grant) throw new Error(grant.message);
     expect(grant).toEqual({
       id: request.hostId,
       serverUrl: SERVER_URL,
-      headers: { "x-bb-connect-machine": "bbcm_private" },
+      headers: { "x-omnyo-connect-machine": "bbcm_private" },
     });
-    expect(await original.bb.storage.kv.get(key)).toMatchObject({
+    expect(await storedGrant(original)).toMatchObject({
       result: { connectMachineId: "cloud-id" },
     });
     const restarted = await restart(original, api.cloud);
@@ -176,7 +202,7 @@ describe("Connect server-owned machine access", () => {
     });
     expect(api.active.size).toBe(0);
     expect(api.cloud.revokeMachine).toHaveBeenCalledWith("cloud-id");
-    expect(await restarted.bb.storage.kv.get(key)).toBeUndefined();
+    expect(await storedGrant(restarted)).toBeUndefined();
   });
 
   it("reacquires fresh access for the same host after release", async () => {
@@ -190,9 +216,9 @@ describe("Connect server-owned machine access", () => {
     });
     await expect(provider(host).acquire(request)).resolves.toMatchObject({
       id: request.hostId,
-      headers: { "x-bb-connect-machine": "bbcm_private" },
+      headers: { "x-omnyo-connect-machine": "bbcm_private" },
     });
-    expect(await host.bb.storage.kv.get(key)).toMatchObject({
+    expect(await storedGrant(host)).toMatchObject({
       result: { connectMachineId: "device-2" },
     });
     expect(api.cloud.revokeMachine).toHaveBeenCalledWith("cloud-id");
@@ -220,26 +246,28 @@ describe("Connect server-owned machine access", () => {
       grantId: request.hostId,
     });
     expect(api.active.size).toBe(0);
-    expect(await restarted.bb.storage.kv.get(key)).toBeUndefined();
+    expect(await storedGrant(restarted)).toBeUndefined();
   });
 
-  it("retains the device ID while this bb is signed out", async () => {
+  it("retains the device ID while this Omnyo is signed out", async () => {
     const api = fakeCloud();
     const host = await setup(api.cloud);
     await provider(host).acquire(request);
+
     const restarted = await restart(
       host,
       api.cloud,
       signedIn({ paired: false }),
     );
+
     await expect(
       provider(restarted).release({
         key: request.key,
         hostId: request.hostId,
         grantId: request.hostId,
       }),
-    ).rejects.toThrow("Sign in to your bb account");
-    expect(await restarted.bb.storage.kv.get(key)).toMatchObject({
+    ).rejects.toThrow("Sign in to your Omnyo account");
+    expect(await storedGrant(restarted)).toMatchObject({
       result: { connectMachineId: "cloud-id" },
     });
   });
@@ -248,11 +276,11 @@ describe("Connect server-owned machine access", () => {
 it("does not redeem a code when persisting the pending record fails", async () => {
   const api = fakeCloud();
   const host = await setup(api.cloud);
-  vi.spyOn(host.bb.storage.kv, "set").mockRejectedValueOnce(
-    new Error("KV write failed"),
+  vi.spyOn(host.api.experimental_secrets, "set").mockRejectedValueOnce(
+    new Error("Secret write failed"),
   );
   await expect(provider(host).acquire(request)).rejects.toThrow(
-    "KV write failed",
+    "Secret write failed",
   );
   expect(api.cloud.createMachineCode).toHaveBeenCalledOnce();
   expect(api.cloud.redeemMachineCode).not.toHaveBeenCalled();
@@ -263,16 +291,20 @@ it.each([true, false])(
   "reconciles lost redemption responses with lookup available=%s without blindly minting",
   async (available) => {
     let redeemed = 0;
+
     const api = fakeCloud({
       lookup: async () => {
         if (!available) throw new Error("Machine code lookup failed (404)");
+
         return { consumed: true, machineId: "device-1" };
       },
       redeem: async () => {
         redeemed += 1;
         const machineId = `device-${redeemed}`;
         api.active.add(machineId);
+
         if (redeemed === 1) throw new Error("Response lost after Cloud commit");
+
         return {
           credential: "private-bearer",
           machineId,
@@ -280,12 +312,14 @@ it.each([true, false])(
         };
       },
     });
+
     const host = await setup(api.cloud);
     await expect(provider(host).acquire(request)).resolves.toEqual({
       status: "failed",
       message:
         "Cloud device may need dashboard revocation: interrupted machine access acquisition",
     });
+
     if (available) {
       await provider(host).acquire(request);
       await provider(host).release({
@@ -309,15 +343,24 @@ it.each([true, false])(
       ).rejects.toThrow("Cloud device may need dashboard revocation");
       expect(api.cloud.createMachineCode).toHaveBeenCalledOnce();
       expect(redeemed).toBe(1);
-      expect(await host.bb.storage.kv.get(key)).toMatchObject({
+      expect(await storedGrant(host)).toMatchObject({
         intent: { code: "PRIVATE-CODE" },
       });
     }
-    const storedValues = await Promise.all(
-      (await host.bb.storage.kv.list()).map((entry) =>
-        host.bb.storage.kv.get(entry),
-      ),
-    );
+
+    const storedValues = [
+      ...(await Promise.all(
+        (await host.api.storage.kv.list()).map((entry) =>
+          host.api.storage.kv.get(entry),
+        ),
+      )),
+      ...(await Promise.all(
+        (await host.api.experimental_secrets.list()).map((entry) =>
+          host.api.experimental_secrets.get(entry),
+        ),
+      )),
+    ];
+
     expect(JSON.stringify(storedValues)).not.toContain("private-bearer");
   },
 );
@@ -325,10 +368,12 @@ it.each([true, false])(
 it("serializes concurrent acquisitions so release revokes every created device", async () => {
   const api = fakeCloud();
   const host = await setup(api.cloud);
+
   const grants = await Promise.all([
     provider(host).acquire(request),
     provider(host).acquire(request),
   ]);
+
   expect(grants[0]).toEqual(grants[1]);
   expect(api.cloud.createMachineCode).toHaveBeenCalledOnce();
   expect(api.cloud.redeemMachineCode).toHaveBeenCalledOnce();
@@ -345,10 +390,12 @@ it.each(["expired", "valid"])(
   async (age) => {
     const issued: string[] = [];
     const redeemedCodes: string[] = [];
+
     const api = fakeCloud({
       lookup: async () => ({ consumed: false, machineId: null }),
       mint: async () => {
         issued.push("NEW-CODE");
+
         return {
           code: "NEW-CODE",
           expiresAt: Date.now() + 600_000,
@@ -357,6 +404,7 @@ it.each(["expired", "valid"])(
       },
       redeem: async ({ code }) => {
         redeemedCodes.push(code);
+
         return {
           credential: "new-private",
           machineId: "new-device",
@@ -364,9 +412,10 @@ it.each(["expired", "valid"])(
         };
       },
     });
+
     const host = await setup(api.cloud, {
       beforeInit: async (current) => {
-        await current.bb.storage.kv.set(key, {
+        await current.api.storage.kv.set(key, {
           intent: {
             key: request.key,
             hostId: request.hostId,
@@ -377,12 +426,13 @@ it.each(["expired", "valid"])(
         });
       },
     });
+
     await expect(provider(host).acquire(request)).resolves.toMatchObject({
-      headers: { "x-bb-connect-machine": "new-private" },
+      headers: { "x-omnyo-connect-machine": "new-private" },
     });
     expect(issued).toEqual(age === "valid" ? [] : ["NEW-CODE"]);
     expect(redeemedCodes).toEqual([age === "valid" ? "OLD-CODE" : "NEW-CODE"]);
-    expect(await host.bb.storage.kv.get(key)).toMatchObject({
+    expect(await storedGrant(host)).toMatchObject({
       result: { connectMachineId: "new-device", grant: { id: request.hostId } },
     });
   },
@@ -391,18 +441,26 @@ it.each(["expired", "valid"])(
 describe("server access recheck", () => {
   it("tells core only when signed-in state, remote access, or public URL changes", async () => {
     const host = await setup(fakeCloud().cloud);
-    const recheck = createServerAccessRecheck(host.bb);
+    const recheck = createServerAccessRecheck(host.api);
     recheck({ paired: false, enabled: true, url: null });
     expect(host.harness.recheckCount).toBe(0);
     recheck({ paired: false, enabled: true, url: null });
     expect(host.harness.recheckCount).toBe(0);
-    recheck({ paired: true, enabled: true, url: "https://test.getbb.app" });
+    recheck({ paired: true, enabled: true, url: "https://test.omnyo.link" });
     expect(host.harness.recheckCount).toBe(1);
-    recheck({ paired: true, enabled: true, url: "https://test.getbb.app" });
+    recheck({ paired: true, enabled: true, url: "https://test.omnyo.link" });
     expect(host.harness.recheckCount).toBe(1);
-    recheck({ paired: true, enabled: true, url: "https://renamed.getbb.app" });
+    recheck({
+      paired: true,
+      enabled: true,
+      url: "https://renamed.omnyo.link",
+    });
     expect(host.harness.recheckCount).toBe(2);
-    recheck({ paired: true, enabled: false, url: "https://renamed.getbb.app" });
+    recheck({
+      paired: true,
+      enabled: false,
+      url: "https://renamed.omnyo.link",
+    });
     expect(host.harness.recheckCount).toBe(3);
     recheck({ paired: false, enabled: false, url: null });
     expect(host.harness.recheckCount).toBe(4);
@@ -412,6 +470,7 @@ describe("server access recheck", () => {
 it("aborts pending code issuance and lets a later acquisition proceed", async () => {
   let started = false;
   let hang = true;
+
   const api = fakeCloud({
     mint: (signal) => {
       if (!hang) {
@@ -421,8 +480,10 @@ it("aborts pending code issuance and lets a later acquisition proceed", async ()
           serverUrl: SERVER_URL,
         });
       }
+
       if (!signal) throw new Error("Missing acquisition signal");
       started = true;
+
       return new Promise((_resolve, reject) => {
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
@@ -430,16 +491,19 @@ it("aborts pending code issuance and lets a later acquisition proceed", async ()
       });
     },
   });
+
   const host = await setup(api.cloud);
   const controller = new AbortController();
+
   const pending = provider(host).acquire({
     ...request,
     signal: controller.signal,
   });
+
   await vi.waitFor(() => expect(started).toBe(true));
   controller.abort(new Error("cancelled"));
   await expect(pending).rejects.toThrow("cancelled");
-  expect(await host.bb.storage.kv.get(key)).toBeUndefined();
+  expect(await storedGrant(host)).toBeUndefined();
   hang = false;
   await provider(host).acquire(request);
   await provider(host).release({
@@ -452,6 +516,7 @@ it("aborts pending code issuance and lets a later acquisition proceed", async ()
 
 it("retains interrupted redemption intent and revokes the committed device", async () => {
   let redeemStarted = false;
+
   const api = fakeCloud({
     mint: async () => ({
       code: "PENDING-CODE",
@@ -461,6 +526,7 @@ it("retains interrupted redemption intent and revokes the committed device", asy
     redeem: ({ signal }) => {
       redeemStarted = true;
       api.active.add("committed-device");
+
       return new Promise((_resolve, reject) => {
         signal.addEventListener("abort", () => reject(signal.reason), {
           once: true,
@@ -469,16 +535,19 @@ it("retains interrupted redemption intent and revokes the committed device", asy
     },
     lookup: async () => ({ consumed: true, machineId: "committed-device" }),
   });
+
   const host = await setup(api.cloud);
   const controller = new AbortController();
+
   const pending = provider(host).acquire({
     ...request,
     signal: controller.signal,
   });
+
   await vi.waitFor(() => expect(redeemStarted).toBe(true));
   controller.abort(new Error("cancelled"));
   await expect(pending).rejects.toThrow("cancelled");
-  expect(await host.bb.storage.kv.get(key)).toMatchObject({
+  expect(await storedGrant(host)).toMatchObject({
     intent: { code: "PENDING-CODE" },
   });
   const restarted = await restart(host, api.cloud);
@@ -492,20 +561,22 @@ it("retains interrupted redemption intent and revokes the committed device", asy
     expect.any(AbortSignal),
   );
   expect(api.active.size).toBe(0);
-  expect(await restarted.bb.storage.kv.get(key)).toBeUndefined();
+  expect(await storedGrant(restarted)).toBeUndefined();
 });
 
 it("keeps an unexpired acquisition intent until a late redemption can be ruled out", async () => {
   let consumed = false;
+
   const api = fakeCloud({
     lookup: async () => ({
       consumed,
       machineId: consumed ? "late-device" : null,
     }),
   });
+
   const host = await setup(api.cloud, {
     beforeInit: async (current) => {
-      await current.bb.storage.kv.set(key, {
+      await current.api.storage.kv.set(key, {
         intent: {
           key: request.key,
           hostId: request.hostId,
@@ -516,11 +587,12 @@ it("keeps an unexpired acquisition intent until a late redemption can be ruled o
       });
     },
   });
+
   const release = { key: request.key, hostId: request.hostId, grantId: null };
   await expect(provider(host).release(release)).rejects.toThrow(
     "still unsettled",
   );
-  expect(await host.bb.storage.kv.get(key)).toMatchObject({
+  expect(await storedGrant(host)).toMatchObject({
     intent: { code: "UNSETTLED-CODE" },
   });
   consumed = true;
@@ -529,5 +601,188 @@ it("keeps an unexpired acquisition intent until a late redemption can be ruled o
     "late-device",
     expect.any(AbortSignal),
   );
-  expect(await host.bb.storage.kv.get(key)).toBeUndefined();
+  expect(await storedGrant(host)).toBeUndefined();
 });
+
+describe("grant storage", () => {
+  function storedResult(machineId: string, credential: string) {
+    return {
+      result: {
+        connectMachineId: machineId,
+        grant: {
+          id: request.hostId,
+          serverUrl: SERVER_URL,
+          headers: { "x-omnyo-connect-machine": credential },
+        },
+      },
+    };
+  }
+
+  it("moves every plugin storage grant into the secret store at start", async () => {
+    const api = fakeCloud();
+
+    const host = await setup(api.cloud, {
+      beforeInit: async (current) => {
+        await current.api.storage.kv.set(
+          key,
+          storedResult("device-row", "bbcm_row"),
+        );
+        await current.api.storage.kv.set("server-access-grant:host_other", {
+          intent: {
+            key: "other-key",
+            hostId: "host_other",
+            code: "OTHER-CODE",
+            serverUrl: SERVER_URL,
+            expiresAt: 1,
+          },
+        });
+        await current.api.storage.kv.set("unrelated", true);
+      },
+    });
+
+    expect(await host.api.storage.kv.list()).toEqual(["unrelated"]);
+    expect(await host.api.experimental_secrets.list()).toEqual([
+      "server-access-grant/host-pending",
+      "server-access-grant/host_other",
+    ]);
+    expect(await storedGrant(host)).toEqual(
+      storedResult("device-row", "bbcm_row"),
+    );
+    await expect(provider(host).acquire(request)).resolves.toEqual(
+      storedResult("device-row", "bbcm_row").result.grant,
+    );
+    expect(api.cloud.createMachineCode).not.toHaveBeenCalled();
+  });
+
+  it("reads a grant that is already in the secret store", async () => {
+    const api = fakeCloud();
+
+    const host = await setup(api.cloud, {
+      beforeInit: (current) =>
+        current.api.experimental_secrets.set(
+          secretName,
+          JSON.stringify(storedResult("device-secret", "bbcm_secret")),
+        ),
+    });
+
+    await expect(provider(host).acquire(request)).resolves.toEqual(
+      storedResult("device-secret", "bbcm_secret").result.grant,
+    );
+    expect(await host.api.storage.kv.list()).toEqual([]);
+  });
+
+  it("finishes a move interrupted after the secret was written", async () => {
+    const api = fakeCloud();
+    const stored = storedResult("device-same", "bbcm_same");
+
+    const host = await setup(api.cloud, {
+      beforeInit: async (current) => {
+        await current.api.experimental_secrets.set(
+          secretName,
+          JSON.stringify(stored),
+        );
+        await current.api.storage.kv.set(key, stored);
+      },
+    });
+
+    expect(await host.api.storage.kv.list()).toEqual([]);
+    expect(await storedGrant(host)).toEqual(stored);
+  });
+
+  it("prefers a plugin storage grant written after the secret", async () => {
+    const api = fakeCloud();
+
+    const host = await setup(api.cloud, {
+      beforeInit: async (current) => {
+        await current.api.experimental_secrets.set(
+          secretName,
+          JSON.stringify(storedResult("device-old", "bbcm_old")),
+        );
+        await current.api.storage.kv.set(
+          key,
+          storedResult("device-new", "bbcm_new"),
+        );
+      },
+    });
+
+    await expect(provider(host).acquire(request)).resolves.toEqual(
+      storedResult("device-new", "bbcm_new").result.grant,
+    );
+    expect(await host.api.storage.kv.list()).toEqual([]);
+  });
+
+  it("refuses a host id that cannot name a secret", async () => {
+    const api = fakeCloud();
+    const host = await setup(api.cloud);
+
+    await expect(
+      provider(host).acquire({ ...request, hostId: "host:bad" }),
+    ).rejects.toThrow();
+    expect(api.cloud.createMachineCode).not.toHaveBeenCalled();
+  });
+});
+
+it("rebinds a cached machine grant only to its paired tenant without redeeming again", async () => {
+  const { cloud } = fakeCloud();
+
+  const host = await setup(cloud, {
+    beforeInit: async (seeded) => {
+      await seeded.api.experimental_secrets.set(
+        secretName,
+        JSON.stringify({
+          result: {
+            connectMachineId: "same-machine",
+            grant: {
+              id: request.hostId,
+              serverUrl: "https://test.slashnew.com",
+              headers: { "x-omnyo-connect-machine": "fixture-kept" },
+            },
+          },
+        }),
+      );
+    },
+  });
+
+  const expected = {
+    id: request.hostId,
+    serverUrl: SERVER_URL,
+    headers: { "x-omnyo-connect-machine": "fixture-kept" },
+  };
+
+  expect(await provider(host).acquire(request)).toEqual(expected);
+  expect(await storedGrant(host)).toEqual({
+    result: { connectMachineId: "same-machine", grant: expected },
+  });
+  expect(await provider(host).acquire(request)).toEqual(expected);
+  expect(cloud.createMachineCode).not.toHaveBeenCalled();
+  expect(cloud.redeemMachineCode).not.toHaveBeenCalled();
+});
+
+it.each(["https://other.slashnew.com", "https://custom.example.test"])(
+  "preserves a cached machine grant for an unrelated origin: %s",
+  async (serverUrl) => {
+    const { cloud } = fakeCloud();
+
+    const grant = {
+      id: request.hostId,
+      serverUrl,
+      headers: { "x-omnyo-connect-machine": "fixture-kept" },
+    };
+
+    const host = await setup(cloud, {
+      beforeInit: async (seeded) => {
+        await seeded.api.experimental_secrets.set(
+          secretName,
+          JSON.stringify({
+            result: { connectMachineId: "same-machine", grant },
+          }),
+        );
+      },
+    });
+
+    expect(await provider(host).acquire(request)).toEqual(grant);
+    expect(await storedGrant(host)).toEqual({
+      result: { connectMachineId: "same-machine", grant },
+    });
+  },
+);

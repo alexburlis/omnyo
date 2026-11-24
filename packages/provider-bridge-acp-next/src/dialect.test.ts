@@ -70,11 +70,13 @@ describe("registerAcpDialect", () => {
 
   it("refuses an empty id and every id the bridge ships", () => {
     expect(() => registerAcpDialect({ id: " " })).toThrow("non-empty id");
+
     for (const id of ["acp", "cursor", "grok", "omp", "opencode"]) {
       expect(() => registerAcpDialect({ id })).toThrow(
         `ACP dialect id "${id}" is reserved by a built-in dialect.`,
       );
     }
+
     expect(resolveAcpDialect({ dialectId: "grok", command: "node" })).toBe(
       GROK_ACP_DIALECT,
     );
@@ -119,6 +121,7 @@ describe("omp command results", () => {
   it("does not remove suffix text that its structured details do not prove", () => {
     const output =
       "literal\n\nWall time: 1.24 seconds\n\nCommand exited with code 8";
+
     expect(
       result({
         status: "failed",
@@ -239,6 +242,7 @@ describe("OpenCode command results", () => {
       output: "OpenCode output\n",
       metadata: { exit: 0, output: "OpenCode metadata output\n" },
     };
+
     expect(normalize(rawOutput)).toEqual(rawOutput);
   });
 });

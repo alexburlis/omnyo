@@ -10,7 +10,13 @@ import { useConnectionBanner, useProfiles } from "@/app-shell";
 import type { ConnectionBannerKind } from "@/lib/connection";
 import { haptic } from "@/lib/haptics";
 import { useTheme } from "@/theme";
-import { Icon, Text, type IconName } from "@/ui";
+import {
+  Icon,
+  MOBILE_MOTION_MS,
+  MOBILE_PRESS_OPACITY,
+  Text,
+  type IconName,
+} from "@/ui";
 import { connectEnrollHref } from "./hrefs";
 
 interface BannerCopy {
@@ -42,9 +48,6 @@ const COPY: Record<Exclude<ConnectionBannerKind, "hidden">, BannerCopy> = {
   },
 };
 
-const ENTER_MS = 220;
-const EXIT_MS = 160;
-
 const CARD_RADIUS = 12;
 
 export function ConnectionBanner() {
@@ -54,17 +57,22 @@ export function ConnectionBanner() {
   const { tokens } = useTheme();
 
   useEffect(() => {
-    if (kind === "auth-required") haptic("warning");
+    if (process.env.EXPO_OS !== "ios" && kind === "auth-required") {
+      haptic("warning");
+    }
   }, [kind]);
 
   if (kind === "hidden" || !activeProfile) return null;
   const copy = COPY[kind];
   const color = copy.destructive ? tokens.destructiveText : tokens.warningText;
+
   const reauth =
     kind === "auth-required" && activeProfile.mode === "connect"
       ? () => router.push(connectEnrollHref({ profileId: activeProfile.id }))
       : null;
+
   const message = copy.message(activeProfile.label);
+
   const cardStyle: ViewStyle = {
     flexDirection: "row",
     alignItems: "center",
@@ -77,6 +85,7 @@ export function ConnectionBanner() {
       ? tokens.surfaceDestructive
       : tokens.surfaceAttention,
   };
+
   const content = (
     <>
       <Icon name={copy.icon} size={18} weight="semibold" color={color} />
@@ -109,11 +118,12 @@ export function ConnectionBanner() {
       ) : null}
     </>
   );
+
   return (
     <Animated.View
-      entering={FadeInUp.duration(ENTER_MS)}
-      exiting={FadeOutUp.duration(EXIT_MS)}
-      layout={LinearTransition.duration(ENTER_MS)}
+      entering={FadeInUp.duration(MOBILE_MOTION_MS.base)}
+      exiting={FadeOutUp.duration(MOBILE_MOTION_MS.fast)}
+      layout={LinearTransition.duration(MOBILE_MOTION_MS.base)}
     >
       {reauth ? (
         <Pressable
@@ -122,7 +132,10 @@ export function ConnectionBanner() {
           accessibilityLabel={`${message} Sign in again`}
           accessibilityLiveRegion="polite"
           onPress={reauth}
-          style={({ pressed }) => [cardStyle, { opacity: pressed ? 0.7 : 1 }]}
+          style={({ pressed }) => [
+            cardStyle,
+            { opacity: pressed ? MOBILE_PRESS_OPACITY : 1 },
+          ]}
         >
           {content}
         </Pressable>

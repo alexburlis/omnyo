@@ -1,6 +1,6 @@
-import { forkThreadRequestSchema } from "@bb/server-contract";
+import { forkThreadRequestSchema } from "@omnyo/server-contract";
 import { describe, expect, it, vi } from "vitest";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import {
   collectLogLines,
   getHelpOutput,
@@ -12,7 +12,7 @@ import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import * as fixtures from "../helpers/command-output-fixtures.js";
 import { registerThreadCommands } from "../../commands/thread/index.js";
 
-describe("bb thread fork command output", () => {
+describe("omnyo thread fork command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -21,12 +21,14 @@ describe("bb thread fork command output", () => {
   it("rejects explicitly empty lifecycle ownership instead of creating an independent thread", async () => {
     const post = vi.fn(async ({ json }: { json: unknown }) => {
       forkThreadRequestSchema.parse(json);
+
       return fixtures.makeThread({
         id: "unexpected-independent-thread",
         projectId: "proj-1",
         providerId: "codex",
       });
     });
+
     stubServerApi({ "v1.threads.fork.$post": post });
     await expect(
       runCommand(
@@ -48,6 +50,7 @@ describe("bb thread fork command output", () => {
       sourceThreadId: "thread-source",
       status: "starting",
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.fork.$post": post });
 
@@ -74,6 +77,7 @@ describe("bb thread fork command output", () => {
       sourceThreadId: "thread-source",
       status: "starting",
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.fork.$post": post });
 
@@ -110,6 +114,7 @@ describe("bb thread fork command output", () => {
       sourceThreadId: "thread-source",
       visibility: "hidden",
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.fork.$post": post });
 
@@ -165,11 +170,13 @@ describe("bb thread fork command output", () => {
       projectId: "proj-1",
       providerId: "codex",
     });
+
     const sourceEnvironment = fixtures.makeEnvironment({
       id: "env-source",
       hostId: "host-source",
       projectId: "proj-1",
     });
+
     const thread = fixtures.makeThread({
       id: "thread-fork-worktree",
       originKind: "fork",
@@ -177,6 +184,7 @@ describe("bb thread fork command output", () => {
       providerId: "codex",
       sourceThreadId: source.id,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({
       "v1.threads.:id.$get": vi.fn(async () => source),
@@ -205,6 +213,7 @@ describe("bb thread fork command output", () => {
         environment: {
           type: "host",
           hostId: "host-source",
+          machineChoice: "explicit",
           workspace: {
             type: "managed-worktree",
             baseBranch: { kind: "named", name: "origin/release" },
@@ -221,11 +230,13 @@ describe("bb thread fork command output", () => {
       projectId: PERSONAL_PROJECT_ID,
       providerId: "codex",
     });
+
     const sourceEnvironment = fixtures.makeEnvironment({
       id: "env-source",
       hostId: "host-source",
       projectId: PERSONAL_PROJECT_ID,
     });
+
     const thread = fixtures.makeThread({
       id: "thread-fork-personal",
       originKind: "fork",
@@ -233,6 +244,7 @@ describe("bb thread fork command output", () => {
       providerId: "codex",
       sourceThreadId: source.id,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({
       "v1.threads.:id.$get": vi.fn(async () => source),
@@ -253,6 +265,7 @@ describe("bb thread fork command output", () => {
         environment: {
           type: "host",
           hostId: "host-source",
+          machineChoice: "explicit",
           workspace: { type: "personal" },
         },
       },

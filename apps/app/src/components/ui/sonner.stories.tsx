@@ -2,7 +2,7 @@ import { appToast, AppToastContent, type AppToastTone } from "./app-toast";
 import { AppToastCommitDescription } from "./app-toast-descriptions";
 import { ArchivedThreadToastDescription } from "../thread/ArchivedThreadToastDescription";
 import { pluginNotificationDescription } from "../plugin/PluginNotificationDescription";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 import { useState, type ReactNode } from "react";
 import { toast as sonnerToast } from "sonner";
@@ -52,7 +52,9 @@ interface GitSuccessDescriptionParams {
 }
 
 const LIVE_TOAST_DURATION = Infinity;
+
 const GIT_SUCCESS_COMMIT_SHA = "e547e81c0ffee1234567890abcdef123456789";
+
 const GIT_SUCCESS_COMMIT_SUBJECT = "Update provider CLI health toasts";
 
 function gitSuccessDescription({
@@ -122,7 +124,7 @@ const TOAST_EXAMPLES: readonly ToastExample[] = [
       description: pluginNotificationDescription(
         { id: "usage", name: "Usage" },
         "installed",
-        "bb connect: timed out waiting for the tunnel client.",
+        "Omnyo connect: timed out waiting for the tunnel client.",
       ),
     },
   },
@@ -375,7 +377,7 @@ function showToastExample(example: ToastExample): void {
       />
     ),
     {
-      className: "bb-app-toast",
+      className: "omnyo-app-toast",
       dismissible: current.dismissible ?? true,
       duration: LIVE_TOAST_DURATION,
       id,
@@ -385,6 +387,7 @@ function showToastExample(example: ToastExample): void {
 
 function showAllToastExamples(): void {
   appToast.dismiss();
+
   for (const example of TOAST_EXAMPLES) {
     showToastExample(example);
   }

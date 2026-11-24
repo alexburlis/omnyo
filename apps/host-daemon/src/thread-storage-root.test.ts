@@ -9,6 +9,7 @@ const tempDirs: string[] = [];
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -23,11 +24,16 @@ afterEach(async () => {
 
 describe("thread storage root", () => {
   it("creates thread-storage under the host data dir, not a parent thread's ambient storage path", async () => {
-    const dataDir = await makeTempDir("bb-thread-storage-root-data-");
+    const dataDir = await makeTempDir("omnyo-thread-storage-root-data-");
+
     const parentStorageRoot = await makeTempDir(
-      "bb-thread-storage-root-parent-",
+      "omnyo-thread-storage-root-parent-",
     );
-    vi.stubEnv("BB_THREAD_STORAGE", path.join(parentStorageRoot, "thr_parent"));
+
+    vi.stubEnv(
+      "OMNYO_THREAD_STORAGE",
+      path.join(parentStorageRoot, "thr_parent"),
+    );
 
     const rootPath = await ensureThreadStorageRoot(dataDir);
 

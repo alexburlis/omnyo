@@ -8,9 +8,10 @@ const community = {
   source: "git:https://github.com/alice/notes.git@v2",
   installed: false,
 };
+
 const official = {
   ...community,
-  marketplace: "bb-official",
+  marketplace: "omnyo-official",
   source: "builtin:notes",
 };
 
@@ -83,6 +84,7 @@ describe("installed plugin catalog identity", () => {
       catalogMarketplaceName: null,
       source: "git:https://github.com/alice/notes.git@main",
     };
+
     const matched = { ...community, installed: true };
     expect(
       installedPluginCatalogEntry(direct, [official, matched], {

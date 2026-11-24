@@ -1,4 +1,4 @@
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import {
   parseAssistantDeltaText,
   parseAssistantFinalText,
@@ -67,6 +67,7 @@ export function projectAssistantAndReasoningEvent(
     parentToolCallId: args.eventParentToolCallId,
     turnId: args.eventTurnId,
   });
+
   const reasoningIdentity = resolveBufferedTextIdentity({
     decoded: args.decoded,
     kind: "reasoning",
@@ -150,6 +151,7 @@ export function projectAssistantAndReasoningEvent(
 
   const reasoningFinalText = parseReasoningFinalText(args.decoded);
   let reasoningCompletionText = reasoningFinalText;
+
   if (
     reasoningIdentity &&
     args.decoded.type === "item/completed" &&
@@ -158,6 +160,7 @@ export function projectAssistantAndReasoningEvent(
     const deltas = args.state.reasoningDeltaTextByKey.get(
       createBufferedTextInstanceKey(reasoningIdentity),
     );
+
     if (
       deltas?.summary === args.decoded.item.summary.join("") &&
       deltas.content === args.decoded.item.content.join("")
@@ -165,6 +168,7 @@ export function projectAssistantAndReasoningEvent(
       reasoningCompletionText = null;
     }
   }
+
   const projectedReasoningFinal = projectReasoningTextEvent({
     identity: reasoningIdentity,
     mode: "final",

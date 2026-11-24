@@ -1,17 +1,20 @@
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/tooltip";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import type { ActivePluginInstallJob } from "@/hooks/queries/plugin-install-job-queries";
 import {
   NEW_TEXT_STYLE,
   type PluginInstallCountPresentation,
 } from "./plugin-ui";
+
+const SWAP_ICON_TRANSITION =
+  "transition-opacity duration-(--motion-duration-fast)";
 
 const INSTALL_JOB_LABELS = {
   queued: "Queued",
@@ -29,11 +32,13 @@ function PluginInstallJobControl({
   onCancel: () => void;
 }) {
   const cancelling = job.state === "cancelling";
+
   const tooltip = cancelling
     ? `Cancelling the ${displayName} install`
     : job.state === "queued"
       ? "Waiting for another install to finish. Click to cancel."
       : `Installing ${displayName}. Click to cancel.`;
+
   return (
     <TooltipProvider delayDuration={250}>
       <Tooltip>
@@ -63,6 +68,7 @@ function PluginInstallJobControl({
                 name="Spinner"
                 className={cn(
                   "col-start-1 row-start-1 size-3.5 animate-spin",
+                  SWAP_ICON_TRANSITION,
                   !cancelling &&
                     "group-hover/install:opacity-0 group-focus-visible/install:opacity-0",
                 )}
@@ -70,7 +76,10 @@ function PluginInstallJobControl({
               {cancelling ? null : (
                 <Icon
                   name="X"
-                  className="col-start-1 row-start-1 size-3.5 opacity-0 group-hover/install:opacity-100 group-focus-visible/install:opacity-100"
+                  className={cn(
+                    "col-start-1 row-start-1 size-3.5 opacity-0 group-hover/install:opacity-100 group-focus-visible/install:opacity-100",
+                    SWAP_ICON_TRANSITION,
+                  )}
                 />
               )}
             </span>
@@ -104,8 +113,10 @@ export function PluginCatalogInstallControl(
   props: PluginCatalogInstallControlProps,
 ) {
   const { displayName, installed, count } = props;
+
   if (!props.installed && props.installJob !== null) {
     const { installJob, onCancelInstall } = props;
+
     return (
       <PluginInstallJobControl
         displayName={displayName}
@@ -114,22 +125,30 @@ export function PluginCatalogInstallControl(
       />
     );
   }
+
   const included = installed && props.included;
+
   const disabled = installed
     ? included || props.onUninstall === undefined
     : props.disabled;
+
   const tooltip = included
-    ? "Included with BB"
+    ? "Included with Omnyo"
     : installed
-      ? "Installed"
+      ? disabled
+        ? "Installed"
+        : `Installed. Click to uninstall ${displayName}.`
       : disabled
-        ? (props.unavailableReason ?? "Unavailable for this version of BB.")
+        ? (props.unavailableReason ?? "Unavailable for this version of Omnyo.")
         : `Install ${displayName}`;
+
   const stateIcon = installed
     ? "Check"
     : disabled
       ? "AlertTriangle"
       : "Download";
+
+  const primary = !installed && !disabled && props.showLabel === true;
 
   return (
     <TooltipProvider delayDuration={250}>
@@ -137,17 +156,25 @@ export function PluginCatalogInstallControl(
         <TooltipTrigger asChild>
           <Button
             type="button"
-            variant={installed || props.subtle ? "ghost" : "outline"}
+            variant={
+              primary
+                ? "default"
+                : installed || props.subtle
+                  ? "ghost"
+                  : "outline"
+            }
             size="sm"
             aria-disabled={disabled}
             aria-label={`${installed ? `${displayName} installed` : `Install ${displayName}`}${
               count === undefined ? "" : ` — ${count.accessibleLabel}`
             }`}
             className={cn(
-              "group/install h-7 min-w-7 shrink-0 gap-1.5 px-2 text-xs shadow-none",
-              installed || props.subtle
-                ? "font-normal text-subtle-foreground"
-                : "border-border/80 bg-background text-foreground hover:bg-state-hover",
+              "group/install h-7 min-w-7 shrink-0 gap-1.5 text-xs",
+              primary
+                ? "px-3"
+                : installed || props.subtle
+                  ? "px-2 font-normal text-subtle-foreground shadow-none"
+                  : "border-border/80 bg-background px-2 text-foreground shadow-none hover:bg-state-hover",
               installed && !disabled && "hover:text-destructive-text",
               disabled &&
                 "cursor-not-allowed hover:bg-transparent hover:text-subtle-foreground",
@@ -156,6 +183,7 @@ export function PluginCatalogInstallControl(
             )}
             onClick={() => {
               if (disabled) return;
+
               if (props.installed) props.onUninstall?.();
               else props.onInstall();
             }}
@@ -171,6 +199,7 @@ export function PluginCatalogInstallControl(
                 name={stateIcon}
                 className={cn(
                   "col-start-1 row-start-1 size-3.5",
+                  SWAP_ICON_TRANSITION,
                   !installed && disabled && "text-warning-text",
                   installed &&
                     !disabled &&
@@ -180,7 +209,10 @@ export function PluginCatalogInstallControl(
               {installed && !disabled ? (
                 <Icon
                   name="Trash2"
-                  className="col-start-1 row-start-1 size-3.5 opacity-0 group-hover/install:opacity-100 group-focus-visible/install:opacity-100"
+                  className={cn(
+                    "col-start-1 row-start-1 size-3.5 opacity-0 group-hover/install:opacity-100 group-focus-visible/install:opacity-100",
+                    SWAP_ICON_TRANSITION,
+                  )}
                 />
               ) : null}
             </span>

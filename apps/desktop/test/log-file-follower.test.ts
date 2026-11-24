@@ -8,13 +8,15 @@ import {
 } from "../src/log-file-follower.js";
 
 const directories: string[] = [];
+
 const followers: LogFileFollower[] = [];
 
 async function logFile(content: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "bb-log-follower-"));
+  const directory = await mkdtemp(join(tmpdir(), "omnyo-log-follower-"));
   directories.push(directory);
   const filePath = join(directory, "server.1.log");
   await writeFile(filePath, content);
+
   return filePath;
 }
 
@@ -33,6 +35,7 @@ function follow(filePath: string, initialLines: number): { text(): string } {
       pollIntervalMs: 10,
     }),
   );
+
   return { text: () => text };
 }
 

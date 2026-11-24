@@ -15,6 +15,7 @@ function toHonoClientOptions(
   if (options === undefined) {
     return undefined;
   }
+
   return { fetch: options.fetch as typeof fetch };
 }
 
@@ -30,6 +31,7 @@ export function createApiClient(
   options?: PublicApiClientOptions,
 ) {
   const apiClient = createPublicApiClient(baseUrl, options);
+
   return {
     api: {
       v1: apiClient,

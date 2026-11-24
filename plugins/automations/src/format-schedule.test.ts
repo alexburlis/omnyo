@@ -63,6 +63,23 @@ describe("automation list and detail states", () => {
     ).toMatch(/^Next /);
   });
 
+  it("keeps a recovered one-shot in paused history without allowing a resume", () => {
+    const automation = {
+      enabled: false,
+      nextRunAt: null,
+      trigger: { triggerType: "once" as const, runAt: NOW - 1 },
+      runCount: 1,
+      lastRunStatus: "recovered" as const,
+      now: NOW,
+    };
+
+    expect(matchesAutomationStatusFilters(automation, ["paused"])).toBe(true);
+    expect(matchesAutomationStatusFilters(automation, ["active"])).toBe(false);
+    expect(oneShotLifecycleAllowsToggle(getOneShotLifecycle(automation))).toBe(
+      false,
+    );
+  });
+
   it("filters active versus paused automations", () => {
     expect(
       matchesAutomationStatusFilters({ enabled: true, nextRunAt: NOW }, []),
@@ -183,6 +200,7 @@ describe("one-shot automation lifecycle", () => {
       },
       now: NOW,
     });
+
     expect(next?.isNextRun).toBe(true);
     expect(next?.text).not.toContain("Next");
   });
@@ -214,6 +232,7 @@ describe("one-shot automation lifecycle", () => {
 
   it("locks a paused run once its deadline has expired", () => {
     const trigger = { triggerType: "once" as const, runAt: NOW - 1 };
+
     const lifecycle = getOneShotLifecycle({
       enabled: false,
       trigger,
@@ -239,12 +258,14 @@ describe("one-shot automation lifecycle", () => {
   it.each([
     ["running", "running", "Running"],
     ["succeeded", "completed", "Completed"],
+    ["recovered", "recovered", "Recovered"],
     ["failed", "failed", "Failed"],
     ["skipped", "skipped", "Skipped"],
   ] as const)(
     "shows a terminal %s run truthfully",
     (lastRunStatus, expectedLifecycle, expectedLabel) => {
       const trigger = { triggerType: "once" as const, runAt: NOW - 1 };
+
       const lifecycle = getOneShotLifecycle({
         enabled: false,
         trigger,

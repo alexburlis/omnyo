@@ -1,8 +1,9 @@
 import type {
   PluginAiCompleteOptions,
+  PluginAiPrepareOptions,
   PluginAiServiceStatus,
   PluginAiTranscribeOptions,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import type { AiServiceRegistry } from "../../src/services/ai/ai-service-registry.js";
 
 export interface FakeCompleteCall {
@@ -27,6 +28,7 @@ export interface RegisterFakeAiServiceArgs {
     | ((audio: File, options: PluginAiTranscribeOptions) => Promise<string>)
     | null;
   status?: (() => Promise<PluginAiServiceStatus>) | null;
+  prepare?: ((options: PluginAiPrepareOptions) => Promise<void>) | null;
 }
 
 export function registerFakeAiService(
@@ -41,6 +43,7 @@ export function registerFakeAiService(
   const transcribeCalls: FakeTranscribeCall[] = [];
   const complete = args.complete;
   const transcribe = args.transcribe;
+
   const registration = registry.register({
     id: args.id ?? "fake-ai",
     displayName: args.displayName ?? "Fake AI",
@@ -51,7 +54,9 @@ export function registerFakeAiService(
         ? null
         : async (prompt, options) => {
             completeCalls.push({ prompt, options });
+
             if (complete === undefined) return "Fake reply";
+
             return complete(prompt, options);
           },
     transcribe:
@@ -59,10 +64,14 @@ export function registerFakeAiService(
         ? null
         : async (audio, options) => {
             transcribeCalls.push({ audio, options });
+
             if (transcribe === undefined) return "fake transcript";
+
             return transcribe(audio, options);
           },
     status: args.status ?? null,
+    experimental_prepare: args.prepare ?? null,
   });
+
   return { completeCalls, transcribeCalls, dispose: registration.dispose };
 }

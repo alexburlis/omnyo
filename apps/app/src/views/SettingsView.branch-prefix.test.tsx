@@ -6,57 +6,54 @@ import {
   fireEvent,
   waitFor,
 } from "@testing-library/react";
+import { defaultAppSettings, type AppSettings } from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GeneralSettingsSection, PrivacySettingsSection } from "./SettingsView";
+import {
+  GeneralSettingsSection,
+  PrivacySettingsSection,
+} from "@/components/settings/GeneralSettingsPage";
 
 afterEach(cleanup);
 
-function renderSection(overrides?: {
-  confirmThreadArchive?: boolean;
-  onConfirmThreadArchiveChange?: (enabled: boolean) => void;
+function renderSection({
+  desktopBrowserAvailable = false,
+  onSettingsChange = vi.fn(),
+  onManagedBranchPrefixChange = vi.fn(),
+  ...overrides
+}: Partial<AppSettings> & {
   desktopBrowserAvailable?: boolean;
-  telemetryEnabled?: boolean;
-  onTelemetryEnabledChange?: (enabled: boolean) => void;
-  managedBranchPrefix?: string;
+  onSettingsChange?: (patch: Partial<AppSettings>) => void;
   onManagedBranchPrefixChange?: (prefix: string) => void;
-}) {
+} = {}) {
+  const settings = {
+    ...defaultAppSettings,
+    telemetryEnabled: true,
+    crashReportsEnabled: true,
+    confirmThreadArchive: true,
+    compactExpiredCache: true,
+    managedBranchPrefix: "omnyo/",
+    ...overrides,
+  };
+
   return render(
     <>
       <GeneralSettingsSection
-        showGitChanges={true}
-        onShowGitChangesChange={vi.fn()}
-        confirmThreadArchive={overrides?.confirmThreadArchive ?? true}
-        onConfirmThreadArchiveChange={
-          overrides?.onConfirmThreadArchiveChange ?? vi.fn()
-        }
-        keepHistoryAfterContextClear={false}
-        onKeepHistoryAfterContextClearChange={vi.fn()}
-        desktopBrowserAvailable={overrides?.desktopBrowserAvailable ?? false}
-        generalSettingsDisabled={false}
-        managedBranchPrefix={overrides?.managedBranchPrefix ?? "bb/"}
+        settings={settings}
+        disabled={false}
+        onSettingsChange={onSettingsChange}
+        desktopBrowserAvailable={desktopBrowserAvailable}
+        onManagedBranchPrefixChange={onManagedBranchPrefixChange}
         navigateToThreadAfterCreate={false}
-        onManagedBranchPrefixChange={
-          overrides?.onManagedBranchPrefixChange ?? vi.fn()
-        }
         onNavigateToThreadAfterCreateChange={vi.fn()}
-        onOpenLinksInAppBrowserChange={vi.fn()}
-        onReplaySetupGuide={vi.fn()}
-        onRewriteLocalhostLinksChange={vi.fn()}
-        onSteerActiveThreadOnEnterChange={vi.fn()}
         openLinksInAppBrowser={false}
+        onOpenLinksInAppBrowserChange={vi.fn()}
         rewriteLocalhostLinks={false}
-        steerActiveThreadOnEnter={false}
+        onRewriteLocalhostLinksChange={vi.fn()}
       />
       <PrivacySettingsSection
+        settings={settings}
         disabled={false}
-        enabled={false}
-        onEnabledChange={vi.fn()}
-        onStreamerModeChange={vi.fn()}
-        streamerMode={false}
-        telemetryEnabled={overrides?.telemetryEnabled ?? true}
-        onTelemetryEnabledChange={
-          overrides?.onTelemetryEnabledChange ?? vi.fn()
-        }
+        onSettingsChange={onSettingsChange}
       />
     </>,
   );
@@ -64,9 +61,11 @@ function renderSection(overrides?: {
 
 function branchPrefixInput() {
   const input = screen.getByLabelText("New branch prefix");
+
   if (!(input instanceof HTMLInputElement)) {
     throw new Error("New branch prefix control is not an input");
   }
+
   return input;
 }
 
@@ -97,7 +96,7 @@ describe("new branch prefix setting", () => {
     const input = branchPrefixInput();
     fireEvent.change(input, { target: { value: "team/" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(input.value).toBe("bb/"));
+    await waitFor(() => expect(input.value).toBe("omnyo/"));
   });
 
   it("refuses an invalid prefix and restores the saved value", () => {
@@ -108,7 +107,7 @@ describe("new branch prefix setting", () => {
     expect(input.getAttribute("aria-invalid")).toBe("true");
     fireEvent.blur(input);
     expect(onChange).not.toHaveBeenCalled();
-    expect(input.value).toBe("bb/");
+    expect(input.value).toBe("omnyo/");
   });
 
   it("reverts the draft on Escape", () => {
@@ -117,34 +116,36 @@ describe("new branch prefix setting", () => {
     const input = branchPrefixInput();
     fireEvent.change(input, { target: { value: "sawyer/" } });
     fireEvent.keyDown(input, { key: "Escape" });
-    expect(input.value).toBe("bb/");
+    expect(input.value).toBe("omnyo/");
     expect(onChange).not.toHaveBeenCalled();
   });
 });
 
 describe("localhost link rewrite setting", () => {
-  it("hides the ineffective setting on localhost", () => {
+  it("offers device-aware routing on localhost too", () => {
     renderSection();
-    expect(screen.queryByText("Rewrite localhost links")).toBeNull();
-    expect(screen.queryByText("Links")).toBeNull();
+    expect(screen.getByText("Rewrite localhost links")).not.toBeNull();
+    expect(screen.getByText("Links")).not.toBeNull();
   });
 
   it("keeps the Links section for the in-app browser setting", () => {
     renderSection({ desktopBrowserAvailable: true });
     expect(screen.getByText("Links")).not.toBeNull();
-    expect(screen.queryByText("Rewrite localhost links")).toBeNull();
+    expect(screen.getByText("Rewrite localhost links")).not.toBeNull();
   });
 });
 
 it("shows the saved telemetry preference and allows opting out", () => {
   const onChange = vi.fn();
-  renderSection({ onTelemetryEnabledChange: onChange });
+  renderSection({ onSettingsChange: onChange });
+
   const toggle = screen.getByRole("switch", {
     name: "Share anonymous usage data",
   });
+
   expect(toggle.getAttribute("aria-checked")).toBe("true");
   fireEvent.click(toggle);
-  expect(onChange).toHaveBeenCalledWith(false);
+  expect(onChange).toHaveBeenCalledWith({ telemetryEnabled: false });
   cleanup();
   renderSection({ telemetryEnabled: false });
   expect(
@@ -154,20 +155,62 @@ it("shows the saved telemetry preference and allows opting out", () => {
   ).toBe("false");
 });
 
+it("shows the saved crash reports preference and allows opting out", () => {
+  const onChange = vi.fn();
+  renderSection({ onSettingsChange: onChange });
+
+  const toggle = screen.getByRole("switch", { name: "Crash reports" });
+
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(toggle);
+  expect(onChange).toHaveBeenCalledWith({ crashReportsEnabled: false });
+  cleanup();
+  renderSection({ crashReportsEnabled: false });
+  expect(
+    screen
+      .getByRole("switch", { name: "Crash reports" })
+      .getAttribute("aria-checked"),
+  ).toBe("false");
+});
+
 it("allows disabling archive confirmation and shows the saved preference", () => {
   const onChange = vi.fn();
-  renderSection({ onConfirmThreadArchiveChange: onChange });
+  renderSection({ onSettingsChange: onChange });
+
   const toggle = screen.getByRole("switch", {
     name: "Thread archive confirmation",
   });
+
   expect(toggle.getAttribute("aria-checked")).toBe("true");
   fireEvent.click(toggle);
-  expect(onChange).toHaveBeenCalledWith(false);
+  expect(onChange).toHaveBeenCalledWith({ confirmThreadArchive: false });
   cleanup();
   renderSection({ confirmThreadArchive: false });
   expect(
     screen
       .getByRole("switch", { name: "Thread archive confirmation" })
+      .getAttribute("aria-checked"),
+  ).toBe("false");
+});
+
+it("shows the saved compact-before-resume preference and allows turning it off", () => {
+  const onChange = vi.fn();
+  renderSection({ onSettingsChange: onChange });
+
+  const toggle = screen.getByRole("switch", {
+    name: "Offer to compact before resuming expired sessions",
+  });
+
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(toggle);
+  expect(onChange).toHaveBeenCalledWith({ compactExpiredCache: false });
+  cleanup();
+  renderSection({ compactExpiredCache: false });
+  expect(
+    screen
+      .getByRole("switch", {
+        name: "Offer to compact before resuming expired sessions",
+      })
       .getAttribute("aria-checked"),
   ).toBe("false");
 });

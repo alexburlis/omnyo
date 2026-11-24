@@ -23,6 +23,7 @@ export function runCancellableInstall<T>(
 
 export function installCancellationSignal(): AbortSignal | null {
   const cancellation = storage.getStore();
+
   return cancellation === undefined || cancellation.committed
     ? null
     : cancellation.signal;
@@ -30,7 +31,9 @@ export function installCancellationSignal(): AbortSignal | null {
 
 export function commitInstall(): void {
   const cancellation = storage.getStore();
+
   if (cancellation === undefined || cancellation.committed) return;
+
   if (cancellation.signal.aborted) throw new PluginInstallCancelledError();
   cancellation.committed = true;
 }

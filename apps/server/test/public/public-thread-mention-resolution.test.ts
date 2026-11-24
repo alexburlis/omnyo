@@ -1,6 +1,6 @@
-import { archiveThread, markThreadDeleted } from "@bb/db";
-import { GENERATED_ID_ALPHABET, GENERATED_ID_SUFFIX_LENGTH } from "@bb/domain";
-import { resolveThreadMentionsResponseSchema } from "@bb/server-contract";
+import { archiveThread, markThreadDeleted } from "@omnyo/db";
+import { GENERATED_ID_ALPHABET, GENERATED_ID_SUFFIX_LENGTH } from "@omnyo/domain";
+import { resolveThreadMentionsResponseSchema } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { readJson } from "../helpers/json.js";
 import {
@@ -13,11 +13,13 @@ import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 function validThreadId(index: number): string {
   let value = index;
   let suffix = "";
+
   for (let position = 0; position < GENERATED_ID_SUFFIX_LENGTH; position += 1) {
     suffix =
       GENERATED_ID_ALPHABET[value % GENERATED_ID_ALPHABET.length] + suffix;
     value = Math.floor(value / GENERATED_ID_ALPHABET.length);
   }
+
   return `thr_${suffix}`;
 }
 
@@ -36,22 +38,28 @@ describe("public thread mention resolution route", () => {
   it("deduplicates exact IDs and omits missing or deleted threads", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const known = seedThread(harness.deps, {
         projectId: project.id,
         title: "Known mention target",
       });
+
       const archived = seedThread(harness.deps, {
         projectId: project.id,
         title: "Archived mention target",
       });
+
       archiveThread(harness.deps.db, harness.deps.hub, archived.id);
+
       const deleted = seedThread(harness.deps, {
         projectId: project.id,
         title: "Deleted mention target",
       });
+
       markThreadDeleted(harness.deps.db, harness.deps.hub, {
         threadId: deleted.id,
       });

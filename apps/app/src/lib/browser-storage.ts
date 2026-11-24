@@ -1,7 +1,9 @@
 import { atomWithStorage } from "jotai/utils";
 
 type StringValueGuard<T extends string> = (value: string) => value is T;
+
 type StoredValueGuard<T> = (value: unknown) => value is T;
+
 type StoredValueListener = (storedValue: string | null) => void;
 
 export interface SyncStorage<T> {
@@ -41,6 +43,7 @@ export function withLocalStorage<T>(
   if (typeof window === "undefined") {
     return fallback;
   }
+
   try {
     return operation(window.localStorage);
   } catch {
@@ -53,6 +56,7 @@ function withSessionStorage<T>(
   fallback: T,
 ): T {
   if (typeof window === "undefined") return fallback;
+
   try {
     return operation(window.sessionStorage);
   } catch {
@@ -65,6 +69,7 @@ function subscribeToLocalStorageKey(
   callback: StoredValueListener,
 ): () => void {
   const localStorage = getLocalStorage();
+
   if (
     !localStorage ||
     typeof window === "undefined" ||
@@ -80,6 +85,7 @@ function subscribeToLocalStorageKey(
   };
 
   window.addEventListener("storage", handleStorage);
+
   return () => {
     window.removeEventListener("storage", handleStorage);
   };
@@ -106,7 +112,9 @@ export const rawStringLocalStorage = createLocalStorageSyncStorage<string>({
 export const booleanLocalStorage = createLocalStorageSyncStorage<boolean>({
   parse: (storedValue, initialValue) => {
     if (storedValue === "true") return true;
+
     if (storedValue === "false") return false;
+
     return initialValue;
   },
   serialize: (value) => String(value),
@@ -123,6 +131,7 @@ export function createJsonLocalStorage<T>(
 
       try {
         const parsedValue: unknown = JSON.parse(storedValue);
+
         return isValue === undefined || isValue(parsedValue)
           ? (parsedValue as T)
           : initialValue;
@@ -156,14 +165,17 @@ export function createTabScopedStorage<T>(
         (storage) => storage.getItem(key),
         null,
       );
+
       const storedValue = tabValue ?? localStorageStringStorage.getItem(key);
       const value = codec.parse(storedValue, initialValue);
+
       if (persistInitialValue) {
         withSessionStorage(
           (storage) => storage.setItem(key, codec.serialize(value)),
           undefined,
         );
       }
+
       return value;
     },
     setItem: (key: string, value: T) => {
@@ -216,6 +228,7 @@ export function createNullableLocalStorageEnumStorage<T extends string>(
   return {
     getItem: (key: string, initialValue: T | null) => {
       const storedValue = localStorageStringStorage.getItem(key);
+
       return storedValue !== null && isValue(storedValue)
         ? storedValue
         : initialValue;
@@ -223,8 +236,10 @@ export function createNullableLocalStorageEnumStorage<T extends string>(
     setItem: (key: string, value: T | null) => {
       if (value === null) {
         localStorageStringStorage.removeItem(key);
+
         return;
       }
+
       localStorageStringStorage.setItem(key, value);
     },
     removeItem: (key: string) => {

@@ -1,9 +1,9 @@
 import type {
   HostDaemonEnvironmentChangePayload,
   HostDaemonEnvironmentMetadataChangePayload,
-} from "@bb/host-daemon-contract";
-import { getEnvironment, type DbNotifier } from "@bb/db";
-import { recordProvisionedEnvironmentWorkspace } from "@bb/db/internal-environment-lifecycle";
+} from "@omnyo/host-daemon-contract";
+import { getEnvironment, type DbNotifier } from "@omnyo/db";
+import { recordProvisionedEnvironmentWorkspace } from "@omnyo/db/internal-environment-lifecycle";
 import type { AppDeps } from "../types.js";
 
 interface EnvironmentChangeNotificationDeps {
@@ -30,6 +30,7 @@ export function notifyWorkspaceMutationResult(
   if (!args.ok) {
     return;
   }
+
   deps.hub.notifyEnvironment(args.environmentId, ["work-status-changed"]);
 }
 
@@ -38,6 +39,7 @@ export function notifyDaemonEnvironmentChange(
   args: NotifyDaemonEnvironmentChangeArgs,
 ): void {
   const environment = getEnvironment(deps.db, args.environmentId);
+
   if (
     !environment ||
     environment.hostId !== args.hostId ||
@@ -54,6 +56,7 @@ export function recordDaemonEnvironmentMetadataChange(
   args: RecordDaemonEnvironmentMetadataChangeArgs,
 ): void {
   const environment = getEnvironment(deps.db, args.environmentId);
+
   if (
     !environment ||
     environment.hostId !== args.hostId ||

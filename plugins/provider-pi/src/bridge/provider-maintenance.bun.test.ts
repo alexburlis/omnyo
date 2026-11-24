@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   experimental_npmLatestVersion as npmLatestVersion,
   experimental_probeNpmGlobalPackage as probeNpmGlobalPackage,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const probeState = vi.hoisted(() => ({
@@ -12,9 +12,10 @@ const probeState = vi.hoisted(() => ({
   executablePath: "",
 }));
 
-vi.mock("@get-bb/plugin-sdk/provider-bridge", async (importOriginal) => {
+vi.mock("@omnyo/plugin-sdk/provider-bridge", async (importOriginal) => {
   const original =
-    await importOriginal<typeof import("@get-bb/plugin-sdk/provider-bridge")>();
+    await importOriginal<typeof import("@omnyo/plugin-sdk/provider-bridge")>();
+
   return {
     ...original,
     experimental_commandOutput: vi.fn(async () => probeState.bunBin),
@@ -43,6 +44,7 @@ import {
 } from "./provider-maintenance.js";
 
 const temporaryDirectories: string[] = [];
+
 const describeOnPosix = process.platform === "win32" ? describe.skip : describe;
 
 afterEach(async () => {
@@ -55,7 +57,7 @@ afterEach(async () => {
 
 describeOnPosix("Pi provider maintenance with a Bun-managed executable", () => {
   it("updates through Bun when the resolved Pi command is a wrapper around Bun's global binary", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "bb-pi-bun-update-"));
+    const root = await mkdtemp(path.join(os.tmpdir(), "omnyo-pi-bun-update-"));
     temporaryDirectories.push(root);
     probeState.bunBin = path.join(root, ".bun", "bin");
     const bunPi = path.join(probeState.bunBin, "pi");

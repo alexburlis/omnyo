@@ -37,20 +37,25 @@ describe("real provider workspace integration", () => {
             harness,
             providerId,
           });
+
           const initialStatus = await getEnvironmentStatus(
             harness.api,
             environment.id,
           );
+
           const branches = await getEnvironmentBranches(
             harness.api,
             environment.id,
           );
+
           expect(initialStatus.outcome).toBe("available");
+
           if (initialStatus.outcome !== "available") {
             throw new Error(
               `Expected initial workspace status, received ${initialStatus.outcome}`,
             );
           }
+
           expect(initialStatus.workspace.branch.currentBranch).toBeTruthy();
           expect(branches.branches.length).toBeGreaterThan(0);
 
@@ -69,17 +74,21 @@ describe("real provider workspace integration", () => {
             harness.api,
             environment.id,
           );
+
           const refreshedStatus = await getEnvironmentStatus(
             harness.api,
             environment.id,
           );
+
           const diff = await getEnvironmentDiff(harness.api, environment.id);
           expect(refreshedStatus.outcome).toBe("available");
+
           if (refreshedStatus.outcome !== "available") {
             throw new Error(
               `Expected refreshed workspace status, received ${refreshedStatus.outcome}`,
             );
           }
+
           expect(refreshedStatus.workspace.branch.currentBranch).toBeTruthy();
           expectNonEmptyOutput(
             await getThreadOutput(harness.api, thread.id),
@@ -89,6 +98,7 @@ describe("real provider workspace integration", () => {
 
           if (refreshedEnvironment.path) {
             const helloPath = path.join(refreshedEnvironment.path, "hello.txt");
+
             if (await pathExists(helloPath)) {
               const helloContents = await fs.readFile(helloPath, "utf8");
               expect(helloContents.trim()).toBe("hello world");

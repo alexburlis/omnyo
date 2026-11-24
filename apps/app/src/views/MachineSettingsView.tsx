@@ -1,14 +1,16 @@
 import { MachineLifecycleNoticeContent } from "@/components/machines/MachineLifecycleNotice";
 import { useMemo, useState, type ComponentProps } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import type { Host, PermissionMode } from "@bb/domain";
-import type { SystemMachineProvider } from "@bb/server-contract";
-import type { HostPlatform } from "@bb/host-daemon-contract";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Pill } from "@bb/shared-ui/pill";
-import { ResourceOverflowMenu } from "@bb/shared-ui/resource-list";
+import type { Host, PermissionMode } from "@omnyo/domain";
+import type { SystemMachineProvider } from "@omnyo/server-contract";
+import type { HostPlatform } from "@omnyo/host-daemon-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { DelayedLoading } from "@omnyo/shared-ui/delayed-loading";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
+import { Pill } from "@omnyo/shared-ui/pill";
+import { ResourceOverflowMenu } from "@omnyo/shared-ui/resource-list";
 import { machineActions } from "@/components/machines/machine-actions";
 import { MachineLifecycleActions } from "@/components/machines/MachineLifecycleActions";
 import {
@@ -25,6 +27,7 @@ import {
 } from "@/components/machines/OldServerCopySection";
 import {
   machineStatusLabel,
+  machineStatusSummary,
   machineStatusTone,
 } from "@/components/machines/machine-status";
 import { canMoveServerHere } from "@/components/machines/server-move";
@@ -36,7 +39,9 @@ import {
   SettingsRow,
   SettingsRowList,
   SettingsSection,
+  SettingsWithControl,
 } from "@/components/ui/settings-section";
+import { Switch } from "@omnyo/shared-ui/switch";
 import { appToast } from "@/components/ui/app-toast";
 import { MachineRenameDialog } from "@/components/settings/MachineRenameDialog";
 import {
@@ -44,6 +49,7 @@ import {
   useResumeHost,
   useRetryHostCleanup,
   useRetryHostUpdate,
+  useSetHostAvailability,
   useSuspendHost,
   useUpdateHostPermissionCeiling,
 } from "@/hooks/mutations/host-mutations";
@@ -52,11 +58,12 @@ import { useSystemMachineProviders } from "@/hooks/queries/machine-provider-quer
 import { useServerMoveStatus } from "@/hooks/queries/server-move-queries";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
 import {
+  useHostProviderCliStatus,
   useSystemConfig,
   useSystemProviders,
 } from "@/hooks/queries/system-queries";
 import { isProviderCliUpdateIssue } from "@/components/provider-cli/provider-cli-install";
-import { useUpdateInventory } from "@/hooks/useUpdateInventory";
+import { buildUpdateInventoryProviderIssues } from "@/hooks/useUpdateInventory";
 import { useHostDaemon } from "@/hooks/useHostDaemon";
 import {
   formatHostUpdateStatus,
@@ -101,10 +108,12 @@ function headerMeta({
   now: number;
 }): string {
   const parts: string[] = [machineStatusLabel({ host, now })];
+
   if (platformLabel !== null) parts.push(platformLabel);
   parts.push(
     `paired ${formatRelativeTime({ timestamp: host.createdAt, now })}`,
   );
+
   return parts.join(" · ");
 }
 
@@ -124,6 +133,7 @@ function PermissionLimitCards({
       <SettingsRowList>
         {PERMISSION_MODE_OPTIONS.map((option) => {
           const selected = option.value === value;
+
           return (
             <SettingsRow key={option.value} className="items-start">
               <button
@@ -141,20 +151,24 @@ function PermissionLimitCards({
               >
                 <span
                   className={cn(
-                    "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
+                    "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors duration-(--motion-duration-base)",
                     selected ? "border-foreground" : "border-input",
                   )}
                 >
-                  {selected ? (
-                    <span className="size-2 rounded-full bg-foreground" />
-                  ) : null}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "size-2 rounded-full bg-foreground transition-[opacity,scale] duration-(--motion-duration-base) ease-(--motion-ease-snappy) motion-reduce:transition-opacity",
+                      !selected && "scale-50 opacity-0",
+                    )}
+                  />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm text-foreground">
                     {option.label}
                   </span>
                   {option.description ? (
-                    <span className="mt-0.5 block text-xs leading-snug text-subtle-foreground/75">
+                    <span className="mt-0.5 block text-xs leading-snug text-subtle-foreground">
                       {option.description}
                     </span>
                   ) : null}
@@ -165,6 +179,21 @@ function PermissionLimitCards({
         })}
       </SettingsRowList>
     </div>
+  );
+}
+
+function BackToMachinesLink() {
+  return (
+    <Link
+      to={getSettingsRoutePath("machines")}
+      className={cn(
+        "-ml-1 inline-flex items-center gap-1 rounded-sm px-1 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",
+        CONTROL_HOVER_TRANSITION,
+      )}
+    >
+      <Icon name="ChevronLeft" className="size-3.5" />
+      Machines
+    </Link>
   );
 }
 
@@ -207,13 +236,7 @@ export function MachineSettingsHeader({
 }) {
   return (
     <div className="space-y-3">
-      <Link
-        to={getSettingsRoutePath("machines")}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <Icon name="ChevronLeft" className="size-3.5" />
-        Machines
-      </Link>
+      <BackToMachinesLink />
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 items-center gap-2">
@@ -224,8 +247,12 @@ export function MachineSettingsHeader({
             {showServerBadge ? <SettingsBadge>Server</SettingsBadge> : null}
           </div>
           <div className="flex min-w-0 items-center gap-2">
-            <MachineStatusDot tone={machineStatusTone(host)} />
-            <p className="min-w-0 text-xs text-subtle-foreground/75">
+            <MachineStatusDot
+              tone={machineStatusTone(host)}
+              label={machineStatusSummary(host)}
+              decorative
+            />
+            <p className="min-w-0 text-xs text-subtle-foreground">
               {headerMeta({ host, platformLabel, now })}
             </p>
           </div>
@@ -267,13 +294,13 @@ export function MachineSettingsView() {
   const systemConfig = useSystemConfig();
   const { localDaemonHostId, platform: localDaemonPlatform } = useHostDaemon();
   const sidebarNavigationQuery = useSidebarNavigation();
-  const updateInventory = useUpdateInventory();
   const renameHost = useRenameHost();
   const retryHostUpdate = useRetryHostUpdate();
   const suspendHost = useSuspendHost();
   const resumeHost = useResumeHost();
   const retryHostCleanup = useRetryHostCleanup();
   const updatePermissionCeiling = useUpdateHostPermissionCeiling();
+  const setHostAvailability = useSetHostAvailability();
   const serverMoveStatus = useServerMoveStatus();
   const [renameOpen, setRenameOpen] = useState(false);
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -282,19 +309,37 @@ export function MachineSettingsView() {
 
   const hosts = hostsQuery.data;
   const host = hosts?.find((candidate) => candidate.id === hostId) ?? null;
+
+  const canCheckProviderStatus =
+    host?.status === "connected" && host.type !== "ephemeral";
+
+  const providerStatusQuery = useHostProviderCliStatus({
+    hostId: host?.id ?? null,
+    enabled: canCheckProviderStatus,
+  });
+
+  const providerStatus = canCheckProviderStatus
+    ? providerStatusQuery.data
+    : undefined;
+
   const lifecycleMessage = host?.lifecycle.message ?? null;
+
   const lifecycleNotice =
     host === null
       ? null
       : { phase: host.lifecycle.phase, message: lifecycleMessage };
+
   const primaryHostId = systemConfig.data?.primaryHostId ?? null;
   const serverMoveEnabled = systemConfig.data?.experiments.serverMove ?? false;
   const isPrimary = host !== null && host.id === primaryHostId;
+
   const showThisMachineBadge =
     (hosts?.filter((candidate) => candidate.type === "persistent").length ??
       0) > 1;
+
   const isThisMachine =
     showThisMachineBadge && host !== null && host.id === localDaemonHostId;
+
   const machineProvider =
     host?.machineProviderId === null || host?.machineProviderId === undefined
       ? null
@@ -304,6 +349,7 @@ export function MachineSettingsView() {
 
   const projects: MachineProject[] = useMemo(() => {
     const navigation = sidebarNavigationQuery.data?.projects ?? [];
+
     return navigation
       .filter((project) =>
         project.sources.some((source) => source.hostId === hostId),
@@ -311,21 +357,26 @@ export function MachineSettingsView() {
       .map((project) => ({ id: project.id, name: project.name }));
   }, [hostId, sidebarNavigationQuery.data]);
 
-  const machine = updateInventory.machines.find(
-    (candidate) => candidate.host.id === hostId,
-  );
-  const updateIssueCount = (machine?.issues ?? []).filter(
-    isProviderCliUpdateIssue,
-  ).length;
+  const updateIssueCount = (
+    providerStatus === undefined
+      ? []
+      : buildUpdateInventoryProviderIssues(providerStatus)
+  ).filter(isProviderCliUpdateIssue).length;
+
   const providerRoster = useSystemProviders().data;
+
   const installedProviders = useMemo(() => {
-    const status = machine?.providerStatus;
+    const status = providerStatus;
+
     if (!status) return [];
+
     return Object.entries(status).flatMap(([providerId, entry]) => {
       if (!entry.installed) return [];
+
       const provider = providerRoster?.find(
         (candidate) => candidate.id === providerId,
       );
+
       return [
         {
           ...entry,
@@ -339,9 +390,10 @@ export function MachineSettingsView() {
         },
       ];
     });
-  }, [machine?.providerStatus, providerRoster]);
+  }, [providerStatus, providerRoster]);
 
   const now = Date.now();
+
   const platformLabel =
     host !== null &&
     host.id === localDaemonHostId &&
@@ -355,7 +407,9 @@ export function MachineSettingsView() {
     return (
       <PageShell contentClassName="pt-4 md:pt-5">
         <div className="mx-auto w-full max-w-3xl">
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <DelayedLoading>
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          </DelayedLoading>
         </div>
       </PageShell>
     );
@@ -365,13 +419,7 @@ export function MachineSettingsView() {
     return (
       <PageShell contentClassName="pt-4 md:pt-5">
         <div className="mx-auto w-full max-w-3xl space-y-3">
-          <Link
-            to={getSettingsRoutePath("machines")}
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <Icon name="ChevronLeft" className="size-3.5" />
-            Machines
-          </Link>
+          <BackToMachinesLink />
           <p className="text-sm text-muted-foreground">
             Machine is no longer paired.
           </p>
@@ -420,6 +468,35 @@ export function MachineSettingsView() {
           onMoveServerHere={() => setMoveServerOpen(true)}
         />
 
+        <SettingsSection title="Availability">
+          <SettingsWithControl
+            label="Away"
+            description="Stops Omnyo's work on this machine and holds new turns until you turn this off."
+          >
+            <Switch
+              aria-label={`${host.name} is Away`}
+              checked={host.availability === "away"}
+              disabled={setHostAvailability.isPending}
+              onCheckedChange={(away) =>
+                setHostAvailability.mutate(
+                  {
+                    hostId: host.id,
+                    availability: away ? "away" : "available",
+                  },
+                  {
+                    onError: (error) => {
+                      showMutationErrorToast({
+                        error,
+                        fallbackMessage: `Couldn't change ${host.name}'s availability.`,
+                      });
+                    },
+                  },
+                )
+              }
+            />
+          </SettingsWithControl>
+        </SettingsSection>
+
         <SettingsSection
           title="Permission limit"
           description={PERMISSION_LIMIT_DESCRIPTION}
@@ -448,9 +525,9 @@ export function MachineSettingsView() {
             <SettingsDetailRow label="Installed">
               {host.status !== "connected" ? (
                 <span>Unavailable while offline</span>
-              ) : machine?.statusPending ? (
+              ) : canCheckProviderStatus && providerStatusQuery.isPending ? (
                 <span>Checking…</span>
-              ) : machine?.statusError ? (
+              ) : canCheckProviderStatus && providerStatusQuery.isError ? (
                 <span>Status unavailable</span>
               ) : (
                 <>
@@ -520,7 +597,10 @@ export function MachineSettingsView() {
                       {index > 0 ? " · " : ""}
                       <Link
                         to={getSettingsProjectRoutePath(project.id)}
-                        className="hover:text-foreground"
+                        className={cn(
+                          "rounded-sm outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",
+                          CONTROL_HOVER_TRANSITION,
+                        )}
                       >
                         {project.name}
                       </Link>

@@ -2,7 +2,7 @@ import type {
   ThreadEvent,
   ThreadEventItemType,
   ThreadEventType,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 export interface StoredEventItemFields {
   itemId: string | null;
@@ -53,6 +53,7 @@ export function deriveStoredEventItemFieldsFromSource(
         if (!source.item) {
           throw new Error(`Missing item payload for ${source.type}`);
         }
+
         return fromItem(source.item);
       case "item/agentMessage/delta":
       case "item/commandExecution/outputDelta":
@@ -70,8 +71,10 @@ export function deriveStoredEventItemFieldsFromSource(
         };
     }
   })();
+
   const parentToolCallId =
     source.item?.parentToolCallId ?? source.parentToolCallId;
+
   return {
     ...ownItemFields,
     parentToolCallId:

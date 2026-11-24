@@ -19,6 +19,7 @@ function service(
     complete: async () => "reply",
     transcribe: null,
     status,
+    experimental_prepare: null,
   };
 }
 
@@ -95,15 +96,18 @@ describe("AI service registry", () => {
     const onStatusChange = vi.fn();
     let ready = false;
     let clock = 0;
+
     const registry = createAiServiceRegistry({
       onStatusChange,
       now: () => clock,
     });
+
     const registration = registry.register(
       service(async () =>
         ready ? { ready: true } : { ready: false, message: "Signed out" },
       ),
     );
+
     expect(onStatusChange).toHaveBeenCalledTimes(1);
 
     await registry.status(ACME);

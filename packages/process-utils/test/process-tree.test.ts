@@ -25,6 +25,7 @@ const posixOnly = process.platform === "win32" ? describe.skip : describe;
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -33,16 +34,19 @@ function isAlive(pid: number): boolean {
 
 async function waitFor(check: () => boolean, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+
   while (!check()) {
     if (Date.now() > deadline) {
       throw new Error("Timed out waiting for condition");
     }
+
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
 
 async function readFirstLine(stream: NodeJS.ReadableStream): Promise<string> {
   const [chunk] = await once(stream, "data");
+
   return String(chunk).trim();
 }
 
@@ -56,10 +60,13 @@ posixOnly("process tree helpers", () => {
         process.kill(pid, "SIGKILL");
       } catch {}
     }
+
     cleanupPids.length = 0;
+
     for (const dir of cleanupDirs) {
       rmSync(dir, { recursive: true, force: true });
     }
+
     cleanupDirs.length = 0;
   });
 
@@ -69,6 +76,7 @@ posixOnly("process tree helpers", () => {
       args: ["-c", "sleep 300 & echo $!; wait"],
       detached: true,
     });
+
     const grandchildPid = Number(await readFirstLine(child.stdout));
     cleanupPids.push(grandchildPid);
     expect(isAlive(grandchildPid)).toBe(true);
@@ -81,13 +89,15 @@ posixOnly("process tree helpers", () => {
   });
 
   it("finds and kills processes whose cwd is inside a directory", async () => {
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), "bb-cwd-sweep-")));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "omnyo-cwd-sweep-")));
     cleanupDirs.push(dir);
+
     const child = spawn("sh", ["-c", "sleep 300 & echo $!; wait"], {
       cwd: dir,
       detached: true,
       stdio: ["ignore", "pipe", "ignore"],
     });
+
     child.unref();
     const grandchildPid = Number(await readFirstLine(child.stdout));
     cleanupPids.push(child.pid ?? 0, grandchildPid);
@@ -102,6 +112,7 @@ posixOnly("process tree helpers", () => {
       directories: [dir],
       graceMs: 200,
     });
+
     expect(killed.map((entry) => entry.pid)).toEqual(
       expect.arrayContaining([child.pid, grandchildPid]),
     );
@@ -118,6 +129,7 @@ posixOnly("process tree helpers", () => {
       args: ["-c", "sleep 300 & echo $!"],
       detached: true,
     });
+
     const grandchildPid = Number(await readFirstLine(child.stdout));
     cleanupPids.push(grandchildPid);
     await once(child, "exit");
@@ -128,7 +140,7 @@ posixOnly("process tree helpers", () => {
   });
 
   it("rescans and kills processes that appear while the first targets shut down", async () => {
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), "bb-cwd-respawn-")));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "omnyo-cwd-respawn-")));
     cleanupDirs.push(dir);
     const respawnerPath = join(dir, "respawner.cjs");
     writeFileSync(
@@ -146,11 +158,13 @@ posixOnly("process tree helpers", () => {
         "setInterval(() => {}, 30_000);",
       ].join("\n"),
     );
+
     const child = spawn(process.execPath, [respawnerPath], {
       cwd: dir,
       detached: true,
       stdio: ["ignore", "pipe", "ignore"],
     });
+
     child.unref();
     await readFirstLine(child.stdout);
     cleanupPids.push(child.pid ?? 0);
@@ -161,16 +175,21 @@ posixOnly("process tree helpers", () => {
     });
 
     expect(killed.length).toBeGreaterThanOrEqual(2);
+
     for (const target of killed) {
       cleanupPids.push(target.pid);
     }
+
     await waitFor(() => killed.every((target) => !isAlive(target.pid)));
     expect(await listProcessesWithCwdUnder({ directories: [dir] })).toEqual([]);
   });
 
   it("does not follow a symlinked workspace root", async () => {
-    const target = realpathSync(mkdtempSync(join(tmpdir(), "bb-cwd-target-")));
-    const linkParent = mkdtempSync(join(tmpdir(), "bb-cwd-link-"));
+    const target = realpathSync(
+      mkdtempSync(join(tmpdir(), "omnyo-cwd-target-")),
+    );
+
+    const linkParent = mkdtempSync(join(tmpdir(), "omnyo-cwd-link-"));
     cleanupDirs.push(target, linkParent);
     const link = join(linkParent, "workspace");
     symlinkSync(target, link);
@@ -187,7 +206,10 @@ posixOnly("process tree helpers", () => {
   });
 
   it("stops the leader first so it can shut its own child down", async () => {
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), "bb-leader-first-")));
+    const dir = realpathSync(
+      mkdtempSync(join(tmpdir(), "omnyo-leader-first-")),
+    );
+
     cleanupDirs.push(dir);
     const log = join(dir, "log");
     writeFileSync(
@@ -214,6 +236,7 @@ posixOnly("process tree helpers", () => {
         "while :; do sleep 0.1; done",
       ].join("\n"),
     );
+
     const child = spawnPortablePipedProcess({
       command: "sh",
       args: [
@@ -224,6 +247,7 @@ posixOnly("process tree helpers", () => {
       ],
       detached: true,
     });
+
     cleanupPids.push(child.pid ?? 0);
     expect(await readFirstLine(child.stdout)).toBe("ready");
 
@@ -247,6 +271,7 @@ posixOnly("process tree helpers", () => {
       ],
       detached: true,
     });
+
     const memberPid = Number(await readFirstLine(child.stdout));
     cleanupPids.push(child.pid ?? 0, memberPid);
     const startedAt = Date.now();

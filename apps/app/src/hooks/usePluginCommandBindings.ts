@@ -4,14 +4,15 @@ import {
   pluginCommandId,
   type AppDefaultKeybindings,
   type AppKeybindingOverrides,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 import { usePluginSlots } from "@/lib/plugin-slots";
 import { browserPlatform } from "@/lib/app-keybindings";
-import { getBbDesktopInfo } from "@/lib/bb-desktop";
+import { getOmnyoDesktopInfo } from "@/lib/omnyo-desktop";
 import { resolvePluginCommandDefaults } from "@/lib/plugin-command-keybindings";
 
 const EMPTY_DEFAULTS: AppDefaultKeybindings = [];
+
 const EMPTY_OVERRIDES: AppKeybindingOverrides = [];
 
 export function usePluginCommandBindings() {
@@ -19,8 +20,9 @@ export function usePluginCommandBindings() {
   const { commandPaletteActions } = usePluginSlots();
   const builtInDefaults = data?.defaultKeybindings ?? EMPTY_DEFAULTS;
   const overrides = data?.keybindingOverrides ?? EMPTY_OVERRIDES;
-  const isDesktop = getBbDesktopInfo() !== null;
+  const isDesktop = getOmnyoDesktopInfo() !== null;
   const platform = browserPlatform();
+
   return useMemo(() => {
     const pluginDefaults: AppDefaultKeybindings = commandPaletteActions.map(
       (command) => ({
@@ -36,13 +38,16 @@ export function usePluginCommandBindings() {
             : { all: ["mainSurface"], none: ["modalOpen"] },
       }),
     );
+
     const resolved = resolvePluginCommandDefaults(
       [...builtInDefaults, ...pluginDefaults],
       overrides,
       isDesktop,
       platform,
     );
+
     const pluginIds = new Set(pluginDefaults.map((binding) => binding.command));
+
     return {
       ...resolved,
       commands: commandPaletteActions,

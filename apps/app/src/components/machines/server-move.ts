@@ -1,12 +1,12 @@
-import { toRecord } from "@bb/core-ui";
-import type { Host, LastServerMove, ServerMoveStepId } from "@bb/domain";
+import { toRecord } from "@omnyo/core-ui";
+import type { Host, LastServerMove, ServerMoveStepId } from "@omnyo/domain";
 import {
   SERVER_MOVED_ERROR_CODE,
   serverMovedErrorDetailsSchema,
   type ServerMoveHealth,
   type ServerMoveHealthState,
-} from "@bb/host-daemon-contract";
-import { BbHttpError } from "@bb/sdk/browser";
+} from "@omnyo/host-daemon-contract";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 import {
   serverMoveCheckItemSchema,
   type ServerMoveCheckItem,
@@ -14,10 +14,11 @@ import {
   type ServerMoveCheckSeverity,
   type ServerMoveStatus,
   type ServerMoveStatusResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 
 export const SERVER_MOVE_POLL_INTERVAL_MS = 1_000;
-export const SERVER_MOVE_ARRIVAL_PARAM = "bbServerMove";
+
+export const SERVER_MOVE_ARRIVAL_PARAM = "serverMove";
 
 const SERVER_MOVE_BLOCKED_ERROR_CODE = "server_move_blocked";
 
@@ -68,7 +69,7 @@ export function serverMoveStepLabel(
     case "stop-work":
       return "Stopping running work";
     case "update-target":
-      return `Updating bb on ${targetHostName}`;
+      return `Updating Omnyo on ${targetHostName}`;
     case "export":
       return "Exporting server data";
     case "transfer":
@@ -90,9 +91,11 @@ export function groupServerMoveCheckItems(
     warning: [],
     info: [],
   };
+
   for (const item of items) {
     groups[item.severity].push(item);
   }
+
   return groups;
 }
 
@@ -118,15 +121,18 @@ export function serverMoveStartAllowed({
   if (result === null || checking || starting || !result.canMove) {
     return false;
   }
+
   if (result.items.some((item) => item.severity === "blocker")) {
     return false;
   }
+
   if (
     showAddress &&
     (checkedServerUrl === null || addressDraft.trim() !== checkedServerUrl)
   ) {
     return false;
   }
+
   return result.existingTargetServerData === null || archiveConfirmed;
 }
 
@@ -134,27 +140,31 @@ export function serverMoveBlockedItems(
   error: unknown,
 ): ServerMoveCheckItem[] | null {
   if (
-    !(error instanceof BbHttpError) ||
+    !(error instanceof OmnyoHttpError) ||
     error.code !== SERVER_MOVE_BLOCKED_ERROR_CODE
   ) {
     return null;
   }
+
   const details = toRecord(toRecord(error.body)?.details);
   const parsed = serverMoveCheckItemSchema.array().safeParse(details?.items);
+
   return parsed.success && parsed.data.length > 0 ? parsed.data : null;
 }
 
 export function movedServerUrlFromError(error: unknown): string | null {
   if (
-    !(error instanceof BbHttpError) ||
+    !(error instanceof OmnyoHttpError) ||
     error.status !== 410 ||
     error.code !== SERVER_MOVED_ERROR_CODE
   ) {
     return null;
   }
+
   const parsed = serverMovedErrorDetailsSchema.safeParse(
     toRecord(error.body)?.details,
   );
+
   return parsed.success ? parsed.data.serverUrl : null;
 }
 
@@ -167,6 +177,7 @@ export interface CurrentAppLocation {
 function searchWithArrivalParam(search: string, moveId: string): string {
   const params = new URLSearchParams(search);
   params.set(SERVER_MOVE_ARRIVAL_PARAM, moveId);
+
   return `?${params.toString()}`;
 }
 
@@ -177,14 +188,17 @@ export function serverMoveDestinationUrl(
 ): string {
   const search = searchWithArrivalParam(location.search, moveId);
   let url: URL;
+
   try {
     url = new URL(serverUrl);
   } catch {
     return `${serverUrl.replace(/\/+$/u, "")}${location.pathname}${search}${location.hash}`;
   }
+
   url.pathname = `${url.pathname.replace(/\/+$/u, "")}${location.pathname}`;
   url.search = search;
   url.hash = location.hash;
+
   return url.toString();
 }
 
@@ -198,6 +212,7 @@ export function serverMoveDestinationProbeUrl({
   if (move === null || move.destinationStatusUrl === null) {
     return null;
   }
+
   return move.state === "completed" ||
     (move.state === "switching" && error !== null)
     ? move.destinationStatusUrl
@@ -211,9 +226,11 @@ export function nextFollowedServerMove(
   if (live === null) {
     return followed;
   }
+
   if (live.moveId === followed?.moveId || isServerMoveUnderway(live)) {
     return live;
   }
+
   return followed;
 }
 
@@ -253,19 +270,24 @@ export function resolveServerMoveOverlay({
   const live = response?.move ?? null;
   const lastMove = response?.lastMove ?? null;
   const move = nextFollowedServerMove(followed, live);
+
   if (
     lastMove !== null &&
     lastMove.moveId === (move === null ? arrivalMoveId : move.moveId)
   ) {
     return { kind: "arrived", lastMove };
   }
+
   if (move === null || move.moveId === dismissedMoveId) {
     return null;
   }
+
   const movedServerUrl = movedServerUrlFromError(error);
+
   if (movedServerUrl !== null && isServerMoveUnderway(move)) {
     return destinationContent(move, movedServerUrl, destination, location);
   }
+
   if (
     error !== null &&
     move.destinationStatusUrl !== null &&
@@ -273,6 +295,7 @@ export function resolveServerMoveOverlay({
   ) {
     return destinationContent(move, move.serverUrl, destination, location);
   }
+
   if (live === null) {
     return move.state === "preparing" ||
       move.state === "switching" ||
@@ -282,6 +305,7 @@ export function resolveServerMoveOverlay({
         ? completedContent(move, destination, location)
         : null;
   }
+
   switch (move.state) {
     case "preparing":
     case "switching":
@@ -306,9 +330,11 @@ function destinationContent(
     destination !== null && destination.moveId === move.moveId
       ? destination.state
       : null;
+
   if (move.destinationStatusUrl !== null && reported !== "ready") {
     return { kind: "waiting", move, destinationState: reported };
   }
+
   return {
     kind: "redirecting",
     move,
@@ -332,18 +358,23 @@ export function serverMoveOverlayPollIntervalMs(args: {
   intervalMs: number;
 }): number | null {
   const { content } = args;
+
   if (content === null) {
     return null;
   }
+
   if (content.kind === "reconnecting" || content.kind === "waiting") {
     return args.intervalMs;
   }
+
   if (content.kind === "recovery") {
     return args.realtimeConnected ? null : args.intervalMs;
   }
+
   if (content.kind !== "progress") {
     return null;
   }
+
   return content.move.state === "switching" || !args.realtimeConnected
     ? args.intervalMs
     : null;

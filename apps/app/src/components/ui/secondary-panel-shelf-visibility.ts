@@ -7,6 +7,7 @@ export const COMPACT_SHELF_HIDDEN_FIXED_CHROME_CLASS =
 
 let compactSecondaryPanelPresentation: CompactSecondaryPanelPresentation =
   "closed";
+
 const listeners = new Set<() => void>();
 
 export function getCompactSecondaryPanelPresentation(): CompactSecondaryPanelPresentation {
@@ -19,7 +20,9 @@ export function setCompactSecondaryPanelPresentation(
   if (compactSecondaryPanelPresentation === presentation) {
     return;
   }
+
   compactSecondaryPanelPresentation = presentation;
+
   for (const listener of listeners) {
     listener();
   }
@@ -29,6 +32,7 @@ export function subscribeCompactSecondaryPanelShelfShowing(
   listener: () => void,
 ): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };
@@ -46,5 +50,6 @@ export function usePanelShelfState({
     getCompactSecondaryPanelPresentation,
     () => "closed" as const,
   );
+
   return isCompactViewport && !isSidebarDrawerOpen ? presentation : undefined;
 }

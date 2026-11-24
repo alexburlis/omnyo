@@ -3,7 +3,7 @@ import {
   appKeybindingSchema,
   type AppKeybinding,
   type AppKeybindings,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { z } from "zod";
 
 const desktopKeybindingSchema = appKeybindingSchema.extend({
@@ -23,12 +23,16 @@ export function parseDesktopSystemConfig(
 ): DesktopSystemConfig {
   const parsed = desktopSystemConfigSchema.parse(payload);
   const keybindings: AppKeybinding[] = [];
+
   for (const binding of parsed.keybindings) {
     const command = appCommandIdSchema.safeParse(binding.command);
+
     if (!command.success) {
       continue;
     }
+
     keybindings.push({ ...binding, command: command.data });
   }
+
   return { keybindings };
 }

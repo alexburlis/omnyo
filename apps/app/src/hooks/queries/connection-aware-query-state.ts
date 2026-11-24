@@ -66,12 +66,15 @@ function useServerConnectionGracePeriodElapsed(): boolean {
   useEffect(() => {
     if (connectionState === "connected") {
       setElapsed(false);
+
       return;
     }
+
     const timer = setTimeout(
       () => setElapsed(true),
       CONNECTION_GRACE_PERIOD_MS,
     );
+
     return () => clearTimeout(timer);
   }, [connectionState]);
 

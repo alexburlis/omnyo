@@ -1,5 +1,5 @@
-import type { ThreadEvent } from "@bb/domain";
-import { turnScope } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
+import { turnScope } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   RuntimeThreadIdentityRegistry,
@@ -25,7 +25,7 @@ describe("RuntimeThreadIdentityRegistry", () => {
     expect(registry.resolveProviderForThread("thread-1")).toBe("codex");
     expect(registry.getProviderThreadId("thread-1")).toBe("provider-thread-1");
     expect(
-      registry.resolveBbThreadIdForProviderThread({
+      registry.resolveAppThreadIdForProviderThread({
         providerState,
         providerThreadId: "provider-thread-1",
       }),
@@ -83,6 +83,7 @@ describe("RuntimeThreadIdentityRegistry", () => {
     const singleThreadState = registry.createProviderState({
       providerId: "claude-code",
     });
+
     registry.registerThreadProvider({
       providerId: "claude-code",
       providerState: singleThreadState,
@@ -105,7 +106,7 @@ describe("RuntimeThreadIdentityRegistry", () => {
     ).toBeUndefined();
   });
 
-  it("stamps projected events with the resolved bb thread id", () => {
+  it("stamps projected events with the resolved Omnyo thread id", () => {
     const event: ThreadEvent = {
       type: "turn/started",
       threadId: "provider-thread-1",
@@ -136,6 +137,7 @@ describe("RuntimeThreadIdentityRegistry", () => {
       status: "completed",
       scope: turnScope("source-turn"),
     };
+
     expect(
       stampThreadEventScope({
         event,

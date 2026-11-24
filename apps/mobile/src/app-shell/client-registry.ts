@@ -16,6 +16,7 @@ export function getAppProfileClientRegistry(): ProfileClientRegistry {
         toast.info(message);
       },
     });
+
     instance = createProfileClientRegistry({
       onServerMoved: (profileId, moved) => {
         serverMoved.handle(profileId, moved).catch((error: unknown) => {
@@ -26,5 +27,6 @@ export function getAppProfileClientRegistry(): ProfileClientRegistry {
       },
     });
   }
+
   return instance;
 }

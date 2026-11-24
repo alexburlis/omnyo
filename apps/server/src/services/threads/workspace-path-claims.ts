@@ -2,8 +2,8 @@ import {
   findForeignManagedEnvironmentAtHostPath,
   findProjectEnvironmentByHostPath,
   type DbConnection,
-} from "@bb/db";
-import { isBbManagedWorkspacePath } from "./workspace-paths.js";
+} from "@omnyo/db";
+import { isOmnyoManagedWorkspacePath } from "./workspace-paths.js";
 
 interface ForeignProjectPathCheckArgs {
   hostId: string;
@@ -16,10 +16,10 @@ interface SuppliedWorkspacePathCheckArgs extends ForeignProjectPathCheckArgs {
 }
 
 const FOREIGN_PROJECT_REFUSAL =
-  "Workspace path is a bb-managed workspace owned by another project";
+  "Workspace path is an Omnyo-managed workspace owned by another project";
 
 const UNRECORDED_MANAGED_REFUSAL =
-  "Workspace path is inside bb-managed storage but is not a workspace of this project";
+  "Workspace path is inside Omnyo-managed storage but is not a workspace of this project";
 
 export function foreignProjectOwnedPathRefusal(
   db: DbConnection,
@@ -39,11 +39,12 @@ export function suppliedWorkspacePathRefusal(
   args: SuppliedWorkspacePathCheckArgs,
 ): string | null {
   const foreign = foreignProjectOwnedPathRefusal(db, args);
+
   if (foreign !== null) return foreign;
 
   if (
     args.dataDir !== null &&
-    isBbManagedWorkspacePath({ dataDir: args.dataDir, path: args.path }) &&
+    isOmnyoManagedWorkspacePath({ dataDir: args.dataDir, path: args.path }) &&
     findProjectEnvironmentByHostPath(
       db,
       args.projectId,

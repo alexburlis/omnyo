@@ -1,11 +1,15 @@
+import { onHostReconnected } from "../services/inbox/waits.js";
+import { isDirectAccessHeld } from "../services/machines/direct-access-state.js";
 import { reportEnvironmentHookProgress } from "../services/environments/environment-hooks.js";
 import { syncDesktopBrowserTabs } from "../services/desktop-browsers.js";
-import { heartbeatSession } from "@bb/db";
+import { heartbeatSession } from "@omnyo/db";
+import { beginProviderCliStartup } from "../services/system/provider-cli-startup.js";
 import {
   hasHostDaemonWebSocketProtocol,
-  hostDaemonDaemonWsMessageSchema,
+  decodeDaemonWirePayload,
+  isDaemonBulkPayload,
   type HostDaemonDaemonWsMessage,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { ApiError } from "../errors.js";
 import { verifyAuthenticatedDaemon } from "../internal/auth.js";
 import type {
@@ -30,14 +34,15 @@ import {
 } from "../internal/environment-changes.js";
 import { requestQueuedMessageDispatch } from "../services/threads/queued-message-dispatch.js";
 import { runEventLoopWorkSync } from "../services/system/event-loop-work.js";
-import { parseSocketMessage } from "./decode-payload.js";
 import type { PluginService } from "../services/plugins/plugin-service.js";
 import type { ServerMoveCoordinator } from "../services/server-move/coordinator.js";
 import {
   isServerMoveFrozen,
+  isMaintenanceFrozen,
   isServerMoveSnapshotFenced,
 } from "../services/server-move/freeze-state.js";
 import { resumeEnvironmentProvisioningForHost } from "../services/environments/environment-engine.js";
+import { waitForEventsThrough } from "../services/hosts/event-receipt-watermarks.js";
 
 interface DaemonSocket {
   close(code?: number, reason?: string): void;
@@ -60,9 +65,11 @@ export async function validateDaemonWebSocket(
   },
 ): Promise<{ hostId: string; sessionId: string }> {
   const sessionId = args.sessionId;
+
   if (!sessionId) {
     throw new ApiError(401, "unauthorized", "Unauthorized");
   }
+
   if (!hasHostDaemonWebSocketProtocol(args.protocolHeader)) {
     throw new ApiError(
       400,
@@ -75,6 +82,7 @@ export async function validateDaemonWebSocket(
     deps,
     args.authorizationHeader,
   );
+
   const session = requireAuthorizedOpenSession(deps.db, {
     hostId: verified.hostId,
     sessionId,
@@ -85,6 +93,10 @@ export async function validateDaemonWebSocket(
     hostId: session.hostId,
   };
 }
+
+const HEARTBEAT_ACK_PAYLOAD = JSON.stringify({ type: "heartbeat-ack" });
+
+const LEASE_RENEWAL_INTERVAL_MS = LEASE_TIMEOUT_MS - 2 * HEARTBEAT_INTERVAL_MS;
 
 export const SERVER_MOVE_FENCED_DAEMON_MESSAGE_TYPES: ReadonlySet<
   HostDaemonDaemonWsMessage["type"]
@@ -106,53 +118,104 @@ export function onDaemonSocketOpen(
     { sessionId: args.sessionId, hostId: args.hostId },
     "Daemon WebSocket opened",
   );
+
+  const startup =
+    isServerMoveFrozen(deps.db) || isDirectAccessHeld(deps, args.hostId)
+      ? Promise.resolve()
+      : beginProviderCliStartup(deps, args.hostId, args.sessionId);
+
   deps.hub.registerDaemon(args.sessionId, args.hostId, args.socket);
   handleDaemonSocketOpened(deps, { hostId: args.hostId });
   deps.sharedPorts.pushCurrentSharedPortsForHost(args.hostId);
-  if (!isServerMoveSnapshotFenced(deps.db)) {
+
+  if (
+    !isServerMoveSnapshotFenced(deps.db) &&
+    !isMaintenanceFrozen(deps.db) &&
+    !isDirectAccessHeld(deps, args.hostId)
+  ) {
     deps.terminalSessions.reconcileDisconnectedHostTerminals({
       daemonSessionId: args.sessionId,
       hostId: args.hostId,
     });
   }
-  if (isServerMoveFrozen(deps.db)) {
+
+  if (isServerMoveFrozen(deps.db) || isDirectAccessHeld(deps, args.hostId)) {
     return;
   }
-  // A dispatch that arrived while this machine was away parked its row on a
-  // `host-offline` wait with no schedule, so no sweep can see it — the
-  // machine coming back is that wait's release signal, and this socket
-  // opening is where core hears it.
-  requestQueuedMessageDispatch(deps, {
-    hostId: args.hostId,
-    kind: "host-connected",
-  });
-  void resumeEnvironmentProvisioningForHost(deps, {
-    hostId: args.hostId,
-  }).catch((error) => {
-    deps.logger.warn(
-      {
-        err: error,
+
+  void startup
+    .then(() => {
+      requestQueuedMessageDispatch(deps, {
         hostId: args.hostId,
-        sessionId: args.sessionId,
-      },
-      "Environment provisioning reconnect resume failed",
-    );
-  });
+        kind: "host-connected",
+      });
+      void onHostReconnected(deps, {
+        hostId: args.hostId,
+        now: Date.now(),
+      }).catch((error) => {
+        deps.logger.warn(
+          { err: error, hostId: args.hostId },
+          "Inbox host reconnect wake failed",
+        );
+      });
+
+      return resumeEnvironmentProvisioningForHost(deps, {
+        hostId: args.hostId,
+      });
+    })
+    .catch((error) => {
+      deps.logger.warn(
+        {
+          err: error,
+          hostId: args.hostId,
+          sessionId: args.sessionId,
+        },
+        "Environment provisioning reconnect resume failed",
+      );
+    });
 }
 
 export function onDaemonSocketMessage(
-  deps: WorkSessionDeps & Pick<AppDeps, "sharedPorts" | "terminalSessions">,
+  deps: WorkSessionDeps &
+    Pick<
+      AppDeps,
+      | "sharedPorts"
+      | "terminalSessions"
+      | "providerNativeRoots"
+      | "commandCatalogs"
+    >,
   args: DaemonSocketMessageArgs,
   plugins?: Pick<PluginService, "handleHostSignal" | "handleHostWorkerExit">,
   serverMove?: Pick<ServerMoveCoordinator, "handleProgress">,
 ): void {
   deps.hub.recordDaemonActivity(args.sessionId);
-  const message = parseSocketMessage(
-    args.socket,
-    args.raw,
-    hostDaemonDaemonWsMessageSchema,
+
+  const decoded = decodeDaemonWirePayload(args.raw);
+
+  if (decoded === null) {
+    args.socket.close(1008, "invalid-message");
+
+    return;
+  }
+
+  const { message } = decoded;
+
+  const ownsSocket =
+    deps.hub.getDaemonSessionSocket(args.sessionId) === args.socket;
+
+  const acknowledged = message.type === "heartbeat" && ownsSocket;
+
+  if (acknowledged) {
+    args.socket.send(HEARTBEAT_ACK_PAYLOAD);
+  }
+
+  const leaseRenewalDue = deps.hub.takeDaemonLeaseRenewal(
+    args.sessionId,
+    Date.now(),
+    LEASE_RENEWAL_INTERVAL_MS,
   );
-  if (message === null) {
+
+  if (acknowledged && !leaseRenewalDue) {
     return;
   }
 
@@ -162,21 +225,36 @@ export function onDaemonSocketMessage(
         hostId: args.hostId,
         sessionId: args.sessionId,
       });
-      const now = Date.now();
-      if (
-        message.type === "heartbeat" ||
-        now < session.updatedAt ||
-        now - session.updatedAt >= session.heartbeatIntervalMs ||
-        session.leaseExpiresAt <= now + session.heartbeatIntervalMs
-      ) {
+
+      if (leaseRenewalDue) {
         heartbeatSession(
           deps.db,
           session.id,
-          Math.max(now + session.leaseTimeoutMs, session.leaseExpiresAt + 1),
+          Math.max(
+            Date.now() + session.leaseTimeoutMs,
+            session.leaseExpiresAt + 1,
+          ),
         );
       }
+
+      if (ownsSocket) {
+        const wireBytes =
+          typeof args.raw === "string"
+            ? Buffer.byteLength(args.raw)
+            : decoded.wireBytes;
+
+        if (isDaemonBulkPayload(message, wireBytes)) {
+          args.socket.send(
+            JSON.stringify({
+              type: "transport.bulk-ack",
+              bytes: wireBytes,
+            }),
+          );
+        }
+      }
+
       if (
-        isServerMoveSnapshotFenced(deps.db) &&
+        (isServerMoveSnapshotFenced(deps.db) || isMaintenanceFrozen(deps.db)) &&
         SERVER_MOVE_FENCED_DAEMON_MESSAGE_TYPES.has(message.type)
       ) {
         if (message.type === "terminal.opened") {
@@ -185,6 +263,7 @@ export function onDaemonSocketMessage(
             sessionId: args.sessionId,
           });
         }
+
         deps.logger.debug(
           {
             hostId: args.hostId,
@@ -193,29 +272,70 @@ export function onDaemonSocketMessage(
           },
           "Ignoring a daemon change while the server is moving",
         );
+
         return;
       }
+
+      if (message.type === "command-catalog-change") {
+        deps.providerNativeRoots.invalidate();
+        deps.commandCatalogs.invalidateHost(args.hostId, message.scopes);
+
+        return;
+      }
+
       if (message.type === "environment-change") {
         notifyDaemonEnvironmentChange(deps, {
           hostId: args.hostId,
           environmentId: message.environmentId,
           change: message.change,
         });
+
         return;
       }
+
       if (message.type === "environment-metadata-change") {
         recordDaemonEnvironmentMetadataChange(deps, {
           hostId: args.hostId,
           environmentId: message.environmentId,
           workspace: message.workspace,
         });
+
         return;
       }
+
       if (message.type === "host-rpc.response") {
+        const eventsThrough = message.eventsThrough;
+
         const disposition = deps.hub.recordHostOnlineRpcResponse({
           message,
           sessionId: args.sessionId,
+          ...(eventsThrough === undefined
+            ? {}
+            : {
+                deliverAfter: async () => {
+                  const outcome = await waitForEventsThrough(deps.db, {
+                    eventsThrough,
+                    key: {
+                      hostId: session.hostId,
+                      instanceId: session.instanceId,
+                    },
+                  });
+
+                  if (outcome === "timed_out") {
+                    deps.logger.warn(
+                      {
+                        commandType: message.commandType,
+                        eventsThrough,
+                        requestId: message.requestId,
+                        sessionId: args.sessionId,
+                      },
+                      "Settled a host RPC response before its events were applied",
+                    );
+                  }
+                },
+              }),
         });
+
         if (!disposition.handled && disposition.reason === "session_mismatch") {
           deps.logger.warn(
             {
@@ -236,12 +356,16 @@ export function onDaemonSocketMessage(
             "Ignoring stale host RPC response",
           );
         }
+
         return;
       }
+
       if (message.type === "connect-tunnel.identity") {
         deps.sharedPorts.recordTunnelIdentity(args.hostId, message.identity);
+
         return;
       }
+
       if (message.type === "desktop-browser.changed") {
         const scope = {
           hostId: args.hostId,
@@ -249,6 +373,7 @@ export function onDaemonSocketMessage(
           generation: message.generation,
           threadId: message.threadId,
         };
+
         const logDropped = (error: unknown) => {
           deps.logger.warn(
             {
@@ -259,27 +384,36 @@ export function onDaemonSocketMessage(
             "Dropping desktop browser snapshot the server cannot apply",
           );
         };
+
         void syncDesktopBrowserTabs(deps, scope, message.tabs).catch(
           logDropped,
         );
+
         return;
       }
+
       if (message.type === "plugin-host.worker-exited") {
         plugins?.handleHostWorkerExit({
           authenticatedHostId: args.hostId,
           pluginId: message.pluginId,
           generation: message.generation,
         });
+
         return;
       }
+
       if (message.type === "environment.hook.progress") {
         reportEnvironmentHookProgress(deps, args.hostId, message);
+
         return;
       }
+
       if (message.type === "server_move.progress") {
         serverMove?.handleProgress(args.hostId, message);
+
         return;
       }
+
       if (message.type === "plugin-host.signal") {
         plugins?.handleHostSignal({
           authenticatedHostId: args.hostId,
@@ -288,15 +422,22 @@ export function onDaemonSocketMessage(
           signal: message.signal,
           payload: message.payload,
         });
+
         return;
       }
+
       if (message.type === "heartbeat") {
-        args.socket.send(JSON.stringify({ type: "heartbeat-ack" }));
+        if (!acknowledged) {
+          args.socket.send(HEARTBEAT_ACK_PAYLOAD);
+        }
+
         return;
       }
+
       if (message.type === "machine.shutdown-ack") {
         return;
       }
+
       deps.terminalSessions.handleDaemonTerminalMessage({
         hostId: args.hostId,
         message,
@@ -314,6 +455,7 @@ export function onDaemonSocketMessage(
         "Daemon heartbeat for inactive session, closing socket",
       );
       args.socket.close(1008, "inactive-session");
+
       return;
     }
 
@@ -326,6 +468,7 @@ export function onDaemonSocketMessage(
         "Daemon heartbeat for unauthorized session, closing socket",
       );
       args.socket.close(1008, "unauthorized-session");
+
       return;
     }
 
@@ -342,6 +485,7 @@ export function onDaemonSocketMessage(
 }
 
 const DAEMON_LIVENESS_CHECK_INTERVAL_MS = HEARTBEAT_INTERVAL_MS;
+
 const DAEMON_LIVENESS_MAX_QUIET_CHECKS = Math.ceil(
   LEASE_TIMEOUT_MS / DAEMON_LIVENESS_CHECK_INTERVAL_MS,
 );
@@ -356,7 +500,9 @@ export function startDaemonLivenessChecks(
       handleDaemonSessionSilent(deps, { sessionId });
     }
   }, DAEMON_LIVENESS_CHECK_INTERVAL_MS);
+
   interval.unref();
+
   return () => clearInterval(interval);
 }
 

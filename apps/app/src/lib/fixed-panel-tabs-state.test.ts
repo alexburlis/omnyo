@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { threadTabsSchema } from "@bb/server-contract";
+import { threadTabsSchema } from "@omnyo/server-contract";
 import {
   EMPTY_FIXED_PANEL_TABS_STATE,
   areFixedPanelTabsEquivalent,
@@ -53,15 +53,18 @@ describe("fixed-panel-tabs-state", () => {
         generation: "generation-1",
       },
     };
+
     const state = createEmptyFixedPanelTabsState({
       lastUsedAt: NOW,
       secondary: { activeTabId: tab.id, isOpen: true, tabs: [tab] },
     });
+
     const parsed = parseFixedPanelTabsState({
       initialValue: makeInitialState(),
       now: NOW,
       storedValue: JSON.stringify(state),
     });
+
     expect(parsed.secondary.tabs).toEqual([tab]);
     expect(parsed.secondary.activeTabId).toBe(tab.id);
     expect(
@@ -74,6 +77,7 @@ describe("fixed-panel-tabs-state", () => {
 
   it("parses current secondary tab state", () => {
     const now = 1_000;
+
     const workspaceTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: "env-1",
       projectId: null,
@@ -87,7 +91,9 @@ describe("fixed-panel-tabs-state", () => {
         statusLabel: null,
       },
     });
+
     const terminalTab = createTerminalFixedPanelTab({ terminalId: "term-1" });
+
     const storedState = {
       version: FIXED_PANEL_TABS_STATE_STORAGE_VERSION,
       secondary: {
@@ -107,6 +113,7 @@ describe("fixed-panel-tabs-state", () => {
       now,
       storedValue: JSON.stringify(storedState),
     });
+
     const expectedWorkspaceTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: "env-1",
       projectId: null,
@@ -139,6 +146,7 @@ describe("fixed-panel-tabs-state", () => {
       pageId: "tasks",
       pluginId: "tasks",
     });
+
     const state = createEmptyFixedPanelTabsState({
       lastUsedAt: NOW,
       secondary: {
@@ -159,6 +167,7 @@ describe("fixed-panel-tabs-state", () => {
 
   it("drops old fixed panel state shapes instead of migrating them", () => {
     const initialValue = makeInitialState();
+
     const parsed = parseFixedPanelTabsState({
       initialValue,
       now: 1_000,
@@ -183,6 +192,7 @@ describe("fixed-panel-tabs-state", () => {
 
   it("closes an open panel when its transient New tab is removed during hydration", () => {
     const newTab = createNewTabFixedPanelTab();
+
     const state: FixedPanelTabsState = {
       version: FIXED_PANEL_TABS_STATE_STORAGE_VERSION,
       secondary: {
@@ -213,6 +223,7 @@ describe("fixed-panel-tabs-state", () => {
 
   it("selects the first surviving tab when the persisted active tab is gone", () => {
     const infoTab = createThreadInfoFixedPanelTab();
+
     const state: FixedPanelTabsState = {
       version: FIXED_PANEL_TABS_STATE_STORAGE_VERSION,
       secondary: {
@@ -235,10 +246,12 @@ describe("fixed-panel-tabs-state", () => {
       environmentId: null,
       url: "https://first.example.com",
     });
+
     const lastActiveTab = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://last.example.com",
     });
+
     const state: FixedPanelTabsState = {
       version: FIXED_PANEL_TABS_STATE_STORAGE_VERSION,
       secondary: {
@@ -260,7 +273,7 @@ describe("fixed-panel-tabs-state", () => {
     ).toBe(true);
     expect(
       isFixedPanelTabsStateStorageKey(
-        "bb.thread.fixedPanelTabsState-thr_old-0",
+        "omnyo.thread.fixedPanelTabsState-thr_old-0",
       ),
     ).toBe(true);
   });
@@ -278,6 +291,7 @@ describe("workspace file preview fixed panel tabs", () => {
         statusLabel: null,
       },
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: projectTab.id,
@@ -303,6 +317,7 @@ describe("workspace file preview fixed panel tabs", () => {
       path: "Pasted-text-1791431248908-krajcq.txt",
       projectId: "proj_app",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: { activeTabId: tab.id, isOpen: true, tabs: [tab] },
       lastUsedAt: NOW,
@@ -330,6 +345,7 @@ describe("workspace file preview fixed panel tabs", () => {
         statusLabel: null,
       },
     });
+
     const secondProjectTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: null,
       projectId: "proj_second",
@@ -358,6 +374,7 @@ describe("thread-owned file preview fixed panel tabs", () => {
       },
       threadId: "thr_app",
     });
+
     const storageTab = createThreadStorageFilePreviewFixedPanelTab({
       environmentId: "env_app",
       isPinned: false,
@@ -367,6 +384,7 @@ describe("thread-owned file preview fixed panel tabs", () => {
       },
       threadId: "thr_app",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: storageTab.id,
@@ -395,6 +413,7 @@ describe("thread-owned file preview fixed panel tabs", () => {
       },
       threadId: "thr_first",
     });
+
     const secondHostTab = createHostFilePreviewFixedPanelTab({
       environmentId: "env_second",
       tab: {
@@ -403,6 +422,7 @@ describe("thread-owned file preview fixed panel tabs", () => {
       },
       threadId: "thr_second",
     });
+
     const firstStorageTab = createThreadStorageFilePreviewFixedPanelTab({
       environmentId: "env_first",
       isPinned: false,
@@ -412,6 +432,7 @@ describe("thread-owned file preview fixed panel tabs", () => {
       },
       threadId: "thr_first",
     });
+
     const secondStorageTab = createThreadStorageFilePreviewFixedPanelTab({
       environmentId: "env_second",
       isPinned: false,
@@ -439,6 +460,7 @@ describe("thread-owned file preview fixed panel tabs", () => {
       tab: { lineRange: null, path: "/tmp/log.txt" },
       threadId: null,
     });
+
     const second = createHostFilePreviewFixedPanelTab({
       environmentId: null,
       hostId: "host_second",
@@ -519,6 +541,7 @@ describe("plugin file opener owner state", () => {
         threadId: "thr_docs",
       },
     } satisfies PluginPanelFixedPanelTab;
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: tab.id,
@@ -558,7 +581,9 @@ describe("terminal tab target", () => {
       hostId: "host_1",
       cwd: "/Users/dev",
     };
+
     const tab = createTerminalFixedPanelTab({ terminalId: "term_abc", target });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: { activeTabId: tab.id, isOpen: true, tabs: [tab] },
       lastUsedAt: NOW,
@@ -584,6 +609,7 @@ describe("terminal tab target", () => {
       terminalId: "term_abc",
       target: { kind: "thread", threadId: "thr_a" },
     });
+
     const environmentTab = createTerminalFixedPanelTab({
       terminalId: "term_abc",
       target: { kind: "environment", environmentId: "env_a" },
@@ -619,6 +645,7 @@ describe("legacy side-chat tabs", () => {
       environmentId: null,
       url: "https://example.com",
     });
+
     const stored = JSON.stringify({
       version: FIXED_PANEL_TABS_STATE_STORAGE_VERSION,
       lastUsedAt: NOW,

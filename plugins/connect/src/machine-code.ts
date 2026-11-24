@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { deriveConnectBaseUrl } from "@bb/connect-client";
+import { deriveConnectBaseUrl } from "@omnyo/connect-client";
 
 export interface MachineCode {
   code: string;
@@ -25,18 +25,27 @@ export async function redeemMachineCode(args: {
     `${deriveConnectBaseUrl(args.serverUrl)}/api/connect/redeem-machine`,
     {
       method: "POST",
+      redirect: "error",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code: args.code }),
       signal: AbortSignal.any([args.signal, AbortSignal.timeout(10_000)]),
     },
   );
+
   if (!response.ok)
     throw new Error(`Machine redeem failed (${response.status})`);
-  return z
+
+  const result = z
     .object({
       credential: z.string().min(1),
       machineId: z.string().min(1),
       serverUrl: z.string().url(),
     })
     .parse(await response.json());
+
+  if (result.serverUrl !== new URL(args.serverUrl).origin) {
+    throw new Error("Machine redemption returned a different server origin");
+  }
+
+  return result;
 }

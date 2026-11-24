@@ -2,9 +2,9 @@ import {
   findStoredEventRow,
   getLastStoredTurnRequestEvent,
   getThread,
-} from "@bb/db";
-import type { DbQueryConnection } from "@bb/db";
-import type { PromptInput } from "@bb/domain";
+} from "@omnyo/db";
+import type { DbQueryConnection } from "@omnyo/db";
+import type { PromptInput } from "@omnyo/domain";
 import { ApiError } from "../../errors.js";
 import { parseStoredTurnRequestEvent } from "./thread-events.js";
 
@@ -27,6 +27,7 @@ export function getLeadingAgentOnlyInput(input: PromptInput[]): PromptInput[] {
   const visibleInputIndex = input.findIndex(
     (item) => item.visibility !== "agent-only",
   );
+
   return input.slice(
     0,
     visibleInputIndex === -1 ? input.length : visibleInputIndex,
@@ -38,23 +39,29 @@ export function resolveDeferredFirstTurnContext(
   threadId: string,
 ): DeferredFirstTurnContext | null {
   const row = getLastStoredTurnRequestEvent(db, threadId);
+
   if (!row || row.type !== "client/turn/requested") {
     return null;
   }
+
   const request = parseStoredTurnRequestEvent(row);
+
   const isSeedRequest =
     request.source === "spawn" &&
     request.request.method === "thread/start" &&
     request.initiator === "agent" &&
     request.senderThreadId !== null &&
     request.target.kind === "thread-start";
+
   const isUndeliveredRetry =
     request.source === "tell" &&
     request.request.method === "turn/start" &&
     request.target.kind === "new-turn" &&
     getThread(db, threadId)?.status === "error";
+
   const leadingInput = getLeadingAgentOnlyInput(request.input);
   const context = leadingInput.length > 0 ? [...leadingInput] : null;
+
   if (
     context === null ||
     (!isSeedRequest && !isUndeliveredRetry) ||
@@ -66,6 +73,7 @@ export function resolveDeferredFirstTurnContext(
   ) {
     return null;
   }
+
   return { input: context, requestSequence: row.sequence };
 }
 
@@ -84,6 +92,7 @@ export function prependDeferredFirstTurnContext(
   if (!context) {
     return prompt;
   }
+
   return {
     input: [...context.input, ...prompt.input],
     ...(prompt.inputGroups !== undefined
@@ -102,9 +111,11 @@ export function requireDeferredFirstTurnContextCurrent(
   args: { requestSequence: number; threadId: string },
 ): void {
   const current = resolveDeferredFirstTurnContext(db, args.threadId);
+
   if (current?.requestSequence === args.requestSequence) {
     return;
   }
+
   throw new ApiError(
     409,
     "invalid_request",

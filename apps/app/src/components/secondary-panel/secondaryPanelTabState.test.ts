@@ -24,7 +24,7 @@ import {
   updateSecondaryPanelTabInState,
   reorderSecondaryPanelFileTabInState,
   replaceNewTabWithSecondaryPanelTabInState,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 
 function makeWorkspaceTab(environmentId: string) {
   return createWorkspaceFilePreviewFixedPanelTab({
@@ -42,6 +42,7 @@ function makeWorkspaceTab(environmentId: string) {
 describe("secondaryPanelTabState", () => {
   it("opens, activates, and closes secondary panel tabs by canonical id", () => {
     const workspaceTab = makeWorkspaceTab("env-1");
+
     const hostTab = createHostFilePreviewFixedPanelTab({
       environmentId: "env-1",
       tab: {
@@ -50,6 +51,7 @@ describe("secondaryPanelTabState", () => {
       },
       threadId: "thr-1",
     });
+
     const tabs = [
       createThreadInfoFixedPanelTab(),
       createGitDiffFixedPanelTab(),
@@ -65,6 +67,7 @@ describe("secondaryPanelTabState", () => {
       createNewTabFixedPanelTab(),
       createTerminalFixedPanelTab({ terminalId: "term-1" }),
     ];
+
     let state = createEmptyFixedPanelTabsState();
 
     for (const tab of tabs) {
@@ -95,6 +98,7 @@ describe("secondaryPanelTabState", () => {
       },
       threadId: "thr-1",
     });
+
     const secondTab = createHostFilePreviewFixedPanelTab({
       environmentId: "env-1",
       tab: {
@@ -103,6 +107,7 @@ describe("secondaryPanelTabState", () => {
       },
       threadId: "thr-1",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: secondTab.id,
@@ -129,6 +134,7 @@ describe("secondaryPanelTabState", () => {
       },
       threadId: "thr-1",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: fileTab.id,
@@ -152,6 +158,7 @@ describe("secondaryPanelTabState", () => {
     const infoTab = createThreadInfoFixedPanelTab();
     const diffTab = createGitDiffFixedPanelTab();
     const contentTab = makeWorkspaceTab("env-1");
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: contentTab.id,
@@ -178,6 +185,7 @@ describe("secondaryPanelTabState", () => {
       pageId: "tasks",
       pluginId: "tasks",
     });
+
     const initial = reconcileFixedPanelViewTabsInState({
       fixedTabs: [navigationTab],
       openFirstFixedTabWhenEmpty: true,
@@ -194,6 +202,7 @@ describe("secondaryPanelTabState", () => {
       ...initial,
       secondary: { ...initial.secondary, isOpen: false },
     };
+
     expect(
       reconcileFixedPanelViewTabsInState({
         fixedTabs: [navigationTab],
@@ -209,11 +218,13 @@ describe("secondaryPanelTabState", () => {
       pageId: "docs",
       pluginId: "docs",
     });
+
     const secondTab = createPluginPageFixedPanelTab({
       fixedTabId: "outline",
       pageId: "docs",
       pluginId: "docs",
     });
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: firstTab.id,
@@ -237,6 +248,7 @@ describe("secondaryPanelTabState", () => {
   it("retains an active Diff tab until eligibility is authoritative", () => {
     const infoTab = createThreadInfoFixedPanelTab();
     const diffTab = createGitDiffFixedPanelTab();
+
     const state = createEmptyFixedPanelTabsState({
       secondary: {
         activeTabId: diffTab.id,
@@ -249,12 +261,14 @@ describe("secondaryPanelTabState", () => {
       fixedTabs: [infoTab, diffTab],
       state,
     });
+
     expect(whileLoading).toBe(state);
 
     const onceIneligible = reconcileFixedPanelViewTabsInState({
       fixedTabs: [infoTab],
       state,
     });
+
     expect(onceIneligible.secondary).toEqual({
       activeTabId: infoTab.id,
       isOpen: true,
@@ -264,6 +278,7 @@ describe("secondaryPanelTabState", () => {
 
   it("closes the panel and removes its sole New tab launcher", () => {
     const newTab = createNewTabFixedPanelTab();
+
     const state = openSecondaryPanelTabInState({
       state: createEmptyFixedPanelTabsState(),
       tab: newTab,
@@ -309,6 +324,7 @@ describe("secondaryPanelTabState", () => {
       path: "Pasted-text-1791431248908-krajcq.txt",
       projectId: "proj_app",
     });
+
     const state = openSecondaryPanelTabInState({
       state: createEmptyFixedPanelTabsState(),
       tab: attachmentTab,
@@ -347,16 +363,19 @@ describe("secondary panel close activation", () => {
     threadId: "thr-1",
     tab: { path: "/tmp/source.txt", lineRange: null },
   });
+
   const neighbor = createHostFilePreviewFixedPanelTab({
     environmentId: "env-1",
     threadId: "thr-1",
     tab: { path: "/tmp/neighbor.txt", lineRange: null },
   });
+
   const detour = createHostFilePreviewFixedPanelTab({
     environmentId: "env-1",
     threadId: "thr-1",
     tab: { path: "/tmp/detour.txt", lineRange: null },
   });
+
   const initial = () =>
     createEmptyFixedPanelTabsState({
       lastUsedAt: 1000,
@@ -424,11 +443,13 @@ describe("secondary panel close activation", () => {
 
   it("handles sequential detours without retaining a full activation stack", () => {
     let state = initial();
+
     for (let i = 0; i < 3; i++) {
       state = openSecondaryPanelTabInState({ state, tab: detour });
       state = closeSecondaryPanelTabInState(state, detour.id);
       expect(state.secondary.activeTabId).toBe(source.id);
     }
+
     state = openSecondaryPanelTabInState({ state, tab: detour });
     state = activateSecondaryPanelTabInState(state, source.id);
     state = activateSecondaryPanelTabInState(state, detour.id);
@@ -442,6 +463,7 @@ describe("secondary panel close activation", () => {
     "returns to a fixed source with other content tabs: %s",
     (hasNeighbor) => {
       const fixed = createGitDiffFixedPanelTab();
+
       let state = createEmptyFixedPanelTabsState({
         secondary: {
           tabs: [
@@ -453,6 +475,7 @@ describe("secondary panel close activation", () => {
           isOpen: true,
         },
       });
+
       state = openSecondaryPanelTabInState({ state, tab: detour });
       expect(
         closeSecondaryPanelTabInState(state, detour.id).secondary.activeTabId,
@@ -465,6 +488,7 @@ describe("secondary panel close activation", () => {
       state: initial(),
       tab: createNewTabFixedPanelTab(),
     });
+
     state = replaceNewTabWithSecondaryPanelTabInState({ state, tab: detour });
     expect(
       closeSecondaryPanelTabInState(state, detour.id).secondary.activeTabId,
@@ -476,10 +500,12 @@ describe("secondary panel close activation", () => {
       state: initial(),
       tab: createNewTabFixedPanelTab(),
     });
+
     const replaced = replaceNewTabWithSecondaryPanelTabInState({
       state,
       tab: neighbor,
     });
+
     expect(
       closeSecondaryPanelTabInState(replaced, neighbor.id).secondary
         .activeTabId,
@@ -499,23 +525,28 @@ describe("secondary panel close activation", () => {
       state: initial(),
       tab: detour,
     });
+
     const serialized = serializeFixedPanelTabsState({ state });
     expect(serialized).not.toContain("previousActiveTabId");
     expect(
       closeSecondaryPanelTabInState(state, detour.id).secondary.activeTabId,
     ).toBe(source.id);
+
     const restored = parseFixedPanelTabsState({
       initialValue: initial(),
       now: 1000,
       storedValue: serialized,
     });
+
     expect(restored.secondary.previousActiveTabId).toBeUndefined();
     expect(
       closeSecondaryPanelTabInState(restored, detour.id).secondary.activeTabId,
     ).toBe(neighbor.id);
+
     const normalized = createEmptyFixedPanelTabsState({
       secondary: state.secondary,
     });
+
     expect(normalized.secondary.previousActiveTabId).toBeUndefined();
   });
 });

@@ -1,72 +1,52 @@
 // @vitest-environment jsdom
 
 import {
-  buildBridgeInjectionScript,
   buildBridgeEventScript,
-  parsePageToShellMessage,
   type NativeShellHandshake,
-} from "@bb/mobile-bridge";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+} from "@omnyo/mobile-bridge";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter } from "react-router-dom";
+import {
+  installNativeShellForTest,
+  removeNativeShellForTest,
+  type InstalledNativeShell,
+} from "@/test/native-shell-test-utils";
 import { NativeShellReporter } from "./NativeShellReporter";
 import {
+  canOpenNativeScreen,
   getNativeShell,
   isInsideNativeShell,
+  nativeShellServerSummary,
   resetNativeShellForTests,
+  shellHaptic,
   shellOpenExternal,
 } from "./native-shell";
 
-const handshake: NativeShellHandshake = {
-  bridgeVersion: 1,
+const baseHandshake: Partial<NativeShellHandshake> = {
   appVersion: "0.39.0",
-  platform: "ios",
-  profileMode: "connect",
-  secureContext: true,
-  safeArea: { top: 59, right: 0, bottom: 34, left: 0 },
   capabilities: ["haptic", "badge", "share", "open-external", "safe-area"],
 };
 
-const posted: string[] = [];
+function installShell(
+  overrides: Partial<NativeShellHandshake> = {},
+): InstalledNativeShell {
+  return installNativeShellForTest({ ...baseHandshake, ...overrides });
+}
 
-function installShell(overrides: Partial<NativeShellHandshake> = {}): void {
-  Object.defineProperty(window, "ReactNativeWebView", {
-    configurable: true,
-    value: {
-      postMessage: (raw: string) => {
-        posted.push(raw);
-      },
-    },
-  });
-  // eslint-disable-next-line no-new-func
+function announceRawCapabilities(capabilities: unknown): void {
   new Function(
     "window",
-    buildBridgeInjectionScript({ ...handshake, ...overrides }),
-  )(window);
+    "capabilities",
+    "window.omnyo.native.__apply({ capabilities: capabilities });",
+  )(window, capabilities);
   resetNativeShellForTests();
 }
-
-function lastMessage(): unknown {
-  const raw = posted.at(-1);
-  const parsed = parsePageToShellMessage(raw);
-  if (!parsed.ok) throw new Error(`shell could not parse: ${parsed.reason}`);
-  return parsed.message;
-}
-
-beforeEach(() => {
-  posted.length = 0;
-  resetNativeShellForTests();
-});
 
 afterEach(() => {
   cleanup();
-  Reflect.deleteProperty(window as unknown as Record<string, unknown>, "bb");
-  Reflect.deleteProperty(
-    window as unknown as Record<string, unknown>,
-    "ReactNativeWebView",
-  );
-  resetNativeShellForTests();
+  removeNativeShellForTest();
   vi.restoreAllMocks();
 });
 
@@ -90,8 +70,24 @@ describe("getNativeShell", () => {
     expect(isInsideNativeShell()).toBe(false);
   });
 
+  it("plays a haptic when the bridge appears after the first lookup", () => {
+    const shell = installShell();
+    const globals = Object.getOwnPropertyDescriptor(window, "omnyo");
+
+    if (!globals) throw new Error("The fixture did not install the bridge");
+
+    Reflect.deleteProperty(window, "omnyo");
+    expect(getNativeShell()).toBeNull();
+
+    Object.defineProperty(window, "omnyo", globals);
+    shellHaptic("impact-light");
+    expect(shell.messages()).toEqual([
+      { type: "haptic", kind: "impact-light" },
+    ]);
+  });
+
   it("ignores a global that is not a usable bridge", () => {
-    Object.defineProperty(window, "bb", {
+    Object.defineProperty(window, "omnyo", {
       configurable: true,
       value: { native: { post: "not a function" } },
     });
@@ -107,13 +103,65 @@ describe("getNativeShell", () => {
     installShell({ bridgeVersion: 99 });
     expect(getNativeShell()).not.toBeNull();
   });
+
+  it("keeps the shell when a newer native announces a capability this page does not know", () => {
+    installShell();
+    announceRawCapabilities(["haptic", "open-native", "live-activity"]);
+    const shell = getNativeShell();
+    expect(shell).not.toBeNull();
+    expect(shell?.handshake.capabilities).toEqual(["haptic", "open-native"]);
+    expect(canOpenNativeScreen()).toBe(true);
+  });
+
+  it("still refuses capabilities that are not a list", () => {
+    installShell();
+    announceRawCapabilities("open-native");
+    expect(getNativeShell()).toBeNull();
+  });
+});
+
+describe("nativeShellServerSummary", () => {
+  it("names this page's host and the shell's connection mode", () => {
+    installShell({ profileMode: "direct" });
+    expect(nativeShellServerSummary()).toEqual({
+      host: window.location.host,
+      mode: "direct",
+    });
+  });
+
+  it("has nothing to say in a plain browser", () => {
+    expect(nativeShellServerSummary()).toBeNull();
+  });
+});
+
+describe("shellHaptic", () => {
+  it("delivers a haptic message to the iOS WebView bridge", () => {
+    const shell = installShell();
+    shellHaptic("impact-light");
+    expect(shell.messages()).toEqual([
+      { type: "haptic", kind: "impact-light" },
+    ]);
+  });
+
+  it.each<Partial<NativeShellHandshake>>([
+    { platform: "android" },
+    { capabilities: [] },
+  ])("leaves the bridge quiet with %j", (overrides) => {
+    const shell = installShell(overrides);
+    shellHaptic("impact-light");
+    expect(shell.messages()).toEqual([]);
+  });
+
+  it("works in a browser without a native bridge", () => {
+    expect(() => shellHaptic("success")).not.toThrow();
+  });
 });
 
 describe("shellOpenExternal", () => {
   it("hands the link to the shell and says it took it", () => {
-    installShell();
+    const shell = installShell();
     expect(shellOpenExternal("https://example.com/docs")).toBe(true);
-    expect(lastMessage()).toEqual({
+    expect(shell.messages().at(-1)).toEqual({
       type: "open-external",
       url: "https://example.com/docs",
     });
@@ -129,11 +177,13 @@ it("applies native bottom insets to portaled UI and updates them when the safe a
     platform: "android",
     safeArea: { top: 24, right: 0, bottom: 24, left: 0 },
   });
+
   const { unmount } = render(
     createElement(MemoryRouter, null, createElement(NativeShellReporter)),
   );
+
   expect(
-    document.documentElement.style.getPropertyValue("--bb-safe-area-bottom"),
+    document.documentElement.style.getPropertyValue("--omnyo-safe-area-bottom"),
   ).toBe("24px");
   act(() => {
     new Function(
@@ -145,10 +195,10 @@ it("applies native bottom insets to portaled UI and updates them when the safe a
     )(window);
   });
   expect(
-    document.documentElement.style.getPropertyValue("--bb-safe-area-bottom"),
+    document.documentElement.style.getPropertyValue("--omnyo-safe-area-bottom"),
   ).toBe("0px");
   unmount();
   expect(
-    document.documentElement.style.getPropertyValue("--bb-safe-area-bottom"),
+    document.documentElement.style.getPropertyValue("--omnyo-safe-area-bottom"),
   ).toBe("");
 });

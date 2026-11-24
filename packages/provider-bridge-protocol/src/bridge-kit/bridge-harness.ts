@@ -55,6 +55,7 @@ export function createBridgeIo<TMessage>({
   const send = (message: TMessage | BridgeJsonRpcResponse): void => {
     write(`${JSON.stringify(message)}\n`);
   };
+
   return {
     send,
     sendError: (id, code, message, data) => {
@@ -75,16 +76,19 @@ export function createBridgeLineHandler(args: {
 }): (line: string) => void {
   return (line): void => {
     const trimmed = line.trim();
+
     if (!trimmed) {
       return;
     }
 
     let parsed: unknown;
+
     try {
       parsed = JSON.parse(trimmed);
     } catch {
       return;
     }
+
     args.handleParsedMessage(parsed);
   };
 }
@@ -101,8 +105,10 @@ export function runBridgeRequest<
       args.sendError(args.request.id, error.code, error.message, {
         recovery: error.recovery,
       });
+
       return;
     }
+
     const message = error instanceof Error ? error.message : String(error);
     args.sendError(args.request.id, -32000, message);
   });

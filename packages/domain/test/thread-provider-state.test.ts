@@ -98,9 +98,10 @@ describe("session option selections", () => {
   });
 
   it("lets a provider write the live state kinds but not the server's selection kind", () => {
-    expect(coreThreadStateSchema("bb/session-options")).not.toBeNull();
-    expect(coreThreadStateSchema("bb/provider-commands")).not.toBeNull();
-    expect(coreThreadStateSchema("bb/session-option-selections")).toBeNull();
+    expect(coreThreadStateSchema("core/session-options")).not.toBeNull();
+    expect(coreThreadStateSchema("core/provider-commands")).not.toBeNull();
+    expect(coreThreadStateSchema("core/session-option-selections")).toBeNull();
+    expect(coreThreadStateSchema("bb/session-options")).toBeNull();
     expect(coreThreadStateSchema("toString")).toBeNull();
   });
 });
@@ -113,6 +114,7 @@ describe("options declared by a provider's models", () => {
     value,
     ...(fixed === undefined ? {} : { fixed }),
   });
+
   const mode = (ids: string[]): ThreadSessionOption => ({
     type: "select",
     id: "mode",
@@ -120,6 +122,7 @@ describe("options declared by a provider's models", () => {
     value: ids[0] ?? "",
     values: ids.map((id) => ({ id, label: id })),
   });
+
   const standardOnly = { sessionOptions: [daybreak(false, true)] };
   const either = { sessionOptions: [daybreak(false), mode(["build", "plan"])] };
   const daybreakOnly = { sessionOptions: [daybreak(true, true)] };

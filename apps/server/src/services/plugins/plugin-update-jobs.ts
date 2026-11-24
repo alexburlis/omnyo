@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type {
   PluginApplyUpdateResult,
   PluginUpdateJob,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { withPluginUpdateProgress } from "./plugin-update-progress.js";
 
 interface JobEntry {
@@ -45,18 +45,22 @@ export function createPluginUpdateJobs(deps: {
 
   function update(entry: JobEntry, job: PluginUpdateJob): void {
     entry.job = job;
+
     if (job.state === "completed" || job.state === "failed") {
       entry.finishedAt = now();
       entry.settle(job);
     }
+
     deps.notifyChanged();
   }
 
   function pump(): void {
     if (running) return;
+
     const entry = [...entries.values()].find(
       (entry) => entry.job.state === "queued",
     );
+
     if (entry === undefined) return;
     running = true;
     const { id, pluginId, displayName } = entry.job;
@@ -84,16 +88,20 @@ export function createPluginUpdateJobs(deps: {
   return {
     start({ pluginId, displayName, run }) {
       pruneFinished();
+
       const duplicate = [...entries.values()].find(
         (entry) =>
           entry.job.pluginId === pluginId &&
           (entry.job.state === "queued" || entry.job.state === "running"),
       );
+
       if (duplicate !== undefined) return duplicate.job;
       let settle: (job: PluginUpdateJob) => void = () => {};
+
       const settled = new Promise<PluginUpdateJob>((resolve) => {
         settle = resolve;
       });
+
       const entry: JobEntry = {
         job: { id: randomUUID(), pluginId, displayName, state: "queued" },
         run,
@@ -101,18 +109,22 @@ export function createPluginUpdateJobs(deps: {
         settled,
         settle,
       };
+
       entries.set(entry.job.id, entry);
       deps.notifyChanged();
       pump();
+
       return entry.job;
     },
     settled: (id) => entries.get(id)?.settled,
     get(id) {
       pruneFinished();
+
       return entries.get(id)?.job;
     },
     list() {
       pruneFinished();
+
       return [...entries.values()].map((entry) => entry.job);
     },
   };

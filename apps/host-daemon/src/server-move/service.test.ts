@@ -1,15 +1,19 @@
 import { readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import {
+  createRuntimeIdentity,
   readServerConnectHoldFile,
   readServerImportFile,
   readServerMovedFile,
   writeServerConnectHoldFile,
   writeServerImportFile,
   writeServerMovedFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
+import { HOST_DAEMON_PROTOCOL_VERSION } from "@omnyo/host-daemon-contract";
+import { maintenanceStatusSchema } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
-import { writeIncomingMoveState } from "./move-state.js";
+import { readIncomingMoveState, writeIncomingMoveState } from "./move-state.js";
 import { isProcessGroupAlive } from "./pending-server.js";
 import {
   ACTIVATION_TOKEN,
@@ -24,7 +28,7 @@ import {
   prepareCommand,
   readJson,
   registerServerMoveFixtureCleanup,
-  writeBbAppRuntime,
+  writeOmnyoAppRuntime,
   writeFileWithDirs,
   writeLauncherMovedMode,
   type Fixture,
@@ -32,14 +36,228 @@ import {
 
 registerServerMoveFixtureCleanup();
 
+const idleDirectActivity = {
+  commands: 0,
+  runtimes: 0,
+  terminals: 0,
+  pluginHosts: 0,
+  interactions: 0,
+};
+
+const directProbeCommand = {
+  type: "server_access.probe_direct" as const,
+  serverUrl: "https://direct.example.test",
+  challenge: "test-direct-probe",
+  instanceId: "test-coordinator-instance",
+};
+
+describe("ServerMoveService direct probe ownership", () => {
+  it.each([null, { ...idleDirectActivity, commands: 1 }])(
+    "releases already-cleared busy probes idempotently: %j",
+    async (activity) => {
+      const fixture = await createFixture();
+
+      const service = fixture.createService({
+        getDirectAccessActivity: () => activity,
+        fetchFn: async () => {
+          throw new Error("Busy admission must not reach the network");
+        },
+      });
+
+      await expect(service.probeDirect(directProbeCommand)).rejects.toThrow(
+        activity === null
+          ? "Worker activity is unknown"
+          : "Worker owners are busy",
+      );
+
+      for (let attempt = 0; attempt < 2; attempt++)
+        await expect(
+          service.releaseDirectProbe({
+            type: "server_access.release_direct_probe",
+            challenge: directProbeCommand.challenge,
+          }),
+        ).resolves.toEqual({ ok: true });
+      expect(() => service.assertDirectAccessAdmission()).not.toThrow();
+    },
+  );
+
+  it("refuses foreign and committed releases without opening worker admission", async () => {
+    const fixture = await createFixture();
+
+    const service = fixture.createService({
+      getDirectAccessActivity: () => idleDirectActivity,
+      fetchFn: async () => {
+        throw new Error("Direct route is unavailable");
+      },
+    });
+
+    await expect(service.probeDirect(directProbeCommand)).rejects.toThrow(
+      "Direct route is unavailable",
+    );
+    await expect(
+      service.releaseDirectProbe({
+        type: "server_access.release_direct_probe",
+        challenge: "different-probe-owner",
+      }),
+    ).rejects.toThrow("owner does not match or is committed");
+    expect(() =>
+      service.assertDirectAccessAdmission("host.paths_exist"),
+    ).toThrow("Worker admission is held");
+    await service.releaseDirectProbe({
+      type: "server_access.release_direct_probe",
+      challenge: directProbeCommand.challenge,
+    });
+    expect(() => service.assertDirectAccessAdmission()).not.toThrow();
+    await expect(service.probeDirect(directProbeCommand)).rejects.toThrow(
+      "Direct route is unavailable",
+    );
+    await service.handleServerMoved({
+      source: "message",
+      serverUrl: fixture.options.serverUrl,
+      headers: { "x-omnyo-direct-proof": directProbeCommand.challenge },
+    });
+    await expect(
+      service.releaseDirectProbe({
+        type: "server_access.release_direct_probe",
+        challenge: directProbeCommand.challenge,
+      }),
+    ).rejects.toThrow("owner does not match or is committed");
+    expect(() => service.assertDirectAccessAdmission()).toThrow(
+      "Worker admission is held",
+    );
+  });
+
+  it("allows only read-only probe inspection while held and reports actual owner/session linkage", async () => {
+    const fixture = await createFixture();
+    let sessionId = "worker-session-at-probe";
+
+    const service = fixture.createService({
+      instanceId: "worker-instance",
+      getServerSessionId: () => sessionId,
+      getDirectAccessActivity: () => idleDirectActivity,
+      fetchFn: async () => {
+        throw new Error("Direct route is unavailable");
+      },
+    });
+
+    const absent = {
+      hostId: fixture.options.hostId,
+      workerInstanceId: "worker-instance",
+      sessionId,
+      probe: null,
+    };
+
+    await expect(service.inspectDirectProbe()).resolves.toEqual(absent);
+    await expect(service.probeDirect(directProbeCommand)).rejects.toThrow(
+      "Direct route is unavailable",
+    );
+    expect(() =>
+      service.assertDirectAccessAdmission("server_access.inspect_direct_probe"),
+    ).not.toThrow();
+
+    for (const commandType of ["host.paths_exist", "server_move.inspect"])
+      expect(() => service.assertDirectAccessAdmission(commandType)).toThrow(
+        "Worker admission is held",
+      );
+    sessionId = "worker-session-after-reconnect";
+    const uncommitted = await service.inspectDirectProbe();
+    expect(uncommitted).toEqual({
+      ...absent,
+      sessionId,
+      probe: {
+        phase: "uncommitted",
+        ownerFingerprint: createHash("sha256")
+          .update(directProbeCommand.challenge)
+          .digest("hex"),
+        coordinatorInstanceId: directProbeCommand.instanceId,
+        sessionId: "worker-session-at-probe",
+      },
+    });
+    expect(JSON.stringify(uncommitted)).not.toContain(
+      directProbeCommand.challenge,
+    );
+    await service.handleServerMoved({
+      source: "message",
+      serverUrl: fixture.options.serverUrl,
+      headers: { "x-omnyo-direct-proof": directProbeCommand.challenge },
+    });
+    const committed = await service.inspectDirectProbe();
+    expect(committed).toEqual({
+      ...uncommitted,
+      probe: { ...uncommitted.probe, phase: "committed" },
+    });
+    await expect(service.inspectDirectProbe()).resolves.toEqual(committed);
+    expect(() => service.assertDirectAccessAdmission()).toThrow(
+      "Worker admission is held",
+    );
+  });
+});
+
 describe("ServerMoveService.prepare", () => {
-  it("installs bb-app, imports the archive, keeps this machine's credentials, starts the pending server, and answers a repeated prepare with the same server", async () => {
+  it("owns the packaged launcher server child and refuses mismatched endpoint and process identities", async () => {
+    const fixture = await createFixture({ packagedPendingServer: true });
+    const command = await prepareCommand(fixture);
+    const result = await fixture.service.prepare(command);
+
+    const response = await fetch(
+      `${result.localServerUrl}/api/v1/server/maintenance`,
+    );
+
+    const maintenance = maintenanceStatusSchema.parse(await response.json());
+    expect(maintenance.runtime.processId).not.toBe(result.pid);
+    expect(maintenance.runtime.parentProcessId).toBe(result.pid);
+    await expect(fixture.service.prepare(command)).resolves.toEqual(result);
+    expect(fixture.source.archiveRequests).toHaveLength(1);
+
+    for (const identity of [
+      { runtime: { parentProcessId: process.pid } },
+      { runtime: { launchId: "wrong-launch" } },
+      { moveId: "wrong-move" },
+      { runtime: { dataDir: fixture.root } },
+    ]) {
+      await writeFile(
+        join(fixture.dataDir, "pending-identity.json"),
+        JSON.stringify(identity),
+      );
+      await expect(
+        fixture.service.abort({ type: "server_move.abort", moveId: MOVE_ID }),
+      ).rejects.toThrow(
+        "Pending process endpoint ownership identity does not match",
+      );
+      expect(isProcessGroupAlive(result.pid)).toBe(true);
+      expect(await exists(join(fixture.dataDir, "app.db"))).toBe(true);
+    }
+
+    await writeFile(join(fixture.dataDir, "pending-identity.json"), "{}");
+    const state = await readIncomingMoveState(fixture.dataDir, MOVE_ID);
+
+    if (state?.pendingServer == null || state.pendingServer.startedAt == null)
+      throw new Error("Pending process receipt is missing");
+    const startedAt = state.pendingServer.startedAt;
+    state.pendingServer.startedAt = startedAt - 60_000;
+    await writeIncomingMoveState(fixture.dataDir, state);
+    await expect(
+      fixture.service.abort({ type: "server_move.abort", moveId: MOVE_ID }),
+    ).rejects.toThrow("Pending process start identity does not match");
+    expect(isProcessGroupAlive(result.pid)).toBe(true);
+    state.pendingServer.startedAt = startedAt;
+    await writeIncomingMoveState(fixture.dataDir, state);
+    await expect(
+      fixture.service.abort({ type: "server_move.abort", moveId: MOVE_ID }),
+    ).resolves.toEqual({ ok: true, moveId: MOVE_ID, fenced: true });
+    expect(isProcessGroupAlive(result.pid)).toBe(false);
+    expect(await exists(join(fixture.dataDir, "app.db"))).toBe(false);
+  });
+
+  it("installs omnyo-app, imports the archive, keeps this machine's credentials, starts the pending server, and answers a repeated prepare with the same server", async () => {
     const installed: Buffer[] = [];
+
     const fixture = await createFixture({
-      installBbApp: async (tarballPath) => {
+      installOmnyoApp: async (tarballPath) => {
         installed.push(await readFile(tarballPath));
       },
     });
+
     await writeFile(
       join(fixture.dataDir, "host-artifact.sha256"),
       "a".repeat(64),
@@ -47,18 +265,30 @@ describe("ServerMoveService.prepare", () => {
     await writeFile(
       join(fixture.dataDir, "config.json"),
       JSON.stringify({
-        serverUrl: "https://bb.example.test",
-        serverHeaders: { "x-bb-connect-machine": "bbcm_target" },
+        serverUrl: "https://omnyo.example.test",
+        serverHeaders: { "x-omnyo-connect-machine": "bbcm_target" },
         machineCredential: "bbcm_target",
         connectMachineId: "machine-target",
       }),
     );
+
+    const identity = await createRuntimeIdentity(fixture.packageRoot, {
+      runtimeVersion: "1.0.0",
+      hostDaemonProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+    });
+
+    await writeFile(
+      join(fixture.packageRoot, "dist", "runtime-identity.json"),
+      JSON.stringify(identity),
+    );
+
     const command = await prepareCommand(fixture, {
-      bbApp: {
-        downloadPath: `/internal/server-move/${MOVE_ID}/bb-app.tgz`,
-        sha256: fixture.source.bbAppSha256,
-        sizeBytes: fixture.source.bbAppSizeBytes,
+      appRuntime: {
+        downloadPath: `/internal/server-move/${MOVE_ID}/app-runtime.tgz`,
+        sha256: fixture.source.omnyoAppSha256,
+        sizeBytes: fixture.source.omnyoAppSizeBytes,
         version: "1.0.0",
+        runtimeSha256: identity.runtimeSha256,
       },
     });
 
@@ -70,12 +300,12 @@ describe("ServerMoveService.prepare", () => {
     });
     expect(isProcessGroupAlive(result.pid)).toBe(true);
     expect(installed.map((bytes) => bytes.toString("utf8"))).toEqual([
-      "full bb-app package",
+      "full omnyo-app package",
     ]);
     expect(await exists(join(fixture.dataDir, "host-artifact.sha256"))).toBe(
       false,
     );
-    expect(await readFile(join(fixture.dataDir, "bb.db"), "utf8")).toBe(
+    expect(await readFile(join(fixture.dataDir, "app.db"), "utf8")).toBe(
       "sqlite database bytes",
     );
     expect(
@@ -85,9 +315,9 @@ describe("ServerMoveService.prepare", () => {
       ),
     ).toBe("attachment");
     expect(await readJson(join(fixture.dataDir, "config.json"))).toEqual({
-      config: { BB_LOG_LEVEL: "info" },
-      serverUrl: "https://bb.example.test",
-      serverHeaders: { "x-bb-connect-machine": "bbcm_target" },
+      config: { OMNYO_LOG_LEVEL: "info" },
+      serverUrl: "https://omnyo.example.test",
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_target" },
       machineCredential: "bbcm_target",
       connectMachineId: "machine-target",
     });
@@ -96,12 +326,12 @@ describe("ServerMoveService.prepare", () => {
       kind: "move",
       moveId: MOVE_ID,
       activationToken: ACTIVATION_TOKEN,
-      sourceDataDir: "/Users/me/.bb",
+      sourceDataDir: "/Users/me/.omnyo",
       sourceServerHostId: "host-source",
       targetHostId: "host-target",
-      serverUrl: "https://bb.example.test",
+      serverUrl: "https://omnyo.example.test",
       importedEntries: expect.arrayContaining([
-        "bb.db",
+        "app.db",
         "config.json",
         "attachments/project/a.txt",
         "plugins/tasks/data.db",
@@ -112,12 +342,12 @@ describe("ServerMoveService.prepare", () => {
     expect(await readServerConnectHoldFile(fixture.dataDir)).toBeNull();
     expect(fixture.launches).toEqual([
       {
-        bbServerEntry: join(fixture.packageRoot, "dist", "bb-server.js"),
+        omnyoServerEntry: join(fixture.packageRoot, "dist", "omnyo-server.js"),
         dataDir: fixture.dataDir,
         serverPort: command.serverPort,
         bindHost: null,
         hostDaemonPort: 38_887,
-        env: expect.objectContaining({ BB_HOST_DAEMON_PORT: "38887" }),
+        env: expect.objectContaining({ OMNYO_HOST_DAEMON_PORT: "38887" }),
         logPath: join(
           fixture.dataDir,
           "logs",
@@ -151,9 +381,11 @@ describe("ServerMoveService.prepare", () => {
 
   it("fails on a digest mismatch and leaves the target data dir untouched", async () => {
     const fixture = await createFixture();
+
     const originalConfig = JSON.stringify({
-      serverUrl: "https://bb.example.test",
+      serverUrl: "https://omnyo.example.test",
     });
+
     await writeFile(join(fixture.dataDir, "config.json"), originalConfig);
     const command = await prepareCommand(fixture);
 
@@ -164,7 +396,7 @@ describe("ServerMoveService.prepare", () => {
       }),
     ).rejects.toMatchObject({ code: "server_move_digest_mismatch" });
 
-    expect(await exists(join(fixture.dataDir, "bb.db"))).toBe(false);
+    expect(await exists(join(fixture.dataDir, "app.db"))).toBe(false);
     expect(await exists(join(fixture.dataDir, "server-import.json"))).toBe(
       false,
     );
@@ -179,40 +411,43 @@ describe("ServerMoveService.prepare", () => {
 
   it("abort stops the pending server, restores config backups, and un-archives standalone data", async () => {
     const fixture = await createFixture();
+
     const originalConfig = {
-      config: { BB_LOG_LEVEL: "debug" },
-      serverUrl: "https://bb.example.test",
+      config: { OMNYO_LOG_LEVEL: "debug" },
+      serverUrl: "https://omnyo.example.test",
       machineCredential: "bbcm_target",
     };
+
     await writeFile(
       join(fixture.dataDir, "config.json"),
       JSON.stringify(originalConfig),
     );
     await writeFileWithDirs(
-      join(fixture.homeDir, ".bb", "bb.db"),
+      join(fixture.homeDir, ".omnyo", "app.db"),
       "standalone server",
     );
+
     const command = await prepareCommand(fixture, {
       archiveExistingServerData: true,
     });
 
     const result = await fixture.service.prepare(command);
-    expect(await exists(join(fixture.homeDir, ".bb"))).toBe(false);
+    expect(await exists(join(fixture.homeDir, ".omnyo"))).toBe(false);
     expect(
       (await readdir(fixture.homeDir)).some((name) =>
-        name.startsWith(".bb.before-move-"),
+        name.startsWith(".omnyo.before-move-"),
       ),
     ).toBe(true);
 
     await expect(
       fixture.service.abort({ type: "server_move.abort", moveId: MOVE_ID }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, moveId: MOVE_ID, fenced: true });
 
     expect(isProcessGroupAlive(result.pid)).toBe(false);
     expect(await readJson(join(fixture.dataDir, "config.json"))).toEqual(
       originalConfig,
     );
-    expect(await exists(join(fixture.dataDir, "bb.db"))).toBe(false);
+    expect(await exists(join(fixture.dataDir, "app.db"))).toBe(false);
     expect(await exists(join(fixture.dataDir, "attachments"))).toBe(false);
     expect(await exists(join(fixture.dataDir, "server-import-backup"))).toBe(
       false,
@@ -223,15 +458,15 @@ describe("ServerMoveService.prepare", () => {
     expect(await exists(join(fixture.dataDir, "server-move-incoming"))).toBe(
       false,
     );
-    expect(await readFile(join(fixture.homeDir, ".bb", "bb.db"), "utf8")).toBe(
-      "standalone server",
-    );
+    expect(
+      await readFile(join(fixture.homeDir, ".omnyo", "app.db"), "utf8"),
+    ).toBe("standalone server");
     await expect(
       fixture.service.abort({ type: "server_move.abort", moveId: MOVE_ID }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, moveId: MOVE_ID, fenced: true });
   });
 
-  it("abort removes a bb connect hold left beside the imported server", async () => {
+  it("abort removes a legacy Connect hold left beside the imported server", async () => {
     const fixture = await createFixture();
     await fixture.service.prepare(await prepareCommand(fixture));
     await writeServerConnectHoldFile(fixture.dataDir, {
@@ -242,34 +477,35 @@ describe("ServerMoveService.prepare", () => {
 
     await expect(
       fixture.service.abort({ type: "server_move.abort", moveId: MOVE_ID }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, moveId: MOVE_ID, fenced: true });
 
-    expect(await exists(join(fixture.dataDir, "bb.db"))).toBe(false);
+    expect(await exists(join(fixture.dataDir, "app.db"))).toBe(false);
     expect(await readServerConnectHoldFile(fixture.dataDir)).toBeNull();
   });
 
-  it("refuses to archive ~/.bb while bb is running from it", async () => {
+  it("refuses to archive ~/.omnyo while Omnyo is running from it", async () => {
     const fixture = await createFixture();
     await writeFileWithDirs(
-      join(fixture.homeDir, ".bb", "bb.db"),
+      join(fixture.homeDir, ".omnyo", "app.db"),
       "standalone server",
     );
-    await writeBbAppRuntime({
-      dataDir: join(fixture.homeDir, ".bb"),
+    await writeOmnyoAppRuntime({
+      dataDir: join(fixture.homeDir, ".omnyo"),
       serverPort: 38_886,
     });
+
     const command = await prepareCommand(fixture, {
       archiveExistingServerData: true,
     });
 
     await expect(fixture.service.prepare(command)).rejects.toMatchObject({
       code: "server_move_rejected",
-      message: `bb is running from ${join(fixture.homeDir, ".bb")} on this machine (pid ${process.pid}). Quit bb there first, then start the move again.`,
+      message: `Omnyo is running from ${join(fixture.homeDir, ".omnyo")} on this machine (pid ${process.pid}). Quit Omnyo there first, then start the move again.`,
     });
     expect(fixture.source.archiveRequests).toEqual([]);
-    expect(await readFile(join(fixture.homeDir, ".bb", "bb.db"), "utf8")).toBe(
-      "standalone server",
-    );
+    expect(
+      await readFile(join(fixture.homeDir, ".omnyo", "app.db"), "utf8"),
+    ).toBe("standalone server");
 
     const stopped = await createFixture({
       processOps: {
@@ -280,12 +516,13 @@ describe("ServerMoveService.prepare", () => {
         }),
       },
     });
+
     await writeFileWithDirs(
-      join(stopped.homeDir, ".bb", "bb.db"),
+      join(stopped.homeDir, ".omnyo", "app.db"),
       "standalone server",
     );
-    await writeBbAppRuntime({
-      dataDir: join(stopped.homeDir, ".bb"),
+    await writeOmnyoAppRuntime({
+      dataDir: join(stopped.homeDir, ".omnyo"),
       serverPort: 38_886,
     });
     await expect(
@@ -293,7 +530,7 @@ describe("ServerMoveService.prepare", () => {
         await prepareCommand(stopped, { archiveExistingServerData: true }),
       ),
     ).resolves.toMatchObject({ pid: expect.any(Number) });
-    expect(await exists(join(stopped.homeDir, ".bb"))).toBe(false);
+    expect(await exists(join(stopped.homeDir, ".omnyo"))).toBe(false);
   });
 });
 
@@ -302,6 +539,7 @@ describe("ServerMoveService in launcher-managed moved mode", () => {
     const fixture = await createFixture({
       checkPortAvailable: async () => false,
     });
+
     await writeLauncherMovedMode({
       dataDir: fixture.dataDir,
       serverPort: 38_886,
@@ -328,7 +566,7 @@ describe("ServerMoveService in launcher-managed moved mode", () => {
       movedFile: true,
     },
     {
-      name: "the recorded pid is not bb-app",
+      name: "the recorded pid is not omnyo-app",
       processOps: {
         isRunning: () => true,
         readIdentity: async () => ({
@@ -350,10 +588,12 @@ describe("ServerMoveService in launcher-managed moved mode", () => {
         checkPortAvailable: async () => false,
         processOps,
       });
+
       await writeLauncherMovedMode({
         dataDir: fixture.dataDir,
         serverPort: 38_886,
       });
+
       if (!movedFile) {
         await rm(join(fixture.dataDir, "server-moved.json"));
       }
@@ -378,10 +618,12 @@ describe("ServerMoveService in launcher-managed moved mode", () => {
         if (fixture === null) {
           throw new Error("Expected the fixture");
         }
+
         portChecks.push(
           await exists(join(fixture.dataDir, "server-import.json")),
         );
         busyChecks -= 1;
+
         return busyChecks < 0;
       },
     });
@@ -407,6 +649,7 @@ describe("ServerMoveService in launcher-managed moved mode", () => {
     const fixture = await createFixture({
       checkPortAvailable: async () => false,
     });
+
     const command = await prepareCommand(fixture);
     await writeLauncherMovedMode({
       dataDir: fixture.dataDir,
@@ -424,7 +667,7 @@ describe("ServerMoveService in launcher-managed moved mode", () => {
     expect(await exists(join(fixture.dataDir, "server-import.json"))).toBe(
       false,
     );
-    expect(await exists(join(fixture.dataDir, "bb.db"))).toBe(false);
+    expect(await exists(join(fixture.dataDir, "app.db"))).toBe(false);
     expect(await exists(join(fixture.dataDir, "server-moved.json"))).toBe(true);
     expect(await exists(join(fixture.dataDir, "server-move-incoming"))).toBe(
       false,
@@ -435,7 +678,7 @@ describe("ServerMoveService in launcher-managed moved mode", () => {
 describe("ServerMoveService own data dir guards", () => {
   it("blocks while an old server copy is still listed, then clears after delete_old_copy", async () => {
     const fixture = await createFixture();
-    await writeFile(join(fixture.dataDir, "bb.db"), "old server");
+    await writeFile(join(fixture.dataDir, "app.db"), "old server");
     await writeFileWithDirs(
       join(fixture.dataDir, "attachments", "a.txt"),
       "old attachment",
@@ -443,8 +686,9 @@ describe("ServerMoveService own data dir guards", () => {
     await writeLauncherMovedMode({
       dataDir: fixture.dataDir,
       serverPort: 38_886,
-      oldCopyEntries: ["bb.db", "attachments"],
+      oldCopyEntries: ["app.db", "attachments"],
     });
+
     const inspect = () =>
       fixture.service.inspect({
         type: "server_move.inspect",
@@ -453,7 +697,7 @@ describe("ServerMoveService own data dir guards", () => {
       });
 
     expect((await inspect()).dataDirHasServerData).toBe(true);
-    await rm(join(fixture.dataDir, "bb.db"));
+    await rm(join(fixture.dataDir, "app.db"));
     expect((await inspect()).dataDirHasServerData).toBe(true);
 
     await expect(fixture.service.deleteOldCopy()).resolves.toEqual({
@@ -468,6 +712,7 @@ describe("ServerMoveService own data dir guards", () => {
       join(fixture.dataDir, "server-import-backup", "config.json"),
       "{}",
     );
+
     const inspect = () =>
       fixture.service.inspect({
         type: "server_move.inspect",
@@ -486,12 +731,14 @@ describe("ServerMoveService own data dir guards", () => {
   it("rolls back an import that crashed before the move recorded it, so the next prepare succeeds", async () => {
     const fixture = await createFixture();
     const { dataDir } = fixture;
+
     const originalConfig = {
-      config: { BB_LOG_LEVEL: "debug" },
-      serverUrl: "https://bb.example.test",
+      config: { OMNYO_LOG_LEVEL: "debug" },
+      serverUrl: "https://omnyo.example.test",
       machineCredential: "bbcm_target",
     };
-    await writeFileWithDirs(join(dataDir, "bb.db"), "crashed import database");
+
+    await writeFileWithDirs(join(dataDir, "app.db"), "crashed import database");
     await writeFileWithDirs(
       join(dataDir, "attachments", "crashed", "a.txt"),
       "crashed attachment",
@@ -499,7 +746,7 @@ describe("ServerMoveService own data dir guards", () => {
     await writeFileWithDirs(
       join(dataDir, "config.json"),
       JSON.stringify({
-        config: { BB_LOG_LEVEL: "info" },
+        config: { OMNYO_LOG_LEVEL: "info" },
         serverUrl: "http://127.0.0.1:39999",
       }),
     );
@@ -511,7 +758,7 @@ describe("ServerMoveService own data dir guards", () => {
       join(dataDir, "server-import-journal.json"),
       JSON.stringify({
         version: 1,
-        entries: ["attachments/crashed/a.txt", "config.json", "bb.db"],
+        entries: ["attachments/crashed/a.txt", "config.json", "app.db"],
         preexistingEntries: ["config.json"],
       }),
     );
@@ -524,6 +771,7 @@ describe("ServerMoveService own data dir guards", () => {
       importedEntries: null,
       archivedServerData: null,
       pendingServer: null,
+      runtime: null,
       preparedAt: null,
       activation: null,
     });
@@ -533,6 +781,7 @@ describe("ServerMoveService own data dir guards", () => {
       paths: [],
       port: 38_886,
     });
+
     expect(inspected.dataDirHasServerData).toBe(false);
 
     await expect(
@@ -546,15 +795,15 @@ describe("ServerMoveService own data dir guards", () => {
     expect(await exists(join(dataDir, "server-import-journal.json"))).toBe(
       false,
     );
-    expect(await readFile(join(dataDir, "bb.db"), "utf8")).toBe(
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe(
       "sqlite database bytes",
     );
     expect(
       await readJson(join(dataDir, "server-import-backup", "config.json")),
     ).toEqual(originalConfig);
     expect(await readJson(join(dataDir, "config.json"))).toEqual({
-      config: { BB_LOG_LEVEL: "info" },
-      serverUrl: "https://bb.example.test",
+      config: { OMNYO_LOG_LEVEL: "info" },
+      serverUrl: "https://omnyo.example.test",
       machineCredential: "bbcm_target",
     });
   });
@@ -562,7 +811,7 @@ describe("ServerMoveService own data dir guards", () => {
   it("rolls back a crashed manual import in this data directory so it doesn't block a move", async () => {
     const fixture = await createFixture();
     const { dataDir } = fixture;
-    await writeFileWithDirs(join(dataDir, "bb.db"), "half-imported database");
+    await writeFileWithDirs(join(dataDir, "app.db"), "half-imported database");
     await writeFileWithDirs(
       join(dataDir, "attachments", "project", "a.txt"),
       "half-imported attachment",
@@ -571,7 +820,7 @@ describe("ServerMoveService own data dir guards", () => {
       join(dataDir, "server-import-journal.json"),
       JSON.stringify({
         version: 1,
-        entries: ["attachments/project/a.txt", "bb.db"],
+        entries: ["attachments/project/a.txt", "app.db"],
         preexistingEntries: [],
       }),
     );
@@ -581,13 +830,14 @@ describe("ServerMoveService own data dir guards", () => {
       paths: [],
       port: 38_886,
     });
+
     expect(inspected.dataDirHasServerData).toBe(false);
 
     await expect(
       fixture.service.prepare(await prepareCommand(fixture)),
     ).resolves.toMatchObject({ pid: expect.any(Number) });
 
-    expect(await readFile(join(dataDir, "bb.db"), "utf8")).toBe(
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe(
       "sqlite database bytes",
     );
     expect(
@@ -598,15 +848,15 @@ describe("ServerMoveService own data dir guards", () => {
     );
   });
 
-  it("removes the bb connect hold of an interrupted manual import it rolls back before a move", async () => {
+  it("removes the legacy Connect hold of an interrupted manual import it rolls back before a move", async () => {
     const fixture = await createFixture();
     const { dataDir } = fixture;
-    await writeFileWithDirs(join(dataDir, "bb.db"), "half-imported database");
+    await writeFileWithDirs(join(dataDir, "app.db"), "half-imported database");
     await writeFileWithDirs(
       join(dataDir, "server-import-journal.json"),
       JSON.stringify({
         version: 1,
-        entries: ["bb.db"],
+        entries: ["app.db"],
         preexistingEntries: [],
       }),
     );
@@ -620,7 +870,7 @@ describe("ServerMoveService own data dir guards", () => {
       fixture.service.prepare(await prepareCommand(fixture)),
     ).resolves.toMatchObject({ pid: expect.any(Number) });
 
-    expect(await readFile(join(dataDir, "bb.db"), "utf8")).toBe(
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe(
       "sqlite database bytes",
     );
     expect(await readServerConnectHoldFile(dataDir)).toBeNull();
@@ -629,8 +879,8 @@ describe("ServerMoveService own data dir guards", () => {
   it("keeps a finished manual import whose journal outlived its marker and refuses the move", async () => {
     const fixture = await createFixture();
     const { dataDir } = fixture;
-    const importedEntries = ["attachments/project/a.txt", "bb.db"];
-    await writeFileWithDirs(join(dataDir, "bb.db"), "imported database");
+    const importedEntries = ["attachments/project/a.txt", "app.db"];
+    await writeFileWithDirs(join(dataDir, "app.db"), "imported database");
     await writeFileWithDirs(
       join(dataDir, "attachments", "project", "a.txt"),
       "imported attachment",
@@ -648,7 +898,7 @@ describe("ServerMoveService own data dir guards", () => {
       kind: "manual",
       moveId: null,
       activationToken: null,
-      sourceDataDir: "/Users/me/.bb",
+      sourceDataDir: "/Users/me/.omnyo",
       sourceServerHostId: "host-source",
       targetHostId: null,
       serverUrl: null,
@@ -667,13 +917,14 @@ describe("ServerMoveService own data dir guards", () => {
       paths: [],
       port: 38_886,
     });
+
     expect(inspected.dataDirHasServerData).toBe(true);
 
     await expect(
       fixture.service.prepare(await prepareCommand(fixture)),
     ).rejects.toMatchObject({ code: "server_move_archive_server_data_exists" });
 
-    expect(await readFile(join(dataDir, "bb.db"), "utf8")).toBe(
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe(
       "imported database",
     );
     expect(
@@ -690,10 +941,10 @@ describe("ServerMoveService own data dir guards", () => {
     expect(fixture.launches).toEqual([]);
   });
 
-  it("hides ~/.bb when it is this daemon's data dir and refuses to archive it", async () => {
+  it("hides ~/.omnyo when it is this daemon's data dir and refuses to archive it", async () => {
     const fixture = await createFixture();
-    await writeFile(join(fixture.dataDir, "bb.db"), "old server");
-    await symlink(fixture.dataDir, join(fixture.homeDir, ".bb"));
+    await writeFile(join(fixture.dataDir, "app.db"), "old server");
+    await symlink(fixture.dataDir, join(fixture.homeDir, ".omnyo"));
 
     const result = await fixture.service.inspect({
       type: "server_move.inspect",
@@ -703,9 +954,11 @@ describe("ServerMoveService own data dir guards", () => {
 
     expect(result.existingServerData).toBeNull();
     expect(result.dataDirHasServerData).toBe(true);
+
     const command = await prepareCommand(fixture, {
       archiveExistingServerData: true,
     });
+
     await expect(fixture.service.prepare(command)).rejects.toMatchObject({
       code: "server_move_rejected",
       message: "The target's own data directory cannot be archived",
@@ -716,10 +969,10 @@ describe("ServerMoveService own data dir guards", () => {
     );
     expect(
       (await readdir(fixture.homeDir)).filter((name) =>
-        name.startsWith(".bb.before-move-"),
+        name.startsWith(".omnyo.before-move-"),
       ),
     ).toEqual([]);
-    expect(await readFile(join(fixture.dataDir, "bb.db"), "utf8")).toBe(
+    expect(await readFile(join(fixture.dataDir, "app.db"), "utf8")).toBe(
       "old server",
     );
   });
@@ -729,9 +982,10 @@ describe("ServerMoveService.deleteOldCopy", () => {
   it("deletes only the listed old server entries and keeps the lock", async () => {
     const fixture = await createFixture();
     const { dataDir } = fixture;
+
     for (const file of [
-      "bb.db",
-      "bb.db-wal",
+      "app.db",
+      "app.db-wal",
       "attachments/project/a.txt",
       "plugins/tasks/data.db",
       "plugins/tasks/host-data/cache.json",
@@ -746,6 +1000,7 @@ describe("ServerMoveService.deleteOldCopy", () => {
         file === "config.json" ? "{}" : "content",
       );
     }
+
     const marker = {
       version: 1 as const,
       moveId: MOVE_ID,
@@ -756,8 +1011,9 @@ describe("ServerMoveService.deleteOldCopy", () => {
       serverUrl: "https://studio.example.test",
       mode: "direct" as const,
       connectHandle: null,
-      oldCopyEntries: ["bb.db", "attachments", "plugins/tasks/data.db"],
+      oldCopyEntries: ["app.db", "attachments", "plugins/tasks/data.db"],
     };
+
     await writeServerMovedFile(dataDir, marker);
 
     await expect(fixture.service.deleteOldCopy()).resolves.toEqual({
@@ -765,13 +1021,14 @@ describe("ServerMoveService.deleteOldCopy", () => {
     });
 
     for (const removed of [
-      "bb.db",
-      "bb.db-wal",
+      "app.db",
+      "app.db-wal",
       "attachments",
       "plugins/tasks/data.db",
     ]) {
       expect(await exists(join(dataDir, ...removed.split("/")))).toBe(false);
     }
+
     for (const kept of [
       "plugins/tasks/host-data/cache.json",
       "skills/review/SKILL.md",
@@ -782,6 +1039,7 @@ describe("ServerMoveService.deleteOldCopy", () => {
     ]) {
       expect(await exists(join(dataDir, ...kept.split("/")))).toBe(true);
     }
+
     expect(await readServerMovedFile(dataDir)).toEqual({
       ...marker,
       oldCopyEntries: [],
@@ -793,21 +1051,25 @@ describe("ServerMoveService.deleteOldCopy", () => {
 
   it("reports nothing deleted when this data dir has no moved-server lock", async () => {
     const fixture = await createFixture();
-    await writeFile(join(fixture.dataDir, "bb.db"), "content");
+    await writeFile(join(fixture.dataDir, "app.db"), "content");
 
     await expect(fixture.service.deleteOldCopy()).resolves.toEqual({
       deleted: false,
     });
-    expect(await exists(join(fixture.dataDir, "bb.db"))).toBe(true);
+    expect(await exists(join(fixture.dataDir, "app.db"))).toBe(true);
   });
 });
 
 describe("ServerMoveService.inspect and probe", () => {
   it("reports the target machine's server-move readiness", async () => {
     const fixture = await createFixture({
-      env: { BB_SERVER_MOVE_SERVICE_MANAGER: "none", BB_APP_VERSION: "1.2.3" },
+      env: {
+        OMNYO_SERVER_MOVE_SERVICE_MANAGER: "none",
+        OMNYO_APP_VERSION: "1.2.3",
+      },
     });
-    await writeFileWithDirs(join(fixture.homeDir, ".bb", "bb.db"), "12345");
+
+    await writeFileWithDirs(join(fixture.homeDir, ".omnyo", "app.db"), "12345");
     await writeFileWithDirs(join(fixture.homeDir, ".codex", "auth.json"), "{}");
     await writeFileWithDirs(join(fixture.homeDir, "tools", "bin", "gh"), "");
 
@@ -828,9 +1090,12 @@ describe("ServerMoveService.inspect and probe", () => {
       dataDir: fixture.dataDir,
       platform: "linux",
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      bbAppVersion: "1.2.3",
+      coreVersion: "1.2.3",
       serverEntryAvailable: true,
-      existingServerData: { path: join(fixture.homeDir, ".bb"), sizeBytes: 5 },
+      existingServerData: {
+        path: join(fixture.homeDir, ".omnyo"),
+        sizeBytes: 5,
+      },
       dataDirHasServerData: false,
       portAvailable: true,
       ghAuthenticated: null,
@@ -850,6 +1115,7 @@ describe("ServerMoveService.inspect and probe", () => {
   it("requires the new address to answer for this move and reports its state", async () => {
     const fixture = await createFixture();
     const health = { state: "pending" };
+
     const { url } = await listen((_request, response) => {
       response.setHeader("content-type", "application/json");
       response.end(
@@ -859,6 +1125,7 @@ describe("ServerMoveService.inspect and probe", () => {
         }),
       );
     });
+
     const closedPort = await freePort();
 
     await expect(
@@ -887,11 +1154,13 @@ describe("ServerMoveService.inspect and probe", () => {
       message: `${url} answered for a different server move`,
       state: null,
     });
+
     const unreachable = await fixture.service.probe({
       type: "server_move.probe",
       url: `http://127.0.0.1:${closedPort}`,
       moveId: MOVE_ID,
     });
+
     expect(unreachable.reachable).toBe(false);
     expect(unreachable.state).toBeNull();
     expect(unreachable.message).toContain(

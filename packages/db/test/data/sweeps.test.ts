@@ -11,13 +11,16 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup() {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   return { db, host, project };
 }
 
@@ -37,6 +40,7 @@ describe("pruneClosedSessions", () => {
       heartbeatIntervalMs: 10_000,
       leaseTimeoutMs: 30_000,
     });
+
     args.db
       .update(hostDaemonSessions)
       .set({
@@ -47,6 +51,7 @@ describe("pruneClosedSessions", () => {
       })
       .where(eq(hostDaemonSessions.id, session.id))
       .run();
+
     return session.id;
   }
 
@@ -60,12 +65,14 @@ describe("pruneClosedSessions", () => {
       hostId: host.id,
       instanceId: "inst-stale",
     });
+
     const fresh = openClosedSessionAt({
       closedAt: now - 1_000,
       db,
       hostId: host.id,
       instanceId: "inst-fresh",
     });
+
     const active = openSession(db, {
       hostId: host.id,
       instanceId: "inst-active",

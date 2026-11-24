@@ -20,6 +20,7 @@ describe("Cursor parameterized model selection", () => {
         ].join("\n"),
       ),
     );
+
     if (catalog === null) {
       throw new Error("expected Cursor model catalog");
     }
@@ -48,6 +49,7 @@ describe("Cursor parameterized model selection", () => {
         ].join("\n"),
       ),
     );
+
     if (catalog === null) {
       throw new Error("expected Cursor model catalog");
     }
@@ -80,6 +82,7 @@ describe("Cursor parameterized model selection", () => {
         ].join("\n"),
       ),
     );
+
     if (catalog === null) {
       throw new Error("expected Cursor model catalog");
     }

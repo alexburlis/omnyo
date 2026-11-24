@@ -12,9 +12,11 @@ export function resolveStoredPath(homeDir: string, storedPath: string): string {
   if (storedPath === "~") {
     return homeDir;
   }
+
   if (storedPath.startsWith("~/")) {
     return path.join(homeDir, storedPath.slice(2));
   }
+
   return path.resolve(homeDir, storedPath);
 }
 
@@ -24,6 +26,7 @@ export function resolveConfiguredHomeDirectory(
   ...defaultSegments: string[]
 ): string {
   const trimmed = configured?.trim();
+
   return trimmed
     ? resolveStoredPath(homeDir, trimmed)
     : path.join(homeDir, ...defaultSegments);
@@ -39,12 +42,15 @@ export function expandConfiguredPath(
     (match, bracedName: string | undefined, plainName: string | undefined) =>
       env[bracedName ?? plainName ?? ""] ?? match,
   );
+
   if (expandedEnvironment === "~") {
     return homeDir;
   }
+
   if (expandedEnvironment.startsWith("~/")) {
     return path.join(homeDir, expandedEnvironment.slice(2));
   }
+
   return expandedEnvironment;
 }
 
@@ -59,6 +65,7 @@ export function resolveConfiguredPath(args: {
     args.env,
     args.value.trim(),
   );
+
   return path.resolve(args.basePath, expanded);
 }
 
@@ -75,6 +82,7 @@ export async function readParsedFile<T>(
   schema: z.ZodType<T>,
 ): Promise<T | null> {
   let content: string;
+
   try {
     content = await fs.readFile(filePath, "utf8");
   } catch {
@@ -82,12 +90,15 @@ export async function readParsedFile<T>(
   }
 
   let value: unknown;
+
   try {
     value = parse(content);
   } catch {
     return null;
   }
+
   const parsed = schema.safeParse(value);
+
   return parsed.success ? parsed.data : null;
 }
 
@@ -96,6 +107,7 @@ export function isPathWithinDirectory(
   candidatePath: string,
 ): boolean {
   const relativePath = path.relative(directoryPath, candidatePath);
+
   return (
     relativePath === "" ||
     (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
@@ -105,6 +117,7 @@ export function isPathWithinDirectory(
 async function hasProjectRootMarker(directoryPath: string): Promise<boolean> {
   try {
     await fs.lstat(path.join(directoryPath, ".git"));
+
     return true;
   } catch {
     return false;
@@ -117,20 +130,26 @@ export async function resolveProjectAncestorDirectories(cwd: string): Promise<{
 }> {
   const directories: string[] = [];
   let directoryPath = cwd;
+
   while (true) {
     directories.push(directoryPath);
+
     if (await hasProjectRootMarker(directoryPath)) {
       break;
     }
+
     const parentPath = path.dirname(directoryPath);
+
     if (parentPath === directoryPath) {
       directories.splice(1);
       break;
     }
+
     directoryPath = parentPath;
   }
 
   const projectRootPath = directories.at(-1) ?? cwd;
+
   return { directories: directories.reverse(), projectRootPath };
 }
 
@@ -178,6 +197,7 @@ export function configuredSkillRoot(args: {
       shape: "skill-file",
     };
   }
+
   return skillsRoot({
     origin: args.origin,
     path: args.skillPath,

@@ -30,14 +30,16 @@ function collectSidebarThreadTargets(
   root: HTMLElement | null,
   limit: number,
   includeWindowedPlaceholders: boolean,
+  rowSelector = SIDEBAR_THREAD_SHORTCUT_TARGET_SELECTOR,
 ): SidebarThreadShortcutTarget[] {
   if (!root) {
     return [];
   }
 
   const selector = includeWindowedPlaceholders
-    ? `${SIDEBAR_THREAD_SHORTCUT_TARGET_SELECTOR}, [${SIDEBAR_WINDOWED_NAV_ATTRIBUTE}]`
-    : SIDEBAR_THREAD_SHORTCUT_TARGET_SELECTOR;
+    ? `${rowSelector}, [${SIDEBAR_WINDOWED_NAV_ATTRIBUTE}]`
+    : rowSelector;
+
   const elements = root.querySelectorAll<HTMLElement>(selector);
   const targets: SidebarThreadShortcutTarget[] = [];
 
@@ -48,11 +50,14 @@ function collectSidebarThreadTargets(
     ) {
       continue;
     }
+
     if (element instanceof HTMLAnchorElement) {
       const threadId = element.dataset.sidebarThreadId;
+
       if (!threadId) {
         continue;
       }
+
       targets.push({
         element,
         key: String(targets.length + 1),
@@ -61,25 +66,31 @@ function collectSidebarThreadTargets(
       });
     } else {
       const encoded = element.getAttribute(SIDEBAR_WINDOWED_NAV_ATTRIBUTE);
+
       if (!encoded) {
         continue;
       }
+
       for (const pair of encoded.split(" ")) {
         const separator = pair.indexOf(":");
+
         if (separator <= 0 || separator === pair.length - 1) {
           continue;
         }
+
         targets.push({
           element: null,
           key: String(targets.length + 1),
           threadId: pair.slice(0, separator),
           projectId: pair.slice(separator + 1),
         });
+
         if (targets.length === limit) {
           break;
         }
       }
     }
+
     if (targets.length === limit) {
       break;
     }
@@ -98,6 +109,23 @@ export function getSidebarThreadNavigationTargets(
   root: HTMLElement | null,
 ): SidebarThreadShortcutTarget[] {
   return collectSidebarThreadTargets(root, Number.POSITIVE_INFINITY, true);
+}
+
+export function getInboxThreadNavigationTargets(
+  root: HTMLElement,
+): SidebarThreadShortcutTarget[] | null {
+  const inbox = Array.from(
+    root.querySelectorAll<HTMLElement>("[data-inbox]"),
+  ).find((element) => element.checkVisibility({ visibilityProperty: true }));
+
+  return inbox
+    ? collectSidebarThreadTargets(
+        inbox,
+        Number.POSITIVE_INFINITY,
+        true,
+        "a[data-feed-item][data-sidebar-thread-id], [data-sidebar-thread-shortcut-target]",
+      )
+    : null;
 }
 
 export function useSidebarThreadShortcut(

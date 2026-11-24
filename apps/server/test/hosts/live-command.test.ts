@@ -1,8 +1,4 @@
-import {
-  createEnvironment,
-  getEnvironment,
-  updateHost,
-} from "@bb/db";
+import { createEnvironment, getEnvironment, updateHost } from "@omnyo/db";
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { replaceMachineEnvironment } from "../../src/services/machines/environment-settings.js";
@@ -12,6 +8,8 @@ import {
   LIVE_DAEMON_COMMAND_TIMEOUT_MS,
   startLiveHostCommand,
   runLiveHostCommand,
+  buildLiveHostCommandFailureReport,
+  expectedLiveHostCommandErrorLogFields,
 } from "../../src/services/hosts/live-command.js";
 import {
   reportQueuedCommandError,
@@ -30,10 +28,13 @@ describe("live host command logging", () => {
         info: vi.fn(),
         warn: vi.fn(),
       };
+
       harness.deps.logger = logger;
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-live-command-expected-error",
       });
+
       const onError = vi.fn();
 
       startLiveHostCommand(harness.deps, {
@@ -52,6 +53,7 @@ describe("live host command logging", () => {
         harness,
         ({ command }) => command.type === "thread.rename",
       );
+
       await reportQueuedCommandError(harness, queued, {
         errorCode: "provision_cancelled",
         errorMessage: "Workspace provisioning was cancelled",
@@ -79,14 +81,17 @@ describe("live host command logging", () => {
 it("preserves provisioning when the host transport disappears", async () => {
   await withTestHarness(async (harness) => {
     const { host } = seedHostSession(harness.deps);
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const environment = createEnvironment(harness.db, harness.hub, {
       projectId: project.id,
       hostId: host.id,
       providerOwnsPath: false,
     });
+
     const command = buildEnvironmentProvisionCommand({
       environmentId: environment.id,
       hostId: host.id,
@@ -94,6 +99,7 @@ it("preserves provisioning when the host transport disappears", async () => {
       path: "/tmp/preserve-disconnected-setup",
       setupScriptTimeoutMs: null,
     });
+
     vi.spyOn(harness.hub, "requestHostOnlineRpc").mockRejectedValue(
       new ApiError(502, "host_unavailable", "Host is not connected"),
     );
@@ -118,14 +124,17 @@ it("resolves fresh setup values at dispatch without retaining them in the reques
     updateHost(harness.db, harness.hub, host.id, {
       machineProviderId: "manual",
     });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const environment = createEnvironment(harness.db, harness.hub, {
       projectId: project.id,
       hostId: host.id,
       providerOwnsPath: true,
     });
+
     const command = buildEnvironmentProvisionCommand({
       environmentId: environment.id,
       hostId: host.id,
@@ -133,7 +142,9 @@ it("resolves fresh setup values at dispatch without retaining them in the reques
       path: "/tmp/setup-values",
       setupScriptTimeoutMs: 1000,
     });
+
     const original = JSON.stringify(command);
+
     const request = vi
       .spyOn(harness.hub, "requestHostOnlineRpc")
       .mockImplementation(async ({ message }) => ({
@@ -149,8 +160,9 @@ it("resolves fresh setup values at dispatch without retaining them in the reques
           defaultBranch: null,
         },
       }));
+
     for (const value of ["first-secret", "refreshed-secret"]) {
-      await replaceMachineEnvironment(harness.db, harness.config.dataDir, {
+      await replaceMachineEnvironment(harness.db, harness.deps.vault, {
         variables: [{ name: "SETUP_VALUE", value, note: null }],
       });
       await runLiveHostCommand(harness.deps, {
@@ -173,6 +185,7 @@ it("resolves fresh setup values at dispatch without retaining them in the reques
         ),
       ).not.toContain(value);
     }
+
     await runLiveHostCommand(harness.deps, {
       command: { ...command, setupScriptTimeoutMs: null },
       hostId: host.id,
@@ -204,19 +217,23 @@ it("fails provisioning if saved setup variables cannot be decrypted", async () =
     updateHost(harness.db, harness.hub, host.id, {
       machineProviderId: "manual",
     });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const environment = createEnvironment(harness.db, harness.hub, {
       projectId: project.id,
       hostId: host.id,
       providerOwnsPath: true,
     });
-    await replaceMachineEnvironment(harness.db, harness.config.dataDir, {
+
+    await replaceMachineEnvironment(harness.db, harness.deps.vault, {
       variables: [{ name: "SETUP_VALUE", value: "private-value", note: null }],
     });
     await rm(join(harness.config.dataDir, "machine-environment-key"));
     const request = vi.spyOn(harness.hub, "requestHostOnlineRpc");
+
     const command = buildEnvironmentProvisionCommand({
       environmentId: environment.id,
       hostId: host.id,
@@ -224,6 +241,7 @@ it("fails provisioning if saved setup variables cannot be decrypted", async () =
       path: "/tmp/setup-values",
       setupScriptTimeoutMs: 1000,
     });
+
     await expect(
       runLiveHostCommand(harness.deps, {
         command,
@@ -234,4 +252,44 @@ it("fails provisioning if saved setup variables cannot be decrypted", async () =
     expect(request).not.toHaveBeenCalled();
     expect(getEnvironment(harness.db, environment.id)?.status).toBe("error");
   });
+});
+
+it("keeps structured quota metadata through live command reports and expected-failure logging", () => {
+  const errorInfo = {
+    category: "rate-limit",
+    providerCode: "usage_limit_reached",
+    httpStatusCode: 429,
+  };
+
+  const error = new ApiError(502, "command_failed", "Quota exhausted", {
+    details: { errorInfo },
+  });
+
+  const report = buildLiveHostCommandFailureReport({
+    command: {
+      type: "thread.rename",
+      environmentId: "environment",
+      threadId: "thread",
+      title: "title",
+    },
+    completedAt: 1,
+    execution: { id: "execution", hostId: "host", createdAt: 0 },
+    error,
+  });
+
+  expect(report).toMatchObject({ errorInfo });
+  expect(expectedLiveHostCommandErrorLogFields(error)).not.toBeNull();
+  expect(
+    buildLiveHostCommandFailureReport({
+      command: {
+        type: "thread.rename",
+        environmentId: "environment",
+        threadId: "thread",
+        title: "title",
+      },
+      completedAt: 1,
+      execution: { id: "execution", hostId: "host", createdAt: 0 },
+      error: new Error("429 in arbitrary message"),
+    }),
+  ).not.toHaveProperty("errorInfo");
 });

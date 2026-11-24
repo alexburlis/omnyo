@@ -12,13 +12,18 @@ import {
 import { ThreadDetailWorkerPoolProvider } from "./ThreadDetailWorkerPoolProvider";
 
 let finishPoolInitialization: () => void = () => {};
+
 let poolInitialization = Promise.resolve();
+
 const fakePool = {
   kind: "fake-pool",
   initialize: () => poolInitialization,
 } as unknown as WorkerPoolManager;
+
 const acquirePierreWorkerPool = vi.fn((_theme: unknown) => fakePool);
+
 const releasePierreWorkerPool = vi.fn();
+
 const themeSyncMounts = vi.fn();
 
 vi.mock("@/lib/pierre-worker-pool", () => ({
@@ -26,6 +31,7 @@ vi.mock("@/lib/pierre-worker-pool", () => ({
   releasePierreWorkerPool: () => releasePierreWorkerPool(),
   PierreWorkerPoolThemeSync: () => {
     themeSyncMounts();
+
     return null;
   },
 }));
@@ -52,6 +58,7 @@ function PlainPane() {
   useEffect(() => {
     mountCount += 1;
   }, []);
+
   return (
     <div data-testid="plain-pane">
       {pool === undefined ? "no pool" : "pool"}
@@ -61,11 +68,13 @@ function PlainPane() {
 
 function PierreElement() {
   const pool = useWorkerPool();
+
   return <>{pool === fakePool ? "ready with pool" : "ready without pool"}</>;
 }
 
 function DiffConsumer() {
   const ready = useRequirePierreWorkerPool();
+
   return (
     <div data-testid="diff-consumer">
       {ready ? (
@@ -94,6 +103,7 @@ describe("ThreadDetailWorkerPoolProvider", () => {
 
   it("builds the pool once after the first consumer asks, without remounting siblings", async () => {
     mountCount = 0;
+
     const { rerender, unmount } = render(
       <ThreadDetailWorkerPoolProvider>
         <>
@@ -101,6 +111,7 @@ describe("ThreadDetailWorkerPoolProvider", () => {
         </>
       </ThreadDetailWorkerPoolProvider>,
     );
+
     await flushLoad();
     expect(mountCount).toBe(1);
 

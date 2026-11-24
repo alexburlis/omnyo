@@ -1,23 +1,27 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { resolveDataDirSkillsRootPath } from "@bb/config/skill-storage-paths";
+import {
+  resolveDataDirSkillsRootPath,
+  legacyOwnedSkillIdentitySeedV1,
+  assertCanonicalWorkspaceStateV1,
+} from "@omnyo/config/skill-storage-paths";
 import {
   EMPTY_PROVIDER_NATIVE_ROOTS,
   EMPTY_PROVIDER_RESOLVED_NATIVE_ROOTS,
   providerNativeRootsAreEmpty,
   type ProviderNativeRoots,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   DiscoveredSkill,
   HostDaemonOnlineRpcResult,
   SkillRootKind,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   CommandDispatchError,
-  type CommandOf,
   ExpectedCommandDispatchError,
-} from "../command-dispatch-support.js";
+} from "../command-errors.js";
+import type { CommandOf } from "../command-dispatch-support.js";
 import {
   type CommandScanRoot,
   discoverSkills,
@@ -32,38 +36,41 @@ import { writeHostFile } from "./file-write.js";
 
 type SkillRootResolution = DeclaredScanRootResolution;
 
-const SHARED_SKILLS_PROVIDER_ID = "bb-shared";
+const SHARED_SKILLS_PROVIDER_ID = "omnyo-shared";
 
-function createBbSkillScanRoot(
+function createOwnedSkillScanRoot(
   rootPath: string,
-  rootKind: Extract<SkillRootKind, `bb-${string}`>,
+  rootKind: Extract<SkillRootKind, `omnyo-${string}`>,
 ): SkillScanRoot {
   return {
     rootPath,
     shape: "skill",
     namePrefix: "",
     source: "skill",
-    origin: rootKind === "bb-project" ? "project" : "user",
-    identitySeed: rootKind,
+    origin: rootKind === "omnyo-project" ? "project" : "user",
+    identitySeed: legacyOwnedSkillIdentitySeedV1(rootKind),
     rootKind,
   };
 }
 
-function resolveBbSkillScanRoots(
+async function resolveOwnedSkillScanRoots(
   resolution: SkillRootResolution,
-): SkillScanRoot[] {
+): Promise<SkillScanRoot[]> {
   const roots: SkillScanRoot[] = [];
+
   if (
     resolution.cwd !== null &&
     resolution.providerId !== SHARED_SKILLS_PROVIDER_ID
   ) {
+    await assertCanonicalWorkspaceStateV1(resolution.cwd);
     roots.push(
-      createBbSkillScanRoot(
-        path.join(resolution.cwd, ".bb", "skills"),
-        "bb-project",
+      createOwnedSkillScanRoot(
+        path.join(resolution.cwd, ".omnyo", "skills"),
+        "omnyo-project",
       ),
     );
   }
+
   return roots;
 }
 
@@ -74,17 +81,22 @@ function classifySkillRoot(
   if (root.source !== "skill") {
     return null;
   }
+
   if (root.namePrefix !== "") {
     const rootPath = "rootPath" in root ? root.rootPath : root.filePath;
+
     return {
       identitySeed: `plugin:${resolution.providerId}:${root.namePrefix}:${rootPath}`,
       rootKind: "plugin",
     };
   }
+
   if (root.skillIdentitySeed === undefined) {
     return null;
   }
+
   const shared = resolution.providerId === SHARED_SKILLS_PROVIDER_ID;
+
   return {
     identitySeed: root.skillIdentitySeed,
     rootKind: shared
@@ -100,25 +112,31 @@ function classifySkillRoot(
 export async function resolveSkillScanRoots(
   resolution: SkillRootResolution,
 ): Promise<SkillScanRoot[]> {
-  const skillRoots = resolveBbSkillScanRoots(resolution);
+  const skillRoots = await resolveOwnedSkillScanRoots(resolution);
   const providerRoots = await resolveDeclaredScanRoots(resolution);
+
   for (const root of providerRoots) {
     const classification = classifySkillRoot(root, resolution);
+
     if (classification === null) {
       continue;
     }
+
     skillRoots.push({ ...root, ...classification });
   }
+
   return skillRoots;
 }
 
 export async function listSharedSkills(args: {
   cwd: string;
   roots: ProviderNativeRoots;
+  observePath?: (target: string) => Promise<void>;
 }): Promise<DiscoveredSkill[]> {
   if (providerNativeRootsAreEmpty(args.roots)) {
     return [];
   }
+
   const roots = await resolveSkillScanRoots({
     cwd: args.cwd,
     homeDir: os.homedir(),
@@ -129,23 +147,35 @@ export async function listSharedSkills(args: {
       resolved: EMPTY_PROVIDER_RESOLVED_NATIVE_ROOTS,
     },
   });
-  return discoverSkills({ roots });
+
+  if (args.observePath) {
+    for (const root of roots)
+      await args.observePath(
+        "rootPath" in root ? root.rootPath : root.filePath,
+      );
+  }
+
+  return discoverSkills({
+    roots: roots.map((root) => ({ ...root, observePath: args.observePath })),
+  });
 }
 
 export async function listHostSkills(
   command: CommandOf<"host.list_skills">,
-  _options: { dataDir: string },
 ): Promise<HostDaemonOnlineRpcResult<"host.list_skills">> {
   if (command.cwd !== null && !path.isAbsolute(command.cwd)) {
     throw new CommandDispatchError("invalid_path", "cwd must be absolute");
   }
+
   const roots = await resolveSkillScanRoots({
     cwd: command.cwd,
     homeDir: os.homedir(),
     providerId: command.providerId,
     nativeRoots: command.nativeRoots,
   });
+
   const skills = await discoverSkills({ roots });
+
   return { skills };
 }
 
@@ -160,36 +190,44 @@ function isSafeSkillName(name: string): boolean {
   );
 }
 
-function resolveDeletableSkillRoot(
+async function resolveWritableSkillRoot(
   args: {
     scope: CommandOf<"host.delete_skill">["scope"];
     cwd: string | null;
     rootPath: string | null;
   },
   dataDir: string,
-): string {
-  if (args.scope === "bb-user") {
+): Promise<string> {
+  if (args.scope === "omnyo-user") {
     return resolveDataDirSkillsRootPath(dataDir);
   }
-  if (args.scope === "bb-project") {
+
+  if (args.scope === "omnyo-project") {
     const cwd = args.cwd;
+
     if (cwd === null) {
       throw new CommandDispatchError(
         "invalid_path",
-        "cwd is required for a bb-project skill",
+        "cwd is required for an Omnyo project skill",
       );
     }
+
     if (!path.isAbsolute(cwd)) {
       throw new CommandDispatchError("invalid_path", "cwd must be absolute");
     }
-    return path.join(cwd, ".bb", "skills");
+
+    await assertCanonicalWorkspaceStateV1(cwd);
+
+    return path.join(cwd, ".omnyo", "skills");
   }
+
   if (args.rootPath === null || !path.isAbsolute(args.rootPath)) {
     throw new CommandDispatchError(
       "invalid_path",
       "rootPath must be absolute for a provider skill",
     );
   }
+
   return args.rootPath;
 }
 
@@ -211,7 +249,8 @@ export async function deleteHostSkill(
       "Skill name must be a single path segment",
     );
   }
-  const root = resolveDeletableSkillRoot(
+
+  const root = await resolveWritableSkillRoot(
     {
       scope: command.scope,
       cwd: command.cwd,
@@ -219,16 +258,19 @@ export async function deleteHostSkill(
     },
     options.dataDir,
   );
+
   const skillDirPath = path.join(root, command.name);
 
   const realRoot = await realpathOrNull(root);
   const realTarget = await realpathOrNull(skillDirPath);
+
   if (realRoot === null || realTarget === null) {
     throw new ExpectedCommandDispatchError(
       "skill_not_found",
       `Skill "${command.name}" not found`,
     );
   }
+
   if (realTarget !== path.join(realRoot, command.name)) {
     throw new CommandDispatchError(
       "skill_outside_root",
@@ -237,15 +279,18 @@ export async function deleteHostSkill(
   }
 
   const targetStat = await fs.stat(realTarget).catch(() => null);
+
   if (targetStat === null || !targetStat.isDirectory()) {
     throw new ExpectedCommandDispatchError(
       "skill_not_found",
       `Skill "${command.name}" not found`,
     );
   }
+
   const skillFileStat = await fs
     .stat(path.join(realTarget, SKILL_FILE_NAME))
     .catch(() => null);
+
   if (skillFileStat === null || !skillFileStat.isFile()) {
     throw new CommandDispatchError(
       "not_a_skill",
@@ -254,6 +299,7 @@ export async function deleteHostSkill(
   }
 
   await fs.rm(realTarget, { recursive: true, force: false });
+
   return { deletedPath: realTarget };
 }
 
@@ -267,32 +313,39 @@ export async function writeHostSkill(
       "Skill name must be a single path segment",
     );
   }
-  const root = resolveDeletableSkillRoot(
+
+  const root = await resolveWritableSkillRoot(
     { scope: command.scope, cwd: command.cwd, rootPath: null },
     options.dataDir,
   );
+
   const realRoot = await realpathOrNull(root);
   const realTarget = await realpathOrNull(path.join(root, command.name));
+
   if (realRoot === null || realTarget === null) {
     throw new ExpectedCommandDispatchError(
       "skill_not_found",
       `Skill "${command.name}" not found`,
     );
   }
+
   if (realTarget !== path.join(realRoot, command.name)) {
     throw new CommandDispatchError(
       "skill_outside_root",
-      "Refusing to edit a skill that resolves outside its bb root",
+      "Refusing to edit a skill that resolves outside its Omnyo root",
     );
   }
+
   const skillFilePath = path.join(realTarget, SKILL_FILE_NAME);
   const skillFileStat = await fs.stat(skillFilePath).catch(() => null);
+
   if (skillFileStat === null || !skillFileStat.isFile()) {
     throw new ExpectedCommandDispatchError(
       "skill_not_found",
       `Skill "${command.name}" not found`,
     );
   }
+
   const result = await writeHostFile({
     type: "host.write_file",
     path: skillFilePath,
@@ -302,9 +355,11 @@ export async function writeHostSkill(
     createParents: false,
     expectedSha256: command.expectedSha256,
   });
+
   if (result.outcome === "conflict") {
     return result;
   }
+
   return {
     outcome: "written",
     filePath: skillFilePath,

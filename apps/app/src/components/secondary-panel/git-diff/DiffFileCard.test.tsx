@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PluginDiffRendererProps } from "@get-bb/plugin-sdk";
-import type { DiffFileEntry } from "@bb/server-contract";
+import type { PluginDiffRendererProps } from "@omnyo/plugin-sdk";
+import type { DiffFileEntry } from "@omnyo/server-contract";
 import type {
   DiffFileContentsResult,
   RequestDiffFileContents,
@@ -87,7 +87,9 @@ describe("DiffFileCard", () => {
       dataUrl: IMAGE_DATA_URL,
       sizeBytes: 20_480,
     };
+
     const onLoadPatch = vi.fn();
+
     const onRequestFileContents = vi.fn<RequestDiffFileContents>(
       async () => imageResult,
     );
@@ -121,6 +123,7 @@ describe("DiffFileCard", () => {
 
   it("keeps the load gate for non-image binary files", async () => {
     const onLoadPatch = vi.fn();
+
     const onRequestFileContents = vi.fn<RequestDiffFileContents>(async () => ({
       kind: "image",
       dataUrl: IMAGE_DATA_URL,
@@ -140,7 +143,7 @@ describe("DiffFileCard", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Binary file.")).toBeTruthy();
+      expect(screen.getByText("Binary file")).toBeTruthy();
     });
     expect(screen.getByText("Load diff")).toBeTruthy();
     expect(onRequestFileContents).not.toHaveBeenCalled();
@@ -157,6 +160,7 @@ describe("DiffFileCard", () => {
             title: "Demo diffs",
             component: ({ patch, path, view }) => {
               seen.push({ patch, path, view });
+
               return <div data-testid="plugin-diff-body">plugin diff</div>;
             },
           },
@@ -186,12 +190,14 @@ describe("DiffFileCard", () => {
             title: "Demo diffs",
             component: ({ experimental_fullFileContents }) => {
               seen.push(experimental_fullFileContents);
+
               return <div data-testid="plugin-diff-body">plugin diff</div>;
             },
           },
         ],
       }),
     );
+
     const onRequestFileContents = vi.fn<RequestDiffFileContents>(
       async (path, side) => ({
         kind: "text",
@@ -228,6 +234,7 @@ describe("DiffFileCard", () => {
 
   it("falls back to the load gate when an image-looking path is not previewable", async () => {
     const onLoadPatch = vi.fn();
+
     const onRequestFileContents = vi.fn<RequestDiffFileContents>(
       async () => null,
     );
@@ -245,7 +252,7 @@ describe("DiffFileCard", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Binary file.")).toBeTruthy();
+      expect(screen.getByText("Binary file")).toBeTruthy();
     });
     expect(screen.getByText("Load diff")).toBeTruthy();
     expect(onRequestFileContents).toHaveBeenCalledTimes(2);

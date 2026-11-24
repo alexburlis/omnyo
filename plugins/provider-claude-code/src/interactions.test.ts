@@ -4,7 +4,7 @@ import {
   type PendingInteractionResolution,
   type UserQuestionPendingInteractionPayload,
   type UserQuestionPendingInteractionResolution,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import {
   buildClaudeApprovalInteractionPayload,
   buildClaudeInteractiveResponse,
@@ -613,9 +613,11 @@ describe("claude-code interactive requests", () => {
   it("rejects Claude AskUserQuestion responses with duplicate prompts", () => {
     const payload = createClaudeUserQuestionPayload();
     const firstQuestion = payload.questions[0];
+
     if (!firstQuestion) {
       throw new Error("Expected user-question helper to create a question");
     }
+
     const duplicatePromptPayload: UserQuestionPendingInteractionPayload = {
       ...payload,
       questions: [

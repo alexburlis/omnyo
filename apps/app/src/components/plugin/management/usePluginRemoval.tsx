@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ConfirmDeleteDialog,
   ConfirmDeleteDialogContent,
-} from "@bb/shared-ui/confirm-delete-dialog";
+} from "@omnyo/shared-ui/confirm-delete-dialog";
 import {
   pluginIsLocalSource,
   pluginRemovalDescription,
@@ -23,27 +23,27 @@ import {
 export function usePluginRemoval() {
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<PluginListItem | null>(null);
+
   const mutation = useMutation({
     meta: { showErrorToast: false },
     mutationFn: (plugin: PluginListItem) => {
-      if (
-        plugin.provenance === "builtin" ||
-        plugin.source.startsWith("builtin:")
-      ) {
+      if (!plugin.removable) {
         throw new Error("Included plugins cannot be uninstalled.");
       }
+
       return removePlugin(fetch, plugin.id);
     },
     onSuccess: (_data, plugin) => {
       pluginToast.success(
         pluginIsLocalSource(plugin)
-          ? "Plugin removed from bb"
+          ? "Plugin removed from Omnyo"
           : "Plugin uninstalled",
         plugin,
         "catalog",
       );
       setTarget(null);
       invalidatePluginCatalogSearch({ queryClient });
+
       return invalidatePluginList({ queryClient });
     },
     onError: (error, plugin) => {
@@ -62,11 +62,7 @@ export function usePluginRemoval() {
     target,
     pending: mutation.isPending,
     open: (plugin: PluginListItem) => {
-      if (
-        plugin.provenance !== "builtin" &&
-        !plugin.source.startsWith("builtin:")
-      )
-        setTarget(plugin);
+      if (plugin.removable) setTarget(plugin);
     },
     close: () => {
       if (!mutation.isPending) setTarget(null);
@@ -93,7 +89,7 @@ export function PluginRemovalDialog({ removal }: PluginRemovalDialogProps) {
         <ConfirmDeleteDialogContent
           title={
             pluginIsLocalSource(removal.target)
-              ? "Remove plugin from bb?"
+              ? "Remove plugin from Omnyo?"
               : "Uninstall plugin?"
           }
           description={pluginRemovalDescription(removal.target)}

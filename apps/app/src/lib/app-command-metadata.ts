@@ -1,9 +1,10 @@
 import {
   QUESTION_SELECT_APP_COMMAND_IDS,
+  RAIL_JUMP_APP_COMMAND_IDS,
   PANE_FOCUS_APP_COMMAND_IDS,
   THREAD_JUMP_APP_COMMAND_IDS,
   type AppCommandId,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 interface AppCommandMetadata {
   command: AppCommandId;
@@ -35,6 +36,18 @@ function paletteHiddenCommand(
 
 export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
   {
+    label: "Projects",
+    commands: RAIL_JUMP_APP_COMMAND_IDS.map((id, index) =>
+      paletteHiddenCommand(
+        id,
+        index === 0 ? "Open Inbox" : `Open project ${index}`,
+        index === 0
+          ? "Show Inbox in the sidebar."
+          : `Show project ${index} in displayed rail order.`,
+      ),
+    ),
+  },
+  {
     label: "Threads",
     commands: [
       command(
@@ -54,6 +67,21 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "Archive the focused thread.",
       ),
       command(
+        "thread.shelve",
+        "Shelve thread",
+        "Move the focused thread to the Shelf, or bring it back.",
+      ),
+      command(
+        "thread.copyLink",
+        "Copy thread link",
+        "Copy a link to the focused thread.",
+      ),
+      command(
+        "thread.group",
+        "Group selected chats",
+        "Put the chats selected in the sidebar into a new group.",
+      ),
+      command(
         "thread.previous",
         "Previous thread",
         "Open the previous visible sidebar thread.",
@@ -62,6 +90,16 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "thread.next",
         "Next thread",
         "Open the next visible sidebar thread.",
+      ),
+      command(
+        "thread.unreadAbove",
+        "Scroll to unread chats above",
+        "Reveal the first unread chat above the sidebar viewport.",
+      ),
+      command(
+        "thread.unreadBelow",
+        "Scroll to unread chats below",
+        "Reveal the last unread chat below the sidebar viewport.",
       ),
       ...THREAD_JUMP_APP_COMMAND_IDS.map((id, index) =>
         paletteHiddenCommand(
@@ -73,23 +111,34 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
     ],
   },
   {
+    label: "Edit",
+    commands: [
+      command(
+        "edit.undo",
+        "Undo",
+        "Undo your last action, such as Archive or a Canvas move.",
+      ),
+      command("edit.redo", "Redo", "Redo the last action you undid."),
+    ],
+  },
+  {
     label: "Window and layout",
     commands: [
       paletteHiddenCommand(
         "palette.open",
         "Open quick palette",
-        "Search and run bb commands from the keyboard.",
+        "Search and run Omnyo commands from the keyboard.",
       ),
-      command("window.new", "New window", "Open another bb desktop window."),
+      command("window.new", "New window", "Open another Omnyo desktop window."),
       command(
         "window.find",
         "Find in window",
-        "Search the text shown in the current bb desktop window.",
+        "Search the text shown in the current Omnyo desktop window.",
       ),
       command(
         "window.reload",
         "Reload window",
-        "Reload the current bb desktop window.",
+        "Reload the current Omnyo desktop window.",
       ),
       command("history.back", "Go back", "Go back in this window's history."),
       command(
@@ -102,11 +151,11 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "Back to app",
         "Return from Settings, Plugins, or Skills to the app.",
       ),
-      command("settings.open", "Open settings", "Open bb settings."),
+      command("settings.open", "Open settings", "Open Omnyo settings."),
       command(
         "settings.openServers",
         "Open server settings",
-        "Open settings to add or manage bb servers.",
+        "Open settings to add or manage Omnyo servers.",
       ),
       command(
         "sidebar.toggle",
@@ -208,12 +257,12 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
       command(
         "logs.openServerDaemon",
         "Open server and daemon logs",
-        "Open the desktop log viewer for the bb server and host daemon.",
+        "Open the desktop log viewer for the Omnyo server and host daemon.",
       ),
       command(
         "dataDirectory.open",
         "Open data directory",
-        "Reveal the bb data directory in the system file manager.",
+        "Reveal the Omnyo data directory in the system file manager.",
       ),
       command(
         "notifications.open",
@@ -223,7 +272,7 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
       command(
         "plugins.enterSafeMode",
         "Turn on plugin safe mode",
-        "Stop every plugin you installed, keeping each plugin's enabled setting. Plugins included with bb keep running.",
+        "Stop every plugin you installed, keeping each plugin's enabled setting. Plugins included with Omnyo keep running.",
       ),
       command(
         "plugins.exitSafeMode",
@@ -233,7 +282,7 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
       command(
         "plugins.pruneCache",
         "Clean up plugin cache",
-        "Delete cached plugin versions that no installed plugin uses, such as versions left by earlier bb releases.",
+        "Delete cached plugin versions that no installed plugin uses, such as versions left by earlier Omnyo releases.",
       ),
     ],
   },
@@ -269,6 +318,11 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "composer.focus",
         "Focus composer",
         "Focus the active composer's input and move the caret to the end.",
+      ),
+      command(
+        "composer.terminal.toggle",
+        "Toggle composer terminal",
+        "Switch the chat composer between the message box and its terminal. Messages starting with ! run there.",
       ),
       command(
         "modelPicker.toggle",
@@ -318,7 +372,7 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
       command(
         "browser.reload",
         "Reload page",
-        "Reload the active embedded browser page.",
+        "Hard reload the active embedded browser page, bypassing its cache.",
       ),
       command(
         "browser.find",
@@ -333,7 +387,7 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
       paletteHiddenCommand(
         id,
         `Choose answer ${index + 1}`,
-        `Choose visible answer ${index + 1} when bb asks a question.`,
+        `Choose visible answer ${index + 1} when Omnyo asks a question.`,
       ),
     ),
   },

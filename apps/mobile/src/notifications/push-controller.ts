@@ -15,5 +15,6 @@ export function getPushRegistrationController(): PushRegistrationController {
     store: getPushStore(),
     deviceLabel: describeThisDevice(),
   });
+
   return instance;
 }

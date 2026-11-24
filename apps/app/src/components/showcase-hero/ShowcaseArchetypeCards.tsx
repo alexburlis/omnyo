@@ -1,6 +1,7 @@
-import { Icon } from "@bb/shared-ui/icon";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@omnyo/shared-ui/tooltip";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import type { ShowcaseArchetype } from "./showcase-archetype";
 import { accentInk, accentTint, neutral } from "./showcase-tokens";
 
@@ -25,7 +26,8 @@ export function ShowcaseExampleCard({
       onClick={onClick}
       className={cn(
         "group flex cursor-pointer flex-col items-start gap-1.5 rounded-lg border border-border",
-        "bg-background p-3 text-left transition-colors duration-150 hover:duration-0",
+        "bg-background p-3 text-left",
+        CONTROL_HOVER_TRANSITION,
         "hover:bg-state-hover focus-visible:ring-1 focus-visible:ring-ring",
         "focus-visible:outline-none",
       )}
@@ -60,6 +62,7 @@ export function ShowcaseExampleCard({
   );
 
   if (tooltip === undefined) return card;
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>{card}</TooltipTrigger>

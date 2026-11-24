@@ -4,8 +4,8 @@ import type {
   ThreadPullRequest,
   WorkspaceMergeBase,
   WorkspaceWorkingTree,
-} from "@bb/domain";
-import type { EnvironmentDisplayHostContext } from "@bb/core-ui";
+} from "@omnyo/domain";
+import type { EnvironmentDisplayHostContext } from "@omnyo/core-ui";
 import {
   makeEnvironment,
   makeThread,
@@ -51,9 +51,9 @@ export function makePullRequest(
     number: 128,
     title: "Show the branch's GitHub pull request in the Info tab",
     state: "open",
-    url: "https://github.com/acme/bb/pull/128",
+    url: "https://github.com/acme/omnyo/pull/128",
     baseRefName: "main",
-    headRefName: "bb/pr-info-panel",
+    headRefName: "omnyo/pr-info-panel",
     updatedAt: "2026-06-16T12:30:00Z",
     autoMerge: false,
     inMergeQueue: false,
@@ -80,7 +80,7 @@ export function makePullRequest(
 
 export const baseProps: ThreadMetadataContentProps = {
   thread: makeThread(),
-  projectId: "proj_bb",
+  projectId: "proj_omnyo",
   parentThreadProjectId: null,
   parentThreadDisplayName: null,
   parentThreads,
@@ -110,6 +110,7 @@ export const STORY_DIRTY_WORKING_TREE: Omit<WorkspaceWorkingTree, "state"> = {
   insertions: 47,
   deletions: 21,
   lineStatsComplete: true,
+  fileCount: 3,
   files: [
     {
       path: "apps/app/src/components/sidebar/ProjectRow.tsx",
@@ -137,11 +138,13 @@ export const STORY_COMMITTED_MERGE_BASE: WorkspaceMergeBase = {
   baseRef: "main",
   aheadCount: 2,
   behindCount: 0,
+  squashMergeCheckComplete: true,
   hasCommittedUnmergedChanges: true,
   commits: [],
   insertions: 110,
   deletions: 24,
   lineStatsComplete: true,
+  fileCount: 2,
   files: [
     {
       path: "apps/app/src/components/right-panel/ThreadMetadataContent.stories.tsx",

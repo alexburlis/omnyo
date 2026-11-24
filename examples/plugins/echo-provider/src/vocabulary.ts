@@ -1,9 +1,9 @@
-import type { PluginProviderFallbackModel } from "@get-bb/plugin-sdk";
+import type { PluginProviderFallbackModel } from "@omnyo/plugin-sdk";
 import {
   type DeltaPresentation,
   experimental_presentationTitle as presentationTitle,
   experimental_withTitle as withTitle,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { z } from "zod";
 
 export const ECHO_PLUGIN_ID = "echo-provider";
@@ -32,6 +32,7 @@ export const echoReceiptSchema = z.object({
   itemCount: z.number().int().nonnegative(),
   shouted: z.boolean(),
 });
+
 export type EchoReceipt = z.infer<typeof echoReceiptSchema>;
 
 export const ECHO_MOOD_KIND = `${ECHO_PLUGIN_ID}/mood` as const;
@@ -40,6 +41,7 @@ export const echoMoodSchema = z.object({
   mood: z.enum(["cheerful", "bored"]),
   turnsEchoed: z.number().int().nonnegative(),
 });
+
 export type EchoMood = z.infer<typeof echoMoodSchema>;
 
 export const echoExtensionKinds = {
@@ -52,9 +54,10 @@ export const echoProviderOptionsSchema = z.object({
   model: z.string(),
   promptMode: z.enum(["plan"]).nullable(),
 });
+
 export type EchoProviderOptions = z.infer<typeof echoProviderOptionsSchema>;
 
-export const ECHO_GREETING_ENV = "BB_ECHO_PROVIDER_GREETING";
+export const ECHO_GREETING_ENV = "OMNYO_ECHO_PROVIDER_GREETING";
 
 export const ECHO_PROJECT_SKILL_ROOT = ".echo/skills";
 

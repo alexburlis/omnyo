@@ -28,26 +28,32 @@ function findThreadNode(
     if (item.kind === "thread") {
       if (item.node.thread.id === threadId) return item.node;
       const nested = findThreadNode(item.node.children, threadId);
+
       if (nested) return nested;
     } else if (item.kind === "environment") {
       for (const node of item.group.nodes) {
         if (node.thread.id === threadId) return node;
         const nested = findThreadNode(node.children, threadId);
+
         if (nested) return nested;
       }
     } else {
       const nested = findThreadNode(item.group.items, threadId);
+
       if (nested) return nested;
     }
   }
+
   return null;
 }
 
 function itemHoldsThread(item: ProjectThreadItem, threadId: string): boolean {
   if (item.kind === "thread") return item.node.thread.id === threadId;
+
   if (item.kind === "environment") {
     return item.group.nodes.some((node) => node.thread.id === threadId);
   }
+
   return false;
 }
 
@@ -56,8 +62,10 @@ function beforeKeyAfterThread(
   threadId: string,
 ): string | null {
   const index = siblings.findIndex((item) => itemHoldsThread(item, threadId));
+
   if (index === -1) return null;
   const next = siblings[index + 1];
+
   return next ? getSidebarItemKey(next) : null;
 }
 
@@ -66,6 +74,7 @@ function withPatchedThread(
   patched: SidebarThread,
 ): SidebarThread[] {
   const others = threads.filter((thread) => thread.id !== patched.id);
+
   return [...others, patched];
 }
 
@@ -85,6 +94,7 @@ export function resolveSidebarNestPreviewBeforeKey({
   threads,
 }: ResolveNestPreviewBeforeKeyArgs): string | null {
   const pinnedItems = nodesToItems(pinnedRootNodes);
+
   if (findThreadNode(pinnedItems, parentThreadId)) {
     const projected = buildPinnedSidebarState({
       threads: withPatchedThread(getProjectThreadItemDescendants(pinnedItems), {
@@ -93,21 +103,26 @@ export function resolveSidebarNestPreviewBeforeKey({
         pinnedAt: null,
       }),
     });
+
     const parentNode = findThreadNode(
       nodesToItems(projected.rootNodes),
       parentThreadId,
     );
+
     return parentNode
       ? beforeKeyAfterThread(parentNode.children, activeThread.id)
       : null;
   }
+
   const projected = buildSectionThreadList(
     withPatchedThread(threads, { ...activeThread, parentThreadId }),
     compareThreads,
     sections,
     groupThreadsByEnvironment,
   );
+
   const parentNode = findThreadNode(projected, parentThreadId);
+
   return parentNode
     ? beforeKeyAfterThread(parentNode.children, activeThread.id)
     : null;

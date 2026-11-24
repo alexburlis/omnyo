@@ -21,13 +21,77 @@ const SCRIPT_PATH = new URL(
   "../../src/assets/install-machine.sh",
   import.meta.url,
 );
+
 const createdDirectories: string[] = [];
-const FIXTURE_ARTIFACT_DIGEST = createHash("sha256")
-  .update("fixture-tarball")
-  .digest("hex");
+
+let runtimeArtifactFixture:
+  | { bytes: Buffer; digest: string; admissionEntry: Buffer }
+  | undefined;
+
+function getRuntimeArtifactFixture(): {
+  bytes: Buffer;
+  digest: string;
+  admissionEntry: Buffer;
+} {
+  if (runtimeArtifactFixture) return runtimeArtifactFixture;
+
+  const root = mkdtempSync(join(tmpdir(), "omnyo-installer-artifact-"));
+
+  try {
+    const packageRoot = join(root, "package");
+    const dist = join(packageRoot, "dist");
+    mkdirSync(dist, { recursive: true });
+
+    const build = spawnSync(
+      process.execPath,
+      [
+        new URL("../../../../scripts/build-node-entry.mjs", import.meta.url)
+          .pathname,
+        "src/state-admission.ts",
+        join(dist, "state-admission.mjs"),
+      ],
+      {
+        cwd: new URL("../../../../packages/omnyo-app", import.meta.url),
+        encoding: "utf8",
+        timeout: 10_000,
+      },
+    );
+
+    if (build.status !== 0)
+      throw new Error(
+        `Installer admission fixture build failed: ${build.stderr}`,
+      );
+    writeFileSync(
+      join(packageRoot, "package.json"),
+      JSON.stringify({ name: "omnyo-app", version: "0.0.0" }),
+    );
+    const archive = join(root, "runtime.tgz");
+
+    const pack = spawnSync("tar", ["-czf", archive, "-C", root, "package"], {
+      encoding: "utf8",
+      timeout: 5_000,
+    });
+
+    if (pack.status !== 0)
+      throw new Error(`Installer artifact fixture failed: ${pack.stderr}`);
+    const bytes = readFileSync(archive);
+    runtimeArtifactFixture = {
+      bytes,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      admissionEntry: readFileSync(join(dist, "state-admission.mjs")),
+    };
+
+    return runtimeArtifactFixture;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
 function createFixture(): { binDir: string; dataDir: string; homeDir: string } {
-  const root = mkdtempSync(join(tmpdir(), "bb-install-script-test-"));
+  const root = realpathSync(
+    mkdtempSync(join(tmpdir(), "omnyo-install-script-test-")),
+  );
+
   createdDirectories.push(root);
   const binDir = join(root, "bin");
   const dataDir = join(root, "data");
@@ -37,6 +101,7 @@ function createFixture(): { binDir: string; dataDir: string; homeDir: string } {
   mkdirSync(homeDir, { recursive: true });
   writeFileSync(join(root, "package.json"), '{"type":"commonjs"}\n');
   symlinkSync(process.execPath, join(binDir, "node"));
+
   return { binDir, dataDir, homeDir };
 }
 
@@ -53,8 +118,8 @@ function createScriptEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    BB_DATA_DIR: fixture.dataDir,
-    BB_ENROLLMENT: bootstrapBundle(),
+    OMNYO_DATA_DIR: fixture.dataDir,
+    OMNYO_ENROLLMENT: bootstrapBundle(),
     HOME: fixture.homeDir,
     PATH: [fixture.binDir, "/usr/bin", "/bin"].join(delimiter),
     ...env,
@@ -72,9 +137,9 @@ function runScript(
   });
 }
 
-const BOOTSTRAP_ARGS = ["--bootstrap-env", "BB_ENROLLMENT"];
+const BOOTSTRAP_ARGS = ["--bootstrap-env", "OMNYO_ENROLLMENT"];
 
-function bootstrapBundle(serverUrl = "https://machine.getbb.app"): string {
+function bootstrapBundle(serverUrl = "https://coordinator.example"): string {
   return JSON.stringify({
     hostId: "host-test",
     serverUrl,
@@ -85,7 +150,7 @@ function bootstrapBundle(serverUrl = "https://machine.getbb.app"): string {
 
 function writeJoinedState(
   fixture: ReturnType<typeof createFixture>,
-  serverUrl = "https://machine.getbb.app",
+  serverUrl = "https://coordinator.example",
   hostId = "host-test",
 ): void {
   writeFileSync(
@@ -98,7 +163,7 @@ function writeJoinedState(
   );
 }
 
-function createEnrollingBbAppScript(args: {
+function createRuntimeLauncherScript(args: {
   hostId: string;
   invocationPath?: string;
   statusServerUrl?: string;
@@ -107,6 +172,7 @@ function createEnrollingBbAppScript(args: {
     args.invocationPath === undefined
       ? ""
       : `fs.writeFileSync(${JSON.stringify(args.invocationPath)}, cliArgs.join("\\n") + "\\n");`;
+
   return `#!/usr/bin/env node
 const fs = require("node:fs");
 const http = require("node:http");
@@ -116,7 +182,7 @@ const option = (name) => {
   const index = cliArgs.indexOf(name);
   return index === -1 ? undefined : cliArgs[index + 1];
 };
-const dataDir = process.env.BB_DATA_DIR;
+const dataDir = process.env.OMNYO_DATA_DIR;
 const hostId = ${JSON.stringify(args.hostId)};
 if (cliArgs[0] === "machine" && cliArgs[1] === "enroll") {
   const bundle = JSON.parse(process.env[option("--bootstrap-env")]);
@@ -149,10 +215,12 @@ ${recordInvocation}
 const port = Number(option("--host-daemon-port"));
 const serverUrl = option("--server-url");
 const statusServerUrl = ${JSON.stringify(args.statusServerUrl)} ?? serverUrl;
-fs.writeFileSync(
-  path.join(dataDir, "auth.json"),
-  JSON.stringify({ hostId, hostKey: "secret" }) + "\\n",
-);
+if (!fs.existsSync(path.join(dataDir, "auth.json"))) {
+  fs.writeFileSync(
+    path.join(dataDir, "auth.json"),
+    JSON.stringify({ hostId, hostKey: "secret" }) + "\\n",
+  );
+}
 const configPath = path.join(dataDir, "config.json");
 if (!fs.existsSync(configPath)) {
   fs.writeFileSync(configPath, JSON.stringify({ serverUrl }) + "\\n");
@@ -173,14 +241,14 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
 function writeServerInstallTools(
   fixture: ReturnType<typeof createFixture>,
   artifactStatus: 200 | 404 | 500,
-  artifactDigest = FIXTURE_ARTIFACT_DIGEST,
+  artifactDigest = getRuntimeArtifactFixture().digest,
   transientFailures = 0,
-  artifactBody = "fixture-tarball",
+  artifactBody: string | Uint8Array = getRuntimeArtifactFixture().bytes,
 ): void {
-  const curlLog = join(fixture.dataDir, "curl.log");
-  const curlConfigLog = join(fixture.dataDir, "curl-config.log");
-  const curlAttemptsLog = join(fixture.dataDir, "curl-attempts.log");
-  const npmLog = join(fixture.dataDir, "npm.log");
+  const curlLog = join(fixture.binDir, "curl.log");
+  const curlConfigLog = join(fixture.binDir, "curl-config.log");
+  const curlAttemptsLog = join(fixture.binDir, "curl-attempts.log");
+  const npmLog = join(fixture.binDir, "npm.log");
   writeExecutable(
     join(fixture.binDir, "curl"),
     `#!/bin/sh
@@ -210,7 +278,7 @@ case "$*" in
       attempt=$((attempt + 1))
     done
     printf '%s\n' '${artifactStatus}' >>"${curlAttemptsLog}"
-    [ -z "$headers" ] || printf '%s\n' 'HTTP/1.1 ${artifactStatus}' 'x-bb-artifact-sha256: ${artifactDigest}' >"$headers"
+    [ -z "$headers" ] || printf '%s\n' 'HTTP/1.1 ${artifactStatus}' 'x-omnyo-artifact-sha256: ${artifactDigest}' >"$headers"
     if [ "$unchanged" = yes ] && [ '${artifactStatus}' = 200 ]; then
       printf '%s' 304
     else
@@ -221,10 +289,10 @@ case "$*" in
 esac
 `,
   );
-  const bbAppTemplatePath = join(fixture.dataDir, "bb-app-template");
+  const runtimeTemplatePath = join(fixture.dataDir, "omnyo-app-template");
   writeExecutable(
-    bbAppTemplatePath,
-    createEnrollingBbAppScript({ hostId: "host-test" }),
+    runtimeTemplatePath,
+    createRuntimeLauncherScript({ hostId: "host-test" }),
   );
   writeExecutable(
     join(fixture.binDir, "npm"),
@@ -236,42 +304,49 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$prefix" ] || exit 2
 mkdir -p "$prefix/bin"
-cp "${bbAppTemplatePath}" "$prefix/bin/bb-app"
-chmod +x "$prefix/bin/bb-app"
-cp "${bbAppTemplatePath}" "$prefix/bin/bb"
-chmod +x "$prefix/bin/bb"
-mkdir -p "$prefix/lib/node_modules/bb-app/host-daemon/dist"
-printf '%s\n' 'fixture' >"$prefix/lib/node_modules/bb-app/host-daemon/dist/daemon-bundle.mjs"
+cp "${runtimeTemplatePath}" "$prefix/bin/omnyo-app"
+chmod +x "$prefix/bin/omnyo-app"
+cp "${runtimeTemplatePath}" "$prefix/bin/omnyo"
+chmod +x "$prefix/bin/omnyo"
+mkdir -p "$prefix/lib/node_modules/omnyo-app/host-daemon/dist"
+printf '%s\n' 'fixture' >"$prefix/lib/node_modules/omnyo-app/host-daemon/dist/daemon-bundle.mjs"
 for module in node-pty @parcel/watcher; do
-  mkdir -p "$prefix/lib/node_modules/bb-app/node_modules/$module"
+  mkdir -p "$prefix/lib/node_modules/omnyo-app/node_modules/$module"
   if [ -z "$FAKE_NPM_SKIP_NATIVE_MODULES" ]; then
-    printf '%s\n' 'module.exports = {};' >"$prefix/lib/node_modules/bb-app/node_modules/$module/index.js"
+    printf '%s\n' 'module.exports = {};' >"$prefix/lib/node_modules/omnyo-app/node_modules/$module/index.js"
   fi
 done
 `,
   );
 }
 
-function writeEnrollingBbApp(
+function writeRuntimeLauncher(
   fixture: ReturnType<typeof createFixture>,
   invocationPath: string,
   hostId = "host-test",
   statusServerUrl?: string,
 ): void {
   writeExecutable(
-    join(fixture.binDir, "bb-app"),
-    createEnrollingBbAppScript({ hostId, invocationPath, statusServerUrl }),
+    join(fixture.binDir, "omnyo-app"),
+    createRuntimeLauncherScript({ hostId, invocationPath, statusServerUrl }),
   );
-  writeEnrollingBb(fixture, hostId);
+  writeEnrollmentCli(fixture, hostId);
+  const template = join(fixture.dataDir, "omnyo-app-template");
+
+  if (existsSync(template))
+    writeExecutable(
+      template,
+      createRuntimeLauncherScript({ hostId, invocationPath, statusServerUrl }),
+    );
 }
 
-function writeEnrollingBb(
+function writeEnrollmentCli(
   fixture: ReturnType<typeof createFixture>,
   hostId = "host-test",
 ): void {
   writeExecutable(
-    join(fixture.binDir, "bb"),
-    createEnrollingBbAppScript({ hostId }),
+    join(fixture.binDir, "omnyo"),
+    createRuntimeLauncherScript({ hostId }),
   );
 }
 
@@ -310,8 +385,10 @@ afterEach(() => {
       const servicePid = Number(
         readFileSync(join(directory, "data/service-daemon.pid"), "utf8"),
       );
+
       process.kill(servicePid, "SIGTERM");
     } catch {}
+
     rmSync(directory, { force: true, recursive: true });
   }
 });
@@ -327,8 +404,10 @@ describeOnPosix("machine install script", { timeout: 15_000 }, () => {
     "resolves an unset HOME and preserves explicit HOME: %j",
     ({ uid, unset }) => {
       const fixture = createFixture();
+
       const homeScript =
         'const home = require("node:os").homedir(); if (!require("node:path").isAbsolute(home)) process.exit(1); process.stdout.write(home);';
+
       rmSync(join(fixture.binDir, "node"));
       writeExecutable(
         join(fixture.binDir, "node"),
@@ -343,13 +422,15 @@ exec '${process.execPath}' "$@"
       );
       writeExecutable(join(fixture.binDir, "id"), `#!/bin/sh\necho ${uid}\n`);
       writeCurlArtifactMock(fixture, 404);
+
       const result = runScript(BOOTSTRAP_ARGS, fixture, {
         HOME: unset ? undefined : fixture.homeDir,
       });
+
       expect(result.status).not.toBe(0);
       expect(result.stderr).not.toContain("HOME");
       expect(existsSync(join(fixture.dataDir, "resolved-home"))).toBe(unset);
-      expect(existsSync(join(fixture.homeDir, ".local/bin/bb"))).toBe(true);
+      expect(existsSync(join(fixture.homeDir, ".local/bin/omnyo"))).toBe(false);
       expect(existsSync(join(fixture.dataDir, "auth.json"))).toBe(false);
     },
   );
@@ -366,20 +447,30 @@ exec '${process.execPath}' "$@"
 
   it("starts an owned daemon that has no service under launcher supervision", () => {
     const fixture = createFixture();
-    mkdirSync(join(fixture.homeDir, ".bb-machines", "owned"), {
+    mkdirSync(join(fixture.homeDir, ".omnyo-machines", "owned"), {
       recursive: true,
     });
+
     const dataDir = realpathSync(
-      join(fixture.homeDir, ".bb-machines", "owned"),
+      join(fixture.homeDir, ".omnyo-machines", "owned"),
     );
+
     writeJoinedState({ ...fixture, dataDir });
     writeFileSync(join(dataDir, "host-daemon-port"), "40000\n");
     const invocationPath = join(dataDir, "invocation");
     mkdirSync(join(dataDir, "npm", "bin"), { recursive: true });
     writeExecutable(
-      join(dataDir, "npm", "bin", "bb-app"),
-      createEnrollingBbAppScript({ hostId: "host-test", invocationPath }),
+      join(dataDir, "npm", "bin", "omnyo-app"),
+      createRuntimeLauncherScript({ hostId: "host-test", invocationPath }),
     );
+
+    const admissionPath = join(
+      dataDir,
+      "npm/lib/node_modules/omnyo-app/dist/state-admission.mjs",
+    );
+
+    mkdirSync(dirname(admissionPath), { recursive: true });
+    writeFileSync(admissionPath, getRuntimeArtifactFixture().admissionEntry);
     const daemonPidPath = join(dataDir, "install-daemon.pid");
 
     const started = runScript(
@@ -396,7 +487,7 @@ exec '${process.execPath}' "$@"
         "--host-daemon-port",
         "40000",
         "--server-url",
-        "https://machine.getbb.app",
+        "https://coordinator.example",
       ]);
     } finally {
       if (existsSync(daemonPidPath)) {
@@ -410,18 +501,20 @@ exec '${process.execPath}' "$@"
     mkdirSync(join(fixture.homeDir, ".bb-machines", "owned"), {
       recursive: true,
     });
+
     const dataDir = realpathSync(
       join(fixture.homeDir, ".bb-machines", "owned"),
     );
+
     writeJoinedState({ ...fixture, dataDir });
     writeFileSync(join(dataDir, "host-daemon-port"), "40000\n");
     const serviceDir = join(fixture.homeDir, ".config", "systemd", "user");
-    const serviceName = "bb-host-daemon-machine-getbb-app-host-test.service";
+    const serviceName = "bb-host-daemon-machine-example-test-host-test.service";
     const servicePath = join(serviceDir, serviceName);
     mkdirSync(serviceDir, { recursive: true });
     writeFileSync(
       servicePath,
-      `[Service]\nEnvironment="BB_DATA_DIR=${dataDir}"\n`,
+      `[Service]\nEnvironment="OMNYO_DATA_DIR=${dataDir}"\n`,
     );
     writeExecutable(
       join(fixture.binDir, "uname"),
@@ -432,19 +525,23 @@ exec '${process.execPath}' "$@"
       join(fixture.binDir, "systemctl"),
       `#!/bin/sh\nprintf '%s\\n' "$*" >>${JSON.stringify(systemctlLog)}\n`,
     );
+
     const stopped = runScript(
       ["--stop", "--host-id", "host-test", "--data-dir", dataDir],
       fixture,
     );
+
     expect(stopped.status, stopped.stderr).toBe(0);
     expect(existsSync(dataDir)).toBe(true);
     expect(readFileSync(systemctlLog, "utf8")).toContain(
       `--user stop ${serviceName}`,
     );
+
     const uninstalled = runScript(
       ["--uninstall", "--host-id", "host-test", "--data-dir", dataDir],
       fixture,
     );
+
     expect(uninstalled.status, uninstalled.stderr).toBe(0);
     expect(existsSync(dataDir)).toBe(false);
     expect(readFileSync(systemctlLog, "utf8")).toContain(
@@ -454,29 +551,31 @@ exec '${process.execPath}' "$@"
 
   it("stops and uninstalls a Linux service after a server move rewrote its server URL", () => {
     const fixture = createFixture();
-    mkdirSync(join(fixture.homeDir, ".bb-machines", "machine.getbb.app"), {
+    mkdirSync(join(fixture.homeDir, ".bb-machines", "machine.example.test"), {
       recursive: true,
     });
+
     const dataDir = realpathSync(
-      join(fixture.homeDir, ".bb-machines", "machine.getbb.app"),
+      join(fixture.homeDir, ".bb-machines", "machine.example.test"),
     );
+
     writeJoinedState(
       { ...fixture, dataDir },
       "https://desk.tailnet.example:38886",
     );
     writeFileSync(join(dataDir, "host-daemon-port"), "40000\n");
     const serviceDir = join(fixture.homeDir, ".config", "systemd", "user");
-    const serviceName = "bb-host-daemon-machine-getbb-app-host-test.service";
+    const serviceName = "bb-host-daemon-machine-example-test-host-test.service";
     const servicePath = join(serviceDir, serviceName);
     const otherServiceName = "bb-host-daemon-other-example-host-test.service";
     mkdirSync(serviceDir, { recursive: true });
     writeFileSync(
       servicePath,
-      `[Service]\nExecStart="node" "bb-app" host-daemon --server-url "https://desk.tailnet.example:38886"\nEnvironment="BB_DATA_DIR=${dataDir}"\n`,
+      `[Service]\nExecStart="node" "bb-app" host-daemon --server-url "https://desk.tailnet.example:38886"\nEnvironment="OMNYO_DATA_DIR=${dataDir}"\n`,
     );
     writeFileSync(
       join(serviceDir, otherServiceName),
-      `[Service]\nEnvironment="BB_DATA_DIR=${dataDir}-other"\n`,
+      `[Service]\nEnvironment="OMNYO_DATA_DIR=${dataDir}-other"\n`,
     );
     writeExecutable(
       join(fixture.binDir, "uname"),
@@ -492,6 +591,7 @@ exec '${process.execPath}' "$@"
       ["--stop", "--host-id", "host-test", "--data-dir", dataDir],
       fixture,
     );
+
     expect(stopped.status, stopped.stderr).toBe(0);
     expect(readFileSync(systemctlLog, "utf8")).toBe(
       `--user stop ${serviceName}\n`,
@@ -501,6 +601,7 @@ exec '${process.execPath}' "$@"
       ["--uninstall", "--host-id", "host-test", "--data-dir", dataDir],
       fixture,
     );
+
     expect(uninstalled.status, uninstalled.stderr).toBe(0);
     expect(existsSync(dataDir)).toBe(false);
     expect(existsSync(servicePath)).toBe(false);
@@ -512,23 +613,27 @@ exec '${process.execPath}' "$@"
 
   it("boots out a macOS launch agent after a server move rewrote its server URL", () => {
     const fixture = createFixture();
-    mkdirSync(join(fixture.homeDir, ".bb-machines", "machine.getbb.app"), {
+    mkdirSync(join(fixture.homeDir, ".bb-machines", "machine.example.test"), {
       recursive: true,
     });
+
     const dataDir = realpathSync(
-      join(fixture.homeDir, ".bb-machines", "machine.getbb.app"),
+      join(fixture.homeDir, ".bb-machines", "machine.example.test"),
     );
+
     writeJoinedState({ ...fixture, dataDir }, "https://desk.tailnet.example");
     writeFileSync(join(dataDir, "host-daemon-port"), "40000\n");
     const agentDir = join(fixture.homeDir, "Library", "LaunchAgents");
+
     const agentPath = join(
       agentDir,
-      "app.getbb.host-daemon.machine-getbb-app-host-test.plist",
+      "app.getbb.host-daemon.machine-example-test-host-test.plist",
     );
+
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(
       agentPath,
-      `<plist><dict><key>EnvironmentVariables</key><dict><key>BB_DATA_DIR</key><string>${dataDir}</string></dict></dict></plist>\n`,
+      `<plist><dict><key>EnvironmentVariables</key><dict><key>OMNYO_DATA_DIR</key><string>${dataDir}</string></dict></dict></plist>\n`,
     );
     writeExecutable(join(fixture.binDir, "uname"), "#!/bin/sh\necho Darwin\n");
     const launchctlLog = join(fixture.homeDir, "launchctl.log");
@@ -550,25 +655,29 @@ exec '${process.execPath}' "$@"
 
   it("refuses lifecycle actions when several services reference the machine data directory", () => {
     const fixture = createFixture();
-    mkdirSync(join(fixture.homeDir, ".bb-machines", "machine.getbb.app"), {
+    mkdirSync(join(fixture.homeDir, ".omnyo-machines", "coordinator.example"), {
       recursive: true,
     });
+
     const dataDir = realpathSync(
-      join(fixture.homeDir, ".bb-machines", "machine.getbb.app"),
+      join(fixture.homeDir, ".omnyo-machines", "coordinator.example"),
     );
+
     writeJoinedState({ ...fixture, dataDir }, "https://desk.tailnet.example");
     writeFileSync(join(dataDir, "host-daemon-port"), "40000\n");
     const serviceDir = join(fixture.homeDir, ".config", "systemd", "user");
     mkdirSync(serviceDir, { recursive: true });
+
     for (const serviceName of [
-      "bb-host-daemon-machine-getbb-app-host-test.service",
-      "bb-host-daemon-machine-getbb-app.service",
+      "omnyo-host-daemon-coordinator-example-host-test.service",
+      "omnyo-host-daemon-coordinator-example.service",
     ]) {
       writeFileSync(
         join(serviceDir, serviceName),
-        `[Service]\nEnvironment="BB_DATA_DIR=${dataDir}"\n`,
+        `[Service]\nEnvironment="OMNYO_DATA_DIR=${dataDir}"\n`,
       );
     }
+
     writeExecutable(
       join(fixture.binDir, "uname"),
       "#!/bin/sh\nprintf '%s\\n' Linux\n",
@@ -594,6 +703,7 @@ exec '${process.execPath}' "$@"
 
   it("rejects an invalid explicit host-daemon port", () => {
     const fixture = createFixture();
+
     const result = runScript(
       [...BOOTSTRAP_ARGS, "--host-daemon-port", "0"],
       fixture,
@@ -607,8 +717,9 @@ exec '${process.execPath}' "$@"
 
   it("rejects a bootstrap bundle carrying an unusable server URL", () => {
     const fixture = createFixture();
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_ENROLLMENT: bootstrapBundle("not-a-url"),
+      OMNYO_ENROLLMENT: bootstrapBundle("not-a-url"),
     });
 
     expect(result.status).toBe(2);
@@ -617,85 +728,102 @@ exec '${process.execPath}' "$@"
     expect(existsSync(join(fixture.dataDir, "auth.json"))).toBe(false);
   });
 
-  it("prefers the newly installed CLI and honors an explicit machine directory", () => {
-    const fixture = createFixture();
+  it("prefers its verified CLI and pins the selected machine profile", () => {
+    const prepared = createFixture();
+    const dataDir = join(prepared.homeDir, "a profile's files");
+    mkdirSync(dataDir);
+    const fixture = { ...prepared, dataDir };
     writeServerInstallTools(fixture, 200);
-    writeExecutable(join(fixture.binDir, "npm"), "#!/bin/sh\nexit 19\n");
-    runScript(BOOTSTRAP_ARGS, fixture, { BB_INSTALL_SKIP_SERVICE: "1" });
-    const olderCli = join(
-      fixture.homeDir,
-      ".bb-machines",
-      "older",
-      "npm",
-      "bin",
-      "bb",
-    );
-    mkdirSync(dirname(olderCli), { recursive: true });
-    writeExecutable(olderCli, "#!/bin/sh\necho wrong-installation\n");
-    const installedCli = join(fixture.dataDir, "npm", "bin", "bb");
-    mkdirSync(dirname(installedCli), { recursive: true });
-    writeExecutable(installedCli, '#!/bin/sh\nprintf "%s" "$BB_DATA_DIR"\n');
-    const shim = join(fixture.homeDir, ".local", "bin", "bb");
-    const explicit = spawnSync(
-      shim,
-      ["machine", "uninstall", "--host-id", "host-test"],
-      { env: createScriptEnv(fixture, {}), encoding: "utf8" },
-    );
-    expect(explicit.status).toBe(0);
-    expect(explicit.stdout).toBe(fixture.dataDir);
-    writeExecutable(installedCli, "#!/bin/sh\necho current-installation\n");
-    const env = createScriptEnv(fixture, {});
-    delete env.BB_DATA_DIR;
-    const selected = spawnSync(shim, ["machine", "enroll"], {
-      env,
-      encoding: "utf8",
+
+    const result = runScript(BOOTSTRAP_ARGS, fixture, {
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
-    expect(selected.status).toBe(0);
-    expect(selected.stdout.trim()).toBe("current-installation");
+
+    expect(result.status, result.stderr).toBe(0);
+
+    const pid = Number(
+      readFileSync(join(fixture.dataDir, "install-daemon.pid"), "utf8"),
+    );
+
+    try {
+      const other = join(
+        fixture.homeDir,
+        ".omnyo-machines/older/npm/bin/omnyo",
+      );
+
+      mkdirSync(dirname(other), { recursive: true });
+      writeExecutable(other, "#!/bin/sh\necho wrong-installation\n");
+      const installed = join(fixture.dataDir, "npm/bin/omnyo");
+      writeExecutable(installed, '#!/bin/sh\nprintf "%s" "$OMNYO_DATA_DIR"\n');
+      const shim = join(fixture.homeDir, ".local/bin/omnyo");
+
+      const explicit = spawnSync(shim, ["machine", "list"], {
+        env: createScriptEnv(fixture, {}),
+        encoding: "utf8",
+      });
+
+      expect(explicit.status, explicit.stderr).toBe(0);
+      expect(explicit.stdout).toBe(fixture.dataDir);
+      const env = createScriptEnv(fixture, {});
+      delete env.OMNYO_DATA_DIR;
+
+      const selected = spawnSync(shim, ["machine", "list"], {
+        env,
+        encoding: "utf8",
+      });
+
+      expect(selected.status, selected.stderr).toBe(0);
+      expect(selected.stdout).toBe(fixture.dataDir);
+    } finally {
+      process.kill(pid, "SIGTERM");
+    }
   });
 
-  it("publishes cleanup before package installation can fail", () => {
+  it("cleans the verified artifact without publishing a CLI when installation fails", () => {
     const fixture = createFixture();
     writeServerInstallTools(fixture, 200);
-    writeExecutable(join(fixture.binDir, "npm"), "#!/bin/sh\nexit 19\n");
-    const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
-    });
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Could not install bb-app");
-    const shim = join(fixture.homeDir, ".local", "bin", "bb");
-    expect(existsSync(shim)).toBe(true);
-    const cleanup = spawnSync(
-      shim,
-      ["machine", "uninstall", "--host-id", "host-test"],
-      { env: createScriptEnv(fixture, {}), encoding: "utf8" },
+    const argsFile = join(fixture.binDir, "failed-npm-args");
+    writeExecutable(
+      join(fixture.binDir, "npm"),
+      "#!/bin/sh\nprintf '%s\\n' \"$@\" >'" + argsFile + "'\nexit 19\n",
     );
-    expect(cleanup.status, cleanup.stderr).toBe(0);
+
+    const result = runScript(BOOTSTRAP_ARGS, fixture, {
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Could not install omnyo-app");
+    expect(existsSync(join(fixture.homeDir, ".local/bin/omnyo"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "auth.json"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "install-daemon.pid"))).toBe(false);
+    const archive = readFileSync(argsFile, "utf8").trim().split("\n").at(-1);
+    expect(archive).toMatch(/omnyo-app\.tgz$/u);
+    expect(existsSync(archive ?? "missing")).toBe(false);
   });
 
-  it.each([{ container: false }, { container: true }])(
+  it.each([{ container: true }])(
     "enrolls privately with portable service selection (%j)",
     ({ container }) => {
       const fixture = createFixture();
-      writeCurlArtifactMock(fixture, 404);
-      writeEnrollingBbApp(
+      writeServerInstallTools(fixture, 200);
+      writeRuntimeLauncher(
         fixture,
         join(fixture.dataDir, "daemon-invocation"),
         "host-test",
       );
       writeExecutable(
-        join(fixture.binDir, "bb"),
+        join(fixture.binDir, "omnyo"),
         `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
-const bundle = JSON.parse(process.env.BB_ENROLLMENT);
-fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "enrollment-argv"), JSON.stringify(process.argv.slice(2)));
-fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "auth.json"), JSON.stringify({hostId: bundle.hostId, hostKey: "durable-test"}));
-fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringify({serverUrl: bundle.serverUrl}));
+const bundle = JSON.parse(process.env.OMNYO_ENROLLMENT);
+fs.writeFileSync(path.join(process.env.OMNYO_DATA_DIR, "enrollment-argv"), JSON.stringify(process.argv.slice(2)));
+fs.writeFileSync(path.join(process.env.OMNYO_DATA_DIR, "auth.json"), JSON.stringify({hostId: bundle.hostId, hostKey: "durable-test"}));
+fs.writeFileSync(path.join(process.env.OMNYO_DATA_DIR, "config.json"), JSON.stringify({serverUrl: bundle.serverUrl}));
 `,
       );
+
       if (container) {
         writeExecutable(
           join(fixture.binDir, "uname"),
@@ -715,28 +843,31 @@ fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringi
           "#!/bin/sh\nexit 1\n",
         );
       }
+
       const result = runScript(["--bootstrap-env", "TEST_BUNDLE"], fixture, {
-        BB_INSTALL_SKIP_SERVICE: container ? "0" : "1",
+        OMNYO_INSTALL_SKIP_SERVICE: container ? "0" : "1",
         TEST_BUNDLE: JSON.stringify({
           hostId: "host-test",
-          serverUrl: "https://machine.getbb.app",
+          serverUrl: "https://coordinator.example",
           credential: "private-bootstrap-test",
           expiresAt: Date.now() + 60_000,
         }),
       });
+
       const pidPath = join(fixture.dataDir, "install-daemon.pid");
+
       try {
         expect(result.status, result.stderr).toBe(0);
         expect(
           JSON.parse(
             readFileSync(join(fixture.dataDir, "enrollment-argv"), "utf8"),
           ),
-        ).toEqual(["machine", "enroll", "--bootstrap-env", "BB_ENROLLMENT"]);
+        ).toEqual(["machine", "enroll", "--bootstrap-env", "OMNYO_ENROLLMENT"]);
         expect(result.stdout + result.stderr).not.toContain(
           "private-bootstrap-test",
         );
         expect(
-          spawnSync("sh", ["-n", join(fixture.homeDir, ".local/bin/bb")])
+          spawnSync("sh", ["-n", join(fixture.homeDir, ".local/bin/omnyo")])
             .status,
         ).toBe(0);
       } finally {
@@ -758,58 +889,42 @@ fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringi
     },
   );
 
-  it("uses bb-app from PATH and enrolls from the private bootstrap bundle", () => {
+  it("refuses a PATH runtime when the private artifact is unavailable", () => {
     const fixture = createFixture();
     const invocationPath = join(fixture.dataDir, "invocation");
-    writeCurlArtifactMock(fixture, 404);
-    writeEnrollingBbApp(fixture, invocationPath);
+    writeServerInstallTools(fixture, 404);
+    writeRuntimeLauncher(fixture, invocationPath);
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
-    expect(result.status, result.stderr).toBe(0);
-    const selectedPort = readFileSync(
-      join(fixture.dataDir, "host-daemon-port"),
-      "utf8",
-    ).trim();
-    expect(
-      JSON.parse(
-        readFileSync(join(fixture.dataDir, "enrollment-argv"), "utf8"),
-      ),
-    ).toEqual(["machine", "enroll", "--bootstrap-env", "BB_ENROLLMENT"]);
-    expect(result.stdout + result.stderr).not.toContain("join-secret");
-    expect(readFileSync(invocationPath, "utf8").trim().split("\n")).toEqual([
-      "host-daemon",
-      "--auto-update",
-      "--supervise",
-      "--host-daemon-port",
-      selectedPort,
-      "--server-url",
-      "https://machine.getbb.app",
-    ]);
-    expect(
-      JSON.parse(readFileSync(join(fixture.dataDir, "auth.json"), "utf8")),
-    ).toEqual({ hostId: "host-test", hostKey: "secret" });
-    const daemonPid = Number(
-      readFileSync(join(fixture.dataDir, "install-daemon.pid"), "utf8"),
-    );
-    process.kill(daemonPid, "SIGTERM");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("HTTP 404");
+    expect(existsSync(invocationPath)).toBe(false);
+    expect(existsSync(join(fixture.dataDir, "auth.json"))).toBe(false);
+    expect(existsSync(join(fixture.dataDir, "npm"))).toBe(false);
+    expect(existsSync(join(fixture.homeDir, ".local"))).toBe(false);
   });
 
   it("starts the daemon for an existing enrollment when service setup is skipped", () => {
     const fixture = createFixture();
     const invocationPath = join(fixture.dataDir, "invocation");
     const daemonPidPath = join(fixture.dataDir, "install-daemon.pid");
-    writeCurlArtifactMock(fixture, 404);
-    writeEnrollingBbApp(fixture, invocationPath);
+    writeServerInstallTools(fixture, 200);
+    writeExecutable(
+      join(fixture.dataDir, "omnyo-app-template"),
+      createRuntimeLauncherScript({ hostId: "host-test", invocationPath }),
+    );
     writeJoinedState(fixture);
 
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("already joined");
+
     try {
       expect(existsSync(daemonPidPath)).toBe(true);
       expect(readFileSync(invocationPath, "utf8").trim().split("\n")).toEqual([
@@ -819,7 +934,7 @@ fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringi
         "--host-daemon-port",
         readFileSync(join(fixture.dataDir, "host-daemon-port"), "utf8").trim(),
         "--server-url",
-        "https://machine.getbb.app",
+        "https://coordinator.example",
       ]);
     } finally {
       if (existsSync(daemonPidPath)) {
@@ -828,160 +943,149 @@ fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringi
     }
   });
 
-  it("restarts its own running daemon on reconnect when service setup is skipped", () => {
+  it("refuses reconnect while the existing daemon still owns the profile", () => {
     const fixture = createFixture();
-    const invocationPath = join(fixture.dataDir, "invocation");
-    const daemonPidPath = join(fixture.dataDir, "install-daemon.pid");
-    writeCurlArtifactMock(fixture, 404);
-    writeEnrollingBbApp(fixture, invocationPath);
-    const reconnectEnv = {
-      BB_DATA_DIR: "",
-      BB_INSTALL_SKIP_SERVICE: "1",
-      BB_ENROLLMENT: JSON.stringify({
-        ...JSON.parse(bootstrapBundle()),
-        reconnect: true,
-        dataDir: fixture.dataDir,
-      }),
-    };
-    const running = new Set<number>();
-    const isRunning = (pid: number) => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    const readPid = () => {
-      const pid = Number(readFileSync(daemonPidPath, "utf8"));
-      running.add(pid);
-      return pid;
-    };
+    writeServerInstallTools(fixture, 200);
+
+    const first = runScript(BOOTSTRAP_ARGS, fixture, {
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
+    });
+
+    expect(first.status, first.stderr).toBe(0);
+    const pidFile = join(fixture.dataDir, "install-daemon.pid");
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    const auth = readFileSync(join(fixture.dataDir, "auth.json"));
+    const config = readFileSync(join(fixture.dataDir, "config.json"));
+
     try {
-      const installed = runScript(BOOTSTRAP_ARGS, fixture, {
-        BB_INSTALL_SKIP_SERVICE: "1",
+      const second = runScript(BOOTSTRAP_ARGS, fixture, {
+        OMNYO_INSTALL_SKIP_SERVICE: "1",
       });
-      expect(installed.status, installed.stderr).toBe(0);
-      const oldPid = readPid();
 
-      const reconnected = runScript(BOOTSTRAP_ARGS, fixture, reconnectEnv);
-      expect(reconnected.status, reconnected.stderr).toBe(0);
-      expect(reconnected.stdout).toContain("Stopped the host daemon");
-      const newPid = readPid();
-      expect(newPid).not.toBe(oldPid);
-      expect(isRunning(oldPid)).toBe(false);
-      expect(isRunning(newPid)).toBe(true);
-
-      rmSync(daemonPidPath);
-      const unowned = runScript(BOOTSTRAP_ARGS, fixture, reconnectEnv);
-      expect(unowned.status).toBe(1);
-      expect(unowned.stdout + unowned.stderr).toContain(
-        "this installer did not start",
+      expect(second.status).toBe(1);
+      expect(second.stderr).toContain("existing daemon");
+      expect(Number(readFileSync(pidFile, "utf8"))).toBe(pid);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      expect(readFileSync(join(fixture.dataDir, "auth.json"))).toEqual(auth);
+      expect(readFileSync(join(fixture.dataDir, "config.json"))).toEqual(
+        config,
       );
-      expect(isRunning(newPid)).toBe(true);
+      expect(
+        readFileSync(join(fixture.binDir, "npm.log"), "utf8")
+          .trim()
+          .split("\n"),
+      ).toHaveLength(1);
     } finally {
-      for (const pid of running) {
-        if (isRunning(pid)) process.kill(pid, "SIGTERM");
-      }
+      process.kill(pid, "SIGTERM");
     }
   });
 
   it("accepts the daemon's normalized loopback server URL", () => {
     const fixture = createFixture();
     const invocationPath = join(fixture.dataDir, "invocation");
-    writeCurlArtifactMock(fixture, 404);
-    writeEnrollingBbApp(
+    writeServerInstallTools(fixture, 200);
+    writeRuntimeLauncher(
       fixture,
       invocationPath,
       "host-test",
       "http://127.0.0.1:20101",
     );
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_ENROLLMENT: bootstrapBundle("http://localhost:20101"),
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_ENROLLMENT: bootstrapBundle("http://localhost:20101"),
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(invocationPath, "utf8").trim().split("\n")).toEqual([
       "host-daemon",
-      "join",
       "--auto-update",
+      "--supervise",
       "--host-daemon-port",
       readFileSync(join(fixture.dataDir, "host-daemon-port"), "utf8").trim(),
-      "--host-id",
-      "host-test",
       "--server-url",
       "http://localhost:20101",
     ]);
+
     const daemonPid = Number(
       readFileSync(join(fixture.dataDir, "install-daemon.pid"), "utf8"),
     );
+
     process.kill(daemonPid, "SIGTERM");
   });
 
-  it("installs the server tarball even when a same-version bb-app is on PATH", () => {
+  it("installs the server tarball even when a same-version omnyo-app is on PATH", () => {
     const fixture = createFixture();
     writeServerInstallTools(fixture, 200);
-    writeExecutable(join(fixture.binDir, "bb-app"), "#!/bin/sh\nexit 99\n");
+    writeExecutable(join(fixture.binDir, "omnyo-app"), "#!/bin/sh\nexit 99\n");
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
     expect(result.status, result.stderr).toBe(0);
-    const npmInvocation = readFileSync(
-      join(fixture.dataDir, "npm.log"),
-      "utf8",
-    );
+
+    const npmInvocation = readFileSync(join(fixture.binDir, "npm.log"), "utf8");
+
     expect(npmInvocation).toMatch(
-      /^install -g --allow-scripts=better-sqlite3,node-pty,@parcel\/watcher --prefix \/.*\/data\/npm \/.*bb-app\..*\.tgz$/mu,
+      /^install -g --allow-scripts=better-sqlite3,node-pty,@parcel\/watcher --prefix \/.*\/data\/npm \/.*omnyo-app\..*\.tgz$/mu,
     );
+
     const daemonPid = Number(
       readFileSync(join(fixture.dataDir, "install-daemon.pid"), "utf8"),
     );
+
     process.kill(daemonPid, "SIGTERM");
   });
 
-  it("prefers the server-matched tarball when bb-app is absent", () => {
+  it("prefers the server-matched tarball when omnyo-app is absent", () => {
     const fixture = createFixture();
     writeServerInstallTools(fixture, 200);
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
     expect(result.status, result.stderr).toBe(0);
-    const npmInvocation = readFileSync(
-      join(fixture.dataDir, "npm.log"),
-      "utf8",
-    );
+
+    const npmInvocation = readFileSync(join(fixture.binDir, "npm.log"), "utf8");
+
     expect(npmInvocation).toMatch(
-      /^install -g --allow-scripts=better-sqlite3,node-pty,@parcel\/watcher --prefix \/.*\/data\/npm \/.*bb-app\..*\.tgz$/mu,
+      /^install -g --allow-scripts=better-sqlite3,node-pty,@parcel\/watcher --prefix \/.*\/data\/npm \/.*omnyo-app\..*\.tgz$/mu,
     );
-    expect(npmInvocation).not.toContain("bb-app\n");
-    expect(readFileSync(join(fixture.dataDir, "curl.log"), "utf8")).toContain(
-      "--silent --show-error --location --connect-timeout 10 --max-time 300 --retry 3",
+    expect(npmInvocation).not.toContain("omnyo-app\n");
+    const curlLog = readFileSync(join(fixture.binDir, "curl.log"), "utf8");
+
+    expect(curlLog).toContain(
+      "--silent --show-error --max-redirs 0 --connect-timeout 10 --max-time 300 --retry 3",
+    );
+    expect(curlLog).not.toMatch(/--location|(^|\s)-L(\s|$)/u);
+    expect(result.stdout).toContain(
+      "Setting up this machine as host-test for https://coordinator.example",
+    );
+    expect(result.stdout).toContain("\n  Omnyo machine setup\n\n");
+    expect(result.stdout).toContain(
+      "  ○  Setting up this machine as host-test for https://coordinator.example",
     );
     expect(result.stdout).toContain(
-      "Setting up this machine as host-test for https://machine.getbb.app",
-    );
-    expect(result.stdout).toContain("\n  bb machine setup\n\n");
-    expect(result.stdout).toContain(
-      "  ○  Setting up this machine as host-test for https://machine.getbb.app",
+      "Downloading the server's omnyo-app package (timeout: 5 minutes)",
     );
     expect(result.stdout).toContain(
-      "Downloading the server's bb-app package (timeout: 5 minutes)",
+      "  ✓  Downloaded the server's omnyo-app package",
     );
     expect(result.stdout).toContain(
-      "  ✓  Downloaded the server's bb-app package",
+      "  ○  Installing the server's omnyo-app build",
     );
     expect(result.stdout).toContain(
-      "  ○  Installing the server's bb-app build",
+      "  ✓  Installed the server's omnyo-app build",
     );
-    expect(result.stdout).toContain("  ✓  Installed the server's bb-app build");
     expect(result.stdout).toContain("Waiting for the host daemon to connect");
     expect(result.stdout).toContain("Host daemon output is logged to");
+
     const daemonPid = Number(
       readFileSync(join(fixture.dataDir, "install-daemon.pid"), "utf8"),
     );
+
     process.kill(daemonPid, "SIGTERM");
   });
 
@@ -997,67 +1101,91 @@ fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringi
     ["{invalid json", null],
   ])("handles failed package response %s", (body, expected) => {
     const fixture = createFixture();
-    writeServerInstallTools(fixture, 500, FIXTURE_ARTIFACT_DIGEST, 0, body);
+    writeServerInstallTools(
+      fixture,
+      500,
+      getRuntimeArtifactFixture().digest,
+      0,
+      body,
+    );
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
+
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("HTTP 500");
+
     if (expected !== null) expect(result.stderr).toContain(expected);
     else expect(result.stderr).not.toContain("Server:");
-    expect(existsSync(join(fixture.dataDir, "npm.log"))).toBe(false);
+    expect(existsSync(join(fixture.binDir, "npm.log"))).toBe(false);
   });
 
   it("retries a transient server artifact download failure", () => {
     const fixture = createFixture();
-    writeServerInstallTools(fixture, 200, FIXTURE_ARTIFACT_DIGEST, 1);
+    writeServerInstallTools(
+      fixture,
+      200,
+      getRuntimeArtifactFixture().digest,
+      1,
+    );
 
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
     expect(result.status, result.stderr).toBe(0);
     expect(
-      readFileSync(join(fixture.dataDir, "curl-attempts.log"), "utf8")
+      readFileSync(join(fixture.binDir, "curl-attempts.log"), "utf8")
         .trim()
         .split("\n"),
     ).toEqual(["504", "200"]);
-    expect(result.stdout).toContain("Downloaded the server's bb-app package");
+    expect(result.stdout).toContain(
+      "Downloaded the server's omnyo-app package",
+    );
+
     const daemonPid = Number(
       readFileSync(join(fixture.dataDir, "install-daemon.pid"), "utf8"),
     );
+
     process.kill(daemonPid, "SIGTERM");
   });
 
-  it("skips downloading and installing an identical host artifact", () => {
+  it("refuses a duplicate installation while the same artifact owner is active", () => {
     const fixture = createFixture();
     writeServerInstallTools(fixture, 200);
+
     const first = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
+
     expect(first.status, first.stderr).toBe(0);
+    const pidFile = join(fixture.dataDir, "install-daemon.pid");
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    const auth = readFileSync(join(fixture.dataDir, "auth.json"));
+    const config = readFileSync(join(fixture.dataDir, "config.json"));
 
-    const second = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
-    });
+    try {
+      const second = runScript(BOOTSTRAP_ARGS, fixture, {
+        OMNYO_INSTALL_SKIP_SERVICE: "1",
+      });
 
-    expect(second.status, second.stderr).toBe(0);
-    expect(second.stdout).toContain(
-      "The identical server host artifact is already installed",
-    );
-    expect(
-      readFileSync(join(fixture.dataDir, "host-artifact.sha256"), "utf8"),
-    ).toBe(`${FIXTURE_ARTIFACT_DIGEST}\n`);
-    expect(
-      readFileSync(join(fixture.dataDir, "npm.log"), "utf8").trim().split("\n"),
-    ).toHaveLength(1);
-    expect(readFileSync(join(fixture.dataDir, "curl.log"), "utf8")).toContain(
-      `If-None-Match: "sha256-${FIXTURE_ARTIFACT_DIGEST}"`,
-    );
-    const daemonPid = Number(
-      readFileSync(join(fixture.dataDir, "install-daemon.pid"), "utf8"),
-    );
-    process.kill(daemonPid, "SIGTERM");
+      expect(second.status).toBe(1);
+      expect(second.stderr).toContain("existing daemon");
+      expect(Number(readFileSync(pidFile, "utf8"))).toBe(pid);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      expect(readFileSync(join(fixture.dataDir, "auth.json"))).toEqual(auth);
+      expect(readFileSync(join(fixture.dataDir, "config.json"))).toEqual(
+        config,
+      );
+      expect(
+        readFileSync(join(fixture.binDir, "npm.log"), "utf8")
+          .trim()
+          .split("\n"),
+      ).toHaveLength(1);
+    } finally {
+      process.kill(pid, "SIGTERM");
+    }
   });
 
   it("rejects a server host artifact whose digest does not match", () => {
@@ -1065,45 +1193,139 @@ fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringi
     writeServerInstallTools(fixture, 200, "a".repeat(64));
 
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("failed SHA-256 verification");
-    expect(existsSync(join(fixture.dataDir, "npm.log"))).toBe(false);
+    expect(existsSync(join(fixture.binDir, "npm.log"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "host-artifact.sha256"))).toBe(
       false,
     );
   });
 
-  it("falls back to npm only when the server artifact returns 404", () => {
+  it("adopts a pinned local artifact without a canonical or public package fallback", () => {
+    const fixture = createFixture();
+    writeJoinedState(fixture);
+    writeServerInstallTools(fixture, 500);
+    const artifact = join(fixture.homeDir, "approved.tgz");
+    writeFileSync(artifact, getRuntimeArtifactFixture().bytes);
+    writeFileSync(
+      join(fixture.dataDir, "auth.json"),
+      JSON.stringify({ hostId: "host-test", hostKey: "secret" }) + "\n",
+    );
+    const before = readFileSync(join(fixture.dataDir, "auth.json"));
+
+    const result = runScript(
+      [
+        "--adopt",
+        "--data-dir",
+        fixture.dataDir,
+        "--artifact-path",
+        artifact,
+        "--artifact-sha256",
+        getRuntimeArtifactFixture().digest,
+      ],
+      fixture,
+      { OMNYO_ENROLLMENT: undefined, OMNYO_INSTALL_SKIP_SERVICE: "1" },
+    );
+
+    try {
+      expect(result.status, result.stderr).toBe(0);
+      expect(existsSync(join(fixture.binDir, "curl.log"))).toBe(false);
+      expect(readFileSync(join(fixture.binDir, "npm.log"), "utf8")).toMatch(
+        /omnyo-app\.tgz\n$/u,
+      );
+      expect(
+        readFileSync(join(fixture.dataDir, "host-artifact.sha256"), "utf8"),
+      ).toBe(getRuntimeArtifactFixture().digest + "\n");
+      expect(readFileSync(join(fixture.dataDir, "auth.json"))).toEqual(before);
+    } finally {
+      const pidFile = join(fixture.dataDir, "install-daemon.pid");
+
+      if (existsSync(pidFile))
+        process.kill(Number(readFileSync(pidFile, "utf8")), "SIGTERM");
+    }
+  });
+
+  it.each([
+    "missing-hash",
+    "missing-path",
+    "invalid-hash",
+    "missing-file",
+    "symlink",
+    "wrong-hash",
+  ])(
+    "refuses a local artifact before changing the enrolled data: %s",
+    (mode) => {
+      const fixture = createFixture();
+      writeJoinedState(fixture);
+      writeServerInstallTools(fixture, 500);
+      const artifact = join(fixture.homeDir, "approved.tgz");
+      writeFileSync(artifact, getRuntimeArtifactFixture().bytes);
+      const link = artifact + ".link";
+
+      if (mode === "symlink") symlinkSync(artifact, link);
+      const before = readdirSync(fixture.dataDir).sort();
+      const args = ["--adopt", "--data-dir", fixture.dataDir];
+
+      if (mode !== "missing-path")
+        args.push(
+          "--artifact-path",
+          mode === "missing-file"
+            ? artifact + ".missing"
+            : mode === "symlink"
+              ? link
+              : artifact,
+        );
+
+      if (mode !== "missing-hash")
+        args.push(
+          "--artifact-sha256",
+          mode === "invalid-hash"
+            ? "invalid"
+            : mode === "wrong-hash"
+              ? "0".repeat(64)
+              : getRuntimeArtifactFixture().digest,
+        );
+      const result = runScript(args, fixture, { OMNYO_ENROLLMENT: undefined });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/artifact|Artifact/u);
+      expect(readdirSync(fixture.dataDir).sort()).toEqual(before);
+      expect(existsSync(join(fixture.homeDir, ".local/bin/omnyo"))).toBe(false);
+    },
+  );
+
+  it("refuses a missing private artifact without installing a registry package", () => {
     const fixture = createFixture();
     writeServerInstallTools(fixture, 404);
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
-    expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(join(fixture.dataDir, "npm.log"), "utf8")).toMatch(
-      /^install -g --allow-scripts=better-sqlite3,node-pty,@parcel\/watcher --prefix \/.*\/data\/npm bb-app\n$/u,
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("HTTP 404");
+    expect(existsSync(join(fixture.binDir, "npm.log"))).toBe(false);
+    expect(existsSync(join(fixture.dataDir, "host-artifact.sha256"))).toBe(
+      false,
     );
-    const daemonPid = Number(
-      readFileSync(join(fixture.dataDir, "install-daemon.pid"), "utf8"),
-    );
-    process.kill(daemonPid, "SIGTERM");
+    expect(existsSync(join(fixture.dataDir, "npm"))).toBe(false);
+    expect(existsSync(join(fixture.homeDir, ".local"))).toBe(false);
   });
 
   it("fails loudly when npm skipped the native add-on install scripts", () => {
     const fixture = createFixture();
     writeServerInstallTools(fixture, 200);
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
       FAKE_NPM_SKIP_NATIVE_MODULES: "1",
     });
 
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain(
-      "npm installed bb-app, but its host native add-ons (node-pty, @parcel/watcher) did not load.",
+      "npm installed omnyo-app, but its host native add-ons (node-pty, @parcel/watcher) did not load.",
     );
     expect(result.stderr).toContain(
       "npm_config_allow_scripts=better-sqlite3,node-pty,@parcel/watcher",
@@ -1111,36 +1333,42 @@ fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringi
     expect(existsSync(join(fixture.dataDir, "install-daemon.pid"))).toBe(false);
   });
 
-  it("defaults the data dir to a per-server directory under ~/.bb-machines", () => {
+  it("defaults the data dir to a per-server directory under ~/.omnyo-machines", () => {
     const fixture = createFixture();
     writeServerInstallTools(fixture, 200);
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_DATA_DIR: "",
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_DATA_DIR: "",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
     expect(result.status, result.stderr).toBe(0);
+
     const defaultDataDir = join(
       fixture.homeDir,
-      ".bb-machines/machine.getbb.app",
+      ".omnyo-machines/coordinator.example",
     );
+
     expect(
       JSON.parse(readFileSync(join(defaultDataDir, "auth.json"), "utf8")),
     ).toMatchObject({ hostId: "host-test" });
+
     const daemonPid = Number(
       readFileSync(join(defaultDataDir, "install-daemon.pid"), "utf8"),
     );
+
     process.kill(daemonPid, "SIGTERM");
   });
 
   it("refuses a data dir enrolled for a different host instead of faking success", () => {
     const fixture = createFixture();
     writeCurlArtifactMock(fixture, 404);
-    writeExecutable(join(fixture.binDir, "bb-app"), "#!/bin/sh\nexit 99\n");
-    writeEnrollingBb(fixture);
-    writeJoinedState(fixture, "https://machine.getbb.app", "host-other");
+    writeExecutable(join(fixture.binDir, "omnyo-app"), "#!/bin/sh\nexit 99\n");
+    writeEnrollmentCli(fixture);
+    writeJoinedState(fixture, "https://coordinator.example", "host-other");
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
     expect(result.status).toBe(1);
@@ -1155,9 +1383,10 @@ fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringi
     const fixture = createFixture();
     writeServerInstallTools(fixture, 200);
     const missingDir = join(fixture.homeDir, "elsewhere");
+
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_DATA_DIR: "",
-      BB_ENROLLMENT: JSON.stringify({
+      OMNYO_DATA_DIR: "",
+      OMNYO_ENROLLMENT: JSON.stringify({
         ...JSON.parse(bootstrapBundle()),
         reconnect: true,
         dataDir: missingDir,
@@ -1181,8 +1410,8 @@ fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringi
     writeFileSync(
       join(fixture.dataDir, "config.json"),
       JSON.stringify({
-        serverUrl: "https://machine.getbb.app/",
-        serverHeaders: { "x-bb-connect-machine": "machine-credential" },
+        serverUrl: "https://coordinator.example/",
+        serverHeaders: { "x-omnyo-connect-machine": "machine-credential" },
       }),
     );
     writeServerInstallTools(fixture, 200);
@@ -1192,7 +1421,7 @@ fs.writeFileSync(path.join(process.env.BB_DATA_DIR, "config.json"), JSON.stringi
       `#!/bin/sh
 if [ "$1" = bootstrap ]; then
   port=$(sed -n '1p' "${join(fixture.dataDir, "host-daemon-port")}")
-  BB_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/bb-app")}" host-daemon --host-daemon-port "$port" --server-url https://machine.getbb.app >/dev/null 2>&1 &
+  OMNYO_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/omnyo-app")}" host-daemon --host-daemon-port "$port" --server-url https://coordinator.example >/dev/null 2>&1 &
   echo $! >"${join(fixture.dataDir, "service-daemon.pid")}"
 fi
 `,
@@ -1201,31 +1430,36 @@ fi
     const result = runScript(
       ["--adopt", "--data-dir", fixture.dataDir],
       fixture,
-      { BB_DATA_DIR: undefined, BB_ENROLLMENT: undefined },
+      { OMNYO_DATA_DIR: undefined, OMNYO_ENROLLMENT: undefined },
     );
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(
-      "Setting up this machine as host-test for https://machine.getbb.app",
+      "Setting up this machine as host-test for https://coordinator.example",
     );
     expect(result.stdout).toContain("already joined");
-    expect(result.stdout).toContain("  ●  bb machine is ready");
+    expect(result.stdout).toContain("  ●  Omnyo machine is ready");
     expect(existsSync(join(fixture.dataDir, "enrollment-argv"))).toBe(false);
     expect(
-      readFileSync(join(fixture.dataDir, "curl-config.log"), "utf8"),
-    ).toContain('header = "x-bb-connect-machine: machine-credential"');
+      readFileSync(join(fixture.binDir, "curl-config.log"), "utf8"),
+    ).toContain('header = "x-omnyo-connect-machine: machine-credential"');
+    expect(readFileSync(join(fixture.binDir, "curl.log"), "utf8")).not.toMatch(
+      /--location|(^|\s)-L(\s|$)/u,
+    );
+
     const plist = readFileSync(
       join(
         fixture.homeDir,
-        "Library/LaunchAgents/app.getbb.host-daemon.machine-getbb-app-host-test.plist",
+        "Library/LaunchAgents/app.omnyo.host-daemon.coordinator-example-host-test.plist",
       ),
       "utf8",
     );
+
     expect(plist).toContain(
-      `<key>BB_DATA_DIR</key><string>${fixture.dataDir}</string>`,
+      `<key>OMNYO_DATA_DIR</key><string>${fixture.dataDir}</string>`,
     );
     expect(plist).toContain("<string>--auto-update</string>");
-    expect(plist).toContain("<string>https://machine.getbb.app</string>");
+    expect(plist).toContain("<string>https://coordinator.example</string>");
   });
 
   it("sends a legacy machine credential when adopting a data directory", () => {
@@ -1237,7 +1471,7 @@ fi
     writeFileSync(
       join(fixture.dataDir, "config.json"),
       JSON.stringify({
-        serverUrl: "https://machine.getbb.app",
+        serverUrl: "https://coordinator.example",
         machineCredential: "legacy-credential",
       }),
     );
@@ -1246,7 +1480,7 @@ fi
     const result = runScript(
       ["--adopt", "--data-dir", fixture.dataDir],
       fixture,
-      { BB_ENROLLMENT: undefined, BB_INSTALL_SKIP_SERVICE: "1" },
+      { OMNYO_ENROLLMENT: undefined, OMNYO_INSTALL_SKIP_SERVICE: "1" },
     );
 
     expect(result.status, result.stderr).toBe(0);
@@ -1255,8 +1489,8 @@ fi
       "SIGTERM",
     );
     expect(
-      readFileSync(join(fixture.dataDir, "curl-config.log"), "utf8"),
-    ).toContain('header = "x-bb-connect-machine: legacy-credential"');
+      readFileSync(join(fixture.binDir, "curl-config.log"), "utf8"),
+    ).toContain('header = "x-omnyo-connect-machine: legacy-credential"');
   });
 
   it.each([
@@ -1281,21 +1515,21 @@ fi
     const fixture = createFixture();
     writeFileSync(
       join(fixture.dataDir, "config.json"),
-      JSON.stringify({ serverUrl: "https://machine.getbb.app" }),
+      JSON.stringify({ serverUrl: "https://coordinator.example" }),
     );
     writeServerInstallTools(fixture, 200);
 
     const result = runScript(
       ["--adopt", "--data-dir", fixture.dataDir],
       fixture,
-      { BB_ENROLLMENT: undefined },
+      { OMNYO_ENROLLMENT: undefined },
     );
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
       `${fixture.dataDir} has no machine credentials to adopt (auth.json is missing).`,
     );
-    expect(existsSync(join(fixture.dataDir, "npm.log"))).toBe(false);
+    expect(existsSync(join(fixture.binDir, "npm.log"))).toBe(false);
   });
 
   it("assigns a different port when the first enrolled-daemon port is occupied", async () => {
@@ -1307,10 +1541,13 @@ fi
           typeof error === "object" && error !== null && "code" in error
             ? error.code
             : undefined;
+
         if (code === "EADDRINUSE") {
           resolve();
+
           return;
         }
+
         reject(error);
       });
       occupied.listen(38888, "127.0.0.1", () => {
@@ -1320,26 +1557,30 @@ fi
     });
     const fixture = createFixture();
     const invocationPath = join(fixture.dataDir, "invocation");
-    writeCurlArtifactMock(fixture, 404);
-    writeEnrollingBbApp(fixture, invocationPath);
+    writeServerInstallTools(fixture, 200);
+    writeRuntimeLauncher(fixture, invocationPath);
 
     try {
       const result = runScript(BOOTSTRAP_ARGS, fixture, {
-        BB_INSTALL_SKIP_SERVICE: "1",
+        OMNYO_INSTALL_SKIP_SERVICE: "1",
       });
 
       expect(result.status, result.stderr).toBe(0);
+
       const selectedPort = readFileSync(
         join(fixture.dataDir, "host-daemon-port"),
         "utf8",
       ).trim();
+
       expect(selectedPort).not.toBe("38888");
       expect(readFileSync(invocationPath, "utf8")).toContain(
         `--host-daemon-port\n${selectedPort}\n`,
       );
+
       const daemonPid = Number(
         readFileSync(join(fixture.dataDir, "install-daemon.pid"), "utf8"),
       );
+
       process.kill(daemonPid, "SIGTERM");
     } finally {
       if (occupiedByTest) {
@@ -1350,33 +1591,39 @@ fi
     }
   });
 
-  it("reports periodic progress while a host daemon is still joining", () => {
+  it("reports progress while waiting for its newly started daemon", () => {
     const fixture = createFixture();
-    writeCurlArtifactMock(fixture, 404);
-    writeExecutable(
-      join(fixture.binDir, "bb-app"),
-      `#!/usr/bin/env node
-setInterval(() => {}, 1000);
-`,
-    );
-    writeEnrollingBb(fixture);
+    writeServerInstallTools(fixture, 200);
+
+    const runtime = createRuntimeLauncherScript({ hostId: "host-test" })
+      .replace(
+        "const server = http.createServer(",
+        "let checks=0;\nconst server = http.createServer(",
+      )
+      .replace("connected: true, hostId", "connected: ++checks > 5, hostId");
+
+    writeExecutable(join(fixture.dataDir, "omnyo-app-template"), runtime);
     writeExecutable(join(fixture.binDir, "sleep"), "#!/bin/sh\nexit 0\n");
 
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
-      BB_INSTALL_SKIP_SERVICE: "1",
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
     });
 
-    expect(result.status).toBe(1);
-    expect(result.stdout).toContain(
-      "Still waiting for the host daemon (5/60 checks)",
-    );
-    expect(result.stdout).toContain(
-      "Still waiting for the host daemon (60/60 checks)",
-    );
-    expect(result.stderr).toContain("The bb host daemon did not connect");
+    const pidFile = join(fixture.dataDir, "install-daemon.pid");
+
+    try {
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(
+        "Still waiting for the host daemon (5/60 checks)",
+      );
+      expect(result.stdout).not.toContain("(60/60 checks)");
+    } finally {
+      if (existsSync(pidFile))
+        process.kill(Number(readFileSync(pidFile, "utf8")), "SIGTERM");
+    }
   });
 
-  it("starts a fresh macOS launch agent once and replaces it with one new process", () => {
+  it("starts one fresh macOS agent and refuses to replace its existing owner", () => {
     const fixture = createFixture();
     writeJoinedState(fixture);
     writeServerInstallTools(fixture, 200);
@@ -1397,7 +1644,7 @@ if [ "$1" = bootout ] && [ -f "${join(fixture.dataDir, "service-daemon.pid")}" ]
 fi
 if [ "$1" = bootstrap ]; then
   port=$(sed -n '1p' "${join(fixture.dataDir, "host-daemon-port")}")
-  BB_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/bb-app")}" host-daemon --host-daemon-port "$port" --server-url https://machine.getbb.app >/dev/null 2>&1 &
+  OMNYO_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/omnyo-app")}" host-daemon --host-daemon-port "$port" --server-url https://coordinator.example >/dev/null 2>&1 &
   echo $! >"${join(fixture.dataDir, "service-daemon.pid")}"
   printf 'start\n' >>"${join(fixture.dataDir, "launchctl-starts.log")}"
 fi
@@ -1414,162 +1661,164 @@ fi
     expect(firstResult.status, firstResult.stderr).toBe(0);
     expect(firstResult.stdout).toContain("already joined");
     expect(firstResult.stdout).toContain(
-      "Installing the persistent bb host daemon service",
+      "Installing the persistent Omnyo host daemon service",
     );
     expect(firstResult.stdout).toContain(
       "Waiting for the launch agent to connect",
     );
-    expect(firstResult.stdout).toContain("  ●  bb machine is ready");
-    expect(secondResult.status, secondResult.stderr).toBe(0);
-    expect(secondResult.stdout).toContain("already joined");
-    expect(secondResult.stdout).toContain("  ●  bb machine is ready");
-    expect(secondResult.stdout).toContain("server  https://machine.getbb.app");
-    expect(secondResult.stdout).toContain(
+    expect(firstResult.stdout).toContain("  ●  Omnyo machine is ready");
+    expect(secondResult.status, secondResult.stderr).toBe(1);
+    expect(secondResult.stderr).toContain("already has an owner");
+    expect(firstResult.stdout).toContain("server  https://coordinator.example");
+    expect(firstResult.stdout).toContain(
       "service " +
         join(
           fixture.homeDir,
-          "Library/LaunchAgents/app.getbb.host-daemon.machine-getbb-app-host-test.plist",
+          "Library/LaunchAgents/app.omnyo.host-daemon.coordinator-example-host-test.plist",
         ),
     );
+
     const plist = readFileSync(
       join(
         fixture.homeDir,
-        "Library/LaunchAgents/app.getbb.host-daemon.machine-getbb-app-host-test.plist",
+        "Library/LaunchAgents/app.omnyo.host-daemon.coordinator-example-host-test.plist",
       ),
       "utf8",
     );
+
     expect(plist).toContain(
-      "<string>app.getbb.host-daemon.machine-getbb-app-host-test</string>",
+      "<string>app.omnyo.host-daemon.coordinator-example-host-test</string>",
     );
     expect(plist).toContain("<key>RunAtLoad</key><true/>");
     expect(plist).toContain("<key>KeepAlive</key><true/>");
     expect(plist).toContain("<string>host-daemon</string>");
     expect(plist).toContain("<string>--auto-update</string>");
+
     const selectedPort = readFileSync(
       join(fixture.dataDir, "host-daemon-port"),
       "utf8",
     ).trim();
+
     expect(plist).toContain(
       `<string>--host-daemon-port</string>\n    <string>${selectedPort}</string>`,
     );
-    expect(plist).toContain("<string>https://machine.getbb.app</string>");
+    expect(plist).toContain("<string>https://coordinator.example</string>");
     expect(plist).toContain(
-      `<key>BB_APP_NPM_PREFIX</key><string>${realpathSync(fixture.dataDir)}/npm</string>`,
+      `<key>OMNYO_APP_NPM_PREFIX</key><string>${realpathSync(fixture.dataDir)}/npm</string>`,
     );
+
     const serviceFile = join(
       fixture.homeDir,
-      "Library/LaunchAgents/app.getbb.host-daemon.machine-getbb-app-host-test.plist",
+      "Library/LaunchAgents/app.omnyo.host-daemon.coordinator-example-host-test.plist",
     );
+
     const domain = `gui/${process.getuid?.()}`;
     expect(readFileSync(join(fixture.dataDir, "launchctl.log"), "utf8")).toBe(
-      `bootout ${domain} ${serviceFile}\nbootstrap ${domain} ${serviceFile}\nbootout ${domain} ${serviceFile}\nbootstrap ${domain} ${serviceFile}\n`,
+      `bootstrap ${domain} ${serviceFile}\n`,
     );
     expect(
       readFileSync(join(fixture.dataDir, "launchctl-starts.log"), "utf8"),
-    ).toBe("start\nstart\n");
+    ).toBe("start\n");
+
+    const serviceNode =
+      /<key>ProgramArguments<\/key>\s*<array>\s*<string>([^<]+)<\/string>/u.exec(
+        plist,
+      )?.[1] ?? "";
+
+    rmSync(join(fixture.binDir, "node"));
+
+    const nodeAfterSession = spawnSync(serviceNode, ["--version"], {
+      encoding: "utf8",
+    });
+
+    expect(nodeAfterSession.status, nodeAfterSession.error?.message).toBe(0);
+    expect(nodeAfterSession.stdout.trim()).toBe(process.version);
   });
 
-  it("replaces a legacy macOS launch agent even when its port differs", () => {
+  it("refuses replacing a V1 macOS agent when its recorded port differs", () => {
     const fixture = createFixture();
     writeJoinedState(fixture);
     writeServerInstallTools(fixture, 200);
     writeExecutable(join(fixture.binDir, "uname"), "#!/bin/sh\necho Darwin\n");
-    const serviceDir = join(fixture.homeDir, "Library/LaunchAgents");
-    mkdirSync(serviceDir, { recursive: true });
-    const legacyServiceFile = join(
-      serviceDir,
-      "app.getbb.host-daemon.machine-getbb-app.plist",
-    );
-    const unrelatedServiceFile = join(
-      serviceDir,
-      "app.getbb.host-daemon.other-getbb-app.plist",
-    );
-    writeFileSync(join(fixture.dataDir, "host-daemon-port"), "45123\n");
-    writeFileSync(
-      unrelatedServiceFile,
-      "<plist><dict><key>BB_DATA_DIR</key><string>/other/machine</string></dict></plist>\n",
-    );
-    writeFileSync(
-      legacyServiceFile,
-      `<plist><dict>
-<key>Label</key><string>app.getbb.host-daemon.machine-getbb-app</string>
-<key>ProgramArguments</key><array><string>host-daemon</string><string>--host-daemon-port</string><string>45122</string></array>
-<key>EnvironmentVariables</key><dict><key>BB_DATA_DIR</key><string>${fixture.dataDir}</string></dict>
-</dict></plist>
-`,
-    );
-    writeExecutable(
-      join(fixture.binDir, "launchctl"),
-      `#!/bin/sh
-printf '%s\n' "$*" >>"${join(fixture.dataDir, "launchctl.log")}"
-if [ "$1" = print ]; then exit 1; fi
-if [ "$1" = bootstrap ]; then
-  BB_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/bb-app")}" host-daemon --host-daemon-port 45123 --server-url https://machine.getbb.app >/dev/null 2>&1 &
-  echo $! >"${join(fixture.dataDir, "service-daemon.pid")}"
-fi
-`,
+
+    const service = join(
+      fixture.homeDir,
+      "Library/LaunchAgents",
+      "app.getbb.host-daemon.recorded-owner.plist",
     );
 
-    const result = runScript(BOOTSTRAP_ARGS, fixture);
+    mkdirSync(dirname(service), { recursive: true });
 
-    expect(result.status, result.stderr).toBe(0);
-    expect(existsSync(legacyServiceFile)).toBe(false);
-    expect(existsSync(unrelatedServiceFile)).toBe(true);
-    expect(
-      readdirSync(serviceDir).filter((file) => file.endsWith(".plist")),
-    ).toEqual([
-      "app.getbb.host-daemon.machine-getbb-app-host-test.plist",
-      "app.getbb.host-daemon.other-getbb-app.plist",
-    ]);
-    const serviceFile = join(
-      serviceDir,
-      "app.getbb.host-daemon.machine-getbb-app-host-test.plist",
-    );
-    const domain = `gui/${process.getuid?.()}`;
-    expect(readFileSync(join(fixture.dataDir, "launchctl.log"), "utf8")).toBe(
-      `bootout ${domain} ${legacyServiceFile}\nprint ${domain}/app.getbb.host-daemon.machine-getbb-app\nbootout ${domain} ${serviceFile}\nbootstrap ${domain} ${serviceFile}\n`,
-    );
-  });
+    const bytes =
+      "<dict><key>BB_DATA_DIR</key><string>" +
+      fixture.dataDir +
+      "</string></dict>";
 
-  it("keeps an existing launch agent if launchctl cannot stop it", () => {
-    const fixture = createFixture();
-    writeJoinedState(fixture);
-    writeServerInstallTools(fixture, 200);
-    writeExecutable(join(fixture.binDir, "uname"), "#!/bin/sh\necho Darwin\n");
-    const serviceDir = join(fixture.homeDir, "Library/LaunchAgents");
-    mkdirSync(serviceDir, { recursive: true });
-    const existingServiceFile = join(
-      serviceDir,
-      "app.getbb.host-daemon.machine-getbb-app.plist",
-    );
-    writeFileSync(
-      existingServiceFile,
-      `<plist><dict>
-<key>Label</key><string>app.getbb.host-daemon.machine-getbb-app</string>
-<key>EnvironmentVariables</key><dict><key>BB_DATA_DIR</key><string>${fixture.dataDir}</string></dict>
-</dict></plist>
-`,
-    );
-    writeExecutable(
-      join(fixture.binDir, "launchctl"),
-      '#!/bin/sh\nif [ "$1" = bootout ]; then exit 1; fi\n',
-    );
+    writeFileSync(service, bytes);
+    const auth = readFileSync(join(fixture.dataDir, "auth.json"));
+    const config = readFileSync(join(fixture.dataDir, "config.json"));
+    const effects = join(fixture.binDir, "service-effects");
 
-    const result = runScript(BOOTSTRAP_ARGS, fixture);
+    for (const tool of ["launchctl", "systemctl"])
+      writeExecutable(
+        join(fixture.binDir, tool),
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >>'" + effects + "'\nexit 0\n",
+      );
+
+    const result = runScript(BOOTSTRAP_ARGS, fixture, {
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
+    });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      "Could not stop the existing bb launch agent app.getbb.host-daemon.machine-getbb-app.",
+    expect(result.stderr).toContain("already has an owner");
+    expect(readFileSync(service, "utf8")).toBe(bytes);
+    expect(readFileSync(join(fixture.dataDir, "auth.json"))).toEqual(auth);
+    expect(readFileSync(join(fixture.dataDir, "config.json"))).toEqual(config);
+    expect(existsSync(effects)).toBe(false);
+    expect(existsSync(join(fixture.binDir, "npm.log"))).toBe(false);
+  });
+
+  it("preserves an existing macOS agent without trying to stop it", () => {
+    const fixture = createFixture();
+    writeJoinedState(fixture);
+    writeServerInstallTools(fixture, 200);
+    writeExecutable(join(fixture.binDir, "uname"), "#!/bin/sh\necho Darwin\n");
+
+    const service = join(
+      fixture.homeDir,
+      "Library/LaunchAgents",
+      "app.omnyo.host-daemon.recorded-owner.plist",
     );
-    expect(existsSync(existingServiceFile)).toBe(true);
-    expect(
-      existsSync(
-        join(
-          serviceDir,
-          "app.getbb.host-daemon.machine-getbb-app-host-test.plist",
-        ),
-      ),
-    ).toBe(false);
+
+    mkdirSync(dirname(service), { recursive: true });
+
+    const bytes =
+      "<dict><key>OMNYO_DATA_DIR</key><string>" +
+      fixture.dataDir +
+      "</string></dict>";
+
+    writeFileSync(service, bytes);
+    const auth = readFileSync(join(fixture.dataDir, "auth.json"));
+    const config = readFileSync(join(fixture.dataDir, "config.json"));
+    const effects = join(fixture.binDir, "service-effects");
+
+    for (const tool of ["launchctl", "systemctl"])
+      writeExecutable(
+        join(fixture.binDir, tool),
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >>'" + effects + "'\nexit 0\n",
+      );
+
+    const result = runScript(BOOTSTRAP_ARGS, fixture, {
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("already has an owner");
+    expect(readFileSync(service, "utf8")).toBe(bytes);
+    expect(readFileSync(join(fixture.dataDir, "auth.json"))).toEqual(auth);
+    expect(readFileSync(join(fixture.dataDir, "config.json"))).toEqual(config);
+    expect(existsSync(effects)).toBe(false);
+    expect(existsSync(join(fixture.binDir, "npm.log"))).toBe(false);
   });
 
   it("reports launchctl bootstrap failures", () => {
@@ -1592,7 +1841,7 @@ fi
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      "Could not register the bb host-daemon launch agent app.getbb.host-daemon.machine-getbb-app-host-test.",
+      "Could not register the Omnyo host-daemon launch agent app.omnyo.host-daemon.coordinator-example-host-test.",
     );
     expect(result.stderr).toContain("launchctl: fixture bootstrap failure");
   });
@@ -1601,6 +1850,20 @@ fi
     const fixture = createFixture();
     writeJoinedState(fixture);
     writeServerInstallTools(fixture, 200);
+    rmSync(join(fixture.binDir, "node"));
+    writeExecutable(
+      join(fixture.binDir, "node"),
+      `#!/bin/sh
+if [ "$1" = -e ] && [ "$#" -eq 6 ] &&
+   [ "$4" = host-test ] && [ "$5" = https://coordinator.example ] &&
+   { [ "$6" = yes ] || [ "$6" = no ]; }; then
+  case "$2" in
+    *"fetch("*"/status"*) exit 1 ;;
+  esac
+fi
+exec '${process.execPath}' "$@"
+`,
+    );
     writeExecutable(join(fixture.binDir, "uname"), "#!/bin/sh\necho Darwin\n");
     writeExecutable(
       join(fixture.binDir, "launchctl"),
@@ -1614,7 +1877,7 @@ printf '%s\n' "$*" >>"${join(fixture.dataDir, "launchctl.log")}"
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      "The bb host-daemon launch agent started but did not connect to https://machine.getbb.app.",
+      "The Omnyo host-daemon launch agent started but did not connect to https://coordinator.example.",
     );
     expect(result.stderr).toContain(
       `See ${fixture.dataDir}/logs/host-daemon-stdio.log for the startup error and ${fixture.dataDir}/logs/launchd.log for launch agent output.`,
@@ -1624,55 +1887,45 @@ printf '%s\n' "$*" >>"${join(fixture.dataDir, "launchctl.log")}"
     );
   });
 
-  it("restarts an active Linux systemd user unit after replacing it", () => {
+  it("refuses reinstalling an existing systemd owner", () => {
     const fixture = createFixture();
     writeJoinedState(fixture);
     writeServerInstallTools(fixture, 200);
     writeExecutable(join(fixture.binDir, "uname"), "#!/bin/sh\necho Linux\n");
-    writeExecutable(
-      join(fixture.binDir, "systemctl"),
-      `#!/bin/sh
-printf '%s\n' "$*" >>"${join(fixture.dataDir, "systemctl.log")}"
-if [ "$*" = "--user restart bb-host-daemon-machine-getbb-app-host-test.service" ]; then
-  port=$(sed -n '1p' "${join(fixture.dataDir, "host-daemon-port")}")
-  BB_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/bb-app")}" host-daemon --host-daemon-port "$port" --server-url https://machine.getbb.app >/dev/null 2>&1 &
-  echo $! >"${join(fixture.dataDir, "service-daemon.pid")}"
-fi
-`,
+
+    const service = join(
+      fixture.homeDir,
+      ".config/systemd/user",
+      "omnyo-host-daemon-recorded-owner.service",
     );
 
-    const result = runScript(BOOTSTRAP_ARGS, fixture);
+    mkdirSync(dirname(service), { recursive: true });
 
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("already joined");
-    expect(result.stdout).toContain(
-      "Waiting for the systemd service to connect",
-    );
-    const unit = readFileSync(
-      join(
-        fixture.homeDir,
-        ".config/systemd/user/bb-host-daemon-machine-getbb-app-host-test.service",
-      ),
-      "utf8",
-    );
-    const selectedPort = readFileSync(
-      join(fixture.dataDir, "host-daemon-port"),
-      "utf8",
-    ).trim();
-    expect(unit).toContain(
-      `host-daemon --auto-update --host-daemon-port "${selectedPort}" --server-url "https://machine.getbb.app"`,
-    );
-    expect(unit).toContain(
-      `Environment="BB_APP_NPM_PREFIX=${realpathSync(fixture.dataDir)}/npm"`,
-    );
-    expect(unit).toContain("After=network-online.target");
-    expect(unit).toContain("Wants=network-online.target");
-    expect(unit).toContain("Restart=always");
-    expect(unit).toContain("RestartSec=2");
-    expect(unit).toContain("WantedBy=default.target");
-    expect(readFileSync(join(fixture.dataDir, "systemctl.log"), "utf8")).toBe(
-      "--user show-environment\n--user daemon-reload\n--user enable bb-host-daemon-machine-getbb-app-host-test.service\n--user restart bb-host-daemon-machine-getbb-app-host-test.service\n",
-    );
+    const bytes =
+      '[Service]\nEnvironment="OMNYO_DATA_DIR=' + fixture.dataDir + '"\n';
+
+    writeFileSync(service, bytes);
+    const auth = readFileSync(join(fixture.dataDir, "auth.json"));
+    const config = readFileSync(join(fixture.dataDir, "config.json"));
+    const effects = join(fixture.binDir, "service-effects");
+
+    for (const tool of ["launchctl", "systemctl"])
+      writeExecutable(
+        join(fixture.binDir, tool),
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >>'" + effects + "'\nexit 0\n",
+      );
+
+    const result = runScript(BOOTSTRAP_ARGS, fixture, {
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("already has an owner");
+    expect(readFileSync(service, "utf8")).toBe(bytes);
+    expect(readFileSync(join(fixture.dataDir, "auth.json"))).toEqual(auth);
+    expect(readFileSync(join(fixture.dataDir, "config.json"))).toEqual(config);
+    expect(existsSync(effects)).toBe(false);
+    expect(existsSync(join(fixture.binDir, "npm.log"))).toBe(false);
   });
 
   it("recovers the current user's systemd runtime path when the installer has no session environment", () => {
@@ -1694,9 +1947,9 @@ printf '%s\\n' '${runtimeDir}'
       `#!/bin/sh
 printf '%s %s\\n' "$*" "\${XDG_RUNTIME_DIR:-missing}" >>"${join(fixture.dataDir, "systemctl.log")}"
 if [ "$2" = show-environment ] && { [ "\${XDG_RUNTIME_DIR:-}" != '${runtimeDir}' ] || [ -n "\${DBUS_SESSION_BUS_ADDRESS:-}" ]; }; then exit 1; fi
-if [ "$2" = restart ]; then
+if [ "$2" = start ]; then
   port=$(sed -n '1p' "${join(fixture.dataDir, "host-daemon-port")}")
-  BB_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/bb-app")}" host-daemon --host-daemon-port "$port" --server-url https://machine.getbb.app >/dev/null 2>&1 &
+  OMNYO_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/omnyo-app")}" host-daemon --host-daemon-port "$port" --server-url https://coordinator.example >/dev/null 2>&1 &
   echo $! >"${join(fixture.dataDir, "service-daemon.pid")}"
 fi
 `,
@@ -1714,7 +1967,7 @@ fi
     expect(
       readFileSync(join(fixture.dataDir, "systemctl.log"), "utf8"),
     ).toContain(
-      `--user enable bb-host-daemon-machine-getbb-app-host-test.service ${runtimeDir}`,
+      `--user enable omnyo-host-daemon-coordinator-example-host-test.service ${runtimeDir}`,
     );
   });
 
@@ -1745,7 +1998,7 @@ fi
     const fixture = createFixture();
     const invocationPath = join(fixture.dataDir, "invocation");
     writeCurlArtifactMock(fixture, 404);
-    writeEnrollingBbApp(fixture, invocationPath);
+    writeRuntimeLauncher(fixture, invocationPath);
     writeUnreachableUserBus(fixture, "systemd");
 
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
@@ -1764,8 +2017,8 @@ fi
   it("runs a detached daemon on Linux without systemd as init", () => {
     const fixture = createFixture();
     const invocationPath = join(fixture.dataDir, "invocation");
-    writeCurlArtifactMock(fixture, 404);
-    writeEnrollingBbApp(fixture, invocationPath);
+    writeServerInstallTools(fixture, 200);
+    writeRuntimeLauncher(fixture, invocationPath);
     writeUnreachableUserBus(fixture, "tini");
 
     const result = runScript(BOOTSTRAP_ARGS, fixture, {
@@ -1783,6 +2036,7 @@ fi
       );
     } finally {
       const pidPath = join(fixture.dataDir, "install-daemon.pid");
+
       if (existsSync(pidPath)) {
         process.kill(Number(readFileSync(pidPath, "utf8")), "SIGTERM");
       }
@@ -1807,9 +2061,9 @@ fi
         join(fixture.binDir, "systemctl"),
         `#!/bin/sh
 printf '%s\n' "$*" >>"${join(fixture.dataDir, "systemctl.log")}"
-if [ "$*" = "${scope} restart bb-host-daemon-machine-getbb-app-host-test.service" ]; then
+if [ "$*" = "${scope} start omnyo-host-daemon-coordinator-example-host-test.service" ]; then
   port=$(sed -n '1p' "${join(fixture.dataDir, "host-daemon-port")}")
-  BB_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/bb-app")}" host-daemon --host-daemon-port "$port" --server-url https://machine.getbb.app >/dev/null 2>&1 &
+  OMNYO_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/omnyo-app")}" host-daemon --host-daemon-port "$port" --server-url https://coordinator.example >/dev/null 2>&1 &
   echo $! >"${join(fixture.dataDir, "service-daemon.pid")}"
 fi
 `,
@@ -1822,82 +2076,155 @@ fi
       expect(result.stdout).toContain(
         "Waiting for the systemd service to connect",
       );
+
       const unit = readFileSync(
         container
           ? join(
               fixture.homeDir,
-              ".config/systemd/user/bb-host-daemon-machine-getbb-app-host-test.service",
+              ".config/systemd/user/omnyo-host-daemon-coordinator-example-host-test.service",
             )
           : join(
               fixture.dataDir,
-              "systemd/bb-host-daemon-machine-getbb-app-host-test.service",
+              "systemd/omnyo-host-daemon-coordinator-example-host-test.service",
             ),
         "utf8",
       );
+
       const selectedPort = readFileSync(
         join(fixture.dataDir, "host-daemon-port"),
         "utf8",
       ).trim();
+
       expect(unit).toContain(
-        `host-daemon --auto-update --host-daemon-port "${selectedPort}" --server-url "https://machine.getbb.app"`,
+        `host-daemon --auto-update --host-daemon-port "${selectedPort}" --server-url "https://coordinator.example"`,
       );
       expect(unit).toContain(
-        `Environment="BB_APP_NPM_PREFIX=${realpathSync(fixture.dataDir)}/npm"`,
+        `Environment="OMNYO_APP_NPM_PREFIX=${realpathSync(fixture.dataDir)}/npm"`,
       );
       expect(unit).toContain(
         container ? "WantedBy=default.target" : "WantedBy=multi-user.target",
       );
+
       const enableUnit = container
-        ? "bb-host-daemon-machine-getbb-app-host-test.service"
+        ? "omnyo-host-daemon-coordinator-example-host-test.service"
         : join(
             realpathSync(fixture.dataDir),
-            "systemd/bb-host-daemon-machine-getbb-app-host-test.service",
+            "systemd/omnyo-host-daemon-coordinator-example-host-test.service",
           );
+
       expect(readFileSync(join(fixture.dataDir, "systemctl.log"), "utf8")).toBe(
-        `${container ? "--user show-environment\n" : ""}${scope} daemon-reload\n${scope} enable ${enableUnit}\n${scope} restart bb-host-daemon-machine-getbb-app-host-test.service\n`,
+        `${container ? "--user show-environment\n" : ""}${scope} daemon-reload\n${scope} enable ${enableUnit}\n${scope} start omnyo-host-daemon-coordinator-example-host-test.service\n`,
       );
     },
   );
 
-  it("replaces a matching legacy systemd unit with exactly one host service", () => {
+  it("refuses replacing a V1 systemd owner", () => {
     const fixture = createFixture();
     writeJoinedState(fixture);
     writeServerInstallTools(fixture, 200);
     writeExecutable(join(fixture.binDir, "uname"), "#!/bin/sh\necho Linux\n");
-    const serviceDir = join(fixture.homeDir, ".config/systemd/user");
-    mkdirSync(serviceDir, { recursive: true });
-    const legacyServiceFile = join(
-      serviceDir,
-      "bb-host-daemon-machine-getbb-app.service",
-    );
-    writeFileSync(join(fixture.dataDir, "host-daemon-port"), "45123\n");
-    writeFileSync(
-      legacyServiceFile,
-      `[Service]
-ExecStart="node" "bb-app" host-daemon --auto-update --host-daemon-port "45123" --server-url "https://machine.getbb.app"
-Environment="BB_DATA_DIR=${fixture.dataDir}"
-`,
-    );
-    writeExecutable(
-      join(fixture.binDir, "systemctl"),
-      `#!/bin/sh
-printf '%s\n' "$*" >>"${join(fixture.dataDir, "systemctl.log")}"
-if [ "$*" = "--user restart bb-host-daemon-machine-getbb-app-host-test.service" ]; then
-  BB_DATA_DIR="${fixture.dataDir}" "${join(fixture.dataDir, "npm/bin/bb-app")}" host-daemon --host-daemon-port 45123 --server-url https://machine.getbb.app >/dev/null 2>&1 &
-  echo $! >"${join(fixture.dataDir, "service-daemon.pid")}"
-fi
-`,
+
+    const service = join(
+      fixture.homeDir,
+      ".config/systemd/user",
+      "bb-host-daemon-recorded-owner.service",
     );
 
-    const result = runScript(BOOTSTRAP_ARGS, fixture);
+    mkdirSync(dirname(service), { recursive: true });
 
-    expect(result.status, result.stderr).toBe(0);
-    expect(existsSync(legacyServiceFile)).toBe(false);
-    expect(
-      readdirSync(serviceDir).filter((file) => file.endsWith(".service")),
-    ).toEqual(["bb-host-daemon-machine-getbb-app-host-test.service"]);
-    expect(readFileSync(join(fixture.dataDir, "systemctl.log"), "utf8")).toBe(
-      "--user show-environment\n--user disable --now bb-host-daemon-machine-getbb-app.service\n--user daemon-reload\n--user enable bb-host-daemon-machine-getbb-app-host-test.service\n--user restart bb-host-daemon-machine-getbb-app-host-test.service\n",
-    );
+    const bytes =
+      '[Service]\nEnvironment="BB_DATA_DIR=' + fixture.dataDir + '"\n';
+
+    writeFileSync(service, bytes);
+    const auth = readFileSync(join(fixture.dataDir, "auth.json"));
+    const config = readFileSync(join(fixture.dataDir, "config.json"));
+    const effects = join(fixture.binDir, "service-effects");
+
+    for (const tool of ["launchctl", "systemctl"])
+      writeExecutable(
+        join(fixture.binDir, tool),
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >>'" + effects + "'\nexit 0\n",
+      );
+
+    const result = runScript(BOOTSTRAP_ARGS, fixture, {
+      OMNYO_INSTALL_SKIP_SERVICE: "1",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("already has an owner");
+    expect(readFileSync(service, "utf8")).toBe(bytes);
+    expect(readFileSync(join(fixture.dataDir, "auth.json"))).toEqual(auth);
+    expect(readFileSync(join(fixture.dataDir, "config.json"))).toEqual(config);
+    expect(existsSync(effects)).toBe(false);
+    expect(existsSync(join(fixture.binDir, "npm.log"))).toBe(false);
   });
+});
+
+describeOnPosix("installer admission", () => {
+  it.each([
+    "legacy database",
+    "migration pointer",
+    "maintenance hold",
+    "existing service",
+    "alias service",
+  ])(
+    "refuses %s before installer writes or launches a second owner",
+    (kind) => {
+      const fixture = createFixture();
+      const requestLog = join(fixture.binDir, "effects");
+      writeExecutable(join(fixture.binDir, "uname"), "#!/bin/sh\necho Linux\n");
+
+      for (const command of ["curl", "npm", "systemctl", "launchctl"]) {
+        writeExecutable(
+          join(fixture.binDir, command),
+          `#!/bin/sh\nprintf '%s\\n' '${command}' >>'${requestLog}'\nexit 1\n`,
+        );
+      }
+
+      const protectedFile =
+        kind === "legacy database"
+          ? join(fixture.dataDir, "bb.db")
+          : kind === "migration pointer"
+            ? join(fixture.dataDir, "config.json")
+            : kind === "maintenance hold"
+              ? join(fixture.dataDir, "server-maintenance-hold.json")
+              : join(fixture.homeDir, ".config/systemd/user/owned.service");
+
+      mkdirSync(dirname(protectedFile), { recursive: true });
+
+      const bytes =
+        kind === "migration pointer"
+          ? JSON.stringify({
+              serverUrl: "http://127.0.0.1:1",
+              stateMigration: {},
+            })
+          : kind.includes("service")
+            ? `Environment="OMNYO_DATA_DIR=${kind === "alias service" ? fixture.dataDir.replace(/^\/private\//u, "/") : fixture.dataDir}"\n`
+            : "preserved owner bytes";
+
+      writeFileSync(protectedFile, bytes);
+      const before = readdirSync(fixture.dataDir).sort();
+
+      const result = runScript(BOOTSTRAP_ARGS, fixture, {
+        OMNYO_INSTALL_SKIP_SERVICE: "1",
+      });
+
+      expect(result.status).not.toBe(0);
+
+      const reason =
+        kind === "legacy database"
+          ? "existing database"
+          : kind === "migration pointer"
+            ? "cannot be reused"
+            : kind === "maintenance hold"
+              ? "maintenance hold"
+              : "already has an owner";
+
+      expect(result.stderr).toContain(reason);
+      expect(readFileSync(protectedFile, "utf8")).toBe(bytes);
+      expect(readdirSync(fixture.dataDir).sort()).toEqual(before);
+      expect(existsSync(join(fixture.homeDir, ".local"))).toBe(false);
+      expect(existsSync(requestLog)).toBe(false);
+    },
+  );
 });

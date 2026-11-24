@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type {
   TerminalCreateTarget,
   TerminalSession,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   terminalQueryScopeForTarget,
   useRenameTerminal,
@@ -17,8 +17,11 @@ import { isVisibleTerminalSession } from "@/lib/terminal-session-visibility";
 import { normalizeTerminalTitle } from "./thread-terminal-title";
 
 export const DEFAULT_TERMINAL_COLS = 100;
+
 export const DEFAULT_TERMINAL_ROWS = 30;
+
 const EMPTY_TERMINAL_SESSIONS: readonly TerminalSession[] = [];
+
 const TERMINAL_TITLE_RENAME_DEBOUNCE_MS = 250;
 
 export interface ThreadTerminalControllerArgs {
@@ -44,6 +47,7 @@ interface TerminalTitleRenameRequest {
 }
 
 type ThreadTerminalTitleChangeHandler = (title: string) => void;
+
 type TerminalTitleRenameTimeout = number;
 
 function shouldMountTerminalViewForPanel({
@@ -65,31 +69,41 @@ export function useThreadTerminalController({
   target,
 }: ThreadTerminalControllerArgs): ThreadTerminalController {
   const queryClient = useQueryClient();
+
   const latestRequestedTitleRenameRef =
     useRef<TerminalTitleRenameRequest | null>(null);
+
   const pendingTitleRenameTimeoutRef =
     useRef<TerminalTitleRenameTimeout | null>(null);
+
   const [hasPanelOpened, setHasPanelOpened] = useState(isPanelOpen);
+
   if (isPanelOpen && !hasPanelOpened) {
     setHasPanelOpened(true);
   } else if (!isPanelOpen && !isPanelPersistedOpen && hasPanelOpened) {
     setHasPanelOpened(false);
   }
+
   const shouldMountTerminalView = shouldMountTerminalViewForPanel({
     hasPanelOpened,
     isPanelOpen,
     isPanelPersistedOpen,
   });
+
   const terminalsQuery = useTerminals(terminalQueryScopeForTarget(target), {
     enabled: isPanelOpen,
   });
+
   const renameTerminal = useRenameTerminal();
+
   const sessions = useMemo(() => {
     const currentSessions =
       terminalsQuery.data?.sessions ?? EMPTY_TERMINAL_SESSIONS;
+
     if (target.kind !== "host_path") {
       return currentSessions;
     }
+
     return currentSessions.filter(
       (session) =>
         session.threadId === null &&
@@ -98,10 +112,12 @@ export function useThreadTerminalController({
         (target.cwd === null || session.initialCwd === target.cwd),
     );
   }, [target, terminalsQuery.data?.sessions]);
+
   const visibleSessions = useMemo(
     () => sessions.filter(isVisibleTerminalSession),
     [sessions],
   );
+
   const activeSession =
     visibleSessions.find((session) => session.id === terminalId) ?? null;
 
@@ -110,6 +126,7 @@ export function useThreadTerminalController({
       if (pendingTitleRenameTimeoutRef.current === null) {
         return;
       }
+
       window.clearTimeout(pendingTitleRenameTimeoutRef.current);
     };
   }, []);
@@ -122,8 +139,10 @@ export function useThreadTerminalController({
           session,
           terminalId: session.id,
         });
+
         return;
       }
+
       applyTerminalSessionUpsert({ queryClient, session });
     },
     [queryClient],
@@ -135,7 +154,9 @@ export function useThreadTerminalController({
         if (!activeSession || activeSession.status !== "running") {
           return;
         }
+
         const normalizedTitle = normalizeTerminalTitle({ title });
+
         if (!normalizedTitle || normalizedTitle === activeSession.title) {
           return;
         }
@@ -144,7 +165,9 @@ export function useThreadTerminalController({
           terminalId: activeSession.id,
           title: normalizedTitle,
         };
+
         const latestRequest = latestRequestedTitleRenameRef.current;
+
         if (
           latestRequest !== null &&
           latestRequest.terminalId === request.terminalId &&
@@ -154,13 +177,17 @@ export function useThreadTerminalController({
         }
 
         latestRequestedTitleRenameRef.current = request;
+
         if (pendingTitleRenameTimeoutRef.current !== null) {
           window.clearTimeout(pendingTitleRenameTimeoutRef.current);
         }
+
         pendingTitleRenameTimeoutRef.current = window.setTimeout(() => {
           pendingTitleRenameTimeoutRef.current = null;
+
           const onSettled = () => {
             const currentRequest = latestRequestedTitleRenameRef.current;
+
             if (
               currentRequest !== null &&
               currentRequest.terminalId === request.terminalId &&
@@ -169,6 +196,7 @@ export function useThreadTerminalController({
               latestRequestedTitleRenameRef.current = null;
             }
           };
+
           renameTerminal.mutate(
             {
               terminalId: request.terminalId,

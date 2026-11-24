@@ -8,57 +8,74 @@ import { resolveRuntime, runtimeRelease } from "./runtime-pin.js";
 import { createRuntime } from "./runtime.js";
 
 const chrome = z.string().min(1).parse(process.env.DEV_BROWSER_SMOKE_CHROME);
-const root = await mkdtemp(join(tmpdir(), "bb-dev-browser-install-smoke-"));
+
+const root = await mkdtemp(join(tmpdir(), "omnyo-dev-browser-install-smoke-"));
+
 const dataDir = join(root, "data");
+
 await mkdir(join(dataDir, "runtime"), { recursive: true });
+
 await symlink(resolve(chrome), join(dataDir, "runtime", "chrome"));
+
 const signal = new AbortController().signal;
+
 const progress: string[] = [];
+
 try {
   const coldStart = Date.now();
+
   const cold = await resolveRuntime({
     dataDir,
     signal,
     onProgress: (detail) => progress.push(detail),
   });
+
   const coldMs = Date.now() - coldStart;
   assert.equal(cold.source, "release");
   assert.equal(cold.version, runtimeRelease.version);
   assert.ok(cold.binary.startsWith(installRoot(dataDir)));
   const digest = await sha256File(cold.binary);
   const warmStart = Date.now();
+
   const warm = await resolveRuntime({
     dataDir,
     signal,
     env: { PATH: join(root, "no-npm-here") },
   });
+
   const warmMs = Date.now() - warmStart;
   assert.equal(warm.binary, cold.binary);
+
   const session = await createRuntime({
     runtime: warm,
     dataDir,
     tempDir: join(root, "sessions"),
     signal,
   });
+
   try {
     const page =
       "data:text/html," +
       encodeURIComponent(
         `<h1>installed</h1><iframe srcdoc="<button id='inner'>frame-button</button>"></iframe>`,
       );
+
     const result = await session.run(
       `const p = await browser.getPage("main"); await p.goto(${JSON.stringify(page)}); await p.snapshot()`,
       20_000,
       signal,
     );
+
     assert.equal(result.exitCode, 0, result.text);
     assert.match(result.text, /installed/);
     assert.match(result.text, /frame-button/);
+
     const shot = await session.run(
       'const p = await browser.getPage("main"); await p.shot({ type: "jpeg", maxEdge: 640, quality: 60 }); undefined',
       20_000,
       signal,
     );
+
     assert.equal(shot.images.length, 1);
     assert.deepEqual(
       (await readFile(shot.images[0]!.path)).subarray(0, 3),

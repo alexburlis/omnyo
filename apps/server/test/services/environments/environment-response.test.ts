@@ -6,7 +6,7 @@ import {
   updateHost,
   upsertHost,
   type EnvironmentRow,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   resolveEnvironmentWorkspaceDisplayKind,
   toEnvironmentResponse,
@@ -17,6 +17,7 @@ function setupDb() {
   const db = createConnection(":memory:");
   migrate(db);
   upsertHost(db, noopNotifier, { id: "host_1", name: "Host" });
+
   return db;
 }
 

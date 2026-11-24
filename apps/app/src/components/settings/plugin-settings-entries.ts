@@ -4,6 +4,7 @@ export interface PluginSettingsCandidate {
   icon: string | null;
   id: string;
   name: string | null;
+  shortName: string | null;
 }
 
 interface PluginSettingsSectionOwner {
@@ -27,6 +28,7 @@ export function buildPluginSettingsEntries(
   const pluginsWithCustomSettings = new Set(
     args.settingsSections.map((section) => section.pluginId),
   );
+
   return args.installedPlugins
     .filter(
       (plugin) =>
@@ -35,7 +37,7 @@ export function buildPluginSettingsEntries(
     )
     .map((plugin) => ({
       id: plugin.id,
-      label: plugin.name ?? plugin.id,
+      label: plugin.shortName ?? plugin.name ?? plugin.id,
       icon: plugin.icon,
     }))
     .sort((left, right) => left.label.localeCompare(right.label));

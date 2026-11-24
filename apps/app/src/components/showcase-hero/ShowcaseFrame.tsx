@@ -1,5 +1,5 @@
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import type { ShowcaseArchetype, ShowcaseScenes } from "./showcase-archetype";
 import { accentInk, accentTint, neutral } from "./showcase-tokens";
 
@@ -23,6 +23,7 @@ export function ShowcaseFrame({
   className?: string;
 }) {
   const active = archetypes[activeIndex] ?? archetypes[0];
+
   if (active === undefined) return null;
   const accent = active.accentToken;
 
@@ -48,17 +49,18 @@ export function ShowcaseFrame({
           ))}
         </div>
         <span
-          className={cn(
-            "mx-auto truncate text-2xs font-medium",
-            !reducedMotion && "transition-colors duration-500",
-          )}
+          className="mx-auto truncate text-2xs font-medium"
           style={{ color: neutral(48) }}
         >
           {titlePrefix}
           {active.title}
         </span>
         <span
-          className="shrink-0 rounded-full px-1.5 py-0.5 text-2xs font-medium"
+          className={cn(
+            "shrink-0 rounded-full px-1.5 py-0.5 text-2xs font-medium",
+            !reducedMotion &&
+              "transition-colors duration-(--motion-duration-slow)",
+          )}
           style={{
             background: accentTint(accent, 14),
             color: accentInk(accent, 60),
@@ -90,7 +92,8 @@ export function ShowcaseFrame({
           <span
             className={cn(
               "flex size-5 items-center justify-center rounded-md border",
-              !reducedMotion && "transition-all duration-500",
+              !reducedMotion &&
+                "transition-colors duration-(--motion-duration-slow)",
             )}
             style={{
               background: accentTint(accent, 16),
@@ -105,15 +108,18 @@ export function ShowcaseFrame({
         <div className="relative min-w-0 flex-1">
           {archetypes.map((archetype, index) => {
             const Scene = scenes[archetype.id];
+
             if (Scene === undefined) return null;
             const isActive = index === activeIndex;
+
             return (
               <div
                 key={archetype.id}
                 aria-hidden={!isActive}
                 className={cn(
                   "absolute inset-0",
-                  !reducedMotion && "transition-opacity duration-500 ease-out",
+                  !reducedMotion &&
+                    "transition-opacity duration-(--motion-duration-slow)",
                   isActive
                     ? "opacity-100"
                     : "pointer-events-none select-none opacity-0",

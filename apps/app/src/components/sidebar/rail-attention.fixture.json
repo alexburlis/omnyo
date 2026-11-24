@@ -1,0 +1,634 @@
+{
+  "description": "Shared rail fixture with explicit server work labels. Project counts use each top-level chat’s own work and unread state.",
+  "projects": [
+    {
+      "id": "proj_omnyo",
+      "name": "omnyo-private",
+      "isPersonal": false
+    },
+    {
+      "id": "proj_web",
+      "name": "web",
+      "isPersonal": false
+    },
+    {
+      "id": "proj_ops",
+      "name": "ops",
+      "isPersonal": false
+    },
+    {
+      "id": "proj_empty",
+      "name": "empty",
+      "isPersonal": false
+    },
+    {
+      "id": "proj_personal",
+      "name": "Personal",
+      "isPersonal": true
+    }
+  ],
+  "threads": [
+    {
+      "id": "thr_omnyo_failed_read",
+      "projectId": "proj_omnyo",
+      "parentThreadId": null,
+      "status": "error",
+      "runtimeStatus": "error",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "unread-error",
+      "note": "A read failure stays Failed.",
+      "workLabel": "failed"
+    },
+    {
+      "id": "thr_omnyo_parent",
+      "projectId": "proj_omnyo",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "open",
+      "note": "The collapsed family selects its child's Blocked label.",
+      "workLabel": "open"
+    },
+    {
+      "id": "thr_omnyo_child_failed",
+      "projectId": "proj_omnyo",
+      "parentThreadId": "thr_omnyo_parent",
+      "status": "error",
+      "runtimeStatus": "error",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": true,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "unread-error",
+      "note": "A failed child stays Failed independent of unreadness.",
+      "workLabel": "failed"
+    },
+    {
+      "id": "thr_omnyo_pending",
+      "projectId": "proj_omnyo",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": true,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "waiting-for-input",
+      "note": "pending interaction",
+      "workLabel": "needs-you"
+    },
+    {
+      "id": "thr_omnyo_running",
+      "projectId": "proj_omnyo",
+      "parentThreadId": null,
+      "status": "active",
+      "runtimeStatus": "active",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "runtime",
+      "note": "running turn",
+      "workLabel": "working"
+    },
+    {
+      "id": "thr_omnyo_unread",
+      "projectId": "proj_omnyo",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": true,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "open",
+      "note": "Open with an independent unread dot.",
+      "workLabel": "open"
+    },
+    {
+      "id": "thr_omnyo_idle",
+      "projectId": "proj_omnyo",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "open",
+      "note": "quiet",
+      "workLabel": "open"
+    },
+    {
+      "id": "thr_omnyo_archived_failed",
+      "projectId": "proj_omnyo",
+      "parentThreadId": null,
+      "status": "error",
+      "runtimeStatus": "error",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": true,
+      "isHidden": false,
+      "isArchived": true,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "unread-error",
+      "note": "archived: not counted",
+      "workLabel": "failed"
+    },
+    {
+      "id": "thr_omnyo_hidden_needs",
+      "projectId": "proj_omnyo",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": true,
+      "isUnread": false,
+      "isHidden": true,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "waiting-for-input",
+      "note": "hidden worker: not counted",
+      "workLabel": "needs-you"
+    },
+    {
+      "id": "thr_web_parent",
+      "projectId": "proj_web",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": true,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "open",
+      "note": "An unread Open root retains unreadness when its family needs you.",
+      "workLabel": "open"
+    },
+    {
+      "id": "thr_web_child_pending",
+      "projectId": "proj_web",
+      "parentThreadId": "thr_web_parent",
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": true,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "waiting-for-input",
+      "note": "sub-chat waiting for input",
+      "workLabel": "needs-you"
+    },
+    {
+      "id": "thr_web_workflow",
+      "projectId": "proj_web",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 1,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "runtime",
+      "note": "workflow running",
+      "workLabel": "working"
+    },
+    {
+      "id": "thr_web_queued",
+      "projectId": "proj_web",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "waiting",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "runtime",
+      "note": "queued message waiting",
+      "workLabel": "working"
+    },
+    {
+      "id": "thr_web_held_result",
+      "projectId": "proj_web",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "waiting",
+      "hasPendingInteraction": false,
+      "isUnread": true,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "runtime",
+      "note": "Working retains its independent unread dot.",
+      "workLabel": "working"
+    },
+    {
+      "id": "thr_web_queue_failed",
+      "projectId": "proj_web",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "failed",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "unread-error",
+      "note": "queued message failed to send",
+      "workLabel": "failed"
+    },
+    {
+      "id": "thr_web_unread_error",
+      "projectId": "proj_web",
+      "parentThreadId": null,
+      "status": "error",
+      "runtimeStatus": "error",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": true,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "unread-error",
+      "note": "unread failure",
+      "workLabel": "failed"
+    },
+    {
+      "id": "thr_ops_parent",
+      "projectId": "proj_ops",
+      "parentThreadId": null,
+      "status": "active",
+      "runtimeStatus": "active",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "runtime",
+      "note": "Working is primary while its failed child remains in family facts.",
+      "workLabel": "working"
+    },
+    {
+      "id": "thr_ops_child",
+      "projectId": "proj_ops",
+      "parentThreadId": "thr_ops_parent",
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "open",
+      "note": "quiet sub-chat",
+      "workLabel": "open"
+    },
+    {
+      "id": "thr_ops_grandchild_failed",
+      "projectId": "proj_ops",
+      "parentThreadId": "thr_ops_child",
+      "status": "error",
+      "runtimeStatus": "error",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "unread-error",
+      "note": "failed grandchild",
+      "workLabel": "failed"
+    },
+    {
+      "id": "thr_ops_background",
+      "projectId": "proj_ops",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": true,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 1,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "runtime",
+      "note": "A background owner keeps Working alongside unreadness.",
+      "workLabel": "working"
+    },
+    {
+      "id": "thr_ops_archived_parent",
+      "projectId": "proj_ops",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": true,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "open",
+      "note": "archived parent: not counted",
+      "workLabel": "open"
+    },
+    {
+      "id": "thr_ops_orphan_unread",
+      "projectId": "proj_ops",
+      "parentThreadId": "thr_ops_archived_parent",
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": true,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "open",
+      "note": "An unread child under an archived parent becomes an unread root.",
+      "workLabel": "open"
+    },
+    {
+      "id": "thr_personal_plan",
+      "projectId": "proj_personal",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 1,
+        "goals": 0
+      },
+      "indicator": "open",
+      "note": "Plan mode alone does not establish live work.",
+      "workLabel": "open"
+    },
+    {
+      "id": "thr_personal_goal_pending",
+      "projectId": "proj_personal",
+      "parentThreadId": null,
+      "status": "idle",
+      "runtimeStatus": "idle",
+      "queuedWork": "none",
+      "hasPendingInteraction": true,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 1
+      },
+      "indicator": "waiting-for-input",
+      "note": "needs you outranks an active goal",
+      "workLabel": "needs-you"
+    },
+    {
+      "id": "thr_personal_starting",
+      "projectId": "proj_personal",
+      "parentThreadId": null,
+      "status": "starting",
+      "runtimeStatus": "starting",
+      "queuedWork": "none",
+      "hasPendingInteraction": false,
+      "isUnread": false,
+      "isHidden": false,
+      "isArchived": false,
+      "activity": {
+        "workflows": 0,
+        "backgroundAgents": 0,
+        "backgroundCommands": 0,
+        "planMode": 0,
+        "goals": 0
+      },
+      "indicator": "runtime",
+      "note": "starting turn",
+      "workLabel": "working"
+    }
+  ],
+  "expected": {
+    "projects": {
+      "proj_omnyo": {
+        "failed": 1,
+        "needs": 1,
+        "running": 1,
+        "fresh": 1,
+        "unread": 1,
+        "hasRunningWork": true
+      },
+      "proj_web": {
+        "failed": 2,
+        "needs": 0,
+        "running": 3,
+        "fresh": 1,
+        "unread": 3,
+        "hasRunningWork": true
+      },
+      "proj_ops": {
+        "failed": 0,
+        "needs": 0,
+        "running": 2,
+        "fresh": 0,
+        "unread": 1,
+        "hasRunningWork": true
+      },
+      "proj_empty": {
+        "failed": 0,
+        "needs": 0,
+        "running": 0,
+        "fresh": 0,
+        "unread": 0,
+        "hasRunningWork": false
+      },
+      "proj_personal": {
+        "failed": 0,
+        "needs": 1,
+        "running": 1,
+        "fresh": 0,
+        "unread": 0,
+        "hasRunningWork": true
+      }
+    },
+    "inbox": {
+      "failed": 3,
+      "needs": 2,
+      "running": 7,
+      "fresh": 2,
+      "unread": 5,
+      "hasRunningWork": true
+    }
+  }
+}

@@ -6,12 +6,9 @@ const appDir = dirname(fileURLToPath(import.meta.url));
 
 export function sharedUiEnvSeam(): Plugin {
   const portalScope = resolve(appDir, "./src/lib/portal-scope.ts");
-  const browserDimming = resolve(
-    appDir,
-    "./src/hooks/useBrowserDimmingModal.ts",
-  );
+
   return {
-    name: "bb:shared-ui-env-seam",
+    name: "omnyo:shared-ui-env-seam",
     enforce: "pre",
     resolveId(source, importer) {
       if (
@@ -20,10 +17,9 @@ export function sharedUiEnvSeam(): Plugin {
       ) {
         return null;
       }
+
       if (/(^|\/)lib\/portal-scope(\.js)?$/.test(source)) return portalScope;
-      if (/(^|\/)hooks\/useBrowserDimmingModal(\.js)?$/.test(source)) {
-        return browserDimming;
-      }
+
       return null;
     },
   };

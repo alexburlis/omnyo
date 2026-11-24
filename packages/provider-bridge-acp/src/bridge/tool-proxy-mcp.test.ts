@@ -5,10 +5,12 @@ import { createServer, type Server, type Socket } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildAcpMcpServerConfig } from "./tool-proxy-mcp.js";
+import { buildAcpMcpServerConfig } from "@omnyo/provider-bridge-protocol/acp/tool-proxy-mcp";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
 const BRIDGE_MODULE = resolve(here, "bridge.ts");
+
 const TSX_LOADER = import.meta.resolve("tsx");
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -34,6 +36,7 @@ async function listenFakeBridge(args: {
   const sockets = new Set<Socket>();
   const heldResponses: Array<() => void> = [];
   const responseTimers = new Set<ReturnType<typeof setTimeout>>();
+
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.on("error", () => {});
@@ -43,27 +46,35 @@ async function listenFakeBridge(args: {
     socket.on("data", (chunk) => {
       buffer += chunk;
       const newline = buffer.indexOf("\n");
+
       if (newline === -1) return;
+
       const request = JSON.parse(buffer.slice(0, newline)) as {
         kind?: unknown;
       };
+
       if (request.kind === "initialized") {
         socket.end(`${JSON.stringify({ ok: true, content: "" })}\n`);
+
         return;
       }
+
       requests.push(request);
       let responded = false;
       socket.once("close", () => {
         if (!responded) cancelled.push(request);
       });
+
       const response = args.response ?? {
         ok: true,
         content: '{"answers":{"Which?":"B"}}',
       };
+
       const respond = () => {
         responded = true;
         socket.end(`${JSON.stringify(response)}\n`);
       };
+
       if (args.responseDelayMs === null) {
         heldResponses.push(respond);
       } else {
@@ -71,10 +82,12 @@ async function listenFakeBridge(args: {
           responseTimers.delete(timer);
           respond();
         }, args.responseDelayMs);
+
         responseTimers.add(timer);
       }
     });
   });
+
   await new Promise<void>((resolveListen) =>
     server.listen(0, "127.0.0.1", () => resolveListen()),
   );
@@ -84,14 +97,17 @@ async function listenFakeBridge(args: {
         for (const timer of responseTimers) clearTimeout(timer);
         responseTimers.clear();
         heldResponses.length = 0;
+
         for (const socket of sockets) socket.destroy();
         server.close(() => resolveClose());
       }),
   );
   const address = server.address();
+
   if (!address || typeof address === "string") {
     throw new Error("fake bridge did not bind a port");
   }
+
   return {
     port: address.port,
     server,
@@ -126,33 +142,40 @@ async function connectLikeOpenCode(port: number): Promise<Client> {
     threadId: "thread-ask",
     token: "secret-token",
   });
+
   const env: Record<string, string> = {};
+
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
   }
+
   for (const { name, value } of config.env) env[name] = value;
-  env.BB_ACP_DYNAMIC_TOOL_PROGRESS_INTERVAL_MS = "200";
+  env.OMNYO_ACP_DYNAMIC_TOOL_PROGRESS_INTERVAL_MS = "200";
+
   const transport = new StdioClientTransport({
     command: config.command,
     args: config.args,
     env,
     stderr: "pipe",
   });
+
   const client = new Client({ name: "opencode-like", version: "0" });
   await client.connect(transport);
   transport.stderr?.on("data", (chunk: Buffer) => {
-    process.stderr.write(`[bb-bridge mcp] ${chunk.toString()}`);
+    process.stderr.write(`[omnyo-bridge mcp] ${chunk.toString()}`);
   });
   cleanups.push(() => client.close());
+
   return client;
 }
 
-describe("bb-bridge MCP server keeps long tool calls alive", () => {
+describe("omnyo-bridge MCP server keeps long tool calls alive", () => {
   it("sends progress notifications so an OpenCode-style client does not time out while the user answers", async () => {
     const fakeBridge = await listenFakeBridge({ responseDelayMs: 2_500 });
     const client = await connectLikeOpenCode(fakeBridge.port);
 
     let progressCount = 0;
+
     const result = await client.callTool(
       {
         name: "AskUserQuestion",
@@ -188,6 +211,7 @@ describe("bb-bridge MCP server keeps long tool calls alive", () => {
         images: [{ data: "iVBORw0KGgo=", mimeType: "image/png" }],
       },
     });
+
     const client = await connectLikeOpenCode(fakeBridge.port);
 
     const result = await client.callTool(
@@ -203,7 +227,7 @@ describe("bb-bridge MCP server keeps long tool calls alive", () => {
   }, 20_000);
 });
 
-describe("bb-bridge MCP cancellation", () => {
+describe("omnyo-bridge MCP cancellation", () => {
   it.each(["timeout", "abort", "disconnect"] as const)(
     "closes the bridge call on %s without a late MCP reply",
     async (kind) => {
@@ -212,6 +236,7 @@ describe("bb-bridge MCP cancellation", () => {
       const errors: string[] = [];
       client.onerror = (error) => errors.push(error.message);
       const controller = new AbortController();
+
       const result = client
         .callTool(
           { name: "AskUserQuestion", arguments: {} },
@@ -222,19 +247,24 @@ describe("bb-bridge MCP cancellation", () => {
           },
         )
         .catch((error) => error);
+
       await expect.poll(() => bridge.requests.length).toBe(1);
+
       if (kind === "abort") controller.abort();
+
       if (kind === "disconnect") await client.close();
       expect(await result).toBeInstanceOf(Error);
       await expect
         .poll(() => bridge.cancelled.length, { timeout: 1_000 })
         .toBe(1);
       bridge.releaseResponses();
+
       if (kind !== "disconnect") {
         expect((await client.listTools()).tools).toContainEqual(
           expect.objectContaining({ name: "AskUserQuestion" }),
         );
       }
+
       expect(
         errors.filter((error) => error.includes("unknown message ID")),
       ).toEqual([]);

@@ -27,6 +27,7 @@ function resolve(
     preference,
     bundledProvider,
   );
+
   return resolved.kind === "plugin" ? resolved.registration : null;
 }
 
@@ -42,7 +43,7 @@ describe("resolvePreferredReplacement", () => {
     ).toBe(first);
   });
 
-  it("lets the user keep BB's implementation", () => {
+  it("lets the user keep Omnyo's implementation", () => {
     expect(
       resolve([slot("alpha", "inbox")], BUILT_IN_REPLACEMENT_PROVIDER),
     ).toBeNull();

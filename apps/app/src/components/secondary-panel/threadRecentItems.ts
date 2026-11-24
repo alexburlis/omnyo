@@ -6,9 +6,12 @@ import { z } from "zod";
 import { createLocalStorageSyncStorage } from "@/lib/browser-storage";
 import { hasThreadId } from "@/lib/thread-id";
 
-const THREAD_RECENT_ITEMS_STORAGE_PREFIX = "bb.thread.recentItems";
+const THREAD_RECENT_ITEMS_STORAGE_PREFIX = "omnyo.thread.recentItems";
+
 const THREAD_RECENT_ITEMS_STORAGE_VERSION = 1;
+
 const THREAD_RECENT_ITEMS_MAX_STORED = 24;
+
 export const THREAD_RECENT_ITEMS_VISIBLE_LIMIT = 6;
 
 type RecentItemSource = "workspace" | "thread-storage";
@@ -58,6 +61,7 @@ export function recordRecentItem({
   const withoutExisting = items.filter(
     (item) => item.source !== source || item.path !== path,
   );
+
   return [{ source, path, openedAt }, ...withoutExisting].slice(0, limit);
 }
 
@@ -68,16 +72,21 @@ const recentItemsStorage = createLocalStorageSyncStorage<
     if (storedValue === null) {
       return initialValue;
     }
+
     let parsedValue: unknown;
+
     try {
       parsedValue = JSON.parse(storedValue);
     } catch {
       return initialValue;
     }
+
     const result = recentItemsSchema.safeParse(parsedValue);
+
     if (!result.success) {
       return initialValue;
     }
+
     return result.data.slice(0, THREAD_RECENT_ITEMS_MAX_STORED);
   },
   serialize: (value) => JSON.stringify(value),
@@ -119,11 +128,13 @@ export function useRecordThreadRecentItem(
   threadId: string | null | undefined,
 ): (args: RecordThreadRecentItemArgs) => void {
   const setRecentItems = useSetAtom(getThreadRecentItemsAtom(threadId));
+
   return useCallback(
     ({ source, path }: RecordThreadRecentItemArgs) => {
       if (!hasThreadId(threadId)) {
         return;
       }
+
       setRecentItems((items) =>
         recordRecentItem({ items, source, path, openedAt: Date.now() }),
       );

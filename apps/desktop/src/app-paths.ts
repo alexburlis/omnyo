@@ -29,21 +29,26 @@ export function resolveDesktopBridgePath(
       return join(
         `${args.paths.appPath}.unpacked`,
         "dist",
-        "bb-app-bridge.mjs",
+        "omnyo-app-bridge.mjs",
       );
     }
 
-    return join(args.paths.resourcesPath, "app", "dist", "bb-app-bridge.mjs");
+    return join(
+      args.paths.resourcesPath,
+      "app",
+      "dist",
+      "omnyo-app-bridge.mjs",
+    );
   }
 
-  return join(args.paths.appPath, "dist", "bb-app-bridge.mjs");
+  return join(args.paths.appPath, "dist", "omnyo-app-bridge.mjs");
 }
 
 export function resolveDesktopMachineInstallerPath(bridgePath: string): string {
   return join(
     dirname(dirname(bridgePath)),
     "node_modules",
-    "bb-app",
+    "omnyo-app",
     "server",
     "dist",
     "assets",

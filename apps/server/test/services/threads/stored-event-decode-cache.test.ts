@@ -3,7 +3,7 @@ import {
   THREAD_CONTEXT_CLEAR_OPERATION,
   threadScope,
   turnScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   createConnection,
   createProject,
@@ -15,7 +15,7 @@ import {
   upsertHost,
   type DbConnection,
   type StoredEventRow,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   clearStoredEventDecodeCache,
   decodeStoredEventRowCached,
@@ -27,7 +27,9 @@ import {
 import { parseStoredEvent } from "../../../src/services/threads/thread-data.js";
 
 let db: DbConnection;
+
 let message: StoredEventRow;
+
 let operation: StoredEventRow;
 
 function agentMessageData(text: string): string {
@@ -40,14 +42,17 @@ beforeAll(() => {
   db = createConnection(":memory:");
   migrate(db);
   const host = upsertHost(db, noopNotifier, { name: "decode-host" });
+
   const { project } = createProject(db, noopNotifier, {
     name: "decode-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/decode" },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
   });
+
   insertEvents(db, noopNotifier, [
     {
       data: agentMessageData("Hello"),
@@ -97,6 +102,7 @@ describe("stored event decode cache", () => {
       expect(decodeStoredEventRowCached(db, row)).toBe(decoded);
       expect(decodeStoredEventRowCached(db, { ...row })).toBe(decoded);
     }
+
     expect(readStoredEventDecodeCacheSize(db).entryCount).toBe(2);
   });
 
@@ -109,6 +115,7 @@ describe("stored event decode cache", () => {
       [message, { ...message, type: "item/started" }],
       [operation, { ...operation, scopeKind: "turn", turnId: "turn-1" }],
     ];
+
     for (const [row, variant] of variants) {
       const original = decodeStoredEventRowCached(db, row);
       const decoded = decodeStoredEventRowCached(db, variant);
@@ -121,11 +128,13 @@ describe("stored event decode cache", () => {
   it("throws for a row that does not parse and caches nothing", () => {
     const invalid = { ...message, id: "evt_invalid", data: "{not json" };
     const before = readStoredEventDecodeCacheSize(db);
+
     for (let attempt = 0; attempt < 2; attempt += 1) {
       expect(() => decodeStoredEventRowCached(db, invalid)).toThrow(
         /is not valid JSON/u,
       );
     }
+
     expect(readStoredEventDecodeCacheSize(db)).toEqual(before);
   });
 
@@ -137,6 +146,7 @@ describe("stored event decode cache", () => {
     }).toThrow(TypeError);
 
     setStoredEventDecodeCacheFreezeForTesting(false);
+
     try {
       clearStoredEventDecodeCache(db);
       const unfrozen = decodeStoredEventRowCached(db, message);
@@ -152,14 +162,17 @@ describe("stored event decode cache", () => {
 
   it("keeps entries and data characters under the caps while recent rows still hit", () => {
     const rowChars = 20_000;
+
     const rows = Array.from({ length: 800 }, (_, index) => ({
       ...message,
       data: agentMessageData("x".repeat(rowChars)),
       id: `evt_cap_${index}`,
     }));
+
     expect(rows.length * rowChars).toBeGreaterThan(
       STORED_EVENT_DECODE_CACHE_MAX_DATA_CHARS,
     );
+
     for (const row of rows) {
       decodeStoredEventRowCached(db, row);
       const size = readStoredEventDecodeCacheSize(db);
@@ -170,9 +183,11 @@ describe("stored event decode cache", () => {
         STORED_EVENT_DECODE_CACHE_MAX_ENTRIES,
       );
     }
+
     expect(readStoredEventDecodeCacheSize(db).dataChars).toBeGreaterThan(
       STORED_EVENT_DECODE_CACHE_MAX_DATA_CHARS / 4,
     );
+
     for (const row of rows.slice(-40)) {
       const decoded = decodeStoredEventRowCached(db, { ...row });
       expect(decodeStoredEventRowCached(db, { ...row })).toBe(decoded);

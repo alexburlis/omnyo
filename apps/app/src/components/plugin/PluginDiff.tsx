@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import type { DiffProps } from "@get-bb/plugin-sdk";
+import type { DiffProps } from "@omnyo/plugin-sdk";
 import { DiffHost } from "@/components/code/DiffHost";
 import { normalizeFilePatch } from "@/components/git-diff/git-diff-parsing";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 export function PluginDiff({
   patch,
@@ -17,6 +17,7 @@ export function PluginDiff({
     () => normalizeFilePatch({ patch, path }),
     [patch, path],
   );
+
   if (normalized === null) {
     return (
       <pre
@@ -29,6 +30,7 @@ export function PluginDiff({
       </pre>
     );
   }
+
   return (
     <DiffHost
       file={normalized.file}

@@ -42,6 +42,7 @@ const signals = {
 
 function createEntry(dispose = vi.fn()) {
   let workerLease: ExperimentalHostWorkerLease | null = null;
+
   return experimental_defineHostEntry({
     contract,
     experimental_signals: signals,
@@ -53,8 +54,10 @@ function createEntry(dispose = vi.fn()) {
         return new Promise((resolve) => {
           if (context.signal.aborted) {
             resolve({ aborted: true });
+
             return;
           }
+
           context.signal.addEventListener(
             "abort",
             () => resolve({ aborted: true }),
@@ -67,6 +70,7 @@ function createEntry(dispose = vi.fn()) {
       },
       async inspect(input, context) {
         await context.experimental_emitSignal("changed", input);
+
         return context.experimental_paths;
       },
       async watch(input, context) {
@@ -74,6 +78,7 @@ function createEntry(dispose = vi.fn()) {
           { rootPath: input.rootPath },
           () => undefined,
         );
+
         return { watching: true };
       },
       async retain(input, context) {
@@ -83,6 +88,7 @@ function createEntry(dispose = vi.fn()) {
           await workerLease?.dispose();
           workerLease = null;
         }
+
         return { retained: workerLease !== null };
       },
     },
@@ -113,31 +119,39 @@ describe("experimental_createHostEntryHarness", () => {
   it("mirrors schema transformations on both sides of the JSON wire", async () => {
     let inputValidations = 0;
     let outputValidations = 0;
+
     const inputDate = z.string().transform((value) => {
       inputValidations += 1;
+
       return new Date(value);
     });
+
     const outputDate = z.string().transform((value) => {
       outputValidations += 1;
+
       return new Date(value);
     });
+
     const transformingContract = defineRpcContract({
       roundTrip: {
         input: z.object({ when: inputDate }).strict(),
         output: outputDate,
       },
     });
+
     const harness = experimental_createHostEntryHarness(
       experimental_defineHostEntry({
         contract: transformingContract,
         handlers: {
           roundTrip(input) {
             expect(input.when).toBeInstanceOf(Date);
+
             return input.when.toISOString();
           },
         },
       }),
     );
+
     const iso = "2026-08-16T12:34:56.000Z";
 
     await expect(
@@ -150,6 +164,7 @@ describe("experimental_createHostEntryHarness", () => {
   it("provides scoped paths, validates signals, and owns watch subscriptions", async () => {
     const disposeWatch = vi.fn(async () => undefined);
     const watch = vi.fn(async () => ({ dispose: disposeWatch }));
+
     const harness = experimental_createHostEntryHarness(createEntry(), {
       experimental_paths: {
         dataDir: "/plugin/data",
@@ -196,6 +211,7 @@ describe("experimental_createHostEntryHarness", () => {
     const dispose = vi.fn();
     const harness = experimental_createHostEntryHarness(createEntry(dispose));
     const requestController = new AbortController();
+
     const request = harness.experimental_call(
       "wait",
       {},
@@ -203,6 +219,7 @@ describe("experimental_createHostEntryHarness", () => {
         signal: requestController.signal,
       },
     );
+
     requestController.abort();
     await expect(request).resolves.toEqual({ aborted: true });
 

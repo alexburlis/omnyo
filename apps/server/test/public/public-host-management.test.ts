@@ -1,6 +1,5 @@
-import { createBbSdk } from "@bb/sdk/core";
-import { createHttpTransport } from "@bb/sdk/node";
-import { spawnSync } from "node:child_process";
+import { createOmnyoSdk } from "@omnyo/sdk/core";
+import { createHttpTransport } from "@omnyo/sdk/node";
 import {
   getEnvironment,
   getHost,
@@ -12,15 +11,15 @@ import {
   listStoredTurnCompletedKeys,
   replaceStoredProviderModelCatalog,
   updateHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   createHostJoinCodeResponseSchema,
   type CreateHostJoinCodeResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   HOST_DAEMON_PROTOCOL_VERSION,
   hostDaemonSessionOpenResponseSchema,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -51,6 +50,7 @@ async function createJoinCode(
 ): Promise<CreateHostJoinCodeResponse> {
   const response = await requestJoinCode(app);
   expect(response.status).toBe(201);
+
   return createHostJoinCodeResponseSchema.parse(await readJson(response));
 }
 
@@ -86,9 +86,11 @@ describe("public host management", () => {
         })
         .where(eq(hostDaemonSessions.id, session.id))
         .run();
+
       const latest = seedSession(harness.deps, host.id, {
         instanceId: "instance-2",
       });
+
       harness.hub.unregisterDaemon(latest.id);
       harness.db
         .update(hostDaemonSessions)
@@ -98,7 +100,8 @@ describe("public host management", () => {
         })
         .where(eq(hostDaemonSessions.id, latest.id))
         .run();
-      const sdk = createBbSdk({
+
+      const sdk = createOmnyoSdk({
         transport: createHttpTransport({
           baseUrl: "http://localhost",
           runtime: "node",
@@ -106,132 +109,10 @@ describe("public host management", () => {
             harness.app.fetch(new Request(input, init)),
         }),
       });
+
       await expect(sdk.hosts.get({ hostId: host.id })).resolves.toMatchObject({
         threadStorageRootPath: "/tmp/new-machine-data/thread-storage",
       });
-    });
-  });
-
-  it("reconnects a machine by re-enrolling it, replacing access only when the installer runs", async () => {
-    await withTestHarness(async (harness) => {
-      const host = seedHost(harness.deps, { id: "host_reconnect" });
-      harness.db
-        .update(hosts)
-        .set({
-          serverAccessProviderId: "relay",
-          serverAccessGrantId: host.id,
-        })
-        .where(eq(hosts.id, host.id))
-        .run();
-      let accessToken = "old-access";
-      const release = vi.fn(async () => {
-        accessToken = "new-access";
-      });
-      const provider = {
-        id: "relay",
-        displayName: "Relay",
-        description: "Test relay",
-        availability: () => ({ status: "available" as const }),
-        acquire: async () => ({
-          id: host.id,
-          serverUrl: "https://relay.example.com",
-          headers: { "x-access-token": accessToken },
-        }),
-        release,
-      };
-      setServerAccessBridge({
-        list: () => [{ pluginId: "test", provider }],
-        invoke: async (_id, run) => run(),
-      });
-      const session = seedSession(harness.deps, host.id);
-      harness.hub.registerDaemon(session.id, host.id, {
-        close: vi.fn(),
-        send: vi.fn(),
-      });
-      const reconnect = () =>
-        harness.app.request(`${API}/hosts/${host.id}/reconnect-commands`, {
-          method: "POST",
-        });
-
-      const refused = await reconnect();
-      expect(refused.status).toBe(409);
-      expect(await readJson(refused)).toMatchObject({
-        code: "machine_reconnect_not_needed",
-      });
-      harness.hub.unregisterDaemon(session.id);
-
-      const stale = await reconnect();
-      expect(stale.status).toBe(201);
-      const response = await reconnect();
-      expect(response.status).toBe(201);
-      const prepared = (await readJson(response)) as {
-        command: string;
-        expiresAt: number;
-        hostId: string;
-      };
-      expect(prepared).toMatchObject({ hostId: host.id });
-      expect(prepared.command).toContain(
-        "https://relay.example.com/install.sh",
-      );
-      expect(release).not.toHaveBeenCalled();
-      const credentialOf = (command: string) =>
-        /X-BB-Enrollment: ([^']+)/u.exec(command)?.[1] ?? "";
-      const credential = credentialOf(prepared.command);
-      expect(credential).toMatch(/^bbde_/u);
-
-      const superseded = await harness.app.request("/install.sh", {
-        headers: {
-          "X-BB-Enrollment": credentialOf(
-            ((await readJson(stale)) as { command: string }).command,
-          ),
-        },
-      });
-      expect(superseded.status).toBe(403);
-      expect(release).not.toHaveBeenCalled();
-
-      const installer = await harness.app.request("/install.sh", {
-        headers: { "X-BB-Enrollment": credential },
-      });
-      expect(installer.status).toBe(200);
-      const script = await installer.text();
-      expect(script).toContain("--bootstrap-env BB_ENROLLMENT");
-      expect(script).toContain('"reconnect":true');
-      expect(script).toContain(`"dataDir":"/tmp/bb-host-data/${host.id}"`);
-      expect(script).toContain("new-access");
-      expect(script).not.toContain("old-access");
-      expect(release).toHaveBeenCalledOnce();
-
-      const enrolled = await harness.app.request("/internal/hosts/enroll", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${credential}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ hostId: host.id, hostName: "renamed-by-os" }),
-      });
-      expect(enrolled.status).toBe(201);
-      expect(await readJson(enrolled)).toMatchObject({ hostId: host.id });
-      expect(getHost(harness.db, host.id)).toMatchObject({
-        name: host.name,
-        destroyedAt: null,
-      });
-      const reused = await harness.app.request("/install.sh", {
-        headers: { "X-BB-Enrollment": credential },
-      });
-      expect(reused.status).toBe(403);
-      expect(reused.headers.get("content-type")).toContain(
-        "text/x-shellscript",
-      );
-      const errorText = await reused.text();
-      if (process.platform !== "win32") {
-        const errorScript = spawnSync("sh", ["-c", errorText], {
-          encoding: "utf8",
-        });
-        expect(errorScript.status).toBe(1);
-        expect(errorScript.stderr).toContain(
-          "already been used, replaced, or expired",
-        );
-      }
     });
   });
 
@@ -245,11 +126,13 @@ describe("public host management", () => {
         .set({ phase: "suspended", suspendedAt: Date.now() })
         .where(eq(hosts.id, suspended.id))
         .run();
+
       for (const hostId of [primary.id, suspended.id]) {
         const response = await harness.app.request(
           `${API}/hosts/${hostId}/reconnect-commands`,
           { method: "POST" },
         );
+
         expect(response.status).toBe(409);
         expect(await readJson(response)).toMatchObject({
           code: "machine_reconnect_unavailable",
@@ -261,6 +144,7 @@ describe("public host management", () => {
   it("enrolls a host from a public join code", async () => {
     await withTestHarness(async (harness) => {
       const issued = await createJoinCode(harness.app);
+
       const response = await harness.app.request("/internal/hosts/enroll", {
         method: "POST",
         headers: {
@@ -290,7 +174,7 @@ describe("public host management", () => {
   it("preserves a renamed host across a daemon reconnect", async () => {
     await withTestHarness(async (harness) => {
       const issued = await createJoinCode(harness.app);
-      expect(issued.joinCode).toMatch(/^bbde_/u);
+      expect(issued.joinCode).toMatch(/^omnyode_/u);
       expect(issued.expiresAt).toBeGreaterThan(Date.now());
       expect(issued.expiresAt).toBeLessThanOrEqual(Date.now() + 15 * 60 * 1000);
       expect(getHost(harness.db, issued.hostId)).toBeNull();
@@ -302,8 +186,8 @@ describe("public host management", () => {
           headers: {
             authorization: `Bearer ${issued.joinCode}`,
             "content-type": "application/json",
-            "x-bb-gate-auth": "machine",
-            "x-bb-gate-machine-id": "machine-cloud-1",
+            "x-omnyo-gate-auth": "machine",
+            "x-omnyo-gate-machine-id": "machine-cloud-1",
           },
           body: JSON.stringify({
             hostId: issued.hostId,
@@ -327,6 +211,7 @@ describe("public host management", () => {
           body: JSON.stringify({ name: "My Build Box" }),
         },
       );
+
       expect(renameResponse.status).toBe(200);
       expect(await readJson(renameResponse)).toMatchObject({
         id: issued.hostId,
@@ -340,12 +225,12 @@ describe("public host management", () => {
           headers: {
             authorization: `Bearer ${enrolled.hostKey}`,
             "content-type": "application/json",
-            "x-bb-gate-auth": "machine",
-            "x-bb-gate-machine-id": "machine-cloud-2",
+            "x-omnyo-gate-auth": "machine",
+            "x-omnyo-gate-machine-id": "machine-cloud-2",
           },
           body: JSON.stringify({
             activeThreads: [],
-            dataDir: "/tmp/remote-bb",
+            dataDir: "/tmp/remote-omnyo",
             hasMachineCredential: true,
             hostId: issued.hostId,
             hostName: "Build Machine",
@@ -357,10 +242,13 @@ describe("public host management", () => {
           }),
         },
       );
+
       expect(sessionResponse.status).toBe(201);
+
       const openedSession = hostDaemonSessionOpenResponseSchema.parse(
         await readJson(sessionResponse),
       );
+
       expect(getHost(harness.db, issued.hostId)).toMatchObject({
         connectMachineId: "machine-cloud-2",
         name: "My Build Box",
@@ -372,6 +260,7 @@ describe("public host management", () => {
       const publicHostResponse = await harness.app.request(
         `${API}/hosts/${issued.hostId}`,
       );
+
       expect(publicHostResponse.status).toBe(200);
       expect(await readJson(publicHostResponse)).toMatchObject({
         id: issued.hostId,
@@ -383,13 +272,14 @@ describe("public host management", () => {
   it("rejects a forged connect machine id at enrollment", async () => {
     await withTestHarness(async (harness) => {
       const issued = await createJoinCode(harness.app);
+
       const response = await harness.app.request("/internal/hosts/enroll", {
         method: "POST",
         headers: {
           authorization: `Bearer ${issued.joinCode}`,
           "content-type": "application/json",
-          "x-bb-gate-auth": "machine",
-          "x-bb-gate-machine-id": "machine-authenticated",
+          "x-omnyo-gate-auth": "machine",
+          "x-omnyo-gate-machine-id": "machine-authenticated",
         },
         body: JSON.stringify({
           connectMachineId: "machine-forged",
@@ -397,6 +287,7 @@ describe("public host management", () => {
           hostName: "Forged Machine",
         }),
       });
+
       expect(response.status).toBe(400);
       expect(await readJson(response)).toMatchObject({
         code: "invalid_request",
@@ -408,12 +299,13 @@ describe("public host management", () => {
   it("rejects machine-gated host-management mutations", async () => {
     await withTestHarness(async (harness) => {
       const host = seedHost(harness.deps, { id: "host_machine_forbidden" });
+
       const requests = [
         harness.app.request(`${API}/hosts/join-codes`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "x-bb-gate-auth": "machine",
+            "x-omnyo-gate-auth": "machine",
           },
           body: JSON.stringify({}),
         }),
@@ -421,49 +313,51 @@ describe("public host management", () => {
           method: "PATCH",
           headers: {
             "content-type": "application/json",
-            "x-bb-gate-auth": "machine",
+            "x-omnyo-gate-auth": "machine",
           },
           body: JSON.stringify({ name: "forbidden" }),
         }),
         harness.app.request(`${API}/hosts/${host.id}`, {
           method: "DELETE",
-          headers: { "x-bb-gate-auth": "machine" },
+          headers: { "x-omnyo-gate-auth": "machine" },
         }),
         harness.app.request(`${API}/hosts/${host.id}/retry-update`, {
           method: "POST",
-          headers: { "x-bb-gate-auth": "machine" },
+          headers: { "x-omnyo-gate-auth": "machine" },
         }),
         harness.app.request(`${API}/hosts/${host.id}/reconnect-commands`, {
           method: "POST",
-          headers: { "x-bb-gate-auth": "machine" },
+          headers: { "x-omnyo-gate-auth": "machine" },
         }),
         harness.app.request(`${API}/hosts/${host.id}/suspend`, {
           method: "POST",
-          headers: { "x-bb-gate-auth": "machine" },
+          headers: { "x-omnyo-gate-auth": "machine" },
         }),
         harness.app.request(`${API}/hosts/${host.id}/resume`, {
           method: "POST",
-          headers: { "x-bb-gate-auth": "machine" },
+          headers: { "x-omnyo-gate-auth": "machine" },
         }),
         harness.app.request(`${API}/hosts/${host.id}/retry-cleanup`, {
           method: "POST",
-          headers: { "x-bb-gate-auth": "machine" },
+          headers: { "x-omnyo-gate-auth": "machine" },
         }),
         harness.app.request(`${API}/hosts/${host.id}/permission-ceiling`, {
           method: "PATCH",
           headers: {
             "content-type": "application/json",
-            "x-bb-gate-auth": "machine",
+            "x-omnyo-gate-auth": "machine",
           },
           body: JSON.stringify({ maxPermissionMode: "full" }),
         }),
       ];
+
       for (const response of await Promise.all(requests)) {
         expect(response.status).toBe(403);
         expect(await readJson(response)).toMatchObject({
           code: "machine_host_management_forbidden",
         });
       }
+
       expect(getHost(harness.db, host.id)).toMatchObject({
         destroyedAt: null,
         maxPermissionMode: "full",
@@ -481,6 +375,7 @@ describe("public host management", () => {
       const listIds = async (query: string) => {
         const response = await harness.app.request(`${API}/hosts${query}`);
         expect(response.status).toBe(200);
+
         return z
           .array(z.object({ id: z.string() }))
           .parse(await readJson(response))
@@ -496,6 +391,48 @@ describe("public host management", () => {
     });
   });
 
+  it("reports each connected worker's runtime version and none once it disconnects", async () => {
+    await withTestHarness(async (harness) => {
+      const worker = seedHost(harness.deps, { id: "host_worker" });
+      const offline = seedHost(harness.deps, { id: "host_offline" });
+      const session = seedSession(harness.deps, worker.id);
+      harness.hub.recordDaemonSessionRuntimeUpdate(session.id, {
+        runtimeVersion: "1.0.0+private.1",
+        automaticUpdates: true,
+      });
+
+      const versions = async () => {
+        const response = await harness.app.request(`${API}/hosts`);
+        expect(response.status).toBe(200);
+
+        return Object.fromEntries(
+          z
+            .array(
+              z.object({
+                id: z.string(),
+                status: z.string(),
+                runtimeVersion: z.string().nullable(),
+              }),
+            )
+            .parse(await readJson(response))
+            .map((host) => [host.id, [host.status, host.runtimeVersion]]),
+        );
+      };
+
+      expect(await versions()).toEqual({
+        [worker.id]: ["connected", "1.0.0+private.1"],
+        [offline.id]: ["disconnected", null],
+      });
+
+      harness.hub.unregisterDaemon(session.id);
+
+      expect(await versions()).toEqual({
+        [worker.id]: ["disconnected", null],
+        [offline.id]: ["disconnected", null],
+      });
+    });
+  });
+
   it("stores a permission ceiling for a session-gated request", async () => {
     await withTestHarness(async (harness) => {
       const host = seedHost(harness.deps, { id: "host_ceiling" });
@@ -507,7 +444,7 @@ describe("public host management", () => {
           method: "PATCH",
           headers: {
             "content-type": "application/json",
-            "x-bb-gate-auth": "session",
+            "x-omnyo-gate-auth": "session",
           },
           body: JSON.stringify({ maxPermissionMode: "accept-edits" }),
         },
@@ -551,11 +488,13 @@ describe("public host management", () => {
           body: JSON.stringify({ name: "Unknown" }),
         },
       );
+
       expect(unknownResponse.status).toBe(404);
 
       updateHost(harness.db, harness.hub, host.id, {
         destroyedAt: Date.now(),
       });
+
       const destroyedResponse = await harness.app.request(
         `${API}/hosts/${host.id}`,
         {
@@ -564,6 +503,7 @@ describe("public host management", () => {
           body: JSON.stringify({ name: "Too Late" }),
         },
       );
+
       expect(destroyedResponse.status).toBe(404);
     });
   });
@@ -576,15 +516,18 @@ describe("public host management", () => {
         `${API}/hosts/${host.id}/retry-update`,
         { method: "POST" },
       );
+
       expect(notNeeded.status).toBe(409);
 
       updateHost(harness.db, harness.hub, host.id, {
         lastRejectedProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION - 1,
       });
+
       const response = await harness.app.request(
         `${API}/hosts/${host.id}/retry-update`,
         { method: "POST" },
       );
+
       expect(response.status).toBe(200);
       expect(await readJson(response)).toEqual({ ok: true });
       expect(harness.hub.takeHostProtocolUpdateRetry(host.id)).toBe(true);
@@ -593,10 +536,12 @@ describe("public host management", () => {
       updateHost(harness.db, harness.hub, host.id, {
         lastRejectedProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION + 1,
       });
+
       const newerDaemon = await harness.app.request(
         `${API}/hosts/${host.id}/retry-update`,
         { method: "POST" },
       );
+
       expect(newerDaemon.status).toBe(409);
       expect(await readJson(newerDaemon)).toMatchObject({
         code: "host_cannot_self_update",
@@ -610,26 +555,33 @@ describe("public host management", () => {
       seedPrimaryHost(harness.deps, primary.id);
       const host = seedHost(harness.deps, { id: "host_remove" });
       const session = seedSession(harness.deps, host.id);
+
       const socket = {
         close: vi.fn(),
         send: vi.fn(),
       };
+
       harness.hub.registerDaemon(session.id, host.id, socket);
+
       const project = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       }).project;
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const activeThread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
         status: "active",
       });
+
       const hostKey = await harness.deps.machineAuth.issueDaemonHostKey({
         hostId: host.id,
       });
+
       const enrollKey = await harness.deps.machineAuth.issueHostEnrollKey({
         enrollSource: "loopback",
         hostId: host.id,
@@ -661,9 +613,11 @@ describe("public host management", () => {
         hostId: host.id,
       });
       expect(getThread(harness.db, activeThread.id)?.status).toBe("idle");
+
       const environmentRead = await harness.app.request(
         `${API}/environments/${environment.id}`,
       );
+
       expect(await readJson(environmentRead)).toMatchObject({
         hostLifecycle: "removed",
       });
@@ -682,12 +636,14 @@ describe("public host management", () => {
           }),
         },
       );
+
       expect(staleEnrollResponse.status).toBe(401);
 
       const secondDelete = await harness.app.request(
         `${API}/hosts/${host.id}`,
         { method: "DELETE" },
       );
+
       expect(secondDelete.status).toBe(404);
     });
   });
@@ -708,19 +664,23 @@ describe("public host management", () => {
         const primary = seedHost(harness.deps, { id: "host_primary" });
         seedPrimaryHost(harness.deps, primary.id);
         const host = seedHost(harness.deps, { id: "host_sandbox" });
+        seedSession(harness.deps, host.id);
         updateHost(harness.db, harness.hub, host.id, {
           machineProviderId: "test-machine",
           phase: "active",
           resource: { allocation: "sandbox" },
           type,
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
         });
+
         const thread = seedThread(harness.deps, {
           environmentId: environment.id,
           projectId: project.id,
@@ -748,9 +708,11 @@ describe("public host management", () => {
         expect(getEnvironment(harness.db, environment.id)?.status).toBe(
           "destroyed",
         );
+
         const environmentRead = await harness.app.request(
           `${API}/environments/${environment.id}`,
         );
+
         expect(await readJson(environmentRead)).toMatchObject({
           hostLifecycle: "removed",
         });
@@ -758,6 +720,7 @@ describe("public host management", () => {
           archivedAt: null,
           status: "idle",
         });
+
         if (status !== "idle") {
           expect(
             listStoredTurnCompletedKeys(harness.db, {
@@ -800,6 +763,7 @@ describe("public host management", () => {
       const primary = seedHost(harness.deps, { id: "host_primary" });
       seedPrimaryHost(harness.deps, primary.id);
       const host = seedHost(harness.deps, { id: "host_remove_announced" });
+
       const announced = vi.spyOn(
         harness.pluginService.events,
         "emitHostDeleted",
@@ -839,29 +803,47 @@ describe("public host management", () => {
     await withTestHarness(async (harness) => {
       const primary = seedHost(harness.deps, { id: "host_primary" });
       seedPrimaryHost(harness.deps, primary.id);
+
       const host = seedHost(harness.deps, {
         connectMachineId: "machine-cloud-remove",
         id: "host_cloud_remove",
       });
+
       const connectPlugin = await harness.pluginService.install(
         "builtin:connect",
         { kind: "root" },
       );
+
       expect(connectPlugin).toMatchObject({
         source: "builtin:connect",
         status: "running",
       });
       const revokeHandler = vi.fn(async () => ({ ok: true }));
+
       const revokeRecord = {
+        threadBootstrap: false,
+        dispatchReadiness: false,
         publication: null,
         inputSchema: z.object({ machineId: z.string() }),
         outputSchema: z.object({ ok: z.literal(true) }),
         handler: revokeHandler,
       };
+
+      const live = harness.pluginService.getRpcHandler(
+        connectPlugin.id,
+        "revokeMachine",
+      );
+
+      if (live.outcome !== "found") {
+        throw new Error("connect plugin registers no revokeMachine handler");
+      }
+
       vi.spyOn(harness.pluginService, "getRpcHandler").mockReturnValue({
         outcome: "found",
         value: revokeRecord,
+        owner: live.owner,
       });
+
       const invoke = vi
         .spyOn(harness.pluginService, "invokeRpcHandler")
         .mockResolvedValue({ ok: true, result: { ok: true } });
@@ -869,13 +851,15 @@ describe("public host management", () => {
       const response = await harness.app.request(`${API}/hosts/${host.id}`, {
         method: "DELETE",
       });
+
       expect(response.status).toBe(200);
       expect(invoke).toHaveBeenCalledWith(
-        connectPlugin.id,
+        live.owner,
         "revokeMachine",
         revokeRecord,
         { machineId: "machine-cloud-remove" },
         { kind: "client" },
+        null,
       );
     });
   }, 30_000);

@@ -16,4 +16,5 @@ export const threadTimelineGoalSchema = z.object({
   tokensUsed: z.number(),
   timeUsedSeconds: z.number(),
 });
+
 export type ThreadTimelineGoal = z.infer<typeof threadTimelineGoalSchema>;

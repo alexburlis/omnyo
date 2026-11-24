@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { loadPluginApp } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp } from "@omnyo/plugin-sdk/testing/app";
 
 const app = await loadPluginApp(() => import("./app"));
+
 const { loadPluginReferences } = await import("./app");
 
 describe("plugin guide registrations", () => {
@@ -19,6 +20,7 @@ describe("loadPluginReferences", () => {
         { id: "docs", icon: "Book", iconUrl: null },
       ],
     }));
+
     const search = vi.fn(async () => ({
       results: [
         {
@@ -36,10 +38,12 @@ describe("loadPluginReferences", () => {
       ],
       collections: [],
     }));
+
     const references = await loadPluginReferences(
       { plugins: { list, catalog: { search } } } as never,
       new AbortController().signal,
     );
+
     expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: "" }));
     expect([...references.keys()].sort()).toEqual(["docs", "github", "tasks"]);
     expect(references.get("github")).toEqual({
@@ -75,6 +79,7 @@ describe("loadPluginReferences", () => {
       } as never,
       new AbortController().signal,
     );
+
     expect([...references.keys()]).toEqual(["tasks"]);
   });
 });

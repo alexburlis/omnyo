@@ -9,17 +9,20 @@ export const CODEX_ASYNC_QUESTION_RENDERER_ID = "async-question";
 export const asyncQuestionPayloadSchema = z.object({
   questions: z.array(codexAsyncQuestionSchema).min(1),
 });
+
 export type AsyncQuestionPayload = z.infer<typeof asyncQuestionPayloadSchema>;
 
 const asyncQuestionAnswerSchema = z.object({
   selected: z.array(z.string().min(1)),
   freeText: z.string().min(1).optional(),
 });
+
 type AsyncQuestionAnswer = z.infer<typeof asyncQuestionAnswerSchema>;
 
 export const asyncQuestionResponseSchema = z.object({
   answers: z.record(z.string().min(1), asyncQuestionAnswerSchema),
 });
+
 export type AsyncQuestionResponse = z.infer<typeof asyncQuestionResponseSchema>;
 
 export interface AsyncQuestionFormQuestion {
@@ -61,7 +64,9 @@ function answerText(
   const labels = question.options
     .filter((option) => answer.selected.includes(option.value))
     .map((option) => option.label);
+
   const freeText = answer.freeText?.trim();
+
   return [...labels, ...(freeText ? [freeText] : [])].join("\n");
 }
 
@@ -72,6 +77,7 @@ export function formatAsyncQuestionAnswer(
   return buildAsyncQuestionFormQuestions(questions)
     .map((question) => {
       const answer = response.answers[question.id] ?? { selected: [] };
+
       return `${quote(question.prompt)}\n\n${answerText(question, answer)}`;
     })
     .join("\n\n");

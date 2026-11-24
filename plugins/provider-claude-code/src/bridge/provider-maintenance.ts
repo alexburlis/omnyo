@@ -1,71 +1,61 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import {
   type ProviderHealthResult,
   type ProviderInstallationRunResult,
   type ProviderInstallationStatus,
-  type ProviderUsage,
   type ProviderUsageResult,
-  type ProviderUsageWindow,
-  experimental_clampPercent as clampPercent,
   experimental_commandOutput as commandOutput,
   experimental_compareVersions as compareVersions,
   experimental_downloadedInstallerCommand as downloadedInstallerCommand,
   experimental_formatCommand as formatCommand,
   experimental_installationVerification as installationVerification,
+  experimental_killPortableProcess as killPortableProcess,
   experimental_npmCommand as npmCommand,
   experimental_npmGlobalInstallSource as npmGlobalInstallSource,
   experimental_probeNpmGlobalPackage as probeNpmGlobalPackage,
   experimental_readCliVersion as readCliVersion,
   experimental_resolveExecutablePath as resolveExecutablePath,
+  experimental_spawnPortableProcess as spawnPortableProcess,
   experimental_versionFrom as versionFrom,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { z } from "zod";
 
-const execFileAsync = promisify(execFile);
-const USAGE_FETCH_TIMEOUT_MS = 15_000;
-const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
-const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 const CLAUDE_NPM_PACKAGE = "@anthropic-ai/claude-code";
+
 const CLAUDE_INSTALL_SCRIPT_URL = "https://claude.ai/install.sh";
+
 const CLAUDE_POWERSHELL_INSTALL_SCRIPT_URL = "https://claude.ai/install.ps1";
 
-const claudeCredentialsSchema = z.object({
-  claudeAiOauth: z.object({
-    accessToken: z.string().min(1),
-    expiresAt: z.number().nullish(),
-    subscriptionType: z.string().nullish(),
-    rateLimitTier: z.string().nullish(),
-  }),
+const claudeAuthStatusSchema = z.object({
+  loggedIn: z.boolean(),
+  email: z.email().nullish().catch(null),
+  subscriptionType: z.string().trim().min(1).nullish().catch(null),
+  loginExpiresAt: z.iso.datetime().nullish().catch(null),
 });
-type ClaudeCredentials = z.infer<
-  typeof claudeCredentialsSchema
->["claudeAiOauth"];
 
-const claudeAccountSchema = z.object({
-  oauthAccount: z
-    .object({
-      emailAddress: z.string().email().nullish(),
-      accountUuid: z.string().uuid().nullish(),
-    })
-    .nullish(),
-});
+type ClaudeAuthStatus = z.infer<typeof claudeAuthStatusSchema>;
+
+const authStatusUnavailable = "Claude Code did not report its login status.";
 
 async function claudeExecutable(): Promise<string> {
-  const explicit = process.env.BB_CLAUDE_CODE_EXECUTABLE?.trim();
+  const explicit = process.env.OMNYO_CLAUDE_CODE_EXECUTABLE?.trim();
+
   if (explicit) return explicit;
+
   if (
     process.platform !== "win32" ||
     (await resolveExecutablePath("claude")) !== null
   ) {
     return "claude";
   }
+
   const nativePath = path.join(os.homedir(), ".local", "bin", "claude.exe");
+
   try {
     await fs.access(nativePath);
+
     return nativePath;
   } catch {
     return "claude";
@@ -83,20 +73,25 @@ function claudeDistTags(value: string | null): {
   stable: string | null;
 } | null {
   if (value === null) return null;
+
   try {
     const distTagsSchema = z.object({
       latest: z.string().min(1),
       stable: z.string().min(1).optional(),
     });
+
     const parsed = z
       .union([
         distTagsSchema,
         z.tuple([distTagsSchema]).transform(([tags]) => tags),
       ])
       .safeParse(JSON.parse(value));
+
     if (!parsed.success) return null;
     const latest = versionFrom(parsed.data.latest);
+
     if (latest === null) return null;
+
     return {
       latest,
       stable:
@@ -115,10 +110,12 @@ function claudeDoctor(value: string | null): {
 } {
   const running =
     value === null ? null : /^Running:\s+([^\s(]+)/mu.exec(value)?.[1];
+
   const channel =
     value === null
       ? null
       : /^Auto-update channel:\s+(latest|stable)\s*$/mu.exec(value)?.[1];
+
   return {
     installMethod:
       running === "native" || running === "npm-global"
@@ -136,6 +133,7 @@ function claudeDoctor(value: string | null): {
 function isDefaultNativeClaudePath(executablePath: string | null): boolean {
   if (executablePath === null) return false;
   const normalized = executablePath.replace(/\\/gu, "/");
+
   return (
     normalized.endsWith("/.local/bin/claude") ||
     (process.platform === "win32" &&
@@ -147,6 +145,7 @@ export async function getClaudeProviderInstallationStatus(
   checkUpdates = true,
 ): Promise<ProviderInstallationStatus> {
   const command = await claudeExecutable();
+
   const [
     resolvedExecutable,
     versionOutput,
@@ -169,14 +168,17 @@ export async function getClaudeProviderInstallationStatus(
       : { npmBin: null, npmGlobalPackageVersion: null },
     checkUpdates ? commandOutput(command, ["doctor"]) : null,
   ]);
+
   const installed = resolvedExecutable !== null || versionOutput !== null;
   const currentVersion = versionFrom(versionOutput);
   const doctor = claudeDoctor(doctorOutput);
   const tags = claudeDistTags(tagsOutput);
+
   const latestVersion =
     doctor.updateChannel === null || tags === null
       ? null
       : tags[doctor.updateChannel];
+
   const definitelyNeedsUnknownChannelUpdate =
     installed &&
     currentVersion !== null &&
@@ -184,33 +186,40 @@ export async function getClaudeProviderInstallationStatus(
     tags?.stable !== undefined &&
     compareVersions(tags.latest, currentVersion) > 0 &&
     compareVersions(tags.stable, currentVersion) > 0;
+
   const needsUpdate =
     installed && currentVersion !== null && latestVersion !== null
       ? compareVersions(latestVersion, currentVersion) > 0
       : definitelyNeedsUnknownChannelUpdate;
+
   const installSource = npmGlobalInstallSource({
     installed,
     executablePath: resolvedExecutable,
     npmBin: npmGlobal.npmBin,
   });
+
   const nativeFallback =
     doctor.installMethod === null &&
     installSource === "external" &&
     isDefaultNativeClaudePath(resolvedExecutable);
+
   const canRunUpdate =
     doctor.installMethod === "native" ||
     nativeFallback ||
     (installSource === "npmGlobal" &&
       (doctor.installMethod === null || doctor.installMethod === "npm-global"));
+
   const actionKind = !installed
     ? "install"
     : needsUpdate && canRunUpdate
       ? "update"
       : null;
+
   const displayCommand =
     actionKind === "install"
       ? claudeInstallerCommand().displayCommand
       : formatCommand(command, ["update"]);
+
   return {
     executableName: command,
     executablePath: resolvedExecutable,
@@ -238,6 +247,7 @@ export async function getClaudeProviderInstallationRun(
   action: "install" | "update",
 ): Promise<ProviderInstallationRunResult> {
   const status = await getClaudeProviderInstallationStatus();
+
   return buildClaudeProviderInstallationRun(status, action);
 }
 
@@ -246,20 +256,23 @@ function buildClaudeProviderInstallationRun(
   action: "install" | "update",
 ): ProviderInstallationRunResult {
   const command = status.executableName;
+
   if (status.installAction?.kind !== action) {
     return {
       available: false,
       message: `Claude Code ${action} is no longer available on this host.`,
     };
   }
+
   const execution =
     action === "install"
       ? claudeInstallerCommand()
       : {
-          command,
+          command: status.executablePath ?? command,
           args: ["update"],
           displayCommand: formatCommand(command, ["update"]),
         };
+
   return {
     available: true,
     command: execution,
@@ -267,87 +280,68 @@ function buildClaudeProviderInstallationRun(
   };
 }
 
-async function readKeychainCredentials(): Promise<string | null> {
-  if (process.platform !== "darwin") return null;
-  const argumentSets = [
-    [
-      "find-generic-password",
-      "-s",
-      CLAUDE_KEYCHAIN_SERVICE,
-      "-a",
-      os.userInfo().username,
-      "-w",
-    ],
-    ["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"],
-  ];
-  for (const args of argumentSets) {
-    try {
-      const { stdout } = await execFileAsync("security", args, {
-        timeout: 10_000,
-      });
-      if (stdout.trim()) return stdout.trim();
-    } catch {}
-  }
-  return null;
-}
+async function claudeAuthStatus(
+  command: string,
+): Promise<ClaudeAuthStatus | null> {
+  const output = await new Promise<string | null>((resolve) => {
+    const child = spawnPortableProcess({
+      command,
+      args: ["auth", "status"],
+      stdio: ["ignore", "pipe", "ignore"],
+    });
 
-function parseCredentials(raw: string): ClaudeCredentials | null {
-  const trimmed = raw.trim();
-  const candidates = [trimmed];
-  if (/^(?:[0-9a-f]{2})+$/iu.test(trimmed)) {
-    candidates.push(Buffer.from(trimmed, "hex").toString("utf8"));
-  }
-  for (const candidate of candidates) {
-    try {
-      const parsed = claudeCredentialsSchema.safeParse(JSON.parse(candidate));
-      if (parsed.success) return parsed.data.claudeAiOauth;
-    } catch {}
-  }
-  return null;
-}
+    const timeout = setTimeout(stop, 10_000);
+    let stdout = "";
 
-async function readCredentials(): Promise<ClaudeCredentials | null> {
-  const keychainCredentials = await readKeychainCredentials();
-  if (keychainCredentials !== null) {
-    const parsed = parseCredentials(keychainCredentials);
-    if (parsed !== null) return parsed;
-  }
+    function stop() {
+      clearTimeout(timeout);
+      child.stdout?.removeAllListeners("data");
+      resolve(null);
+      killPortableProcess(child, "SIGKILL");
+    }
+
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+
+      if (stdout.length > 64 * 1024) stop();
+    });
+    child.once("error", () => {
+      clearTimeout(timeout);
+      resolve(null);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timeout);
+      resolve(code === 0 || code === 1 ? stdout : null);
+    });
+  }).catch(() => null);
+
+  if (output === null) return null;
+
   try {
-    return parseCredentials(
-      await fs.readFile(
-        path.join(os.homedir(), ".claude", ".credentials.json"),
-        "utf8",
-      ),
-    );
+    const parsed = claudeAuthStatusSchema.safeParse(JSON.parse(output));
+
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
 }
 
-async function readAccount() {
-  try {
-    const parsed = claudeAccountSchema.safeParse(
-      JSON.parse(
-        await fs.readFile(path.join(os.homedir(), ".claude.json"), "utf8"),
-      ),
-    );
-    return parsed.success ? (parsed.data.oauthAccount ?? null) : null;
-  } catch {
-    return null;
-  }
+function claudeAccountDetails(auth: ClaudeAuthStatus) {
+  const subscription = auth.subscriptionType;
+
+  return {
+    accountEmail: auth.email ?? null,
+    planLabel: subscription
+      ? subscription.charAt(0).toUpperCase() + subscription.slice(1)
+      : null,
+  };
 }
 
-async function readAccountEmail(): Promise<string | null> {
-  return (await readAccount())?.emailAddress ?? null;
-}
-
-function planLabel(credentials: ClaudeCredentials): string | null {
-  const maxMatch = (credentials.rateLimitTier ?? "").match(/max_(\d+)x/u);
-  if (maxMatch) return `Max (${maxMatch[1]}x)`;
-  const subscription = credentials.subscriptionType;
-  return subscription
-    ? subscription.charAt(0).toUpperCase() + subscription.slice(1)
-    : null;
+function claudeLoginExpired(auth: ClaudeAuthStatus): boolean {
+  return (
+    auth.loginExpiresAt != null && Date.parse(auth.loginExpiresAt) <= Date.now()
+  );
 }
 
 function healthResult(
@@ -377,218 +371,64 @@ function healthResult(
 
 export async function getClaudeProviderHealth(): Promise<ProviderHealthResult> {
   const command = await claudeExecutable();
+
   if ((await resolveExecutablePath(command)) === null) {
     return healthResult("not_installed");
   }
-  const version = await readCliVersion(command);
-  try {
-    const [credentials, email] = await Promise.all([
-      readCredentials(),
-      readAccountEmail(),
-    ]);
-    if (!credentials) {
-      return healthResult("unauthenticated", { installedVersion: version });
-    }
-    const known = {
-      accountEmail: email,
-      planLabel: planLabel(credentials),
-      installedVersion: version,
-    };
-    return credentials.expiresAt != null && Date.now() >= credentials.expiresAt
-      ? healthResult("expired", known)
-      : healthResult("ready", known);
-  } catch (error) {
+
+  const [installedVersion, auth] = await Promise.all([
+    readCliVersion(command),
+    claudeAuthStatus(command),
+  ]);
+
+  if (auth === null)
     return healthResult("unknown", {
-      installedVersion: version,
-      statusMessage: error instanceof Error ? error.message : String(error),
+      installedVersion,
+      statusMessage: authStatusUnavailable,
     });
-  }
-}
 
-const claudeUsageWindowSchema = z.object({
-  utilization: z.number().nullish(),
-  resets_at: z.string().nullish(),
-});
+  const known = { installedVersion, ...claudeAccountDetails(auth) };
 
-const claudeScopedUsageLimitSchema = z
-  .object({
-    kind: z.string(),
-    scope: z
-      .object({
-        model: z
-          .object({ display_name: z.string().trim().min(1).nullish() })
-          .nullish(),
-        surface: z.null().optional(),
-      })
-      .nullish(),
-    percent: z.number().nullish(),
-    resets_at: z.string().nullish(),
-  })
-  .passthrough();
+  if (!auth.loggedIn) return healthResult("unauthenticated", known);
 
-const claudeUsageResponseSchema = z
-  .object({
-    five_hour: claudeUsageWindowSchema.nullish(),
-    seven_day: claudeUsageWindowSchema.nullish(),
-    limits: z
-      .array(claudeScopedUsageLimitSchema.nullable().catch(null))
-      .nullish()
-      .catch([]),
-  })
-  .passthrough();
-
-function resetIso(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-}
-
-function usageWindow(
-  value: z.infer<typeof claudeUsageWindowSchema> | null | undefined,
-  label: string,
-  kind: "five-hour" | "weekly",
-): ProviderUsageWindow | null {
-  if (!value || value.utilization == null) return null;
-  return {
-    label,
-    kind,
-    usedPercent: clampPercent(value.utilization),
-    resetsAt: resetIso(value.resets_at),
-  };
-}
-
-function scopedWindows(
-  limits:
-    | (z.infer<typeof claudeScopedUsageLimitSchema> | null)[]
-    | null
-    | undefined,
-): ProviderUsageWindow[] {
-  const windows: ProviderUsageWindow[] = [];
-  const seen = new Set<string>();
-  for (const limit of limits ?? []) {
-    const label = limit?.scope?.model?.display_name;
-    if (
-      limit == null ||
-      limit.kind !== "weekly_scoped" ||
-      label == null ||
-      limit.percent == null ||
-      seen.has(label.toLowerCase())
-    ) {
-      continue;
-    }
-    seen.add(label.toLowerCase());
-    windows.push({
-      kind: "weekly",
-      model: label.toLowerCase(),
-      label,
-      usedPercent: clampPercent(limit.percent),
-      resetsAt: resetIso(limit.resets_at),
-    });
-  }
-  return windows;
-}
-
-function normalizeUsage(
-  raw: unknown,
-  credentials: ClaudeCredentials,
-  email: string | null,
-): ProviderUsage {
-  const parsed = claudeUsageResponseSchema.safeParse(raw);
-  if (!parsed.success) {
-    return {
-      status: "error",
-      message: "Claude usage response was malformed.",
-      planLabel: planLabel(credentials),
-      accountEmail: email,
-    };
-  }
-  const windows = [
-    usageWindow(parsed.data.five_hour, "Current session", "five-hour"),
-    usageWindow(parsed.data.seven_day, "Weekly limit", "weekly"),
-    ...scopedWindows(parsed.data.limits),
-  ].filter((window): window is ProviderUsageWindow => window !== null);
-  return {
-    status: "ok",
-    accountEmail: email,
-    planLabel: planLabel(credentials),
-    plan: credentials.subscriptionType
-      ? {
-          id: credentials.subscriptionType.toLowerCase(),
-          multiplier:
-            Number(credentials.rateLimitTier?.match(/max_(\d+)x/u)?.[1]) ||
-            null,
-        }
-      : null,
-    windows,
-  };
+  return healthResult(claudeLoginExpired(auth) ? "expired" : "ready", known);
 }
 
 export async function getClaudeProviderUsage(): Promise<ProviderUsageResult> {
   const command = await claudeExecutable();
-  if ((await resolveExecutablePath(command)) === null) {
+
+  if ((await resolveExecutablePath(command)) === null)
     return { supported: true, usage: { status: "not_installed" } };
-  }
-  const [credentials, account] = await Promise.all([
-    readCredentials(),
-    readAccount(),
-  ]);
-  const email = account?.emailAddress ?? null;
-  if (!credentials) {
-    return { supported: true, usage: { status: "unauthenticated" } };
-  }
-  if (credentials.expiresAt != null && Date.now() >= credentials.expiresAt) {
-    return { supported: true, usage: { status: "expired" } };
-  }
-  const known = { planLabel: planLabel(credentials), accountEmail: email };
-  try {
-    const response = await fetch(CLAUDE_USAGE_URL, {
-      headers: {
-        Authorization: `Bearer ${credentials.accessToken}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "anthropic-beta": "oauth-2025-04-20",
-        "User-Agent": "claude-code/2.1.0",
-      },
-      signal: AbortSignal.timeout(USAGE_FETCH_TIMEOUT_MS),
-    });
-    if (response.status === 401) {
-      return { supported: true, usage: { status: "expired" } };
-    }
-    if (!response.ok) {
-      return {
-        supported: true,
-        usage: {
-          status: "error",
-          message:
-            response.status === 429
-              ? "Anthropic temporarily throttled this usage check. This does not mean your Claude limit is exhausted. Try again later."
-              : `Claude usage request failed (HTTP ${response.status}).`,
-          ...known,
-        },
-      };
-    }
-    return {
-      supported: true,
-      usage: {
-        ...normalizeUsage(await response.json(), credentials, email),
-        accountKey: account?.accountUuid
-          ? `anthropic:account:${account.accountUuid}`
-          : null,
-      },
-    };
-  } catch (error) {
+
+  const auth = await claudeAuthStatus(command);
+
+  if (auth === null)
     return {
       supported: true,
       usage: {
         status: "error",
-        message: error instanceof Error ? error.message : String(error),
-        ...known,
+        message: authStatusUnavailable,
+        planLabel: null,
+        accountEmail: null,
       },
     };
-  }
+
+  if (!auth.loggedIn)
+    return { supported: true, usage: { status: "unauthenticated" } };
+
+  if (claudeLoginExpired(auth))
+    return { supported: true, usage: { status: "expired" } };
+
+  return {
+    supported: true,
+    usage: {
+      status: "error",
+      message: "Run /usage in Claude Code to see your current limits.",
+      ...claudeAccountDetails(auth),
+    },
+  };
 }
 
 export const __testing = {
   buildProviderInstallationRun: buildClaudeProviderInstallationRun,
-  normalizeUsage,
 };

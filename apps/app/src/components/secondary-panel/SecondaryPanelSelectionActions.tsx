@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
+import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import {
   anchorPointFromMouseEvent,
   firstClientRect,
@@ -26,14 +26,17 @@ function isEventTargetWithinNode(
   node: HTMLElement | null,
 ): boolean {
   if (node === null || !(event.target instanceof Node)) return false;
+
   return node.contains(event.target);
 }
 
 function selectionRangeTouchesNode(range: Range, node: HTMLElement): boolean {
   const { commonAncestorContainer } = range;
+
   if (node.contains(commonAncestorContainer)) {
     return true;
   }
+
   if (
     typeof range.intersectsNode === "function" &&
     (() => {
@@ -46,6 +49,7 @@ function selectionRangeTouchesNode(range: Range, node: HTMLElement): boolean {
   ) {
     return true;
   }
+
   return false;
 }
 
@@ -61,6 +65,7 @@ function readSelectionWithinPanel({
   if (node === null || typeof window === "undefined") return null;
 
   const selection = window.getSelection();
+
   if (
     selection === null ||
     selection.rangeCount === 0 ||
@@ -70,26 +75,32 @@ function readSelectionWithinPanel({
   }
 
   const text = selection.toString().trim();
+
   if (text.length === 0) {
     return null;
   }
 
   const range = selection.getRangeAt(0);
+
   if (!pointerStartedInNode && !selectionRangeTouchesNode(range, node)) {
     return null;
   }
 
   const selectionAnchor = anchor ?? null;
+
   const rect =
     firstClientRect(range) ??
     (selectionAnchor === null
       ? node.getBoundingClientRect()
       : new DOMRect(selectionAnchor.point.x, selectionAnchor.point.y, 0, 0));
+
   const nextSelection: MessageProseSelection = { text, rect };
+
   if (selectionAnchor !== null) {
     nextSelection.anchorPoint = selectionAnchor.point;
     nextSelection.anchorSide = selectionAnchor.side;
   }
+
   return nextSelection;
 }
 
@@ -103,9 +114,11 @@ export function SecondaryPanelSelectionActions({
   const pointerIsDownRef = useRef(false);
   const lastPointerReleaseAnchorRef = useRef<SelectionAnchor | null>(null);
   const isPointerCoarse = usePointerCoarse();
+
   const [selection, setSelection] = useState<MessageProseSelection | null>(
     null,
   );
+
   const isEnabled = !isPointerCoarse;
 
   const dismissSelection = useCallback(() => {
@@ -126,11 +139,13 @@ export function SecondaryPanelSelectionActions({
     if (!isEnabled || typeof window === "undefined") return;
 
     let frame: number | null = null;
+
     const cancelFrame = () => {
       if (frame === null) return;
       window.cancelAnimationFrame(frame);
       frame = null;
     };
+
     const scheduleReport = (anchor: SelectionAnchor | null = null) => {
       cancelFrame();
       frame = window.requestAnimationFrame(() => {
@@ -138,6 +153,7 @@ export function SecondaryPanelSelectionActions({
         reportSelection(anchor);
       });
     };
+
     const handlePointerDown = (event: PointerEvent) => {
       cancelFrame();
       pointerStartedInNodeRef.current = isEventTargetWithinNode(
@@ -149,6 +165,7 @@ export function SecondaryPanelSelectionActions({
         : null;
       pointerIsDownRef.current = true;
     };
+
     const handlePointerRelease = (event: PointerEvent | MouseEvent) => {
       const anchor =
         pointerStartedInNodeRef.current && pointerStartPointRef.current !== null
@@ -157,22 +174,27 @@ export function SecondaryPanelSelectionActions({
               event,
             )
           : null;
+
       if (anchor !== null) {
         lastPointerReleaseAnchorRef.current = anchor;
       }
+
       pointerIsDownRef.current = false;
       pointerStartPointRef.current = null;
       scheduleReport(anchor ?? lastPointerReleaseAnchorRef.current);
     };
+
     const handlePointerCancel = () => {
       pointerIsDownRef.current = false;
       pointerStartPointRef.current = null;
       scheduleReport(lastPointerReleaseAnchorRef.current);
     };
+
     const handleSelectionChange = () => {
       if (pointerIsDownRef.current) {
         return;
       }
+
       scheduleReport(lastPointerReleaseAnchorRef.current);
     };
 
@@ -182,6 +204,7 @@ export function SecondaryPanelSelectionActions({
     document.addEventListener("mouseup", handlePointerRelease);
     document.addEventListener("selectionchange", handleSelectionChange);
     document.addEventListener("keyup", handleSelectionChange);
+
     return () => {
       cancelFrame();
       document.removeEventListener("pointerdown", handlePointerDown);

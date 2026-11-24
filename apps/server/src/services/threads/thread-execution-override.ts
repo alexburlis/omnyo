@@ -3,14 +3,14 @@ import {
   getThreadExecutionOverride,
   setThreadExecutionOverride,
   type ThreadExecutionOverride,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   reconcileReasoningLevel,
   type AvailableModel,
   type CallerExecutionInputSource,
   type ReasoningLevel,
   type Thread,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { ApiError } from "../../errors.js";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import type { ProviderRegistryService } from "../providers/provider-registry.js";
@@ -52,6 +52,7 @@ export function resolveThreadExecutionOverrideUpdate(
 
   const modelChanged = "model" in patch;
   let nextModel = existing.modelOverride;
+
   if (modelChanged) {
     if (patch.model === null || patch.model === undefined) {
       nextModel = null;
@@ -59,6 +60,7 @@ export function resolveThreadExecutionOverrideUpdate(
       const target = models.find(
         (candidate) => candidate.model === patch.model,
       );
+
       if (!target) {
         throw new ApiError(
           400,
@@ -66,14 +68,17 @@ export function resolveThreadExecutionOverrideUpdate(
           `Model "${patch.model}" is not available in this thread's ${providerId} model catalog. Choose a model offered by ${providerId}; changing providers requires starting a new thread.`,
         );
       }
+
       nextModel = patch.model;
     }
   }
 
   const effectiveModel = nextModel ?? fallbackModel;
+
   const effectiveModelEntry = effectiveModel
     ? models.find((candidate) => candidate.model === effectiveModel)
     : undefined;
+
   const supportedReasoning: readonly ReasoningLevel[] = effectiveModelEntry
     ? effectiveModelEntry.supportedReasoningEfforts.map(
         (effort) => effort.reasoningEffort,
@@ -81,6 +86,7 @@ export function resolveThreadExecutionOverrideUpdate(
     : getSupportedReasoningLevelsForProvider(registry, providerId);
 
   let nextReasoning = existing.reasoningLevelOverride;
+
   if ("reasoningLevel" in patch) {
     if (patch.reasoningLevel === null || patch.reasoningLevel === undefined) {
       nextReasoning = null;
@@ -99,6 +105,7 @@ export function resolveThreadExecutionOverrideUpdate(
           }. Supported reasoning levels: ${supportedReasoning.join(", ")}.`,
         );
       }
+
       nextReasoning = patch.reasoningLevel;
     }
   } else if (
@@ -127,6 +134,7 @@ export async function applyThreadExecutionOverride(
     thread,
     typeof patch.model === "string" ? patch.model : null,
   );
+
   const existing = getThreadExecutionOverride(deps.db, thread.id) ?? {
     modelOverride: null,
     reasoningLevelOverride: null,
@@ -153,6 +161,7 @@ export async function recoverThreadModelOverride(
 ): Promise<void> {
   const existing = getThreadExecutionOverride(deps.db, args.thread.id);
   const patch: ThreadExecutionOverridePatch = {};
+
   if (
     args.model !== undefined &&
     args.modelSource === "explicit" &&
@@ -161,6 +170,7 @@ export async function recoverThreadModelOverride(
   ) {
     patch.model = args.model;
   }
+
   if (
     args.reasoningLevel !== undefined &&
     args.reasoningLevelSource === "explicit" &&
@@ -169,6 +179,7 @@ export async function recoverThreadModelOverride(
   ) {
     patch.reasoningLevel = args.reasoningLevel;
   }
+
   if (patch.model === undefined && patch.reasoningLevel === undefined) return;
 
   await applyThreadExecutionOverride(deps, {
@@ -192,6 +203,7 @@ async function loadThreadProviderModels(
     },
     requiredModel,
   );
+
   if (result.modelLoadError !== null) {
     throw new ApiError(
       503,
@@ -199,6 +211,7 @@ async function loadThreadProviderModels(
       `Unable to load ${thread.providerId} models to validate the change. Try again once the host is connected.`,
     );
   }
+
   return [...result.models, ...result.selectedOnlyModels];
 }
 
@@ -207,11 +220,14 @@ function resolveFallbackModel(
   thread: Thread,
 ): string | null {
   const lastExecution = getLastExecutionOptions(deps, thread.id);
+
   if (lastExecution?.model) {
     return lastExecution.model;
   }
+
   const projectDefaults = getProjectExecutionDefaults(deps.db, {
     projectId: thread.projectId,
   });
+
   return projectDefaults?.model ?? null;
 }

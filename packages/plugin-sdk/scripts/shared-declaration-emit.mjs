@@ -7,15 +7,17 @@ export const declarationId = (id) =>
     ? id
     : id.replace(/\.([cm]?ts|tsx)$/, ".d.$1").replace(/\.d\.tsx$/, ".d.ts");
 
-export function sharedDeclarationEmit(entries, workspaceDir, resolveSource) {
-  const workspaceRoot = path.resolve(workspaceDir) + path.sep;
+export function sharedDeclarationEmit(entries, resolveSource) {
   const configCache = new Map();
   const programs = new Map();
 
   function compilerConfig(file) {
     const configPath = ts.findConfigFile(path.dirname(file), ts.sys.fileExists);
+
     if (!configPath) throw new Error(`Missing tsconfig for ${file}`);
+
     if (configCache.has(configPath)) return configCache.get(configPath);
+
     const config = ts.getParsedCommandLineOfConfigFile(
       configPath,
       {
@@ -40,12 +42,15 @@ export function sharedDeclarationEmit(entries, workspaceDir, resolveSource) {
         },
       },
     );
+
     if (!config || config.errors.length) {
       throw new Error(
         `Invalid tsconfig ${configPath}: ${config?.errors.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")).join("\n")}`,
       );
     }
+
     const options = { ...config.options };
+
     for (const key of [
       "rootDir",
       "outDir",
@@ -54,9 +59,11 @@ export function sharedDeclarationEmit(entries, workspaceDir, resolveSource) {
     ]) {
       delete options[key];
     }
+
     const ambientFiles = config.fileNames.filter((fileName) =>
       /\.d\.[cm]?ts$/.test(fileName),
     );
+
     const result = {
       options,
       ambientFiles,
@@ -65,38 +72,32 @@ export function sharedDeclarationEmit(entries, workspaceDir, resolveSource) {
         ambientFiles,
       ]),
     };
+
     configCache.set(configPath, result);
+
     return result;
   }
 
   const initialConfig = compilerConfig(entries[0]);
+
   const discovery = ts.createProgram(
     [...entries, ...initialConfig.ambientFiles],
     initialConfig.options,
   );
-  const roots = discovery
-    .getSourceFiles()
-    .map((source) => path.resolve(source.fileName))
-    .filter(
-      (id) =>
-        id.startsWith(workspaceRoot) &&
-        !id.includes(`${path.sep}node_modules${path.sep}`) &&
-        !/\.d\.[cm]?ts$/.test(id),
-    );
+
+  programs.set(initialConfig.key, discovery);
 
   function programFor(file) {
     const config = compilerConfig(file);
     const previous = programs.get(config.key);
-    if (
-      !previous ||
-      !previous.getRootFileNames().some((root) => path.resolve(root) === file)
-    ) {
+    const source = previous?.getSourceFile(file);
+
+    if (!source || previous.isSourceFileFromExternalLibrary(source)) {
       programs.set(
         config.key,
         ts.createProgram(
           [
             ...new Set([
-              ...roots,
               ...config.ambientFiles,
               ...(previous?.getRootFileNames() ?? []),
               file,
@@ -108,15 +109,18 @@ export function sharedDeclarationEmit(entries, workspaceDir, resolveSource) {
         ),
       );
     }
+
     return programs.get(config.key);
   }
 
   const declarations = new Map();
+
   const sources = new Map(
     discovery
       .getSourceFiles()
       .map((source) => [path.resolve(source.fileName), source]),
   );
+
   const sourceIds = new Map(
     [...sources.keys()].map((id) => [declarationId(id), id]),
   );
@@ -125,11 +129,15 @@ export function sharedDeclarationEmit(entries, workspaceDir, resolveSource) {
     name: "shared-declaration-emit",
     resolveId(id, importer) {
       const source = resolveSource(id, importer && sourceIds.get(importer));
+
       if (source) {
         sourceIds.set(declarationId(source), source);
+
         return declarationId(source);
       }
+
       if (!importer) return declarationId(id);
+
       if (id.startsWith(".")) {
         const resolved = ts.resolveModuleName(
           id,
@@ -137,22 +145,29 @@ export function sharedDeclarationEmit(entries, workspaceDir, resolveSource) {
           { moduleResolution: ts.ModuleResolutionKind.Node10 },
           ts.sys,
         ).resolvedModule;
+
         if (resolved) {
           const real = path.resolve(resolved.resolvedFileName);
           sourceIds.set(declarationId(real), real);
+
           return declarationId(real);
         }
       }
     },
     load(id) {
       const sourceId = sourceIds.get(id);
+
       if (!sourceId) return null;
+
       if (/\.d\.[cm]?ts$/.test(sourceId)) return readFileSync(sourceId, "utf8");
+
       if (declarations.has(id)) return declarations.get(id);
       const program = programFor(sourceId);
       const source = program.getSourceFile(sourceId);
+
       if (!source) throw new Error(`Missing source ${sourceId}`);
       let declaration;
+
       const result = program.emit(
         source,
         (name, text) => {
@@ -163,12 +178,15 @@ export function sharedDeclarationEmit(entries, workspaceDir, resolveSource) {
         undefined,
         true,
       );
+
       if (!declaration || result.emitSkipped) {
         throw new Error(
           `Failed emit ${sourceId}: ${result.diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")).join("\n")}`,
         );
       }
+
       declarations.set(id, declaration);
+
       return declaration;
     },
   };

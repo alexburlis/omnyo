@@ -1,5 +1,5 @@
-import type { ThreadEvent } from "@bb/domain";
-import { getThreadEventScopeTurnId } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
+import { getThreadEventScopeTurnId } from "@omnyo/domain";
 
 type BufferedTextInstanceKind = "assistant" | "reasoning";
 
@@ -34,9 +34,11 @@ function getThreadEventParentToolCallId(
   if ("item" in decoded && "parentToolCallId" in decoded.item) {
     return decoded.item.parentToolCallId;
   }
+
   if ("parentToolCallId" in decoded) {
     return decoded.parentToolCallId;
   }
+
   return undefined;
 }
 
@@ -44,6 +46,7 @@ export function resolveBufferedTextIdentity(
   args: ResolveBufferedTextIdentityArgs,
 ): BufferedTextInstanceIdentity | null {
   const turnId = args.turnId ?? getThreadEventScopeTurnId(args.decoded.scope);
+
   if (!turnId) {
     return null;
   }
@@ -65,6 +68,7 @@ export function resolveBufferedTextIdentity(
         turnId,
       };
     }
+
     if (
       args.decoded.type === "item/completed" &&
       (args.decoded.item.type === "agentMessage" ||
@@ -77,6 +81,7 @@ export function resolveBufferedTextIdentity(
         turnId,
       };
     }
+
     return null;
   }
 
@@ -91,6 +96,7 @@ export function resolveBufferedTextIdentity(
       turnId,
     };
   }
+
   if (
     (args.decoded.type === "item/started" ||
       args.decoded.type === "item/completed") &&
@@ -103,5 +109,6 @@ export function resolveBufferedTextIdentity(
       turnId,
     };
   }
+
   return null;
 }

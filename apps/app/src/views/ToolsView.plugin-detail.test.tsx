@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { createStore, Provider } from "jotai";
 import { splitLayoutAtom, maximizedPaneIdAtom } from "@/lib/split-layout/atoms";
 import type { ReactNode } from "react";
@@ -26,7 +26,7 @@ import {
   type PluginListItem,
 } from "@/hooks/queries/plugin-settings-queries";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import {
   resetPluginSlotStoreForTest,
   setPluginSlotRegistrations,
@@ -60,6 +60,7 @@ vi.mock("react-resizable-panels", async () => {
   const { createRequire } = await import("node:module");
   const { dirname, join } = await import("node:path");
   const require = createRequire(import.meta.url);
+
   return require(
     join(
       dirname(require.resolve("react-resizable-panels/package.json")),
@@ -71,23 +72,24 @@ vi.mock("react-resizable-panels", async () => {
 const GITHUB_PLUGIN = makePluginListItem({
   id: "github",
   source: "builtin:github",
-  rootDir: "/Users/you/.bb/plugins/github",
-  description: "Browse GitHub issues and pull requests in BB.",
+  rootDir: "/Users/you/.omnyo/plugins/github",
+  description: "Browse GitHub issues and pull requests in Omnyo.",
   name: "GitHub",
   icon: "Github",
   app: { hasApp: true, bundle: null },
   provenance: "catalog",
   catalogEntryId: "github",
-  publisherLabel: "BB Official",
-  sourceDisplay: "BB Official · GitHub",
+  publisherLabel: "Omnyo Official",
+  official: true,
+  sourceDisplay: "Omnyo Official · GitHub",
 });
 
 const GITHUB_CATALOG_ENTRY = {
   entryId: "github",
-  marketplace: "bb-official",
+  marketplace: "omnyo-official",
   pluginId: "github",
   displayName: "GitHub",
-  description: "Browse GitHub issues and pull requests in BB.",
+  description: "Browse GitHub issues and pull requests in Omnyo.",
   icon: "Github",
   iconUrl: null,
   iconTinted: false,
@@ -96,15 +98,14 @@ const GITHUB_CATALOG_ENTRY = {
   collections: [],
   source: "builtin:github",
   repositoryUrl: null,
-  marketplaceDisplayName: "BB Official",
-  publisherKey: "bb-official",
-  publisherLabel: "BB Official",
+  marketplaceDisplayName: "Omnyo Official",
+  publisherKey: "omnyo-official",
+  publisherLabel: "Omnyo Official",
   official: true,
   author: null,
   installed: false,
   conflictingInstallSource: null,
   installedByDefault: false,
-  installs: null,
   compatible: true,
   incompatibleReason: null,
 } satisfies PluginCatalogSearchEntry;
@@ -113,13 +114,16 @@ function RoutedPluginsView() {
   const location = useLocation();
   const isSettings = location.pathname.startsWith("/settings/plugins");
   const prefix = isSettings ? "/settings/plugins/" : "/plugins/";
+
   const pluginId = location.pathname.startsWith(prefix)
     ? decodeURIComponent(location.pathname.slice(prefix.length))
     : undefined;
+
   const detailKey =
     pluginId === undefined
       ? undefined
       : pluginDetailKeyFromRoute(pluginId, location.search);
+
   return (
     <>
       <TooltipProvider>
@@ -140,6 +144,7 @@ function RoutedPluginsView() {
 
 function LocationProbe() {
   const location = useLocation();
+
   return (
     <>
       <output data-testid="route-path">{location.pathname}</output>
@@ -154,6 +159,7 @@ function routeUrl(): string {
 
 function HistoryBackButton() {
   const navigate = useNavigate();
+
   return <button onClick={() => navigate(-1)}>Browser back</button>;
 }
 
@@ -163,15 +169,16 @@ function renderWithQueryClient(ui: ReactNode) {
 
 afterEach(() => {
   cleanup();
-  window.localStorage.removeItem("bb.plugins.workspace.tabs");
+  window.localStorage.removeItem("omnyo.plugins.workspace.tabs");
   resetPluginSlotStoreForTest();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("PluginDetail official catalog lifecycle", () => {
-  it("offers Install from an unowned BB Official plugin detail page", () => {
+  it("offers Install from an unowned Omnyo Official plugin detail page", () => {
     const onInstall = vi.fn();
+
     const { container } = renderWithQueryClient(
       <CatalogPluginDetail
         entry={GITHUB_CATALOG_ENTRY}
@@ -182,10 +189,11 @@ describe("PluginDetail official catalog lifecycle", () => {
     );
 
     expect(screen.getByRole("heading", { name: "GitHub" })).toBeTruthy();
-    expect(screen.getAllByText("BB Official").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Omnyo").length).toBeGreaterThan(0);
+    expect(screen.getByText("Official")).toBeTruthy();
     expect(screen.queryByText("Developer tools")).toBeNull();
     expect(
-      screen.getByText("Browse GitHub issues and pull requests in BB."),
+      screen.getByText("Browse GitHub issues and pull requests in Omnyo."),
     ).toBeTruthy();
     expect(screen.queryByText("Capabilities")).toBeNull();
     expect(container.querySelector('[data-icon="Github"]')).not.toBeNull();
@@ -199,7 +207,7 @@ describe("PluginDetail official catalog lifecycle", () => {
       <CatalogPluginDetail
         entry={{
           ...GITHUB_CATALOG_ENTRY,
-          repositoryUrl: "https://github.com/acme/bb-github",
+          repositoryUrl: "https://github.com/acme/omnyo-github",
         }}
         onInstall={() => {}}
         catalogEntries={[]}
@@ -208,9 +216,12 @@ describe("PluginDetail official catalog lifecycle", () => {
     );
 
     const link = screen.getByRole("link", {
-      name: /github\.com\/acme\/bb-github/u,
+      name: /github\.com\/acme\/omnyo-github/u,
     });
-    expect(link.getAttribute("href")).toBe("https://github.com/acme/bb-github");
+
+    expect(link.getAttribute("href")).toBe(
+      "https://github.com/acme/omnyo-github",
+    );
     expect(link.getAttribute("target")).toBe("_blank");
   });
 
@@ -231,6 +242,7 @@ describe("PluginDetail official catalog lifecycle", () => {
     const screenshot = screen.getByRole("img", {
       name: "GitHub screenshot 1",
     });
+
     expect(screenshot.getAttribute("src")).toBe(
       "https://images.example/plugin.png",
     );
@@ -259,6 +271,7 @@ describe("PluginDetail official catalog lifecycle", () => {
     const link = screen.getByRole("link", {
       name: "Browse Code & Reviews plugins",
     });
+
     expect(link.getAttribute("href")).toBe(
       "/plugins?shelf=category%3Acode-and-reviews",
     );
@@ -270,8 +283,9 @@ describe("PluginDetail official catalog lifecycle", () => {
     const incompatibleEntry = {
       ...GITHUB_CATALOG_ENTRY,
       compatible: false,
-      incompatibleReason: "Requires bb 0.20 or newer.",
+      incompatibleReason: "Requires Omnyo 0.20 or newer.",
     };
+
     renderWithQueryClient(
       <>
         <CatalogPluginDetailBanner
@@ -288,16 +302,19 @@ describe("PluginDetail official catalog lifecycle", () => {
     );
 
     expect(screen.queryByRole("alert")).toBeNull();
+
     const compatibilityStatus = screen
-      .getByText("Update bb to install this plugin")
+      .getByText("Update Omnyo to install this plugin")
       .closest("div[class*='bg-surface-recessed']");
+
     expect(compatibilityStatus).not.toBeNull();
+
     if (compatibilityStatus === null) return;
     expect(compatibilityStatus.textContent).toContain(
-      "Update bb to install this plugin",
+      "Update Omnyo to install this plugin",
     );
     expect(compatibilityStatus.textContent).toContain(
-      "Requires bb 0.20 or newer.",
+      "Requires Omnyo 0.20 or newer.",
     );
     expect(
       screen
@@ -309,6 +326,7 @@ describe("PluginDetail official catalog lifecycle", () => {
   it("keeps catalog provenance and release management in the unified detail taxonomy", async () => {
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
     const onDelete = vi.fn();
+
     const { container } = render(
       <MemoryRouter>
         <QueryClientWrapper>
@@ -329,7 +347,8 @@ describe("PluginDetail official catalog lifecycle", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getAllByText("BB Official").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Omnyo").length).toBeGreaterThan(0);
+    expect(screen.getByText("Official")).toBeTruthy();
     expect(screen.queryByText("Developer tools")).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Uninstall GitHub" }),
@@ -337,7 +356,7 @@ describe("PluginDetail official catalog lifecycle", () => {
 
     expect(screen.getByRole("heading", { name: "Details" })).toBeTruthy();
     expect(
-      screen.getByText("Browse GitHub issues and pull requests in BB."),
+      screen.getByText("Browse GitHub issues and pull requests in Omnyo."),
     ).toBeTruthy();
     const meta = screen.getByText("0.1.0");
     expect(
@@ -345,11 +364,11 @@ describe("PluginDetail official catalog lifecycle", () => {
         .closest("[data-resource-detail-section]")
         ?.getAttribute("data-resource-detail-section"),
     ).toBe("release");
-    expect(screen.queryByText("~/.bb/plugins/github")).toBeNull();
+    expect(screen.queryByText("~/.omnyo/plugins/github")).toBeNull();
     expect(
       screen.queryByRole("button", { name: /Copy plugin path/u }),
     ).toBeNull();
-    expect(screen.getByText("Updates with bb")).toBeTruthy();
+    expect(screen.getByText("Updates with Omnyo")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Check now" })).toBeNull();
 
     expect(container.querySelector('[data-icon="Github"]')).not.toBeNull();
@@ -363,6 +382,7 @@ describe("PluginDetail official catalog lifecycle", () => {
 
   it("keeps the update action separate from Details metadata", () => {
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
+
     const plugin: PluginListItem = {
       ...GITHUB_PLUGIN,
       source: "npm:@example/github@^1.0.0",
@@ -374,6 +394,7 @@ describe("PluginDetail official catalog lifecycle", () => {
         availableVersion: "1.5.0",
       },
     };
+
     render(
       <MemoryRouter>
         <QueryClientWrapper>
@@ -394,11 +415,14 @@ describe("PluginDetail official catalog lifecycle", () => {
     );
 
     const version = screen.getByText(GITHUB_PLUGIN.version);
+
     const update = screen.getByRole("button", {
       name: "Update GitHub to 1.5.0",
     });
+
     const activation = screen.getByRole("switch", { name: "Disable GitHub" });
-    const path = screen.queryByText("~/.bb/plugins/github");
+    const path = screen.queryByText("~/.omnyo/plugins/github");
+
     const releaseSection = document.querySelector(
       '[data-resource-detail-section="release"]',
     );
@@ -412,6 +436,7 @@ describe("PluginDetail official catalog lifecycle", () => {
     const updateLabel = screen.getByText("Update", { selector: "p" });
     const updateRow = updateLabel.parentElement;
     expect(updateRow).not.toBeNull();
+
     if (updateRow === null) return;
     const updateDetails = updateRow.querySelector('[role="status"]');
     expect(updateRow.closest("dl")).toBeNull();
@@ -431,8 +456,10 @@ describe("PluginDetail official catalog lifecycle", () => {
       catalogEntryId: null,
       publisherLabel: null,
     };
+
     const { queryClient, wrapper: QueryClientWrapper } =
       createQueryClientTestHarness();
+
     queryClient.setQueryData(pluginSourceQueryKey(plugin.id), null);
 
     render(
@@ -456,7 +483,7 @@ describe("PluginDetail official catalog lifecycle", () => {
 
     expect(screen.getByText("Installed", { selector: "dt" })).toBeTruthy();
     expect(screen.getByText("Install date unavailable")).toBeTruthy();
-    expect(screen.queryByText("Updates with bb")).toBeNull();
+    expect(screen.queryByText("Updates with Omnyo")).toBeNull();
   });
 
   it("loads the install date for a local plugin", async () => {
@@ -466,7 +493,7 @@ describe("PluginDetail official catalog lifecycle", () => {
       vi.fn(async (input: RequestInfo | URL) =>
         String(input) === "/api/v1/plugins/github/source"
           ? Response.json({
-              requested: "path:/Users/you/src/bb-plugin-github",
+              requested: "path:/Users/you/src/omnyo-plugin-github",
               resolved: "0.1.0",
               engines: {},
               installedAt,
@@ -475,14 +502,16 @@ describe("PluginDetail official catalog lifecycle", () => {
           : Response.json({ error: "not found" }, { status: 404 }),
       ),
     );
+
     const plugin: PluginListItem = {
       ...GITHUB_PLUGIN,
-      source: "path:/Users/you/src/bb-plugin-github",
-      rootDir: "/Users/you/src/bb-plugin-github",
+      source: "path:/Users/you/src/omnyo-plugin-github",
+      rootDir: "/Users/you/src/omnyo-plugin-github",
       provenance: "direct",
       catalogEntryId: null,
       publisherLabel: null,
     };
+
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
     render(
       <MemoryRouter>
@@ -529,7 +558,7 @@ describe("PluginDetail official catalog lifecycle", () => {
       updateState: {
         ...EMPTY_PLUGIN_UPDATE_STATE,
         blockedVersion: "2.0.0",
-        blockedReasons: ["Requires bb 0.20 or newer."],
+        blockedReasons: ["Requires Omnyo 0.20 or newer."],
       },
       expected: "Update blocked",
       actionName: null,
@@ -572,10 +601,12 @@ describe("PluginDetail official catalog lifecycle", () => {
       expect(
         screen.getByText("Version", { selector: "dt" }).parentElement,
       ).not.toBe(updateRow);
+
       const action =
         actionName === null
           ? null
           : screen.getByRole("button", { name: actionName });
+
       expect(action?.closest("dl") ?? null).toBeNull();
       expect(screen.queryByRole("dialog")).toBeNull();
     },
@@ -584,6 +615,7 @@ describe("PluginDetail official catalog lifecycle", () => {
   it("uses a plugin-owned canonical icon when no rich logo is declared", () => {
     const compactIconUrl = "/api/v1/plugins/omega/assets/icon?h=abc";
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
+
     const { container } = render(
       <MemoryRouter>
         <QueryClientWrapper>
@@ -616,21 +648,41 @@ describe("PluginDetail official catalog lifecycle", () => {
     const icon = container.querySelector(
       `[data-plugin-icon-asset="${compactIconUrl}"]`,
     );
+
     expect(icon).not.toBeNull();
   });
 
-  it("shows a disabled Uninstall action for a built-in plugin", async () => {
-    const onDelete = vi.fn();
-    const builtinPlugin = {
-      ...GITHUB_PLUGIN,
+  it.each([
+    {
+      label: "disables Uninstall for a core plugin",
       id: "automations",
       name: "Automations",
-      source: "builtin:automations",
-      provenance: "builtin" as const,
+      removable: false,
+      ariaDisabled: "true",
+      deleteCalls: 0,
+    },
+    {
+      label: "offers Uninstall for a removable bundled plugin",
+      id: "chime-local",
+      name: "Chime",
+      removable: true,
+      ariaDisabled: null,
+      deleteCalls: 1,
+    },
+  ])("$label", async ({ id, name, removable, ariaDisabled, deleteCalls }) => {
+    const onDelete = vi.fn();
+
+    const builtinPlugin: PluginListItem = {
+      ...GITHUB_PLUGIN,
+      id,
+      name,
+      source: `builtin:${id}`,
+      provenance: "builtin",
+      removable,
       catalogEntryId: null,
-      publisherKey: "bb-official",
-      publisherLabel: "BB Official",
+      publisherLabel: "Omnyo Official",
     };
+
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
     render(
       <MemoryRouter>
@@ -651,40 +703,47 @@ describe("PluginDetail official catalog lifecycle", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getAllByText("BB Official").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Omnyo").length).toBeGreaterThan(0);
+    expect(screen.getByText("Official")).toBeTruthy();
     expect(
-      screen.getByRole("switch", { name: "Disable Automations" }),
+      screen.getByRole("switch", { name: `Disable ${name}` }),
     ).toBeTruthy();
 
     fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Automations actions" }),
+      screen.getByRole("button", { name: `${name} actions` }),
     );
+
     const uninstall = await screen.findByRole("menuitem", {
       name: "Uninstall",
     });
-    expect(uninstall.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(uninstall);
-    expect(onDelete).not.toHaveBeenCalled();
+
+    expect(uninstall.getAttribute("aria-disabled")).toBe(ariaDisabled);
     fireEvent.pointerMove(uninstall);
-    expect(
-      await screen.findAllByText(
-        "Included with BB; disable this plugin instead.",
-      ),
-    ).not.toHaveLength(0);
+    await waitFor(() =>
+      expect(
+        screen.queryAllByText(
+          "Included with Omnyo; disable this plugin instead.",
+        ).length > 0,
+      ).toBe(!removable),
+    );
+
+    fireEvent.click(uninstall);
+    expect(onDelete.mock.calls).toEqual(
+      Array.from({ length: deleteCalls }, () => [builtinPlugin]),
+    );
   });
 
-  it("copies the public marketplace link for a BB Community catalog entry", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
+  it("offers no marketplace link for an Acme Plugins catalog entry", () => {
     const entry = {
       ...GITHUB_CATALOG_ENTRY,
       entryId: "acme github",
       pluginId: "acme-github",
-      marketplace: "bb-community",
-      marketplaceDisplayName: "BB Community",
+      marketplace: "acme-plugins",
+      marketplaceDisplayName: "Acme Plugins",
       official: false,
     } satisfies PluginCatalogSearchEntry;
-    renderWithQueryClient(
+
+    const { container } = renderWithQueryClient(
       <CatalogPluginDetail
         entry={entry}
         onInstall={() => {}}
@@ -693,22 +752,11 @@ describe("PluginDetail official catalog lifecycle", () => {
       />,
     );
 
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "GitHub actions" }),
-    );
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Copy marketplace link" }),
-    );
-    await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith(
-        "https://getbb.app/marketplace/acme%20github",
-      ),
-    );
+    expect(screen.queryByRole("button", { name: "GitHub actions" })).toBeNull();
+    expect(container.innerHTML).not.toContain("getbb.app");
   });
 
-  it("copies the marketplace link for an installed BB Community plugin without a loaded catalog entry", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
+  it("offers no marketplace link for an installed Acme Plugins plugin", async () => {
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
     render(
       <MemoryRouter>
@@ -717,9 +765,9 @@ describe("PluginDetail official catalog lifecycle", () => {
             isLoading={false}
             plugin={{
               ...GITHUB_PLUGIN,
-              source: "github:acme/bb-github",
+              source: "github:acme/omnyo-github",
               catalogEntryId: "acme-github",
-              catalogMarketplaceName: "bb-community",
+              catalogMarketplaceName: "acme-plugins",
             }}
             pending={false}
             openSourceDisabled
@@ -737,41 +785,6 @@ describe("PluginDetail official catalog lifecycle", () => {
     fireEvent.pointerDown(
       screen.getByRole("button", { name: "GitHub actions" }),
     );
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Copy marketplace link" }),
-    );
-    await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith(
-        "https://getbb.app/marketplace/acme-github",
-      ),
-    );
-  });
-
-  it("offers no marketplace link for plugins outside BB Community", async () => {
-    const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
-    render(
-      <MemoryRouter>
-        <QueryClientWrapper>
-          <PluginDetail
-            isLoading={false}
-            plugin={GITHUB_PLUGIN}
-            pending={false}
-            openSourceDisabled
-            onToggle={() => {}}
-            onEdit={() => {}}
-            onOpenSource={() => {}}
-            onDelete={() => {}}
-            catalogEntry={GITHUB_CATALOG_ENTRY}
-            catalogEntries={[GITHUB_CATALOG_ENTRY]}
-            onOpenPlugin={() => undefined}
-          />
-        </QueryClientWrapper>
-      </MemoryRouter>,
-    );
-
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "GitHub actions" }),
-    );
     await screen.findByRole("menuitem", { name: "Uninstall" });
     expect(
       screen.queryByRole("menuitem", { name: "Copy marketplace link" }),
@@ -779,15 +792,16 @@ describe("PluginDetail official catalog lifecycle", () => {
   });
 });
 
-describe("BB Official plugin detail routing", () => {
+describe("Omnyo Official plugin detail routing", () => {
   it.each([false, true])(
     "keeps official attribution and tabs through collection navigation (compact: %s)",
     async (compact) => {
       const author = {
-        name: "BB",
+        name: "Omnyo",
         github: "get-bb",
         url: "https://github.com/get-bb",
       };
+
       const entries = [
         { ...GITHUB_CATALOG_ENTRY, author, installed: true },
         {
@@ -799,10 +813,12 @@ describe("BB Official plugin detail routing", () => {
           displayName: "Automations",
         },
       ];
+
       vi.stubGlobal(
         "fetch",
         vi.fn(async (input: RequestInfo | URL) => {
           const url = String(input);
+
           if (url === "/api/v1/plugins")
             return new Response(
               JSON.stringify({
@@ -813,17 +829,19 @@ describe("BB Official plugin detail routing", () => {
                     name: "GitHub",
                     source: "builtin:github",
                     provenance: "builtin",
-                    publisherLabel: "BB Official",
+                    publisherLabel: "Omnyo Official",
                   }),
                 ],
               }),
               { headers: { "content-type": "application/json" } },
             );
+
           if (url.startsWith("/api/v1/plugin-catalog/search"))
             return new Response(
               JSON.stringify({ results: entries, collections: [] }),
               { headers: { "content-type": "application/json" } },
             );
+
           return new Response(JSON.stringify({ error: "not found" }), {
             status: 404,
             headers: { "content-type": "application/json" },
@@ -839,27 +857,37 @@ describe("BB Official plugin detail routing", () => {
         </CompactViewportOverrideProvider>,
         { wrapper },
       );
+
       const title = await screen.findByRole("heading", {
         name: "GitHub",
         level: 1,
       });
+
       const header = title.parentElement?.parentElement;
       expect(header).not.toBeNull();
+
       if (!header) throw new Error("Plugin header missing");
+
       const authorLink = await within(header).findByRole("link", {
-        name: "BB Official",
+        name: "Omnyo",
       });
+
       expect(within(header).queryByText(/^By/u)).toBeNull();
-      expect(within(header).getAllByText("BB Official")).toHaveLength(1);
+      expect(within(header).getAllByText("Omnyo")).toHaveLength(1);
+      expect(within(header).getAllByText("Official")).toHaveLength(1);
       expect(
         within(header).getByRole("img", {
-          name: "BB Official's GitHub avatar",
+          name: "Omnyo's avatar",
         }),
       ).toBeTruthy();
       fireEvent.click(authorLink);
       expect(
-        await screen.findByRole("heading", { name: /^BB Official/u, level: 1 }),
+        await screen.findByRole("heading", {
+          name: /^Omnyo\s*\d+ plugins?$/u,
+          level: 1,
+        }),
       ).toBeTruthy();
+
       if (compact) {
         await waitFor(() =>
           expect(
@@ -868,7 +896,7 @@ describe("BB Official plugin detail routing", () => {
         );
         expect(
           JSON.parse(
-            window.localStorage.getItem("bb.plugins.workspace.tabs") ?? "{}",
+            window.localStorage.getItem("omnyo.plugins.workspace.tabs") ?? "{}",
           ).tabs,
         ).toContain("github");
         fireEvent.click(
@@ -894,8 +922,10 @@ describe("BB Official plugin detail routing", () => {
         expect(
           screen.queryByRole("button", { name: "Close Automations" }),
         ).toBeNull();
+
         return;
       }
+
       expect(screen.getByRole("button", { name: "Close GitHub" })).toBeTruthy();
       expect(screen.getByRole("heading", { name: "GitHub", level: 1 })).toBe(
         title,
@@ -939,17 +969,19 @@ describe("BB Official plugin detail routing", () => {
       displayName: "Canvas",
       description: "Draw diagrams on a shared tldraw canvas.",
       source: "git:https://github.com/example/canvas.git@main",
-      marketplace: "bb-community",
-      marketplaceDisplayName: "BB Community",
-      publisherKey: "bb-community",
-      publisherLabel: "BB Community",
+      marketplace: "acme-plugins",
+      marketplaceDisplayName: "Acme Plugins",
+      publisherKey: "acme-plugins",
+      publisherLabel: "Acme Plugins",
       official: false,
       conflictingInstallSource: "path:/Users/you/git/canvas",
     } satisfies PluginCatalogSearchEntry;
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+
         if (url === "/api/v1/plugins") {
           return new Response(
             JSON.stringify({
@@ -968,12 +1000,14 @@ describe("BB Official plugin detail routing", () => {
             { headers: { "content-type": "application/json" } },
           );
         }
+
         if (url.startsWith("/api/v1/plugin-catalog/search")) {
           return new Response(
             JSON.stringify({ results: [marketplaceCanvas], collections: [] }),
             { headers: { "content-type": "application/json" } },
           );
         }
+
         return new Response(JSON.stringify({ error: "not found" }), {
           status: 404,
           headers: { "content-type": "application/json" },
@@ -996,7 +1030,7 @@ describe("BB Official plugin detail routing", () => {
     );
 
     await waitFor(() => {
-      expect(routeUrl()).toBe("/plugins/canvas?q=canvas&listing=bb-community");
+      expect(routeUrl()).toBe("/plugins/canvas?q=canvas&listing=acme-plugins");
     });
     await waitFor(() => {
       expect(document.querySelector("[data-plugin-summary]")?.textContent).toBe(
@@ -1006,6 +1040,7 @@ describe("BB Official plugin detail routing", () => {
     expect(screen.getByText("Another plugin uses this ID")).toBeTruthy();
     const installButtons = screen.getAllByRole("button", { name: /Install/u });
     expect(installButtons).toHaveLength(2);
+
     for (const button of installButtons) {
       expect(button.getAttribute("aria-disabled")).toBe("true");
     }
@@ -1021,21 +1056,21 @@ describe("BB Official plugin detail routing", () => {
         "Edit .mdx files beside the chat.",
       );
     });
-    expect(screen.getByText("Also published in BB Community")).toBeTruthy();
+    expect(screen.getByText("Also published in Acme Plugins")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "View listing" }));
     await waitFor(() => {
-      expect(routeUrl()).toBe("/plugins/canvas?q=canvas&listing=bb-community");
+      expect(routeUrl()).toBe("/plugins/canvas?q=canvas&listing=acme-plugins");
     });
   });
 
   it("uses the installed catalog identity when plugin ids collide", async () => {
     const firstCatalogEntry = {
       ...GITHUB_CATALOG_ENTRY,
-      marketplace: "bb-community",
-      marketplaceDisplayName: "BB Community",
-      publisherKey: "bb-community:example",
-      publisherLabel: "BB Community",
+      marketplace: "acme-plugins",
+      marketplaceDisplayName: "Acme Plugins",
+      publisherKey: "acme-plugins:example",
+      publisherLabel: "Acme Plugins",
       description: "Description from the first catalog.",
       repositoryUrl: "https://github.com/example/first-catalog-plugin",
       author: {
@@ -1044,6 +1079,7 @@ describe("BB Official plugin detail routing", () => {
         url: "https://github.com/first-publisher",
       },
     };
+
     const installedCatalogEntry = {
       ...GITHUB_CATALOG_ENTRY,
       marketplace: "partner-catalog",
@@ -1059,10 +1095,12 @@ describe("BB Official plugin detail routing", () => {
       },
       installed: true,
     };
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+
         if (url === "/api/v1/plugins") {
           return new Response(
             JSON.stringify({
@@ -1084,6 +1122,7 @@ describe("BB Official plugin detail routing", () => {
             { headers: { "content-type": "application/json" } },
           );
         }
+
         if (url.startsWith("/api/v1/plugin-catalog/search")) {
           return new Response(
             JSON.stringify({
@@ -1093,6 +1132,7 @@ describe("BB Official plugin detail routing", () => {
             { headers: { "content-type": "application/json" } },
           );
         }
+
         return new Response(JSON.stringify({ error: "not found" }), {
           status: 404,
           headers: { "content-type": "application/json" },
@@ -1117,11 +1157,14 @@ describe("BB Official plugin detail routing", () => {
     });
     const title = screen.getByRole("heading", { name: "GitHub", level: 1 });
     const header = title.parentElement?.parentElement;
+
     if (!header) throw new Error("Plugin header missing");
     expect(within(header).queryByText("Partner Catalog")).toBeNull();
+
     const source = screen.getByRole("link", {
       name: /github.com\/example\/installed-catalog-plugin/u,
     });
+
     expect(source.querySelector('[data-icon="GithubLogo"]')).not.toBeNull();
     expect(
       within(header).getByRole("link", { name: "Installed publisher" }),
@@ -1132,10 +1175,10 @@ describe("BB Official plugin detail routing", () => {
   it("uses installed metadata when its catalog entry is unavailable", async () => {
     const unrelatedCatalogEntry = {
       ...GITHUB_CATALOG_ENTRY,
-      marketplace: "bb-community",
-      marketplaceDisplayName: "BB Community",
-      publisherKey: "bb-community:example",
-      publisherLabel: "BB Community",
+      marketplace: "acme-plugins",
+      marketplaceDisplayName: "Acme Plugins",
+      publisherKey: "acme-plugins:example",
+      publisherLabel: "Acme Plugins",
       description: "Description from an unrelated catalog entry.",
       repositoryUrl: "https://github.com/example/unrelated-catalog-plugin",
       author: {
@@ -1144,10 +1187,12 @@ describe("BB Official plugin detail routing", () => {
         url: "https://github.com/unrelated-publisher",
       },
     };
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+
         if (url === "/api/v1/plugins") {
           return new Response(
             JSON.stringify({
@@ -1170,6 +1215,7 @@ describe("BB Official plugin detail routing", () => {
             { headers: { "content-type": "application/json" } },
           );
         }
+
         if (url.startsWith("/api/v1/plugin-catalog/search")) {
           return new Response(
             JSON.stringify({
@@ -1179,6 +1225,7 @@ describe("BB Official plugin detail routing", () => {
             { headers: { "content-type": "application/json" } },
           );
         }
+
         return new Response(JSON.stringify({ error: "not found" }), {
           status: 404,
           headers: { "content-type": "application/json" },
@@ -1212,6 +1259,7 @@ describe("BB Official plugin detail routing", () => {
             headers: { "content-type": "application/json" },
           });
         }
+
         if (url === "/api/v1/plugin-catalog/search?q=") {
           return new Response(
             JSON.stringify({
@@ -1221,6 +1269,7 @@ describe("BB Official plugin detail routing", () => {
             { headers: { "content-type": "application/json" } },
           );
         }
+
         return new Response(JSON.stringify({ error: "not found" }), {
           status: 404,
           headers: { "content-type": "application/json" },
@@ -1260,24 +1309,28 @@ describe("BB Official plugin detail routing", () => {
     async (mode) => {
       const installed = mode === "installed";
       const pluginName = installed ? "Local GitHub" : "GitHub";
+
       const searchLabel = installed
         ? "Search installed plugins"
         : "Search plugins";
+
       const catalogEntry = {
         ...GITHUB_CATALOG_ENTRY,
         installed,
         categoryId: "code-and-reviews",
         category: "Code & Reviews",
         author: {
-          name: "BB",
+          name: "Omnyo",
           github: "get-bb",
           url: "https://github.com/get-bb",
         },
       };
+
       vi.stubGlobal(
         "fetch",
         vi.fn(async (input: RequestInfo | URL) => {
           const url = String(input);
+
           if (url === "/api/v1/plugins") {
             return new Response(
               JSON.stringify({
@@ -1291,12 +1344,14 @@ describe("BB Official plugin detail routing", () => {
               },
             );
           }
+
           if (url.startsWith("/api/v1/plugin-catalog/search")) {
             return new Response(
               JSON.stringify({ results: [catalogEntry], collections: [] }),
               { headers: { "content-type": "application/json" } },
             );
           }
+
           return new Response(JSON.stringify({ error: "not found" }), {
             status: 404,
             headers: { "content-type": "application/json" },
@@ -1323,14 +1378,17 @@ describe("BB Official plugin detail routing", () => {
           ? `${pluginName} plugin details`
           : "Open GitHub details",
       });
+
       const panels = Array.from(document.querySelectorAll("[data-panel]"));
       expect(panels).toHaveLength(2);
       expect(panels[0]?.getAttribute("data-panel-size")).toBe("100.0");
       expect(panels[1]?.getAttribute("data-panel-size")).toBe("0.0");
       const search = screen.getByRole("textbox", { name: searchLabel });
+
       if (installed) {
         fireEvent.change(search, { target: { value: "Local GitHub" } });
       }
+
       card.focus();
       fireEvent.click(card);
       expect(
@@ -1354,6 +1412,7 @@ describe("BB Official plugin detail routing", () => {
           installed ? "?view=installed&query=Local+GitHub" : "",
         );
         expect(document.activeElement).toBe(card);
+
         if (installed) expect(search).toHaveProperty("value", "Local GitHub");
       });
       expect(Array.from(document.querySelectorAll("[data-panel]"))).toEqual(
@@ -1379,10 +1438,11 @@ describe("BB Official plugin detail routing", () => {
     "/plugins?view=installed",
   ])("opens installed plugin settings from %s", async (path) => {
     const author = {
-      name: "BB",
+      name: "Omnyo",
       github: "get-bb",
       url: "https://github.com/get-bb",
     };
+
     const catalogEntries = [
       { ...GITHUB_CATALOG_ENTRY, author, installed: true },
       {
@@ -1393,10 +1453,12 @@ describe("BB Official plugin detail routing", () => {
         author,
       },
     ];
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+
         if (url === "/api/v1/plugins") {
           return new Response(
             JSON.stringify({
@@ -1404,7 +1466,7 @@ describe("BB Official plugin detail routing", () => {
               plugins: [
                 {
                   ...GITHUB_PLUGIN,
-                  catalogMarketplaceName: "bb-official",
+                  catalogMarketplaceName: "omnyo-official",
                   iconUrl: null,
                   screenshots: [],
                   collections: [],
@@ -1417,12 +1479,14 @@ describe("BB Official plugin detail routing", () => {
             { headers: { "content-type": "application/json" } },
           );
         }
+
         if (url.startsWith("/api/v1/plugin-catalog/search")) {
           return new Response(
             JSON.stringify({ results: catalogEntries, collections: [] }),
             { headers: { "content-type": "application/json" } },
           );
         }
+
         return new Response(JSON.stringify({ error: "not found" }), {
           status: 404,
           headers: { "content-type": "application/json" },
@@ -1450,6 +1514,7 @@ describe("BB Official plugin detail routing", () => {
       expect(screen.getByTestId("route-path").textContent).toBe(
         path.split("?")[0],
       );
+
       const pluginButton = await screen.findByRole("button", {
         name: "GitHub plugin details",
       });
@@ -1460,6 +1525,7 @@ describe("BB Official plugin detail routing", () => {
     const relatedPluginButton = await screen.findByRole("button", {
       name: "Open Automations details",
     });
+
     expect(screen.getAllByText("GitHub", { selector: "h1" })).toHaveLength(1);
     fireEvent.click(relatedPluginButton);
     await waitFor(() => {
@@ -1477,10 +1543,11 @@ describe("BB Official plugin detail routing", () => {
 
   it("opens an author from a card and returns to the prior Browse filters", async () => {
     const author = {
-      name: "BB",
+      name: "bb",
       github: "get-bb",
       url: "https://github.com/get-bb",
     };
+
     const catalogEntries = [
       {
         ...GITHUB_CATALOG_ENTRY,
@@ -1498,21 +1565,25 @@ describe("BB Official plugin detail routing", () => {
         author,
       },
     ];
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+
         if (url === "/api/v1/plugins") {
           return new Response(JSON.stringify({ enabled: true, plugins: [] }), {
             headers: { "content-type": "application/json" },
           });
         }
+
         if (url.startsWith("/api/v1/plugin-catalog/search")) {
           return new Response(
             JSON.stringify({ results: catalogEntries, collections: [] }),
             { headers: { "content-type": "application/json" } },
           );
         }
+
         return new Response(JSON.stringify({ error: "not found" }), {
           status: 404,
           headers: { "content-type": "application/json" },
@@ -1535,20 +1606,24 @@ describe("BB Official plugin detail routing", () => {
       { wrapper: QueryClientWrapper },
     );
 
-    fireEvent.click(
-      (await screen.findAllByRole("link", { name: "BB Official" }))[0]!,
-    );
-    expect(await screen.findByRole("heading", { name: /^BB/u })).toBeTruthy();
+    fireEvent.click((await screen.findAllByRole("link", { name: "bb" }))[0]!);
+    expect(
+      await screen.findByRole("heading", { name: /^bb\s*\d+ plugins?$/u }),
+    ).toBeTruthy();
+
     let params = new URLSearchParams(
       screen.getByTestId("route-search").textContent ?? "",
     );
-    expect(params.get("author")).toBe("11:bb-official:github:get-bb");
+
+    expect(params.get("author")).toBe("14:omnyo-official:github:get-bb");
     expect(params.getAll("category")).toEqual(["code-and-reviews"]);
     expect(params.get("sort")).toBe("recently-added");
 
     fireEvent.click(screen.getByRole("button", { name: "Browser back" }));
     await waitFor(() => {
-      expect(screen.queryByRole("heading", { name: /^BB/u })).toBeNull();
+      expect(
+        screen.queryByRole("heading", { name: /^bb\s*\d+ plugins?$/u }),
+      ).toBeNull();
     });
     params = new URLSearchParams(
       screen.getByTestId("route-search").textContent ?? "",
@@ -1557,12 +1632,12 @@ describe("BB Official plugin detail routing", () => {
     expect(params.getAll("category")).toEqual(["code-and-reviews"]);
     expect(params.get("sort")).toBe("recently-added");
 
-    fireEvent.click(
-      (await screen.findAllByRole("link", { name: "BB Official" }))[0]!,
-    );
+    fireEvent.click((await screen.findAllByRole("link", { name: "bb" }))[0]!);
+
     const card = await screen.findByRole("button", {
       name: "Open GitHub details",
     });
+
     card.focus();
     fireEvent.click(card);
     expect(
@@ -1574,10 +1649,11 @@ describe("BB Official plugin detail routing", () => {
 
   it("routes the detail author link to the restored author page", async () => {
     const author = {
-      name: "BB",
+      name: "bb",
       github: "get-bb",
       url: "https://github.com/get-bb",
     };
+
     const catalogEntries = [
       { ...GITHUB_CATALOG_ENTRY, author },
       {
@@ -1588,21 +1664,25 @@ describe("BB Official plugin detail routing", () => {
         author,
       },
     ];
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+
         if (url === "/api/v1/plugins") {
           return new Response(JSON.stringify({ enabled: true, plugins: [] }), {
             headers: { "content-type": "application/json" },
           });
         }
+
         if (url.startsWith("/api/v1/plugin-catalog/search")) {
           return new Response(
             JSON.stringify({ results: catalogEntries, collections: [] }),
             { headers: { "content-type": "application/json" } },
           );
         }
+
         return new Response(JSON.stringify({ error: "not found" }), {
           status: 404,
           headers: { "content-type": "application/json" },
@@ -1623,17 +1703,102 @@ describe("BB Official plugin detail routing", () => {
     expect(
       await screen.findByRole("heading", { name: "More from this author" }),
     ).toBeTruthy();
-    const authorLinks = screen.getAllByRole("link", { name: "BB Official" });
+    expect(screen.getAllByText("Official").length).toBeGreaterThan(0);
+    expect(
+      screen
+        .getByRole("link", { name: /^bb\s*Opens in a new tab$/u })
+        .getAttribute("href"),
+    ).toBe("https://github.com/get-bb");
+    const authorLinks = screen.getAllByRole("link", { name: "bb" });
     fireEvent.click(authorLinks.at(-1)!);
     await waitFor(() => {
       expect(screen.getByTestId("route-path").textContent).toBe("/plugins");
     });
-    expect(await screen.findByRole("heading", { name: /^BB/u })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: /^bb\s*\d+ plugins?$/u }),
+    ).toBeTruthy();
     expect(
       new URLSearchParams(
         screen.getByTestId("route-search").textContent ?? "",
       ).get("author"),
-    ).toBe("11:bb-official:github:get-bb");
+    ).toBe("14:omnyo-official:github:get-bb");
+  });
+});
+
+describe("hosted plugin attribution", () => {
+  function renderInstalled(plugin: PluginListItem) {
+    const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
+    render(
+      <MemoryRouter>
+        <QueryClientWrapper>
+          <PluginDetail
+            isLoading={false}
+            plugin={plugin}
+            pending={false}
+            openSourceDisabled={false}
+            onToggle={() => {}}
+            onEdit={() => {}}
+            onOpenSource={() => {}}
+            onDelete={() => {}}
+            catalogEntries={[]}
+            onOpenPlugin={() => undefined}
+          />
+        </QueryClientWrapper>
+      </MemoryRouter>,
+    );
+  }
+
+  it("marks a local checkout of a hosted plugin Official and links its original author and source", () => {
+    renderInstalled(
+      makePluginListItem({
+        id: "workspace-github",
+        name: "Workspace GitHub",
+        source: "path:/Users/you/projects/omnyo-plugins/workspace-github",
+        rootDir: "/Users/you/projects/omnyo-plugins/workspace-github",
+        official: true,
+        author: {
+          name: "bb",
+          github: "get-bb",
+          url: "https://github.com/get-bb",
+        },
+        repositoryUrl: "https://github.com/get-bb/bb/tree/HEAD/plugins/github",
+      }),
+    );
+
+    const header = screen.getByRole("heading", {
+      name: "Workspace GitHub",
+    }).parentElement?.parentElement;
+
+    if (!header) throw new Error("Plugin header missing");
+    expect(within(header).getByText("bb")).toBeTruthy();
+    expect(within(header).getByText("Official")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("link", { name: /^bb\s*Opens in a new tab$/u })
+        .getAttribute("href"),
+    ).toBe("https://github.com/get-bb");
+    expect(
+      screen
+        .getByRole("link", {
+          name: /^github\.com\/get-bb\/bb\/tree\/HEAD\/plugins\/github/u,
+        })
+        .getAttribute("href"),
+    ).toBe("https://github.com/get-bb/bb/tree/HEAD/plugins/github");
+    expect(screen.getByRole("button", { name: "Open source" })).toBeTruthy();
+  });
+
+  it("leaves a plugin Omnyo does not host unbadged", () => {
+    renderInstalled(
+      makePluginListItem({
+        author: { name: "Pat Lee", github: "patlee", url: null },
+      }),
+    );
+
+    expect(screen.getAllByText("Pat Lee").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Official")).toBeNull();
+    expect(
+      screen.queryByRole("link", { name: /Opens in a new tab/u }),
+    ).toBeNull();
   });
 });
 
@@ -1641,16 +1806,17 @@ describe("plugin removal confirmation", () => {
   it("warns that removing a local plugin deletes its settings, secrets, and schedules and names the move path", async () => {
     const localPlugin = {
       id: "github",
-      source: "path:/Users/you/src/bb-plugin-github",
-      rootDir: "/Users/you/src/bb-plugin-github",
+      source: "path:/Users/you/src/omnyo-plugin-github",
+      rootDir: "/Users/you/src/omnyo-plugin-github",
       version: "0.1.0",
       provenance: "direct",
+      removable: true,
       isOrphanedBuiltin: false,
       publisherLabel: null,
-      sourceDisplay: "path · /Users/you/src/bb-plugin-github",
+      sourceDisplay: "path · /Users/you/src/omnyo-plugin-github",
       updateState: {},
       enabled: true,
-      description: "Browse GitHub issues and pull requests in BB.",
+      description: "Browse GitHub issues and pull requests in Omnyo.",
       name: "GitHub",
       icon: "Github",
       iconUrl: null,
@@ -1666,6 +1832,7 @@ describe("plugin removal confirmation", () => {
       logoUrl: null,
       logoDarkUrl: null,
     };
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -1675,6 +1842,7 @@ describe("plugin removal confirmation", () => {
             { headers: { "content-type": "application/json" } },
           );
         }
+
         return new Response(JSON.stringify({ error: "not found" }), {
           status: 404,
           headers: { "content-type": "application/json" },
@@ -1704,13 +1872,13 @@ describe("plugin removal confirmation", () => {
       screen.getByRole("button", { name: "GitHub actions" }),
     );
     fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Remove from bb" }),
+      await screen.findByRole("menuitem", { name: "Remove from Omnyo" }),
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Remove plugin from bb?" }),
+      await screen.findByRole("heading", { name: "Remove plugin from Omnyo?" }),
     ).toBeTruthy();
-    const description = screen.getByText(/Remove "github" from bb/);
+    const description = screen.getByText(/Remove "github" from Omnyo/);
     expect(description.textContent).toContain(
       "delete its settings, secrets, and schedules",
     );
@@ -1727,6 +1895,7 @@ describe("PluginDetail banner precedence", () => {
     catalogEntryId: null,
     publisherLabel: null,
   };
+
   const collision: PluginListItem = {
     ...managedPlugin,
     status: "degraded",
@@ -1739,7 +1908,7 @@ describe("PluginDetail banner precedence", () => {
       ...EMPTY_PLUGIN_UPDATE_STATE,
       availableVersion: "1.5.0",
       blockedVersion: "2.0.0",
-      blockedReasons: ["Requires a newer bb."],
+      blockedReasons: ["Requires a newer Omnyo."],
       lastFailure: {
         version: "1.4.5",
         at: null,
@@ -1799,6 +1968,7 @@ describe("PluginDetail banner precedence", () => {
         scriptId: "sync",
       },
     } satisfies PluginFrontendDiagnostic;
+
     const failedToLoad = {
       pluginId: "github",
       status: "failed",
@@ -1834,17 +2004,19 @@ describe("PluginDetail runtime health", () => {
   ) {
     const { queryClient, wrapper: QueryClientWrapper } =
       createQueryClientTestHarness();
+
     const plugin = {
       ...GITHUB_PLUGIN,
       source: "builtin:github",
       provenance: "builtin" as const,
       catalogEntryId: null,
-      publisherKey: "bb-official",
-      publisherLabel: "BB Official",
+      publisherKey: "omnyo-official",
+      publisherLabel: "Omnyo Official",
       status,
       statusDetail: "The runtime reported a problem.",
       ...overrides,
     };
+
     const result = render(
       <MemoryRouter>
         <QueryClientWrapper>
@@ -1868,6 +2040,7 @@ describe("PluginDetail runtime health", () => {
         </QueryClientWrapper>
       </MemoryRouter>,
     );
+
     return { ...result, queryClient };
   }
 
@@ -1894,6 +2067,7 @@ describe("PluginDetail runtime health", () => {
     const about = container.querySelector(
       '[data-resource-detail-section="overview"]',
     ) as HTMLElement;
+
     expect(
       alert.compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -1916,13 +2090,17 @@ describe("PluginDetail runtime health", () => {
     expect(alertText).toContain("Wait, then reload.");
     expect(alertText).not.toContain("issue-sync");
     expect(alertText).not.toContain("handler");
-    expect(alertText).not.toContain("Restart bb");
+    expect(alertText).not.toContain("Restart Omnyo");
     expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
   });
 
   it.each([
-    ["incompatible", "This version is incompatible with bb.", "Update bb."],
-    ["missing", "Plugin files are missing.", "Update or reinstall bb."],
+    [
+      "incompatible",
+      "This version is incompatible with Omnyo.",
+      "Update Omnyo.",
+    ],
+    ["missing", "Plugin files are missing.", "Update or reinstall Omnyo."],
   ] as const)(
     "explains the %s condition and a supported recovery without offering Reload",
     (status, condition, recovery) => {
@@ -1944,9 +2122,11 @@ describe("PluginDetail runtime health", () => {
 
     const alert = screen.getByRole("alert");
     expect(alert.querySelector("p")?.textContent).toBe("Needs configuration");
+
     const settingsLink = within(alert).getByRole("link", {
       name: "Open settings",
     });
+
     expect(settingsLink.getAttribute("href")).toBe("/settings/plugins/github");
     expect(screen.queryByRole("button", { name: "Reload" })).toBeNull();
   });
@@ -1991,9 +2171,11 @@ describe("PluginDetail runtime health", () => {
     });
 
     const alert = screen.getByRole("alert");
+
     const settingsLink = within(alert).getByRole("link", {
       name: "Open settings",
     });
+
     expect(settingsLink.getAttribute("href")).toBe("/settings/plugins/github");
     expect(within(alert).getByRole("button", { name: "Reload" })).toBeTruthy();
   });
@@ -2026,12 +2208,14 @@ describe("PluginDetail runtime health", () => {
 
   it("reloads the affected plugin and reflects its pending state", async () => {
     let resolveReload: ((response: Response) => void) | undefined;
+
     const fetchMock = vi.fn(
       () =>
         new Promise<Response>((resolve) => {
           resolveReload = resolve;
         }),
     );
+
     vi.stubGlobal("fetch", fetchMock);
     const { queryClient } = renderRuntimeStatus("error");
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -2176,7 +2360,9 @@ describe("PluginDetail capability inventory", () => {
         },
       ],
     } satisfies PluginListItem;
+
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
+
     const { container } = render(
       <MemoryRouter>
         <QueryClientWrapper>
@@ -2199,6 +2385,7 @@ describe("PluginDetail capability inventory", () => {
     const includes = container.querySelector(
       '[data-resource-detail-section="includes"]',
     );
+
     expect(includes).not.toBeNull();
     const inventory = within(includes as HTMLElement);
     const table = includes?.querySelector("table");
@@ -2207,12 +2394,13 @@ describe("PluginDetail capability inventory", () => {
     expect(
       includes?.querySelector("[data-plugin-capability-group]"),
     ).toBeNull();
+
     for (const text of [
       "Run monitor",
       "Adds a page to the app sidebar.",
       "enhance-prompt",
       "Adds an action beside the thread composer.",
-      "bb capability",
+      "omnyo capability",
       "Inspect contributed capabilities.",
       "review",
       "Review repository changes.",
@@ -2225,6 +2413,7 @@ describe("PluginDetail capability inventory", () => {
     ]) {
       expect(inventory.getByText(text)).toBeTruthy();
     }
+
     expect(inventory.queryByText("Advanced preferences")).toBeNull();
     expect(inventory.queryByText("API token")).toBeNull();
     expect(inventory.queryByText("watch")).toBeNull();
@@ -2238,26 +2427,33 @@ describe("PluginDetail capability inventory", () => {
     const [services, schedules] = Array.from(
       container.querySelectorAll('[data-resource-detail-section="activity"]'),
     ) as HTMLElement[];
+
     expect(schedules).toBeTruthy();
     expect(container.textContent).not.toContain("Health");
 
     const serviceSection = within(services as HTMLElement);
+
     const serviceTable = serviceSection.getByRole("table", {
       name: "Background services",
     });
+
     const serviceTableQueries = within(serviceTable);
     expect(
       serviceTableQueries
         .getAllByRole("columnheader")
         .map((header) => header.textContent),
     ).toEqual(["Status", "Service"]);
+
     for (const name of ["watch", "restart", "sync"]) {
       expect(serviceTableQueries.getByRole("rowheader", { name })).toBeTruthy();
     }
+
     expect(serviceTableQueries.queryByText("daily-cleanup")).toBeNull();
+
     for (const label of ["Running", "Restarting", "Stopped"]) {
       expect(serviceTableQueries.getByText(label)).toBeTruthy();
     }
+
     expect(
       serviceTableQueries.getByText("Running").getAttribute("class"),
     ).toContain("animate-shine");
@@ -2283,9 +2479,11 @@ describe("PluginDetail capability inventory", () => {
         .find(
           (element) => element.querySelector(`[data-icon="${icon}"]`) !== null,
         );
+
       expect(status, `${label} should use ${icon}`).toBeTruthy();
       expect(status?.getAttribute("tabindex")).toBe("0");
     }
+
     expect(
       scheduleTable
         .getAllByRole("img", { name: "Running" })
@@ -2360,6 +2558,7 @@ describe("PluginDetail capability inventory", () => {
     );
 
     expect(screen.getAllByText("Docs")).toHaveLength(2);
+
     for (const label of ["Document", "Markdown", "::docs"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
@@ -2371,6 +2570,7 @@ describe("detail disable workspace cleanup", () => {
     "preserves the workspace until disable settles (failure=%s)",
     async (fails) => {
       const store = createStore();
+
       const layout = {
         root: {
           type: "pane" as const,
@@ -2384,6 +2584,7 @@ describe("detail disable workspace cleanup", () => {
         },
         focusedPaneId: "github",
       };
+
       store.set(splitLayoutAtom, layout);
       store.set(maximizedPaneIdAtom, "github");
       let complete: ((response: Response) => void) | undefined;
@@ -2391,16 +2592,20 @@ describe("detail disable workspace cleanup", () => {
         "fetch",
         vi.fn(async (input: RequestInfo | URL) => {
           const url = String(input);
+
           if (url.includes("/github/disable"))
             return new Promise<Response>((resolve) => {
               complete = resolve;
             });
+
           if (url === "/api/v1/plugins")
             return Response.json({
               plugins: [makeInstalledPlugin({ id: "github", name: "GitHub" })],
             });
+
           if (url.includes("plugin-catalog/search"))
             return Response.json({ results: [], collections: [] });
+
           return Response.json({ error: "not found" }, { status: 404 });
         }),
       );
@@ -2444,6 +2649,7 @@ describe("detail disable workspace cleanup", () => {
               }),
         ),
       );
+
       if (fails) {
         expect(store.get(splitLayoutAtom)).toEqual(layout);
         expect(store.get(maximizedPaneIdAtom)).toBe("github");
@@ -2468,14 +2674,16 @@ describe("plugin detail source and settings", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
     const onOpenSource = vi.fn();
+
     const plugin: PluginListItem = {
       ...GITHUB_PLUGIN,
-      source: "path:/Users/you/src/bb-plugin-github",
-      rootDir: "/Users/you/src/bb-plugin-github",
+      source: "path:/Users/you/src/omnyo-plugin-github",
+      rootDir: "/Users/you/src/omnyo-plugin-github",
       provenance: "direct",
       catalogEntryId: null,
       publisherLabel: null,
     };
+
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
     render(
       <MemoryRouter>
@@ -2499,10 +2707,12 @@ describe("plugin detail source and settings", () => {
     const source = screen
       .getByRole("heading", { name: "Source" })
       .closest("[data-resource-detail-section]");
+
     expect(source).not.toBeNull();
+
     if (source === null) return;
     expect(
-      within(source as HTMLElement).getByText("~/src/bb-plugin-github"),
+      within(source as HTMLElement).getByText("~/src/omnyo-plugin-github"),
     ).toBeTruthy();
     fireEvent.click(
       within(source as HTMLElement).getByRole("button", {
@@ -2512,11 +2722,13 @@ describe("plugin detail source and settings", () => {
     expect(onOpenSource).toHaveBeenCalledWith(plugin);
     fireEvent.click(
       within(source as HTMLElement).getByRole("button", {
-        name: "Copy plugin path: /Users/you/src/bb-plugin-github",
+        name: "Copy plugin path: /Users/you/src/omnyo-plugin-github",
       }),
     );
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith("/Users/you/src/bb-plugin-github");
+      expect(writeText).toHaveBeenCalledWith(
+        "/Users/you/src/omnyo-plugin-github",
+      );
     });
 
     fireEvent.pointerDown(
@@ -2573,6 +2785,7 @@ describe("plugin detail source and settings", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+
         if (url === "/api/v1/plugins") {
           return Response.json({
             enabled: true,
@@ -2586,9 +2799,11 @@ describe("plugin detail source and settings", () => {
             ],
           });
         }
+
         if (url.startsWith("/api/v1/plugin-catalog/search")) {
           return Response.json({ results: [], collections: [] });
         }
+
         if (url === "/api/v1/plugins/github/settings") {
           return Response.json({
             ok: true,
@@ -2596,6 +2811,7 @@ describe("plugin detail source and settings", () => {
             values: { repository: "get-bb/bb" },
           });
         }
+
         return Response.json({ error: "not found" }, { status: 404 });
       }),
     );
@@ -2616,6 +2832,7 @@ describe("plugin detail source and settings", () => {
     const openSettings = await screen.findByRole("link", {
       name: "Open settings",
     });
+
     expect(openSettings.getAttribute("href")).toBe(
       "/plugins/github?view=installed&configure=github",
     );

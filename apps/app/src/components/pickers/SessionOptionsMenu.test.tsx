@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ThreadSessionOption } from "@bb/domain";
-import type { ThreadTimelineSessionOption } from "@bb/server-contract";
+import type { ThreadSessionOption } from "@omnyo/domain";
+import type { ThreadTimelineSessionOption } from "@omnyo/server-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SessionOptionsMenu,
@@ -12,6 +12,7 @@ import {
   sessionOptionsTriggerLabel,
   splitSessionOptionsByPlacement,
 } from "./SessionOptionsMenu";
+import { expectNonmodalPicker } from "@/test/nonmodal-picker";
 
 const mode: ThreadTimelineSessionOption = {
   type: "select",
@@ -26,6 +27,7 @@ const mode: ThreadTimelineSessionOption = {
     { id: "plan", label: "Plan", description: "Read only", group: null },
   ],
 };
+
 const web: ThreadTimelineSessionOption = {
   type: "boolean",
   id: "web",
@@ -64,6 +66,7 @@ describe("declared session option views", () => {
     label: "Daybreak",
     value: false,
   };
+
   const declaredDepth: ThreadSessionOption = {
     type: "select",
     id: "depth",
@@ -133,6 +136,7 @@ describe("session option menu sections", () => {
   it("names the trigger after the agent's mode, a lone option, or nothing in particular", () => {
     const label = (options: ThreadTimelineSessionOption[]) =>
       sessionOptionsTriggerLabel(buildSessionOptionMenuSections(options, {}));
+
     expect(label([web, mode])).toBe("Agent");
     expect(label([web])).toBe("Web search: Off");
     expect(label([web, { ...web, id: "brave", label: "Brave" }])).toBe(
@@ -146,7 +150,24 @@ describe("SessionOptionsMenu", () => {
     const { container } = render(
       <SessionOptionsMenu options={[]} choices={{}} onChange={vi.fn()} />,
     );
+
     expect(container.innerHTML).toBe("");
+  });
+
+  it("keeps the page interactive and closes when focus leaves", async () => {
+    render(
+      <SessionOptionsMenu
+        options={[mode, web]}
+        choices={{}}
+        onChange={vi.fn()}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Agent options" });
+    await expectNonmodalPicker({
+      trigger,
+      open: () => fireEvent.keyDown(trigger, { key: "Enter" }),
+      content: () => screen.queryByRole("menu"),
+    });
   });
 
   it("reports a select choice by value id and a boolean choice as a boolean", async () => {
@@ -158,6 +179,7 @@ describe("SessionOptionsMenu", () => {
         onChange={onChange}
       />,
     );
+
     const open = () =>
       fireEvent.keyDown(screen.getByRole("button", { name: "Agent options" }), {
         key: "Enter",

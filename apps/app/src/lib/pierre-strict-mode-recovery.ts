@@ -23,6 +23,7 @@ export function usePierreStrictModeRecoveryOptions<
     if (!import.meta.env.DEV) return options;
 
     const onPostRender = options?.onPostRender;
+
     return {
       ...options,
       onPostRender(
@@ -31,6 +32,7 @@ export function usePierreStrictModeRecoveryOptions<
         phase: PostRenderPhase,
       ) {
         onPostRender?.(node, instance, phase);
+
         if (phase === "mount") {
           queueMicrotask(() => instance.rerender());
         }

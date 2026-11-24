@@ -1,8 +1,11 @@
 import { spawnSync } from "node:child_process";
 import {
+  closeSync,
+  fstatSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   rmSync,
   statSync,
@@ -32,6 +35,7 @@ function createBetterSqliteRequire(
 
   function Database() {
     state.constructorCalls += 1;
+
     if (state.constructorError !== null) {
       throw state.constructorError;
     }
@@ -83,6 +87,7 @@ function createEnsureOptions(fakeRequire, execFileSync) {
     verifyRepairedNativeModule(name) {
       try {
         verifyNativeModule(name, fakeRequire);
+
         return null;
       } catch (err) {
         return err instanceof Error ? err.message : String(err);
@@ -97,6 +102,7 @@ describe("ensure-native-modules", () => {
     const abiError = new Error(
       "The module was compiled against a different NODE_MODULE_VERSION",
     );
+
     const { requireModule, state } = createBetterSqliteRequire(abiError);
 
     expect(() => requireModule("better-sqlite3")).not.toThrow();
@@ -111,7 +117,9 @@ describe("ensure-native-modules", () => {
     const abiError = new Error(
       "The module was compiled against a different NODE_MODULE_VERSION",
     );
+
     const fake = createBetterSqliteRequire(abiError);
+
     const execFileSync = vi.fn(() => {
       fake.clearConstructorError();
     });
@@ -137,15 +145,18 @@ describe("ensure-native-modules", () => {
   });
 
   it("detaches a hardlinked native binary before verification", () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), "bb-native-repair-"));
+    const tempRoot = mkdtempSync(join(tmpdir(), "omnyo-native-repair-"));
+
     try {
       const packageJsonPath = join(tempRoot, "better-sqlite3", "package.json");
+
       const binaryPath = join(
         dirname(packageJsonPath),
         "build",
         "Release",
         "better_sqlite3.node",
       );
+
       const otherCheckoutBinaryPath = join(tempRoot, "other-checkout.node");
       mkdirSync(dirname(binaryPath), { recursive: true });
       writeFileSync(packageJsonPath, "{}");
@@ -158,11 +169,14 @@ describe("ensure-native-modules", () => {
       const abiError = new Error(
         "The module was compiled against a different NODE_MODULE_VERSION",
       );
+
       const fake = createBetterSqliteRequire(abiError, packageJsonPath);
+
       const execFileSync = vi.fn(() => {
         writeFileSync(binaryPath, "abi-127");
         fake.clearConstructorError();
       });
+
       const options = createEnsureOptions(fake.requireModule, execFileSync);
       options.modules = [
         {
@@ -187,16 +201,109 @@ describe("ensure-native-modules", () => {
     }
   });
 
+  it.runIf(process.platform === "darwin").each(["prebuild", "source rebuild"])(
+    "replaces a checked single-link macOS native binary through a fresh inode before %s",
+    (repair) => {
+      const tempRoot = mkdtempSync(
+        join(tmpdir(), "omnyo-native-macos-repair-"),
+      );
+
+      const checkedFiles = [];
+
+      try {
+        const packageJsonPath = join(
+          tempRoot,
+          "better-sqlite3",
+          "package.json",
+        );
+
+        const binaryPath = join(
+          dirname(packageJsonPath),
+          "build",
+          "Release",
+          "better_sqlite3.node",
+        );
+
+        mkdirSync(dirname(binaryPath), { recursive: true });
+        writeFileSync(packageJsonPath, "{}");
+        writeFileSync(binaryPath, "abi-137", { mode: 0o755 });
+        const original = statSync(binaryPath);
+        expect(original.nlink).toBe(1);
+
+        const fake = createBetterSqliteRequire(
+          new Error(
+            "The module was compiled against a different NODE_MODULE_VERSION",
+          ),
+          packageJsonPath,
+        );
+
+        const requireModule = (request) => {
+          checkedFiles.push(openSync(binaryPath, "r"));
+
+          return fake.requireModule(request);
+        };
+
+        requireModule.resolve = fake.requireModule.resolve;
+        const installerBinaries = [];
+
+        const execFileSync = vi.fn(() => {
+          installerBinaries.push(statSync(binaryPath));
+
+          if (repair === "source rebuild" && installerBinaries.length === 1) {
+            writeFileSync(binaryPath, "prebuilt-abi-137");
+          } else {
+            writeFileSync(binaryPath, "abi-127");
+            fake.clearConstructorError();
+          }
+        });
+
+        const options = createEnsureOptions(requireModule, execFileSync);
+        options.modules = [
+          {
+            name: "better-sqlite3",
+            resolveFrom: "packages/db/package.json",
+            binaryPath: "build/Release/better_sqlite3.node",
+          },
+        ];
+
+        expect(() => ensureNativeModules(options)).not.toThrow();
+
+        const expectedInstalls = repair === "prebuild" ? 1 : 2;
+        expect(installerBinaries).toHaveLength(expectedInstalls);
+        expect(fstatSync(checkedFiles[0]).ino).toBe(original.ino);
+
+        for (const [index, installerBinary] of installerBinaries.entries()) {
+          expect(installerBinary.ino).not.toBe(
+            fstatSync(checkedFiles[index]).ino,
+          );
+          expect(installerBinary.mode & 0o777).toBe(original.mode & 0o777);
+          expect(readFileSync(checkedFiles[index], "utf8")).toBe(
+            index === 0 ? "abi-137" : "prebuilt-abi-137",
+          );
+        }
+
+        expect(readFileSync(binaryPath, "utf8")).toBe("abi-127");
+        expect(execFileSync).toHaveBeenCalledTimes(expectedInstalls);
+      } finally {
+        for (const checkedFile of checkedFiles) closeSync(checkedFile);
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("detaches a matching native binary without a repair", () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), "bb-native-verify-"));
+    const tempRoot = mkdtempSync(join(tmpdir(), "omnyo-native-verify-"));
+
     try {
       const packageJsonPath = join(tempRoot, "better-sqlite3", "package.json");
+
       const binaryPath = join(
         dirname(packageJsonPath),
         "build",
         "Release",
         "better_sqlite3.node",
       );
+
       const otherCheckoutBinaryPath = join(tempRoot, "other-checkout.node");
       mkdirSync(dirname(binaryPath), { recursive: true });
       writeFileSync(packageJsonPath, "{}");
@@ -234,7 +341,9 @@ describe("ensure-native-modules", () => {
     const abiError = new Error(
       "The module was compiled against a different NODE_MODULE_VERSION",
     );
+
     const fake = createBetterSqliteRequire(abiError);
+
     const prebuildError = Object.assign(
       new Error("Command failed: prebuild-install"),
       {
@@ -243,13 +352,16 @@ describe("ensure-native-modules", () => {
           "prebuild-install info unpack resolved to /tmp/fake-node-modules/better-sqlite3/build/Release/better_sqlite3.node\n",
       },
     );
+
     const execFileSync = vi.fn((nodePath, args) => {
       if (args[0] === "/tmp/fake-node-modules/prebuild-install/bin.js") {
         fake.clearConstructorError();
         throw prebuildError;
       }
+
       throw new Error(`Unexpected command: ${args.join(" ")}`);
     });
+
     const options = createEnsureOptions(fake.requireModule, execFileSync);
 
     expect(() => ensureNativeModules(options)).not.toThrow();
@@ -265,7 +377,9 @@ describe("ensure-native-modules", () => {
     const missingBindingError = new Error(
       "Could not locate the bindings file. Tried: build/Release/better_sqlite3.node",
     );
+
     const fake = createBetterSqliteRequire(missingBindingError);
+
     const prebuildError = Object.assign(
       new Error("Command failed: prebuild-install"),
       {
@@ -274,12 +388,15 @@ describe("ensure-native-modules", () => {
           "prebuild-install info install --build-from-source specified, not attempting download.\n",
       },
     );
+
     const execFileSync = vi.fn((nodePath, args) => {
       if (args[0] === "/tmp/fake-node-modules/prebuild-install/bin.js") {
         throw prebuildError;
       }
+
       fake.clearConstructorError();
     });
+
     const options = createEnsureOptions(fake.requireModule, execFileSync);
 
     expect(() => ensureNativeModules(options)).not.toThrow();
@@ -323,7 +440,9 @@ describe("ensure-native-modules", () => {
     const abiError = new Error(
       "The module was compiled against a different NODE_MODULE_VERSION",
     );
+
     const fake = createBetterSqliteRequire(abiError);
+
     const execFileSync = vi.fn((nodePath, args) => {
       if (args[0] === "/tmp/fake-node-modules/node-gyp/bin/node-gyp.js") {
         fake.clearConstructorError();
@@ -367,7 +486,9 @@ describe("ensure-native-modules", () => {
     const registrationError = new Error(
       "Module did not self-register: '/tmp/better_sqlite3.node'",
     );
+
     const fake = createBetterSqliteRequire(registrationError);
+
     const execFileSync = vi.fn((nodePath, args) => {
       if (args[0] === "/tmp/fake-node-modules/node-gyp/bin/node-gyp.js") {
         fake.clearConstructorError();
@@ -434,7 +555,8 @@ describe("ensure-native-modules", () => {
 
 it("validates a broken native binding without installing, rebuilding, or detaching it", async () => {
   const { createRequire } = await import("node:module");
-  const root = mkdtempSync(join(tmpdir(), "bb-native-check-only-"));
+  const root = mkdtempSync(join(tmpdir(), "omnyo-native-check-only-"));
+
   try {
     const packageDir = join(root, "node_modules", "broken-native-fixture");
     mkdirSync(packageDir, { recursive: true });

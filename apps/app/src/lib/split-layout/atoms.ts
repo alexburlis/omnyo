@@ -28,7 +28,7 @@ export const splitLayoutAtom = atomWithStorage<SplitLayout | null>(
   { getOnInit: true },
 );
 
-export const MAXIMIZED_PANE_STORAGE_KEY = "bb.splitLayout.maximizedPaneId";
+export const MAXIMIZED_PANE_STORAGE_KEY = "omnyo.splitLayout.maximizedPaneId";
 
 export const maximizedPaneIdAtom = atomWithStorage<string | null>(
   MAXIMIZED_PANE_STORAGE_KEY,
@@ -44,7 +44,7 @@ export const maximizedPaneIdAtom = atomWithStorage<string | null>(
 );
 
 export const DIM_INACTIVE_SPLITS_STORAGE_KEY =
-  "bb.splitLayout.dimInactiveSplits";
+  "omnyo.splitLayout.dimInactiveSplits";
 
 export const dimInactiveSplitsAtom = createBooleanPreferenceAtom(
   DIM_INACTIVE_SPLITS_STORAGE_KEY,
@@ -60,32 +60,42 @@ export const closePanesForThreadsAtom = atom(
   null,
   (get, set, threadIds: readonly string[]): ClosePanesForThreadsResult => {
     const current = get(splitLayoutAtom);
+
     if (current === null || threadIds.length === 0) {
       return { removedAny: false, focusedRoute: null };
     }
+
     const targets = new Set(threadIds);
     let layout = current;
     let removedAny = false;
+
     for (;;) {
       const pane = listPanes(layout.root).find(
         (candidate) =>
           candidate.content.kind === "thread" &&
           targets.has(candidate.content.threadId),
       );
+
       if (pane === undefined) {
         break;
       }
+
       const next = removePane(layout, pane.paneId);
+
       if (next === layout) {
         break;
       }
+
       layout = next;
       removedAny = true;
     }
+
     if (!removedAny) {
       return { removedAny: false, focusedRoute: null };
     }
+
     const maximizedPaneId = get(maximizedPaneIdAtom);
+
     if (
       maximizedPaneId !== null &&
       (listPanes(layout.root).length < 2 ||
@@ -93,7 +103,9 @@ export const closePanesForThreadsAtom = atom(
     ) {
       set(maximizedPaneIdAtom, null);
     }
+
     const focused = findPane(layout.root, layout.focusedPaneId);
+
     const survivorRoute =
       focused !== null &&
       focused.content.kind === "thread" &&
@@ -103,12 +115,16 @@ export const closePanesForThreadsAtom = atom(
             threadId: focused.content.threadId,
           }
         : null;
+
     if (survivorRoute === null) {
       set(splitLayoutAtom, null);
       set(maximizedPaneIdAtom, null);
+
       return { removedAny: true, focusedRoute: null };
     }
+
     set(splitLayoutAtom, layout);
+
     return { removedAny: true, focusedRoute: survivorRoute };
   },
 );

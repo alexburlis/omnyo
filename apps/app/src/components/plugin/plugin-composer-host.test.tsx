@@ -27,6 +27,7 @@ function ComposerHost({ text }: { text: string }) {
     isRunning: false,
     isSubmitting: false,
   });
+
   return (
     <PluginComposerViewProvider value={view}>
       <ComposerBannersSlot />
@@ -49,14 +50,19 @@ describe("composer host view context", () => {
   it("keeps draft-independent banners still while view readers follow each keystroke", () => {
     const staticRenders = vi.fn();
     const viewRenders = vi.fn();
+
     function StaticBanner() {
       staticRenders();
+
       return <div>static banner</div>;
     }
+
     function ViewBanner() {
       viewRenders();
+
       return <div data-testid="view-text">{useComposerView().draft.text}</div>;
     }
+
     setPluginSlotRegistrations(
       "example-plugin",
       makePluginRegistrationSet({
@@ -77,8 +83,10 @@ describe("composer host view context", () => {
         <ComposerHost text="" />
       </MemoryRouter>,
     );
+
     const staticRendersBefore = staticRenders.mock.calls.length;
     const viewRendersBefore = viewRenders.mock.calls.length;
+
     for (const text of ["h", "he", "hel", "hell", "hello"]) {
       view.rerender(
         <MemoryRouter>

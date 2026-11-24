@@ -25,8 +25,13 @@ import {
   useRemoveFixedRightTerminalTab,
   useUpdateFixedPanelTabsState,
 } from "./fixed-panel-tabs";
-import { BbHttpError } from "./sdk";
-import { setCachedThreadTabs } from "@/hooks/cache-owners/thread-tabs-cache-owner";
+import { OmnyoHttpError } from "./sdk";
+import {
+  getCachedThreadTabs,
+  invalidateCachedThreadTabs,
+  setCachedThreadTabs,
+} from "@/hooks/cache-owners/thread-tabs-cache-owner";
+import { useThreadTabs } from "@/hooks/queries/thread-tabs-query";
 import { scheduleThreadTabsPersistence } from "./thread-tabs-sync";
 import { syncTerminalTabsInFixedPanelState } from "@/components/secondary-panel/terminalPanelTabs";
 import { useThreadSecondaryPanelDrawerVisibility } from "@/views/thread-detail/useThreadSecondaryPanelVisibility";
@@ -38,6 +43,7 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock("./sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./sdk")>();
+
   return {
     ...actual,
     sdk: {
@@ -76,9 +82,128 @@ afterEach(() => {
 });
 
 describe("fixed panel tab server sync", () => {
+  it("keeps a newer saved tab list when an older tab fetch lands last", async () => {
+    const threadId = "sync-stale-fetch";
+    const info = createThreadInfoFixedPanelTab();
+    const closedTerminal = createTerminalFixedPanelTab({ terminalId: "old" });
+    const newTerminal = createTerminalFixedPanelTab({ terminalId: "new" });
+    let resolveStaleFetch: (response: unknown) => void = () => {};
+
+    apiMocks.getThreadTabs
+      .mockResolvedValueOnce({ revision: 1, tabs: [info, closedTerminal] })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveStaleFetch = resolve;
+        }),
+      );
+    apiMocks.updateThreadTabs
+      .mockResolvedValueOnce({ revision: 2, tabs: [info] })
+      .mockResolvedValueOnce({ revision: 3, tabs: [info, newTerminal] });
+    const queryClient = createTestQueryClient();
+
+    const { result } = renderHook(
+      () => ({
+        state: useFixedPanelTabsState(threadId, threadId),
+        update: useUpdateFixedPanelTabsState(threadId, threadId),
+      }),
+      { wrapper: createQueryWrapper(queryClient) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.state.secondary.tabs).toEqual([
+        info,
+        closedTerminal,
+      ]);
+    });
+
+    act(() => {
+      result.current.update((current) => ({
+        ...current,
+        secondary: {
+          activeTabId: info.id,
+          isOpen: true,
+          tabs: [info],
+        },
+      }));
+    });
+    await waitFor(() =>
+      expect(getCachedThreadTabs(queryClient, threadId)?.revision).toBe(2),
+    );
+    act(() => invalidateCachedThreadTabs(queryClient, threadId));
+    await waitFor(() =>
+      expect(apiMocks.getThreadTabs).toHaveBeenCalledTimes(2),
+    );
+
+    act(() => {
+      result.current.update((current) => ({
+        ...current,
+        secondary: {
+          activeTabId: newTerminal.id,
+          isOpen: true,
+          tabs: [info, newTerminal],
+        },
+      }));
+    });
+    await waitFor(() =>
+      expect(getCachedThreadTabs(queryClient, threadId)?.revision).toBe(3),
+    );
+
+    act(() => resolveStaleFetch({ revision: 2, tabs: [info] }));
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+    expect(getCachedThreadTabs(queryClient, threadId)).toEqual({
+      revision: 3,
+      tabs: [info, newTerminal],
+    });
+    expect(result.current.state.secondary.tabs).toEqual([info, newTerminal]);
+    expect(result.current.state.secondary.activeTabId).toBe(newTerminal.id);
+  });
+
+  it("rejects an older direct tab cache write", () => {
+    const queryClient = createTestQueryClient();
+    const threadId = "sync-stale-write";
+    const info = createThreadInfoFixedPanelTab();
+    setCachedThreadTabs(queryClient, threadId, { revision: 3, tabs: [info] });
+    setCachedThreadTabs(queryClient, threadId, { revision: 2, tabs: [] });
+    expect(getCachedThreadTabs(queryClient, threadId)).toEqual({
+      revision: 3,
+      tabs: [info],
+    });
+  });
+
+  it("keeps a newer saved revision between fetch resolution and cache commit", async () => {
+    const queryClient = createTestQueryClient();
+    const threadId = "sync-commit-race";
+    const info = createThreadInfoFixedPanelTab();
+    let resolveFetch: (response: unknown) => void = () => {};
+
+    apiMocks.getThreadTabs.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    renderHook(() => useThreadTabs(threadId), {
+      wrapper: createQueryWrapper(queryClient),
+    });
+    await waitFor(() =>
+      expect(apiMocks.getThreadTabs).toHaveBeenCalledTimes(1),
+    );
+    await act(async () => {
+      resolveFetch({ revision: 2, tabs: [] });
+      await Promise.resolve();
+      setCachedThreadTabs(queryClient, threadId, { revision: 3, tabs: [info] });
+    });
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(getCachedThreadTabs(queryClient, threadId)).toEqual({
+      revision: 3,
+      tabs: [info],
+    });
+  });
+
   it("does not let another window's stored presentation overwrite live tab history", () => {
     const panelStateId = "window-local-history";
     const queryClient = createTestQueryClient();
+
     const { result } = renderHook(
       () => ({
         state: useFixedPanelTabsState(panelStateId, null),
@@ -87,6 +212,7 @@ describe("fixed panel tab server sync", () => {
       }),
       { wrapper: createQueryWrapper(queryClient) },
     );
+
     act(() => result.current.activate("source"));
     act(() => result.current.activate("detour"));
     const live = result.current.state;
@@ -154,6 +280,7 @@ describe("fixed panel tab server sync", () => {
     const panelStateId = "root-compose";
     const localTab = createThreadInfoFixedPanelTab();
     const queryClient = createTestQueryClient();
+
     const { result } = renderHook(
       () => ({
         state: useFixedPanelTabsState(panelStateId, null),
@@ -182,10 +309,12 @@ describe("fixed panel tab server sync", () => {
     const threadId = "sync-remote-tabs";
     const localTab = createThreadInfoFixedPanelTab();
     const lastUsedAt = Date.now();
+
     const remoteTab = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://remote.example.com",
     });
+
     window.localStorage.setItem(
       getFixedPanelTabsStateStorageKey({ threadId }),
       serializeFixedPanelTabsState({
@@ -204,6 +333,7 @@ describe("fixed panel tab server sync", () => {
       tabs: [remoteTab],
     });
     const queryClient = createTestQueryClient();
+
     const { result } = renderHook(
       () => useFixedPanelTabsState(threadId, threadId),
       {
@@ -238,6 +368,7 @@ describe("fixed panel tab server sync", () => {
     );
     apiMocks.getThreadTabs.mockResolvedValue({ revision: 2, tabs: [] });
     const queryClient = createTestQueryClient();
+
     const { result } = renderHook(
       () => useFixedPanelTabsState(threadId, threadId),
       { wrapper: createQueryWrapper(queryClient) },
@@ -254,10 +385,12 @@ describe("fixed panel tab server sync", () => {
 
   it("migrates existing local tabs when the server has no tab row", async () => {
     const threadId = "sync-local-migration";
+
     const localTab = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://example.com",
     });
+
     window.localStorage.setItem(
       getFixedPanelTabsStateStorageKey({ threadId }),
       serializeFixedPanelTabsState({
@@ -292,14 +425,17 @@ describe("fixed panel tab server sync", () => {
 
   it("uses server tabs when local migration is stale", async () => {
     const threadId = "sync-stale-migration";
+
     const localTab = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://local.example.com",
     });
+
     const serverTab = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://server.example.com",
     });
+
     window.localStorage.setItem(
       getFixedPanelTabsStateStorageKey({ threadId }),
       serializeFixedPanelTabsState({
@@ -317,7 +453,7 @@ describe("fixed panel tab server sync", () => {
       .mockResolvedValueOnce({ revision: 0, tabs: [] })
       .mockResolvedValueOnce({ revision: 1, tabs: [serverTab] });
     apiMocks.updateThreadTabs.mockRejectedValueOnce(
-      new BbHttpError({
+      new OmnyoHttpError({
         body: null,
         code: "thread_tabs_conflict",
         message: "changed",
@@ -325,6 +461,7 @@ describe("fixed panel tab server sync", () => {
       }),
     );
     const queryClient = createTestQueryClient();
+
     const { result } = renderHook(
       () => useFixedPanelTabsState(threadId, threadId),
       { wrapper: createQueryWrapper(queryClient) },
@@ -352,6 +489,7 @@ describe("fixed panel tab server sync", () => {
       tabs: [savedTab],
     });
     const queryClient = createTestQueryClient();
+
     const { result } = renderHook(
       () => ({
         state: useFixedPanelTabsState(threadId, threadId),
@@ -359,6 +497,7 @@ describe("fixed panel tab server sync", () => {
       }),
       { wrapper: createQueryWrapper(queryClient) },
     );
+
     await waitFor(() => expect(apiMocks.getThreadTabs).toHaveBeenCalled());
 
     act(() => {
@@ -392,14 +531,17 @@ describe("fixed panel tab server sync", () => {
   it("refreshes from the server after a stale local write", async () => {
     const threadId = "sync-stale-write";
     const originalTab = createThreadInfoFixedPanelTab();
+
     const localTab = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://local.example.com",
     });
+
     const concurrentTab = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://concurrent.example.com",
     });
+
     apiMocks.getThreadTabs
       .mockResolvedValueOnce({ revision: 1, tabs: [originalTab] })
       .mockResolvedValueOnce({
@@ -407,7 +549,7 @@ describe("fixed panel tab server sync", () => {
         tabs: [originalTab, concurrentTab],
       });
     apiMocks.updateThreadTabs.mockRejectedValueOnce(
-      new BbHttpError({
+      new OmnyoHttpError({
         body: null,
         code: "thread_tabs_conflict",
         message: "changed",
@@ -415,6 +557,7 @@ describe("fixed panel tab server sync", () => {
       }),
     );
     const queryClient = createTestQueryClient();
+
     const { result } = renderHook(
       () => ({
         state: useFixedPanelTabsState(threadId, threadId),
@@ -422,6 +565,7 @@ describe("fixed panel tab server sync", () => {
       }),
       { wrapper: createQueryWrapper(queryClient) },
     );
+
     await waitFor(() => {
       expect(result.current.state.secondary.tabs).toEqual([originalTab]);
     });
@@ -459,6 +603,7 @@ describe("fixed panel tab storage churn", () => {
     const threadId = "storage-write-failure";
     const storageKey = getFixedPanelTabsStateStorageKey({ threadId });
     const queryClient = createTestQueryClient();
+
     const { result } = renderHook(
       () => ({
         selectPanel: useSetFixedSecondaryPanelTab(threadId, null),
@@ -466,6 +611,7 @@ describe("fixed panel tab storage churn", () => {
       }),
       { wrapper: createQueryWrapper(queryClient) },
     );
+
     const setItem = vi
       .spyOn(Storage.prototype, "setItem")
       .mockImplementation((key) => {
@@ -487,10 +633,12 @@ describe("fixed panel tab storage churn", () => {
   it("does not rewrite localStorage when hydration and reconciliation leave the state unchanged", async () => {
     resetFixedPanelTabsStateForTest();
     const threadId = "sync-no-rewrite";
+
     const remoteTab = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://remote.example.com",
     });
+
     const storageKey = getFixedPanelTabsStateStorageKey({ threadId });
     window.localStorage.setItem(
       storageKey,
@@ -510,8 +658,10 @@ describe("fixed panel tab storage churn", () => {
       tabs: [remoteTab],
     });
     const setItem = vi.spyOn(Storage.prototype, "setItem");
+
     try {
       const queryClient = createTestQueryClient();
+
       const { result } = renderHook(
         () => ({
           state: useFixedPanelTabsState(threadId, threadId),
@@ -540,13 +690,16 @@ describe("fixed panel tab storage churn", () => {
   it("schedules the storage prune once per page load, off the mount task", () => {
     vi.useFakeTimers();
     resetFixedPanelTabsStorageMaintenanceForTest();
+
     try {
       const now = Date.now();
+
       const expiredBlob = serializeFixedPanelTabsState({
         state: createEmptyFixedPanelTabsState({
           lastUsedAt: now - FIXED_PANEL_TABS_IDLE_EXPIRY_MS - 1,
         }),
       });
+
       const firstKey = getFixedPanelTabsStateStorageKey({ threadId: "one" });
       window.localStorage.setItem(firstKey, expiredBlob);
 
@@ -574,15 +727,19 @@ describe("fixed panel tab storage churn", () => {
   it("prunes expired and malformed blobs and keeps fresh ones", () => {
     const now = Date.now();
     const freshKey = getFixedPanelTabsStateStorageKey({ threadId: "fresh" });
+
     const expiredKey = getFixedPanelTabsStateStorageKey({
       threadId: "expired",
     });
+
     const garbageKey = getFixedPanelTabsStateStorageKey({
       threadId: "garbage",
     });
+
     const staleShapeKey = getFixedPanelTabsStateStorageKey({
       threadId: "stale-shape",
     });
+
     window.localStorage.setItem(
       freshKey,
       serializeFixedPanelTabsState({
@@ -620,12 +777,14 @@ describe("terminal activation history", () => {
     (syncBeforeClose) => {
       const panelId = `terminal-close-drawer-${syncBeforeClose}`;
       const queryClient = createTestQueryClient();
+
       const { result } = renderHook(
         () => {
           const drawer = useThreadSecondaryPanelDrawerVisibility({
             isCompactViewport: true,
             threadId: panelId,
           });
+
           return {
             drawer,
             state: useFixedPanelTabsState(panelId, null),
@@ -640,11 +799,13 @@ describe("terminal activation history", () => {
         },
         { wrapper: createQueryWrapper(queryClient) },
       );
+
       act(() => {
         result.current.activate("closing-terminal");
         result.current.drawer.openDrawer();
       });
       expect(result.current.drawer.isDrawerVisible).toBe(true);
+
       if (syncBeforeClose) {
         act(() =>
           result.current.update((state) =>
@@ -655,6 +816,7 @@ describe("terminal activation history", () => {
           ),
         );
       }
+
       act(() => result.current.close("closing-terminal"));
       expect(result.current.state.secondary.tabs).toEqual([]);
       expect(result.current.drawer.isDrawerVisible).toBe(false);
@@ -663,15 +825,19 @@ describe("terminal activation history", () => {
 
   it("returns to the prior tab through the terminal-specific hooks", () => {
     const panelId = "terminal-history";
+
     const source = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://source.example.com",
     });
+
     const neighbor = createBrowserFixedPanelTab({
       environmentId: null,
       url: "https://neighbor.example.com",
     });
+
     const queryClient = createTestQueryClient();
+
     const { result } = renderHook(
       () => ({
         state: useFixedPanelTabsState(panelId, null),
@@ -681,6 +847,7 @@ describe("terminal activation history", () => {
       }),
       { wrapper: createQueryWrapper(queryClient) },
     );
+
     act(() =>
       result.current.update(() =>
         createEmptyFixedPanelTabsState({

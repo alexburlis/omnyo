@@ -55,8 +55,9 @@ function resolveInjectedSkillSources(
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), "bb-injected-skills-"));
+  const root = await mkdtemp(path.join(tmpdir(), "omnyo-injected-skills-"));
   tempDirs.push(root);
+
   return root;
 }
 
@@ -70,6 +71,7 @@ function createCapturingLogger(): CapturingLogger {
   const debugs: CapturedLog[] = [];
   const infos: CapturedLog[] = [];
   const warnings: CapturedLog[] = [];
+
   function captureTo(target: CapturedLog[]) {
     return (...args: Parameters<ServerLogger["warn"]>): void => {
       const firstArg = args[0];
@@ -86,6 +88,7 @@ function createCapturingLogger(): CapturingLogger {
       });
     };
   }
+
   return {
     debugs,
     infos,
@@ -115,6 +118,7 @@ async function writeSkill(args: WriteSkillArgs): Promise<string> {
     ].join("\n"),
     "utf8",
   );
+
   return skillRootPath;
 }
 
@@ -137,14 +141,17 @@ function expectedTreeSource(args: {
 describe("injected skill source discovery", () => {
   it("hashes trees deterministically and includes content, paths, and modes", async () => {
     const temp = await makeTempDir();
+
     const firstRoot = await writeSkill({
       rootPath: path.join(temp, "first"),
       name: "hash-test",
     });
+
     const secondRoot = await writeSkill({
       rootPath: path.join(temp, "second"),
       name: "hash-test",
     });
+
     await mkdir(path.join(firstRoot, "references"));
     await mkdir(path.join(secondRoot, "references"));
     const firstReference = path.join(firstRoot, "references", "notes.md");
@@ -179,6 +186,7 @@ describe("injected skill source discovery", () => {
 
     const expected = createHash("sha256");
     expected.update("bb-skill-tree-v1");
+
     for (const entry of [...entries].sort((left, right) =>
       left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
     )) {
@@ -255,19 +263,39 @@ describe("injected skill source discovery", () => {
     });
   });
 
+  it("reports an unchanged invalid skill once instead of on every scan", async () => {
+    const dataDir = await makeTempDir();
+    await mkdir(path.join(dataDir, "skills", "empty-skill"), {
+      recursive: true,
+    });
+    const first = createCapturingLogger();
+    const second = createCapturingLogger();
+
+    resolveInjectedSkillSources(first.logger, { dataDir });
+    resolveInjectedSkillSources(second.logger, { dataDir });
+
+    expect(first.warnings).toEqual([
+      expect.objectContaining({ message: "Skipping invalid injected skill" }),
+    ]);
+    expect(second.warnings).toEqual([]);
+  });
+
   it("adds inherited skills as lower-priority user skills", async () => {
     const dataDir = await makeTempDir();
     const inheritedSkillsRootPath = path.join(dataDir, "inherited-skills");
+
     const inheritedSkillRoot = await writeSkill({
       rootPath: inheritedSkillsRootPath,
       name: "stories",
       description: "Inherited stories skill.",
     });
+
     const dataDirSkillRoot = await writeSkill({
       rootPath: path.join(dataDir, "skills"),
       name: "review-loop",
       description: "Data-dir review skill.",
     });
+
     const { logger, warnings } = createCapturingLogger();
 
     const sources = await resolveInjectedSkillSources(logger, {
@@ -292,17 +320,19 @@ describe("injected skill source discovery", () => {
     expect(warnings).toEqual([]);
   });
 
-  it("applies bb precedence around shared user and project roots", async () => {
+  it("applies Omnyo precedence around shared user and project roots", async () => {
     const dataDir = await makeTempDir();
+
     const userSkillRoot = await writeSkill({
       rootPath: path.join(dataDir, "skills"),
       name: "review",
-      description: "bb user review skill.",
+      description: "Omnyo user review skill.",
     });
+
     await writeSkill({
       rootPath: path.join(dataDir, "skills"),
       name: "deploy",
-      description: "bb user deploy skill.",
+      description: "Omnyo user deploy skill.",
     });
     const sharedUserRoot = path.join(dataDir, "external", "review");
     const sharedProjectRoot = path.join(dataDir, "workspace", "deploy");
@@ -342,7 +372,7 @@ describe("injected skill source discovery", () => {
       expectedTreeSource({
         sourceType: "data-dir",
         name: "review",
-        description: "bb user review skill.",
+        description: "Omnyo user review skill.",
         rootPath: userSkillRoot,
       }),
     ]);
@@ -356,11 +386,13 @@ describe("injected skill source discovery", () => {
       name: "stories",
       description: "Inherited stories skill.",
     });
+
     const overrideSkillRoot = await writeSkill({
       rootPath: path.join(dataDir, "skills"),
       name: "stories",
       description: "Local stories skill.",
     });
+
     const { logger, debugs, warnings } = createCapturingLogger();
 
     const sources = await resolveInjectedSkillSources(logger, {
@@ -389,11 +421,13 @@ describe("injected skill source discovery", () => {
     const dataDir = await makeTempDir();
     const parentSkillsRootPath = path.join(dataDir, "parent-skills");
     const prodSkillsRootPath = path.join(dataDir, "prod-skills");
+
     const parentSkillRoot = await writeSkill({
       rootPath: parentSkillsRootPath,
       name: "stories",
       description: "Parent stories skill.",
     });
+
     await writeSkill({
       rootPath: prodSkillsRootPath,
       name: "stories",
@@ -428,20 +462,24 @@ describe("injected skill source discovery", () => {
     const workspacePath = await makeTempDir();
     await writeSkill({
       rootPath: path.join(dataDir, "skills"),
-      name: "bb-cli",
+      name: "omnyo-cli",
       description: "User copy.",
     });
+
     const projectSkillRoot = await writeSkill({
-      rootPath: path.join(workspacePath, ".bb", "skills"),
-      name: "bb-cli",
+      rootPath: path.join(workspacePath, ".omnyo", "skills"),
+      name: "omnyo-cli",
       description: "Project copy.",
     });
+
     const { logger, warnings } = createCapturingLogger();
+
     const projectSkillSource = resolveProjectSkillSourceFromContent(logger, {
       candidatePath: projectSkillRoot,
       content: await readFile(path.join(projectSkillRoot, "SKILL.md"), "utf8"),
-      directoryName: "bb-cli",
+      directoryName: "omnyo-cli",
     });
+
     expect(projectSkillSource).not.toBeNull();
 
     const sources = resolveInjectedSkillSources(logger, {
@@ -454,7 +492,7 @@ describe("injected skill source discovery", () => {
       {
         kind: "workspace-path",
         sourceType: "project",
-        name: "bb-cli",
+        name: "omnyo-cli",
         description: "Project copy.",
         sourceRootPath: projectSkillRoot,
         skillFilePath: path.join(projectSkillRoot, "SKILL.md"),
@@ -477,12 +515,14 @@ describe("injected skill source discovery", () => {
       .map((entry) => entry.runtimeSource);
 
     const builtinNames = sources.map((source) => source.name);
-    expect(builtinNames).toContain("bb-cli");
-    expect(builtinNames).toContain("submit-a-plugin");
+    expect(builtinNames).toContain("omnyo-cli");
+    expect(builtinNames).toContain("skill-creator");
+
     for (const source of sources) {
       expect(source.sourceType).toBe("builtin");
       expect(source.description.trim().length).toBeGreaterThan(0);
     }
+
     expect(warnings).toEqual([]);
   });
 
@@ -501,6 +541,7 @@ describe("injected skill source discovery", () => {
       description: "User review.",
     });
     const { logger } = createCapturingLogger();
+
     const entries = resolveServerOwnedSkillCatalogEntries({
       builtinSkillsRootPath,
       dataDir,

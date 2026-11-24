@@ -4,12 +4,13 @@ import {
   getRecordProperty,
   getStringProperty,
   isRecord,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import type {
   JsonRpcMessage,
   ProviderRawEventDescription,
   ProviderVisibilityMetadata,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
+
 type PiAssistantEventType =
   | "text_delta"
   | "text_end"
@@ -169,23 +170,30 @@ function toPiAssistantEventType(
 
 function hasPiThinkingStartContent(rawMessage: JsonRpcMessage): boolean {
   const sdkMessage = getRawSdkMessage(rawMessage);
+
   if (!sdkMessage) {
     return false;
   }
+
   const assistantMessage = getRecordProperty(sdkMessage, "message");
   const content = assistantMessage?.["content"];
+
   if (!Array.isArray(content)) {
     return false;
   }
+
   for (const block of content) {
     if (!isRecord(block) || getStringProperty(block, "type") !== "thinking") {
       continue;
     }
+
     const thinking = getStringProperty(block, "thinking");
+
     if (thinking && thinking.length > 0) {
       return true;
     }
   }
+
   return false;
 }
 
@@ -210,15 +218,18 @@ function parsePiRawEvent(event: JsonRpcMessage): PiRawEvent {
   }
 
   const message = getRawSdkMessage(event);
+
   if (!message) {
     return { kind: "sdk/unknown" };
   }
 
   const sdkType = toPiSdkEventType(getStringProperty(message, "type"));
+
   switch (sdkType) {
     case "message_start":
     case "message_end": {
       const payload = getRecordProperty(message, "message");
+
       return {
         kind: "sdk/message-boundary",
         sdkType,
@@ -233,6 +244,7 @@ function parsePiRawEvent(event: JsonRpcMessage): PiRawEvent {
         message,
         "assistantMessageEvent",
       );
+
       return {
         kind: "sdk/message_update",
         assistantEventType: toPiAssistantEventType(
@@ -322,6 +334,7 @@ function describeParsedPiRawEvent(
           /:$/u,
           "",
         );
+
       return event.role === "unknown"
         ? { kind: `sdk/${event.sdkType}`, coverage: "unknown" }
         : { kind, coverage: "noise" };

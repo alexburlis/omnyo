@@ -1,7 +1,7 @@
 import {
   hostDaemonDaemonWsMessageSchema,
   type HostDaemonDaemonWsMessage,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { describe, expect, it } from "vitest";
 import { SERVER_MOVE_FENCED_DAEMON_MESSAGE_TYPES } from "../../src/ws/daemon-protocol.js";
 
@@ -11,6 +11,7 @@ const SNAPSHOT_FENCE_CLASSIFICATION: Record<
   DaemonMessageType,
   "fenced" | "unfenced"
 > = {
+  "command-catalog-change": "unfenced",
   "connect-tunnel.identity": "unfenced",
   "desktop-browser.changed": "fenced",
   "environment-change": "unfenced",
@@ -39,8 +40,10 @@ function collectMessageTypes(node: MessageSchemaNode, types: Set<unknown>) {
     for (const option of node.options) {
       collectMessageTypes(option, types);
     }
+
     return;
   }
+
   types.add(node.shape?.type?.value);
 }
 

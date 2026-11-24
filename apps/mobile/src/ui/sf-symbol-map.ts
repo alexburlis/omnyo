@@ -38,6 +38,7 @@ export const SF_SYMBOL_MAP = {
   Loading: "circle.dotted",
   Lock: "lock",
   Palette: "paintpalette",
+  Pencil: "pencil",
   Plus: "plus",
   RotateCcw: "arrow.clockwise",
   Settings: "gearshape",

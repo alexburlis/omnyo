@@ -1,3 +1,4 @@
+import { projectThreadWork, type ThreadWorkSummary } from "@omnyo/domain";
 import type {
   Environment,
   Host,
@@ -6,7 +7,7 @@ import type {
   ThreadListEntry,
   ThreadQueuedMessage,
   ThreadWithRuntime,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 type ProviderInfoOverrides = Omit<
   Partial<ProviderInfo>,
@@ -15,12 +16,14 @@ type ProviderInfoOverrides = Omit<
   capabilities?: Partial<ProviderInfo["capabilities"]>;
   maintenance?: Partial<ProviderInfo["maintenance"]>;
 };
+
 type ThreadWithRuntimeOverrides = Omit<
   Partial<ThreadWithRuntime>,
   "runtime"
 > & {
   runtime?: Partial<ThreadWithRuntime["runtime"]>;
 };
+
 type ThreadListEntryOverrides = Omit<
   Partial<ThreadListEntry>,
   "activity" | "runtime"
@@ -77,7 +80,9 @@ export function makeHost(overrides: Partial<Host> = {}): Host {
     },
     lastSeenAt: null,
     maxPermissionMode: "full",
+    availability: "available",
     lastRejectedProtocolVersion: null,
+    runtimeVersion: null,
     createdAt: 0,
     updatedAt: 0,
     ...overrides,
@@ -88,6 +93,7 @@ export function makeProviderInfo(
   overrides: ProviderInfoOverrides & Pick<ProviderInfo, "id">,
 ): ProviderInfo {
   const id = overrides.id;
+
   const provider: ProviderInfo = {
     id,
     pluginId: `provider-${id}`,
@@ -108,7 +114,9 @@ export function makeProviderInfo(
       permissionModes: ["accept-edits", "auto", "full"],
     },
   };
+
   const capabilities = { ...provider.capabilities, ...overrides.capabilities };
+
   return {
     ...provider,
     ...(capabilities.supportsServiceTier
@@ -134,6 +142,7 @@ export function makeThread(overrides: Partial<Thread> = {}): Thread {
     title: "Test thread",
     titleFallback: "Test thread",
     sectionId: null,
+    groupId: null,
     status: "idle",
     parentThreadId: null,
     lifecycleOwnerThreadId: null,
@@ -141,11 +150,15 @@ export function makeThread(overrides: Partial<Thread> = {}): Thread {
     originKind: null,
     originPluginId: null,
     visibility: "visible",
+    pluginHome: false,
+    quiet: false,
     archivedAt: null,
     pinnedAt: null,
+    shelvedAt: null,
     deletedAt: null,
     lastReadAt: 100,
     latestAttentionAt: 100,
+    lastMessageAt: null,
     createdAt: 0,
     updatedAt: 100,
     ...overrides,
@@ -159,6 +172,7 @@ export function makeThreadWithRuntime(
     ...makeThread(),
     runtime: { displayStatus: "idle" },
   };
+
   return {
     ...thread,
     ...overrides,
@@ -170,6 +184,7 @@ export function makeThreadListEntry(
   overrides: ThreadListEntryOverrides = {},
 ): ThreadListEntry {
   const entry: ThreadListEntry = {
+    work: null,
     ...makeThreadWithRuntime({
       id: "thr_sender",
       environmentId: null,
@@ -177,12 +192,14 @@ export function makeThreadListEntry(
       titleFallback: null,
     }),
     pinSortKey: null,
+    shelfSortKey: null,
     activity: {
       activeWorkflowCount: 0,
       activeBackgroundAgentCount: 0,
       activeBackgroundCommandCount: 0,
       activePlanModeCount: 0,
       activeGoalCount: 0,
+      activeSubagentCount: 0,
     },
     hasPendingInteraction: false,
     environmentHostId: null,
@@ -194,6 +211,7 @@ export function makeThreadListEntry(
     environmentWorkspaceDisplayKind: "other",
     queuedWork: "none",
   };
+
   return {
     ...entry,
     ...overrides,
@@ -225,6 +243,28 @@ export function makeThreadQueuedMessage(
     editable: true,
     createdAt: 0,
     updatedAt: 0,
+    ...overrides,
+  };
+}
+
+export function makeThreadWorkSummary(
+  overrides: Partial<ThreadWorkSummary> = {},
+): ThreadWorkSummary {
+  return {
+    ...projectThreadWork({
+      revision: "fixture",
+      basis: "fixture",
+      activity: [],
+      requiredInput: [],
+      optionalInput: [],
+      failures: [],
+      waits: [],
+      coverageComplete: true,
+      unknownReason: null,
+      assessment: null,
+      postponement: null,
+      closed: false,
+    }),
     ...overrides,
   };
 }

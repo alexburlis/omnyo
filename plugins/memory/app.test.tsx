@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 
 const app = await loadPluginApp(() => import("./app"));
 
@@ -45,7 +45,7 @@ describe("memory settings", () => {
     );
 
     expect(await slot.findByText("validation")).toBeTruthy();
-    expect(slot.getByText("project")).toBeTruthy();
+    expect(slot.getByText("Project")).toBeTruthy();
     fireEvent.click(slot.getByRole("button", { name: "Edit" }));
     fireEvent.change(slot.getByLabelText("Memory summary"), {
       target: { value: "Run all focused tests." },
@@ -66,10 +66,6 @@ describe("memory settings", () => {
   });
 
   it("confirms and deletes a memory", async () => {
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => true),
-    );
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -82,7 +78,11 @@ describe("memory settings", () => {
     );
 
     expect(await slot.findByText("validation")).toBeTruthy();
-    fireEvent.click(slot.getByRole("button", { name: "Delete" }));
+    fireEvent.click(slot.getByRole("button", { name: "Delete validation" }));
+    expect(slot.rpcCalls).not.toContainEqual(
+      expect.objectContaining({ method: "deleteMemory" }),
+    );
+    fireEvent.click(slot.getByRole("button", { name: "Delete memory" }));
 
     await waitFor(() =>
       expect(slot.rpcCalls).toContainEqual({

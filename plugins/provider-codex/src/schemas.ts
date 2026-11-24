@@ -5,7 +5,7 @@ import {
   pendingInteractionNetworkPermissionsSchema,
   type PendingInteractionCommandAction,
   jsonRpcEnvelopeSchema,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { z } from "zod";
 import { codexAsyncQuestionSchema } from "./extension-kinds.js";
 import type { CodexErrorInfo as GeneratedCodexErrorInfo } from "./generated/codex-app-server/schema/v2/CodexErrorInfo.js";
@@ -16,6 +16,7 @@ const codexTurnStatusSchema = z.enum([
   "interrupted",
   "inProgress",
 ]);
+
 export type CodexTurnStatus = z.infer<typeof codexTurnStatusSchema>;
 
 const codexItemStatusSchema = z.enum([
@@ -24,6 +25,7 @@ const codexItemStatusSchema = z.enum([
   "failed",
   "declined",
 ]);
+
 export type CodexItemStatus = z.infer<typeof codexItemStatusSchema>;
 
 const codexPlanStepStatusSchema = z.enum([
@@ -130,6 +132,7 @@ const codexDynamicToolCallContentItemSchema = z.discriminatedUnion("type", [
     })
     .passthrough(),
 ]);
+
 export type CodexDynamicToolCallContentItem = z.infer<
   typeof codexDynamicToolCallContentItemSchema
 >;
@@ -168,6 +171,7 @@ const codexSimpleCommandApprovalDecisionSchema = z.enum([
   "decline",
   "cancel",
 ]);
+
 export type CodexSimpleCommandApprovalDecision = z.infer<
   typeof codexSimpleCommandApprovalDecisionSchema
 >;
@@ -192,6 +196,7 @@ const codexCommandApprovalDecisionSchema = z.union([
   codexExecPolicyAmendmentDecisionSchema,
   codexNetworkPolicyAmendmentDecisionSchema,
 ]);
+
 export type CodexCommandApprovalDecision = z.infer<
   typeof codexCommandApprovalDecisionSchema
 >;
@@ -246,6 +251,7 @@ const codexAdditionalPermissionsSchema = z.object({
   fileSystem: codexFileSystemPermissionsSchema.nullable(),
   macos: codexAdditionalMacOsPermissionsSchema.nullable().optional(),
 });
+
 export type CodexAdditionalPermissions = z.infer<
   typeof codexAdditionalPermissionsSchema
 >;
@@ -254,6 +260,7 @@ const codexRequestPermissionsSchema = z.object({
   network: codexNetworkPermissionsSchema.nullable(),
   fileSystem: codexFileSystemPermissionsSchema.nullable(),
 });
+
 export type CodexRequestedPermissionProfile = z.infer<
   typeof codexRequestPermissionsSchema
 >;
@@ -275,16 +282,20 @@ const codexCommandActionsSchema = z
       }
 
       const parsedActions: PendingInteractionCommandAction[] = [];
+
       for (const action of value) {
         const parsedAction =
           pendingInteractionCommandActionSchema.safeParse(action);
+
         if (!parsedAction.success) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: "Invalid command action",
           });
+
           return z.NEVER;
         }
+
         parsedActions.push(parsedAction.data);
       }
 
@@ -363,6 +374,7 @@ export const codexSubAgentActivityItemSchema = z
     agentPath: z.string(),
   })
   .passthrough();
+
 export type CodexSubAgentActivityItem = z.infer<
   typeof codexSubAgentActivityItemSchema
 >;
@@ -512,6 +524,7 @@ export const codexHandledThreadItemSchema = z.discriminatedUnion("type", [
     })
     .passthrough(),
 ]);
+
 export type CodexHandledThreadItem = z.infer<
   typeof codexHandledThreadItemSchema
 >;
@@ -529,13 +542,18 @@ const codexErrorHttpStatusSchema = z
   })
   .strip();
 
-const codexErrorInfoSchema = z.union([
+export const codexKnownErrorInfoSchema = z.union([
   z.literal("contextWindowExceeded"),
   z.literal("sessionBudgetExceeded"),
   z.literal("usageLimitExceeded"),
+  z.literal("rateLimitExceeded"),
+  z.literal("flexUnavailable"),
   z.literal("serverOverloaded"),
+  z.literal("modelNotFound"),
+  z.literal("policyCapacityUnavailable"),
   z.literal("cyberPolicy"),
   z.literal("misalignmentPolicyViolation"),
+  z.literal("tooManyDenials"),
   z.object({ httpConnectionFailed: codexErrorHttpStatusSchema }),
   z.object({ responseStreamConnectionFailed: codexErrorHttpStatusSchema }),
   z.literal("internalServerError"),
@@ -554,13 +572,50 @@ const codexErrorInfoSchema = z.union([
   }),
   z.literal("other"),
 ]);
+
+export type CodexKnownErrorInfo = z.infer<typeof codexKnownErrorInfoSchema>;
+
+const UNRECOGNIZED_CODEX_ERROR_CODE = "unrecognized";
+
+const codexErrorInfoSchema = z.union([
+  codexKnownErrorInfoSchema,
+  z.object({ unrecognized: z.string() }).strict(),
+  z.string().transform((code) => ({ unrecognized: code })),
+  z.record(z.string(), z.unknown()).transform((variant) => ({
+    unrecognized: Object.keys(variant)[0] ?? UNRECOGNIZED_CODEX_ERROR_CODE,
+  })),
+]);
+
 export type CodexErrorInfo = z.infer<typeof codexErrorInfoSchema>;
-const codexErrorInfoSchemaMatchesGenerated: GeneratedCodexErrorInfo extends CodexErrorInfo
-  ? CodexErrorInfo extends GeneratedCodexErrorInfo
+
+type CodexErrorInfoWire = z.input<typeof codexErrorInfoSchema>;
+
+const codexErrorInfoSchemaMatchesGenerated: GeneratedCodexErrorInfo extends CodexErrorInfoWire
+  ? CodexErrorInfoWire extends GeneratedCodexErrorInfo
     ? true
     : false
   : false = true;
+
 void codexErrorInfoSchemaMatchesGenerated;
+
+type CodexErrorInfoObjectVariant<T> = T extends string
+  ? never
+  : string extends keyof T
+    ? never
+    : T;
+
+type GeneratedCodexErrorInfoObjectVariant =
+  CodexErrorInfoObjectVariant<GeneratedCodexErrorInfo>;
+
+type CodexKnownErrorInfoObjectVariant = Exclude<CodexKnownErrorInfo, string>;
+
+const codexErrorInfoObjectVariantsMatchGenerated: GeneratedCodexErrorInfoObjectVariant extends CodexKnownErrorInfoObjectVariant
+  ? CodexKnownErrorInfoObjectVariant extends GeneratedCodexErrorInfoObjectVariant
+    ? true
+    : false
+  : false = true;
+
+void codexErrorInfoObjectVariantsMatchGenerated;
 
 const codexTurnErrorSchema = z
   .object({
@@ -577,6 +632,7 @@ export const codexTurnSchema = z
     error: codexTurnErrorSchema.nullable().optional(),
   })
   .passthrough();
+
 export type CodexTurn = z.infer<typeof codexTurnSchema>;
 
 const codexThreadSchema = z
@@ -844,6 +900,7 @@ const codexRateLimitSnapshotUpdateSchema = z
     rateLimitReachedType: z.string().nullable().optional(),
   })
   .passthrough();
+
 export type CodexRateLimitSnapshotUpdate = z.infer<
   typeof codexRateLimitSnapshotUpdateSchema
 >;
@@ -1064,7 +1121,9 @@ export const codexHandledEventSchema = z.discriminatedUnion("method", [
       .passthrough(),
   ),
 ]);
+
 export type CodexHandledEvent = z.infer<typeof codexHandledEventSchema>;
+
 type HandledCodexMethod = CodexHandledEvent["method"];
 
 const handledCodexMethodSet = new Set<string>(
@@ -1076,3 +1135,15 @@ export function isHandledCodexMethod(
 ): method is HandledCodexMethod {
   return handledCodexMethodSet.has(method);
 }
+
+export const codexTurnCompletedClosureSchema = createCodexEventSchema(
+  "turn/completed",
+  z.object({
+    threadId: z.string(),
+    turn: z.object({
+      id: z.string(),
+      status: codexTurnStatusSchema.optional().catch(undefined),
+      error: z.object({ message: z.string() }).nullish().catch(null),
+    }),
+  }),
+);

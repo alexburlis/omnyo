@@ -5,7 +5,9 @@ export {
   ResourceStatus,
   type ResourceStatusTone,
 } from "./resource/atoms";
+
 export { useResourceRouteLabel } from "./resource-route-label";
+
 export {
   ResourceControlButton,
   ResourceMultiSelectMenuItems,
@@ -20,6 +22,7 @@ export {
   ResourceToolbar,
   ResourceTabDescription,
 } from "./resource/toolbar";
+
 export {
   ResourceActionButton,
   ResourceListPanel,
@@ -30,12 +33,14 @@ export {
   ResourceRowDetailChevron,
   targetsResourceAction,
 } from "./resource/row";
+
 export {
   ResourceDetailCollection,
   ResourceDetailPanel,
   ResourceDetailStack,
   ResourcePromptPreview,
 } from "./resource/detail-shell";
+
 export {
   ResourceActivitySection,
   ResourceDefinitionSection,
@@ -45,10 +50,12 @@ export {
   ResourceDetailPage,
   ResourceDetailReleaseSection,
 } from "./resource/detail-sections";
+
 export {
   ResourceInstallControl,
   ResourceInstalledControl,
 } from "./resource/detail-controls";
+
 export {
   ResourceBrowseCard,
   ResourceBrowseGrid,

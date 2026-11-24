@@ -91,6 +91,7 @@ describe("github panel query engine", () => {
       labels: ["bug", "good first issue"],
       repos: ["acme/widgets"],
     };
+
     const compact = (token: string, kind: "issue" | "pr") =>
       buildSuggestions(token, vocab, kind, "octocat").map(
         ({ insert, label }) => ({ insert, label }),

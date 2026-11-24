@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import {
   createScriptedEchoRequestRecord,
   createScriptedEchoRuntime,
@@ -23,9 +23,10 @@ function createRewindRuntime(args: {
   onStderr?: (line: string) => void;
   scripted?: ScriptedEchoLaunchScript;
 }) {
-  const workspacePath = mkdtempSync(join(tmpdir(), "bb-runtime-rewind-"));
+  const workspacePath = mkdtempSync(join(tmpdir(), "omnyo-runtime-rewind-"));
   temporaryDirectories.push(workspacePath);
   const record = createScriptedEchoRequestRecord();
+
   const runtime = createScriptedEchoRuntime({
     runtime: {
       workspacePath,
@@ -41,15 +42,18 @@ function createRewindRuntime(args: {
       ? { launch: { scripted: args.scripted } }
       : {}),
   });
+
   return { record, runtime };
 }
 
 describe("prepareThreadRewind", () => {
   it("stages one independently discardable fork per lease and suppresses staging events", async () => {
     const events: ThreadEvent[] = [];
+
     const { record, runtime } = createRewindRuntime({
       onEvent: (event) => events.push(event),
     });
+
     const request = {
       environmentId: "env-1",
       threadId: "thread-1",
@@ -71,6 +75,7 @@ describe("prepareThreadRewind", () => {
       const forkRequests = record
         .read()
         .filter((entry) => entry.method === "thread/fork");
+
       expect(forkRequests.map((entry) => entry.params)).toEqual([
         expect.objectContaining({
           sourceProviderCheckpointId: "turn-before-edit",
@@ -112,10 +117,12 @@ describe("prepareThreadRewind", () => {
 
   it("retains a staged rewind when provider cleanup fails so cleanup can retry", async () => {
     const stderr: string[] = [];
+
     const { record, runtime } = createRewindRuntime({
       onStderr: (line) => stderr.push(line),
       scripted: { discardFailsOnce: true },
     });
+
     const request = {
       environmentId: "env-1",
       threadId: "thread-1",
@@ -149,10 +156,12 @@ describe("prepareThreadRewind", () => {
 
   it("releases a staged fork whose result carries no providerThreadId", async () => {
     const events: ThreadEvent[] = [];
+
     const { record, runtime } = createRewindRuntime({
       onEvent: (event) => events.push(event),
       scripted: { answerStartWithoutIdentity: true },
     });
+
     const request = {
       environmentId: "env-1",
       threadId: "thread-1",
@@ -164,6 +173,7 @@ describe("prepareThreadRewind", () => {
       options: fullRuntimeOptions,
       instructionMode: "append" as const,
     };
+
     try {
       await expect(runtime.prepareThreadRewind(request)).rejects.toThrow(
         /Invalid JSON-RPC result for thread\/fork: providerThreadId/,
@@ -186,6 +196,53 @@ describe("prepareThreadRewind", () => {
       );
       expect(runtime.hasThread(stagingThreadId)).toBe(false);
       expect(events).toEqual([]);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it("keeps a staged fork's provider history once a replacement thread forks from it", async () => {
+    const { record, runtime } = createRewindRuntime({});
+
+    const request = {
+      environmentId: "env-1",
+      threadId: "thread-1",
+      leaseId: "lease-replacement",
+      projectId: "project-1",
+      providerId: "codex",
+      sourceProviderThreadId: "provider-source-1",
+      retainThroughProviderCheckpoint: "turn-before-edit",
+      options: fullRuntimeOptions,
+      instructionMode: "append" as const,
+    };
+
+    try {
+      const staged = await runtime.prepareThreadRewind(request);
+      const stagingThreadId = "thread-1:rewind:lease-replacement";
+
+      await runtime.startThread({
+        environmentId: "env-1",
+        threadId: "thread-1",
+        projectId: "project-1",
+        providerId: "codex",
+        options: fullRuntimeOptions,
+        fork: { sourceProviderThreadId: staged.providerThreadId },
+      });
+      await runtime.discardThreadRewind({ leaseId: request.leaseId });
+
+      const requests = record.read();
+      expect(requests.some((entry) => entry.method === "thread/discard")).toBe(
+        false,
+      );
+      expect(requests).toContainEqual({
+        method: "thread/stop",
+        params: expect.objectContaining({
+          threadId: stagingThreadId,
+          intent: "release",
+        }),
+      });
+      expect(runtime.hasThread(stagingThreadId)).toBe(false);
+      expect(runtime.hasThread("thread-1")).toBe(true);
     } finally {
       await runtime.shutdown();
     }

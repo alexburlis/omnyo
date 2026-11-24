@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import type { BbDesktopBrowserApi } from "@bb/desktop-contract";
+import type { OmnyoDesktopBrowserApi } from "@omnyo/desktop-contract";
 import {
   DESKTOP_BROWSER_IMPORT_FAILURE_COPY,
   type DesktopBrowserImportOutcome,
+  type DesktopBrowserImportSelection,
   type DesktopBrowserImportSource,
-} from "@bb/host-daemon-contract";
-import { Button } from "@bb/shared-ui/button";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/host-daemon-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { appToast } from "@/components/ui/app-toast";
 import {
   SettingsBadge,
@@ -14,8 +15,9 @@ import {
   SettingsRowList,
   SettingsSection,
 } from "@/components/ui/settings-section";
-import { getDesktopBrowserApi } from "@/lib/bb-desktop";
+import { getDesktopBrowserApi } from "@/lib/omnyo-desktop";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { BrowserCookieSyncSettings } from "./BrowserCookieSyncSettings";
 import { BrowserImportDialog } from "./BrowserImportDialog";
 import { BrowserSourceIcon } from "./BrowserSourceIcon";
 import {
@@ -34,7 +36,11 @@ import {
 type SourcesState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; sources: DesktopBrowserImportSource[] };
+  | {
+      status: "ready";
+      sources: DesktopBrowserImportSource[];
+      recommended: DesktopBrowserImportSelection | null;
+    };
 
 const DOT_TONE_CLASS: Record<SourceRowTone, string> = {
   ready: "bg-success",
@@ -69,6 +75,7 @@ function BrowserRow({
 }: BrowserRowProps) {
   const presentation = presentSourceRow(source, record);
   const actionable = presentation.action !== "none";
+
   return (
     <SettingsRow data-testid={`browser-import-${source.id}`}>
       <div className="group -mx-2 flex min-w-0 flex-1 items-center gap-3 rounded-md px-2 py-1.5">
@@ -84,7 +91,7 @@ function BrowserRow({
               </SettingsBadge>
             ) : null}
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-subtle-foreground/75">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-subtle-foreground">
             <span
               className={cn(
                 "inline-flex shrink-0 items-center gap-1.5",
@@ -122,8 +129,8 @@ function BrowserRow({
   );
 }
 
-export interface BrowserSettingsSectionContentProps {
-  desktopBrowser: BbDesktopBrowserApi | null;
+interface BrowserSettingsSectionContentProps {
+  desktopBrowser: OmnyoDesktopBrowserApi | null;
 }
 
 export function BrowserSettingsSectionContent({
@@ -131,14 +138,18 @@ export function BrowserSettingsSectionContent({
 }: BrowserSettingsSectionContentProps) {
   const supported = desktopBrowser?.listImportSources !== undefined;
   const [state, setState] = useState<SourcesState>({ status: "loading" });
+
   const [records, setRecords] = useState<BrowserImportRecords>(() =>
     readBrowserImportRecords(localStorageOrNull()),
   );
+
   const [dialogSource, setDialogSource] =
     useState<DesktopBrowserImportSource | null>(null);
+
   const [pendingSourceIds, setPendingSourceIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+
   const anyPending = pendingSourceIds.size > 0;
 
   const refresh = useCallback(() => {
@@ -148,7 +159,13 @@ export function BrowserSettingsSectionContent({
     );
     desktopBrowser
       .listImportSources()
-      .then((result) => setState({ status: "ready", sources: result.sources }))
+      .then((result) =>
+        setState({
+          status: "ready",
+          sources: result.sources,
+          recommended: result.recommended ?? null,
+        }),
+      )
       .catch((error: unknown) =>
         setState({
           status: "error",
@@ -172,6 +189,7 @@ export function BrowserSettingsSectionContent({
     const record = recordFromOutcome(outcome, profileName, Date.now());
     setRecords((current) => {
       const next: BrowserImportRecords = { ...current, [source.id]: record };
+
       try {
         localStorageOrNull()?.setItem(
           BROWSER_IMPORT_RECORDS_STORAGE_KEY,
@@ -180,6 +198,7 @@ export function BrowserSettingsSectionContent({
       } catch {
         return next;
       }
+
       return next;
     });
     appToast.success(
@@ -191,10 +210,13 @@ export function BrowserSettingsSectionContent({
 
   const importDirectly = (source: DesktopBrowserImportSource) => {
     const profile = source.profiles[0];
+
     if (!profile || !desktopBrowser?.importCookies) {
       setDialogSource(source);
+
       return;
     }
+
     setPendingSourceIds((current) => new Set(current).add(source.id));
     desktopBrowser
       .importCookies({
@@ -204,9 +226,12 @@ export function BrowserSettingsSectionContent({
       .then((outcome) => {
         if (outcome.ok) {
           recordImport(source, profile.name, outcome);
+
           return;
         }
+
         const blocked = sourceAfterFailure(source, outcome.reason);
+
         if (blocked) setDialogSource(blocked);
         else
           appToast.error(
@@ -220,6 +245,7 @@ export function BrowserSettingsSectionContent({
         setPendingSourceIds((current) => {
           const next = new Set(current);
           next.delete(source.id);
+
           return next;
         });
         refresh();
@@ -233,7 +259,7 @@ export function BrowserSettingsSectionContent({
     <>
       <SettingsSection
         title="Browsers"
-        description="Bring signed-in sessions from a browser on this machine into the BB browser, so previews and agent tabs open already logged in."
+        description="Bring signed-in sessions from a browser on this machine into the Omnyo browser, so previews and agent tabs open already logged in."
         action={
           supported ? (
             <Button
@@ -249,7 +275,7 @@ export function BrowserSettingsSectionContent({
       >
         {!supported ? (
           <p className="text-sm text-subtle-foreground">
-            Only available in the BB desktop app.
+            Only available in the Omnyo desktop app.
           </p>
         ) : state.status === "loading" ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
@@ -279,11 +305,23 @@ export function BrowserSettingsSectionContent({
             ))}
           </SettingsRowList>
         )}
+        {supported && desktopBrowser && state.status !== "error" ? (
+          <div
+            className="mt-4 border-t border-border pt-4"
+            hidden={state.status !== "ready"}
+          >
+            <BrowserCookieSyncSettings
+              desktopBrowser={desktopBrowser}
+              sourceList={state.status === "ready" ? state : null}
+            />
+          </div>
+        ) : null}
       </SettingsSection>
       {supported ? (
-        <p className="mt-4 text-xs text-subtle-foreground/75">
-          Also from the CLI: <code>bb browser import-sources</code> and{" "}
-          <code>bb browser import-cookies</code>.
+        <p className="mt-4 text-xs text-subtle-foreground">
+          Also from the CLI: <code>omnyo browser import-sources</code>,{" "}
+          <code>omnyo browser import-cookies</code> and{" "}
+          <code>omnyo browser cookie-sync</code>.
         </p>
       ) : null}
       {dialogSource && desktopBrowser ? (
@@ -304,5 +342,6 @@ export function BrowserSettingsSectionContent({
 
 export function BrowserSettingsSection() {
   const [desktopBrowser] = useState(getDesktopBrowserApi);
+
   return <BrowserSettingsSectionContent desktopBrowser={desktopBrowser} />;
 }

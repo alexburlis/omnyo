@@ -18,6 +18,7 @@ export function parseExtensionKind(kind: ExtensionKind): {
   name: string;
 } {
   const separator = kind.indexOf("/");
+
   return {
     pluginId: kind.slice(0, separator),
     name: kind.slice(separator + 1),

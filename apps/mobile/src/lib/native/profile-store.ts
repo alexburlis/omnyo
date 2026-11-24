@@ -10,5 +10,6 @@ export function getProfileStore(): ProfileStore {
   if (!instance) {
     instance = createProfileStore({ storage: expoSecureStorage });
   }
+
   return instance;
 }

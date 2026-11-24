@@ -3,8 +3,11 @@ import { fileURLToPath } from "node:url";
 import { bumpVersion, readMaxTargetVersion } from "./bump-version.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
+
 const defaultRepoRoot = resolve(dirname(scriptPath), "..");
+
 const semverCorePattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)/u;
+
 const positiveIntegerPattern = /^[1-9]\d*$/u;
 
 function normalizePositiveInteger(value, label) {
@@ -17,12 +20,14 @@ function normalizePositiveInteger(value, label) {
 
 export function deriveNightlyVersion(currentVersion, runId, runAttempt) {
   const coreMatch = semverCorePattern.exec(currentVersion);
+
   if (coreMatch === null) {
     throw new Error(`Invalid current version: ${currentVersion}`);
   }
 
   const [, major, minor, patch] = coreMatch;
   const normalizedRunId = normalizePositiveInteger(runId, "GITHUB_RUN_ID");
+
   const normalizedRunAttempt = normalizePositiveInteger(
     runAttempt,
     "GITHUB_RUN_ATTEMPT",
@@ -35,6 +40,7 @@ export async function prepareNightlyVersion(options) {
   const maxCurrentVersion = await readMaxTargetVersion({
     repoRoot: options.repoRoot,
   });
+
   const nightlyVersion = deriveNightlyVersion(
     maxCurrentVersion,
     options.runId,
@@ -51,9 +57,12 @@ export async function prepareNightlyVersion(options) {
 }
 
 async function main() {
-  const repoRoot = process.env.BB_NIGHTLY_VERSION_REPO_ROOT ?? defaultRepoRoot;
+  const repoRoot =
+    process.env.OMNYO_NIGHTLY_VERSION_REPO_ROOT ?? defaultRepoRoot;
+
   const runId = process.env.GITHUB_RUN_ID ?? "";
   const runAttempt = process.env.GITHUB_RUN_ATTEMPT ?? "";
+
   const nightlyVersion = await prepareNightlyVersion({
     repoRoot,
     runAttempt,

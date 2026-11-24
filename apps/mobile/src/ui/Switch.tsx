@@ -21,6 +21,7 @@ export function Switch({
   ...props
 }: SwitchProps) {
   const { tokens, palette } = useTheme();
+
   const colors = IS_IOS
     ? palette === "default"
       ? {}
@@ -29,6 +30,7 @@ export function Switch({
         trackColor: { false: tokens.muted, true: tokens.foreground },
         thumbColor: tokens.background,
       };
+
   return (
     <RNSwitch
       value={checked}

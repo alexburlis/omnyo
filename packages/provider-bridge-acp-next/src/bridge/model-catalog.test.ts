@@ -14,9 +14,11 @@ import {
 
 function catalogFromSample() {
   const catalog = buildAgentModelCatalog(parseAgentModelLines(SAMPLE_LIST));
+
   if (!catalog) {
     throw new Error("expected a catalog from the sample list");
   }
+
   return catalog;
 }
 
@@ -85,9 +87,11 @@ describe("acp model catalog", () => {
         ),
       ),
     );
+
     const grok46 = catalog?.models.find(
       (m) => m.displayName === "Cursor Grok 4.6",
     );
+
     expect(grok46?.id).toBe("cursor-grok-4.6-medium");
     expect(
       grok46?.supportedReasoningEfforts.map((e) => e.reasoningEffort),
@@ -129,9 +133,11 @@ describe("acp model catalog", () => {
 
   it("reports the fast tier only for families that list a -fast variant", () => {
     const catalog = catalogFromSample();
+
     const tiersByModel = Object.fromEntries(
       catalog.models.map((model) => [model.id, model.supportedServiceTiers]),
     );
+
     expect(tiersByModel["gpt-5.3-codex"]).toEqual([{ id: "fast" }]);
     expect(tiersByModel["gpt-5.5-medium"]).toEqual([]);
     expect(tiersByModel["auto"]).toEqual([]);
@@ -146,6 +152,7 @@ describe("acp model catalog", () => {
         ].join("\n"),
       ),
     );
+
     expect(catalog?.models.map((m) => m.id)).toEqual(["composer-2.5"]);
     expect(
       catalog?.resolveVariant({ model: "composer-2.5", serviceTier: "fast" }),
@@ -192,6 +199,7 @@ describe("acp model catalog", () => {
         ].join("\n"),
       ),
     );
+
     expect(catalog?.models.map((m) => m.displayName)).toEqual([
       "Opus 4.8",
       "Fable 5",
@@ -212,6 +220,7 @@ describe("acp model catalog", () => {
         ].join("\n"),
       ),
     );
+
     expect(catalog?.models.map((m) => m.displayName)).toEqual([
       "Composer 2.5",
       "GPT-5.5",
@@ -235,6 +244,7 @@ describe("acp model catalog", () => {
         ].join("\n"),
       ),
     );
+
     expect(catalog?.models).toHaveLength(1);
     const opus = catalog?.models[0];
     expect(opus?.id).toBe("claude-opus-4-8-thinking-medium");
@@ -269,6 +279,7 @@ describe("acp model catalog", () => {
         ].join("\n"),
       ),
     );
+
     expect(
       catalog?.models[0]?.supportedReasoningEfforts.map(
         (e) => e.reasoningEffort,
@@ -297,9 +308,11 @@ describe("acp model catalog", () => {
 
   it("merges thinking with its non-thinking twins, defaulting to a thinking effort when there is no medium", () => {
     const catalog = catalogFromSample();
+
     const opus = catalog.models.find(
       (m) => m.id === "claude-4.6-opus-high-thinking",
     );
+
     expect(opus).toMatchObject({ defaultReasoningEffort: "high" });
     expect(
       opus?.supportedReasoningEfforts.map((e) => e.reasoningEffort),
@@ -348,6 +361,7 @@ describe("acp configOptions model catalog", () => {
       type: "select",
       options: [{ value: "wrong", name: "Wrong" }],
     };
+
     const byCategory = {
       id: "provider-model",
       category: "model",
@@ -378,6 +392,7 @@ describe("acp configOptions model catalog", () => {
         }),
       ],
     ]);
+
     const models = buildModelCatalogFromConfigOptions(
       {
         id: "model",
@@ -432,6 +447,7 @@ describe("acp configOptions model catalog", () => {
       currentValue: "medium",
       options: [{ value: "low" }, { value: "medium" }, { value: "xhigh" }],
     };
+
     expect(findAcpThoughtLevelConfigOption([thoughtLevel])).toBe(thoughtLevel);
     const support = buildAcpNativeReasoningSupport(thoughtLevel);
     expect(support.defaultReasoningEffort).toBe("medium");
@@ -594,10 +610,12 @@ describe("acp configOptions model catalog", () => {
 describe("acp primary model split", () => {
   it("splits families into primary and selected-only pools", () => {
     const catalog = catalogFromSample();
+
     const split = splitPrimaryModels(catalog.models, [
       "auto",
       "gpt-5.5-medium",
     ]);
+
     expect(split.models.map((m) => m.id)).toEqual(["auto", "gpt-5.5-medium"]);
     expect(split.selectedOnlyModels.map((m) => m.id)).toContain(
       "gpt-5.3-codex",

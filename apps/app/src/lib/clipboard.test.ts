@@ -6,7 +6,9 @@ const toastMocks = vi.hoisted(() => ({
   error: vi.fn(),
   success: vi.fn(),
 }));
+
 const nativeMocks = vi.hoisted(() => ({ getNativeShell: vi.fn() }));
+
 vi.mock("@/lib/native-shell/native-shell", () => nativeMocks);
 
 vi.mock("@/components/ui/app-toast", () => ({
@@ -36,6 +38,7 @@ function installEditingCommand(implementation: (command: string) => boolean) {
     configurable: true,
     value: execCommand,
   });
+
   return execCommand;
 }
 
@@ -46,6 +49,7 @@ function dispatchCopyEvent(target: EventTarget): Map<string, string> {
     value: { setData: (type: string, value: string) => data.set(type, value) },
   });
   target.dispatchEvent(event);
+
   return data;
 }
 
@@ -62,7 +66,7 @@ afterEach(() => {
 describe("copyToClipboard", () => {
   it("writes through the desktop clipboard before the browser APIs", async () => {
     const writeClipboard = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("bbDesktop", { writeClipboard });
+    vi.stubGlobal("omnyoDesktop", { writeClipboard });
     const writeText = vi.fn().mockResolvedValue(undefined);
     installClipboard(writeText);
     const editingCopy = installEditingCommand(() => true);
@@ -80,8 +84,10 @@ describe("copyToClipboard", () => {
   });
 
   it("falls back to the Clipboard API when the desktop clipboard rejects", async () => {
-    vi.stubGlobal("bbDesktop", {
-      writeClipboard: vi.fn().mockRejectedValue(new Error("not a bb window")),
+    vi.stubGlobal("omnyoDesktop", {
+      writeClipboard: vi
+        .fn()
+        .mockRejectedValue(new Error("not an Omnyo window")),
     });
     const writeText = vi.fn().mockResolvedValue(undefined);
     installClipboard(writeText);
@@ -124,9 +130,7 @@ describe("copyToClipboard", () => {
 
     expect(write).toHaveBeenCalledOnce();
     await expect(items[0]?.["text/plain"]?.text()).resolves.toBe("plain");
-    await expect(items[0]?.["text/html"]?.text()).resolves.toBe(
-      "<b>rich</b>",
-    );
+    await expect(items[0]?.["text/html"]?.text()).resolves.toBe("<b>rich</b>");
   });
 
   it.each([
@@ -142,14 +146,17 @@ describe("copyToClipboard", () => {
       } else {
         removeClipboard();
       }
+
       const menuItem = document.createElement("button");
       document.body.append(menuItem);
       menuItem.focus();
       const otherCopyListener = vi.fn();
       document.addEventListener("copy", otherCopyListener);
       let copiedData = new Map<string, string>();
+
       const editingCopy = installEditingCommand(() => {
         copiedData = dispatchCopyEvent(menuItem);
+
         return true;
       });
 
@@ -168,6 +175,7 @@ describe("copyToClipboard", () => {
     let copiedData = new Map<string, string>();
     installEditingCommand(() => {
       copiedData = dispatchCopyEvent(document);
+
       return true;
     });
 
@@ -234,6 +242,7 @@ describe("copyToClipboardWithToast", () => {
         failure === "rejected"
           ? vi.fn().mockRejectedValue(new Error("Image unavailable"))
           : vi.fn().mockResolvedValue({});
+
       nativeMocks.getNativeShell.mockReturnValue({ copyRichText: request });
       const writeText = vi.fn().mockResolvedValue(undefined);
       installClipboard(writeText);
@@ -273,14 +282,17 @@ describe("copyToClipboardWithToast", () => {
   });
   it("writes message text and an attached PNG as one clipboard item", async () => {
     const clipboardData: Record<string, Blob | Promise<Blob>>[] = [];
+
     class TestClipboardItem {
       constructor(data: Record<string, Blob | Promise<Blob>>) {
         clipboardData.push(data);
       }
     }
+
     const write = vi.fn(async () => {
       await Promise.all(Object.values(clipboardData[0] ?? {}));
     });
+
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("ClipboardItem", TestClipboardItem);
     vi.stubGlobal(
@@ -305,9 +317,11 @@ describe("copyToClipboardWithToast", () => {
 
     expect(write).toHaveBeenCalledOnce();
     expect(writeText).not.toHaveBeenCalled();
+
     const copiedImageBlob = await Promise.resolve(
       clipboardData[0]?.["image/png"],
     );
+
     expect(copiedImageBlob?.type).toBe("image/png");
     expect(await copiedImageBlob?.text()).toBe("image");
     const textBlob = await Promise.resolve(clipboardData[0]?.["text/plain"]);
@@ -316,9 +330,11 @@ describe("copyToClipboardWithToast", () => {
 
   it("writes an attached image when the message has no text", async () => {
     const clipboardData: Record<string, Blob | Promise<Blob>>[] = [];
+
     const write = vi.fn(async () => {
       await Promise.all(Object.values(clipboardData[0] ?? {}));
     });
+
     vi.stubGlobal(
       "ClipboardItem",
       class TestClipboardItem {

@@ -9,6 +9,7 @@ export function subscribeComposerFocusRequests(
   listener: ComposerFocusListener,
 ): () => void {
   if (storageKey === null) return () => {};
+
   return focusRequestListeners.subscribe(storageKey, listener);
 }
 

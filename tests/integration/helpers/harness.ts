@@ -1,12 +1,13 @@
 import { sweepProviderLifecycles } from "../../../apps/server/src/services/environments/environment-engine.js";
+import { runEventSourcePoll } from "../../../apps/server/src/services/inbox/event-source-runner.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
-import { listRunningThreads, type DbConnection } from "@bb/db";
-import { defaultFeatureFlags } from "@bb/domain";
+import { listRunningThreads, type DbConnection } from "@omnyo/db";
+import { defaultFeatureFlags } from "@omnyo/domain";
 import {
   acquireDaemonLock,
   createHostDaemonApp,
@@ -14,13 +15,14 @@ import {
   persistHostId,
   type HostDaemon,
   type HostDaemonApp,
-} from "@bb/host-daemon/test";
+} from "@omnyo/host-daemon/test";
 import { initDb } from "../../../apps/server/src/db.js";
 import { createLifecycleDedupers } from "../../../apps/server/src/lifecycle-dedupers.js";
 import { createApp } from "../../../apps/server/src/server.js";
 import { createAiServiceRegistry } from "../../../apps/server/src/services/ai/ai-service-registry.js";
 import { PendingInteractionLifecycle } from "../../../apps/server/src/services/interactions/pending-interactions.js";
 import { createMachineAuthService } from "../../../apps/server/src/services/machine-auth.js";
+import { openServerVault } from "../../../apps/server/src/services/system/server-vault.js";
 import {
   createProviderRegistryService,
   type ProviderRegistryService,
@@ -34,15 +36,19 @@ import {
   copyBuiltinSkills,
   resolveBuiltinSkillsRootPath,
 } from "../../../apps/server/src/services/skills/builtin-skills-copy.js";
+import { ServerCommandMetadata } from "../../../apps/server/src/services/skills/command-metadata.js";
 import { SkillTreeRegistry } from "../../../apps/server/src/services/skills/injected-skills.js";
 import { PluginHostArtifactRegistry } from "../../../apps/server/src/services/plugins/plugin-host-artifact-registry.js";
 import { createAppUpdateService } from "../../../apps/server/src/services/system/app-update.js";
+import { stopRunningWorkForAppUpdate } from "../../../apps/server/src/services/server-move/stop-work.js";
+import { ProjectCommandCatalogs } from "../../../apps/server/src/services/threads/project-command-catalogs.js";
 import { createAppVersionService } from "../../../apps/server/src/services/system/app-version.js";
 import { createProviderNativeRootsCache } from "../../../apps/server/src/services/providers/native-roots.js";
-import { createBbAppManagedConfigReloader } from "../../../apps/server/src/services/system/bb-app-managed-config.js";
+import { createOmnyoAppManagedConfigReloader } from "../../../apps/server/src/services/system/managed-app-config.js";
 import { createNoopTelemetryService } from "../../../apps/server/src/services/system/telemetry.js";
 import { TerminalSessionLifecycle } from "../../../apps/server/src/services/terminals/terminal-session-lifecycle.js";
 import type {
+  ServerAppDeps,
   ServerLogger,
   ServerRuntimeConfig,
 } from "../../../apps/server/src/types.js";
@@ -50,8 +56,8 @@ import { HostSharedPortCoordinator } from "../../../apps/server/src/ws/host-shar
 import { NotificationHub } from "../../../apps/server/src/ws/hub.js";
 import { WatchInterestCoordinator } from "../../../apps/server/src/ws/watch-interests.js";
 import { WorkspaceReadCaches } from "../../../apps/server/src/services/environments/workspace-read-cache.js";
-import { createPublicApiClient } from "@bb/server-contract";
-import { resolveProjectEnvCandidates } from "@bb/test-helpers";
+import { createPublicApiClient } from "@omnyo/server-contract";
+import { resolveProjectEnvCandidates } from "@omnyo/test-helpers";
 import { waitForHostConnected } from "./assertions.js";
 import { createIntegrationFetch } from "./fetch.js";
 import { isNodeError, removePathWithRetry } from "./remove-path.js";
@@ -61,8 +67,11 @@ const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../..",
 );
+
 const HARNESS_DAEMON_START_RETRY_DELAY_MS = 50;
+
 const HARNESS_DAEMON_START_MAX_ATTEMPTS = 2;
+
 const TEST_SERVER_HOST = "127.0.0.1";
 
 let loadedProjectEnvPath: string | null | undefined;
@@ -78,12 +87,14 @@ const testLogger: ServerLogger = {
 
 export interface RunningTestServer {
   sweepEnvironments(): Promise<void>;
+  pollEventSources(): Promise<void>;
   baseUrl: string;
   close(): Promise<void>;
   config: ServerRuntimeConfig;
   db: DbConnection;
   hub: NotificationHub;
   machineAuth: Awaited<ReturnType<typeof createMachineAuthService>>;
+  pendingInteractions: PendingInteractionLifecycle;
   providerRegistry: ProviderRegistryService;
 }
 
@@ -115,6 +126,7 @@ interface CreateHarnessOptions {
 export type WithHarnessCallback<T> = (
   harness: IntegrationHarness,
 ) => Promise<T>;
+
 type WithHarnessInvocation<T> = CreateHarnessOptions | WithHarnessCallback<T>;
 
 interface HarnessDaemonResources {
@@ -134,6 +146,7 @@ function requireListeningAddress(
   if (!address) {
     throw new Error("Server address was not assigned");
   }
+
   return address;
 }
 
@@ -154,16 +167,19 @@ export async function loadProjectEnvFile(): Promise<string | null> {
       await fs.access(candidate);
       process.loadEnvFile(candidate);
       loadedProjectEnvPath = candidate;
+
       return candidate;
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
         continue;
       }
+
       throw error;
     }
   }
 
   loadedProjectEnvPath = null;
+
   return loadedProjectEnvPath;
 }
 
@@ -173,6 +189,13 @@ async function startIntegrationServer(
 ): Promise<RunningTestServer> {
   const serverDataDir = path.join(tmpRoot, "server-data");
   await fs.mkdir(serverDataDir, { recursive: true });
+
+  const vault = await openServerVault({
+    dataDir: serverDataDir,
+    env: { ...process.env, OMNYO_VAULT_KEY_STORE: "key-file" },
+    logger: testLogger,
+  });
+
   const builtinSkillsRootPath = path.join(serverDataDir, "builtin-skills");
   await copyBuiltinSkills({
     skillsRootPath: resolveBuiltinSkillsRootPath(),
@@ -184,6 +207,7 @@ async function startIntegrationServer(
   const sharedPorts = new HostSharedPortCoordinator({ db, hub });
   const watchInterests = new WatchInterestCoordinator({ db, hub });
   const workspaceReadCaches = new WorkspaceReadCaches({ hub });
+
   const config: ServerRuntimeConfig = {
     appVersion: "0.0.0-dev",
     builtinSkillsRootPath,
@@ -192,13 +216,14 @@ async function startIntegrationServer(
     featureFlags: defaultFeatureFlags,
     hostDaemonPort: 3001,
     inheritedSkillsRootPaths: [],
-    marketplaceUrl: "https://marketplace.invalid/marketplace.json",
-    appUrl: "https://bb.example.test",
+    appUrl: "https://omnyo.example.test",
+    appAliasOrigins: [],
     serverPort: 0,
     sharedSkillRoots: { user: [], project: [] },
     isDevelopment: false,
     performanceDiagnosticsAvailable: false,
   };
+
   const terminalSessions = new TerminalSessionLifecycle({
     attachTimeoutMs: 50,
     config,
@@ -206,27 +231,41 @@ async function startIntegrationServer(
     hub,
     logger: testLogger,
     openTimeoutMs: 50,
+    vault,
   });
+
   const machineAuth = await createMachineAuthService({
-    dataDir: serverDataDir,
     db,
     logger: testLogger,
+    vault,
   });
+
   await machineAuth.ensureReady();
   const lifecycleDedupers = createLifecycleDedupers();
-  const bbAppManagedConfig = await createBbAppManagedConfigReloader({
+
+  const omnyoAppManagedConfig = await createOmnyoAppManagedConfigReloader({
     config,
     hub,
     logger: testLogger,
   });
+
   const telemetry = createNoopTelemetryService();
   const skillTreeRegistry = new SkillTreeRegistry();
+
+  const commandMetadata = new ServerCommandMetadata({
+    config,
+    logger: testLogger,
+  });
+
   const providerRegistry = createProviderRegistryService({});
-  await registerFirstPartyProviders(providerRegistry);
+  await registerFirstPartyProviders(providerRegistry, {
+    installationMaintenance: false,
+  });
   const pluginHostArtifacts = new PluginHostArtifactRegistry();
   await registerFakeProviders(providerRegistry, pluginHostArtifacts);
   await recordFirstPartyProviderBridgeArtifacts(pluginHostArtifacts);
   const aiServices = createAiServiceRegistry();
+
   const pendingInteractions = new PendingInteractionLifecycle({
     config,
     db,
@@ -240,33 +279,41 @@ async function startIntegrationServer(
     skillTreeRegistry,
     telemetry,
     terminalSessions,
+    vault,
   });
+
   pendingInteractions.start();
+
   const appVersion = createAppVersionService({
     installKind: null,
     sourceCommit: null,
     config,
-    logger: testLogger,
   });
+
   const appUpdate = createAppUpdateService({
     currentCommit: null,
     appSurface: "web",
-    appVersion,
     config,
     countRunningThreads: () => listRunningThreads(db).length,
+    dataDir: config.dataDir,
     launcher: null,
     logger: testLogger,
     mode: null,
     notifyChanged: () => hub.notifySystem(["app-update-changed"]),
+    stopRunningThreads: (stopArgs) =>
+      stopRunningWorkForAppUpdate(serverDeps, stopArgs),
+    setDraining: () => undefined,
   });
-  const serverDeps = {
+
+  const baseDeps: Omit<ServerAppDeps, "commandCatalogs"> = {
     appUpdate,
     appVersion,
-    bbAppManagedConfig,
+    managedAppConfig: omnyoAppManagedConfig,
     providerRegistry,
     providerNativeRoots: createProviderNativeRootsCache(),
     pluginHostArtifacts,
     aiServices,
+    commandMetadata,
     config,
     db,
     hub,
@@ -278,9 +325,14 @@ async function startIntegrationServer(
     skillTreeRegistry,
     telemetry,
     terminalSessions,
+    vault,
     watchInterests,
     workspaceReadCaches,
   };
+
+  const commandCatalogs = new ProjectCommandCatalogs(baseDeps);
+  const serverDeps: ServerAppDeps = { ...baseDeps, commandCatalogs };
+
   const { app, closeWebSockets, injectWebSocket, pluginService } = createApp(
     serverDeps,
     options.staticDir === undefined
@@ -289,6 +341,7 @@ async function startIntegrationServer(
   );
 
   let addressInfo: ListeningAddress | null = null;
+
   const server = serve(
     {
       hostname: options.bindHost ?? TEST_SERVER_HOST,
@@ -299,6 +352,7 @@ async function startIntegrationServer(
       addressInfo = { port: info.port };
     },
   );
+
   injectWebSocket(server);
 
   while (!addressInfo) {
@@ -310,14 +364,18 @@ async function startIntegrationServer(
   const baseUrl = `http://${TEST_SERVER_HOST}:${port}`;
 
   pluginService.bindSdk({ baseUrl });
+  pluginService.reconcileFrozenBoot();
+
   const builtinPlugins = new Set([
     PROJECT_CHECKOUT_BUILTIN_PLUGIN,
     ...(options.builtinPlugins ?? []),
   ]);
+
   for (const name of builtinPlugins) {
     const entry = await pluginService.install(`builtin:${name}`, {
       kind: "root",
     });
+
     if (entry.status !== "running") {
       throw new Error(
         `builtin plugin ${name} did not start: ${entry.statusDetail ?? entry.status}`,
@@ -327,23 +385,31 @@ async function startIntegrationServer(
 
   return {
     sweepEnvironments: () => sweepProviderLifecycles(serverDeps),
+    pollEventSources: () => runEventSourcePoll(serverDeps, Date.now()),
     baseUrl,
     config,
     db,
     hub,
     machineAuth,
+    pendingInteractions,
     providerRegistry,
     async close(): Promise<void> {
+      await commandCatalogs.dispose();
+      await commandMetadata.dispose();
       await pluginService.stop();
+
       const closed = new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error) {
             reject(error);
+
             return;
           }
+
           resolve();
         });
       });
+
       await closeWebSockets();
       await closed;
     },
@@ -358,10 +424,13 @@ async function startHarnessDaemon(
 
   try {
     const identity = await loadHostIdentity({ dataDir });
+
     const hostKey = await server.machineAuth.issueDaemonHostKey({
       hostId: identity.hostId,
     });
+
     await persistHostId({ dataDir, hostId: identity.hostId });
+
     const daemonApp = await createHostDaemonApp({
       dataDir,
       hostKey,
@@ -373,6 +442,7 @@ async function startHarnessDaemon(
       releaseLock,
       serverUrl: server.baseUrl,
     });
+
     for (
       let attempt = 1;
       attempt <= HARNESS_DAEMON_START_MAX_ATTEMPTS;
@@ -388,11 +458,13 @@ async function startHarnessDaemon(
         ) {
           throw error;
         }
+
         await new Promise((resolve) =>
           setTimeout(resolve, HARNESS_DAEMON_START_RETRY_DELAY_MS),
         );
       }
     }
+
     return {
       daemon: daemonApp.daemon,
       daemonApp,
@@ -409,7 +481,11 @@ export async function createIntegrationHarness(
   options: CreateHarnessOptions = {},
 ): Promise<IntegrationHarness> {
   await loadProjectEnvFile();
-  const tmpRoot = await fs.mkdtemp(path.join(tmpdir(), "bb-integration-"));
+
+  const tmpRoot = await fs.realpath(
+    await fs.mkdtemp(path.join(tmpdir(), "omnyo-integration-")),
+  );
+
   await fs.writeFile(
     path.join(tmpRoot, "parent.pid"),
     `${process.pid}\n`,
@@ -419,6 +495,7 @@ export async function createIntegrationHarness(
   const daemonDataDir = path.join(tmpRoot, "daemon-data");
   const threadStorageRootPath = path.join(daemonDataDir, "thread-storage");
   await fs.mkdir(threadStorageRootPath, { recursive: true });
+
   const repoDir = await createTestGitRepo({
     repoDir: path.join(reposRoot, "test-project"),
   });
@@ -432,14 +509,17 @@ export async function createIntegrationHarness(
     if (!server) {
       throw new Error("Server has not been started");
     }
+
     if (!harness) {
       throw new Error("Harness has not been initialized");
     }
+
     if (daemonResources) {
       return;
     }
 
     daemonResources = await startHarnessDaemon(daemonDataDir, server);
+
     if (daemonResources.hostId !== harness.hostId) {
       const mismatchedResources = daemonResources;
       daemonResources = null;
@@ -450,6 +530,7 @@ export async function createIntegrationHarness(
         `Restarted daemon host ID ${mismatchedResources.hostId} did not match existing harness host ID ${harness.hostId}`,
       );
     }
+
     harness.daemonApp = daemonResources.daemonApp;
     harness.hostId = daemonResources.hostId;
     await waitForHostConnected(harness.api);
@@ -461,6 +542,7 @@ export async function createIntegrationHarness(
     if (!daemonResources) {
       return;
     }
+
     const currentResources = daemonResources;
     daemonResources = null;
     await currentResources.daemon.shutdown(reason, 0);
@@ -475,6 +557,7 @@ export async function createIntegrationHarness(
     if (!daemonResources) {
       return;
     }
+
     const currentResources = daemonResources;
     daemonResources = null;
     await currentResources.daemonApp.connection
@@ -492,6 +575,7 @@ export async function createIntegrationHarness(
     if (cleanedUp) {
       return;
     }
+
     cleanedUp = true;
 
     await shutdownDaemon("integration-cleanup").catch(() => undefined);
@@ -501,9 +585,11 @@ export async function createIntegrationHarness(
 
   try {
     server = await startIntegrationServer(tmpRoot, options);
+
     const api = createPublicApiClient(server.baseUrl, {
       fetch: createIntegrationFetch(),
     });
+
     daemonResources = await startHarnessDaemon(daemonDataDir, server);
     await waitForHostConnected(api);
     await persistHostId({
@@ -545,11 +631,13 @@ export async function withHarness<T>(
 ): Promise<T> {
   const options = typeof arg1 === "function" ? {} : arg1;
   const run = typeof arg1 === "function" ? arg1 : arg2;
+
   if (!run) {
     throw new Error("withHarness requires a callback");
   }
 
   const harness = await createIntegrationHarness(options);
+
   try {
     return await run(harness);
   } finally {

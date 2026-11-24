@@ -1,25 +1,30 @@
-import { renderTemplate } from "@bb/templates";
-import { getThread, updateThread } from "@bb/db";
+import { renderTemplate } from "@omnyo/templates";
+import { getThread, updateThread } from "@omnyo/db";
 import {
   removeCommandMentionsFromPromptInput,
   type PromptInput,
   type PromptMentionCommandTrigger,
   type Thread,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   countWords,
   displayWidth,
   truncateToWidth,
   truncateToWidthAtWordBoundary,
-} from "@bb/text-utils";
+} from "@omnyo/text-utils";
 import type { AppDeps, LoggedWorkSessionDeps } from "../../types.js";
 import { runTextAiTask } from "../ai/ai-tasks.js";
 
 const MIN_TITLE_GENERATION_WORDS = 5;
+
 const MAX_GENERATED_TITLE_WIDTH = 48;
+
 const MAX_TITLE_FALLBACK_WIDTH = 80;
+
 const MAX_TITLE_PROMPT_WIDTH = 4000;
+
 const ELLIPSIS = "...";
+
 const MAX_BRANCH_SLUG_LENGTH = 48;
 
 interface ApplyGeneratedThreadTitleArgs {
@@ -62,15 +67,19 @@ function clampToWidth(text: string, maxWidth: number): string {
   if (displayWidth(text) <= maxWidth) {
     return text;
   }
+
   const body = truncateToWidth(text, maxWidth - ELLIPSIS.length);
+
   return `${body}${ELLIPSIS}`;
 }
 
 export function deriveTitleFallback(input: PromptInput[]): string | null {
   const text = cleanPromptText(input);
+
   if (text.length === 0) {
     return null;
   }
+
   return clampToWidth(text, MAX_TITLE_FALLBACK_WIDTH);
 }
 
@@ -80,13 +89,17 @@ export function deriveForkTitle(
   source: Pick<Thread, "title" | "titleFallback">,
 ): string | null {
   const sourceTitle = source.title?.trim() || source.titleFallback?.trim();
+
   if (!sourceTitle) {
     return null;
   }
+
   const numbered = FORK_TITLE_PATTERN.exec(sourceTitle);
+
   if (numbered === null) {
     return `(1) ${sourceTitle}`;
   }
+
   return `(${BigInt(numbered[1]) + 1n}) ${numbered[2]}`;
 }
 
@@ -99,18 +112,23 @@ export function collectInvokedPromptCommands(
   input: PromptInput[],
 ): InvokedPromptCommand[] {
   const seen = new Set<string>();
+
   return input.flatMap((part) =>
     part.type === "text"
       ? part.mentions.flatMap((mention) => {
           if (mention.resource.kind !== "command") {
             return [];
           }
+
           const { name, trigger } = mention.resource;
           const key = `${trigger}${name}`;
+
           if (seen.has(key)) {
             return [];
           }
+
           seen.add(key);
+
           return [{ name, trigger }];
         })
       : [],
@@ -138,6 +156,7 @@ function formatInvokedCommands(commands: InvokedPromptCommand[]): string {
 
 export function shouldGenerateThreadTitle(input: PromptInput[]): boolean {
   const text = cleanPromptText(input);
+
   if (text.length === 0) {
     return false;
   }
@@ -151,10 +170,12 @@ export function shouldGenerateThreadTitle(input: PromptInput[]): boolean {
 
 export function sanitizeGeneratedTitle(value: string): string | null {
   const normalized = value.trim().replace(/\s+/gu, " ");
+
   const title = truncateToWidthAtWordBoundary(
     normalized,
     MAX_GENERATED_TITLE_WIDTH,
   ).trim();
+
   return title.length > 0 ? title : null;
 }
 
@@ -173,11 +194,14 @@ export function sanitizeGeneratedBranchSlug(value: string): string | null {
 
 export function buildThreadTitlePrompt(input: PromptInput[]): string | null {
   const text = cleanPromptText(input);
+
   if (!text) {
     return null;
   }
+
   const commands = collectInvokedPromptCommands(input);
   const body = promptTextWithoutCommands(input, commands);
+
   return renderTemplate("generateThreadMetadata", {
     cleanedPrompt: clampToWidth(
       body.length > 0 ? body : text,
@@ -194,6 +218,7 @@ export async function generateThreadMetadataWithOutcome(
   args: ThreadMetadataGenerationArgs,
 ): Promise<ThreadMetadataGenerationOutcome> {
   const startedAt = Date.now();
+
   const complete = (
     metadata: GeneratedThreadMetadata | null,
     reason?: ThreadMetadataGenerationOutcomeReason,
@@ -204,9 +229,11 @@ export async function generateThreadMetadataWithOutcome(
   });
 
   const prompt = buildThreadTitlePrompt(args.input);
+
   if (prompt === null) {
     return complete(null, "empty-input");
   }
+
   if (!shouldGenerateThreadTitle(args.input)) {
     return complete(null, "too-short");
   }
@@ -217,6 +244,7 @@ export async function generateThreadMetadataWithOutcome(
     logContext: { threadId: args.threadId },
     prompt,
   });
+
   if (!outcome.ok) {
     return complete(
       null,
@@ -227,7 +255,9 @@ export async function generateThreadMetadataWithOutcome(
           : "inference-unavailable",
     );
   }
+
   const title = sanitizeGeneratedTitle(outcome.value);
+
   return title === null ? complete(null, "failed") : complete({ title });
 }
 
@@ -236,11 +266,13 @@ export function applyGeneratedThreadTitle(
   args: ApplyGeneratedThreadTitleArgs,
 ): boolean {
   const title = args.title.trim();
+
   if (title.length === 0) {
     return false;
   }
 
   const currentThread = getThread(deps.db, args.threadId);
+
   if (!currentThread || currentThread.title) {
     return false;
   }

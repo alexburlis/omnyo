@@ -2,7 +2,7 @@ import type {
   ThreadEvent,
   ThreadEventFileChange,
   ThreadEventItemPresentation,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   itemStatusToApprovalStatus,
   itemStatusToExecStatus,
@@ -42,6 +42,7 @@ interface FileEditChangesPartial extends FileEditPartialBase {
   changes: EventProjectionFileEditChange[];
   approvalStatus: EventProjectionApprovalLifecycleStatus | null;
   status: FileEditStatus;
+  stderr?: string;
   presentation?: ThreadEventItemPresentation;
 }
 
@@ -53,8 +54,10 @@ export function parseFileEditFromItemEvent(
 ): FileEditPartial | null {
   const parentToolCallId =
     parentToolCallIdOverride ?? getEventParentToolCallId(decoded);
+
   if (decoded.type === "item/fileChange/outputDelta") {
     const callId = decoded.itemId;
+
     if (!callId) return null;
 
     return {
@@ -69,9 +72,11 @@ export function parseFileEditFromItemEvent(
   if (decoded.type !== "item/started" && decoded.type !== "item/completed") {
     return null;
   }
+
   if (decoded.item.type !== "fileChange") return null;
 
   const callId = decoded.item.id;
+
   if (!callId) return null;
 
   const changes = mapFileChanges(decoded.item.changes);
@@ -81,6 +86,7 @@ export function parseFileEditFromItemEvent(
     changes,
     approvalStatus: itemStatusToApprovalStatus(decoded.item.approvalStatus),
     status: itemStatusToExecStatus(decoded.item.status),
+    ...(decoded.item.error ? { stderr: decoded.item.error } : {}),
     ...(decoded.item.presentation
       ? { presentation: decoded.item.presentation }
       : {}),

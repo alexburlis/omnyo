@@ -1,5 +1,5 @@
-import { archiveThread } from "@bb/db";
-import { threadSearchResponseSchema } from "@bb/server-contract";
+import { archiveThread } from "@omnyo/db";
+import { threadSearchResponseSchema } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { readJson } from "../helpers/json.js";
 import {
@@ -13,32 +13,39 @@ describe("public thread search route", () => {
   it("returns active and archived search result groups", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const activeThread = seedThread(harness.deps, {
         projectId: project.id,
         title: "routeactive",
         titleFallback: "routeactive",
       });
+
       const archivedThread = seedThread(harness.deps, {
         projectId: project.id,
         title: "routearchived",
         titleFallback: "routearchived",
       });
+
       archiveThread(harness.deps.db, harness.deps.hub, archivedThread.id);
+
       const hiddenThread = seedThread(harness.deps, {
         projectId: project.id,
         title: "routehidden",
         titleFallback: "routehidden",
         visibility: "hidden",
       });
+
       const hiddenArchivedThread = seedThread(harness.deps, {
         projectId: project.id,
         title: "routehiddenarchived",
         titleFallback: "routehiddenarchived",
         visibility: "hidden",
       });
+
       archiveThread(harness.deps.db, harness.deps.hub, hiddenArchivedThread.id);
 
       const response = await harness.app.request(
@@ -71,16 +78,19 @@ describe("public thread search route", () => {
       const missingQueryResponse = await harness.app.request(
         "/api/v1/threads/search",
       );
+
       expect(missingQueryResponse.status).toBe(400);
 
       const shortQueryResponse = await harness.app.request(
         "/api/v1/threads/search?query=x",
       );
+
       expect(shortQueryResponse.status).toBe(400);
 
       const badLimitResponse = await harness.app.request(
         "/api/v1/threads/search?query=valid&limitPerGroup=bad",
       );
+
       expect(badLimitResponse.status).toBe(400);
     });
   });

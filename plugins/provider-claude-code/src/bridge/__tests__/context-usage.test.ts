@@ -9,6 +9,7 @@ const metadata = {
   providerSessionId: "session-1",
   providerTurnId: null,
 };
+
 const report = {
   totalTokens: 1_000,
   rawMaxTokens: 10_000,
@@ -30,9 +31,11 @@ const report = {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((done) => {
     resolve = done;
   });
+
   return { promise, resolve };
 }
 
@@ -87,6 +90,7 @@ describe("Claude context usage normalization", () => {
       },
       metadata,
     );
+
     expect(snapshot.categories[0].entries).toEqual([]);
   });
 
@@ -106,6 +110,7 @@ describe("Claude context usage normalization", () => {
       },
       metadata,
     );
+
     expect(
       snapshot.categories.map((category) =>
         category.entries.map((entry) => entry.tokens),
@@ -143,12 +148,14 @@ describe("Claude context usage capture", () => {
     const collector = new ClaudeContextUsageCollector();
     const pending = deferred<unknown>();
     const publish = vi.fn();
+
     const capture = collector.capture({
       read: () => pending.promise,
       isCurrent: () => true,
       publish,
       providerSessionId: "session-1",
     });
+
     collector.invalidate();
     pending.resolve(report);
     await capture;
@@ -162,12 +169,14 @@ describe("Claude context usage capture", () => {
     const collector = new ClaudeContextUsageCollector();
     const pending = deferred<unknown>();
     const publish = vi.fn();
+
     const capture = collector.capture({
       read: () => pending.promise,
       isCurrent: () => true,
       publish,
       providerSessionId: "session-1",
     });
+
     collector.invalidateCapacity();
     pending.resolve(report);
     await capture;
@@ -178,11 +187,13 @@ describe("Claude context usage capture", () => {
     const collector = new ClaudeContextUsageCollector();
     const pending = deferred<unknown>();
     const publish = vi.fn();
+
     const args = {
       isCurrent: () => true,
       publish,
       providerSessionId: "session-1",
     };
+
     const first = collector.capture({ ...args, read: () => pending.promise });
     await collector.capture({
       ...args,
@@ -205,14 +216,27 @@ describe("Claude context usage capture", () => {
     const collector = new ClaudeContextUsageCollector();
     const pending = deferred<unknown>();
     const publish = vi.fn();
+
     const args = {
       isCurrent: () => true,
       publish,
       providerSessionId: "session-1",
     };
-    const capture = collector.capture({ ...args, read: () => pending.promise });
+
+    let readSignal: AbortSignal | undefined;
+
+    const capture = collector.capture({
+      ...args,
+      read: (signal) => {
+        readSignal = signal;
+
+        return pending.promise;
+      },
+    });
+
     await vi.advanceTimersByTimeAsync(5_000);
     await capture;
+    expect(readSignal?.aborted).toBe(true);
     pending.resolve(report);
     await collector.capture({
       ...args,

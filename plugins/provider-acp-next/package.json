@@ -1,15 +1,24 @@
 {
-  "name": "bb-plugin-bb--provider-acp-next",
+  "name": "omnyo-plugin-omnyo--provider-acp-next",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Preview of the rebuilt ACP adapter for bb threads with ACP agents.",
-  "engines": {
-    "bb": ">=0.0",
-    "bbPluginSdk": ">=0.4.90"
+  "description": "Preview of the rebuilt ACP adapter for Omnyo threads with ACP agents.",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
   },
-  "bb": {
-    "name": "ACP providers (new adapter)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git#b9084d150d7e9e956f15f13cb06e058b042b9f25",
+    "directory": "plugins/provider-acp-next"
+  },
+  "engines": {
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.4.90 >=0.6.44"
+  },
+  "omnyo": {
+    "name": "ACP Providers (New Adapter)",
     "description": "Preview of the rebuilt ACP adapter. Turning it on turns ACP providers off.",
     "branding": {
       "icon": "./icons/acp.svg",
@@ -91,19 +100,22 @@
         "id": "acp-hermes-agent",
         "displayName": "Hermes"
       }
+    ],
+    "skills": [
+      "skills"
     ]
   },
   "keywords": [
-    "bb-plugin"
+    "omnyo-plugin"
   ],
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
-    "prepare:bundled": "bb-plugin-build prepare-bundled"
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
   },
   "devDependencies": {
-    "@bb/plugin-build": "workspace:*",
+    "@omnyo/plugin-build": "workspace:*",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/better-sqlite3": "^7.6.12",
@@ -112,18 +124,18 @@
     "@types/react-dom": "^19.0.0",
     "better-sqlite3": "12.10.0",
     "cron-parser": "^5.5.0",
-    "hono": "4.11.9",
+    "hono": "4.13.18",
     "jsdom": "^29.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^4.1.1"
+    "vitest": "4.1.11"
   },
   "dependencies": {
-    "@bb/shared-ui": "workspace:*",
-    "@get-bb/plugin-sdk": "workspace:*",
-    "smol-toml": "^1.7.1",
+    "@omnyo/shared-ui": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
+    "smol-toml": "^1.9.1",
     "yaml": "^2.9.0",
     "zod": "^4.3.6"
   }

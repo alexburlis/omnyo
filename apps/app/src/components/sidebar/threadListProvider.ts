@@ -13,6 +13,7 @@ export const threadListProviderAtom = createSyncedPreferenceAtom(
 export function useThreadListReplacement(): ResolvedReplacement<PluginThreadListSlot> {
   const { threadLists } = usePluginSlots();
   const preference = useAtomValue(threadListProviderAtom);
+
   return resolvePreferredReplacement(
     threadLists,
     preference,

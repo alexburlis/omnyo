@@ -4,27 +4,58 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
+  render as renderWithoutClient,
   screen,
   waitFor,
 } from "@testing-library/react";
-import { defaultAppSettings } from "@bb/domain";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
+import { createStore, Provider as JotaiProvider, useAtomValue } from "jotai";
+import { wsManager } from "@/lib/ws";
+import { splitLayoutAtom } from "@/lib/split-layout/atoms";
+import { defaultAppSettings } from "@omnyo/domain";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@omnyo/shared-ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@omnyo/shared-ui/tooltip";
 import { createPortal } from "react-dom";
 import {
   resetPluginSlotStoreForTest,
   setPluginSlotRegistrations,
 } from "@/lib/plugin-slots";
+import {
+  markPluginFrontendsSettled,
+  resetPluginFrontendBootStateForTest,
+} from "@/lib/plugin-frontend-boot-state";
 import { resetAllCrashedPluginSlotsForTest } from "@/components/plugin/PluginSlotMount";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import {
+  useEffect,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import { Link, MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppCommandProvider } from "@/components/commands/AppCommandProvider";
 import { AppLayout } from "./AppLayout";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import {
+  sidebarScopeAtom,
+  useSidebarScope,
+} from "@/components/sidebar/sidebarScope";
 import { setCompactSecondaryPanelPresentation } from "@/components/ui/secondary-panel-shelf-visibility";
+import { beginSplitDrag } from "@/lib/split-drag";
+
+function render(ui: ReactNode) {
+  const { wrapper } = createQueryClientTestHarness();
+
+  return renderWithoutClient(ui, { wrapper });
+}
 
 const useThreadDetailBootstrapMock = vi.hoisted(() =>
   vi.fn(
@@ -36,17 +67,23 @@ const useThreadDetailBootstrapMock = vi.hoisted(() =>
   ),
 );
 
-const SIDEBAR_WIDTH_STORAGE_KEY = "bb.sidebar.width";
-const SIDEBAR_OPEN_STORAGE_KEY = "bb.sidebar.open";
+const SIDEBAR_WIDTH_STORAGE_KEY = "omnyo.sidebar.width";
+
+const SIDEBAR_OPEN_STORAGE_KEY = "omnyo.sidebar.open";
+
 const APP_ROUTE = "/projects/proj_one/threads/thr_one?message=12#event-12";
+
 const SETTINGS_ROUTE = "/settings/providers/codex?tab=models#preferred";
+
 const PLUGINS_ROUTE = "/plugins/ui-patterns?tab=settings#source";
+
 const SECONDARY_ROUTES = [SETTINGS_ROUTE, PLUGINS_ROUTE];
 
 vi.mock("./AppLayoutSidebar", async () => {
   const { Sidebar } = await vi.importActual<
     typeof import("@/components/ui/sidebar")
   >("@/components/ui/sidebar");
+
   return {
     AppLayoutSidebar: ({
       onResizeMouseDown,
@@ -60,6 +97,22 @@ vi.mock("./AppLayoutSidebar", async () => {
     ),
   };
 });
+
+vi.mock("./AppFooter", () => ({
+  AppFooter: ({
+    isSettingsActive,
+    settingsToggleRoutePath,
+  }: {
+    isSettingsActive: boolean;
+    settingsToggleRoutePath: string;
+  }) => (
+    <footer
+      data-testid="app-footer"
+      data-settings-active={isSettingsActive}
+      data-settings-route={settingsToggleRoutePath}
+    />
+  ),
+}));
 
 vi.mock("@/hooks/queries/system-queries", () => ({
   useSystemConfig: () => ({
@@ -117,17 +170,18 @@ vi.mock("./AppPageHeader", () => ({
   AppPageHeader: () => <header />,
 }));
 
-vi.mock("@/lib/bb-desktop", () => ({
+vi.mock("@/lib/omnyo-desktop", () => ({
   BROWSER_SIDEBAR_TRIGGER_INSET_CLASS: "",
   CHROME_ROW_CLASS: "",
   DEFAULT_DESKTOP_WINDOW_STATE: { isFullScreen: false },
+  MACOS_APP_REGION_NO_DRAG_CLASS: "",
   MACOS_CHROME_CONTROL_AXIS_CLASS: "",
   MACOS_CHROME_CONTROL_NO_DRAG_CLASS: "",
   MACOS_TRAFFIC_LIGHT_RESERVE_OFFSET_CLASS: "",
   MACOS_TRAFFIC_LIGHT_RESERVE_PADDING_CLASS: "",
   MACOS_WINDOW_DRAG_CLASS: "",
   MACOS_WINDOW_NO_DRAG_CLASS: "",
-  getBbDesktopInfo: () => null,
+  getOmnyoDesktopInfo: () => null,
   shouldReserveMacosTrafficLights: () => false,
   shouldUseMacosDesktopChrome: () => false,
 }));
@@ -150,6 +204,7 @@ vi.mock("@/hooks/useQuickCreateProject", () => ({
 vi.mock("@/hooks/queries/sidebar-navigation-query", () => ({
   useSidebarNavigation: () => ({
     data: {
+      orderedProjectIds: ["proj_personal"],
       sections: [
         { id: "sec_planning", name: "Planning" },
         { id: "sec_building", name: "Building" },
@@ -172,6 +227,8 @@ vi.mock("@/hooks/queries/sidebar-navigation-query", () => ({
 }));
 
 vi.mock("@/hooks/queries/thread-queries", () => ({
+  useArchivedThreads: () => ({ data: undefined }),
+  useShelvedThreads: () => ({ data: undefined }),
   didThreadDetailBootstrapRefreshAfterMount: () => true,
   useThread: () => ({ data: undefined }),
   useThreadDetailBootstrap: useThreadDetailBootstrapMock,
@@ -180,17 +237,27 @@ vi.mock("@/hooks/queries/thread-queries", () => ({
 
 function widthVar(element: Element | null): string {
   if (!(element instanceof HTMLElement)) throw new Error("missing element");
+
   return element.style.getPropertyValue("--sidebar-width");
 }
 
 function getRoot(): HTMLElement {
   const root = document.querySelector('[data-testid="app-layout-root"]');
+
   if (!(root instanceof HTMLElement)) throw new Error("missing app root");
+
   return root;
+}
+
+function SplitLayoutState() {
+  const layout = useAtomValue(splitLayoutAtom);
+
+  return <div data-testid="split-layout">{JSON.stringify(layout)}</div>;
 }
 
 function RouteContent() {
   const location = useLocation();
+
   return (
     <>
       <div data-testid="location">
@@ -207,8 +274,8 @@ function RouteContent() {
   );
 }
 
-function renderLayout(initialPath = "/", children: ReactNode = null) {
-  return render(
+function layoutTree(initialPath: string, children: ReactNode) {
+  return (
     <MemoryRouter initialEntries={[initialPath]}>
       <AppCommandProvider>
         <AppLayout>
@@ -216,8 +283,12 @@ function renderLayout(initialPath = "/", children: ReactNode = null) {
           {children}
         </AppLayout>
       </AppCommandProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderLayout(initialPath = "/", children: ReactNode = null) {
+  return render(layoutTree(initialPath, children));
 }
 
 beforeEach(() => {
@@ -240,7 +311,91 @@ afterEach(() => {
   window.sessionStorage.clear();
 });
 
+describe("thread-open focus", () => {
+  it.each([APP_ROUTE, SETTINGS_ROUTE, PLUGINS_ROUTE])(
+    "keeps the current route and split layout when a preview arrives on %s",
+    (route) => {
+      const subscribe = vi.spyOn(wsManager, "onThreadOpen");
+      renderLayout(route, <SplitLayoutState />);
+      const onThreadOpen = subscribe.mock.calls[0]?.[0];
+
+      if (!onThreadOpen) throw new Error("missing thread-open listener");
+      const layoutBefore = screen.getByTestId("split-layout").textContent;
+
+      act(() => {
+        onThreadOpen({
+          type: "thread-open",
+          projectId: "proj_other",
+          threadId: "thr_other",
+          split: "right",
+          file: {
+            source: "workspace",
+            path: "preview.html",
+            lineNumber: null,
+          },
+        });
+      });
+
+      expect(screen.getByTestId("location").textContent).toBe(route);
+      expect(screen.getByTestId("split-layout").textContent).toBe(layoutBefore);
+    },
+  );
+
+  it("navigates for an explicit thread open without a preview", () => {
+    const subscribe = vi.spyOn(wsManager, "onThreadOpen");
+    renderLayout(APP_ROUTE, <SplitLayoutState />);
+    const onThreadOpen = subscribe.mock.calls[0]?.[0];
+
+    if (!onThreadOpen) throw new Error("missing thread-open listener");
+
+    act(() => {
+      onThreadOpen({
+        type: "thread-open",
+        projectId: "proj_other",
+        threadId: "thr_other",
+        split: "replace",
+        file: null,
+      });
+    });
+
+    expect(screen.getByTestId("location").textContent).toBe(
+      "/projects/proj_other/threads/thr_other",
+    );
+    expect(screen.getByTestId("split-layout").textContent).toContain(
+      "thr_other",
+    );
+  });
+});
+
 describe("canonical thread routes", () => {
+  it("keeps the layout mounted while redirecting to the thread's project route", async () => {
+    let mounts = 0;
+
+    function MountCounter() {
+      useEffect(() => {
+        mounts += 1;
+      }, []);
+
+      return null;
+    }
+
+    const view = renderLayout("/threads/thr_one", <MountCounter />);
+    useThreadDetailBootstrapMock.mockReturnValue({
+      data: { projectId: "proj_actual" },
+      isError: false,
+      isSuccess: true,
+    });
+
+    view.rerender(layoutTree("/threads/thr_one", <MountCounter />));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe(
+        "/projects/proj_actual/threads/thr_one",
+      ),
+    );
+    expect(mounts).toBe(1);
+  });
+
   it.each([
     [
       "/threads/thr_one?message=12#event-12",
@@ -303,18 +458,146 @@ describe("mobile workspace sidebar access", () => {
       expect(toggle.getAttribute("aria-expanded")).toBe("false");
       fireEvent.click(toggle);
       await waitFor(() =>
-        expect(toggle.getAttribute("aria-expanded")).toBe("true"),
+        expect(
+          screen.queryByRole("button", { name: /^Toggle sidebar/ }),
+        ).toBeNull(),
       );
-      fireEvent.click(toggle);
+      fireEvent.click(screen.getByTestId("sidebar-mobile-backdrop"));
       await waitFor(() =>
-        expect(toggle.getAttribute("aria-expanded")).toBe("false"),
+        expect(
+          screen
+            .getByRole("button", { name: /^Toggle sidebar/ })
+            .getAttribute("aria-expanded"),
+        ).toBe("false"),
       );
       expect(getRoot().hasAttribute("inert")).toBe(false);
     },
   );
 });
 
+describe("phone launch", () => {
+  const THREAD_ROUTE = "/projects/proj_one/threads/thr_one";
+
+  function SidebarScopeProbe() {
+    return <div data-testid="sidebar-scope">{useSidebarScope().kind}</div>;
+  }
+
+  function renderLaunch(route: string, isCompactViewport: boolean) {
+    const store = createStore();
+    store.set(sidebarScopeAtom, {
+      kind: "project",
+      projectId: "proj_personal",
+    });
+
+    return render(
+      <JotaiProvider store={store}>
+        <CompactViewportOverrideProvider isCompactViewport={isCompactViewport}>
+          {layoutTree(
+            route,
+            <>
+              <SidebarScopeProbe />
+              <Link to={THREAD_ROUTE}>Open thread</Link>
+              <Link to="/">New chat</Link>
+            </>,
+          )}
+        </CompactViewportOverrideProvider>
+      </JotaiProvider>,
+    );
+  }
+
+  function sidebarToggle() {
+    return screen.getByRole("button", { name: /^Toggle sidebar/ });
+  }
+
+  it("opens the drawer on the Inbox from the first render at the bare root", () => {
+    renderLaunch("/", true);
+
+    expect(
+      screen.getByTestId("sidebar-mobile-backdrop").getAttribute("data-state"),
+    ).toBe("open");
+    expect(
+      screen.queryByRole("button", { name: /^Toggle sidebar/ }),
+    ).toBeNull();
+    expect(screen.getByTestId("sidebar-scope").textContent).toBe("inbox");
+  });
+
+  it.each(["/?initialPrompt=Hello", THREAD_ROUTE])(
+    "keeps the drawer closed and the stored scope when launching at %s",
+    (route) => {
+      renderLaunch(route, true);
+
+      expect(sidebarToggle().getAttribute("aria-expanded")).toBe("false");
+      expect(screen.getByTestId("sidebar-scope").textContent).toBe("project");
+    },
+  );
+
+  it("leaves a desktop launch at the bare root unchanged", () => {
+    renderLaunch("/", false);
+
+    expect(screen.getByTestId("sidebar-scope").textContent).toBe("project");
+    expect(
+      document.querySelector(
+        '[data-sidebar-mobile-backdrop][data-state="open"]',
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps the drawer closed when New chat later returns to the root", async () => {
+    renderLaunch("/", true);
+
+    fireEvent.click(screen.getByTestId("sidebar-mobile-backdrop"));
+    await waitFor(() =>
+      expect(sidebarToggle().getAttribute("aria-expanded")).toBe("false"),
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Open thread" }));
+    expect(screen.getByTestId("location").textContent).toBe(THREAD_ROUTE);
+    fireEvent.click(screen.getByRole("link", { name: "New chat" }));
+    expect(screen.getByTestId("location").textContent).toBe("/");
+
+    expect(sidebarToggle().getAttribute("aria-expanded")).toBe("false");
+    expect(
+      screen.getByTestId("sidebar-mobile-backdrop").getAttribute("data-state"),
+    ).toBe("closed");
+  });
+});
+
 describe("AppLayout Back to app", () => {
+  it.each(SECONDARY_ROUTES)(
+    "keeps %s open when a split drag cancels sidebar reordering",
+    (route) => {
+      renderLayout(route);
+      const originalElementsFromPoint = document.elementsFromPoint;
+      document.elementsFromPoint = () => [];
+      const onEnd = vi.fn();
+
+      try {
+        beginSplitDrag({
+          ghostLabel: "Panel tab",
+          cancelSidebarReorderOnEngage: true,
+          shouldEngage: () => true,
+          decide: () => null,
+          onDrop: vi.fn(),
+          onEnd,
+        });
+        fireEvent.pointerMove(window, { clientX: 500, clientY: 300 });
+        expect(screen.getByTestId("location").textContent).toBe(route);
+        expect(document.body.style.cursor).toBe("grabbing");
+
+        fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
+        expect(onEnd).toHaveBeenCalledWith({ dropped: false });
+        expect(screen.getByTestId("location").textContent).toBe(route);
+
+        fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
+        expect(screen.getByTestId("location").textContent).toBe("/");
+      } finally {
+        fireEvent.pointerCancel(window);
+        fireEvent.click(document.body);
+        document.elementsFromPoint = originalElementsFromPoint;
+      }
+    },
+  );
+
   it.each(SECONDARY_ROUTES)(
     "returns from %s with the remembered query and hash, then releases Escape",
     (route) => {
@@ -417,7 +700,9 @@ describe("AppLayout Back to app", () => {
 describe("AppLayout sidebar state is scoped to this tab", () => {
   function sidebarRoot() {
     const gap = document.querySelector('[data-sidebar="gap"]');
+
     if (!gap?.parentElement) throw new Error("missing sidebar");
+
     return gap.parentElement;
   }
 
@@ -455,6 +740,30 @@ describe("AppLayout sidebar state is scoped to this tab", () => {
   });
 });
 
+describe("AppLayout app footer", () => {
+  it("renders the app footer inside the app root after the content, with the settings route", () => {
+    renderLayout(APP_ROUTE);
+
+    const root = getRoot();
+    const footer = screen.getByTestId("app-footer");
+    const inset = document.querySelector('[data-sidebar="inset"]');
+
+    expect(root.contains(footer)).toBe(true);
+    expect(inset?.contains(footer)).toBe(false);
+    expect(
+      (inset?.compareDocumentPosition(footer) ?? 0) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(footer.dataset.settingsActive).toBe("false");
+
+    fireEvent.click(screen.getByRole("link", { name: SETTINGS_ROUTE }));
+
+    expect(screen.getByTestId("app-footer").dataset.settingsActive).toBe(
+      "true",
+    );
+  });
+});
+
 describe("AppLayout sidebar resize drag", () => {
   let frameCallbacks: FrameRequestCallback[];
 
@@ -462,6 +771,7 @@ describe("AppLayout sidebar resize drag", () => {
     frameCallbacks = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
       frameCallbacks.push(cb);
+
       return frameCallbacks.length;
     });
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
@@ -508,6 +818,7 @@ describe("AppLayout sidebar resize drag", () => {
     const rootStyleBefore = root.getAttribute("style");
 
     const handle = document.querySelector('[data-testid="resize-handle"]');
+
     if (!handle) throw new Error("missing handle");
     act(() => {
       fireEvent.mouseDown(handle, { clientX: 320 });
@@ -544,6 +855,7 @@ describe("AppLayout sidebar resize drag", () => {
     ).toBeNull();
 
     const handle = document.querySelector('[data-testid="resize-handle"]');
+
     if (!handle) throw new Error("missing handle");
     act(() => {
       fireEvent.mouseDown(handle, { clientX: 320 });
@@ -552,6 +864,7 @@ describe("AppLayout sidebar resize drag", () => {
     const overlay = document.querySelector(
       '[data-testid="iframe-drag-guard-overlay"]',
     );
+
     if (!overlay) throw new Error("overlay did not mount");
     expect(overlay.className).toContain("cursor-col-resize");
     expect(
@@ -569,11 +882,20 @@ describe("AppLayout sidebar resize drag", () => {
 });
 
 describe("AppLayout plugin overlay contexts", () => {
+  beforeEach(() => {
+    markPluginFrontendsSettled();
+  });
+
+  afterEach(() => {
+    resetPluginFrontendBootStateForTest();
+  });
+
   it.each([false, true])(
     "provides host tooltips to an overlay (portal: %s)",
     async (portaled) => {
       const errors = vi.spyOn(console, "error").mockImplementation(() => {});
       const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+
       function Overlay() {
         const content = (
           <Tooltip open>
@@ -581,8 +903,10 @@ describe("AppLayout plugin overlay contexts", () => {
             <TooltipContent>Overlay tooltip</TooltipContent>
           </Tooltip>
         );
+
         return portaled ? createPortal(content, document.body) : content;
       }
+
       setPluginSlotRegistrations(
         "tooltip-overlay",
         makePluginRegistrationSet({
@@ -599,9 +923,11 @@ describe("AppLayout plugin overlay contexts", () => {
       );
 
       expect(screen.getByRole("button", { name: "Page action" })).toBeDefined();
+
       const overlayHost = document.querySelector(
-        "[data-bb-plugin-app-overlays]",
+        "[data-omnyo-plugin-app-overlays]",
       );
+
       expect(overlayHost).not.toBeNull();
       expect(overlayHost?.parentElement).toBe(getRoot().parentElement);
       expect(getRoot().contains(overlayHost)).toBe(false);
@@ -609,14 +935,16 @@ describe("AppLayout plugin overlay contexts", () => {
       expect(
         screen.getByRole("button", { name: "Overlay action" }),
       ).toBeDefined();
-      expect((await screen.findByRole("tooltip")).textContent).toBe(
-        "Overlay tooltip",
-      );
+      expect(
+        (await screen.findByRole("tooltip", { hidden: true })).textContent,
+      ).toBe("Overlay tooltip");
       fireEvent.click(screen.getByRole("link", { name: SETTINGS_ROUTE }));
       expect(
         screen.getByRole("button", { name: "Overlay action" }),
       ).toBeDefined();
-      expect(screen.getByRole("tooltip").textContent).toBe("Overlay tooltip");
+      expect(screen.getByRole("tooltip", { hidden: true }).textContent).toBe(
+        "Overlay tooltip",
+      );
       expect(errors).not.toHaveBeenCalled();
       expect(warnings).not.toHaveBeenCalled();
     },

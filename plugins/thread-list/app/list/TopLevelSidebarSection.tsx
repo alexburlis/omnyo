@@ -9,12 +9,12 @@ import {
 } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/icon";
-import { LIST_HOVER_TRANSITION } from "@/components/ui/motion";
-import { CHROME_SECTION_LABEL_CLASS } from "@/components/ui/chrome-style-tokens";
 import {
-  SidebarStickyGroup,
-  SidebarStickyTier,
-} from "../ui/sidebar.js";
+  DISCLOSURE_CHEVRON_TRANSITION,
+  LIST_HOVER_TRANSITION,
+} from "@/components/ui/motion";
+import { SECTION_COUNT_CLASS } from "@/components/ui/section-header";
+import { SidebarStickyGroup, SidebarStickyTier } from "../ui/sidebar.js";
 import {
   SIDEBAR_HOVER_ACTIONS_CLASS,
   SIDEBAR_HOVER_ACTIONS_FADE_CLASS,
@@ -26,7 +26,6 @@ import type { ConsumeDragClickSuppression } from "@/components/ui/use-drag-click
 import {
   SIDEBAR_STANDARD_ROW_PADDING_CLASS,
   SIDEBAR_CONTROL_STATE_CLASS,
-  SIDEBAR_GROUP_TEXT_CLASS,
 } from "@/components/ui/sidebar-row-classes";
 import {
   SectionDropTargetOverlay,
@@ -45,6 +44,9 @@ import {
 import { SplitPaneMiniMap } from "../rows/SplitPaneMiniMap.js";
 import { COARSE_POINTER_ROW_ACTION_SIZE_CLASS } from "@/components/ui/coarse-pointer-sizing";
 import { usePluginThreadRowStatusForThreads } from "./groupRollups.js";
+
+const SECTION_LABEL_CLASS =
+  "text-xs leading-5 font-semibold text-muted-foreground";
 
 const EMPTY_SPLIT_INDICATOR_THREADS: readonly ThreadSplitIndicatorTarget[] = [];
 
@@ -103,17 +105,21 @@ export function TopLevelSidebarSection({
   isDropTargetActive = false,
 }: TopLevelSidebarSectionProps) {
   const threadDropState = useSectionDropTargetState(dropParentKey);
+
   const collapsedSplitIndicator = useThreadGroupSplitIndicator(
     collapsedThreads,
     collapseControl?.isCollapsed === true,
   );
+
   const pluginStatus = usePluginThreadRowStatusForThreads(collapsedThreads);
+
   const showCollapsedActivity =
     !status &&
     collapseControl?.isCollapsed === true &&
     (collapsedSplitIndicator.miniMap !== null ||
       collapsedActivity !== undefined ||
       pluginStatus !== null);
+
   const collapsedActivityIndicator = showCollapsedActivity ? (
     <span
       data-sidebar-collapsed-activity-edge=""
@@ -129,7 +135,9 @@ export function TopLevelSidebarSection({
           slots={collapsedSplitIndicator.miniMap}
           label={`${label} — contains a thread open in split`}
           isWorking={
-            collapsedActivity?.working || pluginStatus?.tone === "running"
+            collapsedActivity?.summaries.some(
+              (work) => work.activity.length > 0,
+            ) || pluginStatus?.tone === "running"
           }
         />
       ) : collapsedActivity || pluginStatus ? (
@@ -140,16 +148,25 @@ export function TopLevelSidebarSection({
       ) : null}
     </span>
   ) : null;
+
+  const hiddenCount =
+    collapseControl?.isCollapsed === true ? collapsedThreads.length : 0;
+
+  const toggleFromLabel =
+    collapseControl !== undefined && onRename === undefined && !labelEditor;
+
   const handleClickCapture = useCallback<MouseEventHandler<HTMLDivElement>>(
     (event) => {
       if (labelEditor || !consumeClickSuppression?.()) {
         return;
       }
+
       event.preventDefault();
       event.stopPropagation();
     },
     [consumeClickSuppression, labelEditor],
   );
+
   const handleCollapseControlClick = useCallback<
     MouseEventHandler<HTMLButtonElement>
   >(
@@ -160,11 +177,13 @@ export function TopLevelSidebarSection({
     },
     [collapseControl],
   );
+
   const stopCollapseControlPointerDown = useCallback<
     PointerEventHandler<HTMLButtonElement>
   >((event) => {
     event.stopPropagation();
   }, []);
+
   const stopCollapseControlKeyDown = useCallback<
     KeyboardEventHandler<HTMLButtonElement>
   >((event) => {
@@ -195,8 +214,7 @@ export function TopLevelSidebarSection({
         tier="label"
         className={cn(
           SIDEBAR_HOVER_ACTIONS_ROW_CLASS,
-          CHROME_SECTION_LABEL_CLASS,
-          SIDEBAR_GROUP_TEXT_CLASS,
+          SECTION_LABEL_CLASS,
           SIDEBAR_STANDARD_ROW_PADDING_CLASS,
           "rounded-md pr-0 transition-colors",
           !stickyHeader && "relative top-auto",
@@ -208,8 +226,12 @@ export function TopLevelSidebarSection({
         <span className="relative z-10 flex min-w-0 flex-1 items-center gap-1 text-left">
           {labelEditor ?? (
             <span
-              className="min-w-0 truncate"
+              className={cn(
+                "min-w-0 truncate",
+                toggleFromLabel && "cursor-pointer",
+              )}
               title={label}
+              onClick={toggleFromLabel ? handleCollapseControlClick : undefined}
               onDoubleClick={
                 onRename
                   ? (event) => {
@@ -223,6 +245,19 @@ export function TopLevelSidebarSection({
               {label}
             </span>
           )}
+          {hiddenCount > 0 && !labelEditor ? (
+            <span
+              data-sidebar-section-hidden-count=""
+              className={cn(SECTION_COUNT_CLASS, "ml-0.5")}
+            >
+              <span aria-hidden="true">{hiddenCount}</span>
+              <span className="sr-only">
+                {hiddenCount === 1
+                  ? "1 thread hidden"
+                  : `${hiddenCount} threads hidden`}
+              </span>
+            </span>
+          ) : null}
           {collapseControl ? (
             <button
               type="button"
@@ -251,7 +286,8 @@ export function TopLevelSidebarSection({
               <Icon
                 name="ChevronRight"
                 className={cn(
-                  "size-3 transition-transform duration-150",
+                  "size-3",
+                  DISCLOSURE_CHEVRON_TRANSITION,
                   !collapseControl.isCollapsed && "rotate-90",
                 )}
                 aria-hidden="true"
@@ -285,8 +321,7 @@ export function TopLevelSidebarSection({
                   "inline-flex shrink-0 items-center",
                   SIDEBAR_HOVER_ACTIONS_GAP_CLASS,
                   !actionsAlwaysVisible && SIDEBAR_HOVER_ACTIONS_CLASS,
-                  collapseControl?.isCollapsed &&
-                    "[@media(hover:none)]:hidden",
+                  collapseControl?.isCollapsed && "[@media(hover:none)]:hidden",
                 )}
               >
                 {actions}

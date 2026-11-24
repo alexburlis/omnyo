@@ -14,6 +14,7 @@ async function withThreadContextMutationGuard<T>(
   work: () => Promise<T>,
 ): Promise<T> {
   const inFlight = inFlightByThreadId.get(threadId) ?? 0;
+
   if (inFlight !== 0 && (mode === "clear" || inFlight < 0)) {
     if (mode === "send") throw new ThreadContextClearInProgressError();
     throw new ApiError(
@@ -22,12 +23,15 @@ async function withThreadContextMutationGuard<T>(
       "Thread is processing another request",
     );
   }
+
   inFlightByThreadId.set(threadId, mode === "clear" ? -1 : inFlight + 1);
+
   try {
     return await work();
   } finally {
     const remaining =
       mode === "clear" ? 0 : (inFlightByThreadId.get(threadId) ?? 1) - 1;
+
     if (remaining === 0) inFlightByThreadId.delete(threadId);
     else inFlightByThreadId.set(threadId, remaining);
   }

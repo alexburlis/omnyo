@@ -1,13 +1,13 @@
 import { ipcRenderer } from "electron";
 import {
-  BB_DESKTOP_EXISTING_SERVER_DIALOG_CHOOSE_CHANNEL,
+  OMNYO_DESKTOP_EXISTING_SERVER_DIALOG_CHOOSE_CHANNEL,
   EXISTING_SERVER_DIALOG_CHOICES,
   type ExistingServerDialogChooseRequest,
 } from "./existing-server-dialog-ipc.js";
 
 window.addEventListener("DOMContentLoaded", () => {
   function choose(choice: ExistingServerDialogChooseRequest["choice"]): void {
-    ipcRenderer.send(BB_DESKTOP_EXISTING_SERVER_DIALOG_CHOOSE_CHANNEL, {
+    ipcRenderer.send(OMNYO_DESKTOP_EXISTING_SERVER_DIALOG_CHOOSE_CHANNEL, {
       choice,
     });
   }
@@ -16,6 +16,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const button = document.querySelector<HTMLButtonElement>(
       `button[data-choice="${choice}"]`,
     );
+
     button?.addEventListener("click", () => {
       choose(choice);
     });

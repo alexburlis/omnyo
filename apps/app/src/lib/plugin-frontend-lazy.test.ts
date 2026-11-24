@@ -7,6 +7,7 @@ describe("createRetryingModuleLoader", () => {
       .fn<() => Promise<string>>()
       .mockRejectedValueOnce(new Error("chunk fetch failed"))
       .mockResolvedValue("module");
+
     const loader = createRetryingModuleLoader(load);
 
     await expect(loader()).rejects.toThrow("chunk fetch failed");

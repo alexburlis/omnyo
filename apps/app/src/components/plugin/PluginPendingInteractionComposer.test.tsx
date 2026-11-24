@@ -11,8 +11,11 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultAppSettings, type PluginPendingInteraction } from "@bb/domain";
-import type { PluginPendingInteractionProps } from "@get-bb/plugin-sdk";
+import {
+  defaultAppSettings,
+  type PluginPendingInteraction,
+} from "@omnyo/domain";
+import type { PluginPendingInteractionProps } from "@omnyo/plugin-sdk";
 import {
   resetPluginSlotStoreForTest,
   setPluginSlotRegistrations,
@@ -57,8 +60,11 @@ vi.mock("@/hooks/queries/system-queries", () => ({
     },
   }),
 }));
-vi.mock("@/lib/bb-desktop", () => ({ getBbDesktopInfo: () => null }));
+
+vi.mock("@/lib/omnyo-desktop", () => ({ getOmnyoDesktopInfo: () => null }));
+
 const pane = vi.hoisted(() => ({ isFocused: true }));
+
 vi.mock("@/views/thread-detail/PaneContext", () => ({
   useOptionalPaneContext: () => pane,
 }));
@@ -72,12 +78,15 @@ async function loadPiPendingInteractions(): Promise<
   NonNullable<PluginRegistrationSet["pendingInteractions"]>
 > {
   installPluginRuntime();
+
   const module: { default?: unknown } = await import(
     /* @vite-ignore */ PI_APP_MODULE
   );
+
   if (!isPluginAppDefinition(module.default)) {
     throw new Error("provider-pi's app.tsx exports no plugin app definition");
   }
+
   return collectPluginAppRegistrations(module.default).pendingInteractions;
 }
 
@@ -175,12 +184,15 @@ describe("PluginPendingInteractionComposer", () => {
 
   it("preserves drafts and pauses keyboard listeners while collapsed", () => {
     const onShortcut = vi.fn();
+
     function QuestionRenderer() {
       const [answer, setAnswer] = useState("");
       useEffect(() => {
         window.addEventListener("keydown", onShortcut);
+
         return () => window.removeEventListener("keydown", onShortcut);
       }, []);
+
       return (
         <input
           aria-label="Answer"
@@ -189,6 +201,7 @@ describe("PluginPendingInteractionComposer", () => {
         />
       );
     }
+
     setPluginSlotRegistrations(
       "secrets",
       registrations([{ id: "secret-request", component: QuestionRenderer }]),
@@ -240,6 +253,7 @@ describe("PluginPendingInteractionComposer", () => {
   it("opens a new interaction with a fresh form after the previous one was collapsed", () => {
     function Renderer() {
       const [answer, setAnswer] = useState("");
+
       return (
         <input
           aria-label="Answer"
@@ -248,11 +262,13 @@ describe("PluginPendingInteractionComposer", () => {
         />
       );
     }
+
     setPluginSlotRegistrations(
       "secrets",
       registrations([{ id: "secret-request", component: Renderer }]),
     );
     const client = new QueryClient();
+
     const composer = (id: string) => (
       <QueryClientProvider client={client}>
         <PluginPendingInteractionComposer
@@ -268,6 +284,7 @@ describe("PluginPendingInteractionComposer", () => {
         />
       </QueryClientProvider>
     );
+
     const view = render(composer(interaction.id));
     fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "Previous answer" },
@@ -287,14 +304,17 @@ describe("PluginPendingInteractionComposer", () => {
       "provider-pi",
       registrations(await loadPiPendingInteractions()),
     );
+
     const data = {
       requestId: "ui-1",
       method: "select" as const,
       options: ["Allow once", "Deny"],
     };
+
     const respond = vi
       .spyOn(sdk.threads.interactions, "respond")
       .mockRejectedValue(new Error("test response"));
+
     renderComposer(
       <PluginPendingInteractionComposer
         collapsedByDefault={false}
@@ -350,14 +370,17 @@ describe("PluginPendingInteractionComposer", () => {
           </button>
         );
       }
+
       setPluginSlotRegistrations(
         "secrets",
         registrations([{ id: "secret-request", component: Renderer }]),
       );
+
       const call = vi
         .spyOn(sdk.threads.interactions, sdkMethod)
         .mockRejectedValueOnce(new Error("offline"))
         .mockResolvedValueOnce(undefined as never);
+
       renderComposer(
         <PluginPendingInteractionComposer
           collapsedByDefault={false}
@@ -366,6 +389,7 @@ describe("PluginPendingInteractionComposer", () => {
           origin="plugin"
         />,
       );
+
       const send = () =>
         screen.getByRole("button", { name: "Send" }) as HTMLButtonElement;
 
@@ -384,11 +408,13 @@ describe("PluginPendingInteractionComposer", () => {
     function WrongRenderer() {
       return <div>wrong plugin renderer</div>;
     }
+
     function MatchingRenderer({
       interaction: view,
     }: PluginPendingInteractionProps) {
       return <div>form {view.title}</div>;
     }
+
     setPluginSlotRegistrations(
       "wrong-plugin",
       registrations([{ id: "secret-request", component: WrongRenderer }]),
@@ -418,15 +444,18 @@ describe("PluginPendingInteractionComposer", () => {
 
   it("resolves the form through the slot store once the renderer registers", () => {
     markPluginFrontendsSettled();
+
     function Renderer({ interaction: view }: PluginPendingInteractionProps) {
       return <div>form {view.title}</div>;
     }
+
     const request = {
       pluginId: "secrets",
       rendererId: "secret-request",
       title: interaction.payload.title,
       data: interaction.payload.data,
     };
+
     const { rerender } = renderComposer(
       <PluginPendingInteractionComposer
         collapsedByDefault={false}
@@ -435,6 +464,7 @@ describe("PluginPendingInteractionComposer", () => {
         origin="provider"
       />,
     );
+
     expect(screen.getByText(/form is unavailable/i)).toBeDefined();
 
     setPluginSlotRegistrations(
@@ -458,12 +488,14 @@ describe("PluginPendingInteractionComposer", () => {
     function Renderer({ interaction: view }: PluginPendingInteractionProps) {
       return <div>form {view.title}</div>;
     }
+
     const request = {
       pluginId: "secrets",
       rendererId: "secret-request",
       title: interaction.payload.title,
       data: interaction.payload.data,
     };
+
     const composer = (
       <PluginPendingInteractionComposer
         collapsedByDefault={false}
@@ -472,6 +504,7 @@ describe("PluginPendingInteractionComposer", () => {
         origin="plugin"
       />
     );
+
     const { rerender } = renderComposer(composer);
 
     expect(screen.queryByText(/form is unavailable/i)).toBeNull();
@@ -500,6 +533,7 @@ describe("PluginPendingInteractionComposer", () => {
       title: interaction.payload.title,
       data: interaction.payload.data,
     };
+
     const composer = (
       <PluginPendingInteractionComposer
         collapsedByDefault={false}
@@ -508,6 +542,7 @@ describe("PluginPendingInteractionComposer", () => {
         origin="plugin"
       />
     );
+
     const { rerender } = renderComposer(composer);
     expect(screen.getByTestId("plugin-interaction-loading")).toBeDefined();
 
@@ -572,9 +607,11 @@ describe("PluginPendingInteractionComposer", () => {
   it("keeps cancel available when the renderer crashes", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
+
     function Crashed(): never {
       throw new Error("boom");
     }
+
     setPluginSlotRegistrations(
       "secrets",
       registrations([{ id: "secret-request", component: Crashed }]),

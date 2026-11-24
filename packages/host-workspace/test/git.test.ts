@@ -1,152 +1,49 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, vi, describe, expect, it } from "vitest";
 import {
   detectGitRepo,
   detectGitRepoKind,
   detectLinkedWorktree,
-  fetchRemoteBranches,
   getCheckoutRef,
   getWorkspaceGitOperation,
   parseNameStatusEntries,
   parseNumstatEntriesZ,
   parsePorcelainEntries,
-  readDefaultBranchRefs,
+  parsePorcelainV2StatusZ,
   readGitBlob,
   runGit,
   runGitWithNullRecordLimit,
-  runShellPipeline,
   summarizeNumstat,
 } from "../src/git.js";
-
-const tempDirs: string[] = [];
-
-async function initReadGitBlobRepo() {
-  const repoPath = await fs.mkdtemp(
-    path.join(os.tmpdir(), "bb-read-git-blob-"),
-  );
-  tempDirs.push(repoPath);
-  await runGit(["init", "-b", "main"], { cwd: repoPath });
-  await runGit(["config", "user.name", "BB Tests"], { cwd: repoPath });
-  await runGit(["config", "user.email", "bb@example.com"], { cwd: repoPath });
-  await fs.mkdir(path.join(repoPath, "docs"));
-  await fs.writeFile(path.join(repoPath, "README.md"), "hello\n", "utf8");
-  await fs.writeFile(path.join(repoPath, "docs", "index.md"), "docs\n", "utf8");
-  await fs.writeFile(path.join(repoPath, "large.txt"), "0123456789\n", "utf8");
-  await runGit(["add", "."], { cwd: repoPath });
-  await runGit(["commit", "-m", "Initial commit"], { cwd: repoPath });
-  return repoPath;
-}
-
-async function initEmptyRepo() {
-  const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), "bb-empty-git-"));
-  tempDirs.push(repoPath);
-  await runGit(["init", "-b", "main"], { cwd: repoPath });
-  return repoPath;
-}
-
-async function initConflictRepo() {
-  const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), "bb-git-conflict-"));
-  tempDirs.push(repoPath);
-  await runGit(["init", "-b", "main"], { cwd: repoPath });
-  await runGit(["config", "user.name", "BB Tests"], { cwd: repoPath });
-  await runGit(["config", "user.email", "bb@example.com"], { cwd: repoPath });
-  await fs.writeFile(path.join(repoPath, "README.md"), "base\n", "utf8");
-  await runGit(["add", "."], { cwd: repoPath });
-  await runGit(["commit", "-m", "Initial commit"], { cwd: repoPath });
-  await runGit(["switch", "-c", "feature"], { cwd: repoPath });
-  await fs.writeFile(path.join(repoPath, "README.md"), "feature\n", "utf8");
-  await runGit(["commit", "-am", "Feature edit"], { cwd: repoPath });
-  await runGit(["switch", "main"], { cwd: repoPath });
-  await fs.writeFile(path.join(repoPath, "README.md"), "main\n", "utf8");
-  await runGit(["commit", "-am", "Main edit"], { cwd: repoPath });
-  return repoPath;
-}
-
-async function initDefaultBranchRemoteRepo() {
-  const repoPath = await initReadGitBlobRepo();
-  const remotePath = await fs.mkdtemp(path.join(os.tmpdir(), "bb-git-remote-"));
-  tempDirs.push(remotePath);
-  await runGit(["init", "--bare"], { cwd: remotePath });
-  await runGit(["remote", "add", "origin", remotePath], { cwd: repoPath });
-  await runGit(["push", "-u", "origin", "main"], { cwd: repoPath });
-  await runGit(["fetch", "origin"], { cwd: repoPath });
-  return { remotePath, repoPath };
-}
-
-async function pushRemoteMainCommit(remotePath: string) {
-  const cloneParent = await fs.mkdtemp(
-    path.join(os.tmpdir(), "bb-git-remote-clone-"),
-  );
-  tempDirs.push(cloneParent);
-  const clonePath = path.join(cloneParent, "repo");
-  await runGit(["clone", "--branch", "main", remotePath, clonePath], {
-    cwd: cloneParent,
-  });
-  await runGit(["config", "user.name", "BB Tests"], { cwd: clonePath });
-  await runGit(["config", "user.email", "bb@example.com"], {
-    cwd: clonePath,
-  });
-  await fs.writeFile(path.join(clonePath, "remote.txt"), "remote\n", "utf8");
-  await runGit(["add", "."], { cwd: clonePath });
-  await runGit(["commit", "-m", "Remote edit"], { cwd: clonePath });
-  await runGit(["push", "origin", "main"], { cwd: clonePath });
-}
-
-async function initSshRemoteRepo() {
-  const repoPath = await initReadGitBlobRepo();
-  const sshLogPath = path.join(repoPath, "ssh-invocations.log");
-  const sshScriptPath = path.join(repoPath, "recording-ssh.sh");
-  await fs.writeFile(
-    sshScriptPath,
-    `#!/bin/sh\nprintf '%s\\n' "$@" >> ${JSON.stringify(sshLogPath.replaceAll("\\", "/"))}\nprintf 'GIT_TERMINAL_PROMPT=%s\\n' "\${GIT_TERMINAL_PROMPT-unset}" >> ${JSON.stringify(sshLogPath.replaceAll("\\", "/"))}\nexit 255\n`,
-    { encoding: "utf8", mode: 0o755 },
-  );
-  await runGit(["remote", "add", "origin", "ssh://git.invalid/repo.git"], {
-    cwd: repoPath,
-  });
-  await runGit(
-    [
-      "config",
-      "core.sshCommand",
-      "'" + sshScriptPath.replaceAll("\\", "/").replaceAll("'", "'\\''") + "'",
-    ],
-    { cwd: repoPath },
-  );
-  return { repoPath, sshLogPath };
-}
-
-async function initBareWorktreeLayout() {
-  const origin = await initReadGitBlobRepo();
-  await runGit(["branch", "feature-a"], { cwd: origin });
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "bb-bare-layout-"));
-  tempDirs.push(root);
-  await runGit(["clone", "--bare", origin, ".bare"], { cwd: root });
-  await fs.writeFile(path.join(root, ".git"), "gitdir: ./.bare\n", "utf8");
-  await runGit(["worktree", "add", "feature-a", "feature-a"], { cwd: root });
-  return { root, worktreePath: path.join(root, "feature-a") };
-}
+import {
+  initBareWorktreeLayout,
+  initConflictRepo,
+  initEmptyRepo,
+  initReadGitBlobRepo,
+  removeTempDirs,
+  trackTempDir,
+} from "./git-test-repos.js";
 
 afterEach(async () => {
   vi.unstubAllEnvs();
-  await Promise.all(
-    tempDirs
-      .splice(0)
-      .map((dir) => fs.rm(dir, { recursive: true, force: true })),
-  );
+  await removeTempDirs();
 });
 
-describe("runShellPipeline", () => {
-  it("scrubs inherited bb runtime env vars and node mode", async () => {
+describe("runGit", () => {
+  it("scrubs inherited Omnyo runtime env vars and node mode", async () => {
     const repoPath = await initEmptyRepo();
-    vi.stubEnv("BB_DATA_DIR", "/tmp/leaked-bb-data");
+    vi.stubEnv("OMNYO_DATA_DIR", "/tmp/leaked-omnyo-data");
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("OPENAI_API_KEY", "external-secret");
 
-    const result = await runShellPipeline(
-      `printf '%s|%s|%s' "\${BB_DATA_DIR-missing}" "\${NODE_ENV-missing}" "\${OPENAI_API_KEY-missing}"`,
-      [],
+    const result = await runGit(
+      [
+        "-c",
+        `alias.env-probe=!printf '%s|%s|%s' "\${OMNYO_DATA_DIR-missing}" "\${NODE_ENV-missing}" "\${OPENAI_API_KEY-missing}"`,
+        "env-probe",
+      ],
       { cwd: repoPath },
     );
 
@@ -244,8 +141,12 @@ describe("runGitWithNullRecordLimit", () => {
 describe("detectGitRepoKind", () => {
   it("tells a bare repository root apart from its worktrees and plain directories", async () => {
     const { root, worktreePath } = await initBareWorktreeLayout();
-    const plainDir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-plain-dir-"));
-    tempDirs.push(plainDir);
+
+    const plainDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "omnyo-plain-dir-"),
+    );
+
+    trackTempDir(plainDir);
 
     await expect(detectGitRepoKind(root)).resolves.toBe("bare");
     await expect(detectGitRepoKind(path.join(root, ".bare"))).resolves.toBe(
@@ -258,8 +159,12 @@ describe("detectGitRepoKind", () => {
   it("tells a linked worktree apart from an ordinary checkout", async () => {
     const { worktreePath } = await initBareWorktreeLayout();
     const ordinaryCheckout = await initReadGitBlobRepo();
-    const plainDir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-plain-wt-"));
-    tempDirs.push(plainDir);
+
+    const plainDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "omnyo-plain-wt-"),
+    );
+
+    trackTempDir(plainDir);
 
     await expect(detectLinkedWorktree(worktreePath)).resolves.toBe(true);
     await expect(detectLinkedWorktree(ordinaryCheckout)).resolves.toBe(false);
@@ -318,68 +223,6 @@ describe("getCheckoutRef", () => {
   });
 });
 
-describe("readDefaultBranchRefs", () => {
-  it("reports equal local and origin defaults", async () => {
-    const { repoPath } = await initDefaultBranchRemoteRepo();
-
-    await expect(readDefaultBranchRefs(repoPath)).resolves.toEqual({
-      defaultBranch: "main",
-      defaultBranchRelation: "equal",
-      originDefaultBranch: "origin/main",
-    });
-  });
-
-  it("reports a local default behind origin", async () => {
-    const { remotePath, repoPath } = await initDefaultBranchRemoteRepo();
-    await pushRemoteMainCommit(remotePath);
-    await runGit(["fetch", "origin"], { cwd: repoPath });
-
-    await expect(readDefaultBranchRefs(repoPath)).resolves.toMatchObject({
-      defaultBranch: "main",
-      defaultBranchRelation: "local-behind",
-      originDefaultBranch: "origin/main",
-    });
-  });
-
-  it("reports a local default ahead of origin", async () => {
-    const { repoPath } = await initDefaultBranchRemoteRepo();
-    await fs.writeFile(path.join(repoPath, "local.txt"), "local\n", "utf8");
-    await runGit(["add", "."], { cwd: repoPath });
-    await runGit(["commit", "-m", "Local edit"], { cwd: repoPath });
-
-    await expect(readDefaultBranchRefs(repoPath)).resolves.toMatchObject({
-      defaultBranch: "main",
-      defaultBranchRelation: "local-ahead",
-      originDefaultBranch: "origin/main",
-    });
-  });
-
-  it("reports diverged local and origin defaults", async () => {
-    const { remotePath, repoPath } = await initDefaultBranchRemoteRepo();
-    await fs.writeFile(path.join(repoPath, "local.txt"), "local\n", "utf8");
-    await runGit(["add", "."], { cwd: repoPath });
-    await runGit(["commit", "-m", "Local edit"], { cwd: repoPath });
-    await pushRemoteMainCommit(remotePath);
-    await runGit(["fetch", "origin"], { cwd: repoPath });
-
-    await expect(readDefaultBranchRefs(repoPath)).resolves.toMatchObject({
-      defaultBranch: "main",
-      defaultBranchRelation: "diverged",
-      originDefaultBranch: "origin/main",
-    });
-  });
-
-  it("omits origin defaults when no origin ref exists", async () => {
-    const repoPath = await initReadGitBlobRepo();
-
-    await expect(readDefaultBranchRefs(repoPath)).resolves.toEqual({
-      defaultBranch: "main",
-      defaultBranchRelation: undefined,
-      originDefaultBranch: undefined,
-    });
-  });
-});
-
 describe("getWorkspaceGitOperation", () => {
   it("reports no operation for ordinary repositories", async () => {
     const repoPath = await initReadGitBlobRepo();
@@ -391,10 +234,12 @@ describe("getWorkspaceGitOperation", () => {
 
   it("reports merge conflicts", async () => {
     const repoPath = await initConflictRepo();
+
     const merge = await runGit(["merge", "feature"], {
       cwd: repoPath,
       allowFailure: true,
     });
+
     expect(merge.exitCode).not.toBe(0);
 
     await expect(getWorkspaceGitOperation(repoPath)).resolves.toEqual({
@@ -406,10 +251,12 @@ describe("getWorkspaceGitOperation", () => {
   it("reports rebase conflicts", async () => {
     const repoPath = await initConflictRepo();
     await runGit(["switch", "feature"], { cwd: repoPath });
+
     const rebase = await runGit(["rebase", "main"], {
       cwd: repoPath,
       allowFailure: true,
     });
+
     expect(rebase.exitCode).not.toBe(0);
 
     await expect(getWorkspaceGitOperation(repoPath)).resolves.toEqual({
@@ -435,75 +282,28 @@ describe("command timeouts", () => {
       name: "WorkspaceError",
     });
   });
-
-  it("classifies shell pipeline timeouts as hard failures when allowFailure is true", async () => {
-    const repoPath = await initEmptyRepo();
-
-    await expect(
-      runShellPipeline("while :; do :; done", [], {
-        cwd: repoPath,
-        allowFailure: true,
-        timeoutMs: 500,
-      }),
-    ).rejects.toMatchObject({
-      code: "shell_pipeline_timeout",
-      name: "WorkspaceError",
-    });
-  });
-});
-
-describe("fetchRemoteBranches", () => {
-  it("keeps a non-interactive fetch from prompting for ssh or git credentials", async () => {
-    const { repoPath, sshLogPath } = await initSshRemoteRepo();
-
-    await expect(
-      fetchRemoteBranches(repoPath, { interactive: false }),
-    ).resolves.toEqual({ status: "failed" });
-
-    const log = await fs.readFile(sshLogPath, "utf8");
-    expect(log).not.toContain("BatchMode");
-    expect(log).toContain("GIT_TERMINAL_PROMPT=0\n");
-  });
-
-  it("leaves an interactive fetch free to prompt", async () => {
-    const { repoPath, sshLogPath } = await initSshRemoteRepo();
-
-    await expect(
-      fetchRemoteBranches(repoPath, { interactive: true }),
-    ).resolves.toEqual({ status: "failed" });
-
-    const log = await fs.readFile(sshLogPath, "utf8");
-    expect(log).not.toContain("BatchMode");
-    expect(log).toContain("GIT_TERMINAL_PROMPT=unset\n");
-  });
 });
 
 describe("user-shell Git resolution", () => {
-  it("uses the resolved shell PATH for Git commands and Git pipelines", async () => {
+  it("uses the resolved shell PATH for Git commands", async () => {
     const workspacePath = await fs.mkdtemp(
-      path.join(os.tmpdir(), "bb-git-shell-path-workspace-"),
+      path.join(os.tmpdir(), "omnyo-git-shell-path-workspace-"),
     );
+
     const binPath = await fs.mkdtemp(
-      path.join(os.tmpdir(), "bb-git-shell-path-bin-"),
+      path.join(os.tmpdir(), "omnyo-git-shell-path-bin-"),
     );
-    tempDirs.push(workspacePath, binPath);
-    const shell =
-      process.platform === "win32"
-        ? (
-            await runGit(["var", "GIT_SHELL_PATH"], { cwd: workspacePath })
-          ).stdout.trim()
-        : "/bin/sh";
-    const gitPath = path.join(
-      binPath,
-      process.platform === "win32" ? "git.cmd" : "git",
-    );
+
+    trackTempDir(workspacePath, binPath);
+
     await fs.writeFile(
-      gitPath,
+      path.join(binPath, process.platform === "win32" ? "git.cmd" : "git"),
       process.platform === "win32"
-        ? `@echo off\r\nif "%~1"=="var" (echo ${shell}) else (echo user-shell-git)\r\n`
+        ? "@echo off\r\necho user-shell-git\r\n"
         : "#!/bin/sh\nprintf 'user-shell-git\\n'\n",
       { mode: 0o755 },
     );
+
     if (process.platform === "win32") {
       await fs.writeFile(
         path.join(binPath, "git"),
@@ -514,14 +314,6 @@ describe("user-shell Git resolution", () => {
 
     await expect(
       runGit(["--version"], { cwd: workspacePath, shellPath: binPath }),
-    ).resolves.toMatchObject({
-      stdout: expect.stringMatching(/^user-shell-git\r?\n$/),
-    });
-    await expect(
-      runShellPipeline("git --version", [], {
-        cwd: workspacePath,
-        shellPath: binPath,
-      }),
     ).resolves.toMatchObject({
       stdout: expect.stringMatching(/^user-shell-git\r?\n$/),
     });
@@ -587,6 +379,100 @@ describe("readGitBlob", () => {
     ).rejects.toMatchObject({
       code: "blob_too_large",
       message: "Blob size 11 bytes exceeds the 0 MB limit",
+    });
+  });
+});
+
+describe("parsePorcelainV2StatusZ", () => {
+  const readStatus = async (repoPath: string) =>
+    parsePorcelainV2StatusZ(
+      (
+        await runGit(
+          [
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "-z",
+            "--untracked-files=all",
+          ],
+          { cwd: repoPath },
+        )
+      ).stdout,
+    );
+
+  it.skipIf(process.platform === "win32")(
+    "reads renames, unusual paths, and the checked-out commit",
+    async () => {
+      const repoPath = await initConflictRepo();
+      await fs.writeFile(path.join(repoPath, "old name.txt"), "rename me\n");
+      await runGit(["add", "."], { cwd: repoPath });
+      await runGit(["commit", "-m", "Add file"], { cwd: repoPath });
+      await runGit(["mv", "old name.txt", "new -> name.txt"], {
+        cwd: repoPath,
+      });
+      await fs.writeFile(path.join(repoPath, "README.md"), "edited\n");
+      await fs.writeFile(path.join(repoPath, "line\nbreak.txt"), "new\n");
+
+      const head = (
+        await runGit(["rev-parse", "HEAD"], { cwd: repoPath })
+      ).stdout.trim();
+
+      const status = await readStatus(repoPath);
+
+      expect(status.headOid).toBe(head);
+      expect(status.headBranch).toBe("main");
+      expect(status.entries).toEqual(
+        expect.arrayContaining([
+          {
+            path: "README.md",
+            status: "M",
+            indexStatus: " ",
+            worktreeStatus: "M",
+          },
+          {
+            path: "new -> name.txt",
+            status: "R",
+            indexStatus: "R",
+            worktreeStatus: " ",
+          },
+          {
+            path: "line\nbreak.txt",
+            status: "??",
+            indexStatus: "?",
+            worktreeStatus: "?",
+          },
+        ]),
+      );
+      expect(status.entries).toHaveLength(3);
+
+      await runGit(["checkout", "--detach"], { cwd: repoPath });
+      expect(await readStatus(repoPath)).toMatchObject({
+        headOid: head,
+        headBranch: null,
+      });
+    },
+  );
+
+  it("reads unmerged entries during a conflicted merge", async () => {
+    const repoPath = await initConflictRepo();
+    await runGit(["merge", "feature"], { cwd: repoPath, allowFailure: true });
+
+    expect((await readStatus(repoPath)).entries).toEqual([
+      {
+        path: "README.md",
+        status: "UU",
+        indexStatus: "U",
+        worktreeStatus: "U",
+      },
+    ]);
+  });
+
+  it("reports an unborn branch without a commit", async () => {
+    const repoPath = await initEmptyRepo();
+    expect(await readStatus(repoPath)).toEqual({
+      entries: [],
+      headOid: null,
+      headBranch: "main",
     });
   });
 });
@@ -666,6 +552,7 @@ describe("parseNameStatusEntries", () => {
       "src/old.ts",
       "",
     ].join("\0");
+
     expect(parseNameStatusEntries(output)).toEqual([
       { path: "src/new.ts", status: "A" },
       { path: "src/existing.ts", status: "M" },
@@ -683,6 +570,7 @@ describe("parseNameStatusEntries", () => {
       "src/copy.ts",
       "",
     ].join("\0");
+
     expect(parseNameStatusEntries(output)).toEqual([
       { path: "src/new.ts", status: "R" },
       { path: "src/copy.ts", status: "C" },
@@ -713,6 +601,7 @@ describe("parseNumstatEntriesZ", () => {
   it("parses normal and binary entries from NUL-delimited output", () => {
     const output =
       "10\t4\tREADME.md\0" + "-\t-\tbinary.dat\0" + "2\t0\tsrc/app.ts\0";
+
     expect(parseNumstatEntriesZ(output)).toEqual([
       { path: "README.md", insertions: 10, deletions: 4 },
       { path: "binary.dat", insertions: null, deletions: null },

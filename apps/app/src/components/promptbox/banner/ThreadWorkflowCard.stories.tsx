@@ -4,7 +4,7 @@ import type {
   WorkflowAgentState,
   WorkflowPhaseSnapshot,
   WorkflowProgressSnapshot,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { ThreadWorkflowCard } from "./ThreadWorkflowCard";
 import { ThreadWorkflowStack } from "./ThreadWorkflowStack";
 import { workflowRow } from "@/test/fixtures/thread-timeline-rows";
@@ -44,6 +44,7 @@ const investigationSnapshot: WorkflowProgressSnapshot = {
     durationMs: durationMs as number,
   })),
 };
+
 investigationSnapshot.agents.push({
   index: 7,
   label: "synthesize-plan",
@@ -64,7 +65,7 @@ const runningWorkflow = workflowRow({
   id: "thr_fixture:workflow:investigation:running",
   status: "pending",
   taskStatus: "running",
-  workflowName: "bb-plugin-investigation",
+  workflowName: "omnyo-plugin-investigation",
   description: "Investigate the plugin subsystem",
   startedAt: Date.now() - 326_000,
   workflow: investigationSnapshot,
@@ -83,6 +84,7 @@ const PHASE_VERBS = [
   "Validate",
   "Summarize",
 ];
+
 const PHASE_TARGETS = [
   "data model",
   "server routes",
@@ -99,6 +101,7 @@ const PHASE_TARGETS = [
 function phaseTitle(i: number): string {
   const verb = PHASE_VERBS[i % PHASE_VERBS.length];
   const target = PHASE_TARGETS[(i * 3) % PHASE_TARGETS.length];
+
   return `${verb} ${target}`;
 }
 
@@ -114,18 +117,22 @@ function buildManyPhasesSnapshot(
   const agents: WorkflowAgentSnapshot[] = [];
   const progressAt = 1780540129098;
   let agentIndex = 1;
+
   for (let p = 1; p <= phaseCount; p++) {
     const title = phaseTitle(p - 1);
     phases.push({ index: p, title });
     const agentCount = ((p - 1) % 3) + 1;
+
     for (let a = 0; a < agentCount; a++) {
       const done = p < activePhase;
       const running = p === activePhase && a === 0;
+
       const state: WorkflowAgentState = done
         ? "done"
         : running
           ? "running"
           : "queued";
+
       const agent: WorkflowAgentSnapshot = {
         index: agentIndex++,
         label: `${slug(title)}-${a + 1}`,
@@ -138,9 +145,11 @@ function buildManyPhasesSnapshot(
         phaseTitle: title,
         queuedAt: progressAt - 2_000,
       };
+
       if (state !== "queued") {
         agent.startedAt = progressAt - 1_000;
       }
+
       if (done) {
         agent.tokens = 42_000 + ((p * 7 + a * 13) % 90) * 1_000;
         agent.toolCalls = 18 + ((p * 5 + a * 7) % 40);
@@ -149,9 +158,11 @@ function buildManyPhasesSnapshot(
         agent.tokens = 28_400;
         agent.toolCalls = 9;
       }
+
       agents.push(agent);
     }
   }
+
   return { phases, agents };
 }
 
@@ -159,7 +170,7 @@ const manyPhasesWorkflow = workflowRow({
   id: "thr_fixture:workflow:many-phases:running",
   status: "pending",
   taskStatus: "running",
-  workflowName: "bb-repo-wide-audit",
+  workflowName: "omnyo-repo-wide-audit",
   description: "Audit the entire repository across forty phases",
   startedAt: Date.now() - 1_472_000,
   workflow: buildManyPhasesSnapshot(40, 12),
@@ -170,7 +181,7 @@ const secondRunningWorkflow = workflowRow({
   id: "thr_fixture:workflow:balance:running",
   status: "pending",
   taskStatus: "running",
-  workflowName: "bb-balance-pass",
+  workflowName: "omnyo-balance-pass",
   description: "Close the remaining balance defects",
   startedAt: Date.now() - 94_000,
   workflow: {
@@ -224,6 +235,7 @@ function ToggleableCard({
   initialExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(initialExpanded);
+
   return (
     <ThreadWorkflowCard
       workflow={workflow}
@@ -235,6 +247,7 @@ function ToggleableCard({
 
 function CollapsedWorkflowPreview() {
   const [collapsed, setCollapsed] = useState(false);
+
   return (
     <ThreadWorkflowCard
       workflow={runningWorkflow}
@@ -247,13 +260,14 @@ function CollapsedWorkflowPreview() {
 function AutoAdvancePreview() {
   const [activePhase, setActivePhase] = useState(3);
   const [expanded, setExpanded] = useState(true);
+
   const workflow = useMemo(
     () =>
       workflowRow({
         id: "thr_fixture:workflow:auto-advance:running",
         status: "pending",
         taskStatus: "running",
-        workflowName: "bb-repo-wide-audit",
+        workflowName: "omnyo-repo-wide-audit",
         description: "Audit the entire repository across forty phases",
         startedAt: Date.now() - 1_472_000,
         workflow: buildManyPhasesSnapshot(40, activePhase),
@@ -265,6 +279,7 @@ function AutoAdvancePreview() {
       }),
     [activePhase],
   );
+
   return (
     <div className="flex flex-col gap-2">
       <button
@@ -316,9 +331,11 @@ function ToggleableStack({
   workflows: readonly (typeof runningWorkflow)[];
 }) {
   const [isStackExpanded, setIsStackExpanded] = useState(false);
+
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+
   return (
     <ThreadWorkflowStack
       workflows={workflows}
@@ -328,7 +345,9 @@ function ToggleableStack({
       onToggleWorkflow={(id) =>
         setExpandedIds((current) => {
           const next = new Set(current);
+
           if (!next.delete(id)) next.add(id);
+
           return next;
         })
       }
@@ -342,12 +361,12 @@ const concurrentWorkflows = [
   {
     ...secondRunningWorkflow,
     id: "thr_fixture:workflow:balance:running-2",
-    workflowName: "bb-balance-pass-2",
+    workflowName: "omnyo-balance-pass-2",
   },
   {
     ...runningWorkflow,
     id: "thr_fixture:workflow:investigation:running-2",
-    workflowName: "bb-plugin-investigation-2",
+    workflowName: "omnyo-plugin-investigation-2",
   },
 ];
 

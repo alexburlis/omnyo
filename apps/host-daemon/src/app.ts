@@ -1,8 +1,33 @@
-import { HOST_DAEMON_RESTART_EXIT_CODE } from "@bb/config/machine-service";
+import { setProcessErrorReportingEnabled } from "@omnyo/process-utils/error-reporting";
+import { randomUUID } from "node:crypto";
+import {
+  idleProviderSessionGraceMs,
+  readMemoryPressure,
+  readProviderProcessMemory,
+} from "./memory-pressure.js";
+import { realpath } from "node:fs/promises";
+import { CommandMetadataCatalog } from "./command-metadata.js";
+import {
+  drainIsolatedFilesystemReaders,
+  startFileChunkReader,
+  IsolatedCommandMetadataCatalog,
+} from "./workspace-read-client.js";
+import {
+  HOST_DAEMON_RESTART_EXIT_CODE,
+  HOST_DAEMON_SERVICE_INSTALL_EXIT_CODE,
+} from "@omnyo/config/machine-service";
+import { prepareWorkerIdentityAdoptionRestart } from "./identity-adoption-update.js";
+import { createAgentProcessContainment } from "./agent-process-containment.js";
 import { startDesktopBrowserBroker } from "./desktop-browser-broker.js";
 import { MachineEnvironment } from "./machine-environment.js";
 import { CommandRouter } from "./command-router.js";
-import { createDaemon, type HostDaemon } from "./daemon.js";
+import { ExpectedCommandDispatchError } from "./command-errors.js";
+import { WorkspaceReadCoalescer } from "./workspace-read-coalescer.js";
+import {
+  createDaemon,
+  type HostDaemon,
+  type HostDaemonExitCode,
+} from "./daemon.js";
 import {
   createEventSink,
   EventSinkDisposedError,
@@ -17,16 +42,29 @@ import { startHostDaemonHealthMonitor } from "./host-daemon-health-monitor.js";
 import { startLocalApiServer, type LocalApiServer } from "./local-api.js";
 import type { HostDaemonLocalApiConfig } from "./local-api-config.js";
 import type { HostDaemonLogger } from "./logger.js";
-import type { HostDaemonDaemonWsMessage } from "@bb/host-daemon-contract";
+import {
+  HOST_DAEMON_PROTOCOL_VERSION,
+  type HostDaemonDaemonWsMessage,
+  type HostDaemonInteractiveRequestKey,
+  type HostDaemonOpenThreadWork,
+  type HostHousekeepingStatus,
+  type MemoryPressureSample,
+} from "@omnyo/host-daemon-contract";
 import {
   RuntimeManager,
   type RuntimeManagerReapIdleProviderSessionsArgs,
   type RuntimeManagerReapIdleProviderSessionsResult,
   type RuntimeManagerOptions,
 } from "./runtime-manager.js";
-import { WatchManager } from "./watch-manager.js";
+import { WatchManager, type WatchManagerOptions } from "./watch-manager.js";
+import {
+  createIsolatedWatchManager,
+  type WatchManagerClient,
+} from "./workspace-observer-client.js";
 import { ConnectTunnelClient } from "./connect-tunnel/index.js";
 import { TerminalManager } from "./terminals/terminal-manager.js";
+import { ManagedPreviewManager } from "./previews/managed-preview-manager.js";
+import { PreviewHostTransport } from "./previews/preview-transport.js";
 import {
   createServerClient,
   ServerResponseError,
@@ -45,12 +83,22 @@ import {
 import { runtimeErrorLogFields, summarizeError } from "./error-utils.js";
 import { ensureThreadStorageRoot } from "./thread-storage-root.js";
 import { createRuntimeShellEnvCache } from "./runtime-shell-env-cache.js";
-import type { AgentRuntime, AgentRuntimeOptions } from "@bb/agent-runtime";
+import type {
+  AgentRuntime,
+  AgentRuntimeOptions,
+  RuntimeOpenBackgroundWork,
+} from "@omnyo/agent-runtime";
 import { createProtocolSelfUpdater } from "./protocol-self-update.js";
 import {
-  disposeParcelWatcherBackend,
-  type HostWatcher,
-} from "@bb/host-watcher";
+  UpdateDeliveryCheckpoint,
+  waitForUpdateCheckpoint,
+  type PendingInteractiveInterruptRequest,
+} from "./update-delivery-checkpoint.js";
+import {
+  readWorkerRuntimeVersion,
+  resolvePackagedOmnyoAppRoot,
+} from "./server-move/package-layout.js";
+import type { HostWatcher } from "@omnyo/host-watcher";
 import { PluginHostManager } from "./plugin-host-manager.js";
 import { writeMachineSuspensionMarker } from "./suspension-marker.js";
 import {
@@ -63,10 +111,48 @@ interface SessionState {
 }
 
 const INTERACTIVE_INTERRUPT_RETRY_DELAY_MS = 1_000;
+
 const INTERACTIVE_INTERRUPT_MAX_RETRY_DELAY_MS = 60_000;
-const IDLE_PROVIDER_SESSION_REAP_AFTER_MS = 30 * 60 * 1000;
-const IDLE_PROVIDER_SESSION_REAP_INTERVAL_MS = 5 * 60 * 1000;
+
+const IDLE_PROVIDER_SESSION_REAP_INTERVAL_MS = 60 * 1000;
+
 const RUNTIME_SHELL_ENV_REFRESH_TTL_MS = 10_000;
+
+const ENDED_INTERACTIVE_REQUEST_REASON =
+  "The question was closed while the host was disconnected";
+
+function collectOpenThreadWork(args: {
+  backgroundWork: readonly RuntimeOpenBackgroundWork[];
+  interactiveRequests: readonly HostDaemonInteractiveRequestKey[];
+}): HostDaemonOpenThreadWork[] {
+  const byThreadId = new Map<string, HostDaemonOpenThreadWork>();
+
+  const threadWork = (threadId: string): HostDaemonOpenThreadWork => {
+    const existing = byThreadId.get(threadId);
+
+    if (existing) return existing;
+
+    const created: HostDaemonOpenThreadWork = {
+      threadId,
+      backgroundItemIds: [],
+      interactiveRequests: [],
+    };
+
+    byThreadId.set(threadId, created);
+
+    return created;
+  };
+
+  for (const work of args.backgroundWork) {
+    threadWork(work.threadId).backgroundItemIds.push(...work.itemIds);
+  }
+
+  for (const request of args.interactiveRequests) {
+    threadWork(request.threadId).interactiveRequests.push(request);
+  }
+
+  return [...byThreadId.values()];
+}
 
 interface IdleProviderSessionReaperTimer {
   clear(): void;
@@ -83,12 +169,14 @@ interface IdleProviderSessionReaper {
 }
 
 interface IdleProviderSessionReaperRuntimeManager {
+  recordHousekeepingStatus(status: HostHousekeepingStatus): void;
   reapIdleProviderSessions(
     args: RuntimeManagerReapIdleProviderSessionsArgs,
   ): Promise<RuntimeManagerReapIdleProviderSessionsResult>;
 }
 
 interface StartIdleProviderSessionReaperArgs {
+  readMemoryPressure?: () => Promise<MemoryPressureSample>;
   logger: HostDaemonLogger;
   nowMs: () => number;
   runtimeManager: IdleProviderSessionReaperRuntimeManager;
@@ -109,6 +197,7 @@ interface CreateHostDaemonAppOptions {
   serverHeaders?: Record<string, string>;
   autoUpdate?: boolean;
   supervised?: boolean;
+  windowsServiceInstall?: boolean;
   releaseLock: () => Promise<void>;
   localApiConfig: HostDaemonLocalApiConfig | null;
   createRuntime?: RuntimeManagerOptions["createRuntime"];
@@ -130,65 +219,127 @@ export interface HostDaemonApp {
   eventSink: EventSink;
   localApi: LocalApiServer | null;
   runtimeManager: RuntimeManager;
-  watchManager: WatchManager;
+  watchManager: WatchManagerClient;
   connectTunnel: ConnectTunnelClient;
   terminalManager: TerminalManager;
   router: CommandRouter;
   connection: ServerConnection;
 }
 
-interface PendingInteractiveInterruptRequest {
-  providerId: string;
-  reason: string;
-  threadIds: readonly string[];
-}
-
 export function startIdleProviderSessionReaper(
   args: StartIdleProviderSessionReaperArgs,
 ): IdleProviderSessionReaper {
   let running = false;
+  let stopped = false;
+  let previousPressure: string | null = null;
+
   const timer = args.setIntervalFn(() => {
-    if (running) {
-      return;
-    }
+    if (running || stopped) return;
     running = true;
-    void args.runtimeManager
-      .reapIdleProviderSessions({
-        idleForMs: IDLE_PROVIDER_SESSION_REAP_AFTER_MS,
-        nowMs: args.nowMs(),
-      })
-      .then((result) => {
-        if (result.reapedSessions.length === 0) {
-          return;
-        }
-        args.logger.info(
-          {
-            count: result.reapedSessions.length,
-            sessions: result.reapedSessions.map((session) => ({
-              environmentId: session.environmentId,
-              idleForMs: session.idleForMs,
-              providerId: session.providerId,
-              threadId: session.threadId,
-            })),
-          },
-          "Reaped idle provider sessions",
+
+    void (async () => {
+      let memoryPressure: MemoryPressureSample;
+
+      try {
+        memoryPressure = await (
+          args.readMemoryPressure ?? readMemoryPressure
+        )();
+      } catch {
+        memoryPressure = { status: "unavailable", reason: "read-failed" };
+      }
+
+      if (stopped) return;
+      const idleGraceMs = idleProviderSessionGraceMs(memoryPressure);
+      const checkedAt = args.nowMs();
+      const pressureKey = JSON.stringify(memoryPressure);
+
+      if (pressureKey !== previousPressure) {
+        args.logger.debug(
+          { memoryPressure, idleGraceMs },
+          "Idle provider cleanup memory pressure changed",
         );
-      })
-      .catch((error) => {
+        previousPressure = pressureKey;
+      }
+
+      try {
+        const result = await args.runtimeManager.reapIdleProviderSessions({
+          idleForMs: idleGraceMs,
+          nowMs: checkedAt,
+        });
+
+        const processMemory = await readProviderProcessMemory(
+          result.retainedSessions.flatMap((session) =>
+            session.processId === null ? [] : [session.processId],
+          ),
+        );
+
+        args.runtimeManager.recordHousekeepingStatus({
+          status: "complete",
+          checkedAt,
+          memoryPressure,
+          idleGraceMs,
+          retainedSessions: result.retainedSessions.map((session) => {
+            const bytes =
+              session.processId === null
+                ? undefined
+                : processMemory.get(session.processId);
+
+            return {
+              ...session,
+              memory:
+                bytes === undefined
+                  ? { status: "unavailable" }
+                  : { status: "observed", source: "rss", bytes },
+            };
+          }),
+          reapedSessions: result.reapedSessions.map(
+            ({ environmentId, idleForMs, providerId, threadId }) => ({
+              environmentId,
+              idleForMs,
+              providerId,
+              threadId,
+            }),
+          ),
+        });
+
+        if (result.reapedSessions.length > 0) {
+          args.logger.info(
+            {
+              count: result.reapedSessions.length,
+              sessions: result.reapedSessions.map(
+                ({ environmentId, idleForMs, providerId, threadId }) => ({
+                  environmentId,
+                  idleForMs,
+                  providerId,
+                  threadId,
+                }),
+              ),
+            },
+            "Reaped idle provider sessions",
+          );
+        }
+      } catch (error) {
+        args.runtimeManager.recordHousekeepingStatus({
+          status: "failed",
+          checkedAt,
+          memoryPressure,
+          idleGraceMs,
+        });
         args.logger.warn(
-          {
-            ...runtimeErrorLogFields(error),
-          },
+          { ...runtimeErrorLogFields(error) },
           "Idle provider session reaper failed",
         );
-      })
-      .finally(() => {
-        running = false;
-      });
+      }
+    })().finally(() => {
+      running = false;
+    });
   }, IDLE_PROVIDER_SESSION_REAP_INTERVAL_MS);
+
   timer.unref();
+
   return {
     stop() {
+      stopped = true;
       timer.clear();
     },
   };
@@ -212,29 +363,58 @@ export async function createHostDaemonApp(
     process.env,
     options.runtimeShellEnv ?? {},
   );
+
   const threadStorageRootPath = await ensureThreadStorageRoot(options.dataDir);
+
   const dataDirSkillsRootPath = await ensureDataDirSkillsRootPath(
     options.dataDir,
   );
+
   await cleanupInjectedSkillStagingDirs({
     dataDir: options.dataDir,
     keepCatalogHashes: [],
     logger: options.logger,
   });
+
   const sessionState: SessionState = {
     value: null,
   };
-  const pendingInteractiveInterrupts = new Map<
-    string,
-    PendingInteractiveInterruptRequest
-  >();
+
+  const deliveryCheckpoint = new UpdateDeliveryCheckpoint(
+    options.dataDir,
+    options.hostId,
+  );
+
+  await deliveryCheckpoint.load();
+
+  const pendingInteractiveInterrupts = new Map(
+    deliveryCheckpoint.interrupts.map((request) => [
+      buildInteractiveInterruptKey(request),
+      request,
+    ]),
+  );
+
+  const rejectedInteractiveInterrupts = new Set<string>();
+  let deliveryPaused = false;
+  let interruptAbort: AbortController | null = null;
+
   let runtimeManager: RuntimeManager;
-  let watchManager: WatchManager;
+  let watchManager: WatchManagerClient;
+
+  const workspaceReads = new WorkspaceReadCoalescer({
+    now: Date.now,
+    environmentPath: (environmentId) => runtimeManager.get(environmentId)?.path,
+    realpath: (workspacePath) => realpath(workspacePath),
+  });
+
   let flushPendingInteractiveInterruptsPromise: Promise<void> | null = null;
+
   let interactiveInterruptRetryTimeout: ReturnType<typeof setTimeout> | null =
     null;
+
   let interactiveInterruptRetryDelayMs = INTERACTIVE_INTERRUPT_RETRY_DELAY_MS;
   let eventSink: EventSink;
+
   let handleServerSessionInvalidated = (
     _args: HandleServerSessionInvalidatedArgs,
   ): void => undefined;
@@ -261,6 +441,7 @@ export async function createHostDaemonApp(
     args: SessionRequestArgs<TResult>,
   ): Promise<TResult> {
     const observedSessionId = sessionState.value;
+
     try {
       return await args.request();
     } catch (error) {
@@ -273,10 +454,6 @@ export async function createHostDaemonApp(
     }
   }
 
-  async function flushThreadEvents(): Promise<void> {
-    await eventSink.flush();
-  }
-
   const serverClient = createServerClient({
     serverUrl: options.serverUrl,
     hostKey: options.hostKey,
@@ -286,19 +463,24 @@ export async function createHostDaemonApp(
       if (!sessionState.value) {
         throw new Error("Server session is not open");
       }
+
       return sessionState.value;
     },
-    beforeInteractiveRequestRegistrationAttempt: flushThreadEvents,
+    runtimeUpdate: () => ({
+      runtimeVersion,
+      automaticUpdates: options.autoUpdate ?? false,
+    }),
     fetchFn: options.fetchFn,
   });
 
   function buildInteractiveInterruptKey(
-    request: PendingInteractiveInterruptRequest,
+    request: Omit<PendingInteractiveInterruptRequest, "deliveryId">,
   ): string {
     return [
       request.providerId,
       request.reason,
       [...request.threadIds].sort().join(","),
+      JSON.stringify(request.requests),
     ].join("|");
   }
 
@@ -311,9 +493,12 @@ export async function createHostDaemonApp(
 
   function scheduleInteractiveInterruptRetry(): void {
     if (
+      deliveryPaused ||
       interactiveInterruptRetryTimeout !== null ||
       sessionState.value === null ||
-      pendingInteractiveInterrupts.size === 0
+      ![...pendingInteractiveInterrupts.keys()].some(
+        (key) => !rejectedInteractiveInterrupts.has(key),
+      )
     ) {
       return;
     }
@@ -338,26 +523,39 @@ export async function createHostDaemonApp(
   }
 
   async function flushPendingInteractiveInterrupts(): Promise<void> {
+    if (deliveryPaused) return;
+
     if (flushPendingInteractiveInterruptsPromise) {
       await flushPendingInteractiveInterruptsPromise;
+
       return;
     }
 
     clearInteractiveInterruptRetry();
 
+    interruptAbort = new AbortController();
     flushPendingInteractiveInterruptsPromise = (async () => {
-      while (sessionState.value !== null) {
-        const nextEntry = pendingInteractiveInterrupts.entries().next().value;
+      while (!deliveryPaused && sessionState.value !== null) {
+        const nextEntry = [...pendingInteractiveInterrupts.entries()].find(
+          ([key]) => !rejectedInteractiveInterrupts.has(key),
+        );
+
         if (!nextEntry) {
           return;
         }
 
         const [key, request] = nextEntry;
+
         try {
           await runSessionRequest({
             source: "interruptInteractiveRequests",
-            request: () => serverClient.interruptInteractiveRequests(request),
+            request: () =>
+              serverClient.interruptInteractiveRequests(
+                request,
+                interruptAbort?.signal,
+              ),
           });
+          await deliveryCheckpoint.acknowledgeInterrupt(request.deliveryId);
           pendingInteractiveInterrupts.delete(key);
           interactiveInterruptRetryDelayMs =
             INTERACTIVE_INTERRUPT_RETRY_DELAY_MS;
@@ -367,19 +565,22 @@ export async function createHostDaemonApp(
             threadIds: request.threadIds,
             ...runtimeErrorLogFields(error),
           };
+
           if (isRejectedInteractiveInterrupt(error)) {
-            pendingInteractiveInterrupts.delete(key);
+            rejectedInteractiveInterrupts.add(key);
             options.logger.warn(
               logFields,
-              "Dropped pending interactive interrupt request the server rejected",
+              "Retained pending interactive interrupt request the server rejected",
             );
             continue;
           }
+
           options.logger.warn(
             logFields,
             "Failed to flush pending interactive interrupt request",
           );
           scheduleInteractiveInterruptRetry();
+
           return;
         }
       }
@@ -389,16 +590,22 @@ export async function createHostDaemonApp(
       await flushPendingInteractiveInterruptsPromise;
     } finally {
       flushPendingInteractiveInterruptsPromise = null;
+      interruptAbort = null;
     }
   }
 
   function enqueueInteractiveInterrupt(
-    request: PendingInteractiveInterruptRequest,
+    request: Omit<PendingInteractiveInterruptRequest, "deliveryId">,
   ): void {
-    pendingInteractiveInterrupts.set(
-      buildInteractiveInterruptKey(request),
-      request,
-    );
+    const key = buildInteractiveInterruptKey(request);
+
+    if (!pendingInteractiveInterrupts.has(key)) {
+      pendingInteractiveInterrupts.set(key, {
+        ...request,
+        deliveryId: randomUUID(),
+      });
+    }
+
     if (interactiveInterruptRetryTimeout === null) {
       void flushPendingInteractiveInterrupts();
     }
@@ -407,39 +614,55 @@ export async function createHostDaemonApp(
   eventSink = createEventSink({
     isSessionOpen: () => sessionState.value !== null,
     logger: options.logger,
-    postEvents: (events) =>
+    instanceId: options.instanceId,
+    initialEvents: deliveryCheckpoint.events,
+    onAcknowledged: (events) => deliveryCheckpoint.acknowledgeEvents(events),
+    onRejected: (events) => deliveryCheckpoint.recordRejectedEvents(events),
+    postEvents: (batch, signal) =>
       runSessionRequest({
         source: "postEvents",
-        request: () => serverClient.postEvents(events),
+        request: () => serverClient.postEvents(batch, signal),
       }),
   });
 
   const interactiveRequestRegistry = new InteractiveRequestRegistry({
-    registerRequest: (request) =>
-      runSessionRequest({
+    registerRequest: (request) => {
+      const eventsThrough = eventSink.markThrough();
+
+      return runSessionRequest({
         source: "registerInteractiveRequest",
-        request: () => serverClient.registerInteractiveRequest(request),
-      }),
+        request: () =>
+          serverClient.registerInteractiveRequest(request, eventsThrough),
+      });
+    },
     onRegistrationFailure: ({ error, request }) => {
       enqueueInteractiveInterrupt({
         providerId: request.providerId,
         reason: `Failed to register interactive request while provider was waiting: ${error.message}`,
         threadIds: [request.threadId],
+        requests: [
+          {
+            interactionId: null,
+            threadId: request.threadId,
+            turnId: request.turnId ?? null,
+            providerThreadId: request.providerThreadId,
+            providerRequestId: request.providerRequestId,
+          },
+        ],
       });
     },
   });
 
   let sendServerMessage = (_message: HostDaemonDaemonWsMessage) => false;
+
   function logHostWatchError(fields: Record<string, string>): void {
     options.logger.warn(
       fields,
       "Host filesystem watch error (live updates for this path may be stale until it recovers)",
     );
   }
-  watchManager = new WatchManager({
-    hostWatcher: options.hostWatcher,
-    refreshWorkspace: (args) =>
-      runtimeManager.refreshEnvironmentWorkspace(args),
+
+  const watchManagerOptions = {
     shellEnv: () => runtimeManager.getShellEnv(),
     threadStorageRootPath,
     onThreadStorageChanged: ({ environmentId }) => {
@@ -457,6 +680,8 @@ export async function createHostDaemonApp(
       });
     },
     onWorkspaceStatusChanged: ({ environmentId, changeKinds }) => {
+      workspaceReads.invalidateEnvironment(environmentId);
+
       for (const change of changeKinds) {
         sendServerMessage({
           type: "environment-change",
@@ -466,11 +691,37 @@ export async function createHostDaemonApp(
       }
     },
     onWorkspaceMetadataChanged: ({ environmentId, workspace }) => {
-      sendServerMessage({
-        type: "environment-metadata-change",
-        environmentId,
-        workspace,
-      });
+      const publish = () =>
+        sendServerMessage({
+          type: "environment-metadata-change",
+          environmentId,
+          workspace,
+        });
+
+      if (options.hostWatcher !== undefined) {
+        publish();
+
+        return;
+      }
+
+      void runtimeManager
+        .refreshEnvironmentWorkspace({
+          environmentId,
+          workspacePath: workspace.path,
+          provision: { path: workspace.path },
+        })
+        .then(publish)
+        .catch((error: unknown) =>
+          logHostWatchError({
+            watchSource: "workspace-status",
+            environmentId,
+            rootPath: workspace.path,
+            watchError:
+              error instanceof Error
+                ? error.message
+                : "Workspace metadata refresh failed",
+          }),
+        );
     },
     onWorkspaceStatusWatchError: ({ error }) => {
       logHostWatchError({
@@ -480,11 +731,41 @@ export async function createHostDaemonApp(
         watchError: error.message,
       });
     },
-  });
+  } satisfies WatchManagerOptions;
+
+  let hostWatcher: HostWatcher;
+
+  if (options.hostWatcher === undefined) {
+    const isolated = createIsolatedWatchManager({
+      ...watchManagerOptions,
+      logger: options.logger,
+    });
+
+    watchManager = isolated;
+    hostWatcher = isolated.hostWatcher;
+  } else {
+    hostWatcher = options.hostWatcher;
+    watchManager = new WatchManager({
+      ...watchManagerOptions,
+      hostWatcher,
+      refreshWorkspace: (args) =>
+        runtimeManager.refreshEnvironmentWorkspace(args),
+    });
+  }
+
+  const commandMetadata =
+    options.hostWatcher === undefined
+      ? new IsolatedCommandMetadataCatalog((scopes) => {
+          sendServerMessage({ type: "command-catalog-change", scopes });
+        }, hostWatcher)
+      : new CommandMetadataCatalog(hostWatcher, () => {
+          sendServerMessage({ type: "command-catalog-change" });
+        });
+
   const connectTunnel = new ConnectTunnelClient({
     serverUrl: options.serverUrl,
     hostName: options.hostName,
-    machineCredential: options.serverHeaders?.["x-bb-connect-machine"],
+    machineCredential: options.serverHeaders?.["x-omnyo-connect-machine"],
     fetchFn: options.fetchFn,
     logger: options.logger,
     onIdentity: (identity) => {
@@ -500,8 +781,16 @@ export async function createHostDaemonApp(
       );
     },
   });
+
+  const agentProcessContainment = createAgentProcessContainment({
+    logger: options.logger,
+  });
+
   runtimeManager = new RuntimeManager({
+    workspaceUnscopedWriterActivity: () =>
+      terminalManager.getDirectAccessActivityCount(),
     bridgeBundleDir: options.bridgeBundleDir,
+    containProviderProcess: agentProcessContainment?.contain,
     createRuntime: options.createRuntime,
     dataDir: options.dataDir,
     dataDirSkillsRootPath,
@@ -510,12 +799,15 @@ export async function createHostDaemonApp(
         source: "fetchSkillTree",
         request: () => serverClient.fetchSkillTree(treeHash),
       }),
-    hostWatcher: options.hostWatcher,
+    hostWatcher,
     logger: options.logger,
     shellEnv: options.runtimeShellEnv,
     applyMachineEnvironment: (shell) =>
       machineEnvironment.shellEnvironment(shell),
     onEvent: ({ environmentId, event }) => {
+      if (event.type === "turn/completed")
+        workspaceReads.invalidateEnvironment(environmentId);
+
       try {
         eventSink.emit({
           threadId: event.threadId,
@@ -531,8 +823,10 @@ export async function createHostDaemonApp(
             },
             "Ignoring runtime event received after event sink disposal",
           );
+
           return;
         }
+
         throw error;
       }
     },
@@ -554,13 +848,20 @@ export async function createHostDaemonApp(
     },
     onToolCall: async (request, signal) => {
       try {
-        await flushThreadEvents();
         signal?.throwIfAborted();
+        const eventsThrough = eventSink.markThrough();
+
         return await runSessionRequest({
           source: "callTool",
-          request: () => serverClient.callTool(request, signal),
+          request: () =>
+            serverClient.callTool(request, {
+              eventsThrough,
+              ...(signal === undefined ? {} : { signal }),
+            }),
         });
       } catch (error) {
+        if (signal?.aborted && error === signal.reason) throw error;
+
         options.logger.error(
           {
             tool: request.tool,
@@ -581,7 +882,8 @@ export async function createHostDaemonApp(
       } catch (error) {
         if (
           error instanceof InteractiveRequestRegistryError &&
-          error.code === "interactive_request_rejected"
+          (error.code === "interactive_request_rejected" ||
+            error.code === "interactive_request_ended")
         ) {
           options.logger.warn(
             {
@@ -597,6 +899,7 @@ export async function createHostDaemonApp(
           );
           throw error;
         }
+
         options.logger.error(
           {
             threadId: request.threadId,
@@ -611,8 +914,28 @@ export async function createHostDaemonApp(
         throw error;
       }
     },
+    onThreadDetached: ({ providerId, threadId }) => {
+      const threadIds = [threadId];
+      const reason = `Provider "${providerId}" detached thread while awaiting user interaction`;
+
+      const requests = interactiveRequestRegistry.interruptThreads({
+        providerId,
+        threadIds,
+        reason,
+      });
+
+      if (requests.length > 0) {
+        enqueueInteractiveInterrupt({
+          providerId,
+          threadIds,
+          reason,
+          requests,
+        });
+      }
+    },
     onProcessExit: (info) => {
       const threadIds = info.threads.map((thread) => thread.threadId);
+
       if (!info.expected && info.stderr) {
         options.logger.warn(
           {
@@ -625,11 +948,14 @@ export async function createHostDaemonApp(
           "Unexpected provider process exited with stderr",
         );
       }
+
       if (threadIds.length === 0) {
         return;
       }
+
       const reason = `Provider "${info.providerId}" exited while awaiting user interaction`;
-      interactiveRequestRegistry.interruptThreads({
+
+      const requests = interactiveRequestRegistry.interruptThreads({
         providerId: info.providerId,
         threadIds,
         reason,
@@ -639,11 +965,13 @@ export async function createHostDaemonApp(
         providerId: info.providerId,
         threadIds,
         reason,
+        requests,
       });
     },
     threadStorageRootPath,
   });
   const nowMs = options.nowMs ?? Date.now;
+
   const runtimeShellEnvCache = createRuntimeShellEnvCache({
     applyShellEnv: (shellEnv) => runtimeManager.replaceBaseShellEnv(shellEnv),
     now: nowMs,
@@ -662,21 +990,25 @@ export async function createHostDaemonApp(
       ? {}
       : { resolvedAtMs: options.runtimeShellEnvResolvedAtMs }),
   });
+
   const withMaintenanceRuntime = async <TResult>(
     request: (runtime: AgentRuntime) => Promise<TResult>,
   ): Promise<TResult> => {
     await runtimeShellEnvCache.refresh({ allowStale: false });
+
     return runtimeManager.withProviderMaintenanceRuntime(
       { dataDir: options.dataDir },
       request,
     );
   };
+
   const idleProviderSessionReaper = startIdleProviderSessionReaper({
     logger: options.logger,
     nowMs: Date.now,
     runtimeManager,
     setIntervalFn: (callback, intervalMs) => {
       const timer = setInterval(callback, intervalMs);
+
       return {
         clear() {
           clearInterval(timer);
@@ -687,14 +1019,36 @@ export async function createHostDaemonApp(
       };
     },
   });
+
   const terminalManager = new TerminalManager({
     logger: options.logger,
     runtimeManager,
     sendMessage: (message) => sendServerMessage(message),
   });
+
+  const managedPreviews = new ManagedPreviewManager({
+    logger: options.logger,
+    shellEnv: () => runtimeManager.getShellEnv(),
+    markActive: (environmentId, previewId) =>
+      runtimeManager.markTerminalActive(environmentId, `preview:${previewId}`),
+    markInactive: (environmentId, previewId) =>
+      runtimeManager.markTerminalInactive(
+        environmentId,
+        `preview:${previewId}`,
+      ),
+  });
+
+  const previewTransport = new PreviewHostTransport({
+    logger: options.logger,
+    getTarget: (previewId, runId) =>
+      managedPreviews.resolveTarget(previewId, runId),
+    validateRun: (previewId, runId) =>
+      managedPreviews.validateSocketOwner(previewId, runId),
+  });
+
   const pluginHostManager = new PluginHostManager({
     dataDir: options.dataDir,
-    hostWatcher: options.hostWatcher,
+    hostWatcher,
     logger: options.logger,
     shellEnv: () => runtimeManager.getShellEnv(),
     fetchArtifact: (args) =>
@@ -727,8 +1081,34 @@ export async function createHostDaemonApp(
     _reason: string,
     _exitCode: 0 | 1,
   ): Promise<void> => undefined;
+
+  const updateOwner = `self-update:${options.instanceId}`;
+
   const serverMove = new ServerMoveService({
     ...defaultServerMoveServiceOptions(),
+    instanceId: options.instanceId,
+    getDirectAccessActivity: () => ({
+      commands: router.getDirectAccessActivityCount(),
+      runtimes: runtimeManager.getDirectAccessActivityCount(),
+      terminals:
+        terminalManager.getDirectAccessActivityCount() +
+        managedPreviews.activityCount(),
+      pluginHosts: pluginHostManager.getDirectAccessActivityCount(),
+      interactions:
+        interactiveRequestRegistry.getDirectAccessActivityCount() +
+        pendingInteractiveInterrupts.size,
+    }),
+    getRuntimeUpdateActivity: ({ ownerId, scope }) => ({
+      commands: router.getDirectAccessActivityCount(),
+      runtimes: runtimeManager.getRuntimeUpdateActivityCount(scope),
+      terminals:
+        terminalManager.getDirectAccessActivityCount() +
+        managedPreviews.activityCount(),
+      pluginHosts: pluginHostManager.getRuntimeUpdateActivityCount(),
+      interactions:
+        interactiveRequestRegistry.getDirectAccessActivityCount() +
+        (ownerId === updateOwner ? 0 : pendingInteractiveInterrupts.size),
+    }),
     dataDir: options.dataDir,
     hostId: options.hostId,
     serverUrl: options.serverUrl,
@@ -740,6 +1120,7 @@ export async function createHostDaemonApp(
     logger: options.logger,
     ...(options.fetchFn === undefined ? {} : { fetchFn: options.fetchFn }),
     isServerSessionOpen: () => sessionState.value !== null,
+    getServerSessionId: () => sessionState.value,
     getShellEnv: () => runtimeManager.getShellEnv(),
     emitProgress: (message) => {
       sendServerMessage(message);
@@ -749,6 +1130,10 @@ export async function createHostDaemonApp(
   });
 
   const router = new CommandRouter({
+    workspaceReads,
+    managedPreviews,
+    terminals: terminalManager,
+    previewTransport,
     emitEnvironmentHookProgress: (message) => sendServerMessage(message),
     desktopBrowserBroker,
     dataDir: options.dataDir,
@@ -792,12 +1177,84 @@ export async function createHostDaemonApp(
     serverMove,
     pluginHostManager,
     threadStorageRootPath,
+    agentProcessContainment,
+    commandMetadata,
     logger: options.logger,
     eventSink,
   });
 
-  let requestDaemonRestart = (): void => undefined;
+  let requestDaemonRestart = (_exitCode: HostDaemonExitCode): void => undefined;
   let requestMachineShutdown = async (): Promise<void> => undefined;
+  let restartRequested = false;
+
+  const restartAfterUpdate = () => {
+    if (restartRequested) return;
+    restartRequested = true;
+
+    const exitCode = protocolSelfUpdater.serviceInstallPending()
+      ? HOST_DAEMON_SERVICE_INSTALL_EXIT_CODE
+      : HOST_DAEMON_RESTART_EXIT_CODE;
+
+    setTimeout(() => requestDaemonRestart(exitCode), 100).unref();
+  };
+
+  const runtimeVersion = await readWorkerRuntimeVersion({
+    env: process.env,
+    packageRoot: resolvePackagedOmnyoAppRoot(process.argv[1] ?? null),
+  });
+
+  const protocolSelfUpdater = createProtocolSelfUpdater({
+    currentVersion: runtimeVersion,
+    acquireUpdate: () => serverMove.tryAcquireRuntimeUpdateHold(0, updateOwner),
+    protectUpdate: () => serverMove.restoreRuntimeUpdateHold(updateOwner),
+    releaseUpdate: () => serverMove.releaseRuntimeUpdateHold(updateOwner),
+    isIdle: () => serverMove.runtimeUpdateStatus().blockers.length === 0,
+    onInstalled: restartAfterUpdate,
+    installMode:
+      process.platform !== "win32"
+        ? "in-place"
+        : options.windowsServiceInstall === true
+          ? "service-handoff"
+          : "unsupported",
+    onBeforeRestart: (target) =>
+      prepareWorkerIdentityAdoptionRestart({
+        dataDir: options.dataDir,
+        hostId: options.hostId,
+        instanceId: options.instanceId,
+        updateOwner,
+        serverMove,
+        target,
+      }),
+    prepareUpdate: async (signal) => {
+      deliveryPaused = true;
+      clearInteractiveInterruptRetry();
+      interruptAbort?.abort();
+      await Promise.all([
+        eventSink.pauseForUpdate(signal),
+        waitForUpdateCheckpoint(
+          flushPendingInteractiveInterruptsPromise ?? Promise.resolve(),
+          signal,
+        ),
+      ]);
+      await deliveryCheckpoint.capture({
+        events: eventSink.pendingEvents(),
+        interrupts: [...pendingInteractiveInterrupts.values()],
+        signal,
+      });
+    },
+    resumeDelivery: () => {
+      deliveryPaused = false;
+      eventSink.resume();
+      void flushPendingInteractiveInterrupts();
+    },
+    dataDir: options.dataDir,
+    enabled: options.autoUpdate ?? false,
+    fetchFn: options.fetchFn,
+    logger: options.logger,
+    serverUrl: options.serverUrl,
+    machineCredential: options.serverHeaders?.["x-omnyo-connect-machine"],
+  });
+
   const connection = new ServerConnection({
     serverUrl: options.serverUrl,
     hostKey: options.hostKey,
@@ -809,27 +1266,36 @@ export async function createHostDaemonApp(
     logger: options.logger,
     serverHeaders: options.serverHeaders,
     serverClient,
-    protocolSelfUpdater: createProtocolSelfUpdater({
-      dataDir: options.dataDir,
-      enabled: options.autoUpdate ?? false,
-      fetchFn: options.fetchFn,
-      logger: options.logger,
-      serverUrl: options.serverUrl,
-    }),
-    onSelfUpdateInstalled: () => requestDaemonRestart(),
+    protocolSelfUpdater,
+    onSelfUpdateInstalled: restartAfterUpdate,
     onMachineShutdown: () => requestMachineShutdown(),
+    onInteractiveRequestsEnded: ({ reason, requests }) =>
+      interactiveRequestRegistry.endRequests(requests, reason),
     onServerMoved: (notice) => serverMove.handleServerMoved(notice),
     onMachineEnvironment: (environment) =>
       machineEnvironment.replace(environment.entries),
+    onDiagnosticsPolicy: setProcessErrorReportingEnabled,
     createWebSocket: options.createWebSocket,
     getActiveThreads: () => runtimeManager.listActiveThreads(),
     getUndeliveredEventThreadIds: () => eventSink.listUndeliveredThreadIds(),
+    getOpenThreadWork: () =>
+      collectOpenThreadWork({
+        backgroundWork: runtimeManager.listOpenBackgroundWork(),
+        interactiveRequests: interactiveRequestRegistry.listOpenRequests(),
+      }),
     getLoadedEnvironments: () => runtimeManager.listLoadedEnvironments(),
     onHostRpcRequest: async (message) => {
       const response = await router.handleOnlineRpcRequest(message);
       sendServerMessage(response);
     },
+    onCatalogRetain: (scopes) => commandMetadata.retain(scopes),
     onWatchSetReplace: async (message) => {
+      for (const target of message.workspaceTargets)
+        workspaceReads.trackEnvironment(
+          target.environmentId,
+          target.workspaceContext.workspacePath,
+        );
+
       await watchManager.replaceWatchSet({
         generation: message.generation,
         workspaceTargets: message.workspaceTargets,
@@ -842,13 +1308,55 @@ export async function createHostDaemonApp(
         ports: message.ports,
       });
     },
-    onTerminalMessage: (message) => terminalManager.handleMessage(message),
+    onTerminalMessage: async (message) => {
+      try {
+        serverMove.assertDirectAccessAdmission();
+      } catch (error) {
+        if (
+          !(error instanceof ExpectedCommandDispatchError) ||
+          (error.code !== "runtime_update_held" &&
+            error.code !== "direct_access_held") ||
+          (message.type !== "terminal.open" &&
+            message.type !== "terminal.attach")
+        )
+          throw error;
+
+        sendServerMessage({
+          type: "terminal.error",
+          requestId: message.requestId,
+          terminalId: message.terminalId,
+          code: error.code,
+          message: error.message,
+        });
+
+        return;
+      }
+
+      return terminalManager.handleMessage(message);
+    },
     onSessionOpened: async (session) => {
+      commandMetadata.invalidate();
       sessionState.value = session.sessionId;
+
+      if (session.endedInteractiveRequests.length > 0) {
+        interactiveRequestRegistry.endRequests(
+          session.endedInteractiveRequests,
+          ENDED_INTERACTIVE_REQUEST_REASON,
+        );
+        options.logger.info(
+          {
+            requests: session.endedInteractiveRequests,
+            sessionId: session.sessionId,
+          },
+          "Ended provider questions the server no longer waits on",
+        );
+      }
+
       connectTunnel.replaceAuthoritativeShareSet(session.connectShares);
       await pluginHostManager.reconcileGenerations(
         session.pluginHostGenerations,
       );
+
       if (session.retiredEnvironmentIds.length > 0) {
         await Promise.all(
           session.retiredEnvironmentIds.map((environmentId) =>
@@ -863,6 +1371,7 @@ export async function createHostDaemonApp(
           "Retired locally loaded environments after session reconciliation",
         );
       }
+
       await watchManager.replaceAuthoritativeWatchSet(session.watchSet);
       void eventSink.flush().catch((error) => {
         options.logger.warn(
@@ -874,17 +1383,20 @@ export async function createHostDaemonApp(
         );
       });
       void flushPendingInteractiveInterrupts();
+      void protocolSelfUpdater.checkForUpdates();
     },
     setSession: (session) => {
       sessionState.value = session?.sessionId ?? null;
       desktopBrowserBroker.setConnected(session !== null);
+
       if (session === null) {
-        terminalManager.releaseOutputFlowControl();
+        terminalManager.releaseOutputStreams();
         clearInteractiveInterruptRetry();
         interactiveInterruptRetryDelayMs = INTERACTIVE_INTERRUPT_RETRY_DELAY_MS;
       }
     },
   });
+
   sendServerMessage = (message) => connection.sendMessage(message);
   handleServerSessionInvalidated = (args) =>
     connection.handleSessionInvalidated(args);
@@ -899,12 +1411,37 @@ export async function createHostDaemonApp(
         devAppPort: options.devAppPort,
         appUrl: options.appUrl,
         getConnected: () => connection.sessionId != null,
+        management: {
+          hostKey: options.hostKey,
+          getStatus: () => ({
+            managementVersion: 1,
+            hostId: options.hostId,
+            instanceId: options.instanceId,
+            runtimeVersion: runtimeVersion ?? null,
+            protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+            serverUrl: options.serverUrl,
+            connected: connection.sessionId !== null,
+            automaticUpdates: options.autoUpdate ?? false,
+            admission: serverMove.runtimeUpdateStatus(),
+            pluginBlockers: pluginHostManager.getRuntimeUpdateBlockers(),
+            update: protocolSelfUpdater.getStatus(),
+          }),
+          requestUpdate: async (target) => {
+            const result = await protocolSelfUpdater.requestUpdate(target);
+
+            if (result === "updated") restartAfterUpdate();
+
+            return result;
+          },
+        },
         shellEnv: () => runtimeManager.getShellEnv(),
       })
     : null;
+
   const eventLoopStallMonitor = startEventLoopStallMonitor({
     logger: options.logger,
   });
+
   const hostDaemonHealthMonitor = startHostDaemonHealthMonitor({
     logger: options.logger,
     getWatchCounts: () => ({
@@ -926,6 +1463,9 @@ export async function createHostDaemonApp(
       await eventSink.flush();
     },
     shutdownRuntimes: async () => {
+      previewTransport.dispose();
+      await managedPreviews.shutdown();
+      await router.shutdownFilesystemMutations();
       await desktopBrowserBroker.close();
       idleProviderSessionReaper.stop();
       eventLoopStallMonitor.stop();
@@ -934,11 +1474,13 @@ export async function createHostDaemonApp(
       await options.closeMachineAuthProxy?.();
       await localApi?.close();
       connectTunnel.shutdown();
+      await commandMetadata.dispose();
+      await drainIsolatedFilesystemReaders();
       await watchManager.shutdown();
-      disposeParcelWatcherBackend();
       await terminalManager.shutdownAll();
       terminalManager.dispose();
       await runtimeManager.shutdownAll();
+      agentProcessContainment?.dispose();
       await eventSink.flush();
       await eventSink.dispose();
       await connection.shutdown();
@@ -949,21 +1491,23 @@ export async function createHostDaemonApp(
         { dataDir: options.dataDir, serverUrl: options.serverUrl },
         "Host daemon connecting",
       );
+      startFileChunkReader();
       await connection.start();
     },
   });
-  requestDaemonRestart = () => {
-    void daemon
-      .shutdown("self-update", HOST_DAEMON_RESTART_EXIT_CODE)
-      .catch((error) => {
-        options.logger.error({ err: error }, "Self-update shutdown failed");
-      });
+
+  requestDaemonRestart = (exitCode) => {
+    void daemon.shutdown("self-update", exitCode).catch((error) => {
+      options.logger.error({ err: error }, "Self-update shutdown failed");
+    });
   };
+
   requestMachineShutdown = async () => {
     await writeMachineSuspensionMarker(options.dataDir);
     sendServerMessage({ type: "machine.shutdown-ack" });
     await daemon.shutdown("machine-shutdown", 0);
   };
+
   requestServerMoveShutdown = (reason, exitCode) =>
     daemon.shutdown(reason, exitCode);
   void serverMove.resumeActivation().catch((error: unknown) => {

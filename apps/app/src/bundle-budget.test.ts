@@ -12,6 +12,7 @@ import {
 } from "../vite-bundle-stats";
 
 const execFileAsync = promisify(execFile);
+
 const checkScriptPath = resolve(
   import.meta.dirname,
   "../scripts/check-bundle-budget.mjs",
@@ -47,7 +48,9 @@ const chunks: BundleStatsChunkInput[] = [
   chunk("assets/route-only.js", {
     moduleIds: [
       "/repo/node_modules/.pnpm/@pierre+diffs@1/node_modules/@pierre/diffs/dist/index.js",
-      resolve(import.meta.dirname, "lib/x.ts").split(sep).join("/"),
+      resolve(import.meta.dirname, "lib/x.ts")
+        .split(sep)
+        .join("/"),
     ],
   }),
   chunk("assets/only-behind-dynamic-import.js", {
@@ -58,11 +61,14 @@ const chunks: BundleStatsChunkInput[] = [
 describe("computeBundleStats", () => {
   it("records a route closure without the boot chunks or lazy-only chunks", () => {
     const warn = vi.fn();
+
     const stats = computeBundleStats(
       chunks,
       { SplitWorkspaceRoute: ["/src/views/SplitWorkspaceRoute.tsx"] },
       warn,
+      resolve(import.meta.dirname, ".."),
     );
+
     if (stats === null) throw new Error("expected stats");
 
     expect(stats.bootChunks.map((c) => c.fileName)).toEqual([
@@ -70,6 +76,7 @@ describe("computeBundleStats", () => {
       "assets/index.js",
     ]);
     const route = stats.routeClosures.SplitWorkspaceRoute;
+
     if (route === undefined) throw new Error("expected the route closure");
     expect(route.entries).toEqual(["assets/SplitWorkspaceRoute.js"]);
     expect(route.chunks.map((c) => c.fileName)).toEqual([
@@ -89,7 +96,9 @@ describe("computeBundleStats", () => {
       chunks,
       { Runtime: ["/src/lib/x.ts"] },
       vi.fn(),
+      resolve(import.meta.dirname, ".."),
     );
+
     expect(
       stats?.routeClosures.Runtime?.chunks.map((chunk) => chunk.fileName),
     ).toEqual(["assets/route-only.js"]);
@@ -120,7 +129,9 @@ describe("computeBundleStats", () => {
         ],
       },
       vi.fn(),
+      resolve(import.meta.dirname, ".."),
     );
+
     const journey = stats?.routeClosures.ThreadPage;
     expect(journey?.entries).toEqual([
       "assets/SplitWorkspaceRoute.js",
@@ -136,18 +147,28 @@ describe("computeBundleStats", () => {
 
   it("drops a journey when any of its entries has no chunk", () => {
     const warn = vi.fn();
+
     const stats = computeBundleStats(
       chunks,
       { ThreadPage: ["/src/views/SplitWorkspaceRoute.tsx", "/nope.tsx"] },
       warn,
+      resolve(import.meta.dirname, ".."),
     );
+
     expect(stats?.routeClosures).toEqual({});
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("/nope.tsx"));
   });
 
   it("warns instead of throwing when a measured route has no chunk", () => {
     const warn = vi.fn();
-    const stats = computeBundleStats(chunks, { Missing: ["/nope.tsx"] }, warn);
+
+    const stats = computeBundleStats(
+      chunks,
+      { Missing: ["/nope.tsx"] },
+      warn,
+      resolve(import.meta.dirname, ".."),
+    );
+
     expect(stats?.routeClosures).toEqual({});
     expect(warn).toHaveBeenCalledTimes(1);
   });
@@ -162,11 +183,14 @@ describe("computeBundleStats", () => {
           }
         : entry,
     );
+
     const stats = computeBundleStats(
       grouped,
       { SplitWorkspaceRoute: ["/src/views/SplitWorkspaceRoute.tsx"] },
       vi.fn(),
+      resolve(import.meta.dirname, ".."),
     );
+
     expect(
       stats?.routeClosures.SplitWorkspaceRoute?.chunks.map((c) => c.fileName),
     ).toEqual(["assets/SplitWorkspaceRoute.js", "assets/route-only.js"]);
@@ -188,12 +212,16 @@ describe("computeBundleStats", () => {
               }
             : entry,
         );
+
       const warn = vi.fn();
+
       const stats = computeBundleStats(
         eager,
         { SplitWorkspaceRoute: ["/src/views/SplitWorkspaceRoute.tsx"] },
         warn,
+        resolve(import.meta.dirname, ".."),
       );
+
       expect(stats?.routeClosures).toEqual({});
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("boot payload"),
@@ -224,17 +252,21 @@ async function writeFixture(
     chunks,
     { SplitWorkspaceRoute: ["/src/views/SplitWorkspaceRoute.tsx"] },
     () => undefined,
+    resolve(import.meta.dirname, ".."),
   ),
   brotliFiles: readonly string[] = chunks.map((c) => c.fileName),
 ): Promise<Fixture> {
-  const root = await mkdtemp(resolve(tmpdir(), "bb-bundle-budget-test-"));
+  const root = await mkdtemp(resolve(tmpdir(), "omnyo-bundle-budget-test-"));
   const distDir = resolve(root, "dist");
   await mkdir(resolve(distDir, "assets"), { recursive: true });
+
   for (const fileName of brotliFiles) {
     await writeFile(resolve(distDir, `${fileName}.br`), "b".repeat(100));
   }
+
   await writeFile(resolve(root, "bundle-stats.json"), JSON.stringify(stats));
   await writeFile(resolve(root, "bundle-budget.json"), JSON.stringify(budget));
+
   return { distDir, budgetDir: root };
 }
 
@@ -245,6 +277,7 @@ async function runCheck(fixture: Fixture) {
       fixture.distDir,
       fixture.budgetDir,
     ]);
+
     return { code: 0, output: `${stdout}${stderr}` };
   } catch (error) {
     const failure = error as {
@@ -252,6 +285,7 @@ async function runCheck(fixture: Fixture) {
       stdout?: string;
       stderr?: string;
     };
+
     return {
       code: failure.code ?? 1,
       output: `${failure.stdout ?? ""}${failure.stderr ?? ""}`,
@@ -294,7 +328,9 @@ describe("check-bundle-budget", () => {
       ),
       { SplitWorkspaceRoute: ["/src/views/SplitWorkspaceRoute.tsx"] },
       () => undefined,
+      resolve(import.meta.dirname, ".."),
     );
+
     const result = await runCheck(
       await writeFixture(
         {
@@ -304,6 +340,7 @@ describe("check-bundle-budget", () => {
         stats,
       ),
     );
+
     expect(result.code).toBe(1);
     expect(result.output).toContain(
       "@dnd-kit/core is in the boot payload (assets/boot-shared.js)",
@@ -322,6 +359,7 @@ describe("check-bundle-budget", () => {
         },
       }),
     );
+
     expect(result.code).toBe(1);
     expect(result.output).toContain(
       "@pierre/diffs is in the SplitWorkspaceRoute closure (assets/route-only.js)",
@@ -340,6 +378,7 @@ describe("check-bundle-budget", () => {
         },
       }),
     );
+
     expect(result.code).toBe(1);
     expect(result.output).toContain("SplitWorkspaceRoute closure is 4.0 KB");
     expect(result.output).toContain("over the 2.9 KB raw budget");
@@ -370,6 +409,7 @@ function writeOnDemandFixture({
   katexGate?: string | null;
 }): Promise<Fixture> {
   const index = statsChunk("index.js", { facade: "src/main.tsx" });
+
   const stats: BundleStats = {
     entry: index.fileName,
     bootChunks: [index],
@@ -392,6 +432,7 @@ function writeOnDemandFixture({
     ],
     routeClosures: {},
   };
+
   return writeFixture(
     {
       maxBootBytes: 10_000,
@@ -447,6 +488,7 @@ describe("split boundaries", () => {
     async (placement) => {
       const gate = "assets/feature.js";
       const source = "src/feature.tsx";
+
       const input = [
         chunk("assets/index.js", {
           isEntry: true,
@@ -464,12 +506,16 @@ describe("split boundaries", () => {
               }),
             ]),
       ];
+
       const stats = computeBundleStats(
         input,
         { SplitWorkspaceRoute: ["/src/views/SplitWorkspaceRoute.tsx"] },
         () => {},
+        resolve(import.meta.dirname, ".."),
       );
+
       if (stats === null) throw new Error("missing stats");
+
       const result = await runCheck(
         await writeFixture(
           {
@@ -480,12 +526,17 @@ describe("split boundaries", () => {
           input.map((entry) => entry.fileName),
         ),
       );
+
       expect(result.code).toBe(placement === "lazy" ? 0 : 1);
+
       if (placement !== "lazy") expect(result.output).toContain(source);
+
       if (placement === "boot")
         expect(result.output).toContain("eager in boot");
+
       if (placement === "route")
         expect(result.output).toContain("eager in SplitWorkspaceRoute");
+
       if (placement === "missing")
         expect(result.output).toContain("absent from bundle module metadata");
     },

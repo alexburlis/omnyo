@@ -9,7 +9,7 @@ import {
 import {
   createFakePluginHost,
   makeThreadResponse,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createComment, createStore } from "../../api/index.js";
 import type { Attachment, DisplayComment } from "../../shared/contract.js";
@@ -29,9 +29,9 @@ vi.mock("../../shell/data.js", () => ({
   useTasksRpc: () => ({ call: rpcCall }),
 }));
 
-vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@get-bb/plugin-sdk/app")>()),
-  useBbNavigate: () => ({ toThread: vi.fn() }),
+vi.mock("@omnyo/plugin-sdk/app", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@omnyo/plugin-sdk/app")>()),
+  experimental_useAppNavigate: () => ({ toThread: vi.fn() }),
 }));
 
 vi.mock("../../editor/tasks-editor.js", () => ({
@@ -105,6 +105,7 @@ describe("AttachmentTracks", () => {
         onOpenImage={() => {}}
       />,
     );
+
     const file = screen.getByText("notes.md");
     const image = screen.getByAltText("shot-a.png");
     expect(
@@ -121,6 +122,7 @@ describe("AttachmentTracks", () => {
         onOpenImage={() => {}}
       />,
     );
+
     const figure = screen.getByRole("figure");
     expect(figure.contains(screen.getByAltText("shot.png"))).toBe(true);
     expect(figure.contains(screen.getByText("shot.png"))).toBe(true);
@@ -131,6 +133,7 @@ describe("activity feed entries", () => {
   it("groups one task-wide attachment listing under the comments that own each file", () => {
     const first = { ...comment("user"), id: "01HZZZZZZZZZZZZZZZZZZZZZC1" };
     const second = { ...comment("agent"), id: "01HZZZZZZZZZZZZZZZZZZZZZC2" };
+
     const file = (id: string, commentId: string | null): Attachment => ({
       id,
       taskId: commentId === null ? first.taskId : null,
@@ -200,6 +203,7 @@ describe("AgentNotificationControl", () => {
     const toggle = screen.getByRole("switch", {
       name: "Notify Fix the login bug",
     });
+
     expect(toggle.getAttribute("aria-disabled")).toBe("false");
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(toggle);
@@ -219,6 +223,7 @@ describe("AgentNotificationControl", () => {
     const toggle = screen.getByRole("switch", {
       name: "Notify Fix the login bug",
     });
+
     expect(toggle.getAttribute("aria-disabled")).toBe("false");
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(toggle);
@@ -228,6 +233,7 @@ describe("AgentNotificationControl", () => {
   it("names the full destination even for a long thread title", () => {
     const title =
       "Make all of the filters in the task list remembered across reloads";
+
     render(
       <AgentNotificationControl
         target={{ kind: "ready", title }}
@@ -254,6 +260,7 @@ describe("AgentNotificationControl", () => {
     const toggle = screen.getByRole("switch", {
       name: "Latest responding agent can’t be notified",
     });
+
     expect(toggle.getAttribute("aria-disabled")).toBe("true");
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(toggle);
@@ -273,6 +280,7 @@ describe("AgentNotificationControl", () => {
     const toggle = screen.getByRole("switch", {
       name: "No prior agent reply to notify",
     });
+
     expect(toggle.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(toggle);
     expect(onCheckedChange).not.toHaveBeenCalled();
@@ -284,15 +292,18 @@ async function renderComposerWithTask(options?: {
   holdSend?: boolean;
 }) {
   let releaseSend!: () => void;
+
   const sendGate = options?.holdSend
     ? new Promise<void>((resolve) => {
         releaseSend = resolve;
       })
     : Promise.resolve();
+
   if (!options?.holdSend) {
     releaseSend = () => {};
   }
-  const { bb, harness } = createFakePluginHost({
+
+  const { api, harness } = createFakePluginHost({
     pluginId: "tasks",
     sdk: {
       threads: {
@@ -302,16 +313,20 @@ async function renderComposerWithTask(options?: {
       },
     },
   });
-  const store = createStore(bb);
+
+  const store = createStore(api);
+
   const project = store.tasks.createProject({
     name: "Composer",
     prefix: "CMP",
     color: "blue",
   });
+
   const task = store.tasks.createTask({
     projectId: project.id,
     title: "Submit once",
   });
+
   store.tasks.createComment({
     taskId: task.id,
     kind: "agent",
@@ -323,13 +338,15 @@ async function renderComposerWithTask(options?: {
     if (method !== "createComment") {
       throw new Error(`Unexpected RPC method: ${String(method)}`);
     }
+
     const request = input as {
       taskId: string;
       body: string;
       notify: boolean;
     };
+
     return {
-      comment: await createComment(bb, store, {
+      comment: await createComment(api, store, {
         taskId: request.taskId,
         kind: "user",
         authorName: "You",
@@ -348,11 +365,13 @@ async function renderComposerWithTask(options?: {
       notificationTarget={{ kind: "ready", title: "Worker" }}
     />,
   );
+
   if (options?.body !== undefined) {
     fireEvent.change(screen.getByRole("textbox", { name: "Comment body" }), {
       target: { value: options.body },
     });
   }
+
   return { store, task, harness, releaseSend };
 }
 
@@ -362,6 +381,7 @@ describe("CommentComposer", () => {
       body: "Only once",
       holdSend: true,
     });
+
     try {
       const submit = screen.getByRole("button", { name: "Comment" });
       fireEvent.click(submit);
@@ -396,6 +416,7 @@ describe("CommentComposer", () => {
       body: "From keyboard",
       holdSend: true,
     });
+
     try {
       const body = screen.getByRole("textbox", { name: "Comment body" });
       fireEvent.keyDown(body, { key: "Enter" });
@@ -416,6 +437,7 @@ describe("CommentComposer", () => {
 
   it("does not submit when the comment is empty", async () => {
     const { harness, releaseSend } = await renderComposerWithTask({ body: "" });
+
     try {
       fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment body" }), {
         key: "Enter",

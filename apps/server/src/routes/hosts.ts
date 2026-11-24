@@ -1,24 +1,37 @@
 import { joinHostPathSegments } from "../services/lib/host-path.js";
-import { serverAccess } from "../services/machines/server-access.js";
+import {
+  serverAccess,
+  directAccessStatus,
+  convertToDirect,
+} from "../services/machines/server-access.js";
 import {
   getLatestSessionForHost,
   getNonDestroyedHost,
   getPublicProjectByLocalPathSource,
   updateHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   publicApiRoutes,
   typedRoutes,
   type PublicApiSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { Hono } from "hono";
-import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
+import { HOST_DAEMON_PROTOCOL_VERSION } from "@omnyo/host-daemon-contract";
 import type { AppDeps } from "../types.js";
 import {
   getProviderInstallations,
   serializeProviderInstallation,
 } from "../services/system/provider-installations.js";
 import { resolveBridgeLaunchForProviderId } from "../services/system/provider-bridge-launch.js";
+import {
+  providerCliUpdateResponse,
+  pendingProviderCliUpdateRequest,
+} from "../services/system/provider-cli-update.js";
+import {
+  withProviderCliStartupFailures,
+  hasProviderCliStartupFailure,
+  reconcileProviderCliStartupFailures,
+} from "../services/system/provider-cli-startup-state.js";
 import type { PluginService } from "../services/plugins/plugin-service.js";
 import { COMMAND_TIMEOUT_MS } from "../constants.js";
 import { ApiError } from "../errors.js";
@@ -37,6 +50,7 @@ import {
   resolvePrimaryHostId,
 } from "../services/hosts/primary-host.js";
 import { issueHostEnrollKey } from "../services/hosts/host-enrollment.js";
+import { setHostAvailability } from "../services/hosts/availability.js";
 import {
   callHostOnlineRpcForWork,
   callHostRetryableOnlineRpc,
@@ -60,10 +74,13 @@ import { prepareReconnect } from "../services/machines/reconnect.js";
 import { emitPluginHostDeleted } from "../services/plugins/plugin-thread-events.js";
 
 const DISCOVERED_REPOS_MAX_DEPTH = 5;
+
 const DISCOVERED_REPOS_SINCE_DAYS = 30;
+
 const DISCOVERED_REPOS_LIMIT = 10;
 
 const PROVIDER_CLI_INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
+
 const FOLDER_PICKER_TIMEOUT_MS = 10 * 60 * 1000;
 
 function providerCliInstallEventsToNdjson(events: readonly unknown[]): string {
@@ -72,9 +89,11 @@ function providerCliInstallEventsToNdjson(events: readonly unknown[]): string {
 
 function requireMutableHost(deps: AppDeps, hostId: string) {
   const host = getNonDestroyedHost(deps.db, hostId);
+
   if (!host) {
     throw new ApiError(404, "host_not_found", "Host not found");
   }
+
   return host;
 }
 
@@ -107,23 +126,28 @@ async function revokeConnectMachineCredential(
     const connectPlugin = plugins
       .list()
       .find((plugin) => plugin.source === "builtin:connect");
+
     if (!connectPlugin) throw new Error("connect plugin is not installed");
     const handler = plugins.getRpcHandler(connectPlugin.id, "revokeMachine");
+
     if (handler.outcome !== "found") {
       throw new Error(`connect plugin revoke handler is ${handler.outcome}`);
     }
+
     const result = await plugins.invokeRpcHandler(
-      connectPlugin.id,
+      handler.owner,
       "revokeMachine",
       handler.value,
       { machineId },
       { kind: "client" },
+      null,
     );
+
     if (!result.ok) throw new Error(result.error.message);
   } catch (error) {
     deps.logger.error(
       { err: error, machineId },
-      "Host was removed locally, but its bb connect machine credential could not be revoked. Revoke this machine manually from the getbb.app dashboard.",
+      "Host was removed locally, but its Omnyo connect machine credential could not be revoked. Revoke this machine manually from the Omnyo connect dashboard.",
     );
   }
 }
@@ -137,18 +161,34 @@ export function registerHostRoutes(
     onValidationError: (message) =>
       new ApiError(400, "invalid_request", message),
   });
+
   const routes = publicApiRoutes.hosts;
+  post(routes.convertToDirect, async (context) => {
+    assertHostManagementAllowed(context);
+
+    if (context.req.header("authorization") !== undefined)
+      throw new ApiError(
+        403,
+        "machine_host_management_forbidden",
+        "Machine credentials cannot manage hosts",
+      );
+
+    return context.json(await convertToDirect(deps, context.req.param("id")));
+  });
 
   post(routes.create, async (context, payload) => {
     assertHostManagementAllowed(context);
+
     return context.json(await submitMachine(deps, payload), 201);
   });
 
   post(routes.createJoinCode, async (context) => {
     assertHostManagementAllowed(context);
+
     const issued = await issueHostEnrollKey(deps, {
       enrollSource: "public-multi-machine",
     });
+
     return context.json(
       {
         joinCode: issued.enrollKey.key,
@@ -168,13 +208,24 @@ export function registerHostRoutes(
     ),
   );
 
-  get(routes.get, (context) => {
+  get(routes.get, async (context) => {
     const hostId = context.req.param("id");
     const host = requireNonDestroyedHostWithStatus(deps, hostId);
     const session = getLatestSessionForHost(deps.db, { hostId });
+
     return context.json({
       ...host,
       connectMachineId: requireMutableHost(deps, hostId).connectMachineId,
+      directAccess:
+        getGateAuthKind(context) === "machine" ||
+        context.req.header("authorization") !== undefined
+          ? {
+              status: "unavailable" as const,
+              code: "machine_host_management_forbidden",
+              message:
+                "Machine credentials cannot inspect direct access ownership",
+            }
+          : await directAccessStatus(deps, hostId),
       threadStorageRootPath:
         session === null
           ? null
@@ -185,6 +236,7 @@ export function registerHostRoutes(
   get(routes.enrollmentCommand, async (context) => {
     assertHostManagementAllowed(context);
     requireMutableHost(deps, context.req.param("id"));
+
     return context.json(
       await manualHostCommand(
         getMachineEnrollmentService(deps),
@@ -197,18 +249,21 @@ export function registerHostRoutes(
     assertHostManagementAllowed(context);
     const hostId = context.req.param("id");
     const host = requireMutableHost(deps, hostId);
+
     if (resolvePrimaryHostId(deps) === hostId || host.phase !== "active")
       throw new ApiError(
         409,
         "machine_reconnect_unavailable",
         "Only active machines other than the server's own can be reconnected",
       );
+
     if (deps.hub.hasDaemonForHost(hostId))
       throw new ApiError(
         409,
         "machine_reconnect_not_needed",
         "Machine is connected and doesn't need reconnecting",
       );
+
     return context.json(await prepareReconnect(deps, hostId), 201);
   });
 
@@ -216,13 +271,17 @@ export function registerHostRoutes(
     assertHostManagementAllowed(context);
     const hostId = context.req.param("id");
     requireMutableHost(deps, hostId);
+
     const updated = updateHost(deps.db, deps.hub, hostId, {
       name: payload.name,
     });
+
     if (!updated) {
       throw new ApiError(404, "host_not_found", "Host not found");
     }
+
     deps.hub.notifyHost(hostId, ["host-connected"]);
+
     return context.json(requireNonDestroyedHostWithStatus(deps, updated.id));
   });
 
@@ -230,20 +289,34 @@ export function registerHostRoutes(
     assertHostManagementAllowed(context);
     const hostId = context.req.param("id");
     requireMutableHost(deps, hostId);
+
     const updated = updateHost(deps.db, deps.hub, hostId, {
       maxPermissionMode: payload.maxPermissionMode,
     });
+
     if (!updated) {
       throw new ApiError(404, "host_not_found", "Host not found");
     }
+
     deps.hub.notifyHost(hostId, ["host-connected"]);
+
     return context.json(requireNonDestroyedHostWithStatus(deps, updated.id));
+  });
+
+  patch(routes.updateAvailability, (context, payload) => {
+    assertHostManagementAllowed(context);
+    const hostId = context.req.param("id");
+    requireMutableHost(deps, hostId);
+    setHostAvailability(deps, { availability: payload.availability, hostId });
+
+    return context.json(requireNonDestroyedHostWithStatus(deps, hostId));
   });
 
   post(routes.retryUpdate, (context) => {
     assertHostManagementAllowed(context);
     const hostId = context.req.param("id");
     const host = requireMutableHost(deps, hostId);
+
     if (host.lastRejectedProtocolVersion === null) {
       throw new ApiError(
         409,
@@ -251,6 +324,7 @@ export function registerHostRoutes(
         "The machine is not waiting for a protocol update",
       );
     }
+
     if (host.lastRejectedProtocolVersion >= HOST_DAEMON_PROTOCOL_VERSION) {
       throw new ApiError(
         409,
@@ -258,7 +332,9 @@ export function registerHostRoutes(
         "The machine daemon is not older than this server",
       );
     }
+
     deps.hub.requestHostProtocolUpdateRetry(hostId);
+
     return context.json({ ok: true as const });
   });
 
@@ -266,6 +342,7 @@ export function registerHostRoutes(
     assertHostManagementAllowed(context);
     const hostId = context.req.param("id");
     startMachineReconciliation(deps, hostId);
+
     return context.json(requireNonDestroyedHostWithStatus(deps, hostId), 202);
   });
 
@@ -274,6 +351,7 @@ export function registerHostRoutes(
     const hostId = context.req.param("id");
     assertNotServerMachine(deps, hostId);
     startMachineSuspension(deps, hostId);
+
     return context.json(requireNonDestroyedHostWithStatus(deps, hostId), 202);
   });
 
@@ -282,12 +360,14 @@ export function registerHostRoutes(
     const hostId = context.req.param("id");
     assertNotServerMachine(deps, hostId);
     startMachineResume(deps, hostId);
+
     return context.json(requireNonDestroyedHostWithStatus(deps, hostId), 202);
   });
 
   post(routes.retryCleanup, async (context) => {
     assertHostManagementAllowed(context);
     await retryMachineCleanup(deps, context.req.param("id"));
+
     return context.json({ ok: true as const });
   });
 
@@ -295,6 +375,7 @@ export function registerHostRoutes(
     assertHostManagementAllowed(context);
     const hostId = context.req.param("id");
     const host = requireMutableHost(deps, hostId);
+
     if (resolvePrimaryHostId(deps) === hostId) {
       throw new ApiError(
         400,
@@ -307,6 +388,7 @@ export function registerHostRoutes(
       requestMachineRemoval(deps, hostId);
       settleRemovedHostWork(deps, { hostId });
       await sweepProviderMachine(deps, hostId);
+
       return context.json({ ok: true });
     }
 
@@ -315,15 +397,21 @@ export function registerHostRoutes(
       hostId,
     });
     const sessionId = deps.hub.getDaemonSessionIdForHost(hostId);
+
     if (sessionId) {
       handleHostRemoved(deps, { hostId, sessionId });
     }
+
     settleRemovedHostWork(deps, { hostId });
+
     const destroyed = updateHost(deps.db, deps.hub, hostId, {
       destroyedAt: Date.now(),
     });
+
     deps.lifecycleDedupers.providerModelCatalogs.forgetHost(deps, hostId);
+
     if (destroyed !== null) emitPluginHostDeleted(destroyed);
+
     if (host.connectMachineId !== null) {
       await revokeConnectMachineCredential(
         deps,
@@ -331,12 +419,27 @@ export function registerHostRoutes(
         host.connectMachineId,
       );
     }
+
     return context.json({ ok: true });
+  });
+
+  get(routes.housekeeping, async (context) => {
+    const hostId = context.req.param("id");
+    assertUsableHostId(deps, { hostId });
+
+    const result = await callHostRetryableOnlineRpc(deps, {
+      hostId,
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      command: { type: "host.housekeeping.status" },
+    });
+
+    return context.json(result);
   });
 
   get(routes.discoveredRepos, async (context) => {
     const hostId = context.req.param("id");
     assertUsableHostId(deps, { hostId });
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -347,6 +450,7 @@ export function registerHostRoutes(
         limit: DISCOVERED_REPOS_LIMIT,
       },
     });
+
     return context.json({
       repos: result.repos.map((repo) => ({
         ...repo,
@@ -364,6 +468,7 @@ export function registerHostRoutes(
   get(routes.directory, async (context, query) => {
     const hostId = context.req.param("id");
     assertUsableHostId(deps, { hostId });
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -372,6 +477,7 @@ export function registerHostRoutes(
         ...(query.path ? { path: query.path } : {}),
       },
     });
+
     return context.json(result);
   });
 
@@ -379,6 +485,7 @@ export function registerHostRoutes(
     const hostId = context.req.param("id");
     assertUsableHostId(deps, { hostId });
     const project = requirePublicStandardProject(deps.db, query.projectId);
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -387,12 +494,14 @@ export function registerHostRoutes(
         projectSlug: project.name,
       },
     });
+
     return context.json(result);
   });
 
   post(routes.pathsExist, async (context, payload) => {
     const hostId = context.req.param("id");
     assertUsableHostId(deps, { hostId });
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -401,12 +510,14 @@ export function registerHostRoutes(
         paths: payload.paths,
       },
     });
+
     return context.json(result);
   });
 
   post(routes.pickFolder, async (context, payload) => {
     const hostId = context.req.param("id");
     assertUsableHostId(deps, { hostId });
+
     if (payload.clientHostId !== hostId) {
       throw new ApiError(
         409,
@@ -414,6 +525,7 @@ export function registerHostRoutes(
         "Native folder picker is only available when the browser helper and work host are on the same machine",
       );
     }
+
     const result = await callHostOnlineRpcForWork(deps, {
       hostId,
       timeoutMs: FOLDER_PICKER_TIMEOUT_MS,
@@ -421,14 +533,34 @@ export function registerHostRoutes(
         type: "host.pick_folder",
       },
     });
+
     return context.json(result);
   });
 
   get(routes.providerCliStatus, async (context) => {
     const hostId = context.req.param("id");
     assertUsableHostId(deps, { hostId });
-    const result = await getProviderInstallations(deps, { hostId });
-    return context.json(result);
+    const failed = hasProviderCliStartupFailure(deps.db, hostId);
+
+    const result = await getProviderInstallations(deps, {
+      hostId,
+      strict: failed,
+    }).catch((error: unknown) => {
+      if (failed)
+        throw new ApiError(
+          502,
+          "provider_cli_startup_failed",
+          "Automatic CLI update failed and installed versions could not be checked. Retry the version check.",
+        );
+      throw error;
+    });
+
+    if (failed && pendingProviderCliUpdateRequest(deps, hostId) === null)
+      reconcileProviderCliStartupFailures(deps.db, hostId, result);
+
+    return context.json(
+      withProviderCliStartupFailures(deps.db, hostId, result),
+    );
   });
 
   post(routes.providerCliInstall, async (context, payload) => {
@@ -436,6 +568,7 @@ export function registerHostRoutes(
     assertUsableHostId(deps, { hostId });
     await deps.providerRegistry.whenProviderRegistered(payload.provider);
     const registration = deps.providerRegistry.get(payload.provider);
+
     if (registration === null || !registration.info.maintenance.installation) {
       throw new ApiError(
         404,
@@ -443,10 +576,12 @@ export function registerHostRoutes(
         `Provider installation is unavailable for ${payload.provider}`,
       );
     }
+
     const bridgeLaunch = resolveBridgeLaunchForProviderId(
       deps,
       payload.provider,
     );
+
     if (bridgeLaunch === null) {
       throw new ApiError(
         409,
@@ -454,6 +589,16 @@ export function registerHostRoutes(
         `Provider bridge is unavailable for ${payload.provider}`,
       );
     }
+
+    if (payload.confirmInterruptingThreads) {
+      return providerCliUpdateResponse(deps, {
+        hostId,
+        providerId: payload.provider,
+        action: payload.actionKind,
+        bridgeLaunch,
+      });
+    }
+
     const result = await serializeProviderInstallation(deps, hostId, () =>
       callHostOnlineRpcForWork(deps, {
         hostId,
@@ -466,6 +611,7 @@ export function registerHostRoutes(
         },
       }),
     );
+
     if (
       result.events.some((event) => event.type === "completed" && event.success)
     ) {
@@ -478,6 +624,7 @@ export function registerHostRoutes(
         payload.provider,
       );
     }
+
     return new Response(providerCliInstallEventsToNdjson(result.events), {
       headers: {
         "content-type": "application/x-ndjson; charset=utf-8",

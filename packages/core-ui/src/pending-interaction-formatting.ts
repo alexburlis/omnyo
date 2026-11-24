@@ -7,11 +7,11 @@ import type {
   PendingInteraction,
   PendingInteractionResolution,
   PendingInteractionRequestedPermissionProfile,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   isApprovalPendingInteractionPayload,
   isUserQuestionPendingInteractionPayload,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { assertNever } from "./assert-never.js";
 import {
   describePendingInteractionToolUse,
@@ -30,28 +30,35 @@ function summarizeRequestedMacOsPermissions(
   }
 
   const summaries: string[] = [];
+
   if (permissions.accessibility) {
     summaries.push("macOS accessibility");
   }
+
   if (permissions.launchServices) {
     summaries.push("macOS launch services");
   }
+
   if (permissions.calendar) {
     summaries.push("macOS calendar");
   }
+
   if (permissions.reminders) {
     summaries.push("macOS reminders");
   }
+
   if (permissions.preferences !== "none") {
     summaries.push(
       `macOS preferences (${permissions.preferences.replace("_", " ")})`,
     );
   }
+
   if (permissions.contacts !== "none") {
     summaries.push(
       `macOS contacts (${permissions.contacts.replace("_", " ")})`,
     );
   }
+
   if (permissions.automations === "all") {
     summaries.push("macOS automation (all apps)");
   } else if (
@@ -72,9 +79,11 @@ export function summarizePendingInteractionRequestedPermissions(
   permissions: PendingInteractionPermissionSummaryProfile,
 ): string[] {
   const summaries: string[] = [];
+
   if (permissions.network?.enabled === true) {
     summaries.push("Network access");
   }
+
   if (permissions.fileSystem) {
     if (permissions.fileSystem.read.length > 0) {
       summaries.push(
@@ -83,6 +92,7 @@ export function summarizePendingInteractionRequestedPermissions(
           : `Read ${permissions.fileSystem.read.length} paths`,
       );
     }
+
     if (permissions.fileSystem.write.length > 0) {
       summaries.push(
         permissions.fileSystem.write.length === 1
@@ -130,8 +140,10 @@ function formatPermissionSummaryLine(
   if (permissions === null) {
     return null;
   }
+
   const summaries =
     summarizePendingInteractionRequestedPermissions(permissions);
+
   return summaries.length > 0 ? `${label}: ${summaries.join(", ")}` : null;
 }
 
@@ -141,18 +153,22 @@ export function formatPendingInteractionSubjectDetailLines(
   if (isUserQuestionPendingInteractionPayload(interaction.payload)) {
     return interaction.payload.questions.map((question) => question.prompt);
   }
+
   if (!isApprovalPendingInteractionPayload(interaction.payload)) {
     return [];
   }
+
   switch (interaction.payload.subject.kind) {
     case "command": {
       const actionLines = summarizeCommandActions(
         interaction.payload.subject.actions,
       ).map((action) => `Action: ${action}`);
+
       const sessionGrant = formatPermissionSummaryLine(
         "Session grant",
         interaction.payload.subject.sessionGrant,
       );
+
       return [
         `Command: ${interaction.payload.subject.command}`,
         ...(interaction.payload.subject.cwd
@@ -162,11 +178,13 @@ export function formatPendingInteractionSubjectDetailLines(
         ...(sessionGrant ? [sessionGrant] : []),
       ];
     }
+
     case "file_change": {
       const sessionGrant = formatPermissionSummaryLine(
         "Session grant",
         interaction.payload.subject.sessionGrant,
       );
+
       return [
         `Item: ${interaction.payload.subject.itemId}`,
         ...(interaction.payload.subject.writeScope
@@ -175,10 +193,12 @@ export function formatPendingInteractionSubjectDetailLines(
         ...(sessionGrant ? [sessionGrant] : []),
       ];
     }
+
     case "permission_grant": {
       const permissions = summarizePendingInteractionRequestedPermissions(
         interaction.payload.subject.permissions,
       );
+
       return [
         ...(interaction.payload.subject.toolName
           ? [`Tool: ${interaction.payload.subject.toolName}`]
@@ -186,11 +206,13 @@ export function formatPendingInteractionSubjectDetailLines(
         ...permissions.map((permission) => `Permission: ${permission}`),
       ];
     }
+
     case "plan": {
       return interaction.payload.subject.planFilePath
         ? [`Plan file: ${interaction.payload.subject.planFilePath}`]
         : [];
     }
+
     case "tool_use":
       return formatPendingInteractionToolUseDetailLines(
         describePendingInteractionToolUse({
@@ -239,6 +261,7 @@ function resolveGrantedPermissionsForApproval(
   if (!isApprovalPendingInteractionPayload(interaction.payload)) {
     return null;
   }
+
   if (interaction.payload.subject.kind === "permission_grant") {
     return toGrantedPermissions(interaction.payload.subject.permissions);
   }

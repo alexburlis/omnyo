@@ -43,11 +43,13 @@ function EnvironmentOptionsStrip({
   worktreeValue = null,
 }: EnvironmentOptionsStripProps) {
   const [projectValue, setProjectValue] = useState<string | null>(
-    project?.value ?? PROJECT_IDS.bb,
+    project?.value ?? PROJECT_IDS.omnyo,
   );
+
   const environmentValue = environment?.value ?? "provider:project-checkout";
   const showReuseEnvironmentPicker = environmentValue === "reuse";
   const showBranchPicker = environmentValue === "provider:git-worktree";
+
   return (
     <div data-promptbox-shell="" className="w-full min-w-0 max-w-[760px]">
       <div className="mt-1 flex min-w-0 max-w-full items-center gap-1 border border-transparent px-3.5">

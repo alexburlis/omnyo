@@ -1,4 +1,4 @@
-import { turnScope } from "@bb/domain";
+import { turnScope } from "@omnyo/domain";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createConnection, type DbConnection } from "../../src/connection.js";
@@ -31,9 +31,11 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup() {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "completed-output-migration-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "completed-output-migration-project",
     source: {
@@ -42,10 +44,12 @@ function setup() {
       type: "local_path",
     },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
   });
+
   return { db, thread };
 }
 
@@ -55,6 +59,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readOutput(data: string, outputPath: string): string {
   const value: unknown = JSON.parse(data);
+
   if (
     !isRecord(value) ||
     !isRecord(value.item) ||
@@ -62,11 +67,13 @@ function readOutput(data: string, outputPath: string): string {
   ) {
     throw new Error(`Expected string output at ${outputPath}`);
   }
+
   return value.item[outputPath];
 }
 
 function readLegacyImageGenerationOutput(data: string): string {
   const value: unknown = JSON.parse(data);
+
   if (
     !isRecord(value) ||
     !isRecord(value.rawEvent) ||
@@ -76,6 +83,7 @@ function readLegacyImageGenerationOutput(data: string): string {
   ) {
     throw new Error("Expected legacy image generation result");
   }
+
   return value.rawEvent.params.item.result;
 }
 
@@ -191,23 +199,40 @@ describe("completed event output migration", () => {
     (kind) => {
       const { db, thread } = setup();
       const migratedAt = 1_800_000_000_000;
+
       try {
         const args = {
-          db, threadId: thread.id, eventId: "rewrite", sequence: 1,
-          createdAt: migratedAt - 1, output: "x".repeat(50_000),
+          db,
+          threadId: thread.id,
+          eventId: "rewrite",
+          sequence: 1,
+          createdAt: migratedAt - 1,
+          output: "x".repeat(50_000),
         };
+
         if (kind === "completed")
-          insertLegacyOutput({ ...args, itemKind: "commandExecution", outputPath: "aggregatedOutput" });
+          insertLegacyOutput({
+            ...args,
+            itemKind: "commandExecution",
+            outputPath: "aggregatedOutput",
+          });
         else insertLegacyImageGeneration(args);
-        const migrateOutput = () => kind === "completed"
-          ? migrateCommandOutput(db, migratedAt)
-          : migrateLegacyImageGeneration(db, migratedAt);
+
+        const migrateOutput = () =>
+          kind === "completed"
+            ? migrateCommandOutput(db, migratedAt)
+            : migrateLegacyImageGeneration(db, migratedAt);
+
         const before = listStoredEventRows(db, { threadId: thread.id });
-        expect(() => db.transaction(() => {
-          expect(migrateOutput().action).toBe("migrated");
-          throw new Error("rollback rewrite");
-        })).toThrow("rollback rewrite");
-        expect(listStoredEventRows(db, { threadId: thread.id })).toEqual(before);
+        expect(() =>
+          db.transaction(() => {
+            expect(migrateOutput().action).toBe("migrated");
+            throw new Error("rollback rewrite");
+          }),
+        ).toThrow("rollback rewrite");
+        expect(listStoredEventRows(db, { threadId: thread.id })).toEqual(
+          before,
+        );
         expect(db.select().from(threadPruningWork).all()).toEqual([]);
         expect(migrateOutput().action).toBe("migrated");
         expect(db.select().from(threadPruningWork).all()).toEqual([
@@ -222,10 +247,12 @@ describe("completed event output migration", () => {
   it("migrates one retained legacy inline output without changing raw reads", () => {
     const migratedAt = 1_800_000_000_000;
     const createdAt = migratedAt - 60_000;
+
     const output =
       "legacy-head-" +
       "x".repeat(COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS) +
       "-legacy-tail";
+
     const { db, thread } = setup();
     insertLegacyOutput({
       createdAt,
@@ -254,9 +281,11 @@ describe("completed event output migration", () => {
     });
 
     const [stored] = listStoredEventRows(db, { threadId: thread.id });
+
     if (!stored) {
       throw new Error("Expected migrated event");
     }
+
     expect(readOutput(stored.data, "aggregatedOutput")).not.toBe(output);
     const [hydrated] = hydrateRetainedEventOutputRows(db, [stored], migratedAt);
     expect(hydrated && readOutput(hydrated.data, "aggregatedOutput")).toBe(
@@ -267,10 +296,13 @@ describe("completed event output migration", () => {
 
   it("migrates every authoritative output path one row at a time", () => {
     const migratedAt = 1_800_000_000_000;
+
     const output = "p".repeat(
       COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS + 1,
     );
+
     const { db, thread } = setup();
+
     for (const [index, target] of RETAINED_EVENT_OUTPUT_TARGETS.entries()) {
       insertLegacyOutput({
         ...target,
@@ -303,14 +335,17 @@ describe("completed event output migration", () => {
     );
     const stored = listStoredEventRows(db, { threadId: thread.id });
     const hydrated = hydrateRetainedEventOutputRows(db, stored, migratedAt);
+
     for (const [index, target] of RETAINED_EVENT_OUTPUT_TARGETS.entries()) {
       const row = hydrated.find(
         (candidate) => candidate.id === `evt_path_${index}`,
       );
+
       expect(row && readOutput(row.data, target.outputPath)).toBe(
         `${target.itemKind}-${output}`,
       );
     }
+
     db.$client.close();
   });
 
@@ -337,11 +372,13 @@ describe("completed event output migration", () => {
       retained: true,
     });
     const [stored] = listStoredEventRows(db, { threadId: thread.id });
+
     const [hydrated] = hydrateRetainedEventOutputRows(
       db,
       stored ? [stored] : [],
       migratedAt,
     );
+
     expect(hydrated && readOutput(hydrated.data, "aggregatedOutput")).toBe(
       output,
     );
@@ -371,9 +408,11 @@ describe("completed event output migration", () => {
     });
     expect(db.select().from(retainedEventOutputs).all()).toEqual([]);
     const [stored] = listStoredEventRows(db, { threadId: thread.id });
+
     if (!stored) {
       throw new Error("Expected expired migrated event");
     }
+
     expect(readOutput(stored.data, "aggregatedOutput")).not.toBe(output);
     expect(
       hydrateRetainedEventOutputRows(db, [stored], migratedAt)[0]?.data,
@@ -490,6 +529,7 @@ describe("completed event output migration", () => {
     const migratedAt = 1_800_000_000_000;
     const output = "window-" + "v".repeat(40_000);
     const setupResult = setup();
+
     for (let sequence = 1; sequence <= 20; sequence += 1) {
       insertLegacyOutput({
         createdAt: migratedAt - 1,
@@ -589,9 +629,11 @@ describe("completed event output migration", () => {
       migratedRows: 1,
     });
     expect(db.select().from(retainedEventOutputs).all()).toHaveLength(1);
+
     const oversized = listStoredEventRows(db, { threadId: thread.id }).find(
       (row) => row.id === "evt_oversized_inline",
     );
+
     expect(JSON.parse(oversized?.data ?? "").item.aggregatedOutput).toBe(
       oversizedOutput,
     );
@@ -650,18 +692,22 @@ describe("completed event output migration", () => {
       threadId: thread.id,
     });
     const [stored] = listStoredEventRows(db, { threadId: thread.id });
+
     if (!stored) {
       throw new Error("Expected migrated legacy image generation event");
     }
+
     expect(stored.type).toBe("provider/unhandled");
     expect(stored.itemKind).toBeNull();
     expect(readLegacyImageGenerationOutput(stored.data)).not.toBe(output);
+
     const [hydrated] = hydrateRetainedEventOutputRowsWithinDataByteLimit(
       db,
       [stored],
       8 * 1024 * 1024,
       migratedAt,
     );
+
     expect(hydrated && readLegacyImageGenerationOutput(hydrated.data)).toBe(
       output,
     );
@@ -674,6 +720,7 @@ describe("completed event output migration", () => {
   it("resumes legacy image migration one row at a time with independent cursor state", () => {
     const migratedAt = 1_800_000_000_000;
     const setupResult = setup();
+
     for (const sequence of [1, 2]) {
       insertLegacyImageGeneration({
         createdAt: migratedAt - 1,
@@ -684,6 +731,7 @@ describe("completed event output migration", () => {
         threadId: setupResult.thread.id,
       });
     }
+
     expect(
       migrateLegacyImageGeneration(setupResult.db, migratedAt),
     ).toMatchObject({
@@ -714,6 +762,7 @@ describe("completed event output migration", () => {
   it("bounds a sparse legacy image scan by all event rows across restart", () => {
     const migratedAt = 1_800_000_000_000;
     const setupResult = setup();
+
     for (const sequence of [1, 2]) {
       insertLegacyOutput({
         createdAt: migratedAt - sequence,
@@ -726,6 +775,7 @@ describe("completed event output migration", () => {
         threadId: setupResult.thread.id,
       });
     }
+
     insertLegacyImageGeneration({
       createdAt: migratedAt - 10_000,
       db: setupResult.db,
@@ -770,6 +820,7 @@ describe("completed event output migration", () => {
       sequence: 1,
       threadId: thread.id,
     });
+
     const malformedData = JSON.stringify({
       providerId: "codex",
       rawEvent: {
@@ -788,6 +839,7 @@ describe("completed event output migration", () => {
       },
       rawType: "item/completed",
     });
+
     db.insert(events)
       .values({
         createdAt: migratedAt - 1,
@@ -825,6 +877,7 @@ describe("completed event output migration", () => {
   it("advances past a malformed legacy image candidate across restart", () => {
     const migratedAt = 1_800_000_000_000;
     const setupResult = setup();
+
     const malformedData = JSON.stringify({
       providerId: "codex",
       rawEvent: {
@@ -842,6 +895,7 @@ describe("completed event output migration", () => {
       },
       rawType: "item/completed",
     });
+
     setupResult.db
       .insert(events)
       .values({

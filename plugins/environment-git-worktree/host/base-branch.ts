@@ -1,47 +1,79 @@
 import {
+  hasRef,
+  readBranchRelation,
   readDefaultBranchRefs,
-  type DefaultBranchRelation,
-} from "bb-environment-provider-host/git";
+  resolveDefaultBaseBranch,
+} from "omnyo-environment-provider-host/git";
 import type { WorktreeBaseBranch } from "../contract.js";
 
-interface ResolveDefaultWorktreeBaseBranchArgs {
-  defaultBranch: string | null;
-  defaultBranchRelation: DefaultBranchRelation | null;
-  originDefaultBranch: string | null;
+export interface ResolvedWorktreeBaseBranch {
+  ref: string;
+  fetchFailureFallback: boolean;
 }
 
-export function resolveDefaultWorktreeBaseBranch(
-  args: ResolveDefaultWorktreeBaseBranchArgs,
-): string | null {
-  if (!args.originDefaultBranch) {
-    return args.defaultBranch;
-  }
-  if (!args.defaultBranch) {
-    return args.originDefaultBranch;
-  }
+function resolvedBaseBranch(
+  ref: string | null,
+  automaticRemoteRef: string | null,
+): ResolvedWorktreeBaseBranch | null {
+  if (ref === null) return null;
+
+  return { ref, fetchFailureFallback: ref === automaticRemoteRef };
+}
+
+async function resolveNamedBaseBranch(
+  sourcePath: string,
+  name: string,
+): Promise<ResolvedWorktreeBaseBranch | null> {
   if (
-    args.defaultBranchRelation === "equal" ||
-    args.defaultBranchRelation === "local-behind"
+    name.startsWith("refs/") ||
+    (await hasRef(sourcePath, `refs/remotes/${name}`))
   ) {
-    return args.originDefaultBranch;
+    return resolvedBaseBranch(name, null);
   }
-  return args.defaultBranch;
+
+  const [hasLocalBranch, hasRemoteBranch] = await Promise.all([
+    hasRef(sourcePath, `refs/heads/${name}`),
+    hasRef(sourcePath, `refs/remotes/origin/${name}`),
+  ]);
+
+  if (!hasRemoteBranch) return resolvedBaseBranch(name, null);
+
+  const localBranch = hasLocalBranch ? name : null;
+  const remoteBranch = `origin/${name}`;
+
+  return resolvedBaseBranch(
+    resolveDefaultBaseBranch({
+      defaultBranch: localBranch,
+      originDefaultBranch: remoteBranch,
+      defaultBranchRelation:
+        (await readBranchRelation(
+          sourcePath,
+          localBranch ?? undefined,
+          remoteBranch,
+        )) ?? null,
+    }),
+    remoteBranch,
+  );
 }
 
 export async function resolveWorktreeBaseBranch(
   sourcePath: string,
   requested: WorktreeBaseBranch,
-): Promise<string | null> {
+): Promise<ResolvedWorktreeBaseBranch | null> {
   if (requested.kind === "named") {
-    return requested.name;
+    return resolveNamedBaseBranch(sourcePath, requested.name);
   }
+
   const refs = await readDefaultBranchRefs(sourcePath);
-  const resolved = resolveDefaultWorktreeBaseBranch({
+  const originDefaultBranch = refs.originDefaultBranch ?? null;
+
+  const resolved = resolveDefaultBaseBranch({
     defaultBranch: refs.defaultBranch ?? null,
     defaultBranchRelation: refs.defaultBranchRelation ?? null,
-    originDefaultBranch: refs.originDefaultBranch ?? null,
+    originDefaultBranch,
   });
+
   return resolved && resolved !== (refs.defaultBranch ?? null)
-    ? resolved
+    ? resolvedBaseBranch(resolved, originDefaultBranch)
     : null;
 }

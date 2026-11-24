@@ -19,16 +19,19 @@ export interface LoadRemoteServerPageArgs {
 
 function describeServerUrl(serverUrl: string): string {
   let parsed: URL;
+
   try {
     parsed = new URL(serverUrl);
   } catch {
-    return "the saved bb server";
+    return "the saved Omnyo server";
   }
-  return `the bb server at ${parsed.origin}`;
+
+  return `the Omnyo server at ${parsed.origin}`;
 }
 
 function formatLoadFailure(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
+
   return ELECTRON_LOAD_ERROR_CODE.exec(message)?.[0] ?? "the page load failed";
 }
 
@@ -37,11 +40,13 @@ export async function loadRemoteServerPage(
 ): Promise<boolean> {
   try {
     await args.loadUrl({ url: args.serverUrl });
+
     return true;
   } catch (error) {
     if (!args.isCurrent()) {
       return false;
     }
+
     const label = describeServerUrl(args.serverUrl);
     args.logWarning(
       `[desktop] could not load ${label}: ${formatLoadFailure(error)}`,
@@ -55,8 +60,9 @@ export async function loadRemoteServerPage(
         `${label.charAt(0).toUpperCase()}${label.slice(1)} did not answer. ` +
         "Check that the machine is awake and reachable.",
       logs: "",
-      title: "Could not reach this bb server",
+      title: "Could not reach this Omnyo server",
     });
+
     return false;
   }
 }

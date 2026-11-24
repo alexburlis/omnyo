@@ -7,9 +7,18 @@ import {
   startUiPreferencesSync,
 } from "./ui-preferences-sync";
 
+type UiPreferencesLoadState = "loading" | "loaded" | "failed";
+
+export function useUiPreferencesLoadState(): UiPreferencesLoadState {
+  const { data, errorUpdateCount } = useUiPreferences();
+
+  if (data !== undefined) return "loaded";
+
+  return errorUpdateCount > 0 ? "failed" : "loading";
+}
+
 export function useUiPreferencesReady(): boolean {
-  const { data, isError } = useUiPreferences();
-  return data !== undefined || isError;
+  return useUiPreferencesLoadState() !== "loading";
 }
 
 export function UiPreferencesSync() {

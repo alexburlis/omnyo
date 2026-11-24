@@ -1,9 +1,10 @@
-import { providerInfoSchema } from "@bb/domain";
+import { providerInfoSchema } from "@omnyo/domain";
 import { z } from "zod";
 import { createLastKnownCache } from "@/lib/last-known-cache";
 
 const providerListCache = createLastKnownCache({
-  prefix: "bb.provider-list",
+  prefix: "omnyo.provider-list",
+  obsoletePrefixes: ["bb.provider-list"],
   version: "2",
   schema: z.array(providerInfoSchema),
   maxEntries: 16,
@@ -20,4 +21,7 @@ export function providerListCacheKey({
 }
 
 export const readCachedProviderList = providerListCache.read;
+
 export const writeCachedProviderList = providerListCache.write;
+
+export const clearCachedProviderLists = providerListCache.clear;

@@ -65,6 +65,7 @@ export function SidebarVisibilityCustomize({
 }) {
   const orderedIds = useMemo(() => items.map((item) => item.id), [items]);
   const visibleIdSet = useMemo(() => new Set(visibleIds), [visibleIds]);
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       if (
@@ -76,6 +77,7 @@ export function SidebarVisibilityCustomize({
     },
     [onReorder],
   );
+
   const { dndContextProps, onClickCapture } = useSidebarReorderDnd({
     onDragEnd: handleDragEnd,
     touchSensor,
@@ -144,10 +146,12 @@ function SidebarCustomizeItem({
   testIdPrefix: string;
 }) {
   const checkboxId = useId();
+
   const { dragBindings, setNodeRef, style } = useSidebarSortable({
     id: item.id,
     disabled: reorderDisabled,
   });
+
   const isNavigation = testIdPrefix === "sidebar-navigation";
 
   return (

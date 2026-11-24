@@ -88,6 +88,7 @@ describe("TabPill", () => {
     const closeButton = screen.getByRole("button", {
       name: "Close File preview",
     });
+
     expect(
       closeButton.classList.contains("max-md:pointer-coarse:min-h-9"),
     ).toBe(true);

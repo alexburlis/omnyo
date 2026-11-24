@@ -17,16 +17,13 @@ import { createRenameFailingFileSystem } from "./atomic-write-helpers.mjs";
 const scriptPath = fileURLToPath(
   new URL("../../../scripts/bump-plugin-sdk.mjs", import.meta.url),
 );
+
 const MANIFEST_PATH = "packages/plugin-sdk/package.json";
+
 const VERSION_MODULE_PATH = "packages/domain/src/plugin-sdk-version.ts";
+
 const testRoots = [];
 
-/**
- * The real plugin-sdk-version.ts carries a long comment that cites version
- * numbers ("any earlier 0.x", "0.4.3 releases"). The fixture reproduces that so
- * a bump that rewrites prose instead of the export is a test failure, not a
- * surprise in a release commit.
- */
 function createVersionModule(version) {
   return `// The major is the plugin API compatibility number. Pre-1.0, a plugin
 // built against any earlier 0.x keeps loading, so ${version} stays compatible.
@@ -38,7 +35,7 @@ export const PLUGIN_SDK_MAJOR = Number(PLUGIN_SDK_VERSION.split(".", 1)[0]);
 }
 
 function createTestRepo({ manifestVersion, moduleVersion }) {
-  const repoRoot = mkdtempSync(join(tmpdir(), "bb-bump-plugin-sdk-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "omnyo-bump-plugin-sdk-"));
   testRoots.push(repoRoot);
 
   mkdirSync(join(repoRoot, "packages", "plugin-sdk"), { recursive: true });
@@ -47,7 +44,7 @@ function createTestRepo({ manifestVersion, moduleVersion }) {
     join(repoRoot, MANIFEST_PATH),
     `${JSON.stringify(
       {
-        name: "@get-bb/plugin-sdk",
+        name: "@omnyo/plugin-sdk",
         version: manifestVersion,
         files: ["bundled-types", "dist", "README.md"],
       },
@@ -82,7 +79,7 @@ function readModuleVersion(repoRoot) {
 function runScript(repoRoot, args) {
   return spawnSync(process.execPath, [scriptPath, ...args], {
     encoding: "utf8",
-    env: { ...process.env, BB_BUMP_PLUGIN_SDK_REPO_ROOT: repoRoot },
+    env: { ...process.env, OMNYO_BUMP_PLUGIN_SDK_REPO_ROOT: repoRoot },
   });
 }
 
@@ -98,10 +95,11 @@ describe("bump-plugin-sdk", () => {
       manifestVersion: "0.4.3",
       moduleVersion: "0.4.3",
     });
+
     const result = runScript(repoRoot, ["--patch"]);
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("@get-bb/plugin-sdk 0.4.3 → 0.4.4");
+    expect(result.stdout).toContain("@omnyo/plugin-sdk 0.4.3 → 0.4.4");
     expect(readManifestVersion(repoRoot)).toBe("0.4.4");
     expect(readModuleVersion(repoRoot)).toBe("0.4.4");
   });
@@ -127,6 +125,7 @@ describe("bump-plugin-sdk", () => {
       manifestVersion: "0.4.3",
       moduleVersion: "0.4.2",
     });
+
     const originalManifest = readContent(repoRoot, MANIFEST_PATH);
     const originalModule = readContent(repoRoot, VERSION_MODULE_PATH);
     const result = runScript(repoRoot, ["--patch"]);
@@ -142,6 +141,7 @@ describe("bump-plugin-sdk", () => {
       manifestVersion: "0.4.3",
       moduleVersion: "0.4.3",
     });
+
     const result = runScript(repoRoot, ["0.4.3"]);
 
     expect(result.status).not.toBe(0);
@@ -156,6 +156,7 @@ describe("bump-plugin-sdk", () => {
       manifestVersion: "0.4.3",
       moduleVersion: "0.4.3",
     });
+
     const originalManifest = readContent(repoRoot, MANIFEST_PATH);
     const originalModule = readContent(repoRoot, VERSION_MODULE_PATH);
     const { fileSystem } = createRenameFailingFileSystem(2);
@@ -169,8 +170,6 @@ describe("bump-plugin-sdk", () => {
       }),
     ).rejects.toThrow("simulated rename failure");
 
-    // A half-applied bump is the exact drift this script prevents, so the
-    // already-renamed manifest must be rolled back.
     expect(readContent(repoRoot, MANIFEST_PATH)).toBe(originalManifest);
     expect(readContent(repoRoot, VERSION_MODULE_PATH)).toBe(originalModule);
     expect(

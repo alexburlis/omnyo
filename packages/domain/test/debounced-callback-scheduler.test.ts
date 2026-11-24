@@ -9,6 +9,7 @@ describe("createDebouncedCallbackScheduler", () => {
   it("debounces repeated schedules into a single flush", async () => {
     vi.useFakeTimers();
     const onFlush = vi.fn();
+
     const scheduler = createDebouncedCallbackScheduler({
       debounceMs: 100,
       maxWaitMs: 500,
@@ -31,6 +32,7 @@ describe("createDebouncedCallbackScheduler", () => {
   it("flushes at max wait while schedules keep resetting the debounce timer", async () => {
     vi.useFakeTimers();
     const onFlush = vi.fn();
+
     const scheduler = createDebouncedCallbackScheduler({
       debounceMs: 100,
       maxWaitMs: 250,
@@ -53,6 +55,7 @@ describe("createDebouncedCallbackScheduler", () => {
   it("flushes immediately and clears pending timers", async () => {
     vi.useFakeTimers();
     const onFlush = vi.fn();
+
     const scheduler = createDebouncedCallbackScheduler({
       debounceMs: 100,
       maxWaitMs: 500,
@@ -72,6 +75,7 @@ describe("createDebouncedCallbackScheduler", () => {
   it("does not flush after disposal", async () => {
     vi.useFakeTimers();
     const onFlush = vi.fn();
+
     const scheduler = createDebouncedCallbackScheduler({
       debounceMs: 100,
       maxWaitMs: 500,

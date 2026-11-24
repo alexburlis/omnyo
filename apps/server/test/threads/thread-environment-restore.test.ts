@@ -4,9 +4,9 @@ import {
   listEvents,
   environments,
   updateHost,
-} from "@bb/db";
-import { apiErrorSchema, threadResponseSchema } from "@bb/server-contract";
-import { validatePluginEnvironmentProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/db";
+import { apiErrorSchema, threadResponseSchema } from "@omnyo/server-contract";
+import { validatePluginEnvironmentProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import { sweepProviderEnvironment } from "../../src/services/environments/environment-engine.js";
@@ -24,18 +24,21 @@ import {
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
 const PROVIDER_ID = "test-worktree";
-const BRANCH_NAME = "bb/important-work";
+
+const BRANCH_NAME = "omnyo/important-work";
 
 function registerProvider(
   options: { pluginId?: string; restorable?: boolean } = {},
 ) {
   const createCalls: string[] = [];
   const restoreCalls: (string | null)[] = [];
+
   const created = {
     status: "created" as const,
     path: "/tmp/restored-worktree",
     ownsPath: true,
   };
+
   const record = {
     pluginId: options.pluginId ?? "test",
     provider: validatePluginEnvironmentProviderDeclaration({
@@ -46,6 +49,7 @@ function registerProvider(
       policy: { retireGraceMs: 0, pathKeys: "per-attempt" },
       create: async (context) => {
         createCalls.push(context.suggestedBranchName);
+
         return created;
       },
       ...(options.restorable === false
@@ -53,12 +57,14 @@ function registerProvider(
         : {
             restore: async (context) => {
               restoreCalls.push(context.previous.environment.branchName);
+
               return created;
             },
           }),
       remove: async () => ({ status: "removed" }),
     }),
   };
+
   setPluginEnvironmentProviderBridge({
     listEnvironmentProviders: () => [record],
     getEnvironmentProvider: (id) =>
@@ -69,6 +75,7 @@ function registerProvider(
     }),
     decisionTimeoutMs: 10_000,
   });
+
   return { createCalls, restoreCalls, record };
 }
 
@@ -77,10 +84,12 @@ function seedDestroyableThread(
   options: { ranTurn?: boolean } = {},
 ) {
   const { host } = seedHostSession(harness.deps, { id: "host_restore" });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: "/tmp/project",
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
@@ -90,11 +99,13 @@ function seedDestroyableThread(
     providerOwnsPath: true,
     branchName: BRANCH_NAME,
   });
+
   const thread = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
     status: "idle",
   });
+
   if (options.ranTurn !== false) {
     seedThreadRuntimeState(harness.deps, {
       environmentId: environment.id,
@@ -102,6 +113,7 @@ function seedDestroyableThread(
       threadId: thread.id,
     });
   }
+
   return { environment, host, project, thread };
 }
 
@@ -113,6 +125,7 @@ async function archiveAndDestroy(
     `/api/v1/threads/${args.threadId}/archive-all`,
     { method: "POST" },
   );
+
   expect(archived.status).toBe(200);
   await sweepProviderEnvironment(harness.deps, args.environmentId);
   expect(
@@ -128,9 +141,12 @@ async function restore(
   harness: TestAppHarness,
   threadId: string,
 ): Promise<Response> {
-  return harness.app.request(`/api/v1/threads/${threadId}/restore-environment`, {
-    method: "POST",
-  });
+  return harness.app.request(
+    `/api/v1/threads/${threadId}/restore-environment`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 async function unarchive(
@@ -161,6 +177,7 @@ describe("POST /threads/:id/restore-environment (#1710)", () => {
         listEvents(harness.db, { threadId: thread.id }).filter(
           (event) => event.type === "client/turn/requested",
         ).length;
+
       const turnRequestsBefore = countTurnRequests();
       const response = await restore(harness, thread.id);
       expect(response.status, await response.clone().text()).toBe(200);
@@ -190,9 +207,11 @@ describe("POST /threads/:id/restore-environment (#1710)", () => {
       await advanceThreadProvisioning(harness.deps, { threadId: thread.id });
 
       expect(getThread(harness.db, thread.id)?.status).toBe("idle");
+
       const provisioning = listEvents(harness.db, {
         threadId: thread.id,
       }).filter((event) => event.type === "system/thread-provisioning");
+
       expect(JSON.parse(provisioning.at(-1)?.data ?? "null")).toMatchObject({
         status: "completed",
       });
@@ -203,9 +222,11 @@ describe("POST /threads/:id/restore-environment (#1710)", () => {
   it("restores a thread whose turn settings no longer resolve", async () => {
     await withTestHarness(async (harness) => {
       const { restoreCalls } = registerProvider();
+
       const { environment, thread } = seedDestroyableThread(harness, {
         ranTurn: false,
       });
+
       await archiveAndDestroy(harness, {
         environmentId: environment.id,
         threadId: thread.id,
@@ -265,6 +286,7 @@ describe("POST /threads/:id/restore-environment (#1710)", () => {
           }),
         },
       );
+
       expect(response.status, await response.clone().text()).toBe(409);
       expect(apiErrorSchema.parse(await readJson(response))).toMatchObject({
         code: "thread_environment_unavailable",

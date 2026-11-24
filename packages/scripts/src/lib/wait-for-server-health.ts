@@ -9,13 +9,16 @@ export async function waitForServerHealth(
   timeoutMs = 15_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+
   while (Date.now() <= deadline) {
     try {
       const response = await fetch(`${serverUrl}/health`);
+
       if (response.ok) {
         return;
       }
     } catch {}
+
     await wait(100);
   }
 

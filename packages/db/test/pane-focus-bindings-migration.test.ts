@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AppKeybindingOverrides } from "@bb/domain";
+import type { AppKeybindingOverrides } from "@omnyo/domain";
 import {
   createConnection,
   getAppKeybindingOverrides,
@@ -15,7 +15,9 @@ import {
 } from "./helpers/rewind.js";
 
 const migrationTimestamp = 1790738477751;
+
 const directions = ["left", "right", "up", "down"] as const;
+
 const legacyOverrides: AppKeybindingOverrides = directions.map((direction) => ({
   command: `pane.focus.${direction}`,
   platform: "mac",
@@ -28,6 +30,7 @@ const legacyOverrides: AppKeybindingOverrides = directions.map((direction) => ({
     shift: true,
   },
 }));
+
 const custom: AppKeybindingOverrides = [
   {
     command: "pane.focus.left",
@@ -55,7 +58,9 @@ function upgradeDatabase(overrides: AppKeybindingOverrides | undefined) {
   db.$client
     .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
     .run(migrationTimestamp);
+
   if (overrides !== undefined) setAppKeybindingOverrides(db, overrides);
+
   return db;
 }
 
@@ -75,8 +80,10 @@ describe("pane focus compatibility migration", () => {
     "preserves effective defaults and explicit overrides on upgrade ($name)",
     ({ overrides }) => {
       const db = upgradeDatabase(overrides);
+
       try {
         migrate(db);
+
         const expected = [
           ...(overrides ?? []),
           ...legacyOverrides.filter(
@@ -86,6 +93,7 @@ describe("pane focus compatibility migration", () => {
               ),
           ),
         ];
+
         expect(getAppKeybindingOverrides(db)).toEqual(expected);
         migrate(db);
         expect(getAppKeybindingOverrides(db)).toEqual(expected);
@@ -94,6 +102,7 @@ describe("pane focus compatibility migration", () => {
           expected.filter((binding) => binding.command !== "pane.focus.up"),
         );
         const restarted = createConnection(db.$client.serialize());
+
         try {
           migrate(restarted);
           expect(getAppKeybindingOverrides(restarted)).toEqual(
@@ -113,10 +122,12 @@ describe("pane focus compatibility migration", () => {
 
   it("keeps fresh installations on live defaults across restart", () => {
     const db = createConnection(":memory:");
+
     try {
       migrate(db);
       expect(getAppKeybindingOverrides(db)).toEqual([]);
       const restarted = createConnection(db.$client.serialize());
+
       try {
         migrate(restarted);
         expect(getAppKeybindingOverrides(restarted)).toEqual([]);
@@ -130,6 +141,7 @@ describe("pane focus compatibility migration", () => {
 
   it("rolls back settings and the ledger together, then retries safely", () => {
     const db = upgradeDatabase(custom);
+
     try {
       db.$client
         .exec(`CREATE TRIGGER reject_pane_migration BEFORE INSERT ON __drizzle_migrations

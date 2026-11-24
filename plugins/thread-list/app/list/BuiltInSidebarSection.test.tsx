@@ -3,17 +3,18 @@
 import { cleanup, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NO_COLLAPSED_CHILD_ACTIVITY } from "../model/thread-activity.js";
+import { getCollapsedChildActivity } from "../model/thread-activity.js";
+import { makeSidebarThread, makeSidebarWork } from "../model/fixtures.js";
 import {
   installTestPluginRuntime,
   renderSlot,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 import type { BuiltInSidebarSectionOptionsById } from "./BuiltInSidebarSection.js";
 
 installTestPluginRuntime();
-const { renderBuiltInSidebarSection } = await import(
-  "./BuiltInSidebarSection.js"
-);
+
+const { renderBuiltInSidebarSection } =
+  await import("./BuiltInSidebarSection.js");
 
 const SECTIONS: BuiltInSidebarSectionOptionsById = {
   pinned: {
@@ -23,6 +24,10 @@ const SECTIONS: BuiltInSidebarSectionOptionsById = {
   threads: {
     label: "Threads",
     content: <div>Threads content</div>,
+  },
+  shelf: {
+    label: "Shelf",
+    content: <div>Shelf content</div>,
   },
 };
 
@@ -125,11 +130,11 @@ describe("built-in sidebar section renderer", () => {
           ...SECTIONS,
           threads: {
             ...SECTIONS.threads,
-            activity: {
-              ...NO_COLLAPSED_CHILD_ACTIVITY,
-              goal: true,
-              working: true,
-            },
+            activity: getCollapsedChildActivity([
+              makeSidebarThread({
+                experimental_work: makeSidebarWork("working"),
+              }),
+            ]),
           },
         },
         showPinnedSection: false,
@@ -142,6 +147,6 @@ describe("built-in sidebar section renderer", () => {
         document.querySelectorAll("[data-thread-status-glyph]"),
         (glyph) => glyph.getAttribute("data-thread-status-glyph"),
       ),
-    ).toEqual(["goal"]);
+    ).toEqual(["runtime"]);
   });
 });

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import {
   assembleRecordedEvents,
   compareParity,
@@ -21,20 +21,20 @@ import {
   type ParityRowProjector,
   type ParityRun,
   type RecordedCell,
-} from "@bb/provider-bridge-protocol/testing";
+} from "@omnyo/provider-bridge-protocol/testing";
 import {
   buildThreadTimelineFromEvents,
   compactThreadTimelineSummaryEvents,
   THREAD_TIMELINE_EXCLUDED_EVENT_TYPES,
   type ThreadEventWithMeta,
-} from "@bb/thread-view";
+} from "@omnyo/thread-view";
 
 export {
   listRecordedCells,
   readBridgeRecording,
   type ParityComparison,
   type RecordedCell,
-} from "@bb/provider-bridge-protocol/testing";
+} from "@omnyo/provider-bridge-protocol/testing";
 
 export const RECORDINGS_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -42,14 +42,17 @@ export const RECORDINGS_ROOT = resolve(
 );
 
 export const ALLOWLIST_PATH = join(RECORDINGS_ROOT, "parity-allowlist.json");
+
 export const ROW_COUNTS_PATH = join(RECORDINGS_ROOT, "row-counts.json");
 
 export const createParityAssembler: CreateParityAssembler = (providerId) => {
   const collector = createBridgeDeltaEventCollector(providerId);
+
   return { assembleMessage: (message) => collector.assembleMessage(message) };
 };
 
 const ROW_BASE_CREATED_AT = 1_700_000_000_000;
+
 const excludedEventTypes = new Set<ThreadEvent["type"]>(
   THREAD_TIMELINE_EXCLUDED_EVENT_TYPES,
 );
@@ -68,9 +71,11 @@ export const projectParityRows: ParityRowProjector = ({
       },
     }))
     .filter(({ event }) => !excludedEventTypes.has(event.type));
+
   const contextWindowEvents = withMeta.filter(
     ({ event }) => event.type === "thread/contextWindowUsage/updated",
   );
+
   const timeline = buildThreadTimelineFromEvents({
     acceptedClientRequestContext: {
       acceptedClientRequestEvents: [],
@@ -89,6 +94,7 @@ export const projectParityRows: ParityRowProjector = ({
       workspaceRoot: "/home/user/workspace",
     },
   });
+
   return JSON.parse(JSON.stringify(timeline.rows)) as unknown[];
 };
 
@@ -98,10 +104,13 @@ export function readAllowlist(
   if (!existsSync(path)) {
     return [];
   }
+
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+
   if (!Array.isArray(parsed)) {
     throw new Error(`${path}: expected a JSON array of allowlist entries`);
   }
+
   return parsed as ParityAllowlistEntry[];
 }
 
@@ -115,11 +124,13 @@ export function recordedCellInputs(
   cell: RecordedCell,
 ): CellInputs & { invalidDeltas: string[] } {
   const recording = withCurrentBridgeLane(readBridgeRecording(cell.dir));
+
   const assembled = assembleRecordedEvents(
     recording,
     createParityAssembler,
     cell.provider,
   );
+
   return {
     ...assembled,
     rows: projectParityRows({
@@ -141,6 +152,7 @@ export interface ReplayCellOptions {
 export function isReplayable(providerId: string): boolean {
   try {
     resolveReplayProfile(providerId);
+
     return true;
   } catch (error) {
     if (error instanceof UnreplayableProviderError) return false;
@@ -154,6 +166,7 @@ export function missingBridgeModule(
 ): string | null {
   const entry =
     FIRST_PARTY_BRIDGE_MODULES[resolveReplayProfile(providerId).bridgeFamily]!;
+
   return resolveFirstPartyBridgeModulePath(checkoutRoot, entry) === null
     ? entry.modulePath
     : null;
@@ -165,6 +178,7 @@ export async function replayCell(
 ): Promise<CellInputs & { run: ParityRun }> {
   const projectRows = options.projectRows ?? projectParityRows;
   const bridge = firstPartyReplayBridge(cell.provider, options.checkoutRoot);
+
   const run = await replayRecording({
     recordingDir: cell.dir,
     providerId: cell.provider,
@@ -179,6 +193,7 @@ export async function replayCell(
       : {}),
     ...(options.onStderr !== undefined ? { onStderr: options.onStderr } : {}),
   });
+
   return {
     run,
     events: run.events,

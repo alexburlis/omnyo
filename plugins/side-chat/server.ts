@@ -1,4 +1,4 @@
-import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
+import { defineRpcContract, type PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 export const REPLY_SEED_PREFIX =
@@ -19,6 +19,7 @@ interface SideChatTimelineRowLike {
 
 function resolveReplySeedText(anchorText: string): string | null {
   const anchor = anchorText.trim();
+
   return anchor.length > 0 ? anchor : null;
 }
 
@@ -29,10 +30,12 @@ function timelineRowsContainUserMessage(
     if (row.kind === "conversation") {
       return row.role === "user";
     }
+
     return row.kind === "turn" && row.children != null
       ? row.children.some(visit)
       : false;
   };
+
   return rows.some(visit);
 }
 
@@ -78,35 +81,38 @@ export const sideChatRpcContract = defineRpcContract({
   },
 });
 
-export default async function plugin(bb: BbPluginApi) {
-  const db = bb.storage.database();
-  bb.storage.migrate(db, [
+export default async function plugin(api: PluginApi) {
+  const db = api.storage.database();
+  api.storage.migrate(db, [
     `CREATE TABLE cleanup_candidates (thread_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, due_at INTEGER NOT NULL);
      CREATE INDEX cleanup_candidates_due_idx ON cleanup_candidates(due_at);
      CREATE TABLE cleanup_discovery (id INTEGER PRIMARY KEY);`,
   ]);
+
   const enqueue = (threadId: string, createdAt: number) => {
     db.prepare(
       "INSERT OR IGNORE INTO cleanup_candidates (thread_id, created_at, due_at) VALUES (?, ?, ?)",
     ).run(threadId, createdAt, createdAt + EMPTY_FORK_MAX_AGE_MS + 1);
   };
+
   for (const event of ["thread.archived", "thread.deleted"] as const)
-    bb.events.on(event, async ({ thread }) => {
+    api.events.on(event, async ({ thread }) => {
       db.prepare("DELETE FROM cleanup_candidates WHERE thread_id=?").run(
         thread.id,
       );
-      await bb.storage.kv.delete(`${KEPT_FORK_KEY_PREFIX}${thread.id}`);
+      await api.storage.kv.delete(`${KEPT_FORK_KEY_PREFIX}${thread.id}`);
     });
 
-  bb.events.on("thread.unarchived", ({ thread }) => {
-    if (isOwnLiveHiddenFork(thread, bb.pluginId)) {
+  api.events.on("thread.unarchived", ({ thread }) => {
+    if (isOwnLiveHiddenFork(thread, api.pluginId)) {
       enqueue(thread.id, thread.createdAt);
     }
   });
 
-  bb.rpc.register(sideChatRpcContract, {
+  api.rpc.register(sideChatRpcContract, {
     async createSideChat({ sourceThreadId, sourceSeqEnd, anchorText }) {
       const seedText = resolveReplySeedText(anchorText);
+
       const forkArgs = {
         lifecycleOwnerThreadId: sourceThreadId,
         sourceThreadId,
@@ -124,26 +130,32 @@ export default async function plugin(bb: BbPluginApi) {
             }
           : {}),
       };
+
       try {
-        const fork = await bb.sdk.threads.fork({
+        const fork = await api.sdk.threads.fork({
           ...forkArgs,
           ...(sourceSeqEnd !== undefined ? { sourceSeqEnd } : {}),
         });
+
         enqueue(fork.id, fork.createdAt);
+
         return { threadId: fork.id };
       } catch (error) {
         if (sourceSeqEnd === undefined || !isSessionUnavailableError(error)) {
           throw error;
         }
-        const fork = await bb.sdk.threads.fork(forkArgs);
+
+        const fork = await api.sdk.threads.fork(forkArgs);
         enqueue(fork.id, fork.createdAt);
+
         return { threadId: fork.id };
       }
     },
   });
 
-  bb.background.schedule("empty-fork-cleanup", "13 * * * *", async () => {
+  api.background.schedule("empty-fork-cleanup", "13 * * * *", async () => {
     const now = Date.now();
+
     if (db.prepare("SELECT id FROM cleanup_discovery WHERE id=1").get()) {
       const candidates = z
         .array(z.object({ threadId: z.string(), createdAt: z.number() }))
@@ -154,11 +166,13 @@ export default async function plugin(bb: BbPluginApi) {
             )
             .all(now),
         );
+
       for (const candidate of candidates) {
         const outcome = await sweepEmptyFork(
           candidate.threadId,
           candidate.createdAt,
         );
+
         if (outcome === "skipped")
           db.prepare(
             "UPDATE cleanup_candidates SET due_at=? WHERE thread_id=?",
@@ -168,53 +182,68 @@ export default async function plugin(bb: BbPluginApi) {
             candidate.threadId,
           );
       }
+
       return;
     }
-    const keptKeys = new Set(await bb.storage.kv.list(KEPT_FORK_KEY_PREFIX));
+
+    const keptKeys = new Set(await api.storage.kv.list(KEPT_FORK_KEY_PREFIX));
     const stillLive = new Set<string>();
     let offset = 0;
+
     for (;;) {
-      const page = await bb.sdk.threads.list({
+      const page = await api.sdk.threads.list({
         includeHidden: true,
         originKind: "fork",
-        originPluginId: bb.pluginId,
+        originPluginId: api.pluginId,
         archived: false,
         limit: EMPTY_FORK_SWEEP_PAGE_SIZE,
         offset,
       });
+
       if (page.length === 0) break;
       let retained = 0;
+
       for (const thread of page) {
-        if (!isOwnLiveHiddenFork(thread, bb.pluginId)) {
+        if (!isOwnLiveHiddenFork(thread, api.pluginId)) {
           retained += 1;
           continue;
         }
+
         if (now - thread.createdAt <= EMPTY_FORK_MAX_AGE_MS) {
           enqueue(thread.id, thread.createdAt);
           retained += 1;
           continue;
         }
+
         const keptKey = `${KEPT_FORK_KEY_PREFIX}${thread.id}`;
+
         if (keptKeys.has(keptKey)) {
           stillLive.add(keptKey);
           retained += 1;
           continue;
         }
+
         const outcome = await sweepEmptyFork(thread.id, thread.createdAt);
+
         if (outcome === "archived") continue;
+
         if (outcome === "kept") {
-          await bb.storage.kv.set(keptKey, true);
+          await api.storage.kv.set(keptKey, true);
           stillLive.add(keptKey);
         }
+
         if (outcome === "skipped") enqueue(thread.id, thread.createdAt);
         retained += 1;
       }
+
       if (page.length < EMPTY_FORK_SWEEP_PAGE_SIZE) break;
       offset += retained;
     }
+
     for (const key of keptKeys) {
-      if (!stillLive.has(key)) await bb.storage.kv.delete(key);
+      if (!stillLive.has(key)) await api.storage.kv.delete(key);
     }
+
     db.prepare("INSERT INTO cleanup_discovery VALUES (1)").run();
   });
 
@@ -223,45 +252,55 @@ export default async function plugin(bb: BbPluginApi) {
     createdAt: number,
   ): Promise<"archived" | "kept" | "skipped"> {
     try {
-      const thread = await bb.sdk.threads.get({ threadId });
-      if (!isOwnLiveHiddenFork(thread, bb.pluginId)) return "kept";
-      const timeline = await bb.sdk.threads.timeline({
+      const thread = await api.sdk.threads.get({ threadId });
+
+      if (!isOwnLiveHiddenFork(thread, api.pluginId)) return "kept";
+
+      const timeline = await api.sdk.threads.timeline({
         threadId,
         includeNestedRows: "true",
       });
+
       if (timelineRowsContainUserMessage(timeline.rows)) return "kept";
     } catch (error) {
-      bb.log.warn(
+      api.log.warn(
         `empty-fork sweep skipped ${threadId} (thread or timeline read failed: ${
           error instanceof Error ? error.message : String(error)
         })`,
       );
+
       return "skipped";
     }
+
     try {
-      const queued = await bb.sdk.threads.queuedMessages.list({ threadId });
+      const queued = await api.sdk.threads.queuedMessages.list({ threadId });
+
       if (queued.length > 0) return "kept";
     } catch (error) {
-      bb.log.warn(
+      api.log.warn(
         `empty-fork sweep skipped ${threadId} (queued-message read failed: ${
           error instanceof Error ? error.message : String(error)
         })`,
       );
+
       return "skipped";
     }
+
     try {
-      await bb.sdk.threads.archive({ threadId });
-      bb.log.info(
+      await api.sdk.threads.archive({ threadId });
+      api.log.info(
         `empty-fork sweep archived ${threadId} (no user messages, ` +
           `created ${new Date(createdAt).toISOString()})`,
       );
+
       return "archived";
     } catch (error) {
-      bb.log.warn(
+      api.log.warn(
         `empty-fork sweep failed to archive ${threadId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
+
       return "skipped";
     }
   }

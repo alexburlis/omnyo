@@ -6,7 +6,7 @@ describe("computeMutedPrefixLength", () => {
     expect(computeMutedPrefixLength("user", "[bb system]\n\nhello")).toBe(0);
   });
 
-  it("returns 0 when text does not start with [bb", () => {
+  it("returns 0 when text does not start with a product marker", () => {
     expect(computeMutedPrefixLength("system", "hello world")).toBe(0);
     expect(computeMutedPrefixLength("agent", "[other] body")).toBe(0);
   });
@@ -34,6 +34,13 @@ describe("computeMutedPrefixLength", () => {
 
   it("handles the agent prefix shape", () => {
     const prefix = "[bb message from thread:thr_sender]";
+    const text = `${prefix}\n\nHi`;
+    expect(computeMutedPrefixLength("agent", text)).toBe(prefix.length + 2);
+    expect(text.slice(prefix.length + 2)).toBe("Hi");
+  });
+
+  it("handles the Omnyo agent prefix shape", () => {
+    const prefix = "[Omnyo message from thread:thr_sender]";
     const text = `${prefix}\n\nHi`;
     expect(computeMutedPrefixLength("agent", text)).toBe(prefix.length + 2);
     expect(text.slice(prefix.length + 2)).toBe("Hi");

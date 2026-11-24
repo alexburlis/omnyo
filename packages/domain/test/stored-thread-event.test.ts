@@ -7,6 +7,37 @@ import { threadScope, turnScope } from "../src/thread-event-scope.js";
 import { systemThreadInterruptedEventDataSchema } from "../src/thread-events.js";
 
 describe("parseStoredThreadEvent", () => {
+  it.each([
+    ["bb/provider-commands", "core/provider-commands"],
+    ["bb/session-options", "core/session-options"],
+    ["bb/session-option-selections", "core/session-option-selections"],
+    ["bb/unowned", "bb/unowned"],
+  ])(
+    "projects only exact V1 core state kind %s without changing payload",
+    (kind, expected) => {
+      const data = {
+        kind,
+        payload: { text: "bb/user prose", providerId: "bb-opaque-provider" },
+      };
+
+      const original = structuredClone(data);
+      expect(
+        parseStoredThreadEvent({
+          type: "thread/extensionState/updated",
+          threadId: "stable",
+          providerThreadId: "provider-stable",
+          scope: threadScope(),
+          data,
+        }),
+      ).toMatchObject({
+        kind: expected,
+        payload: data.payload,
+        providerThreadId: "provider-stable",
+      });
+      expect(data).toEqual(original);
+    },
+  );
+
   it("rejects assistant deltas without an itemId", () => {
     expect(() =>
       parseStoredThreadEvent({
@@ -81,6 +112,7 @@ describe("parseStoredThreadEvent", () => {
         source: "client/turn/requested",
       },
     };
+
     const parse = (marker: Record<string, unknown>) =>
       parseStoredThreadEvent({
         type: "client/turn/requested",
@@ -89,8 +121,6 @@ describe("parseStoredThreadEvent", () => {
         data: { ...base, ...marker },
       });
 
-    // The marker is one fact in two keys: an attempt number without the
-    // request it re-runs (or vice versa) misstates retry ancestry.
     expect(() => parse({ retryAttempt: 2 })).toThrow();
     expect(() => parse({ retryOfRequestId: "creq_23456789cd" })).toThrow();
     expect(

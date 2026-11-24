@@ -20,7 +20,9 @@ function responseJson(body: unknown): Response {
 
 function urlForFetchInput(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
+
   if (input instanceof URL) return input.toString();
+
   return input.url;
 }
 
@@ -33,8 +35,10 @@ afterEach(() => {
 describe("usePromptMentions", () => {
   it("shows loading for a non-at plugin trigger while the query is debouncing", async () => {
     vi.mocked(sdk.system.config).mockResolvedValue(makeSystemConfig());
+
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = urlForFetchInput(input);
+
       if (url === "/api/v1/plugins/contributions") {
         return Promise.resolve(
           responseJson({
@@ -50,6 +54,7 @@ describe("usePromptMentions", () => {
           }),
         );
       }
+
       if (url.startsWith("/api/v1/plugins/mentions/search?")) {
         return Promise.resolve(
           responseJson({
@@ -72,11 +77,14 @@ describe("usePromptMentions", () => {
           }),
         );
       }
+
       throw new Error(`unexpected fetch ${url}`);
     });
+
     vi.stubGlobal("fetch", fetchMock);
 
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         usePromptMentions("proj_1", {
@@ -112,6 +120,108 @@ describe("usePromptMentions", () => {
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
       expect(result.current.results.suggestions).toHaveLength(1);
+    });
+  });
+
+  it("reports refreshing while newer results load behind the current ones", async () => {
+    vi.mocked(sdk.system.config).mockResolvedValue(makeSystemConfig());
+    let releaseSecondSearch: (() => void) | null = null;
+    let searchCount = 0;
+
+    const searchResponse = (title: string) =>
+      responseJson({
+        ok: true,
+        groups: [
+          {
+            pluginId: "github",
+            providerId: "issues",
+            label: "GitHub issues",
+            items: [
+              {
+                itemId: `issue:${title}`,
+                title,
+                subtitle: "owner/repo",
+                icon: null,
+              },
+            ],
+          },
+        ],
+      });
+
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = urlForFetchInput(input);
+
+      if (url === "/api/v1/plugins/contributions") {
+        return Promise.resolve(
+          responseJson({
+            threadActions: [],
+            mentionProviders: [
+              {
+                pluginId: "github",
+                id: "issues",
+                label: "GitHub issues",
+                triggers: ["#"],
+              },
+            ],
+          }),
+        );
+      }
+
+      if (url.startsWith("/api/v1/plugins/mentions/search?")) {
+        searchCount += 1;
+
+        if (searchCount === 1) {
+          return Promise.resolve(searchResponse("#42 Fix login bug"));
+        }
+
+        return new Promise<Response>((resolve) => {
+          releaseSecondSearch = () =>
+            resolve(searchResponse("#43 Fix logout bug"));
+        });
+      }
+
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { wrapper } = createQueryClientTestHarness();
+
+    const { result } = renderHook(
+      () =>
+        usePromptMentions("proj_1", {
+          environmentId: null,
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.triggers).toContain("#");
+    });
+
+    act(() => {
+      result.current.setQuery("42", "#");
+    });
+    await waitFor(() => {
+      expect(result.current.results.suggestions).toHaveLength(1);
+    });
+    expect(result.current.isRefreshing).toBe(false);
+
+    act(() => {
+      result.current.setQuery("43", "#");
+    });
+    await waitFor(() => {
+      expect(releaseSecondSearch).not.toBeNull();
+      expect(result.current.isRefreshing).toBe(true);
+    });
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.results.suggestions).toHaveLength(1);
+
+    act(() => {
+      releaseSecondSearch?.();
+    });
+    await waitFor(() => {
+      expect(result.current.isRefreshing).toBe(false);
     });
   });
 });

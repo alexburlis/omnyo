@@ -4,7 +4,7 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { readBoundedLines } from "../bridge-kit/bounded-line-reader.js";
 import type { BridgeRecordingEntry } from "../bridge-kit/bridge-recorder.js";
 import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "../version.js";
@@ -27,6 +27,7 @@ import {
 } from "./recording.js";
 
 const REPLAY_CLEANUP_RETRIES = 20;
+
 const REPLAY_CLEANUP_RETRY_DELAY_MS = 100;
 
 export interface ParityAssembler {
@@ -62,12 +63,14 @@ export interface ResolveProviderBridgeLaunchOptions {
 const SOURCE_BOOTSTRAP = fileURLToPath(
   new URL("../bridge-worker-entry.ts", import.meta.url),
 );
+
 const BUNDLED_BOOTSTRAP = fileURLToPath(
   new URL("./provider-bridge-worker-entry.mjs", import.meta.url),
 );
 
 export function resolveProviderBridgeBootstrapPath(): string {
   if (existsSync(SOURCE_BOOTSTRAP)) return SOURCE_BOOTSTRAP;
+
   if (existsSync(BUNDLED_BOOTSTRAP)) return BUNDLED_BOOTSTRAP;
   throw new Error(
     `provider-bridge bootstrap not found at ${SOURCE_BOOTSTRAP} or ${BUNDLED_BOOTSTRAP}`,
@@ -86,6 +89,7 @@ function defaultNodeArgs(bootstrapPath: string, modulePath: string): string[] {
   if (isTypeScriptPath(bootstrapPath)) {
     return ["--conditions=source", "--import", tsxSpecifier()];
   }
+
   return isTypeScriptPath(modulePath) ? ["--import", tsxSpecifier()] : [];
 }
 
@@ -97,10 +101,13 @@ export function resolveProviderBridgeLaunch(
       `bridge module path must be absolute: ${options.modulePath}`,
     );
   }
+
   const bootstrapPath =
     options.bootstrapPath ?? resolveProviderBridgeBootstrapPath();
+
   const dataDir =
-    options.dataDir ?? mkdtempSync(join(tmpdir(), "bb-parity-data-"));
+    options.dataDir ?? mkdtempSync(join(tmpdir(), "omnyo-parity-data-"));
+
   return {
     command: process.execPath,
     args: [
@@ -145,12 +152,15 @@ function rewriteRecordedMachineFacts(
   if (!line.includes('"PATH"') && !line.includes('"cwd"')) {
     return line;
   }
+
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(line);
   } catch {
     return line;
   }
+
   const params = (
     parsed as {
       params?: {
@@ -159,19 +169,24 @@ function rewriteRecordedMachineFacts(
       };
     }
   ).params;
+
   if (params === undefined) {
     return line;
   }
+
   let changed = false;
   const envVars = params.options?.envVars;
+
   if (envVars !== undefined && typeof envVars.PATH === "string") {
     envVars.PATH = process.env.PATH ?? envVars.PATH;
     changed = true;
   }
+
   if (typeof params.cwd === "string") {
     params.cwd = workspaceDir;
     changed = true;
   }
+
   return changed ? JSON.stringify(parsed) : line;
 }
 
@@ -180,8 +195,10 @@ function recordedWorkspaceDir(recording: BridgeRecording): string | null {
     if (entry.dir !== "runtime→bridge") continue;
     const message = parseWire(entry.line);
     const cwd = (message?.params as { cwd?: unknown } | undefined)?.cwd;
+
     if (typeof cwd === "string" && cwd.length > 0) return cwd;
   }
+
   return null;
 }
 
@@ -230,6 +247,7 @@ interface ParsedWireMessage {
 function parseWire(line: string): ParsedWireMessage | null {
   try {
     const parsed: unknown = JSON.parse(line);
+
     return typeof parsed === "object" && parsed !== null
       ? (parsed as ParsedWireMessage)
       : null;
@@ -259,9 +277,11 @@ function planRuntimeSteps(
 ): RuntimeStep[] {
   const steps: RuntimeStep[] = [];
   const assembled: ThreadEvent[] = [];
+
   for (const entry of recording.entries) {
     if (entry.dir === "bridge→runtime") {
       const message = parseWire(entry.line);
+
       if (
         message !== null &&
         message.method === THREAD_DELTA_NOTIFICATION_METHOD
@@ -270,11 +290,14 @@ function planRuntimeSteps(
           assembled.push(...assembler.assembleMessage(message));
         } catch {}
       }
+
       continue;
     }
+
     if (entry.dir !== "runtime→bridge") {
       continue;
     }
+
     steps.push({
       entry,
       message: parseWire(entry.line),
@@ -282,6 +305,7 @@ function planRuntimeSteps(
       eventsBefore: assembled.length,
     });
   }
+
   return steps;
 }
 
@@ -293,6 +317,7 @@ function methodOfRecordedBridgeRequest(
   for (const entry of recording.entries) {
     if (entry.dir !== "bridge→runtime" || entry.run !== response.run) continue;
     const message = parseWire(entry.line);
+
     if (
       message !== null &&
       isRequest(message) &&
@@ -301,6 +326,7 @@ function methodOfRecordedBridgeRequest(
       return message.method;
     }
   }
+
   return undefined;
 }
 
@@ -315,7 +341,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 const REPLAY_STARTUP_CONCURRENCY = 4;
+
 const replayStartupQueue: (() => void)[] = [];
+
 let startingReplays = 0;
 
 async function acquireReplayStartup(): Promise<() => void> {
@@ -326,11 +354,14 @@ async function acquireReplayStartup(): Promise<() => void> {
       replayStartupQueue.push(resolveSlot),
     );
   }
+
   let released = false;
+
   return () => {
     if (released) return;
     released = true;
     const next = replayStartupQueue.shift();
+
     if (next === undefined) startingReplays -= 1;
     else next();
   };
@@ -347,10 +378,12 @@ export async function replayRecording(
   const profile = options.profile ?? DEFAULT_REPLAY_PROFILE;
   const recording = readBridgeRecording(options.recordingDir);
 
-  const stateDir = mkdtempSync(join(tmpdir(), "bb-parity-replay-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "omnyo-parity-replay-"));
+
   const workspaceDir = realpathSync(
-    mkdtempSync(join(tmpdir(), "bb-parity-ws-")),
+    mkdtempSync(join(tmpdir(), "omnyo-parity-ws-")),
   );
+
   const replayCommand = [
     process.execPath,
     REPLAY_CHILD_PATH,
@@ -361,13 +394,16 @@ export async function replayRecording(
     "--state",
     stateDir,
   ];
+
   const cursorPath = join(stateDir, "cursor");
+
   const setCursor = (position: { run: number; seq: number } | "end"): void => {
     writeFileSync(
       cursorPath,
       position === "end" ? "end" : `${position.run} ${position.seq}`,
     );
   };
+
   const wrapperPath = join(stateDir, "replay-provider.mjs");
   writeFileSync(
     wrapperPath,
@@ -385,6 +421,7 @@ export async function replayRecording(
   const releaseStartup = await acquireReplayStartup();
   let spawnedChild: ChildProcess | undefined;
   let childEnded: Promise<void> | undefined;
+
   try {
     const child: ChildProcess = spawn(launch.command, launch.args, {
       cwd: launch.cwd,
@@ -395,19 +432,23 @@ export async function replayRecording(
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
+
     spawnedChild = child;
     childEnded = new Promise<void>((resolveEnded) => {
       const onEnded = () => {
         releaseStartup();
         resolveEnded();
       };
+
       child.once("exit", onEnded);
       child.once("error", onEnded);
     });
 
     const recordedCwd = recordedWorkspaceDir(recording);
+
     const jsonText = (value: string): string =>
       JSON.stringify(value).slice(1, -1);
+
     const restoreRecordedWorkspace = (line: string): string =>
       recordedCwd === null || recordedCwd === workspaceDir
         ? line
@@ -418,22 +459,29 @@ export async function replayRecording(
     const lines: string[] = [];
     const lineTimes: number[] = [];
     const lineAfter: ParityRun["lineAfter"] = [];
+
     let lastSentRuntimeEntry: { run: number; seq: number; ts: number } | null =
       null;
+
     const events: ThreadEvent[] = [];
     const grammarViolations: ParityGrammarViolation[] = [];
     const stalls: string[] = [];
     let stderr = "";
     const grammar = new ThreadEventGrammar();
     const liveAssembler = options.createAssembler(providerId);
+
     const planAssembler = (
       options.createPlanAssembler ?? options.createAssembler
     )(providerId);
+
     const exactPlan = options.planFromCurrentLane === true;
+
     const planRecording = exactPlan
       ? withCurrentBridgeLane(recording)
       : recording;
+
     const steps = planRuntimeSteps(planRecording, planAssembler);
+
     const plannedEventCount = exactPlan
       ? assembleRecordedEvents(
           planRecording,
@@ -445,6 +493,7 @@ export async function replayRecording(
     const answeredIds = new Set<string>();
     const pendingBridgeRequests: { id: string | number; method: string }[] = [];
     const recordedAnswers = new Map<string, ParsedWireMessage[]>();
+
     for (const step of steps) {
       if (step.message !== null && isResponse(step.message)) {
         const method =
@@ -453,6 +502,7 @@ export async function replayRecording(
             step.entry,
             step.message.id as string | number,
           ) ?? "?";
+
         const queue = recordedAnswers.get(method) ?? [];
         queue.push(step.message);
         recordedAnswers.set(method, queue);
@@ -460,6 +510,7 @@ export async function replayRecording(
     }
 
     let lastOutputAt = Date.now();
+
     const exited = new Promise<number | null>((resolveExit) => {
       child.on("exit", (code) => resolveExit(code));
       child.on("error", (error) => {
@@ -467,6 +518,7 @@ export async function replayRecording(
         resolveExit(null);
       });
     });
+
     child.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
       stderr += chunk;
       options.onStderr?.(chunk);
@@ -482,6 +534,7 @@ export async function replayRecording(
       const method = message.method ?? "?";
       const queue = recordedAnswers.get(method);
       const recorded = queue?.shift();
+
       if (recorded === undefined) {
         stalls.push(
           `no recorded answer for bridge request ${method} (${String(message.id)})`,
@@ -496,8 +549,10 @@ export async function replayRecording(
             },
           }),
         );
+
         return;
       }
+
       write(JSON.stringify({ ...recorded, id: message.id }));
     }
 
@@ -510,31 +565,41 @@ export async function replayRecording(
         lineTimes.push(lastOutputAt - startedAt);
         lineAfter.push(lastSentRuntimeEntry);
         const message = parseWire(line);
+
         if (message === null) return;
+
         if (isResponse(message)) {
           answeredIds.add(String(message.id));
+
           return;
         }
+
         if (isRequest(message)) {
           pendingBridgeRequests.push({
             id: message.id as string | number,
             method: message.method!,
           });
           answerBridgeRequest(message);
+
           return;
         }
+
         if (message.method === THREAD_DELTA_NOTIFICATION_METHOD) {
           let assembled: ThreadEvent[];
+
           try {
             assembled = liveAssembler.assembleMessage(message);
           } catch (error) {
             stalls.push(
               `invalid thread/delta: ${error instanceof Error ? error.message : String(error)}`,
             );
+
             return;
           }
+
           for (const event of assembled) {
             const result = grammar.observe(event);
+
             if (result.kind === "violation") {
               grammarViolations.push({
                 rule: result.rule,
@@ -543,6 +608,7 @@ export async function replayRecording(
               });
               continue;
             }
+
             events.push(event);
           }
         }
@@ -559,6 +625,7 @@ export async function replayRecording(
       reportStall = true,
     ): Promise<void> {
       const deadline = Date.now() + limitMs;
+
       while (!predicate()) {
         if (
           child.exitCode !== null ||
@@ -566,12 +633,16 @@ export async function replayRecording(
           child.pid === undefined
         ) {
           stalls.push(`bridge exited while waiting for ${label}`);
+
           return;
         }
+
         if (Date.now() > deadline) {
           if (reportStall) stalls.push(`timed out waiting for ${label}`);
+
           return;
         }
+
         await sleep(10);
       }
     }
@@ -579,6 +650,7 @@ export async function replayRecording(
     const firstStep = steps.find(
       (step) => step.message !== null && isRequest(step.message),
     );
+
     setCursor(
       firstStep === undefined
         ? "end"
@@ -591,12 +663,13 @@ export async function replayRecording(
         method: "initialize",
         params: {
           protocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
-          client: { name: "bb-parity", version: "0" },
+          client: { name: "omnyo-parity", version: "0" },
         },
       }),
     );
     await waitFor("initialize response", () => answeredIds.has(initializeId));
     const initialized = answeredIds.has(initializeId);
+
     if (!initialized) {
       if (
         child.pid !== undefined &&
@@ -606,9 +679,11 @@ export async function replayRecording(
         child.kill("SIGKILL");
       await childEnded;
     }
+
     releaseStartup();
 
     const sentRequestIds: string[] = [];
+
     for (const step of initialized ? steps : []) {
       if (step.message === null || !isRequest(step.message)) {
         if (step.message !== null && !isResponse(step.message)) {
@@ -619,8 +694,10 @@ export async function replayRecording(
           };
           write(step.entry.line);
         }
+
         continue;
       }
+
       const request = step.message;
       const method = request.method!;
       await waitFor(`earlier requests before ${method}`, () =>
@@ -630,6 +707,7 @@ export async function replayRecording(
         `${step.gate.started} turn/started and ${step.gate.completed} turn/completed before ${method}`,
         () => {
           const live = countTurns(events);
+
           return (
             live.started >= step.gate.started &&
             live.completed >= step.gate.completed
@@ -650,7 +728,9 @@ export async function replayRecording(
         timeoutMs,
         false,
       );
+
       if (child.exitCode !== null) break;
+
       if (
         method === "thread/stop" &&
         typeof request.params === "object" &&
@@ -658,16 +738,20 @@ export async function replayRecording(
         (request.params as { intent?: unknown }).intent === "release"
       ) {
         const threadId = (request.params as { threadId?: unknown }).threadId;
+
         if (typeof threadId === "string") grammar.clearThread(threadId);
       }
+
       const rewritten = rewriteRecordedMachineFacts(
         step.entry.line,
         workspaceDir,
       );
+
       const line =
         profile.rewriteRuntimeLine === undefined
           ? rewritten
           : profile.rewriteRuntimeLine(rewritten, { replayCommand });
+
       lastSentRuntimeEntry = {
         run: step.entry.run,
         seq: step.entry.seq,
@@ -675,34 +759,40 @@ export async function replayRecording(
       };
       write(line);
       sentRequestIds.push(String(request.id));
+
       const nextStep = steps
         .slice(steps.indexOf(step) + 1)
         .find(
           (candidate) =>
             candidate.message !== null && isRequest(candidate.message),
         );
+
       setCursor(
         nextStep === undefined
           ? "end"
           : { run: nextStep.entry.run, seq: nextStep.entry.seq },
       );
     }
+
     setCursor("end");
     await waitFor("the last responses", () =>
       sentRequestIds.every((id) => answeredIds.has(id)),
     );
+
     if (plannedEventCount !== null) {
       await waitFor(
         `all ${plannedEventCount} planned events before closing the bridge`,
         () => events.length >= plannedEventCount,
       );
     }
+
     await waitFor(
       "the stream to settle",
       () => Date.now() - lastOutputAt >= settleMs,
     );
     child.stdin?.end();
     let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
+
     const exitCode = await Promise.race([
       exited,
       new Promise<null>((resolveTimeout) => {
@@ -713,6 +803,7 @@ export async function replayRecording(
         }, timeoutMs);
       }),
     ]);
+
     clearTimeout(shutdownTimer);
 
     return {
@@ -737,7 +828,9 @@ export async function replayRecording(
       spawnedChild.kill("SIGKILL");
       await childEnded;
     }
+
     releaseStartup();
+
     for (const directory of [stateDir, workspaceDir]) {
       await rm(directory, {
         force: true,
@@ -763,9 +856,11 @@ export function assembleRecordedEvents(
   const events: ThreadEvent[] = [];
   const grammarViolations: ParityGrammarViolation[] = [];
   const invalidDeltas: string[] = [];
+
   for (const entry of recording.entries) {
     if (entry.dir === "runtime→bridge") {
       const message = parseWire(entry.line);
+
       if (
         message !== null &&
         message.method === "thread/stop" &&
@@ -774,15 +869,20 @@ export function assembleRecordedEvents(
         (message.params as { intent?: unknown }).intent === "release"
       ) {
         const threadId = (message.params as { threadId?: unknown }).threadId;
+
         if (typeof threadId === "string") grammar.clearThread(threadId);
       }
+
       continue;
     }
+
     if (entry.dir !== "bridge→runtime") continue;
     const message = parseWire(entry.line);
+
     if (message === null || message.method !== THREAD_DELTA_NOTIFICATION_METHOD)
       continue;
     let assembled: ThreadEvent[];
+
     try {
       assembled = assembler.assembleMessage(message);
     } catch (error) {
@@ -791,8 +891,10 @@ export function assembleRecordedEvents(
       );
       continue;
     }
+
     for (const event of assembled) {
       const result = grammar.observe(event);
+
       if (result.kind === "violation") {
         grammarViolations.push({
           rule: result.rule,
@@ -801,9 +903,11 @@ export function assembleRecordedEvents(
         });
         continue;
       }
+
       events.push(event);
     }
   }
+
   return { events, grammarViolations, invalidDeltas };
 }
 
@@ -855,8 +959,10 @@ function blankTimeFields(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(blankTimeFields);
   }
+
   if (value !== null && typeof value === "object") {
     const out: Record<string, unknown> = {};
+
     for (const [key, entry] of Object.entries(value)) {
       out[key] =
         TIME_FIELDS.has(key) &&
@@ -864,8 +970,10 @@ function blankTimeFields(value: unknown): unknown {
           ? 0
           : blankTimeFields(entry);
     }
+
     return out;
   }
+
   return value;
 }
 
@@ -895,7 +1003,7 @@ export function normalizeParityEvents(
 
 export function normalizeParityRows(rows: readonly unknown[]): unknown[] {
   return blankTimeFields(
-    normalizeCalibrationEvents(rows as unknown as readonly ThreadEvent[], {
+    normalizeCalibrationEvents(rows as readonly ThreadEvent[], {
       internedIdFields: ROW_ID_FIELDS,
     }),
   ) as unknown[];
@@ -907,32 +1015,42 @@ function pointerSegments(path: string): string[] {
 
 export function maskPath(value: unknown, path: string): number {
   const segments = pointerSegments(path);
+
   if (segments.length === 0) {
     if (!Array.isArray(value)) return 0;
     const removed = value.length;
     value.length = 0;
+
     return removed;
   }
+
   let removed = 0;
+
   const visit = (node: unknown, index: number): void => {
     if (index >= segments.length || node === null || typeof node !== "object") {
       return;
     }
+
     const segment = segments[index];
     const last = index === segments.length - 1;
+
     if (segment === "**") {
       visit(node, index + 1);
+
       for (const child of Object.values(node as Record<string, unknown>)) {
         visit(child, index);
       }
+
       return;
     }
+
     const keys =
       segment === "*"
         ? Object.keys(node as Record<string, unknown>)
         : Object.hasOwn(node, segment)
           ? [segment]
           : [];
+
     for (const key of keys) {
       if (last) {
         if (Array.isArray(node)) {
@@ -940,13 +1058,16 @@ export function maskPath(value: unknown, path: string): number {
         } else {
           delete (node as Record<string, unknown>)[key];
         }
+
         removed += 1;
       } else {
         visit((node as Record<string, unknown>)[key], index + 1);
       }
     }
   };
+
   visit(value, 0);
+
   return removed;
 }
 
@@ -974,18 +1095,24 @@ export function compareParity(
     ],
     rows: [normalizeParityRows(oldRun.rows), normalizeParityRows(newRun.rows)],
   } as const;
+
   const staleAllowlist: ParityAllowlistEntry[] = [];
+
   for (const entry of allowlist) {
     if (!entryApplies(entry, scope.provider, scope.cell)) continue;
     const [oldSide, newSide] = layers[entry.layer];
+
     const removed =
       maskPath(oldSide, entry.path) + maskPath(newSide, entry.path);
+
     if (removed === 0) {
       staleAllowlist.push(entry);
     }
   }
+
   const events = diffLayer(layers.events[0], layers.events[1]);
   const rows = diffLayer(layers.rows[0], layers.rows[1]);
+
   const grammar = diffLayer(
     (oldRun.grammarViolations ?? []).map(
       (violation) => `${violation.rule}:${violation.eventType}`,
@@ -994,8 +1121,10 @@ export function compareParity(
       (violation) => `${violation.rule}:${violation.eventType}`,
     ),
   );
+
   const clean = (diff: ParityLayerDiff): boolean =>
     diff.onlyInOld.length === 0 && diff.onlyInNew.length === 0;
+
   return {
     provider: scope.provider,
     cell: scope.cell,
@@ -1016,6 +1145,7 @@ function diffLayer(
   newSide: readonly unknown[],
 ): ParityLayerDiff {
   const diff = diffCalibrationStreams(oldSide, newSide);
+
   return { onlyInOld: diff.onlyInLegacy, onlyInNew: diff.onlyInBridge };
 }
 
@@ -1023,18 +1153,23 @@ export function describeParityValue(value: unknown): string {
   if (value === null || typeof value !== "object") {
     return String(value);
   }
+
   const record = value as Record<string, unknown>;
+
   const type =
     typeof record.type === "string"
       ? record.type
       : typeof record.kind === "string"
         ? record.kind
         : "?";
+
   const item = record.item;
+
   const suffix =
     item !== null && typeof item === "object" && "type" in item
       ? `:${String((item as { type: unknown }).type)}`
       : "";
+
   return `${type}${suffix} ${JSON.stringify(value).slice(0, 160)}`;
 }
 
@@ -1060,6 +1195,7 @@ export async function replayRecordedCells(
       (options.cells === undefined || options.cells.includes(cell.cell)) &&
       readBridgeRecording(cell.dir).manifest?.scope !== "process",
   );
+
   return Promise.all(
     cells.map(async (cell): Promise<RecordedCellReplay> => {
       const recorded = assembleRecordedEvents(
@@ -1067,7 +1203,9 @@ export async function replayRecordedCells(
         options.createAssembler,
         cell.provider,
       );
+
       const bridge = options.bridge(cell);
+
       const run = await replayRecording({
         recordingDir: cell.dir,
         providerId: cell.provider,
@@ -1082,6 +1220,7 @@ export async function replayRecordedCells(
           ? { onStderr: options.onStderr }
           : {}),
       });
+
       return {
         provider: cell.provider,
         cell: cell.cell,

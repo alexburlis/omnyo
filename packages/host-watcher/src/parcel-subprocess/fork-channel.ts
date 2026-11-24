@@ -7,17 +7,21 @@ import type { ChildChannel } from "./parcel-watcher-proxy.js";
 
 function resolveChildEntry(): string {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
+
   const candidates = [
-    "bb-parcel-watcher-child.mjs",
+    "omnyo-parcel-watcher-child.mjs",
     "parcel-child-entry.js",
     "parcel-child-entry.ts",
   ];
+
   for (const candidate of candidates) {
     const candidatePath = join(moduleDir, candidate);
+
     if (existsSync(candidatePath)) {
       return candidatePath;
     }
   }
+
   throw new Error(
     `Watcher child entry not found in ${moduleDir} (looked for ${candidates.join(", ")})`,
   );
@@ -31,7 +35,9 @@ export function createChildChannel(child: ChildProcess): ChildChannel {
     if (gone) {
       return;
     }
+
     gone = true;
+
     for (const listener of exitListeners) {
       listener();
     }
@@ -41,6 +47,7 @@ export function createChildChannel(child: ChildProcess): ChildChannel {
     if (gone) {
       return;
     }
+
     child.kill("SIGKILL");
     markGone();
   }
@@ -53,6 +60,7 @@ export function createChildChannel(child: ChildProcess): ChildChannel {
       if (gone || !child.connected) {
         return;
       }
+
       try {
         child.send(message, (error) => {
           if (error) {

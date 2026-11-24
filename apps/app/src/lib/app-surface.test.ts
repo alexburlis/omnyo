@@ -1,15 +1,22 @@
-import { APP_SURFACE_HEADER_NAME } from "@bb/config/app-surface";
+import { ANALYTICS_CONSENT_HEADER } from "@omnyo/domain/usage-telemetry";
+import { saveClientUsageConsent } from "./usage-consent";
+import { APP_SURFACE_HEADER_NAME } from "@omnyo/config/app-surface";
 import {
   buildBridgeInjectionScript,
+  MOBILE_BRIDGE_VERSION,
   type NativeShellHandshake,
-} from "@bb/mobile-bridge";
+} from "@omnyo/mobile-bridge";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createBbDesktopApi } from "@/test/bb-desktop-test-utils";
+import { createOmnyoDesktopApi } from "@/test/omnyo-desktop-test-utils";
 import { resetNativeShellForTests } from "@/lib/native-shell";
-import { appSurfaceRequestInit, getAppSurface } from "./app-surface";
+import {
+  appSurfaceRequestInit,
+  getAppSurface,
+  fetchWithAppSurface,
+} from "./app-surface";
 
 const mobileHandshake: NativeShellHandshake = {
-  bridgeVersion: 1,
+  bridgeVersion: MOBILE_BRIDGE_VERSION,
   appVersion: "0.39.0",
   platform: "ios",
   profileMode: "connect",
@@ -54,7 +61,7 @@ describe("app surface request metadata", () => {
 
   it("marks Electron preload requests as desktop", () => {
     vi.stubGlobal("window", {
-      bbDesktop: createBbDesktopApi(desktopInfo),
+      omnyoDesktop: createOmnyoDesktopApi(desktopInfo),
     });
 
     const init = appSurfaceRequestInit();
@@ -65,10 +72,11 @@ describe("app surface request metadata", () => {
     );
   });
 
-  it("marks requests from the bb mobile shell as mobile", () => {
+  it("marks requests from the Omnyo mobile shell as mobile", () => {
     const fakeWindow: Record<string, unknown> = {
       ReactNativeWebView: { postMessage: () => {} },
     };
+
     // eslint-disable-next-line no-new-func
     new Function("window", buildBridgeInjectionScript(mobileHandshake))(
       fakeWindow,
@@ -82,5 +90,53 @@ describe("app surface request metadata", () => {
     expect(new Headers(init.headers).get(APP_SURFACE_HEADER_NAME)).toBe(
       "mobile",
     );
+  });
+  it("limits a saved analytics capability to contributing same-origin actions and refuses redirects", async () => {
+    const stored = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+      removeItem: (key: string) => stored.delete(key),
+    });
+    vi.stubGlobal("window", { location: new URL("http://localhost") });
+    const proof = "a".repeat(64);
+    saveClientUsageConsent({ active: proof, proofs: [proof] });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 200 }));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await fetchWithAppSurface("/api/v1/threads", { method: "POST" });
+      expect(
+        new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get(
+          ANALYTICS_CONSENT_HEADER,
+        ),
+      ).toBe(proof);
+      expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe("error");
+      await fetchWithAppSurface("/api/v1/plugins/private/rpc/call", {
+        method: "POST",
+      });
+      await fetchWithAppSurface("https://external.example/api/v1/threads", {
+        method: "POST",
+      });
+      await fetchWithAppSurface("/api/v1/system/bug-reports", {
+        method: "POST",
+      });
+
+      for (const call of fetchMock.mock.calls.slice(1))
+        expect(
+          new Headers(call[1]?.headers).has(ANALYTICS_CONSENT_HEADER),
+        ).toBe(false);
+      await fetchWithAppSurface("/api/v1/system/usage/erase", {
+        method: "POST",
+        body: JSON.stringify({ proof }),
+      });
+      expect(fetchMock.mock.calls.at(-1)?.[1]?.redirect).toBe("error");
+    } finally {
+      localStorage.removeItem("omnyo.usage-consent.v1");
+    }
   });
 });

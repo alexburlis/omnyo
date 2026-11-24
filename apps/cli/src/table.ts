@@ -1,5 +1,5 @@
 import Table from "cli-table3";
-import { displayWidth, truncateToWidth } from "@bb/text-utils";
+import { displayWidth, truncateToWidth } from "@omnyo/text-utils";
 
 interface BorderlessTableOptions {
   head: string[];
@@ -48,9 +48,11 @@ export function renderBorderlessTable(
   }
 
   const rendered = table.toString();
+
   if (!options.trimTrailingWhitespace) {
     return rendered;
   }
+
   return rendered
     .split("\n")
     .map((line) => line.trimEnd())
@@ -77,6 +79,8 @@ export function columnWidths(
 
 export function truncateCell(value: string, maxWidth: number): string {
   const singleLine = value.replace(/\s+/gu, " ");
+
   if (displayWidth(singleLine) <= maxWidth) return singleLine;
+
   return `${truncateToWidth(singleLine, maxWidth - 1)}…`;
 }

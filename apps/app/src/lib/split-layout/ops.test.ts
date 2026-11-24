@@ -29,6 +29,7 @@ function singlePaneLayout(): SplitLayout {
 
 function layoutAtPaneCount(count: number): SplitLayout {
   let layout = singlePaneLayout();
+
   for (let index = 2; index <= count; index += 1) {
     layout = splitPane(
       layout,
@@ -37,6 +38,7 @@ function layoutAtPaneCount(count: number): SplitLayout {
       threadContent(`thread-${index}`),
     );
   }
+
   return layout;
 }
 
@@ -49,15 +51,19 @@ function expectNormalizedSizes(layout: SplitLayout): void {
     if (node.type === "pane") {
       return;
     }
+
     expect(node.sizes).toHaveLength(node.children.length);
     expect(node.sizes.reduce((sum, size) => sum + size, 0)).toBeCloseTo(1, 12);
     const feasibleMinimum = Math.min(0.15, 1 / node.children.length);
+
     for (const size of node.sizes) {
       expect(size).toBeGreaterThanOrEqual(feasibleMinimum);
       expect(size).toBeLessThanOrEqual(0.85);
     }
+
     node.children.forEach(visit);
   }
+
   visit(layout.root);
 }
 
@@ -70,13 +76,17 @@ describe("split layout operations", () => {
       dir: "row",
       children: Array.from({ length: MAX_PANES }, () => ({ type: "pane" })),
     });
+
     if (eight.root.type !== "split") {
       throw new Error("Expected a flat row split");
     }
+
     expect(eight.root.sizes).toHaveLength(MAX_PANES);
+
     for (const size of eight.root.sizes) {
       expect(size).toBeCloseTo(1 / MAX_PANES, 12);
     }
+
     expect(
       splitPane(eight, eight.focusedPaneId, "right", threadContent("thread-9")),
     ).toBe(eight);
@@ -89,9 +99,11 @@ describe("split layout operations", () => {
       "left",
       threadContent("thread-2", "project-2"),
     );
+
     const three = splitPane(two, "pane-1", "bottom", threadContent("thread-3"));
     const four = splitPane(three, "pane-3", "right", threadContent("thread-4"));
     let eight = four;
+
     for (let index = 5; index <= MAX_PANES; index += 1) {
       eight = splitPane(
         eight,
@@ -100,6 +112,7 @@ describe("split layout operations", () => {
         threadContent(`thread-${index}`),
       );
     }
+
     const rejected = splitPane(
       eight,
       "pane-1",
@@ -137,6 +150,7 @@ describe("split layout operations", () => {
       "right",
       threadContent("thread-2"),
     );
+
     const replacement = threadContent("replacement", "project-2");
     const replaced = replacePaneContent(two, "pane-1", replacement);
     const swapped = swapPanes(replaced, "pane-1", "pane-2");
@@ -156,6 +170,7 @@ describe("split layout operations", () => {
       "right",
       threadContent("thread-2"),
     );
+
     const three = splitPane(two, "pane-2", "bottom", threadContent("thread-3"));
     const removedMiddle = removePane(three, "pane-2");
     const removedEnd = removePane(setFocus(removedMiddle, "pane-3"), "pane-3");
@@ -214,6 +229,7 @@ describe("split layout operations", () => {
       "right",
       threadContent("thread-2"),
     );
+
     const low = resizeSplit(two, [], 0, -10);
     const high = resizeSplit(low, [], 0, 10);
 
@@ -221,11 +237,13 @@ describe("split layout operations", () => {
       expect(low.root.sizes[0]).toBeCloseTo(0.15, 12);
       expect(low.root.sizes[1]).toBeCloseTo(0.85, 12);
     }
+
     if (high.root.type === "split") {
       expect(high.root.sizes[0]).toBeCloseTo(0.85, 12);
       expect(high.root.sizes[1]).toBeCloseTo(0.15, 12);
       expect(high.root.sizes.reduce((sum, size) => sum + size, 0)).toBe(1);
     }
+
     expect(resizeSplit(high, [], 1, 0.5)).toBe(high);
     expect(resizeSplit(high, [0], 0, 0.5)).toBe(high);
   });

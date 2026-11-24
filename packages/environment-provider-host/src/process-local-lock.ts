@@ -25,17 +25,20 @@ export class ProcessLocalQueuedLockTimeoutError extends Error {
 }
 
 const heldLocks = new AsyncLocalStorage<Set<string>>();
+
 const lockQueues = new Map<string, Promise<void>>();
 
 function normalizeProcessLocalLockSpecs(
   locks: ProcessLocalQueuedLockSpec[],
 ): ProcessLocalQueuedLockSpec[] {
   const locksByKey = new Map<string, ProcessLocalQueuedLockSpec>();
+
   for (const lock of locks) {
     if (!locksByKey.has(lock.key)) {
       locksByKey.set(lock.key, lock);
     }
   }
+
   return Array.from(locksByKey.values()).sort((left, right) =>
     left.key.localeCompare(right.key),
   );
@@ -47,6 +50,7 @@ export async function withProcessLocalQueuedLocks<T>(args: {
   work: ProcessLocalQueuedLockWork<T>;
 }): Promise<T> {
   const locks = normalizeProcessLocalLockSpecs(args.locks);
+
   return withProcessLocalQueuedLocksAtIndex({
     locks,
     index: 0,
@@ -62,6 +66,7 @@ function withProcessLocalQueuedLocksAtIndex<T>(args: {
   work: ProcessLocalQueuedLockWork<T>;
 }): Promise<T> {
   const lock = args.locks[args.index];
+
   if (!lock) {
     return args.work();
   }
@@ -85,6 +90,7 @@ function withProcessLocalQueuedLock<T>(args: {
   work: ProcessLocalQueuedLockWork<T>;
 }): Promise<T> {
   const held = heldLocks.getStore();
+
   if (held?.has(args.lock.key)) {
     return args.work();
   }
@@ -101,6 +107,7 @@ function lockAbortError(key: string, signal: AbortSignal): Error {
   if (signal.reason instanceof Error) {
     return signal.reason;
   }
+
   return new Error(`Aborted waiting for process-local lock ${key}`);
 }
 
@@ -120,6 +127,7 @@ function runInProcessQueue<T>(
   let timedOut = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let removeAbortListener: (() => void) | undefined;
+
   const next = previous
     .catch(() => undefined)
     .then(async () => {
@@ -127,29 +135,37 @@ function runInProcessQueue<T>(
         clearTimeout(timeout);
         timeout = undefined;
       }
+
       if (removeAbortListener) {
         removeAbortListener();
         removeAbortListener = undefined;
       }
+
       if (aborted && signal) {
         throw lockAbortError(key, signal);
       }
+
       if (timedOut) {
         throw new ProcessLocalQueuedLockTimeoutError({ key, timeoutMs });
       }
+
       started = true;
+
       return work();
     });
+
   const settled = next.then(
     () => undefined,
     () => undefined,
   );
+
   lockQueues.set(key, settled);
   void settled.then(() => {
     if (lockQueues.get(key) === settled) {
       lockQueues.delete(key);
     }
   });
+
   if (timeoutMs <= 0) {
     return next;
   }
@@ -159,6 +175,7 @@ function runInProcessQueue<T>(
       if (started) {
         return;
       }
+
       timedOut = true;
       reject(new ProcessLocalQueuedLockTimeoutError({ key, timeoutMs }));
     }, timeoutMs);
@@ -168,9 +185,11 @@ function runInProcessQueue<T>(
         if (started) {
           return;
         }
+
         aborted = true;
         reject(lockAbortError(key, signal));
       };
+
       signal.addEventListener("abort", onAbort, { once: true });
       removeAbortListener = () => {
         signal.removeEventListener("abort", onAbort);
@@ -183,10 +202,12 @@ function runInProcessQueue<T>(
           clearTimeout(timeout);
           timeout = undefined;
         }
+
         if (removeAbortListener) {
           removeAbortListener();
           removeAbortListener = undefined;
         }
+
         resolve(value);
       },
       (error: unknown) => {
@@ -194,33 +215,40 @@ function runInProcessQueue<T>(
           clearTimeout(timeout);
           timeout = undefined;
         }
+
         if (removeAbortListener) {
           removeAbortListener();
           removeAbortListener = undefined;
         }
+
         reject(error);
       },
     );
   });
 }
 
-const GIT_REF_FS_LOCK_DIR_NAME = "bb-ref-mutation.lock";
+const GIT_REF_FS_LOCK_DIR_NAME = "omnyo-ref-mutation.lock";
+
+const legacyGitRefFsLockDirNameV1 = "bb-ref-mutation.lock";
+
 const GIT_REF_FS_LOCK_STALE_MS = 10 * 60_000;
+
 const GIT_REF_FS_LOCK_POLL_MS = 100;
+
 const GIT_REF_FS_LOCK_DEFAULT_TIMEOUT_MS = 5 * 60_000;
 
-async function acquireGitRefFsLock(
-  commonDir: string,
-  options: { signal?: AbortSignal; timeoutMs?: number },
+async function acquireGitRefFsLockDirectory(
+  lockPath: string,
+  deadline: number,
+  signal: AbortSignal | undefined,
 ): Promise<() => Promise<void>> {
-  const lockPath = path.join(commonDir, GIT_REF_FS_LOCK_DIR_NAME);
-  const deadline =
-    Date.now() + (options.timeoutMs ?? GIT_REF_FS_LOCK_DEFAULT_TIMEOUT_MS);
   for (;;) {
-    options.signal?.throwIfAborted();
+    signal?.throwIfAborted();
+
     try {
       await fs.mkdir(lockPath);
       await fs.writeFile(path.join(lockPath, "owner"), `${process.pid}\n`);
+
       return async () => {
         await fs.rm(lockPath, { recursive: true, force: true });
       };
@@ -231,19 +259,53 @@ async function acquireGitRefFsLock(
         throw error;
       }
     }
+
     const held = await fs.stat(lockPath).catch(() => null);
+
     if (held !== null && Date.now() - held.mtimeMs > GIT_REF_FS_LOCK_STALE_MS) {
       await fs.rm(lockPath, { recursive: true, force: true });
       continue;
     }
+
     if (Date.now() >= deadline) {
       throw new Error(
         `Timed out waiting for the git ref lock held at ${lockPath}`,
       );
     }
+
     await sleep(GIT_REF_FS_LOCK_POLL_MS, undefined, {
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(signal === undefined ? {} : { signal }),
     });
+  }
+}
+
+async function acquireGitRefFsLock(
+  commonDir: string,
+  options: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<() => Promise<void>> {
+  const deadline =
+    Date.now() + (options.timeoutMs ?? GIT_REF_FS_LOCK_DEFAULT_TIMEOUT_MS);
+
+  const releaseCanonical = await acquireGitRefFsLockDirectory(
+    path.join(commonDir, GIT_REF_FS_LOCK_DIR_NAME),
+    deadline,
+    options.signal,
+  );
+
+  try {
+    const releaseLegacy = await acquireGitRefFsLockDirectory(
+      path.join(commonDir, legacyGitRefFsLockDirNameV1),
+      deadline,
+      options.signal,
+    );
+
+    return async () => {
+      await releaseLegacy();
+      await releaseCanonical();
+    };
+  } catch (error) {
+    await releaseCanonical();
+    throw error;
   }
 }
 
@@ -255,6 +317,7 @@ export async function withGitRefMutationLock<T>(
   options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<T> {
   const commonDirIdentity = await fs.stat(commonDir, { bigint: true });
+
   return withProcessLocalQueuedLocks({
     locks: [
       {
@@ -267,6 +330,7 @@ export async function withGitRefMutationLock<T>(
     signal: options.signal,
     work: async () => {
       const release = await acquireGitRefFsLock(commonDir, options);
+
       try {
         return await work();
       } finally {

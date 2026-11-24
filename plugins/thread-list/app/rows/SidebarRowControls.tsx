@@ -66,6 +66,7 @@ export function SidebarControlButton({
           className={SIDEBAR_CONTROL_PRIMARY_BUTTON_CLASS}
           onClick={(event) => {
             event.stopPropagation();
+
             if (event.detail > 0) event.currentTarget.blur();
             onClick();
           }}

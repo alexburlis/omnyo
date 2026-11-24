@@ -1,16 +1,18 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { JsonValue } from "@get-bb/plugin-sdk";
+import type { JsonValue } from "@omnyo/plugin-sdk";
 import {
   jsonValueSchema,
   type JsonObject,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { resolveCodexHome } from "../codex-home.js";
 import { AiServiceFailure } from "./failure.js";
 
 const CODEX_AUTH_FILE_NAME = "auth.json";
+
 const CHATGPT_AUTH_CLAIM_PATH = "https://api.openai.com/auth";
+
 const CHATGPT_PROFILE_CLAIM_PATH = "https://api.openai.com/profile";
 
 export interface CodexChatGptAuthCredentials {
@@ -64,6 +66,7 @@ export function toJsonObject(value: JsonValue | undefined): JsonObject | null {
   ) {
     return null;
   }
+
   return value;
 }
 
@@ -77,11 +80,14 @@ export function parseJsonValue(raw: string): JsonValue {
 
 function decodeJwtPayload(token: string): JsonObject | null {
   const parts = token.split(".");
+
   if (parts.length !== 3 || !parts[1]) {
     return null;
   }
+
   try {
     const decoded = Buffer.from(parts[1], "base64url").toString("utf8");
+
     return toJsonObject(parseJsonValue(decoded));
   } catch {
     return null;
@@ -95,11 +101,13 @@ function chatGptClaims(token: string): JsonObject | null {
 function accountEmail(token: string): string | null {
   const payload = decodeJwtPayload(token);
   const profile = toJsonObject(payload?.[CHATGPT_PROFILE_CLAIM_PATH]);
+
   return nonEmptyString(payload?.email) ?? nonEmptyString(profile?.email);
 }
 
 function tokenExpired(token: string): boolean {
   const exp = decodeJwtPayload(token)?.exp;
+
   return typeof exp === "number" && Date.now() >= exp * 1000;
 }
 
@@ -117,11 +125,14 @@ function toError(error: unknown): Error {
 
 function classifyAuthJson(value: JsonValue): ClassifiedAuthJson {
   const parsed = toJsonObject(value);
+
   if (parsed === null) {
     return { state: "unusable", reason: "not_object" };
   }
+
   const authMode = nonEmptyString(parsed.auth_mode);
   const apiKey = nonEmptyString(parsed.OPENAI_API_KEY);
+
   if (
     authMode === "apikey" ||
     authMode === "apiKey" ||
@@ -131,22 +142,29 @@ function classifyAuthJson(value: JsonValue): ClassifiedAuthJson {
       ? { state: "unusable", reason: "api_key" }
       : { state: "ok", credentials: { type: "apiKey", apiKey } };
   }
+
   const tokens = toJsonObject(parsed.tokens);
   const accessToken = nonEmptyString(tokens?.access_token);
+
   if (tokens === null || accessToken === null) {
     return { state: "unusable", reason: "access_token" };
   }
+
   const claims = chatGptClaims(accessToken);
   const idToken = nonEmptyString(tokens.id_token);
+
   const idTokenClaims =
     idToken === null ? toJsonObject(tokens.id_token) : chatGptClaims(idToken);
+
   const accountId =
     nonEmptyString(tokens.account_id) ??
     nonEmptyString(claims?.chatgpt_account_id) ??
     nonEmptyString(idTokenClaims?.chatgpt_account_id);
+
   if (accountId === null) {
     return { state: "unusable", reason: "account_id" };
   }
+
   return {
     state: "ok",
     credentials: {
@@ -167,6 +185,7 @@ function classifyAuthJson(value: JsonValue): ClassifiedAuthJson {
 export async function readCodexAuthFile(): Promise<CodexAuthFile> {
   const authPath = codexAuthPath();
   let raw: string;
+
   try {
     raw = await fs.readFile(authPath, "utf8");
   } catch (error) {
@@ -174,12 +193,15 @@ export async function readCodexAuthFile(): Promise<CodexAuthFile> {
       ? { state: "missing", authPath }
       : { state: "unreadable", authPath, error: toError(error) };
   }
+
   let value: JsonValue;
+
   try {
     value = parseJsonValue(raw);
   } catch (error) {
     return { state: "malformed", authPath, error: toError(error) };
   }
+
   return { ...classifyAuthJson(value), authPath };
 }
 
@@ -199,6 +221,7 @@ const UNUSABLE_AUTH_MESSAGES: Record<
 
 export async function readCodexAuthCredentials(): Promise<CodexAuthCredentials> {
   const auth = await readCodexAuthFile();
+
   switch (auth.state) {
     case "ok":
       return auth.credentials;

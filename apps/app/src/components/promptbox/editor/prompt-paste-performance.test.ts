@@ -9,9 +9,9 @@ import {
   promptEditorValueFromDoc,
 } from "./prompt-editor-serialization";
 import { findUltracodeRanges } from "./prompt-decoration-extension";
-import { findActiveTrigger } from "@bb/client-core";
-import type { TypeaheadTrigger } from "@bb/client-core";
-import { serializePromptDraftStorage } from "@bb/client-core";
+import { findActiveTrigger } from "@omnyo/client-core";
+import type { TypeaheadTrigger } from "@omnyo/client-core";
+import { serializePromptDraftStorage } from "@omnyo/client-core";
 import { generateMinifiedJsFixture } from "@/test/fixtures/minified-js-paste-fixture";
 
 const PERF_ENABLED = process.env.PROMPTBOX_PERF === "1";
@@ -27,12 +27,15 @@ const FIXTURE_SIZES = [128 * 1024, 512 * 1024, 1024 * 1024] as const;
 
 function measureMs(iterations: number, run: () => unknown): number {
   const samples: number[] = [];
+
   for (let index = 0; index < iterations; index += 1) {
     const start = performance.now();
     run();
     samples.push(performance.now() - start);
   }
+
   samples.sort((left, right) => left - right);
+
   return samples[Math.floor(samples.length / 2)]!;
 }
 
@@ -42,11 +45,13 @@ function formatMs(value: number): string {
 
 describe.runIf(PERF_ENABLED)("composer large minified-JS paste", () => {
   const fixtureOut = process.env.PROMPTBOX_PERF_FIXTURE_OUT;
+
   if (fixtureOut) {
     it("writes the manual-repro fixture file", () => {
       const text = generateMinifiedJsFixture({
         approximateLength: 1024 * 1024,
       });
+
       writeFileSync(fixtureOut, text);
       console.log(
         `fixture written: ${fixtureOut} (${text.length} chars, single line)`,
@@ -66,6 +71,7 @@ describe.runIf(PERF_ENABLED)("composer large minified-JS paste", () => {
       const plainPasteMs = measureMs(5, () =>
         promptEditorInlineContentFromValue(value),
       );
+
       lines.push(
         `paste: inline content (plain)          ${formatMs(plainPasteMs)}ms`,
       );
@@ -106,17 +112,21 @@ describe.runIf(PERF_ENABLED)("composer large minified-JS paste", () => {
           doc,
         },
       };
+
       const triggerMs = measureMs(7, () =>
         findActiveTrigger(caretEditor, TRIGGERS),
       );
+
       lines.push(
         `keystroke: findActiveTrigger           ${formatMs(triggerMs)}ms`,
       );
 
       const draft = { text, mentions: [], attachments: [] };
+
       const draftSerializeMs = measureMs(7, () =>
         serializePromptDraftStorage(draft),
       );
+
       lines.push(
         `draft JSON serialize (per keystroke pre-fix; now per 250ms flush) ${formatMs(draftSerializeMs)}ms`,
       );

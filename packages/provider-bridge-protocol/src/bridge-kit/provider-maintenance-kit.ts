@@ -1,4 +1,4 @@
-import { execPortableFile } from "@bb/process-utils";
+import { execPortableFile } from "@omnyo/process-utils";
 import { execFile } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access } from "node:fs/promises";
@@ -17,6 +17,7 @@ import type {
 const execFileAsync = promisify(execFile);
 
 const CLI_PROBE_TIMEOUT_MS = 5_000;
+
 const INSTALLATION_CHECK_TIMEOUT_MS = 15_000;
 
 const DEFAULT_WINDOWS_PATHEXT = ".COM;.EXE;.BAT;.CMD";
@@ -29,13 +30,16 @@ export function selectResolvedExecutable(args: {
   const candidates = args.candidates
     .map((candidate) => candidate.trim())
     .filter((candidate) => candidate.length > 0);
+
   if (args.platform !== "win32") {
     return candidates[0] ?? null;
   }
+
   const extensions = (args.pathExt ?? DEFAULT_WINDOWS_PATHEXT)
     .split(";")
     .map((extension) => extension.trim().toLowerCase())
     .filter((extension) => extension.length > 0);
+
   return (
     candidates.find((candidate) =>
       extensions.includes(path.win32.extname(candidate).toLowerCase()),
@@ -49,16 +53,20 @@ export async function resolveExecutablePath(
   if (path.isAbsolute(command)) {
     try {
       await access(command, fsConstants.X_OK);
+
       return command;
     } catch {
       return null;
     }
   }
+
   try {
     const lookup = process.platform === "win32" ? "where" : "which";
+
     const { stdout } = await execFileAsync(lookup, [command], {
       timeout: CLI_PROBE_TIMEOUT_MS,
     });
+
     return selectResolvedExecutable({
       candidates: stdout.split(/\r?\n/u),
       platform: process.platform,
@@ -80,6 +88,7 @@ export async function commandOutput(
       maxBuffer: 1024 * 1024,
       timeout: INSTALLATION_CHECK_TIMEOUT_MS,
     });
+
     return `${stdout}\n${stderr}`.trim();
   } catch {
     return null;
@@ -88,6 +97,7 @@ export async function commandOutput(
 
 export function versionFrom(value: string | null): string | null {
   const candidate = value?.match(/\bv?(\d+\.\d+\.\d+[0-9A-Za-z.+-]*)/u)?.[1];
+
   return candidate !== undefined && semverValid(candidate) !== null
     ? candidate
     : null;
@@ -101,6 +111,7 @@ export async function readCliVersion(command: string): Promise<string | null> {
       maxBuffer: 1024 * 1024,
       timeout: CLI_PROBE_TIMEOUT_MS,
     });
+
     return versionFrom(`${stdout}\n${stderr}`);
   } catch {
     return null;
@@ -133,6 +144,7 @@ export function npmGlobalInstallCommand(
 ): ProviderInstallationCommand {
   const command = npmCommand();
   const args = ["install", "-g", `${npmPackage}@latest`];
+
   return { command, args, displayCommand: formatCommand(command, args) };
 }
 
@@ -153,11 +165,14 @@ export async function probeNpmGlobalPackage(
   npmPackage: string,
 ): Promise<NpmGlobalPackageProbe> {
   const npm = npmCommand();
+
   const [prefixOutput, listOutput] = await Promise.all([
     commandOutput(npm, ["prefix", "-g"]),
     commandOutput(npm, ["list", "-g", npmPackage, "--depth=0", "--json"]),
   ]);
+
   const npmPrefix = firstLine(prefixOutput);
+
   return {
     npmBin:
       npmPrefix === null
@@ -183,6 +198,7 @@ function npmGlobalPackageVersion(
   npmPackage: string,
 ): string | null {
   if (value === null) return null;
+
   try {
     const parsed = z
       .object({
@@ -191,6 +207,7 @@ function npmGlobalPackageVersion(
           .default({}),
       })
       .safeParse(JSON.parse(value));
+
     return parsed.success
       ? (parsed.data.dependencies[npmPackage]?.version ?? null)
       : null;
@@ -201,6 +218,7 @@ function npmGlobalPackageVersion(
 
 function pathIsInside(child: string, parent: string): boolean {
   const relativePath = path.relative(path.resolve(parent), path.resolve(child));
+
   return (
     relativePath === "" ||
     (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
@@ -244,6 +262,7 @@ export function downloadedInstallerCommand(
     options.powershellUrl !== undefined
   ) {
     const powershellScript = `irm ${options.powershellUrl} | iex`;
+
     return {
       command: "powershell.exe",
       args: [
@@ -256,12 +275,14 @@ export function downloadedInstallerCommand(
       displayCommand: powershellScript,
     };
   }
+
   const script = [
     'tmp=$(mktemp "${TMPDIR:-/tmp}/provider-installation.XXXXXX")',
     "trap 'rm -f \"$tmp\"' EXIT",
     `curl -fsSL ${url} -o "$tmp"`,
     'bash "$tmp"',
   ].join(" && ");
+
   return { command: "sh", args: ["-c", script], displayCommand: script };
 }
 

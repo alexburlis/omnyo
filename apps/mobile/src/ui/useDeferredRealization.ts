@@ -15,7 +15,9 @@ export function useDeferredRealization(active: boolean): boolean {
   const [realized, setRealized] = useState(false);
   useEffect(() => {
     if (!active || realized) return;
+
     return scheduleDeferredRealization(() => setRealized(true), scheduler);
   }, [active, realized]);
+
   return realized;
 }

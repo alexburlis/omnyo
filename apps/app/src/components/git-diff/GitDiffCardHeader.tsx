@@ -1,14 +1,18 @@
 import { useMemo, type ReactNode } from "react";
-import type { GitDiffFileChangeKind } from "@bb/server-contract";
+import type { GitDiffFileChangeKind } from "@omnyo/server-contract";
 import { CopyButton } from "@/components/ui/copy-button.js";
 import { DiffStatsTally } from "@/components/ui/diff-stats-tally.js";
 import { FilePathLink } from "@/components/ui/file-path-link.js";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { OpenInEditorButton } from "@/components/ui/open-in-editor-button.js";
 import { TruncateStart } from "@/components/ui/truncate-start.js";
 import { resolveAbsoluteFilePath } from "@/lib/absolute-file-path";
 import { formatByteSize } from "@/lib/format-byte-size";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  CONTROL_HOVER_TRANSITION,
+  DISCLOSURE_CHEVRON_TRANSITION,
+} from "@omnyo/shared-ui/motion";
 import type { DiffImageSizeStat } from "./GitDiffCardBody";
 
 export interface GitDiffCardHeaderModel {
@@ -66,10 +70,14 @@ export function GitDiffCardRawToggle({
   const label = isRaw
     ? `Show image preview for ${fileLabel}`
     : `Show raw SVG diff for ${fileLabel}`;
+
   return (
     <button
       type="button"
-      className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring aria-pressed:bg-state-active aria-pressed:text-foreground"
+      className={cn(
+        "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring aria-pressed:bg-state-active aria-pressed:text-foreground",
+        CONTROL_HOVER_TRANSITION,
+      )}
       onClick={onToggle}
       aria-label={label}
       aria-pressed={isRaw}
@@ -86,9 +94,11 @@ function resolveRenameInfo(
   if (model.changeKind !== "renamed" && model.changeKind !== "copied") {
     return null;
   }
+
   if (previousPath && previousPath !== model.path) {
     return { from: previousPath, to: model.path };
   }
+
   return null;
 }
 
@@ -109,15 +119,20 @@ export function GitDiffCardHeader({
   const headerInsertions = isDeletedFile ? 0 : model.insertions;
   const headerDeletions = isAddedFile ? 0 : model.deletions;
   const hideEmptyHeaderStats = isAddedFile || isDeletedFile;
+
   const renameInfo = useMemo(
     () => resolveRenameInfo(model, previousPath),
     [model, previousPath],
   );
+
   const openablePath = model.openablePath;
+
   const copyablePath = openablePath
     ? resolveAbsoluteFilePath({ path: openablePath, rootPath: filePathRoot })
     : null;
+
   const canOpenFile = Boolean(openablePath);
+
   const supportsCollapse =
     isCollapsed !== undefined && onToggleCollapsed !== undefined;
 
@@ -128,7 +143,8 @@ export function GitDiffCardHeader({
           <button
             type="button"
             className={cn(
-              "inline-flex w-8 shrink-0 items-center justify-center text-muted-foreground transition-colors",
+              "inline-flex w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              CONTROL_HOVER_TRANSITION,
               hasChanges
                 ? "hover:text-foreground"
                 : "cursor-not-allowed opacity-40",
@@ -145,7 +161,8 @@ export function GitDiffCardHeader({
             <Icon
               name="ChevronRight"
               className={cn(
-                "size-3.5 shrink-0 transition-transform duration-150",
+                "size-3.5 shrink-0",
+                DISCLOSURE_CHEVRON_TRANSITION,
                 hasChanges && !isCollapsed && "rotate-90",
               )}
             />

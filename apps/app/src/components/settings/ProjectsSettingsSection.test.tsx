@@ -7,8 +7,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { Host } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import type { Host } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
@@ -55,6 +55,7 @@ function host(overrides: Partial<Host> & Pick<Host, "id" | "name">): Host {
 }
 
 const primaryHost = host({ id: "host_primary", name: "MacBook Pro" });
+
 const remoteHost = host({
   id: "host_remote",
   name: "dev-vm",
@@ -79,6 +80,10 @@ function stubSidebarBootstrapFetch(
       new Response(
         JSON.stringify({
           sections: [],
+          orderedProjectIds: [
+            ...projects.map((project) => project.id),
+            "proj_personal",
+          ],
           projects: projects.map((project) => ({
             id: project.id,
             kind: "standard",
@@ -122,8 +127,8 @@ function stubSidebarBootstrapFetch(
 
 const projects: SidebarProjectFixture[] = [
   {
-    id: "proj_bb",
-    name: "bb",
+    id: "proj_omnyo",
+    name: "Omnyo",
     gitRemoteUrl: "git@github.com:get-bb/bb.git",
     hostIds: ["host_primary", "host_remote"],
     threadCount: 3,
@@ -146,6 +151,7 @@ const projects: SidebarProjectFixture[] = [
 
 function renderSection() {
   const { wrapper } = createQueryClientTestHarness();
+
   return render(
     <MemoryRouter>
       <ProjectsSettingsSection />
@@ -183,6 +189,7 @@ it("counts only persistent checkouts and their connection status in project summ
     name: "Sandbox",
     type: "ephemeral",
   });
+
   vi.mocked(sdk.hosts.list).mockResolvedValue([
     primaryHost,
     remoteHost,
@@ -205,12 +212,15 @@ it("counts only persistent checkouts and their connection status in project summ
     },
   ]);
   renderSection();
+
   const all = await screen.findByRole("link", {
     name: "Open All checkouts settings",
   });
+
   const offline = screen.getByRole("link", {
     name: "Open Offline checkout settings",
   });
+
   expect(all.textContent).toContain("2 of 2 machines");
   expect(offline.textContent).toContain("1 of 2 machines");
   expect(offline.textContent).toContain("offline");
@@ -271,7 +281,7 @@ describe("ProjectsSettingsSection", () => {
 
     renderSection();
 
-    expect(await screen.findByText("bb")).toBeDefined();
+    expect(await screen.findByText("Omnyo")).toBeDefined();
     expect(screen.getByText("github.com/get-bb/bb")).toBeDefined();
     expect(await screen.findByText("2 of 2 machines")).toBeDefined();
     expect(screen.getByText("3 threads")).toBeDefined();
@@ -282,9 +292,9 @@ describe("ProjectsSettingsSection", () => {
     expect(screen.queryByText("Personal")).toBeNull();
     expect(
       screen
-        .getByRole("link", { name: "Open bb settings" })
+        .getByRole("link", { name: "Open Omnyo settings" })
         .getAttribute("href"),
-    ).toBe("/settings/projects/proj_bb");
+    ).toBe("/settings/projects/proj_omnyo");
   });
 
   it("marks a project offline when every configured machine is disconnected", async () => {
@@ -295,15 +305,15 @@ describe("ProjectsSettingsSection", () => {
     await screen.findByText("1 of 2 machines");
     const pierre = screen.getByText("pierre");
     expect(pierre.parentElement?.textContent).toContain("offline");
-    const bb = screen.getByText("bb");
-    expect(bb.parentElement?.textContent).not.toContain("offline");
+    const api = screen.getByText("Omnyo");
+    expect(api.parentElement?.textContent).not.toContain("offline");
   });
 
   it("shows a drag handle per project and disables them with a single project", async () => {
     stubSidebarBootstrapFetch(projects);
     const { unmount } = renderSection();
 
-    await screen.findByText("bb");
+    await screen.findByText("Omnyo");
     const handles = screen.getAllByRole("button", { name: /^Reorder / });
     expect(handles).toHaveLength(3);
     expect(handles.every((handle) => !handle.hasAttribute("disabled"))).toBe(
@@ -313,12 +323,12 @@ describe("ProjectsSettingsSection", () => {
 
     stubSidebarBootstrapFetch([projects[0]!]);
     renderSection();
-    await screen.findByText("bb");
+    await screen.findByText("Omnyo");
     await waitFor(() =>
       expect(
         (
           screen.getByRole("button", {
-            name: "Reorder bb",
+            name: "Reorder Omnyo",
           }) as HTMLButtonElement
         ).disabled,
       ).toBe(true),
@@ -328,9 +338,9 @@ describe("ProjectsSettingsSection", () => {
   it("renames a project through the existing dialog", async () => {
     stubSidebarBootstrapFetch(projects);
     vi.mocked(sdk.projects.update).mockResolvedValue({
-      id: "proj_bb",
+      id: "proj_omnyo",
       kind: "standard",
-      name: "bb-next",
+      name: "omnyo-next",
       gitRemoteUrl: null,
       createdAt: NOW,
       updatedAt: NOW,
@@ -338,17 +348,17 @@ describe("ProjectsSettingsSection", () => {
     });
 
     renderSection();
-    await openProjectMenu("bb");
+    await openProjectMenu("Omnyo");
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
 
-    const input = await screen.findByDisplayValue("bb");
-    fireEvent.change(input, { target: { value: "bb-next" } });
+    const input = await screen.findByDisplayValue("Omnyo");
+    fireEvent.change(input, { target: { value: "omnyo-next" } });
     fireEvent.submit(input.closest("form")!);
 
     await waitFor(() =>
       expect(sdk.projects.update).toHaveBeenCalledWith({
-        projectId: "proj_bb",
-        name: "bb-next",
+        projectId: "proj_omnyo",
+        name: "omnyo-next",
       }),
     );
   });
@@ -377,7 +387,7 @@ describe("ProjectsSettingsSection", () => {
     stubSidebarBootstrapFetch(projects);
 
     renderSection();
-    await screen.findByText("bb");
+    await screen.findByText("Omnyo");
     fireEvent.click(screen.getByRole("button", { name: "Add a project" }));
 
     expect(

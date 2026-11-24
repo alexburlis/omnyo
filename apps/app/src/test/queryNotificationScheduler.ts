@@ -11,6 +11,7 @@ export function createQueryNotificationScheduler() {
           pending.delete(timer);
           callback();
         }, 0);
+
         pending.set(timer, callback);
       });
     },
@@ -22,6 +23,7 @@ export function createQueryNotificationScheduler() {
             pending.delete(timer);
             callback();
           }
+
           await Promise.resolve();
         });
       } while (pending.size > 0);

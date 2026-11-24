@@ -8,8 +8,11 @@ const OPUS = availableModelFixture({
   reasoningLevels: ["low", "medium", "high", "xhigh", "max"],
   defaultReasoningLevel: "medium",
 });
+
 const HAIKU = availableModelFixture({ model: "claude-haiku-4-5" });
+
 const CATALOG = [OPUS, HAIKU];
+
 const EMPTY = { modelOverride: null, reasoningLevelOverride: null };
 
 const registry = await createTestProviderRegistry();

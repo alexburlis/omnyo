@@ -9,7 +9,9 @@ export function plainSurfaceCopy(text: string): string {
       if (part.length > 1 && part.startsWith("`") && part.endsWith("`")) {
         return part.slice(1, -1);
       }
+
       if (part === "{experimental}") return "";
+
       return /^\[([^\]]+)\]\([a-z0-9-]+\)$/.exec(part)?.[1] ?? part;
     })
     .join("")

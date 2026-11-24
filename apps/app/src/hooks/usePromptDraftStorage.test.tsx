@@ -1,11 +1,18 @@
-import { appendQuoteAndAttachmentsToDraft } from "@bb/client-core";
+import {
+  appendQuoteAndAttachmentsToDraft,
+  isPromptDraftEmpty,
+  nextPromptImageAlias,
+  parsePromptDraftStorage,
+} from "@omnyo/client-core";
 // @vitest-environment jsdom
 
 import { createCoreComposerActions } from "@/lib/plugin-composer-handle";
+import { useActiveComposerDraft } from "@/components/thread/embedded-chat/useActiveComposerDraft";
 import { act, cleanup, render, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getPromptDraftAccessor,
+  movePromptDraft,
   usePromptDraftController,
   usePromptDraftInputEmpty,
   usePromptDraftInputThreadIds,
@@ -13,7 +20,8 @@ import {
   usePromptDraftStorage,
 } from "./usePromptDraftStorage";
 
-const NEW_THREAD_DRAFT_KEY = "bb.promptbox.contents-draft-3";
+const NEW_THREAD_DRAFT_KEY = "omnyo.promptbox.contents-draft-3";
+
 const LEGACY_PROJECT_DRAFT_KEY = "bb.promptbox.contents-proj_prompt-draft-3";
 
 function storedDraft(text: string): string {
@@ -21,8 +29,10 @@ function storedDraft(text: string): string {
 }
 
 let scopeCounter = 0;
+
 function uniqueScope() {
   scopeCounter += 1;
+
   return {
     kind: "thread" as const,
     projectId: `proj-quote-test-${scopeCounter}`,
@@ -40,6 +50,51 @@ afterEach(() => {
 });
 
 describe("usePromptDraftStorage", () => {
+  it("persists canvas conversation drafts independently of the main chat and other regions", () => {
+    const scope = uniqueScope();
+    const main = getPromptDraftAccessor(scope);
+
+    const first = getPromptDraftAccessor({
+      ...scope,
+      conversationKey: "canvas:first",
+    });
+
+    const second = getPromptDraftAccessor({
+      ...scope,
+      conversationKey: "canvas:second",
+    });
+
+    main.setTextAndMentions("main", []);
+    first.setTextAndMentions("first", []);
+    second.setTextAndMentions("second", []);
+    expect(main.getCurrent().text).toBe("main");
+    expect(first.getCurrent().text).toBe("first");
+    expect(second.getCurrent().text).toBe("second");
+    expect(
+      new Set([main.storageKey, first.storageKey, second.storageKey]).size,
+    ).toBe(3);
+  });
+
+  it("moves an unfinished provisional draft without replacing newer destination text", () => {
+    vi.useFakeTimers();
+    const sourceScope = uniqueScope();
+    const targetScope = uniqueScope();
+    const source = getPromptDraftAccessor(sourceScope);
+    const target = getPromptDraftAccessor(targetScope);
+    source.setTextAndMentions("pending followup", []);
+    target.setTextAndMentions("newer draft", []);
+
+    movePromptDraft(sourceScope, targetScope);
+    vi.runAllTimers();
+
+    expect(source.getCurrent().text).toBe("");
+    expect(window.localStorage.getItem(source.storageKey)).toBeNull();
+    expect(target.getCurrent().text).toBe("newer draft\n\npending followup");
+    expect(
+      JSON.parse(window.localStorage.getItem(target.storageKey)!).text,
+    ).toBe("newer draft\n\npending followup");
+  });
+
   it("keeps deferred text writes readable and serializes at the persist boundary", () => {
     vi.useFakeTimers();
     const scope = uniqueScope();
@@ -97,7 +152,9 @@ describe("usePromptDraftStorage", () => {
       .mockImplementation(() => {
         throw new DOMException("quota", "QuotaExceededError");
       });
+
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     try {
       act(() => {
         result.current.setDraft({
@@ -139,10 +196,12 @@ describe("usePromptDraftStorage", () => {
 
   it("subscribes to draft presence for a batch of threads", () => {
     const projectId = "proj-batch-drafts";
+
     const threadRefs = [
       { id: "thr-batch-a", projectId },
       { id: "thr-batch-b", projectId },
     ];
+
     const { result } = renderHook(() => ({
       draft: usePromptDraftStorage({
         kind: "thread",
@@ -170,29 +229,37 @@ describe("usePromptDraftStorage", () => {
 
   it("does not re-read storage or re-render the batch when a draft edit keeps presence", () => {
     const projectId = "proj-batch-keystrokes";
+
     const threadRefs = Array.from({ length: 30 }, (_, index) => ({
       id: `thr-batch-${index}`,
       projectId,
     }));
+
     const composer = getPromptDraftAccessor({
       kind: "thread",
       projectId,
       threadId: "thr-batch-3",
     });
+
     let batchRenders = 0;
+
     const { result, rerender } = renderHook(() => {
       batchRenders += 1;
+
       return usePromptDraftInputThreadIds(threadRefs);
     });
+
     act(() => {
       composer.setDraft({ text: "first", mentions: [], attachments: [] });
     });
     expect([...result.current]).toEqual(["thr-batch-3"]);
 
     const getItem = vi.spyOn(Storage.prototype, "getItem");
+
     const presenceReads = () =>
       getItem.mock.calls.filter(([key]) => String(key).includes(projectId))
         .length;
+
     rerender();
     expect(presenceReads()).toBe(0);
 
@@ -248,6 +315,117 @@ describe("usePromptDraftStorage", () => {
     );
   });
 
+  it("keeps the image label high-water mark after the labelled image is removed", () => {
+    const draft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId: "proj_labels",
+      threadId: "thr_labels",
+    });
+
+    draft.setDraft({
+      text: "See [Img3]",
+      mentions: [],
+      attachments: [
+        {
+          type: "localImage",
+          path: "uploads/shot.png",
+          name: "shot.png",
+          alias: "Img3",
+        },
+      ],
+    });
+    draft.setTextAndMentions("See", []);
+    draft.setAttachments([]);
+
+    expect(draft.getCurrent().imageAliasHighWater).toBe(3);
+    expect(
+      JSON.parse(window.localStorage.getItem(draft.storageKey) ?? "{}"),
+    ).toMatchObject({ text: "See", imageAliasHighWater: 3 });
+  });
+
+  it("keeps the label counter across reload when removing the only image empties the draft", () => {
+    const draft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId: "proj_labels",
+      threadId: "thr_only_image",
+    });
+
+    draft.setDraft({
+      text: "[Img1]",
+      mentions: [
+        {
+          start: 0,
+          end: 6,
+          resource: {
+            kind: "attachment",
+            path: "uploads/shot.png",
+            label: "Img1",
+          },
+        },
+      ],
+      attachments: [
+        {
+          type: "localImage",
+          path: "uploads/shot.png",
+          name: "shot.png",
+          alias: "Img1",
+        },
+      ],
+    });
+    draft.setTextAndMentions("", []);
+    draft.setAttachments([]);
+
+    expect(isPromptDraftEmpty(draft.getCurrent())).toBe(true);
+
+    const reloaded = parsePromptDraftStorage(
+      window.localStorage.getItem(draft.storageKey),
+    );
+
+    expect(reloaded.imageAliasHighWater).toBe(1);
+
+    const composer = renderHook(() =>
+      useActiveComposerDraft({
+        draftScope: {
+          kind: "thread",
+          projectId: "proj_labels",
+          threadId: "thr_only_image",
+        },
+        inlineDraft: null,
+        inlineSessionRef: { current: null },
+      }),
+    );
+
+    expect(composer.result.current.currentPromptDraft.imageAliasHighWater).toBe(
+      1,
+    );
+    expect(
+      nextPromptImageAlias({
+        text: composer.result.current.currentPromptDraft.text,
+        attachments: composer.result.current.currentPromptDraft.attachments,
+        highWater:
+          composer.result.current.currentPromptDraft.imageAliasHighWater,
+      }),
+    ).toBe("Img2");
+
+    draft.clear();
+
+    expect(window.localStorage.getItem(draft.storageKey)).toBeNull();
+    expect(draft.getCurrent().imageAliasHighWater).toBeUndefined();
+  });
+
+  it("removes storage for a content-empty draft that never issued a label", () => {
+    const draft = getPromptDraftAccessor({
+      kind: "thread",
+      projectId: "proj_labels",
+      threadId: "thr_plain",
+    });
+
+    draft.setDraft({ text: "hello", mentions: [], attachments: [] });
+    draft.setDraft({ text: "", mentions: [], attachments: [] });
+
+    expect(window.localStorage.getItem(draft.storageKey)).toBeNull();
+  });
+
   it("keeps thread follow-up drafts scoped to the thread", () => {
     const { result } = renderHook(() =>
       usePromptDraftStorage({
@@ -258,7 +436,7 @@ describe("usePromptDraftStorage", () => {
     );
 
     expect(result.current.storageKey).toBe(
-      "bb.promptbox.contents-proj_prompt-thr_followup-3",
+      "omnyo.promptbox.contents-proj_prompt-thr_followup-3",
     );
   });
 
@@ -271,7 +449,7 @@ describe("usePromptDraftStorage", () => {
     );
 
     expect(result.current.storageKey).toBe(
-      "bb.promptbox.contents-automation-edit-auto_watchdog-3",
+      "omnyo.promptbox.contents-automation-edit-auto_watchdog-3",
     );
   });
 });
@@ -296,6 +474,7 @@ describe("composer quote persistence", () => {
     function DraftActionConsumer() {
       consumerRenders += 1;
       draftActions = getPromptDraftAccessor(scope);
+
       return null;
     }
 
@@ -369,19 +548,63 @@ describe("composer quote persistence", () => {
 });
 
 describe("usePromptDraftController", () => {
+  it("recovers failed message content without replacing the newer draft or its mention offsets", () => {
+    const draft = getPromptDraftAccessor(uniqueScope());
+    draft.setDraft({
+      text: "new",
+      mentions: [],
+      attachments: [{ type: "localFile", path: "/new.txt", name: "new.txt" }],
+    });
+    draft.restoreFailedDraft({
+      text: "@chat",
+      mentions: [
+        {
+          start: 0,
+          end: 5,
+          resource: { kind: "thread", threadId: "related", label: "chat" },
+        },
+      ],
+      attachments: [
+        { type: "localFile", path: "/failed.txt", name: "failed.txt" },
+      ],
+    });
+
+    expect(draft.getCurrent()).toEqual({
+      text: "new\n\n@chat",
+      mentions: [
+        {
+          start: 5,
+          end: 10,
+          resource: { kind: "thread", threadId: "related", label: "chat" },
+        },
+      ],
+      attachments: [
+        { type: "localFile", path: "/new.txt", name: "new.txt" },
+        { type: "localFile", path: "/failed.txt", name: "failed.txt" },
+      ],
+    });
+    expect(JSON.parse(window.localStorage.getItem(draft.storageKey)!)).toEqual(
+      draft.getCurrent(),
+    );
+  });
+
   it("returns stable methods and never re-renders its caller on draft writes", () => {
     const scope = uniqueScope();
     let renders = 0;
+
     const { result } = renderHook(() => {
       renders += 1;
       const controller = usePromptDraftController(scope);
+
       return { controller, inputEmpty: usePromptDraftInputEmpty(controller) };
     });
+
     const initialController = result.current.controller;
     const rendersBefore = renders;
 
     act(() => initialController.setTextAndMentions("h", []));
     const rendersAfterFirstKey = renders;
+
     for (const text of ["he", "hel", "hell", "hello"]) {
       act(() => initialController.setTextAndMentions(text, []));
     }
@@ -395,6 +618,7 @@ describe("usePromptDraftController", () => {
 
   it("follows the live draft through the snapshot hook", () => {
     const scope = uniqueScope();
+
     const { result } = renderHook(() =>
       usePromptDraftSnapshot(usePromptDraftController(scope)),
     );

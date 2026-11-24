@@ -32,28 +32,45 @@ function codeForStatus(
   wireError: string,
 ): ConnectMachineRedeemErrorCode {
   if (wireError === "machine-limit") return "machine_limit";
+
   if (wireError === "already-used" || status === 409) return "already_used";
+
   if (wireError === "expired" || status === 410) return "expired";
+
   if (status >= 500) return "network";
+
   return "invalid_code";
 }
 
 function handleForApex(serverUrl: string, apexUrl: string): string | null {
   let parsed: URL;
   let apex: URL;
+
   try {
     parsed = new URL(serverUrl);
     apex = new URL(apexUrl);
   } catch {
     return null;
   }
-  if (parsed.protocol !== apex.protocol || parsed.port !== apex.port) {
+
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash ||
+    parsed.protocol !== apex.protocol ||
+    parsed.port !== apex.port
+  ) {
     return null;
   }
+
   const [label, ...rest] = parsed.hostname.split(".");
+
   if (label === undefined || label.length === 0) {
     return null;
   }
+
   return rest.join(".") === apex.hostname ? label : null;
 }
 
@@ -63,9 +80,11 @@ export async function redeemMachineCredential(
 ): Promise<ConnectCredential> {
   const url = `${args.apexUrl.replace(/\/$/u, "")}/api/connect/redeem-machine`;
   let response: Response;
+
   try {
     response = await fetchImpl(url, {
       method: "POST",
+      redirect: "error",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code: args.code, deviceName: args.deviceName }),
     });
@@ -77,6 +96,7 @@ export async function redeemMachineCredential(
   }
 
   let body: unknown;
+
   try {
     body = await response.json();
   } catch {
@@ -96,25 +116,31 @@ export async function redeemMachineCredential(
   }
 
   const parsed = redeemMachineResponseSchema.safeParse(body);
+
   if (!parsed.success) {
     throw new ConnectMachineRedeemError(
       "invalid_response",
       "Machine redeem response failed schema validation",
     );
   }
+
   const { credential, serverUrl } = parsed.data;
+
   if (serverUrl === null) {
     throw new ConnectMachineRedeemError(
       "invalid_response",
       "Machine redeem returned no server URL",
     );
   }
+
   const handle = handleForApex(serverUrl, args.apexUrl);
+
   if (handle === null) {
     throw new ConnectMachineRedeemError(
       "invalid_response",
       `Machine redeem returned a server URL outside ${args.apexUrl}`,
     );
   }
+
   return { credential, handle, serverUrl };
 }

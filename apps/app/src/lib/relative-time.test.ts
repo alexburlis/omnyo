@@ -6,8 +6,11 @@ import {
 } from "./relative-time";
 
 const NOW = 1_700_000_000_000;
+
 const MINUTE = 60 * 1000;
+
 const HOUR = 60 * MINUTE;
+
 const DAY = 24 * HOUR;
 
 describe("formatScheduledTime", () => {
@@ -28,6 +31,7 @@ describe("formatScheduledTime", () => {
     expect((next.getTime() - start.getTime()) / HOUR).toBe(hours);
 
     const now = new Date(2026, month, day, 12).getTime();
+
     for (const [offset, hour, minute, prefix] of [
       [0, 23, 30, ""],
       [1, 0, 0, "Tomorrow "],
@@ -36,10 +40,12 @@ describe("formatScheduledTime", () => {
       [1, 23, 30, "Tomorrow "],
     ] as const) {
       const target = new Date(2026, month, day + offset, hour, minute);
+
       const clock = target.toLocaleTimeString(undefined, {
         hour: "numeric",
         minute: "2-digit",
       });
+
       expect(formatScheduledTime({ timestamp: target.getTime(), now })).toBe(
         `${prefix}${clock}`,
       );
@@ -47,14 +53,17 @@ describe("formatScheduledTime", () => {
 
     for (const offset of [-1, 2]) {
       const target = new Date(2026, month, day + offset, 0, 30);
+
       const date = target.toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
       });
+
       const clock = target.toLocaleTimeString(undefined, {
         hour: "numeric",
         minute: "2-digit",
       });
+
       expect(formatScheduledTime({ timestamp: target.getTime(), now })).toBe(
         `${date} ${clock}`,
       );

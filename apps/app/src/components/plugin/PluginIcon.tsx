@@ -4,13 +4,13 @@ import {
   getPluginAssetIcon,
   subscribeAppIcons,
   subscribePluginAssetIcons,
-} from "@bb/shared-ui/icon-registry";
-import { PluginCompactIconMask } from "@bb/shared-ui/plugin-icon";
-import { Icon, isBuiltinIconName, type IconName } from "@bb/shared-ui/icon";
+} from "@omnyo/shared-ui/icon-registry";
+import { PluginCompactIconMask } from "@omnyo/shared-ui/plugin-icon";
+import { Icon, isBuiltinIconName, type IconName } from "@omnyo/shared-ui/icon";
 import { usePluginCompactBranding } from "@/lib/plugin-logos";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
-export { PluginCompactIconMask } from "@bb/shared-ui/plugin-icon";
+export { PluginCompactIconMask } from "@omnyo/shared-ui/plugin-icon";
 
 export function pluginIconName(icon: string | null): IconName {
   return icon ?? "Zap";
@@ -30,15 +30,20 @@ export function PluginIcon({
   className?: string;
 }) {
   const branding = usePluginCompactBranding(pluginId);
+
   const compactIconUrl =
     compactIconUrlProp === undefined
       ? (branding?.compactIconUrl ?? null)
       : compactIconUrlProp;
+
   if (compactIconUrl !== null) {
     return <PluginCompactIconMask url={compactIconUrl} className={className} />;
   }
+
   const resolvedIcon = branding?.icon ?? icon ?? fallbackIcon;
+
   if (resolvedIcon === null) return null;
+
   return (
     <Icon
       name={resolvedIcon}
@@ -58,16 +63,19 @@ export function PluginItemIcon({
   className?: string;
 }) {
   const name = icon ?? "";
+
   const custom = useSyncExternalStore(
     subscribeAppIcons,
     () => getAppIcon(name),
     () => getAppIcon(name),
   );
+
   const asset = useSyncExternalStore(
     subscribePluginAssetIcons,
     () => getPluginAssetIcon(name),
     () => getPluginAssetIcon(name),
   );
+
   if (isBuiltinIconName(name) || custom !== undefined || asset !== undefined) {
     return (
       <Icon
@@ -77,5 +85,6 @@ export function PluginItemIcon({
       />
     );
   }
+
   return <PluginIcon pluginId={pluginId} icon={null} className={className} />;
 }

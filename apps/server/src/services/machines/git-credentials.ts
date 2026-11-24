@@ -4,7 +4,7 @@ import {
 } from "../lib/async-ttl-memo.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { HostDaemonContributedEnvEntry } from "@bb/host-daemon-contract";
+import type { HostDaemonContributedEnvEntry } from "@omnyo/host-daemon-contract";
 import { z } from "zod";
 
 const exec = promisify(execFile);
@@ -18,6 +18,7 @@ const gitConfig = [
   ["url.https://github.com/.insteadOf", "git@github.com:"],
   ["url.https://github.com/.insteadOf", "ssh://git@github.com/"],
 ] as const;
+
 const identitySchema = z.object({
   login: z.string().regex(/^[a-zA-Z0-9-]+$/u),
   id: z.number().int().positive(),
@@ -29,6 +30,7 @@ async function runGh(args: string[]): Promise<string> {
     timeout: 15_000,
     maxBuffer: 1024 * 1024,
   });
+
   return stdout;
 }
 
@@ -36,10 +38,12 @@ export function githubGitConfiguration(): HostDaemonContributedEnvEntry[] {
   const configEnv: Record<string, string> = {
     GIT_CONFIG_COUNT: String(gitConfig.length),
   };
+
   gitConfig.forEach(([key, value], index) => {
     configEnv[`GIT_CONFIG_KEY_${index}`] = key;
     configEnv[`GIT_CONFIG_VALUE_${index}`] = value;
   });
+
   return Object.entries(configEnv).map<HostDaemonContributedEnvEntry>(
     ([name, value]) => ({
       name,
@@ -54,17 +58,23 @@ async function loadGitCredentials(
   run = runGh,
 ): Promise<HostDaemonContributedEnvEntry[]> {
   try {
+    const [rawToken, rawUser] = await Promise.all([
+      run(["auth", "token", "--hostname", "github.com"]),
+      run(["api", "--hostname", "github.com", "user"]),
+    ]);
+
     const token = z
       .string()
       .trim()
       .min(1)
       .regex(/^[^\s\x00]+$/u)
-      .parse(await run(["auth", "token", "--hostname", "github.com"]));
-    const user = identitySchema.parse(
-      JSON.parse(await run(["api", "--hostname", "github.com", "user"])),
-    );
+      .parse(rawToken);
+
+    const user = identitySchema.parse(JSON.parse(rawUser));
+
     const email =
       user.email ?? `${user.id}+${user.login}@users.noreply.github.com`;
+
     return [
       ...githubGitConfiguration(),
       ...Object.entries({
@@ -92,6 +102,7 @@ const credentialCaches = new WeakMap<
 
 async function cachedGitCredentials(run: typeof runGh, refresh: boolean) {
   let cache = credentialCaches.get(run);
+
   if (!cache) {
     cache = createAsyncTtlMemo({
       maxEntries: 1_024,
@@ -100,6 +111,7 @@ async function cachedGitCredentials(run: typeof runGh, refresh: boolean) {
     });
     credentialCaches.set(run, cache);
   }
+
   return structuredClone(
     await cache.run("github.com", () => loadGitCredentials(run), refresh),
   );
@@ -113,6 +125,7 @@ export async function resolveGitCredentials(
 
 export async function machineGitHealth(run = runGh) {
   const entries = await cachedGitCredentials(run, true);
+
   return {
     status: entries.length ? ("ready" as const) : ("not configured" as const),
     statusMessage: entries.length

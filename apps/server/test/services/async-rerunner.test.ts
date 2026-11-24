@@ -1,4 +1,4 @@
-import { createDeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { describe, expect, it } from "vitest";
 import { createLifecycleDedupers } from "../../src/lifecycle-dedupers.js";
 import { createAsyncRerunner } from "../../src/services/lib/async-deduper.js";
@@ -24,6 +24,7 @@ describe("createAsyncRerunner", () => {
     const first = runner.run("thread", async () => {
       calls.push("first");
     });
+
     queueMicrotask(() => {
       queueMicrotask(() => {
         void runner
@@ -49,10 +50,13 @@ describe("createAsyncRerunner", () => {
       firstStarted.resolve();
       await releaseFirst.promise;
     });
+
     await firstStarted.promise;
+
     const superseded = runner.run("thread", async () => {
       calls.push("superseded");
     });
+
     const latest = runner.run("thread", async () => {
       calls.push("latest");
     });
@@ -75,10 +79,13 @@ describe("createAsyncRerunner", () => {
       await releaseFirst.promise;
       throw new Error("first failed");
     });
+
     await firstStarted.promise;
+
     const pending = runner.run("thread", async () => {
       calls.push("pending");
     });
+
     releaseFirst.resolve();
 
     await Promise.all([

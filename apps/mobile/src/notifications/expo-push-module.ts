@@ -9,16 +9,21 @@ import type {
 
 export function getEasProjectId(): string | null {
   const extra: unknown = Constants.expoConfig?.extra;
+
   if (typeof extra === "object" && extra !== null && "eas" in extra) {
     const eas: unknown = (extra as { eas?: unknown }).eas;
+
     if (typeof eas === "object" && eas !== null && "projectId" in eas) {
       const projectId: unknown = (eas as { projectId?: unknown }).projectId;
+
       if (typeof projectId === "string" && projectId.length > 0) {
         return projectId;
       }
     }
   }
+
   const easConfigId = Constants.easConfig?.projectId;
+
   return typeof easConfigId === "string" && easConfigId.length > 0
     ? easConfigId
     : null;
@@ -33,6 +38,7 @@ function toPermissionState(
   ) {
     return "granted";
   }
+
   return status.status === "undetermined" || status.canAskAgain
     ? "undetermined"
     : "denied";
@@ -61,6 +67,7 @@ export function createExpoPushModule(): PushNotificationsModule {
     },
     async requestPermission() {
       await ensureNotificationChannel();
+
       return toPermissionState(
         await Notifications.requestPermissionsAsync({
           ios: { allowAlert: true, allowBadge: true, allowSound: true },
@@ -70,6 +77,7 @@ export function createExpoPushModule(): PushNotificationsModule {
     async getExpoPushToken(projectId) {
       await ensureNotificationChannel();
       const token = await Notifications.getExpoPushTokenAsync({ projectId });
+
       return token.data;
     },
     async unregisterDevicePushToken() {
@@ -86,8 +94,10 @@ export function createExpoPushModule(): PushNotificationsModule {
           "data" in event.data
             ? event.data.data
             : event.data;
+
         listener(String(token));
       });
+
       return () => subscription.remove();
     },
     setBadgeCount(count) {
@@ -100,5 +110,6 @@ let instance: PushNotificationsModule | null = null;
 
 export function getPushNotificationsModule(): PushNotificationsModule {
   instance ??= createExpoPushModule();
+
   return instance;
 }

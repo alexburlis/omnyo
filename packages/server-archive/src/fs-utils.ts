@@ -9,6 +9,7 @@ export async function lstatOrNull(path: string): Promise<Stats | null> {
     if (hasErrorCode(error, "ENOENT")) {
       return null;
     }
+
     throw error;
   }
 }
@@ -23,6 +24,7 @@ export async function moveFile(
     if (!hasErrorCode(error, "EXDEV")) {
       throw error;
     }
+
     await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL);
     await rm(sourcePath, { force: true });
   }

@@ -72,12 +72,170 @@ describe("ComposerBannersSlot", () => {
     expect(screen.getByText("bare body").closest("section")).toBeNull();
   });
 
+  it.each([
+    {
+      ownerPlacement: "after" as const,
+      expected: ["first default", "second default", "owner", "adjacent"],
+    },
+    {
+      ownerPlacement: "before" as const,
+      expected: ["owner", "first default", "second default", "adjacent"],
+    },
+  ])(
+    "renders adjacent-to-composer banners last with owner placement $ownerPlacement",
+    ({ ownerPlacement, expected }) => {
+      setPluginSlotRegistrations(
+        "a-adjacent-plugin",
+        registrations([
+          {
+            id: "suggestion",
+            banners: [
+              {
+                id: "adjacent",
+                chrome: "bare",
+                experimental_placement: "adjacent-to-composer",
+                component: () => <div data-row="">adjacent</div>,
+              },
+            ],
+          },
+        ]),
+      );
+      setPluginSlotRegistrations(
+        "b-default-plugin",
+        registrations([
+          {
+            id: "defaults",
+            banners: [
+              {
+                id: "first",
+                chrome: "bare",
+                component: () => <div data-row="">first default</div>,
+              },
+              {
+                id: "second",
+                chrome: "bare",
+                component: () => <div data-row="">second default</div>,
+              },
+            ],
+          },
+        ]),
+      );
+
+      const { container } = render(
+        <ComposerBannersSlot
+          view={composerView("t1")}
+          ownerPlacement={ownerPlacement}
+        >
+          <div data-row="">owner</div>
+        </ComposerBannersSlot>,
+      );
+
+      expect(
+        [...container.querySelectorAll("[data-row]")].map(
+          (row) => row.textContent,
+        ),
+      ).toEqual(expected);
+    },
+  );
+
+  it("keeps content attached to the composer below every adjacent banner", () => {
+    setPluginSlotRegistrations(
+      "a-adjacent-plugin",
+      registrations([
+        {
+          id: "servers",
+          banners: [
+            {
+              id: "adjacent",
+              chrome: "bare",
+              experimental_placement: "adjacent-to-composer",
+              component: () => <div data-row="">adjacent</div>,
+            },
+          ],
+        },
+      ]),
+    );
+
+    const { container } = render(
+      <ComposerBannersSlot
+        view={composerView("t1")}
+        attachedToComposer={<div data-row="">queue</div>}
+      >
+        <div data-row="">owner</div>
+      </ComposerBannersSlot>,
+    );
+
+    expect(
+      [...container.querySelectorAll("[data-row]")].map(
+        (row) => row.textContent,
+      ),
+    ).toEqual(["owner", "adjacent", "queue"]);
+    expect(
+      screen.getByText("queue").closest("[data-composer-banner-row]"),
+    ).toBeNull();
+  });
+
+  it("places adjacent-to-composer banners from every plugin in one shared row", () => {
+    for (const pluginId of ["a-status-plugin", "b-chip-plugin"]) {
+      setPluginSlotRegistrations(
+        pluginId,
+        registrations([
+          {
+            id: "row",
+            banners: [
+              {
+                id: "item",
+                chrome: "bare",
+                experimental_placement: "adjacent-to-composer",
+                component: () => <div data-row="">{pluginId}</div>,
+              },
+            ],
+          },
+        ]),
+      );
+    }
+
+    setPluginSlotRegistrations(
+      "c-default-plugin",
+      registrations([
+        {
+          id: "defaults",
+          banners: [
+            {
+              id: "default",
+              chrome: "bare",
+              component: () => <div data-row="">default</div>,
+            },
+          ],
+        },
+      ]),
+    );
+
+    const { container } = render(
+      <ComposerBannersSlot view={composerView("t1")} />,
+    );
+
+    const rows = container.querySelectorAll("[data-composer-banner-row]");
+
+    expect(rows).toHaveLength(1);
+    expect(
+      [...rows[0]!.querySelectorAll("[data-row]")].map(
+        (row) => row.textContent,
+      ),
+    ).toEqual(["a-status-plugin", "b-chip-plugin"]);
+    expect(
+      screen.getByText("default").closest("[data-composer-banner-row]"),
+    ).toBeNull();
+  });
+
   it("collapses only the crashing banner", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
+
     function Crash(): never {
       throw new Error("banner exploded");
     }
+
     setPluginSlotRegistrations(
       "isolated-plugin",
       registrations([
@@ -100,13 +258,17 @@ describe("ComposerBannersSlot", () => {
   it("remounts banners when the scope identity changes", () => {
     const mounted = vi.fn();
     const unmounted = vi.fn();
+
     function StatefulBanner() {
       useEffect(() => {
         mounted();
+
         return unmounted;
       }, []);
+
       return <div>stateful banner</div>;
     }
+
     setPluginSlotRegistrations(
       "stateful-plugin",
       registrations([
@@ -163,10 +325,12 @@ describe("ComposerBannersSlot", () => {
   it("provides the live composer view to banner components", () => {
     function ViewProbe() {
       const view = useComposerView();
+
       return (
         <div>{`${view.scope.kind}:${view.draft.text}:${view.layout}:${view.run.isRunning}:${view.run.isSubmitting}`}</div>
       );
     }
+
     setPluginSlotRegistrations(
       "view-plugin",
       registrations([
@@ -178,11 +342,13 @@ describe("ComposerBannersSlot", () => {
     );
 
     const first = composerView("t1", "draft one");
+
     const rendered = render(
       <MemoryRouter>
         <ComposerBannersSlot view={first} />
       </MemoryRouter>,
     );
+
     expect(
       screen.getByText("thread:draft one:expanded:false:false"),
     ).toBeDefined();
@@ -201,7 +367,7 @@ describe("ComposerBannersSlot", () => {
     expect(screen.getByText("thread:draft two:zen:true:true")).toBeDefined();
   });
 
-  it("preserves BB-owned rows on either side of plugin banners", () => {
+  it("preserves Omnyo-owned rows on either side of plugin banners", () => {
     setPluginSlotRegistrations(
       "ordered-plugin",
       registrations([
@@ -214,16 +380,17 @@ describe("ComposerBannersSlot", () => {
 
     const view = render(
       <ComposerBannersSlot view={composerView("t1")} ownerPlacement="before">
-        <div>BB row</div>
+        <div>Omnyo row</div>
       </ComposerBannersSlot>,
     );
-    expect(view.container.textContent).toBe("BB rowPlugin row");
+
+    expect(view.container.textContent).toBe("Omnyo rowPlugin row");
 
     view.rerender(
       <ComposerBannersSlot view={composerView("t1")} ownerPlacement="after">
-        <div>BB row</div>
+        <div>Omnyo row</div>
       </ComposerBannersSlot>,
     );
-    expect(view.container.textContent).toBe("Plugin rowBB row");
+    expect(view.container.textContent).toBe("Plugin rowOmnyo row");
   });
 });

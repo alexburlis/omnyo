@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createThreadArchiveFilterAtom } from "./thread-lifecycle-filter";
 
 const sidebarKey = "test.sidebar.archiveFilter";
+
 const paletteKey = "test.palette.archiveFilter";
 
 afterEach(() => {
@@ -42,9 +43,9 @@ describe("browser-local thread filters", () => {
       '["active","archived","unknown"]',
     ]) {
       window.localStorage.setItem(sidebarKey, value);
-      expect(createStore().get(createThreadArchiveFilterAtom(sidebarKey))).toEqual([
-        "active",
-      ]);
+      expect(
+        createStore().get(createThreadArchiveFilterAtom(sidebarKey)),
+      ).toEqual(["active"]);
     }
   });
 });

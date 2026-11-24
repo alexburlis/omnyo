@@ -9,10 +9,11 @@ import {
 } from "./index";
 
 const COMMITTED = ":root { --canvas: white; }";
+
 const PREVIEW = ":root { --canvas: black; }";
 
 function styleText(): string | null {
-  return document.getElementById("bb-app-theme")?.textContent ?? null;
+  return document.getElementById("omnyo-app-theme")?.textContent ?? null;
 }
 
 afterEach(() => {

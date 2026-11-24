@@ -1,10 +1,11 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   formatServerDataSize,
+  getErrorMessage,
   type ServerMoveMode,
   type ServerMoveStepId,
-} from "@bb/domain";
-import { BbHttpError, type BbSdk } from "@bb/sdk";
+} from "@omnyo/domain";
+import { OmnyoHttpError, type OmnyoSdk } from "@omnyo/sdk";
 import {
   serverMoveCheckItemSchema,
   type ServerMoveCheckItem,
@@ -15,16 +16,20 @@ import {
   type ServerMoveStatusResponse,
   type ServerMoveStep,
   type ServerMoveStepStatus,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { z } from "zod";
 import { CliExitError } from "../action.js";
-import { getErrorMessage } from "./helpers.js";
 
 export const SERVER_MOVE_POLL_INTERVAL_MS = 1_000;
+
 export const SERVER_MOVE_RECOVERY_EXIT_CODE = 2;
+
 const MAX_CONSECUTIVE_STATUS_FAILURES = 5;
+
 const SERVER_MOVED_ERROR_CODE = "server_moved";
+
 const SERVER_MOVE_BLOCKED_ERROR_CODE = "server_move_blocked";
+
 const SERVER_MOVE_EXPERIMENT_DISABLED_ERROR_CODE =
   "server_move_experiment_disabled";
 
@@ -37,7 +42,7 @@ export async function callServerMoveRoute<T>(
     return await run();
   } catch (error) {
     if (
-      error instanceof BbHttpError &&
+      error instanceof OmnyoHttpError &&
       error.code === SERVER_MOVE_EXPERIMENT_DISABLED_ERROR_CODE
     ) {
       const body = httpErrorMessageBodySchema.safeParse(error.body);
@@ -46,6 +51,7 @@ export async function callServerMoveRoute<T>(
         1,
       );
     }
+
     throw error;
   }
 }
@@ -66,7 +72,7 @@ export type ServerMoveFollowOutcome =
   | { kind: "ended"; status: ServerMoveStatus };
 
 export interface FollowServerMoveArgs {
-  sdk: BbSdk;
+  sdk: OmnyoSdk;
   initial: ServerMoveStatus;
   signal: AbortSignal;
   report: (line: string) => void;
@@ -80,7 +86,7 @@ export function serverMoveStepLabel(
     case "stop-work":
       return "Stop running work";
     case "update-target":
-      return `Update bb on ${targetHostName}`;
+      return `Update Omnyo on ${targetHostName}`;
     case "export":
       return "Export server data";
     case "transfer":
@@ -95,7 +101,7 @@ export function serverMoveStepLabel(
 }
 
 function describeMode(mode: ServerMoveMode): string {
-  return mode === "connect" ? "bb connect" : "direct address";
+  return mode === "connect" ? "Omnyo connect" : "direct address";
 }
 
 export function printServerMoveCheckItems(
@@ -103,11 +109,14 @@ export function printServerMoveCheckItems(
 ): void {
   for (const [severity, heading] of SEVERITY_HEADINGS) {
     const group = items.filter((item) => item.severity === severity);
+
     if (group.length === 0) continue;
     console.log("");
     console.log(heading);
+
     for (const item of group) {
       console.log(`  - ${item.title}`);
+
       if (item.detail !== null) console.log(`    ${item.detail}`);
     }
   }
@@ -115,50 +124,58 @@ export function printServerMoveCheckItems(
 
 export function printServerMoveCheck(check: ServerMoveCheckResponse): void {
   console.log(
-    `Moving the bb server to ${check.targetHostName} (${describeMode(check.mode)})`,
+    `Moving the Omnyo server to ${check.targetHostName} (${describeMode(check.mode)})`,
   );
+
   if (check.serverUrl !== null) console.log(`New address: ${check.serverUrl}`);
+
   if (check.targetDataDir !== null) {
     console.log(`Target data directory: ${check.targetDataDir}`);
   }
+
   if (check.existingTargetServerData !== null) {
     console.log(
-      `Existing bb server data on ${check.targetHostName}: ${check.existingTargetServerData.path} (${formatServerDataSize(check.existingTargetServerData.sizeBytes)})`,
+      `Existing Omnyo server data on ${check.targetHostName}: ${check.existingTargetServerData.path} (${formatServerDataSize(check.existingTargetServerData.sizeBytes)})`,
     );
   }
+
   printServerMoveCheckItems(check.items);
   console.log("");
 }
 
 export function missingAddressGuidance(check: ServerMoveCheckResponse): string {
-  return `This bb server uses a direct address, so the new server needs one too. Re-run with --address <url>: the URL every machine and app will use to reach bb on ${check.targetHostName}, such as a Tailscale Serve URL.`;
+  return `This Omnyo server uses a direct address, so the new server needs one too. Re-run with --address <url>: the URL every machine and app will use to reach Omnyo on ${check.targetHostName}, such as a Tailscale Serve URL.`;
 }
 
 export function existingDataGuidance(check: ServerMoveCheckResponse): string {
   const existing = check.existingTargetServerData;
+
   const location =
     existing === null
       ? ""
       : ` at ${existing.path} (${formatServerDataSize(existing.sizeBytes)})`;
-  return `${check.targetHostName} already has bb server data${location}. Re-run with --archive-existing-data to move it aside to a .before-move-<date> directory; it is never merged.`;
+
+  return `${check.targetHostName} already has Omnyo server data${location}. Re-run with --archive-existing-data to move it aside to a .before-move-<date> directory; it is never merged.`;
 }
 
 export function blockedStartItems(
   error: unknown,
 ): ServerMoveCheckItem[] | null {
   if (
-    !(error instanceof BbHttpError) ||
+    !(error instanceof OmnyoHttpError) ||
     error.code !== SERVER_MOVE_BLOCKED_ERROR_CODE
   ) {
     return null;
   }
+
   const parsed = blockedErrorBodySchema.safeParse(error.body);
+
   return parsed.success ? parsed.data.details.items : null;
 }
 
 function isServerMovedError(error: unknown): boolean {
   return (
-    error instanceof BbHttpError &&
+    error instanceof OmnyoHttpError &&
     error.status === 410 &&
     error.code === SERVER_MOVED_ERROR_CODE
   );
@@ -188,11 +205,12 @@ const STATE_LABELS: Record<ServerMoveState, string> = {
 export function serverMoveRecoveryGuidance(status: ServerMoveStatus): string[] {
   const name = status.targetHostName;
   const problem = status.error === null ? "" : ` (${status.error.message})`;
+
   return [
-    `bb couldn't confirm that ${name} took over${problem}.`,
-    `This server stays up but read-only, and bb finishes the move on its own as soon as ${name} answers.`,
-    `If ${name} isn't running the server, run bb server move cancel --yes to abandon the move and keep the server here.`,
-    "If this server stops, run bb server unlock on this computer.",
+    `Omnyo couldn't confirm that ${name} took over${problem}.`,
+    `This server stays up but read-only, and Omnyo finishes the move on its own as soon as ${name} answers.`,
+    `If ${name} isn't running the server, run omnyo server move cancel --yes to abandon the move and keep the server here.`,
+    "If this server stops, run omnyo server unlock on this computer.",
   ];
 }
 
@@ -208,9 +226,10 @@ export function formatServerMoveRecoveryExit(status: ServerMoveStatus): string {
 
 export function serverMoveAbandonWarning(status: ServerMoveStatus): string[] {
   const name = status.targetHostName;
+
   return [
     `The move to ${name} wasn't confirmed. Abandoning rolls back the switch and keeps the server on this computer.`,
-    `If ${name} already took over, two servers will run with the same data and bb connect credential. Stop the server on ${name} first.`,
+    `If ${name} already took over, two servers will run with the same data and Omnyo connect credential. Stop the server on ${name} first.`,
   ];
 }
 
@@ -222,6 +241,7 @@ function reportStepChanges(
   for (const step of status.steps) {
     if (step.status === "pending") continue;
     const key = `${step.status}\n${step.message ?? ""}`;
+
     if (reported.get(step.id) === key) continue;
     reported.set(step.id, key);
     report(
@@ -236,46 +256,60 @@ export async function followServerMove(
   const reported = new Map<ServerMoveStepId, string>();
   let status = args.initial;
   let consecutiveFailures = 0;
+
   for (;;) {
     reportStepChanges(status, reported, args.report);
+
     if (status.state === "completed") return { kind: "moved", status };
+
     if (status.state === "recovery_required") {
       return { kind: "recovery", status };
     }
+
     if (status.state === "failed" || status.state === "cancelled") {
       return { kind: "ended", status };
     }
+
     await sleep(SERVER_MOVE_POLL_INTERVAL_MS, undefined, {
       signal: args.signal,
     });
     let response: ServerMoveStatusResponse;
+
     try {
       response = await args.sdk.experimental_server.moveStatus({
         signal: args.signal,
       });
     } catch (error) {
       if (args.signal.aborted) throw error;
+
       if (status.state === "switching" || isServerMovedError(error)) {
         return { kind: "moved", status };
       }
+
       consecutiveFailures += 1;
+
       if (consecutiveFailures >= MAX_CONSECUTIVE_STATUS_FAILURES) {
         throw new Error(
-          `Lost contact with the bb server before the switch (${getErrorMessage(error)}). Run bb server move status once it answers again.`,
+          `Lost contact with the Omnyo server before the switch (${getErrorMessage(error)}). Run omnyo server move status once it answers again.`,
         );
       }
+
       continue;
     }
+
     consecutiveFailures = 0;
+
     if (response.move?.moveId === status.moveId) {
       status = response.move;
       continue;
     }
+
     if (response.lastMove?.moveId === status.moveId) {
       return { kind: "moved", status };
     }
+
     throw new Error(
-      "The bb server no longer reports this move. A server restart before the switch abandons the move and keeps the server where it was.",
+      "The Omnyo server no longer reports this move. A server restart before the switch abandons the move and keeps the server where it was.",
     );
   }
 }
@@ -286,37 +320,46 @@ export function formatServerMovedMessage(status: ServerMoveStatus): string {
 
 export function formatServerMoveFailure(status: ServerMoveStatus): string {
   if (status.state === "cancelled") return "The server move was cancelled.";
+
   if (status.error === null) return "The server move failed.";
+
   return `The server move failed at "${serverMoveStepLabel(status.error.step, status.targetHostName)}": ${status.error.message}`;
 }
 
 export function printServerMoveStatus(status: ServerMoveStatus): void {
   console.log(
-    `Moving the bb server to ${status.targetHostName} (${STATE_LABELS[status.state]})`,
+    `Moving the Omnyo server to ${status.targetHostName} (${STATE_LABELS[status.state]})`,
   );
   console.log(`Address: ${status.serverUrl} (${describeMode(status.mode)})`);
   console.log(`Started: ${new Date(status.startedAt).toLocaleString()}`);
+
   if (status.finishedAt !== null) {
     console.log(`Finished: ${new Date(status.finishedAt).toLocaleString()}`);
   }
+
   console.log("");
+
   for (const step of status.steps) {
     console.log(
       `  ${STEP_STATUS_LABELS[step.status].padEnd(8)} ${serverMoveStepLabel(step.id, status.targetHostName)}${formatStepMessage(step)}`,
     );
   }
+
   if (status.state === "recovery_required") {
     console.log("");
     printServerMoveRecovery(status);
+
     return;
   }
+
   if (status.error !== null) {
     console.log("");
     console.log(formatServerMoveFailure(status));
   }
+
   if (status.cancellable) {
     console.log("");
-    console.log("Cancel it with bb server move cancel.");
+    console.log("Cancel it with omnyo server move cancel.");
   }
 }
 
@@ -325,13 +368,18 @@ export function printServerMoveStatusResponse(
 ): void {
   if (response.move !== null) {
     printServerMoveStatus(response.move);
+
     return;
   }
+
   const { lastMove } = response;
+
   if (lastMove === null) {
     console.log("No server move in progress.");
+
     return;
   }
+
   console.log(
     `No server move in progress. The server last moved from ${lastMove.fromHostName} to ${lastMove.toHostName} on ${new Date(lastMove.completedAt).toLocaleString()}.`,
   );

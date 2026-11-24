@@ -5,6 +5,7 @@ import { highlightMarkdownCode } from "./markdown-code-highlight.js";
 
 vi.mock("sugar-high", async (importOriginal) => {
   const actual = await importOriginal<typeof import("sugar-high")>();
+
   return { ...actual, highlight: vi.fn(actual.highlight) };
 });
 
@@ -42,6 +43,7 @@ describe("highlightMarkdownCode", () => {
         code: "const a = 1 // hi",
         language,
       });
+
       expect(tokens(html)).toContainEqual(["keyword", "const"]);
       expect(tokens(html)).toContainEqual(["comment", "// hi"]);
     },
@@ -86,23 +88,24 @@ describe("highlightMarkdownCode", () => {
       "-enabled=false",
       "+enabled=true",
     ].join("\n");
+
     const html = highlightMarkdownCode({ code, language: "diff" });
 
     for (const role of ["add", "remove", "hunk", "meta"]) {
       expect(html).toContain(`sh__line--diff-${role}`);
       expect(stylesheet).toContain(
-        `.bb-code-highlight .sh__line--diff-${role}`,
+        `.omnyo-code-highlight .sh__line--diff-${role}`,
       );
     }
 
     expect(stylesheet).toMatch(
-      /\.bb-code-highlight \.sh__line\s*\{[^}]*display: inline-block;[^}]*min-width: 100%;[^}]*\}/u,
+      /\.omnyo-code-highlight \.sh__line\s*\{[^}]*display: inline-block;[^}]*min-width: 100%;[^}]*\}/u,
     );
     expect(stylesheet).toMatch(
-      /\.bb-code-highlight \.sh__line--diff-add\s*\{[^}]*var\(--diff-added\)[^}]*\}/u,
+      /\.omnyo-code-highlight \.sh__line--diff-add\s*\{[^}]*var\(--diff-added\)[^}]*\}/u,
     );
     expect(stylesheet).toMatch(
-      /\.bb-code-highlight \.sh__line--diff-remove\s*\{[^}]*var\(--diff-removed\)[^}]*\}/u,
+      /\.omnyo-code-highlight \.sh__line--diff-remove\s*\{[^}]*var\(--diff-removed\)[^}]*\}/u,
     );
   });
 
@@ -127,6 +130,7 @@ describe("highlightMarkdownCode", () => {
     const thousandLines = "const value = compute(input, { flag: true });\n"
       .repeat(1000)
       .trimEnd();
+
     const longest = " ".repeat(128_000);
     const tooLong = " ".repeat(128_001);
     const withinBudget = "a+".repeat(26_000);
@@ -136,12 +140,14 @@ describe("highlightMarkdownCode", () => {
     for (const code of [thousandLines, thousandLines, longest, longest]) {
       highlightMarkdownCode({ code, language: null });
     }
+
     expect(highlight).toHaveBeenCalledTimes(2);
 
     const tooLongHtml = highlightMarkdownCode({
       code: tooLong,
       language: null,
     });
+
     expect(tooLong.length + tooLongHtml.length).toBeLessThan(4_000_000);
     highlightMarkdownCode({ code: tooLong, language: null });
     expect(highlight).toHaveBeenCalledTimes(4);
@@ -150,11 +156,14 @@ describe("highlightMarkdownCode", () => {
       code: withinBudget,
       language: "js",
     });
+
     expect(withinBudget.length + withinHtml.length).toBeLessThan(3_900_000);
+
     const overHtml = highlightMarkdownCode({
       code: overBudget,
       language: "js",
     });
+
     expect(overHtml.length).toBeGreaterThan(4_050_000);
     highlightMarkdownCode({ code: overBudget, language: "js" });
     expect(highlight).toHaveBeenCalledTimes(7);
@@ -166,9 +175,11 @@ describe("highlightMarkdownCode", () => {
   it("recomputes the least recently used code block past 128 entries and past the character budget", () => {
     const countBlock = (index: number) =>
       `const countEntry${index} = ${index};`;
+
     for (let index = 0; index < 129; index += 1) {
       highlightMarkdownCode({ code: countBlock(index), language: "js" });
     }
+
     vi.mocked(highlight).mockClear();
 
     highlightMarkdownCode({ code: countBlock(1), language: "js" });
@@ -183,12 +194,15 @@ describe("highlightMarkdownCode", () => {
 
     const budgetBlock = (index: number) =>
       `const budget${index} = 0${"+a".repeat(1_500)};`;
+
     let distinctChars = 0;
+
     for (let index = 0; index < 20; index += 1) {
       const code = budgetBlock(index);
       distinctChars +=
         code.length + highlightMarkdownCode({ code, language: "ts" }).length;
     }
+
     expect(distinctChars).toBeGreaterThan(4_000_000);
     vi.mocked(highlight).mockClear();
 

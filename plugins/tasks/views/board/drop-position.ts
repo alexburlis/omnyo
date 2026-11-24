@@ -29,6 +29,7 @@ export function dropNeighborsForIndex(
 ): BoardDropNeighbors {
   const ids = columnTaskIds.filter((id) => id !== draggedTaskId);
   const index = Math.max(0, Math.min(dropIndex, ids.length));
+
   return {
     beforeTaskId: ids[index - 1] ?? null,
     afterTaskId: ids[index] ?? null,
@@ -40,9 +41,11 @@ export function dropIndexForPointer(
   pointerY: number,
 ): number {
   let index = 0;
+
   for (const centerY of cardCenterYs) {
     if (pointerY > centerY) index += 1;
   }
+
   return index;
 }
 
@@ -53,6 +56,7 @@ export function applyBoardMove<T extends { id: string; status: TaskStatus }>(
   dropIndex: number,
 ): Record<TaskStatus, T[]> {
   let moved: T | undefined;
+
   const next: Record<TaskStatus, T[]> = {
     backlog: [],
     todo: [],
@@ -61,16 +65,20 @@ export function applyBoardMove<T extends { id: string; status: TaskStatus }>(
     done: [],
     canceled: [],
   };
+
   for (const status of TASK_STATUSES) {
     next[status] = columns[status].filter((task) => {
       if (task.id !== taskId) return true;
       moved = task;
+
       return false;
     });
   }
+
   if (!moved) return next;
   const destination = next[toStatus];
   const index = Math.max(0, Math.min(dropIndex, destination.length));
   destination.splice(index, 0, { ...moved, status: toStatus });
+
   return next;
 }

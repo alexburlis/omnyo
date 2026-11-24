@@ -88,6 +88,7 @@ it("can omit the fallback when plugin branding is unavailable", () => {
   const view = render(
     <PluginIcon pluginId="unavailable" icon={null} fallbackIcon={null} />,
   );
+
   expect(view.container.querySelector("[data-icon]")).toBeNull();
 });
 
@@ -110,9 +111,11 @@ it("uses a plugin-owned compact SVG before named icon hints", () => {
   );
 
   const view = render(<PluginIcon pluginId="omega" icon="Layers" />);
+
   const asset = view.container.querySelector(
     `[data-plugin-icon-asset="${compactIconUrl}"]`,
   );
+
   expect(asset).toBeTruthy();
   expect(asset?.getAttribute("style")).toContain(compactIconUrl);
   expect(view.container.querySelector("[data-icon]")).toBeNull();
@@ -122,20 +125,30 @@ it("resolves every named branding.icon the shipped plugins declare", async () =>
   const { readdir, readFile } = await import("node:fs/promises");
   const { dirname, join, resolve } = await import("node:path");
   const { fileURLToPath } = await import("node:url");
-  const { isBuiltinIconName } = await import("@bb/shared-ui/icon");
+  const { isBuiltinIconName } = await import("@omnyo/shared-ui/icon");
 
   const pluginsDir = resolve(
     dirname(fileURLToPath(import.meta.url)),
     "../../../../../plugins",
   );
-  const entries = await readdir(pluginsDir, { withFileTypes: true });
+
+  const entries = [
+    ...(await readdir(pluginsDir, { withFileTypes: true })),
+    { name: ".bundled-stage-incomplete", isDirectory: () => true },
+  ];
+
   const declared: Array<[string, string]> = [];
+
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const manifest: { bb?: { branding?: { icon?: string } } } = JSON.parse(
+    if (!entry.isDirectory() || entry.name.startsWith(".bundled-stage-"))
+      continue;
+
+    const manifest: { omnyo?: { branding?: { icon?: string } } } = JSON.parse(
       await readFile(join(pluginsDir, entry.name, "package.json"), "utf8"),
     );
-    const icon = manifest.bb?.branding?.icon;
+
+    const icon = manifest.omnyo?.branding?.icon;
+
     if (icon === undefined || icon.startsWith("./")) continue;
     declared.push([entry.name, icon]);
   }
@@ -162,6 +175,7 @@ it.each(["sidebar", "header"])(
         ],
       ]),
     );
+
     const view = render(
       surface === "sidebar" ? (
         <SidebarNavigationIcon
@@ -173,6 +187,7 @@ it.each(["sidebar", "header"])(
         />
       ),
     );
+
     expect(view.container.querySelector('[data-icon="Zap"]')).not.toBeNull();
     expect(view.container.querySelector("[data-plugin-icon-asset]")).toBeNull();
   },

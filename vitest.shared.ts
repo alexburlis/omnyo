@@ -1,12 +1,16 @@
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { shuffle } from "@vitest/utils/helpers";
 import { mergeConfig, type ViteUserConfig } from "vitest/config";
+import type { Plugin } from "vite";
 import { BaseSequencer, type TestSpecification } from "vitest/node";
 
 const GLOBAL_OBJECT = String.raw`(?:window|globalThis|global|document|navigator|process|[A-Z][\w$]*\.prototype)`;
+
 const GLOBAL_TARGET = String.raw`(?:${GLOBAL_OBJECT}|\(\s*${GLOBAL_OBJECT}\s+as\b[^)]*\))`;
+
 const GLOBAL_MEMBER = String.raw`(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])`;
 
 const ISOLATION_REQUIRING_API = new RegExp(
@@ -45,12 +49,14 @@ const TEST_SUPPORT_DIRS = new Set([
   "testing",
   "test-utils",
 ]);
+
 const TEST_SUPPORT_FILE =
   /(^|[.-])(test|tests|mock|mocks|harness|fixture|fixtures|helpers?)(\.|-|$)/;
 
 function isTestSupportModule(relativePath: string): boolean {
   const segments = relativePath.split(path.sep);
   const baseName = (segments.pop() ?? "").replace(/\.[cm]?[jt]sx?$/, "");
+
   return (
     segments.some((segment) => TEST_SUPPORT_DIRS.has(segment)) ||
     TEST_SUPPORT_FILE.test(baseName)
@@ -58,6 +64,7 @@ function isTestSupportModule(relativePath: string): boolean {
 }
 
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
+
 const SKIP_DIRS = new Set(["node_modules", "dist"]);
 
 const ENVIRONMENT_DOCBLOCK = /@(?:vitest|jest)-environment\s+([\w-]+)/;
@@ -99,6 +106,7 @@ function resolveLocalImport(
   scan: IsolationScan,
 ): string | null {
   let base: string | null = null;
+
   if (specifier.startsWith("./") || specifier.startsWith("../")) {
     base = path.resolve(path.dirname(fromFile), specifier);
   } else {
@@ -113,8 +121,10 @@ function resolveLocalImport(
       }
     }
   }
+
   if (base === null) return null;
   const withoutJs = base.replace(/\.[cm]?jsx?$/, "");
+
   const candidates = [
     base,
     ...SOURCE_EXTENSIONS.map((extension) => withoutJs + extension),
@@ -122,40 +132,52 @@ function resolveLocalImport(
       path.join(base, `index${extension}`),
     ),
   ];
+
   for (const candidate of candidates) {
     const relative = path.relative(scan.pkgDir, candidate);
+
     if (
       relative.startsWith("..") ||
       relative.split(path.sep).includes("node_modules")
     ) {
       continue;
     }
+
     if (!isFile(candidate)) continue;
+
     return isTestSupportModule(relative) ? candidate : null;
   }
+
   return null;
 }
 
 function requiresIsolation(file: string, scan: IsolationScan): boolean {
   const memo = scan.memo.get(file);
+
   if (memo !== undefined) return memo;
+
   if (scan.visiting.has(file)) return false;
   scan.visiting.add(file);
   const source = readFileSync(file, "utf8");
   let result = ISOLATION_REQUIRING_API.test(source);
+
   if (!result) {
     for (const match of source.matchAll(IMPORT_SPECIFIER)) {
       const specifier = match[1] ?? match[2] ?? match[3];
+
       if (specifier === undefined) continue;
       const target = resolveLocalImport(file, specifier, scan);
+
       if (target !== null && requiresIsolation(target, scan)) {
         result = true;
         break;
       }
     }
   }
+
   scan.visiting.delete(file);
   scan.memo.set(file, result);
+
   return result;
 }
 
@@ -170,50 +192,70 @@ export function partitionTestFiles(
     memo: new Map(),
     visiting: new Set(),
   };
+
   const sharedByEnvironment = new Map<string | null, Set<string>>();
   const isolated = new Set<string>();
+
+  const classify = (fullPath: string) => {
+    const relative = path.relative(pkgDir, fullPath).split(path.sep).join("/");
+
+    const source = readFileSync(fullPath, "utf8");
+    const environment = ENVIRONMENT_DOCBLOCK.exec(source)?.[1] ?? null;
+
+    if (
+      ISOLATED_ENVIRONMENTS.has(environment ?? "node") ||
+      requiresIsolation(fullPath, scan)
+    ) {
+      isolated.add(relative);
+    } else {
+      let group = sharedByEnvironment.get(environment);
+
+      if (!group) {
+        group = new Set();
+        sharedByEnvironment.set(environment, group);
+      }
+
+      group.add(relative);
+    }
+  };
+
   const walk = (dir: string) => {
     let entries;
+
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
+
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
+
       if (entry.isDirectory()) {
         if (!SKIP_DIRS.has(entry.name)) walk(fullPath);
       } else if (TEST_FILE.test(entry.name)) {
-        const relative = path
-          .relative(pkgDir, fullPath)
-          .split(path.sep)
-          .join("/");
-        const source = readFileSync(fullPath, "utf8");
-        const environment = ENVIRONMENT_DOCBLOCK.exec(source)?.[1] ?? null;
-        if (
-          ISOLATED_ENVIRONMENTS.has(environment ?? "node") ||
-          requiresIsolation(fullPath, scan)
-        ) {
-          isolated.add(relative);
-        } else {
-          let group = sharedByEnvironment.get(environment);
-          if (!group) {
-            group = new Set();
-            sharedByEnvironment.set(environment, group);
-          }
-          group.add(relative);
-        }
+        classify(fullPath);
       }
     }
   };
-  for (const root of new Set(roots)) walk(path.join(pkgDir, root));
+
+  for (const root of new Set(roots)) {
+    const fullPath = path.join(pkgDir, root);
+
+    if (TEST_FILE.test(root) && isFile(fullPath)) classify(fullPath);
+    else walk(fullPath);
+  }
+
   const shared = [...sharedByEnvironment]
     .map(([environment, files]) => ({ environment, files: [...files].sort() }))
     .sort((a, b) => {
       if (a.environment === null) return -1;
+
       if (b.environment === null) return 1;
+
       return a.environment.localeCompare(b.environment);
     });
+
   return { shared, isolated: [...isolated].sort() };
 }
 
@@ -234,16 +276,20 @@ export function sharedWorkerProjects(
 ): TestProjects {
   const exclude = args.exclude ?? ["dist/**", "node_modules/**"];
   const options: PartitionOptions = {};
+
   if (args.aliases !== undefined) options.aliases = args.aliases;
+
   const partition = partitionTestFiles(
     args.pkgDir,
     args.include.map(globRoot),
     options,
   );
+
   const allFiles = [
     ...partition.shared.flatMap((group) => group.files),
     ...partition.isolated,
   ];
+
   if (allFiles.length === 0) {
     return [
       {
@@ -252,10 +298,13 @@ export function sharedWorkerProjects(
       },
     ];
   }
+
   const otherFiles = (own: readonly string[]) => {
     const ownSet = new Set(own);
+
     return allFiles.filter((file) => !ownSet.has(file));
   };
+
   const projects: TestProjects = partition.shared.map((group) => ({
     extends: true,
     test: {
@@ -268,6 +317,7 @@ export function sharedWorkerProjects(
       isolate: false,
     },
   }));
+
   if (partition.isolated.length > 0) {
     projects.push({
       extends: true,
@@ -278,6 +328,7 @@ export function sharedWorkerProjects(
       },
     });
   }
+
   return projects;
 }
 
@@ -296,8 +347,10 @@ export class SharedWorkerSequencer extends BaseSequencer {
           this.ctx.config.sequence.seed,
         )
       : await super.sort(files);
+
     const rank = (spec: TestSpecification) =>
       spec.project.config.isolate ? 0 : 1;
+
     return sorted
       .map((spec, index) => ({ spec, index }))
       .sort(
@@ -313,12 +366,46 @@ export class SharedWorkerSequencer extends BaseSequencer {
 function globRoot(glob: string): string {
   const segments = glob.split("/");
   const literal: string[] = [];
+
   for (const segment of segments) {
     if (/[*?{}[\]]/.test(segment)) break;
     literal.push(segment);
   }
-  if (literal.length === segments.length) literal.pop();
+
   return literal.length > 0 ? literal.join("/") : ".";
+}
+
+function forkablePluginPathsCacheInputs(): Plugin {
+  return {
+    name: "omnyo:forkable-plugin-paths-cache-inputs",
+    configureVitest({ project, experimental_defineCacheKeyGenerator }) {
+      if (
+        !project.vite.config.plugins.some(
+          ({ name }) => name === "omnyo:forkable-plugin-paths",
+        )
+      )
+        return;
+
+      const repoRoot = path.dirname(fileURLToPath(import.meta.url));
+
+      const list = readFileSync(
+        path.join(repoRoot, "scripts", "forkable-plugins.json"),
+        "utf8",
+      );
+
+      const hash = createHash("sha1").update(list);
+
+      for (const pluginDir of (JSON.parse(list) as { plugins: string[] })
+        .plugins) {
+        hash.update(
+          readFileSync(path.join(repoRoot, pluginDir, "tsconfig.json"), "utf8"),
+        );
+      }
+
+      const key = hash.digest("hex");
+      experimental_defineCacheKeyGenerator(() => key);
+    },
+  };
 }
 
 export function defineWorkspaceTestConfig(
@@ -326,10 +413,20 @@ export function defineWorkspaceTestConfig(
 ): ViteUserConfig {
   return mergeConfig(
     {
+      plugins: [forkablePluginPathsCacheInputs()],
       resolve: {
         conditions: ["source"],
       },
       test: {
+        experimental: { fsModuleCache: true },
+        env: {
+          GIT_CONFIG_COUNT: "2",
+          GIT_CONFIG_KEY_0: "commit.gpgsign",
+          GIT_CONFIG_VALUE_0: "false",
+          GIT_CONFIG_KEY_1: "tag.gpgsign",
+          GIT_CONFIG_VALUE_1: "false",
+          OMNYO_VAULT_KEY_STORE: "key-file",
+        },
         globalSetup: [
           fileURLToPath(new URL("./vitest.global-tmpdir.ts", import.meta.url)),
         ],

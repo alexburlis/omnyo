@@ -14,6 +14,7 @@ describe("fetchConnectAccountServers", () => {
       expect(init?.method).toBe("POST");
       expect(init?.headers).toEqual({ "content-type": "application/json" });
       expect(init?.body).toBe("null");
+
       return {
         ok: true,
         status: 200,
@@ -26,13 +27,13 @@ describe("fetchConnectAccountServers", () => {
                 handle: "me",
                 name: "primary",
                 live: true,
-                url: "https://me.getbb.app",
+                url: "https://me.example.test",
               },
               {
                 handle: "other",
                 name: "laptop",
                 live: false,
-                url: "https://other.getbb.app",
+                url: "https://other.example.test",
               },
             ],
           },
@@ -45,10 +46,13 @@ describe("fetchConnectAccountServers", () => {
       serverUrl: "http://127.0.0.1:38886/",
       fetchImpl,
     });
+
     expect(result.ok).toBe(true);
+
     if (!result.ok) {
       throw new Error(`unexpected skip: ${result.reason}`);
     }
+
     expect(result.result.selfHandle).toBe("me");
     expect(result.result.servers).toHaveLength(2);
   });
@@ -127,6 +131,7 @@ describe("createConnectServerSync", () => {
   it("hands fresh servers to onServers and skips list trigger within the min interval", async () => {
     let now = 1_000_000;
     let received: ConnectAccountServer[] | null = null;
+
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -139,7 +144,7 @@ describe("createConnectServerSync", () => {
               handle: "other",
               name: "Other",
               live: true,
-              url: "https://other.getbb.app",
+              url: "https://other.example.test",
             },
           ],
         },
@@ -167,7 +172,7 @@ describe("createConnectServerSync", () => {
         handle: "other",
         name: "Other",
         live: true,
-        url: "https://other.getbb.app",
+        url: "https://other.example.test",
       },
     ]);
 
@@ -177,10 +182,12 @@ describe("createConnectServerSync", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 
     now += 60_000;
+
     const listSync = new Promise<void>((resolve) => {
       sync.onListRequested();
       void sync.syncNow().then(resolve);
     });
+
     await listSync;
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
@@ -190,11 +197,13 @@ describe("createConnectServerSync", () => {
     const skipped: string[] = [];
     let onServersCalls = 0;
     let mode: "down" | "disabled" | "up" = "down";
+
     const fetchImpl = vi.fn(
       async (): Promise<Pick<Response, "ok" | "status" | "json" | "text">> => {
         if (mode === "down") {
           throw new Error("down");
         }
+
         if (mode === "disabled") {
           return {
             ok: false,
@@ -203,6 +212,7 @@ describe("createConnectServerSync", () => {
             text: async () => "",
           };
         }
+
         return {
           ok: true,
           status: 200,
@@ -259,11 +269,12 @@ describe("createConnectServerSync without a local server", () => {
   const credential = {
     credential: "bbcm_desktop",
     handle: "me",
-    serverUrl: "https://me.getbb.app",
+    serverUrl: "https://me.example.test",
   };
 
   it("lists servers straight from the gate with the cached credential", async () => {
     let received: ConnectAccountServer[] | null = null;
+
     const gateFetchImpl = vi.fn(
       async () =>
         new Response(
@@ -291,9 +302,9 @@ describe("createConnectServerSync without a local server", () => {
 
     await sync.syncNow();
     expect(gateFetchImpl).toHaveBeenCalledWith(
-      "https://me.getbb.app/api/connect/servers",
+      "https://me.example.test/api/connect/servers",
       expect.objectContaining({
-        headers: { "x-bb-connect-machine": "bbcm_desktop" },
+        headers: { "x-omnyo-connect-machine": "bbcm_desktop" },
       }),
     );
     expect(received).toEqual([
@@ -301,13 +312,13 @@ describe("createConnectServerSync without a local server", () => {
         handle: "other",
         name: "Other",
         live: true,
-        url: "https://other.getbb.app",
+        url: "https://other.example.test",
       },
       {
         handle: "phone",
         name: "Phone",
         live: false,
-        url: "https://phone.getbb.app",
+        url: "https://phone.example.test",
       },
     ]);
   });
@@ -315,6 +326,7 @@ describe("createConnectServerSync without a local server", () => {
   it("reports a refused credential so the caller drops it", async () => {
     let unauthorized = 0;
     const skipped: string[] = [];
+
     const sync = createConnectServerSync({
       getCredential: () => credential,
       getLocalServerUrl: () => null,
@@ -336,6 +348,7 @@ describe("createConnectServerSync without a local server", () => {
 
   it("reports a gate outage as unavailable", async () => {
     const skipped: string[] = [];
+
     const sync = createConnectServerSync({
       getCredential: () => credential,
       getLocalServerUrl: () => null,
@@ -356,6 +369,7 @@ describe("createConnectServerSync without a local server", () => {
     const gateFetchImpl = vi.fn(async () => new Response("{}"));
     const skipped: string[] = [];
     const logs: string[] = [];
+
     const sync = createConnectServerSync({
       getCredential: () => null,
       getLocalServerUrl: () => null,

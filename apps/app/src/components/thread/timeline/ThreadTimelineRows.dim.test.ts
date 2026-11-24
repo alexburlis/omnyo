@@ -1,5 +1,5 @@
-import type { ThreadTimelineViewRow } from "@bb/thread-view";
-import { buildTimelineViewRows } from "@bb/thread-view";
+import type { ThreadTimelineViewRow } from "@omnyo/thread-view";
+import { buildTimelineViewRows } from "@omnyo/thread-view";
 import { describe, expect, it } from "vitest";
 import {
   commandRow,
@@ -11,16 +11,18 @@ import {
 import {
   PAST_ROW_DIM_CLASS_NAME,
   pastRowDimClassName,
-} from "./ThreadTimelineRows";
+} from "./timeline-row-prominence";
 
 function viewRow(
   rows: Parameters<typeof buildTimelineViewRows>[0],
 ): ThreadTimelineViewRow {
   const built = buildTimelineViewRows(rows);
   const first = built[0];
+
   if (!first) {
     throw new Error("expected at least one view row");
   }
+
   return first;
 }
 
@@ -37,11 +39,9 @@ describe("pastRowDimClassName", () => {
     );
   });
 
-  it("recedes a failed work row alongside its completed neighbours", () => {
+  it("keeps a failed work row readable alongside its completed neighbours", () => {
     const row = viewRow([toolRow({ status: "error" })]);
-    expect(pastRowDimClassName({ ...inactiveScope, row })).toBe(
-      PAST_ROW_DIM_CLASS_NAME,
-    );
+    expect(pastRowDimClassName({ ...inactiveScope, row })).toBeUndefined();
   });
 
   it("keeps running and interrupted work rows at full strength", () => {
@@ -78,6 +78,7 @@ describe("pastRowDimClassName", () => {
           status: "completed",
         }),
       ]);
+
       expect(pastRowDimClassName({ ...inactiveScope, row })).toBeUndefined();
     },
   );
@@ -100,6 +101,7 @@ describe("pastRowDimClassName", () => {
       commandRow({ id: "cmd-1", command: "pnpm build", sourceSeqStart: 1 }),
       commandRow({ id: "cmd-2", command: "pnpm test", sourceSeqStart: 2 }),
     ]);
+
     expect(bundle.kind).toBe("bundle-summary");
     expect(pastRowDimClassName({ ...inactiveScope, row: bundle })).toBe(
       PAST_ROW_DIM_CLASS_NAME,
@@ -115,31 +117,25 @@ describe("pastRowDimClassName", () => {
         sourceSeqStart: 3,
       }),
     ]);
+
     expect(step.kind).toBe("step-summary");
     expect(pastRowDimClassName({ ...inactiveScope, row: step })).toBe(
       PAST_ROW_DIM_CLASS_NAME,
     );
   });
 
-  it("keeps the active-latest bundle prominent but recedes it once scope is idle", () => {
+  it("recedes a completed bundle while the scope is still active", () => {
     const bundle = viewRow([
       commandRow({ id: "cmd-1", command: "pnpm build", sourceSeqStart: 1 }),
       commandRow({ id: "cmd-2", command: "pnpm test", sourceSeqStart: 2 }),
     ]);
+
     expect(bundle.kind).toBe("bundle-summary");
 
     expect(
       pastRowDimClassName({
         activeLatestBundleId: bundle.id,
         scopeActive: true,
-        row: bundle,
-      }),
-    ).toBeUndefined();
-
-    expect(
-      pastRowDimClassName({
-        activeLatestBundleId: bundle.id,
-        scopeActive: false,
         row: bundle,
       }),
     ).toBe(PAST_ROW_DIM_CLASS_NAME);
@@ -149,6 +145,7 @@ describe("pastRowDimClassName", () => {
     const assistant = viewRow([
       conversationRow({ role: "assistant", text: "answer" }),
     ]);
+
     expect(
       pastRowDimClassName({ ...inactiveScope, row: assistant }),
     ).toBeUndefined();

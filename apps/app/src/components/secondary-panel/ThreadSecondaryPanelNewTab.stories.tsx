@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import type { Host } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import type { Host } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import type {
   ThreadStoragePathListResponse,
   WorkspacePathEntry,
   WorkspacePathListResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 import { WithDesktopBrowser } from "../../../.ladle/story-desktop";
 import { createAppQueryClient } from "@/lib/query-client";
@@ -18,7 +18,7 @@ import { ThreadSecondaryPanel } from "./ThreadSecondaryPanel";
 import type { SecondaryPanelRenderableTab } from "./ThreadSecondaryPanel";
 import { NewTabPage } from "./NewTabPage";
 import type { FileSearchSelection } from "./useThreadFileTabs";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 import {
   getThreadRecentItemsStorageKey,
   type ThreadRecentItem,
@@ -41,27 +41,39 @@ export default {
   title: "right-panel/New tab",
 };
 
-const PROJECT_ID = "proj_bb";
+const PROJECT_ID = "proj_omnyo";
+
 const ENVIRONMENT_ID = "env_open_file_story";
+
 const STORY_SOURCE_LIMIT = 40;
+
 const BLANK_THREAD_ID = "thr_new_tab_blank_story";
+
 const SINGLE_HOST_THREAD_ID = "thr_new_tab_single_host_story";
+
 const MULTIPLE_HOSTS_THREAD_ID = "thr_new_tab_multiple_hosts_story";
+
 const RECENTS_THREAD_ID = "thr_new_tab_recents_story";
+
 const LONG_RECENTS_THREAD_ID = "thr_new_tab_long_recents_story";
+
 const SEARCH_THREAD_ID = "thr_new_tab_search_story";
+
 const ACTION_SEARCH_THREAD_ID = "thr_new_tab_action_search_story";
+
 const STORY_TERMINAL_ID = "term_new_tab_story";
 
 const MAC_STUDIO = makeHost({
   id: "host_mac_studio",
   name: "Mac Studio",
 });
+
 const MACBOOK_PRO = makeHost({
   ...MAC_STUDIO,
   id: "host_macbook_pro",
   name: "MacBook Pro",
 });
+
 const BUILD_SERVER = makeHost({
   ...MAC_STUDIO,
   id: "host_build_server",
@@ -253,6 +265,7 @@ function createStoryActiveTab(
   }
 
   const { selection } = outcome;
+
   if (selection.source === "workspace") {
     return {
       environmentId: ENVIRONMENT_ID,
@@ -329,7 +342,7 @@ function makeThreadStoragePathResponse(
 ): ThreadStoragePathListResponse {
   return {
     paths: [...paths],
-    storageRootPath: "/Users/michael/.bb-dev/thread-storage/thr_demo",
+    storageRootPath: "/Users/michael/.omnyo-dev/thread-storage/thr_demo",
     truncated: false,
   };
 }
@@ -345,8 +358,10 @@ function seedThreadRecentItems({
   const storageKey = getThreadRecentItemsStorageKey({
     threadId: currentThreadId,
   });
+
   if (recentItems.length === 0) {
     window.localStorage.removeItem(storageKey);
+
     return;
   }
 
@@ -372,6 +387,7 @@ function useStoryQueryClient({
         },
       },
     });
+
     const query = initialQuery.trim();
     queryClient.setQueryData(
       environmentPathsQueryKey(
@@ -392,6 +408,7 @@ function useStoryQueryClient({
       }),
       makeThreadStoragePathResponse(threadStoragePaths),
     );
+
     return queryClient;
   }, [currentThreadId, initialQuery, threadStoragePaths, workspacePaths]);
 }
@@ -438,36 +455,45 @@ function NewTabPanelStory({
   terminalHosts,
 }: NewTabPanelStoryProps) {
   const [outcome, setOutcome] = useState<NewTabStoryOutcome | null>(null);
+
   const [preferredTerminalHostId, setPreferredTerminalHostId] = useState<
     string | null
   >(null);
+
   const selectedTerminalHost = resolveTerminalHost({
     hosts: terminalHosts ?? [],
     preferredHostId: preferredTerminalHostId,
     primaryHostId: terminalHosts?.[0]?.id ?? null,
   });
+
   const queryClient = useStoryQueryClient({
     currentThreadId,
     initialQuery,
     threadStoragePaths,
     workspacePaths,
   });
+
   const handleSelect = useCallback((selection: FileSearchSelection) => {
     setOutcome({ kind: "file", selection });
   }, []);
+
   const handleOpenBrowser = useCallback(() => {
     setOutcome({ kind: "browser" });
   }, []);
+
   const handleStartTerminal = useCallback(() => {
     setOutcome({
       kind: "terminal",
       hostName: selectedTerminalHost?.name ?? null,
     });
   }, [selectedTerminalHost]);
+
   const handleOpenNewTab = useCallback(() => {
     setOutcome(null);
   }, []);
+
   const activeTab = createStoryActiveTab(outcome, currentThreadId);
+
   const content =
     outcome === null ? (
       <QueryClientProvider client={queryClient}>
@@ -506,7 +532,7 @@ function NewTabPanelStory({
       </div>
     ) : outcome.kind === "terminal" ? (
       <div className="flex min-h-full flex-col justify-center bg-neutral-950 px-4 font-mono text-xs text-emerald-100">
-        <p>$ bb terminal start</p>
+        <p>$ omnyo terminal start</p>
         <p className="pt-1 text-emerald-300">
           Terminal tab opened from the New tab page
           {outcome.hostName === null ? "." : ` on ${outcome.hostName}.`}
@@ -525,6 +551,7 @@ function NewTabPanelStory({
         </p>
       </div>
     );
+
   const panelTab: SecondaryPanelRenderableTab = {
     contentFillsRegion: outcome?.kind === "terminal",
     label:

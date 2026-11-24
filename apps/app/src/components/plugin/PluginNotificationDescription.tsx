@@ -9,6 +9,7 @@ import { getPluginSlotSnapshot, usePluginSlots } from "@/lib/plugin-slots";
 
 function PluginOpenActionLabel({ pluginId }: { pluginId: string }) {
   const slots = usePluginSlots();
+
   return slots.navPanels.some((panel) => panel.pluginId === pluginId)
     ? "Open plugin"
     : "View details";
@@ -16,6 +17,7 @@ function PluginOpenActionLabel({ pluginId }: { pluginId: string }) {
 
 export function usePluginNotificationAction() {
   const navigate = useNavigate();
+
   return useCallback(
     (
       pluginId: string,
@@ -34,6 +36,7 @@ export function usePluginNotificationAction() {
                 (panel) => panel.pluginId === pluginId,
               )
             : undefined;
+
         navigate(
           panel
             ? getPluginPanelRoutePath({ pluginId, path: panel.path })

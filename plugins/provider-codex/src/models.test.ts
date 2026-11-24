@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cyberProgramForTurn,
-  mapBbReasoningLevelToCodex,
+  mapOmnyoReasoningLevelToCodex,
   parseModelCatalog,
 } from "./models.js";
 
@@ -78,7 +78,7 @@ describe("parseModelsResponse", () => {
       models[0]?.supportedReasoningEfforts.map((e) => e.reasoningEffort),
     ).toEqual(["low", "quantum", "high"]);
     expect(models[0]?.defaultReasoningEffort).toBe("quantum");
-    expect(mapBbReasoningLevelToCodex("quantum")).toBe("quantum");
+    expect(mapOmnyoReasoningLevelToCodex("quantum")).toBe("quantum");
   });
 
   it("skips effort entries without a string level and defaults to the first effort when none is named", () => {
@@ -262,17 +262,12 @@ describe("parseModelCatalog Daybreak", () => {
     isDefault,
     ...(cyber === undefined ? {} : { availableAccessPrograms: { cyber } }),
   });
-  const optionOf = (model: { sessionOptions?: unknown }) => {
-    const option = (
-      model.sessionOptions as { value: boolean; fixed?: boolean }[]
-    )[0];
-    return [option?.value, option?.fixed === true];
-  };
 
   it("adds no option when no model advertises a Daybreak program", () => {
     const catalog = parseModelCatalog({
       data: [entry("gpt-6-astra", ["standard"], true), entry("gpt-5.5")],
     });
+
     expect(catalog.daybreakAvailable).toBe(false);
     expect(catalog.models.map((model) => model.sessionOptions)).toEqual([
       undefined,
@@ -281,7 +276,7 @@ describe("parseModelCatalog Daybreak", () => {
     expect(catalog.selectedOnlyModels).toEqual([]);
   });
 
-  it("marks each model with whether it runs with Daybreak, without it, or both", () => {
+  it("lists Daybreak as a model without a session switch", () => {
     const catalog = parseModelCatalog({
       data: [
         entry("gpt-6-astra", ["standard"], true),
@@ -291,21 +286,18 @@ describe("parseModelCatalog Daybreak", () => {
         entry("gpt-daybreak-blue-latest", ["daybreakBlue"]),
       ],
     });
+
     expect(catalog.daybreakAvailable).toBe(true);
     expect(
-      catalog.models.map((model) => [model.model, ...optionOf(model)]),
+      catalog.models.map((model) => [model.model, model.sessionOptions]),
     ).toEqual([
-      ["gpt-6-astra", false, true],
-      ["gpt-6-sol", false, false],
-      ["gpt-legacy", false, true],
-      ["gpt-red-only", true, true],
+      ["gpt-6-astra", undefined],
+      ["gpt-6-sol", undefined],
+      ["gpt-legacy", undefined],
+      ["gpt-red-only", undefined],
+      ["gpt-daybreak-blue-latest", undefined],
     ]);
-    expect(
-      catalog.selectedOnlyModels.map((model) => [
-        model.model,
-        ...optionOf(model),
-      ]),
-    ).toEqual([["gpt-daybreak-blue-latest", true, true]]);
+    expect(catalog.selectedOnlyModels).toEqual([]);
   });
 
   it("keeps the alias as a regular model when it is the only way to reach Daybreak", () => {
@@ -315,6 +307,7 @@ describe("parseModelCatalog Daybreak", () => {
         entry("gpt-daybreak-blue-latest", ["daybreakBlue"]),
       ],
     });
+
     expect(catalog.models.map((model) => model.model)).toEqual([
       "gpt-6-astra",
       "gpt-daybreak-blue-latest",
@@ -326,6 +319,7 @@ describe("parseModelCatalog Daybreak", () => {
     const catalog = parseModelCatalog({
       data: [entry("gpt-6-sol", ["standard", "daybreakGreen"], true)],
     });
+
     expect(catalog.daybreakAvailable).toBe(false);
     expect(catalog.cyberProgramsByModel.get("gpt-6-sol")).toEqual(["standard"]);
   });

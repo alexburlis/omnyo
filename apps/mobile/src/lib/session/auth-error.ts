@@ -1,6 +1,6 @@
-import { ConnectListError } from "@bb/connect-client";
-import { toRecord } from "@bb/core-ui";
-import { BbHttpError } from "@bb/sdk/browser";
+import { ConnectListError } from "@omnyo/connect-client";
+import { toRecord } from "@omnyo/core-ui";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 
 export type AuthErrorKind = "auth-required" | "network" | "http" | "unknown";
 
@@ -11,8 +11,10 @@ interface ResponseLike {
 
 function isResponseLike(value: unknown): value is ResponseLike {
   const record = toRecord(value);
+
   if (!record || typeof record.status !== "number") return false;
   const headers = toRecord(record.headers);
+
   return typeof headers?.get === "function";
 }
 
@@ -24,23 +26,31 @@ export function mapAuthError(input: unknown): AuthErrorKind {
   if (input instanceof ConnectListError) {
     return input.code === "unauthorized" ? "auth-required" : "network";
   }
-  if (input instanceof BbHttpError) {
+
+  if (input instanceof OmnyoHttpError) {
     return isAuthStatus(input.status) ? "auth-required" : "http";
   }
+
   if (isResponseLike(input)) {
     if (isAuthStatus(input.status)) return "auth-required";
+
     return input.status >= 400 ? "http" : "unknown";
   }
+
   const record = toRecord(input);
+
   if (record) {
     if (typeof record.status === "number" && isAuthStatus(record.status)) {
       return "auth-required";
     }
+
     if (record.name === "AbortError" || record.name === "TimeoutError") {
       return "network";
     }
+
     if (typeof record.message === "string") {
       const message = record.message.toLowerCase();
+
       if (
         message.includes("network request failed") ||
         message.includes("failed to fetch") ||
@@ -52,5 +62,6 @@ export function mapAuthError(input: unknown): AuthErrorKind {
       }
     }
   }
+
   return "unknown";
 }

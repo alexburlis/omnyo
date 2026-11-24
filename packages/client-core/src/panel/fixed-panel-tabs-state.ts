@@ -1,16 +1,16 @@
 import { z } from "zod";
 import {
-  BB_DESKTOP_BROWSER_MAX_TITLE_LENGTH,
-  BB_DESKTOP_BROWSER_MAX_URL_LENGTH,
-  bbDesktopBrowserTargetSchema,
-  type BbDesktopBrowserTarget,
-} from "@bb/desktop-contract";
+  OMNYO_DESKTOP_BROWSER_MAX_TITLE_LENGTH,
+  OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH,
+  omnyoDesktopBrowserTargetSchema,
+  type OmnyoDesktopBrowserTarget,
+} from "@omnyo/desktop-contract";
 import {
   terminalCreateTargetSchema,
   threadTabFileOpenerOwnerSchema,
   type TerminalCreateTarget,
   type ThreadTabFileOpenerOwner,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   areFilePreviewLineRangesEqual,
   areEnvironmentFilePreviewSourcesEqual,
@@ -22,13 +22,19 @@ import {
   type WorkspaceFileTabState,
 } from "../file-preview.js";
 
-const FIXED_PANEL_TABS_STATE_STORAGE_PREFIX = "bb.thread.fixedPanelTabsState";
+const FIXED_PANEL_TABS_STATE_STORAGE_PREFIX =
+  "omnyo.thread.fixedPanelTabsState";
+
 export const FIXED_PANEL_TABS_STATE_STORAGE_VERSION = 1;
+
 export const FIXED_PANEL_TABS_IDLE_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
 
 const SECONDARY_PANEL_TAB_ID_ENVIRONMENT_NONE = "none";
+
 const THREAD_INFO_TAB_ID = "thread-info:thread-info:none";
+
 const GIT_DIFF_TAB_ID = "git-diff:git-diff:none";
+
 const NEW_TAB_TAB_ID = "new-tab:new-tab:none";
 
 const environmentFilePreviewSourceSchema: z.ZodType<EnvironmentFilePreviewSource> =
@@ -50,8 +56,10 @@ const environmentFilePreviewSourceSchema: z.ZodType<EnvironmentFilePreviewSource
       })
       .strict(),
   ]);
+
 const workspaceFilePreviewStatusLabelSchema: z.ZodType<WorkspaceFilePreviewStatusLabel | null> =
   z.literal("deleted").nullable();
+
 const filePreviewLineRangeSchema: z.ZodType<FilePreviewLineRange> = z
   .object({
     endLineNumber: z.number().int().positive(),
@@ -59,18 +67,21 @@ const filePreviewLineRangeSchema: z.ZodType<FilePreviewLineRange> = z
   })
   .strict()
   .refine((range) => range.startLineNumber <= range.endLineNumber);
+
 const threadInfoFixedPanelTabSchema = z
   .object({
     id: z.string().min(1),
     kind: z.literal("thread-info"),
   })
   .strict();
+
 const gitDiffFixedPanelTabSchema = z
   .object({
     id: z.string().min(1),
     kind: z.literal("git-diff"),
   })
   .strict();
+
 const pluginPageFixedPanelTabSchema = z
   .object({
     fixedTabId: z.string().min(1),
@@ -80,6 +91,7 @@ const pluginPageFixedPanelTabSchema = z
     pluginId: z.string().min(1),
   })
   .strict();
+
 const workspaceFilePreviewFixedPanelTabSchema = z
   .object({
     environmentId: z.string().min(1).nullable(),
@@ -92,6 +104,7 @@ const workspaceFilePreviewFixedPanelTabSchema = z
     statusLabel: workspaceFilePreviewStatusLabelSchema,
   })
   .strict();
+
 const hostFilePreviewFixedPanelTabSchema = z
   .object({
     environmentId: z.string().min(1).nullable().default(null),
@@ -103,6 +116,7 @@ const hostFilePreviewFixedPanelTabSchema = z
     threadId: z.string().min(1).nullable().default(null),
   })
   .strict();
+
 const threadStorageFilePreviewFixedPanelTabSchema = z
   .object({
     environmentId: z.string().min(1).nullable().default(null),
@@ -114,6 +128,7 @@ const threadStorageFilePreviewFixedPanelTabSchema = z
     threadId: z.string().min(1).nullable().default(null),
   })
   .strict();
+
 const attachmentFilePreviewFixedPanelTabSchema = z
   .object({
     id: z.string().min(1),
@@ -123,26 +138,29 @@ const attachmentFilePreviewFixedPanelTabSchema = z
     projectId: z.string().min(1),
   })
   .strict();
+
 const browserFixedPanelTabSchema = z
   .object({
     environmentId: z.string().min(1).nullable().default(null),
     id: z.string().min(1),
     kind: z.literal("browser"),
-    desktopTarget: bbDesktopBrowserTargetSchema.optional(),
+    desktopTarget: omnyoDesktopBrowserTargetSchema.optional(),
     title: z
       .string()
       .min(1)
-      .max(BB_DESKTOP_BROWSER_MAX_TITLE_LENGTH)
+      .max(OMNYO_DESKTOP_BROWSER_MAX_TITLE_LENGTH)
       .nullable(),
-    url: z.string().max(BB_DESKTOP_BROWSER_MAX_URL_LENGTH),
+    url: z.string().max(OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH),
   })
   .strict();
+
 const newTabFixedPanelTabSchema = z
   .object({
     id: z.string().min(1),
     kind: z.literal("new-tab"),
   })
   .strict();
+
 const terminalFixedPanelTabSchema = z
   .object({
     id: z.string().min(1),
@@ -151,6 +169,7 @@ const terminalFixedPanelTabSchema = z
     target: terminalCreateTargetSchema.optional(),
   })
   .strict();
+
 const pluginPanelFixedPanelTabSchema = z
   .object({
     actionId: z.string().min(1),
@@ -162,6 +181,7 @@ const pluginPanelFixedPanelTabSchema = z
     title: z.string().min(1),
   })
   .strict();
+
 const secondaryFixedPanelTabSchema = z.union([
   threadInfoFixedPanelTabSchema,
   gitDiffFixedPanelTabSchema,
@@ -175,6 +195,7 @@ const secondaryFixedPanelTabSchema = z.union([
   newTabFixedPanelTabSchema,
   terminalFixedPanelTabSchema,
 ]);
+
 const secondaryFixedPanelTabsSchema = z.preprocess(
   (value) =>
     Array.isArray(value)
@@ -189,6 +210,7 @@ const secondaryFixedPanelTabsSchema = z.preprocess(
       : value,
   z.array(secondaryFixedPanelTabSchema),
 );
+
 const secondaryFixedPanelTabGroupStateSchema = z
   .object({
     tabs: secondaryFixedPanelTabsSchema,
@@ -196,6 +218,7 @@ const secondaryFixedPanelTabGroupStateSchema = z
     isOpen: z.boolean(),
   })
   .strict();
+
 const fixedPanelTabsStateSchema = z
   .object({
     version: z.literal(FIXED_PANEL_TABS_STATE_STORAGE_VERSION),
@@ -277,7 +300,7 @@ export interface AttachmentFilePreviewFixedPanelTab {
 }
 
 export interface BrowserFixedPanelTab {
-  desktopTarget?: BbDesktopBrowserTarget;
+  desktopTarget?: OmnyoDesktopBrowserTarget;
   environmentId: string | null;
   id: string;
   kind: "browser";
@@ -503,6 +526,7 @@ function buildHostFilePreviewTabId({
       path,
     });
   }
+
   if (threadId === null || environmentId === null) {
     return buildFixedPanelTabId({
       environmentId: null,
@@ -510,6 +534,7 @@ function buildHostFilePreviewTabId({
       path,
     });
   }
+
   return buildFixedPanelTabId({
     environmentId: `thread:${threadId}:environment:${environmentId}`,
     kind: "host-file-preview",
@@ -685,11 +710,13 @@ export function ensureOpenFixedPanelHasActiveTab(
   const activeTab = state.secondary.tabs.find(
     (tab) => tab.id === state.secondary.activeTabId,
   );
+
   if (activeTab !== undefined) {
     return state;
   }
 
   const fallbackTab = state.secondary.tabs[0];
+
   if (fallbackTab === undefined) {
     return {
       ...state,
@@ -748,16 +775,20 @@ function normalizeFixedPanelTabId(tab: FixedPanelTab): FixedPanelTab {
         pageId: tab.pageId,
         pluginId: tab.pluginId,
       }).id;
+
       return tab.id === id ? tab : { ...tab, id };
     }
+
     case "workspace-file-preview": {
       const id = buildWorkspaceFilePreviewTabId({
         environmentId: tab.environmentId,
         path: tab.path,
         projectId: tab.projectId,
       });
+
       return tab.id === id ? tab : { ...tab, id };
     }
+
     case "host-file-preview": {
       const id = buildHostFilePreviewTabId({
         environmentId: tab.environmentId,
@@ -765,36 +796,46 @@ function normalizeFixedPanelTabId(tab: FixedPanelTab): FixedPanelTab {
         path: tab.path,
         threadId: tab.threadId,
       });
+
       return tab.id === id ? tab : { ...tab, id };
     }
+
     case "thread-storage-file-preview": {
       const id = buildThreadStorageFilePreviewTabId({
         path: tab.path,
         threadId: tab.threadId,
       });
+
       return tab.id === id ? tab : { ...tab, id };
     }
+
     case "attachment-file-preview": {
       const id = buildAttachmentFilePreviewTabId({
         path: tab.path,
         projectId: tab.projectId,
       });
+
       return tab.id === id ? tab : { ...tab, id };
     }
+
     case "browser": {
       if (tab.desktopTarget !== undefined) return tab;
       const idSegments = tab.id.split(":");
+
       const browserPath =
         idSegments.length === 3 && idSegments[0] === "browser"
           ? decodeStorageSegment(idSegments[1] ?? "")
           : tab.id;
+
       const id = buildFixedPanelTabId({
         environmentId: tab.environmentId,
         kind: tab.kind,
         path: browserPath,
       });
+
       return tab.id === id ? tab : { ...tab, id };
     }
+
     case "new-tab":
       return tab.id === NEW_TAB_TAB_ID
         ? tab
@@ -809,14 +850,17 @@ function normalizeFixedPanelTabId(tab: FixedPanelTab): FixedPanelTab {
         pluginId: tab.pluginId,
         title: tab.title,
       }).id;
+
       return tab.id === id ? tab : { ...tab, id };
     }
+
     case "terminal": {
       const id = buildFixedPanelTabId({
         environmentId: null,
         kind: tab.kind,
         path: tab.terminalId,
       });
+
       return tab.id === id ? tab : { ...tab, id };
     }
   }
@@ -832,16 +876,20 @@ function normalizeFixedPanelTabGroupState({
   const seenTabIds = new Set<string>();
   const tabs: FixedPanelTab[] = [];
   let activeTabId: string | null = null;
+
   for (const tab of group.tabs) {
     const normalizedTab = normalizeFixedPanelTabId(tab);
+
     if (
       isTransientFixedPanelTab(normalizedTab) ||
       seenTabIds.has(normalizedTab.id)
     ) {
       continue;
     }
+
     seenTabIds.add(normalizedTab.id);
     tabs.push(normalizedTab);
+
     if (
       group.activeTabId !== null &&
       (tab.id === group.activeTabId || normalizedTab.id === group.activeTabId)
@@ -999,6 +1047,7 @@ function parseFixedPanelTabsStateForStorage({
   }
 
   let parsedValue: unknown;
+
   try {
     parsedValue = JSON.parse(storedValue);
   } catch {
@@ -1009,6 +1058,7 @@ function parseFixedPanelTabsStateForStorage({
   }
 
   const stateResult = fixedPanelTabsStateSchema.safeParse(parsedValue);
+
   if (!stateResult.success) {
     return {
       shouldPrune: true,
@@ -1021,6 +1071,7 @@ function parseFixedPanelTabsStateForStorage({
       state: stateResult.data,
     }),
   });
+
   if (isFixedPanelTabsStateExpired({ now, state: normalizedState })) {
     return {
       shouldPrune: true,
@@ -1041,16 +1092,21 @@ export function shouldPruneStoredFixedPanelTabsState(
   if (storedValue === null) {
     return false;
   }
+
   let parsedValue: unknown;
+
   try {
     parsedValue = JSON.parse(storedValue);
   } catch {
     return true;
   }
+
   if (typeof parsedValue !== "object" || parsedValue === null) {
     return true;
   }
+
   const lastUsedAt = Reflect.get(parsedValue, "lastUsedAt");
+
   if (
     typeof lastUsedAt === "number" &&
     Number.isInteger(lastUsedAt) &&
@@ -1059,8 +1115,10 @@ export function shouldPruneStoredFixedPanelTabsState(
     if (now - lastUsedAt > FIXED_PANEL_TABS_IDLE_EXPIRY_MS) {
       return true;
     }
+
     return !fixedPanelTabsStateSchema.safeParse(parsedValue).success;
   }
+
   return parseFixedPanelTabsStateForStorage({
     initialValue: EMPTY_FIXED_PANEL_TABS_STATE,
     now,
@@ -1085,6 +1143,7 @@ export function areFixedPanelTabsEquivalent(
   if (a.id !== b.id || a.kind !== b.kind) {
     return false;
   }
+
   switch (a.kind) {
     case "thread-info":
     case "git-diff":
@@ -1174,6 +1233,7 @@ function areFileOpenerOwnersEqual(
   b: ThreadTabFileOpenerOwner | undefined,
 ): boolean {
   if (a === undefined || b === undefined) return a === b;
+
   if (
     a.kind !== b.kind ||
     a.environmentId !== b.environmentId ||
@@ -1186,10 +1246,13 @@ function areFileOpenerOwnersEqual(
   ) {
     return false;
   }
+
   if (a.kind === "host-file-preview") {
     return b.kind === "host-file-preview" && a.hostId === b.hostId;
   }
+
   if (a.kind !== "workspace-file-preview") return true;
+
   return (
     b.kind === "workspace-file-preview" &&
     a.projectId === b.projectId &&

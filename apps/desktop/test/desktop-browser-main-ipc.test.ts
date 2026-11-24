@@ -1,30 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  BB_DESKTOP_BROWSER_MAX_URL_LENGTH,
-  type BbDesktopBrowserAttachRequest,
-  type BbDesktopBrowserFindInPageRequest,
-  type BbDesktopBrowserNavigateRequest,
-  type BbDesktopBrowserSetBoundsRequest,
-  type BbDesktopBrowserSetVisibleRequest,
-  type BbDesktopBrowserStopFindInPageRequest,
-  type BbDesktopBrowserEvaluateRequest,
-  type BbDesktopBrowserEvaluateResult,
-} from "@bb/desktop-contract";
+  OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH,
+  type OmnyoDesktopBrowserAttachRequest,
+  type OmnyoDesktopBrowserFindInPageRequest,
+  type OmnyoDesktopBrowserNavigateRequest,
+  type OmnyoDesktopBrowserSetBoundsRequest,
+  type OmnyoDesktopBrowserSetVisibleRequest,
+  type OmnyoDesktopBrowserStopFindInPageRequest,
+  type OmnyoDesktopBrowserEvaluateRequest,
+  type OmnyoDesktopBrowserEvaluateResult,
+} from "@omnyo/desktop-contract";
 import {
-  BB_DESKTOP_BROWSER_ATTACH_CHANNEL,
-  BB_DESKTOP_BROWSER_DETACH_CHANNEL,
-  BB_DESKTOP_BROWSER_EVALUATE_CHANNEL,
-  BB_DESKTOP_BROWSER_FOCUS_CHANNEL,
-  BB_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
-  BB_DESKTOP_BROWSER_GO_BACK_CHANNEL,
-  BB_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
-  BB_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
-  BB_DESKTOP_BROWSER_RELOAD_CHANNEL,
-  BB_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
-  BB_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
-  BB_DESKTOP_BROWSER_SET_VISIBLE_WITHOUT_FOCUS_CHANNEL,
-  BB_DESKTOP_BROWSER_STOP_CHANNEL,
-  BB_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_ATTACH_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_DETACH_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_EVALUATE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_FOCUS_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_HOST_FOCUS_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_GO_BACK_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_RELOAD_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_SET_VISIBLE_WITHOUT_FOCUS_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_STOP_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
 } from "../src/desktop-browser-ipc.js";
 import { registerDesktopBrowserIpc } from "../src/desktop-browser-main-ipc.js";
 import type { DesktopBrowserViewManager } from "../src/desktop-browser-view.js";
@@ -43,6 +44,7 @@ const electronMock = vi.hoisted(() => {
   }
 
   type FakeIpcListener = (event: FakeIpcEvent, payload: unknown) => void;
+
   type FakeIpcHandler = (
     event: FakeIpcEvent,
     payload: unknown,
@@ -78,15 +80,25 @@ vi.mock("electron", () => ({
 }));
 
 type AttachCall = Parameters<DesktopBrowserViewManager["attach"]>[0];
+
 type DetachCall = Parameters<DesktopBrowserViewManager["detach"]>[0];
+
 type FindInPageCall = Parameters<DesktopBrowserViewManager["findInPage"]>[0];
+
 type StopFindInPageCall = Parameters<
   DesktopBrowserViewManager["stopFindInPage"]
 >[0];
+
 type NavigateCall = Parameters<DesktopBrowserViewManager["navigate"]>[0];
+
 type SetBoundsCall = Parameters<DesktopBrowserViewManager["setBounds"]>[0];
+
 type SetVisibleCall = Parameters<DesktopBrowserViewManager["setVisible"]>[0];
+
 type TabCommandCall = Parameters<DesktopBrowserViewManager["reload"]>[0];
+
+type HostFocusCall = Parameters<DesktopBrowserViewManager["setHostFocus"]>[0];
+
 type EvaluateCall = Parameters<DesktopBrowserViewManager["evaluate"]>[0];
 
 interface FakeWebContents {
@@ -142,6 +154,7 @@ class RecordingDesktopBrowserViewManager implements DesktopBrowserViewManager {
   public readonly attachCalls: AttachCall[] = [];
   public readonly detachCalls: DetachCall[] = [];
   public readonly focusCalls: TabCommandCall[] = [];
+  public readonly hostFocusCalls: HostFocusCall[] = [];
   public readonly findInPageCalls: FindInPageCall[] = [];
   public readonly stopFindInPageCalls: StopFindInPageCall[] = [];
   public readonly goBackCalls: TabCommandCall[] = [];
@@ -152,8 +165,11 @@ class RecordingDesktopBrowserViewManager implements DesktopBrowserViewManager {
   public readonly setVisibleCalls: SetVisibleCall[] = [];
   public readonly evaluateCalls: EvaluateCall[] = [];
 
-  async evaluate(call: EvaluateCall): Promise<BbDesktopBrowserEvaluateResult> {
+  async evaluate(
+    call: EvaluateCall,
+  ): Promise<OmnyoDesktopBrowserEvaluateResult> {
     this.evaluateCalls.push(call);
+
     return { ok: true, value: "evaluated" };
   }
   public readonly setVisibleWithoutFocusCalls: SetVisibleCall[] = [];
@@ -177,6 +193,14 @@ class RecordingDesktopBrowserViewManager implements DesktopBrowserViewManager {
 
   focus(args: TabCommandCall): void {
     this.focusCalls.push(args);
+  }
+
+  setHostFocus(args: HostFocusCall): void {
+    this.hostFocusCalls.push(args);
+  }
+
+  reloadHostFocusedTab(): boolean {
+    return false;
   }
 
   findInPage(args: FindInPageCall): void {
@@ -236,26 +260,30 @@ function createTrustedRenderer(label: string): FakeRenderer {
   nextWebContentsId += 1;
   const hostWindow = { label };
   electronMock.windowsBySender.set(sender, hostWindow);
+
   return { hostWindow, sender };
 }
 
 function createUntrustedSender(): FakeWebContents {
   const sender = { id: nextWebContentsId };
   nextWebContentsId += 1;
+
   return sender;
 }
 
 function sendBrowserIpc(args: SendBrowserIpcArgs): void {
   const listener = electronMock.listeners.get(args.channel);
   expect(listener).toBeDefined();
+
   if (listener === undefined) {
     throw new Error(`Expected listener for ${args.channel}.`);
   }
+
   listener({ sender: args.sender }, args.payload);
 }
 
 function oversizedBrowserUrl(): string {
-  return `https://example.com/${"a".repeat(BB_DESKTOP_BROWSER_MAX_URL_LENGTH)}`;
+  return `https://example.com/${"a".repeat(OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH)}`;
 }
 
 describe("registerDesktopBrowserIpc", () => {
@@ -263,13 +291,16 @@ describe("registerDesktopBrowserIpc", () => {
     const manager = new RecordingDesktopBrowserViewManager();
     registerDesktopBrowserIpc(manager);
     const renderer = createTrustedRenderer("main-window");
+
     const handler = electronMock.handlers.get(
-      BB_DESKTOP_BROWSER_EVALUATE_CHANNEL,
+      OMNYO_DESKTOP_BROWSER_EVALUATE_CHANNEL,
     );
+
     if (handler === undefined) {
       throw new Error("Expected an evaluate handler.");
     }
-    const request: BbDesktopBrowserEvaluateRequest = {
+
+    const request: OmnyoDesktopBrowserEvaluateRequest = {
       tabId: "browser:a",
       expression: "document.title",
       world: "isolated",
@@ -301,41 +332,58 @@ describe("registerDesktopBrowserIpc", () => {
     registerDesktopBrowserIpc(manager);
     const renderer = createTrustedRenderer("main-window");
     const untrustedSender = createUntrustedSender();
-    const attachRequest: BbDesktopBrowserAttachRequest = {
+
+    const attachRequest: OmnyoDesktopBrowserAttachRequest = {
       threadId: "thread-1",
       tabId: "browser:a",
       url: "http://localhost:5173/",
       bounds: { x: 0, y: 0, width: 800, height: 600 },
       visible: true,
     };
-    const navigateRequest: BbDesktopBrowserNavigateRequest = {
+
+    const navigateRequest: OmnyoDesktopBrowserNavigateRequest = {
       tabId: "browser:a",
       url: "https://example.com/",
     };
 
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_ATTACH_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_ATTACH_CHANNEL,
       payload: attachRequest,
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_ATTACH_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_ATTACH_CHANNEL,
       payload: attachRequest,
       sender: untrustedSender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
       payload: navigateRequest,
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_RELOAD_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_RELOAD_CHANNEL,
       payload: { tabId: "browser:a" },
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_FOCUS_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_FOCUS_CHANNEL,
       payload: { tabId: "browser:a" },
+      sender: renderer.sender,
+    });
+    sendBrowserIpc({
+      channel: OMNYO_DESKTOP_BROWSER_HOST_FOCUS_CHANNEL,
+      payload: { tabId: "browser:a" },
+      sender: renderer.sender,
+    });
+    sendBrowserIpc({
+      channel: OMNYO_DESKTOP_BROWSER_HOST_FOCUS_CHANNEL,
+      payload: { tabId: null },
+      sender: renderer.sender,
+    });
+    sendBrowserIpc({
+      channel: OMNYO_DESKTOP_BROWSER_HOST_FOCUS_CHANNEL,
+      payload: { tabId: "" },
       sender: renderer.sender,
     });
 
@@ -351,6 +399,10 @@ describe("registerDesktopBrowserIpc", () => {
     expect(manager.focusCalls).toEqual([
       { hostWindow: renderer.hostWindow, tabId: "browser:a" },
     ]);
+    expect(manager.hostFocusCalls).toEqual([
+      { hostWindow: renderer.hostWindow, tabId: "browser:a" },
+      { hostWindow: renderer.hostWindow, tabId: null },
+    ]);
   });
 
   it("dispatches validated find-in-page requests and rejects malformed ones", () => {
@@ -358,13 +410,15 @@ describe("registerDesktopBrowserIpc", () => {
     registerDesktopBrowserIpc(manager);
     const renderer = createTrustedRenderer("main-window");
     const untrustedSender = createUntrustedSender();
-    const findRequest: BbDesktopBrowserFindInPageRequest = {
+
+    const findRequest: OmnyoDesktopBrowserFindInPageRequest = {
       tabId: "browser:a",
       text: "WebContents",
       forward: true,
       newSession: true,
     };
-    const stopRequest: BbDesktopBrowserStopFindInPageRequest = {
+
+    const stopRequest: OmnyoDesktopBrowserStopFindInPageRequest = {
       tabId: "browser:a",
       action: "clearSelection",
     };
@@ -377,28 +431,29 @@ describe("registerDesktopBrowserIpc", () => {
       { tabId: "browser:a", text: "x" },
     ]) {
       sendBrowserIpc({
-        channel: BB_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
         payload,
         sender: renderer.sender,
       });
     }
+
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
       payload: findRequest,
       sender: untrustedSender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
       payload: findRequest,
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
       payload: { tabId: "browser:a", action: "explode" },
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
       payload: stopRequest,
       sender: renderer.sender,
     });
@@ -415,7 +470,8 @@ describe("registerDesktopBrowserIpc", () => {
     const manager = new RecordingDesktopBrowserViewManager();
     registerDesktopBrowserIpc(manager);
     const renderer = createTrustedRenderer("main-window");
-    const validAttachRequest: BbDesktopBrowserAttachRequest = {
+
+    const validAttachRequest: OmnyoDesktopBrowserAttachRequest = {
       threadId: "thread-1",
       tabId: "browser:a",
       url: "",
@@ -430,7 +486,7 @@ describe("registerDesktopBrowserIpc", () => {
       { ...validAttachRequest, bounds: { x: 0, y: 0, width: -1, height: 600 } },
     ]) {
       sendBrowserIpc({
-        channel: BB_DESKTOP_BROWSER_ATTACH_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_ATTACH_CHANNEL,
         payload,
         sender: renderer.sender,
       });
@@ -442,7 +498,7 @@ describe("registerDesktopBrowserIpc", () => {
       { tabId: "browser:a", url: "https://example.com/", extra: true },
     ]) {
       sendBrowserIpc({
-        channel: BB_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
         payload,
         sender: renderer.sender,
       });
@@ -456,17 +512,19 @@ describe("registerDesktopBrowserIpc", () => {
     const manager = new RecordingDesktopBrowserViewManager();
     registerDesktopBrowserIpc(manager);
     const renderer = createTrustedRenderer("main-window");
-    const boundsRequest: BbDesktopBrowserSetBoundsRequest = {
+
+    const boundsRequest: OmnyoDesktopBrowserSetBoundsRequest = {
       tabId: "browser:a",
       bounds: { x: 0, y: 0, width: 800, height: 600 },
     };
-    const visibleRequest: BbDesktopBrowserSetVisibleRequest = {
+
+    const visibleRequest: OmnyoDesktopBrowserSetVisibleRequest = {
       tabId: "browser:a",
       visible: true,
     };
 
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
       payload: {
         ...boundsRequest,
         bounds: { x: 0.5, y: 0, width: 1, height: 1 },
@@ -474,33 +532,33 @@ describe("registerDesktopBrowserIpc", () => {
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
       payload: boundsRequest,
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
       payload: { tabId: "browser:a", visible: "yes" },
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_SET_VISIBLE_WITHOUT_FOCUS_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_SET_VISIBLE_WITHOUT_FOCUS_CHANNEL,
       payload: visibleRequest,
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
       payload: visibleRequest,
       sender: renderer.sender,
     });
 
     for (const channel of [
-      BB_DESKTOP_BROWSER_DETACH_CHANNEL,
-      BB_DESKTOP_BROWSER_FOCUS_CHANNEL,
-      BB_DESKTOP_BROWSER_GO_BACK_CHANNEL,
-      BB_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
-      BB_DESKTOP_BROWSER_RELOAD_CHANNEL,
-      BB_DESKTOP_BROWSER_STOP_CHANNEL,
+      OMNYO_DESKTOP_BROWSER_DETACH_CHANNEL,
+      OMNYO_DESKTOP_BROWSER_FOCUS_CHANNEL,
+      OMNYO_DESKTOP_BROWSER_GO_BACK_CHANNEL,
+      OMNYO_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
+      OMNYO_DESKTOP_BROWSER_RELOAD_CHANNEL,
+      OMNYO_DESKTOP_BROWSER_STOP_CHANNEL,
     ]) {
       sendBrowserIpc({
         channel,
@@ -510,22 +568,22 @@ describe("registerDesktopBrowserIpc", () => {
     }
 
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_DETACH_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_DETACH_CHANNEL,
       payload: { tabId: "browser:a" },
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_GO_BACK_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_GO_BACK_CHANNEL,
       payload: { tabId: "browser:a" },
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
       payload: { tabId: "browser:a" },
       sender: renderer.sender,
     });
     sendBrowserIpc({
-      channel: BB_DESKTOP_BROWSER_STOP_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_STOP_CHANNEL,
       payload: { tabId: "browser:a" },
       sender: renderer.sender,
     });

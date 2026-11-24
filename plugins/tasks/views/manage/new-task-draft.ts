@@ -5,8 +5,19 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "../../shared/contract.js";
+import { importLegacyTasksBrowserKeyV1 } from "../../shared/legacy-browser-key-v1.js";
 
-export const NEW_TASK_DRAFT_STORAGE_KEY = "bb-tasks:new-task-draft";
+export const NEW_TASK_DRAFT_STORAGE_KEY = "tasks:new-task-draft";
+
+const LEGACY_NEW_TASK_DRAFT_STORAGE_KEY_V1 = "bb-tasks:new-task-draft";
+
+function importLegacyNewTaskDraftV1(): void {
+  importLegacyTasksBrowserKeyV1(
+    LEGACY_NEW_TASK_DRAFT_STORAGE_KEY_V1,
+    NEW_TASK_DRAFT_STORAGE_KEY,
+  );
+}
+
 const NEW_TASK_DRAFT_VERSION = 1;
 
 export interface NewTaskDraft {
@@ -35,12 +46,17 @@ export function hasDraftContent(draft: NewTaskDraft): boolean {
 }
 
 export function loadNewTaskDraft(): NewTaskDraft | null {
+  importLegacyNewTaskDraftV1();
+
   try {
     const raw = window.localStorage.getItem(NEW_TASK_DRAFT_STORAGE_KEY);
+
     if (raw === null) return null;
     const parsed = storedDraftSchema.safeParse(JSON.parse(raw));
+
     if (!parsed.success) return null;
     const { version: _version, ...draft } = parsed.data;
+
     return hasDraftContent(draft) ? draft : null;
   } catch {
     return null;
@@ -48,11 +64,15 @@ export function loadNewTaskDraft(): NewTaskDraft | null {
 }
 
 export function storeNewTaskDraft(draft: NewTaskDraft): void {
+  importLegacyNewTaskDraftV1();
+
   try {
     if (!hasDraftContent(draft)) {
       window.localStorage.removeItem(NEW_TASK_DRAFT_STORAGE_KEY);
+
       return;
     }
+
     window.localStorage.setItem(
       NEW_TASK_DRAFT_STORAGE_KEY,
       JSON.stringify({ version: NEW_TASK_DRAFT_VERSION, ...draft }),
@@ -61,6 +81,8 @@ export function storeNewTaskDraft(draft: NewTaskDraft): void {
 }
 
 export function clearNewTaskDraft(): void {
+  importLegacyNewTaskDraftV1();
+
   try {
     window.localStorage.removeItem(NEW_TASK_DRAFT_STORAGE_KEY);
   } catch {}

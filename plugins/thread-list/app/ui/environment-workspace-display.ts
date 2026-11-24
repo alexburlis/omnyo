@@ -1,4 +1,4 @@
-import type { PluginEnvironmentProvider } from "@get-bb/plugin-sdk/app";
+import type { PluginEnvironmentProvider } from "@omnyo/plugin-sdk/app";
 import type { IconName } from "@/components/ui/icon";
 
 export type EnvironmentWorkspaceDisplayProviderLookup =
@@ -20,9 +20,11 @@ export function findEnvironmentDisplayProvider(
   if (environmentProviderId === null) {
     return { status: "loaded", provider: null, environmentProviderId: null };
   }
+
   if (providers === undefined) {
     return { status: "loading" };
   }
+
   return {
     status: "loaded",
     environmentProviderId,
@@ -42,6 +44,7 @@ interface EnvironmentDisplayNameSource {
 function workspaceFolderName(workspacePath: string | null): string | null {
   if (workspacePath === null) return null;
   const segments = workspacePath.split(/[\\/]+/u).filter(Boolean);
+
   return segments[segments.length - 1] ?? null;
 }
 
@@ -50,6 +53,7 @@ function environmentProviderLabel(
   lookup: EnvironmentWorkspaceDisplayProviderLookup,
 ): string | null {
   if (lookup.status === "loading") return null;
+
   return lookup.provider === null
     ? environmentProviderId
     : lookup.provider.displayName;
@@ -73,6 +77,7 @@ export function getEnvironmentLabelIconName(
 ): IconName {
   const provider =
     providerLookup.status === "loaded" ? providerLookup.provider : null;
+
   return provider === null
     ? PERSISTENT_HOST_ICON_NAME
     : (provider.icon ?? "Zap");

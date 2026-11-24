@@ -4,6 +4,7 @@ import { useDesktopUpdateInfo } from "@/hooks/useDesktopUpdateInfo";
 export function useServerDaemonLogsCommand(): void {
   const { desktopApi, desktopInfo } = useDesktopUpdateInfo();
   const openLogs = desktopApi?.openServerDaemonLogs;
+
   const enabled =
     openLogs !== undefined && desktopInfo?.serverDaemonLogsAvailable === true;
 
@@ -13,7 +14,9 @@ export function useServerDaemonLogsCommand(): void {
       if (openLogs === undefined) {
         return false;
       }
+
       void openLogs.call(desktopApi).catch(() => undefined);
+
       return true;
     },
     0,

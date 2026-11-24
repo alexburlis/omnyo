@@ -1,11 +1,11 @@
 import { acquireProjectAttachmentOwnership } from "./project-attachments.js";
-import { projectAttachmentPaths } from "@bb/domain";
+import { projectAttachmentPaths } from "@omnyo/domain";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import {
   PROMPT_HISTORY_ENTRY_LIMIT,
   type PromptHistoryScope,
   type PromptInput,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { DbQueryConnection } from "../connection.js";
 import { promptHistoryEntries, threads } from "../schema.js";
 import { createPromptHistoryEntryId } from "../ids.js";
@@ -62,6 +62,10 @@ export interface ListPromptHistoryPageArgs {
   limit: number;
 }
 
+export const PROMPT_HISTORY_ENTRY_MAX_BYTES = 256 * 1024;
+
+const promptHistoryEntryWithinSizeLimit = sql`octet_length(${promptHistoryEntries.input}) <= ${PROMPT_HISTORY_ENTRY_MAX_BYTES}`;
+
 function rawPromptHistoryRowLimit(limit: number): number {
   return Math.min(
     PROMPT_HISTORY_ENTRY_LIMIT * 2,
@@ -81,6 +85,7 @@ export function createPromptHistoryEntry(
         projectAttachmentPaths(input.input),
       );
       const createdAt = input.createdAt ?? Date.now();
+
       return tx
         .insert(promptHistoryEntries)
         .values({
@@ -112,6 +117,7 @@ export function listStoredProjectPromptHistoryRows(
         eq(promptHistoryEntries.projectId, args.projectId),
         eq(promptHistoryEntries.scope, "project"),
         isNull(threads.deletedAt),
+        promptHistoryEntryWithinSizeLimit,
       ),
     )
     .orderBy(
@@ -134,6 +140,7 @@ export function listStoredThreadPromptHistoryRows(
       and(
         eq(promptHistoryEntries.threadId, args.threadId),
         eq(promptHistoryEntries.scope, "thread"),
+        promptHistoryEntryWithinSizeLimit,
       ),
     )
     .orderBy(
@@ -150,13 +157,17 @@ export function listPromptHistoryPage(
   args: ListPromptHistoryPageArgs,
 ): StoredPromptHistoryEntryRow[] {
   const before = args.before;
+
   return db
     .select(storedPromptHistoryEntryColumns)
     .from(promptHistoryEntries)
     .where(
-      before === null
-        ? undefined
-        : sql`(${promptHistoryEntries.createdAt}, ${promptHistoryEntries.requestSequence}, ${promptHistoryEntries.id}) < (${before.createdAt}, ${before.requestSequence}, ${before.id})`,
+      and(
+        promptHistoryEntryWithinSizeLimit,
+        before === null
+          ? undefined
+          : sql`(${promptHistoryEntries.createdAt}, ${promptHistoryEntries.requestSequence}, ${promptHistoryEntries.id}) < (${before.createdAt}, ${before.requestSequence}, ${before.id})`,
+      ),
     )
     .orderBy(
       desc(promptHistoryEntries.createdAt),

@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
-import type { PluginComposerScope } from "@get-bb/plugin-sdk";
+import type { PluginComposerScope } from "@omnyo/plugin-sdk";
 import {
   resolveComposerActions,
   resolveComposerPopups,
@@ -37,6 +37,7 @@ function useResolvedComposerSlot<T>(
   empty: () => T,
 ): T {
   const registrations = useComposerCustomizationRegistrations();
+
   return useMemo(
     () => (scopeKind === null ? empty() : resolve(registrations, scopeKind)),
     [empty, registrations, resolve, scopeKind],

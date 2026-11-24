@@ -1,11 +1,12 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { z } from "zod";
-import { environmentHostProgressSchema } from "bb-environment-provider-host/progress";
+import { environmentHostProgressSchema } from "omnyo-environment-provider-host/progress";
 
 export const worktreeBaseBranchSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("named"), name: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("default") }).strict(),
 ]);
+
 export type WorktreeBaseBranch = z.infer<typeof worktreeBaseBranchSchema>;
 
 export const discoveredWorktreeSchema = z
@@ -16,6 +17,7 @@ export const discoveredWorktreeSchema = z
     prunable: z.boolean(),
   })
   .strict();
+
 export type DiscoveredWorktree = z.infer<typeof discoveredWorktreeSchema>;
 
 export const worktreeHostContract = defineRpcContract({

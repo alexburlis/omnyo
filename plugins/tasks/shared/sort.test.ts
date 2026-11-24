@@ -44,6 +44,7 @@ describe("sortTasks", () => {
       ],
       "priority",
     );
+
     expect(keys(sorted)).toEqual(["T-4", "T-3", "T-2", "T-1"]);
   });
 
@@ -57,6 +58,7 @@ describe("sortTasks", () => {
       ],
       "due",
     );
+
     expect(keys(sorted)).toEqual(["T-4", "T-3", "T-2", "T-1"]);
   });
 
@@ -66,6 +68,7 @@ describe("sortTasks", () => {
       task("T-1", { priority: "high" }),
       task("T-2", { priority: "high" }),
     ];
+
     expect(keys(sortTasks(input, "priority"))).toEqual(["T-3", "T-1", "T-2"]);
     expect(keys(sortTasks(input, "due"))).toEqual(["T-3", "T-1", "T-2"]);
   });

@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "bb",
+    "name": "Omnyo",
     "slug": "bb-app",
     "owner": "bb-team",
     "version": "0.39.0",
-    "scheme": "bb",
+    "scheme": "omnyo",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -17,17 +17,17 @@
         "dark": "./assets/ios-icon-dark.png"
       },
       "infoPlist": {
-        "NSLocalNetworkUsageDescription": "bb connects to a bb server on your local network or tailnet.",
-        "NSCameraUsageDescription": "bb attaches photos you take to your prompts.",
-        "NSMicrophoneUsageDescription": "bb records voice input and transcribes it into your prompt.",
-        "NSPhotoLibraryUsageDescription": "bb attaches photos you pick to your prompts.",
+        "NSLocalNetworkUsageDescription": "Omnyo connects to an Omnyo server on your local network or tailnet.",
+        "NSCameraUsageDescription": "Omnyo scans pairing QR codes and attaches photos you take to your prompts.",
+        "NSMicrophoneUsageDescription": "Omnyo records voice input and transcribes it into your prompt.",
+        "NSPhotoLibraryUsageDescription": "Omnyo attaches photos you pick to your prompts.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         },
         "UIBackgroundModes": ["remote-notification"]
       },
-      "associatedDomains": ["applinks:getbb.app", "applinks:*.getbb.app"]
+      "associatedDomains": ["applinks:omnyo.link", "applinks:*.omnyo.link"]
     },
     "android": {
       "package": "app.getbb.mobile",
@@ -46,17 +46,17 @@
           "data": [
             {
               "scheme": "https",
-              "host": "*.getbb.app",
+              "host": "*.omnyo.link",
               "pathPrefix": "/threads/"
             },
             {
               "scheme": "https",
-              "host": "*.getbb.app",
+              "host": "*.omnyo.link",
               "pathPrefix": "/projects/"
             },
             {
               "scheme": "https",
-              "host": "*.getbb.app",
+              "host": "*.omnyo.link",
               "pathPrefix": "/settings/"
             }
           ],
@@ -68,6 +68,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./plugins/with-preferences-records-v1",
       "./plugins/with-selection-accent",
       "./plugins/with-push-consent",
       "expo-router",
@@ -103,6 +104,9 @@
       [
         "expo-build-properties",
         {
+          "ios": {
+            "enableSceneSupport": true
+          },
           "android": {
             "usesCleartextTraffic": true
           }

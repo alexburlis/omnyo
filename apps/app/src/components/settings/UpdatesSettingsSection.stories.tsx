@@ -1,9 +1,9 @@
-import type { Host } from "@bb/domain";
-import type { SystemAppUpdateStatus } from "@bb/server-contract";
+import type { Host } from "@omnyo/domain";
+import type { SystemAppUpdateStatus } from "@omnyo/server-contract";
 import {
   HOST_DAEMON_PROTOCOL_VERSION,
   type ProviderCliKey,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { ProviderCliIssue } from "@/components/provider-cli/provider-cli-install";
 import type { ProviderCliInstallFailure } from "@/components/provider-cli/provider-cli-install-store";
 import type { UpdateInventoryMachine } from "@/hooks/useUpdateInventory";
@@ -13,9 +13,8 @@ import {
 } from "../../../.ladle/story-fixtures";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 import {
-  BbAppUpdateRows,
-  BbUpdatesCard,
-  ChangelogPreviewCard,
+  OmnyoAppUpdateRows,
+  OmnyoUpdatesCard,
   MachineUpdateRow,
   ProviderCliUpdatesSection,
 } from "./UpdatesSettingsSection";
@@ -25,8 +24,11 @@ export default {
 };
 
 const noop = () => {};
+
 const NO_JOBS: ReadonlySet<string> = new Set();
+
 const NO_FAILURES: ReadonlyMap<string, ProviderCliInstallFailure> = new Map();
+
 const STORY_NOW = 1_800_000_000_000;
 
 const NPM_VERSION = {
@@ -37,7 +39,7 @@ const NPM_VERSION = {
   source: "npm" as const,
   updateAvailable: false,
   isDevelopment: false,
-  upgradeCommand: "npx bb-app@latest",
+  upgradeCommand: "npx omnyo-app@latest",
 };
 
 const IN_APP_UPDATE: SystemAppUpdateStatus = {
@@ -51,7 +53,9 @@ const IN_APP_UPDATE: SystemAppUpdateStatus = {
   },
   blocked: null,
   current: { commit: null, version: "0.38.0" },
+  installsWhenIdle: false,
   lastResult: null,
+  newTurnsPausedForUpdate: false,
   runningThreadCount: 0,
   support: { kind: "supported", mode: "npm" },
 };
@@ -73,11 +77,13 @@ function updateIssue(
   latestVersion: string,
 ): ProviderCliIssue {
   const base = makeProviderCliStatus(provider);
+
   const action = {
     kind: "update" as const,
     label: "Update" as const,
     command: `${base.executableName} update`,
   };
+
   return {
     provider,
     status: {
@@ -96,14 +102,12 @@ function updateIssue(
 
 function machineOf({
   host,
-  isPrimary = false,
   issues = [],
   statusError = false,
   canRetryDaemonUpdate = false,
   providers = ["codex", "claude-code", "acp-cursor"],
 }: {
   host: Host;
-  isPrimary?: boolean;
   issues?: ProviderCliIssue[];
   statusError?: boolean;
   canRetryDaemonUpdate?: boolean;
@@ -112,13 +116,15 @@ function machineOf({
   const statusFor = (provider: ProviderCliKey) =>
     issues.find((issue) => issue.provider === provider)?.status ??
     makeProviderCliStatus(provider);
+
   const providerStatus: NonNullable<UpdateInventoryMachine["providerStatus"]> =
     {};
+
   for (const provider of providers)
     providerStatus[provider] = statusFor(provider);
+
   return {
     host,
-    isPrimary,
     providerStatus: host.status === "connected" ? providerStatus : null,
     statusPending: false,
     statusFetching: false,
@@ -157,7 +163,7 @@ function failedProviderFailures(
           message:
             index === 0
               ? "Command exited with code 1"
-              : "HTTP 504: bb connect: timed out waiting for the tunnel client",
+              : "HTTP 504: Omnyo connect: timed out waiting for the tunnel client",
           title: `${issue.status.displayName} update log`,
         },
       },
@@ -244,6 +250,7 @@ function manualUpdateIssue(
     installAction: null,
     needsUpdate: true,
   });
+
   return {
     provider,
     status,
@@ -260,6 +267,7 @@ export function RowVariations() {
     providers: ["codex"],
     issues: [updateIssue("codex", "0.145.0", "0.146.0")],
   });
+
   const providerInstalling = machineOf({
     host: makeHost({ id: "state-provider-installing", name: "studio-mac" }),
     providers: ["codex", "claude-code"],
@@ -268,14 +276,17 @@ export function RowVariations() {
       updateIssue("claude-code", "2.0.1", "2.1.0"),
     ],
   });
+
   const providerFailed = failedProviderMachine("state-provider-failed", [
     "codex",
   ]);
+
   const providerManual = machineOf({
     host: makeHost({ id: "state-provider-manual", name: "homelab" }),
     providers: ["codex"],
     issues: [manualUpdateIssue("codex", "0.145.0", "0.146.0")],
   });
+
   const daemonUpdating = machineOf({
     host: makeHost({
       id: "state-daemon-updating",
@@ -286,6 +297,7 @@ export function RowVariations() {
     }),
     canRetryDaemonUpdate: true,
   });
+
   const daemonStalled = machineOf({
     host: makeHost({
       id: "state-daemon-stalled",
@@ -296,6 +308,7 @@ export function RowVariations() {
     }),
     canRetryDaemonUpdate: true,
   });
+
   const daemonOffline = machineOf({
     host: makeHost({
       id: "state-daemon-offline",
@@ -303,6 +316,7 @@ export function RowVariations() {
       status: "disconnected",
     }),
   });
+
   const providerCheckFailed = machineOf({
     host: makeHost({ id: "state-provider-check", name: "workstation" }),
     statusError: true,
@@ -317,15 +331,15 @@ export function RowVariations() {
           hint="Nothing to do. The settled state stays visually quiet."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={NPM_VERSION}
                 desktopInfo={null}
                 isDesktop={false}
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -334,15 +348,15 @@ export function RowVariations() {
           hint="The app version check is still in progress."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={undefined}
                 desktopInfo={null}
                 isDesktop={false}
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -351,8 +365,8 @@ export function RowVariations() {
           hint="A web install cannot replace itself, so its action copies the upgrade command."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   latestVersion: "0.39.0",
@@ -363,17 +377,17 @@ export function RowVariations() {
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
         <StoryRow
           label="In-app update available"
-          hint="bb runs under the update shim, so it can download the update and restart itself."
+          hint="Omnyo runs under the update shim, so it can download the update and restart itself."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={NPM_VERSION}
                 appUpdate={IN_APP_UPDATE}
                 desktopInfo={null}
@@ -383,17 +397,17 @@ export function RowVariations() {
                 onRetryDesktop={null}
                 onShowAppUpdateResult={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
         <StoryRow
           label="In-app update downloading"
-          hint="The launcher is installing the new version while bb keeps running."
+          hint="The launcher is installing the new version while Omnyo keeps running."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={NPM_VERSION}
                 appUpdate={{
                   ...IN_APP_UPDATE,
@@ -401,7 +415,7 @@ export function RowVariations() {
                     output: [],
                     phase: "preparing",
                     startedAt: "2026-09-23T00:00:00.000Z",
-                    step: "Downloading bb-app 0.39.0",
+                    step: "Downloading omnyo-app 0.39.0",
                     targetVersion: "0.39.0",
                   },
                 }}
@@ -412,17 +426,17 @@ export function RowVariations() {
                 onRetryDesktop={null}
                 onShowAppUpdateResult={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
         <StoryRow
           label="In-app update failed"
-          hint="The download failed, bb kept running the current version, and the row keeps the details until dismissed."
+          hint="The download failed, Omnyo kept running the current version, and the row keeps the details until dismissed."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={NPM_VERSION}
                 appUpdate={{
                   ...IN_APP_UPDATE,
@@ -445,7 +459,7 @@ export function RowVariations() {
                 onRetryDesktop={null}
                 onShowAppUpdateResult={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -454,8 +468,8 @@ export function RowVariations() {
           hint="Runs from a checkout without an update shim. No comparison with npm or origin/main has been made."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   installKind: "source",
@@ -467,7 +481,7 @@ export function RowVariations() {
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -476,8 +490,8 @@ export function RowVariations() {
           hint="A source tree with no detected Git revision shows its declared build version without claiming freshness."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   installKind: "source",
@@ -489,7 +503,7 @@ export function RowVariations() {
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -498,8 +512,8 @@ export function RowVariations() {
           hint="The npm lookup failed. Retry forces another lookup without upgrading the app."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{ ...NPM_VERSION, latestVersion: null }}
                 desktopInfo={null}
                 isDesktop={false}
@@ -507,7 +521,7 @@ export function RowVariations() {
                 onRetryDesktop={null}
                 onRetryAppCheck={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -516,8 +530,8 @@ export function RowVariations() {
           hint="The managed checkout has successfully checked origin/main and has no incoming commits."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   installKind: "source",
@@ -537,7 +551,7 @@ export function RowVariations() {
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -546,8 +560,8 @@ export function RowVariations() {
           hint="The managed checkout could not fetch origin/main."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   installKind: "source",
@@ -570,7 +584,7 @@ export function RowVariations() {
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -579,8 +593,8 @@ export function RowVariations() {
           hint="This branch cannot use automatic updates; no incoming update is shown."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   installKind: "source",
@@ -604,7 +618,7 @@ export function RowVariations() {
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -613,8 +627,8 @@ export function RowVariations() {
           hint="A clean pnpm start checkout on main shows commits instead of a release version and offers to fast-forward."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   currentCommit: "a".repeat(40),
@@ -642,7 +656,7 @@ export function RowVariations() {
                 onRetryDesktop={null}
                 onShowAppUpdateResult={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -651,8 +665,8 @@ export function RowVariations() {
           hint="The launcher rechecks origin/main before accepting the update target. The spinner and step replace the Update button."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   installKind: "source",
@@ -684,7 +698,7 @@ export function RowVariations() {
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -693,8 +707,8 @@ export function RowVariations() {
           hint="Validation succeeded. The launcher is waiting for the server to approve the restart."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   installKind: "source",
@@ -726,7 +740,7 @@ export function RowVariations() {
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -735,8 +749,8 @@ export function RowVariations() {
           hint="The last row before shutdown. Git fast-forward, dependency installation, and rebuilding happen while the server is offline; there are no live rows during those steps."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   installKind: "source",
@@ -767,7 +781,7 @@ export function RowVariations() {
                 onRelaunchDesktop={null}
                 onRetryDesktop={null}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -776,8 +790,8 @@ export function RowVariations() {
           hint="Incoming commits stay visible, but there is no update button until the working tree is clean."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={{
                   ...NPM_VERSION,
                   currentCommit: "a".repeat(40),
@@ -810,7 +824,7 @@ export function RowVariations() {
                 onRetryDesktop={null}
                 onShowAppUpdateResult={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -819,8 +833,8 @@ export function RowVariations() {
           hint="The desktop shell is fetching the update automatically."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={undefined}
                 desktopInfo={{
                   ...DESKTOP_UPDATE,
@@ -832,7 +846,7 @@ export function RowVariations() {
                 onRelaunchDesktop={noop}
                 onRetryDesktop={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -841,8 +855,8 @@ export function RowVariations() {
           hint="No check has completed yet. Check starts a lookup without claiming the installed version is current."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={undefined}
                 desktopInfo={{
                   ...DESKTOP_UPDATE,
@@ -857,7 +871,7 @@ export function RowVariations() {
                 onRelaunchDesktop={noop}
                 onRetryDesktop={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -866,8 +880,8 @@ export function RowVariations() {
           hint="The check is running. The action is disabled until it completes."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={undefined}
                 desktopInfo={{
                   ...DESKTOP_UPDATE,
@@ -883,7 +897,7 @@ export function RowVariations() {
                 onRelaunchDesktop={noop}
                 onRetryDesktop={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -892,8 +906,8 @@ export function RowVariations() {
           hint="A check completed without establishing the latest release. The installed version stays visible with an explanation and Retry."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={undefined}
                 desktopInfo={{
                   ...DESKTOP_UPDATE,
@@ -907,7 +921,7 @@ export function RowVariations() {
                 onRelaunchDesktop={noop}
                 onRetryDesktop={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -916,15 +930,15 @@ export function RowVariations() {
           hint="The update is ready and needs one explicit relaunch."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={undefined}
                 desktopInfo={DESKTOP_UPDATE}
                 isDesktop
                 onRelaunchDesktop={noop}
                 onRetryDesktop={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
 
@@ -933,8 +947,8 @@ export function RowVariations() {
           hint="The red caption states the failure; the neutral Retry button is the recovery."
         >
           <div className="w-full">
-            <BbUpdatesCard>
-              <BbAppUpdateRows
+            <OmnyoUpdatesCard>
+              <OmnyoAppUpdateRows
                 systemVersion={undefined}
                 desktopInfo={{
                   ...DESKTOP_UPDATE,
@@ -946,7 +960,7 @@ export function RowVariations() {
                 onRelaunchDesktop={noop}
                 onRetryDesktop={noop}
               />
-            </BbUpdatesCard>
+            </OmnyoUpdatesCard>
           </div>
         </StoryRow>
       </StoryCard>
@@ -961,7 +975,7 @@ export function RowVariations() {
 
         <StoryRow
           label="Expanded"
-          hint="Each installed CLI with its versions and the updater bb will run."
+          hint="Each installed CLI with its versions and the updater Omnyo will run."
         >
           <StoryMachineRow machine={providerUpdate} expanded />
         </StoryRow>
@@ -993,7 +1007,7 @@ export function RowVariations() {
 
         <StoryRow
           label="Update in terminal"
-          hint="bb cannot run this update, so the avatar is dashed and Update all skips it."
+          hint="Omnyo cannot run this update, so the avatar is dashed and Update all skips it."
         >
           <StoryMachineRow machine={providerManual} expanded />
         </StoryRow>
@@ -1006,7 +1020,7 @@ export function RowVariations() {
         </StoryRow>
 
         <StoryRow
-          label="Machine updating bb"
+          label="Machine updating Omnyo"
           hint="The enrolled daemon is applying its required update automatically."
         >
           <StoryMachineRow machine={daemonUpdating} />
@@ -1021,7 +1035,7 @@ export function RowVariations() {
 
         <StoryRow
           label="Machine offline"
-          hint="Shown only after Show all; bb cannot currently reach this machine."
+          hint="Shown only after Show all; Omnyo cannot currently reach this machine."
         >
           <StoryMachineRow machine={daemonOffline} />
         </StoryRow>
@@ -1033,16 +1047,16 @@ export function RowVariations() {
 export function SectionVariations() {
   const current = machineOf({
     host: makeHost({ id: "section-current", name: "workstation" }),
-    isPrimary: true,
   });
+
   const workstation = machineOf({
     host: makeHost({ id: "section-workstation", name: "workstation" }),
-    isPrimary: true,
     issues: [
       updateIssue("codex", "0.145.0", "0.146.0"),
       updateIssue("acp-cursor", "0.48.0", "0.49.0"),
     ],
   });
+
   const studioMac = machineOf({
     host: makeHost({ id: "section-studio", name: "studio-mac" }),
     issues: [
@@ -1050,6 +1064,7 @@ export function SectionVariations() {
       updateIssue("claude-code", "2.0.1", "2.1.0"),
     ],
   });
+
   const homelab = machineOf({
     host: makeHost({ id: "section-homelab", name: "homelab" }),
     issues: [
@@ -1057,6 +1072,7 @@ export function SectionVariations() {
       manualUpdateIssue("claude-code", "2.0.1", "2.1.0"),
     ],
   });
+
   const offline = machineOf({
     host: makeHost({
       id: "section-offline",
@@ -1064,6 +1080,7 @@ export function SectionVariations() {
       status: "disconnected",
     }),
   });
+
   const stalled = machineOf({
     host: makeHost({
       id: "section-stalled",
@@ -1074,9 +1091,11 @@ export function SectionVariations() {
     }),
     canRetryDaemonUpdate: true,
   });
+
   const failed = failedProviderMachine("section-failed");
+
   const serverRow = (
-    <BbAppUpdateRows
+    <OmnyoAppUpdateRows
       systemVersion={NPM_VERSION}
       desktopInfo={null}
       isDesktop={false}
@@ -1084,8 +1103,9 @@ export function SectionVariations() {
       onRetryDesktop={null}
     />
   );
+
   const serverUpdateRow = (
-    <BbAppUpdateRows
+    <OmnyoAppUpdateRows
       systemVersion={NPM_VERSION}
       appUpdate={IN_APP_UPDATE}
       desktopInfo={null}
@@ -1096,8 +1116,9 @@ export function SectionVariations() {
       onShowAppUpdateResult={noop}
     />
   );
+
   const desktopRow = (
-    <BbAppUpdateRows
+    <OmnyoAppUpdateRows
       name="Desktop"
       systemVersion={undefined}
       desktopInfo={DESKTOP_UPDATE}
@@ -1114,7 +1135,7 @@ export function SectionVariations() {
         hint="One Server row and one quiet line for the fleet."
       >
         <div className="w-full space-y-6">
-          <BbUpdatesCard>{serverRow}</BbUpdatesCard>
+          <OmnyoUpdatesCard>{serverRow}</OmnyoUpdatesCard>
           <StoryProviderClis machines={[current, offline]} />
         </div>
       </StoryRow>
@@ -1123,7 +1144,7 @@ export function SectionVariations() {
         hint="Update all sits beside the Provider CLIs heading."
       >
         <div className="w-full space-y-6">
-          <BbUpdatesCard>{serverRow}</BbUpdatesCard>
+          <OmnyoUpdatesCard>{serverRow}</OmnyoUpdatesCard>
           <StoryProviderClis
             machines={[workstation]}
             serverHostId={workstation.host.id}
@@ -1135,10 +1156,10 @@ export function SectionVariations() {
         hint="Server and desktop updates, provider updates, a manual update, a failed install, and a stalled daemon; quiet machines fold into the footer."
       >
         <div className="w-full space-y-6">
-          <BbUpdatesCard>
+          <OmnyoUpdatesCard>
             {serverUpdateRow}
             {desktopRow}
-          </BbUpdatesCard>
+          </OmnyoUpdatesCard>
           <StoryProviderClis
             machines={[
               workstation,
@@ -1160,7 +1181,7 @@ export function SectionVariations() {
         hint="Update all gives way to progress while the queue drains."
       >
         <div className="w-full space-y-6">
-          <BbUpdatesCard>{serverRow}</BbUpdatesCard>
+          <OmnyoUpdatesCard>{serverRow}</OmnyoUpdatesCard>
           <StoryProviderClis
             machines={[workstation, studioMac]}
             runningJobKey={`${workstation.host.id}:codex`}
@@ -1172,16 +1193,6 @@ export function SectionVariations() {
               ])
             }
           />
-        </div>
-      </StoryRow>
-      <StoryRow
-        label="Changelog preview"
-        hint="The optional release preview appears above the update cards."
-      >
-        <div className="w-full space-y-6">
-          <ChangelogPreviewCard />
-          <BbUpdatesCard>{serverRow}</BbUpdatesCard>
-          <StoryProviderClis machines={[workstation]} />
         </div>
       </StoryRow>
     </StoryCard>

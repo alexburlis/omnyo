@@ -1,9 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@bb/shared-ui/hover-reveal";
-import { cn, formatHomePathForDisplay } from "@bb/shared-ui/lib/utils";
-import { ResourceInfiniteScrollSentinel } from "@bb/shared-ui/resource-pagination";
+import { Button } from "@omnyo/shared-ui/button";
+import { DelayedLoading } from "@omnyo/shared-ui/delayed-loading";
+import { EmptyStateBlock } from "@omnyo/shared-ui/empty-state";
+import { INSET_FOCUS_RING_CLASS } from "@omnyo/shared-ui/focus-ring";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@omnyo/shared-ui/hover-reveal";
+import { cn, formatHomePathForDisplay } from "@omnyo/shared-ui/lib/utils";
+import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
+import { ResourceInfiniteScrollSentinel } from "@omnyo/shared-ui/resource-pagination";
 import {
   ResourceDefinitionSection,
   ResourceDetailCollection,
@@ -11,15 +16,16 @@ import {
   ResourceDetailPage,
   ResourceDetailPanel,
   ResourceDetailStack,
-} from "@bb/shared-ui/resource-list";
+} from "@omnyo/shared-ui/resource-list";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
+} from "@omnyo/shared-ui/tooltip";
 import { FilePreview } from "@/components/secondary-panel/FilePreview.js";
 import { ProvenancePill } from "@/components/tools/ProvenancePill";
+import { CopyGlyph } from "@/components/ui/copy-button";
 import { useClipboardCopy } from "@/lib/clipboard";
 import type { MarkdownLinkRouting } from "@/components/ui/markdown-link-routing";
 
@@ -50,11 +56,14 @@ interface SkillDetailViewProps {
   markdownLinkRouting?: MarkdownLinkRouting;
 }
 
+const SKILL_PATH_ACTION_CLASS = `group -ml-1.5 inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-xs text-subtle-foreground ${CONTROL_HOVER_TRANSITION} hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring`;
+
 function SkillPath({ path, href }: { path: string; href?: string }) {
   const { copied, copy } = useClipboardCopy({
     text: path,
     errorMessage: "Failed to copy path.",
   });
+
   const displayPath = formatHomePathForDisplay(path);
 
   return (
@@ -67,7 +76,7 @@ function SkillPath({ path, href }: { path: string; href?: string }) {
               target="_blank"
               rel="noreferrer"
               aria-label={`Open ${path} in a new tab`}
-              className="group -ml-1.5 inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-xs text-subtle-foreground transition-colors hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className={SKILL_PATH_ACTION_CLASS}
             >
               <span className="truncate font-mono">{displayPath}</span>
               <Icon
@@ -81,16 +90,15 @@ function SkillPath({ path, href }: { path: string; href?: string }) {
               type="button"
               aria-label={`Copy skill path: ${path}`}
               onClick={() => void copy()}
-              className="group -ml-1.5 inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-xs text-subtle-foreground transition-colors hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className={SKILL_PATH_ACTION_CLASS}
             >
               <span className="truncate font-mono">{displayPath}</span>
-              <Icon
-                name={copied ? "Check" : "Copy"}
+              <CopyGlyph
+                copied={copied}
                 className={cn(
-                  "size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100",
+                  "size-3 shrink-0 opacity-0 transition-opacity duration-(--motion-duration-fast) group-hover:opacity-100 group-focus-visible:opacity-100",
                   HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS,
                 )}
-                aria-hidden
               />
             </button>
           )}
@@ -107,12 +115,59 @@ function getSkillDirectoryPath(path: string): string {
   return path.replace(/[\\/]SKILL\.md$/i, "");
 }
 
+function skillFileDisplayName(path: string, directoryPath: string): string {
+  const prefix = `${directoryPath}/`;
+
+  if (directoryPath !== path && path.startsWith(prefix)) {
+    return path.slice(prefix.length);
+  }
+
+  return formatHomePathForDisplay(path);
+}
+
+function SkillFileLabel({
+  name,
+  heading = false,
+}: {
+  name: string;
+  heading?: boolean;
+}) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <Icon
+        name="FileText"
+        aria-hidden
+        className={cn(
+          "shrink-0 text-subtle-foreground",
+          heading ? "size-4" : "size-3.5",
+        )}
+      />
+      <span
+        className={cn(
+          "min-w-0 truncate font-mono",
+          heading ? "text-sm" : "text-xs",
+        )}
+      >
+        {name}
+      </span>
+    </span>
+  );
+}
+
+const SKILL_FILE_ROW_CLASS = cn(
+  "flex w-full min-w-0 cursor-pointer items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-state-hover hover:text-foreground aria-pressed:bg-state-active aria-pressed:text-foreground",
+  CONTROL_HOVER_TRANSITION,
+  INSET_FOCUS_RING_CLASS,
+);
+
 function SkillFileList({
   files,
+  directoryPath,
   selectedPath,
   onSelectFile,
 }: {
   files: readonly string[];
+  directoryPath: string;
   selectedPath: string;
   onSelectFile: (path: string) => void;
 }) {
@@ -122,16 +177,42 @@ function SkillFileList({
         <button
           key={path}
           type="button"
+          title={formatHomePathForDisplay(path)}
           aria-pressed={path === selectedPath}
           onClick={() => onSelectFile(path)}
-          className="flex w-full min-w-0 items-center px-3 py-2 text-left font-mono text-xs text-muted-foreground hover:bg-state-hover hover:text-foreground aria-pressed:bg-surface-recessed/45 aria-pressed:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+          className={SKILL_FILE_ROW_CLASS}
         >
-          <span className="min-w-0 truncate">
-            {formatHomePathForDisplay(path)}
-          </span>
+          <SkillFileLabel name={skillFileDisplayName(path, directoryPath)} />
+          {path === selectedPath ? (
+            <span className="ml-auto shrink-0 text-2xs text-subtle-foreground">
+              Showing
+            </span>
+          ) : null}
         </button>
       ))}
     </ResourceDetailCollection>
+  );
+}
+
+function SkillContentSkeleton({ name }: { name: string }) {
+  return (
+    <ResourceDetailPanel
+      surface="recessed"
+      className="min-h-25 px-4 py-4 shadow-none"
+    >
+      <DelayedLoading>
+        <div
+          role="status"
+          aria-label={`Loading ${name}`}
+          className="flex flex-col gap-2.5"
+        >
+          <Skeleton className="h-5 w-2/5" />
+          <Skeleton className="h-3.5 w-11/12" />
+          <Skeleton className="h-3.5 w-4/5" />
+          <Skeleton className="h-3.5 w-3/5" />
+        </div>
+      </DelayedLoading>
+    </ResourceDetailPanel>
   );
 }
 
@@ -142,11 +223,14 @@ export function splitMarkdownIntoChunks(content: string): string[] {
   const chunks: string[] = [];
   let current: string[] = [];
   let inFence = false;
+
   for (const line of lines) {
     current.push(line);
+
     if (/^\s*(```|~~~)/u.test(line)) {
       inFence = !inFence;
     }
+
     if (
       !inFence &&
       current.length >= SKILL_CONTENT_CHUNK_LINES &&
@@ -156,9 +240,11 @@ export function splitMarkdownIntoChunks(content: string): string[] {
       current = [];
     }
   }
+
   if (current.length > 0) {
     chunks.push(current.join("\n"));
   }
+
   return chunks;
 }
 
@@ -177,8 +263,10 @@ function ScrollingSkillContent({
     () => (markdown ? splitMarkdownIntoChunks(content) : [content]),
     [content, markdown],
   );
+
   const [visibleChunkCount, setVisibleChunkCount] = useState(1);
   const shownChunks = chunks.slice(0, visibleChunkCount);
+
   return (
     <ResourceDetailPanel surface="recessed" className="shadow-none">
       <div
@@ -233,8 +321,9 @@ export function SkillDetailView({
   markdownLinkRouting,
 }: SkillDetailViewProps) {
   const directoryPath = getSkillDirectoryPath(path);
-  const selectedDisplayPath = formatHomePathForDisplay(selectedPath);
+  const selectedName = skillFileDisplayName(selectedPath, directoryPath);
   const selectedFileIsMarkdown = selectedPath.toLowerCase().endsWith(".md");
+
   const titleMeta =
     titleBadge === undefined ? undefined : (
       <ProvenancePill
@@ -243,6 +332,7 @@ export function SkillDetailView({
         accessibleLabel={titleBadge.accessibleLabel}
       />
     );
+
   return (
     <ResourceDetailPage
       leading={leading}
@@ -257,45 +347,44 @@ export function SkillDetailView({
           <ResourceDetailIncludesSection label="Files">
             <SkillFileList
               files={files}
+              directoryPath={directoryPath}
               selectedPath={selectedPath}
               onSelectFile={onSelectFile}
             />
           </ResourceDetailIncludesSection>
         ) : null}
 
-        <ResourceDefinitionSection label={selectedDisplayPath}>
+        <ResourceDefinitionSection
+          label={
+            <span title={formatHomePathForDisplay(selectedPath)}>
+              <SkillFileLabel name={selectedName} heading />
+            </span>
+          }
+        >
           {contentState.kind === "loading" ? (
-            <ResourceDetailPanel
-              surface="recessed"
-              className="px-3 py-10 text-center text-sm text-muted-foreground"
-            >
-              Loading {selectedDisplayPath}…
-            </ResourceDetailPanel>
+            <SkillContentSkeleton name={selectedName} />
           ) : contentState.kind === "error" ? (
-            <ResourceDetailPanel
-              surface="recessed"
-              className="px-3 py-10 text-center text-sm"
-            >
-              <div
-                role="alert"
-                className="flex items-start justify-center gap-2 text-foreground"
-              >
-                <Icon
-                  name="CircleX"
-                  className="mt-0.5 size-4 shrink-0 text-destructive"
-                  aria-hidden
+            <ResourceDetailPanel surface="recessed" className="shadow-none">
+              <div role="alert">
+                <EmptyStateBlock
+                  icon="FileQuestion"
+                  tone="error"
+                  className="py-8"
+                  title={contentState.message}
+                  description="Check that the file still exists, then try again."
+                  actions={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={contentState.onRetry}
+                    >
+                      <Icon name="RotateCcw" aria-hidden />
+                      Retry
+                    </Button>
+                  }
                 />
-                <p>{contentState.message}</p>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={contentState.onRetry}
-              >
-                Retry
-              </Button>
             </ResourceDetailPanel>
           ) : (
             <ScrollingSkillContent

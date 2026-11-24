@@ -11,11 +11,23 @@ describe("thread name tags", () => {
   it("round-trips user-provided literal bb-prefixed titles", () => {
     const providerName = toProviderExternalThreadName("[bb] Literal");
 
-    expect(providerName).toBe("[bb] [bb] Literal");
+    expect(providerName).toBe("[omnyo] [bb] Literal");
     expect(fromProviderExternalThreadName(providerName)).toBe("[bb] Literal");
   });
 
-  it("normalizes provider title events by stripping one bb tag", () => {
+  it("imports one exact historical tag and preserves literal title text", () => {
+    expect(fromProviderExternalThreadName("[bb] [bb] Literal")).toBe(
+      "[bb] Literal",
+    );
+    expect(fromProviderExternalThreadName("User [bb] literal")).toBe(
+      "User [bb] literal",
+    );
+    expect(fromProviderExternalThreadName("[omnyo] [omnyo] Literal")).toBe(
+      "[omnyo] Literal",
+    );
+  });
+
+  it("normalizes provider title events by stripping one omnyo tag", () => {
     const event = {
       type: "thread/name/updated",
       threadId: "t1",

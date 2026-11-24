@@ -15,15 +15,19 @@ export function ExpandableLine({
 }: ExpandableLineProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
+
   const handleToggle = () => {
     const selection =
       typeof window === "undefined" ? null : window.getSelection();
+
     if (selection && selection.toString().length > 0) {
       return;
     }
+
     if (isExpanded && buttonRef.current) {
       buttonRef.current.scrollTo({ top: 0, behavior: "auto" });
     }
+
     setIsExpanded((prev) => !prev);
   };
 
@@ -33,7 +37,7 @@ export function ExpandableLine({
       type="button"
       onClick={handleToggle}
       className={[
-        "block w-full cursor-pointer select-text text-left leading-tight transition-[max-height] duration-200 ease-out",
+        "block w-full cursor-pointer select-text text-left leading-tight",
         isExpanded ? EXPANDED_CLASS_NAME : collapsedClassName,
       ]
         .filter(Boolean)

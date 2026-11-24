@@ -2,7 +2,7 @@ import { toast } from "sonner";
 import {
   definePluginApp,
   type ComposerSendMenuItem,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 
 const saveDraft: ComposerSendMenuItem = {
   id: "drafts",
@@ -15,12 +15,21 @@ const saveDraft: ComposerSendMenuItem = {
       toast.error("Nothing to save", {
         description: "Type a message first, then save it as a draft.",
       });
+
       return;
     }
+
+    const saving = composer.submit({
+      experimental_data: { kind: "draft" },
+      experimental_expectHeld: { reason: "Draft" },
+    });
+
+    const saved = toast.success("Draft saved");
+
     try {
-      await composer.submit({ experimental_data: { kind: "draft" } });
-      toast.success("Draft saved");
+      await saving;
     } catch (error: unknown) {
+      toast.dismiss(saved);
       toast.error(error instanceof Error ? error.message : String(error));
     }
   },

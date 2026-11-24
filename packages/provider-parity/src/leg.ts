@@ -5,7 +5,7 @@ import type {
   CreateParityAssembler,
   ParityAssembler,
   ParityRowProjector,
-} from "@bb/provider-bridge-protocol/testing";
+} from "@omnyo/provider-bridge-protocol/testing";
 import { projectParityRows } from "./index.js";
 
 export interface ParityLeg {
@@ -42,9 +42,11 @@ async function importFromCheckout<T>(
   relativePath: string,
 ): Promise<T | null> {
   const file = join(checkoutRoot, relativePath);
+
   if (!existsSync(file)) {
     return null;
   }
+
   return (await import(pathToFileURL(file).href)) as T;
 }
 
@@ -55,6 +57,7 @@ export async function loadParityLeg(checkoutRoot: string): Promise<ParityLeg> {
     root,
     LEG_PACKAGE_ENTRY,
   );
+
   if (
     ownPackage !== null &&
     typeof ownPackage.createParityAssembler === "function" &&
@@ -71,17 +74,21 @@ export async function loadParityLeg(checkoutRoot: string): Promise<ParityLeg> {
 
   for (const candidate of COLLECTOR_CANDIDATES) {
     const module = await importFromCheckout<CollectorModule>(root, candidate);
+
     if (
       module === null ||
       !isCreateCollector(module.createBridgeDeltaEventCollector)
     ) {
       continue;
     }
+
     const createCollector = module.createBridgeDeltaEventCollector;
+
     return {
       checkoutRoot: root,
       createAssembler: (providerId) => {
         const collector = createCollector(providerId);
+
         return {
           assembleMessage: (message) => collector.assembleMessage(message),
         };
@@ -92,6 +99,6 @@ export async function loadParityLeg(checkoutRoot: string): Promise<ParityLeg> {
   }
 
   throw new Error(
-    `${root} has neither ${LEG_PACKAGE_ENTRY} nor a delta collector at ${COLLECTOR_CANDIDATES.join(" / ")}; is it a bb checkout with pnpm install run?`,
+    `${root} has neither ${LEG_PACKAGE_ENTRY} nor a delta collector at ${COLLECTOR_CANDIDATES.join(" / ")}; is it an Omnyo checkout with pnpm install run?`,
   );
 }

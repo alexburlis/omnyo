@@ -18,6 +18,7 @@ export interface ResolvedHostLimit {
 export function parseLimitValue(raw: string): number | null {
   if (!/^\d+$/u.test(raw)) return null;
   const value = Number(raw);
+
   return value <= MAX_LIMIT_VALUE ? value : null;
 }
 
@@ -25,6 +26,7 @@ export function automaticHostLimit(
   availableParallelism: number | null,
 ): number {
   if (availableParallelism === null) return 1;
+
   return availableParallelism;
 }
 
@@ -36,6 +38,7 @@ export function resolveHostLimit(
   const override = configuration.hostOverrides.find(
     (candidate) => candidate.hostId === hostId,
   );
+
   return override === undefined
     ? {
         limit: automaticHostLimit(availableParallelism),

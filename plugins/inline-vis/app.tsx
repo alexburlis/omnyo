@@ -6,18 +6,19 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   definePluginApp,
   Markdown,
-  useBbNavigate,
+  experimental_useAppNavigate,
   useRpc,
   type ExperimentalCodeFenceRendererProps,
   type PluginMessageDirectiveProps,
   type MarkdownProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import {
   FRAME_HEIGHT_BEFORE_FIRST_REPORT,
   FRAME_MAX_HEIGHT,
@@ -28,6 +29,7 @@ import {
   frameThemeMessage,
   readFrameContentHeight,
   readFrameLinkRequest,
+  readFrameScrollInput,
 } from "./frame";
 import type { inlineVisRpcContract } from "./server.js";
 import { appFontCss, useFrameTheme } from "./theme";
@@ -64,9 +66,13 @@ type LoadState =
   | { status: "error"; file: string; message: string };
 
 type ReadyPreview = Extract<LoadState, { status: "ready" }>;
+
 type PreviewCache = Map<string, ReadyPreview>;
+
 const MAX_CACHED_PREVIEWS = 8;
+
 const MAX_REMEMBERED_FRAME_HEIGHTS = 200;
+
 const MAX_REMEMBERED_EXPANDED_DOCUMENTS = 200;
 
 function rememberBounded<Value>(
@@ -77,24 +83,31 @@ function rememberBounded<Value>(
 ): void {
   cache.delete(key);
   cache.set(key, value);
+
   while (cache.size > limit) {
     const oldest = cache.keys().next().value;
+
     if (oldest === undefined) break;
     cache.delete(oldest);
   }
 }
 
 const DOCUMENT_PREVIEW_HEIGHT_PX = 256;
+
 const DOCUMENT_PREVIEW_SLACK_PX = 64;
+
 const DOCUMENT_COPIED_MS = 1_500;
 
 function parseRequestedHeight(
   value: string | undefined,
 ): number | null | "invalid" {
   const normalized = value?.trim() ?? "";
+
   if (normalized.length === 0) return null;
+
   if (!/^\d+$/.test(normalized)) return "invalid";
   const height = Number(normalized);
+
   return height >= FRAME_MIN_HEIGHT && height <= FRAME_MAX_HEIGHT
     ? height
     : "invalid";
@@ -105,10 +118,11 @@ function isHtmlFile(file: string): boolean {
 }
 
 const DOCUMENT_ACTION_CLASS =
-  "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 function splitDocumentPath(file: string): { name: string; folder: string } {
-  const separator = file.lastIndexOf("/");
+  const separator = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
+
   return separator === -1
     ? { name: file, folder: "" }
     : { name: file.slice(separator + 1), folder: file.slice(0, separator) };
@@ -126,10 +140,11 @@ function DocumentCard({
   children: ReactNode;
 }) {
   const { name, folder } = splitDocumentPath(file);
+
   return (
     <section
       aria-label={file}
-      className="my-2 min-w-0 overflow-hidden rounded-lg border border-border bg-background"
+      className="@container/page my-2 min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-background"
     >
       <header className="flex items-center gap-2 border-b border-border py-1.5 pl-3 pr-1.5">
         <Icon
@@ -138,9 +153,16 @@ function DocumentCard({
           className="size-3.5 shrink-0 text-subtle-foreground"
         />
         <div className="flex min-w-0 flex-1 items-baseline gap-2 text-xs">
-          <span className="truncate font-medium text-foreground">{name}</span>
+          <span
+            title={file}
+            className="min-w-0 flex-1 truncate font-medium text-foreground"
+          >
+            {name}
+          </span>
           {folder.length === 0 ? null : (
-            <span className="truncate text-subtle-foreground">{folder}</span>
+            <span className="hidden min-w-0 flex-1 truncate text-subtle-foreground @md/page:block">
+              {folder}
+            </span>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-0.5">{actions}</div>
@@ -162,8 +184,10 @@ function CopyDocumentAction({
   useEffect(() => {
     if (!copied) return;
     const timer = window.setTimeout(() => setCopied(false), DOCUMENT_COPIED_MS);
+
     return () => window.clearTimeout(timer);
   }, [copied]);
+
   return (
     <button
       type="button"
@@ -202,25 +226,33 @@ function MarkdownDocument({
   const [expanded, setExpanded] = useState(() =>
     expandedDocuments.has(rememberKey),
   );
+
   const [contentHeight, setContentHeight] = useState<number | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = contentRef.current;
+
     if (element === null || typeof ResizeObserver === "undefined") return;
+
     const observer = new ResizeObserver(() => {
       setContentHeight(element.getBoundingClientRect().height);
     });
+
     observer.observe(element);
+
     return () => observer.disconnect();
   }, []);
 
   const collapsible =
     contentHeight !== null &&
     contentHeight > previewHeight + DOCUMENT_PREVIEW_SLACK_PX;
+
   const clamped = contentHeight === null || (collapsible && !expanded);
+
   const toggle = () => {
     const next = !expanded;
     setExpanded(next);
+
     if (next) {
       rememberBounded(
         expandedDocuments,
@@ -247,7 +279,7 @@ function MarkdownDocument({
           <button
             type="button"
             aria-expanded={expanded}
-            className="flex w-full cursor-pointer items-center justify-center gap-1 border-t border-border py-1.5 text-xs text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+            className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-1 border-t border-border py-1.5 text-xs text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
             onClick={toggle}
           >
             {expanded ? "Show less" : "Show more"}
@@ -255,7 +287,7 @@ function MarkdownDocument({
               name="ChevronDown"
               aria-hidden
               className={cn(
-                "size-3.5 transition-transform duration-200",
+                "size-3.5 transition-transform duration-(--motion-duration-base) ease-in-out",
                 expanded && "rotate-180",
               )}
             />
@@ -265,8 +297,18 @@ function MarkdownDocument({
     >
       <div
         data-inline-vis-document=""
-        className="relative overflow-hidden"
-        style={clamped ? { maxHeight: previewHeight } : undefined}
+        role="region"
+        aria-label={`Document ${file}`}
+        tabIndex={clamped ? undefined : 0}
+        className={cn(
+          "@container/page relative min-w-0 max-w-full overscroll-contain",
+          clamped
+            ? "overflow-hidden"
+            : "overflow-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+        )}
+        style={{
+          maxHeight: clamped ? `min(${previewHeight}px, 70svh)` : "70svh",
+        }}
       >
         <div ref={contentRef} className="px-4 py-3">
           {children}
@@ -283,7 +325,7 @@ function MarkdownDocument({
 }
 
 const FRAME_OPEN_ACTION_CLASS =
-  "flex size-6 cursor-pointer items-center justify-center rounded-md border border-border bg-background/90 text-muted-foreground shadow-xs transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "flex size-11 cursor-pointer items-center justify-center rounded-md border border-border bg-background/90 text-muted-foreground shadow-xs transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 function isModifiedClick(event: ReactMouseEvent<HTMLAnchorElement>): boolean {
   return (
@@ -297,6 +339,7 @@ function isModifiedClick(event: ReactMouseEvent<HTMLAnchorElement>): boolean {
 
 function newPageClickHint(): string {
   const platform = typeof navigator === "undefined" ? "" : navigator.platform;
+
   return /Mac|iPhone|iPad/.test(platform) ? "⌘-click" : "Ctrl-click";
 }
 
@@ -320,6 +363,7 @@ function OpenPreviewAction({
       className={pageUrl === null ? "size-3.5" : "size-3"}
     />
   );
+
   if (pageUrl === null) {
     return (
       <button
@@ -333,6 +377,7 @@ function OpenPreviewAction({
       </button>
     );
   }
+
   return (
     <a
       href={pageUrl}
@@ -383,12 +428,14 @@ function HtmlFrame({
       const options = { theme: latestTheme.current, baseHref, fontCss };
       setSrcDoc(frameDocument(content, options));
     });
+
     return () => {
       live = false;
     };
   }, [content, baseHref]);
   const [loaded, setLoaded] = useState(false);
   const [contentHeight, setContentHeight] = useState<number>();
+
   const height = frameHeight({
     requested,
     contentHeight,
@@ -399,13 +446,16 @@ function HtmlFrame({
     const message = frameThemeMessage(theme);
     frameRef.current?.contentWindow?.postMessage(message, "*");
   };
+
   useEffect(postTheme, [theme]);
 
   useLayoutEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const frame = frameRef.current;
+
       if (frame === null || event.source !== frame.contentWindow) return;
       const reported = readFrameContentHeight(event.data);
+
       if (reported !== undefined) {
         rememberBounded(
           rememberedFrameHeights,
@@ -414,9 +464,27 @@ function HtmlFrame({
           MAX_REMEMBERED_FRAME_HEIGHTS,
         );
         setContentHeight(reported);
+
         return;
       }
+
+      const scrollInput = readFrameScrollInput(event.data);
+
+      if (scrollInput !== undefined) {
+        frame.dispatchEvent(
+          scrollInput.kind === "wheel"
+            ? new WheelEvent("wheel", {
+                bubbles: true,
+                deltaY: scrollInput.deltaY,
+              })
+            : new Event("touchmove", { bubbles: true }),
+        );
+
+        return;
+      }
+
       const link = readFrameLinkRequest(event.data);
+
       if (
         link === undefined ||
         document.activeElement !== frame ||
@@ -424,17 +492,20 @@ function HtmlFrame({
       ) {
         return;
       }
+
       window.open(link.url, "_blank", "noopener,noreferrer");
       frame.contentWindow?.postMessage(frameResult(link.id), "*");
     };
+
     window.addEventListener("message", onMessage);
+
     return () => window.removeEventListener("message", onMessage);
   }, [heightKey]);
 
   return (
     <div
       data-inline-vis-frame=""
-      className="group/inline-vis relative my-2"
+      className="group/inline-vis relative my-2 max-h-[70svh] min-w-0 max-w-full"
       style={{ height }}
     >
       {srcDoc === null ? null : (
@@ -442,7 +513,7 @@ function HtmlFrame({
           ref={frameRef}
           title={title}
           srcDoc={srcDoc}
-          sandbox="allow-scripts allow-forms"
+          sandbox="allow-scripts"
           onLoad={() => {
             setLoaded(true);
             postTheme();
@@ -451,7 +522,7 @@ function HtmlFrame({
           style={{ colorScheme: loaded ? theme.appearance : "light" }}
         />
       )}
-      <div className="absolute right-2 top-2 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/inline-vis:opacity-100 pointer-coarse:opacity-100">
+      <div className="absolute right-2 top-2 opacity-0 transition-opacity duration-(--motion-duration-fast) focus-within:opacity-100 group-hover/inline-vis:opacity-100 pointer-coarse:opacity-100">
         {action}
       </div>
     </div>
@@ -465,22 +536,25 @@ function InlineVisDirective({
   previewCache,
 }: PluginMessageDirectiveProps & { previewCache: PreviewCache }) {
   const rpc = useRpc<typeof inlineVisRpcContract>();
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const fileAttr = attributes.file?.trim() ?? "";
   const sourceAttr = attributes.source;
   const heightAttr = attributes.height;
   const parsedHeight = parseRequestedHeight(heightAttr);
   const requestedHeight = parsedHeight === "invalid" ? null : parsedHeight;
+
   const heightError =
     parsedHeight === "invalid"
       ? `inline-vis height must be a whole number from ${FRAME_MIN_HEIGHT} to ${FRAME_MAX_HEIGHT} pixels.`
       : null;
+
   const cacheKey = JSON.stringify([
     message.threadId,
     message.id,
     sourceAttr ?? "workspace",
     fileAttr,
   ]);
+
   const [state, setState] = useState<LoadState>(() =>
     heightError
       ? { status: "invalid-height", message: heightError }
@@ -488,15 +562,20 @@ function InlineVisDirective({
         ? (previewCache.get(cacheKey) ?? { status: "loading", file: fileAttr })
         : { status: "missing-file" },
   );
+
   useEffect(() => {
     if (heightError) {
       setState({ status: "invalid-height", message: heightError });
+
       return;
     }
+
     if (!fileAttr) {
       setState({ status: "missing-file" });
+
       return;
     }
+
     let cancelled = false;
     const cachedPreview = previewCache.get(cacheKey);
     setState(cachedPreview ?? { status: "loading", file: fileAttr });
@@ -508,7 +587,9 @@ function InlineVisDirective({
           file: fileAttr,
           ...(sourceAttr === undefined ? {} : { source: sourceAttr }),
         });
+
         if (cancelled) return;
+
         if (result.kind === "not-found") {
           previewCache.delete(cacheKey);
           setState({
@@ -516,8 +597,10 @@ function InlineVisDirective({
             file: result.file,
             message: `Preview file not found: ${result.file}`,
           });
+
           return;
         }
+
         const preview: ReadyPreview = { status: "ready", ...result };
         rememberBounded(previewCache, cacheKey, preview, MAX_CACHED_PREVIEWS);
         setState(preview);
@@ -546,26 +629,26 @@ function InlineVisDirective({
 
   if (state.status === "missing-file") {
     return (
-      <div
-        role="alert"
-        className="my-2 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
-        title={source}
-      >
-        inline-vis requires a file attribute, e.g.{" "}
-        <code>::inline-vis{'{file="demo.html"}'}</code>
-      </div>
+      <Alert variant="warning" className="my-2" title={source}>
+        <Icon name="AlertCircle" />
+        <AlertTitle>This preview has no file to show</AlertTitle>
+        <AlertDescription>
+          inline-vis requires a file attribute, e.g.{" "}
+          <code className="rounded bg-state-hover px-1 font-mono text-xs text-foreground">
+            ::inline-vis{'{file="demo.html"}'}
+          </code>
+        </AlertDescription>
+      </Alert>
     );
   }
 
   if (state.status === "invalid-height") {
     return (
-      <div
-        role="alert"
-        className="my-2 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
-        title={source}
-      >
-        {state.message}
-      </div>
+      <Alert variant="warning" className="my-2" title={source}>
+        <Icon name="AlertCircle" />
+        <AlertTitle>This preview’s height can’t be used</AlertTitle>
+        <AlertDescription>{state.message}</AlertDescription>
+      </Alert>
     );
   }
 
@@ -579,14 +662,15 @@ function InlineVisDirective({
           style={{
             height: requestedHeight ?? FRAME_HEIGHT_BEFORE_FIRST_REPORT,
           }}
-          className="my-2"
+          className="my-2 max-h-[70svh] min-w-0 max-w-full"
         />
       );
     }
+
     return (
       <DocumentCard
         file={state.file}
-        actions={<span aria-hidden className="size-6 shrink-0" />}
+        actions={<span aria-hidden className="size-11 shrink-0" />}
       >
         <div
           role="status"
@@ -605,13 +689,17 @@ function InlineVisDirective({
 
   if (state.status === "error") {
     return (
-      <div
-        role="alert"
-        className="my-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+      <Alert
+        variant="destructive"
+        className="my-2 min-w-0 break-words"
         title={source}
       >
-        Failed to load {state.file}: {state.message}
-      </div>
+        <Icon name="AlertCircle" />
+        <AlertTitle>Couldn’t show {state.file}</AlertTitle>
+        <AlertDescription className="text-destructive-text [overflow-wrap:anywhere]">
+          {state.message}
+        </AlertDescription>
+      </Alert>
     );
   }
 
@@ -688,11 +776,13 @@ function InlineVisFence({
       </div>
     );
   }
+
   if (status === "unclosed" || code.trim().length === 0) {
     return <Original />;
   }
 
   const sourceLabel = sourceShown ? "Hide source" : "Show source";
+
   return (
     <>
       <HtmlFrame

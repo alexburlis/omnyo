@@ -1,6 +1,6 @@
-import { fuzzyMatchText } from "@bb/fuzzy-match";
-import type { PromptMentionSuggestion } from "@bb/client-core";
-import { compareCodepoint } from "@bb/client-core";
+import { fuzzyMatchText } from "@omnyo/fuzzy-match";
+import type { PromptMentionSuggestion } from "@omnyo/client-core";
+import { compareCodepoint } from "@omnyo/client-core";
 
 type ProjectMentionSuggestion = Extract<
   PromptMentionSuggestion,
@@ -45,6 +45,7 @@ function rankNamedMentionCandidates({
   limit,
 }: RankNamedMentionCandidatesArgs): NamedMentionCandidate[] {
   const trimmedQuery = query.trim();
+
   if (trimmedQuery.length === 0 || limit <= 0) {
     return [];
   }

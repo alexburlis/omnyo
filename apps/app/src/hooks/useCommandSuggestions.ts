@@ -1,17 +1,13 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
-import type { PromptMentionCommandTrigger } from "@bb/domain";
-import type { ProviderCommand } from "@bb/server-contract";
-import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
+import { useMemo } from "react";
+import type { PromptMentionCommandTrigger } from "@omnyo/domain";
+import type { ProviderCommand } from "@omnyo/server-contract";
 import {
   filterCommandSuggestions,
   toProviderCommandSuggestion,
   type ProviderCommandSuggestion,
-} from "@bb/client-core";
-import {
-  projectCommandsQueryOptions,
-  useProjectCommands,
-} from "./queries/project-queries";
+} from "@omnyo/client-core";
+import { useProjectCommandCatalog } from "./queries/project-queries";
+import { useSystemConfig } from "./queries/system-queries";
 
 interface UseCommandSuggestionsArgs {
   projectId: string | undefined;
@@ -24,16 +20,15 @@ interface UseCommandSuggestionsArgs {
   environmentId: string | null;
   hostId?: string | null;
   query: string | null;
-  composerFocused?: boolean;
 }
-
-const COMMAND_CATALOG_PREFETCH_STALE_TIME_MS = 30_000;
 
 interface UseCommandSuggestionsResult {
   triggers: readonly PromptMentionCommandTrigger[];
   suggestions: ProviderCommandSuggestion[];
   isLoading: boolean;
   isError: boolean;
+  errorMessage: string | null;
+  isUpdating: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => void;
@@ -66,6 +61,7 @@ export function promptActionCommandSuggestions({
       if (!action.command || action.command.trigger !== trigger) {
         return [];
       }
+
       return [
         {
           kind: "command",
@@ -93,6 +89,7 @@ export function threadProviderCommandSuggestions({
   if (trigger !== "/") {
     return [];
   }
+
   return filterCommandSuggestions(
     (commands ?? []).map(toProviderCommandSuggestion),
     query,
@@ -108,9 +105,11 @@ function mergeCommandSuggestions(
 
   for (const suggestion of [...preferred, ...fallback]) {
     const key = `${suggestion.source}:${suggestion.name}`;
+
     if (seen.has(key)) {
       continue;
     }
+
     seen.add(key);
     suggestions.push(suggestion);
   }
@@ -122,6 +121,7 @@ export function useCommandSuggestions(
   args: UseCommandSuggestionsArgs,
 ): UseCommandSuggestionsResult {
   const trigger = args.activeTrigger;
+
   const isActive =
     args.projectId !== undefined &&
     args.providerId !== undefined &&
@@ -130,6 +130,7 @@ export function useCommandSuggestions(
     args.query !== null;
 
   const trimmedQuery = args.query?.trim() ?? "";
+
   const promptActionSuggestions = useMemo(
     () =>
       isActive
@@ -142,67 +143,59 @@ export function useCommandSuggestions(
     [args.promptActions, isActive, trigger, trimmedQuery],
   );
 
-  const commandsQuery = useProjectCommands(
+  const catalogEnabled =
+    args.projectId !== undefined &&
+    args.providerId !== undefined &&
+    args.skillsTriggers.length > 0;
+
+  const systemConfigQuery = useSystemConfig({ enabled: catalogEnabled });
+
+  const commandsQuery = useProjectCommandCatalog(
     {
       projectId: args.projectId,
       providerId: args.providerId,
       environmentId: args.environmentId,
       hostId: args.hostId ?? null,
     },
-    { enabled: isActive },
+    {
+      enabled: catalogEnabled,
+    },
   );
-  const queryClient = useQueryClient();
-  const isPointerCoarse = usePointerCoarse();
-  const shouldPrefetchCatalog =
-    args.composerFocused === true &&
-    isPointerCoarse &&
-    args.projectId !== undefined &&
-    args.providerId !== undefined &&
-    args.skillsTriggers.length > 0;
-  const prefetchProjectId = args.projectId;
-  const prefetchProviderId = args.providerId;
-  const prefetchEnvironmentId = args.environmentId;
-  const prefetchHostId = args.hostId ?? null;
-  useEffect(() => {
-    if (!shouldPrefetchCatalog) {
-      return;
-    }
-    void queryClient.prefetchQuery({
-      ...projectCommandsQueryOptions({
-        projectId: prefetchProjectId,
-        providerId: prefetchProviderId,
-        environmentId: prefetchEnvironmentId,
-        hostId: prefetchHostId,
-      }),
-      retry: false,
-      staleTime: COMMAND_CATALOG_PREFETCH_STALE_TIME_MS,
-    });
-  }, [
-    prefetchEnvironmentId,
-    prefetchHostId,
-    prefetchProjectId,
-    prefetchProviderId,
-    queryClient,
-    shouldPrefetchCatalog,
-  ]);
+
+  const catalogSuggestions = useMemo(
+    () =>
+      (
+        commandsQuery.data?.commands ??
+        (args.providerId === undefined
+          ? []
+          : (systemConfigQuery.data?.commandDefaultsByProvider[
+              args.providerId
+            ] ?? []))
+      ).map(toProviderCommandSuggestion),
+    [
+      args.providerId,
+      commandsQuery.data?.commands,
+      systemConfigQuery.data?.commandDefaultsByProvider,
+    ],
+  );
 
   const suggestions = useMemo<ProviderCommandSuggestion[]>(() => {
     if (!isActive) {
       return [];
     }
+
     const discoveredSuggestions = filterCommandSuggestions(
-      (commandsQuery.data?.commands ?? [])
-        .map(toProviderCommandSuggestion)
-        .filter(
-          (suggestion) =>
-            (trigger !== "$" || suggestion.source === "skill") &&
-            (args.commandScope === "thread" ||
-              suggestion.source !== "command" ||
-              suggestion.origin !== "builtin" ||
-              suggestion.name !== "compact"),
-        ),
+      catalogSuggestions.filter(
+        (suggestion) =>
+          (trigger !== "$" || suggestion.source === "skill") &&
+          (args.commandScope === "thread" ||
+            suggestion.source !== "command" ||
+            suggestion.origin !== "builtin" ||
+            suggestion.name !== "compact"),
+      ),
       trimmedQuery,
     );
+
     return mergeCommandSuggestions(
       mergeCommandSuggestions(
         promptActionSuggestions,
@@ -216,7 +209,7 @@ export function useCommandSuggestions(
     );
   }, [
     args.threadProviderCommands,
-    commandsQuery.data?.commands,
+    catalogSuggestions,
     args.commandScope,
     trigger,
     isActive,
@@ -224,18 +217,36 @@ export function useCommandSuggestions(
     trimmedQuery,
   ]);
 
-  const isLoading =
+  const catalogFailure =
+    commandsQuery.data?.state === "failed"
+      ? commandsQuery.data.error
+      : commandsQuery.error;
+
+  const hasCatalogError =
     isActive &&
-    suggestions.length === 0 &&
-    commandsQuery.data === undefined &&
-    (commandsQuery.isPending || commandsQuery.isFetching);
-  const isError = isActive && commandsQuery.isError;
+    (commandsQuery.isError || commandsQuery.data?.state === "failed");
+
+  const isError = hasCatalogError && suggestions.length === 0;
+
+  const isPreparing =
+    isActive &&
+    !hasCatalogError &&
+    (commandsQuery.data === undefined ||
+      commandsQuery.data.state === "preparing");
 
   return {
     triggers: args.skillsTriggers,
     suggestions,
-    isLoading,
+    isLoading: false,
     isError,
+    errorMessage: hasCatalogError
+      ? catalogFailure !== null &&
+        "code" in catalogFailure &&
+        catalogFailure.code === "host_unavailable"
+        ? "Machine unavailable. Reconnect it to update commands."
+        : "Failed to load commands"
+      : null,
+    isUpdating: isPreparing,
     hasMore: false,
     isLoadingMore: false,
     loadMore: () => {},

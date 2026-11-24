@@ -13,14 +13,17 @@ export function createPromptParagraphNewlineTransaction(args: {
   editor: SplitBlockEditorContext;
 }): Transaction | null {
   const { selection } = args.state;
+
   if (!selection.empty) return null;
 
   const { $from } = selection;
+
   if ($from.depth !== 1 || $from.parent.type.name !== "paragraph") {
     return null;
   }
 
   const transaction = args.state.tr;
+
   const didSplit = commands.splitBlock({ keepMarks: false })({
     state: args.state,
     tr: transaction,

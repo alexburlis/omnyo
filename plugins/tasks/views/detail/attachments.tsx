@@ -8,6 +8,12 @@ import {
   ConfirmDeleteDialogContent,
 } from "@/components/ui/confirm-delete-dialog";
 import { Icon } from "@/components/ui/icon";
+import {
+  CONTROL_HOVER_TRANSITION,
+  MOTION_DURATION_MS,
+  TRANSITION_FALLBACK_SLACK_MS,
+} from "@/components/ui/motion";
+import { cn } from "@/lib/utils";
 
 let tokenPromise: Promise<string> | null = null;
 
@@ -18,19 +24,24 @@ function pluginToken(): Promise<string> {
       headers: { "content-type": "application/json" },
       body: "{}",
     });
+
     const json: unknown = await response.json().catch(() => null);
+
     const token =
       json && typeof json === "object" && "token" in json
         ? (json as { token: unknown }).token
         : undefined;
+
     if (!response.ok || typeof token !== "string") {
       throw new Error(`failed to fetch plugin token (HTTP ${response.status})`);
     }
+
     return token;
   })();
   tokenPromise.catch(() => {
     tokenPromise = null;
   });
+
   return tokenPromise;
 }
 
@@ -41,28 +52,35 @@ export async function uploadAttachment(
   owner: AttachmentOwnerRef,
 ): Promise<{ attachmentId: string; url: string }> {
   const token = await pluginToken();
+
   const query = new URLSearchParams({
     ...owner,
     fileName: file.name || "attachment",
     mime: file.type || "application/octet-stream",
   });
+
   const response = await fetch(
     `/api/v1/plugins/tasks/http/attachments/upload?${query.toString()}`,
     {
       method: "POST",
-      headers: { "x-bb-plugin-token": token },
+      headers: { "x-omnyo-plugin-token": token },
       body: file,
     },
   );
+
   const json: unknown = await response.json().catch(() => null);
+
   if (!response.ok) {
     const message =
       json && typeof json === "object" && "error" in json
         ? String((json as { error: unknown }).error)
         : `upload failed (HTTP ${response.status})`;
+
     throw new Error(message);
   }
+
   const result = json as { attachmentId: string; url: string };
+
   return { attachmentId: result.attachmentId, url: result.url };
 }
 
@@ -70,43 +88,81 @@ export function Lightbox({
   attachment,
   onClose,
 }: {
-  attachment: Attachment;
+  attachment: Attachment | null;
   onClose: () => void;
 }) {
+  const [shown, setShown] = useState(attachment);
+  const open = attachment !== null;
+
+  if (attachment !== null && attachment !== shown) setShown(attachment);
+
   useEffect(() => {
+    if (open) return;
+
+    const timer = window.setTimeout(
+      () => setShown(null),
+      MOTION_DURATION_MS.fast + TRANSITION_FALLBACK_SLACK_MS,
+    );
+
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
       onClose();
     };
+
     window.addEventListener("keydown", onKeyDown, true);
+
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
+  }, [open, onClose]);
+
+  if (shown === null) return null;
+
   return (
     <div
       role="dialog"
-      aria-label={attachment.fileName}
-      className="fixed inset-0 z-50 flex items-center justify-center p-8"
-      style={{ background: "color-mix(in oklab, var(--ink) 60%, transparent)" }}
+      aria-modal={open ? true : undefined}
+      aria-hidden={open ? undefined : true}
+      aria-label={shown.fileName}
+      className={cn(
+        "fixed inset-0 z-50 flex items-center justify-center p-8",
+        !open &&
+          "pointer-events-none animate-out fade-out-0 fill-mode-forwards",
+      )}
       onClick={onClose}
     >
+      <span
+        aria-hidden
+        className="absolute inset-0 animate-in fade-in-0"
+        style={{
+          background: "color-mix(in oklab, var(--ink) 60%, transparent)",
+        }}
+      />
       <img
-        src={attachmentDownloadUrl(attachment.id)}
-        alt={attachment.fileName}
-        className="max-h-full max-w-full rounded-md shadow-md"
+        src={attachmentDownloadUrl(shown.id)}
+        alt={shown.fileName}
+        className="relative max-h-full max-w-full animate-in rounded-md shadow-md fade-in-0 zoom-in-97"
         onClick={(event) => event.stopPropagation()}
       />
-      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md bg-popover/90 px-3 py-1.5 text-xs text-popover-foreground shadow-md">
-        <span className="max-w-72 truncate">{attachment.fileName}</span>
+      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 animate-in items-center gap-2 rounded-md bg-popover/90 px-3 py-1.5 text-xs text-popover-foreground shadow-md fade-in-0">
+        <span className="max-w-72 truncate">{shown.fileName}</span>
         <span className="text-muted-foreground">
-          {formatFileSize(attachment.sizeBytes)}
+          {formatFileSize(shown.sizeBytes)}
         </span>
       </div>
       <button
         type="button"
         aria-label="Close"
-        className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-md bg-popover/90 text-popover-foreground shadow-md hover:bg-popover"
+        className={cn(
+          "absolute right-3 top-3 flex size-8 animate-in items-center justify-center rounded-md bg-popover/90 text-popover-foreground shadow-md fade-in-0 hover:bg-popover",
+          CONTROL_HOVER_TRANSITION,
+        )}
         onClick={onClose}
       >
         <Icon name="X" className="size-4" />
@@ -142,6 +198,7 @@ export function AttachmentsGrid({
     setConfirm(null);
     setLightbox((current) => (current?.id === attachment.id ? null : current));
     setPending((current) => new Set(current).add(attachment.id));
+
     try {
       await onRemove(attachment);
     } catch (error) {
@@ -150,6 +207,7 @@ export function AttachmentsGrid({
       setPending((current) => {
         const next = new Set(current);
         next.delete(attachment.id);
+
         return next;
       });
     }
@@ -162,10 +220,12 @@ export function AttachmentsGrid({
 
   const removeButton = (attachment: Attachment, variant: "image" | "file") => {
     const busy = pending.has(attachment.id);
+
     const base =
       variant === "image"
-        ? "absolute right-1 top-1 z-10 rounded-full bg-black/55 p-0.5 text-white transition-colors hover:bg-black/70 disabled:opacity-70"
-        : "shrink-0 rounded p-0.5 text-muted-foreground hover:bg-state-hover hover:text-foreground disabled:opacity-70";
+        ? `absolute right-1 top-1 z-10 rounded-full bg-black/55 p-0.5 text-white hover:bg-black/70 disabled:opacity-70 ${CONTROL_HOVER_TRANSITION}`
+        : `shrink-0 rounded p-0.5 text-muted-foreground hover:bg-state-hover hover:text-foreground disabled:opacity-70 ${CONTROL_HOVER_TRANSITION}`;
+
     return (
       <button
         type="button"
@@ -175,6 +235,7 @@ export function AttachmentsGrid({
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
+
           if (!busy) requestRemove(attachment);
         }}
       >
@@ -249,9 +310,7 @@ export function AttachmentsGrid({
           {images.map(imageTile)}
         </div>
       ) : null}
-      {lightbox ? (
-        <Lightbox attachment={lightbox} onClose={() => setLightbox(null)} />
-      ) : null}
+      <Lightbox attachment={lightbox} onClose={() => setLightbox(null)} />
       <ConfirmDeleteDialog
         className="max-w-sm"
         open={confirm !== null}

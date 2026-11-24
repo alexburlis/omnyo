@@ -3,30 +3,67 @@
 import {
   cleanup,
   fireEvent,
-  render,
+  render as renderComponent,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type { ReactNode, Ref } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadDetailHeader } from "./ThreadDetailHeader";
 import { PaneContext, type PaneContextValue } from "./PaneContext";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import { sdk } from "@/lib/sdk";
-import { createBbDesktopApi } from "@/test/bb-desktop-test-utils";
+import { createOmnyoDesktopApi } from "@/test/omnyo-desktop-test-utils";
 import { AppCommandProvider } from "@/components/commands/AppCommandProvider";
 import {
   ThreadActionCollectors,
   resetThreadActionRegistryForTest,
 } from "@/lib/thread-actions/thread-action-registry";
 import type { ThreadDetailHeaderActionsMenuArgs } from "./ThreadDetailHeader";
+import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
+import {
+  environmentQueryKey,
+  hostsQueryKey,
+  sidebarNavigationQueryKey,
+  threadQueryKey,
+} from "@/hooks/queries/query-keys";
+import { makeThreadResponse } from "@/test/fixtures/thread-responses";
+import {
+  makeProjectWithThreadsResponse,
+  makeSidebarBootstrapResponse,
+} from "@/test/fixtures/projects";
+import { makeEnvironment, makeHost } from "@omnyo/test-helpers/domain-fixtures";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
+import type { WorkspaceCheckoutDisplay } from "@/lib/workspace-checkout-display";
+import { WindowTitleBarSlotsContext } from "@/components/layout/window-title-bar-slots";
+import { MemoryRouter } from "react-router-dom";
+import { PluginThreadHeaderActions } from "@/components/plugin/PluginThreadHeaderActions";
+import {
+  resetPluginSlotStoreForTest,
+  setPluginSlotRegistrations,
+} from "@/lib/plugin-slots";
+import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
+
+const queryHarness = createQueryClientTestHarness();
+
+function render(ui: ReactNode) {
+  return renderComponent(ui, { wrapper: queryHarness.wrapper });
+}
 
 const mocks = vi.hoisted(() => ({
+  copyToClipboardWithToast: vi.fn(async () => true),
+  providers: [] as { id: string; displayName: string }[],
   renameThreadAsync: vi.fn(),
 }));
 
-vi.mock("@/components/thread/ThreadActionsProvider", () => ({
+vi.mock("@/lib/clipboard", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/clipboard")>()),
+  copyToClipboardWithToast: mocks.copyToClipboardWithToast,
+}));
+
+vi.mock("@/lib/thread-actions/thread-actions-context", () => ({
   useThreadActions: () => ({
     renameThreadAsync: mocks.renameThreadAsync,
   }),
@@ -53,9 +90,27 @@ vi.mock("@/components/layout/AppPageHeader", () => ({
   ),
 }));
 
-const viewportState = vi.hoisted(() => ({ isCompactViewport: false }));
+const viewportState = vi.hoisted(() => ({
+  isCompactViewport: false,
+  isPointerCoarse: false,
+  isNarrowWindow: false,
+  titleBarHostsChrome: false,
+}));
+
+vi.mock("@/components/layout/WindowRightPanelToggle", () => ({
+  useWindowTitleBarHostsRightPanelToggle: () =>
+    viewportState.titleBarHostsChrome,
+}));
+
+vi.mock("@omnyo/shared-ui/hooks/use-media-query", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@omnyo/shared-ui/hooks/use-media-query")
+  >()),
+  useMediaQuery: () => viewportState.isNarrowWindow,
+}));
 
 vi.mock("@/hooks/queries/system-queries", () => ({
+  useSystemProviders: () => ({ data: mocks.providers }),
   useSystemConfig: () => ({
     data: {
       keybindings: [
@@ -77,8 +132,12 @@ vi.mock("@/hooks/queries/system-queries", () => ({
   }),
 }));
 
-vi.mock("@bb/shared-ui/hooks/use-compact-viewport", () => ({
+vi.mock("@omnyo/shared-ui/hooks/use-compact-viewport", () => ({
   useIsCompactViewport: () => viewportState.isCompactViewport,
+}));
+
+vi.mock("@omnyo/shared-ui/hooks/use-pointer-coarse", () => ({
+  usePointerCoarse: () => viewportState.isPointerCoarse,
 }));
 
 const THREAD_ID = "thr_header";
@@ -100,24 +159,188 @@ const PANE_CONTEXT: PaneContextValue = {
 
 afterEach(() => {
   cleanup();
+  queryHarness.queryClient.clear();
   resetThreadActionRegistryForTest();
   viewportState.isCompactViewport = false;
+  viewportState.isPointerCoarse = false;
+  viewportState.isNarrowWindow = false;
+  viewportState.titleBarHostsChrome = false;
+  document.body.replaceChildren();
   mocks.renameThreadAsync.mockReset();
+  mocks.copyToClipboardWithToast.mockClear();
+  mocks.providers = [];
   vi.restoreAllMocks();
   window.localStorage.clear();
-  delete window.bbDesktop;
+  delete window.omnyoDesktop;
 });
 
 describe("ThreadDetailHeader", () => {
+  describe("meta line", () => {
+    const branchCheckout: WorkspaceCheckoutDisplay = {
+      copyErrorMessage: "Failed to copy branch name",
+      copyLabel: "Copy branch name",
+      copySuccessMessage: "Branch name copied",
+      copyValue: "omnyo/footer-move",
+      label: "omnyo/footer-move",
+      rowLabel: "Branch",
+      title: "Copy branch name: omnyo/footer-move",
+    };
+
+    function seedThread() {
+      mocks.providers = [{ id: "codex", displayName: "Codex" }];
+      queryHarness.queryClient.setQueryData(
+        threadQueryKey(THREAD_ID),
+        makeThreadResponse({
+          id: THREAD_ID,
+          projectId: "proj_meta",
+          providerId: "codex",
+          environmentId: "env_meta",
+        }),
+      );
+      queryHarness.queryClient.setQueryData(
+        sidebarNavigationQueryKey(),
+        makeSidebarBootstrapResponse({
+          projects: [
+            makeProjectWithThreadsResponse({ id: "proj_meta", name: "Omnyo" }),
+          ],
+        }),
+      );
+      queryHarness.queryClient.setQueryData(
+        environmentQueryKey("env_meta"),
+        makeEnvironment({ id: "env_meta", hostId: "host_meta" }),
+      );
+      queryHarness.queryClient.setQueryData(hostsQueryKey(), [
+        makeHost({ id: "host_meta", name: "Mac Studio" }),
+      ]);
+    }
+
+    function renderHeader({
+      checkout,
+      environmentLabel,
+    }: {
+      checkout?: WorkspaceCheckoutDisplay;
+      environmentLabel?: string;
+    }) {
+      render(
+        <TooltipProvider delayDuration={0}>
+          <PaneContext.Provider value={PANE_CONTEXT}>
+            <ThreadDetailHeader
+              actionsMenu={null}
+              checkout={checkout}
+              environmentLabel={environmentLabel}
+              isSecondaryPanelOpen={false}
+              onToggleSecondaryPanel={vi.fn()}
+              threadId={THREAD_ID}
+              threadTitle="Meta line"
+            />
+          </PaneContext.Provider>
+        </TooltipProvider>,
+      );
+    }
+
+    it("lists the project, environment, branch, provider and creation time in order", () => {
+      seedThread();
+      renderHeader({ checkout: branchCheckout, environmentLabel: "Worktree" });
+
+      const parts = screen
+        .getByTestId("thread-header-meta")
+        .textContent?.split(" · ");
+
+      expect(parts?.slice(0, 4)).toEqual([
+        "Omnyo",
+        "Worktree",
+        "omnyo/footer-move",
+        "Codex",
+      ]);
+      expect(parts?.at(-1)).toMatch(/^Created /);
+      expect(parts).toHaveLength(5);
+    });
+
+    it("names the machine when no environment label is known", () => {
+      seedThread();
+      renderHeader({});
+
+      expect(screen.getByTestId("thread-header-meta").textContent).toMatch(
+        /^Omnyo · Mac Studio · Codex · Created /,
+      );
+    });
+
+    it("copies the branch name from the meta line", () => {
+      seedThread();
+      renderHeader({ checkout: branchCheckout, environmentLabel: "Worktree" });
+
+      const branch = screen.getByRole("button", { name: "omnyo/footer-move" });
+      expect(branch.querySelector('[data-icon="GitBranch"]')).not.toBeNull();
+      fireEvent.click(branch);
+
+      expect(mocks.copyToClipboardWithToast).toHaveBeenCalledExactlyOnceWith(
+        "omnyo/footer-move",
+        {
+          successMessage: "Branch name copied",
+          errorMessage: "Failed to copy branch name",
+        },
+      );
+    });
+
+    it("shows a checkout it cannot copy as plain text", () => {
+      seedThread();
+      renderHeader({
+        checkout: {
+          copyErrorMessage: null,
+          copyLabel: null,
+          copySuccessMessage: null,
+          copyValue: null,
+          label: "detached HEAD",
+          rowLabel: "Checkout",
+          title: "Detached HEAD",
+        },
+        environmentLabel: "Worktree",
+      });
+
+      expect(screen.getByTestId("thread-header-meta").textContent).toContain(
+        "Worktree · detached HEAD · Codex",
+      );
+      expect(
+        screen.queryByRole("button", { name: "detached HEAD" }),
+      ).toBeNull();
+      expect(screen.getByTitle("Detached HEAD").textContent).toBe(
+        "detached HEAD",
+      );
+    });
+  });
+
+  it("marks the open thread with a Shelved badge only while it is shelved", async () => {
+    queryHarness.queryClient.setQueryData(
+      threadQueryKey(THREAD_ID),
+      makeThreadResponse({ id: THREAD_ID, shelvedAt: 5 }),
+    );
+    render(
+      <PaneContext.Provider value={PANE_CONTEXT}>
+        <ThreadDetailHeader
+          actionsMenu={null}
+          isSecondaryPanelOpen={false}
+          onToggleSecondaryPanel={vi.fn()}
+          threadId={THREAD_ID}
+          threadTitle="Shelved chat"
+        />
+      </PaneContext.Provider>,
+    );
+
+    expect(await screen.findByText("Shelved")).toBeTruthy();
+    queryHarness.queryClient.setQueryData(
+      threadQueryKey(THREAD_ID),
+      makeThreadResponse({ id: THREAD_ID, shelvedAt: null }),
+    );
+    await waitFor(() => expect(screen.queryByText("Shelved")).toBeNull());
+  });
+
   it("leaves the open right-panel collapse control to the panel header", () => {
     render(
       <PaneContext.Provider value={PANE_CONTEXT}>
         <ThreadDetailHeader
           actionsMenu={null}
           isSecondaryPanelOpen
-          onOpenThreadGitAction={vi.fn()}
           onToggleSecondaryPanel={vi.fn()}
-          threadHeaderGitActions={[]}
           threadId={THREAD_ID}
           threadTitle="Panel state"
         />
@@ -137,9 +360,7 @@ describe("ThreadDetailHeader", () => {
         <ThreadDetailHeader
           actionsMenu={null}
           isSecondaryPanelOpen
-          onOpenThreadGitAction={vi.fn()}
           onToggleSecondaryPanel={vi.fn()}
-          threadHeaderGitActions={[]}
           threadId={THREAD_ID}
           threadTitle="Panel state"
         />
@@ -149,6 +370,7 @@ describe("ThreadDetailHeader", () => {
     const trigger = screen.getByRole("button", {
       name: "Hide right panel",
     });
+
     expect(trigger.closest("[data-thread-header-pane-actions]")).not.toBeNull();
   });
 
@@ -165,9 +387,7 @@ describe("ThreadDetailHeader", () => {
           <ThreadDetailHeader
             actionsMenu={null}
             isSecondaryPanelOpen={false}
-            onOpenThreadGitAction={vi.fn()}
             onToggleSecondaryPanel={vi.fn()}
-            threadHeaderGitActions={[]}
             threadId={THREAD_ID}
             threadTitle="Panel state"
           />
@@ -177,6 +397,7 @@ describe("ThreadDetailHeader", () => {
       const showButton = screen.getByRole("button", {
         name: "Show right panel",
       });
+
       expect(
         showButton.querySelector(`[data-icon="${expectedIcon}"]`),
       ).not.toBeNull();
@@ -196,9 +417,7 @@ describe("ThreadDetailHeader", () => {
         <ThreadDetailHeader
           actionsMenu={null}
           isSecondaryPanelOpen
-          onOpenThreadGitAction={vi.fn()}
           onToggleSecondaryPanel={vi.fn()}
-          threadHeaderGitActions={[]}
           threadId={THREAD_ID}
           threadTitle="Split panel state"
         />
@@ -225,6 +444,7 @@ describe("ThreadDetailHeader", () => {
       y: 0,
       toJSON: () => ({}),
     });
+
     const splitContext: PaneContextValue = {
       ...PANE_CONTEXT,
       isFocused: true,
@@ -245,11 +465,7 @@ describe("ThreadDetailHeader", () => {
           )}
           isSecondaryPanelOpen={false}
           onClosePane={vi.fn()}
-          onOpenThreadGitAction={vi.fn()}
           onToggleSecondaryPanel={vi.fn()}
-          threadHeaderGitActions={[
-            { label: "Commit", target: { kind: "commit" } },
-          ]}
           threadId={THREAD_ID}
           threadTitle="Narrow split"
           workspaceOpenButton={<button>Open workspace</button>}
@@ -258,7 +474,6 @@ describe("ThreadDetailHeader", () => {
     );
 
     expect(screen.queryByText("Open workspace")).toBeNull();
-    expect(screen.queryByText("Commit")).toBeNull();
     expect(screen.getByText("Thread menu")).not.toBeNull();
     expect(screen.getByText("Responsive menu actions")).not.toBeNull();
     const closePane = screen.getByRole("button", { name: "Close pane" });
@@ -283,6 +498,7 @@ describe("ThreadDetailHeader", () => {
       y: 0,
       toJSON: () => ({}),
     });
+
     const splitContext: PaneContextValue = {
       ...PANE_CONTEXT,
       isFocused: true,
@@ -303,11 +519,7 @@ describe("ThreadDetailHeader", () => {
           )}
           isSecondaryPanelOpen={false}
           onClosePane={vi.fn()}
-          onOpenThreadGitAction={vi.fn()}
           onToggleSecondaryPanel={vi.fn()}
-          threadHeaderGitActions={[
-            { label: "Commit", target: { kind: "commit" } },
-          ]}
           threadId={THREAD_ID}
           threadTitle="Wide split"
           workspaceOpenButton={<button>Open workspace</button>}
@@ -316,7 +528,6 @@ describe("ThreadDetailHeader", () => {
     );
 
     expect(screen.getByText("Open workspace")).not.toBeNull();
-    expect(screen.getByText("Commit")).not.toBeNull();
     expect(screen.getByText("Thread menu")).not.toBeNull();
     expect(screen.queryByText("Responsive menu actions")).toBeNull();
   });
@@ -327,9 +538,7 @@ describe("ThreadDetailHeader", () => {
         <ThreadDetailHeader
           actionsMenu={null}
           isSecondaryPanelOpen={false}
-          onOpenThreadGitAction={vi.fn()}
           onToggleSecondaryPanel={vi.fn()}
-          threadHeaderGitActions={[]}
           threadId={THREAD_ID}
           threadTitle="Review @docs/foo.test.ts with @thread:thr_worker"
         />
@@ -362,9 +571,7 @@ describe("ThreadDetailHeader", () => {
           <ThreadDetailHeader
             actionsMenu={null}
             isSecondaryPanelOpen={false}
-            onOpenThreadGitAction={vi.fn()}
             onToggleSecondaryPanel={vi.fn()}
-            threadHeaderGitActions={[]}
             threadId={THREAD_ID}
             threadTitle="Continue from thr_dcwivn5n8w docs/foo.ts"
           />
@@ -402,9 +609,7 @@ describe("ThreadDetailHeader", () => {
             <ThreadDetailHeader
               actionsMenu={null}
               isSecondaryPanelOpen={false}
-              onOpenThreadGitAction={vi.fn()}
               onToggleSecondaryPanel={vi.fn()}
-              threadHeaderGitActions={[]}
               threadId={THREAD_ID}
               threadTitle={title}
             />
@@ -423,6 +628,7 @@ describe("ThreadDetailHeader", () => {
     const resolveMentions = vi
       .spyOn(sdk.threads, "resolveMentions")
       .mockResolvedValue([]);
+
     const title = [
       "thr_dcwivn5n8w.md",
       "thr_dcwivn5n8w/path",
@@ -433,6 +639,7 @@ describe("ThreadDetailHeader", () => {
       "docs\\thr_dcwivn5n8w",
       "thr_dcwivn5n8w\\logs",
     ].join(" ");
+
     const mentionedThread = makeThreadListEntry({
       id: "thr_dcwivn5n8w",
       title: "Should not render",
@@ -449,9 +656,7 @@ describe("ThreadDetailHeader", () => {
           <ThreadDetailHeader
             actionsMenu={null}
             isSecondaryPanelOpen={false}
-            onOpenThreadGitAction={vi.fn()}
             onToggleSecondaryPanel={vi.fn()}
-            threadHeaderGitActions={[]}
             threadId={THREAD_ID}
             threadTitle={title}
           />
@@ -468,6 +673,7 @@ describe("ThreadDetailHeader", () => {
     const resolveMentions = vi
       .spyOn(sdk.threads, "resolveMentions")
       .mockResolvedValue([]);
+
     const { container } = render(
       <ThreadTitleMentionResourcesProvider
         sectionNamesById={new Map()}
@@ -478,9 +684,7 @@ describe("ThreadDetailHeader", () => {
           <ThreadDetailHeader
             actionsMenu={null}
             isSecondaryPanelOpen={false}
-            onOpenThreadGitAction={vi.fn()}
             onToggleSecondaryPanel={vi.fn()}
-            threadHeaderGitActions={[]}
             threadId={THREAD_ID}
             threadTitle="Unknown thr_2222222222"
           />
@@ -500,9 +704,7 @@ describe("ThreadDetailHeader", () => {
         <ThreadDetailHeader
           actionsMenu={null}
           isSecondaryPanelOpen={false}
-          onOpenThreadGitAction={vi.fn()}
           onToggleSecondaryPanel={vi.fn()}
-          threadHeaderGitActions={[]}
           threadId={THREAD_ID}
           threadTitle="Focused thread"
         />
@@ -535,14 +737,13 @@ describe("ThreadDetailHeader", () => {
         <ThreadDetailHeader
           actionsMenu={null}
           isSecondaryPanelOpen={false}
-          onOpenThreadGitAction={vi.fn()}
           onToggleSecondaryPanel={vi.fn()}
-          threadHeaderGitActions={[]}
           threadId={threadId}
           threadTitle={threadTitle}
         />
       </PaneContext.Provider>
     );
+
     const { rerender } = render(header(THREAD_ID, "Focused thread"));
 
     fireEvent.doubleClick(screen.getByText("Focused thread"));
@@ -562,7 +763,7 @@ describe("ThreadDetailHeader", () => {
   });
 
   it("keeps the header title out of the macOS window-drag region so double click renames", async () => {
-    window.bbDesktop = createBbDesktopApi({
+    window.omnyoDesktop = createOmnyoDesktopApi({
       lastCheckedAt: null,
       latestVersion: null,
       pendingVersion: null,
@@ -576,9 +777,7 @@ describe("ThreadDetailHeader", () => {
         <ThreadDetailHeader
           actionsMenu={null}
           isSecondaryPanelOpen={false}
-          onOpenThreadGitAction={vi.fn()}
           onToggleSecondaryPanel={vi.fn()}
-          threadHeaderGitActions={[]}
           threadId={THREAD_ID}
           threadTitle="Focused thread"
         />
@@ -608,9 +807,7 @@ describe("ThreadDetailHeader", () => {
         <ThreadDetailHeader
           actionsMenu={null}
           isSecondaryPanelOpen={false}
-          onOpenThreadGitAction={vi.fn()}
           onToggleSecondaryPanel={vi.fn()}
-          threadHeaderGitActions={[]}
           threadId={THREAD_ID}
           threadTitle="Focused thread"
         />
@@ -628,6 +825,7 @@ describe("ThreadDetailHeader", () => {
     const menuArgs: { current: ThreadDetailHeaderActionsMenuArgs | null } = {
       current: null,
     };
+
     const requestRenameDialog = vi.fn();
     render(
       <AppCommandProvider>
@@ -639,18 +837,18 @@ describe("ThreadDetailHeader", () => {
           <ThreadDetailHeader
             actionsMenu={(args) => {
               menuArgs.current = args;
+
               return null;
             }}
             isSecondaryPanelOpen={false}
-            onOpenThreadGitAction={vi.fn()}
             onToggleSecondaryPanel={vi.fn()}
-            threadHeaderGitActions={[]}
             threadId={THREAD_ID}
             threadTitle="Focused thread"
           />
         </PaneContext.Provider>
       </AppCommandProvider>,
     );
+
     return { menuArgs, requestRenameDialog };
   }
 
@@ -668,17 +866,71 @@ describe("ThreadDetailHeader", () => {
     expect(requestRenameDialog).not.toHaveBeenCalled();
   });
 
-  it("opens the rename dialog from the actions menu at compact width", () => {
-    viewportState.isCompactViewport = true;
-    const { menuArgs, requestRenameDialog } = renderWithMenuArgs();
-    menuArgs.current?.requestRename(THREAD_ID);
-    const closeEvent = new Event("focusout", { cancelable: true });
-    menuArgs.current?.onCloseAutoFocus(closeEvent);
+  it.each([
+    { compact: false, coarse: false },
+    { compact: true, coarse: false },
+    { compact: false, coarse: true },
+    { compact: true, coarse: true },
+  ])(
+    "chooses rename presentation for compact=$compact coarse=$coarse",
+    async ({ compact, coarse }) => {
+      viewportState.isCompactViewport = compact;
+      viewportState.isPointerCoarse = coarse;
+      const { menuArgs, requestRenameDialog } = renderWithMenuArgs();
+      const expectsDialog = compact || coarse;
+      menuArgs.current?.requestRename(THREAD_ID);
+      menuArgs.current?.onCloseAutoFocus(
+        new Event("focusout", { cancelable: true }),
+      );
 
-    expect(requestRenameDialog).toHaveBeenCalledWith(THREAD_ID);
-    expect(closeEvent.defaultPrevented).toBe(false);
-    expect(screen.queryByRole("textbox", { name: "Thread name" })).toBeNull();
-  });
+      if (expectsDialog) {
+        expect(requestRenameDialog).toHaveBeenCalledWith(THREAD_ID);
+        expect(
+          screen.queryByRole("textbox", { name: "Thread name" }),
+        ).toBeNull();
+      } else {
+        fireEvent.keyDown(
+          await screen.findByRole("textbox", { name: "Thread name" }),
+          { key: "Escape" },
+        );
+      }
+
+      requestRenameDialog.mockClear();
+      fireEvent.keyDown(window, {
+        key: "R",
+        code: "KeyR",
+        ctrlKey: true,
+        shiftKey: true,
+      });
+
+      if (expectsDialog) {
+        expect(requestRenameDialog).toHaveBeenCalledWith(THREAD_ID);
+        expect(
+          screen.queryByRole("textbox", { name: "Thread name" }),
+        ).toBeNull();
+      } else {
+        fireEvent.keyDown(
+          await screen.findByRole("textbox", { name: "Thread name" }),
+          { key: "Escape" },
+        );
+      }
+
+      requestRenameDialog.mockClear();
+      fireEvent.doubleClick(screen.getByText("Focused thread"));
+
+      if (coarse) {
+        expect(requestRenameDialog).toHaveBeenCalledWith(THREAD_ID);
+        expect(
+          screen.queryByRole("textbox", { name: "Thread name" }),
+        ).toBeNull();
+      } else {
+        expect(
+          await screen.findByRole("textbox", { name: "Thread name" }),
+        ).toHaveProperty("value", "Focused thread");
+        expect(requestRenameDialog).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it.each([
     [true, true],
@@ -693,6 +945,7 @@ describe("ThreadDetailHeader", () => {
         ctrlKey: true,
         shiftKey: true,
       });
+
       if (edits) {
         expect(
           await screen.findByRole("textbox", { name: "Thread name" }),
@@ -704,4 +957,283 @@ describe("ThreadDetailHeader", () => {
       }
     },
   );
+
+  describe("in a single pane under the window title bar", () => {
+    function renderInTitleBar({
+      onClosePane,
+      pane = PANE_CONTEXT,
+      menuArgs,
+    }: {
+      onClosePane?: () => void;
+      pane?: PaneContextValue;
+      menuArgs?: { current: ThreadDetailHeaderActionsMenuArgs | null };
+    } = {}) {
+      viewportState.titleBarHostsChrome = true;
+      const pageTitle = document.createElement("div");
+      const pageActions = document.createElement("div");
+      document.body.append(pageTitle, pageActions);
+
+      const view = render(
+        <WindowTitleBarSlotsContext.Provider
+          value={{ pageTitle, pageActions, companionToolbar: null }}
+        >
+          <PaneContext.Provider value={pane}>
+            <ThreadDetailHeader
+              actionsMenu={(args) => {
+                if (menuArgs) menuArgs.current = args;
+
+                return <button type="button">Thread actions</button>;
+              }}
+              isSecondaryPanelOpen={false}
+              onClosePane={onClosePane}
+              onToggleSecondaryPanel={vi.fn()}
+              pluginActions={<button type="button">Commit</button>}
+              threadId={THREAD_ID}
+              threadTitle="Focused thread"
+              workspaceOpenButton={<button type="button">Open in</button>}
+            />
+          </PaneContext.Provider>
+        </WindowTitleBarSlotsContext.Provider>,
+      );
+
+      return { pageActions, pageTitle, view };
+    }
+
+    it("puts the title, badge, and menu on the left and the actions on the right, with no pane row or close", async () => {
+      queryHarness.queryClient.setQueryData(
+        threadQueryKey(THREAD_ID),
+        makeThreadResponse({ id: THREAD_ID, shelvedAt: 5 }),
+      );
+      const onClosePane = vi.fn();
+
+      const { pageActions, pageTitle, view } = renderInTitleBar({
+        onClosePane,
+      });
+
+      const left = within(pageTitle);
+      expect(left.getByText("Focused thread")).not.toBeNull();
+      expect(await left.findByText("Shelved")).not.toBeNull();
+      expect(
+        left.getByRole("button", { name: "Thread actions" }),
+      ).not.toBeNull();
+
+      const right = within(pageActions);
+      expect(right.getByRole("button", { name: "Commit" })).not.toBeNull();
+      expect(right.getByRole("button", { name: "Open in" })).not.toBeNull();
+
+      expect(view.container.querySelector("header")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Close pane" })).toBeNull();
+    });
+
+    it("renames inline from a double click on the title bar title, which stays out of the drag region", async () => {
+      mocks.renameThreadAsync.mockResolvedValue(undefined);
+      const { pageTitle } = renderInTitleBar();
+
+      const title = within(pageTitle).getByText("Focused thread");
+      expect(title.closest("p")?.className).toContain(
+        "[-webkit-app-region:no-drag]",
+      );
+      fireEvent.doubleClick(title);
+
+      const input = await within(pageTitle).findByRole("textbox", {
+        name: "Thread name",
+      });
+
+      fireEvent.change(input, { target: { value: "Renamed thread" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() =>
+        expect(mocks.renameThreadAsync).toHaveBeenCalledWith(
+          THREAD_ID,
+          "Renamed thread",
+        ),
+      );
+    });
+
+    it("moves the open-in button into the menu on a narrow window", () => {
+      viewportState.isNarrowWindow = true;
+
+      const menuArgs: { current: ThreadDetailHeaderActionsMenuArgs | null } = {
+        current: null,
+      };
+
+      const { pageActions } = renderInTitleBar({ menuArgs });
+
+      expect(
+        within(pageActions).queryByRole("button", { name: "Open in" }),
+      ).toBeNull();
+      expect(menuArgs.current?.includeResponsiveActions).toBe(true);
+    });
+
+    it("keeps each split pane's own header row and leaves the title bar empty", () => {
+      const { pageActions, pageTitle, view } = renderInTitleBar({
+        onClosePane: vi.fn(),
+        pane: { ...PANE_CONTEXT, isSplitPane: true },
+      });
+
+      expect(pageTitle.childElementCount).toBe(0);
+      expect(pageActions.childElementCount).toBe(0);
+      const header = view.container.querySelector("header");
+      expect(header).not.toBeNull();
+      expect(
+        within(header as HTMLElement).getByText("Focused thread"),
+      ).not.toBeNull();
+      expect(screen.getByRole("button", { name: "Close pane" })).not.toBeNull();
+    });
+  });
 });
+
+describe("compact thread header", () => {
+  function seedCompactThread() {
+    queryHarness.queryClient.setQueryData(
+      threadQueryKey(THREAD_ID),
+      makeThreadResponse({
+        id: THREAD_ID,
+        serviceTier: "default",
+        shelvedAt: 5,
+      }),
+    );
+  }
+
+  function renderCompactHeader({
+    pane = PANE_CONTEXT,
+    menuArgs,
+  }: {
+    pane?: PaneContextValue;
+    menuArgs?: { current: ThreadDetailHeaderActionsMenuArgs | null };
+  } = {}) {
+    setPluginSlotRegistrations(
+      "header-fixture",
+      makePluginRegistrationSet({
+        threadHeaderActions: [
+          {
+            id: "branch",
+            title: "Branch",
+            component: () => <button type="button">Plugin branch</button>,
+          },
+        ],
+      }),
+    );
+
+    return render(
+      <MemoryRouter>
+        <PaneContext.Provider value={pane}>
+          <ThreadDetailHeader
+            actionsMenu={(args) => {
+              if (menuArgs) menuArgs.current = args;
+
+              return <button type="button">Thread actions</button>;
+            }}
+            isSecondaryPanelOpen={false}
+            onClosePane={vi.fn()}
+            onToggleSecondaryPanel={vi.fn()}
+            pluginActions={
+              <>
+                <button type="button">Continued from parent</button>
+                <PluginThreadHeaderActions
+                  threadId={THREAD_ID}
+                  projectId="proj_header"
+                />
+              </>
+            }
+            threadId={THREAD_ID}
+            threadTitle="Paraspeech > Support > Daily triage"
+            workspaceOpenButton={<button type="button">Open in</button>}
+          />
+        </PaneContext.Provider>
+      </MemoryRouter>,
+    );
+  }
+
+  afterEach(() => {
+    resetPluginSlotStoreForTest();
+  });
+
+  it("keeps only the title, one thread menu and the panel toggle at phone width", async () => {
+    viewportState.isCompactViewport = true;
+    seedCompactThread();
+
+    const menuArgs: { current: ThreadDetailHeaderActionsMenuArgs | null } = {
+      current: null,
+    };
+
+    const { container } = renderCompactHeader({ menuArgs });
+    const header = container.querySelector("header") as HTMLElement;
+
+    await waitFor(() =>
+      expect(
+        queryHarness.queryClient.getQueryData(threadQueryKey(THREAD_ID)),
+      ).toBeDefined(),
+    );
+
+    expect(
+      within(header)
+        .getAllByRole("button")
+        .map(
+          (button) => button.getAttribute("aria-label") ?? button.textContent,
+        ),
+    ).toEqual(["Thread actions", "Show right panel"]);
+    expect(
+      within(header).getByText("Paraspeech > Support > Daily triage"),
+    ).not.toBeNull();
+    expect(screen.queryByText("Plugin branch")).toBeNull();
+    expect(screen.queryByText("Shelved")).toBeNull();
+    expect(screen.queryByText("Normal")).toBeNull();
+    expect(screen.queryByLabelText("Session speed")).toBeNull();
+    expect(menuArgs.current).toMatchObject({
+      includeResponsiveActions: true,
+      isCompactViewport: true,
+    });
+  });
+
+  it("keeps Close pane in a real split at phone width", () => {
+    viewportState.isCompactViewport = true;
+    renderCompactHeader({ pane: { ...PANE_CONTEXT, isSplitPane: true } });
+
+    expect(screen.getByRole("button", { name: "Close pane" })).not.toBeNull();
+    expect(screen.queryByText("Plugin branch")).toBeNull();
+  });
+
+  it("mounts plugin header actions and Close pane inline on wider layouts", async () => {
+    seedCompactThread();
+
+    const menuArgs: { current: ThreadDetailHeaderActionsMenuArgs | null } = {
+      current: null,
+    };
+
+    renderCompactHeader({ menuArgs });
+
+    expect(await screen.findByText("Plugin branch")).not.toBeNull();
+    expect(screen.getByText("Continued from parent")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Close pane" })).not.toBeNull();
+    expect(await screen.findByText("Shelved")).not.toBeNull();
+    expect(menuArgs.current?.isCompactViewport).toBe(false);
+  });
+});
+
+it.each([false, true])(
+  "never shows a session speed badge (compact=%s)",
+  async (isCompactViewport) => {
+    viewportState.isCompactViewport = isCompactViewport;
+    queryHarness.queryClient.setQueryData(
+      threadQueryKey(THREAD_ID),
+      makeThreadResponse({ id: THREAD_ID, serviceTier: "fast", shelvedAt: 5 }),
+    );
+    render(
+      <PaneContext.Provider value={PANE_CONTEXT}>
+        <ThreadDetailHeader
+          actionsMenu={null}
+          isSecondaryPanelOpen={false}
+          onToggleSecondaryPanel={vi.fn()}
+          threadId={THREAD_ID}
+          threadTitle="Speed test"
+        />
+      </PaneContext.Provider>,
+    );
+
+    if (!isCompactViewport)
+      expect(await screen.findByText("Shelved")).not.toBeNull();
+    expect(screen.queryByLabelText("Session speed")).toBeNull();
+    expect(screen.queryByText("Fast")).toBeNull();
+  },
+);

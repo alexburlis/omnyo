@@ -2,8 +2,8 @@
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PluginComposerScope } from "@get-bb/plugin-sdk";
-import type { PromptDraftState } from "@bb/client-core";
+import type { PluginComposerScope } from "@omnyo/plugin-sdk";
+import type { PromptDraftState } from "@omnyo/client-core";
 import { PluginContext } from "@/components/plugin/plugin-context";
 import type { PluginComposerHost } from "@/components/plugin/plugin-composer-host";
 import {
@@ -20,16 +20,19 @@ interface TestHost extends PluginComposerHost {
 function createHost(key: string, scope: PluginComposerScope): TestHost {
   let draft: PromptDraftState = { text: "", mentions: [], attachments: [] };
   const listeners = new Set<() => void>();
+
   return {
     scope,
     textEffectKey: key,
     getCurrent: () => draft,
     subscribeDraft: (listener) => {
       listeners.add(listener);
+
       return () => listeners.delete(listener);
     },
     setDraft: (next) => {
       draft = next;
+
       for (const listener of [...listeners]) listener();
     },
     focus: () => {},
@@ -57,8 +60,10 @@ function mountEditor(host: TestHost, pluginCustomizable = true) {
     },
     insertAtCursor: () => true,
   };
+
   act(() => publishComposerEditorBridge(host.textEffectKey, bridge));
   published.push([host.textEffectKey, bridge]);
+
   return () => act(() => clearComposerEditorBridge(host.textEffectKey, bridge));
 }
 
@@ -72,6 +77,7 @@ afterEach(() => {
   for (const [key, bridge] of published.splice(0)) {
     clearComposerEditorBridge(key, bridge);
   }
+
   vi.restoreAllMocks();
 });
 
@@ -81,11 +87,14 @@ describe("useComposers", () => {
       kind: "thread",
       threadId: "thr_a",
     });
+
     const side = createHost("thread-b", { kind: "thread", threadId: "thr_b" });
+
     const sentEdit = createHost("sent-edit", {
       kind: "thread",
       threadId: "thr_a",
     });
+
     mountEditor(thread);
     const unmountSide = mountEditor(side);
     mountEditor(sentEdit, false);
@@ -116,10 +125,13 @@ describe("useComposers", () => {
       kind: "thread",
       threadId: "thr_a",
     });
+
     mountEditor(thread);
+
     const { result } = renderHook(() => useComposers()[0]?.isEmpty, {
       wrapper,
     });
+
     expect(result.current).toBe(true);
 
     act(() => {
@@ -130,10 +142,12 @@ describe("useComposers", () => {
 
   it("does not let listed handles lock or paint a composer", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     const thread = createHost("thread-a", {
       kind: "thread",
       threadId: "thr_a",
     });
+
     mountEditor(thread);
     const { result } = renderHook(() => useComposers(), { wrapper });
 

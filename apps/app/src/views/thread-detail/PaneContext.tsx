@@ -12,6 +12,10 @@ import type { ThreadRoutePathArgs } from "@/lib/route-paths";
 import type { PluginComposerHost } from "@/components/plugin/plugin-composer-host";
 import type { SplitSide } from "@/lib/split-layout";
 
+export interface PaneNavigationOptions {
+  replace?: boolean;
+}
+
 export interface PaneContextValue {
   paneId: string;
   isFocused: boolean;
@@ -25,7 +29,10 @@ export interface PaneContextValue {
   isBoundedPane: boolean;
   isTopRow: boolean;
   ownsWindowTopLeft: boolean;
-  navigateInPane: (thread: ThreadRoutePathArgs) => void;
+  navigateInPane: (
+    thread: ThreadRoutePathArgs,
+    options?: PaneNavigationOptions,
+  ) => void;
   beginPaneDrag?: (event: ReactPointerEvent, label: string) => void;
 }
 
@@ -59,6 +66,7 @@ export interface PaneSecondaryPanelRegistry {
 export function createPaneSecondaryPanelRegistry(): PaneSecondaryPanelRegistry {
   const models = new Map<string, PaneSecondaryPanelViewModel>();
   const listeners = new Map<string, Set<PaneSecondaryPanelRegistryListener>>();
+
   const notify = (paneId: string) => {
     listeners.get(paneId)?.forEach((listener) => listener());
   };
@@ -77,8 +85,10 @@ export function createPaneSecondaryPanelRegistry(): PaneSecondaryPanelRegistry {
       const paneListeners = listeners.get(paneId) ?? new Set();
       paneListeners.add(listener);
       listeners.set(paneId, paneListeners);
+
       return () => {
         paneListeners.delete(listener);
+
         if (paneListeners.size === 0) listeners.delete(paneId);
       };
     },
@@ -94,10 +104,12 @@ export function usePaneSecondaryPanelModel(
       registry.subscribe(paneId, listener),
     [paneId, registry],
   );
+
   const getSnapshot = useCallback(
     () => registry.getSnapshot(paneId),
     [paneId, registry],
   );
+
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
@@ -119,9 +131,11 @@ export const PaneContext = createContext<PaneContextValue | null>(null);
 
 export function usePaneContext(): PaneContextValue {
   const context = useContext(PaneContext);
+
   if (context === null) {
     throw new Error("usePaneContext must be used within a <PaneContext>");
   }
+
   return context;
 }
 
@@ -132,7 +146,7 @@ export function useOptionalPaneContext(): PaneContextValue | null {
 interface DefaultPaneContextProviderProps {
   children: ReactNode;
   onRequestClose: (() => void) | null;
-  navigateInPane: (thread: ThreadRoutePathArgs) => void;
+  navigateInPane: PaneContextValue["navigateInPane"];
 }
 
 export function DefaultPaneContextProvider({

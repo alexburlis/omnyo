@@ -36,7 +36,9 @@ export function ReplacementProviderSetting({
   const [preference, setPreference] = useAtom(preferenceAtom);
 
   const automaticProvider = findAutomaticReplacement(slots, bundledProvider);
+
   if (automaticProvider === undefined) return null;
+
   const automaticOption = {
     key: AUTOMATIC_REPLACEMENT_PROVIDER,
     title: "Automatic",
@@ -46,32 +48,37 @@ export function ReplacementProviderSetting({
         : automaticProvider.pluginId
     }).`,
   };
+
   const builtInOption =
     builtInDescription === undefined
       ? null
       : {
           key: BUILT_IN_REPLACEMENT_PROVIDER,
-          title: "bb (built-in)",
+          title: "Omnyo (built-in)",
           description: builtInDescription,
         };
+
   const pluginOptions = slots.map((slot) => {
     const bundled = replacementProviderKey(slot) === bundledProvider;
+
     return {
       key: replacementProviderKey(slot),
       title: bundled ? `${slot.title} (built-in)` : slot.title,
       description: bundled
-        ? `BB default. ${slot.description ?? ""}`.trim()
+        ? `Omnyo default. ${slot.description ?? ""}`.trim()
         : slot.description === undefined
           ? `From the ${slot.pluginId} plugin.`
           : `${slot.pluginId} plugin. ${slot.description}`,
     };
   });
+
   const options = [
     ...(allowAutomatic ? [automaticOption] : []),
     ...pluginOptions.filter((option) => option.key !== bundledProvider),
     ...pluginOptions.filter((option) => option.key === bundledProvider),
     ...(builtInOption === null ? [] : [builtInOption]),
   ];
+
   const selected =
     options.find((option) => option.key === preference) ??
     builtInOption ??

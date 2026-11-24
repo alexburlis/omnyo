@@ -1,4 +1,5 @@
-export type DesktopReleaseChannel = "latest" | "nightly";
+export type DesktopReleaseChannel = "latest" | "nightly" | "public-beta";
+
 export type DesktopBuildPlatform = "macos" | "linux" | "windows";
 
 export interface DesktopUpdateMetadataFileNames {
@@ -8,16 +9,27 @@ export interface DesktopUpdateMetadataFileNames {
 }
 
 export interface DesktopReleaseConfig {
-  appId: "dev.bb.desktop" | "dev.bb.desktop.nightly";
-  applicationName: "bb" | "bb Nightly";
+  appId: "dev.omnyo.beta" | "dev.omnyo.private" | "dev.omnyo.private.nightly";
+  applicationName: "Omnyo" | "Omnyo Nightly";
+  profileName: "Omnyo Private" | "Omnyo Private Nightly" | "Omnyo";
   artifactName: string;
   iconFileName: "icon.png" | "icon-nightly.png";
-  linuxExecutableName: "bb" | "bb-nightly";
+  linuxExecutableName: "omnyo-private" | "omnyo-private-nightly";
   macIconPath: "assets/icon.icns" | "assets/icon-nightly.icns";
-  releaseTag: "desktop-latest" | "desktop-nightly";
+  releaseTag: "desktop-latest" | "desktop-nightly" | "desktop-public-beta";
   updateMetadataFileNames: DesktopUpdateMetadataFileNames;
-  windowsInstallName: "bb" | "bb-nightly";
+  windowsInstallGuid: "11c43a4e-5f09-59c3-a447-6f25f5982512" | null;
+  windowsInstallName: "omnyo-private" | "omnyo-private-nightly";
 }
+
+export interface DesktopNativeVersion {
+  shortVersion: string;
+  bundleVersion: string;
+  buildNumber: string;
+  buildVersion: string;
+}
+
+export function desktopNativeVersion(version: string): DesktopNativeVersion;
 
 export function resolveDesktopReleaseChannel(
   env: NodeJS.ProcessEnv,
@@ -29,8 +41,11 @@ export function resolveDesktopBuildPlatform(
 
 export function createDesktopReleaseConfig(
   channel: DesktopReleaseChannel,
+  buildPlatform: DesktopBuildPlatform,
 ): DesktopReleaseConfig;
 
-export function createDesktopUpdateReleaseBaseUrl(
-  releaseTag: DesktopReleaseConfig["releaseTag"],
-): string;
+export function desktopBuildSelection(channel: DesktopReleaseChannel): {
+  privateContinuity: boolean;
+  outputDirectory: string;
+  excludedArtifacts: string[];
+};

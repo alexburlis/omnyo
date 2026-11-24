@@ -8,6 +8,7 @@ import {
 describe("command output harness stream cleanup", () => {
   let stdinTty: PropertyDescriptor | undefined;
   let stdoutTty: PropertyDescriptor | undefined;
+
   const nonTty = {
     value: false,
     configurable: true,
@@ -34,6 +35,7 @@ describe("command output harness stream cleanup", () => {
       if (stdinTty === undefined)
         Reflect.deleteProperty(process.stdin, "isTTY");
       else Object.defineProperty(process.stdin, "isTTY", stdinTty);
+
       if (stdoutTty === undefined)
         Reflect.deleteProperty(process.stdout, "isTTY");
       else Object.defineProperty(process.stdout, "isTTY", stdoutTty);

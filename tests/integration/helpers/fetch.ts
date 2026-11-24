@@ -1,23 +1,30 @@
 type FetchInput = Parameters<typeof fetch>[0];
+
 type FetchInit = Parameters<typeof fetch>[1];
 
 const IDEMPOTENT_METHODS = new Set(["GET", "HEAD"]);
+
 const TRANSIENT_FETCH_ERROR_CODES = new Set(["ECONNRESET", "UND_ERR_SOCKET"]);
+
 const TRANSIENT_FETCH_MAX_ATTEMPTS = 2;
+
 const TRANSIENT_FETCH_RETRY_DELAY_MS = 25;
 
 function getFetchMethod(input: FetchInput, init: FetchInit): string {
   if (init?.method) {
     return init.method.toUpperCase();
   }
+
   if (input instanceof Request) {
     return input.method.toUpperCase();
   }
+
   return "GET";
 }
 
 function getErrorCode(error: Error): string | null {
   const cause = error.cause;
+
   if (
     cause instanceof Error &&
     "code" in cause &&
@@ -25,6 +32,7 @@ function getErrorCode(error: Error): string | null {
   ) {
     return cause.code;
   }
+
   return null;
 }
 
@@ -63,9 +71,11 @@ export function createIntegrationFetch(): typeof fetch {
           attempt < TRANSIENT_FETCH_MAX_ATTEMPTS &&
           error instanceof Error &&
           isTransientFetchError(error);
+
         if (!shouldRetry) {
           throw error;
         }
+
         await waitForRetryDelay();
       }
     }

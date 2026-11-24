@@ -1,6 +1,6 @@
 import semver from "semver";
 import { z } from "zod";
-import { PLUGIN_SDK_VERSION } from "@bb/domain";
+import { PLUGIN_SDK_VERSION } from "@omnyo/domain";
 import {
   DEFAULT_GIT_REF,
   gitSemverTagName,
@@ -8,16 +8,19 @@ import {
   isCommitSha,
   runInstallCommand,
 } from "./install-sources.js";
+import { PluginInstallCancelledError } from "./install-cancellation.js";
+import { legacyNpmPluginEnginesV1Schema } from "./legacy-npm-plugin-engines-v1.js";
 import {
   isPluginSdkRangeSatisfied,
   pluginSdkRangeProblem,
 } from "./sdk-compat.js";
 
 export type NpmSpecKind = "default" | "exact" | "tag" | "range";
+
 export type GitRefKind = "branch" | "tag" | "commit";
 
 export interface CompatibilityProblem {
-  engine: "bb" | "bbPluginSdk";
+  engine: "omnyo" | "omnyoPluginSdk";
   required: string;
   actual: string;
   message: string;
@@ -70,19 +73,14 @@ export interface NpmSourceIntentForResolution {
 export interface NpmResolvedCandidate extends PluginResolvedUpdateVersion {
   integrity: string;
   engines: {
-    bb: string | undefined;
-    bbPluginSdk: string | undefined;
+    omnyo: string | undefined;
+    omnyoPluginSdk: string | undefined;
   };
 }
 
 const packumentVersionSchema = z.object({
   version: z.string(),
-  engines: z
-    .object({
-      bb: z.string().optional(),
-      bbPluginSdk: z.string().optional(),
-    })
-    .optional(),
+  engines: legacyNpmPluginEnginesV1Schema.optional(),
   dist: z
     .object({
       integrity: z.string().optional(),
@@ -107,17 +105,23 @@ export function createNpmResolverRun(options?: {
   readJson?: (response: Response) => Promise<unknown>;
 }): NpmResolverRun {
   const fetchImpl = options?.fetch ?? fetch;
+
   const readJson =
     options?.readJson ?? ((response: Response) => response.json());
+
   const cache = new Map<string, Promise<Packument>>();
+
   return {
     getPackument(intent) {
       const registry = intent.registry.replace(/\/+$/, "");
       const key = `${registry}\n${intent.packageName}`;
       const existing = cache.get(key);
+
       if (existing) return existing;
+
       const pending = (async () => {
         let response: Response;
+
         try {
           response = await fetchImpl(
             `${registry}/${encodeURIComponent(intent.packageName)}`,
@@ -133,21 +137,27 @@ export function createNpmResolverRun(options?: {
             `${intent.packageName} registry request failed: ${detail}`,
           );
         }
+
         if (!response.ok) {
           throw new NpmPackageUnavailableError(
             `${intent.packageName} registry request failed: ${response.status} ${response.statusText}`,
           );
         }
+
         const json = await readJson(response);
         const parsed = packumentSchema.safeParse(json);
+
         if (!parsed.success) {
           throw new Error(
             `registry returned malformed metadata for ${intent.packageName}: ${parsed.error.issues[0]?.message ?? "invalid packument"}`,
           );
         }
+
         return parsed.data;
       })();
+
       cache.set(key, pending);
+
       return pending;
     },
   };
@@ -157,9 +167,11 @@ class NpmPackageUnavailableError extends Error {}
 
 function requestedRangeIncludesPrerelease(spec: string): boolean {
   const range = new semver.Range(spec);
+
   return range.set.some((comparators) =>
     comparators.some((comparator) => {
       const version: unknown = comparator.semver;
+
       return version instanceof semver.SemVer && version.prerelease.length > 0;
     }),
   );
@@ -170,15 +182,18 @@ function allowedNpmVersions(
   intent: NpmSourceIntentForResolution,
 ): string[] | { unavailable: string } {
   let versions: string[];
+
   if (intent.specKind === "exact") {
     versions = [intent.requestedSpec];
   } else if (intent.specKind === "tag") {
     const tagged = packument["dist-tags"][intent.requestedSpec];
+
     if (tagged === undefined) {
       return {
         unavailable: `npm dist-tag "${intent.requestedSpec}" does not exist for ${intent.packageName}`,
       };
     }
+
     versions = [tagged];
   } else if (intent.specKind === "range") {
     versions = Object.keys(packument.versions).filter((version) =>
@@ -195,6 +210,7 @@ function allowedNpmVersions(
       semver.prerelease(intent.requestedSpec) !== null) ||
     (intent.specKind === "range" &&
       requestedRangeIncludesPrerelease(intent.requestedSpec));
+
   return versions
     .filter((version) => semver.valid(version) !== null)
     .filter(
@@ -204,7 +220,7 @@ function allowedNpmVersions(
 }
 
 export function evaluateCompatibility(args: {
-  bbRange: string | undefined;
+  coreEngineRange: string | undefined;
   sdkRange: string | undefined;
   appVersion: string;
 }): {
@@ -213,49 +229,55 @@ export function evaluateCompatibility(args: {
   devMode: boolean;
 } {
   const appVersion = semver.coerce(args.appVersion);
+
   if (!appVersion) {
-    throw new Error(`cannot parse running bb version "${args.appVersion}"`);
+    throw new Error(`cannot parse running Omnyo version "${args.appVersion}"`);
   }
+
   const devMode = appVersion.version === "0.0.0";
-  const bbProblems: CompatibilityProblem[] = [];
-  if (args.bbRange !== undefined) {
-    if (semver.validRange(args.bbRange) === null) {
-      bbProblems.push({
-        engine: "bb",
-        required: args.bbRange,
+  const coreProblems: CompatibilityProblem[] = [];
+
+  if (args.coreEngineRange !== undefined) {
+    if (semver.validRange(args.coreEngineRange) === null) {
+      coreProblems.push({
+        engine: "omnyo",
+        required: args.coreEngineRange,
         actual: appVersion.version,
-        message: `declares invalid engines.bb range ${JSON.stringify(args.bbRange)}`,
+        message: `declares invalid engines.omnyo range ${JSON.stringify(args.coreEngineRange)}`,
       });
-    } else if (!semver.satisfies(appVersion, args.bbRange)) {
-      bbProblems.push({
-        engine: "bb",
-        required: args.bbRange,
+    } else if (!semver.satisfies(appVersion, args.coreEngineRange)) {
+      coreProblems.push({
+        engine: "omnyo",
+        required: args.coreEngineRange,
         actual: appVersion.version,
-        message: `requires bb ${args.bbRange}, running bb is ${appVersion.version}`,
+        message: `requires Omnyo ${args.coreEngineRange}, running Omnyo is ${appVersion.version}`,
       });
     }
   }
+
   const sdkProblems: CompatibilityProblem[] = [];
+
   if (args.sdkRange !== undefined) {
     if (semver.validRange(args.sdkRange) === null) {
       sdkProblems.push({
-        engine: "bbPluginSdk",
+        engine: "omnyoPluginSdk",
         required: args.sdkRange,
         actual: PLUGIN_SDK_VERSION,
-        message: `declares invalid engines.bbPluginSdk range ${JSON.stringify(args.sdkRange)}`,
+        message: `declares invalid engines.omnyoPluginSdk range ${JSON.stringify(args.sdkRange)}`,
       });
     } else if (!isPluginSdkRangeSatisfied(args.sdkRange)) {
       sdkProblems.push({
-        engine: "bbPluginSdk",
+        engine: "omnyoPluginSdk",
         required: args.sdkRange,
         actual: PLUGIN_SDK_VERSION,
         message: pluginSdkRangeProblem(args.sdkRange),
       });
     }
   }
+
   return {
-    effective: devMode ? sdkProblems : [...bbProblems, ...sdkProblems],
-    packaged: bbProblems,
+    effective: devMode ? sdkProblems : [...coreProblems, ...sdkProblems],
+    packaged: coreProblems,
     devMode,
   };
 }
@@ -288,6 +310,7 @@ export async function selectNpmCandidate(args: {
   | { outcome: "unavailable"; detail: string; devMode: boolean }
 > {
   let packument: Packument;
+
   try {
     packument = await args.run.getPackument(args.intent);
   } catch (error) {
@@ -298,13 +321,17 @@ export async function selectNpmCandidate(args: {
         devMode: semver.coerce(args.appVersion)?.version === "0.0.0",
       };
     }
+
     throw error;
   }
+
   const allowed = allowedNpmVersions(packument, args.intent);
   const devMode = semver.coerce(args.appVersion)?.version === "0.0.0";
+
   if (!Array.isArray(allowed)) {
     return { outcome: "unavailable", detail: allowed.unavailable, devMode };
   }
+
   if (allowed.length === 0) {
     return {
       outcome: "unavailable",
@@ -315,32 +342,41 @@ export async function selectNpmCandidate(args: {
 
   let newestCandidate: NpmResolvedCandidate | undefined;
   let newestProblems: CompatibilityProblem[] = [];
+
   let blocked:
     | { candidate: NpmResolvedCandidate; reasons: CompatibilityProblem[] }
     | undefined;
+
   for (const version of allowed) {
     const metadata = packument.versions[version];
+
     if (!metadata) continue;
+
     const candidate: NpmResolvedCandidate = {
       version,
       display: npmDisplay(args.intent.packageName, version),
       integrity: metadata.dist?.integrity ?? "",
       engines: {
-        bb: metadata.engines?.bb,
-        bbPluginSdk: metadata.engines?.bbPluginSdk,
+        omnyo: metadata.engines?.omnyo,
+        omnyoPluginSdk: metadata.engines?.omnyoPluginSdk,
       },
     };
+
     const problems = evaluateCompatibility({
-      bbRange: candidate.engines.bb,
-      sdkRange: candidate.engines.bbPluginSdk,
+      coreEngineRange: candidate.engines.omnyo,
+      sdkRange: candidate.engines.omnyoPluginSdk,
       appVersion: args.appVersion,
     });
+
     newestCandidate ??= candidate;
+
     if (newestCandidate === candidate) newestProblems = problems.effective;
+
     if (problems.effective.length > 0) {
       blocked ??= { candidate, reasons: problems.effective };
       continue;
     }
+
     return {
       outcome: "selected",
       candidate,
@@ -349,6 +385,7 @@ export async function selectNpmCandidate(args: {
       devMode: problems.devMode,
     };
   }
+
   if (!newestCandidate) {
     return {
       outcome: "unavailable",
@@ -356,6 +393,7 @@ export async function selectNpmCandidate(args: {
       devMode,
     };
   }
+
   return {
     outcome: "incompatible",
     newest: newestCandidate,
@@ -371,6 +409,7 @@ export async function resolveNpmUpdate(args: {
   run: NpmResolverRun;
 }): Promise<PluginUpdateResolution> {
   const devMode = semver.coerce(args.appVersion)?.version === "0.0.0";
+
   if (args.intent.specKind === "exact") {
     return {
       outcome: "pinned",
@@ -378,13 +417,17 @@ export async function resolveNpmUpdate(args: {
       ...(devMode ? { devMode: true } : {}),
     };
   }
+
   const selected = await selectNpmCandidate(args);
+
   const flags = {
     ...(selected.devMode ? { devMode: true as const } : {}),
   };
+
   if (selected.outcome === "unavailable") {
     return { outcome: "unavailable", detail: selected.detail, ...flags };
   }
+
   if (selected.outcome === "incompatible") {
     return {
       outcome: "incompatible",
@@ -394,6 +437,7 @@ export async function resolveNpmUpdate(args: {
       ...flags,
     };
   }
+
   const extra = {
     ...flags,
     ...(selected.blocked
@@ -408,9 +452,11 @@ export async function resolveNpmUpdate(args: {
       ? { packagedBuildProblems: selected.packagedBuildProblems }
       : {}),
   };
+
   if (selected.candidate.version === args.current.version) {
     return { outcome: "current", current: args.current, ...extra };
   }
+
   return {
     outcome: "update-available",
     current: args.current,
@@ -419,23 +465,51 @@ export async function resolveNpmUpdate(args: {
   };
 }
 
+export class GitLookupUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "GitLookupUnavailableError";
+  }
+}
+
+async function runGitRemoteLookup(
+  args: string[],
+  maxStdoutBytes?: number,
+): Promise<string> {
+  try {
+    return await runInstallCommand("git", ["ls-remote", ...args], {
+      notFoundHint: GIT_NOT_FOUND_HINT,
+      maxStdoutBytes,
+    });
+  } catch (error) {
+    if (error instanceof PluginInstallCancelledError) throw error;
+
+    throw new GitLookupUnavailableError(error);
+  }
+}
+
 function parseLsRemote(output: string): Map<string, string> {
   const refs = new Map<string, string>();
+
   for (const line of output.split("\n")) {
     if (line.trim().length === 0) continue;
     const [commit, ref, extra] = line.trim().split(/\s+/);
+
     if (extra !== undefined || commit === undefined || ref === undefined) {
       throw new Error(
         `malformed git ls-remote output: ${JSON.stringify(line)}`,
       );
     }
+
     if (!/^[0-9a-f]{40}$/i.test(commit)) {
       throw new Error(
         `git ls-remote returned invalid object id ${JSON.stringify(commit)}`,
       );
     }
+
     refs.set(ref, commit.toLowerCase());
   }
+
   return refs;
 }
 
@@ -453,13 +527,12 @@ export async function resolveGitRef(args: {
       commit: args.ref.toLowerCase(),
     };
   }
+
   if (args.ref === DEFAULT_GIT_REF) {
-    const output = await runInstallCommand(
-      "git",
-      ["ls-remote", args.url, DEFAULT_GIT_REF],
-      { notFoundHint: GIT_NOT_FOUND_HINT },
-    );
+    const output = await runGitRemoteLookup([args.url, DEFAULT_GIT_REF]);
+
     const commit = parseLsRemote(output).get(DEFAULT_GIT_REF);
+
     return commit === undefined
       ? {
           outcome: "unavailable",
@@ -467,27 +540,29 @@ export async function resolveGitRef(args: {
         }
       : { outcome: "resolved", refKind: "branch", commit };
   }
-  const output = await runInstallCommand(
-    "git",
-    [
-      "ls-remote",
-      args.url,
-      `refs/tags/${args.ref}`,
-      `refs/tags/${args.ref}^{}`,
-      `refs/heads/${args.ref}`,
-    ],
-    { notFoundHint: GIT_NOT_FOUND_HINT },
-  );
+
+  const output = await runGitRemoteLookup([
+    args.url,
+    `refs/tags/${args.ref}`,
+    `refs/tags/${args.ref}^{}`,
+    `refs/heads/${args.ref}`,
+  ]);
+
   const refs = parseLsRemote(output);
+
   const tag =
     refs.get(`refs/tags/${args.ref}^{}`) ?? refs.get(`refs/tags/${args.ref}`);
+
   if (tag !== undefined) {
     return { outcome: "resolved", refKind: "tag", commit: tag };
   }
+
   const branch = refs.get(`refs/heads/${args.ref}`);
+
   if (branch !== undefined) {
     return { outcome: "resolved", refKind: "branch", commit: branch };
   }
+
   return {
     outcome: "unavailable",
     detail: `git ref "${args.ref}" was not found in ${args.url}`,
@@ -520,29 +595,28 @@ export async function listGitSemverTags(args: {
   url: string;
   tagPrefix: string;
 }): Promise<GitSemverTag[]> {
-  const output = await runInstallCommand(
-    "git",
+  const output = await runGitRemoteLookup(
     [
-      "ls-remote",
       "--tags",
       args.url,
       `refs/tags/${args.tagPrefix}v*`,
       `refs/tags/${args.tagPrefix}v*^{}`,
     ],
-    {
-      notFoundHint: GIT_NOT_FOUND_HINT,
-      maxStdoutBytes: MAX_LS_REMOTE_TAG_BYTES,
-    },
+    MAX_LS_REMOTE_TAG_BYTES,
   );
+
   const refs = parseLsRemote(output);
   const tags: GitSemverTag[] = [];
+
   for (const [ref, commit] of refs) {
     if (!ref.startsWith("refs/tags/") || ref.endsWith("^{}")) continue;
     const tag = ref.slice("refs/tags/".length);
     const version = gitSemverTagVersion(tag, args.tagPrefix);
+
     if (version === null) continue;
     tags.push({ tag, version, commit: refs.get(`${ref}^{}`) ?? commit });
   }
+
   return tags.sort((left, right) =>
     semver.rcompare(left.version, right.version),
   );
@@ -560,6 +634,7 @@ function satisfyingGitSemverTags(args: {
   range: string;
 }): GitSemverTag[] {
   const permitsPrerelease = requestedRangeIncludesPrerelease(args.range);
+
   return args.tags
     .filter((tag) => semver.satisfies(tag.version, args.range))
     .filter(
@@ -575,9 +650,10 @@ function movedGitTagDetail(args: {
   currentCommit: string;
 }): string | null {
   if (args.currentCommit === args.recordedCommit) return null;
+
   return (
     `security check failed: git tag "${args.tag}" in ${args.url} moved from ` +
-    `${args.recordedCommit} to ${args.currentCommit}; bb will not re-resolve a ` +
+    `${args.recordedCommit} to ${args.currentCommit}; Omnyo will not re-resolve a ` +
     `tag that changed. Remove the plugin and install it again to accept the new commit`
   );
 }
@@ -621,41 +697,50 @@ async function resolveGitRangeUpdate(args: {
     url: args.url,
     tagPrefix: args.intent.tagPrefix,
   });
+
   const recorded = tags.find((tag) => tag.tag === args.intent.resolvedTag);
+
   if (recorded === undefined) {
     return {
       outcome: "unavailable",
       detail:
         `security check failed: recorded git tag "${args.intent.resolvedTag}" no longer exists in ${args.url}; ` +
-        "bb will not re-resolve a missing release tag. Restore the tag, or remove and install the plugin again",
+        "Omnyo will not re-resolve a missing release tag. Restore the tag, or remove and install the plugin again",
     };
   }
+
   const moved = movedGitTagDetail({
     url: args.url,
     tag: recorded.tag,
     recordedCommit: args.currentCommit,
     currentCommit: recorded.commit,
   });
+
   if (moved !== null) return { outcome: "unavailable", detail: moved };
+
   const candidates = satisfyingGitSemverTags({
     tags,
     range: args.intent.range,
   });
+
   if (candidates.length === 0) {
     return {
       outcome: "unavailable",
       detail: `no tag of ${args.url} matches ${args.intent.range} (looking for tags named "${gitSemverTagName(args.intent.tagPrefix, "X.Y.Z")}")`,
     };
   }
+
   let blocked: ResolutionFlags["blocked"] | undefined;
   let invalidDetail: string | undefined;
   let probes = 0;
+
   for (const candidate of candidates) {
     const version = gitResolvedVersion({
       url: args.url,
       ref: candidate.tag,
       commit: candidate.commit,
     });
+
     if (candidate.commit === args.currentCommit) {
       return {
         outcome: "current",
@@ -663,22 +748,27 @@ async function resolveGitRangeUpdate(args: {
         ...(blocked ? { blocked } : {}),
       };
     }
+
     if (probes >= MAX_GIT_CANDIDATE_PROBES) {
       return {
         outcome: "unavailable",
-        detail: `no release of ${args.url} matching ${args.intent.range} runs on this bb within the newest ${MAX_GIT_CANDIDATE_PROBES} releases`,
+        detail: `no release of ${args.url} matching ${args.intent.range} runs on this Omnyo within the newest ${MAX_GIT_CANDIDATE_PROBES} releases`,
       };
     }
+
     probes += 1;
     const probed = await args.probeCandidate(candidate);
+
     if (probed.outcome === "invalid") {
       invalidDetail ??= probed.detail;
       continue;
     }
+
     if (probed.outcome === "incompatible") {
       blocked ??= { version, reasons: probed.reasons };
       continue;
     }
+
     return {
       outcome: "update-available",
       current: args.current,
@@ -691,6 +781,7 @@ async function resolveGitRangeUpdate(args: {
         : {}),
     };
   }
+
   if (blocked !== undefined) {
     return {
       outcome: "incompatible",
@@ -699,6 +790,7 @@ async function resolveGitRangeUpdate(args: {
       reasons: blocked.reasons,
     };
   }
+
   return {
     outcome: "unavailable",
     detail:
@@ -719,6 +811,7 @@ export async function resolveGitUpdate(args: {
       args.intent.kind === "range" ? args.intent.resolvedTag : args.intent.ref,
     commit: args.currentCommit,
   });
+
   if (args.intent.kind === "range") {
     return resolveGitRangeUpdate({
       url: args.url,
@@ -728,9 +821,12 @@ export async function resolveGitUpdate(args: {
       probeCandidate: args.probeCandidate,
     });
   }
+
   if (args.intent.refKind === "commit") return { outcome: "pinned", current };
   const resolved = await resolveGitRef({ url: args.url, ref: args.intent.ref });
+
   if (resolved.outcome === "unavailable") return resolved;
+
   if (args.intent.refKind === "tag") {
     const moved = movedGitTagDetail({
       url: args.url,
@@ -738,18 +834,22 @@ export async function resolveGitUpdate(args: {
       recordedCommit: args.currentCommit,
       currentCommit: resolved.commit,
     });
+
     return moved === null
       ? { outcome: "pinned", current }
       : { outcome: "unavailable", detail: moved };
   }
+
   const candidate = gitResolvedVersion({
     url: args.url,
     ref: args.intent.ref,
     commit: resolved.commit,
   });
+
   if (resolved.commit === args.currentCommit) {
     return { outcome: "current", current };
   }
+
   return { outcome: "update-available", current, candidate };
 }
 
@@ -766,34 +866,42 @@ export async function resolveGitRange(args: {
     url: args.url,
     tagPrefix: args.tagPrefix,
   });
+
   const candidates = satisfyingGitSemverTags({ tags, range: args.range });
+
   if (candidates.length === 0) {
     return {
       outcome: "unavailable",
       detail: `no tag of ${args.url} matches ${args.range} (looking for tags named "${gitSemverTagName(args.tagPrefix, "X.Y.Z")}")`,
     };
   }
+
   let firstProblem: string | undefined;
   let probes = 0;
+
   for (const candidate of candidates) {
     if (probes >= MAX_GIT_CANDIDATE_PROBES) {
       return {
         outcome: "unavailable",
-        detail: `no release of ${args.url} matching ${args.range} runs on this bb within the newest ${MAX_GIT_CANDIDATE_PROBES} releases`,
+        detail: `no release of ${args.url} matching ${args.range} runs on this Omnyo within the newest ${MAX_GIT_CANDIDATE_PROBES} releases`,
       };
     }
+
     probes += 1;
     const probed = await args.probeCandidate(candidate);
+
     if (probed.outcome === "compatible") {
       return { outcome: "resolved", ...candidate };
     }
+
     firstProblem ??=
       probed.outcome === "invalid" ? probed.detail : probed.reasons[0]?.message;
   }
+
   return {
     outcome: "unavailable",
     detail:
       firstProblem ??
-      `no release of ${args.url} matching ${args.range} runs on this bb`,
+      `no release of ${args.url} matching ${args.range} runs on this Omnyo`,
   };
 }

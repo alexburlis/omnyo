@@ -1,12 +1,12 @@
-import type { Host } from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
+import type { Host } from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { ConfirmDeleteDialog } from "@bb/shared-ui/confirm-delete-dialog";
+} from "@omnyo/shared-ui/dialog";
+import { ConfirmDeleteDialog } from "@omnyo/shared-ui/confirm-delete-dialog";
 import { useRemoveHost } from "@/hooks/mutations/host-mutations";
 import { useMachineThreadPreview } from "@/hooks/queries/thread-queries";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
@@ -26,9 +26,16 @@ export function machineRemovalConsequences(host: Host): string {
   if (host.type === "ephemeral") {
     return "The compute and its saved snapshots are deleted. Its environments remain as read-only history.";
   }
+
   if (host.machineProviderId !== null) {
-    return "The provider cleans up resources it owns. Its environments remain as read-only history.";
+    const offline =
+      host.status !== "connected" && host.lifecycle.phase !== "suspended"
+        ? " It's offline, so Omnyo won't clean up its workspaces."
+        : "";
+
+    return `The provider cleans up resources it owns.${offline} Its environments remain as read-only history.`;
   }
+
   return "Project checkouts stay on its disk, but its environments become read-only history and it cannot run new work until paired again.";
 }
 
@@ -37,13 +44,16 @@ function MachineThreadPreviewList({ hostId }: { hostId: string }) {
     hostId,
     limit: MACHINE_THREAD_PREVIEW_LIMIT,
   });
+
   if (preview.data === undefined || preview.data.total === 0) return null;
   const { threads, total } = preview.data;
   const hiddenCount = total - threads.length;
+
   const summary =
     total === 1
       ? "1 unarchived thread on this machine:"
       : `${total} unarchived threads on this machine:`;
+
   return (
     <div className="space-y-1 text-sm text-muted-foreground">
       <p>{summary}</p>

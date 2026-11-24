@@ -47,9 +47,11 @@ describe("RootComposeRightPanelToggle", () => {
 
   it("warms the panel from toggle intent but not from mounting the toggle", async () => {
     vi.useFakeTimers();
+
     const preload = vi
       .spyOn(LazyThreadSecondaryPanel, "preload")
       .mockResolvedValue(undefined);
+
     render(<RootComposeRightPanelToggle isOpen={false} onToggle={vi.fn()} />);
 
     await act(async () => vi.runAllTimersAsync());

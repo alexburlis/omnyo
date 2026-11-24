@@ -1,6 +1,7 @@
-import { defineRpcContract, type PluginRpcHandlers } from "@get-bb/plugin-sdk";
+import { defineRpcContract, type PluginRpcHandlers } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import {
+  CLAUDE_POOL_LOGIN_RETIRED,
   accountAddInputSchema,
   accountPoolConfigSchema,
   accountPoolConfigSetInputSchema,
@@ -17,6 +18,7 @@ import {
   hubTokenSummarySchema,
   loginCompleteInputSchema,
   loginStartSchema,
+  loginTargetSchema,
   routedThreadStatusListSchema,
   statusSchema,
   tokenRotateInputSchema,
@@ -24,8 +26,39 @@ import {
   type AccountPoolConfigController,
 } from "./contracts.js";
 import type { PoolOperations } from "./operations.js";
-import type { ClaudeOAuthLogin } from "./oauth-login.js";
 import type { CodexDeviceLogin } from "./codex-device-login.js";
+import type {
+  PluginApi,
+  ExperimentalPluginRpcHandlerContext,
+} from "@omnyo/plugin-sdk";
+import { codexResetRpcContract } from "./codex-reset-contract.js";
+import type { AccountPoolHub } from "./hub.js";
+
+export function registerCodexResetRpc(
+  api: PluginApi,
+  hub: AccountPoolHub,
+): void {
+  const authorize = (context: ExperimentalPluginRpcHandlerContext) => {
+    if (
+      context.experimental_caller.kind !== "plugin" ||
+      context.experimental_caller.pluginId !== "omnyo--account-usage"
+    )
+      throw new Error("Codex resets caller is not authorized");
+  };
+
+  api.rpc.register(codexResetRpcContract, {
+    "experimental_codex-resets.v1.credits": (input, context) => {
+      authorize(context);
+
+      return hub.codexResetCredits(input.accountId);
+    },
+    "experimental_codex-resets.v1.redeem": (input, context) => {
+      authorize(context);
+
+      return hub.codexRedeemReset(input);
+    },
+  });
+}
 
 export const accountPoolRpcContract = defineRpcContract({
   "account.add": {
@@ -75,7 +108,7 @@ export const accountPoolRpcContract = defineRpcContract({
     output: accountPoolConfigSchema,
   },
   "login.start": {
-    input: z.null(),
+    input: loginTargetSchema,
     output: loginStartSchema,
   },
   "login.complete": {
@@ -83,7 +116,7 @@ export const accountPoolRpcContract = defineRpcContract({
     output: accountSchema,
   },
   "codexLogin.start": {
-    input: z.null(),
+    input: loginTargetSchema,
     output: codexLoginStartSchema,
   },
   "codexLogin.poll": {
@@ -114,7 +147,6 @@ export const accountPoolRpcContract = defineRpcContract({
 
 export function createRpcHandlers(
   operations: PoolOperations,
-  login: ClaudeOAuthLogin,
   codexLogin: CodexDeviceLogin,
   config: AccountPoolConfigController,
 ): PluginRpcHandlers<typeof accountPoolRpcContract> {
@@ -138,17 +170,23 @@ export function createRpcHandlers(
     }),
     "account.reorder": async ({ provider, accountIds }) => {
       await operations.reorder(provider, accountIds);
+
       return null;
     },
     "routing.set": async ({ provider, enabled }) => {
       await operations.setRouting(provider, enabled);
+
       return { provider, enabled };
     },
     "config.get": () => config.get(),
     "config.set": (input) => config.set(input),
-    "login.start": () => login.start(),
-    "login.complete": (input) => login.complete(input),
-    "codexLogin.start": () => codexLogin.start(),
+    "login.start": () => {
+      throw new Error(CLAUDE_POOL_LOGIN_RETIRED);
+    },
+    "login.complete": () => {
+      throw new Error(CLAUDE_POOL_LOGIN_RETIRED);
+    },
+    "codexLogin.start": (target) => codexLogin.start(target),
     "codexLogin.poll": (input) => codexLogin.poll(input),
     "codexLogin.cancel": (input) => ({
       cancelled: codexLogin.cancel(input),

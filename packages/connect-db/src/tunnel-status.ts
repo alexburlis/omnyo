@@ -1,5 +1,6 @@
 export const TUNNEL_STATUS_URL = "https://tunnel/__control/status";
-export const TUNNEL_STATUS_HEADER = "x-bb-tunnel-status";
+
+export const TUNNEL_STATUS_HEADER = "x-omnyo-tunnel-status";
 
 export type TunnelConnectedLookup = (
   routingKey: string,
@@ -24,12 +25,16 @@ export async function readTunnelConnected<Id>(
     const response = await namespace
       .get(namespace.idFromName(routingKey))
       .fetch(TUNNEL_STATUS_URL);
+
     if (!response.ok || response.headers.get(TUNNEL_STATUS_HEADER) !== "1") {
       return null;
     }
+
     const body: unknown = await response.json();
+
     if (typeof body !== "object" || body === null) return null;
     const connected: unknown = Reflect.get(body, "connected");
+
     return typeof connected === "boolean" ? connected : null;
   } catch {
     return null;
@@ -52,6 +57,7 @@ export function isLive(args: {
   tunnelConnected: boolean | null;
 }): boolean {
   if (args.tunnelConnected !== null) return args.tunnelConnected;
+
   return (
     args.lastSeenMs !== null && args.now - args.lastSeenMs < args.offlineAfterMs
   );

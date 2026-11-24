@@ -1,7 +1,6 @@
 import { DiffLoadingSkeleton } from "@/components/code/code-loading-skeletons";
 import {
   type CSSProperties,
-  type RefCallback,
   useCallback,
   useEffect,
   useMemo,
@@ -9,11 +8,10 @@ import {
   useState,
 } from "react";
 import type { FileContents } from "@pierre/diffs";
-import type { GitDiffFileChangeKind } from "@bb/server-contract";
-import type { ExperimentalDiffFullFileContents } from "@get-bb/plugin-sdk";
-import { useIntersectionObserver } from "usehooks-ts";
-import { Button } from "@bb/shared-ui/button";
-import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
+import type { GitDiffFileChangeKind } from "@omnyo/server-contract";
+import type { ExperimentalDiffFullFileContents } from "@omnyo/plugin-sdk";
+import { Button } from "@omnyo/shared-ui/button";
+import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import { DiffHost } from "@/components/code/DiffHost";
 import type { DiffPresentation } from "@/components/code/code-rendering";
 import {
@@ -47,6 +45,10 @@ export type GitDiffCardSvgDisplayMode = "preview" | "raw";
 
 const GIT_DIFF_CARD_BODY_STYLE: CSSProperties = {
   contain: "layout paint style",
+};
+
+const GIT_DIFF_CARD_BODY_DEFERRED_STYLE: CSSProperties = {
+  ...GIT_DIFF_CARD_BODY_STYLE,
   contentVisibility: "auto",
   containIntrinsicSize: "0 600px",
 };
@@ -110,9 +112,12 @@ function canExpandContextForChangeKind(
 function scheduleIdleWork(work: () => void): () => void {
   if (typeof window.requestIdleCallback === "function") {
     const handle = window.requestIdleCallback(work, { timeout: 2_000 });
+
     return () => window.cancelIdleCallback(handle);
   }
+
   const handle = window.setTimeout(work, 200);
+
   return () => window.clearTimeout(handle);
 }
 
@@ -132,10 +137,12 @@ function buildDiffFileContentPlan(
           path: changeKind === "renamed" ? previousPath : currentPath,
           side: "old",
         };
+
   const newSource: DiffFileContentSource =
     changeKind === "deleted"
       ? { kind: "empty", path: currentPath }
       : { kind: "request", path: currentPath, side: "new" };
+
   const hunkIdentity = fileDiff.hunks
     .map(
       (hunk) =>
@@ -174,6 +181,7 @@ function resolveDiffFileContentSource(
       file: { name: source.path, contents: "" },
     });
   }
+
   return fetcher(source.path, source.side);
 }
 
@@ -212,7 +220,9 @@ function isSvgPreviewCard(
 
 function svgTextToDataUrl(contents: string): string | null {
   const trimmedContents = contents.trim();
+
   if (trimmedContents.length === 0) return null;
+
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(trimmedContents)}`;
 }
 
@@ -221,18 +231,15 @@ interface UseGitDiffCardBodyArgs {
   changeKind: GitDiffFileChangeKind;
   onRequestFileContents: RequestDiffFileContents | undefined;
   patchText?: string;
-  renderBeforeVisible: boolean;
 }
 
 interface GitDiffCardBodyState {
-  bodySentinelRef: RefCallback<HTMLDivElement>;
   enrichment: DiffFileEnrichmentState;
   fileDiff: ParsedGitDiffFile;
   fileDiffLabel: string;
   isImageCard: boolean;
   isSvgPreviewCard: boolean;
   shouldGateDeletedDiff: boolean;
-  shouldRenderDiffView: boolean;
   loadDeletedDiff: () => void;
   imageSizeStat: DiffImageSizeStat | null;
   contextExpansion: DiffContextExpansionState;
@@ -245,38 +252,38 @@ export function useGitDiffCardBody({
   changeKind,
   onRequestFileContents,
   patchText,
-  renderBeforeVisible,
 }: UseGitDiffCardBodyArgs): GitDiffCardBodyState {
   const isDeletedFile = changeKind === "deleted";
   const isImageCard = isImagePreviewCard(fileDiff, onRequestFileContents);
   const isSvgCard = isSvgPreviewCard(fileDiff, onRequestFileContents);
+
   const fileDiffLabel = useMemo(
     () => formatGitDiffFileLabel(fileDiff),
     [fileDiff],
   );
+
   const fileContentPlan = useMemo(
     () => buildDiffFileContentPlan(fileDiff, changeKind, patchText),
     [fileDiff, changeKind, patchText],
   );
-  const { ref: bodySentinelRef, isIntersecting: isBodyVisible } =
-    useIntersectionObserver({
-      initialIsIntersecting: false,
-      rootMargin: "200px",
-    });
+
   const fetcherRef = useRef(onRequestFileContents);
   useEffect(() => {
     fetcherRef.current = onRequestFileContents;
   });
+
   const [enrichment, setEnrichment] = useState<DiffFileEnrichmentState>({
     status: "idle",
   });
+
   const enrichmentStatusRef = useRef<DiffFileEnrichmentState["status"]>("idle");
-  const [hasBodyEnteredViewport, setHasBodyEnteredViewport] =
-    useState(renderBeforeVisible);
+
   const [hasLoadedDeletedDiff, setHasLoadedDeletedDiff] = useState(false);
   const [contextRequestVersion, setContextRequestVersion] = useState(0);
+
   const [isContextRequestedByUser, setIsContextRequestedByUser] =
     useState(false);
+
   const isPointerCoarse = usePointerCoarse();
   useEffect(() => {
     enrichmentStatusRef.current = "idle";
@@ -285,33 +292,33 @@ export function useGitDiffCardBody({
     setContextRequestVersion(0);
     setIsContextRequestedByUser(false);
   }, [fileContentPlan.identity, isImageCard, isSvgCard]);
-  useEffect(() => {
-    if (isBodyVisible) {
-      setHasBodyEnteredViewport(true);
-    }
-  }, [isBodyVisible]);
+
   const shouldGateDeletedDiff =
     isDeletedFile && !isImageCard && !isSvgCard && !hasLoadedDeletedDiff;
-  const shouldRenderDiffView = hasBodyEnteredViewport && !shouldGateDeletedDiff;
+
   const needsContentsToRender = isImageCard || isSvgCard;
+
   const canExpandContext =
     !needsContentsToRender &&
     onRequestFileContents !== undefined &&
     patchText !== undefined &&
     fileDiff.hunks.length > 0 &&
     canExpandContextForChangeKind(changeKind);
+
   const shouldFetchContents =
-    shouldRenderDiffView &&
+    !shouldGateDeletedDiff &&
     (needsContentsToRender || (canExpandContext && contextRequestVersion > 0));
+
   useEffect(() => {
     if (
       isPointerCoarse ||
-      !shouldRenderDiffView ||
+      shouldGateDeletedDiff ||
       !canExpandContext ||
       contextRequestVersion > 0
     ) {
       return;
     }
+
     return scheduleIdleWork(() => {
       setContextRequestVersion((version) => (version === 0 ? 1 : version));
     });
@@ -319,13 +326,15 @@ export function useGitDiffCardBody({
     canExpandContext,
     contextRequestVersion,
     isPointerCoarse,
-    shouldRenderDiffView,
+    shouldGateDeletedDiff,
   ]);
   useEffect(() => {
     if (!shouldFetchContents || enrichmentStatusRef.current !== "idle") {
       return;
     }
+
     const fetcher = fetcherRef.current;
+
     if (!fetcher) return;
 
     let cancelled = false;
@@ -340,6 +349,7 @@ export function useGitDiffCardBody({
         if (cancelled) return;
         const oldImage = oldResult?.kind === "image" ? oldResult : null;
         const newImage = newResult?.kind === "image" ? newResult : null;
+
         if (oldImage !== null || newImage !== null) {
           enrichmentStatusRef.current = "ready-image";
           setEnrichment({
@@ -349,17 +359,22 @@ export function useGitDiffCardBody({
             oldSizeBytes: oldImage?.sizeBytes ?? null,
             newSizeBytes: newImage?.sizeBytes ?? null,
           });
+
           return;
         }
+
         if (oldResult?.kind !== "text" || newResult?.kind !== "text") {
           enrichmentStatusRef.current = "unavailable";
           setEnrichment({ status: "unavailable" });
+
           return;
         }
+
         const fullFileContents = toDiffFullFileContents(
           oldResult.file,
           newResult.file,
         );
+
         if (isSvgCard) {
           enrichmentStatusRef.current = "ready-svg";
           setEnrichment({
@@ -368,8 +383,10 @@ export function useGitDiffCardBody({
             oldImageUrl: svgTextToDataUrl(oldResult.file.contents),
             newImageUrl: svgTextToDataUrl(newResult.file.contents),
           });
+
           return;
         }
+
         enrichmentStatusRef.current = "ready";
         setEnrichment({
           status: "ready",
@@ -384,6 +401,7 @@ export function useGitDiffCardBody({
 
     return () => {
       cancelled = true;
+
       if (enrichmentStatusRef.current === "loading") {
         enrichmentStatusRef.current = "idle";
       }
@@ -402,9 +420,11 @@ export function useGitDiffCardBody({
       enrichmentStatusRef.current = "idle";
       setEnrichment({ status: "idle" });
     }
+
     setIsContextRequestedByUser(true);
     setContextRequestVersion((version) => version + 1);
   }, []);
+
   const contextExpansionStatus = getDiffContextExpansionStatus({
     canExpandContext,
     contextRequested: contextRequestVersion > 0,
@@ -412,6 +432,7 @@ export function useGitDiffCardBody({
     isPrefetchedAutomatically: !isPointerCoarse,
     isRequestedByUser: isContextRequestedByUser,
   });
+
   const contextExpansion = useMemo<DiffContextExpansionState>(
     () => ({
       status: contextExpansionStatus,
@@ -427,7 +448,6 @@ export function useGitDiffCardBody({
 
   const loadDeletedDiff = useCallback(() => {
     setHasLoadedDeletedDiff(true);
-    setHasBodyEnteredViewport(true);
   }, []);
 
   const imageSizeStat =
@@ -436,14 +456,12 @@ export function useGitDiffCardBody({
       : null;
 
   return {
-    bodySentinelRef,
     enrichment,
     fileDiff,
     fileDiffLabel,
     isImageCard,
     isSvgPreviewCard: isSvgCard,
     shouldGateDeletedDiff,
-    shouldRenderDiffView,
     loadDeletedDiff,
     imageSizeStat,
     contextExpansion,
@@ -467,9 +485,11 @@ function getDiffContextExpansionStatus({
 }): DiffContextExpansionStatus {
   if (!canExpandContext) return "unavailable";
   const loadingStatus = isRequestedByUser ? "loading" : "prefetching";
+
   switch (enrichmentStatus) {
     case "idle":
       if (contextRequested) return loadingStatus;
+
       return isPrefetchedAutomatically ? "prefetching" : "idle";
     case "loading":
       return loadingStatus;
@@ -483,6 +503,7 @@ function getDiffContextExpansionStatus({
       return "unavailable";
     default: {
       const _exhaustive: never = enrichmentStatus;
+
       return _exhaustive;
     }
   }
@@ -499,12 +520,15 @@ function buildGitDiffCardImageSides(
 ): GitDiffCardImageSide[] {
   const showSideLabels = oldImageUrl !== null && newImageUrl !== null;
   const sides: GitDiffCardImageSide[] = [];
+
   if (oldImageUrl !== null) {
     sides.push({ url: oldImageUrl, caption: showSideLabels ? "Old" : null });
   }
+
   if (newImageUrl !== null) {
     sides.push({ url: newImageUrl, caption: showSideLabels ? "New" : null });
   }
+
   return sides;
 }
 
@@ -537,6 +561,7 @@ function getGitDiffCardImageUrls(
   ) {
     return null;
   }
+
   return {
     oldImageUrl: enrichment.oldImageUrl,
     newImageUrl: enrichment.newImageUrl,
@@ -552,7 +577,9 @@ export function getGitDiffCardImageSizeStat(
 ): DiffImageSizeStat | null {
   const addedBytes = changeKind === "deleted" ? null : preview.newSizeBytes;
   const removedBytes = changeKind === "added" ? null : preview.oldSizeBytes;
+
   if (addedBytes === null && removedBytes === null) return null;
+
   return { addedBytes, removedBytes };
 }
 
@@ -570,10 +597,12 @@ export function GitDiffCardImagePreviewBody({
   const [expandedImageIndex, setExpandedImageIndex] = useState<number | null>(
     null,
   );
+
   const imageSides = buildGitDiffCardImageSides(
     preview.oldImageUrl,
     preview.newImageUrl,
   );
+
   if (imageSides.length === 0) {
     return (
       <div className="px-3 py-3 text-xs text-muted-foreground">
@@ -581,8 +610,10 @@ export function GitDiffCardImagePreviewBody({
       </div>
     );
   }
+
   const expandedImageSide =
     expandedImageIndex === null ? undefined : imageSides[expandedImageIndex];
+
   const stepExpandedImage = (direction: "previous" | "next") => {
     setExpandedImageIndex((currentIndex) =>
       currentIndex === null
@@ -594,6 +625,7 @@ export function GitDiffCardImagePreviewBody({
           }),
     );
   };
+
   return (
     <>
       <div className="@container/diff-preview min-w-0">
@@ -662,7 +694,9 @@ function GitDiffCardImageBody({
   if (enrichment.status === "idle" || enrichment.status === "loading") {
     return <DiffLoadingSkeleton />;
   }
+
   const preview = getGitDiffCardImageUrls(enrichment);
+
   if (preview === null) {
     return (
       <div className="px-3 py-3 text-xs text-muted-foreground">
@@ -670,6 +704,7 @@ function GitDiffCardImageBody({
       </div>
     );
   }
+
   return (
     <GitDiffCardImagePreviewBody
       preview={preview}
@@ -722,6 +757,7 @@ interface GitDiffCardBodyProps {
   presentation: DiffPresentation;
   svgDisplayMode: GitDiffCardSvgDisplayMode;
   reservesCollapseGutter: boolean;
+  defersOffscreenRendering: boolean;
   onSelectionAddToChat?: (text: string) => void;
 }
 
@@ -730,17 +766,16 @@ export function GitDiffCardBody({
   presentation,
   svgDisplayMode,
   reservesCollapseGutter,
+  defersOffscreenRendering,
   onSelectionAddToChat,
 }: GitDiffCardBodyProps) {
   const {
-    bodySentinelRef,
     enrichment,
     fileDiff,
     fileDiffLabel,
     isImageCard,
     isSvgPreviewCard,
     shouldGateDeletedDiff,
-    shouldRenderDiffView,
     loadDeletedDiff,
     contextExpansion,
     fullFileContents,
@@ -749,9 +784,12 @@ export function GitDiffCardBody({
 
   return (
     <div
-      ref={bodySentinelRef}
       className="overflow-hidden rounded-b-lg bg-background"
-      style={GIT_DIFF_CARD_BODY_STYLE}
+      style={
+        defersOffscreenRendering
+          ? GIT_DIFF_CARD_BODY_DEFERRED_STYLE
+          : GIT_DIFF_CARD_BODY_STYLE
+      }
     >
       {shouldGateDeletedDiff ? (
         <div className="flex items-center py-3 pl-2 pr-3 text-xs text-muted-foreground">
@@ -771,8 +809,6 @@ export function GitDiffCardBody({
             </Button>
           </span>
         </div>
-      ) : !shouldRenderDiffView ? (
-        <DiffLoadingSkeleton />
       ) : isImageCard ? (
         <GitDiffCardImageBody
           enrichment={enrichment}
@@ -818,6 +854,7 @@ function GitDiffCardContextExpansionFooter({
   reservesCollapseGutter,
 }: GitDiffCardContextExpansionFooterProps) {
   const { status, request } = contextExpansion;
+
   if (
     status === "unavailable" ||
     status === "ready" ||
@@ -825,6 +862,7 @@ function GitDiffCardContextExpansionFooter({
   ) {
     return null;
   }
+
   return (
     <div className="flex items-center py-2 pl-2 pr-3 text-xs text-muted-foreground">
       {reservesCollapseGutter ? (

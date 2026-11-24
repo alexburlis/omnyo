@@ -2,27 +2,29 @@ import type {
   PluginBoundThreadAction,
   PluginThreadActionsInlineItem,
   PluginThreadActionTarget,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { Fragment } from "react";
 import {
   ContextMenuItem,
+  ContextMenuShortcut,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
-} from "@bb/shared-ui/context-menu";
+} from "@omnyo/shared-ui/context-menu";
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
-} from "@bb/shared-ui/dropdown-menu";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/shared-ui/dropdown-menu";
+import { Icon } from "@omnyo/shared-ui/icon";
 import {
   ActionMenuItem,
   ActionMenuSeparator,
-} from "@bb/shared-ui/action-menu-items";
+} from "@omnyo/shared-ui/action-menu-items";
 import {
   bindThreadAction,
   useDefaultRequestRename,
@@ -45,11 +47,14 @@ export function groupThreadActionMenuEntries(
   inline: readonly ThreadActionMenuEntry[],
 ): ThreadActionMenuEntry[][] {
   const groups = new Map<string, ThreadActionMenuEntry[]>();
+
   for (const entry of [...entries, ...inline]) {
     const group = groups.get(entry.group);
+
     if (group === undefined) groups.set(entry.group, [entry]);
     else group.push(entry);
   }
+
   return [...groups.entries()]
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([, group]) => group);
@@ -67,6 +72,7 @@ export function useThreadActionMenuGroups({
   const defaultRequestRename = useDefaultRequestRename();
   const rename = requestRename ?? defaultRequestRename;
   const entries = useThreadActionEntries(thread, { requestRename: rename });
+
   return groupThreadActionMenuEntries(
     entries,
     inline.map((item) => ({
@@ -85,8 +91,10 @@ function ThreadActionChoiceRows({
   surface: ThreadActionMenuSurface;
 }) {
   const choices = entry.action.choices;
+
   if (choices === undefined) return null;
   const Item = surface === "context" ? ContextMenuItem : DropdownMenuItem;
+
   return choices.items.map((choice) => (
     <Item
       key={choice.id}
@@ -116,7 +124,9 @@ function ThreadActionChoicesHint({
   surface: ThreadActionMenuSurface;
 }) {
   const hint = entry.action.choices?.hint;
+
   if (hint === undefined) return null;
+
   return (
     <>
       <ActionMenuSeparator surface={surface} />
@@ -129,6 +139,7 @@ function ThreadActionChoicesHint({
 
 function ThreadActionLabel({ action }: { action: PluginBoundThreadAction }) {
   if (action.detail === undefined) return action.label;
+
   return (
     <span className="flex min-w-0 flex-1 flex-col">
       <span className="truncate">{action.label}</span>
@@ -141,16 +152,22 @@ function ThreadActionLabel({ action }: { action: PluginBoundThreadAction }) {
 
 function ThreadActionMenuRow({
   entry,
+  shortcut,
   surface,
   isDrawer,
   onOpenDrawerStep,
 }: {
   entry: ThreadActionMenuEntry;
+  shortcut: string | undefined;
   surface: ThreadActionMenuSurface;
   isDrawer: boolean;
   onOpenDrawerStep: (key: string) => void;
 }) {
   const { action } = entry;
+
+  const MenuShortcut =
+    surface === "context" ? ContextMenuShortcut : DropdownMenuShortcut;
+
   if (action.choices === undefined) {
     return (
       <ActionMenuItem
@@ -163,9 +180,13 @@ function ThreadActionMenuRow({
         }}
       >
         <ThreadActionLabel action={action} />
+        {shortcut === undefined ? null : (
+          <MenuShortcut aria-hidden="true">{shortcut}</MenuShortcut>
+        )}
       </ActionMenuItem>
     );
   }
+
   if (isDrawer) {
     return (
       <DropdownMenuItem
@@ -185,11 +206,15 @@ function ThreadActionMenuRow({
       </DropdownMenuItem>
     );
   }
+
   const Sub = surface === "context" ? ContextMenuSub : DropdownMenuSub;
+
   const SubTrigger =
     surface === "context" ? ContextMenuSubTrigger : DropdownMenuSubTrigger;
+
   const SubContent =
     surface === "context" ? ContextMenuSubContent : DropdownMenuSubContent;
+
   return (
     <Sub>
       <SubTrigger disabled={action.disabled}>
@@ -234,12 +259,14 @@ function ThreadActionDrawerStep({
 
 export function ThreadActionMenuRows({
   groups,
+  shortcuts,
   surface,
   isDrawer,
   drawerStep,
   onDrawerStepChange,
 }: {
   groups: readonly ThreadActionMenuEntry[][];
+  shortcuts: ReadonlyMap<string, string>;
   surface: ThreadActionMenuSurface;
   isDrawer: boolean;
   drawerStep: string | null;
@@ -249,6 +276,7 @@ export function ThreadActionMenuRows({
     isDrawer && drawerStep !== null
       ? groups.flat().find((entry) => entry.key === drawerStep)
       : undefined;
+
   if (stepEntry !== undefined && stepEntry.action.choices !== undefined) {
     return (
       <ThreadActionDrawerStep
@@ -257,6 +285,7 @@ export function ThreadActionMenuRows({
       />
     );
   }
+
   return groups.map((group, index) => (
     <Fragment key={group[0]?.group ?? index}>
       {index > 0 && !isDrawer ? (
@@ -266,6 +295,7 @@ export function ThreadActionMenuRows({
         <ThreadActionMenuRow
           key={entry.key}
           entry={entry}
+          shortcut={shortcuts.get(entry.key)}
           surface={surface}
           isDrawer={isDrawer}
           onOpenDrawerStep={onDrawerStepChange}

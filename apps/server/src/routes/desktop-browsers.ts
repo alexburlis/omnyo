@@ -4,15 +4,17 @@ import {
   desktopBrowserCreateRequestSchema,
   desktopBrowserAcquireRequestSchema,
   desktopBrowserImportCookiesRequestSchema,
+  desktopRendererProfileRequestSchema,
   publicApiRoutes,
   typedRoutes,
   type PublicApiSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { AppDeps } from "../types.js";
 import { ApiError } from "../errors.js";
 import {
   acquireDesktopBrowserControl,
   captureDesktopBrowserTab,
+  configureDesktopBrowserCookieSync,
   createDesktopBrowserTab,
   desktopBrowserTabAction,
   importDesktopBrowserCookies,
@@ -20,7 +22,9 @@ import {
   listDesktopBrowserInstances,
   listDesktopBrowserTabs,
   openDesktopBrowserConnection,
+  readDesktopBrowserCookieSync,
   releaseDesktopBrowserControl,
+  profileDesktopRenderer,
 } from "../services/desktop-browsers.js";
 
 export function registerDesktopBrowserRoutes(app: Hono, deps: AppDeps) {
@@ -28,12 +32,15 @@ export function registerDesktopBrowserRoutes(app: Hono, deps: AppDeps) {
     onValidationError: (message) =>
       new ApiError(400, "invalid_request", message),
   });
+
   const routes = publicApiRoutes.desktopBrowsers;
+
   for (const route of Object.values(routes)) {
     app.use(route.path, async (context, next) => {
       const problem = browserRequestProblem(context, deps, {
         requireJsonForMutation: true,
       });
+
       if (problem)
         throw new ApiError(
           problem.status,
@@ -45,9 +52,20 @@ export function registerDesktopBrowserRoutes(app: Hono, deps: AppDeps) {
       await next();
     });
   }
+
   post(routes.listInstances, async (c, input) =>
     c.json(await listDesktopBrowserInstances(deps, input.hostId)),
   );
+  post(routes.profileRenderer, async (c, input) => {
+    c.header("Cache-Control", "no-store");
+
+    return c.json(
+      await profileDesktopRenderer(
+        deps,
+        desktopRendererProfileRequestSchema.parse(input),
+      ),
+    );
+  });
   post(routes.listTabs, async (c, input) =>
     c.json(await listDesktopBrowserTabs(deps, input)),
   );
@@ -69,6 +87,7 @@ export function registerDesktopBrowserRoutes(app: Hono, deps: AppDeps) {
   );
   post(routes.openConnection, async (c, input) => {
     c.header("Cache-Control", "no-store");
+
     return c.json(await openDesktopBrowserConnection(deps, input));
   });
   post(routes.releaseControl, async (c, input) =>
@@ -76,6 +95,7 @@ export function registerDesktopBrowserRoutes(app: Hono, deps: AppDeps) {
   );
   post(routes.captureTab, async (c, input) => {
     c.header("Cache-Control", "no-store");
+
     return c.json(await captureDesktopBrowserTab(deps, input));
   });
   post(routes.revealTab, async (c, input) =>
@@ -89,6 +109,7 @@ export function registerDesktopBrowserRoutes(app: Hono, deps: AppDeps) {
   );
   post(routes.importCookies, async (c, input) => {
     c.header("Cache-Control", "no-store");
+
     return c.json(
       await importDesktopBrowserCookies(
         deps,
@@ -96,4 +117,13 @@ export function registerDesktopBrowserRoutes(app: Hono, deps: AppDeps) {
       ),
     );
   });
+  post(routes.cookieSyncStatus, async (c, input) =>
+    c.json(await readDesktopBrowserCookieSync(deps, input, "status")),
+  );
+  post(routes.configureCookieSync, async (c, input) =>
+    c.json(await configureDesktopBrowserCookieSync(deps, input)),
+  );
+  post(routes.runCookieSync, async (c, input) =>
+    c.json(await readDesktopBrowserCookieSync(deps, input, "run")),
+  );
 }

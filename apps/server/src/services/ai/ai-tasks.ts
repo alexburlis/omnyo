@@ -1,11 +1,11 @@
-import { getAiServiceSelections } from "@bb/db";
+import { getAiServiceSelections } from "@omnyo/db";
 import type {
   AiServiceSelection,
   AiServiceStatus,
   AiTask,
   AiTextTask,
   JsonObject,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { runtimeErrorLogFields } from "../lib/error-log-fields.js";
 import { cleanGeneratedLine } from "./ai-reply.js";
@@ -40,6 +40,7 @@ export type AiTaskOutcome<T> =
       reason: AiTaskFailureReason;
       message: string;
       durationMs: number;
+      error: unknown;
     };
 
 type AiTaskDeps = Pick<
@@ -66,6 +67,13 @@ class AiTaskTimeoutError extends Error {
   }
 }
 
+export class AiTaskEmptyResultError extends Error {
+  constructor() {
+    super("AI service returned an empty result");
+    this.name = "AiTaskEmptyResultError";
+  }
+}
+
 function compareIds(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
@@ -76,10 +84,7 @@ export function orderedAiServices(
   return deps.aiServices
     .list()
     .sort(
-      (a, b) =>
-        Number(b.pluginId === "bb-ai") - Number(a.pluginId === "bb-ai") ||
-        compareIds(a.pluginId, b.pluginId) ||
-        compareIds(a.id, b.id),
+      (a, b) => compareIds(a.pluginId, b.pluginId) || compareIds(a.id, b.id),
     );
 }
 
@@ -98,6 +103,7 @@ export function selectedAiService(
   selection: Extract<AiServiceSelection, { mode: "service" }>,
 ): AiServiceRegistration | null {
   const service = deps.aiServices.get(selection);
+
   return service !== null && aiServiceSupportsTask(service, task)
     ? service
     : null;
@@ -109,8 +115,10 @@ export function aiTaskServices(
   selection: AiServiceSelection,
 ): AiServiceRegistration[] {
   if (selection.mode === "off") return [];
+
   if (selection.mode === "automatic") return automaticAiServices(deps, task);
   const service = selectedAiService(deps, task, selection);
+
   return service === null ? [] : [service];
 }
 
@@ -119,26 +127,31 @@ export function isAiTaskAvailable(
   task: AiTask,
 ): boolean {
   const selection = getAiServiceSelections(deps.db)[task];
+
   return aiTaskServices(deps, task, selection).some(
     (service) =>
       deps.aiServices.peekStatus(aiServiceKey(service))?.ready === true,
   );
 }
 
-function linkedSignal(
+export function linkedSignal(
   timeoutMs: number,
   parent: AbortSignal | undefined,
 ): { signal: AbortSignal; dispose(): void; timedOut(): boolean } {
   const controller = new AbortController();
   let timedOut = false;
+
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort(new AiTaskTimeoutError(timeoutMs));
   }, timeoutMs);
+
   timer.unref();
   const onParentAbort = (): void => controller.abort(parent?.reason);
+
   if (parent?.aborted) onParentAbort();
   else parent?.addEventListener("abort", onParentAbort, { once: true });
+
   return {
     signal: controller.signal,
     timedOut: () => timedOut,
@@ -149,8 +162,12 @@ function linkedSignal(
   };
 }
 
-function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+export function abortable<T>(
+  work: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
   if (signal.aborted) return Promise.reject(signal.reason);
+
   return new Promise<T>((resolve, reject) => {
     const onAbort = (): void => reject(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
@@ -180,22 +197,32 @@ export async function runAiTask<T>(
 ): Promise<AiTaskOutcome<T>> {
   const startedAt = Date.now();
   const selection = getAiServiceSelections(deps.db)[args.task];
+
   const fail = (
     reason: AiTaskFailureReason,
     message: string,
+    error: unknown = null,
   ): AiTaskOutcome<T> => ({
     ok: false,
     reason,
     message,
     durationMs: Date.now() - startedAt,
+    error,
   });
+
   if (selection.mode === "off") {
-    return fail("off", "Turned off in Settings → AI services");
+    return fail(
+      "off",
+      `This AI task is turned off. To enable it, run \`omnyo settings ai-services set ${args.task} automatic\`.`,
+    );
   }
+
   if (args.signal?.aborted) {
     return fail("cancelled", REQUEST_CANCELLED_MESSAGE);
   }
+
   const services = aiTaskServices(deps, args.task, selection);
+
   if (services.length === 0) {
     return fail(
       "unavailable",
@@ -204,37 +231,55 @@ export async function runAiTask<T>(
         : "No AI service is available",
     );
   }
+
   const timeoutMs = args.timeoutMs ?? AI_TASK_TIMEOUT_MS[args.task];
-  let last: { reason: AiTaskFailureReason; message: string } = {
+
+  let last: { reason: AiTaskFailureReason; message: string; error: unknown } = {
     reason: "unavailable",
     message: "No AI service is ready",
+    error: null,
   };
+
   for (const service of services) {
-    const skipped = skipMessage(
-      service,
-      await deps.aiServices.status(aiServiceKey(service)),
-    );
+    const skipped =
+      args.task === "voice"
+        ? null
+        : skipMessage(
+            service,
+            await deps.aiServices.status(aiServiceKey(service)),
+          );
+
     if (skipped !== null) {
-      last = { reason: "unavailable", message: skipped };
+      last = { reason: "unavailable", message: skipped, error: null };
       continue;
     }
+
     if (args.signal?.aborted) {
-      last = { reason: "cancelled", message: REQUEST_CANCELLED_MESSAGE };
+      last = {
+        reason: "cancelled",
+        message: REQUEST_CANCELLED_MESSAGE,
+        error: null,
+      };
       break;
     }
+
     const link = linkedSignal(timeoutMs, args.signal);
+
     const fields = {
       task: args.task,
       serviceId: service.id,
       pluginId: service.pluginId,
       ...args.logContext,
     };
+
     try {
       const raw = await abortable(
         Promise.resolve().then(() => args.call(service, link.signal)),
         link.signal,
       );
+
       const value = args.accept(raw);
+
       if (value !== null) {
         return {
           ok: true,
@@ -243,21 +288,29 @@ export async function runAiTask<T>(
           durationMs: Date.now() - startedAt,
         };
       }
+
       last = {
         reason: "failed",
         message: `${service.displayName} returned an empty reply`,
+        error: new AiTaskEmptyResultError(),
       };
       deps.logger.warn(fields, `${args.label} returned an empty reply`);
     } catch (error) {
       if (args.signal?.aborted) {
-        last = { reason: "cancelled", message: REQUEST_CANCELLED_MESSAGE };
+        last = {
+          reason: "cancelled",
+          message: REQUEST_CANCELLED_MESSAGE,
+          error: null,
+        };
         deps.logger.info(fields, `${args.label} was cancelled`);
         break;
       }
+
       if (link.timedOut()) {
         last = {
           reason: "timeout",
           message: `${service.displayName} timed out after ${timeoutMs}ms`,
+          error,
         };
         deps.logger.info({ ...fields, timeoutMs }, `${args.label} timed out`);
       } else {
@@ -265,9 +318,11 @@ export async function runAiTask<T>(
           error instanceof Error && error.message.trim().length > 0
             ? error.message.trim()
             : "Request failed";
+
         last = {
           reason: "failed",
           message: `${service.displayName}: ${message}`,
+          error,
         };
         deps.logger.warn(
           { ...fields, ...runtimeErrorLogFields(deps.config, error) },
@@ -278,7 +333,8 @@ export async function runAiTask<T>(
       link.dispose();
     }
   }
-  return fail(last.reason, last.message);
+
+  return fail(last.reason, last.message, last.error);
 }
 
 export function runTextAiTask(
@@ -302,6 +358,7 @@ export function runTextAiTask(
       if (service.complete === null) {
         throw new Error("This service does not answer text prompts");
       }
+
       return service.complete(args.prompt, { signal });
     },
     accept: (raw) => (typeof raw === "string" ? cleanGeneratedLine(raw) : null),

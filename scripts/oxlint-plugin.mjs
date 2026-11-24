@@ -7,10 +7,13 @@ const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+
 const forkablePluginRoots = JSON.parse(
   readFileSync(new URL("./forkable-plugins.json", import.meta.url), "utf8"),
 ).plugins.map((pluginDir) => `${path.resolve(repoRoot, pluginDir)}${path.sep}`);
+
 const registryDir = path.join(repoRoot, "packages", "plugin-registry", "r");
+
 const registryAliases = new Set(
   readdirSync(registryDir)
     .filter((name) => name.endsWith(".json") && name !== "index.json")
@@ -20,6 +23,7 @@ const registryAliases = new Set(
     )
     .map((file) => `@/${file.target.replace(/\.(?:tsx?|jsx?)$/u, "")}`),
 );
+
 const workspacePackageNames = new Set(
   ["apps", "packages", "plugins", "tests", "examples/plugins"]
     .flatMap((dir) =>
@@ -29,16 +33,14 @@ const workspacePackageNames = new Set(
     )
     .filter((manifestPath) => existsSync(manifestPath))
     .map((manifestPath) => JSON.parse(readFileSync(manifestPath, "utf8")).name)
-    .filter((name) => name !== "@get-bb/plugin-sdk"),
+    .filter((name) => name !== "@omnyo/plugin-sdk"),
 );
 
 function isWorkspacePackage(specifier) {
   const segments = specifier.split("/");
-  return (
-    specifier.startsWith("@bb/") ||
-    workspacePackageNames.has(
-      specifier.startsWith("@") ? segments.slice(0, 2).join("/") : segments[0],
-    )
+
+  return workspacePackageNames.has(
+    specifier.startsWith("@") ? segments.slice(0, 2).join("/") : segments[0],
   );
 }
 
@@ -51,6 +53,7 @@ const moduleLoaderCalls = new Set([
   "vi.importActual",
   "vi.importMock",
 ]);
+
 const blockingChildProcessCalls = new Set([
   "execFileSync",
   "execSync",
@@ -90,6 +93,7 @@ const noNativeTitleWithAriaLabel = {
     return {
       JSXOpeningElement(node) {
         const titleAttribute = findJsxAttribute(node, "title");
+
         if (titleAttribute && findJsxAttribute(node, "aria-label")) {
           context.report({
             node: titleAttribute,
@@ -108,6 +112,7 @@ const noNativeTitleOnButton = {
       JSXOpeningElement(node) {
         if (node.name.type === "JSXIdentifier" && node.name.name === "Button") {
           const titleAttribute = findJsxAttribute(node, "title");
+
           if (titleAttribute) {
             context.report({
               node: titleAttribute,
@@ -123,6 +128,7 @@ const noNativeTitleOnButton = {
 
 function calleeName(callee) {
   if (callee.type === "Identifier") return callee.name;
+
   if (
     callee.type === "MemberExpression" &&
     callee.object.type === "Identifier" &&
@@ -130,41 +136,51 @@ function calleeName(callee) {
   ) {
     return `${callee.object.name}.${callee.property.name}`;
   }
+
   return null;
 }
 
 const forkablePluginImports = {
   create(context) {
     const filename = path.resolve(context.filename);
+
     const pluginRoot = forkablePluginRoots.find((root) =>
       filename.startsWith(root),
     );
+
     if (pluginRoot === undefined) return {};
 
     function check(node) {
       if (node?.type !== "Literal" || typeof node.value !== "string") return;
       const specifier = node.value;
+
       if (isWorkspacePackage(specifier)) {
         context.report({
           node,
-          message: `${specifier} is a bb workspace package, which a copy of this plugin cannot install. Forkable plugins import only @get-bb/plugin-sdk, npm packages, their own files, and registry components through @/ (for example @/components/ui/button) (scripts/forkable-plugins.json).`,
+          message: `${specifier} is an Omnyo workspace package, which a copy of this plugin cannot install. Forkable plugins import only @omnyo/plugin-sdk, npm packages, their own files, and registry components through @/ (for example @/components/ui/button) (scripts/forkable-plugins.json).`,
         });
+
         return;
       }
-      if (specifier.startsWith("@get-bb/plugin-sdk/internal/")) {
+
+      if (specifier.startsWith("@omnyo/plugin-sdk/internal/")) {
         context.report({
           node,
-          message: `${specifier} is an internal SDK module that bb can change in any release. Forkable plugins import only the SDK's public entry points (scripts/forkable-plugins.json).`,
+          message: `${specifier} is an internal SDK module that Omnyo can change in any release. Forkable plugins import only the SDK's public entry points (scripts/forkable-plugins.json).`,
         });
+
         return;
       }
+
       if (specifier.startsWith("@/") && !registryAliases.has(specifier)) {
         context.report({
           node,
           message: `${specifier} is not a component registry file, so a fork cannot write it into its copy. @/ imports name registry targets such as @/components/ui/button or @/lib/utils (scripts/forkable-plugins.json).`,
         });
+
         return;
       }
+
       if (
         specifier.startsWith(".") &&
         !`${path.resolve(path.dirname(filename), specifier)}${path.sep}`.startsWith(
@@ -235,6 +251,7 @@ const noComments = {
               const [start, end] = comment.range;
               const before = fileText[start - 1];
               const after = fileText[end];
+
               const needsSeparator =
                 commentText.startsWith("/*") &&
                 before !== undefined &&
@@ -261,7 +278,7 @@ export const rules = {
 
 export default {
   meta: {
-    name: "bb",
+    name: "omnyo",
   },
   rules,
 };

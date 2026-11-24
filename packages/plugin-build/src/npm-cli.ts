@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 function bundledNpmBin(fileName: string): string {
   const require = createRequire(import.meta.url);
+
   return join(dirname(require.resolve("npm/package.json")), "bin", fileName);
 }
 

@@ -10,8 +10,8 @@ import {
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { Dialog, DialogContent, DialogTitle } from "@bb/shared-ui/dialog";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import { Dialog, DialogContent, DialogTitle } from "@omnyo/shared-ui/dialog";
 import {
   Select,
   SelectContent,
@@ -21,9 +21,10 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
-} from "@bb/shared-ui/select";
+} from "@omnyo/shared-ui/select";
 
 const pendingFrames = new Map<number, FrameRequestCallback>();
+
 let nextFrameId = 0;
 
 beforeEach(() => {
@@ -31,6 +32,7 @@ beforeEach(() => {
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
     nextFrameId += 1;
     pendingFrames.set(nextFrameId, callback);
+
     return nextFrameId;
   });
   vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
@@ -48,6 +50,7 @@ function runNextFrame() {
   act(() => {
     const queued = Array.from(pendingFrames.entries());
     pendingFrames.clear();
+
     for (const [, callback] of queued) callback(performance.now());
   });
 }
@@ -60,8 +63,11 @@ function topmostOpenBackdrop(): HTMLElement {
   const backdrops = document.querySelectorAll<HTMLElement>(
     '[data-persistent-drawer-backdrop][data-state="open"]',
   );
+
   const top = backdrops[backdrops.length - 1];
+
   if (top === undefined) throw new Error("no open drawer backdrop");
+
   return top;
 }
 
@@ -88,6 +94,7 @@ function FolderOptions() {
 function NewProjectDialog({ compact }: { compact: boolean }) {
   const [open, setOpen] = useState(true);
   const [folder, setFolder] = useState("none");
+
   return (
     <CompactViewportOverrideProvider isCompactViewport={compact}>
       <main data-testid="app-root">
@@ -114,6 +121,7 @@ function renderCompactDialog() {
   runFrames();
   const name = screen.getByRole("textbox", { name: "Project name" });
   fireEvent.change(name, { target: { value: "Roadmap" } });
+
   return {
     name,
     trigger: screen.getByRole("combobox", { name: "Folder" }),
@@ -124,6 +132,7 @@ function renderCompactDialog() {
 function openPicker(trigger: HTMLElement) {
   fireEvent.click(trigger);
   runFrames();
+
   return screen.getByRole("listbox");
 }
 
@@ -224,8 +233,10 @@ describe("compact Select nested in a compact Dialog", () => {
     fireEvent.keyDown(trigger, { key: "Enter" });
     runFrames();
     const listbox = screen.getByRole("listbox", { name: "Folder" });
+
     const option = (name: string) =>
       within(listbox).getByRole("option", { name });
+
     const type = (key: string) =>
       fireEvent.keyDown(document.activeElement as HTMLElement, { key });
 

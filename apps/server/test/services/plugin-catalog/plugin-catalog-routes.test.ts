@@ -1,14 +1,12 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createConnection, migrate, type DbConnection } from "@bb/db";
+import { createConnection, migrate, type DbConnection } from "@omnyo/db";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { registerPluginCatalogRoutes } from "../../../src/routes/plugin-catalog.js";
 import { createPluginInstallJobs } from "../../../src/services/plugins/plugin-install-jobs.js";
 import { createPluginCatalogService } from "../../../src/services/plugin-catalog/plugin-catalog-service.js";
-import { refreshCuratedMarketplace } from "../../helpers/plugin-catalog.js";
-import { BUNDLED_CURATED_MARKETPLACE } from "../../../src/services/plugin-catalog/curated-marketplace.js";
 import {
   BUILTIN_PLUGINS,
   BUNDLED_PLUGINS,
@@ -16,7 +14,7 @@ import {
 } from "../../../src/services/plugins/builtin-registry.js";
 
 const MANIFEST_URL = "https://marketplace.test/marketplace.json";
-const SEED_ENTRY_COUNT = BUNDLED_CURATED_MARKETPLACE.plugins.length;
+
 const VALID_SVG = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h16v16H0z"/></svg>',
 );
@@ -29,7 +27,7 @@ describe("plugin catalog routes", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    dataDir = await mkdtemp(join(tmpdir(), "bb-catalog-routes-"));
+    dataDir = await mkdtemp(join(tmpdir(), "omnyo-catalog-routes-"));
   });
 
   afterEach(async () => {
@@ -43,7 +41,6 @@ describe("plugin catalog routes", () => {
     const catalog = createPluginCatalogService({
       db,
       appVersion: "1.0.0",
-      marketplaceUrl: MANIFEST_URL,
       dataDir,
       plugins: {
         installOfficialPlugin: async () => {
@@ -59,12 +56,14 @@ describe("plugin catalog routes", () => {
       },
       ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
     });
+
     const app = new Hono();
     registerPluginCatalogRoutes(
       app,
       catalog,
       createPluginInstallJobs({ notifyChanged: () => {} }),
     );
+
     return { app, catalog };
   }
 
@@ -74,17 +73,19 @@ describe("plugin catalog routes", () => {
     const status = await app.request("/plugin-catalog");
     await expect(status.json()).resolves.toMatchObject({
       catalog: {
-        pluginCount: BUNDLED_PLUGINS.length + SEED_ENTRY_COUNT,
+        pluginCount: BUNDLED_PLUGINS.length,
         includedPluginCount: BUILTIN_PLUGINS.length,
-        optionalPluginCount: OFFICIAL_PLUGINS.length + SEED_ENTRY_COUNT,
+        optionalPluginCount: OFFICIAL_PLUGINS.length,
       },
     });
+
     const search = await app.request(
       "/plugin-catalog/search?q=durable%20memory",
     );
+
     await expect(search.json()).resolves.toMatchObject({
       results: [{ entryId: "memory", installed: false }],
-      collections: [{ id: "bb-official", displayName: "BB Official" }],
+      collections: [{ id: "omnyo-official", displayName: "Omnyo Official" }],
     });
 
     const refresh = await app.request("/plugin-catalog/refresh", {
@@ -92,6 +93,7 @@ describe("plugin catalog routes", () => {
       headers: { "content-type": "application/json" },
       body: "{}",
     });
+
     expect(refresh.status).toBe(404);
 
     const install = await app.request("/plugin-catalog/install", {
@@ -99,6 +101,7 @@ describe("plugin catalog routes", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ entryId: "memory" }),
     });
+
     expect(install.status).toBe(422);
     await expect(install.json()).resolves.toMatchObject({
       error: expect.stringContaining("unexpected install"),
@@ -109,6 +112,7 @@ describe("plugin catalog routes", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ entryId: "memory", version: "0.2.0" }),
     });
+
     expect(versionOverride.status).toBe(422);
   });
 
@@ -120,6 +124,7 @@ describe("plugin catalog routes", () => {
         expect.objectContaining({ entryId: "docs" }),
       ]),
     });
+
     for (const entryId of ["docs", "simple-notes"]) {
       const install = await app.request("/plugin-catalog/install", {
         method: "POST",
@@ -127,15 +132,16 @@ describe("plugin catalog routes", () => {
           "content-type": "application/json",
           prefer: "respond-async",
         },
-        body: JSON.stringify({ entryId, marketplace: "bb-official" }),
+        body: JSON.stringify({ entryId, marketplace: "omnyo-official" }),
       });
+
       expect(install.status).toBe(202);
       await expect(install.json()).resolves.toMatchObject({
         job: {
           target: {
             kind: "catalog",
             entryId: "docs",
-            marketplace: "bb-official",
+            marketplace: "omnyo-official",
           },
         },
       });
@@ -148,8 +154,8 @@ describe("plugin catalog routes", () => {
         ? new Response(
             JSON.stringify({
               schemaVersion: 1,
-              name: "bb-community",
-              displayName: "BB Community",
+              name: "acme-plugins",
+              displayName: "Acme Plugins",
               plugins: [
                 {
                   id: "widgets",
@@ -170,26 +176,30 @@ describe("plugin catalog routes", () => {
           )
         : new Response(VALID_SVG, { status: 200 }),
     );
-    await refreshCuratedMarketplace(catalog, 1_000);
-    const hash = (await catalog.icon("bb-community", "widgets"))?.hash;
+
+    await catalog.addMarketplace({ source: MANIFEST_URL, subdirectory: null });
+    const hash = (await catalog.icon("acme-plugins", "widgets"))?.hash;
     expect(hash).toBeDefined();
 
     const hashed = await app.request(
-      `/plugin-catalog/icons/bb-community/widgets?h=${hash}`,
+      `/plugin-catalog/icons/acme-plugins/widgets?h=${hash}`,
     );
+
     expect(hashed.status).toBe(200);
     expect(hashed.headers.get("content-type")).toBe("image/svg+xml");
     expect(hashed.headers.get("cache-control")).toContain("immutable");
     expect(await hashed.text()).toBe(VALID_SVG.toString());
 
     const stale = await app.request(
-      "/plugin-catalog/icons/bb-community/widgets?h=stale",
+      "/plugin-catalog/icons/acme-plugins/widgets?h=stale",
     );
+
     expect(stale.headers.get("cache-control")).toBe("no-store");
 
     const missing = await app.request(
-      "/plugin-catalog/icons/bb-community/nothing",
+      "/plugin-catalog/icons/acme-plugins/nothing",
     );
+
     expect(missing.status).toBe(404);
   });
 
@@ -209,7 +219,7 @@ describe("plugin catalog routes", () => {
             icon: "Zap",
             author: { name: "Acme" },
             source: {
-              npm: { package: "bb-plugin-notes", range: "^1.0.0" },
+              npm: { package: "omnyo-plugin-notes", range: "^1.0.0" },
             },
           },
         ],
@@ -252,8 +262,7 @@ describe("plugin catalog routes", () => {
       const listed = await app.request("/marketplaces");
       await expect(listed.json()).resolves.toMatchObject({
         marketplaces: [
-          { name: "bb-official", official: true, sourceKind: "path" },
-          { name: "bb-community" },
+          { name: "omnyo-official", official: true, sourceKind: "path" },
           { name: "acme-plugins" },
         ],
       });
@@ -261,6 +270,7 @@ describe("plugin catalog routes", () => {
       const refreshed = await postJson(app, "/marketplaces/refresh", {
         name: "acme-plugins",
       });
+
       await expect(refreshed.json()).resolves.toMatchObject({
         results: [{ name: "acme-plugins", ok: true, error: null }],
       });
@@ -268,6 +278,7 @@ describe("plugin catalog routes", () => {
       const removed = await app.request("/marketplaces/acme-plugins", {
         method: "DELETE",
       });
+
       expect(removed.status).toBe(200);
       await expect(removed.json()).resolves.toEqual({
         ok: true,
@@ -285,12 +296,14 @@ describe("plugin catalog routes", () => {
         source: ACME_URL,
         subdirectory: "",
       });
+
       expect(emptySubdirectory.status).toBe(422);
 
       const misplacedSubdirectory = await postJson(app, "/marketplaces", {
         source: ACME_URL,
-        subdirectory: "bb",
+        subdirectory: "omnyo",
       });
+
       expect(misplacedSubdirectory.status).toBe(422);
       await expect(misplacedSubdirectory.json()).resolves.toMatchObject({
         error: expect.stringContaining(
@@ -301,27 +314,33 @@ describe("plugin catalog routes", () => {
       const badName = await app.request("/marketplaces/Not%20A%20Name", {
         method: "DELETE",
       });
+
       expect(badName.status).toBe(422);
 
       const badRefresh = await postJson(app, "/marketplaces/refresh", {
         name: "Not A Name",
       });
+
       expect(badRefresh.status).toBe(422);
 
       const longName = "a".repeat(65);
+
       const longRemoval = await app.request(`/marketplaces/${longName}`, {
         method: "DELETE",
       });
+
       expect(longRemoval.status).toBe(422);
 
       const longPlan = await app.request(
         `/plugin-catalog/install-plan?entryId=notes&marketplace=${longName}`,
       );
+
       expect(longPlan.status).toBe(422);
 
-      const reserved = await app.request("/marketplaces/bb-community", {
+      const reserved = await app.request("/marketplaces/omnyo-official", {
         method: "DELETE",
       });
+
       expect(reserved.status).toBe(422);
       await expect(reserved.json()).resolves.toMatchObject({
         error: expect.stringContaining("cannot be removed"),
@@ -335,16 +354,17 @@ describe("plugin catalog routes", () => {
       const plan = await app.request(
         "/plugin-catalog/install-plan?entryId=notes&marketplace=acme-plugins",
       );
+
       expect(plan.status).toBe(200);
       await expect(plan.json()).resolves.toMatchObject({
         plan: {
           kind: "marketplace",
           marketplace: "acme-plugins",
           official: false,
-          source: "npm:bb-plugin-notes@^1.0.0",
+          source: "npm:omnyo-plugin-notes@^1.0.0",
           resolvedSource: {
             kind: "npm",
-            package: "bb-plugin-notes",
+            package: "omnyo-plugin-notes",
             range: "^1.0.0",
             unresolvedReason: "no registry in this test",
           },
@@ -354,6 +374,7 @@ describe("plugin catalog routes", () => {
       const missingEntry = await app.request(
         "/plugin-catalog/install-plan?entryId=nope",
       );
+
       expect(missingEntry.status).toBe(422);
 
       const missingArgs = await app.request("/plugin-catalog/install-plan");
@@ -369,11 +390,12 @@ describe("plugin catalog routes", () => {
         marketplace: "acme-plugins",
         confirmedSource: {
           kind: "npm",
-          package: "bb-plugin-notes",
+          package: "omnyo-plugin-notes",
           range: "^1.0.0",
           unresolvedReason: "no registry in this test",
         },
       });
+
       expect(install.status).toBe(422);
       await expect(install.json()).resolves.toMatchObject({
         error: expect.stringContaining("the npm source could not be resolved"),
@@ -384,6 +406,7 @@ describe("plugin catalog routes", () => {
         "/plugin-catalog/install",
         { entryId: "notes", marketplace: "nope" },
       );
+
       expect(unknownMarketplace.status).toBe(422);
       await expect(unknownMarketplace.json()).resolves.toMatchObject({
         error: expect.stringContaining('unknown marketplace "nope"'),

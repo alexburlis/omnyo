@@ -3,7 +3,7 @@ import type {
   TimelineCommandWorkRow,
   TimelineFileReadWorkRow,
   TimelineSearchWorkRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { assertNever } from "./assert-never.js";
 import {
   formatTimelinePath,
@@ -14,6 +14,7 @@ export type TimelineExplorationWorkRow =
   | TimelineCommandWorkRow
   | TimelineFileReadWorkRow
   | TimelineSearchWorkRow;
+
 type TimelineReadActivityIntent = Extract<
   TimelineActivityIntent,
   { type: "read" }
@@ -45,6 +46,7 @@ export function timelineRowActivityIntents(
           },
         ];
       }
+
       return [
         {
           type: "list_files",
@@ -58,6 +60,7 @@ export function timelineRowActivityIntents(
 }
 
 const SKILL_FILE_NAME = "SKILL.md";
+
 const PLUGIN_CACHE_PATH_MARKERS = ["plugins", "cache"];
 
 interface FormatTimelineActivityIntentDetailArgs {
@@ -108,12 +111,15 @@ function formatReadTarget(
   pathMode: TimelinePathDisplayMode,
 ): string {
   const target = readTarget(intent);
+
   if (pathMode === "compact") {
     const skillTarget = formatCompactSkillTarget(target);
+
     if (skillTarget !== null) {
       return skillTarget;
     }
   }
+
   return formatTimelinePath({ path: target, mode: pathMode });
 }
 
@@ -121,6 +127,7 @@ function formatCompactSkillTarget(path: string): string | null {
   const segments = path.replaceAll("\\", "/").split("/");
   const fileIndex = segments.length - 1;
   const fileName = segments[fileIndex];
+
   if (fileName !== SKILL_FILE_NAME) {
     return null;
   }
@@ -129,16 +136,19 @@ function formatCompactSkillTarget(path: string): string | null {
     fileIndex,
     segments,
   });
+
   if (pluginCacheSkillName !== null) {
     return pluginCacheSkillName;
   }
 
   for (let index = segments.length - 2; index >= 0; index -= 1) {
     const skillName = segments[index];
+
     if (skillName && skillName.length > 0) {
       return `${skillName}/${SKILL_FILE_NAME}`;
     }
   }
+
   return null;
 }
 
@@ -152,15 +162,18 @@ function formatPluginCacheRootSkillTarget({
   segments,
 }: FormatPluginCacheRootSkillTargetArgs): string | null {
   const pluginName = segments[fileIndex - 2];
+
   if (!pluginName || pluginName.length === 0) {
     return null;
   }
+
   if (
     segments[fileIndex - 4] !== PLUGIN_CACHE_PATH_MARKERS[1] ||
     segments[fileIndex - 5] !== PLUGIN_CACHE_PATH_MARKERS[0]
   ) {
     return null;
   }
+
   return `${pluginName}/${SKILL_FILE_NAME}`;
 }
 
@@ -201,38 +214,46 @@ function formatTimelineActivityIntentText({
         content: formatReadTarget(intent, pathMode),
       };
     }
+
     case "list_files": {
       const verb = pending ? "Listing" : "Listed";
+
       return {
         prefix: verb,
         content: intent.path ? `files in ${intent.path}` : "files",
       };
     }
+
     case "search": {
       const verb = pending ? "Searching" : "Searched";
+
       if (intent.query && intent.path) {
         return {
           prefix: verb,
           content: `for ${intent.query} in ${intent.path}`,
         };
       }
+
       if (intent.query) {
         return {
           prefix: verb,
           content: `for ${intent.query}`,
         };
       }
+
       if (intent.path) {
         return {
           prefix: verb,
           content: `in ${intent.path}`,
         };
       }
+
       return {
         prefix: verb,
         content: "files",
       };
     }
+
     case "unknown":
       return {
         prefix: null,

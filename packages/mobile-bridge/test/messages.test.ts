@@ -30,7 +30,7 @@ describe("parsePageToShellMessage", () => {
   it("accepts every message kind the contract defines", () => {
     const cases: unknown[] = [
       { type: "ready", path: "/threads/thr_1" },
-      { type: "title", title: "bb", path: "/" },
+      { type: "title", title: "Omnyo", path: "/" },
       { type: "haptic", kind: "impact-medium" },
       { type: "badge", count: 0 },
       { type: "open-external", url: "https://example.com/docs" },
@@ -40,10 +40,11 @@ describe("parsePageToShellMessage", () => {
         id: "r1-2",
         request: {
           kind: "share",
-          payload: { url: "https://bee.getbb.app/threads/thr_1" },
+          payload: { url: "https://bee.example.test/threads/thr_1" },
         },
       },
     ];
+
     for (const value of cases) {
       const parsed = parsePageToShellMessage(json(value));
       expect(parsed.ok, JSON.stringify(value)).toBe(true);
@@ -62,6 +63,7 @@ describe("parsePageToShellMessage", () => {
     const parsed = parsePageToShellMessage(
       json({ type: "open-camera", lens: "front" }),
     );
+
     expect(parsed.ok).toBe(false);
   });
 
@@ -80,6 +82,7 @@ describe("parsePageToShellMessage", () => {
     const parsed = parsePageToShellMessage(
       json({ type: "badge", count: 3, colour: "red" }),
     );
+
     expect(parsed.ok).toBe(false);
   });
 
@@ -97,7 +100,7 @@ describe("parsePageToShellMessage", () => {
       "javascript:alert(1)",
       "data:text/html,<script>alert(1)</script>",
       "file:///etc/passwd",
-      "bb://settings",
+      "omnyo://settings",
       "not a url",
     ]) {
       expect(
@@ -105,6 +108,7 @@ describe("parsePageToShellMessage", () => {
         url,
       ).toBe(false);
     }
+
     expect(
       parsePageToShellMessage(
         json({ type: "open-external", url: "https://example.com/docs" }),
@@ -130,7 +134,7 @@ describe("parsePageToShellMessage", () => {
         json({
           type: "request",
           id: "r1",
-          request: { kind: "share", payload: { title: "bb" } },
+          request: { kind: "share", payload: { title: "Omnyo" } },
         }),
       ).ok,
     ).toBe(false);
@@ -140,12 +144,15 @@ describe("parsePageToShellMessage", () => {
 describe("parseNativeShellHandshake", () => {
   it("accepts the handshake the shell injects", () => {
     expect(parseNativeShellHandshake(handshake)).toEqual(handshake);
+
     const android = {
       ...handshake,
       platform: "android",
       androidVersionCode: 4,
     };
+
     expect(parseNativeShellHandshake(android)).toEqual(android);
+
     for (const androidVersionCode of [0, -1, 1.5, "4"]) {
       expect(
         parseNativeShellHandshake({ ...android, androidVersionCode }),

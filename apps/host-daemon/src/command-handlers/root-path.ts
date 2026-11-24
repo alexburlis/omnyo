@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { CommandDispatchError } from "../command-dispatch-support.js";
+import { CommandDispatchError } from "../command-errors.js";
 
 interface ResolveNonSymlinkDirectoryPathArgs {
   description: string;
@@ -10,12 +10,14 @@ export async function resolveNonSymlinkDirectoryPath(
   args: ResolveNonSymlinkDirectoryPathArgs,
 ): Promise<string> {
   const rootStat = await fs.lstat(args.path);
+
   if (rootStat.isSymbolicLink()) {
     throw new CommandDispatchError(
       "invalid_path",
       `${args.description} "${args.path}" must not be a symlink`,
     );
   }
+
   if (!rootStat.isDirectory()) {
     throw new CommandDispatchError(
       "invalid_path",

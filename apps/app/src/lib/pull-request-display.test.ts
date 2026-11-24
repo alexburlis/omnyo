@@ -1,4 +1,4 @@
-import type { ThreadPullRequest } from "@bb/domain";
+import type { ThreadPullRequest } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   getPullRequestGithubCheckStatus,
@@ -14,7 +14,7 @@ function pullRequest(
   return {
     number: 42,
     title: "Change",
-    url: "https://github.com/acme/bb/pull/42",
+    url: "https://github.com/acme/omnyo/pull/42",
     state: "open",
     baseRefName: "main",
     headRefName: "change",
@@ -89,6 +89,7 @@ describe("pull request signals", () => {
       attention: "review_requested",
       review: { state: "review_required", reviewRequestCount: 0 },
     });
+
     expect(getPullRequestNextStep(pr)?.label).toBe("Review required");
   });
 
@@ -111,6 +112,7 @@ describe("pull request signals", () => {
       attention: "draft",
       autoMerge: true,
     });
+
     expect(describePullRequestStatus(pr)).toBe("Draft, Checks passing");
     const open = pullRequest({ autoMerge: true, attention: "queued" });
     expect(describePullRequestStatus(open)).toBe(

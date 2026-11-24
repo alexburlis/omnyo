@@ -3,13 +3,13 @@
   "name": "toggle",
   "type": "registry:ui",
   "title": "toggle",
-  "description": "BB ui \"toggle\" — vendored from the BB app's own source (version-matched to this BB release).",
+  "description": "Omnyo ui \"toggle\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
   "dependencies": [
     "@radix-ui/react-toggle",
     "class-variance-authority"
   ],
   "registryDependencies": [
-    "@bb/utils"
+    "@omnyo/utils"
   ],
   "files": [
     {

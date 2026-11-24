@@ -35,10 +35,12 @@ it("removes multiple selected pills and rebases surviving UTF-16 ranges without 
       },
     ],
   };
+
   const next = removeComposerMentions(
     draft,
     (mention) => mention.kind === "thread",
   );
+
   expect(next.text).toBe("🙂  @keep  @last");
   expect(next.mentions).toMatchObject([
     { from: 4, to: 9, projectId: "keep" },
@@ -57,6 +59,7 @@ it("reconciles text edits outside pills and drops pills overlapped by the change
       { kind: "thread", threadId: "keep", label: "keep", from: 3, to: 8 },
     ],
   };
+
   const shifted = setComposerText(draft, "🙂 hi @keep end");
   expect(shifted.mentions).toMatchObject([{ from: 6, to: 11 }]);
   expect(setComposerText(shifted, "🙂 hi plain end").mentions).toEqual([]);

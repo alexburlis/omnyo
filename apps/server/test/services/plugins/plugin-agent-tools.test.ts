@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createConnection, migrate, type DbConnection } from "@bb/db";
-import { encodeClientTurnRequestIdNumber } from "@bb/domain";
-import type { Logger } from "@bb/logger";
-import { RESERVED_AGENT_TOOL_NAMES } from "@get-bb/plugin-sdk/internal/host-policy";
+import { createConnection, migrate, type DbConnection } from "@omnyo/db";
+import { encodeClientTurnRequestIdNumber } from "@omnyo/domain";
+import type { Logger } from "@omnyo/logger";
+import { RESERVED_AGENT_TOOL_NAMES } from "@omnyo/plugin-sdk/internal/host-policy";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
 import {
   createPluginService,
@@ -34,6 +34,7 @@ import {
   type TestAppHarness,
 } from "../../helpers/test-app.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
 
@@ -48,7 +49,7 @@ async function writePlugin(
     JSON.stringify({
       name: options.name,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Agent tools fixture",
         description: "Agent tools plugin fixture.",
         branding: { icon: "Zap" },
@@ -57,10 +58,11 @@ async function writePlugin(
     }),
   );
   await writeFile(join(rootDir, "server.ts"), options.serverSource);
+
   return rootDir;
 }
 
-describe("bb.agents.registerTool", () => {
+describe("api.agents.registerTool", () => {
   let db: DbConnection;
   let workDir: string;
   let service: PluginService;
@@ -68,7 +70,7 @@ describe("bb.agents.registerTool", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-tools-test-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-tools-test-"));
     service = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -80,6 +82,7 @@ describe("bb.agents.registerTool", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
     });
@@ -92,16 +95,16 @@ describe("bb.agents.registerTool", () => {
 
   it("rejects duplicate tool names within one factory execution", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-replacer",
+      name: "omnyo-plugin-replacer",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.registerTool({
+        export default function plugin(api: any) {
+          api.agents.registerTool({
             name: "echo_tool",
             description: "first version",
             parameters: { type: "object", properties: { text: { type: "string" } } },
             execute: () => "first",
           });
-          bb.agents.registerTool({
+          api.agents.registerTool({
             name: "echo_tool",
             description: "second version",
             instructions: "Prefer echo_tool for echoing.",
@@ -111,6 +114,7 @@ describe("bb.agents.registerTool", () => {
         }
       `,
     });
+
     const entry = await service.installPath(rootDir);
     expect(entry.status).toBe("error");
     expect(entry.statusDetail).toContain(
@@ -121,14 +125,15 @@ describe("bb.agents.registerTool", () => {
 
   it("rejects duplicate configure registrations within one factory execution", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-double-configure",
+      name: "omnyo-plugin-double-configure",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.configure(() => ({ tools: [], skills: [] }));
-          bb.agents.configure(() => ({ tools: [], skills: [] }));
+        export default function plugin(api: any) {
+          api.agents.configure(() => ({ tools: [], skills: [] }));
+          api.agents.configure(() => ({ tools: [], skills: [] }));
         }
       `,
     });
+
     const entry = await service.installPath(rootDir);
     expect(entry.status).toBe("error");
     expect(entry.statusDetail).toContain(
@@ -138,10 +143,10 @@ describe("bb.agents.registerTool", () => {
 
   it("two tools from different plugins dispatch by name (design §9 regression)", async () => {
     const a = await writePlugin(workDir, {
-      name: "bb-plugin-tool-a",
+      name: "omnyo-plugin-tool-a",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.registerTool({
+        export default function plugin(api: any) {
+          api.agents.registerTool({
             name: "alpha_tool",
             description: "Alpha",
             parameters: { type: "object" },
@@ -150,11 +155,12 @@ describe("bb.agents.registerTool", () => {
         }
       `,
     });
+
     const b = await writePlugin(workDir, {
-      name: "bb-plugin-tool-b",
+      name: "omnyo-plugin-tool-b",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.registerTool({
+        export default function plugin(api: any) {
+          api.agents.registerTool({
             name: "beta_tool",
             description: "Beta",
             parameters: { type: "object" },
@@ -163,6 +169,7 @@ describe("bb.agents.registerTool", () => {
         }
       `,
     });
+
     await service.installPath(a);
     await service.installPath(b);
 
@@ -178,6 +185,7 @@ describe("bb.agents.registerTool", () => {
       projectId: "proj_1",
       signal: new AbortController().signal,
     };
+
     const alpha = service.findAgentTool("alpha_tool")!;
     await expect(
       service.invokeAgentTool({ ...alpha, input: {}, ctx }),
@@ -197,9 +205,10 @@ describe("bb.agents.registerTool", () => {
 
   it("zod parameters: converted to JSON schema, validated per call, bad input is not a plugin error", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-zodded",
+      name: "omnyo-plugin-zodded",
       serverSource: "export default function plugin() {}",
     });
+
     await service.installPath(rootDir);
     const api = service.getApi("zodded");
     expect(api).toBeDefined();
@@ -223,6 +232,7 @@ describe("bb.agents.registerTool", () => {
       projectId: "proj_1",
       signal: new AbortController().signal,
     };
+
     const found = service.findAgentTool("search_issues")!;
     await expect(
       service.invokeAgentTool({ ...found, input: { query: "bug" }, ctx }),
@@ -236,6 +246,7 @@ describe("bb.agents.registerTool", () => {
       input: { query: 42 },
       ctx,
     });
+
     expect(invalid.success).toBe(false);
     expect(invalid.contentItems[0]).toMatchObject({ type: "inputText" });
     expect((invalid.contentItems[0] as { text: string }).text).toContain(
@@ -257,11 +268,13 @@ describe("bb.agents.registerTool", () => {
       },
     });
     const exploder = service.findAgentTool("exploder")!;
+
     const failed = await service.invokeAgentTool({
       ...exploder,
       input: {},
       ctx,
     });
+
     expect(failed.success).toBe(false);
     expect((failed.contentItems[0] as { text: string }).text).toContain(
       "tool boom",
@@ -271,13 +284,56 @@ describe("bb.agents.registerTool", () => {
     ).toBe(1);
   });
 
-  it("uses a foreign zod schema's own JSON Schema converter", async () => {
+  it("reports a failed tool's cause chain to the agent", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-foreign-zod",
+      name: "omnyo-plugin-network-tool",
       serverSource: "export default function plugin() {}",
     });
+
+    await service.installPath(rootDir);
+    const api = service.getApi("network-tool");
+    expect(api).toBeDefined();
+    api!.agents.registerTool({
+      name: "network_call",
+      description: "Fails with a reset loopback request",
+      parameters: { type: "object" },
+      execute: () => {
+        throw new TypeError("fetch failed", {
+          cause: new Error("read ECONNRESET"),
+        });
+      },
+    });
+
+    const failed = await service.invokeAgentTool({
+      ...service.findAgentTool("network_call")!,
+      input: {},
+      ctx: {
+        threadId: "thr_1",
+        projectId: "proj_1",
+        signal: new AbortController().signal,
+      },
+    });
+
+    expect(failed).toEqual({
+      success: false,
+      contentItems: [
+        {
+          type: "inputText",
+          text: 'Tool "network_call" failed: fetch failed: read ECONNRESET',
+        },
+      ],
+    });
+  });
+
+  it("uses a foreign zod schema's own JSON Schema converter", async () => {
+    const rootDir = await writePlugin(workDir, {
+      name: "omnyo-plugin-foreign-zod",
+      serverSource: "export default function plugin() {}",
+    });
+
     await service.installPath(rootDir);
     const api = service.getApi("foreign-zod")!;
+
     const parameters = {
       safeParse(input: unknown) {
         return { success: true as const, data: input };
@@ -310,9 +366,10 @@ describe("bb.agents.registerTool", () => {
 
   it("rejects recursive tool schemas before they reach a provider", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-schema-refs",
+      name: "omnyo-plugin-schema-refs",
       serverSource: "export default function plugin() {}",
     });
+
     await service.installPath(rootDir);
     const api = service.getApi("schema-refs")!;
 
@@ -363,9 +420,10 @@ describe("bb.agents.registerTool", () => {
 
   it("resolves one full row presentation per injected tool", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-presented-tools",
+      name: "omnyo-plugin-presented-tools",
       serverSource: "export default function plugin() {}",
     });
+
     await service.installPath(rootDir);
     const api = service.getApi("presented-tools")!;
 
@@ -391,6 +449,7 @@ describe("bb.agents.registerTool", () => {
     const byName = new Map(
       service.listAgentTools().map((entry) => [entry.tool.name, entry.tool]),
     );
+
     expect(byName.get("declared_tool")?.presentation).toEqual({
       label: { pending: "Looking things up", completed: "Looked things up" },
       icon: { glyph: "Search" },
@@ -417,10 +476,10 @@ describe("bb.agents.registerTool", () => {
 
   it("cross-plugin name collision drops the later registration with a status detail", async () => {
     const first = await writePlugin(workDir, {
-      name: "bb-plugin-collide-a",
+      name: "omnyo-plugin-collide-a",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.registerTool({
+        export default function plugin(api: any) {
+          api.agents.registerTool({
             name: "shared_tool",
             description: "First owner",
             parameters: { type: "object" },
@@ -429,17 +488,18 @@ describe("bb.agents.registerTool", () => {
         }
       `,
     });
+
     const second = await writePlugin(workDir, {
-      name: "bb-plugin-collide-b",
+      name: "omnyo-plugin-collide-b",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.registerTool({
+        export default function plugin(api: any) {
+          api.agents.registerTool({
             name: "shared_tool",
             description: "Second owner",
             parameters: { type: "object" },
             execute: () => "from collide-b",
           });
-          bb.agents.registerTool({
+          api.agents.registerTool({
             name: "unique_tool",
             description: "Unrelated",
             parameters: { type: "object" },
@@ -448,6 +508,7 @@ describe("bb.agents.registerTool", () => {
         }
       `,
     });
+
     await service.installPath(first);
     const entry = await service.installPath(second);
 
@@ -466,10 +527,10 @@ describe("bb.agents.registerTool", () => {
 
   it("fails a plugin's load when its environment provider id is already registered", async () => {
     const first = await writePlugin(workDir, {
-      name: "bb-plugin-env-a",
+      name: "omnyo-plugin-env-a",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.experimental_environments.register({
+        export default function plugin(api: any) {
+          api.experimental_environments.register({
             id: "shared-env",
             displayName: "Shared",
             description: "Create a shared workspace.",
@@ -479,11 +540,12 @@ describe("bb.agents.registerTool", () => {
         }
       `,
     });
+
     const second = await writePlugin(workDir, {
-      name: "bb-plugin-env-b",
+      name: "omnyo-plugin-env-b",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.experimental_environments.register({
+        export default function plugin(api: any) {
+          api.experimental_environments.register({
             id: "shared-env",
             displayName: "Shared again",
             description: "Create another shared workspace.",
@@ -493,6 +555,7 @@ describe("bb.agents.registerTool", () => {
         }
       `,
     });
+
     await service.installPath(first);
     const entry = await service.installPath(second);
 
@@ -506,11 +569,12 @@ describe("bb.agents.registerTool", () => {
     expect(RESERVED_AGENT_TOOL_NAMES).toContain(
       UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
     );
+
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-shadower",
+      name: "omnyo-plugin-shadower",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.registerTool({
+        export default function plugin(api: any) {
+          api.agents.registerTool({
             name: "update_environment_directory",
             description: "Shadow attempt",
             parameters: { type: "object" },
@@ -519,9 +583,10 @@ describe("bb.agents.registerTool", () => {
         }
       `,
     });
+
     const entry = await service.installPath(rootDir);
     expect(entry.status).toBe("error");
-    expect(entry.statusDetail).toContain("built-in bb tool");
+    expect(entry.statusDetail).toContain("built-in omnyo tool");
     expect(service.listAgentTools()).toEqual([]);
   });
 
@@ -542,10 +607,10 @@ describe("bb.agents.registerTool", () => {
     "rejects a registration built against SDK <0.4.16 that carries %s",
     async (field, message) => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-stale-field",
+        name: "omnyo-plugin-stale-field",
         serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.registerTool({
+        export default function plugin(api: any) {
+          api.agents.registerTool({
             name: "stale_tool",
             description: "Built against an SDK before 0.4.16",
             ${field}: { pending: "Working", completed: "Worked" },
@@ -555,6 +620,7 @@ describe("bb.agents.registerTool", () => {
         }
       `,
       });
+
       const entry = await service.installPath(rootDir);
       expect(entry.status).toBe("error");
       expect(entry.statusDetail).toContain(message);
@@ -563,7 +629,7 @@ describe("bb.agents.registerTool", () => {
   );
 });
 
-describe("bb.agents.contributeInstructions", () => {
+describe("api.agents.contributeInstructions", () => {
   let db: DbConnection;
   let workDir: string;
   let service: PluginService;
@@ -571,7 +637,7 @@ describe("bb.agents.contributeInstructions", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-instr-test-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-instr-test-"));
     service = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -583,6 +649,7 @@ describe("bb.agents.contributeInstructions", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
     });
@@ -595,14 +662,15 @@ describe("bb.agents.contributeInstructions", () => {
 
   it("rejects duplicate instruction providers within one factory execution", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-advisor",
+      name: "omnyo-plugin-advisor",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.contributeInstructions(() => "first");
-          bb.agents.contributeInstructions(() => "second");
+        export default function plugin(api: any) {
+          api.agents.contributeInstructions(() => "first");
+          api.agents.contributeInstructions(() => "second");
         }
       `,
     });
+
     const entry = await service.installPath(rootDir);
     expect(entry.status).toBe("error");
     expect(entry.statusDetail).toContain(
@@ -613,21 +681,23 @@ describe("bb.agents.contributeInstructions", () => {
 
   it("two plugins each contribute one provider, ordered by plugin id", async () => {
     const zebra = await writePlugin(workDir, {
-      name: "bb-plugin-zebra",
+      name: "omnyo-plugin-zebra",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.contributeInstructions(() => "from zebra");
+        export default function plugin(api: any) {
+          api.agents.contributeInstructions(() => "from zebra");
         }
       `,
     });
+
     const alpha = await writePlugin(workDir, {
-      name: "bb-plugin-alpha",
+      name: "omnyo-plugin-alpha",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.contributeInstructions(() => "from alpha");
+        export default function plugin(api: any) {
+          api.agents.contributeInstructions(() => "from alpha");
         }
       `,
     });
+
     await service.installPath(zebra);
     await service.installPath(alpha);
 
@@ -640,13 +710,14 @@ describe("bb.agents.contributeInstructions", () => {
 
   it("reload without contributeInstructions clears the previous provider", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-transient",
+      name: "omnyo-plugin-transient",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.contributeInstructions(() => "present");
+        export default function plugin(api: any) {
+          api.agents.contributeInstructions(() => "present");
         }
       `,
     });
+
     await service.installPath(rootDir);
     expect(service.listInstructionContributions()).toHaveLength(1);
 
@@ -665,7 +736,7 @@ describe("plugin tools reach thread runtime config", () => {
 
   beforeEach(async () => {
     harness = await createTestAppHarness();
-    pluginsDir = await mkdtemp(join(tmpdir(), "bb-plugin-tools-runtime-"));
+    pluginsDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-tools-runtime-"));
   });
 
   afterEach(async () => {
@@ -676,17 +747,17 @@ describe("plugin tools reach thread runtime config", () => {
 
   it("thread.start dynamicTools include plugin tools with per-tool instructions", async () => {
     const rootDir = await writePlugin(pluginsDir, {
-      name: "bb-plugin-tooldemo",
+      name: "omnyo-plugin-tooldemo",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.registerTool({
+        export default function plugin(api: any) {
+          api.agents.registerTool({
             name: "demo_lookup",
             description: "Look up demo data",
             instructions: "Call demo_lookup before guessing demo data.",
             parameters: { type: "object", properties: { key: { type: "string" } } },
             execute: () => "demo",
           });
-          bb.agents.registerTool({
+          api.agents.registerTool({
             name: "quiet_tool",
             description: "No instructions on purpose",
             parameters: { type: "object" },
@@ -695,30 +766,36 @@ describe("plugin tools reach thread runtime config", () => {
         }
       `,
     });
+
     const entry = await harness.pluginService.installPath(rootDir);
     expect(entry.status).toBe("running");
 
     const { host } = seedHostSession(harness.deps, {
       id: "host-plugin-agent-tools",
     });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const environment = seedEnvironment(harness.deps, {
       hostId: host.id,
       projectId: project.id,
       path: join(harness.config.dataDir, "plugin-tools-workspace"),
     });
+
     const thread = seedThread(harness.deps, {
       projectId: project.id,
       environmentId: environment.id,
       providerId: "codex",
     });
+
     const execution = await buildExecutionOptions(
       harness.deps,
       { model: "gpt-5" },
       { threadId: thread.id },
     );
+
     const buildCommand = (requestValue: number) =>
       buildThreadStartCommand(harness.deps, {
         environment,
@@ -745,7 +822,7 @@ describe("plugin tools reach thread runtime config", () => {
     ).toMatchObject({ type: "object" });
     expect(command.instructions).toContain("update_environment_directory");
     expect(command.instructions).toContain(
-      'The following instructions come from the BB plugin "tooldemo" for its tool "demo_lookup":',
+      'The following instructions come from the Omnyo plugin "tooldemo" for its tool "demo_lookup":',
     );
     expect(command.instructions).toContain(
       "Call demo_lookup before guessing demo data.",
@@ -755,15 +832,15 @@ describe("plugin tools reach thread runtime config", () => {
 
   it("resolves different conditional tools, skills, instructions, and context without rebuilding static registrations", async () => {
     const rootDir = await writePlugin(pluginsDir, {
-      name: "bb-plugin-conditional",
+      name: "omnyo-plugin-conditional",
       serverSource: `
-        globalThis.__bbConditionalFactoryCount =
-          (globalThis.__bbConditionalFactoryCount ?? 0) + 1;
-        const factoryCount = globalThis.__bbConditionalFactoryCount;
+        globalThis.__omnyoConditionalFactoryCount =
+          (globalThis.__omnyoConditionalFactoryCount ?? 0) + 1;
+        const factoryCount = globalThis.__omnyoConditionalFactoryCount;
         let configureCount = 0;
-        export default function plugin(bb: any) {
+        export default function plugin(api: any) {
           for (const name of ["alpha_tool", "beta_tool"]) {
-            bb.agents.registerTool({
+            api.agents.registerTool({
               name,
               description: name,
               instructions: "Static instructions for " + name,
@@ -771,7 +848,7 @@ describe("plugin tools reach thread runtime config", () => {
               execute: () => name,
             });
           }
-          bb.agents.configure((context: any) => {
+          api.agents.configure((context: any) => {
             configureCount += 1;
             if (
               context.origin.pluginId === "side-chat" &&
@@ -804,6 +881,7 @@ describe("plugin tools reach thread runtime config", () => {
         }
       `,
     });
+
     for (const skill of ["alpha-skill", "beta-skill"]) {
       const skillDir = join(rootDir, "skills", skill);
       await mkdir(skillDir, { recursive: true });
@@ -812,17 +890,18 @@ describe("plugin tools reach thread runtime config", () => {
         `---\nname: ${skill}\ndescription: Use ${skill} in conditional tests.\n---\n\n# ${skill}\n`,
       );
     }
+
     const brokenRoot = await writePlugin(pluginsDir, {
-      name: "bb-plugin-broken-conditional",
+      name: "omnyo-plugin-broken-conditional",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.agents.registerTool({
+        export default function plugin(api: any) {
+          api.agents.registerTool({
             name: "broken_tool",
             description: "Must never leak from an invalid selection",
             parameters: { type: "object" },
             execute: () => "broken",
           });
-          bb.agents.configure((context: any) => {
+          api.agents.configure((context: any) => {
             if (context.provider.id === "claude-code") {
               throw new Error("conditional failure");
             }
@@ -840,6 +919,7 @@ describe("plugin tools reach thread runtime config", () => {
         }
       `,
     });
+
     await harness.pluginService.installPath(rootDir);
     await harness.pluginService.installPath(brokenRoot);
 
@@ -847,10 +927,12 @@ describe("plugin tools reach thread runtime config", () => {
       id: "host-conditional-alpha",
       name: "Alpha Host",
     }).host;
+
     const betaHost = seedHostSession(harness.deps, {
       id: "host-conditional-beta",
       name: "Beta Host",
     }).host;
+
     const makeTarget = (args: {
       hostId: string;
       projectName: string;
@@ -862,36 +944,43 @@ describe("plugin tools reach thread runtime config", () => {
         name: args.projectName,
         path: join(harness.config.dataDir, args.projectName),
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: args.hostId,
         projectId: project.id,
         path: join(harness.config.dataDir, args.projectName),
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: args.providerId,
       });
+
       return { ...args, project, environment, thread };
     };
+
     const alpha = makeTarget({
       hostId: alphaHost.id,
       projectName: "Alpha Project",
       providerId: "codex",
       model: "gpt-5.6",
     });
+
     const beta = makeTarget({
       hostId: betaHost.id,
       projectName: "Beta Project",
       providerId: "claude-code",
       model: "claude-opus-4-6",
     });
+
     const build = async (target: typeof alpha, requestValue: number) => {
       const execution = await buildExecutionOptions(
         harness.deps,
         { model: target.model },
         { threadId: target.thread.id },
       );
+
       return buildThreadStartCommand(harness.deps, {
         environment: target.environment,
         execution,
@@ -980,6 +1069,7 @@ describe("plugin tools reach thread runtime config", () => {
       visibility: "hidden",
       sourceThreadId: alpha.thread.id,
     });
+
     const sideCommand = await build({ ...alpha, thread: sideThread }, 12);
     expect(sideCommand.dynamicTools.map((tool) => tool.name)).toEqual([
       "update_environment_directory",
@@ -1001,7 +1091,7 @@ describe("plugin tools reach thread runtime config", () => {
       sideCommand.injectedSkillSources.map((skill) => skill.name),
     ).not.toContain("beta-skill");
     expect(sideCommand.instructions).toContain(
-      'The following dynamic instructions come from the BB plugin "conditional":',
+      'The following dynamic instructions come from the Omnyo plugin "conditional":',
     );
     expect(
       harness.pluginService.list().find((plugin) => plugin.id === "conditional")
@@ -1015,6 +1105,7 @@ describe("plugin tools reach thread runtime config", () => {
       { model: beta.model },
       { threadId: beta.thread.id },
     );
+
     const turnSubmit = await prepareTurnSubmitCommandPayload(harness.deps, {
       environment: beta.environment,
       execution: betaExecution,
@@ -1024,6 +1115,7 @@ describe("plugin tools reach thread runtime config", () => {
       target: { mode: "start" },
       thread: beta.thread,
     });
+
     expect(
       turnSubmit.resumeContext.dynamicTools.map((tool) => tool.name),
     ).toEqual([UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME, "beta_tool"]);
@@ -1039,13 +1131,16 @@ describe("plugin tools reach thread runtime config", () => {
 describe("internal tool-call dispatch to plugin tools", () => {
   it("dispatches by name to plugin tools and keeps update_environment_directory working", async () => {
     await withTestHarness(async (harness) => {
-      const pluginsDir = await mkdtemp(join(tmpdir(), "bb-plugin-tools-wire-"));
+      const pluginsDir = await mkdtemp(
+        join(tmpdir(), "omnyo-plugin-tools-wire-"),
+      );
+
       try {
         const rootDir = await writePlugin(pluginsDir, {
-          name: "bb-plugin-wired",
+          name: "omnyo-plugin-wired",
           serverSource: `
-            export default function plugin(bb: any) {
-              bb.agents.registerTool({
+            export default function plugin(api: any) {
+              api.agents.registerTool({
                 name: "echo_context",
                 description: "Echo params and call context",
                 parameters: { type: "object" },
@@ -1058,6 +1153,7 @@ describe("internal tool-call dispatch to plugin tools", () => {
             }
           `,
         });
+
         const entry = await harness.pluginService.installPath(rootDir);
         expect(entry.status).toBe("running");
         harness.pluginService.getApi("wired")!.agents.registerTool({
@@ -1068,15 +1164,19 @@ describe("internal tool-call dispatch to plugin tools", () => {
         });
 
         const { session } = seedHostSession(harness.deps);
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: session.hostId,
         });
+
         const environmentPath = join(harness.config.dataDir, "wire-workspace");
+
         const environment = seedEnvironment(harness.deps, {
           hostId: session.hostId,
           projectId: project.id,
           path: environmentPath,
         });
+
         const thread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
@@ -1118,10 +1218,12 @@ describe("internal tool-call dispatch to plugin tools", () => {
 
         const badResponse = await postToolCall("strict_add", { a: 2 });
         expect(badResponse.status).toBe(200);
+
         const bad = (await readJson(badResponse)) as {
           success: boolean;
           contentItems: Array<{ text: string }>;
         };
+
         expect(bad.success).toBe(false);
         expect(bad.contentItems[0].text).toContain(
           'Invalid arguments for tool "strict_add"',
@@ -1131,10 +1233,12 @@ describe("internal tool-call dispatch to plugin tools", () => {
           UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
           { path: environmentPath },
         );
+
         const builtin = (await readJson(builtinResponse)) as {
           success: boolean;
           contentItems: Array<{ text: string }>;
         };
+
         expect(builtin.success).toBe(true);
         expect(builtin.contentItems[0].text).toContain("already using");
 

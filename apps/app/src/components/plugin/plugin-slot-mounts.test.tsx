@@ -7,6 +7,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   act,
@@ -16,7 +17,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import type {
   ComposerView,
   ExperimentalComposerSelection,
@@ -24,13 +25,17 @@ import type {
   PluginFileOpenerProps,
   PluginNewThreadPanelProps,
   PluginThreadPanelProps,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { createPluginPanelFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 import {
+  getPluginSlotSnapshot,
   resetPluginSlotStoreForTest,
   setPluginSlotRegistrations,
   type PluginNavPanelSlot,
 } from "@/lib/plugin-slots";
+import { createSidebarNavigationRows } from "@/components/sidebar/sidebarNavigationItems";
+import { buildPluginPagePaletteActions } from "@/lib/command-palette/palette-plugin-page-actions";
+import { getLegacyGraphRedirect } from "@/lib/workflow-panel-routes";
 import { PLUGIN_PANEL_ROUTE_PATH } from "@/lib/route-paths";
 import {
   markPluginFrontendsSettled,
@@ -44,7 +49,7 @@ import {
 import { resetAllCrashedPluginSlotsForTest } from "./PluginSlotMount";
 import { applyPluginCss, resetPluginCssForTest } from "@/lib/plugin-css";
 import { ComposerActionsSlot } from "./PluginComposerActions";
-import { PluginContext } from "./plugin-context";
+import { PluginContext, usePluginId } from "./plugin-context";
 import {
   clearComposerEditorBridge,
   publishComposerEditorBridge,
@@ -60,6 +65,7 @@ import {
 import { PluginHomepageSections } from "./PluginHomepageSections";
 import { makePluginRegistrationSet as registrationSet } from "@/test/fixtures/plugins";
 import {
+  experimental_useAppNavigate,
   getComposerInputLock,
   useComposer,
   useComposers,
@@ -82,7 +88,7 @@ import {
   useNewTabActions,
 } from "@/components/secondary-panel/NewTabActions";
 import { buildFileOpenerPanelTab } from "./file-opener-tabs";
-import type { PromptDraftState } from "@bb/client-core";
+import type { PromptDraftState } from "@omnyo/client-core";
 
 function composerTextEffectValues(storageKey: string | null) {
   return getComposerTextEffects(storageKey).map(({ effect }) => effect);
@@ -94,6 +100,7 @@ function RoutedPluginPanelView() {
     panelPath: string;
     "*": string;
   }>();
+
   return (
     <PluginPanelView
       pluginId={params.pluginId ?? ""}
@@ -118,12 +125,15 @@ describe("PluginHomepageSections", () => {
   it("contains a crashing section without hiding its sibling", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
+
     function Crashes(): never {
       throw new Error("section crashed");
     }
+
     function Fine() {
       return <div>fine section body</div>;
     }
+
     setPluginSlotRegistrations(
       "broken",
       registrationSet({
@@ -152,6 +162,7 @@ function ThreadDraftViewer({ threadId }: { threadId: string }) {
     projectId: PERSONAL_PROJECT_ID,
     threadId,
   });
+
   return (
     <div>
       <div data-testid="draft-key">{draft.storageKey}</div>
@@ -166,6 +177,7 @@ function ThreadDraftViewer({ threadId }: { threadId: string }) {
 
 function NewThreadDraftViewer() {
   const draft = usePromptDraftStorage({ kind: "new-thread" });
+
   return (
     <div>
       <div data-testid="draft-key">{draft.storageKey}</div>
@@ -184,6 +196,7 @@ function ThreadDraftSeeder({ threadId }: { threadId: string }) {
     projectId: PERSONAL_PROJECT_ID,
     threadId,
   });
+
   return (
     <button
       type="button"
@@ -221,6 +234,7 @@ function ThreadDraftSeeder({ threadId }: { threadId: string }) {
 
 function NewThreadDraftSeeder() {
   const draft = usePromptDraftStorage({ kind: "new-thread" });
+
   return (
     <button
       type="button"
@@ -249,17 +263,20 @@ describe("useComposer", () => {
     function ComposerProbe() {
       const composer = useComposer();
       onRender?.(composer);
+
       const initialMethods = useRef({
         setText: composer.setText,
         updateText: composer.updateText,
         clear: composer.clear,
         setTextEffect: composer.setTextEffect,
       });
+
       const methodsAreStable =
         initialMethods.current.setText === composer.setText &&
         initialMethods.current.updateText === composer.updateText &&
         initialMethods.current.clear === composer.clear &&
         initialMethods.current.setTextEffect === composer.setTextEffect;
+
       return (
         <div>
           <div>scope: {composer.scope.kind}</div>
@@ -344,6 +361,7 @@ describe("useComposer", () => {
         </div>
       );
     }
+
     setPluginSlotRegistrations(
       "demo",
       registrationSet({
@@ -359,15 +377,18 @@ describe("useComposer", () => {
 
   function ComposerCustomizationMount() {
     const view = useComposerView();
+
     return <ComposerActionsSlot view={view} />;
   }
 
   it("does not re-render a plugin that never reads the text while the draft changes", () => {
     const quietRenders = vi.fn<(composer: PluginComposerApi) => void>();
     const readingRenders = vi.fn();
+
     function QuietProbe() {
       const composer = useComposer();
       quietRenders(composer);
+
       return (
         <button
           type="button"
@@ -377,11 +398,14 @@ describe("useComposer", () => {
         </button>
       );
     }
+
     function ReadingProbe() {
       const composer = useComposer();
       readingRenders();
+
       return <div data-testid="reading-text">{composer.text}</div>;
     }
+
     setPluginSlotRegistrations(
       "demo",
       registrationSet({
@@ -396,22 +420,26 @@ describe("useComposer", () => {
         ],
       }),
     );
+
     const staticView: ComposerView = {
       scope: { kind: "thread", threadId: "thr_quiet" },
       layout: "expanded",
       draft: { text: "", isEmpty: true, attachmentCount: 0 },
       run: { isRunning: false, isSubmitting: false },
     };
+
     render(
       <MemoryRouter initialEntries={["/threads/thr_quiet"]}>
         <ComposerActionsSlot view={staticView} />
       </MemoryRouter>,
     );
+
     const draft = getPromptDraftAccessor({
       kind: "thread",
       projectId: PERSONAL_PROJECT_ID,
       threadId: "thr_quiet",
     });
+
     const quietRendersBefore = quietRenders.mock.calls.length;
     const readingRendersBefore = readingRenders.mock.calls.length;
 
@@ -433,6 +461,7 @@ describe("useComposer", () => {
     function LateReader() {
       const composer = useComposer();
       const [reading, setReading] = useState(false);
+
       return (
         <div>
           <button type="button" onClick={() => setReading(true)}>
@@ -447,6 +476,7 @@ describe("useComposer", () => {
         </div>
       );
     }
+
     setPluginSlotRegistrations(
       "demo",
       registrationSet({
@@ -455,17 +485,20 @@ describe("useComposer", () => {
         ],
       }),
     );
+
     const staticView: ComposerView = {
       scope: { kind: "thread", threadId: "thr_late" },
       layout: "expanded",
       draft: { text: "", isEmpty: true, attachmentCount: 0 },
       run: { isRunning: false, isSubmitting: false },
     };
+
     render(
       <MemoryRouter initialEntries={["/threads/thr_late"]}>
         <ComposerActionsSlot view={staticView} />
       </MemoryRouter>,
     );
+
     const draft = getPromptDraftAccessor({
       kind: "thread",
       projectId: PERSONAL_PROJECT_ID,
@@ -499,9 +532,11 @@ describe("useComposer", () => {
 
     let focusRequests = 0;
     const storageKey = screen.getByTestId("draft-key").textContent ?? "";
+
     const unsubscribe = subscribeComposerFocusRequests(storageKey, () => {
       focusRequests += 1;
     });
+
     fireEvent.click(screen.getByText("t-quote"));
     expect(screen.getByTestId("draft-text").textContent).toBe(
       "> picked text\n",
@@ -548,6 +583,7 @@ describe("useComposer", () => {
 
     let focusRequests = 0;
     const storageKey = screen.getAllByTestId("draft-key")[0]?.textContent ?? "";
+
     const unsubscribe = subscribeComposerFocusRequests(storageKey, () => {
       focusRequests += 1;
     });
@@ -635,6 +671,7 @@ describe("useComposer", () => {
 
     function QueuedComposerHarness() {
       const [queuedMessageId, setQueuedMessageId] = useState("qmsg_1");
+
       const [draft, setDraft] = useState<PromptDraftState>({
         text: "queued draft",
         mentions: [],
@@ -647,9 +684,11 @@ describe("useComposer", () => {
           },
         ],
       });
+
       const draftRef = useRef(draft);
       draftRef.current = draft;
       const subscribeDraft = useComposerHostDraftNotifier(draft);
+
       const host = useMemo<PluginComposerHost>(
         () => ({
           scope: {
@@ -712,11 +751,13 @@ describe("useComposer", () => {
   it("shares a queued-message host with sibling plugin surfaces in the pane", () => {
     function HostPublisher({ host }: { host: PluginComposerHost | null }) {
       usePublishPluginComposerHost(host);
+
       return null;
     }
 
     function SiblingPluginProbe() {
       const composer = useComposer();
+
       return (
         <>
           <div data-testid="sibling-scope">{composer.scope.kind}</div>
@@ -733,6 +774,7 @@ describe("useComposer", () => {
 
     function QueuedPaneHarness() {
       const [isEditing, setIsEditing] = useState(true);
+
       const [draft, setDraft] = useState<PromptDraftState>({
         text: "queued draft",
         mentions: [],
@@ -745,6 +787,7 @@ describe("useComposer", () => {
           },
         ],
       });
+
       const host = useMemo<PluginComposerHost | null>(
         () =>
           isEditing
@@ -764,6 +807,7 @@ describe("useComposer", () => {
             : null,
         [draft, isEditing],
       );
+
       return (
         <PluginComposerHostScopeProvider>
           <HostPublisher host={host} />
@@ -830,6 +874,7 @@ describe("useComposer", () => {
 
     function RootSiblingPluginSurface() {
       const composer = useComposer();
+
       return (
         <>
           <div data-testid="root-sibling-scope-project">
@@ -849,6 +894,7 @@ describe("useComposer", () => {
 
     function RootComposerHarness() {
       const [projectId, setProjectId] = useState("proj_selected");
+
       const [draft, setDraft] = useState<PromptDraftState>({
         text: "root draft",
         mentions: [],
@@ -861,9 +907,11 @@ describe("useComposer", () => {
           },
         ],
       });
+
       const draftRef = useRef(draft);
       draftRef.current = draft;
       const subscribeDraft = useComposerHostDraftNotifier(draft);
+
       const host = useMemo<PluginComposerHost>(
         () => ({
           scope: { kind: "new-thread", projectId },
@@ -942,12 +990,14 @@ describe("useComposer", () => {
       const [projectId, setProjectId] = useState<string | null>(
         PERSONAL_PROJECT_ID,
       );
+
       const host = useMemo<PluginComposerHost>(() => {
         const draft: PromptDraftState = {
           text: "",
           mentions: [],
           attachments: [],
         };
+
         return {
           scope: { kind: "new-thread", projectId },
           textEffectKey: `root-state:${projectId ?? "null"}`,
@@ -986,12 +1036,14 @@ describe("useComposer", () => {
 
   it("scopes text effects to the composer and clears them on unmount", () => {
     registerComposerProbe("effect");
+
     const view = render(
       <MemoryRouter initialEntries={["/threads/thr_effect"]}>
         <ComposerCustomizationMount />
         <ThreadDraftViewer threadId="thr_effect" />
       </MemoryRouter>,
     );
+
     const storageKey = screen.getByTestId("draft-key").textContent ?? "";
 
     fireEvent.click(screen.getByText("effect-start-effect"));
@@ -1017,6 +1069,7 @@ describe("useComposer", () => {
       captured.set(label, {
         setTextEffect: composer.setTextEffect,
       });
+
       return (
         <button
           type="button"
@@ -1031,6 +1084,7 @@ describe("useComposer", () => {
 
     function Harness() {
       const [showFirst, setShowFirst] = useState(true);
+
       return (
         <PluginContext.Provider value="demo">
           {showFirst ? <VisualOwner label="first" /> : null}
@@ -1080,6 +1134,7 @@ describe("useComposer", () => {
 
     function ScopedVisualWriter() {
       const { scope, setTextEffect } = useComposer();
+
       const queuedMessageId =
         scope.kind === "queued-message" ? scope.queuedMessageId : "unexpected";
 
@@ -1092,6 +1147,7 @@ describe("useComposer", () => {
 
     function Harness() {
       const [queuedMessageId, setQueuedMessageId] = useState("qmsg_1");
+
       const host = useMemo<PluginComposerHost>(
         () => ({
           scope: {
@@ -1139,8 +1195,10 @@ describe("useComposer", () => {
     const captured: Array<
       Pick<PluginComposerApi, "setInputLock" | "setTextEffect">
     > = [];
+
     registerComposerProbe("owned", (composer) => {
       const previous = captured.at(-1);
+
       if (
         previous?.setInputLock !== composer.setInputLock ||
         previous?.setTextEffect !== composer.setTextEffect
@@ -1151,8 +1209,10 @@ describe("useComposer", () => {
         });
       }
     });
+
     function ChangeScope() {
       const navigate = useNavigate();
+
       return (
         <button
           type="button"
@@ -1162,6 +1222,7 @@ describe("useComposer", () => {
         </button>
       );
     }
+
     const view = render(
       <MemoryRouter initialEntries={["/threads/thr_owned"]}>
         <ComposerCustomizationMount />
@@ -1170,6 +1231,7 @@ describe("useComposer", () => {
         <ChangeScope />
       </MemoryRouter>,
     );
+
     const [initialStorageKey, nextStorageKey] = screen
       .getAllByTestId("draft-key")
       .map((element) => element.textContent ?? "");
@@ -1222,6 +1284,7 @@ describe("useComposer", () => {
 
     fireEvent.click(screen.getByText("n-mention"));
     expect(screen.getByTestId("draft-text").textContent).toBe("ideas.md ");
+
     const mentions = JSON.parse(
       screen.getByTestId("draft-mentions").textContent ?? "[]",
     ) as Array<{
@@ -1229,6 +1292,7 @@ describe("useComposer", () => {
       end: number;
       resource: Record<string, unknown>;
     }>;
+
     expect(mentions).toEqual([
       {
         start: 0,
@@ -1271,6 +1335,7 @@ describe("useComposer", () => {
     registerComposerProbe("submit", (composer) => {
       captured = composer;
     });
+
     const draft: PromptDraftState = {
       text: "ship the notes",
       mentions: [],
@@ -1290,6 +1355,7 @@ describe("useComposer", () => {
         }),
         [withSubmit],
       );
+
       return (
         <PluginComposerHostProvider value={host}>
           <ComposerCustomizationMount />
@@ -1321,12 +1387,15 @@ describe("useComposer", () => {
       },
       insertAtCursor: () => true,
     };
+
     publishComposerEditorBridge("thread:thr_submit", readyEditor);
+
     const view = render(
       <MemoryRouter initialEntries={["/threads/thr_submit"]}>
         <Harness withSubmit />
       </MemoryRouter>,
     );
+
     const sendAt = Date.now() + 3_600_000;
     await act(async () => {
       await captured!.experimental_submit({ sendAt });
@@ -1364,6 +1433,7 @@ describe("useComposer", () => {
 describe("useComposer().experimental_setSelection", () => {
   function ComposerCustomizationMount() {
     const view = useComposerView();
+
     return <ComposerActionsSlot view={view} />;
   }
 
@@ -1377,8 +1447,10 @@ describe("useComposer().experimental_setSelection", () => {
       const composer = useComposer();
       const listed = useComposers();
       onRender(composer, listed);
+
       return <div>selection probe</div>;
     }
+
     setPluginSlotRegistrations("demo", {
       homepageSections: [],
       settingsSections: [],
@@ -1420,6 +1492,7 @@ describe("useComposer().experimental_setSelection", () => {
       }),
       [host],
     );
+
     return (
       <PluginComposerHostProvider value={value}>
         <ComposerCustomizationMount />
@@ -1429,15 +1502,18 @@ describe("useComposer().experimental_setSelection", () => {
 
   it("re-renders the same composer handle when its picker snapshot changes", async () => {
     const listeners = new Set<() => void>();
+
     let selection: ExperimentalComposerSelection = {
       providerId: "codex",
       model: "gpt-5",
     };
+
     const reads: Array<{
       handle: PluginComposerApi;
       selection: ExperimentalComposerSelection | null;
       listedSelection: ExperimentalComposerSelection | null;
     }> = [];
+
     registerSelectionProbe((composer, listed) => {
       reads.push({
         handle: composer,
@@ -1445,6 +1521,7 @@ describe("useComposer().experimental_setSelection", () => {
         listedSelection: listed[0]?.selection ?? null,
       });
     });
+
     const host: PluginComposerHost = {
       scope: { kind: "thread", threadId: "thr_selection" },
       textEffectKey: "thread:thr_selection",
@@ -1455,9 +1532,11 @@ describe("useComposer().experimental_setSelection", () => {
       getSelection: () => selection,
       subscribeSelection: (listener) => {
         listeners.add(listener);
+
         return () => listeners.delete(listener);
       },
     };
+
     const editor: ComposerEditorBridge = {
       openPopup: () => false,
       closePopup: () => false,
@@ -1475,12 +1554,15 @@ describe("useComposer().experimental_setSelection", () => {
       },
       insertAtCursor: () => true,
     };
+
     publishComposerEditorBridge("thread:thr_selection", editor);
+
     const view = render(
       <MemoryRouter initialEntries={["/threads/thr_selection"]}>
         <Harness host={host} />
       </MemoryRouter>,
     );
+
     expect(reads.at(-1)?.selection).toEqual({
       providerId: "codex",
       model: "gpt-5",
@@ -1489,6 +1571,7 @@ describe("useComposer().experimental_setSelection", () => {
     const handle = reads.at(-1)?.handle;
     await act(async () => {
       selection = { providerId: "claude-code", model: "claude-opus-5" };
+
       for (const listener of listeners) listener();
     });
     expect(reads.at(-1)?.handle).toBe(handle);
@@ -1500,18 +1583,22 @@ describe("useComposer().experimental_setSelection", () => {
 
   it("re-renders a plugin that reads only its own composer's selection", async () => {
     const listeners = new Set<() => void>();
+
     let selection: ExperimentalComposerSelection = {
       providerId: "codex",
       model: "gpt-5",
     };
+
     function OwnSelectionProbe() {
       const composer = useComposer();
+
       return (
         <div data-testid="own-selection">
           {composer.selection?.model ?? "none"}
         </div>
       );
     }
+
     setPluginSlotRegistrations(
       "demo",
       registrationSet({
@@ -1523,15 +1610,18 @@ describe("useComposer().experimental_setSelection", () => {
         ],
       }),
     );
+
     const host = {
       scope: { kind: "thread", threadId: "thr_own_selection" },
       textEffectKey: "thread:thr_own_selection",
       getSelection: () => selection,
       subscribeSelection: (listener: () => void) => {
         listeners.add(listener);
+
         return () => listeners.delete(listener);
       },
     } as const;
+
     render(
       <MemoryRouter initialEntries={["/threads/thr_own_selection"]}>
         <Harness host={host} />
@@ -1541,6 +1631,7 @@ describe("useComposer().experimental_setSelection", () => {
 
     await act(async () => {
       selection = { providerId: "claude-code", model: "claude-opus-5" };
+
       for (const listener of listeners) listener();
     });
 
@@ -1556,6 +1647,7 @@ describe("useComposer().experimental_setSelection", () => {
         model: "gpt-5",
       }),
     );
+
     let captured: PluginComposerApi | null = null;
     registerSelectionProbe((composer) => {
       captured = composer;
@@ -1572,6 +1664,7 @@ describe("useComposer().experimental_setSelection", () => {
         />
       </MemoryRouter>,
     );
+
     await expect(
       captured!.experimental_setSelection({
         providerId: "codex",
@@ -1618,11 +1711,13 @@ describe("useComposer().experimental_setSelection", () => {
           <Harness host={{ scope, textEffectKey: `${scope.kind}:probe` }} />
         </MemoryRouter>,
       );
+
       await expect(
         captured!.experimental_setSelection({ model: "gpt-5" }),
       ).rejects.toThrow(/no pickers/);
       view.unmount();
     }
+
     expect(setSelection).toHaveBeenCalledTimes(1);
   });
 });
@@ -1631,6 +1726,111 @@ describe("PluginPanelView routes", () => {
   function Board() {
     return <div>board panel body</div>;
   }
+
+  it("opens graph routes in Workflows with the original plugin context", () => {
+    const workflowRoot = "/plugins/automations/automations";
+    const graphPath = `${workflowRoot}/graphs/m/mch_fixture`;
+
+    function Graph({ subPath }: { subPath: string }) {
+      const pluginId = usePluginId();
+      const navigate = experimental_useAppNavigate();
+
+      return (
+        <>
+          <div>
+            {pluginId}: {subPath}
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              navigate.toPluginPanel("machines", {
+                subPath: "m/mch_fixture/draft/@state:review",
+              })
+            }
+          >
+            Edit review step
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate.toPluginPanel("machines")}
+          >
+            Back to graphs
+          </button>
+        </>
+      );
+    }
+
+    setPluginSlotRegistrations(
+      "automations",
+      registrationSet({
+        navPanels: [
+          {
+            id: "automations",
+            title: "Workflows",
+            icon: "Repeat",
+            path: "automations",
+            component: () => <div>Workflows dashboard</div>,
+          },
+        ],
+      }),
+    );
+    setPluginSlotRegistrations(
+      "state-machines",
+      registrationSet({
+        navPanels: [
+          {
+            id: "machines",
+            title: "State machines",
+            icon: "Workflow",
+            path: "machines",
+            component: Graph,
+          },
+        ],
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={[graphPath]}>
+          <Routes>
+            <Route
+              path={PLUGIN_PANEL_ROUTE_PATH}
+              element={<RoutedPluginPanelView />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText("state-machines: m/mch_fixture")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Edit review step" }));
+    expect(
+      screen.getByText(
+        /state-machines: m\/mch_fixture\/draft\/(?:%40state%3A|@state:)review/,
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to graphs" }));
+    expect(screen.getByText("Workflows dashboard")).toBeTruthy();
+
+    const panels = getPluginSlotSnapshot().navPanels;
+
+    const rows = createSidebarNavigationRows(
+      panels.map((panel) => ({ chrome: { ...panel }, panel })),
+    );
+
+    expect(rows.some((row) => row.label === "Workflows")).toBe(true);
+    expect(rows.some((row) => row.label === "State machines")).toBe(false);
+    expect(
+      buildPluginPagePaletteActions({ navigate: vi.fn(), panels }).map(
+        (action) => action.title,
+      ),
+    ).toEqual(["Workflows"]);
+    expect(
+      getLegacyGraphRedirect(
+        "/plugins/state-machines/machines/m/mch_fixture/draft/%40state%3Areview",
+      ),
+    ).toBe(`${graphPath}/draft/%40state%3Areview`);
+  });
 
   it("releases the plugin stylesheet when navigation unmounts the panel route", async () => {
     vi.useFakeTimers();
@@ -1649,14 +1849,17 @@ describe("PluginPanelView routes", () => {
       }),
     );
     applyPluginCss("demo", "/demo.css?h=route");
+
     function LeavePanel() {
       const navigate = useNavigate();
+
       return (
         <button type="button" onClick={() => navigate("/")}>
           Leave panel
         </button>
       );
     }
+
     render(
       <MemoryRouter initialEntries={["/plugins/demo/board"]}>
         <Routes>
@@ -1674,20 +1877,20 @@ describe("PluginPanelView routes", () => {
       </MemoryRouter>,
     );
     expect(
-      document.head.querySelector('link[data-bb-plugin-css="demo"]'),
+      document.head.querySelector('link[data-omnyo-plugin-css="demo"]'),
     ).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Leave panel" }));
     await act(async () => {});
     expect(screen.getByText("home")).toBeDefined();
     expect(
-      document.head.querySelector('link[data-bb-plugin-css="demo"]'),
+      document.head.querySelector('link[data-omnyo-plugin-css="demo"]'),
     ).not.toBeNull();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });
     expect(
-      document.head.querySelector('link[data-bb-plugin-css="demo"]'),
+      document.head.querySelector('link[data-omnyo-plugin-css="demo"]'),
     ).toBeNull();
   });
 
@@ -1748,9 +1951,11 @@ describe("plugin panel shared title bar and full-bleed body", () => {
   it("hides a throwing headerContent without breaking the header (no crash chip)", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
+
     function ExplodingAccessory(): never {
       throw new Error("accessory exploded");
     }
+
     const panel = panelSlot({ headerContent: ExplodingAccessory });
     render(
       <>
@@ -1764,36 +1969,40 @@ describe("plugin panel shared title bar and full-bleed body", () => {
 
   it("gives headerContent independent CSS ownership without a mounted panel body", async () => {
     vi.useFakeTimers();
+
     function Accessory() {
       return <button type="button">Toggle sidebar</button>;
     }
+
     const panel = panelSlot({ headerContent: Accessory });
     applyPluginCss("demo", "/demo.css?h=header");
+
     const view = render(
       <>
         <PluginPanelHeaderCenter chrome={panel} />
         <PluginPanelHeaderActions panel={panel} subPath="notes/today.md" />
       </>,
     );
+
     expect(screen.getByText("Demo board")).toBeDefined();
     expect(
       screen.getByRole("button", { name: "Toggle sidebar" }),
     ).toBeDefined();
     expect(
-      document.head.querySelector('link[data-bb-plugin-css="demo"]'),
+      document.head.querySelector('link[data-omnyo-plugin-css="demo"]'),
     ).not.toBeNull();
     expect(screen.queryByTestId("plugin-panel-body")).toBeNull();
 
     view.unmount();
     await act(async () => {});
     expect(
-      document.head.querySelector('link[data-bb-plugin-css="demo"]'),
+      document.head.querySelector('link[data-omnyo-plugin-css="demo"]'),
     ).not.toBeNull();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });
     expect(
-      document.head.querySelector('link[data-bb-plugin-css="demo"]'),
+      document.head.querySelector('link[data-omnyo-plugin-css="demo"]'),
     ).toBeNull();
   });
 
@@ -1813,9 +2022,11 @@ describe("plugin panel shared title bar and full-bleed body", () => {
   it("still contains a crashing panel inside the error boundary", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
+
     function Crashes(): never {
       throw new Error("panel crashed");
     }
+
     setPluginSlotRegistrations(
       "demo",
       registrationSet({
@@ -1855,6 +2066,7 @@ describe("plugin thread panel actions", () => {
     openPluginPanel: (args: OpenPluginPanelArgs) => void;
   }) {
     const entries = usePluginPanelActions({ openPluginPanel, threadId });
+
     return (
       <div>
         {entries.map((entry) => (
@@ -1890,6 +2102,7 @@ describe("plugin thread panel actions", () => {
       const [tab, setTab] = useState<ReturnType<
         typeof createPluginPanelFixedPanelTab
       > | null>(null);
+
       return (
         <>
           <ActionsProbe
@@ -1999,10 +2212,12 @@ describe("plugin thread panel actions", () => {
         openPluginPanel: () => undefined,
         threadId: "thr_9",
       });
+
       const rootEntries = usePluginNewThreadPanelActions({
         openPluginPanel: () => undefined,
         projectId: "proj_1",
       });
+
       return (
         <div>
           {[...threadEntries, ...rootEntries].map((entry) => (
@@ -2062,14 +2277,17 @@ describe("plugin thread panel actions", () => {
       const [tab, setTab] = useState<ReturnType<
         typeof createPluginPanelFixedPanelTab
       > | null>(null);
+
       const entries = usePluginNewThreadPanelActions({
         openPluginPanel: (args) => setTab(createPluginPanelFixedPanelTab(args)),
         projectId: "proj_1",
       });
+
       const actions = useNewTabActions({
         onStartTerminal: () => undefined,
         pluginActions: entries,
       });
+
       return (
         <>
           <NewTabActions actions={actions} />
@@ -2105,6 +2323,7 @@ describe("plugin thread panel actions", () => {
       pluginId: "ghost",
       title: "Issue",
     });
+
     render(
       <PluginPanelTabContent
         tab={tab}
@@ -2127,6 +2346,7 @@ describe("plugin thread panel actions", () => {
         ],
       }),
     );
+
     const tab = createPluginPanelFixedPanelTab({
       actionId: "issue",
       paramsJson: "1e999",
@@ -2180,6 +2400,7 @@ describe("plugin file opener tabs", () => {
         ],
       }),
     );
+
     const tab = {
       ...createPluginPanelFixedPanelTab({
         actionId: "file-opener:editor",
@@ -2239,12 +2460,14 @@ describe("plugin file opener tabs", () => {
               extensions: ["md"],
               component: (props) => {
                 seen(props);
+
                 return <div>editor</div>;
               },
             },
           ],
         }),
       );
+
       const makeTab = (
         lineRange: { startLineNumber: number; endLineNumber: number } | null,
       ) =>
@@ -2287,7 +2510,9 @@ describe("plugin file opener tabs", () => {
                   tab: { path: "notes/todo.md", lineRange },
                 },
         );
+
       let tab = makeTab({ startLineNumber: 12, endLineNumber: 12 });
+
       const content = () => (
         <PluginPanelTabContent
           tab={tab}
@@ -2295,6 +2520,7 @@ describe("plugin file opener tabs", () => {
           fileOpenerOriginal={<div>native</div>}
         />
       );
+
       const mounted = render(content());
       const first = seen.mock.lastCall?.[0];
       expect(first?.experimental_lineRange).toEqual({
@@ -2327,6 +2553,7 @@ describe("plugin file opener tabs", () => {
     function DelegatingEditor({ Original }: PluginFileOpenerProps) {
       return <Original />;
     }
+
     setPluginSlotRegistrations(
       "notes",
       registrationSet({
@@ -2340,6 +2567,7 @@ describe("plugin file opener tabs", () => {
         ],
       }),
     );
+
     const tab = buildFileOpenerPanelTab(
       { id: "editor", pluginId: "notes" },
       {
@@ -2409,6 +2637,7 @@ describe("plugin file opener tabs", () => {
         threadId: null,
       },
     };
+
     const { unmount } = render(
       <PluginPanelTabContent
         tab={orphanTab}
@@ -2418,6 +2647,7 @@ describe("plugin file opener tabs", () => {
         }
       />,
     );
+
     expect(screen.getByRole("button").textContent).toBe(
       "Native preview actions for a.md",
     );
@@ -2436,12 +2666,14 @@ describe("plugin file opener tabs", () => {
         ],
       }),
     );
+
     const junkParamsTab = createPluginPanelFixedPanelTab({
       actionId: "file-opener:editor",
       paramsJson: "not json",
       pluginId: "notes",
       title: "junk",
     });
+
     render(
       <PluginPanelTabContent
         tab={junkParamsTab}

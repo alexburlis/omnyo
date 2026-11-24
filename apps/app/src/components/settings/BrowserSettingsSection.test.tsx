@@ -1,14 +1,19 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
-import type { BbDesktopBrowserApi } from "@bb/desktop-contract";
-import type { DesktopBrowserImportSource } from "@bb/host-daemon-contract";
+import type {
+  OmnyoDesktopBrowserApi,
+  OmnyoDesktopBrowserImportSourcesResult,
+} from "@omnyo/desktop-contract";
+import type { DesktopBrowserImportSource } from "@omnyo/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserSettingsSectionContent } from "./BrowserSettingsSection";
 import { BROWSER_IMPORT_RECORDS_STORAGE_KEY } from "./browser-import-wizard";
@@ -45,9 +50,10 @@ const sources: DesktopBrowserImportSource[] = [
 ];
 
 function makeDesktopBrowser(
-  overrides: Partial<BbDesktopBrowserApi> = {},
-): BbDesktopBrowserApi {
+  overrides: Partial<OmnyoDesktopBrowserApi> = {},
+): OmnyoDesktopBrowserApi {
   const noop = () => undefined;
+
   return {
     attach: noop,
     detach: noop,
@@ -75,7 +81,9 @@ function rowButton(id: string): HTMLButtonElement {
   const button = screen
     .getByTestId(`browser-import-${id}`)
     .querySelector("button");
+
   if (!button) throw new Error(`no button in row ${id}`);
+
   return button;
 }
 
@@ -88,7 +96,7 @@ describe("BrowserSettingsSectionContent", () => {
   it("explains that import is desktop only outside the desktop app", () => {
     render(<BrowserSettingsSectionContent desktopBrowser={null} />);
     expect(
-      screen.getByText("Only available in the BB desktop app."),
+      screen.getByText("Only available in the Omnyo desktop app."),
     ).toBeDefined();
   });
 
@@ -123,6 +131,7 @@ describe("BrowserSettingsSectionContent", () => {
           ),
         })),
       });
+
       render(<BrowserSettingsSectionContent desktopBrowser={desktopBrowser} />);
       await waitFor(() => expect(screen.getByText("Firefox")).toBeDefined());
       fireEvent.click(rowButton(sourceId));
@@ -179,6 +188,7 @@ describe("BrowserSettingsSectionContent", () => {
             : source,
         ),
       });
+
     render(
       <BrowserSettingsSectionContent
         desktopBrowser={makeDesktopBrowser({ listImportSources })}
@@ -188,5 +198,259 @@ describe("BrowserSettingsSectionContent", () => {
     fireEvent.click(rowButton("brave"));
     await waitFor(() => expect(rowButton("brave").textContent).toBe("Import…"));
     expect(screen.getByText("5 cookies")).toBeDefined();
+  });
+
+  it("turns on login sync from a chosen profile and syncs on demand", async () => {
+    const off = {
+      source: null,
+      running: false,
+      lastRun: null,
+      nextRunAt: null,
+    };
+
+    const on = {
+      source: {
+        sourceId: "chrome" as const,
+        sourceProfileDirectory: "Profile 1",
+      },
+      running: false,
+      lastRun: {
+        ok: true as const,
+        at: Date.now(),
+        imported: 12,
+        removed: 2,
+        skipped: 0,
+      },
+      nextRunAt: Date.now() + 900_000,
+    };
+
+    const configureCookieSync = vi.fn(async () => on);
+
+    const runCookieSync = vi.fn(async () => ({
+      ...on,
+      lastRun: {
+        ok: false as const,
+        at: Date.now(),
+        reason: "needsKeychainApproval" as const,
+      },
+    }));
+
+    render(
+      <BrowserSettingsSectionContent
+        desktopBrowser={makeDesktopBrowser({
+          cookieSyncStatus: vi.fn(async () => off),
+          configureCookieSync,
+          runCookieSync,
+        })}
+      />,
+    );
+
+    const toggle = await screen.findByRole("switch", {
+      name: "Keep logins synced",
+    });
+
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(toggle);
+
+    const panel = within(screen.getByTestId("browser-cookie-sync"));
+    const picker = panel.getByRole("button", { name: "Sync from" });
+    expect(picker.textContent).toContain("Choose a profile");
+    fireEvent.pointerDown(picker, { button: 0 });
+    expect(
+      await screen.findByRole("menuitem", {
+        name: /Google Chrome\s*Person 1/u,
+      }),
+    ).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: /Firefox/u })).toBeDefined();
+    expect(screen.queryByRole("menuitem", { name: /Brave/u })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Google Chrome\s*Work/u }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText("Synced just now · 12 cookies, 2 removed"),
+      ).toBeDefined(),
+    );
+    expect(configureCookieSync).toHaveBeenCalledWith({
+      sourceId: "chrome",
+      sourceProfileDirectory: "Profile 1",
+    });
+    expect(
+      panel.getByRole("button", { name: "Sync from" }).textContent,
+    ).toContain("Google Chrome · Work");
+
+    fireEvent.pointerDown(panel.getByRole("button", { name: "Sync from" }), {
+      button: 0,
+    });
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /Google Chrome\s*Work/u }),
+    );
+    expect(configureCookieSync).toHaveBeenCalledOnce();
+    fireEvent.pointerDown(panel.getByRole("button", { name: "Sync from" }), {
+      button: 0,
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Firefox/u }));
+    await waitFor(() => expect(configureCookieSync).toHaveBeenCalledTimes(2));
+    expect(configureCookieSync).toHaveBeenLastCalledWith({
+      sourceId: "firefox",
+      sourceProfileDirectory: "Profiles/p1",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(/^Failed just now: Needs Keychain/u),
+      ).toBeDefined(),
+    );
+  });
+
+  it("connects the default browser's profile in one click", async () => {
+    const recommended = {
+      sourceId: "chrome" as const,
+      sourceProfileDirectory: "Profile 1",
+    };
+
+    const configureCookieSync = vi.fn(async () => ({
+      source: recommended,
+      running: false,
+      lastRun: {
+        ok: true as const,
+        at: Date.now(),
+        imported: 5,
+        removed: 0,
+        skipped: 0,
+      },
+      nextRunAt: Date.now() + 900_000,
+    }));
+
+    render(
+      <BrowserSettingsSectionContent
+        desktopBrowser={makeDesktopBrowser({
+          listImportSources: vi.fn(async () => ({ sources, recommended })),
+          cookieSyncStatus: vi.fn(async () => ({
+            source: null,
+            running: false,
+            lastRun: null,
+            nextRunAt: null,
+          })),
+          configureCookieSync,
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/Google Chrome · Work is your default browser/u),
+    ).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Connect Google Chrome" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText("Synced just now · 5 cookies")).toBeDefined(),
+    );
+    expect(configureCookieSync).toHaveBeenCalledWith(recommended);
+    expect(
+      screen.queryByRole("button", { name: "Connect Google Chrome" }),
+    ).toBeNull();
+  });
+});
+
+describe("BrowserCookieSyncSettings status", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("reads sync status while browser profile discovery is pending", async () => {
+    let releaseSources = () => {};
+
+    const sourceList = new Promise<OmnyoDesktopBrowserImportSourcesResult>(
+      (resolve) => {
+        releaseSources = () => resolve({ sources });
+      },
+    );
+
+    const listImportSources = vi.fn(() => sourceList);
+
+    const cookieSyncStatus = vi.fn(async () => ({
+      source: null,
+      running: false,
+      lastRun: null,
+      nextRunAt: null,
+    }));
+
+    render(
+      <BrowserSettingsSectionContent
+        desktopBrowser={makeDesktopBrowser({
+          listImportSources,
+          cookieSyncStatus,
+        })}
+      />,
+    );
+
+    expect(listImportSources).toHaveBeenCalledOnce();
+    expect(cookieSyncStatus).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole("switch", { name: "Keep logins synced" }),
+    ).toBeNull();
+
+    releaseSources();
+    expect(
+      await screen.findByRole("switch", { name: "Keep logins synced" }),
+    ).toBeDefined();
+    expect(cookieSyncStatus).toHaveBeenCalledOnce();
+  });
+
+  it("shows a background sync that finishes while the section stays open", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+
+    const source = {
+      sourceId: "chrome" as const,
+      sourceProfileDirectory: "Profile 1",
+    };
+
+    const earlier = {
+      source,
+      running: false,
+      lastRun: {
+        ok: true as const,
+        at: Date.now() - 12 * 60_000,
+        imported: 30,
+        removed: 4,
+        skipped: 0,
+      },
+      nextRunAt: Date.now() + 180_000,
+    };
+
+    const later = {
+      ...earlier,
+      lastRun: {
+        ok: true as const,
+        at: Date.now(),
+        imported: 31,
+        removed: 2,
+        skipped: 0,
+      },
+      nextRunAt: Date.now() + 900_000,
+    };
+
+    const cookieSyncStatus = vi
+      .fn<() => Promise<typeof earlier>>()
+      .mockResolvedValueOnce(earlier)
+      .mockResolvedValue(later);
+
+    render(
+      <BrowserSettingsSectionContent
+        desktopBrowser={makeDesktopBrowser({ cookieSyncStatus })}
+      />,
+    );
+
+    expect(
+      await screen.findByText(/^Synced .+ · 30 cookies, 4 removed$/u),
+    ).toBeDefined();
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(
+      await screen.findByText("Synced just now · 31 cookies, 2 removed"),
+    ).toBeDefined();
   });
 });

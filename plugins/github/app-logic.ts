@@ -1,4 +1,4 @@
-import type { PluginRpcResult } from "@get-bb/plugin-sdk/app";
+import type { PluginRpcResult } from "@omnyo/plugin-sdk/app";
 import type { githubRpcContract } from "./server.js";
 
 export type Item = PluginRpcResult<
@@ -14,20 +14,27 @@ export type Route =
 
 export function parseSubPath(subPath: string): Route {
   const parts = subPath.split("/").filter((part) => part.length > 0);
+
   if (parts[0] === "pulls" && parts.length === 4) {
     const number = Number(parts[3]);
+
     if (Number.isFinite(number)) {
       return { view: "pull", repo: `${parts[1]}/${parts[2]}`, number };
     }
   }
+
   if (parts[0] === "pulls") return { view: "pulls" };
+
   if (parts[0] === "new") return { view: "new" };
+
   if (parts[0] === "issues" && parts.length === 4) {
     const number = Number(parts[3]);
+
     if (Number.isFinite(number)) {
       return { view: "issue", repo: `${parts[1]}/${parts[2]}`, number };
     }
   }
+
   return { view: "issues" };
 }
 
@@ -82,11 +89,14 @@ export function parseQuery(query: string): ParsedQuery {
     noLabel: false,
     text: [],
   };
+
   for (const token of tokenizeQuery(query)) {
     const idx = token.indexOf(":");
     const key = idx > 0 ? token.slice(0, idx).toLowerCase() : "";
     const value = idx > 0 ? unquote(token.slice(idx + 1)) : "";
+
     if (idx > 0 && value.length === 0) continue;
+
     if (key === "is" || key === "state") {
       parsed.states.push(
         STATE_VALUES[value.toLowerCase()] ?? value.toUpperCase(),
@@ -101,11 +111,13 @@ export function parseQuery(query: string): ParsedQuery {
       parsed.repos.push(value.toLowerCase());
     } else if (key === "no") {
       if (value.toLowerCase() === "assignee") parsed.noAssignee = true;
+
       if (value.toLowerCase() === "label") parsed.noLabel = true;
     } else {
       parsed.text.push(unquote(token).toLowerCase());
     }
   }
+
   return parsed;
 }
 
@@ -117,37 +129,50 @@ export function matchesQuery(
   if (query.states.length > 0 && !query.states.includes(item.state)) {
     return false;
   }
+
   if (query.assignees.length > 0) {
     const wanted = query.assignees.map((login) =>
       login === "@me" ? (viewer?.toLowerCase() ?? "\u0000") : login,
     );
+
     if (!item.assignees.some((login) => wanted.includes(login.toLowerCase()))) {
       return false;
     }
   }
+
   if (query.authors.length > 0) {
     const author = item.author.toLowerCase();
+
     const wanted = query.authors.map((login) =>
       login === "@me" ? (viewer?.toLowerCase() ?? "\u0000") : login,
     );
+
     if (!wanted.includes(author)) return false;
   }
+
   if (query.labels.length > 0) {
     const labels = item.labels.map((label) => label.toLowerCase());
+
     if (!query.labels.some((label) => labels.includes(label))) return false;
   }
+
   if (
     query.repos.length > 0 &&
     !query.repos.includes(item.repo.toLowerCase())
   ) {
     return false;
   }
+
   if (query.noAssignee && item.assignees.length > 0) return false;
+
   if (query.noLabel && item.labels.length > 0) return false;
+
   if (query.text.length > 0) {
     const haystack = `${item.title} #${item.number} ${item.repo}`.toLowerCase();
+
     if (!query.text.every((term) => haystack.includes(term))) return false;
   }
+
   return true;
 }
 
@@ -182,8 +207,10 @@ export function buildSuggestions(
   viewer: string | null,
 ): Suggestion[] {
   const idx = token.indexOf(":");
+
   if (idx <= 0) {
     const prefix = token.toLowerCase();
+
     return QUALIFIER_KEYS.filter((entry) => entry.key.startsWith(prefix)).map(
       (entry) => ({
         insert: entry.key,
@@ -192,12 +219,15 @@ export function buildSuggestions(
       }),
     );
   }
+
   const key = token.slice(0, idx).toLowerCase();
   const partial = unquote(token.slice(idx + 1)).toLowerCase();
   const matches = (value: string) => value.toLowerCase().includes(partial);
+
   if (key === "is" || key === "state") {
     const states =
       kind === "pr" ? ["open", "closed", "merged"] : ["open", "closed"];
+
     return states.filter(matches).map((state) => ({
       insert: `${key}:${state} `,
       label: state,
@@ -208,14 +238,18 @@ export function buildSuggestions(
       },
     }));
   }
+
   if (key === "assignee" || key === "author") {
     const users = ["@me", ...vocab.users];
+
     return users.filter(matches).map((login) => {
       const avatarLogin = login === "@me" ? viewer : login;
+
       const icon: SuggestionIcon | undefined =
         avatarLogin === null
           ? undefined
           : { kind: "avatar", login: avatarLogin };
+
       return {
         insert: `${key}:${login} `,
         label: login === "@me" && viewer !== null ? `@me (${viewer})` : login,
@@ -223,23 +257,27 @@ export function buildSuggestions(
       };
     });
   }
+
   if (key === "label") {
     return vocab.labels.filter(matches).map((label) => ({
       insert: `${key}:${quoteValue(label)} `,
       label,
     }));
   }
+
   if (key === "repo") {
     return vocab.repos.filter(matches).map((repo) => ({
       insert: `${key}:${repo} `,
       label: repo,
     }));
   }
+
   if (key === "no") {
     return ["assignee", "label"].filter(matches).map((field) => ({
       insert: `${key}:${field} `,
       label: `no:${field}`,
     }));
   }
+
   return [];
 }

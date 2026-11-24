@@ -3,7 +3,7 @@ import { getSchema } from "@tiptap/core";
 import { promptEditorExtensions } from "./prompt-editor-extensions";
 import { Node, Slice } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
-import type { PromptTextMention } from "@bb/domain";
+import type { PromptTextMention } from "@omnyo/domain";
 import {
   promptCommandResourceFromSuggestion,
   promptEditorClipboardTextFromSlice,
@@ -19,6 +19,7 @@ const schema = getSchema(promptEditorExtensions({ getPlaceholder: () => "" }));
 
 function roundTrip(value: PromptEditorValue): PromptEditorValue {
   const node = Node.fromJSON(schema, promptEditorContentFromValue(value));
+
   return promptEditorValueFromDoc(node);
 }
 
@@ -58,6 +59,7 @@ describe("prompt editor serialization round-trip", () => {
       text: "> q1\nr1\n> q2\nr2",
       mentions: [],
     };
+
     expect(roundTrip(value)).toEqual({
       text: "> q1\n\nr1\n> q2\n\nr2",
       mentions: [],
@@ -78,6 +80,7 @@ describe("prompt editor serialization round-trip", () => {
     const prefix = "> a\n\nhey ";
     const mentionText = "@thread";
     const text = `${prefix}${mentionText} done`;
+
     const mention: PromptTextMention = {
       start: prefix.length,
       end: prefix.length + mentionText.length,
@@ -88,6 +91,7 @@ describe("prompt editor serialization round-trip", () => {
         label: "@thread",
       },
     };
+
     const value: PromptEditorValue = { text, mentions: [mention] };
 
     const result = roundTrip(value);
@@ -102,6 +106,7 @@ describe("prompt editor serialization round-trip", () => {
 describe("prompt editor clipboard serialization", () => {
   function clipboardText(content: unknown[]): string {
     const doc = Node.fromJSON(schema, { type: "doc", content });
+
     return promptEditorClipboardTextFromSlice(
       new Slice(doc.content, 0, 0),
       schema,
@@ -155,24 +160,30 @@ describe("promptEditorCopiedSlice", () => {
       schema,
       promptEditorContentFromValue({ text: markdown, mentions: [] }),
     );
+
     const positionOf = (needle: string): number => {
       let position: number | null = null;
       doc.descendants((node, nodePosition) => {
         const index = node.isText ? (node.text ?? "").indexOf(needle) : -1;
+
         if (position === null && index >= 0) {
           position = nodePosition + index;
         }
       });
+
       if (position === null) {
         throw new Error(`Missing ${needle}`);
       }
+
       return position;
     };
+
     const selection = TextSelection.create(
       doc,
       positionOf(from),
       positionOf(to) + to.length,
     );
+
     return promptEditorClipboardTextFromSlice(
       promptEditorCopiedSlice(selection.content(), selection),
       schema,
@@ -285,6 +296,7 @@ describe("prompt editor serialization", () => {
 
   it("serializes a selected skill as a pill without materializing argument hint text", () => {
     const text = "/review ";
+
     const mentions: PromptTextMention[] = [
       {
         start: 0,
@@ -311,5 +323,85 @@ describe("prompt editor serialization", () => {
       },
       { type: "text", text: " " },
     ]);
+  });
+});
+
+describe("prompt editor mention word boundaries", () => {
+  function skill(start: number, name: string): PromptTextMention {
+    return {
+      start,
+      end: start + 1 + name.length,
+      resource: {
+        kind: "command",
+        trigger: "/",
+        name,
+        source: "skill",
+        origin: "user",
+        label: name,
+        argumentHint: null,
+      },
+    };
+  }
+
+  function thread(start: number, threadId: string): PromptTextMention {
+    return {
+      start,
+      end: start + "@thread:".length + threadId.length,
+      resource: {
+        kind: "thread",
+        threadId,
+        projectId: "proj_1",
+        label: threadId,
+      },
+    };
+  }
+
+  it.each([
+    {
+      name: "a word typed right after a pill",
+      input: {
+        text: "I am lost. /poteto-modeAlso testing",
+        mentions: [skill(11, "poteto-mode")],
+      },
+      expected: {
+        text: "I am lost. /poteto-mode Also testing",
+        mentions: [skill(11, "poteto-mode")],
+      },
+    },
+    {
+      name: "a word typed right before a pill",
+      input: { text: "hello/review", mentions: [skill(5, "review")] },
+      expected: { text: "hello /review", mentions: [skill(6, "review")] },
+    },
+    {
+      name: "two adjacent pills",
+      input: {
+        text: "@thread:thr_a@thread:thr_b",
+        mentions: [thread(0, "thr_a"), thread(13, "thr_b")],
+      },
+      expected: {
+        text: "@thread:thr_a @thread:thr_b",
+        mentions: [thread(0, "thr_a"), thread(14, "thr_b")],
+      },
+    },
+    {
+      name: "a pill inside a quote",
+      input: { text: "> /reviewAlso", mentions: [skill(2, "review")] },
+      expected: { text: "> /review Also", mentions: [skill(2, "review")] },
+    },
+  ])("separates $name", ({ input, expected }) => {
+    const separated = roundTrip(input);
+    expect(separated).toEqual(expected);
+    expect(roundTrip(separated)).toEqual(expected);
+  });
+
+  it.each([
+    { text: "see /review, then", mentions: [skill(4, "review")] },
+    { text: "(/review)", mentions: [skill(1, "review")] },
+    { text: "/review world", mentions: [skill(0, "review")] },
+    { text: "/review\nAlso", mentions: [skill(0, "review")] },
+    { text: "/review", mentions: [skill(0, "review")] },
+  ])("leaves punctuation, whitespace and line breaks alone: $text", (value) => {
+    expect(roundTrip(value)).toEqual(value);
   });
 });

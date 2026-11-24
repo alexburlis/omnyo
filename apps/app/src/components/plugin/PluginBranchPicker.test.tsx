@@ -62,8 +62,10 @@ describe("PluginBranchPicker", () => {
 
   it("shows the branch alone without a label", () => {
     renderPicker({ value: "release" });
+
     const text =
       screen.getByRole("combobox", { name: "Branch" }).textContent ?? "";
+
     expect(text).toContain("release");
     expect(text).not.toContain("Branch from");
   });
@@ -78,6 +80,7 @@ describe("PluginBranchPicker", () => {
       const labelsBeforeOpen = screen.queryAllByText(label).length;
       fireEvent.click(trigger);
       expect(screen.getAllByText(label)).toHaveLength(labelsBeforeOpen + 1);
+
       if (label !== "Branch from:") {
         expect(screen.queryByText("Branch from:")).toBeNull();
       }

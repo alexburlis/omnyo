@@ -1,5 +1,8 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { z } from "zod";
+import { managedHostContract } from "./managed-contract.js";
+import { housekeepingHostContract } from "./housekeeping-contract.js";
+import { hostContract as worktreesHostContract } from "./worktrees/host-contract.js";
 
 export const diskUsageInputSchema = z
   .object({
@@ -17,7 +20,9 @@ export const diskUsageInputSchema = z
     largeFileMinBytes: z.number().int().min(1).nullable(),
   })
   .strict();
+
 export type DiskUsageInput = z.infer<typeof diskUsageInputSchema>;
+
 export const measuredTargetSchema = z.discriminatedUnion("outcome", [
   z.object({
     outcome: z.literal("measured"),
@@ -28,13 +33,16 @@ export const measuredTargetSchema = z.discriminatedUnion("outcome", [
         z.object({
           name: z.string(),
           sizeBytes: z.number().int().nonnegative(),
+          empty: z.boolean(),
         }),
       )
       .nullable(),
   }),
   z.object({ outcome: z.literal("missing"), path: z.string() }),
 ]);
+
 export type MeasuredTarget = z.infer<typeof measuredTargetSchema>;
+
 export const diskUsageOutputSchema = z.object({
   targets: z.array(measuredTargetSchema),
   largeFiles: z.array(
@@ -44,7 +52,9 @@ export const diskUsageOutputSchema = z.object({
     }),
   ),
 });
+
 export type DiskUsageOutput = z.infer<typeof diskUsageOutputSchema>;
+
 const storageEntriesSchema = z
   .object({
     rootPath: z.string().min(1),
@@ -52,17 +62,22 @@ const storageEntriesSchema = z
     recreate: z.boolean(),
   })
   .strict();
+
 export const diskCapacitySchema = z.object({
   totalBytes: z.number().int().nonnegative(),
   freeBytes: z.number().int().nonnegative(),
 });
+
 const largeFileTotalsSchema = z.object({
   name: z.string(),
   sizeBytes: z.number().int().nonnegative(),
   count: z.number().int().nonnegative(),
 });
+
 export type LargeFileTotals = z.infer<typeof largeFileTotalsSchema>;
+
 const minBytesSchema = z.number().int().min(1);
+
 export const developerEntryInspectionSchema = z.object({
   name: z.string(),
   sourcePath: z.string().nullable(),
@@ -71,6 +86,18 @@ export const developerEntryInspectionSchema = z.object({
 });
 
 export const hostStorageContract = defineRpcContract({
+  ...managedHostContract,
+  ...housekeepingHostContract,
+  ...worktreesHostContract,
+  retainedEntries: {
+    input: z
+      .object({
+        rootPath: z.string().min(1),
+        names: z.array(z.string().min(1)).max(500),
+      })
+      .strict(),
+    output: z.object({ retained: z.array(z.string()) }),
+  },
   inspectDeveloperEntries: {
     input: z
       .object({

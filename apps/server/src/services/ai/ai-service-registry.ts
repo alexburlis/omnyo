@@ -2,12 +2,14 @@ import {
   aiServiceStatusSchema,
   type AiServiceStatus,
   type AiTask,
-} from "@bb/domain";
-import type { NormalizedPluginAiService } from "@get-bb/plugin-sdk/internal/host-policy";
-import { aiServiceAlreadyRegisteredMessage } from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/domain";
+import type { NormalizedPluginAiService } from "@omnyo/plugin-sdk/internal/host-policy";
+import { aiServiceAlreadyRegisteredMessage } from "@omnyo/plugin-sdk/internal/host-policy";
 
 const STATUS_TTL_MS = 10_000;
+
 const STATUS_TIMEOUT_MS = 2_000;
+
 const NOT_RESPONDING: AiServiceStatus = {
   ready: false,
   message: "Not responding",
@@ -72,6 +74,7 @@ async function readStatus(
 ): Promise<AiServiceStatus> {
   if (service.status === null) return { ready: true };
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   try {
     const raw = await Promise.race([
       service.status(),
@@ -80,13 +83,16 @@ async function readStatus(
         timer.unref();
       }),
     ]);
+
     if (raw === null) return NOT_RESPONDING;
     const parsed = aiServiceStatusSchema.safeParse(raw);
+
     return parsed.success
       ? parsed.data
       : { ready: false, message: "Reported an invalid status" };
   } catch (error) {
     const message = error instanceof Error ? error.message.trim() : "";
+
     return {
       ready: false,
       message: message.length > 0 ? message : "Status check failed",
@@ -106,36 +112,47 @@ export function createAiServiceRegistry(
 
   function refresh(service: AiServiceRegistration): Promise<AiServiceStatus> {
     const pending = inFlight.get(service);
+
     if (pending !== undefined) return pending;
+
     const request = readStatus(service)
       .then((status) => {
         const previous = statuses.get(service)?.status;
+
         if (services.get(mapKey(aiServiceKey(service))) === service) {
           statuses.set(service, { status, checkedAt: now() });
         }
+
         if (previous === undefined || previous.ready !== status.ready) {
           args.onStatusChange?.();
         }
+
         return status;
       })
       .finally(() => inFlight.delete(service));
+
     inFlight.set(service, request);
+
     return request;
   }
 
   return {
     register(registration) {
       const key = mapKey(aiServiceKey(registration));
+
       if (services.has(key)) {
         throw new Error(aiServiceAlreadyRegisteredMessage(registration.id));
       }
+
       services.set(key, registration);
       args.onStatusChange?.();
       let disposed = false;
+
       return {
         dispose() {
           if (disposed) return;
           disposed = true;
+
           if (services.get(key) === registration) {
             services.delete(key);
             statuses.delete(registration);
@@ -152,22 +169,29 @@ export function createAiServiceRegistry(
     },
     peekStatus(key) {
       const service = services.get(mapKey(key));
+
       if (service === undefined) return null;
       const cached = statuses.get(service);
+
       if (cached === undefined || now() - cached.checkedAt > STATUS_TTL_MS) {
         void refresh(service);
       }
+
       return cached?.status ?? null;
     },
     async status(key) {
       const service = services.get(mapKey(key));
+
       if (service === undefined) {
         return { ready: false, message: "Plugin not loaded" };
       }
+
       const cached = statuses.get(service);
+
       if (cached !== undefined && now() - cached.checkedAt <= STATUS_TTL_MS) {
         return cached.status;
       }
+
       return refresh(service);
     },
   };

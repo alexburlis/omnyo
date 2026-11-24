@@ -1,4 +1,4 @@
-import type { PluginThreadActionTarget } from "@get-bb/plugin-sdk/app";
+import type { PluginThreadActionTarget } from "@omnyo/plugin-sdk/app";
 import type { SidebarThread } from "../model/sidebar-thread.js";
 
 export function toThreadActionTarget(
@@ -10,6 +10,7 @@ export function toThreadActionTarget(
     parentThreadId: thread.parentThreadId,
     archivedAt: thread.archivedAt,
     pinnedAt: thread.pinnedAt,
+    shelvedAt: thread.experimental_shelvedAt,
     sectionId: thread.sectionId,
     isUnread: thread.isUnread,
     status: thread.status,

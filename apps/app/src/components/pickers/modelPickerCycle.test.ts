@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ReasoningLevel } from "@bb/domain";
+import type { ReasoningLevel } from "@omnyo/domain";
 import {
+  cyclableModelOptions,
   cycleReasoningValue,
   nextCycleValue,
   previousCycleValue,
@@ -44,6 +45,26 @@ describe("previousCycleValue", () => {
   });
 });
 
+describe("cyclableModelOptions", () => {
+  it("skips hidden and disabled models so the chord never lands on them", () => {
+    const models = [
+      { value: "gpt-6.1-sol", label: "GPT-6.1-Sol" },
+      { value: "gpt-5.6-sol", label: "GPT-5.6-Sol" },
+      { value: "gpt-6-luna", label: "GPT-6-Luna", disabled: true },
+      { value: "gpt-6-astra", label: "GPT-6-Astra" },
+    ];
+
+    const cyclable = cyclableModelOptions(models, new Set(["gpt-5.6-sol"]));
+
+    expect(cyclable.map((model) => model.value)).toEqual([
+      "gpt-6.1-sol",
+      "gpt-6-astra",
+    ]);
+    expect(nextCycleValue(cyclable, "gpt-6.1-sol")).toBe("gpt-6-astra");
+    expect(nextCycleValue(cyclable, "gpt-5.6-sol")).toBe("gpt-6.1-sol");
+  });
+});
+
 describe("cycleReasoningValue", () => {
   const unorderedOptions = [
     { value: "max", label: "Max" },
@@ -57,6 +78,7 @@ describe("cycleReasoningValue", () => {
       { value: "minimal", label: "Minimal" },
       { value: "high", label: "High" },
     ];
+
     expect(cycleReasoningValue(providerSpecific, "off", "forward")).toBe(
       "minimal",
     );
@@ -97,6 +119,19 @@ describe("cycleReasoningValue", () => {
     expect(cycleReasoningValue(unorderedOptions, "medium", "backward")).toBe(
       "low",
     );
+  });
+
+  it("cycles through Max before the Ultra column", () => {
+    const claude = [
+      { value: "xhigh", label: "xHigh" },
+      { value: "ultracode", label: "Ultracode" },
+      { value: "max", label: "Max" },
+    ] satisfies readonly { value: ReasoningLevel; label: string }[];
+
+    expect(cycleReasoningValue(claude, "xhigh", "forward")).toBe("max");
+    expect(cycleReasoningValue(claude, "max", "forward")).toBe("ultracode");
+    expect(cycleReasoningValue(claude, "ultracode", "forward")).toBe("xhigh");
+    expect(cycleReasoningValue(claude, "ultracode", "backward")).toBe("max");
   });
 
   it("returns null when there is nowhere to move", () => {

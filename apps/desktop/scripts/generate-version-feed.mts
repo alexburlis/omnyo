@@ -3,10 +3,10 @@ import { resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import {
-  bbDesktopVersionFeedSchema,
-  createBbDesktopVersionFeedFileName,
-  type BbDesktopVersionFeed,
-} from "@bb/desktop-contract";
+  omnyoDesktopVersionFeedSchema,
+  createOmnyoDesktopVersionFeedFileName,
+  type OmnyoDesktopVersionFeed,
+} from "@omnyo/desktop-contract";
 import {
   createDesktopReleaseConfig,
   resolveDesktopBuildPlatform,
@@ -14,21 +14,31 @@ import {
 } from "./desktop-release-channel.mjs";
 
 const packageRoot = process.cwd();
+
 const packageJsonPath = resolve(packageRoot, "package.json");
+
 const releaseChannel = resolveDesktopReleaseChannel(process.env);
-const releaseConfig = createDesktopReleaseConfig(releaseChannel);
+
+const releaseConfig = createDesktopReleaseConfig(
+  releaseChannel,
+  resolveDesktopBuildPlatform(process.platform),
+);
+
 const buildPlatform = resolveDesktopBuildPlatform(process.platform);
+
 const updateMetadataFileName =
   releaseConfig.updateMetadataFileNames[buildPlatform];
+
 const updateMetadataPath = resolve(
   packageRoot,
   "release",
   updateMetadataFileName,
 );
+
 const desktopVersionFeedPath = resolve(
   packageRoot,
   "release",
-  createBbDesktopVersionFeedFileName(buildPlatform),
+  createOmnyoDesktopVersionFeedFileName(buildPlatform),
 );
 
 const packageJsonSchema = z.object({
@@ -60,6 +70,7 @@ function parseJson(text: string): unknown {
 const packageJson = packageJsonSchema.parse(
   parseJson(await readFile(packageJsonPath, "utf8")),
 );
+
 const updateMetadata = updateMetadataSchema.parse(
   parseYaml(await readFile(updateMetadataPath, "utf8")),
 );
@@ -70,7 +81,7 @@ if (updateMetadata.version !== packageJson.version) {
   );
 }
 
-const desktopVersionFeed: BbDesktopVersionFeed = {
+const desktopVersionFeed: OmnyoDesktopVersionFeed = {
   channel: releaseChannel,
   files: updateMetadata.files,
   minimumSystemVersion: buildPlatform === "macos" ? "22.0.0" : null,
@@ -85,7 +96,8 @@ const desktopVersionFeed: BbDesktopVersionFeed = {
   version: packageJson.version,
 };
 
-const validatedFeed = bbDesktopVersionFeedSchema.parse(desktopVersionFeed);
+const validatedFeed = omnyoDesktopVersionFeedSchema.parse(desktopVersionFeed);
+
 if (validatedFeed.minimumSystemVersion !== null) {
   await writeFile(
     updateMetadataPath,
@@ -96,6 +108,7 @@ if (validatedFeed.minimumSystemVersion !== null) {
     "utf8",
   );
 }
+
 await writeFile(
   desktopVersionFeedPath,
   `${JSON.stringify(validatedFeed, null, 2)}\n`,

@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  CURATED_PLUGIN_MARKETPLACE_NAME,
   type PluginCatalogInstallPlan,
   type PluginCatalogResolvedSource,
   type PluginInstallJob,
-} from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
+} from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
@@ -14,9 +13,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Icon } from "@bb/shared-ui/icon";
-import { Input } from "@bb/shared-ui/input";
+} from "@omnyo/shared-ui/dialog";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Input } from "@omnyo/shared-ui/input";
 import { pluginAdminErrorMessage } from "@/lib/plugin-admin-error";
 import { applyPluginInstallJob } from "@/hooks/cache-owners/plugin-cache-owner";
 import { useCatalogInstallPlan } from "@/hooks/queries/plugin-catalog-queries";
@@ -37,19 +36,6 @@ export type AddPluginInitial = {
   iconTinted: boolean;
   source: string;
 };
-
-function catalogInstallDescription(
-  source: string,
-  publisherLabel: string,
-): string {
-  if (source.startsWith("builtin:")) {
-    return "Install this plugin, bundled with BB.";
-  }
-  if (source.startsWith("npm:")) {
-    return `Install this ${publisherLabel} plugin from its listed npm package.`;
-  }
-  return `Install this ${publisherLabel} plugin from its listed source repository.`;
-}
 
 interface AddPluginDialogProps {
   open: boolean;
@@ -93,7 +79,9 @@ function buildRequest(
       marketplace: initial.marketplace,
     };
   }
+
   const trimmed = sourceText.trim();
+
   return trimmed.length === 0 ? null : { kind: "direct", source: trimmed };
 }
 
@@ -111,6 +99,7 @@ function resolvedSourceRows(
         : [{ label: "registry", value: source.registry }]),
     ];
   }
+
   return [
     { label: "repository", value: source.url, href: source.url },
     ...(source.subdir === undefined
@@ -158,6 +147,7 @@ function ThirdPartySourceDisclosure({
       </p>
     );
   }
+
   if (error !== null && error !== undefined) {
     const status =
       error instanceof Error &&
@@ -165,8 +155,10 @@ function ThirdPartySourceDisclosure({
       typeof error.status === "number"
         ? error.status
         : null;
+
     const retryable =
       status === null || status === 408 || status === 429 || status >= 500;
+
     const message =
       status === 401 || status === 403
         ? "Source access denied. Check repository permissions."
@@ -175,6 +167,7 @@ function ThirdPartySourceDisclosure({
           : retryable
             ? "Source unavailable. Try again."
             : "Invalid source. Check the marketplace listing.";
+
     return (
       <div
         className="flex items-center gap-3 rounded-md border border-warning/20 bg-warning/5 p-3"
@@ -202,9 +195,11 @@ function ThirdPartySourceDisclosure({
       </div>
     );
   }
+
   if (plan === undefined || plan.kind !== "marketplace" || plan.official) {
     return null;
   }
+
   const author =
     plan.author.url === null ? null : (
       <a
@@ -216,12 +211,13 @@ function ThirdPartySourceDisclosure({
         {plan.author.name}
       </a>
     );
+
   return (
     <div className="space-y-1.5 rounded-md border border-border bg-muted/30 px-3 py-2">
       <p className="text-2xs text-subtle-foreground">
         Listed by{" "}
         <span className="text-foreground">{plan.marketplaceDisplayName}</span>,
-        a third-party marketplace that BB does not review.
+        a third-party marketplace that Omnyo does not review.
       </p>
       <dl className="space-y-0.5">
         <div className="flex gap-2">
@@ -270,15 +266,15 @@ function AddPluginDialogContent({
   const queryClient = useQueryClient();
   const [sourceText, setSourceText] = useState("");
   const request = buildRequest(initial, sourceText);
-  const thirdParty =
-    initial !== null &&
-    initial.marketplace !== CURATED_PLUGIN_MARKETPLACE_NAME &&
-    !initial.source.startsWith("builtin:");
+
+  const thirdParty = initial !== null && !initial.source.startsWith("builtin:");
+
   const planQuery = useCatalogInstallPlan(
     thirdParty && initial !== null
       ? { entryId: initial.entryId, marketplace: initial.marketplace }
       : null,
   );
+
   const plan = planQuery.data;
 
   const install = useMutation({
@@ -311,10 +307,7 @@ function AddPluginDialogContent({
             ? "Install from npm, a Git repository, or a local path."
             : thirdParty
               ? "Install this plugin from the source its marketplace lists."
-              : catalogInstallDescription(
-                  initial.source,
-                  initial.publisherLabel,
-                )}
+              : "Install this plugin, bundled with Omnyo."}
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-3">
@@ -334,17 +327,31 @@ function AddPluginDialogContent({
             </p>
           </div>
         ) : (
-          <div>
+          <div className="space-y-1.5">
+            <label
+              htmlFor="add-plugin-source"
+              className="text-xs font-medium text-foreground"
+            >
+              Source
+            </label>
             <Input
+              id="add-plugin-source"
               value={sourceText}
               autoFocus
-              placeholder="https://github.com/owner/bb-plugin-name"
+              placeholder="https://github.com/owner/omnyo-plugin-name"
               aria-label="Plugin source"
+              aria-describedby="add-plugin-source-hint"
               className="h-8 font-mono text-xs"
               onChange={(event) => setSourceText(event.target.value)}
             />
-            <p className="mt-1.5 text-2xs text-subtle-foreground">
-              GitHub repository URL · npm:package[@version] · ./local/path
+            <p
+              id="add-plugin-source-hint"
+              className="text-xs text-muted-foreground"
+            >
+              A GitHub repository URL,{" "}
+              <code className="font-mono">npm:package[@version]</code> or a
+              local folder such as{" "}
+              <code className="font-mono">./local/path</code>.
             </p>
           </div>
         )}
@@ -359,12 +366,19 @@ function AddPluginDialogContent({
         ) : null}
 
         {install.isError ? (
-          <p
+          <div
             role="alert"
-            className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-xs text-warning-text"
+            className="flex items-start gap-2 rounded-md border border-surface-destructive-border bg-surface-destructive px-3 py-2 text-xs text-destructive-text"
           >
-            {pluginAdminErrorMessage(install.error)}
-          </p>
+            <Icon
+              name="AlertCircle"
+              aria-hidden
+              className="mt-0.5 size-3.5 shrink-0"
+            />
+            <p className="max-h-40 min-w-0 overflow-y-auto whitespace-pre-wrap break-words leading-5">
+              {pluginAdminErrorMessage(install.error)}
+            </p>
+          </div>
         ) : null}
 
         <FullTrustWarning />

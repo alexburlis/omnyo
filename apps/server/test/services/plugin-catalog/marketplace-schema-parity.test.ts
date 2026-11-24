@@ -10,16 +10,10 @@ import {
 
 const SCHEMA_PATHS = {
   1: fileURLToPath(
-    new URL(
-      "../../../../web/public/schemas/marketplace.schema.json",
-      import.meta.url,
-    ),
+    new URL("./schemas/marketplace.schema.json", import.meta.url),
   ),
   2: fileURLToPath(
-    new URL(
-      "../../../../web/public/schemas/marketplace-v2.schema.json",
-      import.meta.url,
-    ),
+    new URL("./schemas/marketplace-v2.schema.json", import.meta.url),
   ),
 } as const;
 
@@ -31,6 +25,7 @@ async function compilePublishedSchema(
   const schema = publishedSchemaSchema.parse(
     JSON.parse(await readFile(SCHEMA_PATHS[version], "utf8")),
   );
+
   const ajv = new Ajv2020({ strict: false });
   ajv.addFormat("date-time", (value) => {
     const normalized = value
@@ -38,6 +33,7 @@ async function compilePublishedSchema(
       .replace(/z$/iu, "Z")
       .replace(/([+-]\d\d)(\d\d)$/u, "$1:$2")
       .replace(/([+-]\d\d)$/u, "$1:00");
+
     return z.iso.datetime({ offset: true }).safeParse(normalized).success;
   });
   ajv.addFormat("uri", (value) => {
@@ -47,6 +43,7 @@ async function compilePublishedSchema(
       return false;
     }
   });
+
   return ajv.compile(schema);
 }
 
@@ -68,7 +65,7 @@ function manifestWith(entry: Record<string, unknown>): Record<string, unknown> {
         description: "An Acme plugin.",
         icon: "ZoomIn",
         author: { name: "Acme" },
-        source: { npm: { package: "bb-plugin-acme" } },
+        source: { npm: { package: "omnyo-plugin-acme" } },
         ...entry,
       },
     ],
@@ -84,7 +81,7 @@ function rangeFixture(label: string, range: string, valid: boolean): Fixture {
     label,
     valid,
     manifest: manifestWith({
-      source: { npm: { package: "bb-plugin-acme", range } },
+      source: { npm: { package: "omnyo-plugin-acme", range } },
     }),
   };
 }
@@ -144,7 +141,7 @@ const fixtures: readonly Fixture[] = [
     valid: false,
     manifest: manifestWith({
       source: {
-        npm: { package: "bb-plugin-acme", range: "^1.0.0", tag: "beta" },
+        npm: { package: "omnyo-plugin-acme", range: "^1.0.0", tag: "beta" },
       },
     }),
   },
@@ -291,14 +288,14 @@ const v2Fixtures: readonly Fixture[] = [
     label: "partial prerelease range",
     valid: true,
     manifest: manifestV2With({
-      source: { npm: { package: "bb-plugin-acme", range: "1.x-alpha" } },
+      source: { npm: { package: "omnyo-plugin-acme", range: "1.x-alpha" } },
     }),
   },
   {
     label: "partial range with build metadata",
     valid: true,
     manifest: manifestV2With({
-      source: { npm: { package: "bb-plugin-acme", range: "1.2+build" } },
+      source: { npm: { package: "omnyo-plugin-acme", range: "1.2+build" } },
     }),
   },
   {
@@ -306,7 +303,7 @@ const v2Fixtures: readonly Fixture[] = [
     valid: true,
     manifest: manifestV2With({
       source: {
-        npm: { package: "bb-plugin-acme", range: ">=1.2.3-alpha" },
+        npm: { package: "omnyo-plugin-acme", range: ">=1.2.3-alpha" },
       },
     }),
   },
@@ -314,7 +311,7 @@ const v2Fixtures: readonly Fixture[] = [
     label: "double equals partial range",
     valid: true,
     manifest: manifestV2With({
-      source: { npm: { package: "bb-plugin-acme", range: "==1.2" } },
+      source: { npm: { package: "omnyo-plugin-acme", range: "==1.2" } },
     }),
   },
   {
@@ -323,7 +320,7 @@ const v2Fixtures: readonly Fixture[] = [
     manifest: manifestV2With({
       source: {
         npm: {
-          package: "bb-plugin-acme",
+          package: "omnyo-plugin-acme",
           range: ">=1.0.0 ".repeat(33).trim(),
         },
       },
@@ -336,7 +333,7 @@ const v2Fixtures: readonly Fixture[] = [
       author: { name: "Acme", url: "HTTPS://example.com/acme" },
       source: {
         npm: {
-          package: "bb-plugin-acme",
+          package: "omnyo-plugin-acme",
           registry: "HTTPS://registry.example.com/",
         },
       },
@@ -354,7 +351,7 @@ const v2Fixtures: readonly Fixture[] = [
     valid: true,
     manifest: manifestV2With({
       source: {
-        npm: { package: "bb-plugin-acme", registry: "https://" },
+        npm: { package: "omnyo-plugin-acme", registry: "https://" },
       },
     }),
   },
@@ -400,11 +397,13 @@ describe("published marketplace schema parity", () => {
     const disagreements = fixtures.flatMap((fixture) => {
       const published = validate(fixture.manifest);
       let runtime = true;
+
       try {
         parseMarketplaceManifest(fixture.manifest, "fixture");
       } catch {
         runtime = false;
       }
+
       return published === fixture.valid && (!published || runtime)
         ? []
         : [
@@ -417,14 +416,17 @@ describe("published marketplace schema parity", () => {
 
   it("agrees with the v2 runtime parser on known fields", async () => {
     const validate = await compilePublishedSchema(2);
+
     const disagreements = v2Fixtures.flatMap((fixture) => {
       const published = validate(fixture.manifest);
       let runtime = true;
+
       try {
         parseMarketplaceManifest(fixture.manifest, "fixture");
       } catch {
         runtime = false;
       }
+
       return published === fixture.valid && (!published || runtime)
         ? []
         : [
@@ -437,6 +439,7 @@ describe("published marketplace schema parity", () => {
 
   it("keeps the v2 publisher strict and the consumer tolerant", async () => {
     const validate = await compilePublishedSchema(2);
+
     const manifest = manifestV2With(
       {
         futureEntryField: true,
@@ -453,10 +456,11 @@ describe("published marketplace schema parity", () => {
 
   it("keeps source objects strict as the v2 tolerance exception", async () => {
     const validate = await compilePublishedSchema(2);
+
     const manifests = [
       manifestV2With({
         source: {
-          npm: { package: "bb-plugin-acme", regsitry: "https://npm.test/" },
+          npm: { package: "omnyo-plugin-acme", regsitry: "https://npm.test/" },
         },
       }),
       manifestV2With({
@@ -478,15 +482,16 @@ describe("published marketplace schema parity", () => {
 
   it("keeps the bundled source out of the public publisher schema", async () => {
     const validate = await compilePublishedSchema(2);
+
     const manifest = {
       ...manifestV2With({ source: { bundled: { plugin: "docs" } } }),
-      name: "bb-official",
-      displayName: "BB Official",
+      name: "omnyo-official",
+      displayName: "Omnyo Official",
     };
 
     expect(validate(manifest)).toBe(false);
     expect(parseBundledMarketplaceManifest(manifest, "fixture")).toMatchObject({
-      name: "bb-official",
+      name: "omnyo-official",
     });
     expect(() => parseMarketplaceManifest(manifest, "fixture")).toThrow(
       /not allowed in fetched or third-party documents/u,
@@ -496,6 +501,7 @@ describe("published marketplace schema parity", () => {
   it("accepts more than 1024 entries in both contracts", async () => {
     for (const version of [1, 2] as const) {
       const validate = await compilePublishedSchema(version);
+
       const largeManifest = {
         schemaVersion: version,
         name: "acme",
@@ -506,7 +512,7 @@ describe("published marketplace schema parity", () => {
           description: "An Acme plugin.",
           icon: "ZoomIn",
           author: { name: "Acme" },
-          source: { npm: { package: `bb-plugin-acme-${index}` } },
+          source: { npm: { package: `omnyo-plugin-acme-${index}` } },
         })),
       };
 

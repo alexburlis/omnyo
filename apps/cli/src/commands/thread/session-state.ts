@@ -1,10 +1,10 @@
 import type {
   ProviderCommand,
   ThreadTimelineSessionOption,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { Command } from "commander";
 import { action } from "../../action.js";
-import { createCliBbSdk } from "../../client.js";
+import { createCliOmnyoSdk } from "../../client.js";
 import { outputJson, requireThreadIdOrSelf } from "../helpers.js";
 
 interface SessionStateCommandOptions {
@@ -27,35 +27,44 @@ export function parseSessionOptionAssignments(args: {
   clear: readonly string[];
 }): Record<string, string | boolean | null> {
   const patch: Record<string, string | boolean | null> = {};
+
   for (const assignment of args.set) {
     const separator = assignment.indexOf("=");
     const optionId = separator === -1 ? "" : assignment.slice(0, separator);
+
     if (optionId === "") {
       throw new Error(
         `Invalid --set '${assignment}'. Expected <option-id>=<value>.`,
       );
     }
+
     const raw = assignment.slice(separator + 1);
     const option = args.options?.find((candidate) => candidate.id === optionId);
+
     if (option?.type === "boolean") {
       if (raw !== "true" && raw !== "false") {
         throw new Error(
           `Session option '${optionId}' takes true or false, not '${raw}'.`,
         );
       }
+
       patch[optionId] = raw === "true";
       continue;
     }
+
     patch[optionId] = raw;
   }
+
   for (const optionId of args.clear) {
     if (Object.hasOwn(patch, optionId)) {
       throw new Error(
         `Session option '${optionId}' cannot be both set and cleared.`,
       );
     }
+
     patch[optionId] = null;
   }
+
   return patch;
 }
 
@@ -63,18 +72,22 @@ export function parseSpawnSessionOptions(
   assignments: readonly string[],
 ): Record<string, string | boolean> {
   const selections: Record<string, string | boolean> = {};
+
   for (const assignment of assignments) {
     const separator = assignment.indexOf("=");
     const optionId = separator === -1 ? "" : assignment.slice(0, separator);
     const raw = assignment.slice(separator + 1);
+
     if (optionId === "" || raw === "") {
       throw new Error(
         `Invalid --option '${assignment}'. Expected <option-id>=<value>.`,
       );
     }
+
     selections[optionId] =
       raw === "true" ? true : raw === "false" ? false : raw;
   }
+
   return selections;
 }
 
@@ -84,9 +97,11 @@ export function formatThreadProviderCommands(
   if (commands === null || commands.length === 0) {
     return ["The agent has not advertised any commands for this thread."];
   }
+
   return commands.map((command) => {
     const hint = command.argumentHint ? ` <${command.argumentHint}>` : "";
     const description = command.description ? `  ${command.description}` : "";
+
     return `/${command.name}${hint}${description}`;
   });
 }
@@ -97,15 +112,19 @@ export function formatThreadSessionOptions(
   if (options === null || options.length === 0) {
     return ["The agent has not reported any session options for this thread."];
   }
+
   return options.flatMap((option) => {
     const pending =
       option.pendingValue === null
         ? ""
         : ` -> ${String(option.pendingValue)} on the next turn`;
+
     const heading = `${option.id} (${option.label}): ${String(option.value)}${pending}`;
+
     if (option.type === "boolean") {
       return [heading];
     }
+
     return [
       heading,
       ...option.values.map(
@@ -131,12 +150,16 @@ export function registerSessionStateCommands(
       action(
         async (id: string | undefined, opts: SessionStateCommandOptions) => {
           const threadId = requireThreadIdOrSelf(id, opts);
-          const timeline = await createCliBbSdk(getUrl()).threads.timeline({
+
+          const timeline = await createCliOmnyoSdk(getUrl()).threads.timeline({
             threadId,
             summaryOnly: "true",
           });
+
           const commands = timeline.providerCommands;
+
           if (outputJson(opts, { commands })) return;
+
           for (const line of formatThreadProviderCommands(commands)) {
             console.log(line);
           }
@@ -165,13 +188,16 @@ export function registerSessionStateCommands(
       action(
         async (id: string | undefined, opts: SessionOptionsCommandOptions) => {
           const threadId = requireThreadIdOrSelf(id, opts);
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
+
           const readOptions = async () =>
             (await sdk.threads.timeline({ threadId, summaryOnly: "true" }))
               .sessionOptions;
+
           let options = await readOptions();
           const set = opts.set ?? [];
           const clear = opts.clear ?? [];
+
           if (set.length > 0 || clear.length > 0) {
             await sdk.threads.update({
               threadId,
@@ -183,7 +209,9 @@ export function registerSessionStateCommands(
             });
             options = await readOptions();
           }
+
           if (outputJson(opts, { options })) return;
+
           for (const line of formatThreadSessionOptions(options)) {
             console.log(line);
           }

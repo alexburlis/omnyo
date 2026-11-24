@@ -16,8 +16,8 @@ import {
   threadPendingInteractionsQueryKey,
 } from "../queries/query-keys";
 import { threadDefaultExecutionOptionsQueryKey } from "../queries/thread-default-execution-options-query";
-import type { PendingInteraction } from "@bb/domain";
-import type { ThreadPendingInteractionsResponse } from "@bb/server-contract";
+import type { PendingInteraction } from "@omnyo/domain";
+import type { ThreadPendingInteractionsResponse } from "@omnyo/server-contract";
 import type {
   ProjectArg,
   QueryClientArg,
@@ -28,6 +28,7 @@ import {
   getProjectListInvalidationQueryKeys,
   getProjectPromptHistoryInvalidationQueryKeys,
   getProjectSourceDependentInvalidationQueryKeys,
+  resetProjectCommandCatalogQueries,
   getThreadDetailInvalidationQueryKeys,
   getThreadListInvalidationQueryKeys,
   getThreadPendingInteractionInvalidationQueryKeys,
@@ -78,6 +79,7 @@ export function invalidateProjectSourceQueries({
   projectId,
   queryClient,
 }: ProjectSourceInvalidationArg): void {
+  resetProjectCommandCatalogQueries({ projectId, queryClient });
   invalidateQueryKeys({
     queryClient,
     queryKeys: getProjectSourceDependentInvalidationQueryKeys({ projectId }),
@@ -267,6 +269,7 @@ export function applyResolvedThreadPendingInteraction({
     (current) =>
       current?.flatMap((entry) => {
         if (entry.id !== interaction.id) return [entry];
+
         return interaction.status === "pending" ||
           interaction.status === "resolving"
           ? [interaction]

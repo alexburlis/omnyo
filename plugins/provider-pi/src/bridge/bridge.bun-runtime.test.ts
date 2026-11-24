@@ -10,11 +10,12 @@ import {
 } from "./test-support.js";
 
 let harness: FakePiBridgeHarness;
+
 let nextId = 2000;
 
 beforeEach(async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-bun-",
+    prefix: "omnyo-pi-bun-",
     initialize: true,
   });
 });
@@ -25,11 +26,14 @@ afterEach(async () => {
 
 function bunBinary(): string | null {
   const probe = spawnSync("bun", ["--version"], { encoding: "utf8" });
+
   if (probe.status !== 0 || !probe.stdout?.trim()) {
     if (process.env.CI)
       throw new Error("Bun is required for the Pi runtime regression in CI");
+
     return null;
   }
+
   return "bun";
 }
 
@@ -41,6 +45,7 @@ it.skipIf(bunBinary() === null)(
     vi.stubEnv(PI_BRIDGE_ARGS_ENV, JSON.stringify([fakePiPath]));
 
     const threadId = "thr_bun_dyn_tool";
+
     const started = await harness.request((nextId += 1), "thread/start", {
       threadId,
       cwd: harness.workspaceDir,
@@ -48,8 +53,8 @@ it.skipIf(bunBinary() === null)(
       options: FULL_PERMISSION_OPTIONS,
       dynamicTools: [
         {
-          name: "bb_probe",
-          description: "A bb tool.",
+          name: "omnyo_probe",
+          description: "An Omnyo tool.",
           inputSchema: {
             type: "object",
             properties: { value: { type: "string" } },
@@ -57,10 +62,13 @@ it.skipIf(bunBinary() === null)(
         },
       ],
     });
+
     expect(started.error, JSON.stringify(started)).toBeUndefined();
+
     const providerThreadId = String(
       (started.result as { providerThreadId?: unknown }).providerThreadId,
     );
+
     expect(providerThreadId).toMatch(/^pi_[0-9a-f-]{36}$/u);
 
     handleLine(
@@ -75,7 +83,7 @@ it.skipIf(bunBinary() === null)(
           input: [
             {
               type: "text",
-              text: `/tool bb_probe ${JSON.stringify({ value: "hi" })}`,
+              text: `/tool omnyo_probe ${JSON.stringify({ value: "hi" })}`,
               mentions: [],
             },
           ],
@@ -83,10 +91,12 @@ it.skipIf(bunBinary() === null)(
         },
       }),
     );
+
     const toolCall = await harness.waitForMessage(
       (m) => m.method === "item/tool/call",
       "the dynamic tool call",
     );
+
     handleLine(
       JSON.stringify({
         jsonrpc: "2.0",

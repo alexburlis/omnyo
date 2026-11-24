@@ -2,9 +2,9 @@ import { StringDecoder } from "node:string_decoder";
 import {
   DEFAULT_ENV_SETUP_SCRIPT_NAME,
   DEFAULT_ENV_TEARDOWN_SCRIPT_NAME,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { operationEnvironment } from "./operation-environment.js";
-import type { HostDaemonContributedEnvEntry } from "@bb/host-daemon-contract";
+import type { HostDaemonContributedEnvEntry } from "@omnyo/host-daemon-contract";
 import {
   execPortableFile,
   isProcessGroupAlive,
@@ -12,23 +12,23 @@ import {
   spawnPortableOutputProcess,
   supportsProcessGroups,
   type ProcessStopResult,
-} from "@bb/process-utils";
+} from "@omnyo/process-utils";
 import {
   findGitBashProcessGroup,
   stopGitBashProcessGroup,
 } from "./git-bash-process-group.js";
-import fs from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
-import { WorkspaceError } from "bb-environment-provider-host/git";
-import { createTerminalOutputLineReader } from "bb-environment-provider-host/terminal-output";
+import { canAccessIsolatedPath } from "./workspace-read-client.js";
+import { WorkspaceError } from "omnyo-environment-provider-host/git";
+import { createTerminalOutputLineReader } from "omnyo-environment-provider-host/terminal-output";
 import {
   createProvisionCancelledError,
   emitOutput,
   emitStep,
   throwIfProvisionAborted,
   type ProgressCallback,
-} from "bb-environment-provider-host/transcript";
+} from "omnyo-environment-provider-host/transcript";
 
 export interface RunSetupScriptArgs {
   workspacePath: string;
@@ -69,9 +69,10 @@ export function buildLifecycleScriptCommand(
     if (args.windowsBashPath === null) {
       throw new WorkspaceError(
         "setup_script_failed",
-        `${args.scriptName} needs Git for Windows: bb runs ${args.kind} scripts with the bash that Git installs, and it could not find one.`,
+        `${args.scriptName} needs Git for Windows: Omnyo runs ${args.kind} scripts with the bash that Git installs, and it could not find one.`,
       );
     }
+
     return {
       command: args.windowsBashPath,
       args: [args.scriptPath],
@@ -91,7 +92,7 @@ export function buildLifecycleScriptCommand(
 export class LifecycleScriptTerminationUnverifiedError extends Error {
   constructor(scriptName: string) {
     super(
-      `${scriptName} was stopped, but bb could not confirm that all of its processes exited`,
+      `${scriptName} was stopped, but Omnyo could not confirm that all of its processes exited`,
     );
     this.name = "LifecycleScriptTerminationUnverifiedError";
   }
@@ -104,13 +105,16 @@ export async function assertScriptProcessTreeStopped(
   if (stop === undefined) {
     return;
   }
+
   const result = await stop.catch(() => null);
+
   if (result === null || result.treeTermination !== "confirmed") {
     throw new LifecycleScriptTerminationUnverifiedError(scriptName);
   }
 }
 
 const GIT_SHELL_LOOKUP_TIMEOUT_MS = 10_000;
+
 const WINDOWS_OUTPUT_CLOSE_GRACE_MS = 2_000;
 
 export async function resolveWindowsBashPath(
@@ -118,6 +122,7 @@ export async function resolveWindowsBashPath(
   signal?: AbortSignal,
 ): Promise<string | null> {
   let gitShellPath: string;
+
   try {
     const result = await execPortableFile("git", ["var", "GIT_SHELL_PATH"], {
       cwd: process.cwd(),
@@ -126,52 +131,79 @@ export async function resolveWindowsBashPath(
       signal,
       timeout: GIT_SHELL_LOOKUP_TIMEOUT_MS,
     });
+
     gitShellPath = path.win32.normalize(result.stdout.trim());
   } catch {
     return null;
   }
+
   if (gitShellPath.length === 0) {
     return null;
   }
+
   const bashPath = path.win32.join(
     path.win32.dirname(gitShellPath),
     "bash.exe",
   );
-  try {
-    await fs.access(bashPath);
-    return bashPath;
-  } catch {
-    return gitShellPath;
-  }
+
+  return (await canAccessIsolatedPath(bashPath, signal))
+    ? bashPath
+    : gitShellPath;
 }
+
+const legacyEnvironmentHookNamesV1 = {
+  setup: ".bb-env-setup.sh",
+  teardown: ".bb-env-teardown.sh",
+} as const;
 
 async function resolveLifecycleScriptPath(
   workspacePath: string,
   scriptName: string,
+  kind: "setup" | "teardown",
+  signal: AbortSignal | undefined,
 ): Promise<string | null> {
   const scriptPath = path.join(workspacePath, scriptName);
-  try {
-    await fs.access(scriptPath);
-  } catch {
-    return null;
+
+  const legacyScriptPath = path.join(
+    workspacePath,
+    legacyEnvironmentHookNamesV1[kind],
+  );
+
+  const [canonicalExists, legacyExists] = await Promise.all([
+    canAccessIsolatedPath(scriptPath, signal),
+    canAccessIsolatedPath(legacyScriptPath, signal),
+  ]);
+
+  if (canonicalExists && legacyExists) {
+    throw new WorkspaceError(
+      "setup_script_failed",
+      `Both lifecycle hook files exist: ${scriptPath} and ${legacyScriptPath}. Keep one file before running the ${kind} hook.`,
+    );
   }
-  return scriptPath;
+
+  return canonicalExists ? scriptPath : legacyExists ? legacyScriptPath : null;
 }
 
 async function runLifecycleScript(
   args: RunLifecycleScriptArgs,
 ): Promise<{ ran: boolean }> {
   throwIfProvisionAborted(args.signal);
+
   const scriptPath = await resolveLifecycleScriptPath(
     args.workspacePath,
     args.scriptName,
+    args.kind,
+    args.signal,
   );
+
   if (!scriptPath) {
     return { ran: false };
   }
 
   throwIfProvisionAborted(args.signal);
+  const scriptName = path.basename(scriptPath);
   const { timeoutMs } = args;
+
   const env = operationEnvironment(
     args.contributedEnv ?? [],
     {
@@ -180,23 +212,27 @@ async function runLifecycleScript(
     },
     true,
   );
+
   const windowsBashPath =
     process.platform === "win32"
       ? await resolveWindowsBashPath(env, args.signal)
       : null;
+
   throwIfProvisionAborted(args.signal);
+
   const command = buildLifecycleScriptCommand({
     kind: args.kind,
-    scriptName: args.scriptName,
+    scriptName: scriptName,
     platform: process.platform,
     scriptPath,
     windowsBashPath,
   });
+
   const startedAt = Date.now();
   emitStep({
     onProgress: args.onProgress,
     key: `${args.kind}-started`,
-    text: `Running ${args.scriptName}`,
+    text: `Running ${scriptName}`,
     status: "started",
     startedAt,
   });
@@ -208,6 +244,7 @@ async function runLifecycleScript(
           ...env,
           PATH: [...command.pathPrefix, env.PATH ?? ""].join(path.delimiter),
         };
+
   const child = spawnPortableOutputProcess({
     command: command.command,
     args: command.args,
@@ -215,10 +252,12 @@ async function runLifecycleScript(
     detached: supportsProcessGroups(),
     env: scriptEnv,
   });
+
   const gitBash =
     windowsBashPath === null
       ? null
       : { bashPath: windowsBashPath, child, env: scriptEnv };
+
   const gitBashProcessGroup =
     gitBash === null ? null : findGitBashProcessGroup(gitBash);
 
@@ -236,26 +275,34 @@ async function runLifecycleScript(
 
   const readers = [child.stdout, child.stderr].map((stream) => {
     const decoder = new StringDecoder("utf8");
+
     const emit = (text: string) => {
       emitScriptOutputLines(outputLineReader.push(text));
     };
+
     stream.on("data", (chunk: Buffer) => emit(decoder.write(chunk)));
+
     return () => emit(decoder.end());
   });
 
   let windowsTreeStop: Promise<ProcessStopResult> | undefined;
   let reportOutputLeftOpen: (() => void) | undefined;
+
   const outputLeftOpen = new Promise<null>((resolve) => {
     reportOutputLeftOpen = () => resolve(null);
   });
+
   const killScriptProcesses = (): void => {
     if (gitBash === null || gitBashProcessGroup === null) {
       killProcessGroup({ child, signal: "SIGKILL" });
+
       return;
     }
+
     if (windowsTreeStop !== undefined) {
       return;
     }
+
     windowsTreeStop = stopGitBashProcessGroup({
       ...gitBash,
       processGroup: gitBashProcessGroup,
@@ -265,20 +312,25 @@ async function runLifecycleScript(
       .then(() => delay(WINDOWS_OUTPUT_CLOSE_GRACE_MS))
       .then(reportOutputLeftOpen, reportOutputLeftOpen);
   };
+
   const timeout = setTimeout(() => {
     timedOut = true;
     killScriptProcesses();
   }, timeoutMs);
+
   const abortLifecycleScript = () => {
     if (abortRequested) {
       return;
     }
+
     abortRequested = true;
     killScriptProcesses();
   };
+
   args.signal?.addEventListener("abort", abortLifecycleScript, {
     once: true,
   });
+
   if (args.signal?.aborted) {
     abortLifecycleScript();
   }
@@ -291,26 +343,29 @@ async function runLifecycleScript(
       child.on("error", reject);
       child.on("close", (exitCode, signal) => resolve({ exitCode, signal }));
     });
+
     const result = await Promise.race([closed, outputLeftOpen]);
+
     if (result === null) {
       child.stdout.destroy();
       child.stderr.destroy();
-      throw new LifecycleScriptTerminationUnverifiedError(args.scriptName);
+      throw new LifecycleScriptTerminationUnverifiedError(scriptName);
     }
 
     if (abortRequested || timedOut) {
       while (isProcessGroupAlive(child)) await delay(25);
-      await assertScriptProcessTreeStopped(windowsTreeStop, args.scriptName);
+      await assertScriptProcessTreeStopped(windowsTreeStop, scriptName);
     }
 
     for (const flush of readers) flush();
     emitScriptOutputLines(outputLineReader.flush());
     const durationMs = Date.now() - startedAt;
+
     if (abortRequested || args.signal?.aborted) {
       emitStep({
         onProgress: args.onProgress,
         key: `${args.kind}-cancelled`,
-        text: `${args.scriptName} cancelled`,
+        text: `${scriptName} cancelled`,
         status: "failed",
         startedAt,
         metadata: { durationMs },
@@ -322,7 +377,7 @@ async function runLifecycleScript(
       emitStep({
         onProgress: args.onProgress,
         key: `${args.kind}-failed`,
-        text: `${args.scriptName} failed`,
+        text: `${scriptName} failed`,
         status: "failed",
         startedAt,
         metadata: { durationMs },
@@ -348,11 +403,12 @@ async function runLifecycleScript(
     emitStep({
       onProgress: args.onProgress,
       key: `${args.kind}-completed`,
-      text: `${args.scriptName} finished`,
+      text: `${scriptName} finished`,
       status: "completed",
       startedAt,
       metadata: { durationMs },
     });
+
     return { ran: true };
   } finally {
     clearTimeout(timeout);
@@ -375,12 +431,15 @@ export async function runTeardownScript(
 ): Promise<{ ran: boolean }> {
   const startedAt = Date.now();
   let failureReported = false;
+
   const onProgress: ProgressCallback = (entry) => {
     if (entry.type === "step" && entry.key === "teardown-failed") {
       failureReported = true;
     }
+
     args.onProgress?.(entry);
   };
+
   try {
     return await runLifecycleScript({
       ...args,
@@ -390,6 +449,7 @@ export async function runTeardownScript(
     });
   } catch (error) {
     if (args.signal?.aborted) throw error;
+
     if (!failureReported) {
       emitStep({
         onProgress: args.onProgress,
@@ -400,11 +460,13 @@ export async function runTeardownScript(
         metadata: { durationMs: Date.now() - startedAt },
       });
     }
+
     emitOutput(
       args.onProgress,
       "teardown-error",
       error instanceof Error ? error.message : String(error),
     );
+
     return { ran: true };
   }
 }

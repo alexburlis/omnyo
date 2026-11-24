@@ -23,11 +23,13 @@ describe("rowWindows", () => {
 
   it("offsets later groups by the rows above them", () => {
     const above = ROW_WINDOW_THRESHOLD - 20;
+
     const [first, second] = rowWindows({
       ...base,
       counts: [above, 5000],
       scrollTop: 0,
     });
+
     expect(first).toEqual([0, above]);
     expect(second).toEqual([0, 0]);
   });
@@ -40,6 +42,7 @@ describe("rowWindows", () => {
       scrollTop: 0,
       viewportHeight: 0,
     });
+
     expect(range![0]).toBe(0);
     expect(range![1]).toBeLessThan(5000);
   });

@@ -1,7 +1,7 @@
 import type {
   PromptHistoryListQuery,
   PromptHistoryListResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 export type ExperimentalPromptHistoryListArgs = PromptHistoryListQuery & {
@@ -22,6 +22,7 @@ export function createPromptHistoryArea({
   return {
     async list(input = {}) {
       const { signal, ...query } = input;
+
       return transport.readJson(
         transport.api.v1["prompt-history"].$get(
           { query },

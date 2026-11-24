@@ -7,9 +7,10 @@ import {
 } from "./TopLevelSidebarSection.js";
 import { useSidebarSortable } from "@/components/ui/sortable-motion";
 import { CHRONOLOGICAL_CONTAINER_ID } from "../model/project-thread-groups.js";
-import type {
-  CollapsibleSidebarSectionId,
-  SidebarSectionId,
+import {
+  isCollapsibleSidebarSectionId,
+  type CollapsibleSidebarSectionId,
+  type SidebarSectionId,
 } from "../model/sidebar-section-id.js";
 import type { CollapsedChildActivity } from "../model/thread-activity.js";
 import { PINNED_THREAD_PARENT_KEY } from "../dnd/useSectionThreadDnd.js";
@@ -27,6 +28,7 @@ export interface BuiltInSidebarSectionOptions {
   collapsedThreads?: readonly ThreadSplitIndicatorTarget[];
   content: ReactNode;
   label: string;
+  status?: ReactNode;
 }
 
 interface BuiltInSidebarSectionProps extends BuiltInSidebarSectionOptions {
@@ -39,10 +41,11 @@ interface BuiltInSidebarSectionProps extends BuiltInSidebarSectionOptions {
 
 const BUILT_IN_SECTION_DROP_PARENT_KEY: Record<
   CollapsibleSidebarSectionId,
-  string
+  string | undefined
 > = {
   pinned: PINNED_THREAD_PARENT_KEY,
   threads: CHRONOLOGICAL_CONTAINER_ID,
+  shelf: undefined,
 };
 
 export type BuiltInSidebarSectionOptionsById = Record<
@@ -92,11 +95,13 @@ function BuiltInSidebarSection({
   isCollapsed,
   label,
   onToggleCollapsed,
+  status,
 }: BuiltInSidebarSectionProps) {
   return (
     <SortableSidebarSection
       id={id}
       label={label}
+      status={status}
       stickyHeader={id !== "pinned"}
       disabled={disabled}
       actions={actions}
@@ -127,10 +132,12 @@ export function renderBuiltInSidebarSection({
   sections,
   showPinnedSection,
 }: RenderBuiltInSidebarSectionArgs): ReactNode | undefined {
-  if (sectionId !== "pinned" && sectionId !== "threads") {
+  if (!isCollapsibleSidebarSectionId(sectionId)) {
     return undefined;
   }
+
   if (sectionId === "pinned" && !showPinnedSection) return undefined;
+
   return (
     <BuiltInSidebarSection
       {...sections[sectionId]}

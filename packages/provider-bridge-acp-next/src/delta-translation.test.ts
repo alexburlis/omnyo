@@ -1,9 +1,9 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { threadScope, turnScope, type ThreadEvent } from "@bb/domain";
-import type { ProviderRuntimeEvent } from "@bb/provider-bridge-protocol/bridge-kit";
-import { createDeltaAssembler } from "@bb/provider-bridge-protocol/assembler";
-import type { DeltaAssembler } from "@bb/provider-bridge-protocol/assembler";
+import { threadScope, turnScope, type ThreadEvent } from "@omnyo/domain";
+import type { ProviderRuntimeEvent } from "@omnyo/provider-bridge-protocol/bridge-kit";
+import { createDeltaAssembler } from "@omnyo/provider-bridge-protocol/assembler";
+import type { DeltaAssembler } from "@omnyo/provider-bridge-protocol/assembler";
 import {
   ACP_COMPACTION_COMPLETED_METHOD,
   ACP_COMPACTION_STARTED_METHOD,
@@ -18,11 +18,13 @@ import {
   type AcpDeltaTranslator,
 } from "./delta-translation.js";
 import { resolveAcpDialect } from "./dialect.js";
-import { ACP_TOOL_PAYLOAD_MAX_CHARS } from "./tool-classification.js";
+import { ACP_TOOL_PAYLOAD_MAX_CHARS } from "@omnyo/provider-bridge-protocol/acp/tool-classification";
 import type { AcpToolCallUpdateEvent } from "./wire.js";
 
 const THREAD_ID = "t-acp-translation";
+
 const ENTROPY = "acp-test";
+
 const ITEM_ID_PATTERN = /^acp-test-i\d+$/;
 
 interface AcpEquivalenceHarness {
@@ -36,11 +38,13 @@ const SESSION_CWD = "/workspace";
 
 function createHarness(): AcpEquivalenceHarness {
   const translator = createAcpDeltaTranslator({ cwd: SESSION_CWD });
+
   const assembler = createDeltaAssembler({
     providerId: "acp",
     entropyPrefix: ENTROPY,
     textDeltaFlushMs: 0,
   });
+
   return {
     assembler,
     translator,
@@ -119,6 +123,7 @@ describe("acp delta translation (bridge-shared invariants)", () => {
         content: { type: "text", text: "late text" },
       }),
     );
+
     const lateToolCall = harness.translate(
       updateEvent({
         sessionUpdate: "tool_call",
@@ -135,6 +140,7 @@ describe("acp delta translation (bridge-shared invariants)", () => {
         true,
       );
     }
+
     expect(harness.openTurnId()).toBe("");
   });
 
@@ -151,6 +157,7 @@ describe("acp delta translation (bridge-shared invariants)", () => {
         status: "in_progress",
       }),
     );
+
     expect(startedEvents).toContainEqual(
       expect.objectContaining({
         type: "item/started",
@@ -160,6 +167,7 @@ describe("acp delta translation (bridge-shared invariants)", () => {
         }),
       }),
     );
+
     const startedItemId =
       startedEvents.find((event) => event.type === "item/started")?.type ===
       "item/started"
@@ -185,11 +193,13 @@ describe("acp delta translation (bridge-shared invariants)", () => {
         ],
       }),
     );
+
     const settled = completedItems(terminalEvents);
     expect(settled.map((item) => item.type).sort()).toEqual([
       "fileChange",
       "toolCall",
     ]);
+
     for (const item of settled) {
       expect(item.id).toBe(startedItemId);
     }
@@ -235,15 +245,19 @@ describe("acp delta translation (bridge-shared invariants)", () => {
   it("keeps unmatched fs writes standalone with distinct item ids", () => {
     const harness = createHarness();
     harness.translate(turnStartedEvent());
+
     const first = completedItems(
       harness.translate(fsWriteEvent("/tmp/file.ts")),
     ).find((item) => item.type === "fileChange");
+
     const second = completedItems(
       harness.translate(fsWriteEvent("/tmp/file.ts")),
     ).find((item) => item.type === "fileChange");
+
     if (!first || !second) {
       throw new Error("Expected acp/fs/write to complete fileChange items");
     }
+
     expect(first.id).toMatch(ITEM_ID_PATTERN);
     expect(second.id).toMatch(ITEM_ID_PATTERN);
     expect(first.id).not.toBe(second.id);
@@ -252,6 +266,7 @@ describe("acp delta translation (bridge-shared invariants)", () => {
   it("keeps an fs write standalone when its native file-change match is ambiguous", () => {
     const harness = createHarness();
     harness.translate(turnStartedEvent());
+
     for (const toolCallId of ["edit-a", "edit-b"]) {
       harness.translate(
         updateEvent({
@@ -267,6 +282,7 @@ describe("acp delta translation (bridge-shared invariants)", () => {
     const [write] = completedItems(
       harness.translate(fsWriteEvent("/tmp/file.ts")),
     );
+
     expect(write).toMatchObject({
       type: "fileChange",
       changes: [{ path: "/tmp/file.ts", kind: "add" }],
@@ -340,12 +356,15 @@ describe("acp delta translation (bridge-shared invariants)", () => {
         }),
       ),
     );
+
     expect(completed).toMatchObject({
       type: "fileChange",
       changes: [{ path: "/workspace/poem.md", kind: "update" }],
     });
+
     const change =
       completed?.type === "fileChange" ? completed.changes[0] : undefined;
+
     expect(change?.diff).toContain("-original");
     expect(change?.diff).toContain("+latest");
     expect(change?.diff).not.toContain("middle");
@@ -402,17 +421,22 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
   } {
     let added = 0;
     let removed = 0;
+
     for (const line of diff?.split("\n") ?? []) {
       if (line.startsWith("+++ ") || line.startsWith("--- ")) continue;
+
       if (line.startsWith("+")) added += 1;
+
       if (line.startsWith("-")) removed += 1;
     }
+
     return { added, removed };
   }
 
   function startedHarness(): AcpEquivalenceHarness {
     const harness = createHarness();
     harness.translate(turnStartedEvent());
+
     return harness;
   }
 
@@ -527,12 +551,14 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
   it("accumulates thought chunks into a reasoning item", () => {
     const harness = startedHarness();
     const turnId = harness.openTurnId();
+
     const thoughtEvents = harness.translate(
       updateEvent({
         sessionUpdate: "agent_thought_chunk",
         content: { type: "text", text: "Considering..." },
       }),
     );
+
     expect(thoughtEvents.map((event) => event.type)).toEqual([
       "item/started",
       "item/reasoning/textDelta",
@@ -545,6 +571,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
       itemId: expect.stringMatching(ITEM_ID_PATTERN),
       delta: "Considering...",
     });
+
     const reasoningItemId =
       thoughtEvents[1]?.type === "item/reasoning/textDelta"
         ? thoughtEvents[1].itemId
@@ -556,6 +583,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         content: { type: "text", text: "Answer" },
       }),
     );
+
     expect(messageEvents[0]).toEqual({
       type: "item/completed",
       threadId: "",
@@ -584,6 +612,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         rawInput: { command: "pnpm test" },
       }),
     );
+
     expect(startedEvents).toEqual([
       {
         type: "item/started",
@@ -605,6 +634,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         },
       },
     ]);
+
     const startedItemId =
       startedEvents[0]?.type === "item/started" ? startedEvents[0].item.id : "";
 
@@ -660,6 +690,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
           rawInput: { command },
         }),
       );
+
       const items = completedItems(
         harness.translate(
           updateEvent({
@@ -669,11 +700,14 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
           }),
         ),
       );
+
       expect(items).toHaveLength(1);
       const item = items[0];
+
       if (item?.type !== "commandExecution") {
         throw new Error(`expected a commandExecution, got ${item?.type}`);
       }
+
       return item;
     }
 
@@ -682,6 +716,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         status: "completed",
         rawOutput: { exitCode: 1, stdout: "", stderr: "" },
       });
+
       expect(item.status).toBe("completed");
       expect(item.exitCode).toBe(1);
     });
@@ -699,6 +734,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
           },
         },
       );
+
       expect(item.exitCode).toBeUndefined();
       expect(item.aggregatedOutput).toContain('"metadata"');
     });
@@ -710,6 +746,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         "echo hi; git status",
         { status: "completed" },
       );
+
       expect(item.status).toBe("completed");
       expect(item.aggregatedOutput).toBeUndefined();
       expect(item.exitCode).toBeUndefined();
@@ -725,6 +762,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
           },
         ],
       });
+
       expect(item.status).toBe("failed");
       expect(item.exitCode).toBe(1);
     });
@@ -734,6 +772,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         status: "failed",
         rawOutput: { exitCode: 127, stdout: "", stderr: "nope: not found" },
       });
+
       expect(item.exitCode).toBe(127);
     });
 
@@ -742,6 +781,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         status: "completed",
         rawOutput: { exitCode: "0", stdout: "ok" },
       });
+
       expect(item.exitCode).toBeUndefined();
     });
   });
@@ -809,11 +849,13 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         changes: [{ path: "/workspace/a.ts", kind: "update" }],
       },
     });
+
     const change =
       events[0]?.type === "item/completed" &&
       events[0].item.type === "fileChange"
         ? events[0].item.changes[0]
         : undefined;
+
     expect(change?.diff).toContain("-old line");
     expect(change?.diff).toContain("+new line");
     expect(change?.diff).not.toContain("-same");
@@ -835,6 +877,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         rawInput: {},
       }),
     );
+
     expect(startedEvents).toEqual([
       {
         type: "item/started",
@@ -854,6 +897,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         },
       },
     ]);
+
     const startedItemId =
       startedEvents[0]?.type === "item/started" ? startedEvents[0].item.id : "";
 
@@ -883,11 +927,13 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         changes: [{ path: "/workspace/a.ts", kind: "update" }],
       },
     });
+
     const change =
       completedEvents[0]?.type === "item/completed" &&
       completedEvents[0].item.type === "fileChange"
         ? completedEvents[0].item.changes[0]
         : undefined;
+
     expect(countChangedLines(change?.diff)).toEqual({ added: 1, removed: 1 });
   });
 
@@ -906,6 +952,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         rawInput: {},
       }),
     );
+
     expect(startedEvents).toEqual([
       {
         type: "item/started",
@@ -925,6 +972,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         },
       },
     ]);
+
     const startedItemId =
       startedEvents[0]?.type === "item/started" ? startedEvents[0].item.id : "";
 
@@ -942,6 +990,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         rawOutput: { output: "Wrote file successfully." },
       }),
     );
+
     expect(completedEvents).toEqual([
       expect.objectContaining({
         type: "item/completed",
@@ -963,6 +1012,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
 
   it("folds an OMP client fs write into its path-pending native edit", () => {
     const harness = startedHarness();
+
     const startedEvents = harness.translate(
       updateEvent({
         sessionUpdate: "tool_call",
@@ -973,13 +1023,16 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         rawInput: {},
       }),
     );
+
     const startedItem = startedEvents.find(
       (event) => event.type === "item/started",
     );
+
     expect(startedItem).toMatchObject({
       type: "item/started",
       item: { type: "fileChange", changes: [] },
     });
+
     const startedItemId =
       startedItem?.type === "item/started" ? startedItem.item.id : "";
 
@@ -1015,6 +1068,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         ],
       }),
     );
+
     expect(completedEvents).toHaveLength(1);
     expect(completedEvents[0]).toMatchObject({
       type: "item/completed",
@@ -1025,11 +1079,13 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         changes: [{ path: "/workspace/poem.md", kind: "update" }],
       },
     });
+
     const change =
       completedEvents[0]?.type === "item/completed" &&
       completedEvents[0].item.type === "fileChange"
         ? completedEvents[0].item.changes[0]
         : undefined;
+
     expect(countChangedLines(change?.diff)).toEqual({ added: 1, removed: 1 });
 
     expect(
@@ -1039,6 +1095,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
 
   it("translates plan updates into settled planSteps snapshots", () => {
     const harness = startedHarness();
+
     const first = harness.translate(
       updateEvent({
         sessionUpdate: "plan",
@@ -1049,6 +1106,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         ],
       }),
     );
+
     expect(first).toEqual([
       {
         type: "item/completed",
@@ -1073,6 +1131,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         },
       },
     ]);
+
     const second = completedItems(
       harness.translate(
         updateEvent({
@@ -1081,6 +1140,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
         }),
       ),
     );
+
     expect(second).toHaveLength(1);
     expect(second[0]?.id).not.toBe(completedItems(first)[0]?.id);
     expect(first.some((event) => event.type === "turn/plan/updated")).toBe(
@@ -1152,6 +1212,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
     ]);
 
     const notices: Record<string, unknown>[] = [];
+
     for (const stopReason of [
       "refusal",
       "max_tokens",
@@ -1174,6 +1235,7 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
           .map((event) => ({ ...event })),
       );
     }
+
     expect(
       notices.map((notice) => [notice["summary"], notice["details"]]),
     ).toEqual([
@@ -1212,11 +1274,13 @@ describe("acp delta translation (moved from the legacy adapter suite)", () => {
 describe("acp delta translation (session title)", () => {
   it("reports a title the agent sets once, as an agent-sourced thread name", () => {
     const harness = createHarness();
+
     const titled = updateEvent({
       sessionUpdate: "session_info_update",
       title: "Fix the login redirect",
       updatedAt: "2026-10-08T00:00:00Z",
     });
+
     expect(harness.translate(titled)).toEqual([
       {
         type: "thread/name/updated",
@@ -1256,10 +1320,12 @@ describe("acp delta translation (presentation)", () => {
   it("attaches a presentation to every item.open and item.close", () => {
     const translator = createAcpDeltaTranslator({ cwd: SESSION_CWD });
     const context = { threadId: THREAD_ID };
+
     const translate = (event: ProviderRuntimeEvent) =>
       translator.translateAcpEvent(event, context);
 
     translate(turnStartedEvent());
+
     const lifecycle = [
       ...translate(
         updateEvent({
@@ -1315,9 +1381,11 @@ describe("acp delta translation (presentation)", () => {
       "item.close",
       "item.open",
     ]);
+
     for (const delta of items) {
       expect(delta.presentation).toBeDefined();
     }
+
     expect(items.map((delta) => delta.presentation)).toEqual([
       {
         label: { pending: "Running command", completed: "Ran command" },
@@ -1363,6 +1431,7 @@ describe("acp delta translation (presentation)", () => {
     const translator = createAcpDeltaTranslator({ cwd: SESSION_CWD });
     const context = { threadId: THREAD_ID };
     translator.translateAcpEvent(turnStartedEvent(), context);
+
     const [command] = itemDeltas(
       translator.translateAcpEvent(
         updateEvent({
@@ -1375,6 +1444,7 @@ describe("acp delta translation (presentation)", () => {
         context,
       ),
     );
+
     expect(command?.presentation?.title).toBe("touch approved.txt");
 
     const [deletion] = itemDeltas(
@@ -1390,6 +1460,7 @@ describe("acp delta translation (presentation)", () => {
         context,
       ),
     );
+
     expect(deletion?.presentation).toEqual({
       label: { pending: "Deleting file", completed: "Deleted file" },
       icon: { glyph: "Trash2" },
@@ -1402,15 +1473,19 @@ describe("acp delta translation (native kinds → core kinds)", () => {
   function openItem(update: Record<string, unknown>) {
     const harness = createHarness();
     harness.translate(turnStartedEvent());
+
     const events = harness.translate(
       updateEvent({ sessionUpdate: "tool_call", status: "pending", ...update }),
     );
+
     const started = events.find((event) => event.type === "item/started");
+
     if (started?.type !== "item/started") {
       throw new Error(
         `Expected an item/started, got ${JSON.stringify(events)}`,
       );
     }
+
     return started.item;
   }
 
@@ -1548,6 +1623,7 @@ describe("acp delta translation (native kinds → core kinds)", () => {
         status: "in_progress",
       }),
     );
+
     const [settled] = completedItems(
       harness.translate(
         updateEvent({
@@ -1563,6 +1639,7 @@ describe("acp delta translation (native kinds → core kinds)", () => {
         }),
       ),
     );
+
     expect(settled).toMatchObject({
       type: "reasoning",
       summary: [],
@@ -1574,6 +1651,7 @@ describe("acp delta translation (native kinds → core kinds)", () => {
   it("keeps a call whose kind the schema does not know", () => {
     const harness = createHarness();
     harness.translate(turnStartedEvent());
+
     const opened = harness.translate(
       updateEvent({
         sessionUpdate: "tool_call",
@@ -1583,6 +1661,7 @@ describe("acp delta translation (native kinds → core kinds)", () => {
         status: "in_progress",
       }),
     );
+
     expect(opened).toHaveLength(1);
     expect(opened[0]).toMatchObject({
       type: "item/started",
@@ -1597,6 +1676,7 @@ describe("acp delta translation (native kinds → core kinds)", () => {
         },
       },
     });
+
     const openedId =
       opened[0]?.type === "item/started" ? opened[0].item.id : "";
 
@@ -1608,6 +1688,7 @@ describe("acp delta translation (native kinds → core kinds)", () => {
         rawOutput: { url: "https://preview.example" },
       }),
     );
+
     expect(closed).toHaveLength(1);
     expect(closed[0]).toMatchObject({
       type: "item/completed",
@@ -1633,6 +1714,7 @@ describe("acp delta translation (native kinds → core kinds)", () => {
         status: "pending",
       }),
     );
+
     const closed = harness.translate(
       updateEvent({
         sessionUpdate: "tool_call_update",
@@ -1640,6 +1722,7 @@ describe("acp delta translation (native kinds → core kinds)", () => {
         status: "cancelled",
       }),
     );
+
     expect(closed).toHaveLength(1);
     expect(closed[0]).toMatchObject({
       type: "item/completed",
@@ -1680,6 +1763,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
   function startedHarness(): AcpEquivalenceHarness {
     const harness = createHarness();
     harness.translate(turnStartedEvent());
+
     return harness;
   }
 
@@ -1753,6 +1837,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
 
     const item =
       events[0]?.type === "item/completed" ? events[0].item : undefined;
+
     expect(item).toMatchObject({ type: "commandExecution", exitCode: 3 });
     expect(
       item?.type === "commandExecution" ? item.aggregatedOutput : "unset",
@@ -1837,6 +1922,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
         ],
       }),
     );
+
     expect(first).toEqual([
       expect.objectContaining({
         type: "item/commandExecution/outputDelta",
@@ -1854,6 +1940,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
         ],
       }),
     );
+
     expect(second).toEqual([
       expect.objectContaining({
         type: "item/commandExecution/outputDelta",
@@ -1871,6 +1958,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
         ],
       }),
     );
+
     expect(third).toEqual([
       expect.objectContaining({
         type: "item/commandExecution/outputDelta",
@@ -1970,6 +2058,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
 
     const item =
       events[0]?.type === "item/completed" ? events[0].item : undefined;
+
     const result = item?.type === "toolCall" ? item.result : undefined;
     expect(typeof result).toBe("string");
     expect(String(result).length).toBeLessThan(
@@ -1980,16 +2069,19 @@ describe("acp delta translation (raw payloads and real results)", () => {
 
   it("resolves a relative location and grok's target_file against the session cwd", () => {
     const translator = createAcpDeltaTranslator({ cwd: "/workspace/app" });
+
     const assembler = createDeltaAssembler({
       providerId: "acp",
       entropyPrefix: ENTROPY,
       textDeltaFlushMs: 0,
     });
+
     const translate = (event: ProviderRuntimeEvent) =>
       assembler.assemble({
         threadId: THREAD_ID,
         deltas: translator.translateAcpEvent(event, { threadId: THREAD_ID }),
       });
+
     translate(turnStartedEvent());
 
     expect(
@@ -2062,16 +2154,19 @@ describe("acp delta translation (raw payloads and real results)", () => {
       cwd: "/workspace/app",
       dialect: resolveAcpDialect({ command: "/usr/local/bin/grok" }),
     });
+
     const assembler = createDeltaAssembler({
       providerId: "acp",
       entropyPrefix: ENTROPY,
       textDeltaFlushMs: 0,
     });
+
     const translate = (event: ProviderRuntimeEvent) =>
       assembler.assemble({
         threadId: THREAD_ID,
         deltas: translator.translateAcpEvent(event, { threadId: THREAD_ID }),
       });
+
     translate(turnStartedEvent());
 
     const opened = translate(
@@ -2090,10 +2185,12 @@ describe("acp delta translation (raw payloads and real results)", () => {
         },
       }),
     );
+
     expect(opened[0]).toMatchObject({
       type: "item/started",
       item: { type: "commandExecution", command: "ls", cwd: "/workspace/app" },
     });
+
     const openedId =
       opened[0]?.type === "item/started" ? opened[0].item.id : "";
 
@@ -2114,6 +2211,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
         },
       }),
     );
+
     expect(closed).toHaveLength(1);
     expect(closed[0]).toMatchObject({
       type: "item/completed",
@@ -2128,6 +2226,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
 
   it("binds a permission request by kind and gives the row the URL it named", () => {
     const harness = startedHarness();
+
     const opened = harness.translate(
       updateEvent({
         sessionUpdate: "tool_call",
@@ -2138,6 +2237,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
         rawInput: {},
       }),
     );
+
     expect(opened[0]).toMatchObject({
       item: {
         type: "toolCall",
@@ -2145,6 +2245,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
         presentation: { title: "Web Fetch" },
       },
     });
+
     const openedId =
       opened[0]?.type === "item/started" ? opened[0].item.id : "";
 
@@ -2153,6 +2254,7 @@ describe("acp delta translation (raw payloads and real results)", () => {
       title: "Fetch https://nodejs.org/dist/index.json",
       kind: "fetch",
     });
+
     expect(bound.toolCallId).toBe("call-fetch");
 
     expect(
@@ -2193,10 +2295,11 @@ describe("acp delta translation (raw payloads and real results)", () => {
 
     const bound = harness.translator.notePermissionToolCall(THREAD_ID, {
       toolCallId: "call-mcp",
-      title: "bb-bridge-AskUserQuestion: AskUserQuestion",
+      title: "omnyo-bridge-AskUserQuestion: AskUserQuestion",
       kind: "other",
       rawInput: { question: "Which one?" },
     });
+
     expect(bound.event?.rawInput).toEqual({ question: "Which one?" });
 
     expect(
@@ -2214,7 +2317,9 @@ describe("acp delta translation (raw payloads and real results)", () => {
         type: "toolCall",
         tool: "other",
         arguments: { question: "Which one?" },
-        presentation: { title: "bb-bridge-AskUserQuestion: AskUserQuestion" },
+        presentation: {
+          title: "omnyo-bridge-AskUserQuestion: AskUserQuestion",
+        },
       },
     });
   });
@@ -2250,11 +2355,13 @@ describe("acp delta translation (dialects)", () => {
       cwd: "/workspace",
       dialect: resolveAcpDialect({ dialectId, command: "node" }),
     });
+
     const assembler = createDeltaAssembler({
       providerId: "acp",
       entropyPrefix: ENTROPY,
       textDeltaFlushMs: 0,
     });
+
     const harness: AcpEquivalenceHarness = {
       assembler,
       translator,
@@ -2265,7 +2372,9 @@ describe("acp delta translation (dialects)", () => {
         }),
       openTurnId: () => assembler.getOpenTurnId(THREAD_ID) ?? "",
     };
+
     harness.translate(turnStartedEvent());
+
     return harness;
   }
 
@@ -2287,6 +2396,7 @@ describe("acp delta translation (dialects)", () => {
         rawInput: args.rawInput,
       }),
     );
+
     return completedItems(
       harness.translate(
         updateEvent({
@@ -2341,6 +2451,7 @@ describe("acp delta translation (dialects)", () => {
           details: sample.details,
         },
       });
+
       expect(item).toMatchObject({
         type: "commandExecution",
         status: "completed",
@@ -2353,6 +2464,7 @@ describe("acp delta translation (dialects)", () => {
   it("preserves omp timeout failure semantics", () => {
     const output =
       "partial\n\nWall time: 1.00 seconds\n\n[Command timed out after 1 seconds]";
+
     expect(
       completedDialectCommand({
         dialectId: "omp",
@@ -2389,6 +2501,7 @@ describe("acp delta translation (dialects)", () => {
     });
 
     const decoratedOutput = "ok\n\nWall time: 0.25 seconds";
+
     const generic = completedDialectCommand({
       dialectId: "unknown",
       rawInput: { command: "echo ok" },
@@ -2397,6 +2510,7 @@ describe("acp delta translation (dialects)", () => {
         details: { wallTimeMs: 250 },
       },
     });
+
     expect(generic).toMatchObject({ aggregatedOutput: decoratedOutput });
     expect(generic).not.toHaveProperty("exitCode");
   });
@@ -2452,6 +2566,7 @@ describe("acp delta translation (dialects)", () => {
 
   it("opens a Cursor task call as a delegation and takes the report's detail", () => {
     const harness = dialectHarness("cursor");
+
     const opened = harness.translate(
       updateEvent({
         sessionUpdate: "tool_call",
@@ -2462,6 +2577,7 @@ describe("acp delta translation (dialects)", () => {
         rawInput: { _toolName: "task" },
       }),
     );
+
     expect(opened[0]).toMatchObject({
       type: "item/started",
       item: {
@@ -2471,6 +2587,7 @@ describe("acp delta translation (dialects)", () => {
         presentation: { icon: { glyph: "UserRound" } },
       },
     });
+
     const openedId =
       opened[0]?.type === "item/started" ? opened[0].item.id : "";
 
@@ -2483,6 +2600,7 @@ describe("acp delta translation (dialects)", () => {
         detail: "model default",
       }),
     });
+
     expect(reported).toEqual([
       expect.objectContaining({
         type: "item/started",
@@ -2576,7 +2694,7 @@ describe("acp delta translation (dialects)", () => {
     });
   });
 
-  it("keeps a bb-injected tool binding ahead of the dialect", () => {
+  it("keeps an Omnyo-injected tool binding ahead of the dialect", () => {
     const harness = dialectHarness("cursor");
     harness.translator.configureInjectedTools([{ name: "AskUserQuestion" }]);
     harness.translator.noteInjectedToolCall(THREAD_ID, "AskUserQuestion");
@@ -2584,7 +2702,7 @@ describe("acp delta translation (dialects)", () => {
       harness.translate(
         updateEvent({
           sessionUpdate: "tool_call",
-          toolCallId: "call-bb",
+          toolCallId: "call-omnyo",
           title: "MCP: AskUserQuestion",
           kind: "other",
           status: "pending",
@@ -2593,12 +2711,12 @@ describe("acp delta translation (dialects)", () => {
       )[0],
     ).toMatchObject({
       type: "item/started",
-      item: { type: "toolCall", tool: "AskUserQuestion", server: "bb" },
+      item: { type: "toolCall", tool: "AskUserQuestion", server: "omnyo" },
     });
   });
 });
 
-describe("acp delta translation (bb-injected tools)", () => {
+describe("acp delta translation (Omnyo-injected tools)", () => {
   const ASK_PRESENTATION = {
     label: { pending: "Asking a question", completed: "Asked a question" },
     icon: { glyph: "MessageQuestion" },
@@ -2610,20 +2728,24 @@ describe("acp delta translation (bb-injected tools)", () => {
     const translator = createAcpDeltaTranslator({ cwd: SESSION_CWD });
     translator.configureInjectedTools([
       { name: "ask_user_question", presentation: ASK_PRESENTATION },
-      { name: "bb_workflow_run" },
+      { name: "omnyo_workflow_run" },
     ]);
     const assembler = harness.assembler;
+
     const translate = (event: ProviderRuntimeEvent) =>
       assembler.assemble({
         threadId: THREAD_ID,
         deltas: translator.translateAcpEvent(event, { threadId: THREAD_ID }),
       });
+
     translate(turnStartedEvent());
+
     return { translate, translator };
   }
 
-  it("binds the agent's announced MCP call when the proxy forwards the bb tool call", () => {
+  it("binds the agent's announced MCP call when the proxy forwards the Omnyo tool call", () => {
     const { translate, translator } = injectedHarness();
+
     const [started] = translate(
       updateEvent({
         sessionUpdate: "tool_call",
@@ -2633,6 +2755,7 @@ describe("acp delta translation (bb-injected tools)", () => {
         status: "pending",
       }),
     );
+
     expect(started).toMatchObject({
       type: "item/started",
       item: { type: "toolCall", tool: "other" },
@@ -2649,9 +2772,10 @@ describe("acp delta translation (bb-injected tools)", () => {
         }),
       ),
     );
+
     expect(completed).toMatchObject({
       type: "toolCall",
-      server: "bb",
+      server: "omnyo",
       tool: "ask_user_question",
       status: "completed",
       presentation: ASK_PRESENTATION,
@@ -2660,7 +2784,7 @@ describe("acp delta translation (bb-injected tools)", () => {
 
   it("holds a proxied call until the agent announces it, and presents an unknown definition generically", () => {
     const { translate, translator } = injectedHarness();
-    translator.noteInjectedToolCall(THREAD_ID, "bb_workflow_run");
+    translator.noteInjectedToolCall(THREAD_ID, "omnyo_workflow_run");
     translator.noteInjectedToolCall(THREAD_ID, "not_configured");
 
     const first = completedItems(
@@ -2673,18 +2797,20 @@ describe("acp delta translation (bb-injected tools)", () => {
         }),
       ),
     );
+
     expect(first[0]).toMatchObject({
       type: "toolCall",
-      server: "bb",
-      tool: "bb_workflow_run",
+      server: "omnyo",
+      tool: "omnyo_workflow_run",
       presentation: {
         label: {
-          pending: "Running bb_workflow_run",
-          completed: "Ran bb_workflow_run",
+          pending: "Running omnyo_workflow_run",
+          completed: "Ran omnyo_workflow_run",
         },
         icon: { glyph: "Toolbox" },
       },
     });
+
     const second = completedItems(
       translate(
         updateEvent({
@@ -2696,9 +2822,10 @@ describe("acp delta translation (bb-injected tools)", () => {
         }),
       ),
     );
+
     expect(second[0]).toMatchObject({
       type: "toolCall",
-      server: "bb",
+      server: "omnyo",
       tool: "not_configured",
     });
   });
@@ -2715,21 +2842,23 @@ describe("acp delta translation (bb-injected tools)", () => {
         rawInput: { command: "sleep 1" },
       }),
     );
+
     const [named] = translate(
       updateEvent({
         sessionUpdate: "tool_call",
         toolCallId: "mcp-4",
-        title: "ask_user_question (bb-bridge MCP Server)",
+        title: "ask_user_question (omnyo-bridge MCP Server)",
         kind: "other",
         status: "pending",
       }),
     );
+
     expect(named).toMatchObject({
       type: "item/started",
-      item: { type: "toolCall", server: "bb", tool: "ask_user_question" },
+      item: { type: "toolCall", server: "omnyo", tool: "ask_user_question" },
     });
 
-    translator.noteInjectedToolCall(THREAD_ID, "bb_workflow_run");
+    translator.noteInjectedToolCall(THREAD_ID, "omnyo_workflow_run");
     const settled = completedItems(translate(turnCompletedEvent("end_turn")));
     expect(settled.map((item) => item.type)).toEqual([
       "commandExecution",

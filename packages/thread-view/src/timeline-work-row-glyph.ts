@@ -2,11 +2,11 @@ import {
   isBackgroundAgentTaskType,
   isBackgroundCommandTaskType,
   isNamespacedGlyph,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   TimelineActivityIntent,
   TimelineRowPresentation,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { assertNever } from "./assert-never.js";
 import { primaryTimelineActivityIntent } from "./timeline-activity-intents.js";
 import type { TimelineActivityIntentTitle } from "./timeline-row-title.js";
@@ -34,7 +34,9 @@ function isSkillReadIntent(intent: TimelineActivityIntent): boolean {
   if (intent.type !== "read") {
     return false;
   }
+
   const target = (intent.path ?? intent.name).replaceAll("\\", "/");
+
   return target.split("/").pop() === SKILL_FILE_NAME;
 }
 
@@ -59,6 +61,7 @@ export function activityIntentTitleGlyph(
   if (isSkillReadIntent(entry.intent)) {
     return "Zap";
   }
+
   return explorationIntentGlyph(entry.intentType);
 }
 
@@ -68,6 +71,7 @@ export function workRowPresentation(
   if (row.workKind === "approval" || row.workKind === "question") {
     return undefined;
   }
+
   return row.presentation;
 }
 
@@ -80,10 +84,12 @@ function fallbackGlyphForWorkRow(
     row.workKind === "search"
   ) {
     const intent = primaryTimelineActivityIntent(row);
+
     if (intent !== null && intent.type !== "unknown") {
       return explorationIntentGlyph(intent.type);
     }
   }
+
   switch (row.workKind) {
     case "file-change":
       return "EditFile";
@@ -112,9 +118,11 @@ function fallbackGlyphForWorkRow(
       if (isBackgroundCommandTaskType(row.taskType)) {
         return "Terminal";
       }
+
       if (isBackgroundAgentTaskType(row.taskType)) {
         return "UserRoundPlus";
       }
+
       return "ListTodo";
     case "approval":
       return "Lock";
@@ -134,10 +142,13 @@ export function workRowGlyph<HostGlyph extends string>(
   if (isSkillReadCommandRow(row)) {
     return "Zap";
   }
+
   const presented = workRowPresentation(row)?.icon.glyph;
+
   if (presented !== undefined && isHostGlyph(presented)) {
     return presented;
   }
+
   return fallbackGlyphForWorkRow(row);
 }
 
@@ -147,7 +158,9 @@ export function workRowPluginGlyph(
   if (isSkillReadCommandRow(row)) {
     return undefined;
   }
+
   const presented = workRowPresentation(row)?.icon.glyph;
+
   return presented !== undefined && isNamespacedGlyph(presented)
     ? presented
     : undefined;

@@ -8,22 +8,56 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { Toaster, toast } from "sonner";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
-import { makeHostResponse } from "@get-bb/plugin-sdk/testing";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
+import { makeHostResponse } from "@omnyo/plugin-sdk/testing";
 import { z } from "zod";
 import { policySchema, storageRpc } from "./src/contract.js";
+import { rpcContract as worktreesRpc } from "./src/worktrees/contract.js";
+import type { SavedScan } from "./src/worktrees/contract.js";
 import { makeSystemConfig } from "../../apps/app/src/test/fixtures/system-config.js";
 import type { State } from "./src/contract.js";
 import type { HostStorageListResponse } from "./src/storage-types.js";
 
 const app = await loadPluginApp(() => import("./app"));
+
 afterEach(() => {
   cleanup();
   toast.dismiss();
   vi.restoreAllMocks();
 });
 
-function fixture(subPath = "host_test") {
+function fixture(
+  subPath = "host_test",
+  options: { primaryHostId?: string; snapshot?: SavedScan } = {},
+) {
+  const worktreeState: z.infer<typeof worktreesRpc.savedScan.output> = {
+    snapshot: options.snapshot ?? null,
+    lastError: null,
+    lastCleanup: null,
+    scanning: false,
+    startedAt: null,
+    nextScanAt: new Date(Date.now() + 3600000).toISOString(),
+  };
+
+  const cleanSaved = vi.fn(
+    async (_input: z.infer<typeof worktreesRpc.cleanSaved.input>) => {
+      const result = {
+        removed: (worktreeState.snapshot?.items ?? []).map((item) => ({
+          ...item,
+          freedBytes: item.estimatedBytes,
+        })),
+        skipped: [],
+      };
+
+      worktreeState.lastCleanup = {
+        ...result,
+        finishedAt: new Date().toISOString(),
+      };
+
+      return result;
+    },
+  );
+
   let state: State = {
     policy: {
       archiveAfterDays: null,
@@ -33,6 +67,7 @@ function fixture(subPath = "host_test") {
     },
     lastRun: null,
   };
+
   const hosts: HostStorageListResponse["hosts"] = [
     {
       hostId: "host_test",
@@ -40,6 +75,8 @@ function fixture(subPath = "host_test") {
       largeFileCleanup: { state: "idle" },
       archivedFileCleanup: { state: "idle" },
       maintenance: { state: "idle" },
+      maintenanceJobs: [],
+      externalWorktreeRemovals: [],
       report: {
         hostId: "host_test",
         scannedAt: Date.now(),
@@ -62,6 +99,7 @@ function fixture(subPath = "host_test") {
         largestThreads: [],
         leftoverWorktrees: [],
         projectWorktrees: [],
+        externalWorktrees: [],
         developerStorage: {
           path: "/fixture/dev",
           sizeBytes: 20,
@@ -73,28 +111,45 @@ function fixture(subPath = "host_test") {
               sourcePathState: "exists",
               running: true,
               threads: [],
+              current: false,
             },
           ],
         },
       },
     },
   ];
+
   const reports = vi.fn(async () => ({ hosts }));
+
   const configure = vi.fn(async (policy: State["policy"]) => {
     state = { ...state, policy };
+
     return state;
   });
+
   const remove = vi.fn(
     async (_input: z.infer<typeof storageRpc.removeDevInstances.input>) => ({
-    running: [] as string[],
-    removedCount: 1,
-    removedBytes: 20,
-    skippedCount: 0,
-    stoppedProcessCount: 1,
+      running: [] as string[],
+      removedCount: 1,
+      removedBytes: 20,
+      skippedCount: 0,
+      stoppedProcessCount: 1,
     }),
   );
+
+  const entryJobs = new Map<
+    string,
+    import("./src/storage-types.js").EntryCleanupStatus
+  >();
+
   const start = vi.fn(async () => null);
+
+  const removeWorktree = vi.fn<
+    () => Promise<z.infer<typeof storageRpc.startRemoveExternalWorktree.output>>
+  >(async () => ({ state: "started" }));
+
   const Component = app.navPanels[0]!.component;
+
   const slot = renderSlot<{ subPath: string }>(
     {
       component: (props) => (
@@ -107,14 +162,43 @@ function fixture(subPath = "host_test") {
     { subPath },
     {
       rpc: {
+        savedScan: () => worktreeState,
+        files: () => [],
+        cleanSaved: (input) =>
+          cleanSaved(worktreesRpc.cleanSaved.input.parse(input)),
         state: () => state,
         configure: (input) => configure(policySchema.parse(input)),
         hosts: reports,
-        removeDevInstances: (input) =>
-          remove(storageRpc.removeDevInstances.input.parse(input)),
+        startEntryCleanup: (raw) => {
+          const input = storageRpc.startEntryCleanup.input.parse(raw);
+          const id = JSON.stringify(input);
+
+          if (input.kind !== "development")
+            throw new Error("Unexpected cleanup");
+          entryJobs.set(id, { state: "running" });
+          void remove({
+            hostId: input.hostId,
+            names: input.names,
+            stopRunning: input.stopRunning,
+          }).then(
+            (result) =>
+              entryJobs.set(id, {
+                state: "completed",
+                result: { kind: "development", ...result },
+              }),
+            (error: Error) =>
+              entryJobs.set(id, { state: "failed", message: error.message }),
+          );
+
+          return { id };
+        },
+        entryCleanup: (raw) =>
+          entryJobs.get(storageRpc.entryCleanup.input.parse(raw).id),
+        scanHost: start,
         startClearArchivedFiles: start,
         startClearLargeFiles: start,
         startCleanup: start,
+        startRemoveExternalWorktree: removeWorktree,
       },
       sdk: {
         subscribe: () => () => {},
@@ -128,13 +212,44 @@ function fixture(subPath = "host_test") {
           ],
         },
         system: {
-          config: async () => makeSystemConfig({ primaryHostId: "host_test" }),
+          config: async () =>
+            makeSystemConfig({
+              primaryHostId: options.primaryHostId ?? "host_test",
+            }),
         },
       },
     },
   );
-  return { slot, configure, remove, start, hosts, reports };
+
+  return {
+    slot,
+    configure,
+    remove,
+    start,
+    removeWorktree,
+    hosts,
+    reports,
+    cleanSaved,
+    worktreeState,
+  };
 }
+
+it("names the development storage folder that the machine's scan measured", async () => {
+  const { slot } = fixture();
+  const page = within(slot.container);
+
+  expect(await page.findByText("Omnyo development storage")).toBeTruthy();
+  expect(
+    page.getByText(
+      "Databases, logs, and thread files from local development instances in /fixture/dev.",
+    ),
+  ).toBeTruthy();
+  expect(
+    page.getByText(
+      "0 development instances in /fixture/dev whose source checkout no longer exists. Servers still running from them are stopped before removal.",
+    ),
+  ).toBeTruthy();
+});
 
 it("stops a running development instance only after the user confirms stop and remove", async () => {
   const { slot, remove } = fixture();
@@ -149,9 +264,11 @@ it("stops a running development instance only after the user confirms stop and r
   fireEvent.click(
     await page.findByRole("button", { name: "Remove instance: after" }),
   );
+
   const confirmation = await page.findByRole("region", {
     name: "Confirm cleanup",
   });
+
   expect(remove.mock.calls.map(([input]) => input)).toEqual([
     { hostId: "host_test", names: ["after"], stopRunning: false },
   ]);
@@ -201,9 +318,11 @@ it("shows cleanup failures as toasts, keeps other actions available, and permits
 it("saves switches immediately and rolls failed saves back without a storage scan", async () => {
   const { slot, configure } = fixture("");
   const page = within(slot.container);
+
   const toggle = await page.findByRole("switch", {
     name: "Delete thread storage on archive",
   });
+
   configure.mockRejectedValueOnce(new Error("Save failed"));
   fireEvent.click(toggle);
   await waitFor(() =>
@@ -224,7 +343,7 @@ it("saves switches immediately and rolls failed saves back without a storage sca
   ).toBe(false);
 });
 
-it("toasts background completion once and keeps completed messages out of the page", async () => {
+it("shows background progress on the action and toasts only completion", async () => {
   const { slot, hosts } = fixture();
   await within(slot.container).findByRole("button", {
     name: "Clear archived files",
@@ -237,9 +356,14 @@ it("toasts background completion once and keeps completed messages out of the pa
   await act(async () => {
     await slot.emitRealtime("changed", null);
   });
-  await within(slot.container).findByText(
-    /Removing archived files in the background/,
-  );
+
+  const button = within(slot.container).getByRole("button", {
+    name: "Clear archived files",
+  });
+
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(document.querySelector("[data-sonner-toast]")).toBeNull();
   hosts[0]!.archivedFileCleanup = {
     state: "completed",
     clearedThreads: 1,
@@ -262,7 +386,7 @@ it("toasts background completion once and keeps completed messages out of the pa
   ).toBe(false);
 });
 
-it("hands an all-machines large-file cleanup toast over to each machine's job until it completes", async () => {
+it("keeps all-machines cleanup busy until the machine jobs complete", async () => {
   const { slot, hosts, start } = fixture("");
   hosts[0]!.report!.archivedLargeFiles = {
     threadCount: 1,
@@ -280,24 +404,17 @@ it("hands an all-machines large-file cleanup toast over to each machine's job un
     ),
   );
   await waitFor(() => expect(start).toHaveBeenCalled());
-  await waitFor(() =>
-    expect(
-      document.querySelector('[data-sonner-toast][data-type="info"]')
-        ?.textContent,
-    ).toContain("Started on all online machines"),
-  );
-  const loadingDescriptions = () =>
-    [
-      ...document.querySelectorAll(
-        '[data-sonner-toast][data-type="loading"]:not([data-removed="true"]) [data-description]',
-      ),
-    ].map((node) => node.textContent);
-  await waitFor(() => expect(loadingDescriptions()).toEqual([]));
+  expect(document.querySelector("[data-sonner-toast]")).toBeNull();
   hosts[0]!.largeFileCleanup = { state: "running", startedAt: Date.now() };
   await act(async () => {
     await slot.emitRealtime("changed", null);
   });
-  await waitFor(() => expect(loadingDescriptions()).toEqual(["Test machine"]));
+  expect(
+    page
+      .getByRole("button", { name: "Delete large files" })
+      .getAttribute("aria-busy"),
+  ).toBe("true");
+  expect(document.querySelector("[data-sonner-toast]")).toBeNull();
   hosts[0]!.largeFileCleanup = {
     state: "completed",
     clearedFiles: 2,
@@ -312,7 +429,11 @@ it("hands an all-machines large-file cleanup toast over to each machine's job un
         ?.textContent,
     ).toContain("Large archived files deleted"),
   );
-  expect(loadingDescriptions()).toEqual([]);
+  expect(
+    page
+      .getByRole("button", { name: "Delete large files" })
+      .getAttribute("aria-busy"),
+  ).toBe("false");
 });
 
 it("does not keep cleanup controls locked while the follow-up report is slow", async () => {
@@ -322,12 +443,14 @@ it("does not keep cleanup controls locked while the follow-up report is slow", a
     await page.findByRole("button", { name: "Clear archived files" }),
   );
   let finish = () => {};
+
   reports.mockImplementationOnce(
     () =>
       new Promise((resolve) => {
         finish = () => resolve({ hosts });
       }),
   );
+
   try {
     fireEvent.click(
       within(page.getByRole("region", { name: "Confirm cleanup" })).getByRole(
@@ -350,7 +473,7 @@ it("does not keep cleanup controls locked while the follow-up report is slow", a
   }
 });
 
-it("starts orphan cleanup in the background, shows progress, and toasts completion", async () => {
+it("starts orphan cleanup in the background without locking the page and toasts completion", async () => {
   const { slot, hosts, start } = fixture();
   const page = within(slot.container);
   fireEvent.click(await page.findByRole("button", { name: "Remove orphans" }));
@@ -364,21 +487,28 @@ it("starts orphan cleanup in the background, shows progress, and toasts completi
   expect(
     slot.rpcCalls.find((call) => call.method === "startCleanup")?.input,
   ).toEqual({ hostId: "host_test", kind: "orphans" });
-  hosts[0]!.maintenance = { state: "running", kind: "orphans" };
+  hosts[0]!.maintenanceJobs = [{ state: "running", kind: "orphans" }];
   await act(async () => {
     await slot.emitRealtime("changed", null);
   });
-  await page.findByText("Removing orphaned storage…");
+  expect(document.querySelector("[data-sonner-toast]")).toBeNull();
+  expect(
+    page
+      .getByRole("button", { name: "Remove orphans" })
+      .getAttribute("aria-busy"),
+  ).toBe("true");
   expect(
     page
       .getByRole("button", { name: "Remove orphans" })
       .hasAttribute("disabled"),
   ).toBe(true);
-  hosts[0]!.maintenance = {
-    state: "completed",
-    kind: "orphans",
-    message: "Removed 1 orphaned storage folder",
-  };
+  hosts[0]!.maintenanceJobs = [
+    {
+      state: "completed",
+      kind: "orphans",
+      message: "Removed 1 orphaned storage folder",
+    },
+  ];
   await act(async () => {
     await slot.emitRealtime("changed", null);
   });
@@ -389,7 +519,6 @@ it("starts orphan cleanup in the background, shows progress, and toasts completi
       ),
     ).toBe(true),
   );
-  expect(page.queryByText("Removing orphaned storage…")).toBeNull();
   expect(
     page
       .getByRole("button", { name: "Remove orphans" })
@@ -397,11 +526,13 @@ it("starts orphan cleanup in the background, shows progress, and toasts completi
   ).toBe(false);
 });
 
-it("shows the development path below a short pending title and updates the same toast on completion", async () => {
+it("spins the development trash button immediately and only toasts completion", async () => {
   const { slot, remove } = fixture();
+
   const completion: {
     resolve: (value: Awaited<ReturnType<typeof remove>>) => void;
   } = { resolve: () => {} };
+
   remove.mockImplementationOnce(
     () =>
       new Promise((resolve) => {
@@ -412,19 +543,15 @@ it("shows the development path below a short pending title and updates the same 
   fireEvent.click(
     await page.findByRole("button", { name: "Remove instance: after" }),
   );
-  await waitFor(() =>
-    expect(
-      document.querySelector(
-        '[data-sonner-toast][data-type="loading"] [data-title]',
-      )?.textContent,
-    ).toBe("Deleting development data"),
-  );
-  const pending = document.querySelector(
-    '[data-sonner-toast][data-type="loading"]',
-  );
-  expect(pending?.querySelector("[data-description]")?.textContent).toBe(
-    "/fixture/dev/after",
-  );
+  const button = page.getByRole("button", { name: "Remove instance: after" });
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(
+    button.querySelector('[data-icon="Spinner"].animate-spin'),
+  ).not.toBeNull();
+  expect(document.querySelector("[data-sonner-toast]")).toBeNull();
+  fireEvent.click(button);
+  expect(remove).toHaveBeenCalledTimes(1);
   await act(async () =>
     completion.resolve({
       running: [],
@@ -435,13 +562,14 @@ it("shows the development path below a short pending title and updates the same 
     }),
   );
   await waitFor(() =>
-    expect(pending?.querySelector("[data-title]")?.textContent).toBe(
-      "Development data deleted",
-    ),
+    expect(
+      document.querySelector("[data-sonner-toast] [data-title]")?.textContent,
+    ).toBe("Development data deleted"),
   );
-  expect(pending?.querySelector("[data-description]")?.textContent).toBe(
-    "/fixture/dev/after · 20 B freed",
-  );
+  expect(
+    document.querySelector("[data-sonner-toast] [data-description]")
+      ?.textContent,
+  ).toBe("/fixture/dev/after · 20 B freed");
   expect(document.querySelectorAll("[data-sonner-toast]")).toHaveLength(1);
 });
 
@@ -456,11 +584,13 @@ it.each([
     await within(slot.container).findByRole("button", {
       name: "Remove orphans",
     });
-    hosts[0]!.maintenance = {
-      state: "completed",
-      kind,
-      message: "Test machine",
-    };
+    hosts[0]!.maintenanceJobs = [
+      {
+        state: "completed",
+        kind,
+        message: "Test machine",
+      },
+    ];
     await act(async () => {
       await slot.emitRealtime("changed", null);
     });
@@ -471,3 +601,497 @@ it.each([
     );
   },
 );
+
+it("keeps worktree removal spinning through queued and running states, then toasts completion", async () => {
+  const { slot, hosts, removeWorktree } = fixture("host_test", {
+    primaryHostId: "host_other",
+  });
+
+  const worktreePath = "/fixture/worktrees/heavy";
+  hosts[0]!.report!.externalWorktrees = [
+    {
+      projectId: "proj_test",
+      repositoryPath: "/fixture/repo",
+      path: worktreePath,
+      branch: "heavy",
+      locked: false,
+      changedFileCount: 0,
+      unsavedCommitCount: 0,
+      lastActivityAt: null,
+      sizeBytes: 4096,
+      threads: [],
+    },
+  ];
+  const page = within(slot.container);
+  fireEvent.click(
+    await page.findByRole("button", { name: "Remove worktree: heavy" }),
+  );
+  expect(removeWorktree).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(page.getByRole("region", { name: "Confirm cleanup" })).getByRole(
+      "button",
+      { name: "Remove worktree" },
+    ),
+  );
+  await waitFor(() => expect(removeWorktree).toHaveBeenCalledTimes(1));
+  expect(document.querySelector("[data-sonner-toast]")).toBeNull();
+  hosts[0]!.externalWorktreeRemovals = [
+    { path: worktreePath, state: "queued" },
+  ];
+  await act(async () => {
+    await slot.emitRealtime("changed", null);
+  });
+  const button = page.getByRole("button", { name: "Remove worktree: heavy" });
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(document.querySelector("[data-sonner-toast]")).toBeNull();
+  hosts[0]!.externalWorktreeRemovals = [
+    { path: worktreePath, state: "running" },
+  ];
+  await act(async () => {
+    await slot.emitRealtime("changed", null);
+  });
+  hosts[0]!.report!.externalWorktrees = [];
+  hosts[0]!.externalWorktreeRemovals = [
+    { path: worktreePath, state: "completed", removedBytes: 4096 },
+  ];
+  await act(async () => {
+    await slot.emitRealtime("changed", null);
+  });
+  await waitFor(() =>
+    expect(
+      document.querySelector("[data-sonner-toast] [data-title]")?.textContent,
+    ).toBe("Worktree removed"),
+  );
+  expect(document.querySelectorAll("[data-sonner-toast]")).toHaveLength(1);
+  expect(
+    document.querySelector("[data-sonner-toast] [data-description]")
+      ?.textContent,
+  ).toBe(`${worktreePath} · 4 KB freed`);
+});
+
+it("shows scan progress immediately and waits for the updated report before toasting", async () => {
+  const { slot, hosts, start } = fixture();
+  let finish = () => {};
+
+  start.mockImplementationOnce(
+    () =>
+      new Promise<null>((resolve) => {
+        finish = () => resolve(null);
+      }),
+  );
+  const page = within(slot.container);
+  fireEvent.click(await page.findByRole("button", { name: "Rescan machine" }));
+  const button = page.getByRole("button", { name: "Scanning…" });
+  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(button.querySelector(".animate-spin")).not.toBeNull();
+  expect(document.querySelector("[data-sonner-toast]")).toBeNull();
+  hosts[0]!.scan = { state: "scanning", startedAt: Date.now() };
+  await act(async () => finish());
+  expect(
+    page
+      .getAllByRole("button", { name: "Scanning…" })
+      .every((control) => control.hasAttribute("disabled")),
+  ).toBe(true);
+  expect(document.querySelector("[data-sonner-toast]")).toBeNull();
+  hosts[0]!.scan = { state: "idle" };
+  hosts[0]!.report!.scannedAt += 1000;
+  await act(async () => {
+    await slot.emitRealtime("changed", null);
+  });
+  await waitFor(() =>
+    expect(
+      document.querySelector("[data-sonner-toast] [data-title]")?.textContent,
+    ).toBe("Storage scan completed"),
+  );
+  expect(
+    page
+      .getByRole("button", { name: "Rescan machine" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
+});
+
+it("aggregates nearby instance deletions and starts a fresh toast after the window expires", async () => {
+  const { slot, hosts, remove } = fixture();
+  const storage = hosts[0]!.report!.developerStorage!;
+  const template = storage.entries[0]!;
+  storage.entries = ["first", "second", "later"].map((name) => ({
+    ...template,
+    name,
+    sourcePath: `/fixture/${name}`,
+    running: false,
+  }));
+  remove.mockResolvedValue({
+    running: [],
+    removedCount: 1,
+    removedBytes: 100,
+    skippedCount: 0,
+    stoppedProcessCount: 0,
+  });
+  const page = within(slot.container);
+  fireEvent.click(
+    await page.findByRole("button", { name: "Remove instance: first" }),
+  );
+  await waitFor(() =>
+    expect(
+      document.querySelector('[data-sonner-toast][data-type="success"]')
+        ?.textContent,
+    ).toContain("Development data deleted"),
+  );
+
+  const firstToast = document.querySelector(
+    '[data-sonner-toast][data-type="success"]',
+  );
+
+  fireEvent.click(
+    page.getByRole("button", { name: "Remove instance: second" }),
+  );
+  await waitFor(() =>
+    expect(firstToast?.textContent).toContain("2 instances deleted"),
+  );
+  expect(firstToast?.textContent).toContain("200 B freed");
+  expect(
+    document.querySelectorAll('[data-sonner-toast][data-type="success"]'),
+  ).toHaveLength(1);
+  vi.spyOn(Date, "now").mockReturnValue(Date.now() + 6000);
+  fireEvent.click(page.getByRole("button", { name: "Remove instance: later" }));
+  await waitFor(() =>
+    expect(
+      document.querySelectorAll('[data-sonner-toast][data-type="success"]'),
+    ).toHaveLength(2),
+  );
+
+  const titles = [
+    ...document.querySelectorAll(
+      '[data-sonner-toast][data-type="success"] [data-title]',
+    ),
+  ].map((node) => node.textContent);
+
+  expect(titles).toEqual(
+    expect.arrayContaining(["2 instances deleted", "Development data deleted"]),
+  );
+});
+
+it("aggregates background completions across cleanup types while keeping failures separate", async () => {
+  const { slot, hosts } = fixture();
+  await within(slot.container).findByRole("button", {
+    name: "Clear archived files",
+  });
+  hosts[0]!.archivedFileCleanup = {
+    state: "completed",
+    clearedThreads: 1,
+    clearedBytes: 100,
+  };
+  hosts[0]!.largeFileCleanup = {
+    state: "completed",
+    clearedFiles: 2,
+    clearedBytes: 200,
+  };
+  hosts[0]!.externalWorktreeRemovals = [
+    { path: "/fixture/worktree", state: "completed", removedBytes: 300 },
+  ];
+  hosts[0]!.maintenanceJobs = [
+    { kind: "orphans", state: "failed", message: "Machine disconnected" },
+  ];
+  await act(async () => {
+    await slot.emitRealtime("changed", null);
+  });
+  await waitFor(() =>
+    expect(
+      document.querySelector('[data-sonner-toast][data-type="success"]')
+        ?.textContent,
+    ).toContain("3 storage actions completed"),
+  );
+  expect(
+    document.querySelector('[data-sonner-toast][data-type="success"]')
+      ?.textContent,
+  ).toContain("600 B freed");
+  expect(
+    document.querySelectorAll('[data-sonner-toast][data-type="success"]'),
+  ).toHaveLength(1);
+  expect(
+    document.querySelector('[data-sonner-toast][data-type="error"]')
+      ?.textContent,
+  ).toContain("Machine disconnected");
+  await act(async () => {
+    await slot.emitRealtime("changed", null);
+  });
+  expect(
+    document.querySelector('[data-sonner-toast][data-type="success"]')
+      ?.textContent,
+  ).toContain("3 storage actions completed");
+});
+
+it("keeps every section on one dashboard and moves focus without navigating", async () => {
+  const { slot } = fixture("");
+  const page = within(slot.container);
+  expect(
+    await page.findByRole("heading", { name: "Storage & retention" }),
+  ).toBeTruthy();
+
+  const navigation = page.getByRole("navigation", {
+    name: "Dashboard sections",
+  });
+
+  for (const name of [
+    "Machine storage",
+    "Worktrees & branches",
+    "Automatic retention",
+  ]) {
+    const heading = await page.findByRole("heading", { name });
+    fireEvent.click(within(navigation).getByRole("button", { name }));
+    expect(document.activeElement).toBe(heading);
+  }
+
+  expect(slot.navigateCalls).toEqual([]);
+});
+
+it("opens legacy Worktrees links on the same dashboard with the section focused", async () => {
+  const { slot, reports } = fixture("worktrees");
+  const page = within(slot.container);
+  expect(
+    await page.findByRole("heading", { name: "Storage & retention" }),
+  ).toBeTruthy();
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      page.getByRole("heading", { name: "Worktrees & branches" }),
+    ),
+  );
+  expect(
+    await page.findByRole("heading", { name: "Machine storage" }),
+  ).toBeTruthy();
+  expect(
+    page.getByRole("heading", { name: "Automatic retention" }),
+  ).toBeTruthy();
+  expect(reports).toHaveBeenCalled();
+  expect(slot.navigateCalls).toEqual([]);
+});
+
+it("keeps the selected machine report inside the dashboard", async () => {
+  const { slot } = fixture();
+  const page = within(slot.container);
+  expect(await page.findByText("Omnyo development storage")).toBeTruthy();
+
+  for (const name of [
+    "Storage & retention",
+    "Machine storage",
+    "Worktrees & branches",
+    "Automatic retention",
+  ]) {
+    expect(page.getByRole("heading", { name })).toBeTruthy();
+  }
+
+  expect(slot.navigateCalls).toEqual([]);
+});
+
+function cleanupSnapshot(): SavedScan {
+  const shared = {
+    projectId: "proj_fixture",
+    projectName: "Fixture project",
+    repo: "/fixture/repo",
+    head: "ab".repeat(20),
+    base: "main",
+  };
+
+  return {
+    id: "saved-scan-exact-123",
+    scannedAt: new Date().toISOString(),
+    durationMs: 12,
+    entries: [
+      {
+        projectId: shared.projectId,
+        projectName: shared.projectName,
+        path: shared.repo,
+        error: null,
+        repo: {
+          path: shared.repo,
+          base: "main",
+          branches: [
+            {
+              name: "merged-branch",
+              head: shared.head,
+              ahead: 0,
+              behind: 0,
+              worktrees: [],
+              deleteReady: true,
+              deleteBase: "main",
+              reasons: [],
+            },
+          ],
+          worktrees: [
+            {
+              path: "/fixture/merged-folder",
+              head: shared.head,
+              branch: "merged-folder-branch",
+              locked: false,
+              missing: false,
+              bare: false,
+              error: null,
+              dirty: false,
+              dirtyFiles: [],
+              ignored: false,
+              lastActivityAt: null,
+              unsavedCommitCount: 0,
+              ahead: 0,
+              behind: 0,
+              storage: {
+                status: "measured",
+                allocatedBytes: 4096,
+                reclaimableBytes: 4096,
+                measuredAt: new Date().toISOString(),
+                error: null,
+              },
+              purgeReady: true,
+              preserveIn: "main",
+              reasons: [],
+            },
+          ],
+        },
+      },
+    ],
+    issues: [],
+    items: [
+      {
+        ...shared,
+        kind: "folder",
+        target: "/fixture/merged-folder",
+        estimatedBytes: 4096,
+      },
+      {
+        ...shared,
+        kind: "branch",
+        target: "merged-branch",
+        estimatedBytes: null,
+      },
+    ],
+  };
+}
+
+it("starts project inventories collapsed and reveals matching search results", async () => {
+  const { slot } = fixture("", { snapshot: cleanupSnapshot() });
+  const page = within(slot.container);
+  const summary = await page.findByText("Fixture project");
+  const disclosure = summary.closest("details");
+  expect(disclosure?.open).toBe(false);
+  fireEvent.change(
+    page.getByRole("searchbox", { name: "Find repository or branch" }),
+    { target: { value: "merged-branch" } },
+  );
+  await waitFor(() => expect(disclosure?.open).toBe(true));
+  expect(page.getByText("merged-branch")).toBeTruthy();
+});
+
+it("focuses the changes inspector and returns focus after Escape or Close", async () => {
+  const { slot } = fixture("", { snapshot: cleanupSnapshot() });
+  const page = within(slot.container);
+  fireEvent.click(await page.findByText("Fixture project"));
+  const open = page.getByTitle("View changes on merged-branch");
+
+  fireEvent.click(open);
+  const heading = await page.findByRole("heading", { name: "merged-branch" });
+
+  expect(document.activeElement).toBe(heading);
+  fireEvent.keyDown(heading, { key: "Escape" });
+  expect(page.queryByRole("heading", { name: "merged-branch" })).toBeNull();
+  expect(document.activeElement).toBe(open);
+  fireEvent.click(open);
+  fireEvent.click(
+    await page.findByRole("button", { name: "Close changes inspector" }),
+  );
+  expect(page.queryByRole("heading", { name: "merged-branch" })).toBeNull();
+  expect(document.activeElement).toBe(open);
+});
+
+it("reviews the exact saved folder and branch before explicitly confirming cleanup", async () => {
+  const { slot, cleanSaved } = fixture("", { snapshot: cleanupSnapshot() });
+  const page = within(slot.container);
+  fireEvent.click(
+    await page.findByRole("button", { name: "Review cleanup (2)" }),
+  );
+  expect(cleanSaved).not.toHaveBeenCalled();
+  const review = page.getByRole("region", { name: "Review worktree cleanup" });
+  expect(within(review).getByText("/fixture/merged-folder")).toBeTruthy();
+  expect(within(review).getByText("merged-branch")).toBeTruthy();
+  expect(within(review).getAllByText("main")).toHaveLength(2);
+  fireEvent.click(
+    within(review).getByRole("button", { name: "Confirm cleanup (2)" }),
+  );
+  await waitFor(() =>
+    expect(cleanSaved).toHaveBeenCalledExactlyOnceWith({
+      snapshotId: "saved-scan-exact-123",
+    }),
+  );
+  expect(await page.findByText(/Freed 4.1 KB/)).toBeTruthy();
+});
+
+it("disables cleanup confirmation when the saved scan changes during review", async () => {
+  const { slot, cleanSaved, worktreeState } = fixture("", {
+    snapshot: cleanupSnapshot(),
+  });
+
+  const page = within(slot.container);
+  fireEvent.click(
+    await page.findByRole("button", { name: "Review cleanup (2)" }),
+  );
+  const review = page.getByRole("region", { name: "Review worktree cleanup" });
+
+  const confirm = within(review).getByRole("button", {
+    name: "Confirm cleanup (2)",
+  });
+
+  worktreeState.snapshot = { ...cleanupSnapshot(), id: "newer-saved-scan" };
+  await act(async () => {
+    await slot.emitRealtime("scan-changed", null);
+  });
+  await waitFor(() => expect(confirm.hasAttribute("disabled")).toBe(true));
+  fireEvent.click(confirm);
+  expect(cleanSaved).not.toHaveBeenCalled();
+});
+
+it("keeps protected external worktrees without offering forced removal", async () => {
+  const { slot, hosts, removeWorktree } = fixture("host_test", {
+    primaryHostId: "host_other",
+  });
+
+  hosts[0]!.report!.externalWorktrees = [
+    {
+      projectId: "proj_test",
+      repositoryPath: "/fixture/repo",
+      path: "/fixture/protected",
+      branch: "protected",
+      locked: true,
+      changedFileCount: 0,
+      unsavedCommitCount: 0,
+      lastActivityAt: null,
+      sizeBytes: 4096,
+      threads: [],
+    },
+  ];
+  removeWorktree.mockResolvedValueOnce({
+    state: "skipped",
+    reasons: ["locked"],
+  });
+  const page = within(slot.container);
+  fireEvent.click(
+    await page.findByRole("button", { name: "Remove worktree: protected" }),
+  );
+  expect(removeWorktree).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(page.getByRole("region", { name: "Confirm cleanup" })).getByRole(
+      "button",
+      { name: "Remove worktree" },
+    ),
+  );
+  await waitFor(() => expect(removeWorktree).toHaveBeenCalledTimes(1));
+  expect(removeWorktree).toHaveBeenCalledWith({
+    hostId: "host_test",
+    path: "/fixture/protected",
+    force: false,
+  });
+  await waitFor(() =>
+    expect(
+      document.querySelector("[data-sonner-toast] [data-title]")?.textContent,
+    ).toBe("Couldn’t remove worktree"),
+  );
+  expect(page.queryByRole("button", { name: "Remove anyway" })).toBeNull();
+});

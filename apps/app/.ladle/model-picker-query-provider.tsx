@@ -1,28 +1,28 @@
 import { useMemo, type ReactNode } from "react";
 import { makeSystemConfig } from "../src/test/fixtures/system-config";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type {
-  AvailableModel,
-  ProviderComposerAction,
-  ProviderInfo,
-  ReasoningLevel,
-} from "@bb/domain";
-import type { SystemExecutionOptionsResponse } from "@bb/server-contract";
+import {
+  defaultUiPreferences,
+  UI_PREFERENCE_KEYS,
+  type AvailableModel,
+  type ProviderComposerAction,
+  type ProviderInfo,
+  type ReasoningLevel,
+} from "@omnyo/domain";
+import type { SystemExecutionOptionsResponse } from "@omnyo/server-contract";
 import {
   hostsQueryKey,
   systemConfigQueryKey,
   systemExecutionOptionsQueryKey,
+  uiPreferencesQueryKey,
 } from "../src/hooks/queries/query-keys";
 import type { PickerOption } from "../src/components/pickers/OptionPicker";
 import type { ModelPickerOption } from "../src/components/pickers/model-picker-option";
 import {
   STORY_CLAUDE_CODE_MORE_MODELS,
   STORY_CLAUDE_CODE_MODELS,
-  STORY_CLAUDE_REASONING,
   STORY_CODEX_MODELS,
-  STORY_CODEX_REASONING,
   STORY_PI_MODELS,
-  STORY_PI_REASONING,
   STORY_PROVIDER_OPTIONS,
   STORY_SERVICE_TIER_SUPPORT,
 } from "./story-fixtures";
@@ -91,34 +91,25 @@ function makeSupportedReasoningEfforts(
 
 function makeAvailableModels({
   models,
-  reasoningOptions,
   markFirstDefault = true,
 }: {
-  models: readonly (ModelPickerOption & {
-    reasoningOptions?: readonly PickerOption<ReasoningLevel>[];
-  })[];
-  reasoningOptions: readonly PickerOption<ReasoningLevel>[];
+  models: readonly ModelPickerOption[];
   markFirstDefault?: boolean;
 }): AvailableModel[] {
-  return models.map((model, index) => {
-    const modelReasoning = model.reasoningOptions ?? reasoningOptions;
-    const defaultReasoningEffort =
-      modelReasoning.find((option) => option.value === "medium")?.value ??
-      modelReasoning[0]?.value ??
-      "medium";
-    return {
-      id: model.value,
-      model: model.value,
-      displayName: model.label,
-      ...(model.routeProviderId
-        ? { routeProviderId: model.routeProviderId }
-        : {}),
-      description: "",
-      supportedReasoningEfforts: makeSupportedReasoningEfforts(modelReasoning),
-      defaultReasoningEffort,
-      isDefault: markFirstDefault && index === 0,
-    };
-  });
+  return models.map((model, index) => ({
+    id: model.value,
+    model: model.value,
+    displayName: model.label,
+    ...(model.routeProviderId
+      ? { routeProviderId: model.routeProviderId }
+      : {}),
+    description: "",
+    supportedReasoningEfforts: makeSupportedReasoningEfforts(
+      model.reasoningOptions,
+    ),
+    defaultReasoningEffort: model.defaultReasoningLevel,
+    isDefault: markFirstDefault && index === 0,
+  }));
 }
 
 function makeExecutionOptions(
@@ -131,6 +122,7 @@ function makeExecutionOptions(
     selectedOnlyModels,
     permissionCeiling: "full",
     modelLoadError: null,
+    modelNotice: null,
   };
 }
 
@@ -152,28 +144,16 @@ function createStoryQueryClient(
     SystemExecutionOptionsResponse
   > = {
     codex: makeExecutionOptions(
-      makeAvailableModels({
-        models: STORY_CODEX_MODELS,
-        reasoningOptions: STORY_CODEX_REASONING,
-      }),
+      makeAvailableModels({ models: STORY_CODEX_MODELS }),
     ),
     "claude-code": makeExecutionOptions(
-      makeAvailableModels({
-        models: STORY_CLAUDE_CODE_MODELS,
-        reasoningOptions: STORY_CLAUDE_REASONING,
-      }),
+      makeAvailableModels({ models: STORY_CLAUDE_CODE_MODELS }),
       makeAvailableModels({
         models: STORY_CLAUDE_CODE_MORE_MODELS,
-        reasoningOptions: STORY_CLAUDE_REASONING,
         markFirstDefault: false,
       }),
     ),
-    pi: makeExecutionOptions(
-      makeAvailableModels({
-        models: STORY_PI_MODELS,
-        reasoningOptions: STORY_PI_REASONING,
-      }),
-    ),
+    pi: makeExecutionOptions(makeAvailableModels({ models: STORY_PI_MODELS })),
   };
 
   for (const environmentId of [null, ...environmentIds]) {
@@ -193,6 +173,14 @@ function createStoryQueryClient(
 
   queryClient.setQueryData(hostsQueryKey(), []);
   queryClient.setQueryData(systemConfigQueryKey(), makeSystemConfig());
+  queryClient.setQueryData(uiPreferencesQueryKey(), {
+    preferences: Object.fromEntries(
+      UI_PREFERENCE_KEYS.map((key) => [
+        key,
+        { revision: 0, value: defaultUiPreferences[key] },
+      ]),
+    ),
+  });
 
   return queryClient;
 }

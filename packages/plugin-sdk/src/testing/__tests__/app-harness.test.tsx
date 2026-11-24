@@ -19,16 +19,18 @@ import {
 import { defineRpcContract } from "../../rpc-contract.js";
 
 installTestPluginRuntime();
+
 const {
   definePluginApp,
   experimental_FileLink: FileLink,
   UrlLink: UrlLink,
   experimental_ProviderModelPicker: ProviderModelPicker,
   experimental_PermissionModePicker: PermissionModePicker,
+  experimental_useActionHistory,
   experimental_useAppPanel,
   experimental_useFixedTabTarget,
   ThreadChat,
-  useBbNavigate,
+  experimental_useAppNavigate,
   useComposer,
   useComposers,
   useComposerView,
@@ -44,6 +46,7 @@ function SdkProbe() {
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [queuedId, setQueuedId] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+
   return (
     <div>
       <button
@@ -109,6 +112,7 @@ const taskDetailsTab = {
 function FixedTabProbe() {
   const panel = experimental_useAppPanel();
   const targetState = experimental_useFixedTabTarget(taskDetailsTab);
+
   return (
     <div>
       <button
@@ -159,6 +163,7 @@ function TypedRpcPanel() {
       setTitle(exactTitle);
     });
   }, [rpc]);
+
   return <div>{title}</div>;
 }
 
@@ -167,9 +172,63 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function HistoryProbe() {
+  const history = experimental_useActionHistory();
+  const [position, setPosition] = useState(0);
+
+  return (
+    <div>
+      <span>{`at ${position}`}</span>
+      <button
+        type="button"
+        onClick={() => {
+          setPosition(1);
+          history.record({
+            label: "Move card",
+            undo: async () => setPosition(0),
+            redo: async () => setPosition(1),
+          });
+        }}
+      >
+        Move
+      </button>
+      <button type="button" disabled={!history.canUndo}>
+        Undo available
+      </button>
+    </div>
+  );
+}
+
+describe("experimental_useActionHistory test runtime", () => {
+  it("records entries and replays them like the undo shortcuts", async () => {
+    const slot = renderSlot({ component: HistoryProbe }, {});
+
+    const undoAvailable = () =>
+      !slot
+        .getByRole("button", { name: "Undo available" })
+        .hasAttribute("disabled");
+
+    expect(undoAvailable()).toBe(false);
+    fireEvent.click(slot.getByRole("button", { name: "Move" }));
+    expect(slot.inspection.experimental_actionHistory.undoLabels).toEqual([
+      "Move card",
+    ]);
+    expect(undoAvailable()).toBe(true);
+
+    await slot.inspection.experimental_actionHistory.undo();
+    expect(slot.getByText("at 0")).toBeTruthy();
+    expect(slot.experimental_actionHistory.redoLabels).toEqual(["Move card"]);
+    expect(undoAvailable()).toBe(false);
+
+    await slot.experimental_actionHistory.redo();
+    expect(slot.getByText("at 1")).toBeTruthy();
+  });
+});
+
 describe("experimental_ProviderModelPicker test runtime", () => {
   it("applies all execution edits as one controlled value", () => {
     const onChange = vi.fn();
+
     const view = () => (
       <ProviderModelPicker
         value={{
@@ -183,6 +242,7 @@ describe("experimental_ProviderModelPicker test runtime", () => {
         align="end"
       />
     );
+
     const picker = render(view());
 
     fireEvent.change(picker.getByRole("textbox", { name: "Provider ID" }), {
@@ -210,20 +270,21 @@ describe("experimental_ProviderModelPicker test runtime", () => {
       serviceTier: "fast",
     });
     expect(
-      picker.getByTestId("bb-provider-model-picker").dataset.routingKind,
+      picker.getByTestId("omnyo-provider-model-picker").dataset.routingKind,
     ).toBe("host");
     expect(
-      picker.getByTestId("bb-provider-model-picker").dataset.routingId,
+      picker.getByTestId("omnyo-provider-model-picker").dataset.routingId,
     ).toBe("host-test");
-    expect(picker.getByTestId("bb-provider-model-picker").dataset.align).toBe(
-      "end",
-    );
+    expect(
+      picker.getByTestId("omnyo-provider-model-picker").dataset.align,
+    ).toBe("end");
   });
 });
 
 describe("experimental_PermissionModePicker test runtime", () => {
   it("exposes the controlled mode, provider, and routing", () => {
     const onChange = vi.fn();
+
     const picker = render(
       <PermissionModePicker
         providerId="codex"
@@ -241,23 +302,24 @@ describe("experimental_PermissionModePicker test runtime", () => {
 
     expect(onChange).toHaveBeenCalledWith("full");
     expect(
-      picker.getByTestId("bb-permission-mode-picker").dataset.providerId,
+      picker.getByTestId("omnyo-permission-mode-picker").dataset.providerId,
     ).toBe("codex");
     expect(
-      picker.getByTestId("bb-permission-mode-picker").dataset.routingKind,
+      picker.getByTestId("omnyo-permission-mode-picker").dataset.routingKind,
     ).toBe("environment");
     expect(
-      picker.getByTestId("bb-permission-mode-picker").dataset.routingId,
+      picker.getByTestId("omnyo-permission-mode-picker").dataset.routingId,
     ).toBe("env-test");
-    expect(picker.getByTestId("bb-permission-mode-picker").dataset.align).toBe(
-      "start",
-    );
+    expect(
+      picker.getByTestId("omnyo-permission-mode-picker").dataset.align,
+    ).toBe("start");
   });
 });
 
 function Panel({ subPath }: PluginNavPanelProps) {
   const rpc = useRpc();
   const [items, setItems] = useState<string[] | null>(null);
+
   const refresh = () => {
     void rpc
       .call("listItems", { subPath })
@@ -268,9 +330,12 @@ function Panel({ subPath }: PluginNavPanelProps) {
         ]),
       );
   };
-  useEffect(refresh, []);
+
+  useEffect(refresh, [rpc, subPath]);
   useRealtime("items-changed", refresh);
+
   if (items === null) return <div>Loading…</div>;
+
   return (
     <div>
       {items.map((item) => (
@@ -282,11 +347,13 @@ function Panel({ subPath }: PluginNavPanelProps) {
 
 function RealtimeConnectionProbe() {
   const state = useRealtimeConnectionState();
+
   return <div>Realtime: {state}</div>;
 }
 
 function UrlNavigationProbe() {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   return (
     <div>
       <UrlLink href="https://example.com/from-link">Open link</UrlLink>
@@ -303,6 +370,12 @@ function UrlNavigationProbe() {
       >
         Open imperatively
       </button>
+      <button
+        type="button"
+        onClick={() => navigate.experimental_prefetchThreadOpen("thr_prefetch")}
+      >
+        Warm thread
+      </button>
     </div>
   );
 }
@@ -317,7 +390,8 @@ const fileIntent = {
 };
 
 function FileNavigationProbe() {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   return (
     <div>
       <FileLink {...fileIntent}>Open file</FileLink>
@@ -377,6 +451,7 @@ let capturedComposerVisualSetters: Pick<
   PluginComposerApi,
   "setTextEffect" | "setInputLock"
 > | null = null;
+
 let capturedComposerSetSelection: PluginComposerApi["setSelection"] | null =
   null;
 
@@ -403,6 +478,7 @@ function ComposerProbe() {
     setInputLock: composer.setInputLock,
   };
   capturedComposerSetSelection = composer.setSelection;
+
   return (
     <div>
       <span data-testid="composer-scope">{composer.scope.kind}</span>
@@ -534,6 +610,7 @@ describe("loadPluginApp", () => {
     function Overlay() {
       return <div>overlay</div>;
     }
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         builder.slots.experimental_appOverlay({
@@ -562,8 +639,128 @@ describe("loadPluginApp", () => {
     ).rejects.toThrow('slots.experimental_appOverlay: duplicate id "office"');
   });
 
+  it("captures and validates title bar center registrations", async () => {
+    function Island() {
+      return <div>island</div>;
+    }
+
+    const captured = await loadPluginApp(
+      definePluginApp((builder) => {
+        builder.slots.experimental_titleBarCenter({
+          id: "live",
+          component: Island,
+        });
+        builder.slots.experimental_titleBarCenter({
+          id: "queue_2",
+          component: Island,
+        });
+      }),
+    );
+
+    expect(captured.titleBarCenters).toEqual([
+      { id: "live", component: Island },
+      { id: "queue_2", component: Island },
+    ]);
+    await expect(
+      loadPluginApp(
+        definePluginApp((builder) => {
+          builder.slots.experimental_titleBarCenter({
+            id: "live",
+            component: Island,
+          });
+          builder.slots.experimental_titleBarCenter({
+            id: "live",
+            component: Island,
+          });
+        }),
+      ),
+    ).rejects.toThrow('slots.experimental_titleBarCenter: duplicate id "live"');
+    await expect(
+      loadPluginApp(
+        definePluginApp((builder) => {
+          builder.slots.experimental_titleBarCenter({
+            id: "live island",
+            component: Island,
+          });
+        }),
+      ),
+    ).rejects.toThrow('slots.experimental_titleBarCenter: "id" must match');
+  });
+
+  it("captures and validates thread companion registrations", async () => {
+    function Companion() {
+      return <div>companion</div>;
+    }
+
+    const captured = await loadPluginApp(
+      definePluginApp((builder) => {
+        builder.slots.experimental_threadCompanion({
+          id: "glance",
+          title: "Glance",
+          icon: "GridView",
+          component: Companion,
+        });
+      }),
+    );
+
+    expect(captured.threadCompanions).toEqual([
+      {
+        id: "glance",
+        title: "Glance",
+        icon: "GridView",
+        component: Companion,
+      },
+    ]);
+    await expect(
+      loadPluginApp(
+        definePluginApp((builder) => {
+          const registration = {
+            id: "glance",
+            title: "Glance",
+            icon: "GridView",
+            component: Companion,
+          };
+
+          builder.slots.experimental_threadCompanion(registration);
+          builder.slots.experimental_threadCompanion(registration);
+        }),
+      ),
+    ).rejects.toThrow(
+      'slots.experimental_threadCompanion: duplicate id "glance"',
+    );
+    await expect(
+      loadPluginApp(
+        definePluginApp((builder) => {
+          builder.slots.experimental_threadCompanion({
+            id: "glance",
+            title: "",
+            icon: "GridView",
+            component: Companion,
+          });
+        }),
+      ),
+    ).rejects.toThrow(
+      'slots.experimental_threadCompanion: "title" must be a non-empty string',
+    );
+    await expect(
+      loadPluginApp(
+        definePluginApp((builder) => {
+          builder.slots.experimental_threadCompanion({
+            id: "glance",
+            title: "Glance",
+            icon: "",
+            component: Companion,
+          });
+        }),
+      ),
+    ).rejects.toThrow(
+      'slots.experimental_threadCompanion: "icon" must be a non-empty string',
+    );
+  });
+
   it("captures and validates New thread panel action registrations", async () => {
     const run = () => {};
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         builder.slots.experimental_newThreadPanelAction({
@@ -609,6 +806,7 @@ describe("loadPluginApp", () => {
 
   it("captures, mounts, and exactly-once disposes content scripts in lifecycle order", async () => {
     const events: string[] = [];
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         for (const id of ["first", "second"] as const) {
@@ -622,6 +820,7 @@ describe("loadPluginApp", () => {
                 () => events.push(`${id}:abort`),
                 { once: true },
               );
+
               return () => {
                 events.push(`${id}:dispose`);
               };
@@ -635,10 +834,12 @@ describe("loadPluginApp", () => {
       "first",
       "second",
     ]);
+
     const mounted = await mountPluginContentScripts(captured, {
       pluginId: "demo",
       generation: 7,
     });
+
     expect(mounted.inspection.mountedIds).toEqual(["first", "second"]);
     expect(events).toEqual(["first:mount:demo:7", "second:mount:demo:7"]);
 
@@ -682,12 +883,13 @@ describe("loadPluginApp", () => {
       pluginId: "demo",
       experimental_copyToClipboard: async () => false,
     });
+
     expect(mounted.inspection.experimental_clipboardWrites).toEqual([
       { text: "plain", html: "<b>rich</b>" },
     ]);
-    await expect(
-      experimental_copyToClipboard({ text: "later" }),
-    ).resolves.toBe(false);
+    await expect(experimental_copyToClipboard({ text: "later" })).resolves.toBe(
+      false,
+    );
 
     const slot = renderSlot(captured.navPanels[0]!, { subPath: "" });
     await expect(
@@ -704,8 +906,63 @@ describe("loadPluginApp", () => {
     await mounted.lifecycle.dispose();
   });
 
+  it("models subtitle validation, clearing, stale setters, and older hosts", async () => {
+    let setter:
+      | NonNullable<
+          import("../../app-contract.js").PluginContentScriptContext["experimental_setThreadRowSubtitle"]
+        >
+      | undefined;
+
+    const captured = await loadPluginApp(
+      definePluginApp((builder) => {
+        builder.contentScripts.register({
+          id: "subtitle",
+          mount(context) {
+            setter = context.experimental_setThreadRowSubtitle;
+          },
+        });
+      }),
+    );
+
+    const mounted = await mountPluginContentScripts(captured, {
+      pluginId: "glance",
+    });
+
+    setter?.(" thr_one ", { text: "  Needs you:\n review  " });
+    expect(
+      mounted.inspection.experimental_getThreadRowSubtitle("thr_one"),
+    ).toEqual({ text: "Needs you: review" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setter?.("thr_one", { text: "x".repeat(141) });
+    setter?.("thr_one", { text: " " });
+    expect(mounted.inspection.experimental_threadRowSubtitleCalls).toHaveLength(
+      1,
+    );
+    expect(warn).toHaveBeenCalledTimes(2);
+    setter?.("thr_one", null);
+    expect(
+      mounted.inspection.experimental_getThreadRowSubtitle("thr_one"),
+    ).toBeNull();
+    setter?.("thr_one", { text: "Done" });
+    await mounted.lifecycle.dispose();
+    setter?.("thr_one", { text: "Stale" });
+    expect(
+      mounted.inspection.experimental_getThreadRowSubtitle("thr_one"),
+    ).toBeNull();
+
+    const older = await mountPluginContentScripts(captured, {
+      pluginId: "glance",
+      omitExperimentalThreadRowSubtitle: true,
+    });
+
+    expect(setter).toBeUndefined();
+    await older.lifecycle.dispose();
+    warn.mockRestore();
+  });
+
   it("models current-host thread-row statuses, validation, and lifecycle cleanup", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     let retainedSetter:
       | ((
           threadId: string,
@@ -716,6 +973,7 @@ describe("loadPluginApp", () => {
           } | null,
         ) => void)
       | undefined;
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         builder.contentScripts.register({
@@ -743,6 +1001,7 @@ describe("loadPluginApp", () => {
     const mounted = await mountPluginContentScripts(captured, {
       pluginId: "prompt-shaper",
     });
+
     expect(mounted.inspection.getThreadRowStatus("thr_source")).toEqual({
       icon: "AiContentGenerator01",
       label: "Improving draft",
@@ -765,6 +1024,7 @@ describe("loadPluginApp", () => {
     const unsafeSetter = retainedSetter as
       | ((threadId: unknown, status: unknown) => void)
       | undefined;
+
     unsafeSetter?.("thr_source", {
       icon: "   ",
       label: "Missing icon",
@@ -805,6 +1065,7 @@ describe("loadPluginApp", () => {
 
   it("can omit the experimental thread-row status API for compatibility tests", async () => {
     let setterWasAvailable = true;
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         builder.contentScripts.register({
@@ -820,6 +1081,7 @@ describe("loadPluginApp", () => {
       pluginId: "prompt-shaper",
       omitExperimentalThreadRowStatus: true,
     });
+
     expect(setterWasAvailable).toBe(false);
     expect(mounted.inspection.threadRowStatusCalls).toEqual([]);
     await mounted.lifecycle.dispose();
@@ -827,6 +1089,7 @@ describe("loadPluginApp", () => {
 
   it("rolls back earlier content scripts when a later mount rejects", async () => {
     const events: string[] = [];
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         builder.contentScripts.register({
@@ -836,6 +1099,7 @@ describe("loadPluginApp", () => {
               once: true,
             });
             events.push("first:mount");
+
             return () => {
               events.push("first:dispose");
             };
@@ -865,12 +1129,14 @@ describe("loadPluginApp", () => {
   it("simulates independent content-script instances for multiple app windows", async () => {
     const signals: AbortSignal[] = [];
     const cleanup = vi.fn();
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         builder.contentScripts.register({
           id: "window-instance",
           mount({ signal }) {
             signals.push(signal);
+
             return cleanup;
           },
         });
@@ -880,9 +1146,11 @@ describe("loadPluginApp", () => {
     const windowA = await mountPluginContentScripts(captured, {
       pluginId: "demo",
     });
+
     const windowB = await mountPluginContentScripts(captured, {
       pluginId: "demo",
     });
+
     await windowA.lifecycle.dispose();
     expect(signals[0]?.aborted).toBe(true);
     expect(signals[1]?.aborted).toBe(false);
@@ -953,6 +1221,7 @@ describe("loadPluginApp", () => {
     function SidebarAccessory() {
       return <span>12</span>;
     }
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         builder.slots.navPanel({
@@ -975,6 +1244,7 @@ describe("loadPluginApp", () => {
     function Navigation({ subPath }: PluginNavPanelProps) {
       return <span>{subPath}</span>;
     }
+
     const targetContract = {
       validate(
         value: import("../../json-value.js").JsonValue,
@@ -988,6 +1258,7 @@ describe("loadPluginApp", () => {
         );
       },
     };
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         builder.slots.navPanel({
@@ -1157,6 +1428,7 @@ describe("loadPluginApp", () => {
 
   it("mirrors host isolation for malformed composer regions and duplicate entries", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     const malformed = await loadPluginApp(
       definePluginApp((builder) => {
         builder.composer.customize({
@@ -1192,6 +1464,7 @@ describe("loadPluginApp", () => {
   it("does not reserve nested ids for malformed composer contributions", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     warning.mockClear();
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         builder.composer.customize({
@@ -1274,6 +1547,7 @@ describe("loadPluginApp", () => {
 
   it("captures experimental_codeFenceRenderer registrations and validates them like the host", async () => {
     const FenceRenderer = () => null;
+
     const captured = await loadPluginApp(
       definePluginApp((builder) => {
         builder.slots.experimental_codeFenceRenderer({
@@ -1288,6 +1562,7 @@ describe("loadPluginApp", () => {
         });
       }),
     );
+
     expect(captured.codeFenceRenderers).toEqual([
       {
         id: "generative-ui",
@@ -1302,6 +1577,7 @@ describe("loadPluginApp", () => {
     ]);
 
     const kind = "slots.experimental_codeFenceRenderer";
+
     const rejected: [string, Record<string, unknown>[]][] = [
       [
         `${kind}: "languages" must be a non-empty array`,
@@ -1338,6 +1614,7 @@ describe("loadPluginApp", () => {
         [{ id: "ui", languages: ["ui"], component: undefined }],
       ],
     ];
+
     for (const [message, registrations] of rejected) {
       await expect(
         loadPluginApp(
@@ -1404,6 +1681,7 @@ describe("loadPluginApp", () => {
             icon: () => null,
           });
         }
+
         // @ts-expect-error legacy plugin declaration
         builder.slots.experimental_providerIcon({
           providerId: "shared",
@@ -1411,6 +1689,7 @@ describe("loadPluginApp", () => {
         });
       }),
     );
+
     expect(
       captured.providerIcons.map(({ providerKind }) => providerKind),
     ).toEqual(["agent", "machine", "environment", "all"]);
@@ -1427,6 +1706,7 @@ describe("loadPluginApp", () => {
               providerId: "shared",
               icon: () => null,
             };
+
             Reflect.set(registration, "providerKind", providerKind);
             builder.slots.experimental_providerIcon(registration);
           }),
@@ -1445,6 +1725,7 @@ describe("loadPluginApp", () => {
         });
       }),
     );
+
     expect(captured.providerIcons).toHaveLength(1);
     expect(captured.providerIcons[0]?.providerId).toBe("acp-cursor");
     await expect(
@@ -1452,7 +1733,7 @@ describe("loadPluginApp", () => {
         definePluginApp((builder) => {
           builder.slots.experimental_providerIcon({
             providerKind: "agent",
-            providerId: "bb-plugin-x/codex",
+            providerId: "omnyo-plugin-x/codex",
             icon: () => null,
           });
         }),
@@ -1483,6 +1764,7 @@ describe("loadPluginApp", () => {
   it("invokes a captured messageAction run with a plugin-authored context", () => {
     const openPanel = (options: { actionId: string }) =>
       options.actionId === "panel";
+
     app.messageActions[0]!.run({
       threadId: "thr_main",
       message: {
@@ -1507,7 +1789,7 @@ describe("loadPluginApp", () => {
   it("renders the ThreadChat stub with recorded props inside a slot", () => {
     const chatPanel = app.navPanels.find((panel) => panel.id === "chat")!;
     const slot = renderSlot(chatPanel, { subPath: "thr_42" });
-    const stub = slot.getByTestId("bb-thread-chat");
+    const stub = slot.getByTestId("omnyo-thread-chat");
     expect(stub.getAttribute("data-thread-id")).toBe("thr_42");
     expect(stub.getAttribute("data-variant")).toBe("compact");
     expect(stub.getAttribute("data-layout")).toBe("document");
@@ -1520,10 +1802,10 @@ describe("loadPluginApp", () => {
     const chatPanel = app.navPanels.find((panel) => panel.id === "chat")!;
     const slot = renderSlot(chatPanel, { subPath: "thr_42" });
     expect(
-      slot.getByTestId("bb-thread-chat-leading-content").textContent,
+      slot.getByTestId("omnyo-thread-chat-leading-content").textContent,
     ).toContain("Replying to something earlier");
 
-    const action = slot.getByTestId("bb-thread-chat-action-send-to-main");
+    const action = slot.getByTestId("omnyo-thread-chat-action-send-to-main");
     expect(action.getAttribute("data-roles")).toBe("assistant");
     fireEvent.click(action);
     expect(messageActionRuns).toEqual([
@@ -1552,6 +1834,7 @@ describe("typed rpc test runtime", () => {
         },
       },
     );
+
     await slot.findByText("Item item-1");
     expect(slot.rpcCalls).toEqual([
       { method: "getItem", input: { id: "item-1" } },
@@ -1582,6 +1865,7 @@ describe("renderSlot", () => {
         },
       },
     );
+
     fireEvent.click(slot.getByRole("button", { name: "Create section" }));
     await slot.findByText("created sec_1");
     fireEvent.click(slot.getByRole("button", { name: "Pin without a fake" }));
@@ -1611,10 +1895,13 @@ describe("renderSlot", () => {
       {},
       { openUrl: () => true },
     );
+
     fireEvent.click(slot.getByRole("link", { name: "Open link" }));
+
     const explicitTargetLink = slot.getByRole("link", {
       name: "Open in explicit target",
     });
+
     expect(explicitTargetLink.getAttribute("target")).toBe("preview-pane");
     expect(explicitTargetLink.getAttribute("rel")).toBe(
       "nofollow noopener noreferrer",
@@ -1630,12 +1917,22 @@ describe("renderSlot", () => {
     ]);
   });
 
+  it("records the experimental thread-open prefetch navigation intent", () => {
+    const slot = renderSlot({ component: UrlNavigationProbe }, {});
+    fireEvent.click(slot.getByRole("button", { name: "Warm thread" }));
+    expect(slot.inspection.navigateCalls).toContainEqual({
+      method: "experimental_prefetchThreadOpen",
+      threadId: "thr_prefetch",
+    });
+  });
+
   it("exposes a scheme-safe href for file links", () => {
     const slot = renderSlot(
       { component: SchemeLikeFileLinkProbe },
       {},
       { openFilePreview: () => true },
     );
+
     const link = slot.getByRole("link", { name: "Open scheme-like file" });
     expect(link.getAttribute("href")).toBe("./vscode%3Afoo");
     fireEvent.click(link);
@@ -1660,6 +1957,7 @@ describe("renderSlot", () => {
       {},
       { openFilePreview: () => true },
     );
+
     const invalid = slot.getByText("Open malformed file");
     expect(
       slot.queryByRole("link", { name: "Open malformed file" }),
@@ -1675,6 +1973,7 @@ describe("renderSlot", () => {
       {},
       { openFilePreview: () => true },
     );
+
     const invalid = slot.getByText("Open malformed Unicode file");
     expect(
       slot.queryByRole("link", { name: "Open malformed Unicode file" }),
@@ -1693,6 +1992,7 @@ describe("renderSlot", () => {
         openFileExternally: () => true,
       },
     );
+
     fireEvent.click(slot.getByRole("link", { name: "Open file" }));
     fireEvent.click(slot.getByRole("button", { name: "Open file externally" }));
     expect(slot.inspection.navigateCalls).toEqual([
@@ -1743,6 +2043,7 @@ describe("renderSlot", () => {
       { projectId: null },
       { realtimeConnectionState: "connecting" },
     );
+
     await slot.findByText("Realtime: connecting");
 
     await slot.behavior.setRealtimeConnectionState("connected");
@@ -1754,11 +2055,13 @@ describe("renderSlot", () => {
 
   it("refreshes rendered RPC data after a realtime event", async () => {
     let listing = ["a.md"];
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "" },
       { rpc: { listItems: () => listing } },
     );
+
     await slot.findByText("a.md");
     expect(slot.rpcCalls).toEqual([
       { method: "listItems", input: { subPath: "" } },
@@ -1795,6 +2098,7 @@ describe("renderSlot", () => {
       },
       openWorkspaceFile: null,
     });
+
     expect(slot.getByTestId("file").textContent).toBe("demo.html");
     expect(slot.getByTestId("source").textContent).toBe(
       '::inline-vis{file="demo.html"}',
@@ -1811,6 +2115,7 @@ describe("renderSlot", () => {
         composer: { text: "seed" },
       },
     );
+
     const newThreadSlot = renderSlot(
       app.composerCustomizations[0]!.actions![0]!,
       {},
@@ -1819,6 +2124,7 @@ describe("renderSlot", () => {
         composer: { text: "new-thread seed" },
       },
     );
+
     const thread = within(threadSlot.container);
     const newThread = within(newThreadSlot.container);
 
@@ -1848,10 +2154,12 @@ describe("renderSlot", () => {
       threadId: "thr_1",
       queuedMessageId: "qmsg_1",
     } satisfies PluginComposerScope;
+
     const nextScope = {
       kind: "thread",
       threadId: "thr_2",
     } satisfies PluginComposerScope;
+
     const slot = renderSlot(
       app.composerCustomizations[0]!.actions![0]!,
       {},
@@ -1933,7 +2241,9 @@ describe("renderSlot", () => {
       {},
       { context: { projectId: "proj_1", threadId: "thr_1" } },
     );
+
     const setSelection = capturedComposerSetSelection;
+
     if (setSelection === null) throw new Error("setSelection not captured");
     expect(threadSlot.getByTestId("composer-selection").textContent).toBe("{}");
 
@@ -1976,6 +2286,7 @@ describe("renderSlot", () => {
       {},
       { context: { projectId: "proj_1" } },
     );
+
     await expect(
       capturedComposerSetSelection!({ projectId: "proj_2", model: "gpt-5" }),
     ).resolves.toEqual({ projectId: "proj_2", model: "gpt-5" });
@@ -2000,6 +2311,7 @@ describe("renderSlot", () => {
         },
       },
     );
+
     expect(queuedSlot.getByTestId("composer-selection").textContent).toBe(
       "null",
     );
@@ -2017,7 +2329,9 @@ describe("renderSlot", () => {
         {},
         { context: { projectId: "proj_1", threadId: "thr_1" } },
       );
+
       const setters = capturedComposerVisualSetters;
+
       if (setters === null)
         throw new Error("composer setters were not captured");
 
@@ -2049,7 +2363,9 @@ describe("renderSlot", () => {
       {},
       { context: { projectId: "proj_1", threadId: "thr_1" } },
     );
+
     const setters = capturedComposerVisualSetters;
+
     if (setters === null) throw new Error("composer setters were not captured");
 
     setters.setTextEffect({ className: "cleanup-effect" });
@@ -2072,8 +2388,10 @@ it("reacts to attachment-only updates and atomic replacement through the public 
     name: "spec.txt",
     sizeBytes: 12,
   } as const;
+
   function DraftActionsProbe() {
     const composer = useComposer();
+
     return (
       <>
         <output>
@@ -2117,6 +2435,7 @@ it("reacts to attachment-only updates and atomic replacement through the public 
       </>
     );
   }
+
   const slot = renderSlot({ component: DraftActionsProbe }, {});
   expect(slot.getByRole("status").textContent).toBe(":0:true");
   fireEvent.click(slot.getByRole("button", { name: "Attach file" }));
@@ -2136,6 +2455,7 @@ describe("thread actions menu fake", () => {
     parentThreadId: null,
     archivedAt: null,
     pinnedAt: null,
+    shelvedAt: null,
     sectionId: null,
     isUnread: false,
     status: "idle" as const,
@@ -2145,7 +2465,9 @@ describe("thread actions menu fake", () => {
   it("rejects a trigger that drops the props and ref it receives", async () => {
     const { experimental_ThreadActionsMenu: ThreadActionsMenu } =
       await import("../../app.js");
+
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
     function Probe() {
       return (
         <ThreadActionsMenu
@@ -2154,6 +2476,7 @@ describe("thread actions menu fake", () => {
         />
       );
     }
+
     expect(() => renderSlot({ component: Probe }, {})).toThrow(
       /must spread the props and ref/,
     );
@@ -2163,7 +2486,9 @@ describe("thread actions menu fake", () => {
   it("rejects a trigger that replaces the host's className", async () => {
     const { experimental_ThreadActionsMenu: ThreadActionsMenu } =
       await import("../../app.js");
+
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
     function Probe() {
       return (
         <ThreadActionsMenu
@@ -2176,6 +2501,7 @@ describe("thread actions menu fake", () => {
         />
       );
     }
+
     expect(() => renderSlot({ component: Probe }, {})).toThrow(
       /replaced the host's className/,
     );
@@ -2185,7 +2511,9 @@ describe("thread actions menu fake", () => {
   it("opens from a trigger that spreads its props", async () => {
     const { experimental_ThreadActionsMenu: ThreadActionsMenu } =
       await import("../../app.js");
+
     const run = vi.fn(async () => {});
+
     function Probe() {
       return (
         <ThreadActionsMenu
@@ -2198,20 +2526,22 @@ describe("thread actions menu fake", () => {
         />
       );
     }
+
     const slot = renderSlot(
       { component: Probe },
       {},
       {
         threadActions: () => [
           {
-            key: "bb--core/pin",
-            pluginId: "bb--core",
+            key: "omnyo--core/pin",
+            pluginId: "omnyo--core",
             group: "2_organize",
             action: { label: "Pin", icon: "Pin", run },
           },
         ],
       },
     );
+
     fireEvent.click(slot.getByRole("button", { name: "Thread actions" }));
     fireEvent.click(slot.getByRole("menuitem", { name: "Pin" }));
     expect(run).toHaveBeenCalledTimes(1);

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, type ReactNode } from "react";
-import type { ComposerView } from "@get-bb/plugin-sdk";
+import type { ComposerView } from "@omnyo/plugin-sdk";
 import { useAppCommandContext } from "@/components/commands/AppCommandProvider";
 import {
   PluginComposerHostProvider,
@@ -28,12 +28,16 @@ export function useComposerExtensionController({
 }: UseComposerExtensionControllerOptions): ComposerExtensionController {
   const focus = useCallback(() => {
     if (collapseIfFocused?.()) return;
+
     if (host !== null) {
       host.focus();
+
       return;
     }
+
     focusDefault();
   }, [collapseIfFocused, focusDefault, host]);
+
   useAppCommandContext("promptAvailable", true);
 
   return useMemo(() => ({ host, view, focus }), [focus, host, view]);

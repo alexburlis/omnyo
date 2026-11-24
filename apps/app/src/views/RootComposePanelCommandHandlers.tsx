@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useAppCommandHandler } from "@/components/commands/AppCommandProvider";
 import { useWindowRightPanel } from "@/components/layout/WindowRightPanelToggle";
-import { getBbDesktopInfo } from "@/lib/bb-desktop";
+import { getOmnyoDesktopInfo } from "@/lib/omnyo-desktop";
 
 interface RootComposePanelCommandHandlersProps {
   isFocused: boolean;
@@ -19,18 +19,23 @@ export function RootComposePanelCommandHandlers({
   useAppCommandHandler("panel.toggle", () => {
     if (!isFocused) return false;
     onToggle();
+
     return true;
   });
   useWindowRightPanel({ isOpen, enabled: isFocused });
   useAppCommandHandler("panel.close", () => {
     if (!isFocused) return false;
+
     return onClose();
   });
   useEffect(() => {
     if (!isFocused) return;
-    const desktopInfo = getBbDesktopInfo();
+    const desktopInfo = getOmnyoDesktopInfo();
+
     if (desktopInfo?.onCloseWindowRequest === undefined) return;
+
     return desktopInfo.onCloseWindowRequest(onClose);
   }, [isFocused, onClose]);
+
   return null;
 }

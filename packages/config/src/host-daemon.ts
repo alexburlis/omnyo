@@ -10,9 +10,14 @@ import {
   type LoadCommonConfigArgs,
 } from "./common.js";
 import {
-  BB_APP_URL_ENV,
-  BB_DEV_APP_PORT_ENV,
-  DEFAULT_BB_APP_URL,
+  OMNYO_APP_URL_ENV,
+  OMNYO_APP_VERSION_ENV,
+  OMNYO_DEV_APP_PORT_ENV,
+  OMNYO_SENTRY_DSN_ENV,
+  DEFAULT_OMNYO_APP_URL,
+  DEFAULT_OMNYO_APP_VERSION,
+  DEFAULT_OMNYO_SENTRY_DSN,
+  PUBLIC_BETA_COLLECTION_DISABLED,
 } from "./env-vars.js";
 import { assignIfDefined } from "./objects.js";
 import { loadHostDaemonPortValue } from "./ports.js";
@@ -21,13 +26,18 @@ import { validatePortNumber } from "./runtime.js";
 import { loadServerUrlValue } from "./server-url.js";
 
 interface HostDaemonConnectionConfig {
-  BB_APP_URL: string;
-  BB_DEV_APP_PORT?: number;
-  BB_HOST_DAEMON_PORT: number;
-  BB_SERVER_URL: string;
+  OMNYO_APP_URL: string;
+  OMNYO_DEV_APP_PORT?: number;
+  OMNYO_HOST_DAEMON_PORT: number;
+  OMNYO_SERVER_URL: string;
 }
 
 interface HostDaemonConfig extends CommonConfig, HostDaemonConnectionConfig {}
+
+interface HostDaemonErrorReportingConfig {
+  OMNYO_APP_VERSION: string;
+  OMNYO_SENTRY_DSN: string;
+}
 
 interface LoadHostDaemonConnectionConfigArgs extends EnvLoaderArgs {
   hostDaemonPort?: number;
@@ -52,7 +62,7 @@ function resolveHostDaemonPort(
 ): number {
   if (args.hostDaemonPort !== undefined) {
     return validatePortNumber({
-      name: "BB_HOST_DAEMON_PORT",
+      name: "OMNYO_HOST_DAEMON_PORT",
       value: args.hostDaemonPort,
     });
   }
@@ -64,42 +74,76 @@ export function loadHostDaemonConnectionConfig(
   args: LoadHostDaemonConnectionConfigArgs = {},
 ): HostDaemonConnectionConfig {
   const loader = resolveEnvLoader(args);
+
   const config: HostDaemonConnectionConfig = {
-    BB_APP_URL: validateOptionalUrl(
-      "BB_APP_URL",
+    OMNYO_APP_URL: validateOptionalUrl(
+      "OMNYO_APP_URL",
       readEnvVarWithDefault({
         context: loader.context,
-        defaultValue: DEFAULT_BB_APP_URL,
-        definition: BB_APP_URL_ENV,
+        defaultValue: DEFAULT_OMNYO_APP_URL,
+        definition: OMNYO_APP_URL_ENV,
         env: loader.env,
       }),
     ),
-    BB_HOST_DAEMON_PORT: resolveHostDaemonPort({
+    OMNYO_HOST_DAEMON_PORT: resolveHostDaemonPort({
       ...args,
       env: loader.env,
       homeDir: loader.context.homeDir,
       mode: loader.mode,
     }),
-    BB_SERVER_URL: loadServerUrlValue({
+    OMNYO_SERVER_URL: loadServerUrlValue({
       ...args,
       env: loader.env,
       homeDir: loader.context.homeDir,
       mode: loader.mode,
     }),
   };
+
   const devAppPort = readOptionalEnvVar({
     context: loader.context,
-    definition: BB_DEV_APP_PORT_ENV,
+    definition: OMNYO_DEV_APP_PORT_ENV,
     env: loader.env,
   });
 
   assignIfDefined({
-    key: "BB_DEV_APP_PORT",
+    key: "OMNYO_DEV_APP_PORT",
     target: config,
     value: devAppPort,
   });
 
   return config;
+}
+
+export function loadHostDaemonErrorReportingConfig(
+  args: EnvLoaderArgs = {},
+): HostDaemonErrorReportingConfig {
+  const loader = resolveEnvLoader(args);
+
+  const configuredAppVersion = readOptionalEnvVar({
+    context: loader.context,
+    definition: {
+      ...OMNYO_APP_VERSION_ENV,
+      parse: ({ value }) => value.trim(),
+    },
+    env: loader.env,
+  });
+
+  return {
+    OMNYO_APP_VERSION:
+      configuredAppVersion === undefined || configuredAppVersion === ""
+        ? DEFAULT_OMNYO_APP_VERSION
+        : configuredAppVersion,
+    OMNYO_SENTRY_DSN:
+      PUBLIC_BETA_COLLECTION_DISABLED ||
+      loader.env.OMNYO_DESKTOP_RELEASE_CHANNEL === "public-beta"
+        ? ""
+        : readEnvVarWithDefault({
+            context: loader.context,
+            defaultValue: DEFAULT_OMNYO_SENTRY_DSN,
+            definition: OMNYO_SENTRY_DSN_ENV,
+            env: loader.env,
+          }),
+  };
 }
 
 export function loadHostDaemonConfig(
@@ -116,9 +160,10 @@ export function loadHostDaemonStartConfig(
 ): HostDaemonStartConfig {
   if (args.dataDir === undefined) {
     const config = loadHostDaemonConfig(args);
+
     return {
       connectionConfig: config,
-      dataDir: config.BB_DATA_DIR,
+      dataDir: config.OMNYO_DATA_DIR,
     };
   }
 

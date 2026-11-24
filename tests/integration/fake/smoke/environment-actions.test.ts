@@ -31,6 +31,7 @@ describe.sequential("fake provider smoke environment integration", () => {
         harness,
         "Workspace Status Smoke",
       );
+
       const { environment } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -41,17 +42,20 @@ describe.sequential("fake provider smoke environment integration", () => {
 
       const status = await getEnvironmentStatus(harness.api, environment.id);
       const diff = await getEnvironmentDiff(harness.api, environment.id);
+
       const branches = await getEnvironmentBranches(
         harness.api,
         environment.id,
       );
 
       expect(status.outcome).toBe("available");
+
       if (status.outcome !== "available") {
         throw new Error(
           `Expected workspace status, received ${status.outcome}`,
         );
       }
+
       expect(status.workspace.workingTree.state).toBe("clean");
       expect(status.workspace.workingTree.hasUncommittedChanges).toBe(false);
       expect(typeof diff.diff).toBe("string");
@@ -64,6 +68,7 @@ describe.sequential("fake provider smoke environment integration", () => {
         harness,
         "Diff Pagination Smoke",
       );
+
       const { environment } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -73,6 +78,7 @@ describe.sequential("fake provider smoke environment integration", () => {
       });
 
       const workspacePath = environment.path;
+
       if (!workspacePath) {
         throw new Error("Workspace path was not assigned");
       }
@@ -84,9 +90,11 @@ describe.sequential("fake provider smoke environment integration", () => {
 
       const files = await getEnvironmentDiffFiles(harness.api, environment.id);
       expect(files.outcome).toBe("available");
+
       if (files.outcome !== "available") {
         throw new Error(`Expected diff files, received ${files.outcome}`);
       }
+
       const entry = files.files.find((file) => file.path === "feature.ts");
       expect(entry).toBeDefined();
       expect(entry?.loadMode).toBe("auto");
@@ -97,10 +105,13 @@ describe.sequential("fake provider smoke environment integration", () => {
       const patch = await getEnvironmentDiffPatch(harness.api, environment.id, [
         "feature.ts",
       ]);
+
       expect(patch.outcome).toBe("available");
+
       if (patch.outcome !== "available") {
         throw new Error(`Expected diff patch, received ${patch.outcome}`);
       }
+
       expect(patch.patches).toHaveLength(1);
       expect(patch.patches[0]?.path).toBe("feature.ts");
       expect(patch.patches[0]?.patch).toContain(
@@ -114,6 +125,7 @@ describe.sequential("fake provider smoke environment integration", () => {
         harness,
         "Workspace Commit Smoke",
       );
+
       const { environment } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -123,6 +135,7 @@ describe.sequential("fake provider smoke environment integration", () => {
       });
 
       const workspacePath = environment.path;
+
       if (!workspacePath) {
         throw new Error("Workspace path was not assigned");
       }
@@ -136,12 +149,15 @@ describe.sequential("fake provider smoke environment integration", () => {
         harness.api,
         environment.id,
       );
+
       expect(dirtyStatus.outcome).toBe("available");
+
       if (dirtyStatus.outcome !== "available") {
         throw new Error(
           `Expected dirty workspace status, received ${dirtyStatus.outcome}`,
         );
       }
+
       expect(dirtyStatus.workspace.workingTree.hasUncommittedChanges).toBe(
         true,
       );
@@ -149,36 +165,44 @@ describe.sequential("fake provider smoke environment integration", () => {
       const result = await runEnvironmentAction(harness.api, environment.id, {
         action: "commit",
       });
+
       expect(result.action).toBe("commit");
+
       if (result.action !== "commit") {
         throw new Error(
           `Expected commit action result, received ${result.action}`,
         );
       }
+
       expect(result.commitSha).toBeTruthy();
 
       const cleanStatus = await getEnvironmentStatus(
         harness.api,
         environment.id,
       );
+
       expect(cleanStatus.outcome).toBe("available");
+
       if (cleanStatus.outcome !== "available") {
         throw new Error(
           `Expected clean workspace status, received ${cleanStatus.outcome}`,
         );
       }
+
       expect(cleanStatus.workspace.workingTree.state).toBe("clean");
 
       const subject = await runGit({
         args: ["log", "-1", "--format=%s"],
         cwd: workspacePath,
       });
-      expect(subject.trim()).toBe("bb: automated commit");
+
+      expect(subject.trim()).toBe("omnyo: automated commit");
     }));
 
   it("archives and unarchives a thread, blocking work while archived", () =>
     withHarness(async (harness) => {
       const project = await createProjectFixture(harness, "Archive Smoke");
+
       const { thread } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -198,6 +222,7 @@ describe.sequential("fake provider smoke environment integration", () => {
           mode: "auto",
         },
       });
+
       expect(archivedSendResponse.status).toBe(409);
 
       await unarchiveThread(harness.api, thread.id);
@@ -221,6 +246,7 @@ describe.sequential("fake provider smoke environment integration", () => {
   it("deletes a thread after turn history has been created", () =>
     withHarness(async (harness) => {
       const project = await createProjectFixture(harness, "Delete Smoke");
+
       const { thread } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {

@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { Icon, preloadExtendedIcons } from "@bb/shared-ui/icon";
-import { setPluginAssetIcons } from "@bb/shared-ui/icon-registry";
-import { collectPluginAppRegistrations } from "@get-bb/plugin-sdk/internal/plugin-app-collector";
-import type { ExperimentalIconRegistration } from "@get-bb/plugin-sdk/app";
+import { Icon, preloadExtendedIcons } from "@omnyo/shared-ui/icon";
+import { setPluginAssetIcons } from "@omnyo/shared-ui/icon-registry";
+import { collectPluginAppRegistrations } from "@omnyo/plugin-sdk/internal/plugin-app-collector";
+import type { ExperimentalIconRegistration } from "@omnyo/plugin-sdk/app";
 import {
   beginPluginSlotBatch,
   getPluginSlotSnapshot,
@@ -35,7 +35,7 @@ function OtherMark() {
 
 function registrations(...icons: ExperimentalIconRegistration[]) {
   return collectPluginAppRegistrations({
-    __bbPluginApp: true,
+    __omnyoPluginApp: true,
     setup(app) {
       for (const icon of icons) app.experimental_icons.register(icon);
     },
@@ -52,12 +52,14 @@ afterEach(() => {
 
 it("updates mounted host and SDK icons when plugins load, reload, and unload", () => {
   const SdkIcon = pluginSdkAppImplementation.experimental_Icon;
+
   const view = render(
     <>
       <Icon name="acme/receipt" fallback="Check" />
       <SdkIcon name="acme/receipt" fallback="Check" />
     </>,
   );
+
   expect(view.container.querySelectorAll('[data-icon="Check"]')).toHaveLength(
     2,
   );
@@ -83,12 +85,14 @@ it("updates mounted host and SDK icons when plugins load, reload, and unload", (
 
 it("overrides core and extended icons and restores them on removal", async () => {
   await preloadExtendedIcons();
+
   const view = render(
     <>
       <Icon name="Check" />
       <Icon name="FileText" />
     </>,
   );
+
   act(() =>
     setPluginSlotRegistrations(
       "overrides",
@@ -137,6 +141,7 @@ it("uses registered fallbacks and terminates missing and recursive references", 
       { name: "loop", component: Recursive },
     ),
   );
+
   const view = render(
     <>
       <Icon name="missing" fallback="spare" />
@@ -144,6 +149,7 @@ it("uses registered fallbacks and terminates missing and recursive references", 
       <Icon name="loop" />
     </>,
   );
+
   expect(view.container.querySelector('[data-mark="one"]')).not.toBeNull();
   expect(view.container.querySelectorAll('svg[data-icon="Zap"]')).toHaveLength(
     2,
@@ -168,16 +174,20 @@ it("rejects invalid registrations before replacing a live plugin", () => {
 
 it("contains a broken icon and recovers after its plugin replaces it", () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+
   const Broken = () => {
     throw new Error("broken artwork");
   };
+
   setPluginSlotRegistrations(
     "broken",
     registrations({ name: "broken/mark", component: Broken }),
   );
+
   const view = render(
     <Icon name="broken/mark" aria-label="Example" className="size-4" />,
   );
+
   expect(view.container.querySelector('svg[data-icon="Zap"]')).not.toBeNull();
   act(() =>
     setPluginSlotRegistrations(
@@ -199,9 +209,11 @@ it("defers icon notifications until the slot batch commits, even when a render r
     "batch",
     registrations({ name: "batch/icon", component: Mark }),
   );
+
   function ReadPendingSlots() {
     return <span>{getPluginSlotSnapshot().icons.length}</span>;
   }
+
   render(<ReadPendingSlots />);
   expect(error).not.toHaveBeenCalled();
   expect(icons.container.querySelector("[data-mark]")).toBeNull();
@@ -211,14 +223,18 @@ it("defers icon notifications until the slot batch commits, even when a render r
 
 it("remounts plugin artwork on a new generation even when the component function is unchanged", () => {
   let mounts = 0;
+
   function StatefulMark() {
     const [mount] = useState(() => ++mounts);
+
     return <svg data-mount={mount} />;
   }
+
   const registration = registrations({
     name: "stateful",
     component: StatefulMark,
   });
+
   setPluginSlotRegistrations("stateful", registration);
   const view = render(<Icon name="stateful" />);
   expect(view.container.querySelector("svg")?.getAttribute("data-mount")).toBe(
@@ -272,12 +288,14 @@ it.each(["/acme.svg", null])(
         ],
       ]),
     );
+
     const resource = {
       kind: "plugin",
       pluginId: "acme",
       itemId: "receipt:1",
       label: "Receipt",
     } as const;
+
     const view = render(<PromptMentionIcon resource={resource} />);
     const branding = view.container.innerHTML;
     expect(branding).not.toBe("");

@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { ThreadListEntry, ThreadWithRuntime } from "@bb/domain";
-import { makeThreadWithRuntime as makeThreadWithRuntimeFixture } from "@bb/test-helpers/domain-fixtures";
+import type { ThreadListEntry, ThreadWithRuntime } from "@omnyo/domain";
+import { makeThreadWithRuntime as makeThreadWithRuntimeFixture } from "@omnyo/test-helpers/domain-fixtures";
 import type {
   SidebarBootstrapResponse,
   ThreadResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
-import { makeThreadListEntry as makeThreadListEntryFixture } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry as makeThreadListEntryFixture } from "@omnyo/test-helpers/domain-fixtures";
 import { makeThreadResponse as makeThreadResponseFixture } from "@/test/fixtures/thread-responses";
 import {
   makeProjectWithThreadsResponse,
@@ -21,10 +21,13 @@ import {
   threadListQueryKey,
   threadQueryKey,
 } from "../queries/query-keys";
-import { useUpdateThread } from "./thread-state-mutations";
+import {
+  unarchiveThreadsInOrder,
+  useUpdateThread,
+} from "./thread-state-mutations";
 
 vi.mock("@/lib/sdk", () => ({
-  sdk: { threads: { unpin: vi.fn(), update: vi.fn() } },
+  sdk: { threads: { unarchive: vi.fn(), unpin: vi.fn(), update: vi.fn() } },
 }));
 
 function makeThreadWithRuntime(
@@ -101,10 +104,12 @@ describe("thread state mutations", () => {
       const threadId = "thread-1";
       const thread = makeThreadWithRuntime({ id: threadId, [field]: before });
       const listEntry = makeThreadListEntry({ id: threadId, [field]: before });
+
       const threadListKey = threadListQueryKey({
         archived: false,
         projectId: "project-1",
       });
+
       let resolveUpdate: (thread: ThreadResponse) => void = () => {};
 
       queryClient.setQueryData(threadQueryKey(threadId), thread);
@@ -159,4 +164,58 @@ describe("thread state mutations", () => {
       });
     },
   );
+
+  it("shows every unarchived thread at once and rolls back only the failed and unsent ones", async () => {
+    const { queryClient } = createQueryClientTestHarness();
+    const archivedAt = 5;
+
+    const [first, second, third] = ["thread-a", "thread-b", "thread-c"].map(
+      (id) => makeThreadListEntry({ id, archivedAt }),
+    );
+
+    if (!first || !second || !third) throw new Error("Expected threads");
+    const archivedKey = threadListQueryKey({ archived: true });
+    queryClient.setQueryData(archivedKey, [first, second, third]);
+    queryClient.setQueryData(
+      sidebarNavigationQueryKey(),
+      makeSidebarNavigation([]),
+    );
+
+    const sidebarIds = () =>
+      queryClient
+        .getQueryData<SidebarBootstrapResponse>(sidebarNavigationQueryKey())
+        ?.projects[0]?.threads.map((thread) => thread.id);
+
+    let rejectSecond: () => void = () => {};
+
+    vi.mocked(sdk.threads.unarchive)
+      .mockResolvedValueOnce({ ok: true })
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectSecond = () => reject(new Error("offline"));
+          }),
+      );
+
+    const restoring = unarchiveThreadsInOrder({
+      queryClient,
+      threadIds: [first.id, second.id, third.id],
+    });
+
+    const failure = expect(restoring).rejects.toThrow("offline");
+
+    await waitFor(() => expect(sdk.threads.unarchive).toHaveBeenCalledTimes(2));
+    expect(sidebarIds()).toEqual([first.id, second.id, third.id]);
+
+    rejectSecond();
+    await failure;
+
+    expect(sidebarIds()).toEqual([first.id]);
+    expect(
+      queryClient
+        .getQueryData<ThreadListEntry[]>(archivedKey)
+        ?.map((thread) => thread.id),
+    ).toEqual([second.id, third.id]);
+    expect(sdk.threads.unarchive).toHaveBeenCalledTimes(2);
+  });
 });

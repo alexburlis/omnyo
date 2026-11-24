@@ -16,6 +16,7 @@ export function pluginDetailKey({
 
 export function parsePluginDetailKey(detailKey: string): PluginDetailTarget {
   const separator = detailKey.indexOf("/");
+
   return separator < 0
     ? { pluginId: detailKey, listing: null }
     : {
@@ -40,8 +41,10 @@ export function pluginDetailLocation(
 ): { pathname: string; search: string } {
   const { pluginId, listing } = parsePluginDetailKey(detailKey);
   const params = new URLSearchParams(search);
+
   if (listing === null) params.delete(LISTING_SEARCH_PARAM);
   else params.set(LISTING_SEARCH_PARAM, listing);
+
   return {
     pathname: getPluginDetailRoutePath({ pluginId }),
     search: params.toString(),
@@ -51,5 +54,6 @@ export function pluginDetailLocation(
 export function withoutPluginListing(search: string): string {
   const params = new URLSearchParams(search);
   params.delete(LISTING_SEARCH_PARAM);
+
   return params.toString();
 }

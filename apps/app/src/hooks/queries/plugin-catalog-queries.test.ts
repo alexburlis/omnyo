@@ -16,10 +16,13 @@ function fetchReturning(body: unknown, status = 200): typeof fetch {
 function recordingFetch(body: unknown, status = 200) {
   const calls: { url: string; init: RequestInit | undefined }[] = [];
   const impl = fetchReturning(body, status);
+
   const fetchImpl: typeof fetch = async (input, init) => {
     calls.push({ url: String(input), init });
+
     return impl(input, init);
   };
+
   return { fetchImpl, calls };
 }
 
@@ -40,7 +43,7 @@ const UPDATES_RESULTS = [
     outcome: "incompatible",
     devMode: true,
     installed: { version: "1.8.3", display: "1.8.3" },
-    blocked: { version: "1.9.0", reasons: ["requires bb >= 0.15"] },
+    blocked: { version: "1.9.0", reasons: ["requires Omnyo >= 0.15"] },
   },
 ];
 
@@ -50,13 +53,14 @@ describe("checkPluginUpdates", () => {
       fetchReturning({ results: UPDATES_RESULTS }),
       { id: "updatable-plugin" },
     );
+
     expect(entries.map((entry) => entry.outcome)).toEqual([
       "current",
       "update-available",
       "incompatible",
     ]);
     expect(entries[1]?.candidate?.version).toBe("1.7.0");
-    expect(entries[2]?.blocked?.reasons).toEqual(["requires bb >= 0.15"]);
+    expect(entries[2]?.blocked?.reasons).toEqual(["requires Omnyo >= 0.15"]);
   });
 
   it("throws on a malformed 2xx body", async () => {
@@ -74,6 +78,7 @@ describe("applyPluginUpdate", () => {
       to: { version: "1.7.0", display: "1.7.0" },
       outcome: "updated",
     });
+
     const result = await applyPluginUpdate(fetchImpl, "linear");
     expect(result).toEqual({
       applied: true,
@@ -115,7 +120,7 @@ describe("plugin catalog queries", () => {
             installed: false,
             conflictingInstallSource: null,
             compatible: false,
-            incompatibleReason: "requires bb >= 0.15",
+            incompatibleReason: "requires Omnyo >= 0.15",
           },
         ],
         collections: [
@@ -128,6 +133,7 @@ describe("plugin catalog queries", () => {
       }),
       "todo",
     );
+
     expect(data).toEqual({
       entries: [
         {
@@ -158,7 +164,7 @@ describe("plugin catalog queries", () => {
           installedByDefault: false,
           installs: null,
           compatible: false,
-          incompatibleReason: "requires bb >= 0.15",
+          incompatibleReason: "requires Omnyo >= 0.15",
         },
       ],
       collections: [

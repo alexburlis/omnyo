@@ -1,8 +1,8 @@
 /**
- * The Claude Code task-tool vocabulary as `@get-bb/plugin-sdk/provider-bridge`
+ * The Claude Code task-tool vocabulary as `@omnyo/plugin-sdk/provider-bridge`
  * published it through 0.4.15: the four tool names and the union of their
  * outputs. Core shared these with the claude-code runtime when that runtime
- * lived in bb; the claude-code plugin now owns its own task vocabulary and
+ * lived in Omnyo; the claude-code plugin now owns its own task vocabulary and
  * nothing in this repository reads these. They stay exactly as shipped so a
  * bridge compiled against an earlier SDK still resolves them, and go with
  * the next major version (docs/api_to_audit.md, "Scheduled removals").
@@ -61,4 +61,5 @@ export const claudeTaskToolOutputSchema = z.union([
   claudeTaskListOutputSchema,
   claudeTaskUpdateOutputSchema,
 ]);
+
 export type ClaudeTaskToolOutput = z.infer<typeof claudeTaskToolOutputSchema>;

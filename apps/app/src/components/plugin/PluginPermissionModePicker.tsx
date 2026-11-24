@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import type { ExperimentalPermissionModePickerProps } from "@get-bb/plugin-sdk";
+import type { ExperimentalPermissionModePickerProps } from "@omnyo/plugin-sdk";
 import { PermissionModePicker } from "@/components/pickers/PermissionModePicker";
 import { useThreadCreationOptions } from "@/hooks/useThreadCreationOptions";
 import { resolvePluginExecutionRouting } from "./plugin-execution-routing";
@@ -17,7 +17,9 @@ export function PluginPermissionModePicker({
     () => resolvePluginExecutionRouting(routing),
     [routing],
   );
+
   const controlledKey = `${resolvedRouting.key}\0${providerId}\0${value}`;
+
   const controller = useThreadCreationOptions({
     scope: "component-local",
     initialProviderId: providerId,
@@ -25,6 +27,7 @@ export function PluginPermissionModePicker({
     resetKey: controlledKey,
     resolveProviderRouting: () => resolvedRouting.query,
   });
+
   const providerMatches =
     providerId.length > 0 && controller.selectedProviderId === providerId;
 

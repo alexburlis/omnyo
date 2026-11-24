@@ -1,4 +1,4 @@
-import type { HostDaemonCommandResult } from "@bb/host-daemon-contract";
+import type { HostDaemonCommandResult } from "@omnyo/host-daemon-contract";
 import {
   CommandDispatchError,
   type CommandDispatchOptions,
@@ -24,5 +24,6 @@ export async function resolveInteractiveRequest(
     resolution: command.resolution,
     threadId: command.threadId,
   });
+
   return {};
 }

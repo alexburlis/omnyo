@@ -11,13 +11,15 @@ import {
 } from "./environment-lifecycle-script.js";
 
 const directories: string[] = [];
+
 async function workspace(
   kind: "setup" | "teardown",
   script: string,
 ): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "bb-core-hooks-"));
+  const directory = await mkdtemp(join(tmpdir(), "omnyo-core-hooks-"));
   directories.push(directory);
-  await writeFile(join(directory, `.bb-env-${kind}.sh`), script);
+  await writeFile(join(directory, `.omnyo-env-${kind}.sh`), script);
+
   return directory;
 }
 
@@ -39,8 +41,10 @@ describe("core environment scripts", () => {
         kind,
         'cat >/dev/null\nprintf complete > marker\nprintf "\\342"\nsleep 0.05\nprintf "\\234\\223\\n"\nprintf "done\\n" >&2\n',
       );
+
       const output: string[] = [];
       const run = kind === "setup" ? runSetupScript : runTeardownScript;
+
       const result = await run({
         workspacePath,
         timeoutMs: 1000,
@@ -50,6 +54,7 @@ describe("core environment scripts", () => {
             : { PATH: "/usr/bin:/bin" },
         onProgress: (entry) => output.push(entry.text),
       });
+
       expect(result).toEqual({ ran: true });
       expect(await readFile(join(workspacePath, "marker"), "utf8")).toBe(
         "complete",
@@ -64,6 +69,7 @@ describe("core environment scripts", () => {
       "setup",
       "{ pwd -W 2>/dev/null || pwd; } > marker\nprintf 'first\\rsecond\\n'\necho stderr >&2\n",
     );
+
     const output: string[] = [];
     await runSetupScript({
       workspacePath,
@@ -77,7 +83,7 @@ describe("core environment scripts", () => {
     ).toBe(await realpath(workspacePath));
     expect(output).toContain("second");
     expect(output).toContain("stderr");
-    expect(output).toContain("Running .bb-env-setup.sh");
+    expect(output).toContain("Running .omnyo-env-setup.sh");
   });
 
   it("surfaces output before setup failure", async () => {
@@ -85,6 +91,7 @@ describe("core environment scripts", () => {
       "setup",
       "echo failed-details >&2\nexit 7\n",
     );
+
     const output: string[] = [];
     await expect(
       runSetupScript({
@@ -103,13 +110,16 @@ describe("core environment scripts", () => {
         kind,
         "echo before-timeout\nsleep 120\n",
       );
+
       const output: string[] = [];
       const run = kind === "setup" ? runSetupScript : runTeardownScript;
+
       const result = run({
         workspacePath,
         timeoutMs: 100,
         onProgress: (entry) => output.push(entry.text),
       });
+
       if (kind === "setup")
         await expect(result).rejects.toThrow("timed out after 100ms");
       else {
@@ -124,6 +134,7 @@ describe("core environment scripts", () => {
       "teardown",
       "echo teardown-details\nexit 9\n",
     );
+
     const output: string[] = [];
     await expect(
       runTeardownScript({
@@ -169,6 +180,7 @@ describe("core environment scripts", () => {
           "",
         ].join("\n"),
       );
+
       const controller = new AbortController();
       let pids: number[] = [];
       await expect(
@@ -184,14 +196,17 @@ describe("core environment scripts", () => {
         }),
       ).rejects.toThrow("cancelled");
       expect(pids).toHaveLength(2);
+
       const alive = pids.filter((pid) => {
         try {
           process.kill(pid, 0);
+
           return true;
         } catch {
           return false;
         }
       });
+
       expect(alive).toEqual([]);
     },
     20_000,
@@ -199,27 +214,27 @@ describe("core environment scripts", () => {
 
   it("accepts a stopped script only when its whole process tree is confirmed gone", async () => {
     await expect(
-      assertScriptProcessTreeStopped(undefined, ".bb-env-setup.sh"),
+      assertScriptProcessTreeStopped(undefined, ".omnyo-env-setup.sh"),
     ).resolves.toBeUndefined();
     await expect(
       assertScriptProcessTreeStopped(
         Promise.resolve({ treeTermination: "confirmed" }),
-        ".bb-env-setup.sh",
+        ".omnyo-env-setup.sh",
       ),
     ).resolves.toBeUndefined();
     await expect(
       assertScriptProcessTreeStopped(
         Promise.resolve({ treeTermination: "unverified" }),
-        ".bb-env-setup.sh",
+        ".omnyo-env-setup.sh",
       ),
     ).rejects.toBeInstanceOf(LifecycleScriptTerminationUnverifiedError);
     await expect(
       assertScriptProcessTreeStopped(
         Promise.reject(new Error("Process did not exit after termination")),
-        ".bb-env-teardown.sh",
+        ".omnyo-env-teardown.sh",
       ),
     ).rejects.toThrow(
-      ".bb-env-teardown.sh was stopped, but bb could not confirm that all of its processes exited",
+      ".omnyo-env-teardown.sh was stopped, but Omnyo could not confirm that all of its processes exited",
     );
   });
 
@@ -227,15 +242,15 @@ describe("core environment scripts", () => {
     expect(
       buildLifecycleScriptCommand({
         kind: "setup",
-        scriptName: ".bb-env-setup.sh",
+        scriptName: ".omnyo-env-setup.sh",
         platform: "win32",
-        scriptPath: "C:\\src\\repo\\.bb-env-setup.sh",
+        scriptPath: "C:\\src\\repo\\.omnyo-env-setup.sh",
         windowsBashPath: "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
       }),
     ).toEqual({
       command: "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
-      args: ["C:\\src\\repo\\.bb-env-setup.sh"],
-      text: "bash .bb-env-setup.sh",
+      args: ["C:\\src\\repo\\.omnyo-env-setup.sh"],
+      text: "bash .omnyo-env-setup.sh",
       pathPrefix: ["C:\\Program Files\\Git\\usr\\bin"],
     });
   });
@@ -244,12 +259,12 @@ describe("core environment scripts", () => {
     expect(() =>
       buildLifecycleScriptCommand({
         kind: "teardown",
-        scriptName: ".bb-env-teardown.sh",
+        scriptName: ".omnyo-env-teardown.sh",
         platform: "win32",
-        scriptPath: "C:\\src\\repo\\.bb-env-teardown.sh",
+        scriptPath: "C:\\src\\repo\\.omnyo-env-teardown.sh",
         windowsBashPath: null,
       }),
-    ).toThrow(".bb-env-teardown.sh needs Git for Windows");
+    ).toThrow(".omnyo-env-teardown.sh needs Git for Windows");
   });
 
   it("skips absent scripts", async () => {

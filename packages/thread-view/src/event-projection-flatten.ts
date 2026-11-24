@@ -9,11 +9,14 @@ export function getProjectionEntryMessages(
   if (entry.kind === "projected-message") {
     return [entry.message];
   }
+
   if (entry.turn.messages) {
     return entry.turn.messages;
   }
+
   if (entry.turn.terminalMessage) {
     return [entry.turn.terminalMessage];
   }
+
   return [];
 }

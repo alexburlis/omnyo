@@ -8,9 +8,11 @@ import {
 describe("shell command bus", () => {
   it("delivers a command to the live WebView", () => {
     const seen: ShellCommand[] = [];
+
     const unsubscribe = subscribeToShellCommands((command) =>
       seen.push(command),
     );
+
     expect(sendShellCommand({ kind: "reload" })).toBe(true);
     expect(seen).toEqual([{ kind: "reload" }]);
     unsubscribe();

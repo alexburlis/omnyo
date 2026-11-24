@@ -17,6 +17,7 @@ import {
   AppShellRightPanel,
   AppShellWireframe,
   CommandPaletteWireframe,
+  ResponsiveDrawerWireframe,
   ComposeScreenWireframe,
   RealComposerAnnotated,
   SettingsWireframe,
@@ -56,6 +57,7 @@ describe("guide fixture boundaries", () => {
     const fixtures: Record<string, ReactNode[]> = {
       "app-shell": [createElement(AppShellWireframe)],
       "command-palette": [createElement(CommandPaletteWireframe)],
+      "compact-drawers": [createElement(ResponsiveDrawerWireframe)],
       composer: [createElement(RealComposerAnnotated)],
       home: [
         createElement(ComposeScreenWireframe),
@@ -64,16 +66,20 @@ describe("guide fixture boundaries", () => {
       settings: [createElement(SettingsWireframe)],
       extensions: [createElement(ExtensionsPluginPageWireframe)],
     };
+
     const visualGroups = SURFACE_GROUPS.filter(
       (group) => group.id !== "headless",
     );
+
     expect(visualGroups.map((group) => group.id).sort()).toEqual(
       Object.keys(fixtures).sort(),
     );
+
     for (const group of visualGroups) {
       const markup = fixtures[group.id]!.map((node) =>
         renderWireframe(node),
       ).join("");
+
       expect(guideSurfaceIds(markup), group.id).toEqual(
         group.surfaces.map((surface) => surface.id).sort(),
       );
@@ -87,6 +93,7 @@ describe("guide fixture boundaries", () => {
     ] as const) {
       const contract = anatomy.surfaceFixtures[id];
       const markup = renderWireframe(createElement(component));
+
       for (const label of contract.labels.anchor)
         expect(markup).toContain(label);
     }
@@ -97,7 +104,7 @@ describe("guide fixture boundaries", () => {
 
     expect(
       markup.match(/data-guide-responsive-strategy="scale-together"/g),
-    ).toHaveLength(6);
+    ).toHaveLength(7);
     expect(
       markup.match(/data-guide-responsive-strategy="reflow"/g),
     ).toHaveLength(1);
@@ -113,9 +120,11 @@ describe("guide fixture boundaries", () => {
   it("keeps annotation chips legible while the fixture shrinks under them", () => {
     expect(annotationChipCounterScale(0.5)).toBe(2);
     expect(annotationChipCounterScale(0.8)).toBeCloseTo(1.25, 10);
+
     for (const scale of [0.5, 0.6, 0.8, 0.95]) {
       expect(scale * annotationChipCounterScale(scale)).toBeCloseTo(1, 10);
     }
+
     expect(annotationChipCounterScale(1)).toBe(1);
     expect(annotationChipCounterScale(MAX_FIXTURE_SCALE)).toBe(1);
     expect(annotationChipCounterScale(0.2)).toBe(MAX_CHIP_COUNTER_SCALE);
@@ -173,10 +182,12 @@ describe("guide fixture boundaries", () => {
         onTabSelect: vi.fn(),
       }),
     );
+
     const tabStrip = panelMarkup.slice(
       0,
       panelMarkup.indexOf("data-guide-tab-body="),
     );
+
     const appMarkup = renderWireframe(createElement(AppShellWireframe));
 
     expect(tabStrip).toContain("h-12 items-center");
@@ -184,6 +195,7 @@ describe("guide fixture boundaries", () => {
     expect(tabStrip).not.toContain("items-end");
     expect(tabStrip).not.toContain("pb-2");
     expect(tabStrip).not.toContain("data-guide-badge=");
+
     for (const id of [
       "browser-toolbar",
       "thread-panel",
@@ -196,18 +208,20 @@ describe("guide fixture boundaries", () => {
         ),
       );
     }
+
     expect(appMarkup).not.toContain(
       'data-guide-annotation-layer="right-panel-tabs"',
     );
   });
 
-  it("mirrors bb's fixed Info/Diff tabs before plugin-owned content tabs", () => {
+  it("mirrors Omnyo's fixed Info/Diff tabs before plugin-owned content tabs", () => {
     const markup = renderWireframe(
       createElement(AppShellRightPanel, {
         activeTab: "thread-panel",
         onTabSelect: vi.fn(),
       }),
     );
+
     const tabStrip = markup.slice(0, markup.indexOf("data-guide-tab-body="));
 
     expect(tabStrip).toMatch(
@@ -255,9 +269,11 @@ describe("guide fixture boundaries", () => {
 
   it("keeps the sidebar trigger in app-owned overlay chrome", () => {
     const markup = renderWireframe(createElement(AppShellWireframe));
+
     const reserveStart = markup.indexOf(
       'data-guide-fixture="sidebar-top-reserve"',
     );
+
     const reserveEnd = markup.indexOf('data-guide-region="thread-list"');
 
     expect(markup).toContain('data-guide-fixture="sidebar-trigger-overlay"');
@@ -273,21 +289,57 @@ describe("guide fixture boundaries", () => {
     const contract = anatomy.surfaceFixtures["app-overlay"];
 
     expect(contract.requiredStates).toEqual(["anchor"]);
+
     for (const label of contract.labels.anchor) {
       expect(markup).toContain(label);
     }
+
     for (const classAnchor of contract.fixtureClassAnchors) {
       expect(markup, `missing fixture class ${classAnchor}`).toContain(
         classAnchor,
       );
     }
+
     const overlayClasses = markup
       .match(/data-guide-region="app-overlay"[^>]*class="([^"]*)"/)?.[1]
       .split(" ");
+
     expect(overlayClasses).toEqual(
       expect.arrayContaining(["absolute", "z-[6]", "shadow-md"]),
     );
     expect(markup.match(/data-guide-badge="app-overlay"/g)).toHaveLength(1);
+  });
+
+  it("shows plugin top-bar content on the desktop window only", () => {
+    const markup = renderWireframe(createElement(AppShellWireframe));
+    const contract = anatomy.surfaceFixtures["title-bar-center"];
+
+    expect(contract.requiredStates).toEqual(["anchor"]);
+
+    for (const label of contract.labels.anchor) {
+      expect(markup).toContain(label);
+    }
+
+    for (const classAnchor of contract.fixtureClassAnchors) {
+      expect(markup, `missing fixture class ${classAnchor}`).toContain(
+        classAnchor,
+      );
+    }
+
+    expect(markup).toMatch(
+      /data-guide-badge="title-bar-center"[^>]*data-guide-badge-placement="above"/,
+    );
+    expect(markup.match(/data-guide-badge="title-bar-center"/g)).toHaveLength(
+      1,
+    );
+    expect(
+      renderWireframe(
+        createElement(AppShellWireframe, {
+          mobile: true,
+          mobileScene: "conversation",
+        }),
+      ),
+    ).not.toContain("title-bar-center");
   });
 
   it("shows plugin panels as icon-only destinations in the navigation rail", () => {
@@ -305,6 +357,7 @@ describe("guide fixture boundaries", () => {
 
   it("grows the app window within capped viewport-fit bounds while retaining loose timeline spacing", () => {
     const markup = renderWireframe(createElement(AppShellWireframe));
+
     const timeline = markup.slice(
       markup.indexOf('data-guide-fixture="app-window-timeline"'),
       markup.indexOf("Fix the flaky checkout tests"),
@@ -345,19 +398,23 @@ describe("guide fixture boundaries", () => {
 
     expect(contract.fidelity).toBe("flow");
     expect(contract.requiredStates).toEqual(["anchor", "triggered", "outcome"]);
+
     for (const state of ["anchor", "triggered"] as const) {
       for (const label of contract.labels[state]) {
         expect(markup).toContain(label);
       }
     }
+
     for (const label of contract.labels.outcome) {
       expect(markup).not.toContain(label);
     }
+
     for (const classAnchor of contract.fixtureClassAnchors) {
       expect(markup, `missing fixture class ${classAnchor}`).toContain(
         classAnchor,
       );
     }
+
     expect(markup).toContain('data-guide-fixture="command-palette-thread"');
     expect(markup).toContain('data-guide-fixture="command-palette-overlay"');
     expect(markup).toContain('data-guide-fixture="command-palette-dialog"');
@@ -406,6 +463,7 @@ describe("guide fixture boundaries", () => {
     const markup = renderWireframe(createElement(RealComposerAnnotated));
 
     expect(markup).toContain('data-guide-annotation-layer="composer-controls"');
+
     for (const id of [
       "composer-banners",
       "composer-state",
@@ -416,6 +474,7 @@ describe("guide fixture boundaries", () => {
       expect(markup).toContain(`data-guide-badge="${id}"`);
       expect(markup).toContain(`data-guide-target="${id}"`);
     }
+
     expect(markup).not.toMatch(
       /data-guide-target="composer-actions"[^>]*>[\s\S]*data-guide-badge="composer-actions"/,
     );
@@ -431,13 +490,16 @@ describe("guide fixture boundaries", () => {
     expect(markup).toMatch(
       /data-guide-target="composer-banners"[^>]*>[\s\S]*?data-guide-transient-for="mention-provider"[^>]*class="[^"]*bottom-full left-0 z-\[60\][\s\S]*?data-guide-region="mention-provider"/,
     );
+
     const transientStart = markup.indexOf(
       'data-guide-transient-for="mention-provider"',
     );
+
     const transientMarkup = markup.slice(
       transientStart,
       markup.indexOf('data-guide-region="mention-provider"', transientStart),
     );
+
     expect(transientMarkup).not.toContain(
       'data-guide-badge="mention-provider"',
     );

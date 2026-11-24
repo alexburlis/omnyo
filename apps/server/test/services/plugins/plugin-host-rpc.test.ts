@@ -1,4 +1,4 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { callPluginHostRpc } from "../../../src/services/plugins/plugin-host-rpc.js";
@@ -12,6 +12,11 @@ const contract = defineRpcContract({
     input: z.object({ id: z.string() }),
     output: z.object({ path: z.string() }),
   },
+  status: {
+    input: z.object({ id: z.string() }),
+    output: z.object({ path: z.string() }),
+    experimental_hostReplacementKey: "fixture-control-v1",
+  },
 });
 
 describe("callPluginHostRpc", () => {
@@ -19,6 +24,7 @@ describe("callPluginHostRpc", () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
       const audioBase64 = Buffer.alloc(20 * 1024 * 1024).toString("base64");
+
       const responder = registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -26,9 +32,12 @@ describe("callPluginHostRpc", () => {
           if (request.command.type !== "plugin.host.call")
             throw new Error("Unexpected RPC");
           expect(request.command.input).toEqual({ id: audioBase64 });
+          expect(request.command.replacementKey).toBeNull();
+
           return { ok: true, result: { output: { path: "accepted" } } };
         },
       });
+
       const args = {
         pluginId: "environment-test",
         contract,
@@ -37,6 +46,7 @@ describe("callPluginHostRpc", () => {
         hostId: host.id,
         artifact: stubHostArtifact("environment-test"),
       };
+
       await expect(callPluginHostRpc(harness.deps, args)).resolves.toEqual({
         path: "accepted",
       });
@@ -50,36 +60,74 @@ describe("callPluginHostRpc", () => {
     });
   });
 
+  it("forwards the shared retiring-worker contract key on existing-job controls", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: async (request) => {
+          if (request.command.type !== "plugin.host.call")
+            throw new Error("Unexpected RPC");
+          expect(request.command.replacementKey).toBe("fixture-control-v1");
+
+          return { ok: true, result: { output: { path: "retained-owner" } } };
+        },
+      });
+
+      await expect(
+        callPluginHostRpc(harness.deps, {
+          pluginId: "environment-test",
+          contract,
+          method: "status",
+          input: { id: "existing-job" },
+          hostId: host.id,
+          artifact: stubHostArtifact("environment-test"),
+        }),
+      ).resolves.toEqual({ path: "retained-owner" });
+    });
+  });
+
   it("waits for host execution to stop after forwarding cancellation", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
       let releaseCall: (() => void) | undefined;
+
       const callHeld = new Promise<void>((resolve) => {
         releaseCall = resolve;
       });
+
       let recordCancel: (() => void) | undefined;
+
       const cancelReceived = new Promise<void>((resolve) => {
         recordCancel = resolve;
       });
+
       const responder = registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
         handle: async (request) => {
           if (request.command.type === "plugin.host.call") {
             await callHeld;
+
             return {
               ok: true,
               result: { output: { path: "/tmp/created" } },
             };
           }
+
           if (request.command.type === "plugin.host.cancel") {
             recordCancel?.();
+
             return { ok: true, result: { cancelled: true } };
           }
+
           throw new Error(`Unexpected RPC ${request.command.type}`);
         },
       });
+
       const controller = new AbortController();
+
       const result = callPluginHostRpc(harness.deps, {
         pluginId: "environment-test",
         contract,
@@ -89,6 +137,7 @@ describe("callPluginHostRpc", () => {
         signal: controller.signal,
         artifact: stubHostArtifact("environment-test"),
       });
+
       let settled = false;
       void result.then(
         () => {

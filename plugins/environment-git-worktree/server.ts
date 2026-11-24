@@ -1,14 +1,14 @@
 import {
   defineRpcContract,
-  type BbPluginApi,
+  type PluginApi,
   type JsonValue,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import type {
   PluginEnvironmentProviderCreateContext,
   PluginEnvironmentProviderCreateResult,
   PluginEnvironmentProviderProgress,
-} from "@get-bb/plugin-sdk/environment-provider";
-import { reportHostProgress } from "bb-environment-provider-host/progress";
+} from "@omnyo/plugin-sdk/environment-provider";
+import { reportHostProgress } from "omnyo-environment-provider-host/progress";
 import { z } from "zod";
 import {
   discoveredWorktreeSchema,
@@ -20,6 +20,7 @@ import {
 import { GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
 
 const CREATE_TIMEOUT_MS = 15 * 60 * 1000;
+
 const REMOVE_TIMEOUT_MS = 15 * 60 * 1000;
 
 export const worktreeInputsSchema = z
@@ -37,7 +38,9 @@ export const worktreeInputsSchema = z
       .strict(),
   ])
   .default({ branch: { kind: "default" } });
+
 export type WorktreeInputs = z.infer<typeof worktreeInputsSchema>;
+
 type WorktreeOperation = Pick<
   PluginEnvironmentProviderCreateContext<{ gitCheckout: true }>,
   | "attempt"
@@ -85,15 +88,17 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
-  const host = bb.hosts.experimental_client({
+export default async function worktreePlugin(api: PluginApi): Promise<void> {
+  const host = api.hosts.experimental_client({
     contract: worktreeHostContract,
     experimental_signals: worktreeHostSignals,
   });
+
   const reports = new Map<string, PluginEnvironmentProviderProgress>();
 
   host.experimental_onSignal("progress", (event) => {
     const report = reports.get(event.payload.operationId);
+
     if (report !== undefined) reportHostProgress(report, event.payload);
   });
 
@@ -110,15 +115,18 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
         timeoutMs: CREATE_TIMEOUT_MS,
       },
     );
+
     if (resolved.status === "failed") {
       return { status: "failed", message: resolved.message };
     }
+
     if (!(await context.experimental_claimPath(resolved.path))) {
       return {
         status: "failed",
         message: `${resolved.path} is already in use by another environment.`,
       };
     }
+
     return {
       status: "created",
       path: resolved.path,
@@ -137,6 +145,7 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
   ): Promise<PluginEnvironmentProviderCreateResult> {
     const operationId = `create#${context.pathKey}#${context.attempt}`;
     reports.set(operationId, context.report);
+
     try {
       const result = await host.call(
         "create",
@@ -152,9 +161,11 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
           timeoutMs: CREATE_TIMEOUT_MS,
         },
       );
+
       if (result.status === "failed") {
         return { status: "failed", message: result.message };
       }
+
       return {
         status: "created",
         path: result.path,
@@ -165,13 +176,14 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
       };
     } catch (error) {
       if (context.signal.aborted) throw error;
+
       return { status: "failed", message: errorMessage(error) };
     } finally {
       reports.delete(operationId);
     }
   }
 
-  bb.experimental_environments.register({
+  api.experimental_environments.register({
     id: GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID,
     displayName: "Worktree",
     description: "Create an isolated Git worktree for your changes.",
@@ -185,6 +197,7 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
       if ("kind" in context.inputs) {
         return adoptExistingWorktree(context, context.inputs.path);
       }
+
       return createManagedWorktree(context, {
         branchName: context.suggestedBranchName,
         baseBranch: context.inputs.branch,
@@ -195,7 +208,9 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
       if ("kind" in context.inputs) {
         return adoptExistingWorktree(context, context.inputs.path);
       }
+
       const branchName = context.previous.environment.branchName;
+
       if (branchName === null) {
         return {
           status: "failed",
@@ -203,6 +218,7 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
             "The removed worktree had no branch checked out, so there is no branch to restore it on.",
         };
       }
+
       return createManagedWorktree(context, {
         branchName,
         baseBranch: context.inputs.branch,
@@ -213,11 +229,14 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
       if (isAdoptedResource(context.resource)) {
         return { status: "removed" };
       }
+
       if (context.hostId === null) {
         return { status: "failed", message: "The worktree machine is unknown" };
       }
+
       const operationId = `remove#${context.pathKey}#${context.attempt}`;
       reports.set(operationId, context.report);
+
       try {
         const result = await host.call(
           "remove",
@@ -232,9 +251,11 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
             timeoutMs: REMOVE_TIMEOUT_MS,
           },
         );
+
         return result;
       } catch (error) {
         if (context.signal.aborted) throw error;
+
         return { status: "failed", message: errorMessage(error) };
       } finally {
         reports.delete(operationId);
@@ -242,17 +263,21 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
     },
   });
 
-  bb.rpc.register(worktreeRpcContract, {
+  api.rpc.register(worktreeRpcContract, {
     async defaultBaseBranch({ projectId, hostId }) {
-      const project = await bb.sdk.projects.get({ projectId });
+      const project = await api.sdk.projects.get({ projectId });
+
       const sources = project.sources.filter(
         (source) => source.type === "local_path",
       );
+
       const source =
         hostId === null
           ? (sources.find((source) => source.isDefault) ?? sources[0])
           : sources.find((source) => source.hostId === hostId);
+
       if (source === undefined) return { branch: null };
+
       return host.call(
         "defaultBaseBranch",
         { sourcePath: source.path },
@@ -260,12 +285,15 @@ export default async function worktreePlugin(bb: BbPluginApi): Promise<void> {
       );
     },
     async listExistingWorktrees({ projectId, hostId }) {
-      const project = await bb.sdk.projects.get({ projectId });
+      const project = await api.sdk.projects.get({ projectId });
+
       const source = project.sources.find(
         (candidate) =>
           candidate.hostId === hostId && candidate.type === "local_path",
       );
+
       if (source === undefined) return { worktrees: [] };
+
       return host.call(
         "listWorktrees",
         { sourcePath: source.path },

@@ -20,9 +20,10 @@ import {
   type DeltaNoTurnFallback,
   type JsonRpcMessage,
   type ProviderRawEvent,
+  type ProviderErrorInfo,
   type ThreadDelta,
   type ThreadEventTokenUsageBreakdown,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { toCanonicalPiModelId } from "./model-list.js";
 import { piVisibilityMetadata } from "./visibility.js";
 import { runSettlementError } from "./bridge/run-settlement.js";
@@ -79,6 +80,7 @@ const piAssistantUsageSchema = z
     output: z.number().optional(),
     cacheRead: z.number().nonnegative().optional().catch(undefined),
     cacheWrite: z.number().nonnegative().optional().catch(undefined),
+    cacheWrite1h: z.number().nonnegative().optional().catch(undefined),
     totalTokens: z.number().optional(),
   })
   .passthrough();
@@ -112,6 +114,13 @@ const piCustomMessageBoundaryEventSchema = z
         display: z.boolean(),
       })
       .passthrough(),
+  })
+  .passthrough();
+
+const piAssistantMessageBoundaryEventSchema = z
+  .object({
+    type: z.enum(["message_end", "message_start"]),
+    message: piAssistantMessageSchema,
   })
   .passthrough();
 
@@ -152,6 +161,62 @@ const piCompactionNoopMessages = new Set([
 
 function isPiCompactionNoop(errorMessage: string): boolean {
   return piCompactionNoopMessages.has(errorMessage.trim());
+}
+
+function piErrorInfo(message: string): ProviderErrorInfo {
+  const status = message.match(
+    /\b(?:HTTP(?:\/[\d.]+)?\s+|status(?:\s+code)?[=:\s]+)([45]\d{2})\b|(?:^|:\s*)([45]\d{2})(?=[\s:]|$)/i,
+  );
+
+  const httpStatusCode = status ? Number(status[1] ?? status[2]) : null;
+
+  const category = (): ProviderErrorInfo["category"] => {
+    if (httpStatusCode === 401 || httpStatusCode === 403) return "unauthorized";
+
+    if (httpStatusCode === 402) return "billing";
+
+    if (httpStatusCode === 429) return "rate-limit";
+
+    if (httpStatusCode === 529) return "overloaded";
+
+    if (
+      /unauthorized|authentication[_ ](?:error|failed)|invalid api key/i.test(
+        message,
+      )
+    )
+      return "unauthorized";
+
+    if (/insufficient[_ ]quota|\bbilling\b/i.test(message)) return "billing";
+
+    if (/rate[_ -]?limit(?:ed|_error)?\b|too many requests/i.test(message))
+      return "rate-limit";
+
+    if (
+      /context[_ -](?:window|length).*(?:exceed|limit|full)|too many tokens|prompt is too long/i.test(
+        message,
+      )
+    )
+      return "context-window-exceeded";
+
+    if (httpStatusCode === 408) return "connection-failed";
+
+    if (httpStatusCode !== null && httpStatusCode < 500) return "bad-request";
+
+    if (/\boverloaded(?:_error)?\b/i.test(message)) return "overloaded";
+
+    if (httpStatusCode !== null && httpStatusCode >= 500) return "internal";
+
+    if (
+      /ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|fetch failed|network (?:error|failure)|connection (?:reset|closed|refused|failed)|timed out|timeout/i.test(
+        message,
+      )
+    )
+      return "connection-failed";
+
+    return "unknown";
+  };
+
+  return { category: category(), providerCode: null, httpStatusCode };
 }
 
 const piMessageUpdateEventSchema = z
@@ -203,6 +268,7 @@ const piToolResultContentSchema = z.object({
 
 function hasPiImageContent(result: unknown): boolean {
   const parsed = piToolResultContentSchema.safeParse(result);
+
   return (
     parsed.success &&
     parsed.data.content.some(
@@ -238,20 +304,28 @@ const piFileEditBatchSchema = z.array(
 );
 
 type PiAssistantMessage = z.infer<typeof piAssistantMessageSchema>;
+
 type PiAssistantErrorMessage = PiAssistantMessage & {
   errorMessage: string;
   stopReason: "error";
 };
+
 type PiConversationMessage = z.infer<typeof piConversationMessageSchema>;
+
 type PiToolExecutionUpdateEvent = z.infer<
   typeof piToolExecutionUpdateEventSchema
 >;
 
 const PI_EMPTY_BASH_OUTPUT_PLACEHOLDERS = ["(no output)"] as const;
+
 const PI_COMMAND_TOOL_NAMES = new Set(["bash"]);
+
 const PI_FILE_CHANGE_TOOL_NAMES = new Set(["edit", "write"]);
+
 const PI_IMAGE_READ_PATH_PATTERN = /\.(?:png|jpe?g|gif|webp|bmp)$/i;
+
 const PI_UNICODE_SPACE_PATTERN = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
 const URL_SCHEME_PATTERN = /^[a-z][a-z\d+.-]*:\/\//i;
 
 const ASSISTANT_STREAM_KEY = "assistant";
@@ -267,28 +341,36 @@ function classifyPiToolUse(
 ): DeltaItemShape {
   if (PI_COMMAND_TOOL_NAMES.has(toolName)) {
     const parsed = bashArgsSchema.safeParse(args);
+
     const command = parsed.success
       ? toOptionalString(parsed.data.command)
       : undefined;
+
     const cwd =
       (parsed.success ? toOptionalString(parsed.data.cwd) : undefined) ??
       toOptionalString(sessionCwd);
+
     if (!command || !cwd) {
       return { type: "tool", tool: toolName, args };
     }
+
     return { type: "command", command, cwd };
   }
 
   if (PI_FILE_CHANGE_TOOL_NAMES.has(toolName)) {
     const parsed = piFileEditArgsSchema.safeParse(args);
+
     if (!parsed.success) {
       return { type: "tool", tool: toolName, args };
     }
+
     if (!parsed.data.path) {
       return { type: "tool", tool: toolName, args: parsed.data };
     }
+
     const path = parsed.data.path;
     const parsedEdits = piFileEditBatchSchema.safeParse(parsed.data.edits);
+
     if (parsedEdits.success && parsedEdits.data.length > 0) {
       return {
         type: "fileChange",
@@ -302,6 +384,7 @@ function classifyPiToolUse(
     }
 
     const newText = parsed.data.newText ?? parsed.data.content;
+
     return {
       type: "fileChange",
       changes: [
@@ -331,25 +414,33 @@ function resolvePiImageReadPath(
   if (toolName !== "read") {
     return null;
   }
+
   const parsed = piReadArgsSchema.safeParse(args);
+
   if (!parsed.success) {
     return null;
   }
+
   let path = parsed.data.path.replace(PI_UNICODE_SPACE_PATTERN, " ");
+
   if (path.startsWith("@")) {
     path = path.slice(1);
   }
+
   if (path === "~" || path.startsWith("~/")) {
     path = join(homedir(), path.slice(2));
   }
+
   if (URL_SCHEME_PATTERN.test(path)) {
     return null;
   }
+
   const absolutePath = isAbsolute(path)
     ? resolve(path)
     : sessionCwd !== undefined && isAbsolute(sessionCwd)
       ? resolve(sessionCwd, path)
       : null;
+
   return absolutePath !== null && PI_IMAGE_READ_PATH_PATTERN.test(absolutePath)
     ? absolutePath
     : null;
@@ -359,6 +450,7 @@ function classifyPiToolResultFallback(toolName: string): DeltaItemShape {
   if (PI_FILE_CHANGE_TOOL_NAMES.has(toolName)) {
     return { type: "fileChange", changes: [] };
   }
+
   return { type: "tool", tool: toolName };
 }
 
@@ -376,17 +468,21 @@ function buildPiModelContextWindowLookup(
 ): PiModelContextWindowLookup {
   const byCanonicalId = new Map<string, number>();
   const byModelId = new Map<string, number>();
+
   for (const model of models) {
     const contextWindow = toPositiveNumber(model.contextWindow);
+
     if (contextWindow === undefined) {
       continue;
     }
+
     byCanonicalId.set(
       toCanonicalPiModelId(model.provider, model.id),
       contextWindow,
     );
     byModelId.set(model.id, contextWindow);
   }
+
   return { byCanonicalId, byModelId };
 }
 
@@ -394,6 +490,7 @@ export function createPiModelContextWindowResolverFrom(
   models: readonly PiContextWindowModel[],
 ): PiModelContextWindowResolver {
   const modelContextWindowLookup = buildPiModelContextWindowLookup(models);
+
   return (lastAssistant) =>
     resolvePiModelContextWindow(lastAssistant, modelContextWindowLookup);
 }
@@ -403,11 +500,13 @@ function resolvePiModelContextWindow(
   modelContextWindowLookup: PiModelContextWindowLookup,
 ): number | null {
   const modelId = toOptionalString(lastAssistant?.model);
+
   if (!modelId) {
     return null;
   }
 
   const providerId = toOptionalString(lastAssistant?.provider);
+
   if (providerId) {
     return (
       modelContextWindowLookup.byCanonicalId.get(
@@ -442,14 +541,32 @@ export function createPiDeltaTranslator(
   const { resolveModelContextWindow } = options;
 
   const startedToolShapes = new Map<string, StartedPiTool>();
+
   const cumulativeTokensByThreadId = new Map<
     string,
     ThreadEventTokenUsageBreakdown
   >();
 
+  const promptCacheTtlMsByThreadId = new Map<string, number>();
+  const closedAssistantStreams = new Set<string>();
+
   function resetThread(threadId: string): void {
     cumulativeTokensByThreadId.delete(threadId);
+    promptCacheTtlMsByThreadId.delete(threadId);
     clearThreadToolShapes({ threadId });
+    const prefix = `${threadId} `;
+
+    for (const key of [...closedAssistantStreams]) {
+      if (key.startsWith(prefix)) {
+        closedAssistantStreams.delete(key);
+      }
+    }
+  }
+
+  function assistantStreamKey(
+    context: PiDeltaTranslationContext | undefined,
+  ): string {
+    return `${context?.threadId ?? ""} ${context?.parentToolCallId ?? ""}`;
   }
 
   function toolShapeKey(
@@ -461,11 +578,14 @@ export function createPiDeltaTranslator(
 
   function rememberStartedToolShape(key: string, started: StartedPiTool): void {
     startedToolShapes.set(key, started);
+
     while (startedToolShapes.size > MAX_STARTED_TOOL_SHAPES) {
       const oldest = startedToolShapes.keys().next();
+
       if (oldest.done === true) {
         break;
       }
+
       startedToolShapes.delete(oldest.value);
     }
   }
@@ -474,6 +594,7 @@ export function createPiDeltaTranslator(
     context: PiDeltaTranslationContext | undefined,
   ): void {
     const prefix = `${context?.threadId ?? ""} `;
+
     for (const key of [...startedToolShapes.keys()]) {
       if (key.startsWith(prefix)) {
         startedToolShapes.delete(key);
@@ -483,9 +604,11 @@ export function createPiDeltaTranslator(
 
   function toRawEvent(rawEvent: JsonRpcMessage): ProviderRawEvent {
     const parsed = providerRawEventSchema.safeParse(rawEvent);
+
     if (parsed.success) {
       return parsed.data;
     }
+
     return {
       jsonrpc: "2.0",
       ...(rawEvent.id !== undefined ? { id: rawEvent.id } : {}),
@@ -502,9 +625,11 @@ export function createPiDeltaTranslator(
     parentToolCallId: string | undefined,
   ): ThreadDelta[] {
     const description = piVisibilityMetadata.describeRawEvent(rawEvent);
+
     if (description.coverage !== "unknown") {
       return [];
     }
+
     return [
       {
         kind: "unhandled",
@@ -528,6 +653,7 @@ export function createPiDeltaTranslator(
         message: rawMessage,
       },
     };
+
     return {
       raw: toRawEvent(rawEvent),
       rawType: piVisibilityMetadata.describeRawEvent(rawEvent).kind,
@@ -539,6 +665,7 @@ export function createPiDeltaTranslator(
     context: PiDeltaTranslationContext | undefined,
   ): ThreadDelta[] {
     const fallback = noTurnFallbackFor(rawMessage, context);
+
     return [
       {
         kind: "unhandled",
@@ -557,18 +684,22 @@ export function createPiDeltaTranslator(
     context?: PiDeltaTranslationContext,
   ): ThreadDelta[] {
     const sdkEnvelope = sdkMessageEnvelopeSchema.safeParse(event);
+
     if (sdkEnvelope.success) {
       if (
         piIgnoredEventSchema.safeParse(sdkEnvelope.data.params.message).success
       ) {
         return [];
       }
+
       const parentToolCallId =
         sdkEnvelope.data.params.parent_tool_use_id ?? context?.parentToolCallId;
+
       const translated = translate(sdkEnvelope.data.params.message, {
         ...context,
         ...(parentToolCallId ? { parentToolCallId } : {}),
       });
+
       return translated.length > 0
         ? translated
         : unhandledDeltas(
@@ -583,8 +714,10 @@ export function createPiDeltaTranslator(
 
     const promptSettledEnvelope =
       piPromptSettledEnvelopeSchema.safeParse(event);
+
     if (promptSettledEnvelope.success) {
       clearThreadToolShapes(context);
+
       return [
         {
           kind: "turn.boundary",
@@ -599,10 +732,12 @@ export function createPiDeltaTranslator(
 
     const contextWindowUsageEnvelope =
       threadContextWindowUsageEnvelopeSchema.safeParse(event);
+
     if (contextWindowUsageEnvelope.success) {
       const { contextWindowUsage } = contextWindowUsageEnvelope.data.params;
       const used = contextWindowUsage.usedTokens;
       const size = contextWindowUsage.modelContextWindow;
+
       return [
         {
           kind: "contextWindow",
@@ -618,19 +753,25 @@ export function createPiDeltaTranslator(
     }
 
     const errorEnvelope = errorEnvelopeSchema.safeParse(event);
+
     if (errorEnvelope.success) {
       clearThreadToolShapes(context);
+
       return [
         {
           kind: "provider.error",
           message: "Provider error",
           detail: errorEnvelope.data.params?.message ?? "unknown error",
+          errorInfo: piErrorInfo(
+            errorEnvelope.data.params?.message ?? "unknown error",
+          ),
           settlesTurn: true,
         },
       ];
     }
 
     const envelope = jsonRpcEnvelopeSchema.safeParse(event);
+
     if (envelope.success) {
       return unhandledDeltas(
         {
@@ -643,9 +784,11 @@ export function createPiDeltaTranslator(
     }
 
     const eventType = piEventTypeSchema.safeParse(event);
+
     if (!eventType.success) {
       return [];
     }
+
     const parentRef = context?.parentToolCallId;
     const parentRefField = parentRef ? { parentRef } : {};
 
@@ -655,28 +798,72 @@ export function createPiDeltaTranslator(
 
       case "message_end":
       case "message_start": {
+        const assistantEvent =
+          piAssistantMessageBoundaryEventSchema.safeParse(event);
+
+        if (assistantEvent.success) {
+          const streamKey = assistantStreamKey(context);
+          const message = assistantEvent.data.message;
+
+          if (assistantEvent.data.type === "message_start") {
+            closedAssistantStreams.delete(streamKey);
+
+            return [];
+          }
+
+          if (
+            message.stopReason === "error" ||
+            message.stopReason === "aborted"
+          ) {
+            return [];
+          }
+
+          closedAssistantStreams.add(streamKey);
+          const text = extractAssistantText(message);
+
+          if (!text) {
+            return [];
+          }
+
+          return [
+            {
+              kind: "item.textClose",
+              key: { channel: ASSISTANT_STREAM_KEY, ...parentRefField },
+              channel: "agentMessage",
+              text,
+            },
+          ];
+        }
+
         const piEvent = piCustomMessageBoundaryEventSchema.safeParse(event);
+
         if (!piEvent.success) {
           return [];
         }
+
         if (
           piEvent.data.type === "message_end" ||
           !piEvent.data.message.display
         ) {
           return [];
         }
+
         const text = extractCustomMessageText(piEvent.data.message.content);
+
         if (text === undefined) {
           return [];
         }
+
         return [{ kind: "input.provider", text, ...parentRefField }];
       }
 
       case "compaction_start": {
         const parsed = piCompactionStartEventSchema.safeParse(event);
+
         if (!parsed.success) {
           return unexpectedSdkEventDeltas(event, context);
         }
+
         const open: ThreadDelta = {
           kind: "item.open",
           key: { channel: "compaction" },
@@ -686,6 +873,7 @@ export function createPiDeltaTranslator(
             : { attach: "currentOrLast" }),
           noTurnFallback: noTurnFallbackFor(event, context),
         };
+
         return parsed.data.reason === "manual"
           ? [{ kind: "turn.open" }, open]
           : [open];
@@ -693,22 +881,28 @@ export function createPiDeltaTranslator(
 
       case "compaction_end": {
         const parsed = piCompactionEndEventSchema.safeParse(event);
+
         if (!parsed.success) {
           return unexpectedSdkEventDeltas(event, context);
         }
+
         const succeeded = !parsed.data.aborted && !parsed.data.errorMessage;
+
         const compacted: ThreadDelta = {
           kind: "context.compacted",
           noTurnFallback: noTurnFallbackFor(event, context),
         };
+
         if (parsed.data.reason === "manual") {
           clearThreadToolShapes(context);
+
           const compactionNoopDetail =
             !parsed.data.aborted &&
             parsed.data.errorMessage !== undefined &&
             isPiCompactionNoop(parsed.data.errorMessage)
               ? parsed.data.errorMessage
               : undefined;
+
           if (compactionNoopDetail !== undefined) {
             return [
               {
@@ -721,6 +915,7 @@ export function createPiDeltaTranslator(
               { kind: "turn.boundary", status: "completed" },
             ];
           }
+
           return [
             ...(succeeded ? [compacted] : []),
             {
@@ -736,9 +931,11 @@ export function createPiDeltaTranslator(
             },
           ];
         }
+
         if (succeeded) {
           return [compacted];
         }
+
         return [
           {
             kind: "provider.error",
@@ -748,16 +945,23 @@ export function createPiDeltaTranslator(
             detail:
               parsed.data.errorMessage ??
               "Automatic context compaction was interrupted",
+            errorInfo: piErrorInfo(
+              parsed.data.errorMessage ??
+                "Automatic context compaction was interrupted",
+            ),
           },
         ];
       }
 
       case "agent_end": {
         const piEvent = piAgentEndEventSchema.safeParse(event);
+
         if (!piEvent.success) {
           return unexpectedSdkEventDeltas(event, context);
         }
+
         const lastAssistant = findLastAssistantMessage(piEvent.data.messages);
+
         if (piEvent.data.willRetry && !piEvent.data.deferSettlement) {
           if (lastAssistant && isPiAssistantError(lastAssistant)) {
             return [
@@ -765,25 +969,32 @@ export function createPiDeltaTranslator(
                 kind: "provider.error",
                 message: "Provider error",
                 detail: lastAssistant.errorMessage,
+                errorInfo: piErrorInfo(lastAssistant.errorMessage),
                 willRetry: true,
               },
             ];
           }
+
           return [];
         }
+
         const settlementError =
           piEvent.data.settlementError ??
           runSettlementError(piEvent.data, piEvent.data.messages);
+
         if (settlementError && !piEvent.data.deferSettlement) {
           clearThreadToolShapes(context);
           const failure: ThreadDelta[] = [];
+
           if (!piEvent.data.settlementErrorReported) {
             failure.push({
               kind: "provider.error",
               message: "Provider error",
               detail: settlementError,
+              errorInfo: piErrorInfo(settlementError),
             });
           }
+
           failure.push({
             kind: "turn.boundary",
             status: "failed",
@@ -791,10 +1002,13 @@ export function createPiDeltaTranslator(
               ? { providerCheckpointId: piEvent.data.providerCheckpointId }
               : {}),
           });
+
           return failure;
         }
+
         if (!piEvent.data.deferSettlement) clearThreadToolShapes(context);
         const deltas: ThreadDelta[] = [];
+
         if (
           settlementError &&
           piEvent.data.deferSettlement &&
@@ -804,11 +1018,23 @@ export function createPiDeltaTranslator(
             kind: "provider.error",
             message: "Provider error",
             detail: settlementError,
+            errorInfo: piErrorInfo(settlementError),
             ...(piEvent.data.willRetry ? { willRetry: true } : {}),
           });
         }
-        if (lastAssistant && !piEvent.data.settlementOnly && !settlementError) {
+
+        const assistantClosed = closedAssistantStreams.delete(
+          assistantStreamKey(context),
+        );
+
+        if (
+          lastAssistant &&
+          !assistantClosed &&
+          !piEvent.data.settlementOnly &&
+          !settlementError
+        ) {
           const text = extractAssistantText(lastAssistant);
+
           if (text) {
             deltas.push({
               kind: "item.textClose",
@@ -818,23 +1044,36 @@ export function createPiDeltaTranslator(
             });
           }
         }
+
         const usage = piEvent.data.settlementOnly
           ? undefined
           : toAssistantUsageBreakdown(lastAssistant);
+
         if (usage && !(settlementError && usage.totalTokens === 0)) {
           const threadKey = context?.threadId ?? "";
+
           const total = addTokenUsage(
             cumulativeTokensByThreadId.get(threadKey) ?? ZERO_TOKEN_USAGE,
             usage,
           );
+
           cumulativeTokensByThreadId.set(threadKey, total);
+          const reportedTtlMs = toPromptCacheTtlMs(lastAssistant);
+
+          if (reportedTtlMs !== undefined) {
+            promptCacheTtlMsByThreadId.set(threadKey, reportedTtlMs);
+          }
+
+          const promptCacheTtlMs = promptCacheTtlMsByThreadId.get(threadKey);
           deltas.push({
             kind: "usage",
             total,
             last: usage,
             modelContextWindow: resolveModelContextWindow(lastAssistant),
+            ...(promptCacheTtlMs === undefined ? {} : { promptCacheTtlMs }),
           });
         }
+
         if (piEvent.data.deferSettlement) return deltas;
         deltas.push({
           kind: "turn.boundary",
@@ -844,20 +1083,26 @@ export function createPiDeltaTranslator(
             : {}),
           claimIfIdle: true,
         });
+
         return deltas;
       }
 
       case "message_update": {
         const piEvent = piMessageUpdateEventSchema.safeParse(event);
+
         if (!piEvent.success) {
           return unexpectedSdkEventDeltas(event, context);
         }
+
         const assistantEvent = piEvent.data.assistantMessageEvent;
+
         if (assistantEvent.type === "text_delta") {
           const delta = assistantEvent.delta;
+
           if (!delta) {
             return [];
           }
+
           return [
             {
               kind: "item.textDelta",
@@ -867,14 +1112,18 @@ export function createPiDeltaTranslator(
             },
           ];
         }
+
         if (assistantEvent.type === "thinking_delta") {
           const delta = assistantEvent.delta;
+
           if (!delta) {
             return [];
           }
+
           if (typeof assistantEvent.contentIndex !== "number") {
             return unexpectedSdkEventDeltas(event, context);
           }
+
           return [
             {
               kind: "item.textDelta",
@@ -887,14 +1136,18 @@ export function createPiDeltaTranslator(
             },
           ];
         }
+
         if (assistantEvent.type === "thinking_end") {
           const content = assistantEvent.content;
+
           if (!content) {
             return [];
           }
+
           if (typeof assistantEvent.contentIndex !== "number") {
             return unexpectedSdkEventDeltas(event, context);
           }
+
           return [
             {
               kind: "item.textClose",
@@ -907,31 +1160,38 @@ export function createPiDeltaTranslator(
             },
           ];
         }
+
         return [];
       }
 
       case "tool_execution_start": {
         const piEvent = piToolExecutionStartEventSchema.safeParse(event);
+
         if (!piEvent.success) {
           return unexpectedSdkEventDeltas(event, context);
         }
+
         const shape = classifyPiToolUse(
           piEvent.data.toolName,
           piEvent.data.args,
           context?.cwd,
         );
+
         const deferredImageReadPath = resolvePiImageReadPath(
           piEvent.data.toolName,
           piEvent.data.args,
           context?.cwd,
         );
+
         rememberStartedToolShape(
           toolShapeKey(context, piEvent.data.toolCallId),
           { shape, deferredImageReadPath },
         );
+
         if (deferredImageReadPath !== null) {
           return [];
         }
+
         return [
           {
             kind: "item.open",
@@ -947,19 +1207,24 @@ export function createPiDeltaTranslator(
 
       case "tool_execution_end": {
         const piEvent = piToolExecutionEndEventSchema.safeParse(event);
+
         if (!piEvent.success) {
           return unexpectedSdkEventDeltas(event, context);
         }
+
         const resultText = extractResultText(piEvent.data.result);
+
         const aggregatedOutput = PI_COMMAND_TOOL_NAMES.has(
           piEvent.data.toolName,
         )
           ? extractPiCommandExecutionOutput(piEvent.data.result)
           : undefined;
+
         const shapeKey = toolShapeKey(context, piEvent.data.toolCallId);
         const started = startedToolShapes.get(shapeKey);
         startedToolShapes.delete(shapeKey);
         const deferredImageReadPath = started?.deferredImageReadPath ?? null;
+
         const terminalShape: DeltaItemShape =
           deferredImageReadPath !== null &&
           !piEvent.data.isError &&
@@ -967,15 +1232,19 @@ export function createPiDeltaTranslator(
             ? { type: "imageView", path: deferredImageReadPath }
             : (started?.shape ??
               classifyPiToolResultFallback(piEvent.data.toolName));
+
         const key = {
           providerItemId: piEvent.data.toolCallId,
           ...parentRefField,
         };
+
         const noTurnFallback = noTurnFallbackFor(piEvent.data, context);
+
         const deferredOpen: ThreadDelta[] =
           deferredImageReadPath === null
             ? []
             : [{ kind: "item.open", key, item: terminalShape, noTurnFallback }];
+
         return [
           ...deferredOpen,
           {
@@ -993,22 +1262,28 @@ export function createPiDeltaTranslator(
 
       case "tool_execution_update": {
         const piEvent = piToolExecutionUpdateEventSchema.safeParse(event);
+
         if (!piEvent.success) {
           return unexpectedSdkEventDeltas(event, context);
         }
+
         const started = startedToolShapes.get(
           toolShapeKey(context, piEvent.data.toolCallId),
         );
+
         if ((started?.deferredImageReadPath ?? null) !== null) {
           return [];
         }
+
         if (PI_COMMAND_TOOL_NAMES.has(piEvent.data.toolName)) {
           const snapshot = extractPiCommandExecutionOutput(
             piEvent.data.partialResult,
           );
+
           if (snapshot === undefined) {
             return [];
           }
+
           return [
             {
               kind: "command.outputSnapshot",
@@ -1021,6 +1296,7 @@ export function createPiDeltaTranslator(
             },
           ];
         }
+
         return [
           {
             kind: "item.progress",
@@ -1048,23 +1324,29 @@ function findLastAssistantMessage(
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     const parsedMessage = piAssistantMessageSchema.safeParse(message);
+
     if (parsedMessage.success) {
       return parsedMessage.data;
     }
   }
+
   return undefined;
 }
 
 function extractAssistantText(message: PiAssistantMessage): string | undefined {
   const content = message.content;
   const chunks: string[] = [];
+
   for (const block of content) {
     const parsedBlock = textBlockSchema.safeParse(block);
+
     if (parsedBlock.success) {
       chunks.push(parsedBlock.data.text);
     }
   }
+
   const text = chunks.join("\n").trim();
+
   return text.length > 0 ? text : undefined;
 }
 
@@ -1079,10 +1361,12 @@ function extractCustomMessageText(
       : content
           .flatMap((block) => {
             const parsedBlock = textBlockSchema.safeParse(block);
+
             return parsedBlock.success ? [parsedBlock.data.text] : [];
           })
           .join("\n")
   ).trim();
+
   return text.length > 0 ? text : undefined;
 }
 
@@ -1105,20 +1389,44 @@ function extractPiCommandExecutionOutput(content: unknown): string | undefined {
 
 function extractPiToolProgressText(event: PiToolExecutionUpdateEvent): string {
   const text = extractResultText(event.partialResult).trim();
+
   return text.length > 0 ? text : `${event.toolName} progress update`;
+}
+
+const PI_ONE_HOUR_CACHE_TTL_MS = 60 * 60_000;
+
+const PI_FIVE_MINUTE_CACHE_TTL_MS = 5 * 60_000;
+
+function toPromptCacheTtlMs(
+  lastAssistant: PiAssistantMessage | undefined,
+): number | undefined {
+  const usage = lastAssistant?.usage;
+
+  if (usage?.cacheWrite1h === undefined) return undefined;
+
+  if (usage.cacheWrite1h > 0) return PI_ONE_HOUR_CACHE_TTL_MS;
+
+  if (toNonNegativeNumber(usage.cacheWrite) > 0) {
+    return PI_FIVE_MINUTE_CACHE_TTL_MS;
+  }
+
+  return undefined;
 }
 
 function toAssistantUsageBreakdown(
   lastAssistant: PiAssistantMessage | undefined,
 ) {
   const typedUsage = lastAssistant?.usage;
+
   if (!typedUsage) return undefined;
 
   const inputTokens = toNonNegativeNumber(typedUsage.input);
   const outputTokens = toNonNegativeNumber(typedUsage.output);
+
   const cachedInputTokens =
     toNonNegativeNumber(typedUsage.cacheRead) +
     toNonNegativeNumber(typedUsage.cacheWrite);
+
   const totalTokens = toNonNegativeNumber(typedUsage.totalTokens);
 
   return {

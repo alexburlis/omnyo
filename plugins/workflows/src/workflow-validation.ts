@@ -1,4 +1,8 @@
 import { inspectWorkflowSource, type LiteralAgentSelection } from "./parser.js";
+import {
+  resolveWorkflowReasoning,
+  type WorkflowReasoningModel,
+} from "./reasoning-selection.js";
 import type { ParsedWorkflow } from "./types.js";
 
 interface CatalogProvider {
@@ -6,10 +10,9 @@ interface CatalogProvider {
   available: boolean;
 }
 
-interface CatalogModel {
+interface CatalogModel extends WorkflowReasoningModel {
   id: string;
   model: string;
-  supportedReasoningEfforts: Array<{ reasoningEffort: string }>;
 }
 
 interface ModelCatalog {
@@ -19,6 +22,7 @@ interface ModelCatalog {
 }
 
 export interface WorkflowCatalogDependencies {
+  validateEnvironment(environmentId: string): Promise<void>;
   listProviders(environmentId: string): Promise<CatalogProvider[]>;
   loadModels(environmentId: string, providerId: string): Promise<ModelCatalog>;
 }
@@ -40,48 +44,76 @@ export async function validateWorkflowSource(
   catalog: WorkflowCatalogDependencies,
 ): Promise<WorkflowValidationSummary> {
   const inspected = inspectWorkflowSource(source);
+
+  for (const target of inspected.literalEnvironmentIds) {
+    await catalog.validateEnvironment(target);
+  }
+
   if (inspected.literalSelections.length > 0) {
-    const providers = await catalog.listProviders(environmentId);
+    const providersByEnvironment = new Map<string, CatalogProvider[]>();
     const catalogs = new Map<string, ModelCatalog>();
+
     for (const selection of inspected.literalSelections) {
+      if (selection.target.kind === "dynamic") continue;
+
+      const targetEnvironmentId =
+        selection.target.kind === "existing"
+          ? selection.target.environmentId
+          : environmentId;
+
+      let providers = providersByEnvironment.get(targetEnvironmentId);
+
+      if (providers === undefined) {
+        providers = await catalog.listProviders(targetEnvironmentId);
+        providersByEnvironment.set(targetEnvironmentId, providers);
+      }
+
       const provider = providers.find(
         (candidate) => candidate.id === selection.provider,
       );
+
       if (provider === undefined || !provider.available) {
         throw new Error(
           `Unavailable provider for literal workflow selection ${tupleDescription(selection)}${selection.line === null ? "" : ` at line ${selection.line}`}`,
         );
       }
-      let models = catalogs.get(provider.id);
+
+      const catalogKey = JSON.stringify([targetEnvironmentId, provider.id]);
+      let models = catalogs.get(catalogKey);
+
       if (models === undefined) {
         try {
-          models = await catalog.loadModels(environmentId, provider.id);
+          models = await catalog.loadModels(targetEnvironmentId, provider.id);
         } catch (error) {
           throw new Error(
             `Model-load error for provider ${provider.id}: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
-        catalogs.set(provider.id, models);
+
+        catalogs.set(catalogKey, models);
       }
+
       if (models.modelLoadError !== null) {
         throw new Error(
           `Model-load error for provider ${provider.id}: ${models.modelLoadError.code}`,
         );
       }
+
       const model = models.models.find(
         (candidate) =>
           candidate.id === selection.model ||
           candidate.model === selection.model,
       );
+
       if (model === undefined) {
         throw new Error(
           `Model mismatch for literal workflow selection ${tupleDescription(selection)}`,
         );
       }
+
       if (
-        !model.supportedReasoningEfforts.some(
-          (effort) => effort.reasoningEffort === selection.reasoningLevel,
-        )
+        resolveWorkflowReasoning(model, selection.reasoningLevel, false) ===
+        null
       ) {
         throw new Error(
           `Unsupported reasoning level for literal workflow selection ${tupleDescription(selection)}`,
@@ -89,6 +121,7 @@ export async function validateWorkflowSource(
       }
     }
   }
+
   return {
     valid: true,
     sourceBytes: new TextEncoder().encode(source).byteLength,

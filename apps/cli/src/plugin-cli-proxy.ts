@@ -3,8 +3,8 @@ import {
   resolveContextProjectId,
   resolveContextThreadId,
 } from "./context-env.js";
-import { Agent, type Dispatcher } from "undici";
-import { cliFetch } from "./client.js";
+import { Agent, EnvHttpProxyAgent, type Dispatcher } from "undici";
+import { cliFetch, proxyEnvironmentConfigured } from "./client.js";
 
 export interface PluginCliContributionEntry {
   pluginId: string;
@@ -19,18 +19,22 @@ export function pluginCommandLabel(
   argv: readonly string[],
 ): string {
   const declared = new Set(contribution.commands.map((entry) => entry.name));
+
   for (let words = Math.min(3, argv.length); words > 0; words -= 1) {
     const candidate = argv.slice(0, words);
+
     if (declared.has(candidate.join("-"))) {
       return [contribution.name, ...candidate].join(" ");
     }
   }
+
   return contribution.name;
 }
 
 const CONTRIBUTIONS_TIMEOUT_MS = 2000;
 
 const CONTRIBUTIONS_TIMEOUT_MULTIPLIERS = [1, 2, 2] as const;
+
 const CONTRIBUTIONS_RETRY_DELAYS_MS = [150, 500] as const;
 
 const RETRYABLE_CODES = new Set([
@@ -72,15 +76,19 @@ function diagnoseUnreachableServer(cause: unknown): UnreachableDiagnosis {
 
   while (pending.length > 0) {
     const current = pending.pop();
+
     if (typeof current !== "object" || current === null) {
       terminalCodes.push(undefined);
       continue;
     }
+
     if (seen.has(current)) {
       terminalCodes.push(undefined);
       continue;
     }
+
     seen.add(current);
+
     const record = current as {
       cause?: unknown;
       code?: unknown;
@@ -88,31 +96,40 @@ function diagnoseUnreachableServer(cause: unknown): UnreachableDiagnosis {
       name?: unknown;
       message?: unknown;
     };
+
     const code = typeof record.code === "string" ? record.code : undefined;
+
     if (code === "EPERM" || code === "EACCES") {
       blockedCode ??= code;
     }
+
     if (code !== undefined && RETRYABLE_CODES.has(code)) {
       retryableCode = true;
     }
+
     if (record.name === "TimeoutError" || record.name === "AbortError") {
       timedOut = true;
     }
+
     if (typeof record.message === "string" && record.message.length > 0) {
       messages.push(record.message);
     }
 
     const children: unknown[] = [];
+
     if (record.cause !== undefined && record.cause !== null) {
       children.push(record.cause);
     }
+
     if (Array.isArray(record.errors)) {
       children.push(...record.errors);
     }
+
     if (children.length === 0) {
       terminalCodes.push(code);
       continue;
     }
+
     for (let index = children.length - 1; index >= 0; index -= 1) {
       pending.push(children[index]);
     }
@@ -143,24 +160,28 @@ export function describeUnreachableServer(
 
   if (blockedCode !== undefined) {
     return (
-      `Cannot reach bb at ${baseUrl}: ${blockedCode} — the connection was blocked. ` +
-      `bb may still be running; check sandbox or firewall rules for this shell.`
+      `Cannot reach Omnyo at ${baseUrl}: ${blockedCode} — the connection was blocked. ` +
+      `Omnyo may still be running; check sandbox or firewall rules for this shell.`
     );
   }
+
   if (refused) {
-    return `bb is not running at ${baseUrl} — open the bb app, then re-run this command.`;
+    return `Omnyo is not running at ${baseUrl} — open the Omnyo app, then re-run this command.`;
   }
+
   if (timedOut || retryable) {
     const tried =
       attempts > 1
         ? ` after ${attempts} attempts (last window ${timeoutMs}ms)`
         : ` within ${timeoutMs}ms`;
+
     return (
-      `bb did not respond at ${baseUrl}${tried} — it may be busy or temporarily unreachable. ` +
+      `Omnyo did not respond at ${baseUrl}${tried} — it may be busy or temporarily unreachable. ` +
       `No server response was received and your command did not run; re-run it.`
     );
   }
-  return `Cannot reach bb at ${baseUrl}: ${
+
+  return `Cannot reach Omnyo at ${baseUrl}: ${
     messages.length > 0 ? messages.join(": ") : String(cause)
   }`;
 }
@@ -178,12 +199,14 @@ export async function fetchPluginCliContributions(
   options: FetchPluginCliContributionsOptions = {},
 ): Promise<PluginCliContributionsResult> {
   const sleep = options.sleep ?? defaultSleep;
+
   for (
     let attempt = 0;
     attempt < CONTRIBUTIONS_TIMEOUT_MULTIPLIERS.length;
     attempt += 1
   ) {
     const window = timeoutMs * CONTRIBUTIONS_TIMEOUT_MULTIPLIERS[attempt]!;
+
     try {
       const response = await cliFetch(
         `${baseUrl}/api/v1/plugins/contributions`,
@@ -191,8 +214,10 @@ export async function fetchPluginCliContributions(
           signal: AbortSignal.timeout(window),
         },
       );
+
       if (!response.ok) return { outcome: "invalid" };
       let parsed: { cliCommands?: unknown } | null;
+
       try {
         parsed = (await response.json()) as {
           cliCommands?: unknown;
@@ -201,10 +226,14 @@ export async function fetchPluginCliContributions(
         if (!diagnoseUnreachableServer(error).retryable) {
           return { outcome: "invalid" };
         }
+
         throw error;
       }
+
       const cliCommands = parsed?.cliCommands;
+
       if (!Array.isArray(cliCommands)) return { outcome: "invalid" };
+
       return {
         outcome: "ok",
         contributions: cliCommands.filter(
@@ -218,6 +247,7 @@ export async function fetchPluginCliContributions(
     } catch (error) {
       const isLastAttempt =
         attempt === CONTRIBUTIONS_TIMEOUT_MULTIPLIERS.length - 1;
+
       if (isLastAttempt || !diagnoseUnreachableServer(error).retryable) {
         return {
           outcome: "unreachable",
@@ -226,9 +256,11 @@ export async function fetchPluginCliContributions(
           lastTimeoutMs: window,
         };
       }
+
       await sleep(CONTRIBUTIONS_RETRY_DELAYS_MS[attempt]!);
     }
   }
+
   return { outcome: "invalid" };
 }
 
@@ -241,9 +273,12 @@ export async function findDisabledPluginForCommand(
     const response = await cliFetch(`${baseUrl}/api/v1/plugins`, {
       signal: AbortSignal.timeout(timeoutMs),
     });
+
     if (!response.ok) return null;
     const parsed = (await response.json()) as { plugins?: unknown } | null;
+
     if (!Array.isArray(parsed?.plugins)) return null;
+
     const match = parsed.plugins.find(
       (entry): entry is { id: string } =>
         typeof entry === "object" &&
@@ -253,6 +288,7 @@ export async function findDisabledPluginForCommand(
         ((entry as { enabled?: unknown }).enabled === false ||
           (entry as { status?: unknown }).status === "disabled"),
     );
+
     return match === undefined ? null : match.id;
   } catch {
     return null;
@@ -278,6 +314,7 @@ interface PluginCliInputStream extends AsyncIterable<Buffer | string> {
 }
 
 const PLUGIN_CLI_STDIN_MAX_BYTES = 16 * 1024;
+
 const PLUGIN_CLI_STDIN_FLAG = /^--([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)-stdin$/u;
 
 async function materializeStdinFlag(
@@ -286,38 +323,52 @@ async function materializeStdinFlag(
 ): Promise<string[]> {
   const terminator = argv.indexOf("--");
   const scanned = terminator === -1 ? argv : argv.slice(0, terminator);
+
   const matches = scanned.flatMap((flag, index) => {
     const match = PLUGIN_CLI_STDIN_FLAG.exec(flag);
     const name = match?.[1];
+
     return name === undefined ? [] : [{ flag, index, name }];
   });
+
   if (matches.length === 0) return [...argv];
+
   if (matches.length > 1) throw new Error("Choose only one stdin input flag.");
   const match = matches[0];
+
   if (match === undefined) return [...argv];
   const valueFlag = `--${match.name}`;
+
   if (scanned.includes(valueFlag)) {
     throw new Error(`Choose only one of ${match.flag} and ${valueFlag}.`);
   }
+
   if (input.isTTY === true) {
     throw new Error(`${match.flag} requires piped stdin.`);
   }
+
   const chunks: Buffer[] = [];
   let bytes = 0;
+
   for await (const chunk of input) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.byteLength;
+
     if (bytes > PLUGIN_CLI_STDIN_MAX_BYTES) {
       throw new Error(`${match.flag} input exceeds 16 KiB.`);
     }
+
     chunks.push(buffer);
   }
+
   const value = Buffer.concat(chunks)
     .toString("utf8")
     .replace(/\r?\n$/u, "");
+
   if (value.length === 0 || /[\r\n]/u.test(value)) {
     throw new Error(`${match.flag} requires exactly one non-empty stdin line.`);
   }
+
   return [
     ...argv.slice(0, match.index),
     valueFlag,
@@ -336,24 +387,31 @@ async function writePluginCliOutput(
     const settle = (error?: Error | null) => {
       stream.off("error", onError);
       stream.off("close", onClose);
+
       if (error && !("code" in error && error.code === "EPIPE")) {
         rejectPromise(error);
       } else {
         resolvePromise();
       }
     };
+
     const onError = (error: Error) => settle(error);
+
     const onClose = () =>
       settle(
         stream.errored ??
           new Error("Plugin CLI output stream closed before flushing"),
       );
+
     stream.once("error", onError);
     stream.once("close", onClose);
+
     if (stream.destroyed) {
       if (stream.closed) process.nextTick(onClose);
+
       return;
     }
+
     try {
       stream.write(output, (error) => {
         if (!error) settle();
@@ -367,11 +425,14 @@ async function writePluginCliOutput(
 }
 
 export const PLUGIN_CLI_HEADERS_TIMEOUT_MS = 65 * 60 * 1000;
+
 let pluginCliDispatcher: Dispatcher | undefined;
+
 function getPluginCliDispatcher(): Dispatcher {
-  pluginCliDispatcher ??= new Agent({
-    headersTimeout: PLUGIN_CLI_HEADERS_TIMEOUT_MS,
-  });
+  pluginCliDispatcher ??= proxyEnvironmentConfigured()
+    ? new EnvHttpProxyAgent({ headersTimeout: PLUGIN_CLI_HEADERS_TIMEOUT_MS })
+    : new Agent({ headersTimeout: PLUGIN_CLI_HEADERS_TIMEOUT_MS });
+
   return pluginCliDispatcher;
 }
 
@@ -386,6 +447,7 @@ export async function runPluginCliCommand(
   input: PluginCliInputStream = process.stdin,
 ): Promise<number> {
   let resolvedArgv: string[];
+
   try {
     resolvedArgv = await materializeStdinFlag(argv, input);
   } catch (error) {
@@ -393,10 +455,13 @@ export async function runPluginCliCommand(
       streams.stderr,
       error instanceof Error ? error.message : String(error),
     );
+
     return 1;
   }
+
   const threadId = resolveContextThreadId();
   const projectId = resolveContextProjectId();
+
   const response = await cliFetch(
     `${baseUrl}/api/v1/plugins/${encodeURIComponent(pluginId)}/cli`,
     {
@@ -411,12 +476,14 @@ export async function runPluginCliCommand(
       dispatcher: getPluginCliDispatcher(),
     },
   );
+
   const result = (await response.json().catch(() => null)) as {
     exitCode?: unknown;
     stdout?: unknown;
     stderr?: unknown;
     error?: unknown;
   } | null;
+
   if (result === null || typeof result.exitCode !== "number") {
     await writePluginCliOutput(
       streams.stderr,
@@ -424,13 +491,17 @@ export async function runPluginCliCommand(
         ? result.error
         : `Unexpected response from the plugin CLI endpoint (HTTP ${response.status})`,
     );
+
     return 1;
   }
+
   if (typeof result.stdout === "string" && result.stdout.length > 0) {
     await writePluginCliOutput(streams.stdout, result.stdout);
   }
+
   if (typeof result.stderr === "string" && result.stderr.length > 0) {
     await writePluginCliOutput(streams.stderr, result.stderr);
   }
+
   return result.exitCode;
 }

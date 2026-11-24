@@ -30,9 +30,11 @@ export function tallyCliErrors(
   entries: readonly CliErrorLogEntry[],
 ): CliErrorTallyRow[] {
   const rows = new Map<string, CliErrorTallyRow>();
+
   for (const entry of entries) {
     const key = JSON.stringify([entry.command, entry.code, entry.token]);
     const existing = rows.get(key);
+
     if (existing === undefined) {
       rows.set(key, {
         code: entry.code,
@@ -43,9 +45,12 @@ export function tallyCliErrors(
       });
       continue;
     }
+
     existing.count += 1;
+
     if (entry.at > existing.lastAt) existing.lastAt = entry.at;
   }
+
   return [...rows.values()].sort(
     (left, right) =>
       right.count - left.count || right.lastAt.localeCompare(left.lastAt),
@@ -55,12 +60,12 @@ export function tallyCliErrors(
 export function registerDiagnosticsCommands(program: Command): void {
   const diagnostics = program
     .command("diagnostics")
-    .description("Inspect local bb CLI diagnostics");
+    .description("Inspect local Omnyo CLI diagnostics");
 
   diagnostics
     .command("cli-errors")
     .description(
-      "Tally failed bb invocations recorded on this machine, most frequent first (records the command path, error code, and the unknown command or flag; never argument values)",
+      "Tally failed Omnyo invocations recorded on this machine, most frequent first (records the command path, error code, and the unknown command or flag; never argument values)",
     )
     .option(
       "--since <duration>",
@@ -72,13 +77,17 @@ export function registerDiagnosticsCommands(program: Command): void {
       action(async (opts: CliErrorsOptions) => {
         const location = resolveCliErrorLogLocation();
         const logPath = formatCliErrorLogPath(location);
+
         if (opts.clear) {
           rmSync(logPath, { force: true });
           rmSync(`${logPath}.1`, { force: true });
+
           if (outputJson(opts, { ok: true, logPath })) return;
           console.log(`Cleared ${logPath}`);
+
           return;
         }
+
         const cutoff =
           opts.since === undefined
             ? null
@@ -91,10 +100,13 @@ export function registerDiagnosticsCommands(program: Command): void {
                     value: opts.since,
                   }),
               ).toISOString();
+
         const entries = readCliErrorLogEntries(location).filter(
           (entry) => cutoff === null || entry.at >= cutoff,
         );
+
         const rows = tallyCliErrors(entries);
+
         if (
           outputJson(opts, {
             enabled: isCliErrorLogEnabled(),
@@ -105,13 +117,17 @@ export function registerDiagnosticsCommands(program: Command): void {
         ) {
           return;
         }
+
         if (!isCliErrorLogEnabled()) {
-          console.log("Recording is off (BB_CLI_ERROR_LOG=0).");
+          console.log("Recording is off (OMNYO_CLI_ERROR_LOG=0).");
         }
+
         if (rows.length === 0) {
-          console.log(`No failed bb invocations recorded in ${logPath}`);
+          console.log(`No failed Omnyo invocations recorded in ${logPath}`);
+
           return;
         }
+
         const tableRows = rows.map((row) => [
           String(row.count),
           row.command.length === 0 ? "(top level)" : row.command,
@@ -119,6 +135,7 @@ export function registerDiagnosticsCommands(program: Command): void {
           row.token ?? "",
           row.lastAt,
         ]);
+
         printBorderlessTable(
           {
             head: ["Count", "Command", "Code", "Token", "Last seen"],

@@ -14,6 +14,7 @@ function frozenApp(state: { frozen: boolean }): Hono {
   );
   app.all("/api/v1/*", (context) => context.json({ ok: true }));
   app.all("/internal/*", (context) => context.json({ ok: true }));
+
   return app;
 }
 
@@ -35,9 +36,10 @@ describe("server move freeze middleware", () => {
         code: "server_moving",
         message:
           "The server is moving to another machine. Changes are paused until the move finishes or is cancelled.",
-        retryable: false,
+        retryable: true,
       });
     }
+
     for (const [method, path] of [
       ["GET", "/api/v1/threads"],
       ["HEAD", "/api/v1/threads"],

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 const MAX_RELATIVE_PATH_BYTES = 4096;
+
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
 
 export function isSafeRelativePath(value: string): boolean {
@@ -13,6 +14,7 @@ export function isSafeRelativePath(value: string): boolean {
   ) {
     return false;
   }
+
   return value
     .split("/")
     .every(
@@ -28,20 +30,25 @@ export function findRelativePathConflict(
   paths: readonly string[],
 ): string | null {
   const seen = new Set<string>();
+
   for (const path of paths) {
     if (seen.has(path)) {
       return path;
     }
+
     seen.add(path);
   }
+
   for (const path of paths) {
     const segments = path.split("/");
+
     for (let depth = 1; depth < segments.length; depth += 1) {
       if (seen.has(segments.slice(0, depth).join("/"))) {
         return path;
       }
     }
   }
+
   return null;
 }
 

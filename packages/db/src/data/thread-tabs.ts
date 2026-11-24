@@ -41,7 +41,9 @@ export function replaceStoredThreadTabs(
       .from(threadTabs)
       .where(eq(threadTabs.threadId, args.threadId))
       .get();
+
     const currentRevision = current?.revision ?? 0;
+
     if (currentRevision !== args.expectedRevision) {
       return { outcome: "conflict", revision: currentRevision };
     }
@@ -64,6 +66,7 @@ export function replaceStoredThreadTabs(
         },
       })
       .run();
+
     return { outcome: "updated", revision };
   });
 }

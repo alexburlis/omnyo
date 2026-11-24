@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Icon } from "@bb/shared-ui/icon";
-import { Button } from "@bb/shared-ui/button";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { appToast } from "@/components/ui/app-toast";
 import { invalidatePluginList } from "@/hooks/cache-owners/plugin-cache-owner";
@@ -19,21 +19,26 @@ import { pluginAdminErrorMessage } from "@/lib/plugin-admin-error";
 import { AddPluginDialog, type AddPluginInitial } from "./AddPluginDialog";
 
 const PLUGIN_GUIDE_ID = "plugin-api-docs";
+
 const PLUGIN_GUIDE_PATH = `/plugins/${PLUGIN_GUIDE_ID}/plugin-api`;
 
 export function OpenPluginGuideButton() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+
   const [installTarget, setInstallTarget] = useState<AddPluginInitial | null>(
     null,
   );
+
   const [installJobId, setInstallJobId] = useState<string | null>(null);
   const installJob = usePluginInstallJob(installJobId);
   useEffect(() => {
     if (installJob === null || isActivePluginInstallJob(installJob)) return;
     setInstallJobId(null);
+
     if (installJob.state === "succeeded") navigate(PLUGIN_GUIDE_PATH);
   }, [installJob, navigate]);
+
   const open = useMutation({
     meta: { showErrorToast: false },
     mutationFn: async () => {
@@ -41,24 +46,31 @@ export function OpenPluginGuideButton() {
         ...pluginListQueryOptions({ enabled: true }),
         staleTime: 0,
       });
+
       const guide = plugins.find((plugin) => plugin.id === PLUGIN_GUIDE_ID);
+
       if (guide === undefined) {
         const catalog = await searchPluginCatalog(fetch, PLUGIN_GUIDE_ID);
+
         const entry = catalog.entries.find(
           (candidate) =>
             candidate.pluginId === PLUGIN_GUIDE_ID &&
             candidate.source === `builtin:${PLUGIN_GUIDE_ID}` &&
             candidate.official,
         );
+
         if (entry === undefined) {
           throw new Error("Plugin Guide is unavailable in the catalog.");
         }
+
         return entry;
       }
+
       if (!guide.enabled) {
         await setPluginEnabled(fetch, PLUGIN_GUIDE_ID, true);
         await invalidatePluginList({ queryClient });
       }
+
       return null;
     },
     onError: (error) => {

@@ -7,17 +7,26 @@ import { wsManager } from "../lib/ws";
 export function useWebSocket(): void {
   const queryClient = useQueryClient();
   const handleDeletedResourceRouteChange = useDeletedResourceRouteOwner();
+
   const deletedResourceRouteChangeRef = useRef(
     handleDeletedResourceRouteChange,
   );
+
   deletedResourceRouteChangeRef.current = handleDeletedResourceRouteChange;
 
   useEffect(() => {
     const cacheEffects = createRealtimeCacheEffects({ queryClient });
+
     const unsubscribeConnected = wsManager.onConnected(
       cacheEffects.handleConnected,
     );
+
     const unsubscribeResumed = wsManager.onResumed(cacheEffects.handleResumed);
+
+    const unsubscribePluginSignal = wsManager.onPluginSignal(
+      cacheEffects.handlePluginSignal,
+    );
+
     const unsubscribe = wsManager.onChanged((message) => {
       cacheEffects.handleChanged(message);
       deletedResourceRouteChangeRef.current(message);
@@ -29,6 +38,7 @@ export function useWebSocket(): void {
       cacheEffects.dispose();
       unsubscribeConnected();
       unsubscribeResumed();
+      unsubscribePluginSignal();
       unsubscribe();
     };
   }, [queryClient]);

@@ -4,24 +4,24 @@ import {
   BranchPickerRow,
   BranchPickerSearch,
   BranchPickerSectionHeader,
-} from "@bb/shared-ui/branch-picker-primitives";
-import { Button } from "@bb/shared-ui/button";
+} from "@omnyo/shared-ui/branch-picker-primitives";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   COARSE_POINTER_COMPACT_ICON_SIZE_CLASS,
   COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { MenuHoverProvider } from "@bb/shared-ui/menu-item-hover";
-import { LIST_HOVER_TRANSITION } from "@bb/shared-ui/motion";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { MenuHoverProvider } from "@omnyo/shared-ui/menu-item-hover";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import {
   OPTION_BASE_CLASS_NAME,
   OPTION_INTERACTIVE_CLASS_NAME,
   OPTION_MUTED_CLASS_NAME,
   OPTION_TRIGGER_CONTENT_CLASS_NAME,
-} from "@bb/shared-ui/option-display";
-import { blurActiveKeyboardInputWithin } from "@bb/shared-ui/overlay-trigger";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
+} from "@omnyo/shared-ui/option-display";
+import { blurActiveKeyboardInputWithin } from "@omnyo/shared-ui/overlay-trigger";
+import { Popover, PopoverContent, PopoverTrigger } from "@omnyo/shared-ui/popover";
 import {
   definePluginApp,
   experimental_useBranches,
@@ -29,16 +29,18 @@ import {
   type CheckoutState,
   type JsonValue,
   type PluginEnvironmentProviderInputsProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import type { CheckoutBranchSelection } from "./contract.js";
 import { PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
 
 const CREATE_NEW_BRANCH_LABEL = "New branch";
+
 const BRANCH_LABEL_PREFIXES = [
   "Current:",
   "Checkout:",
   "New branch from:",
 ] as const;
+
 const CURRENT_PARENTHESES_LABEL_PREFIX = "Current (";
 
 interface CheckoutInputsValue {
@@ -65,12 +67,15 @@ function readBranch(
   if (typeof branch !== "object" || branch === null || Array.isArray(branch)) {
     return null;
   }
+
   if (branch.kind === "existing" && typeof branch.name === "string") {
     return { kind: "existing", name: branch.name };
   }
+
   if (branch.kind === "new" && typeof branch.baseBranch === "string") {
     return { kind: "new", baseBranch: branch.baseBranch };
   }
+
   return null;
 }
 
@@ -80,6 +85,7 @@ export function readCheckoutInputs(
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return { path: null, branch: null };
   }
+
   return {
     path: typeof value.path === "string" ? value.path : null,
     branch: readBranch(value.branch),
@@ -118,57 +124,74 @@ export function checkoutBlocker(state: CheckoutState): CheckoutBlocker | null {
       guidance: "Checking whether branch changes are available…",
     };
   }
+
   if (!state.isGit) {
     return {
       label: "Unknown",
       reason: "Checkout state is unavailable",
-      guidance: "Branch changes are unavailable because this checkout could not be inspected.",
+      guidance:
+        "Branch changes are unavailable because this checkout could not be inspected.",
     };
   }
+
   if (state.operation.kind !== "none") {
     if (state.operation.hasConflicts) {
       return {
         label: "Conflicts",
         reason: "Checkout blocked by unresolved conflicts",
-        guidance: "Resolve the conflicts and finish or abort the Git operation to change branches.",
+        guidance:
+          "Resolve the conflicts and finish or abort the Git operation to change branches.",
       };
     }
+
     const name = operationName(state);
+
     return {
       label: name,
       reason: `Checkout blocked by an in-progress ${name.toLowerCase()}`,
       guidance: `Finish or abort the ${name.toLowerCase()} to change branches.`,
     };
   }
+
   if (state.dirty) {
     return {
       label: "Dirty",
       reason: "Checkout blocked by uncommitted changes",
-      guidance: "Commit or stash the uncommitted changes in this checkout to create or switch branches.",
+      guidance:
+        "Commit or stash the uncommitted changes in this checkout to create or switch branches.",
     };
   }
+
   if (state.detached) {
     return {
       label: "Detached",
       reason: "Checkout blocked while HEAD is detached",
-      guidance: "Attach HEAD to a branch in this checkout to create or switch branches here.",
+      guidance:
+        "Attach HEAD to a branch in this checkout to create or switch branches here.",
     };
   }
+
   if (state.unborn) {
     return {
       label: "Empty repo",
       reason: "Checkout blocked before the first commit",
-      guidance: "Create the first commit in this checkout to create or switch branches.",
+      guidance:
+        "Create the first commit in this checkout to create or switch branches.",
     };
   }
+
   return null;
 }
 
 function currentMenuLabel(state: CheckoutState): string {
   if (state.currentBranch !== null) return `Current: ${state.currentBranch}`;
+
   if (state.detached) return "Current (detached)";
+
   if (state.unborn) return "Current (empty repo)";
+
   if (state.isGit === null) return "Checking checkout";
+
   return "Unknown checkout";
 }
 
@@ -182,7 +205,9 @@ function resolveCheckoutIntent(
   branch: CheckoutBranchSelection | null,
 ): CheckoutIntent {
   if (branch?.kind === "new") return "new";
+
   if (branch?.kind === "existing") return "checkout";
+
   return "current";
 }
 
@@ -197,8 +222,10 @@ function splitBranchLabel(label: string): BranchLabelParts {
       value: label.slice(CURRENT_PARENTHESES_LABEL_PREFIX.length, -1),
     };
   }
+
   for (const prefix of BRANCH_LABEL_PREFIXES) {
     const prefixWithSpace = `${prefix} `;
+
     if (label.startsWith(prefixWithSpace)) {
       return {
         kind: "prefixed",
@@ -207,6 +234,7 @@ function splitBranchLabel(label: string): BranchLabelParts {
       };
     }
   }
+
   return { kind: "plain", value: label };
 }
 
@@ -224,9 +252,11 @@ function BranchPickerText({
   const valueClassName = wrap
     ? "min-w-0 whitespace-normal break-words"
     : "min-w-0 truncate";
+
   const compactAffixProps = compactAffixesInPromptbox
     ? { "data-promptbox-hide-compact": "" }
     : {};
+
   if (label === CREATE_NEW_BRANCH_LABEL) {
     return (
       <span className={cn("flex min-w-0 items-baseline gap-1", className)}>
@@ -237,10 +267,13 @@ function BranchPickerText({
       </span>
     );
   }
+
   const parts = splitBranchLabel(label);
+
   if (parts.kind === "plain") {
     return <span className={cn(valueClassName, className)}>{parts.value}</span>;
   }
+
   if (parts.kind === "parenthetical") {
     return (
       <span
@@ -262,6 +295,7 @@ function BranchPickerText({
       </span>
     );
   }
+
   return (
     <span
       className={cn(
@@ -282,7 +316,9 @@ function BranchPickerText({
 
 function filterBranches(branches: readonly string[], query: string): string[] {
   const normalizedQuery = query.trim().toLowerCase();
+
   if (normalizedQuery.length === 0) return [...branches];
+
   return branches.filter((branch) =>
     branch.toLowerCase().includes(normalizedQuery),
   );
@@ -293,6 +329,7 @@ function orderBranches(
   selected: string | null,
 ): string[] {
   if (selected === null || !branches.includes(selected)) return [...branches];
+
   return [selected, ...branches.filter((branch) => branch !== selected)];
 }
 
@@ -306,31 +343,36 @@ function CheckoutInputsControl({
   const inputs = useMemo(() => readCheckoutInputs(value), [value]);
   const checkout = experimental_useCheckoutState({ hostId, projectId });
   const selectedCheckoutIntent = resolveCheckoutIntent(inputs.branch);
+
   const [checkoutIntent, setCheckoutIntent] = useState<CheckoutIntent>(
     selectedCheckoutIntent,
   );
+
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
+
   const branchState = experimental_useBranches({
     hostId,
     projectId,
     query: deferredQuery.trim().toLowerCase(),
   });
+
   const inputRef = useRef<HTMLInputElement>(null);
   const optionsScrollRef = useRef<HTMLDivElement>(null);
   const blocker = hostId === null ? null : checkoutBlocker(checkout);
-  const nextInputs = useMemo(
-    () => buildCheckoutInputs(inputs),
-    [inputs.branch, inputs.path],
-  );
+
+  const nextInputs = useMemo(() => buildCheckoutInputs(inputs), [inputs]);
+
   const blockerReason = blocker?.reason ?? null;
 
   useEffect(() => {
     if (inputs.branch !== null && blockerReason !== null) {
       onChange({ status: "blocked", reason: blockerReason });
+
       return;
     }
+
     onChange({ status: "ready", value: nextInputs });
   }, [blockerReason, inputs.branch, nextInputs, onChange]);
 
@@ -348,6 +390,7 @@ function CheckoutInputsControl({
       : inputs.branch?.kind === "new"
         ? inputs.branch.baseBranch
         : null;
+
   const branchOptions = useMemo(() => {
     const branches =
       hostId === null
@@ -362,9 +405,12 @@ function CheckoutInputsControl({
               ),
             ]
           : [...branchState.branches];
+
     const filtered = filterBranches(branches, deferredQuery);
+
     const selectedBranch =
       query.trim().length === 0 ? selectedBranchName : null;
+
     return orderBranches(filtered, selectedBranch);
   }, [
     hostId,
@@ -375,10 +421,13 @@ function CheckoutInputsControl({
     query,
     selectedBranchName,
   ]);
+
   const currentOptionLabel =
     hostId === null ? "Default branch" : currentMenuLabel(checkout);
+
   const showBranchChooser = checkoutIntent !== "current";
   const showOptionsSearch = showBranchChooser && blocker === null;
+
   const triggerLabel =
     inputs.branch?.kind === "existing"
       ? `Checkout: ${inputs.branch.name}`
@@ -387,6 +436,7 @@ function CheckoutInputsControl({
         : hostId === null
           ? "Default branch"
           : currentTriggerLabel(checkout);
+
   const triggerTitle =
     blocker?.reason ??
     (inputs.branch?.kind === "existing"
@@ -396,13 +446,16 @@ function CheckoutInputsControl({
         : hostId === null
           ? "Use the repository’s default branch"
           : currentMenuLabel(checkout));
+
   const inputsDisabled = projectId === null;
+
   const updateBranch = (branch: CheckoutBranchSelection | null) => {
     onChange({
       status: "ready",
       value: buildCheckoutInputs({ path: inputs.path, branch }),
     });
   };
+
   const updateOpen = (nextOpen: boolean) => {
     if (!nextOpen) {
       blurActiveKeyboardInputWithin(inputRef.current);
@@ -410,9 +463,12 @@ function CheckoutInputsControl({
     } else {
       void branchState.refresh().catch(() => undefined);
     }
+
     setOpen(nextOpen);
   };
+
   const closePicker = () => updateOpen(false);
+
   const selectBranchAndClose = (branch: string) => {
     updateBranch(
       checkoutIntent === "new"
@@ -517,6 +573,7 @@ function CheckoutInputsControl({
               onSelect={() => {
                 setCheckoutIntent("new");
                 const baseBranch = selectedBranchName ?? checkout.currentBranch;
+
                 if (baseBranch !== null) {
                   updateBranch({ kind: "new", baseBranch });
                 }
@@ -538,7 +595,10 @@ function CheckoutInputsControl({
               <BranchPickerText label="Checkout" className="flex-1" wrap />
             </BranchPickerRow>
             {blocker !== null ? (
-              <p role="status" className="px-2 py-2 text-xs leading-snug text-muted-foreground">
+              <p
+                role="status"
+                className="px-2 py-2 text-xs leading-snug text-muted-foreground"
+              >
                 {blocker.guidance}
               </p>
             ) : null}

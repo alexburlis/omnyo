@@ -3,7 +3,7 @@ import type {
   PendingInteractionToolUseApprovalSubject,
   ThreadEventItemPresentationIcon,
   ThreadEventItemPresentationTint,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 export interface PendingInteractionToolUseAsk {
   title: string;
@@ -22,6 +22,7 @@ export function describePendingInteractionToolUse(
   payload: ToolUseApprovalPendingInteractionPayload,
 ): PendingInteractionToolUseAsk {
   const { tool, presentation } = payload.subject;
+
   return {
     title: payload.reason ?? presentation.label.pending,
     tool,

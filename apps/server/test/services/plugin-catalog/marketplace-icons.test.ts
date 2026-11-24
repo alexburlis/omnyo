@@ -10,10 +10,12 @@ import {
 const SVG = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h16v16H0z"/></svg>',
 );
+
 const PNG = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   Buffer.alloc(16),
 ]);
+
 const WEBP = Buffer.concat([
   Buffer.from("RIFF"),
   Buffer.from([0, 0, 0, 0]),
@@ -22,6 +24,7 @@ const WEBP = Buffer.concat([
 ]);
 
 const base = "https://cdn.example/icons/widgets";
+
 const cleanup: string[] = [];
 
 afterEach(async () => {
@@ -73,10 +76,11 @@ describe("marketplace icon validation", () => {
   });
 
   it("bounds a local icon read before validation", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bb-local-icon-bound-"));
+    const directory = await mkdtemp(join(tmpdir(), "omnyo-local-icon-bound-"));
     cleanup.push(directory);
     const path = join(directory, "large.png");
     const handle = await open(path, "w");
+
     try {
       await handle.truncate(3 * 1024 * 1024 * 1024);
     } finally {

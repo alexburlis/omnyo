@@ -6,6 +6,7 @@ import type {
   ReactNode,
 } from "react";
 import type {
+  InboxSnapshot,
   PermissionMode,
   PromptInput,
   ProviderInfo,
@@ -17,19 +18,20 @@ import type {
   ThreadRuntimeDisplayStatus,
   ThreadStatus,
   WorkspaceGitOperation,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   CreateExecutionInputSources,
   CreateThreadEnvironmentArgs,
-} from "@bb/server-contract";
+  ProjectResponse,
+} from "@omnyo/server-contract";
 import type {
-  BbSdkAreas,
+  OmnyoSdkAreas,
   PluginThreadMetadataListArgs,
   PluginThreadMetadataListResult,
   ThreadPluginMetadataArgs,
   ThreadPluginMetadataResult,
   ThreadPluginMetadataUpdateArgs,
-} from "@bb/sdk";
+} from "@omnyo/sdk";
 import type { JsonValue } from "./json-value.js";
 import type {
   PluginRpcCallArgs,
@@ -38,10 +40,10 @@ import type {
 } from "./rpc-contract.js";
 
 /**
- * The `@get-bb/plugin-sdk/app` contract (plugin design §5.2) — pure types with no
- * side effects. The BB app imports these to keep its real implementation in
+ * The `@omnyo/plugin-sdk/app` contract (plugin design §5.2) — pure types with no
+ * side effects. The Omnyo app imports these to keep its real implementation in
  * sync (`satisfies PluginSdkApp`). Plugin authors import the same shapes through
- * `@get-bb/plugin-sdk/app`.
+ * `@omnyo/plugin-sdk/app`.
  *
  * Per-slot props are versioned contracts: additive-only within an SDK major.
  */
@@ -78,7 +80,7 @@ export interface PluginNavPanelProps {
    * route is `/plugins/<pluginId>/<path>/*`, so a deep link like
    * `/plugins/notes/notes/work/ideas.md` renders the panel with
    * `subPath: "work/ideas.md"`. Navigate within the panel via
-   * `useBbNavigate().toPluginPanel(path, { subPath })` — browser
+   * `experimental_useAppNavigate().toPluginPanel(path, { subPath })` — browser
    * back/forward then walks panel-internal history.
    */
   subPath: string;
@@ -134,7 +136,7 @@ export interface ExperimentalQuestionShortcut {
 }
 
 /**
- * The keyboard shortcuts bb binds while a pending interaction is open. The
+ * The keyboard shortcuts Omnyo binds while a pending interaction is open. The
  * host owns the bindings (users can remap them); a form shows them and decides
  * what choosing an option means.
  */
@@ -155,16 +157,15 @@ export interface ExperimentalQuestionFormHost {
 
 /**
  * Props of the host-owned `experimental_VoiceInputTextarea`: a controlled
- * textarea with bb's voice input. Other textarea attributes, including `ref`
+ * textarea with Omnyo's voice input. Other textarea attributes, including `ref`
  * and `className`, reach the underlying `<textarea>`; the caller styles it and
  * the host adds room for its microphone controls when voice input is
  * available.
  */
-export interface ExperimentalVoiceInputTextareaProps
-  extends Omit<
-    ComponentPropsWithRef<"textarea">,
-    "value" | "defaultValue" | "onChange" | "children"
-  > {
+export interface ExperimentalVoiceInputTextareaProps extends Omit<
+  ComponentPropsWithRef<"textarea">,
+  "value" | "defaultValue" | "onChange" | "children"
+> {
   value: string;
   /**
    * Receives typed edits and finished transcripts, which the host appends to
@@ -191,6 +192,15 @@ export interface ExperimentalSidebarFooterDisclosureProps {
 }
 
 /**
+ * What the sidebar shows, chosen in the navigation rail. `inbox` covers every
+ * project; `project` narrows the sidebar to one project of the catalog,
+ * including Personal and projects without chats.
+ */
+export type PluginSidebarScope =
+  | { kind: "inbox" }
+  | { kind: "project"; projectId: string };
+
+/**
  * Props passed to an `experimental_threadList` component — the sidebar's
  * scrolling thread area, replaced wholesale by one plugin.
  */
@@ -202,11 +212,18 @@ export interface PluginThreadListProps {
   /** True on phone-width viewports and coarse pointers. */
   isCompactViewport: boolean;
   /**
+   * The rail's current scope. With `inbox`, list chats from every project.
+   * With `project`, list only the chats of `projectId`. The host persists the
+   * choice per device and moves a project scope to the project of a chat the
+   * user opens elsewhere. Hosts without a project rail omit it.
+   */
+  experimental_scope?: PluginSidebarScope;
+  /**
    * Call after the user opens a thread. It closes the mobile sidebar drawer.
    */
   onNavigate: () => void;
   /**
-   * Compatibility value for the former sidebar search field. BB now searches
+   * Compatibility value for the former sidebar search field. Omnyo now searches
    * threads in the quick palette, so the host always supplies "".
    *
    * @deprecated The quick palette owns thread search. Ignore this value.
@@ -216,11 +233,13 @@ export interface PluginThreadListProps {
 
 /**
  * Props passed to an `experimental_threadHeaderAction` component, rendered in
- * the thread header's action row.
+ * the thread's header controls: the window title bar's right cluster for a
+ * single wide pane, or the pane's own header row in split panes. Phone-width
+ * layouts do not mount it (see {@link PluginThreadHeaderActionRegistration}).
  */
 export interface PluginThreadHeaderActionProps {
   /**
-   * The thread this header belongs to. Never null: the slot is not rendered
+   * The thread these controls belong to. Never null: the slot is not rendered
    * on the compose screen or other non-thread routes. A split layout renders
    * one header per pane, so the component mounts once per visible thread,
    * each with its own id — keep per-thread state in the component, never in a
@@ -229,9 +248,47 @@ export interface PluginThreadHeaderActionProps {
   threadId: string;
   projectId: string;
   /**
-   * True on phone-width viewports and coarse pointers. Collapse to an
-   * icon-sized control when it is true — the row is short.
+   * True on coarse (touch) pointers, such as a tablet, where Omnyo's own
+   * header controls grow to touch size. Collapse to an icon-sized control when
+   * it is true. Never true because of width alone: phone-width layouts do not
+   * mount header actions at all.
    */
+  isCompactViewport: boolean;
+}
+
+/**
+ * Props passed to an `experimental_threadView` component, which renders the
+ * main pane of an open thread below the host-owned thread header.
+ *
+ * The three nodes are alternatives: render `defaultView`, or any of
+ * `transcript` and `composer`. `defaultView` already contains the composer, so
+ * rendering it together with `composer` mounts two composers for one thread.
+ */
+export interface PluginThreadViewProps {
+  /**
+   * The thread this pane shows. A split layout mounts the view once per pane,
+   * each with its own id — keep per-thread state in the component.
+   */
+  threadId: string;
+  projectId: string;
+  /**
+   * Core's unmodified main pane (timeline + composer). Render it for threads
+   * this plugin does not claim.
+   */
+  defaultView: ReactNode;
+  /**
+   * Core's transcript without the composer, for a plugin view that shows
+   * history on demand.
+   */
+  transcript: ReactNode;
+  /**
+   * Core's thread composer alone (send, queue, drafts, banners), for a plugin
+   * view that replaces the transcript. Place it at the bottom of a flex column;
+   * it does not shrink. Sending does not scroll a separately rendered
+   * `transcript`.
+   */
+  composer: ReactNode;
+  /** True on phone-width viewports and coarse pointers. */
   isCompactViewport: boolean;
 }
 
@@ -240,9 +297,9 @@ export type ExperimentalPluginBrowserPageWorld = "isolated" | "main";
 
 export interface ExperimentalPluginBrowserPageEvaluateOptions {
   /**
-   * `isolated` (default) runs in a BB-owned world that shares the page DOM but
-   * not page globals, and binds `bb.postMessage(data)`. `main` runs beside the
-   * page's own scripts, where `bb` is `null`.
+   * `isolated` (default) runs in an Omnyo-owned world that shares the page DOM but
+   * not page globals, and binds `api.postMessage(data)`. `main` runs beside the
+   * page's own scripts, where `omnyo` is `null`.
    */
   world?: ExperimentalPluginBrowserPageWorld;
 }
@@ -255,7 +312,7 @@ export interface ExperimentalPluginBrowserPage {
   /**
    * Evaluate a JavaScript expression and resolve its JSON-serialized value.
    * Promises are awaited and `undefined` resolves to `null`. The expression
-   * can reference `bb`. Rejects when the tab is gone or the expression throws.
+   * can reference `omnyo`. Rejects when the tab is gone or the expression throws.
    * Anything the expression installs is lost when the document navigates.
    */
   evaluate(
@@ -264,9 +321,16 @@ export interface ExperimentalPluginBrowserPage {
   ): Promise<JsonValue>;
   /**
    * Subscribe to values this plugin's isolated-world scripts in this tab send
-   * with `bb.postMessage(data)`. Returns the unsubscribe function.
+   * with `api.postMessage(data)`. Returns the unsubscribe function.
    */
   onMessage(listener: (data: JsonValue) => void): () => void;
+  /** Capture this bound desktop tab through its existing native owner. */
+  experimental_capture?(): Promise<{
+    base64: string;
+    mimeType: "image/jpeg";
+    width: number;
+    height: number;
+  }>;
 }
 
 export interface ExperimentalPluginBrowserToolbarActionProps {
@@ -308,7 +372,7 @@ export interface PluginFileOpenerProps {
   source: PluginFileOpenerSource;
   /**
    * One-based, inclusive lines requested by the latest file open, or null when
-   * untargeted. BB supplies a new object for each targeted open, including an
+   * untargeted. Omnyo supplies a new object for each targeted open, including an
    * identical target in the active tab. Observe object identity to navigate
    * again; keep the editor model intact. Older hosts may omit this prop.
    *
@@ -319,7 +383,7 @@ export interface PluginFileOpenerProps {
     endLineNumber: number;
   } | null;
   /**
-   * BB's file preview, bound to this file. Render it to delegate conditionally
+   * Omnyo's file preview, bound to this file. Render it to delegate conditionally
    * without re-entering plugin replacement resolution.
    *
    * @experimental Audit before relying on this as a stable contract.
@@ -359,9 +423,9 @@ export interface ExperimentalDiffFullFileContents {
 }
 
 /**
- * Props of the host-owned `experimental_SourceCode` component — BB's source
+ * Props of the host-owned `experimental_SourceCode` component — Omnyo's source
  * viewer. The host owns syntax highlighting, gutters, wrapping, line-selection
- * presentation, and the live BB code theme; the caller owns loading the text
+ * presentation, and the live Omnyo code theme; the caller owns loading the text
  * and any surrounding chrome.
  */
 export interface SourceCodeProps {
@@ -381,11 +445,11 @@ export interface SourceCodeProps {
 }
 
 /**
- * Props of the host-owned `experimental_Diff` component — BB's diff viewer.
+ * Props of the host-owned `experimental_Diff` component — Omnyo's diff viewer.
  * The host owns patch normalization (a patch without a `diff --git` header is
  * completed from `path`), syntax highlighting, unified/split presentation,
  * gutters, line-selection presentation, optional full-file context expansion,
- * and the live BB code theme. Content that cannot be parsed as a patch
+ * and the live Omnyo code theme. Content that cannot be parsed as a patch
  * degrades to plain monospace text.
  */
 export interface DiffProps {
@@ -405,7 +469,7 @@ export interface DiffProps {
   showLineNumbers?: boolean;
   /**
    * Complete text for both file sides. When present and consistent with the
-   * patch, BB enables expand-context controls between hunks. The caller owns
+   * patch, Omnyo enables expand-context controls between hunks. The caller owns
    * loading these contents; omit the field to render from the patch alone.
    */
   experimental_fullFileContents?: ExperimentalDiffFullFileContents;
@@ -423,7 +487,7 @@ export interface PluginSourceCodeRendererProps {
   overflow: CodeOverflowMode;
   highlightedLines: SourceCodeLineRange | null;
   /**
-   * BB's source renderer, bound to this request. Render it to delegate
+   * Omnyo's source renderer, bound to this request. Render it to delegate
    * conditionally without re-entering plugin replacement resolution.
    *
    * @experimental Audit before relying on this as a stable contract.
@@ -446,12 +510,12 @@ export interface PluginDiffRendererProps {
    * Caller-resolved text for both sides, or `null` when the caller supplied
    * only the patch. A replacement can use this to implement context expansion,
    * but must verify that the paths and hunk lines agree with `patch` before
-   * treating the contents as complete. BB's original renderer performs that
+   * treating the contents as complete. Omnyo's original renderer performs that
    * verification when it mounts.
    */
   experimental_fullFileContents: ExperimentalDiffFullFileContents | null;
   /**
-   * BB's diff renderer, bound to this request. Render it to delegate
+   * Omnyo's diff renderer, bound to this request. Render it to delegate
    * conditionally without re-entering plugin replacement resolution.
    *
    * @experimental Audit before relying on this as a stable contract.
@@ -460,8 +524,8 @@ export interface PluginDiffRendererProps {
 }
 
 /**
- * Message context passed to a `messageDirective` component — the assistant
- * (or nested agent) message that contained the directive.
+ * Message context passed to a `messageDirective` component — the user,
+ * assistant, or nested agent message that contained the directive.
  */
 export interface PluginMessageDirectiveMessage {
   id: string;
@@ -510,7 +574,7 @@ export type ExperimentalCodeFenceStatus = "streaming" | "closed" | "unclosed";
 /**
  * Props passed to an `experimental_codeFenceRenderer` component — one fenced
  * code block whose info-string language the plugin claimed, inside assistant
- * (or nested agent) message Markdown. BB mounts the component once per fence
+ * (or nested agent) message Markdown. Omnyo mounts the component once per fence
  * and keeps that instance for as long as the message stays on screen, so
  * component state survives the whole stream, including the moment the fence
  * closes and the moment the reply finishes.
@@ -533,7 +597,7 @@ export interface ExperimentalCodeFenceRendererProps {
   index: number;
   message: PluginMessageDirectiveMessage;
   /**
-   * BB's own code block for this fence. Render it to show the source, for
+   * Omnyo's own code block for this fence. Render it to show the source, for
    * example while `status` is `"streaming"` or when `code` does not parse.
    */
   Original: ComponentType;
@@ -566,12 +630,12 @@ export interface PluginSettingsSectionRegistration {
 }
 
 /**
- * Render app-wide plugin UI outside BB's layout regions.
+ * Render app-wide plugin UI outside Omnyo's layout regions.
  *
  * The host mounts each registration once per app window through the ordinary
  * plugin React boundary. The component therefore keeps PluginContext, router,
  * query, realtime, and other app-level SDK contexts when it renders fixed UI
- * or creates a React portal. BB supplies no chrome, positioning, visibility,
+ * or creates a React portal. Omnyo supplies no chrome, positioning, visibility,
  * or interaction policy; the plugin owns those details and responsive
  * behavior. Registrations are additive and a crash hides only that overlay.
  */
@@ -582,10 +646,155 @@ export interface ExperimentalAppOverlayRegistration {
 }
 
 /**
+ * Props passed to an `experimental_sidebarFooterCard` component.
+ */
+export interface ExperimentalSidebarFooterCardProps {
+  /**
+   * Where the host mounted this card. `footer` is the one-line app footer
+   * that spans the desktop window, about 30px tall, and the phone drawer's
+   * bottom rail, which is far narrower; `sidebar` is the sidebar footer above
+   * its action row. Render a layout that fits the placement. Earlier hosts used
+   * `rail` for the narrow navigation-rail column, and older hosts omit it and
+   * mount cards only in the rail.
+   */
+  experimental_placement?: "rail" | "sidebar" | "footer";
+}
+
+/**
+ * Mount an additive card in the app footer on desktop, or in the drawer's
+ * bottom rail and sidebar footer on compact viewports. The host supplies the
+ * ordinary plugin contexts and crash boundary, passes the placement, and
+ * keeps its own controls in place.
+ */
+export interface ExperimentalSidebarFooterCardRegistration {
+  /** Unique within the plugin; letters, digits, `-`, `_`. */
+  id: string;
+  component: ComponentType<ExperimentalSidebarFooterCardProps>;
+}
+
+/**
+ * Props passed to an `experimental_titleBarCenter` component.
+ *
+ * Deliberately empty while the component reads live app state through SDK
+ * hooks; versioned additive like the other slot props.
+ */
+export interface ExperimentalTitleBarCenterProps {}
+
+/**
+ * Mount an additive component in the center column of the window's top rail,
+ * between the left cluster (window controls, then the breadcrumbs or a single
+ * pane's thread title) and the right cluster (thread controls and the
+ * right-panel toggle). The host mounts every registration in plugin load
+ * order after any `experimental_threadCompanion` toolbar items, with the
+ * ordinary plugin contexts and crash boundary, renders nothing when no plugin
+ * registers, and lets the component receive pointer events inside the desktop
+ * window's drag region. A crash hides only that registration. Render one
+ * compact row; the left cluster truncates before it reaches it. Phone-width
+ * layouts have no top rail and do not mount it.
+ */
+export interface ExperimentalTitleBarCenterRegistration {
+  /** Unique within the plugin; letters, digits, `-`, `_`. */
+  id: string;
+  component: ComponentType<ExperimentalTitleBarCenterProps>;
+}
+
+/**
+ * What an `experimental_sidebarEntry` status hook reports. `dot` lights the
+ * row's indicator (`"attention"` amber, `"failed"` red); `tooltip` replaces
+ * the registration's idle tooltip while set; `state` shows a muted
+ * `"Paused"` label before the dot or a muted `"!"` in place of it.
+ */
+export interface ExperimentalSidebarEntryStatus {
+  dot: "attention" | "failed" | null;
+  tooltip: string | null;
+  state: "paused" | "error" | null;
+}
+
+/**
+ * A labeled row the host draws in the sidebar body, directly under "New
+ * thread" and above the chat list, in every sidebar scope and in the phone
+ * drawer. It stays outside the scrolling list and outside any replacement
+ * chat list. The row opens `panel`, one of this plugin's own `navPanel`
+ * registrations, and that page gets no rail icon. The host draws the label,
+ * icon, selection and indicator; the plugin only supplies state through
+ * `useStatus`, which the host calls inside the plugin's contexts and crash
+ * boundary. Return `null` while loading. A crash or thrown hook shows the
+ * error state without hiding the row. When several enabled plugins register
+ * an entry, the host shows only the first in plugin load order.
+ *
+ * Experimental: see docs/api_to_audit.md.
+ */
+export interface ExperimentalSidebarEntryRegistration {
+  /** Unique within the plugin; letters, digits, `-`, `_`. */
+  id: string;
+  title: string;
+  icon: IconName;
+  /** The `id` of a `navPanel` registered by the same plugin. */
+  panel: string;
+  /** Tooltip while the status reports none. */
+  tooltip: string;
+  useStatus?: () => ExperimentalSidebarEntryStatus | null;
+}
+
+/**
+ * Where the host currently shows an `experimental_threadCompanion`:
+ *
+ * - `"aside"`: a 288px floating card at the top right of the thread pane,
+ *   beside the chat column. It never scrolls with the timeline.
+ * - `"toolbar"`: one compact row, at most 28px tall, in the window title bar's
+ *   center column.
+ * - `"inline"`: a full-width card in the stack above the composer, on
+ *   phone-width layouts.
+ */
+export type ExperimentalThreadCompanionPlacement =
+  | "aside"
+  | "toolbar"
+  | "inline";
+
+/**
+ * Props passed to an `experimental_threadCompanion` component.
+ */
+export interface ExperimentalThreadCompanionProps {
+  /** The thread the companion accompanies. */
+  threadId: string;
+  projectId: string;
+  /**
+   * The host's current placement. Lay the component out for it: a card for
+   * `"aside"` and `"inline"`, one short row for `"toolbar"`. The component
+   * stays mounted when the placement changes, so its state survives the move.
+   */
+  placement: ExperimentalThreadCompanionPlacement;
+}
+
+/**
+ * Show a live companion for the open thread. The host owns where it appears:
+ * phone-width layouts render it `"inline"` above the composer. Otherwise it is
+ * an `"aside"` card while the pane has room beside the centered chat column,
+ * and a `"toolbar"` row in the window title bar when it does not. The host
+ * adds no control of its own: the component's `"toolbar"` row is the way in,
+ * so let it open the full card when the row is clicked.
+ * In split panes, each pane shows its aside only when it fits, and only the
+ * focused pane's companion takes the toolbar. When the placement changes,
+ * the host moves the mounted component and animates the move.
+ *
+ * The host mounts the component with the ordinary plugin contexts and crash
+ * boundary. A crash hides only that registration.
+ */
+export interface ExperimentalThreadCompanionRegistration {
+  /** Unique within the plugin; letters, digits, `-`, `_`. */
+  id: string;
+  /** Names the companion. The host does not display it today. */
+  title: string;
+  /** Identifies the companion. The host does not display it today. */
+  icon: IconName;
+  component: ComponentType<ExperimentalThreadCompanionProps>;
+}
+
+/**
  * A name the host resolves to a glyph, in this order: a name any plugin
- * registered with `app.experimental_icons.register()`, then a built-in BB icon
+ * registered with `app.experimental_icons.register()`, then a built-in Omnyo icon
  * name (`"Zap"`), then a namespaced `"<pluginId>/<name>"` glyph naming an
- * entry of that plugin's manifest `bb.branding.experimental_icons` map. A
+ * entry of that plugin's manifest `omnyo.branding.experimental_icons` map. A
  * registration therefore shadows a built-in, and either shadows a declared
  * icon of the same name. Names that resolve to none of the three fall back to
  * the surface's generic icon.
@@ -597,7 +806,7 @@ export interface ExperimentalAppOverlayRegistration {
  * registrations can be any React component but live only while the plugin's
  * app bundle is loaded.
  */
-type BbIconName = string;
+type IconName = string;
 
 /**
  * Owner-defined validator for a fixed tab's transient target. The host first
@@ -631,7 +840,7 @@ export type PluginFixedTabRegistration<Target extends JsonValue = never> =
   ExperimentalPluginFixedTabReference<Target> & {
     title: string;
     /** Resolved names take precedence over plugin branding; unknown names fall back to branding. */
-    icon: BbIconName;
+    icon: IconName;
     component: ComponentType<PluginNavPanelProps>;
     /** `flush` lets the component own padding and scrolling. */
     layout?: "padded" | "flush";
@@ -647,13 +856,13 @@ export interface PluginNavPanelRegistration {
   id: string;
   title: string;
   /** Resolved names take precedence over plugin branding in navigation and the header; unknown names fall back to branding. */
-  icon: BbIconName;
+  icon: IconName;
   /** URL segment under `/plugins/<pluginId>/`; letters, digits, `-`, `_`. */
   path: string;
   component: ComponentType<PluginNavPanelProps>;
   /**
    * Ordered, non-closable tabs shown in this page's host-owned right panel.
-   * BB owns selection and persistence and always includes its native Browser
+   * Omnyo owns selection and persistence and always includes its native Browser
    * and Terminal tools beside them. One tab is active in each visible split
    * pane, so multiple fixed-tab components can be mounted concurrently. A
    * component mounts only while its tab is active in a visible pane and the
@@ -719,7 +928,7 @@ export interface PluginThreadPanelActionContext {
    * Returns true when the host accepted the open; false when it declined —
    * from this launcher, only a `params` that is not a JSON value. The true /
    * false contract is shared with `messageAction`'s `openPanel` and
-   * `useBbNavigate().openThreadPanel` (which decline for more reasons) so one
+   * `experimental_useAppNavigate().openThreadPanel` (which decline for more reasons) so one
    * open routine can serve every action kind. A decline is never thrown: the
    * host logs it and reports it here.
    */
@@ -735,7 +944,7 @@ export interface PluginThreadPanelActionRegistration {
    * Resolved names take precedence over plugin branding in the launcher and
    * opened tabs. Omitted or unknown names fall back to plugin branding.
    */
-  icon?: BbIconName;
+  icon?: IconName;
   /** Rendered inside every panel tab this action opens. */
   component: ComponentType<PluginThreadPanelProps>;
   /**
@@ -775,7 +984,7 @@ export interface PluginNewThreadPanelActionRegistration {
   /** Label of the action row in the panel's new-tab launcher. */
   title: string;
   /** Resolved names take precedence over plugin branding; omitted or unknown names fall back to branding. */
-  icon?: BbIconName;
+  icon?: IconName;
   /** Rendered inside every panel tab this action opens. */
   component: ComponentType<PluginNewThreadPanelProps>;
   /** Host framing; matches `threadPanelAction`. */
@@ -787,16 +996,23 @@ export interface PluginNewThreadPanelActionRegistration {
   run?(context: PluginNewThreadPanelActionContext): void | Promise<void>;
 }
 
+/**
+ * A form for a pending interaction. Where it renders follows the request: an
+ * `api.ui.requestInput` form belongs to no turn, so it is pinned above the
+ * composer, which stays usable with its queue, and on phones it waits as a
+ * chip until tapped. A provider bridge's `interaction/request` blocks its turn,
+ * so its form replaces the composer and opens at once on phones.
+ */
 export interface PluginPendingInteractionRegistration {
   /**
    * The renderer's plugin-local name. Two addresses resolve to it: the
-   * `rendererId` a backend passes to `bb.ui.requestInput`, and the `<name>`
+   * `rendererId` a backend passes to `api.ui.requestInput`, and the `<name>`
    * half of a provider bridge's `interaction/request` kind
    * `"<pluginId>/<name>"` (docs/provider-plugin-api.md §4), which the client
    * splits on the slash to find this registration under its plugin.
-   * `bb.ui.requestInput` validates `rendererId` against `/^[a-zA-Z0-9_-]+$/`;
+   * `api.ui.requestInput` validates `rendererId` against `/^[a-zA-Z0-9_-]+$/`;
    * an extension kind must match `/^[a-z0-9-]+\/[a-z0-9-]+$/`
-   * (`EXTENSION_KIND_PATTERN` in @bb/domain), so an id addressable both ways
+   * (`EXTENSION_KIND_PATTERN` in @omnyo/domain), so an id addressable both ways
    * uses lowercase letters, digits, and "-" only.
    */
   id: string;
@@ -823,7 +1039,7 @@ export interface PluginSidebarFooterActionRegistration {
   /** Tooltip and accessible label for the icon button. */
   title: string;
   /** Resolved names take precedence over plugin branding; omitted or unknown names fall back to branding. */
-  icon: BbIconName;
+  icon: IconName;
   /**
    * Runs when the user activates the action (e.g. call `openSettings()`,
    * open a panel via other surfaces, toast). Errors (sync or async) are
@@ -844,7 +1060,7 @@ export interface ExperimentalSidebarFooterItemBase {
   id: string;
   /** Tooltip and accessible label for the host-rendered icon button. */
   label: string;
-  icon: BbIconName;
+  icon: IconName;
 }
 
 /** A sidebar-footer item that runs a callback when activated. */
@@ -889,35 +1105,12 @@ export interface ExperimentalSidebarFooter {
 // ---------------------------------------------------------------------------
 
 /**
- * The one status bb would paint for a thread, already resolved through the
- * host's precedence (attention before work; plan and goal before the generic
- * spinner). Draw your own glyph for it — the SDK ships no status component.
- *
- * Treat an unrecognized value as "none": bb adds kinds over time, and an
- * older plugin must degrade to drawing nothing rather than throwing.
- *
- * "draft" and "working-draft" are never reported here: an unsubmitted composer
- * draft is per-client state the host reads per row, which an array-wide view
- * cannot. A thread holding a draft reports whatever it would report without
- * one. "queued-failed" and "queued-waiting" are reported, with the same
- * precedence bb's list uses (a failed send outranks the unread dot; a waiting
- * message ranks just below it).
+ * The glyph mapped from the server-owned work summary. Read unreadness from
+ * `isUnread` independently. Local drafts may decorate the glyph without
+ * changing work state or archive eligibility.
  */
 export type PluginSidebarThreadIndicator =
-  | "unread-error"
-  | "waiting-for-input"
-  | "working-draft"
-  | "workflow"
-  | "background-agent"
-  | "background-command"
-  | "plan-mode"
-  | "goal"
-  | "runtime"
-  | "queued-failed"
-  | "draft"
-  | "unread-success"
-  | "queued-waiting"
-  | "none";
+  import("@omnyo/domain").ThreadListIndicatorKind;
 
 /** Live work counts on a thread. All zero means nothing is running. */
 export interface PluginSidebarThreadActivity {
@@ -926,6 +1119,13 @@ export interface PluginSidebarThreadActivity {
   backgroundCommands: number;
   planMode: number;
   goals: number;
+  /**
+   * Subagents running now: delegated agents in the open turn, background
+   * agents, and running workflow agents, one per spawning call. Absent only
+   * on hosts that predate the field.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  experimental_subagents?: number;
 }
 
 /**
@@ -936,19 +1136,25 @@ export interface PluginSidebarThreadActivity {
  * field. Timestamps are epoch milliseconds.
  */
 export interface PluginSidebarThread {
+  /** Server-owned work summary; absent or null only on legacy hosts. */
+  experimental_work?: import("@omnyo/domain").ThreadWorkSummary | null;
+  /** Native question/callback state; absent only on older servers. */
+  experimental_attention?: import("@omnyo/domain").ThreadAttention;
   id: string;
   projectId: string;
   /** Null while a thread is still unnamed; pair with `titleFallback`. */
   title: string | null;
   titleFallback: string | null;
   /**
-   * What bb shows for this thread as plain text: `title`, else
+   * What Omnyo shows for this thread as plain text: `title`, else
    * `titleFallback`, else a short id, with any `@project:`, `@section:`, and
    * `@thread:` mentions in it resolved to their names. Sort on it and use it
    * for accessible names; render {@link PluginSdkApp.ThreadTitle} for the
    * same text with mention chips.
    */
   displayTitle: string;
+  /** Plugin-authored second line; null when no active plugin owns a subtitle. */
+  experimental_subtitle: string | null;
   /** The thread this one was forked from or spawned under; null at the root. */
   parentThreadId: string | null;
   /**
@@ -956,11 +1162,27 @@ export interface PluginSidebarThread {
    * when its owner stops); null when the thread owns its own lifecycle.
    */
   lifecycleOwnerThreadId: string | null;
-  /** The thread this one was forked from; null unless `originKind` is "fork". */
+  /**
+   * The thread this one was forked from (`originKind` "fork") or handed off
+   * from (`originKind` "handoff"); null when `originKind` is null.
+   */
   sourceThreadId: string | null;
   sectionId: string | null;
-  /** How this thread came to exist under its parent; null for root threads. */
-  originKind: "fork" | null;
+  /**
+   * The chat group this chat sits in (see
+   * {@link PluginSidebarThreadsState.experimental_groups}); null when
+   * ungrouped. A sub-chat shows under its parent whatever its own group.
+   * Absent only on hosts that predate groups. Experimental: see
+   * docs/api_to_audit.md.
+   */
+  experimental_groupId?: string | null;
+  /**
+   * How this thread came from `sourceThreadId`: "fork" copies the source's
+   * history, "handoff" continues the source's work under the same title.
+   * The source and its existing children become children of the handoff.
+   * Null when the thread has no source.
+   */
+  originKind: "fork" | "handoff" | null;
   /** The plugin that spawned it, or null for non-plugin origins. */
   originPluginId: string | null;
   /** The agent provider this thread runs on; resolve it through
@@ -968,7 +1190,7 @@ export interface PluginSidebarThread {
   providerId: string;
 
   /**
-   * The thread's execution status. bb's list sorts busy threads ("starting",
+   * The thread's execution status. Omnyo's list sorts busy threads ("starting",
    * "active", "stopping") above idle ones. Treat an unknown value as "idle".
    */
   status: ThreadStatus;
@@ -1001,23 +1223,38 @@ export interface PluginSidebarThread {
   /**
    * The user's manual order among pinned threads (lexicographic, ascending);
    * null for an unpinned thread or a pin that has never been reordered, which
-   * bb's list sorts after keyed pins by `pinnedAt`.
+   * Omnyo's list sorts after keyed pins by `pinnedAt`.
    */
   pinSortKey: string | null;
   isArchived: boolean;
   /** When the thread was archived (epoch ms); null when not archived. */
   archivedAt: number | null;
   /**
-   * The app-relative URL bb opens for this thread, e.g.
+   * When the thread's family was moved to the Shelf (epoch ms); null when it
+   * is not shelved. A shelved thread is not archived: archiving clears it,
+   * and new activity in the family returns it. Experimental: see
+   * docs/api_to_audit.md.
+   */
+  experimental_shelvedAt: number | null;
+  /**
+   * The owner's Shelf order (lexicographic, ascending) for a shelved thread's
+   * family; null when the thread is not shelved or was shelved a moment ago
+   * and the server has not answered yet, which lists it first. Move a
+   * top-level Shelf thread with `sdk.threads.experimental_reorderShelved`.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  experimental_shelfSortKey: string | null;
+  /**
+   * The app-relative URL Omnyo opens for this thread, e.g.
    * `/projects/<projectId>/threads/<id>`. Put it on your row's anchor: the
    * host routes a plain click in place, and middle-click, copy-link, and
    * open-in-new-window work without further code.
    */
   href: string;
   /**
-   * True for threads bb keeps out of its own list (internal helper threads a
+   * True for threads Omnyo keeps out of its own list (internal helper threads a
    * plugin spawned with `visibility: "hidden"`). The array includes them so a
-   * list that wants them can show them; bb's list filters them out.
+   * list that wants them can show them; Omnyo's list filters them out.
    */
   isHidden: boolean;
 
@@ -1028,7 +1265,7 @@ export interface PluginSidebarThread {
     /** The checkout's absolute path on its host; null when unknown. */
     path: string | null;
     /**
-     * True when the environment is a git worktree, which is what bb's
+     * True when the environment is a git worktree, which is what Omnyo's
      * "group by environment" clusters; false for a plain checkout; null when
      * unknown.
      */
@@ -1054,11 +1291,16 @@ export interface PluginSidebarThread {
   updatedAt: number;
   lastReadAt: number | null;
   latestAttentionAt: number;
+  /**
+   * When the latest user or agent message in the thread was sent; null
+   * before the first message.
+   */
+  lastMessageAt: number | null;
 }
 
 /**
  * The pull request for a thread's branch, narrowed to what a sidebar row
- * needs. `attention` is bb's rolled-up "does this need you" signal, so a row
+ * needs. `attention` is Omnyo's rolled-up "does this need you" signal, so a row
  * can colour a badge without reading checks, review, and mergeability itself.
  */
 export interface PluginSidebarPullRequest {
@@ -1111,6 +1353,45 @@ export interface PluginSidebarThreadPullRequestState {
 }
 
 /** One project in the sidebar's live view. */
+export interface ExperimentalProjectSidebarMenuItem {
+  id: string;
+  label: string;
+  icon?: IconName;
+  destructive?: boolean;
+  run(): void | Promise<void>;
+}
+
+export interface ExperimentalProjectSidebarItem {
+  id: string;
+  label: string;
+  icon: IconName;
+  href: string;
+  threadId?: string;
+  status?: { icon: IconName; label: string };
+  indicator?: PluginSidebarThreadIndicator;
+  count?: number;
+  unread?: boolean;
+  children?: readonly ExperimentalProjectSidebarItem[];
+  onRename?: (label: string) => void | Promise<void>;
+  onReorder?: (orderedChildIds: readonly string[]) => void | Promise<void>;
+  onDrop?: (itemId: string) => void | Promise<void>;
+  menuItems?: readonly ExperimentalProjectSidebarMenuItem[];
+}
+
+export interface ExperimentalProjectSidebarGroup {
+  /** Host-stamped owner identity; providers omit this field. */
+  key?: string;
+  projectId: string;
+  items: readonly ExperimentalProjectSidebarItem[];
+}
+
+export interface ExperimentalProjectSidebarItemsRegistration {
+  id: string;
+  useItems(context: {
+    projects: readonly PluginSidebarProject[];
+  }): readonly ExperimentalProjectSidebarGroup[];
+}
+
 export interface PluginSidebarProject {
   id: string;
   name: string;
@@ -1127,7 +1408,7 @@ export interface PluginSidebarProject {
  * view. A thread belongs to at most one section via `sectionId`; a null
  * `sectionId` means the loose "Threads" bucket. Sections are created,
  * renamed, and deleted through the public API (`threadSections` in the SDK,
- * `bb thread section` in the CLI); this state is the read side.
+ * `omnyo thread section` in the CLI); this state is the read side.
  */
 export interface PluginSidebarSection {
   id: string;
@@ -1135,6 +1416,45 @@ export interface PluginSidebarSection {
   /** Epoch milliseconds. */
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * One chat group: a named, purely visual folder that holds chats from one
+ * project. A chat belongs to at most one group via
+ * {@link PluginSidebarThread.experimental_groupId}; grouped chats run, ask
+ * the owner and appear in the Inbox exactly as ungrouped ones. Create, rename
+ * and ungroup through {@link PluginSdkApp.experimental_useThreadGroupActions}
+ * (`threadGroups` in the SDK, `omnyo thread group` in the CLI); this is the
+ * read side. Experimental: see docs/api_to_audit.md.
+ */
+export interface PluginSidebarThreadGroup {
+  id: string;
+  projectId: string;
+  name: string;
+  /** Epoch milliseconds. */
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Omnyo's chat group actions (see
+ * {@link PluginSdkApp.experimental_useThreadGroupActions}). Each updates the
+ * sidebar at once, shows Omnyo's own toasts, and rejects after Omnyo has
+ * shown an error toast.
+ */
+export interface PluginThreadGroupActions {
+  /**
+   * Put these chats in a new group and clear the selection. Chats outside
+   * the first chat's project are left out; Omnyo names the group after the
+   * words their titles share. Resolves to the new group's id, or null when
+   * no chat could be grouped. The toast offers Undo.
+   */
+  group(threadIds: readonly string[]): Promise<string | null>;
+  rename(groupId: string, name: string): Promise<void>;
+  /** Delete the group; its chats stay where they are. The toast offers Undo. */
+  ungroup(groupId: string): Promise<void>;
+  /** Move one chat into a group of its project, or out of its group with null. */
+  move(threadId: string, groupId: string | null): Promise<void>;
 }
 
 export interface PluginSidebarThreadsState {
@@ -1146,12 +1466,22 @@ export interface PluginSidebarThreadsState {
     isFetchNextPageError: boolean;
     fetchNextPage(): Promise<void>;
   } | null;
+  /**
+   * Null when shelved threads were not requested. Pages arrive newest
+   * shelved first. Experimental: see docs/api_to_audit.md.
+   */
+  experimental_shelved: PluginSidebarThreadsState["experimental_archived"];
   status: "loading" | "ready" | "error";
   threads: readonly PluginSidebarThread[];
   experimental_hosts?: readonly { id: string; name: string }[];
   projects: readonly PluginSidebarProject[];
   /** Every section, in the server's order (creation order). */
   sections: readonly PluginSidebarSection[];
+  /**
+   * Every chat group, in creation order. Absent only on hosts that predate
+   * groups. Experimental: see docs/api_to_audit.md.
+   */
+  experimental_groups?: readonly PluginSidebarThreadGroup[];
 }
 
 /**
@@ -1183,13 +1513,13 @@ export interface PluginCodeThemeTokenRule {
 }
 
 /**
- * The active code theme as a VS Code theme file: the same document BB's own
+ * The active code theme as a VS Code theme file: the same document Omnyo's own
  * highlighter renders from, so a plugin that embeds a third-party editor can
  * translate it into that editor's theme format rather than guessing colors
  * from CSS variables.
  */
 export interface PluginCodeThemeData {
-  /** Registered theme name — a bundled Shiki name or a BB-registered id. */
+  /** Registered theme name — a bundled Shiki name or an Omnyo-registered id. */
   name: string;
   type: "light" | "dark";
   /** Default editor foreground, as `#rrggbb[aa]`. */
@@ -1202,7 +1532,7 @@ export interface PluginCodeThemeData {
 }
 
 /**
- * The code theme BB is currently rendering with (see
+ * The code theme Omnyo is currently rendering with (see
  * {@link PluginSdkApp.experimental_useCodeTheme}). `mode` and `name` change
  * the moment the user switches palette or light/dark; `theme` follows once
  * the theme file resolves, and keeps the previous document until then so a
@@ -1226,16 +1556,30 @@ export interface ExperimentalClipboardContent {
   html?: string;
 }
 
+export type ExperimentalNativeFileClassification =
+  | { kind: "directory"; path: string }
+  | { kind: "file"; path?: string }
+  | null;
+
+export interface ExperimentalNativeFileResolver {
+  /** Classifies disk-backed Files on this desktop client, preserving order. */
+  resolve(
+    files: readonly File[],
+  ): Promise<readonly ExperimentalNativeFileClassification[]>;
+}
+
 /**
- * The `threads` area of {@link PluginBrowserBbSdk}: bb's public thread API
+ * The `threads` area of {@link experimental_PluginBrowserSdk}: Omnyo's public thread API
  * with the calling plugin's identity filled in. `spawn` and `fork` stamp
  * `origin: "plugin"` and `originPluginId` unless the call names another
  * origin, and the plugin-metadata calls default `pluginId`. The same
- * narrowing the backend `bb.sdk` applies.
+ * narrowing the backend `api.sdk` applies.
  */
 export type PluginBoundThreadsArea = Omit<
-  BbSdkAreas["threads"],
-  "getPluginMetadata" | "updatePluginMetadata" | "experimental_listPluginMetadata"
+  OmnyoSdkAreas["threads"],
+  | "getPluginMetadata"
+  | "updatePluginMetadata"
+  | "experimental_listPluginMetadata"
 > & {
   getPluginMetadata(
     args: Omit<ThreadPluginMetadataArgs, "pluginId"> & { pluginId?: string },
@@ -1253,14 +1597,14 @@ export type PluginBoundThreadsArea = Omit<
 };
 
 /**
- * bb's public API client, bound to the calling plugin, for plugin frontends
- * (see {@link PluginSdkApp.useSdk}). The same areas the `bb` CLI and the
- * backend `bb.sdk` expose: threads, thread sections, projects, environments,
+ * Omnyo's public API client, bound to the calling plugin, for plugin frontends
+ * (see {@link PluginSdkApp.useSdk}). The same areas the `omnyo` CLI and the
+ * backend `api.sdk` expose: threads, thread sections, projects, environments,
  * hosts, files, and the rest. Requests carry the signed-in user's session on
  * the app origin, so every call runs with the user's own authority; there
  * is no narrower plugin scope.
  */
-export type PluginBrowserBbSdk = Omit<BbSdkAreas, "threads"> & {
+export type experimental_PluginBrowserSdk = Omit<OmnyoSdkAreas, "threads"> & {
   threads: PluginBoundThreadsArea;
 };
 
@@ -1271,7 +1615,7 @@ export interface PluginThreadTitleProps {
 }
 
 /**
- * Props for {@link PluginSdkApp.experimental_ThreadStatusGlyph}: bb's thread
+ * Props for {@link PluginSdkApp.experimental_ThreadStatusGlyph}: Omnyo's thread
  * status glyph, the one its own lists draw. The caller resolves the
  * indicator, so a row can fold in state the host does not know about, such
  * as collapsed children or a client-local draft.
@@ -1289,12 +1633,19 @@ export interface PluginThreadStatusGlyphProps {
   rowStatus?: PluginSidebarThreadRowStatus | null;
   /** Hides the idle draft glyph from assistive technology. */
   hideIdleDraftLabel?: boolean;
-  /** "compact" draws a 14 px glyph; "default" matches bb's sidebar rows. */
+  /** "compact" draws a 14 px glyph; "default" matches Omnyo's sidebar rows. */
   size?: "default" | "compact";
+  /**
+   * Running subagents to draw inside the working spinner, such as the row
+   * thread's `activity.experimental_subagents`. Zero, absent, or a glyph
+   * that is not the working spinner draws the glyph unchanged.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  experimental_subagents?: number;
 }
 
 /**
- * One environment provider from bb's catalog (see
+ * One environment provider from Omnyo's catalog (see
  * {@link PluginSdkApp.useEnvironmentProviders}): what a sidebar needs to
  * name and draw the environment a thread runs in. `icon` and `logoUrl` are
  * what `experimental_ProviderIcon` reads with `providerKind: "environment"`.
@@ -1319,7 +1670,7 @@ export interface PluginEnvironmentProvidersState {
 /**
  * Whether the composer holds unsent text for a thread (see
  * {@link PluginSdkApp.useSidebarThreadDraft}). This is per-client state, so
- * it lives beside `indicator` rather than in it: bb's row paints a pencil for
+ * it lives beside `indicator` rather than in it: Omnyo's row paints a pencil for
  * an idle thread with a draft and a "working-draft" glyph for a busy one.
  */
 export interface PluginSidebarThreadDraftState {
@@ -1329,7 +1680,7 @@ export interface PluginSidebarThreadDraftState {
 /**
  * The status another plugin's app-wide script set on a thread's row through
  * the content-script context's `experimental_setThreadRowStatus` (see
- * {@link PluginSdkApp.useSidebarThreadRowStatus}). bb's row draws it in
+ * {@link PluginSdkApp.useSidebarThreadRowStatus}). Omnyo's row draws it in
  * place of the draft glyph while it is set; a replaced list should do the
  * same so a status set by, say, the drafts or workflows plugin does not
  * vanish when the list changes hands.
@@ -1337,7 +1688,7 @@ export interface PluginSidebarThreadDraftState {
 export type PluginSidebarThreadRowStatus = PluginComposerThreadRowStatus;
 
 /**
- * The jump-to-thread shortcut bb assigned to a row while the app command
+ * The jump-to-thread shortcut Omnyo assigned to a row while the app command
  * modifier is held (see {@link PluginSdkApp.useSidebarThreadShortcut}).
  */
 export interface PluginSidebarThreadShortcut {
@@ -1355,16 +1706,16 @@ export interface PluginSidebarThreadShortcut {
  *
  * @internal Superseded by `app.slots.experimental_threadAction` and
  * `experimental_ThreadActionsMenu`, `useSdk().threads` for data writes, and
- * `useBbNavigate().toThread` / `toCompose` for navigation; kept for plugins
+ * `experimental_useAppNavigate().toThread` / `toCompose` for navigation; kept for plugins
  * built against older SDKs.
  */
 export interface PluginSidebarThreadActions {
   /**
-   * Navigate to a thread. `split: true` applies bb's split placement rules —
+   * Navigate to a thread. `split: true` applies Omnyo's split placement rules —
    * a right split by default, focus when the thread is already open, replace
    * at the pane cap — and falls back to plain navigation where splits are off.
    * Opening also expands the thread's conversation if the secondary panel had
-   * collapsed it, as bb's own row does.
+   * collapsed it, as Omnyo's own row does.
    */
   open(threadId: string, options?: { split?: boolean }): void;
   /**
@@ -1372,7 +1723,7 @@ export interface PluginSidebarThreadActions {
    * the composer's selection, so the thread is created where you asked.
    * `sectionId` files the new thread under that section, and
    * `environmentId` reuses that environment (the "New thread in
-   * environment" affordance), both exactly as bb's own list does.
+   * environment" affordance), both exactly as Omnyo's own list does.
    * `experimental_placement` explicitly selects the section and pin state,
    * overriding `sectionId`. Omitting placement starts unpinned, outside sections
    * unless `sectionId` is supplied; previous composer placement is cleared.
@@ -1394,10 +1745,10 @@ export interface PluginSidebarThreadActions {
   rename(threadId: string, title: string): Promise<void>;
   /** Confirms before including child threads unless archive confirmation is disabled in Settings → General. */
   archive(threadId: string): void;
-  /** Archives an environment's active thread trees with bb's optimistic updates, pane cleanup, and one Undo toast. Rejects after bb shows an error toast on failure. */
+  /** Archives an environment's active thread trees with Omnyo's optimistic updates, pane cleanup, and one Undo toast. Rejects after Omnyo shows an error toast on failure. */
   experimental_archiveEnvironmentThreads(environmentId: string): Promise<void>;
   /**
-   * Opens bb's delete confirmation, which counts child threads first. Deletion
+   * Opens Omnyo's delete confirmation, which counts child threads first. Deletion
    * is destructive and recursive, so the host owns the confirmation: there is
    * deliberately no silent `delete`.
    */
@@ -1405,16 +1756,25 @@ export interface PluginSidebarThreadActions {
 }
 
 /**
- * Render a plugin component in the thread header's action row.
+ * Render a plugin component in the thread's header controls.
  *
- * The frontend sibling of the backend `bb.ui.registerThreadAction`, which
+ * The frontend sibling of the backend `api.ui.registerThreadAction`, which
  * renders a host-owned button and runs server-side. Use that one for "do a
  * thing"; use this one when the control must draw live state.
  *
- * The host places it at the left end of the action row, before the workspace
- * button, git actions, the panel toggle, maximize, and close. That row is a
- * 48px chrome row with 28px controls: render one inline control that fits, and
- * put anything taller in a portalled popover.
+ * For a single pane on a wide window, the host places it in the window title
+ * bar's right cluster, a 40px row, before the open-in-editor button and the
+ * right-panel toggle. In split panes, each pane keeps its own 48px header
+ * row, with the control before the open-in-editor button, maximize, and
+ * close. Both rows hold 28px controls: render one inline control that fits,
+ * and put anything taller in a portalled popover. When a narrow pane row runs
+ * out of room, the host shrinks and clips the plugin controls horizontally
+ * before it touches the thread title or its menu.
+ *
+ * The header row is a host-owned budget. On phone-width layouts the host
+ * omits header actions entirely and keeps only the title, the single thread
+ * menu and the right-panel toggle. Register an `experimental_threadAction`
+ * for anything that must stay reachable there: it appears in that menu.
  */
 export interface PluginThreadHeaderActionRegistration {
   /** Unique within the plugin; letters, digits, `-`, `_`. */
@@ -1428,6 +1788,27 @@ export interface PluginThreadHeaderActionRegistration {
   component: ComponentType<PluginThreadHeaderActionProps>;
 }
 
+/**
+ * Replace the main pane of every open thread with a plugin component. The
+ * thread header, the side panel, split panes, and the compact drawer stay
+ * host-rendered.
+ *
+ * This slot is **exclusive**: at most one registration is active, the first in
+ * deterministic slot order (plugins sorted by id, then registration order
+ * within a plugin). The component receives every thread; render `defaultView`
+ * for threads the plugin does not claim. Omnyo renders its default pane while
+ * plugin frontends are still booting, when no plugin registers, and in place
+ * of a view that crashes (a crash disables the view for that thread for the
+ * session and shows an error toast).
+ */
+export interface PluginThreadViewRegistration {
+  /** Unique within the plugin; letters, digits, `-`, `_`. */
+  id: string;
+  /** Label shown in capability details and the crash notice. */
+  title: string;
+  component: ComponentType<PluginThreadViewProps>;
+}
+
 export interface ExperimentalPluginBrowserToolbarActionRegistration {
   /** Unique within the plugin; letters, digits, `-`, `_`. */
   id: string;
@@ -1438,7 +1819,7 @@ export interface ExperimentalPluginBrowserToolbarActionRegistration {
 }
 
 /**
- * The thread a thread action is evaluated for: the fields bb's own actions
+ * The thread a thread action is evaluated for: the fields Omnyo's own actions
  * read, copied from the thread payload by the surface that shows the menu.
  */
 export interface PluginThreadActionTarget {
@@ -1447,6 +1828,7 @@ export interface PluginThreadActionTarget {
   parentThreadId: string | null;
   archivedAt: number | null;
   pinnedAt: number | null;
+  shelvedAt: number | null;
   sectionId: string | null;
   isUnread: boolean;
   status: ThreadStatus;
@@ -1461,7 +1843,7 @@ export interface PluginThreadActionTarget {
 export interface PluginThreadActionChoice {
   id: string;
   label: string;
-  icon?: BbIconName;
+  icon?: IconName;
   selected?: boolean;
   disabled?: boolean;
 }
@@ -1488,7 +1870,7 @@ export interface PluginThreadActionRunInput {
   value?: string;
   /**
    * Start renaming a thread with the editor of the surface that showed the
-   * menu: inline in the sidebar row or thread header, bb's rename dialog
+   * menu: inline in the sidebar row or thread header, Omnyo's rename dialog
    * elsewhere.
    */
   requestRename(threadId: string): void;
@@ -1502,7 +1884,7 @@ export interface PluginThreadAction {
    * current value of a choice list.
    */
   detail?: string;
-  icon: BbIconName;
+  icon: IconName;
   variant?: "default" | "destructive";
   disabled?: boolean;
   choices?: PluginThreadActionChoices;
@@ -1532,19 +1914,19 @@ export interface PluginThreadActionItemInput<Data> {
   /** What `useData` last returned; undefined when the registration has none. */
   data: Data;
   /** The registering plugin's `useSdk()` client. */
-  sdk: PluginBrowserBbSdk;
+  sdk: experimental_PluginBrowserSdk;
   /**
-   * The registering plugin's `useBbNavigate()`. Thread menus are not inside a
+   * The registering plugin's `experimental_useAppNavigate()`. Thread menus are not inside a
    * side panel, so `openThreadPanel` opens in the focused thread view, as
    * plugin commands do, and returns false when no thread view is open.
    */
-  navigate: BbNavigate;
+  navigate: experimental_AppNavigate;
 }
 
 /**
  * Add an action to every thread actions menu: the thread header's menu, the
  * sidebar row's menu and right-click menu, the compact long-press drawer, and,
- * when the user picks it, a sidebar row's quick-action buttons. bb's own
+ * when the user picks it, a sidebar row's quick-action buttons. Omnyo's own
  * actions (Open in split, Copy thread link, Mark read, Pin, Rename, Archive,
  * Delete, …) are registrations of this same shape.
  *
@@ -1562,11 +1944,11 @@ export interface PluginThreadActionRegistration<Data = undefined> {
   /** Static name, shown where the user picks a row's quick actions. */
   title: string;
   /** Static icon for that picker; the evaluated action's `icon` wins in menus. */
-  icon: BbIconName;
+  icon: IconName;
   /**
    * Menus and the quick-action picker sort by `group` (string compare) with a
    * separator between groups, then by `order` within a group (unset sorts
-   * last), then by registration order. bb's groups are
+   * last), then by registration order. Omnyo's groups are
    * {@link PluginSdkApp.experimental_THREAD_ACTION_GROUPS}; any other string
    * is a group of its own, placed where it sorts.
    */
@@ -1578,7 +1960,7 @@ export interface PluginThreadActionRegistration<Data = undefined> {
 
 /**
  * A thread action as {@link PluginSdkApp.experimental_useThreadActions}
- * returns it: `run` is bound to the caller's `requestRename` (or bb's rename
+ * returns it: `run` is bound to the caller's `requestRename` (or Omnyo's rename
  * dialog), contains errors, and resolves when the action settles.
  */
 export interface PluginBoundThreadAction extends Omit<
@@ -1592,7 +1974,7 @@ export interface PluginBoundThreadAction extends Omit<
 /**
  * One row of {@link PluginSdkApp.experimental_useThreadActions}: `key` is
  * `<owner>/<id>`, where the owner is the registering plugin's id or
- * `bb--core` for bb's own actions.
+ * `omnyo--core` for Omnyo's own actions.
  */
 export interface PluginThreadActionEntry {
   key: string;
@@ -1607,7 +1989,7 @@ export interface PluginThreadActionRegistrationInfo {
   key: string;
   pluginId: string;
   title: string;
-  icon: BbIconName;
+  icon: IconName;
 }
 
 /** Options for {@link PluginSdkApp.experimental_useThreadActions}. */
@@ -1616,7 +1998,7 @@ export interface PluginThreadActionsOptions {
   keys?: readonly string[];
   /**
    * The surface's own rename editor, passed to `run` as `requestRename`.
-   * Omit to use bb's rename dialog.
+   * Omit to use Omnyo's rename dialog.
    */
   requestRename?(threadId: string): void;
 }
@@ -1651,7 +2033,7 @@ interface PluginThreadActionsMenuBaseProps {
 }
 
 /**
- * Props of the host-owned `experimental_ThreadActionsMenu`: bb's thread menu
+ * Props of the host-owned `experimental_ThreadActionsMenu`: Omnyo's thread menu
  * opened from the button `trigger` renders (see
  * {@link PluginThreadActionsTriggerProps}), a drawer at compact width.
  */
@@ -1663,7 +2045,7 @@ export interface PluginThreadActionsMenuProps extends PluginThreadActionsMenuBas
 }
 
 /**
- * Props of the host-owned `experimental_ThreadActionsContextMenu`: bb's thread
+ * Props of the host-owned `experimental_ThreadActionsContextMenu`: Omnyo's thread
  * menu on right-click of `children`, or on touch long-press at compact width.
  */
 export interface PluginThreadActionsContextMenuProps extends PluginThreadActionsMenuBaseProps {
@@ -1736,7 +2118,7 @@ export interface PluginSidebarThreadSplit {
  * Replace the sidebar's thread list with a plugin component.
  *
  * Unlike every other slot, this one is EXCLUSIVE: two lists cannot share one
- * scroll area. bb ships its own list as the bundled Thread list plugin
+ * scroll area. Omnyo ships its own list as the bundled Thread list plugin
  * (`thread-list/thread-list`). Registering activates the replacement while the
  * plugin is enabled: by default the first registered list other than the
  * bundled one, in deterministic slot order, is active, falling back to the
@@ -1763,30 +2145,30 @@ export interface PluginThreadListRegistration {
 /**
  * Register this plugin as a viewer/editor for file extensions. By default,
  * matching files render the first applicable opener in deterministic slot
- * order. The user can pin BB's preview or a specific opener per extension
+ * order. The user can pin Omnyo's preview or a specific opener per extension
  * under Settings → Files. The file tab's "Open with" menu can override that
  * choice for one open. A plugin can also use its own setting and render
  * `Original` conditionally. Applies to working-tree, host, and
  * thread-storage files — never to git-ref snapshots (diff views always use
- * BB's preview).
+ * Omnyo's preview).
  */
 export interface PluginFileOpenerRegistration {
   /** Unique within the plugin; letters, digits, `-`, `_`. */
   id: string;
   /** Label in the "Open with" menu (e.g. "Notes editor"). */
   title: string;
-  /** Lowercase extensions without the dot (e.g. ["md", "mdx"]). */
+  /** Lowercase alphanumeric extensions without the dot; single underscores or hyphens may separate segments. */
   extensions: readonly string[];
   component: ComponentType<PluginFileOpenerProps>;
 }
 
 /**
- * Replace BB's source-code renderer everywhere it renders supplied source
+ * Replace Omnyo's source-code renderer everywhere it renders supplied source
  * text — the native file preview and every plugin that calls
  * `experimental_SourceCode`. Like `experimental_threadList` this slot is
  * **exclusive**: one renderer at a time. Registering activates it while the
  * plugin is enabled; if several are registered the first in deterministic slot
- * order wins. A missing, disabled, or crashing replacement falls back to BB's
+ * order wins. A missing, disabled, or crashing replacement falls back to Omnyo's
  * renderer, and a replacement can render `Original` to delegate
  * per call (behind its own setting, by language, by size — whatever it needs).
  */
@@ -1801,7 +2183,7 @@ export interface PluginSourceCodeRendererRegistration {
 }
 
 /**
- * Replace BB's diff renderer everywhere it renders supplied diff content — the
+ * Replace Omnyo's diff renderer everywhere it renders supplied diff content — the
  * timeline file diffs, the environment diff panel's text bodies, and every
  * plugin that calls `experimental_Diff`. Exclusive, with the same activation,
  * fallback, and `Original` delegation rules as
@@ -1818,8 +2200,10 @@ export interface PluginDiffRendererRegistration {
 }
 
 /**
- * Register a leaf message directive rendered inside assistant (and nested
- * agent) message Markdown. `id` is the directive name: `inline-vis` matches
+ * Register a leaf message directive rendered inside user, assistant, and nested
+ * agent message Markdown. Complete registered directives render in prose,
+ * including after text on the same line. Fenced examples remain code.
+ * `id` is the directive name: `inline-vis` matches
  * `::inline-vis{file="demo.html"}`.
  */
 export interface PluginMessageDirectiveRegistration {
@@ -1834,11 +2218,11 @@ export interface PluginMessageDirectiveRegistration {
  * Render fenced code blocks of chosen languages inside assistant (and nested
  * agent) message Markdown. ` ```ui ` matches a registration whose `languages`
  * include `"ui"`. Fences elsewhere (user messages, file previews, plugin
- * Markdown) keep BB's code block.
+ * Markdown) keep Omnyo's code block.
  *
- * BB's code block also renders when two plugins claim the same language (BB
+ * Omnyo's code block also renders when two plugins claim the same language (Omnyo
  * logs a warning naming them), when the plugin is disabled, and for a fence
- * whose component throws. A throw affects that fence only, and BB tries the
+ * whose component throws. A throw affects that fence only, and Omnyo tries the
  * component again when the fence's `code` or `status` changes.
  *
  * @experimental Audit before relying on this as a stable contract.
@@ -1870,7 +2254,7 @@ export interface ThreadChatMessageReference {
   /**
    * The event sequence that recorded this message: the `msg` value of a
    * message link and the seq that `sdk.threads.message` and
-   * `bb thread log --message` read. For a steer this is its request sequence,
+   * `omnyo thread log --message` read. For a steer this is its request sequence,
    * which can differ from the acceptance sequence in `sourceSeqEnd`.
    */
   experimental_messageSeq: number;
@@ -1878,7 +2262,7 @@ export interface ThreadChatMessageReference {
 
 /**
  * What a caller that is *not* itself a panel action passes to open one — a
- * `messageAction`'s `run`, or any component via `useBbNavigate()`. A panel
+ * `messageAction`'s `run`, or any component via `experimental_useAppNavigate()`. A panel
  * action opening its own tab is already the target, so it passes the bare
  * {@link PluginPanelActionOpenOptions} instead.
  */
@@ -1900,7 +2284,7 @@ export interface PluginMessageActionContext {
   /**
    * Open one of this plugin's `threadPanelAction` components in the current
    * thread's side panel — the registration-callback equivalent of
-   * `useBbNavigate().openThreadPanel`.
+   * `experimental_useAppNavigate().openThreadPanel`.
    *
    * Returns true when the host accepted the open; false when it declined —
    * `params` was not a JSON value, the action id names no `threadPanelAction`
@@ -1918,9 +2302,11 @@ export interface PluginMessageActionContext {
 }
 
 /**
- * An action on chat messages in the main thread timeline: an icon button in
- * the per-message action bar (user and assistant messages) and an entry in
- * the assistant-message text-selection menu. Embedded `ThreadChat` timelines
+ * An action on chat messages in the main thread timeline: an entry in the
+ * per-message action menu (user and assistant messages) and in the
+ * assistant-message text-selection menu. The message action menu is an icon
+ * row revealed on hover or keyboard focus with a fine pointer, and a sheet
+ * opened by a long press on the message with a touch pointer. Embedded `ThreadChat` timelines
  * do not show slot-registered actions. Host-rendered chrome — the plugin
  * supplies title, icon, and `run` behavior only. Resolved icon names take precedence over
  * plugin branding; omitted or unknown names fall back to branding.
@@ -1930,7 +2316,7 @@ export interface PluginMessageActionRegistration {
   id: string;
   /** Tooltip / menu label for the action. */
   title: string;
-  icon?: BbIconName;
+  icon?: IconName;
   /**
    * Runs when the user activates the action. Errors (sync or async) are
    * contained and logged; they never break the timeline.
@@ -1969,9 +2355,9 @@ export interface PluginCommandShortcut {
 }
 
 /**
- * A command registered with `app.commands.register`, listed in bb's quick
+ * A command registered with `app.commands.register`, listed in Omnyo's quick
  * palette (Mod+Shift+P) under the plugin's name
- * beside bb's own commands. Host-rendered: the plugin supplies a title and
+ * beside Omnyo's own commands. Host-rendered: the plugin supplies a title and
  * `run`, and the host owns matching, ordering, and recency.
  */
 export interface PluginCommandRegistration {
@@ -1995,10 +2381,10 @@ export interface PluginCommandRegistration {
 }
 
 /**
- * A command handled by a composer through the same path as bb's own "Focus
+ * A command handled by a composer through the same path as Omnyo's own "Focus
  * composer" command. Listed, rebindable and namespaced like any other plugin
  * command. The composer holding the caret runs it; with the caret outside every
- * composer, the focused pane's primary composer does. Like bb's composer
+ * composer, the focused pane's primary composer does. Like Omnyo's composer
  * commands, its shortcut is inactive while a terminal, browser tab or modal has
  * focus, and the palette lists it only when some composer would run it.
  */
@@ -2016,7 +2402,7 @@ export interface ExperimentalComposerCommandRegistration {
   run(context: { composer: PluginComposerApi }): void | Promise<void>;
 }
 
-/** Registers commands for bb's command palette. */
+/** Registers commands for Omnyo's command palette. */
 export interface PluginAppCommands {
   /** Register a command. IDs are unique within this plugin, including legacy slot registrations. */
   register(registration: PluginCommandRegistration): void;
@@ -2039,7 +2425,7 @@ export interface PluginAppCommands {
 export interface PluginProviderIconRegistration {
   providerKind: "agent" | "machine" | "environment";
   /**
-   * The provider this mark is for — the id bb knows the provider by (the
+   * The provider this mark is for — the id Omnyo knows the provider by (the
    * provider declaration's id, e.g. `codex` or `acp-cursor`), not the plugin
    * id. Letters, digits, `-`, `_`.
    */
@@ -2165,7 +2551,7 @@ export type PluginEnvironmentProviderInputsChange =
 /**
  * Supply the control for one of this plugin's environment providers that
  * declared `inputs` (registered server-side via
- * `bb.experimental_environments.register`). The New Thread environment picker
+ * `api.experimental_environments.register`). The New Thread environment picker
  * renders the component beside the picker while that provider is selected and
  * submits the component's latest `onChange` value as the selection's `inputs`.
  * A provider whose schema rejects empty inputs cannot be submitted without a
@@ -2196,7 +2582,7 @@ export type PluginMachineProviderInputsChange =
 
 /**
  * Supply the inputs control for one machine provider registered server-side
- * through `bb.experimental_machines.register`.
+ * through `api.experimental_machines.register`.
  */
 export interface PluginMachineProviderInputsRegistration {
   /** The machine provider id this control supplies inputs for. */
@@ -2209,6 +2595,10 @@ export interface PluginMachineProviderInputsRegistration {
 // ---------------------------------------------------------------------------
 
 export interface PluginAppSlots {
+  /** Add project navigation data under the registering plugin context. Experimental: see docs/api_to_audit.md. */
+  experimental_projectSidebarItems(
+    registration: ExperimentalProjectSidebarItemsRegistration,
+  ): void;
   homepageSection(registration: PluginHomepageSectionRegistration): void;
   settingsSection(registration: PluginSettingsSectionRegistration): void;
   /**
@@ -2218,6 +2608,30 @@ export interface PluginAppSlots {
    */
   experimental_appOverlay(
     registration: ExperimentalAppOverlayRegistration,
+  ): void;
+  /**
+   * Render an additive footer card (see
+   * {@link ExperimentalSidebarFooterCardRegistration}). Experimental: see
+   * docs/api_to_audit.md.
+   */
+  experimental_sidebarFooterCard(
+    registration: ExperimentalSidebarFooterCardRegistration,
+  ): void;
+  /**
+   * Render an additive component in the top rail's center column (see
+   * {@link ExperimentalTitleBarCenterRegistration}). Experimental: see
+   * docs/api_to_audit.md.
+   */
+  experimental_titleBarCenter(
+    registration: ExperimentalTitleBarCenterRegistration,
+  ): void;
+  /**
+   * Add a labeled row under "New thread" that opens one of this plugin's
+   * pages (see {@link ExperimentalSidebarEntryRegistration}). Experimental:
+   * see docs/api_to_audit.md.
+   */
+  experimental_sidebarEntry(
+    registration: ExperimentalSidebarEntryRegistration,
   ): void;
   navPanel(registration: PluginNavPanelRegistration): void;
   /**
@@ -2244,13 +2658,29 @@ export interface PluginAppSlots {
    */
   experimental_threadList(registration: PluginThreadListRegistration): void;
   /**
-   * Render a component in the thread header's action row (see
+   * Render a component in the thread's header controls (see
    * {@link PluginThreadHeaderActionRegistration}). Experimental: see
    * docs/api_to_audit.md.
    */
   experimental_threadHeaderAction(
     registration: PluginThreadHeaderActionRegistration,
   ): void;
+  /**
+   * Show a live companion beside the open thread, in the title bar, or above
+   * the composer, as the host decides (see
+   * {@link ExperimentalThreadCompanionRegistration}). Experimental: see
+   * docs/api_to_audit.md.
+   */
+  experimental_threadCompanion(
+    registration: ExperimentalThreadCompanionRegistration,
+  ): void;
+  /**
+   * Replace an open thread's main pane, below its header (see
+   * {@link PluginThreadViewRegistration}). Exclusive: only the first
+   * registration in plugin-id order is active. Experimental: see
+   * docs/api_to_audit.md.
+   */
+  experimental_threadView(registration: PluginThreadViewRegistration): void;
   /**
    * Add an action to every thread actions menu (see
    * {@link PluginThreadActionRegistration}). Experimental: see
@@ -2265,7 +2695,7 @@ export interface PluginAppSlots {
   ): void;
   fileOpener(registration: PluginFileOpenerRegistration): void;
   /**
-   * Replace BB's source-code renderer (see
+   * Replace Omnyo's source-code renderer (see
    * {@link PluginSourceCodeRendererRegistration}). Experimental: see
    * docs/api_to_audit.md.
    */
@@ -2273,7 +2703,7 @@ export interface PluginAppSlots {
     registration: PluginSourceCodeRendererRegistration,
   ): void;
   /**
-   * Replace BB's diff renderer (see
+   * Replace Omnyo's diff renderer (see
    * {@link PluginDiffRendererRegistration}). Experimental: see
    * docs/api_to_audit.md.
    */
@@ -2336,7 +2766,12 @@ export interface PluginAppComposer {
   ): void;
 }
 
-/** Stable lifecycle values for one content-script instance in one bb client. */
+export interface ExperimentalThreadRowSubtitle {
+  /** Plain text, trimmed with whitespace collapsed, at most 140 characters. */
+  text: string;
+}
+
+/** Stable lifecycle values for one content-script instance in one Omnyo client. */
 export interface PluginContentScriptContext {
   /** The id of the plugin that owns this script. */
   readonly pluginId: string;
@@ -2359,6 +2794,16 @@ export interface PluginContentScriptContext {
     threadId: string,
     status: PluginComposerThreadRowStatus | null,
   ) => void;
+  /**
+   * Decorate a sidebar row with plain text for this frontend generation.
+   * The first active owner wins; null clears this generation's value.
+   * Blank or overlength text is rejected. Deactivation clears owned values.
+   * Optional for compatibility with hosts that predate this experimental API.
+   */
+  readonly experimental_setThreadRowSubtitle?: (
+    threadId: string,
+    subtitle: ExperimentalThreadRowSubtitle | null,
+  ) => void;
 }
 
 /** Cleanup returned by a frontend content script. */
@@ -2366,13 +2811,13 @@ export type PluginContentScriptDisposer = () => void | Promise<void>;
 
 /**
  * Trusted same-origin JavaScript/TypeScript mounted once per active frontend
- * generation in each bb app window or browser tab.
+ * generation in each Omnyo app window or browser tab.
  */
 export interface PluginContentScriptRegistration {
   /** Unique within the plugin; letters, digits, `-`, `_`. */
   id: string;
   /**
-   * Install behavior into the bb app shell. The host awaits a returned
+   * Install behavior into the Omnyo app shell. The host awaits a returned
    * promise, retains the plugin's imported frontend stylesheet for this
    * generation, contains failures, and calls the returned disposer exactly
    * once. Styling or decorating existing app-shell DOM belongs here rather
@@ -2402,6 +2847,14 @@ export interface ExperimentalIconProps {
 }
 
 /** Shared agent, machine, or environment artwork without fetching metadata. */
+export interface ExperimentalProjectIconProps {
+  /** A project id from the sidebar's live view, including the personal project. */
+  projectId: string;
+  /** Sizes and shapes the decorative mark; the face fills it and inherits font size. */
+  className?: string;
+  style?: CSSProperties;
+}
+
 export interface ExperimentalProviderIconProps {
   /** Keeps same-id agent, machine, and environment providers distinct. */
   providerKind: PluginProviderIconRegistration["providerKind"];
@@ -2426,7 +2879,7 @@ export interface ExperimentalProviderIconProps {
 
 /**
  * An app icon registered by a plugin. The registry is app-wide: a registered
- * name is usable wherever a `BbIconName` is — `experimental_Icon`, and every
+ * name is usable wherever a `IconName` is — `experimental_Icon`, and every
  * host-rendered surface that takes one — by this plugin or any other.
  */
 export interface ExperimentalIconRegistration {
@@ -2466,7 +2919,7 @@ export type PluginAppSetup = (app: PluginAppBuilder) => void;
  */
 export interface PluginAppDefinition {
   /** Brand the host checks before interpreting a bundle's default export. */
-  readonly __bbPluginApp: true;
+  readonly __omnyoPluginApp: true;
   readonly setup: PluginAppSetup;
 }
 
@@ -2478,7 +2931,7 @@ export interface PluginRpcClient<
   Contract extends PluginRpcContract = PluginRpcContract,
 > {
   /**
-   * Invoke one of the plugin's `bb.rpc` methods (POST
+   * Invoke one of the plugin's `api.rpc` methods (POST
    * /api/v1/plugins/&lt;id&gt;/rpc/&lt;method&gt;). Resolves with the method's
    * inferred output; rejects with an `Error` carrying the server's message,
    * stable `code`, and validation `issues` when present.
@@ -2498,7 +2951,7 @@ export interface PluginSettingsState {
   isLoading: boolean;
 }
 
-/** State of the app's shared realtime connection to the bb server. */
+/** State of the app's shared realtime connection to the omnyo server. */
 export type PluginRealtimeConnectionState =
   | "connecting"
   | "connected"
@@ -2529,6 +2982,8 @@ export interface ComposerCustomization {
     id: string;
     /** Host chrome around the banner. Defaults to `"card"`. */
     chrome?: "card" | "bare";
+    /** `"adjacent-to-composer"` renders the banner after the host's own banners, directly above the editor, keeping registration order among such banners. While messages are queued, the queue tray stays attached to the editor and these banners sit above it. Omit to keep the default position. */
+    experimental_placement?: "adjacent-to-composer";
     component: ComponentType;
   }[];
   plusMenu?: readonly ComposerPlusMenuItem[];
@@ -2553,8 +3008,8 @@ export interface ExperimentalComposerPopupRegistration {
 export interface ComposerPlusMenuItem {
   id: string;
   label: string;
-  /** Takes precedence over the plugin's `bb.branding.icon`, which is drawn when this is omitted. */
-  icon?: BbIconName;
+  /** Takes precedence over the plugin's `omnyo.branding.icon`, which is drawn when this is omitted. */
+  icon?: IconName;
   /** Accessible description for the host-rendered row. */
   description?: string;
   disabled?: boolean | ((composer: PluginComposerApi) => boolean);
@@ -2569,8 +3024,8 @@ export interface ComposerPlusMenuItem {
 export interface ComposerSendMenuItem {
   id: string;
   label: string;
-  /** Takes precedence over the plugin's `bb.branding.icon`, which is drawn when this is omitted. */
-  icon?: BbIconName;
+  /** Takes precedence over the plugin's `omnyo.branding.icon`, which is drawn when this is omitted. */
+  icon?: IconName;
   /** Accessible description for the host-rendered row. */
   description?: string;
   disabled?: boolean | ((composer: PluginComposerApi) => boolean);
@@ -2635,7 +3090,7 @@ export type ComposerAttachment = {
   path: string;
   name: string;
   mimeType?: string;
-  /** Exact size in bytes; omit when unknown. Zero is treated as unknown. A wrong nonzero size can make the send fail when bb stages a file. */
+  /** Exact size in bytes; omit when unknown. Zero is treated as unknown. A wrong nonzero size can make the send fail when Omnyo stages a file. */
   sizeBytes?: number;
 } & (
   | {
@@ -2732,13 +3187,45 @@ export interface PluginComposerTextEffect {
   className: string;
 }
 
+/**
+ * A suggested next message the host shows inside an empty composer.
+ *
+ * `ready` shows `text` in muted type across the editor's full width, above a
+ * "Suggested reply" caption with Insert, dismiss and, when `onRegenerate` is
+ * supplied, a control that asks for another suggestion. Until the user clicks
+ * or types in the editor, the send button submits `text` exactly as Enter
+ * submits a draft, without focusing the editor. Insert and Tab in the empty
+ * editor put it in the draft as editable text. `loading` shows an animated
+ * waiting line whose stop control calls `onDismiss`; `failed` shows `message`
+ * with Retry; `none` shows `reason` with a control that calls `onRequest` to
+ * ask for a suggestion anyway. Escape in the empty editor and the dismiss
+ * control call `onDismiss`.
+ *
+ * On compact viewports the host shows the suggestion as a card above the
+ * editor instead: `ready` shows the full `text` clamped to three lines (tap to
+ * expand), with Edit, which inserts it as editable text, and a Send button
+ * that submits it in one tap and stays visible but disabled, with the reason,
+ * while the composer cannot submit. The composer's own send button does not
+ * send the suggestion there.
+ */
+export type ExperimentalComposerSuggestion =
+  | {
+      status: "ready";
+      text: string;
+      onDismiss(): void;
+      onRegenerate?(): void;
+    }
+  | { status: "loading"; onDismiss(): void }
+  | { status: "failed"; message: string; onRetry(): void; onDismiss(): void }
+  | { status: "none"; reason: string; onRequest(): void; onDismiss(): void };
+
 /** Host-rendered status that temporarily replaces a thread's draft glyph. */
 export interface PluginComposerThreadRowStatus {
   /**
    * Always drawn as given: unlike the plugin-badged surfaces, this one has no
-   * preference for the plugin's own `bb.branding.icon`.
+   * preference for the plugin's own `omnyo.branding.icon`.
    */
-  icon: BbIconName;
+  icon: IconName;
   /** Accessible label for the status glyph. */
   label: string;
   /**
@@ -2751,7 +3238,7 @@ export interface PluginComposerThreadRowStatus {
 
 /** An @-mention pill bound to one of the calling plugin's mention providers. */
 export interface PluginComposerMention {
-  /** Mention provider id registered by THIS plugin via `bb.ui.registerMentionProvider`. */
+  /** Mention provider id registered by THIS plugin via `api.ui.registerMentionProvider`. */
   provider: string;
   /** Item id your provider's `resolve` will receive at send time. */
   id: string;
@@ -2872,6 +3359,16 @@ export interface PluginComposerApi {
    */
   setTextEffect(effect: PluginComposerTextEffect | null): void;
   /**
+   * Show a suggested next message inside this composer while its draft is
+   * empty, or clear it with null: in the editor on wide viewports, or as a
+   * card above the editor on compact viewports. Only one plugin's suggestion
+   * shows at a time. Scoped to the calling plugin; clears automatically when
+   * the slot unmounts or its composer scope changes.
+   */
+  experimental_setSuggestion(
+    suggestion: ExperimentalComposerSuggestion | null,
+  ): void;
+  /**
    * Lock or unlock editing for this composer. Locks are scoped to the calling
    * plugin and automatically release when the slot unmounts or its composer
    * scope changes.
@@ -2894,6 +3391,10 @@ export interface PluginComposerApi {
   removeMention(mention: { provider: string; id: string }): void;
   /** Subscribe to successful local submissions in this composer scope, including accepted queued messages. Failed sends and draft clearing do not notify. Dispose on unmount. */
   onSubmitted(listener: () => void): () => void;
+  /** Observe the exact draft accepted by the existing send or queue owner. */
+  experimental_onSubmittedDraft(
+    listener: (draft: ComposerDraftSnapshot) => void,
+  ): () => void;
   /** Focus the composer caret at the end of the draft. */
   focus(): void;
   /**
@@ -2916,7 +3417,7 @@ export interface PluginComposerApi {
    * later attempts; core does not persist or interpret the opaque data.
    *
    * Resolves once the host has accepted the submission and cleared the draft.
-   * Failures of the underlying request are reported by bb's own submit error
+   * Failures of the underlying request are reported by Omnyo's own submit error
    * handling and restore the draft, exactly as an interactive failure does.
    */
   submit(options: ComposerSubmitOptions): Promise<void>;
@@ -2983,10 +3484,10 @@ export interface PluginComposerApi {
 /**
  * Current picker values in `selection`, input for `setSelection`, and the shape it resolves with. Field names match `NewThreadRequest` and the `default*` props of
  * `experimental_NewThreadComposer`, so one routed decision can feed the
- * composer, the embedded composer and `bb.sdk.threads.spawn` alike.
+ * composer, the embedded composer and `api.sdk.threads.spawn` alike.
  */
 export interface ComposerSelection {
-  /** New-thread composers only. BB's personal-project id means "Don't work in a project". */
+  /** New-thread composers only. Omnyo's personal-project id means "Don't work in a project". */
   projectId?: string;
   /**
    * New-thread composers only. `{ type: "project-default" }` and a `host`
@@ -3016,13 +3517,31 @@ export interface ComposerSelection {
  * `experimental_data` is opaque JSON delivered to dispatch hooks. The runtime
  * associates it with the calling plugin automatically for the initial
  * dispatch attempt.
+ *
+ * `experimental_expectHeld` tells the host that the calling plugin's own
+ * dispatch hook will hold this submission with `{ action: "wait", reason }`.
+ * The host then shows the message at once as a queued message waiting on the
+ * plugin with that reason, instead of briefly showing it as sent until the
+ * server answers. It requires `experimental_data`, because that is how the
+ * hook recognizes the submission. `reason` must be 1 to 200 characters. The
+ * server's answer always wins: if the hook does not hold the message, the
+ * prediction is corrected to a sent message.
  */
 export type ComposerSubmitOptions =
-  | { sendAt: number; experimental_data?: JsonValue }
-  | { experimental_data: JsonValue; sendAt?: never };
+  | {
+      sendAt: number;
+      experimental_data?: JsonValue;
+      experimental_expectHeld?: { reason: string };
+    }
+  | {
+      experimental_data: JsonValue;
+      sendAt?: never;
+      experimental_expectHeld?: { reason: string };
+    };
 
 /** @internal Old name of {@link ComposerSelection}. */
 export type ExperimentalComposerSelection = ComposerSelection;
+
 /** @internal Old name of {@link ComposerSubmitOptions}. */
 export type ExperimentalComposerSubmitOptions = ComposerSubmitOptions;
 
@@ -3032,8 +3551,8 @@ export type ExperimentalComposerSubmitOptions = ComposerSubmitOptions;
 
 /**
  * A consumer-supplied action on the messages of one `ThreadChat` instance,
- * rendered in the embedded timeline's per-message action bar alongside the
- * native actions. Slot-registered `messageAction`s do not appear there. Unlike
+ * rendered in the embedded timeline's per-message action menu (hover row on a
+ * fine pointer, long-press sheet on touch) alongside the native actions. Slot-registered `messageAction`s do not appear there. Unlike
  * the `messageAction` slot this is scoped to the rendering component, not
  * registered globally.
  */
@@ -3042,7 +3561,7 @@ export interface ThreadChatMessageAction {
   id: string;
   /** Tooltip / menu label for the action. */
   title: string;
-  icon?: BbIconName;
+  icon?: IconName;
   /**
    * Message roles the action applies to. Omitted = both user and assistant
    * messages.
@@ -3058,7 +3577,7 @@ export interface ThreadChatMessageAction {
 /**
  * Props of the host-owned `ThreadChat` component — one thread's chat
  * (timeline, and for the composer variants the full send/queue/draft
- * engine), rendered by the BB app inside a plugin slot. This is the
+ * engine), rendered by the Omnyo app inside a plugin slot. This is the
  * deliberate exception to the no-host-components rule (§5.5): a stable
  * product capability, not a UI kit. Versioned additive like slot props;
  * internal timeline rows, query hooks, and prompt-box configuration are
@@ -3066,6 +3585,8 @@ export interface ThreadChatMessageAction {
  */
 export interface ThreadChatProps {
   threadId: string;
+  /** A plugin-owned conversation with an independent draft and durable mention attribution. */
+  experimental_conversation?: { id: string; mention: PluginComposerMention };
   /**
    * "full" (default) is the page presentation (centered reading width);
    * "compact" is the side-panel presentation; "timeline" renders the
@@ -3089,10 +3610,16 @@ export interface ThreadChatProps {
    */
   permissionPolicy?: "inherit" | "editable";
   className?: string;
+  /**
+   * Composer placeholder while the chat is idle. The host keeps its own
+   * text while the chat is provisioning or stopping. Experimental: see
+   * docs/api_to_audit.md.
+   */
+  experimental_placeholder?: string;
   /** Rendered above the conversation, scrolling with it. */
   leadingContent?: ReactNode;
   /**
-   * Actions rendered in this instance's per-message action bar (see
+   * Actions rendered in this instance's per-message action menu (see
    * {@link ThreadChatMessageAction}).
    */
   messageActions?: readonly ThreadChatMessageAction[];
@@ -3106,7 +3633,7 @@ export interface ThreadChatProps {
  * The controlled execution selection resolved by the picker.
  *
  * Deliberately a single concrete shape, not a union: this value exists to be
- * forwarded verbatim to `bb.sdk.threads.spawn`, so it must name a real
+ * forwarded verbatim to `api.sdk.threads.spawn`, so it must name a real
  * provider and model.
  */
 export interface ExperimentalProviderModelPickerValue {
@@ -3127,18 +3654,31 @@ export type ExperimentalProviderModelPickerRouting =
 
 /**
  * Props of the host-owned `experimental_ProviderModelPicker` component.
- * Provider switches emit one coherent value after the live catalog resolves
- * its default model, reasoning level, and service-tier capability. Failed or
- * empty catalogs leave `value` unchanged. Omit `routing` to use bb's
- * primary-machine routing. Environment routing is required when a provider's
- * model catalog depends on the selected workspace.
+ * The picker lists each provider's models in one grouped list, with every
+ * model's reasoning levels as cells. One click on a cell, a model name, or a
+ * favorite emits one complete value from that provider's verified catalog and
+ * closes the picker; a model name lands on the current reasoning level or the
+ * closest one it supports. The user's model picker favorites and hidden models
+ * apply as in Omnyo's composers, and unavailable favorites never emit. Loading,
+ * failed, or empty catalogs leave `value` unchanged. Omit `routing` to use
+ * Omnyo's primary-machine routing. Environment routing is required when a
+ * provider's model catalog depends on the selected workspace.
  */
 export interface ExperimentalProviderModelPickerProps {
   value: ExperimentalProviderModelPickerValue;
+  /**
+   * Receives the complete selection once per committed choice, and when a
+   * a verified catalog fills an empty selection or reconciles its supported
+   * reasoning level and service tier. A selected model missing from the catalog
+   * stays selected until the user explicitly chooses a replacement.
+   */
   onChange(value: ExperimentalProviderModelPickerValue): void;
   /** Route discovery through an explicit machine or existing environment. */
   routing?: ExperimentalProviderModelPickerRouting;
-  /** Allow switching providers. Defaults to true; false hides provider tabs. */
+  /**
+   * Allow choosing another provider. Defaults to true; false shows only the
+   * group and favorites of `value.providerId`.
+   */
   allowProviderChange?: boolean;
   /** Horizontal popover alignment. Defaults to `"start"`. */
   align?: "start" | "center" | "end";
@@ -3148,7 +3688,7 @@ export interface ExperimentalProviderModelPickerProps {
 }
 
 /**
- * Props of the host-owned `experimental_BranchPicker` component — bb's branch
+ * Props of the host-owned `experimental_BranchPicker` component — Omnyo's branch
  * picker bundled with its branch-options loading for the given host and
  * project. The host owns fetching, searching, and refreshing the branch list;
  * the caller owns the selection and its meaning.
@@ -3210,7 +3750,123 @@ export interface CheckoutState {
   operation: WorkspaceGitOperation;
 }
 
-/** Props of BB's controlled, host-resolved permission-mode picker. */
+/** One changed file in a thread's workspace. */
+export interface ExperimentalThreadGitFile {
+  /** Path relative to the workspace root. */
+  path: string;
+  /**
+   * Porcelain status: `M` modified, `A` added, `D` deleted, `R` renamed,
+   * `C` copied, `U` conflicted, `??` untracked, `?` unknown.
+   */
+  status: "M" | "A" | "D" | "R" | "C" | "U" | "??" | "?";
+  /** Null when the host could not count lines, e.g. for a binary file. */
+  insertions: number | null;
+  deletions: number | null;
+}
+
+/**
+ * A set of changed files with totals. `files` can be shorter than
+ * `fileCount` when the host caps a large change list.
+ */
+export interface ExperimentalThreadGitChanges {
+  fileCount: number;
+  insertions: number;
+  deletions: number;
+  /** False when at least one file has no line counts. */
+  lineStatsComplete: boolean;
+  files: readonly ExperimentalThreadGitFile[];
+}
+
+/** One commit on the thread's branch that the comparison base lacks. */
+export interface ExperimentalThreadGitCommit {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  authorName: string;
+  /** Epoch milliseconds. */
+  authoredAt: number;
+}
+
+/** The thread branch compared with its merge base branch. */
+export interface ExperimentalThreadGitComparison {
+  /** The branch the thread merges into, e.g. `main`. */
+  baseBranch: string;
+  aheadCount: number;
+  behindCount: number;
+  /** Ahead commits, newest first. */
+  commits: readonly ExperimentalThreadGitCommit[];
+  /** Committed changes relative to the merge base. */
+  changes: ExperimentalThreadGitChanges;
+}
+
+export type ExperimentalThreadGitMergeMethod = "merge" | "squash" | "rebase";
+
+/** Pull request actions the host can perform for this thread. */
+export interface ExperimentalThreadGitPullRequestActions {
+  /** True while a pull request action is running. */
+  isPending: boolean;
+  /** The merge method Omnyo last used for this thread, the default choice. */
+  mergeMethod: ExperimentalThreadGitMergeMethod;
+  /** Null when the pull request cannot be marked ready. */
+  markReady: (() => void) | null;
+  /** Null when the pull request cannot be merged. */
+  merge: ((method: ExperimentalThreadGitMergeMethod) => void) | null;
+  /** Null when the pull request cannot return to draft. */
+  convertToDraft: (() => void) | null;
+}
+
+/** Where a changed file was listed, which decides how it opens. */
+export type ExperimentalThreadGitFileSource = "workingTree" | "comparison";
+
+/**
+ * Git state for one thread's workspace, read with
+ * `experimental_useThreadGit()`.
+ *
+ * `loading` covers the first status lookup. `ready` carries the status and
+ * the host's git actions; each action runs the same path as Omnyo's own git
+ * controls.
+ */
+export type ExperimentalThreadGit =
+  | { status: "loading" }
+  | {
+      status: "ready";
+      /** Checked-out branch, or null for a detached HEAD. */
+      branch: string | null;
+      /** The repository's default branch. */
+      defaultBranch: string;
+      /** Uncommitted changes, untracked (`??`) files included. */
+      workingTree: ExperimentalThreadGitChanges;
+      /** Null when the host has no merge base to compare with. */
+      comparison: ExperimentalThreadGitComparison | null;
+      /** The branch's pull request, or null when there is none. */
+      pullRequest: PluginSidebarPullRequest | null;
+      /** Null when the host offers no pull request actions. */
+      pullRequestActions: ExperimentalThreadGitPullRequestActions | null;
+      /**
+       * Opens Omnyo's commit flow for the uncommitted changes. Null when there
+       * is nothing to commit or the thread cannot commit.
+       */
+      commit: (() => void) | null;
+      /**
+       * Opens one changed file the way Omnyo's change lists do: a diff for a
+       * tracked change, a preview for an untracked file.
+       */
+      openFile(args: {
+        path: string;
+        source: ExperimentalThreadGitFileSource;
+      }): void;
+      /** Opens Omnyo's full diff panel for this thread. */
+      openDiffPanel(): void;
+    };
+
+/** Props of the host-owned `experimental_ThreadMergeBasePicker`. */
+export interface ExperimentalThreadMergeBasePickerProps {
+  /** Horizontal menu alignment. Defaults to `"end"`. */
+  align?: "start" | "center" | "end";
+  className?: string;
+}
+
+/** Props of Omnyo's controlled, host-resolved permission-mode picker. */
 export interface ExperimentalPermissionModePickerProps {
   /** Provider whose supported modes determine the available choices. */
   providerId: string;
@@ -3232,10 +3888,10 @@ export interface ExperimentalPermissionModePickerProps {
 /**
  * Every selection the composer resolved, JSON-serializable so a plugin can
  * forward it to its own backend rpc verbatim and hand it straight to
- * `bb.sdk.threads.spawn`.
+ * `api.sdk.threads.spawn`.
  *
  * The split is deliberate: the composer owns *user selections*, the plugin
- * owns *filing and attribution*. `bb.sdk.threads.spawn` auto-fills
+ * owns *filing and attribution*. `api.sdk.threads.spawn` auto-fills
  * `origin: "plugin"` and `originPluginId`, so a thread created this way stays
  * attributed to the plugin — which it would not be if the component created
  * the thread itself. The plugin adds `sectionId`, `parentThreadId`, `title`,
@@ -3244,11 +3900,11 @@ export interface ExperimentalPermissionModePickerProps {
  */
 export interface NewThreadRequest {
   /**
-   * The selected project id. Choosing "Don't work in a project" submits BB's
+   * The selected project id. Choosing "Don't work in a project" submits Omnyo's
    * personal-project id (not `null`) together with a `personal` workspace
    * environment. Forward those fields unchanged to `threads.spawn`; if the
    * plugin needs project metadata, request it from the plugin backend with
-   * `bb.sdk.projects.list({ includePersonal: true })`.
+   * `api.sdk.projects.list({ includePersonal: true })`.
    */
   projectId: string;
   providerId: string;
@@ -3282,11 +3938,11 @@ export interface NewThreadRequest {
 }
 
 /**
- * Props of the host-owned `experimental_NewThreadComposer` component — bb's
+ * Props of the host-owned `experimental_NewThreadComposer` component — Omnyo's
  * full new-thread compose surface (prompt editor with @-mentions and expand,
  * attachments, provider/model/reasoning picker, voice, submit, and the row
  * beneath with project, environment, branch-from, and permission mode),
- * rendered by the BB app inside a plugin slot.
+ * rendered by the Omnyo app inside a plugin slot.
  *
  * It is the create-side counterpart to `ThreadChat`: same deliberate
  * exception to the no-host-components rule (§5.5), same additive versioning.
@@ -3392,8 +4048,17 @@ export interface NewThreadComposerProps {
   onSubmit: (request: NewThreadRequest) => void | Promise<void>;
 }
 
+/** Authenticated raster object URL rendered through the shared image lightbox. */
+export interface ExperimentalImagePreviewProps {
+  src: string;
+  alt: string;
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  title?: string;
+  className?: string;
+}
+
 /**
- * Props of the host-owned `Markdown` component — bb's chat message renderer
+ * Props of the host-owned `Markdown` component — Omnyo's chat message renderer
  * (the same typography, spacing, and code styling as timeline messages).
  * Use it wherever plugin UI quotes or previews message content so it reads
  * like the rest of the chat. Like `ThreadChat`, this is a stable product
@@ -3412,7 +4077,7 @@ export interface MarkdownProps {
 }
 
 /**
- * Props for BB's semantic URL link. The host owns ordinary activation while
+ * Props for Omnyo's semantic URL link. The host owns ordinary activation while
  * retaining browser-owned anchor behavior for app routes, modifiers, explicit
  * targets, copying, and unsupported schemes. New top-level targets preserve
  * supplied `rel` tokens and receive safe defaults unless `opener` is explicit.
@@ -3436,14 +4101,14 @@ export type ExperimentalFileLocation =
   | { kind: "line"; line: number; column: number | null }
   | { kind: "range"; startLine: number; endLine: number };
 
-/** Options shared by BB's preview and preferred-external file intents. */
+/** Options shared by Omnyo's preview and preferred-external file intents. */
 export interface ExperimentalFileOpenOptions {
   target: ExperimentalLiveFileTarget;
   location: ExperimentalFileLocation | null;
 }
 
 /**
- * Props for BB's host-rendered semantic file link. Valid targets receive a
+ * Props for Omnyo's host-rendered semantic file link. Valid targets receive a
  * scheme-safe anchor href; traversal paths, ill-formed Unicode, and other
  * malformed runtime targets remain inert.
  */
@@ -3483,21 +4148,88 @@ export interface ExperimentalAppPanel {
   ): boolean;
 }
 
+/**
+ * One user action a plugin adds to Omnyo's single undo history. `label` names the
+ * action in the Undid/Redid toast, so phrase it as the action: "Move Revenue
+ * chart". `undo` and `redo` reject to show Omnyo's error toast.
+ */
+export interface ExperimentalActionHistoryEntry {
+  label: string;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
+}
+
+/**
+ * Omnyo's one app-wide undo history, shared with chat actions such as Archive.
+ * Record only actions the user took, after they succeed; Cmd+Z / Cmd+Shift+Z
+ * (Ctrl+Z / Ctrl+Y elsewhere) replay the newest entry wherever it came from,
+ * after native text editing in the focused field. Plugins must not handle
+ * those shortcuts themselves.
+ */
+export interface ExperimentalActionHistory {
+  record(entry: ExperimentalActionHistoryEntry): void;
+  /** Replay the newest entry, as the keyboard shortcut does. */
+  undo(): Promise<void>;
+  redo(): Promise<void>;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+}
+
 /** Current app selection, derived from the route. */
-export interface BbContext {
+export interface experimental_AppContext {
   projectId: string | null;
   threadId: string | null;
 }
 
-export interface BbNavigate {
+/** Window-local visible selection; retained or hidden panels are excluded. */
+export interface ExperimentalVisibleAppContext {
+  view:
+    | "compose"
+    | "thread"
+    | "settings"
+    | "archive"
+    | "tools"
+    | "plugin"
+    | "other";
+  projectId: string | null;
+  threadId: string | null;
+  panel: {
+    kind:
+      | "file"
+      | "browser"
+      | "terminal"
+      | "diff"
+      | "thread-info"
+      | "plugin"
+      | "new-tab";
+    label: string;
+    resourceId: string | null;
+  } | null;
+}
+
+export interface experimental_AppNavigate {
   /**
-   * Open a thread. `split: true` applies bb's split placement rules (a right
+   * Open a thread. `split: true` applies Omnyo's split placement rules (a right
    * split by default, focus when already open, replace at the pane cap) and
    * falls back to plain navigation where splits are off. Opening also expands
-   * the thread's conversation if the side panel had collapsed it.
+   * the thread's conversation if the side panel had collapsed it. Set
+   * `experimental_userInitiated` for a direct chat open so iOS can give
+   * feedback when the chat is off screen.
    */
-  toThread(threadId: string, options?: { split?: boolean }): void;
+  toThread(
+    threadId: string,
+    options?: { split?: boolean; experimental_userInitiated?: boolean },
+  ): void;
+  experimental_prefetchThreadOpen(threadId: string): void;
   toProject(projectId: string): void;
+  /**
+   * Open Omnyo's add-project picker while keeping the current page open.
+   * Returns false if the host cannot open the picker. The callback receives
+   * the project after a successful save and is not called on cancel.
+   */
+  experimental_openProjectCreator?(
+    onCreated: (project: Pick<ProjectResponse, "id" | "name">) => void,
+  ): boolean;
   /**
    * Navigate to one of this plugin's own nav panels by its `path`.
    * `subPath` targets a location inside the panel (the component's
@@ -3536,19 +4268,19 @@ export interface BbNavigate {
    */
   openThreadPanel(options: PluginTargetedPanelActionOpenOptions): boolean;
   /**
-   * Open an HTTP(S) URL using this client's BB browser preference. Returns
+   * Open an HTTP(S) URL using this client's Omnyo browser preference. Returns
    * false for schemes the host does not own. Experimental: see
    * docs/api_to_audit.md.
    */
   openUrl(url: string): boolean;
-  /** Open a live file in this surface's shared BB preview panel. */
+  /** Open a live file in this surface's shared Omnyo preview panel. */
   experimental_openFilePreview(options: ExperimentalFileOpenOptions): boolean;
   /** Open a live file in this client's preferred external file target. */
   experimental_openFileExternally(
     options: ExperimentalFileOpenOptions,
   ): boolean;
   /**
-   * Show a terminal session in this surface's BB terminal panel: select its
+   * Show a terminal session in this surface's Omnyo terminal panel: select its
    * tab, adding one when needed, and reveal the panel. Create the session
    * first with `useSdk().terminals.create`, whose scope chooses the thread,
    * environment, or host directory it runs in. A thread surface accepts only
@@ -3563,11 +4295,11 @@ export interface BbNavigate {
 
 // ---------------------------------------------------------------------------
 // The whole runtime surface. Declaration-versus-runtime parity is tested
-// against the actual `@get-bb/plugin-sdk/app` module namespace.
+// against the actual `@omnyo/plugin-sdk/app` module namespace.
 //
 // Components are deliberately NOT part of this surface (removed 2026-07-03,
 // plugin design §5.5): plugins vendor shadcn-style component source from the
-// BB registry (`npx shadcn add @bb/<name>`) and own it. `bb plugin build`
+// Omnyo registry (`npx shadcn add ./vendor/omnyo-ui/<name>.json`) and own it. `omnyo plugin build`
 // shims react, the shared-singleton packages (portal radix families,
 // sonner, vaul, @pierre/diffs) and the host-resident libraries every plugin
 // would otherwise duplicate (clsx, tailwind-merge, class-variance-authority,
@@ -3577,11 +4309,47 @@ export interface BbNavigate {
 // ---------------------------------------------------------------------------
 
 /**
- * Everything `@get-bb/plugin-sdk/app` resolves to at runtime. The BB app builds
- * the real implementation and `satisfies` this interface; `bb plugin build`
- * shims the specifier to that object on `globalThis.__bbPluginRuntime`.
+ * Everything `@omnyo/plugin-sdk/app` resolves to at runtime. The Omnyo app builds
+ * the real implementation and `satisfies` this interface; `omnyo plugin build`
+ * shims the specifier to that object on `globalThis.__omnyoPluginRuntime`.
  */
+export type ExperimentalThreadBootstrapData =
+  | { status: "pending" }
+  | { status: "unavailable" }
+  | { status: "error"; message: string; updatedAt: number }
+  | { status: "ready"; result: JsonValue; updatedAt: number; current: boolean };
+
+type DrawerPointerDownOutsideEvent = CustomEvent<{
+  originalEvent: PointerEvent;
+}>;
+
+/** Props for {@link PluginSdkApp.experimental_ResponsiveDrawerShell}. */
+export interface ExperimentalResponsiveDrawerShellProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** A screen-reader label when the content does not supply a visible heading. */
+  srLabel?: string;
+  /** ID of the visible heading, if supplied by the content. */
+  labelledBy?: string;
+  describedBy?: string;
+  children: ReactNode;
+  contentClassName?: string;
+  closeOnBackdropClick?: boolean;
+  /** Normal-motion duration in milliseconds. The default follows the host theme. */
+  motionDurationMs?: number;
+  /** Set false to close immediately except when a swipe follows the finger. */
+  animateClose?: boolean;
+  /** Prevent default to keep the drawer open. */
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
+  /** Prevent default to keep the drawer open when the backdrop is pressed. */
+  onPointerDownOutside?: (event: DrawerPointerDownOutsideEvent) => void;
+  onInteractOutside?: (event: DrawerPointerDownOutsideEvent) => void;
+  onAfterCloseAutoFocus?: () => void;
+  onContentAnimationEnd?: (open: boolean) => void;
+}
+
 export interface PluginSdkApp {
+  experimental_useInitialLoadPending(pending: boolean): void;
   experimental_Icon: ComponentType<ExperimentalIconProps>;
   /**
    * Render provider slot override, then its logo, then its glyph, then fallback.
@@ -3591,10 +4359,21 @@ export interface PluginSdkApp {
    * fall back to declared artwork. Logo assets render as currentColor masks.
    */
   experimental_ProviderIcon: ComponentType<ExperimentalProviderIconProps>;
+  /**
+   * Render a project's icon the way the sidebar project rail does: its icon file
+   * when found, else its monogram, or the personal glyph. Decorative; renders
+   * nothing for an unknown project or before the sidebar catalog loads.
+   */
+  experimental_ProjectIcon: ComponentType<ExperimentalProjectIconProps>;
   definePluginApp(setup: PluginAppSetup): PluginAppDefinition;
   useRpc<
     Contract extends PluginRpcContract = PluginRpcContract,
   >(): PluginRpcClient<Contract>;
+  /** Read this plugin's opted-in result without another request. Ready current distinguishes active-entry responses from prior-entry snapshots. */
+  experimental_useThreadBootstrapData(
+    threadId: string,
+    method: string,
+  ): ExperimentalThreadBootstrapData;
   useRealtime(channel: string, handler: (payload: unknown) => void): void;
   /**
    * Observe the same shared connection that delivers `useRealtime` signals.
@@ -3604,26 +4383,30 @@ export interface PluginSdkApp {
    */
   useRealtimeConnectionState(): PluginRealtimeConnectionState;
   useSettings(): PluginSettingsState;
-  useBbContext(): BbContext;
+  experimental_useAppContext(): experimental_AppContext;
+  /** Read the visible window selection without fetching its content. */
+  experimental_useVisibleAppContext(): ExperimentalVisibleAppContext;
   /**
    * The id of the plugin that owns the calling component: the same id
-   * `bb.pluginId` reports on the server, derived from the package name. Key
-   * state the plugin keeps outside bb's per-plugin storage with it, such as
+   * `api.pluginId` reports on the server, derived from the package name. Key
+   * state the plugin keeps outside Omnyo's per-plugin storage with it, such as
    * localStorage entries and log prefixes, so a copy of the plugin published
    * under another name does not collide with the original. Experimental: see
    * docs/api_to_audit.md.
    */
   experimental_usePluginId(): string;
   /**
-   * The answer shortcuts bb binds while a pending interaction is open. Inside
+   * The answer shortcuts Omnyo binds while a pending interaction is open. Inside
    * a `pendingInteraction` component the form shows each option's shortcut and
    * registers a handler that chooses the option; outside one, the map is empty
    * and handlers never run. Experimental: see docs/api_to_audit.md.
    */
   experimental_useQuestionFormHost(): ExperimentalQuestionFormHost;
-  useBbNavigate(): BbNavigate;
+  experimental_useAppNavigate(): experimental_AppNavigate;
   /** Select one of this plugin's eligible fixed tabs on the current surface. */
   experimental_useAppPanel(): ExperimentalAppPanel;
+  /** Omnyo's single undo history; re-renders when undo or redo availability changes. */
+  experimental_useActionHistory(): ExperimentalActionHistory;
   /** Read or clear the owning tab's validated, session-scoped target. */
   experimental_useFixedTabTarget<Target extends JsonValue>(
     tab: ExperimentalPluginFixedTabReference<Target>,
@@ -3643,6 +4426,17 @@ export interface PluginSdkApp {
    * changes.
    */
   useComposers(): readonly PluginComposerApi[];
+  /** Reads the shared server Inbox projection, retaining older data on refresh errors. */
+  experimental_useInboxSnapshot(): {
+    snapshot: InboxSnapshot | null;
+    status: "loading" | "ready" | "error";
+    stale: boolean;
+    refresh(): void;
+  };
+  /** Reads the selected chat's server work summary from the shared detail cache, independent of sidebar placement. */
+  experimental_useThreadWork(
+    threadId: string | null,
+  ): NonNullable<PluginSidebarThread["experimental_work"]> | null;
   /**
    * The sidebar's live thread view (see {@link PluginSidebarThreadsState}).
    * Reads the host's own cache and realtime subscriptions, so it costs no
@@ -3650,6 +4444,10 @@ export interface PluginSdkApp {
    *
    * Active threads are uncapped. Opting into archived threads uses the host
    * archive query; request more pages through `experimental_archived`.
+   * Opting into shelved threads uses the host shelf query; request more pages
+   * through `experimental_shelved`. A thread belongs to one lifecycle:
+   * archived when `archivedAt` is set, else shelved when
+   * `experimental_shelvedAt` is set, else active.
    * `threads` contains the selected lifecycles across loaded pages. Thread
    * objects keep their identity across updates while the underlying entry is
    * unchanged, so a memoized row re-renders only when its own thread changed;
@@ -3658,25 +4456,47 @@ export interface PluginSdkApp {
    * row per thread is slow on phones with many threads.
    * Experimental: see docs/api_to_audit.md.
    */
+  /** Shared project navigation data; honor thread claims only while rendering the project tree. */
+  experimental_useProjectSidebarItems(): readonly ExperimentalProjectSidebarGroup[];
   experimental_useSidebarThreads(options?: {
     /** Defaults to active threads only. An empty selection also means active. */
-    experimental_lifecycles: readonly ("active" | "archived")[];
+    experimental_lifecycles: readonly ("active" | "archived" | "shelved")[];
   }): PluginSidebarThreadsState;
+  /**
+   * The chats the owner has multi-selected in the active thread list, in the
+   * list's display order; empty when nothing is selected. Omnyo's Group command
+   * (Mod+G by default) and the selection's right-click menu act on them.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  experimental_useChatSelection(): readonly string[];
+  /**
+   * Publish the active thread list's multi-selection, in display order, so
+   * Omnyo's commands and menus can act on it; pass an empty array when it
+   * clears. Omnyo clears it
+   * after grouping. Experimental: see docs/api_to_audit.md.
+   */
+  experimental_setChatSelection(threadIds: readonly string[]): void;
+  /**
+   * Omnyo's chat group actions (see {@link PluginThreadGroupActions}): the
+   * same implementation Omnyo's Group command and menus use.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  experimental_useThreadGroupActions(): PluginThreadGroupActions;
   /**
    * Thread actions bound to the host's mutations (see
    * {@link PluginSidebarThreadActions}). Experimental: see
    * docs/api_to_audit.md.
    *
    * @internal Superseded by `experimental_useThreadActions`, the thread
-   * action components, `useSdk().threads`, and `useBbNavigate()`; kept for
+   * action components, `useSdk().threads`, and `experimental_useAppNavigate()`; kept for
    * plugins built against older SDKs.
    */
   experimental_useSidebarThreadActions(): PluginSidebarThreadActions;
   /**
-   * Archive an environment's active thread trees the way bb's own list does:
+   * Archive an environment's active thread trees the way Omnyo's own list does:
    * optimistic removal, closing their split panes, leaving a route that shows
    * one of them, and one Undo toast that restores them and the route. The
-   * promise rejects after bb has shown an error toast. Experimental: see
+   * promise rejects after Omnyo has shown an error toast. Experimental: see
    * docs/api_to_audit.md.
    */
   experimental_useArchiveEnvironmentThreads(): (
@@ -3684,7 +4504,7 @@ export interface PluginSdkApp {
   ) => Promise<void>;
   /**
    * Every thread action for one thread, in menu order (see
-   * {@link PluginThreadAction} for grouping): bb's own registrations first,
+   * {@link PluginThreadAction} for grouping): Omnyo's own registrations first,
    * then plugins' in registration order. Registrations' `useData` hooks run
    * once for the app, so calling this per sidebar row costs one store
    * subscription and a pure `item` call per registration. Pass `keys` for a
@@ -3701,20 +4521,20 @@ export interface PluginSdkApp {
    */
   experimental_useThreadActionRegistrations(): readonly PluginThreadActionRegistrationInfo[];
   /**
-   * bb's thread menu behind a trigger (see
+   * Omnyo's thread menu behind a trigger (see
    * {@link PluginThreadActionsMenuProps}): the same items, order, choice
    * submenus and compact drawer as the thread header's menu. Experimental: see
    * docs/api_to_audit.md.
    */
   experimental_ThreadActionsMenu: ComponentType<PluginThreadActionsMenuProps>;
   /**
-   * bb's thread menu on right-click or long-press (see
+   * Omnyo's thread menu on right-click or long-press (see
    * {@link PluginThreadActionsContextMenuProps}). Experimental: see
    * docs/api_to_audit.md.
    */
   experimental_ThreadActionsContextMenu: ComponentType<PluginThreadActionsContextMenuProps>;
   /**
-   * bb's thread menu groups, for a registration that joins one:
+   * Omnyo's thread menu groups, for a registration that joins one:
    * `open` (split), `organize` (copy, read, pin, move, rename), `settings`,
    * and `lifecycle` (archive, delete). Experimental: see docs/api_to_audit.md.
    */
@@ -3761,7 +4581,7 @@ export interface PluginSdkApp {
   useSidebarThreadDraftIds(): ReadonlySet<string>;
   /**
    * The row status another plugin set on this thread (see
-   * {@link PluginSidebarThreadRowStatus}), or null. Draw it where bb's row
+   * {@link PluginSidebarThreadRowStatus}), or null. Draw it where Omnyo's row
    * would: in place of the draft glyph, with its `tone`.
    */
   useSidebarThreadRowStatus(
@@ -3784,7 +4604,7 @@ export interface PluginSdkApp {
   /**
    * The jump shortcut assigned to this row while the app command modifier is
    * held (see {@link PluginSidebarThreadShortcut}), or null the rest of the
-   * time. bb assigns keys in DOM order to rows carrying the
+   * time. Omnyo assigns keys in DOM order to rows carrying the
    * `data-sidebar-thread-shortcut-target` attribute, so a row that omits it
    * always reads null.
    */
@@ -3793,46 +4613,49 @@ export interface PluginSdkApp {
   ): PluginSidebarThreadShortcut | null;
   /**
    * A thread's display title with `@project:`, `@section:`, and `@thread:`
-   * mentions rendered as bb's chips (see {@link PluginThreadTitleProps}).
+   * mentions rendered as Omnyo's chips (see {@link PluginThreadTitleProps}).
    * Inline content; wrap it in your own truncating container. The plain-text
    * form is `displayTitle` on the thread.
    */
   ThreadTitle: ComponentType<PluginThreadTitleProps>;
   /**
-   * bb's thread status glyph (see {@link PluginThreadStatusGlyphProps}): the
-   * same icons, colors, and accessible labels as bb's own thread lists.
+   * Omnyo's thread status glyph (see {@link PluginThreadStatusGlyphProps}): the
+   * same icons, colors, and accessible labels as Omnyo's own thread lists.
    * Experimental: see docs/api_to_audit.md.
    */
   experimental_ThreadStatusGlyph: ComponentType<PluginThreadStatusGlyphProps>;
+  /** The native questions and callback panel used by core's composer. */
+  experimental_ThreadAttention: ComponentType<{ threadId: string }>;
+  experimental_threadIndicators: typeof import("@omnyo/domain").threadIndicators;
   /**
-   * bb's environment provider catalog (see
+   * Omnyo's environment provider catalog (see
    * {@link PluginEnvironmentProvidersState}), the directory a thread's
    * `environment.providerId` points into. Reads the host's own cached
    * catalog, so it costs no extra request.
    */
   useEnvironmentProviders(): PluginEnvironmentProvidersState;
   /**
-   * bb's public API client bound to this plugin (see
-   * {@link PluginBrowserBbSdk}). The first choice for reading and mutating
-   * bb state from a frontend: creating or renaming thread sections, moving a
+   * Omnyo's public API client bound to this plugin (see
+   * {@link experimental_PluginBrowserSdk}). The first choice for reading and mutating
+   * Omnyo state from a frontend: creating or renaming thread sections, moving a
    * thread into one, pinning, unarchiving, spawning a thread. The host's own
-   * caches refresh over realtime, so a mutation made here shows up in bb's
+   * caches refresh over realtime, so a mutation made here shows up in Omnyo's
    * surfaces without further work. Reserve `useRpc` for work that needs your
    * server: secrets, host files, or your plugin's own storage.
    *
    * Thread title, section, parent, pin, and unpin writes are optimistic in
-   * bb's surfaces. Synchronous calls share one cache transaction; writes to
+   * Omnyo's surfaces. Synchronous calls share one cache transaction; writes to
    * the same thread execute in order, so unpin and move can be submitted
    * together. Unarchive, environment-group archive, project/machine/environment
    * renames, and project/section removal are also optimistic and roll back on
    * failure. Created sections enter the cache when the server assigns their id.
-   * Navigation belongs to `useBbNavigate()`; archive and delete
+   * Navigation belongs to `experimental_useAppNavigate()`; archive and delete
    * confirmation to the thread action menus.
    *
    * The client is stable for the plugin's lifetime, so it is safe in effect
    * and callback dependency lists.
    */
-  useSdk(): PluginBrowserBbSdk;
+  useSdk(): experimental_PluginBrowserSdk;
   /**
    * The provider directory (see {@link PluginProvidersState}). Reads the
    * host's own cached provider roster, so a plugin that shows a thread's
@@ -3843,14 +4666,14 @@ export interface PluginSdkApp {
   /**
    * The active code theme as a VS Code theme file (see
    * {@link PluginCodeThemeState}), for a plugin that renders code with an
-   * engine of its own and needs BB's palette to reach it. Experimental: see
+   * engine of its own and needs Omnyo's palette to reach it. Experimental: see
    * docs/api_to_audit.md.
    */
   experimental_useCodeTheme(): PluginCodeThemeState;
   /**
-   * Writes content to the system clipboard through bb's own clipboard writer,
-   * the one bb's copy actions use. A plain function, callable from
-   * components, content scripts, and command callbacks. bb Desktop writes
+   * Writes content to the system clipboard through Omnyo's own clipboard writer,
+   * the one Omnyo's copy actions use. A plain function, callable from
+   * components, content scripts, and command callbacks. Omnyo Desktop writes
    * through the native clipboard, so copies work without window focus or a
    * secure origin; browsers use the Clipboard API, then the copy command.
    * Resolves true once the clipboard holds the content and false when every
@@ -3861,18 +4684,32 @@ export interface PluginSdkApp {
     content: ExperimentalClipboardContent,
   ): Promise<boolean>;
   /**
-   * The host-owned chat component (see {@link ThreadChatProps}). Together
-   * with `Markdown`, the only components the SDK ships — everything else
-   * stays vendored per §5.5.
+   * The desktop client's native File resolver, or null in a browser without
+   * the capability. Generated Files have a null classification. Native errors
+   * reject; callers must not substitute a server clipboard or another resolver.
+   * File possession does not establish a fresh gesture or execution-host identity.
+   * Core composer paste and drop use this same path. Experimental: see docs/api_to_audit.md.
+   */
+  experimental_getNativeFileResolver(): ExperimentalNativeFileResolver | null;
+  /**
+   * The host-owned chat component (see {@link ThreadChatProps}).
    */
   ThreadChat: ComponentType<ThreadChatProps>;
+  /**
+   * A controlled compact drawer. The host defers initially mounting its
+   * content, retains mounted content on close, and scopes its portals to
+   * the rendering plugin. Render it inside a plugin slot.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  experimental_ResponsiveDrawerShell: ComponentType<ExperimentalResponsiveDrawerShellProps>;
   /**
    * The host-owned chat-message markdown renderer (see
    * {@link MarkdownProps}).
    */
   Markdown: ComponentType<MarkdownProps>;
+  experimental_ImagePreview: ComponentType<ExperimentalImagePreviewProps>;
   /**
-   * A real anchor whose ordinary HTTP(S) activation uses BB's URL preference.
+   * A real anchor whose ordinary HTTP(S) activation uses Omnyo's URL preference.
    * Experimental: see docs/api_to_audit.md.
    */
   UrlLink: ComponentType<UrlLinkProps>;
@@ -3885,27 +4722,27 @@ export interface PluginSdkApp {
    */
   experimental_NewThreadComposer: ComponentType<NewThreadComposerProps>;
   /**
-   * BB's textarea with voice input (see
+   * Omnyo's textarea with voice input (see
    * {@link ExperimentalVoiceInputTextareaProps}): the same microphone
    * preference, transcription service, and error handling as the prompt box.
    * Experimental: see docs/api_to_audit.md.
    */
   experimental_VoiceInputTextarea: ComponentType<ExperimentalVoiceInputTextareaProps>;
   /**
-   * BB's controlled provider/model/reasoning picker. Provider changes emit
+   * Omnyo's controlled provider/model/reasoning picker. Provider changes emit
    * only after the new provider's verified defaults and capabilities resolve,
    * so `onChange` always receives one coherent value. Experimental: see
    * docs/api_to_audit.md.
    */
   experimental_ProviderModelPicker: ComponentType<ExperimentalProviderModelPickerProps>;
   /**
-   * BB's controlled permission-mode picker. The host resolves provider
+   * Omnyo's controlled permission-mode picker. The host resolves provider
    * capabilities and the routed machine's permission ceiling. Experimental:
    * see docs/api_to_audit.md.
    */
   experimental_PermissionModePicker: ComponentType<ExperimentalPermissionModePickerProps>;
   /**
-   * BB's branch picker with its branch-options loading for one host and
+   * Omnyo's branch picker with its branch-options loading for one host and
    * project (see {@link BranchPickerProps}) — the same control
    * the New Thread composer renders as "Branch from". Experimental: see
    * docs/api_to_audit.md.
@@ -3924,15 +4761,31 @@ export interface PluginSdkApp {
    */
   experimental_useCheckoutState(args: UseCheckoutStateArgs): CheckoutState;
   /**
+   * Git state and actions for the thread that hosts the calling component
+   * (see {@link ExperimentalThreadGit}). Returns null outside a thread
+   * (for example on the compose screen), when the thread has no git
+   * workspace, when its environment is unavailable or archived, or when the
+   * owner turned Git changes off in Settings. Omnyo's thread header renders git
+   * status only through this hook. Experimental: see docs/api_to_audit.md.
+   */
+  experimental_useThreadGit(): ExperimentalThreadGit | null;
+  /**
+   * Omnyo's merge base branch picker for the thread that hosts the calling
+   * component: the same control and branch loading Omnyo uses to choose what
+   * the thread's changes compare with. Renders nothing outside a thread or
+   * when no merge base applies. Experimental: see docs/api_to_audit.md.
+   */
+  experimental_ThreadMergeBasePicker: ComponentType<ExperimentalThreadMergeBasePickerProps>;
+  /**
    * The host-owned source viewer (see {@link SourceCodeProps}). Renders
-   * supplied source text with BB's syntax highlighting, gutters, and live code
+   * supplied source text with Omnyo's syntax highlighting, gutters, and live code
    * theme, and honours an active `experimental_sourceCodeRenderer`
    * replacement. Experimental: see docs/api_to_audit.md.
    */
   experimental_SourceCode: ComponentType<SourceCodeProps>;
   /**
    * The host-owned diff viewer (see {@link DiffProps}). Renders supplied patch
-   * content with BB's normalization, optional full-file context expansion,
+   * content with Omnyo's normalization, optional full-file context expansion,
    * syntax highlighting, unified/split presentation, and live code theme, and
    * honours an active
    * `experimental_diffRenderer` replacement. Experimental: see

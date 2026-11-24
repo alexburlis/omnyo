@@ -12,13 +12,16 @@ import {
   buildStandaloneRuntimeEnv,
   buildStandaloneShellExports,
   resolveStandaloneParentPid,
+  parseStandaloneState,
+  readStandaloneStateRuntime,
   STANDALONE_OPENAI_API_KEY_ENV,
   STANDALONE_PARENT_PID_ENV,
 } from "../src/shared.js";
 
 const RESTART_PROVIDER_ENV_BLOCK =
-  'case "${BB_QA_OPENAI_API_KEY-}" in *[![:space:]]*) OPENAI_API_KEY="$BB_QA_OPENAI_API_KEY"; export OPENAI_API_KEY ;; *) unset OPENAI_API_KEY ;; esac';
-const DAEMON_ENV_BLOCK_PREFIX = "; BB_DATA_DIR=";
+  'case "${OMNYO_QA_OPENAI_API_KEY-}" in *[![:space:]]*) OPENAI_API_KEY="$OMNYO_QA_OPENAI_API_KEY"; export OPENAI_API_KEY ;; *) unset OPENAI_API_KEY ;; esac';
+
+const DAEMON_ENV_BLOCK_PREFIX = "; OMNYO_DATA_DIR=";
 
 interface ShellCommandResult {
   processGroupId: number;
@@ -31,27 +34,31 @@ function buildTestRestartCommand(): string {
     cwd: "/repo",
     daemonPid: 123,
     daemonPort: 456,
-    dataDir: "/tmp/bb root",
+    dataDir: "/tmp/omnyo root",
     entrypoint: "/repo/apps/host-daemon/dist/index.js",
     envFilePath: "/repo/.env",
     hostId: "host_123",
     instanceId: "instance_123",
-    logPath: "/tmp/bb logs/host-daemon.log",
+    logPath: "/tmp/omnyo logs/host-daemon.log",
     parentPid: 789,
-    pidPath: "/tmp/bb-restart.pid",
+    pidPath: "/tmp/omnyo-restart.pid",
     serverUrl: "http://127.0.0.1:3334",
   });
 }
 
 function extractProviderEnvBlock(command: string): string {
   const blockStart = command.indexOf(RESTART_PROVIDER_ENV_BLOCK);
+
   if (blockStart < 0) {
     throw new Error("restart command is missing provider env block");
   }
+
   const blockEnd = command.indexOf(DAEMON_ENV_BLOCK_PREFIX, blockStart);
+
   if (blockEnd < 0) {
     throw new Error("restart command is missing daemon env block");
   }
+
   return command.slice(blockStart, blockEnd);
 }
 
@@ -64,6 +71,7 @@ async function delay(ms: number): Promise<void> {
 function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -74,13 +82,17 @@ async function stopProcess(pid: number): Promise<void> {
   if (!isProcessRunning(pid)) {
     return;
   }
+
   process.kill(pid, "SIGTERM");
+
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (!isProcessRunning(pid)) {
       return;
     }
+
     await delay(50);
   }
+
   if (isProcessRunning(pid)) {
     process.kill(pid, "SIGKILL");
   }
@@ -91,16 +103,20 @@ async function waitForPidFile(
   previousPid?: number,
 ): Promise<number> {
   const startedAt = Date.now();
+
   while (Date.now() - startedAt < 2_000) {
     try {
       const rawPid = await fs.readFile(pidPath, "utf8");
       const pid = Number.parseInt(rawPid.trim(), 10);
+
       if (Number.isInteger(pid) && pid > 0 && pid !== previousPid) {
         return pid;
       }
     } catch {}
+
     await delay(50);
   }
+
   throw new Error("Timed out waiting for restarted daemon pid file");
 }
 
@@ -114,12 +130,16 @@ async function runShellCommand(
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
+
     let stdout = "";
     let stderr = "";
+
     if (!child.stdout || !child.stderr) {
       reject(new Error("Expected shell command pipes"));
+
       return;
     }
+
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
@@ -136,12 +156,16 @@ async function runShellCommand(
             `Shell command failed with code ${String(code)} signal ${String(signal)}\n${stderr}`,
           ),
         );
+
         return;
       }
+
       if (!child.pid) {
         reject(new Error("Shell command exited without a pid"));
+
         return;
       }
+
       resolve({
         processGroupId: child.pid,
         stderr,
@@ -164,6 +188,7 @@ async function runRestartProviderEnvBlock(
   const script =
     `${block}; ` +
     'if [ "${OPENAI_API_KEY+x}" = x ]; then printf \'set:%s\' "$OPENAI_API_KEY"; else printf unset; fi';
+
   return new Promise((resolve, reject) => {
     execFileCallback(
       "sh",
@@ -178,8 +203,10 @@ async function runRestartProviderEnvBlock(
       (error, stdout) => {
         if (error) {
           reject(error);
+
           return;
         }
+
         resolve(stdout);
       },
     );
@@ -189,6 +216,7 @@ async function runRestartProviderEnvBlock(
 function buildTestRestartProviderEnvBlock(): string {
   const block = extractProviderEnvBlock(buildTestRestartCommand());
   expect(block).toBe(RESTART_PROVIDER_ENV_BLOCK);
+
   return block;
 }
 
@@ -218,17 +246,17 @@ describe("standalone restart command", () => {
   it("clears inherited thread context from env-format setup output", () => {
     expect(
       buildStandaloneShellExports({
-        BB_HOST_DAEMON_PORT: "3334",
-        BB_PROJECT_ID: "proj_standalone",
-        BB_SERVER_URL: "http://127.0.0.1:3333",
+        OMNYO_HOST_DAEMON_PORT: "3334",
+        OMNYO_PROJECT_ID: "proj_standalone",
+        OMNYO_SERVER_URL: "http://127.0.0.1:3333",
       }).split("\n"),
     ).toEqual([
-      "unset BB_THREAD_ID",
-      "unset BB_ENVIRONMENT_ID",
-      "unset BB_THREAD_STORAGE",
-      "export BB_HOST_DAEMON_PORT='3334'",
-      "export BB_PROJECT_ID='proj_standalone'",
-      "export BB_SERVER_URL='http://127.0.0.1:3333'",
+      "unset OMNYO_THREAD_ID",
+      "unset OMNYO_ENVIRONMENT_ID",
+      "unset OMNYO_THREAD_STORAGE",
+      "export OMNYO_HOST_DAEMON_PORT='3334'",
+      "export OMNYO_PROJECT_ID='proj_standalone'",
+      "export OMNYO_SERVER_URL='http://127.0.0.1:3333'",
     ]);
   });
 
@@ -236,17 +264,17 @@ describe("standalone restart command", () => {
     expect(
       buildStandaloneRuntimeEnv({
         baseEnv: {
-          BB_ENVIRONMENT_ID: "env_parent",
-          BB_THREAD_ID: "thr_parent",
-          BB_THREAD_STORAGE: "/home/user/.bb/thread-storage/thr_parent",
+          OMNYO_ENVIRONMENT_ID: "env_parent",
+          OMNYO_THREAD_ID: "thr_parent",
+          OMNYO_THREAD_STORAGE: "/home/user/.omnyo/thread-storage/thr_parent",
           PATH: "/usr/bin",
         },
         overrides: {
-          BB_DATA_DIR: "/tmp/standalone/bb-root",
+          OMNYO_DATA_DIR: "/tmp/standalone/omnyo-root",
         },
       }),
     ).toEqual({
-      BB_DATA_DIR: "/tmp/standalone/bb-root",
+      OMNYO_DATA_DIR: "/tmp/standalone/omnyo-root",
       PATH: "/usr/bin",
     });
   });
@@ -286,18 +314,18 @@ describe("standalone restart command", () => {
     const command = buildTestRestartCommand();
 
     expect(command).toContain("daemon_pid='123'");
-    expect(command).toContain("daemon_pid=$(cat '/tmp/bb-restart.pid')");
+    expect(command).toContain("daemon_pid=$(cat '/tmp/omnyo-restart.pid')");
     expect(command).toContain('(kill "$daemon_pid"');
     expect(command).toContain("/repo/.env");
     expect(command).toContain(RESTART_PROVIDER_ENV_BLOCK);
-    expect(command).toContain("BB_DATA_DIR=");
-    expect(command).toContain("BB_STANDALONE_INSTANCE=");
-    expect(command).toContain("BB_RESTART_DAEMON_ENTRYPOINT=");
-    expect(command).toContain("BB_RESTART_DAEMON_CWD=");
-    expect(command).toContain("BB_RESTART_DAEMON_PID_PATH=");
+    expect(command).toContain("OMNYO_DATA_DIR=");
+    expect(command).toContain("OMNYO_STANDALONE_INSTANCE=");
+    expect(command).toContain("OMNYO_RESTART_DAEMON_ENTRYPOINT=");
+    expect(command).toContain("OMNYO_RESTART_DAEMON_CWD=");
+    expect(command).toContain("OMNYO_RESTART_DAEMON_PID_PATH=");
     expect(command).toContain("/repo/apps/host-daemon/dist/index.js");
     expect(command).toContain(
-      "</dev/null >> '/tmp/bb logs/host-daemon.log' 2>&1",
+      "</dev/null >> '/tmp/omnyo logs/host-daemon.log' 2>&1",
     );
     expect(command).toContain("'http://127.0.0.1:3334/api/v1/hosts'");
     expect(command).toContain(
@@ -355,7 +383,7 @@ describe("standalone restart command", () => {
       cwd: "/repo",
       daemonPid: null,
       daemonPort: 456,
-      dataDir: "/tmp/bb-root",
+      dataDir: "/tmp/omnyo-root",
       entrypoint: "/repo/apps/host-daemon/dist/index.js",
       envFilePath: null,
       hostId: "host_123",
@@ -377,19 +405,24 @@ describe("standalone restart command", () => {
       process.platform === "win32",
       "the standalone QA restart command is a POSIX shell script",
     );
+
     const tempDir = await fs.mkdtemp(
-      path.join(tmpdir(), "bb-restart-command-"),
+      path.join(tmpdir(), "omnyo-restart-command-"),
     );
+
     const pidPath = path.join(tempDir, "daemon.pid");
     const logPath = path.join(tempDir, "host-daemon.log");
     const entrypoint = path.join(tempDir, "daemon-child.mjs");
     let daemonPid: number | null = null;
+
     const server = createServer((request, response) => {
       if (request.url === "/api/v1/hosts") {
         response.setHeader("content-type", "application/json");
         response.end('[{"id":"host_123","status":"connected"}]');
+
         return;
       }
+
       response.statusCode = 404;
       response.end("not found");
     });
@@ -409,6 +442,7 @@ describe("standalone restart command", () => {
         });
       });
       const address = server.address();
+
       if (!address || typeof address === "string") {
         throw new Error("Expected test server to listen on a TCP port");
       }
@@ -417,7 +451,7 @@ describe("standalone restart command", () => {
         cwd: tempDir,
         daemonPid: null,
         daemonPort: 456,
-        dataDir: path.join(tempDir, "bb-root"),
+        dataDir: path.join(tempDir, "omnyo-root"),
         entrypoint,
         envFilePath: null,
         hostId: "host_123",
@@ -431,6 +465,7 @@ describe("standalone restart command", () => {
       const shellResult = await runShellCommand(command, {
         PATH: process.env.PATH ?? "",
       });
+
       daemonPid = await waitForPidFile(pidPath);
       expect(isProcessRunning(daemonPid)).toBe(true);
 
@@ -451,12 +486,15 @@ describe("standalone restart command", () => {
       if (daemonPid) {
         await stopProcess(daemonPid);
       }
+
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error) {
             reject(error);
+
             return;
           }
+
           resolve();
         });
       });
@@ -464,3 +502,30 @@ describe("standalone restart command", () => {
     }
   });
 });
+
+it.each(["bbRoot", "omnyoRoot"] as const)(
+  "keeps %s auxiliary status outside the standalone cleanup and restart ownership contract",
+  (key) => {
+    const raw = JSON.stringify({
+      instanceId: "owned-instance",
+      parentPid: 789,
+      daemon: { pid: 123 },
+      server: { pid: 456 },
+      paths: {
+        [key]: "/opaque/omnyo-root",
+        tmpRoot: "/tmp/owned-qa",
+        daemonRestartPidPath: "/tmp/owned-qa/restart.pid",
+      },
+    });
+
+    expect(readStandaloneStateRuntime(parseStandaloneState(raw))).toEqual({
+      instanceId: "owned-instance",
+      parentPid: 789,
+      daemonPid: 123,
+      serverPid: 456,
+      tmpRoot: "/tmp/owned-qa",
+      daemonRestartPidPath: "/tmp/owned-qa/restart.pid",
+    });
+    expect(JSON.parse(raw).paths[key]).toBe("/opaque/omnyo-root");
+  },
+);

@@ -1,8 +1,11 @@
 import { z } from "zod";
 
 export const LOCAL_WORKFLOW_TASK_TYPE = "local_workflow";
+
 export const LOCAL_BASH_TASK_TYPE = "local_bash";
+
 export const LOCAL_AGENT_TASK_TYPE = "local_agent";
+
 export const LOCAL_SUBAGENT_TASK_TYPE = "local_subagent";
 
 export function isBackgroundCommandTaskType(taskType: string): boolean {
@@ -24,7 +27,9 @@ const backgroundTaskStatusValues = [
   "killed",
   "stopped",
 ] as const;
+
 export const backgroundTaskStatusSchema = z.enum(backgroundTaskStatusValues);
+
 export type BackgroundTaskStatus = z.infer<typeof backgroundTaskStatusSchema>;
 
 const workflowAgentStateValues = [
@@ -34,7 +39,9 @@ const workflowAgentStateValues = [
   "failed",
   "skipped",
 ] as const;
+
 const workflowAgentStateSchema = z.enum(workflowAgentStateValues);
+
 export type WorkflowAgentState = z.infer<typeof workflowAgentStateSchema>;
 
 export function isSettledWorkflowAgentState(
@@ -74,6 +81,7 @@ const workflowAgentSnapshotSchema = z.object({
   toolCalls: z.number().optional(),
   durationMs: z.number().optional(),
 });
+
 export type WorkflowAgentSnapshot = z.infer<typeof workflowAgentSnapshotSchema>;
 
 const workflowPhaseSnapshotSchema = z.object({
@@ -81,12 +89,14 @@ const workflowPhaseSnapshotSchema = z.object({
   title: z.string(),
   kind: z.string().optional(),
 });
+
 export type WorkflowPhaseSnapshot = z.infer<typeof workflowPhaseSnapshotSchema>;
 
 export const workflowProgressSnapshotSchema = z.object({
   phases: z.array(workflowPhaseSnapshotSchema),
   agents: z.array(workflowAgentSnapshotSchema),
 });
+
 export type WorkflowProgressSnapshot = z.infer<
   typeof workflowProgressSnapshotSchema
 >;
@@ -96,6 +106,7 @@ export const backgroundTaskUsageSchema = z.object({
   toolUses: z.number(),
   durationMs: z.number(),
 });
+
 export type BackgroundTaskUsage = z.infer<typeof backgroundTaskUsageSchema>;
 
 export function backgroundTaskItemStatus(

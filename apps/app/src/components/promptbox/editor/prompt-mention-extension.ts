@@ -21,7 +21,14 @@ type ParsedMentionAttrs = ReturnType<typeof parsePromptEditorMentionAttrs>;
 
 function renderMentionText({ node }: MentionRenderArgs): string {
   const attrs = parsePromptEditorMentionAttrs(node.attrs);
+
   return attrs?.serializedText ?? "";
+}
+
+function isMentionSelected(decorations: readonly Decoration[]): boolean {
+  return decorations.some(
+    (decoration) => decoration.spec?.mentionSelected === true,
+  );
 }
 
 function renderMentionLabel(attrs: ParsedMentionAttrs): string {
@@ -35,6 +42,7 @@ function renderMentionTitle(attrs: ParsedMentionAttrs): string {
 export const PromptMentionExtension = Mention.extend({
   addAttributes() {
     const parentAttributes = this.parent?.() ?? {};
+
     return {
       ...parentAttributes,
       resource: {
@@ -46,11 +54,32 @@ export const PromptMentionExtension = Mention.extend({
     };
   },
   addNodeView() {
-    return ReactNodeViewRenderer(PromptMentionPillNodeView);
+    return ReactNodeViewRenderer(PromptMentionPillNodeView, {
+      update: ({
+        oldNode,
+        newNode,
+        oldDecorations,
+        newDecorations,
+        updateProps,
+      }) => {
+        if (oldNode.type !== newNode.type) return false;
+
+        if (
+          oldNode !== newNode ||
+          isMentionSelected(oldDecorations) !==
+            isMentionSelected(newDecorations)
+        ) {
+          updateProps();
+        }
+
+        return true;
+      },
+    });
   },
   addProseMirrorPlugins() {
     const parentPlugins = this.parent?.() ?? [];
     const mentionName = this.name;
+
     return [
       ...parentPlugins,
       new Plugin({
@@ -58,6 +87,7 @@ export const PromptMentionExtension = Mention.extend({
           decorations(state) {
             const { selection } = state;
             const decorations: Decoration[] = [];
+
             if (!selection.empty) {
               state.doc.nodesBetween(
                 selection.from,
@@ -94,9 +124,11 @@ export const PromptMentionExtension = Mention.extend({
   renderText: renderMentionText,
   renderHTML({ node, options }) {
     const attrs = parsePromptEditorMentionAttrs(node.attrs);
+
     const clipboardAttributes = attrs
       ? promptMentionClipboardDataAttributes(attrs)
       : { "data-prompt-mention": "true" };
+
     return [
       "span",
       mergeAttributes(options.HTMLAttributes, {

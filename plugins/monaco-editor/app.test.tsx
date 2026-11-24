@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
-import type { PluginFileOpenerProps } from "@get-bb/plugin-sdk/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
+import type { PluginFileOpenerProps } from "@omnyo/plugin-sdk/app";
 
 const editor = vi.hoisted(() => ({
   setSelection: vi.fn(),
@@ -22,7 +28,9 @@ const editor = vi.hoisted(() => ({
   updateOptions: vi.fn(),
   dispose: vi.fn(),
 }));
+
 const create = vi.hoisted(() => vi.fn(() => editor));
+
 vi.mock("./lib/monaco-loader.js", () => ({
   loadMonaco: async () => ({
     editor: { create },
@@ -32,14 +40,18 @@ vi.mock("./lib/monaco-loader.js", () => ({
   overflowWidgetsNode: () => document.body,
   setOverflowWidgetsTheme: vi.fn(),
 }));
+
 vi.mock("./lib/monaco-theme.js", () => ({
   applyCodeTheme: () => ({ name: "test", base: "vs-dark" }),
   editorBackground: () => "black",
 }));
 
 const app = await loadPluginApp(() => import("./app"));
+
 const registration = app.fileOpeners[0]!;
+
 const Component = registration.component;
+
 const base: PluginFileOpenerProps = {
   path: "target.ts",
   source: {
@@ -50,6 +62,7 @@ const base: PluginFileOpenerProps = {
   },
   Original: () => <div>native</div>,
 };
+
 const file = {
   kind: "text",
   content: "fixture",
@@ -57,6 +70,7 @@ const file = {
   absolutePath: "/fixture/target.ts",
   relativePath: "target.ts",
 };
+
 function mount(
   range: PluginFileOpenerProps["experimental_lineRange"],
   read: () => unknown = () => file,
@@ -69,6 +83,7 @@ function mount(
     },
   );
 }
+
 const range = (startLineNumber: number, endLineNumber = startLineNumber) => ({
   startLineNumber,
   endLineNumber,
@@ -82,16 +97,19 @@ beforeEach(() => {
     editor.onDidChangeModelContent.mock.calls.at(-1)?.[0]();
   });
 });
+
 afterEach(cleanup);
 
 it("saves edits with the toolbar button and prevents duplicate pending saves", async () => {
   let finishSave = (_value: { outcome: "written"; sha256: string }) => {};
+
   const write = vi.fn(
     () =>
       new Promise<{ outcome: "written"; sha256: string }>((resolve) => {
         finishSave = resolve;
       }),
   );
+
   renderSlot(registration, base, {
     rpc: {
       assets: () => ({ baseUrl: "/assets", expiresAtMs: 99999 }),
@@ -127,6 +145,7 @@ it("overwrites the conflicted version and requires confirmation for a newer conf
     .mockResolvedValueOnce({ outcome: "conflict", currentSha256: "external" })
     .mockResolvedValueOnce({ outcome: "conflict", currentSha256: "newer" })
     .mockResolvedValue({ outcome: "written", sha256: "saved" });
+
   renderSlot(registration, base, {
     rpc: {
       assets: () => ({ baseUrl: "/assets", expiresAtMs: 99999 }),
@@ -181,10 +200,12 @@ it("overwrites the conflicted version and requires confirmation for a newer conf
 it("undoes keeping the disk version without writing and restores conflict protection", async () => {
   const diskFile = { ...file, content: "Updated on disk", sha256: "disk" };
   const read = vi.fn().mockReturnValueOnce(file).mockReturnValue(diskFile);
+
   const write = vi
     .fn()
     .mockResolvedValueOnce({ outcome: "conflict", currentSha256: "external" })
     .mockResolvedValue({ outcome: "conflict", currentSha256: "newer" });
+
   renderSlot(registration, base, {
     rpc: {
       assets: () => ({ baseUrl: "/assets", expiresAtMs: 99999 }),
@@ -243,12 +264,14 @@ it.each(["edit", "file"])(
         write: () => ({ outcome: "conflict", currentSha256: "external" }),
       },
     });
+
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     fireEvent.click(
       await screen.findByRole("button", { name: "Keep disk version" }),
     );
     await screen.findByRole("button", { name: "Undo" });
+
     if (action === "edit") {
       act(() => {
         editor.getValue.mockReturnValue("New edits to the disk version");
@@ -259,22 +282,31 @@ it.each(["edit", "file"])(
       slot.lifecycle.rerender(<Component {...base} path="other.ts" />);
       await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
     }
+
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   },
 );
 
 it("does not offer an old file's draft when its disk reload finishes after navigation", async () => {
   let finishRead = (_value: typeof file) => {};
+
   const pendingRead = new Promise<typeof file>((resolve) => {
     finishRead = resolve;
   });
+
   const read = vi
     .fn()
     .mockReturnValueOnce(file)
     .mockReturnValueOnce(pendingRead)
     .mockReturnValue(file);
-  const nextEditor = { ...editor, setValue: vi.fn<(content: string) => void>() };
+
+  const nextEditor = {
+    ...editor,
+    setValue: vi.fn<(content: string) => void>(),
+  };
+
   create.mockReturnValueOnce(editor).mockReturnValueOnce(nextEditor);
+
   const slot = renderSlot(registration, base, {
     rpc: {
       assets: () => ({ baseUrl: "/assets", expiresAtMs: 99999 }),
@@ -282,6 +314,7 @@ it("does not offer an old file's draft when its disk reload finishes after navig
       write: () => ({ outcome: "conflict", currentSha256: "external" }),
     },
   });
+
   await waitFor(() => expect(create).toHaveBeenCalledOnce());
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   fireEvent.click(
@@ -356,9 +389,11 @@ it("navigates changed and repeated targets without recreating the editor", async
 
 it("uses only the latest target when several arrive before the file loads", async () => {
   let resolveRead = (_value: typeof file) => {};
+
   const pending = new Promise<typeof file>((resolve) => {
     resolveRead = resolve;
   });
+
   const slot = mount(range(30), () => pending);
   slot.lifecycle.rerender(
     <Component {...base} experimental_lineRange={range(90)} />,
@@ -389,9 +424,11 @@ it("clamps a target beyond EOF to the final line", async () => {
 
 it("does not create or navigate a disposed loading editor", async () => {
   let resolveRead = (_value: typeof file) => {};
+
   const pending = new Promise<typeof file>((resolve) => {
     resolveRead = resolve;
   });
+
   const slot = mount(range(80), () => pending);
   slot.lifecycle.unmount();
   await act(async () => resolveRead(file));
@@ -401,9 +438,11 @@ it("does not create or navigate a disposed loading editor", async () => {
 
 it("does not apply a stale target cleared during loading", async () => {
   let resolveRead = (_value: typeof file) => {};
+
   const pending = new Promise<typeof file>((resolve) => {
     resolveRead = resolve;
   });
+
   const slot = mount(range(80), () => pending);
   slot.lifecycle.rerender(
     <Component {...base} experimental_lineRange={null} />,

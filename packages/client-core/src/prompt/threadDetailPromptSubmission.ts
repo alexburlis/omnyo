@@ -1,15 +1,17 @@
-import type {
-  PermissionMode,
-  PromptInput,
-  ReasoningLevel,
-  ServiceTier,
-  ThreadRuntimeDisplayStatus,
-} from "@bb/domain";
+import {
+  isStandaloneBuiltinClearCommand,
+  isStandaloneBuiltinCompactCommand,
+  type PermissionMode,
+  type PromptInput,
+  type ReasoningLevel,
+  type ServiceTier,
+  type ThreadRuntimeDisplayStatus,
+} from "@omnyo/domain";
 import type {
   CreateQueuedMessageRequest,
   ExistingThreadExecutionInputSources,
   SendMessageRequest,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { FollowUpSubmitMode } from "./follow-up-submit-mode.js";
 
 export interface SendMessageMutationRequest extends SendMessageRequest {
@@ -51,6 +53,7 @@ interface BaseFollowUpRequestArgs {
 }
 
 interface BuildAutoFollowUpRequestArgs extends BaseFollowUpRequestArgs {
+  compactFirst: boolean;
   execution: FollowUpExecutionSelection;
 }
 
@@ -139,15 +142,19 @@ export function buildFollowUpSubmitMode({
   if (isStopRequested) {
     return { kind: "queue-while-stopping" };
   }
+
   if (hasPendingInteraction) {
     return { kind: "blocked", reason: "pending-interaction" };
   }
+
   if (shouldQueueFollowUpMessage(runtimeDisplayStatus)) {
     return { kind: "queue", onStop };
   }
+
   if (isDefaultExecutionOptionsLoading) {
     return { kind: "blocked", reason: "loading-execution-options" };
   }
+
   return { kind: "ready" };
 }
 
@@ -164,6 +171,7 @@ export function buildSideChatSubmitMode({
       ? { kind: "blocked", reason: "loading-execution-options" }
       : { kind: "ready" };
   }
+
   return buildFollowUpSubmitMode({
     hasPendingInteraction,
     isDefaultExecutionOptionsLoading,
@@ -184,18 +192,22 @@ export function canSubmitFollowUpShortcut({
   if (isFollowUpSubmitting || isQueueMutationPending) {
     return false;
   }
+
   const canSteerActiveWork =
     (runtimeDisplayStatus === "active" ||
       runtimeDisplayStatus === "provisioning" ||
       runtimeDisplayStatus === "starting") &&
     submitModeKind === "queue";
+
   if (hasPromptDraftInput) {
     return (
       canSteerActiveWork ||
+      submitModeKind === "ready" ||
       (runtimeDisplayStatus === "waiting-for-host" &&
         submitModeKind === "queue")
     );
   }
+
   return (
     queuedMessageCount > 0 &&
     (canSteerActiveWork ||
@@ -211,13 +223,16 @@ export function resolveDefaultExecutionOptionsState({
   if (hasConcreteDefaultExecutionOptions) {
     return "available";
   }
+
   if (hasResolvedDefaultExecutionOptions || isError) {
     return "unavailable";
   }
+
   return "loading";
 }
 
 export function buildAutoFollowUpRequest({
+  compactFirst,
   execution,
   input,
   threadId,
@@ -231,7 +246,18 @@ export function buildAutoFollowUpRequest({
     input,
     mode: "queue-if-active",
     ...buildSharedThreadExecutionRequestFields(execution),
+    ...(compactFirst &&
+    !isStandaloneBuiltinCompactCommand(input) &&
+    !isStandaloneBuiltinClearCommand(input)
+      ? { compactFirst: true }
+      : {}),
   };
+}
+
+export function canCompactBeforeSend(
+  displayStatus: ThreadRuntimeDisplayStatus,
+): boolean {
+  return displayStatus === "idle" || displayStatus === "error";
 }
 
 function buildSteerFollowUpRequest({
@@ -289,11 +315,13 @@ export function buildFollowUpShortcutRequest({
     input,
     threadId,
   });
+
   if (draftRequest) {
     return { kind: "draft", request: draftRequest };
   }
 
   const nextQueuedMessage = queuedMessages[0];
+
   if (!nextQueuedMessage) {
     return null;
   }

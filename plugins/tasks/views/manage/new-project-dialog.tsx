@@ -34,9 +34,10 @@ import {
   derivePrefix,
   Field,
 } from "./shared.js";
-import { BbProjectLinkPicker } from "./bb-project-link.js";
+import { OmnyoProjectLinkPicker } from "./omnyo-project-link.js";
 
 const NO_FOLDER = "__none__";
+
 const NEW_FOLDER = "__new__";
 
 interface NewProjectDialogProps {
@@ -60,17 +61,20 @@ export function NewProjectDialog({
   const [folderId, setFolderId] = useState<string | null>(null);
   const [newFolderMode, setNewFolderMode] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
-  const [linkedBbProjectId, setLinkedBbProjectId] = useState<string | null>(
+
+  const [linkedAppProjectId, setLinkedOmnyoProjectId] = useState<string | null>(
     null,
   );
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const bbProjects = useTasksQuery(
-    async (rpc) => (await rpc.call("listBbProjects")).bbProjects,
+  const omnyoProjects = useTasksQuery(
+    async (rpc) => (await rpc.call("listAppProjects")).appProjects,
     [],
   );
-  const bbProjectList = bbProjects.data ?? [];
+
+  const omnyoProjectList = omnyoProjects.data ?? [];
 
   useEffect(() => {
     if (!open) return;
@@ -81,18 +85,21 @@ export function NewProjectDialog({
     setFolderId(null);
     setNewFolderMode(false);
     setNewFolderName("");
-    setLinkedBbProjectId(null);
+    setLinkedOmnyoProjectId(null);
     setError(null);
   }, [open]);
 
   const prefixError = useMemo(() => {
     if (prefix === "") return null;
+
     if (!PROJECT_PREFIX_PATTERN.test(prefix)) {
       return "Use 1–10 uppercase letters and digits, starting with a letter.";
     }
+
     const clash = (projects.data ?? []).find(
       (project) => project.prefix.toUpperCase() === prefix.toUpperCase(),
     );
+
     return clash ? `Already used by ${clash.name}.` : null;
   }, [prefix, projects.data]);
 
@@ -103,24 +110,31 @@ export function NewProjectDialog({
     !submitting;
 
   const folderList = folders.data ?? [];
+
   const folderName = (id: string) => {
     const folder = folderList.find((entry) => entry.id === id);
+
     if (!folder) return "Folder";
+
     const parent = folder.parentFolderId
       ? folderList.find((entry) => entry.id === folder.parentFolderId)
       : null;
+
     return parent ? `${parent.name} / ${folder.name}` : folder.name;
   };
 
   const createFolderInline = async () => {
     const trimmed = newFolderName.trim();
+
     if (trimmed === "") return;
     setError(null);
+
     try {
       const { folder } = await rpc.call("createFolder", {
         name: trimmed,
         parentFolderId: null,
       });
+
       setFolderId(folder.id);
       setNewFolderMode(false);
       setNewFolderName("");
@@ -133,14 +147,16 @@ export function NewProjectDialog({
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
+
     try {
       const { project } = await rpc.call("createProject", {
         name: name.trim(),
         prefix,
         color,
         folderId,
-        linkedBbProjectId,
+        linkedAppProjectId,
       });
+
       onOpenChange(false);
       navigation.go({ kind: "project", projectId: project.id, view: null });
     } catch (submitError) {
@@ -175,6 +191,7 @@ export function NewProjectDialog({
               placeholder="e.g. Tasks Plugin"
               onChange={(event) => {
                 setName(event.target.value);
+
                 if (!prefixTouched) setPrefix(derivePrefix(event.target.value));
               }}
               className="h-8"
@@ -211,8 +228,10 @@ export function NewProjectDialog({
               onValueChange={(value) => {
                 if (value === NEW_FOLDER) {
                   setNewFolderMode(true);
+
                   return;
                 }
+
                 setNewFolderMode(false);
                 setFolderId(value === NO_FOLDER ? null : value);
               }}
@@ -266,13 +285,13 @@ export function NewProjectDialog({
             ) : null}
           </Field>
           <Field
-            label="Linked bb project"
-            hint="Optional. Linking a bb project enables dispatching to agents."
+            label="Linked Omnyo project"
+            hint="Optional. Linking an Omnyo project enables dispatching to agents."
           >
-            <BbProjectLinkPicker
-              value={linkedBbProjectId}
-              onChange={setLinkedBbProjectId}
-              bbProjects={bbProjectList}
+            <OmnyoProjectLinkPicker
+              value={linkedAppProjectId}
+              onChange={setLinkedOmnyoProjectId}
+              omnyoProjects={omnyoProjectList}
             />
           </Field>
         </div>

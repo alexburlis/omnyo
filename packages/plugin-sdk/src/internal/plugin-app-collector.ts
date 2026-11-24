@@ -1,7 +1,12 @@
+import type { ExperimentalProjectSidebarItemsRegistration } from "../app-contract.js";
 import { z } from "zod";
 import type {
   ComposerCustomization,
   ExperimentalAppOverlayRegistration,
+  ExperimentalSidebarFooterCardRegistration,
+  ExperimentalTitleBarCenterRegistration,
+  ExperimentalSidebarEntryRegistration,
+  ExperimentalThreadCompanionRegistration,
   ExperimentalCodeFenceRendererRegistration,
   ExperimentalSidebarFooter,
   ExperimentalSidebarFooterActionContext,
@@ -33,8 +38,9 @@ import type {
   ExperimentalPluginBrowserToolbarActionRegistration,
   PluginThreadListRegistration,
   PluginThreadPanelActionRegistration,
+  PluginThreadViewRegistration,
   PluginTimelineRendererRegistration,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import {
   collectComposerCustomization,
   PLUGIN_SLOT_ID_PATTERN,
@@ -118,6 +124,7 @@ class SidebarFooterItemRuntime implements ExperimentalSidebarFooterItemRuntime {
 
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
+
     return () => this.listeners.delete(listener);
   };
 
@@ -190,9 +197,11 @@ class SidebarFooterCollector implements ExperimentalSidebarFooter {
 
     if (registration.kind === "action") {
       this.rejectUnknownKeys(kind, registration, SIDEBAR_FOOTER_ACTION_KEYS);
+
       if (typeof registration.onActivate !== "function") {
         throw new Error(`${kind}: "onActivate" must be a function`);
       }
+
       const item: CollectedManagedSidebarFooterItem = {
         id,
         label,
@@ -202,8 +211,10 @@ class SidebarFooterCollector implements ExperimentalSidebarFooter {
         source: "experimental_sidebarFooter",
         runtime,
       };
+
       this.collected.push(item);
       this.allCollected.push(item);
+
       return;
     }
 
@@ -213,6 +224,7 @@ class SidebarFooterCollector implements ExperimentalSidebarFooter {
         registration,
         SIDEBAR_FOOTER_DISCLOSURE_KEYS,
       );
+
       const item: CollectedManagedSidebarFooterItem = {
         id,
         label,
@@ -222,8 +234,10 @@ class SidebarFooterCollector implements ExperimentalSidebarFooter {
         source: "experimental_sidebarFooter",
         runtime,
       };
+
       this.collected.push(item);
       this.allCollected.push(item);
+
       return runtime.createDisclosureController();
     }
 
@@ -278,11 +292,13 @@ function rejectStaleNavPanelKeys(kind: string, registration: object): void {
   for (const key of Object.keys(registration)) {
     if (NAV_PANEL_REGISTRATION_KEYS.has(key)) continue;
     const renamedTo = RENAMED_NAV_PANEL_KEYS.get(key);
+
     if (renamedTo !== undefined) {
       throw new Error(
         `${kind}: "${key}" was renamed to "${renamedTo}" in SDK 0.4.16`,
       );
     }
+
     if (key.startsWith("experimental_")) {
       throw new Error(`${kind}: unknown field "${key}"`);
     }
@@ -345,9 +361,13 @@ export type CollectedPluginCommandRegistration =
     });
 
 export interface CollectedPluginAppRegistrations {
+  projectSidebarItems: ExperimentalProjectSidebarItemsRegistration[];
   homepageSections: PluginHomepageSectionRegistration[];
   settingsSections: PluginSettingsSectionRegistration[];
   appOverlays: ExperimentalAppOverlayRegistration[];
+  sidebarFooterCards: ExperimentalSidebarFooterCardRegistration[];
+  titleBarCenters: ExperimentalTitleBarCenterRegistration[];
+  sidebarEntries: ExperimentalSidebarEntryRegistration[];
   navPanels: PluginNavPanelRegistration[];
   threadPanelActions: PluginThreadPanelActionRegistration[];
   newThreadPanelActions: PluginNewThreadPanelActionRegistration[];
@@ -357,6 +377,8 @@ export interface CollectedPluginAppRegistrations {
   experimentalSidebarFooterItems: CollectedExperimentalSidebarFooterItem[];
   threadLists: PluginThreadListRegistration[];
   threadHeaderActions: PluginThreadHeaderActionRegistration[];
+  threadCompanions: ExperimentalThreadCompanionRegistration[];
+  threadViews: PluginThreadViewRegistration[];
   threadActions: PluginThreadActionRegistration<unknown>[];
   browserToolbarActions: ExperimentalPluginBrowserToolbarActionRegistration[];
   fileOpeners: PluginFileOpenerRegistration[];
@@ -397,11 +419,13 @@ function collectTitledComponent<C>(
 ): { id: string; title: string; description?: string; component: C } {
   const id = requireSlotId(kind, registration?.id);
   requireUniqueId(kind, seen, id);
+
   const description = requireOptionalString(
     kind,
     "description",
     registration.description,
   );
+
   return {
     id,
     title: requireNonEmptyString(kind, "title", registration.title),
@@ -431,12 +455,14 @@ function collectPanelAction<C, Run>(
 } {
   const id = requireSlotId(kind, registration?.id);
   requireUniqueId(kind, seen, id);
+
   if (
     registration.run !== undefined &&
     typeof registration.run !== "function"
   ) {
     throw new Error(`${kind}: "run" must be a function when set`);
   }
+
   if (
     registration.layout !== undefined &&
     registration.layout !== "padded" &&
@@ -444,6 +470,7 @@ function collectPanelAction<C, Run>(
   ) {
     throw new Error(`${kind}: "layout" must be "padded" or "flush"`);
   }
+
   return {
     id,
     title: requireNonEmptyString(kind, "title", registration.title),
@@ -460,7 +487,7 @@ function collectPanelAction<C, Run>(
 
 /**
  * Run a plugin app definition against the canonical validating collector.
- * Both the BB app and the public test harness use this implementation so a
+ * Both the Omnyo app and the public test harness use this implementation so a
  * registration accepted by one cannot be rejected or normalized differently
  * by the other.
  */
@@ -470,10 +497,15 @@ export function collectPluginAppRegistrations(
     console.warn(reason),
 ): CollectedPluginAppRegistrations {
   const sidebarFooterItems: CollectedSidebarFooterItem[] = [];
+
   const collected: CollectedPluginAppRegistrations = {
+    projectSidebarItems: [],
     homepageSections: [],
     settingsSections: [],
     appOverlays: [],
+    sidebarFooterCards: [],
+    titleBarCenters: [],
+    sidebarEntries: [],
     navPanels: [],
     threadPanelActions: [],
     newThreadPanelActions: [],
@@ -483,6 +515,8 @@ export function collectPluginAppRegistrations(
     experimentalSidebarFooterItems: [],
     threadLists: [],
     threadHeaderActions: [],
+    threadCompanions: [],
+    threadViews: [],
     threadActions: [],
     browserToolbarActions: [],
     fileOpeners: [],
@@ -499,11 +533,17 @@ export function collectPluginAppRegistrations(
     machineProviderInputs: [],
     contentScripts: [],
   };
+
   sidebarFooterItemsByRegistrationSet.set(collected, sidebarFooterItems);
+
   const seenIds = {
+    projectSidebarItems: new Set<string>(),
     homepageSection: new Set<string>(),
     settingsSection: new Set<string>(),
     appOverlay: new Set<string>(),
+    sidebarFooterCard: new Set<string>(),
+    titleBarCenter: new Set<string>(),
+    sidebarEntry: new Set<string>(),
     navPanel: new Set<string>(),
     threadPanelAction: new Set<string>(),
     newThreadPanelAction: new Set<string>(),
@@ -513,6 +553,8 @@ export function collectPluginAppRegistrations(
     sidebarFooterItem: new Set<string>(),
     threadList: new Set<string>(),
     threadHeaderAction: new Set<string>(),
+    threadCompanion: new Set<string>(),
+    threadView: new Set<string>(),
     threadAction: new Set<string>(),
     browserToolbarAction: new Set<string>(),
     fileOpener: new Set<string>(),
@@ -538,9 +580,11 @@ export function collectPluginAppRegistrations(
   ) {
     const id = requireSlotId(kind, registration?.id);
     requireUniqueId(kind, seenIds.command, id);
+
     if (typeof registration.run !== "function") {
       throw new Error(`${kind}: "run" must be a function`);
     }
+
     return {
       id,
       defaultShortcut:
@@ -554,12 +598,14 @@ export function collectPluginAppRegistrations(
   function registerCommand(registration: PluginCommandRegistration): void {
     const kind = "commands.register";
     const command = collectCommand(kind, registration);
+
     if (
       registration.isAvailable !== undefined &&
       typeof registration.isAvailable !== "function"
     ) {
       throw new Error(`${kind}: "isAvailable" must be a function`);
     }
+
     collected.commandPaletteActions.push({
       target: "app",
       ...command,
@@ -598,15 +644,19 @@ export function collectPluginAppRegistrations(
         const id = requireSlotId(kind, registration?.id);
         requireUniqueId(kind, seenIds.settingsSection, id);
         const title = requireOptionalString(kind, "title", registration.title);
+
         const description = requireOptionalString(
           kind,
           "description",
           registration.description,
         );
+
         const page = registration.experimental_page;
+
         if (page !== undefined && page !== "mobile") {
           throw new Error(`${kind}: experimental_page must be "mobile"`);
         }
+
         collected.settingsSections.push({
           ...(page !== undefined ? { experimental_page: page } : {}),
           id,
@@ -624,6 +674,47 @@ export function collectPluginAppRegistrations(
           component: requireComponent(kind, registration.component),
         });
       },
+      experimental_sidebarFooterCard(registration) {
+        const kind = "slots.experimental_sidebarFooterCard";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.sidebarFooterCard, id);
+        collected.sidebarFooterCards.push({
+          id,
+          component: requireComponent(kind, registration.component),
+        });
+      },
+      experimental_titleBarCenter(registration) {
+        const kind = "slots.experimental_titleBarCenter";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.titleBarCenter, id);
+        collected.titleBarCenters.push({
+          id,
+          component: requireComponent(kind, registration.component),
+        });
+      },
+      experimental_sidebarEntry(registration) {
+        const kind = "slots.experimental_sidebarEntry";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.sidebarEntry, id);
+
+        if (
+          registration.useStatus !== undefined &&
+          typeof registration.useStatus !== "function"
+        ) {
+          throw new Error(`${kind}: "useStatus" must be a function`);
+        }
+
+        collected.sidebarEntries.push({
+          id,
+          title: requireNonEmptyString(kind, "title", registration.title),
+          icon: requireNonEmptyString(kind, "icon", registration.icon),
+          panel: requireSlotId(`${kind}.panel`, registration.panel),
+          tooltip: requireNonEmptyString(kind, "tooltip", registration.tooltip),
+          ...(registration.useStatus !== undefined
+            ? { useStatus: registration.useStatus }
+            : {}),
+        });
+      },
       navPanel(registration) {
         const kind = "slots.navPanel";
         const id = requireSlotId(kind, registration?.id);
@@ -631,11 +722,13 @@ export function collectPluginAppRegistrations(
         rejectStaleNavPanelKeys(kind, registration);
         const panelId = id;
         const path = requireNonEmptyString(kind, "path", registration.path);
+
         if (!PLUGIN_SLOT_ID_PATTERN.test(path)) {
           throw new Error(
             `${kind}: "path" must match ${String(PLUGIN_SLOT_ID_PATTERN)} (it becomes a URL segment), got ${JSON.stringify(path)}`,
           );
         }
+
         if (
           registration.headerContent !== undefined &&
           typeof registration.headerContent !== "function"
@@ -644,6 +737,7 @@ export function collectPluginAppRegistrations(
             `${kind}: "headerContent" must be a React component function when set`,
           );
         }
+
         if (
           registration.experimental_sidebarAccessory !== undefined &&
           typeof registration.experimental_sidebarAccessory !== "function"
@@ -652,18 +746,23 @@ export function collectPluginAppRegistrations(
             `${kind}: "experimental_sidebarAccessory" must be a React component function when set`,
           );
         }
+
         const fixedTabs: PluginNavPanelFixedTabRegistration[] = (() => {
           if (registration.fixedTabs === undefined) return [];
+
           if (!Array.isArray(registration.fixedTabs)) {
             throw new Error(`${kind}: "fixedTabs" must be an array when set`);
           }
+
           const seenFixedTabIds = new Set<string>();
+
           return registration.fixedTabs.map((value, index) => {
             const fixedTabKind = `${kind}.fixedTabs[${index}]`;
             const fixedTab = value as Record<string, unknown> | null;
             const id = requireSlotId(fixedTabKind, fixedTab?.id);
             requireUniqueId(fixedTabKind, seenFixedTabIds, id);
             const layout = fixedTab?.layout;
+
             if (
               layout !== undefined &&
               layout !== "padded" &&
@@ -673,17 +772,21 @@ export function collectPluginAppRegistrations(
                 `${fixedTabKind}: "layout" must be "padded" or "flush" when set`,
               );
             }
+
             const fixedTabPanelId = requireNonEmptyString(
               fixedTabKind,
               "panelId",
               fixedTab?.panelId,
             );
+
             if (fixedTabPanelId !== panelId) {
               throw new Error(
                 `${fixedTabKind}: "panelId" must match its containing navPanel id ${JSON.stringify(panelId)}`,
               );
             }
+
             const experimentalTarget = fixedTab?.experimental_target;
+
             if (
               experimentalTarget !== undefined &&
               (typeof experimentalTarget !== "object" ||
@@ -695,6 +798,7 @@ export function collectPluginAppRegistrations(
                 `${fixedTabKind}: "experimental_target.validate" must be a function when set`,
               );
             }
+
             return {
               id,
               panelId: fixedTabPanelId,
@@ -717,6 +821,7 @@ export function collectPluginAppRegistrations(
             };
           });
         })();
+
         collected.navPanels.push({
           id,
           title: requireNonEmptyString(kind, "title", registration.title),
@@ -766,17 +871,34 @@ export function collectPluginAppRegistrations(
         const kind = "slots.sidebarFooterAction";
         const id = requireSlotId(kind, registration?.id);
         requireUniqueId(kind, seenIds.sidebarFooterItem, id);
+
         if (typeof registration.run !== "function") {
           throw new Error(`${kind}: "run" must be a function`);
         }
+
         const legacyRegistration = {
           id,
           title: requireNonEmptyString(kind, "title", registration.title),
           icon: requireNonEmptyString(kind, "icon", registration.icon),
           run: registration.run,
         };
+
         collected.sidebarFooterActions.push(legacyRegistration);
         sidebarFooterItems.push(adaptSidebarFooterAction(legacyRegistration));
+      },
+      experimental_projectSidebarItems(registration) {
+        const kind = "slots.experimental_projectSidebarItems";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.projectSidebarItems, id);
+
+        if (typeof registration.useItems !== "function") {
+          throw new Error(`${kind}: "useItems" must be a function`);
+        }
+
+        collected.projectSidebarItems.push({
+          id,
+          useItems: registration.useItems,
+        });
       },
       experimental_threadList(registration) {
         collected.threadLists.push(
@@ -797,25 +919,50 @@ export function collectPluginAppRegistrations(
           component: requireComponent(kind, registration.component),
         });
       },
+      experimental_threadCompanion(registration) {
+        const kind = "slots.experimental_threadCompanion";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.threadCompanion, id);
+        collected.threadCompanions.push({
+          id,
+          title: requireNonEmptyString(kind, "title", registration.title),
+          icon: requireNonEmptyString(kind, "icon", registration.icon),
+          component: requireComponent(kind, registration.component),
+        });
+      },
+      experimental_threadView(registration) {
+        const kind = "slots.experimental_threadView";
+        const id = requireSlotId(kind, registration?.id);
+        requireUniqueId(kind, seenIds.threadView, id);
+        collected.threadViews.push({
+          id,
+          title: requireNonEmptyString(kind, "title", registration.title),
+          component: requireComponent(kind, registration.component),
+        });
+      },
       experimental_threadAction(registration) {
         const kind = "slots.experimental_threadAction";
         const id = requireSlotId(kind, registration?.id);
         requireUniqueId(kind, seenIds.threadAction, id);
+
         if (typeof registration.item !== "function") {
           throw new Error(`${kind}: "item" must be a function`);
         }
+
         if (
           registration.useData !== undefined &&
           typeof registration.useData !== "function"
         ) {
           throw new Error(`${kind}: "useData" must be a function`);
         }
+
         if (
           registration.order !== undefined &&
           !Number.isFinite(registration.order)
         ) {
           throw new Error(`${kind}: "order" must be a finite number`);
         }
+
         collected.threadActions.push({
           id,
           title: requireNonEmptyString(kind, "title", registration.title),
@@ -845,19 +992,26 @@ export function collectPluginAppRegistrations(
         const id = requireSlotId(kind, registration?.id);
         requireUniqueId(kind, seenIds.fileOpener, id);
         const rawExtensions = registration?.extensions;
+
         if (!Array.isArray(rawExtensions) || rawExtensions.length === 0) {
           throw new Error(
             `${kind}: "extensions" must be a non-empty array of lowercase extensions without the dot`,
           );
         }
+
         const extensions = rawExtensions.map((extension) => {
-          if (typeof extension !== "string" || !/^[a-z0-9]+$/.test(extension)) {
+          if (
+            typeof extension !== "string" ||
+            !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(extension)
+          ) {
             throw new Error(
-              `${kind}: extensions must be lowercase alphanumerics without the dot, got ${JSON.stringify(extension)}`,
+              `${kind}: extensions must be lowercase alphanumerics with single underscores or hyphens between segments, without the dot, got ${JSON.stringify(extension)}`,
             );
           }
+
           return extension;
         });
+
         collected.fileOpeners.push({
           id,
           title: requireNonEmptyString(kind, "title", registration.title),
@@ -897,11 +1051,13 @@ export function collectPluginAppRegistrations(
         const id = requireSlotId(kind, registration?.id);
         requireUniqueId(kind, seenIds.codeFenceRenderer, id);
         const rawLanguages: unknown = registration.languages;
+
         if (!Array.isArray(rawLanguages) || rawLanguages.length === 0) {
           throw new Error(
             `${kind}: "languages" must be a non-empty array of lowercase info-string languages`,
           );
         }
+
         const languages = rawLanguages.map((language: unknown) => {
           if (
             typeof language !== "string" ||
@@ -911,12 +1067,16 @@ export function collectPluginAppRegistrations(
               `${kind}: languages must match ${CODE_FENCE_LANGUAGE_PATTERN}, got ${JSON.stringify(language)}`,
             );
           }
+
           if (seenIds.codeFenceLanguage.has(language)) {
             throw new Error(`${kind}: duplicate language "${language}"`);
           }
+
           seenIds.codeFenceLanguage.add(language);
+
           return language;
         });
+
         collected.codeFenceRenderers.push({
           id,
           languages,
@@ -927,9 +1087,11 @@ export function collectPluginAppRegistrations(
         const kind = "slots.messageAction";
         const id = requireSlotId(kind, registration?.id);
         requireUniqueId(kind, seenIds.messageAction, id);
+
         if (typeof registration.run !== "function") {
           throw new Error(`${kind}: "run" must be a function`);
         }
+
         collected.messageActions.push({
           id,
           title: requireNonEmptyString(kind, "title", registration.title),
@@ -948,6 +1110,7 @@ export function collectPluginAppRegistrations(
         const kind = "slots.experimental_providerIcon";
         const providerId = requireProviderId(kind, registration?.providerId);
         const declaredKind = registration.providerKind;
+
         if (
           declaredKind !== undefined &&
           declaredKind !== "agent" &&
@@ -956,6 +1119,7 @@ export function collectPluginAppRegistrations(
         ) {
           throw new Error(`${kind}: invalid providerKind`);
         }
+
         const providerKind = declaredKind ?? "all";
         requireUniqueId(
           kind,
@@ -979,10 +1143,12 @@ export function collectPluginAppRegistrations(
       },
       experimental_environmentProviderInputs(registration) {
         const kind = "slots.experimental_environmentProviderInputs";
+
         const environmentProviderId = requireEnvironmentProviderId(
           kind,
           registration?.environmentProviderId,
         );
+
         requireUniqueId(
           kind,
           seenIds.environmentProviderInputs,
@@ -995,10 +1161,12 @@ export function collectPluginAppRegistrations(
       },
       experimental_machineProviderInputs(registration) {
         const kind = "slots.experimental_machineProviderInputs";
+
         const machineProviderId = requireProviderId(
           kind,
           registration?.machineProviderId,
         );
+
         requireUniqueId(kind, seenIds.machineProviderInputs, machineProviderId);
         collected.machineProviderInputs.push({
           machineProviderId,
@@ -1019,6 +1187,7 @@ export function collectPluginAppRegistrations(
           onComposerCustomizationRejected,
           seenIds.composerPopup,
         );
+
         if (customization !== null) {
           collected.composerCustomizations.push(customization);
         }
@@ -1028,16 +1197,20 @@ export function collectPluginAppRegistrations(
     experimental_icons: {
       register(registration) {
         const kind = "experimental_icons.register";
+
         const name = requireNonEmptyString(
           kind,
           "name",
           registration?.name,
         ).trim();
+
         if (name.length === 0)
           throw new Error(`${kind}: "name" must not be blank`);
+
         if (collected.icons.some((icon) => icon.name === name)) {
           throw new Error(`${kind}: duplicate icon name "${name}"`);
         }
+
         collected.icons.push({
           name,
           component: requireComponent(kind, registration.component),
@@ -1049,9 +1222,11 @@ export function collectPluginAppRegistrations(
         const kind = "contentScripts.register";
         const id = requireSlotId(kind, registration?.id);
         requireUniqueId(kind, seenIds.contentScript, id);
+
         if (typeof registration.mount !== "function") {
           throw new Error(`${kind}: "mount" must be a function`);
         }
+
         collected.contentScripts.push({ id, mount: registration.mount });
       },
     },

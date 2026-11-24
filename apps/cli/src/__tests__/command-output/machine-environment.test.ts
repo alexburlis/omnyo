@@ -8,12 +8,15 @@ import {
 
 describe("machine env commands", () => {
   setupCommandOutputTestEnvironment();
+
   const result = {
     builtInGit: { status: "overridden", statusMessage: "User override" },
     variables: [{ name: "GH_TOKEN", secret: true, value: null, note: null }],
   };
+
   const register = (program: import("commander").Command) =>
     registerMachineCommands(program, () => "http://server");
+
   it.each([undefined, "project-a"])(
     "sends a secret from stdin, lists metadata, and unsets through SDK routes (%s)",
     async (projectId) => {
@@ -21,20 +24,24 @@ describe("machine env commands", () => {
       const requests: Request[] = [];
       vi.mocked(fetch).mockImplementation(async (input, init) => {
         requests.push(new Request(input, init));
+
         return new Response(JSON.stringify(result), {
           headers: { "Content-Type": "application/json" },
         });
       });
+
       const stdin = vi
         .spyOn(process.stdin, Symbol.asyncIterator)
         .mockImplementation(async function* () {
           yield Buffer.from("cli-secret\n");
         });
+
       const wasTty = process.stdin.isTTY;
       Object.defineProperty(process.stdin, "isTTY", {
         value: false,
         configurable: true,
       });
+
       try {
         await runCommand(
           ["machine", "env", "set", "GH_TOKEN", ...scope, "--json"],
@@ -93,6 +100,7 @@ describe("machine env commands", () => {
       const requests: Request[] = [];
       vi.mocked(fetch).mockImplementation(async (url, init) => {
         requests.push(new Request(url, init));
+
         return Response.json(result);
       });
       const bytes = Buffer.from(input);
@@ -100,20 +108,25 @@ describe("machine env commands", () => {
         async function* () {
           const start = Math.max(0, bytes.length - 16);
           yield bytes.subarray(0, start);
+
           for (let i = start; i < bytes.length; i++)
             yield bytes.subarray(i, i + 1);
         },
       );
+
       const descriptor = Object.getOwnPropertyDescriptor(
         process.stdin,
         "isTTY",
       )!;
+
       Object.defineProperty(process.stdin, "isTTY", { value: false });
+
       try {
         const run = runCommand(
           ["machine", "env", "set", "VALUE", "--json"],
           register,
         );
+
         if (expected === null) {
           await expect(run).rejects.toThrow("process.exit:1");
           expect(requests.map((request) => request.method)).toEqual([]);

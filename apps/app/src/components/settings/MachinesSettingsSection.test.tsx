@@ -8,21 +8,25 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
-import { RETRY_ACTION_ICON } from "@bb/domain/update-state";
-import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
+import { RETRY_ACTION_ICON } from "@omnyo/domain/update-state";
+import { HOST_DAEMON_PROTOCOL_VERSION } from "@omnyo/host-daemon-contract";
 import type {
   ServerMoveStatus,
   SystemConfigResponse,
   SystemMachineProvider,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { defaultExperiments, type Host } from "@bb/domain";
+import { defaultExperiments, type Host } from "@omnyo/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { serverMoveStatusQueryKey } from "@/hooks/queries/query-keys";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { makeSystemConfig } from "@/test/fixtures/system-config";
+import {
+  makeProjectWithThreadsResponse,
+  makeSidebarBootstrapResponse,
+} from "@/test/fixtures/projects";
 import { MachinesSettingsSection } from "./MachinesSettingsSection";
 import { focusWithKeyboard } from "@/test/keyboard-focus";
 
@@ -78,18 +82,21 @@ function host(overrides: Partial<Host> & Pick<Host, "id" | "name">): Host {
 }
 
 const primaryHost = host({ id: "host_primary", name: "MacBook Pro" });
+
 const offlineHost = host({
   id: "host_remote",
   name: "dev-vm",
   status: "disconnected",
   lastSeenAt: NOW - 2 * 60 * 60 * 1000,
 });
+
 const sandboxHost = host({
   id: "host_sandbox",
   name: "Modal sandbox 3f9a",
   type: "ephemeral",
   machineProviderId: "modal-sandbox",
 });
+
 const modalMachineProvider: SystemMachineProvider = {
   id: "modal-sandbox",
   displayName: "Modal Sandbox",
@@ -115,23 +122,52 @@ function stubSidebarBootstrapFetch(): void {
     "fetch",
     vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          projects: [
-            {
-              id: "proj_1",
-              sources: [
-                { id: "src_1", hostId: "host_primary" },
-                { id: "src_2", hostId: "host_remote" },
-              ],
-              threads: [],
-            },
-            {
-              id: "proj_2",
-              sources: [{ id: "src_3", hostId: "host_primary" }],
-              threads: [],
-            },
-          ],
-        }),
+        JSON.stringify(
+          makeSidebarBootstrapResponse({
+            projects: [
+              makeProjectWithThreadsResponse({
+                id: "proj_1",
+                sources: [
+                  {
+                    id: "src_1",
+                    projectId: "proj_1",
+                    hostId: "host_primary",
+                    type: "local_path",
+                    path: "/project-one",
+                    isDefault: true,
+                    createdAt: NOW,
+                    updatedAt: NOW,
+                  },
+                  {
+                    id: "src_2",
+                    projectId: "proj_1",
+                    hostId: "host_remote",
+                    type: "local_path",
+                    path: "/project-one",
+                    isDefault: false,
+                    createdAt: NOW,
+                    updatedAt: NOW,
+                  },
+                ],
+              }),
+              makeProjectWithThreadsResponse({
+                id: "proj_2",
+                sources: [
+                  {
+                    id: "src_3",
+                    projectId: "proj_2",
+                    hostId: "host_primary",
+                    type: "local_path",
+                    path: "/project-two",
+                    isDefault: true,
+                    createdAt: NOW,
+                    updatedAt: NOW,
+                  },
+                ],
+              }),
+            ],
+          }),
+        ),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
     ),
@@ -140,6 +176,7 @@ function stubSidebarBootstrapFetch(): void {
 
 function LocationProbe() {
   const location = useLocation();
+
   return <div data-testid="location">{location.pathname}</div>;
 }
 
@@ -152,6 +189,7 @@ function renderSectionWithClient() {
     </MemoryRouter>,
     { wrapper },
   );
+
   return { queryClient };
 }
 
@@ -173,7 +211,7 @@ function preparingMove(): ServerMoveStatus {
     mode: "connect",
     targetHostId: "host_desk",
     targetHostName: "desk",
-    serverUrl: "https://sawyer.getbb.app",
+    serverUrl: "https://sawyer.example.test",
     destinationStatusUrl: null,
     startedAt: NOW,
     finishedAt: null,
@@ -207,9 +245,11 @@ describe("MachinesSettingsSection", () => {
     vi.mocked(sdk.hosts.list).mockResolvedValue([primaryHost, offlineHost]);
     stubSidebarBootstrapFetch();
     const { queryClient } = renderSectionWithClient();
+
     const banner = await screen.findByRole("region", {
       name: "dev-vm is offline",
     });
+
     expect(within(banner).getByText("dev-vm is offline")).toBeTruthy();
     expect(within(banner).queryByRole("button")).toBeNull();
     vi.mocked(sdk.hosts.list).mockResolvedValue([
@@ -234,6 +274,7 @@ describe("MachinesSettingsSection", () => {
         teardown: { status: "failed" as const, attempt: 3 },
       },
     };
+
     vi.mocked(sdk.system.config).mockResolvedValue(systemConfig());
     vi.mocked(sdk.hosts.list).mockResolvedValue([primaryHost, failedHost]);
     vi.mocked(sdk.hosts.experimental_retryCleanup).mockResolvedValue({
@@ -241,13 +282,22 @@ describe("MachinesSettingsSection", () => {
     });
     stubSidebarBootstrapFetch();
     renderSection();
+
     const banner = await screen.findByRole("region", {
       name: "Machines need attention",
     });
+
+    fireEvent.click(
+      within(banner).getByRole("button", { name: "Error details" }),
+    );
     expect(
       within(banner).getByText("Provider credentials expired."),
     ).toBeTruthy();
-    expect(within(banner).queryByRole("button")).toBeNull();
+    expect(
+      within(banner)
+        .queryAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Error details"]);
     await openHostMenu(failedHost.name);
     fireEvent.click(
       await screen.findByRole("menuitem", { name: "Retry cleanup" }),
@@ -429,7 +479,7 @@ describe("MachinesSettingsSection", () => {
     ).toBeNull();
   });
 
-  it("prioritizes offline status while keeping the retry update action available", async () => {
+  it("shows protocol rejection while keeping the retry update action available", async () => {
     vi.mocked(sdk.system.config).mockResolvedValue(systemConfig());
     vi.mocked(sdk.hosts.list).mockResolvedValue([
       primaryHost,
@@ -442,16 +492,19 @@ describe("MachinesSettingsSection", () => {
 
     renderSection();
 
-    await screen.findByText(/^Offline · last seen/);
-    expect(screen.queryByText(/Needs update|daemon protocol/)).toBeNull();
+    await screen.findByText(/^Needs update · last seen/);
+    expect(screen.queryByText(/daemon protocol/)).toBeNull();
     await openHostMenu("dev-vm");
     const renameItem = await screen.findByRole("menuitem", { name: "Rename" });
+
     const retryItem = await screen.findByRole("menuitem", {
       name: "Retry update",
     });
+
     const removeItem = await screen.findByRole("menuitem", {
       name: "Remove machine",
     });
+
     expect(renameItem.querySelector('[data-icon="Edit"]')).not.toBeNull();
     expect(
       retryItem.querySelector(`[data-icon="${RETRY_ACTION_ICON}"]`),
@@ -469,6 +522,7 @@ describe("MachinesSettingsSection", () => {
     const trigger = await screen.findByRole("button", {
       name: "dev-vm actions",
     });
+
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
@@ -494,6 +548,7 @@ describe("MachinesSettingsSection", () => {
     const addMachine = await screen.findByRole("button", {
       name: "Add a machine",
     });
+
     expect(addMachine.textContent).toBe("Add a machine");
     expect(addMachine.querySelector('[data-icon="Plus"]')).not.toBeNull();
     fireEvent.click(addMachine);
@@ -589,9 +644,11 @@ describe("MachinesSettingsSection", () => {
     const machineLink = await screen.findByRole("link", {
       name: "Open dev-vm",
     });
+
     const row = machineLink.closest("[data-machine-row]");
     const caret = row?.querySelector('[data-icon="ChevronRight"]');
     expect(caret).not.toBeNull();
+
     if (caret === null || caret === undefined) return;
 
     fireEvent.click(caret);
@@ -613,6 +670,7 @@ describe("MachinesSettingsSection", () => {
     const trigger = await screen.findByRole("button", {
       name: "dev-vm actions",
     });
+
     fireEvent.pointerDown(trigger, { button: 0 });
     fireEvent.click(trigger);
     expect(screen.getByTestId("location").textContent).toBe("/");
@@ -687,6 +745,7 @@ describe("MachinesSettingsSection", () => {
     const removeItem = await screen.findByRole("menuitem", {
       name: "Remove machine",
     });
+
     expect(removeItem.getAttribute("aria-disabled")).toBe("true");
     expect(removeItem.textContent).toBe("Remove machine");
     focusWithKeyboard(removeItem);
@@ -868,6 +927,7 @@ describe("MachinesSettingsSection", () => {
       const trigger = await screen.findByRole("button", {
         name: "dev-vm actions",
       });
+
       trigger.focus();
       fireEvent.keyDown(trigger, { key: "ArrowDown" });
       const item = await screen.findByRole("menuitem", { name: itemName });
@@ -889,9 +949,9 @@ describe("MachinesSettingsSection", () => {
     vi.mocked(sdk.hosts.list).mockResolvedValue([primaryHost, offlineHost]);
     vi.mocked(sdk.hosts.experimental_reconnect).mockResolvedValue({
       command:
-        "curl -fsSL -H 'X-BB-Enrollment: bbde_test' 'https://bb.example.com/install.sh' | sh",
+        "curl -sS --fail-with-body -L --max-redirs 0 -H 'X-Omnyo-Enrollment: omnyode_test' 'https://omnyo.example.com/install.sh' | sh",
       windowsCommand:
-        "irm -Headers @{ 'X-BB-Enrollment' = 'bbde_test' } 'https://bb.example.com/install.ps1' | iex",
+        "irm -MaximumRedirection 0 -Headers @{ 'X-Omnyo-Enrollment' = 'omnyode_test' } 'https://omnyo.example.com/install.ps1' | iex",
       expiresAt: NOW + 15 * 60 * 1000,
       hostId: offlineHost.id,
     });
@@ -908,7 +968,9 @@ describe("MachinesSettingsSection", () => {
         hostId: offlineHost.id,
       });
     });
-    expect(await screen.findByText(/X-BB-Enrollment: bbde_test/)).toBeDefined();
+    expect(
+      await screen.findByText(/X-Omnyo-Enrollment: omnyode_test/),
+    ).toBeDefined();
     expect(
       await screen.findByText("Waiting for the machine to reconnect…"),
     ).toBeDefined();
@@ -948,7 +1010,7 @@ describe("MachinesSettingsSection", () => {
       mode: "connect",
       serverUrl: null,
       requiresServerUrl: false,
-      targetDataDir: "/home/sawyer/.bb-machines/macbook-pro",
+      targetDataDir: "/home/sawyer/.omnyo-machines/macbook-pro",
       existingTargetServerData: null,
       items: [],
       canMove: true,

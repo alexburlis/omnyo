@@ -27,7 +27,7 @@ describe("plugin host worker lifecycle", () => {
     artifactSource: string,
     disposeTimeoutMs = 50,
   ): Promise<ChildProcess> {
-    const root = await mkdtemp(join(tmpdir(), "bb-plugin-worker-test-"));
+    const root = await mkdtemp(join(tmpdir(), "omnyo-plugin-worker-test-"));
     tempDirs.push(root);
     const artifactPath = join(root, "host.mjs");
     const dataDir = join(root, "data");
@@ -37,6 +37,7 @@ describe("plugin host worker lifecycle", () => {
       mkdir(dataDir),
       mkdir(workerTempDir),
     ]);
+
     const child = fork(
       workerEntryPath,
       [
@@ -49,8 +50,10 @@ describe("plugin host worker lifecycle", () => {
       ],
       { stdio: ["ignore", "ignore", "pipe", "ipc"] },
     );
+
     children.add(child);
     child.once("close", () => children.delete(child));
+
     return child;
   }
 
@@ -63,6 +66,7 @@ describe("plugin host worker lifecycle", () => {
         () => reject(new Error("host worker did not exit")),
         timeoutMs,
       );
+
       child.once("close", (code, signal) => {
         clearTimeout(timer);
         resolve({ code, signal });
@@ -83,6 +87,7 @@ describe("plugin host worker lifecycle", () => {
         () => reject(new Error(`host worker did not send ${type}`)),
         2_000,
       );
+
       child.on("message", (message: unknown) => {
         if (
           typeof message === "object" &&
@@ -103,6 +108,7 @@ describe("plugin host worker lifecycle", () => {
       await new Promise((resolve) => setTimeout(resolve, 30_000));
       export default {};
     `);
+
     const closed = waitForClose(child);
     await waitForMessageType(child, "import-started");
 
@@ -122,6 +128,7 @@ describe("plugin host worker lifecycle", () => {
         dispose() { return new Promise(() => {}); },
       };
     `);
+
     await waitForReady(child);
 
     const closed = waitForClose(child);

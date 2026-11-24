@@ -5,6 +5,7 @@ describe("mapProviderMaintenanceRequests", () => {
   it("limits a large provider roster to three concurrent requests", async () => {
     let active = 0;
     let maximumActive = 0;
+
     const providers = Array.from(
       { length: 20 },
       (_, index) => `provider-${index}`,
@@ -17,6 +18,7 @@ describe("mapProviderMaintenanceRequests", () => {
         maximumActive = Math.max(maximumActive, active);
         await new Promise((resolve) => setTimeout(resolve, 5));
         active -= 1;
+
         return `${provider}:ready`;
       },
     );

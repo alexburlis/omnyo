@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { BrowserFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
-import { getDesktopBrowserApi } from "@/lib/bb-desktop";
+import { getDesktopBrowserApi } from "@/lib/omnyo-desktop";
 import { destroyPersistedBrowserView } from "./browserViewVisibilityCoordinator";
 
 interface BrowserTabLifecycleObserverProps {
@@ -33,6 +33,7 @@ export function BrowserTabLifecycleObserver({
   useEffect(() => {
     const tabIds = buildBrowserTabIdSet({ browserTabs });
     const previous = previousTabIdsRef.current;
+
     if (
       desktopBrowser !== null &&
       previous !== null &&
@@ -44,6 +45,7 @@ export function BrowserTabLifecycleObserver({
         }
       }
     }
+
     previousTabIdsRef.current = { tabIds, threadId };
   }, [browserTabs, desktopBrowser, threadId]);
 

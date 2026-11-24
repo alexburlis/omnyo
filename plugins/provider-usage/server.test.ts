@@ -2,14 +2,18 @@ import { expect, it, vi } from "vitest";
 import {
   createFakePluginHost,
   makeHostResponse,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import plugin from "./server.js";
-import { usageListMethod, usageFetchMethod } from "./usage-source-contract.js";
+import { experimental_providerUsageSourceV1 } from "@omnyo/plugin-sdk/provider-usage";
+
+const { usageListMethod, usageFetchMethod } =
+  experimental_providerUsageSourceV1;
 
 it("lists cheaply, fetches only the selected source/provider, preserves failed measurements, and evicts removed resources", async () => {
   let enabled = true;
   let failure = false;
   let hasWork = true;
+
   const rpc = vi.fn(async ({ pluginId, method, input }) => {
     if (method === usageListMethod)
       return pluginId === "pool"
@@ -50,7 +54,9 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
               },
             ],
           };
+
     if (failure) throw new Error("Upstream failed");
+
     return {
       observedAt: 123,
       usage: {
@@ -70,6 +76,7 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
       },
     };
   });
+
   const host = createFakePluginHost({
     pluginId: "provider-usage",
     sdk: {
@@ -113,13 +120,16 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
       },
     },
   });
-  plugin(host.bb);
+
+  plugin(host.api);
+
   const request = {
     force: false,
     machineIds: null,
     providerIds: [],
     maxAgeMs: 60_000,
   };
+
   try {
     const listed = await host.harness.behavior.callRpc("getUsage", request);
     expect(listed).toMatchObject({
@@ -138,11 +148,13 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
     expect(
       rpc.mock.calls.every(([args]) => args.method === usageListMethod),
     ).toBe(true);
+
     const target = {
       ...request,
       machineIds: ["source:pool"],
       providerIds: ["codex"],
     };
+
     await host.harness.behavior.callRpc("getUsage", target);
     expect(
       rpc.mock.calls
@@ -226,6 +238,7 @@ it("lists cheaply, fetches only the selected source/provider, preserves failed m
 
 it("keeps an unconfigured shared group without hosts or measurement requests", async () => {
   const rpc = vi.fn(async () => ({ label: "Account Pooler", resources: [] }));
+
   const host = createFakePluginHost({
     pluginId: "provider-usage",
     sdk: {
@@ -240,7 +253,9 @@ it("keeps an unconfigured shared group without hosts or measurement requests", a
       },
     },
   });
-  plugin(host.bb);
+
+  plugin(host.api);
+
   try {
     await expect(
       host.harness.behavior.callRpc("getUsage", {
@@ -267,7 +282,7 @@ it("keeps an unconfigured shared group without hosts or measurement requests", a
 });
 
 it("collapses known account observations per machine, preserves unknown identities, and normalizes display labels", async () => {
-  const { bb, harness } = createFakePluginHost({
+  const { api, harness } = createFakePluginHost({
     sdk: {
       system: { config: async () => ({ primaryHostId: null }) },
       hosts: {
@@ -325,14 +340,17 @@ it("collapses known account observations per machine, preserves unknown identiti
       },
     },
   });
+
   try {
-    plugin(bb);
+    plugin(api);
+
     const snapshot = await harness.behavior.callRpc("getUsage", {
       force: false,
       machineIds: ["host"],
       providerIds: ["codex"],
       maxAgeMs: 0,
     });
+
     expect(snapshot).toMatchObject({
       machines: [
         {

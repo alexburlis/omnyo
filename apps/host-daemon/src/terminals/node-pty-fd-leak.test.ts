@@ -6,7 +6,9 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ensureNodePtySpawnHelpersExecutableInPackage } from "./terminal-manager.js";
 
 const require = createRequire(import.meta.url);
+
 const execFileAsync = promisify(execFile);
+
 const nodePtyPackageDirectory = path.dirname(
   require.resolve("node-pty/package.json"),
 );

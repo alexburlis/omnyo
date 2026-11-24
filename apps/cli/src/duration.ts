@@ -25,8 +25,10 @@ export interface ParsedDuration {
 
 export function matchDuration(value: string): ParsedDuration | null {
   const match = DURATION_PATTERN.exec(value.trim().toLowerCase());
+
   if (!match) return null;
   const unit = match[2];
+
   return {
     amount: Number.parseFloat(match[1]),
     unit: isDurationUnit(unit) ? unit : null,
@@ -54,16 +56,20 @@ export function durationHelp(defaultUnit: DurationUnit): string {
 
 export function parseDurationMs(args: ParseDurationMsArgs): number {
   const parsed = matchDuration(args.value);
+
   if (parsed === null) {
     throw new Error(
       `Invalid ${args.label} value '${args.value}'. Expected ${durationHelp(args.defaultUnit)}.`,
     );
   }
+
   const milliseconds = Math.round(
     parsed.amount * DURATION_UNIT_MS[parsed.unit ?? args.defaultUnit],
   );
+
   if (milliseconds === 0 && !args.allowZero) {
     throw new Error(`${args.label} must be greater than zero.`);
   }
+
   return milliseconds;
 }

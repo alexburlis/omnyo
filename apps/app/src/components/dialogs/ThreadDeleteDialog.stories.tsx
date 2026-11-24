@@ -10,6 +10,7 @@ export default {
 const noop = () => {};
 
 const standardThread = makeThread();
+
 const parentThread = makeThread({
   id: "thr_parent",
   title: "Frontend Parent",
@@ -25,7 +26,7 @@ export function Thread() {
       >
         <DialogStage>
           <ThreadDeleteDialogContent
-            target={{ thread: standardThread }}
+            target={{ thread: standardThread, childSummaryLoaded: true }}
             pending={false}
             onOpenChange={noop}
             onDelete={noop}
@@ -35,7 +36,7 @@ export function Thread() {
       <StoryRow label="pending" hint="delete request in flight">
         <DialogStage>
           <ThreadDeleteDialogContent
-            target={{ thread: standardThread }}
+            target={{ thread: standardThread, childSummaryLoaded: true }}
             pending
             onOpenChange={noop}
             onDelete={noop}
@@ -55,7 +56,7 @@ export function Parent() {
       >
         <DialogStage>
           <ThreadDeleteDialogContent
-            target={{ thread: parentThread }}
+            target={{ thread: parentThread, childSummaryLoaded: true }}
             pending={false}
             onOpenChange={noop}
             onDelete={noop}
@@ -70,6 +71,7 @@ export function Parent() {
           <ThreadDeleteDialogContent
             target={{
               thread: parentThread,
+              childSummaryLoaded: true,
               childThreadCount: 3,
             }}
             pending={false}
@@ -86,6 +88,7 @@ export function Parent() {
           <ThreadDeleteDialogContent
             target={{
               thread: parentThread,
+              childSummaryLoaded: true,
               childThreadCount: 1,
             }}
             pending={false}

@@ -1,6 +1,7 @@
 import { createStore } from "jotai";
 import { QueryObserver } from "@tanstack/react-query";
-import type { ChangedMessage } from "@bb/domain";
+import type { ChangedMessage } from "@omnyo/domain";
+import { rewriteLocalhostLinkHref } from "@omnyo/client-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -51,8 +52,8 @@ vi.mock("./sdk", () => ({
   },
 }));
 
-vi.mock("./bb-desktop", () => ({
-  getBbDesktopInfo: () => null,
+vi.mock("./omnyo-desktop", () => ({
+  getOmnyoDesktopInfo: () => null,
 }));
 
 vi.mock("./ws", () => ({
@@ -66,6 +67,7 @@ vi.mock("./ws", () => ({
 import {
   hostDaemonPortAtom,
   localHostDaemonAccessStateAtom,
+  localHostDaemonHostIdAtom,
   localHostStatusAtom,
   requestLocalHostDaemonAccessAtom,
 } from "./system-config-atoms";
@@ -78,8 +80,10 @@ import { createRealtimeCacheEffects } from "@/hooks/realtime-cache-effects";
 beforeEach(() => {
   appQueryClient.clear();
   mocks.fetchHostStatus.mockReset();
-  mocks.onConnected.mockClear();
-  mocks.onChanged.mockClear();
+  mocks.onConnected.mockReset();
+  mocks.onConnected.mockImplementation(() => () => {});
+  mocks.onChanged.mockReset();
+  mocks.onChanged.mockImplementation(() => () => {});
   mocks.fetchSdkSystemConfig.mockReset();
   mocks.fetchSdkSystemConfig.mockResolvedValue({
     hostDaemonPort: 38_887,
@@ -88,9 +92,11 @@ beforeEach(() => {
   mocks.fetchSystemConfig.mockClear();
   vi.stubGlobal("window", {
     location: {
-      hostname: "remote.getbb.app",
-      origin: "https://remote.getbb.app",
+      hostname: "remote.example.test",
+      origin: "https://remote.example.test",
     },
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
   });
   vi.stubGlobal("navigator", {
     permissions: {
@@ -107,8 +113,85 @@ afterEach(() => {
 });
 
 describe("local host daemon access atoms", () => {
+  it.each(["focus", "reconnect", "host-connected"] as const)(
+    "recovers cached failed helper discovery on %s and removes listeners",
+    async (event) => {
+      vi.useFakeTimers();
+      const focus = new EventTarget();
+      const addEventListener = vi.fn(focus.addEventListener.bind(focus));
+      const removeEventListener = vi.fn(focus.removeEventListener.bind(focus));
+      Object.assign(window, { addEventListener, removeEventListener });
+      vi.stubGlobal("navigator", {
+        permissions: { query: vi.fn(async () => ({ state: "granted" })) },
+        userAgent: "test",
+      });
+      const disconnected = vi.fn();
+      mocks.onConnected.mockImplementation(() => disconnected);
+      mocks.onChanged.mockImplementation(() => disconnected);
+      mocks.fetchHostStatus.mockResolvedValue(null);
+      const store = createStore();
+      const unsubscribe = store.sub(localHostStatusAtom, () => {});
+
+      try {
+        const initial = store.get(localHostStatusAtom);
+        await vi.advanceTimersByTimeAsync(2_000);
+        await expect(initial).resolves.toBeNull();
+        const href = "http://127.0.0.1:4175/preview/flux-edit";
+
+        const routedHref = async () =>
+          rewriteLocalhostLinkHref({
+            enabled: true,
+            href,
+            sourceHostId: "host-recovered",
+            viewerHostId: await store.get(localHostDaemonHostIdAtom),
+            remoteBaseUrl: "/preview/prv_fixture",
+          });
+
+        await expect(routedHref()).resolves.toBe(
+          "/preview/prv_fixture/preview/flux-edit",
+        );
+        expect(mocks.fetchHostStatus).toHaveBeenCalledTimes(6);
+        mocks.fetchHostStatus.mockResolvedValue({
+          connected: true,
+          hostId: "host-recovered",
+          serverUrl: "https://remote.example.test",
+        });
+
+        if (event === "focus") focus.dispatchEvent(new Event("focus"));
+        else if (event === "reconnect") {
+          for (const [listener] of mocks.onConnected.mock.calls)
+            listener({ reconnected: true });
+        } else {
+          for (const [listener] of mocks.onChanged.mock.calls)
+            listener({
+              type: "changed",
+              entity: "host",
+              changes: ["host-connected"],
+            });
+        }
+
+        await vi.waitFor(async () => {
+          await expect(store.get(localHostStatusAtom)).resolves.toMatchObject({
+            hostId: "host-recovered",
+          });
+        });
+        await expect(routedHref()).resolves.toBe(href);
+      } finally {
+        unsubscribe();
+      }
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(removeEventListener).toHaveBeenCalledWith(
+        "focus",
+        expect.any(Function),
+      );
+      expect(disconnected).toHaveBeenCalled();
+    },
+  );
+
   it("shares the system config request with the app query owner", async () => {
     const store = createStore();
+
     const query = appQueryClient.fetchQuery({
       queryKey: systemConfigQueryKey(),
       queryFn: ({ signal }) => sdk.system.config({ signal }),
@@ -130,17 +213,22 @@ describe("local host daemon access atoms", () => {
         hostDaemonPort: 38_887,
         localHelperPorts: [38_887, 38_888],
       };
+
       appQueryClient.setQueryData(systemConfigQueryKey(), cachedConfig);
       const store = createStore();
+
       const unsubscribeAtom = store.sub(
         localHostDaemonAccessStateAtom,
         () => {},
       );
+
       const observer = new QueryObserver(
         appQueryClient,
         systemConfigQueryOptions(),
       );
+
       const unsubscribeQuery = observer.subscribe(() => {});
+
       const effects = createRealtimeCacheEffects({
         queryClient: appQueryClient,
         visibility: {
@@ -148,9 +236,11 @@ describe("local host daemon access atoms", () => {
           subscribe: () => () => {},
         },
       });
+
       const requests: Array<{
         resolve: (config: typeof cachedConfig) => void;
       }> = [];
+
       let abortCount = 0;
 
       try {
@@ -169,15 +259,18 @@ describe("local host daemon access atoms", () => {
               );
             }),
         );
+
         const message = {
           type: "changed",
           entity: "system",
           changes: ["config-changed"],
         } satisfies ChangedMessage;
+
         const atomListener = mocks.onChanged.mock.calls.at(-1)?.[0];
         expect(atomListener).toBeDefined();
         const notifyAtom = () => atomListener?.(message);
         const notifyRealtime = () => effects.handleChanged(message);
+
         const [first, second] =
           listenerOrder === "atom-first"
             ? [notifyAtom, notifyRealtime]
@@ -194,6 +287,7 @@ describe("local host daemon access atoms", () => {
         for (const request of requests) {
           request.resolve(cachedConfig);
         }
+
         effects.dispose();
         unsubscribeQuery();
         unsubscribeAtom();
@@ -207,18 +301,23 @@ describe("local host daemon access atoms", () => {
       hostDaemonPort: 38_887,
       localHelperPorts: [38_887, 38_888],
     };
+
     const newerConfig = {
       hostDaemonPort: 39_999,
       localHelperPorts: [],
     };
+
     appQueryClient.setQueryData(systemConfigQueryKey(), olderConfig);
     const store = createStore();
     const unsubscribeAtom = store.sub(localHostDaemonAccessStateAtom, () => {});
+
     const observer = new QueryObserver(
       appQueryClient,
       systemConfigQueryOptions(),
     );
+
     const unsubscribeQuery = observer.subscribe(() => {});
+
     const effects = createRealtimeCacheEffects({
       queryClient: appQueryClient,
       visibility: {
@@ -226,6 +325,7 @@ describe("local host daemon access atoms", () => {
         subscribe: () => () => {},
       },
     });
+
     const requests: Array<{
       resolve: (config: typeof olderConfig) => void;
     }> = [];
@@ -238,13 +338,16 @@ describe("local host daemon access atoms", () => {
             requests.push({ resolve });
           }),
       );
+
       const message = {
         type: "changed",
         entity: "system",
         changes: ["config-changed"],
       } satisfies ChangedMessage;
+
       const atomListener = mocks.onChanged.mock.calls.at(-1)?.[0];
       expect(atomListener).toBeDefined();
+
       const notify = () => {
         atomListener?.(message);
         effects.handleChanged(message);
@@ -273,6 +376,7 @@ describe("local host daemon access atoms", () => {
       for (const request of requests) {
         request.resolve(newerConfig);
       }
+
       effects.dispose();
       unsubscribeQuery();
       unsubscribeAtom();
@@ -289,7 +393,7 @@ describe("local host daemon access atoms", () => {
     mocks.fetchHostStatus.mockResolvedValue({
       connected: true,
       hostId: "host-local",
-      serverUrl: "https://remote.getbb.app",
+      serverUrl: "https://remote.example.test",
     });
     const store = createStore();
     const unsubscribe = store.sub(localHostStatusAtom, () => {});
@@ -297,9 +401,11 @@ describe("local host daemon access atoms", () => {
     await expect(store.get(localHostStatusAtom)).resolves.toMatchObject({
       hostId: "host-local",
     });
+
     for (const [listener] of mocks.onConnected.mock.calls) {
       listener({ reconnected: false });
     }
+
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(mocks.fetchHostStatus).toHaveBeenCalledTimes(2);
@@ -316,7 +422,7 @@ describe("local host daemon access atoms", () => {
     mocks.fetchHostStatus.mockResolvedValue({
       connected: true,
       hostId: "host-local",
-      serverUrl: "https://remote.getbb.app",
+      serverUrl: "https://remote.example.test",
     });
     const store = createStore();
     const unsubscribe = store.sub(localHostStatusAtom, () => {});
@@ -324,6 +430,7 @@ describe("local host daemon access atoms", () => {
     await expect(store.get(localHostStatusAtom)).resolves.toMatchObject({
       hostId: "host-local",
     });
+
     for (const [listener] of mocks.onConnected.mock.calls) {
       listener({ reconnected: true, disconnectedAt: Date.now() });
     }
@@ -344,13 +451,15 @@ describe("local host daemon access atoms", () => {
     mocks.fetchHostStatus.mockResolvedValue({
       connected: true,
       hostId: "host-local",
-      serverUrl: "https://remote.getbb.app",
+      serverUrl: "https://remote.example.test",
     });
     const store = createStore();
     const unsubscribe = store.sub(localHostStatusAtom, () => {});
+
     const configRequestCount = () =>
       mocks.fetchSdkSystemConfig.mock.calls.length +
       mocks.fetchSystemConfig.mock.calls.length;
+
     const notifyChanged = (message: ChangedMessage) => {
       for (const [listener] of mocks.onChanged.mock.calls) {
         listener(message);
@@ -426,7 +535,7 @@ describe("local host daemon access atoms", () => {
     mocks.fetchHostStatus.mockResolvedValue({
       connected: true,
       hostId: "host-local",
-      serverUrl: "https://remote.getbb.app",
+      serverUrl: "https://remote.example.test",
     });
     const store = createStore();
 
@@ -446,7 +555,9 @@ describe("local host daemon access atoms", () => {
       connected: true,
       hostId: port === 38_888 ? "host-browser-machine" : "host-primary",
       serverUrl:
-        port === 38_888 ? "https://remote.getbb.app" : "http://127.0.0.1:38886",
+        port === 38_888
+          ? "https://remote.example.test"
+          : "http://127.0.0.1:38886",
     }));
     const store = createStore();
 

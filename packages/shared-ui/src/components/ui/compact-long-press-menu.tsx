@@ -10,15 +10,33 @@ import {
 } from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { DropdownMenu, DropdownMenuContent } from "./dropdown-menu";
+import { CompactViewportOverrideProvider } from "./hooks/use-compact-viewport";
+import {
+  beginLongPress,
+  isLongPressIntact,
+  trackLongPressScrolls,
+  type LongPressOrigin,
+} from "./long-press-guards";
 
 const LONG_PRESS_MS = 700;
+
 const LONG_PRESS_MOVE_SLOP_PX = 10;
 
 const LONG_PRESS_TARGET_STYLE: CSSProperties = {
   WebkitTouchCallout: "none",
 };
 
-const claimedPressEvents = new WeakSet<Event>();
+const CLAIMED_PRESS_EVENT_KEY = Symbol.for(
+  "omnyo.compactLongPressMenu.claimedPressEvent",
+);
+
+function isClaimedPressEvent(event: Event): boolean {
+  return Reflect.get(event, CLAIMED_PRESS_EVENT_KEY) === true;
+}
+
+function claimPressEvent(event: Event) {
+  Reflect.set(event, CLAIMED_PRESS_EVENT_KEY, true);
+}
 
 interface CompactLongPressMenuProps {
   children: ReactNode;
@@ -26,7 +44,21 @@ interface CompactLongPressMenuProps {
   dragging?: boolean;
   items: ReactNode;
   label: string;
+  open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  presentation?: "responsive" | "sheet";
+  shouldStartPress?: (target: Element) => boolean;
+}
+
+function isPressTargetAllowed(
+  shouldStartPress: ((target: Element) => boolean) | undefined,
+  target: EventTarget,
+): boolean {
+  return (
+    shouldStartPress === undefined ||
+    !(target instanceof Element) ||
+    shouldStartPress(target)
+  );
 }
 
 export function CompactLongPressMenu({
@@ -35,25 +67,38 @@ export function CompactLongPressMenu({
   dragging = false,
   items,
   label,
+  open: controlledOpen,
   onOpenChange,
+  presentation = "responsive",
+  shouldStartPress,
 }: CompactLongPressMenuProps) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
   const [hasOpened, setHasOpened] = useState(false);
   const timerRef = useRef<number | null>(null);
-  const pressRef = useRef<{ pointerId: number; x: number; y: number } | null>(
+
+  const pressRef = useRef<(LongPressOrigin & { pointerId: number }) | null>(
     null,
   );
+
   const suppressClickRef = useRef(false);
+
+  const blockedTouchPressRef = useRef(false);
 
   const clearPress = useCallback(() => {
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+
     pressRef.current = null;
   }, []);
 
-  useEffect(() => clearPress, [clearPress]);
+  useEffect(() => {
+    trackLongPressScrolls(window);
+
+    return clearPress;
+  }, [clearPress]);
 
   useEffect(() => {
     if (disabled || dragging) {
@@ -74,6 +119,7 @@ export function CompactLongPressMenu({
   useEffect(() => {
     if (!dragging) return;
     clearPress();
+
     if (open) handleOpenChange(false);
   }, [clearPress, dragging, handleOpenChange, open]);
 
@@ -86,44 +132,73 @@ export function CompactLongPressMenu({
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
       suppressClickRef.current = false;
+      blockedTouchPressRef.current = false;
+
       if (disabled || dragging) {
         return;
       }
+
       if (event.pointerType !== "touch" && event.pointerType !== "pen") {
         return;
       }
+
       if (!event.isPrimary) {
         return;
       }
-      if (claimedPressEvents.has(event.nativeEvent)) {
+
+      if (isClaimedPressEvent(event.nativeEvent)) {
         return;
       }
-      claimedPressEvents.add(event.nativeEvent);
+
+      if (!isPressTargetAllowed(shouldStartPress, event.target)) {
+        return;
+      }
+
+      claimPressEvent(event.nativeEvent);
       clearPress();
-      pressRef.current = {
-        pointerId: event.pointerId,
-        x: event.clientX,
-        y: event.clientY,
-      };
+
+      const origin = beginLongPress(
+        event.currentTarget,
+        event.clientX,
+        event.clientY,
+      );
+
+      if (origin === null) {
+        blockedTouchPressRef.current = true;
+
+        return;
+      }
+
+      pressRef.current = { ...origin, pointerId: event.pointerId };
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
-        if (pressRef.current === null) {
+        const press = pressRef.current;
+
+        if (press === null) {
           return;
         }
+
         pressRef.current = null;
+
+        if (!isLongPressIntact(press)) {
+          return;
+        }
+
         suppressClickRef.current = true;
         openMenu();
       }, LONG_PRESS_MS);
     },
-    [clearPress, disabled, dragging, openMenu],
+    [clearPress, disabled, dragging, openMenu, shouldStartPress],
   );
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
       const press = pressRef.current;
+
       if (press === null || press.pointerId !== event.pointerId) {
         return;
       }
+
       if (
         Math.abs(event.clientX - press.x) > LONG_PRESS_MOVE_SLOP_PX ||
         Math.abs(event.clientY - press.y) > LONG_PRESS_MOVE_SLOP_PX
@@ -136,6 +211,8 @@ export function CompactLongPressMenu({
 
   const handlePointerEnd = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
+      blockedTouchPressRef.current = false;
+
       if (pressRef.current?.pointerId === event.pointerId) {
         clearPress();
       }
@@ -147,18 +224,37 @@ export function CompactLongPressMenu({
     (event: ReactMouseEvent<HTMLElement>) => {
       if (dragging) {
         event.preventDefault();
+
         return;
       }
-      if (disabled || event.defaultPrevented) {
+
+      if (
+        disabled ||
+        event.defaultPrevented ||
+        !isPressTargetAllowed(shouldStartPress, event.target)
+      ) {
         return;
       }
+
       event.preventDefault();
-      if (pressRef.current !== null) {
+      const press = pressRef.current;
+
+      if (
+        blockedTouchPressRef.current ||
+        (press !== null && !isLongPressIntact(press))
+      ) {
+        clearPress();
+
+        return;
+      }
+
+      if (press !== null) {
         suppressClickRef.current = true;
       }
+
       openMenu();
     },
-    [disabled, dragging, openMenu],
+    [clearPress, disabled, dragging, openMenu, shouldStartPress],
   );
 
   const handleClickCapture = useCallback(
@@ -166,6 +262,7 @@ export function CompactLongPressMenu({
       if (!suppressClickRef.current) {
         return;
       }
+
       suppressClickRef.current = false;
       event.preventDefault();
       event.stopPropagation();
@@ -175,12 +272,15 @@ export function CompactLongPressMenu({
 
   useEffect(() => {
     if (!open) return;
+
     const clearSuppressedClick = () => {
       suppressClickRef.current = false;
     };
+
     document.addEventListener("click", handleClickCapture, true);
     document.addEventListener("pointerdown", clearSuppressedClick, true);
     document.addEventListener("keydown", clearSuppressedClick, true);
+
     return () => {
       document.removeEventListener("click", handleClickCapture, true);
       document.removeEventListener("pointerdown", clearSuppressedClick, true);
@@ -188,10 +288,28 @@ export function CompactLongPressMenu({
     };
   }, [handleClickCapture, open]);
 
+  const menu = (
+    <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+      <DropdownMenuContent
+        mobileTitle={label}
+        aria-label={label}
+        onPointerDownCapture={() => {
+          suppressClickRef.current = false;
+        }}
+        onClickCapture={handleClickCapture}
+        onKeyDownCapture={() => {
+          suppressClickRef.current = false;
+        }}
+      >
+        {items}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <>
       <Slot
-        style={LONG_PRESS_TARGET_STYLE}
+        style={disabled ? undefined : LONG_PRESS_TARGET_STYLE}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
@@ -204,23 +322,13 @@ export function CompactLongPressMenu({
       >
         {children}
       </Slot>
-      {hasOpened ? (
-        <DropdownMenu open={open} onOpenChange={handleOpenChange}>
-          <DropdownMenuContent
-            mobileTitle={label}
-            aria-label={label}
-            onPointerDownCapture={() => {
-              suppressClickRef.current = false;
-            }}
-            onClickCapture={handleClickCapture}
-            onKeyDownCapture={() => {
-              suppressClickRef.current = false;
-            }}
-          >
-            {items}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
+      {!hasOpened && !open ? null : presentation === "sheet" ? (
+        <CompactViewportOverrideProvider isCompactViewport>
+          {menu}
+        </CompactViewportOverrideProvider>
+      ) : (
+        menu
+      )}
     </>
   );
 }

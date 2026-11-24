@@ -1,28 +1,33 @@
+import path from "node:path";
 import type {
   HostWatcher,
-  WatchThreadStorageRootArgs,
+  WatchThreadStorageArgs,
   WatchWorkspaceArgs,
   WorkspaceWatchError,
-} from "@bb/host-watcher";
-import type { HostWorkspace } from "@bb/host-workspace";
+} from "@omnyo/host-watcher";
+import type { HostWorkspace } from "@omnyo/host-workspace";
 import {
   createDeferredPromise,
   makeWorkspaceMergeBase,
   makeWorkspaceStatus,
-} from "@bb/test-helpers";
+} from "@omnyo/test-helpers";
 import { describe, expect, it, vi } from "vitest";
 import { WatchManager, type WatchManagerOptions } from "./watch-manager.js";
 
 type GetLocalStateFingerprintResult = Awaited<
   ReturnType<HostWorkspace["getLocalStateFingerprint"]>
 >;
+
 type GetSharedGitRefsFingerprintResult = Awaited<
   ReturnType<HostWorkspace["getSharedGitRefsFingerprint"]>
 >;
+
 type StopWatching = () => void | Promise<void>;
+
 type WatchWorkspaceImplementation = (args: WatchWorkspaceArgs) => StopWatching;
-type WatchThreadStorageRootImplementation = (
-  args: WatchThreadStorageRootArgs,
+
+type WatchThreadStorageImplementation = (
+  args: WatchThreadStorageArgs,
 ) => StopWatching;
 
 function createFakeWorkspace(path: string, isGitRepo = true) {
@@ -30,6 +35,7 @@ function createFakeWorkspace(path: string, isGitRepo = true) {
   let localStateFingerprintError: Error | null = null;
   let sharedGitRefsFingerprint: GetSharedGitRefsFingerprintResult = `refs:${path}:initial`;
   let sharedGitRefsFingerprintError: Error | null = null;
+
   const workspace = {
     path,
     isGitRepo,
@@ -41,12 +47,14 @@ function createFakeWorkspace(path: string, isGitRepo = true) {
       if (localStateFingerprintError) {
         throw localStateFingerprintError;
       }
+
       return localStateFingerprint;
     }),
     getSharedGitRefsFingerprint: vi.fn(async () => {
       if (sharedGitRefsFingerprintError) {
         throw sharedGitRefsFingerprintError;
       }
+
       return sharedGitRefsFingerprint;
     }),
     getAdditionalWorkspaceWriteRoots: vi.fn(async () => []),
@@ -101,24 +109,26 @@ function createFakeWorkspace(path: string, isGitRepo = true) {
 
 function createFakeHostWatcher(
   args: {
-    watchThreadStorageRootImplementation?: WatchThreadStorageRootImplementation;
+    watchThreadStorageImplementation?: WatchThreadStorageImplementation;
     watchWorkspaceImplementation?: WatchWorkspaceImplementation;
   } = {},
 ) {
   const watchWorkspace = vi.fn<WatchWorkspaceImplementation>(
     args.watchWorkspaceImplementation ?? (() => () => undefined),
   );
-  const watchThreadStorageRoot = vi.fn<WatchThreadStorageRootImplementation>(
-    args.watchThreadStorageRootImplementation ?? (() => () => undefined),
+
+  const watchThreadStorage = vi.fn<WatchThreadStorageImplementation>(
+    args.watchThreadStorageImplementation ?? (() => () => undefined),
   );
+
   const hostWatcher = {
     watchWorkspace,
-    watchThreadStorageRoot,
+    watchThreadStorage,
   } satisfies HostWatcher;
 
   return {
     hostWatcher,
-    watchThreadStorageRoot,
+    watchThreadStorage,
     watchWorkspace,
   };
 }
@@ -126,12 +136,15 @@ function createFakeHostWatcher(
 describe("WatchManager", () => {
   it("starts watching before initial workspace fingerprints finish", async () => {
     const workspace = createFakeWorkspace("/tmp/env-watch");
+
     const localFingerprint =
       createDeferredPromise<GetLocalStateFingerprintResult>();
+
     workspace.getLocalStateFingerprint.mockImplementationOnce(
       () => localFingerprint.promise,
     );
     const { hostWatcher, watchWorkspace } = createFakeHostWatcher();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -162,13 +175,17 @@ describe("WatchManager", () => {
   it("reconciles live content when the workspace watcher becomes ready", async () => {
     let watchWorkspaceArgs: WatchWorkspaceArgs | undefined;
     const workspace = createFakeWorkspace("/tmp/env-watch");
+
     const { hostWatcher } = createFakeHostWatcher({
       watchWorkspaceImplementation: (args) => {
         watchWorkspaceArgs = args;
+
         return () => undefined;
       },
     });
+
     const onWorkspaceStatusChanged = vi.fn();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -200,13 +217,17 @@ describe("WatchManager", () => {
     const stopWatchingStatus = vi.fn(() => undefined);
     let watchWorkspaceArgs: WatchWorkspaceArgs | undefined;
     const workspace = createFakeWorkspace("/tmp/env-watch");
+
     const { hostWatcher, watchWorkspace } = createFakeHostWatcher({
       watchWorkspaceImplementation: (args) => {
         watchWorkspaceArgs = args;
+
         return stopWatchingStatus;
       },
     });
+
     const onWorkspaceStatusChanged = vi.fn();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -266,13 +287,17 @@ describe("WatchManager", () => {
   it("reports workspace content changes when the local fingerprint is unchanged", async () => {
     let watchWorkspaceArgs: WatchWorkspaceArgs | undefined;
     const workspace = createFakeWorkspace("/tmp/env-watch");
+
     const { hostWatcher } = createFakeHostWatcher({
       watchWorkspaceImplementation: (args) => {
         watchWorkspaceArgs = args;
+
         return () => undefined;
       },
     });
+
     const onWorkspaceStatusChanged = vi.fn();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -317,20 +342,26 @@ describe("WatchManager", () => {
     let watchWorkspaceArgs: WatchWorkspaceArgs | undefined;
     const plainWorkspace = createFakeWorkspace("/tmp/env-watch", false);
     const gitWorkspace = createFakeWorkspace("/tmp/env-watch");
+
     const provisionWorkspace = vi
       .fn<NonNullable<WatchManagerOptions["provisionWorkspace"]>>()
       .mockResolvedValue(plainWorkspace);
+
     const refreshWorkspace = vi
       .fn<NonNullable<WatchManagerOptions["refreshWorkspace"]>>()
       .mockResolvedValue(gitWorkspace);
+
     const { hostWatcher } = createFakeHostWatcher({
       watchWorkspaceImplementation: (args) => {
         watchWorkspaceArgs = args;
+
         return () => undefined;
       },
     });
+
     const onWorkspaceMetadataChanged = vi.fn();
     const onWorkspaceStatusChanged = vi.fn();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace,
@@ -401,13 +432,17 @@ describe("WatchManager", () => {
   it("suppresses git metadata notifications when the local fingerprint is unchanged", async () => {
     let watchWorkspaceArgs: WatchWorkspaceArgs | undefined;
     const workspace = createFakeWorkspace("/tmp/env-watch");
+
     const { hostWatcher } = createFakeHostWatcher({
       watchWorkspaceImplementation: (args) => {
         watchWorkspaceArgs = args;
+
         return () => undefined;
       },
     });
+
     const onWorkspaceStatusChanged = vi.fn();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -442,6 +477,7 @@ describe("WatchManager", () => {
   it("ignores stale watch-set generations", async () => {
     const workspace = createFakeWorkspace("/tmp/env-watch");
     const { hostWatcher, watchWorkspace } = createFakeHostWatcher();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -472,9 +508,11 @@ describe("WatchManager", () => {
   it("applies authoritative watch-set snapshots even when generation goes backward", async () => {
     const stopWatchingStatus = vi.fn(() => undefined);
     const workspace = createFakeWorkspace("/tmp/env-watch");
+
     const { hostWatcher, watchWorkspace } = createFakeHostWatcher({
       watchWorkspaceImplementation: () => stopWatchingStatus,
     });
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -520,12 +558,15 @@ describe("WatchManager", () => {
     const stopWatchingStatus = vi.fn(() => undefined);
     const workspace = createFakeWorkspace("/tmp/env-watch");
     const pendingWorkspace = createDeferredPromise<HostWorkspace>();
+
     const provisionWorkspace = vi.fn(() => {
       return pendingWorkspace.promise;
     });
+
     const { hostWatcher, watchWorkspace } = createFakeHostWatcher({
       watchWorkspaceImplementation: () => stopWatchingStatus,
     });
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace,
@@ -543,6 +584,7 @@ describe("WatchManager", () => {
       ],
       threadStorageTargets: [],
     });
+
     const stop = manager.replaceWatchSet({
       generation: 2,
       workspaceTargets: [],
@@ -565,13 +607,17 @@ describe("WatchManager", () => {
   it("reports shared git ref changes from single-dir git watcher events", async () => {
     let watchWorkspaceArgs: WatchWorkspaceArgs | undefined;
     const workspace = createFakeWorkspace("/tmp/env-watch");
+
     const { hostWatcher } = createFakeHostWatcher({
       watchWorkspaceImplementation: (args) => {
         watchWorkspaceArgs = args;
+
         return () => undefined;
       },
     });
+
     const onWorkspaceStatusChanged = vi.fn();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -607,17 +653,94 @@ describe("WatchManager", () => {
     });
   });
 
-  it("reports local fingerprint recomputation failures and recovers on the next change", async () => {
+  it("spaces fingerprint recomputation while changes keep arriving during a run", async () => {
     let watchWorkspaceArgs: WatchWorkspaceArgs | undefined;
-    const workspace = createFakeWorkspace("/tmp/env-watch");
+    const workspace = createFakeWorkspace("/tmp/env-churn");
+
     const { hostWatcher } = createFakeHostWatcher({
       watchWorkspaceImplementation: (args) => {
         watchWorkspaceArgs = args;
+
         return () => undefined;
       },
     });
+
+    const manager = new WatchManager({
+      hostWatcher,
+      provisionWorkspace: vi.fn(async () => workspace),
+    });
+
+    await manager.replaceWatchSet({
+      generation: 1,
+      workspaceTargets: [
+        {
+          environmentId: "env-churn",
+          workspaceContext: { workspacePath: "/tmp/env-churn" },
+        },
+      ],
+      threadStorageTargets: [],
+    });
+
+    await vi.waitFor(() => {
+      expect(workspace.getLocalStateFingerprint).toHaveBeenCalledTimes(1);
+    });
+    workspace.getLocalStateFingerprint.mockClear();
+    vi.useFakeTimers();
+
+    try {
+      const running = createDeferredPromise<GetLocalStateFingerprintResult>();
+      workspace.getLocalStateFingerprint.mockImplementationOnce(
+        () => running.promise,
+      );
+
+      const change = () =>
+        watchWorkspaceArgs?.onChange({
+          changedPaths: ["/tmp/env-churn/.git/index"],
+          changeKinds: ["workspace-git-changed"],
+          kind: "workspace-status-changed",
+          environmentId: "env-churn",
+        });
+
+      change();
+      change();
+      change();
+      expect(workspace.getLocalStateFingerprint).toHaveBeenCalledTimes(1);
+
+      running.resolve("local:/tmp/env-churn:changed");
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(workspace.getLocalStateFingerprint).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(workspace.getLocalStateFingerprint).toHaveBeenCalledTimes(2);
+
+      await manager.replaceWatchSet({
+        generation: 2,
+        workspaceTargets: [],
+        threadStorageTargets: [],
+      });
+      change();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(workspace.getLocalStateFingerprint).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports local fingerprint recomputation failures and recovers on the next change", async () => {
+    let watchWorkspaceArgs: WatchWorkspaceArgs | undefined;
+    const workspace = createFakeWorkspace("/tmp/env-watch");
+
+    const { hostWatcher } = createFakeHostWatcher({
+      watchWorkspaceImplementation: (args) => {
+        watchWorkspaceArgs = args;
+
+        return () => undefined;
+      },
+    });
+
     const onWorkspaceStatusChanged = vi.fn();
     const onWorkspaceStatusWatchError = vi.fn();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -682,14 +805,18 @@ describe("WatchManager", () => {
   it("reports shared git ref fingerprint recomputation failures and recovers on the next change", async () => {
     let watchWorkspaceArgs: WatchWorkspaceArgs | undefined;
     const workspace = createFakeWorkspace("/tmp/env-watch");
+
     const { hostWatcher } = createFakeHostWatcher({
       watchWorkspaceImplementation: (args) => {
         watchWorkspaceArgs = args;
+
         return () => undefined;
       },
     });
+
     const onWorkspaceStatusChanged = vi.fn();
     const onWorkspaceStatusWatchError = vi.fn();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -750,13 +877,17 @@ describe("WatchManager", () => {
   it("forwards workspace watch errors", async () => {
     let watchWorkspaceArgs: WatchWorkspaceArgs | undefined;
     const workspace = createFakeWorkspace("/tmp/env-watch");
+
     const { hostWatcher } = createFakeHostWatcher({
       watchWorkspaceImplementation: (args) => {
         watchWorkspaceArgs = args;
+
         return () => undefined;
       },
     });
+
     const onWorkspaceStatusWatchError = vi.fn();
+
     const manager = new WatchManager({
       hostWatcher,
       provisionWorkspace: vi.fn(async () => workspace),
@@ -793,20 +924,24 @@ describe("WatchManager", () => {
     });
   });
 
-  it("starts and stops the root thread-storage watcher from snapshots", async () => {
-    const stopWatchingPathChanges = vi.fn(() => undefined);
-    let watchThreadStorageRootArgs: WatchThreadStorageRootArgs | undefined;
-    const { hostWatcher, watchThreadStorageRoot } = createFakeHostWatcher({
-      watchThreadStorageRootImplementation: (args) => {
-        watchThreadStorageRootArgs = args;
-        return stopWatchingPathChanges;
+  it("watches each thread's storage directory and reports its current environment", async () => {
+    const stopWatching = vi.fn(() => undefined);
+    let watchThreadStorageArgs: WatchThreadStorageArgs | undefined;
+
+    const { hostWatcher, watchThreadStorage } = createFakeHostWatcher({
+      watchThreadStorageImplementation: (args) => {
+        watchThreadStorageArgs = args;
+
+        return stopWatching;
       },
     });
+
     const onThreadStorageChanged = vi.fn();
+
     const manager = new WatchManager({
       hostWatcher,
       onThreadStorageChanged,
-      threadStorageRootPath: "/tmp/bb-data/thread-storage",
+      threadStorageRootPath: "/tmp/omnyo-data/thread-storage",
     });
 
     await manager.replaceWatchSet({
@@ -819,35 +954,53 @@ describe("WatchManager", () => {
         },
       ],
     });
-    watchThreadStorageRootArgs?.onChange({
-      kind: "thread-storage-changed",
-      environmentId: "env-storage",
-      threadId: "thread-1",
+    await manager.replaceWatchSet({
+      generation: 2,
+      workspaceTargets: [],
+      threadStorageTargets: [
+        {
+          environmentId: "env-moved",
+          threadId: "thread-1",
+        },
+      ],
     });
+    watchThreadStorageArgs?.onChange();
 
-    expect(watchThreadStorageRoot).toHaveBeenCalledTimes(1);
+    expect(watchThreadStorage).toHaveBeenCalledTimes(1);
+    expect(watchThreadStorageArgs?.threadStoragePath).toBe(
+      path.resolve("/tmp/omnyo-data/thread-storage", "thread-1"),
+    );
     expect(onThreadStorageChanged).toHaveBeenCalledWith({
-      environmentId: "env-storage",
+      environmentId: "env-moved",
       threadId: "thread-1",
     });
 
     await manager.replaceWatchSet({
-      generation: 2,
+      generation: 3,
       workspaceTargets: [],
       threadStorageTargets: [],
     });
+    watchThreadStorageArgs?.onChange();
 
-    expect(stopWatchingPathChanges).toHaveBeenCalledTimes(1);
+    expect(stopWatching).toHaveBeenCalledTimes(1);
+    expect(onThreadStorageChanged).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the root thread-storage watcher while another target remains", async () => {
-    const stopWatchingPathChanges = vi.fn(() => undefined);
+  it("stops only the storage watcher of a removed thread", async () => {
+    const stopWatchingByPath = new Map<string, ReturnType<typeof vi.fn>>();
+
     const { hostWatcher } = createFakeHostWatcher({
-      watchThreadStorageRootImplementation: () => stopWatchingPathChanges,
+      watchThreadStorageImplementation: (args) => {
+        const stopWatching = vi.fn(() => undefined);
+        stopWatchingByPath.set(args.threadStoragePath, stopWatching);
+
+        return stopWatching;
+      },
     });
+
     const manager = new WatchManager({
       hostWatcher,
-      threadStorageRootPath: "/tmp/bb-data/thread-storage",
+      threadStorageRootPath: "/tmp/omnyo-data/thread-storage",
     });
 
     await manager.replaceWatchSet({
@@ -875,14 +1028,37 @@ describe("WatchManager", () => {
       ],
     });
 
-    expect(stopWatchingPathChanges).not.toHaveBeenCalled();
+    expect(
+      stopWatchingByPath.get(
+        path.resolve("/tmp/omnyo-data/thread-storage", "thread-a"),
+      ),
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      stopWatchingByPath.get(
+        path.resolve("/tmp/omnyo-data/thread-storage", "thread-b"),
+      ),
+    ).not.toHaveBeenCalled();
+    expect(manager.threadStorageWatchTargetCount()).toBe(1);
+  });
 
-    await manager.replaceWatchSet({
-      generation: 3,
-      workspaceTargets: [],
-      threadStorageTargets: [],
+  it("never watches a path outside a single thread's storage directory", async () => {
+    const { hostWatcher, watchThreadStorage } = createFakeHostWatcher();
+
+    const manager = new WatchManager({
+      hostWatcher,
+      threadStorageRootPath: "/tmp/omnyo-data/thread-storage",
     });
 
-    expect(stopWatchingPathChanges).toHaveBeenCalledTimes(1);
+    await manager.replaceWatchSet({
+      generation: 1,
+      workspaceTargets: [],
+      threadStorageTargets: [
+        { environmentId: "env-a", threadId: "." },
+        { environmentId: "env-a", threadId: "../escape" },
+        { environmentId: "env-a", threadId: "nested/thread" },
+      ],
+    });
+
+    expect(watchThreadStorage).not.toHaveBeenCalled();
   });
 });

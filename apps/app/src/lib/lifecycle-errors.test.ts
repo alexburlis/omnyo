@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LifecycleApiError } from "@bb/server-contract";
+import type { LifecycleApiError } from "@omnyo/server-contract";
 import { HttpError } from "./api";
 import {
   describeLifecycleError,
@@ -619,6 +619,7 @@ describe("describeLifecycleError", () => {
 
   it("keeps a gate rejection readable under an operation title", () => {
     const pluginMessage = "This project is frozen until the release ships.";
+
     const body: LifecycleApiError = {
       code: "dispatch_rejected",
       message: pluginMessage,
@@ -633,6 +634,7 @@ describe("describeLifecycleError", () => {
     if (!description) {
       throw new Error("expected a lifecycle description");
     }
+
     expect(description.body).toContain(pluginMessage);
     expect(description.body).toContain('"release-freeze"');
     expect(formatLifecycleErrorDescription(description)).toBe(

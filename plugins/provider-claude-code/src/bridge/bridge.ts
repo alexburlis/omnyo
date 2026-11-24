@@ -1,5 +1,16 @@
 #!/usr/bin/env node
 import { ClaudeContextUsageCollector } from "./context-usage.js";
+import {
+  startCompactionTelemetryReceiver,
+  type CompactionTelemetryReceiver,
+} from "./compaction-telemetry.js";
+import {
+  compactionPromptCacheTtlMs,
+  createCompactionUsageHolds,
+  hasZeroResultUsage,
+  toCompactionTokenUsage,
+} from "./compaction-usage-hold.js";
+import { readIsolatedClaudeContextUsage } from "./context-usage-probe.js";
 
 import {
   type PendingInteractionGrantedPermissionProfile,
@@ -27,7 +38,8 @@ import {
   withoutBridgeRuntimeEnv,
   type BridgeToolCallRequest,
   experimental_defineProviderBridge,
-} from "@get-bb/plugin-sdk/provider-bridge";
+  isStandaloneBuiltinCompactCommand,
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { randomUUID } from "node:crypto";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -60,7 +72,10 @@ import {
   type SdkSessionOptions,
 } from "./sdk-session.js";
 import { MissingClaudeCliError } from "./missing-cli-error.js";
-import { createClaudeCodeBridgeModelListMemo } from "./model-list.js";
+import {
+  createClaudeCodeBridgeModelListMemo,
+  listClaudeCodeBridgeModels,
+} from "./model-list.js";
 import {
   claudeThreadForkParamsSchema,
   claudeThreadResumeParamsSchema,
@@ -86,7 +101,9 @@ import {
   buildChromeExtraArgs,
   buildReadonlyDenialMessage,
   buildMutableFlagSettings,
+  buildModelFallbackSettings,
   buildSessionOptions,
+  buildSessionSettingsEnv,
   buildWorkspaceWriteDenialMessage,
   toSdkEffort,
   type BuildSessionOptionsArgs,
@@ -99,9 +116,10 @@ import {
 import {
   buildBridgeMcpServer,
   getAllowedToolNames,
+  getBridgeToolName,
   type ToolCallForwarder,
 } from "./tool-proxy-mcp.js";
-import { BB_BRIDGE_MCP_SERVER_NAME } from "../tool-classification.js";
+import { OMNYO_BRIDGE_MCP_SERVER_NAME } from "../tool-classification.js";
 import {
   type ClaudeInteractiveResponse,
   type ClaudePermissionMode,
@@ -158,7 +176,20 @@ const promptInputItemSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-const CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES = new Set(["Agent", "Task"]);
+const CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES = new Set([
+  "Agent",
+  "Task",
+  "ListAgents",
+]);
+
+function subagentDisallowedTools(
+  providerSubagentsEnabled: boolean,
+): string[] | undefined {
+  return providerSubagentsEnabled
+    ? undefined
+    : [...CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES];
+}
+
 const CLAUDE_WORKFLOW_TOOL_NAME = "Workflow";
 
 interface BridgeEventNotification {
@@ -234,6 +265,7 @@ interface ThreadSession {
   restartBeforeNextTurn: ClaudeSessionRestart | null;
   launchedWithBypassPermissions: boolean;
   recoveryHintRaisedThisTurn: "authRequired" | "rateLimited" | null;
+  standaloneCompactionStartedAtMs: number | null;
   streamEnded: boolean;
   translator: ClaudeDeltaTranslator;
   pendingInteractiveRequests: Map<string | number, PendingInteractiveRequest>;
@@ -273,6 +305,7 @@ interface CreateThreadAttachmentArgs {
 }
 
 type CanonicalTurnStartParams = z.infer<typeof canonicalTurnStartParamsSchema>;
+
 type CanonicalTurnSteerParams = z.infer<typeof canonicalTurnSteerParamsSchema>;
 
 interface CanonicalTurnAcceptance {
@@ -294,6 +327,7 @@ interface SessionConstructionConfig {
 }
 
 interface ClaudeLiveSessionSettings {
+  fullAccessApprovalsEnabled: boolean;
   memoryEnabled: boolean;
   model?: string;
   providerSubagentsEnabled: boolean;
@@ -354,14 +388,19 @@ interface ForwardUserQuestionRequestArgs extends BuildUserQuestionRequestParamsA
 }
 
 let sessionSerialCounter = 0;
+
 let interactiveRequestIdCounter = 0;
 
 function nextInteractiveRequestId(): string {
   interactiveRequestIdCounter += 1;
+
   return `interaction-${interactiveRequestIdCounter}`;
 }
+
 let configuredSkillRoots: ClaudeCodeSkillRoot[] | null = null;
+
 let skillPluginsRoot: string | null = null;
+
 let bridgeTempDir: string | null = null;
 
 function assembleSkillPlugins(
@@ -369,6 +408,7 @@ function assembleSkillPlugins(
 ): ClaudeCodeSkillRoot[] {
   const takenNames = new Map<string, string>();
   const assembled: ClaudeCodeSkillRoot[] = [];
+
   for (const root of roots) {
     try {
       assembled.push({
@@ -385,6 +425,7 @@ function assembleSkillPlugins(
       );
     }
   }
+
   return assembled;
 }
 
@@ -394,10 +435,18 @@ function requireSkillPluginsRoot(): string {
       bridgeTempDir === null ? undefined : joinPath(bridgeTempDir, "skills"),
     );
   }
+
   return skillPluginsRoot;
 }
 
 const THREAD_STOP_CLOSE_TIMEOUT_MS = 4_000;
+
+const COMPACTION_USAGE_WAIT_MS = 10_000;
+
+let compactionTelemetry: CompactionTelemetryReceiver | null = null;
+
+let compactionTelemetryStart: Promise<void> | null = null;
+
 const CLAUDE_CHROME_SETTING_RESTART_REASON = "Claude in Chrome setting changed";
 
 const { send, sendResult, sendError } = createBridgeIo<
@@ -405,14 +454,18 @@ const { send, sendResult, sendError } = createBridgeIo<
 >();
 
 const threadAttachments = new Map<string, ThreadAttachment>();
+
 const closingSessions = new Map<string, Promise<void>>();
+
 const toolCallTracker = createPendingToolCallTracker({ sendToolCall: send });
+
 const { forwardToolCall, handleToolCallResponse } = toolCallTracker;
 
 function resolvePendingSessionWork(
   threadSession: ThreadSession,
   message: string,
 ): void {
+  threadSession.contextUsageCollector.cancel();
   toolCallTracker.resolvePendingToolCalls(threadSession, message);
   resolvePendingInteractiveRequests(threadSession, message);
 }
@@ -422,19 +475,55 @@ function applyChromeSetting(
   enabled: boolean | undefined,
 ): void {
   const sessionOptions = attachment.sessionConstructionConfig.sessionOptions;
+
   if (enabled === undefined || sessionOptions.chromeEnabled === enabled) {
     return;
   }
+
   sessionOptions.chromeEnabled = enabled;
   const extraArgs = buildChromeExtraArgs(enabled);
+
   if (extraArgs) {
     attachment.sessionOptions.extraArgs = extraArgs;
   } else {
     delete attachment.sessionOptions.extraArgs;
   }
+
   if (attachment.residentSession) {
     attachment.residentSession.restartBeforeNextTurn = {
       reason: CLAUDE_CHROME_SETTING_RESTART_REASON,
+      showRuntimeNote: false,
+    };
+  }
+}
+
+function applySubagentSetting(
+  attachment: ThreadAttachment,
+  enabled: boolean | undefined,
+): void {
+  if (
+    enabled === undefined ||
+    attachment.liveSettings.providerSubagentsEnabled === enabled
+  ) {
+    return;
+  }
+
+  const disallowedTools = subagentDisallowedTools(enabled);
+
+  if (disallowedTools === undefined) {
+    delete attachment.sessionOptions.disallowedTools;
+  } else {
+    attachment.sessionOptions.disallowedTools = disallowedTools;
+  }
+
+  attachment.liveSettings = {
+    ...attachment.liveSettings,
+    providerSubagentsEnabled: enabled,
+  };
+
+  if (attachment.residentSession) {
+    attachment.residentSession.restartBeforeNextTurn = {
+      reason: "Claude Code subagent setting changed",
       showRuntimeNote: false,
     };
   }
@@ -445,17 +534,57 @@ function applyContextWindowSetting(
   disabled: boolean | undefined,
 ): void {
   const sessionOptions = attachment.sessionConstructionConfig.sessionOptions;
+
   if (disabled === undefined || sessionOptions.disable1MContext === disabled) {
     return;
   }
+
   sessionOptions.disable1MContext = disabled;
-  attachment.sessionOptions.env = {
-    ...attachment.sessionOptions.env,
-    CLAUDE_CODE_DISABLE_1M_CONTEXT: disabled ? "1" : "0",
-  };
+  attachment.sessionOptions.env = buildSessionSettingsEnv({
+    ...sessionOptions,
+    env: attachment.sessionOptions.env ?? {},
+  });
+
   if (attachment.residentSession) {
     attachment.residentSession.restartBeforeNextTurn = {
       reason: "Claude Code 1M context setting changed",
+      showRuntimeNote: false,
+    };
+  }
+}
+
+function applyModelFallbackSetting(
+  attachment: ThreadAttachment,
+  enabled: boolean,
+): void {
+  const sessionOptions = attachment.sessionConstructionConfig.sessionOptions;
+
+  if (sessionOptions.allowModelFallback === enabled) {
+    return;
+  }
+
+  sessionOptions.allowModelFallback = enabled;
+  attachment.sessionOptions.env = buildSessionSettingsEnv({
+    ...sessionOptions,
+    env: attachment.sessionOptions.env ?? {},
+  });
+
+  const settings =
+    typeof attachment.sessionOptions.settings === "object"
+      ? attachment.sessionOptions.settings
+      : {};
+
+  const fallbackSettings = buildModelFallbackSettings(enabled);
+
+  attachment.sessionOptions.settings = {
+    ...settings,
+    ...fallbackSettings,
+    env: { ...settings.env, ...fallbackSettings.env },
+  };
+
+  if (attachment.residentSession) {
+    attachment.residentSession.restartBeforeNextTurn = {
+      reason: "Claude Code model fallback setting changed",
       showRuntimeNote: false,
     };
   }
@@ -466,11 +595,14 @@ async function applyPermissionSettings(
   params: TurnStartParams | TurnSteerParams,
 ): Promise<boolean> {
   const construction = attachment.sessionConstructionConfig.sessionOptions;
+
   const writeRoots =
     params.permissionScope === "workspace"
       ? params.additionalWorkspaceWriteRoots
       : [];
+
   const sandboxEnabled = params.sandboxEnabled ?? construction.sandboxEnabled;
+
   if (
     attachment.approvedPlanPermissionMode === params.permissionMode &&
     construction.permissionScope === params.permissionScope &&
@@ -482,8 +614,10 @@ async function applyPermissionSettings(
   ) {
     return false;
   }
+
   const permissionMode =
     attachment.permissionMode === "plan" ? "plan" : params.permissionMode;
+
   const nextConstruction = {
     ...construction,
     permissionMode,
@@ -491,6 +625,7 @@ async function applyPermissionSettings(
     additionalWorkspaceWriteRoots: writeRoots,
     sandboxEnabled,
   };
+
   const rebuilt = buildSessionOptions(
     {
       ...nextConstruction,
@@ -499,32 +634,40 @@ async function applyPermissionSettings(
     },
     attachment.sessionOptions.env ?? {},
   );
+
   const permissionSettings = {
     sandbox: rebuilt.sandbox ?? { enabled: false },
     permissions: {
       additionalDirectories: [...(rebuilt.additionalDirectories ?? [])],
     },
   };
+
   attachment.sessionPermissionGrants = [];
   const resident = attachment.residentSession;
+
   const needsRestart =
     params.permissionMode === "bypassPermissions" &&
     resident !== null &&
     !resident.launchedWithBypassPermissions;
+
   if (resident && !needsRestart) {
     await resident.session.applyPermissionSettings(permissionSettings);
+
     if (attachment.permissionMode !== permissionMode) {
       await resident.session.setPermissionMode(permissionMode);
     }
   }
+
   resident?.translator.configureSandbox(rebuilt.sandbox?.enabled === true);
   attachment.sessionConstructionConfig.sessionOptions = nextConstruction;
   attachment.permissionMode = permissionMode;
   attachment.approvedPlanPermissionMode = params.permissionMode;
+
   const currentSettings =
     typeof attachment.sessionOptions.settings === "object"
       ? attachment.sessionOptions.settings
       : {};
+
   attachment.sessionOptions.settings = {
     ...currentSettings,
     ...permissionSettings,
@@ -532,24 +675,73 @@ async function applyPermissionSettings(
   attachment.sessionOptions.permissionMode = permissionMode;
   attachment.sessionOptions.allowBypassPermissions =
     rebuilt.allowBypassPermissions;
+
   if (rebuilt.sandbox) {
     attachment.sessionOptions.sandbox = rebuilt.sandbox;
   } else {
     delete attachment.sessionOptions.sandbox;
   }
+
   if (rebuilt.additionalDirectories) {
     attachment.sessionOptions.additionalDirectories =
       rebuilt.additionalDirectories;
   } else {
     delete attachment.sessionOptions.additionalDirectories;
   }
+
   if (resident && needsRestart) {
     resident.restartBeforeNextTurn = {
       reason: "Claude Code permissions changed",
       showRuntimeNote: false,
     };
   }
+
   return needsRestart;
+}
+
+const OMNYO_USER_QUESTION_TOOL_NAME = getBridgeToolName(
+  CLAUDE_USER_QUESTION_TOOL_NAME,
+);
+
+const OMNYO_USER_QUESTION_REDIRECT = `Ask with ${OMNYO_USER_QUESTION_TOOL_NAME} instead. It takes the same input, opens the question in Omnyo and returns at once; the answer arrives as a new message.`;
+
+const PLAN_MODE_QUESTION_REDIRECT = `Plan mode keeps questions in this turn. Ask with ${CLAUDE_USER_QUESTION_TOOL_NAME} instead.`;
+
+const SUBAGENT_QUESTION_DENIAL =
+  "Subagents cannot ask the user. Return the question to the main agent.";
+
+function offersOmnyoUserQuestion(attachment: ThreadAttachment): boolean {
+  return (attachment.sessionConstructionConfig.dynamicTools ?? []).some(
+    (tool) => tool.name === CLAUDE_USER_QUESTION_TOOL_NAME,
+  );
+}
+
+function userQuestionDenial(args: {
+  attachment: ThreadAttachment;
+  toolName: string;
+  agentId: string | undefined;
+  permissionMode: string | undefined;
+}): string | null {
+  const planMode =
+    (args.permissionMode ?? args.attachment.permissionMode) === "plan";
+
+  if (args.toolName === CLAUDE_USER_QUESTION_TOOL_NAME) {
+    return args.agentId === undefined &&
+      !planMode &&
+      offersOmnyoUserQuestion(args.attachment)
+      ? OMNYO_USER_QUESTION_REDIRECT
+      : null;
+  }
+
+  if (args.toolName !== OMNYO_USER_QUESTION_TOOL_NAME) {
+    return null;
+  }
+
+  if (args.agentId !== undefined) {
+    return SUBAGENT_QUESTION_DENIAL;
+  }
+
+  return planMode ? PLAN_MODE_QUESTION_REDIRECT : null;
 }
 
 function createForwardToolCall(getThreadId: () => string): ToolCallForwarder {
@@ -557,6 +749,7 @@ function createForwardToolCall(getThreadId: () => string): ToolCallForwarder {
     const threadId = getThreadId();
     const attachment = threadAttachments.get(threadId);
     const threadSession = attachment?.residentSession;
+
     if (
       !attachment ||
       attachment.closing ||
@@ -568,6 +761,7 @@ function createForwardToolCall(getThreadId: () => string): ToolCallForwarder {
         isError: true,
       });
     }
+
     return forwardToolCall({
       arguments: args,
       providerThreadId: attachment.providerThreadId ?? threadId,
@@ -583,22 +777,35 @@ async function closeThreadSession(args: {
   message: string;
   threadId: string;
 }): Promise<void> {
+  compactionUsageHolds.flush(args.threadId);
   const existingClose = closingSessions.get(args.threadId);
+
   if (existingClose) {
     return existingClose;
   }
 
   const attachment = threadAttachments.get(args.threadId);
+
   if (!attachment) {
     return;
   }
 
-  attachment.closing = true;
   const threadSession = attachment.residentSession;
+
+  if (threadSession && !threadSession.closing) {
+    sendThreadDeltas(
+      args.threadId,
+      threadSession.translator.buildBackgroundTaskCloseDeltas(args.threadId),
+    );
+  }
+
+  attachment.closing = true;
+
   if (threadSession) {
     threadSession.closing = true;
     resolvePendingSessionWork(threadSession, args.message);
   }
+
   const closePromise = Promise.resolve()
     .then(async () => {
       if (threadSession) {
@@ -609,9 +816,12 @@ async function closeThreadSession(args: {
       if (threadAttachments.get(args.threadId) === attachment) {
         threadAttachments.delete(args.threadId);
       }
+
       closingSessions.delete(args.threadId);
     });
+
   closingSessions.set(args.threadId, closePromise);
+
   return closePromise;
 }
 
@@ -629,12 +839,15 @@ function permissionPathCovers(
 ): boolean {
   const normalizedGrantPath = resolvePath(grantPath);
   const normalizedRequestedPath = resolvePath(requestedPath);
+
   if (normalizedGrantPath === normalizedRequestedPath) {
     return true;
   }
+
   const grantPrefix = normalizedGrantPath.endsWith("/")
     ? normalizedGrantPath
     : `${normalizedGrantPath}/`;
+
   return normalizedRequestedPath.startsWith(grantPrefix);
 }
 
@@ -656,10 +869,13 @@ function fileSystemPermissionsCover(
   if (requested === null) {
     return true;
   }
+
   if (granted === null) {
     return false;
   }
+
   const grantedReadPaths = [...granted.read, ...granted.write];
+
   return (
     permissionPathListCovers(grantedReadPaths, requested.read) &&
     permissionPathListCovers(granted.write, requested.write)
@@ -679,6 +895,7 @@ function sessionPermissionGrantCovers(
   if (args.grant.toolName !== null && args.grant.toolName !== args.toolName) {
     return false;
   }
+
   return (
     networkPermissionsCover(
       args.grant.permissions.network,
@@ -700,6 +917,7 @@ function hasClaudeSessionPermissionGrant(
   ) {
     return false;
   }
+
   return args.grants.some((grant) =>
     sessionPermissionGrantCovers({
       grant,
@@ -734,6 +952,7 @@ function pushPromptInput(
     promptId,
     permissionEscalation,
   );
+
   return threadSession.session.pushInput(input, promptId).catch((error) => {
     threadSession.permissionEscalationByPromptId.delete(promptId);
     throw error;
@@ -744,9 +963,14 @@ async function applyLiveSessionSettings(
   threadSession: ThreadSession,
   threadId: string,
   next: ClaudeLiveSessionSettings,
+  intent: "new-turn" | "steer" | "resume",
 ): Promise<void> {
   const current = threadSession.attachment.liveSettings;
-  if (current.model !== next.model) {
+
+  if (
+    current.model !== next.model ||
+    (intent === "new-turn" && next.model !== undefined)
+  ) {
     threadSession.contextUsageCollector.invalidateCapacity();
     await threadSession.session.setModel(next.model);
     seedModelContextWindowHint(threadSession, threadId, next.model);
@@ -776,9 +1000,26 @@ async function applyLiveSessionSettings(
 }
 
 const MODEL_LIST_MEMO_TTL_MS = 2 * 60_000;
+
 const listModelsMemoized = createClaudeCodeBridgeModelListMemo({
+  list: (envVars) => listClaudeCodeBridgeModels(buildSessionEnv(envVars)),
   ttlMs: MODEL_LIST_MEMO_TTL_MS,
 });
+
+function sendThreadDeltaNotification(
+  threadId: string,
+  deltas: readonly ThreadDelta[],
+): void {
+  send({
+    jsonrpc: "2.0",
+    method: THREAD_DELTA_NOTIFICATION_METHOD,
+    params: { threadId, deltas: [...deltas] },
+  });
+}
+
+const compactionUsageHolds = createCompactionUsageHolds(
+  sendThreadDeltaNotification,
+);
 
 function sendThreadDeltas(
   threadId: string,
@@ -787,11 +1028,88 @@ function sendThreadDeltas(
   if (deltas.length === 0) {
     return;
   }
-  send({
-    jsonrpc: "2.0",
-    method: THREAD_DELTA_NOTIFICATION_METHOD,
-    params: { threadId, deltas: [...deltas] },
-  });
+
+  const outgoing = compactionUsageHolds.offer(threadId, deltas);
+
+  if (outgoing.length > 0) {
+    sendThreadDeltaNotification(threadId, outgoing);
+  }
+}
+
+function ensureCompactionTelemetry(): Promise<void> {
+  compactionTelemetryStart ??= startCompactionTelemetryReceiver().then(
+    (receiver) => {
+      compactionTelemetry = receiver;
+    },
+    (error: unknown) => {
+      logBridgeError(
+        `Compaction usage telemetry is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+  );
+
+  return compactionTelemetryStart;
+}
+
+function holdStandaloneCompactionUsage(args: {
+  message: SDKMessage;
+  providerThreadId: string;
+  threadId: string;
+  threadSession: ThreadSession;
+}): (() => void) | null {
+  if (args.message.type !== "result") {
+    return null;
+  }
+
+  const startedAtMs = args.threadSession.standaloneCompactionStartedAtMs;
+  args.threadSession.standaloneCompactionStartedAtMs = null;
+  const receiver = compactionTelemetry;
+
+  if (
+    startedAtMs === null ||
+    receiver === null ||
+    args.providerThreadId.length === 0 ||
+    args.message.subtype !== "success" ||
+    args.message.is_error ||
+    !hasZeroResultUsage(args.message.usage) ||
+    !receiver.reaches(args.threadSession.attachment.sessionOptions.env)
+  ) {
+    return null;
+  }
+
+  const generation = compactionUsageHolds.hold(args.threadId);
+
+  return () => {
+    compactionUsageHolds.endCapture(args.threadId, generation);
+    void receiver
+      .waitForCompactionUsage({
+        sessionId: args.providerThreadId,
+        sinceMs: startedAtMs,
+        timeoutMs: COMPACTION_USAGE_WAIT_MS,
+      })
+      .then((usage) => {
+        if (!compactionUsageHolds.isHolding(args.threadId, generation)) {
+          return;
+        }
+
+        if (usage === null) {
+          compactionUsageHolds.release(args.threadId, generation, null);
+
+          return;
+        }
+
+        const last = toCompactionTokenUsage(usage);
+
+        compactionUsageHolds.release(args.threadId, generation, {
+          last,
+          total: args.threadSession.translator.addSupplementalTurnUsage(
+            args.threadId,
+            last,
+          ),
+          promptCacheTtlMs: compactionPromptCacheTtlMs(usage),
+        });
+      });
+  };
 }
 
 function sendSessionReset(threadId: string): void {
@@ -816,16 +1134,20 @@ function emitForSession(
     { jsonrpc: "2.0", method, params },
     { threadId },
   );
+
   sendThreadDeltas(threadId, deltas);
+
   for (const delta of deltas) {
     if (delta.kind === "provider.error" && delta.willRetry !== true) {
       const category = delta.errorInfo?.category;
+
       const kind =
         category === "unauthorized"
           ? "authRequired"
           : category === "rate-limit"
             ? "rateLimited"
             : null;
+
       if (kind !== null) {
         emitTerminalAccountErrorHint(
           threadSession,
@@ -835,6 +1157,7 @@ function emitForSession(
         );
       }
     }
+
     if (delta.kind === "turn.boundary" || delta.kind === "session.reset") {
       threadSession.recoveryHintRaisedThisTurn = null;
     }
@@ -850,6 +1173,7 @@ function emitTerminalAccountErrorHint(
   if (threadSession.recoveryHintRaisedThisTurn === kind) {
     return;
   }
+
   threadSession.recoveryHintRaisedThisTurn = kind;
   send({
     jsonrpc: "2.0",
@@ -869,11 +1193,14 @@ function getAssistantMessageErrorText(message: SDKMessage): string {
       .flatMap((block) => (block.type === "text" ? [block.text] : []))
       .join("\n")
       .trim();
+
     if (text.length > 0) {
       return text;
     }
+
     return `Claude reported ${message.error ?? "an account error"}`;
   }
+
   return "Claude reported an account error";
 }
 
@@ -883,6 +1210,7 @@ function getAssistantMessageRecoveryKind(
   if (message.type !== "assistant") {
     return null;
   }
+
   switch (message.error) {
     case "authentication_failed":
     case "oauth_org_not_allowed":
@@ -902,6 +1230,7 @@ function emitSessionError(
   if (threadSession.translator.hasOpenTurn(threadId)) {
     emitForSession(threadSession, threadId, "error", { threadId, message });
   }
+
   send({
     jsonrpc: "2.0",
     method: BRIDGE_NOTIFICATION_METHODS.error,
@@ -963,6 +1292,7 @@ function sendThreadIdentity(threadId: string, providerThreadId: string): void {
 
 function nextSessionSerial(): number {
   sessionSerialCounter += 1;
+
   return sessionSerialCounter;
 }
 
@@ -977,6 +1307,7 @@ function toSessionConstructionConfig(
       baseInstructions: params.baseInstructions,
       chromeEnabled: params.chromeEnabled,
       disable1MContext: params.disable1MContext,
+      allowModelFallback: params.allowModelFallback,
       cwd: params.cwd,
       instructionMode: params.instructionMode,
       permissionMode: params.permissionMode,
@@ -991,6 +1322,7 @@ function toInitialLiveSessionSettings(
   params: SessionConstructionParams,
 ): ClaudeLiveSessionSettings {
   return {
+    fullAccessApprovalsEnabled: params.fullAccessApprovalsEnabled,
     memoryEnabled: params.memoryEnabled ?? true,
     ...(params.model !== undefined ? { model: params.model } : {}),
     providerSubagentsEnabled: params.providerSubagentsEnabled ?? true,
@@ -1008,7 +1340,10 @@ function withTurnLiveSessionSettings(
 ): ClaudeLiveSessionSettings {
   const model = params.model ?? current.model;
   const reasoningLevel = params.reasoningLevel ?? current.reasoningLevel;
+
   return {
+    fullAccessApprovalsEnabled:
+      params.fullAccessApprovalsEnabled ?? current.fullAccessApprovalsEnabled,
     memoryEnabled: params.memoryEnabled ?? current.memoryEnabled,
     ...(model !== undefined ? { model } : {}),
     providerSubagentsEnabled:
@@ -1027,6 +1362,7 @@ function seedModelContextWindowHint(
   if (model === undefined) {
     return;
   }
+
   threadSession.translator.setClaudeModelContextWindowHint(threadId, model);
 }
 
@@ -1051,12 +1387,15 @@ function createThreadAttachment(
     sessionPermissionGrants: [],
     threadIdRef: args.threadIdRef,
   };
+
   attachment.residentSession = createThreadSession(attachment);
+
   return attachment;
 }
 
 function createThreadSession(attachment: ThreadAttachment): ThreadSession {
   const sessionSerial = nextSessionSerial();
+
   const session = new SdkSession(
     attachment.sessionOptions,
     createOnSdkMessage({
@@ -1073,6 +1412,7 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
     cwd: attachment.sessionConstructionConfig.sessionOptions.cwd,
     sandboxEnabled: attachment.sessionOptions.sandbox?.enabled === true,
   });
+
   translator.configureInjectedTools(
     (attachment.sessionConstructionConfig.dynamicTools ?? []).map((tool) => ({
       name: tool.name,
@@ -1081,6 +1421,7 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
         : { presentation: tool.presentation }),
     })),
   );
+
   const threadSession: ThreadSession = {
     contextUsageCollector: new ClaudeContextUsageCollector(),
     session,
@@ -1092,6 +1433,7 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
       attachment.sessionOptions.allowBypassPermissions &&
       isBypassPermissionsAvailable(),
     recoveryHintRaisedThisTurn: null,
+    standaloneCompactionStartedAtMs: null,
     streamEnded: false,
     translator,
     pendingInteractiveRequests: new Map(),
@@ -1100,11 +1442,13 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
     permissionEscalationBySubagentParentToolUseId: new Map(),
     permissionEscalationByToolUseId: new Map(),
   };
+
   seedModelContextWindowHint(
     threadSession,
     attachment.threadIdRef.current,
     attachment.liveSettings.model,
   );
+
   return threadSession;
 }
 
@@ -1113,9 +1457,11 @@ function startResidentThreadSession(
   resumeProviderThreadId?: string,
 ): ThreadSession {
   const threadSession = attachment.residentSession;
+
   if (!threadSession) {
     throw new Error("Claude thread attachment has no resident session");
   }
+
   try {
     threadSession.session.start(resumeProviderThreadId);
   } catch (error) {
@@ -1123,6 +1469,7 @@ function startResidentThreadSession(
     attachment.residentSession = null;
     throw error;
   }
+
   return threadSession;
 }
 
@@ -1133,6 +1480,7 @@ function getTrackedPermissionEscalation(
   if (key === undefined || !values.has(key)) {
     return undefined;
   }
+
   return values.get(key) ?? null;
 }
 
@@ -1144,6 +1492,7 @@ function resolvePermissionEscalationForWork(
     threadSession.permissionEscalationByToolUseId,
     context.toolUseId,
   );
+
   if (toolPermissionEscalation !== undefined) {
     return toolPermissionEscalation;
   }
@@ -1152,6 +1501,7 @@ function resolvePermissionEscalationForWork(
     threadSession.permissionEscalationByAgentId,
     context.agentId,
   );
+
   if (agentPermissionEscalation !== undefined) {
     return agentPermissionEscalation;
   }
@@ -1160,6 +1510,7 @@ function resolvePermissionEscalationForWork(
     threadSession.permissionEscalationByPromptId,
     context.promptId,
   );
+
   return promptPermissionEscalation === undefined
     ? threadSession.attachment.permissionEscalation
     : promptPermissionEscalation;
@@ -1174,10 +1525,12 @@ function trackSdkAssistantPermissionEscalation(
   }
 
   const parentToolUseId = message.parent_tool_use_id ?? undefined;
+
   const parentPermissionEscalation = getTrackedPermissionEscalation(
     threadSession.permissionEscalationBySubagentParentToolUseId,
     parentToolUseId,
   );
+
   const permissionEscalation =
     parentPermissionEscalation === undefined
       ? threadSession.attachment.permissionEscalation
@@ -1187,10 +1540,12 @@ function trackSdkAssistantPermissionEscalation(
     if (content.type !== "tool_use") {
       continue;
     }
+
     threadSession.permissionEscalationByToolUseId.set(
       content.id,
       permissionEscalation,
     );
+
     if (CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES.has(content.name)) {
       threadSession.permissionEscalationBySubagentParentToolUseId.set(
         content.id,
@@ -1210,9 +1565,11 @@ function buildSessionTrackingHooks(
     ) {
       return { continue: true };
     }
+
     const threadSession = threadAttachments.get(
       threadIdRef.current,
     )?.residentSession;
+
     if (threadSession) {
       threadSession.permissionEscalationByToolUseId.set(
         toolUseId,
@@ -1224,6 +1581,7 @@ function buildSessionTrackingHooks(
         }),
       );
     }
+
     return { continue: true };
   };
 
@@ -1231,9 +1589,11 @@ function buildSessionTrackingHooks(
     if (input.hook_event_name !== "PreToolUse") {
       return { continue: true };
     }
+
     const threadSession = threadAttachments.get(
       threadIdRef.current,
     )?.residentSession;
+
     if (threadSession) {
       const permissionEscalation = resolvePermissionEscalationForWork(
         threadSession,
@@ -1244,16 +1604,19 @@ function buildSessionTrackingHooks(
             : {}),
         },
       );
+
       threadSession.permissionEscalationByToolUseId.set(
         input.tool_use_id,
         permissionEscalation,
       );
+
       if (CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES.has(input.tool_name)) {
         threadSession.permissionEscalationBySubagentParentToolUseId.set(
           input.tool_use_id,
           permissionEscalation,
         );
       }
+
       if (
         !threadSession.attachment.liveSettings.providerSubagentsEnabled &&
         CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES.has(input.tool_name)
@@ -1264,10 +1627,11 @@ function buildSessionTrackingHooks(
             hookEventName: "PreToolUse",
             permissionDecision: "deny",
             permissionDecisionReason:
-              "bb has disabled Claude Code native subagents; use bb delegation instead.",
+              "Omnyo has disabled Claude Code native subagents; use Omnyo delegation instead.",
           },
         };
       }
+
       if (
         !threadSession.attachment.liveSettings.workflowsEnabled &&
         input.tool_name === CLAUDE_WORKFLOW_TOOL_NAME
@@ -1278,11 +1642,30 @@ function buildSessionTrackingHooks(
             hookEventName: "PreToolUse",
             permissionDecision: "deny",
             permissionDecisionReason:
-              "bb has disabled the Claude Code Workflow tool.",
+              "Omnyo has disabled the Claude Code Workflow tool.",
+          },
+        };
+      }
+
+      const questionDenial = userQuestionDenial({
+        attachment: threadSession.attachment,
+        toolName: input.tool_name,
+        agentId: input.agent_id,
+        permissionMode: input.permission_mode,
+      });
+
+      if (questionDenial !== null) {
+        return {
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: questionDenial,
           },
         };
       }
     }
+
     return { continue: true };
   };
 
@@ -1290,9 +1673,11 @@ function buildSessionTrackingHooks(
     if (input.hook_event_name !== "SubagentStart") {
       return { continue: true };
     }
+
     const threadSession = threadAttachments.get(
       threadIdRef.current,
     )?.residentSession;
+
     if (threadSession) {
       threadSession.permissionEscalationByAgentId.set(
         input.agent_id,
@@ -1303,6 +1688,7 @@ function buildSessionTrackingHooks(
         }),
       );
     }
+
     return { continue: true };
   };
 
@@ -1312,6 +1698,7 @@ function buildSessionTrackingHooks(
         .get(threadIdRef.current)
         ?.residentSession?.permissionEscalationByAgentId.delete(input.agent_id);
     }
+
     return { continue: true };
   };
 
@@ -1327,6 +1714,7 @@ function buildSessionTrackingHooks(
           input.tool_use_id,
         );
     }
+
     return { continue: true };
   };
 
@@ -1354,9 +1742,20 @@ function buildTrackedSessionOptions(
     },
     env,
   );
+
   sessionOptions.permissionMode = params.permissionMode;
+
+  const disallowedTools = subagentDisallowedTools(
+    params.providerSubagentsEnabled ?? true,
+  );
+
+  if (disallowedTools !== undefined) {
+    sessionOptions.disallowedTools = disallowedTools;
+  }
+
   sessionOptions.hooks = buildSessionTrackingHooks(threadIdRef);
   sessionOptions.recordThreadId = () => threadIdRef.current;
+
   return sessionOptions;
 }
 
@@ -1377,6 +1776,7 @@ function replaceThreadSession(args: ReplaceThreadSessionArgs): ThreadSession {
   startResidentThreadSession(args.attachment, args.providerThreadId);
   sendThreadIdentity(args.threadId, args.providerThreadId);
   sendSessionReset(args.threadId);
+
   return replacementSession;
 }
 
@@ -1386,11 +1786,13 @@ function replaceThreadSessionBeforeNextTurn(
   const providerThreadId =
     args.attachment.providerThreadId ??
     args.threadSession.session.getSessionId();
+
   if (!providerThreadId) {
     return undefined;
   }
 
   args.attachment.providerThreadId = providerThreadId;
+
   return replaceThreadSession({
     attachment: args.attachment,
     providerThreadId,
@@ -1405,13 +1807,17 @@ async function getWritableThreadSession(
   intent: "new-turn" | "steer",
 ): Promise<ThreadSession | undefined> {
   const attachment = threadAttachments.get(threadId);
+
   if (!attachment || attachment.closing) {
     return undefined;
   }
+
   const threadSession = attachment.residentSession;
+
   if (!threadSession) {
     return undefined;
   }
+
   const replacement: ClaudeSessionRestart | null = threadSession.streamEnded
     ? {
         reason: "Thread session replaced after Claude SDK stream ended",
@@ -1420,9 +1826,11 @@ async function getWritableThreadSession(
     : intent === "new-turn"
       ? threadSession.restartBeforeNextTurn
       : null;
+
   if (replacement === null) {
     return threadSession;
   }
+
   return replaceThreadSessionBeforeNextTurn({
     attachment,
     restart: replacement,
@@ -1437,6 +1845,7 @@ function getAuthenticationFailureRestartReason(
   if (message.type !== "assistant") {
     return null;
   }
+
   switch (message.error) {
     case "authentication_failed":
       return "Claude session restarted after authentication failed";
@@ -1451,6 +1860,7 @@ function getCurrentThreadSession(
   args: CurrentThreadSessionArgs,
 ): ThreadSession | undefined {
   const threadSession = threadAttachments.get(args.threadId)?.residentSession;
+
   if (
     !threadSession ||
     threadSession.closing ||
@@ -1458,18 +1868,23 @@ function getCurrentThreadSession(
   ) {
     return undefined;
   }
+
   return threadSession;
 }
 
 function createOnSdkMessage(
   args: CreateSdkCallbackArgs,
 ): (message: SDKMessage) => void {
+  let sessionAnnounced = false;
+
   return (message: SDKMessage) => {
     const threadSession = getCurrentThreadSession({
       sessionSerial: args.sessionSerial,
       threadId: args.threadIdRef.current,
     });
+
     if (!threadSession) return;
+
     if (
       message.type === "assistant" ||
       message.type === "user" ||
@@ -1477,7 +1892,15 @@ function createOnSdkMessage(
     ) {
       threadSession.contextUsageCollector.invalidate();
     }
-    const providerThreadId = message.session_id?.trim() ?? "";
+
+    if (message.type === "system" && message.subtype === "init") {
+      sessionAnnounced = true;
+    }
+
+    const providerThreadId = sessionAnnounced
+      ? (message.session_id?.trim() ?? "")
+      : "";
+
     if (
       providerThreadId.length > 0 &&
       threadSession.attachment.providerThreadId !== providerThreadId
@@ -1485,19 +1908,32 @@ function createOnSdkMessage(
       threadSession.attachment.providerThreadId = providerThreadId;
       sendThreadIdentity(args.threadIdRef.current, providerThreadId);
     }
+
     const authenticationFailureRestartReason =
       getAuthenticationFailureRestartReason(message);
+
     if (authenticationFailureRestartReason !== null) {
       threadSession.restartBeforeNextTurn = {
         reason: authenticationFailureRestartReason,
         showRuntimeNote: false,
       };
     }
+
     trackSdkAssistantPermissionEscalation(threadSession, message);
+
+    const awaitCompactionUsage = holdStandaloneCompactionUsage({
+      message,
+      providerThreadId,
+      threadId: args.threadIdRef.current,
+      threadSession,
+    });
+
     emitForSession(threadSession, args.threadIdRef.current, "sdk/message", {
       threadId: args.threadIdRef.current,
       message,
     });
+    awaitCompactionUsage?.();
+
     if (
       message.type === "result" ||
       (message.type === "system" &&
@@ -1513,9 +1949,18 @@ function createOnSdkMessage(
           },
         ]);
       }
+
       if (providerThreadId) {
         void threadSession.contextUsageCollector.capture({
-          read: () => threadSession.session.getContextUsage(),
+          read: (signal) =>
+            readIsolatedClaudeContextUsage({
+              sessionOptions: threadSession.attachment.sessionOptions,
+              providerSessionId: providerThreadId,
+              dynamicTools:
+                threadSession.attachment.sessionConstructionConfig
+                  .dynamicTools ?? [],
+              signal,
+            }),
           providerSessionId: providerThreadId,
           isCurrent: () =>
             getCurrentThreadSession({
@@ -1528,6 +1973,7 @@ function createOnSdkMessage(
                 args.threadIdRef.current,
                 snapshot.contextWindowTokens,
               );
+
             sendThreadDeltas(args.threadIdRef.current, [
               snapshotCurrent
                 ? {
@@ -1544,7 +1990,9 @@ function createOnSdkMessage(
         });
       }
     }
+
     const recoveryKind = getAssistantMessageRecoveryKind(message);
+
     if (recoveryKind !== null) {
       emitTerminalAccountErrorHint(
         threadSession,
@@ -1564,19 +2012,36 @@ function createOnSdkDone(
       sessionSerial: args.sessionSerial,
       threadId: args.threadIdRef.current,
     });
-    if (!threadSession) return;
 
+    if (!threadSession || threadSession.streamEnded) return;
+
+    compactionUsageHolds.flush(args.threadIdRef.current);
     threadSession.streamEnded = true;
     resolvePendingSessionWork(
       threadSession,
       "Claude SDK stream ended before pending work completed",
     );
 
-    if (!error) return;
+    const message = error
+      ? error instanceof Error
+        ? error.message
+        : String(error)
+      : "Claude SDK stream ended unexpectedly; execution outcome is unknown";
 
-    const message = error instanceof Error ? error.message : String(error);
+    if (
+      error ||
+      threadSession.translator.hasOpenTurn(args.threadIdRef.current)
+    ) {
+      emitSessionError(threadSession, args.threadIdRef.current, message);
+    }
 
-    emitSessionError(threadSession, args.threadIdRef.current, message);
+    sendThreadDeltas(
+      args.threadIdRef.current,
+      threadSession.translator.buildSessionSettlementDeltas(
+        args.threadIdRef.current,
+        "Claude provider reporting ended; execution outcome is unknown",
+      ),
+    );
   };
 }
 
@@ -1585,6 +2050,7 @@ function findSessionByPendingInteractiveRequest(
 ): ThreadSession | undefined {
   for (const attachment of threadAttachments.values()) {
     const threadSession = attachment.residentSession;
+
     if (threadSession?.pendingInteractiveRequests.has(id)) {
       return threadSession;
     }
@@ -1622,13 +2088,13 @@ async function closeClaudeThreadSession(
 function buildSessionEnv(
   envOverrides: Record<string, string>,
 ): NodeJS.ProcessEnv {
-  const sessionEnv: NodeJS.ProcessEnv = {
-    ...withoutBridgeRuntimeEnv(process.env),
+  const hostEnv = withoutBridgeRuntimeEnv(process.env);
+
+  return {
+    ...hostEnv,
+    ...compactionTelemetry?.sessionEnv(hostEnv),
     ...envOverrides,
-    CLAUDE_CODE_ENTRYPOINT: "cli",
   };
-  delete sessionEnv.CLAUDE_AGENT_SDK_CLIENT_APP;
-  return sessionEnv;
 }
 
 const sessionConfigEnvVarsSchema = z.record(z.string(), z.string());
@@ -1637,6 +2103,7 @@ function readConfigEnvOverrides(
   config: Record<string, unknown> | undefined,
 ): Record<string, string> {
   const parsed = sessionConfigEnvVarsSchema.safeParse(config?.["envVars"]);
+
   return parsed.success ? parsed.data : {};
 }
 
@@ -1653,23 +2120,24 @@ function applyTurnEnvironment(
   if (config === undefined) {
     return;
   }
+
   const envOverrides = readConfigEnvOverrides(config);
   const signature = environmentSignature(envOverrides);
+
   if (attachment.envSignature === signature) {
     return;
   }
+
   attachment.envSignature = signature;
   attachment.sessionConstructionConfig = {
     ...attachment.sessionConstructionConfig,
     config,
   };
-  attachment.sessionOptions.env = {
-    ...buildSessionEnv(envOverrides),
-    CLAUDE_CODE_DISABLE_1M_CONTEXT: attachment.sessionConstructionConfig
-      .sessionOptions.disable1MContext
-      ? "1"
-      : "0",
-  };
+  attachment.sessionOptions.env = buildSessionSettingsEnv({
+    ...attachment.sessionConstructionConfig.sessionOptions,
+    env: buildSessionEnv(envOverrides),
+  });
+
   if (attachment.residentSession) {
     attachment.residentSession.restartBeforeNextTurn = {
       reason:
@@ -1688,6 +2156,7 @@ function parseClaudeSuggestedPermissionUpdates(
 
   const parsedUpdates = value.flatMap((entry) => {
     const parsed = claudeSuggestedPermissionUpdateSchema.safeParse(entry);
+
     return parsed.success ? [parsed.data] : [];
   });
 
@@ -1734,9 +2203,11 @@ function decodePendingInteractiveResponse(
     payload: pending.payload,
     resolution: result,
   });
+
   if (!outcome.success) {
     return null;
   }
+
   try {
     return buildClaudeInteractiveResponse(
       outcome.data,
@@ -1760,6 +2231,7 @@ function buildInteractivePermissionResult(
           toolUseID: pending.itemId,
         };
       }
+
       if (response.behavior === "deny") {
         return {
           behavior: "deny",
@@ -1773,6 +2245,7 @@ function buildInteractivePermissionResult(
           toolUseID: pending.itemId,
         };
       }
+
       return {
         behavior: "allow",
         updatedInput: pending.originalInput,
@@ -1792,6 +2265,7 @@ function buildInteractivePermissionResult(
           toolUseID: pending.itemId,
         };
       }
+
       return {
         behavior: "allow",
         updatedInput: response.updatedInput,
@@ -1808,16 +2282,19 @@ function createForwardInteractiveRequest(
       const threadSession = threadAttachments.get(
         threadIdRef.current,
       )?.residentSession;
+
       if (!threadSession) {
         resolve({
           behavior: "deny",
           message: "Thread session not found",
           toolUseID: args.toolUseId,
         });
+
         return;
       }
 
       let params: ClaudePermissionRequestApprovalParams;
+
       try {
         params = buildInteractiveRequestParams(args);
       } catch (error) {
@@ -1826,6 +2303,7 @@ function createForwardInteractiveRequest(
           message: error instanceof Error ? error.message : String(error),
           toolUseID: args.toolUseId,
         });
+
         return;
       }
 
@@ -1840,6 +2318,7 @@ function createForwardInteractiveRequest(
         if (!threadSession.pendingInteractiveRequests.delete(requestId)) {
           return;
         }
+
         finish({
           behavior: "deny",
           message: "Interactive request cancelled",
@@ -1869,7 +2348,6 @@ function createForwardInteractiveRequest(
           threadId: args.threadId,
           providerThreadId: args.providerThreadId,
           turnId: null,
-          providerNativeIds: true,
           payload,
         },
       });
@@ -1884,12 +2362,14 @@ function createForwardUserQuestionRequest(
       const threadSession = threadAttachments.get(
         threadIdRef.current,
       )?.residentSession;
+
       if (!threadSession) {
         resolve({
           behavior: "deny",
           message: "Thread session not found",
           toolUseID: args.toolUseId,
         });
+
         return;
       }
 
@@ -1905,6 +2385,7 @@ function createForwardUserQuestionRequest(
         if (!threadSession.pendingInteractiveRequests.delete(requestId)) {
           return;
         }
+
         finish({
           behavior: "deny",
           message: "User question request cancelled",
@@ -1930,7 +2411,6 @@ function createForwardUserQuestionRequest(
           threadId: args.threadId,
           providerThreadId: args.providerThreadId,
           turnId: null,
-          providerNativeIds: true,
           payload,
         },
       });
@@ -1947,6 +2427,7 @@ async function enterPlanModeIfRequested(
   ) {
     return;
   }
+
   await threadSession.session.setPermissionMode("plan");
   threadSession.attachment.permissionMode = "plan";
 }
@@ -1955,9 +2436,11 @@ async function restoreApprovedPlanPermissionMode(
   threadSession: ThreadSession,
 ): Promise<void> {
   const attachment = threadSession.attachment;
+
   if (attachment.permissionMode === attachment.approvedPlanPermissionMode) {
     return;
   }
+
   await threadSession.session.setPermissionMode(
     attachment.approvedPlanPermissionMode,
   );
@@ -1969,6 +2452,7 @@ async function restoreApprovedPlanPermissionMode(
 function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
   const forwardInteractiveRequest =
     createForwardInteractiveRequest(threadIdRef);
+
   const forwardUserQuestionRequest =
     createForwardUserQuestionRequest(threadIdRef);
 
@@ -1978,6 +2462,7 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
     const threadSession = threadAttachments.get(
       threadIdRef.current,
     )?.residentSession;
+
     if (!threadSession) {
       return {
         behavior: "deny",
@@ -1988,6 +2473,7 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
 
     if (toolName === CLAUDE_USER_QUESTION_TOOL_NAME) {
       const parsedInput = claudeUserQuestionInputSchema.safeParse(input);
+
       if (!parsedInput.success) {
         return {
           behavior: "deny",
@@ -1995,6 +2481,7 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
           toolUseID: options.toolUseID,
         };
       }
+
       return forwardUserQuestionRequest({
         threadId: threadIdRef.current,
         providerThreadId:
@@ -2013,6 +2500,7 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
           toolUseID: options.toolUseID,
         };
       }
+
       return forwardInteractiveRequest({
         threadId: threadIdRef.current,
         providerThreadId:
@@ -2034,6 +2522,7 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
         toolUseId: options.toolUseID,
       }),
     };
+
     const suggestions = parseClaudeSuggestedPermissionUpdates(
       options.suggestions,
     );
@@ -2043,6 +2532,7 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
       blockedPath: options.blockedPath,
       suggestions,
     });
+
     if (
       toolName === CLAUDE_BASH_TOOL_NAME &&
       shouldAutoDenyInteractiveRequest(interactiveRequestPolicy) &&
@@ -2057,6 +2547,7 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
         toolUseID: options.toolUseID,
       };
     }
+
     if (
       hasClaudeSessionPermissionGrant({
         grants: threadSession.attachment.sessionPermissionGrants,
@@ -2072,7 +2563,11 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
       };
     }
 
-    if (threadSession.attachment.permissionMode === "bypassPermissions") {
+    if (
+      threadSession.attachment.permissionMode === "bypassPermissions" &&
+      (!isBypassPermissionsAvailable() ||
+        !threadSession.attachment.liveSettings.fullAccessApprovalsEnabled)
+    ) {
       return {
         behavior: "allow",
         updatedInput: input,
@@ -2086,9 +2581,10 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
         threadSession.attachment.permissionMode === "auto"
           ? buildWorkspaceWriteDenialMessage()
           : buildReadonlyDenialMessage();
+
       return {
         behavior: "deny",
-        message: options.decisionReason ?? policyMessage,
+        message: options.decisionReason?.trim() || policyMessage,
         toolUseID: options.toolUseID,
       };
     }
@@ -2126,11 +2622,15 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
           skills: { configure: true },
         },
       };
+
       sendResult(request.id, result);
       break;
     case "model/list":
       try {
-        sendResult(request.id, await listModelsMemoized());
+        sendResult(
+          request.id,
+          await listModelsMemoized(request.params.envVars ?? {}),
+        );
       } catch (error) {
         if (error instanceof MissingClaudeCliError) {
           sendError(
@@ -2140,8 +2640,10 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
           );
           break;
         }
+
         throw error;
       }
+
       break;
     case "provider/health":
       sendResult(request.id, await getClaudeProviderHealth());
@@ -2193,6 +2695,32 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
         }),
       );
       break;
+    case "thread/speed/set": {
+      const session = threadAttachments.get(
+        request.params.threadId,
+      )?.residentSession;
+
+      if (!session || session.closing)
+        throw new Error("No live Claude session is available");
+
+      if (
+        request.params.serviceTier !== "default" &&
+        request.params.serviceTier !== "fast"
+      )
+        throw new Error("Unsupported Claude speed");
+      await applyLiveSessionSettings(
+        session,
+        request.params.threadId,
+        {
+          ...session.attachment.liveSettings,
+          serviceTier: request.params.serviceTier,
+        },
+        "steer",
+      );
+      sendResult(request.id, { ok: true });
+      break;
+    }
+
     case "turn/start":
       await handleTurnStart(request.id, request.params);
       break;
@@ -2221,16 +2749,20 @@ function attachThreadSession(
   const threadIdRef = { current: params.threadId };
   const env = buildSessionEnv(readConfigEnvOverrides(params.config));
   const sessionOptions = buildTrackedSessionOptions(params, env, threadIdRef);
+
   if (!resume) {
     sessionOptions.sessionId = providerThreadId;
   }
+
   sessionOptions.canUseTool = createCanUseTool(threadIdRef);
+
   if (params.dynamicTools && params.dynamicTools.length > 0) {
     const mcpServer = buildBridgeMcpServer(
       params.dynamicTools,
       createForwardToolCall(() => threadIdRef.current),
     );
-    sessionOptions.mcpServers = { [BB_BRIDGE_MCP_SERVER_NAME]: mcpServer };
+
+    sessionOptions.mcpServers = { [OMNYO_BRIDGE_MCP_SERVER_NAME]: mcpServer };
     sessionOptions.allowedTools = getAllowedToolNames(params.dynamicTools);
   }
 
@@ -2244,6 +2776,7 @@ function attachThreadSession(
     sessionOptions,
     threadIdRef,
   });
+
   threadAttachments.set(params.threadId, attachment);
   startResidentThreadSession(attachment, resume ? providerThreadId : undefined);
 
@@ -2256,7 +2789,9 @@ async function handleThreadStart(
   id: string | number,
   params: ThreadStartParams,
 ): Promise<void> {
+  await ensureCompactionTelemetry();
   const existing = threadAttachments.get(params.threadId);
+
   if (existing) {
     await closeThreadSession({
       graceful: false,
@@ -2272,20 +2807,25 @@ async function handleThreadResume(
   id: string | number,
   params: ThreadResumeParams,
 ): Promise<void> {
+  await ensureCompactionTelemetry();
   const threadId = params.threadId;
   const requestedProviderThreadId = params.providerThreadId ?? undefined;
+
   if (requestedProviderThreadId === undefined) {
     sendError(
       id,
       BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS,
       "thread/resume requires a providerThreadId",
     );
+
     return;
   }
+
   const sessionConstructionConfig = toSessionConstructionConfig(params);
 
   const existing = threadAttachments.get(threadId);
   const existingSession = existing?.residentSession;
+
   if (
     existing &&
     requestedProviderThreadId &&
@@ -2298,18 +2838,22 @@ async function handleThreadResume(
     )
   ) {
     const liveSettings = toInitialLiveSessionSettings(params);
+
     if (existingSession) {
       await applyLiveSessionSettings(
         existingSession,
         params.threadId,
         liveSettings,
+        "resume",
       );
     }
+
     existing.permissionEscalation = params.permissionEscalation;
     sendResult(id, {
       providerThreadId: requestedProviderThreadId,
       sessionRestorable: true,
     });
+
     return;
   }
 
@@ -2323,6 +2867,7 @@ async function handleThreadResume(
         threadSession: existingSession,
       });
     }
+
     await closeThreadSession({
       graceful: false,
       message: "Thread session replaced while awaiting permission approval",
@@ -2337,9 +2882,11 @@ async function handleThreadFork(
   id: string | number,
   params: ThreadForkParams,
 ): Promise<void> {
+  await ensureCompactionTelemetry();
   const threadId = params.threadId;
 
   const existing = threadAttachments.get(threadId);
+
   if (existing) {
     await closeThreadSession({
       graceful: false,
@@ -2349,16 +2896,19 @@ async function handleThreadFork(
   }
 
   let forkedProviderThreadId: string;
+
   try {
     const forkResult = await forkSession(params.sourceProviderThreadId, {
       ...(params.sourceProviderCheckpointId !== undefined
         ? { upToMessageId: params.sourceProviderCheckpointId }
         : {}),
     });
+
     forkedProviderThreadId = forkResult.sessionId;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     sendError(id, -32000, message);
+
     return;
   }
 
@@ -2383,23 +2933,31 @@ async function runTurnInput(
   params: TurnStartParams | TurnSteerParams,
   acceptance: CanonicalTurnAcceptance,
   intent: "new-turn" | "steer",
+  standaloneCompaction: boolean,
 ): Promise<void> {
   const promptText = buildPromptText(params.input);
+
   if (promptText === undefined) {
     sendError(id, BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS, "Missing input text");
+
     return;
   }
 
   const attachment = threadAttachments.get(params.threadId);
+
   if (attachment) {
     if ("config" in params) {
       applyTurnEnvironment(attachment, params.config);
     }
+
     applyChromeSetting(attachment, params.chromeEnabled);
+    applySubagentSetting(attachment, params.providerSubagentsEnabled);
     applyContextWindowSetting(attachment, params.disable1MContext);
+    applyModelFallbackSetting(attachment, params.allowModelFallback);
   }
 
   let permissionRestartRequired = false;
+
   try {
     permissionRestartRequired = attachment
       ? await applyPermissionSettings(attachment, params)
@@ -2410,21 +2968,27 @@ async function runTurnInput(
       -32000,
       error instanceof Error ? error.message : String(error),
     );
+
     return;
   }
+
   const threadSession = await getWritableThreadSession(
     params.threadId,
     permissionRestartRequired ? "new-turn" : intent,
   );
+
   if (!threadSession) {
     sendError(id, -32000, "No active session");
+
     return;
   }
 
   if (!threadSession.session.canPushInput()) {
     sendError(id, -32000, "Claude SDK input stream is closed");
+
     return;
   }
+
   try {
     await applyLiveSessionSettings(
       threadSession,
@@ -2433,15 +2997,20 @@ async function runTurnInput(
         threadSession.attachment.liveSettings,
         params,
       ),
+      intent,
     );
     await enterPlanModeIfRequested(threadSession, params);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     sendError(id, -32000, message);
+
     return;
   }
 
   try {
+    threadSession.standaloneCompactionStartedAtMs = standaloneCompaction
+      ? Date.now()
+      : null;
     await pushPromptInput(
       threadSession,
       promptText,
@@ -2451,6 +3020,7 @@ async function runTurnInput(
     threadSession.attachment.permissionEscalation = params.permissionEscalation;
     sendResult(id, { threadId: params.threadId });
   } catch (error) {
+    threadSession.standaloneCompactionStartedAtMs = null;
     const message = error instanceof Error ? error.message : String(error);
     sendError(id, -32000, message);
   }
@@ -2475,6 +3045,7 @@ async function handleTurnStart(
       providerThreadId: params.providerThreadId,
     },
     "new-turn",
+    isStandaloneBuiltinCompactCommand(params.input),
   );
 }
 
@@ -2498,6 +3069,7 @@ async function handleTurnSteer(
       providerThreadId: params.providerThreadId,
     },
     "steer",
+    false,
   );
 }
 
@@ -2509,6 +3081,7 @@ async function closeThreadForStop(
     message: "Thread stopped while awaiting permission approval",
     threadId,
   });
+
   return { ok: true };
 }
 
@@ -2516,7 +3089,9 @@ async function handleThreadStop(
   id: string | number,
   params: ThreadStopParams,
 ): Promise<void> {
+  compactionUsageHolds.flush(params.threadId);
   const threadSession = threadAttachments.get(params.threadId)?.residentSession;
+
   if (
     params.intent === "interrupt" &&
     threadSession != null &&
@@ -2527,6 +3102,7 @@ async function handleThreadStop(
       threadSession.translator.buildSessionSettlementDeltas(params.threadId),
     );
   }
+
   sendResult(id, await closeThreadForStop(params.threadId));
 }
 
@@ -2539,52 +3115,79 @@ function localAttachmentMarker(args: {
 }): string {
   const namePart = args.name && args.name.length > 0 ? ` "${args.name}"` : "";
   const details: string[] = [];
+
   if (args.mimeType) details.push(args.mimeType);
+
   if (args.sizeBytes !== undefined) details.push(`${args.sizeBytes} bytes`);
   const suffix = details.length > 0 ? ` (${details.join(", ")})` : "";
+
   return `[Attached ${args.kind}${namePart}${suffix}. It is on disk at ${args.path} — use the Read tool to view it.]`;
 }
 
-function normalizeClaudeSkillMentions(
+interface SelectedClaudeSkillMention {
+  start: number;
+  end: number;
+  name: string;
+}
+
+function selectedClaudeSkillMentions(
   entry: Extract<z.infer<typeof promptInputItemSchema>, { type: "text" }>,
-): string {
-  const replacements = new Set<number>();
+): SelectedClaudeSkillMention[] {
+  const selected: SelectedClaudeSkillMention[] = [];
+  const starts = new Set<number>();
+
   for (const mention of entry.mentions) {
     const resource = mention.resource;
+
     if (
       resource.kind === "command" &&
       resource.source === "skill" &&
-      resource.trigger === "$" &&
+      (resource.trigger === "$" || resource.trigger === "/") &&
       typeof resource.name === "string" &&
+      mention.start < mention.end &&
       mention.end <= entry.text.length &&
-      entry.text.slice(mention.start, mention.end) === `$${resource.name}`
+      entry.text.slice(mention.start, mention.end) ===
+        `${resource.trigger}${resource.name}` &&
+      !starts.has(mention.start)
     ) {
-      replacements.add(mention.start);
+      starts.add(mention.start);
+      selected.push({
+        start: mention.start,
+        end: mention.end,
+        name: resource.name,
+      });
     }
   }
 
-  let normalized = entry.text;
-  for (const start of replacements) {
-    normalized = `${normalized.slice(0, start)}/${normalized.slice(start + 1)}`;
-  }
-  return normalized;
+  return selected;
 }
 
 function buildPromptText(input: unknown): string | undefined {
   if (typeof input === "string") {
     return input.length > 0 ? input : undefined;
   }
+
   if (!Array.isArray(input)) return undefined;
 
   const chunks: string[] = [];
+  const skills: (SelectedClaudeSkillMention & { chunkIndex: number })[] = [];
+
   for (const item of input) {
     const parsed = promptInputItemSchema.safeParse(item);
+
     if (!parsed.success) continue;
     const entry = parsed.data;
+
     switch (entry.type) {
       case "text":
-        if (entry.text.length > 0)
-          chunks.push(normalizeClaudeSkillMentions(entry));
+        if (entry.text.length > 0) {
+          const chunkIndex = chunks.push(entry.text) - 1;
+
+          for (const mention of selectedClaudeSkillMentions(entry)) {
+            skills.push({ ...mention, chunkIndex });
+          }
+        }
+
         break;
       case "image":
         chunks.push(`[Attached image: ${entry.url}]`);
@@ -2606,11 +3209,34 @@ function buildPromptText(input: unknown): string | undefined {
     }
   }
 
+  const [skill] = skills;
+
+  if (skills.length === 1 && skill) {
+    const chunk = chunks[skill.chunkIndex] ?? "";
+
+    const leading =
+      skill.chunkIndex === 0 && chunk.slice(0, skill.start).trim() === "";
+
+    const reference = leading ? "" : chunk.slice(skill.start + 1, skill.end);
+    chunks[skill.chunkIndex] =
+      `${chunk.slice(0, skill.start)}${reference}${chunk.slice(skill.end)}`;
+    const argumentsText = chunks.join("\n");
+    const separator = argumentsText.startsWith(" ") ? "" : " ";
+
+    return `/${skill.name}${argumentsText ? `${separator}${argumentsText}` : ""}`;
+  }
+
+  for (const { chunkIndex, start } of skills) {
+    const chunk = chunks[chunkIndex] ?? "";
+    chunks[chunkIndex] = `${chunk.slice(0, start)}/${chunk.slice(start + 1)}`;
+  }
+
   return chunks.length > 0 ? chunks.join("\n") : undefined;
 }
 
 function handleParsedMessage(parsed: unknown): void {
   const response = decodeBridgeJsonRpcResponse(parsed);
+
   if (response && handleToolCallResponse(response)) {
     return;
   }
@@ -2618,15 +3244,18 @@ function handleParsedMessage(parsed: unknown): void {
   const threadSession = response
     ? findSessionByPendingInteractiveRequest(response.id)
     : undefined;
+
   if (response && threadSession) {
     const pending = threadSession.pendingInteractiveRequests.get(response.id)!;
     threadSession.pendingInteractiveRequests.delete(response.id);
+
     if ("error" in response) {
       pending.resolve({
         behavior: "deny",
         message: response.error.message ?? "Interactive request failed",
         toolUseID: pending.itemId,
       });
+
       return;
     }
 
@@ -2634,14 +3263,17 @@ function handleParsedMessage(parsed: unknown): void {
       pending,
       response.result,
     );
+
     if (interactiveResponse === null) {
       pending.resolve({
         behavior: "deny",
         message: "Invalid interactive response payload",
         toolUseID: pending.itemId,
       });
+
       return;
     }
+
     if (
       pending.kind === "permission_request" &&
       pending.toolName !== CLAUDE_BASH_TOOL_NAME &&
@@ -2671,10 +3303,12 @@ function handleParsedMessage(parsed: unknown): void {
     pending.resolve(
       buildInteractivePermissionResult(pending, interactiveResponse),
     );
+
     return;
   }
 
   const decoded = decodeClaudeCodeJsonRpcRequest(parsed);
+
   switch (decoded.kind) {
     case "not_a_request":
       return;
@@ -2685,19 +3319,23 @@ function handleParsedMessage(parsed: unknown): void {
         BRIDGE_JSON_RPC_ERRORS.METHOD_NOT_FOUND,
         `Unknown method: ${decoded.method}`,
       );
+
       return;
     case "invalid_params": {
       const message = `Invalid params for ${decoded.method}: ${decoded.issues}`;
       logBridgeError(message);
       sendError(decoded.id, BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS, message);
+
       return;
     }
+
     case "request": {
       runBridgeRequest({
         request: decoded.request,
         handleRequest,
         sendError,
       });
+
       return;
     }
   }
@@ -2711,10 +3349,13 @@ function shutdownGracefully(message: string): void {
   if (shuttingDown) {
     return;
   }
+
   shuttingDown = true;
-  void closeThreadSessionsGracefully(message).finally(() => {
-    process.exit(0);
-  });
+  void closeThreadSessionsGracefully(message)
+    .then(() => compactionTelemetry?.close())
+    .finally(() => {
+      process.exit(0);
+    });
 }
 
 export const experimental_providerBridge = experimental_defineProviderBridge({

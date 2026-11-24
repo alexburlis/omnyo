@@ -1,7 +1,7 @@
 import { Command } from "commander";
-import type { PromptHistoryListEntry } from "@bb/domain";
+import type { PromptHistoryListEntry } from "@omnyo/domain";
 import { action } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { columnWidths, printBorderlessTable, truncateCell } from "../table.js";
 import { outputJson } from "./helpers.js";
 
@@ -35,6 +35,7 @@ function printPromptHistoryTable(entries: PromptHistoryListEntry[]): void {
     entry.threadId,
     truncateCell(promptText(entry), PROMPT_COLUMN_WIDTH),
   ]);
+
   printBorderlessTable(
     {
       head: ["Created", "Thread", "Prompt"],
@@ -61,22 +62,27 @@ export function registerPromptHistoryCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: PromptHistoryListOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const result = await sdk.experimental_promptHistory.list({
           cursor: opts.cursor,
           limit: opts.limit,
         });
+
         if (outputJson(opts, result)) return;
+
         if (result.entries.length === 0) {
           console.log("No prompt history found");
         } else {
           printPromptHistoryTable(result.entries);
         }
+
         if (result.nextCursor !== null) {
           const limit =
             opts.limit === undefined ? "" : ` --limit ${opts.limit}`;
+
           console.log(
-            `Next page: bb prompt-history list --cursor ${result.nextCursor}${limit}`,
+            `Next page: omnyo prompt-history list --cursor ${result.nextCursor}${limit}`,
           );
         }
       }),

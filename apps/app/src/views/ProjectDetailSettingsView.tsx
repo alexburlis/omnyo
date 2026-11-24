@@ -1,17 +1,20 @@
+import { ProjectIconSettings } from "@/components/project/ProjectIconSettings";
 import { ScopedMachineEnvironmentSettings } from "@/components/settings/MachineEnvironmentSettings";
+import { ShowMoreToggle } from "@/components/settings/ShowMoreToggle";
+import { REVEALED_CONTENT_MOTION } from "@omnyo/shared-ui/motion";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import "@bb/shared-ui/icon-extended";
+import "@omnyo/shared-ui/icon-extended";
 import {
   findLocalPathProjectSourceForHost,
   type Host,
   type LocalPathProjectSource,
-} from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Pill } from "@bb/shared-ui/pill";
-import { ResourceOverflowMenu } from "@bb/shared-ui/resource-list";
+} from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Pill } from "@omnyo/shared-ui/pill";
+import { ResourceOverflowMenu } from "@omnyo/shared-ui/resource-list";
 import { ProjectPathDialog } from "@/components/dialogs/ProjectPathDialog";
 import {
   ProjectDeleteDialog,
@@ -72,7 +75,7 @@ const CHECKOUTS_DESCRIPTION =
   "Where this project lives on each machine. A machine needs a checkout before it can run threads for this project.";
 
 const DEFAULTS_DESCRIPTION =
-  "What new threads in this project start with. bb remembers the last options you used here.";
+  "What new threads in this project start with. Omnyo remembers the last options you used here.";
 
 interface CheckoutRowProps {
   host: Host;
@@ -100,8 +103,14 @@ function CheckoutRow({
   onRemove,
 }: CheckoutRowProps) {
   const connected = host.status === "connected";
+
   return (
-    <SettingsRow className="items-start">
+    <SettingsRow
+      className={cn(
+        "items-start",
+        host.type === "ephemeral" && REVEALED_CONTENT_MOTION,
+      )}
+    >
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex min-w-0 items-center gap-1.5">
           <Icon
@@ -111,7 +120,10 @@ function CheckoutRow({
               !connected && "opacity-60",
             )}
           />
-          <MachineStatusDot connected={connected} />
+          <MachineStatusDot
+            connected={connected}
+            label={connected ? "Online" : "Offline"}
+          />
           <Link
             to={getSettingsMachineRoutePath(host.id)}
             className="min-w-0 truncate text-sm font-medium text-foreground hover:underline"
@@ -123,7 +135,7 @@ function CheckoutRow({
             <Pill variant="destructive">Path not found</Pill>
           ) : null}
         </div>
-        <div className="min-w-0 truncate font-mono text-xs text-subtle-foreground/75">
+        <div className="min-w-0 truncate font-mono text-xs text-subtle-foreground">
           {source === null ? (
             <span className="font-sans italic">Not set up on this machine</span>
           ) : (
@@ -205,10 +217,13 @@ export function ProjectDetailSettingsView() {
 
   const [renameTarget, setRenameTarget] =
     useState<ProjectRenameDialogTarget | null>(null);
+
   const [deleteTarget, setDeleteTarget] =
     useState<ProjectDeleteDialogTarget | null>(null);
+
   const [sourceDeleteTarget, setSourceDeleteTarget] =
     useState<ProjectSourceDeleteDialogTarget | null>(null);
+
   const [machineSetupTarget, setMachineSetupTarget] =
     useState<ProjectMachineSetupDialogTarget | null>(null);
 
@@ -217,14 +232,17 @@ export function ProjectDetailSettingsView() {
   const projectSources = project?.sources;
   const sources = useMemo(() => projectSources ?? [], [projectSources]);
   const projectName = project?.name ?? "";
+
   const everyHost = useMemo(
     () => selectHosts(hostsQuery.data, "all"),
     [hostsQuery.data],
   );
+
   const persistentHosts = useMemo(
     () => selectHosts(hostsQuery.data, "persistent"),
     [hostsQuery.data],
   );
+
   const [showAllMachines, setShowAllMachines] = useState(false);
   const hosts = showAllMachines ? everyHost : persistentHosts;
   const hiddenMachineCount = everyHost.length - persistentHosts.length;
@@ -232,9 +250,11 @@ export function ProjectDetailSettingsView() {
 
   const localSourcePending =
     addLocalSource.isPending || updateLocalSource.isPending;
+
   const localSourceSubmit = useCallback(
     ({ path, hostId, target, closeDialog }: LocalPathSubmitParams) => {
       if (!projectId) return;
+
       if (target.kind === "add-source") {
         addLocalSource.mutate(
           { projectId, path, hostId },
@@ -242,6 +262,7 @@ export function ProjectDetailSettingsView() {
         );
       } else if (target.kind === "update") {
         const source = sources.find((candidate) => candidate.hostId === hostId);
+
         if (!source) return;
         updateLocalSource.mutate(
           { projectId, sourceId: source.id, path },
@@ -251,11 +272,14 @@ export function ProjectDetailSettingsView() {
     },
     [addLocalSource, projectId, sources, updateLocalSource],
   );
+
   const localSourcePicker = useLocalPathPicker({
     isPending: localSourcePending,
     submit: localSourceSubmit,
   });
+
   const pickerHostId = localSourcePicker.hostId;
+
   const pickerHostSourcePaths = useMemo(
     () =>
       pickerHostId
@@ -265,6 +289,7 @@ export function ProjectDetailSettingsView() {
         : [],
     [pickerHostId, sources],
   );
+
   const pathExistence = useHostPathExistence(
     pickerHostId,
     pickerHostSourcePaths,
@@ -273,14 +298,17 @@ export function ProjectDetailSettingsView() {
   const openSetUp = useCallback(
     (host: Host) => {
       if (!project) return;
+
       if (host.id === pickerHostId) {
         localSourcePicker.openPicker({
           kind: "add-source",
           projectId: project.id,
           projectName: project.name,
         });
+
         return;
       }
+
       setMachineSetupTarget({
         projectId: project.id,
         projectName: project.name,
@@ -324,17 +352,22 @@ export function ProjectDetailSettingsView() {
     project.gitRemoteUrl === null
       ? null
       : formatGitRemote(project.gitRemoteUrl);
+
   const configuredHostIds = new Set(sources.map((source) => source.hostId));
+
   const configuredCount = hosts.filter((host) =>
     configuredHostIds.has(host.id),
   ).length;
+
   const defaults = defaultsQuery.data ?? null;
+
   const permissionLabel =
     defaults === null
       ? null
       : (PERMISSION_MODE_OPTIONS.find(
           (option) => option.value === defaults.permissionMode,
         )?.label ?? defaults.permissionMode);
+
   const now = Date.now();
 
   return (
@@ -362,7 +395,7 @@ export function ProjectDetailSettingsView() {
                   <SettingsBadge>needs setup</SettingsBadge>
                 ) : null}
               </div>
-              <p className="mt-1 min-w-0 truncate text-xs text-subtle-foreground/75">
+              <p className="mt-1 min-w-0 truncate text-xs text-subtle-foreground">
                 {remoteLabel ?? "No git remote"}
                 {" · "}
                 {hosts.length > 1
@@ -391,6 +424,8 @@ export function ProjectDetailSettingsView() {
           </div>
         </div>
 
+        <ProjectIconSettings project={project} />
+
         <SettingsSection title="Checkouts" description={CHECKOUTS_DESCRIPTION}>
           {hosts.length === 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -403,7 +438,9 @@ export function ProjectDetailSettingsView() {
                   sources,
                   host.id,
                 );
+
                 const isPickerHost = host.id === pickerHostId;
+
                 return (
                   <CheckoutRow
                     key={host.id}
@@ -441,24 +478,12 @@ export function ProjectDetailSettingsView() {
             </SettingsRowList>
           )}
           {hiddenMachineCount > 0 ? (
-            <button
-              type="button"
-              aria-expanded={showAllMachines}
-              onClick={() => setShowAllMachines((previous) => !previous)}
-              className="-ml-1 inline-flex items-center gap-1.5 self-start rounded-md px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground"
-            >
-              <Icon
-                name="ChevronDown"
-                className={cn(
-                  "size-3.5 transition-transform",
-                  showAllMachines && "rotate-180",
-                )}
-                aria-hidden
-              />
-              <span>
-                {showAllMachines ? "Show fewer machines" : "Show all machines"}
-              </span>
-            </button>
+            <ShowMoreToggle
+              expanded={showAllMachines}
+              onExpandedChange={setShowAllMachines}
+              collapsedLabel="Show all machines"
+              expandedLabel="Show fewer machines"
+            />
           ) : null}
         </SettingsSection>
 

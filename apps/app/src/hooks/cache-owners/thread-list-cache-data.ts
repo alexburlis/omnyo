@@ -3,7 +3,7 @@ import type {
   QueryClient,
   QueryKey,
 } from "@tanstack/react-query";
-import type { ThreadListEntry } from "@bb/domain";
+import type { ThreadListEntry } from "@omnyo/domain";
 import { patchCachedQueryData } from "./cache-effect-utils";
 
 export type ThreadListCacheData =
@@ -31,12 +31,15 @@ export function* iterateThreadListCacheEntries(
   if (!data) {
     return;
   }
+
   if (isThreadListEntryArray(data)) {
     for (const entry of data) {
       yield entry;
     }
+
     return;
   }
+
   for (const page of data.pages) {
     for (const entry of page) {
       yield entry;
@@ -51,6 +54,7 @@ function mapThreadListCacheData<T extends ThreadListCacheData>(
   if (isThreadListEntryArray(data)) {
     return mapper(data, 0) as T;
   }
+
   return { ...data, pages: data.pages.map(mapper) } as T;
 }
 
@@ -78,14 +82,17 @@ export function getCachedThreadLists(
   options: ThreadListCacheQueryOptions,
 ): CachedThreadList[] {
   const result: CachedThreadList[] = [];
+
   for (const [queryKey, data] of queryClient.getQueriesData({
     queryKey: options.queryKey,
   })) {
     if (!isThreadListCacheData(data)) {
       continue;
     }
+
     result.push({ queryKey, data });
   }
+
   return result;
 }
 
@@ -99,12 +106,14 @@ export function restoreCachedThreadLists(
       patchCachedQueryData(queryClient, queryKey, data);
       continue;
     }
+
     patchCachedQueryData<ThreadListCacheData>(
       queryClient,
       queryKey,
       (current) => {
         if (!current) return current;
         const pages = isThreadListEntryArray(data) ? [data] : data.pages;
+
         return mapThreadListCacheData(current, (list, pageIndex) =>
           restoreRemovedThreadEntries(list, pages[pageIndex] ?? [], threadIds),
         );
@@ -120,15 +129,18 @@ export function restoreRemovedThreadEntries(
 ): ThreadListEntry[] {
   const restored = [...current];
   let insertionIndex = restored.length;
+
   for (let index = previous.length - 1; index >= 0; index--) {
     const thread = previous[index]!;
     const currentIndex = restored.findIndex((entry) => entry.id === thread.id);
+
     if (currentIndex >= 0) {
       insertionIndex = currentIndex;
     } else if (threadIds.has(thread.id)) {
       restored.splice(insertionIndex, 0, thread);
     }
   }
+
   return restored;
 }
 

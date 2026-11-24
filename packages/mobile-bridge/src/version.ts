@@ -1,8 +1,8 @@
-export const MOBILE_BRIDGE_VERSION = 2;
+export const MOBILE_BRIDGE_VERSION = 3;
 
-export const MINIMUM_MOBILE_BRIDGE_VERSION = 1;
+export const MINIMUM_MOBILE_BRIDGE_VERSION = 3;
 
-export const NATIVE_BRIDGE_GLOBAL = "bb";
+export const NATIVE_BRIDGE_GLOBAL = "omnyo";
 
 interface VersionPair {
   remoteVersion: number;
@@ -22,10 +22,13 @@ export function compareBridgeVersions(
   if (!Number.isInteger(remoteVersion) || remoteVersion < 1) {
     return { kind: "unsupported", remoteVersion, localVersion };
   }
+
   if (remoteVersion < MINIMUM_MOBILE_BRIDGE_VERSION) {
     return { kind: "unsupported", remoteVersion, localVersion };
   }
+
   if (remoteVersion === localVersion) return { kind: "supported" };
+
   return remoteVersion < localVersion
     ? { kind: "older-peer", remoteVersion, localVersion }
     : { kind: "newer-peer", remoteVersion, localVersion };

@@ -62,6 +62,7 @@ export function SettingsSwitchRow({
   testID,
 }: SettingsSwitchRowProps) {
   const { tokens } = useTheme();
+
   return (
     <GroupedRow
       title={label}
@@ -103,8 +104,6 @@ export function SettingsHint({
   );
 }
 
-export const ICON_ROW_SEPARATOR_INSET = 16 + 20 + 12;
-
 export interface HeaderIconButtonProps {
   icon: IconName;
   accessibilityLabel: string;
@@ -119,6 +118,7 @@ export function HeaderIconButton({
   testID,
 }: HeaderIconButtonProps) {
   const { tokens } = useTheme();
+
   return (
     <Pressable
       accessibilityRole="button"

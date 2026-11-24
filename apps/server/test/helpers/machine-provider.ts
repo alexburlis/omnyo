@@ -1,5 +1,5 @@
-import type { PluginMachineProviderDeclaration } from "@get-bb/plugin-sdk";
-import { validatePluginMachineProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
+import type { PluginMachineProviderDeclaration } from "@omnyo/plugin-sdk";
+import { validatePluginMachineProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
 import { invokePluginInline } from "../../src/services/plugins/plugin-hook-registry.js";
 import { setPluginMachineProviderBridge } from "../../src/services/plugins/plugin-machine-provider-registry.js";
 
@@ -23,6 +23,7 @@ export function installMachineProvider(
       ...overrides,
     }),
   };
+
   setPluginMachineProviderBridge({
     listMachineProviders: () => [record],
     getMachineProvider: (id) =>
@@ -30,5 +31,6 @@ export function installMachineProvider(
     invokeProvider: (_pluginId, _label, run) => invokePluginInline(run),
     decisionTimeoutMs: 10_000,
   });
+
   return record;
 }

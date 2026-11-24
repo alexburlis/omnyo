@@ -12,6 +12,7 @@ export const PROVIDER_IDS = [
   "acp-grok",
   "acp-hermes-agent",
 ] as const;
+
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export const NATIVE_ROOT_ENV_KEYS = [
@@ -28,7 +29,9 @@ export const NATIVE_ROOT_ENV_KEYS = [
   "GROK_CURSOR_SKILLS_ENABLED",
   "HERMES_HOME",
 ] as const;
+
 export type NativeRootEnvKey = (typeof NATIVE_ROOT_ENV_KEYS)[number];
+
 export type FixtureEnv = Partial<Record<NativeRootEnvKey, string>>;
 
 export interface FixturePaths {
@@ -53,14 +56,16 @@ export interface FixtureVariant {
 
 export async function createFixturePaths(): Promise<FixturePaths> {
   const root = await fs.realpath(
-    await fs.mkdtemp(path.join(os.tmpdir(), "bb-native-roots-golden-")),
+    await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-native-roots-golden-")),
   );
+
   const home = path.join(root, "home");
   const workspace = path.join(root, "ws");
   const cwd = path.join(workspace, "packages", "app");
   await fs.mkdir(home, { recursive: true });
   await fs.mkdir(path.join(workspace, ".git"), { recursive: true });
   await fs.mkdir(cwd, { recursive: true });
+
   return { root, home, workspace, cwd };
 }
 
@@ -82,6 +87,7 @@ function skillFileContent(args: {
   description: string;
 }): string {
   const nameLine = args.name === undefined ? "" : `name: ${args.name}\n`;
+
   return `---\n${nameLine}description: ${args.description}\n---\n# Skill body\n`;
 }
 
@@ -104,6 +110,7 @@ async function writeCommand(
 ): Promise<void> {
   const hintLine =
     argumentHint === undefined ? "" : `argument-hint: ${argumentHint}\n`;
+
   await writeText(
     path.join(commandsDir, ...relativeFile.split("/")),
     `---\ndescription: ${description}\n${hintLine}---\nCommand body\n`,
@@ -147,6 +154,7 @@ async function writeSimpleClaudePlugin(
     ...manifestExtra,
   });
   await writeSkill(path.join(pluginRoot, "skills"), `${name}-skill`);
+
   if (options.command) {
     await writeCommand(
       path.join(pluginRoot, "commands"),
@@ -161,10 +169,13 @@ async function writeClaudePluginInstall(
   claudeDir: string,
 ): Promise<void> {
   const { root, home, workspace, cwd } = paths;
+
   const cache = (name: string, version: string): string =>
     path.join(claudeDir, "plugins", "cache", "golden-market", name, version);
+
   const userPluginRoot = cache("user-plugin", "1.0.0");
   const cachePluginRoot = cache("cache-plugin", "0123456789ab");
+
   const tildePluginRoot = path.join(
     home,
     ".claude",
@@ -174,11 +185,13 @@ async function writeClaudePluginInstall(
     "tilde-plugin",
     "1.0.0",
   );
+
   const managedPluginRoot = path.join(
     root,
     "managed-plugins",
     "managed-plugin",
   );
+
   const projectPluginRoot = path.join(
     cwd,
     ".claude",
@@ -188,7 +201,9 @@ async function writeClaudePluginInstall(
     "project-plugin",
     "1.0.0",
   );
+
   const localPluginRoot = path.join(cwd, ".claude", "plugins", "local-plugin");
+
   const outsidePluginRoot = path.join(
     workspace,
     ".claude",
@@ -333,19 +348,23 @@ const CLAUDE_PLUGIN_USER_SKILLS = [
   "home-skills-dir-plugin:home-skills-dir-plugin-root",
   "home-skills-dir-plugin:home-skills-dir-plugin-child",
 ] as const;
+
 const CLAUDE_PLUGIN_USER_COMMANDS = [
   "user-plugin:user-plugin-cmd",
   "user-plugin:deploy",
 ] as const;
+
 const CLAUDE_PLUGIN_PROJECT_SKILLS = [
   "project-plugin:project-plugin-skill",
   "local-plugin:local-plugin-skill",
   "cwd-skills-dir-plugin:cwd-skills-dir-plugin-root",
   "cwd-skills-dir-plugin:cwd-skills-dir-plugin-child",
 ] as const;
+
 const CLAUDE_PLUGIN_PROJECT_COMMANDS = [
   "project-plugin:project-plugin-cmd",
 ] as const;
+
 const CLAUDE_PLUGIN_ABSENT = [
   "disabled-plugin:disabled-plugin-skill",
   "default-off-plugin:default-off-plugin-skill",
@@ -376,9 +395,11 @@ async function buildClaudeCode(
     path.join(home, ".claude", "skills"),
     "linked-home-skill",
   );
+
   if (claudeDir !== path.join(home, ".claude")) {
     await writeSkill(path.join(claudeDir, "skills"), "configdir-claude-skill");
   }
+
   await writeCommand(
     path.join(cwd, ".claude", "commands"),
     "cwd-review.md",
@@ -403,13 +424,14 @@ async function buildClaudeCode(
   await writeClaudePluginInstall(paths, claudeDir);
 }
 
+const CLAUDE_HOME_SKILLS = ["home-claude-skill", "linked-home-skill"];
+
 const CLAUDE_USER_NAMES = [
-  "home-claude-skill",
-  "linked-home-skill",
   "home-lint",
   ...CLAUDE_PLUGIN_USER_SKILLS,
   ...CLAUDE_PLUGIN_USER_COMMANDS,
 ];
+
 const CLAUDE_PROJECT_NAMES = [
   "cwd-claude-skill",
   "ws-claude-skill",
@@ -419,6 +441,7 @@ const CLAUDE_PROJECT_NAMES = [
   ...CLAUDE_PLUGIN_PROJECT_SKILLS,
   ...CLAUDE_PLUGIN_PROJECT_COMMANDS,
 ];
+
 const CLAUDE_ABSENT = [
   "ws-command",
   "above-root-claude-skill",
@@ -430,6 +453,7 @@ function claudeCodeVariant(
   claudeDirFor: (paths: FixturePaths) => string,
   env: (paths: FixturePaths) => FixtureEnv,
   extraUserNames: readonly string[],
+  unusedUserNames: readonly string[],
 ): FixtureVariant {
   return {
     providerId: "claude-code",
@@ -443,11 +467,11 @@ function claudeCodeVariant(
           ...CLAUDE_USER_NAMES,
           ...extraUserNames,
         ],
-        absent: CLAUDE_ABSENT,
+        absent: [...CLAUDE_ABSENT, ...unusedUserNames],
       },
       userOnly: {
         present: [...CLAUDE_USER_NAMES, ...extraUserNames],
-        absent: [...CLAUDE_ABSENT, ...CLAUDE_PROJECT_NAMES],
+        absent: [...CLAUDE_ABSENT, ...CLAUDE_PROJECT_NAMES, ...unusedUserNames],
       },
     },
   };
@@ -494,9 +518,11 @@ async function buildCodex(
     path.join(codexHome, "skills", ".system"),
     "system-codex-skill",
   );
+
   if (codexHome !== path.join(home, ".codex")) {
     await writeSkill(path.join(codexHome, "skills"), "codexhome-skill");
   }
+
   await writeText(
     path.join(codexHome, "config.toml"),
     [
@@ -507,8 +533,10 @@ async function buildCodex(
       "",
     ].join("\n"),
   );
+
   const cache = (name: string): string =>
     path.join(codexHome, "plugins", "cache", "golden-market", name, "1.0.0");
+
   const codexPluginRoot = cache("codex-plugin");
   await writeCodexPlugin(codexPluginRoot, {
     name: "codex-plugin",
@@ -548,12 +576,14 @@ const CODEX_USER_NAMES = [
   "codex-plugin:codex-plugin-extra",
   "unlisted-plugin:unlisted-plugin-skill",
 ];
+
 const CODEX_PROJECT_NAMES = [
   "cwd-codex-skill",
   "cwd-agents-skill",
   "ws-agents-skill",
   "pkg-agents-skill",
 ];
+
 const CODEX_ABSENT = [
   "ws-codex-skill",
   "above-root-agents-skill",
@@ -626,6 +656,7 @@ async function buildPi(paths: FixturePaths, agentDir: string): Promise<void> {
 }
 
 const PI_PROJECT_NAMES = ["cwd-pi-skill", "cwd-agents-skill"];
+
 const PI_USER_NAMES = [
   "home-pi-agent-skill",
   "home-agents-skill",
@@ -633,6 +664,7 @@ const PI_USER_NAMES = [
   "settings-abs-skill",
   "settings-relative-skill",
 ];
+
 const PI_ABSENT = ["ws-pi-skill", "settings-file-skill"];
 
 function piVariant(
@@ -644,9 +676,11 @@ function piVariant(
   const userNames = movedAgentDir
     ? [...PI_USER_NAMES, "moved-agent-skill"]
     : PI_USER_NAMES;
+
   const absent = movedAgentDir
     ? PI_ABSENT
     : [...PI_ABSENT, "moved-agent-skill"];
+
   return {
     providerId: "pi",
     variant,
@@ -681,12 +715,14 @@ async function buildCursor(paths: FixturePaths): Promise<void> {
     path.join(workspace, ".cursor", "skills"),
     "ws-cursor-skill",
   );
+
   for (const dir of CURSOR_DIRS) {
     await writeSkill(
       path.join(home, dir, "skills"),
       `home-${dir.slice(1)}-skill`,
     );
   }
+
   await writeSkill(
     path.join(home, ".cursor", "skills", "team"),
     "home-nested-cursor-skill",
@@ -696,14 +732,18 @@ async function buildCursor(paths: FixturePaths): Promise<void> {
 const CURSOR_USER_NAMES = CURSOR_DIRS.map(
   (dir) => `home-${dir.slice(1)}-skill`,
 );
+
 const CURSOR_PROJECT_NAMES = [
   "cwd-agents-skill",
   "cwd-claude-skill",
   "cwd-codex-skill",
   "nested-agents-skill",
 ];
+
 const CURSOR_USER_NAMES_NESTED = ["home-nested-cursor-skill"];
+
 const CURSOR_REPO_ROOT_NAMES = ["ws-cursor-skill"];
+
 const CURSOR_ABSENT: string[] = [];
 
 const CURSOR_VARIANT: FixtureVariant = {
@@ -767,6 +807,7 @@ async function buildOpenCode(
   );
   await writeSkill(path.join(home, ".claude", "skills"), "home-claude-skill");
   await writeSkill(path.join(home, ".agents", "skills"), "home-agents-skill");
+
   if (dirs.customConfigDir !== null) {
     await writeSkill(
       path.join(dirs.customConfigDir, "skills"),
@@ -783,11 +824,13 @@ const OPENCODE_PROJECT_NAMES = [
   "pkg-claude-skill",
   "ws-agents-skill",
 ];
+
 const OPENCODE_USER_NAMES = [
   "opencode-config-skill",
   "home-claude-skill",
   "home-agents-skill",
 ];
+
 const OPENCODE_ABSENT = ["above-root-opencode-skill"];
 
 function openCodeVariant(
@@ -835,12 +878,14 @@ interface OmpDirs {
 
 async function buildOmp(paths: FixturePaths, dirs: OmpDirs): Promise<void> {
   const { root, home, workspace, cwd } = paths;
+
   for (const dir of OMP_PROJECT_DIRS) {
     await writeSkill(
       path.join(cwd, dir, "skills"),
       `cwd-${dir.slice(1)}-skill`,
     );
   }
+
   await writeSkill(path.join(workspace, ".omp", "skills"), "ws-omp-skill");
   await writeSkill(
     path.join(workspace, "packages", ".pi", "skills"),
@@ -884,6 +929,7 @@ const OMP_PROJECT_NAMES = [
   "omp-custom-project-skill",
   ...CLAUDE_PLUGIN_PROJECT_SKILLS,
 ];
+
 const OMP_USER_NAMES = [
   "omp-agent-skill",
   "omp-managed-skill",
@@ -895,6 +941,7 @@ const OMP_USER_NAMES = [
   "opencode-config-skill",
   ...CLAUDE_PLUGIN_USER_SKILLS,
 ];
+
 const OMP_ABSENT = [
   "above-root-omp-skill",
   ...CLAUDE_PLUGIN_USER_COMMANDS,
@@ -985,6 +1032,7 @@ async function buildGrok(
       ? []
       : ["[compat.cursor]", `skills = ${options.compat.cursor}`]),
   ];
+
   await writeText(
     path.join(grokDir, "config.toml"),
     [
@@ -1060,6 +1108,7 @@ const GROK_ALWAYS_PROJECT = [
   "project-grok-plugin:project-grok-plugin-skill",
   "claude-dir-grok-plugin:claude-dir-grok-plugin-skill",
 ];
+
 const GROK_ALWAYS_USER = [
   "grok-home-skill",
   "nested-grok-home-skill",
@@ -1070,14 +1119,19 @@ const GROK_ALWAYS_USER = [
   "path-grok-plugin:path-grok-plugin-skill",
   "registry-grok-plugin:registry-grok-plugin-skill",
 ];
+
 const GROK_CLAUDE_PROJECT = [
   "cwd-claude-skill",
   "ws-claude-skill",
   ...CLAUDE_PLUGIN_PROJECT_SKILLS,
 ];
+
 const GROK_CLAUDE_USER = ["home-claude-skill", ...CLAUDE_PLUGIN_USER_SKILLS];
+
 const GROK_CURSOR_PROJECT = ["cwd-cursor-skill", "pkg-cursor-skill"];
+
 const GROK_CURSOR_USER = ["home-cursor-skill"];
+
 const GROK_ALWAYS_ABSENT = [
   "above-root-grok-skill",
   "unlisted-grok-plugin:unlisted-grok-plugin-skill",
@@ -1094,22 +1148,27 @@ function grokVariant(
 ): FixtureVariant {
   const pick = (on: boolean, names: readonly string[]): readonly string[] =>
     on ? names : [];
+
   const drop = (on: boolean, names: readonly string[]): readonly string[] =>
     on ? [] : names;
+
   const userPresent = [
     ...GROK_ALWAYS_USER,
     ...pick(effective.claude, GROK_CLAUDE_USER),
     ...pick(effective.cursor, GROK_CURSOR_USER),
   ];
+
   const projectPresent = [
     ...GROK_ALWAYS_PROJECT,
     ...pick(effective.claude, GROK_CLAUDE_PROJECT),
     ...pick(effective.cursor, GROK_CURSOR_PROJECT),
   ];
+
   const compatAbsent = [
     ...drop(effective.claude, [...GROK_CLAUDE_USER, ...GROK_CLAUDE_PROJECT]),
     ...drop(effective.cursor, [...GROK_CURSOR_USER, ...GROK_CURSOR_PROJECT]),
   ];
+
   return {
     providerId: "acp-grok",
     variant,
@@ -1135,6 +1194,7 @@ function grokVariant(
 }
 
 const GROK_SYMLINK_CONTROL_PROJECT = ["ws-grok-skill"];
+
 const GROK_SYMLINK_CONTROL_USER = ["grok-home-skill"];
 
 async function writeGrokSymlinkControls(paths: FixturePaths): Promise<void> {
@@ -1165,6 +1225,7 @@ async function buildGrokSymlinkAncestor(paths: FixturePaths): Promise<void> {
     "linked-pkg-cursor-skill",
   );
 }
+
 const GROK_SYMLINK_ANCESTOR_PROJECT = [
   "linked-pkg-grok-skill",
   "linked-pkg-agents-skill",
@@ -1196,6 +1257,7 @@ async function buildGrokSymlinkOutside(paths: FixturePaths): Promise<void> {
     "escaped-cwd-cursor-skill",
   );
 }
+
 const GROK_SYMLINK_OUTSIDE_ABSENT = [
   "escaped-cwd-grok-skill",
   "escaped-pkg-grok-skill",
@@ -1228,6 +1290,7 @@ async function buildGrokSymlinkCwd(paths: FixturePaths): Promise<void> {
     "linked-cwd-cursor-skill",
   );
 }
+
 const GROK_SYMLINK_CWD_PROJECT = [
   "linked-cwd-grok-skill",
   "linked-cwd-agents-skill",
@@ -1241,6 +1304,7 @@ function grokSymlinkVariant(
   linked: { present: readonly string[]; absent: readonly string[] },
 ): FixtureVariant {
   const projectPresent = [...GROK_SYMLINK_CONTROL_PROJECT, ...linked.present];
+
   return {
     providerId: "acp-grok",
     variant,
@@ -1279,12 +1343,15 @@ async function buildCursorSymlinkBoundary(paths: FixturePaths): Promise<void> {
     "escaped-claude-skill",
   );
 }
+
 const CURSOR_SYMLINK_PROJECT = [
   "cwd-codex-skill",
   "linked-cwd-cursor-skill",
   "linked-repo-agents-skill",
 ];
+
 const CURSOR_SYMLINK_USER = ["home-cursor-skill"];
+
 const CURSOR_SYMLINK_ABSENT = ["escaped-claude-skill"];
 
 const CURSOR_SYMLINK_VARIANT: FixtureVariant = {
@@ -1338,6 +1405,7 @@ function hermesVariant(
     present: userNames,
     absent: ["cwd-hermes-skill"],
   };
+
   return {
     providerId: "acp-hermes-agent",
     variant,
@@ -1352,12 +1420,19 @@ const defaultClaudeDir = (paths: FixturePaths): string =>
   path.join(paths.home, ".claude");
 
 export const FIXTURE_VARIANTS: readonly FixtureVariant[] = [
-  claudeCodeVariant("default", defaultClaudeDir, () => ({}), []),
+  claudeCodeVariant(
+    "default",
+    defaultClaudeDir,
+    () => ({}),
+    CLAUDE_HOME_SKILLS,
+    [],
+  ),
   claudeCodeVariant(
     "config-dir",
     (paths) => path.join(paths.root, "claude-config"),
     (paths) => ({ CLAUDE_CONFIG_DIR: path.join(paths.root, "claude-config") }),
     ["configdir-claude-skill"],
+    CLAUDE_HOME_SKILLS,
   ),
   codexVariant(
     "default",

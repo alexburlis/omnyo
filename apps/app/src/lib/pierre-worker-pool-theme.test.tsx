@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, render } from "@testing-library/react";
 import type { WorkerPoolManager } from "@pierre/diffs/worker";
-import { defaultResolvedCodeTheme } from "@bb/domain";
+import { defaultResolvedCodeTheme } from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyResolvedCodeTheme } from "./code-theme";
 import {
@@ -12,6 +12,7 @@ import {
 function createFakePool() {
   const setRenderOptions = vi.fn(() => Promise.resolve());
   const pool = { setRenderOptions } as unknown as WorkerPoolManager;
+
   return { pool, setRenderOptions };
 }
 
@@ -23,6 +24,7 @@ function ThemeSync({
   constructedTheme: CodeThemePair;
 }) {
   useSyncPierreWorkerPoolTheme(pool, constructedTheme);
+
   return null;
 }
 
@@ -33,6 +35,7 @@ afterEach(() => {
 describe("useSyncPierreWorkerPoolTheme", () => {
   it("does not call setRenderOptions when the pool already has the current theme", () => {
     const { pool, setRenderOptions } = createFakePool();
+
     const constructedTheme = {
       dark: defaultResolvedCodeTheme.dark,
       light: defaultResolvedCodeTheme.light,
@@ -45,10 +48,12 @@ describe("useSyncPierreWorkerPoolTheme", () => {
 
   it("pushes a theme change once, then stays quiet until the next change", () => {
     const { pool, setRenderOptions } = createFakePool();
+
     const constructedTheme = {
       dark: defaultResolvedCodeTheme.dark,
       light: defaultResolvedCodeTheme.light,
     };
+
     const { rerender } = render(
       <ThemeSync pool={pool} constructedTheme={constructedTheme} />,
     );

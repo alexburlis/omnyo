@@ -1,4 +1,4 @@
-import { createEnvironment } from "@bb/db";
+import { createEnvironment } from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import {
   foreignProjectOwnedPathRefusal,
@@ -11,16 +11,18 @@ import {
 } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
 
-const HOST_DATA_DIR = "/home/agent/.bb";
+const HOST_DATA_DIR = "/home/agent/.omnyo";
 
 describe("suppliedWorkspacePathRefusal", () => {
   it("still refuses a foreign managed workspace when the host data dir is unknown", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, { id: "host-claims" });
+
       const { project: owner } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Owner",
       });
+
       seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: owner.id,
@@ -28,6 +30,7 @@ describe("suppliedWorkspacePathRefusal", () => {
         environmentProviderId: "git-worktree",
         providerOwnsPath: true,
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Other",
@@ -42,7 +45,7 @@ describe("suppliedWorkspacePathRefusal", () => {
           projectId: project.id,
         }),
       ).toBe(
-        "Workspace path is a bb-managed workspace owned by another project",
+        "Workspace path is an Omnyo-managed workspace owned by another project",
       );
     });
   });
@@ -50,6 +53,7 @@ describe("suppliedWorkspacePathRefusal", () => {
   it("allows an ordinary directory when the host data dir is unknown", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, { id: "host-claims-ok" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/plain",
@@ -69,10 +73,12 @@ describe("suppliedWorkspacePathRefusal", () => {
   it("lets a project attach to a managed path it already owns", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, { id: "host-claims-own" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Owner",
       });
+
       const ownPath = `${HOST_DATA_DIR}/worktrees/env_own/repo`;
       seedEnvironment(harness.deps, {
         hostId: host.id,
@@ -97,6 +103,7 @@ describe("suppliedWorkspacePathRefusal", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-claims-plugin-storage",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Owner",
@@ -110,7 +117,7 @@ describe("suppliedWorkspacePathRefusal", () => {
           projectId: project.id,
         }),
       ).toBe(
-        "Workspace path is inside bb-managed storage but is not a workspace of this project",
+        "Workspace path is inside Omnyo-managed storage but is not a workspace of this project",
       );
     });
   });
@@ -122,11 +129,13 @@ describe("foreignProjectOwnedPathRefusal for provider-produced environments", ()
       const { host } = seedHostSession(harness.deps, {
         id: "host-claims-provider",
       });
+
       const { project: owner } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Owner",
         path: "/tmp/owner-source",
       });
+
       createEnvironment(harness.db, harness.hub, {
         hostId: host.id,
         projectId: owner.id,
@@ -142,6 +151,7 @@ describe("foreignProjectOwnedPathRefusal for provider-produced environments", ()
           },
         },
       });
+
       const { project: other } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Other",
@@ -159,9 +169,10 @@ describe("foreignProjectOwnedPathRefusal for provider-produced environments", ()
             projectId: other.id,
           }),
         ).toBe(
-          "Workspace path is a bb-managed workspace owned by another project",
+          "Workspace path is an Omnyo-managed workspace owned by another project",
         );
       }
+
       expect(
         foreignProjectOwnedPathRefusal(harness.deps.db, {
           hostId: host.id,
@@ -184,11 +195,13 @@ describe("foreignProjectOwnedPathRefusal for provider-produced environments", ()
       const { host } = seedHostSession(harness.deps, {
         id: "host-claims-shared-checkout",
       });
+
       const { project: first } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "First",
         path: "/tmp/shared-checkout",
       });
+
       seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: first.id,
@@ -196,6 +209,7 @@ describe("foreignProjectOwnedPathRefusal for provider-produced environments", ()
         environmentProviderId: "project-checkout",
         providerOwnsPath: false,
       });
+
       const { project: second } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Second",
@@ -226,6 +240,7 @@ describe("foreignProjectOwnedPathRefusal for freshly created workspaces", () => 
       const { host } = seedHostSession(harness.deps, {
         id: "host-claims-fresh",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Owner",

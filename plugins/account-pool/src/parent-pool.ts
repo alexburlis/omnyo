@@ -5,17 +5,36 @@ import {
   type PoolAvailability,
 } from "./contracts.js";
 
-export const PARENT_URL_ENV = "BB_ACCOUNT_POOL_PARENT_URL";
-export const PARENT_TOKEN_ENV = "BB_ACCOUNT_POOL_PARENT_TOKEN";
+export const PARENT_URL_ENV = "OMNYO_ACCOUNT_POOL_PARENT_URL";
+
+export const PARENT_TOKEN_ENV = "OMNYO_ACCOUNT_POOL_PARENT_TOKEN";
+
 export const AVAILABILITY_PATH = "/availability";
-export const HUB_TOKEN_HEADER = "x-bb-account-pool-token";
+
+export const CLAUDE_API_KEY_PROXY_PREFIX = "/claude-api-key";
+
+export const CLAUDE_API_KEY_PROXY_HEADER = "x-omnyo-claude-api-key-proxy";
+
+export const HUB_TOKEN_HEADER = "x-omnyo-account-pool-token";
+
+export function readHubHeaderV1(
+  headers: Headers,
+): { kind: "absent" } | { kind: "credential"; token: string } {
+  const selected = headers.get(HUB_TOKEN_HEADER);
+
+  return selected === null
+    ? { kind: "absent" }
+    : { kind: "credential", token: selected };
+}
 
 const DEFAULT_AVAILABILITY_TTL_MS = 30_000;
+
 const AVAILABILITY_TIMEOUT_MS = 2_000;
 
 const parentUrlSchema = z.string().refine((value) => {
   try {
     const protocol = new URL(value).protocol;
+
     return protocol === "http:" || protocol === "https:";
   } catch {
     return false;
@@ -32,9 +51,15 @@ export interface ParentPool {
 export function readParentPool(
   env: NodeJS.ProcessEnv = process.env,
 ): ParentPool | null {
-  const url = parentUrlSchema.safeParse(env[PARENT_URL_ENV]);
-  const token = parentTokenSchema.safeParse(env[PARENT_TOKEN_ENV]);
-  if (!url.success || !token.success) return null;
+  const values = { url: env[PARENT_URL_ENV], token: env[PARENT_TOKEN_ENV] };
+  const url = parentUrlSchema.safeParse(values.url);
+  const token = parentTokenSchema.safeParse(values.token);
+
+  if (values.url === undefined && values.token === undefined) return null;
+
+  if (!url.success || !token.success)
+    throw new Error("Invalid parent pool environment");
+
   return {
     baseUrl: url.data.replace(/\/+$/u, ""),
     token: token.data,
@@ -43,8 +68,10 @@ export function readParentPool(
 
 export function parentRequestHeaders(inbound: Headers, token: string): Headers {
   const headers = new Headers();
+
   for (const [name, value] of inbound) {
     const lower = name.toLowerCase();
+
     if (
       lower === "authorization" ||
       lower === "x-api-key" ||
@@ -55,9 +82,12 @@ export function parentRequestHeaders(inbound: Headers, token: string): Headers {
     ) {
       continue;
     }
+
     headers.append(name, value);
   }
+
   headers.set(HUB_TOKEN_HEADER, token);
+
   return headers;
 }
 
@@ -76,12 +106,15 @@ export class ParentAvailability {
 
   async get(): Promise<PoolAvailability> {
     const cached = this.cached;
+
     if (cached !== null && cached.expiresAt > this.options.now()) {
       return cached.value;
     }
+
     const value = await this.load();
     const ttlMs = this.options.ttlMs ?? DEFAULT_AVAILABILITY_TTL_MS;
     this.cached = { value, expiresAt: this.options.now() + ttlMs };
+
     return value;
   }
 
@@ -95,15 +128,27 @@ export class ParentAvailability {
           signal: AbortSignal.timeout(AVAILABILITY_TIMEOUT_MS),
         },
       );
+
       if (response.ok) {
-        return poolAvailabilitySchema.parse(await response.json());
+        const availability = poolAvailabilitySchema.parse(
+          await response.json(),
+        );
+
+        return {
+          ...availability,
+          claude:
+            availability.claude &&
+            response.headers.get(CLAUDE_API_KEY_PROXY_HEADER) === "1",
+        };
       }
+
       this.options.onError?.(
         new Error(`parent availability returned HTTP ${response.status}`),
       );
     } catch (error) {
       this.options.onError?.(error);
     }
+
     return UNAVAILABLE_POOL;
   }
 }

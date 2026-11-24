@@ -1,24 +1,25 @@
 import type {
   ServerAccessStatus,
   SystemMachineProvider,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { machineServerAccessBlockedReason } from "../src/components/machines/machine-server-access";
 import type { MachineAccessState } from "../src/components/settings/MachineAccessSettings";
 import modalLogoUrl from "../../../plugins/environment-modal-sandbox/modal-logo.svg";
 
 const noop = () => {};
+
 const noopAsync = async () => {};
 
 export const CONNECT_UNPAIRED: ServerAccessStatus = {
   providers: [
     {
       id: "connect",
-      displayName: "bb connect",
-      description: "Use a private getbb.app address.",
+      displayName: "Omnyo connect",
+      description: "Use a private Omnyo connect address.",
       pluginId: "connect",
       availability: {
         status: "setup-required",
-        message: "Pair with bb connect",
+        message: "Pair with Omnyo connect",
       },
     },
     {
@@ -42,7 +43,7 @@ export const CONNECT_PAIRED: ServerAccessStatus = {
           ...provider,
           availability: {
             status: "available",
-            serverUrl: "https://bb.example.com",
+            serverUrl: "https://omnyo.example.com",
           },
         }
       : provider,
@@ -74,6 +75,7 @@ export function machineAccessState(
   overrides: Partial<MachineAccessState> = {},
 ): MachineAccessState {
   const selected = overrides.selected ?? access.defaultProviderId ?? "connect";
+
   return {
     access,
     disabled: false,

@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { InstalledPlugin } from "@bb/server-contract";
+import type { InstalledPlugin } from "@omnyo/server-contract";
 import { appToast } from "@/components/ui/app-toast";
 import type { PluginCatalogSearchEntry } from "@/hooks/queries/plugin-catalog-queries";
 import { pluginInstallJobsQueryKey } from "@/hooks/queries/query-keys";
@@ -16,13 +16,17 @@ const GUIDE: InstalledPlugin = {
   rootDir: "/plugins/plugin-api-docs",
   version: "1.0.0",
   provenance: "builtin",
-  publisherLabel: "BB Official",
+  removable: false,
+  publisherLabel: "Omnyo Official",
+  official: true,
+  repositoryUrl: null,
   isOrphanedBuiltin: false,
-  sourceDisplay: "Included with BB",
+  sourceDisplay: "Included with Omnyo",
   updateState: {},
   enabled: false,
   description: "Explore the plugin API",
   name: "Plugin Guide",
+  shortName: null,
   screenshots: [],
   collections: [],
   icon: null,
@@ -48,12 +52,12 @@ const GUIDE_ENTRY: PluginCatalogSearchEntry = {
   displayName: "Plugin Guide",
   description: "Explore the plugin API",
   source: GUIDE.source,
-  marketplace: "bb-official",
-  marketplaceDisplayName: "BB Official",
-  publisherKey: "bb-official",
-  publisherLabel: "BB Official",
+  marketplace: "omnyo-official",
+  marketplaceDisplayName: "Omnyo Official",
+  publisherKey: "omnyo-official",
+  publisherLabel: "Omnyo Official",
   official: true,
-  author: { name: "BB", github: "get-bb", url: "https://github.com/get-bb" },
+  author: { name: "Omnyo", github: "get-bb", url: "https://github.com/get-bb" },
   icon: null,
   iconUrl: null,
   iconTinted: false,
@@ -63,7 +67,6 @@ const GUIDE_ENTRY: PluginCatalogSearchEntry = {
   installed: false,
   conflictingInstallSource: null,
   installedByDefault: false,
-  installs: null,
   compatible: true,
   incompatibleReason: null,
 };
@@ -88,6 +91,7 @@ function renderGuide() {
     </MemoryRouter>,
     { wrapper },
   );
+
   return {
     button: screen.getByRole("button", { name: "Plugin Guide" }),
     queryClient,
@@ -104,14 +108,17 @@ describe("OpenPluginGuideButton", () => {
   it("enables a disabled Guide before navigating and prevents duplicate requests", async () => {
     const enabled = { ...GUIDE, enabled: true, status: "running" };
     let finishEnable: (response: Response) => void = () => undefined;
+
     const enableResponse = new Promise<Response>((resolve) => {
       finishEnable = resolve;
     });
+
     const fetchMock = vi.fn((input: RequestInfo | URL) =>
       String(input).endsWith("/enable")
         ? enableResponse
         : Promise.resolve(jsonResponse({ plugins: [GUIDE] })),
     );
+
     vi.stubGlobal("fetch", fetchMock);
     const { button } = renderGuide();
     fireEvent.click(button);
@@ -139,6 +146,7 @@ describe("OpenPluginGuideButton", () => {
         plugins: [{ ...GUIDE, enabled: true, status: "running" }],
       }),
     );
+
     vi.stubGlobal("fetch", fetchMock);
     fireEvent.click(renderGuide().button);
     await vi.waitFor(() =>
@@ -158,7 +166,9 @@ describe("OpenPluginGuideButton", () => {
         if (!String(input).endsWith("/enable")) {
           return jsonResponse({ plugins: [GUIDE] });
         }
+
         attempts += 1;
+
         return attempts === 1
           ? jsonResponse({ error: "Service unavailable" }, 503)
           : jsonResponse({
@@ -191,6 +201,7 @@ describe("OpenPluginGuideButton", () => {
         ? jsonResponse({ results: [GUIDE_ENTRY], collections: [] })
         : jsonResponse({ plugins: [] }),
     );
+
     vi.stubGlobal("fetch", fetchMock);
     fireEvent.click(renderGuide().button);
     expect(
@@ -210,28 +221,35 @@ describe("OpenPluginGuideButton", () => {
       target: {
         kind: "catalog",
         entryId: "plugin-api-docs",
-        marketplace: "bb-official",
+        marketplace: "omnyo-official",
       },
       displayName: "Plugin Guide",
     };
+
     let finishInstall: (response: Response) => void = () => undefined;
+
     const finishedJobs = new Promise<Response>((resolve) => {
       finishInstall = resolve;
     });
+
     const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
+
       if (url === "/api/v1/plugin-catalog/install") {
         return Promise.resolve(
           jsonResponse({ ok: true, job: { ...job, state: "queued" } }, 202),
         );
       }
+
       if (url === "/api/v1/plugins/install-jobs") return finishedJobs;
+
       return Promise.resolve(
         url.startsWith("/api/v1/plugin-catalog/search")
           ? jsonResponse({ results: [GUIDE_ENTRY], collections: [] })
           : jsonResponse({ plugins: [] }),
       );
     });
+
     vi.stubGlobal("fetch", fetchMock);
     const { button, queryClient } = renderGuide();
     fireEvent.click(button);
@@ -239,13 +257,15 @@ describe("OpenPluginGuideButton", () => {
       await screen.findByRole("button", { name: "Install Plugin Guide" }),
     );
     await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
     const installCall = fetchMock.mock.calls.find(
       ([url]) => url === "/api/v1/plugin-catalog/install",
     );
+
     expect(installCall?.[1]?.method).toBe("POST");
     expect(JSON.parse(String(installCall?.[1]?.body))).toEqual({
       entryId: "plugin-api-docs",
-      marketplace: "bb-official",
+      marketplace: "omnyo-official",
     });
     expect(screen.getByTestId("location").textContent).toBe("/plugins");
 

@@ -3,25 +3,30 @@ import {
   type MentionCandidate,
   type OrderedMentionSuggestions,
   type PromptMentionSuggestion,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 
 type ThreadMentionSuggestion = Extract<
   PromptMentionSuggestion,
   { kind: "thread" }
 >;
+
 type ProjectMentionSuggestion = Extract<
   PromptMentionSuggestion,
   { kind: "project" }
 >;
+
 type SectionMentionSuggestion = Extract<
   PromptMentionSuggestion,
   { kind: "section" }
 >;
+
 type PathMentionSuggestion = Extract<PromptMentionSuggestion, { kind: "path" }>;
+
 type PluginMentionSuggestion = Extract<
   PromptMentionSuggestion,
   { kind: "plugin" }
 >;
+
 export type AttachmentMentionSuggestion = Extract<
   PromptMentionSuggestion,
   { kind: "attachment" }
@@ -85,6 +90,7 @@ function pathMentionCandidate(
   suggestion: PathMentionSuggestion,
 ): MentionCandidate {
   const isThreadStorage = suggestion.source === "thread-storage";
+
   return {
     suggestion,
     visibleTitle: suggestion.name,
@@ -127,18 +133,23 @@ function promptMentionCandidate(
   if (suggestion.kind === "thread") {
     return threadMentionCandidate(suggestion);
   }
+
   if (suggestion.kind === "project") {
     return projectMentionCandidate(suggestion);
   }
+
   if (suggestion.kind === "section") {
     return sectionMentionCandidate(suggestion);
   }
+
   if (suggestion.kind === "plugin") {
     return pluginMentionCandidate(suggestion);
   }
+
   if (suggestion.kind === "attachment") {
     return attachmentMentionCandidate(suggestion);
   }
+
   return pathMentionCandidate(suggestion);
 }
 
@@ -188,15 +199,20 @@ export function withAttachmentMentionSuggestions({
   results: OrderedMentionSuggestions;
 }): OrderedMentionSuggestions {
   const normalizedQuery = query.trim().toLowerCase();
+
   const matches = attachments.filter((attachment) =>
     attachment.name.toLowerCase().includes(normalizedQuery),
   );
+
   if (matches.length === 0) return results;
+
   const attachmentResults = orderPromptMentionSuggestions({
     query: query.trim(),
     suggestions: matches,
   });
+
   const offset = attachmentResults.suggestions.length;
+
   return {
     groups: [
       ...attachmentResults.groups,

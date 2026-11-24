@@ -12,6 +12,7 @@ export function PluginCompactIconMask({
   style?: CSSProperties;
 }) {
   const maskImage = `url(${JSON.stringify(url)})`;
+
   return (
     <span
       aria-hidden="true"
@@ -46,12 +47,15 @@ export function PluginBrandIcon({
   className?: string;
 }) {
   const [failedIconUrl, setFailedIconUrl] = useState<string | null>(null);
+
   if (iconUrl !== null && iconTinted) {
     return <PluginCompactIconMask url={iconUrl} className={className} />;
   }
+
   if (iconUrl === null || iconUrl === failedIconUrl) {
     return <Icon name={icon ?? "Zap"} className={className} aria-hidden />;
   }
+
   return (
     <img
       src={iconUrl}

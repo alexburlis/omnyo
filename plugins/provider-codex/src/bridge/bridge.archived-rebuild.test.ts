@@ -2,8 +2,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@get-bb/plugin-sdk/provider-bridge/testing";
-import type { BridgeJsonRpcOutputMessage } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness } from "@omnyo/plugin-sdk/provider-bridge/testing";
+import type { BridgeJsonRpcOutputMessage } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
 import {
   cleanupBridgeProcessTest,
@@ -15,7 +15,9 @@ import {
 } from "./fake-codex-app-server-harness.js";
 
 const THREAD_ID = "thr_archived_rebuild_1";
+
 const PROVIDER_THREAD_ID = "rebuild-rollout-1";
+
 const ARCHIVED_ERROR_TEXT = `session ${PROVIDER_THREAD_ID} is archived; unarchive it and retry`;
 
 const sessionOptions = {
@@ -31,12 +33,15 @@ const changedSessionOptions = {
 const turnInput = [{ type: "text", text: "hello", mentions: [] }];
 
 let harness: ReturnType<typeof createBridgeJsonRpcTestHarness>;
+
 let workspaceDir = "";
+
 let archiveStatePath = "";
+
 let processLogPath = "";
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-archived-rebuild-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-archived-rebuild-"));
   archiveStatePath = join(workspaceDir, "fake-codex-archived.json");
   processLogPath = join(workspaceDir, "app-server-processes.log");
   const scriptPath = join(workspaceDir, "fake-codex-script.json");
@@ -72,7 +77,7 @@ async function resumeThread(): Promise<void> {
   expect(response.error).toBeUndefined();
 }
 
-function archiveOutsideBb(): void {
+function archiveOutsideOmnyo(): void {
   writeFileSync(archiveStatePath, JSON.stringify([PROVIDER_THREAD_ID]));
 }
 
@@ -87,6 +92,7 @@ async function startTurn(
     input: turnInput,
     options,
   });
+
   return harness.waitForResponse(id);
 }
 
@@ -98,17 +104,21 @@ function sessionReplacedNotifications(): BridgeJsonRpcOutputMessage[] {
 
 async function waitForTurnBoundary(): Promise<void> {
   const deadline = Date.now() + 15_000;
+
   while (Date.now() < deadline) {
     const settled = harness.messages.some(
       (message) =>
         message.method === "thread/delta" &&
         JSON.stringify(message.params).includes('"turn.boundary"'),
     );
+
     if (settled) {
       return;
     }
+
     await new Promise((resolveTick) => setTimeout(resolveTick, 20));
   }
+
   throw new Error("Timed out waiting for the turn to settle");
 }
 
@@ -150,7 +160,7 @@ async function expectRetryAfterUnarchiveSucceeds(
 
 it("keeps the thread resumable when a settings-change rebuild hits an externally archived rollout", async () => {
   await resumeThread();
-  archiveOutsideBb();
+  archiveOutsideOmnyo();
 
   await expectArchivedHint(await startTurn(2, changedSessionOptions));
   await expectRetryAfterUnarchiveSucceeds(changedSessionOptions);
@@ -160,11 +170,14 @@ it("keeps the thread resumable when the rebuild after the child died hits an ext
   await resumeThread();
   const [childPid] = spawnedAppServerPids(processLogPath);
   expect(childPid).toBeDefined();
+
   if (childPid === undefined) {
     throw new Error("Expected the fake app-server child to have spawned");
   }
+
   process.kill(childPid, "SIGKILL");
   const deadline = Date.now() + 15_000;
+
   while (
     !harness.messages.some(
       (message) =>
@@ -175,9 +188,11 @@ it("keeps the thread resumable when the rebuild after the child died hits an ext
     if (Date.now() > deadline) {
       throw new Error("Timed out waiting for the child exit report");
     }
+
     await new Promise((resolveTick) => setTimeout(resolveTick, 20));
   }
-  archiveOutsideBb();
+
+  archiveOutsideOmnyo();
 
   await expectArchivedHint(await startTurn(2, sessionOptions));
   await expectRetryAfterUnarchiveSucceeds(sessionOptions);

@@ -16,10 +16,10 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Button } from "@bb/shared-ui/button";
+} from "@omnyo/shared-ui/dialog";
+import { Button } from "@omnyo/shared-ui/button";
 import { CopyButton } from "./copy-button.js";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { loadMermaid } from "./markdown-mermaid-loader.js";
 import {
   buildMermaidRenderCacheKey,
@@ -32,7 +32,12 @@ import {
 } from "./markdown-mermaid-render-cache.js";
 import { useAppThemeEpoch } from "@/hooks/useAppTheme";
 import type { Theme } from "@/hooks/useTheme";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@omnyo/shared-ui/hover-reveal";
+import {
+  MARKDOWN_BLOCK_CONTROLS_CLASS,
+  MARKDOWN_BLOCK_SURFACE_CLASS,
+} from "./markdown-typeset.js";
 
 interface MarkdownMermaidDiagramProps {
   preferredTheme: Theme;
@@ -72,6 +77,7 @@ interface MermaidThemePalette {
 }
 
 type MermaidDiagramOpenChangeHandler = (open: boolean) => void;
+
 type MermaidDiagramDisplayMode = "preview" | "source";
 
 interface MermaidDiagramDialogProps {
@@ -210,24 +216,39 @@ type MermaidRenderState =
   | { kind: "source" };
 
 type MermaidTheme = NonNullable<MermaidConfig["theme"]>;
+
 type MermaidDiagramContainerProps = ComponentPropsWithoutRef<"div"> & {
   ref?: Ref<HTMLDivElement>;
 };
+
 type MermaidDiagramPointerHandler = PointerEventHandler<HTMLDivElement>;
 
 const MERMAID_THEME: MermaidTheme = "base";
-const MERMAID_RENDER_ID_PREFIX = "bb-mermaid";
+
+const MERMAID_RENDER_ID_PREFIX = "omnyo-mermaid";
+
 const MERMAID_RENDER_ID_SAFE_CHARACTER_PATTERN = /[^a-zA-Z0-9_-]/gu;
+
 const MERMAID_DIAGRAM_MIN_SCALE = 0.5;
+
 const MERMAID_DIAGRAM_MAX_SCALE = 4;
+
 const MERMAID_DIAGRAM_SCALE_STEP = 0.25;
+
 const MERMAID_WHEEL_DELTA_LINE_MODE = 1;
+
 const MERMAID_WHEEL_DELTA_PAGE_MODE = 2;
+
 const MERMAID_WHEEL_LINE_DELTA_PX = 16;
+
 const MERMAID_WHEEL_PAGE_DELTA_PX = 800;
+
 const MERMAID_WHEEL_ZOOM_INTENSITY = 0.01;
+
 const MERMAID_WHEEL_MIN_ZOOM_FACTOR = 0.82;
+
 const MERMAID_WHEEL_MAX_ZOOM_FACTOR = 1.22;
+
 const MERMAID_DIAGRAM_CENTER_POINT: MermaidDiagramPoint = { x: 0, y: 0 };
 
 const MERMAID_TOKEN = {
@@ -249,12 +270,15 @@ function toSrgbColor(color: string): string {
         willReadFrequently: true,
       }) ?? null;
   }
+
   const ctx = srgbCanvasContext;
+
   if (!ctx) return color;
   ctx.clearRect(0, 0, 1, 1);
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, 1, 1);
   const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+
   return a === 255
     ? `rgb(${r}, ${g}, ${b})`
     : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
@@ -264,7 +288,9 @@ function resolveThemeColor(probe: HTMLElement, varName: string): string {
   const raw = getComputedStyle(document.documentElement)
     .getPropertyValue(varName)
     .trim();
+
   probe.style.color = raw || "currentColor";
+
   return toSrgbColor(getComputedStyle(probe).color);
 }
 
@@ -275,6 +301,7 @@ function resolveMermaidThemePalette(): MermaidThemePalette {
   probe.style.pointerEvents = "none";
   document.body.appendChild(probe);
   const get = (name: string) => resolveThemeColor(probe, name);
+
   const palette: MermaidThemePalette = {
     actorBkg: get(MERMAID_TOKEN.nodeFill),
     actorBorder: get(MERMAID_TOKEN.border),
@@ -306,7 +333,9 @@ function resolveMermaidThemePalette(): MermaidThemePalette {
     tertiaryTextColor: get(MERMAID_TOKEN.text),
     textColor: get(MERMAID_TOKEN.text),
   };
+
   probe.remove();
+
   return palette;
 }
 
@@ -324,6 +353,7 @@ function buildMermaidConfig(preferredTheme: Theme): MermaidConfig {
 
 function buildMermaidRenderId(reactId: string): string {
   const safeId = reactId.replace(MERMAID_RENDER_ID_SAFE_CHARACTER_PATTERN, "");
+
   return `${MERMAID_RENDER_ID_PREFIX}-${safeId}`;
 }
 
@@ -344,6 +374,7 @@ function getMermaidDiagramPointFromClientPosition({
   container,
 }: GetMermaidDiagramPointFromClientPositionArgs): MermaidDiagramPoint {
   const containerRect = container.getBoundingClientRect();
+
   return {
     x: clientX - containerRect.left - containerRect.width / 2,
     y: clientY - containerRect.top - containerRect.height / 2,
@@ -356,6 +387,7 @@ function isMermaidClientPointWithinContainer({
   container,
 }: IsMermaidClientPointWithinContainerArgs): boolean {
   const containerRect = container.getBoundingClientRect();
+
   return (
     clientX >= containerRect.left &&
     clientX <= containerRect.right &&
@@ -419,6 +451,7 @@ function getMermaidTouchPair({
     clientY: firstTouch.clientY,
     container,
   });
+
   const secondPoint = getMermaidDiagramPointFromClientPosition({
     clientX: secondTouch.clientX,
     clientY: secondTouch.clientY,
@@ -459,9 +492,11 @@ export function getMermaidWheelZoomDelta({
   if (deltaY !== 0) {
     return deltaY;
   }
+
   if (deltaX !== 0) {
     return deltaX;
   }
+
   return deltaZ;
 }
 
@@ -498,11 +533,13 @@ export function zoomMermaidDiagramView({
   view,
 }: ZoomMermaidDiagramViewArgs): MermaidDiagramView {
   const clampedNextScale = clampMermaidScale(nextScale);
+
   if (clampedNextScale === view.scale) {
     return view;
   }
 
   const scaleRatio = clampedNextScale / view.scale;
+
   return {
     offset: {
       x: focalPoint.x - scaleRatio * (focalPoint.x - view.offset.x),
@@ -556,10 +593,7 @@ function MermaidDiagramContainer({
     <div
       {...containerProps}
       ref={ref}
-      className={cn(
-        "my-2 overflow-hidden rounded-md border border-border bg-surface-recessed",
-        className,
-      )}
+      className={cn(MARKDOWN_BLOCK_SURFACE_CLASS, className)}
     >
       {children}
     </div>
@@ -574,19 +608,25 @@ function MermaidDiagramDialog({
 }: MermaidDiagramDialogProps) {
   const dialogViewportRef = useRef<HTMLDivElement>(null);
   const dialogDiagramRef = useRef<HTMLDivElement>(null);
+
   const [view, setView] = useState<MermaidDiagramView>(
     createInitialMermaidDiagramView,
   );
+
   const viewRef = useRef<MermaidDiagramView>(view);
   const pinchStateRef = useRef<MermaidDiagramPinchState | null>(null);
   const gestureStateRef = useRef<MermaidDiagramGestureState | null>(null);
+
   const [dragState, setDragState] = useState<MermaidDiagramDragState | null>(
     null,
   );
+
   const diagramStyle = createMermaidDialogDiagramStyle({ view });
   const isDragging = dragState !== null;
+
   const zoomFromWheelEvent = useCallback((event: MermaidWheelZoomEvent) => {
     const viewportElement = dialogViewportRef.current;
+
     if (!viewportElement) {
       return;
     }
@@ -604,6 +644,7 @@ function MermaidDiagramDialog({
     if (event.cancelable) {
       event.preventDefault();
     }
+
     event.stopPropagation();
 
     const focalPoint = getMermaidDiagramFocalPoint({
@@ -611,6 +652,7 @@ function MermaidDiagramDialog({
       clientY: event.clientY,
       container: viewportElement,
     });
+
     const zoomFactor = getMermaidWheelZoomFactor({
       deltaMode: event.deltaMode,
       deltaY: zoomDelta,
@@ -646,6 +688,7 @@ function MermaidDiagramDialog({
     }
 
     const diagramElement = dialogDiagramRef.current;
+
     if (!diagramElement) {
       return;
     }
@@ -659,6 +702,7 @@ function MermaidDiagramDialog({
     }
 
     const viewportElement = dialogViewportRef.current;
+
     if (!viewportElement) {
       return;
     }
@@ -669,8 +713,10 @@ function MermaidDiagramDialog({
 
     const handleGestureStart = (event: Event) => {
       const gestureEventData = getMermaidGestureEventData({ event });
+
       if (gestureEventData === null || gestureEventData.scale <= 0) {
         gestureStateRef.current = null;
+
         return;
       }
 
@@ -688,6 +734,7 @@ function MermaidDiagramDialog({
     const handleGestureChange = (event: Event) => {
       const gestureState = gestureStateRef.current;
       const gestureEventData = getMermaidGestureEventData({ event });
+
       if (
         gestureState === null ||
         gestureEventData === null ||
@@ -725,6 +772,7 @@ function MermaidDiagramDialog({
     const handleTouchStart = (event: TouchEvent) => {
       if (event.touches.length < 2) {
         pinchStateRef.current = null;
+
         return;
       }
 
@@ -736,6 +784,7 @@ function MermaidDiagramDialog({
         container: viewportElement,
         touches: event.touches,
       });
+
       if (touchPair === null) {
         return;
       }
@@ -750,6 +799,7 @@ function MermaidDiagramDialog({
 
     const handleTouchMove = (event: TouchEvent) => {
       const pinchState = pinchStateRef.current;
+
       if (pinchState === null || event.touches.length < 2) {
         return;
       }
@@ -762,6 +812,7 @@ function MermaidDiagramDialog({
         container: viewportElement,
         touches: event.touches,
       });
+
       if (touchPair === null) {
         return;
       }
@@ -884,6 +935,7 @@ function MermaidDiagramDialog({
     }
 
     setDragState(null);
+
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -972,31 +1024,39 @@ export function MarkdownMermaidDiagram({
   const renderId = useMemo(() => buildMermaidRenderId(reactId), [reactId]);
   const renderAttemptRef = useRef(0);
   const appThemeEpoch = useAppThemeEpoch();
+
   const [initialCachedDiagram] = useState(() =>
     peekMermaidRenderCache(
       buildMermaidRenderCacheKey({ appThemeEpoch, preferredTheme, source }),
     ),
   );
+
   const [renderState, setRenderState] = useState<MermaidRenderState>(() =>
     initialCachedDiagram === null
       ? { kind: "loading" }
       : { kind: "rendered", diagram: initialCachedDiagram },
   );
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+
   const [displayMode, setDisplayMode] =
     useState<MermaidDiagramDisplayMode>("preview");
+
   const [hasEnteredViewport, setHasEnteredViewport] = useState(
     initialCachedDiagram !== null,
   );
+
   const renderedSourceRef = useRef<string | null>(
     initialCachedDiagram === null ? null : source,
   );
 
   useEffect(() => {
     const containerElement = containerElementRef.current;
+
     if (hasEnteredViewport || containerElement === null) {
       return;
     }
+
     return observeMermaidViewportEntry(containerElement, () => {
       setHasEnteredViewport(true);
     });
@@ -1006,16 +1066,21 @@ export function MarkdownMermaidDiagram({
     if (!hasEnteredViewport) {
       return;
     }
+
     const cacheKey = buildMermaidRenderCacheKey({
       appThemeEpoch,
       preferredTheme,
       source,
     });
+
     const cachedDiagram = readMermaidRenderCache(cacheKey);
+
     const isSourceUpdate =
       renderedSourceRef.current !== null &&
       renderedSourceRef.current !== source;
+
     renderedSourceRef.current = source;
+
     if (cachedDiagram !== null) {
       setRenderState((currentState) =>
         currentState.kind === "rendered" &&
@@ -1024,17 +1089,21 @@ export function MarkdownMermaidDiagram({
           : { kind: "rendered", diagram: cachedDiagram },
       );
       setDisplayMode("preview");
+
       return;
     }
 
     let isCurrentRender = true;
+
     const runRender = () => {
       loadMermaid()
         .then((mermaid) => {
           if (!isCurrentRender) {
             return null;
           }
+
           mermaid.initialize(buildMermaidConfig(preferredTheme));
+
           return mermaid.render(
             `${renderId}-${++renderAttemptRef.current}`,
             source,
@@ -1044,10 +1113,12 @@ export function MarkdownMermaidDiagram({
           if (!isCurrentRender || renderResult === null) {
             return;
           }
+
           const diagram: RenderedMermaidDiagram = {
             bindFunctions: renderResult.bindFunctions,
             svg: renderResult.svg,
           };
+
           storeMermaidRenderCache(cacheKey, diagram);
           setRenderState({ kind: "rendered", diagram });
         })
@@ -1055,6 +1126,7 @@ export function MarkdownMermaidDiagram({
           if (!isCurrentRender) {
             return;
           }
+
           setRenderState((currentState) =>
             currentState.kind === "rendered"
               ? currentState
@@ -1067,14 +1139,17 @@ export function MarkdownMermaidDiagram({
       setRenderState({ kind: "loading" });
       setDisplayMode("preview");
       runRender();
+
       return () => {
         isCurrentRender = false;
       };
     }
+
     const timeoutId = window.setTimeout(
       runRender,
       MERMAID_SOURCE_RENDER_DEBOUNCE_MS,
     );
+
     return () => {
       isCurrentRender = false;
       window.clearTimeout(timeoutId);
@@ -1087,6 +1162,7 @@ export function MarkdownMermaidDiagram({
     }
 
     const diagramElement = diagramElementRef.current;
+
     if (!diagramElement) {
       return;
     }
@@ -1096,8 +1172,10 @@ export function MarkdownMermaidDiagram({
 
   const isRendered = renderState.kind === "rendered";
   const showRenderedDiagram = isRendered && displayMode === "preview";
+
   const showSource =
     renderState.kind === "source" || (isRendered && displayMode === "source");
+
   const toggleDisplayMode = () => {
     setDisplayMode((currentDisplayMode) =>
       currentDisplayMode === "preview" ? "source" : "preview",
@@ -1106,11 +1184,16 @@ export function MarkdownMermaidDiagram({
 
   return (
     <MermaidDiagramContainer ref={containerElementRef}>
-      <div className="flex items-center justify-between pl-3 pr-1.5 pt-1.5">
-        <span className="font-mono text-xs uppercase text-muted-foreground">
+      <div className="flex items-center justify-between pl-4 pr-2 pt-2.5">
+        <span className="font-mono text-xs lowercase text-muted-foreground">
           mermaid
         </span>
-        <div className="flex items-center gap-1">
+        <div
+          className={cn(
+            MARKDOWN_BLOCK_CONTROLS_CLASS,
+            HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS,
+          )}
+        >
           {isRendered ? (
             <Button
               type="button"
@@ -1140,7 +1223,7 @@ export function MarkdownMermaidDiagram({
         </div>
       </div>
       {showRenderedDiagram ? (
-        <div className="overflow-x-auto px-3 pb-3 pt-2">
+        <div className="overflow-x-auto px-4 pb-3.5 pt-2">
           <div
             ref={diagramElementRef}
             className="min-w-0 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
@@ -1151,13 +1234,15 @@ export function MarkdownMermaidDiagram({
         </div>
       ) : null}
       {renderState.kind === "loading" ? (
-        <div className="flex min-h-24 items-center justify-center px-3 pb-3 pt-2 text-xs text-muted-foreground">
+        <div className="flex min-h-24 items-center justify-center px-4 pb-3.5 pt-2 text-xs text-muted-foreground">
           Rendering diagram...
         </div>
       ) : null}
       {showSource ? (
-        <pre className="overflow-x-auto px-3 pb-3 pt-1">
-          <code className="font-mono text-xs language-mermaid">{source}</code>
+        <pre className="overflow-x-auto px-4 pb-3.5 pt-1">
+          <code className="font-mono text-sm leading-5 language-mermaid">
+            {source}
+          </code>
         </pre>
       ) : null}
       {isRendered ? (

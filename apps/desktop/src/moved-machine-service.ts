@@ -8,6 +8,7 @@ import type {
 } from "./server-moved.js";
 
 export const MACHINE_SERVICE_NOTICE_FILE_NAME = "machine-service-notice.json";
+
 export const MACHINE_SERVICE_INSTALL_LOG_FILE_NAME =
   "install-machine-service.log";
 
@@ -56,6 +57,7 @@ function describeInstallerExit(exit: InstallerExit): string {
   if (exit.error !== null) {
     return `The installer could not start: ${exit.error.message}.`;
   }
+
   return exit.signal === null
     ? `The installer exited with code ${String(exit.code)}.`
     : `The installer stopped with ${exit.signal}.`;
@@ -67,15 +69,18 @@ async function readInstallerFailure(args: {
   offset: number;
 }): Promise<string> {
   let output = "";
+
   try {
     output = (await readFile(args.logPath)).subarray(args.offset).toString();
   } catch {
     return describeInstallerExit(args.exit);
   }
+
   const failures = output
     .split(/\r?\n/u)
     .map((line) => INSTALLER_FAILURE_LINE_PATTERN.exec(line)?.[1])
     .filter((line): line is string => line !== undefined);
+
   return failures.at(-1) ?? describeInstallerExit(args.exit);
 }
 
@@ -86,12 +91,14 @@ export async function runMachineInstaller(
   const offset = await fileSize(args.logPath);
   const log = await open(args.logPath, "a");
   let exit: InstallerExit;
+
   try {
     const installer = spawn(
       "/bin/sh",
       [args.installerPath, "--adopt", "--data-dir", args.dataDir],
       { env: args.env, stdio: ["ignore", log.fd, log.fd] },
     );
+
     exit = await new Promise<InstallerExit>((resolvePromise) => {
       installer.once("error", (error) => {
         resolvePromise({ code: null, error, signal: null });
@@ -103,9 +110,11 @@ export async function runMachineInstaller(
   } finally {
     await log.close();
   }
+
   if (exit.error === null && exit.code === 0) {
     return { ok: true };
   }
+
   return {
     ok: false,
     reason: await readInstallerFailure({
@@ -122,8 +131,8 @@ export function formatMachineServiceFailureNotice(args: {
   reason: string;
 }): ServerMovedNotice {
   return {
-    detail: `bb couldn't install the background service that keeps this computer connected and up to date: ${args.reason} bb tries again the next time it opens. The installer log is ${args.logPath}.`,
-    message: `This computer stays connected to ${args.move.toHostName} only while bb is open`,
+    detail: `Omnyo couldn't install the background service that keeps this computer connected and up to date: ${args.reason} Omnyo tries again the next time it opens. The installer log is ${args.logPath}.`,
+    message: `This computer stays connected to ${args.move.toHostName} only while Omnyo is open`,
   };
 }
 
@@ -131,20 +140,26 @@ export async function keepMovedMachineConnected(
   args: KeepMovedMachineConnectedArgs,
 ): Promise<KeepMovedMachineConnectedResult> {
   const existing = await args.findService();
+
   if (existing !== null) {
     return "existing-service";
   }
+
   await args.stopLocalRuntime();
   const result = await args.install();
+
   if (result.ok) {
     args.logInfo(
       `[desktop] installed the background service that keeps this computer connected to ${args.move.toHostName}`,
     );
+
     return "installed";
   }
+
   args.logInfo(
     `[desktop] could not install the background service for this computer: ${result.reason}`,
   );
+
   if (!(await args.noticeStore.hasShown(args.move.moveId))) {
     await args.noticeStore.markShown(args.move.moveId);
     args.showNotice(
@@ -155,5 +170,6 @@ export async function keepMovedMachineConnected(
       }),
     );
   }
+
   return "install-failed";
 }

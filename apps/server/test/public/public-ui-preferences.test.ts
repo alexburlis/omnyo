@@ -1,5 +1,5 @@
-import { overwriteStoredUiPreference } from "@bb/db";
-import { defaultUiPreferences, UI_PREFERENCE_KEYS } from "@bb/domain";
+import { overwriteStoredUiPreference } from "@omnyo/db";
+import { defaultUiPreferences, UI_PREFERENCE_KEYS } from "@omnyo/domain";
 import { describe, expect, it, vi } from "vitest";
 import { readJson } from "../helpers/json.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
@@ -35,8 +35,10 @@ describe("public ui preferences", () => {
     async (previous) => {
       await withTestHarness(async (harness) => {
         const key = "sidebar.threadListProvider";
+
         const expected =
           previous === "__builtin__" ? "thread-list/thread-list" : previous;
+
         overwriteStoredUiPreference(harness.deps.db, {
           key,
           valueJson: JSON.stringify(previous),
@@ -65,6 +67,7 @@ describe("public ui preferences", () => {
   it("ignores stored rows for retired sidebar provider preferences", async () => {
     await withTestHarness(async (harness) => {
       const retired = ["sidebar.navigationProvider", "sidebar.headerProvider"];
+
       for (const key of retired) {
         overwriteStoredUiPreference(harness.deps.db, {
           key,
@@ -76,14 +79,18 @@ describe("public ui preferences", () => {
           )
           .run(key, JSON.stringify("garden/icons"));
       }
+
       const listed = await listPreferences(harness);
       expect(listed.status).toBe(200);
+
       const body = (await readJson(listed)) as {
         preferences: Record<string, unknown>;
       };
+
       expect(Object.keys(body.preferences).sort()).toEqual(
         [...UI_PREFERENCE_KEYS].sort(),
       );
+
       for (const key of retired) {
         expect(body.preferences).not.toHaveProperty([key]);
         expect(
@@ -113,16 +120,19 @@ describe("public ui preferences", () => {
           })
         ).status,
       ).toBe(200);
+
       const hidden = [
         "project:proj_hidden",
         "section:section_review",
         "machine:host_offline",
         "project:proj_deleted",
       ];
+
       const saved = await putPreference(harness, key, {
         expectedRevision: 0,
         value: [...hidden, hidden[0]],
       });
+
       expect(saved.status).toBe(200);
       expect(await readJson(saved)).toMatchObject({
         revision: 1,
@@ -131,10 +141,12 @@ describe("public ui preferences", () => {
       expect(await readJson(await listPreferences(harness))).toMatchObject({
         preferences: { [key]: { revision: 1, value: hidden } },
       });
+
       const replaced = await putPreference(harness, key, {
         expectedRevision: 1,
         value: ["section:section_review"],
       });
+
       expect(replaced.status).toBe(200);
       expect(await readJson(replaced)).toMatchObject({
         revision: 2,
@@ -158,6 +170,7 @@ describe("public ui preferences", () => {
   it("rejects built-in, malformed, and oversized hidden-group lists", async () => {
     await withTestHarness(async (harness) => {
       const key = "sidebar.hiddenGroups";
+
       const invalidValues = [
         null,
         "project:proj_hidden",
@@ -172,12 +185,14 @@ describe("public ui preferences", () => {
         [`project:${"x".repeat(1_024)}`],
         Array.from({ length: 10_001 }, () => "project:proj_hidden"),
       ];
+
       for (const value of invalidValues) {
         expect(
           (await putPreference(harness, key, { expectedRevision: 0, value }))
             .status,
         ).toBe(400);
       }
+
       expect(await readJson(await listPreferences(harness))).toMatchObject({
         preferences: { [key]: { revision: 0, value: [] } },
       });
@@ -192,6 +207,7 @@ describe("public ui preferences", () => {
           "builtin:settings",
           "plugin:unknown/item",
         ];
+
         expect(
           (await putPreference(harness, key, { expectedRevision: 0, value }))
             .status,
@@ -211,6 +227,186 @@ describe("public ui preferences", () => {
           await readJson(await resetPreference(harness, key)),
         ).toMatchObject({ value: [] });
       }
+    });
+  });
+
+  it("stores model picker favorites in order with the default speed filled and duplicates dropped", async () => {
+    await withTestHarness(async (harness) => {
+      const key = "modelPicker.favorites";
+
+      const sol = {
+        providerId: "codex",
+        model: "gpt-6.1-sol",
+        reasoningLevel: "xhigh",
+        serviceTier: "fast",
+      };
+
+      const opus = {
+        providerId: "claude-code",
+        model: "claude-opus-5-5",
+        reasoningLevel: "ultracode",
+      };
+
+      const saved = await putPreference(harness, key, {
+        expectedRevision: 0,
+        value: [
+          sol,
+          opus,
+          { ...sol },
+          { ...opus, serviceTier: "default" },
+          { ...sol, serviceTier: "default" },
+        ],
+      });
+
+      const expected = [
+        sol,
+        { ...opus, serviceTier: "default" },
+        { ...sol, serviceTier: "default" },
+      ];
+
+      expect(saved.status).toBe(200);
+      expect(await readJson(saved)).toEqual({
+        key,
+        revision: 1,
+        value: expected,
+      });
+      expect(await readJson(await listPreferences(harness))).toMatchObject({
+        preferences: { [key]: { revision: 1, value: expected } },
+      });
+      expect(await readJson(await resetPreference(harness, key))).toEqual({
+        key,
+        revision: 2,
+        value: [],
+      });
+    });
+  });
+
+  it("rejects malformed, oversized, and extended model picker favorites", async () => {
+    await withTestHarness(async (harness) => {
+      const key = "modelPicker.favorites";
+
+      const favorite = {
+        providerId: "codex",
+        model: "gpt-6.1-sol",
+        reasoningLevel: "xhigh",
+      };
+
+      const invalidValues = [
+        null,
+        favorite,
+        [{ ...favorite, label: "Sol" }],
+        [{ providerId: "codex", model: "gpt-6.1-sol" }],
+        [{ ...favorite, providerId: "" }],
+        [{ ...favorite, serviceTier: "" }],
+        [{ ...favorite, reasoningLevel: 3 }],
+        Array.from({ length: 25 }, (_, index) => ({
+          ...favorite,
+          model: `model-${index}`,
+        })),
+      ];
+
+      for (const value of invalidValues) {
+        expect(
+          (await putPreference(harness, key, { expectedRevision: 0, value }))
+            .status,
+        ).toBe(400);
+      }
+
+      expect(
+        (
+          await putPreference(harness, key, {
+            expectedRevision: 0,
+            value: Array.from({ length: 24 }, (_, index) => ({
+              ...favorite,
+              model: `model-${index}`,
+            })),
+          })
+        ).status,
+      ).toBe(200);
+    });
+  });
+
+  it("stores hidden models per provider without duplicates or empty providers", async () => {
+    await withTestHarness(async (harness) => {
+      const key = "modelPicker.hiddenModels";
+
+      const saved = await putPreference(harness, key, {
+        expectedRevision: 0,
+        value: {
+          codex: ["gpt-5.6-sol", "gpt-5.5", "gpt-5.6-sol"],
+          "claude-code": [],
+          pi: ["openrouter/nvidia/nemotron-3-ultra"],
+        },
+      });
+
+      const expected = {
+        codex: ["gpt-5.6-sol", "gpt-5.5"],
+        pi: ["openrouter/nvidia/nemotron-3-ultra"],
+      };
+
+      expect(saved.status).toBe(200);
+      expect(await readJson(saved)).toMatchObject({
+        revision: 1,
+        value: expected,
+      });
+      expect(await readJson(await listPreferences(harness))).toMatchObject({
+        preferences: { [key]: { revision: 1, value: expected } },
+      });
+
+      for (const value of [
+        null,
+        ["gpt-5.5"],
+        { codex: "gpt-5.5" },
+        { codex: [12] },
+        { codex: [""] },
+        { "": ["gpt-5.5"] },
+      ]) {
+        expect(
+          (await putPreference(harness, key, { expectedRevision: 1, value }))
+            .status,
+        ).toBe(400);
+      }
+
+      expect(await readJson(await resetPreference(harness, key))).toMatchObject(
+        { revision: 2, value: {} },
+      );
+    });
+  });
+
+  it("stores whether favorites show in the composer and reads a retired count as the default", async () => {
+    await withTestHarness(async (harness) => {
+      const key = "modelPicker.footerFavorites";
+
+      expect(await readJson(await listPreferences(harness))).toMatchObject({
+        preferences: { [key]: { revision: 0, value: true } },
+      });
+
+      for (const value of [0, 3, "false", null]) {
+        expect(
+          (await putPreference(harness, key, { expectedRevision: 0, value }))
+            .status,
+        ).toBe(400);
+      }
+
+      const saved = await putPreference(harness, key, {
+        expectedRevision: 0,
+        value: false,
+      });
+
+      expect(saved.status).toBe(200);
+      expect(await readJson(saved)).toMatchObject({
+        revision: 1,
+        value: false,
+      });
+
+      overwriteStoredUiPreference(harness.deps.db, {
+        key,
+        valueJson: JSON.stringify(0),
+      });
+
+      expect(await readJson(await listPreferences(harness))).toMatchObject({
+        preferences: { [key]: { revision: 2, value: true } },
+      });
     });
   });
 
@@ -256,12 +452,15 @@ describe("public ui preferences", () => {
     await withTestHarness(async (harness) => {
       const response = await listPreferences(harness);
       expect(response.status).toBe(200);
+
       const body = (await readJson(response)) as {
         preferences: Record<string, { revision: number; value: unknown }>;
       };
+
       expect(Object.keys(body.preferences).sort()).toEqual(
         [...UI_PREFERENCE_KEYS].sort(),
       );
+
       for (const key of UI_PREFERENCE_KEYS) {
         expect(body.preferences[key]).toEqual({
           revision: 0,
@@ -354,6 +553,7 @@ describe("public ui preferences", () => {
         expectedRevision: 0,
         value: "machine",
       });
+
       expect(first.status).toBe(200);
       expect(await readJson(first)).toEqual({
         key: "sidebar.organizationMode",
@@ -366,6 +566,7 @@ describe("public ui preferences", () => {
         expectedRevision: 0,
         value: "chronological",
       });
+
       expect(stale.status).toBe(409);
       expect(await readJson(stale)).toEqual({
         code: "ui_preference_conflict",
@@ -377,6 +578,7 @@ describe("public ui preferences", () => {
       const listed = (await readJson(await listPreferences(harness))) as {
         preferences: Record<string, { revision: number; value: unknown }>;
       };
+
       expect(listed.preferences["sidebar.organizationMode"]).toEqual({
         revision: 1,
         value: "machine",
@@ -394,6 +596,7 @@ describe("public ui preferences", () => {
         expectedRevision: 0,
         value: "x",
       });
+
       expect(unknown.status).toBe(404);
       expect((await readJson(unknown)) as { code: string }).toMatchObject({
         code: "ui_preference_not_found",
@@ -404,6 +607,7 @@ describe("public ui preferences", () => {
         "sidebar.organizationMode",
         { expectedRevision: 0, value: "by-color" },
       );
+
       expect(invalidEnum.status).toBe(400);
 
       const invalidList = await putPreference(
@@ -411,6 +615,7 @@ describe("public ui preferences", () => {
         "sidebar.hiddenFooterItems",
         { expectedRevision: 0, value: ["thr_1", 2] },
       );
+
       expect(invalidList.status).toBe(400);
 
       const missingValue = await putPreference(
@@ -418,6 +623,7 @@ describe("public ui preferences", () => {
         "sidebar.hiddenFooterItems",
         { expectedRevision: 0, value: undefined },
       );
+
       expect(missingValue.status).toBe(400);
 
       const nullable = await putPreference(
@@ -425,6 +631,7 @@ describe("public ui preferences", () => {
         "sidebar.visiblePluginPanels",
         { expectedRevision: 0, value: null },
       );
+
       expect(nullable.status).toBe(200);
 
       const unknownReset = await resetPreference(harness, "sidebar.nope");
@@ -450,6 +657,7 @@ describe("public ui preferences", () => {
         expectedRevision: 1,
         value: ["pinned", "threads", "projects"],
       });
+
       expect(stale.status).toBe(409);
     });
   });
@@ -459,9 +667,11 @@ describe("public ui preferences", () => {
       harness.db.$client.exec(
         `INSERT INTO ui_preferences (key, value_json, revision, updated_at) VALUES ('sidebar.organizationMode', '"by-color"', 4, 1), ('sidebar.unknownKey', '1', 2, 1)`,
       );
+
       const listed = (await readJson(await listPreferences(harness))) as {
         preferences: Record<string, { revision: number; value: unknown }>;
       };
+
       expect(listed.preferences["sidebar.organizationMode"]).toEqual({
         revision: 4,
         value: "chronological",

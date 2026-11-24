@@ -8,7 +8,7 @@ export default defineWorkspaceTestConfig({
     silent: "passed-only",
     projects: sharedWorkerProjects({
       pkgDir: __dirname,
-      name: "@bb/provider-bridge-acp-next",
+      name: "@omnyo/provider-bridge-acp-next",
       include: ["src/**/*.test.ts"],
     }),
   },

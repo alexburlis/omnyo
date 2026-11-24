@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AppKeybinding } from "@bb/domain";
+import type { AppKeybinding } from "@omnyo/domain";
 import { parseDesktopSystemConfig } from "../src/desktop-system-config.js";
 
 const reloadBinding: AppKeybinding = {
@@ -27,6 +27,7 @@ describe("parseDesktopSystemConfig", () => {
       serverUrl: "http://127.0.0.1:1",
       unknownTopLevelField: 1,
     });
+
     expect(config.keybindings).toEqual([reloadBinding]);
   });
 

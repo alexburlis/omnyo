@@ -4,7 +4,7 @@ import {
   type PromptMentionCommandTrigger,
   type PromptMentionResource,
   type PromptTextMention,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { JSONContent } from "@tiptap/react";
 import {
   Fragment,
@@ -16,7 +16,7 @@ import type { Selection } from "@tiptap/pm/state";
 import type {
   PromptMentionSuggestion,
   ProviderCommandSuggestion,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 
 export interface PromptEditorValue {
   text: string;
@@ -54,7 +54,32 @@ export function parsePromptEditorMentionAttrs(
   attrs: ProseMirrorNode["attrs"],
 ): PromptEditorMentionAttrs | null {
   const result = promptEditorMentionAttrsSchema.safeParse(attrs);
+
   return result.success ? result.data : null;
+}
+
+const WORD_CHARACTER_AT_START = /^[\p{L}\p{N}]/u;
+
+const WORD_CHARACTER_AT_END = /[\p{L}\p{N}]$/u;
+
+function needsMentionSeparator(
+  previous: ProseMirrorNode | null,
+  next: ProseMirrorNode,
+): boolean {
+  if (previous === null) return false;
+
+  if (next.type.name === "mention") {
+    return (
+      previous.type.name === "mention" ||
+      (previous.isText && WORD_CHARACTER_AT_END.test(previous.text ?? ""))
+    );
+  }
+
+  return (
+    previous.type.name === "mention" &&
+    next.isText &&
+    WORD_CHARACTER_AT_START.test(next.text ?? "")
+  );
 }
 
 function splitTextContent(text: string): JSONContent[] {
@@ -64,14 +89,17 @@ function splitTextContent(text: string): JSONContent[] {
 
   const nodes: JSONContent[] = [];
   const parts = text.split("\n");
+
   for (const [index, part] of parts.entries()) {
     if (index > 0) {
       nodes.push({ type: "hardBreak" });
     }
+
     if (part.length > 0) {
       nodes.push({ type: "text", text: part });
     }
   }
+
   return nodes;
 }
 
@@ -98,7 +126,9 @@ function isBlankLine(line: string): boolean {
 
 function stripQuotePrefix(line: string): string {
   if (line.startsWith("> ")) return line.slice(2);
+
   if (line === ">") return "";
+
   return line;
 }
 
@@ -113,6 +143,7 @@ function rebaseMentionsToSpan(
   lineSpans: readonly StrippedLineSpan[],
 ): PromptTextMention[] {
   const rebased: PromptTextMention[] = [];
+
   for (const mention of value.mentions) {
     for (const span of lineSpans) {
       if (
@@ -129,6 +160,7 @@ function rebaseMentionsToSpan(
       }
     }
   }
+
   return rebased;
 }
 
@@ -142,6 +174,7 @@ function blockquoteFromLines(
 
   const lineSpans: StrippedLineSpan[] = [];
   let innerCursor = 0;
+
   for (const [index, line] of lines.entries()) {
     const prefixLength = line.length - strippedLines[index]!.length;
     const contentStart = lineGlobalStarts[index]! + prefixLength;
@@ -155,6 +188,7 @@ function blockquoteFromLines(
   }
 
   const innerMentions = rebaseMentionsToSpan(value, lineSpans);
+
   return {
     type: "blockquote",
     content: [
@@ -194,6 +228,7 @@ function promptEditorContentValueFromSourceSpan({
   value: PromptEditorContentValue;
 }): PromptEditorContentValue {
   const subText = value.text.slice(sourceStart, sourceEnd);
+
   const subMentions = value.mentions.flatMap((mention) =>
     mention.start >= sourceStart && mention.end <= sourceEnd
       ? [
@@ -205,6 +240,7 @@ function promptEditorContentValueFromSourceSpan({
         ]
       : [],
   );
+
   return { text: subText, mentions: subMentions };
 }
 
@@ -239,6 +275,7 @@ export function promptEditorContentFromValue(
   const lines = value.text.split("\n");
   const lineGlobalStarts: number[] = [];
   let offset = 0;
+
   for (const line of lines) {
     lineGlobalStarts.push(offset);
     offset += line.length + 1;
@@ -246,16 +283,21 @@ export function promptEditorContentFromValue(
 
   const blocks: JSONContent[] = [];
   let index = 0;
+
   while (index < lines.length) {
     const quote = isQuoteLine(lines[index]!);
     let end = index;
+
     while (end < lines.length && isQuoteLine(lines[end]!) === quote) {
       end += 1;
     }
+
     const groupLines = lines.slice(index, end);
     const groupStarts = lineGlobalStarts.slice(index, end);
+
     if (quote) {
       blocks.push(blockquoteFromLines(value, groupLines, groupStarts));
+
       if (
         isBlankLine(lines[end] ?? "") &&
         end + 1 < lines.length &&
@@ -269,6 +311,7 @@ export function promptEditorContentFromValue(
       const spanEnd = groupStarts[groupStarts.length - 1]! + lastLine.length;
       blocks.push(paragraphFromSpan(value, spanStart, spanEnd));
     }
+
     index = end;
   }
 
@@ -289,6 +332,7 @@ export function promptEditorInlineContentFromValue(
     if (mention.start < cursor) {
       continue;
     }
+
     content.push(...splitTextContent(value.text.slice(cursor, mention.start)));
     content.push({
       type: "mention",
@@ -313,6 +357,7 @@ function serializePromptEditorNode(
   let previousSerializedBlockWasBlockquote: boolean | null = null;
   const mentions: PromptTextMention[] = [];
   const offsetMapping: PromptEditorOffsetSegment[] = [];
+  let previousInline: ProseMirrorNode | null = null;
 
   const appendInlineText = (
     value: string,
@@ -329,54 +374,81 @@ function serializePromptEditorNode(
       docTo,
       kind,
     });
+
     return { start, end: text.length };
   };
 
   const appendBlockBoundary = (blockIsBlockquote: boolean) => {
+    previousInline = null;
+
     if (previousSerializedBlockWasBlockquote !== null) {
       text +=
         previousSerializedBlockWasBlockquote && !blockIsBlockquote
           ? "\n\n"
           : "\n";
     }
+
     previousSerializedBlockWasBlockquote = blockIsBlockquote;
   };
 
   const appendInline = (node: ProseMirrorNode, nodePosition: number) => {
     if (node.type.name === "text") {
       const value = node.text ?? "";
+
       if (value.length === 0) {
         return;
       }
+
+      if (needsMentionSeparator(previousInline, node)) {
+        text += " ";
+      }
+
+      previousInline = node;
+
       appendInlineText(
         value,
         nodePosition,
         nodePosition + node.nodeSize,
         "text",
       );
+
       return;
     }
+
     if (node.type.name === "hardBreak") {
       text += "\n";
+      previousInline = null;
+
       return;
     }
+
     if (node.type.name === "mention") {
       const attrs = parsePromptEditorMentionAttrs(node.attrs);
+
       if (attrs) {
+        if (needsMentionSeparator(previousInline, node)) {
+          text += " ";
+        }
+
+        previousInline = node;
+
         const span = appendInlineText(
           attrs.serializedText,
           nodePosition,
           nodePosition + node.nodeSize,
           "mention",
         );
+
         mentions.push({
           start: span.start,
           end: span.end,
           resource: attrs.resource,
         });
       }
+
       return;
     }
+
     appendChildren(node, nodePosition);
   };
 
@@ -385,25 +457,30 @@ function serializePromptEditorNode(
     const lines = inner.text.split("\n");
     const lineGlobalStarts: number[] = [];
     let innerOffset = 0;
+
     for (const line of lines) {
       lineGlobalStarts.push(innerOffset);
       innerOffset += line.length + 1;
     }
 
     const blockStart = text.length;
+
     const prefixedLines = lines.map((line) =>
       line.length > 0 ? `> ${line}` : ">",
     );
+
     text += prefixedLines.join("\n");
 
     const prefixedOffset = (offset: number): number => {
       let lineIndex = lines.length - 1;
+
       for (let index = 0; index < lines.length; index += 1) {
         if (offset <= lineGlobalStarts[index]! + lines[index]!.length) {
           lineIndex = index;
           break;
         }
       }
+
       const prefixDelta = prefixedLines
         .slice(0, lineIndex + 1)
         .reduce(
@@ -411,6 +488,7 @@ function serializePromptEditorNode(
             sum + (prefixedLine.length - lines[index]!.length),
           0,
         );
+
       return offset + prefixDelta;
     };
 
@@ -438,26 +516,31 @@ function serializePromptEditorNode(
       node.type.name === "mention"
     ) {
       appendInline(node, nodePosition);
+
       return;
     }
 
     if (node.type.name === "blockquote") {
       appendBlockBoundary(true);
       appendBlockquote(node, nodePosition);
+
       return;
     }
 
     if (node.isBlock && node.type.name !== "doc") {
       appendBlockBoundary(false);
       appendChildren(node, nodePosition);
+
       return;
     }
+
     appendChildren(node, nodePosition);
   };
 
   const appendChildren = (node: ProseMirrorNode, nodePosition: number) => {
     let childPosition =
       node.type.name === "doc" ? nodePosition : nodePosition + 1;
+
     for (let index = 0; index < node.childCount; index += 1) {
       const child = node.child(index);
       appendNode(child, childPosition);
@@ -480,6 +563,7 @@ export function promptEditorValueFromDoc(
   doc: ProseMirrorNode,
 ): PromptEditorValue {
   const { text, mentions } = promptEditorSerializationFromDoc(doc);
+
   return { text, mentions };
 }
 
@@ -488,6 +572,7 @@ export function promptEditorValueFromSlice(
   schema: Schema,
 ): PromptEditorValue {
   const doc = schema.topNodeType.createAndFill(null, slice.content);
+
   if (doc) {
     return promptEditorValueFromDoc(doc);
   }
@@ -501,9 +586,11 @@ export function promptEditorValueFromSlice(
 function selectionCoversWholeLines({ $from, $to }: Selection): boolean {
   const startsLine =
     $from.parentOffset === 0 || $from.nodeBefore?.type.name === "hardBreak";
+
   const endsLine =
     $to.parentOffset === $to.parent.content.size ||
     $to.nodeAfter?.type.name === "hardBreak";
+
   return startsLine && endsLine;
 }
 
@@ -518,8 +605,10 @@ export function promptEditorCopiedSlice(
   const schema = selection.$from.doc.type.schema;
   let { content, openStart, openEnd } = slice;
   let result = slice;
+
   while (openStart > 0 && openEnd > 0 && content.childCount === 1) {
     const ancestor = content.firstChild!;
+
     if (ancestor.isTextblock) {
       return new Slice(
         Fragment.from(schema.nodes.paragraph!.create(null, ancestor.content)),
@@ -527,13 +616,16 @@ export function promptEditorCopiedSlice(
         1,
       );
     }
+
     content = ancestor.content;
     openStart -= 1;
     openEnd -= 1;
+
     if (schema.topNodeType.validContent(content)) {
       result = new Slice(content, openStart, openEnd);
     }
   }
+
   return result;
 }
 

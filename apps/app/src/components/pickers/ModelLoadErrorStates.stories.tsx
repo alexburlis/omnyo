@@ -1,7 +1,10 @@
-import type { ReasoningLevel } from "@bb/domain";
-import type { SystemExecutionOptionsModelLoadError } from "@bb/server-contract";
+import type { ReasoningLevel } from "@omnyo/domain";
+import type { SystemExecutionOptionsModelLoadError } from "@omnyo/server-contract";
 import { ModelPickerStoryQueryProvider } from "../../../.ladle/model-picker-query-provider";
-import { STORY_PROVIDER_OPTIONS } from "../../../.ladle/story-fixtures";
+import {
+  STORY_PROVIDER_INFOS,
+  STORY_PROVIDER_OPTIONS,
+} from "../../../.ladle/story-fixtures";
 import { ModelReasoningPicker } from "./ModelReasoningPicker";
 import type { PickerOption } from "./OptionPicker";
 import type { ProviderPickerOption } from "./model-brand-prefix";
@@ -37,13 +40,15 @@ const reasoningOptions: readonly PickerOption<ReasoningLevel>[] = [
 ];
 
 interface EmptyCatalogPickerProps {
-  error: SystemExecutionOptionsModelLoadError;
+  error: SystemExecutionOptionsModelLoadError | null;
+  loading?: boolean;
   modelValue?: string;
   providerId?: string;
 }
 
 function EmptyCatalogPicker({
   error,
+  loading = false,
   modelValue = "gpt-5.5",
   providerId = "codex",
 }: EmptyCatalogPickerProps) {
@@ -54,6 +59,7 @@ function EmptyCatalogPicker({
         data-app-composer
       >
         <ModelReasoningPicker
+          providers={STORY_PROVIDER_INFOS}
           providerOptions={providerOptions}
           selectedProviderId={providerId}
           onSelectedProviderChange={() => {}}
@@ -61,12 +67,15 @@ function EmptyCatalogPicker({
           modelValue={modelValue}
           modelOptions={[]}
           moreModelOptions={[]}
-          modelIsLoading={false}
+          catalogModelOptions={[]}
+          modelCatalogIsVerified={false}
+          modelIsLoading={loading}
           modelLoadError={error}
           onModelChange={() => {}}
           reasoningValue="medium"
           reasoningOptions={reasoningOptions}
           onReasoningChange={() => {}}
+          onSelectionChange={() => true}
           serviceTierValue={undefined}
           serviceTierOptions={[]}
           onServiceTierChange={() => {}}
@@ -84,7 +93,7 @@ export function MissingCli() {
         providerId: "codex",
         code: "missing_executable",
         detail:
-          "bb could not find the Codex CLI on this machine. Install Codex (https://developers.openai.com/codex/cli) or put `codex` on PATH, then retry.",
+          "Omnyo could not find the Codex CLI on this machine. Install Codex (https://developers.openai.com/codex/cli) or put `codex` on PATH, then retry.",
       }}
     />
   );
@@ -139,4 +148,8 @@ export function ProviderPluginUnavailable() {
       }}
     />
   );
+}
+
+export function CatalogLoading() {
+  return <EmptyCatalogPicker error={null} loading />;
 }

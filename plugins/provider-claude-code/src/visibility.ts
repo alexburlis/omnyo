@@ -7,24 +7,30 @@ import {
   type JsonRpcMessage,
   type ProviderRawEventDescription,
   type ProviderVisibilityMetadata,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
+import { claudeBlockingInformationalSystemMessageSchema } from "./schemas.js";
 
 function getMessageContentTypes(message: Record<string, unknown>): string[] {
   const messagePayload = getRecordProperty(message, "message");
   const content = messagePayload?.["content"];
+
   if (!Array.isArray(content)) {
     return [];
   }
 
   const types = new Set<string>();
+
   for (const block of content) {
     if (!isRecord(block)) continue;
     const type = getStringProperty(block, "type");
+
     if (!type) continue;
     types.add(type);
   }
+
   return [...types];
 }
+
 const CLAUDE_NORMALIZED_ASSISTANT_CONTENT_TYPES = new Set([
   "fallback",
   "text",
@@ -49,6 +55,7 @@ type ClaudeSystemSubtype =
   | "hook_progress"
   | "hook_response"
   | "hook_started"
+  | "informational"
   | "init"
   | "local_command_output"
   | "memory_recall"
@@ -137,6 +144,7 @@ interface ClaudeUserRawEvent {
 interface ClaudeSystemRawEvent {
   kind: "sdk/system";
   subtype: ClaudeSystemSubtype;
+  blocksContinuation: boolean;
 }
 
 interface ClaudeResultRawEvent {
@@ -229,6 +237,7 @@ function toClaudeSystemSubtype(
     case "hook_progress":
     case "hook_response":
     case "hook_started":
+    case "informational":
     case "init":
     case "local_command_output":
     case "memory_recall":
@@ -324,11 +333,13 @@ function parseClaudeRawEvent(event: JsonRpcMessage): ClaudeRawEvent {
   }
 
   const message = getRawSdkMessage(event);
+
   if (!message) {
     return { kind: "sdk/unknown" };
   }
 
   const type = getStringProperty(message, "type");
+
   switch (type) {
     case "assistant":
       return {
@@ -352,13 +363,16 @@ function parseClaudeRawEvent(event: JsonRpcMessage): ClaudeRawEvent {
 
     case "stream_event": {
       const streamEvent = getRecordProperty(message, "event");
+
       const eventType = toClaudeStreamEventType(
         streamEvent ? getStringProperty(streamEvent, "type") : undefined,
       );
+
       if (eventType === "content_block_start") {
         const contentBlock = streamEvent
           ? getRecordProperty(streamEvent, "content_block")
           : null;
+
         return {
           kind: "sdk/stream_event",
           eventType,
@@ -373,10 +387,12 @@ function parseClaudeRawEvent(event: JsonRpcMessage): ClaudeRawEvent {
             : undefined,
         };
       }
+
       if (eventType === "content_block_delta") {
         const delta = streamEvent
           ? getRecordProperty(streamEvent, "delta")
           : null;
+
         return {
           kind: "sdk/stream_event",
           eventType,
@@ -387,6 +403,7 @@ function parseClaudeRawEvent(event: JsonRpcMessage): ClaudeRawEvent {
           thinking: delta ? getStringProperty(delta, "thinking") : undefined,
         };
       }
+
       return {
         kind: "sdk/stream_event",
         eventType,
@@ -397,6 +414,9 @@ function parseClaudeRawEvent(event: JsonRpcMessage): ClaudeRawEvent {
       return {
         kind: "sdk/system",
         subtype: toClaudeSystemSubtype(getStringProperty(message, "subtype")),
+        blocksContinuation:
+          claudeBlockingInformationalSystemMessageSchema.safeParse(message)
+            .success,
       };
 
     case "user":
@@ -428,6 +448,7 @@ function toClaudeMessageKind(
   if (contentTypes.length === 0) {
     return prefix;
   }
+
   return `${prefix}:${[...contentTypes].sort().join("+")}`;
 }
 
@@ -458,6 +479,7 @@ function describeParsedClaudeRawEvent(
 
     case "sdk/assistant": {
       const kind = toClaudeMessageKind("sdk/assistant", event.contentTypes);
+
       if (
         event.contentTypes.length > 0 &&
         event.contentTypes.every((contentType) =>
@@ -466,6 +488,7 @@ function describeParsedClaudeRawEvent(
       ) {
         return { kind, coverage: "normalized" };
       }
+
       return { kind, coverage: "unknown" };
     }
 
@@ -477,17 +500,25 @@ function describeParsedClaudeRawEvent(
 
     case "sdk/user": {
       const kind = toClaudeMessageKind("sdk/user", event.contentTypes);
+
       if (kind === "sdk/user:text") {
         return { kind, coverage: "noise" };
       }
+
       if (kind === "sdk/user:tool_result") {
         return { kind, coverage: "normalized" };
       }
+
       return { kind, coverage: "unknown" };
     }
 
     case "sdk/system":
       switch (event.subtype) {
+        case "informational":
+          return {
+            kind: "sdk/system:informational",
+            coverage: event.blocksContinuation ? "normalized" : "unknown",
+          };
         case "compact_boundary":
           return {
             kind: "sdk/system:compact_boundary",

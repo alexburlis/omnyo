@@ -7,14 +7,14 @@ import {
   listPendingInteractionsByThread,
   updateTerminalSession,
   type DbConnection,
-} from "@bb/db";
-import { threadScope } from "@bb/domain";
+} from "@omnyo/db";
+import { threadScope } from "@omnyo/domain";
 import {
   groupHostDaemonEvents,
   hostDaemonServerWsMessageSchema,
   type HostDaemonServerWsMessage,
-} from "@bb/host-daemon-contract";
-import { createDeferredPromise } from "@bb/test-helpers";
+} from "@omnyo/host-daemon-contract";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { callHostOnlineRpc } from "../../src/services/hosts/online-rpc.js";
 import { createServerMoveCoordinator } from "../../src/services/server-move/coordinator.js";
@@ -50,6 +50,7 @@ import {
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
 const MOVE_SOURCE_HOST_ID = "host-fence-source";
+
 const MOVE_TARGET_HOST_ID = "host-fence-target";
 
 interface CapturingDaemonSocket {
@@ -68,6 +69,7 @@ function connectCapturingDaemon(
   args: { hostId: string; sessionId: string },
 ): CapturingDaemonSocket {
   const messages: HostDaemonServerWsMessage[] = [];
+
   const socket: CapturingDaemonSocket = {
     close: vi.fn<(code?: number, reason?: string) => void>(),
     messages,
@@ -75,12 +77,15 @@ function connectCapturingDaemon(
       const parsed = hostDaemonServerWsMessageSchema.safeParse(
         JSON.parse(data),
       );
+
       if (parsed.success) {
         messages.push(parsed.data);
       }
     }),
   };
+
   harness.hub.registerDaemon(args.sessionId, args.hostId, socket);
+
   return socket;
 }
 
@@ -97,9 +102,11 @@ async function waitForSentMessage<
       ): message is Extract<HostDaemonServerWsMessage, { type: TType }> =>
         message.type === type,
     );
+
     if (found === undefined) {
       throw new Error(`The daemon never received ${type}`);
     }
+
     return found;
   });
 }
@@ -117,7 +124,9 @@ async function startThreadTerminalOpen(
       target: { kind: "thread", threadId: args.threadId },
     }),
   });
+
   const open = await waitForSentMessage(args.socket, "terminal.open");
+
   return { open, response: Promise.resolve(response) };
 }
 
@@ -131,6 +140,7 @@ function seedDaemonChanges(harness: TestAppHarness, hostId: string) {
       branchName: null,
     },
   });
+
   const terminal = createTerminalSession(harness.db, {
     cols: 100,
     daemonSessionId: session.id,
@@ -142,16 +152,20 @@ function seedDaemonChanges(harness: TestAppHarness, hostId: string) {
     threadId: thread.id,
     title: "zsh",
   });
+
   const socket = { close: vi.fn(), send: vi.fn() };
+
   const plugins = {
     handleHostSignal: vi.fn(),
     handleHostWorkerExit: vi.fn(),
   };
+
   const readTerminal = () =>
     getTerminalSession(harness.db, {
       kind: "terminal",
       terminalId: terminal.id,
     });
+
   return {
     feed() {
       for (const raw of [
@@ -253,6 +267,7 @@ function seedDisconnectedTerminal(harness: TestAppHarness, hostId: string) {
   } = seedThreadFixture(harness, {
     session: { id: hostId },
   });
+
   const terminal = createTerminalSession(harness.db, {
     cols: 100,
     daemonSessionId: previousSession.id,
@@ -264,11 +279,13 @@ function seedDisconnectedTerminal(harness: TestAppHarness, hostId: string) {
     threadId: thread.id,
     title: "zsh",
   });
+
   updateTerminalSession(harness.db, {
     scope: { kind: "terminal", terminalId: terminal.id },
     update: { kind: "disconnect", retainDaemonSession: false },
   });
   const session = seedSession(harness.deps, host.id);
+
   return {
     readTerminal: () =>
       getTerminalSession(harness.db, {
@@ -292,6 +309,7 @@ function seedDaemonSessionWrites(harness: TestAppHarness, hostId: string) {
   const { session, thread } = seedThreadFixture(harness, {
     session: { id: hostId },
   });
+
   const eventBatch = {
     sessionId: session.id,
     eventGroups: groupHostDaemonEvents([
@@ -306,6 +324,7 @@ function seedDaemonSessionWrites(harness: TestAppHarness, hostId: string) {
       },
     ]),
   };
+
   const writes: [string, unknown][] = [
     ["/internal/session/events", eventBatch],
     [
@@ -348,6 +367,7 @@ function seedDaemonSessionWrites(harness: TestAppHarness, hostId: string) {
       },
     ],
   ];
+
   return {
     eventBatch,
     post: (path: string, body: unknown) =>
@@ -374,15 +394,18 @@ function snapshotFenceMove(
   seedHost(harness.deps, { id: MOVE_TARGET_HOST_ID, name: "Desktop" });
   const { environment, events } = createTestServerMoveEnvironment(harness);
   const observed: string[] = [];
+
   const observe = (step: string) => {
     observed.push(
       `${step} frozen=${isServerMoveFrozen(harness.db)} fenced=${isServerMoveSnapshotFenced(harness.db)}`,
     );
   };
+
   const coordinator = createServerMoveCoordinator({
     ...environment,
     exportArchive: (args) => {
       observe("export");
+
       return environment.exportArchive(args);
     },
     plugins: {
@@ -396,6 +419,7 @@ function snapshotFenceMove(
       observe("stop work");
     },
   });
+
   const reply = (result: unknown): FakeDaemonReply => ({ ok: true, result });
   registerFakeDaemon(harness, {
     events,
@@ -415,12 +439,17 @@ function snapshotFenceMove(
         case "server_move.prepare":
           return prepare();
         case "server_move.abort":
-          return reply({ ok: true });
+          return reply({
+            ok: true,
+            moveId: request.command.moveId,
+            fenced: true,
+          });
         default:
           throw new Error(`Unexpected target command ${request.command.type}`);
       }
     },
   });
+
   return {
     coordinator,
     events,
@@ -441,6 +470,7 @@ describe("writes while a server move is frozen", () => {
       const changes = seedDaemonChanges(harness, "host-frozen-before-export");
 
       setServerMoveFrozen(harness.db, true);
+
       try {
         changes.feed();
         changes.expectApplied();
@@ -454,6 +484,7 @@ describe("writes while a server move is frozen", () => {
       const changes = seedDaemonChanges(harness, "host-frozen-writes");
 
       setSnapshotFence(harness.db, true);
+
       try {
         changes.feed();
         changes.expectDropped();
@@ -470,12 +501,15 @@ describe("writes while a server move is frozen", () => {
       const { host, session, environment } = seedThreadFixture(harness, {
         session: { id: "host-frozen-live" },
       });
+
       const socket = connectCapturingDaemon(harness, {
         hostId: host.id,
         sessionId: session.id,
       });
+
       const notifyEnvironment = vi.spyOn(harness.hub, "notifyEnvironment");
       const serverMove = { handleProgress: vi.fn() };
+
       const feed = (raw: object) =>
         onDaemonSocketMessage(
           harness.deps,
@@ -490,6 +524,7 @@ describe("writes while a server move is frozen", () => {
         );
 
       setSnapshotFence(harness.db, true);
+
       try {
         const probe = callHostOnlineRpc(harness.deps, {
           hostId: host.id,
@@ -500,6 +535,7 @@ describe("writes while a server move is frozen", () => {
             moveId: "move-frozen",
           },
         });
+
         const request = await waitForSentMessage(socket, "host-rpc.request");
         feed({
           type: "host-rpc.response",
@@ -548,16 +584,19 @@ describe("writes while a server move is frozen", () => {
       const { host, session, thread } = seedThreadFixture(harness, {
         session: { id: "host-frozen-terminal-open" },
       });
+
       const socket = connectCapturingDaemon(harness, {
         hostId: host.id,
         sessionId: session.id,
       });
+
       const { open, response } = await startThreadTerminalOpen(harness, {
         socket,
         threadId: thread.id,
       });
 
       setSnapshotFence(harness.db, true);
+
       try {
         onDaemonSocketMessage(harness.deps, {
           hostId: host.id,
@@ -602,16 +641,19 @@ describe("writes while a server move is frozen", () => {
       const { host, session, thread } = seedThreadFixture(harness, {
         session: { id: "host-frozen-terminal-error" },
       });
+
       const socket = connectCapturingDaemon(harness, {
         hostId: host.id,
         sessionId: session.id,
       });
+
       const { open, response } = await startThreadTerminalOpen(harness, {
         socket,
         threadId: thread.id,
       });
 
       setSnapshotFence(harness.db, true);
+
       try {
         onDaemonSocketMessage(harness.deps, {
           hostId: host.id,
@@ -648,6 +690,7 @@ describe("writes while a server move is frozen", () => {
       );
 
       setServerMoveFrozen(harness.db, true);
+
       try {
         disconnected.reconnect();
         expect(disconnected.readTerminal()).toMatchObject({
@@ -667,6 +710,7 @@ describe("writes while a server move is frozen", () => {
       );
 
       setSnapshotFence(harness.db, true);
+
       try {
         disconnected.reconnect();
         expect(disconnected.readTerminal()).toMatchObject({
@@ -692,6 +736,7 @@ describe("writes while a server move is frozen", () => {
       );
 
       setServerMoveFrozen(harness.db, true);
+
       try {
         for (const [path, body] of daemon.writes) {
           const response = await daemon.post(path, body);
@@ -699,25 +744,29 @@ describe("writes while a server move is frozen", () => {
             code: "server_moving",
           });
         }
+
         expect(daemon.systemErrorCount()).toBe(1);
       } finally {
         setServerMoveFrozen(harness.db, false);
       }
     }));
 
-  it("refuses daemon session writes over HTTP once the snapshot is taken and accepts them after", () =>
+  it("refuses daemon session writes over HTTP as retryable once the snapshot is taken and accepts them after", () =>
     withTestHarness(async (harness) => {
       const daemon = seedDaemonSessionWrites(harness, "host-frozen-internal");
 
       setSnapshotFence(harness.db, true);
+
       try {
         for (const [path, body] of daemon.writes) {
           const response = await daemon.post(path, body);
           expect(response.status, path).toBe(503);
           expect(await readJson(response), path).toMatchObject({
             code: "server_moving",
+            retryable: true,
           });
         }
+
         expect(daemon.systemErrorCount()).toBe(0);
         expect(
           listPendingInteractionsByThread(harness.db, {
@@ -732,6 +781,7 @@ describe("writes while a server move is frozen", () => {
         "/internal/session/events",
         daemon.eventBatch,
       );
+
       expect(accepted.status).toBe(200);
       expect(daemon.systemErrorCount()).toBe(1);
     }));
@@ -764,7 +814,7 @@ describe("the server move snapshot fence", () => {
       expect(isServerMoveFrozen(harness.db)).toBe(false);
     }));
 
-  it("lifts the snapshot fence as soon as a move is cancelled after the export", () =>
+  it("lifts the snapshot fence after cancellation proves the target fence", () =>
     withTestHarness(async (harness) => {
       const prepareReply = createDeferredPromise<FakeDaemonReply>();
       const move = snapshotFenceMove(harness, () => prepareReply.promise);
@@ -777,7 +827,7 @@ describe("the server move snapshot fence", () => {
         .toBe(true);
       expect(isServerMoveSnapshotFenced(harness.db)).toBe(true);
 
-      move.coordinator.cancel();
+      await move.coordinator.cancel();
 
       expect(isServerMoveSnapshotFenced(harness.db)).toBe(false);
       prepareReply.resolve({

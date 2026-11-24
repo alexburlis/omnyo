@@ -9,14 +9,13 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { useContext, useLayoutEffect, useState } from "react";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { threadsQueryKey } from "@/hooks/queries/query-keys";
+import { carryQueuedMessageRenderKey } from "@/hooks/cache-owners/queued-message-render-keys";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ThreadQueuedMessage } from "@bb/domain";
-import {
-  makeThreadListEntry,
-  makeThreadQueuedMessage,
-} from "@bb/test-helpers/domain-fixtures";
+import type { PromptInput, ThreadQueuedMessage } from "@omnyo/domain";
+import { makeThreadQueuedMessage } from "@omnyo/test-helpers/domain-fixtures";
 import type { Active, DroppableContainer } from "@dnd-kit/core";
 import { focusWithKeyboard } from "@/test/keyboard-focus";
 import {
@@ -58,6 +57,7 @@ function QueuedMessagesList({
   onExpandedChange?: QueuedMessagesListProps["onExpandedChange"];
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+
   return (
     <QueuedMessagesListComponent
       {...props}
@@ -92,6 +92,7 @@ function TypeaheadLayoutFixture({
   useLayoutEffect(() => {
     reportLayout?.(layout);
   }, [layout, reportLayout]);
+
   return <div>Inline editor</div>;
 }
 
@@ -196,9 +197,13 @@ function renderQueuedMessagesWithExpandedSpy(
 }
 
 function expandQueue() {
-  fireEvent.click(
-    screen.getByRole("button", { name: "Toggle queued messages" }),
-  );
+  const toggle = screen.queryByRole("button", {
+    name: /(?:Toggle|Show).*queued messages/,
+  });
+
+  if (toggle?.getAttribute("aria-expanded") === "false") {
+    fireEvent.click(toggle);
+  }
 }
 
 afterEach(() => {
@@ -218,6 +223,7 @@ describe("QueuedMessagesList", () => {
     { kind: "stopping" },
   ] as const)("offers Send now for a failed $kind row", (waitingOn) => {
     const onSend = vi.fn();
+
     const { getByRole, getByText } = render(
       <QueuedMessagesList
         queuedMessages={[
@@ -238,6 +244,7 @@ describe("QueuedMessagesList", () => {
         onDelete={noop}
       />,
     );
+
     expandQueue();
     expect(getByText("Provider unavailable")).toBeTruthy();
     const button = getByRole("button", { name: "Send queued message 1 now" });
@@ -246,86 +253,26 @@ describe("QueuedMessagesList", () => {
     expect(onSend).toHaveBeenCalledWith("failed-row");
   });
 
-  it("labels non-user senders and refreshes their names from the thread cache", async () => {
-    const queryClient = new QueryClient();
-    const messages = [
-      makeQueuedMessage("q_user", "User follow-up"),
-      makeThreadQueuedMessage({
-        id: "q_agent",
-        initiator: "agent",
-        senderThreadId: "thr_sender",
-      }),
-      makeThreadQueuedMessage({
-        id: "q_system",
-        initiator: "system",
-        waitingOn: { kind: "provisioning" },
-      }),
-    ];
-    const { container, getByText, getByRole } = render(
-      <QueryClientProvider client={queryClient}>
-        <QueuedMessagesList
-          queuedMessages={messages}
-          sendDisabled={false}
-          actionDisabled={false}
-          processingMessageId={null}
-          processingAction={null}
-          onSend={noop}
-          onReorder={noop}
-          onSetGroupBoundary={noop}
-          onEdit={noop}
-          onDelete={noop}
-        />
-      </QueryClientProvider>,
-    );
-    expandQueue();
-    expect(
-      container.querySelector(
-        '[data-queued-message-id="q_user"] [data-queued-message-sender]',
-      ),
-    ).toBeNull();
-    expect(
-      getByText("thr_sender").closest("[data-queued-message-metadata]"),
-    ).not.toBeNull();
-    expect(
-      getByText("System")
-        .closest("[data-queued-message-metadata]")
-        ?.querySelector("[data-queued-message-wait]"),
-    ).not.toBeNull();
-    expect(
-      getByText("thr_sender").closest(".prompt-mention-pill"),
-    ).not.toBeNull();
-    act(() => {
-      queryClient.setQueryData(threadsQueryKey(), [
-        makeThreadListEntry({ id: "thr_sender", title: "Code review" }),
-      ]);
-    });
-    await waitFor(() => expect(getByText("Code review")).toBeTruthy());
-    fireEvent.click(getByRole("button", { name: "Collapse queued messages" }));
-    fireEvent.click(getByRole("button", { name: "Toggle queued messages" }));
-    expect(getByText("Code review")).toBeTruthy();
-    expect(getByText("System")).toBeTruthy();
-    queryClient.clear();
-  });
-
   it.each([
-    { initiator: "system" as const, senderThreadId: null, height: "118px" },
+    { initiator: "system" as const, senderThreadId: null, height: "64px" },
     {
       initiator: "agent" as const,
       senderThreadId: "thr_sender",
-      height: "124px",
+      height: "70px",
     },
   ])(
-    "reserves the metadata height for $initiator senders",
-    ({ initiator, senderThreadId, height }) => {
+    "lets a single $initiator sender row size to its metadata",
+    ({ initiator, senderThreadId }) => {
       const { container } = renderQueuedMessages([
         makeThreadQueuedMessage({ initiator, senderThreadId }),
       ]);
+
       expandQueue();
       expect(
         container.querySelector<HTMLElement>(
           'section[aria-label="Queued messages"]',
         )?.style.height,
-      ).toBe(height);
+      ).toBe("");
     },
   );
 
@@ -334,6 +281,7 @@ describe("QueuedMessagesList", () => {
       [makeQueuedMessage("q_one", "First queued message")],
       false,
     );
+
     const surface = container.querySelector<HTMLElement>(
       'section[aria-label="Queued messages"]',
     );
@@ -344,58 +292,94 @@ describe("QueuedMessagesList", () => {
     expect(surface?.classList.contains("border-b-0")).toBe(false);
   });
 
-  it("starts collapsed and toggles a few messages through the fitted drawer", () => {
-    const { container, getByRole, getByText } = renderQueuedMessages([
+  it("shows a count summary while collapsed and expands every queued row", () => {
+    const { container, getByRole, queryByText } = renderQueuedMessages([
       makeQueuedMessage("q_one", "First queued message"),
       makeQueuedMessage("q_two", "Second queued message"),
     ]);
+
     const header = container.querySelector<HTMLElement>(
       "[data-queued-messages-mode]",
     );
+
     const surface = container.querySelector<HTMLElement>(
       'section[aria-label="Queued messages"]',
     );
-    const toggle = getByRole("button", { name: "Toggle queued messages" });
 
-    expect(getByText("Queue")).not.toBeNull();
+    const toggle = getByRole("button", {
+      name: /(?:Toggle|Show).*queued messages/,
+    });
+
+    const row = (id: string) =>
+      container.querySelector<HTMLElement>(`[data-queued-message-id="${id}"]`);
+
+    const count = () =>
+      container.querySelector<HTMLElement>("[data-queued-messages-count]");
+
+    expect(queryByText("Queue")).toBeNull();
     expect(header?.getAttribute("data-queued-messages-mode")).toBe("collapsed");
-    expect(surface?.style.height).toBe("44px");
+    expect(surface?.style.height).toBe("61px");
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-
-    fireEvent.click(toggle);
-    expect(header?.getAttribute("data-queued-messages-mode")).toBe("drawer");
-    expect(surface?.style.height).toBe("135px");
+    expect(toggle.querySelector('[data-icon="ChevronDown"]')).not.toBeNull();
+    expect(count()?.textContent).toBe("2");
+    expect(row("q_one")?.closest("[hidden]")).not.toBeNull();
+    expect(row("q_two")?.hasAttribute("inert")).toBe(true);
+    expect(row("q_two")?.getAttribute("aria-hidden")).toBe("true");
     expect(
-      getByRole("button", { name: "Collapse queued messages" }).querySelector(
-        '[data-icon="ChevronUp"]',
-      ),
-    ).not.toBeNull();
-    expect(document.activeElement).toBe(
-      getByRole("button", { name: "Collapse queued messages" }),
-    );
+      screen.queryByRole("button", { name: "Send queued message 1 now" }),
+    ).toBeNull();
 
-    fireEvent.click(getByRole("button", { name: "Collapse queued messages" }));
-    expect(header?.getAttribute("data-queued-messages-mode")).toBe("collapsed");
-    expect(surface?.style.height).toBe("44px");
-    expect(document.activeElement).toBe(toggle);
-
-    fireEvent.click(toggle);
-    expect(surface?.style.height).toBe("135px");
     toggle.focus();
     fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(surface?.style.height).toBe("44px");
+    expect(header?.getAttribute("data-queued-messages-mode")).toBe("drawer");
+    expect(surface?.style.height).toBe("81px");
+    expect(
+      toggle.querySelector('[data-icon="ChevronDown"]')?.getAttribute("class"),
+    ).toContain("rotate-180");
+    expect(count()?.textContent).toBe("2");
+    expect(row("q_two")?.hasAttribute("inert")).toBe(false);
     expect(document.activeElement).toBe(toggle);
+
+    fireEvent.click(toggle);
+    expect(header?.getAttribute("data-queued-messages-mode")).toBe("collapsed");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(surface?.style.height).toBe("61px");
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it("needs no toggle for a single message and keeps its row usable", () => {
+    const { container, queryByRole, getByRole } = renderQueuedMessages([
+      makeQueuedMessage("q_one", "First queued message"),
+    ]);
+
+    expect(
+      queryByRole("button", { name: /(?:Toggle|Show).*queued messages/ }),
+    ).toBeNull();
+    expect(container.querySelector("[data-queued-messages-count]")).toBeNull();
+    expect(
+      container.querySelector<HTMLElement>(
+        'section[aria-label="Queued messages"]',
+      )?.style.height,
+    ).toBe("");
+    expect(
+      container.querySelector("[data-queued-message-position]")?.textContent,
+    ).toBe("1");
+    expect(
+      getByRole("button", { name: "Delete queued message 1" }),
+    ).not.toBeNull();
   });
 
   it("gives a row that renders a wait line room for it", () => {
     const plain = renderQueuedMessages([
       makeQueuedMessage("q_one", "First queued message"),
     ]);
+
     expandQueue();
+
     const plainHeight = plain.container.querySelector<HTMLElement>(
       'section[aria-label="Queued messages"]',
     )?.style.height;
+
     cleanup();
 
     const waiting = renderQueuedMessages([
@@ -409,13 +393,15 @@ describe("QueuedMessagesList", () => {
         sendAt: Date.now() + 60_000,
       },
     ]);
+
     expandQueue();
+
     const waitingHeight = waiting.container.querySelector<HTMLElement>(
       'section[aria-label="Queued messages"]',
     )?.style.height;
 
-    expect(plainHeight).toBe("102px");
-    expect(waitingHeight).toBe("118px");
+    expect(plainHeight).toBe("");
+    expect(waitingHeight).toBe("");
   });
 
   it("toggles an overflowing queue with the same disclosure as a fitted queue", () => {
@@ -424,15 +410,26 @@ describe("QueuedMessagesList", () => {
         makeQueuedMessage(`q_${index}`, `Queued message ${index + 1}`),
       ),
     );
+
     const header = container.querySelector<HTMLElement>(
       "[data-queued-messages-mode]",
     );
 
+    const surface = container.querySelector<HTMLElement>(
+      'section[aria-label="Queued messages"]',
+    );
+
     expect(header?.getAttribute("data-queued-messages-mode")).toBe("collapsed");
-    fireEvent.click(getByRole("button", { name: "Toggle queued messages" }));
+    fireEvent.click(
+      getByRole("button", { name: /(?:Toggle|Show).*queued messages/ }),
+    );
     expect(header?.getAttribute("data-queued-messages-mode")).toBe("drawer");
-    fireEvent.click(getByRole("button", { name: "Collapse queued messages" }));
+    expect(surface?.style.height).toBe("163px");
+    fireEvent.click(
+      getByRole("button", { name: /(?:Toggle|Show).*queued messages/ }),
+    );
     expect(header?.getAttribute("data-queued-messages-mode")).toBe("collapsed");
+    expect(surface?.style.height).toBe("61px");
   });
 
   it("stays collapsed and bumps the count when a queued message arrives", () => {
@@ -447,9 +444,15 @@ describe("QueuedMessagesList", () => {
       onEdit: noop,
       onDelete: noop,
     } as const;
+
     const firstMessage = makeQueuedMessage("q_one", "First queued message");
+    const secondMessage = makeQueuedMessage("q_two", "Second queued message");
+
     const { container, rerender } = render(
-      <QueuedMessagesList {...sharedProps} queuedMessages={[firstMessage]} />,
+      <QueuedMessagesList
+        {...sharedProps}
+        queuedMessages={[firstMessage, secondMessage]}
+      />,
     );
 
     expect(
@@ -460,13 +463,15 @@ describe("QueuedMessagesList", () => {
 
     const count = () =>
       container.querySelector<HTMLElement>("[data-queued-messages-count]");
-    expect(count()?.classList.contains("bb-count-flash")).toBe(false);
 
-    const secondMessage = makeQueuedMessage("q_two", "Second queued message");
+    expect(count()?.textContent).toBe("2");
+    expect(count()?.classList.contains("omnyo-count-flash")).toBe(false);
+
+    const thirdMessage = makeQueuedMessage("q_three", "Third queued message");
     rerender(
       <QueuedMessagesList
         {...sharedProps}
-        queuedMessages={[firstMessage, secondMessage]}
+        queuedMessages={[firstMessage, secondMessage, thirdMessage]}
       />,
     );
 
@@ -479,21 +484,234 @@ describe("QueuedMessagesList", () => {
       container.querySelector<HTMLElement>(
         'section[aria-label="Queued messages"]',
       )?.style.height,
-    ).toBe("44px");
-    expect(count()?.classList.contains("bb-count-flash")).toBe(true);
+    ).toBe("61px");
+    expect(count()?.classList.contains("omnyo-count-flash")).toBe(true);
+
     const previousCount = container.querySelector<HTMLElement>(
       "[data-queued-messages-previous-count]",
     );
-    expect(previousCount?.textContent).toBe("1");
-    expect(count()?.lastElementChild?.textContent).toBe("2");
+
+    expect(previousCount?.textContent).toBe("2");
+    expect(count()?.lastElementChild?.textContent).toBe("3");
 
     rerender(
-      <QueuedMessagesList {...sharedProps} queuedMessages={[secondMessage]} />,
+      <QueuedMessagesList
+        {...sharedProps}
+        queuedMessages={[secondMessage, thirdMessage]}
+      />,
     );
-    expect(count()?.textContent).toBe("1");
+    expect(count()?.textContent).toBe("2");
     expect(
       container.querySelector("[data-queued-messages-previous-count]"),
     ).toBeNull();
+  });
+
+  it("grows the card in when the first message arrives and keeps it until its exit finishes", async () => {
+    let finishExit = noop;
+
+    const animate = vi.fn(() => ({
+      finished: new Promise<void>((resolve) => {
+        finishExit = resolve;
+      }),
+      cancel: noop,
+    }));
+
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      value: animate,
+    });
+    document.documentElement.style.setProperty(
+      "--motion-ease-smooth",
+      "linear(0, 1)",
+    );
+
+    try {
+      const sharedProps = {
+        sendDisabled: false,
+        actionDisabled: false,
+        processingMessageId: null,
+        processingAction: null,
+        onSend: noop,
+        onReorder: noop,
+        onSetGroupBoundary: noop,
+        onEdit: noop,
+        onDelete: noop,
+      } as const;
+
+      const card = () =>
+        container.querySelector<HTMLElement>(
+          'section[aria-label="Queued messages"]',
+        );
+
+      const { container, rerender } = render(
+        <QueuedMessagesList {...sharedProps} queuedMessages={[]} />,
+      );
+
+      expect(card()).toBeNull();
+
+      const message = makeQueuedMessage("q_arrives", "Arrives later");
+      rerender(
+        <QueuedMessagesList {...sharedProps} queuedMessages={[message]} />,
+      );
+
+      expect(card()?.classList.contains("omnyo-queue-card-enter")).toBe(true);
+      expect(card()?.style.height).toBe("");
+
+      rerender(<QueuedMessagesList {...sharedProps} queuedMessages={[]} />);
+
+      expect(animate).toHaveBeenCalledTimes(1);
+      expect(animate).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({ easing: "linear(0, 1)" }),
+      );
+      expect(card()?.textContent).toContain("Arrives later");
+
+      await act(async () => {
+        finishExit();
+      });
+
+      expect(card()).toBeNull();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "animate");
+      document.documentElement.style.removeProperty("--motion-ease-smooth");
+    }
+  });
+
+  it("does not animate a queue that is already there when it mounts", () => {
+    const { container } = render(
+      <QueuedMessagesList
+        queuedMessages={[makeQueuedMessage("q_present", "Already queued")]}
+        sendDisabled={false}
+        actionDisabled={false}
+        processingMessageId={null}
+        processingAction={null}
+        onSend={noop}
+        onReorder={noop}
+        onSetGroupBoundary={noop}
+        onEdit={noop}
+        onDelete={noop}
+      />,
+    );
+
+    expect(
+      container
+        .querySelector('section[aria-label="Queued messages"]')
+        ?.classList.contains("omnyo-queue-card-enter"),
+    ).toBe(false);
+  });
+
+  it("disables only placeholder row actions while acknowledged rows stay actionable", () => {
+    const onSend = vi.fn();
+    const onEdit = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <QueuedMessagesList
+        queuedMessages={[
+          makeQueuedMessage("optimistic-queued-pending", "Pending"),
+          makeQueuedMessage("q_real", "Ready"),
+        ]}
+        sendDisabled={false}
+        actionDisabled={false}
+        processingMessageId={null}
+        processingAction={null}
+        onSend={onSend}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onReorder={noop}
+        onSetGroupBoundary={noop}
+        defaultExpanded={true}
+      />,
+    );
+
+    for (const label of [
+      "Send queued message 1 now",
+      "Edit queued message 1",
+      "Delete queued message 1",
+    ]) {
+      const button = screen.getByRole("button", { name: label });
+      expect(button).toHaveProperty("disabled", true);
+      fireEvent.click(button);
+    }
+
+    expect(
+      screen.getByRole("button", { name: "Edit queued message 2" }),
+    ).toHaveProperty("disabled", false);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete queued message 2" }),
+    );
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(onDelete).toHaveBeenCalledExactlyOnceWith("q_real");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps a row mounted when its optimistic id is confirmed by the server", () => {
+    const queryClient = new QueryClient();
+
+    const sharedProps = {
+      sendDisabled: false,
+      actionDisabled: false,
+      processingMessageId: null,
+      processingAction: null,
+      onSend: noop,
+      onReorder: noop,
+      onSetGroupBoundary: noop,
+      onEdit: noop,
+      onDelete: noop,
+      defaultExpanded: true,
+    } as const;
+
+    const existing = makeQueuedMessage("q_existing", "Existing message");
+    const optimistic = makeQueuedMessage("optimistic-queued-1", "Just sent");
+
+    const { container, rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <QueuedMessagesList
+          {...sharedProps}
+          queuedMessages={[existing, optimistic]}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (id: string) =>
+      container.querySelector<HTMLElement>(`[data-queued-message-id="${id}"]`);
+
+    const optimisticRow = row("optimistic-queued-1");
+    expect(optimisticRow?.classList.contains("omnyo-queue-row-enter")).toBe(
+      false,
+    );
+
+    carryQueuedMessageRenderKey(queryClient, "optimistic-queued-1", "q_server");
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <QueuedMessagesList
+          {...sharedProps}
+          queuedMessages={[existing, { ...optimistic, id: "q_server" }]}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(row("q_server")).toBe(optimisticRow);
+
+    const arrival = makeQueuedMessage("q_arrival", "Another one");
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <QueuedMessagesList
+          {...sharedProps}
+          queuedMessages={[
+            existing,
+            { ...optimistic, id: "q_server" },
+            arrival,
+          ]}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(row("q_arrival")?.classList.contains("omnyo-queue-row-enter")).toBe(
+      true,
+    );
+    expect(row("q_server")?.classList.contains("omnyo-queue-row-enter")).toBe(
+      false,
+    );
   });
 
   it("does not replay the arrival flash for restored or replaced messages", () => {
@@ -508,34 +726,43 @@ describe("QueuedMessagesList", () => {
       onEdit: noop,
       onDelete: noop,
     } as const;
+
+    const leadMessage = makeQueuedMessage("q_lead", "Lead queued message");
     const firstMessage = makeQueuedMessage("q_one", "First queued message");
     const secondMessage = makeQueuedMessage("q_two", "Second queued message");
+
     const { container, rerender } = render(
       <QueuedMessagesList
         {...sharedProps}
-        queuedMessages={[firstMessage, secondMessage]}
+        queuedMessages={[leadMessage, firstMessage, secondMessage]}
       />,
     );
+
     const count = () =>
       container.querySelector<HTMLElement>("[data-queued-messages-count]");
+
     const restingPill = count();
 
     rerender(
-      <QueuedMessagesList {...sharedProps} queuedMessages={[firstMessage]} />,
+      <QueuedMessagesList
+        {...sharedProps}
+        queuedMessages={[leadMessage, firstMessage]}
+      />,
     );
     rerender(
       <QueuedMessagesList
         {...sharedProps}
-        queuedMessages={[firstMessage, secondMessage]}
+        queuedMessages={[leadMessage, firstMessage, secondMessage]}
       />,
     );
     expect(count()).toBe(restingPill);
-    expect(count()?.classList.contains("bb-count-flash")).toBe(false);
+    expect(count()?.classList.contains("omnyo-count-flash")).toBe(false);
 
     rerender(
       <QueuedMessagesList
         {...sharedProps}
         queuedMessages={[
+          leadMessage,
           firstMessage,
           secondMessage,
           makeQueuedMessage("optimistic-queued-1", "Third queued message"),
@@ -543,12 +770,13 @@ describe("QueuedMessagesList", () => {
       />,
     );
     const bumpedPill = count();
-    expect(bumpedPill?.classList.contains("bb-count-flash")).toBe(true);
+    expect(bumpedPill?.classList.contains("omnyo-count-flash")).toBe(true);
 
     rerender(
       <QueuedMessagesList
         {...sharedProps}
         queuedMessages={[
+          leadMessage,
           firstMessage,
           secondMessage,
           makeQueuedMessage("q_three", "Third queued message"),
@@ -556,10 +784,10 @@ describe("QueuedMessagesList", () => {
       />,
     );
     expect(count()).toBe(bumpedPill);
-    expect(count()?.lastElementChild?.textContent).toBe("3");
+    expect(count()?.lastElementChild?.textContent).toBe("4");
   });
 
-  it("names the newest failure, else the newest wait, in the collapsed header", () => {
+  it("flags a failure hidden behind the collapsed tray on its count", () => {
     const sharedProps = {
       sendDisabled: false,
       actionDisabled: false,
@@ -571,79 +799,55 @@ describe("QueuedMessagesList", () => {
       onEdit: noop,
       onDelete: noop,
     } as const;
+
     const plainMessage = makeQueuedMessage("q_plain", "Plain follow-up");
-    const retryMessage = makeThreadQueuedMessage({
-      id: "q_retry",
-      payload: {
-        kind: "retry",
-        retryOfTurnRequestId: "req_1",
-        attempt: 2,
-        reason: "Rate limited",
-      },
-      waitingOn: { kind: "time" },
-      sendAt: 0,
-      createdAt: 2,
-    });
+    const otherMessage = makeQueuedMessage("q_other", "Another follow-up");
+
     const failedMessage = {
       ...makeQueuedMessage("q_failed", "Post the summary"),
       failureReason: "Provider unavailable",
-      createdAt: 1,
     };
-    const draftMessage = {
-      ...makeQueuedMessage("q_draft", "Release notes outline"),
-      waitingOn: { kind: "plugin" as const, pluginId: "drafts", reason: "Draft" },
-      createdAt: 3,
-    };
+
     const { container, rerender } = render(
       <QueuedMessagesList
         {...sharedProps}
-        queuedMessages={[plainMessage, retryMessage, failedMessage]}
+        queuedMessages={[plainMessage, otherMessage, failedMessage]}
       />,
     );
-    const headerWait = () =>
-      container.querySelector<HTMLElement>(
-        "header [data-queued-message-wait]",
-      );
 
-    expect(headerWait()?.textContent).toBe("Provider unavailable");
-    expect(headerWait()?.hasAttribute("data-queued-message-failed")).toBe(true);
+    const tone = () =>
+      container
+        .querySelector("[data-queued-messages-count]")
+        ?.getAttribute("data-queued-messages-count-tone");
+
+    expect(tone()).toBe("failed");
 
     rerender(
       <QueuedMessagesList
         {...sharedProps}
-        queuedMessages={[plainMessage, retryMessage]}
+        queuedMessages={[failedMessage, plainMessage, otherMessage]}
       />,
     );
-    expect(headerWait()?.textContent).toMatch(
-      /^Rate limited · retrying at .* · attempt 2$/u,
-    );
-
-    rerender(
-      <QueuedMessagesList
-        {...sharedProps}
-        queuedMessages={[retryMessage, plainMessage, draftMessage]}
-      />,
-    );
-    expect(headerWait()?.textContent).toMatch(/· Draft$/u);
-
-    expandQueue();
-    expect(headerWait()).toBeNull();
-  });
-
-  it("shows no header wait for ordinary queued messages", () => {
-    const { container } = renderQueuedMessages([
-      {
-        ...makeQueuedMessage("q_busy", "Ordinary queued"),
-        waitingOn: { kind: "thread-busy" },
-      },
-    ]);
+    expect(tone()).toBe("failed");
     expect(
-      container.querySelector("header [data-queued-message-wait]"),
-    ).toBeNull();
+      container.querySelector(
+        '[data-queued-message-id="q_failed"] [data-queued-message-failed]',
+      )?.textContent,
+    ).toBe("Provider unavailable");
+
+    rerender(
+      <QueuedMessagesList
+        {...sharedProps}
+        queuedMessages={[plainMessage, otherMessage, failedMessage]}
+      />,
+    );
+    expandQueue();
+    expect(tone()).toBe("neutral");
   });
 
   it("reports each open and close to its owner", () => {
     const onExpandedChange = vi.fn();
+
     const { container, getByRole } = renderQueuedMessagesWithExpandedSpy(
       [
         makeQueuedMessage("q_one", "First queued message"),
@@ -651,16 +855,21 @@ describe("QueuedMessagesList", () => {
       ],
       onExpandedChange,
     );
+
     const mode = () =>
       container
         .querySelector("[data-queued-messages-mode]")
         ?.getAttribute("data-queued-messages-mode");
 
-    fireEvent.click(getByRole("button", { name: "Toggle queued messages" }));
+    fireEvent.click(
+      getByRole("button", { name: /(?:Toggle|Show).*queued messages/ }),
+    );
     expect(onExpandedChange).toHaveBeenLastCalledWith(true);
     expect(mode()).toBe("drawer");
 
-    fireEvent.click(getByRole("button", { name: "Collapse queued messages" }));
+    fireEvent.click(
+      getByRole("button", { name: /(?:Toggle|Show).*queued messages/ }),
+    );
     expect(onExpandedChange).toHaveBeenLastCalledWith(false);
     expect(mode()).toBe("collapsed");
   });
@@ -670,14 +879,17 @@ describe("QueuedMessagesList", () => {
       renderQueuedMessages([
         makeQueuedMessage("q_one", "First queued message"),
       ]);
+
     expandQueue();
 
     const sendButton = getByRole("button", {
       name: "Send queued message 1 now",
     });
+
     const editButton = getByRole("button", {
       name: "Edit queued message 1",
     });
+
     const deleteButton = getByRole("button", {
       name: "Delete queued message 1",
     });
@@ -715,6 +927,7 @@ describe("QueuedMessagesList", () => {
     const { container } = renderQueuedMessages([
       makeQueuedMessage("q_one", "First queued message"),
     ]);
+
     const actions = container.querySelector("[data-queued-message-actions]");
 
     expect(actions?.classList.contains("max-md:hidden")).toBe(true);
@@ -727,10 +940,13 @@ describe("QueuedMessagesList", () => {
       makeQueuedMessage("q_one", "First queued message"),
       makeQueuedMessage("q_two", "Second queued message"),
     ]);
+
     expandQueue();
+
     const firstActions = getByRole("button", {
       name: "Queued message 1 actions",
     });
+
     const secondActions = getByRole("button", {
       name: "Queued message 2 actions",
     });
@@ -750,8 +966,12 @@ describe("QueuedMessagesList", () => {
     expect(secondActions.getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.click(firstActions);
-    fireEvent.click(getByRole("button", { name: "Collapse queued messages" }));
-    fireEvent.click(getByRole("button", { name: "Toggle queued messages" }));
+    fireEvent.click(
+      getByRole("button", { name: /(?:Toggle|Show).*queued messages/ }),
+    );
+    fireEvent.click(
+      getByRole("button", { name: /(?:Toggle|Show).*queued messages/ }),
+    );
     expect(firstActions.getAttribute("aria-expanded")).toBe("false");
   });
 
@@ -775,7 +995,9 @@ describe("QueuedMessagesList", () => {
           onDelete={noop}
         />,
       );
+
       expandQueue();
+
       const trigger = getByRole("button", {
         name: "Queued message 1 actions",
       });
@@ -793,10 +1015,13 @@ describe("QueuedMessagesList", () => {
     const { getByRole } = renderQueuedMessages([
       makeQueuedMessage("q_one", "First queued message"),
     ]);
+
     expandQueue();
+
     const reorderButton = getByRole("button", {
       name: "Reorder queued message 1",
     });
+
     focusWithKeyboard(reorderButton);
 
     fireEvent.click(getByRole("button", { name: "Queued message 1 actions" }), {
@@ -808,6 +1033,7 @@ describe("QueuedMessagesList", () => {
 
   it("replaces the edited row with the real inline composer", () => {
     const onDismiss = vi.fn();
+
     const queuedMessages = [
       makeQueuedMessage("q_one", "First queued message"),
       makeQueuedMessage("q_two", "Second queued message"),
@@ -837,9 +1063,11 @@ describe("QueuedMessagesList", () => {
     expect(
       container.querySelector("[data-queued-message-inline-editor]"),
     ).not.toBeNull();
+
     const inlineEditorSlot = container.querySelector(
       "[data-queued-message-inline-editor]",
     );
+
     expect(
       inlineEditorSlot?.querySelector(
         '[data-overflow-fade="above"][data-overflow-fade-tone="surface-raised"]',
@@ -904,6 +1132,7 @@ describe("QueuedMessagesList", () => {
     const scrollFrame = container.querySelector(
       "[data-queued-messages-scroll-frame]",
     );
+
     expect(scrollFrame?.hasAttribute("inert")).toBe(false);
     expect(scrollFrame?.getAttribute("aria-hidden")).not.toBe("true");
   });
@@ -912,6 +1141,7 @@ describe("QueuedMessagesList", () => {
     const queuedMessages = Array.from({ length: 4 }, (_, index) =>
       makeQueuedMessage(`q_${index}`, `Queued message ${index + 1}`),
     );
+
     const sharedProps = {
       queuedMessages,
       defaultExpanded: true,
@@ -925,6 +1155,7 @@ describe("QueuedMessagesList", () => {
       onEdit: noop,
       onDelete: noop,
     } as const;
+
     const { container, rerender } = render(
       <QueuedMessagesList
         {...sharedProps}
@@ -936,11 +1167,12 @@ describe("QueuedMessagesList", () => {
         }}
       />,
     );
+
     const surface = container.querySelector<HTMLElement>(
       'section[aria-label="Queued messages"]',
     );
 
-    expect(surface?.style.height).toBe("240px");
+    expect(surface?.style.height).toBe("216px");
 
     rerender(<QueuedMessagesList {...sharedProps} />);
 
@@ -950,16 +1182,18 @@ describe("QueuedMessagesList", () => {
           .querySelector("[data-queued-messages-mode]")
           ?.getAttribute("data-queued-messages-mode"),
       ).toBe("drawer");
-      expect(surface?.style.height).toBe("198px");
+      expect(surface?.style.height).toBe("147px");
     });
   });
 
-  it("keeps an explicitly collapsed inline editor collapsed after dismissal", async () => {
+  it("leaves the editor's own dismiss as the only way out while editing inline", async () => {
     const onDismiss = vi.fn();
+
     const queuedMessages = [
       makeQueuedMessage("q_one", "First queued message"),
       makeQueuedMessage("q_two", "Second queued message"),
     ];
+
     const sharedProps = {
       queuedMessages,
       sendDisabled: false,
@@ -972,7 +1206,8 @@ describe("QueuedMessagesList", () => {
       onEdit: noop,
       onDelete: noop,
     } as const;
-    const { container, getByRole, rerender } = render(
+
+    const { container, getByRole, queryByRole, rerender } = render(
       <QueuedMessagesList
         {...sharedProps}
         inlineEditor={{
@@ -984,7 +1219,12 @@ describe("QueuedMessagesList", () => {
       />,
     );
 
-    fireEvent.click(getByRole("button", { name: "Collapse queued messages" }));
+    expect(
+      queryByRole("button", { name: /(?:Toggle|Show).*queued messages/ }),
+    ).toBeNull();
+    fireEvent.click(
+      getByRole("button", { name: "Stop editing queued message" }),
+    );
     expect(onDismiss).toHaveBeenCalledOnce();
 
     rerender(<QueuedMessagesList {...sharedProps} />);
@@ -1005,14 +1245,17 @@ describe("QueuedMessagesList", () => {
 
     const nativeGetBoundingClientRect =
       HTMLElement.prototype.getBoundingClientRect;
+
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
       function (this: HTMLElement) {
         if (this.hasAttribute("data-queue-test-footer")) {
           return new DOMRect(0, 0, 600, 420);
         }
+
         if (this.getAttribute("aria-label") === "Queued messages") {
           return new DOMRect(0, 0, 600, 240);
         }
+
         return nativeGetBoundingClientRect.call(this);
       },
     );
@@ -1021,6 +1264,7 @@ describe("QueuedMessagesList", () => {
       makeQueuedMessage("q_one", "First queued message"),
       makeQueuedMessage("q_two", "Second queued message"),
     ];
+
     const sharedProps = {
       queuedMessages,
       defaultExpanded: true,
@@ -1034,6 +1278,7 @@ describe("QueuedMessagesList", () => {
       onEdit: noop,
       onDelete: noop,
     } as const;
+
     const renderSurface = (editing: boolean) => (
       <div data-queue-test-footer="">
         <div data-app-composer="">
@@ -1054,10 +1299,13 @@ describe("QueuedMessagesList", () => {
         </div>
       </div>
     );
+
     const { container, rerender } = render(renderSurface(true));
+
     const surface = container.querySelector<HTMLElement>(
       'section[aria-label="Queued messages"]',
     );
+
     const composer = container.querySelector("[data-test-bottom-composer]");
 
     await waitFor(() => expect(surface?.style.height).toBe("140px"));
@@ -1068,7 +1316,7 @@ describe("QueuedMessagesList", () => {
     rerender(renderSurface(false));
 
     await waitFor(() => {
-      expect(surface?.style.height).toBe("135px");
+      expect(surface?.style.height).toBe("81px");
       expect(
         container
           .querySelector("[data-queued-messages-mode]")
@@ -1084,28 +1332,35 @@ describe("QueuedMessagesList", () => {
 
     const nativeGetBoundingClientRect =
       HTMLElement.prototype.getBoundingClientRect;
+
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
       function (this: HTMLElement) {
         if (this.hasAttribute("data-queue-test-footer")) {
           return new DOMRect(0, 0, 600, 340);
         }
+
         if (this.getAttribute("aria-label") === "Queued messages") {
           return new DOMRect(0, 0, 600, 240);
         }
+
         if (this.hasAttribute("data-queued-messages-scroll")) {
           return new DOMRect(0, 32, 600, 180);
         }
+
         if (this.hasAttribute("data-queued-message-inline-editor")) {
           return new DOMRect(0, 112, 600, 130);
         }
+
         if (this.hasAttribute("data-queued-message-row")) {
           if (this.textContent?.includes("Previous queued message")) {
             return new DOMRect(0, 32, 600, 80);
           }
+
           if (this.textContent?.includes("Following queued message")) {
             return new DOMRect(0, 242, 600, 90);
           }
         }
+
         return nativeGetBoundingClientRect.call(this);
       },
     );
@@ -1115,6 +1370,7 @@ describe("QueuedMessagesList", () => {
       makeQueuedMessage("q_editing", "Edited queued message"),
       makeQueuedMessage("q_following", "Following queued message"),
     ];
+
     const { container } = render(
       <div data-queue-test-footer="">
         <div data-app-composer="">
@@ -1140,6 +1396,7 @@ describe("QueuedMessagesList", () => {
         </div>
       </div>,
     );
+
     const surface = container.querySelector<HTMLElement>(
       'section[aria-label="Queued messages"]',
     );
@@ -1149,6 +1406,7 @@ describe("QueuedMessagesList", () => {
 
   it("realigns both neighbors as the edit surface finishes growing", async () => {
     let notifyResize = noop;
+
     class ResizeObserverMock {
       constructor(callback: ResizeObserverCallback) {
         notifyResize = () => callback([], this as unknown as ResizeObserver);
@@ -1158,6 +1416,7 @@ describe("QueuedMessagesList", () => {
       unobserve() {}
       disconnect() {}
     }
+
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
 
     const viewport = document.createElement("div");
@@ -1165,33 +1424,42 @@ describe("QueuedMessagesList", () => {
     bottomAnchorMocks.scrollElement = viewport;
 
     let queueViewportBottom = 180;
+
     const nativeGetBoundingClientRect =
       HTMLElement.prototype.getBoundingClientRect;
+
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
       function (this: HTMLElement) {
         if (this.hasAttribute("data-queue-test-footer")) {
           return new DOMRect(0, 0, 600, 340);
         }
+
         if (this.getAttribute("aria-label") === "Queued messages") {
           return new DOMRect(0, 0, 600, 240);
         }
+
         if (this.hasAttribute("data-queued-messages-scroll")) {
           return new DOMRect(0, 32, 600, queueViewportBottom - 32);
         }
+
         const queueScrollTop =
           this.closest<HTMLElement>("[data-queued-messages-scroll]")
             ?.scrollTop ?? 0;
+
         if (this.hasAttribute("data-queued-message-inline-editor")) {
           return new DOMRect(0, 132 - queueScrollTop, 600, 180);
         }
+
         if (this.hasAttribute("data-queued-message-row")) {
           if (this.textContent?.includes("Previous queued message")) {
             return new DOMRect(0, 92 - queueScrollTop, 600, 40);
           }
+
           if (this.textContent?.includes("Following queued message")) {
             return new DOMRect(0, 312 - queueScrollTop, 600, 30);
           }
         }
+
         return nativeGetBoundingClientRect.call(this);
       },
     );
@@ -1201,6 +1469,7 @@ describe("QueuedMessagesList", () => {
       makeQueuedMessage("q_editing", "Edited queued message"),
       makeQueuedMessage("q_following", "Following queued message"),
     ];
+
     const { container } = render(
       <div data-queue-test-footer="">
         <div data-app-composer="">
@@ -1226,10 +1495,13 @@ describe("QueuedMessagesList", () => {
         </div>
       </div>,
     );
+
     const scroll = container.querySelector<HTMLElement>(
       "[data-queued-messages-scroll]",
     );
+
     expect(scroll).not.toBeNull();
+
     if (!scroll) return;
     scroll.scrollTop = 100;
 
@@ -1271,6 +1543,7 @@ describe("QueuedMessagesList", () => {
 
       const nativeGetBoundingClientRect =
         HTMLElement.prototype.getBoundingClientRect;
+
       vi.spyOn(
         HTMLElement.prototype,
         "getBoundingClientRect",
@@ -1278,24 +1551,31 @@ describe("QueuedMessagesList", () => {
         if (this.hasAttribute("data-queue-test-footer")) {
           return new DOMRect(0, 0, 600, 340);
         }
+
         if (this.getAttribute("aria-label") === "Queued messages") {
           return new DOMRect(0, 0, 600, 240);
         }
+
         if (this.hasAttribute("data-queued-messages-scroll")) {
           return new DOMRect(0, 32, 600, 180);
         }
+
         if (this.hasAttribute("data-queued-message-inline-editor")) {
           const scrollTop =
             this.closest<HTMLElement>("[data-queued-messages-scroll]")
               ?.scrollTop ?? 0;
+
           return new DOMRect(0, editorTop - scrollTop, 600, 278);
         }
+
         if (this.getAttribute("data-queued-message-id") === "q_neighbor") {
           const scrollTop =
             this.closest<HTMLElement>("[data-queued-messages-scroll]")
               ?.scrollTop ?? 0;
+
           return new DOMRect(0, neighborTop - scrollTop, 600, 80);
         }
+
         return nativeGetBoundingClientRect.call(this);
       });
 
@@ -1330,22 +1610,28 @@ describe("QueuedMessagesList", () => {
           </div>
         </div>,
       );
+
       const surface = container.querySelector<HTMLElement>(
         'section[aria-label="Queued messages"]',
       );
+
       const scroll = container.querySelector<HTMLElement>(
         "[data-queued-messages-scroll]",
       );
 
       await waitFor(() => expect(surface?.style.height).toBe("400px"));
+
       const reservation = container.querySelector<HTMLElement>(
         "[data-queued-editor-typeahead-reservation]",
       );
+
       if (!reservation) throw new Error("Expected typeahead reservation");
       expect(reservation?.style.paddingTop).toBe("128px");
+
       const editorFrame = reservation.closest(
         '[data-inline-message-editor-frame="embedded"]',
       );
+
       expect(editorFrame?.firstElementChild?.textContent).toContain(
         "Editing queued message",
       );
@@ -1367,7 +1653,7 @@ describe("QueuedMessagesList", () => {
         surfaceHeight: 240,
         viewportHeight: 200,
       }),
-    ).toBe(44);
+    ).toBe(48);
   });
 
   it("renders queued blockquote markdown as a compact quote preview", () => {
@@ -1457,6 +1743,7 @@ describe("QueuedMessagesList", () => {
       "q_multiple_attachments",
       "Review both attached screenshots",
     );
+
     queuedMessage.content.push(
       {
         type: "localFile",
@@ -1484,6 +1771,7 @@ describe("QueuedMessagesList", () => {
         onDelete={noop}
       />,
     );
+
     expandQueue();
 
     const attachment = getByRole("img", { name: "2 attachments" });
@@ -1491,9 +1779,54 @@ describe("QueuedMessagesList", () => {
     expect(getByText("Sending…")).not.toBeNull();
   });
 
+  it("opens a chat message link directly from a queued preview", async () => {
+    function Location() {
+      const { pathname, hash } = useLocation();
+
+      return (
+        <output>
+          {pathname}
+          {hash}
+        </output>
+      );
+    }
+
+    render(
+      <MemoryRouter>
+        <RouteNavigationProvider>
+          <QueuedMessagesList
+            defaultExpanded
+            queuedMessages={[
+              makeQueuedMessage(
+                "q_link",
+                "[Source result](/projects/proj_other/threads/thr_source#msg=12)",
+              ),
+            ]}
+            sendDisabled={false}
+            actionDisabled={false}
+            processingMessageId={null}
+            processingAction={null}
+            onSend={noop}
+            onReorder={noop}
+            onSetGroupBoundary={noop}
+            onEdit={noop}
+            onDelete={noop}
+          />
+          <Location />
+        </RouteNavigationProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Source result" }));
+    expect(
+      await screen.findByText("/projects/proj_other/threads/thr_source#msg=12"),
+    ).toBeTruthy();
+  });
+
   it("renders prompt mentions as pills in queued previews", () => {
     const text =
       "Run /goal and open @apps/app/src/foo.ts from @thread:thr_prompt_pills";
+
     const commandToken = "/goal";
     const pathToken = "@apps/app/src/foo.ts";
     const threadToken = "@thread:thr_prompt_pills";
@@ -1581,11 +1914,15 @@ describe("QueuedMessagesList", () => {
         ),
       ),
     );
+
     expandQueue();
+
     const scroll = container.querySelector<HTMLDivElement>(
       "[data-queued-messages-scroll]",
     );
+
     expect(scroll).not.toBeNull();
+
     if (!scroll) return;
 
     Object.defineProperty(scroll, "clientHeight", {
@@ -1608,6 +1945,7 @@ describe("QueuedMessagesList", () => {
       const fade = container.querySelector(
         '[data-overflow-fade="below"][data-overflow-fade-tone="surface-raised"][data-overflow-fade-inset]',
       );
+
       expect(fade).not.toBeNull();
     });
   });
@@ -1625,9 +1963,11 @@ describe("QueuedMessagesList", () => {
     expect(
       container.querySelector("[data-queued-message-group-fill]"),
     ).toBeNull();
+
     const divider = container.querySelector(
       "[data-queued-message-group-divider]",
     );
+
     expect(divider?.tagName).toBe("LI");
     expect(divider?.parentElement?.tagName).toBe("UL");
   });
@@ -1638,11 +1978,13 @@ describe("QueuedMessagesList", () => {
       makeQueuedMessage("q_two", "Second queued message"),
       makeQueuedMessage("q_three", "Third queued message"),
     ]);
+
     const rows = container.querySelectorAll("[data-queued-message-row]");
 
     const divider = container.querySelector(
       "ul > [data-queued-message-group-divider]",
     );
+
     expect(divider).not.toBeNull();
     expect(divider?.previousElementSibling).toBe(rows[0]);
     expect(rows[0]?.querySelector("[data-queued-message-group-divider]")).toBe(
@@ -1688,9 +2030,11 @@ describe("QueuedMessagesList", () => {
         { id: "q_two", groupWithNext: false },
       ],
     });
+
     if (result?.kind !== "row") {
       throw new Error("Expected row drag result");
     }
+
     expect(result.request.groupBoundaryQueuedMessageId).toBeUndefined();
   });
 
@@ -1785,12 +2129,14 @@ describe("QueuedMessagesList", () => {
       node: { current: null },
       rect: { current: null },
     });
+
     const containers = [
       makeContainer("q_one"),
       makeContainer("__queued_message_group_divider__"),
       makeContainer("q_two"),
       makeContainer("q_three"),
     ];
+
     const collisions = queuedMessageCollisionDetection({
       active: {
         data: { current: undefined },
@@ -1855,6 +2201,7 @@ describe("QueuedMessagesList", () => {
       makeQueuedMessage("q_two", "Second queued message"),
       makeQueuedMessage("q_three", "Third queued message"),
     ];
+
     const { container, rerender } = renderQueuedMessages(originalMessages);
 
     rerender(
@@ -1954,11 +2301,15 @@ describe("QueuedMessagesList", () => {
     const { container } = renderQueuedMessages([
       makeQueuedMessage("q_one", "single queued message"),
     ]);
+
     expandQueue();
+
     const scroll = container.querySelector<HTMLDivElement>(
       "[data-queued-messages-scroll]",
     );
+
     expect(scroll).not.toBeNull();
+
     if (!scroll) return;
 
     Object.defineProperty(scroll, "clientHeight", {
@@ -1976,11 +2327,13 @@ describe("QueuedMessagesList", () => {
 
     const currentObserver = observers[0];
     expect(currentObserver).toBeDefined();
+
     if (!currentObserver) return;
 
     const [topSentinel, bottomSentinel] = currentObserver.targets;
     expect(topSentinel).toBeDefined();
     expect(bottomSentinel).toBeDefined();
+
     if (!topSentinel || !bottomSentinel) return;
 
     act(() => {
@@ -2012,6 +2365,7 @@ describe("queued row affordances", () => {
         ],
       ]),
     );
+
     const { container, getByText } = renderQueuedMessages([
       {
         ...makeQueuedMessage("q_draft", "Draft message"),
@@ -2022,11 +2376,13 @@ describe("queued row affordances", () => {
         },
       },
     ]);
+
     expandQueue();
 
     const waitLine = getByText("Held by Drafts · Draft").closest(
       "[data-queued-message-wait]",
     );
+
     expect(waitLine?.querySelector("[data-icon=EditFile]")).not.toBeNull();
     expect(container.querySelector("[data-icon=Limitation]")).toBeNull();
   });
@@ -2050,6 +2406,7 @@ describe("queued row affordances", () => {
         },
       },
     ]);
+
     expandQueue();
 
     expect(getByText("Waiting for workspace")).toBeDefined();
@@ -2062,6 +2419,56 @@ describe("queued row affordances", () => {
     ).toHaveLength(2);
   });
 
+  it("refreshes projected waits without changing queue order or timestamps", () => {
+    const held = makeThreadQueuedMessage({
+      id: "q_held",
+      waitingOn: {
+        kind: "plugin",
+        pluginId: "concurrency-limit",
+        reason: "4 of 4 running",
+      },
+    });
+
+    const sharedProps = {
+      defaultExpanded: true,
+      sendDisabled: false,
+      actionDisabled: false,
+      processingMessageId: null,
+      processingAction: null,
+      onSend: noop,
+      onReorder: noop,
+      onSetGroupBoundary: noop,
+      onEdit: noop,
+      onDelete: noop,
+    } as const;
+
+    const { getByText, queryByLabelText, rerender } = render(
+      <QueuedMessagesList {...sharedProps} queuedMessages={[held]} />,
+    );
+
+    expect(
+      getByText("Held by concurrency-limit · 4 of 4 running"),
+    ).toBeTruthy();
+    expect(queryByLabelText("Send queued message 1 now")).not.toBeNull();
+
+    rerender(
+      <QueuedMessagesList
+        {...sharedProps}
+        queuedMessages={[{ ...held, waitingOn: { kind: "server-update" } }]}
+      />,
+    );
+
+    expect(getByText("Sending after the update")).toBeTruthy();
+    expect(queryByLabelText("Send queued message 1 now")).toBeNull();
+
+    rerender(<QueuedMessagesList {...sharedProps} queuedMessages={[held]} />);
+
+    expect(
+      getByText("Held by concurrency-limit · 4 of 4 running"),
+    ).toBeTruthy();
+    expect(queryByLabelText("Send queued message 1 now")).not.toBeNull();
+  });
+
   it("hides Send now only where a re-attempt could not clear the wait", () => {
     const { queryByLabelText } = renderQueuedMessages([
       {
@@ -2069,44 +2476,64 @@ describe("queued row affordances", () => {
         waitingOn: { kind: "thread-busy" },
       },
     ]);
+
     expect(queryByLabelText("Send queued message 1 now")).not.toBeNull();
 
     cleanup();
+
     const queued = renderQueuedMessages([
       {
         ...makeQueuedMessage("q_wait", "Waiting on a reply"),
         waitingOn: { kind: "interaction" },
       },
     ]);
+
     expect(queued.queryByLabelText("Send queued message 1 now")).toBeNull();
   });
 
-  it("offers to steer a provisioning row when the thread is ready", () => {
-    const onSend = vi.fn();
-    const { getByLabelText } = render(
-      <QueuedMessagesList
-        queuedMessages={[
-          {
-            ...makeQueuedMessage("q_provisioning", "Steer after startup"),
-            waitingOn: { kind: "provisioning" },
-          },
-        ]}
-        sendAction="steer-when-ready"
-        sendDisabled={false}
-        actionDisabled={false}
-        processingMessageId={null}
-        processingAction={null}
-        onSend={onSend}
-        onReorder={noop}
-        onSetGroupBoundary={noop}
-        onEdit={noop}
-        onDelete={noop}
-      />,
-    );
+  it.each(["provisioning", "server-update"] as const)(
+    "only offers steering while the %s wait permits it",
+    (kind) => {
+      const onSend = vi.fn();
 
-    fireEvent.click(getByLabelText("Steer queued message 1 when ready"));
-    expect(onSend).toHaveBeenCalledWith("q_provisioning");
-  });
+      const { queryByLabelText, getAllByText } = render(
+        <QueuedMessagesList
+          queuedMessages={[
+            {
+              ...makeQueuedMessage("q_provisioning", "Steer after startup"),
+              waitingOn: { kind },
+              failureReason:
+                kind === "server-update" ? "Previous failure" : null,
+            },
+          ]}
+          sendAction="steer-when-ready"
+          sendDisabled={false}
+          actionDisabled={false}
+          processingMessageId={null}
+          processingAction={null}
+          onSend={onSend}
+          onReorder={noop}
+          onSetGroupBoundary={noop}
+          onEdit={noop}
+          onDelete={noop}
+        />,
+      );
+
+      const steer = queryByLabelText("Steer queued message 1 when ready");
+
+      if (kind === "server-update") {
+        expect(steer).toBeNull();
+        expect(getAllByText("Sending after the update").length).toBeGreaterThan(
+          0,
+        );
+        expect(onSend).not.toHaveBeenCalled();
+      } else {
+        expect(steer).not.toBeNull();
+        fireEvent.click(steer!);
+        expect(onSend).toHaveBeenCalledWith("q_provisioning");
+      }
+    },
+  );
 
   it("names the absent machine on a host-offline row and hides Send now", () => {
     const { getByText, queryByLabelText } = renderQueuedMessages([
@@ -2115,6 +2542,7 @@ describe("queued row affordances", () => {
         waitingOn: { kind: "host-offline", hostName: "M4" },
       },
     ]);
+
     expandQueue();
     expect(getByText("Waiting for M4 to be ready")).toBeDefined();
     expect(queryByLabelText("Send queued message 1 now")).toBeNull();
@@ -2128,6 +2556,7 @@ describe("queued row affordances", () => {
         failureReason: "Thread stopped before the message could dispatch",
       },
     ]);
+
     expandQueue();
     expect(
       getByText("Thread stopped before the message could dispatch"),
@@ -2161,6 +2590,7 @@ describe("queued row affordances", () => {
         sendAt: 0,
       },
     ]);
+
     expandQueue();
     expect(getByText(/^Retry failed turn from /u)).toBeDefined();
     expect(
@@ -2183,6 +2613,7 @@ describe("queued row affordances", () => {
         sendAt: 0,
       }),
     ]);
+
     expandQueue();
     expect(container.querySelector("[data-queued-message-sender]")).toBeNull();
     expect(
@@ -2205,8 +2636,123 @@ describe("queued row affordances", () => {
         sendAt: 0,
       },
     ]);
+
     expandQueue();
     expect(queryByLabelText("Edit queued message 1")).toBeNull();
     expect(queryByLabelText("Delete queued message 1")).not.toBeNull();
+  });
+
+  const agentOnlyContent: PromptInput[] = [
+    {
+      type: "text",
+      text: "Omnyo paused this turn to install an update. Please continue where you left off.",
+      mentions: [],
+      visibility: "agent-only",
+    },
+  ];
+
+  it("names a system continuation held by an update and spins while waiting", () => {
+    const { container, getAllByText, getByText, queryByText } =
+      renderQueuedMessages([
+        makeThreadQueuedMessage({
+          id: "q_resume",
+          initiator: "system",
+          payload: { kind: "continuation" },
+          waitingOn: { kind: "server-update" },
+          content: agentOnlyContent,
+        }),
+      ]);
+
+    expandQueue();
+
+    expect(getByText("Resume after update")).toBeTruthy();
+    expect(
+      getAllByText("Omnyo continues this turn when the update finishes").length,
+    ).toBeGreaterThan(0);
+    expect(queryByText("(empty message)")).toBeNull();
+    expect(queryByText("From")).toBeNull();
+    expect(
+      container
+        .querySelector(
+          '[data-queued-message-row] [data-queued-message-wait] [data-slot="icon"], [data-queued-message-row] [data-queued-message-wait] svg',
+        )
+        ?.getAttribute("class"),
+    ).toContain("animate-spin");
+  });
+
+  it("names agent-only input instead of showing an empty message", () => {
+    const { getByText, queryByText } = renderQueuedMessages([
+      makeThreadQueuedMessage({
+        id: "q_hidden",
+        initiator: "system",
+        content: agentOnlyContent,
+      }),
+    ]);
+
+    expandQueue();
+
+    expect(getByText("Message for the agent")).toBeTruthy();
+    expect(queryByText("(empty message)")).toBeNull();
+  });
+
+  it("names a wait wake-up and hides its marker text and script sender", () => {
+    const { getByText, queryByText } = renderQueuedMessages([
+      makeThreadQueuedMessage({
+        id: "q_wait",
+        initiator: "system",
+        messageSource: { kind: "script", label: "Wait" },
+        content: [
+          {
+            type: "text",
+            text: "[callback-wait:0f0e5b9d-5a7e-4c22-9d1f-4d3a8e6b1c2a] Ready: build.",
+            mentions: [],
+          },
+        ],
+      }),
+    ]);
+
+    expandQueue();
+
+    expect(getByText("Wait check-in")).toBeTruthy();
+    expect(queryByText(/callback-wait/u)).toBeNull();
+    expect(queryByText("Script Wait")).toBeNull();
+  });
+
+  it("shows the Inbox notice's own text with a plain sender", () => {
+    const { getByText, queryByText } = renderQueuedMessages([
+      makeThreadQueuedMessage({
+        id: "q_inbox",
+        initiator: "system",
+        messageSource: { kind: "script", label: "Inbox" },
+        content: [
+          {
+            type: "text",
+            text: "1 chat waits on your result; deliver it or explain why not.",
+            mentions: [],
+          },
+        ],
+      }),
+    ]);
+
+    expandQueue();
+
+    expect(getByText("Inbox")).toBeTruthy();
+    expect(queryByText("Script Inbox")).toBeNull();
+  });
+
+  it("keeps a user message held by an update unchanged", () => {
+    const { getByText, queryByText } = renderQueuedMessages([
+      makeThreadQueuedMessage({
+        id: "q_user",
+        waitingOn: { kind: "server-update" },
+        content: [{ type: "text", text: "Ship it", mentions: [] }],
+      }),
+    ]);
+
+    expandQueue();
+
+    expect(getByText("Ship it")).toBeTruthy();
+    expect(getByText("Sending after the update")).toBeTruthy();
+    expect(queryByText("Resume after update")).toBeNull();
   });
 });

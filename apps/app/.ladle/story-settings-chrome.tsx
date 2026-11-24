@@ -28,18 +28,23 @@ export type SettingsStoryRoute =
 export function useSettingsStoryRoute(): SettingsStoryRoute {
   const { pathname } = useLocation();
   const machineMatch = matchPath(SETTINGS_MACHINE_ROUTE_PATH, pathname);
+
   if (machineMatch?.params.hostId !== undefined) {
     return { kind: "machine", id: machineMatch.params.hostId };
   }
+
   const projectMatch = matchPath(SETTINGS_PROJECT_ROUTE_PATH, pathname);
+
   if (projectMatch?.params.projectId !== undefined) {
     return { kind: "project", id: projectMatch.params.projectId };
   }
+
   const section = SETTINGS_NAV_SECTIONS.find((entry) =>
     entry.id === "general"
       ? pathname === SETTINGS_ROUTE_PATH
       : getSettingsRoutePath(entry.id) === pathname,
   );
+
   return { kind: "section", id: section?.id ?? "general" };
 }
 
@@ -53,6 +58,7 @@ export function SettingsStoryChrome({
   contentOwnsPageShell?: boolean;
 }) {
   const route = useSettingsStoryRoute();
+
   const resolvedActiveSection =
     activeSection ??
     (route.kind === "section"
@@ -64,7 +70,7 @@ export function SettingsStoryChrome({
   return (
     <SidebarProvider
       className="h-screen min-h-[640px] bg-background"
-      style={{ "--bb-shell-height": "100vh" } as CSSProperties}
+      style={{ "--omnyo-shell-height": "100vh" } as CSSProperties}
     >
       <Sidebar>
         <SettingsSidebarContent

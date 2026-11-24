@@ -1,4 +1,4 @@
-import { createDeferredPromise, type DeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise, type DeferredPromise } from "@omnyo/test-helpers";
 import { describe, expect, it } from "vitest";
 import type { ServerChangedMessage } from "../../ws/hub.js";
 import {
@@ -8,6 +8,7 @@ import {
 
 function createClock(start = 1_000) {
   let now = start;
+
   return {
     now: () => now,
     advance(ms: number) {
@@ -18,15 +19,18 @@ function createClock(start = 1_000) {
 
 function createCounter<T>(values: T[]) {
   const loads: DeferredPromise<T>[] = [];
+
   return {
     loads,
     load: () => {
       const next = createDeferredPromise<T>();
       loads.push(next);
       const value = values[loads.length - 1];
+
       if (value !== undefined) {
         next.resolve(value);
       }
+
       return next.promise;
     },
   };
@@ -34,9 +38,11 @@ function createCounter<T>(values: T[]) {
 
 function createFakeHub() {
   const listeners = new Set<(message: ServerChangedMessage) => void>();
+
   return {
     onChangedMessage(listener: (message: ServerChangedMessage) => void) {
       listeners.add(listener);
+
       return () => {
         listeners.delete(listener);
       };
@@ -54,10 +60,12 @@ const READ = { environmentId: "env-1", hostId: "host-1", key: "k" };
 describe("EnvironmentReadCache", () => {
   it("shares one in-flight load between overlapping reads and reuses it inside the TTL", async () => {
     const clock = createClock();
+
     const cache = new EnvironmentReadCache<string>({
       now: clock.now,
       ttlMs: 3_000,
     });
+
     const counter = createCounter<string>([]);
 
     const first = cache.read({ ...READ, load: counter.load });
@@ -85,6 +93,7 @@ describe("EnvironmentReadCache", () => {
       now: () => 0,
       ttlMs: 3_000,
     });
+
     const counter = createCounter(["a", "b", "c"]);
 
     await cache.read({ ...READ, load: counter.load });
@@ -99,6 +108,7 @@ describe("EnvironmentReadCache", () => {
       now: () => 0,
       ttlMs: 3_000,
     });
+
     const counter = createCounter<string>([]);
 
     const first = cache.read({ ...READ, load: counter.load });
@@ -116,6 +126,7 @@ describe("EnvironmentReadCache", () => {
       now: () => 0,
       ttlMs: 3_000,
     });
+
     const counter = createCounter<string>([]);
 
     const stale = cache.read({ ...READ, load: counter.load });
@@ -140,6 +151,7 @@ describe("EnvironmentReadCache", () => {
       now: () => 0,
       ttlMs: 3_000,
     });
+
     const counter = createCounter(["a", "b", "c"]);
 
     await cache.read({ ...READ, load: counter.load });
@@ -172,21 +184,26 @@ describe("WorkspaceReadCaches", () => {
       message: "no git",
     },
   };
+
   const pullRequestResult = { outcome: "absent" as const };
 
   async function primeBoth(caches: WorkspaceReadCaches) {
     const status = createCounter([statusResult, statusResult, statusResult]);
+
     const pullRequest = createCounter([
       pullRequestResult,
       pullRequestResult,
       pullRequestResult,
     ]);
+
     await caches.status.read({ ...READ, load: status.load });
     await caches.pullRequest.read({ ...READ, load: pullRequest.load });
+
     return {
       async readBoth() {
         await caches.status.read({ ...READ, load: status.load });
         await caches.pullRequest.read({ ...READ, load: pullRequest.load });
+
         return {
           status: status.loads.length,
           pullRequest: pullRequest.loads.length,

@@ -45,6 +45,7 @@ interface HoldingFakeChildPlan {
 }
 
 type FakeChildPlan = ExitingFakeChildPlan | HoldingFakeChildPlan;
+
 type FakeRuntimePredicate = () => boolean;
 
 interface CreateSupervisorOptionsArgs {
@@ -57,6 +58,7 @@ const SERVICE_NAME = "scripts-test-dev-supervisor";
 
 function createDeferred<T>(): Deferred<T> {
   let resolvePromise: ((value: T) => void) | undefined;
+
   const promise = new Promise<T>((resolve) => {
     resolvePromise = resolve;
   });
@@ -67,6 +69,7 @@ function createDeferred<T>(): Deferred<T> {
       if (!resolvePromise) {
         throw new Error("Deferred promise was not initialized");
       }
+
       resolvePromise(value);
     },
   };
@@ -89,7 +92,7 @@ function createSupervisorOptions(
   return {
     childArgs: ["child.js"],
     childCommand: "node",
-    childCwd: "/tmp/bb-supervisor-test",
+    childCwd: "/tmp/omnyo-supervisor-test",
     serviceName: SERVICE_NAME,
     unexpectedRestartBackoff: args,
   };
@@ -159,6 +162,7 @@ class FakeChildProcess implements DevSupervisorChildProcess {
     this.runtime.advanceTime(this.plan.runtimeMs);
     this.exitCode = this.plan.result.signal ? null : this.plan.result.code;
     this.signalCode = this.plan.result.signal;
+
     return Promise.resolve(this.plan.result);
   }
 }
@@ -200,8 +204,10 @@ class FakeDevSupervisorRuntime implements DevSupervisorRuntime {
       delayMs,
       runtime: this,
     });
+
     this.timers.push(timer);
     this.notifyWaiters();
+
     return timer;
   }
 
@@ -209,6 +215,7 @@ class FakeDevSupervisorRuntime implements DevSupervisorRuntime {
     _request: DevSupervisorChildSpawnRequest,
   ): DevSupervisorChildProcess {
     const plan = this.childPlans.shift();
+
     if (!plan) {
       throw new Error("No fake child plan was queued");
     }
@@ -216,6 +223,7 @@ class FakeDevSupervisorRuntime implements DevSupervisorRuntime {
     const child = new FakeChildProcess(this, plan);
     this.children.push(child);
     this.notifyWaiters();
+
     return child;
   }
 
@@ -223,6 +231,7 @@ class FakeDevSupervisorRuntime implements DevSupervisorRuntime {
     handler: DevSupervisorTerminationSignalHandler,
   ): DevSupervisorSignalHandlerCleanup {
     this.stopSignalHandler = handler;
+
     return () => {
       this.stopSignalHandler = null;
     };
@@ -232,6 +241,7 @@ class FakeDevSupervisorRuntime implements DevSupervisorRuntime {
     handler: DevSupervisorRestartSignalHandler,
   ): DevSupervisorSignalHandlerCleanup {
     this.restartSignalHandler = handler;
+
     return () => {
       this.restartSignalHandler = null;
     };
@@ -265,6 +275,7 @@ class FakeDevSupervisorRuntime implements DevSupervisorRuntime {
     if (!this.restartSignalHandler) {
       throw new Error("Restart signal handler is not installed");
     }
+
     this.restartSignalHandler();
     this.notifyWaiters();
   }
@@ -273,6 +284,7 @@ class FakeDevSupervisorRuntime implements DevSupervisorRuntime {
     if (!this.stopSignalHandler) {
       throw new Error("Stop signal handler is not installed");
     }
+
     this.stopSignalHandler(signal);
     this.notifyWaiters();
   }
@@ -287,6 +299,7 @@ class FakeDevSupervisorRuntime implements DevSupervisorRuntime {
     const timer = this.timers.find(
       (candidate) => candidate.active && candidate.delayMs === delayMs,
     );
+
     if (!timer) {
       throw new Error(`No active ${delayMs}ms timer was scheduled`);
     }
@@ -315,6 +328,7 @@ class FakeDevSupervisorRuntime implements DevSupervisorRuntime {
         deferred.resolve(undefined);
       },
     });
+
     return deferred.promise;
   }
 
@@ -332,6 +346,7 @@ class FakeDevSupervisorRuntime implements DevSupervisorRuntime {
 
     this.waiters.length = 0;
     this.waiters.push(...pendingWaiters);
+
     for (const waiter of readyWaiters) {
       waiter.resolve();
     }
@@ -344,6 +359,7 @@ describe("runDevSupervisor", () => {
       createUnexpectedExitPlan(0),
       { mode: "hold" },
     ]);
+
     const supervisorPromise = runDevSupervisorWithRuntime({
       options: createSupervisorOptions({
         initialDelayMs: 20,
@@ -372,6 +388,7 @@ describe("runDevSupervisor", () => {
       createUnexpectedExitPlan(0),
       createUnexpectedExitPlan(0),
     ]);
+
     const supervisorPromise = runDevSupervisorWithRuntime({
       options: createSupervisorOptions({
         initialDelayMs: 5_000,
@@ -404,6 +421,7 @@ describe("runDevSupervisor", () => {
       createUnexpectedExitPlan(0),
       createUnexpectedExitPlan(31),
     ]);
+
     const supervisorPromise = runDevSupervisorWithRuntime({
       options: createSupervisorOptions({
         initialDelayMs: 1_000,

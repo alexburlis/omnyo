@@ -1,7 +1,7 @@
 import { useEffect, useState, type ComponentType } from "react";
-import type { PluginComposerScope } from "@get-bb/plugin-sdk";
-import { Button } from "@bb/shared-ui/button";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
+import type { PluginComposerScope } from "@omnyo/plugin-sdk";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 import {
   makeAttachmentsConfig,
@@ -43,8 +43,10 @@ function StoryPluginRegistration({
 }) {
   useEffect(() => {
     setPluginSlotRegistrations(pluginId, registrations(actions, scopes));
+
     return () => removePluginSlotRegistrations(pluginId);
   }, [actions, pluginId, scopes]);
+
   return null;
 }
 
@@ -75,6 +77,7 @@ const OVERFLOW_REGISTRATIONS = OVERFLOW_PLUGINS.map(
 
 function OverflowFixture() {
   const [value, setValue] = useState("");
+
   return (
     <>
       {OVERFLOW_REGISTRATIONS.map(({ pluginId, actions }) => (
@@ -139,6 +142,7 @@ export function NarrowUsageActions() {
   const [value, setValue] = useState("Check the narrow composer");
   const [sent, setSent] = useState(0);
   const [variant, setVariant] = useState("standard");
+
   return (
     <div className="w-full max-w-3xl p-2" data-composer-layout-fixture="">
       {variant !== "none" ? (

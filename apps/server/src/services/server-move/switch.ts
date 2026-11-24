@@ -1,12 +1,12 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  formatBbAppConfigPath,
-  parseBbAppManagedConfig,
-} from "@bb/config/bb-app-managed-config";
-import { mutateManagedJsonFile } from "@bb/config/managed-json-file";
-import type { ServerMoveMode } from "@bb/domain";
-import { SERVER_MOVED_FILE_NAME } from "@bb/server-archive";
+  formatAppConfigPath,
+  parseAppManagedConfig,
+} from "@omnyo/config/managed-app-config";
+import { mutateManagedJsonFile } from "@omnyo/config/managed-json-file";
+import type { ServerMoveMode } from "@omnyo/domain";
+import { SERVER_MOVED_FILE_NAME } from "@omnyo/server-archive";
 import { parseManagedConfigObject, readOptionalText } from "./managed-files.js";
 
 const OLD_SERVER_KEPT_ENTRIES: ReadonlySet<string> = new Set([
@@ -56,14 +56,16 @@ function nextOldServerDaemonConfig(
       ? { serverHeaders: args.headers }
       : {}),
   };
-  parseBbAppManagedConfig(next);
+
+  parseAppManagedConfig(next);
+
   return next;
 }
 
 export async function validateOldServerDaemonConfig(
   args: WriteOldServerDaemonConfigArgs,
 ): Promise<void> {
-  const path = formatBbAppConfigPath(args.dataDir);
+  const path = formatAppConfigPath(args.dataDir);
   nextOldServerDaemonConfig(
     parseManagedConfigObject(path, await readOptionalText(path)),
     args,
@@ -73,16 +75,18 @@ export async function validateOldServerDaemonConfig(
 export async function writeOldServerDaemonConfig(
   args: WriteOldServerDaemonConfigArgs,
 ): Promise<OldServerDaemonConfigBackup> {
-  const path = formatBbAppConfigPath(args.dataDir);
+  const path = formatAppConfigPath(args.dataDir);
   const backup: OldServerDaemonConfigBackup = { originalText: null, path };
   await mutateManagedJsonFile({
     path,
     read: async () => {
       backup.originalText = await readOptionalText(path);
+
       return parseManagedConfigObject(path, backup.originalText);
     },
     mutate: (current) => nextOldServerDaemonConfig(current, args),
   });
+
   return backup;
 }
 
@@ -90,10 +94,13 @@ export async function restoreOldServerDaemonConfig(
   backup: OldServerDaemonConfigBackup,
 ): Promise<void> {
   const originalText = backup.originalText;
+
   if (originalText === null) {
     await rm(backup.path, { force: true });
+
     return;
   }
+
   await mutateManagedJsonFile({
     path: backup.path,
     read: async () => ({}),
@@ -127,6 +134,7 @@ export function listServerMovedTargets(
       ? [args.sourceServerHostId]
       : [];
   }
+
   return args.connectedHosts
     .filter(
       (host) => host.type === "persistent" && host.id !== args.targetHostId,

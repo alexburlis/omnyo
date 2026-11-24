@@ -14,21 +14,23 @@ describe("DesktopZoomIndicator", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
-    delete window.bbDesktop;
+    delete window.omnyoDesktop;
   });
 
   function setup() {
     const changeListener = { current: (_factor: number) => undefined };
     const unsubscribe = vi.fn();
     const zoom = vi.fn();
-    window.bbDesktop = {
+    window.omnyoDesktop = {
       onZoomChange: vi.fn((callback) => {
         changeListener.current = callback;
+
         return unsubscribe;
       }),
       zoom,
-    } as unknown as Window["bbDesktop"];
+    } as unknown as Window["omnyoDesktop"];
     const view = render(<DesktopZoomIndicator />);
+
     return {
       emitZoomChange: (factor: number) => changeListener.current(factor),
       unsubscribe,
@@ -56,6 +58,7 @@ describe("DesktopZoomIndicator", () => {
 
   it("disables zoom out at 50 percent and zoom in at 300 percent", () => {
     const { emitZoomChange } = setup();
+
     const isDisabled = (name: string) =>
       screen.getByRole("button", { name }).hasAttribute("disabled");
 
@@ -110,7 +113,7 @@ describe("DesktopZoomIndicator", () => {
   });
 
   it("renders nothing without zoom notifications and unsubscribes", () => {
-    window.bbDesktop = {} as Window["bbDesktop"];
+    window.omnyoDesktop = {} as Window["omnyoDesktop"];
     const view = render(<DesktopZoomIndicator />);
     expect(view.container.childElementCount).toBe(0);
     view.unmount();

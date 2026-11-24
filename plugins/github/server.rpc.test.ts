@@ -8,22 +8,26 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import plugin from "./server";
 import { installFakeGh } from "./testing/fake-gh";
 
 let binDir: string;
+
 let callLog: string;
+
 let restoreEnv: () => void;
 
 function ghCalls(): string[] {
   if (!existsSync(callLog)) return [];
+
   return readFileSync(callLog, "utf8").trim().split("\n").filter(Boolean);
 }
 
 beforeEach(() => {
-  binDir = mkdtempSync(join(tmpdir(), "bb-github-rpc-"));
+  binDir = mkdtempSync(join(tmpdir(), "omnyo-github-rpc-"));
   callLog = join(binDir, "gh-calls.log");
+
   const openIssue = [
     {
       number: 7,
@@ -37,6 +41,7 @@ beforeEach(() => {
       updatedAt: "2026-08-19T12:00:00Z",
     },
   ];
+
   const openPull = [
     {
       number: 42,
@@ -50,6 +55,7 @@ beforeEach(() => {
       updatedAt: "2026-08-19T13:00:00Z",
     },
   ];
+
   const lists = JSON.stringify({
     data: {
       repository: {
@@ -61,6 +67,7 @@ beforeEach(() => {
       },
     },
   });
+
   const issueDetail = JSON.stringify({
     number: 7,
     title: "Cache mutations",
@@ -73,6 +80,7 @@ beforeEach(() => {
     updatedAt: "2026-08-19T12:00:00Z",
     comments: [],
   });
+
   const pullDetail = JSON.stringify({
     number: 42,
     title: "Normalize pull details",
@@ -123,6 +131,7 @@ beforeEach(() => {
       },
     ],
   });
+
   const reviewComments = JSON.stringify([
     [
       {
@@ -153,6 +162,7 @@ beforeEach(() => {
       },
     ],
   ]);
+
   const pullFiles = JSON.stringify([
     [
       {
@@ -209,7 +219,9 @@ async function loadPlugin(extraRepos = "acme/widgets") {
     pluginId: "github",
     settings: { extraRepos },
   });
-  await plugin(host.bb);
+
+  await plugin(host.api);
+
   return host;
 }
 
@@ -272,6 +284,7 @@ describe("github plugin RPC behavior", () => {
       "bad/repo/shape",
       "--json",
     ]);
+
     expect(failure.exitCode).toBe(1);
     expect(JSON.parse(failure.stdout)).toEqual({
       ok: false,
@@ -283,8 +296,8 @@ describe("github plugin RPC behavior", () => {
 
     const help = await harness.runCli(["--help"]);
     expect(help.exitCode).toBe(0);
-    expect(help.stdout).toContain("bb github issues");
-    expect(help.stdout).toContain("bb github sync");
+    expect(help.stdout).toContain("omnyo github issues");
+    expect(help.stdout).toContain("omnyo github sync");
   });
 
   it("rejects a malformed repository or item number when starting work", async () => {
@@ -401,12 +414,15 @@ describe("github plugin RPC behavior", () => {
       stdout: "acme/widgets#7\t[OPEN]\tCache mutations",
       stderr: "",
     });
+
     const issueProvider = harness.registrations.mentionProviders.find(
       (provider) => provider.id === "issue",
     );
+
     if (issueProvider === undefined) {
       throw new Error("GitHub issue mention provider was not registered");
     }
+
     expect(
       issueProvider.search({
         query: "cache",

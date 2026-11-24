@@ -1,11 +1,11 @@
-import type { ExperimentalFileOpenOptions } from "@get-bb/plugin-sdk";
+import type { ExperimentalFileOpenOptions } from "@omnyo/plugin-sdk";
 import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
-} from "@bb/shared-ui/context-menu";
+} from "@omnyo/shared-ui/context-menu";
 import { useLocalOpenTargets } from "@/hooks/useLocalOpenTargets";
 import { useResolvedLiveFileTarget } from "@/hooks/useResolvedLiveFileTarget";
 import { useAppNavigationHost } from "@/lib/app-navigation-host";
@@ -19,6 +19,7 @@ import { usePluginSlots } from "@/lib/plugin-slots";
 function getFileExtension(path: string): string | null {
   const name = getFileBasename(path);
   const dotIndex = name.lastIndexOf(".");
+
   return dotIndex > 0 && dotIndex < name.length - 1
     ? name.slice(dotIndex + 1).toLowerCase()
     : null;
@@ -31,18 +32,22 @@ export function ExperimentalFileLinkMenu({
 }) {
   const navigation = useAppNavigationHost();
   const resolved = useResolvedLiveFileTarget(intent.target, { enabled: true });
+
   const localTargets = useLocalOpenTargets({
     enabled: resolved.status === "available",
     ...(resolved.status === "available"
       ? { openContext: resolved.openContext }
       : {}),
   });
+
   const { fileOpeners } = usePluginSlots();
   const extension = getFileExtension(intent.target.path);
+
   const matchingOpeners =
     extension === null
       ? []
       : fileOpeners.filter((opener) => opener.extensions.includes(extension));
+
   const location = getExperimentalFileLocationStart(intent.location);
 
   return (
@@ -59,7 +64,7 @@ export function ExperimentalFileLinkMenu({
                 navigation.openFilePreview({ ...intent, viewer: "builtin" })
               }
             >
-              BB preview
+              Omnyo preview
             </ContextMenuItem>
             {matchingOpeners.map((opener) => (
               <ContextMenuItem

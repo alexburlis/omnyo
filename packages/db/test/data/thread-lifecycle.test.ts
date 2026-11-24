@@ -19,39 +19,46 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup() {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   return { db, host, project };
 }
 
 describe("applyThreadLifecycleEvent", () => {
   it("applies a legal event and persists the row", () => {
     const { db, project } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
       status: "starting",
     });
 
-    const outcome = applyThreadLifecycleEvent(db, {
+    const outcome = applyThreadLifecycleEvent(db, noopNotifier, {
       event: { type: "run.started" },
       threadId: thread.id,
     });
 
     expect(outcome.applied).toBe(true);
+
     if (outcome.applied) {
       expect(outcome.thread.status).toBe("active");
     }
+
     expect(getThread(db, thread.id)?.status).toBe("active");
   });
 
   it("applies events inside an existing transaction", () => {
     const { db, project } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -59,7 +66,7 @@ describe("applyThreadLifecycleEvent", () => {
     });
 
     const outcome = db.transaction((tx) =>
-      applyThreadLifecycleEventInTransaction(tx, {
+      applyThreadLifecycleEventInTransaction(tx, noopNotifier, {
         event: { type: "run.succeeded" },
         threadId: thread.id,
       }),
@@ -71,9 +78,11 @@ describe("applyThreadLifecycleEvent", () => {
 
   it("no-ops as illegal-transition and leaves the row untouched", () => {
     vi.useFakeTimers();
+
     try {
       vi.setSystemTime(1_000);
       const { db, project } = setup();
+
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
@@ -81,7 +90,8 @@ describe("applyThreadLifecycleEvent", () => {
       });
 
       vi.setSystemTime(2_000);
-      const outcome = applyThreadLifecycleEvent(db, {
+
+      const outcome = applyThreadLifecycleEvent(db, noopNotifier, {
         event: { type: "run.succeeded" },
         threadId: thread.id,
       });
@@ -99,15 +109,17 @@ describe("applyThreadLifecycleEvent", () => {
 
   it("no-ops as superseded when the thread is deleted", () => {
     const { db, project } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
       status: "starting",
     });
+
     markThreadDeleted(db, noopNotifier, { threadId: thread.id });
     const beforeRow = getThread(db, thread.id);
 
-    const outcome = applyThreadLifecycleEvent(db, {
+    const outcome = applyThreadLifecycleEvent(db, noopNotifier, {
       event: { type: "run.started" },
       threadId: thread.id,
     });
@@ -122,10 +134,12 @@ describe("applyThreadLifecycleEvent", () => {
 
   it("no-ops as not-found for a missing thread", () => {
     const { db } = setup();
-    const outcome = applyThreadLifecycleEvent(db, {
+
+    const outcome = applyThreadLifecycleEvent(db, noopNotifier, {
       event: { type: "run.started" },
       threadId: "thr_nonexistent",
     });
+
     expect(outcome).toEqual({
       applied: false,
       detail: "thread not found: thr_nonexistent",
@@ -135,6 +149,7 @@ describe("applyThreadLifecycleEvent", () => {
 
   it("no-ops as cas-conflict when the status changes between load and update", () => {
     const { db, project } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -148,7 +163,8 @@ describe("applyThreadLifecycleEvent", () => {
           .where(eq(threads.id, thread.id))
           .run();
       });
-      return applyThreadLifecycleEventInTransaction(interleaved, {
+
+      return applyThreadLifecycleEventInTransaction(interleaved, noopNotifier, {
         event: { type: "run.started" },
         threadId: thread.id,
       });
@@ -162,36 +178,33 @@ describe("applyThreadLifecycleEvent", () => {
     expect(getThread(db, thread.id)?.status).toBe("idle");
   });
 
-  it("sets latestAttentionAt only on attention-worthy transitions", () => {
+  it("never changes latestAttentionAt, which only inbox receipts advance", () => {
     vi.useFakeTimers();
+
     try {
       vi.setSystemTime(1_000);
       const { db, project } = setup();
 
       const cases = [
         {
-          attention: true,
           event: { type: "run.succeeded" },
           parent: false,
           status: "active",
           target: "idle",
         },
         {
-          attention: false,
           event: { type: "run.succeeded" },
           parent: true,
           status: "active",
           target: "idle",
         },
         {
-          attention: false,
           event: { type: "run.started" },
           parent: false,
           status: "starting",
           target: "active",
         },
         {
-          attention: true,
           event: { type: "run.failed" },
           parent: false,
           status: "starting",
@@ -200,6 +213,7 @@ describe("applyThreadLifecycleEvent", () => {
       ] as const;
 
       let now = 1_000;
+
       for (const testCase of cases) {
         const parentThreadId = testCase.parent
           ? createThread(db, noopNotifier, {
@@ -207,6 +221,7 @@ describe("applyThreadLifecycleEvent", () => {
               providerId: "codex",
             }).id
           : null;
+
         const thread = createThread(db, noopNotifier, {
           parentThreadId,
           projectId: project.id,
@@ -216,19 +231,22 @@ describe("applyThreadLifecycleEvent", () => {
 
         now += 1_000;
         vi.setSystemTime(now);
-        const outcome = applyThreadLifecycleEvent(db, {
+
+        const outcome = applyThreadLifecycleEvent(db, noopNotifier, {
           event: testCase.event,
           threadId: thread.id,
         });
 
         expect(outcome.applied).toBe(true);
+
         if (!outcome.applied) {
           continue;
         }
+
         expect(outcome.thread.status).toBe(testCase.target);
         expect(outcome.thread.updatedAt).toBe(now);
         expect(outcome.thread.latestAttentionAt).toBe(
-          testCase.attention ? now : thread.latestAttentionAt,
+          thread.latestAttentionAt,
         );
       }
     } finally {
@@ -240,17 +258,20 @@ describe("applyThreadLifecycleEvent", () => {
 describe("requireThreadLifecycleEventApplied", () => {
   it("throws a typed error carrying reason and detail on a no-op", () => {
     const { db, project } = setup();
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
       status: "idle",
     });
 
-    const outcome = applyThreadLifecycleEvent(db, {
+    const outcome = applyThreadLifecycleEvent(db, noopNotifier, {
       event: { type: "run.succeeded" },
       threadId: thread.id,
     });
+
     let caught: ThreadLifecycleEventNotAppliedError | null = null;
+
     try {
       requireThreadLifecycleEventApplied(outcome);
     } catch (error) {
@@ -258,6 +279,7 @@ describe("requireThreadLifecycleEventApplied", () => {
         caught = error;
       }
     }
+
     expect(caught?.reason).toBe("illegal-transition");
     expect(caught?.detail).toBe(
       "no transition for run.succeeded from status idle",

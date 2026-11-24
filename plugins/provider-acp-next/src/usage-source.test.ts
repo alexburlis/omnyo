@@ -2,14 +2,18 @@ import { expect, it, vi } from "vitest";
 import {
   createFakePluginHost,
   makeHostResponse,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import { registerUsageSource as plugin } from "./usage-source.js";
-import {
+import { experimental_providerUsageSourceV1 } from "@omnyo/plugin-sdk/provider-usage";
+
+const {
   usageListMethod,
   usageFetchMethod,
   usageMeasurementSchema,
   usageResourceListSchema,
-} from "./usage-contract.js";
+} = experimental_providerUsageSourceV1;
+
+const OWN_PLUGIN_ID = "omnyo--provider-acp-next";
 
 it("publishes only its own maintenance providers without a display and only measures the requested resource", async () => {
   const collect = vi.fn(async () => ({
@@ -22,8 +26,11 @@ it("publishes only its own maintenance providers without a display and only meas
       ],
     },
   }));
+
   let removed = false;
-  const { bb, harness } = createFakePluginHost({
+
+  const { api, harness } = createFakePluginHost({
+    pluginId: OWN_PLUGIN_ID,
     sdk: {
       hosts: {
         list: async () => [
@@ -33,6 +40,7 @@ it("publishes only its own maintenance providers without a display and only meas
         get: async ({ hostId }) => {
           if (hostId === "missing")
             throw Object.assign(new Error("Host not found"), { status: 404 });
+
           return makeHostResponse({
             id: hostId,
             status: hostId === "offline" ? "disconnected" : "connected",
@@ -52,24 +60,27 @@ it("publishes only its own maintenance providers without a display and only meas
                 {
                   id: "acp-custom",
                   displayName: "Custom",
-                  pluginId: "bb--provider-acp-next",
+                  pluginId: OWN_PLUGIN_ID,
                 },
                 {
                   id: "another",
                   displayName: "Another",
-                  pluginId: "bb--provider-acp-next",
+                  pluginId: OWN_PLUGIN_ID,
                 },
               ],
       },
       system: { usageLimits: collect },
     },
   });
+
   try {
-    plugin(bb);
+    plugin(api);
+
     const list = async () =>
       usageResourceListSchema.parse(
         await harness.behavior.callRpc(usageListMethod, {}),
       );
+
     const read = async (host: string, provider: string, refresh = false) =>
       usageMeasurementSchema.parse(
         await harness.behavior.callRpc(usageFetchMethod, {
@@ -77,6 +88,7 @@ it("publishes only its own maintenance providers without a display and only meas
           refresh,
         }),
       );
+
     expect((await list()).resources).toHaveLength(4);
     expect(collect).not.toHaveBeenCalled();
     await expect(read("missing", "foreign")).rejects.toThrow(
@@ -121,7 +133,8 @@ it("publishes only its own maintenance providers without a display and only meas
 });
 
 it("forwards validated provider-owned identity and normalization metadata while tolerating older providers", async () => {
-  const { bb, harness } = createFakePluginHost({
+  const { api, harness } = createFakePluginHost({
+    pluginId: OWN_PLUGIN_ID,
     sdk: {
       hosts: {
         list: async () => [
@@ -132,7 +145,11 @@ it("forwards validated provider-owned identity and normalization metadata while 
       },
       providers: {
         list: async () => [
-          { id: "acp-custom", displayName: "Custom", pluginId: "bb--provider-acp-next" },
+          {
+            id: "acp-custom",
+            displayName: "Custom",
+            pluginId: OWN_PLUGIN_ID,
+          },
         ],
       },
       system: {
@@ -157,14 +174,17 @@ it("forwards validated provider-owned identity and normalization metadata while 
       },
     },
   });
+
   try {
-    plugin(bb);
+    plugin(api);
+
     const value = usageMeasurementSchema.parse(
       await harness.behavior.callRpc(usageFetchMethod, {
         resourceId: JSON.stringify(["host", "acp-custom"]),
         refresh: false,
       }),
     );
+
     expect(value).toMatchObject({
       accountKey: "issuer:organization:123",
       usage: {
@@ -172,9 +192,11 @@ it("forwards validated provider-owned identity and normalization metadata while 
         windows: [{ kind: "weekly", model: "fable" }],
       },
     });
+
     const inventory = usageResourceListSchema.parse(
       await harness.behavior.callRpc(usageListMethod, {}),
     );
+
     expect(inventory.resources[0]?.accountKey).toBe(value.accountKey);
   } finally {
     await harness.lifecycle.dispose();
@@ -183,11 +205,14 @@ it("forwards validated provider-owned identity and normalization metadata while 
 
 it("coalesces concurrent reads and makes a forced refresh wait for a fresh collection", async () => {
   let finish: (() => void) | undefined;
+
   const gate = new Promise<void>((resolve) => {
     finish = resolve;
   });
+
   const collect = vi.fn(async () => {
     await gate;
+
     return {
       "acp-custom": {
         status: "ok" as const,
@@ -197,7 +222,9 @@ it("coalesces concurrent reads and makes a forced refresh wait for a fresh colle
       },
     };
   });
-  const { bb, harness } = createFakePluginHost({
+
+  const { api, harness } = createFakePluginHost({
+    pluginId: OWN_PLUGIN_ID,
     sdk: {
       hosts: {
         list: async () => [
@@ -208,19 +235,26 @@ it("coalesces concurrent reads and makes a forced refresh wait for a fresh colle
       },
       providers: {
         list: async () => [
-          { id: "acp-custom", displayName: "Custom", pluginId: "bb--provider-acp-next" },
+          {
+            id: "acp-custom",
+            displayName: "Custom",
+            pluginId: OWN_PLUGIN_ID,
+          },
         ],
       },
       system: { usageLimits: collect },
     },
   });
+
   try {
-    plugin(bb);
+    plugin(api);
+
     const read = (refresh: boolean) =>
       harness.behavior.callRpc(usageFetchMethod, {
         resourceId: JSON.stringify(["host", "acp-custom"]),
         refresh,
       });
+
     const first = read(false);
     const second = read(false);
     const forced = read(true);

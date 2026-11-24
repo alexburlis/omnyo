@@ -1,0 +1,15 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "focus-ring",
+  "type": "registry:ui",
+  "title": "focus-ring",
+  "description": "Omnyo ui \"focus-ring\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
+  "files": [
+    {
+      "path": "registry/components/ui/focus-ring.ts",
+      "content": "export const FOCUS_RING_CLASS =\n  \"outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/60\";\n\nexport const INSET_FOCUS_RING_CLASS =\n  \"outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring/60\";\n\nexport const FIELD_FOCUS_RING_CLASS =\n  \"outline-none focus-visible:border-ring/60 focus-visible:outline-3 focus-visible:outline-offset-0 focus-visible:outline-ring/15\";\n",
+      "type": "registry:ui",
+      "target": "components/ui/focus-ring.ts"
+    }
+  ]
+}

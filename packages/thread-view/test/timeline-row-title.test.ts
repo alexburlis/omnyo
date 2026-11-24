@@ -13,7 +13,7 @@ import type {
   TimelineToolWorkRow,
   TimelineWebFetchWorkRow,
   TimelineWebSearchWorkRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   buildTimelineActivityIntentTitles,
   buildTimelineRowTitle,
@@ -36,14 +36,17 @@ type PermissionGrantApprovalLifecycle = Extract<
   TimelineApprovalWorkRow,
   { approvalKind: "permission-grant" }
 >["lifecycle"];
+
 type TimelinePermissionGrantApprovalWorkRow = Extract<
   TimelineApprovalWorkRow,
   { approvalKind: "permission-grant" }
 >;
+
 type FileEditApprovalLifecycle = Extract<
   TimelineApprovalWorkRow,
   { approvalKind: "file-edit" }
 >["lifecycle"];
+
 interface PermissionGrantApprovalRowArgs {
   grantScope?: TimelinePermissionGrantApprovalWorkRow["grantScope"];
   lifecycle: PermissionGrantApprovalLifecycle;
@@ -69,14 +72,17 @@ function parentChangeFlatTitle(
   threadName: string,
 ): string {
   const verb = PARENT_CHANGE_VERB[parentChange.action];
+
   const parentTitle =
     parentChange.action === "release"
       ? parentChange.previousParentThreadTitle
       : parentChange.nextParentThreadTitle;
+
   const parent =
     parentTitle !== null && parentTitle.trim().length > 0
       ? parentTitle.trim()
       : "parent";
+
   return `${threadName} ${verb} ${parent}`;
 }
 
@@ -99,7 +105,7 @@ function commandRow(): TimelineCommandWorkRow {
     workKind: "command",
     status: "completed",
     callId: "call-1",
-    command: "pnpm exec turbo run test --filter=@bb/app",
+    command: "pnpm exec turbo run test --filter=@omnyo/app",
     cwd: null,
     source: null,
     output: "",
@@ -307,6 +313,7 @@ function permissionGrantApprovalRow({
         return "interrupted";
     }
   })();
+
   return {
     ...baseRow(`permission-grant-${lifecycle}`),
     kind: "work",
@@ -362,6 +369,7 @@ function parentChangeSystemRow({
   threadId,
 }: ParentChangeSystemRowArgs): TimelineSystemRow {
   const base = baseRow(`system-parent-${parentChange.action}`);
+
   return {
     ...base,
     ...(threadId !== undefined ? { threadId } : {}),
@@ -405,11 +413,11 @@ describe("buildTimelineRowTitle", () => {
     const title = buildTimelineRowTitle(commandRow(), DEFAULT_OPTIONS);
 
     expect(title.plain).toBe(
-      "Ran pnpm exec turbo run test --filter=@bb/app (2s)",
+      "Ran pnpm exec turbo run test --filter=@omnyo/app (2s)",
     );
     expect(title.segments.map((s) => s.text)).toEqual([
       "Ran",
-      "pnpm exec turbo run test --filter=@bb/app",
+      "pnpm exec turbo run test --filter=@omnyo/app",
     ]);
     expect(title.segments[1]?.em).toBe(true);
     expect(title.decorations).toEqual([
@@ -426,6 +434,7 @@ describe("buildTimelineRowTitle", () => {
     const title = buildTimelineRowTitle(row, DEFAULT_OPTIONS);
 
     expect(title.plain).not.toContain("\n");
+
     for (const segment of title.segments) {
       expect(segment.text).not.toContain("\n");
     }
@@ -443,7 +452,7 @@ describe("buildTimelineRowTitle", () => {
     );
 
     expect(title.plain).toBe(
-      "Running pnpm exec turbo run test --filter=@bb/app",
+      "Running pnpm exec turbo run test --filter=@omnyo/app",
     );
     expect(title.segments[0]?.text).toBe("Running");
     expect(title.segments[0]?.shimmer).toBe(true);
@@ -472,18 +481,18 @@ describe("buildTimelineRowTitle", () => {
     });
 
     expect(title.plain).toBe(
-      "Ran pnpm exec turbo run test --filter=@bb/app (2s)",
+      "Ran pnpm exec turbo run test --filter=@omnyo/app (2s)",
     );
     expect(title.tone).toBe("summary");
     expect(title.segments.find((s) => s.em)?.text).toBe(
-      "pnpm exec turbo run test --filter=@bb/app",
+      "pnpm exec turbo run test --filter=@omnyo/app",
     );
   });
 
   it.each([
     {
       expectedPlain:
-        "Permission denied: pnpm exec turbo run test --filter=@bb/app (2s)",
+        "Permission denied: pnpm exec turbo run test --filter=@omnyo/app (2s)",
       row: {
         ...commandRow(),
         approvalStatus: "denied",
@@ -606,6 +615,7 @@ describe("buildTimelineRowTitle", () => {
 
   it("renders permission grant interrupted status reason", () => {
     const statusReason = "Thread stopped by user request";
+
     const title = buildTimelineRowTitle(
       permissionGrantApprovalRow({ lifecycle: "interrupted", statusReason }),
       DEFAULT_OPTIONS,
@@ -673,7 +683,7 @@ describe("buildTimelineRowTitle", () => {
     const title = buildTimelineRowTitle(row, DEFAULT_OPTIONS);
 
     expect(title.plain).toBe(
-      "Ran pnpm exec turbo run test --filter=@bb/app (2s, error)",
+      "Ran pnpm exec turbo run test --filter=@omnyo/app (2s, error)",
     );
     expect(title.tone).toBe("default");
   });
@@ -941,6 +951,7 @@ describe("buildTimelineRowTitle", () => {
       ]);
       expect(title.segments[0]?.shimmer).toBe(expectedShimmer);
       expect(title.tone).toBe("default");
+
       if (expectedDecorationText.length > 0) {
         expect(title.decorations.map(formatTimelineDecorationText)).toContain(
           expectedDecorationText,
@@ -998,6 +1009,7 @@ describe("buildTimelineRowTitle", () => {
       createdFileRow(),
       DEFAULT_OPTIONS,
     );
+
     expect(createTitle.action).toEqual({
       kind: "open-file-diff",
       path: "src/new-file.ts",
@@ -1055,9 +1067,11 @@ describe("buildTimelineRowTitle", () => {
     expect(title.plain).toBe(
       "Ran subagent: Review correctness + plan adherence (general-purpose-review-agent-with-a-long-name) (45s)",
     );
+
     const typeSegment = title.segments.find(
       (s) => s.text === "(general-purpose-review-agent-with-a-long-name)",
     );
+
     expect(typeSegment?.truncate).toBe(true);
     expect(typeSegment?.em).toBe(false);
     expect(title.decorations).toEqual([
@@ -1239,7 +1253,9 @@ describe("buildTimelineRowTitle", () => {
 
     const title = buildTimelineRowTitle(row, DEFAULT_OPTIONS);
 
-    expect(title.plain).toBe("Ran pnpm exec turbo run test --filter=@bb/app");
+    expect(title.plain).toBe(
+      "Ran pnpm exec turbo run test --filter=@omnyo/app",
+    );
   });
 
   it("hides one-second turn durations", () => {
@@ -1292,7 +1308,7 @@ describe("buildTimelineRowTitle", () => {
         completedAt: 3_001,
       } satisfies TimelineCommandWorkRow,
       expectedPlain:
-        "Ran pnpm exec turbo run test --filter=@bb/app (3s, interrupted)",
+        "Ran pnpm exec turbo run test --filter=@omnyo/app (3s, interrupted)",
     },
     {
       row: {
@@ -1383,6 +1399,7 @@ describe("buildTimelineRowTitle", () => {
     const row = workSummaryRow([webSearchRow(), webFetchRow()]);
 
     const bundleTitle = buildTimelineRowTitle(row, DEFAULT_OPTIONS);
+
     const backgroundTitle = buildTimelineRowTitle(row, {
       summaryStyle: "background",
       workStyle: "default",
@@ -1486,6 +1503,7 @@ describe("buildTimelineRowTitle", () => {
       ),
       status: "pending",
     } satisfies TimelineWorkSummaryRow;
+
     const title = buildTimelineRowTitle(row, {
       summaryStyle: "bundle",
       workStyle: "default",
@@ -1513,6 +1531,7 @@ describe("buildTimelineRowTitle", () => {
       ),
       status: "pending",
     } satisfies TimelineWorkSummaryRow;
+
     const title = buildTimelineRowTitle(row, {
       summaryStyle: "bundle",
       workStyle: "default",
@@ -1621,11 +1640,13 @@ describe("buildTimelineRowTitle", () => {
       hint: "Outside of sandbox",
       tone: "destructive",
     } as const;
+
     const presentation = {
       label: { pending: "Running command", completed: "Ran command" },
       icon: { glyph: "Terminal" },
       badge,
     };
+
     const badgeDecoration = {
       kind: "badge",
       glyph: "SquareUnlock02",
@@ -1638,6 +1659,7 @@ describe("buildTimelineRowTitle", () => {
       { ...commandRow(), presentation } satisfies TimelineCommandWorkRow,
       DEFAULT_OPTIONS,
     );
+
     expect(plainCommand.decorations[0]).toEqual(badgeDecoration);
     expect(plainCommand.plain).toContain("(Outside of sandbox)");
 
@@ -1646,6 +1668,7 @@ describe("buildTimelineRowTitle", () => {
       presentation,
       activityIntents: [searchIntent("TODO", "src"), listFilesIntent("test")],
     } satisfies TimelineCommandWorkRow);
+
     expect(explorationTitles[0]?.title.decorations).toEqual([badgeDecoration]);
     expect(explorationTitles[1]?.title.decorations).toEqual([]);
 
@@ -1664,6 +1687,7 @@ describe("buildTimelineRowTitle", () => {
         presentation,
         activityIntents: [searchIntent("TODO", "src")],
       } satisfies TimelineCommandWorkRow;
+
       expect(
         buildTimelineRowTitle(row, DEFAULT_OPTIONS).decorations.some(
           (decoration) => decoration.kind === "badge",
@@ -1785,10 +1809,12 @@ describe("buildTimelineRowTitle form rows", () => {
         DEFAULT_OPTIONS,
       ).plain,
     ).toBe("Added API_KEY to .env");
+
     const cancelled = buildTimelineRowTitle(
       formRow("cancelled"),
       DEFAULT_OPTIONS,
     );
+
     expect(cancelled.plain).toBe("Submitted Add secrets to .env (interrupted)");
     expect(cancelled.decorations).toEqual([
       expect.objectContaining({ kind: "status", status: "interrupted" }),

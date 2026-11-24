@@ -5,7 +5,7 @@ import {
   experimental_THREAD_ACTION_GROUPS,
   experimental_useSidebarThreads,
   type PluginThreadActionRegistration,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import {
   buildSidebarEntitySectionId,
   normalizeSidebarSectionOrder,
@@ -14,7 +14,10 @@ import {
   sidebarManualSectionOrderAtom,
   sidebarOrganizationModeAtom,
 } from "../preferences/atoms.js";
-import { usePreferencesSync } from "../preferences/PreferencesSync.js";
+import {
+  usePreferencesReady,
+  usePreferencesSync,
+} from "../preferences/PreferencesSync.js";
 
 export interface ThreadSectionMoveDestination {
   label: string;
@@ -28,10 +31,12 @@ function choiceId(sectionId: string | null): string {
 }
 
 function useMoveDestinations(): readonly ThreadSectionMoveDestination[] | null {
-  usePreferencesSync();
+  usePreferencesSync(false);
+  const ready = usePreferencesReady();
   const mode = useAtomValue(sidebarOrganizationModeAtom);
   const storedOrder = useAtomValue(sidebarManualSectionOrderAtom);
   const { sections } = experimental_useSidebarThreads();
+
   const destinations =
     mode === "chronological"
       ? normalizeSidebarSectionOrder({
@@ -43,16 +48,20 @@ function useMoveDestinations(): readonly ThreadSectionMoveDestination[] | null {
           hasPinnedSection: true,
         }).flatMap<ThreadSectionMoveDestination>((id) => {
           if (id === "threads") return [{ label: "Threads", sectionId: null }];
+
           const section = sections.find(
             (candidate) =>
               buildSidebarEntitySectionId("section", candidate.id) === id,
           );
+
           return section
             ? [{ label: section.name, sectionId: section.id }]
             : [];
         })
       : null;
-  const key = JSON.stringify(destinations);
+
+  const key = JSON.stringify(ready ? destinations : null);
+
   return useMemo(
     () => JSON.parse(key) as readonly ThreadSectionMoveDestination[] | null,
     [key],
@@ -76,11 +85,14 @@ export const moveThreadAction: PluginThreadActionRegistration<
     ) {
       return null;
     }
+
     const isCurrent = (sectionId: string | null) =>
       thread.pinnedAt === null && thread.sectionId === sectionId;
+
     if (destinations.every((destination) => isCurrent(destination.sectionId))) {
       return null;
     }
+
     return {
       label: "Move to section",
       icon: "SectionMove",
@@ -96,24 +108,30 @@ export const moveThreadAction: PluginThreadActionRegistration<
         const destination = destinations.find(
           (candidate) => choiceId(candidate.sectionId) === value,
         );
+
         if (destination === undefined) return;
         const threadId = thread.id;
         const { sectionId } = destination;
+
         if (thread.pinnedAt !== null) {
           if (thread.sectionId === sectionId) {
             void sdk.threads.unpin({ threadId }).catch(() => {
               toast.error("Failed to unpin thread.");
             });
+
             return;
           }
+
           void Promise.all([
             sdk.threads.unpin({ threadId }),
             sdk.threads.update({ threadId, sectionId }),
           ]).catch(() => {
             toast.error("Failed to unpin and move thread.");
           });
+
           return;
         }
+
         if (thread.sectionId === sectionId) return;
         void sdk.threads.update({ threadId, sectionId }).catch(() => {
           toast.error("Failed to move thread.");

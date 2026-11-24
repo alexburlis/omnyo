@@ -10,16 +10,16 @@ const branches = [
   "main",
   "develop",
   "staging",
-  "bb/feat/review-flow",
-  "bb/fix/timeline-pagination",
-  "bb/implement-server-daemon-protocol-simplification-thr_qfk8ksbxkk",
+  "omnyo/feat/review-flow",
+  "omnyo/fix/timeline-pagination",
+  "omnyo/implement-server-daemon-protocol-simplification-thr_qfk8ksbxkk",
 ] as const;
 
 const remoteBranches = [
   "origin/main",
   "origin/develop",
   "origin/release/1.3",
-  "origin/bb/feat/review-flow",
+  "origin/omnyo/feat/review-flow",
   "upstream/main",
 ] as const;
 
@@ -50,11 +50,11 @@ const mergeBasePicker: BranchPickerStoryConfig = {
 };
 
 const longBranchPicker: BranchPickerStoryConfig = {
-  value: "bb/implement-server-daemon-protocol-simplification-thr_qfk8ksbxkk",
+  value: "omnyo/implement-server-daemon-protocol-simplification-thr_qfk8ksbxkk",
   triggerLabel:
-    "bb/implement-server-daemon-protocol-simplification-thr_qfk8ksbxkk",
+    "omnyo/implement-server-daemon-protocol-simplification-thr_qfk8ksbxkk",
   triggerTitle:
-    "Branch: bb/implement-server-daemon-protocol-simplification-thr_qfk8ksbxkk",
+    "Branch: omnyo/implement-server-daemon-protocol-simplification-thr_qfk8ksbxkk",
   defaultOpen: true,
   modal: false,
 };
@@ -68,10 +68,12 @@ function BranchPickerStoryRow({
 }: BranchPickerStoryRowProps) {
   const { branchOptions, ...branchPickerProps } = picker;
   const [value, setValue] = useState(picker.value);
+
   const triggerLabel =
     picker.menuLabel !== undefined && value !== null
       ? `${picker.menuLabel} ${value}`
       : picker.triggerLabel;
+
   const triggerTitle =
     picker.menuLabel !== undefined && value !== null
       ? `${picker.menuLabel} ${value}`
@@ -116,6 +118,23 @@ export function Overview() {
   );
 }
 
+const loadingBranchesPicker: BranchPickerStoryConfig = {
+  value: null,
+  loading: true,
+  branchOptions: [],
+  defaultOpen: true,
+  modal: false,
+  triggerLabel: "Loading branches...",
+};
+
+const noBranchesPicker: BranchPickerStoryConfig = {
+  value: null,
+  branchOptions: [],
+  defaultOpen: true,
+  modal: false,
+  triggerLabel: "Select branch",
+};
+
 export function EmptyStates() {
   return (
     <StoryCard labelWidth="190px">
@@ -123,26 +142,39 @@ export function EmptyStates() {
         label="loading branches"
         hint="branch options are still loading"
         includeRemoteOptions={false}
-        picker={{
-          value: null,
-          loading: true,
-          branchOptions: [],
-          defaultOpen: true,
-          modal: false,
-          triggerLabel: "Loading branches...",
-        }}
+        picker={{ ...loadingBranchesPicker, defaultOpen: false }}
       />
       <BranchPickerStoryRow
         label="no branches found"
         hint="the repository has no selectable branches"
         includeRemoteOptions={false}
-        picker={{
-          value: null,
-          branchOptions: [],
-          defaultOpen: true,
-          modal: false,
-          triggerLabel: "Select branch",
-        }}
+        picker={{ ...noBranchesPicker, defaultOpen: false }}
+      />
+    </StoryCard>
+  );
+}
+
+export function LoadingBranches() {
+  return (
+    <StoryCard labelWidth="190px">
+      <BranchPickerStoryRow
+        label="loading branches"
+        hint="branch options are still loading"
+        includeRemoteOptions={false}
+        picker={loadingBranchesPicker}
+      />
+    </StoryCard>
+  );
+}
+
+export function NoBranches() {
+  return (
+    <StoryCard labelWidth="190px">
+      <BranchPickerStoryRow
+        label="no branches found"
+        hint="the repository has no selectable branches"
+        includeRemoteOptions={false}
+        picker={noBranchesPicker}
       />
     </StoryCard>
   );

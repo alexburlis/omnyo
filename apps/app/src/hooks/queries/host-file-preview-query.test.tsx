@@ -40,6 +40,7 @@ describe("useHostFilePreview", () => {
       sizeBytes: 8,
     });
     const { queryClient, wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useHostFilePreview("host-1", "/tmp/diagram.png"),
       { wrapper },
@@ -69,6 +70,7 @@ describe("useHostFilePreview", () => {
       }),
     );
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useHostFilePreview("host-1", "/tmp/report.html"),
       { wrapper },
@@ -95,6 +97,7 @@ describe("useHostFilePreview", () => {
       }),
     );
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useHostFilePreview("host-1", "/tmp/example.ts"),
       { wrapper },
@@ -111,6 +114,7 @@ describe("useHostFilePreview", () => {
   it("fails instead of reading the whole file when the host file URL fails", async () => {
     fetchMock.mockRejectedValue(new Error("host unavailable"));
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useHostFilePreview("host-1", "/tmp/archive.zip"),
       { wrapper },
@@ -132,6 +136,7 @@ describe("useHostFilePreview", () => {
         }),
     );
     const { queryClient, wrapper } = createQueryClientTestHarness();
+
     const { rerender } = renderHook(
       ({ enabled }) =>
         useHostFilePreview("host-1", "/tmp/example.txt", { enabled }),
@@ -139,9 +144,11 @@ describe("useHostFilePreview", () => {
     );
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
     const activeQuery = queryClient.getQueryCache().find({
       queryKey: hostFilePreviewQueryKey("host-1", "/tmp/example.txt"),
     });
+
     expect(activeQuery).toBeDefined();
 
     vi.useFakeTimers();

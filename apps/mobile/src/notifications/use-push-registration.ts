@@ -33,11 +33,13 @@ export function usePushRegistration(profile: {
   const controller = getPushRegistrationController();
   const notifications = getPushNotificationsModule();
   const storeSnapshot = usePushStoreSnapshot();
+
   const controllerSnapshot = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
     controller.getSnapshot,
   );
+
   useEffect(() => {
     void controller.refreshPermission();
   }, [controller]);
@@ -45,10 +47,12 @@ export function usePushRegistration(profile: {
   const state = controllerSnapshot.byProfileId[profile.id] ?? IDLE_STATE;
   const enabled = storeSnapshot.enabledProfileIds.includes(profile.id);
   const registration = storeSnapshot.registrations[profile.id] ?? null;
+
   const setEnabled = useCallback(
     (next: boolean) => controller.setEnabled(profile, next),
     [controller, profile],
   );
+
   return {
     available:
       notifications.projectId !== null && isPushRegistrationAllowed(profile),

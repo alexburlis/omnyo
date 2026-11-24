@@ -12,10 +12,13 @@ export type PluginWorkspaceState = z.infer<typeof pluginWorkspaceSchema>;
 const storage = createLocalStorageSyncStorage<PluginWorkspaceState>({
   parse: (storedValue, initialValue) => {
     if (storedValue === null) return initialValue;
+
     try {
       const parsed = pluginWorkspaceSchema.safeParse(JSON.parse(storedValue));
+
       if (!parsed.success) return initialValue;
       const tabs = [...new Set(parsed.data.tabs)];
+
       return {
         tabs,
         activePluginId: tabs.includes(parsed.data.activePluginId ?? "")
@@ -30,7 +33,7 @@ const storage = createLocalStorageSyncStorage<PluginWorkspaceState>({
 });
 
 export const pluginWorkspaceAtom = atomWithStorage<PluginWorkspaceState>(
-  "bb.plugins.workspace.tabs",
+  "omnyo.plugins.workspace.tabs",
   { tabs: [], activePluginId: null },
   storage,
   { getOnInit: true },

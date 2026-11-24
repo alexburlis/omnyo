@@ -2,13 +2,17 @@ import { spawn } from "node:child_process";
 import {
   experimental_defineHostEntry,
   type ExperimentalHostWorkerLease,
-} from "@get-bb/plugin-sdk/host";
+} from "@omnyo/plugin-sdk/host";
 import { keepAwakeHostContract } from "./contract.js";
 
 const CAFFEINATE_COMMAND = "/usr/bin/caffeinate";
+
 const RESTART_DELAY_MS = 1_000;
+
 const MAX_RESTART_DELAY_MS = 60_000;
+
 const SETTLED_CHILD_MS = 10_000;
+
 const WINDOWS_AWAKE_STATE = 0x80000001;
 
 interface KeepAwakeCommand {
@@ -23,6 +27,7 @@ export function keepAwakeCommand(
   if (platform === "darwin") {
     return { command: CAFFEINATE_COMMAND, args: ["-i", "-w", String(pid)] };
   }
+
   if (platform === "win32") {
     return {
       command: "powershell.exe",
@@ -32,13 +37,14 @@ export function keepAwakeCommand(
         "-Command",
         [
           "$ErrorActionPreference = 'Stop'",
-          "$power = Add-Type -Name KeepAwake -Namespace Bb -PassThru -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint flags);'",
+          "$power = Add-Type -Name KeepAwake -Namespace Omnyo -PassThru -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint flags);'",
           `if ($power::SetThreadExecutionState(${WINDOWS_AWAKE_STATE}) -eq 0) { exit 1 }`,
           `Wait-Process -Id ${pid}`,
         ].join("; "),
       ],
     };
   }
+
   return null;
 }
 
@@ -94,6 +100,7 @@ export function createKeepAwakeHostEntry(deps: KeepAwakeHostDependencies) {
     ) {
       return;
     }
+
     const delayMs = restartDelayMs;
     restartDelayMs = Math.min(restartDelayMs * 2, MAX_RESTART_DELAY_MS);
     restartTimer = setTimeout(() => {
@@ -112,23 +119,31 @@ export function createKeepAwakeHostEntry(deps: KeepAwakeHostDependencies) {
     ) {
       return;
     }
+
     let next: KeepAwakeChild;
+
     try {
       next = deps.spawn(command.command, command.args, { stdio: "ignore" });
     } catch {
       scheduleRestart();
+
       return;
     }
+
     child = next;
     const startedAt = now();
+
     const clear = (): void => {
       if (child !== next) return;
       child = null;
+
       if (now() - startedAt >= SETTLED_CHILD_MS) {
         restartDelayMs = RESTART_DELAY_MS;
       }
+
       scheduleRestart();
     };
+
     next.once("error", clear);
     next.once("exit", clear);
   }
@@ -156,15 +171,19 @@ export function createKeepAwakeHostEntry(deps: KeepAwakeHostDependencies) {
       setEnabled(input, context) {
         bindLifecycle(context.lifecycle.signal);
         desiredEnabled = command !== null && input.enabled;
+
         if (!desiredEnabled) {
           restartDelayMs = RESTART_DELAY_MS;
           clearRestart();
           stop();
           releaseWorkerLease();
+
           return status();
         }
+
         workerLease ??= context.experimental_retainWorker();
         start();
+
         return status();
       },
     },

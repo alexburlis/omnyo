@@ -12,7 +12,6 @@ export interface PluginMarketplaceRow {
   sourceGitSubdirectory: string | null;
   sourceGitCommit: string | null;
   manifestJson: string;
-  statsJson: string | null;
   etag: string | null;
   lastModified: string | null;
   lastSuccessfulRefreshAt: number | null;
@@ -71,6 +70,7 @@ export function deletePluginMarketplace(
   db.delete(pluginMarketplaceIcons)
     .where(eq(pluginMarketplaceIcons.marketplaceName, name))
     .run();
+
   return (
     db.delete(pluginMarketplaces).where(eq(pluginMarketplaces.name, name)).run()
       .changes > 0
@@ -91,9 +91,11 @@ export function upsertPluginMarketplace(
     })
     .run();
   const row = getPluginMarketplace(db, name);
+
   if (row === undefined) {
     throw new Error(`plugin marketplace "${name}" missing after upsert`);
   }
+
   return row;
 }
 
@@ -111,6 +113,7 @@ export function recordPluginMarketplaceRefreshFailure(
     })
     .where(eq(pluginMarketplaces.name, name))
     .run();
+
   return getPluginMarketplace(db, name);
 }
 
@@ -174,5 +177,6 @@ export function replacePluginMarketplaceIcons(
   db.delete(pluginMarketplaceIcons)
     .where(eq(pluginMarketplaceIcons.marketplaceName, marketplaceName))
     .run();
+
   for (const icon of icons) upsertPluginMarketplaceIcon(db, icon);
 }

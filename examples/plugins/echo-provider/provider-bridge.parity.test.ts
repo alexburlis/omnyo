@@ -16,15 +16,18 @@ import {
   experimental_rerecordCurrentBridgeLane as rerecordCurrentBridgeLane,
   experimental_resolveProviderBridgeLaunch as resolveProviderBridgeLaunch,
   experimental_withCurrentBridgeLane as withCurrentBridgeLane,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import type {
   CreateParityAssembler,
   RecordedCell,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 
 const packageRoot = dirname(fileURLToPath(import.meta.url));
+
 const RECORDINGS_ROOT = join(packageRoot, "recordings");
+
 const BRIDGE_MODULE = join(packageRoot, "src", "provider-bridge.ts");
+
 const PLUGIN_ID = "echo-provider";
 
 const SCRIPTED_ITEM_KINDS = [
@@ -40,6 +43,7 @@ const SCRIPTED_ITEM_KINDS = [
 
 const createAssembler: CreateParityAssembler = (providerId) => {
   const collector = createBridgeDeltaEventCollector(providerId);
+
   return { assembleMessage: (message) => collector.assembleMessage(message) };
 };
 
@@ -72,13 +76,16 @@ it
       createAssembler,
       cell.provider,
     );
+
     expect(recorded.invalidDeltas).toEqual([]);
     expect(recorded.grammarViolations).toEqual([]);
+
     const recordedKinds = new Set(
       recorded.events.flatMap((event) =>
         event.type === "item/completed" ? [event.item.type] : [],
       ),
     );
+
     expect([...recordedKinds].sort()).toEqual(SCRIPTED_ITEM_KINDS);
 
     const run = await replayRecording({
@@ -93,6 +100,7 @@ it
       timeoutMs: 60_000,
       onStderr: (text) => process.stderr.write(`[echo bridge] ${text}`),
     });
+
     expect(run.stalls).toEqual([]);
     expect(run.exitCode).toBe(0);
 
@@ -110,6 +118,7 @@ it
       [],
       { provider: cell.provider, cell: cell.cell },
     );
+
     expect({ events: comparison.events, grammar: comparison.grammar }).toEqual({
       events: { onlyInOld: [], onlyInNew: [] },
       grammar: { onlyInOld: [], onlyInNew: [] },
@@ -124,6 +133,7 @@ it
       recordedEvents: recorded.events,
       stalls: run.stalls,
     });
+
     console.info(
       `echo recorded conformance:\n${formatConformanceReport({
         results,
@@ -143,9 +153,11 @@ it.skipIf(replayJoinsNativeSeparatorsUnlikeThePosixRecording)(
   "re-records the bridge lane beside a copy of the recording and replays from it",
   async () => {
     const cell = cells[0]!;
-    const copy = mkdtempSync(join(tmpdir(), "bb-echo-rerecord-"));
+    const copy = mkdtempSync(join(tmpdir(), "omnyo-echo-rerecord-"));
+
     try {
       cpSync(cell.dir, copy, { recursive: true });
+
       const result = await rerecordCurrentBridgeLane({
         recordingDir: copy,
         providerId: cell.provider,
@@ -156,10 +168,12 @@ it.skipIf(replayJoinsNativeSeparatorsUnlikeThePosixRecording)(
         createAssembler,
         timeoutMs: 60_000,
       });
+
       expect(result.stalls).toEqual([]);
       expect(result.file).toBe(join(copy, CURRENT_BRIDGE_LANE_FILE));
 
       const lane = readFileSync(join(copy, CURRENT_BRIDGE_LANE_FILE), "utf8");
+
       const recordedCwd = (
         JSON.parse(
           readBridgeRecording(cell.dir).entries.find(
@@ -167,8 +181,10 @@ it.skipIf(replayJoinsNativeSeparatorsUnlikeThePosixRecording)(
           )!.line,
         ) as { params: { cwd: string } }
       ).params.cwd;
+
       expect(lane).toContain(recordedCwd);
-      expect(lane).not.toContain("bb-parity-ws-");
+      expect(lane).not.toContain("omnyo-parity-ws-");
+
       const toolCallIds = lane
         .split("\n")
         .filter((raw) => raw.length > 0)
@@ -181,6 +197,7 @@ it.skipIf(replayJoinsNativeSeparatorsUnlikeThePosixRecording)(
         )
         .filter((message) => message.method === "item/tool/call")
         .map((message) => message.id);
+
       expect(toolCallIds).toEqual(["echo-req-1"]);
 
       const recorded = assembleRecordedEvents(
@@ -188,18 +205,22 @@ it.skipIf(replayJoinsNativeSeparatorsUnlikeThePosixRecording)(
         createAssembler,
         cell.provider,
       );
+
       const current = assembleRecordedEvents(
         withCurrentBridgeLane(readBridgeRecording(copy)),
         createAssembler,
         cell.provider,
       );
+
       expect(current.invalidDeltas).toEqual([]);
+
       const comparison = compareParity(
         { events: recorded.events, rows: [] },
         { events: current.events, rows: [] },
         [],
         { provider: cell.provider, cell: cell.cell },
       );
+
       expect(comparison.events).toEqual({ onlyInOld: [], onlyInNew: [] });
       expect(current.events.length).toBe(recorded.events.length);
     } finally {

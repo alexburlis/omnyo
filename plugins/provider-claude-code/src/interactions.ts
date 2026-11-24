@@ -12,16 +12,18 @@ import {
   isApprovalInteractionOutcome,
   userQuestionInteractionOutcomeSchema,
   ProviderResponseEncodeError,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { z } from "zod";
 
 export const claudeInteractionOutcomeSchema = z.union([
   approvalInteractionOutcomeSchema,
   userQuestionInteractionOutcomeSchema,
 ]);
+
 export type ClaudeInteractionOutcome =
   | ApprovalInteractionOutcome
   | UserQuestionInteractionOutcome;
+
 import {
   buildClaudePlanRejectionMessage,
   buildClaudeSessionPermissionUpdates,
@@ -54,6 +56,7 @@ function getClaudeSessionRules(
   if (args.toolName === CLAUDE_BASH_TOOL_NAME) {
     return args.suggestedRules;
   }
+
   return args.toolName !== null && args.permissions.network?.enabled === true
     ? [{ toolName: args.toolName }]
     : [];
@@ -76,6 +79,7 @@ function buildClaudeApprovalAvailableDecisions(
   if (args.toolName === CLAUDE_EXIT_PLAN_MODE_TOOL_NAME) {
     return ["allow_once", "deny"];
   }
+
   return hasClaudeSessionPermissionUpdate(args)
     ? ["allow_once", "allow_for_session", "deny"]
     : ["allow_once", "deny"];
@@ -86,6 +90,7 @@ function buildClaudeApprovalSubject(
 ): PendingInteractionApprovalSubject {
   if (args.toolName === CLAUDE_EXIT_PLAN_MODE_TOOL_NAME) {
     const parsed = claudeExitPlanModeInputSchema.safeParse(args.input);
+
     if (parsed.success) {
       return {
         kind: "plan",
@@ -98,6 +103,7 @@ function buildClaudeApprovalSubject(
 
   if (args.toolName === CLAUDE_BASH_TOOL_NAME) {
     const bashCommand = parseClaudeBashCommand(args.input);
+
     if (bashCommand) {
       return {
         kind: "command",
@@ -117,6 +123,7 @@ function buildClaudeApprovalSubject(
 
   if (isClaudeConcreteFileChangeToolName(args.toolName)) {
     const parsed = claudeFileEditArgsSchema.safeParse(args.input);
+
     if (parsed.success && getClaudeFileEditPath(parsed.data)) {
       return {
         kind: "file_change",
@@ -167,6 +174,7 @@ export function buildClaudeUserQuestionPayload(
     kind: "user_question",
     questions: args.questions.map((question, questionIndex) => {
       const questionId = buildClaudeUserQuestionId(args.itemId, questionIndex);
+
       return {
         id: questionId,
         prompt: question.question,
@@ -191,6 +199,7 @@ function buildClaudeUserQuestion(
       `User question '${question.id}' has no options to return to Claude`,
     );
   }
+
   return {
     question: question.prompt,
     header: question.shortLabel ?? question.prompt.slice(0, 12),
@@ -207,32 +216,41 @@ function buildClaudeUserQuestionAnswerText(
   resolution: UserQuestionPendingInteractionResolution,
 ): string {
   const answer = resolution.answers[question.id];
+
   if (!answer) {
     throw new ProviderResponseEncodeError(
       `Missing answer for user question '${question.id}'`,
     );
   }
+
   const options = question.options ?? [];
+
   const selectedLabels = answer.selected.map((selectedValue) => {
     const option = options.find(
       (candidate) => candidate.value === selectedValue,
     );
+
     if (!option) {
       throw new ProviderResponseEncodeError(
         `Unknown selected option '${selectedValue}' for user question '${question.id}'`,
       );
     }
+
     return option.label;
   });
+
   if (selectedLabels.length > 0) {
     const selectedText = selectedLabels.join(", ");
+
     return answer.freeText
       ? `${selectedText}; ${answer.freeText}`
       : selectedText;
   }
+
   if (answer.freeText) {
     return answer.freeText;
   }
+
   throw new ProviderResponseEncodeError(
     `Answer for user question '${question.id}' is empty`,
   );
@@ -243,12 +261,15 @@ function buildClaudeUserQuestionAnnotations(
   resolution: UserQuestionPendingInteractionResolution,
 ): ClaudeUserQuestionOutput["annotations"] {
   const annotations: NonNullable<ClaudeUserQuestionOutput["annotations"]> = {};
+
   for (const question of payload.questions) {
     const answer = resolution.answers[question.id];
+
     if (answer && answer.selected.length > 0 && answer.freeText !== undefined) {
       annotations[question.prompt] = { notes: answer.freeText };
     }
   }
+
   return Object.keys(annotations).length > 0 ? annotations : undefined;
 }
 
@@ -256,12 +277,14 @@ function validateUniqueClaudeUserQuestionPrompts(
   payload: UserQuestionPendingInteractionPayload,
 ): void {
   const prompts = new Set<string>();
+
   for (const question of payload.questions) {
     if (prompts.has(question.prompt)) {
       throw new ProviderResponseEncodeError(
         `Claude user-question prompts must be unique; duplicate prompt '${question.prompt}'`,
       );
     }
+
     prompts.add(question.prompt);
   }
 }
@@ -272,13 +295,16 @@ function buildClaudeUserQuestionOutput(
 ): ClaudeUserQuestionOutput {
   validateUniqueClaudeUserQuestionPrompts(payload);
   const answers: ClaudeUserQuestionOutput["answers"] = {};
+
   for (const question of payload.questions) {
     answers[question.prompt] = buildClaudeUserQuestionAnswerText(
       question,
       resolution,
     );
   }
+
   const annotations = buildClaudeUserQuestionAnnotations(payload, resolution);
+
   return {
     questions: payload.questions.map(buildClaudeUserQuestion),
     answers,
@@ -355,6 +381,7 @@ export function buildClaudeInteractiveResponse(
   const permissions = resolveClaudeGrantedPermissions(
     args.resolution.grantedPermissions,
   );
+
   const updatedPermissions = buildClaudeSessionPermissionUpdates({
     permissions,
     rules: getClaudeSessionRules({

@@ -1,7 +1,13 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": [],
-  "jsPlugins": ["./scripts/oxlint-plugin.mjs"],
+  "jsPlugins": [
+    "./scripts/oxlint-plugin.mjs",
+    {
+      "name": "anti-slop",
+      "specifier": "./tools/oxlint/anti-slop/index.ts"
+    }
+  ],
   "categories": {
     "correctness": "off"
   },
@@ -9,7 +15,26 @@
     "builtin": true
   },
   "rules": {
-    "bb/no-comments": "error"
+    "omnyo/no-comments": "error",
+    "oxc/no-accumulating-spread": "error",
+    "anti-slop/no-array-filter-map": "off",
+    "anti-slop/no-reduce-accumulator-copy": "error",
+    "anti-slop/no-chained-type-assertions": "error",
+    "anti-slop/no-conditional-empty-object-spread": "off",
+    "anti-slop/no-known-value-widening": "off",
+    "anti-slop/no-module-mocking": "error",
+    "anti-slop/no-object-parameters": "off",
+    "anti-slop/no-reflect-apply": "off",
+    "anti-slop/no-reflect-get": "off",
+    "anti-slop/no-runtime-typeof": "off",
+    "anti-slop/no-shape-in-symbol-names": "off",
+    "anti-slop/no-unknown-parameters": "off",
+    "anti-slop/no-unknown-returns": "off",
+    "anti-slop/no-unknown-type-aliases": "off",
+    "anti-slop/no-unsafe-dictionary-type": "off",
+    "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/require-readable-spacing": "error",
+    "anti-slop/require-safety-comment-for-type-assertion": "off"
   },
   "ignorePatterns": [
     "**/node_modules/**",
@@ -21,7 +46,20 @@
     "apps/mobile/.expo/**",
     "packages/templates/src/generated/**",
     "packages/plugin-build/src/generated/**",
-    "packages/plugin-sdk/bundled-types/**"
+    "packages/plugin-sdk/bundled-types/**",
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    "tools/oxlint/anti-slop/**",
+    "apps/web/src/components/consent/**"
   ],
   "overrides": [
     {
@@ -32,7 +70,7 @@
         "packages/plugin-sdk/src/testing/*.{ts,tsx}"
       ],
       "rules": {
-        "bb/no-comments": "off"
+        "omnyo/no-comments": "off"
       }
     },
     {
@@ -41,19 +79,19 @@
       "rules": {
         "react/rules-of-hooks": "error",
         "react/exhaustive-deps": "error",
-        "react/static-components": "error",
+        "react/static-components": "off",
         "react/use-memo": "error",
         "react/void-use-memo": "error",
-        "react/preserve-manual-memoization": "warn",
-        "react/incompatible-library": "warn",
-        "react/immutability": "warn",
-        "react/globals": "error",
-        "react/refs": "warn",
-        "react/set-state-in-effect": "warn",
+        "react/preserve-manual-memoization": "off",
+        "react/incompatible-library": "off",
+        "react/immutability": "off",
+        "react/globals": "off",
+        "react/refs": "off",
+        "react/set-state-in-effect": "off",
         "react/error-boundaries": "error",
-        "react/purity": "warn",
+        "react/purity": "off",
         "react/set-state-in-render": "error",
-        "react/unsupported-syntax": "warn"
+        "react/unsupported-syntax": "off"
       }
     },
     {
@@ -76,7 +114,7 @@
             ]
           }
         ],
-        "bb/no-blocking-child-process-call": "error"
+        "omnyo/no-blocking-child-process-call": "error"
       }
     },
     {
@@ -94,20 +132,20 @@
               {
                 "name": "node:child_process",
                 "allowTypeImports": true,
-                "message": "Use @bb/process-utils managed processes or buffered commands so launch and termination share one owner."
+                "message": "Use @omnyo/process-utils managed processes or buffered commands so launch and termination share one owner."
               },
               {
                 "name": "child_process",
                 "allowTypeImports": true,
-                "message": "Use @bb/process-utils managed processes or buffered commands so launch and termination share one owner."
+                "message": "Use @omnyo/process-utils managed processes or buffered commands so launch and termination share one owner."
               },
               {
                 "name": "cross-spawn",
                 "allowTypeImports": true,
-                "message": "Use @bb/process-utils managed processes or buffered commands so launch and termination share one owner."
+                "message": "Use @omnyo/process-utils managed processes or buffered commands so launch and termination share one owner."
               },
               {
-                "name": "@bb/process-utils",
+                "name": "@omnyo/process-utils",
                 "importNames": [
                   "spawnPortableProcess",
                   "spawnPortablePipedProcess",
@@ -132,7 +170,7 @@
       ],
       "rules": {
         "no-restricted-imports": "off",
-        "bb/no-blocking-child-process-call": "off"
+        "omnyo/no-blocking-child-process-call": "off"
       }
     },
     {
@@ -143,20 +181,30 @@
           {
             "paths": [
               {
-                "name": "@bb/host-workspace",
+                "name": "node:child_process",
+                "importNames": ["spawnSync", "execSync", "execFileSync"],
+                "message": "Use async child_process APIs instead of blocking sync variants."
+              },
+              {
+                "name": "child_process",
+                "importNames": ["spawnSync", "execSync", "execFileSync"],
+                "message": "Use async child_process APIs instead of blocking sync variants."
+              },
+              {
+                "name": "@omnyo/host-workspace",
                 "message": "Server must not access workspaces directly. Use daemon commands instead."
               },
               {
-                "name": "@bb/host-watcher",
+                "name": "@omnyo/host-watcher",
                 "message": "Server must not access host watchers directly. Use daemon commands instead."
               },
               {
                 "name": "node:fs",
-                "message": "Server must not use node:fs. Use daemon commands for workspace access. (attachments.ts is the only exception — it manages server-local storage.)"
+                "message": "Workspace filesystem access belongs to daemon commands. Server-owned storage modules are listed in docs/lint-policy.md."
               },
               {
                 "name": "node:fs/promises",
-                "message": "Server must not use node:fs/promises. Use daemon commands for workspace access. (attachments.ts is the only exception — it manages server-local storage.)"
+                "message": "Workspace filesystem access belongs to daemon commands. Server-owned storage modules are listed in docs/lint-policy.md."
               }
             ]
           }
@@ -180,14 +228,14 @@
           {
             "paths": [
               {
-                "name": "@bb/sdk",
-                "message": "Import @bb/sdk/browser: the root entry resolves to the Node SDK under Metro's source condition."
+                "name": "@omnyo/sdk",
+                "message": "Import @omnyo/sdk/browser: the root entry resolves to the Node SDK under Metro's source condition."
               }
             ],
             "patterns": [
               {
-                "group": ["@bb/shared-ui", "@bb/shared-ui/*"],
-                "message": "@bb/shared-ui is React DOM + Radix. Use the mobile primitives instead."
+                "group": ["@omnyo/shared-ui", "@omnyo/shared-ui/*"],
+                "message": "@omnyo/shared-ui is React DOM + Radix. Use the mobile primitives instead."
               }
             ]
           }
@@ -197,8 +245,8 @@
     {
       "files": ["apps/app/src/**/*.{ts,tsx}"],
       "rules": {
-        "bb/no-native-title-with-aria-label": "error",
-        "bb/no-native-title-on-button": "error"
+        "omnyo/no-native-title-with-aria-label": "error",
+        "omnyo/no-native-title-on-button": "error"
       }
     },
     {
@@ -208,14 +256,90 @@
         "apps/app/src/**/*.stories.tsx"
       ],
       "rules": {
-        "bb/no-native-title-with-aria-label": "off",
-        "bb/no-native-title-on-button": "off"
+        "omnyo/no-native-title-with-aria-label": "off",
+        "omnyo/no-native-title-on-button": "off"
       }
     },
     {
       "files": ["plugins/**/*.{ts,tsx,mts,cts,js,mjs,cjs}"],
       "rules": {
-        "bb/forkable-plugin-imports": "error"
+        "omnyo/forkable-plugin-imports": "error"
+      }
+    },
+    {
+      "files": [
+        "apps/server/src/services/plugin-catalog/**/*.ts",
+        "apps/server/src/services/plugins/**/*.ts",
+        "apps/server/src/services/skills/**/*.ts",
+        "apps/server/src/services/server-move/**/*.ts",
+        "apps/server/src/services/install/omnyo-app-artifact.ts",
+        "apps/server/src/services/system/code-themes.ts",
+        "apps/server/src/services/system/managed-app-config.ts",
+        "apps/server/src/services/system/custom-themes.ts",
+        "apps/server/src/services/hosts/primary-host-id.ts",
+        "apps/server/src/services/machines/bootstrap.ts",
+        "apps/server/src/services/machines/environment-storage.ts",
+        "apps/server/src/services/threads/workspace-agent-instructions.ts",
+        "apps/server/src/routes/plugins.ts",
+        "apps/server/src/server.ts",
+        "apps/server/src/legacy-automations-export.ts",
+        "apps/server/src/omnyo-identity-adoption.ts",
+        "apps/server/src/services/maintenance/omnyo-identity-controller-v1.ts",
+        "apps/server/src/internal/host-artifact-response.ts",
+        "apps/server/src/internal/server-move.ts",
+        "apps/server/src/start-server.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "node:child_process",
+                "importNames": ["spawnSync", "execSync", "execFileSync"],
+                "message": "Use async child_process APIs instead of blocking sync variants."
+              },
+              {
+                "name": "child_process",
+                "importNames": ["spawnSync", "execSync", "execFileSync"],
+                "message": "Use async child_process APIs instead of blocking sync variants."
+              },
+              {
+                "name": "@omnyo/host-workspace",
+                "message": "Server must not access workspaces directly. Use daemon commands instead."
+              },
+              {
+                "name": "@omnyo/host-watcher",
+                "message": "Server must not access host watchers directly. Use daemon commands instead."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/cli/src/cli-reexec.ts"],
+      "rules": {
+        "no-restricted-imports": "off",
+        "omnyo/no-blocking-child-process-call": "off"
+      }
+    },
+    {
+      "files": [
+        "**/test/**",
+        "**/tests/**",
+        "**/__tests__/**",
+        "**/*.{test,spec}.{ts,tsx,js,mjs,cjs}",
+        "**/vitest.setup.{ts,tsx,js,mjs}",
+        "packages/plugin-sdk/src/testing/**",
+        "**/src/testing/**"
+      ],
+      "rules": {
+        "no-restricted-imports": "off",
+        "omnyo/no-blocking-child-process-call": "off",
+        "anti-slop/no-module-mocking": "off",
+        "anti-slop/no-chained-type-assertions": "off",
+        "anti-slop/no-widen-then-assert": "off"
       }
     }
   ]

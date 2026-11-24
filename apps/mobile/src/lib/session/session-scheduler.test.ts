@@ -1,4 +1,4 @@
-import { ConnectListError, type DesktopSession } from "@bb/connect-client";
+import { ConnectListError, type DesktopSession } from "@omnyo/connect-client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectServerProfile } from "../profiles/profile";
 import type { CookieStoreLike, SessionCookieSpec } from "./cookie-store";
@@ -6,13 +6,15 @@ import type { SessionCacheLike, StoredSession } from "./session-cache";
 import { createSessionScheduler, type SessionState } from "./session-scheduler";
 
 const HOUR = 60 * 60 * 1000;
+
 const MINUTE = 60 * 1000;
+
 const DAY = 24 * HOUR;
 
 const profile: ConnectServerProfile = {
   id: "p1",
   mode: "connect",
-  serverUrl: "https://bee.getbb.app",
+  serverUrl: "https://bee.example.test",
   label: "bee",
   handle: "bee",
   credential: "bbcm_secret",
@@ -22,9 +24,9 @@ const profile: ConnectServerProfile = {
 function session(expiresAt: number, value = "sess"): DesktopSession {
   return {
     cookie: {
-      name: "bb_desktop_session",
+      name: "omnyo_desktop_session",
       value,
-      domain: ".getbb.app",
+      domain: ".example.test",
       expiresAt,
     },
   };
@@ -36,12 +38,15 @@ function setup(stored: Map<string, StoredSession> = new Map()) {
     cookie: SessionCookieSpec;
     useWebKit: boolean;
   }[] = [];
+
   const cookieStore: CookieStoreLike = {
     set: async (url, cookie, useWebKit) => {
       cookies.push({ url, cookie, useWebKit });
+
       return true;
     },
   };
+
   const sessionCache: SessionCacheLike = {
     read: async (profileId) => stored.get(profileId) ?? null,
     write: async (profileId, entry) => {
@@ -51,15 +56,20 @@ function setup(stored: Map<string, StoredSession> = new Map()) {
       stored.delete(profileId);
     },
   };
+
   const fetchSession =
     vi.fn<(c: { credential: string }) => Promise<DesktopSession>>();
+
   const states: SessionState["status"][] = [];
+
   const scheduler = createSessionScheduler({
     cookieStore,
     sessionCache,
     fetchSession,
   });
+
   scheduler.onStateChange((s) => states.push(s.status));
+
   return { cookies, stored, fetchSession, scheduler, states };
 }
 
@@ -89,11 +99,11 @@ describe("createSessionScheduler", () => {
     expect(cookies.map((c) => c.useWebKit)).toEqual([false, true]);
     expect(cookies[1]).toEqual({ ...cookies[0], useWebKit: true });
     expect(cookies[0]).toMatchObject({
-      url: "https://bee.getbb.app",
+      url: "https://bee.example.test",
       cookie: {
-        name: "bb_desktop_session",
+        name: "omnyo_desktop_session",
         value: "one",
-        domain: ".getbb.app",
+        domain: ".example.test",
         path: "/",
         secure: true,
         httpOnly: true,
@@ -248,13 +258,15 @@ describe("createSessionScheduler", () => {
       session: session(Date.now() + DAY, "old"),
       ...overrides,
     });
+
     for (const entry of [
       stored({ session: session(Date.now() + 5 * MINUTE, "old") }),
-      stored({ serverUrl: "https://moved.getbb.app" }),
+      stored({ serverUrl: "https://moved.example.test" }),
     ]) {
       const { cookies, fetchSession, scheduler } = setup(
         new Map([["p1", entry]]),
       );
+
       fetchSession.mockResolvedValueOnce(session(Date.now() + 7 * DAY, "new"));
       await scheduler.start(profile);
       expect(fetchSession).toHaveBeenCalledTimes(1);
@@ -344,12 +356,14 @@ describe("createSessionScheduler", () => {
     const first = scheduler.start(profile);
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchSession).toHaveBeenCalledTimes(1);
+
     const secondProfile = {
       ...profile,
       id: "p2",
       handle: "other",
       credential: "bbcm_2",
     };
+
     fetchSession.mockResolvedValueOnce(session(Date.now() + HOUR, "two"));
     const second = scheduler.start(secondProfile);
     expect(second).not.toBe(first);
@@ -392,4 +406,49 @@ describe("createSessionScheduler", () => {
       credential: "bbcm_2",
     });
   });
+});
+
+it("renews an existing profile on the new relay instead of installing its old-origin session", async () => {
+  const old = { ...profile, serverUrl: "https://bee.slashnew.com" };
+  const migrated = { ...old, serverUrl: "https://bee.omnyo.link" };
+
+  const cached = {
+    serverUrl: old.serverUrl,
+    credential: old.credential,
+    session: {
+      cookie: {
+        ...session(Date.now() + DAY, "old").cookie,
+        domain: ".slashnew.com",
+      },
+    },
+  };
+
+  const { cookies, fetchSession, scheduler } = setup(
+    new Map([[old.id, cached]]),
+  );
+
+  fetchSession.mockResolvedValueOnce({
+    cookie: {
+      ...session(Date.now() + DAY, "new").cookie,
+      domain: ".omnyo.link",
+    },
+  });
+
+  try {
+    await expect(scheduler.start(migrated)).resolves.toMatchObject({
+      status: "authenticated",
+      restored: false,
+    });
+    expect(fetchSession).toHaveBeenCalledWith({
+      serverUrl: migrated.serverUrl,
+      credential: old.credential,
+      handle: old.handle,
+    });
+    expect(cookies.map((entry) => [entry.url, entry.cookie.value])).toEqual([
+      [migrated.serverUrl, "new"],
+      [migrated.serverUrl, "new"],
+    ]);
+  } finally {
+    scheduler.stop();
+  }
 });

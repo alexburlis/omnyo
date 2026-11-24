@@ -7,8 +7,8 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
-import type { JsonValue } from "@get-bb/plugin-sdk/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
+import type { JsonValue } from "@omnyo/plugin-sdk/app";
 import { GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
 
 const app = await loadPluginApp(() => import("./app"));
@@ -22,9 +22,11 @@ function inputsSlot() {
     (candidate) =>
       candidate.environmentProviderId === GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID,
   );
+
   if (registration === undefined) {
     throw new Error("the worktree inputs control was not registered");
   }
+
   return registration;
 }
 
@@ -62,6 +64,7 @@ function render(
       },
     },
   );
+
   return { slot, onChange };
 }
 
@@ -131,6 +134,7 @@ describe("worktree inputs control", () => {
     const { slot, onChange } = render({
       branch: { kind: "named", name: "release" },
     });
+
     await openPicker(slot);
     fireEvent.click(slot.getByRole("button", { name: "Default branch" }));
     expect(onChange).toHaveBeenLastCalledWith({
@@ -141,6 +145,7 @@ describe("worktree inputs control", () => {
 
   it("checks the chosen section immediately while discovery is pending", async () => {
     const onChange = vi.fn();
+
     const slot = renderSlot(
       inputsSlot(),
       {
@@ -156,6 +161,7 @@ describe("worktree inputs control", () => {
         },
       },
     );
+
     await openPicker(slot);
     const existing = slot.getByRole("button", { name: "Existing worktree" });
     const fresh = slot.getByRole("button", { name: "New worktree" });
@@ -270,6 +276,7 @@ describe("worktree inputs control", () => {
 
   it("loads existing worktrees only after selecting that section", async () => {
     const list = vi.fn(() => ({ worktrees: [] }));
+
     const slot = renderSlot(
       inputsSlot(),
       {
@@ -285,6 +292,7 @@ describe("worktree inputs control", () => {
         },
       },
     );
+
     await openPicker(slot);
     expect(list).not.toHaveBeenCalled();
     fireEvent.click(slot.getByRole("button", { name: "Existing worktree" }));
@@ -308,12 +316,14 @@ describe("worktree discovery scope", () => {
         resolve(value: { worktrees: JsonValue[] }): void;
         reject(error: Error): void;
       }[] = [];
+
       const props = {
         projectId: "project-1",
         target: { kind: "existing-host" as const, hostId: "host-a" },
         value: { branch: { kind: "default" } },
         onChange: vi.fn(),
       };
+
       const slot = renderSlot(inputsSlot(), props, {
         rpc: {
           defaultBaseBranch: () => ({ branch: "main" }),
@@ -324,6 +334,7 @@ describe("worktree discovery scope", () => {
         },
         branchesState: { branches: ["main"] },
       });
+
       expect(requests).toHaveLength(0);
       await openPicker(slot);
       expect(requests).toHaveLength(0);
@@ -382,13 +393,16 @@ describe("default branch label scope", () => {
     async (change) => {
       const requests: ((value: { branch: string | null }) => void)[] = [];
       const onChange = vi.fn();
+
       const props = {
         projectId: "project-1",
         target: { kind: "existing-host" as const, hostId: "host-a" },
         value: { branch: { kind: "default" } },
         onChange,
       };
+
       const list = vi.fn(() => ({ worktrees: WORKTREES }));
+
       const slot = renderSlot(inputsSlot(), props, {
         rpc: {
           defaultBaseBranch: () =>
@@ -398,6 +412,7 @@ describe("default branch label scope", () => {
           listExistingWorktrees: list,
         },
       });
+
       expect(slot.getByRole("combobox").textContent).toContain(
         "Branch from:default",
       );

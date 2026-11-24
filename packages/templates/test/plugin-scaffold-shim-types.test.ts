@@ -1,3 +1,4 @@
+import { resolvePrivateSdkArtifact } from "../src/plugin-scaffold.js";
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import {
@@ -16,18 +17,24 @@ import { scaffoldPlugin } from "../src/plugin-scaffold.js";
 import { PLUGIN_SHIMMED_TYPE_DEPENDENCIES } from "../src/generated/plugin-starter-files.generated.js";
 
 const execFileAsync = promisify(execFile);
+
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
+
 const appRoot = join(repoRoot, "apps", "app");
+
 const pluginSdkRoot = join(repoRoot, "packages", "plugin-sdk");
 
 function workspacePackageRoot(name: string): string {
   for (const base of [appRoot, repoRoot, pluginSdkRoot]) {
     const candidate = join(base, "node_modules", name);
+
     try {
       readFileSync(join(candidate, "package.json"), "utf8");
+
       return candidate;
     } catch {}
   }
+
   throw new Error(`package not installed in the workspace: ${name}`);
 }
 
@@ -36,17 +43,21 @@ async function installDeclaredDependencies(targetDir: string): Promise<void> {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
   } = JSON.parse(await readFile(join(targetDir, "package.json"), "utf8"));
+
   const names = new Set([
     ...Object.keys(manifest.dependencies ?? {}),
     ...Object.keys(manifest.devDependencies ?? {}),
   ]);
+
   for (const name of names) {
     const target = join(targetDir, "node_modules", name);
     await mkdir(dirname(target), { recursive: true });
+
     const source =
       name === "@get-bb/plugin-sdk"
         ? pluginSdkRoot
         : workspacePackageRoot(name);
+
     await symlink(source, target, "dir");
   }
 }
@@ -55,15 +66,18 @@ async function runTsc(
   targetDir: string,
 ): Promise<{ ok: boolean; output: string }> {
   const tsc = join(workspacePackageRoot("typescript"), "lib", "tsc.js");
+
   try {
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
       [tsc, "--project", "tsconfig.json"],
       { cwd: targetDir },
     );
+
     return { ok: true, output: `${stdout}${stderr}` };
   } catch (error) {
     const failed = error as { stdout?: string; stderr?: string };
+
     return {
       ok: false,
       output: `${failed.stdout ?? ""}${failed.stderr ?? ""}`,
@@ -85,12 +99,15 @@ describe("scaffold typechecks the runtime-shimmed imports (#2072)", () => {
   let targetDir: string;
 
   beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), "bb-scaffold-shims-"));
-    targetDir = join(workDir, "bb-plugin-toasty");
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-scaffold-shims-"));
+    targetDir = join(workDir, "omnyo-plugin-toasty");
     await scaffoldPlugin({
       targetDir,
-      packageName: "bb-plugin-toasty",
-      bbVersion: "0.39.0",
+      packageName: "omnyo-plugin-toasty",
+      appVersion: "0.39.0",
+      sdkArtifact: await resolvePrivateSdkArtifact({
+        sourceUrl: import.meta.url,
+      }),
     });
     await installDeclaredDependencies(targetDir);
   });
@@ -108,9 +125,11 @@ describe("scaffold typechecks the runtime-shimmed imports (#2072)", () => {
       appPath,
       `${app.slice(0, firstImport + 1)}import { toast } from "sonner";\ntoast.success("hi");\n${app.slice(firstImport + 1)}`,
     );
+
     const lines = SHIMMED_SPECIFIERS.map(
       (specifier, i) => `import * as m${i} from "${specifier}";`,
     );
+
     lines.push(
       `export const all = [${SHIMMED_SPECIFIERS.map((_, i) => `m${i}`).join(", ")}];`,
     );
@@ -124,6 +143,7 @@ describe("scaffold typechecks the runtime-shimmed imports (#2072)", () => {
     const missing = [
       ...result.output.matchAll(/Cannot find module '([^']+)'/g),
     ].map((m) => m[1]);
+
     expect(missing, result.output).toEqual([]);
     expect(result.output).toBe("");
     expect(result.ok).toBe(true);

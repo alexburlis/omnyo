@@ -1,64 +1,46 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, rename, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { isSealed } from "./envelope.js";
+import { SecretVaultError } from "./errors.js";
+import {
+  createFileExclusive,
+  ensurePrivateDirectory,
+  errorCode,
+  replaceFileAtomic,
+  writePrivateTemp,
+} from "./files.js";
+import type { SecretVault } from "./vault.js";
 
-interface ReadOrCreateSecretFileArgs {
+export interface GeneratedFileArgs {
   bytes: number;
-  dataDir: string;
   encoding: BufferEncoding;
   fileName: string;
 }
 
-export async function readOrCreateSecretFile(
-  args: ReadOrCreateSecretFileArgs,
-): Promise<string> {
-  await mkdir(args.dataDir, { recursive: true });
-  const secretPath = join(args.dataDir, args.fileName);
-
+async function readIfPresent(path: string): Promise<string | undefined> {
   try {
-    const existing = (await readFile(secretPath, "utf8")).trim();
-    if (existing.length > 0) {
-      return existing;
-    }
+    return await readFile(path, "utf8");
   } catch (error) {
-    const errorCode =
-      error instanceof Error && "code" in error ? error.code : undefined;
-    if (errorCode !== "ENOENT") {
-      throw error;
-    }
+    if (errorCode(error) === "ENOENT") return undefined;
+    throw error;
   }
-
-  const generatedSecret = randomBytes(args.bytes).toString(args.encoding);
-  try {
-    await writeFile(secretPath, `${generatedSecret}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    return generatedSecret;
-  } catch (error) {
-    const errorCode =
-      error instanceof Error && "code" in error ? error.code : undefined;
-    if (errorCode !== "EEXIST") {
-      throw error;
-    }
-  }
-
-  const racedSecret = (await readFile(secretPath, "utf8")).trim();
-  if (racedSecret.length === 0) {
-    throw new Error(`Failed to initialize secret at ${secretPath}`);
-  }
-  return racedSecret;
 }
 
-export async function writeSecretFile(
+async function sealInPlace(
+  vault: SecretVault,
   path: string,
-  value: string,
+  plaintext: string,
 ): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+  const tempPath = await writePrivateTemp(path, vault.seal(plaintext));
+
   try {
-    await writeFile(tempPath, value, { encoding: "utf8", mode: 0o600 });
+    if (vault.open(await readFile(tempPath, "utf8")) !== plaintext)
+      throw new SecretVaultError(
+        "corrupt",
+        `Sealing ${path} did not reproduce its value`,
+      );
+
     await rename(tempPath, path);
   } catch (error) {
     await rm(tempPath, { force: true });
@@ -66,6 +48,103 @@ export async function writeSecretFile(
   }
 }
 
+export async function readSecretFile(
+  vault: SecretVault,
+  path: string,
+): Promise<string | undefined> {
+  const content = await readIfPresent(path);
+
+  if (content === undefined) return undefined;
+
+  if (isSealed(content)) return vault.open(content);
+
+  await sealInPlace(vault, path, content);
+
+  return content;
+}
+
+export async function writeSecretFile(
+  vault: SecretVault,
+  path: string,
+  value: string,
+): Promise<void> {
+  await replaceFileAtomic(path, vault.seal(value));
+}
+
 export async function deleteSecretFile(path: string): Promise<void> {
   await rm(path, { force: true });
+}
+
+export async function sealLegacySecretFile(
+  vault: SecretVault,
+  path: string,
+): Promise<"sealed" | "already-sealed" | "absent"> {
+  const content = await readIfPresent(path);
+
+  if (content === undefined) return "absent";
+
+  if (isSealed(content)) {
+    vault.open(content);
+
+    return "already-sealed";
+  }
+
+  await sealInPlace(vault, path, content);
+
+  return "sealed";
+}
+
+function initializationFailure(path: string): Error {
+  return new Error(`Failed to initialize secret at ${path}`);
+}
+
+export async function readOrCreateSecretFile(
+  vault: SecretVault,
+  args: GeneratedFileArgs,
+): Promise<string> {
+  await ensurePrivateDirectory(vault.dataDir);
+  const path = join(vault.dataDir, args.fileName);
+  const existing = (await readSecretFile(vault, path))?.trim();
+
+  if (existing !== undefined) {
+    if (existing.length === 0) throw initializationFailure(path);
+
+    return existing;
+  }
+
+  const generated = randomBytes(args.bytes).toString(args.encoding);
+
+  if (await createFileExclusive(path, vault.seal(generated))) return generated;
+
+  const raced = (await readSecretFile(vault, path))?.trim();
+
+  if (raced === undefined || raced.length === 0)
+    throw initializationFailure(path);
+
+  return raced;
+}
+
+export async function readOrCreateIdentifierFile(
+  args: GeneratedFileArgs & { dataDir: string },
+): Promise<string> {
+  await mkdir(args.dataDir, { recursive: true });
+  const path = join(args.dataDir, args.fileName);
+  const existing = (await readIfPresent(path))?.trim();
+
+  if (existing !== undefined && existing.length > 0) return existing;
+
+  const generated = randomBytes(args.bytes).toString(args.encoding);
+
+  if (
+    existing === undefined &&
+    (await createFileExclusive(path, `${generated}\n`))
+  )
+    return generated;
+
+  const raced = (await readIfPresent(path))?.trim();
+
+  if (raced === undefined || raced.length === 0)
+    throw initializationFailure(path);
+
+  return raced;
 }

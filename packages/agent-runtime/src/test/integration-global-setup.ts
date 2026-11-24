@@ -1,9 +1,12 @@
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildPluginHost, resolvePluginBuildToolchain } from "@bb/plugin-build";
-import { ensurePluginProcessDataDir } from "@bb/process-utils";
-import type { NormalizedPluginProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
+import {
+  buildPluginHost,
+  resolvePluginBuildToolchain,
+} from "@omnyo/plugin-build";
+import { ensurePluginProcessDataDir } from "@omnyo/process-utils";
+import type { NormalizedPluginProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
 import {
   captureFirstPartyProviderDeclarations,
   firstPartyPluginRootDir,
@@ -24,6 +27,7 @@ function wireCapabilities(
   declaration: NormalizedPluginProviderDeclaration,
 ): IntegrationProviderBridgeManifest[string]["capabilities"] {
   const { capabilities } = declaration;
+
   return {
     providerInstallation: declaration.maintenance?.installation ?? false,
     supportsServiceTier: capabilities.supportsServiceTier,
@@ -35,22 +39,31 @@ function wireCapabilities(
 }
 
 export async function setup(): Promise<void> {
-  const bridgeDataRoot = join(tmpdir(), "bb-agent-runtime-integration-daemon");
-  const toolchain = await resolvePluginBuildToolchain(
-    join(tmpdir(), "bb-plugin-build-toolchain"),
+  const bridgeDataRoot = join(
+    tmpdir(),
+    "omnyo-agent-runtime-integration-daemon",
   );
+
+  const toolchain = await resolvePluginBuildToolchain(
+    join(tmpdir(), "omnyo-plugin-build-toolchain"),
+  );
+
   const manifest: IntegrationProviderBridgeManifest = {};
+
   for (const pluginId of PROVIDER_BRIDGE_PLUGIN_IDS) {
     const rootDir = firstPartyPluginRootDir(pluginId);
+
     const [declarations, build] = await Promise.all([
       captureFirstPartyProviderDeclarations(pluginId),
       buildPluginHost(rootDir, "0.0.0-integration", toolchain),
     ]);
+
     const dataDir = await ensurePluginProcessDataDir({
       daemonDataDir: bridgeDataRoot,
       pluginId,
       kind: "bridge-data",
     });
+
     for (const declaration of declarations) {
       manifest[declaration.id] = {
         pluginId,
@@ -66,6 +79,7 @@ export async function setup(): Promise<void> {
       };
     }
   }
+
   await writeFile(
     integrationProviderBridgeManifestPath(),
     JSON.stringify(manifest, null, 2),

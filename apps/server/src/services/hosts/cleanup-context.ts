@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { DbConnection } from "@bb/db";
+import type { DbConnection } from "@omnyo/db";
 
 const cleanup = new AsyncLocalStorage<{ db: DbConnection; hostId: string }>();
 
@@ -16,5 +16,6 @@ export function isHostCleanupAllowed(
   hostId: string,
 ): boolean {
   const context = cleanup.getStore();
+
   return context?.db === deps.db && context.hostId === hostId;
 }

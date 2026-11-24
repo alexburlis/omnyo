@@ -11,8 +11,10 @@ export function useHostPathExistence(
 ): HostPathExistence {
   const sortedPaths = useMemo(() => {
     if (paths.length === 0) return [];
+
     return [...new Set(paths)].sort();
   }, [paths]);
+
   const enabledHostId =
     hostId !== null && sortedPaths.length > 0 ? hostId : null;
 
@@ -39,5 +41,6 @@ export function isHostPathMissing(
   path: string | null | undefined,
 ): boolean {
   if (path == null) return false;
+
   return existence[path] === false;
 }

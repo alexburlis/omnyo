@@ -1,3 +1,10 @@
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +16,7 @@ import { loadHostDaemonEntrypointConfig } from "../src/host-daemon-entrypoint.js
 import {
   loadHostDaemonConfig,
   loadHostDaemonConnectionConfig,
+  loadHostDaemonErrorReportingConfig,
   loadHostDaemonStartConfig,
 } from "../src/host-daemon.js";
 import { loadLoggerConfig } from "../src/logger.js";
@@ -21,6 +29,16 @@ import {
 import { loadServerPortConfig } from "../src/server-port.js";
 import { loadServerConfig } from "../src/server.js";
 import { loadViteDevConfig } from "../src/vite-dev.js";
+
+function withCliHome(run: (homeDir: string) => void): void {
+  const homeDir = mkdtempSync(path.join(os.tmpdir(), "omnyo-cli-config-"));
+
+  try {
+    run(homeDir);
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+}
 
 async function importConfigModules(): Promise<void> {
   vi.resetModules();
@@ -44,9 +62,9 @@ function createServerRuntimeEnv(
   overrides: NodeJS.ProcessEnv = {},
 ): NodeJS.ProcessEnv {
   return {
-    BB_DATA_DIR: "/tmp/bb-data",
-    BB_HOST_DAEMON_PORT: "5555",
-    BB_SERVER_PORT: "4444",
+    OMNYO_DATA_DIR: "/tmp/omnyo-data",
+    OMNYO_HOST_DAEMON_PORT: "5555",
+    OMNYO_SERVER_PORT: "4444",
     NODE_ENV: "development",
     ...overrides,
   };
@@ -56,8 +74,8 @@ function createHostDaemonRuntimeEnv(
   overrides: NodeJS.ProcessEnv = {},
 ): NodeJS.ProcessEnv {
   return {
-    BB_HOST_DAEMON_PORT: "5555",
-    BB_SERVER_URL: "http://localhost:4444",
+    OMNYO_HOST_DAEMON_PORT: "5555",
+    OMNYO_SERVER_URL: "http://localhost:4444",
     NODE_ENV: "development",
     ...overrides,
   };
@@ -77,11 +95,11 @@ describe("common config", () => {
           NODE_ENV: "production",
         },
         homeDir: "/Users/tester",
-      }).BB_DATA_DIR,
-    ).toBe(path.normalize("/Users/tester/.bb"));
+      }).OMNYO_DATA_DIR,
+    ).toBe(path.normalize("/Users/tester/.omnyo"));
   });
 
-  it("requires repoRoot or BB_DATA_DIR for development data dir resolution", () => {
+  it("requires repoRoot or OMNYO_DATA_DIR for development data dir resolution", () => {
     expect(() =>
       loadCommonConfig({
         env: {
@@ -89,12 +107,12 @@ describe("common config", () => {
         },
         homeDir: "/Users/tester",
       }),
-    ).toThrow("repoRoot is required to resolve development BB_DATA_DIR");
+    ).toThrow("repoRoot is required to resolve development OMNYO_DATA_DIR");
   });
 
   it("resolves development defaults from the checkout instance", () => {
     const homeDir = "/Users/tester";
-    const repoRoot = "/Users/tester/src/bb";
+    const repoRoot = "/Users/tester/src/omnyo";
 
     expect(
       loadCommonConfig({
@@ -103,19 +121,19 @@ describe("common config", () => {
         },
         homeDir,
         repoRoot,
-      }).BB_DATA_DIR,
-    ).toBe(path.normalize("/Users/tester/.bb-dev/src-bb-9039de53a76a"));
+      }).OMNYO_DATA_DIR,
+    ).toBe(path.normalize("/Users/tester/.omnyo-dev/src-omnyo-8e48821ec67b"));
   });
 
-  it("expands home-directory overrides for BB_DATA_DIR", () => {
+  it("expands home-directory overrides for OMNYO_DATA_DIR", () => {
     expect(
       loadCommonConfig({
         env: {
-          BB_DATA_DIR: "~/custom-bb",
+          OMNYO_DATA_DIR: "~/custom-omnyo",
           NODE_ENV: "production",
         },
-      }).BB_DATA_DIR,
-    ).toBe(path.join(os.homedir(), "custom-bb"));
+      }).OMNYO_DATA_DIR,
+    ).toBe(path.join(os.homedir(), "custom-omnyo"));
   });
 
   it.runIf(process.platform === "win32")(
@@ -124,34 +142,34 @@ describe("common config", () => {
       expect(
         loadCommonConfig({
           env: {
-            BB_DATA_DIR: "~\\custom-bb",
+            OMNYO_DATA_DIR: "~\\custom-omnyo",
             NODE_ENV: "production",
           },
-        }).BB_DATA_DIR,
-      ).toBe(path.join(os.homedir(), "custom-bb"));
+        }).OMNYO_DATA_DIR,
+      ).toBe(path.join(os.homedir(), "custom-omnyo"));
     },
   );
 
-  it("rejects whitespace-only BB_DATA_DIR overrides", () => {
+  it("rejects whitespace-only OMNYO_DATA_DIR overrides", () => {
     expect(() =>
       loadCommonConfig({
         env: {
-          BB_DATA_DIR: "   ",
+          OMNYO_DATA_DIR: "   ",
           NODE_ENV: "production",
         },
       }),
-    ).toThrow("BB_DATA_DIR must not be empty");
+    ).toThrow("OMNYO_DATA_DIR must not be empty");
   });
 
-  it("rejects unsupported BB_LOG_LEVEL overrides", () => {
+  it("rejects unsupported OMNYO_LOG_LEVEL overrides", () => {
     expect(() =>
       loadCommonConfig({
         env: {
-          BB_LOG_LEVEL: "bogus",
+          OMNYO_LOG_LEVEL: "bogus",
           NODE_ENV: "production",
         },
       }),
-    ).toThrow(/BB_LOG_LEVEL/u);
+    ).toThrow(/OMNYO_LOG_LEVEL/u);
   });
 });
 
@@ -159,9 +177,9 @@ describe("data-dir helpers", () => {
   it("expands a bare home-directory override", () => {
     expect(
       resolveConfiguredDataDir({
-        defaultDataDir: path.join(os.homedir(), ".bb"),
+        defaultDataDir: path.join(os.homedir(), ".omnyo"),
         env: {
-          BB_DATA_DIR: "~",
+          OMNYO_DATA_DIR: "~",
         },
         homeDir: os.homedir(),
       }),
@@ -171,18 +189,18 @@ describe("data-dir helpers", () => {
   it("rejects whitespace-only data dir overrides", () => {
     expect(() =>
       resolveConfiguredDataDir({
-        defaultDataDir: path.join(os.homedir(), ".bb"),
+        defaultDataDir: path.join(os.homedir(), ".omnyo"),
         env: {
-          BB_DATA_DIR: " ",
+          OMNYO_DATA_DIR: " ",
         },
         homeDir: os.homedir(),
       }),
-    ).toThrow("BB_DATA_DIR must not be empty");
+    ).toThrow("OMNYO_DATA_DIR must not be empty");
   });
 
   it("resolves development defaults from the current checkout instance", () => {
     const homeDir = "/Users/tester";
-    const repoRoot = "/Users/tester/src/bb";
+    const repoRoot = "/Users/tester/src/omnyo";
 
     expect(
       resolveRuntimeDataDir({
@@ -191,7 +209,7 @@ describe("data-dir helpers", () => {
         mode: "dev",
         repoRoot,
       }),
-    ).toBe(path.normalize("/Users/tester/.bb-dev/src-bb-9039de53a76a"));
+    ).toBe(path.normalize("/Users/tester/.omnyo-dev/src-omnyo-8e48821ec67b"));
   });
 
   it("keeps the legacy fallback label for degenerate checkout labels", () => {
@@ -202,7 +220,7 @@ describe("data-dir helpers", () => {
         mode: "dev",
         repoRoot: "/Users/tester/---",
       }),
-    ).toBe(path.normalize("/Users/tester/.bb-dev/worktree-41987f975862"));
+    ).toBe(path.normalize("/Users/tester/.omnyo-dev/worktree-41987f975862"));
   });
 });
 
@@ -210,13 +228,13 @@ describe("port helpers", () => {
   it("accepts the TCP port boundary values", () => {
     expect(
       parsePortValue({
-        name: "BB_SERVER_PORT",
+        name: "OMNYO_SERVER_PORT",
         rawPort: "1",
       }),
     ).toBe(1);
     expect(
       parsePortValue({
-        name: "BB_SERVER_PORT",
+        name: "OMNYO_SERVER_PORT",
         rawPort: "65535",
       }),
     ).toBe(65_535);
@@ -238,10 +256,10 @@ describe("port helpers", () => {
     ]) {
       expect(() =>
         parsePortValue({
-          name: "BB_SERVER_PORT",
+          name: "OMNYO_SERVER_PORT",
           rawPort,
         }),
-      ).toThrow("BB_SERVER_PORT must be a valid TCP port");
+      ).toThrow("OMNYO_SERVER_PORT must be a valid TCP port");
     }
   });
 
@@ -250,7 +268,7 @@ describe("port helpers", () => {
       resolvePortFromEnv({
         defaultPort: 4444,
         env: {},
-        name: "BB_SERVER_PORT",
+        name: "OMNYO_SERVER_PORT",
       }),
     ).toBe(4444);
 
@@ -258,62 +276,100 @@ describe("port helpers", () => {
       resolvePortFromEnv({
         defaultPort: 4444,
         env: {
-          BB_SERVER_PORT: "",
+          OMNYO_SERVER_PORT: "",
         },
-        name: "BB_SERVER_PORT",
+        name: "OMNYO_SERVER_PORT",
       }),
-    ).toThrow("BB_SERVER_PORT must be a valid TCP port");
+    ).toThrow("OMNYO_SERVER_PORT must be a valid TCP port");
   });
 
   it("rejects whitespace-padded port env values through every port loader path", () => {
     expect(() =>
       loadServerPortConfig({
         env: {
-          BB_SERVER_PORT: " 4444",
+          OMNYO_SERVER_PORT: " 4444",
           NODE_ENV: "development",
         },
       }),
-    ).toThrow("BB_SERVER_PORT must be a valid TCP port");
+    ).toThrow("OMNYO_SERVER_PORT must be a valid TCP port");
 
     expect(() =>
       resolvePortFromEnv({
         defaultPort: 4444,
         env: {
-          BB_SERVER_PORT: " 4444",
+          OMNYO_SERVER_PORT: " 4444",
         },
-        name: "BB_SERVER_PORT",
+        name: "OMNYO_SERVER_PORT",
       }),
-    ).toThrow("BB_SERVER_PORT must be a valid TCP port");
+    ).toThrow("OMNYO_SERVER_PORT must be a valid TCP port");
 
     expect(() =>
       loadCliConfig({
         env: createHostDaemonRuntimeEnv({
-          BB_HOST_DAEMON_PORT: " 5555",
+          OMNYO_HOST_DAEMON_PORT: " 5555",
         }),
       }),
-    ).toThrow("BB_HOST_DAEMON_PORT must be a valid TCP port");
+    ).toThrow("OMNYO_HOST_DAEMON_PORT must be a valid TCP port");
   });
 });
 
 describe("consumer-specific config", () => {
+  it("ignores inherited collection configuration for public beta coordinator and daemon", () => {
+    const args = {
+      mode: "prod" as const,
+      homeDir: "/synthetic",
+      env: {
+        OMNYO_DESKTOP_RELEASE_CHANNEL: "public-beta",
+        OMNYO_TELEMETRY: "true",
+        OMNYO_USAGE_COLLECTOR_URL: "https://collector.invalid",
+        OMNYO_SENTRY_DSN: "https://inherited@sentry.invalid/42",
+      },
+    };
+
+    expect(loadServerConfig(args).OMNYO_SENTRY_DSN).toBe("");
+    expect(loadServerConfig(args).OMNYO_TELEMETRY).toBe(false);
+    expect(loadHostDaemonErrorReportingConfig(args).OMNYO_SENTRY_DSN).toBe("");
+  });
+
+  it("treats an empty or blank host daemon release as a development run", () => {
+    for (const version of ["", "   "]) {
+      expect(
+        loadHostDaemonErrorReportingConfig({
+          env: { OMNYO_APP_VERSION: version, OMNYO_SENTRY_DSN: "" },
+        }),
+      ).toEqual({ OMNYO_APP_VERSION: "0.0.0-dev", OMNYO_SENTRY_DSN: "" });
+    }
+
+    expect(
+      loadHostDaemonErrorReportingConfig({
+        env: {
+          OMNYO_APP_VERSION: " 0.46.293+private.1 ",
+          OMNYO_SENTRY_DSN: "",
+        },
+      }).OMNYO_APP_VERSION,
+    ).toBe("0.46.293+private.1");
+  });
+
   it("builds server config from explicit runtime env", () => {
     const serverConfig = loadServerConfig({
       env: createServerRuntimeEnv({
-        BB_APP_URL: undefined,
-        BB_APP_VERSION: undefined,
-        BB_EXTERNAL_URL: undefined,
-        BB_FF_PLACEHOLDER: undefined,
+        OMNYO_APP_URL: undefined,
+        OMNYO_APP_VERSION: undefined,
+        OMNYO_EXTERNAL_URL: undefined,
+        OMNYO_FF_PLACEHOLDER: undefined,
       }),
     });
 
-    expect(serverConfig.BB_PERF_DIAGNOSTICS).toBe(false);
-    expect(serverConfig.BB_SERVER_PORT).toBe(4444);
-    expect(serverConfig.BB_HOST_DAEMON_PORT).toBe(5555);
-    expect(serverConfig.databasePath).toBe(path.resolve("/tmp/bb-data/bb.db"));
-    expect(serverConfig.BB_APP_URL).toBe("");
-    expect(serverConfig.BB_APP_SURFACE).toBe("web");
-    expect(serverConfig.BB_APP_VERSION).toBe("0.0.0-dev");
-    expect(serverConfig.BB_EXTERNAL_URL).toBe("");
+    expect(serverConfig.OMNYO_PERF_DIAGNOSTICS).toBe(false);
+    expect(serverConfig.OMNYO_SERVER_PORT).toBe(4444);
+    expect(serverConfig.OMNYO_HOST_DAEMON_PORT).toBe(5555);
+    expect(serverConfig.databasePath).toBe(
+      path.resolve("/tmp/omnyo-data/app.db"),
+    );
+    expect(serverConfig.OMNYO_APP_URL).toBe("");
+    expect(serverConfig.OMNYO_APP_SURFACE).toBe("web");
+    expect(serverConfig.OMNYO_APP_VERSION).toBe("0.0.0-dev");
+    expect(serverConfig.OMNYO_EXTERNAL_URL).toBe("");
     expect(serverConfig.featureFlags).toEqual({
       placeholder: false,
       timelineWindowEventBudget: 1_500,
@@ -323,79 +379,79 @@ describe("consumer-specific config", () => {
   it("validates the opt-in performance diagnostics setting", () => {
     expect(
       loadServerConfig({
-        env: createServerRuntimeEnv({ BB_PERF_DIAGNOSTICS: "1" }),
-      }).BB_PERF_DIAGNOSTICS,
+        env: createServerRuntimeEnv({ OMNYO_PERF_DIAGNOSTICS: "1" }),
+      }).OMNYO_PERF_DIAGNOSTICS,
     ).toBe(true);
     expect(() =>
       loadServerConfig({
-        env: createServerRuntimeEnv({ BB_PERF_DIAGNOSTICS: "typo" }),
+        env: createServerRuntimeEnv({ OMNYO_PERF_DIAGNOSTICS: "typo" }),
       }),
-    ).toThrow("BB_PERF_DIAGNOSTICS must be a boolean");
+    ).toThrow("OMNYO_PERF_DIAGNOSTICS must be a boolean");
   });
 
   it("carries the launcher's server launch id only when it is set", () => {
     expect(
       loadServerConfig({
-        env: createServerRuntimeEnv({ BB_SERVER_LAUNCH_ID: undefined }),
+        env: createServerRuntimeEnv({ OMNYO_SERVER_LAUNCH_ID: undefined }),
       }),
-    ).not.toHaveProperty("BB_SERVER_LAUNCH_ID");
+    ).not.toHaveProperty("OMNYO_SERVER_LAUNCH_ID");
     expect(
       loadServerConfig({
-        env: createServerRuntimeEnv({ BB_SERVER_LAUNCH_ID: "launch-123" }),
-      }).BB_SERVER_LAUNCH_ID,
+        env: createServerRuntimeEnv({ OMNYO_SERVER_LAUNCH_ID: "launch-123" }),
+      }).OMNYO_SERVER_LAUNCH_ID,
     ).toBe("launch-123");
   });
 
   it("carries the launcher's in-app update mode and rejects unknown modes", () => {
     expect(
       loadServerConfig({ env: createServerRuntimeEnv({}) }),
-    ).not.toHaveProperty("BB_APP_UPDATE_MODE");
+    ).not.toHaveProperty("OMNYO_APP_UPDATE_MODE");
     expect(
       loadServerConfig({
-        env: createServerRuntimeEnv({ BB_APP_UPDATE_MODE: "source" }),
-      }).BB_APP_UPDATE_MODE,
+        env: createServerRuntimeEnv({ OMNYO_APP_UPDATE_MODE: "source" }),
+      }).OMNYO_APP_UPDATE_MODE,
     ).toBe("source");
     expect(() =>
       loadServerConfig({
-        env: createServerRuntimeEnv({ BB_APP_UPDATE_MODE: "brew" }),
+        env: createServerRuntimeEnv({ OMNYO_APP_UPDATE_MODE: "brew" }),
       }),
-    ).toThrow("BB_APP_UPDATE_MODE must be one of npm, source");
+    ).toThrow("OMNYO_APP_UPDATE_MODE must be one of npm, source");
   });
 
   it("defaults the server bind host to loopback", () => {
     const serverConfig = loadServerConfig({
       env: createServerRuntimeEnv({
-        BB_SERVER_BIND_HOST: undefined,
+        OMNYO_SERVER_BIND_HOST: undefined,
       }),
     });
 
-    expect(serverConfig.BB_SERVER_BIND_HOST).toBe("127.0.0.1");
+    expect(serverConfig.OMNYO_SERVER_BIND_HOST).toBe("127.0.0.1");
   });
 
   it("honors an explicit wildcard server bind host", () => {
     const serverConfig = loadServerConfig({
       env: createServerRuntimeEnv({
-        BB_SERVER_BIND_HOST: "0.0.0.0",
+        OMNYO_SERVER_BIND_HOST: "0.0.0.0",
       }),
     });
 
-    expect(serverConfig.BB_SERVER_BIND_HOST).toBe("0.0.0.0");
+    expect(serverConfig.OMNYO_SERVER_BIND_HOST).toBe("0.0.0.0");
   });
 
   it("rejects an unsupported server bind host", () => {
     expect(() =>
       loadServerConfig({
         env: createServerRuntimeEnv({
-          BB_SERVER_BIND_HOST: "localhost",
+          OMNYO_SERVER_BIND_HOST: "localhost",
         }),
       }),
-    ).toThrow(/BB_SERVER_BIND_HOST/u);
+    ).toThrow(/OMNYO_SERVER_BIND_HOST/u);
   });
 
   it("parses the placeholder feature flag from env", () => {
     const serverConfig = loadServerConfig({
       env: createServerRuntimeEnv({
-        BB_FF_PLACEHOLDER: "true",
+        OMNYO_FF_PLACEHOLDER: "true",
       }),
     });
 
@@ -405,7 +461,7 @@ describe("consumer-specific config", () => {
   it("parses the timeline window event budget from env", () => {
     const serverConfig = loadServerConfig({
       env: createServerRuntimeEnv({
-        BB_FF_TIMELINE_WINDOW_EVENT_BUDGET: "4000",
+        OMNYO_FF_TIMELINE_WINDOW_EVENT_BUDGET: "4000",
       }),
     });
 
@@ -416,7 +472,7 @@ describe("consumer-specific config", () => {
     expect(() =>
       loadServerConfig({
         env: createServerRuntimeEnv({
-          BB_FF_TIMELINE_WINDOW_EVENT_BUDGET: "0",
+          OMNYO_FF_TIMELINE_WINDOW_EVENT_BUDGET: "0",
         }),
       }),
     ).toThrow(/positive integer/);
@@ -426,64 +482,64 @@ describe("consumer-specific config", () => {
     expect(() =>
       loadServerConfig({
         env: createServerRuntimeEnv({
-          BB_FF_PLACEHOLDER: "not-bool",
+          OMNYO_FF_PLACEHOLDER: "not-bool",
         }),
       }),
-    ).toThrow(/BB_FF_PLACEHOLDER/u);
+    ).toThrow(/OMNYO_FF_PLACEHOLDER/u);
   });
 
-  it("uses 0.0.0-dev as the default BB_APP_VERSION in production", () => {
+  it("uses 0.0.0-dev as the default OMNYO_APP_VERSION in production", () => {
     const serverConfig = loadServerConfig({
       env: createServerRuntimeEnv({
-        BB_APP_VERSION: undefined,
+        OMNYO_APP_VERSION: undefined,
         NODE_ENV: "production",
       }),
     });
 
-    expect(serverConfig.BB_APP_VERSION).toBe("0.0.0-dev");
+    expect(serverConfig.OMNYO_APP_VERSION).toBe("0.0.0-dev");
   });
 
-  it("honors an explicit BB_APP_VERSION env override", () => {
+  it("honors an explicit OMNYO_APP_VERSION env override", () => {
     const serverConfig = loadServerConfig({
       env: createServerRuntimeEnv({
-        BB_APP_VERSION: "0.1.2",
+        OMNYO_APP_VERSION: "0.1.2",
         NODE_ENV: "production",
       }),
     });
 
-    expect(serverConfig.BB_APP_VERSION).toBe("0.1.2");
+    expect(serverConfig.OMNYO_APP_VERSION).toBe("0.1.2");
   });
 
   it("parses the internal app surface marker for server telemetry", () => {
     const serverConfig = loadServerConfig({
       env: createServerRuntimeEnv({
-        BB_APP_SURFACE: "desktop",
+        OMNYO_APP_SURFACE: "desktop",
         NODE_ENV: "production",
       }),
     });
 
-    expect(serverConfig.BB_APP_SURFACE).toBe("desktop");
+    expect(serverConfig.OMNYO_APP_SURFACE).toBe("desktop");
 
     expect(() =>
       loadServerConfig({
         env: createServerRuntimeEnv({
-          BB_APP_SURFACE: "mobile",
+          OMNYO_APP_SURFACE: "mobile",
           NODE_ENV: "production",
         }),
       }),
-    ).toThrow("BB_APP_SURFACE must be one of desktop, web");
+    ).toThrow("OMNYO_APP_SURFACE must be one of desktop, web");
   });
 
   it("lets tooling read the server port without validating unrelated server env", () => {
     const serverPortConfig = loadServerPortConfig({
       env: {
-        BB_EXTERNAL_URL: "not-a-url",
-        BB_SERVER_PORT: "4444",
+        OMNYO_EXTERNAL_URL: "not-a-url",
+        OMNYO_SERVER_PORT: "4444",
         NODE_ENV: "development",
       },
     });
 
-    expect(serverPortConfig.BB_SERVER_PORT).toBe(4444);
+    expect(serverPortConfig.OMNYO_SERVER_PORT).toBe(4444);
   });
 
   it("validates server port env at loader call time", () => {
@@ -493,121 +549,125 @@ describe("consumer-specific config", () => {
           NODE_ENV: "development",
         },
       }),
-    ).toThrow(/BB_SERVER_PORT/u);
+    ).toThrow(/OMNYO_SERVER_PORT/u);
   });
 
   it("derives the database path from data dir without validating unrelated server env", () => {
     const databaseConfig = loadDatabaseConfig({
       env: {
-        BB_DATA_DIR: "/tmp/bb-data",
-        BB_EXTERNAL_URL: "not-a-url",
+        OMNYO_DATA_DIR: "/tmp/omnyo-data",
+        OMNYO_EXTERNAL_URL: "not-a-url",
         NODE_ENV: "development",
       },
     });
 
     expect(databaseConfig.databasePath).toBe(
-      path.resolve("/tmp/bb-data/bb.db"),
+      path.resolve("/tmp/omnyo-data/app.db"),
     );
   });
 
   it("requires a valid server URL for the daemon and CLI", () => {
     const env = createHostDaemonRuntimeEnv({
-      BB_SERVER_URL: "http://localhost:9999",
+      OMNYO_SERVER_URL: "http://localhost:9999",
     });
+
     const hostDaemonConfig = loadHostDaemonConnectionConfig({ env });
     const cliConfig = loadCliConfig({ env });
 
-    expect(hostDaemonConfig.BB_SERVER_URL).toBe("http://localhost:9999");
-    expect(cliConfig.BB_SERVER_URL).toBe("http://localhost:9999");
+    expect(hostDaemonConfig.OMNYO_SERVER_URL).toBe("http://localhost:9999");
+    expect(cliConfig.OMNYO_SERVER_URL).toBe("http://localhost:9999");
 
     expect(() =>
       loadCliConfig({
         env: createHostDaemonRuntimeEnv({
-          BB_SERVER_URL: "not-a-url",
+          OMNYO_SERVER_URL: "not-a-url",
         }),
       }),
-    ).toThrow(/BB_SERVER_URL/u);
+    ).toThrow(/OMNYO_SERVER_URL/u);
   });
 
   it("normalizes server URL whitespace consistently for the daemon and CLI", () => {
     const env = createHostDaemonRuntimeEnv({
-      BB_SERVER_URL: " http://localhost:9999 ",
+      OMNYO_SERVER_URL: " http://localhost:9999 ",
     });
+
     const hostDaemonConfig = loadHostDaemonConnectionConfig({ env });
     const cliConfig = loadCliConfig({ env });
 
-    expect(hostDaemonConfig.BB_SERVER_URL).toBe("http://localhost:9999");
-    expect(cliConfig.BB_SERVER_URL).toBe("http://localhost:9999");
+    expect(hostDaemonConfig.OMNYO_SERVER_URL).toBe("http://localhost:9999");
+    expect(cliConfig.OMNYO_SERVER_URL).toBe("http://localhost:9999");
 
     expect(() =>
       loadCliConfig({
         env: createHostDaemonRuntimeEnv({
-          BB_SERVER_URL: "   ",
+          OMNYO_SERVER_URL: "   ",
         }),
       }),
-    ).toThrow("BB_SERVER_URL must not be empty");
+    ).toThrow("OMNYO_SERVER_URL must not be empty");
   });
 
   it("validates host-daemon connection config without requiring data dir", () => {
     const hostDaemonConfig = loadHostDaemonConnectionConfig({
       env: {
-        BB_HOST_DAEMON_PORT: "3999",
-        BB_SERVER_URL: "http://localhost:9999",
+        OMNYO_HOST_DAEMON_PORT: "3999",
+        OMNYO_SERVER_URL: "http://localhost:9999",
         NODE_ENV: "development",
       },
     });
 
-    expect(hostDaemonConfig.BB_SERVER_URL).toBe("http://localhost:9999");
-    expect(hostDaemonConfig.BB_HOST_DAEMON_PORT).toBe(3999);
+    expect(hostDaemonConfig.OMNYO_SERVER_URL).toBe("http://localhost:9999");
+    expect(hostDaemonConfig.OMNYO_HOST_DAEMON_PORT).toBe(3999);
   });
 
   it("validates explicit host-daemon ports with the shared port validator", () => {
     expect(() =>
       loadHostDaemonConnectionConfig({
         env: {
-          BB_SERVER_URL: "http://localhost:9999",
+          OMNYO_SERVER_URL: "http://localhost:9999",
           NODE_ENV: "development",
         },
         hostDaemonPort: 0,
       }),
-    ).toThrow("BB_HOST_DAEMON_PORT must be a valid TCP port");
+    ).toThrow("OMNYO_HOST_DAEMON_PORT must be a valid TCP port");
   });
 
   it("builds full host-daemon config when the daemon entrypoint owns data dir", () => {
     const hostDaemonConfig = loadHostDaemonConfig({
       env: {
-        BB_DATA_DIR: "/tmp/bb-data",
-        BB_HOST_DAEMON_PORT: "3999",
-        BB_SERVER_URL: "http://localhost:9999",
+        OMNYO_DATA_DIR: "/tmp/omnyo-data",
+        OMNYO_HOST_DAEMON_PORT: "3999",
+        OMNYO_SERVER_URL: "http://localhost:9999",
         NODE_ENV: "development",
       },
     });
 
-    expect(hostDaemonConfig.BB_DATA_DIR).toBe(path.resolve("/tmp/bb-data"));
-    expect(hostDaemonConfig.BB_SERVER_URL).toBe("http://localhost:9999");
-    expect(hostDaemonConfig.BB_HOST_DAEMON_PORT).toBe(3999);
+    expect(hostDaemonConfig.OMNYO_DATA_DIR).toBe(
+      path.resolve("/tmp/omnyo-data"),
+    );
+    expect(hostDaemonConfig.OMNYO_SERVER_URL).toBe("http://localhost:9999");
+    expect(hostDaemonConfig.OMNYO_HOST_DAEMON_PORT).toBe(3999);
   });
 
   it("builds host-daemon start config from full config when data dir is not provided", () => {
     const hostDaemonStartConfig = loadHostDaemonStartConfig({
       env: {
-        BB_DATA_DIR: "/tmp/bb-data",
-        BB_HOST_DAEMON_PORT: "3999",
-        BB_SERVER_URL: "http://localhost:9999",
+        OMNYO_DATA_DIR: "/tmp/omnyo-data",
+        OMNYO_HOST_DAEMON_PORT: "3999",
+        OMNYO_SERVER_URL: "http://localhost:9999",
         NODE_ENV: "development",
       },
     });
 
-    expect(hostDaemonStartConfig.dataDir).toBe(path.resolve("/tmp/bb-data"));
-    expect(hostDaemonStartConfig.connectionConfig.BB_SERVER_URL).toBe(
+    expect(hostDaemonStartConfig.dataDir).toBe(path.resolve("/tmp/omnyo-data"));
+    expect(hostDaemonStartConfig.connectionConfig.OMNYO_SERVER_URL).toBe(
       "http://localhost:9999",
     );
-    expect(hostDaemonStartConfig.connectionConfig.BB_HOST_DAEMON_PORT).toBe(
+    expect(hostDaemonStartConfig.connectionConfig.OMNYO_HOST_DAEMON_PORT).toBe(
       3999,
     );
   });
 
-  it("builds logger config from an explicit data dir without resolving BB_DATA_DIR", () => {
+  it("builds logger config from an explicit data dir without resolving OMNYO_DATA_DIR", () => {
     const loggerConfig = loadLoggerConfig({
       dataDir: "/tmp/logger-data",
       env: {
@@ -615,96 +675,99 @@ describe("consumer-specific config", () => {
       },
     });
 
-    expect(loggerConfig.BB_DATA_DIR).toBe("/tmp/logger-data");
-    expect(loggerConfig.BB_LOG_LEVEL).toBe("debug");
+    expect(loggerConfig.OMNYO_DATA_DIR).toBe("/tmp/logger-data");
+    expect(loggerConfig.OMNYO_LOG_LEVEL).toBe("debug");
   });
 
-  it("defaults CLI connection env to the local app instance", () => {
-    const cliConfig = loadCliConfig({
-      env: {
-        NODE_ENV: "development",
-      },
-    });
+  it("defaults CLI connection to the local app only without a saved selection", () => {
+    withCliHome((homeDir) => {
+      const cliConfig = loadCliConfig({
+        env: { NODE_ENV: "development" },
+        homeDir,
+      });
 
-    expect(cliConfig.BB_SERVER_URL).toBe("http://127.0.0.1:38886");
-    expect(cliConfig.BB_HOST_DAEMON_PORT).toBe(38887);
+      expect(cliConfig.OMNYO_SERVER_URL).toBe("http://127.0.0.1:38886");
+      expect(cliConfig.OMNYO_HOST_DAEMON_PORT).toBe(38887);
+    });
   });
 
   it("lets explicit CLI env overrides win over NODE_ENV-selected defaults", () => {
     const cliConfig = loadCliConfig({
       env: {
-        BB_HOST_DAEMON_PORT: "3999",
-        BB_SERVER_URL: "http://localhost:9999",
+        OMNYO_HOST_DAEMON_PORT: "3999",
+        OMNYO_SERVER_URL: "http://localhost:9999",
         NODE_ENV: "development",
       },
     });
 
-    expect(cliConfig.BB_SERVER_URL).toBe("http://localhost:9999");
-    expect(cliConfig.BB_HOST_DAEMON_PORT).toBe(3999);
+    expect(cliConfig.OMNYO_SERVER_URL).toBe("http://localhost:9999");
+    expect(cliConfig.OMNYO_HOST_DAEMON_PORT).toBe(3999);
   });
 
   it("allows app and external URLs to be omitted in production server config", () => {
     const serverConfig = loadServerConfig({
       env: createServerRuntimeEnv({
-        BB_APP_URL: undefined,
-        BB_EXTERNAL_URL: undefined,
+        OMNYO_APP_URL: undefined,
+        OMNYO_EXTERNAL_URL: undefined,
         NODE_ENV: "production",
       }),
     });
 
-    expect(serverConfig.BB_APP_URL).toBe("");
-    expect(serverConfig.BB_EXTERNAL_URL).toBe("");
+    expect(serverConfig.OMNYO_APP_URL).toBe("");
+    expect(serverConfig.OMNYO_EXTERNAL_URL).toBe("");
   });
 
   it("validates app and external URLs independently", () => {
     const serverConfig = loadServerConfig({
       env: createServerRuntimeEnv({
-        BB_APP_URL: "https://app.example.test",
-        BB_EXTERNAL_URL: "https://external.example.test",
+        OMNYO_APP_URL: "https://app.example.test",
+        OMNYO_EXTERNAL_URL: "https://external.example.test",
         NODE_ENV: "production",
       }),
     });
 
-    expect(serverConfig.BB_APP_URL).toBe("https://app.example.test");
-    expect(serverConfig.BB_EXTERNAL_URL).toBe("https://external.example.test");
+    expect(serverConfig.OMNYO_APP_URL).toBe("https://app.example.test");
+    expect(serverConfig.OMNYO_EXTERNAL_URL).toBe(
+      "https://external.example.test",
+    );
 
     expect(() =>
       loadServerConfig({
         env: createServerRuntimeEnv({
-          BB_APP_URL: "not-a-url",
+          OMNYO_APP_URL: "not-a-url",
           NODE_ENV: "production",
         }),
       }),
-    ).toThrow(/BB_APP_URL/u);
+    ).toThrow(/OMNYO_APP_URL/u);
 
     expect(() =>
       loadServerConfig({
         env: createServerRuntimeEnv({
-          BB_APP_URL: "https://app.example.test",
-          BB_EXTERNAL_URL: "not-a-url",
+          OMNYO_APP_URL: "https://app.example.test",
+          OMNYO_EXTERNAL_URL: "not-a-url",
           NODE_ENV: "production",
         }),
       }),
-    ).toThrow(/BB_EXTERNAL_URL/u);
+    ).toThrow(/OMNYO_EXTERNAL_URL/u);
   });
 
   it("reads dev app host from its dedicated config scope", () => {
     const devAppConfig = loadDevAppConfig({
       env: {
-        BB_DEV_APP_HOST: "0.0.0.0",
+        OMNYO_DEV_APP_HOST: "0.0.0.0",
         NODE_ENV: "development",
       },
     });
 
-    expect(devAppConfig.BB_DEV_APP_HOST).toBe("0.0.0.0");
-    expect(devAppConfig.BB_DEV_APP_PORT).toBeUndefined();
+    expect(devAppConfig.OMNYO_DEV_APP_HOST).toBe("0.0.0.0");
+    expect(devAppConfig.OMNYO_DEV_APP_PORT).toBeUndefined();
   });
 
   it("builds app Vite dev config from the app dev entrypoint scope", () => {
     const defaultViteDevConfig = loadViteDevConfig({
       env: {
-        BB_DEV_APP_PORT: "4173",
-        BB_SERVER_PORT: "4444",
+        OMNYO_DEV_APP_PORT: "4173",
+        OMNYO_SERVER_PORT: "4444",
         NODE_ENV: "development",
       },
     });
@@ -718,9 +781,9 @@ describe("consumer-specific config", () => {
 
     const explicitViteDevConfig = loadViteDevConfig({
       env: {
-        BB_DEV_APP_HOST: "0.0.0.0",
-        BB_DEV_APP_PORT: "4173",
-        BB_SERVER_PORT: "4444",
+        OMNYO_DEV_APP_HOST: "0.0.0.0",
+        OMNYO_DEV_APP_PORT: "4173",
+        OMNYO_SERVER_PORT: "4444",
         NODE_ENV: "development",
       },
     });
@@ -732,42 +795,171 @@ describe("consumer-specific config", () => {
     expect(() =>
       loadViteDevConfig({
         env: {
-          BB_SERVER_PORT: "4444",
+          OMNYO_SERVER_PORT: "4444",
           NODE_ENV: "development",
         },
       }),
-    ).toThrow("BB_DEV_APP_PORT is required to run the app dev server");
+    ).toThrow("OMNYO_DEV_APP_PORT is required to run the app dev server");
   });
 
   it("parses optional host-daemon entrypoint env vars in one place", () => {
     const hostDaemonEntrypointConfig = loadHostDaemonEntrypointConfig({
       env: {
-        BB_BRIDGE_DIR: " /tmp/bridges ",
-        BB_CLI_DIR: " /tmp/bb-bin ",
-        BB_HOST_ENROLL_KEY: " enroll-token ",
-        BB_HOST_DAEMON_AUTO_UPDATE: "true",
-        BB_HOST_ID: " host-123 ",
+        OMNYO_BRIDGE_DIR: " /tmp/bridges ",
+        OMNYO_CLI_DIR: " /tmp/omnyo-bin ",
+        OMNYO_HOST_ENROLL_KEY: " enroll-token ",
+        OMNYO_HOST_DAEMON_AUTO_UPDATE: "true",
+        OMNYO_HOST_ID: " host-123 ",
       },
     });
 
     expect(hostDaemonEntrypointConfig).toEqual({
-      BB_BRIDGE_DIR: "/tmp/bridges",
-      BB_CLI_DIR: "/tmp/bb-bin",
-      BB_HOST_ENROLL_KEY: "enroll-token",
-      BB_HOST_DAEMON_AUTO_UPDATE: true,
-      BB_HOST_ID: "host-123",
+      OMNYO_BRIDGE_DIR: "/tmp/bridges",
+      OMNYO_CLI_DIR: "/tmp/omnyo-bin",
+      OMNYO_HOST_ENROLL_KEY: "enroll-token",
+      OMNYO_HOST_DAEMON_AUTO_UPDATE: true,
+      OMNYO_HOST_ID: "host-123",
     });
   });
 
   it("drops empty optional host-daemon entrypoint env vars", () => {
     const hostDaemonEntrypointConfig = loadHostDaemonEntrypointConfig({
       env: {
-        BB_BRIDGE_DIR: "",
-        BB_CLI_DIR: "   ",
-        BB_HOST_ENROLL_KEY: " ",
+        OMNYO_BRIDGE_DIR: "",
+        OMNYO_CLI_DIR: "   ",
+        OMNYO_HOST_ENROLL_KEY: " ",
       },
     });
 
     expect(hostDaemonEntrypointConfig).toEqual({});
   });
+});
+
+describe("CLI saved server selection", () => {
+  it.each(["production", "development"])(
+    "uses saved selection for standalone %s commands without rewriting it",
+    (nodeEnv) => {
+      withCliHome((homeDir) => {
+        mkdirSync(path.join(homeDir, ".omnyo"));
+        const file = path.join(homeDir, ".omnyo", "config.json");
+
+        const contents = JSON.stringify({
+          serverUrl: "https://saved.example.test",
+        });
+
+        writeFileSync(file, contents);
+        writeFileSync(
+          path.join(homeDir, ".omnyo", "app-runtime.json"),
+          JSON.stringify({ serverUrl: "http://127.0.0.1:38886" }),
+        );
+        expect(loadCliConfig({ env: { NODE_ENV: nodeEnv }, homeDir })).toEqual({
+          OMNYO_SERVER_URL: "https://saved.example.test",
+          OMNYO_HOST_DAEMON_PORT: 38887,
+        });
+        expect(readFileSync(file, "utf8")).toBe(contents);
+      });
+    },
+  );
+
+  it("uses only the selected data directory", () => {
+    withCliHome((homeDir) => {
+      mkdirSync(path.join(homeDir, ".omnyo"));
+      writeFileSync(
+        path.join(homeDir, ".omnyo", "config.json"),
+        "invalid home config",
+      );
+      const dataDir = path.join(homeDir, "selected");
+      mkdirSync(dataDir);
+      const file = path.join(dataDir, "config.json");
+      writeFileSync(
+        file,
+        JSON.stringify({ serverUrl: "https://selected.example.test" }),
+      );
+      const args = { env: { OMNYO_DATA_DIR: "~/selected" }, homeDir };
+      expect(loadCliConfig(args).OMNYO_SERVER_URL).toBe(
+        "https://selected.example.test",
+      );
+      writeFileSync(file, "{}");
+      expect(loadCliConfig(args).OMNYO_SERVER_URL).toBe(
+        "http://127.0.0.1:38886",
+      );
+    });
+  });
+
+  it("does not read saved config when an override or repository development target wins", () => {
+    withCliHome((homeDir) => {
+      mkdirSync(path.join(homeDir, ".omnyo"));
+      writeFileSync(
+        path.join(homeDir, ".omnyo", "config.json"),
+        "invalid saved config",
+      );
+      expect(
+        loadCliConfig({
+          env: { OMNYO_SERVER_URL: "https://override.example.test" },
+          homeDir,
+        }).OMNYO_SERVER_URL,
+      ).toBe("https://override.example.test");
+
+      const development = loadCliConfig({
+        env: {},
+        mode: "dev",
+        repoRoot: "/Users/tester/src/omnyo",
+        homeDir,
+      });
+
+      expect(development.OMNYO_SERVER_URL).toMatch(
+        /^http:\/\/127\.0\.0\.1:\d+$/,
+      );
+      expect(development.OMNYO_HOST_DAEMON_PORT).not.toBe(38887);
+    });
+  });
+
+  it.each(["", "   ", "synthetic-sensitive-invalid-url"])(
+    "rejects a present invalid override without printing its value (%j)",
+    (value) => {
+      withCliHome((homeDir) => {
+        expect(() =>
+          loadCliConfig({ env: { OMNYO_SERVER_URL: value }, homeDir }),
+        ).toThrow(
+          new Error(
+            value.trim() === ""
+              ? "OMNYO_SERVER_URL must not be empty"
+              : "Invalid OMNYO_SERVER_URL; expected a non-empty URL",
+          ),
+        );
+      });
+    },
+  );
+
+  it.each(["malformed", "schema", "invalid-url", "unreadable"])(
+    "fails visibly and safely on %s saved configuration",
+    (kind) => {
+      withCliHome((homeDir) => {
+        const dataDir = path.join(homeDir, ".omnyo");
+        mkdirSync(dataDir);
+        const file = path.join(dataDir, "config.json");
+
+        if (kind === "unreadable") mkdirSync(file);
+        else
+          writeFileSync(
+            file,
+            kind === "malformed"
+              ? '{"machineCredential":"synthetic-sensitive-config-field"'
+              : JSON.stringify(
+                  kind === "schema"
+                    ? {
+                        serverUrl: 42,
+                        machineCredential: "synthetic-sensitive-config-field",
+                      }
+                    : { serverUrl: "synthetic-sensitive-invalid-url" },
+                ),
+          );
+        expect(() => loadCliConfig({ env: {}, homeDir })).toThrow(
+          new Error(
+            `Cannot load saved Omnyo CLI server selection from ${file}`,
+          ),
+        );
+      });
+    },
+  );
 });

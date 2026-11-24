@@ -34,15 +34,19 @@ export const defaultGhAuthenticationCheck: GhAuthenticationCheck = (env) =>
       (error) => {
         if (error === null) {
           resolveCheck(true);
+
           return;
         }
+
         if (
           ("code" in error && error.code === "ENOENT") ||
           ("killed" in error && error.killed === true)
         ) {
           resolveCheck(null);
+
           return;
         }
+
         resolveCheck(false);
       },
     );
@@ -52,6 +56,7 @@ export async function readDiskFreeBytes(path: string): Promise<number | null> {
   try {
     const stats = await statfs(path);
     const free = Number(stats.bavail) * Number(stats.bsize);
+
     return Number.isSafeInteger(free) && free >= 0 ? free : null;
   } catch {
     return null;
@@ -65,6 +70,7 @@ export async function readFileSizeBytes(path: string): Promise<number | null> {
     if (isFileNotFoundError(error)) {
       return null;
     }
+
     throw error;
   }
 }

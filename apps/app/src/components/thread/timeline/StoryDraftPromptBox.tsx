@@ -1,10 +1,10 @@
-import type { PromptTextMention } from "@bb/domain";
+import type { PromptTextMention } from "@omnyo/domain";
 import { useCallback, useMemo, useState } from "react";
 import {
   PromptBoxInternal,
   type HistoryConfig,
 } from "@/components/promptbox/PromptBoxInternal";
-import { appendQuoteToDraftText } from "@bb/client-core";
+import { appendQuoteToDraftText } from "@omnyo/client-core";
 import {
   makeAttachmentsConfig,
   makeTypeaheadConfig,
@@ -28,6 +28,7 @@ export function useStoryPromptDraft(): StoryPromptDraftController {
     text: "",
     mentionRanges: [],
   });
+
   const [focusEndKey, setFocusEndKey] = useState(0);
 
   const addQuote = useCallback((quotedText: string) => {
@@ -40,6 +41,7 @@ export function useStoryPromptDraft(): StoryPromptDraftController {
         },
         quotedText,
       );
+
       return {
         text: next.text,
         mentionRanges: next.mentions,
@@ -70,6 +72,7 @@ export function StoryDraftPromptBox({
 }) {
   const typeahead = useMemo(() => makeTypeaheadConfig(), []);
   const attachments = useMemo(() => makeAttachmentsConfig(), []);
+
   const history = useMemo<HistoryConfig>(
     () => ({
       currentDraft: {

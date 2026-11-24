@@ -36,9 +36,9 @@ env:
 - assertNotVisible:
     id: "add-server-screen"
 - runFlow:
-    file: ../subflows/open-bb-link.yaml
+    file: ../subflows/open-omnyo-link.yaml
     env:
-      LINK: "bb://settings/device"
+      LINK: "omnyo://settings/device"
 - extendedWaitUntil:
     visible:
       id: "device-settings-screen"

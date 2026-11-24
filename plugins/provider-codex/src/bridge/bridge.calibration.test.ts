@@ -9,18 +9,18 @@ import {
   approvalInteractionOutcomeSchema,
   interactionRequestPayloadSchema,
   type PromptInput,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import {
   experimental_createBridgeDeltaEventCollector as createBridgeDeltaEventCollector,
   experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness,
   experimental_describeCalibrationEvents as describeCalibrationEvents,
   experimental_normalizeCalibrationEvents as normalizeCalibrationEvents,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import type {
   BridgeDeltaEventCollector,
   BridgeJsonRpcTestHarness,
   ThreadEvent,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import type { ServerNotification as CodexEvent } from "../generated/codex-app-server/schema/ServerNotification.js";
 import type { Turn } from "../generated/codex-app-server/schema/v2/Turn.js";
 import { handleLine } from "./bridge.js";
@@ -30,9 +30,13 @@ import {
 } from "./fake-codex-app-server-harness.js";
 
 const THREAD_ID = "thr_codex_calibration_1";
+
 const SCRIPT_THREAD_ID = "codex-script-thread";
+
 const FIRST_TURN_ID = "turn-cal-1";
+
 const SECOND_TURN_ID = "turn-cal-2";
+
 const COMMAND_ITEM_ID = "cmd-cal-1";
 
 interface ScriptedNotification {
@@ -276,7 +280,9 @@ function promptInput(text: string): PromptInput[] {
 }
 
 const FIRST_REQUEST_ID = "creq_23456789ab";
+
 const STEER_REQUEST_ID = "creq_23456789ac";
+
 const SECOND_REQUEST_ID = "creq_23456789ad";
 
 const interactionRequestParamsSchema = z
@@ -288,7 +294,6 @@ const interactionRequestParamsSchema = z
       approvalInteractionOutcomeSchema.shape.payload,
       ...interactionRequestPayloadSchema.options,
     ]),
-    providerNativeIds: z.boolean().optional(),
   })
   .passthrough();
 
@@ -312,6 +317,7 @@ function answerBridgeRequests(
     ) {
       continue;
     }
+
     approvals.push(interactionRequestParamsSchema.parse(message.params));
     handleLine(
       JSON.stringify({
@@ -321,6 +327,7 @@ function answerBridgeRequests(
       }),
     );
   }
+
   return bridge.messages.length;
 }
 
@@ -332,13 +339,16 @@ async function replayCanonical(workspaceDir: string): Promise<ReplayResult> {
   let answered = 0;
 
   const collector = createBridgeDeltaEventCollector("codex");
+
   const collect = (): void => {
     for (const message of bridge.messages.slice(drained)) {
       if (message.method !== THREAD_DELTA_NOTIFICATION_METHOD) {
         continue;
       }
+
       events.push(...collector.assembleMessage(message));
     }
+
     drained = bridge.messages.length;
   };
 
@@ -347,6 +357,7 @@ async function replayCanonical(workspaceDir: string): Promise<ReplayResult> {
       answered = answerBridgeRequests(bridge, answered, approvals);
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
+
     answered = bridge.messages.length;
     collect();
   };
@@ -369,14 +380,17 @@ async function replayCanonical(workspaceDir: string): Promise<ReplayResult> {
     });
     await settle(2);
 
-    const bbTurnId = firstTurnId(events);
+    const appTurnId = firstTurnId(events);
+
     const expectedTurnId =
-      bbTurnId === undefined
+      appTurnId === undefined
         ? undefined
-        : collector.assembler.getProviderTurnId(THREAD_ID, bbTurnId);
+        : collector.assembler.getProviderTurnId(THREAD_ID, appTurnId);
+
     if (expectedTurnId === undefined) {
       throw new Error("Expected a codex-native turn id to steer against");
     }
+
     bridge.sendRequest(3, "turn/steer", {
       threadId: THREAD_ID,
       providerThreadId: THREAD_ID,
@@ -416,12 +430,14 @@ function firstTurnId(events: readonly ThreadEvent[]): string | undefined {
       return event.scope.turnId;
     }
   }
+
   return undefined;
 }
 
 const GOLDEN_EVENT_STREAM: string[] = [
   "thread/started",
   "thread/identity",
+  "thread/extensionState/updated",
   "turn/started",
   "turn/input/accepted",
   "item/started:agentMessage",
@@ -445,7 +461,7 @@ const GOLDEN_EVENT_STREAM: string[] = [
 let workspaceDir: string;
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-calibration-ws-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-calibration-ws-"));
   const scriptPath = join(workspaceDir, "calibration-script.json");
   writeFileSync(scriptPath, JSON.stringify({ turns: SCRIPT }), "utf8");
   stubFakeCodexAppServer(scriptPath);
@@ -476,22 +492,25 @@ it("replays one scripted codex session onto the golden event stream", async () =
   expect(canonical.approvals).toHaveLength(1);
   const approvalRequest = canonical.approvals[0];
   const canonicalApproval = approvalRequest?.payload;
+
   if (
     canonicalApproval?.kind !== "approval" ||
     canonicalApproval.subject.kind !== "command"
   ) {
     throw new Error("Expected a canonical command-approval payload");
   }
-  expect(approvalRequest?.providerNativeIds).toBe(true);
+
   expect(canonicalApproval.subject.itemId).toBe(COMMAND_ITEM_ID);
+
   const commandEventItemId = canonical.events.find(
     (event) =>
       event.type === "item/completed" &&
       event.item.type === "commandExecution" &&
       event.item.command === "git status --short",
   );
+
   expect(
-    canonical.collector.assembler.getBbItemId(THREAD_ID, COMMAND_ITEM_ID),
+    canonical.collector.assembler.getAppItemId(THREAD_ID, COMMAND_ITEM_ID),
   ).toBe(
     commandEventItemId?.type === "item/completed"
       ? commandEventItemId.item.id

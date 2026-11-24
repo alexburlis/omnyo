@@ -6,12 +6,12 @@ import {
   openSession,
   updateHost,
   upsertHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   HOST_DAEMON_PROTOCOL_VERSION,
   hostDaemonServerWsMessageSchema,
   hostDaemonSessionOpenResponseSchema,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../src/errors.js";
 import { HostSharedPortCoordinator } from "../../src/ws/host-shared-ports.js";
@@ -32,11 +32,13 @@ function setup(args: { enrolled?: boolean; online?: boolean } = {}) {
   migrate(db);
   const hub = new NotificationHub();
   const sharedPorts = new HostSharedPortCoordinator({ db, hub });
+
   const host = upsertHost(db, noopNotifier, {
     id: "host-1",
     name: "test-host",
     ...(args.enrolled === false ? {} : { connectMachineId: "machine-1" }),
   });
+
   if (args.enrolled !== false && args.online !== false) {
     const session = openSession(db, {
       hostId: host.id,
@@ -47,13 +49,16 @@ function setup(args: { enrolled?: boolean; online?: boolean } = {}) {
       heartbeatIntervalMs: 30_000,
       leaseTimeoutMs: 90_000,
     });
+
     sharedPorts.recordHostConnectCapability({
       hostId: host.id,
       sessionId: session.id,
       hasMachineCredential: true,
     });
+
     return { db, host, hub, session, sharedPorts };
   }
+
   return { db, host, hub, session: null, sharedPorts };
 }
 
@@ -61,9 +66,11 @@ describe("HostSharedPortCoordinator", () => {
   it("aggregates owner replacements and pushes only changed desired sets", () => {
     const { host, hub, session, sharedPorts } = setup();
     const daemonSocket = createMockHubSocket();
+
     if (!session) {
       throw new Error("expected an enrolled setup session");
     }
+
     hub.registerDaemon(session.id, host.id, daemonSocket);
 
     expect(sharedPorts.reconcileSharedPortsForHost(host.id)).toEqual({
@@ -142,6 +149,7 @@ describe("HostSharedPortCoordinator", () => {
 
   it("delivers changed ports over a registered credentialed socket after its lease stales", () => {
     const { db, host, hub, session, sharedPorts } = setup();
+
     if (!session) throw new Error("expected an online host session");
     const daemonSocket = createMockHubSocket();
     hub.registerDaemon(session.id, host.id, daemonSocket);
@@ -176,6 +184,7 @@ describe("HostSharedPortCoordinator", () => {
 
   it("rejects a registered credentialless session after its lease stales", () => {
     const { db, host, hub, session, sharedPorts } = setup();
+
     if (!session) throw new Error("expected an online host session");
     hub.registerDaemon(session.id, host.id, createMockHubSocket());
     sharedPorts.recordHostConnectCapability({
@@ -186,6 +195,7 @@ describe("HostSharedPortCoordinator", () => {
     heartbeatSession(db, session.id, Date.now() - 1);
 
     let declarationError: unknown;
+
     try {
       sharedPorts.declareSharedPorts({
         ownerId: "connect",
@@ -208,6 +218,7 @@ describe("HostSharedPortCoordinator", () => {
 
   it("retains changed generations through a full disconnect and reconnect", () => {
     const { db, host, hub, session, sharedPorts } = setup();
+
     if (!session) throw new Error("expected an online host session");
     const firstSocket = createMockHubSocket();
     hub.registerDaemon(session.id, host.id, firstSocket);
@@ -241,6 +252,7 @@ describe("HostSharedPortCoordinator", () => {
       heartbeatIntervalMs: 30_000,
       leaseTimeoutMs: 90_000,
     });
+
     sharedPorts.recordHostConnectCapability({
       hostId: host.id,
       sessionId: reconnected.id,
@@ -276,6 +288,7 @@ describe("HostSharedPortCoordinator", () => {
 
     const credentialless = setup({ enrolled: false });
     let unenrolledError: unknown;
+
     try {
       credentialless.sharedPorts.declareSharedPorts({
         ownerId: "connect",
@@ -285,6 +298,7 @@ describe("HostSharedPortCoordinator", () => {
     } catch (error) {
       unenrolledError = error;
     }
+
     expect(unenrolledError).toBeInstanceOf(ApiError);
     expect(unenrolledError).toMatchObject({
       body: {
@@ -311,6 +325,7 @@ describe("HostSharedPortCoordinator", () => {
       heartbeatIntervalMs: 30_000,
       leaseTimeoutMs: 90_000,
     });
+
     offline.sharedPorts.recordHostConnectCapability({
       hostId: offline.host.id,
       sessionId: session.id,
@@ -335,6 +350,7 @@ describe("HostSharedPortCoordinator", () => {
 
   it("always accepts empty declarations for offline, unenrolled, and removed hosts", () => {
     const offline = setup();
+
     if (!offline.session) throw new Error("expected an online host session");
     offline.sharedPorts.declareSharedPorts({
       ownerId: "connect",
@@ -390,18 +406,37 @@ describe("HostSharedPortCoordinator", () => {
   });
 
   it("stores only daemon-reported tunnel identity", () => {
-    const { host, sharedPorts } = setup();
+    const { host, hub, session, sharedPorts } = setup();
+
+    if (!session) throw new Error("expected an online host session");
+    hub.registerDaemon(session.id, host.id, createMockHubSocket());
     expect(sharedPorts.getTunnelIdentity(host.id)).toBeNull();
     expect(
       sharedPorts.recordTunnelIdentity(host.id, {
         label: "sawyer-air",
-        baseDomain: "getbb.app",
+        baseDomain: "omnyo.link",
       }),
-    ).toEqual({ label: "sawyer-air", baseDomain: "getbb.app" });
+    ).toEqual({ label: "sawyer-air", baseDomain: "omnyo.link" });
     expect(sharedPorts.getTunnelIdentity(host.id)).toEqual({
       label: "sawyer-air",
-      baseDomain: "getbb.app",
+      baseDomain: "omnyo.link",
     });
+  });
+
+  it("treats a host as connected while the hub holds its socket, whatever the persisted lease says", () => {
+    const { db, host, hub, session, sharedPorts } = setup();
+
+    if (!session) throw new Error("expected an online host session");
+    hub.registerDaemon(session.id, host.id, createMockHubSocket());
+    heartbeatSession(db, session.id, Date.now() - 1);
+    expect(sharedPorts.getTunnelIdentity(host.id)).toBeNull();
+
+    hub.unregisterDaemon(session.id);
+    expect(() => sharedPorts.getTunnelIdentity(host.id)).toThrow(
+      expect.objectContaining({
+        body: expect.objectContaining({ code: "connect_host_offline" }),
+      }),
+    );
   });
 });
 
@@ -413,6 +448,7 @@ describe("daemon session connect shares", () => {
         name: "Host",
         connectMachineId: "machine-1",
       });
+
       const previousSession = openSession(harness.db, {
         hostId: "host-1",
         instanceId: "previous-instance",
@@ -422,6 +458,7 @@ describe("daemon session connect shares", () => {
         heartbeatIntervalMs: 30_000,
         leaseTimeoutMs: 90_000,
       });
+
       harness.deps.sharedPorts.recordHostConnectCapability({
         hostId: "host-1",
         sessionId: previousSession.id,
@@ -466,6 +503,7 @@ describe("daemon session connect shares", () => {
         name: "Host",
         connectMachineId: "machine-1",
       });
+
       const response = await harness.app.request("/internal/session/open", {
         method: "POST",
         headers: {
@@ -484,9 +522,11 @@ describe("daemon session connect shares", () => {
           activeThreads: [],
         }),
       });
+
       const session = hostDaemonSessionOpenResponseSchema.parse(
         await response.json(),
       );
+
       expect(session.connectShares).toEqual({ generation: 0, ports: [] });
 
       harness.deps.sharedPorts.declareSharedPorts({
@@ -515,12 +555,12 @@ describe("daemon session connect shares", () => {
         socket: daemonSocket,
         raw: JSON.stringify({
           type: "connect-tunnel.identity",
-          identity: { label: "sawyer-air", baseDomain: "getbb.app" },
+          identity: { label: "sawyer-air", baseDomain: "omnyo.link" },
         }),
       });
       expect(harness.deps.sharedPorts.getTunnelIdentity("host-1")).toEqual({
         label: "sawyer-air",
-        baseDomain: "getbb.app",
+        baseDomain: "omnyo.link",
       });
     });
   });
@@ -532,6 +572,7 @@ describe("daemon session connect shares", () => {
         name: "Host",
         connectMachineId: "machine-1",
       });
+
       const response = await harness.app.request("/internal/session/open", {
         method: "POST",
         headers: {
@@ -550,10 +591,13 @@ describe("daemon session connect shares", () => {
           activeThreads: [],
         }),
       });
+
       expect(response.status).toBe(201);
+
       const session = hostDaemonSessionOpenResponseSchema.parse(
         await response.json(),
       );
+
       const daemonSocket = createMockHubSocket();
       onDaemonSocketOpen(harness.deps, {
         hostId: "host-1",
@@ -569,7 +613,7 @@ describe("daemon session connect shares", () => {
           ports: [4173],
         }),
       ).toThrow(
-        'cannot share ports from host "Host" (host-1) because it has no bb connect machine credential; enroll it via Connect in Settings > Machines',
+        'cannot share ports from host "Host" (host-1) because it has no Omnyo connect machine credential; enroll it via Connect in Settings > Machines',
       );
       expect(daemonSocket.messages).toEqual(messagesBeforeDeclaration);
       expect(

@@ -7,12 +7,12 @@ import {
   useRealtimeConnectionState,
   useRpc,
   useSdk,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import {
   encodeMobilePairingPayload,
   mobilePairingPayload,
   type MobilePairingPayload,
-} from "@bb/connect-client";
+} from "@omnyo/connect-client";
 import type { connectRpcContract } from "./src/rpc.js";
 import type { MachineCodeErrorCode } from "./src/machine-code.js";
 import {
@@ -24,17 +24,19 @@ import {
   type LoginView,
 } from "./src/account-client.js";
 import QRCode from "qrcode";
-import { Button } from "@bb/shared-ui/button";
+import { PairedDeviceList } from "./paired-devices.js";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Icon } from "@bb/shared-ui/icon";
-import { Input } from "@bb/shared-ui/input";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/dialog";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Input } from "@omnyo/shared-ui/input";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { DISCLOSURE_CHEVRON_TRANSITION } from "@omnyo/shared-ui/motion";
 import { CONNECT_REALTIME_CHANNEL, type ConnectStatus } from "@/src/types";
 
 function errorText(error: unknown): string {
@@ -61,6 +63,7 @@ interface PairErrorCopy {
 }
 
 const LOGIN_POLL_MS = 2_000;
+
 const LOGIN_POLL_MAX_MS = 30_000;
 
 function loginPollDelay(failures: number): number {
@@ -86,29 +89,29 @@ const PAIR_ERROR_COPY: Record<ConnectPairErrorCode, PairErrorCopy> = {
     tail: " — each code works once.",
   },
   network: {
-    lead: "Couldn't reach getbb.app.",
+    lead: "Couldn't reach omnyo.link.",
     linkLabel: "Open the dashboard",
     tail: " — check your connection, then try again.",
   },
   unauthorized: {
-    lead: "getbb.app rejected the new pairing.",
+    lead: "omnyo.link rejected the new pairing.",
     linkLabel: "Get a new code",
     tail: " and try again.",
   },
   profile_unavailable: {
-    lead: "This bb saved the pairing, but getbb.app hasn't returned your account yet.",
+    lead: "This Omnyo saved the pairing, but omnyo.link hasn't returned your account yet.",
     linkLabel: "Open the dashboard",
-    tail: " — bb keeps retrying, and remote access starts once it does.",
+    tail: " — Omnyo keeps retrying, and remote access starts once it does.",
   },
   superseded: {
     lead: "Another sign-in or a sign-out replaced this one.",
     linkLabel: "Open the dashboard",
-    tail: " — check which account this bb uses under bb account.",
+    tail: " — check which account this Omnyo uses under Omnyo account.",
   },
   account_unavailable: {
-    lead: "The bb account plugin is off.",
+    lead: "The Omnyo account plugin is off.",
     linkLabel: "Open the dashboard",
-    tail: " — turn bb account on under Plugins, then try again.",
+    tail: " — turn Omnyo account on under Plugins, then try again.",
   },
 };
 
@@ -124,6 +127,7 @@ function isUnavailableError(error: unknown): boolean {
 function toPairErrorCode(error: unknown): ConnectPairErrorCode {
   if (isUnavailableError(error)) return "account_unavailable";
   const code = accountErrorCode(error);
+
   if (
     code === "invalid_code" ||
     code === "expired_code" ||
@@ -135,11 +139,13 @@ function toPairErrorCode(error: unknown): ConnectPairErrorCode {
   ) {
     return code;
   }
+
   return "invalid_code";
 }
 
 function asStatus(payload: unknown): ConnectStatus | null {
   if (payload === null || typeof payload !== "object") return null;
+
   const record = payload as {
     state?: unknown;
     paired?: unknown;
@@ -154,6 +160,7 @@ function asStatus(payload: unknown): ConnectStatus | null {
     lastRemoteActivityAt?: unknown;
     shares?: unknown;
   };
+
   if (
     (record.state !== "disconnected" &&
       record.state !== "pairing" &&
@@ -164,7 +171,9 @@ function asStatus(payload: unknown): ConnectStatus | null {
   ) {
     return null;
   }
+
   const shares: ConnectStatus["shares"] = [];
+
   if (Array.isArray(record.shares)) {
     for (const entry of record.shares) {
       if (
@@ -193,6 +202,7 @@ function asStatus(payload: unknown): ConnectStatus | null {
       }
     }
   }
+
   return {
     state: record.state,
     paired: record.paired,
@@ -202,7 +212,7 @@ function asStatus(payload: unknown): ConnectStatus | null {
     dashboardUrl:
       typeof record.dashboardUrl === "string"
         ? record.dashboardUrl
-        : "https://getbb.app/dashboard",
+        : "https://omnyo.link/dashboard",
     lastError: typeof record.lastError === "string" ? record.lastError : null,
     nextRetryAt:
       typeof record.nextRetryAt === "number" ? record.nextRetryAt : null,
@@ -220,10 +230,12 @@ function asStatus(payload: unknown): ConnectStatus | null {
 function formatSince(sinceMs: number): string {
   const at = new Date(sinceMs);
   const now = new Date();
+
   const sameDay =
     at.getFullYear() === now.getFullYear() &&
     at.getMonth() === now.getMonth() &&
     at.getDate() === now.getDate();
+
   return sameDay
     ? at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
     : at.toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -232,6 +244,7 @@ function formatSince(sinceMs: number): string {
 function retryHint(nextRetryAt: number | null): string {
   if (nextRetryAt === null) return "retrying automatically";
   const seconds = Math.max(0, Math.round((nextRetryAt - Date.now()) / 1000));
+
   return seconds > 0 ? `retrying in ${seconds}s` : "retrying…";
 }
 
@@ -248,6 +261,7 @@ function formatConnectCode(raw: string): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "")
     .slice(0, 8);
+
   return cleaned.length > 4
     ? `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`
     : cleaned;
@@ -266,7 +280,7 @@ function StatusDot({ tone }: { tone: "ok" | "warn" | "muted" }) {
         tone === "ok" &&
           "bg-success shadow-[0_0_0_3px_color-mix(in_oklab,var(--success)_18%,transparent)]",
         tone === "warn" &&
-          "animate-pulse bg-warning shadow-[0_0_0_3px_color-mix(in_oklab,var(--warning)_22%,transparent)]",
+          "animate-pulse bg-warning motion-reduce:animate-none shadow-[0_0_0_3px_color-mix(in_oklab,var(--warning)_22%,transparent)]",
         tone === "muted" && "bg-muted-foreground/50",
       )}
     />
@@ -293,11 +307,14 @@ function QrCodeImage({
         if (!cancelled) setDataUrl(null);
       },
     );
+
     return () => {
       cancelled = true;
     };
   }, [value]);
+
   if (dataUrl === null) return null;
+
   return (
     <img
       src={dataUrl}
@@ -314,6 +331,7 @@ function UrlHero({ url, showOpen }: { url: string; showOpen: boolean }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "manual">(
     "idle",
   );
+
   const urlRef = useRef<HTMLSpanElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -325,8 +343,10 @@ function UrlHero({ url, showOpen }: { url: string; showOpen: boolean }) {
 
   const selectUrl = useCallback(() => {
     const element = urlRef.current;
+
     if (element === null) return;
     const selection = window.getSelection();
+
     if (selection === null) return;
     const range = document.createRange();
     range.selectNodeContents(element);
@@ -339,9 +359,12 @@ function UrlHero({ url, showOpen }: { url: string; showOpen: boolean }) {
       if (!copied) {
         selectUrl();
         setCopyState("manual");
+
         return;
       }
+
       setCopyState("copied");
+
       if (timerRef.current !== null) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopyState("idle"), 1500);
     });
@@ -394,14 +417,17 @@ function QuietCopyButton({ text, label }: { text: string; label: string }) {
     },
     [],
   );
+
   const copy = useCallback(() => {
     void experimental_copyToClipboard({ text }).then((written) => {
       if (!written) return;
       setCopied(true);
+
       if (timerRef.current !== null) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
     });
   }, [text]);
+
   return (
     <Button
       type="button"
@@ -433,6 +459,7 @@ function PairForm({
     (value: string) => {
       if (pending) return;
       const canonical = formatConnectCode(value);
+
       if (!isCompleteCode(canonical)) return;
       submittedRef.current = canonical;
       setPending(true);
@@ -464,7 +491,9 @@ function PairForm({
     (raw: string) => {
       const formatted = formatConnectCode(raw);
       setCode(formatted);
+
       if (errorCode !== null) setErrorCode(null);
+
       if (isCompleteCode(formatted) && formatted !== submittedRef.current) {
         submit(formatted);
       }
@@ -524,21 +553,24 @@ function PairForm({
 
 function signInStartErrorText(error: unknown): string {
   if (isUnavailableError(error)) {
-    return "The bb account plugin is off. Turn it on under Plugins, then try again.";
+    return "The Omnyo account plugin is off. Turn it on under Plugins, then try again.";
   }
+
   switch (accountErrorCode(error)) {
     case "rate_limited":
       return "Too many sign-in attempts from this network. Wait a minute, then try again.";
     case "unavailable":
-      return "getbb.app couldn't start sign-in right now. Try again in a minute.";
+      return "omnyo.link couldn't start sign-in right now. Try again in a minute.";
     default:
-      return "Couldn't reach getbb.app to start sign-in. Check your connection, then try again.";
+      return "Couldn't reach omnyo.link to start sign-in. Check your connection, then try again.";
   }
 }
 
 function toMachineCodeErrorCode(error: unknown): MachineCodeErrorCode {
   const message = errorText(error);
+
   if (message === "machine_limit" || message === "not_paired") return message;
+
   return "network";
 }
 
@@ -546,6 +578,7 @@ function formatCountdown(remainingMs: number): string {
   const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
+
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
@@ -554,8 +587,10 @@ function useCountdown(expiresAt: number | null): number | null {
   useEffect(() => {
     if (expiresAt === null) return;
     const interval = setInterval(() => setNow(Date.now()), 1000);
+
     return () => clearInterval(interval);
   }, [expiresAt]);
+
   return expiresAt === null ? null : expiresAt - now;
 }
 
@@ -573,6 +608,7 @@ function MobilePairingCard({
   const remainingMs = useCountdown(payload.expiresAt);
   const expired = remainingMs !== null && remainingMs <= 0;
   const qrText = encodeMobilePairingPayload(payload);
+
   return (
     <div className="@container/connect-pairing min-w-0">
       <div className="flex flex-col gap-3 rounded-md border border-border bg-surface-recessed/50 px-3 py-3 @min-[32rem]/connect-pairing:flex-row @min-[32rem]/connect-pairing:items-start">
@@ -584,15 +620,15 @@ function MobilePairingCard({
         >
           <QrCodeImage
             value={qrText}
-            alt="QR code to pair the bb mobile app"
+            alt="QR code to pair the Omnyo mobile app"
             className="size-40"
           />
         </div>
         <div className="min-w-0 flex-1 space-y-2">
           <p className="text-sm">
             {expired
-              ? "Generate a new code, then scan it or enter it in the bb mobile app."
-              : "Scan this with the bb mobile app, or enter the code by hand."}
+              ? "Generate a new code, then scan it or enter it in the Omnyo mobile app."
+              : "Scan this with the Omnyo mobile app, or enter the code by hand."}
           </p>
           <div className="flex max-w-xs items-center gap-1 rounded-lg border border-border bg-surface-recessed py-1 pl-3.5 pr-1">
             <span
@@ -634,7 +670,7 @@ function MobilePairingCard({
               </span>
             ) : null}
           </div>
-          <p className="text-xs text-subtle-foreground/75">
+          <p className="text-xs text-subtle-foreground">
             {expired ? "Each new code works once." : "This code works once."}{" "}
             You can revoke your phone’s access from the {dashboardHost}{" "}
             dashboard.
@@ -674,7 +710,7 @@ function AddMobileDeviceSection({ dashboardUrl }: { dashboardUrl: string }) {
         <div className="min-w-0">
           <h3 className="text-xs font-medium">Pair your phone</h3>
           {payload === null ? (
-            <p className="mt-1 text-xs text-subtle-foreground/75">
+            <p className="mt-1 text-xs text-subtle-foreground">
               Scan or enter a code.
             </p>
           ) : null}
@@ -740,7 +776,7 @@ function AddMobileDeviceSection({ dashboardUrl }: { dashboardUrl: string }) {
               in the dashboard, then try again.
             </>
           ) : errorCode === "not_paired" ? (
-            "This bb is signed out. Open Manage to sign in, then try again."
+            "This Omnyo is signed out. Open Manage to sign in, then try again."
           ) : (
             "Couldn't reach the Connect service to create a code — check your connection, then try again."
           )}
@@ -759,15 +795,19 @@ interface ShareHostGroup {
 function groupSharesByHost(shares: ConnectStatus["shares"]): ShareHostGroup[] {
   const groups: ShareHostGroup[] = [];
   const byHostId = new Map<string, ShareHostGroup>();
+
   for (const share of shares) {
     let group = byHostId.get(share.hostId);
+
     if (group === undefined) {
       group = { hostId: share.hostId, hostName: share.hostName, shares: [] };
       byHostId.set(share.hostId, group);
       groups.push(group);
     }
+
     group.shares.push(share);
   }
+
   return groups;
 }
 
@@ -782,21 +822,27 @@ function SharedPortsSection({
   const [portInput, setPortInput] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [exposing, setExposing] = useState(false);
+
   const [collapsedHosts, setCollapsedHosts] = useState<Set<string>>(
     () => new Set(),
   );
+
   const [revokingHost, setRevokingHost] = useState<string | null>(null);
   const [revokingShare, setRevokingShare] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const expose = useCallback(() => {
     const trimmed = portInput.trim();
+
     if (trimmed.length === 0 || exposing || revokingHost !== null) return;
     const port = Number(trimmed);
+
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       setError("Port must be an integer between 1 and 65535");
+
       return;
     }
+
     setExposing(true);
     setError(null);
     rpc.call("expose", { port }).then(
@@ -835,6 +881,7 @@ function SharedPortsSection({
     if (revokingHost !== null || revokingShare !== null) return;
     setRevokingHost(hostId);
     setError(null);
+
     try {
       await rpc.call("unexposeAll", { hostId });
     } catch (rpcError) {
@@ -874,6 +921,7 @@ function SharedPortsSection({
           {groupSharesByHost(shares).map((group) => {
             const collapsed = collapsedHosts.has(group.hostId);
             const hostDown = group.shares.every((share) => share.url === "");
+
             return (
               <div key={group.hostId} className="space-y-1">
                 <div className="flex items-center gap-2">
@@ -885,15 +933,21 @@ function SharedPortsSection({
                     onClick={() =>
                       setCollapsedHosts((previous) => {
                         const next = new Set(previous);
+
                         if (next.has(group.hostId)) next.delete(group.hostId);
                         else next.add(group.hostId);
+
                         return next;
                       })
                     }
                   >
                     <Icon
-                      name={collapsed ? "ChevronRight" : "ChevronDown"}
-                      className="size-3.5 shrink-0 text-muted-foreground"
+                      name="ChevronRight"
+                      className={cn(
+                        "size-3.5 shrink-0 text-muted-foreground",
+                        DISCLOSURE_CHEVRON_TRANSITION,
+                        !collapsed && "rotate-90",
+                      )}
                     />
                     <StatusDot tone={hostDown ? "muted" : "ok"} />
                     <span
@@ -1029,7 +1083,7 @@ function SharedPortsSection({
         </form>
       ) : null}
 
-      <p className="text-xs text-subtle-foreground/75">
+      <p className="text-xs text-subtle-foreground">
         Agents can expose their dev servers too — same owner sign-in required to
         view.
       </p>
@@ -1064,7 +1118,7 @@ function TurnOffDialog({
             <p className="text-sm text-muted-foreground">
               <span className="font-medium text-foreground">{host}</span> will
               stop working on all devices until you turn remote access back on.
-              This bb stays signed in to your bb account.
+              This Omnyo stays signed in to your Omnyo account.
             </p>
             <DialogFooter>
               <Button
@@ -1128,6 +1182,7 @@ function useAccountLogin(onSignedIn: () => void) {
     let cancelled = false;
     let failures = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+
     const poll = () => {
       sdk.plugins
         .callRpc({
@@ -1139,8 +1194,11 @@ function useAccountLogin(onSignedIn: () => void) {
         .then(
           (result) => {
             failures = 0;
+
             if (cancelled) return;
+
             if (result.login !== null) setLogin(result.login);
+
             if (result.login?.state === "signed-in") onSignedIn();
           },
           () => {
@@ -1151,7 +1209,9 @@ function useAccountLogin(onSignedIn: () => void) {
           if (!cancelled) timer = setTimeout(poll, loginPollDelay(failures));
         });
     };
+
     timer = setTimeout(poll, LOGIN_POLL_MS);
+
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -1172,6 +1232,7 @@ function useAccountLogin(onSignedIn: () => void) {
           () => {},
         );
     }
+
     setLogin(null);
     setError(null);
   }, [pendingId, sdk]);
@@ -1194,7 +1255,7 @@ function AccountSignInCard({ onSignedIn }: { onSignedIn: () => void }) {
           {starting ? (
             <Icon name="Spinner" className="size-4 animate-spin" />
           ) : null}
-          Sign in to your bb account
+          Sign in to your Omnyo account
         </Button>
         {error !== null ? (
           <p className="text-xs text-destructive-text">{error}</p>
@@ -1242,7 +1303,7 @@ function AccountSignInCard({ onSignedIn }: { onSignedIn: () => void }) {
             target="_blank"
             rel="noreferrer"
           >
-            Open getbb.app
+            Open omnyo.link
             <Icon name="ExternalLink" className="size-3.5" />
           </UrlLink>
         </Button>
@@ -1273,11 +1334,12 @@ function NotPairedContent({
 }) {
   const dashboardHost = hostOf(dashboardUrl);
   const [codeOpen, setCodeOpen] = useState(false);
+
   return (
     <div className="@container/connect-controls space-y-4">
       <p className="text-sm text-muted-foreground">
-        Remote access uses your bb account. Once you sign in, this bb gets a
-        private URL like{" "}
+        Remote access uses your Omnyo account. Once you sign in, this Omnyo gets
+        a private URL like{" "}
         <span className="rounded bg-surface-recessed px-1.5 py-0.5 font-mono text-xs text-foreground">
           you.{dashboardHost}
         </span>
@@ -1301,8 +1363,8 @@ function NotPairedContent({
       ) : null}
 
       <p className="text-xs text-subtle-foreground">
-        Only your {dashboardHost} account can open this bb. Manage the account
-        under Plugins → bb account.
+        Only your {dashboardHost} account can open this Omnyo. Manage the
+        account under Plugins → Omnyo account.
       </p>
     </div>
   );
@@ -1341,7 +1403,7 @@ function TurnOffControls({
     );
   }, [rpc, onChanged, onTurnedOff]);
 
-  const host = status.url !== null ? hostOf(status.url) : "this bb";
+  const host = status.url !== null ? hostOf(status.url) : "this Omnyo";
 
   return (
     <>
@@ -1401,7 +1463,7 @@ function ConnectedContent({
 
       <TurnOffControls
         status={status}
-        note="Turning off keeps this bb signed in to your bb account."
+        note="Turning off keeps this Omnyo signed in to your Omnyo account."
         onChanged={onChanged}
         onTurnedOff={onTurnedOff}
       />
@@ -1436,7 +1498,7 @@ function ReconnectingContent({
 
       <div className="space-y-2 pointer-events-none opacity-60 saturate-[0.85]">
         <p className="text-sm text-muted-foreground">
-          Your bb will be reachable again at:
+          Your Omnyo will be reachable again at:
         </p>
         {status.url !== null ? (
           <UrlHero url={status.url} showOpen={false} />
@@ -1447,7 +1509,7 @@ function ReconnectingContent({
 
       <TurnOffControls
         status={status}
-        note="Remote devices can't reach this bb right now. Local access is unaffected."
+        note="Remote devices can't reach this Omnyo right now. Local access is unaffected."
         onChanged={onChanged}
         onTurnedOff={onTurnedOff}
       />
@@ -1495,8 +1557,8 @@ function OffContent({
         </Button>
       </div>
       <p className="text-sm text-muted-foreground">
-        This bb stays signed in to your bb account. Turn remote access on to
-        reach it again
+        This Omnyo stays signed in to your Omnyo account. Turn remote access on
+        to reach it again
         {status.url !== null ? ` at ${hostOf(status.url)}` : ""}.
       </p>
       <SharedPortsSection shares={status.shares} dimmed />
@@ -1521,6 +1583,7 @@ function useConnectStatus() {
       (result) => {
         if (request !== latestStatusRequest.current) return;
         const next = asStatus(result);
+
         if (next !== null) {
           setStatus(next);
           setLoadError(null);
@@ -1542,6 +1605,7 @@ function useConnectStatus() {
   useEffect(() => {
     const previous = previousConnectionState.current;
     previousConnectionState.current = connectionState;
+
     if (connectionState === "connected" && previous !== "connected") {
       refetch();
     }
@@ -1549,6 +1613,7 @@ function useConnectStatus() {
 
   useRealtime(CONNECT_REALTIME_CHANNEL, (payload) => {
     const next = asStatus(payload);
+
     if (next !== null) {
       setStatus(next);
       setLoadError(null);
@@ -1560,6 +1625,7 @@ function useConnectStatus() {
 
 function MobilePairingSection() {
   const { status, loadError, refetch } = useConnectStatus();
+
   if (loadError !== null)
     return (
       <div className="mt-3 space-y-2 border-t border-border-seam pt-3">
@@ -1574,17 +1640,27 @@ function MobilePairingSection() {
         </p>
       </div>
     );
-  if (!status?.paired || !status.enabled || status.state !== "connected")
-    return null;
-  return <AddMobileDeviceSection dashboardUrl={status.dashboardUrl} />;
+
+  if (!status?.paired) return null;
+
+  return (
+    <>
+      {status.enabled && status.state === "connected" ? (
+        <AddMobileDeviceSection dashboardUrl={status.dashboardUrl} />
+      ) : null}
+      <PairedDeviceList />
+    </>
+  );
 }
 
 function ConnectSettingsSection() {
   const { status, loadError, refetch } = useConnectStatus();
   const [flash, setFlash] = useState<string | null>(null);
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const showTurnedOff = useCallback(() => {
     setFlash("Remote access turned off");
+
     if (flashTimerRef.current !== null) clearTimeout(flashTimerRef.current);
     flashTimerRef.current = setTimeout(() => setFlash(null), 4000);
   }, []);
@@ -1603,6 +1679,7 @@ function ConnectSettingsSection() {
       </p>
     );
   }
+
   if (status === null) {
     return <p className="text-sm text-muted-foreground">Loading...</p>;
   }
@@ -1646,7 +1723,7 @@ export default definePluginApp((app) => {
   app.slots.settingsSection({
     id: "remote-access",
     description:
-      "Use this bb from any device, anywhere — powered by getbb.app.",
+      "Use this Omnyo from any device, anywhere, through the Omnyo relay at omnyo.link.",
     component: ConnectSettingsSection,
   });
   app.slots.settingsSection({

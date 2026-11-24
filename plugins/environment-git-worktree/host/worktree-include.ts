@@ -1,8 +1,8 @@
-import { runGit } from "bb-environment-provider-host/git";
+import { runGit } from "omnyo-environment-provider-host/git";
 import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { throwIfProvisionAborted } from "bb-environment-provider-host/transcript";
+import { throwIfProvisionAborted } from "omnyo-environment-provider-host/transcript";
 
 export const WORKTREE_INCLUDE_FILE_NAME = ".worktreeinclude";
 
@@ -49,6 +49,7 @@ async function readIncludeFile(sourcePath: string): Promise<string | null> {
     if (isMissingFileError(error)) {
       return null;
     }
+
     throw error;
   }
 }
@@ -70,23 +71,27 @@ async function listMatchingFiles(
       ...(signal !== undefined ? { signal } : {}),
     },
   );
+
   return result.stdout.split("\0").filter(Boolean);
 }
 
 async function pathPresent(targetPath: string): Promise<boolean> {
   try {
     await fs.lstat(targetPath);
+
     return true;
   } catch (error) {
     if (isMissingFileError(error)) {
       return false;
     }
+
     throw error;
   }
 }
 
 function isInside(parentRealPath: string, childRealPath: string): boolean {
   const relative = path.relative(parentRealPath, childRealPath);
+
   return (
     relative === "" ||
     (!relative.startsWith("..") && !path.isAbsolute(relative))
@@ -101,16 +106,19 @@ export async function copyWorktreeIncludeFiles(
   args: CopyWorktreeIncludeFilesArgs,
 ): Promise<CopyWorktreeIncludeFilesResult> {
   const contents = await readIncludeFile(args.sourcePath);
+
   if (contents === null || !hasPattern(contents)) {
     return EMPTY_RESULT;
   }
 
   const relativePaths = await listMatchingFiles(args.sourcePath, args.signal);
+
   if (relativePaths.length === 0) {
     return { ran: true, copied: [], skipped: [] };
   }
 
   let targetRealPath: string;
+
   try {
     targetRealPath = await fs.realpath(args.targetPath);
   } catch (error) {
@@ -123,26 +131,33 @@ export async function copyWorktreeIncludeFiles(
 
   const copied: string[] = [];
   const skipped: string[] = [];
+
   for (const relativePath of relativePaths) {
     throwIfProvisionAborted(args.signal);
     const sourceFile = path.join(args.sourcePath, relativePath);
     const targetFile = path.join(targetRealPath, relativePath);
+
     try {
       const stats = await fs.lstat(sourceFile);
+
       if (stats.isSymbolicLink()) {
         skipped.push(`${relativePath}: symlink`);
         continue;
       }
+
       if (await pathPresent(targetFile)) {
         skipped.push(`${relativePath}: already exists in the worktree`);
         continue;
       }
+
       await fs.mkdir(path.dirname(targetFile), { recursive: true });
       const parentRealPath = await fs.realpath(path.dirname(targetFile));
+
       if (!isInside(targetRealPath, parentRealPath)) {
         skipped.push(`${relativePath}: destination escapes the worktree`);
         continue;
       }
+
       await fs.copyFile(sourceFile, targetFile, fsConstants.COPYFILE_EXCL);
       copied.push(relativePath);
     } catch (error) {

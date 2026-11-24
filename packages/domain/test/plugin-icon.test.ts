@@ -39,12 +39,12 @@ describe("namespaced glyphs", () => {
   });
 });
 
-describe("bb.branding.icon grammar", () => {
+describe("omnyo.branding.icon grammar", () => {
   function manifest(icon: string) {
     return pluginPackageJsonSchema.safeParse({
-      name: "bb-plugin-icons",
+      name: "omnyo-plugin-icons",
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Icons",
         description: "Declares icons.",
         branding: { icon, experimental_icons: { logo: "./icons/logo.svg" } },
@@ -61,19 +61,23 @@ describe("bb.branding.icon grammar", () => {
   it("refuses the namespaced declared-icon form, naming the value", () => {
     const parsed = manifest("icons/logo");
     expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues[0]?.path).toEqual(["bb", "branding", "icon"]);
+    expect(parsed.error?.issues[0]?.path).toEqual([
+      "omnyo",
+      "branding",
+      "icon",
+    ]);
     expect(parsed.error?.issues[0]?.message).toMatch(
       /^"icons\/logo" is a namespaced glyph/u,
     );
   });
 });
 
-describe("bb.branding.experimental_icons grammar", () => {
+describe("omnyo.branding.experimental_icons grammar", () => {
   function manifest(icons: unknown) {
     return pluginPackageJsonSchema.safeParse({
-      name: "bb-plugin-icons",
+      name: "omnyo-plugin-icons",
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Icons",
         description: "Declares icons.",
         branding: { icon: "Zap", experimental_icons: icons },
@@ -87,6 +91,7 @@ describe("bb.branding.experimental_icons grammar", () => {
       receipt: "./icons/receipt.svg",
       "mood-2": "./icons/MOOD.SVG",
     });
+
     expect(parsed.success).toBe(true);
   });
 
@@ -94,7 +99,7 @@ describe("bb.branding.experimental_icons grammar", () => {
     const badName = manifest({ Receipt: "./icons/receipt.svg" });
     expect(badName.success).toBe(false);
     expect(badName.error?.issues[0]?.path).toEqual([
-      "bb",
+      "omnyo",
       "branding",
       "experimental_icons",
       "Receipt",
@@ -103,6 +108,7 @@ describe("bb.branding.experimental_icons grammar", () => {
     const longName = manifest({
       ["r".repeat(PLUGIN_ICON_NAME_MAX_LENGTH + 1)]: "./icons/receipt.svg",
     });
+
     expect(longName.success).toBe(false);
 
     const png = manifest({ receipt: "./icons/receipt.png" });
@@ -120,6 +126,7 @@ describe("bb.branding.experimental_icons grammar", () => {
         ]),
       ),
     );
+
     expect(tooMany.success).toBe(false);
     expect(tooMany.error?.issues[0]?.message).toMatch(/at most/u);
   });

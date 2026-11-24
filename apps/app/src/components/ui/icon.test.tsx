@@ -7,21 +7,26 @@ import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const require = createRequire(import.meta.url);
-const sharedUiIconDir = dirname(require.resolve("@bb/shared-ui/icon"));
 
-type IconModule = typeof import("@bb/shared-ui/icon");
-type IconRegistryModule = typeof import("@bb/shared-ui/icon-registry");
-type IconExtendedModule = typeof import("@bb/shared-ui/icon-extended");
+const sharedUiIconDir = dirname(require.resolve("@omnyo/shared-ui/icon"));
+
+type IconModule = typeof import("@omnyo/shared-ui/icon");
+
+type IconRegistryModule = typeof import("@omnyo/shared-ui/icon-registry");
+
+type IconExtendedModule = typeof import("@omnyo/shared-ui/icon-extended");
 
 async function freshIconModules(): Promise<{
   icon: IconModule;
   registry: IconRegistryModule;
 }> {
   vi.resetModules();
+
   const [icon, registry] = await Promise.all([
-    import("@bb/shared-ui/icon"),
-    import("@bb/shared-ui/icon-registry"),
+    import("@omnyo/shared-ui/icon"),
+    import("@omnyo/shared-ui/icon-registry"),
   ]);
+
   return { icon, registry };
 }
 
@@ -73,15 +78,18 @@ describe("Icon core/extended split", () => {
 
   it("keeps ICON_NAMES equal to the disjoint union of the core and extended maps", async () => {
     const { icon, registry } = await freshIconModules();
+
     const extended: IconExtendedModule =
-      await import("@bb/shared-ui/icon-extended");
+      await import("@omnyo/shared-ui/icon-extended");
 
     const extendedKeys = Object.keys(extended.EXTENDED_ICON_MAP).sort();
     expect(extendedKeys).toEqual([...registry.EXTENDED_ICON_NAMES].sort());
     expect(new Set(icon.ICON_NAMES).size).toBe(icon.ICON_NAMES.length);
+
     for (const name of registry.EXTENDED_ICON_NAMES) {
       expect(icon.ICON_NAMES).toContain(name);
     }
+
     for (const name of registry.EXTENDED_ICON_NAMES) {
       expect(extended.EXTENDED_ICON_MAP[name].length).toBeGreaterThan(0);
     }
@@ -89,6 +97,7 @@ describe("Icon core/extended split", () => {
 
   it("keeps the extended artwork off the static import graph of the boot modules", () => {
     const iconSource = readFileSync(join(sharedUiIconDir, "icon.tsx"), "utf8");
+
     const registrySource = readFileSync(
       join(sharedUiIconDir, "icon-registry.ts"),
       "utf8",

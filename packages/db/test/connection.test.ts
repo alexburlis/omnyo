@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import {
   createConnection,
+  PrimaryWriteBusyError,
+  runImmediateTransactionWithBusyWait,
   SQLITE_BUSY_TIMEOUT_MS,
   SQLITE_CACHE_SIZE_KIB,
   SQLITE_MMAP_SIZE_BYTES,
@@ -35,21 +37,26 @@ class CapturingSlowQueryLogger implements SlowDbQueryLogger {
 function getOnlyInfoLog(logger: CapturingSlowQueryLogger): LoggedInfo {
   expect(logger.infoLogs).toHaveLength(1);
   const infoLog = logger.infoLogs[0];
+
   if (!infoLog) {
     throw new Error("Expected slow query info log");
   }
+
   return infoLog;
 }
 
 describe("createConnection", () => {
   it("distinguishes time waiting inside SQLite from CPU work", () => {
     const logger = new CapturingSlowQueryLogger();
+
     const db = createConnection(":memory:", {
       slowQueryLogger: logger,
       slowQueryThresholdMs: 0,
       slowQueryDiagnosticsEnabled: () => true,
     });
+
     migrate(db);
+
     try {
       const signal = new Int32Array(new SharedArrayBuffer(4));
       let insideBefore = resourceUsage();
@@ -59,6 +66,7 @@ describe("createConnection", () => {
         const pages = Buffer.alloc(32 * 1024 * 1024, 1);
         Atomics.wait(signal, 0, 0, 100);
         insideAfter = resourceUsage();
+
         return 6 + pages[0]!;
       });
       logger.clear();
@@ -73,7 +81,9 @@ describe("createConnection", () => {
       expect(fields.durationMs - fields.cpuDurationMs).toBeGreaterThan(50);
       const diagnostics = fields.diagnostics;
       expect(diagnostics).toBeDefined();
+
       if (!diagnostics) throw new Error("Expected diagnostic attribution");
+
       for (const key of [
         "minorPageFault",
         "majorPageFault",
@@ -89,6 +99,7 @@ describe("createConnection", () => {
           outsideAfter[key] - outsideBefore[key],
         );
       }
+
       expect(diagnostics.wal).toEqual({ sizeBytes: null });
     } finally {
       db.$client.close();
@@ -96,22 +107,26 @@ describe("createConnection", () => {
   });
 
   it("samples WAL size with the live diagnostic gate on already-prepared statements", () => {
-    const directory = mkdtempSync(join(tmpdir(), "bb-db-attribution-"));
-    const databasePath = join(directory, "bb.db");
+    const directory = mkdtempSync(join(tmpdir(), "omnyo-db-attribution-"));
+    const databasePath = join(directory, "app.db");
     const logger = new CapturingSlowQueryLogger();
     let diagnosticsEnabled = false;
+
     const db = createConnection(databasePath, {
       slowQueryLogger: logger,
       slowQueryThresholdMs: 0,
       slowQueryDiagnosticsEnabled: () => diagnosticsEnabled,
     });
+
     try {
       migrate(db);
       db.$client.exec("CREATE TABLE diagnostic_values (value INTEGER)");
       db.$client.exec("INSERT INTO diagnostic_values VALUES (0)");
+
       const update = db.$client.prepare(
         "UPDATE diagnostic_values SET value = value + 1",
       );
+
       logger.clear();
       update.run();
       expect(getOnlyInfoLog(logger).fields).not.toHaveProperty("diagnostics");
@@ -144,14 +159,74 @@ describe("createConnection", () => {
     }
   });
 
+  it("names the work that issued a slow statement", () => {
+    const logger = new CapturingSlowQueryLogger();
+    let work: string | null = "sweep:retention > plugin:storage delete";
+
+    const db = createConnection(":memory:", {
+      slowQueryLogger: logger,
+      slowQueryThresholdMs: 0,
+      slowQueryWork: () => work,
+    });
+
+    migrate(db);
+
+    try {
+      const statement = db.$client.prepare("SELECT 1");
+      logger.clear();
+      statement.get();
+      expect(getOnlyInfoLog(logger).fields.work).toBe(
+        "sweep:retention > plugin:storage delete",
+      );
+      logger.clear();
+      work = null;
+      statement.get();
+      expect(getOnlyInfoLog(logger).fields).not.toHaveProperty("work");
+    } finally {
+      db.$client.close();
+    }
+  });
+
+  it("marks work that ran inside an open transaction as nested", () => {
+    const logger = new CapturingSlowQueryLogger();
+
+    const db = createConnection(":memory:", {
+      slowQueryLogger: logger,
+      slowQueryThresholdMs: 0,
+    });
+
+    try {
+      db.transaction(() => {
+        db.$client.prepare("SELECT 1").get();
+        db.transaction(() => undefined);
+      });
+
+      expect(
+        logger.infoLogs.map((log) => ({
+          nested: log.fields.nested ?? false,
+          operation: log.fields.operation,
+        })),
+      ).toEqual([
+        { nested: true, operation: "get" },
+        { nested: true, operation: "transaction" },
+        { nested: false, operation: "transaction" },
+      ]);
+    } finally {
+      db.$client.close();
+    }
+  });
+
   it("applies live thresholds to statements prepared before the setting changed", () => {
     const logger = new CapturingSlowQueryLogger();
     let thresholdMs = Infinity;
+
     const db = createConnection(":memory:", {
       slowQueryLogger: logger,
       slowQueryThresholdMs: () => thresholdMs,
     });
+
     migrate(db);
+
     try {
       const statement = db.$client.prepare("SELECT 1");
       statement.get();
@@ -172,11 +247,14 @@ describe("createConnection", () => {
     "times complete %s transactions and exec while preserving rollback and receivers",
     (mode) => {
       const logger = new CapturingSlowQueryLogger();
+
       const db = createConnection(":memory:", {
         slowQueryLogger: logger,
         slowQueryThresholdMs: 0,
       });
+
       migrate(db);
+
       try {
         db.$client.exec("CREATE TABLE diagnostic_values (value TEXT)");
         logger.clear();
@@ -189,12 +267,14 @@ describe("createConnection", () => {
           operation: "exec",
           sql: "INSERT INTO diagnostic_values VALUES ('?')",
         });
+
         const nested = db.$client.transaction(() => {
           db.$client.exec(
             "INSERT INTO diagnostic_values VALUES ('rolled-back')",
           );
           throw new Error("rollback nested transaction");
         });
+
         const transaction = db.$client.transaction(function (
           this: { prefix: string },
           value: string,
@@ -203,15 +283,19 @@ describe("createConnection", () => {
             .prepare("INSERT INTO diagnostic_values VALUES (?)")
             .run(value);
           expect(() => nested()).toThrow("rollback nested transaction");
+
           return this.prefix + value;
         });
+
         logger.clear();
         expect(transaction[mode].call({ prefix: "result:" }, "committed")).toBe(
           "result:committed",
         );
+
         const transactions = logger.infoLogs.filter(
           (log) => log.fields.operation === "transaction",
         );
+
         expect(transactions.map((log) => log.fields.sql)).toEqual([
           "TRANSACTION DEFAULT",
           `TRANSACTION ${mode.toUpperCase()}`,
@@ -236,6 +320,7 @@ describe("createConnection", () => {
 
   it("logs slow prepared statement executions without parameter values", () => {
     const logger = new CapturingSlowQueryLogger();
+
     const db = createConnection(":memory:", {
       slowQueryLogger: logger,
       slowQueryThresholdMs: 0,
@@ -256,6 +341,7 @@ describe("createConnection", () => {
 
   it("redacts SQL string literals in slow query logs", () => {
     const logger = new CapturingSlowQueryLogger();
+
     const db = createConnection(":memory:", {
       slowQueryLogger: logger,
       slowQueryThresholdMs: 0,
@@ -272,10 +358,12 @@ describe("createConnection", () => {
 
   it("logs slow drizzle ORM statement executions", () => {
     const logger = new CapturingSlowQueryLogger();
+
     const db = createConnection(":memory:", {
       slowQueryLogger: logger,
       slowQueryThresholdMs: 0,
     });
+
     migrate(db);
     db.insert(hosts)
       .values({
@@ -308,10 +396,12 @@ describe("createConnection", () => {
 
   it("keeps truncated slow query SQL within the logged length limit", () => {
     const logger = new CapturingSlowQueryLogger();
+
     const db = createConnection(":memory:", {
       slowQueryLogger: logger,
       slowQueryThresholdMs: 0,
     });
+
     const longSql = `SELECT '${"x".repeat(1_200)}' AS value, ${"1 OR ".repeat(
       300,
     )} 1`;
@@ -326,8 +416,8 @@ describe("createConnection", () => {
   });
 
   it("applies the hot-path sqlite pragmas on a file database", () => {
-    const directory = mkdtempSync(join(tmpdir(), "bb-db-pragmas-"));
-    const db = createConnection(join(directory, "bb.db"));
+    const directory = mkdtempSync(join(tmpdir(), "omnyo-db-pragmas-"));
+    const db = createConnection(join(directory, "app.db"));
 
     try {
       expect(
@@ -355,5 +445,116 @@ describe("createConnection", () => {
       db.$client.close();
       rmSync(directory, { force: true, recursive: true });
     }
+  });
+});
+
+function withWriterPair(
+  run: (
+    primary: ReturnType<typeof createConnection>,
+    peer: ReturnType<typeof createConnection>,
+  ) => void,
+): void {
+  const directory = mkdtempSync(join(tmpdir(), "omnyo-db-bounded-write-"));
+  const file = join(directory, "omnyo.db");
+  const primary = createConnection(file);
+  const peer = createConnection(file);
+
+  try {
+    primary.$client.exec("CREATE TABLE bounded_write (value INTEGER)");
+    run(primary, peer);
+  } finally {
+    peer.$client.close();
+    primary.$client.close();
+    rmSync(directory, { force: true, recursive: true });
+  }
+}
+
+function countBoundedWrites(db: ReturnType<typeof createConnection>): number {
+  return Number(
+    db.$client.prepare("SELECT count(*) FROM bounded_write").pluck().get(),
+  );
+}
+
+describe("runImmediateTransactionWithBusyWait", () => {
+  it("refuses within the wait while another connection holds the write lock and restores the previous busy timeout", () => {
+    withWriterPair((primary, peer) => {
+      primary.$client.pragma("busy_timeout = 1234");
+      peer.$client.exec("BEGIN IMMEDIATE");
+      let workStarted = false;
+      const startedAt = performance.now();
+
+      expect(() =>
+        runImmediateTransactionWithBusyWait(primary, 50, () => {
+          workStarted = true;
+        }),
+      ).toThrow(PrimaryWriteBusyError);
+
+      const refusedAfterMs = performance.now() - startedAt;
+      peer.$client.exec("ROLLBACK");
+
+      const timeoutInsideWork = runImmediateTransactionWithBusyWait(
+        primary,
+        50,
+        () => {
+          primary.$client.prepare("INSERT INTO bounded_write VALUES (1)").run();
+
+          return primary.$client.pragma("busy_timeout", { simple: true });
+        },
+      );
+
+      expect({
+        refusedWithinOneSecond: refusedAfterMs < 1_000,
+        rows: countBoundedWrites(primary),
+        timeoutAfter: primary.$client.pragma("busy_timeout", { simple: true }),
+        timeoutInsideWork,
+        workStarted,
+      }).toEqual({
+        refusedWithinOneSecond: true,
+        rows: 1,
+        timeoutAfter: 1234,
+        timeoutInsideWork: 1234,
+        workStarted: false,
+      });
+    });
+  });
+
+  it("throws when called inside an open transaction", () => {
+    withWriterPair((primary) => {
+      primary.transaction(() => {
+        expect(() =>
+          runImmediateTransactionWithBusyWait(primary, 50, () => undefined),
+        ).toThrow("cannot start inside an open transaction");
+      });
+
+      expect(primary.$client.pragma("busy_timeout", { simple: true })).toBe(
+        SQLITE_BUSY_TIMEOUT_MS,
+      );
+    });
+  });
+
+  it("rolls back nested effect transactions with the outer transaction", () => {
+    withWriterPair((primary) => {
+      expect(() =>
+        runImmediateTransactionWithBusyWait(primary, 50, () => {
+          primary.$client.prepare("INSERT INTO bounded_write VALUES (1)").run();
+          primary.transaction(
+            () => {
+              primary.$client
+                .prepare("INSERT INTO bounded_write VALUES (2)")
+                .run();
+            },
+            { behavior: "immediate" },
+          );
+
+          if (countBoundedWrites(primary) !== 2) {
+            throw new Error("nested effect write was not visible");
+          }
+
+          throw new Error("effect failed");
+        }),
+      ).toThrow("effect failed");
+
+      expect(countBoundedWrites(primary)).toBe(0);
+    });
   });
 });

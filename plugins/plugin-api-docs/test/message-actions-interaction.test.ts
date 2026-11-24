@@ -63,9 +63,11 @@ describe("message action guide interaction", () => {
     const message = container.querySelector<HTMLElement>(
       '[data-guide-fixture="assistant-message"]',
     );
+
     const actionRegion = container.querySelector<HTMLElement>(
       '[data-guide-region="message-actions"]',
     );
+
     const actionRow = container.querySelector<HTMLElement>(
       '[data-guide-fixture="message-action-hover-row"]',
     );

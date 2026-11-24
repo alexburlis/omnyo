@@ -7,11 +7,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CLAUDE_SKILL_PLUGIN_NAME,
   createClaudeSkillPluginsRoot,
+  directoryLinkType,
   ensureClaudeSkillPlugin,
 } from "../skill-plugins.js";
 
@@ -19,7 +20,7 @@ describe("claude skill plugins", () => {
   let baseDir: string;
 
   beforeEach(() => {
-    baseDir = mkdtempSync(join(tmpdir(), "bb-claude-skill-plugins-test-"));
+    baseDir = mkdtempSync(join(tmpdir(), "omnyo-claude-skill-plugins-test-"));
   });
 
   afterEach(() => {
@@ -33,6 +34,7 @@ describe("claude skill plugins", () => {
       join(root, "demo", "SKILL.md"),
       "---\nname: demo\ndescription: demo\n---\n",
     );
+
     return root;
   }
 
@@ -40,28 +42,56 @@ describe("claude skill plugins", () => {
     const pluginsRoot = createClaudeSkillPluginsRoot(baseDir);
     const first = stageSkills("a");
     const second = stageSkills("b");
+
     const pluginPath = ensureClaudeSkillPlugin({
       pluginsRoot,
       root: { id: "r", path: first },
     });
+
     expect(pluginPath.startsWith(pluginsRoot)).toBe(true);
     expect(
       ensureClaudeSkillPlugin({ pluginsRoot, root: { id: "r", path: first } }),
     ).toBe(pluginPath);
-    expect(readlinkSync(join(pluginPath, "skills"))).toBe(first);
+    expect(resolve(readlinkSync(join(pluginPath, "skills")))).toBe(
+      resolve(first),
+    );
 
     const movedPluginPath = ensureClaudeSkillPlugin({
       pluginsRoot,
       root: { id: "r", path: second },
     });
+
     expect(movedPluginPath).not.toBe(pluginPath);
-    expect(readlinkSync(join(movedPluginPath, "skills"))).toBe(second);
+    expect(resolve(readlinkSync(join(movedPluginPath, "skills")))).toBe(
+      resolve(second),
+    );
+  });
+
+  it("uses a Windows junction and a directory symlink on POSIX", () => {
+    expect(directoryLinkType("win32")).toBe("junction");
+    expect(directoryLinkType("darwin")).toBe("dir");
+    expect(directoryLinkType("linux")).toBe("dir");
+  });
+
+  it("keeps a normalized link to a root with a trailing path separator", () => {
+    const pluginsRoot = createClaudeSkillPluginsRoot(baseDir);
+    const root = stageSkills("normalized");
+    const args = { pluginsRoot, root: { id: "r", path: root + sep } };
+    const pluginPath = ensureClaudeSkillPlugin(args);
+    const link = join(pluginPath, "skills");
+
+    expect(ensureClaudeSkillPlugin(args)).toBe(pluginPath);
+    expect(resolve(readlinkSync(link))).toBe(resolve(root));
+    expect(readFileSync(join(link, "demo", "SKILL.md"), "utf8")).toContain(
+      "name: demo",
+    );
   });
 
   it("keeps the stable name across catalog changes and suffixes only a colliding second root", () => {
     const pluginsRoot = createClaudeSkillPluginsRoot(baseDir);
     const first = stageSkills("a");
     const second = stageSkills("b");
+
     const nameOf = (pluginPath: string): string =>
       (
         JSON.parse(
@@ -90,17 +120,20 @@ describe("claude skill plugins", () => {
     ).toBe(CLAUDE_SKILL_PLUGIN_NAME);
 
     const takenNames = new Map<string, string>();
+
     const a = ensureClaudeSkillPlugin({
       pluginsRoot,
       root: { id: "global-skills:aaaa", path: first },
       takenNames,
     });
+
     const b = ensureClaudeSkillPlugin({
       pluginsRoot,
       root: { id: "global-skills:bbbb", path: second },
       takenNames,
     });
+
     expect(nameOf(a)).toBe(CLAUDE_SKILL_PLUGIN_NAME);
-    expect(nameOf(b)).toMatch(/^bb-global-skills-[0-9a-f]{8}$/u);
+    expect(nameOf(b)).toMatch(/^omnyo-global-skills-[0-9a-f]{8}$/u);
   });
 });

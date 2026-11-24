@@ -27,7 +27,9 @@ export function bindRealtimeToAppState(
     if (state === "active") realtime.resume();
     else if (state === "background") realtime.suspend();
   };
+
   apply(appState.currentState);
   const subscription = appState.addEventListener("change", apply);
+
   return () => subscription.remove();
 }

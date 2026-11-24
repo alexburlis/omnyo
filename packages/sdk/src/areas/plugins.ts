@@ -2,9 +2,12 @@ import {
   pluginUpdateJobResponseSchema,
   pluginUpdateJobListResponseSchema,
   type PluginUpdateJob,
-} from "@bb/server-contract";
-export type { PluginUpdateJob } from "@bb/server-contract";
-import { jsonValueSchema, type JsonValue } from "@bb/domain";
+  type PluginApplyUpdateRequest,
+} from "@omnyo/server-contract";
+
+export type { PluginUpdateJob } from "@omnyo/server-contract";
+
+import { jsonValueSchema, type JsonValue } from "@omnyo/domain";
 import {
   installedPluginSchema,
   pluginRpcDiscoveryQuerySchema,
@@ -29,6 +32,8 @@ import {
   pluginInstallJobStartResponseSchema,
   pluginCachePruneRequestSchema,
   pluginCachePruneResponseSchema,
+  pluginPathRelocationRequestSchema,
+  pluginPathRelocationResponseSchema,
   pluginInstallRequestSchema,
   pluginRemoveResponseSchema,
   pluginSafeModeRequestSchema,
@@ -52,6 +57,8 @@ import {
   type PluginInstallJob as PluginInstallJobContract,
   type PluginApplyUpdateResult as PluginApplyUpdateContract,
   type PluginCachePruneResponse,
+  type PluginCachePruneRequest,
+  type PluginPathRelocationResponse,
   type PluginListResponse,
   type PluginReloadResponse,
   type PluginRemoveResponse,
@@ -62,39 +69,38 @@ import {
   type PluginSourceSelection,
   type PluginTokenResponse,
   type PluginUpdateCheckEntry,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { z } from "zod";
 import type { CreateSdkAreaArgs } from "./common.js";
 
-/**
- * A server older than `providerIds` (bb-app < 0.39) or `icons` answers with
- * the installed-plugin shape minus those fields. The contract keeps them
- * required — the server fills them once at its boundary — so the tolerance
- * lives here, on the response side only: the SDK never sends this shape, and a
- * default on the contract would leak into request bodies.
- */
 const installedPluginResponseSchema = installedPluginSchema.extend({
   screenshots: installedPluginSchema.shape.screenshots.default([]),
   collections: installedPluginSchema.shape.collections.default([]),
   providerIds: z.array(z.string()).default([]),
   icons: z.record(z.string(), z.string()).default({}),
 });
+
 const pluginListResponseSchema = z.object({
   plugins: z.array(installedPluginResponseSchema),
 });
+
 const pluginInstallResponseSchema = z.object({
   ok: z.literal(true),
   plugin: installedPluginResponseSchema,
 });
+
 const pluginInstallStartResponseSchema = z.union([
   pluginInstallJobStartResponseSchema,
   pluginInstallResponseSchema,
 ]);
+
 const INSTALL_JOB_POLL_INTERVAL_MS = 500;
+
 const pluginReloadResponseSchema = z.object({
   ok: z.literal(true),
   plugins: z.array(installedPluginResponseSchema),
 });
+
 const pluginCatalogSearchResponseCompatibilitySchema =
   pluginCatalogSearchResponseSchema.extend({
     collections: pluginCatalogSearchResponseSchema.shape.collections.default(
@@ -108,9 +114,12 @@ export const pluginMutationResponseSchema = z.object({
   plugin: installedPluginResponseSchema.optional(),
   plugins: z.array(installedPluginResponseSchema).optional(),
 });
+
 export type PluginMutationResponse = z.infer<
   typeof pluginMutationResponseSchema
 >;
+
+export type PluginApplyUpdateArgs = PluginIdArgs & PluginApplyUpdateRequest;
 
 export interface PluginIdArgs {
   pluginId: string;
@@ -221,34 +230,63 @@ export interface PluginSetSafeModeArgs {
   enabled: boolean;
 }
 
-export interface PluginPruneCacheArgs {
+export interface PluginPruneCacheArgs extends Partial<PluginCachePruneRequest> {
+  signal?: AbortSignal;
+}
+
+export interface PluginRelocatePathSourcesArgs {
+  from: string;
+  to: string;
   dryRun?: boolean;
   signal?: AbortSignal;
 }
 
 export type PluginDisableResult = InstalledPlugin;
+
 export type PluginEnableResult = InstalledPlugin;
+
 export type PluginGetSettingsResult = PluginSettingsResponse;
+
 export type PluginInstallResult = InstalledPlugin;
+
 export type PluginInstallJob = PluginInstallJobContract;
+
 export type PluginListResult = PluginListResponse;
+
 export type PluginReloadResult = PluginReloadResponse;
+
 export type PluginRemoveResult = PluginRemoveResponse;
+
 export type PluginSafeModeResult = PluginSafeModeResponse;
+
 export type PluginSetSafeModeResult = PluginSafeModeUpdateResponse;
+
 export type PluginPruneCacheResult = PluginCachePruneResponse;
+
+export type PluginRelocatePathSourcesResult = PluginPathRelocationResponse;
+
 export type PluginTokenResult = PluginTokenResponse;
+
 export type PluginUpdateSettingsResult = PluginSettingsResponse;
+
 export type PluginGetSourceResult = PluginSourceDetail;
+
 export type PluginCheckUpdatesResult = PluginUpdateCheckEntry[];
+
 export type PluginApplyUpdateResult = PluginApplyUpdateContract;
 
 export type PluginCatalogStatusResult = PluginCatalogStatusContract;
+
 export type PluginCatalogSearchEntry = PluginCatalogSearchContract;
+
 export type PluginCatalogSearchResult = PluginCatalogSearchResponseContract;
+
 export type PluginCatalogInstallPlanResult = PluginCatalogInstallPlanContract;
+
 export type PluginMarketplaceListResult = PluginMarketplaceContract[];
+
 export type PluginMarketplaceAddResult = PluginMarketplaceContract;
+
 export type PluginMarketplaceRefreshResult = PluginMarketplaceRefreshContract[];
 
 export interface PluginMarketplaceRemoveResult {
@@ -300,8 +338,13 @@ export interface PluginsArea {
   experimental_pruneCache(
     args?: PluginPruneCacheArgs,
   ): Promise<PluginPruneCacheResult>;
-  applyUpdate(args: PluginIdArgs): Promise<PluginApplyUpdateResult>;
-  experimental_startUpdate(args: PluginIdArgs): Promise<PluginUpdateJob>;
+  experimental_relocatePathSources(
+    args: PluginRelocatePathSourcesArgs,
+  ): Promise<PluginRelocatePathSourcesResult>;
+  applyUpdate(args: PluginApplyUpdateArgs): Promise<PluginApplyUpdateResult>;
+  experimental_startUpdate(
+    args: PluginApplyUpdateArgs,
+  ): Promise<PluginUpdateJob>;
   experimental_updateJobs: PluginUpdateJobsArea;
   callRpc<TOutput>(args: PluginRpcArgs<TOutput>): Promise<TOutput>;
   checkUpdates(
@@ -334,12 +377,15 @@ function pluginSourceSelection(
   if (args.subdirectory !== undefined) {
     return { kind: "subdirectory", path: args.subdirectory };
   }
+
   if (args.plugin !== undefined) return { kind: "entry", name: args.plugin };
+
   return undefined;
 }
 
 function pluginPath(pluginId: string, suffix = ""): string {
   const id = z.string().min(1).parse(pluginId);
+
   return `/api/v1/plugins/${encodeURIComponent(id)}${suffix}`;
 }
 
@@ -354,8 +400,10 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
     const url = transport.baseUrl
       ? `${transport.baseUrl.replace(/\/$/u, "")}${path}`
       : path;
+
     const response = await transport.resolve(transport.fetch(url, init));
     const json: unknown = await response.json();
+
     return schema.parse(json);
   }
 
@@ -369,16 +417,19 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
 
   function installJobPath(jobId: string, suffix = ""): string {
     const id = z.string().min(1).parse(jobId);
+
     return `/api/v1/plugins/install-jobs/${encodeURIComponent(id)}${suffix}`;
   }
 
   const updateJobs: PluginUpdateJobsArea = {
     async get(input) {
       const jobId = z.string().min(1).parse(input.jobId);
+
       const response = await requestParsed(
         `/api/v1/plugins/update-jobs/${encodeURIComponent(jobId)}`,
         pluginUpdateJobResponseSchema,
       );
+
       return response.job;
     },
     async list(input = {}) {
@@ -387,11 +438,12 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         pluginUpdateJobListResponseSchema,
         { signal: input.signal },
       );
+
       return response.jobs;
     },
   };
 
-  function requestUpdate(input: PluginIdArgs) {
+  function requestUpdate(input: PluginApplyUpdateArgs) {
     return requestParsed(
       pluginPath(input.pluginId, "/update"),
       z.union([pluginUpdateJobResponseSchema, pluginApplyUpdateResultSchema]),
@@ -401,7 +453,13 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
           "content-type": "application/json",
           prefer: "respond-async",
         },
-        body: JSON.stringify(pluginApplyUpdateRequestSchema.parse({})),
+        body: JSON.stringify(
+          pluginApplyUpdateRequestSchema.parse({
+            ...(input.bundledCandidate === undefined
+              ? {}
+              : { bundledCandidate: input.bundledCandidate }),
+          }),
+        ),
       },
     );
   }
@@ -413,6 +471,7 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         pluginInstallJobResponseSchema,
         jsonInit("POST", {}),
       );
+
       return response.job;
     },
     async get(input) {
@@ -420,6 +479,7 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         installJobPath(input.jobId),
         pluginInstallJobResponseSchema,
       );
+
       return response.job;
     },
     async list(input = {}) {
@@ -428,6 +488,7 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         pluginInstallJobListResponseSchema,
         { signal: input.signal },
       );
+
       return response.jobs;
     },
   };
@@ -448,9 +509,10 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
     body: unknown,
   ): Promise<PluginInstallJob> {
     const response = await requestInstall(path, body);
+
     if ("job" in response) return response.job;
     throw new Error(
-      `installed "${response.plugin.id}" without an install job; this BB server predates background installs`,
+      `installed "${response.plugin.id}" without an install job; this Omnyo server predates background installs`,
     );
   }
 
@@ -459,8 +521,10 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
     body: unknown,
   ): Promise<InstalledPlugin> {
     const response = await requestInstall(path, body);
+
     if ("plugin" in response) return response.plugin;
     let job = response.job;
+
     while (
       job.state === "queued" ||
       job.state === "running" ||
@@ -471,6 +535,7 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
       );
       job = await installJobs.get({ jobId: job.id });
     }
+
     if (job.state === "succeeded") return job.plugin;
     throw new Error(job.state === "failed" ? job.error : "install cancelled");
   }
@@ -481,12 +546,16 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         "plugin install accepts subdirectory or plugin, not both",
       );
     }
+
     const selection = pluginSourceSelection(input);
+
     const body =
       selection === undefined
         ? { source: input.source }
         : { source: input.source, selection };
+
     pluginInstallRequestSchema.parse(body);
+
     return body;
   }
 
@@ -509,24 +578,30 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
           ? { entryId: input.entryId }
           : { entryId: input.entryId, marketplace: input.marketplace },
       );
+
       const query = new URLSearchParams({ entryId: body.entryId });
+
       if (body.marketplace !== undefined) {
         query.set("marketplace", body.marketplace);
       }
+
       const response = await requestParsed(
         `/api/v1/plugin-catalog/install-plan?${query.toString()}`,
         pluginCatalogInstallPlanResponseSchema,
         { signal: input.signal },
       );
+
       return response.plan;
     },
     async search(input) {
       const query = z.string().parse(input.query);
+
       const response = await requestParsed(
         `/api/v1/plugin-catalog/search?q=${encodeURIComponent(query)}`,
         pluginCatalogSearchResponseCompatibilitySchema,
         { signal: input.signal },
       );
+
       return response;
     },
     async status(input = {}) {
@@ -535,6 +610,7 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         pluginCatalogStatusResponseSchema,
         { signal: input.signal },
       );
+
       return response.catalog;
     },
   };
@@ -542,11 +618,13 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
   const marketplaces: PluginMarketplacesArea = {
     async add(input) {
       const body = pluginMarketplaceAddRequestSchema.parse(input);
+
       const response = await requestParsed(
         "/api/v1/marketplaces",
         pluginMarketplaceMutationResponseSchema,
         jsonInit("POST", body),
       );
+
       return response.marketplace;
     },
     async list(input = {}) {
@@ -555,26 +633,31 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         pluginMarketplaceListResponseSchema,
         { signal: input.signal },
       );
+
       return response.marketplaces;
     },
     async refresh(input = {}) {
       const body = pluginMarketplaceRefreshRequestSchema.parse(
         input.name === undefined ? {} : { name: input.name },
       );
+
       const response = await requestParsed(
         "/api/v1/marketplaces/refresh",
         pluginMarketplaceRefreshResponseSchema,
         { ...jsonInit("POST", body), signal: input.signal },
       );
+
       return response.results;
     },
     async remove(input) {
       const name = pluginMarketplaceNameSchema.parse(input.name);
+
       const response = await requestParsed(
         `/api/v1/marketplaces/${encodeURIComponent(name)}`,
         pluginMarketplaceRemoveResponseSchema,
         { method: "DELETE" },
       );
+
       return { convertedPluginIds: response.convertedPluginIds };
     },
   };
@@ -582,30 +665,37 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
   return {
     async applyUpdate(input) {
       const response = await requestUpdate(input);
+
       if (!("job" in response)) return response;
       let job = response.job;
+
       while (job.state === "queued" || job.state === "running") {
         await new Promise((resolve) =>
           setTimeout(resolve, INSTALL_JOB_POLL_INTERVAL_MS),
         );
         job = await updateJobs.get({ jobId: job.id });
       }
+
       if (job.state === "completed") return job.result;
       throw new Error(job.error);
     },
     async experimental_startUpdate(input) {
       const response = await requestUpdate(input);
+
       if ("job" in response) return response.job;
       throw new Error(
-        "Update completed without a job; this BB server predates background updates",
+        "Update completed without a job; this Omnyo server predates background updates",
       );
     },
     experimental_updateJobs: updateJobs,
     async experimental_discoverRpc(input = {}) {
       const query = pluginRpcDiscoveryQuerySchema.parse(input);
       const params = new URLSearchParams();
+
       if (query.pluginId !== undefined) params.set("pluginId", query.pluginId);
+
       if (query.method !== undefined) params.set("method", query.method);
+
       return requestParsed(
         `/api/v1/plugins/rpc?${params}`,
         pluginRpcDiscoveryResponseSchema,
@@ -618,17 +708,20 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         z.object({ ok: z.literal(true), result: jsonValueSchema }),
         { ...jsonInit("POST", input.input ?? null), signal: input.signal },
       );
+
       return input.outputSchema.parse(envelope.result);
     },
     async checkUpdates(input = {}) {
       const body = pluginUpdateCheckRequestSchema.parse(
         input.pluginId === undefined ? {} : { id: input.pluginId },
       );
+
       const response = await requestParsed(
         "/api/v1/plugins/updates/check",
         pluginUpdateCheckResponseSchema,
         { ...jsonInit("POST", body), signal: input.signal },
       );
+
       return response.results;
     },
     async experimental_getSafeMode(input = {}) {
@@ -642,6 +735,7 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
       const body = pluginSafeModeRequestSchema.parse({
         enabled: input.enabled,
       });
+
       return requestParsed(
         "/api/v1/plugins/safe-mode",
         pluginSafeModeUpdateResponseSchema,
@@ -651,10 +745,26 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
     async experimental_pruneCache(input = {}) {
       const body = pluginCachePruneRequestSchema.parse({
         dryRun: input.dryRun ?? false,
+        maxItems: input.maxItems,
+        maxBytes: input.maxBytes,
       });
+
       return requestParsed(
         "/api/v1/plugins/cache/prune",
         pluginCachePruneResponseSchema,
+        { ...jsonInit("POST", body), signal: input.signal },
+      );
+    },
+    async experimental_relocatePathSources(input) {
+      const body = pluginPathRelocationRequestSchema.parse({
+        from: input.from,
+        to: input.to,
+        dryRun: input.dryRun ?? false,
+      });
+
+      return requestParsed(
+        "/api/v1/plugins/relocate",
+        pluginPathRelocationResponseSchema,
         { ...jsonInit("POST", body), signal: input.signal },
       );
     },
@@ -666,6 +776,7 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         pluginInstallResponseSchema,
         jsonInit("POST", {}),
       );
+
       return response.plugin;
     },
     async enable(input) {
@@ -674,6 +785,7 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         pluginInstallResponseSchema,
         jsonInit("POST", {}),
       );
+
       return response.plugin;
     },
     async getSettings(input) {
@@ -711,12 +823,14 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
         pluginUpdateCheckResponseSchema,
         { signal: input.signal },
       );
+
       return response.results;
     },
     async reload(input = {}) {
       const query = input.pluginId
         ? `?id=${encodeURIComponent(z.string().min(1).parse(input.pluginId))}`
         : "";
+
       return requestParsed(
         `/api/v1/plugins/reload${query}`,
         pluginReloadResponseSchema,
@@ -734,6 +848,7 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
       const body = pluginTokenRequestSchema.parse({
         rotate: input.rotate ?? false,
       });
+
       return requestParsed(
         pluginPath(input.pluginId, "/token"),
         pluginTokenResponseSchema,
@@ -744,6 +859,7 @@ export function createPluginsArea(args: CreateSdkAreaArgs): PluginsArea {
       const body = pluginSettingsUpdateRequestSchema.parse({
         values: input.values,
       });
+
       return requestParsed(
         pluginPath(input.pluginId, "/settings"),
         pluginSettingsResponseSchema,

@@ -1,4 +1,5 @@
-import { isClosedProcessStdinError } from "@bb/process-utils";
+import type { ProviderFailureMetadata } from "@omnyo/domain";
+import { isClosedProcessStdinError } from "@omnyo/process-utils";
 import type { ChildProcess } from "node:child_process";
 import type { Writable } from "node:stream";
 import { z } from "zod";
@@ -45,16 +46,31 @@ export class ProviderResponseEncodeError extends Error {
 export class JsonRpcResponseError extends Error {
   readonly code: number;
   readonly recovery: ProviderRecoveryHint | null;
+  readonly errorInfo?: ProviderFailureMetadata["errorInfo"];
+  readonly rateLimits?: ProviderFailureMetadata["rateLimits"];
 
   constructor(
     code: number,
     message: string,
     recovery: ProviderRecoveryHint | null = null,
+    failure: ProviderFailureMetadata = {},
   ) {
     super(message);
     this.name = "JsonRpcResponseError";
     this.code = code;
     this.recovery = recovery;
+    this.errorInfo = failure.errorInfo;
+    this.rateLimits = failure.rateLimits;
+  }
+}
+
+export class JsonRpcRequestTimeoutError extends Error {
+  readonly method: string;
+
+  constructor(method: string) {
+    super(`JSON-RPC request timed out: ${method}`);
+    this.name = "JsonRpcRequestTimeoutError";
+    this.method = method;
   }
 }
 
@@ -106,6 +122,7 @@ export interface SendJsonRpcRequestArgs<TResult> {
   pending: Map<string | number, PendingJsonRpcRequest>;
   resultSchema: z.ZodType<TResult>;
   timeoutMs?: number;
+  afterTimeout?: PendingJsonRpcRequest;
 }
 
 interface SendJsonRpcResultArgs {
@@ -147,6 +164,7 @@ function formatJsonRpcErrorMessage(error: unknown): string {
   if (isJsonRpcObject(error) && typeof error.message === "string") {
     return error.message;
   }
+
   return JSON.stringify(error);
 }
 
@@ -160,8 +178,10 @@ function jsonRpcResponseError(error: unknown): Error {
       error.code,
       error.message,
       decodeRecoveryHint(error.data),
+      bridgeErrorDataSchema.safeParse(error.data).data,
     );
   }
+
   return new Error(formatJsonRpcErrorMessage(error));
 }
 
@@ -169,7 +189,9 @@ function decodeRecoveryHint(data: unknown): ProviderRecoveryHint | null {
   if (data === undefined) {
     return null;
   }
+
   const parsed = bridgeErrorDataSchema.safeParse(data);
+
   return parsed.success ? (parsed.data.recovery ?? null) : null;
 }
 
@@ -177,6 +199,7 @@ function handleJsonRpcStdinError(error: Error): void {
   if (isClosedProcessStdinError(error)) {
     return;
   }
+
   throw error;
 }
 
@@ -184,21 +207,25 @@ function ensureJsonRpcStdinErrorHandler(stdin: Writable): void {
   if (jsonRpcStdinErrorHandledStreams.has(stdin)) {
     return;
   }
+
   jsonRpcStdinErrorHandledStreams.add(stdin);
   stdin.on("error", handleJsonRpcStdinError);
 }
 
 function writeJsonRpcLine(child: ChildProcess, line: string): void {
   const stdin = child.stdin;
+
   if (!stdin || stdin.destroyed || !stdin.writable) {
     return;
   }
+
   ensureJsonRpcStdinErrorHandler(stdin);
   stdin.write(line + "\n");
 }
 
 export function parseJsonRpcLine(line: string): ParsedJsonRpcLine {
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(line);
   } catch {
@@ -211,6 +238,7 @@ export function parseJsonRpcLine(line: string): ParsedJsonRpcLine {
 
   const parsedId = parsed.id;
   const parsedMethod = parsed.method;
+
   if (isJsonRpcId(parsedId) && !parsedMethod) {
     return {
       kind: "response",
@@ -226,6 +254,7 @@ export function parseJsonRpcLine(line: string): ParsedJsonRpcLine {
       method: parsedMethod,
       ...(Object.hasOwn(parsed, "params") ? { params: parsed.params } : {}),
     };
+
     return {
       kind: "request",
       parsedId,
@@ -254,18 +283,22 @@ export function getJsonRpcStringParam(
   }
 
   const value = message.params[key];
+
   return typeof value === "string" ? value : undefined;
 }
 
 export function settleJsonRpcResponse(args: SettleJsonRpcResponseArgs): void {
   const pending = args.pending.get(args.id);
+
   if (!pending) {
     return;
   }
 
   args.pending.delete(args.id);
+
   if (args.response.error) {
     pending.reject(jsonRpcResponseError(args.response.error));
+
     return;
   }
 
@@ -278,6 +311,7 @@ function toJsonRpcMessage(
   if ("jsonrpc" in message) {
     return message;
   }
+
   return {
     jsonrpc: "2.0",
     method: message.method,
@@ -291,26 +325,37 @@ export function sendJsonRpcRequest<TResult>(
   const id = args.getNextId();
   const message = toJsonRpcMessage(args.message);
   const withId: JsonRpcMessage = { ...message, id };
+
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      args.pending.delete(id);
-      reject(new Error(`JSON-RPC request timed out: ${message.method}`));
+      if (args.afterTimeout === undefined) {
+        args.pending.delete(id);
+      } else {
+        args.pending.set(id, args.afterTimeout);
+      }
+
+      reject(new JsonRpcRequestTimeoutError(message.method));
     }, args.timeoutMs ?? 30_000);
+
     args.pending.set(id, {
       resolve: (result) => {
         clearTimeout(timer);
         const parsedResult = args.resultSchema.safeParse(result);
+
         if (!parsedResult.success) {
           const issues = parsedResult.error.issues
             .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
             .join("; ");
+
           reject(
             new Error(
               `Invalid JSON-RPC result for ${message.method}: ${issues}`,
             ),
           );
+
           return;
         }
+
         resolve(parsedResult.data);
       },
       reject: (error) => {
@@ -360,5 +405,6 @@ export function sendProviderResponseEncodeErrorIfKnown(
     message: args.error.message,
     code: args.error.code,
   });
+
   return true;
 }

@@ -1,5 +1,5 @@
-import type { JsonValue } from "@get-bb/plugin-sdk";
-import type { JsonObject } from "@get-bb/plugin-sdk/provider-bridge";
+import type { JsonValue } from "@omnyo/plugin-sdk";
+import type { JsonObject } from "@omnyo/plugin-sdk/provider-bridge";
 import { fetchChatGpt, isCloudflareChallenge } from "./chatgpt-fetch.js";
 import type {
   CodexAiCompleteInput,
@@ -17,18 +17,27 @@ import {
 import { AiServiceFailure } from "./failure.js";
 
 type InferenceCompleteCommand = CodexAiCompleteInput;
+
 type VoiceTranscribeCommand = CodexAiTranscribeInput;
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
+
 const CHATGPT_TRANSCRIBE_URL = "https://chatgpt.com/backend-api/transcribe";
+
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+
 const OPENAI_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions";
+
 const CODEX_ERROR_TEXT_MAX_BYTES = 4 * 1024;
+
 const CODEX_SSE_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
+
 const CODEX_SSE_EVENT_MAX_CHARS = 1024 * 1024;
+
 const CODEX_TRANSCRIPTION_RESPONSE_MAX_BYTES = 1024 * 1024;
 
 type ReadOverflowBehavior = "throw" | "truncate";
+
 type CodexRequestOperation = "inference" | "transcription";
 
 interface TimeoutFetchArgs {
@@ -148,17 +157,20 @@ function createChatGptHeaders(auth: CodexChatGptAuthCredentials): Headers {
   headers.set("Authorization", `Bearer ${auth.accessToken}`);
   headers.set("chatgpt-account-id", auth.accountId);
   headers.set("originator", "bb");
-  headers.set("User-Agent", "bb-host-daemon");
+  headers.set("User-Agent", "omnyo-host-daemon");
+
   if (auth.isFedrampAccount) {
     headers.set("X-OpenAI-Fedramp", "true");
   }
+
   return headers;
 }
 
 function createOpenAiHeaders(auth: CodexOpenAiApiKeyCredentials): Headers {
   const headers = new Headers();
   headers.set("Authorization", `Bearer ${auth.apiKey}`);
-  headers.set("User-Agent", "bb-host-daemon");
+  headers.set("User-Agent", "omnyo-host-daemon");
+
   return headers;
 }
 
@@ -168,6 +180,7 @@ function createOpenAiResponsesHeaders(
   const headers = createOpenAiHeaders(auth);
   headers.set("Accept", "text/event-stream");
   headers.set("Content-Type", "application/json");
+
   return headers;
 }
 
@@ -188,31 +201,39 @@ function remainingCodexRequestTimeoutMs(
   if (deadline.signal.aborted) {
     throw codexRequestCancelledError();
   }
+
   const remainingMs = Math.ceil(deadline.expiresAt - performance.now());
+
   if (remainingMs <= 0) {
     throw codexRequestTimeoutError(deadline.timeoutMs);
   }
+
   return remainingMs;
 }
 
 async function runWithTimeout(args: TimeoutFetchArgs): Promise<Response> {
   const abortController = new AbortController();
   const timeoutMs = remainingCodexRequestTimeoutMs(args.deadline);
+
   const timeout = setTimeout(() => {
     abortController.abort();
   }, timeoutMs);
+
   timeout.unref();
   const cancel = (): void => abortController.abort();
   args.deadline.signal.addEventListener("abort", cancel, { once: true });
+
   try {
     return await args.work(abortController.signal);
   } catch (error) {
     if (args.deadline.signal.aborted) {
       throw codexRequestCancelledError();
     }
+
     if (abortController.signal.aborted) {
       throw codexRequestTimeoutError(args.deadline.timeoutMs);
     }
+
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -253,6 +274,7 @@ async function readChunkWithTimeout({
   let timeout: ReturnType<typeof setTimeout> | null = null;
   let cancel: (() => void) | null = null;
   const timeoutMs = remainingCodexRequestTimeoutMs(deadline);
+
   try {
     return await Promise.race([
       reader.read(),
@@ -269,6 +291,7 @@ async function readChunkWithTimeout({
     if (timeout) {
       clearTimeout(timeout);
     }
+
     if (cancel) {
       deadline.signal.removeEventListener("abort", cancel);
     }
@@ -303,18 +326,22 @@ async function readLimitedResponseText(
         deadline: args.deadline,
         reader,
       });
+
       if (chunk.done) {
         break;
       }
 
       const value = chunk.value;
       totalBytes += value.byteLength;
+
       if (totalBytes > args.maxBytes) {
         if (args.overflowBehavior === "throw") {
           await cancelReaderBestEffort(reader);
           throw codexResponseTooLargeError();
         }
+
         const allowedBytes = value.byteLength - (totalBytes - args.maxBytes);
+
         if (allowedBytes > 0) {
           chunks.push(
             decoder.decode(value.slice(0, allowedBytes), {
@@ -322,6 +349,7 @@ async function readLimitedResponseText(
             }),
           );
         }
+
         truncated = true;
         await cancelReaderBestEffort(reader);
         break;
@@ -329,7 +357,9 @@ async function readLimitedResponseText(
 
       chunks.push(decoder.decode(value, { stream: true }));
     }
+
     chunks.push(decoder.decode());
+
     return `${chunks.join("")}${truncated ? "..." : ""}`;
   } catch (error) {
     await cancelReaderBestEffort(reader);
@@ -346,6 +376,7 @@ async function readErrorText(
     maxBytes: CODEX_ERROR_TEXT_MAX_BYTES,
     overflowBehavior: "truncate",
   }).catch(() => "");
+
   return text.length > 400 ? `${text.slice(0, 400)}...` : text;
 }
 
@@ -355,12 +386,15 @@ function codexRequestErrorCode(status: number): FailureCodes {
   if (status === 401) {
     return ["auth_required", "codex_auth_failed"];
   }
+
   if (status === 429) {
     return ["rate_limited", "codex_rate_limited"];
   }
+
   if (status >= 500) {
     return ["service_unavailable", "codex_service_unavailable"];
   }
+
   return ["request_failed", "codex_request_failed"];
 }
 
@@ -373,9 +407,11 @@ function codexStreamFailureErrorCode(
   if (failure.code === "server_error") {
     return ["service_unavailable", "codex_service_unavailable"];
   }
+
   if (failure.code === "rate_limit_exceeded") {
     return ["rate_limited", "codex_rate_limited"];
   }
+
   return CODEX_SERVICE_UNAVAILABLE_PATTERN.test(failure.message)
     ? ["service_unavailable", "codex_service_unavailable"]
     : ["request_failed", "codex_request_failed"];
@@ -384,39 +420,48 @@ function codexStreamFailureErrorCode(
 function extractJsonErrorMessage(value: JsonValue): string | null {
   if (typeof value === "string") {
     const normalized = value.replace(/\s+/g, " ").trim();
+
     return normalized.length > 0 ? normalized : null;
   }
 
   if (Array.isArray(value)) {
     for (const item of value) {
       const message = extractJsonErrorMessage(item);
+
       if (message) {
         return message;
       }
     }
+
     return null;
   }
 
   const object = toJsonObject(value);
+
   if (!object) {
     return null;
   }
 
   for (const key of ["message", "detail", "error"]) {
     const child = object[key];
+
     if (child === undefined) {
       continue;
     }
+
     const message = extractJsonErrorMessage(child);
+
     if (message) {
       return message;
     }
   }
+
   return null;
 }
 
 function extractProviderErrorMessage(rawText: string): string | null {
   const normalized = rawText.replace(/\s+/g, " ").trim();
+
   if (normalized.length === 0) {
     return null;
   }
@@ -443,17 +488,21 @@ async function createCodexHttpError({
   response,
 }: CodexHttpErrorArgs): Promise<AiServiceFailure> {
   const prefix = `Codex ${operation} request failed with HTTP ${response.status}`;
+
   if (isCloudflareChallenge(response)) {
     return new AiServiceFailure(
       "service_unavailable",
       "codex_service_unavailable",
-      `${prefix}: chatgpt.com answered with a Cloudflare challenge that bb cannot solve. Retry, or choose another service in Settings → AI services.`,
+      `${prefix}: chatgpt.com answered with a Cloudflare challenge that Omnyo cannot solve. Retry or list other services with omnyo settings ai-services show.`,
     );
   }
+
   const providerMessage = isHtmlResponse(response)
     ? null
     : extractProviderErrorMessage(await readErrorText(response, deadline));
+
   const details = providerMessage ? `: ${providerMessage}` : "";
+
   return new AiServiceFailure(
     ...codexRequestErrorCode(response.status),
     `${prefix}${details}`,
@@ -462,38 +511,50 @@ async function createCodexHttpError({
 
 function getCodexResponseText(response: JsonObject): string | null {
   const output = optionalJsonArray(response.output);
+
   if (!output) {
     return null;
   }
+
   for (const outputItem of output) {
     const item = toJsonObject(outputItem);
     const content = item ? optionalJsonArray(item.content) : null;
+
     if (!content) {
       continue;
     }
+
     for (const contentItem of content) {
       const contentObject = toJsonObject(contentItem);
+
       if (!contentObject) {
         continue;
       }
+
       const type = optionalString(contentObject.type);
+
       const text =
         optionalString(contentObject.text) ??
         optionalString(contentObject.output_text);
+
       if ((type === "output_text" || type === "text") && text !== null) {
         return text;
       }
     }
   }
+
   return null;
 }
 
 function getCodexFailure(response: JsonObject): CodexStreamFailure | null {
   const error = response.error ? toJsonObject(response.error) : null;
+
   if (!error) {
     return null;
   }
+
   const code = optionalString(error.code);
+
   return {
     code,
     message: optionalString(error.message) ?? code ?? "Codex response failed",
@@ -502,8 +563,10 @@ function getCodexFailure(response: JsonObject): CodexStreamFailure | null {
 
 function extractTextFromSseEvent(event: JsonObject): ResponseTextResult {
   const type = optionalString(event.type);
+
   if (type === "error") {
     const code = optionalString(event.code);
+
     return {
       failure: {
         code,
@@ -516,6 +579,7 @@ function extractTextFromSseEvent(event: JsonObject): ResponseTextResult {
 
   if (type === "response.failed") {
     const response = event.response ? toJsonObject(event.response) : null;
+
     return {
       failure: response
         ? (getCodexFailure(response) ?? {
@@ -538,6 +602,7 @@ function extractTextFromSseEvent(event: JsonObject): ResponseTextResult {
     const response = event.response ? toJsonObject(event.response) : null;
     const text = response ? getCodexResponseText(response) : null;
     const failure = response ? getCodexFailure(response) : null;
+
     return {
       failure,
       text: text ?? "",
@@ -588,48 +653,60 @@ async function readResponseTextFromSse(
         deadline: args.deadline,
         reader,
       });
+
       if (chunk.done) {
         break;
       }
 
       totalBytes += chunk.value.byteLength;
+
       if (totalBytes > args.maxBytes) {
         throw codexResponseTooLargeError();
       }
 
       buffer += decoder.decode(chunk.value, { stream: true });
+
       if (buffer.length > args.maxEventChars) {
         throw codexResponseTooLargeError();
       }
 
       let index = buffer.indexOf("\n\n");
+
       while (index !== -1) {
         const block = buffer.slice(0, index);
+
         if (block.length > args.maxEventChars) {
           throw codexResponseTooLargeError();
         }
+
         buffer = buffer.slice(index + 2);
+
         const eventData = block
           .split("\n")
           .filter((line) => line.startsWith("data:"))
           .map((line) => line.slice(5).trim())
           .join("\n")
           .trim();
+
         if (eventData === "[DONE]") {
           completed = true;
           break;
         }
+
         if (eventData) {
           const eventValue = parseSseEventValue(eventData);
           const event = toJsonObject(eventValue);
+
           if (event) {
             const result = extractTextFromSseEvent(event);
+
             if (result.failure) {
               throw new AiServiceFailure(
                 ...codexStreamFailureErrorCode(result.failure),
                 result.failure.message,
               );
             }
+
             if (
               optionalString(event.type) === "response.completed" ||
               optionalString(event.type) === "response.done"
@@ -638,15 +715,19 @@ async function readResponseTextFromSse(
               completed = true;
               break;
             }
+
             if (result.text) {
               deltaText += result.text;
             }
           }
         }
+
         index = buffer.indexOf("\n\n");
       }
     }
+
     buffer += decoder.decode();
+
     if (completed) {
       await cancelReaderBestEffort(reader);
     }
@@ -656,6 +737,7 @@ async function readResponseTextFromSse(
   }
 
   const text = finalText ?? deltaText;
+
   if (!text) {
     throw new AiServiceFailure(
       "invalid_response",
@@ -663,6 +745,7 @@ async function readResponseTextFromSse(
       "Codex response did not include output text.",
     );
   }
+
   return text;
 }
 
@@ -698,9 +781,11 @@ function createChatGptResponsesHeaders(
   headers.set("OpenAI-Beta", "responses=experimental");
   headers.set("Accept", "text/event-stream");
   headers.set("Content-Type", "application/json");
+
   for (const [key, value] of cloudflareHeaders) {
     headers.set(key, value);
   }
+
   return headers;
 }
 
@@ -709,9 +794,11 @@ function createChatGptTranscriptionHeaders(
   cloudflareHeaders: Headers,
 ): Headers {
   const headers = createChatGptHeaders(auth);
+
   for (const [key, value] of cloudflareHeaders) {
     headers.set(key, value);
   }
+
   return headers;
 }
 
@@ -790,6 +877,7 @@ export async function completeCodexInference(
 
 function buildAudioBlob(command: VoiceTranscribeCommand): Blob {
   const bytes = Buffer.from(command.audioBase64, "base64");
+
   return new Blob([bytes], {
     type: command.mimeType,
   });
@@ -799,15 +887,18 @@ function buildTranscriptionFormData(command: VoiceTranscribeCommand): FormData {
   const formData = new FormData();
   formData.set("file", buildAudioBlob(command), command.filename);
   formData.set("model", command.model);
+
   if (command.hint !== null) {
     formData.set("prompt", command.hint);
   }
+
   return formData;
 }
 
 function parseTranscriptionText(value: JsonValue): string {
   const object = toJsonObject(value);
   const text = object ? optionalString(object.text) : null;
+
   if (text === null) {
     throw new AiServiceFailure(
       "invalid_response",
@@ -815,6 +906,7 @@ function parseTranscriptionText(value: JsonValue): string {
       "Codex transcription response did not include transcript text.",
     );
   }
+
   return text;
 }
 

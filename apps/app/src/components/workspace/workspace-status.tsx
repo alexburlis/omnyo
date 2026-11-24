@@ -1,8 +1,14 @@
-import { assertNever } from "@bb/core-ui";
-import type { WorkspaceStatus } from "@bb/domain";
-import type { WorkspaceResolutionFailure } from "@bb/host-daemon-contract";
-import { BbHttpError } from "@bb/sdk/browser";
+import { useState } from "react";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@omnyo/shared-ui/tooltip";
+import { assertNever } from "@omnyo/core-ui";
+import type { WorkspaceStatus } from "@omnyo/domain";
+import type { WorkspaceResolutionFailure } from "@omnyo/host-daemon-contract";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 import { describeLifecycleError } from "@/lib/lifecycle-errors";
+
+export const INCOMPLETE_SQUASH_MERGE_MESSAGE =
+  "Squash-merge check incomplete; counts may include already-merged commits.";
 
 export interface ThreadGitStatusDisplay {
   label:
@@ -15,6 +21,7 @@ export interface ThreadGitStatusDisplay {
     | "Dirty"
     | "Untracked";
   summary: string;
+  warning?: string;
 }
 
 interface GetGitStatusDisplayOptions {
@@ -31,6 +38,7 @@ function formatComparisonSummary(
 ): string | null {
   const aheadCount = status.mergeBase?.aheadCount ?? 0;
   const behindCount = status.mergeBase?.behindCount ?? 0;
+
   if (aheadCount === 0 && behindCount === 0) {
     return null;
   }
@@ -65,22 +73,25 @@ function divergenceDisplay(
 ): ThreadGitStatusDisplay | null {
   const aheadCount = status.mergeBase?.aheadCount ?? 0;
   const behindCount = status.mergeBase?.behindCount ?? 0;
+
   if (aheadCount > 0 && behindCount > 0) {
     return plainDisplay(
       "Diverged",
       comparisonSummary ?? "Branch has diverged.",
     );
   }
+
   if (behindCount > 0) {
     return plainDisplay(
       "Behind",
       comparisonSummary ?? "Branch is behind its merge base.",
     );
   }
+
   return null;
 }
 
-export function getGitStatusDisplay(
+function getGitStatusDisplayWithoutWarning(
   status: WorkspaceStatus | undefined,
   options?: GetGitStatusDisplayOptions,
 ): ThreadGitStatusDisplay {
@@ -92,6 +103,7 @@ export function getGitStatusDisplay(
             error: options.error,
             operation: "load_git_status",
           });
+
     if (lifecycleErrorDescription) {
       return plainDisplay("Unknown", lifecycleErrorDescription.body);
     }
@@ -100,20 +112,24 @@ export function getGitStatusDisplay(
       if (options.workspaceUnavailable.code === "path_not_found") {
         return plainDisplay("Unknown", "Workspace not found.");
       }
+
       return plainDisplay("Unknown", options.workspaceUnavailable.message);
     }
 
     const isPathNotFound =
-      options?.error instanceof BbHttpError &&
+      options?.error instanceof OmnyoHttpError &&
       options.error.code === "path_not_found";
+
     if (options?.workspaceDeleted || isPathNotFound) {
       return plainDisplay("Unknown", "Workspace not found.");
     }
+
     return plainDisplay("Unknown", "Workspace status unavailable.");
   }
 
   const resolvedMergeBaseBranch =
     options?.mergeBaseBranch ?? status.mergeBase?.mergeBaseBranch;
+
   const comparisonSummary = options?.showBranchComparison
     ? formatComparisonSummary(status, resolvedMergeBaseBranch)
     : null;
@@ -150,4 +166,43 @@ export function getGitStatusDisplay(
     default:
       return assertNever(status.workingTree.state);
   }
+}
+
+export function getGitStatusDisplay(
+  status: WorkspaceStatus | undefined,
+  options?: GetGitStatusDisplayOptions,
+): ThreadGitStatusDisplay {
+  const display = getGitStatusDisplayWithoutWarning(status, options);
+
+  return status?.mergeBase?.squashMergeCheckComplete === false
+    ? { ...display, warning: INCOMPLETE_SQUASH_MERGE_MESSAGE }
+    : display;
+}
+
+export function SquashMergeInfo() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={INCOMPLETE_SQUASH_MERGE_MESSAGE}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            setOpen((value) => !value);
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+
+            if (event.detail === 0) setOpen((value) => !value);
+          }}
+          className="inline-flex shrink-0 items-center text-muted-foreground"
+        >
+          <Icon name="Info" className="size-3" aria-hidden />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{INCOMPLETE_SQUASH_MERGE_MESSAGE}</TooltipContent>
+    </Tooltip>
+  );
 }

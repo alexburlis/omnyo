@@ -2,21 +2,26 @@
 
 import { cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NO_COLLAPSED_CHILD_ACTIVITY } from "../model/thread-activity.js";
+import {
+  getCollapsedChildActivity,
+  NO_COLLAPSED_CHILD_ACTIVITY,
+} from "../model/thread-activity.js";
+import { makeSidebarThread, makeSidebarWork } from "../model/fixtures.js";
 import type {
   PluginSidebarSplitLayout,
   PluginSidebarThreadRowStatus,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import {
   installTestPluginRuntime,
   renderSlot,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 import {
   SIDEBAR_CONTROL_STATE_CLASS,
   SIDEBAR_GROUP_TEXT_CLASS,
 } from "@/components/ui/sidebar-row-classes";
 
 installTestPluginRuntime();
+
 const { SidebarSectionRow } = await import("./SidebarSectionRow.js");
 
 type SectionRowProps = Parameters<typeof SidebarSectionRow>[0];
@@ -57,6 +62,7 @@ describe("SidebarSectionRow", () => {
     const disclosure = screen.getByRole("button", {
       name: "Collapse Nested work section",
     });
+
     const icon = result.container.querySelector('[data-icon="ListView"]');
     const label = screen.getByText("Nested work");
     const row = label.parentElement?.parentElement as HTMLElement | null;
@@ -68,9 +74,11 @@ describe("SidebarSectionRow", () => {
     ).not.toBe(0);
     expect(row?.style.paddingLeft).toBe("32px");
     expect(row?.classList.contains(SIDEBAR_GROUP_TEXT_CLASS)).toBe(true);
+
     for (const token of SIDEBAR_CONTROL_STATE_CLASS.split(" ")) {
       expect(disclosure.classList.contains(token)).toBe(true);
     }
+
     expect(disclosure.classList.contains("hover:bg-sidebar-accent")).toBe(
       false,
     );
@@ -81,7 +89,19 @@ describe("SidebarSectionRow", () => {
       {
         name: "Build",
         label: "Work / Build",
-        activity: { ...NO_COLLAPSED_CHILD_ACTIVITY, pending: true },
+        activity: getCollapsedChildActivity([
+          makeSidebarThread({
+            id: "thread-input",
+            experimental_work: {
+              ...makeSidebarWork("needs-you"),
+              activity: [],
+            },
+          }),
+          makeSidebarThread({
+            id: "thread-one",
+            experimental_work: makeSidebarWork("working"),
+          }),
+        ]),
         collapsedThreads: [{ id: "thread-one" }, { id: "thread-two" }],
         isCollapsed: true,
       },
@@ -114,12 +134,16 @@ describe("SidebarSectionRow", () => {
     const splitMaps = screen.getAllByRole("img", {
       name: "Work / Build — contains a thread open in split",
     });
+
     const splitMap = splitMaps[0];
+
     if (!splitMap) {
       throw new Error("Expected a collapsed split mini-map");
     }
+
     const slots = splitMap.querySelectorAll("rect");
 
+    expect(splitMap.classList.contains("animate-shine-icon")).toBe(true);
     expect(slots).toHaveLength(3);
     expect(slots[0]?.getAttribute("class")).toContain("fill-muted-foreground");
     expect(slots[1]?.getAttribute("class")).toContain("fill-none");

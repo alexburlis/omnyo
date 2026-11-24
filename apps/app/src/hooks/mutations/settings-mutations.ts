@@ -7,9 +7,8 @@ import {
   type AppKeybindingOverrides,
   type AppSettings,
   type AppThemeSelection,
-  type ExperimentUpdates,
-} from "@bb/domain";
-import type { SystemInstallCliSkillsRequest } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { SystemInstallCliSkillsRequest } from "@omnyo/server-contract";
 import { sdk } from "@/lib/sdk";
 import {
   invalidateGeneralSettingsDependencies,
@@ -18,59 +17,24 @@ import {
   resetModelCatalogsAfterStreamerModeChange,
 } from "../cache-owners/system-cache-effects";
 import {
-  beginExperimentsCacheTransaction,
   beginGeneralSettingsCacheTransaction,
   beginKeyboardSettingsCacheTransaction,
   readCachedGeneralSettings,
-  rollbackExperimentsCacheTransaction,
   rollbackGeneralSettingsCacheTransaction,
   rollbackKeyboardSettingsCacheTransaction,
 } from "../cache-owners/system-config-cache-owner";
 
 const optimisticSettingsMutationKey = ["system", "settings"] as const;
+
 const generalSettingsMutationKey = [
   ...optimisticSettingsMutationKey,
   "general",
-] as const;
-const experimentsMutationKey = [
-  ...optimisticSettingsMutationKey,
-  "experiments",
 ] as const;
 
 function isLastPendingSettingsWrite(queryClient: QueryClient): boolean {
   return (
     queryClient.isMutating({ mutationKey: optimisticSettingsMutationKey }) === 1
   );
-}
-
-export function useUpdateExperiments() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationKey: experimentsMutationKey,
-    meta: {
-      errorMessage: "Failed to update experiments.",
-    },
-    mutationFn: (updates: ExperimentUpdates) =>
-      sdk.system.updateExperiments(updates),
-    onMutate: (updates) =>
-      beginExperimentsCacheTransaction({ queryClient, updates }),
-    onError: (_error, updates, transaction) => {
-      rollbackExperimentsCacheTransaction({
-        queryClient,
-        transaction,
-        updates,
-      });
-      if (isLastPendingSettingsWrite(queryClient)) {
-        invalidateSystemConfig({ queryClient });
-      }
-    },
-    onSuccess: () => {
-      if (isLastPendingSettingsWrite(queryClient)) {
-        invalidateSystemConfig({ queryClient });
-      }
-    },
-  });
 }
 
 export function useUpdateGeneralSettings() {
@@ -84,9 +48,11 @@ export function useUpdateGeneralSettings() {
     },
     mutationFn: (patch: Partial<AppSettings>) => {
       const settings = readCachedGeneralSettings(queryClient);
+
       if (settings === undefined) {
         throw new Error("General settings have not loaded yet.");
       }
+
       return sdk.system.updateGeneralSettings({ ...settings, ...patch });
     },
     onMutate: (patch) =>
@@ -97,6 +63,7 @@ export function useUpdateGeneralSettings() {
         queryClient,
         transaction,
       });
+
       if (isLastPendingSettingsWrite(queryClient)) {
         invalidateSystemConfig({ queryClient });
       }
@@ -107,20 +74,25 @@ export function useUpdateGeneralSettings() {
         includeSystemConfig: isLastPendingSettingsWrite(queryClient),
         queryClient,
       });
+
       if (
         patch.streamerMode !== undefined &&
         patch.streamerMode !== previous?.streamerMode
       ) {
         void resetModelCatalogsAfterStreamerModeChange({ queryClient });
       }
+
       const nextProviderOrder = patch.providerOrder;
+
       if (nextProviderOrder === undefined) return;
+
       const providerOrderChanged =
         previous === undefined ||
         previous.providerOrder.length !== nextProviderOrder.length ||
         previous.providerOrder.some(
           (providerId, index) => providerId !== nextProviderOrder[index],
         );
+
       if (providerOrderChanged) {
         return invalidateSystemProviders({ queryClient });
       }
@@ -154,7 +126,7 @@ export function useUpdateKeyboardSettings() {
 export function useInstallCliSkills() {
   return useMutation({
     meta: {
-      errorMessage: "Failed to install the bb CLI skills.",
+      errorMessage: "Failed to install the Omnyo CLI skills.",
     },
     mutationFn: (args: SystemInstallCliSkillsRequest) =>
       sdk.system.installCliSkills(args),

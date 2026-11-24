@@ -3,10 +3,10 @@
   "name": "resource-detail-shell",
   "type": "registry:ui",
   "title": "resource-detail-shell",
-  "description": "BB ui \"resource-detail-shell\" — vendored from the BB app's own source (version-matched to this BB release).",
+  "description": "Omnyo ui \"resource-detail-shell\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
   "registryDependencies": [
-    "@bb/icon",
-    "@bb/utils"
+    "@omnyo/icon",
+    "@omnyo/utils"
   ],
   "files": [
     {

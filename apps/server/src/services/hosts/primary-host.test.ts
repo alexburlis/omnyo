@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { updateHost } from "@bb/db";
+import { updateHost } from "@omnyo/db";
 import {
   seedHost,
   seedHostSession,
@@ -29,14 +29,17 @@ describe("primary host resolution", () => {
     "does not select a sole %s host without a local identity",
     async (status) => {
       harness = await createTestAppHarness();
+
       if (status === "connected") {
         seedHostSession(harness.deps, { name: "remote" });
       } else {
         seedHost(harness.deps, { name: "remote" });
       }
+
       const deps = harness.deps;
 
       expect(resolvePrimaryHostId(deps)).toBeNull();
+
       for (const requireHost of [
         requirePrimaryHostId,
         requireConnectedPrimaryHostId,
@@ -56,6 +59,7 @@ describe("primary host resolution", () => {
       harness = await createTestAppHarness();
       const deps = harness.deps;
       seedHostSession(deps, { name: "remote" });
+
       if (state === "destroyed") {
         const local = seedHost(deps, { name: "local" });
         updateHost(deps.db, deps.hub, local.id, { destroyedAt: Date.now() });
@@ -94,25 +98,32 @@ function expectApiError(
     if (!(error instanceof ApiError)) {
       throw error;
     }
+
     expect(error.status).toBe(expected.status);
     expect(error.body.code).toBe(expected.code);
+
     if (expected.message !== undefined) {
       expect(error.body.message).toBe(expected.message);
     }
+
     return;
   }
+
   throw new Error("Expected operation to throw ApiError");
 }
 
 describe("assertUsableHostId", () => {
   it("accepts a non-primary public host", async () => {
     harness = await createTestAppHarness();
+
     const { host: primary } = seedHostSession(harness.deps, {
       name: "primary",
     });
+
     const { host: secondary } = seedHostSession(harness.deps, {
       name: "secondary",
     });
+
     seedPrimaryHost(harness.deps, primary.id);
     const deps = harness.deps;
 
@@ -123,9 +134,11 @@ describe("assertUsableHostId", () => {
 
   it("returns 404 for an unknown host", async () => {
     harness = await createTestAppHarness();
+
     const { host: primary } = seedHostSession(harness.deps, {
       name: "primary",
     });
+
     seedPrimaryHost(harness.deps, primary.id);
     const deps = harness.deps;
 

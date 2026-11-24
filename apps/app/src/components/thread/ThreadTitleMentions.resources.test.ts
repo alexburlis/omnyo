@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import {
   buildThreadTitleMentionResources,
   EMPTY_TITLE_MENTION_RESOURCES,
@@ -44,12 +44,14 @@ describe("buildThreadTitleMentionResources", () => {
       navigation(),
       EMPTY_TITLE_MENTION_RESOURCES,
     );
+
     expect(first.threadById.get("thr_app")?.title).toBe("Ship it");
 
     const second = buildThreadTitleMentionResources(
       navigation({ updatedAt: 2 }),
       first,
     );
+
     expect(second).toBe(first);
   });
 
@@ -58,10 +60,12 @@ describe("buildThreadTitleMentionResources", () => {
       navigation(),
       EMPTY_TITLE_MENTION_RESOURCES,
     );
+
     const renamedProject = buildThreadTitleMentionResources(
       navigation({ projectName: "Application" }),
       first,
     );
+
     expect(renamedProject).not.toBe(first);
     expect(renamedProject.projectNamesById.get("proj_app")).toBe("Application");
     expect(renamedProject.sectionNamesById).toBe(first.sectionNamesById);
@@ -71,6 +75,7 @@ describe("buildThreadTitleMentionResources", () => {
       navigation({ projectName: "Application", threadTitle: "Shipped" }),
       renamedProject,
     );
+
     expect(retitled.threadById).not.toBe(renamedProject.threadById);
     expect(retitled.threadById.get("thr_app")?.title).toBe("Shipped");
     expect(retitled.threadById.get("thr_me")).toBe(
@@ -84,6 +89,7 @@ describe("buildThreadTitleMentionResources", () => {
       navigation(),
       EMPTY_TITLE_MENTION_RESOURCES,
     );
+
     expect(buildThreadTitleMentionResources(undefined, first)).toBe(
       EMPTY_TITLE_MENTION_RESOURCES,
     );

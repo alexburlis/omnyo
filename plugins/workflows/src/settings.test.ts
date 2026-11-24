@@ -1,4 +1,4 @@
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_WORKFLOW_SETTINGS,
@@ -91,14 +91,15 @@ describe("workflow settings policy", () => {
   );
 
   it("registers descriptors and returns parsed fake-host values", async () => {
-    const { bb, harness } = createFakePluginHost({
+    const { api, harness } = createFakePluginHost({
       pluginId: "workflows",
       settings: {
         maxActiveRuns: " 6 ",
         maxAgentCalls: "250",
       },
     });
-    const settings = registerWorkflowSettings(bb);
+
+    const settings = registerWorkflowSettings(api);
 
     expect(harness.registrations.settingsDescriptors).toEqual(
       WORKFLOW_SETTING_DESCRIPTORS,
@@ -113,6 +114,7 @@ describe("workflow settings policy", () => {
       next: WorkflowSettings;
       previous: WorkflowSettings;
     }> = [];
+
     settings.onChange((next, previous) => changes.push({ next, previous }));
     await harness.setSettings({ maxConcurrentAgents: 12 });
 
@@ -122,19 +124,22 @@ describe("workflow settings policy", () => {
   });
 
   it("falls back from a nonnumeric legacy stored string", async () => {
-    const { bb } = createFakePluginHost({
+    const { api } = createFakePluginHost({
       pluginId: "workflows",
       settings: { retentionDays: "forever" },
     });
 
-    await expect(registerWorkflowSettings(bb).get()).resolves.toMatchObject({
+    await expect(registerWorkflowSettings(api).get()).resolves.toMatchObject({
       retentionDays: 7,
     });
   });
 
   it("rejects string and out-of-range updates", async () => {
-    const { bb, harness } = createFakePluginHost({ pluginId: "workflows" });
-    const settings = registerWorkflowSettings(bb);
+    const { api, harness } = createFakePluginHost({
+      pluginId: "workflows",
+    });
+
+    const settings = registerWorkflowSettings(api);
     const changes: WorkflowSettings[] = [];
     const errors: string[] = [];
     settings.onChange(

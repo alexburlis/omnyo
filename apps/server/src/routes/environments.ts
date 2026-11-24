@@ -5,12 +5,12 @@ import {
   countLiveThreadsInEnvironment,
   listEnvironments,
   updateEnvironmentMetadata,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   environmentStatusValues,
   type EnvironmentStatus,
   type ThreadPullRequest,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   publicApiRoutes,
   typedRoutes,
@@ -19,7 +19,7 @@ import {
   type EnvironmentDiffQuery,
   type PublicApiSchema,
   type PullRequestMergeMethod,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { Hono } from "hono";
 import type { AppDeps } from "../types.js";
 import {
@@ -81,9 +81,10 @@ import {
 const LISTED_ENVIRONMENT_STATUSES: readonly EnvironmentStatus[] =
   environmentStatusValues.filter((status) => status !== "destroyed");
 
-const COMMIT_FALLBACK_MESSAGE = "bb: automated commit";
+const COMMIT_FALLBACK_MESSAGE = "omnyo: automated commit";
 
 const AI_MAX_DIFF_BYTES = 32_000;
+
 const AI_MAX_FILE_LIST_BYTES = 4_000;
 
 async function mapNoChangesTo409<TResult>(
@@ -96,6 +97,7 @@ async function mapNoChangesTo409<TResult>(
     if (error instanceof ApiError && error.body.code === "no_changes") {
       throw new ApiError(409, "no_changes", conflictMessage);
     }
+
     throw error;
   }
 }
@@ -114,6 +116,7 @@ async function mapPullRequestActionFailureTo409<TResult>(
     ) {
       throw new ApiError(409, "pull_request_action_failed", error.body.message);
     }
+
     throw error;
   }
 }
@@ -139,6 +142,7 @@ function toWorkspaceDiffTarget(query: EnvironmentDiffQuery) {
       };
     default: {
       const _exhaustive: never = query;
+
       return _exhaustive;
     }
   }
@@ -168,6 +172,7 @@ async function getPullRequestForWorkspaceTarget(
       workspaceContext: target.workspaceContext,
     },
   });
+
   return result.outcome === "available"
     ? assembleThreadPullRequest(result.pullRequest)
     : null;
@@ -183,6 +188,7 @@ function requirePullRequest(
       "No pull request found",
     );
   }
+
   return pullRequest;
 }
 
@@ -229,6 +235,7 @@ async function runPullRequestAction(
       "Pull request actions require a git environment",
     );
   }
+
   const target = requireWorkspaceCommandTarget(environment);
   const pullRequest = await getPullRequestForWorkspaceTarget(deps, target);
   assertState(requirePullRequest(pullRequest));
@@ -261,6 +268,7 @@ function resolveDiffFileRef(
       return query.side === "old" ? `${query.sha}^` : query.sha;
     default: {
       const _exhaustive: never = query;
+
       return _exhaustive;
     }
   }
@@ -274,9 +282,11 @@ const NON_GIT_DIFF_NOT_APPLICABLE = {
 
 function resolveGitDiffWorkspaceTarget(deps: AppDeps, environmentId: string) {
   const environment = requireReadyEnvironment(deps.db, environmentId);
+
   if (!environment.isGitRepo) {
     return null;
   }
+
   return requireWorkspaceCommandTarget(environment);
 }
 
@@ -284,9 +294,11 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
   const { del, get, patch, post } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
+
   const routes = publicApiRoutes.environments;
-  post(routes.cleanup, (context) => {
+  post(routes.cleanup, (context, query) => {
     const environment = requireEnvironment(deps.db, context.req.param("id"));
+
     if (
       countLiveThreadsInEnvironment(deps.db, {
         environmentId: environment.id,
@@ -297,12 +309,18 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
         "invalid_request",
         "Environment still has live threads",
       );
-    if (!cleanupEnvironment(deps, environment.id))
+
+    if (
+      !cleanupEnvironment(deps, environment.id, {
+        hookStopped: query.hookStopped,
+      })
+    )
       throw new ApiError(
         409,
         "invalid_request",
         "Environment is not provider-managed",
       );
+
     return context.json({ ok: true } as const);
   });
 
@@ -311,6 +329,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
       limit: query?.limit,
       offset: query?.offset,
     });
+
     return context.json(
       toEnvironmentResponses(
         deps.db,
@@ -334,6 +353,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
 
   del(routes.delete, (context) => {
     const environment = requireEnvironment(deps.db, context.req.param("id"));
+
     if (
       countLiveThreadsInEnvironment(deps.db, {
         environmentId: environment.id,
@@ -345,6 +365,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
         "Environment still has live threads",
       );
     }
+
     if (environment.status !== "destroyed") {
       if (!requestEnvironmentRemoval(deps, environment.id)) {
         throw new ApiError(
@@ -353,10 +374,12 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
           `Environment cannot be deleted while ${environment.status}`,
         );
       }
+
       deps.terminalSessions.closeDestroyedEnvironmentTerminals({
         environmentId: environment.id,
       });
     }
+
     return context.json({ ok: true } as const);
   });
 
@@ -371,21 +394,25 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
 
   patch(routes.update, (context, payload) => {
     const environment = requireEnvironment(deps.db, context.req.param("id"));
+
     const updated = updateEnvironmentMetadata(
       deps.db,
       deps.hub,
       environment.id,
       payload,
     );
+
     if (!updated) {
       throw new ApiError(404, "environment_not_found", "Environment not found");
     }
+
     return context.json(toEnvironmentResponse(deps.db, updated));
   });
 
   post(routes.archiveThreads, (context) => {
     const environment = requireEnvironment(deps.db, context.req.param("id"));
     const archivedThreadIds = archiveEnvironmentThreads(deps, { environment });
+
     return context.json({
       ok: true,
       archivedThreadIds,
@@ -397,6 +424,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
       deps.db,
       context.req.param("id"),
     );
+
     if (!environment.isGitRepo) {
       return context.json({
         outcome: "not_applicable",
@@ -404,7 +432,9 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
         message: "Workspace status is not available for non-git environments",
       });
     }
+
     const target = requireWorkspaceCommandTarget(environment);
+
     const result = await deps.workspaceReadCaches.status.read({
       environmentId: environment.id,
       hostId: target.hostId,
@@ -418,12 +448,14 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
             : {}),
         }),
     });
+
     if (result.outcome === "unavailable") {
       return context.json({
         outcome: "unavailable",
         failure: result.failure,
       });
     }
+
     return context.json({
       outcome: "available",
       workspace: result.workspaceStatus,
@@ -435,10 +467,13 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
       deps.db,
       context.req.param("id"),
     );
+
     if (!environment.isGitRepo) {
       return context.json({ outcome: "absent" });
     }
+
     const target = requireWorkspaceCommandTarget(environment);
+
     const result = await deps.workspaceReadCaches.pullRequest.read({
       environmentId: environment.id,
       hostId: target.hostId,
@@ -454,23 +489,28 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
           },
         }),
     });
+
     if (result.outcome === "available") {
       return context.json({
         outcome: "available",
         pullRequest: assembleThreadPullRequest(result.pullRequest),
       });
     }
+
     if (result.outcome === "unavailable") {
       return context.json({ outcome: "unavailable", message: result.message });
     }
+
     return context.json({ outcome: "absent" });
   });
 
   get(routes.diff, async (context, query) => {
     const target = resolveGitDiffWorkspaceTarget(deps, context.req.param("id"));
+
     if (target === null) {
       return context.json(NON_GIT_DIFF_NOT_APPLICABLE);
     }
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId: target.hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -484,12 +524,14 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
         maxUntrackedFiles: WORKSPACE_DIFF_MAX_FILES,
       },
     });
+
     if (result.outcome === "unavailable") {
       return context.json({
         outcome: "unavailable",
         failure: result.failure,
       });
     }
+
     return context.json({
       outcome: "available",
       diff: result.diff,
@@ -498,9 +540,11 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
 
   get(routes.diffFiles, async (context, query) => {
     const target = resolveGitDiffWorkspaceTarget(deps, context.req.param("id"));
+
     if (target === null) {
       return context.json(NON_GIT_DIFF_NOT_APPLICABLE);
     }
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId: target.hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -512,15 +556,18 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
         maxFiles: WORKSPACE_DIFF_MAX_FILES,
       },
     });
+
     if (result.outcome === "unavailable") {
       return context.json({
         outcome: "unavailable",
         failure: result.failure,
       });
     }
+
     const files = result.files.map(rawDiffFileStatToEntry);
     const initialPatchPaths = selectInitialPatchPaths(files);
     let initialPatches: DiffPatchEntry[] = [];
+
     if (initialPatchPaths.length > 0) {
       const patchResult = await callHostRetryableOnlineRpc(deps, {
         hostId: target.hostId,
@@ -534,10 +581,12 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
           maxBytesPerFile: DIFF_FILE_PATCH_MAX_BYTES,
         },
       });
+
       if (patchResult.outcome === "available") {
         initialPatches = patchResult.patches;
       }
     }
+
     return context.json({
       outcome: "available",
       files,
@@ -550,9 +599,11 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
 
   post(routes.diffPatch, async (context, payload) => {
     const target = resolveGitDiffWorkspaceTarget(deps, context.req.param("id"));
+
     if (target === null) {
       return context.json(NON_GIT_DIFF_NOT_APPLICABLE);
     }
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId: target.hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -565,12 +616,14 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
         maxBytesPerFile: DIFF_FILE_PATCH_MAX_BYTES,
       },
     });
+
     if (result.outcome === "unavailable") {
       return context.json({
         outcome: "unavailable",
         failure: result.failure,
       });
     }
+
     return context.json({
       outcome: "available",
       patches: result.patches,
@@ -582,18 +635,23 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
       deps.db,
       context.req.param("id"),
     );
+
     const repoRelativePath = query.path.replace(/^\/+/u, "");
+
     if (
       repoRelativePath.length === 0 ||
       repoRelativePath.split("/").includes("..")
     ) {
       throw new ApiError(400, "invalid_request", "Invalid path");
     }
+
     const absolutePath = joinHostPathSegments(
       environment.path,
       repoRelativePath,
     );
+
     const ref = resolveDiffFileRef(query);
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId: environment.hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -604,7 +662,9 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
         ...(ref !== undefined ? { ref } : {}),
       },
     }).catch(remapDaemonFileRouteError);
+
     const contentResult = requireDaemonFileContentResult(result);
+
     return context.json({
       path: contentResult.path,
       content: contentResult.content,
@@ -619,8 +679,10 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
       deps.db,
       context.req.param("id"),
     );
+
     const branchQuery = normalizeBranchQuery(query.query);
     const selectedBranch = normalizeBranchQuery(query.selectedBranch);
+
     const result = await callHostRetryableOnlineRpc(deps, {
       hostId: environment.hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -633,6 +695,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
         remoteRefresh: "background",
       },
     });
+
     return context.json({
       branches: result.branches,
       branchesTruncated: result.branchesTruncated,
@@ -647,7 +710,9 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
       deps.db,
       context.req.param("id"),
     );
+
     const limit = parseFileListLimit(query.limit);
+
     const inclusion = parsePathKindInclusion({
       includeFiles: query.includeFiles,
       includeDirectories: query.includeDirectories,
@@ -669,6 +734,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
           excludeNames: [...DEFAULT_PATH_LIST_EXCLUDE_NAMES],
         },
       });
+
       return context.json({
         paths: result.paths,
         truncated: result.truncated,
@@ -677,6 +743,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
       if (error instanceof ApiError && error.body.code === "ENOENT") {
         return context.json({ paths: [], truncated: false });
       }
+
       throw error;
     }
   });
@@ -712,8 +779,10 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
               },
             }),
           ]);
+
           const workspaceStatus = requireAvailableWorkspaceStatus(statusResult);
           const workspaceDiff = requireAvailableWorkspaceDiff(diffResult);
+
           if (!workspaceStatus.workingTree.hasUncommittedChanges) {
             throw new ApiError(
               409,
@@ -728,6 +797,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
             files: workspaceDiff.files,
             patch: workspaceDiff.diff,
           });
+
           const commitMessage = aiMessage ?? COMMIT_FALLBACK_MESSAGE;
 
           const result = await mapNoChangesTo409(
@@ -744,6 +814,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
                 },
               }),
           );
+
           return context.json({
             ok: true,
             action: "commit",
@@ -752,6 +823,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
             commitSubject: result.commitSubject,
           });
         }
+
         case "pull_request_ready": {
           await runPullRequestAction(
             deps,
@@ -759,12 +831,14 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
             { operation: "ready" },
             assertCanMarkPullRequestReady,
           );
+
           return context.json({
             ok: true,
             action: "pull_request_ready",
             message: "Pull request marked ready",
           });
         }
+
         case "pull_request_draft": {
           await runPullRequestAction(
             deps,
@@ -772,12 +846,14 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
             { operation: "draft" },
             assertCanConvertPullRequestToDraft,
           );
+
           return context.json({
             ok: true,
             action: "pull_request_draft",
             message: "Pull request converted to draft",
           });
         }
+
         case "pull_request_merge": {
           await runPullRequestAction(
             deps,
@@ -785,6 +861,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
             { operation: "merge", method: payload.options.method },
             assertCanMergePullRequest,
           );
+
           return context.json({
             ok: true,
             action: "pull_request_merge",
@@ -792,6 +869,7 @@ export function registerEnvironmentRoutes(app: Hono, deps: AppDeps): void {
             message: "Pull request merge started",
           });
         }
+
         default: {
           const _exhaustive: never = payload;
           throw new Error(`Unhandled environment action: ${_exhaustive}`);

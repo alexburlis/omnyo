@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { TerminalSession } from "@bb/server-contract";
+import type { TerminalSession } from "@omnyo/server-contract";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadTerminalContent } from "./ThreadTerminalContent";
@@ -76,6 +76,7 @@ describe("ThreadTerminalContent", () => {
     const rendered = render(
       <ThreadTerminalContent autoFocus={false} controller={controller(true)} />,
     );
+
     const mountedView = rendered.getByTestId("terminal-view");
 
     rendered.rerender(
@@ -99,6 +100,7 @@ describe("ThreadTerminalContent", () => {
     const rendered = render(
       <ThreadTerminalContent autoFocus={false} controller={controller(true)} />,
     );
+
     expect(rendered.queryByTestId("terminal-view")).not.toBeNull();
 
     rendered.rerender(

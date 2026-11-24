@@ -8,6 +8,7 @@ export const threadTimelineModelFallbackSchema = z.object({
   reason: z.enum(["refusal", "provider"]),
   message: z.string(),
 });
+
 export type ThreadTimelineModelFallback = z.infer<
   typeof threadTimelineModelFallbackSchema
 >;

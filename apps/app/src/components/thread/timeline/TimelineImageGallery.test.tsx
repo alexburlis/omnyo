@@ -22,6 +22,7 @@ const clients: QueryClient[] = [];
 
 afterEach(() => {
   cleanup();
+
   for (const client of clients) client.clear();
   clients.length = 0;
   vi.restoreAllMocks();
@@ -32,7 +33,9 @@ function renderTimeline(children: ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+
   clients.push(client);
+
   return render(children, {
     wrapper: ({ children }) => (
       <QueryClientProvider client={client}>
@@ -128,6 +131,7 @@ it("preserves occurrence identity as streaming images settle into cached blocks"
       ]}
     />,
   );
+
   fireEvent.click(screen.getByRole("img", { name: "B" }));
   expect(screen.getByRole("status").textContent).toBe("2 / 2");
   rerender(
@@ -168,6 +172,7 @@ it("preserves occurrence identity as streaming images settle into cached blocks"
 it("preserves identical inline and footnote occurrences when normalized streaming content settles", async () => {
   const text =
     "---\ntitle: Images\n---\n\n$$ x\n y $$\n\nSee[^n].\n\n[^n]: ![Same](https://example.com/same.png)\n\n![Same](https://example.com/same.png)\n";
+
   const timeline = (status: "active" | "idle") => (
     <ThreadTimelineRows
       threadId="thread-1"
@@ -176,6 +181,7 @@ it("preserves identical inline and footnote occurrences when normalized streamin
       timelineRows={[conversationRow({ id: "streaming", text })]}
     />
   );
+
   const { rerender } = renderTimeline(timeline("active"));
   fireEvent.click(screen.getAllByRole("img", { name: "Same" })[1]!);
   expect(screen.getByRole("status").textContent).toBe("2 / 2");
@@ -206,6 +212,7 @@ it("includes lazy turn details only while expanded, including during the collaps
     ],
     olderCursor: null,
   });
+
   const { container } = renderTimeline(
     <ThreadTimelineRows
       threadId="thread-1"
@@ -226,13 +233,17 @@ it("includes lazy turn details only while expanded, including during the collaps
       ]}
     />,
   );
+
   const turn = container.querySelector(
     '[data-timeline-row-id="completed-turn"]',
   );
+
   const toggle = turn?.querySelector("button[aria-expanded]");
+
   if (!(toggle instanceof HTMLButtonElement)) {
     throw new Error("Missing turn toggle");
   }
+
   if (toggle.getAttribute("aria-expanded") === "true") fireEvent.click(toggle);
   fireEvent.click(screen.getByRole("img", { name: "Final" }));
   expect(screen.queryByRole("button", { name: "Next image" })).toBeNull();
@@ -329,6 +340,7 @@ it("keeps the selected image source until close even when no eligible images rem
       <MarkdownPreview content="![Selected](https://example.com/selected.png)" />
     </TimelineImageGallery>,
   );
+
   fireEvent.click(screen.getByRole("img", { name: "Selected" }));
   rerender(
     <TimelineImageGallery>
@@ -367,6 +379,7 @@ it("excludes clipped user-message images until expanded", () => {
       if (this instanceof HTMLImageElement && this.alt === "Clipped") {
         return new DOMRect(0, 300, 100, 100);
       }
+
       return new DOMRect(0, 0, 200, 200);
     },
   );

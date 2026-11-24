@@ -1,8 +1,10 @@
+import { registerNewChatStagedCallback } from "@/lib/send-outbox/new-chat-staging";
 import { createCoreComposerActions } from "@/lib/plugin-composer-handle";
-import { usePendingAttachmentUploads } from "./usePendingAttachmentUploads";
+import type { CapturedAttachmentUploads } from "./usePendingAttachmentUploads";
+import { useDraftAttachmentUploads } from "@/components/thread/embedded-chat/useComposerAttachmentUploads";
 import { useInitialPromptDraft } from "./mentions/initial-prompt-draft";
 import { ProviderRequirementBanner } from "./banner/ProviderRequirementBanner";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import { recordTelemetryEvent } from "@/components/onboarding/onboarding-telemetry";
 import {
   getPluginConfigurationRoutePath,
@@ -15,7 +17,9 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
+import type { PromptBoxHandle } from "@/components/promptbox/PromptBoxInternal";
 import { useNavigate } from "react-router-dom";
 import {
   findLocalPathProjectSourceForHost,
@@ -27,19 +31,19 @@ import {
   type ProjectExecutionDefaults,
   type ReasoningLevel,
   type ServiceTier,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   ExperimentalComposerSelection,
   NewThreadRequest,
   PluginEnvironmentProviderInputsChange,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import type {
   CreateThreadRequest,
   CreateExecutionInputSources,
-  SidebarBootstrapResponse,
+  MachineChoice,
   SystemEnvironmentProvider,
   SystemExecutionOptionsModelLoadError,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { ProjectSelectorCreateProjectConfig } from "@/components/pickers/ProjectSelector";
 import {
   encodeReuseValue,
@@ -61,25 +65,35 @@ import {
   NewThreadPromptBox,
   type NewThreadPromptBoxProps,
 } from "@/components/promptbox/NewThreadPromptBox";
-import { buildProviderPromptActionProps } from "@bb/client-core";
+import {
+  describeWhere,
+  type NewChatDockConfig,
+} from "@/components/promptbox/dock/new-chat-where";
+import { rankLauncherProjects } from "@/components/promptbox/dock/project-ranking";
+import { buildProviderPromptActionProps } from "@omnyo/client-core";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import {
   type PluginComposerHost,
   useComposerHostSelection,
 } from "@/components/plugin/plugin-composer-host";
-import type { ExperimentalComposerSubmitOptions } from "@get-bb/plugin-sdk";
+import type { ExperimentalComposerSubmitOptions } from "@omnyo/plugin-sdk";
 import {
   readExecutionSelection,
+  readExecutionTuple,
   resolveComposerSelectionDeadline,
   useCommittedComposerState,
   waitForSettledComposerState,
   waitUntilComposerStateSettled,
   type CommittedComposerState,
 } from "@/components/promptbox/composer-selection-settle";
-import { newThreadEnvironmentArgsToSeed } from "@/components/plugin/new-thread-environment-seed";
+import type { ModelPickerSelection } from "@/components/pickers/model-picker-selection";
+import type { ModelPickerSelects } from "@/components/pickers/ModelFavoritesBar";
+import {
+  CORE_WORKSPACE_DEFAULT_INPUTS,
+  newThreadEnvironmentArgsToSeed,
+} from "@/components/plugin/new-thread-environment-seed";
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
 import { usePluginSlots } from "@/lib/plugin-slots";
-import { useUploadPromptAttachment } from "@/hooks/mutations/project-mutations";
 import { useSystemEnvironmentProviders } from "@/hooks/queries/environment-provider-queries";
 import { useSystemMachineProviders } from "@/hooks/queries/machine-provider-queries";
 import { usePluginList } from "@/hooks/queries/plugin-settings-queries";
@@ -88,7 +102,6 @@ import {
   selectPrimaryHost,
   useHosts,
 } from "@/hooks/queries/host-queries";
-import { useProjectDefaultExecutionOptions } from "@/hooks/queries/project-default-execution-options-query";
 import {
   stripProjectThreads,
   useProjectPromptHistory,
@@ -101,12 +114,15 @@ import {
   usePromptDraftController,
   usePromptDraftInputEmpty,
   usePromptDraftSnapshot,
+  restoreFailedPromptDraft,
+  getPromptDraftAccessor,
   type PromptDraftController,
   type PromptDraftScope,
 } from "@/hooks/usePromptDraftStorage";
 import { usePromptMentions } from "@/hooks/usePromptMentions";
 import { usePromptBoxMachinePreference } from "@/hooks/thread-creation-options/persisted-selection-fields";
 import { useThreadCreationOptions } from "@/hooks/useThreadCreationOptions";
+import { useHostDaemon } from "@/hooks/useHostDaemon";
 import { useComposerTextEffects } from "@/lib/composer-text-effects";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
 import { promptHistoryEntriesToDrafts } from "@/lib/prompt-history";
@@ -118,17 +134,29 @@ import {
   promptDraftToInput,
   type PromptDraftAttachment,
   type PromptDraftState,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import {
   getProjectComposeRoutePath,
   getThreadRoutePath,
   isProjectlessProjectId,
 } from "@/lib/route-paths";
 import { sdk } from "@/lib/sdk";
+import { prepareComposerAttachmentSubmission } from "@/lib/composer-attachment-submission";
+import {
+  isPendingChatId,
+  reservePendingChatSubmission,
+  resolvePendingThreadDraftScope,
+} from "@/lib/pending-chat-creations";
+import type { ComposerSendSlot } from "@/lib/composer-send-queue";
+import {
+  expectedPluginWait,
+  type ExpectedPluginWait,
+} from "@/lib/expected-plugin-wait";
 import {
   buildReuseThreadOptions,
   resolveHostEnvironmentProvider,
   resolveNewThreadHostEnvironmentProvider,
+  resolveProjectMachine,
   resolveRootComposeEffectiveEnvironmentValue,
   type SeededReuseEnvironment,
 } from "@/views/root-compose-environment-selection";
@@ -140,6 +168,14 @@ import {
 } from "@/components/machines/machine-server-access";
 
 type NewThreadComposerSelectionScope = "new-thread" | "component-local";
+
+const MODEL_PICKER_SELECTS: Record<
+  NewThreadComposerSelectionScope,
+  ModelPickerSelects
+> = {
+  "new-thread": "model-and-effort",
+  "component-local": "model-and-effort",
+};
 
 export interface NewThreadComposerSeed {
   providerId?: string;
@@ -155,6 +191,7 @@ interface NewThreadComposerLocks {
   project?: boolean;
   provider?: boolean;
   environment?: boolean;
+  execution?: boolean;
 }
 
 type ProjectChangeOutcome = "changed" | "unchanged" | "refused";
@@ -174,11 +211,13 @@ interface NewThreadComposerSelectionState extends CommittedComposerState {
   changeEnvironment: (
     value: string,
     providerMachine: EnvironmentMachineSelection | null,
+    inputs?: JsonValue,
   ) => void;
   changeProvider: (providerId: string) => void;
   changeModel: (model: string) => void;
   changeReasoning: (level: ReasoningLevel) => void;
   changeServiceTier: (tier: ServiceTier | undefined) => void;
+  changeExecution: (selection: ModelPickerSelection) => void;
   changePermissionMode: (mode: PermissionMode) => void;
 }
 
@@ -211,6 +250,9 @@ interface NewThreadComposerPromptOptions {
   onRequestMachineSetup?: (host: Host) => void;
   locks?: NewThreadComposerLocks;
   mentionMenuPlacement: NewThreadPromptBoxProps["mentionMenuPlacement"];
+  selectionLayout?: "footer" | "dock" | "stage";
+  projectShelf?: HTMLElement | null;
+  promptBoxRef?: RefObject<PromptBoxHandle | null>;
 }
 
 type ParsedEnvironment = ReturnType<typeof parseEnvironmentValue>;
@@ -219,7 +261,6 @@ export interface NewThreadComposerState {
   projectId: string;
   isProjectless: boolean;
   projects: readonly SidebarProject[] | undefined;
-  sidebarNavigation: SidebarBootstrapResponse | undefined;
   sidebarNavigationError: boolean;
   currentProject: SidebarProject | undefined;
   projectSources: SidebarProject["sources"];
@@ -233,7 +274,6 @@ export interface NewThreadComposerState {
   focusPromptBox: () => void;
   pluginComposerHost: PluginComposerHost;
   textEffects: NewThreadPromptBoxProps["textEffects"];
-  isSubmitting: boolean;
   seedEnvironmentSelectionValue: (value: string) => void;
   hostSelectionReady: boolean;
   selectHostForNewEnvironment: (hostId: string) => void;
@@ -241,29 +281,19 @@ export interface NewThreadComposerState {
     value: string,
     providerHostId?: string | null,
   ) => void;
-  setProviderModelReasoning: (selection: {
-    providerId: string;
-    model: string;
-    reasoningLevel: ReasoningLevel;
-  }) => void;
+  setProviderModelReasoning: (selection: ModelPickerSelection) => void;
   setPermissionMode: (value: PermissionMode) => void;
   setServiceTier: (value: ServiceTier | undefined) => void;
   renderPromptBox: (options: NewThreadComposerPromptOptions) => ReactNode;
 }
 
-export function resolveSubmittedExecutionSources(
-  environment: NewThreadRequest["environment"],
-  sources: CreateExecutionInputSources,
-): CreateExecutionInputSources {
-  return environment.type === "provider" &&
-    environment.machine?.type !== "existing"
-    ? { ...sources, model: "explicit" }
-    : sources;
-}
-
 export interface NewThreadComposerSubmission extends NewThreadRequest {
+  capturedUploads?: CapturedAttachmentUploads;
+  prepareInput?: () => Promise<NewThreadRequest["input"]>;
+  sendReservation?: ComposerSendSlot;
   pluginSubmission?: CreateThreadRequest["pluginSubmission"];
   sendAt?: number;
+  expectedPluginWait?: ExpectedPluginWait;
 }
 
 export interface NewThreadComposerProps {
@@ -305,6 +335,7 @@ function LiveDraftNewThreadPromptBox({
   ...promptBoxProps
 }: LiveDraftNewThreadPromptBoxProps) {
   const draft = usePromptDraftSnapshot(promptDraft);
+
   return (
     <NewThreadPromptBox
       {...promptBoxProps}
@@ -355,16 +386,21 @@ export function resolveNewThreadSubmitDisabledReason({
   submissionEnvironmentUnavailable,
 }: ResolveNewThreadSubmitDisabledReasonArgs): string | null {
   if (isSubmitting) return "Starting thread...";
+
   if (isCopyingAttachments) {
     return "Moving attachments to the selected project...";
   }
+
   if (isUploading) return "Uploading attachments...";
+
   if (projectDefaultsUnavailable) {
     return projectDefaultsStatus === "error"
       ? "Could not load the project's execution defaults."
       : "Loading the project's execution defaults...";
   }
+
   if (!selectedProviderId) return "Select a provider.";
+
   if (isLoadingModels) {
     return "Loading models from the selected machine...";
   }
@@ -373,43 +409,41 @@ export function resolveNewThreadSubmitDisabledReason({
     modelLoadError?.code === "provider_unavailable" ||
     modelLoadError?.code === "missing_executable" ||
     modelLoadError?.code === "auth_required";
+
   if (modelLoadError && (fatalModelLoadError || !selectedThreadModel)) {
     return formatModelLoadErrorText({
       error: modelLoadError,
       providerLabel: providerDisplayName || selectedProviderId,
     });
   }
+
   if (!selectedThreadModel) return "Select a model.";
+
   if (environmentSetupRequiredReason) return environmentSetupRequiredReason;
+
   if (environmentProviderInputsBlocker) return environmentProviderInputsBlocker;
+
   if (submissionEnvironmentUnavailable) return "Select an environment.";
+
   if (promptInputEmpty) return "Enter a prompt or attach a file.";
+
   return null;
 }
 
 export function resolveNewThreadProjectDefaultsState({
   cachedDefaults,
   projectFound,
-  queryData,
-  queryIsError,
-  queryIsPlaceholderData,
-  queryIsSuccess,
 }: {
   cachedDefaults: ProjectExecutionDefaults | null | undefined;
   projectFound: boolean;
-  queryData: ProjectExecutionDefaults | null | undefined;
-  queryIsError: boolean;
-  queryIsPlaceholderData: boolean;
-  queryIsSuccess: boolean;
 }): ProjectDefaultsState {
-  if (cachedDefaults !== null && cachedDefaults !== undefined) {
+  if (cachedDefaults !== undefined) {
     return { status: "resolved", defaults: cachedDefaults };
   }
+
   if (!projectFound) return { status: "pending" };
-  if (queryIsSuccess && !queryIsPlaceholderData) {
-    return { status: "resolved", defaults: queryData ?? null };
-  }
-  return queryIsError ? { status: "error" } : { status: "pending" };
+
+  return { status: "resolved", defaults: null };
 }
 
 function mergeMissingPromptDraftAttachments(
@@ -419,9 +453,11 @@ function mergeMissingPromptDraftAttachments(
   const existingPaths = new Set(
     currentAttachments.map((attachment) => attachment.path),
   );
+
   const missingAttachments = preservedAttachments.filter(
     (attachment) => !existingPaths.has(attachment.path),
   );
+
   return missingAttachments.length === 0
     ? null
     : [...currentAttachments, ...missingAttachments];
@@ -443,6 +479,7 @@ export function restorePromptDraftAfterOptionChange({
 
   let restoredDraft = currentDraft;
   let changed = false;
+
   if (isPromptDraftEmpty(currentDraft) && !isPromptDraftEmpty(preservedDraft)) {
     restoredDraft = preservedDraft;
     changed = true;
@@ -460,10 +497,12 @@ export function restorePromptDraftAfterOptionChange({
     restoredDraft.attachments,
     preservedDraft.attachments,
   );
+
   if (mergedAttachments !== null) {
     restoredDraft = { ...restoredDraft, attachments: mergedAttachments };
     changed = true;
   }
+
   return changed ? restoredDraft : null;
 }
 
@@ -482,11 +521,20 @@ function useDraftPreservingOptionChange<T>(
   );
 }
 
+function providerInputsScopeKey(
+  projectId: string,
+  value: string,
+  hostId: string | null,
+): string {
+  return `${projectId}\0${value}\0${hostId ?? ""}`;
+}
+
 function resolvePanelThreadId(
   environmentId: string | null,
   reuseThreadOptions: ReturnType<typeof buildReuseThreadOptions>,
 ): string | null {
   if (environmentId === null) return null;
+
   return (
     reuseThreadOptions.find((option) => option.environmentId === environmentId)
       ?.threads[0]?.id ?? null
@@ -506,65 +554,92 @@ export function NewThreadComposer({
   children,
 }: NewThreadComposerProps) {
   const navigate = useNavigate();
+
   const [localPromptBoxFocusRequest, setLocalPromptBoxFocusRequest] = useState<
     number | null
   >(null);
+
   const promptBoxFocusRequest =
     focusRequest === undefined && localPromptBoxFocusRequest === null
       ? undefined
       : `${focusRequest ?? ""}:${localPromptBoxFocusRequest ?? ""}`;
 
   const sidebarNavigationQuery = useSidebarNavigation();
+
   const projects = useMemo(
     () => sidebarNavigationQuery.data?.projects.map(stripProjectThreads),
     [sidebarNavigationQuery.data],
   );
+
   const requestedCandidate = requestedProjectId ?? PERSONAL_PROJECT_ID;
+
   const candidateKnown =
     isProjectlessProjectId(requestedCandidate) ||
     (projects?.some((project) => project.id === requestedCandidate) ?? false);
+
   const replayKnowsCandidate =
     !sidebarNavigationQuery.isPlaceholderData || candidateKnown;
+
   const sidebarNavigationSettled =
     sidebarNavigationQuery.isError ||
     (sidebarNavigationQuery.isSuccess && replayKnowsCandidate);
+
   const projectId = useMemo(() => {
     if (isProjectlessProjectId(requestedCandidate)) return PERSONAL_PROJECT_ID;
+
     if (!projects || !replayKnowsCandidate) return requestedCandidate;
+
     return candidateKnown ? requestedCandidate : PERSONAL_PROJECT_ID;
   }, [candidateKnown, projects, replayKnowsCandidate, requestedCandidate]);
+
   const isProjectless = isProjectlessProjectId(projectId);
+
   const currentProject = useMemo(() => {
     if (isProjectless) {
       const personalProject = sidebarNavigationQuery.data?.personalProject;
+
       return personalProject ? stripProjectThreads(personalProject) : undefined;
     }
+
     return projects?.find((project) => project.id === projectId);
   }, [isProjectless, projectId, projects, sidebarNavigationQuery.data]);
+
   const projectSources = useMemo(
     () => currentProject?.sources ?? [],
     [currentProject?.sources],
   );
+
   const projectOptions = useMemo(
     () => projects?.map(({ id, name }) => ({ id, name })) ?? [],
     [projects],
   );
 
   const hostsQuery = useHosts();
+  const { localHostId, isLocalHostLoading } = useHostDaemon();
+
   const availableHosts = useMemo(
     () => selectHosts(hostsQuery.data, "persistent"),
     [hostsQuery.data],
   );
+
   const systemConfigQuery = useSystemConfig();
+
   const primaryHostId =
     selectPrimaryHost(
       availableHosts,
       systemConfigQuery.data?.primaryHostId ?? null,
     )?.id ?? null;
+
+  const defaultThreadMachineId =
+    systemConfigQuery.data?.generalSettings?.defaultThreadMachineId ?? null;
+
+  const defaultHostId = defaultThreadMachineId ?? primaryHostId;
+
   const knownHostIds = useMemo(
     () => new Set(availableHosts.map((host) => host.id)),
     [availableHosts],
   );
+
   const connectedHostIds = useMemo(
     () =>
       new Set(
@@ -574,21 +649,29 @@ export function NewThreadComposer({
       ),
     [availableHosts],
   );
+
   const worktreeHostNameById = useMemo(() => {
     const hosts = availableHosts;
+
     return hosts.length <= 1
       ? null
       : new Map(hosts.map((host) => [host.id, host.name]));
   }, [availableHosts]);
+
   const projectThreads = useMemo(() => {
     const navigation = sidebarNavigationQuery.data;
+
     if (!navigation) return undefined;
+
     if (isProjectless) return navigation.personalProject.threads;
+
     return navigation.projects.find((project) => project.id === projectId)
       ?.threads;
   }, [isProjectless, projectId, sidebarNavigationQuery.data]);
+
   const reuseThreadOptionsLoading =
     projectThreads === undefined && !sidebarNavigationSettled;
+
   const threadDerivedReuseOptions = useMemo(
     () => buildReuseThreadOptions(projectThreads ?? [], worktreeHostNameById),
     [projectThreads, worktreeHostNameById],
@@ -596,6 +679,7 @@ export function NewThreadComposer({
 
   const { providers: registeredEnvironmentProviders } =
     useSystemEnvironmentProviders();
+
   const environmentProviders = useMemo(
     () =>
       registeredEnvironmentProviders?.filter((provider) =>
@@ -605,9 +689,12 @@ export function NewThreadComposer({
       ),
     [isProjectless, registeredEnvironmentProviders],
   );
+
   const { providers: projectEnvironmentProviders } =
     useSystemEnvironmentProviders({ projectId });
+
   const projectGitRemoteUrl = currentProject?.gitRemoteUrl;
+
   const environmentProvidersByHostId = useMemo(
     () =>
       new Map(
@@ -642,6 +729,7 @@ export function NewThreadComposer({
       projectSources,
     ],
   );
+
   const { providers: machineProviders } = useSystemMachineProviders();
   const pluginList = usePluginList({ enabled: true });
 
@@ -655,6 +743,7 @@ export function NewThreadComposer({
     seed?.permissionMode ?? null,
     seed?.environment ?? null,
   ]);
+
   const environmentSeed = useMemo(
     () =>
       seed?.environment === undefined
@@ -662,35 +751,45 @@ export function NewThreadComposer({
         : newThreadEnvironmentArgsToSeed(seed.environment),
     [seed?.environment],
   );
+
   const seededReuseEnvironmentId = useMemo(() => {
     if (environmentSeed === null) return null;
     const parsed = parseEnvironmentValue(environmentSeed.selectionValue);
+
     return parsed?.type === "reuse" ? parsed.environmentId : null;
   }, [environmentSeed]);
+
   const seededReuseIsThreadDerived =
     seededReuseEnvironmentId !== null &&
     threadDerivedReuseOptions.some(
       (option) => option.environmentId === seededReuseEnvironmentId,
     );
+
   const seededReuseLookupId =
     seededReuseEnvironmentId !== null && !seededReuseIsThreadDerived
       ? seededReuseEnvironmentId
       : null;
+
   const seededReuseEnvironmentQuery = useEnvironment(seededReuseLookupId);
+
   const seededReuseEnvironmentRow =
     seededReuseLookupId !== null &&
     seededReuseEnvironmentQuery.data?.id === seededReuseLookupId &&
     seededReuseEnvironmentQuery.data.status !== "destroyed"
       ? seededReuseEnvironmentQuery.data
       : null;
+
   const seededReuseEnvironment = useMemo<SeededReuseEnvironment | null>(() => {
     if (seededReuseEnvironmentId === null) return null;
+
     if (seededReuseIsThreadDerived) {
       return { environmentId: seededReuseEnvironmentId, status: "available" };
     }
+
     if (seededReuseEnvironmentQuery.isPending) {
       return { environmentId: seededReuseEnvironmentId, status: "pending" };
     }
+
     return {
       environmentId: seededReuseEnvironmentId,
       status: seededReuseEnvironmentRow === null ? "missing" : "available",
@@ -701,8 +800,10 @@ export function NewThreadComposer({
     seededReuseEnvironmentRow,
     seededReuseIsThreadDerived,
   ]);
+
   const reuseThreadOptions = useMemo(() => {
     if (seededReuseEnvironmentRow === null) return threadDerivedReuseOptions;
+
     return [
       ...threadDerivedReuseOptions,
       {
@@ -712,6 +813,7 @@ export function NewThreadComposer({
         path: seededReuseEnvironmentRow.path,
         environmentProviderId:
           seededReuseEnvironmentRow.environmentProviderId ?? null,
+        hostId: seededReuseEnvironmentRow.hostId,
         hostName:
           worktreeHostNameById?.get(seededReuseEnvironmentRow.hostId) ?? null,
         threads: [],
@@ -722,14 +824,18 @@ export function NewThreadComposer({
     threadDerivedReuseOptions,
     worktreeHostNameById,
   ]);
+
   const { value: storedMachineId, setValue: setStoredMachineId } =
     usePromptBoxMachinePreference(projectId);
+
   const [activeSeedSignature, setActiveSeedSignature] = useState(seedSignature);
   const [seedOverridden, setBranchSeedOverridden] = useState(false);
+
   const [pickedProviderMachine, setPickedProviderMachine] = useState<{
     selectionValue: string;
     machine: EnvironmentMachineSelection;
   } | null>(null);
+
   if (activeSeedSignature !== seedSignature) {
     setActiveSeedSignature(seedSignature);
     setBranchSeedOverridden(false);
@@ -742,14 +848,21 @@ export function NewThreadComposer({
     ): {
       provider: SystemEnvironmentProvider;
       machine: EnvironmentMachineSelection | null;
+      machineChoice: MachineChoice;
     } | null => {
       const parsedValue = parseEnvironmentValue(effectiveValue);
+
       if (parsedValue?.type !== "provider") return null;
+
       const provider = environmentProviders?.find(
         (candidate) => candidate.id === parsedValue.environmentProviderId,
       );
+
       if (provider === undefined) return null;
-      if (provider.machineProviderId) return { provider, machine: null };
+
+      if (provider.machineProviderId)
+        return { provider, machine: null, machineChoice: "explicit" };
+
       const usable = (hostId: string | null): boolean =>
         hostId !== null &&
         knownHostIds.has(hostId) &&
@@ -761,32 +874,43 @@ export function NewThreadComposer({
               candidate.availability?.status !== "unavailable",
           ) ??
           false);
+
       const picked =
         pickedProviderMachine?.selectionValue === effectiveValue
           ? pickedProviderMachine.machine
           : null;
-      if (picked !== null) return { provider, machine: picked };
+
+      if (picked !== null)
+        return { provider, machine: picked, machineChoice: "explicit" };
+
       const seeded =
         !seedOverridden &&
         environmentSeed !== null &&
         environmentSeed.selectionValue === effectiveValue
           ? environmentSeed.providerMachine
           : null;
-      const remembered: EnvironmentMachineSelection | null =
-        selectionScope === "new-thread" && storedMachineId !== ""
-          ? { type: "existing", hostId: storedMachineId }
-          : null;
-      const candidate = seeded ?? remembered;
-      if (candidate?.type === "new") return { provider, machine: candidate };
-      if (usable(candidate?.hostId ?? null)) {
-        return { provider, machine: candidate };
-      }
+
+      if (seeded !== null)
+        return { provider, machine: seeded, machineChoice: "explicit" };
+
+      const hostId = resolveProjectMachine({
+        defaultThreadMachineId,
+        rememberedHostId:
+          selectionScope === "new-thread" && storedMachineId !== ""
+            ? storedMachineId
+            : null,
+        localHostId,
+        primaryHostId,
+        sources: projectSources,
+        hostOrder: availableHosts.map((host) => host.id),
+        connectedHostIds,
+        isUsable: usable,
+      });
+
       return {
         provider,
-        machine:
-          primaryHostId !== null && usable(primaryHostId)
-            ? { type: "existing", hostId: primaryHostId }
-            : null,
+        machine: hostId === null ? null : { type: "existing", hostId },
+        machineChoice: "default",
       };
     },
     [
@@ -796,15 +920,21 @@ export function NewThreadComposer({
       environmentProvidersByHostId,
       knownHostIds,
       pickedProviderMachine,
+      defaultThreadMachineId,
       selectionScope,
       storedMachineId,
       primaryHostId,
+      localHostId,
+      connectedHostIds,
+      projectSources,
+      availableHosts,
     ],
   );
 
   const resolveProviderRouting = useCallback(
     (environmentSelectionValue: string) => {
       const effectiveValue = resolveRootComposeEffectiveEnvironmentValue({
+        defaultThreadMachineId,
         environmentSelectionValue,
         environmentProviders,
         isProjectless,
@@ -815,13 +945,17 @@ export function NewThreadComposer({
         reuseThreadOptionsLoading,
         seededReuseEnvironment,
       });
+
       const providerSelection = resolveProviderSelection(effectiveValue);
+
       if (providerSelection !== null) {
         return providerSelection.machine?.type !== "existing"
           ? {}
           : { hostId: providerSelection.machine.hostId };
       }
+
       const parsed = parseEnvironmentValue(effectiveValue);
+
       return parsed?.type === "reuse" && parsed.environmentId !== null
         ? { environmentId: parsed.environmentId }
         : {};
@@ -830,6 +964,7 @@ export function NewThreadComposer({
       environmentProviders,
       isProjectless,
       knownHostIds,
+      defaultThreadMachineId,
       primaryHostId,
       projectSources,
       resolveProviderSelection,
@@ -838,33 +973,33 @@ export function NewThreadComposer({
       seededReuseEnvironment,
     ],
   );
-  const projectDefaultsQuery = useProjectDefaultExecutionOptions(
-    { projectId },
-    {
-      enabled:
-        currentProject !== undefined &&
-        currentProject.defaultExecutionOptions === null,
-    },
-  );
+
   const projectDefaultsState = resolveNewThreadProjectDefaultsState({
     cachedDefaults: currentProject?.defaultExecutionOptions,
     projectFound: currentProject !== undefined,
-    queryData: projectDefaultsQuery.data,
-    queryIsError: projectDefaultsQuery.isError,
-    queryIsPlaceholderData: projectDefaultsQuery.isPlaceholderData,
-    queryIsSuccess: projectDefaultsQuery.isSuccess,
   });
+
   const projectDefaults =
     projectDefaultsState.status === "resolved"
       ? projectDefaultsState.defaults
       : undefined;
+
   const projectDefaultsUnavailable =
     projectDefaultsState.status !== "resolved" &&
     (seed?.providerId === undefined ||
       seed?.model === undefined ||
       seed?.reasoningLevel === undefined ||
       seed?.permissionMode === undefined);
+
+  const providerRoutingReady =
+    !isLocalHostLoading &&
+    !hostsQuery.isPending &&
+    !systemConfigQuery.isPending &&
+    sidebarNavigationSettled &&
+    environmentProviders !== undefined;
+
   const creationOptions = useThreadCreationOptions({
+    enabled: providerRoutingReady && !projectDefaultsUnavailable,
     scope: selectionScope,
     preferenceProjectId: projectId,
     resetKey: `${projectId}\0${seedSignature}`,
@@ -880,21 +1015,26 @@ export function NewThreadComposer({
       seed?.permissionMode ?? projectDefaults?.permissionMode,
     initialEnvironmentSelectionValue: environmentSeed?.selectionValue,
   });
+
   const {
     activeModel,
+    catalogModelOptions,
     executionInputSources,
     executionOptionsRouting,
     environmentSelectionValue,
     hasMultipleProviders,
     isLoadingModels,
     modelCatalogIsSettled,
+    modelCatalogIsVerified,
     modelLoadError,
+    modelNotice,
     modelLoadFailed,
     modelOptions,
     moreModelOptions,
     permissionMode,
     permissionModeOptions,
     providerOptions,
+    providers: executionProviders,
     reasoningLevel,
     reasoningOptions,
     selectedModel,
@@ -916,9 +1056,12 @@ export function NewThreadComposer({
     clearReuseEnvironment,
     declaredSessionOptions,
     sessionOptionSelections,
+    sessionOptionSelectionsForProvider,
     setSessionOption,
   } = creationOptions;
+
   const selectedThreadModel = activeModel?.model ?? selectedModel;
+
   const placedSessionOptions = useMemo(
     () =>
       splitSessionOptionsByPlacement(
@@ -934,6 +1077,7 @@ export function NewThreadComposer({
       sessionOptionSelections,
     ],
   );
+
   const pickerSessionOptionSections = useMemo(
     () =>
       buildSessionOptionMenuSections(
@@ -942,6 +1086,7 @@ export function NewThreadComposer({
       ),
     [placedSessionOptions.picker],
   );
+
   const providerIds = useMemo(
     () => providerOptions.map((option) => option.value),
     [providerOptions],
@@ -950,43 +1095,71 @@ export function NewThreadComposer({
   const promptDraft = usePromptDraftController(draftStorage);
   const textEffects = useComposerTextEffects(promptDraft.storageKey);
   const promptOptionDraftSnapshotRef = useRef<PromptDraftState | null>(null);
+
   const snapshotDraftBeforeOptionChange = useCallback(() => {
     const currentDraft = promptDraft.getCurrent();
     promptOptionDraftSnapshotRef.current = isPromptDraftEmpty(currentDraft)
       ? null
       : currentDraft;
   }, [promptDraft]);
+
   useEffect(() => {
     const preservedDraft = promptOptionDraftSnapshotRef.current;
+
     if (preservedDraft === null) return;
     promptOptionDraftSnapshotRef.current = null;
+
     const restoredDraft = restorePromptDraftAfterOptionChange({
       currentDraft: promptDraft.getCurrent(),
       preservedDraft,
     });
+
     if (restoredDraft !== null) promptDraft.setDraft(restoredDraft);
   });
+
+  const [environmentProviderInputsOverride, setProviderInputsOverride] =
+    useState<{ scopeKey: string; value: JsonValue | null } | null>(null);
+
+  const [environmentProviderInputsBlocked, setProviderInputsBlocked] =
+    useState<{ scopeKey: string; reason: string } | null>(null);
 
   const changeEnvironment = useCallback(
     (
       value: string,
       providerTarget: string | EnvironmentMachineSelection | null = null,
+      inputs?: JsonValue,
     ) => {
       const providerMachine =
         typeof providerTarget === "string"
           ? { type: "existing" as const, hostId: providerTarget }
           : providerTarget;
+
       const currentProviderMachine =
         pickedProviderMachine?.selectionValue === value
           ? pickedProviderMachine.machine
           : null;
+
+      const inputsScopeKey = providerInputsScopeKey(
+        projectId,
+        value,
+        providerMachine?.type === "existing" ? providerMachine.hostId : null,
+      );
+
+      const inputsUnchanged =
+        inputs === undefined ||
+        (environmentProviderInputsOverride?.scopeKey === inputsScopeKey &&
+          JSON.stringify(environmentProviderInputsOverride.value) ===
+            JSON.stringify(inputs));
+
       if (
         Object.is(environmentSelectionValue, value) &&
         JSON.stringify(providerMachine) ===
-          JSON.stringify(currentProviderMachine)
+          JSON.stringify(currentProviderMachine) &&
+        inputsUnchanged
       ) {
         return;
       }
+
       snapshotDraftBeforeOptionChange();
       setBranchSeedOverridden(true);
       setPickedProviderMachine(
@@ -994,6 +1167,12 @@ export function NewThreadComposer({
           ? null
           : { selectionValue: value, machine: providerMachine },
       );
+
+      if (inputs !== undefined) {
+        setProviderInputsBlocked(null);
+        setProviderInputsOverride({ scopeKey: inputsScopeKey, value: inputs });
+      }
+
       if (
         selectionScope === "new-thread" &&
         parseEnvironmentValue(value)?.type === "provider"
@@ -1002,20 +1181,25 @@ export function NewThreadComposer({
           providerMachine?.type === "existing" ? providerMachine.hostId : "",
         );
       }
+
       setCreationEnvironmentSelectionValue(value);
     },
     [
+      environmentProviderInputsOverride,
       environmentSelectionValue,
       pickedProviderMachine,
+      projectId,
       setCreationEnvironmentSelectionValue,
       selectionScope,
       setStoredMachineId,
       snapshotDraftBeforeOptionChange,
     ],
   );
+
   const effectiveEnvironmentValue = useMemo(
     () =>
       resolveRootComposeEffectiveEnvironmentValue({
+        defaultThreadMachineId,
         environmentSelectionValue,
         environmentProviders,
         isProjectless,
@@ -1031,6 +1215,7 @@ export function NewThreadComposer({
       environmentProviders,
       isProjectless,
       knownHostIds,
+      defaultThreadMachineId,
       primaryHostId,
       projectSources,
       reuseThreadOptions,
@@ -1038,15 +1223,19 @@ export function NewThreadComposer({
       seededReuseEnvironment,
     ],
   );
+
   const parsedEnvironment = useMemo(
     () => parseEnvironmentValue(effectiveEnvironmentValue),
     [effectiveEnvironmentValue],
   );
+
   const providerSelection = useMemo(
     () => resolveProviderSelection(effectiveEnvironmentValue),
     [effectiveEnvironmentValue, resolveProviderSelection],
   );
+
   const selectedEnvironmentProvider = providerSelection?.provider;
+
   const inputEnvironmentProvider =
     selectedEnvironmentProvider?.environmentProviderId
       ? environmentProviders?.find(
@@ -1054,9 +1243,14 @@ export function NewThreadComposer({
             provider.id === selectedEnvironmentProvider.environmentProviderId,
         )
       : selectedEnvironmentProvider;
+
   const providerMachine = providerSelection?.machine ?? null;
+
+  const providerMachineChoice = providerSelection?.machineChoice ?? "explicit";
+
   const providerHostId =
     providerMachine?.type === "existing" ? providerMachine.hostId : null;
+
   const selectedProviderMachineUnavailable =
     providerHostId !== null &&
     !(
@@ -1068,6 +1262,7 @@ export function NewThreadComposer({
             provider.availability?.status !== "unavailable",
         ) ?? false
     );
+
   const handleSelectProvider = useCallback(
     (provider: SystemEnvironmentProvider, hostId: string | null) => {
       changeEnvironment(
@@ -1077,35 +1272,21 @@ export function NewThreadComposer({
     },
     [changeEnvironment],
   );
-  const handleSelectHost = useCallback(
-    (hostId: string) => {
-      const provider = resolveHostEnvironmentProvider({
-        currentProvider: selectedEnvironmentProvider ?? null,
-        providers: environmentProvidersByHostId.get(hostId) ?? [],
-      });
-      if (provider === null) return;
-      changeEnvironment(encodeProviderValue(provider.id), {
-        type: "existing",
-        hostId,
-      });
-    },
-    [
-      changeEnvironment,
-      environmentProvidersByHostId,
-      selectedEnvironmentProvider,
-    ],
-  );
+
   const selectHostForNewEnvironment = useCallback(
     (hostId: string) => {
       if (!knownHostIds.has(hostId)) return;
+
       const currentProviderId =
         parsedEnvironment?.type === "provider"
           ? parsedEnvironment.environmentProviderId
           : null;
+
       const provider = resolveNewThreadHostEnvironmentProvider({
         currentProviderId,
         providers: environmentProvidersByHostId.get(hostId) ?? [],
       });
+
       if (provider === null) return;
       changeEnvironment(encodeProviderValue(provider.id), hostId);
     },
@@ -1116,12 +1297,14 @@ export function NewThreadComposer({
       parsedEnvironment,
     ],
   );
+
   const selectedMachineProvider =
     providerMachine?.type === "new"
       ? machineProviders?.find(
           (provider) => provider.id === providerMachine.machineProviderId,
         )
       : undefined;
+
   const configurationMachineProvider =
     selectedMachineProvider ??
     (selectedEnvironmentProvider?.machineProviderId === null ||
@@ -1131,32 +1314,48 @@ export function NewThreadComposer({
           (provider) =>
             provider.id === selectedEnvironmentProvider.machineProviderId,
         ));
+
   const configurationPlugin =
     configurationMachineProvider === undefined
       ? undefined
       : pluginList.data?.plugins.find(
           (plugin) => plugin.id === configurationMachineProvider.pluginId,
         );
+
   const setupRequiredProvider =
     configurationPlugin?.status === "needs-configuration" &&
     configurationMachineProvider !== undefined
       ? configurationMachineProvider
       : null;
-  const environmentSetupRequiredReason =
-    setupRequiredProvider === null
+
+  const projectCheckoutMissing =
+    !isProjectless &&
+    providerHostId !== null &&
+    (selectedEnvironmentProvider?.requires.projectCheckout ||
+      selectedEnvironmentProvider?.requires.gitCheckout) &&
+    findLocalPathProjectSourceForHost(projectSources, providerHostId) ===
+      undefined;
+
+  const environmentSetupRequiredReason = projectCheckoutMissing
+    ? `Set up ${currentProject?.name ?? "this project"} on ${availableHosts.find((host) => host.id === providerHostId)?.name ?? "the selected machine"}.`
+    : setupRequiredProvider === null
       ? null
       : (configurationPlugin?.statusDetail ??
         `${setupRequiredProvider.displayName} needs setting up.`);
+
   const serverAccess = systemConfigQuery.data?.serverAccess;
+
   const machineServerAccessReason =
     selectedEnvironmentProvider?.machineProviderId == null
       ? null
       : machineServerAccessBlockedReason(serverAccess);
-  const [environmentProviderInputsOverride, setProviderInputsOverride] =
-    useState<{ scopeKey: string; value: JsonValue | null } | null>(null);
-  const [environmentProviderInputsBlocked, setProviderInputsBlocked] =
-    useState<{ scopeKey: string; reason: string } | null>(null);
-  const environmentProviderInputsScopeKey = `${projectId}\0${effectiveEnvironmentValue}\0${providerHostId ?? ""}`;
+
+  const environmentProviderInputsScopeKey = providerInputsScopeKey(
+    projectId,
+    effectiveEnvironmentValue,
+    providerHostId,
+  );
+
   const handleProviderInputsChange = useCallback(
     (next: PluginEnvironmentProviderInputsChange) => {
       if (next.status === "blocked") {
@@ -1167,13 +1366,16 @@ export function NewThreadComposer({
           ) {
             return current;
           }
+
           return {
             scopeKey: environmentProviderInputsScopeKey,
             reason: next.reason,
           };
         });
+
         return;
       }
+
       setProviderInputsBlocked(null);
       setProviderInputsOverride((current) => {
         if (
@@ -1182,6 +1384,7 @@ export function NewThreadComposer({
         ) {
           return current;
         }
+
         return {
           scopeKey: environmentProviderInputsScopeKey,
           value: next.value,
@@ -1190,22 +1393,27 @@ export function NewThreadComposer({
     },
     [environmentProviderInputsScopeKey],
   );
+
   const activeProviderInputsOverride =
     environmentProviderInputsOverride !== null &&
     environmentProviderInputsOverride.scopeKey ===
       environmentProviderInputsScopeKey
       ? environmentProviderInputsOverride
       : null;
+
   const activeProviderInputsBlocked =
     environmentProviderInputsBlocked?.scopeKey ===
     environmentProviderInputsScopeKey
       ? environmentProviderInputsBlocked
       : null;
+
   const providerTakesInputs =
     inputEnvironmentProvider !== undefined &&
     inputEnvironmentProvider.inputs !== null;
+
   const pluginSlots = usePluginSlots();
   const environmentProviderInputsSlots = pluginSlots.environmentProviderInputs;
+
   const inputsControlProviderIds = useMemo(() => {
     const pluginIdByProviderId = new Map(
       (environmentProviders ?? []).map((provider) => [
@@ -1213,6 +1421,7 @@ export function NewThreadComposer({
         provider.pluginId,
       ]),
     );
+
     const ids = new Set(
       environmentProviderInputsSlots
         .filter(
@@ -1222,6 +1431,7 @@ export function NewThreadComposer({
         )
         .map((slot) => slot.environmentProviderId),
     );
+
     for (const provider of environmentProviders ?? []) {
       if (
         provider.environmentProviderId &&
@@ -1229,8 +1439,32 @@ export function NewThreadComposer({
       )
         ids.add(provider.id);
     }
+
     return ids;
   }, [environmentProviderInputsSlots, environmentProviders]);
+
+  const handleSelectHost = useCallback(
+    (hostId: string) => {
+      const provider = resolveHostEnvironmentProvider({
+        currentProvider: selectedEnvironmentProvider ?? null,
+        providers: environmentProvidersByHostId.get(hostId) ?? [],
+        inputsControlProviderIds,
+      });
+
+      if (provider === null) return;
+      changeEnvironment(encodeProviderValue(provider.id), {
+        type: "existing",
+        hostId,
+      });
+    },
+    [
+      changeEnvironment,
+      environmentProvidersByHostId,
+      inputsControlProviderIds,
+      selectedEnvironmentProvider,
+    ],
+  );
+
   const environmentProviderInputsRegistration = useMemo(() => {
     if (
       inputEnvironmentProvider === undefined ||
@@ -1238,27 +1472,41 @@ export function NewThreadComposer({
     ) {
       return undefined;
     }
+
     return environmentProviderInputsSlots.find(
       (slot) =>
         slot.environmentProviderId === inputEnvironmentProvider.id &&
         slot.pluginId === inputEnvironmentProvider.pluginId,
     );
   }, [environmentProviderInputsSlots, inputEnvironmentProvider]);
+
   const controlRequiredForSelectedProvider =
     inputEnvironmentProvider !== undefined &&
     providerInputsControlRequired(inputEnvironmentProvider);
+
   const submissionProviderInputs = useMemo((): JsonValue | null => {
     if (!providerTakesInputs) return null;
+
     if (activeProviderInputsOverride !== null) {
       return activeProviderInputsOverride.value;
     }
+
     const seededInputs =
       !seedOverridden &&
       environmentSeed !== null &&
       effectiveEnvironmentValue === environmentSeed.selectionValue
         ? environmentSeed.providerInputs
         : null;
+
     if (seededInputs !== null) return seededInputs;
+
+    const defaultInputs =
+      inputEnvironmentProvider === undefined
+        ? undefined
+        : CORE_WORKSPACE_DEFAULT_INPUTS.get(inputEnvironmentProvider.id);
+
+    if (defaultInputs !== undefined) return defaultInputs;
+
     return environmentProviderInputsRegistration === undefined &&
       !controlRequiredForSelectedProvider
       ? {}
@@ -1270,13 +1518,16 @@ export function NewThreadComposer({
     effectiveEnvironmentValue,
     environmentSeed,
     environmentProviderInputsRegistration,
+    inputEnvironmentProvider,
     providerTakesInputs,
   ]);
+
   const environmentInputsPending =
     providerTakesInputs &&
     environmentProviderInputsRegistration !== undefined &&
     activeProviderInputsBlocked === null &&
     submissionProviderInputs === null;
+
   const environmentProviderInputsBlocker =
     inputEnvironmentProvider === undefined || !providerTakesInputs
       ? null
@@ -1288,9 +1539,11 @@ export function NewThreadComposer({
           : submissionProviderInputs === null
             ? `Configure ${inputEnvironmentProvider.displayName}`
             : null;
+
   const environmentProviderInputsSlot = useMemo(() => {
     if (environmentProviderInputsRegistration === undefined) return null;
     const InputsComponent = environmentProviderInputsRegistration.component;
+
     return (
       <PluginSlotMount
         pluginId={environmentProviderInputsRegistration.pluginId}
@@ -1333,6 +1586,7 @@ export function NewThreadComposer({
           acceptsEmptyInputs:
             selectedEnvironmentProvider.machineAcceptsEmptyInputs,
         };
+
   const seededMachineInputs =
     !seedOverridden &&
     environmentSeed?.selectionValue === effectiveEnvironmentValue &&
@@ -1341,12 +1595,15 @@ export function NewThreadComposer({
       compositionMachineProvider?.id
       ? environmentSeed.providerMachine.inputs
       : undefined;
+
   const machineProviderInputs = useMachineProviderInputs({
     provider: compositionMachineProvider,
     initialValue: seededMachineInputs,
     instanceId: `new-thread-${projectId}`,
   });
+
   const compositionMachineProviderId = compositionMachineProvider?.id ?? null;
+
   const compositionMachineInputsSchema =
     compositionMachineProvider?.inputs ?? null;
 
@@ -1365,6 +1622,7 @@ export function NewThreadComposer({
                 inputs: machineProviderInputs.value,
               }
             : providerMachine,
+        providerMachineChoice,
         providerInputs: submissionProviderInputs,
       }),
     [
@@ -1375,101 +1633,89 @@ export function NewThreadComposer({
       compositionMachineInputsSchema,
       compositionMachineProviderId,
       machineProviderInputs.value,
+      providerMachineChoice,
       providerMachine,
     ],
   );
 
+  const attachmentTargetHostId =
+    parsedEnvironment?.type === "reuse"
+      ? (projectThreads?.find(
+          (thread) => thread.environmentId === parsedEnvironment.environmentId,
+        )?.environmentHostId ??
+        (seededReuseEnvironmentRow?.id === parsedEnvironment.environmentId
+          ? seededReuseEnvironmentRow.hostId
+          : null))
+      : selectedEnvironment?.type === "provider" &&
+          selectedEnvironment.machine?.type === "existing"
+        ? selectedEnvironment.machine.hostId
+        : null;
+
   const initialPromptDraft = useInitialPromptDraft(seed?.initialPrompt ?? null);
   const seedInitialPrompt = promptDraft.restoreIfEmpty;
+
   const focusPromptBox = useCallback(() => {
     setLocalPromptBoxFocusRequest((current) => (current ?? 0) + 1);
   }, []);
+
   useEffect(() => {
     if (!initialPromptDraft?.text) return;
     seedInitialPrompt(initialPromptDraft);
   }, [initialPromptDraft, seedInitialPrompt]);
-  const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [isCopyingAttachments, setIsCopyingAttachments] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const pendingUploadCountRef = useRef(0);
   const isCopyingAttachmentsRef = useRef(false);
   const isSubmittingRef = useRef(false);
-  const uploadPromptAttachment = useUploadPromptAttachment();
-  const uploadTargetKey = `${projectId}\0${promptDraft.storageKey}`;
-  const { pendingUploads, startUploads, finishUploads } =
-    usePendingAttachmentUploads(uploadTargetKey);
-  const currentUploadTargetRef = useRef(uploadTargetKey);
-  useEffect(() => {
-    currentUploadTargetRef.current = uploadTargetKey;
-  }, [uploadTargetKey]);
-  const handleAttachFiles = useCallback(
-    async (files: File[]) => {
-      const added: PromptDraftAttachment[] = [];
-      if (!projectId || files.length === 0) return added;
-      const capturedTarget = `${projectId}\0${promptDraft.storageKey}`;
-      setAttachmentError(null);
-      pendingUploadCountRef.current += 1;
-      setIsUploading(true);
-      const uploads = startUploads(files);
-      try {
-        for (const upload of uploads) {
-          try {
-            const uploaded = await uploadPromptAttachment.mutateAsync({
-              projectId,
-              file: upload.file,
-            });
-            if (currentUploadTargetRef.current !== capturedTarget) return added;
-            promptDraft.addAttachment(uploaded);
-            added.push(uploaded);
-          } catch (error) {
-            if (currentUploadTargetRef.current === capturedTarget) {
-              setAttachmentError(
-                getMutationErrorMessage({
-                  error,
-                  fallbackMessage: "Attachment upload failed",
-                }),
-              );
-            }
-            break;
-          } finally {
-            finishUploads([upload]);
-          }
-        }
-      } finally {
-        finishUploads(uploads);
-        pendingUploadCountRef.current -= 1;
-        setIsUploading(pendingUploadCountRef.current > 0);
-      }
-      return added;
+
+  const addUploadedAttachment = useCallback(
+    (attachment: PromptDraftAttachment) => {
+      getPromptDraftAccessor(
+        resolvePendingThreadDraftScope(draftStorage),
+      ).addAttachment(attachment);
     },
-    [
-      projectId,
-      promptDraft,
-      uploadPromptAttachment,
-      startUploads,
-      finishUploads,
-    ],
+    [draftStorage],
   );
+
+  const {
+    attachmentError,
+    setAttachmentError,
+    handleAttachFiles,
+    isAttachingFiles: isUploading,
+    pendingUploads,
+    capturePendingUploads,
+  } = useDraftAttachmentUploads({
+    projectId,
+    target: {
+      key: promptDraft.storageKey,
+      addAttachment: addUploadedAttachment,
+    },
+  });
+
   const changeProject = useCallback(
     async (nextProjectId: string | null): Promise<ProjectChangeOutcome> => {
       const nextValue = nextProjectId ?? PERSONAL_PROJECT_ID;
+
       if (nextValue === projectId) return "unchanged";
+
       if (
         isCopyingAttachmentsRef.current ||
-        pendingUploadCountRef.current > 0 ||
+        pendingUploads.length > 0 ||
         isSubmittingRef.current
       ) {
         return "refused";
       }
+
       const attachmentPaths = getProjectStoredPromptAttachmentPaths(
         promptDraft.getCurrent().attachments,
       );
+
       isCopyingAttachmentsRef.current = true;
       setIsCopyingAttachments(true);
+
       try {
         if (attachmentPaths.length > 0) {
           setAttachmentError(null);
+
           try {
             await sdk.projects.attachments.copy({
               projectId: nextValue,
@@ -1484,19 +1730,30 @@ export function NewThreadComposer({
                   "Attachments could not be moved to the selected project",
               }),
             );
+
             return "refused";
           }
         }
+
         snapshotDraftBeforeOptionChange();
         await onProjectChange(nextValue);
+
         return "changed";
       } finally {
         isCopyingAttachmentsRef.current = false;
         setIsCopyingAttachments(false);
       }
     },
-    [onProjectChange, projectId, promptDraft, snapshotDraftBeforeOptionChange],
+    [
+      onProjectChange,
+      projectId,
+      promptDraft,
+      snapshotDraftBeforeOptionChange,
+      pendingUploads.length,
+      setAttachmentError,
+    ],
   );
+
   const handleProjectChange = useCallback(
     async (nextProjectId: string | null) => {
       await changeProject(nextProjectId);
@@ -1508,12 +1765,17 @@ export function NewThreadComposer({
     parsedEnvironment?.type === "reuse"
       ? parsedEnvironment.environmentId
       : null;
+
   const projectHostId =
-    reuseEnvironmentId !== null ? null : (providerHostId ?? primaryHostId);
+    !providerRoutingReady || reuseEnvironmentId !== null
+      ? null
+      : (providerHostId ?? defaultHostId);
+
   const panelThreadId = resolvePanelThreadId(
     reuseEnvironmentId,
     reuseThreadOptions,
   );
+
   const promptMentions = usePromptMentions(
     isProjectless ? undefined : projectId,
     {
@@ -1522,10 +1784,12 @@ export function NewThreadComposer({
       threadStorageThreadId: panelThreadId ?? undefined,
     },
   );
+
   const defaultMentionLinkResolver = useCallback<PromptMentionLinkResolver>(
     (resource) => {
       if (resource.kind === "thread") {
         const targetProjectId = resource.projectId ?? projectId;
+
         return () =>
           navigate(
             getThreadRoutePath({
@@ -1534,26 +1798,28 @@ export function NewThreadComposer({
             }),
           );
       }
+
       if (resource.kind === "project") {
         return () => navigate(getProjectComposeRoutePath(resource.projectId));
       }
+
       return null;
     },
     [navigate, projectId],
   );
+
   const [commandState, setCommandState] = useState<{
     query: string | null;
-    trigger: import("@bb/domain").PromptMentionCommandTrigger | null;
+    trigger: import("@omnyo/domain").PromptMentionCommandTrigger | null;
   }>({ query: null, trigger: null });
-  const [hasComposerFocused, setHasComposerFocused] = useState(false);
-  const handleEditorFocus = useCallback(() => {
-    setHasComposerFocused(true);
-  }, []);
+
   const providerPromptActions = useMemo(
     () => buildProviderPromptActionProps(selectedProviderComposerActions),
     [selectedProviderComposerActions],
   );
+
   const { promptActions } = providerPromptActions;
+
   const commandSuggestions = useCommandSuggestions({
     projectId,
     providerId: selectedProviderId,
@@ -1564,24 +1830,29 @@ export function NewThreadComposer({
     environmentId: reuseEnvironmentId,
     hostId: projectHostId,
     query: commandState.query,
-    composerFocused: hasComposerFocused,
   });
+
   const promptHistoryEnabled = usePromptHistoryEnabled();
+
   const { data: projectPromptHistory = [] } = useProjectPromptHistory(
     projectId,
     { enabled: promptHistoryEnabled && sidebarNavigationSettled },
   );
+
   const promptHistoryDrafts = useMemo(
     () => promptHistoryEntriesToDrafts(projectPromptHistory),
     [projectPromptHistory],
   );
+
   const promptInputEmpty = usePromptDraftInputEmpty(promptDraft);
+
   const submitProgrammaticallyRef = useRef<
     (
       options: ExperimentalComposerSubmitOptions,
       pluginSubmission: NewThreadComposerSubmission["pluginSubmission"],
     ) => Promise<void>
   >(async () => {});
+
   const submitProgrammaticallyThroughRef = useCallback(
     (
       options: ExperimentalComposerSubmitOptions,
@@ -1589,6 +1860,7 @@ export function NewThreadComposer({
     ) => submitProgrammaticallyRef.current(options, pluginSubmission),
     [],
   );
+
   const seededExecutionInputSources = useMemo(
     (): CreateExecutionInputSources => ({
       ...(seed?.providerId !== undefined
@@ -1615,20 +1887,22 @@ export function NewThreadComposer({
       supportsServiceTier,
     ],
   );
+
   const submissionEnvironment = selectedProviderMachineUnavailable
     ? null
     : (selectedEnvironment ??
       (selectionScope === "new-thread" ? seed?.environment : undefined) ??
       null);
+
   const submissionReadinessReason = resolveNewThreadSubmitDisabledReason({
     environmentProviderInputsBlocker:
       machineProviderInputs.blockedReason ?? environmentProviderInputsBlocker,
     environmentSetupRequiredReason:
       environmentSetupRequiredReason ?? machineServerAccessReason,
     isCopyingAttachments,
-    isLoadingModels,
-    isSubmitting,
-    isUploading,
+    isLoadingModels: isLoadingModels && selectedThreadModel.length === 0,
+    isSubmitting: false,
+    isUploading: false,
     modelLoadError,
     projectDefaultsStatus: projectDefaultsState.status,
     projectDefaultsUnavailable,
@@ -1638,39 +1912,89 @@ export function NewThreadComposer({
     selectedThreadModel,
     submissionEnvironmentUnavailable: submissionEnvironment === null,
   });
+
   const submitDisabledReason =
-    submissionReadinessReason ??
-    (promptInputEmpty ? "Enter a prompt or attach a file." : null);
+    (isSubmitting ? "Starting thread..." : submissionReadinessReason) ??
+    (promptInputEmpty && pendingUploads.length === 0
+      ? "Enter a prompt or attach a file."
+      : null);
+
   const submitDraft = useCallback(
     async (
       blockedReason: string | null,
       submitOptions: ExperimentalComposerSubmitOptions | null,
       pluginSubmission?: NewThreadComposerSubmission["pluginSubmission"],
+      explicitDraft?: PromptDraftState,
+      explicitUploads?: CapturedAttachmentUploads | null,
+      sendReservation?: ComposerSendSlot,
     ) => {
-      const submittedDraft = promptDraft.getCurrent();
+      const submittedDraft = explicitDraft ?? promptDraft.getCurrent();
       const input = promptDraftToInput(submittedDraft);
+      let heldWait: ExpectedPluginWait | undefined;
+      let invalidHint: string | null = null;
+
+      try {
+        heldWait = expectedPluginWait(submitOptions, pluginSubmission);
+      } catch (hintError) {
+        invalidHint =
+          hintError instanceof Error ? hintError.message : String(hintError);
+      }
+
+      const hasPendingUploads =
+        explicitDraft === undefined
+          ? pendingUploads.length > 0
+          : (explicitUploads?.files.length ?? 0) > 0;
+
       if (
         blockedReason !== null ||
+        invalidHint !== null ||
         submissionReadinessReason !== null ||
-        input.length === 0 ||
-        isSubmittingRef.current ||
+        (input.length === 0 && !hasPendingUploads) ||
+        (explicitDraft === undefined && isSubmittingRef.current) ||
         projectDefaultsUnavailable ||
         submissionEnvironment === null ||
         !selectedProviderId ||
         !selectedThreadModel
       ) {
+        sendReservation?.cancel();
+
+        if (explicitDraft !== undefined) {
+          explicitUploads?.restore();
+          restoreFailedPromptDraft(
+            resolvePendingThreadDraftScope(draftStorage),
+            submittedDraft,
+          );
+        }
+
         throw new Error(
           blockedReason ??
+            invalidHint ??
             submissionReadinessReason ??
             (input.length === 0
               ? "Type a message first."
               : "This composer is not ready to submit yet."),
         );
       }
+
       const sources: CreateExecutionInputSources = {
+        providerId: "client-preference",
+        model: "client-preference",
+        reasoningLevel: "client-preference",
         ...executionInputSources,
         ...seededExecutionInputSources,
       };
+
+      const uploads =
+        explicitDraft === undefined
+          ? capturePendingUploads()
+          : (explicitUploads ?? null);
+
+      const attachmentSubmission = prepareComposerAttachmentSubmission({
+        scope: draftStorage,
+        draft: submittedDraft,
+        uploads,
+      });
+
       const request: NewThreadComposerSubmission = {
         projectId,
         providerId: selectedProviderId,
@@ -1681,49 +2005,91 @@ export function NewThreadComposer({
         ...(Object.keys(sessionOptionSelections).length > 0
           ? { sessionOptions: sessionOptionSelections }
           : {}),
-        executionInputSources: resolveSubmittedExecutionSources(
-          submissionEnvironment,
-          sources,
-        ),
+        executionInputSources: sources,
         environment: submissionEnvironment,
-        input,
+        input: attachmentSubmission.input,
+        ...(sendReservation === undefined ? {} : { sendReservation }),
+        ...(uploads === null
+          ? {}
+          : {
+              capturedUploads: uploads,
+              prepareInput: attachmentSubmission.prepareInput,
+            }),
         ...(submitOptions?.sendAt === undefined
           ? {}
           : { sendAt: submitOptions.sendAt }),
         ...(pluginSubmission === undefined ? {} : { pluginSubmission }),
+        ...(heldWait === undefined ? {} : { expectedPluginWait: heldWait }),
       };
-      isSubmittingRef.current = true;
-      setIsSubmitting(true);
+
+      if (explicitDraft === undefined) {
+        isSubmittingRef.current = true;
+        setIsSubmitting(true);
+      }
+
       setAttachmentError(null);
+
       const clearedSubmittedDraft =
+        explicitDraft === undefined &&
         promptDraft.clearIfCurrentMatches(submittedDraft);
+
       recordTelemetryEvent({
         name: "new_thread_submit",
         properties: { outcome: "started" },
       });
+
       try {
-        await onSubmit(request);
+        let submission: void | Promise<void>;
+
+        try {
+          registerNewChatStagedCallback(request, () =>
+            attachmentSubmission.complete(),
+          );
+          submission = onSubmit(request);
+
+          if (explicitDraft === undefined) clearReuseEnvironment();
+        } finally {
+          if (explicitDraft === undefined) {
+            isSubmittingRef.current = false;
+            setIsSubmitting(false);
+          }
+        }
+
+        await submission;
+        attachmentSubmission.complete();
         recordTelemetryEvent({
           name: "new_thread_submit",
           properties: { outcome: "accepted" },
         });
-        clearReuseEnvironment();
       } catch (submitError) {
         recordTelemetryEvent({
           name: "new_thread_submit",
           properties: { outcome: "failed" },
         });
-        if (clearedSubmittedDraft) {
-          promptDraft.restoreIfEmpty(submittedDraft);
+
+        if (
+          clearedSubmittedDraft ||
+          explicitDraft !== undefined ||
+          uploads !== null
+        ) {
+          attachmentSubmission.restoreFailed((failedDraft) =>
+            restoreFailedPromptDraft(
+              resolvePendingThreadDraftScope(draftStorage),
+              failedDraft,
+            ),
+          );
+        } else {
+          attachmentSubmission.complete();
         }
+
         throw submitError;
-      } finally {
-        isSubmittingRef.current = false;
-        setIsSubmitting(false);
       }
     },
     [
       clearReuseEnvironment,
+      capturePendingUploads,
+      pendingUploads.length,
+      draftStorage,
       executionInputSources,
       onSubmit,
       permissionMode,
@@ -1738,8 +2104,17 @@ export function NewThreadComposer({
       selectedThreadModel,
       serviceTier,
       sessionOptionSelections,
+      setAttachmentError,
       supportsServiceTier,
     ],
+  );
+
+  const submitExplicitDraft = useCallback<
+    NonNullable<PluginComposerHost["submitDraft"]>
+  >(
+    (draft, options, pluginSubmission, reservation, uploads) =>
+      submitDraft(null, options, pluginSubmission, draft, uploads, reservation),
+    [submitDraft],
   );
 
   const handleSubmit = useCallback(
@@ -1750,6 +2125,7 @@ export function NewThreadComposer({
     },
     [submitDraft],
   );
+
   useEffect(() => {
     submitProgrammaticallyRef.current = async (
       submitOptions,
@@ -1764,41 +2140,90 @@ export function NewThreadComposer({
     setSelectedProviderId,
     snapshotDraftBeforeOptionChange,
   );
+
   const handleModelChange = useDraftPreservingOptionChange(
     selectedModel,
     setSelectedModel,
     snapshotDraftBeforeOptionChange,
   );
+
   const handleReasoningChange = useDraftPreservingOptionChange(
     reasoningLevel,
     setReasoningLevel,
     snapshotDraftBeforeOptionChange,
   );
+
   const handlePermissionChange = useDraftPreservingOptionChange(
     permissionMode,
     setPermissionMode,
     snapshotDraftBeforeOptionChange,
   );
+
   const handleServiceTierChange = useDraftPreservingOptionChange(
     serviceTier,
     setServiceTier,
     snapshotDraftBeforeOptionChange,
   );
+
   const handleWorktreeChange = useCallback(
     (environmentId: string) => {
       changeEnvironment(encodeReuseValue(environmentId));
     },
     [changeEnvironment],
   );
+
   const handleSelectReuse = useCallback(() => {
     changeEnvironment(REUSE_VALUE_WITHOUT_ENVIRONMENT);
   }, [changeEnvironment]);
 
   const pickerLocksRef = useRef<NewThreadComposerLocks>({});
+
+  const applyExecutionTuple = useCallback(
+    (selection: ModelPickerSelection) => {
+      const locks = pickerLocksRef.current;
+
+      if (
+        locks.execution ||
+        (locks.provider && selection.providerId !== selectedProviderId)
+      ) {
+        return;
+      }
+
+      const changesServiceTier =
+        selection.serviceTier !== undefined &&
+        serviceTierSupportByProvider[selection.providerId] === true &&
+        selection.serviceTier !== serviceTier;
+
+      if (
+        selection.providerId === selectedProviderId &&
+        selection.model === selectedThreadModel &&
+        selection.reasoningLevel === reasoningLevel &&
+        !changesServiceTier
+      ) {
+        return;
+      }
+
+      snapshotDraftBeforeOptionChange();
+      setProviderModelReasoning(selection);
+    },
+    [
+      reasoningLevel,
+      selectedProviderId,
+      selectedThreadModel,
+      serviceTier,
+      serviceTierSupportByProvider,
+      setProviderModelReasoning,
+      snapshotDraftBeforeOptionChange,
+    ],
+  );
+
   const selectionState =
     useCommittedComposerState<NewThreadComposerSelectionState>((version) => ({
       version,
-      isSettled: modelCatalogIsSettled && !environmentInputsPending,
+      isSettled:
+        providerRoutingReady &&
+        modelCatalogIsSettled &&
+        !environmentInputsPending,
       requestedProjectId: requestedCandidate,
       projectId,
       selectedProviderId,
@@ -1815,8 +2240,10 @@ export function NewThreadComposer({
       changeModel: handleModelChange,
       changeReasoning: handleReasoningChange,
       changeServiceTier: handleServiceTierChange,
+      changeExecution: applyExecutionTuple,
       changePermissionMode: handlePermissionChange,
     }));
+
   const composerSelection = useMemo(
     () => ({
       projectId,
@@ -1843,11 +2270,14 @@ export function NewThreadComposer({
       supportsServiceTier,
     ],
   );
+
   const { getSelection, subscribeSelection } = useComposerHostSelection(
     promptDraft.storageKey,
     composerSelection,
   );
+
   const pendingSelectionRef = useRef<Promise<unknown>>(Promise.resolve());
+
   const applySelection = useCallback(
     async (
       selection: ExperimentalComposerSelection,
@@ -1855,6 +2285,7 @@ export function NewThreadComposer({
       const deadline = resolveComposerSelectionDeadline();
       const { observer } = selectionState;
       let state = await observer.waitUntil(() => true, deadline);
+
       const settle = async (requireSettled: boolean) => {
         state = await waitForSettledComposerState(
           selectionState,
@@ -1862,14 +2293,20 @@ export function NewThreadComposer({
           requireSettled,
         );
       };
+
       const ensureSettled = async () => {
         if (state.isSettled) return;
         state = await waitUntilComposerStateSettled(selectionState, deadline);
       };
+
       const locks = pickerLocksRef.current;
+      let projectRefused = false;
+
       if (selection.projectId !== undefined && !locks.project) {
         const requestedProjectId = selection.projectId;
         const outcome = await state.changeProject(requestedProjectId);
+        projectRefused = outcome === "refused";
+
         if (outcome === "changed") {
           state = await observer.waitUntil(
             (next) => next.requestedProjectId === requestedProjectId,
@@ -1877,64 +2314,144 @@ export function NewThreadComposer({
           );
         }
       }
-      if (selection.environment !== undefined && !locks.environment) {
+
+      if (
+        selection.environment !== undefined &&
+        !locks.environment &&
+        !projectRefused
+      ) {
         const seed = newThreadEnvironmentArgsToSeed(selection.environment);
+
         if (seed !== null) {
-          state.changeEnvironment(seed.selectionValue, seed.providerMachine);
+          state.changeEnvironment(
+            seed.selectionValue,
+            seed.providerMachine,
+            seed.appliedInputs,
+          );
           await settle(false);
         }
       }
+
       if (selection.providerId !== undefined) await ensureSettled();
-      if (
-        selection.providerId !== undefined &&
-        !locks.provider &&
-        selection.providerId !== state.selectedProviderId &&
-        state.providerIds.includes(selection.providerId)
-      ) {
-        state.changeProvider(selection.providerId);
+
+      const requestedTuple = readExecutionTuple(selection, state.providerIds);
+
+      const executionTuple =
+        requestedTuple !== null &&
+        !locks.execution &&
+        (!locks.provider ||
+          requestedTuple.providerId === state.selectedProviderId)
+          ? requestedTuple
+          : null;
+
+      if (executionTuple !== null) {
+        state.changeExecution(executionTuple);
         await settle(true);
+      } else {
+        if (
+          selection.providerId !== undefined &&
+          !locks.provider &&
+          selection.providerId !== state.selectedProviderId &&
+          state.providerIds.includes(selection.providerId)
+        ) {
+          state.changeProvider(selection.providerId);
+          await settle(true);
+        }
+
+        const providerMatches =
+          selection.providerId === undefined ||
+          state.selectedProviderId === selection.providerId;
+
+        if (
+          providerMatches &&
+          !locks.execution &&
+          selection.model !== undefined
+        ) {
+          await ensureSettled();
+          state.changeModel(selection.model);
+          await settle(false);
+        }
+
+        if (
+          providerMatches &&
+          !locks.execution &&
+          selection.reasoningLevel !== undefined
+        ) {
+          await ensureSettled();
+          state.changeReasoning(selection.reasoningLevel);
+          await settle(false);
+        }
+
+        if (
+          !locks.execution &&
+          selection.serviceTier !== undefined &&
+          state.supportsServiceTier
+        ) {
+          state.changeServiceTier(selection.serviceTier);
+          await settle(false);
+        }
       }
-      const providerMatches =
-        selection.providerId === undefined ||
-        state.selectedProviderId === selection.providerId;
-      if (providerMatches && selection.model !== undefined) {
-        await ensureSettled();
-        state.changeModel(selection.model);
-        await settle(false);
-      }
-      if (providerMatches && selection.reasoningLevel !== undefined) {
-        await ensureSettled();
-        state.changeReasoning(selection.reasoningLevel);
-        await settle(false);
-      }
-      if (selection.serviceTier !== undefined && state.supportsServiceTier) {
-        state.changeServiceTier(selection.serviceTier);
-        await settle(false);
-      }
-      if (selection.permissionMode !== undefined) {
+
+      if (!locks.execution && selection.permissionMode !== undefined) {
         state.changePermissionMode(selection.permissionMode);
         await settle(false);
       }
+
       await settle(true);
+
       return readNewThreadComposerSelection(state);
     },
     [selectionState],
   );
+
   const setSelection = useCallback(
     (selection: ExperimentalComposerSelection) => {
       const run = pendingSelectionRef.current.then(
         () => applySelection(selection),
         () => applySelection(selection),
       );
+
       pendingSelectionRef.current = run;
+
       return run;
     },
     [applySelection],
   );
 
+  const rankedProjectIds = useMemo(
+    () =>
+      rankLauncherProjects(
+        sidebarNavigationQuery.data?.projects ?? [],
+        Date.now(),
+      ),
+    [sidebarNavigationQuery.data],
+  );
+
+  const dockConfig = useMemo<NewChatDockConfig>(
+    () => ({
+      where: describeWhere(
+        submissionEnvironment,
+        isProjectless,
+        reuseThreadOptions,
+      ),
+      defaultThreadMachineId,
+      rankedProjectIds,
+      select: setSelection,
+    }),
+    [
+      defaultThreadMachineId,
+      isProjectless,
+      rankedProjectIds,
+      reuseThreadOptions,
+      setSelection,
+      submissionEnvironment,
+    ],
+  );
+
   const pluginComposerHost = useMemo<PluginComposerHost>(
     () => ({
       scope: { kind: "new-thread", projectId },
+      draftScope: draftStorage,
       textEffectKey: promptDraft.storageKey,
       getCurrent: promptDraft.getCurrent,
       subscribeDraft: promptDraft.subscribe,
@@ -1943,10 +2460,20 @@ export function NewThreadComposer({
       setDraft: promptDraft.setDraft,
       focus: focusPromptBox,
       submit: submitProgrammaticallyThroughRef,
+      submitDraft: submitExplicitDraft,
+      captureAttachments: capturePendingUploads,
+      ...(draftStorage.kind === "thread" &&
+      isPendingChatId(draftStorage.threadId)
+        ? {
+            reserveSubmission: () =>
+              reservePendingChatSubmission(draftStorage.threadId),
+          }
+        : {}),
       setSelection,
     }),
     [
       focusPromptBox,
+      draftStorage,
       getSelection,
       projectId,
       promptDraft.getCurrent,
@@ -1956,6 +2483,8 @@ export function NewThreadComposer({
       setSelection,
       subscribeSelection,
       submitProgrammaticallyThroughRef,
+      submitExplicitDraft,
+      capturePendingUploads,
     ],
   );
 
@@ -1970,10 +2499,12 @@ export function NewThreadComposer({
       const locks = options.locks ?? {};
       pickerLocksRef.current = locks;
       const disabledReason = options.blockedReason ?? submitDisabledReason;
+
       return (
         <LiveDraftNewThreadPromptBox
           promptDraft={promptDraft}
           id={options.id}
+          promptBoxRef={options.promptBoxRef}
           focusRequest={promptBoxFocusRequest}
           onChange={promptDraft.setTextAndMentions}
           onSubmit={() => void handleSubmit(options.blockedReason ?? null)}
@@ -1995,6 +2526,7 @@ export function NewThreadComposer({
               triggers: promptMentions.triggers,
               results: promptMentions.results,
               isLoading: promptMentions.isLoading,
+              isRefreshing: promptMentions.isRefreshing,
               isError: promptMentions.isError,
               onQueryChange: promptMentions.setQuery,
               resolveLink:
@@ -2004,18 +2536,20 @@ export function NewThreadComposer({
               triggers: commandSuggestions.triggers,
               suggestions: commandSuggestions.suggestions,
               isLoading: commandSuggestions.isLoading,
+              isUpdating: commandSuggestions.isUpdating,
               isError: commandSuggestions.isError,
+              errorMessage: commandSuggestions.errorMessage,
               hasMore: commandSuggestions.hasMore,
               isLoadingMore: commandSuggestions.isLoadingMore,
               loadMore: commandSuggestions.loadMore,
               onQueryChange: (query, trigger) =>
                 setCommandState({ query, trigger }),
-              onEditorFocus: handleEditorFocus,
             },
           }}
           attachments={{
             pendingUploads,
             projectId,
+            targetHostId: attachmentTargetHostId,
             onAttachFiles: handleAttachFiles,
             onUpdate: promptDraft.updateAttachments,
             isAttaching: isUploading || isCopyingAttachments,
@@ -2049,18 +2583,23 @@ export function NewThreadComposer({
               value: permissionMode,
               options: permissionModeOptions,
               onChange: handlePermissionChange,
-              supported: supportsPermissionModeSelection,
+              supported: supportsPermissionModeSelection && !locks.execution,
             },
             sessionOptionsControl:
-              placedSessionOptions.footer.length === 0 ? null : (
+              placedSessionOptions.footer.length === 0 ||
+              locks.execution ? null : (
                 <SessionOptionsMenu
                   options={placedSessionOptions.footer}
                   choices={NO_SESSION_OPTION_CHOICES}
                   onChange={setSessionOption}
                 />
               ),
-            environmentProviderInputsSlot,
-            machineProviderInputsSlot: machineProviderInputs.control,
+            environmentProviderInputsSlot: locks.environment
+              ? null
+              : environmentProviderInputsSlot,
+            machineProviderInputsSlot: locks.environment
+              ? null
+              : machineProviderInputs.control,
             banner:
               options.banner ??
               (machineServerAccessReason !== null ? (
@@ -2116,13 +2655,33 @@ export function NewThreadComposer({
               isSubmitting,
             showChevronWhenDisabled: !locks.project,
           }}
+          dock={
+            options.selectionLayout === "dock" ||
+            options.selectionLayout === "stage"
+              ? dockConfig
+              : undefined
+          }
+          dockLayout={
+            options.selectionLayout === "stage" ? "stage" : "launcher"
+          }
+          projectShelf={options.projectShelf ?? null}
           execution={{
+            disabled: locks.execution,
             providerRouting: executionOptionsRouting,
+            catalog: {
+              providers: executionProviders,
+              verified: modelCatalogIsVerified,
+              modelOptions: catalogModelOptions,
+            },
+            selection: { onChange: applyExecutionTuple },
+            favoriteChips: !locks.provider && !locks.execution,
+            selects: MODEL_PICKER_SELECTS[selectionScope],
             provider: {
               options: providerOptions,
               selectedId: selectedProviderId,
               onChange: locks.provider ? undefined : handleProviderChange,
               hasMultiple: hasMultipleProviders,
+              sessionOptionSelectionsForProvider,
             },
             model: {
               active: activeModel,
@@ -2132,13 +2691,13 @@ export function NewThreadComposer({
               isLoading: isLoadingModels,
               loadFailed: modelLoadFailed,
               loadError: modelLoadError,
+              notice: modelNotice,
               onChange: handleModelChange,
             },
             serviceTier: {
               value: serviceTier,
               onChange: handleServiceTierChange,
               supported: supportsServiceTier,
-              supportByProvider: serviceTierSupportByProvider,
               options: serviceTierOptions,
             },
             reasoning: {
@@ -2160,15 +2719,18 @@ export function NewThreadComposer({
     },
     [
       activeModel,
+      applyExecutionTuple,
       attachmentError,
+      attachmentTargetHostId,
+      catalogModelOptions,
       commandSuggestions,
       defaultMentionLinkResolver,
       effectiveEnvironmentValue,
       environmentProviders,
       environmentProvidersByHostId,
       executionOptionsRouting,
+      executionProviders,
       handleAttachFiles,
-      handleEditorFocus,
       handleModelChange,
       handlePermissionChange,
       handleProjectChange,
@@ -2186,8 +2748,11 @@ export function NewThreadComposer({
       isProjectless,
       isSubmitting,
       isUploading,
+      dockConfig,
       pendingUploads,
+      modelCatalogIsVerified,
       modelLoadError,
+      modelNotice,
       modelLoadFailed,
       modelOptions,
       moreModelOptions,
@@ -2210,8 +2775,9 @@ export function NewThreadComposer({
       reuseThreadOptions,
       selectedModel,
       selectedProviderId,
+      selectionScope,
       serviceTier,
-      serviceTierSupportByProvider,
+      sessionOptionSelectionsForProvider,
       sidebarNavigationSettled,
       supportsPermissionModeSelection,
       supportsServiceTier,
@@ -2239,7 +2805,6 @@ export function NewThreadComposer({
         projectId,
         isProjectless,
         projects,
-        sidebarNavigation: sidebarNavigationQuery.data,
         sidebarNavigationError: sidebarNavigationQuery.isError,
         currentProject,
         projectSources,
@@ -2253,13 +2818,8 @@ export function NewThreadComposer({
         focusPromptBox,
         pluginComposerHost,
         textEffects,
-        isSubmitting,
         seedEnvironmentSelectionValue: setCreationEnvironmentSelectionValue,
-        hostSelectionReady:
-          sidebarNavigationSettled &&
-          !hostsQuery.isPending &&
-          registeredEnvironmentProviders !== undefined &&
-          projectEnvironmentProviders !== undefined,
+        hostSelectionReady: providerRoutingReady,
         selectHostForNewEnvironment,
         setEnvironmentSelectionValue: changeEnvironment,
         setProviderModelReasoning,

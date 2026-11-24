@@ -12,7 +12,7 @@ import {
   threads,
   updateAttachmentBackfill,
   type DbConnection,
-} from "@bb/db";
+} from "@omnyo/db";
 import type { AppDeps } from "../../types.js";
 import {
   inventoryAttachmentReference,
@@ -22,6 +22,7 @@ import {
 } from "./attachments.js";
 
 type MaintenanceDeps = Pick<AppDeps, "db" | "config" | "logger">;
+
 interface AttachmentMaintenanceState {
   inventoryWalkers: Map<string, AsyncGenerator<string>>;
   backfillRunning: boolean;
@@ -36,6 +37,7 @@ const maintenanceStates = new WeakMap<
 
 function getMaintenanceState(db: DbConnection): AttachmentMaintenanceState {
   let state = maintenanceStates.get(db);
+
   if (!state) {
     state = {
       inventoryWalkers: new Map(),
@@ -45,6 +47,7 @@ function getMaintenanceState(db: DbConnection): AttachmentMaintenanceState {
     };
     maintenanceStates.set(db, state);
   }
+
   return state;
 }
 
@@ -65,18 +68,22 @@ export async function runProjectAttachmentBackfill(
   now = Date.now(),
 ): Promise<void> {
   const maintenance = getMaintenanceState(deps.db);
+
   if (maintenance.backfillRunning) return;
   maintenance.backfillRunning = true;
   let projectId: string | null = null;
+
   try {
     projectId =
       maintenance.inventoryWalkers.keys().next().value ??
       nextProjectAttachmentBackfill(deps.db, now);
+
     if (projectId === null) return;
     let state = ensureProjectAttachmentBackfill(deps.db, projectId);
     state = { ...state, attemptedAt: now, error: null };
     updateAttachmentBackfill(deps.db, state);
     const started = performance.now();
+
     for (
       let count = 0;
       count < limits.maxSteps &&
@@ -86,11 +93,14 @@ export async function runProjectAttachmentBackfill(
       if (state.phase === "files") {
         const walkers = maintenance.inventoryWalkers;
         let walker = walkers.get(projectId);
+
         if (!walker) {
           walker = walkProjectAttachmentFiles(deps.config.dataDir, projectId);
           walkers.set(projectId, walker);
         }
+
         const entry = await walker.next();
+
         if (entry.done) {
           walkers.delete(projectId);
           state = startAttachmentBackfillPhase(state, "events");
@@ -102,9 +112,11 @@ export async function runProjectAttachmentBackfill(
             entry.value,
           );
         }
+
         updateAttachmentBackfill(deps.db, state);
       } else if (state.phase !== "done") {
         const step = readAttachmentBackfillInput(deps.db, state);
+
         if (step.paths.length > 0)
           await inventoryAttachmentReferences(
             deps.db,
@@ -150,6 +162,7 @@ export async function runProjectAttachmentBackfill(
         .where(eq(projectAttachmentBackfills.projectId, projectId))
         .run();
     }
+
     deps.logger.warn(
       { err: error, projectId },
       "Attachment backfill paused; cleanup remains disabled",
@@ -166,6 +179,7 @@ export async function pruneProjectAttachments(
 ) {
   const state = ensureProjectAttachmentBackfill(deps.db, projectId);
   const running = getMaintenanceState(deps.db).runningPrunes;
+
   if (running.has(projectId))
     return {
       status: "busy" as const,
@@ -173,6 +187,7 @@ export async function pruneProjectAttachments(
       reclaimedBytes: 0,
       failedCount: 0,
     };
+
   if (state.phase !== "done")
     return {
       status: "backfill-pending" as const,
@@ -184,6 +199,7 @@ export async function pruneProjectAttachments(
   let reclaimedCount = 0;
   let reclaimedBytes = 0;
   let failedCount = 0;
+
   try {
     for (const attachment of claimProjectAttachments(deps.db, projectId, now)) {
       try {
@@ -206,13 +222,16 @@ export async function pruneProjectAttachments(
           "Attachment deletion will retry",
         );
       }
+
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
+
     if (reclaimedCount > 0)
       deps.logger.info(
         { projectId, reclaimedCount, reclaimedBytes },
         "Reclaimed project attachments",
       );
+
     return {
       status: "complete" as const,
       reclaimedCount,
@@ -229,6 +248,7 @@ export async function runProjectAttachmentPrune(
   now: number,
 ): Promise<void> {
   const maintenance = getMaintenanceState(deps.db);
+
   const row = deps.db
     .select({ id: projectAttachmentBackfills.projectId })
     .from(projectAttachmentBackfills)
@@ -241,6 +261,8 @@ export async function runProjectAttachmentPrune(
     .orderBy(asc(projectAttachmentBackfills.projectId))
     .limit(1)
     .get();
+
   maintenance.pruneCursor = row?.id ?? "";
+
   if (row) await pruneProjectAttachments(deps, row.id, now);
 }

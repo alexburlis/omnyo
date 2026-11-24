@@ -1,53 +1,57 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppCommandId } from "@bb/domain";
+import type { AppCommandId } from "@omnyo/domain";
 import type {
-  BbDesktopApi,
-  BbDesktopBrowserFindResult,
-  BbDesktopBrowserOpenTabRequest,
-  BbDesktopBrowserScopedOpenTabRequest,
-  BbDesktopBrowserSnapshot,
-  BbDesktopBrowserState,
-  BbDesktopInfo,
-  BbDesktopWindowState,
-} from "@bb/desktop-contract";
+  OmnyoDesktopApi,
+  OmnyoDesktopBrowserFindResult,
+  OmnyoDesktopBrowserOpenTabRequest,
+  OmnyoDesktopBrowserScopedOpenTabRequest,
+  OmnyoDesktopBrowserSnapshot,
+  OmnyoDesktopBrowserState,
+  OmnyoDesktopInfo,
+  OmnyoDesktopWindowState,
+} from "@omnyo/desktop-contract";
 import {
-  BB_DESKTOP_CHECK_FOR_UPDATES_CHANNEL,
-  BB_DESKTOP_GET_INFO_CHANNEL,
-  BB_DESKTOP_INFO_CHANGED_CHANNEL,
-  BB_DESKTOP_INSTALL_UPDATE_CHANNEL,
-  BB_DESKTOP_SET_THEME_CHANNEL,
+  OMNYO_DESKTOP_CHECK_FOR_UPDATES_CHANNEL,
+  OMNYO_DESKTOP_GET_INFO_CHANNEL,
+  OMNYO_DESKTOP_INFO_CHANGED_CHANNEL,
+  OMNYO_DESKTOP_INSTALL_UPDATE_CHANNEL,
+  OMNYO_DESKTOP_SET_THEME_CHANNEL,
 } from "../src/desktop-update-ipc.js";
 import {
-  BB_DESKTOP_BROWSER_ATTACH_CHANNEL,
-  BB_DESKTOP_BROWSER_DETACH_CHANNEL,
-  BB_DESKTOP_BROWSER_FOCUS_CHANNEL,
-  BB_DESKTOP_BROWSER_FOCUSED_CHANNEL,
-  BB_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
-  BB_DESKTOP_BROWSER_FIND_RESULT_CHANNEL,
-  BB_DESKTOP_BROWSER_GO_BACK_CHANNEL,
-  BB_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
-  BB_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
-  BB_DESKTOP_BROWSER_OPEN_TAB_CHANNEL,
-  BB_DESKTOP_BROWSER_RELOAD_CHANNEL,
-  BB_DESKTOP_BROWSER_SCOPED_OPEN_TAB_CHANNEL,
-  BB_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
-  BB_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
-  BB_DESKTOP_BROWSER_SET_VISIBLE_WITHOUT_FOCUS_CHANNEL,
-  BB_DESKTOP_BROWSER_SNAPSHOT_CHANNEL,
-  BB_DESKTOP_BROWSER_STATE_CHANNEL,
-  BB_DESKTOP_BROWSER_STOP_CHANNEL,
-  BB_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_ATTACH_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_DETACH_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_FOCUS_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_HOST_FOCUS_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_FOCUSED_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_FIND_RESULT_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_GO_BACK_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_OPEN_TAB_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_RELOAD_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_SCOPED_OPEN_TAB_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_SET_VISIBLE_WITHOUT_FOCUS_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_SNAPSHOT_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_STATE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_STOP_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
 } from "../src/desktop-browser-ipc.js";
 import {
-  BB_DESKTOP_APP_COMMAND_CHANNEL,
-  BB_DESKTOP_CLOSE_WINDOW_REQUEST_CHANNEL,
-  BB_DESKTOP_CLOSE_WINDOW_RESPONSE_CHANNEL,
-  BB_DESKTOP_FOCUS_WINDOW_CHANNEL,
-  BB_DESKTOP_GET_WINDOW_STATE_CHANNEL,
-  BB_DESKTOP_OPEN_NEW_TAB_CHANNEL,
-  BB_DESKTOP_OPEN_SERVER_DAEMON_LOGS_CHANNEL,
-  BB_DESKTOP_WINDOW_STATE_CHANGED_CHANNEL,
+  OMNYO_DESKTOP_APP_COMMAND_CHANNEL,
+  OMNYO_DESKTOP_CLOSE_WINDOW_REQUEST_CHANNEL,
+  OMNYO_DESKTOP_CLOSE_WINDOW_RESPONSE_CHANNEL,
+  OMNYO_DESKTOP_FOCUS_WINDOW_CHANNEL,
+  OMNYO_DESKTOP_GET_WINDOW_STATE_CHANNEL,
+  OMNYO_DESKTOP_OPEN_NEW_TAB_CHANNEL,
+  OMNYO_DESKTOP_OPEN_SERVER_DAEMON_LOGS_CHANNEL,
+  OMNYO_DESKTOP_OPEN_THREAD_REQUEST_CHANNEL,
+  OMNYO_DESKTOP_OPEN_THREAD_RESPONSE_CHANNEL,
+  OMNYO_DESKTOP_WINDOW_STATE_CHANGED_CHANNEL,
 } from "../src/desktop-window-command-ipc.js";
+
 const electronMock = vi.hoisted(() => {
   interface IpcRendererEvent {}
 
@@ -61,7 +65,7 @@ const electronMock = vi.hoisted(() => {
     payload: unknown,
   ) => void;
 
-  const desktopInfo: BbDesktopInfo = {
+  const desktopInfo: OmnyoDesktopInfo = {
     lastCheckedAt: null,
     latestVersion: null,
     pendingVersion: null,
@@ -70,13 +74,16 @@ const electronMock = vi.hoisted(() => {
     updateDownloaded: false,
     version: "0.0.0-test",
   };
-  const desktopWindowState: BbDesktopWindowState = {
+
+  const desktopWindowState: OmnyoDesktopWindowState = {
     isFullScreen: false,
   };
+
   const invokeCalls: string[] = [];
+  const invokeErrors = new Map<string, Error>();
   const listeners = new Map<string, IpcRendererListener>();
   const sendCalls: SendCall[] = [];
-  let exposedApi: BbDesktopApi | null = null;
+  let exposedApi: OmnyoDesktopApi | null = null;
   let exposedName: string | null = null;
   let zoomFactor = 1;
 
@@ -88,12 +95,14 @@ const electronMock = vi.hoisted(() => {
       return exposedName;
     },
     invokeCalls,
+    invokeErrors,
     listeners,
     sendCalls,
     reset(): void {
       exposedApi = null;
       exposedName = null;
       invokeCalls.length = 0;
+      invokeErrors.clear();
       listeners.clear();
       sendCalls.length = 0;
       zoomFactor = 1;
@@ -103,22 +112,28 @@ const electronMock = vi.hoisted(() => {
     },
     contextBridge: {
       exposeInMainWorld(name: string, api: unknown): void {
-        if (name === "bbDesktop") {
+        if (name === "omnyoDesktop") {
           exposedName = name;
-          exposedApi = api as BbDesktopApi;
+          exposedApi = api as OmnyoDesktopApi;
         }
       },
     },
     ipcRenderer: {
       invoke(channel: string): Promise<unknown> {
         invokeCalls.push(channel);
-        if (channel === "bb-desktop:get-server-choices")
+        const error = invokeErrors.get(channel);
+
+        if (error !== undefined) return Promise.reject(error);
+
+        if (channel === "omnyo-desktop:get-server-choices")
           return Promise.resolve([
             { id: "builtin", name: "Local", active: true },
           ]);
-        if (channel === "bb-desktop:get-window-state") {
+
+        if (channel === "omnyo-desktop:get-window-state") {
           return Promise.resolve(desktopWindowState);
         }
+
         return Promise.resolve(desktopInfo);
       },
       on(channel: string, listener: IpcRendererListener): void {
@@ -147,31 +162,35 @@ interface EmitIpcPayloadArgs {
   payload: unknown;
 }
 
-async function loadPreload(): Promise<BbDesktopApi> {
+async function loadPreload(): Promise<OmnyoDesktopApi> {
   electronMock.reset();
   vi.resetModules();
-  process.env.BB_DESKTOP_VERSION = "0.0.0-test";
+  process.env.OMNYO_DESKTOP_VERSION = "0.0.0-test";
   await import("../src/preload.js");
   const api = electronMock.exposedApi;
-  expect(electronMock.exposedName).toBe("bbDesktop");
+  expect(electronMock.exposedName).toBe("omnyoDesktop");
   expect(api).not.toBeNull();
+
   if (api === null) {
-    throw new Error("Expected preload to expose window.bbDesktop.");
+    throw new Error("Expected preload to expose window.omnyoDesktop.");
   }
+
   return api;
 }
 
 function emitIpcPayload(args: EmitIpcPayloadArgs): void {
   const listener = electronMock.listeners.get(args.channel);
   expect(listener).toBeDefined();
+
   if (listener === undefined) {
     throw new Error(`Expected listener for ${args.channel}.`);
   }
+
   listener({}, args.payload);
 }
 
 describe("desktop preload browser API", () => {
-  let api: BbDesktopApi;
+  let api: OmnyoDesktopApi;
 
   beforeEach(async () => {
     api = await loadPreload();
@@ -184,14 +203,14 @@ describe("desktop preload browser API", () => {
     const updates = vi.fn();
     const stop = api.onServerChoicesChange?.(updates);
     emitIpcPayload({
-      channel: "bb-desktop:server-choices-changed",
+      channel: "omnyo-desktop:server-choices-changed",
       payload: [
         { id: "remote", name: "Remote", active: false, url: "private" },
       ],
     });
     expect(updates).not.toHaveBeenCalled();
     emitIpcPayload({
-      channel: "bb-desktop:server-choices-changed",
+      channel: "omnyo-desktop:server-choices-changed",
       payload: [{ id: "remote", name: "Remote", active: false }],
     });
     expect(updates).toHaveBeenCalledWith([
@@ -199,13 +218,13 @@ describe("desktop preload browser API", () => {
     ]);
     stop?.();
     emitIpcPayload({
-      channel: "bb-desktop:server-choices-changed",
+      channel: "omnyo-desktop:server-choices-changed",
       payload: [],
     });
     expect(updates).toHaveBeenCalledTimes(1);
     api.selectServer?.("remote");
     expect(electronMock.sendCalls).toContainEqual({
-      channel: "bb-desktop:select-server",
+      channel: "omnyo-desktop:select-server",
       payload: "remote",
     });
   });
@@ -219,24 +238,29 @@ describe("desktop preload browser API", () => {
       bounds: { x: 0, y: 0, width: 800, height: 600 },
       visible: true,
     };
+
     const navigateRequest = {
       tabId: "browser:a",
       url: "https://example.com/",
     };
+
     const boundsRequest = {
       tabId: "browser:a",
       bounds: { x: 10, y: 20, width: 300, height: 200 },
     };
+
     const visibleRequest = {
       tabId: "browser:a",
       visible: false,
     };
+
     const findRequest = {
       tabId: "browser:a",
       text: "needle",
       forward: true,
       newSession: true,
     };
+
     const stopFindRequest = {
       tabId: "browser:a",
       action: "clearSelection" as const,
@@ -244,6 +268,8 @@ describe("desktop preload browser API", () => {
 
     expect(Object.keys(api.browser).sort()).toEqual([
       "attach",
+      "configureCookieSync",
+      "cookieSyncStatus",
       "detach",
       "evaluate",
       "findInPage",
@@ -267,7 +293,9 @@ describe("desktop preload browser API", () => {
       "openFullDiskAccessSettings",
       "releaseControl",
       "reload",
+      "runCookieSync",
       "setBounds",
+      "setHostFocus",
       "setVisible",
       "setVisibleWithoutFocus",
       "stop",
@@ -284,6 +312,8 @@ describe("desktop preload browser API", () => {
     api.browser.reload("browser:a");
     api.browser.stop("browser:a");
     api.browser.focus?.("browser:a");
+    api.browser.setHostFocus?.("browser:a");
+    api.browser.setHostFocus?.(null);
     api.browser.setBounds(boundsRequest);
     api.browser.setVisible(visibleRequest);
     api.browser.setVisibleWithoutFocus?.(visibleRequest);
@@ -299,67 +329,75 @@ describe("desktop preload browser API", () => {
     await api.installUpdate();
 
     expect(electronMock.sendCalls).toEqual([
-      { channel: BB_DESKTOP_BROWSER_ATTACH_CHANNEL, payload: attachRequest },
+      { channel: OMNYO_DESKTOP_BROWSER_ATTACH_CHANNEL, payload: attachRequest },
       {
-        channel: BB_DESKTOP_BROWSER_DETACH_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_DETACH_CHANNEL,
         payload: { tabId: "browser:a" },
       },
       {
-        channel: BB_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_NAVIGATE_CHANNEL,
         payload: navigateRequest,
       },
       {
-        channel: BB_DESKTOP_BROWSER_GO_BACK_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_GO_BACK_CHANNEL,
         payload: { tabId: "browser:a" },
       },
       {
-        channel: BB_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_GO_FORWARD_CHANNEL,
         payload: { tabId: "browser:a" },
       },
       {
-        channel: BB_DESKTOP_BROWSER_RELOAD_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_RELOAD_CHANNEL,
         payload: { tabId: "browser:a" },
       },
       {
-        channel: BB_DESKTOP_BROWSER_STOP_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_STOP_CHANNEL,
         payload: { tabId: "browser:a" },
       },
       {
-        channel: BB_DESKTOP_BROWSER_FOCUS_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_FOCUS_CHANNEL,
         payload: { tabId: "browser:a" },
       },
       {
-        channel: BB_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_HOST_FOCUS_CHANNEL,
+        payload: { tabId: "browser:a" },
+      },
+      {
+        channel: OMNYO_DESKTOP_BROWSER_HOST_FOCUS_CHANNEL,
+        payload: { tabId: null },
+      },
+      {
+        channel: OMNYO_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
         payload: boundsRequest,
       },
       {
-        channel: BB_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_SET_VISIBLE_CHANNEL,
         payload: visibleRequest,
       },
       {
-        channel: BB_DESKTOP_BROWSER_SET_VISIBLE_WITHOUT_FOCUS_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_SET_VISIBLE_WITHOUT_FOCUS_CHANNEL,
         payload: visibleRequest,
       },
       {
-        channel: BB_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_FIND_IN_PAGE_CHANNEL,
         payload: findRequest,
       },
       {
-        channel: BB_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_STOP_FIND_IN_PAGE_CHANNEL,
         payload: stopFindRequest,
       },
-      { channel: BB_DESKTOP_FOCUS_WINDOW_CHANNEL, payload: undefined },
-      { channel: BB_DESKTOP_SET_THEME_CHANNEL, payload: "dark" },
+      { channel: OMNYO_DESKTOP_FOCUS_WINDOW_CHANNEL, payload: undefined },
+      { channel: OMNYO_DESKTOP_SET_THEME_CHANNEL, payload: "dark" },
     ]);
-    expect(electronMock.invokeCalls).toContain(BB_DESKTOP_GET_INFO_CHANNEL);
+    expect(electronMock.invokeCalls).toContain(OMNYO_DESKTOP_GET_INFO_CHANNEL);
     expect(electronMock.invokeCalls).toContain(
-      BB_DESKTOP_CHECK_FOR_UPDATES_CHANNEL,
+      OMNYO_DESKTOP_CHECK_FOR_UPDATES_CHANNEL,
     );
     expect(electronMock.invokeCalls).toContain(
-      BB_DESKTOP_GET_WINDOW_STATE_CHANNEL,
+      OMNYO_DESKTOP_GET_WINDOW_STATE_CHANNEL,
     );
     expect(electronMock.invokeCalls).toContain(
-      BB_DESKTOP_INSTALL_UPDATE_CHANNEL,
+      OMNYO_DESKTOP_INSTALL_UPDATE_CHANNEL,
     );
   }, 10_000);
 
@@ -380,7 +418,7 @@ describe("desktop preload browser API", () => {
 
     expect(electronMock.sendCalls).toEqual([
       {
-        channel: BB_DESKTOP_BROWSER_ATTACH_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_ATTACH_CHANNEL,
         payload: {
           threadId: "thread-1",
           tabId: "browser:zoomed",
@@ -390,7 +428,7 @@ describe("desktop preload browser API", () => {
         },
       },
       {
-        channel: BB_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
+        channel: OMNYO_DESKTOP_BROWSER_SET_BOUNDS_CHANNEL,
         payload: {
           tabId: "browser:zoomed",
           bounds: { x: 1001, y: 51, width: 499, height: 749 },
@@ -400,17 +438,18 @@ describe("desktop preload browser API", () => {
   });
 
   it("validates browser event payloads before notifying renderer listeners", () => {
-    const states: BbDesktopBrowserState[] = [];
-    const openTabs: BbDesktopBrowserOpenTabRequest[] = [];
-    const scopedOpenTabs: BbDesktopBrowserScopedOpenTabRequest[] = [];
+    const states: OmnyoDesktopBrowserState[] = [];
+    const openTabs: OmnyoDesktopBrowserOpenTabRequest[] = [];
+    const scopedOpenTabs: OmnyoDesktopBrowserScopedOpenTabRequest[] = [];
     const focusedTabs: string[] = [];
-    const snapshots: BbDesktopBrowserSnapshot[] = [];
-    const findResults: BbDesktopBrowserFindResult[] = [];
+    const snapshots: OmnyoDesktopBrowserSnapshot[] = [];
+    const findResults: OmnyoDesktopBrowserFindResult[] = [];
     let closeWindowRequestCount = 0;
     let openNewTabCount = 0;
     const appCommands: AppCommandId[] = [];
-    const windowStates: BbDesktopWindowState[] = [];
-    const state: BbDesktopBrowserState = {
+    const windowStates: OmnyoDesktopWindowState[] = [];
+
+    const state: OmnyoDesktopBrowserState = {
       tabId: "browser:a",
       url: "https://example.com/",
       title: "Example",
@@ -419,18 +458,22 @@ describe("desktop preload browser API", () => {
       canGoForward: true,
       errorText: null,
     };
-    const openTab: BbDesktopBrowserOpenTabRequest = {
+
+    const openTab: OmnyoDesktopBrowserOpenTabRequest = {
       url: "https://example.com/popup",
     };
-    const scopedOpenTab: BbDesktopBrowserScopedOpenTabRequest = {
+
+    const scopedOpenTab: OmnyoDesktopBrowserScopedOpenTabRequest = {
       tabId: "browser:a",
       url: "https://example.com/scoped-popup",
     };
-    const snapshot: BbDesktopBrowserSnapshot = {
+
+    const snapshot: OmnyoDesktopBrowserSnapshot = {
       tabId: "browser:a",
       dataUrl: null,
     };
-    const findResult: BbDesktopBrowserFindResult = {
+
+    const findResult: OmnyoDesktopBrowserFindResult = {
       tabId: "browser:a",
       requestId: 3,
       activeMatchOrdinal: 1,
@@ -464,6 +507,7 @@ describe("desktop preload browser API", () => {
     });
     api.onCloseWindowRequest?.(() => {
       closeWindowRequestCount += 1;
+
       return true;
     });
     api.onWindowStateChange?.((windowState) => {
@@ -471,79 +515,79 @@ describe("desktop preload browser API", () => {
     });
 
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_STATE_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_STATE_CHANNEL,
       payload: { ...state, extra: true },
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_OPEN_TAB_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_OPEN_TAB_CHANNEL,
       payload: { url: "" },
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_SCOPED_OPEN_TAB_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_SCOPED_OPEN_TAB_CHANNEL,
       payload: { tabId: "", url: "https://example.com/scoped-popup" },
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_FOCUSED_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_FOCUSED_CHANNEL,
       payload: { tabId: "", extra: true },
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_SNAPSHOT_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_SNAPSHOT_CHANNEL,
       payload: { tabId: "browser:a", dataUrl: 42 },
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_FIND_RESULT_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_FIND_RESULT_CHANNEL,
       payload: { ...findResult, matches: -1 },
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_FIND_RESULT_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_FIND_RESULT_CHANNEL,
       payload: { ...findResult, selectionArea: {} },
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_WINDOW_STATE_CHANGED_CHANNEL,
+      channel: OMNYO_DESKTOP_WINDOW_STATE_CHANGED_CHANNEL,
       payload: { isFullScreen: false, extra: true },
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_STATE_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_STATE_CHANNEL,
       payload: state,
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_OPEN_TAB_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_OPEN_TAB_CHANNEL,
       payload: openTab,
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_SCOPED_OPEN_TAB_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_SCOPED_OPEN_TAB_CHANNEL,
       payload: scopedOpenTab,
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_FOCUSED_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_FOCUSED_CHANNEL,
       payload: { tabId: "browser:a" },
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_SNAPSHOT_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_SNAPSHOT_CHANNEL,
       payload: snapshot,
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_BROWSER_FIND_RESULT_CHANNEL,
+      channel: OMNYO_DESKTOP_BROWSER_FIND_RESULT_CHANNEL,
       payload: findResult,
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_WINDOW_STATE_CHANGED_CHANNEL,
+      channel: OMNYO_DESKTOP_WINDOW_STATE_CHANGED_CHANNEL,
       payload: { isFullScreen: true },
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_OPEN_NEW_TAB_CHANNEL,
+      channel: OMNYO_DESKTOP_OPEN_NEW_TAB_CHANNEL,
       payload: null,
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_APP_COMMAND_CHANNEL,
+      channel: OMNYO_DESKTOP_APP_COMMAND_CHANNEL,
       payload: "not-a-command",
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_APP_COMMAND_CHANNEL,
+      channel: OMNYO_DESKTOP_APP_COMMAND_CHANNEL,
       payload: "thread.new",
     });
     emitIpcPayload({
-      channel: BB_DESKTOP_CLOSE_WINDOW_REQUEST_CHANNEL,
+      channel: OMNYO_DESKTOP_CLOSE_WINDOW_REQUEST_CHANNEL,
       payload: null,
     });
 
@@ -558,7 +602,7 @@ describe("desktop preload browser API", () => {
     expect(openNewTabCount).toBe(1);
     expect(appCommands).toEqual(["thread.new"]);
     expect(electronMock.sendCalls).toContainEqual({
-      channel: BB_DESKTOP_CLOSE_WINDOW_RESPONSE_CHANNEL,
+      channel: OMNYO_DESKTOP_CLOSE_WINDOW_RESPONSE_CHANNEL,
       payload: true,
     });
   });
@@ -566,12 +610,12 @@ describe("desktop preload browser API", () => {
   it("routes the log viewer request to main and mirrors its availability", async () => {
     await api.openServerDaemonLogs?.();
     expect(electronMock.invokeCalls).toContain(
-      BB_DESKTOP_OPEN_SERVER_DAEMON_LOGS_CHANNEL,
+      OMNYO_DESKTOP_OPEN_SERVER_DAEMON_LOGS_CHANNEL,
     );
 
     expect(api.serverDaemonLogsAvailable).toBeUndefined();
     emitIpcPayload({
-      channel: BB_DESKTOP_INFO_CHANGED_CHANNEL,
+      channel: OMNYO_DESKTOP_INFO_CHANGED_CHANNEL,
       payload: {
         lastCheckedAt: null,
         latestVersion: null,
@@ -586,14 +630,65 @@ describe("desktop preload browser API", () => {
     expect(api.serverDaemonLogsAvailable).toBe(true);
   });
 
+  it("passes the main process's install refusal to the caller", async () => {
+    electronMock.invokeErrors.set(
+      OMNYO_DESKTOP_INSTALL_UPDATE_CHANNEL,
+      new Error(
+        "Error invoking remote method 'omnyo-desktop:install-update': Error: Private update admission is already held",
+      ),
+    );
+
+    await expect(api.installUpdate()).rejects.toThrow(
+      /^Private update admission is already held$/u,
+    );
+  });
+
+  it("hands open-thread requests to the app and acknowledges them", () => {
+    const opened: string[] = [];
+    const unsubscribe = api.onOpenThread?.((threadId) => opened.push(threadId));
+
+    emitIpcPayload({
+      channel: OMNYO_DESKTOP_OPEN_THREAD_REQUEST_CHANNEL,
+      payload: { threadId: "thr_missing_request" },
+    });
+    emitIpcPayload({
+      channel: OMNYO_DESKTOP_OPEN_THREAD_REQUEST_CHANNEL,
+      payload: { requestId: "request-1", threadId: "thr_one" },
+    });
+
+    expect(opened).toEqual(["thr_one"]);
+    expect(
+      electronMock.sendCalls.filter(
+        (call) => call.channel === OMNYO_DESKTOP_OPEN_THREAD_RESPONSE_CHANNEL,
+      ),
+    ).toEqual([
+      {
+        channel: OMNYO_DESKTOP_OPEN_THREAD_RESPONSE_CHANNEL,
+        payload: { requestId: "request-1", handled: true },
+      },
+    ]);
+
+    unsubscribe?.();
+    emitIpcPayload({
+      channel: OMNYO_DESKTOP_OPEN_THREAD_REQUEST_CHANNEL,
+      payload: { requestId: "request-2", threadId: "thr_two" },
+    });
+
+    expect(opened).toEqual(["thr_one"]);
+    expect(electronMock.sendCalls).toContainEqual({
+      channel: OMNYO_DESKTOP_OPEN_THREAD_RESPONSE_CHANNEL,
+      payload: { requestId: "request-2", handled: false },
+    });
+  });
+
   it("answers unhandled close-window requests so main closes the window", () => {
     emitIpcPayload({
-      channel: BB_DESKTOP_CLOSE_WINDOW_REQUEST_CHANNEL,
+      channel: OMNYO_DESKTOP_CLOSE_WINDOW_REQUEST_CHANNEL,
       payload: null,
     });
 
     expect(electronMock.sendCalls).toContainEqual({
-      channel: BB_DESKTOP_CLOSE_WINDOW_RESPONSE_CHANNEL,
+      channel: OMNYO_DESKTOP_CLOSE_WINDOW_RESPONSE_CHANNEL,
       payload: false,
     });
   });

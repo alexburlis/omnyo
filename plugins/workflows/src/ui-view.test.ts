@@ -13,6 +13,10 @@ function call(index: number, phase: string | null): WorkflowCallInspection {
     cacheKey: `cache_${index}`,
     prompt: `Prompt ${index}`,
     optionsJson: "{}",
+    requestedEnvironmentId: null,
+    resolvedEnvironmentId: "env_test",
+    resolvedHostId: null,
+    resolvedWorkspacePath: null,
     resolvedProvider: "codex",
     resolvedModel: "gpt-test",
     resolvedReasoningLevel: "medium",
@@ -31,6 +35,7 @@ function call(index: number, phase: string | null): WorkflowCallInspection {
     finishedAt: index + 1,
     options: {
       selection: null,
+      environmentId: null,
       outputSchema: null,
       title: `Agent ${index}`,
       phase,

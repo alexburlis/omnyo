@@ -3,16 +3,17 @@ import {
   encodeClientTurnRequestIdNumber,
   LOCAL_WORKFLOW_TASK_TYPE,
   THREAD_CONTEXT_CLEAR_OPERATION,
+  type JsonObject,
   type ThreadEventItemType,
   type ThreadEventType,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   advanceThreadPruning,
   createThread,
   deleteThreadEventSuffixInTransaction,
   getLatestThreadSequence,
   noopNotifier,
-} from "@bb/db";
+} from "@omnyo/db";
 import { pruneThreadEventHistory } from "../../../src/services/system/event-pruning.js";
 import {
   clearTimelineOrderingContextCache,
@@ -71,7 +72,9 @@ interface SessionState {
 }
 
 const SEEDS = 5;
+
 const STEPS = 70;
+
 const execution = {
   model: "gpt-5",
   serviceTier: "default",
@@ -79,13 +82,10 @@ const execution = {
   permissionMode: "full",
   source: "client/turn/requested",
 } as const;
+
 const registry = await createTestProviderRegistry();
 
-function userRequest(
-  value: number,
-  target: Record<string, unknown>,
-  text: string,
-): RowSpec {
+function userRequest(value: number, target: JsonObject, text: string): RowSpec {
   return {
     data: {
       direction: "outbound",
@@ -113,7 +113,7 @@ function acceptedInput(value: number, turnId: string): RowSpec {
 function itemRow(
   type: "item/started" | "item/completed",
   turnId: string,
-  item: Record<string, unknown> & { id: string; type: ThreadEventItemType },
+  item: JsonObject & { id: string; type: ThreadEventItemType },
   parentToolCallId: string | null = null,
 ): RowSpec {
   return {
@@ -237,6 +237,7 @@ function completeTurn(
   status = "completed",
 ): RowSpec {
   closeTurn(state, turnId);
+
   return { data: { status }, turnId, type: "turn/completed" };
 }
 
@@ -251,6 +252,7 @@ function startTurn(state: SessionState): RowSpec[] {
   state.openToolCallId = null;
   state.lastCommandId = null;
   state.lastMessageId = null;
+
   return [
     userRequest(
       state.requestCounter,
@@ -264,6 +266,7 @@ function startTurn(state: SessionState): RowSpec[] {
 
 function nextItemId(state: SessionState, prefix: string): string {
   state.itemCounter += 1;
+
   return `${prefix}-${state.itemCounter}`;
 }
 
@@ -279,7 +282,9 @@ function closeTurn(state: SessionState, turnId: string): void {
 function lateDeltaRows(state: SessionState, random: Random): RowSpec[] {
   const closed =
     state.closedTurns[Math.floor(random() * state.closedTurns.length)];
+
   if (closed === undefined) return [];
+
   if (closed.commandId !== null && random() < 0.6) {
     return [
       deltaRow(
@@ -290,6 +295,7 @@ function lateDeltaRows(state: SessionState, random: Random): RowSpec[] {
       ),
     ];
   }
+
   return [
     messageDelta(
       closed.turnId,
@@ -314,11 +320,14 @@ function contextClear(operationId: string): RowSpec {
 function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
   const turnId = state.openTurnId;
   const outOfOrder = random();
+
   if (outOfOrder < 0.05 && state.closedTurns.length > 0) {
     return lateDeltaRows(state, random);
   }
+
   if (outOfOrder < 0.08) {
     const turnNumber = state.turnCounter + 1;
+
     return [
       messageDelta(
         `turn-${turnNumber}`,
@@ -327,31 +336,41 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
       ),
     ];
   }
+
   if (turnId === null) {
     if (random() < 0.1) {
       return [contextClear(`clear-${state.itemCounter}`)];
     }
+
     return startTurn(state);
   }
+
   const choice = random();
+
   if (choice < 0.34) {
     const rows: RowSpec[] = [];
+
     if (state.openMessage === null) {
       state.openMessage = { id: nextItemId(state, "message"), text: "" };
       state.lastMessageId = state.openMessage.id;
       rows.push(messageStarted(turnId, state.openMessage.id));
     }
+
     const count = 1 + Math.floor(random() * 3);
+
     for (let index = 0; index < count; index += 1) {
       const delta = random() < 0.3 ? `line ${index}\n` : `word${index} `;
       state.openMessage.text += delta;
       rows.push(messageDelta(turnId, state.openMessage.id, delta));
     }
+
     return rows;
   }
+
   if (choice < 0.4 && state.openMessage !== null) {
     const message = state.openMessage;
     state.openMessage = null;
+
     return [
       itemRow("item/completed", turnId, {
         id: message.id,
@@ -360,8 +379,10 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
       }),
     ];
   }
+
   if (choice < 0.48) {
     const rows: RowSpec[] = [];
+
     if (state.openReasoningId === null) {
       state.openReasoningId = nextItemId(state, "reasoning");
       rows.push(
@@ -373,6 +394,7 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
         }),
       );
     }
+
     rows.push(
       deltaRow(
         random() < 0.5
@@ -383,6 +405,7 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
         "thinking ",
       ),
     );
+
     if (random() < 0.2) {
       rows.push(
         itemRow("item/completed", turnId, {
@@ -394,16 +417,20 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
       );
       state.openReasoningId = null;
     }
+
     return rows;
   }
+
   if (choice < 0.56) {
     const rows: RowSpec[] = [];
+
     const command = {
       approvalStatus: null,
       command: "pnpm test",
       cwd: "/tmp/memo",
       type: "commandExecution",
     } as const;
+
     if (state.openCommandId === null) {
       state.openCommandId = nextItemId(state, "command");
       state.lastCommandId = state.openCommandId;
@@ -415,6 +442,7 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
         }),
       );
     }
+
     rows.push(
       deltaRow(
         "item/commandExecution/outputDelta",
@@ -423,6 +451,7 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
         "ok\n",
       ),
     );
+
     if (random() < 0.3) {
       rows.push(
         itemRow("item/completed", turnId, {
@@ -435,15 +464,20 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
       );
       state.openCommandId = null;
     }
+
     return rows;
   }
+
   if (choice < 0.64) {
     if (state.openToolCallId === null) {
       state.openToolCallId = nextItemId(state, "agent");
+
       return [agentToolCall("item/started", turnId, state.openToolCallId)];
     }
+
     const toolCallId = state.openToolCallId;
     const roll = random();
+
     if (roll < 0.35) {
       return [
         {
@@ -454,14 +488,19 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
         },
       ];
     }
+
     if (roll < 0.75) {
       return [childCommand(turnId, nextItemId(state, "child"), toolCallId)];
     }
+
     state.openToolCallId = null;
+
     return [agentToolCall("item/completed", turnId, toolCallId)];
   }
+
   if (choice < 0.7) {
     state.requestCounter += 1;
+
     return [
       userRequest(
         state.requestCounter,
@@ -471,11 +510,14 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
       acceptedInput(state.requestCounter, turnId),
     ];
   }
+
   if (choice < 0.8) {
     const roll = random();
+
     if (roll < 0.4) {
       return [contextUsage(turnId, state.itemCounter * 10)];
     }
+
     if (roll < 0.7) {
       const breakdown = {
         cachedInputTokens: 0,
@@ -484,6 +526,7 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
         reasoningOutputTokens: 0,
         totalTokens: 15,
       };
+
       return [
         {
           data: {
@@ -498,26 +541,35 @@ function randomSessionRows(state: SessionState, random: Random): RowSpec[] {
         },
       ];
     }
+
     return [
       { data: { diff: "diff --git" }, turnId, type: "turn/diff/updated" },
     ];
   }
+
   if (choice < 0.86) {
     if (state.openTaskId === null) {
       state.openTaskId = `task:${nextItemId(state, "wf")}`;
+
       return [
         itemRow("item/started", turnId, workflowTask(state.openTaskId, false)),
       ];
     }
+
     const taskId = state.openTaskId;
     const completed = random() < 0.4;
+
     if (completed) state.openTaskId = null;
+
     return [workflowTaskUpdate(taskId, completed)];
   }
+
   if (choice < 0.93) {
     return [completeTurn(state, turnId)];
   }
+
   closeTurn(state, turnId);
+
   return [
     { data: { reason: "manual-stop" }, type: "system/thread/interrupted" },
   ];
@@ -535,6 +587,7 @@ function expectWarmEqualsCold(
       registry,
       thread: testThread.thread,
     });
+
   const warm = build(testThread.db);
   clearCrossBuildTimelineCaches(testThread.coldDb);
   clearTimelineOrderingContextCache(testThread.coldDb);
@@ -543,12 +596,15 @@ function expectWarmEqualsCold(
   expect(JSON.stringify(warm.response), label).toBe(
     JSON.stringify(cold.response),
   );
+
   const profileSummary = ({ profile }: BuiltTimelinePage) => ({
     eventDataBytes: profile.eventDataBytes,
     eventRowCount: profile.eventRowCount,
     selectionStrategy: profile.selectionStrategy,
   });
+
   expect(profileSummary(warm), label).toEqual(profileSummary(cold));
+
   return warm;
 }
 
@@ -559,8 +615,10 @@ function walkOlderPages(
   label: string,
 ): void {
   let page = latest;
+
   for (let depth = 0; depth < 10; depth += 1) {
     const cursor = page.response.timelinePage.olderCursor;
+
     if (!page.response.timelinePage.hasOlderRows || cursor === null) return;
     page = expectWarmEqualsCold(
       testThread,
@@ -648,22 +706,265 @@ function pruneUsageSnapshots(testThread: TestThread): void {
     )
       return;
   }
+
   throw new Error("Usage pruning did not finish a cycle");
 }
 
 describe("latest timeline selection memo", () => {
+  it("decodes only appended root text while preserving the cold response and prior snapshots", () => {
+    withTestThread((testThread) => {
+      const args = {
+        ...latestArgs("default"),
+        eventBudget: 1_500,
+      };
+
+      append(testThread, [
+        ...startTurn(initialState()),
+        messageStarted("turn-1", "message-1"),
+        ...Array.from({ length: 2_048 }, () =>
+          messageDelta("turn-1", "message-1", "A complete line.\n"),
+        ),
+      ]);
+
+      const initial = expectWarmEqualsCold(
+        testThread,
+        args,
+        "initial long turn",
+      );
+
+      const retained = [
+        { response: initial.response, json: JSON.stringify(initial.response) },
+      ];
+
+      expect(initial.profile.decodedEventCount).toBeGreaterThan(2_048);
+
+      for (const chunk of ["partial", " tail\n", "next\n", "unfinished"]) {
+        append(testThread, [messageDelta("turn-1", "message-1", chunk)]);
+        const tick = expectWarmEqualsCold(testThread, args, chunk);
+        expect(selectionWasReused(tick.profile)).toBe(true);
+        expect(tick.profile.decodedEventCount).toBeLessThanOrEqual(2);
+
+        for (const previous of retained) {
+          expect(JSON.stringify(previous.response)).toBe(previous.json);
+        }
+
+        retained.push({
+          response: tick.response,
+          json: JSON.stringify(tick.response),
+        });
+      }
+    });
+  });
+
+  it("retains incomplete buffers and command reset semantics without changing delivered snapshots", () => {
+    withTestThread((testThread) => {
+      const args = latestArgs("nested");
+      append(testThread, [
+        ...startTurn(initialState()),
+        messageStarted("turn-1", "message-1"),
+        itemRow("item/started", "turn-1", {
+          approvalStatus: null,
+          command: "printf output",
+          cwd: "/tmp/memo",
+          id: "command-1",
+          status: "pending",
+          type: "commandExecution",
+        }),
+        messageDelta("turn-1", "message-1", "visible\n"),
+        deltaRow(
+          "item/commandExecution/outputDelta",
+          "turn-1",
+          "command-1",
+          "old output\n",
+        ),
+      ]);
+      const first = expectWarmEqualsCold(testThread, args, "initial buffers");
+
+      const retained = [
+        { response: first.response, json: JSON.stringify(first.response) },
+      ];
+
+      const batches: RowSpec[][] = [
+        [messageDelta("turn-1", "message-1", "partial")],
+        [
+          deltaRow(
+            "item/commandExecution/outputDelta",
+            "turn-1",
+            "command-1",
+            "old suffix",
+          ),
+        ],
+        [
+          {
+            ...deltaRow(
+              "item/commandExecution/outputDelta",
+              "turn-1",
+              "command-1",
+              "replacement\n",
+            ),
+            data: { itemId: "command-1", delta: "replacement\n", reset: true },
+          },
+        ],
+        [messageDelta("turn-1", "message-1", " line\n")],
+        [
+          itemRow("item/completed", "turn-1", {
+            id: "message-1",
+            type: "agentMessage",
+            text: "corrected final text",
+          }),
+        ],
+        [
+          deltaRow(
+            "item/commandExecution/outputDelta",
+            "turn-1",
+            "command-1",
+            "last line\n",
+          ),
+        ],
+        [
+          itemRow("item/completed", "turn-1", {
+            approvalStatus: null,
+            command: "printf output",
+            cwd: "/tmp/memo",
+            id: "command-1",
+            status: "completed",
+            exitCode: 0,
+            aggregatedOutput: "replacement\nlast line\n",
+            type: "commandExecution",
+          }),
+        ],
+        [
+          {
+            data: { status: "completed" },
+            turnId: "turn-1",
+            type: "turn/completed",
+          },
+        ],
+      ];
+
+      for (const [index, batch] of batches.entries()) {
+        append(testThread, batch);
+
+        const tick = expectWarmEqualsCold(
+          testThread,
+          args,
+          `buffer batch ${index}`,
+        );
+
+        for (const previous of retained) {
+          expect(JSON.stringify(previous.response)).toBe(previous.json);
+        }
+
+        retained.push({
+          response: tick.response,
+          json: JSON.stringify(tick.response),
+        });
+      }
+    });
+  });
+
+  it("rebuilds accepted and rejected steer context before resuming root deltas", () => {
+    withTestThread((testThread) => {
+      const args = latestArgs("default");
+      append(testThread, [
+        ...startTurn(initialState()),
+        messageStarted("turn-1", "message-1"),
+        messageDelta("turn-1", "message-1", "first\n"),
+      ]);
+      expectWarmEqualsCold(testThread, args, "before steers");
+
+      const batches: RowSpec[][] = [
+        [
+          userRequest(
+            2,
+            { kind: "steer", expectedTurnId: "turn-1" },
+            "Accepted steer",
+          ),
+        ],
+        [acceptedInput(2, "turn-1")],
+        [messageDelta("turn-1", "message-1", "after accepted\n")],
+        [
+          userRequest(
+            3,
+            { kind: "steer", expectedTurnId: "turn-1" },
+            "Rejected steer",
+          ),
+        ],
+        [
+          {
+            type: "client/turn/rejected",
+            data: {
+              requestId: encodeClientTurnRequestIdNumber({ value: 3 }),
+              reason: "command_failed",
+              message: "The steer was rejected",
+            },
+          },
+        ],
+        [messageDelta("turn-1", "message-1", "after rejected\n")],
+        [
+          {
+            ...messageDelta("turn-1", "message-1", "nested\n"),
+            parentToolCallId: "agent-1",
+          },
+        ],
+        [messageDelta("turn-1", "message-1", "after nested\n")],
+      ];
+
+      for (const [index, batch] of batches.entries()) {
+        append(testThread, batch);
+        expectWarmEqualsCold(testThread, args, `steer batch ${index}`);
+      }
+    });
+  });
+
+  it("keeps projection options isolated when alternating variants around root appends", () => {
+    withTestThread((testThread) => {
+      append(testThread, [
+        ...startTurn(initialState()),
+        messageStarted("turn-1", "message-1"),
+        messageDelta("turn-1", "message-1", "first\n"),
+        itemRow("item/started", "turn-1", {
+          id: "reasoning-1",
+          type: "reasoning",
+          content: [],
+          summary: [],
+        }),
+      ]);
+
+      for (let index = 0; index < 4; index += 1) {
+        append(testThread, [
+          messageDelta("turn-1", "message-1", `line ${index}\n`),
+        ]);
+
+        for (const variant of ["default", "nested"] as const) {
+          for (const diagnostics of [false, true]) {
+            expectWarmEqualsCold(
+              testThread,
+              latestArgs(variant, diagnostics),
+              `${index} ${variant} ${diagnostics}`,
+            );
+          }
+        }
+      }
+    });
+  });
+
   it("matches a cold build over randomized streaming, out-of-order deltas, rewrites, prunes and context clears", () => {
     let reused = 0;
     let rebuilt = 0;
+
     for (let seed = 1; seed <= SEEDS; seed += 1) {
       const random = createRandom(seed);
       withTestThread((testThread) => {
         const state = initialState();
+
         for (let step = 0; step < STEPS; step += 1) {
           const roll = random();
+
           const latest = getLatestThreadSequence(testThread.db, {
             threadId: testThread.thread.id,
           });
+
           if (step > 8 && roll < 0.05) {
             testThread.db.transaction((tx) => {
               deleteThreadEventSuffixInTransaction(tx, {
@@ -688,23 +989,28 @@ describe("latest timeline selection memo", () => {
           } else {
             append(testThread, randomSessionRows(state, random));
           }
+
           const label = JSON.stringify({ seed, step });
           const includeDiagnosticOperations = random() < 0.2;
+
           const warm = expectWarmEqualsCold(
             testThread,
             latestArgs("default", includeDiagnosticOperations),
             label,
           );
+
           if (selectionWasReused(warm.profile)) {
             reused += 1;
           } else {
             rebuilt += 1;
           }
+
           expectWarmEqualsCold(
             testThread,
             latestArgs("nested", includeDiagnosticOperations),
             `${label} nested`,
           );
+
           if (step % 10 === 9) {
             walkOlderPages(
               testThread,
@@ -716,6 +1022,7 @@ describe("latest timeline selection memo", () => {
         }
       });
     }
+
     expect(reused).toBeGreaterThan(SEEDS * 10);
     expect(rebuilt).toBeGreaterThan(SEEDS * 15);
   }, 120_000);
@@ -737,11 +1044,13 @@ describe("latest timeline selection memo", () => {
       ]);
       const delta = expectWarmEqualsCold(testThread, args, "delta");
       expect(selectionWasReused(delta.profile)).toBe(true);
+
       const nested = expectWarmEqualsCold(
         testThread,
         latestArgs("nested"),
         "nested at the same sequence",
       );
+
       expect(selectionWasReused(nested.profile)).toBe(true);
 
       append(testThread, [
@@ -812,12 +1121,14 @@ describe("latest timeline selection memo", () => {
           "late output\n",
         ),
       ]);
+
       const fetchedLate = expectWarmEqualsCold(
         testThread,
         args,
         "late delta for a fetched turn",
       );
-      expect(selectionWasReused(fetchedLate.profile)).toBe(true);
+
+      expect(selectionWasReused(fetchedLate.profile)).toBe(false);
     });
   });
 
@@ -852,6 +1163,7 @@ describe("latest timeline selection memo", () => {
       append(testThread, [
         ...startTurn(state),
         goalRow(testThread.thread.id, "first goal"),
+        contextUsage("turn-1", 100),
         planStepsRow("turn-1", "plan-1", "Ship it"),
         itemRow("item/started", "turn-1", workflowTask("task:wf-1", false)),
         messageStarted("turn-1", "message-1"),
@@ -866,11 +1178,13 @@ describe("latest timeline selection memo", () => {
         messageStarted("turn-2", "message-2"),
         messageDelta("turn-2", "message-2", "two\n"),
       ]);
+
       const initial = expectWarmEqualsCold(
         testThread,
         singleSegmentArgs,
         "initial",
       );
+
       expect({
         goal: initial.response.goal?.objective,
         todos: initial.response.pendingTodos?.items.map((item) => item.text),
@@ -884,28 +1198,30 @@ describe("latest timeline selection memo", () => {
       const laggingSeq = append(testThread, [
         messageDelta("turn-2", "message-2", "three\n"),
       ]);
+
+      const savedBeforeAppend = buildRouteTimelinePage({
+        ...singleSegmentArgs,
+        db: testThread.coldDb,
+        registry,
+        thread: testThread.thread,
+        maxSeq: laggingSeq,
+      }).response;
+
       append(testThread, [
         goalRow(testThread.thread.id, "second goal"),
+        contextUsage("turn-2", 200),
         planStepsRow("turn-2", "plan-2", "Ship again"),
         workflowTaskUpdate("task:wf-1", true),
       ]);
+
       const lagging = expectWarmEqualsCold(
         testThread,
         { ...singleSegmentArgs, maxSeq: laggingSeq },
         "lagging snapshot",
       );
+
       expect(selectionWasReused(lagging.profile)).toBe(false);
-      expect({
-        activeWorkflows: lagging.response.activeWorkflows,
-        goal: lagging.response.goal,
-        maxSeq: lagging.response.maxSeq,
-        pendingTodos: lagging.response.pendingTodos,
-      }).toEqual({
-        activeWorkflows: [],
-        goal: null,
-        maxSeq: laggingSeq,
-        pendingTodos: null,
-      });
+      expect(lagging.response).toEqual(savedBeforeAppend);
 
       expectWarmEqualsCold(testThread, singleSegmentArgs, "head snapshot");
       append(testThread, [messageDelta("turn-2", "message-2", "four\n")]);
@@ -918,35 +1234,42 @@ describe("latest timeline selection memo", () => {
     withTestThread((testThread) => {
       const state = initialState();
       const args = latestArgs("default");
+
       const boundary = (maxSeq: number) =>
         getTimelineGroupingContext(testThread.coldDb, {
           maxSeq,
           sequenceStart: 0,
           threadId: testThread.thread.id,
         }).orderingBoundarySequence;
+
       const rowStarts = (page: BuiltTimelinePage) =>
         page.response.rows.map((row) => row.sourceSeqStart);
+
       const message = (id: string) =>
         itemRow("item/completed", "turn-1", {
           id,
           text: id,
           type: "agentMessage",
         });
+
       const steerSeq = append(testThread, [
         ...startTurn(state),
         agentToolCall("item/started", "turn-1", "agent-1"),
         userRequest(2, { kind: "new-turn" }, "Steer"),
       ]);
+
       const requestSeq = append(testThread, [
         acceptedInput(2, "turn-1"),
         message("message-1"),
         agentToolCall("item/started", "turn-1", "agent-2"),
         userRequest(3, { kind: "new-turn" }, "Queued"),
       ]);
+
       const beforeSeq = append(testThread, [
         message("message-2"),
         completeTurn(state, "turn-1"),
       ]);
+
       const before = expectWarmEqualsCold(testThread, args, "before");
       expect(boundary(beforeSeq)).toBe(requestSeq);
       expect(rowStarts(before)).toEqual([1, 4, 5, 8, 7, 9, 10]);
@@ -954,6 +1277,7 @@ describe("latest timeline selection memo", () => {
       const maxSeq = append(testThread, [
         contextUsage("turn-1", 42, "agent-1"),
       ]);
+
       const after = expectWarmEqualsCold(testThread, args, "after");
       expect(boundary(maxSeq)).toBe(steerSeq);
       expect(rowStarts(after)).toEqual([1, 4, 5, 7, 8, 9, 10]);
@@ -1003,14 +1327,17 @@ describe("latest timeline selection memo", () => {
       expect(before.response.timelinePage.returnedSegmentCount).toBe(2);
 
       let crossed = false;
+
       for (let index = 0; index < 20 && !crossed; index += 1) {
         append(testThread, [messageDelta("turn-2", "message-2", "word ")]);
         const page = expectWarmEqualsCold(testThread, args, `delta ${index}`);
         crossed = page.response.timelinePage.returnedSegmentCount === 1;
+
         if (crossed) {
           expect(selectionWasReused(page.profile)).toBe(false);
         }
       }
+
       expect(crossed).toBe(true);
     });
   });
@@ -1037,9 +1364,11 @@ describe("latest timeline selection memo", () => {
         messageStarted("turn-1", "message-2"),
         messageDelta("turn-1", "message-1", "one\n"),
       ]);
+
       const deletedSeq = append(testThread, [
         messageDelta("turn-1", "message-1", "two\n"),
       ]);
+
       append(testThread, [
         itemRow("item/completed", "turn-1", {
           id: "message-1",
@@ -1069,6 +1398,7 @@ describe("latest timeline selection memo", () => {
         ...testThread,
         thread: { ...testThread.thread, status: "idle" },
       };
+
       append(idle, [messageDelta("turn-1", "message-1", "word")]);
       const page = expectWarmEqualsCold(idle, latestArgs("default"), "idle");
       expect(selectionWasReused(page.profile)).toBe(false);
@@ -1086,11 +1416,13 @@ describe("latest timeline selection memo", () => {
         contextClear("clear-1"),
         ...startTurn(state),
       ]);
+
       const second = expectWarmEqualsCold(
         testThread,
         latestArgs("default"),
         "second epoch",
       );
+
       expect(second.response.contextBoundarySeq).not.toBeNull();
       expect(countTimelineSelectionMemoEntries(testThread.db)).toBe(1);
     });
@@ -1108,6 +1440,7 @@ describe("latest timeline selection memo", () => {
           providerId: "codex",
           status: "active",
         });
+
         append({ db: testThread.db, thread }, startTurn(initialState()));
         buildRouteTimelinePage({
           ...latestArgs("default"),
@@ -1116,6 +1449,7 @@ describe("latest timeline selection memo", () => {
           thread,
         });
       }
+
       expect(countTimelineSelectionMemoEntries(testThread.db)).toBe(
         TIMELINE_SELECTION_MEMO_MAX_ENTRIES,
       );

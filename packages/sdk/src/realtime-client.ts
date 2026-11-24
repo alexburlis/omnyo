@@ -2,36 +2,40 @@ import type {
   ChangedMessage,
   ClientMessage,
   RealtimeSubscriptionTarget,
-} from "@bb/domain";
-import { realtimeSubscriptionTargetKey } from "@bb/domain";
-import { serverMessageLenientSchema } from "@bb/server-contract";
+} from "@omnyo/domain";
+import { realtimeSubscriptionTargetKey } from "@omnyo/domain";
+import { serverMessageLenientSchema } from "@omnyo/server-contract";
 import { resolveRealtimeUrl } from "./realtime-url.js";
 import type {
-  BbRealtime,
-  BbRealtimeCallback,
-  BbRealtimeConnectionEvent,
-  BbRealtimeEventMap,
-  BbRealtimeEventName,
-  BbRealtimeSubscribeArgs,
-  BbRealtimeSubscribeArgsUnion,
-  BbRealtimeUnsubscribe,
+  OmnyoRealtime,
+  OmnyoRealtimeCallback,
+  OmnyoRealtimeConnectionEvent,
+  OmnyoRealtimeEventMap,
+  OmnyoRealtimeEventName,
+  OmnyoRealtimeSubscribeArgs,
+  OmnyoRealtimeSubscribeArgsUnion,
+  OmnyoRealtimeUnsubscribe,
   SystemRealtimeEvent,
 } from "./realtime-types.js";
 import type {
-  BbRealtimeSocket,
-  BbRealtimeSocketFactory,
-  BbRealtimeSocketMessageEvent,
-  BbSdkTransport,
+  OmnyoRealtimeSocket,
+  OmnyoRealtimeSocketFactory,
+  OmnyoRealtimeSocketMessageEvent,
+  OmnyoSdkTransport,
 } from "./transport.js";
 
 const SOCKET_CONNECTING = 0;
+
 const SOCKET_OPEN = 1;
+
 const INITIAL_RECONNECT_DELAY_MS = 1000;
+
 const MAX_RECONNECT_DELAY_MS = 30_000;
+
 const RECONNECT_DELAY_MULTIPLIER = 1.5;
 
-interface CreateBbRealtimeClientArgs {
-  transport: BbSdkTransport;
+interface CreateOmnyoRealtimeClientArgs {
+  transport: OmnyoSdkTransport;
 }
 
 interface TargetSubscription {
@@ -56,7 +60,7 @@ interface IdScopedChangedListenerRecord<
   TEventName extends IdScopedChangedEventName,
 > {
   active: boolean;
-  callback: BbRealtimeCallback<TEventName>;
+  callback: OmnyoRealtimeCallback<TEventName>;
   event: TEventName;
   selectorId?: string;
   target: RealtimeSubscriptionTarget;
@@ -66,7 +70,7 @@ interface UnscopedChangedListenerRecord<
   TEventName extends UnscopedChangedEventName,
 > {
   active: boolean;
-  callback: BbRealtimeCallback<TEventName>;
+  callback: OmnyoRealtimeCallback<TEventName>;
   event: TEventName;
   target: RealtimeSubscriptionTarget;
 }
@@ -85,7 +89,7 @@ type ChangedListenerRecord =
 
 interface ConnectionListenerRecord {
   active: boolean;
-  callback: BbRealtimeCallback<"realtime:connection">;
+  callback: OmnyoRealtimeCallback<"realtime:connection">;
   event: "realtime:connection";
 }
 
@@ -129,7 +133,7 @@ export function createRealtimeSocketAdapter(socket: {
   close(): void;
   readonly readyState: number;
   send(data: string): void;
-}): BbRealtimeSocket {
+}): OmnyoRealtimeSocket {
   return {
     close: () => socket.close(),
     onclose: null,
@@ -143,19 +147,21 @@ export function createRealtimeSocketAdapter(socket: {
   };
 }
 
-export function wrapStandardWebsocket(socket: WebSocket): BbRealtimeSocket {
+export function wrapStandardWebsocket(socket: WebSocket): OmnyoRealtimeSocket {
   const adapter = createRealtimeSocketAdapter(socket);
   socket.onopen = () => adapter.onopen?.();
   socket.onmessage = (event) => adapter.onmessage?.({ data: event.data });
   socket.onclose = () => adapter.onclose?.();
   socket.onerror = () => adapter.onerror?.();
+
   return adapter;
 }
 
-function resolveDefaultWebsocketFactory(): BbRealtimeSocketFactory | null {
+function resolveDefaultWebsocketFactory(): OmnyoRealtimeSocketFactory | null {
   if (typeof WebSocket === "undefined") {
     return null;
   }
+
   return (url) => wrapStandardWebsocket(new WebSocket(url));
 }
 
@@ -174,32 +180,32 @@ function isIdScopedChangedListenerFor<
   return listener.event === event;
 }
 
-export class BbRealtimeClient implements BbRealtime {
+export class OmnyoRealtimeClient implements OmnyoRealtime {
   private readonly listeners = new Set<RealtimeListenerRecord>();
   private readonly targetSubscriptions = new Map<string, TargetSubscription>();
-  private readonly transport: BbSdkTransport;
-  private lastConnectionEvent: BbRealtimeConnectionEvent | null = null;
+  private readonly transport: OmnyoSdkTransport;
+  private lastConnectionEvent: OmnyoRealtimeConnectionEvent | null = null;
   private reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
   private reconnectingAfterUnexpectedClose = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private rejectSocketReady: ((error: Error) => void) | null = null;
   private resolveSocketReady: (() => void) | null = null;
-  private socket: BbRealtimeSocket | null = null;
+  private socket: OmnyoRealtimeSocket | null = null;
   private socketReadyPromise: Promise<void> | null = null;
 
-  constructor(args: CreateBbRealtimeClientArgs) {
+  constructor(args: CreateOmnyoRealtimeClientArgs) {
     this.transport = args.transport;
   }
 
-  subscribe<TEventName extends BbRealtimeEventName>(
-    args: BbRealtimeSubscribeArgs<TEventName>,
-  ): BbRealtimeUnsubscribe {
+  subscribe<TEventName extends OmnyoRealtimeEventName>(
+    args: OmnyoRealtimeSubscribeArgs<TEventName>,
+  ): OmnyoRealtimeUnsubscribe {
     return this.addListener(args);
   }
 
   private addListener(
-    args: BbRealtimeSubscribeArgsUnion,
-  ): BbRealtimeUnsubscribe {
+    args: OmnyoRealtimeSubscribeArgsUnion,
+  ): OmnyoRealtimeUnsubscribe {
     switch (args.event) {
       case "thread:changed":
         return this.activateListener({
@@ -258,9 +264,10 @@ export class BbRealtimeClient implements BbRealtime {
 
   private addConnectionListener(
     listener: ConnectionListenerRecord,
-  ): BbRealtimeUnsubscribe {
+  ): OmnyoRealtimeUnsubscribe {
     const unsubscribe = this.activateListener(listener);
     const snapshot = this.lastConnectionEvent;
+
     if (snapshot) {
       queueMicrotask(() => {
         if (listener.active && this.lastConnectionEvent === snapshot) {
@@ -268,19 +275,22 @@ export class BbRealtimeClient implements BbRealtime {
         }
       });
     }
+
     return unsubscribe;
   }
 
   private activateListener(
     listener: RealtimeListenerRecord,
-  ): BbRealtimeUnsubscribe {
+  ): OmnyoRealtimeUnsubscribe {
     this.listeners.add(listener);
+
     if (isTargetedListener(listener)) {
       this.addTarget(listener.target);
+
       try {
         void this.connectSocket().catch((error) => {
           if (listener.active) {
-            console.error("bb realtime connection failed", error);
+            console.error("Omnyo realtime connection failed", error);
           }
         });
       } catch (error) {
@@ -296,22 +306,29 @@ export class BbRealtimeClient implements BbRealtime {
     if (!listener.active) {
       return;
     }
+
     listener.active = false;
     this.listeners.delete(listener);
+
     if (isTargetedListener(listener)) {
       this.removeTarget(listener.target);
     }
+
     this.closeSocketIfIdle();
   }
 
   private addTarget(target: RealtimeSubscriptionTarget): void {
     const key = realtimeSubscriptionTargetKey(target);
     const existing = this.targetSubscriptions.get(key);
+
     if (existing) {
       existing.count += 1;
+
       return;
     }
+
     this.targetSubscriptions.set(key, { count: 1, target });
+
     if (this.socket?.readyState === SOCKET_OPEN) {
       this.sendTargetMessage("subscribe", target);
     }
@@ -320,14 +337,19 @@ export class BbRealtimeClient implements BbRealtime {
   private removeTarget(target: RealtimeSubscriptionTarget): void {
     const key = realtimeSubscriptionTargetKey(target);
     const existing = this.targetSubscriptions.get(key);
+
     if (!existing) {
       return;
     }
+
     if (existing.count > 1) {
       existing.count -= 1;
+
       return;
     }
+
     this.targetSubscriptions.delete(key);
+
     if (this.socket?.readyState === SOCKET_OPEN) {
       this.sendTargetMessage("unsubscribe", target);
     }
@@ -337,6 +359,7 @@ export class BbRealtimeClient implements BbRealtime {
     if (this.targetSubscriptions.size === 0) {
       return Promise.resolve();
     }
+
     if (
       this.socket &&
       (this.socket.readyState === SOCKET_OPEN ||
@@ -347,11 +370,13 @@ export class BbRealtimeClient implements BbRealtime {
 
     const websocketFactory =
       this.transport.websocket ?? resolveDefaultWebsocketFactory();
+
     if (!websocketFactory) {
       throw new Error(
-        "BB SDK realtime requires a WebSocket implementation. Pass websocket when creating the transport.",
+        "Omnyo SDK realtime requires a WebSocket implementation. Pass websocket when creating the transport.",
       );
     }
+
     const socket = websocketFactory(
       resolveRealtimeUrl({ transport: this.transport }),
     );
@@ -375,17 +400,22 @@ export class BbRealtimeClient implements BbRealtime {
       if (this.socket !== socket) {
         return;
       }
+
       const openedAfterReconnect = this.reconnectingAfterUnexpectedClose;
       this.reconnectingAfterUnexpectedClose = false;
       this.reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
+
       for (const subscription of this.targetSubscriptions.values()) {
         this.sendTargetMessage("subscribe", subscription.target);
       }
+
       this.resolveSocketReadyPromise();
       this.closeSocketIfIdle();
+
       if (this.socket !== socket) {
         return;
       }
+
       this.emitConnection({
         state: "connected",
         reconnected: openedAfterReconnect,
@@ -397,14 +427,16 @@ export class BbRealtimeClient implements BbRealtime {
       this.handleSocketMessage(event);
     };
 
-    socket.onclose = () => {
+    const handleClosed = () => {
       if (this.socket !== socket) {
         return;
       }
+
       this.socket = null;
       this.clearSocketReadyPromise(
-        new Error("bb realtime socket closed before it became ready."),
+        new Error("Omnyo realtime socket closed before it became ready."),
       );
+
       if (this.targetSubscriptions.size === 0) {
         if (this.lastConnectionEvent?.state !== "disconnected") {
           this.emitConnection({
@@ -413,8 +445,10 @@ export class BbRealtimeClient implements BbRealtime {
             reconnectDelayMs: null,
           });
         }
+
         return;
       }
+
       this.reconnectingAfterUnexpectedClose = true;
       const reconnectDelayMs = this.reconnectDelayMs;
       this.emitConnection({
@@ -422,27 +456,36 @@ export class BbRealtimeClient implements BbRealtime {
         reconnected: false,
         reconnectDelayMs,
       });
+
       if (this.reconnectTimer || this.socket) {
         return;
       }
+
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
         this.reconnectDelayMs = Math.min(
           reconnectDelayMs * RECONNECT_DELAY_MULTIPLIER,
           MAX_RECONNECT_DELAY_MS,
         );
+
         try {
           void this.connectSocket().catch((error) => {
-            console.error("bb realtime reconnect failed", error);
+            console.error("Omnyo realtime reconnect failed", error);
           });
         } catch (error) {
-          console.error("bb realtime reconnect failed", error);
+          console.error("Omnyo realtime reconnect failed", error);
         }
       }, reconnectDelayMs);
     };
 
+    socket.onclose = handleClosed;
+
+    let closeRequested = false;
     socket.onerror = () => {
+      if (closeRequested) return;
+      closeRequested = true;
       socket.close();
+      handleClosed();
     };
 
     return socketReadyPromise;
@@ -452,19 +495,23 @@ export class BbRealtimeClient implements BbRealtime {
     if (this.targetSubscriptions.size > 0) {
       return;
     }
+
     let canceledPendingReconnect = false;
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
       canceledPendingReconnect = true;
     }
+
     this.reconnectingAfterUnexpectedClose = false;
     this.reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
     this.clearSocketReadyPromise(
       new Error(
-        "bb realtime socket closed because there are no active targets.",
+        "Omnyo realtime socket closed because there are no active targets.",
       ),
     );
+
     if (
       this.socket &&
       (this.socket.readyState === SOCKET_OPEN ||
@@ -478,8 +525,10 @@ export class BbRealtimeClient implements BbRealtime {
         reconnectDelayMs: null,
       });
       socket.close();
+
       return;
     }
+
     if (canceledPendingReconnect) {
       this.emitConnection({
         state: "disconnected",
@@ -489,15 +538,21 @@ export class BbRealtimeClient implements BbRealtime {
     }
   }
 
-  private handleSocketMessage(event: BbRealtimeSocketMessageEvent): void {
+  private handleSocketMessage(event: OmnyoRealtimeSocketMessageEvent): void {
     if (typeof event.data !== "string") {
       return;
     }
+
     let parsedMessage: unknown;
+
     try {
       parsedMessage = JSON.parse(event.data);
     } catch (error) {
-      console.error("bb realtime ignored malformed websocket message", error);
+      console.error(
+        "Omnyo realtime ignored malformed websocket message",
+        error,
+      );
+
       return;
     }
 
@@ -512,13 +567,16 @@ export class BbRealtimeClient implements BbRealtime {
     }
 
     const parseResult = serverMessageLenientSchema.safeParse(parsedMessage);
+
     if (!parseResult.success) {
       console.error(
-        "bb realtime ignored invalid websocket message",
+        "Omnyo realtime ignored invalid websocket message",
         parseResult.error,
       );
+
       return;
     }
+
     this.dispatchChangedMessage(parseResult.data);
   }
 
@@ -544,7 +602,7 @@ export class BbRealtimeClient implements BbRealtime {
 
   private dispatchIdScopedChangedMessage<
     TEventName extends IdScopedChangedEventName,
-  >(event: TEventName, message: BbRealtimeEventMap[TEventName]): void {
+  >(event: TEventName, message: OmnyoRealtimeEventMap[TEventName]): void {
     for (const listener of this.listenerSnapshot()) {
       if (
         !isIdScopedChangedListenerFor(listener, event) ||
@@ -556,6 +614,7 @@ export class BbRealtimeClient implements BbRealtime {
       ) {
         continue;
       }
+
       this.callListener(listener.callback, message);
     }
   }
@@ -565,9 +624,11 @@ export class BbRealtimeClient implements BbRealtime {
       if (!listener.active) {
         continue;
       }
+
       if (listener.event === "system:changed") {
         this.callListener(listener.callback, message);
       }
+
       if (
         listener.event === "system:config-changed" &&
         message.changes.includes("config-changed")
@@ -581,15 +642,19 @@ export class BbRealtimeClient implements BbRealtime {
     if (!this.socketReadyPromise) {
       this.resetSocketReadyPromise();
     }
+
     if (!this.socketReadyPromise) {
-      throw new Error("BB SDK realtime socket readiness was not initialized.");
+      throw new Error(
+        "Omnyo SDK realtime socket readiness was not initialized.",
+      );
     }
+
     return this.socketReadyPromise;
   }
 
   private resetSocketReadyPromise(): void {
     this.clearSocketReadyPromise(
-      new Error("bb realtime socket closed before it became ready."),
+      new Error("Omnyo realtime socket closed before it became ready."),
     );
     this.socketReadyPromise = new Promise((resolve, reject) => {
       this.resolveSocketReady = resolve;
@@ -601,6 +666,7 @@ export class BbRealtimeClient implements BbRealtime {
     if (!this.resolveSocketReady) {
       return;
     }
+
     this.resolveSocketReady();
     this.resolveSocketReady = null;
     this.rejectSocketReady = null;
@@ -615,6 +681,7 @@ export class BbRealtimeClient implements BbRealtime {
     if (!this.rejectSocketReady) {
       return;
     }
+
     this.rejectSocketReady(error);
     this.resolveSocketReady = null;
     this.rejectSocketReady = null;
@@ -627,16 +694,19 @@ export class BbRealtimeClient implements BbRealtime {
     if (!this.socket || this.socket.readyState !== SOCKET_OPEN) {
       return;
     }
+
     const message: ClientMessage = { type, target };
     this.socket.send(JSON.stringify(message));
   }
 
-  private emitConnection(event: BbRealtimeConnectionEvent): void {
+  private emitConnection(event: OmnyoRealtimeConnectionEvent): void {
     this.lastConnectionEvent = event;
+
     for (const listener of this.listenerSnapshot()) {
       if (listener.event !== "realtime:connection" || !listener.active) {
         continue;
       }
+
       this.callListener(listener.callback, event);
     }
   }
@@ -645,20 +715,20 @@ export class BbRealtimeClient implements BbRealtime {
     return [...this.listeners];
   }
 
-  private callListener<TEventName extends BbRealtimeEventName>(
-    callback: BbRealtimeCallback<TEventName>,
-    event: Parameters<BbRealtimeCallback<TEventName>>[0],
+  private callListener<TEventName extends OmnyoRealtimeEventName>(
+    callback: OmnyoRealtimeCallback<TEventName>,
+    event: Parameters<OmnyoRealtimeCallback<TEventName>>[0],
   ): void {
     try {
       callback(event);
     } catch (error) {
-      console.error("bb realtime listener failed", error);
+      console.error("Omnyo realtime listener failed", error);
     }
   }
 }
 
-export function createBbRealtimeClient(
-  args: CreateBbRealtimeClientArgs,
-): BbRealtimeClient {
-  return new BbRealtimeClient(args);
+export function createOmnyoRealtimeClient(
+  args: CreateOmnyoRealtimeClientArgs,
+): OmnyoRealtimeClient {
+  return new OmnyoRealtimeClient(args);
 }

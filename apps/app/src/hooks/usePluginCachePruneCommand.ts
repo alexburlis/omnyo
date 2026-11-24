@@ -25,6 +25,7 @@ export function usePluginCachePruneCommand(): void {
         });
       },
     );
+
     return true;
   });
 }

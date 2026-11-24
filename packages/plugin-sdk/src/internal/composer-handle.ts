@@ -2,7 +2,9 @@ import {
   removeComposerMentions,
   setComposerText,
 } from "./composer-draft-transforms.js";
+
 export { reconcileComposerMentions } from "./composer-draft-transforms.js";
+
 import type {
   ComposerDraft,
   ComposerDraftReplacement,
@@ -12,12 +14,13 @@ import type {
   ComposerMention,
   ComposerSelection,
   ComposerSubmitOptions,
+  ExperimentalComposerSuggestion,
   JsonValue,
   PluginComposerApi,
   PluginComposerMention,
   PluginComposerScope,
   PluginComposerTextEffect,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { createComposerDraftActions } from "./composer-draft-actions.js";
 
 export { createComposerDraftActions } from "./composer-draft-actions.js";
@@ -59,8 +62,9 @@ export interface ComposerHandleController {
   target: ComposerHandleTarget;
   mentionText(mention: ComposerMention): string;
   setTextEffect(effect: PluginComposerTextEffect | null): void;
+  setSuggestion(suggestion: ExperimentalComposerSuggestion | null): void;
   setInputLock(locked: boolean): void;
-  onSubmitted(listener: () => void): () => void;
+  onSubmitted(listener: (draft?: ComposerDraftSnapshot) => void): () => void;
 }
 
 export interface ComposerHandleBinding {
@@ -70,6 +74,7 @@ export interface ComposerHandleBinding {
 }
 
 const UNAVAILABLE_MESSAGE = "This composer is no longer available.";
+
 const OFF_SCREEN_MESSAGE = "This composer isn't on screen.";
 
 export const OFF_SCREEN_EDITOR_STATE: ComposerEditorState = {
@@ -100,6 +105,7 @@ export function appendComposerDraft(
   const base = block ? current.text.replace(/\s+$/u, "") : current.text;
   const separator = block && base.length > 0 ? "\n\n" : "";
   const offset = base.length + separator.length;
+
   return {
     text: `${base}${separator}${value.text}`,
     mentions: [
@@ -115,6 +121,7 @@ export function appendComposerDraft(
 
 function validProviderId(provider: string): string | null {
   const trimmed = provider.trim();
+
   return trimmed.length === 0 || trimmed.includes(":") ? null : trimmed;
 }
 
@@ -125,21 +132,27 @@ function insertValue(
   const list: readonly ComposerInsertPart[] = Array.isArray(parts)
     ? parts
     : [parts as ComposerInsertPart];
+
   let text = "";
   const mentions: ComposerMention[] = [];
+
   for (const part of list) {
     if (typeof part === "string") {
       text += part;
       continue;
     }
+
     let mention: ComposerMention;
+
     if ("kind" in part) {
       mention = part;
     } else {
       const provider = validProviderId(part.provider);
+
       if (provider === null) {
         throw new Error(`Invalid mention provider id "${part.provider}".`);
       }
+
       mention = {
         from: 0,
         to: 0,
@@ -151,6 +164,7 @@ function insertValue(
         icon: null,
       };
     }
+
     const serialized = controller.mentionText(mention);
     mentions.push({
       ...mention,
@@ -159,6 +173,7 @@ function insertValue(
     });
     text += serialized;
   }
+
   return { text, mentions };
 }
 
@@ -180,6 +195,7 @@ function withLegacyDraftFields(
   attachmentCount: number,
 ): ComposerDraftSnapshot {
   const cached = legacyDrafts.get(draft);
+
   if (cached) return cached;
   const snapshot = { ...draft };
   Object.defineProperties(snapshot, {
@@ -188,6 +204,7 @@ function withLegacyDraftFields(
   });
   Object.freeze(snapshot);
   legacyDrafts.set(draft, snapshot);
+
   return snapshot;
 }
 
@@ -195,8 +212,10 @@ function waitForUploads(target: ComposerHandleTarget): Promise<void> {
   return new Promise((resolve) => {
     if (!target.getEditorState().isAttaching) {
       resolve();
+
       return;
     }
+
     const unsubscribe = target.subscribeEditorState(() => {
       if (target.getEditorState().isAttaching) return;
       unsubscribe();
@@ -216,33 +235,42 @@ export function createComposerHandleBinding(
   const requireAvailable = () => {
     if (!target().isAvailable()) throw new Error(UNAVAILABLE_MESSAGE);
   };
+
   const legacyAvailable = (method: string) => {
     if (target().isAvailable()) return true;
     console.warn(
       `[plugin:${controller.pluginId}] useComposer().${method}: ${UNAVAILABLE_MESSAGE}`,
     );
+
     return false;
   };
 
   const replaceText = (nextText: string) => {
     const current = target().getDraft();
+
     if (nextText === current.text) return;
     target().setDraft(setComposerText(current, nextText));
   };
+
   const insertMention = (mention: PluginComposerMention) => {
     warnDeprecatedComposerMember("insertMention", "insert");
     const provider = validProviderId(mention.provider);
+
     if (provider === null) {
       console.warn(
         `[plugin:${controller.pluginId}] useComposer().insertMention: invalid provider id "${mention.provider}"`,
       );
+
       return;
     }
+
     if (!legacyAvailable("insertMention")) return;
     const label = mention.label.trim() || mention.id;
     const current = target().getDraft();
+
     const separator =
       current.text.length === 0 || /\s$/u.test(current.text) ? "" : " ";
+
     const from = current.text.length + separator.length;
     target().setDraft({
       text: `${current.text}${separator}${label} `,
@@ -262,8 +290,10 @@ export function createComposerHandleBinding(
     });
     target().focus();
   };
+
   const removeMentionFrom = (mention: { provider: string; id: string }) => {
     const current = target().getDraft();
+
     const next = removeComposerMentions(
       current,
       (item) =>
@@ -272,13 +302,16 @@ export function createComposerHandleBinding(
         item.provider === mention.provider &&
         item.id === mention.id,
     );
+
     if (next !== current) target().setDraft(next);
   };
+
   const removeMention = (mention: { provider: string; id: string }) => {
     warnDeprecatedComposerMember("removeMention", "replace");
     requireAvailable();
     removeMentionFrom(mention);
   };
+
   const insert = (
     parts: ComposerInsertPart | readonly ComposerInsertPart[],
     options: ComposerInsertOptions = {},
@@ -286,41 +319,51 @@ export function createComposerHandleBinding(
     requireAvailable();
     const value = insertValue(parts, controller);
     const block = options.block === true;
+
     if ((options.at ?? "cursor") === "cursor") {
       if (!target().insertAtCursor(value, block)) {
         throw new Error(OFF_SCREEN_MESSAGE);
       }
+
       return;
     }
+
     target().setDraft(appendComposerDraft(target().getDraft(), value, block));
   };
+
   const submit = async (options: ComposerSubmitOptions) => {
     requireAvailable();
     const hostSubmit = target().submit;
+
     if (hostSubmit === undefined) {
       throw new Error("This composer cannot submit programmatically.");
     }
+
     if (
       options.sendAt !== undefined &&
       (!Number.isFinite(options.sendAt) || options.sendAt <= Date.now())
     ) {
       throw new Error("Pick a time in the future.");
     }
+
     const errorBefore = editorState().attachmentError;
     await waitForUploads(target());
     const state = editorState();
+
     if (
       state.attachmentError !== null &&
       state.attachmentError !== errorBefore
     ) {
       throw new Error(state.attachmentError);
     }
+
     if (state.isSubmittingBlocked) {
       throw new Error(
         state.submittingBlockedReason ??
           "This composer can't submit right now.",
       );
     }
+
     await hostSubmit(
       options,
       options.experimental_data === undefined
@@ -328,22 +371,35 @@ export function createComposerHandleBinding(
         : { pluginId: controller.pluginId, data: options.experimental_data },
     );
   };
+
   const setSelection = async (selection: ComposerSelection) => {
     requireAvailable();
     const hostSetSelection = target().setSelection;
+
     if (hostSetSelection === undefined) {
       throw new Error("This composer has no pickers to set.");
     }
+
     return hostSetSelection(selection);
   };
+
   const submittedListeners = new Set<() => void>();
+
+  const submittedDraftListeners = new Set<
+    (draft: ComposerDraftSnapshot) => void
+  >();
+
   let submittedSubscription: {
     scope: string;
     unsubscribe: () => void;
   } | null = null;
+
   const syncSubmittedSubscription = () => {
     const scope =
-      submittedListeners.size === 0 ? null : JSON.stringify(target().scope);
+      submittedListeners.size + submittedDraftListeners.size === 0
+        ? null
+        : JSON.stringify(target().scope);
+
     if (submittedSubscription?.scope === scope) return;
     submittedSubscription?.unsubscribe();
     submittedSubscription =
@@ -351,7 +407,17 @@ export function createComposerHandleBinding(
         ? null
         : {
             scope,
-            unsubscribe: controller.onSubmitted(() => {
+            unsubscribe: controller.onSubmitted((draft) => {
+              if (draft !== undefined) {
+                for (const listener of [...submittedDraftListeners]) {
+                  try {
+                    listener(draft);
+                  } catch (error) {
+                    console.error("Composer submission listener failed", error);
+                  }
+                }
+              }
+
               for (const listener of [...submittedListeners]) {
                 try {
                   listener();
@@ -362,10 +428,12 @@ export function createComposerHandleBinding(
             }),
           };
   };
+
   const onSubmitted = (listener: () => void) => {
     const entry = () => listener();
     submittedListeners.add(entry);
     syncSubmittedSubscription();
+
     return () => {
       submittedListeners.delete(entry);
       syncSubmittedSubscription();
@@ -373,6 +441,7 @@ export function createComposerHandleBinding(
   };
 
   const draftActions = createComposerDraftActions(target);
+
   const handle: PluginComposerApi = {
     replace: draftActions.replace,
     get scope() {
@@ -416,23 +485,29 @@ export function createComposerHandleBinding(
     },
     setText: (next) => {
       warnDeprecatedComposerMember("setText", "replace");
+
       if (legacyAvailable("setText")) replaceText(next);
     },
     updateText: (updater) => {
       warnDeprecatedComposerMember("updateText", "replace");
+
       if (legacyAvailable("updateText")) {
         replaceText(updater(target().getDraft().text));
       }
     },
     clear: () => {
       warnDeprecatedComposerMember("clear", "replace");
+
       if (legacyAvailable("clear")) replaceText("");
     },
     insert,
     setTextEffect: (effect) => controller.setTextEffect(effect),
+    experimental_setSuggestion: (suggestion) =>
+      controller.setSuggestion(suggestion),
     setInputLock: (locked) => controller.setInputLock(locked),
     addQuote: (text) => {
       warnDeprecatedComposerMember("addQuote", "replace");
+
       if (!legacyAvailable("addQuote")) return;
       target().addQuote(text);
       target().focus();
@@ -440,6 +515,15 @@ export function createComposerHandleBinding(
     insertMention,
     removeMention,
     onSubmitted,
+    experimental_onSubmittedDraft(listener) {
+      submittedDraftListeners.add(listener);
+      syncSubmittedSubscription();
+
+      return () => {
+        submittedDraftListeners.delete(listener);
+        syncSubmittedSubscription();
+      };
+    },
     focus: () => target().focus(),
     experimental_openPopup: (id) =>
       target().openPopup?.(controller.pluginId, id) ?? false,
@@ -449,27 +533,33 @@ export function createComposerHandleBinding(
     setSelection,
     experimental_removeMention: (mention) => {
       warnDeprecatedComposerMember("experimental_removeMention", "replace");
+
       if (!legacyAvailable("experimental_removeMention")) return;
       removeMentionFrom(mention);
     },
     experimental_onSubmitted: (listener) => {
       warnDeprecatedComposerMember("experimental_onSubmitted", "onSubmitted");
+
       return onSubmitted(listener);
     },
     experimental_submit: (options) => {
       warnDeprecatedComposerMember("experimental_submit", "submit");
+
       return submit(options);
     },
     experimental_setSelection: (selection) => {
       warnDeprecatedComposerMember("experimental_setSelection", "setSelection");
+
       return setSelection(selection);
     },
   };
+
   Object.defineProperties(handle, {
     run: {
       enumerable: false,
       get: () => {
         const state = editorState();
+
         return { isRunning: state.isRunning, isSubmitting: state.isSubmitting };
       },
     },

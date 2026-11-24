@@ -30,6 +30,7 @@ describe("buildMachineThreadGroups", () => {
       createHost({ id: "host_a", name: "Laptop" }),
       createHost({ id: "host_b", name: "Desktop" }),
     ];
+
     const threads = [
       createThread({ id: "thr_1", host: { id: "host_b", name: "host_b" } }),
       createThread({ id: "thr_2", host: null }),
@@ -62,13 +63,16 @@ describe("buildMachineThreadGroups", () => {
       createHost({ id: "host_a", name: "Laptop" }),
       createHost({ id: "host_b", name: "Desktop" }),
     ];
+
     const threads = [
       createThread({ id: "thr_1", host: { id: "host_b", name: "host_b" } }),
     ];
 
     const groups = buildMachineThreadGroups(threads, hosts);
 
-    expect(groups.map((group) => ({ key: group.key, threads: group.threads }))).toEqual([
+    expect(
+      groups.map((group) => ({ key: group.key, threads: group.threads })),
+    ).toEqual([
       { key: "host_a", threads: [] },
       { key: "host_b", threads },
     ]);

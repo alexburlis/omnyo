@@ -44,6 +44,7 @@ function ThreadRenameDialogStage({ children }: { children: ReactNode }) {
 
 export function Overview() {
   const inputRef = useRef<HTMLInputElement | null>(null);
+
   return (
     <StoryCard>
       <StoryRow label="default" hint="thread, idle">

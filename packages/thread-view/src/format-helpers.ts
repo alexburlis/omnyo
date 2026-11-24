@@ -10,6 +10,7 @@ function getNonEmptyStringField(
   key: string,
 ): string | undefined {
   const value = record?.[key];
+
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
@@ -19,8 +20,10 @@ export function getFirstStringField(
 ): string | undefined {
   for (const key of keys) {
     const value = getNonEmptyStringField(record, key);
+
     if (value) return value;
   }
+
   return undefined;
 }
 
@@ -42,10 +45,14 @@ export function durationToCompactString(
   durationMs: number | undefined,
 ): string | undefined {
   if (durationMs === undefined) return undefined;
+
   if (!Number.isFinite(durationMs) || durationMs < 0) return "0s";
+
   if (durationMs < 1_000) return `${Math.round(durationMs)}ms`;
   const totalSeconds = Math.round(durationMs / 1_000);
+
   if (totalSeconds < 60) return `${totalSeconds}s`;
+
   return formatRoundedDurationSeconds(totalSeconds);
 }
 
@@ -58,9 +65,11 @@ function formatRoundedDurationSeconds(totalSeconds: number): string {
   if (hours > 0) {
     parts.push(`${hours}h`);
   }
+
   if (minutes > 0) {
     parts.push(`${minutes}m`);
   }
+
   if (seconds > 0) {
     parts.push(`${seconds}s`);
   }
@@ -86,9 +95,13 @@ export function formatDiffStatsText(input: {
   const { added, removed, hideZero = false } = input;
   const addedText = `+${formatDiffCount(added)}`;
   const removedText = `-${formatDiffCount(removed)}`;
+
   if (!hideZero) return `${addedText} ${removedText}`;
   const parts: string[] = [];
+
   if (added > 0) parts.push(addedText);
+
   if (removed > 0) parts.push(removedText);
+
   return parts.join(" ");
 }

@@ -1,4 +1,4 @@
-import { fork, type ChildProcess } from "node:child_process";
+import { execFile, fork, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, createReadStream, openSync } from "node:fs";
 import {
@@ -7,6 +7,7 @@ import {
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import {
@@ -18,12 +19,24 @@ import {
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { ServerMoveProgressMessage } from "@bb/host-daemon-contract";
-import { writeServerArchive, writeServerMovedFile } from "@bb/server-archive";
+import {
+  HOST_ID_FILE_NAME,
+  HOST_DAEMON_PROTOCOL_VERSION,
+} from "@omnyo/host-daemon-contract";
+import type { ServerMoveProgressMessage } from "@omnyo/host-daemon-contract";
+import {
+  writeServerArchive,
+  writeServerMovedFile,
+} from "@omnyo/server-archive";
 import { afterEach, vi } from "vitest";
 import type { CommandOf } from "../command-dispatch-support.js";
-import type { PendingServerLaunchRequest } from "./pending-server.js";
+import {
+  createDefaultPendingServerLauncher,
+  type PendingServerLaunchRequest,
+} from "./pending-server.js";
 import { ServerMoveService, type ServerMoveServiceOptions } from "./service.js";
 import {
   defaultDetachedProcessSpawner,
@@ -31,15 +44,22 @@ import {
 } from "./service-manager.js";
 
 const roots: string[] = [];
+
 const httpServers: Server[] = [];
+
 const spawnedPids: number[] = [];
+
 const spawnedChildren: ChildProcess[] = [];
 
 export const MOVE_ID = "move-0001";
+
 export const ACTIVATION_TOKEN = "activation-token-0123456789";
+
 export const HOST_KEY = "host-key-target";
+
 export const PARENT_PID = 424_242;
-export const LAUNCHER_ENTRY_PATH = "/opt/npm/bin/bb-app";
+
+export const LAUNCHER_ENTRY_PATH = "/opt/npm/bin/omnyo-app";
 
 export const lastMove = {
   moveId: MOVE_ID,
@@ -55,16 +75,22 @@ const STUB_PENDING_SERVER = `
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
-const [dataDir, port] = process.argv.slice(2);
+const [dataDir = process.env.OMNYO_DATA_DIR, port = process.env.OMNYO_SERVER_PORT] = process.argv.slice(2);
 const importFile = JSON.parse(readFileSync(join(dataDir, "server-import.json"), "utf8"));
 const server = createServer((request, response) => {
+  const identityPath = join(dataDir, "pending-identity.json");
+  const identity = existsSync(identityPath) ? JSON.parse(readFileSync(identityPath, "utf8")) : {};
   response.setHeader("content-type", "application/json");
+  if (request.url === "/api/v1/server/maintenance") {
+    response.end(JSON.stringify({contractVersion:1,runtime:{runtimeId:"inert-pending",processId:process.pid,parentProcessId:process.ppid,launchId:process.env.OMNYO_SERVER_LAUNCH_ID??null,dataDir,serverHostId:"host-target",appVersion:"1.0.0",protocolVersion:${HOST_DAEMON_PROTOCOL_VERSION},...identity.runtime},hold:JSON.parse(readFileSync(join(dataDir,"server-maintenance-hold.json"),"utf8")),activity:{runningThreads:0,pendingInteractions:0,hostRpcs:0,provisioning:0,queuedDispatches:0,pluginLoads:0,pluginInvocations:0,hungServices:0}}));
+    return;
+  }
   if (request.url === "/health") {
-    response.end(JSON.stringify({ ok: true, serverMove: { state: "pending", moveId: importFile.moveId } }));
+    response.end(JSON.stringify({ ok: true, serverMove: { state: "pending", moveId: identity.moveId ?? importFile.moveId } }));
     return;
   }
   if (request.url === "/internal/server-move/pending") {
-    response.end(JSON.stringify({ moveId: importFile.moveId, verified: existsSync(join(dataDir, "bb.db")), message: null }));
+    response.end(JSON.stringify({ moveId: importFile.moveId, verified: existsSync(join(dataDir, "app.db")), message: null }));
     return;
   }
   response.statusCode = 404;
@@ -97,11 +123,13 @@ export function registerServerMoveFixtureCleanup(): void {
         });
       }),
     );
+
     for (const pid of spawnedPids.splice(0)) {
       try {
         process.kill(-pid, "SIGKILL");
       } catch {}
     }
+
     await Promise.all(
       httpServers
         .splice(0)
@@ -119,8 +147,9 @@ export function registerServerMoveFixtureCleanup(): void {
 }
 
 export async function createRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "bb-server-move-test-"));
+  const root = await mkdtemp(join(tmpdir(), "omnyo-server-move-test-"));
   roots.push(root);
+
   return root;
 }
 
@@ -141,6 +170,7 @@ export async function listen(
     server.listen(0, "127.0.0.1", () => resolveListen()),
   );
   const { port } = server.address() as AddressInfo;
+
   return { url: `http://127.0.0.1:${port}`, port };
 }
 
@@ -151,12 +181,14 @@ export async function freePort(): Promise<number> {
   );
   const { port } = server.address() as AddressInfo;
   await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+
   return port;
 }
 
 export async function exists(path: string): Promise<boolean> {
   try {
     await stat(path);
+
     return true;
   } catch {
     return false;
@@ -170,21 +202,21 @@ export async function readJson(path: string): Promise<unknown> {
 interface SourceServer {
   archiveSha256: string;
   archiveSizeBytes: number;
-  bbAppSha256: string;
-  bbAppSizeBytes: number;
+  omnyoAppSha256: string;
+  omnyoAppSizeBytes: number;
   archiveRequests: IncomingMessage[];
   url: string;
 }
 
 async function createSourceServer(root: string): Promise<SourceServer> {
   const sourceDir = join(root, "source-data");
-  await writeFileWithDirs(join(sourceDir, "bb.db"), "sqlite database bytes");
+  await writeFileWithDirs(join(sourceDir, "app.db"), "sqlite database bytes");
   await writeFileWithDirs(
     join(sourceDir, "config.json"),
     JSON.stringify({
-      config: { BB_LOG_LEVEL: "info" },
-      serverUrl: "https://bb.example.test",
-      serverHeaders: { "x-bb-connect-machine": "bbcm_source" },
+      config: { OMNYO_LOG_LEVEL: "info" },
+      serverUrl: "https://omnyo.example.test",
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_source" },
     }),
   );
   await writeFileWithDirs(
@@ -196,10 +228,11 @@ async function createSourceServer(root: string): Promise<SourceServer> {
     "tasks database",
   );
   const archivePath = join(root, "server-archive.tar.gz");
+
   const archive = await writeServerArchive({
     outPath: archivePath,
     files: [
-      "bb.db",
+      "app.db",
       "config.json",
       "attachments/project/a.txt",
       "plugins/tasks/data.db",
@@ -209,64 +242,76 @@ async function createSourceServer(root: string): Promise<SourceServer> {
     })),
     manifest: {
       createdAt: 1_700_000_000_000,
-      bbVersion: "1.0.0",
+      appVersion: "1.0.0",
       protocolVersion: 209,
       migrationCount: 10,
-      sourceDataDir: "/Users/me/.bb",
+      sourceDataDir: "/Users/me/.omnyo",
       sourceServerHostId: "host-source",
       serverMoveExperiment: true,
     },
   });
-  const bbAppPath = join(root, "bb-app.tgz");
-  await writeFile(bbAppPath, "full bb-app package");
-  const bbAppBytes = await readFile(bbAppPath);
+
+  const omnyoAppPath = join(root, "omnyo-app.tgz");
+  await writeFile(omnyoAppPath, "full omnyo-app package");
+  const omnyoAppBytes = await readFile(omnyoAppPath);
   const archiveRequests: IncomingMessage[] = [];
+
   const { url } = await listen((request, response) => {
     if (request.headers.authorization !== `Bearer ${HOST_KEY}`) {
       response.statusCode = 401;
       response.end();
+
       return;
     }
+
     if (request.url === `/internal/server-move/${MOVE_ID}/archive`) {
       archiveRequests.push(request);
       response.setHeader("content-length", String(archive.sizeBytes));
       createReadStream(archivePath).pipe(response);
+
       return;
     }
-    if (request.url === `/internal/server-move/${MOVE_ID}/bb-app.tgz`) {
-      response.write(bbAppBytes);
+
+    if (request.url === `/internal/server-move/${MOVE_ID}/app-runtime.tgz`) {
+      response.write(omnyoAppBytes);
       response.end();
+
       return;
     }
+
     response.statusCode = 404;
     response.end();
   });
+
   return {
     archiveSha256: archive.sha256,
     archiveSizeBytes: archive.sizeBytes,
-    bbAppSha256: createHash("sha256").update(bbAppBytes).digest("hex"),
-    bbAppSizeBytes: bbAppBytes.byteLength,
+    omnyoAppSha256: createHash("sha256").update(omnyoAppBytes).digest("hex"),
+    omnyoAppSizeBytes: omnyoAppBytes.byteLength,
     archiveRequests,
     url,
   };
 }
 
 async function createPackageRoot(root: string): Promise<string> {
-  const packageRoot = join(root, "npm", "lib", "node_modules", "bb-app");
+  const packageRoot = join(root, "npm", "lib", "node_modules", "omnyo-app");
   await writeFileWithDirs(
     join(packageRoot, "package.json"),
-    JSON.stringify({ name: "bb-app", version: "1.0.0" }),
+    JSON.stringify({ name: "omnyo-app", version: "1.0.0" }),
   );
+
   for (const file of [
     "host-daemon/dist/daemon-bundle.mjs",
-    "dist/bb-app.js",
-    "dist/bb-server.js",
+    "dist/omnyo-app.js",
+    "dist/omnyo-server.js",
     "server/dist/index.js",
     "app/dist/index.html",
   ]) {
     await writeFileWithDirs(join(packageRoot, ...file.split("/")), "");
   }
-  await writeFileWithDirs(join(root, "npm", "bin", "bb-app"), "");
+
+  await writeFileWithDirs(join(root, "npm", "bin", "omnyo-app"), "");
+
   return packageRoot;
 }
 
@@ -295,18 +340,18 @@ export async function writeLauncherMovedMode(args: {
     connectHandle: null,
     oldCopyEntries: args.oldCopyEntries ?? [],
   });
-  await writeBbAppRuntime({
+  await writeOmnyoAppRuntime({
     dataDir: args.dataDir,
     serverPort: args.serverPort,
   });
 }
 
-export async function writeBbAppRuntime(args: {
+export async function writeOmnyoAppRuntime(args: {
   dataDir: string;
   serverPort: number;
 }): Promise<void> {
   await writeFileWithDirs(
-    join(args.dataDir, "bb-app-runtime.json"),
+    join(args.dataDir, "app-runtime.json"),
     JSON.stringify({
       entryPath: LAUNCHER_ENTRY_PATH,
       pid: process.pid,
@@ -328,42 +373,92 @@ export async function writeSystemdUnit(args: {
     ".config",
     "systemd",
     "user",
-    "bb-host-daemon-old-server-studio.service",
+    "omnyo-host-daemon-old-server-studio.service",
   );
+
   await writeFileWithDirs(
     unitPath,
     [
       "[Service]",
       `ExecStart=${args.execStart}`,
-      'Environment="BB_APP_NPM_PREFIX=/opt/npm"',
-      `Environment="BB_DATA_DIR=${args.dataDir.replaceAll("\\", "\\\\")}"`,
+      'Environment="OMNYO_APP_NPM_PREFIX=/opt/npm"',
+      `Environment="OMNYO_DATA_DIR=${args.dataDir.replaceAll("\\", "\\\\")}"`,
       "Restart=always",
       "",
     ].join("\n"),
   );
+
   return unitPath;
 }
 
 export interface FixtureArgs {
+  getDirectAccessActivity?: ServerMoveServiceOptions["getDirectAccessActivity"];
   env?: NodeJS.ProcessEnv;
   serverUrl?: string;
   autoUpdate?: boolean;
   supervised?: boolean;
   hostDaemonPort?: number | null;
-  installBbApp?: ServerMoveServiceOptions["installBbApp"];
+  installOmnyoApp?: ServerMoveServiceOptions["installOmnyoApp"];
   checkPortAvailable?: ServerMoveServiceOptions["checkPortAvailable"];
   processOps?: ServerMoveServiceOptions["processOps"];
   portReleaseTimeoutMs?: number;
+  packagedPendingServer?: boolean;
 }
 
 export async function createFixture(args: FixtureArgs = {}) {
   const root = await createRoot();
   const homeDir = join(root, "home");
-  const dataDir = join(homeDir, ".bb-machines", "old-server");
+  const dataDir = join(homeDir, ".omnyo-machines", "old-server");
   await mkdir(dataDir, { recursive: true });
+  await writeFile(join(dataDir, HOST_ID_FILE_NAME), "host-target\n");
   const packageRoot = await createPackageRoot(root);
   const stubPath = join(root, "pending-server.mjs");
   await writeFile(stubPath, STUB_PENDING_SERVER);
+
+  if (args.packagedPendingServer) {
+    const packageSource = fileURLToPath(
+      new URL("../../../../packages/omnyo-app/", import.meta.url),
+    );
+
+    await promisify(execFile)(
+      process.execPath,
+      [
+        fileURLToPath(
+          new URL("../../../../scripts/build-node-entry.mjs", import.meta.url),
+        ),
+        join(packageSource, "src", "bin", "omnyo-server.ts"),
+        join(packageRoot, "dist", "omnyo-server.js"),
+      ],
+      { cwd: packageSource },
+    );
+    await symlink(
+      join(packageSource, "node_modules"),
+      join(packageRoot, "node_modules"),
+      "dir",
+    );
+    await writeFile(
+      join(packageRoot, "server", "dist", "index.js"),
+      STUB_PENDING_SERVER,
+    );
+
+    for (const file of [
+      "omnyo",
+      "omnyo-chunks/fixture.js",
+      "omnyo-provider-bridge-worker.mjs",
+      "omnyo-parcel-watcher-child.mjs",
+      "omnyo-plugin-host-worker.mjs",
+      "omnyo-file-search-worker.mjs",
+      "omnyo-process-launcher-worker.mjs",
+      "omnyo-workspace-observer-child.mjs",
+      "omnyo-workspace-read-child.mjs",
+    ]) {
+      await writeFileWithDirs(
+        join(packageRoot, "host-daemon", "dist", file),
+        "",
+      );
+    }
+  }
+
   const source = await createSourceServer(root);
   const session = { open: false };
   const progress: ServerMoveProgressMessage[] = [];
@@ -372,6 +467,7 @@ export async function createFixture(args: FixtureArgs = {}) {
   const commands: string[][] = [];
   const launches: PendingServerLaunchRequest[] = [];
   const reservedPorts = new Map<number, Server>();
+
   const reserveServerPort = async (): Promise<number> => {
     const server = createServer();
     httpServers.push(server);
@@ -380,13 +476,19 @@ export async function createFixture(args: FixtureArgs = {}) {
     );
     const { port } = server.address() as AddressInfo;
     reservedPorts.set(port, server);
+
     return port;
   };
+
   const logger = { error: vi.fn(), info: vi.fn(), warn: vi.fn() };
+
   const options: ServerMoveServiceOptions = {
+    getDirectAccessActivity: args.getDirectAccessActivity,
     dataDir,
     homeDir,
     hostId: "host-target",
+    instanceId: "instance-host-target",
+    getServerSessionId: () => (session.open ? "session-host-target" : null),
     serverUrl: args.serverUrl ?? source.url,
     hostKey: HOST_KEY,
     serverHeaders: { "x-test-access": "opaque" },
@@ -394,7 +496,7 @@ export async function createFixture(args: FixtureArgs = {}) {
       args.hostDaemonPort === undefined ? 38_887 : args.hostDaemonPort,
     autoUpdate: args.autoUpdate ?? false,
     supervised: args.supervised ?? false,
-    env: args.env ?? { BB_SERVER_MOVE_SERVICE_MANAGER: "none" },
+    env: args.env ?? { OMNYO_SERVER_MOVE_SERVICE_MANAGER: "none" },
     platform: "linux",
     uid: 1000,
     parentPid: PARENT_PID,
@@ -413,23 +515,46 @@ export async function createFixture(args: FixtureArgs = {}) {
     },
     spawnDetached: async (request) => {
       detachedRequests.push(request);
+
       return 999_999;
     },
     launchPendingServer: async (request) => {
       launches.push(request);
       const reservation = reservedPorts.get(request.serverPort);
+
+      if (args.packagedPendingServer) {
+        if (reservation !== undefined) {
+          await new Promise<void>((resolveClose) =>
+            reservation.close(() => resolveClose()),
+          );
+          reservedPorts.delete(request.serverPort);
+        }
+
+        const pid = await createDefaultPendingServerLauncher(
+          defaultDetachedProcessSpawner,
+        )(request);
+
+        spawnedPids.push(pid);
+
+        return pid;
+      }
+
       if (reservation !== undefined) {
         await mkdir(dirname(request.logPath), { recursive: true });
         const log = openSync(request.logPath, "a", 0o600);
         let child: ChildProcess;
         let ready: Promise<void>;
+
         try {
           child = fork(
             stubPath,
             [request.dataDir, String(request.serverPort)],
             {
               detached: true,
-              env: { PATH: process.env.PATH },
+              env: {
+                PATH: process.env.PATH,
+                OMNYO_SERVER_LAUNCH_ID: request.env.OMNYO_SERVER_LAUNCH_ID,
+              },
               execArgv: [],
               stdio: ["ignore", log, log, "ipc"],
             },
@@ -440,13 +565,16 @@ export async function createFixture(args: FixtureArgs = {}) {
               child.off("exit", onExit);
               child.off("error", finish);
               child.off("message", onMessage);
+
               if (error) rejectReady(error);
               else resolveReady();
             };
+
             const onExit = () =>
               finish(
                 new Error("Pending fixture server exited before listening"),
               );
+
             const onMessage = (message: unknown) => {
               if (message === "ready-for-handle") {
                 child.send("listen", reservation, (error) => {
@@ -456,6 +584,7 @@ export async function createFixture(args: FixtureArgs = {}) {
                 finish();
               }
             };
+
             child.once("error", finish);
             child.once("exit", onExit);
             child.on("message", onMessage);
@@ -463,6 +592,7 @@ export async function createFixture(args: FixtureArgs = {}) {
         } finally {
           closeSync(log);
         }
+
         await ready;
         await new Promise<void>((resolveClose) =>
           reservation.close(() => resolveClose()),
@@ -470,20 +600,28 @@ export async function createFixture(args: FixtureArgs = {}) {
         reservedPorts.delete(request.serverPort);
         child.disconnect();
         child.unref();
+
         if (child.pid === undefined)
           throw new Error("Pending fixture server did not report a pid");
+
         return child.pid;
       }
+
       const pid = await defaultDetachedProcessSpawner({
         command: process.execPath,
         args: [stubPath, request.dataDir, String(request.serverPort)],
-        env: { PATH: process.env.PATH },
+        env: {
+          PATH: process.env.PATH,
+          OMNYO_SERVER_LAUNCH_ID: request.env.OMNYO_SERVER_LAUNCH_ID,
+        },
         logPath: request.logPath,
       });
+
       spawnedPids.push(pid);
+
       return pid;
     },
-    installBbApp: args.installBbApp ?? (async () => undefined),
+    installOmnyoApp: args.installOmnyoApp ?? (async () => undefined),
     checkGhAuthenticated: async () => null,
     checkPortAvailable: args.checkPortAvailable ?? (async () => true),
     processOps: args.processOps ?? launcherProcessOps,
@@ -499,10 +637,13 @@ export async function createFixture(args: FixtureArgs = {}) {
     portReleaseTimeoutMs: args.portReleaseTimeoutMs ?? 400,
     activationSessionCloseTimeoutMs: 10_000,
   };
+
   const createService = (
     overrides: Partial<ServerMoveServiceOptions> = {},
   ): ServerMoveService => new ServerMoveService({ ...options, ...overrides });
+
   return {
+    options,
     root,
     homeDir,
     dataDir,
@@ -537,12 +678,12 @@ export async function prepareCommand(
       sha256: fixture.source.archiveSha256,
       sizeBytes: fixture.source.archiveSizeBytes,
     },
-    bbApp: null,
+    appRuntime: null,
     serverPort: overrides.serverPort ?? (await fixture.reserveServerPort()),
     bindHost: null,
-    sourceDataDir: "/Users/me/.bb",
+    sourceDataDir: "/Users/me/.omnyo",
     sourceServerHostId: "host-source",
-    serverUrl: "https://bb.example.test",
+    serverUrl: "https://omnyo.example.test",
     archiveExistingServerData: false,
     ...overrides,
   };

@@ -1,90 +1,105 @@
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import {
-  getThreadListIndicatorLabel,
-  type ThreadListIndicatorKind,
-} from "@bb/client-core";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import type { ThreadListIndicatorKind } from "@omnyo/client-core";
+import { threadIndicatorLabel } from "@/lib/thread-indicator-label";
 import type {
   PluginComposerThreadRowStatus,
   PluginThreadStatusGlyphProps,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { pluginIconName } from "@/components/plugin/PluginIcon";
 import {
   SIDEBAR_STATUS_ICON_CLASS,
   SIDEBAR_SUCCESS_STATUS_COLOR_CLASS,
   SIDEBAR_SUCCESS_STATUS_DOT_CLASS,
-  SIDEBAR_WORKING_STATUS_COLOR_CLASS,
-} from "@bb/shared-ui/sidebar-row-classes";
-
-const WORKING_ACTIVITY_ICONS = {
-  workflow: "Workflow",
-  "background-agent": "UserRoundPlus",
-  "background-command": "Terminal",
-  "plan-mode": "ListTodo",
-  goal: "Target",
-} satisfies Partial<Record<ThreadListIndicatorKind, IconName>>;
+} from "@omnyo/shared-ui/sidebar-row-classes";
 
 const WAITING_ICONS = {
   "waiting-for-input": "CircleQuestion",
-  "queued-waiting": "Clock",
+  "queued-waiting": "CircleDashed",
+  "input-welcome": "MessageQuestion",
+  "callback-waiting": "CircleDashed",
+  "dependency-failed": "CircleAlert",
+  external: "Sent",
 } satisfies Partial<Record<ThreadListIndicatorKind, IconName>>;
 
-function ThreadDraftIndicator({
-  hideIdleLabel = false,
-  isWorking,
+function subagentCountLabel(count: number): string {
+  return count === 1 ? "1 subagent" : `${count} subagents`;
+}
+
+function WorkingThreadIndicator({
+  label,
   size,
+  subagents,
 }: {
-  hideIdleLabel?: boolean;
-  isWorking: boolean;
+  label: string | null;
   size: "default" | "compact";
+  subagents: number;
 }) {
-  const label = getThreadListIndicatorLabel(
-    isWorking ? "working-draft" : "draft",
-  );
+  const sizeClass = size === "compact" ? "size-3.5" : SIDEBAR_STATUS_ICON_CLASS;
+
+  if (subagents <= 0) {
+    return (
+      <span
+        role="img"
+        className={cn(
+          "pointer-events-none inline-flex shrink-0 items-center justify-center",
+          sizeClass,
+        )}
+        aria-label={label ?? undefined}
+      >
+        <span className="omnyo-working-orb omnyo-working-orb-fill">
+          <span className="omnyo-working-orb-halo" />
+          <span className="omnyo-working-orb-ring" />
+          <span className="omnyo-working-orb-core" />
+        </span>
+      </span>
+    );
+  }
+
+  const countLabel = subagentCountLabel(subagents);
+
   return (
-    <Icon
-      name="Edit"
+    <span
+      role="img"
       className={cn(
-        "pointer-events-none shrink-0",
-        size === "compact" ? "size-3.5" : SIDEBAR_STATUS_ICON_CLASS,
-        isWorking
-          ? ["animate-shine-icon", SIDEBAR_WORKING_STATUS_COLOR_CLASS]
-          : "text-muted-foreground",
+        "pointer-events-none relative inline-flex shrink-0 items-center justify-center text-timeline-accent",
+        sizeClass,
       )}
-      {...(!isWorking && hideIdleLabel
-        ? { "aria-hidden": true }
-        : { "aria-label": label ?? undefined })}
-    />
+      aria-label={label === null ? countLabel : `${label} · ${countLabel}`}
+    >
+      <span className="absolute inset-0 rounded-full border-[1.5px] border-current opacity-25" />
+      <span className="absolute inset-0 animate-spin rounded-full border-[1.5px] border-current border-r-transparent border-b-transparent" />
+      <span
+        className={cn(
+          "text-2xs font-semibold leading-none",
+          subagents < 10 ? "tabular-nums" : "tracking-tighter",
+        )}
+      >
+        {subagents}
+      </span>
+    </span>
   );
 }
 
 function PluginThreadRowStatusIndicator({
   status,
   size,
+  subagents,
 }: {
   status: PluginComposerThreadRowStatus;
   size: "default" | "compact";
+  subagents: number;
 }) {
   const iconSizeClass =
     size === "compact" ? "size-3.5" : SIDEBAR_STATUS_ICON_CLASS;
+
   if (status.tone === "running") {
     return (
-      <span
-        className={cn(
-          "inline-flex items-center justify-center motion-safe:animate-pulse",
-          iconSizeClass,
-          "text-success",
-        )}
-      >
-        <Icon
-          name={pluginIconName(status.icon)}
-          className={cn(
-            "pointer-events-none shrink-0 animate-shine-icon",
-            iconSizeClass,
-          )}
-          aria-label={status.label}
-        />
-      </span>
+      <WorkingThreadIndicator
+        label={status.label}
+        size={size}
+        subagents={subagents}
+      />
     );
   }
 
@@ -117,19 +132,24 @@ export function resolveThreadStatus(
   archived = false,
 ): ThreadStatusResolution {
   const indicatorKind = archived ? "archived" : indicator;
+
   const rowStatusIsVisible =
     !archived &&
     rowStatus !== null &&
     indicatorKind !== "runtime" &&
     indicatorKind !== "unread-error" &&
-    indicatorKind !== "waiting-for-input";
+    indicatorKind !== "waiting-for-input" &&
+    indicatorKind !== "input-welcome" &&
+    indicatorKind !== "callback-waiting" &&
+    indicatorKind !== "dependency-failed" &&
+    indicatorKind !== "external";
 
   return {
     accessibleLabel: rowStatusIsVisible
       ? rowStatus.label
       : indicatorKind === "archived"
         ? "Archived thread"
-        : getThreadListIndicatorLabel(indicatorKind),
+        : threadIndicatorLabel(indicatorKind),
     indicatorKind,
     rowStatusIsVisible,
   };
@@ -141,9 +161,11 @@ export function ThreadStatusGlyph({
   rowStatus = null,
   hideIdleDraftLabel = false,
   size = "default",
+  experimental_subagents: subagents = 0,
 }: PluginThreadStatusGlyphProps) {
   const iconSizeClass =
     size === "compact" ? "size-3.5" : SIDEBAR_STATUS_ICON_CLASS;
+
   const { indicatorKind: kind, rowStatusIsVisible } = resolveThreadStatus(
     indicator,
     rowStatus,
@@ -151,7 +173,13 @@ export function ThreadStatusGlyph({
   );
 
   if (rowStatusIsVisible && rowStatus) {
-    return <PluginThreadRowStatusIndicator status={rowStatus} size={size} />;
+    return (
+      <PluginThreadRowStatusIndicator
+        status={rowStatus}
+        size={size}
+        subagents={subagents}
+      />
+    );
   }
 
   switch (kind) {
@@ -169,61 +197,70 @@ export function ThreadStatusGlyph({
         <Icon
           name="CircleX"
           className={cn("text-destructive", iconSizeClass)}
-          aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
+          aria-label={threadIndicatorLabel(kind) ?? undefined}
         />
       );
     case "waiting-for-input":
+    case "input-welcome":
+    case "callback-waiting":
+    case "dependency-failed":
     case "queued-waiting":
+    case "external":
       return (
         <Icon
           name={WAITING_ICONS[kind]}
           className={cn("text-muted-foreground/75", iconSizeClass)}
-          aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
+          aria-label={threadIndicatorLabel(kind) ?? undefined}
         />
       );
     case "working-draft":
-      return <ThreadDraftIndicator isWorking size={size} />;
     case "workflow":
     case "background-agent":
     case "background-command":
     case "plan-mode":
     case "goal":
-      return (
-        <Icon
-          name={WORKING_ACTIVITY_ICONS[kind]}
-          className={cn(
-            "animate-shine-icon",
-            SIDEBAR_WORKING_STATUS_COLOR_CLASS,
-            iconSizeClass,
-          )}
-          aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
-        />
-      );
     case "runtime":
       return (
-        <Icon
-          name="Loading"
-          className={cn(
-            "animate-spin motion-reduce:animate-none",
-            SIDEBAR_WORKING_STATUS_COLOR_CLASS,
-            iconSizeClass,
-          )}
-          aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
+        <WorkingThreadIndicator
+          label={threadIndicatorLabel(kind)}
+          size={size}
+          subagents={subagents}
         />
       );
     case "draft":
       return (
-        <ThreadDraftIndicator
-          hideIdleLabel={hideIdleDraftLabel}
-          isWorking={false}
-          size={size}
+        <Icon
+          name="Edit"
+          className={cn(
+            "pointer-events-none shrink-0 text-muted-foreground",
+            iconSizeClass,
+          )}
+          {...(hideIdleDraftLabel
+            ? { "aria-hidden": true }
+            : { "aria-label": threadIndicatorLabel(kind) ?? undefined })}
+        />
+      );
+    case "ready-to-archive":
+      return (
+        <Icon
+          name="CircleCheckSolid"
+          className={cn(SIDEBAR_SUCCESS_STATUS_COLOR_CLASS, iconSizeClass)}
+          aria-label={threadIndicatorLabel(kind) ?? undefined}
+        />
+      );
+    case "open":
+      return (
+        <Icon
+          name="CircleCheck"
+          className={cn(SIDEBAR_SUCCESS_STATUS_COLOR_CLASS, iconSizeClass)}
+          aria-label={threadIndicatorLabel(kind) ?? undefined}
         />
       );
     case "unread-success":
       return (
         <span
           className={SIDEBAR_SUCCESS_STATUS_DOT_CLASS}
-          aria-label={getThreadListIndicatorLabel(kind) ?? undefined}
+          aria-label={threadIndicatorLabel(kind) ?? undefined}
         />
       );
     case "none":

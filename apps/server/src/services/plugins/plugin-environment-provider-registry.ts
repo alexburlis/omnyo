@@ -1,5 +1,5 @@
-import type { NormalizedPluginEnvironmentComposition } from "@get-bb/plugin-sdk/internal/host-policy";
-import type { NormalizedPluginEnvironmentProvider } from "@get-bb/plugin-sdk/internal/host-policy";
+import type { NormalizedPluginEnvironmentComposition } from "@omnyo/plugin-sdk/internal/host-policy";
+import type { NormalizedPluginEnvironmentProvider } from "@omnyo/plugin-sdk/internal/host-policy";
 import {
   DEFAULT_PLUGIN_HOOK_TIMEOUT_MS,
   invokeBridgedProvider,
@@ -17,6 +17,7 @@ export interface PluginEnvironmentCompositionRecord {
   composition: NormalizedPluginEnvironmentComposition;
   icon?: { bytes: Uint8Array; contentType: string; hash: string };
 }
+
 export interface PluginEnvironmentProviderBridge {
   listEnvironmentCompositions?(): PluginEnvironmentCompositionRecord[];
   listEnvironmentProviders(): PluginEnvironmentProviderRecord[];
@@ -24,7 +25,7 @@ export interface PluginEnvironmentProviderBridge {
     id: string,
   ): PluginEnvironmentProviderRecord | undefined;
   invokeProvider<T>(
-    pluginId: string,
+    record: PluginEnvironmentProviderRecord,
     label: string,
     run: () => Promise<T>,
   ): Promise<PluginHookInvocation<T>>;
@@ -32,6 +33,7 @@ export interface PluginEnvironmentProviderBridge {
 }
 
 let bridge: PluginEnvironmentProviderBridge | undefined;
+
 let recheckHandler: ((pluginId: string) => void) | undefined;
 
 export function setPluginEnvironmentProviderBridge(
@@ -59,7 +61,7 @@ export async function invokeEnvironmentProvider<T>(
   label: string,
   run: () => Promise<T>,
 ): Promise<PluginHookInvocation<T>> {
-  return invokeBridgedProvider(bridge, record.pluginId, label, run);
+  return invokeBridgedProvider(bridge, record, label, run);
 }
 
 export function environmentProviderDecisionTimeoutMs(): number {

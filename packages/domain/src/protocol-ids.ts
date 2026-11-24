@@ -1,7 +1,9 @@
 import { z } from "zod";
 
 const CLIENT_TURN_REQUEST_ID_PREFIX = "creq_";
+
 export const CLIENT_TURN_REQUEST_ID_SUFFIX_LENGTH = 10;
+
 export const CLIENT_TURN_REQUEST_ID_ALPHABET =
   "23456789abcdefghijkmnpqrstuvwxyz";
 
@@ -20,6 +22,7 @@ interface EncodeClientTurnRequestIdNumberArgs {
 export const clientTurnRequestIdSchema = z
   .string()
   .regex(/^creq_[23456789abcdefghijkmnpqrstuvwxyz]{10}$/u);
+
 export type ClientTurnRequestId = z.infer<typeof clientTurnRequestIdSchema>;
 
 export function formatClientTurnRequestIdSuffix(
@@ -40,6 +43,7 @@ export function encodeClientTurnRequestIdAlphabetIndexes(
   }
 
   let suffix = "";
+
   for (const index of args.indexes) {
     if (
       !Number.isInteger(index) ||
@@ -48,6 +52,7 @@ export function encodeClientTurnRequestIdAlphabetIndexes(
     ) {
       throw new Error(`Invalid client turn request id alphabet index ${index}`);
     }
+
     suffix += CLIENT_TURN_REQUEST_ID_ALPHABET.charAt(index);
   }
 
@@ -65,6 +70,7 @@ export function encodeClientTurnRequestIdNumber(
 
   let value = args.value;
   let suffix = "";
+
   for (
     let index = 0;
     index < CLIENT_TURN_REQUEST_ID_SUFFIX_LENGTH;

@@ -15,17 +15,21 @@ function amp(displayName: string, command: string): unknown {
 
 function shipped(id: string) {
   const agent = KNOWN_ACP_AGENTS.find((known) => known.id === id);
+
   if (agent === undefined) throw new Error(`no shipped agent ${id}`);
+
   return agent;
 }
 
 function onlyAgent(resolved: ReturnType<typeof resolveConfiguredAcpAgents>) {
   const [agent] = resolved.agents;
+
   if (agent === undefined || resolved.agents.length !== 1) {
     throw new Error(
       `expected exactly one agent, got ${resolved.agents.length}`,
     );
   }
+
   return agent;
 }
 
@@ -110,7 +114,9 @@ describe("a configured entry that replaces a shipped agent", () => {
   let tempRoot: string;
 
   beforeEach(async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "bb-acp-configured-agents-"));
+    tempRoot = await mkdtemp(
+      path.join(tmpdir(), "omnyo-acp-configured-agents-"),
+    );
   });
 
   afterEach(async () => {
@@ -131,6 +137,7 @@ describe("a configured entry that replaces a shipped agent", () => {
       displayName: "Grok (private)",
       command: "/opt/grok-private",
     });
+
     const agent = onlyAgent(resolved);
     const grok = shipped("acp-grok");
 
@@ -150,12 +157,14 @@ describe("a configured entry that replaces a shipped agent", () => {
     expect(declaration.experimental_resolvesNativeRoots).toBe(true);
 
     const homeDir = path.join(tempRoot, "home");
+
     const answer = await resolveAcpNativeRoots({
       agentId: agent.id,
       cwd: null,
       homeDir,
       env: {},
     });
+
     expect(answer.skills?.map((root) => root.path)).toContain(
       path.join(homeDir, ".grok", "skills"),
     );
@@ -202,6 +211,7 @@ describe("a configured entry that replaces a shipped agent", () => {
         nativeSkillRoots: { user: [".amp/skills"], project: [] },
       }),
     );
+
     expect(declared.launch.nativeSkillRoots).toEqual({
       user: [".amp/skills"],
       project: [],

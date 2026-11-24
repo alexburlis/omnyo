@@ -11,7 +11,7 @@ import {
   type Key,
 } from "react";
 import { PluginIcon } from "./PluginIcon";
-import { arrayMove } from "@bb/client-core";
+import { arrayMove } from "@omnyo/client-core";
 import { arrangeByStoredOrder } from "@/lib/stored-order";
 import type { SecondaryPanelRenderableTab } from "@/components/secondary-panel/ThreadSecondaryPanel";
 import type { ThreadSecondaryPanelProps } from "@/components/secondary-panel/ThreadSecondaryPanel";
@@ -59,20 +59,25 @@ export function usePluginDetailPanelState(
   const [destinations, setDestinations] = useState<PluginDetailDestination[]>(
     [],
   );
+
   const destinationsRef = useRef(destinations);
   const [activePluginId, setActivePluginId] = useState<string | null>(null);
   const localOrderId = useId();
   const orderKey = historyContextKey ?? `${localOrderId}:${resetKey}`;
+
   const subscribeOrder = useCallback(
     (listener: () => void) => subscribePanelTabOrder(orderKey, listener),
     [orderKey],
   );
+
   const getOrder = useCallback(() => getPanelTabOrder(orderKey), [orderKey]);
   const tabOrder = useSyncExternalStore(subscribeOrder, getOrder, getOrder);
+
   const setTabOrder = useCallback(
     (order: string[]) => setPanelTabOrder(orderKey, order),
     [orderKey],
   );
+
   const orderedDestinations = useMemo(
     () =>
       arrangeByStoredOrder({
@@ -82,6 +87,7 @@ export function usePluginDetailPanelState(
       }).ordered,
     [destinations, tabOrder],
   );
+
   useLayoutEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
     setDestinations([]);
@@ -90,6 +96,7 @@ export function usePluginDetailPanelState(
     setActivePluginId(null);
   }, [resetKey]);
   const dismiss = useCallback(() => setActivePluginId(null), []);
+
   const open = useCallback<PluginDetailOpener>(
     (destination) => {
       if (historyContextKey !== null)
@@ -98,18 +105,22 @@ export function usePluginDetailPanelState(
           `marketplace-plugin:${destination.pluginId}`,
         );
       const current = destinationsRef.current;
+
       const next = current.some(
         (entry) => entry.pluginId === destination.pluginId,
       )
         ? current
         : [...current, destination];
+
       destinationsRef.current = next;
       setDestinations(next);
       setActivePluginId(destination.pluginId);
+
       return true;
     },
     [historyContextKey],
   );
+
   const restore = useCallback(
     ({
       destination,
@@ -121,15 +132,19 @@ export function usePluginDetailPanelState(
     },
     [open],
   );
+
   const close = useCallback(
     (pluginId: string) => {
       const index = orderedDestinations.findIndex(
         (entry) => entry.pluginId === pluginId,
       );
+
       const destination = destinationsRef.current.find(
         (entry) => entry.pluginId === pluginId,
       );
+
       if (destination === undefined) return;
+
       const remaining = arrangeByStoredOrder({
         items: destinationsRef.current.filter(
           (entry) => entry.pluginId !== pluginId,
@@ -137,7 +152,9 @@ export function usePluginDetailPanelState(
         getId: (entry) => `marketplace-plugin:${entry.pluginId}`,
         storedOrder: tabOrder,
       }).ordered;
+
       destinationsRef.current = remaining;
+
       if (historyContextKey !== null) {
         rememberClosedPanelTab(historyContextKey, {
           kind: "plugin-detail",
@@ -145,7 +162,9 @@ export function usePluginDetailPanelState(
           destination,
         });
       }
+
       setDestinations(remaining);
+
       if (activePluginId === pluginId) {
         setActivePluginId(
           remaining[Math.min(index, remaining.length - 1)]?.pluginId ?? null,
@@ -154,7 +173,9 @@ export function usePluginDetailPanelState(
     },
     [activePluginId, historyContextKey, orderedDestinations, tabOrder],
   );
+
   usePublishPluginDetailOpener(open, isFocused);
+
   return useMemo(
     () => ({
       activePluginId,
@@ -190,12 +211,14 @@ export function usePluginDetailPanelProps(
     if (previousActiveTabId.current !== activeTabId) dismiss?.();
     previousActiveTabId.current = activeTabId;
   }, [activeTabId, dismiss]);
+
   const visibleIds = [
     ...props.tabs.map((tab) => tab.tab.id),
     ...(details?.destinations.map(
       (destination) => `marketplace-plugin:${destination.pluginId}`,
     ) ?? []),
   ];
+
   const displayedOrder = details?.destinations.length
     ? arrangeByStoredOrder({
         items: visibleIds,
@@ -203,16 +226,20 @@ export function usePluginDetailPanelProps(
         storedOrder: details.tabOrder,
       }).ordered
     : visibleIds;
+
   const setTabOrder = details?.setTabOrder;
   useLayoutEffect(() => {
     setTabOrder?.(displayedOrder);
   }, [displayedOrder, setTabOrder]);
+
   if (details === null || details.destinations.length === 0) return props;
   const active = details.activePluginId;
+
   const selectExisting = (select: () => void) => () => {
     details.dismiss();
     select();
   };
+
   const { ordered: tabs } = arrangeByStoredOrder<SecondaryPanelRenderableTab>({
     items: [
       ...props.tabs.map((tab) => ({
@@ -244,6 +271,7 @@ export function usePluginDetailPanelProps(
     getId: (tab) => tab.tab.id,
     storedOrder: details.tabOrder,
   });
+
   return {
     ...props,
     activeTab:
@@ -267,15 +295,20 @@ export function usePluginDetailPanelProps(
       const ids = tabs.map((tab) => tab.tab.id);
       const from = ids.indexOf(activeTabId);
       const to = ids.indexOf(overTabId);
+
       if (from === -1 || to === -1 || from === to) return;
       const nextOrder = arrayMove(ids, from, to);
       details.setTabOrder(nextOrder);
       const existingIds = new Set(props.tabs.map((tab) => tab.tab.id));
+
       if (!existingIds.has(activeTabId)) return;
+
       const nextIndex = nextOrder
         .filter((id) => existingIds.has(id))
         .indexOf(activeTabId);
+
       const existingTarget = props.tabs[nextIndex];
+
       if (existingTarget !== undefined) {
         props.onTabReorder({ activeTabId, overTabId: existingTarget.tab.id });
       }

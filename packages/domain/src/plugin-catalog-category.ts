@@ -35,6 +35,7 @@ export const pluginMarketplaceCollectionSchema = z.object({
             message: `duplicate plugin id "${pluginId}"`,
           });
         }
+
         seen.add(pluginId);
       });
     }),
@@ -44,7 +45,7 @@ export const PLUGIN_CATALOG_CATEGORIES = [
   {
     id: "themes-and-appearance",
     displayName: "Themes & Appearance",
-    description: "Personalize how bb looks and feels.",
+    description: "Personalize how Omnyo looks and feels.",
   },
   {
     id: "thread-management",
@@ -109,18 +110,18 @@ export const PLUGIN_CATALOG_CATEGORIES = [
   {
     id: "command-line",
     displayName: "Command Line",
-    description: "Work with shells and command-line programs inside bb.",
+    description: "Work with shells and command-line programs inside Omnyo.",
   },
   {
     id: "utilities",
     displayName: "Utilities",
-    description: "Inspect or control the computers bb runs on.",
+    description: "Inspect or control the computers Omnyo runs on.",
   },
   {
     id: "plugin-development",
     displayName: "Plugin Development",
     description:
-      "Understand, inspect, build, or debug bb and its plugin surfaces.",
+      "Understand, inspect, build, or debug Omnyo and its plugin surfaces.",
   },
   {
     id: "tasks-and-workflows",
@@ -128,9 +129,11 @@ export const PLUGIN_CATALOG_CATEGORIES = [
     description: "Plan, track, route, schedule, or automate work.",
   },
 ] as const;
+
 export type PluginMarketplaceCategory = z.infer<
   typeof pluginMarketplaceCategorySchema
 >;
+
 export type PluginMarketplaceCollection = z.infer<
   typeof pluginMarketplaceCollectionSchema
 >;

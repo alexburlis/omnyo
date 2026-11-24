@@ -8,10 +8,10 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
-import type { BbDesktopInfo } from "@bb/desktop-contract";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
+import type { OmnyoDesktopInfo } from "@omnyo/desktop-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createBbDesktopApi } from "@/test/bb-desktop-test-utils";
+import { createOmnyoDesktopApi } from "@/test/omnyo-desktop-test-utils";
 import { focusWithKeyboard } from "@/test/keyboard-focus";
 import { useIsBrowserDimmingModalOpen } from "@/hooks/useBrowserDimmingModal";
 import { PaneContext, type PaneContextValue } from "./PaneContext";
@@ -57,6 +57,7 @@ function renderButton(
     ownsWindowTopLeft: true,
     navigateInPane: noop,
   };
+
   return render(
     <TooltipProvider delayDuration={0}>
       <PaneContext.Provider value={value}>
@@ -70,13 +71,14 @@ function renderButton(
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  delete window.bbDesktop;
+  delete window.omnyoDesktop;
 });
 
 describe("PaneMaximizeButton", () => {
   it("renders a keyboard-focusable native button that maximizes a web pane", () => {
     const onToggle = vi.fn();
     renderButton(false, onToggle);
+
     const button = screen.getByRole("button", {
       name: "Maximize pane (⌘⇧E)",
     });
@@ -94,9 +96,11 @@ describe("PaneMaximizeButton", () => {
   it("restores a web split on click and uses the clear tooltip copy", async () => {
     const onToggle = vi.fn();
     renderButton(true, onToggle);
+
     const button = screen.getByRole("button", {
       name: "Restore split (⌘⇧E)",
     });
+
     expect(button.getAttribute("aria-pressed")).toBe("true");
 
     focusWithKeyboard(button);
@@ -112,10 +116,11 @@ describe("PaneMaximizeButton", () => {
     expect(onToggle).toHaveBeenCalledOnce();
   });
 
-  it("shows only BB's supported split arrangement actions on hover", () => {
+  it("shows only Omnyo's supported split arrangement actions on hover", () => {
     vi.useFakeTimers();
     const onMoveToSide = vi.fn();
     renderButton(false, noop, onMoveToSide);
+
     const button = screen.getByRole("button", {
       name: "Maximize pane (⌘⇧E)",
     });
@@ -130,15 +135,18 @@ describe("PaneMaximizeButton", () => {
     expect(
       screen.getAllByRole("menuitem").map((item) => item.textContent),
     ).toEqual(["Maximize pane⌘⇧E", "", "", "", ""]);
+
     for (const side of ["left", "right", "top", "bottom"]) {
       const action = screen.getByRole("menuitem", {
         name: `Move ${side}`,
       });
+
       expect(
         action.querySelector(`[data-pane-arrangement-glyph="${side}"]`),
       ).not.toBeNull();
       expect(action.className).toContain("cursor-pointer");
     }
+
     expect(
       screen.getByRole("menuitem", { name: /Maximize pane/ }).className,
     ).toContain("cursor-pointer");
@@ -151,6 +159,7 @@ describe("PaneMaximizeButton", () => {
     vi.useFakeTimers();
     const onMoveToSide = vi.fn();
     renderButton(false, noop, onMoveToSide);
+
     const button = screen.getByRole("button", {
       name: "Maximize pane (⌘⇧E)",
     });
@@ -175,6 +184,7 @@ describe("PaneMaximizeButton", () => {
   it("keeps the menu closed while the pointer only passes over the button", () => {
     vi.useFakeTimers();
     renderButton(false);
+
     const button = screen.getByRole("button", {
       name: "Maximize pane (⌘⇧E)",
     });
@@ -187,7 +197,7 @@ describe("PaneMaximizeButton", () => {
   });
 
   it("preserves full-screen copy in every desktop app context", async () => {
-    const desktopInfo: BbDesktopInfo = {
+    const desktopInfo: OmnyoDesktopInfo = {
       lastCheckedAt: null,
       latestVersion: null,
       pendingVersion: null,
@@ -196,12 +206,14 @@ describe("PaneMaximizeButton", () => {
       updateDownloaded: false,
       version: "0.0.0-test",
     };
-    window.bbDesktop = createBbDesktopApi(desktopInfo);
+
+    window.omnyoDesktop = createOmnyoDesktopApi(desktopInfo);
     renderButton(false);
 
     const button = screen.getByRole("button", {
       name: "Full Screen (⌘⇧E)",
     });
+
     fireEvent.focus(button);
     const menu = await screen.findByRole("menu", { name: "Pane arrangement" });
     expect(
@@ -212,7 +224,8 @@ describe("PaneMaximizeButton", () => {
 
   it("hides the native desktop browser while the arrangement menu can cover it", () => {
     vi.useFakeTimers();
-    const desktopInfo: BbDesktopInfo = {
+
+    const desktopInfo: OmnyoDesktopInfo = {
       lastCheckedAt: null,
       latestVersion: null,
       pendingVersion: null,
@@ -221,7 +234,8 @@ describe("PaneMaximizeButton", () => {
       updateDownloaded: false,
       version: "0.0.0-test",
     };
-    window.bbDesktop = createBbDesktopApi(desktopInfo);
+
+    window.omnyoDesktop = createOmnyoDesktopApi(desktopInfo);
     renderButton(false);
     expect(screen.getByTestId("browser-overlay-state").textContent).toBe(
       "visible",
@@ -230,11 +244,14 @@ describe("PaneMaximizeButton", () => {
     const trigger = screen.getByRole("button", {
       name: "Full Screen (⌘⇧E)",
     });
+
     fireEvent.pointerEnter(trigger);
     act(() => vi.advanceTimersByTime(400));
+
     const menu = screen.getByRole("menu", {
       name: "Pane arrangement",
     });
+
     fireEvent.pointerLeave(trigger);
     fireEvent.pointerEnter(menu);
     expect(screen.getByTestId("browser-overlay-state").textContent).toBe(
@@ -267,6 +284,7 @@ describe("PaneMaximizeButton", () => {
       ownsWindowTopLeft: true,
       navigateInPane: noop,
     };
+
     render(
       <PaneContext.Provider value={value}>
         <PaneMaximizeButton />

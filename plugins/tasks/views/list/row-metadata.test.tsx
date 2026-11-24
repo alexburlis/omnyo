@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import type { Label, Task, TaskThread } from "../../shared/contract.js";
 import { makeTask, rpcInput } from "../../test-fixtures.js";
 
@@ -15,11 +15,13 @@ window.matchMedia ??= (query: string) => ({
   removeEventListener: () => {},
   dispatchEvent: () => false,
 });
+
 window.ResizeObserver ??= class {
   observe() {}
   unobserve() {}
   disconnect() {}
 };
+
 Element.prototype.scrollIntoView ??= () => {};
 
 const app = await loadPluginApp(() => import("../../app"));
@@ -39,7 +41,7 @@ const project = {
   nextTaskNumber: 9,
   color: "blue",
   folderId: null,
-  linkedBbProjectId: null,
+  linkedAppProjectId: null,
   createdAt: "2026-07-15T00:00:00.000Z",
 };
 
@@ -89,6 +91,7 @@ interface ListFixture {
 
 function renderList(fixture: ListFixture) {
   const calls = { listComments: 0, listAttachments: 0 };
+
   const slot = renderSlot(
     app.navPanels[0]!,
     { subPath: PROJECT_ID },
@@ -106,15 +109,18 @@ function renderList(fixture: ListFixture) {
         }),
         listComments: () => {
           calls.listComments += 1;
+
           return { comments: [] };
         },
         listAttachments: () => {
           calls.listAttachments += 1;
+
           return { attachments: [] };
         },
       },
     },
   );
+
   return { slot, calls };
 }
 
@@ -124,6 +130,7 @@ describe("list-row Active chip", () => {
     const starting = task(2);
     const historical = task(3);
     const bare = task(4);
+
     const { slot } = renderList({
       tasks: [working, starting, historical, bare],
       threadsByTask: {
@@ -136,6 +143,7 @@ describe("list-row Active chip", () => {
         ],
       },
     });
+
     await slot.findByText("TSK-1");
     await waitFor(() => {
       expect(slot.getByTitle("Agent working")).toBeTruthy();
@@ -150,6 +158,7 @@ describe("list-row Active chip", () => {
 
   it("aggregates multiple live agents into one constant-text chip", async () => {
     const busy = task(1);
+
     const { slot } = renderList({
       tasks: [busy],
       threadsByTask: {
@@ -160,6 +169,7 @@ describe("list-row Active chip", () => {
         ],
       },
     });
+
     await slot.findByText("TSK-1");
     await waitFor(() => {
       expect(slot.getByTitle("2 agents working")).toBeTruthy();
@@ -188,6 +198,7 @@ describe("list-row metadata rail", () => {
       label("C", "needs-design"),
       label("D", "very-long-label-name-that-truncates"),
     ];
+
     const { slot } = renderList({
       tasks: [
         task(1),
@@ -199,6 +210,7 @@ describe("list-row metadata rail", () => {
       ],
       labels,
     });
+
     await slot.findByText("TSK-1");
 
     expect(slot.getAllByText("bug").length).toBeGreaterThan(0);

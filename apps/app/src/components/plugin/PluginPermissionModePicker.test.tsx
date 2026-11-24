@@ -8,9 +8,9 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { PermissionMode, ProviderInfo } from "@bb/domain";
-import { makeProviderInfo } from "@bb/test-helpers/domain-fixtures";
-import type { SystemExecutionOptionsResponse } from "@bb/server-contract";
+import type { PermissionMode, ProviderInfo } from "@omnyo/domain";
+import { makeProviderInfo } from "@omnyo/test-helpers/domain-fixtures";
+import type { SystemExecutionOptionsResponse } from "@omnyo/server-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { systemExecutionOptionsQueryKey } from "@/hooks/queries/query-keys";
 import {
@@ -27,6 +27,7 @@ import { PluginPermissionModePicker } from "./PluginPermissionModePicker";
 
 vi.mock("@/lib/sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sdk")>();
+
   return {
     ...actual,
     sdk: {
@@ -82,6 +83,7 @@ function executionOptions(
     selectedOnlyModels: [],
     permissionCeiling,
     modelLoadError: null,
+    modelNotice: null,
   };
 }
 
@@ -117,6 +119,7 @@ describe("PluginPermissionModePicker", () => {
       const [value, setValue] = useState<"accept-edits" | "auto" | "full">(
         "full",
       );
+
       return (
         <PluginPermissionModePicker
           providerId="codex"
@@ -158,6 +161,7 @@ describe("PluginPermissionModePicker", () => {
         value: "full",
         environmentId: "env-wide",
       });
+
       return (
         <>
           <PluginPermissionModePicker
@@ -261,6 +265,7 @@ describe("PluginPermissionModePicker", () => {
     const trigger = await screen.findByRole("button", {
       name: "Permission mode",
     });
+
     expect(trigger.hasAttribute("disabled")).toBe(true);
     await waitFor(() =>
       expect(sdk.system.executionOptions).toHaveBeenCalledTimes(2),

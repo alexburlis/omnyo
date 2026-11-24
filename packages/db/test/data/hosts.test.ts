@@ -13,12 +13,14 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup() {
   const db = createMigratedConnection();
+
   return { db };
 }
 
 describe("hosts", () => {
   it("upsert creates a new host", () => {
     const { db } = setup();
+
     const host = upsertHost(db, noopNotifier, {
       name: "My Machine",
     });
@@ -31,6 +33,7 @@ describe("hosts", () => {
 
   it("upsert with same ID preserves the display name and lastSeenAt", () => {
     const { db } = setup();
+
     const host1 = upsertHost(db, noopNotifier, {
       connectMachineId: "machine-1",
       name: "My Machine",
@@ -52,6 +55,7 @@ describe("hosts", () => {
 
   it("preserves destroyedAt when omitted on update", () => {
     const { db } = setup();
+
     const host = upsertHost(db, noopNotifier, {
       destroyedAt: 123,
       name: "Disconnected Host",
@@ -72,6 +76,7 @@ describe("hosts", () => {
   it("notifies when upsertHost updates connection state", () => {
     const { db } = setup();
     const notifyHost = vi.fn();
+
     const notifier = {
       notifyEnvironment() {},
       notifyHost,
@@ -79,10 +84,12 @@ describe("hosts", () => {
       notifySystem() {},
       notifyThread() {},
     };
+
     const host = upsertHost(db, notifier, {
       destroyedAt: 123,
       name: "Persistent Host",
     });
+
     notifyHost.mockClear();
 
     upsertHost(db, notifier, {
@@ -97,6 +104,7 @@ describe("hosts", () => {
   it("does not notify when upsertHost changes metadata without a connection-state change", () => {
     const { db } = setup();
     const notifyHost = vi.fn();
+
     const notifier = {
       notifyEnvironment() {},
       notifyHost,
@@ -104,9 +112,11 @@ describe("hosts", () => {
       notifySystem() {},
       notifyThread() {},
     };
+
     const host = upsertHost(db, notifier, {
       name: "Persistent Host",
     });
+
     notifyHost.mockClear();
 
     upsertHost(db, notifier, {
@@ -119,18 +129,22 @@ describe("hosts", () => {
 
   it("lists only non-destroyed hosts for the public inventory", () => {
     const { db } = setup();
+
     const visibleHost = upsertHost(db, noopNotifier, {
       id: "host-visible",
       name: "Visible Host",
     });
+
     const ephemeralHost = upsertHost(db, noopNotifier, {
       id: "host-ephemeral",
       name: "Ephemeral Host",
     });
+
     const destroyedHost = upsertHost(db, noopNotifier, {
       id: "host-destroyed",
       name: "Destroyed Host",
     });
+
     updateHost(db, noopNotifier, ephemeralHost.id, { phase: "creating" });
     updateHost(db, noopNotifier, destroyedHost.id, { destroyedAt: 123 });
 
@@ -144,10 +158,12 @@ describe("hosts", () => {
 
   it("filters the public inventory by host type", () => {
     const { db } = setup();
+
     const persistentHost = upsertHost(db, noopNotifier, {
       id: "host-persistent",
       name: "Persistent Host",
     });
+
     const ephemeralHost = upsertHost(db, noopNotifier, {
       id: "host-ephemeral",
       name: "Ephemeral Host",
@@ -164,10 +180,12 @@ describe("hosts", () => {
 
   it("filters destroyed hosts from non-destroyed lookups", () => {
     const { db } = setup();
+
     const visibleHost = upsertHost(db, noopNotifier, {
       id: "host-visible",
       name: "Visible Host",
     });
+
     const destroyedHost = upsertHost(db, noopNotifier, {
       id: "host-destroyed",
       name: "Destroyed Host",
@@ -187,6 +205,7 @@ describe("hosts", () => {
   it("notifies when updateHost changes host connection state", () => {
     const { db } = setup();
     const notifyHost = vi.fn();
+
     const notifier = {
       notifyEnvironment() {},
       notifyHost,
@@ -194,9 +213,11 @@ describe("hosts", () => {
       notifySystem() {},
       notifyThread() {},
     };
+
     const host = upsertHost(db, notifier, {
       name: "Persistent Host",
     });
+
     notifyHost.mockClear();
 
     updateHost(db, notifier, host.id, {
@@ -212,6 +233,7 @@ describe("hosts", () => {
   it("does not notify when updateHost only changes host metadata", () => {
     const { db } = setup();
     const notifyHost = vi.fn();
+
     const notifier = {
       notifyEnvironment() {},
       notifyHost,
@@ -219,9 +241,11 @@ describe("hosts", () => {
       notifySystem() {},
       notifyThread() {},
     };
+
     const host = upsertHost(db, notifier, {
       name: "Persistent Host",
     });
+
     notifyHost.mockClear();
 
     updateHost(db, notifier, host.id, {

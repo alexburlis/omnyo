@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultExperiments } from "@bb/domain";
+import { defaultExperiments } from "@omnyo/domain";
 import {
   createConnection,
   getExperiments,
@@ -23,7 +23,7 @@ describe("experiments", () => {
       migrate(db);
       expect(getExperiments(db)).toEqual(defaultExperiments);
 
-      setExperiments(db, { changelogPreview: true });
+      setExperiments(db, { serverMove: true });
       db.$client
         .prepare(
           "INSERT INTO system_experiments (key, value, updated_at) VALUES ('futureExperiment', true, 1)",
@@ -32,7 +32,7 @@ describe("experiments", () => {
 
       expect(getExperiments(db)).toEqual({
         ...defaultExperiments,
-        changelogPreview: true,
+        serverMove: true,
       });
     } finally {
       db.$client.close();

@@ -1,5 +1,5 @@
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
 
 export function ThreadUnarchiveButton({
   isPending,
@@ -11,6 +11,7 @@ export function ThreadUnarchiveButton({
   variant?: "icon" | "secondary";
 }) {
   const isSecondary = variant === "secondary";
+
   return (
     <Button
       type="button"

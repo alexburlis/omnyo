@@ -1,9 +1,19 @@
-import { clientMessageSchema, type PongMessage } from "@bb/domain";
+import {
+  clientMessageSchema,
+  type ChangedMessage,
+  type PongMessage,
+} from "@omnyo/domain";
 import { parseSocketMessage } from "./decode-payload.js";
 import type { NotificationHub } from "./hub.js";
 import type { WatchInterestCoordinator } from "./watch-interests.js";
 
 const PONG_MESSAGE: PongMessage = { type: "pong" };
+
+const COMMAND_CATALOG_CATCH_UP_MESSAGE: ChangedMessage = {
+  type: "changed",
+  entity: "system",
+  changes: ["command-catalog-changed"],
+};
 
 interface ClientSocket {
   close(code?: number, reason?: string): void;
@@ -29,6 +39,7 @@ export function onClientSocketMessage(
   raw: unknown,
 ): void {
   const parsed = parseSocketMessage(socket, raw, clientMessageSchema);
+
   if (parsed === null) {
     return;
   }
@@ -37,13 +48,21 @@ export function onClientSocketMessage(
     case "subscribe":
       deps.hub.subscribe(socket, parsed.target);
       deps.watchInterests.subscribe(socket, parsed.target);
+
+      if (parsed.target.kind === "system") {
+        deps.hub.sendClientPayload(
+          socket,
+          JSON.stringify(COMMAND_CATALOG_CATCH_UP_MESSAGE),
+        );
+      }
+
       break;
     case "unsubscribe":
       deps.hub.unsubscribe(socket, parsed.target);
       deps.watchInterests.unsubscribe(socket, parsed.target);
       break;
     case "ping":
-      socket.send(JSON.stringify(PONG_MESSAGE));
+      deps.hub.sendClientPayload(socket, JSON.stringify(PONG_MESSAGE));
       break;
     default: {
       const _exhaustive: never = parsed;

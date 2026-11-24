@@ -9,16 +9,22 @@ const messageSchema = z.object({
   error: z.object({ message: z.string() }).optional(),
   sessionId: z.string().optional(),
 });
+
 const targetInfoSchema = z.object({
   targetId: z.string(),
   type: z.string(),
   url: z.string(),
   title: z.string(),
 });
+
 const targetEventSchema = z.object({ targetInfo: targetInfoSchema });
+
 const targetDestroyedSchema = z.object({ targetId: z.string() });
+
 const detachedSchema = z.object({ sessionId: z.string() });
+
 const attachedSchema = z.object({ sessionId: z.string() });
+
 const screencastFrameSchema = z.object({
   data: z.string().min(1),
   sessionId: z.number().int(),
@@ -29,7 +35,9 @@ const screencastFrameSchema = z.object({
 });
 
 const maxFrameChars = 700_000;
+
 const frameEdge: Record<PreviewSize, number> = { thumbnail: 800, full: 1280 };
+
 const blankUrls = new Set(["", "about:blank"]);
 
 const socketOpen = 1;
@@ -73,10 +81,12 @@ export function createPreview(
     string,
     { url: string; title: string; activity: number }
   >();
+
   const calls = new Map<
     number,
     { resolve(value: unknown): void; reject(error: Error): void }
   >();
+
   const waiters = new Set<{ check(): void; fail(error: Error): void }>();
   let socket: PreviewSocket | null = null;
   let cast: { targetId: string; sessionId: string; edge: number } | null = null;
@@ -101,6 +111,7 @@ export function createPreview(
     if (connection !== socket || connection.readyState !== socketOpen)
       return Promise.reject(new Error("Browser preview connection closed"));
     const id = ++nextCallId;
+
     return new Promise((resolve, reject) => {
       calls.set(id, { resolve, reject });
       connection.send(
@@ -118,20 +129,26 @@ export function createPreview(
     const connection = socket;
     socket = null;
     cast = null;
+    latest = null;
+
     if (settleTimer) clearTimeout(settleTimer);
     settleTimer = null;
     targets.clear();
+
     for (const call of calls.values())
       call.reject(new Error("Browser preview connection closed"));
     calls.clear();
+
     if (connection && connection.readyState <= socketOpen) connection.close();
   }
 
   function bestTarget(): string | null {
     let best: { targetId: string; rank: number; activity: number } | null =
       null;
+
     for (const [targetId, target] of targets) {
       const rank = blankUrls.has(target.url) ? 0 : 1;
+
       if (
         !best ||
         rank > best.rank ||
@@ -139,6 +156,7 @@ export function createPreview(
       )
         best = { targetId, rank, activity: target.activity };
     }
+
     return best?.targetId ?? null;
   }
 
@@ -147,24 +165,30 @@ export function createPreview(
       .then(async () => {
         if (connection !== socket) return;
         const targetId = bestTarget();
+
         const edge =
           Date.now() < fullSizeUntil ? frameEdge.full : frameEdge.thumbnail;
+
         if (
           targetId === (cast?.targetId ?? null) &&
           (cast === null || cast.edge === edge)
         )
           return;
         let sessionId: string;
+
         if (cast && cast.targetId === targetId) {
           sessionId = cast.sessionId;
           await send(connection, "Page.stopScreencast", {}, sessionId);
         } else {
           const previous = cast;
           cast = null;
+          latest = null;
+
           if (previous)
             await send(connection, "Target.detachFromTarget", {
               sessionId: previous.sessionId,
             }).catch(() => {});
+
           if (targetId === null) return;
           sessionId = attachedSchema.parse(
             await send(connection, "Target.attachToTarget", {
@@ -173,6 +197,7 @@ export function createPreview(
             }),
           ).sessionId;
         }
+
         cast = { targetId, sessionId, edge };
         await send(
           connection,
@@ -198,6 +223,7 @@ export function createPreview(
   ) {
     if (info.type !== "page") return;
     const known = targets.get(info.targetId);
+
     if (known && known.url === info.url && known.title === info.title) return;
     targets.set(info.targetId, {
       url: info.url,
@@ -205,6 +231,7 @@ export function createPreview(
       activity:
         known && known.url === info.url ? known.activity : ++activityClock,
     });
+
     if (latest && cast?.targetId === info.targetId) {
       latest = {
         ...latest,
@@ -212,20 +239,26 @@ export function createPreview(
         url: info.url.slice(0, 2_000),
         title: info.title.slice(0, 300),
       };
+
       for (const waiter of [...waiters]) waiter.check();
     }
+
     select(connection);
   }
 
   function receive(connection: PreviewSocket, raw: string) {
     const message = messageSchema.parse(JSON.parse(raw));
+
     if (message.id !== undefined) {
       const call = calls.get(message.id);
       calls.delete(message.id);
+
       if (message.error) call?.reject(new Error(message.error.message));
       else call?.resolve(message.result);
+
       return;
     }
+
     if (
       message.method === "Target.targetCreated" ||
       message.method === "Target.targetInfoChanged" ||
@@ -235,21 +268,31 @@ export function createPreview(
     } else if (message.method === "Target.targetDestroyed") {
       const { targetId } = targetDestroyedSchema.parse(message.params);
       targets.delete(targetId);
-      if (cast?.targetId === targetId) cast = null;
+
+      if (cast?.targetId === targetId) {
+        cast = null;
+        latest = null;
+      }
+
       select(connection);
     } else if (message.method === "Target.detachedFromTarget") {
       const { sessionId } = detachedSchema.parse(message.params);
+
       if (cast?.sessionId !== sessionId) return;
       cast = null;
+      latest = null;
       select(connection);
     } else if (message.method === "Page.screencastFrame") {
       const sessionId = message.sessionId;
+
       if (sessionId === undefined || sessionId !== cast?.sessionId) return;
       const frame = screencastFrameSchema.parse(message.params);
       const target = targets.get(cast.targetId);
+
       if (frame.data.length <= maxFrameChars) {
         latest = {
           sequence: ++sequence,
+          targetId: cast.targetId,
           mimeType: "image/jpeg",
           data: frame.data,
           width: frame.metadata.deviceWidth,
@@ -257,9 +300,12 @@ export function createPreview(
           url: (target?.url ?? "").slice(0, 2_000),
           title: (target?.title ?? "").slice(0, 300),
         };
+
         for (const waiter of [...waiters]) waiter.check();
       }
+
       const targetId = cast.targetId;
+
       const refresh = () =>
         void send(connection, "Target.getTargetInfo", { targetId })
           .then((result) => {
@@ -267,12 +313,15 @@ export function createPreview(
               observe(connection, targetEventSchema.parse(result).targetInfo);
           })
           .catch(() => {});
+
       refresh();
+
       if (settleTimer) clearTimeout(settleTimer);
       settleTimer = setTimeout(refresh, timing.settleMs);
       settleTimer.unref();
       const ackAt = Math.max(Date.now(), nextAckAt) + timing.frameIntervalMs;
       nextAckAt = ackAt;
+
       const ack = setTimeout(() => {
         void send(
           connection,
@@ -281,6 +330,7 @@ export function createPreview(
           sessionId,
         ).catch(() => {});
       }, ackAt - Date.now());
+
       ack.unref();
     }
   }
@@ -300,15 +350,18 @@ export function createPreview(
     });
     connection.addEventListener("message", (event) => {
       if (connection !== socket || typeof event.data !== "string") return;
+
       try {
         receive(connection, event.data);
       } catch {
         disconnect();
       }
     });
+
     const drop = () => {
       if (connection === socket) disconnect();
     };
+
     connection.addEventListener("close", drop);
     connection.addEventListener("error", drop);
   }
@@ -317,6 +370,7 @@ export function createPreview(
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       idleTimer = null;
+
       if (waiters.size > 0) touch();
       else disconnect();
     }, timing.idleMs);
@@ -326,20 +380,27 @@ export function createPreview(
   return {
     next(afterSequence, waitMs, signal, size) {
       signal.throwIfAborted();
+
       if (closed)
         return Promise.reject(
           new Error("Browser session stopped; open a new session"),
         );
       touch();
       connect();
+
       if (size === "full") fullSizeUntil = Date.now() + timing.fullSizeHoldMs;
+
       if (socket) select(socket);
+
       const ready = () =>
         latest && (latest.sequence > afterSequence || afterSequence > sequence)
           ? latest
           : null;
+
       const immediate = ready();
+
       if (immediate) return Promise.resolve(immediate);
+
       return new Promise((resolve, reject) => {
         const settle = (finish: () => void) => {
           waiters.delete(waiter);
@@ -348,15 +409,18 @@ export function createPreview(
           signal.removeEventListener("abort", abort);
           finish();
         };
+
         const waiter = {
           check() {
             const frame = ready();
+
             if (frame) settle(() => resolve(frame));
           },
           fail(error: Error) {
             settle(() => reject(error));
           },
         };
+
         const abort = () => waiter.fail(new Error("Browser preview cancelled"));
         const timeout = setTimeout(() => settle(() => resolve(null)), waitMs);
         const reconnect = setInterval(connect, timing.reconnectMs);
@@ -369,9 +433,11 @@ export function createPreview(
     close() {
       if (closed) return;
       closed = true;
+
       if (idleTimer) clearTimeout(idleTimer);
       idleTimer = null;
       disconnect();
+
       for (const waiter of [...waiters])
         waiter.fail(new Error("Browser session stopped; open a new session"));
     },

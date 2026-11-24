@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ClientTurnRequestId } from "@get-bb/plugin-sdk/provider-bridge";
+import type { ClientTurnRequestId } from "@omnyo/plugin-sdk/provider-bridge";
 import {
   experimental_createDeltaAssembler as createDeltaAssembler,
   type ThreadEvent,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import {
   createClaudeDeltaTranslator,
   type ClaudeDeltaTranslationContext,
@@ -13,6 +13,7 @@ import {
 } from "./delta-translation.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
 const FIXTURES = resolve(__dirname, "./__fixtures__");
 
 export function threadScope(): ThreadEvent["scope"] {
@@ -31,9 +32,11 @@ export function loadFixture(name: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(
     readFileSync(resolve(FIXTURES, name), "utf8"),
   );
+
   if (!isFixtureObject(parsed)) {
     throw new Error(`Fixture ${name} did not contain an object`);
   }
+
   return parsed;
 }
 
@@ -46,9 +49,11 @@ export function loadSessionFixture(
     .split("\n")
     .map((line) => {
       const parsed: unknown = JSON.parse(line);
+
       if (!isFixtureObject(parsed)) {
         throw new Error(`Session fixture ${name} contained a non-object line`);
       }
+
       return parsed;
     });
 }
@@ -81,11 +86,14 @@ export function spawningToolUseFor(
   taskStarted: Record<string, unknown>,
 ): Record<string, unknown> {
   const toolUseId = taskStarted.tool_use_id;
+
   if (typeof toolUseId !== "string") {
     throw new Error("task_started fixture has no tool_use_id");
   }
+
   const description =
     typeof taskStarted.description === "string" ? taskStarted.description : "";
+
   switch (taskStarted.task_type) {
     case "local_workflow":
       return spawningToolUseMessage({
@@ -116,8 +124,11 @@ export function spawningToolUseFor(
 }
 
 const CLAUDE_TEST_ENTROPY = "cl-test";
+
 export const TURN_1 = "cl-test-t1";
+
 export const TURN_2 = "cl-test-t2";
+
 export const ITEM_ID_PATTERN = /^cl-test-i\d+$/;
 
 interface ClaudeDeltaHarness {
@@ -138,11 +149,13 @@ export function createClaudeDeltaHarness(
     cwd: "/workspace",
     sandboxEnabled: options.sandboxEnabled ?? false,
   });
+
   const assembler = createDeltaAssembler({
     providerId: "claude-code",
     entropyPrefix: CLAUDE_TEST_ENTROPY,
     textDeltaFlushMs: 0,
   });
+
   return {
     translator,
     translate(event, context) {
@@ -167,7 +180,7 @@ export function createClaudeDeltaHarness(
       });
     },
     itemId(providerItemId, threadId = "") {
-      return assembler.getBbItemId(threadId, providerItemId) ?? "";
+      return assembler.getAppItemId(threadId, providerItemId) ?? "";
     },
   };
 }

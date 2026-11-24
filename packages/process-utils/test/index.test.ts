@@ -1,5 +1,14 @@
+import { spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -27,6 +36,7 @@ async function readProcessOutput() {
   child.stderr.on("data", (chunk) => stderrChunks.push(Buffer.from(chunk)));
 
   const [exitCode] = await once(child, "exit");
+
   return {
     exitCode,
     stderr: Buffer.concat(stderrChunks).toString("utf8"),
@@ -38,13 +48,16 @@ describe("process utils", () => {
   it("installs safe diagnostics without enabling Node process reports", () => {
     const originalDirectory = process.report.directory;
     const originalReportOnFatalError = process.report.reportOnFatalError;
+
     const originalReportOnUncaughtException =
       process.report.reportOnUncaughtException;
+
     const originalListenerCount = process.listenerCount(
       "uncaughtExceptionMonitor",
     );
+
     const logsDir = join(
-      mkdtempSync(join(tmpdir(), "bb-process-utils-report-")),
+      mkdtempSync(join(tmpdir(), "omnyo-process-utils-report-")),
       "logs",
     );
 
@@ -74,11 +87,94 @@ describe("process utils", () => {
     );
   });
 
+  it.each([
+    ["rejection", "unhandledRejection"],
+    ["listener", "uncaughtException"],
+    ["unrelated", "uncaughtException"],
+    ["caught", undefined],
+    ["unattended", undefined],
+  ])("diagnoses a native timeout in a child process (%s)", (mode, origin) => {
+    const root = mkdtempSync(join(tmpdir(), "private-timeout-fixture-"));
+    const sourceDir = join(root, "apps/server/src");
+    const entry = join(sourceDir, "timeout-fixture.mjs");
+    const logsDir = join(root, "logs");
+    const diagnostics = new URL("../src/diagnostics.ts", import.meta.url);
+
+    try {
+      mkdirSync(sourceDir, { recursive: true });
+      writeFileSync(
+        entry,
+        [
+          `import { installSafeProcessDiagnostics } from ${JSON.stringify(diagnostics.href)};`,
+          `installSafeProcessDiagnostics({ logsDir: ${JSON.stringify(logsDir)}, processName: "server", trackAbortDeadlines: true });`,
+          "const mode = process.argv[2];",
+          'if (mode === "unattended") { AbortSignal.timeout(10_000); } else {',
+          "const deadline = AbortSignal.timeout(10);",
+          "const other = AbortSignal.timeout(1);",
+          'if (mode === "unrelated") {',
+          '  other.addEventListener("abort", () => { throw new DOMException(other.reason.message, "TimeoutError"); });',
+          '} else if (mode === "listener") {',
+          '  deadline.addEventListener("abort", () => { throw deadline.reason; });',
+          "} else {",
+          "  const composite = AbortSignal.any([deadline]);",
+          '  const pending = new Promise((_, reject) => composite.addEventListener("abort", () => { const reason = composite.reason; setImmediate(() => reject(reason)); }));',
+          '  if (mode === "caught") void pending.catch(() => {});',
+          "}",
+          "setTimeout(() => {}, 30);",
+          "}",
+        ].join("\n"),
+      );
+
+      const child = spawnSync(
+        process.execPath,
+        ["--import", "tsx", entry, mode],
+        {
+          encoding: "utf8",
+          timeout: 4_000,
+        },
+      );
+
+      expect(child.error).toBeUndefined();
+      expect(child.status, child.stderr).toBe(origin === undefined ? 0 : 1);
+
+      if (origin === undefined) {
+        expect(readdirSync(logsDir)).toEqual([]);
+
+        return;
+      }
+
+      const [file] = readdirSync(logsDir);
+      expect(file).toBeDefined();
+      const serialized = readFileSync(join(logsDir, file ?? ""), "utf8");
+      const report = JSON.parse(serialized);
+      expect(report.uncaughtException?.origin).toBe(origin);
+
+      if (mode === "unrelated") {
+        expect(report.uncaughtException.deadline).toBeUndefined();
+
+        return;
+      }
+
+      expect(report.error.stack).toMatch(
+        /node:internal\/per_context\/domexception[\s\S]*node:internal\/abort_controller[\s\S]*node:internal\/timers/,
+      );
+      expect(report.uncaughtException.deadline).toEqual({
+        source: "app:///apps/server/src/timeout-fixture.mjs",
+        line: 5,
+        column: expect.any(Number),
+      });
+      expect(JSON.stringify(report.uncaughtException)).not.toContain(root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("writes env-safe diagnostic reports", () => {
     const logsDir = join(
-      mkdtempSync(join(tmpdir(), "bb-process-utils-report-")),
+      mkdtempSync(join(tmpdir(), "omnyo-process-utils-report-")),
       "logs",
     );
+
     const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
     const secretValue = "sk-test-secret-that-must-not-leak";
     process.env.OPENAI_API_KEY = secretValue;
@@ -92,6 +188,7 @@ describe("process utils", () => {
         now: () => new Date("2026-06-01T12:00:00.000Z"),
         createReportId: () => "report-id",
       });
+
       const reportText = readFileSync(reportPath, "utf8");
 
       expect(reportText).toContain('"kind": "startupFailure"');
@@ -110,13 +207,15 @@ describe("process utils", () => {
 
   it("writes nested error causes", () => {
     const logsDir = join(
-      mkdtempSync(join(tmpdir(), "bb-process-utils-report-")),
+      mkdtempSync(join(tmpdir(), "omnyo-process-utils-report-")),
       "logs",
     );
+
     const connectionError = new Error("connect ECONNREFUSED 127.0.0.1:38886");
     Object.defineProperty(connectionError, "code", {
       value: "ECONNREFUSED",
     });
+
     const reportPath = writeSafeProcessDiagnosticReport({
       kind: "startupFailure",
       logsDir,
@@ -141,9 +240,10 @@ describe("process utils", () => {
 
   it("truncates cyclic error causes", () => {
     const logsDir = join(
-      mkdtempSync(join(tmpdir(), "bb-process-utils-report-")),
+      mkdtempSync(join(tmpdir(), "omnyo-process-utils-report-")),
       "logs",
     );
+
     const firstError = new Error("first");
     const secondError = new Error("second");
     firstError.cause = secondError;
@@ -174,11 +274,13 @@ describe("process utils", () => {
 
   it("truncates error causes that exceed the depth limit", () => {
     const logsDir = join(
-      mkdtempSync(join(tmpdir(), "bb-process-utils-report-")),
+      mkdtempSync(join(tmpdir(), "omnyo-process-utils-report-")),
       "logs",
     );
+
     const rootError = new Error("cause-0");
     let currentError = rootError;
+
     for (let index = 1; index < 32; index += 1) {
       const cause = new Error(`cause-${index}`);
       currentError.cause = cause;
@@ -193,6 +295,7 @@ describe("process utils", () => {
       now: () => new Date("2026-06-01T12:00:00.000Z"),
       createReportId: () => "report-id",
     });
+
     const reportText = readFileSync(reportPath, "utf8");
 
     expect(reportText).toContain('"name": "TruncatedErrorCause"');
@@ -202,14 +305,17 @@ describe("process utils", () => {
 
   it("writes bounded AggregateError details", () => {
     const logsDir = join(
-      mkdtempSync(join(tmpdir(), "bb-process-utils-report-")),
+      mkdtempSync(join(tmpdir(), "omnyo-process-utils-report-")),
       "logs",
     );
+
     const connectionErrors = Array.from({ length: 10 }, (_, index) => {
       const error = new Error(`connect ECONNREFUSED address-${index}`);
       Object.defineProperty(error, "code", { value: "ECONNREFUSED" });
+
       return error;
     });
+
     const reportPath = writeSafeProcessDiagnosticReport({
       kind: "startupFailure",
       logsDir,
@@ -218,6 +324,7 @@ describe("process utils", () => {
       now: () => new Date("2026-06-01T12:00:00.000Z"),
       createReportId: () => "report-id",
     });
+
     const reportText = readFileSync(reportPath, "utf8");
 
     expect(reportText).toContain('"errors"');
@@ -281,10 +388,10 @@ describe("process utils", () => {
     ).toBeNull();
   });
 
-  it("scrubs inherited bb runtime env vars and node mode", () => {
+  it("scrubs inherited Omnyo runtime env vars and node mode", () => {
     const env: NodeJS.ProcessEnv = {
-      BB_DATA_DIR: "/tmp/bb-data",
-      BB_HOST_DAEMON_PORT: "38887",
+      OMNYO_DATA_DIR: "/tmp/omnyo-data",
+      OMNYO_HOST_DAEMON_PORT: "38887",
       NODE_ENV: "development",
       NODE_OPTIONS: "--enable-source-maps",
       OPENAI_API_KEY: "external-secret",
@@ -301,15 +408,15 @@ describe("process utils", () => {
     expect("SKIP_ME" in sanitizedEnv).toBe(false);
   });
 
-  it("keeps provider credentials a nested bb server needs and drops the pool marker", () => {
+  it("keeps provider credentials a nested Omnyo server needs and drops the pool marker", () => {
     const env: NodeJS.ProcessEnv = {
       ANTHROPIC_BASE_URL: "http://127.0.0.1:38886/pool/http",
       ANTHROPIC_AUTH_TOKEN: "parent-hub-token",
       CODEX_OPENAI_BASE_URL: "http://127.0.0.1:38886/pool/http/v1",
       CODEX_POOL_AUTH_TOKEN: "parent-hub-token",
       ENABLE_TOOL_SEARCH: "true",
-      BB_ACCOUNT_POOL_PARENT_URL: "http://127.0.0.1:38886/pool/http",
-      BB_ACCOUNT_POOL_PARENT_TOKEN: "parent-hub-token",
+      OMNYO_ACCOUNT_POOL_PARENT_URL: "http://127.0.0.1:38886/pool/http",
+      OMNYO_ACCOUNT_POOL_PARENT_TOKEN: "parent-hub-token",
       PATH: "/bin",
     };
 
@@ -325,10 +432,11 @@ describe("process utils", () => {
 
   it("does not mutate the inherited env", () => {
     const env: NodeJS.ProcessEnv = {
-      BB_DATA_DIR: "/tmp/bb-data",
+      OMNYO_DATA_DIR: "/tmp/omnyo-data",
       NODE_ENV: "development",
       PATH: "/bin",
     };
+
     const originalEnv: NodeJS.ProcessEnv = { ...env };
 
     expect(sanitizeInheritedChildProcessEnv({ env })).toEqual({

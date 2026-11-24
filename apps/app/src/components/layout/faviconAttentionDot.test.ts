@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { makeThreadWorkSummary } from "@omnyo/test-helpers/domain-fixtures";
 import { shouldShowFaviconAttentionDot } from "./faviconAttentionDot";
 
 type FaviconSidebarThread = Parameters<
@@ -28,6 +29,53 @@ const BASE_ARGS = {
 };
 
 describe("shouldShowFaviconAttentionDot", () => {
+  it("holds background unread attention while launched work runs and restores it for the result", () => {
+    const working = makeSidebarThread({
+      work: makeThreadWorkSummary({
+        primary: {
+          label: "working",
+          reason: { code: "owned-work", text: "Worker is running." },
+        },
+        activity: [
+          {
+            id: "child",
+            kind: "agent",
+            label: "Worker is running.",
+            phase: "running",
+            actor: { kind: "thread", id: "child", label: "Worker" },
+          },
+        ],
+      }),
+    });
+
+    expect(
+      shouldShowFaviconAttentionDot({
+        ...BASE_ARGS,
+        sidebarThreads: [working],
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowFaviconAttentionDot({
+        ...BASE_ARGS,
+        isThreadView: true,
+        currentThreadId: working.id,
+        thread: working,
+        sidebarThreads: [working],
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowFaviconAttentionDot({
+        ...BASE_ARGS,
+        sidebarThreads: [{ ...working, work: makeThreadWorkSummary() }],
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowFaviconAttentionDot({
+        ...BASE_ARGS,
+        sidebarThreads: [{ ...working, hasPendingInteraction: true }],
+      }),
+    ).toBe(true);
+  });
   it("ignores unread side-chat threads hidden from the sidebar", () => {
     expect(
       shouldShowFaviconAttentionDot({
@@ -140,7 +188,7 @@ describe("shouldShowFaviconAttentionDot", () => {
     ).toBe(false);
   });
 
-  it("shows the dot when a viewed parent has a delegated child waiting on the user", () => {
+  it("keeps a child's pending input on the child while the parent is viewed", () => {
     expect(
       shouldShowFaviconAttentionDot({
         ...BASE_ARGS,
@@ -157,7 +205,30 @@ describe("shouldShowFaviconAttentionDot", () => {
           }),
         ],
       }),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("does not mark a dependency consumer as needing input", () => {
+    expect(
+      shouldShowFaviconAttentionDot({
+        ...BASE_ARGS,
+        isThreadView: true,
+        currentThreadId: "thr_waiter",
+        thread: { lastReadAt: 30, latestAttentionAt: 20 },
+        sidebarThreads: [
+          makeSidebarThread({
+            id: "thr_waiter",
+            lastReadAt: 30,
+            attention: {
+              kind: "dependency-failed",
+              requiredCount: 0,
+              optionalCount: 0,
+              callback: null,
+            },
+          }),
+        ],
+      }),
+    ).toBe(false);
   });
 
   it("ignores a pending fork of the viewed thread", () => {

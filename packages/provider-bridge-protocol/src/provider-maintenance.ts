@@ -13,6 +13,7 @@ export type ProviderMaintenanceParams = z.infer<
 >;
 
 export const providerInstallationRequirementSchema = z.enum(["thread_rewind"]);
+
 export type ProviderInstallationRequirement = z.infer<
   typeof providerInstallationRequirementSchema
 >;
@@ -22,6 +23,7 @@ export const providerInstallationStatusParamsSchema =
     requirement: providerInstallationRequirementSchema.optional(),
     checkUpdates: z.boolean().default(true),
   });
+
 export type ProviderInstallationStatusParams = z.infer<
   typeof providerInstallationStatusParamsSchema
 >;
@@ -118,6 +120,7 @@ export const providerInstallationActionKindSchema = z.enum([
   "install",
   "update",
 ]);
+
 export type ProviderInstallationActionKind = z.infer<
   typeof providerInstallationActionKindSchema
 >;
@@ -129,6 +132,7 @@ export const providerInstallationActionSchema = z
     command: z.string().min(1),
   })
   .passthrough();
+
 export type ProviderInstallationAction = z.infer<
   typeof providerInstallationActionSchema
 >;
@@ -138,6 +142,7 @@ export const providerInstallationSourceSchema = z.enum([
   "npmGlobal",
   "external",
 ]);
+
 export type ProviderInstallationSource = z.infer<
   typeof providerInstallationSourceSchema
 >;
@@ -158,6 +163,7 @@ export const providerInstallationStatusSchema = z
     versionUnsupported: z.boolean(),
   })
   .passthrough();
+
 export type ProviderInstallationStatus = z.infer<
   typeof providerInstallationStatusSchema
 >;
@@ -166,6 +172,7 @@ export const providerInstallationRunParamsSchema =
   providerMaintenanceParamsSchema.extend({
     action: providerInstallationActionKindSchema,
   });
+
 export type ProviderInstallationRunParams = z.infer<
   typeof providerInstallationRunParamsSchema
 >;
@@ -177,6 +184,7 @@ export const providerInstallationCommandSchema = z
     displayCommand: z.string().min(1),
   })
   .passthrough();
+
 export type ProviderInstallationCommand = z.infer<
   typeof providerInstallationCommandSchema
 >;
@@ -199,6 +207,7 @@ export const providerInstallationVerificationSchema = z.discriminatedUnion(
       .passthrough(),
   ],
 );
+
 export type ProviderInstallationVerification = z.infer<
   typeof providerInstallationVerificationSchema
 >;
@@ -221,6 +230,7 @@ export const providerInstallationRunResultSchema = z.discriminatedUnion(
       .passthrough(),
   ],
 );
+
 export type ProviderInstallationRunResult = z.infer<
   typeof providerInstallationRunResultSchema
 >;

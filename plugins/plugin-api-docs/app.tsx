@@ -2,10 +2,10 @@ import { PluginBrandIcon } from "@/components/ui/plugin-icon";
 import { useCallback, useEffect, useState } from "react";
 import {
   definePluginApp,
-  useBbNavigate,
+  experimental_useAppNavigate,
   useSdk,
-  type PluginBrowserBbSdk,
-} from "@get-bb/plugin-sdk/app";
+  type experimental_PluginBrowserSdk,
+} from "@omnyo/plugin-sdk/app";
 import { copyPluginSurfaceAgentReference } from "./src/agent-reference";
 import { firstPartyPluginId } from "./src/plugin-icons";
 import { ProductMap } from "./src/product-map";
@@ -18,7 +18,7 @@ export interface PluginReference {
 }
 
 export async function loadPluginReferences(
-  sdk: Pick<PluginBrowserBbSdk, "plugins">,
+  sdk: Pick<experimental_PluginBrowserSdk, "plugins">,
   signal: AbortSignal,
 ): Promise<ReadonlyMap<string, PluginReference>> {
   const [installed, catalog] = await Promise.all([
@@ -45,6 +45,7 @@ export async function loadPluginReferences(
       )
       .catch((): PluginReference[] => []),
   ]);
+
   return new Map(
     [...catalog, ...installed].map((plugin) => [plugin.id, plugin]),
   );
@@ -52,35 +53,45 @@ export async function loadPluginReferences(
 
 function usePluginReferences(): ReadonlyMap<string, PluginReference> {
   const sdk = useSdk();
+
   const [plugins, setPlugins] = useState<ReadonlyMap<string, PluginReference>>(
     () => new Map(),
   );
+
   useEffect(() => {
     const controller = new AbortController();
     void loadPluginReferences(sdk, controller.signal).then((references) => {
       if (!controller.signal.aborted) setPlugins(references);
     });
+
     return () => controller.abort();
   }, [sdk]);
+
   return plugins;
 }
 
 function PluginApiMapPage({ subPath }: { subPath: string }) {
   const plugins = usePluginReferences();
-  const bbNavigate = useBbNavigate();
+  const omnyoNavigate = experimental_useAppNavigate();
+
   const pluginPageHref = useCallback(
     (displayName: string) => {
       const id = firstPartyPluginId(displayName);
+
       if (!id || !plugins.has(id)) return null;
+
       return `/plugins/${id}`;
     },
     [plugins],
   );
+
   const renderPluginIcon = useCallback(
     (displayName: string) => {
       const id = firstPartyPluginId(displayName);
       const plugin = id ? plugins.get(id) : undefined;
+
       if (!plugin) return null;
+
       return (
         <PluginBrandIcon
           icon={plugin.icon}
@@ -92,15 +103,17 @@ function PluginApiMapPage({ subPath }: { subPath: string }) {
     },
     [plugins],
   );
+
   const onSlideChange = useCallback(
     (slideId: string) => {
-      bbNavigate.toPluginPanel("plugin-api", {
+      omnyoNavigate.toPluginPanel("plugin-api", {
         subPath: slideId,
         replace: true,
       });
     },
-    [bbNavigate],
+    [omnyoNavigate],
   );
+
   return (
     <div className="@container/guide-page flex h-full min-h-0 min-w-0 flex-1">
       <div

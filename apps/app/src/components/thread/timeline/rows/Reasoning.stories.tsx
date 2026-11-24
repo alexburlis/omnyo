@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   systemRow,
   fileReadRow,
@@ -14,6 +14,7 @@ export default { title: "thread/timeline/rows/Reasoning" };
 
 const text =
   "The live indicator and completed thought should use the same layout. Keep the disclosure expanded while changing the label and adding the duration.";
+
 const thought = systemRow({
   id: "reasoning-1",
   systemKind: "operation",
@@ -24,6 +25,7 @@ const thought = systemRow({
   startedAt: 1_000,
   completedAt: 13_000,
 });
+
 const baseProps = {
   threadRuntimeDisplayStatus: "idle" as const,
   workspaceRootPath: undefined,
@@ -33,7 +35,9 @@ export function Lifecycle() {
   const [phase, setPhase] = useState<"empty" | "thinking" | "completed">(
     "empty",
   );
+
   const [cycle, setCycle] = useState(0);
+
   return (
     <div className="mx-auto max-w-2xl p-8 space-y-6">
       <div>
@@ -107,6 +111,7 @@ export function Completed() {
 
 export function Grouped() {
   const [closed, setClosed] = useState(false);
+
   const rows = [
     { ...thought, id: "before", detail: "Inspect the implementation first." },
     fileReadRow({ id: "read-a", path: "src/app.ts", seq: 2 }),
@@ -119,6 +124,7 @@ export function Grouped() {
     },
     fileChangeRow({ id: "edit", path: "src/app.ts", seq: 6 }),
   ];
+
   return (
     <div className="mx-auto max-w-2xl p-8 space-y-6">
       <Button onClick={() => setClosed(!closed)}>

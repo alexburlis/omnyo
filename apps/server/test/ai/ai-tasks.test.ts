@@ -1,4 +1,4 @@
-import { setAiServiceSelection } from "@bb/db";
+import { setAiServiceSelection } from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import { createAiServiceRegistry } from "../../src/services/ai/ai-service-registry.js";
 import {
@@ -12,14 +12,14 @@ import { withTestHarness } from "../helpers/test-app.js";
 const PROMPT = "Write a title for: fix the flaky login test";
 
 describe("AI task routing", () => {
-  it("tries bb cloud before other Automatic services", async () => {
+  it("tries Automatic services in plugin id order, not registration order", async () => {
     await withTestHarness({}, async (harness) => {
-      const cloud = registerFakeAiService(harness.deps.aiServices, {
-        id: "bb",
-        pluginId: "bb-ai",
-        builtin: true,
-        complete: async () => "Cloud title",
+      const later = registerFakeAiService(harness.deps.aiServices, {
+        id: "helper",
+        pluginId: "zeta-plugin",
+        complete: async () => "Later title",
       });
+
       const codex = registerFakeAiService(harness.deps.aiServices, {
         id: "codex",
         pluginId: "provider-codex",
@@ -33,9 +33,9 @@ describe("AI task routing", () => {
         prompt: PROMPT,
       });
 
-      expect(outcome).toMatchObject({ ok: true, value: "Cloud title" });
-      expect(cloud.completeCalls.map((call) => call.prompt)).toEqual([PROMPT]);
-      expect(codex.completeCalls).toEqual([]);
+      expect(outcome).toMatchObject({ ok: true, value: "Codex title" });
+      expect(codex.completeCalls.map((call) => call.prompt)).toEqual([PROMPT]);
+      expect(later.completeCalls).toEqual([]);
     });
   });
 
@@ -47,10 +47,10 @@ describe("AI task routing", () => {
         builtin: true,
         status: async () => ({ ready: false, message: "Sign in to Codex" }),
       });
+
       registerFakeAiService(harness.deps.aiServices, {
-        id: "bb",
-        pluginId: "bb-ai",
-        builtin: true,
+        id: "helper",
+        pluginId: "helper-plugin",
         complete: async () => {
           throw new Error("upstream down");
         },
@@ -65,6 +65,7 @@ describe("AI task routing", () => {
         label: "test",
         prompt: PROMPT,
       });
+
       expect(codex.completeCalls).toEqual([]);
       expect(failed).toMatchObject({
         ok: false,
@@ -78,10 +79,12 @@ describe("AI task routing", () => {
     await withTestHarness({}, async (harness) => {
       let clock = 0;
       let signedIn = false;
+
       const deps = {
         ...harness.deps,
         aiServices: createAiServiceRegistry({ now: () => clock }),
       };
+
       const codex = registerFakeAiService(deps.aiServices, {
         id: "codex",
         pluginId: "provider-codex",
@@ -90,6 +93,7 @@ describe("AI task routing", () => {
         status: async () =>
           signedIn ? { ready: true } : { ready: false, message: "Sign in" },
       });
+
       await deps.aiServices.status({
         pluginId: "provider-codex",
         serviceId: "codex",
@@ -124,6 +128,7 @@ describe("AI task routing", () => {
         pluginId: "provider-codex",
         builtin: true,
       });
+
       const controller = new AbortController();
       controller.abort();
 
@@ -146,11 +151,13 @@ describe("AI task routing", () => {
         pluginId: "first-plugin",
         complete: async () => "First title",
       });
+
       const second = registerFakeAiService(harness.deps.aiServices, {
         id: "helper",
         pluginId: "second-plugin",
         complete: async () => "Second title",
       });
+
       setAiServiceSelection(harness.deps.db, "thread-title", {
         mode: "service",
         pluginId: "second-plugin",
@@ -174,6 +181,7 @@ describe("AI task routing", () => {
     async (task) => {
       await withTestHarness({}, async (harness) => {
         const calls: string[] = [];
+
         const registrations = [
           { pluginId: "z-plugin", id: "helper", ready: true, reply: "Unused" },
           {
@@ -183,18 +191,20 @@ describe("AI task routing", () => {
             reply: "Third-party reply",
           },
           { pluginId: "a-plugin", id: "a-service", ready: true, reply: null },
-          { pluginId: "0-plugin", id: "helper", ready: false, reply: "Unused" },
-          { pluginId: "bb-ai", id: "bb", ready: true, reply: null },
+          { pluginId: "0-plugin", id: "helper", ready: false, reply: null },
         ];
+
         for (const registration of registrations) {
           const answer = async () => {
             calls.push(`${registration.pluginId}/${registration.id}`);
+
             if (registration.reply === null) throw new Error("upstream down");
+
             return registration.reply;
           };
+
           registerFakeAiService(harness.deps.aiServices, {
             ...registration,
-            builtin: registration.pluginId === "bb-ai",
             complete: answer,
             transcribe: answer,
             status: async () =>
@@ -203,11 +213,13 @@ describe("AI task routing", () => {
                 : { ready: false, message: "Sign in" },
           });
         }
+
         const incompatible = registerFakeAiService(harness.deps.aiServices, {
           pluginId: "00-plugin",
           complete: task === "voice" ? async () => "Unused" : null,
           transcribe: task === "voice" ? null : async () => "Unused",
         });
+
         const outcome = await runAiTask(harness.deps, {
           task,
           label: "test",
@@ -220,9 +232,10 @@ describe("AI task routing", () => {
               : service.complete!(PROMPT, { signal }),
           accept: (value) => value,
         });
+
         expect(outcome).toMatchObject({ ok: true, value: "Third-party reply" });
         expect(calls).toEqual([
-          "bb-ai/bb",
+          ...(task === "voice" ? ["0-plugin/helper"] : []),
           "a-plugin/a-service",
           "a-plugin/z-service",
         ]);
@@ -239,6 +252,7 @@ describe("AI task routing", () => {
         pluginId: "provider-codex",
         builtin: true,
       });
+
       const mine = registerFakeAiService(harness.deps.aiServices, {
         id: "my-openrouter",
         pluginId: "z-openrouter",
@@ -246,6 +260,7 @@ describe("AI task routing", () => {
           throw new Error("bad key");
         },
       });
+
       setAiServiceSelection(harness.deps.db, "commit-message", {
         mode: "service",
         pluginId: "z-openrouter",
@@ -267,6 +282,7 @@ describe("AI task routing", () => {
         label: "test",
         prompt: PROMPT,
       });
+
       expect(title).toMatchObject({ ok: true, value: "Fake reply" });
       expect(codex.completeCalls).toHaveLength(1);
     });
@@ -278,6 +294,7 @@ describe("AI task routing", () => {
         id: "my-openrouter",
         pluginId: "someone-else",
       });
+
       setAiServiceSelection(harness.deps.db, "thread-title", {
         mode: "service",
         pluginId: "my-openrouter",
@@ -302,6 +319,7 @@ describe("AI task routing", () => {
         pluginId: "provider-codex",
         builtin: true,
       });
+
       setAiServiceSelection(harness.deps.db, "thread-title", { mode: "off" });
 
       const outcome = await runTextAiTask(harness.deps, {
@@ -310,7 +328,13 @@ describe("AI task routing", () => {
         prompt: PROMPT,
       });
 
-      expect(outcome).toMatchObject({ ok: false, reason: "off" });
+      expect(outcome).toMatchObject({
+        ok: false,
+        reason: "off",
+        message: expect.stringContaining(
+          "omnyo settings ai-services set thread-title automatic",
+        ),
+      });
       expect(codex.completeCalls).toEqual([]);
     });
   });
@@ -379,9 +403,8 @@ describe("AI task routing", () => {
         status: async () => ({ ready: true }),
       });
       registerFakeAiService(harness.deps.aiServices, {
-        id: "bb",
-        pluginId: "bb-ai",
-        builtin: true,
+        id: "helper",
+        pluginId: "helper-plugin",
         complete: null,
         transcribe: async () => "hello",
         status: async () => ({ ready: false, message: "Signed out" }),
@@ -393,15 +416,15 @@ describe("AI task routing", () => {
         serviceId: "codex",
       });
       await harness.deps.aiServices.status({
-        pluginId: "bb-ai",
-        serviceId: "bb",
+        pluginId: "helper-plugin",
+        serviceId: "helper",
       });
       expect(isAiTaskAvailable(harness.deps, "voice")).toBe(true);
 
       setAiServiceSelection(harness.deps.db, "voice", {
         mode: "service",
-        pluginId: "bb-ai",
-        serviceId: "bb",
+        pluginId: "helper-plugin",
+        serviceId: "helper",
       });
       expect(isAiTaskAvailable(harness.deps, "voice")).toBe(false);
     });

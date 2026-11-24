@@ -23,6 +23,7 @@ export function createSyncedPreferenceAtom<Key extends PreferenceKey>(
       const valueAtom = preferenceValueAtom(key);
       const previous = get(valueAtom);
       const next = typeof update === "function" ? update(previous) : update;
+
       if (Object.is(next, previous)) return;
       set(valueAtom, next);
       schedulePreferenceWrite(key, next);

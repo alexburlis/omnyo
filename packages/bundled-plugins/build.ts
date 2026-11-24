@@ -7,9 +7,13 @@ import {
 } from "../../apps/server/src/services/plugin-catalog/bundled-marketplace-paths.js";
 
 const root = resolve(import.meta.dirname, "../..");
+
 const output = resolve(import.meta.dirname, "dist");
+
 await rm(output, { recursive: true, force: true });
+
 await mkdir(output, { recursive: true });
+
 await cp(
   resolve(
     root,
@@ -19,6 +23,7 @@ await cp(
   ),
   resolve(output, BUNDLED_MARKETPLACE_FILENAME),
 );
+
 for (const { name } of BUNDLED_PLUGINS) {
   await cp(
     resolve(root, "plugins", name, ".bundled-runtime"),

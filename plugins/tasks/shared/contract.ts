@@ -1,4 +1,4 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import {
   TASK_SORTS,
@@ -37,43 +37,62 @@ export const PRESET_ENVIRONMENT_KINDS = [
 ] as const;
 
 export const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+
 export const PROJECT_PREFIX_PATTERN = /^[A-Z][A-Z0-9]{0,9}$/;
+
 export const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const idSchema = z.string().regex(ULID_PATTERN, "must be a ULID");
+
 const nonBlankStringSchema = z.string().trim().min(1, "must not be blank");
+
 export const presetReasoningLevelSchema = nonBlankStringSchema;
+
 export type PresetReasoningLevel = z.infer<typeof presetReasoningLevelSchema>;
+
 export const presetServiceTierSchema = nonBlankStringSchema;
+
 export type PresetServiceTier = z.infer<typeof presetServiceTierSchema>;
+
 export const PRESET_PERMISSION_MODES = [
   "accept-edits",
   "auto",
   "full",
 ] as const;
+
 export const presetPermissionModeSchema = z.enum(PRESET_PERMISSION_MODES);
+
 export type PresetPermissionMode = z.infer<typeof presetPermissionModeSchema>;
+
 const presetEnvironmentKindSchema = z.enum(PRESET_ENVIRONMENT_KINDS);
+
 const nullablePresetTargetSchema = nonBlankStringSchema.nullable();
+
 const projectPrefixSchema = z
   .string()
   .regex(
     PROJECT_PREFIX_PATTERN,
     "must be uppercase alphanumeric, start with a letter, and contain at most 10 characters",
   );
+
 const dueDateSchema = z
   .string()
   .regex(ISO_DATE_PATTERN)
   .refine((value) => {
     const parsed = new Date(`${value}T00:00:00.000Z`);
+
     return (
       !Number.isNaN(parsed.valueOf()) &&
       parsed.toISOString().slice(0, 10) === value
     );
   }, "must be a valid calendar date in YYYY-MM-DD format");
+
 const taskStatusSchema = z.enum(TASK_STATUSES);
+
 const taskPrioritySchema = z.enum(TASK_PRIORITIES);
+
 const taskSortSchema = z.enum(TASK_SORTS);
+
 const threadSearchStatusSchema = z.enum([
   "pending",
   "idle",
@@ -100,7 +119,7 @@ const projectSchema = z
     nextTaskNumber: z.number().int().positive(),
     color: z.string(),
     folderId: idSchema.nullable(),
-    linkedBbProjectId: z.string().startsWith("proj_").nullable(),
+    linkedAppProjectId: z.string().startsWith("proj_").nullable(),
     createdAt: z.string(),
   })
   .strict();
@@ -313,7 +332,7 @@ const updateProjectInputSchema = z
     name: nonBlankStringSchema.optional(),
     color: nonBlankStringSchema.optional(),
     folderId: idSchema.nullable().optional(),
-    linkedBbProjectId: z.string().startsWith("proj_").nullable().optional(),
+    linkedAppProjectId: z.string().startsWith("proj_").nullable().optional(),
   })
   .strict()
   .refine(
@@ -321,7 +340,7 @@ const updateProjectInputSchema = z
       input.name !== undefined ||
       input.color !== undefined ||
       input.folderId !== undefined ||
-      input.linkedBbProjectId !== undefined,
+      input.linkedAppProjectId !== undefined,
     { message: "at least one project field must be updated" },
   );
 
@@ -377,6 +396,7 @@ const updatePresetInputSchema = z
         message: "requires environmentKind new-worktree",
       });
     }
+
     if (
       input.environmentKind === "project-default" &&
       input.machineId !== undefined &&
@@ -433,7 +453,7 @@ export const tasksRpcContract = defineRpcContract({
         prefix: projectPrefixSchema,
         color: nonBlankStringSchema,
         folderId: idSchema.nullable().default(null),
-        linkedBbProjectId: z
+        linkedAppProjectId: z
           .string()
           .startsWith("proj_")
           .nullable()
@@ -639,6 +659,7 @@ export const tasksRpcContract = defineRpcContract({
             message: "requires environmentKind new-worktree",
           });
         }
+
         if (
           input.environmentKind === "project-default" &&
           input.machineId !== null
@@ -695,11 +716,11 @@ export const tasksRpcContract = defineRpcContract({
       })
       .strict(),
   },
-  listBbProjects: {
+  listAppProjects: {
     input: z.null(),
     output: z
       .object({
-        bbProjects: z.array(
+        appProjects: z.array(
           z
             .object({ id: z.string().startsWith("proj_"), name: z.string() })
             .strict(),
@@ -732,24 +753,41 @@ export const tasksRpcContract = defineRpcContract({
 });
 
 export type TasksRpcContract = typeof tasksRpcContract;
+
 export type Folder = z.infer<typeof folderSchema>;
+
 export type Project = z.infer<typeof projectSchema>;
+
 export type Task = z.infer<typeof taskSchema>;
+
 export type TaskStatus = (typeof TASK_STATUSES)[number];
+
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
 export type Label = z.infer<typeof labelSchema>;
+
 export type Comment = z.infer<typeof commentSchema>;
+
 export type CommentProvider = z.infer<typeof commentProviderSchema>;
+
 export type DisplayComment = z.infer<typeof displayCommentSchema>;
+
 export type Attachment = z.infer<typeof attachmentSchema>;
+
 export type TaskThread = z.infer<typeof taskThreadSchema>;
+
 export type TaskPullRequest = z.infer<typeof taskPullRequestSchema>;
+
 export type Preset = z.infer<typeof presetSchema>;
+
 export type TasksDomainError = z.infer<typeof tasksDomainErrorSchema>;
+
 export type TaskMutationResult = z.infer<typeof taskMutationResultSchema>;
-export type BbProjectOption = z.infer<
-  (typeof tasksRpcContract)["listBbProjects"]["output"]
->["bbProjects"][number];
+
+export type OmnyoProjectOption = z.infer<
+  (typeof tasksRpcContract)["listAppProjects"]["output"]
+>["appProjects"][number];
+
 export type SidebarProjectSummary = z.infer<
   (typeof tasksRpcContract)["sidebarSummary"]["output"]
 >["projects"][number];

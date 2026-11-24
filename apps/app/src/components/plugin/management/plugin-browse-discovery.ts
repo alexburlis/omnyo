@@ -1,8 +1,8 @@
 import {
   PLUGIN_CATALOG_CATEGORIES,
   type PluginMarketplaceCategory,
-} from "@bb/domain";
-import type { PluginCatalogCollection } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { PluginCatalogCollection } from "@omnyo/server-contract";
 import type {
   PluginCatalogSearchEntry,
   PluginCatalogSearchData,
@@ -10,7 +10,8 @@ import type {
 
 export const UNCATEGORIZED_PLUGIN_CATEGORY_ID = "uncategorized";
 
-export type PluginBrowseSort = "name" | "recently-added" | "most-installed";
+export type PluginBrowseSort = "name" | "recently-added";
+
 export type PluginBrowseSortDirection = "asc" | "desc";
 
 export interface PluginBrowseShelf {
@@ -32,9 +33,11 @@ function orderedCategories(
   categories: readonly PluginMarketplaceCategory[],
 ): Map<string, PluginMarketplaceCategory> {
   const ordered = new Map<string, PluginMarketplaceCategory>();
+
   for (const category of [...categories, ...PLUGIN_CATALOG_CATEGORIES]) {
     if (!ordered.has(category.id)) ordered.set(category.id, category);
   }
+
   return ordered;
 }
 
@@ -47,29 +50,38 @@ export function pluginCategoryFilterOptions(
   const labels = new Map<string, string>();
   const counts = new Map<string, number>();
   const unknownIds: string[] = [];
+
   for (const entry of entries) {
     const id = pluginCategoryFilterId(entry);
+
     if (id === UNCATEGORIZED_PLUGIN_CATEGORY_ID) continue;
+
     if (!labels.has(id)) {
       labels.set(id, entry.category ?? id);
+
       if (!knownCategories.has(id)) {
         unknownIds.push(id);
       }
     }
+
     counts.set(id, (counts.get(id) ?? 0) + 1);
   }
+
   for (const id of selected) {
     if (id === UNCATEGORIZED_PLUGIN_CATEGORY_ID || labels.has(id)) continue;
     const category = knownCategories.get(id);
     labels.set(id, category?.displayName ?? id);
+
     if (category === undefined) {
       unknownIds.push(id);
     }
   }
+
   const orderedIds = [
     ...[...knownCategories.keys()].filter((id) => labels.has(id)),
     ...unknownIds,
   ];
+
   return orderedIds.map((id) => ({
     id,
     label: labels.get(id) ?? id,
@@ -90,6 +102,7 @@ function collectionEntries(
   const rankByEntryId = new Map(
     collection.pluginIds.map((entryId, rank) => [entryId, rank]),
   );
+
   return entries
     .filter(
       (entry) =>
@@ -109,8 +122,10 @@ export function pluginBrowseShelves({
   categories,
 }: PluginCatalogSearchData): PluginBrowseShelf[] {
   const knownCategories = orderedCategories(categories);
+
   const shelves: PluginBrowseShelf[] = collections.flatMap((collection) => {
     const shelfEntries = collectionEntries(entries, collection);
+
     return shelfEntries.length === 0
       ? []
       : [
@@ -122,18 +137,23 @@ export function pluginBrowseShelves({
           },
         ];
   });
+
   const entriesByCategory = new Map<string, PluginCatalogSearchEntry[]>();
   const categoryLabels = new Map<string, string>();
   const unknownCategoryOrder: string[] = [];
+
   for (const entry of entries) {
     if (!isCategorized(entry)) continue;
     const categoryId = entry.categoryId;
     const categoryLabel = entry.category;
+
     if (categoryId === undefined || categoryLabel === undefined) continue;
     const categoryEntries = entriesByCategory.get(categoryId);
+
     if (categoryEntries === undefined) {
       entriesByCategory.set(categoryId, [entry]);
       categoryLabels.set(categoryId, categoryLabel);
+
       if (!knownCategories.has(categoryId)) {
         unknownCategoryOrder.push(categoryId);
       }
@@ -141,9 +161,12 @@ export function pluginBrowseShelves({
       categoryEntries.push(entry);
     }
   }
+
   const categoryOrder = [...knownCategories.keys(), ...unknownCategoryOrder];
+
   for (const categoryId of categoryOrder) {
     const shelfEntries = entriesByCategory.get(categoryId);
+
     if (shelfEntries === undefined || shelfEntries.length === 0) continue;
     const knownCategory = knownCategories.get(categoryId);
     shelves.push({
@@ -160,7 +183,9 @@ export function pluginBrowseShelves({
       kind: "category",
     });
   }
+
   const uncategorizedEntries = entries.filter((entry) => !isCategorized(entry));
+
   if (uncategorizedEntries.length > 0) {
     shelves.push({
       key: "category:uncategorized",
@@ -170,6 +195,7 @@ export function pluginBrowseShelves({
       kind: "uncategorized",
     });
   }
+
   return shelves;
 }
 
@@ -187,15 +213,17 @@ function compareOptionalNumbers(
   direction: PluginBrowseSortDirection,
 ): number {
   if (left === undefined) return right === undefined ? 0 : 1;
+
   if (right === undefined) return -1;
   const result = left - right;
+
   return direction === "asc" ? result : -result;
 }
 
 export function sortPluginEntries<
   Entry extends Pick<
     PluginCatalogSearchEntry,
-    "displayName" | "entryId" | "publishedAt" | "installs"
+    "displayName" | "entryId" | "publishedAt"
   >,
 >(
   entries: readonly Entry[],
@@ -207,23 +235,19 @@ export function sortPluginEntries<
       sort === "name"
         ? left.displayName.localeCompare(right.displayName) *
           (direction === "asc" ? 1 : -1)
-        : sort === "recently-added"
-          ? compareOptionalNumbers(
-              left.publishedAt === undefined
-                ? undefined
-                : Date.parse(left.publishedAt),
-              right.publishedAt === undefined
-                ? undefined
-                : Date.parse(right.publishedAt),
-              direction,
-            )
-          : compareOptionalNumbers(
-              left.installs ?? undefined,
-              right.installs ?? undefined,
-              direction,
-            );
+        : compareOptionalNumbers(
+            left.publishedAt === undefined
+              ? undefined
+              : Date.parse(left.publishedAt),
+            right.publishedAt === undefined
+              ? undefined
+              : Date.parse(right.publishedAt),
+            direction,
+          );
+
     if (sortResult !== 0) return sortResult;
     const nameResult = left.displayName.localeCompare(right.displayName);
+
     return nameResult || left.entryId.localeCompare(right.entryId);
   });
 }

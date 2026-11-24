@@ -80,6 +80,7 @@ describe("thread session state output", () => {
         pendingValue: null,
       },
     ];
+
     expect(
       parseSessionOptionAssignments({
         options,

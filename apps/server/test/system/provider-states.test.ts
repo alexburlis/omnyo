@@ -1,5 +1,5 @@
-import type { ProviderHealth } from "@bb/host-daemon-contract";
-import { updateHost } from "@bb/db";
+import type { ProviderHealth } from "@omnyo/host-daemon-contract";
+import { updateHost } from "@omnyo/db";
 import { describe, expect, it, vi } from "vitest";
 import { getProviderStates } from "../../src/services/system/provider-states.js";
 import { setPluginAgentContributions } from "../../src/services/plugins/plugin-agent-contributions.js";
@@ -50,6 +50,7 @@ describe("getProviderStates", () => {
       const host = seedHost(harness.deps, {
         id: "host-provider-states-suspended",
       });
+
       updateHost(harness.db, harness.hub, host.id, {
         phase: "suspended",
         suspendedAt: 123,
@@ -99,6 +100,7 @@ describe("getProviderStates", () => {
               }
             : null,
       });
+
       try {
         const { host, session } = seedHostSession(harness.deps);
         registerHostRpcResponder(harness, {
@@ -121,6 +123,7 @@ describe("getProviderStates", () => {
                 },
               };
             }
+
             throw new Error(`Unexpected command ${request.command.type}`);
           },
         });
@@ -165,6 +168,7 @@ describe("getProviderStates", () => {
               },
             };
           }
+
           throw new Error(`Unexpected command ${request.command.type}`);
         },
       });
@@ -184,6 +188,177 @@ describe("getProviderStates", () => {
         providerId: "codex",
         status: "ready",
       });
+    });
+  });
+
+  it("reuses cold discovery health and refreshes readiness on a warm request", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      let opencodeCalls = 0;
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          if (request.command.type !== "provider.health") {
+            throw new Error(`Unexpected command ${request.command.type}`);
+          }
+
+          if (request.command.providerId === "acp-opencode") {
+            opencodeCalls += 1;
+          }
+
+          return {
+            ok: true,
+            result: {
+              supported: true,
+              health: {
+                ...healthForInstalledOnlyProvider(
+                  request.command.providerId,
+                  new Set(["acp-opencode"]),
+                ),
+                ...(request.command.providerId === "acp-opencode"
+                  ? { installedVersion: `1.0.${opencodeCalls}` }
+                  : {}),
+              },
+            },
+          };
+        },
+      });
+
+      const cold = await getProviderStates(harness.deps, { hostId: host.id });
+      expect(opencodeCalls).toBe(1);
+      expect(
+        cold.providers.find(
+          (provider) => provider.providerId === "acp-opencode",
+        ),
+      ).toMatchObject({ status: "ready", installedVersion: "1.0.1" });
+
+      const warm = await getProviderStates(harness.deps, { hostId: host.id });
+      expect(opencodeCalls).toBe(2);
+      expect(
+        warm.providers.find(
+          (provider) => provider.providerId === "acp-opencode",
+        ),
+      ).toMatchObject({ status: "ready", installedVersion: "1.0.2" });
+    });
+  });
+
+  it("checks installed provider health again for an environment cwd", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+      });
+
+      const environment = seedEnvironment(harness.deps, {
+        hostId: host.id,
+        projectId: project.id,
+      });
+
+      const opencodeCwds: Array<string | undefined> = [];
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          if (request.command.type !== "provider.health") {
+            throw new Error(`Unexpected command ${request.command.type}`);
+          }
+
+          if (request.command.providerId === "acp-opencode") {
+            opencodeCwds.push(request.command.cwd);
+          }
+
+          return {
+            ok: true,
+            result: {
+              supported: true,
+              health: {
+                ...healthForInstalledOnlyProvider(
+                  request.command.providerId,
+                  new Set(["acp-opencode"]),
+                ),
+                ...(request.command.cwd === undefined
+                  ? {}
+                  : {
+                      status: "unauthenticated",
+                      loginCommand: "provider login",
+                    }),
+              },
+            },
+          };
+        },
+      });
+
+      const result = await getProviderStates(harness.deps, {
+        environmentId: environment.id,
+      });
+
+      expect(opencodeCwds).toEqual([undefined, environment.path]);
+      expect(
+        result.providers.find(
+          (provider) => provider.providerId === "acp-opencode",
+        ),
+      ).toMatchObject({
+        status: "unauthenticated",
+        loginCommand: "provider login",
+      });
+    });
+  });
+
+  it("does not reuse discovery health after a bridge artifact changes", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, session } = seedHostSession(harness.deps);
+      let opencodeCalls = 0;
+      registerHostRpcResponder(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+        handle: (request) => {
+          if (request.command.type !== "provider.health") {
+            throw new Error(`Unexpected command ${request.command.type}`);
+          }
+
+          if (request.command.providerId === "acp-opencode") {
+            opencodeCalls += 1;
+
+            if (opencodeCalls === 1) {
+              const artifact =
+                harness.deps.pluginHostArtifacts.get("provider-acp");
+
+              if (artifact === undefined)
+                throw new Error("Missing fixture bridge");
+              harness.deps.pluginHostArtifacts.set("provider-acp", {
+                ...artifact,
+                digest: "b".repeat(64),
+              });
+            }
+          }
+
+          return {
+            ok: true,
+            result: {
+              supported: true,
+              health: {
+                ...healthForInstalledOnlyProvider(
+                  request.command.providerId,
+                  new Set(["acp-opencode"]),
+                ),
+                ...(request.command.providerId === "acp-opencode"
+                  ? { installedVersion: `1.0.${opencodeCalls}` }
+                  : {}),
+              },
+            },
+          };
+        },
+      });
+
+      const result = await getProviderStates(harness.deps, { hostId: host.id });
+      expect(opencodeCalls).toBe(2);
+      expect(
+        result.providers.find(
+          (provider) => provider.providerId === "acp-opencode",
+        ),
+      ).toMatchObject({ installedVersion: "1.0.2" });
     });
   });
 
@@ -220,6 +395,7 @@ describe("getProviderStates", () => {
         }),
       );
       const { host, session } = seedHostSession(harness.deps);
+
       const responder = registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -236,6 +412,7 @@ describe("getProviderStates", () => {
               },
             };
           }
+
           throw new Error(`Unexpected command ${request.command.type}`);
         },
       });
@@ -268,17 +445,21 @@ describe("getProviderStates", () => {
         id: "host-primary",
         name: "Primary",
       });
+
       const remote = seedHostSession(harness.deps, {
         id: "host-remote",
         name: "Remote",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: remote.host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: remote.host.id,
         projectId: project.id,
       });
+
       let primaryCalls = 0;
       const healthCwds: Array<string | undefined> = [];
 
@@ -296,6 +477,7 @@ describe("getProviderStates", () => {
         handle: (request) => {
           if (request.command.type === "provider.health") {
             healthCwds.push(request.command.cwd);
+
             return {
               ok: true,
               result: {
@@ -307,6 +489,7 @@ describe("getProviderStates", () => {
               },
             };
           }
+
           throw new Error(`Unexpected command ${request.command.type}`);
         },
       });

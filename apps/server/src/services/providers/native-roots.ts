@@ -4,12 +4,12 @@ import {
   providerResolvedNativeRootsSchema,
   type ProviderNativeRootSet,
   type ProviderResolvedNativeRoots,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   HostDaemonOnlineRpcResultForCommand,
   HostDaemonRetryableOnlineRpcCommand,
-} from "@bb/host-daemon-contract";
-import { experimental_nativeRootsHostContract } from "@get-bb/plugin-sdk/host";
+} from "@omnyo/host-daemon-contract";
+import { experimental_nativeRootsHostContract } from "@omnyo/plugin-sdk/host";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
 import type { AppDeps, WorkSessionDeps } from "../../types.js";
 import {
@@ -52,34 +52,43 @@ export function createProviderNativeRootsCache(
   const now = options.now ?? Date.now;
   const ttlMs = options.ttlMs ?? PROVIDER_NATIVE_ROOTS_CACHE_TTL_MS;
   const entries = new Map<string, CacheEntry>();
+
   return {
     invalidate(pluginId) {
       if (pluginId === undefined) {
         entries.clear();
+
         return;
       }
+
       for (const [key, entry] of entries) {
         if (entry.pluginId === pluginId) entries.delete(key);
       }
     },
     lookup(key, registrationRevision) {
       const entry = entries.get(key);
+
       if (entry === undefined) return undefined;
+
       if (
         entry.registrationRevision !== registrationRevision ||
         entry.expiresAt <= now()
       ) {
         entries.delete(key);
+
         return undefined;
       }
+
       return entry.value;
     },
     store(key, entry) {
       const stored: CacheEntry = { ...entry, expiresAt: now() + ttlMs };
       entries.set(key, stored);
+
       const restamp = (): void => {
         if (entries.get(key) === stored) stored.expiresAt = now() + ttlMs;
       };
+
       void entry.value.then(restamp, restamp);
     },
   };
@@ -96,12 +105,15 @@ export function createProviderListingBudget(
 ): ProviderListingBudget {
   const now = options.now ?? Date.now;
   const deadline = now() + COMMAND_TIMEOUT_MS;
+
   return {
     remainingMs() {
       const remaining = deadline - now();
+
       if (remaining < PROVIDER_LISTING_BUDGET_FLOOR_MS) {
         throw hostCommandTimeoutError();
       }
+
       return remaining;
     },
   };
@@ -150,13 +162,16 @@ async function callResolveNativeRoots(
   const providerId = registration.info.id;
   const fields = { pluginId, providerId, hostId: args.hostId, cwd: args.cwd };
   const artifact = deps.pluginHostArtifacts.get(pluginId);
+
   if (artifact === undefined) {
     deps.logger.warn(
       fields,
-      `Plugin "${pluginId}" resolves native roots for provider "${providerId}" but has no live bb.host artifact; listing its declared roots only`,
+      `Plugin "${pluginId}" resolves native roots for provider "${providerId}" but has no live omnyo.host artifact; listing its declared roots only`,
     );
+
     return EMPTY_PROVIDER_RESOLVED_NATIVE_ROOTS;
   }
+
   try {
     return providerResolvedNativeRootsSchema.parse(
       await callPluginHostRpc(deps, {
@@ -174,6 +189,7 @@ async function callResolveNativeRoots(
       { ...fields, err: error },
       `Plugin "${pluginId}" failed to resolve native roots for provider "${providerId}"; listing its declared roots only`,
     );
+
     return EMPTY_PROVIDER_RESOLVED_NATIVE_ROOTS;
   }
 }
@@ -183,27 +199,34 @@ export async function resolveProviderResolvedNativeRoots(
   args: ResolveNativeRootsArgs,
 ): Promise<ProviderResolvedNativeRoots> {
   const { registration } = args;
+
   if (!registration.resolvesNativeRoots) {
     return EMPTY_PROVIDER_RESOLVED_NATIVE_ROOTS;
   }
+
   const pluginId = registration.pluginId;
+
   const key = cacheKey({
     pluginId,
     providerId: registration.info.id,
     hostId: args.hostId,
     cwd: args.cwd,
   });
+
   const registrationRevision = deps.providerRegistry.getRegistrationRevision();
   const cached = deps.providerNativeRoots.lookup(key, registrationRevision);
+
   if (cached !== undefined) {
     return cached;
   }
+
   const value = callResolveNativeRoots(deps, args);
   deps.providerNativeRoots.store(key, {
     pluginId,
     registrationRevision,
     value,
   });
+
   return value;
 }
 
@@ -213,6 +236,7 @@ export async function resolveProviderNativeRootSet(
 ): Promise<ProviderNativeRootSet> {
   const { registration } = args;
   const resolved = await resolveProviderResolvedNativeRoots(deps, args);
+
   return {
     skills: {
       user: [...registration.nativeSkillRoots.user],
@@ -225,11 +249,15 @@ export async function resolveProviderNativeRootSet(
     resolved: {
       skills: [...resolved.skills],
       commands: [...resolved.commands],
+      ...(resolved.watchPaths === undefined
+        ? {}
+        : { watchPaths: [...resolved.watchPaths] }),
     },
   };
 }
 
 type ProviderNativeRootScanType = "host.list_commands" | "host.list_skills";
+
 type ProviderNativeRootScanResult<TType extends ProviderNativeRootScanType> =
   HostDaemonOnlineRpcResultForCommand<
     Extract<HostDaemonRetryableOnlineRpcCommand, { type: TType }>
@@ -254,17 +282,20 @@ export async function scanProviderNativeRoots(
   args: ScanProviderNativeRootsArgs & { type: ProviderNativeRootScanType },
 ): Promise<ProviderNativeRootScanResult<ProviderNativeRootScanType>> {
   const budget = createProviderListingBudget();
+
   const nativeRoots = await resolveProviderNativeRootSet(deps, {
     registration: args.registration,
     hostId: args.hostId,
     cwd: args.cwd,
     timeoutMs: budget.remainingMs(),
   });
+
   const scan = {
     providerId: args.registration.info.id,
     cwd: args.cwd,
     nativeRoots,
   };
+
   return callHostRetryableOnlineRpc(deps, {
     hostId: args.hostId,
     timeoutMs: budget.remainingMs(),

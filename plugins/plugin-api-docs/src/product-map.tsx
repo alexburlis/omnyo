@@ -9,6 +9,11 @@ import {
   type ReactNode,
 } from "react";
 import { Icon } from "@/components/ui/icon";
+import {
+  getDisclosureRevealClass,
+  MOTION_DURATION_MS,
+  TRANSITION_FALLBACK_SLACK_MS,
+} from "@/components/ui/motion";
 import { HugeiconsIcon } from "@hugeicons/react";
 import ComputerIcon from "@hugeicons/core-free-icons/ComputerIcon";
 import SmartPhone01Icon from "@hugeicons/core-free-icons/SmartPhone01Icon";
@@ -39,6 +44,7 @@ import {
 import {
   AppShellWireframe,
   CommandPaletteWireframe,
+  ResponsiveDrawerWireframe,
   ComposeScreenWireframe,
   ExtensionsPluginPageWireframe,
   RealComposerAnnotated,
@@ -59,6 +65,7 @@ const DESKTOP_SLIDES: GuideSlide[] = SURFACE_GROUPS.map((group) => ({
   ...group,
   groupId: group.id,
 }));
+
 const MOBILE_SLIDES: GuideSlide[] = DESKTOP_SLIDES.flatMap((group) => {
   if (group.id === "composer") {
     return [
@@ -69,18 +76,22 @@ const MOBILE_SLIDES: GuideSlide[] = DESKTOP_SLIDES.flatMap((group) => {
       },
     ];
   }
+
   if (group.id === "app-shell") {
     return [
       {
         ...group,
         title: "Sidebar",
-        blurb: "Plugins can add navigation, thread status, and footer controls.",
+        blurb:
+          "Plugins can add navigation, thread status, and footer controls.",
         appShellScene: "navigation" as const,
         surfaces: group.surfaces.filter((surface) =>
           [
             "nav-panel",
+            "sidebar-entry",
             "thread-row-status",
             "thread-list",
+            "sidebar-footer-card",
             "sidebar-footer",
           ].includes(surface.id),
         ),
@@ -89,11 +100,13 @@ const MOBILE_SLIDES: GuideSlide[] = DESKTOP_SLIDES.flatMap((group) => {
         ...group,
         id: "app-shell-thread",
         title: "Thread",
-        blurb: "Plugins can extend the thread header, conversation, and composer.",
+        blurb:
+          "Plugins can extend the thread header, conversation, and composer.",
         appShellScene: "conversation" as const,
         surfaces: group.surfaces.filter((surface) =>
           [
             "thread-header",
+            "thread-view",
             "timeline-renderers",
             "message-directives",
             "code-fence-renderers",
@@ -121,6 +134,7 @@ const MOBILE_SLIDES: GuideSlide[] = DESKTOP_SLIDES.flatMap((group) => {
       },
     ];
   }
+
   if (group.id === "home") {
     return [
       {
@@ -141,6 +155,7 @@ const MOBILE_SLIDES: GuideSlide[] = DESKTOP_SLIDES.flatMap((group) => {
       },
     ];
   }
+
   return [group];
 });
 
@@ -151,9 +166,11 @@ export function annotationNeighbors(
   const currentIndex = surfaces.findIndex(
     (surface) => surface.id === currentId,
   );
+
   if (currentIndex === -1) {
     return { previous: null, next: null };
   }
+
   return {
     previous: surfaces[currentIndex - 1] ?? null,
     next: surfaces[currentIndex + 1] ?? null,
@@ -164,6 +181,7 @@ function PlatformCard({ surface }: { surface: PluginSurface }) {
   const { activeId, setActiveId, expandedId, onSelect } = useSurfaceMap();
   const selected = activeId === surface.id || expandedId === surface.id;
   const icon = surfaceIcon(surface.id);
+
   return (
     <a
       href={`#surface-${surface.id}`}
@@ -217,6 +235,7 @@ function PlatformSlide({ group }: { group: GuideSlide }) {
         const surfaces = section.surfaceIds
           .map((id) => SURFACES_BY_ID.get(id))
           .filter((surface): surface is PluginSurface => Boolean(surface));
+
         return (
           <section key={section.title} aria-label={section.title}>
             <h3 className="text-xs font-medium uppercase tracking-wide text-subtle-foreground">
@@ -245,6 +264,7 @@ export function spatialFixtureScale(
   authoredHeight?: number,
 ): number {
   if (availableWidth <= 0 || authoredWidth <= 0) return 1;
+
   const heightScale =
     availableHeight !== undefined &&
     authoredHeight !== undefined &&
@@ -252,6 +272,7 @@ export function spatialFixtureScale(
     authoredHeight > 0
       ? availableHeight / authoredHeight
       : Number.POSITIVE_INFINITY;
+
   return Math.min(
     MAX_FIXTURE_SCALE,
     availableWidth / authoredWidth,
@@ -265,6 +286,7 @@ const FIXTURE_WIDTH_BANDS: Record<
 > = {
   "app-shell": { min: 1260, max: 1440 },
   "command-palette": { min: 860, max: 1200 },
+  "compact-drawers": { min: 560, max: 900 },
   composer: { min: 720, max: 768 },
   home: { min: 560, max: 1080 },
   settings: { min: 640, max: 900 },
@@ -283,6 +305,8 @@ function SpatialFixture({
   const frameRef = useRef<HTMLDivElement>(null);
   const fixtureRef = useRef<HTMLDivElement>(null);
   const cardReserveRef = useRef(0);
+  const [animate, setAnimate] = useState(false);
+
   const [geometry, setGeometry] = useState({
     scale: 1,
     height: null as number | null,
@@ -293,15 +317,18 @@ function SpatialFixture({
   useBrowserLayoutEffect(() => {
     const frame = frameRef.current;
     const fixture = fixtureRef.current;
+
     if (!frame || !fixture) return;
     const viewport = frame.closest<HTMLElement>("[data-guide-stage-viewport]");
 
     const measure = () => {
       const authoredWidth = fixture.scrollWidth;
       const authoredHeight = fixture.scrollHeight;
+
       const flowCard = frame
         .closest("section")
         ?.querySelector<HTMLElement>("[data-guide-card-flow]");
+
       if (flowCard) {
         cardReserveRef.current = Math.max(
           cardReserveRef.current,
@@ -311,10 +338,13 @@ function SpatialFixture({
       } else {
         cardReserveRef.current = 0;
       }
+
       const probe = frame
         .closest("[data-map-section]")
         ?.querySelector<HTMLElement>("[data-guide-card-probe]");
+
       let probeReserve = 0;
+
       if (probe) {
         for (const item of Array.from(probe.children)) {
           if (!(item instanceof HTMLElement)) continue;
@@ -325,9 +355,11 @@ function SpatialFixture({
           );
         }
       }
+
       const cardFootprint = flowCard
         ? Math.max(probeReserve, cardReserveRef.current)
         : 0;
+
       const availableHeight =
         viewport && frame.clientWidth >= 640
           ? viewport.clientHeight -
@@ -337,6 +369,7 @@ function SpatialFixture({
             cardFootprint -
             8
           : undefined;
+
       const scale = Math.min(
         maxScale,
         spatialFixtureScale(
@@ -346,6 +379,7 @@ function SpatialFixture({
           authoredHeight,
         ),
       );
+
       const scaled = Math.abs(scale - 1) >= 0.0001;
       const height = authoredHeight * scale;
       const width = scaled ? authoredWidth : null;
@@ -364,44 +398,78 @@ function SpatialFixture({
     const observer = new ResizeObserver(measure);
     observer.observe(frame);
     observer.observe(fixture);
+
     if (viewport) observer.observe(viewport);
+
     const probeRoot = frame
       .closest("[data-map-section]")
       ?.querySelector("[data-guide-card-probe]");
+
     if (probeRoot?.firstElementChild) {
       observer.observe(probeRoot.firstElementChild);
     }
+
     const section = frame.closest("section");
     let observedCard: Element | null = null;
+    let watching = false;
+    let animateTimer: number | null = null;
+
     const watchCard = () => {
       const card = section?.querySelector("[data-guide-card-flow]") ?? null;
+
       if (card === observedCard) return;
+
       if (observedCard) observer.unobserve(observedCard);
       observedCard = card;
+
       if (card) observer.observe(card);
+
+      if (watching) {
+        if (animateTimer !== null) window.clearTimeout(animateTimer);
+        setAnimate(true);
+        animateTimer = window.setTimeout(
+          () => setAnimate(false),
+          MOTION_DURATION_MS.slow + TRANSITION_FALLBACK_SLACK_MS,
+        );
+      }
+
       measure();
     };
+
     watchCard();
+    watching = true;
     const cardObserver = section ? new MutationObserver(watchCard) : null;
     cardObserver?.observe(section as Node, { childList: true });
+
     return () => {
       observer.disconnect();
       cardObserver?.disconnect();
+
+      if (animateTimer !== null) window.clearTimeout(animateTimer);
     };
   }, [maxScale]);
 
   const scaled = geometry.width !== null;
+
   return (
     <div
       ref={frameRef}
       data-guide-responsive-strategy="scale-together"
       data-guide-scale={geometry.scale.toFixed(4)}
-      className="w-full overflow-x-clip transition-[height] duration-300 ease-out"
+      className={cn(
+        "w-full overflow-x-clip",
+        animate &&
+          "transition-[height] duration-(--motion-duration-slow) ease-(--motion-ease-smooth) motion-reduce:transition-none",
+      )}
       style={{ height: geometry.height ?? undefined }}
     >
       <div
         ref={fixtureRef}
-        className="mx-auto w-full origin-top transition-transform duration-300 ease-out"
+        className={cn(
+          "mx-auto w-full origin-top",
+          animate &&
+            "transition-transform duration-(--motion-duration-slow) ease-(--motion-ease-smooth) motion-reduce:transition-none",
+        )}
         style={
           {
             minWidth: band?.min,
@@ -427,11 +495,13 @@ function SpatialFixture({
 }
 
 const PHONE_COLUMN_WIDTH = 350;
+
 const PHONE_TOOLBAR_RESERVE = 72;
 
 function PhoneFixture({ children }: { children: ReactNode }) {
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
+
   const [fit, setFit] = useState({
     scale: 1,
     height: null as number | null,
@@ -441,25 +511,34 @@ function PhoneFixture({ children }: { children: ReactNode }) {
   useBrowserLayoutEffect(() => {
     const outer = outerRef.current;
     const inner = innerRef.current;
+
     if (!outer || !inner) return;
+
     const measure = () => {
       const viewport = outer.closest<HTMLElement>(
         "[data-guide-stage-viewport]",
       );
+
       const viewportHeight =
         viewport?.clientHeight ?? document.documentElement.clientHeight;
+
       const naturalHeight = inner.offsetHeight;
+
       if (naturalHeight === 0 || outer.clientWidth === 0) return;
+
       const scale = Math.min(
         1,
         outer.clientWidth / PHONE_COLUMN_WIDTH,
         (viewportHeight - PHONE_TOOLBAR_RESERVE) / naturalHeight,
       );
+
       const height = Math.ceil(naturalHeight * scale);
+
       const offsetX = Math.max(
         0,
         (outer.clientWidth - PHONE_COLUMN_WIDTH * scale) / 2,
       );
+
       setFit((current) =>
         Math.abs(current.scale - scale) < 0.001 &&
         current.height === height &&
@@ -468,11 +547,13 @@ function PhoneFixture({ children }: { children: ReactNode }) {
           : { scale, height, offsetX },
       );
     };
+
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(outer);
     observer.observe(inner);
     window.addEventListener("resize", measure);
+
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", measure);
@@ -521,6 +602,8 @@ function SlideContent({
       );
     case "command-palette":
       return <CommandPaletteWireframe mobile={mobile} />;
+    case "compact-drawers":
+      return <ResponsiveDrawerWireframe mobile={mobile} />;
     case "composer":
       return <RealComposerAnnotated mobile={mobile} />;
     case "home":
@@ -535,10 +618,12 @@ function SlideContent({
 }
 
 const PROBE_NOOP = () => {};
+
 const PROBE_COPY = async () => false;
 
 function CardReserveProbe({ group }: { group: GuideSlide }) {
   const { numberOf } = useSurfaceMap();
+
   return (
     <div
       inert
@@ -584,6 +669,7 @@ function Slide({
       </PhoneFixture>
     );
   }
+
   if (fixtureResponsiveStrategy(group) === "reflow") {
     return (
       <div data-guide-responsive-strategy="reflow" className="w-full">
@@ -591,10 +677,13 @@ function Slide({
       </div>
     );
   }
+
   return (
     <>
       <SpatialFixture
-        band={mobile ? { min: 390, max: 390 } : FIXTURE_WIDTH_BANDS[group.groupId]}
+        band={
+          mobile ? { min: 390, max: 390 } : FIXTURE_WIDTH_BANDS[group.groupId]
+        }
         maxScale={mobile ? 1 : MAX_FIXTURE_SCALE}
       >
         <SlideContent group={group} mobile={mobile} />
@@ -612,15 +701,17 @@ function SlideTitle({
   brandMark?: ReactNode;
 }) {
   const parts = title.split(/\bbb\b/);
+
   if (parts.length === 1) {
     return <>{title}</>;
   }
+
   return (
     <>
       {parts.map((part, index) => (
         <Fragment key={index}>
           {index > 0
-            ? (brandMark ?? <span className="font-bold italic">bb</span>)
+            ? (brandMark ?? <span className="font-bold italic">Omnyo</span>)
             : null}
           {part}
         </Fragment>
@@ -674,54 +765,72 @@ function useStageHeight(
   useEffect(() => {
     if (!mountedRef.current) {
       mountedRef.current = true;
+
       return;
     }
+
     setAnimate(true);
-    const timer = window.setTimeout(() => setAnimate(false), 350);
+
+    const timer = window.setTimeout(
+      () => setAnimate(false),
+      MOTION_DURATION_MS.slow + TRANSITION_FALLBACK_SLACK_MS,
+    );
+
     return () => window.clearTimeout(timer);
   }, [index]);
   useEffect(() => {
     const slide = slideRefs.current[index];
+
     if (!slide) {
       return;
     }
+
     const measure = () => setHeight(slide.getBoundingClientRect().height);
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(slide);
+
     return () => observer.disconnect();
   }, [index, slideRefs]);
+
   return { height, animate };
 }
 
-function MobileCardFlow({ children }: { children: ReactNode }) {
-  const frameRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  useBrowserLayoutEffect(() => {
-    const frame = frameRef.current;
-    const content = contentRef.current;
-    if (!frame || !content) return;
-    const measure = () => {
-      frame.style.height = `${content.getBoundingClientRect().height}px`;
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, []);
-
+function MobileCardFlow({
+  open,
+  children,
+}: {
+  open: boolean;
+  children: ReactNode;
+}) {
   return (
-    <div
-      ref={frameRef}
-      className="overflow-y-clip transition-[height] duration-300 ease-out motion-reduce:transition-none"
-      style={{ height: 0 }}
-    >
-      <div ref={contentRef} className="flow-root">
+    <div className={getDisclosureRevealClass(open)}>
+      <div className="min-h-0 overflow-y-clip" inert={!open}>
         {children}
       </div>
     </div>
   );
+}
+
+function useRetainedSurface(
+  surface: PluginSurface | undefined,
+  exitMs: number,
+): PluginSurface | undefined {
+  const [retained, setRetained] = useState(surface);
+
+  useEffect(() => {
+    if (surface) {
+      setRetained(surface);
+
+      return;
+    }
+
+    const timer = window.setTimeout(() => setRetained(undefined), exitMs);
+
+    return () => window.clearTimeout(timer);
+  }, [surface, exitMs]);
+
+  return surface ?? retained;
 }
 
 export function ProductMap({
@@ -750,35 +859,48 @@ export function ProductMap({
   const card = useSurfaceCard();
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
   const [viewportMobile, setViewportMobile] = useState(
     () =>
       typeof window !== "undefined" &&
       window.matchMedia?.("(max-width: 767px)").matches === true,
   );
+
   const [compactContainer, setCompactContainer] = useState<boolean | null>(
     null,
   );
+
   const compactLayout = compactContainer ?? viewportMobile;
   useBrowserLayoutEffect(() => {
     const container = containerRef.current;
+
     if (container === null) return;
+
     const measure = () => {
       const width = container.getBoundingClientRect().width;
+
       if (width > 0) setCompactContainer(width < 768);
     };
+
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(container);
+
     return () => observer.disconnect();
   }, []);
+
   const [displayMode, setDisplayMode] = useState<"mobile" | "desktop" | null>(
     null,
   );
+
   const desktopLocked = mobileOnlyOnCompactViewport && viewportMobile;
+
   const mobile =
     desktopLocked ||
     (displayMode === null ? compactLayout : displayMode === "mobile");
+
   const slides = mobile ? MOBILE_SLIDES : DESKTOP_SLIDES;
+
   const numbers = useMemo(
     () =>
       new Map(
@@ -792,33 +914,42 @@ export function ProductMap({
       ),
     [slides],
   );
+
   useEffect(() => {
     const query = window.matchMedia?.("(max-width: 767px)");
+
     if (!query) return;
     const update = () => setViewportMobile(query.matches);
     query.addEventListener("change", update);
+
     return () => query.removeEventListener("change", update);
   }, []);
+
   const selectSurface = (id: string) => {
     setSelectedId(id);
     card.open(id);
   };
+
   const pageListEdges = useScrollEdges(pageListRef);
   const [slideId, setSlideId] = useState(initialSlideId ?? "app-shell");
   const previousMobile = useRef(mobile);
   useBrowserLayoutEffect(() => {
     if (previousMobile.current === mobile) return;
     previousMobile.current = mobile;
+
     if (!mobile || !card.openId) return;
+
     const destination = slides.find((slide) =>
       slide.surfaces.some((surface) => surface.id === card.openId),
     );
+
     if (destination && destination.id !== slideId) {
       setSlideId(destination.id);
       onSlideChange?.(destination.id);
     }
   }, [mobile, card.openId, slides, slideId, onSlideChange]);
   const selectedSlide = MOBILE_SLIDES.find((slide) => slide.id === slideId);
+
   const index = Math.max(
     0,
     slides.findIndex(
@@ -827,28 +958,39 @@ export function ProductMap({
         (!mobile && slide.id === selectedSlide?.groupId),
     ),
   );
+
   const stage = useStageHeight(index, slideRefs);
 
   useEffect(() => {
     if (compactLayout) return;
     const list = pageListRef.current;
     const button = pageButtonRefs.current[index];
+
     if (!list || !button) return;
     const listRect = list.getBoundingClientRect();
     const buttonRect = button.getBoundingClientRect();
     const leftDelta = buttonRect.left - listRect.left;
     const rightDelta = buttonRect.right - listRect.right;
+
     if (leftDelta < 0) list.scrollLeft += leftDelta;
     else if (rightDelta > 0) list.scrollLeft += rightDelta;
   }, [index, compactLayout]);
 
   const openSurface = card.openId ? SURFACES_BY_ID.get(card.openId) : undefined;
+
+  const presentedSurface = useRetainedSurface(
+    openSurface,
+    (compactLayout ? MOTION_DURATION_MS.base : MOTION_DURATION_MS.fast) +
+      TRANSITION_FALLBACK_SLACK_MS,
+  );
+
   const carets = panCarets(index, slides.length);
 
   const show = (next: number) => {
     if (next === index || next < 0 || next >= slides.length) {
       return;
     }
+
     card.close();
     setSelectedId(null);
     setHoverId(null);
@@ -858,20 +1000,29 @@ export function ProductMap({
 
   const goToSurface = (id: string) => {
     const group = GROUP_BY_SURFACE_ID.get(id);
+
     if (!group) return;
+
     const target = slides.findIndex((slide) =>
       slide.surfaces.some((surface) => surface.id === id),
     );
+
     if (target === -1) return;
+
     if (target !== index) show(target);
     selectSurface(id);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.target instanceof HTMLSelectElement) return;
-    if (event.target instanceof Element && event.target.closest('[role="dialog"]')) {
+
+    if (
+      event.target instanceof Element &&
+      event.target.closest('[role="dialog"]')
+    ) {
       return;
     }
+
     if (event.key === "ArrowRight") {
       event.preventDefault();
       show(index + 1);
@@ -907,39 +1058,54 @@ export function ProductMap({
     ],
   );
 
-  const cardNode = openSurface ? (
+  const cardNode = presentedSurface ? (
     <div
       data-guide-card-flow
-      className="mx-auto mt-[clamp(8px,var(--guide-stage-gap,8px),28px)] w-full"
+      inert={!openSurface}
+      className={cn(
+        "mx-auto mt-[clamp(8px,var(--guide-stage-gap,8px),28px)] w-full",
+        openSurface
+          ? "animate-in fade-in-0 slide-in-from-top-1 duration-(--motion-duration-base)"
+          : "pointer-events-none animate-out fade-out-0 duration-(--motion-duration-fast) fill-mode-forwards",
+      )}
     >
       <SurfaceCard
-        surface={openSurface}
+        surface={presentedSurface}
         mobile={compactLayout}
-        number={numbers.get(openSurface.id) ?? null}
+        number={numbers.get(presentedSurface.id) ?? null}
         onDismiss={card.close}
         onCopyForAgent={onCopyForAgent}
         navigation={{
-          ...annotationNeighbors(slides[index].surfaces, openSurface.id),
+          ...annotationNeighbors(slides[index].surfaces, presentedSurface.id),
           onOpen: selectSurface,
         }}
       />
     </div>
   ) : null;
+
   useEffect(() => {
     if (card.openId === null) return;
     const container = containerRef.current;
+
     if (container === null) return;
+
     const scope =
-      container.closest<HTMLElement>("[data-bb-plugin]") ?? container;
+      container.closest<HTMLElement>("[data-omnyo-plugin]") ?? container;
+
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
+
       if (!(target instanceof Element)) return;
+
       if (target.closest('[role="dialog"]')) return;
+
       if (target.closest('a[href^="#surface-"], [data-guide-display-mode]'))
         return;
       card.close();
     };
+
     scope.addEventListener("pointerdown", onPointerDown);
+
     return () => scope.removeEventListener("pointerdown", onPointerDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.openId]);
@@ -950,7 +1116,7 @@ export function ProductMap({
         <div data-map-column className="mx-auto w-full max-w-[100rem]">
           <section
             aria-roledescription="carousel"
-            aria-label="bb surfaces a plugin can extend"
+            aria-label="Omnyo surfaces a plugin can extend"
             onKeyDown={onKeyDown}
             className="mt-2"
           >
@@ -959,9 +1125,12 @@ export function ProductMap({
             ) : (
               <div className="mb-3 border-b border-border-hairline pb-3">
                 <h2 className="text-base font-semibold">
-                  <SlideTitle title={slides[index].title} brandMark={brandMark} />
+                  <SlideTitle
+                    title={slides[index].title}
+                    brandMark={brandMark}
+                  />
                 </h2>
-                <p className="mt-1 max-w-2xl text-sm leading-relaxed text-subtle-foreground/75">
+                <p className="mt-1 max-w-2xl text-sm leading-relaxed text-subtle-foreground">
                   {slides[index].blurb}
                 </p>
               </div>
@@ -1009,9 +1178,11 @@ export function ProductMap({
                     const start = touchStart.current;
                     touchStart.current = null;
                     const touch = event.changedTouches[0];
+
                     if (!start || !touch) return;
                     const dx = touch.clientX - start.x;
                     const dy = touch.clientY - start.y;
+
                     if (Math.abs(dx) < 30 || Math.abs(dx) <= Math.abs(dy))
                       return;
                     suppressClickUntil.current = Date.now() + 500;
@@ -1110,7 +1281,8 @@ export function ProductMap({
             <div
               className={cn(
                 "overflow-x-clip",
-                stage.animate && "transition-[height] duration-300 ease-out",
+                stage.animate &&
+                  "transition-[height] duration-(--motion-duration-slow) ease-(--motion-ease-smooth) motion-reduce:transition-none",
               )}
               style={{
                 ...(stage.height === null
@@ -1120,7 +1292,7 @@ export function ProductMap({
               }}
             >
               <div
-                className="flex transition-transform duration-300 ease-out"
+                className="flex transition-transform duration-(--motion-duration-slow) ease-(--motion-ease-smooth) motion-reduce:transition-none"
                 style={{ transform: `translateX(-${index * 100}%)` }}
               >
                 {slides.map((entry, slideIndex) => (
@@ -1149,7 +1321,9 @@ export function ProductMap({
             </div>
 
             {compactLayout ? (
-              <MobileCardFlow>{cardNode}</MobileCardFlow>
+              <MobileCardFlow open={openSurface !== undefined}>
+                {cardNode}
+              </MobileCardFlow>
             ) : (
               cardNode
             )}

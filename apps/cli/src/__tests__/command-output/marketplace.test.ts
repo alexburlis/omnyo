@@ -22,19 +22,19 @@ const acme = {
   lastError: null,
 };
 
-const official = {
+const partner = {
   ...acme,
-  name: "bb-community",
-  displayName: "BB Community",
-  official: true,
-  source: "https://getbb.app/marketplace/v1/marketplace.json",
+  name: "partner-plugins",
+  displayName: "Partner Plugins",
+  source: "https://partner.test/marketplace.json",
   entryCount: 5,
 };
 
 const bundled = {
-  ...official,
-  name: "bb-official",
-  displayName: "BB Official",
+  ...acme,
+  official: true,
+  name: "omnyo-official",
+  displayName: "Omnyo Official",
   sourceKind: "path" as const,
   source: "/app/builtin-plugins",
   entryCount: 25,
@@ -47,8 +47,9 @@ function json(value: object, status = 200): Response {
   });
 }
 
-describe("bb marketplace", () => {
+describe("omnyo marketplace", () => {
   setupCommandOutputTestEnvironment();
+
   const register: CommandRegistrar = (program) =>
     registerMarketplaceCommands(program, () => "http://server");
 
@@ -71,7 +72,7 @@ describe("bb marketplace", () => {
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
     expect(output).toContain("Added marketplace acme-plugins");
     expect(output).toContain("Adding a marketplace installs nothing");
-    expect(output).toContain("bb plugin install <id>@acme-plugins");
+    expect(output).toContain("omnyo plugin install <id>@acme-plugins");
   });
 
   it("sends --subdirectory with a git source and prints the stored subdirectory", async () => {
@@ -82,7 +83,7 @@ describe("bb marketplace", () => {
           ...acme,
           sourceKind: "git",
           source: "git:https://github.com/acme/agent-plugins.git@main",
-          subdirectory: "bb",
+          subdirectory: "Omnyo",
           resolvedCommit: "0123456789abcdef0123456789abcdef01234567",
         },
       }),
@@ -94,7 +95,7 @@ describe("bb marketplace", () => {
         "add",
         "git:https://github.com/acme/agent-plugins.git@main",
         "--subdirectory",
-        "bb",
+        "Omnyo",
       ],
       register,
     );
@@ -103,13 +104,13 @@ describe("bb marketplace", () => {
       JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body)),
     ).toEqual({
       source: "git:https://github.com/acme/agent-plugins.git@main",
-      subdirectory: "bb",
+      subdirectory: "Omnyo",
     });
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
     expect(output).toContain(
       "source: git:https://github.com/acme/agent-plugins.git@main",
     );
-    expect(output).toContain("subdirectory: bb");
+    expect(output).toContain("subdirectory: Omnyo");
   });
 
   it("resolves a relative path: source on the invoking machine", async () => {
@@ -122,6 +123,7 @@ describe("bb marketplace", () => {
     const body = JSON.parse(
       String(vi.mocked(fetch).mock.calls[0]?.[1]?.body),
     ) as { source: string };
+
     expect(body.source.startsWith("path:")).toBe(true);
     expect(isAbsolute(body.source.slice("path:".length))).toBe(true);
     expect(body.source.endsWith(`${sep}catalog`)).toBe(true);
@@ -129,14 +131,14 @@ describe("bb marketplace", () => {
 
   it("lists marketplaces with their source and entry count", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      json({ marketplaces: [bundled, official, acme] }),
+      json({ marketplaces: [bundled, acme, partner] }),
     );
 
     await runCommand(["marketplace", "list"], register);
 
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
-    expect(output).toContain("bb-official (official)");
-    expect(output).toContain("bb-community (official)");
+    expect(output).toContain("omnyo-official (official)");
+    expect(output).not.toContain("partner-plugins (official)");
     expect(output).toContain("acme-plugins");
     expect(output).toContain("https://acme.test/marketplace.json");
     expect(output).not.toContain("Subdirectory");
@@ -150,7 +152,7 @@ describe("bb marketplace", () => {
             ...acme,
             sourceKind: "git",
             source: "git:https://acme.test/repo.git@main",
-            subdirectory: "bb",
+            subdirectory: "Omnyo",
           },
         ],
       }),
@@ -161,7 +163,7 @@ describe("bb marketplace", () => {
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
     expect(output).toMatch(/Source\s+Subdirectory\s+Entries/u);
     expect(output).toMatch(
-      /git:https:\/\/acme\.test\/repo\.git@main\s+bb\s+2\s/u,
+      /git:https:\/\/acme\.test\/repo\.git@main\s+Omnyo\s+2\s/u,
     );
   });
 
@@ -170,10 +172,10 @@ describe("bb marketplace", () => {
       json({
         results: [
           {
-            name: "bb-community",
+            name: "partner-plugins",
             ok: true,
             error: null,
-            marketplace: official,
+            marketplace: partner,
           },
           {
             name: "acme-plugins",
@@ -190,7 +192,7 @@ describe("bb marketplace", () => {
     ).rejects.toThrow("process.exit:1");
 
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
-    expect(output).toContain("bb-community: 5 entries");
+    expect(output).toContain("partner-plugins: 5 entries");
     expect(output).toContain("acme-plugins: refresh failed");
     expect(output).toContain("keeping the last catalog");
   });

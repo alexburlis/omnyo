@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { getThread, listEvents, markThreadDeleted } from "@bb/db";
-import type { EnvironmentRow } from "@bb/db";
-import type { Thread } from "@bb/domain";
+import { getThread, listEvents, markThreadDeleted } from "@omnyo/db";
+import type { EnvironmentRow } from "@omnyo/db";
+import { threadScope, type Thread } from "@omnyo/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   finalizeStoppedThread,
@@ -23,6 +23,8 @@ import {
   seedProjectWithSource,
   seedThread,
   seedTurnStarted,
+  seedThreadFixture,
+  seedStoredEvent,
 } from "../helpers/seed.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
@@ -46,16 +48,19 @@ function seedActiveThreadStopFixture(
   const { host } = seedHostSession(args.harness.deps, {
     id: `host-thread-stop-retry-${args.value}`,
   });
+
   const { project } = seedProjectWithSource(args.harness.deps, {
     hostId: host.id,
     path: `/tmp/thread-stop-retry-${args.value}`,
   });
+
   const environment = seedEnvironment(args.harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: `/tmp/thread-stop-retry-${args.value}`,
     status: "ready",
   });
+
   const thread = seedThread(args.harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
@@ -67,10 +72,12 @@ function seedActiveThreadStopFixture(
 
 async function waitForStopRpcIdle(args: WaitForStopRpcIdleArgs): Promise<void> {
   const deadline = Date.now() + 1_000;
+
   while (Date.now() < deadline) {
     if (!hasLiveThreadStopInFlight(args.threadId)) {
       return;
     }
+
     await sleep(10);
   }
 
@@ -78,21 +85,57 @@ async function waitForStopRpcIdle(args: WaitForStopRpcIdleArgs): Promise<void> {
 }
 
 describe("thread stop dispatch", () => {
+  it("records each accepted stop without a live environment after a historical interruption", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedThreadFixture(harness, {
+        thread: { status: "idle" },
+      });
+
+      seedStoredEvent(harness.deps, {
+        threadId: thread.id,
+        sequence: 1,
+        type: "system/thread/interrupted",
+        scope: threadScope(),
+        data: { reason: "manual-stop" },
+      });
+
+      for (let request = 1; request <= 2; request += 1) {
+        await stopThreadForCurrentState(harness.deps, thread, null);
+
+        const interrupted = listEvents(harness.db, {
+          threadId: thread.id,
+        }).filter((event) => event.type === "system/thread/interrupted");
+
+        expect(interrupted).toHaveLength(request + 1);
+        expect(JSON.parse(interrupted.at(-1)!.data)).toMatchObject({
+          reason: "manual-stop",
+        });
+      }
+
+      expect(
+        listQueuedThreadCommands(harness, "thread.stop", thread.id),
+      ).toHaveLength(0);
+    });
+  });
+
   it("keeps a deleted thread tombstone until storage deletion succeeds", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedActiveThreadStopFixture({
         harness,
         value: 5,
       });
+
       markThreadDeleted(harness.db, harness.hub, { threadId: thread.id });
 
       requestThreadStorageDeletion(harness.deps, thread, environment);
+
       const failedDelete = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.storage.delete" &&
           command.threadId === thread.id,
       );
+
       expect(getThread(harness.db, thread.id)).toMatchObject({
         deletedAt: expect.any(Number),
         storageDeletedAt: null,
@@ -108,12 +151,14 @@ describe("thread stop dispatch", () => {
       });
 
       requestThreadStorageDeletion(harness.deps, thread, environment);
+
       const successfulDelete = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.storage.delete" &&
           command.threadId === thread.id,
       );
+
       await reportQueuedCommandSuccess(harness, successfulDelete, {
         providerCheckpointId: null,
       });
@@ -153,6 +198,7 @@ describe("thread stop dispatch", () => {
         ({ command }) =>
           command.type === "thread.stop" && command.threadId === thread.id,
       );
+
       expect(hasLiveThreadStopInFlight(thread.id)).toBe(true);
       expect(getThread(harness.db, thread.id)).toMatchObject({
         status: "stopping",
@@ -188,6 +234,7 @@ describe("thread stop dispatch", () => {
         ({ command }) =>
           command.type === "thread.stop" && command.threadId === thread.id,
       );
+
       expect(getThread(harness.db, thread.id)).toMatchObject({
         status: "stopping",
       });
@@ -219,11 +266,13 @@ describe("thread stop dispatch", () => {
         harness,
         value: 7,
       });
+
       seedTurnStarted(harness.deps, {
         environmentId: environment.id,
         threadId: thread.id,
         turnId: "turn-stop-unanswered",
       });
+
       const rpc = vi
         .spyOn(harness.hub, "requestHostOnlineRpc")
         .mockRejectedValue(new HostOnlineRpcTimeoutError());
@@ -252,6 +301,7 @@ describe("thread stop dispatch", () => {
         harness,
         value: 3,
       });
+
       seedTurnStarted(harness.deps, {
         environmentId: environment.id,
         threadId: thread.id,
@@ -259,11 +309,13 @@ describe("thread stop dispatch", () => {
       });
 
       requestThreadStopForCurrentState(harness.deps, thread, environment);
+
       const stopCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.stop" && command.threadId === thread.id,
       );
+
       await reportQueuedCommandSuccess(harness, stopCommand, {
         providerCheckpointId: "pi-entry-at-stop",
       });
@@ -281,9 +333,11 @@ describe("thread stop dispatch", () => {
       expect(
         threadEvents.filter((event) => event.type === "turn/completed"),
       ).toHaveLength(1);
+
       const completion = threadEvents.find(
         (event) => event.type === "turn/completed",
       );
+
       expect(completion).toBeDefined();
       expect(JSON.parse(completion?.data ?? "{}")).toMatchObject({
         providerCheckpointId: "pi-entry-at-stop",
@@ -311,6 +365,7 @@ describe("thread stop dispatch", () => {
         ({ command }) =>
           command.type === "thread.stop" && command.threadId === thread.id,
       );
+
       expect(hasLiveThreadStopInFlight(thread.id)).toBe(true);
 
       requestThreadStopForCurrentState(harness.deps, thread, environment);

@@ -10,7 +10,7 @@ import {
 } from "../command-resolution.js";
 
 function buildProgram(): Command {
-  const program = new Command().name("bb");
+  const program = new Command().name("Omnyo");
   const thread = program.command("thread");
   thread.command("show [id]").aliases(["get"]).option("--json");
   thread.command("tell <id> [message]").option("--mode <mode>");
@@ -27,11 +27,12 @@ function buildProgram(): Command {
   terminal.command("wait <terminalId>").option("--exit").option("--regex <p>");
   program.command("machine").command("list");
   program.command("provider").command("models [providerId]");
+
   return program;
 }
 
 function argv(...args: string[]): string[] {
-  return ["node", "bb", ...args];
+  return ["node", "Omnyo", ...args];
 }
 
 describe("resolveInvocation", () => {
@@ -40,6 +41,7 @@ describe("resolveInvocation", () => {
       buildProgram(),
       argv("thread", "message", "thr_1", "hello"),
     );
+
     expect(invocation.path).toEqual(["thread"]);
     expect(invocation.unknownSubcommand).toBe("message");
   });
@@ -49,6 +51,7 @@ describe("resolveInvocation", () => {
       buildProgram(),
       argv("thread", "tell", "thr_1", "status"),
     );
+
     expect(invocation.path).toEqual(["thread", "tell"]);
     expect(invocation.unknownSubcommand).toBeNull();
   });
@@ -58,6 +61,7 @@ describe("resolveInvocation", () => {
       buildProgram(),
       argv("thread", "log", "--limit", "show", "thr_1"),
     );
+
     expect(invocation.path).toEqual(["thread", "log"]);
   });
 
@@ -66,6 +70,7 @@ describe("resolveInvocation", () => {
       buildProgram(),
       argv("thread", "get", "thr_1"),
     );
+
     expect(invocation.path).toEqual(["thread", "show"]);
   });
 
@@ -79,16 +84,17 @@ describe("resolveInvocation", () => {
 
 describe("suggestCommand", () => {
   const cases: Array<[string[], string | null]> = [
-    [["thread", "message"], "bb thread tell"],
-    [["thread", "timeline"], "bb thread log"],
-    [["thread", "create"], "bb thread spawn"],
-    [["thread", "shwo"], "bb thread show"],
-    [["terminal", "read"], "bb terminal output"],
-    [["host"], "bb machine"],
-    [["models"], "bb provider models"],
+    [["thread", "message"], "omnyo thread tell"],
+    [["thread", "timeline"], "omnyo thread log"],
+    [["thread", "create"], "omnyo thread spawn"],
+    [["thread", "shwo"], "omnyo thread show"],
+    [["terminal", "read"], "omnyo terminal output"],
+    [["host"], "omnyo machine"],
+    [["models"], "omnyo provider models"],
     [["thread", "zzzzzz"], null],
     [["tasks"], null],
   ];
+
   it.each(cases)("suggests for %j", (args, expected) => {
     expect(
       suggestCommand(resolveInvocation(buildProgram(), argv(...args))),
@@ -127,15 +133,17 @@ describe("suggestOption", () => {
 describe("usage formatting", () => {
   it("prints the full command path and hides hidden options", () => {
     const program = buildProgram();
+
     const invocation = resolveInvocation(
       program,
       argv("terminal", "output", "term_1"),
     );
+
     invocation.command.addOption(
       new Command().createOption("--thread <id>").hideHelp(),
     );
     expect(formatUsageLine(invocation)).toBe(
-      "Usage: bb terminal output [options] <terminalId>",
+      "Usage: omnyo terminal output [options] <terminalId>",
     );
     expect(formatOptionList(invocation.command)).toBe(
       "--tail-bytes <n>, --json",

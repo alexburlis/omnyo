@@ -1,4 +1,4 @@
-import type { BbPluginApi, PluginRpcHandlers } from "@get-bb/plugin-sdk";
+import type { PluginApi, PluginRpcHandlers } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import type {
   Attachment,
@@ -25,7 +25,9 @@ import { truncateToWidth } from "../shared/text-measure";
 import { delegationRpcContract } from "./contract";
 
 const MAX_DELEGATED_THREAD_TITLE_WIDTH = 120;
+
 const SYSTEM_AUTHOR_NAME = "Tasks";
+
 const MANUAL_PRESET_NAME = "Attached";
 
 const presetExecutionSchema = z
@@ -66,6 +68,7 @@ function markdownSection(title: string, body: string): string {
 
 function formatSubtasks(subtasks: readonly Task[]): string {
   if (subtasks.length === 0) return "None.";
+
   return subtasks
     .map((subtask) => `- ${subtask.key} · ${subtask.title} (${subtask.status})`)
     .join("\n");
@@ -75,17 +78,19 @@ function formatAttachments(
   attachments: readonly Pick<Attachment, "id" | "fileName">[],
 ): string {
   if (attachments.length === 0) return "None.";
+
   return attachments
     .map(
       (attachment) =>
         `- ${attachment.fileName} · ${attachment.id}\n` +
-        `  Fetch with: bb tasks attachment get ${attachment.id} --out <path>`,
+        `  Fetch with: omnyo tasks attachment get ${attachment.id} --out <path>`,
     )
     .join("\n");
 }
 
 function formatComments(comments: readonly Comment[]): string {
   if (comments.length === 0) return "None.";
+
   return comments
     .map(
       (comment) =>
@@ -103,14 +108,14 @@ export function buildSeedPrompt(input: SeedPromptInput): string {
     ),
     markdownSection(
       "Project context",
-      `- Name: ${input.project.name}\n- Linked bb project: ${input.project.linkedBbProjectId ?? "Not linked"}`,
+      `- Name: ${input.project.name}\n- Linked Omnyo project: ${input.project.linkedAppProjectId ?? "Not linked"}`,
     ),
     markdownSection("Sub-tasks", formatSubtasks(input.subtasks)),
     markdownSection("Attachments", formatAttachments(input.attachments)),
     markdownSection("Recent comments", formatComments(input.recentComments)),
     markdownSection(
       "Report-back contract",
-      `You are working on task ${input.task.key}. Use the bb tasks CLI: comment substantive updates (bb tasks comment ${input.task.key} --body ...), attach result artifacts, set status when done (bb tasks update ${input.task.key} --status in_review) or explain blockage in a comment. Your thread is already attached to the task.`,
+      `You are working on task ${input.task.key}. Use the omnyo tasks CLI: comment substantive updates (omnyo tasks comment ${input.task.key} --body ...), attach result artifacts, set status when done (omnyo tasks update ${input.task.key} --status in_review) or explain blockage in a comment. Your thread is already attached to the task.`,
     ),
   ];
 
@@ -119,6 +124,7 @@ export function buildSeedPrompt(input: SeedPromptInput): string {
       markdownSection("Preset instructions", input.presetInstructions.trim()),
     );
   }
+
   if (input.extraInstructions?.trim()) {
     sections.push(
       markdownSection(
@@ -140,27 +146,33 @@ function delegatedThreadTitle(task: Task): string {
 
 function requireTask(store: TasksStore, taskId: string): Task {
   const task = store.getTask(taskId);
+
   if (!task) throw new Error(`Task not found: ${taskId}`);
+
   return task;
 }
 
 function requireProject(store: TasksStore, projectId: string): Project {
   const project = store.getProject(projectId);
+
   if (!project) throw new Error(`Project not found: ${projectId}`);
+
   return project;
 }
 
 function requirePreset(store: TasksStore, presetId: string): Preset {
   const preset = store.getPreset(presetId);
+
   if (!preset) throw new Error(`Preset not found: ${presetId}`);
+
   return preset;
 }
 
-function requireLinkedBbProject(project: Project): string {
-  if (project.linkedBbProjectId) return project.linkedBbProjectId;
+function requireLinkedOmnyoProject(project: Project): string {
+  if (project.linkedAppProjectId) return project.linkedAppProjectId;
   throw new DelegationError(
     "project_not_linked",
-    `Task project "${project.name}" is not linked to a bb project`,
+    `Task project "${project.name}" is not linked to an Omnyo project`,
   );
 }
 
@@ -170,23 +182,26 @@ function collectAttachments(
   comments: readonly Comment[],
 ): Attachment[] {
   const attachments = new Map<string, Attachment>();
+
   for (const attachment of store.listAttachmentsForTask(taskId)) {
     attachments.set(attachment.id, attachment);
   }
+
   for (const comment of comments) {
     for (const attachment of store.listAttachmentsForComment(comment.id)) {
       attachments.set(attachment.id, attachment);
     }
   }
+
   return [...attachments.values()];
 }
 
 type SpawnEnvironment = Parameters<
-  BbPluginApi["sdk"]["threads"]["spawn"]
+  PluginApi["sdk"]["threads"]["spawn"]
 >[0]["environment"];
 
 async function presetSpawnEnvironment(
-  bb: BbPluginApi,
+  api: PluginApi,
   preset: Preset,
 ): Promise<SpawnEnvironment> {
   if (preset.environmentKind === "project-default") {
@@ -194,13 +209,15 @@ async function presetSpawnEnvironment(
   }
 
   const hostId =
-    preset.machineId ?? (await bb.sdk.system.config()).primaryHostId;
+    preset.machineId ?? (await api.sdk.system.config()).primaryHostId;
+
   if (hostId === null) {
     throw new DelegationError(
       "spawn_target_invalid",
-      "Could not create a worktree because BB has no default machine",
+      "Could not create a worktree because Omnyo has no default machine",
     );
   }
+
   return {
     type: "host",
     hostId,
@@ -214,7 +231,7 @@ async function presetSpawnEnvironment(
   };
 }
 
-function isBbHttpError(
+function isOmnyoHttpError(
   error: unknown,
 ): error is Error & { code: string | null; status: number } {
   return (
@@ -238,7 +255,7 @@ const SPAWN_TARGET_ERROR_CODES = new Set([
 function mapSpawnTargetError(error: unknown, preset: Preset): never {
   if (
     preset.environmentKind === "new-worktree" &&
-    isBbHttpError(error) &&
+    isOmnyoHttpError(error) &&
     error.code !== null &&
     SPAWN_TARGET_ERROR_CODES.has(error.code)
   ) {
@@ -250,6 +267,7 @@ function mapSpawnTargetError(error: unknown, preset: Preset): never {
       `Could not create a worktree on ${machine} from ${branch}: ${detail}`,
     );
   }
+
   throw error;
 }
 
@@ -272,15 +290,16 @@ export function createSystemComment(
   });
 }
 
-export function publishThreadsChanged(bb: BbPluginApi, taskId: string): void {
+export function publishThreadsChanged(api: PluginApi, taskId: string): void {
   const payload: ThreadsChangedEvent = { taskId };
-  bb.realtime.publish("threads:changed", payload);
+  api.realtime.publish("threads:changed", payload);
 }
 
-type SdkThread = Awaited<ReturnType<BbPluginApi["sdk"]["threads"]["get"]>>;
+type SdkThread = Awaited<ReturnType<PluginApi["sdk"]["threads"]["get"]>>;
 
 function taskThreadLiveStatus(thread: SdkThread): TaskThreadLiveStatus {
   if (thread.deletedAt != null) return "completed";
+
   switch (thread.status) {
     case "pending":
     case "starting":
@@ -296,18 +315,19 @@ function taskThreadLiveStatus(thread: SdkThread): TaskThreadLiveStatus {
 }
 
 export function handlers(
-  bb: BbPluginApi,
+  api: PluginApi,
   store: TasksApiStore,
 ): PluginRpcHandlers<typeof delegationRpcContract> {
   return {
     async delegate(input) {
       const task = requireTask(store.tasks, input.taskId);
       const project = requireProject(store.tasks, task.projectId);
-      const linkedBbProjectId = requireLinkedBbProject(project);
+      const linkedAppProjectId = requireLinkedOmnyoProject(project);
       const preset = requirePreset(store.tasks, input.presetId);
       const comments = store.tasks.listComments(task.id);
       const recentComments = comments.slice(-5);
       const title = delegatedThreadTitle(task);
+
       const execution = presetExecutionSchema.parse({
         providerId: preset.providerId,
         model: preset.modelId,
@@ -315,6 +335,7 @@ export function handlers(
         serviceTier: preset.serviceTier,
         permissionMode: preset.permissionMode,
       });
+
       const prompt = buildSeedPrompt({
         task,
         project,
@@ -325,10 +346,11 @@ export function handlers(
         extraInstructions: input.extraInstructions,
       });
 
-      const environment = await presetSpawnEnvironment(bb, preset);
-      const thread = await bb.sdk.threads
+      const environment = await presetSpawnEnvironment(api, preset);
+
+      const thread = await api.sdk.threads
         .spawn({
-          projectId: linkedBbProjectId,
+          projectId: linkedAppProjectId,
           environment,
           providerId: execution.providerId,
           model: execution.model,
@@ -367,32 +389,39 @@ export function handlers(
           threadId: thread.id,
           body: `Dispatched to ${preset.name}`,
         });
+
         return attached;
       });
 
       try {
-        const currentThread = await bb.sdk.threads.get({ threadId: thread.id });
+        const currentThread = await api.sdk.threads.get({
+          threadId: thread.id,
+        });
+
         const currentLiveStatus = taskThreadLiveStatus(currentThread);
+
         if (currentLiveStatus !== taskThread.liveStatus) {
           store.tasks.updateTaskThreadStatus(taskThread.id, currentLiveStatus);
         }
       } catch (error) {
-        bb.log.warn(
+        api.log.warn(
           `Could not read delegated thread ${thread.id} after attach: ${errorMessage(
             error,
           )}`,
         );
       }
 
-      publishThreadsChanged(bb, task.id);
-      publishTasksChanged(bb, task.id, task.projectId);
-      publishCommentsChanged(bb, task.id);
+      publishThreadsChanged(api, task.id);
+      publishTasksChanged(api, task.id, task.projectId);
+      publishCommentsChanged(api, task.id);
+
       return { threadId: thread.id };
     },
 
     async taskThreadsAttach(input) {
       const task = requireTask(store.tasks, input.taskId);
-      const thread = await bb.sdk.threads.get({ threadId: input.threadId });
+      const thread = await api.sdk.threads.get({ threadId: input.threadId });
+
       const title = truncateToWidth(
         thread.title ?? thread.titleFallback ?? delegatedThreadTitle(task),
         MAX_DELEGATED_THREAD_TITLE_WIDTH,
@@ -406,34 +435,36 @@ export function handlers(
         liveStatus: taskThreadLiveStatus(thread),
       });
 
-      publishThreadsChanged(bb, task.id);
-      publishTasksChanged(bb, task.id, task.projectId);
+      publishThreadsChanged(api, task.id);
+      publishTasksChanged(api, task.id, task.projectId);
+
       return { threadId: thread.id };
     },
 
     async taskThreadsDetach(input) {
       const task = requireTask(store.tasks, input.taskId);
+
       const taskThread = store.tasks.getTaskThreadByThreadId(
         task.id,
         input.threadId,
       );
+
       if (!taskThread) {
         throw new Error(
           `Thread ${input.threadId} is not attached to ${task.key}`,
         );
       }
+
       store.tasks.deleteTaskThread(taskThread.id);
 
-      publishThreadsChanged(bb, task.id);
-      publishTasksChanged(bb, task.id, task.projectId);
+      publishThreadsChanged(api, task.id);
+      publishTasksChanged(api, task.id, task.projectId);
+
       return { threadId: taskThread.threadId };
     },
   };
 }
 
-export function registerDelegation(
-  bb: BbPluginApi,
-  store: TasksApiStore,
-): void {
-  bb.rpc.register(delegationRpcContract, handlers(bb, store));
+export function registerDelegation(api: PluginApi, store: TasksApiStore): void {
+  api.rpc.register(delegationRpcContract, handlers(api, store));
 }

@@ -17,7 +17,7 @@ const runner = fileURLToPath(
 );
 
 function runFixture({ cleanupFails }: { cleanupFails: boolean }) {
-  const root = mkdtempSync(join(tmpdir(), "bb-mobile-flow-runner-"));
+  const root = mkdtempSync(join(tmpdir(), "omnyo-mobile-flow-runner-"));
   const bin = join(root, "bin");
   const artifacts = join(root, "artifacts");
   const trace = join(root, "trace.log");
@@ -80,6 +80,7 @@ const posixDescribe = process.platform === "win32" ? describe.skip : describe;
 posixDescribe("ci-run-flows", () => {
   it("clears native confirmation state before continuing after a failed flow", () => {
     const fixture = runFixture({ cleanupFails: false });
+
     try {
       expect(fixture.result.status).toBe(1);
       expect(fixture.trace).toEqual([
@@ -96,6 +97,7 @@ posixDescribe("ci-run-flows", () => {
 
   it("stops before a later flow when native-state cleanup cannot be verified", () => {
     const fixture = runFixture({ cleanupFails: true });
+
     try {
       expect(fixture.result.status).toBe(1);
       expect(fixture.trace).toEqual([

@@ -5,11 +5,20 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { createConnection } from "../../src/connection.js";
-import { events, threadPruningCursors, threadPruningWork, threads } from "../../src/schema.js";
+import {
+  events,
+  threadPruningCursors,
+  threadPruningWork,
+  threads,
+} from "../../src/schema.js";
 import { noopNotifier } from "../../src/notifier.js";
 import { upsertHost } from "../../src/data/hosts.js";
 import { createProject } from "../../src/data/projects.js";
-import { archiveThread, createThread, unarchiveThread } from "../../src/data/threads.js";
+import {
+  archiveThread,
+  createThread,
+  unarchiveThread,
+} from "../../src/data/threads.js";
 import {
   advanceThreadPruning,
   getNextThreadPruningPolicy,
@@ -25,24 +34,28 @@ import {
 } from "../../src/data/events.js";
 import { advanceLiveEventPruning } from "../../src/data/resolved-item-pruning.js";
 import { getThreadEventRewriteGeneration } from "../../src/data/event-rewrite-generation.js";
-import { THREAD_CONTEXT_CLEAR_OPERATION, turnScope } from "@bb/domain";
+import { THREAD_CONTEXT_CLEAR_OPERATION, turnScope } from "@omnyo/domain";
 import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup() {
   const db = createMigratedConnection();
   const host = upsertHost(db, noopNotifier, { name: "pruning" });
+
   const { project } = createProject(db, noopNotifier, {
     name: "pruning",
     source: { type: "local_path", hostId: host.id, path: "/tmp/pruning" },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
   });
+
   return { db, thread, project };
 }
 
 type Fixture = ReturnType<typeof setup>;
+
 function seed(
   f: Fixture,
   sequence: number,
@@ -64,17 +77,73 @@ function seed(
     .run();
   markThreadPruningWork(f.db, [f.thread.id]);
 }
+
 function cycle(f: Fixture, policy: ThreadPruningPolicy) {
   const results = [];
+
   for (let i = 0; i < 2000; i++) {
     const result = advanceThreadPruning(f.db, policy);
     expect(result.scanned).toBeLessThanOrEqual(500);
     expect(result.removed).toBeLessThanOrEqual(500);
     results.push(result);
+
     if (result.action === "cycle-complete") return results;
   }
+
   throw new Error("Pruning did not finish a cycle");
 }
+
+function cycleInBatches(
+  f: Fixture,
+  policy: ThreadPruningPolicy,
+  batchSize: number,
+) {
+  for (let i = 0; i < 2000; i++) {
+    const result = advanceThreadPruning(f.db, policy, batchSize);
+    expect(result.scanned).toBeLessThanOrEqual(batchSize);
+
+    if (result.action === "cycle-complete") return;
+  }
+
+  throw new Error("Pruning did not finish a cycle");
+}
+
+const MIXED_EVENT_TYPES = [
+  "thread/tokenUsage/updated",
+  "thread/contextWindowUsage/updated",
+  "turn/diff/updated",
+  "provider/rateLimits/updated",
+  "item/completed",
+] as const;
+
+function mixedEventData(type: (typeof MIXED_EVENT_TYPES)[number]): string {
+  switch (type) {
+    case "thread/contextWindowUsage/updated":
+      return JSON.stringify({
+        contextWindowUsage: { modelContextWindow: 1000, usedTokens: 10 },
+      });
+    case "thread/tokenUsage/updated":
+      return JSON.stringify({ tokenUsage: { total: { totalTokens: 10 } } });
+    case "turn/diff/updated":
+      return JSON.stringify({ diff: "changed" });
+    case "provider/rateLimits/updated":
+      return JSON.stringify({ rateLimits: { providerId: "codex" } });
+    case "item/completed":
+      return JSON.stringify({ item: { id: "item", type: "agentMessage" } });
+  }
+}
+
+function seedMixed(f: Fixture) {
+  for (let sequence = 1; sequence <= 300; sequence += 1) {
+    const type = MIXED_EVENT_TYPES[sequence % MIXED_EVENT_TYPES.length]!;
+    seed(f, sequence, {
+      type,
+      turnId: `turn-${Math.floor(sequence / 40)}`,
+      data: mixedEventData(type),
+    });
+  }
+}
+
 function sequences(f: Fixture) {
   return f.db
     .select({ sequence: events.sequence })
@@ -86,36 +155,69 @@ function sequences(f: Fixture) {
 }
 
 describe("thread pruning", () => {
+  it.each(["usage", "turn-diffs", "rate-limits"] as const)(
+    "deletes the same %s events in small batches as in full batches",
+    (policy) => {
+      const full = setup();
+      const small = setup();
+
+      seedMixed(full);
+      seedMixed(small);
+      cycle(full, policy);
+      cycleInBatches(small, policy, 7);
+
+      expect(sequences(full).length).toBeLessThan(300);
+      expect(sequences(small)).toEqual(sequences(full));
+    },
+  );
+
   it("queues archive changes for every owned thread and rolls them back together", () => {
     const f = setup();
+
     try {
       const child = createThread(f.db, noopNotifier, {
         projectId: f.project.id,
         providerId: "codex",
         lifecycleOwnerThreadId: f.thread.id,
       });
+
       const work = () => f.db.select().from(threadPruningWork).all();
-      expect(() => f.db.transaction((tx) => {
-        archiveThread(tx, noopNotifier, f.thread.id);
-        throw new Error("rollback archive");
-      })).toThrow("rollback archive");
+      expect(() =>
+        f.db.transaction((tx) => {
+          archiveThread(tx, noopNotifier, f.thread.id);
+          throw new Error("rollback archive");
+        }),
+      ).toThrow("rollback archive");
       expect(work()).toEqual([]);
-      expect(f.db.select().from(threads).all().every((thread) => thread.archivedAt === null)).toBe(true);
+      expect(
+        f.db
+          .select()
+          .from(threads)
+          .all()
+          .every((thread) => thread.archivedAt === null),
+      ).toBe(true);
       archiveThread(f.db, noopNotifier, f.thread.id);
       expect(work()).toHaveLength(2);
-      expect(work()).toEqual(expect.arrayContaining([
-        { policy: "rate-limits", threadId: f.thread.id, revision: 1 },
-        { policy: "rate-limits", threadId: child.id, revision: 1 },
-      ]));
+      expect(work()).toEqual(
+        expect.arrayContaining([
+          { policy: "rate-limits", threadId: f.thread.id, revision: 1 },
+          { policy: "rate-limits", threadId: child.id, revision: 1 },
+        ]),
+      );
       archiveThread(f.db, noopNotifier, f.thread.id);
       expect(work().every((row) => row.revision === 1)).toBe(true);
       unarchiveThread(f.db, noopNotifier, f.thread.id);
-      expect(() => f.db.transaction(() => {
-        unarchiveThread(f.db, noopNotifier, child.id);
-        throw new Error("rollback unarchive");
-      })).toThrow("rollback unarchive");
+      expect(() =>
+        f.db.transaction(() => {
+          unarchiveThread(f.db, noopNotifier, child.id);
+          throw new Error("rollback unarchive");
+        }),
+      ).toThrow("rollback unarchive");
       expect(work().find((row) => row.threadId === child.id)?.revision).toBe(1);
-      expect(f.db.select().from(threads).where(eq(threads.id, child.id)).get()?.archivedAt).not.toBeNull();
+      expect(
+        f.db.select().from(threads).where(eq(threads.id, child.id)).get()
+          ?.archivedAt,
+      ).not.toBeNull();
       unarchiveThread(f.db, noopNotifier, child.id);
       expect(work().every((row) => row.revision === 2)).toBe(true);
     } finally {
@@ -125,14 +227,17 @@ describe("thread pruning", () => {
 
   it("advances past a thread that becomes dirty again before its next cycle", () => {
     const f = setup();
+
     try {
       const other = createThread(f.db, noopNotifier, {
         projectId: f.project.id,
         providerId: "codex",
       });
+
       const [first, second] = [f.thread, other].sort((a, b) =>
         a.id.localeCompare(b.id),
       );
+
       if (!first || !second) throw new Error("Missing pruning fixtures");
       seed({ ...f, thread: first }, 1);
       seed({ ...f, thread: second }, 1);
@@ -148,9 +253,11 @@ describe("thread pruning", () => {
 
   it("requires output presence only when pruning command output deltas", () => {
     const f = setup();
+
     try {
       let sequence = 0;
       const retained: number[] = [];
+
       for (const [itemKind, type] of [
         ["agentMessage", "item/agentMessage/delta"],
         ["reasoning", "item/reasoning/textDelta"],
@@ -167,6 +274,7 @@ describe("thread pruning", () => {
           seed(f, ++sequence, { type, itemId });
           retained.push(sequence);
           seed(f, ++sequence, { type, itemId });
+
           if (itemKind === "commandExecution" && !hasOutput)
             retained.push(sequence);
           seed(f, ++sequence, {
@@ -178,6 +286,7 @@ describe("thread pruning", () => {
           retained.push(sequence);
         }
       }
+
       cycle(f, "resolved-items");
       expect(sequences(f)).toEqual(retained);
     } finally {
@@ -187,12 +296,14 @@ describe("thread pruning", () => {
 
   it("rotates scoped live policies durably and drains active usage without global idle cleanup", () => {
     let f = setup();
+
     try {
       f.db
         .update(threads)
         .set({ status: "active" })
         .where(eq(threads.id, f.thread.id))
         .run();
+
       for (let i = 1; i <= 200; i++) {
         seed(f, i, {
           type: "thread/contextWindowUsage/updated",
@@ -204,21 +315,26 @@ describe("thread pruning", () => {
           }),
         });
       }
+
       seed(f, 201, { type: "turn/completed" });
       const policies = [];
+
       for (let i = 0; i < 160; i++) {
         const policy = getNextThreadPruningPolicy(f.db, new Set(), f.thread.id);
+
         if (policy === null) throw new Error("Missing policy");
         policies.push(policy);
         const result = advanceThreadPruning(f.db, { threadId: f.thread.id });
         expect(result.scanned).toBeLessThanOrEqual(32);
         expect(result.removed).toBeLessThanOrEqual(32);
+
         if (i === 6) {
           const saved = f.db.$client.serialize();
           f.db.$client.close();
           f = { ...f, db: createConnection(saved) };
         }
       }
+
       expect(policies.slice(0, 8)).toEqual([
         "rate-limits",
         "usage",
@@ -244,6 +360,7 @@ describe("thread pruning", () => {
 
   it("reaches resolved deltas beyond unrelated history in one scoped advance", () => {
     const f = setup();
+
     try {
       f.db.transaction(() => {
         for (let i = 1; i <= 2000; i++)
@@ -256,6 +373,7 @@ describe("thread pruning", () => {
           itemId: "message",
         });
       });
+
       for (let i = 0; i < 3; i++)
         advanceThreadPruning(f.db, { threadId: f.thread.id });
       const result = advanceThreadPruning(f.db, { threadId: f.thread.id });
@@ -272,6 +390,7 @@ describe("thread pruning", () => {
 
   it("rolls back scoped live progress and deletion and restores the busy timeout", () => {
     const f = setup();
+
     try {
       seed(f, 1);
       seed(f, 2);
@@ -298,6 +417,7 @@ describe("thread pruning", () => {
 
   it("isolates live progress by thread and preserves global progress on thread deletion", () => {
     const f = setup();
+
     try {
       const other = {
         ...f,
@@ -306,14 +426,17 @@ describe("thread pruning", () => {
           providerId: "codex",
         }),
       };
+
       for (const fixture of [f, other]) {
         fixture.db.transaction(() => {
           for (let i = 1; i <= 600; i++)
             seed(fixture, i, { type: "item/agentMessage/delta" });
         });
+
         for (let i = 0; i < 4; i++)
           advanceThreadPruning(f.db, { threadId: fixture.thread.id });
       }
+
       advanceThreadPruning(f.db, "rate-limits");
       const before = f.db.select().from(threadPruningCursors).all();
       expect(
@@ -322,12 +445,14 @@ describe("thread pruning", () => {
           .map((row) => row.scope)
           .sort(),
       ).toEqual([f.thread.id, other.thread.id].sort());
+
       const hasLiveDeltaCursor = () =>
         f.db
           .select()
           .from(threadPruningCursors)
           .all()
           .some((row) => row.policy === "deltas" && row.scope === f.thread.id);
+
       for (let i = 0; i < 1000 && hasLiveDeltaCursor(); i++)
         advanceThreadPruning(f.db, { threadId: f.thread.id });
       expect(hasLiveDeltaCursor()).toBe(false);
@@ -350,6 +475,7 @@ describe("thread pruning", () => {
 
   it("keeps only the latest thread snapshot across restart and late arrivals", () => {
     let f = setup();
+
     try {
       f.db.transaction(() => {
         for (let i = 1; i <= 1100; i++)
@@ -358,6 +484,7 @@ describe("thread pruning", () => {
               rateLimits: { providerId: "codex" },
             }),
           });
+
         for (const [i, data] of [
           "{broken",
           "{}",
@@ -393,6 +520,7 @@ describe("thread pruning", () => {
 
   it("advances live cleanup past retained first deltas and revisits late completions", () => {
     const f = setup();
+
     try {
       f.db.transaction(() => {
         for (let i = 1; i <= 125; i++) {
@@ -403,6 +531,7 @@ describe("thread pruning", () => {
             itemId: `item-${i}`,
           });
         }
+
         seed(f, 126, { type: "item/agentMessage/delta", itemId: "item-1" });
         seed(f, 252, { type: "turn/completed" });
       });
@@ -441,6 +570,7 @@ describe("thread pruning", () => {
 
   it("persists unfinished live probes across restart and rolls progress back with deletion", () => {
     let f = setup();
+
     try {
       seed(f, 1, {
         type: "item/agentMessage/delta",
@@ -501,6 +631,7 @@ describe("thread pruning", () => {
 
   it("finishes unarchived cleanup in the background and advances past retained task progress", () => {
     const f = setup();
+
     try {
       f.db.transaction(() => {
         for (let i = 1; i <= 510; i++)
@@ -534,11 +665,13 @@ describe("thread pruning", () => {
 
   it("prunes oversized snapshots without parsing their payloads", () => {
     const f = setup();
+
     try {
       const data = JSON.stringify({
         rateLimits: { providerId: "codex" },
         padding: "x".repeat(2 * 1024 * 1024),
       });
+
       seed(f, 1, { data });
       seed(f, 2, { data });
       const first = advanceThreadPruning(f.db, "rate-limits");
@@ -553,6 +686,7 @@ describe("thread pruning", () => {
 
   it("rolls back the cursor and deletions together without publishing a rewrite generation", () => {
     const f = setup();
+
     try {
       seed(f, 1);
       f.db
@@ -581,9 +715,10 @@ describe("thread pruning", () => {
 
   it("resumes after a competing writer and preserves the current latest snapshot after truncation", () => {
     let f = setup();
-    const directory = mkdtempSync(join(tmpdir(), "bb-pruning-concurrent-"));
+    const directory = mkdtempSync(join(tmpdir(), "omnyo-pruning-concurrent-"));
     const path = join(directory, "fixture.db");
     let writer: ReturnType<typeof createConnection> | undefined;
+
     try {
       f.db.transaction(() => {
         for (let i = 1; i <= 600; i++) seed(f, i);
@@ -624,24 +759,24 @@ describe("thread pruning", () => {
 
   it("revisits new thread IDs behind the traversal cursor", () => {
     const f = setup();
+
     try {
       seed(f, 1);
       seed(f, 2);
       cycle(f, "rate-limits");
-      const added = createThread(f.db, noopNotifier, {
-        projectId: f.project.id,
-        providerId: "claude",
-      });
-      f.db
-        .update(threads)
-        .set({ id: "aaa-pruning" })
-        .where(eq(threads.id, added.id))
-        .run();
-      const newer = { ...f, thread: { ...added, id: "aaa-pruning" } };
+
+      const added = f.db
+        .insert(threads)
+        .values({ ...f.thread, id: "aaa-pruning", providerId: "claude" })
+        .returning()
+        .get();
+
+      const newer = { ...f, thread: added };
       seed(newer, 1);
       seed(newer, 2);
       cycle(f, "rate-limits");
       expect(sequences(newer)).toEqual([2]);
+      expect(f.db.$client.pragma("foreign_key_check")).toEqual([]);
     } finally {
       f.db.$client.close();
     }
@@ -649,6 +784,7 @@ describe("thread pruning", () => {
 
   it("retains the latest historical row and skips incoming diffs without allocating sequences", () => {
     const f = setup();
+
     try {
       seed(f, 1, { type: "turn/started", providerThreadId: "old", data: "{}" });
       seed(f, 2, {
@@ -671,6 +807,7 @@ describe("thread pruning", () => {
           threadIds: [f.thread.id],
         })[0]?.latestProviderThreadId,
       ).toBeNull();
+
       const result = f.db.transaction((tx) =>
         appendDaemonEventsInTransaction(tx, [
           {
@@ -697,6 +834,7 @@ describe("thread pruning", () => {
           },
         ]),
       );
+
       expect(result.acceptedEvents.map((r) => r.sequence)).toEqual([4]);
       expect(result.insertedInputIndexes).toEqual([1]);
       expect(sequences(f)).toEqual([1, 2, 3, 4]);
@@ -711,6 +849,7 @@ describe("thread pruning", () => {
 
   it("preserves the current latest row when resuming after truncation", () => {
     const f = setup();
+
     try {
       f.db.transaction(() => {
         for (let i = 1; i <= 1200; i++)
@@ -735,6 +874,7 @@ describe("thread pruning", () => {
 
   it("recovers identity from retained lifecycle events and respects context clearing", () => {
     const f = setup();
+
     try {
       seed(f, 1, {
         type: "thread/identity",
@@ -794,6 +934,7 @@ describe("thread pruning", () => {
 
   it("drains more than 500 resolved deltas and preserves scope, first-delta and output guards", () => {
     const f = setup();
+
     try {
       archiveThread(f.db, noopNotifier, f.thread.id);
       f.db.transaction(() => {
@@ -810,6 +951,7 @@ describe("thread pruning", () => {
           itemKind: "commandExecution",
           data: '{"item":{"aggregatedOutput":"x"}}',
         });
+
         for (let i = 1202; i <= 1203; i++)
           seed(f, i, {
             type: "item/commandExecution/outputDelta",
@@ -817,6 +959,7 @@ describe("thread pruning", () => {
             turnId: "other",
             data: '{"delta":"keep"}',
           });
+
         for (let i = 1204; i <= 1205; i++)
           seed(f, i, {
             type: "item/commandExecution/outputDelta",
@@ -824,6 +967,7 @@ describe("thread pruning", () => {
             parentToolCallId: "nested",
             data: '{"delta":"keep"}',
           });
+
         for (let i = 1206; i <= 1207; i++)
           seed(f, i, {
             type: "item/commandExecution/outputDelta",
@@ -848,6 +992,7 @@ describe("thread pruning", () => {
 
   it("preserves the first delta of each type across batches with reversed storage order", () => {
     const f = setup();
+
     try {
       const types = [
         "item/agentMessage/delta",
@@ -855,6 +1000,7 @@ describe("thread pruning", () => {
         "item/reasoning/summaryTextDelta",
         "item/reasoning/textDelta",
       ] as const;
+
       for (const [index, itemKind] of (
         ["agentMessage", "commandExecution", "reasoning"] as const
       ).entries()) {
@@ -865,15 +1011,18 @@ describe("thread pruning", () => {
           data: '{"item":{"aggregatedOutput":"complete"}}',
         });
       }
+
       for (let sequence = 12; sequence > 0; sequence--) {
         seed(f, sequence, {
           type: types[(sequence - 1) % types.length],
           itemId: "item",
         });
       }
+
       seed(f, 16, { type: "turn/completed" });
       let complete = false;
       let removed = 0;
+
       for (let i = 0; i < 30; i++) {
         const batch = f.db.transaction((tx) =>
           advanceLiveEventPruning(tx, {
@@ -882,13 +1031,16 @@ describe("thread pruning", () => {
             limit: 5,
           }),
         );
+
         expect(batch.scanned).toBeLessThanOrEqual(5);
         removed += batch.removed;
+
         if (batch.complete) {
           complete = true;
           break;
         }
       }
+
       expect(complete).toBe(true);
       expect(removed).toBe(8);
       expect(sequences(f)).toEqual([1, 2, 3, 4, 13, 14, 15, 16]);
@@ -899,6 +1051,7 @@ describe("thread pruning", () => {
 
   it("rechecks archive status and the latest-event safeguard between rate batches", () => {
     const f = setup();
+
     try {
       for (let i = 1; i <= 130; i++) seed(f, i);
       seed(f, 131, { type: "turn/completed" });
@@ -924,8 +1077,10 @@ describe("thread pruning", () => {
     "keeps only root usage and capacity witnesses with archivedAt=%s",
     (archivedAt) => {
       const f = setup();
+
       try {
         if (archivedAt !== null) archiveThread(f.db, noopNotifier, f.thread.id);
+
         for (let sequence = 1; sequence <= 6; sequence++) {
           seed(f, sequence, {
             type: "thread/contextWindowUsage/updated",
@@ -945,6 +1100,7 @@ describe("thread pruning", () => {
             }),
           });
         }
+
         seed(f, 13, {
           type: "turn/started",
           turnId: "nested",
@@ -969,6 +1125,7 @@ describe("thread pruning", () => {
 
   it("retains the latest context snapshot boundary through pruning between estimates", () => {
     const f = setup();
+
     try {
       const usage = (sequence: number, values: object) =>
         seed(f, sequence, {
@@ -977,6 +1134,7 @@ describe("thread pruning", () => {
             contextWindowUsage: { estimated: true, ...values },
           }),
         });
+
       usage(1, {
         usedTokens: 128000,
         modelContextWindow: 256000,
@@ -1000,12 +1158,14 @@ describe("thread pruning", () => {
 
   it("reports exact removed UTF-8 bytes while retaining usage keepers", () => {
     const f = setup();
+
     try {
       const context = (modelContextWindow: number | null) =>
         JSON.stringify({
           contextWindowUsage: { modelContextWindow },
           text: "é🙂",
         });
+
       const payloads = [
         context(200000),
         context(null),
@@ -1015,6 +1175,7 @@ describe("thread pruning", () => {
         "{}",
         "malformed",
       ];
+
       for (const [index, data] of payloads.entries())
         seed(f, index + 1, {
           type:
@@ -1056,6 +1217,7 @@ describe("thread pruning", () => {
 
   it("restarts usage keeper discovery after a keeper disappears during a visit", () => {
     const f = setup();
+
     try {
       archiveThread(f.db, noopNotifier, f.thread.id);
       f.db.transaction(() => {
@@ -1090,6 +1252,7 @@ describe("thread pruning", () => {
 
   it("revisits deltas whose completion arrives after their candidate window", () => {
     const f = setup();
+
     try {
       archiveThread(f.db, noopNotifier, f.thread.id);
       f.db.transaction(() => {
@@ -1100,10 +1263,13 @@ describe("thread pruning", () => {
             data: '{"delta":"part"}',
           });
       });
+
       for (let i = 0; i < 10; i++) {
         const result = advanceThreadPruning(f.db, "resolved-items");
+
         if (result.scanned > 0) break;
       }
+
       seed(f, 801, {
         type: "item/completed",
         itemId: "late",
@@ -1121,6 +1287,7 @@ describe("thread pruning", () => {
 
   it("resumes bounded support probes through adversarial reused-item scopes", () => {
     let f = setup();
+
     try {
       archiveThread(f.db, noopNotifier, f.thread.id);
       seed(f, 1, {
@@ -1151,8 +1318,10 @@ describe("thread pruning", () => {
         });
       });
       let pending = false;
+
       for (let i = 0; i < 30; i++) {
         advanceThreadPruning(f.db, "resolved-items");
+
         if (
           f.db
             .select()
@@ -1164,6 +1333,7 @@ describe("thread pruning", () => {
           break;
         }
       }
+
       expect(pending).toBe(true);
       const saved = f.db.$client.serialize();
       f.db.$client.close();
@@ -1180,6 +1350,7 @@ describe("thread pruning", () => {
 
   it("cycles past disappeared threads and resets independent versioned policies", () => {
     const f = setup();
+
     try {
       for (let i = 1; i <= 501; i++) seed(f, i);
       advanceThreadPruning(f.db, "rate-limits");

@@ -1,14 +1,14 @@
 import { replaceMachineEnvironment } from "../../src/services/machines/environment-settings.js";
 import * as gitCredentials from "../../src/services/machines/git-credentials.js";
-import { updateHost } from "@bb/db";
+import { updateHost } from "@omnyo/db";
 import {
   countProjectSources,
   getAppSettings,
   getProject,
   setAppSettings,
   setExperiments,
-} from "@bb/db";
-import { defaultExperiments } from "@bb/domain";
+} from "@omnyo/db";
+import { defaultExperiments } from "@omnyo/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   listQueuedCommands,
@@ -59,6 +59,7 @@ describe("project clone sources", () => {
           reason: "Server gh login",
         },
       ]);
+
     try {
       await withTestHarness(async (harness) => {
         setAppSettings(harness.db, {
@@ -71,14 +72,17 @@ describe("project clone sources", () => {
         updateHost(harness.db, harness.hub, machine.host.id, {
           machineProviderId: "manual",
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: first.host.id,
         });
-        await replaceMachineEnvironment(harness.db, harness.config.dataDir, {
+
+        await replaceMachineEnvironment(harness.db, harness.deps.vault, {
           variables: [
             { name: "CUSTOM_SETUP", value: "setup-value", note: null },
           ],
         });
+
         const response = harness.app.fetch(
           cloneSourceRequest({
             projectId: project.id,
@@ -86,10 +90,12 @@ describe("project clone sources", () => {
             remoteUrl: "git@github.com:octocat/private.git",
           }),
         );
+
         const queued = await waitForQueuedCommand(
           harness,
           ({ command }) => command.type === "project.clone",
         );
+
         expect(queued.command).toMatchObject({
           contributedEnv: [
             ...(await resolve()),
@@ -118,7 +124,9 @@ describe("project clone sources", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-clone-conflict",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
@@ -147,6 +155,7 @@ describe("project clone sources", () => {
       setExperiments(harness.db, {
         ...defaultExperiments,
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: first.host.id,
         name: "Clone Me",
@@ -159,10 +168,12 @@ describe("project clone sources", () => {
           remoteUrl: "ssh://git.example.test/team/repo.git",
         }),
       );
+
       const firstCommand = await waitForQueuedCommand(
         harness,
         ({ command }) => command.type === "project.clone",
       );
+
       expect(firstCommand.command).toEqual({
         type: "project.clone",
         operationId: expect.any(String),
@@ -186,15 +197,18 @@ describe("project clone sources", () => {
       );
 
       const third = seedHostSession(harness.deps, { id: "host-clone-third" });
+
       const secondResponsePromise = harness.app.fetch(
         cloneSourceRequest({ projectId: project.id, hostId: third.host.id }),
       );
+
       const secondCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "project.clone" &&
           command.remoteUrl.includes("repo.git"),
       );
+
       expect(secondCommand.command).toMatchObject({
         remoteUrl: "ssh://git.example.test/team/repo.git",
       });
@@ -211,14 +225,17 @@ describe("project clone sources", () => {
       const primary = seedHostSession(harness.deps, {
         id: "host-clone-primary",
       });
+
       const target = seedHostSession(harness.deps, { id: "host-clone-target" });
       seedPrimaryHost(harness.deps, primary.host.id);
       setExperiments(harness.db, {
         ...defaultExperiments,
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: primary.host.id,
       });
+
       const before = countProjectSources(harness.db, { projectId: project.id });
 
       const missingRemoteResponse = await harness.app.fetch(
@@ -227,6 +244,7 @@ describe("project clone sources", () => {
           hostId: target.host.id,
         }),
       );
+
       expect(missingRemoteResponse.status).toBe(400);
       await expect(readJson(missingRemoteResponse)).resolves.toMatchObject({
         code: "missing_git_remote",
@@ -239,10 +257,12 @@ describe("project clone sources", () => {
           remoteUrl: "ssh://git.example.test/team/repo.git",
         }),
       );
+
       const command = await waitForQueuedCommand(
         harness,
         ({ command }) => command.type === "project.clone",
       );
+
       await reportQueuedCommandError(harness, command, {
         errorCode: "target_not_empty",
         errorMessage: "Clone target is not empty: /target",
@@ -264,7 +284,9 @@ describe("project clone sources", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-path-discovery",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Path Project",
@@ -273,10 +295,12 @@ describe("project clone sources", () => {
       const responsePromise = harness.app.request(
         `/api/v1/hosts/${host.id}/clone-default-path?projectId=${project.id}`,
       );
+
       const command = await waitForQueuedCommand(
         harness,
         ({ command }) => command.type === "project.clone_default_path",
       );
+
       expect(command.command).toEqual({
         type: "project.clone_default_path",
         projectSlug: "Path Project",

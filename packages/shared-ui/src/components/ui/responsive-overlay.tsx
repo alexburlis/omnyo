@@ -11,6 +11,14 @@ import {
 } from "./overlay-trigger.js";
 import { useIsCompactViewport } from "./hooks/use-compact-viewport.js";
 import { usePointerCoarse } from "./hooks/use-pointer-coarse.js";
+import {
+  dragSettleTransition,
+  getDragSettleMs,
+  MOTION_DURATION_MS,
+  MOTION_EASE,
+  TRANSITION_FALLBACK_SLACK_MS,
+  usePrefersReducedMotion,
+} from "./motion.js";
 import { usePortalScopeProps } from "../../lib/portal-scope.js";
 import { cn } from "../../lib/utils.js";
 
@@ -28,7 +36,8 @@ export const COMPACT_SHEET_CONTENT_STYLE: React.CSSProperties = {
   maxWidth: "none",
 };
 
-const DRAWER_KEYBOARD_INSET_PROPERTY = "--bb-drawer-keyboard-inset";
+const DRAWER_KEYBOARD_INSET_PROPERTY = "--omnyo-drawer-keyboard-inset";
+
 const DRAWER_KEYBOARD_MIN_OVERLAP_PX = 80;
 
 function resetDrawerKeyboardStyles(drawerElement: HTMLElement | null): void {
@@ -51,6 +60,7 @@ export function measureDrawerKeyboardOverlap({
   const overlap = Math.round(
     layoutViewportHeight - (visualViewportHeight + visualViewportOffsetTop),
   );
+
   return overlap >= DRAWER_KEYBOARD_MIN_OVERLAP_PX ? overlap : 0;
 }
 
@@ -61,32 +71,42 @@ function useDrawerKeyboardInset(
   React.useEffect(() => {
     const panel = panelRef.current;
     const visualViewport = window.visualViewport;
+
     if (panel === null || !open || !visualViewport) return;
 
     let animationFrame: number | null = null;
+
     const applyInset = () => {
       animationFrame = null;
+
       if (visualViewport.scale !== 1) {
         resetDrawerKeyboardStyles(panel);
+
         return;
       }
+
       const overlap = measureDrawerKeyboardOverlap({
         layoutViewportHeight: panel.ownerDocument.documentElement.clientHeight,
         visualViewportHeight: visualViewport.height,
         visualViewportOffsetTop: visualViewport.offsetTop,
       });
+
       if (overlap === 0) {
         panel.style.bottom = "";
         panel.style.removeProperty(DRAWER_KEYBOARD_INSET_PROPERTY);
+
         return;
       }
+
       panel.style.bottom = `${overlap}px`;
       panel.style.setProperty(DRAWER_KEYBOARD_INSET_PROPERTY, `${overlap}px`);
     };
+
     const scheduleUpdate = () => {
       if (animationFrame !== null) {
         window.cancelAnimationFrame(animationFrame);
       }
+
       animationFrame = window.requestAnimationFrame(applyInset);
     };
 
@@ -97,9 +117,11 @@ function useDrawerKeyboardInset(
     return () => {
       visualViewport.removeEventListener("resize", scheduleUpdate);
       visualViewport.removeEventListener("scroll", scheduleUpdate);
+
       if (animationFrame !== null) {
         window.cancelAnimationFrame(animationFrame);
       }
+
       resetDrawerKeyboardStyles(panel);
     };
   }, [open, panelRef]);
@@ -131,9 +153,11 @@ export function useResponsiveRoot(
       if (open && !next && isCompactViewport) {
         blurActiveKeyboardInputBeforeOverlayClose();
       }
+
       if (!isControlled) {
         setInternalOpen(next);
       }
+
       controlledOnChange?.(next);
     },
     [isCompactViewport, isControlled, controlledOnChange, open],
@@ -176,12 +200,15 @@ export const MobileTrigger = React.forwardRef<
     ref,
   ) => {
     const triggerClassName = getOverlayTriggerClassName(className);
+
     const handleClick: React.MouseEventHandler<HTMLButtonElement> = (e) => {
       onClick?.(e);
+
       if (!e.defaultPrevented) {
         if (!open) {
           blurActiveKeyboardInputBeforeOverlayOpen();
         }
+
         onOpenChange(!open);
       }
     };
@@ -222,6 +249,7 @@ export const MobileTrigger = React.forwardRef<
     );
   },
 );
+
 MobileTrigger.displayName = "MobileTrigger";
 
 const RADIX_CONTENT_PROP_NAMES = [
@@ -253,11 +281,13 @@ export function stripRadixContentProps<T extends Record<string, unknown>>(
   props: T,
 ): Omit<T, RadixContentPropName> {
   const result = {} as Record<string, unknown>;
+
   for (const key of Object.keys(props)) {
     if (!RADIX_CONTENT_KEYS.has(key)) {
       result[key] = props[key];
     }
   }
+
   return result as Omit<T, RadixContentPropName>;
 }
 
@@ -280,6 +310,9 @@ interface ResponsiveDrawerShellProps extends DrawerDismissalHandlers {
   labelledBy?: string;
   describedBy?: string;
   contentClassName?: string;
+  motionDurationMs?: number;
+  animateClose?: boolean;
+  portalPluginId?: string;
   onContentAnimationEnd?: (open: boolean) => void;
   children: React.ReactNode;
 }
@@ -292,6 +325,7 @@ export function useResponsiveDrawerRealization({
   enabled?: boolean;
 }): { isContentRealized: boolean; realizeContent: () => void } {
   const [isContentRealized, setIsContentRealized] = React.useState(false);
+
   const realizeContent = React.useCallback(
     () => setIsContentRealized(true),
     [],
@@ -311,6 +345,7 @@ export function useResponsiveDrawerRealization({
         realizeContent();
       });
     });
+
     const fallback = window.setTimeout(
       realizeContent,
       RESPONSIVE_DRAWER_REALIZE_FALLBACK_MS,
@@ -320,9 +355,11 @@ export function useResponsiveDrawerRealization({
       if (firstFrame !== null) {
         window.cancelAnimationFrame(firstFrame);
       }
+
       if (secondFrame !== null) {
         window.cancelAnimationFrame(secondFrame);
       }
+
       window.clearTimeout(fallback);
     };
   }, [enabled, isContentRealized, open, realizeContent]);
@@ -342,6 +379,9 @@ export function ResponsiveDrawerShell({
   labelledBy,
   describedBy,
   contentClassName,
+  motionDurationMs,
+  animateClose,
+  portalPluginId,
   onContentAnimationEnd,
   onEscapeKeyDown,
   onPointerDownOutside,
@@ -357,6 +397,7 @@ export function ResponsiveDrawerShell({
   return (
     <PersistentResponsiveDrawerShell
       open={open}
+      presented={isContentRealized}
       onOpenChange={onOpenChange}
       onAfterCloseAutoFocus={onAfterCloseAutoFocus}
       closeOnBackdropClick={closeOnBackdropClick}
@@ -364,6 +405,9 @@ export function ResponsiveDrawerShell({
       labelledBy={labelledBy}
       describedBy={describedBy}
       contentClassName={contentClassName}
+      motionDurationMs={motionDurationMs}
+      animateClose={animateClose}
+      portalPluginId={portalPluginId}
       onContentAnimationEnd={onContentAnimationEnd}
       onEscapeKeyDown={onEscapeKeyDown}
       onPointerDownOutside={onPointerDownOutside}
@@ -384,6 +428,7 @@ export function ResponsiveDrawerShell({
 
 interface PersistentResponsiveDrawerShellProps extends DrawerDismissalHandlers {
   open: boolean;
+  presented?: boolean;
   onOpenChange: (open: boolean) => void;
   closeOnBackdropClick?: boolean;
   onAfterCloseAutoFocus?: () => void;
@@ -392,13 +437,16 @@ interface PersistentResponsiveDrawerShellProps extends DrawerDismissalHandlers {
   describedBy?: string;
   contentClassName?: string;
   motionDurationMs?: number;
+  animateClose?: boolean;
+  portalPluginId?: string;
   onContentAnimationEnd?: (open: boolean) => void;
   children: React.ReactNode;
 }
 
-const PERSISTENT_DRAWER_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
 const PERSISTENT_DRAWER_CLOSE_RATIO = 0.25;
+
 const PERSISTENT_DRAWER_CLOSE_VELOCITY_PX_PER_SEC = 450;
+
 const PERSISTENT_DRAWER_FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -418,7 +466,9 @@ type PersistentDrawerStack = {
   handleKeyDown: (event: KeyboardEvent) => void;
 };
 
-const PERSISTENT_DRAWER_STACK_KEY = Symbol.for("bb.persistent-drawer-stack.v1");
+const PERSISTENT_DRAWER_STACK_KEY = Symbol.for(
+  "omnyo.persistent-drawer-stack.v1",
+);
 
 function isPersistentDrawerStack(
   value: unknown,
@@ -440,6 +490,7 @@ function readPersistentDrawerStack(
     ownerDocument,
     PERSISTENT_DRAWER_STACK_KEY,
   );
+
   return isPersistentDrawerStack(stack) ? stack : undefined;
 }
 
@@ -456,13 +507,15 @@ function activeElementIsInAnotherOverlay(
   panel: HTMLElement,
 ): boolean {
   const overlay = activeElement?.closest<HTMLElement>(
-    "[data-bb-portaled-overlay]",
+    "[data-omnyo-portaled-overlay]",
   );
+
   return overlay !== null && overlay !== undefined && overlay !== panel;
 }
 
 function handleDrawerTab(event: KeyboardEvent, panel: HTMLElement): void {
   const activeElement = panel.ownerDocument.activeElement;
+
   if (
     !panel.contains(activeElement) &&
     activeElementIsInAnotherOverlay(activeElement, panel)
@@ -472,13 +525,16 @@ function handleDrawerTab(event: KeyboardEvent, panel: HTMLElement): void {
 
   const focusable = getDrawerFocusableElements(panel);
   event.preventDefault();
+
   if (focusable.length === 0) {
     panel.focus({ preventScroll: true });
+
     return;
   }
 
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
+
   if (event.shiftKey) {
     if (
       !panel.contains(activeElement) ||
@@ -486,10 +542,13 @@ function handleDrawerTab(event: KeyboardEvent, panel: HTMLElement): void {
       activeElement === first
     ) {
       last?.focus({ preventScroll: true });
+
       return;
     }
+
     const index = focusable.indexOf(activeElement as HTMLElement);
     focusable[Math.max(0, index - 1)]?.focus({ preventScroll: true });
+
     return;
   }
 
@@ -499,8 +558,10 @@ function handleDrawerTab(event: KeyboardEvent, panel: HTMLElement): void {
     activeElement === last
   ) {
     first?.focus({ preventScroll: true });
+
     return;
   }
+
   const index = focusable.indexOf(activeElement as HTMLElement);
   focusable[Math.min(focusable.length - 1, index + 1)]?.focus({
     preventScroll: true,
@@ -512,17 +573,22 @@ function registerOpenDrawer(
   entry: PersistentDrawerStackEntry,
 ): () => void {
   let stack = readPersistentDrawerStack(ownerDocument);
+
   if (stack === undefined) {
     const entries: PersistentDrawerStackEntry[] = [];
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) {
         return;
       }
+
       const topEntry = entries[entries.length - 1];
       const panel = topEntry?.panel() ?? null;
+
       if (topEntry === undefined || panel === null) {
         return;
       }
+
       if (event.key === "Escape") {
         topEntry.dismissOnEscape(event);
         event.preventDefault();
@@ -530,21 +596,27 @@ function registerOpenDrawer(
         handleDrawerTab(event, panel);
       }
     };
+
     stack = { entries, handleKeyDown };
     Reflect.set(ownerDocument, PERSISTENT_DRAWER_STACK_KEY, stack);
     ownerDocument.addEventListener("keydown", handleKeyDown);
   }
+
   stack.entries.push(entry);
 
   return () => {
     const currentStack = readPersistentDrawerStack(ownerDocument);
+
     if (currentStack === undefined) {
       return;
     }
+
     const index = currentStack.entries.indexOf(entry);
+
     if (index >= 0) {
       currentStack.entries.splice(index, 1);
     }
+
     if (currentStack.entries.length === 0) {
       ownerDocument.removeEventListener("keydown", currentStack.handleKeyDown);
       Reflect.deleteProperty(ownerDocument, PERSISTENT_DRAWER_STACK_KEY);
@@ -578,6 +650,7 @@ export function usePersistentOverlayFocus({
   React.useLayoutEffect(() => {
     if (!open) return;
     const panel = panelRef.current;
+
     if (panel === null) return;
     const ownerDocument = panel.ownerDocument;
     const previousFocus = ownerDocument.activeElement;
@@ -586,30 +659,38 @@ export function usePersistentOverlayFocus({
       previousFocus !== ownerDocument.body
         ? previousFocus
         : null;
+
     const unregister = registerOpenDrawer(ownerDocument, {
       panel: () => panelRef.current,
       dismissOnEscape: (event) => {
         onEscapeKeyDownRef.current?.(event);
+
         if (!event.defaultPrevented) requestClose();
       },
     });
+
     panel.focus({ preventScroll: true });
+
     return unregister;
   }, [open, panelRef, requestClose]);
 
   const previousOpenRef = React.useRef(open);
   React.useLayoutEffect(() => {
     let cancelDeferredFocus: (() => void) | undefined;
+
     if (previousOpenRef.current && !open) {
       onBeforeCloseAutoFocus?.();
       const returnFocus = returnFocusRef.current;
+
       if (
         returnFocus?.isConnected &&
         returnFocus.closest('[aria-hidden="true"], [inert]') === null
       ) {
         returnFocus.focus({ preventScroll: true });
+
         if (returnFocus.ownerDocument.activeElement !== returnFocus) {
           const ownerWindow = returnFocus.ownerDocument.defaultView;
+
           if (ownerWindow !== null) {
             const frame = ownerWindow.requestAnimationFrame(() => {
               if (
@@ -618,18 +699,24 @@ export function usePersistentOverlayFocus({
               ) {
                 returnFocus.focus({ preventScroll: true });
               }
+
               onAfterCloseAutoFocus?.();
             });
+
             cancelDeferredFocus = () => ownerWindow.cancelAnimationFrame(frame);
           }
         }
       }
+
       returnFocusRef.current = null;
+
       if (cancelDeferredFocus === undefined) {
         onAfterCloseAutoFocus?.();
       }
     }
+
     previousOpenRef.current = open;
+
     return cancelDeferredFocus;
   }, [onAfterCloseAutoFocus, onBeforeCloseAutoFocus, open]);
 }
@@ -645,6 +732,7 @@ type PersistentDrawerDrag = {
 
 export function PersistentResponsiveDrawerShell({
   open,
+  presented = true,
   onOpenChange,
   onAfterCloseAutoFocus,
   closeOnBackdropClick = true,
@@ -652,7 +740,9 @@ export function PersistentResponsiveDrawerShell({
   labelledBy,
   describedBy,
   contentClassName,
-  motionDurationMs = 220,
+  motionDurationMs = MOTION_DURATION_MS.sheet,
+  animateClose = true,
+  portalPluginId,
   onContentAnimationEnd,
   onEscapeKeyDown,
   onPointerDownOutside,
@@ -664,19 +754,47 @@ export function PersistentResponsiveDrawerShell({
   const backdropPointerDownRef = React.useRef<PointerEvent | null>(null);
   const dragRef = React.useRef<PersistentDrawerDrag | null>(null);
   const settledStateRef = React.useRef<boolean | null>(null);
+  const dragDismissSettleMsRef = React.useRef<number | null>(null);
+  const settleMsRef = React.useRef<number>(motionDurationMs);
   const labelId = React.useId();
-  const portalScopeProps = usePortalScopeProps();
-  const transition = `transform ${motionDurationMs}ms ${PERSISTENT_DRAWER_EASING}`;
-  const backdropTransition = `opacity ${motionDurationMs}ms ${PERSISTENT_DRAWER_EASING}`;
+  const portalScopeProps = usePortalScopeProps(portalPluginId);
+  const reducedMotion = usePrefersReducedMotion();
+  const visualOpen = open && presented;
+
+  const animate = open || animateClose;
+
+  const settleDurationMs = animate
+    ? reducedMotion
+      ? MOTION_DURATION_MS.fast
+      : motionDurationMs
+    : 0;
+
+  const crossfadeTransition = `opacity ${MOTION_DURATION_MS.fast}ms ${MOTION_EASE.standard}`;
+
+  const transition = reducedMotion
+    ? crossfadeTransition
+    : `transform ${motionDurationMs}ms ${MOTION_EASE.sheet}`;
+
+  const backdropTransition = reducedMotion
+    ? crossfadeTransition
+    : `opacity ${motionDurationMs}ms ${MOTION_EASE.sheet}`;
+
+  const panelTransform =
+    visualOpen || reducedMotion
+      ? "translate3d(0, 0, 0)"
+      : "translate3d(0, 100%, 0)";
+
   const onOpenChangeRef = React.useRef(onOpenChange);
   React.useLayoutEffect(() => {
     onOpenChangeRef.current = onOpenChange;
   }, [onOpenChange]);
+
   const requestClose = React.useCallback(() => {
     blurActiveKeyboardInputWithin(panelRef.current);
     resetDrawerKeyboardStyles(panelRef.current);
     onOpenChangeRef.current(false);
   }, []);
+
   const prepareCloseAutoFocus = React.useCallback(() => {
     blurActiveKeyboardInputWithin(panelRef.current);
     resetDrawerKeyboardStyles(panelRef.current);
@@ -694,16 +812,21 @@ export function PersistentResponsiveDrawerShell({
   const handleBackdropClick = () => {
     const originalEvent = backdropPointerDownRef.current;
     backdropPointerDownRef.current = null;
+
     if (!closeOnBackdropClick) return;
+
     if (originalEvent !== null) {
       const outsideEvent: DrawerPointerDownOutsideEvent = new CustomEvent(
         "dismissableLayer.pointerDownOutside",
         { cancelable: true, detail: { originalEvent } },
       );
+
       onPointerDownOutside?.(outsideEvent);
       onInteractOutside?.(outsideEvent);
+
       if (outsideEvent.defaultPrevented) return;
     }
+
     requestClose();
   };
 
@@ -714,36 +837,72 @@ export function PersistentResponsiveDrawerShell({
       if (settledStateRef.current === settledOpen) {
         return;
       }
+
       settledStateRef.current = settledOpen;
       onContentAnimationEnd?.(settledOpen);
     },
     [onContentAnimationEnd],
   );
 
+  React.useLayoutEffect(() => {
+    const dragDismissSettleMs = visualOpen
+      ? null
+      : dragDismissSettleMsRef.current;
+
+    dragDismissSettleMsRef.current = null;
+    settleMsRef.current = dragDismissSettleMs ?? settleDurationMs;
+
+    if (dragDismissSettleMs !== null) return;
+    const panel = panelRef.current;
+    const backdrop = backdropRef.current;
+
+    if (panel === null || backdrop === null) return;
+    panel.style.transition = animate ? transition : "none";
+    panel.style.transform = panelTransform;
+    backdrop.style.transition = animate ? backdropTransition : "none";
+  }, [
+    animate,
+    backdropTransition,
+    panelTransform,
+    settleDurationMs,
+    transition,
+    visualOpen,
+  ]);
+
   React.useEffect(() => {
     settledStateRef.current = null;
+
     const timeout = window.setTimeout(
-      () => reportSettled(open),
-      motionDurationMs + 50,
+      () => reportSettled(visualOpen),
+      settleMsRef.current + TRANSITION_FALLBACK_SLACK_MS,
     );
+
     return () => window.clearTimeout(timeout);
-  }, [motionDurationMs, open, reportSettled]);
+  }, [reportSettled, settleDurationMs, visualOpen]);
 
   const setDragPosition = React.useCallback(
-    (offsetY: number, height: number, animate: boolean) => {
+    (offsetY: number, height: number, settleMs: number | null) => {
       const panel = panelRef.current;
       const backdrop = backdropRef.current;
+
       if (panel === null || backdrop === null) {
         return;
       }
-      panel.style.transition = animate ? transition : "none";
+
+      panel.style.transition =
+        settleMs === null
+          ? "none"
+          : dragSettleTransition(["transform"], settleMs);
       panel.style.transform = `translate3d(0, ${offsetY}px, 0)`;
-      backdrop.style.transition = animate ? backdropTransition : "none";
+      backdrop.style.transition =
+        settleMs === null
+          ? "none"
+          : dragSettleTransition(["opacity"], settleMs);
       backdrop.style.opacity = String(
         Math.max(0, Math.min(1, 1 - offsetY / height)),
       );
     },
-    [backdropTransition, transition],
+    [],
   );
 
   const handleDragStart = React.useCallback(
@@ -751,6 +910,7 @@ export function PersistentResponsiveDrawerShell({
       if (!open || event.button !== 0) {
         return;
       }
+
       event.currentTarget.setPointerCapture(event.pointerId);
       const nowMs = Date.now();
       const height = Math.max(panelRef.current?.clientHeight ?? 0, 1);
@@ -762,7 +922,8 @@ export function PersistentResponsiveDrawerShell({
         velocityY: 0,
         height,
       };
-      setDragPosition(0, height, false);
+      dragDismissSettleMsRef.current = null;
+      setDragPosition(0, height, null);
       event.preventDefault();
     },
     [open, setDragPosition],
@@ -771,20 +932,24 @@ export function PersistentResponsiveDrawerShell({
   const handleDragMove = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       const drag = dragRef.current;
+
       if (drag === null || drag.pointerId !== event.pointerId) {
         return;
       }
+
       const nowMs = Date.now();
       const elapsedMs = nowMs - drag.lastTimeMs;
+
       if (elapsedMs > 0) {
         drag.velocityY = ((event.clientY - drag.lastY) / elapsedMs) * 1000;
         drag.lastY = event.clientY;
         drag.lastTimeMs = nowMs;
       }
+
       setDragPosition(
         Math.max(0, event.clientY - drag.startY),
         drag.height,
-        false,
+        null,
       );
       event.preventDefault();
     },
@@ -794,27 +959,46 @@ export function PersistentResponsiveDrawerShell({
   const finishDrag = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>, cancelled: boolean) => {
       const drag = dragRef.current;
+
       if (drag === null || drag.pointerId !== event.pointerId) {
         return;
       }
+
       dragRef.current = null;
       const offsetY = Math.max(0, event.clientY - drag.startY);
+
       const shouldClose =
         !cancelled &&
         (offsetY >= drag.height * PERSISTENT_DRAWER_CLOSE_RATIO ||
           drag.velocityY >= PERSISTENT_DRAWER_CLOSE_VELOCITY_PX_PER_SEC);
+
+      const travelledFraction = Math.min(1, offsetY / drag.height);
+
       if (shouldClose) {
-        setDragPosition(drag.height, drag.height, true);
+        const settleMs = getDragSettleMs(
+          1 - travelledFraction,
+          reducedMotion,
+          motionDurationMs,
+        );
+
+        setDragPosition(drag.height, drag.height, settleMs);
+        dragDismissSettleMsRef.current = settleMs;
         requestClose();
       } else {
-        setDragPosition(0, drag.height, true);
+        setDragPosition(
+          0,
+          drag.height,
+          getDragSettleMs(travelledFraction, reducedMotion, motionDurationMs),
+        );
       }
+
       event.preventDefault();
     },
-    [requestClose, setDragPosition],
+    [motionDurationMs, reducedMotion, requestClose, setDragPosition],
   );
 
   const portalTarget = typeof document === "undefined" ? null : document.body;
+
   if (portalTarget === null) {
     return null;
   }
@@ -829,7 +1013,7 @@ export function PersistentResponsiveDrawerShell({
         data-state={open ? "open" : "closed"}
         className="fixed inset-0 z-50 bg-black/40"
         style={{
-          opacity: open ? 1 : 0,
+          opacity: visualOpen ? 1 : 0,
           pointerEvents: open ? "auto" : "none",
           transition: backdropTransition,
         }}
@@ -848,25 +1032,28 @@ export function PersistentResponsiveDrawerShell({
         }
         aria-describedby={describedBy}
         aria-modal={open || undefined}
-        data-bb-portaled-overlay=""
+        data-omnyo-portaled-overlay=""
         data-persistent-drawer-content=""
         data-state={open ? "open" : "closed"}
         inert={!open}
         role="dialog"
         tabIndex={-1}
         className={cn(
-          "fixed inset-x-0 bottom-0 z-50 mt-24 flex max-h-[calc(92dvh-var(--bb-drawer-keyboard-inset,0px))] flex-col rounded-t-xl border bg-background pb-[var(--bb-safe-area-bottom,env(safe-area-inset-bottom))] outline-none",
+          "fixed inset-x-0 bottom-0 z-50 mt-24 flex max-h-[calc(92dvh-var(--omnyo-drawer-keyboard-inset,0px))] flex-col rounded-t-xl border bg-background pr-[env(safe-area-inset-right)] pb-[var(--omnyo-safe-area-bottom,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] outline-none",
           contentClassName,
         )}
         style={{
-          transform: open ? "translate3d(0, 0, 0)" : "translate3d(0, 100%, 0)",
+          transform: panelTransform,
           transition,
-          willChange: open ? "transform" : undefined,
+          opacity: reducedMotion ? (visualOpen ? 1 : 0) : undefined,
+          pointerEvents: reducedMotion && !visualOpen ? "none" : undefined,
+          willChange: open && !reducedMotion ? "transform" : undefined,
         }}
         onTransitionEnd={(event) => {
           if (
             event.currentTarget === event.target &&
-            event.propertyName === "transform"
+            (event.propertyName === "transform" ||
+              event.propertyName === "opacity")
           ) {
             reportSettled(open);
           }

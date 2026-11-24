@@ -1,4 +1,4 @@
-import type { ThreadEvent } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import type { ThreadEvent } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { describe, expect, it } from "vitest";
 import {
   createClaudeDeltaHarness,
@@ -60,6 +60,7 @@ function presentationOf(item: StartedItem | undefined): unknown {
 describe("claude item presentation", () => {
   it("emits a TodoWrite call as a collapsed tool row plus a settled planSteps snapshot", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = harness.translate(
       toolUse("todo-1", "TodoWrite", {
         todos: [
@@ -74,6 +75,7 @@ describe("claude item presentation", () => {
         ],
       }),
     );
+
     const started = startedItems(events);
     expect(started).toEqual([
       expect.objectContaining({
@@ -114,11 +116,13 @@ describe("claude item presentation", () => {
         activeForm: "Shipping the bridge",
       }),
     );
+
     const created = harness.translate(
       toolResult("create-1", "Task #1 created successfully: Ship the bridge", {
         tool_use_result: { task: { id: "1", subject: "Ship the bridge" } },
       }),
     );
+
     expect(completedItems(created)).toEqual([
       expect.objectContaining({
         type: "toolCall",
@@ -138,11 +142,13 @@ describe("claude item presentation", () => {
     harness.translate(
       toolUse("update-1", "TaskUpdate", { taskId: "1", status: "in_progress" }),
     );
+
     const updated = harness.translate(
       toolResult("update-1", "Updated task #1 status", {
         tool_use_result: { success: true, taskId: "1" },
       }),
     );
+
     expect(completedItems(updated)).toEqual([
       expect.objectContaining({ type: "toolCall", tool: "TaskUpdate" }),
       expect.objectContaining({
@@ -157,16 +163,19 @@ describe("claude item presentation", () => {
     harness.translate(
       toolUse("update-2", "TaskUpdate", { taskId: "9", status: "completed" }),
     );
+
     const unknown = harness.translate(
       toolResult("update-2", "Updated task #9 status", {
         tool_use_result: { success: true, taskId: "9" },
       }),
     );
+
     expect(completedItems(unknown).map((item) => item.type)).toEqual([
       "toolCall",
     ]);
 
     harness.translate(toolUse("list-1", "TaskList", {}));
+
     const listed = harness.translate(
       toolResult("list-1", "2 tasks", {
         tool_use_result: {
@@ -178,6 +187,7 @@ describe("claude item presentation", () => {
         },
       }),
     );
+
     expect(completedItems(listed)).toContainEqual(
       expect.objectContaining({
         type: "planSteps",
@@ -191,6 +201,7 @@ describe("claude item presentation", () => {
 
   it("collapses the low-value housekeeping calls and titles them from their arguments", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = harness.translate({
       type: "assistant",
       message: {
@@ -226,11 +237,13 @@ describe("claude item presentation", () => {
       },
       session_id: "sess-1",
     });
+
     const byTool = new Map(
       startedItems(events).flatMap((item) =>
         item.type === "toolCall" ? [[item.tool, item] as const] : [],
       ),
     );
+
     expect(byTool.get("ToolSearch")?.presentation).toEqual({
       label: { pending: "Searching tools", completed: "Searched tools" },
       icon: { glyph: "Toolbox" },
@@ -259,9 +272,11 @@ describe("claude item presentation", () => {
 
   it("splits an MCP-served tool into server and tool with a generic presentation", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = harness.translate(
       toolUse("mcp-1", "mcp__claude_ai_Intuit__expert_search", { q: "cpa" }),
     );
+
     expect(startedItems(events)).toEqual([
       expect.objectContaining({
         type: "toolCall",
@@ -280,11 +295,11 @@ describe("claude item presentation", () => {
     ]);
   });
 
-  it("emits a bb-injected tool call as server:bb with the definition's presentation", () => {
+  it("emits an Omnyo-injected tool call as server:omnyo with the definition's presentation", () => {
     const translator = createClaudeDeltaTranslator({ sandboxEnabled: false });
     translator.configureInjectedTools([
       {
-        name: "bb_workflow_result",
+        name: "omnyo_workflow_result",
         presentation: {
           label: {
             pending: "Reading workflow result",
@@ -294,8 +309,9 @@ describe("claude item presentation", () => {
           suppress: true,
         },
       },
-      { name: "bb_thread_list" },
+      { name: "omnyo_thread_list" },
     ]);
+
     const deltas = translator.translate(
       {
         type: "assistant",
@@ -304,20 +320,20 @@ describe("claude item presentation", () => {
           content: [
             {
               type: "tool_use",
-              id: "bb-1",
-              name: "mcp__bb-bridge__bb_workflow_result",
+              id: "omnyo-1",
+              name: "mcp__omnyo-bridge__omnyo_workflow_result",
               input: { runId: "wfr_1" },
             },
             {
               type: "tool_use",
-              id: "bb-2",
-              name: "mcp__bb-bridge__bb_thread_list",
+              id: "omnyo-2",
+              name: "mcp__omnyo-bridge__omnyo_thread_list",
               input: {},
             },
             {
               type: "tool_use",
-              id: "bb-3",
-              name: "mcp__bb-bridge__not_in_session",
+              id: "omnyo-3",
+              name: "mcp__omnyo-bridge__not_in_session",
               input: {},
             },
           ],
@@ -326,13 +342,14 @@ describe("claude item presentation", () => {
       },
       { threadId: "t" },
     );
+
     const opens = deltas.filter((delta) => delta.kind === "item.open");
     expect(opens).toEqual([
       expect.objectContaining({
         item: {
           type: "tool",
-          tool: "bb_workflow_result",
-          server: "bb",
+          tool: "omnyo_workflow_result",
+          server: "omnyo",
           args: { runId: "wfr_1" },
         },
         presentation: {
@@ -345,26 +362,38 @@ describe("claude item presentation", () => {
         },
       }),
       expect.objectContaining({
-        item: { type: "tool", tool: "bb_thread_list", server: "bb", args: {} },
+        item: {
+          type: "tool",
+          tool: "omnyo_thread_list",
+          server: "omnyo",
+          args: {},
+        },
         presentation: {
           label: {
-            pending: "Running bb_thread_list",
-            completed: "Ran bb_thread_list",
+            pending: "Running omnyo_thread_list",
+            completed: "Ran omnyo_thread_list",
           },
           icon: { glyph: "Toolbox" },
         },
       }),
       expect.objectContaining({
-        item: { type: "tool", tool: "not_in_session", server: "bb", args: {} },
+        item: {
+          type: "tool",
+          tool: "not_in_session",
+          server: "omnyo",
+          args: {},
+        },
       }),
     ]);
   });
 
   it("presents an unknown tool generically, without suppression", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = harness.translate(
       toolUse("x-1", "BrandNewTool", { anything: 1 }),
     );
+
     expect(presentationOf(startedItems(events)[0])).toEqual({
       label: { pending: "Running BrandNewTool", completed: "Ran BrandNewTool" },
       icon: { glyph: "Toolbox" },
@@ -373,10 +402,12 @@ describe("claude item presentation", () => {
 
   it("labels an inline Skill call as loading once its result arrives", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = [
       ...harness.translate(toolUse("skill-1", "Skill", { skill: "debugging" })),
       ...harness.translate(toolResult("skill-1", "Launching skill: debugging")),
     ];
+
     const loading = {
       label: { pending: "Loading skill", completed: "Loaded skill" },
       icon: { glyph: "Zap" },
@@ -394,6 +425,7 @@ describe("claude item presentation", () => {
 
   it("labels a forked Skill call as running before its subagent task", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = [
       ...harness.translate(
         toolUse("skill-1", "Skill", { skill: "code-review" }),
@@ -415,6 +447,7 @@ describe("claude item presentation", () => {
         ),
       ),
     ];
+
     const running = {
       label: { pending: "Running skill", completed: "Ran skill" },
       icon: { glyph: "Zap" },
@@ -431,6 +464,7 @@ describe("claude item presentation", () => {
 
   it("opens a Skill call before a tool call sharing its assistant message", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = harness.translate({
       type: "assistant",
       message: {
@@ -463,6 +497,7 @@ describe("claude item presentation", () => {
 
   it("does not label an inline Skill as running for another tool's task", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = [
       ...harness.translate(toolUse("skill-1", "Skill", { skill: "debugging" })),
       ...harness.translate({
@@ -485,6 +520,7 @@ describe("claude item presentation", () => {
   it("opens a held Skill before reporting a provider error", () => {
     const harness = createClaudeDeltaHarness();
     const context = { threadId: "skill-error-thread" };
+
     const events = [
       ...harness.translate(
         toolUse("skill-1", "Skill", { skill: "debugging" }),
@@ -514,6 +550,7 @@ describe("claude item presentation", () => {
 
   it("keeps a Skill call whose session settles before its result", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = [
       ...harness.translate(toolUse("skill-1", "Skill", { skill: "debugging" })),
       ...harness.settleSession(),
@@ -528,6 +565,7 @@ describe("claude item presentation", () => {
 
   it("maps MultiEdit and NotebookEdit to file changes with their own verbs", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = harness.translate({
       type: "assistant",
       message: {
@@ -561,6 +599,7 @@ describe("claude item presentation", () => {
       },
       session_id: "sess-1",
     });
+
     const started = startedItems(events);
     expect(started[0]).toMatchObject({
       type: "fileChange",
@@ -594,6 +633,7 @@ describe("claude item presentation", () => {
 
   it("labels a backgrounded Bash call as a launch and titles commands by their first line", () => {
     const harness = createClaudeDeltaHarness();
+
     const events = harness.translate({
       type: "assistant",
       message: {
@@ -618,6 +658,7 @@ describe("claude item presentation", () => {
       },
       session_id: "sess-1",
     });
+
     const started = startedItems(events);
     expect(presentationOf(started[0])).toEqual({
       label: {
@@ -636,6 +677,7 @@ describe("claude item presentation", () => {
 
   it("badges a Bash call that opts out of the session sandbox", () => {
     const harness = createClaudeDeltaHarness({ sandboxEnabled: true });
+
     const events = harness.translate({
       type: "assistant",
       message: {
@@ -660,6 +702,7 @@ describe("claude item presentation", () => {
       },
       session_id: "sess-1",
     });
+
     const started = startedItems(events);
     expect(presentationOf(started[0])).toEqual({
       label: { pending: "Running command", completed: "Ran command" },
@@ -677,6 +720,7 @@ describe("claude item presentation", () => {
 
   it("omits the sandbox badge when the session never enabled the sandbox", () => {
     const harness = createClaudeDeltaHarness({ sandboxEnabled: false });
+
     const events = harness.translate({
       type: "assistant",
       message: {
@@ -692,6 +736,7 @@ describe("claude item presentation", () => {
       },
       session_id: "sess-1",
     });
+
     expect(presentationOf(startedItems(events)[0])).not.toHaveProperty("badge");
   });
 
@@ -702,6 +747,7 @@ describe("claude item presentation", () => {
       message: { role: "assistant", content: [{ type: "text", text: "hi" }] },
       session_id: "sess-1",
     });
+
     const events = harness.translate({
       type: "user",
       message: {
@@ -717,6 +763,7 @@ describe("claude item presentation", () => {
       },
       session_id: "sess-1",
     });
+
     expect(completedItems(events)).toEqual([
       expect.objectContaining({
         type: "fileChange",
@@ -732,6 +779,7 @@ describe("claude item presentation", () => {
   it("attaches a presentation to every item.open and item.close delta", () => {
     const translator = createClaudeDeltaTranslator({ sandboxEnabled: false });
     const context = { threadId: "t" };
+
     const deltas = [
       ...translator.translate(
         {
@@ -847,10 +895,13 @@ describe("claude item presentation", () => {
         context,
       ),
     ];
+
     const lifecycle = deltas.filter(
       (delta) => delta.kind === "item.open" || delta.kind === "item.close",
     );
+
     expect(lifecycle.length).toBeGreaterThanOrEqual(30);
+
     for (const delta of lifecycle) {
       expect(
         delta.kind === "item.open" || delta.kind === "item.close"
@@ -882,6 +933,7 @@ describe("claude background-task presentation", () => {
   it("presents workflows, background commands and background subagents on open and close", () => {
     const harness = createClaudeDeltaHarness();
     const presentations = new Map<string, unknown>();
+
     for (const [taskType, extra] of [
       ["local_workflow", { workflow_name: "review-changes" }],
       ["local_bash", {}],
@@ -896,6 +948,7 @@ describe("claude background-task presentation", () => {
           ? started.presentation
           : undefined,
       );
+
       const closed = harness.translate({
         type: "system",
         subtype: "task_notification",
@@ -906,9 +959,11 @@ describe("claude background-task presentation", () => {
         summary: "done",
         session_id: "sess-1",
       });
+
       const completed = closed.find(
         (event) => event.type === "item/backgroundTask/completed",
       );
+
       presentations.set(
         `${taskType}:close`,
         completed?.type === "item/backgroundTask/completed"
@@ -916,6 +971,7 @@ describe("claude background-task presentation", () => {
           : undefined,
       );
     }
+
     expect(presentations.get("local_workflow:open")).toEqual({
       label: { pending: "Running workflow", completed: "Workflow finished" },
       icon: { glyph: "Workflow" },

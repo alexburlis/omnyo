@@ -1,5 +1,5 @@
-import { threads, listQueuedThreadMessages } from "@bb/db";
-import { sendMessageResponseSchema } from "@bb/server-contract";
+import { threads, listQueuedThreadMessages } from "@omnyo/db";
+import { sendMessageResponseSchema } from "@omnyo/server-contract";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as environmentEngine from "../../src/services/environments/environment-engine.js";
@@ -32,21 +32,25 @@ import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 async function queueOfflineFollowUp(harness: TestAppHarness) {
   const host = seedHost(harness.deps, { id: "host-frozen", name: "M5" });
   const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: "/tmp/frozen-followup",
   });
+
   const thread = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
     status: "idle",
   });
+
   seedThreadRuntimeState(harness.deps, {
     threadId: thread.id,
     environmentId: environment.id,
     providerThreadId: "provider-frozen-followup",
   });
+
   const response = await harness.app.request(
     `/api/v1/threads/${thread.id}/send`,
     {
@@ -62,10 +66,12 @@ async function queueOfflineFollowUp(harness: TestAppHarness) {
       }),
     },
   );
+
   expect(response.status).toBe(200);
   expect(
     sendMessageResponseSchema.parse(await readJson(response)),
   ).toMatchObject({ delivery: "queued" });
+
   return { host, thread };
 }
 
@@ -77,11 +83,14 @@ describe("work while a server move is frozen", () => {
   it("holds queued dispatch and connect resumes while frozen, then releases them on unfreeze", () =>
     withTestHarness(async (harness) => {
       const { host, thread } = await queueOfflineFollowUp(harness);
+
       const resumeProvisioning = vi.spyOn(
         environmentEngine,
         "resumeEnvironmentProvisioningForHost",
       );
+
       setServerMoveFrozen(harness.db, true);
+
       try {
         const session = seedSession(harness.deps, host.id);
         onDaemonSocketOpen(harness.deps, {
@@ -124,6 +133,7 @@ describe("work while a server move is frozen", () => {
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === thread.id,
       );
+
       expect(dispatched.command.type).toBe("turn.submit");
     }));
 
@@ -132,23 +142,28 @@ describe("work while a server move is frozen", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-stop-loop",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const first = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "active",
       });
+
       const late = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "idle",
       });
+
       const stopped: string[] = [];
       registerHostRpcResponder(harness, {
         hostId: host.id,
@@ -157,7 +172,9 @@ describe("work while a server move is frozen", () => {
           if (command.type !== "thread.stop") {
             throw new Error(`Unexpected command: ${command.type}`);
           }
+
           stopped.push(command.threadId);
+
           if (command.threadId === first.id) {
             harness.db
               .update(threads)
@@ -165,6 +182,7 @@ describe("work while a server move is frozen", () => {
               .where(eq(threads.id, late.id))
               .run();
           }
+
           return { ok: true, result: { providerCheckpointId: null } };
         },
       });

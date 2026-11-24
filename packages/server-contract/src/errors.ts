@@ -4,7 +4,7 @@ import {
   hostStatusSchema,
   pluginIdSchema,
   threadStatusSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 export const apiErrorSchema = z.object({
   code: z.string().min(1),
@@ -12,12 +12,14 @@ export const apiErrorSchema = z.object({
   details: z.unknown().optional(),
   retryable: z.boolean().optional(),
 });
+
 export type ApiError = z.infer<typeof apiErrorSchema>;
 
 export const environmentNotReadyErrorDetailsSchema = z.object({
   environmentStatus: environmentStatusSchema,
   hasPath: z.boolean(),
 });
+
 export type EnvironmentNotReadyErrorDetails = z.infer<
   typeof environmentNotReadyErrorDetailsSchema
 >;
@@ -32,6 +34,7 @@ export const threadNotWritableReasonSchema = z.enum([
   "already_active",
   "still_starting",
 ]);
+
 export type ThreadNotWritableReason = z.infer<
   typeof threadNotWritableReasonSchema
 >;
@@ -41,6 +44,7 @@ export const threadNotWritableErrorDetailsSchema = z.object({
   archivedAt: z.number().int().nonnegative().nullable(),
   threadStatus: threadStatusSchema,
 });
+
 export type ThreadNotWritableErrorDetails = z.infer<
   typeof threadNotWritableErrorDetailsSchema
 >;
@@ -56,6 +60,7 @@ export const threadEnvironmentUnavailableErrorDetailsSchema = z.object({
   reason: threadEnvironmentUnavailableReasonSchema,
   environmentStatus: environmentStatusSchema.nullable(),
 });
+
 export type ThreadEnvironmentUnavailableErrorDetails = z.infer<
   typeof threadEnvironmentUnavailableErrorDetailsSchema
 >;
@@ -72,6 +77,7 @@ export const hostUnavailableErrorDetailsSchema = z.object({
   suspendedAt: z.number().int().nonnegative().nullable(),
   destroyedAt: z.number().int().nonnegative().nullable(),
 });
+
 export type HostUnavailableErrorDetails = z.infer<
   typeof hostUnavailableErrorDetailsSchema
 >;
@@ -85,6 +91,7 @@ export const projectUnavailableErrorDetailsSchema = z.object({
   reason: projectUnavailableReasonSchema,
   deletedAt: z.number().int().nonnegative().nullable(),
 });
+
 export type ProjectUnavailableErrorDetails = z.infer<
   typeof projectUnavailableErrorDetailsSchema
 >;
@@ -97,11 +104,13 @@ export const parentThreadInvalidReasonSchema = z.enum([
   "cycle",
   "too_deep",
 ]);
+
 export type ParentThreadInvalidReason = z.infer<
   typeof parentThreadInvalidReasonSchema
 >;
 
 export const parentThreadInvalidSubjectSchema = z.enum(["parent", "sender"]);
+
 export type ParentThreadInvalidSubject = z.infer<
   typeof parentThreadInvalidSubjectSchema
 >;
@@ -110,13 +119,11 @@ export const parentThreadInvalidErrorDetailsSchema = z.object({
   reason: parentThreadInvalidReasonSchema,
   subject: parentThreadInvalidSubjectSchema,
 });
+
 export type ParentThreadInvalidErrorDetails = z.infer<
   typeof parentThreadInvalidErrorDetailsSchema
 >;
 
-/** Which plugin's `message.dispatch` hook ended the dispatch. Shared by the
- *  hook's `reject` decision (409) and its fail-closed failure (502): both name
- *  the same plugin, so the client can attribute either one without guessing. */
 export const dispatchHookErrorDetailsSchema = z.object({
   pluginId: pluginIdSchema,
 });
@@ -173,4 +180,5 @@ export const lifecycleApiErrorSchema = z.discriminatedUnion("code", [
   dispatchRejectedApiErrorSchema,
   dispatchHookFailedApiErrorSchema,
 ]);
+
 export type LifecycleApiError = z.infer<typeof lifecycleApiErrorSchema>;

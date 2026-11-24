@@ -8,6 +8,7 @@ class FakeNode {
   descendants = new Set<FakeNode>();
   contains(other: unknown): boolean {
     if (other === this) return true;
+
     return this.descendants.has(other as FakeNode);
   }
 }
@@ -18,6 +19,7 @@ function makeProse() {
   const alsoInside = new FakeNode();
   node.descendants.add(inside);
   node.descendants.add(alsoInside);
+
   return { node, inside, alsoInside, outside: new FakeNode() };
 }
 

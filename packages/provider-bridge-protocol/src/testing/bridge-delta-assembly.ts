@@ -1,4 +1,4 @@
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import {
   THREAD_DELTA_NOTIFICATION_METHOD,
   threadDeltaNotificationParamsSchema,
@@ -26,15 +26,18 @@ export function createBridgeDeltaEventCollector(
     textDeltaFlushMs: 0,
     now: () => 0,
   });
+
   return {
     assembler,
     assembleMessage(message) {
       if (message.method !== THREAD_DELTA_NOTIFICATION_METHOD) {
         return [];
       }
+
       const parsed = threadDeltaNotificationParamsSchema.safeParse(
         message.params,
       );
+
       if (!parsed.success) {
         throw new Error(
           `Invalid thread/delta notification: ${parsed.error.issues
@@ -44,6 +47,7 @@ export function createBridgeDeltaEventCollector(
             )} (params: ${JSON.stringify(message.params)?.slice(0, 400)})`,
         );
       }
+
       return assembler.assemble({
         threadId: parsed.data.threadId,
         deltas: parsed.data.deltas,
@@ -57,5 +61,6 @@ export function assembleCapturedThreadEvents(
   providerId = "pi",
 ): ThreadEvent[] {
   const collector = createBridgeDeltaEventCollector(providerId);
+
   return messages.flatMap((message) => collector.assembleMessage(message));
 }

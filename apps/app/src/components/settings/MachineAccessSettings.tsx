@@ -1,12 +1,14 @@
-import type { ServerAccessStatus } from "@bb/server-contract";
+import type { ServerAccessStatus } from "@omnyo/server-contract";
 import { isLocalOnlyUrl } from "@/lib/loopback-hostname";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
+import { DelayedLoading } from "@omnyo/shared-ui/delayed-loading";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { getPluginConfigurationRoutePath } from "@/lib/route-paths";
-import { Icon } from "@bb/shared-ui/icon";
-import { Input } from "@bb/shared-ui/input";
-import { COARSE_POINTER_INPUT_HEIGHT_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Input } from "@omnyo/shared-ui/input";
+import { COARSE_POINTER_INPUT_HEIGHT_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
 import { OptionPicker } from "@/components/pickers/OptionPicker";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 import { useUpdateGeneralSettings } from "@/hooks/mutations/settings-mutations";
@@ -47,16 +49,20 @@ function useMachineAccess(): MachineAccessState {
   const [error, setError] = useState<string | null>(null);
   const disabled = !settings;
   const savedProviderId = access?.defaultProviderId ?? "direct";
+
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
     null,
   );
+
   useEffect(() => {
     if (selectedProviderId === savedProviderId) setSelectedProviderId(null);
   }, [savedProviderId, selectedProviderId]);
   const selected = selectedProviderId ?? savedProviderId;
+
   const effective = access?.providers.find(
     (provider) => provider.id === selected,
   );
+
   return {
     access,
     disabled,
@@ -82,8 +88,10 @@ function useMachineAccess(): MachineAccessState {
     commitUrl: async () => {
       if (!settings || draft === null) return;
       const url = draft.trim();
+
       if (url) {
         const parsed = parseUrl(url);
+
         if (
           parsed === null ||
           !["http:", "https:"].includes(parsed.protocol) ||
@@ -91,15 +99,19 @@ function useMachineAccess(): MachineAccessState {
           parsed.password
         ) {
           setError("Enter a valid HTTP or HTTPS URL without credentials");
+
           return;
         }
+
         if (isLocalOnlyUrl(url)) {
           setError(
             "Other machines cannot reach localhost. Use a domain or shared-network address.",
           );
+
           return;
         }
       }
+
       try {
         await update.mutateAsync({ machineServerUrl: url || null });
       } catch (saveError) {
@@ -109,8 +121,10 @@ function useMachineAccess(): MachineAccessState {
             fallbackMessage: "Couldn't save the address.",
           }),
         );
+
         return;
       }
+
       setDraft(null);
       setError(null);
     },
@@ -125,6 +139,7 @@ export function MachineAccessSettings({
   title?: string;
 }) {
   const machineAccess = useMachineAccess();
+
   return (
     <MachineAccessSettingsContent machineAccess={machineAccess} title={title}>
       {children?.(
@@ -146,23 +161,27 @@ export function MachineAccessSettingsContent({
   title?: string;
 }) {
   return (
-    <section aria-label={title} className="space-y-3">
+    <section aria-label={title} className="w-full space-y-3">
       <div>
         <h2 className="text-sm font-semibold">{title}</h2>
         <p className="mt-1 text-xs text-subtle-foreground">
-          Choose how your devices reach this bb server.
+          Choose how your devices reach this Omnyo server.
         </p>
       </div>
       <div className="overflow-hidden rounded-lg border border-border bg-card">
         <div className="px-4 py-3">
           {machineAccess.access === undefined ? (
-            <p
-              role="status"
-              className="flex h-8 items-center gap-2 text-xs text-subtle-foreground"
-            >
-              <Icon name="Spinner" className="size-3.5 animate-spin" />
-              Loading connection settings…
-            </p>
+            <div className="h-8">
+              <DelayedLoading>
+                <p
+                  role="status"
+                  className="flex h-8 items-center gap-2 text-xs text-subtle-foreground"
+                >
+                  <Icon name="Spinner" className="size-3.5 animate-spin" />
+                  Loading connection settings…
+                </p>
+              </DelayedLoading>
+            </div>
           ) : (
             <>
               {machineAccess.selected !== "direct" &&
@@ -202,6 +221,7 @@ export function MachineAccessControls({
   onNavigate?: () => void;
 }) {
   const machineAccess = useMachineAccess();
+
   return (
     <MachineAccessControlsContent
       machineAccess={machineAccess}
@@ -241,6 +261,7 @@ function MachineAccessMethodPicker({
   align?: "start" | "end";
 }) {
   const { access, disabled, selected } = machineAccess;
+
   return (
     <OptionPicker
       modal={false}
@@ -274,6 +295,7 @@ function MachineAccessDetails({
 }) {
   const { access, disabled, draft, effective, error, saving, selected, value } =
     machineAccess;
+
   return (
     <>
       {selected !== "direct" && effective !== undefined && (
@@ -299,7 +321,7 @@ function MachineAccessDetails({
               aria-label="Server address"
               aria-invalid={error !== null}
               value={draft ?? value}
-              placeholder={access?.effectiveUrl ?? "https://bb.example.com"}
+              placeholder={access?.effectiveUrl ?? "https://omnyo.example.com"}
               disabled={disabled}
               onChange={(event) => machineAccess.editDraft(event.target.value)}
               onKeyDown={(event) => {
@@ -336,55 +358,68 @@ function MachineAccessStatus({
   methodPicker?: ReactNode;
 }) {
   const { effective, configurationMessage } = machineAccess;
+
   if (!effective) return null;
   const ready = configurationMessage === null;
+
   const setup =
     effective.availability?.status === "setup-required" &&
     effective.pluginId !== null;
-  return (
-    <div className="space-y-0">
-      <div
+
+  const action =
+    effective.pluginId === null ? null : (
+      <Button
+        variant={setup ? "default" : "link"}
+        size="sm"
         className={
           setup
-            ? "flex flex-col items-start gap-2"
-            : "flex min-h-7 items-center justify-between gap-3"
+            ? "shrink-0"
+            : cn(
+                "-mr-3 h-7 shrink-0 px-3 font-normal text-subtle-foreground no-underline hover:text-muted-foreground hover:no-underline",
+                methodPicker === undefined && "-my-1.5 ml-auto",
+              )
         }
+        asChild
       >
-        {methodPicker}
-        {setup && (
-          <p className="max-w-xl text-xs text-subtle-foreground">
-            {effective.description} {configurationMessage}
-          </p>
-        )}
-        {effective.pluginId !== null && (
-          <Button
-            variant={setup ? "default" : "link"}
-            size="sm"
-            className={
-              setup
-                ? "shrink-0"
-                : "h-7 shrink-0 px-3 font-normal text-subtle-foreground/75 no-underline hover:text-subtle-foreground hover:no-underline"
-            }
-            asChild
-          >
-            <Link
-              onClick={onNavigate}
-              to={getPluginConfigurationRoutePath({
-                pluginId: effective.pluginId,
-              })}
-            >
-              {setup ? (
-                <>
-                  Set up {effective.displayName}
-                  <Icon name="ArrowRight" />
-                </>
-              ) : (
-                "Manage"
-              )}
-            </Link>
-          </Button>
-        )}
-      </div>
+        <Link
+          onClick={onNavigate}
+          to={getPluginConfigurationRoutePath({
+            pluginId: effective.pluginId,
+          })}
+        >
+          {setup ? (
+            <>
+              Set up {effective.displayName}
+              <Icon name="ArrowRight" />
+            </>
+          ) : (
+            "Manage"
+          )}
+        </Link>
+      </Button>
+    );
+
+  const actionInStatusRow = !setup && methodPicker === undefined;
+
+  return (
+    <div className="space-y-0">
+      {actionInStatusRow ? null : (
+        <div
+          className={
+            setup
+              ? "flex flex-col items-start gap-2"
+              : "flex min-h-7 items-center justify-between gap-3"
+          }
+        >
+          {methodPicker}
+          {setup && (
+            <p className="max-w-xl text-xs text-subtle-foreground">
+              {effective.description} {configurationMessage}
+            </p>
+          )}
+          {action}
+        </div>
+      )}
       {!setup && (
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
           <p className="inline-flex shrink-0 items-center gap-1.5 font-medium">
@@ -403,6 +438,7 @@ function MachineAccessStatus({
                 : null) ??
               "Ready to connect devices."}
           </p>
+          {actionInStatusRow ? action : null}
         </div>
       )}
     </div>

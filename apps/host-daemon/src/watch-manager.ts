@@ -1,26 +1,28 @@
-import type { DiscoveredWorkspaceProperties } from "@bb/domain";
+import path from "node:path";
+import type { DiscoveredWorkspaceProperties } from "@omnyo/domain";
 import {
   provisionWorkspace,
   type HostWorkspace,
   type ProvisionWorkspaceArgs,
-} from "@bb/host-workspace";
+} from "@omnyo/host-workspace";
 import type {
   HostDaemonEnvironmentChange,
   HostDaemonWatchSet,
   HostDaemonWatchSetThreadStorageTarget,
   HostDaemonWatchSetWorkspaceTarget,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type {
   HostWatcher,
   ThreadStorageWatchError,
   WorkspaceStatusWatchChangeKind,
   WorkspaceWatchError,
-} from "@bb/host-watcher";
+} from "@omnyo/host-watcher";
 import { userExecutableProcessOptions } from "./user-executable-env.js";
 
 type StopWatching = () => void | Promise<void>;
 
 const STOP_WATCHING: StopWatching = () => undefined;
+
 const LOCAL_WORKSPACE_WATCH_CHANGE_KINDS: readonly WorkspaceStatusWatchChangeKind[] =
   [
     "workspace-content-changed",
@@ -28,11 +30,14 @@ const LOCAL_WORKSPACE_WATCH_CHANGE_KINDS: readonly WorkspaceStatusWatchChangeKin
     "workspace-git-repository-created",
   ];
 
+const WORKSPACE_WATCH_FOLLOW_UP_DELAY_MS = 2_000;
+
 interface WorkspaceWatchState {
   lastLocalFingerprint: string | null;
   lastSharedRefsFingerprint: string | null;
   pendingKinds: Set<WorkspaceStatusWatchChangeKind>;
   processing: Promise<void> | null;
+  followUp: ReturnType<typeof setTimeout> | null;
 }
 
 interface WorkspaceWatchEntry {
@@ -40,6 +45,11 @@ interface WorkspaceWatchEntry {
   target: HostDaemonWatchSetWorkspaceTarget;
   watchState: WorkspaceWatchState;
   workspace: HostWorkspace;
+}
+
+interface ThreadStorageWatchEntry {
+  stopWatching: StopWatching;
+  target: HostDaemonWatchSetThreadStorageTarget;
 }
 
 interface RefreshWorkspaceArgs {
@@ -103,14 +113,13 @@ export class WatchManager {
   private readonly hostWatcher;
   private readonly provisionWorkspace;
   private readonly refreshWorkspace;
-  private readonly threadStorageTargets = new Map<
+  private readonly threadStorageEntries = new Map<
     string,
-    HostDaemonWatchSetThreadStorageTarget
+    ThreadStorageWatchEntry
   >();
   private readonly workspaceEntries = new Map<string, WorkspaceWatchEntry>();
   private latestAppliedWatchSetGeneration = -1;
   private watchSetMutationTail: Promise<void> = Promise.resolve();
-  private stopWatchingThreadStorageRoot: StopWatching = STOP_WATCHING;
 
   constructor(private readonly options: WatchManagerOptions = {}) {
     this.hostWatcher = options.hostWatcher;
@@ -130,6 +139,7 @@ export class WatchManager {
       if (watchSet.generation <= this.latestAppliedWatchSetGeneration) {
         return;
       }
+
       await this.applyWatchSet(watchSet);
     });
   }
@@ -145,10 +155,13 @@ export class WatchManager {
   async shutdown(): Promise<void> {
     await this.enqueueWatchSetMutation(async () => {
       const entries = [...this.workspaceEntries.values()];
+      const threadStorageEntries = [...this.threadStorageEntries.values()];
       this.workspaceEntries.clear();
-      this.threadStorageTargets.clear();
-      await Promise.all(entries.map((entry) => this.stopWorkspaceWatch(entry)));
-      await this.stopThreadStorageWatcher();
+      this.threadStorageEntries.clear();
+      await Promise.all([
+        ...entries.map((entry) => this.stopWorkspaceWatch(entry)),
+        ...threadStorageEntries.map((entry) => entry.stopWatching()),
+      ]);
     });
   }
 
@@ -157,27 +170,32 @@ export class WatchManager {
   }
 
   threadStorageWatchTargetCount(): number {
-    return this.threadStorageTargets.size;
+    return this.threadStorageEntries.size;
   }
 
   private async replaceWorkspaceTargets(
     targets: readonly HostDaemonWatchSetWorkspaceTarget[],
   ): Promise<void> {
     const nextTargets = new Map<string, HostDaemonWatchSetWorkspaceTarget>();
+
     for (const target of targets) {
       nextTargets.set(target.environmentId, target);
     }
 
     const stops: Promise<void>[] = [];
+
     for (const [environmentId, entry] of this.workspaceEntries) {
       const nextTarget = nextTargets.get(environmentId);
+
       if (nextTarget && sameWorkspaceTarget(entry.target, nextTarget)) {
         nextTargets.delete(environmentId);
         continue;
       }
+
       this.workspaceEntries.delete(environmentId);
       stops.push(this.stopWorkspaceWatch(entry));
     }
+
     await Promise.all(stops);
 
     for (const target of nextTargets.values()) {
@@ -188,21 +206,41 @@ export class WatchManager {
   private async replaceThreadStorageTargets(
     targets: readonly HostDaemonWatchSetThreadStorageTarget[],
   ): Promise<void> {
-    this.threadStorageTargets.clear();
+    const nextTargets = new Map<
+      string,
+      HostDaemonWatchSetThreadStorageTarget
+    >();
+
     for (const target of targets) {
-      this.threadStorageTargets.set(target.threadId, target);
+      nextTargets.set(target.threadId, target);
     }
 
-    if (this.threadStorageTargets.size > 0) {
-      this.ensureThreadStorageWatcher();
-      return;
+    const stops: (void | Promise<void>)[] = [];
+
+    for (const [threadId, entry] of this.threadStorageEntries) {
+      const nextTarget = nextTargets.get(threadId);
+
+      if (nextTarget) {
+        entry.target = nextTarget;
+        nextTargets.delete(threadId);
+        continue;
+      }
+
+      this.threadStorageEntries.delete(threadId);
+      stops.push(entry.stopWatching());
     }
-    await this.stopThreadStorageWatcher();
+
+    await Promise.all(stops);
+
+    for (const target of nextTargets.values()) {
+      this.startThreadStorageWatch(target);
+    }
   }
 
   private enqueueWatchSetMutation(work: () => Promise<void>): Promise<void> {
     const next = this.watchSetMutationTail.then(work, work);
     this.watchSetMutationTail = next.catch(() => undefined);
+
     return next;
   }
 
@@ -223,6 +261,7 @@ export class WatchManager {
       const workspace = await this.provisionWorkspace({
         path: target.workspaceContext.workspacePath,
       });
+
       const entry: WorkspaceWatchEntry = {
         stopWatchingStatus: STOP_WATCHING,
         target,
@@ -231,9 +270,11 @@ export class WatchManager {
           lastSharedRefsFingerprint: null,
           pendingKinds: new Set(),
           processing: null,
+          followUp: null,
         },
         workspace,
       };
+
       this.workspaceEntries.set(target.environmentId, entry);
       entry.stopWatchingStatus = this.hostWatcher.watchWorkspace({
         environmentId: target.environmentId,
@@ -277,21 +318,25 @@ export class WatchManager {
     if (!entry.workspace.isGitRepo) {
       return;
     }
+
     try {
       const [lastLocalFingerprint, lastSharedRefsFingerprint] =
         await Promise.all([
           entry.workspace.getLocalStateFingerprint(),
           entry.workspace.getSharedGitRefsFingerprint(),
         ]);
+
       if (this.workspaceEntries.get(entry.target.environmentId) !== entry) {
         return;
       }
+
       entry.watchState.lastLocalFingerprint = lastLocalFingerprint;
       entry.watchState.lastSharedRefsFingerprint = lastSharedRefsFingerprint;
     } catch (error) {
       if (this.workspaceEntries.get(entry.target.environmentId) !== entry) {
         return;
       }
+
       this.reportWorkspaceWatchError(entry, error);
     }
   }
@@ -305,18 +350,22 @@ export class WatchManager {
     ) {
       return;
     }
+
     if (args.changeKinds.includes("workspace-content-changed")) {
       this.options.onWorkspaceStatusChanged?.({
         changeKinds: ["work-status-changed"],
         environmentId: args.entry.target.environmentId,
       });
     }
+
     for (const changeKind of args.changeKinds) {
       args.entry.watchState.pendingKinds.add(changeKind);
     }
-    if (args.entry.watchState.processing) {
+
+    if (args.entry.watchState.processing || args.entry.watchState.followUp) {
       return;
     }
+
     this.flushWorkspaceWatchChanges(args);
   }
 
@@ -327,11 +376,33 @@ export class WatchManager {
       if (args.entry.watchState.processing === processing) {
         args.entry.watchState.processing = null;
       }
+
       if (args.entry.watchState.pendingKinds.size > 0) {
-        this.flushWorkspaceWatchChanges(args);
+        this.scheduleWorkspaceWatchFollowUp(args);
       }
     });
+
     args.entry.watchState.processing = processing;
+  }
+
+  private scheduleWorkspaceWatchFollowUp(args: {
+    entry: WorkspaceWatchEntry;
+  }): void {
+    const followUp = setTimeout(() => {
+      if (args.entry.watchState.followUp !== followUp) return;
+      args.entry.watchState.followUp = null;
+
+      if (
+        this.workspaceEntries.get(args.entry.target.environmentId) ===
+          args.entry &&
+        args.entry.watchState.pendingKinds.size > 0
+      ) {
+        this.flushWorkspaceWatchChanges(args);
+      }
+    }, WORKSPACE_WATCH_FOLLOW_UP_DELAY_MS);
+
+    followUp.unref?.();
+    args.entry.watchState.followUp = followUp;
   }
 
   private async processWorkspaceWatchChanges(args: {
@@ -342,6 +413,7 @@ export class WatchManager {
 
     try {
       const changeKinds: HostDaemonEnvironmentChange[] = [];
+
       if (workspaceWatchKindsIncludeLocalState(pendingKinds)) {
         if (
           pendingKinds.includes("workspace-git-repository-created") &&
@@ -349,12 +421,15 @@ export class WatchManager {
         ) {
           await this.refreshGitWorkspaceMetadata(args.entry);
         }
+
         const workspaceContentChanged = pendingKinds.includes(
           "workspace-content-changed",
         );
+
         if (args.entry.workspace.isGitRepo && !workspaceContentChanged) {
           const nextLocalFingerprint =
             await args.entry.workspace.getLocalStateFingerprint();
+
           if (
             args.entry.watchState.lastLocalFingerprint !== nextLocalFingerprint
           ) {
@@ -363,12 +438,14 @@ export class WatchManager {
           }
         }
       }
+
       if (
         args.entry.workspace.isGitRepo &&
         pendingKinds.includes("shared-git-refs-changed")
       ) {
         const nextSharedRefsFingerprint =
           await args.entry.workspace.getSharedGitRefsFingerprint();
+
         if (
           args.entry.watchState.lastSharedRefsFingerprint !==
           nextSharedRefsFingerprint
@@ -378,9 +455,11 @@ export class WatchManager {
           changeKinds.push("git-refs-changed");
         }
       }
+
       if (changeKinds.length === 0) {
         return;
       }
+
       this.options.onWorkspaceStatusChanged?.({
         changeKinds,
         environmentId: args.entry.target.environmentId,
@@ -413,12 +492,15 @@ export class WatchManager {
     if (entry.workspace.isGitRepo) {
       return;
     }
+
     const provision = { path: entry.target.workspaceContext.workspacePath };
+
     const workspace = await this.refreshWorkspace({
       environmentId: entry.target.environmentId,
       provision,
       workspacePath: entry.target.workspaceContext.workspacePath,
     });
+
     if (!workspace.isGitRepo) {
       return;
     }
@@ -429,6 +511,7 @@ export class WatchManager {
         workspace.getDefaultBranch(),
         workspace.getSharedGitRefsFingerprint(),
       ]);
+
     entry.workspace = workspace;
     entry.watchState.lastSharedRefsFingerprint = sharedRefsFingerprint;
     this.options.onWorkspaceMetadataChanged?.({
@@ -444,48 +527,60 @@ export class WatchManager {
   }
 
   private async stopWorkspaceWatch(entry: WorkspaceWatchEntry): Promise<void> {
+    if (entry.watchState.followUp !== null) {
+      clearTimeout(entry.watchState.followUp);
+      entry.watchState.followUp = null;
+    }
+
     const stopWatchingStatus = entry.stopWatchingStatus;
     entry.stopWatchingStatus = STOP_WATCHING;
     await stopWatchingStatus();
   }
 
-  private ensureThreadStorageWatcher(): void {
+  private startThreadStorageWatch(
+    target: HostDaemonWatchSetThreadStorageTarget,
+  ): void {
+    const entry: ThreadStorageWatchEntry = {
+      stopWatching: STOP_WATCHING,
+      target,
+    };
+
+    this.threadStorageEntries.set(target.threadId, entry);
+
+    const threadStorageRootPath = this.options.threadStorageRootPath;
+
+    if (!this.hostWatcher || !threadStorageRootPath) {
+      return;
+    }
+
+    const threadStoragePath = path.resolve(
+      threadStorageRootPath,
+      target.threadId,
+    );
+
     if (
-      !this.hostWatcher ||
-      this.stopWatchingThreadStorageRoot !== STOP_WATCHING
+      path.dirname(threadStoragePath) !== path.resolve(threadStorageRootPath)
     ) {
       return;
     }
 
-    const threadStorageRootPath = this.options.threadStorageRootPath;
-    if (!threadStorageRootPath) {
-      return;
-    }
+    entry.stopWatching = this.hostWatcher.watchThreadStorage({
+      threadStoragePath,
+      onChange: () => {
+        if (this.threadStorageEntries.get(entry.target.threadId) !== entry) {
+          return;
+        }
 
-    this.stopWatchingThreadStorageRoot =
-      this.hostWatcher.watchThreadStorageRoot({
-        threadStorageRootPath,
-        resolveThreadTarget: (threadId) =>
-          this.threadStorageTargets.get(threadId) ?? null,
-        onChange: (event) => {
-          if (event.kind === "thread-storage-changed") {
-            this.options.onThreadStorageChanged?.({
-              environmentId: event.environmentId,
-              threadId: event.threadId,
-            });
-          }
-        },
-        onWatchError: (error) => {
-          this.options.onThreadStorageWatchError?.({
-            error,
-          });
-        },
-      });
-  }
-
-  private async stopThreadStorageWatcher(): Promise<void> {
-    const stopWatchingThreadStorageRoot = this.stopWatchingThreadStorageRoot;
-    this.stopWatchingThreadStorageRoot = STOP_WATCHING;
-    await stopWatchingThreadStorageRoot();
+        this.options.onThreadStorageChanged?.({
+          environmentId: entry.target.environmentId,
+          threadId: entry.target.threadId,
+        });
+      },
+      onWatchError: (error) => {
+        this.options.onThreadStorageWatchError?.({
+          error,
+        });
+      },
+    });
   }
 }

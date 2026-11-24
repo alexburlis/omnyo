@@ -36,6 +36,7 @@ describe.sequential("fake provider smoke lifecycle integration", () => {
   it("creates a project and unmanaged thread, then provisions the workspace", () =>
     withHarness(async (harness) => {
       const project = await createProjectFixture(harness, "Unmanaged Smoke");
+
       const { environment, thread } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -65,6 +66,7 @@ describe.sequential("fake provider smoke lifecycle integration", () => {
           harness,
           "Managed Worktree Smoke",
         );
+
         const { environment } = await createReadyThread(harness, {
           projectId: project.id,
           workspace: { type: "managed-worktree" },
@@ -75,12 +77,14 @@ describe.sequential("fake provider smoke lifecycle integration", () => {
         expect(environment.path).toBeTruthy();
 
         const workspacePath = environment.path;
+
         if (!workspacePath) {
           throw new Error("Managed worktree path was not assigned");
         }
 
         await fs.access(workspacePath);
         const resolvedWorktreePath = await fs.realpath(workspacePath);
+
         const worktreeList = await runGit({
           args: ["worktree", "list", "--porcelain"],
           cwd: harness.repoDir,
@@ -90,86 +94,96 @@ describe.sequential("fake provider smoke lifecycle integration", () => {
           path.sep === "\\"
             ? resolvedWorktreePath.replaceAll("\\", "/")
             : resolvedWorktreePath;
+
         expect(worktreeList).toContain(`worktree ${gitWorktreePath}`);
       },
     ));
 
   it("starts parent and child threads with the shared runtime config", async () => {
     const record = await recordScriptedEchoRequests();
+
     try {
-      await withHarness({ builtinPlugins: ["bb-guide"] }, async (harness) => {
-        const project = await createProjectFixture(
-          harness,
-          "Parent Thread Smoke",
-        );
-        const { environment: parentEnvironment, thread: parentThread } =
-          await createReadyThread(harness, {
+      await withHarness(
+        { builtinPlugins: ["omnyo-guide"] },
+        async (harness) => {
+          const project = await createProjectFixture(
+            harness,
+            "Parent Thread Smoke",
+          );
+
+          const { environment: parentEnvironment, thread: parentThread } =
+            await createReadyThread(harness, {
+              execution: {
+                model: "fake-model",
+                reasoningLevel: "medium",
+              },
+              projectId: project.id,
+              providerId: "fake",
+              title: "Parent thread",
+              workspace: {
+                type: "unmanaged",
+                path: harness.repoDir,
+              },
+            });
+
+          const childThread = await createReuseThread(harness.api, {
+            environmentId: parentEnvironment.id,
             execution: {
               model: "fake-model",
               reasoningLevel: "medium",
             },
+            parentThreadId: parentThread.id,
             projectId: project.id,
             providerId: "fake",
-            title: "Parent thread",
-            workspace: {
-              type: "unmanaged",
-              path: harness.repoDir,
-            },
+            title: "Child thread",
           });
 
-        const childThread = await createReuseThread(harness.api, {
-          environmentId: parentEnvironment.id,
-          execution: {
-            model: "fake-model",
-            reasoningLevel: "medium",
-          },
-          parentThreadId: parentThread.id,
-          projectId: project.id,
-          providerId: "fake",
-          title: "Child thread",
-        });
-        expect(childThread.parentThreadId).toBe(parentThread.id);
-        expect(childThread.environmentId).toBe(parentEnvironment.id);
+          expect(childThread.parentThreadId).toBe(parentThread.id);
+          expect(childThread.environmentId).toBe(parentEnvironment.id);
 
-        await waitForThreadStatus(
-          harness.api,
-          childThread.id,
-          "idle",
-          TURN_TIMEOUT_MS,
-        );
-
-        const requests = await record.read();
-        const parentRuntimeCommand = findSessionConstruction(
-          requests,
-          parentThread.id,
-        );
-        const childRuntimeCommand = findSessionConstruction(
-          requests,
-          childThread.id,
-        );
-        if (!parentRuntimeCommand || !childRuntimeCommand) {
-          throw new Error(
-            "Expected session constructions for parent and child",
+          await waitForThreadStatus(
+            harness.api,
+            childThread.id,
+            "idle",
+            TURN_TIMEOUT_MS,
           );
-        }
 
-        expect(parentRuntimeCommand.method).toBe("thread/start");
-        expect(childRuntimeCommand.method).toBe("thread/start");
-        expect(parentRuntimeCommand.dynamicToolNames).toEqual([
-          "update_environment_directory",
-        ]);
-        expect(childRuntimeCommand.dynamicToolNames).toEqual([
-          "update_environment_directory",
-        ]);
-        expect(parentRuntimeCommand.instructions).toContain("bb status");
-        expect(parentRuntimeCommand.instructions).toContain("bb guide");
-        expect(parentRuntimeCommand.instructions).toContain("Markdown links");
-        expect(childRuntimeCommand.instructions).toContain("bb status");
-        expect(childRuntimeCommand.instructions).toContain("bb guide");
-        expect(childRuntimeCommand.instructions).toContain("Markdown links");
-        expect(parentRuntimeCommand.instructions).not.toContain("manager");
-        expect(childRuntimeCommand.instructions).not.toContain("manager");
-      });
+          const requests = await record.read();
+
+          const parentRuntimeCommand = findSessionConstruction(
+            requests,
+            parentThread.id,
+          );
+
+          const childRuntimeCommand = findSessionConstruction(
+            requests,
+            childThread.id,
+          );
+
+          if (!parentRuntimeCommand || !childRuntimeCommand) {
+            throw new Error(
+              "Expected session constructions for parent and child",
+            );
+          }
+
+          expect(parentRuntimeCommand.method).toBe("thread/start");
+          expect(childRuntimeCommand.method).toBe("thread/start");
+          expect(parentRuntimeCommand.dynamicToolNames).toEqual([
+            "update_environment_directory",
+          ]);
+          expect(childRuntimeCommand.dynamicToolNames).toEqual([
+            "update_environment_directory",
+          ]);
+          expect(parentRuntimeCommand.instructions).toContain("omnyo status");
+          expect(parentRuntimeCommand.instructions).toContain("omnyo guide");
+          expect(parentRuntimeCommand.instructions).toContain("Markdown links");
+          expect(childRuntimeCommand.instructions).toContain("omnyo status");
+          expect(childRuntimeCommand.instructions).toContain("omnyo guide");
+          expect(childRuntimeCommand.instructions).toContain("Markdown links");
+          expect(parentRuntimeCommand.instructions).not.toContain("manager");
+          expect(childRuntimeCommand.instructions).not.toContain("manager");
+        },
+      );
     } finally {
       await record.dispose();
     }
@@ -178,6 +192,7 @@ describe.sequential("fake provider smoke lifecycle integration", () => {
   it("sends a message, runs the provider, and records timeline/output data", () =>
     withHarness(async (harness) => {
       const project = await createProjectFixture(harness, "Turn Flow Smoke");
+
       const { thread } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -230,6 +245,7 @@ describe.sequential("fake provider smoke lifecycle integration", () => {
         (event) =>
           event.type === "turn/started" || event.type === "turn/completed",
       );
+
       expect(storedTurnEvents.length).toBeGreaterThanOrEqual(2);
       expect(storedTurnEvents.every((event) => Boolean(event.turnId))).toBe(
         true,
@@ -244,6 +260,7 @@ describe.sequential("fake provider smoke lifecycle integration", () => {
   it("creates a new turn for an idle follow-up instead of steering the previous turn", () =>
     withHarness(async (harness) => {
       const project = await createProjectFixture(harness, "Follow-Up Smoke");
+
       const { thread } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -251,13 +268,17 @@ describe.sequential("fake provider smoke lifecycle integration", () => {
           path: harness.repoDir,
         },
       });
+
       const baselineEvents = await getThreadEvents(harness.api, thread.id);
+
       const baselineStartedCount = baselineEvents.filter(
         (event) => event.type === "turn/started",
       ).length;
+
       const baselineCompletedCount = baselineEvents.filter(
         (event) => event.type === "turn/completed",
       ).length;
+
       const baselineTurnIds = new Set(
         readStoredTurnEvents(harness.db, thread.id)
           .map((event) => event.turnId)
@@ -298,12 +319,14 @@ describe.sequential("fake provider smoke lifecycle integration", () => {
           .map((event) => event.turnId)
           .filter((turnId): turnId is string => Boolean(turnId)),
       );
+
       expect(turnIds.size).toBe(baselineTurnIds.size + 2);
     }));
 
   it("stops an active thread and records a thread interruption event", () =>
     withHarness(async (harness) => {
       const project = await createProjectFixture(harness, "Stop Smoke");
+
       const { thread } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -328,9 +351,11 @@ describe.sequential("fake provider smoke lifecycle integration", () => {
         "idle",
         TURN_TIMEOUT_MS,
       );
+
       const interruptedEvents = (
         await getThreadEvents(harness.api, thread.id)
       ).filter((event) => event.type === "system/thread/interrupted");
+
       const latestInterruptedEvent = interruptedEvents.at(-1);
       expect(latestInterruptedEvent?.data.reason).toBe("manual-stop");
     }));

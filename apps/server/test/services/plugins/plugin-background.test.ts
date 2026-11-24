@@ -12,8 +12,8 @@ import {
   migrate,
   pluginSchedules,
   type DbConnection,
-} from "@bb/db";
-import type { Logger } from "@bb/logger";
+} from "@omnyo/db";
+import type { Logger } from "@omnyo/logger";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
 import {
   createPluginService,
@@ -21,6 +21,7 @@ import {
 } from "../../../src/services/plugins/plugin-service.js";
 import { testLogger } from "../../helpers/test-app.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
 
@@ -35,7 +36,7 @@ async function writePlugin(
     JSON.stringify({
       name: options.name,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Background fixture",
         description: "Background plugin fixture.",
         branding: { icon: "Zap" },
@@ -44,6 +45,7 @@ async function writePlugin(
     }),
   );
   await writeFile(join(rootDir, "server.ts"), options.serverSource);
+
   return rootDir;
 }
 
@@ -74,7 +76,7 @@ describe("plugin background services", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-bg-test-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-bg-test-"));
     service = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -86,6 +88,7 @@ describe("plugin background services", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
       serviceStopTimeoutMs: 100,
@@ -100,13 +103,13 @@ describe("plugin background services", () => {
 
   it("starts services after load and aborts them on reload", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-connector",
+      name: "omnyo-plugin-connector",
       serverSource: `
-        export default function plugin(bb: any) {
+        export default function plugin(api: any) {
           const g = globalThis as any;
           g.__connStarts = (g.__connStarts ?? 0);
           g.__connAborts = (g.__connAborts ?? 0);
-          bb.background.service("conn", {
+          api.background.service("conn", {
             start(signal: any) {
               g.__connStarts += 1;
               return new Promise<void>((resolve) => {
@@ -120,6 +123,7 @@ describe("plugin background services", () => {
         }
       `,
     });
+
     const entry = await service.installPath(rootDir);
     expect(entry.status).toBe("running");
     expect(entry.services).toEqual([{ name: "conn", state: "running" }]);
@@ -136,13 +140,14 @@ describe("plugin background services", () => {
   it("suspends every plugin but the kept ones without disabling them, then resumes them", async () => {
     globals.__suspendStarts = {};
     globals.__suspendAborts = {};
-    for (const name of ["bb-plugin-suspended", "bb-plugin-kept"]) {
+
+    for (const name of ["omnyo-plugin-suspended", "omnyo-plugin-kept"]) {
       const rootDir = await writePlugin(workDir, {
         name,
         serverSource: `
-          export default function plugin(bb: any) {
+          export default function plugin(api: any) {
             const g = globalThis as any;
-            bb.background.service("tick", {
+            api.background.service("tick", {
               start(signal: any) {
                 g.__suspendStarts[${JSON.stringify(name)}] =
                   (g.__suspendStarts[${JSON.stringify(name)}] ?? 0) + 1;
@@ -158,6 +163,7 @@ describe("plugin background services", () => {
           }
         `,
       });
+
       await service.installPath(rootDir);
     }
 
@@ -170,7 +176,7 @@ describe("plugin background services", () => {
     expect(service.getApi("kept")).toBeDefined();
     expect(service.isPluginExpectedToRun("suspended")).toBe(true);
     expect(service.isPluginExpectedToRun("kept")).toBe(true);
-    expect(globals.__suspendAborts).toEqual({ "bb-plugin-suspended": 1 });
+    expect(globals.__suspendAborts).toEqual({ "omnyo-plugin-suspended": 1 });
     expect(getInstalledPlugin(db, "suspended")?.enabled).toBe(true);
     expect(
       service.list().find((plugin) => plugin.id === "suspended"),
@@ -183,19 +189,22 @@ describe("plugin background services", () => {
     expect(service.getApi("suspended")).toBeDefined();
     expect(service.isPluginExpectedToRun("suspended")).toBe(true);
     expect(globals.__suspendStarts).toEqual({
-      "bb-plugin-suspended": 2,
-      "bb-plugin-kept": 1,
+      "omnyo-plugin-suspended": 2,
+      "omnyo-plugin-kept": 1,
     });
     expect(await service.resumeSuspendedPlugins()).toEqual([]);
   });
 
   it("rejects new interactions while a plugin is disposing", async () => {
     globals.__disposeRequestErrors = [];
+
     const requestPluginInteraction = vi.fn(async () => ({
       outcome: "cancelled" as const,
       reason: "plugin-disposed" as const,
     }));
+
     const interruptPluginInteractions = vi.fn(() => []);
+
     const local = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -209,25 +218,28 @@ describe("plugin background services", () => {
       pendingInteractions: {
         requestPluginInteraction,
         interruptPluginInteractions,
+        interruptOwnedPluginInteractions: vi.fn(() => []),
         setPluginDirectory: () => {},
       },
       dataDir: join(workDir, "data-dispose-request"),
+      vault: await openSecretVault(join(workDir, "data-dispose-request")),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
       serviceStopTimeoutMs: 2000,
     });
+
     try {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-dispose-request",
+        name: "omnyo-plugin-dispose-request",
         serverSource: `
-          export default function plugin(bb: any) {
+          export default function plugin(api: any) {
             const g = globalThis as any;
             g.__disposeRequestErrors = g.__disposeRequestErrors ?? [];
-            bb.background.service("request-on-stop", {
+            api.background.service("request-on-stop", {
               start(signal: any) {
                 return new Promise<void>((resolve) => {
                   signal.addEventListener("abort", () => {
-                    void bb.ui.requestInput({
+                    void api.ui.requestInput({
                       threadId: "thread-test",
                       rendererId: "form",
                       title: "Form",
@@ -243,6 +255,7 @@ describe("plugin background services", () => {
           }
         `,
       });
+
       await local.installPath(rootDir);
 
       await local.reload("dispose-request");
@@ -256,6 +269,145 @@ describe("plugin background services", () => {
     }
   });
 
+  it("honors a declared shutdown allowance without extending other services", async () => {
+    const rootDir = await writePlugin(workDir, {
+      name: "omnyo-plugin-declared-drain",
+      serverSource: `export default function plugin(api: any) {
+        api.background.service("stream", {
+          experimental_stopTimeoutMs: 300,
+          start(signal: AbortSignal) {
+            return new Promise<void>((resolve) => signal.addEventListener("abort", () => setTimeout(resolve, 150), { once: true }));
+          },
+        });
+      }`,
+    });
+
+    await service.installPath(rootDir);
+    expect((await service.reload("declared-drain")).ok).toBe(true);
+    expect(service.list().find((p) => p.id === "declared-drain")?.status).toBe(
+      "running",
+    );
+
+    const ordinary = await writePlugin(workDir, {
+      name: "omnyo-plugin-ordinary-drain",
+      serverSource: `export default function plugin(api: any) {
+        api.background.service("stream", {
+          start(signal: AbortSignal) {
+            return new Promise<void>((resolve) => signal.addEventListener("abort", () => setTimeout(resolve, 150), { once: true }));
+          },
+        });
+      }`,
+    });
+
+    await service.installPath(ordinary);
+    expect((await service.reload("ordinary-drain")).ok).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+
+  it.each([0, -1, 300_001, "slow"])(
+    "rejects an invalid declared shutdown allowance: %s",
+    async (allowance) => {
+      const rootDir = await writePlugin(workDir, {
+        name: "omnyo-plugin-invalid-drain",
+        serverSource: `export default function plugin(api: any) {
+        api.background.service("stream", { experimental_stopTimeoutMs: ${JSON.stringify(allowance)}, start() {} });
+      }`,
+      });
+
+      const result = await service.installPath(rootDir);
+      expect(result.status).toBe("error");
+      expect(result.statusDetail).toContain("experimental_stopTimeoutMs");
+    },
+  );
+
+  it.each([
+    "reload",
+    "disable",
+    "shutdown",
+    "suspend",
+    "remove",
+    "safe-mode",
+  ] as const)(
+    "settles late service settlement under the latest %s intent",
+    async (intent) => {
+      globals.__lateStarts = 0;
+      globals.__lateActive = 0;
+      globals.__lateMaximum = 0;
+      globals.__lateRelease = undefined;
+
+      const rootDir = await writePlugin(workDir, {
+        name: "omnyo-plugin-late-stop",
+        serverSource: `export default function plugin(api: any) {
+        const g = globalThis as any;
+        api.background.service("stream", {
+          start(signal: AbortSignal) {
+            g.__lateStarts += 1;
+            g.__lateActive += 1;
+            g.__lateMaximum = Math.max(g.__lateMaximum, g.__lateActive);
+            return new Promise<void>((resolve) => signal.addEventListener("abort", () => {
+              if (g.__lateStarts > 1) { g.__lateActive -= 1; resolve(); return; }
+              g.__lateRelease = () => { g.__lateActive -= 1; resolve(); };
+            }, { once: true }));
+          },
+        });
+      }`,
+      });
+
+      try {
+        await service.installPath(rootDir);
+        expect((await service.reload("late-stop")).ok).toBe(false);
+
+        if (intent === "disable") await service.setEnabled("late-stop", false);
+
+        if (intent === "shutdown") await service.stop();
+
+        if (intent === "suspend")
+          await service.suspendPlugins({ keep: () => false });
+
+        if (intent === "remove") await service.remove("late-stop");
+
+        if (intent === "safe-mode") await service.setSafeMode(true);
+        const release = globals.__lateRelease;
+
+        if (typeof release !== "function")
+          throw new Error("Expected a held service stop");
+        release();
+        await vi.waitFor(
+          () => {
+            if (intent === "reload") {
+              expect(globals.__lateStarts).toBe(2);
+              expect(
+                service.list().find((p) => p.id === "late-stop")?.status,
+              ).toBe("running");
+            } else {
+              expect(globals.__lateActive).toBe(0);
+              expect(service.getApi("late-stop")).toBeUndefined();
+
+              if (intent === "disable")
+                expect(
+                  service.list().find((p) => p.id === "late-stop")?.status,
+                ).toBe("disabled");
+            }
+          },
+          { timeout: 1000 },
+        );
+        expect(globals.__lateMaximum).toBe(1);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(globals.__lateStarts).toBe(intent === "reload" ? 2 : 1);
+      } finally {
+        const release = globals.__lateRelease;
+
+        if (
+          typeof release === "function" &&
+          globals.__lateActive === 1 &&
+          globals.__lateStarts === 1
+        )
+          release();
+        delete globals.__lateRelease;
+      }
+    },
+  );
+
   it("serializes concurrent reloads so a slow-stopping service never double-starts", async () => {
     const local = createPluginService({
       aiServices: createAiServiceRegistry(),
@@ -268,20 +420,22 @@ describe("plugin background services", () => {
       },
       logger,
       dataDir: join(workDir, "data-serialize"),
+      vault: await openSecretVault(join(workDir, "data-serialize")),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
       serviceStopTimeoutMs: 2000,
     });
+
     try {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-slowstop",
+        name: "omnyo-plugin-slowstop",
         serverSource: `
-          export default function plugin(bb: any) {
+          export default function plugin(api: any) {
             const g = globalThis as any;
             g.__slowActive = g.__slowActive ?? 0;
             g.__slowMaxActive = g.__slowMaxActive ?? 0;
             g.__slowStarts = g.__slowStarts ?? 0;
-            bb.background.service("slow", {
+            api.background.service("slow", {
               start(signal: any) {
                 g.__slowStarts += 1;
                 g.__slowActive += 1;
@@ -301,6 +455,7 @@ describe("plugin background services", () => {
           }
         `,
       });
+
       const entry = await local.installPath(rootDir);
       expect(entry.status).toBe("running");
       await Promise.all([local.reload("slowstop"), local.reload("slowstop")]);
@@ -316,10 +471,10 @@ describe("plugin background services", () => {
 
   it("marks the plugin degraded when a service ignores its abort", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-stubborn",
+      name: "omnyo-plugin-stubborn",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.background.service("socket", {
+        export default function plugin(api: any) {
+          api.background.service("socket", {
             start() {
               // Ignores the abort signal entirely.
               return new Promise(() => {});
@@ -328,6 +483,7 @@ describe("plugin background services", () => {
         }
       `,
     });
+
     await service.installPath(rootDir);
     const outcome = await service.reload("stubborn");
     const entry = service.list().find((p) => p.id === "stubborn");
@@ -349,13 +505,14 @@ describe("plugin background services", () => {
 
   it("reports a failed reload that kept the previous instance", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-keeper",
+      name: "omnyo-plugin-keeper",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.cli.register({ name: "keeper", summary: "keeper", run() { return { exitCode: 0, stdout: "ok" }; } });
+        export default function plugin(api: any) {
+          api.cli.register({ name: "keeper", summary: "keeper", run() { return { exitCode: 0, stdout: "ok" }; } });
         }
       `,
     });
+
     const installed = await service.installPath(rootDir);
     expect(installed.status).toBe("running");
     const healthy = await service.reload("keeper");
@@ -371,6 +528,7 @@ describe("plugin background services", () => {
     expect(entry?.statusDetail).toBe("reload failed: boom on load");
     expect(service.getApi("keeper")).toBeDefined();
     expect(outcome.ok).toBe(false);
+
     if (outcome.ok) throw new Error("unreachable");
     expect(outcome.error).toBe(
       'plugin "keeper" reload failed: boom on load (the previous instance is still running)',
@@ -379,7 +537,7 @@ describe("plugin background services", () => {
     expect((await service.reload()).ok).toBe(false);
     await writeFile(
       join(rootDir, "server.ts"),
-      `export default function plugin(bb: any) { bb.cli.register({ name: "keeper", summary: "keeper", run() { return { exitCode: 0, stdout: "ok" }; } }); }`,
+      `export default function plugin(api: any) { api.cli.register({ name: "keeper", summary: "keeper", run() { return { exitCode: 0, stdout: "ok" }; } }); }`,
     );
     expect((await service.reload("keeper")).ok).toBe(true);
     expect(
@@ -389,12 +547,12 @@ describe("plugin background services", () => {
 
   it("restarts a crashed service with backoff", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-crashy",
+      name: "omnyo-plugin-crashy",
       serverSource: `
-        export default function plugin(bb: any) {
+        export default function plugin(api: any) {
           const g = globalThis as any;
           g.__crashyStarts = 0;
-          bb.background.service("flaky", {
+          api.background.service("flaky", {
             async start(signal: any) {
               g.__crashyStarts += 1;
               if (g.__crashyStarts < 3) throw new Error("crash " + g.__crashyStarts);
@@ -405,6 +563,7 @@ describe("plugin background services", () => {
         }
       `,
     });
+
     await service.installPath(rootDir);
     await vi.waitFor(
       () => {
@@ -421,14 +580,14 @@ describe("plugin background services", () => {
 
   it("routes an uncaught exception from a service's async context to the supervisor", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-emitter",
+      name: "omnyo-plugin-emitter",
       serverSource: `
         import { EventEmitter } from "node:events";
-        export default function plugin(bb: any) {
+        export default function plugin(api: any) {
           const g = globalThis as any;
           g.__emitterStarts = 0;
           g.__emitterAborts = 0;
-          bb.background.service("imap", {
+          api.background.service("imap", {
             async start(signal: any) {
               g.__emitterStarts += 1;
               if (g.__emitterStarts === 1) {
@@ -445,12 +604,14 @@ describe("plugin background services", () => {
         }
       `,
     });
+
     const vitestListeners = process.listeners("uncaughtException");
     process.removeAllListeners("uncaughtException");
     const unclaimed: unknown[] = [];
     process.on("uncaughtException", (error) => {
       if (!service.handleUncaughtException(error)) unclaimed.push(error);
     });
+
     try {
       await service.installPath(rootDir);
       await vi.waitFor(
@@ -471,6 +632,7 @@ describe("plugin background services", () => {
       );
     } finally {
       process.removeAllListeners("uncaughtException");
+
       for (const listener of vitestListeners) {
         process.on("uncaughtException", listener);
       }
@@ -479,12 +641,12 @@ describe("plugin background services", () => {
 
   it("NeedsConfigurationError maps to needs-configuration and stops restarts", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-needy",
+      name: "omnyo-plugin-needy",
       serverSource: `
-        export default function plugin(bb: any) {
+        export default function plugin(api: any) {
           const g = globalThis as any;
           g.__needyStarts = (g.__needyStarts ?? 0);
-          bb.background.service("bot", {
+          api.background.service("bot", {
             async start() {
               g.__needyStarts += 1;
               const error = new Error("api key missing");
@@ -495,6 +657,7 @@ describe("plugin background services", () => {
         }
       `,
     });
+
     await service.installPath(rootDir);
     await vi.waitFor(() => {
       expect(service.list().find((p) => p.id === "needy")?.status).toBe(
@@ -513,15 +676,16 @@ describe("plugin background services", () => {
     });
   });
 
-  it("bb.status.needsConfiguration from the factory wins over running", async () => {
+  it("api.status.needsConfiguration from the factory wins over running", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-unconfigured",
+      name: "omnyo-plugin-unconfigured",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.status.needsConfiguration("set the token first");
+        export default function plugin(api: any) {
+          api.status.needsConfiguration("set the token first");
         }
       `,
     });
+
     const entry = await service.installPath(rootDir);
     expect(entry.status).toBe("needs-configuration");
     expect(entry.statusDetail).toBe("set the token first");
@@ -530,13 +694,14 @@ describe("plugin background services", () => {
 
   it("rejects an invalid cron at registration", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-badcron",
+      name: "omnyo-plugin-badcron",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.background.schedule("bad", "not a cron", async () => {});
+        export default function plugin(api: any) {
+          api.background.schedule("bad", "not a cron", async () => {});
         }
       `,
     });
+
     await service.installPath(rootDir);
     const entry = service.list().find((p) => p.id === "badcron");
     expect(entry?.status).toBe("error");
@@ -552,7 +717,7 @@ describe("plugin schedules", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-sched-test-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-sched-test-"));
     service = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -564,6 +729,7 @@ describe("plugin schedules", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
     });
@@ -576,17 +742,18 @@ describe("plugin schedules", () => {
 
   async function installTicker(): Promise<void> {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-ticker",
+      name: "omnyo-plugin-ticker",
       serverSource: `
-        export default function plugin(bb: any) {
+        export default function plugin(api: any) {
           const g = globalThis as any;
           g.__tickRuns = 0;
-          bb.background.schedule("tick", "*/5 * * * *", async () => {
+          api.background.schedule("tick", "*/5 * * * *", async () => {
             g.__tickRuns += 1;
           });
         }
       `,
     });
+
     await service.installPath(rootDir);
   }
 
@@ -611,11 +778,13 @@ describe("plugin schedules", () => {
     await service.sweepDueSchedules(now);
     expect(globals.__tickRuns).toBe(1);
     const row = listPluginSchedules(db, "ticker")[0];
+
     const expectedNext = CronExpressionParser.parse("*/5 * * * *", {
       currentDate: new Date(now),
     })
       .next()
       .getTime();
+
     expect(row?.nextRunAt).toBe(expectedNext);
     expect(row?.lastStatus).toBe("ok");
     expect(row?.lastRunAt).toBe(now);
@@ -645,6 +814,7 @@ describe("plugin schedules", () => {
       service.sweepDueSchedules(now),
     ]);
     expect(globals.__tickRuns).toBe(1);
+
     const claimed = claimPluginScheduledRun(db, {
       pluginId: "ticker",
       name: "tick",
@@ -652,20 +822,22 @@ describe("plugin schedules", () => {
       newNextRunAt: now + 60_000,
       now,
     });
+
     expect(claimed).toBe(false);
   });
 
   it("records last_error on failure and still advances the schedule", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-boomer",
+      name: "omnyo-plugin-boomer",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.background.schedule("boom", "*/5 * * * *", async () => {
+        export default function plugin(api: any) {
+          api.background.schedule("boom", "*/5 * * * *", async () => {
             throw new Error("sync exploded");
           });
         }
       `,
     });
+
     await service.installPath(rootDir);
     setNextRunAt(db, "boomer", "boom", Date.now() - 60_000);
     const now = Date.now();
@@ -695,21 +867,22 @@ describe("plugin schedules", () => {
 
   it("prunes rows for schedule names the plugin no longer registers", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-renamer",
+      name: "omnyo-plugin-renamer",
       serverSource: `
-        export default function plugin(bb: any) {
-          bb.background.schedule("old-name", "*/5 * * * *", async () => {});
+        export default function plugin(api: any) {
+          api.background.schedule("old-name", "*/5 * * * *", async () => {});
         }
       `,
     });
+
     await service.installPath(rootDir);
     expect(listPluginSchedules(db, "renamer").map((r) => r.name)).toEqual([
       "old-name",
     ]);
     await writeFile(
       join(rootDir, "server.ts"),
-      `export default function plugin(bb: any) {
-        bb.background.schedule("new-name", "*/5 * * * *", async () => {});
+      `export default function plugin(api: any) {
+        api.background.schedule("new-name", "*/5 * * * *", async () => {});
       }`,
     );
     await service.reload("renamer");

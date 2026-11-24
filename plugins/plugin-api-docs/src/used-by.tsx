@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { usePrefersReducedMotion } from "@/components/ui/hooks/use-media-query";
 import { Icon } from "@/components/ui/icon";
 
 import { cn } from "@/lib/utils";
@@ -10,6 +11,7 @@ import {
 } from "./scroll-edges";
 
 const SCROLL_OVERLAP_PX = 32;
+
 const MIN_SCROLL_STEP_PX = 80;
 
 export function usedByScrollStep(clientWidth: number): number {
@@ -30,21 +32,6 @@ export function scrollUsedBy(
     left: direction * usedByScrollStep(viewport.clientWidth),
     behavior: reducedMotion ? "auto" : "smooth",
   });
-}
-
-function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    if (!query) {
-      return;
-    }
-    const sync = () => setReduced(query.matches);
-    sync();
-    query.addEventListener("change", sync);
-    return () => query.removeEventListener("change", sync);
-  }, []);
-  return reduced;
 }
 
 function Caret({
@@ -86,10 +73,11 @@ export function UsedByList({
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const scroll = useScrollEdges(viewportRef);
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = usePrefersReducedMotion();
 
   const page = (direction: -1 | 1) => {
     const viewport = viewportRef.current;
+
     if (viewport) {
       scrollUsedBy(viewport, direction, { reducedMotion });
     }
@@ -154,6 +142,7 @@ export function UsedByPager({
   const [index, setIndex] = useState(0);
   const currentIndex = Math.min(index, items.length - 1);
   const item = items[currentIndex];
+
   if (!item) return null;
 
   return (
@@ -165,10 +154,15 @@ export function UsedByPager({
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
         event.stopPropagation();
-        setIndex(Math.max(0, Math.min(
-          items.length - 1,
-          currentIndex + (event.key === "ArrowLeft" ? -1 : 1),
-        )));
+        setIndex(
+          Math.max(
+            0,
+            Math.min(
+              items.length - 1,
+              currentIndex + (event.key === "ArrowLeft" ? -1 : 1),
+            ),
+          ),
+        );
       }}
     >
       {items.length > 1 ? (
@@ -183,7 +177,9 @@ export function UsedByPager({
         </button>
       ) : null}
       <div className="min-w-0 flex-1" aria-live="polite" aria-atomic="true">
-        <span className="sr-only">Example {currentIndex + 1} of {items.length}: </span>
+        <span className="sr-only">
+          Example {currentIndex + 1} of {items.length}:{" "}
+        </span>
         {renderItem(item)}
       </div>
       {items.length > 1 ? (

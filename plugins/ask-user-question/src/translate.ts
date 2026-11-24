@@ -12,11 +12,15 @@ import { NOT_UNIQUE_MESSAGE } from "./tool-definition.js";
 
 export function validateToolInput(input: ToolInput): string | null {
   const prompts = input.questions.map((question) => question.question);
+
   if (new Set(prompts).size !== prompts.length) return NOT_UNIQUE_MESSAGE;
+
   for (const question of input.questions) {
     const labels = question.options.map((option) => option.label);
+
     if (new Set(labels).size !== labels.length) return NOT_UNIQUE_MESSAGE;
   }
+
   return null;
 }
 
@@ -42,7 +46,9 @@ function optionValue(index: number, optionIndex: number): string {
 function normalizePreview(preview: string | undefined): string | undefined {
   if (preview === undefined) return undefined;
   const trimmed = preview.trim();
+
   if (trimmed.length === 0) return undefined;
+
   return trimmed.slice(0, MAX_OPTION_PREVIEW_LENGTH);
 }
 
@@ -57,6 +63,7 @@ export function buildInteractionPayload(input: ToolInput): InteractionPayload {
         const preview = question.multiSelect
           ? undefined
           : normalizePreview(option.preview);
+
         return {
           value: optionValue(index, optionIndex),
           label: option.label,
@@ -73,6 +80,7 @@ export function assertInteractionPayloadFits(
   payload: InteractionPayload,
 ): void {
   const byteLength = new TextEncoder().encode(JSON.stringify(payload)).length;
+
   if (byteLength > MAX_INTERACTION_PAYLOAD_BYTES) {
     throw new PreviewTooLargeError(byteLength);
   }
@@ -84,22 +92,28 @@ export function describeAnswers(
 ): { title: string; detail: string; payload: ToolResult } {
   const entries = Object.entries(result.answers);
   const [first] = payload.questions;
+
   const title =
     payload.questions.length === 1 && first && entries[0]
       ? `Answered ${first.prompt} — ${entries[0][1]}`
       : `Answered ${entries.length} of ${payload.questions.length} questions`;
+
   const detail = payload.questions
     .map((question) => {
       const answer = result.answers[question.prompt];
+
       return `- ${question.prompt} — ${answer ?? "no answer"}`;
     })
     .join("\n");
+
   return { title, detail, payload: result };
 }
 
 export function buildInteractionTitle(payload: InteractionPayload): string {
   const [first] = payload.questions;
+
   if (payload.questions.length === 1 && first) return first.shortLabel;
+
   return `${payload.questions.length} questions`;
 }
 
@@ -111,6 +125,7 @@ function selectedOptions(
     const option = question.options.find(
       (candidate) => candidate.value === value,
     );
+
     return option === undefined ? [] : [option];
   });
 }
@@ -122,13 +137,17 @@ function buildAnswerText(
   const labels = selectedOptions(question, answer).map(
     (option) => option.label,
   );
+
   if (labels.length > 0) {
     const selectedText = labels.join(", ");
+
     return answer.freeText
       ? `${selectedText}; ${answer.freeText}`
       : selectedText;
   }
+
   if (answer.freeText) return answer.freeText;
+
   return "";
 }
 
@@ -140,11 +159,15 @@ function buildAnnotation(
     answer.selected.length > 0 && answer.freeText !== undefined
       ? answer.freeText
       : undefined;
+
   const previews = selectedOptions(question, answer).flatMap((option) =>
     option.preview === undefined ? [] : [option.preview],
   );
+
   const preview = previews.length > 0 ? previews.join("\n\n") : undefined;
+
   if (notes === undefined && preview === undefined) return null;
+
   return {
     ...(preview === undefined ? {} : { preview }),
     ...(notes === undefined ? {} : { notes }),
@@ -158,12 +181,16 @@ export function buildToolResult(
   const answers: Record<string, string> = {};
   const annotations: Record<string, ToolResultAnnotation> = {};
   let freeformResponse: string | undefined;
+
   for (const question of payload.questions) {
     const answer = response.answers[question.id];
+
     if (answer === undefined) continue;
     const text = buildAnswerText(question, answer);
+
     if (text.length === 0) continue;
     answers[question.prompt] = text;
+
     if (
       payload.questions.length === 1 &&
       answer.selected.length === 0 &&
@@ -171,9 +198,12 @@ export function buildToolResult(
     ) {
       freeformResponse = answer.freeText;
     }
+
     const annotation = buildAnnotation(question, answer);
+
     if (annotation !== null) annotations[question.prompt] = annotation;
   }
+
   return {
     questions: payload.questions.map((question) => ({
       question: question.prompt,

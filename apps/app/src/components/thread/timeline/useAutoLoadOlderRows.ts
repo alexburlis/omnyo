@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBottomAnchoredScroll } from "@/components/ui/bottom-anchored-scroll-body.js";
 
-const AUTO_LOAD_OLDER_ROWS_PREFETCH_MARGIN_PX = 600;
+const LOAD_OLDER_ROWS_DISTANCE_PX = 1_200;
 
 interface UseAutoLoadOlderRowsArgs {
   hasOlderTimelineRows: boolean;
@@ -10,24 +10,14 @@ interface UseAutoLoadOlderRowsArgs {
 }
 
 interface AutoLoadOlderRows {
-  sentinelRef: (node: HTMLElement | null) => void;
   isAutoLoadEnabled: boolean;
   loadOlderRows: () => void;
 }
 
-function isSentinelWithinPrefetchRange({
-  scrollElement,
-  sentinel,
-}: {
-  scrollElement: HTMLElement;
-  sentinel: HTMLElement;
-}): boolean {
-  const scrollRect = scrollElement.getBoundingClientRect();
-  const sentinelRect = sentinel.getBoundingClientRect();
+function isNearTop(scrollElement: HTMLElement): boolean {
   return (
-    sentinelRect.bottom >=
-      scrollRect.top - AUTO_LOAD_OLDER_ROWS_PREFETCH_MARGIN_PX &&
-    sentinelRect.top <= scrollRect.bottom
+    scrollElement.scrollTop <
+    Math.max(LOAD_OLDER_ROWS_DISTANCE_PX, scrollElement.clientHeight)
   );
 }
 
@@ -37,36 +27,31 @@ export function useAutoLoadOlderRows({
   onLoadOlderRows,
 }: UseAutoLoadOlderRowsArgs): AutoLoadOlderRows {
   const bottomAnchor = useBottomAnchoredScroll();
-  const sentinelNodeRef = useRef<HTMLElement | null>(null);
-  const isIntersectingRef = useRef(false);
-  const [sentinelVersion, setSentinelVersion] = useState(0);
-  const [intersectionTick, setIntersectionTick] = useState(0);
+  const getScrollElement = bottomAnchor?.getScrollElement;
   const [autoLoadFailed, setAutoLoadFailed] = useState(false);
-
-  const sentinelRef = useCallback((node: HTMLElement | null) => {
-    sentinelNodeRef.current = node;
-    setSentinelVersion((version) => version + 1);
-  }, []);
+  const [settledLoads, setSettledLoads] = useState(0);
+  const inFlightRef = useRef(false);
 
   const isAutoLoadEnabled =
-    bottomAnchor !== null &&
+    getScrollElement !== undefined &&
     hasOlderTimelineRows &&
     onLoadOlderRows !== undefined &&
     !autoLoadFailed;
 
   const startLoad = useCallback(() => {
-    if (!onLoadOlderRows) {
-      return;
-    }
-    bottomAnchor?.captureScrollAnchor();
+    if (!onLoadOlderRows || inFlightRef.current) return;
+    inFlightRef.current = true;
     void (async () => {
       try {
         await onLoadOlderRows();
       } catch {
         setAutoLoadFailed(true);
+      } finally {
+        inFlightRef.current = false;
+        setSettledLoads((count) => count + 1);
       }
     })();
-  }, [bottomAnchor, onLoadOlderRows]);
+  }, [onLoadOlderRows]);
 
   const loadOlderRows = useCallback(() => {
     setAutoLoadFailed(false);
@@ -74,56 +59,46 @@ export function useAutoLoadOlderRows({
   }, [startLoad]);
 
   useEffect(() => {
-    if (!isAutoLoadEnabled) {
-      isIntersectingRef.current = false;
-      return;
-    }
-    const sentinel = sentinelNodeRef.current;
-    if (!sentinel) {
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries.at(-1);
-        isIntersectingRef.current = entry?.isIntersecting ?? false;
-        if (isIntersectingRef.current) {
-          setIntersectionTick((tick) => tick + 1);
-        }
-      },
-      {
-        root: bottomAnchor?.getScrollElement() ?? null,
-        rootMargin: `${AUTO_LOAD_OLDER_ROWS_PREFETCH_MARGIN_PX}px 0px 0px 0px`,
-      },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [bottomAnchor, isAutoLoadEnabled, sentinelVersion]);
+    const scrollElement = getScrollElement?.();
 
-  useEffect(() => {
-    if (
-      !isAutoLoadEnabled ||
-      isLoadingOlderTimelineRows ||
-      !isIntersectingRef.current
-    ) {
+    if (!isAutoLoadEnabled || isLoadingOlderTimelineRows || !scrollElement) {
       return;
     }
-    const sentinel = sentinelNodeRef.current;
-    const scrollElement = bottomAnchor?.getScrollElement();
-    if (!sentinel || !scrollElement) {
+
+    if (scrollElement.scrollHeight <= scrollElement.clientHeight) {
+      startLoad();
+
       return;
     }
-    if (!isSentinelWithinPrefetchRange({ scrollElement, sentinel })) {
-      isIntersectingRef.current = false;
-      return;
-    }
-    startLoad();
+
+    let lastScrollTop = scrollElement.scrollTop;
+
+    const onScroll = () => {
+      const scrollTop = scrollElement.scrollTop;
+      const movedUp = scrollTop < lastScrollTop;
+      lastScrollTop = scrollTop;
+
+      if (movedUp && isNearTop(scrollElement)) startLoad();
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0 && scrollElement.scrollTop <= 0) startLoad();
+    };
+
+    scrollElement.addEventListener("scroll", onScroll, { passive: true });
+    scrollElement.addEventListener("wheel", onWheel, { passive: true });
+
+    return () => {
+      scrollElement.removeEventListener("scroll", onScroll);
+      scrollElement.removeEventListener("wheel", onWheel);
+    };
   }, [
-    bottomAnchor,
-    intersectionTick,
+    getScrollElement,
     isAutoLoadEnabled,
     isLoadingOlderTimelineRows,
+    settledLoads,
     startLoad,
   ]);
 
-  return { sentinelRef, isAutoLoadEnabled, loadOlderRows };
+  return { isAutoLoadEnabled, loadOlderRows };
 }

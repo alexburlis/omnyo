@@ -1,4 +1,4 @@
-import type { ThreadListEntry } from "@bb/domain";
+import type { ThreadListEntry } from "@omnyo/domain";
 import {
   getCollapsedChildActivity,
   type CollapsedChildActivity,
@@ -76,6 +76,7 @@ function buildSortedItems(
   compareThreads: ThreadComparator,
 ): ProjectThreadItem[] {
   nodes.sort((left, right) => compareThreads(left.thread, right.thread));
+
   return nodes.map(buildThreadItem);
 }
 
@@ -95,6 +96,7 @@ function buildThreadNode({
 
   for (const childThread of childrenByParentId.get(thread.id) ?? []) {
     if (nextAncestorThreadIds.has(childThread.id)) continue;
+
     if (visitedThreadIds.has(childThread.id)) continue;
 
     childNodes.push(
@@ -111,6 +113,7 @@ function buildThreadNode({
   }
 
   const children = buildSortedItems(childNodes, compareThreads);
+
   return {
     thread,
     children,
@@ -138,14 +141,18 @@ export function resolveSidebarProjectId(
 ): string {
   const visitedThreadIds = new Set<string>([thread.id]);
   let current = thread;
+
   while (current.parentThreadId !== null) {
     const parent = threadById.get(current.parentThreadId);
+
     if (parent === undefined || visitedThreadIds.has(parent.id)) {
       break;
     }
+
     visitedThreadIds.add(parent.id);
     current = parent;
   }
+
   return current.projectId;
 }
 
@@ -160,9 +167,11 @@ export function buildChronologicalThreadList(
 
   for (const thread of projectThreads) {
     if (thread.parentThreadId === null) continue;
+
     if (!projectThreadIds.has(thread.parentThreadId)) continue;
 
     const children = childrenByParentId.get(thread.parentThreadId);
+
     if (children) {
       children.push(thread);
     } else {
@@ -175,6 +184,7 @@ export function buildChronologicalThreadList(
 
   for (const thread of projectThreads) {
     if (!isRootThread(thread, projectThreadIds)) continue;
+
     if (visitedThreadIds.has(thread.id)) continue;
 
     rootNodes.push(

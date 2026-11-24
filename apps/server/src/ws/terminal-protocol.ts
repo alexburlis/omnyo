@@ -1,7 +1,7 @@
 import {
   terminalClientMessageSchema,
   terminalServerMessageSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { ApiError } from "../errors.js";
 import type { AppDeps } from "../types.js";
 import { parseSocketMessage } from "./decode-payload.js";
@@ -43,6 +43,7 @@ function sendTerminalSocketError(args: TerminalSocketErrorArgs): void {
     code: args.code,
     message: args.message,
   });
+
   args.socket.send(JSON.stringify(payload));
 }
 
@@ -61,8 +62,10 @@ function closeTerminalSocketForError(
       code: error.body.code,
       message: error.body.message,
     });
+
     return;
   }
+
   closeTerminalSocketWithError({
     socket,
     code: "terminal_socket_error",
@@ -95,6 +98,7 @@ export function onTerminalSocketMessage(
     args.raw,
     terminalClientMessageSchema,
   );
+
   if (message === null) {
     return;
   }

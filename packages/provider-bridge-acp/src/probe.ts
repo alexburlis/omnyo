@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { withoutBridgeRuntimeEnv } from "@bb/provider-bridge-protocol/bridge-kit";
+import { withoutBridgeRuntimeEnv } from "@omnyo/provider-bridge-protocol/bridge-kit";
 import {
   AcpAgentExitedError,
   createAcpAgentConnection,
@@ -27,6 +27,7 @@ function describe(error: unknown): string {
   if (error instanceof AcpAgentExitedError) {
     return `the agent exited before it answered initialize: ${error.message}`;
   }
+
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -35,6 +36,7 @@ export async function probeAcpAgent(
 ): Promise<AcpAgentProbe> {
   const timeoutMs = request.timeoutMs ?? PROBE_TIMEOUT_MS;
   let connection: ReturnType<typeof createAcpAgentConnection> | undefined;
+
   try {
     connection = createAcpAgentConnection({
       command: request.command,
@@ -44,7 +46,7 @@ export async function probeAcpAgent(
       recordThreadId: null,
       onNotification: () => {},
       onRequest: (_method, _params, responder) => {
-        responder.error(-32601, "bb is probing this agent's capabilities");
+        responder.error(-32601, "Omnyo is probing this agent's capabilities");
       },
       onExit: () => {},
     });
@@ -53,6 +55,7 @@ export async function probeAcpAgent(
   }
 
   const connected = connection;
+
   const timeout = new Promise<never>((_resolve, reject) => {
     setTimeout(
       () =>
@@ -73,6 +76,7 @@ export async function probeAcpAgent(
       }),
       timeout,
     ]);
+
     return {
       reachable: true,
       fork: result.agentCapabilities?.sessionCapabilities?.fork != null,

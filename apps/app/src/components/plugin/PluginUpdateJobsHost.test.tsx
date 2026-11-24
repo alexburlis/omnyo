@@ -3,7 +3,7 @@
 import { MemoryRouter } from "react-router-dom";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { PluginUpdateJob } from "@bb/server-contract";
+import type { PluginUpdateJob } from "@omnyo/server-contract";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { pluginUpdateJobsQueryKey } from "@/hooks/queries/query-keys";
 import { appToast } from "@/components/ui/app-toast";
@@ -23,16 +23,20 @@ function mount(jobs: PluginUpdateJob[]) {
     "fetch",
     vi.fn(async () => new Response(JSON.stringify({ jobs }))),
   );
+
   const harness = createQueryClientTestHarness({
     queries: { staleTime: Infinity },
   });
+
   harness.queryClient.setQueryData(pluginUpdateJobsQueryKey(), jobs);
+
   const view = render(
     <MemoryRouter>
       <PluginUpdateJobsHost />
     </MemoryRouter>,
     { wrapper: harness.wrapper },
   );
+
   return { ...view, ...harness };
 }
 
@@ -49,6 +53,7 @@ it.each(["updated", "rolled-back"] as const)(
     );
     first.unmount();
     first.queryClient.clear();
+
     const completed: PluginUpdateJob = {
       ...base,
       state: "completed",
@@ -58,6 +63,7 @@ it.each(["updated", "rolled-back"] as const)(
         outcome,
       },
     };
+
     const second = mount([completed]);
     const toast = outcome === "updated" ? success : error;
     expect(toast).toHaveBeenCalledWith(

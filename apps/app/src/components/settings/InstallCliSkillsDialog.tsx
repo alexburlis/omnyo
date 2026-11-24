@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import type { Host } from "@bb/domain";
-import type { CliSkillMachineStatus } from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
-import { Checkbox } from "@bb/shared-ui/checkbox";
+import type { Host } from "@omnyo/domain";
+import type { CliSkillMachineStatus } from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { Checkbox } from "@omnyo/shared-ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
+} from "@omnyo/shared-ui/dialog";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
 
 interface InstallCliSkillsDialogContentProps {
@@ -37,6 +37,7 @@ function machineStatusLabel(args: {
   status: CliSkillMachineStatus | undefined;
 }): string | null {
   if (!args.connected) return "Disconnected";
+
   return args.status === undefined ? null : MACHINE_STATUS_LABELS[args.status];
 }
 
@@ -51,9 +52,12 @@ function InstallCliSkillsDialogContent({
     () => hosts.filter(isConnected).map((host) => host.id),
     [hosts],
   );
+
   const [selectedHostIds, setSelectedHostIds] =
     useState<readonly string[]>(connectedHostIds);
+
   const choosable = hosts.length > 1;
+
   const selected = choosable
     ? selectedHostIds.filter((hostId) => connectedHostIds.includes(hostId))
     : connectedHostIds;
@@ -61,7 +65,7 @@ function InstallCliSkillsDialogContent({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Install bb CLI skills</DialogTitle>
+        <DialogTitle>Install Omnyo CLI skills</DialogTitle>
         <DialogDescription>
           {choosable
             ? "Choose the machines to install them onto. Each one gets the skills in ~/.agents/skills and ~/.claude/skills, replacing any copy already there."
@@ -73,10 +77,12 @@ function InstallCliSkillsDialogContent({
         <div className="flex flex-col gap-1 py-1">
           {hosts.map((host) => {
             const connected = isConnected(host);
+
             const statusLabel = machineStatusLabel({
               connected,
               status: statusByHostId.get(host.id),
             });
+
             return (
               <label
                 key={host.id}
@@ -94,7 +100,10 @@ function InstallCliSkillsDialogContent({
                   }
                   aria-label={host.name}
                 />
-                <MachineStatusDot connected={connected} />
+                <MachineStatusDot
+                  connected={connected}
+                  label={connected ? "Online" : undefined}
+                />
                 <span className="min-w-0 truncate">{host.name}</span>
                 {statusLabel === null ? null : (
                   <span className="ml-auto shrink-0 text-xs text-subtle-foreground">

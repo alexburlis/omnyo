@@ -1,0 +1,15 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "use-minute-now",
+  "type": "registry:hook",
+  "title": "use-minute-now",
+  "description": "Omnyo hook \"use-minute-now\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
+  "files": [
+    {
+      "path": "registry/components/ui/hooks/use-minute-now.ts",
+      "content": "import { useSyncExternalStore } from \"react\";\n\nconst listeners = new Set<() => void>();\n\nlet tickNow = Date.now();\n\nlet ticker: ReturnType<typeof setInterval> | null = null;\n\nfunction tick(): void {\n  tickNow = Date.now();\n\n  for (const notify of listeners) notify();\n}\n\nfunction handleVisibilityChange(): void {\n  if (ticker !== null) {\n    clearInterval(ticker);\n    ticker = null;\n  }\n\n  if (\n    typeof document === \"undefined\" ||\n    document.visibilityState !== \"hidden\"\n  ) {\n    tick();\n    ticker = setInterval(tick, 30_000);\n  }\n}\n\nfunction subscribe(listener: () => void): () => void {\n  listeners.add(listener);\n\n  if (listeners.size === 1) {\n    handleVisibilityChange();\n\n    if (typeof document !== \"undefined\")\n      document.addEventListener(\"visibilitychange\", handleVisibilityChange);\n  }\n\n  return () => {\n    listeners.delete(listener);\n\n    if (listeners.size === 0) {\n      if (ticker !== null) clearInterval(ticker);\n      ticker = null;\n\n      if (typeof document !== \"undefined\")\n        document.removeEventListener(\n          \"visibilitychange\",\n          handleVisibilityChange,\n        );\n    }\n  };\n}\n\nfunction getSnapshot(): number {\n  return tickNow;\n}\n\nexport function useMinuteNow(): number {\n  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);\n}\n",
+      "type": "registry:hook",
+      "target": "components/ui/hooks/use-minute-now.ts"
+    }
+  ]
+}

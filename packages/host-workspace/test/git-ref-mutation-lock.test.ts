@@ -2,17 +2,18 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createDeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import {
   ProcessLocalQueuedLockTimeoutError,
   withGitRefMutationLock,
-} from "bb-environment-provider-host/process-local-lock";
+} from "omnyo-environment-provider-host/process-local-lock";
 
 const tempDirs: string[] = [];
 
 async function makeTempDir(name: string): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), `bb-${name}-`));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), `omnyo-${name}-`));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -26,16 +27,20 @@ async function expectPathsShareLock(
 ): Promise<void> {
   const firstEntered = createDeferredPromise<void>();
   const releaseFirst = createDeferredPromise<void>();
+
   const first = withGitRefMutationLock(firstCommonDir, async () => {
     firstEntered.resolve();
     await releaseFirst.promise;
   });
+
   await firstEntered.promise;
 
   let secondEntered = false;
+
   const second = withGitRefMutationLock(secondCommonDir, async () => {
     secondEntered = true;
   });
+
   try {
     await waitForLockContention();
     expect(secondEntered).toBe(false);
@@ -43,6 +48,7 @@ async function expectPathsShareLock(
     releaseFirst.resolve();
     await Promise.all([first, second]);
   }
+
   expect(secondEntered).toBe(true);
 }
 
@@ -78,13 +84,16 @@ describe("git ref mutation lock", () => {
     async () => {
       const dataVolumePrefix = "/System/Volumes/Data";
       const commonDir = process.cwd();
+
       const aliasDir = commonDir.startsWith(dataVolumePrefix)
         ? commonDir.slice(dataVolumePrefix.length)
         : `${dataVolumePrefix}${commonDir}`;
+
       const [commonStats, aliasStats] = await Promise.all([
         fs.stat(commonDir, { bigint: true }),
         fs.stat(aliasDir, { bigint: true }),
       ]);
+
       expect(aliasStats.dev).toBe(commonStats.dev);
       expect(aliasStats.ino).toBe(commonStats.ino);
 
@@ -96,10 +105,12 @@ describe("git ref mutation lock", () => {
     const commonDir = await makeTempDir("git-ref-lock-timeout");
     const firstEntered = createDeferredPromise<void>();
     const releaseFirst = createDeferredPromise<void>();
+
     const first = withGitRefMutationLock(commonDir, async () => {
       firstEntered.resolve();
       await releaseFirst.promise;
     });
+
     await firstEntered.promise;
 
     try {
@@ -116,26 +127,59 @@ describe("git ref mutation lock", () => {
 });
 
 describe("withGitRefMutationLock across processes", () => {
-  it("waits for a lock directory another process holds and takes over a stale one", async () => {
-    const commonDir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-ref-lock-"));
-    const lockPath = path.join(commonDir, "bb-ref-mutation.lock");
-    await fs.mkdir(lockPath);
-    let entered = false;
-    const run = withGitRefMutationLock(commonDir, async () => {
-      entered = true;
-    });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    expect(entered).toBe(false);
-    await fs.rm(lockPath, { recursive: true, force: true });
-    await run;
-    expect(entered).toBe(true);
-    await expect(fs.stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+  it.each(["omnyo-ref-mutation.lock", "bb-ref-mutation.lock"])(
+    "waits for a %s directory another process holds and takes over a stale one",
+    async (lockName) => {
+      const commonDir = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-lock-"));
+      const lockPath = path.join(commonDir, lockName);
+      await fs.mkdir(lockPath);
+      let entered = false;
 
-    await fs.mkdir(lockPath);
-    const stale = new Date(Date.now() - 11 * 60_000);
-    await fs.utimes(lockPath, stale, stale);
+      const run = withGitRefMutationLock(commonDir, async () => {
+        entered = true;
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(entered).toBe(false);
+      await fs.rm(lockPath, { recursive: true, force: true });
+      await run;
+      expect(entered).toBe(true);
+      await expect(fs.stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+      await fs.mkdir(lockPath);
+      const stale = new Date(Date.now() - 11 * 60_000);
+      await fs.utimes(lockPath, stale, stale);
+      await expect(
+        withGitRefMutationLock(commonDir, async () => "took over"),
+      ).resolves.toBe("took over");
+    },
+  );
+
+  it("holds both lock names during the work so an older daemon stays excluded", async () => {
+    const commonDir = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-lock-"));
+
+    const held = await withGitRefMutationLock(commonDir, async () =>
+      fs.readdir(commonDir),
+    );
+
+    expect(held.sort()).toEqual([
+      "bb-ref-mutation.lock",
+      "omnyo-ref-mutation.lock",
+    ]);
+    await expect(fs.readdir(commonDir)).resolves.toEqual([]);
+  });
+
+  it("releases the canonical lock when the legacy lock times out", async () => {
+    const commonDir = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-lock-"));
+    await fs.mkdir(path.join(commonDir, "bb-ref-mutation.lock"));
+
     await expect(
-      withGitRefMutationLock(commonDir, async () => "took over"),
-    ).resolves.toBe("took over");
+      withGitRefMutationLock(commonDir, async () => undefined, {
+        timeoutMs: 150,
+      }),
+    ).rejects.toThrow("Timed out waiting for the git ref lock");
+    await expect(
+      fs.stat(path.join(commonDir, "omnyo-ref-mutation.lock")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

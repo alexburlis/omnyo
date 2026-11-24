@@ -3,14 +3,15 @@ import {
   THREAD_SESSION_OPTIONS_STATE_KIND,
   THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND,
   pendingSessionOptionSelections,
+  importLegacyCoreThreadStateKindV1,
   threadProviderCommandsStateSchema,
   threadSessionOptionSelectionsStateSchema,
   threadSessionOptionsStateSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   ProviderCommand,
   ThreadTimelineSessionOption,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { ThreadEventWithMeta } from "./build-event-projection.js";
 
 function latestStatePayload(
@@ -19,16 +20,18 @@ function latestStatePayload(
 ): unknown {
   let latestSeq = -1;
   let payload: unknown;
+
   for (const { event, meta } of events) {
     if (
       event.type === "thread/extensionState/updated" &&
-      event.kind === kind &&
+      importLegacyCoreThreadStateKindV1(event.kind) === kind &&
       meta.seq > latestSeq
     ) {
       latestSeq = meta.seq;
       payload = event.payload;
     }
   }
+
   return payload;
 }
 
@@ -38,9 +41,11 @@ export function extractThreadProviderCommands(
   const state = threadProviderCommandsStateSchema.safeParse(
     latestStatePayload(events, THREAD_PROVIDER_COMMANDS_STATE_KIND),
   );
+
   if (!state.success) {
     return null;
   }
+
   return state.data.commands.map((command) => ({
     name: command.name,
     source: "command",
@@ -56,16 +61,20 @@ export function extractThreadSessionOptions(
   const state = threadSessionOptionsStateSchema.safeParse(
     latestStatePayload(events, THREAD_SESSION_OPTIONS_STATE_KIND),
   );
+
   if (!state.success) {
     return null;
   }
+
   const selections = threadSessionOptionSelectionsStateSchema.safeParse(
     latestStatePayload(events, THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND),
   );
+
   const pending = pendingSessionOptionSelections(
     state.data.options,
     selections.success ? selections.data.selections : {},
   );
+
   return state.data.options.map((option) => {
     const base = {
       id: option.id,
@@ -73,9 +82,11 @@ export function extractThreadSessionOptions(
       description: option.description ?? null,
       category: option.category ?? null,
     };
+
     const pendingValue = Object.hasOwn(pending, option.id)
       ? pending[option.id]
       : null;
+
     return option.type === "boolean"
       ? {
           ...base,

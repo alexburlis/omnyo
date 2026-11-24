@@ -1,7 +1,12 @@
 import { useEffect } from "react";
-import type { ThreadOpenFile } from "@bb/server-contract";
-import { createFilePreviewLineRange } from "@bb/client-core";
+import { useSetAtom } from "jotai";
+import type { ThreadOpenFile } from "@omnyo/server-contract";
+import {
+  createFilePreviewLineRange,
+  isHtmlFilePreviewPath,
+} from "@omnyo/client-core";
 import { wsManager } from "@/lib/ws";
+import { widenSecondaryPanelForPreviewAtom } from "./threadSecondaryPanelAtoms";
 import type { OpenSecondaryPanelTabRequest } from "./useThreadFileTabs";
 
 interface UseThreadOpenFileSignalParams {
@@ -18,6 +23,7 @@ function toOpenRequest(file: ThreadOpenFile): OpenSecondaryPanelTabRequest {
           startLineNumber: file.lineNumber,
           endLineNumber: file.lineNumber,
         });
+
   if (file.source === "workspace") {
     return {
       kind: "workspace-file-preview",
@@ -29,6 +35,7 @@ function toOpenRequest(file: ThreadOpenFile): OpenSecondaryPanelTabRequest {
       },
     };
   }
+
   return {
     kind: "thread-storage-file-preview",
     tab: { lineRange, path: file.path },
@@ -40,21 +47,31 @@ export function useThreadOpenFileSignal({
   environmentId,
   openTab,
 }: UseThreadOpenFileSignalParams): void {
+  const widenForPreview = useSetAtom(widenSecondaryPanelForPreviewAtom);
+
   useEffect(() => {
     if (threadId == null || environmentId === undefined) {
       return;
     }
+
     const apply = () => {
       const file = wsManager.consumePendingOpenFile(threadId);
+
       if (file) {
         openTab(toOpenRequest(file));
+
+        if (isHtmlFilePreviewPath(file.path)) {
+          widenForPreview();
+        }
       }
     };
+
     apply();
+
     return wsManager.onThreadOpen((signal) => {
       if (signal.threadId === threadId) {
         apply();
       }
     });
-  }, [threadId, environmentId, openTab]);
+  }, [threadId, environmentId, openTab, widenForPreview]);
 }

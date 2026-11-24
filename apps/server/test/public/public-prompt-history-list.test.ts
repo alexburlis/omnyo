@@ -1,5 +1,5 @@
-import { createPromptHistoryEntry, listQueuedThreadMessages } from "@bb/db";
-import { promptHistoryListResponseSchema } from "@bb/server-contract";
+import { createPromptHistoryEntry, listQueuedThreadMessages } from "@omnyo/db";
+import { promptHistoryListResponseSchema } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
   readAttachment,
@@ -21,16 +21,21 @@ describe("public prompt history list route", () => {
     async (type) => {
       await withTestHarness(async (harness) => {
         const { host } = seedHostSession(harness.deps);
+
         const { project: source } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const { project: destination } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const sourceThread = seedThread(harness.deps, { projectId: source.id });
+
         const destinationThread = seedThread(harness.deps, {
           projectId: destination.id,
         });
+
         const attachment = await storeAttachment(
           harness.deps.db,
           harness.deps.config.dataDir,
@@ -43,6 +48,7 @@ describe("public prompt history list route", () => {
             },
           ),
         );
+
         createPromptHistoryEntry(harness.deps.db, {
           projectId: source.id,
           threadId: sourceThread.id,
@@ -57,7 +63,9 @@ describe("public prompt history list route", () => {
         const history = promptHistoryListResponseSchema.parse(
           await readJson(await harness.app.request("/api/v1/prompt-history")),
         );
+
         const input = history.entries[0]!.input;
+
         const response = await harness.app.request(
           `/api/v1/threads/${destinationThread.id}/queued-messages`,
           {
@@ -85,14 +93,17 @@ describe("public prompt history list route", () => {
             )
           ).content.toString(),
         ).toBe("attachment bytes");
+
         const queued = listQueuedThreadMessages(
           harness.deps.db,
           destinationThread.id,
         )[0]!;
+
         expect(JSON.parse(queued.content)).toEqual([
           ...textInput("Review this attachment"),
           { type, path: attachment.path },
         ]);
+
         const edited = await harness.app.request(
           `/api/v1/threads/${destinationThread.id}/queued-messages/${queued.id}`,
           {
@@ -104,6 +115,7 @@ describe("public prompt history list route", () => {
             }),
           },
         );
+
         expect(edited.status).toBe(200);
         expect(
           listQueuedThreadMessages(harness.deps.db, destinationThread.id)[0]!
@@ -117,9 +129,11 @@ describe("public prompt history list route", () => {
     await withTestHarness(async (harness) => {
       const { host: hostA } = seedHostSession(harness.deps, { id: "host-a" });
       const { host: hostB } = seedHostSession(harness.deps, { id: "host-b" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: hostA.id,
       });
+
       const threadOn = (hostId: string) =>
         seedThread(harness.deps, {
           projectId: project.id,
@@ -129,6 +143,7 @@ describe("public prompt history list route", () => {
             path: `/tmp/${crypto.randomUUID()}`,
           }).id,
         });
+
       const source = threadOn(hostA.id);
       createPromptHistoryEntry(harness.deps.db, {
         projectId: project.id,
@@ -137,9 +152,11 @@ describe("public prompt history list route", () => {
         requestSequence: 1,
         input: [{ type: "localFile", path: "/tmp/report.txt" }],
       });
+
       const history = promptHistoryListResponseSchema.parse(
         await readJson(await harness.app.request("/api/v1/prompt-history")),
       );
+
       const input = history.entries[0]!.input;
       expect(input).toEqual([
         {
@@ -148,6 +165,7 @@ describe("public prompt history list route", () => {
           hostId: "host-a",
         },
       ]);
+
       const queue = (threadId: string) =>
         harness.app.request(`/api/v1/threads/${threadId}/queued-messages`, {
           method: "POST",
@@ -175,11 +193,14 @@ describe("public prompt history list route", () => {
   it("pages every prompt newest first with its project, thread, and scope", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const first = seedThread(harness.deps, { projectId: project.id });
       const second = seedThread(harness.deps, { projectId: project.id });
+
       const seed = (
         threadId: string,
         requestSequence: number,
@@ -195,10 +216,12 @@ describe("public prompt history list route", () => {
           input: textInput(text),
           createdAt,
         });
+
       const oldest = seed(first.id, 1, "Investigate auth flow", 10);
       const older = seed(first.id, 2, "Fix the login test", 20);
       const newer = seed(second.id, 1, "Write release notes", 30, "project");
       const newest = seed(second.id, 2, "Review release notes", 40);
+
       const page = async (query: string) =>
         promptHistoryListResponseSchema.parse(
           await readJson(
@@ -225,6 +248,7 @@ describe("public prompt history list route", () => {
           scope: "project",
         },
       ]);
+
       if (firstPage.nextCursor === null) throw new Error("expected a cursor");
 
       const secondPage = await page(`limit=2&cursor=${firstPage.nextCursor}`);

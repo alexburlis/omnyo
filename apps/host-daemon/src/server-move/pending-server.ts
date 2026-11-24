@@ -3,9 +3,10 @@ import { delimiter } from "node:path";
 import {
   serverHealthResponseSchema,
   type ServerMoveHealth,
-} from "@bb/host-daemon-contract";
-import { sanitizeInheritedChildProcessEnv } from "@bb/process-utils";
+} from "@omnyo/host-daemon-contract";
+import { sanitizeInheritedChildProcessEnv } from "@omnyo/process-utils";
 import { z } from "zod";
+import { maintenanceStatusSchema } from "@omnyo/server-contract";
 import type { FetchFn } from "../server-client.js";
 import { CommandDispatchError } from "../command-dispatch-support.js";
 import type { DetachedProcessSpawner } from "./service-manager.js";
@@ -13,6 +14,7 @@ import type { DetachedProcessSpawner } from "./service-manager.js";
 export const SERVER_MOVE_START_FAILED = "server_move_start_failed";
 
 const HEALTH_REQUEST_TIMEOUT_MS = 2_000;
+
 const PROCESS_POLL_INTERVAL_MS = 100;
 
 const pendingVerificationSchema = z.object({
@@ -22,7 +24,7 @@ const pendingVerificationSchema = z.object({
 });
 
 export interface PendingServerLaunchRequest {
-  bbServerEntry: string;
+  omnyoServerEntry: string;
   dataDir: string;
   serverPort: number;
   bindHost: string | null;
@@ -53,6 +55,7 @@ export interface StopProcessGroupArgs {
   timeoutMs: number;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
+  verifyOwner: () => Promise<void>;
 }
 
 export function createPendingServerEnv(
@@ -61,6 +64,7 @@ export function createPendingServerEnv(
 ): NodeJS.ProcessEnv {
   const sanitized = sanitizeInheritedChildProcessEnv({ env });
   const executableDirectory = dirname(process.execPath);
+
   return {
     ...sanitized,
     PATH:
@@ -69,7 +73,7 @@ export function createPendingServerEnv(
         : `${executableDirectory}${delimiter}${sanitized.PATH}`,
     ...(hostDaemonPort === null
       ? {}
-      : { BB_HOST_DAEMON_PORT: String(hostDaemonPort) }),
+      : { OMNYO_HOST_DAEMON_PORT: String(hostDaemonPort) }),
   };
 }
 
@@ -80,7 +84,7 @@ export function createDefaultPendingServerLauncher(
     spawnDetached({
       command: process.execPath,
       args: [
-        request.bbServerEntry,
+        request.omnyoServerEntry,
         "--data-dir",
         request.dataDir,
         "--server-port",
@@ -101,6 +105,7 @@ function signalProcessGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
   for (const target of [-pid, pid]) {
     try {
       process.kill(target, signal);
+
       return true;
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "EPERM") {
@@ -108,6 +113,7 @@ function signalProcessGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
       }
     }
   }
+
   return false;
 }
 
@@ -118,21 +124,32 @@ export function isProcessGroupAlive(pid: number): boolean {
 export async function stopProcessGroup(
   args: StopProcessGroupArgs,
 ): Promise<void> {
+  await args.verifyOwner();
+
   if (!signalProcessGroup(args.pid, "SIGTERM")) {
     return;
   }
+
   const deadline = args.now() + args.timeoutMs;
+
   while (args.now() < deadline) {
     if (!isProcessGroupAlive(args.pid)) {
       return;
     }
+
     await args.sleep(PROCESS_POLL_INTERVAL_MS);
   }
+
+  await args.verifyOwner();
   signalProcessGroup(args.pid, "SIGKILL");
   const killDeadline = args.now() + 2_000;
+
   while (args.now() < killDeadline && isProcessGroupAlive(args.pid)) {
     await args.sleep(PROCESS_POLL_INTERVAL_MS);
   }
+
+  if (isProcessGroupAlive(args.pid))
+    throw new Error("Pending process death could not be proved");
 }
 
 interface FetchJsonArgs {
@@ -147,9 +164,11 @@ async function fetchJson(args: FetchJsonArgs): Promise<unknown> {
     method: "GET",
     signal: AbortSignal.any([args.signal, AbortSignal.timeout(args.timeoutMs)]),
   });
+
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
+
   return response.json();
 }
 
@@ -175,6 +194,7 @@ export async function readServerMoveHealth(
       timeoutMs: args.timeoutMs,
     }),
   );
+
   return health.serverMove ?? null;
 }
 
@@ -184,19 +204,33 @@ export async function readPendingServerMoveId(
   return (await readServerMoveHealth(args))?.moveId ?? null;
 }
 
+export async function readPendingServerRuntime(args: ReadServerMoveHealthArgs) {
+  return maintenanceStatusSchema.parse(
+    await fetchJson({
+      fetchFn: args.fetchFn,
+      url: `${baseUrl(args.serverUrl)}/api/v1/server/maintenance`,
+      signal: args.signal,
+      timeoutMs: args.timeoutMs,
+    }),
+  ).runtime;
+}
+
 export async function waitForPendingServer(
   args: WaitForPendingServerArgs,
 ): Promise<void> {
   const deadline = args.now() + args.timeoutMs;
   let lastMessage = "The server did not answer yet";
+
   while (args.now() < deadline) {
     args.signal.throwIfAborted();
+
     if (!isProcessGroupAlive(args.pid)) {
       throw new CommandDispatchError(
         SERVER_MOVE_START_FAILED,
         `The imported server exited before it became ready. See ${args.logPath}`,
       );
     }
+
     try {
       const moveId = await readPendingServerMoveId({
         fetchFn: args.fetchFn,
@@ -204,6 +238,7 @@ export async function waitForPendingServer(
         signal: args.signal,
         timeoutMs: HEALTH_REQUEST_TIMEOUT_MS,
       });
+
       if (moveId !== args.moveId) {
         lastMessage =
           moveId === null
@@ -218,9 +253,11 @@ export async function waitForPendingServer(
             timeoutMs: HEALTH_REQUEST_TIMEOUT_MS,
           }),
         );
+
         if (verification.moveId === args.moveId && verification.verified) {
           return;
         }
+
         lastMessage =
           verification.message ?? "The imported server is not verified yet";
       }
@@ -228,8 +265,10 @@ export async function waitForPendingServer(
       args.signal.throwIfAborted();
       lastMessage = error instanceof Error ? error.message : String(error);
     }
+
     await args.sleep(args.pollIntervalMs);
   }
+
   throw new CommandDispatchError(
     SERVER_MOVE_START_FAILED,
     `The imported server did not become ready within ${Math.round(args.timeoutMs / 1000)}s: ${lastMessage}. See ${args.logPath}`,

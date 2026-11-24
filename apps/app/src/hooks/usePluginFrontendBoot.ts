@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { matchPath } from "react-router-dom";
 import {
   PLUGIN_FRONTEND_BOOT_TIMEOUT_MS,
   requestBrowserIdle,
@@ -7,7 +8,11 @@ import {
 import { markPluginFrontendSettleFloorReached } from "../lib/plugin-frontend-boot-state";
 import { bootPluginFrontends } from "../lib/plugin-frontend-lazy";
 import { whenRouteContentPainted } from "../lib/route-content-paint";
-import { getPluginPanelRoutePluginId } from "../lib/route-paths";
+import {
+  getPluginPanelRoutePluginId,
+  PROJECTLESS_THREAD_DETAIL_ROUTE_PATH,
+  THREAD_DETAIL_ROUTE_PATH,
+} from "../lib/route-paths";
 import { useSystemConfig } from "./queries/system-queries";
 
 export const PLUGIN_FRONTEND_SETTLE_FLOOR_MS = 15_000;
@@ -18,10 +23,19 @@ export function usePluginFrontendBoot(): void {
   useEffect(() => {
     if (!resolved) return;
     const routePluginId = getPluginPanelRoutePluginId(window.location.pathname);
-    if (routePluginId !== null) {
+
+    const pathname = window.location.pathname;
+
+    const isThreadRoute =
+      matchPath(THREAD_DETAIL_ROUTE_PATH, pathname) !== null ||
+      matchPath(PROJECTLESS_THREAD_DETAIL_ROUTE_PATH, pathname) !== null;
+
+    if (routePluginId !== null || isThreadRoute) {
       void bootPluginFrontends();
+
       return;
     }
+
     return scheduleDeferredPluginFrontendBoot(
       () => void bootPluginFrontends(),
       {
@@ -38,6 +52,7 @@ export function usePluginFrontendBoot(): void {
       markPluginFrontendSettleFloorReached,
       PLUGIN_FRONTEND_SETTLE_FLOOR_MS,
     );
+
     return () => window.clearTimeout(timeout);
   }, []);
 }

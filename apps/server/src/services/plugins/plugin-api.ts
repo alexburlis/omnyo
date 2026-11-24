@@ -1,9 +1,22 @@
+import { diagnosticRunningReadFetch } from "../system/running-read-diagnostics.js";
+import { isPerformanceDiagnosticsEnabled } from "../system/performance-diagnostics.js";
+import {
+  createNodeOmnyoSdk,
+  createRequestTimeoutFetch,
+  DEFAULT_CORE_REQUEST_TIMEOUT_MS,
+} from "@omnyo/sdk";
+import { INBOX_CALLER_PLUGIN_HEADER } from "@omnyo/domain";
 import {
   environmentCompositionSchema,
+  createThreadEventFilter,
+  validateEventSourceDeclaration,
+  validatePluginErrorReport,
   validateServerAccessProviderDeclaration,
   type NormalizedPluginEnvironmentComposition,
   type NormalizedPluginInteractionRequest,
-} from "@get-bb/plugin-sdk/internal/host-policy";
+  type PluginThreadEventFilter,
+} from "@omnyo/plugin-sdk/internal/host-policy";
+import { captureProcessError } from "@omnyo/process-utils/error-reporting";
 import { createMachineBootstrapApi } from "../machines/bootstrap.js";
 import type { MachineEnrollments } from "../machines/enrollments.js";
 import { listServerAccessProviders } from "./plugin-server-access-registry.js";
@@ -20,15 +33,15 @@ import {
   listPluginKvKeys,
   setPluginKvValue,
   type DbConnection,
-} from "@bb/db";
-import type { ThreadEventItemPresentation } from "@bb/domain";
+} from "@omnyo/db";
+import type { ThreadEventItemPresentation } from "@omnyo/domain";
 import type {
-  BbPluginApi,
+  PluginApi,
   PluginAgentConfiguration,
   PluginAgentConfigurationContext,
   PluginAgentToolContext,
   PluginRowPresentation,
-  PluginBbSdk,
+  PluginSdk,
   PluginAgentToolResult,
   PluginAgents,
   PluginBackground,
@@ -47,9 +60,7 @@ import type {
   PluginHosts,
   PluginKvStorage,
   PluginLogger,
-  PluginMentionItem,
   PluginMentionProviderRegistration,
-  PluginMentionSearchContext,
   PluginMentionTrigger,
   PluginMachines,
   PluginAiServices,
@@ -58,11 +69,14 @@ import type {
   ExperimentalPluginProviderEnvEntry,
   ExperimentalPluginProviderEnvHealth,
   ExperimentalPluginProviderEnvHealthContext,
+  ExperimentalPluginProviderModelNotice,
+  ExperimentalPluginProviderModelNoticeContext,
   ExperimentalPluginWebSocket,
   ExperimentalPluginWebSocketHandler,
   PluginProviders,
   PluginRealtime,
   PluginRpc,
+  PluginSecrets,
   PluginServerApi,
   PluginSettingDescriptors,
   PluginSettingValue,
@@ -76,7 +90,7 @@ import type {
   StandardSchemaV1,
   PluginRpcContract,
   ExperimentalPluginRpcHandlerContext,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import {
   KV_VALUE_MAX_BYTES,
   normalizeAgentToolRegistration,
@@ -106,21 +120,21 @@ import {
   validateSettingsUpdate,
   validatePluginAiServiceDeclaration,
   validatePluginProviderDeclaration,
-} from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/plugin-sdk/internal/host-policy";
 import type {
   NormalizedPluginAiService,
   NormalizedPluginEnvironmentProvider,
   NormalizedPluginMachineProvider,
   NormalizedPluginProviderDeclaration,
-} from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/plugin-sdk/internal/host-policy";
 import type {
-  BbSdk,
+  OmnyoSdk,
   ThreadForkArgs,
   PluginThreadMetadataListArgs,
   ThreadPluginMetadataArgs,
   ThreadPluginMetadataUpdateArgs,
   ThreadSpawnArgs,
-} from "@bb/sdk";
+} from "@omnyo/sdk";
 import { requestEnvironmentProviderRecheck } from "./plugin-environment-provider-registry.js";
 import { requestServerAccessRecheck } from "./plugin-server-access-registry.js";
 import {
@@ -129,14 +143,17 @@ import {
 } from "./plugin-rpc-caller.js";
 import type { ServerLogger } from "../../types.js";
 import type { PluginInteractionResult } from "../interactions/pending-interactions.js";
+import { createBoundedMentionSearch } from "./plugin-mention-search.js";
 import { appendPluginLogLine } from "./plugin-log.js";
 import {
   readPluginSettingsValues,
+  sealLegacySecretSettings,
   writePluginSettingsUpdate,
 } from "./plugin-settings.js";
+import type { PluginSecretStore } from "./plugin-secrets.js";
 
 export type {
-  BbPluginApi,
+  PluginApi,
   PluginAgentConfigurationContext,
   PluginAgentToolContext,
   PluginCliCommandInfo,
@@ -144,10 +161,10 @@ export type {
   PluginMentionTrigger,
   PluginThreadEventName,
   PluginThreadEventPayloads,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 
-class PluginContextStaleError extends Error {
-  constructor(pluginId: string) {
+export class PluginContextStaleError extends Error {
+  constructor(readonly pluginId: string) {
     super(
       `plugin "${pluginId}" used a stale API handle — it was reloaded or disabled; ` +
         `re-entry happens via a fresh factory call`,
@@ -160,17 +177,10 @@ export function isNeedsConfigurationError(error: unknown): error is Error {
   return error instanceof Error && error.name === "NeedsConfigurationError";
 }
 
-/**
- * The handler this plugin registered per hook, or null where it registered
- * none. A mapped type over the hook-name union rather than a loose map: a hook
- * added to the contract without an entry here fails to compile, which is what
- * keeps the registry and the contract from drifting.
- */
 export type PluginHookRecords = {
   [K in PluginHookName]: PluginHookHandler<K> | null;
 };
 
-/** Per-event handler lists recorded by `bb.events.on`; dropped with the handle. */
 type PluginThreadEventHandlers = {
   [E in PluginThreadEventName]: Array<PluginThreadEventHandler<E>>;
 };
@@ -191,6 +201,8 @@ export interface PluginWebSocketRouteRecord {
 }
 
 export interface PluginRpcHandler {
+  threadBootstrap: boolean;
+  dispatchReadiness: boolean;
   publication: ReturnType<typeof publishRpcMethod>;
   inputSchema: StandardSchemaV1;
   outputSchema: StandardSchemaV1;
@@ -219,15 +231,14 @@ interface PluginMentionProviderRecord {
   id: string;
   label: string;
   triggers: readonly PluginMentionTrigger[];
-  search: (
-    ctx: PluginMentionSearchContext,
-  ) => PluginMentionItem[] | Promise<PluginMentionItem[]>;
+  search: ReturnType<typeof createBoundedMentionSearch>;
   resolve: PluginMentionProviderRegistration["resolve"];
 }
 
 export interface PluginBackgroundServiceRecord {
   name: string;
   start: (signal: AbortSignal) => void | Promise<void>;
+  experimental_stopTimeoutMs: number | null;
 }
 
 interface PluginScheduleRecord {
@@ -253,9 +264,9 @@ type PluginSettingsListener = (
 ) => void;
 
 export interface PluginApiHandle {
-  api: BbPluginApi;
+  api: PluginApi;
   disposeHooks: Array<() => void | Promise<void>>;
-  /** Handlers recorded by `bb.onInstall`; run once after a fresh install. */
+
   installHandlers: Array<() => void | Promise<void>>;
   settings: {
     descriptors: PluginSettingDescriptors;
@@ -263,16 +274,21 @@ export interface PluginApiHandle {
   };
   databaseHandles: Database.Database[];
   threadEventHandlers: PluginThreadEventHandlers;
-  /** Hook handlers recorded by `bb.experimental_hooks.on`. */
+  threadEventFilters: WeakMap<object, PluginThreadEventFilter>;
+
   hooks: PluginHookRecords;
   environmentCompositions: Map<string, NormalizedPluginEnvironmentComposition>;
   environmentProviders: Map<string, NormalizedPluginEnvironmentProvider>;
   machineProviders: Map<string, NormalizedPluginMachineProvider>;
   serverAccessProviders: Map<
     string,
-    import("@get-bb/plugin-sdk").ServerAccessProviderDeclaration
+    import("@omnyo/plugin-sdk").ServerAccessProviderDeclaration
   >;
-  /** HTTP routes recorded by `bb.http.route`; dropped with the handle. */
+  eventSources: Map<
+    string,
+    import("@omnyo/plugin-sdk").PluginEventSourceDeclaration
+  >;
+
   httpRoutes: PluginHttpRouteRecord[];
   websocketRoutes: PluginWebSocketRouteRecord[];
   rpcHandlers: Map<string, PluginRpcHandler>;
@@ -287,6 +303,10 @@ export interface PluginApiHandle {
   providerEnvHealthResolvers: ReadonlyMap<
     string,
     PluginProviderEnvHealthResolver
+  >;
+  providerModelNoticeResolvers: ReadonlyMap<
+    string,
+    PluginProviderModelNoticeResolver
   >;
   agentConfigurationProvider: PluginAgentConfigurationProvider | null;
   instructionProvider: PluginInstructionProvider | null;
@@ -331,33 +351,126 @@ export type PluginProviderEnvHealthResolver = (
   | null
   | Promise<ExperimentalPluginProviderEnvHealth | null>;
 
+export type PluginProviderModelNoticeResolver = (
+  context: ExperimentalPluginProviderModelNoticeContext,
+) =>
+  | ExperimentalPluginProviderModelNotice
+  | null
+  | Promise<ExperimentalPluginProviderModelNotice | null>;
+
 function withPluginThreadAttribution<
   TArgs extends ThreadForkArgs | ThreadSpawnArgs,
 >(args: TArgs, pluginId: string): TArgs {
+  const claimsHome =
+    "experimental_pluginHome" in args && args.experimental_pluginHome === true;
+
   const attribution: Pick<ThreadSpawnArgs, "origin" | "originPluginId"> =
-    args.pluginMetadata !== undefined
+    args.pluginMetadata !== undefined || claimsHome
       ? { origin: "plugin", originPluginId: pluginId }
       : args.origin === undefined || args.origin === "plugin"
         ? { origin: "plugin", originPluginId: args.originPluginId ?? pluginId }
         : { origin: args.origin };
+
   return { ...args, ...attribution };
 }
 
+function createPluginIdentifiedSdk(args: {
+  assertLive(): void;
+  db: DbConnection;
+  logger: ServerLogger;
+  sdk: OmnyoSdk;
+  baseUrl: string;
+  pluginId: string;
+}): OmnyoSdk {
+  const timeoutFetch = diagnosticRunningReadFetch(
+    createRequestTimeoutFetch({
+      timeoutMs: DEFAULT_CORE_REQUEST_TIMEOUT_MS,
+    }),
+    () => isPerformanceDiagnosticsEnabled(args.db),
+    args.logger,
+  );
+
+  const identified = createNodeOmnyoSdk({
+    baseUrl: args.baseUrl,
+    fetch: (input, init) => {
+      args.assertLive();
+      const headers = new Headers(init?.headers);
+      headers.set(INBOX_CALLER_PLUGIN_HEADER, args.pluginId);
+
+      return timeoutFetch(input, { ...init, headers });
+    },
+  });
+
+  return {
+    ...identified,
+    subscribe(input) {
+      args.assertLive();
+
+      return args.sdk.subscribe(input);
+    },
+    experimental_desktopBrowsers: {
+      ...identified.experimental_desktopBrowsers,
+      subscribe(input) {
+        args.assertLive();
+
+        return identified.experimental_desktopBrowsers.subscribe(input);
+      },
+    },
+  };
+}
+
 function wrapSdkForPlugin(
-  sdk: BbSdk,
+  sdk: OmnyoSdk,
   pluginId: string,
-  rpcCallerSdk: BbSdk,
-): PluginBbSdk {
+  rpcCallerSdk: OmnyoSdk,
+  assertLive: () => void,
+): PluginSdk {
   return {
     ...sdk,
     plugins: {
       ...sdk.plugins,
       callRpc(args) {
+        assertLive();
+
         return rpcCallerSdk.plugins.callRpc(args);
       },
     },
     threads: {
       ...sdk.threads,
+      send(args) {
+        return sdk.threads.send({
+          ...args,
+          messageSource: { kind: "plugin", pluginId },
+        });
+      },
+      experimental_listStartMachines(args) {
+        return sdk.threads.experimental_listStartMachines({
+          ...args,
+          pluginId,
+        });
+      },
+      experimental_moveStart(args) {
+        return sdk.threads.experimental_moveStart({
+          ...args,
+          initiator: { kind: "plugin", pluginId },
+        });
+      },
+      experimental_importNative(args) {
+        return sdk.threads.experimental_importNative({
+          ...args,
+          origin: "plugin",
+          originPluginId: pluginId,
+        });
+      },
+      queuedMessages: {
+        ...sdk.threads.queuedMessages,
+        create(args) {
+          return sdk.threads.queuedMessages.create({
+            ...args,
+            messageSource: { kind: "plugin", pluginId },
+          });
+        },
+      },
       async getPluginMetadata(
         args: Omit<ThreadPluginMetadataArgs, "pluginId"> & {
           pluginId?: string;
@@ -428,35 +541,44 @@ function createStagedRegistrations<
       disposed: boolean;
     }
   >();
+
   return {
     register(declaration) {
       options.assertLive();
       const normalized = options.validate(declaration);
       const binding = options.bind(normalized.id);
+
       if (entries.has(normalized.id)) {
         throw new Error(options.alreadyRegisteredMessage(normalized.id));
       }
+
       const entry = {
         declaration: normalized,
         binding,
         disposer: null as { dispose(): void } | null,
         disposed: false,
       };
+
       if (options.isActivated()) {
         entry.disposer = options.registerLive(normalized, binding);
       } else if (options.isTaken?.(normalized.id) === true) {
         throw new Error(options.alreadyRegisteredMessage(normalized.id));
       }
+
       entries.set(normalized.id, entry);
+
       const dispose = (): void => {
         if (entry.disposed) return;
         entry.disposed = true;
         entry.disposer?.dispose();
+
         if (entries.get(normalized.id) === entry) {
           entries.delete(normalized.id);
         }
       };
+
       options.disposeHooks.push(dispose);
+
       return { dispose };
     },
     flush() {
@@ -482,35 +604,24 @@ export function createPluginApi(options: {
   logger: ServerLogger;
   db: DbConnection;
   dataDir: string;
-  getSdk: () => BbSdk | undefined;
+  secrets: PluginSecretStore;
+  getSdk: () => OmnyoSdk | undefined;
   getMachineEnrollments: () => MachineEnrollments;
   getAppUrl: () => string | null;
   getLoopbackBaseUrl: () => string | undefined;
-  /**
-   * This load's rpc caller token, attached to the plugin's
-   * `bb.sdk.plugins.callRpc` requests so handlers see it as the caller.
-   * Revoked when the handle is invalidated.
-   */
+
   rpcCaller: PluginRpcCallerCredential;
   publishSignal: (channel: string, payload: unknown) => void;
   settingsChanged: () => void;
   reportNeedsConfiguration: (message: string) => void;
   isAgentToolNameTaken: (name: string) => string | undefined;
   isEnvironmentProviderIdTaken: (id: string) => string | undefined;
+  isEventSourceFamilyTaken: (family: string) => string | undefined;
   isMachineProviderIdTaken: (id: string) => string | undefined;
   reportAgentToolProblem: (message: string) => void;
-  /**
-   * Schedules a re-attempt of every plugin-queued row
-   * (`bb.experimental_hooks.recheck`). Coalescing, pacing and the walk
-   * itself belong to the queue; this only asks for it.
-   */
+
   requestQueueDrain: () => void;
-  /**
-   * The names this plugin's manifest declares under
-   * `bb.branding.experimental_icons`: what a namespaced glyph
-   * (`"<pluginId>/<name>"`) in a tool presentation or a provider icon must
-   * name. Empty when the manifest declares none.
-   */
+
   declaredIconNames: ReadonlySet<string>;
   brandingIcon: string | undefined;
   requestInteraction: (
@@ -553,6 +664,7 @@ export function createPluginApi(options: {
     logger,
     db,
     dataDir,
+    secrets,
     getSdk,
     getAppUrl,
     getLoopbackBaseUrl,
@@ -576,22 +688,27 @@ export function createPluginApi(options: {
     isProviderIdTaken,
     assertProviderRegistrable,
   } = options;
+
   let invalidated = false;
   let activated = false;
-  let wrappedSdk: PluginBbSdk | undefined;
+  let wrappedSdk: PluginSdk | undefined;
   let pendingNeedsConfiguration: string | null = null;
   const pendingAgentToolProblems: string[] = [];
   const pendingSharedPorts = new Map<string, readonly number[]>();
   const disposeHooks: Array<() => void | Promise<void>> = [];
   const installHandlers: Array<() => void | Promise<void>> = [];
+
   const settingsRecord: PluginApiHandle["settings"] = {
     descriptors: {},
     listeners: [],
   };
+
   const databaseHandles: Database.Database[] = [];
+
   const threadEventHandlers: PluginThreadEventHandlers = {
     "experimental_thread.events": [],
     "experimental_thread.parentChanged": [],
+    "experimental_thread.maintenance": [],
     "experimental_terminal.input": [],
     "experimental_host.deleted": [],
     "experimental_environment.removed": [],
@@ -608,22 +725,35 @@ export function createPluginApi(options: {
     "message.cancelled": [],
     "thread.unarchived": [],
   };
+
+  const threadEventFilters = new WeakMap<object, PluginThreadEventFilter>();
+
   const hooks: PluginHookRecords = {
     "message.dispatch": null,
   };
+
   const environmentCompositions = new Map<
     string,
     NormalizedPluginEnvironmentComposition
   >();
+
   const environmentProviders = new Map<
     string,
     NormalizedPluginEnvironmentProvider
   >();
+
   const machineProviders = new Map<string, NormalizedPluginMachineProvider>();
+
   const serverAccessProviders = new Map<
     string,
-    import("@get-bb/plugin-sdk").ServerAccessProviderDeclaration
+    import("@omnyo/plugin-sdk").ServerAccessProviderDeclaration
   >();
+
+  const eventSources = new Map<
+    string,
+    import("@omnyo/plugin-sdk").PluginEventSourceDeclaration
+  >();
+
   const httpRoutes: PluginHttpRouteRecord[] = [];
   const websocketRoutes: PluginWebSocketRouteRecord[] = [];
   const rpcHandlers = new Map<string, PluginRpcHandler>();
@@ -632,11 +762,20 @@ export function createPluginApi(options: {
   const backgroundServices: PluginBackgroundServiceRecord[] = [];
   const schedules: PluginScheduleRecord[] = [];
 
+  let staleError: PluginContextStaleError | undefined;
+
+  function stale(): PluginContextStaleError {
+    staleError ??= new PluginContextStaleError(pluginId);
+
+    return staleError;
+  }
+
   function assertLive(): void {
-    if (invalidated) throw new PluginContextStaleError(pluginId);
+    if (invalidated) throw stale();
   }
 
   const prefix = `[plugin:${pluginId}]`;
+
   function emitLog(
     level: "debug" | "info" | "warn" | "error",
     message: string,
@@ -644,6 +783,7 @@ export function createPluginApi(options: {
     logger[level](`${prefix} ${message}`);
     appendPluginLogLine(dataDir, pluginId, level, message);
   }
+
   const log: PluginLogger = {
     debug: (message) => emitLog("debug", message),
     info: (message) => emitLog("info", message),
@@ -658,13 +798,16 @@ export function createPluginApi(options: {
     assertLive();
     const normalized = normalizeInteractionRequest(request);
     const glyph = normalized.presentation?.icon?.glyph;
+
     const iconProblem =
       glyph === undefined
         ? null
         : undeclaredIconProblem(pluginId, declaredIconNames, glyph);
+
     if (iconProblem !== null) {
       throw new Error(`ui.requestInput presentation.icon ${iconProblem}`);
     }
+
     const pending = requestInteraction({
       ...normalized,
       presentation: fillPluginPresentation({
@@ -677,9 +820,11 @@ export function createPluginApi(options: {
       }),
       signal: requestOptions?.signal,
     });
+
     if (!requestOptions?.signal?.aborted) {
       detachActivePluginToolCallForUserInput();
     }
+
     return pending;
   }
 
@@ -687,22 +832,28 @@ export function createPluginApi(options: {
     async get(key) {
       assertLive();
       const raw = getPluginKvValue(db, pluginId, key);
+
       if (raw === undefined) return undefined;
+
       return JSON.parse(raw);
     },
     async set(key, value) {
       assertLive();
       const json = JSON.stringify(value);
+
       if (json === undefined) {
         throw new Error(`kv value for "${key}" is not JSON-serializable`);
       }
+
       const bytes = Buffer.byteLength(json, "utf8");
+
       if (bytes > KV_VALUE_MAX_BYTES) {
         throw new Error(
           `kv value for "${key}" is ${bytes} bytes; the limit is ${KV_VALUE_MAX_BYTES} (256KB). ` +
             `Store large data in storage.database() instead.`,
         );
       }
+
       setPluginKvValue(db, pluginId, key, json);
     },
     async delete(key) {
@@ -711,27 +862,60 @@ export function createPluginApi(options: {
     },
     async list(kvPrefix) {
       assertLive();
+
       return listPluginKvKeys(db, pluginId, kvPrefix);
     },
   };
 
+  const experimental_secrets: PluginSecrets = {
+    async get(name) {
+      assertLive();
+      await secrets.sealLegacyTreeOnce();
+
+      return secrets.get(name);
+    },
+    async set(name, value) {
+      assertLive();
+      await secrets.sealLegacyTreeOnce();
+      await secrets.set(name, value);
+    },
+    async delete(name) {
+      assertLive();
+      await secrets.sealLegacyTreeOnce();
+      await secrets.delete(name);
+    },
+    async list(secretPrefix) {
+      assertLive();
+      await secrets.sealLegacyTreeOnce();
+
+      return secrets.list(secretPrefix);
+    },
+  };
+
   let databaseHandle: Database.Database | undefined;
+
   const storage: PluginStorage = {
     kv,
     database() {
       assertLive();
+
       if (databaseHandle?.open) return databaseHandle;
+
       if (databaseHandle) {
         const index = databaseHandles.indexOf(databaseHandle);
+
         if (index !== -1) databaseHandles.splice(index, 1);
       }
+
       const dir = join(dataDir, "plugins", pluginId);
       mkdirSync(dir, { recursive: true });
       const database = new Database(join(dir, "data.db"));
+      database.pragma("auto_vacuum = INCREMENTAL");
       database.pragma("journal_mode = WAL");
       database.pragma("busy_timeout = 5000");
       databaseHandle = database;
       databaseHandles.push(database);
+
       return database;
     },
     migrate(database, statements) {
@@ -743,17 +927,23 @@ export function createPluginApi(options: {
   const settings: PluginSettings = {
     define(descriptors) {
       assertLive();
+
       const validated = registerSettingDescriptors(
         settingsRecord.descriptors,
         descriptors as Record<string, unknown>,
       );
+
+      void sealLegacySecretSettings({ secrets, descriptors: validated });
+
       type Values = PluginSettingsValues<typeof descriptors>;
+
       return {
         async get() {
           assertLive();
+
           return (await readPluginSettingsValues({
             db,
-            dataDir,
+            secrets,
             pluginId,
             descriptors: validated,
           })) as Values;
@@ -761,22 +951,28 @@ export function createPluginApi(options: {
         async experimental_set(values) {
           assertLive();
           const rawValues: Record<string, unknown> = {};
+
           for (const [key, value] of Object.entries(values)) {
             rawValues[key] = value;
           }
+
           const errors = validateSettingsUpdate(validated, rawValues);
+
           if (errors.length > 0) {
             throw new Error(errors.join("; "));
           }
+
           const storeArgs = {
             db,
-            dataDir,
+            secrets,
             pluginId,
             descriptors: settingsRecord.descriptors,
           };
+
           const prev = await readPluginSettingsValues(storeArgs);
           await writePluginSettingsUpdate({ ...storeArgs, values: rawValues });
           const next = await readPluginSettingsValues(storeArgs);
+
           if (JSON.stringify(next) !== JSON.stringify(prev)) {
             for (const listener of settingsRecord.listeners) {
               try {
@@ -788,11 +984,13 @@ export function createPluginApi(options: {
                 );
               }
             }
+
             if (activated) settingsChanged();
           }
+
           return (await readPluginSettingsValues({
             db,
-            dataDir,
+            secrets,
             pluginId,
             descriptors: validated,
           })) as Values;
@@ -808,6 +1006,7 @@ export function createPluginApi(options: {
   const http: PluginHttp = {
     route(method, path, handler, opts) {
       assertLive();
+
       const route = normalizeHttpRouteRegistration(
         method,
         path,
@@ -815,16 +1014,19 @@ export function createPluginApi(options: {
         opts,
         httpRoutes,
       );
+
       httpRoutes.push({ ...route, handler });
     },
     experimental_websocket(path, handler, opts) {
       assertLive();
+
       const route = normalizeWebSocketRouteRegistration(
         path,
         handler,
         opts,
         websocketRoutes,
       );
+
       websocketRoutes.push({
         ...route,
         handler,
@@ -837,6 +1039,7 @@ export function createPluginApi(options: {
   const rpc: PluginRpc = {
     register(contract, handlers, options) {
       assertLive();
+
       for (const [name, record] of normalizeRpcRegistration(
         contract,
         handlers,
@@ -883,16 +1086,20 @@ export function createPluginApi(options: {
   };
 
   const agentTools: PluginAgentToolRecord[] = [];
+
   const providerRegistrations = createStagedRegistrations({
     validate: (declaration: PluginProviderDeclaration) => {
       const normalized = validatePluginProviderDeclaration(declaration);
+
       const problem =
         normalized.icon === undefined
           ? null
           : undeclaredIconProblem(pluginId, declaredIconNames, normalized.icon);
+
       if (problem !== null) {
         throw new Error(providerIconRefusalMessage(normalized.id, problem));
       }
+
       return normalized;
     },
     bind: assertProviderRegistrable,
@@ -903,38 +1110,53 @@ export function createPluginApi(options: {
     isActivated: () => activated,
     disposeHooks,
   });
+
   const providerEnvResolvers = new Map<string, PluginProviderEnvResolver>();
+
   const providerEnvHealthResolvers = new Map<
     string,
     PluginProviderEnvHealthResolver
   >();
+
+  const providerModelNoticeResolvers = new Map<
+    string,
+    PluginProviderModelNoticeResolver
+  >();
+
   let agentConfigurationProvider: PluginAgentConfigurationProvider | null =
     null;
+
   let instructionProvider: PluginInstructionProvider | null = null;
 
   const agents: PluginAgents = {
     configure(provider) {
       assertLive();
+
       if (agentConfigurationProvider !== null) {
         throw new Error("agent configuration is already registered");
       }
+
       if (typeof provider !== "function") {
         throw new Error(
           "configure requires a provider function (context) => ({ tools, skills, instructions? })",
         );
       }
+
       agentConfigurationProvider = provider;
     },
     contributeInstructions(provider) {
       assertLive();
+
       if (instructionProvider !== null) {
         throw new Error("agent instructions are already registered");
       }
+
       if (typeof provider !== "function") {
         throw new Error(
           "contributeInstructions requires a provider function (ctx) => string | null",
         );
       }
+
       instructionProvider = provider;
     },
     registerTool(tool: {
@@ -949,37 +1171,53 @@ export function createPluginApi(options: {
       ): PluginAgentToolResult | Promise<PluginAgentToolResult>;
     }) {
       assertLive();
+
       const record = normalizeAgentToolRegistration({
         pluginId,
         declaredIconNames,
         tool,
       });
+
       const owner = isAgentToolNameTaken(record.name);
+
       if (owner !== undefined) {
         const problem = `tool "${record.name}" is already registered by plugin "${owner}" — not registered`;
+
         if (activated) reportAgentToolProblem(problem);
         else pendingAgentToolProblems.push(problem);
+
         return;
       }
+
       if (agentTools.some((existing) => existing.name === record.name)) {
         throw new Error(`tool "${record.name}" is already registered`);
       }
+
       agentTools.push(record);
     },
   };
 
   const mentionProviders: PluginMentionProviderRecord[] = [];
+
   const ui: PluginUi = {
     requestInput,
     registerMentionProvider(provider) {
       assertLive();
-      mentionProviders.push(
-        normalizeMentionProviderRegistration(provider, mentionProviders),
+
+      const record = normalizeMentionProviderRegistration(
+        provider,
+        mentionProviders,
       );
+
+      mentionProviders.push({
+        ...record,
+        search: createBoundedMentionSearch(record.search),
+      });
     },
   };
 
   const cliRecord: PluginApiHandle["cli"] = { registration: null };
+
   const cli: PluginCli = {
     register(registration) {
       assertLive();
@@ -993,10 +1231,12 @@ export function createPluginApi(options: {
   const status: PluginStatusApi = {
     needsConfiguration(message) {
       assertLive();
+
       const normalized =
         typeof message === "string" && message.length > 0
           ? message
           : "needs configuration";
+
       if (activated) reportNeedsConfiguration(normalized);
       else pendingNeedsConfiguration = normalized;
     },
@@ -1005,21 +1245,25 @@ export function createPluginApi(options: {
   const server: PluginServerApi = {
     get experimental_appUrl(): string | null {
       assertLive();
+
       return getAppUrl();
     },
     get loopbackBaseUrl(): string {
       assertLive();
       const baseUrl = getLoopbackBaseUrl();
+
       if (baseUrl === undefined) {
         throw new Error(
-          "bb.server.loopbackBaseUrl is not available until the server is listening — " +
+          "api.server.loopbackBaseUrl is not available until the server is listening — " +
             "use it inside handlers, services, or timers, not at factory load time",
         );
       }
+
       return baseUrl;
     },
     get experimental_dataDir(): string {
       assertLive();
+
       return dataDir;
     },
   };
@@ -1027,17 +1271,21 @@ export function createPluginApi(options: {
   const hosts: PluginHosts = {
     experimental_client({ contract, experimental_signals }) {
       assertLive();
+
       return {
         async call(method, input, callOptions) {
           assertLive();
+
           if (!activated) {
             throw new Error(
               "host plugin calls are unavailable during factory registration; call from a handler, service, or timer",
             );
           }
+
           if (typeof method !== "string" || contract[method] === undefined) {
             throw new Error(`unknown host rpc method "${String(method)}"`);
           }
+
           if (
             typeof callOptions !== "object" ||
             callOptions === null ||
@@ -1046,6 +1294,7 @@ export function createPluginApi(options: {
           ) {
             throw new Error(`host rpc method "${method}" requires a host id`);
           }
+
           return callPluginHost({
             contract,
             method,
@@ -1066,21 +1315,26 @@ export function createPluginApi(options: {
         },
         experimental_onWorkerExit(handler) {
           assertLive();
+
           if (typeof handler !== "function") {
             throw new Error("host worker exit subscription requires a handler");
           }
+
           hostWorkerExitHandlers.push(handler);
           let subscribed = true;
+
           return () => {
             if (!subscribed) return;
             subscribed = false;
             const index = hostWorkerExitHandlers.indexOf(handler);
+
             if (index >= 0) hostWorkerExitHandlers.splice(index, 1);
           };
         },
         experimental_onSignal(signal, handler) {
           assertLive();
           const descriptor = experimental_signals?.[signal];
+
           if (
             typeof signal !== "string" ||
             signal.length === 0 ||
@@ -1090,20 +1344,25 @@ export function createPluginApi(options: {
           ) {
             throw new Error(`unknown host signal "${String(signal)}"`);
           }
+
           if (typeof handler !== "function") {
             throw new Error("host signal subscription requires a handler");
           }
+
           const record: PluginHostSignalHandler = {
             signal,
             payloadSchema: descriptor.payload,
             handler,
           };
+
           hostSignalHandlers.push(record);
           let subscribed = true;
+
           return () => {
             if (!subscribed) return;
             subscribed = false;
             const index = hostSignalHandlers.indexOf(record);
+
             if (index >= 0) hostSignalHandlers.splice(index, 1);
           };
         },
@@ -1111,10 +1370,12 @@ export function createPluginApi(options: {
     },
     ensureSharedPortTunnel(hostId) {
       assertLive();
+
       return ensureSharedPortTunnel(hostId);
     },
     declareSharedPorts(hostId, ports) {
       assertLive();
+
       if (activated) declareSharedPorts(hostId, ports);
       else {
         pendingSharedPorts.set(
@@ -1124,10 +1385,12 @@ export function createPluginApi(options: {
       }
     },
   };
+
   const events: PluginEvents = {
-    on(event, handler) {
+    on(event, handler, options) {
       assertLive();
       const handlers = threadEventHandlers[event];
+
       if (handlers === undefined) {
         throw new Error(
           `unknown event "${String(event)}" — supported events: ${Object.keys(
@@ -1135,29 +1398,41 @@ export function createPluginApi(options: {
           ).join(", ")}`,
         );
       }
-      handlers.push(handler);
+
+      if (options === undefined) {
+        handlers.push(handler);
+      } else {
+        if (event !== "experimental_thread.events") {
+          throw new Error(
+            "Event type filters require experimental_thread.events",
+          );
+        }
+
+        const subscription: typeof handler = (payload) => handler(payload);
+        threadEventFilters.set(
+          subscription,
+          createThreadEventFilter(options.experimental_eventTypes),
+        );
+        handlers.push(subscription);
+      }
     },
   };
 
   const experimental_hooks: PluginHooks = {
     on(hook, handler) {
       assertLive();
+
       if (hooks[hook] !== null) {
-        // Two handlers from one plugin for one hook would make the order
-        // within the plugin invisible. Say so at registration rather than
-        // silently keeping one.
         throw new Error(pluginHookAlreadyRegisteredMessage(hook));
       }
+
       storePluginHook(hooks, hook, handler);
     },
     async recheck(hook) {
       assertLive();
-      // One hook key exists; the parameter selects which question to re-pose
-      // and widens additively when a second key ever ships.
+
       void hook;
-      // Resolves on SCHEDULING. The walk runs on a later macrotask, and the
-      // caller is not the one it reports to — a failed re-attempt lands on the
-      // row it failed, like every other background drain.
+
       requestQueueDrain();
     },
   };
@@ -1184,17 +1459,29 @@ export function createPluginApi(options: {
       );
       providerEnvHealthResolvers.set(providerId, resolve);
     },
+    experimental_contributeModelNotice(providerId, resolve) {
+      assertLive();
+      validateProviderEnvContribution(
+        "provider model notice contribution",
+        providerId,
+        resolve,
+        providerModelNoticeResolvers,
+      );
+      providerModelNoticeResolvers.set(providerId, resolve);
+    },
   };
 
   const experimental_environments: PluginEnvironments = {
     register(
       declaration:
-        | import("@get-bb/plugin-sdk").PluginEnvironmentProviderDeclaration
+        | import("@omnyo/plugin-sdk").PluginEnvironmentProviderDeclaration
         | NormalizedPluginEnvironmentComposition,
     ) {
       assertLive();
+
       if ("machineProviderId" in declaration) {
         const composition = environmentCompositionSchema.parse(declaration);
+
         const problem =
           composition.icon === null
             ? null
@@ -1203,38 +1490,48 @@ export function createPluginApi(options: {
                 declaredIconNames,
                 composition.icon,
               );
+
         if (problem !== null)
           throw new Error(providerIconRefusalMessage(composition.id, problem));
         const owner = options.isEnvironmentProviderIdTaken(composition.id);
+
         if (owner !== undefined)
           throw new Error(
             `environment provider "${composition.id}" is already registered by plugin "${owner}"`,
           );
+
         if (environmentProviders.has(composition.id))
           throw new Error(
             "Environment ID is already registered as a concrete provider",
           );
         environmentCompositions.set(composition.id, composition);
+
         return;
       }
+
       if (environmentCompositions.has(declaration.id))
         throw new Error(
           "Environment ID is already registered as a composition",
         );
+
       const provider =
         validatePluginEnvironmentProviderDeclaration(declaration);
+
       const problem =
         provider.icon === null
           ? null
           : undeclaredIconProblem(pluginId, declaredIconNames, provider.icon);
+
       if (problem !== null)
         throw new Error(providerIconRefusalMessage(provider.id, problem));
       const owner = options.isEnvironmentProviderIdTaken(provider.id);
+
       if (owner !== undefined) {
         throw new Error(
           `environment provider "${provider.id}" is already registered by plugin "${owner}"`,
         );
       }
+
       environmentProviders.set(provider.id, provider);
     },
     async recheck() {
@@ -1243,11 +1540,31 @@ export function createPluginApi(options: {
     },
   };
 
-  const experimental_serverAccess: import("@get-bb/plugin-sdk").PluginServerAccess =
+  const experimental_eventSources: import("@omnyo/plugin-sdk").PluginEventSources =
+    {
+      register(source) {
+        assertLive();
+        validateEventSourceDeclaration(source);
+
+        const owner = eventSources.has(source.family)
+          ? pluginId
+          : options.isEventSourceFamilyTaken(source.family);
+
+        if (owner !== undefined)
+          throw new Error(
+            `event source "${source.family}" is already registered by plugin "${owner}"`,
+          );
+
+        eventSources.set(source.family, source);
+      },
+    };
+
+  const experimental_serverAccess: import("@omnyo/plugin-sdk").PluginServerAccess =
     {
       register(declaration) {
         assertLive();
         validateServerAccessProviderDeclaration(declaration);
+
         if (
           serverAccessProviders.has(declaration.id) ||
           listServerAccessProviders().some(
@@ -1260,6 +1577,7 @@ export function createPluginApi(options: {
             `Server access provider "${declaration.id}" is already registered`,
           );
         }
+
         serverAccessProviders.set(declaration.id, declaration);
       },
       recheck() {
@@ -1275,36 +1593,45 @@ export function createPluginApi(options: {
     },
     prepare(request) {
       assertLive();
+
       return options.getMachineEnrollments().prepare(request);
     },
     waitForConnection(request) {
       assertLive();
+
       return options.getMachineEnrollments().waitForConnection(request);
     },
   };
+
   const experimental_machines: PluginMachines = {
     ...createMachineBootstrapApi(enrollmentApi),
     async getResource(hostId) {
       assertLive();
+
       return getHost(db, hostId)?.resource ?? null;
     },
     register(declaration) {
       assertLive();
       const provider = validatePluginMachineProviderDeclaration(declaration);
+
       const problem = undeclaredIconProblem(
         pluginId,
         declaredIconNames,
         provider.icon,
       );
+
       if (problem !== null) {
         throw new Error(providerIconRefusalMessage(provider.id, problem));
       }
+
       const owner = options.isMachineProviderIdTaken(provider.id);
+
       if (owner !== undefined) {
         throw new Error(
           `machine provider "${provider.id}" is already registered by plugin "${owner}"`,
         );
       }
+
       machineProviders.set(provider.id, provider);
     },
   };
@@ -1318,13 +1645,37 @@ export function createPluginApi(options: {
     isActivated: () => activated,
     disposeHooks,
   });
+
   const experimental_aiServices: PluginAiServices = {
     register: aiServiceRegistrations.register,
   };
 
-  const api: BbPluginApi = {
+  const api: PluginApi = {
     pluginId,
     log,
+    experimental_reportError(error, report) {
+      assertLive();
+      const valid = validatePluginErrorReport(error, report);
+      captureProcessError(valid.error, {
+        level: "error",
+        stage: "plugin",
+        ...(valid.experimental_diagnostic === undefined
+          ? {}
+          : {
+              diagnostic: {
+                operation: "plugin" as const,
+                dependency: "plugin" as const,
+                ...valid.experimental_diagnostic,
+              },
+            }),
+        tags: {
+          plugin: pluginId,
+          operation: valid.operation,
+          code: valid.code,
+        },
+        fingerprint: ["plugin", pluginId, valid.operation, valid.code],
+      });
+    },
     settings,
     storage,
     http,
@@ -1340,28 +1691,41 @@ export function createPluginApi(options: {
     experimental_environments,
     experimental_machines,
     experimental_serverAccess,
+    experimental_eventSources,
+    experimental_secrets,
     status,
     server,
     hosts,
     experimental_aiServices,
-    get sdk(): PluginBbSdk {
+    get sdk(): PluginSdk {
       assertLive();
       const sdk = getSdk();
       const loopbackBaseUrl = getLoopbackBaseUrl();
+
       if (!sdk || loopbackBaseUrl === undefined) {
         throw new Error(
-          "bb.sdk is not available until the server is listening — " +
+          "api.sdk is not available until the server is listening — " +
             "use it inside handlers, services, or timers, not at factory load time",
         );
       }
+
       wrappedSdk ??= wrapSdkForPlugin(
-        sdk,
+        createPluginIdentifiedSdk({
+          assertLive,
+          sdk,
+          baseUrl: loopbackBaseUrl,
+          pluginId,
+          db: options.db,
+          logger: options.logger,
+        }),
         pluginId,
         createPluginRpcCallerSdk({
           baseUrl: loopbackBaseUrl,
           token: rpcCaller.token,
         }),
+        assertLive,
       );
+
       return wrappedSdk;
     },
     onDispose(hook) {
@@ -1370,9 +1734,11 @@ export function createPluginApi(options: {
     },
     onInstall(handler) {
       assertLive();
+
       if (typeof handler !== "function") {
         throw new Error("onInstall expects a function");
       }
+
       installHandlers.push(handler);
     },
   };
@@ -1384,11 +1750,13 @@ export function createPluginApi(options: {
     settings: settingsRecord,
     databaseHandles,
     threadEventHandlers,
+    threadEventFilters,
     hooks,
     environmentCompositions,
     environmentProviders,
     machineProviders,
     serverAccessProviders,
+    eventSources,
     httpRoutes,
     websocketRoutes,
     rpcHandlers,
@@ -1401,6 +1769,7 @@ export function createPluginApi(options: {
     listProviderDeclarations: providerRegistrations.values,
     providerEnvResolvers,
     providerEnvHealthResolvers,
+    providerModelNoticeResolvers,
     get agentConfigurationProvider() {
       return agentConfigurationProvider;
     },
@@ -1417,15 +1786,20 @@ export function createPluginApi(options: {
       providerRegistrations.flush();
       aiServiceRegistrations.flush();
       activated = true;
+
       const cliWarning = cliRecord.registration
         ? pluginCliCollisionWarning(pluginId, cliRecord.registration.name)
         : null;
+
       if (cliWarning) emitLog("warn", cliWarning);
       pendingSharedPorts.clear();
+
       for (const problem of pendingAgentToolProblems) {
         reportAgentToolProblem(problem);
       }
+
       pendingAgentToolProblems.length = 0;
+
       if (pendingNeedsConfiguration !== null) {
         reportNeedsConfiguration(pendingNeedsConfiguration);
         pendingNeedsConfiguration = null;
@@ -1434,6 +1808,7 @@ export function createPluginApi(options: {
     closeWebSockets() {
       for (const route of websocketRoutes) {
         route.active = false;
+
         for (const socket of route.sockets) {
           try {
             socket.close(1012, "Plugin reloaded or disabled");

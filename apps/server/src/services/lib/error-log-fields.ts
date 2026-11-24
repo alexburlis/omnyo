@@ -17,6 +17,7 @@ interface ExpectedFallbackErrorLogFields {
 }
 
 type LoggableError = unknown;
+
 type RuntimeErrorLogFields = { err: LoggableError } | ProductionErrorLogFields;
 
 export function expectedFallbackErrorLogFields(
@@ -27,12 +28,15 @@ export function expectedFallbackErrorLogFields(
     errorMessage: error.body.message,
     errorStatus: error.status,
   };
+
   if (error.body.details !== undefined) {
     fields.errorDetails = error.body.details;
   }
+
   if (error.body.retryable !== undefined) {
     fields.errorRetryable = error.body.retryable;
   }
+
   return fields;
 }
 

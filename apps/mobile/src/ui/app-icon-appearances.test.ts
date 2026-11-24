@@ -5,9 +5,11 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
 const MOBILE_ROOT = join(HERE, "..", "..");
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
 const COLOR_TYPES_WITH_ALPHA = new Set([4, 6]);
 
 const iosIconsSchema = z.object({
@@ -22,6 +24,7 @@ function readIosIcons(): { light: string; dark: string } {
   const raw: unknown = JSON.parse(
     readFileSync(join(MOBILE_ROOT, "app.json"), "utf8"),
   );
+
   return iosIconsSchema.parse(raw).expo.ios.icon;
 }
 
@@ -35,6 +38,7 @@ function readPngHeader(relativePath: string): {
     PNG_SIGNATURE,
   );
   expect(bytes.subarray(12, 16).toString("ascii")).toBe("IHDR");
+
   return {
     width: bytes.readUInt32BE(16),
     height: bytes.readUInt32BE(20),
@@ -50,6 +54,7 @@ describe("iOS app icon appearances", () => {
 
   it("ships both variants at Apple's 1024x1024 layout size", () => {
     const { light, dark } = readIosIcons();
+
     for (const path of [light, dark]) {
       const { width, height } = readPngHeader(path);
       expect({ path, width, height }).toEqual({

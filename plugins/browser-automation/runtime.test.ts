@@ -6,22 +6,28 @@ import {
   writeFile,
   symlink,
   rm,
+  chmod,
 } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { decodeOutput, runtimeEnvironment } from "./runtime.js";
+import { createRuntime, decodeOutput, runtimeEnvironment } from "./runtime.js";
 
 const dirs: string[] = [];
+
 afterEach(async () => {
   await Promise.all(
     dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
 });
+
 const done = { type: "done", exitCode: 0, durationMs: 1 };
+
 const endpoint = "ws://127.0.0.1:9999/cdp?token=private-secret";
+
 const frames = (...items: object[]) =>
   items.map((item) => JSON.stringify(item)).join("\n");
+
 describe("runtime output boundary", () => {
   it("returns a readable temporary JPEG path without embedding image bytes", async () => {
     const home = await mkdtemp(join(tmpdir(), "browser-capture-test-"));
@@ -30,12 +36,14 @@ describe("runtime output boundary", () => {
     const path = join(home, "tmp", "capture.jpg");
     const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
     await writeFile(path, jpeg);
+
     const result = await decodeOutput(
       frames({ type: "image", path, width: 640, height: 400 }, done),
       home,
       endpoint,
       "1.0.0-test",
     );
+
     expect(result.images).toEqual([
       {
         path: await realpath(path),
@@ -82,6 +90,7 @@ describe("runtime output boundary", () => {
       endpoint,
       "1.0.0-test",
     );
+
     expect(result.text).not.toContain("private-secret");
     expect(result.text).not.toContain("/tmp/isolated");
   });
@@ -89,6 +98,7 @@ describe("runtime output boundary", () => {
     const token = "native-private-credential";
     const path = `/devtools/browser/${token}`;
     const endpoint = `ws://127.0.0.1:9999${path}`;
+
     const result = await decodeOutput(
       frames(
         {
@@ -101,6 +111,7 @@ describe("runtime output boundary", () => {
       endpoint,
       "1.0.0-test",
     );
+
     expect(result.text).not.toContain(token);
     expect(result.text).not.toContain(path);
     expect(result.text).not.toContain(endpoint);
@@ -110,6 +121,7 @@ describe("runtime output boundary", () => {
     const token = "failed-connection-private-token";
     const path = `/devtools/browser/${token}`;
     const endpoint = `ws://127.0.0.1:9999${path}`;
+
     const result = await decodeOutput(
       frames(
         {
@@ -124,6 +136,7 @@ describe("runtime output boundary", () => {
       endpoint,
       "1.0.0-test",
     );
+
     expect(result.exitCode).toBe(1);
     expect(result.text).toContain("WebSocketError");
     expect(result.text).not.toContain(token);
@@ -176,5 +189,58 @@ describe("runtime output boundary", () => {
         "1.0.0-test",
       ),
     ).rejects.toThrow("escaped");
+  });
+});
+
+const describeOnPosix = process.platform === "win32" ? describe.skip : describe;
+
+describeOnPosix("runtime session", () => {
+  it("keeps the session open after a run passes the output limit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "browser-runtime-test-"));
+    dirs.push(root);
+    const binary = join(root, "dev-browser");
+    await writeFile(
+      binary,
+      `#!${process.execPath}
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "daemon") {
+  fs.writeFileSync(process.env.DEV_BROWSER_HOME + "/daemon.pid", String(process.pid));
+  setInterval(() => {}, 1000);
+} else {
+  const script = args[args.indexOf("-e") + 1];
+  if (script === "flood") setInterval(() => fs.writeSync(1, "x".repeat(64000)), 5);
+  else {
+    fs.writeSync(1, JSON.stringify({ type: "result", value: script }) + "\\n");
+    fs.writeSync(1, JSON.stringify({ type: "done", exitCode: 0, durationMs: 1 }) + "\\n");
+  }
+}
+`,
+    );
+    await chmod(binary, 0o755);
+
+    const session = await createRuntime({
+      runtime: { binary, version: "1.0.0-test", source: "release" },
+      dataDir: root,
+      tempDir: join(root, "sessions"),
+      connectionUrl: "ws://127.0.0.1:9/devtools/browser/test",
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    try {
+      const flood = await session.run(
+        "flood",
+        10_000,
+        AbortSignal.timeout(10_000),
+      );
+
+      expect(flood.exitCode).toBe(1);
+      expect(flood.text).toContain("DevBrowser output exceeded 512 KB");
+      expect(
+        await session.run("after", 10_000, AbortSignal.timeout(10_000)),
+      ).toEqual({ text: "after", images: [], exitCode: 0 });
+    } finally {
+      await session.close();
+    }
   });
 });

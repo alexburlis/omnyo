@@ -1,4 +1,4 @@
-import { collectOptionalFieldPaths } from "@bb/test-helpers";
+import { collectOptionalFieldPaths } from "@omnyo/test-helpers";
 import {
   TERMINAL_COLS_MAX,
   TERMINAL_DATA_MAX_BASE64_LENGTH,
@@ -7,7 +7,7 @@ import {
   threadScope,
   turnScope,
   type JsonObject,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import * as contract from "../src/index.js";
 import {
@@ -40,6 +40,7 @@ import {
 } from "../src/index.js";
 
 const CLIENT_REQUEST_ID = "creq_23456789ab";
+
 const ACP_LAUNCH_SPEC = {
   displayName: "Local ACP",
   command: "local-acp",
@@ -76,10 +77,15 @@ const ACP_LAUNCH_SPEC = {
   },
 };
 
+type RpcResultFixture =
+  | JsonObject
+  | contract.HostDaemonOnlineRpcResult<"host.read_file_chunk">;
+
 type OnlineRpcResponseResultFixtures = Record<
   HostDaemonOnlineRpcCommandType,
-  JsonObject
+  RpcResultFixture
 >;
+
 type SettledResponseResultFixtures = Record<
   HostDaemonSettledCommandType,
   JsonObject
@@ -113,6 +119,7 @@ const WORKSPACE_STATUS_AVAILABLE_RESULT: JsonObject = {
       insertions: 3,
       deletions: 1,
       lineStatsComplete: true,
+      fileCount: 1,
       files: [
         {
           path: "src/index.ts",
@@ -137,6 +144,7 @@ const WORKSPACE_STATUS_AVAILABLE_RESULT: JsonObject = {
       insertions: 5,
       deletions: 0,
       lineStatsComplete: true,
+      fileCount: 1,
       files: [
         {
           path: "README.md",
@@ -149,6 +157,7 @@ const WORKSPACE_STATUS_AVAILABLE_RESULT: JsonObject = {
       baseRef: "abc123",
       aheadCount: 1,
       behindCount: 0,
+      squashMergeCheckComplete: true,
       hasCommittedUnmergedChanges: true,
       commits: [
         {
@@ -174,10 +183,81 @@ const WORKSPACE_DIFF_AVAILABLE_RESULT: JsonObject = {
   },
 };
 
+const DIRECT_PROBE_INSPECTION_RESULT = {
+  hostId: "host-primary",
+  workerInstanceId: "worker-current",
+  sessionId: "session-current",
+  probe: null,
+};
+
+const DIRECT_PROBE_OWNER = {
+  phase: "uncommitted",
+  ownerFingerprint: "a".repeat(64),
+  coordinatorInstanceId: "coordinator-owner",
+  sessionId: "session-owner",
+};
+
 const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
+  "host.housekeeping.status": {
+    status: "complete",
+    checkedAt: 1700000000000,
+    memoryPressure: { status: "observed", level: "normal" },
+    idleGraceMs: 120000,
+    reapedSessions: [
+      {
+        environmentId: "environment-idle",
+        threadId: "thread-idle",
+        providerId: "codex",
+        idleForMs: 180000,
+      },
+    ],
+    retainedSessions: [],
+  },
+  "host.prepare_workspace_identity_v1": {
+    status: "current",
+    rootPath: "/workspace/.omnyo",
+  },
+  "host.preview.status": {
+    state: "stopped",
+    checkedAt: 0,
+    detail: null,
+    runId: null,
+  },
+  "host.preview.ensure": {
+    state: "online",
+    checkedAt: 0,
+    detail: null,
+    runId: "preview-run",
+  },
+  "terminal.foreground": { state: "busy", command: "npm run dev" },
+  "preview.http": {
+    status: 200,
+    headers: [["content-type", "text/plain"]],
+    bodyBase64: "",
+  },
+  "preview.socket.open": { protocol: "" },
+  "preview.socket.read": { messages: [], closed: false },
+  "preview.socket.write": {},
+  "preview.socket.close": {},
+  "runtime_update.acquire": { held: true },
+  "runtime_update.release": { released: true },
+  "server_access.probe_direct": { ok: true },
+  "server_access.prove_current_primary": { ok: true },
+  "server_access.release_direct_probe": { ok: true },
+  "server_access.inspect_direct_probe": DIRECT_PROBE_INSPECTION_RESULT,
   "environment.hook.run": {},
   "environment.hook.cancel": { status: "terminated" },
   "desktop.browser.list_instances": { instances: [] },
+  "desktop.browser.profile_renderer": {
+    requestedDurationMs: 200,
+    actualDurationMs: 201,
+    sampleIntervalUs: 1000,
+    totalSamples: 4,
+    omittedSamples: 1,
+    hotspots: [{ assetPath: "/assets/app.js", line: 1, column: 2, hits: 2 }],
+    builtinSamples: { idle: 1, program: 0, garbageCollection: 0 },
+    truncated: false,
+  },
   "desktop.browser.list_tabs": { tabs: [] },
   "desktop.browser.create_tab": {
     tab: {
@@ -230,12 +310,36 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
     skipped: 1,
     skippedDomains: ["example.com"],
   },
+  "desktop.browser.cookie_sync_status": {
+    source: null,
+    running: false,
+    lastRun: null,
+    nextRunAt: null,
+  },
+  "desktop.browser.cookie_sync_configure": {
+    source: { sourceId: "dia", sourceProfileDirectory: "Profile 7" },
+    running: false,
+    lastRun: {
+      ok: true,
+      at: 1700000000000,
+      imported: 4,
+      removed: 1,
+      skipped: 0,
+    },
+    nextRunAt: 1700000900000,
+  },
+  "desktop.browser.cookie_sync_run": {
+    source: { sourceId: "dia", sourceProfileDirectory: "Profile 7" },
+    running: false,
+    lastRun: { ok: false, at: 1700000000000, reason: "needsKeychainApproval" },
+    nextRunAt: 1700000900000,
+  },
   "plugin.host.call": { output: { ok: true } },
   "plugin.host.cancel": { cancelled: true },
   "plugin.host.dispose": { disposed: true },
   "connect-tunnel.ensure-identity": {
     label: "sawyer-air",
-    baseDomain: "getbb.app",
+    baseDomain: "example.test",
   },
   "host.list_files": {
     files: [
@@ -276,6 +380,10 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
       { kind: "file", name: "README.md", path: "/home/me/project/README.md" },
     ],
   },
+  "host.agent_processes.terminate": {
+    contained: true,
+    terminatedProcessCount: 3,
+  },
   "host.paths_exist": {
     existence: {
       "/home/me/project": true,
@@ -287,7 +395,7 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
     gitRemoteUrl: "git@example.com:me/project.git",
   },
   "project.clone_default_path": {
-    path: "/home/me/.bb/checkouts/project",
+    path: "/home/me/.omnyo/checkouts/project",
   },
   "host.pick_folder": {
     path: "/home/me/project",
@@ -303,14 +411,19 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
       },
     ],
   },
+  "host.list_command_metadata": {
+    commands: [],
+    projectSkills: [],
+    sharedSkills: [],
+  },
   "host.list_skills": {
     skills: [
       {
         id: `skill_${"a".repeat(64)}`,
         name: "review",
         description: "Review the current diff",
-        filePath: "/home/user/.bb/skills/review/SKILL.md",
-        rootKind: "bb-data-dir",
+        filePath: "/home/user/.omnyo/skills/review/SKILL.md",
+        rootKind: "omnyo-data-dir",
         linked: false,
       },
     ],
@@ -330,25 +443,25 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
     sharedSkills: [],
   },
   "host.delete_skill": {
-    deletedPath: "/home/user/.bb/skills/review",
+    deletedPath: "/home/user/.omnyo/skills/review",
   },
   "host.write_skill": {
     outcome: "written",
-    filePath: "/home/user/.bb/skills/review/SKILL.md",
+    filePath: "/home/user/.omnyo/skills/review/SKILL.md",
     sha256: "b".repeat(64),
   },
   "host.global_skills_status": {
     entries: [
       {
-        name: "bb-cli",
-        path: "/home/user/.agents/skills/bb-cli",
+        name: "omnyo-cli",
+        path: "/home/user/.agents/skills/omnyo-cli",
         treeHash: "c".repeat(64),
       },
     ],
   },
   "host.install_global_skills": {
     installations: [
-      { name: "bb-cli", path: "/home/user/.agents/skills/bb-cli" },
+      { name: "omnyo-cli", path: "/home/user/.agents/skills/omnyo-cli" },
     ],
   },
   "host.inspect_git_source": {
@@ -386,7 +499,7 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
   },
   "host.read_file_chunk": {
     path: "/tmp/clip.mp4",
-    content: "AAEC",
+    content: new Uint8Array([0, 1, 2]),
     offset: 0,
     sizeBytes: 3,
     modifiedAtMs: 1234,
@@ -458,10 +571,10 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
   "host.discover_repos": {
     repos: [
       {
-        path: "/home/user/projects/bb",
-        name: "bb",
+        path: "/home/user/projects/omnyo",
+        name: "omnyo",
         lastActivityAt: "2026-08-05T00:00:00.000Z",
-        originUrl: "https://github.com/example/bb",
+        originUrl: "https://github.com/example/omnyo",
       },
     ],
     truncated: false,
@@ -500,6 +613,18 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
       },
     ],
   },
+  "provider.installation.start": {
+    operationId: "installation-one",
+    providerId: "codex",
+    action: "update",
+    state: "installing",
+    events: [],
+  },
+  "provider.installation.get": {
+    operation: null,
+    held: false,
+    holdOwner: null,
+  },
   "workspace.status": WORKSPACE_UNAVAILABLE_RESULT,
   "workspace.diff": {
     outcome: "unavailable",
@@ -511,13 +636,14 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
   },
   "workspace.diffFiles": WORKSPACE_UNAVAILABLE_RESULT,
   "workspace.diffPatch": WORKSPACE_UNAVAILABLE_RESULT,
+  "workspace.gitActivity": WORKSPACE_UNAVAILABLE_RESULT,
   "workspace.pull_request": {
     outcome: "available",
     pullRequest: {
       number: 42,
       title: "Add host RPC guard",
       state: "OPEN",
-      url: "https://github.com/acme/bb/pull/42",
+      url: "https://github.com/acme/omnyo/pull/42",
       isDraft: false,
       baseRefName: "main",
       headRefName: "feature/host-rpc",
@@ -540,10 +666,10 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
     },
   },
   "server_move.inspect": {
-    dataDir: "/home/me/.bb-machines/bb.example.com",
+    dataDir: "/home/me/.omnyo-machines/omnyo.example.com",
     platform: "linux",
     timeZone: "America/Los_Angeles",
-    bbAppVersion: "0.0.5",
+    coreVersion: "0.0.5",
     serverEntryAvailable: false,
     existingServerData: null,
     dataDirHasServerData: false,
@@ -559,7 +685,7 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
     pid: 4242,
   },
   "server_move.activate": { ok: true },
-  "server_move.abort": { ok: true },
+  "server_move.abort": { ok: true, moveId: "move", fenced: true },
   "server_move.delete_old_copy": { deleted: true },
 };
 
@@ -577,6 +703,7 @@ const SETTLED_RESPONSE_RESULT_FIXTURES: SettledResponseResultFixtures = {
   "thread.stop": { providerCheckpointId: null },
   "thread.storage.delete": { providerCheckpointId: null },
   "thread.goal.clear": { cleared: true },
+  "thread.speed.set": { ok: true },
   "thread.plan.cancel": { cancelled: true },
   "thread.rename": {},
   "thread.archive": {},
@@ -586,14 +713,14 @@ const SETTLED_RESPONSE_RESULT_FIXTURES: SettledResponseResultFixtures = {
     path: "/tmp/env",
     isGitRepo: true,
     isWorktree: false,
-    branchName: "bb/env-123",
+    branchName: "omnyo/env-123",
     defaultBranch: "main",
   },
   "environment.attach.cancel": {
     aborted: true,
   },
   "project.clone": {
-    path: "/home/me/.bb/checkouts/project",
+    path: "/home/me/.omnyo/checkouts/project",
     gitRemoteUrl: "git@example.com:me/project.git",
   },
   "workspace.commit": {
@@ -634,6 +761,32 @@ const WORKSPACE_DIFF_PATCH_AVAILABLE_RESULT: JsonObject = {
 
 const ADDITIONAL_ONLINE_RPC_RESPONSE_ROUND_TRIP_CASES: OnlineRpcResponseRoundTripCase[] =
   [
+    {
+      name: "workspace identity explicit preparation",
+      commandType: "host.prepare_workspace_identity_v1",
+      result: { status: "adopted", rootPath: "/workspace/.omnyo" },
+    },
+    {
+      name: "server_access.inspect_direct_probe uncommitted ownership",
+      commandType: "server_access.inspect_direct_probe",
+      result: {
+        ...DIRECT_PROBE_INSPECTION_RESULT,
+        probe: DIRECT_PROBE_OWNER,
+      },
+    },
+    {
+      name: "server_access.inspect_direct_probe committed ownership without a session",
+      commandType: "server_access.inspect_direct_probe",
+      result: {
+        ...DIRECT_PROBE_INSPECTION_RESULT,
+        sessionId: null,
+        probe: {
+          ...DIRECT_PROBE_OWNER,
+          phase: "committed",
+          sessionId: null,
+        },
+      },
+    },
     {
       name: "host.read_file not-modified result",
       commandType: "host.read_file",
@@ -678,17 +831,18 @@ const ADDITIONAL_ONLINE_RPC_RESPONSE_ROUND_TRIP_CASES: OnlineRpcResponseRoundTri
             insertions: 0,
             deletions: 0,
             lineStatsComplete: true,
+            fileCount: 0,
             files: [],
             hasUncommittedChanges: false,
             state: "clean",
           },
           branch: {
-            currentBranch: "bb/env-123",
+            currentBranch: "omnyo/env-123",
             defaultBranch: "main",
           },
           checkout: {
             kind: "branch",
-            branchName: "bb/env-123",
+            branchName: "omnyo/env-123",
             headSha: null,
           },
           mergeBase: null,
@@ -711,6 +865,49 @@ const ADDITIONAL_ONLINE_RPC_RESPONSE_ROUND_TRIP_CASES: OnlineRpcResponseRoundTri
       result: WORKSPACE_DIFF_PATCH_AVAILABLE_RESULT,
     },
     {
+      name: "workspace.gitActivity available result",
+      commandType: "workspace.gitActivity",
+      result: {
+        outcome: "available",
+        activity: {
+          commits: [
+            {
+              sha: "a".repeat(40),
+              subject: "Read turn git activity",
+              kind: "amend",
+              branch: "main",
+              replacedSha: "b".repeat(40),
+              committedAt: 1_700_000_100_000,
+              remoteRefs: ["origin/main"],
+            },
+            {
+              sha: "c".repeat(64),
+              subject: "Detached work",
+              kind: "commit",
+              branch: null,
+              replacedSha: null,
+              committedAt: 1_700_000_101_000,
+              remoteRefs: [],
+            },
+          ],
+          pushes: [
+            {
+              remote: "origin",
+              branch: "main",
+              oldSha: null,
+              newSha: "a".repeat(40),
+              forced: false,
+              pushedAt: 1_700_000_102_000,
+              commitCount: null,
+            },
+          ],
+          remotes: [
+            { name: "origin", url: "https://github.com/acme/omnyo.git" },
+          ],
+        },
+      },
+    },
+    {
       name: "workspace.pull_request no-PR result",
       commandType: "workspace.pull_request",
       result: { outcome: "absent" },
@@ -726,6 +923,54 @@ const ADDITIONAL_ONLINE_RPC_RESPONSE_ROUND_TRIP_CASES: OnlineRpcResponseRoundTri
   ];
 
 const ONLINE_RPC_RESPONSE_MISMATCH_CASES: OnlineRpcResponseMismatchCase[] = [
+  {
+    name: "inspection result with an extra bearer challenge",
+    commandType: "server_access.inspect_direct_probe",
+    result: {
+      ...DIRECT_PROBE_INSPECTION_RESULT,
+      challenge: "synthetic-probe-challenge",
+    },
+  },
+  {
+    name: "inspection ownership with an extra bearer challenge",
+    commandType: "server_access.inspect_direct_probe",
+    result: {
+      ...DIRECT_PROBE_INSPECTION_RESULT,
+      probe: {
+        ...DIRECT_PROBE_OWNER,
+        challenge: "synthetic-probe-challenge",
+      },
+    },
+  },
+  ...[
+    "A".repeat(64),
+    "a".repeat(63),
+    "g".repeat(64),
+  ].map<OnlineRpcResponseMismatchCase>((ownerFingerprint, index) => ({
+    name: `inspection ownership with invalid fingerprint case ${index}`,
+    commandType: "server_access.inspect_direct_probe",
+    result: {
+      ...DIRECT_PROBE_INSPECTION_RESULT,
+      probe: { ...DIRECT_PROBE_OWNER, ownerFingerprint },
+    },
+  })),
+  {
+    name: "inspection ownership with an unknown phase",
+    commandType: "server_access.inspect_direct_probe",
+    result: {
+      ...DIRECT_PROBE_INSPECTION_RESULT,
+      probe: { ...DIRECT_PROBE_OWNER, phase: "idle" },
+    },
+  },
+  {
+    name: "inspection result without current session linkage",
+    commandType: "server_access.inspect_direct_probe",
+    result: {
+      hostId: "host-primary",
+      workerInstanceId: "worker-current",
+      probe: null,
+    },
+  },
   {
     name: "host.list_files command with a read-file result",
     commandType: "host.list_files",
@@ -763,8 +1008,8 @@ const ONLINE_RPC_RESPONSE_MISMATCH_CASES: OnlineRpcResponseMismatchCase[] = [
 
 function buildHostRpcResponseMessage(
   commandType: HostDaemonRpcCommandType,
-  result: JsonObject,
-): JsonObject {
+  result: RpcResultFixture,
+) {
   return {
     type: "host-rpc.response",
     requestId: `rpc-${commandType}`,
@@ -776,17 +1021,13 @@ function buildHostRpcResponseMessage(
 
 function expectHostRpcResponseRoundTrip(
   commandType: HostDaemonRpcCommandType,
-  result: JsonObject,
+  result: RpcResultFixture,
   name: string,
 ): void {
   const message = buildHostRpcResponseMessage(commandType, result);
-  const jsonRoundTripped = JSON.parse(JSON.stringify(message));
-
-  expect(
-    hostDaemonOnlineRpcResponseMessageSchema.parse(jsonRoundTripped),
-    name,
-  ).toEqual(message);
-  expect(hostDaemonDaemonWsMessageSchema.parse(jsonRoundTripped), name).toEqual(
+  const parsed = hostDaemonOnlineRpcResponseMessageSchema.parse(message);
+  const wire = contract.encodeDaemonWirePayload(parsed);
+  expect(contract.decodeDaemonWirePayload(wire)?.message, name).toEqual(
     message,
   );
 }
@@ -796,6 +1037,8 @@ function terminalDataBase64(byteLength: number): string {
 }
 
 const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
+  "hostDaemonInteractiveRequestSchema.eventsThrough":
+    "an older admitted daemon may omit the event receipt watermark; presence orders approval registration after those events, while absence preserves that daemon's unstamped request semantics.",
   "hostDaemonCommandSchema.resolution.description":
     "the interaction.resolve command's resolution is the persisted union, so it also admits the plugin_submitted arm and the description a plugin's describeSubmission returned. It never reaches the wire: a plugin interaction is settled in the server against its waiting requestInput promise and never queues a daemon command, so an older daemon never sees the field.",
   "hostDaemonCommandSchema.resolution.description.detail":
@@ -804,8 +1047,10 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a described submission carries a payload only when the plugin has something for its own timeline renderer; absence means the row renders from title and detail alone.",
   "hostDaemonCommandSchema.resolution.description.title":
     "a described submission overrides the row title only when the plugin returned one; absence means the presentation's completed label stands.",
+  "hostDaemonOnlineRpcCommandSchema.nativeRoots.resolved.watchPaths":
+    "a resolver declares watchPaths only when it knows which host paths its roots depend on; omission keeps the older plugin parent-watch semantics, an explicit [] means watch nothing, and a declared list is at most 256 host-absolute inputs.",
   "hostDaemonCommandSchema.dynamicTools.presentation":
-    "a dynamic tool declares a row presentation only when its plugin wrote one; absence means bb renders the call with the standard tool name and the plugin's branding glyph.",
+    "a dynamic tool declares a row presentation only when its plugin wrote one; absence means Omnyo renders the call with the standard tool name and the plugin's branding glyph.",
   "hostDaemonCommandSchema.dynamicTools.presentation.badge":
     "a dynamic tool's presentation carries a badge only when there is something to flag about how the call will run; absence means the ordinary case, not a blank badge.",
   "hostDaemonCommandSchema.dynamicTools.presentation.detail":
@@ -841,7 +1086,7 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
   "hostDaemonCommandSchema.inputGroups.visibility":
     "a prompt input declares visibility only to hide itself from the person: the single value agent-only marks an input the transcript does not show, so absence is the ordinary visible input.",
   "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation":
-    "a dynamic tool declares a row presentation only when its plugin wrote one; absence means bb renders the call with the standard tool name and the plugin's branding glyph.",
+    "a dynamic tool declares a row presentation only when its plugin wrote one; absence means Omnyo renders the call with the standard tool name and the plugin's branding glyph.",
   "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.badge":
     "a dynamic tool's presentation carries a badge only when there is something to flag about how the call will run; absence means the ordinary case, not a blank badge.",
   "hostDaemonCommandSchema.resumeContext.dynamicTools.presentation.detail":
@@ -900,10 +1145,14 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a tool_use approval's presentation has a title only when the call has a headline (a path, a query); absence means the label stands alone.",
   "hostDaemonOnlineRpcCommandSchema.cwd":
     "provider.list_models may omit cwd when only user-level provider configuration applies.",
+  "hostDaemonOnlineRpcCommandSchema.discovery":
+    "host.list_files requests icon discovery only when needed; omission preserves ordinary file search.",
   "hostDaemonOnlineRpcCommandSchema.query":
     "host.list_files may omit a search string to list files without filtering.",
   "hostDaemonOnlineRpcCommandSchema.path":
     "host.browse_directory may omit path to list the host's home directory, which a remote caller cannot resolve.",
+  "hostDaemonOnlineRpcCommandSchema.repositoryPath":
+    "workspace Git activity targets the primary workspace unless a confined nested repository was selected.",
   "hostDaemonOnlineRpcCommandSchema.ref":
     "host.read_file may omit ref to read from disk; setting ref switches to git history at that ref.",
   "hostDaemonOnlineRpcCommandSchema.rootPath":
@@ -916,6 +1165,8 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "thread.start omits fork unless the new thread should clone an existing provider session; absent means a normal start.",
   "hostDaemonCommandSchema.fork.sourceProviderCheckpointId":
     "thread.start.fork names a checkpoint only when the clone should stop at an earlier source turn; absent means clone the session tip.",
+  "hostDaemonCommandSchema.fork.restoreArchivedSource":
+    "thread.start.fork sets restoreArchivedSource to false when the source session belongs to the user and must stay archived; absent means servers that predate the choice, which restore an archived source.",
   "hostDaemonCommandSchema.inputGroups":
     "thread.start and turn.submit omit inputGroups for ordinary single user-message turns; presence preserves grouped user messages within one turn.",
   "hostDaemonCommandSchema.options.promptMode":
@@ -926,10 +1177,11 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
 
 describe("cache usage wire compatibility", () => {
   it.each([
-    {},
-    { cacheReadInputTokens: 31, cacheWriteInputTokens: 9 },
-    { cacheWriteInputTokens: 0 },
-  ])("preserves legacy and reported cache fields %j", (counts) => {
+    [{}, {}],
+    [{ cacheReadInputTokens: 31, cacheWriteInputTokens: 9 }, {}],
+    [{ cacheWriteInputTokens: 0 }, {}],
+    [{ cacheWriteInputTokens: 9 }, { promptCacheTtlMs: 3_600_000 }],
+  ])("preserves legacy and reported cache fields %j %j", (counts, cache) => {
     const usage = {
       totalTokens: 140,
       inputTokens: 80,
@@ -938,6 +1190,7 @@ describe("cache usage wire compatibility", () => {
       reasoningOutputTokens: 0,
       ...counts,
     };
+
     const batch = {
       sessionId: "session-usage",
       eventGroups: [
@@ -953,12 +1206,14 @@ describe("cache usage wire compatibility", () => {
                 total: usage,
                 last: usage,
                 modelContextWindow: null,
+                ...cache,
               },
             },
           ],
         },
       ],
     };
+
     expect(hostDaemonEventBatchRequestSchema.parse(batch)).toEqual(batch);
   });
 });
@@ -1091,7 +1346,7 @@ describe("host-daemon local schemas", () => {
       contract.openInTargetRequestSchema.parse({
         context: {
           kind: "remote-ssh",
-          serverOrigin: "https://bb.example.test",
+          serverOrigin: "https://omnyo.example.test",
           hostId: "host_remote",
         },
         lineNumber: 12,
@@ -1101,7 +1356,7 @@ describe("host-daemon local schemas", () => {
     ).toEqual({
       context: {
         kind: "remote-ssh",
-        serverOrigin: "https://bb.example.test",
+        serverOrigin: "https://omnyo.example.test",
         hostId: "host_remote",
       },
       columnNumber: null,
@@ -1228,8 +1483,58 @@ const CONTRIBUTED_ENV = [
 
 describe("host-daemon command schemas", () => {
   it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(234);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(261);
     expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
+  });
+
+  it("requires runtime update acquisition to name the plugin leases it may close", () => {
+    const command = {
+      type: "runtime_update.acquire",
+      ownerId: "update-owner",
+      closePluginLeases: ["browser-automation"],
+    };
+
+    expect(hostDaemonOnlineRpcCommandSchema.parse(command)).toEqual(command);
+    expect(
+      hostDaemonOnlineRpcCommandSchema.safeParse({
+        type: "runtime_update.acquire",
+        ownerId: "update-owner",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts direct-probe inspection only without an action payload", () => {
+    const command = { type: "server_access.inspect_direct_probe" };
+
+    expect(hostDaemonOnlineRpcCommandSchema.parse(command)).toEqual(command);
+
+    for (const payload of [
+      { challenge: "synthetic-probe-challenge" },
+      { payload: {} },
+      { instanceId: "coordinator-requester" },
+    ]) {
+      expect(
+        hostDaemonOnlineRpcCommandSchema.safeParse({ ...command, ...payload })
+          .success,
+      ).toBe(false);
+    }
+  });
+
+  it("reads workspace status from daemons that predate squash-check completeness", () => {
+    const legacyResult: unknown = JSON.parse(
+      JSON.stringify(WORKSPACE_STATUS_AVAILABLE_RESULT, (key, value) =>
+        key === "squashMergeCheckComplete" ? undefined : value,
+      ),
+    );
+
+    expect(
+      contract.hostDaemonOnlineRpcResultSchemaByType["workspace.status"].parse(
+        legacyResult,
+      ),
+    ).toMatchObject({
+      outcome: "available",
+      workspaceStatus: { mergeBase: { squashMergeCheckComplete: true } },
+    });
   });
 
   it.each([
@@ -1248,6 +1553,7 @@ describe("host-daemon command schemas", () => {
         controllerLabel: "😀".repeat(length),
         expiresAt: 1700000000000,
       };
+
       expect(hostDaemonOnlineRpcCommandSchema.safeParse(command).success).toBe(
         valid,
       );
@@ -1265,12 +1571,14 @@ describe("host-daemon command schemas", () => {
       },
       callId: "call-1",
       method: "echo",
-      input: null,
+      input: { conversationContext: "Synthetic accepted conversation" },
       timeoutMs: 10_000,
     };
-    expect(hostDaemonOnlineRpcCommandSchema.safeParse(command).success).toBe(
-      true,
-    );
+
+    expect(hostDaemonOnlineRpcCommandSchema.parse(command)).toMatchObject({
+      type: "plugin.host.call",
+      input: { conversationContext: "Synthetic accepted conversation" },
+    });
     expect(
       hostDaemonOnlineRpcCommandSchema.safeParse({
         ...command,
@@ -1295,6 +1603,7 @@ describe("host-daemon command schemas", () => {
       threadId: "thr_1",
       type: "thread.stop" as const,
     };
+
     expect(threadStopCommandSchema.safeParse(base).success).toBe(false);
     expect(
       threadStopCommandSchema.safeParse({ ...base, intent: "release" }).success,
@@ -1395,8 +1704,8 @@ describe("host-daemon command schemas", () => {
         },
         workspaceProvisionType: "managed-worktree",
         sourcePath: "/tmp/project",
-        targetPath: "/tmp/project/.bb/env",
-        branchName: "bb/env-123",
+        targetPath: "/tmp/project/.omnyo/env",
+        branchName: "omnyo/env-123",
         baseBranch: null,
         setupTimeoutMs: 900000,
       }),
@@ -1409,7 +1718,7 @@ describe("host-daemon command schemas", () => {
         environmentId: "env_personal",
         initiator: null,
         workspaceProvisionType: "personal",
-        targetPath: "/tmp/bb/personal-workspaces/env_personal",
+        targetPath: "/tmp/omnyo/personal-workspaces/env_personal",
       }),
     ).toThrow();
 
@@ -1486,6 +1795,7 @@ describe("host-daemon command schemas", () => {
     expect(
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.list_files",
+        followRootSymlink: false,
         path: "/tmp/workspace",
         limit: 1000,
         includeHidden: true,
@@ -1494,6 +1804,7 @@ describe("host-daemon command schemas", () => {
       }),
     ).toMatchObject({
       type: "host.list_files",
+      followRootSymlink: false,
       path: "/tmp/workspace",
       limit: 1000,
       includeHidden: true,
@@ -1537,6 +1848,7 @@ describe("host-daemon command schemas", () => {
       namePrefix: "",
       ...options,
     });
+
     const emptyRoots = { user: [], project: [] };
     expect(
       hostDaemonOnlineRpcCommandSchema.parse({
@@ -1580,7 +1892,7 @@ describe("host-daemon command schemas", () => {
     expect(
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.list_skills",
-        providerId: "bb-shared",
+        providerId: "omnyo-shared",
         cwd: "/tmp/workspace",
         nativeRoots: {
           skills: { ...emptyRoots, user: [root(".agents/skills")] },
@@ -1601,6 +1913,7 @@ describe("host-daemon command schemas", () => {
         nativeSkillRoots: { user: [".pi/agent/skills"], project: [] },
       }),
     ).toThrow();
+
     const withRoots = (skills: Record<string, unknown>) => ({
       type: "host.list_commands",
       providerId: "pi",
@@ -1611,6 +1924,7 @@ describe("host-daemon command schemas", () => {
         resolved: { skills: [], commands: [] },
       },
     });
+
     expect(() =>
       hostDaemonOnlineRpcCommandSchema.parse(
         withRoots({ absolute: [root("/home/dev/.pi/agent/skills")] }),
@@ -1670,8 +1984,8 @@ describe("host-daemon command schemas", () => {
     expect(
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.read_file",
-        path: "/tmp/bb-data/thread-storage/thread-123/notes.md",
-        rootPath: "/tmp/bb-data/thread-storage/thread-123",
+        path: "/tmp/omnyo-data/thread-storage/thread-123/notes.md",
+        rootPath: "/tmp/omnyo-data/thread-storage/thread-123",
         ifNoneMatch: {
           kind: "sha256",
           values: ["a".repeat(64)],
@@ -1679,8 +1993,8 @@ describe("host-daemon command schemas", () => {
       }),
     ).toMatchObject({
       type: "host.read_file",
-      path: "/tmp/bb-data/thread-storage/thread-123/notes.md",
-      rootPath: "/tmp/bb-data/thread-storage/thread-123",
+      path: "/tmp/omnyo-data/thread-storage/thread-123/notes.md",
+      rootPath: "/tmp/omnyo-data/thread-storage/thread-123",
       ifNoneMatch: {
         kind: "sha256",
         values: ["a".repeat(64)],
@@ -1690,37 +2004,39 @@ describe("host-daemon command schemas", () => {
     expect(
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.read_file",
-        path: "/tmp/bb-data/thread-storage/thread-123/notes.md",
+        path: "/tmp/omnyo-data/thread-storage/thread-123/notes.md",
       }),
     ).toMatchObject({
       type: "host.read_file",
-      path: "/tmp/bb-data/thread-storage/thread-123/notes.md",
+      path: "/tmp/omnyo-data/thread-storage/thread-123/notes.md",
     });
 
     expect(
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.read_file",
-        path: "/tmp/bb-data/thread-storage/thread-123/notes.md",
-        rootPath: "/tmp/bb-data/thread-storage/thread-123",
+        path: "/tmp/omnyo-data/thread-storage/thread-123/notes.md",
+        rootPath: "/tmp/omnyo-data/thread-storage/thread-123",
         ref: "HEAD",
       }),
     ).toMatchObject({
       type: "host.read_file",
-      path: "/tmp/bb-data/thread-storage/thread-123/notes.md",
-      rootPath: "/tmp/bb-data/thread-storage/thread-123",
+      path: "/tmp/omnyo-data/thread-storage/thread-123/notes.md",
+      rootPath: "/tmp/omnyo-data/thread-storage/thread-123",
       ref: "HEAD",
     });
 
     expect(
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.read_file_relative",
-        rootPath: "/tmp/bb-data/apps/demo/assets",
+        followRootSymlink: false,
+        rootPath: "/tmp/omnyo-data/apps/demo/assets",
         path: "logo.png",
         dotfiles: "deny",
       }),
     ).toMatchObject({
       type: "host.read_file_relative",
-      rootPath: "/tmp/bb-data/apps/demo/assets",
+      followRootSymlink: false,
+      rootPath: "/tmp/omnyo-data/apps/demo/assets",
       path: "logo.png",
       dotfiles: "deny",
     });
@@ -1752,6 +2068,7 @@ describe("host-daemon command schemas", () => {
     const onlineReadCommands = [
       {
         type: "host.list_files",
+        followRootSymlink: false,
         path: "/tmp/workspace",
         limit: 100,
         includeHidden: true,
@@ -1786,6 +2103,7 @@ describe("host-daemon command schemas", () => {
       },
       {
         type: "host.read_file_relative",
+        followRootSymlink: false,
         rootPath: "/tmp/workspace",
         path: "README.md",
         dotfiles: "deny",
@@ -1798,6 +2116,7 @@ describe("host-daemon command schemas", () => {
       {
         type: "workspace.status",
         environmentId: "env_123",
+        maxFiles: 200,
         maxUntrackedLineStatFiles: 50,
         maxUntrackedLineStatBytes: 8 * 1024 * 1024,
         workspaceContext: {
@@ -1843,7 +2162,7 @@ describe("host-daemon command schemas", () => {
         initiator: null,
         workspaceProvisionType: "managed-worktree",
         sourcePath: "/tmp/project",
-        targetPath: "/tmp/project/.bb/env",
+        targetPath: "/tmp/project/.omnyo/env",
       }),
     ).toThrow();
 
@@ -1863,7 +2182,7 @@ describe("host-daemon command schemas", () => {
         environmentId: "env_123",
         initiator: null,
         path: "/tmp/project",
-        checkout: { kind: "new", name: "bb/env-123" },
+        checkout: { kind: "new", name: "omnyo/env-123" },
       }),
     ).toThrow();
 
@@ -1881,7 +2200,7 @@ describe("host-daemon command schemas", () => {
     expect(() =>
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.read_file",
-        path: "/tmp/bb-data/thread-storage/thread-123/notes.md",
+        path: "/tmp/omnyo-data/thread-storage/thread-123/notes.md",
         ref: "HEAD",
       }),
     ).toThrow();
@@ -1889,7 +2208,8 @@ describe("host-daemon command schemas", () => {
     expect(() =>
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.read_file_relative",
-        rootPath: "/tmp/bb-data/apps/demo/assets",
+        followRootSymlink: false,
+        rootPath: "/tmp/omnyo-data/apps/demo/assets",
         path: "logo.png",
       }),
     ).toThrow();
@@ -2091,6 +2411,60 @@ describe("host-daemon command schemas", () => {
     },
   );
 
+  it("parses fork commands with and without the archived-source restore choice", () => {
+    const forkStartCommand = {
+      type: "thread.start",
+      bridgeLaunch: BRIDGE_LAUNCH,
+      environmentId: "env_123",
+      threadId: "thr_123",
+      workspaceContext: {
+        workspacePath: "/tmp/workspace",
+      },
+      projectId: "proj_123",
+      providerId: "codex",
+      requestId: CLIENT_REQUEST_ID,
+      input: [{ type: "text", text: "continue", mentions: [] }],
+      options: {
+        model: "gpt-5",
+        serviceTier: "default",
+        reasoningLevel: "medium",
+        providerOptions: {},
+        permissionMode: "full",
+        permissionScope: "full",
+        approvalReviewer: null,
+        permissionEscalation: null,
+      },
+      instructions: "Be a helpful thread.",
+      dynamicTools: [],
+      contributedEnv: [],
+      injectedSkillSources: [],
+      instructionMode: "replace",
+    };
+
+    const withChoice = hostDaemonCommandSchema.parse({
+      ...forkStartCommand,
+      fork: {
+        sourceProviderThreadId: "provider-native",
+        restoreArchivedSource: false,
+      },
+    });
+
+    const withoutChoice = hostDaemonCommandSchema.parse({
+      ...forkStartCommand,
+      fork: { sourceProviderThreadId: "provider-source" },
+    });
+
+    expect(withChoice.type === "thread.start" && withChoice.fork).toEqual({
+      sourceProviderThreadId: "provider-native",
+      restoreArchivedSource: false,
+    });
+    expect(withoutChoice.type === "thread.start" && withoutChoice.fork).toEqual(
+      {
+        sourceProviderThreadId: "provider-source",
+      },
+    );
+  });
+
   it("rejects grouped commands whose flat input disagrees with inputGroups", () => {
     const threadStartCommand = {
       type: "thread.start",
@@ -2167,9 +2541,35 @@ describe("host-daemon command schemas", () => {
       },
       target: { mode: "start" },
     };
+
     expect(() => hostDaemonCommandSchema.parse(turnSubmitCommand)).toThrow(
       /flattened inputGroups/u,
     );
+  });
+
+  it("lists models with contributed provider environment and accepts older servers that omit it", () => {
+    const poolEntry = {
+      name: "CODEX_OPENAI_BASE_URL",
+      value: { serverPath: "/api/v1/plugins/account-pool/http/v1" },
+      source: { plugin: "account-pool" },
+      reason: "Routed through the Account Pooler hub",
+    };
+
+    const command = {
+      type: "provider.list_models",
+      bridgeLaunch: ACP_BRIDGE_LAUNCH,
+      providerId: "codex",
+    };
+
+    expect(
+      hostDaemonOnlineRpcCommandSchema.parse({
+        ...command,
+        contributedEnv: [poolEntry],
+      }),
+    ).toMatchObject({ contributedEnv: [poolEntry] });
+    expect(hostDaemonOnlineRpcCommandSchema.parse(command)).toMatchObject({
+      contributedEnv: [],
+    });
   });
 
   it("round-trips a provider's declared launch spec on provider.list_models, thread.start, and turn.submit", () => {
@@ -2178,7 +2578,9 @@ describe("host-daemon command schemas", () => {
       bridgeLaunch: ACP_BRIDGE_LAUNCH,
       providerId: "acp-local",
       cwd: "/tmp/workspace",
+      contributedEnv: [],
     };
+
     const providerListModelsRoundTrip = JSON.parse(
       JSON.stringify(providerListModelsCommand),
     );
@@ -2226,6 +2628,7 @@ describe("host-daemon command schemas", () => {
       injectedSkillSources: [],
       instructionMode: "append",
     };
+
     const threadStartRoundTrip = JSON.parse(JSON.stringify(threadStartCommand));
 
     expect(hostDaemonCommandSchema.parse(threadStartRoundTrip)).toEqual(
@@ -2265,6 +2668,7 @@ describe("host-daemon command schemas", () => {
       },
       target: { mode: "start" },
     };
+
     const turnSubmitRoundTrip = JSON.parse(JSON.stringify(turnSubmitCommand));
 
     expect(hostDaemonCommandSchema.parse(turnSubmitRoundTrip)).toEqual(
@@ -2274,6 +2678,7 @@ describe("host-daemon command schemas", () => {
     const withoutBridgeLaunch: Record<string, unknown> = {
       ...threadStartRoundTrip,
     };
+
     delete withoutBridgeLaunch.bridgeLaunch;
     expect(hostDaemonCommandSchema.safeParse(withoutBridgeLaunch).success).toBe(
       false,
@@ -2297,7 +2702,7 @@ describe("host-daemon command schemas", () => {
         fork: "tip",
       },
       providerOptions: { launch: { command: "echo-agent" } },
-      envPassthrough: ["BB_ECHO_AGENT_EXECUTABLE"],
+      envPassthrough: ["OMNYO_ECHO_AGENT_EXECUTABLE"],
     };
 
     const providerListModelsCommand = {
@@ -2305,7 +2710,9 @@ describe("host-daemon command schemas", () => {
       providerId: "echo-agent",
       bridgeLaunch,
       cwd: "/tmp/workspace",
+      contributedEnv: [],
     };
+
     expect(
       hostDaemonOnlineRpcCommandSchema.parse(
         JSON.parse(JSON.stringify(providerListModelsCommand)),
@@ -2340,6 +2747,7 @@ describe("host-daemon command schemas", () => {
       injectedSkillSources: [],
       instructionMode: "append",
     };
+
     expect(
       hostDaemonCommandSchema.parse(
         JSON.parse(JSON.stringify(threadStartCommand)),
@@ -2365,6 +2773,7 @@ describe("host-daemon command schemas", () => {
         instructionMode: "append",
       },
     };
+
     expect(
       hostDaemonCommandSchema.parse(
         JSON.parse(JSON.stringify(goalClearCommand)),
@@ -2385,6 +2794,7 @@ describe("host-daemon command schemas", () => {
         }).success,
       ).toBe(false);
     }
+
     expect(
       hostDaemonCommandSchema.safeParse({
         ...threadStartCommand,
@@ -2401,6 +2811,7 @@ describe("host-daemon command schemas", () => {
       name: "workflow-help",
       description: "Use when building workflows.",
     };
+
     const tree = {
       ...base,
       kind: "tree",
@@ -2425,8 +2836,8 @@ describe("host-daemon command schemas", () => {
         ...base,
         kind: "workspace-path",
         sourceType: "project",
-        sourceRootPath: "/workspace/.bb/skills/workflow-help",
-        skillFilePath: "/workspace/.bb/skills/workflow-help/SKILL.md",
+        sourceRootPath: "/workspace/.omnyo/skills/workflow-help",
+        skillFilePath: "/workspace/.omnyo/skills/workflow-help/SKILL.md",
       }),
     ).toMatchObject({ kind: "workspace-path", sourceType: "project" });
     expect(
@@ -2703,8 +3114,8 @@ describe("host-daemon command schemas", () => {
         },
         workspaceProvisionType: "managed-worktree",
         sourcePath: "/tmp/project",
-        targetPath: "/tmp/project/.bb/env",
-        branchName: "bb/env-123",
+        targetPath: "/tmp/project/.omnyo/env",
+        branchName: "omnyo/env-123",
         setupTimeoutMs: 900000,
       }),
     ).toThrow();
@@ -2717,6 +3128,7 @@ describe("host-daemon command schemas", () => {
       limit: 50,
       remoteRefresh: "none",
     };
+
     expect(
       hostDaemonOnlineRpcCommandSchema.safeParse({
         ...listBranchOptions,
@@ -2733,12 +3145,14 @@ describe("host-daemon command schemas", () => {
     const workspaceStatus = {
       type: "workspace.status",
       environmentId: "env_123",
+      maxFiles: 200,
       maxUntrackedLineStatFiles: 50,
       maxUntrackedLineStatBytes: 8 * 1024 * 1024,
       workspaceContext: {
         workspacePath: "/tmp/workspace",
       },
     };
+
     expect(
       hostDaemonOnlineRpcCommandSchema.safeParse({
         ...workspaceStatus,
@@ -2753,7 +3167,7 @@ describe("host-daemon command schemas", () => {
     ).toBe(false);
   });
 
-  it("limits host.write_skill to daemon-derived bb roots", () => {
+  it("limits host.write_skill to daemon-derived Omnyo roots", () => {
     const base = {
       type: "host.write_skill",
       name: "review",
@@ -2761,10 +3175,11 @@ describe("host-daemon command schemas", () => {
       content: "# Review",
       expectedSha256: "a".repeat(64),
     } as const;
+
     expect(
       hostDaemonOnlineRpcCommandSchema.safeParse({
         ...base,
-        scope: "bb-user",
+        scope: "omnyo-user",
       }).success,
     ).toBe(true);
     expect(
@@ -2778,12 +3193,14 @@ describe("host-daemon command schemas", () => {
   it("requires file list commands to state their entry filters", () => {
     const listFiles = {
       type: "host.list_files",
+      followRootSymlink: false,
       path: "/tmp/workspace",
       limit: 100,
       includeHidden: true,
       respectGitIgnore: false,
       excludeNames: ["node_modules"],
     };
+
     const listPaths = {
       type: "host.list_paths",
       path: "/tmp/workspace",
@@ -2794,11 +3211,13 @@ describe("host-daemon command schemas", () => {
       respectGitIgnore: false,
       excludeNames: ["node_modules"],
     };
+
     const parses = (command: Record<string, unknown>) =>
       hostDaemonOnlineRpcCommandSchema.safeParse(command).success;
 
     expect(parses(listFiles)).toBe(true);
     expect(parses(listPaths)).toBe(true);
+
     for (const command of [listFiles, listPaths]) {
       const { includeHidden: _hidden, ...withoutHidden } = command;
       const { respectGitIgnore: _ignore, ...withoutIgnorePolicy } = command;
@@ -2826,7 +3245,8 @@ describe("host-daemon command schemas", () => {
     expect(() =>
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.list_files",
-        path: "/tmp/bb-data/thread-storage/thread-123",
+        followRootSymlink: false,
+        path: "/tmp/omnyo-data/thread-storage/thread-123",
         query: longQuery,
         limit: 100,
         includeHidden: true,
@@ -2838,7 +3258,8 @@ describe("host-daemon command schemas", () => {
     expect(() =>
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.list_files",
-        path: "/tmp/bb-data/thread-storage/thread-123",
+        followRootSymlink: false,
+        path: "/tmp/omnyo-data/thread-storage/thread-123",
         limit: contract.FILE_LIST_LIMIT_MAX + 1,
         includeHidden: true,
         respectGitIgnore: false,
@@ -2849,6 +3270,7 @@ describe("host-daemon command schemas", () => {
     expect(() =>
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.list_files",
+        followRootSymlink: false,
         path: "/tmp/workspace",
         query: longQuery,
         limit: 100,
@@ -2861,6 +3283,7 @@ describe("host-daemon command schemas", () => {
     expect(() =>
       hostDaemonOnlineRpcCommandSchema.parse({
         type: "host.list_files",
+        followRootSymlink: false,
         path: "/tmp/workspace",
         limit: contract.FILE_LIST_LIMIT_MAX + 1,
         includeHidden: true,
@@ -2925,19 +3348,19 @@ describe("host-daemon command schemas", () => {
         path: "/tmp/env",
         isGitRepo: true,
         isWorktree: true,
-        branchName: "bb/env-123",
+        branchName: "omnyo/env-123",
         defaultBranch: "main",
       }),
     ).toMatchObject({
       isGitRepo: true,
       isWorktree: true,
-      branchName: "bb/env-123",
+      branchName: "omnyo/env-123",
     });
     expect(() =>
       hostDaemonCommandResultSchemaByType["environment.attach"].parse({
         path: "/tmp/env",
         isGitRepo: true,
-        branchName: "bb/env-123",
+        branchName: "omnyo/env-123",
         defaultBranch: "main",
       }),
     ).toThrow();
@@ -2945,6 +3368,152 @@ describe("host-daemon command schemas", () => {
 });
 
 describe("host-daemon session schemas", () => {
+  it("accepts bounded scoped catalog changes and legacy host-wide changes", () => {
+    const legacy = { type: "command-catalog-change" };
+
+    const scoped = {
+      ...legacy,
+      scopes: [
+        { cwd: "/workspace/one", providerId: "pi" },
+        { cwd: null, providerId: "claude-code" },
+      ],
+    };
+
+    expect(hostDaemonDaemonWsMessageSchema.parse(legacy)).toEqual(legacy);
+    expect(hostDaemonDaemonWsMessageSchema.parse(scoped)).toEqual(scoped);
+    const retain = { type: "command-catalog-retain", scopes: scoped.scopes };
+    expect(hostDaemonServerWsMessageSchema.parse(retain)).toEqual(retain);
+    expect(
+      hostDaemonServerWsMessageSchema.parse({ ...retain, scopes: [] }),
+    ).toEqual({ ...retain, scopes: [] });
+    expect(
+      hostDaemonServerWsMessageSchema.safeParse({
+        ...retain,
+        scopes: Array.from({ length: 33 }, () => scoped.scopes[0]),
+      }).success,
+    ).toBe(false);
+    expect(
+      hostDaemonDaemonWsMessageSchema.safeParse({
+        ...scoped,
+        scopes: Array.from({ length: 33 }, () => scoped.scopes[0]),
+      }).success,
+    ).toBe(false);
+    expect(
+      hostDaemonDaemonWsMessageSchema.safeParse({
+        ...scoped,
+        scopes: [{ cwd: "/workspace/one", providerId: "pi", all: true }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires a complete diagnostics policy in each session handshake", () => {
+    const response = {
+      sessionId: "session-policy",
+      machineEnvironment: { revision: 0, entries: [] },
+      heartbeatIntervalMs: 5000,
+      leaseTimeoutMs: 30000,
+    };
+
+    expect(
+      hostDaemonSessionOpenResponseSchema.safeParse(response).success,
+    ).toBe(false);
+
+    for (const diagnosticsPolicy of [
+      { revision: -1, crashReportsEnabled: true },
+      { revision: 0 },
+      { revision: 0, crashReportsEnabled: "true" },
+    ]) {
+      expect(
+        hostDaemonSessionOpenResponseSchema.safeParse({
+          ...response,
+          diagnosticsPolicy,
+        }).success,
+      ).toBe(false);
+    }
+
+    expect(
+      hostDaemonSessionOpenResponseSchema.parse({
+        ...response,
+        diagnosticsPolicy: { revision: 0, crashReportsEnabled: false },
+      }).diagnosticsPolicy,
+    ).toEqual({ revision: 0, crashReportsEnabled: false });
+  });
+
+  it("keeps session open compatible with daemons and servers that predate open-work sync", () => {
+    expect(
+      hostDaemonSessionOpenRequestSchema.parse({
+        hostId: "host_123",
+        instanceId: "instance_1",
+        hostName: "Older daemon",
+        hasMachineCredential: false,
+        platform: "darwin",
+        dataDir: "/tmp/omnyo-data",
+        localApiPort: null,
+        protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+        activeThreads: [],
+      }).openThreadWork,
+    ).toBeUndefined();
+    expect(
+      hostDaemonSessionOpenResponseSchema.parse({
+        sessionId: "session_older_server",
+        machineEnvironment: { revision: 0, entries: [] },
+        diagnosticsPolicy: { revision: 0, crashReportsEnabled: false },
+        heartbeatIntervalMs: 5_000,
+        leaseTimeoutMs: 30_000,
+      }).endedInteractiveRequests,
+    ).toEqual([]);
+  });
+
+  it("parses historical daemon requests before the server checks their protocol", () => {
+    const shippedDaemonRequest = {
+      hostId: "host_123",
+      instanceId: "instance_1",
+      hostName: "Protocol 256 daemon",
+      hasMachineCredential: false,
+      platform: "win32",
+      dataDir: "C:\\omnyo-data",
+      localApiPort: null,
+      protocolVersion: 256,
+      activeThreads: [],
+      openThreadWork: [],
+      undeliveredEventThreadIds: [],
+      loadedEnvironments: [],
+      runtimeVersion: "1.0.47",
+      automaticUpdates: true,
+    };
+
+    const parsed = hostDaemonSessionOpenRequestSchema.parse(
+      JSON.parse(JSON.stringify(shippedDaemonRequest)),
+    );
+
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(261);
+    expect(parsed).toEqual(shippedDaemonRequest);
+  });
+
+  it("rejects the retired optional server-message capability field", () => {
+    const request = {
+      hostId: "host_123",
+      instanceId: "instance_1",
+      hostName: "Current daemon",
+      hasMachineCredential: false,
+      platform: "darwin",
+      dataDir: "/tmp/omnyo-data",
+      localApiPort: null,
+      protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+      activeThreads: [],
+      openThreadWork: [],
+      acceptedServerMessages: ["future-feature.replace", "a-later.message"],
+      undeliveredEventThreadIds: [],
+      loadedEnvironments: [],
+      runtimeVersion: null,
+      automaticUpdates: false,
+    };
+
+    expect(hostDaemonSessionOpenRequestSchema.safeParse(request).success).toBe(
+      false,
+    );
+  });
+
   it("rejects the deleted host type from enrolment and session payloads", () => {
     expect(
       hostDaemonEnrollRequestSchema.safeParse({
@@ -2961,12 +3530,33 @@ describe("host-daemon session schemas", () => {
         hostType: "persistent",
         hasMachineCredential: true,
         platform: "linux",
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         localApiPort: null,
         protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
         activeThreads: [],
       }).success,
     ).toBe(false);
+  });
+
+  it("carries a worker's runtime version and automatic update setting on session open", () => {
+    expect(
+      hostDaemonSessionOpenRequestSchema.parse({
+        hostId: "host_123",
+        instanceId: "instance_1",
+        hostName: "Mac Pro",
+        hasMachineCredential: false,
+        platform: "darwin",
+        dataDir: "/tmp/omnyo-data",
+        localApiPort: 38_888,
+        protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+        activeThreads: [],
+        runtimeVersion: "0.46.174+private.1",
+        automaticUpdates: true,
+      }),
+    ).toMatchObject({
+      runtimeVersion: "0.46.174+private.1",
+      automaticUpdates: true,
+    });
   });
 
   it("parses valid session open and event batch payloads", () => {
@@ -2977,7 +3567,7 @@ describe("host-daemon session schemas", () => {
         hostName: "Michael's MacBook",
         hasMachineCredential: true,
         platform: "darwin",
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         localApiPort: 38_887,
         protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
         activeThreads: [
@@ -2985,11 +3575,27 @@ describe("host-daemon session schemas", () => {
             threadId: "thr_123",
           },
         ],
+        openThreadWork: [
+          {
+            threadId: "thr_123",
+            backgroundItemIds: ["item_1"],
+            interactiveRequests: [
+              {
+                threadId: "thr_123",
+                providerId: "claude-code",
+                providerThreadId: "provider_thr_123",
+                providerRequestId: "request_1",
+              },
+            ],
+          },
+        ],
       }),
     ).toMatchObject({
       hostId: "host_123",
       hasMachineCredential: true,
       loadedEnvironments: [],
+      runtimeVersion: null,
+      automaticUpdates: false,
     });
 
     expect(
@@ -2999,10 +3605,11 @@ describe("host-daemon session schemas", () => {
         hostName: "Michael's MacBook",
         hasMachineCredential: false,
         platform: "darwin",
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         localApiPort: null,
         protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
         activeThreads: [],
+        openThreadWork: [],
         loadedEnvironments: [
           {
             environmentId: "env_123",
@@ -3024,7 +3631,7 @@ describe("host-daemon session schemas", () => {
         hostName: "Michael's MacBook",
         hasMachineCredential: true,
         platform: "darwin",
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         localApiPort: 38_887,
         protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
         activeThreads: [
@@ -3032,6 +3639,7 @@ describe("host-daemon session schemas", () => {
             threadId: "",
           },
         ],
+        openThreadWork: [],
       }),
     ).toThrow();
 
@@ -3042,10 +3650,11 @@ describe("host-daemon session schemas", () => {
         hostName: "Michael's MacBook",
         hasMachineCredential: true,
         platform: "darwin",
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         localApiPort: 38_887,
         protocolVersion: HOST_DAEMON_PROTOCOL_VERSION - 1,
         activeThreads: [],
+        openThreadWork: [],
       }),
     ).toMatchObject({
       protocolVersion: HOST_DAEMON_PROTOCOL_VERSION - 1,
@@ -3058,10 +3667,11 @@ describe("host-daemon session schemas", () => {
         hostName: "Michael's MacBook",
         hasMachineCredential: true,
         platform: "darwin",
-        dataDir: "/tmp/bb-data",
+        dataDir: "/tmp/omnyo-data",
         localApiPort: 38_887,
         protocolVersion: 0,
         activeThreads: [],
+        openThreadWork: [],
       }),
     ).toThrow();
 
@@ -3069,12 +3679,14 @@ describe("host-daemon session schemas", () => {
       hostDaemonSessionOpenResponseSchema.parse({
         sessionId: "session_123",
         machineEnvironment: { revision: 0, entries: [] },
+        diagnosticsPolicy: { revision: 0, crashReportsEnabled: false },
         heartbeatIntervalMs: 5_000,
         leaseTimeoutMs: 30_000,
         connectShares: {
           generation: 2,
           ports: [3000, 8080],
         },
+        endedInteractiveRequests: [],
       }),
     ).toMatchObject({
       sessionId: "session_123",
@@ -3094,8 +3706,10 @@ describe("host-daemon session schemas", () => {
       hostDaemonSessionOpenResponseSchema.parse({
         sessionId: "session_default_shares",
         machineEnvironment: { revision: 0, entries: [] },
+        diagnosticsPolicy: { revision: 0, crashReportsEnabled: false },
         heartbeatIntervalMs: 5_000,
         leaseTimeoutMs: 30_000,
+        endedInteractiveRequests: [],
       }).connectShares,
     ).toEqual({ generation: 0, ports: [] });
 
@@ -3255,14 +3869,19 @@ describe("host-daemon session schemas", () => {
         },
       ],
     });
+
     const [group] = parsed.eventGroups;
+
     const started = group?.events.find(
       (event) => event.type === "item/started",
     );
+
     expect(started).toBeDefined();
+
     if (started?.type !== "item/started") {
       throw new Error("Expected the spoofed event to parse as item/started");
     }
+
     expect(started.item).not.toHaveProperty("statusLabels");
 
     expect(() =>
@@ -3535,19 +4154,48 @@ describe("host-daemon session schemas", () => {
         ports: [3000],
         tunnel: {
           label: "sawyer-air",
-          baseDomain: "getbb.app",
+          baseDomain: "example.test",
         },
       }).success,
     ).toBe(false);
 
+    for (const enabled of [true, false]) {
+      const message = {
+        type: "diagnostics-policy.replace",
+        policy: { revision: 1, crashReportsEnabled: enabled },
+      };
+
+      expect(
+        hostDaemonServerWsMessageSchema.parse(
+          JSON.parse(JSON.stringify(message)),
+        ),
+      ).toEqual(message);
+    }
+
+    for (const invalid of [
+      { type: "diagnostics-policy.replace" },
+      {
+        type: "diagnostics-policy.replace",
+        policy: { revision: 1, crashReportsEnabled: "false" },
+      },
+      {
+        type: "diagnostics-policy.replace",
+        policy: { revision: 1, crashReportsEnabled: false, dsn: "" },
+      },
+    ]) {
+      expect(hostDaemonServerWsMessageSchema.safeParse(invalid).success).toBe(
+        false,
+      );
+    }
+
     expect(
       hostDaemonDaemonWsMessageSchema.parse({
         type: "connect-tunnel.identity",
-        identity: { label: "sawyer-air", baseDomain: "getbb.app" },
+        identity: { label: "sawyer-air", baseDomain: "example.test" },
       }),
     ).toEqual({
       type: "connect-tunnel.identity",
-      identity: { label: "sawyer-air", baseDomain: "getbb.app" },
+      identity: { label: "sawyer-air", baseDomain: "example.test" },
     });
 
     expect(
@@ -3585,7 +4233,7 @@ describe("host-daemon session schemas", () => {
         commandType: "host.read_file",
         ok: true,
         result: {
-          path: "/tmp/bb-data/thread-storage/thread-123/notes.md",
+          path: "/tmp/omnyo-data/thread-storage/thread-123/notes.md",
           content: "# Notes",
           contentEncoding: "utf8",
           mimeType: "text/markdown",
@@ -3600,7 +4248,7 @@ describe("host-daemon session schemas", () => {
       commandType: "host.read_file",
       ok: true,
       result: {
-        path: "/tmp/bb-data/thread-storage/thread-123/notes.md",
+        path: "/tmp/omnyo-data/thread-storage/thread-123/notes.md",
         content: "# Notes",
         contentEncoding: "utf8",
         mimeType: "text/markdown",
@@ -3685,6 +4333,7 @@ describe("host-daemon session schemas", () => {
         testCase.commandType,
         testCase.result,
       );
+
       const jsonRoundTripped = JSON.parse(JSON.stringify(message));
 
       expect(
@@ -3743,9 +4392,11 @@ describe("host-daemon session schemas", () => {
 
   it("bounds and validates terminal data in daemon websocket messages", () => {
     const maxPayload = terminalDataBase64(TERMINAL_DATA_MAX_BYTES);
+
     const oversizedDecodedPayload = terminalDataBase64(
       TERMINAL_DATA_MAX_BYTES + 1,
     );
+
     const oversizedEncodedPayload = "A".repeat(
       TERMINAL_DATA_MAX_BASE64_LENGTH + 4,
     );
@@ -3820,19 +4471,20 @@ describe("bounded file read contract", () => {
     length: 0,
     revision: null,
   };
+
   it("accepts metadata-only probes and bounded revision-checked reads", () => {
     expect(hostDaemonOnlineRpcCommandSchema.parse(command)).toEqual(command);
     expect(
       hostDaemonOnlineRpcCommandSchema.parse({
         ...command,
         offset: 32 * 1024 * 1024,
-        length: 1024 * 1024,
+        length: 64 * 1024,
         revision: "a".repeat(64),
       }),
-    ).toMatchObject({ length: 1024 * 1024 });
+    ).toMatchObject({ length: 64 * 1024 });
   });
   it.each([
-    { length: 1024 * 1024 + 1 },
+    { length: 64 * 1024 + 1 },
     { length: -1 },
     { length: 1.5 },
     { offset: -1 },
@@ -3844,6 +4496,71 @@ describe("bounded file read contract", () => {
     expect(
       hostDaemonOnlineRpcCommandSchema.safeParse({ ...command, ...override })
         .success,
+    ).toBe(false);
+  });
+});
+
+describe("retained delivery compatibility", () => {
+  it("preserves legacy and current batches and requires an index for a retained origin", () => {
+    const eventGroups = [
+      {
+        threadId: "thread-retained",
+        events: [
+          {
+            type: "system/error",
+            threadId: "thread-retained",
+            scope: threadScope(),
+            message: "pending output",
+          },
+        ],
+      },
+    ];
+
+    const legacy = { sessionId: "session-legacy", eventGroups };
+    expect(hostDaemonEventBatchRequestSchema.parse(legacy)).toEqual(legacy);
+    const indexed = { ...legacy, firstEventIndex: 7 };
+    expect(hostDaemonEventBatchRequestSchema.parse(indexed)).toEqual(indexed);
+    const retained = { ...indexed, sourceInstanceId: "instance-original" };
+    expect(hostDaemonEventBatchRequestSchema.parse(retained)).toEqual(retained);
+    expect(
+      hostDaemonEventBatchRequestSchema.safeParse({
+        ...legacy,
+        sourceInstanceId: "instance-original",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps legacy interruption delivery and validates precise retained requests", () => {
+    const legacy = {
+      sessionId: "session-legacy",
+      providerId: "codex",
+      reason: "provider exited",
+      threadIds: ["thread-retained"],
+    };
+
+    expect(hostDaemonInteractiveInterruptRequestSchema.parse(legacy)).toEqual(
+      legacy,
+    );
+
+    const target = {
+      interactionId: null,
+      threadId: "thread-retained",
+      turnId: "turn-original",
+      providerThreadId: "provider-original",
+      providerRequestId: "request-original",
+    };
+
+    expect(
+      hostDaemonInteractiveInterruptRequestSchema.parse({
+        ...legacy,
+        requests: [target],
+      }),
+    ).toEqual({ ...legacy, requests: [target] });
+    expect(
+      hostDaemonInteractiveInterruptRequestSchema.safeParse({
+        ...legacy,
+        requests: [{ ...target, threadId: "another-thread" }],
+      }).success,
     ).toBe(false);
   });
 });

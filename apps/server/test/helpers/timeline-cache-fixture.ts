@@ -7,7 +7,7 @@ import {
   type Thread,
   type ThreadEventItemType,
   type ThreadEventType,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   createConnection,
   createProject,
@@ -18,7 +18,7 @@ import {
   noopNotifier,
   upsertHost,
   type DbConnection,
-} from "@bb/db";
+} from "@omnyo/db";
 
 export type Random = () => number;
 
@@ -50,26 +50,31 @@ function readMigratedImage(): Buffer {
     migratedImage = db.$client.serialize();
     db.$client.close();
   }
+
   return migratedImage;
 }
 
 export function withTestThread(run: (testThread: TestThread) => void): void {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bb-timeline-cache-"));
-  const file = path.join(dir, "bb.db");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omnyo-timeline-cache-"));
+  const file = path.join(dir, "app.db");
   fs.writeFileSync(file, readMigratedImage());
   const db = createConnection(file);
   const coldDb = createConnection(file);
+
   try {
     const host = upsertHost(db, noopNotifier, { name: "timeline-cache-host" });
+
     const { project } = createProject(db, noopNotifier, {
       name: "timeline-cache-project",
       source: { type: "local_path", hostId: host.id, path: "/tmp/memo" },
     });
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
       status: "active",
     });
+
     run({ coldDb, db, projectId: project.id, thread });
   } finally {
     coldDb.$client.close();
@@ -90,6 +95,7 @@ export function appendRows(
     specs.map((spec, index) => {
       const sequence = start + index + 1;
       const turnId = spec.turnId ?? null;
+
       return {
         createdAt: 1_800_000_000_000 + sequence * 1_000,
         data: JSON.stringify(spec.data ?? {}),
@@ -109,16 +115,19 @@ export function appendRows(
       };
     }),
   );
+
   return start + specs.length;
 }
 
 export function createRandom(seed: number): Random {
   let state = seed >>> 0;
+
   return () => {
     state = (state + 0x6d2b79f5) >>> 0;
     let value = state;
     value = Math.imul(value ^ (value >>> 15), value | 1);
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+
     return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
   };
 }
@@ -133,8 +142,58 @@ export function randomInteger(
 
 export function pick<T>(random: Random, values: readonly T[]): T {
   const value = values[Math.floor(random() * values.length)];
+
   if (value === undefined) {
     throw new Error("Expected a non-empty choice list");
   }
+
   return value;
+}
+
+export function countSelectedEventRows(
+  db: DbConnection,
+  run: () => void,
+): number {
+  const raw = db.$client;
+  const originalPrepare = raw.prepare.bind(raw);
+  const restores = new Map<object, () => void>();
+  let count = 0;
+  Object.defineProperty(raw, "prepare", {
+    configurable: true,
+    writable: true,
+    value: (source: string) => {
+      const statement = originalPrepare(source);
+
+      if (
+        !restores.has(statement) &&
+        source.includes('from "events"') &&
+        source.includes('"created_at"')
+      ) {
+        const unwrapped = statement.all;
+        const originalAll = unwrapped.bind(statement);
+
+        restores.set(statement, () => {
+          statement.all = unwrapped;
+        });
+        statement.all = function (...params: unknown[]) {
+          const rows = originalAll(...params);
+          count += rows.length;
+
+          return rows;
+        };
+      }
+
+      return statement;
+    },
+  });
+
+  try {
+    run();
+  } finally {
+    raw.prepare = originalPrepare;
+
+    for (const restore of restores.values()) restore();
+  }
+
+  return count;
 }

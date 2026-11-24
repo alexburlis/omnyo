@@ -1,3 +1,4 @@
+import { resolvePrivateSdkArtifact } from "../src/plugin-scaffold.js";
 import {
   mkdir,
   mkdtemp,
@@ -18,12 +19,14 @@ vi.mock("node:fs/promises", async () => {
     await vi.importActual<typeof import("node:fs/promises")>(
       "node:fs/promises",
     );
+
   return {
     ...actual,
     readdir: async (path: string, options?: unknown) => {
       const entries = await (
         actual.readdir as (p: string, o?: unknown) => Promise<unknown>
       )(path, options);
+
       if (race.armed && path.endsWith(`${sep}types`)) {
         race.armed = false;
         await actual.writeFile(
@@ -31,18 +34,21 @@ vi.mock("node:fs/promises", async () => {
           "// saved mid-migration\n",
         );
       }
+
       return entries;
     },
   };
 });
 
-const SDK_VERSION = "0.4.3";
+const SDK_ARTIFACT = await resolvePrivateSdkArtifact({
+  sourceUrl: import.meta.url,
+});
 
 describe("migratePluginToPackageLayout when types/ survives the rmdir", () => {
   let rootDir: string;
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "bb-plugin-types-dir-"));
+    rootDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-types-dir-"));
     race.armed = false;
   });
 
@@ -82,22 +88,26 @@ describe("migratePluginToPackageLayout when types/ survives the rmdir", () => {
 
     const result = await migratePluginToPackageLayout({
       rootDir,
-      sdkVersion: SDK_VERSION,
+      sdkArtifact: SDK_ARTIFACT,
     });
 
-    expect(result.deletedFiles).toEqual(["types/bb-plugin-sdk.d.ts"]);
+    expect(result.archivedFiles).toEqual(["types/bb-plugin-sdk.d.ts"]);
     expect(result.removedTypesDir).toBe(false);
     expect(
       await stat(join(rootDir, "types")).then((s) => s.isDirectory()),
     ).toBe(true);
     expect(result.removedIncludes).toEqual([]);
+
     const tsconfig: { include: string[] } = JSON.parse(
       await readFile(join(rootDir, "tsconfig.json"), "utf8"),
     );
+
     expect(tsconfig.include).toEqual(["server.ts", "types"]);
+
     const compilerOptions: { paths?: unknown } = JSON.parse(
       await readFile(join(rootDir, "tsconfig.json"), "utf8"),
     ).compilerOptions;
+
     expect(compilerOptions.paths).toBeUndefined();
   });
 });

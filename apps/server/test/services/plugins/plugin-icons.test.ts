@@ -2,14 +2,16 @@ import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PLUGIN_ICON_MAX_BYTES } from "@bb/domain";
+import { PLUGIN_ICON_MAX_BYTES } from "@omnyo/domain";
 import {
   createTestAppHarness,
   type TestAppHarness,
 } from "../../helpers/test-app.js";
 
 const BASE = "http://127.0.0.1:3334";
+
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M4 4h16v16H4z"/></svg>`;
+
 const OTHER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle fill="currentColor" r="8" cx="12" cy="12"/></svg>`;
 
 async function writeIconPluginFixture(
@@ -29,7 +31,7 @@ async function writeIconPluginFixture(
     JSON.stringify({
       name: options.name,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Icons fixture",
         description: "Declares icons.",
         branding: {
@@ -47,12 +49,14 @@ async function writeIconPluginFixture(
     join(rootDir, "server.ts"),
     options.serverSource ?? "export default function plugin() {}\n",
   );
+
   if (options.withHost) {
     await writeFile(
       join(rootDir, "bridge.ts"),
       "export const experimental_providerBridge = { experimental_apiVersion: 1, handleLine: () => undefined };\n",
     );
   }
+
   for (const [relative, contents] of Object.entries(options.files ?? {})) {
     const path = join(rootDir, relative);
     await mkdir(join(path, ".."), { recursive: true });
@@ -61,8 +65,8 @@ async function writeIconPluginFixture(
 }
 
 const PROVIDER_SOURCE = (icon: string): string => `
-  export default function plugin(bb: any) {
-    bb.providers.register({
+  export default function plugin(api: any) {
+    api.providers.register({
       id: "marked-agent",
       displayName: "Marked Agent",
       icon: ${JSON.stringify(icon)},
@@ -98,10 +102,11 @@ describe("plugin-declared icons", () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-iconed",
+      "omnyo-plugin-iconed",
     );
+
     await writeIconPluginFixture(rootDir, {
-      name: "bb-plugin-iconed",
+      name: "omnyo-plugin-iconed",
       icons: { receipt: "./icons/receipt.svg", mark: "./icons/mark.svg" },
       files: { "icons/receipt.svg": SVG, "icons/mark.svg": OTHER_SVG },
     });
@@ -128,6 +133,7 @@ describe("plugin-declared icons", () => {
     const noHash = await harness.app.request(
       `${BASE}/api/v1/plugins/iconed/assets/icons/mark.svg`,
     );
+
     expect(noHash.status).toBe(200);
     expect(noHash.headers.get("cache-control")).toBe("no-store");
     expect(await noHash.text()).toBe(OTHER_SVG);
@@ -148,9 +154,11 @@ describe("plugin-declared icons", () => {
 
     const disabled = await harness.pluginService.setEnabled("iconed", false);
     expect(disabled?.icons).toEqual(entry.icons);
+
     const disabledIcon = await harness.app.request(
       `${BASE}${entry.icons.receipt}`,
     );
+
     expect(disabledIcon.status).toBe(200);
 
     await harness.pluginService.remove("iconed");
@@ -221,10 +229,11 @@ describe("plugin-declared icons", () => {
       const rootDir = join(
         harness.config.dataDir,
         "fixtures",
-        "bb-plugin-badicon",
+        "omnyo-plugin-badicon",
       );
+
       await writeIconPluginFixture(rootDir, {
-        name: "bb-plugin-badicon",
+        name: "omnyo-plugin-badicon",
         icons,
         files,
       });
@@ -234,14 +243,15 @@ describe("plugin-declared icons", () => {
     },
   );
 
-  it("fails the load when bb.branding.icon is a namespaced glyph, even the plugin's own", async () => {
+  it("fails the load when omnyo.branding.icon is a namespaced glyph, even the plugin's own", async () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-branded",
+      "omnyo-plugin-branded",
     );
+
     await writeIconPluginFixture(rootDir, {
-      name: "bb-plugin-branded",
+      name: "omnyo-plugin-branded",
       brandingIcon: "branded/logo",
       icons: { logo: "./icons/logo.svg" },
       files: { "icons/logo.svg": SVG },
@@ -249,22 +259,24 @@ describe("plugin-declared icons", () => {
     await expect(
       harness.pluginService.installPath(rootDir),
     ).rejects.toThrowError(
-      /\(bb\.branding\.icon\): "branded\/logo" is a namespaced glyph/,
+      /\(omnyo\.branding\.icon\): "branded\/logo" is a namespaced glyph/,
     );
     expect(harness.pluginService.getApi("branded")).toBeUndefined();
   });
 
   it("fails the load for an icon reached through a symlink outside the plugin", async () => {
-    const outside = join(tmpdir(), `bb-plugin-icon-outside-${Date.now()}`);
+    const outside = join(tmpdir(), `omnyo-plugin-icon-outside-${Date.now()}`);
     await mkdir(outside, { recursive: true });
     await writeFile(join(outside, "receipt.svg"), SVG);
+
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-linked",
+      "omnyo-plugin-linked",
     );
+
     await writeIconPluginFixture(rootDir, {
-      name: "bb-plugin-linked",
+      name: "omnyo-plugin-linked",
       icons: { receipt: "./icons/receipt.svg" },
     });
     await mkdir(join(rootDir, "icons"), { recursive: true });
@@ -283,10 +295,11 @@ describe("plugin-declared icons", () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-tooled",
+      "omnyo-plugin-tooled",
     );
+
     await writeIconPluginFixture(rootDir, {
-      name: "bb-plugin-tooled",
+      name: "omnyo-plugin-tooled",
       icons: { stamp: "./icons/stamp.svg" },
       files: { "icons/stamp.svg": SVG },
     });
@@ -335,10 +348,11 @@ describe("plugin-declared icons", () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-marked",
+      "omnyo-plugin-marked",
     );
+
     await writeIconPluginFixture(rootDir, {
-      name: "bb-plugin-marked",
+      name: "omnyo-plugin-marked",
       icons: { agent: "./icons/agent.svg" },
       files: { "icons/agent.svg": SVG },
       serverSource: PROVIDER_SOURCE("marked/agent"),
@@ -359,6 +373,7 @@ describe("plugin-declared icons", () => {
     const logo = await harness.app.request(
       `${BASE}/api/v1/system/providers/marked-agent/logo`,
     );
+
     expect(logo.status).toBe(200);
     expect(logo.headers.get("content-type")).toBe("image/svg+xml");
     expect(logo.headers.get("x-content-type-options")).toBe("nosniff");
@@ -371,6 +386,7 @@ describe("plugin-declared icons", () => {
     const hashedLogo = await harness.app.request(
       `${BASE}/api/v1/system/providers/marked-agent/logo?h=${iconHash}`,
     );
+
     expect(hashedLogo.status).toBe(200);
     expect(hashedLogo.headers.get("cache-control")).toBe(
       "public, max-age=31536000, immutable",
@@ -380,6 +396,7 @@ describe("plugin-declared icons", () => {
     const staleLogo = await harness.app.request(
       `${BASE}/api/v1/system/providers/marked-agent/logo?h=stale`,
     );
+
     expect(staleLogo.headers.get("cache-control")).toBe("no-store");
   });
 
@@ -387,10 +404,11 @@ describe("plugin-declared icons", () => {
     const rootDir = join(
       harness.config.dataDir,
       "fixtures",
-      "bb-plugin-unmarked",
+      "omnyo-plugin-unmarked",
     );
+
     await writeIconPluginFixture(rootDir, {
-      name: "bb-plugin-unmarked",
+      name: "omnyo-plugin-unmarked",
       icons: { agent: "./icons/agent.svg" },
       files: { "icons/agent.svg": SVG },
       serverSource: PROVIDER_SOURCE("unmarked/badge"),

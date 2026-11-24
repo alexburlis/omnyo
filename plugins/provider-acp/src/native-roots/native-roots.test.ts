@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { experimental_nativeRootsResolveOutputSchema } from "@get-bb/plugin-sdk/host";
+import { experimental_nativeRootsResolveOutputSchema } from "@omnyo/plugin-sdk/host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveGrokNativeRoots } from "./grok.js";
 import { resolveHermesNativeRoots } from "./hermes.js";
@@ -15,11 +15,13 @@ import type {
 } from "./resolver.js";
 
 let tempRoot: string;
+
 let homeDir: string;
+
 let cwd: string;
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), "bb-acp-native-roots-"));
+  tempRoot = await mkdtemp(path.join(tmpdir(), "omnyo-acp-native-roots-"));
   homeDir = path.join(tempRoot, "home");
   cwd = path.join(tempRoot, "workspace");
   await mkdir(homeDir, { recursive: true });
@@ -52,6 +54,7 @@ async function resolveSkills(
   const answer = await resolver(args);
   const parsed = experimental_nativeRootsResolveOutputSchema.safeParse(answer);
   expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+
   return answer.skills ?? [];
 }
 
@@ -92,6 +95,7 @@ describe("opencode", () => {
         OPENCODE_CONFIG_DIR: "~/custom-opencode",
       }),
     );
+
     expect(moved.map((root) => root.path)).toEqual([
       home("custom-xdg", "opencode", "skills"),
       home("custom-opencode", "skills"),
@@ -123,16 +127,19 @@ describe("omp", () => {
         CODEX_HOME: path.join(tempRoot, "codex-home"),
       }),
     );
+
     const paths = roots.map((root) => root.path);
     expect(paths).toContain(
       home(".omp", "profiles", "work", "agent", "skills"),
     );
     expect(paths).toContain(home("pi-agent", "skills"));
     expect(paths).toContain(path.join(tempRoot, "codex-home", "skills"));
+
     const fallback = await resolveSkills(
       resolveOmpNativeRoots,
       argsFor({ OMP_PROFILE: "default", PI_CODING_AGENT_DIR: "~/pi-agent" }),
     );
+
     expect(fallback.slice(0, 3).map((root) => root.path)).toEqual([
       home("pi-agent", "skills"),
       home("pi-agent", "managed-skills"),
@@ -178,6 +185,7 @@ describe("omp", () => {
       resolveOmpNativeRoots,
       argsFor({}, null),
     );
+
     expect(byPath(userOnly, skillRoot)).toBeUndefined();
     expect(byPath(userOnly, path.join(tempRoot, "user-skills"))).toBeDefined();
   });
@@ -188,6 +196,7 @@ describe("omp", () => {
       extraConfig,
       "skills:\n  customDirectories:\n    - $SKILLS_BASE/team\n",
     );
+
     const roots = await resolveSkills(
       resolveOmpNativeRoots,
       argsFor({
@@ -195,6 +204,7 @@ describe("omp", () => {
         SKILLS_BASE: path.join(tempRoot, "base"),
       }),
     );
+
     expect(byPath(roots, path.join(tempRoot, "base", "team"))).toMatchObject({
       origin: "user",
     });
@@ -209,6 +219,7 @@ describe("omp", () => {
       "tools",
       "1.0.0",
     );
+
     await writeFileEnsuringDir(
       home(".claude", "plugins", "installed_plugins.json"),
       JSON.stringify({
@@ -279,10 +290,12 @@ describe("hermes", () => {
       home("custom-hermes", "config.yaml"),
       "skills:\n  external_dirs: extra\n",
     );
+
     const roots = await resolveSkills(
       resolveHermesNativeRoots,
       argsFor({ HERMES_HOME: "custom-hermes" }),
     );
+
     expect(roots.map((root) => root.path)).toEqual([
       home("custom-hermes", "skills"),
       home("custom-hermes", "extra"),
@@ -328,10 +341,12 @@ describe("grok", () => {
       home("custom-grok", "config.toml"),
       "[compat.cursor]\nskills = false\n",
     );
+
     const roots = await resolveSkills(
       resolveGrokNativeRoots,
       argsFor({ GROK_HOME: "custom-grok" }),
     );
+
     const paths = roots.map((root) => root.path);
     expect(paths).toContain(home("custom-grok", "skills"));
     expect(
@@ -358,6 +373,7 @@ describe("grok", () => {
         GROK_CURSOR_SKILLS_ENABLED: "true",
       }),
     );
+
     expect(reenabled.map((root) => root.path)).toEqual([
       home(".grok", "skills"),
       ...compatPaths(),
@@ -390,6 +406,7 @@ describe("grok", () => {
       resolveGrokNativeRoots,
       argsFor({ GROK_CLAUDE_SKILLS_ENABLED: "false" }),
     );
+
     expect(without.map((root) => root.path)).toEqual([
       home(".grok", "skills"),
       path.join(cwd, ".cursor", "skills"),
@@ -419,10 +436,12 @@ describe("grok", () => {
     expect(byPath(roots, home("one", "SKILL.md"))).toMatchObject({
       shape: "skill-file",
     });
+
     const userOnly = await resolveSkills(
       resolveGrokNativeRoots,
       argsFor({}, null),
     );
+
     expect(byPath(userOnly, userSkills)).toMatchObject({ origin: "user" });
     expect(byPath(userOnly, home("team", "skills"))).toMatchObject({
       origin: "user",
@@ -434,9 +453,11 @@ describe("grok", () => {
       home(".grok", "config.toml"),
       '[plugins]\nenabled = ["release-tools", "org/renamed"]\ndisabled = ["auto-off"]\npaths = ["~/auto-plugins/auto-on", "~/auto-plugins/auto-off"]\n',
     );
+
     for (const name of ["release-tools", "unlisted"]) {
       await writeSkill(home(".grok", "plugins", name, "skills"), "release");
     }
+
     await writeFileEnsuringDir(
       home(".claude", "plugins", "renamed-dir", "plugin.json"),
       JSON.stringify({
@@ -452,6 +473,7 @@ describe("grok", () => {
       home(".claude", "plugins", "renamed-dir", "one", "SKILL.md"),
       "---\nname: one\n---\n",
     );
+
     for (const name of ["auto-on", "auto-off"]) {
       await writeSkill(home("auto-plugins", name, "skills"), "x");
     }
@@ -506,6 +528,7 @@ describe("grok", () => {
         defaultEnabled: "yes",
       }),
     );
+
     for (const pluginRoot of [
       home(".grok", "plugins", "dir-name"),
       home(".claude", "plugins", "flag-dir"),
@@ -567,6 +590,7 @@ describe("grok", () => {
       resolveGrokNativeRoots,
       argsFor({}, nested),
     );
+
     expect(
       byPath(roots, path.join(repoPath, "plugins", "registered", "skills")),
     ).toMatchObject({

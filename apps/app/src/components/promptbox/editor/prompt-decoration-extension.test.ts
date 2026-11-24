@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ComposerView } from "@get-bb/plugin-sdk";
+import type { ComposerView } from "@omnyo/plugin-sdk";
 import { Editor } from "@tiptap/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -79,6 +79,7 @@ describe("PromptDecorationExtension", () => {
               className: "plugin-beta",
               match(text) {
                 const from = text.indexOf("beta");
+
                 return from === -1 ? [] : [{ from, to: from + "beta".length }];
               },
             },
@@ -86,6 +87,7 @@ describe("PromptDecorationExtension", () => {
         },
       ],
     });
+
     const before = promptEditorValueFromDoc(editor.state.doc);
 
     expect(decorationClasses(editor)).toContain("plugin-beta");
@@ -130,6 +132,7 @@ describe("PromptDecorationExtension", () => {
                 className: "mention-range",
                 match(text) {
                   const from = text.indexOf("@alice");
+
                   return [{ from, to: text.length }];
                 },
               },
@@ -138,6 +141,7 @@ describe("PromptDecorationExtension", () => {
         ],
       },
     );
+
     const serialization = promptEditorSerializationFromDoc(editor.state.doc);
 
     expect(serialization.text).toBe("pre @alice post");
@@ -146,9 +150,11 @@ describe("PromptDecorationExtension", () => {
       { textFrom: 4, textTo: 10, docFrom: 5, docTo: 6, kind: "mention" },
       { textFrom: 10, textTo: 15, docFrom: 6, docTo: 11, kind: "text" },
     ]);
+
     const mentionDecorations = getPromptDecorationSet(editor.state)
       ?.find(5, 6, (spec) => spec.className === "mention-range")
       .filter((decoration) => decoration.from === 5 && decoration.to === 6);
+
     expect(mentionDecorations).toHaveLength(1);
     expect(
       decorationClasses(editor).filter((name) => name === "mention-range"),
@@ -158,6 +164,7 @@ describe("PromptDecorationExtension", () => {
 
   it("adds and removes content and whole-draft classes across edits", () => {
     let includeWholeDraftEffect = true;
+
     const editor = createEditor(paragraphContent("tag"), {
       getDecorationSources: () => [
         {
@@ -203,6 +210,7 @@ describe("PromptDecorationExtension", () => {
 
   it("stacks overlapping host and plugin classes in composition order", () => {
     const wholeRange = (text: string) => [{ from: 0, to: text.length }];
+
     const editor = createEditor(paragraphContent("ultracode"), {
       getDecorationSources: () => [
         {
@@ -228,6 +236,7 @@ describe("PromptDecorationExtension", () => {
         },
       ],
     });
+
     const decorations = getPromptDecorationSet(editor.state)?.find() ?? [];
 
     expect(decorations.map((decoration) => decoration.spec.className)).toEqual([
@@ -244,11 +253,15 @@ describe("PromptDecorationExtension", () => {
 
   it("disables a throwing rule until its source generation changes", () => {
     let generation = 1;
+
     const match = vi.fn((text: string) => {
       if (generation === 1) throw new Error("bad matcher");
+
       return [{ from: 0, to: text.length }];
     });
+
     const onRuleError = vi.fn();
+
     const editor = createEditor(paragraphContent("paint me"), {
       getDecorationSources: () => [
         {
@@ -276,12 +289,14 @@ describe("PromptDecorationExtension", () => {
   it("debounces structured draft observation with mention spans and view", () => {
     vi.useFakeTimers();
     const onDraftChange = vi.fn();
+
     const composerView: ComposerView = {
       scope: { kind: "thread", threadId: "thr_1" },
       layout: "expanded",
       draft: { text: "", isEmpty: true, attachmentCount: 0 },
       run: { isRunning: false, isSubmitting: false },
     };
+
     const editor = createEditor(
       {
         type: "doc",
@@ -340,6 +355,7 @@ describe("PromptDecorationExtension", () => {
     vi.useFakeTimers();
     const bulk = "x".repeat(PROMPT_DECORATION_LARGE_DOC_SIZE + 100);
     const editor = createEditor(paragraphContent(`ultracode ${bulk}`));
+
     const ultracodeDecorations = () =>
       (getPromptDecorationSet(editor.state)?.find() ?? []).filter(
         (decoration) => decoration.spec.className === ULTRACODE_HIGHLIGHT_CLASS,
@@ -369,12 +385,14 @@ describe("PromptDecorationExtension", () => {
   it("does not re-run draft observers for a deferred large-doc rebuild", () => {
     vi.useFakeTimers();
     const onDraftChange = vi.fn();
+
     const composerView: ComposerView = {
       scope: { kind: "thread", threadId: "thr_1" },
       layout: "expanded",
       draft: { text: "", isEmpty: true, attachmentCount: 0 },
       run: { isRunning: false, isSubmitting: false },
     };
+
     const editor = createEditor(
       paragraphContent("x".repeat(PROMPT_DECORATION_LARGE_DOC_SIZE + 100)),
       {
@@ -384,6 +402,7 @@ describe("PromptDecorationExtension", () => {
         ],
       },
     );
+
     vi.advanceTimersByTime(25);
     onDraftChange.mockClear();
 
@@ -402,6 +421,7 @@ describe("PromptDecorationExtension", () => {
   it("cancels a pending large-doc rebuild after an explicit refresh", () => {
     vi.useFakeTimers();
     const match = vi.fn(() => []);
+
     const editor = createEditor(
       paragraphContent("x".repeat(PROMPT_DECORATION_LARGE_DOC_SIZE + 100)),
       {
@@ -414,6 +434,7 @@ describe("PromptDecorationExtension", () => {
         ],
       },
     );
+
     expect(match).toHaveBeenCalledTimes(1);
 
     editor.commands.insertContent("y");

@@ -9,12 +9,14 @@ function buildPluginStaticProviderOptions(
   options: CreateBridgeAdapterOptions,
 ): { staticProviderOptions?: Record<string, unknown> } {
   const additionalWorkspaceWriteRoots = options.additionalWorkspaceWriteRoots;
+
   const staticProviderOptions = {
     ...options.bridgeLaunch.providerOptions,
     ...(additionalWorkspaceWriteRoots.length > 0
       ? { additionalWorkspaceWriteRoots: [...additionalWorkspaceWriteRoots] }
       : {}),
   };
+
   return Object.keys(staticProviderOptions).length > 0
     ? { staticProviderOptions }
     : {};
@@ -25,6 +27,7 @@ export function createProviderForId(
   adapterOptions: CreateBridgeAdapterOptions,
 ): BridgeProtocolAdapter {
   const { bridgeLaunch } = adapterOptions;
+
   return createBridgeProtocolAdapter({
     id: providerId,
     capabilities: {
@@ -57,9 +60,12 @@ function pickDeclaredEnv(
   names: readonly string[],
 ): Record<string, string> {
   const picked: Record<string, string> = {};
+
   for (const name of names) {
     const value = env[name];
+
     if (value !== undefined && value !== "") picked[name] = value;
   }
+
   return picked;
 }

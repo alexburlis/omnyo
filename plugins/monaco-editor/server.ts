@@ -1,7 +1,7 @@
 import path from "node:path";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
+import { defineRpcContract, type PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 const MAX_EDITABLE_BYTES = 8 * 1024 * 1024;
@@ -79,6 +79,7 @@ function hostPathApi(hostPath: string): path.PlatformPath {
 function isBundleStale(moduleDir: string, bundleDir: string): boolean {
   const builtAtMs = statSync(path.join(bundleDir, "editor.js")).mtimeMs;
   const entryDir = path.join(moduleDir, "monaco-bundle");
+
   if (!existsSync(entryDir)) return false;
 
   const inputs = [
@@ -86,6 +87,7 @@ function isBundleStale(moduleDir: string, bundleDir: string): boolean {
     ...readdirSync(entryDir).map((name) => path.join(entryDir, name)),
     path.join(moduleDir, "package.json"),
   ];
+
   return inputs.some(
     (input) => existsSync(input) && statSync(input).mtimeMs > builtAtMs,
   );
@@ -95,13 +97,16 @@ async function ensureMonacoBundleDir(
   log: (message: string) => void,
 ): Promise<string> {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+
   const candidates = [
     path.join(moduleDir, "monaco"),
     path.join(moduleDir, "dist", "monaco"),
   ];
+
   const built = candidates.find((candidate) =>
     existsSync(path.join(candidate, "editor.js")),
   );
+
   if (built !== undefined && !isBundleStale(moduleDir, built)) return built;
 
   log(
@@ -115,31 +120,36 @@ async function ensureMonacoBundleDir(
   const staged = candidates.find((candidate) =>
     existsSync(path.join(candidate, "editor.js")),
   );
+
   if (staged === undefined) {
     throw new Error(
-      "could not build the Monaco bundle; run `pnpm --filter bb-plugin-monaco-editor build:monaco`",
+      "could not build the Monaco bundle; run `pnpm --filter omnyo-plugin-monaco-editor build:monaco`",
     );
   }
+
   return staged;
 }
 
-export default async function plugin(bb: BbPluginApi) {
+export default async function plugin(api: PluginApi) {
   let assetLease: { baseUrl: string; expiresAtMs: number } | null = null;
 
   async function assets() {
     const now = Date.now();
+
     if (
       assetLease === null ||
       assetLease.expiresAtMs - now < ASSET_LEASE_REFRESH_MARGIN_MS
     ) {
       const bundleDir = await ensureMonacoBundleDir((message) =>
-        bb.log.info(message),
+        api.log.info(message),
       );
-      assetLease = await bb.sdk.files.createPreview({
+
+      assetLease = await api.sdk.files.createPreview({
         rootPath: bundleDir,
         ttlMs: ASSET_LEASE_TTL_MS,
       });
     }
+
     return assetLease;
   }
 
@@ -151,47 +161,60 @@ export default async function plugin(bb: BbPluginApi) {
       if (source.threadId === null) {
         throw new Error("This thread-storage file has no thread");
       }
-      const { hostId, storageRootPath } = await bb.sdk.threads.storageLocation({
-        threadId: source.threadId,
-      });
+
+      const { hostId, storageRootPath } = await api.sdk.threads.storageLocation(
+        {
+          threadId: source.threadId,
+        },
+      );
+
       return {
         path: hostPathApi(storageRootPath).join(storageRootPath, filePath),
         rootPath: storageRootPath,
         hostId,
       };
     }
+
     if (source.environmentId === null && source.kind === "workspace") {
       if (source.projectId === null) {
         throw new Error("This file has no environment or project");
       }
-      const project = await bb.sdk.projects.get({
+
+      const project = await api.sdk.projects.get({
         projectId: source.projectId,
       });
+
       const sources = project.sources;
+
       const checkout =
         source.experimental_hostId === undefined
           ? (sources.find((entry) => entry.isDefault) ?? sources[0])
           : sources.find(
               (entry) => entry.hostId === source.experimental_hostId,
             );
+
       if (checkout === undefined) {
         throw new Error("This project has no matching source checkout");
       }
+
       return {
         path: hostPathApi(checkout.path).join(checkout.path, filePath),
         rootPath: checkout.path,
         hostId: checkout.hostId,
       };
     }
+
     if (source.environmentId === null) {
       throw new Error("This file has no environment to resolve it against");
     }
-    const environment = await bb.sdk.environments.get({
+
+    const environment = await api.sdk.environments.get({
       environmentId: source.environmentId,
     });
 
     if (source.kind === "host") {
       const api = path.win32.isAbsolute(filePath) ? path.win32 : path.posix;
+
       return {
         path: filePath,
         rootPath: api.dirname(filePath),
@@ -202,6 +225,7 @@ export default async function plugin(bb: BbPluginApi) {
     if (!environment.path) {
       throw new Error("This environment has no workspace path");
     }
+
     return {
       path: hostPathApi(environment.path).join(environment.path, filePath),
       rootPath: environment.path,
@@ -211,15 +235,16 @@ export default async function plugin(bb: BbPluginApi) {
 
   function relativeTo(root: string, target: string): string {
     const api = hostPathApi(root);
+
     return api.relative(root, target) || api.basename(target);
   }
 
-  bb.rpc.register(rpcContract, {
+  api.rpc.register(rpcContract, {
     assets: () => assets(),
 
     async read({ path: filePath, source }) {
       const target = await resolveTarget(source, filePath);
-      const file = await bb.sdk.files.read(target);
+      const file = await api.sdk.files.read(target);
 
       if (file.contentEncoding !== "utf8") {
         return {
@@ -227,12 +252,14 @@ export default async function plugin(bb: BbPluginApi) {
           reason: "This file is not text",
         };
       }
+
       if (file.sizeBytes > MAX_EDITABLE_BYTES) {
         return {
           kind: "unsupported" as const,
           reason: `This file is too large to edit (${Math.round(file.sizeBytes / 1024 / 1024)} MB)`,
         };
       }
+
       return {
         kind: "text" as const,
         content: file.content,
@@ -244,7 +271,8 @@ export default async function plugin(bb: BbPluginApi) {
 
     async tree({ source }) {
       const target = await resolveTarget(source, ".");
-      const result = await bb.sdk.files.listPaths({
+
+      const result = await api.sdk.files.listPaths({
         path: target.rootPath,
         includeFiles: true,
         includeDirectories: true,
@@ -252,6 +280,7 @@ export default async function plugin(bb: BbPluginApi) {
         limit: MAX_TREE_ENTRIES,
         ...(target.hostId !== undefined ? { hostId: target.hostId } : {}),
       });
+
       return {
         root: target.rootPath,
         entries: result.paths.map((entry) => ({
@@ -264,12 +293,14 @@ export default async function plugin(bb: BbPluginApi) {
 
     async write({ path: filePath, source, content, expectedSha256 }) {
       const target = await resolveTarget(source, filePath);
-      const result = await bb.sdk.files.write({
+
+      const result = await api.sdk.files.write({
         ...target,
         content,
         contentEncoding: "utf8",
         expectedSha256,
       });
+
       return result.outcome === "written"
         ? { outcome: "written" as const, sha256: result.sha256 }
         : { outcome: "conflict" as const, currentSha256: result.currentSha256 };

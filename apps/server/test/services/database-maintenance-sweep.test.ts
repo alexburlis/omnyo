@@ -18,13 +18,15 @@ import {
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import type { ServerLogger } from "../../src/types.js";
 import { runDatabaseMaintenanceSweep } from "../../src/services/system/periodic-sweeps.js";
 import { testLogger } from "../helpers/test-app.js";
 
 const FREELIST_ROW_COUNT = 1_200;
+
 const SQLITE_BUSY_HEADROOM_MS = 1_000;
+
 const TEST_DEFERRED_LEGACY_TABLE_NAMES = [
   "client_turn_requests",
   "environment_operations",
@@ -53,6 +55,7 @@ class CapturingSlowQueryLogger implements SlowDbQueryLogger {
 
 function createCapturingServerLogger() {
   const warnMessages: string[] = [];
+
   const logger: ServerLogger = {
     debug(): void {},
     error(): void {},
@@ -66,17 +69,19 @@ function createCapturingServerLogger() {
 }
 
 function createTempDatabasePath(): TempDatabasePath {
-  const dir = mkdtempSync(join(tmpdir(), "bb-server-db-maintenance-"));
+  const dir = mkdtempSync(join(tmpdir(), "omnyo-server-db-maintenance-"));
+
   return {
     cleanup(): void {
       rmSync(dir, { force: true, recursive: true });
     },
-    dbPath: join(dir, "bb.db"),
+    dbPath: join(dir, "app.db"),
   };
 }
 
 function createLegacyDatabaseFile(dbPath: string): void {
   const rawDb = new Database(dbPath);
+
   try {
     rawDb.exec("PRAGMA journal_mode = WAL");
     rawDb.exec(
@@ -108,10 +113,12 @@ function markDatabaseBusy(db: DbConnection): void {
   const host = upsertHost(db, noopNotifier, {
     name: "maintenance-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "maintenance-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/project" },
   });
+
   createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
@@ -123,15 +130,19 @@ function buildFreelist(db: DbConnection): void {
   db.$client.exec(
     "CREATE TABLE scratch_blobs (id INTEGER PRIMARY KEY, blob TEXT)",
   );
+
   const insert = db.$client.prepare(
     "INSERT INTO scratch_blobs (blob) VALUES (?)",
   );
+
   const blob = "x".repeat(8 * 1024);
+
   const insertMany = db.$client.transaction((count: number) => {
     for (let index = 0; index < count; index += 1) {
       insert.run(blob);
     }
   });
+
   insertMany(FREELIST_ROW_COUNT);
   db.$client.exec("DELETE FROM scratch_blobs");
 }
@@ -155,7 +166,7 @@ function setupBusyFileDatabaseWithFreelist(tempDatabase: TempDatabasePath) {
 }
 
 describe("runDatabaseMaintenanceSweep", () => {
-  it("drops deferred legacy tables on an idle maintenance pass", () => {
+  it("drops deferred legacy tables on an idle maintenance pass", async () => {
     const db = createConnection(":memory:");
     migrate(db);
     createDeferredLegacyTables(db);
@@ -163,45 +174,45 @@ describe("runDatabaseMaintenanceSweep", () => {
       [...TEST_DEFERRED_LEGACY_TABLE_NAMES].sort(),
     );
 
-    runDatabaseMaintenanceSweep({ db, logger: testLogger });
+    await runDatabaseMaintenanceSweep({ db, logger: testLogger });
 
     expect(listDeferredLegacyTables(db)).toEqual([]);
   });
 
-  it("skips deferred legacy table cleanup while app work is active", () => {
+  it("skips deferred legacy table cleanup while app work is active", async () => {
     const { db } = setupBusyDatabaseWithFreelist();
     createDeferredLegacyTables(db);
 
-    runDatabaseMaintenanceSweep({ db, logger: testLogger });
+    await runDatabaseMaintenanceSweep({ db, logger: testLogger });
 
     expect(listDeferredLegacyTables(db)).toEqual(
       [...TEST_DEFERRED_LEGACY_TABLE_NAMES].sort(),
     );
   });
 
-  it("skips busy legacy databases before dbstat or full maintenance", () => {
+  it("leaves idle auto_vacuum=NONE databases untouched without scanning pages", async () => {
     const tempDatabase = createTempDatabasePath();
+
     try {
       createLegacyDatabaseFile(tempDatabase.dbPath);
       const slowQueryLogger = new CapturingSlowQueryLogger();
+
       const db = createConnection(tempDatabase.dbPath, {
         slowQueryLogger,
         slowQueryThresholdMs: 0,
       });
+
       try {
         migrate(db);
         expect(getDatabaseAutoVacuumMode(db)).toBe("none");
-        markDatabaseBusy(db);
         buildFreelist(db);
         const before = getDatabaseFreelistStats(db);
         slowQueryLogger.clear();
 
-        runDatabaseMaintenanceSweep({ db, logger: testLogger });
+        await runDatabaseMaintenanceSweep({ db, logger: testLogger });
 
         expect(getDatabaseAutoVacuumMode(db)).toBe("none");
-        expect(getDatabaseFreelistStats(db).freelistCount).toBe(
-          before.freelistCount,
-        );
+        expect(getDatabaseFreelistStats(db)).toEqual(before);
         expect(
           slowQueryLogger.debugLogs.some((log) => log.sql.includes("dbstat")),
         ).toBe(false);
@@ -213,12 +224,74 @@ describe("runDatabaseMaintenanceSweep", () => {
     }
   });
 
-  it("does not wait on a WAL reader during incremental maintenance", () => {
+  it("vacuums in chunks and yields to the event loop between them", async () => {
+    const { db } = setupBusyDatabaseWithFreelist();
+    const before = getDatabaseFreelistStats(db);
+    expect(before.freelistCount).toBeGreaterThan(512);
+    let yielded = false;
+    setImmediate(() => {
+      yielded = true;
+    });
+
+    await runDatabaseMaintenanceSweep({ db, logger: testLogger });
+
+    expect(yielded).toBe(true);
+    expect(getDatabaseFreelistStats(db).freelistCount).toBeLessThan(
+      before.freelistCount - 256,
+    );
+  });
+
+  it("keeps each synchronous incremental vacuum step small", async () => {
     const tempDatabase = createTempDatabasePath();
+
+    try {
+      const slowQueryLogger = new CapturingSlowQueryLogger();
+
+      const db = createConnection(tempDatabase.dbPath, {
+        slowQueryLogger,
+        slowQueryThresholdMs: 0,
+      });
+
+      try {
+        migrate(db);
+        buildFreelist(db);
+        const before = getDatabaseFreelistStats(db);
+        slowQueryLogger.clear();
+
+        await runDatabaseMaintenanceSweep({ db, logger: testLogger });
+
+        const statements = slowQueryLogger.debugLogs.map((log) => log.sql);
+
+        const vacuumPages = statements.flatMap((sql) => {
+          const match = /incremental_vacuum\((\d+)\)/u.exec(sql);
+
+          return match ? [Number(match[1])] : [];
+        });
+
+        expect(getDatabaseFreelistStats(db).freelistCount).toBeLessThan(
+          before.freelistCount - 256,
+        );
+        expect(vacuumPages.length).toBeGreaterThan(1);
+        expect(Math.max(...vacuumPages)).toBeLessThanOrEqual(64);
+        expect(
+          statements.filter((sql) => sql.includes("wal_checkpoint")),
+        ).toHaveLength(0);
+      } finally {
+        db.$client.close();
+      }
+    } finally {
+      tempDatabase.cleanup();
+    }
+  });
+
+  it("does not wait on a WAL reader during incremental maintenance", async () => {
+    const tempDatabase = createTempDatabasePath();
+
     try {
       const { db } = setupBusyFileDatabaseWithFreelist(tempDatabase);
       const readerDb = new Database(tempDatabase.dbPath, { readonly: true });
       let readerTransactionOpen = false;
+
       try {
         readerDb.exec("BEGIN");
         readerTransactionOpen = true;
@@ -226,7 +299,7 @@ describe("runDatabaseMaintenanceSweep", () => {
         const before = getDatabaseFreelistStats(db);
         const startedAt = performance.now();
 
-        runDatabaseMaintenanceSweep({ db, logger: testLogger });
+        await runDatabaseMaintenanceSweep({ db, logger: testLogger });
 
         const elapsedMs = performance.now() - startedAt;
         expect(elapsedMs).toBeLessThan(
@@ -239,6 +312,7 @@ describe("runDatabaseMaintenanceSweep", () => {
         if (readerTransactionOpen) {
           readerDb.exec("ROLLBACK");
         }
+
         readerDb.close();
         db.$client.close();
       }
@@ -247,12 +321,14 @@ describe("runDatabaseMaintenanceSweep", () => {
     }
   });
 
-  it("returns quickly when a WAL writer blocks incremental maintenance", () => {
+  it("returns quickly when a WAL writer blocks incremental maintenance", async () => {
     const tempDatabase = createTempDatabasePath();
+
     try {
       const { db } = setupBusyFileDatabaseWithFreelist(tempDatabase);
       const writerDb = new Database(tempDatabase.dbPath);
       let writerTransactionOpen = false;
+
       try {
         writerDb.exec("BEGIN IMMEDIATE");
         writerTransactionOpen = true;
@@ -260,7 +336,7 @@ describe("runDatabaseMaintenanceSweep", () => {
         const { logger, warnMessages } = createCapturingServerLogger();
         const startedAt = performance.now();
 
-        runDatabaseMaintenanceSweep({ db, logger });
+        await runDatabaseMaintenanceSweep({ db, logger });
 
         const elapsedMs = performance.now() - startedAt;
         expect(elapsedMs).toBeLessThan(
@@ -274,6 +350,7 @@ describe("runDatabaseMaintenanceSweep", () => {
         if (writerTransactionOpen) {
           writerDb.exec("ROLLBACK");
         }
+
         writerDb.close();
         db.$client.close();
       }

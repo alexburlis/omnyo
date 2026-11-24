@@ -45,6 +45,7 @@ function parseHostAuthority(
 ): { hostname: string; port: string } | null {
   try {
     const url = new URL(`http://${host}`);
+
     return url.username.length === 0 &&
       url.password.length === 0 &&
       url.pathname === "/" &&
@@ -64,11 +65,15 @@ function isProxyLoopbackAuthority(
   if (host === undefined) {
     return false;
   }
+
   const parsed = parseHostAuthority(host);
+
   if (parsed === null) {
     return false;
   }
+
   const hostPort = parsed.port.length > 0 ? Number(parsed.port) : 80;
+
   return (
     hostPort === boundPort && LOOPBACK_AUTHORITY_HOSTNAMES.has(parsed.hostname)
   );
@@ -84,6 +89,7 @@ function writeRejectedSocket(
   socket: Duplex,
   status: RejectedSocketStatus,
 ): void {
+  socket.on("error", () => socket.destroy());
   socket.end(
     `HTTP/1.1 ${status} ${REJECTED_SOCKET_MESSAGES[status]}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
   );
@@ -100,9 +106,11 @@ function rejectedProxyStatus(
   ) {
     return 403;
   }
+
   if (!isOriginFormTarget(request.url)) {
     return 400;
   }
+
   return null;
 }
 
@@ -112,6 +120,7 @@ function openUpstreamRequest(
   serverHeaders: Record<string, string>,
 ): http.ClientRequest {
   const requestFn = target.protocol === "https:" ? https.request : http.request;
+
   return requestFn({
     protocol: target.protocol,
     hostname: target.hostname,
@@ -134,8 +143,10 @@ function proxyRequest(args: {
   target: URL;
 }): void {
   const rejectedStatus = rejectedProxyStatus(args.request, args.boundPort);
+
   if (rejectedStatus !== null) {
     args.response.writeHead(rejectedStatus).end();
+
     return;
   }
 
@@ -144,6 +155,10 @@ function proxyRequest(args: {
     args.target,
     args.serverHeaders,
   );
+
+  args.response.once("close", () => {
+    if (!args.response.writableFinished) upstream.destroy();
+  });
   upstream.once("response", (upstreamResponse) => {
     args.response.writeHead(
       upstreamResponse.statusCode ?? 502,
@@ -157,10 +172,14 @@ function proxyRequest(args: {
     upstreamResponse.pipe(args.response);
   });
   upstream.on("error", () => {
+    if (args.response.destroyed) return;
+
     if (args.response.headersSent) {
       args.response.destroy();
+
       return;
     }
+
     args.response.writeHead(502).end();
   });
   args.request.pipe(upstream);
@@ -175,8 +194,10 @@ function proxyUpgrade(args: {
   target: URL;
 }): void {
   const rejectedStatus = rejectedProxyStatus(args.request, args.boundPort);
+
   if (rejectedStatus !== null) {
     writeRejectedSocket(args.clientSocket, rejectedStatus);
+
     return;
   }
 
@@ -185,24 +206,33 @@ function proxyUpgrade(args: {
     args.target,
     args.serverHeaders,
   );
+
   upstreamRequest.on("upgrade", (response, upstreamSocket, upstreamHead) => {
     upstreamSocket.on("error", () => upstreamSocket.destroy());
     upstreamSocket.on("close", () => args.clientSocket.destroy());
     args.clientSocket.on("close", () => upstreamSocket.destroy());
+
     if (args.clientSocket.destroyed) {
       upstreamSocket.destroy();
+
       return;
     }
+
     const statusLine = `HTTP/${response.httpVersion} ${response.statusCode ?? 101} ${response.statusMessage ?? "Switching Protocols"}\r\n`;
+
     const headerLines = response.rawHeaders
       .reduce<string[]>((lines, value, index) => {
         if (index % 2 === 0)
           lines.push(`${value}: ${response.rawHeaders[index + 1] ?? ""}\r\n`);
+
         return lines;
       }, [])
       .join("");
+
     args.clientSocket.write(`${statusLine}${headerLines}\r\n`);
+
     if (upstreamHead.length > 0) args.clientSocket.write(upstreamHead);
+
     if (args.head.length > 0) upstreamSocket.write(args.head);
     upstreamSocket.pipe(args.clientSocket).pipe(upstreamSocket);
   });
@@ -219,13 +249,16 @@ export async function startMachineAuthProxy(
   options: StartMachineAuthProxyOptions,
 ): Promise<MachineAuthProxy> {
   const target = new URL(options.serverUrl);
+
   if (target.protocol !== "http:" && target.protocol !== "https:") {
     throw new Error(
       `Unsupported machine proxy server protocol: ${target.protocol}`,
     );
   }
+
   const sockets = new Set<Socket>();
   let boundPort: number | null = null;
+
   const server = http.createServer((request, response) =>
     proxyRequest({
       boundPort,
@@ -235,6 +268,7 @@ export async function startMachineAuthProxy(
       target,
     }),
   );
+
   server.on("connect", (_request, socket) => writeRejectedSocket(socket, 405));
   server.on("upgrade", (request, socket, head) =>
     proxyUpgrade({
@@ -256,10 +290,12 @@ export async function startMachineAuthProxy(
       server.off("listening", onListening);
       reject(error);
     };
+
     const onListening = () => {
       server.off("error", onError);
       resolve();
     };
+
     server.once("error", onError);
     server.once("listening", onListening);
     server.listen(options.port ?? 0, LOOPBACK_HOST);
@@ -267,11 +303,13 @@ export async function startMachineAuthProxy(
 
   const address = server.address() as AddressInfo;
   boundPort = address.port;
+
   return {
     serverUrl: `http://${LOOPBACK_HOST}:${address.port}`,
     async close(): Promise<void> {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
+
         for (const socket of sockets) socket.destroy();
       });
     },

@@ -143,12 +143,15 @@ export function PriorityIcon({
       </svg>
     );
   }
+
   const lit = PRIORITY_LIT_BARS[priority];
+
   const bars = [
     { x: 1.5, height: 5 },
     { x: 5.5, height: 8 },
     { x: 9.5, height: 11 },
   ];
+
   return (
     <svg
       viewBox="0 0 14 14"

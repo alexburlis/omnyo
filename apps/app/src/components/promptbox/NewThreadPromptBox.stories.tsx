@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { PermissionMode, PromptTextMention } from "@bb/domain";
-import type { SystemExecutionOptionsModelLoadError } from "@bb/server-contract";
+import type { PermissionMode, PromptTextMention } from "@omnyo/domain";
+import type { SystemExecutionOptionsModelLoadError } from "@omnyo/server-contract";
 import {
   NewThreadPromptBoxUI,
   type NewThreadEnvironmentConfig,
@@ -19,7 +19,9 @@ import { ModelPickerStoryQueryProvider } from "../../../.ladle/model-picker-quer
 import {
   HOST_IDS,
   PROJECT_IDS,
+  STORY_CLAUDE_CODE_MODELS,
   STORY_CLAUDE_CODE_MORE_MODELS,
+  STORY_CODEX_REASONING,
   STORY_ENVIRONMENT_PROVIDERS,
   STORY_PROJECTS,
   STORY_PROJECT_SOURCES,
@@ -29,6 +31,7 @@ import {
   useInteractiveExecutionControls,
   makeTypeaheadConfig as makeTypeahead,
   makeHost,
+  storyModelOption,
 } from "../../../.ladle/story-fixtures";
 
 export default {
@@ -38,12 +41,14 @@ export default {
 const noop = () => {};
 
 const baseExecution = makeExecutionControlsProps();
+
 const codexModelLoadError = {
   providerId: "codex",
   code: "failed",
   detail:
-    "bb could not find the Codex CLI on this machine. Install Codex (https://developers.openai.com/codex/cli) or put `codex` on PATH, then retry.",
+    "Omnyo could not find the Codex CLI on this machine. Install Codex (https://developers.openai.com/codex/cli) or put `codex` on PATH, then retry.",
 } satisfies SystemExecutionOptionsModelLoadError;
+
 const codexMissingCliModelLoadError = {
   providerId: "codex",
   code: "missing_executable",
@@ -65,7 +70,7 @@ const baseWorktree: NewThreadWorktreeConfig = {
 
 const baseProject: NewThreadProjectConfig = {
   projects: STORY_PROJECTS,
-  value: PROJECT_IDS.bb,
+  value: PROJECT_IDS.omnyo,
   onChange: noop,
 };
 
@@ -112,10 +117,12 @@ const promptActions: readonly PromptBoxAction[] = [
 function useControlledValue(initial: string) {
   const [value, setValue] = useState(initial);
   const [mentionRanges, setMentionRanges] = useState<PromptTextMention[]>([]);
+
   const onChange = (nextValue: string, nextMentions: PromptTextMention[]) => {
     setValue(nextValue);
     setMentionRanges(nextMentions);
   };
+
   return { value, mentionRanges, onChange };
 }
 
@@ -136,6 +143,7 @@ function PromptStage({ children }: PromptStageProps) {
 function DefaultRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
   const execution = useInteractiveExecutionControls(baseExecution);
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -163,6 +171,7 @@ function SubmittingRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "Investigate the timeline pagination flicker.",
   );
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -189,6 +198,7 @@ function LoadingModelsRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "Investigate the timeline pagination flicker.",
   );
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -207,6 +217,11 @@ function LoadingModelsRow() {
         project={baseProject}
         execution={{
           ...baseExecution,
+          catalog: {
+            ...baseExecution.catalog,
+            verified: false,
+            modelOptions: [],
+          },
           model: {
             ...baseExecution.model,
             active: null,
@@ -224,6 +239,7 @@ function ModelLoadFailedRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "Investigate the timeline pagination flicker.",
   );
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -242,6 +258,11 @@ function ModelLoadFailedRow() {
         project={baseProject}
         execution={{
           ...baseExecution,
+          catalog: {
+            ...baseExecution.catalog,
+            verified: false,
+            modelOptions: [],
+          },
           model: {
             ...baseExecution.model,
             active: null,
@@ -261,6 +282,7 @@ function UnsupportedCodexCliRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "Create an automation that checks the release until CI passes.",
   );
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -302,6 +324,7 @@ function MissingCodexCliRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "Investigate the timeline pagination flicker.",
   );
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -334,6 +357,11 @@ function MissingCodexCliRow() {
         project={baseProject}
         execution={{
           ...baseExecution,
+          catalog: {
+            ...baseExecution.catalog,
+            verified: false,
+            modelOptions: [],
+          },
           model: {
             ...baseExecution.model,
             active: null,
@@ -353,6 +381,7 @@ function GenericModelRequestFailedRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "Investigate the timeline pagination flicker.",
   );
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -371,6 +400,7 @@ function GenericModelRequestFailedRow() {
         project={baseProject}
         execution={{
           ...baseExecution,
+          catalog: { providers: [], verified: false, modelOptions: [] },
           provider: {
             options: [],
             selectedId: "",
@@ -396,6 +426,7 @@ function NoModelsAvailableRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "Investigate the timeline pagination flicker.",
   );
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -414,6 +445,7 @@ function NoModelsAvailableRow() {
         project={baseProject}
         execution={{
           ...baseExecution,
+          catalog: { ...baseExecution.catalog, modelOptions: [] },
           model: {
             ...baseExecution.model,
             active: null,
@@ -431,6 +463,7 @@ function NoModelsAvailableRow() {
 
 function CustomModelAfterLoadErrorRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -449,15 +482,27 @@ function CustomModelAfterLoadErrorRow() {
         project={baseProject}
         execution={{
           ...baseExecution,
+          catalog: {
+            ...baseExecution.catalog,
+            verified: false,
+            modelOptions: [
+              storyModelOption(
+                "gpt-example-preview",
+                "GPT Example Preview",
+                STORY_CODEX_REASONING,
+              ),
+            ],
+          },
           model: {
             ...baseExecution.model,
             active: { model: "gpt-example-preview" },
             selected: "gpt-example-preview",
             options: [
-              {
-                value: "gpt-example-preview",
-                label: "GPT Example Preview",
-              },
+              storyModelOption(
+                "gpt-example-preview",
+                "GPT Example Preview",
+                STORY_CODEX_REASONING,
+              ),
             ],
             isLoading: false,
             loadFailed: true,
@@ -471,6 +516,7 @@ function CustomModelAfterLoadErrorRow() {
 
 function ClaudeProviderRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -489,15 +535,15 @@ function ClaudeProviderRow() {
         project={baseProject}
         execution={{
           ...baseExecution,
+          catalog: {
+            ...baseExecution.catalog,
+            modelOptions: STORY_CLAUDE_CODE_MODELS,
+          },
           provider: { ...baseExecution.provider, selectedId: "claude-code" },
           model: {
             active: { model: "claude-opus-4-8[1m]" },
             selected: "claude-opus-4-8[1m]",
-            options: [
-              { value: "claude-fable-5", label: "Claude Fable 5" },
-              { value: "claude-opus-4-8[1m]", label: "Claude Opus 4.8 (1M)" },
-              { value: "claude-sonnet-5", label: "Claude Sonnet 5" },
-            ],
+            options: STORY_CLAUDE_CODE_MODELS,
             moreOptions: STORY_CLAUDE_CODE_MORE_MODELS,
             isLoading: false,
             loadFailed: false,
@@ -512,6 +558,7 @@ function ClaudeProviderRow() {
 
 function FullAccessRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -551,10 +598,13 @@ function ProjectlessThreadRow() {
   const [permission, setPermission] = useState<PermissionMode>("auto");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [hostId, setHostId] = useState<string | null>(HOST_IDS.remote);
+
   const [environmentValue, setEnvironmentValue] = useState(
     "provider:personal-workspace",
   );
+
   const [worktreeId, setWorktreeId] = useState<string | null>(null);
+
   return (
     <PromptStage>
       <NewThreadPromptBoxUI
@@ -636,7 +686,7 @@ export function Overview() {
         </StoryRow>
         <StoryRow
           label="provider failed"
-          hint="provider-specific error; picker menu keeps provider tabs"
+          hint="provider-specific error under its own group; other provider groups stay selectable"
         >
           <ModelLoadFailedRow />
         </StoryRow>
@@ -648,19 +698,19 @@ export function Overview() {
         </StoryRow>
         <StoryRow
           label="missing Codex CLI"
-          hint="thread creation blocked; banner exposes Install action, picker keeps provider tabs"
+          hint="thread creation blocked; banner exposes Install action, other provider groups stay selectable"
         >
           <MissingCodexCliRow />
         </StoryRow>
         <StoryRow
           label="request failed"
-          hint="generic request failure; picker menu hides provider tabs"
+          hint="generic request failure; the picker lists no other provider groups"
         >
           <GenericModelRequestFailedRow />
         </StoryRow>
         <StoryRow
           label="no models"
-          hint="successful empty model list; provider tabs remain available"
+          hint="successful empty model list; other provider groups remain available"
         >
           <NoModelsAvailableRow />
         </StoryRow>

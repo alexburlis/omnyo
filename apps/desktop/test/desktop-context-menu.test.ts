@@ -7,6 +7,7 @@ import {
 } from "../src/desktop-context-menu.js";
 
 const popup = vi.fn();
+
 const { writeClipboardText } = vi.hoisted(() => ({
   writeClipboardText: vi.fn(),
 }));
@@ -56,6 +57,12 @@ interface FakeWebContents extends Pick<
   addedDictionaryWords: string[];
   replacedMisspellings: string[];
   spellCheckerEnabledValues: boolean[];
+  downloadedUrls: string[];
+  copiedImagePositions: Array<{ x: number; y: number }>;
+  destroyed: boolean;
+  downloadURL(url: string): void;
+  copyImageAt(x: number, y: number): void;
+  isDestroyed(): boolean;
 }
 
 function createContextMenuParams(
@@ -96,16 +103,32 @@ function createFakeWebContents(): FakeWebContents {
   const addedDictionaryWords: string[] = [];
   const replacedMisspellings: string[] = [];
   const spellCheckerEnabledValues: boolean[] = [];
+  const downloadedUrls: string[] = [];
+  const copiedImagePositions: Array<{ x: number; y: number }> = [];
+
   return {
     addedDictionaryWords,
     replacedMisspellings,
     spellCheckerEnabledValues,
+    downloadedUrls,
+    copiedImagePositions,
+    destroyed: false,
+    downloadURL(url) {
+      downloadedUrls.push(url);
+    },
+    copyImageAt(x, y) {
+      copiedImagePositions.push({ x, y });
+    },
+    isDestroyed() {
+      return this.destroyed;
+    },
     replaceMisspelling(text) {
       replacedMisspellings.push(text);
     },
     session: {
       addWordToSpellCheckerDictionary(word) {
         addedDictionaryWords.push(word);
+
         return true;
       },
       setSpellCheckerEnabled(enabled) {
@@ -122,6 +145,7 @@ function clickMenuItem(item: MenuItemConstructorOptions | undefined): void {
 describe("desktop context menu", () => {
   it("uses Electron's spelling result even when spellcheckEnabled is false", () => {
     const webContents = createFakeWebContents();
+
     const params = createContextMenuParams({
       formControlType: "input-text",
       isEditable: true,
@@ -129,6 +153,7 @@ describe("desktop context menu", () => {
       misspelledWord: "teh",
       dictionarySuggestions: ["the", "tech"],
     });
+
     const template = buildDesktopContextMenuTemplate({
       webContents,
       params,
@@ -144,6 +169,7 @@ describe("desktop context menu", () => {
 
   it("can add a misspelled word to the spellchecker dictionary", () => {
     const webContents = createFakeWebContents();
+
     const template = buildDesktopContextMenuTemplate({
       webContents,
       params: createContextMenuParams({
@@ -168,6 +194,7 @@ describe("desktop context menu", () => {
 
   it("keeps standard edit actions in editable context menus", () => {
     const webContents = createFakeWebContents();
+
     const template = buildDesktopContextMenuTemplate({
       webContents,
       params: createContextMenuParams({
@@ -196,6 +223,7 @@ describe("desktop context menu", () => {
 
   it("copies a link target", () => {
     const webContents = createFakeWebContents();
+
     const template = buildDesktopContextMenuTemplate({
       webContents,
       params: createContextMenuParams({
@@ -205,6 +233,7 @@ describe("desktop context menu", () => {
 
     expect(template).toEqual([
       { label: "Copy Link", click: expect.any(Function) },
+      { label: "Save Link As…", click: expect.any(Function) },
     ]);
 
     clickMenuItem(template[0]);
@@ -216,6 +245,7 @@ describe("desktop context menu", () => {
 
   it("groups selected-text actions together", () => {
     const webContents = createFakeWebContents();
+
     const template = buildDesktopContextMenuTemplate({
       webContents,
       params: createContextMenuParams({
@@ -236,6 +266,7 @@ describe("desktop context menu", () => {
 
   it("preserves selected-text actions for links", () => {
     const webContents = createFakeWebContents();
+
     const template = buildDesktopContextMenuTemplate({
       webContents,
       params: createContextMenuParams({
@@ -251,6 +282,7 @@ describe("desktop context menu", () => {
 
     expect(template).toMatchObject([
       { label: "Copy Link" },
+      { label: "Save Link As…" },
       { type: "separator" },
       { role: "copy", enabled: true },
       { role: "selectAll", enabled: true },
@@ -266,6 +298,179 @@ describe("desktop context menu", () => {
         params: createContextMenuParams(),
       }),
     ).toEqual([]);
+  });
+
+  it("saves a generated private host image through its owning web contents and copies its image pixels", () => {
+    const webContents = createFakeWebContents();
+
+    const srcURL =
+      "https://omnyo.example/api/v1/threads/thr_example/host-files/C%3A/outputs/generated%20image.png";
+
+    const template = buildDesktopContextMenuTemplate({
+      webContents,
+      params: createContextMenuParams({
+        mediaType: "image",
+        hasImageContents: true,
+        srcURL,
+        x: 67,
+        y: 89,
+      }),
+    });
+
+    clickMenuItem(template.find((item) => item.label === "Save Image As…"));
+    clickMenuItem(template.find((item) => item.label === "Copy Image"));
+
+    expect(webContents.downloadedUrls).toEqual([srcURL]);
+    expect(webContents.copiedImagePositions).toEqual([{ x: 67, y: 89 }]);
+  });
+
+  it("keeps image, link and selected-text actions available on a linked image", () => {
+    const webContents = createFakeWebContents();
+
+    const template = buildDesktopContextMenuTemplate({
+      webContents,
+      params: createContextMenuParams({
+        mediaType: "image",
+        hasImageContents: true,
+        srcURL: "https://omnyo.example/generated.png",
+        linkURL: "https://omnyo.example/generated-original.png",
+        selectionText: "Generated result",
+        editFlags: { ...DEFAULT_EDIT_FLAGS, canCopy: true, canSelectAll: true },
+      }),
+    });
+
+    for (const label of [
+      "Save Image As…",
+      "Copy Image",
+      "Copy Link",
+      "Save Link As…",
+    ])
+      expect(template.find((item) => item.label === label)).toBeDefined();
+    expect(template).toContainEqual({ role: "copy", enabled: true });
+    expect(template).toContainEqual({ role: "selectAll", enabled: true });
+    expect(template[0]?.type).not.toBe("separator");
+    expect(template.at(-1)?.type).not.toBe("separator");
+    expect(
+      template.some(
+        (item, index) =>
+          item.type === "separator" &&
+          template[index + 1]?.type === "separator",
+      ),
+    ).toBe(false);
+  });
+
+  it("passes the exact private linked file URL to the owning download path", () => {
+    const webContents = createFakeWebContents();
+
+    const linkURL =
+      "https://omnyo.example/api/v1/environments/env_example/files/results/report%20final.pdf";
+
+    const template = buildDesktopContextMenuTemplate({
+      webContents,
+      params: createContextMenuParams({ linkURL }),
+    });
+
+    clickMenuItem(template.find((item) => item.label === "Save Link As…"));
+
+    expect(webContents.downloadedUrls).toEqual([linkURL]);
+  });
+
+  it.each([
+    "data:image/png;base64,iVBORw0KGgo=",
+    "blob:https://omnyo.example/3d87c94c-5e0c-4440-b751-c75906c90001",
+  ])("saves a loaded image using the proven %s native URL path", (srcURL) => {
+    const webContents = createFakeWebContents();
+
+    const template = buildDesktopContextMenuTemplate({
+      webContents,
+      params: createContextMenuParams({
+        mediaType: "image",
+        hasImageContents: true,
+        srcURL,
+      }),
+    });
+
+    clickMenuItem(template.find((item) => item.label === "Save Image As…"));
+
+    expect(webContents.downloadedUrls).toEqual([srcURL]);
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "file:///C:/private/generated.png",
+    "omnyo://open/private-file",
+    "data:text/html,<script>alert(1)</script>",
+    "not a URL",
+  ])("does not download an unsafe source %s", (srcURL) => {
+    const webContents = createFakeWebContents();
+
+    const template = buildDesktopContextMenuTemplate({
+      webContents,
+      params: createContextMenuParams({
+        mediaType: "image",
+        hasImageContents: true,
+        srcURL,
+        linkURL: srcURL,
+      }),
+    });
+
+    expect(
+      template.find((item) => item.label === "Save Image As…"),
+    ).toBeUndefined();
+    expect(
+      template.find((item) => item.label === "Save Link As…"),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    {
+      mediaType: "image",
+      hasImageContents: false,
+      srcURL: "https://omnyo.example/broken.png",
+    },
+    { mediaType: "image", hasImageContents: true, srcURL: "" },
+    {
+      mediaType: "none",
+      hasImageContents: false,
+      srcURL: "https://omnyo.example/not-an-image",
+    },
+  ] satisfies Array<Partial<ContextMenuParams>>)(
+    "does not offer image saves for unloaded media $srcURL",
+    (params) => {
+      const template = buildDesktopContextMenuTemplate({
+        webContents: createFakeWebContents(),
+        params: createContextMenuParams(params),
+      });
+
+      expect(
+        template.find((item) => item.label === "Save Image As…"),
+      ).toBeUndefined();
+    },
+  );
+
+  it("ignores a stale image action after its owning web contents is destroyed", () => {
+    const webContents = createFakeWebContents();
+
+    const template = buildDesktopContextMenuTemplate({
+      webContents,
+      params: createContextMenuParams({
+        mediaType: "image",
+        hasImageContents: true,
+        srcURL: "https://omnyo.example/generated.png",
+      }),
+    });
+
+    const save = template.find((item) => item.label === "Save Image As…");
+    const copy = template.find((item) => item.label === "Copy Image");
+    expect(save).toBeDefined();
+    expect(copy).toBeDefined();
+    webContents.destroyed = true;
+
+    clickMenuItem(save);
+    clickMenuItem(copy);
+
+    expect(webContents.downloadedUrls).toEqual([]);
+    expect(webContents.copiedImagePositions).toEqual([]);
   });
 
   it("registers the native menu popup for context-menu events", async () => {

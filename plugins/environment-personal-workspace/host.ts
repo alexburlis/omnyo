@@ -2,7 +2,7 @@ import { mkdir, rm, stat } from "node:fs/promises";
 import {
   experimental_defineHostEntry,
   experimental_killProcessesWithCwdUnder,
-} from "@get-bb/plugin-sdk/host";
+} from "@omnyo/plugin-sdk/host";
 import { personalWorkspaceHostContract } from "./contract.js";
 import {
   assertRemovableWorkspacePath,
@@ -12,6 +12,7 @@ import {
 async function pathExists(target: string): Promise<boolean> {
   try {
     await stat(target);
+
     return true;
   } catch {
     return false;
@@ -27,7 +28,9 @@ export function createPersonalWorkspaceHostEntry() {
           dataDir: context.experimental_paths.dataDir,
           pathKey: input.pathKey,
         });
+
         await mkdir(target, { recursive: true });
+
         return { path: target };
       },
 
@@ -42,13 +45,17 @@ export function createPersonalWorkspaceHostEntry() {
                 dataDir: context.experimental_paths.dataDir,
                 path: input.path,
               });
+
         const existed = await pathExists(target);
+
         if (existed) {
           await experimental_killProcessesWithCwdUnder({
             directories: [target],
           });
         }
+
         await rm(target, { recursive: true, force: true });
+
         return { removed: existed };
       },
     },

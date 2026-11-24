@@ -4,13 +4,18 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/utils";
 
 const alertVariants = cva(
-  "relative w-full rounded-lg border px-4 py-3 text-sm [&>[data-icon-root]+div]:translate-y-[-3px] [&>[data-icon-root]]:absolute [&>[data-icon-root]]:left-4 [&>[data-icon-root]]:top-4 [&>[data-icon-root]]:text-foreground [&>[data-icon-root]~*]:pl-7",
+  "relative w-full rounded-lg border px-4 py-3 text-sm [&>[data-icon-root]+div]:translate-y-[-3px] [&>[data-icon-root]]:absolute [&>[data-icon-root]]:left-4 [&>[data-icon-root]]:top-4 [&>[data-icon-root]]:size-4 [&>[data-icon-root]~*]:pl-7",
   {
     variants: {
       variant: {
-        default: "bg-background text-foreground",
+        default:
+          "border-border bg-surface-raised text-foreground [&>[data-icon-root]]:text-muted-foreground",
         destructive:
-          "border-destructive/50 text-destructive dark:border-destructive [&>[data-icon-root]]:text-destructive",
+          "border-surface-destructive-border bg-surface-destructive text-destructive-text [&>[data-icon-root]]:text-destructive-text",
+        warning:
+          "border-warning/30 bg-warning/10 text-foreground [&>[data-icon-root]]:text-warning-text",
+        success:
+          "border-success/30 bg-success/10 text-foreground [&>[data-icon-root]]:text-success-foreground",
       },
     },
     defaultVariants: {
@@ -30,6 +35,7 @@ const Alert = React.forwardRef<
     {...props}
   />
 ));
+
 Alert.displayName = "Alert";
 
 const AlertTitle = React.forwardRef<
@@ -38,10 +44,11 @@ const AlertTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <h5
     ref={ref}
-    className={cn("mb-1 font-medium leading-none tracking-tight", className)}
+    className={cn("mb-1 font-medium leading-5", className)}
     {...props}
   />
 ));
+
 AlertTitle.displayName = "AlertTitle";
 
 const AlertDescription = React.forwardRef<
@@ -50,10 +57,14 @@ const AlertDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("text-sm [&_p]:leading-relaxed", className)}
+    className={cn(
+      "text-sm leading-5 text-muted-foreground [&_p]:leading-relaxed",
+      className,
+    )}
     {...props}
   />
 ));
+
 AlertDescription.displayName = "AlertDescription";
 
 export { Alert, AlertTitle, AlertDescription };

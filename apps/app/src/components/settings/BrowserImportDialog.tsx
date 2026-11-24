@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { BbDesktopBrowserApi } from "@bb/desktop-contract";
+import type { OmnyoDesktopBrowserApi } from "@omnyo/desktop-contract";
 import {
   DESKTOP_BROWSER_IMPORT_FAILURE_COPY,
   isRetryableDesktopBrowserImportReason,
   type DesktopBrowserImportOutcome,
   type DesktopBrowserImportSource,
-} from "@bb/host-daemon-contract";
-import { Button } from "@bb/shared-ui/button";
+} from "@omnyo/host-daemon-contract";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
@@ -14,8 +14,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/dialog";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import { BrowserSourceIcon } from "./BrowserSourceIcon";
 import {
   canCloseDialog,
@@ -27,9 +28,9 @@ import {
   type BrowserImportDialogStep,
 } from "./browser-import-wizard";
 
-export interface BrowserImportDialogProps {
+interface BrowserImportDialogProps {
   source: DesktopBrowserImportSource;
-  desktopBrowser: BbDesktopBrowserApi;
+  desktopBrowser: OmnyoDesktopBrowserApi;
   onClose: () => void;
   onImported: (
     source: DesktopBrowserImportSource,
@@ -38,10 +39,14 @@ export interface BrowserImportDialogProps {
   ) => void;
 }
 
-const TILE_CLASS =
-  "flex w-full items-center gap-2.5 rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-state-hover";
+const TILE_CLASS = cn(
+  "flex w-full items-center gap-2.5 rounded-md border px-3 py-2 text-left text-sm hover:bg-state-hover",
+  LIST_HOVER_TRANSITION,
+);
+
 const TILE_SELECTED_CLASS =
   "border-surface-selected-border bg-surface-selected";
+
 const TILE_IDLE_CLASS = "border-border";
 
 export function BrowserImportDialog({
@@ -51,15 +56,19 @@ export function BrowserImportDialog({
   onImported,
 }: BrowserImportDialogProps) {
   const [source, setSource] = useState(initialSource);
+
   const [step, setStep] = useState<BrowserImportDialogStep>(() =>
     initialDialogStep(initialSource),
   );
+
   const [sourceProfileDirectory, setSourceProfileDirectory] = useState<
     string | null
   >(() => preferredSourceProfileDirectory(null, initialSource));
+
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
+
     return () => {
       mounted.current = false;
     };
@@ -76,8 +85,10 @@ export function BrowserImportDialog({
       !desktopBrowser.importCookies
     ) {
       setStep({ step: "blocked", reason: "unknownSourceProfile" });
+
       return;
     }
+
     const profileName = selectedProfile.name;
     setStep({ step: "importing" });
     desktopBrowser
@@ -87,11 +98,14 @@ export function BrowserImportDialog({
       })
       .then((outcome) => {
         if (!mounted.current) return;
+
         if (outcome.ok) {
           onImported(source, profileName, outcome);
           onClose();
+
           return;
         }
+
         setStep(failedDialogStep(outcome.reason));
       })
       .catch(() => {
@@ -107,15 +121,18 @@ export function BrowserImportDialog({
       .listImportSources()
       .then((result) => {
         if (!mounted.current) return;
+
         const refreshed = result.sources.find(
           (candidate) => candidate.id === source.id,
         );
+
         if (refreshed) {
           setSource(refreshed);
           setSourceProfileDirectory((current) =>
             preferredSourceProfileDirectory(current, refreshed),
           );
         }
+
         setStep(refreshedDialogStep(refreshed, previous));
       })
       .catch(() => {
@@ -124,6 +141,7 @@ export function BrowserImportDialog({
   };
 
   const closable = canCloseDialog(step);
+
   const title = (text: string) => (
     <DialogTitle className="flex items-center gap-2.5">
       <BrowserSourceIcon source={source} className="size-5 rounded-[5px]" />
@@ -153,7 +171,7 @@ export function BrowserImportDialog({
               {title(`Allow Full Disk Access for ${source.name}`)}
               <DialogDescription>
                 {source.name} keeps its cookies in a protected folder. Turn on
-                Full Disk Access for BB in System Settings → Privacy &amp;
+                Full Disk Access for Omnyo in System Settings → Privacy &amp;
                 Security, then come back. You can turn it off again after the
                 import.
               </DialogDescription>
@@ -161,7 +179,7 @@ export function BrowserImportDialog({
             {step.checked ? (
               <p className="text-xs text-destructive-text">
                 Full Disk Access is still off. macOS may require quitting and
-                reopening BB before the grant applies.
+                reopening Omnyo before the grant applies.
               </p>
             ) : null}
             <DialogFooter>
@@ -217,7 +235,7 @@ export function BrowserImportDialog({
             <DialogHeader>
               {title(`Import from ${source.name}`)}
               <DialogDescription>
-                Which profile's cookies should be copied into the BB browser?
+                Which profile's cookies should be copied into the Omnyo browser?
               </DialogDescription>
             </DialogHeader>
             <div
@@ -227,6 +245,7 @@ export function BrowserImportDialog({
             >
               {source.profiles.map((profile) => {
                 const selected = profile.directory === sourceProfileDirectory;
+
                 return (
                   <button
                     key={profile.directory}

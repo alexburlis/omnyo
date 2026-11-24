@@ -1,77 +1,50 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { BottomAnchorContext } from "@/components/ui/bottom-anchored-scroll-body.js";
 import type { BottomAnchorContextValue } from "@/components/ui/bottom-anchored-scroll-body.js";
 import { useAutoLoadOlderRows } from "./useAutoLoadOlderRows.js";
 
-interface ObserverHandle {
-  emit: (isIntersecting: boolean) => void;
+interface ScrollGeometry {
+  clientHeight: number;
+  scrollHeight: number;
+  scrollTop: number;
 }
 
-let observers: ObserverHandle[] = [];
-
-function installIntersectionObserverStub(): void {
-  class ControllableIntersectionObserver {
-    constructor(private readonly callback: IntersectionObserverCallback) {
-      observers.push({
-        emit: (isIntersecting: boolean) => {
-          this.callback(
-            [{ isIntersecting } as IntersectionObserverEntry],
-            this as unknown as IntersectionObserver,
-          );
-        },
-      });
-    }
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-    takeRecords(): IntersectionObserverEntry[] {
-      return [];
-    }
-  }
-  vi.stubGlobal("IntersectionObserver", ControllableIntersectionObserver);
-}
-
-function emitIntersection(isIntersecting: boolean): void {
-  act(() => {
-    for (const observer of observers) {
-      observer.emit(isIntersecting);
-    }
+function createScrollElement(geometry: ScrollGeometry) {
+  const element = document.createElement("div");
+  const state = { ...geometry };
+  Object.defineProperty(element, "clientHeight", {
+    configurable: true,
+    get: () => state.clientHeight,
   });
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    get: () => state.scrollHeight,
+  });
+  element.scrollTop = state.scrollTop;
+
+  const scrollTo = (top: number) => {
+    act(() => {
+      element.scrollTop = top;
+      element.dispatchEvent(new Event("scroll"));
+    });
+  };
+
+  return { element, state, scrollTo };
 }
 
-function createBottomAnchor(
-  scrollElement = document.createElement("div"),
-): BottomAnchorContextValue {
+function createBottomAnchor(element: HTMLElement): BottomAnchorContextValue {
   return {
-    getScrollElement: () => scrollElement,
+    getScrollElement: () => element,
     isAtBottom: false,
     scrollToBottom: vi.fn(),
     scrollElementIntoView: vi.fn(),
     scrollElementIntoViewClampedToMaxScroll: vi.fn(),
-    captureScrollAnchor: vi.fn(),
     holdContentPosition: vi.fn(),
   };
-}
-
-function mockElementRect(
-  element: HTMLElement,
-  { bottom, top }: { bottom: number; top: number },
-): void {
-  vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
-    bottom,
-    height: bottom - top,
-    left: 0,
-    right: 100,
-    top,
-    width: 100,
-    x: 0,
-    y: top,
-    toJSON: () => ({}),
-  });
 }
 
 function renderAutoLoad(args: {
@@ -86,7 +59,8 @@ function renderAutoLoad(args: {
         {children}
       </BottomAnchorContext.Provider>
     );
-  const result = renderHook(
+
+  return renderHook(
     ({ isLoading }: { isLoading: boolean }) =>
       useAutoLoadOlderRows({
         hasOlderTimelineRows: true,
@@ -95,122 +69,152 @@ function renderAutoLoad(args: {
       }),
     { initialProps: { isLoading: false }, wrapper },
   );
-  const sentinel = document.createElement("div");
-  act(() => {
-    result.result.current.sentinelRef(sentinel);
-  });
-  return { ...result, sentinel };
 }
-
-beforeEach(() => {
-  observers = [];
-  installIntersectionObserverStub();
-});
 
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("useAutoLoadOlderRows", () => {
-  it("loads the next page when the top of the window scrolls into view", async () => {
-    const onLoadOlderRows = vi.fn(() => Promise.resolve());
-    const anchor = createBottomAnchor();
-    const { result } = renderAutoLoad({ anchor, onLoadOlderRows });
-
-    expect(result.current.isAutoLoadEnabled).toBe(true);
-    expect(onLoadOlderRows).not.toHaveBeenCalled();
-
-    emitIntersection(true);
-
-    expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
-    expect(anchor.captureScrollAnchor).toHaveBeenCalledTimes(1);
-  });
-
-  it("stays manual with no bottom anchor to keep the reading position", () => {
-    const onLoadOlderRows = vi.fn(() => Promise.resolve());
-    const { result } = renderAutoLoad({ anchor: null, onLoadOlderRows });
-
-    expect(result.current.isAutoLoadEnabled).toBe(false);
-    emitIntersection(true);
-    expect(onLoadOlderRows).not.toHaveBeenCalled();
-
-    act(() => {
-      result.current.loadOlderRows();
+  it("fills an unfilled viewport and stops once the content overflows", async () => {
+    const scroll = createScrollElement({
+      clientHeight: 800,
+      scrollHeight: 400,
+      scrollTop: 0,
     });
-    expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
-  });
 
-  it("keeps loading while the sentinel stays visible after a page settles", async () => {
-    const onLoadOlderRows = vi.fn(() => Promise.resolve());
-    const { rerender } = renderAutoLoad({
-      anchor: createBottomAnchor(),
+    const onLoadOlderRows = vi.fn(async () => {
+      scroll.state.scrollHeight += 600;
+    });
+
+    const view = renderAutoLoad({
+      anchor: createBottomAnchor(scroll.element),
       onLoadOlderRows,
     });
 
-    emitIntersection(true);
+    expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
+    await act(async () => {});
+    view.rerender({ isLoading: true });
+    view.rerender({ isLoading: false });
+    expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads only when the reader scrolls upward near the top", () => {
+    const scroll = createScrollElement({
+      clientHeight: 800,
+      scrollHeight: 20_000,
+      scrollTop: 10_000,
+    });
+
+    const onLoadOlderRows = vi.fn();
+    renderAutoLoad({
+      anchor: createBottomAnchor(scroll.element),
+      onLoadOlderRows,
+    });
+
+    scroll.scrollTo(5_000);
+    expect(onLoadOlderRows).not.toHaveBeenCalled();
+    scroll.scrollTo(600);
+    expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
+  });
+
+  it("never loads while scrolling down, even close to the top", () => {
+    const scroll = createScrollElement({
+      clientHeight: 800,
+      scrollHeight: 20_000,
+      scrollTop: 0,
+    });
+
+    const onLoadOlderRows = vi.fn();
+    renderAutoLoad({
+      anchor: createBottomAnchor(scroll.element),
+      onLoadOlderRows,
+    });
+
+    scroll.scrollTo(300);
+    scroll.scrollTo(700);
+    expect(onLoadOlderRows).not.toHaveBeenCalled();
+  });
+
+  it("does not chain another page after a load settles without new upward scrolling", async () => {
+    const scroll = createScrollElement({
+      clientHeight: 800,
+      scrollHeight: 20_000,
+      scrollTop: 2_000,
+    });
+
+    const onLoadOlderRows = vi.fn(async () => {});
+
+    const view = renderAutoLoad({
+      anchor: createBottomAnchor(scroll.element),
+      onLoadOlderRows,
+    });
+
+    scroll.scrollTo(200);
+    expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
+    view.rerender({ isLoading: true });
+    await act(async () => {});
+    scroll.state.scrollHeight += 500;
+    scroll.scrollTo(700);
+    view.rerender({ isLoading: false });
     expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
 
-    await act(async () => {
-      rerender({ isLoading: true });
-    });
-    expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      rerender({ isLoading: false });
-    });
+    scroll.scrollTo(400);
     expect(onLoadOlderRows).toHaveBeenCalledTimes(2);
   });
 
-  it("does not recapture from stale intersection state after a prepend moves the sentinel away", async () => {
-    const scrollElement = document.createElement("div");
-    mockElementRect(scrollElement, { top: 0, bottom: 500 });
-    const anchor = createBottomAnchor(scrollElement);
-    const onLoadOlderRows = vi.fn(() => Promise.resolve());
-    const { rerender, sentinel } = renderAutoLoad({
-      anchor,
+  it("loads when the reader wheels up while already at the very top", () => {
+    const scroll = createScrollElement({
+      clientHeight: 800,
+      scrollHeight: 20_000,
+      scrollTop: 0,
+    });
+
+    const onLoadOlderRows = vi.fn();
+    renderAutoLoad({
+      anchor: createBottomAnchor(scroll.element),
       onLoadOlderRows,
     });
-    mockElementRect(sentinel, { top: 100, bottom: 120 });
 
-    emitIntersection(true);
-    expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
-    expect(anchor.captureScrollAnchor).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      rerender({ isLoading: true });
+    act(() => {
+      scroll.element.dispatchEvent(new WheelEvent("wheel", { deltaY: -40 }));
     });
-    mockElementRect(sentinel, { top: -800, bottom: -780 });
-    await act(async () => {
-      rerender({ isLoading: false });
-    });
-
     expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
-    expect(anchor.captureScrollAnchor).toHaveBeenCalledTimes(1);
   });
 
-  it("stops auto-loading after a failure instead of retrying in a loop", async () => {
-    const onLoadOlderRows = vi.fn(() => Promise.reject(new Error("boom")));
-    const { result, rerender } = renderAutoLoad({
-      anchor: createBottomAnchor(),
+  it("stays manual with no bottom anchor to keep the reading position", () => {
+    const onLoadOlderRows = vi.fn();
+    const view = renderAutoLoad({ anchor: null, onLoadOlderRows });
+
+    expect(view.result.current.isAutoLoadEnabled).toBe(false);
+    expect(onLoadOlderRows).not.toHaveBeenCalled();
+  });
+
+  it("stops auto-loading after a failure until the reader retries", async () => {
+    const scroll = createScrollElement({
+      clientHeight: 800,
+      scrollHeight: 20_000,
+      scrollTop: 2_000,
+    });
+
+    const onLoadOlderRows = vi.fn(async () => {
+      throw new Error("offline");
+    });
+
+    const view = renderAutoLoad({
+      anchor: createBottomAnchor(scroll.element),
       onLoadOlderRows,
     });
 
-    emitIntersection(true);
+    scroll.scrollTo(200);
     await act(async () => {});
-    expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
-    expect(result.current.isAutoLoadEnabled).toBe(false);
-
-    await act(async () => {
-      rerender({ isLoading: false });
-    });
-    emitIntersection(true);
-    await act(async () => {});
+    expect(view.result.current.isAutoLoadEnabled).toBe(false);
+    scroll.scrollTo(2_000);
+    scroll.scrollTo(100);
     expect(onLoadOlderRows).toHaveBeenCalledTimes(1);
 
-    await act(async () => {
-      result.current.loadOlderRows();
-    });
+    act(() => view.result.current.loadOlderRows());
     expect(onLoadOlderRows).toHaveBeenCalledTimes(2);
   });
 });

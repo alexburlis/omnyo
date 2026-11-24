@@ -13,10 +13,11 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildPluginServer } from "./build-plugin-server.js";
+import { serverBundleExpectsHostZod } from "./zod-resolution.js";
 import { resolvePluginBuildToolchain } from "./toolchain.js";
 
 function testToolchain() {
-  return resolvePluginBuildToolchain(join(tmpdir(), "bb-toolchain-unused"));
+  return resolvePluginBuildToolchain(join(tmpdir(), "omnyo-toolchain-unused"));
 }
 
 describe("plugin server build", () => {
@@ -30,8 +31,8 @@ describe("plugin server build", () => {
     );
   });
 
-  it("builds a pre-rename source importing bare @bb/plugin-sdk", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-server-legacy-"));
+  it("refuses a finite legacy SDK runtime input without creating a public alias", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-server-legacy-"));
     tempDirs.push(dir);
     await mkdir(join(dir, "dist"), { recursive: true });
     await writeFile(
@@ -41,7 +42,7 @@ describe("plugin server build", () => {
         version: "0.0.0",
         bb: {
           name: "Legacy SDK fixture",
-          description: "Verifies the pre-rename SDK specifier stays external.",
+          description: "Finite legacy SDK runtime input.",
           branding: { icon: "Zap" },
           server: "./server.ts",
         },
@@ -60,27 +61,23 @@ describe("plugin server build", () => {
       ].join("\n"),
     );
 
-    const { jsPath } = await buildPluginServer(
-      dir,
-      "0.0.0-test",
-      await testToolchain(),
-    );
-
-    const bundle = await readFile(jsPath, "utf8");
-    expect(bundle).toMatch(/from\s*"@bb\/plugin-sdk"/);
+    await expect(
+      buildPluginServer(dir, "0.0.0-test", await testToolchain()),
+    ).rejects.toThrow(/Retired plugin SDK runtime import/);
   });
 
   describe("host-provided zod", () => {
     const manifest = {
-      name: "bb-plugin-zod-host",
+      name: "omnyo-plugin-zod-host",
       version: "0.0.0",
-      bb: {
+      omnyo: {
         name: "Zod host fixture",
         description: "Server entry importing zod and zod/mini.",
         branding: { icon: "Zap" },
         server: "./server.ts",
       },
     };
+
     const serverSource = [
       'import { z } from "zod";',
       'import { z as mini } from "zod/mini";',
@@ -91,7 +88,7 @@ describe("plugin server build", () => {
     ].join("\n");
 
     async function buildFixture(options?: { hostProvidedZod: boolean }) {
-      const dir = await mkdtemp(join(tmpdir(), "bb-plugin-server-zod-"));
+      const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-server-zod-"));
       tempDirs.push(dir);
       await writeFile(join(dir, "package.json"), JSON.stringify(manifest));
       await writeFile(join(dir, "server.ts"), serverSource);
@@ -105,12 +102,14 @@ describe("plugin server build", () => {
         join(dir, "node_modules", "zod"),
         "dir",
       );
+
       const { jsPath } = await buildPluginServer(
         dir,
         "0.0.0-test",
         await testToolchain(),
         options,
       );
+
       return readFile(jsPath, "utf8");
     }
 
@@ -118,25 +117,30 @@ describe("plugin server build", () => {
       const bundle = await buildFixture({ hostProvidedZod: true });
       expect(bundle).toMatch(/from\s*"zod"/);
       expect(bundle).not.toMatch(/from\s*"zod\/mini"/);
+      expect(await serverBundleExpectsHostZod(bundle)).toBe(true);
     });
 
     it("bundles zod for an installed plugin, whose zod need not be the host's", async () => {
       const bundle = await buildFixture();
       expect(bundle).not.toMatch(/from\s*"zod"/);
       expect(bundle).not.toMatch(/from\s*"zod\/mini"/);
+      expect(await serverBundleExpectsHostZod(bundle)).toBe(false);
     });
   });
 
   describe("runtime dependency resolution", () => {
     async function fixture(source: string) {
-      const dir = await mkdtemp(join(tmpdir(), "bb-plugin-runtime-resolve-"));
+      const dir = await mkdtemp(
+        join(tmpdir(), "omnyo-plugin-runtime-resolve-"),
+      );
+
       tempDirs.push(dir);
       await writeFile(
         join(dir, "package.json"),
         JSON.stringify({
-          name: "bb-plugin-runtime-resolution",
+          name: "omnyo-plugin-runtime-resolution",
           version: "0.0.0",
-          bb: {
+          omnyo: {
             name: "Runtime resolution",
             description: "Exercises runtime dependency resolution.",
             branding: { icon: "Zap" },
@@ -145,6 +149,7 @@ describe("plugin server build", () => {
         }),
       );
       await writeFile(join(dir, "server.ts"), source);
+
       return dir;
     }
 
@@ -160,6 +165,7 @@ import { spawn } from "child_process";
 import { fileURLToPath } from "node:url";
 export default () => [typeof readFileSync, basename("/a/b"), typeof spawn, fileURLToPath(${JSON.stringify(pathToFileURL(resolve("/tmp/test")).href)})];
 `);
+
       const { jsPath } = await buildPluginServer(
         dir,
         "0.0.0-test",
@@ -169,6 +175,7 @@ export default () => [typeof readFileSync, basename("/a/b"), typeof spawn, fileU
           fallbackResolve: (specifier) => sdkRequire.resolve(specifier),
         },
       );
+
       expect(sdkRequire(jsPath).default()).toEqual([
         "function",
         "b",
@@ -183,9 +190,11 @@ import { z } from "zod";
 import { z as mini } from "zod/mini";
 export default () => [z.string().parse("full"), mini.string().parse("mini")];
 `);
+
       await expect(
         buildPluginServer(dir, "0.0.0-test", await testToolchain()),
       ).rejects.toThrow('could not resolve "zod"');
+
       const { jsPath } = await buildPluginServer(
         dir,
         "0.0.0-test",
@@ -195,6 +204,7 @@ export default () => [z.string().parse("full"), mini.string().parse("mini")];
           fallbackResolve: (specifier) => sdkRequire.resolve(specifier),
         },
       );
+
       expect(sdkRequire(jsPath).default()).toEqual(["full", "mini"]);
     });
 
@@ -202,6 +212,7 @@ export default () => [z.string().parse("full"), mini.string().parse("mini")];
       const dir = await fixture(
         'import { owner } from "zod"; export default () => owner;',
       );
+
       const zodDir = join(dir, "node_modules", "zod");
       await mkdir(zodDir, { recursive: true });
       await writeFile(
@@ -209,6 +220,7 @@ export default () => [z.string().parse("full"), mini.string().parse("mini")];
         JSON.stringify({ name: "zod", main: "index.js" }),
       );
       await writeFile(join(zodDir, "index.js"), 'exports.owner = "plugin";');
+
       const { jsPath } = await buildPluginServer(
         dir,
         "0.0.0-test",
@@ -220,20 +232,21 @@ export default () => [z.string().parse("full"), mini.string().parse("mini")];
           },
         },
       );
+
       expect(sdkRequire(jsPath).default()).toBe("plugin");
     });
   });
 
   it("accepts runtime-validated server config without applying release asset validation", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-server-runtime-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-server-runtime-"));
     tempDirs.push(dir);
     const serverEntry = join(dir, "server.ts");
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-runtime-fixture",
+        name: "omnyo-plugin-runtime-fixture",
         version: "1.0.0",
-        bb: {
+        omnyo: {
           name: "Runtime fixture",
           description: "Uses runtime branding validation.",
           branding: { logo: { light: "./logo.svg" } },
@@ -254,7 +267,7 @@ export default () => [z.string().parse("full"), mini.string().parse("mini")];
       {
         validatedConfig: {
           serverEntry,
-          packageName: "bb-plugin-runtime-fixture",
+          packageName: "omnyo-plugin-runtime-fixture",
           pluginVersion: "1.0.0",
         },
       },
@@ -266,15 +279,15 @@ export default () => [z.string().parse("full"), mini.string().parse("mini")];
   });
 
   it("places release ESM in an explicit module package scope", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-server-commonjs-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-server-commonjs-"));
     tempDirs.push(dir);
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-commonjs-fixture",
+        name: "omnyo-plugin-commonjs-fixture",
         version: "1.0.0",
         type: "commonjs",
-        bb: {
+        omnyo: {
           name: "CommonJS fixture",
           description: "Builds an ESM server inside a CommonJS package.",
           branding: { icon: "Zap" },
@@ -299,7 +312,7 @@ export default () => [z.string().parse("full"), mini.string().parse("mini")];
   });
 
   it("preserves module locations without rewriting source text", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-server-location-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-server-location-"));
     tempDirs.push(dir);
     const serverEntry = join(dir, "server.ts");
     await writeFile(
@@ -334,14 +347,16 @@ export default async function plugin() {
         externalizeSourceOutsideRoot: true,
         validatedConfig: {
           serverEntry,
-          packageName: "bb-plugin-location-fixture",
+          packageName: "omnyo-plugin-location-fixture",
           pluginVersion: "1.0.0",
         },
       },
     );
+
     const loaded = createRequire(import.meta.url)(jsPath) as {
       default: () => Promise<Record<string, unknown>>;
     };
+
     const canonicalServerEntry = await realpath(serverEntry);
 
     await expect(loaded.default()).resolves.toEqual({
@@ -358,7 +373,7 @@ export default async function plugin() {
   });
 
   it("keeps named exports of CommonJS dependencies when preserving module locations", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-server-cjs-dep-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-server-cjs-dep-"));
     tempDirs.push(dir);
     const serverEntry = join(dir, "server.ts");
     const dependencyDir = join(dir, "node_modules", "cjs-dependency");
@@ -386,11 +401,12 @@ export default async function plugin() {
         externalizeSourceOutsideRoot: true,
         validatedConfig: {
           serverEntry,
-          packageName: "bb-plugin-cjs-dependency-fixture",
+          packageName: "omnyo-plugin-cjs-dependency-fixture",
           pluginVersion: "1.0.0",
         },
       },
     );
+
     const loaded = createRequire(import.meta.url)(jsPath) as {
       default: () => Record<string, unknown>;
     };
@@ -400,8 +416,9 @@ export default async function plugin() {
 
   it("resolves CommonJS module paths against their original files", async () => {
     const dir = await realpath(
-      await mkdtemp(join(tmpdir(), "bb-plugin-server-cjs-paths-")),
+      await mkdtemp(join(tmpdir(), "omnyo-plugin-server-cjs-paths-")),
     );
+
     tempDirs.push(dir);
     const serverEntry = join(dir, "server.ts");
     const dependencyDir = join(dir, "node_modules", "asset-dependency");
@@ -441,11 +458,12 @@ export default () => ({
         externalizeSourceOutsideRoot: true,
         validatedConfig: {
           serverEntry,
-          packageName: "bb-plugin-cjs-paths-fixture",
+          packageName: "omnyo-plugin-cjs-paths-fixture",
           pluginVersion: "1.0.0",
         },
       },
     );
+
     const loaded = createRequire(import.meta.url)(jsPath) as {
       default: () => Record<string, unknown>;
     };
@@ -459,8 +477,9 @@ export default () => ({
 
   it("compiles Zod installed inside the plugin root when preserving module locations", async () => {
     const dir = await realpath(
-      await mkdtemp(join(tmpdir(), "bb-plugin-server-inroot-zod-")),
+      await mkdtemp(join(tmpdir(), "omnyo-plugin-server-inroot-zod-")),
     );
+
     tempDirs.push(dir);
     const serverEntry = join(dir, "server.ts");
     const zodDir = join(dir, "node_modules", "zod");
@@ -505,11 +524,12 @@ export default () => ({
         externalizeSourceOutsideRoot: true,
         validatedConfig: {
           serverEntry,
-          packageName: "bb-plugin-inroot-zod-fixture",
+          packageName: "omnyo-plugin-inroot-zod-fixture",
           pluginVersion: "1.0.0",
         },
       },
     );
+
     const loaded = createRequire(import.meta.url)(jsPath) as {
       default: () => Record<string, unknown>;
     };
@@ -518,7 +538,10 @@ export default () => ({
   });
 
   it("rejects static source imports outside the plugin tree", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "bb-plugin-server-boundary-"));
+    const workDir = await mkdtemp(
+      join(tmpdir(), "omnyo-plugin-server-boundary-"),
+    );
+
     tempDirs.push(workDir);
     const dir = join(workDir, "plugin");
     await mkdir(dir);
@@ -535,7 +558,7 @@ export default () => ({
         externalizeSourceOutsideRoot: true,
         validatedConfig: {
           serverEntry,
-          packageName: "bb-plugin-boundary-fixture",
+          packageName: "omnyo-plugin-boundary-fixture",
           pluginVersion: "1.0.0",
         },
       }),
@@ -546,22 +569,23 @@ export default () => ({
 
   describe("SDK subpath imports", () => {
     const manifest = {
-      name: "bb-plugin-server-subpath-fixture",
+      name: "omnyo-plugin-server-subpath-fixture",
       version: "1.0.0",
-      engines: { bb: ">=0.0" },
-      bb: {
+      engines: { omnyo: ">=0.0" },
+      omnyo: {
         name: "Server subpath fixture",
         description: "Imports a host contract from the SDK in server code.",
         branding: { icon: "Cpu" },
         server: "./server.ts",
       },
     };
+
     const serverSource = [
-      'import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";',
-      'import { experimental_nativeRootsHostContract } from "@get-bb/plugin-sdk/host";',
+      'import { defineRpcContract, type PluginApi } from "@omnyo/plugin-sdk";',
+      'import { experimental_nativeRootsHostContract } from "@omnyo/plugin-sdk/host";',
       "export const contract = defineRpcContract(experimental_nativeRootsHostContract);",
-      "export default function plugin(bb: BbPluginApi) {",
-      "  void bb;",
+      "export default function plugin(api: PluginApi) {",
+      "  void api;",
       "}",
       "",
     ].join("\n");
@@ -572,13 +596,13 @@ export default () => ({
     }
 
     it("keeps the bare specifier external and bundles the subpath from the plugin's SDK", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "bb-plugin-server-subpath-"));
+      const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-server-subpath-"));
       tempDirs.push(dir);
       await writeFixture(dir);
-      await mkdir(join(dir, "node_modules", "@get-bb"), { recursive: true });
+      await mkdir(join(dir, "node_modules", "@omnyo"), { recursive: true });
       await symlink(
         resolve(import.meta.dirname, "../../plugin-sdk"),
-        join(dir, "node_modules", "@get-bb", "plugin-sdk"),
+        join(dir, "node_modules", "@omnyo", "plugin-sdk"),
         "dir",
       );
 
@@ -590,35 +614,36 @@ export default () => ({
       );
 
       const bundle = await readFile(jsPath, "utf8");
-      expect(bundle).toMatch(/from\s*"@get-bb\/plugin-sdk"/);
-      expect(bundle).not.toContain('"@get-bb/plugin-sdk/host"');
+      expect(bundle).toMatch(/from\s*"@omnyo\/plugin-sdk"/);
+      expect(bundle).not.toContain('"@omnyo/plugin-sdk/host"');
       expect(bundle).toContain("resolveNativeRoots:");
     });
 
     it("names the missing SDK dependency when the plugin has no node_modules", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "bb-plugin-server-no-sdk-"));
+      const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-server-no-sdk-"));
       tempDirs.push(dir);
       await writeFixture(dir);
 
       await expect(
         buildPluginServer(dir, "0.0.0-test", await testToolchain()),
       ).rejects.toThrow(
-        '"@get-bb/plugin-sdk/host" is not installed for this plugin (no node_modules/@get-bb/plugin-sdk); a server entry\'s "@get-bb/plugin-sdk/host" import is bundled from the plugin\'s own SDK install (bb serves only the bare "@get-bb/plugin-sdk" at load time), so the plugin needs the SDK as a dependency',
+        '"@omnyo/plugin-sdk/host" is not installed for this plugin (no node_modules/@omnyo/plugin-sdk); a server entry\'s "@omnyo/plugin-sdk/host" import is bundled from the plugin\'s own SDK install (Omnyo serves only the bare "@omnyo/plugin-sdk" at load time), so the plugin needs the SDK as a dependency',
       );
     });
 
     it("names the unbuilt SDK dist when the package is installed without it", async () => {
       const dir = await mkdtemp(
-        join(tmpdir(), "bb-plugin-server-unbuilt-sdk-"),
+        join(tmpdir(), "omnyo-plugin-server-unbuilt-sdk-"),
       );
+
       tempDirs.push(dir);
       await writeFixture(dir);
-      const sdkDir = join(dir, "node_modules", "@get-bb", "plugin-sdk");
+      const sdkDir = join(dir, "node_modules", "@omnyo", "plugin-sdk");
       await mkdir(sdkDir, { recursive: true });
       await writeFile(
         join(sdkDir, "package.json"),
         JSON.stringify({
-          name: "@get-bb/plugin-sdk",
+          name: "@omnyo/plugin-sdk",
           version: "0.0.0-test",
           type: "module",
           exports: {
@@ -631,7 +656,7 @@ export default () => ({
       await expect(
         buildPluginServer(dir, "0.0.0-test", await testToolchain()),
       ).rejects.toThrow(
-        `"@get-bb/plugin-sdk/host" is installed for this plugin but its dist is not built: run the SDK build (${join(await realpath(sdkDir), "dist", "host.js")} is missing)`,
+        `"@omnyo/plugin-sdk/host" is installed for this plugin but its dist is not built: run the SDK build (${join(await realpath(sdkDir), "dist", "host.js")} is missing)`,
       );
     });
   });

@@ -2,10 +2,11 @@ import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WebSocket as NodeWebSocket } from "ws";
-import { decodeFrame, encodeFrame, type Frame } from "@bb/tunnel-contract";
+import { decodeFrame, encodeFrame, type Frame } from "@omnyo/tunnel-contract";
 import { TunnelSession } from "../src/session.js";
 
 const CHUNK_BYTES = 64 * 1024;
+
 const CHUNK_COUNT = 48;
 
 class FakeTunnel extends EventEmitter {
@@ -20,9 +21,11 @@ class FakeTunnel extends EventEmitter {
 
   bodyBytes(): number {
     let total = 0;
+
     for (const frame of this.frames) {
       if (frame.type === "body-chunk") total += frame.data.length;
     }
+
     return total;
   }
 }
@@ -32,6 +35,7 @@ let origin: Server | undefined;
 afterEach(async () => {
   const server = origin;
   origin = undefined;
+
   if (server !== undefined) {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -42,26 +46,33 @@ async function startOrigin(): Promise<number> {
   origin = createServer((_request, response) => {
     response.writeHead(200, { "content-type": "application/octet-stream" });
     let written = 0;
+
     const writeNext = () => {
       if (written === CHUNK_COUNT) {
         response.end();
+
         return;
       }
+
       written += 1;
+
       if (response.write(Buffer.alloc(CHUNK_BYTES, 1))) {
         setImmediate(writeNext);
       } else {
         response.once("drain", writeNext);
       }
     };
+
     writeNext();
   });
   const server = origin;
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
+
   if (address === null || typeof address === "string") {
     throw new Error("expected a TCP address");
   }
+
   return address.port;
 }
 
@@ -73,10 +84,11 @@ function openDownload(tunnel: FakeTunnel, port: number): TunnelSession {
       kind: "ok",
       resolved: {
         origin: `http://127.0.0.1:${port}`,
-        publicOrigin: "https://handle.getbb.app",
+        publicOrigin: "https://handle.example.test",
       },
     }),
   });
+
   session.start();
   tunnel.emit(
     "message",
@@ -92,6 +104,7 @@ function openDownload(tunnel: FakeTunnel, port: number): TunnelSession {
     ),
     true,
   );
+
   return session;
 }
 

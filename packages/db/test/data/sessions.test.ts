@@ -15,9 +15,11 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup() {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   return { db, host };
 }
 
@@ -35,6 +37,7 @@ describe("sessions", () => {
       heartbeatIntervalMs: 10_000,
       leaseTimeoutMs: 30_000,
     });
+
     const seenAtOpen = getHost(db, host.id)?.lastSeenAt ?? null;
     expect(seenAtOpen).not.toBeNull();
 
@@ -51,6 +54,7 @@ describe("sessions", () => {
 
   it("rolls back the lease renewal if updating host liveness fails", () => {
     const { db, host } = setup();
+
     const session = openSession(db, {
       hostId: host.id,
       instanceId: "inst-1",
@@ -60,6 +64,7 @@ describe("sessions", () => {
       heartbeatIntervalMs: 5_000,
       leaseTimeoutMs: 30_000,
     });
+
     db.$client.exec(`CREATE TRIGGER reject_host_liveness BEFORE UPDATE ON hosts
       BEGIN SELECT RAISE(ABORT, 'host update failed'); END`);
     expect(() =>
@@ -126,15 +131,18 @@ describe("sessions", () => {
       .from(hostDaemonSessions)
       .where(eq(hostDaemonSessions.id, session1.id))
       .get();
+
     expect(old?.status).toBe("closed");
     expect(old?.closeReason).toBe("replaced");
   });
 
   it("lists the most recently closed session for each requested host", () => {
     const { db, host } = setup();
+
     const otherHost = upsertHost(db, noopNotifier, {
       name: "test-host-2",
     });
+
     const openTestSession = (hostId: string, instanceId: string) =>
       openSession(db, {
         hostId,
@@ -179,6 +187,7 @@ describe("sessions", () => {
 
   it("prefers an active replacement session when latest timestamps tie", () => {
     const { db, host } = setup();
+
     const closedSession = openSession(db, {
       hostId: host.id,
       instanceId: "inst-1",
@@ -188,6 +197,7 @@ describe("sessions", () => {
       heartbeatIntervalMs: 10_000,
       leaseTimeoutMs: 30_000,
     });
+
     const activeSession = openSession(db, {
       hostId: host.id,
       instanceId: "inst-2",
@@ -222,6 +232,7 @@ describe("sessions", () => {
 
   it("does not overwrite an already closed session", () => {
     const { db, host } = setup();
+
     const session = openSession(db, {
       hostId: host.id,
       instanceId: "inst-1",
@@ -233,6 +244,7 @@ describe("sessions", () => {
     });
 
     closeSession(db, noopNotifier, session.id, "replaced");
+
     const closedAgain = closeSession(
       db,
       noopNotifier,

@@ -4,20 +4,24 @@ import { createAsyncTtlMemo } from "../../src/services/lib/async-ttl-memo.js";
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: Error) => void;
+
   const promise = new Promise<T>((yes, no) => {
     resolve = yes;
     reject = no;
   });
+
   return { promise, resolve, reject };
 }
 
 describe("createAsyncTtlMemo", () => {
   it("starts TTL at completion and shares cold and refresh bursts", async () => {
     let now = 0;
+
     const cache = createAsyncTtlMemo<string, string>({
       ttlMs: 100,
       now: () => now,
     });
+
     const first = deferred<string>();
     const load = vi.fn(() => first.promise);
     const readers = Array.from({ length: 10 }, () => cache.run("key", load));
@@ -29,9 +33,11 @@ describe("createAsyncTtlMemo", () => {
     expect(load).toHaveBeenCalledTimes(1);
     const next = deferred<string>();
     load.mockImplementation(() => next.promise);
+
     const refreshes = Array.from({ length: 10 }, () =>
       cache.run("key", load, true),
     );
+
     expect(load).toHaveBeenCalledTimes(2);
     next.resolve("new");
     expect(await Promise.all(refreshes)).toEqual(Array(10).fill("new"));
@@ -39,10 +45,13 @@ describe("createAsyncTtlMemo", () => {
     const expired = deferred<string>();
     load.mockImplementation(() => expired.promise);
     let completed = false;
+
     const waiting = cache.run("key", load).then((value) => {
       completed = true;
+
       return value;
     });
+
     await Promise.resolve();
     expect(completed).toBe(false);
     expect(load).toHaveBeenCalledTimes(3);
@@ -62,37 +71,45 @@ describe("createAsyncTtlMemo", () => {
         ttlMs: 100,
         now: () => 0,
       });
+
       const stale = deferred<string>();
       const fresh = deferred<string>();
       const before = cache.run("key", () => stale.promise);
+
       if (operation === "clear") cache.clear();
       else cache.invalidateWhere((key) => key === "key");
       const load = vi.fn(() => fresh.promise);
       const after = cache.run("key", load);
+
       if (staleFirst) {
         stale.resolve("stale");
         await before;
       }
+
       const concurrent = cache.run("key", load);
       expect(load).toHaveBeenCalledTimes(1);
       fresh.resolve("fresh");
       expect(await after).toBe("fresh");
       expect(await concurrent).toBe("fresh");
+
       if (!staleFirst) {
         stale.resolve("stale");
         await before;
       }
+
       expect(await cache.run("key", load)).toBe("fresh");
     },
   );
 
   it("serves an expired result while one background lookup replaces it", async () => {
     let now = 0;
+
     const cache = createAsyncTtlMemo<string, string>({
       ttlMs: 100,
       now: () => now,
       staleWhileRevalidate: true,
     });
+
     await cache.run("key", async () => "old");
     now = 100;
     const failed = deferred<string>();
@@ -139,11 +156,13 @@ describe("createAsyncTtlMemo", () => {
 
   it("bounds retained results and allows shorter TTLs for absent results", async () => {
     let now = 0;
+
     const cache = createAsyncTtlMemo<string, string | null>({
       maxEntries: 2,
       now: () => now,
       ttlMs: (value) => (value === null ? 5 : 100),
     });
+
     await cache.run("one", async () => "one");
     await cache.run("two", async () => "two");
     await cache.run("absent", async () => null);

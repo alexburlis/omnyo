@@ -16,7 +16,7 @@ export const SETTING_DESCRIPTORS = {
     type: "string",
     label: "Modal app name",
     description: "The Modal app the sandboxes are created in.",
-    default: "bb-sandboxes",
+    default: "omnyo-sandboxes",
   },
   idleMinutes: {
     type: "number",
@@ -46,25 +46,33 @@ export interface RawSettings {
 }
 
 export const SANDBOX_LIFETIME_MS = 24 * 60 * 60_000;
+
 export const DEFAULT_SANDBOX_SIZE = { cpu: 1, memoryMiB: 2048 } as const;
+
 const MAX_IDLE_MINUTES = 24 * 60;
 
 export function resolveSettings(raw: RawSettings): SettingsResolution {
   const tokenId = (raw.tokenId ?? "").trim();
   const tokenSecret = (raw.tokenSecret ?? "").trim();
   const missing: string[] = [];
+
   if (tokenId.length === 0) missing.push("tokenId");
+
   if (tokenSecret.length === 0) missing.push("tokenSecret");
+
   if (missing.length > 0) {
     return {
       ok: false,
       message: `Set ${missing.join(" and ")} in the plugin's settings.`,
     };
   }
+
   const appName = raw.appName.trim();
+
   if (appName.length === 0) {
     return { ok: false, message: "The app name must not be blank." };
   }
+
   if (
     !Number.isInteger(raw.idleMinutes) ||
     raw.idleMinutes < 0 ||
@@ -75,6 +83,7 @@ export function resolveSettings(raw: RawSettings): SettingsResolution {
       message: `idleMinutes must be a whole number between 0 and ${MAX_IDLE_MINUTES}, not ${raw.idleMinutes}.`,
     };
   }
+
   return {
     ok: true,
     settings: {

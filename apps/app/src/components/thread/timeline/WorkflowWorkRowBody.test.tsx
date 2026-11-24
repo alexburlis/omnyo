@@ -77,6 +77,7 @@ describe("WorkflowWorkRowBody", () => {
         { ...progress.agents[1]!, index: 3, label: "Adversarial review" },
       ],
     };
+
     const { rerender } = render(
       <WorkflowWorkRowBody
         row={workflowRow({ status: "pending", workflow: pipelined })}
@@ -87,7 +88,7 @@ describe("WorkflowWorkRowBody", () => {
 
     expect(screen.getByText("Straggler scan")).toBeTruthy();
     expect(screen.getByText("Adversarial review")).toBeTruthy();
-    expect(screen.getByText("not started")).toBeTruthy();
+    expect(screen.getByText("Not started")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Review0\/1/ }));
     expect(screen.queryByText("Adversarial review")).toBeNull();
@@ -98,6 +99,7 @@ describe("WorkflowWorkRowBody", () => {
         agent.phaseIndex === 1 ? { ...agent, state: "done" as const } : agent,
       ),
     };
+
     rerender(
       <WorkflowWorkRowBody
         row={workflowRow({ status: "pending", workflow: settledDiscover })}
@@ -130,6 +132,7 @@ describe("WorkflowWorkRowBody", () => {
         { ...progress.agents[1]!, index: 3, label: "Adversarial review" },
       ],
     };
+
     render(
       <WorkflowWorkRowBody
         row={workflowRow({ status: "pending", workflow: withFailure })}
@@ -152,6 +155,47 @@ describe("WorkflowWorkRowBody", () => {
     );
 
     expect(screen.getByText("Adversarial review")).toBeTruthy();
-    expect(screen.getByText("opus · stopped")).toBeTruthy();
+    expect(screen.getByText("opus")).toBeTruthy();
+    expect(screen.getAllByText("Stopped").length).toBeGreaterThan(0);
+  });
+
+  it("shows a failure once when the workflow error repeats an agent's error", () => {
+    const failure = "agent abandoned: user requested retry on all 3 attempts";
+
+    const failed = {
+      ...progress,
+      agents: [
+        progress.agents[0]!,
+        { ...progress.agents[1]!, state: "failed" as const, error: failure },
+      ],
+    };
+
+    const { rerender } = render(
+      <WorkflowWorkRowBody
+        row={workflowRow({
+          status: "error",
+          taskStatus: "failed",
+          workflow: failed,
+          error: failure,
+        })}
+      />,
+    );
+
+    expect(screen.getAllByText(failure)).toHaveLength(1);
+
+    rerender(
+      <WorkflowWorkRowBody
+        row={workflowRow({
+          status: "error",
+          taskStatus: "failed",
+          workflow: progress,
+          error: "Workflow script threw before phase 2",
+        })}
+      />,
+    );
+
+    expect(
+      screen.getAllByText("Workflow script threw before phase 2"),
+    ).toHaveLength(1);
   });
 });

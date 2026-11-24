@@ -1,10 +1,10 @@
-import { authApiKeys, getHost } from "@bb/db";
+import { authApiKeys, getHost } from "@omnyo/db";
 import { eq } from "drizzle-orm";
 import {
   hostDaemonEnrollKeyResponseSchema,
   hostDaemonEnrollResponseSchema,
   type HostDaemonEnrollKeyResponse,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { createServerErrorHandler } from "../src/errors.js";
@@ -35,6 +35,7 @@ function createInternalHostRouteApp(args: CreateHostRouteAppArgs): Hono {
     await next();
   });
   registerInternalHostRoutes(app, args.deps);
+
   return app;
 }
 
@@ -46,6 +47,7 @@ async function requestHostEnrollKey(
     deps,
     trustedRemoteAddress: "127.0.0.1",
   });
+
   const response = await app.request("/hosts/enroll-key", {
     method: "POST",
     headers: {
@@ -55,12 +57,14 @@ async function requestHostEnrollKey(
   });
 
   expect(response.status).toBe(201);
+
   return parseHostEnrollKeyResponse(response);
 }
 
 describe("host enroll routes", () => {
-  it("creates local enroll-key material without BB_APP_URL", async () => {
+  it("creates local enroll-key material without OMNYO_APP_URL", async () => {
     const harness = await createTestAppHarness({ appUrl: undefined });
+
     const app = createInternalHostRouteApp({
       deps: harness.deps,
       trustedRemoteAddress: "127.0.0.1",
@@ -80,7 +84,7 @@ describe("host enroll routes", () => {
       expect(response.status).toBe(201);
       const body = await parseHostEnrollKeyResponse(response);
       expect(body.hostId).toBe("host_local_enroll_key");
-      expect(body.enrollKey).toMatch(/^bbde_/u);
+      expect(body.enrollKey).toMatch(/^omnyode_/u);
       expect(getHost(harness.db, "host_local_enroll_key")).toBeNull();
     } finally {
       await harness.cleanup();
@@ -89,6 +93,7 @@ describe("host enroll routes", () => {
 
   it("rejects non-loopback enroll-key requests without side effects", async () => {
     const harness = await createTestAppHarness({ appUrl: undefined });
+
     const app = createInternalHostRouteApp({
       deps: harness.deps,
       trustedRemoteAddress: "192.168.1.50",
@@ -117,19 +122,22 @@ describe("host enroll routes", () => {
 
   it("rejects machine-gated enroll-key requests even from loopback", async () => {
     const harness = await createTestAppHarness({ appUrl: undefined });
+
     const app = createInternalHostRouteApp({
       deps: harness.deps,
       trustedRemoteAddress: "127.0.0.1",
     });
+
     try {
       const response = await app.request("/hosts/enroll-key", {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-bb-gate-auth": "machine",
+          "x-omnyo-gate-auth": "machine",
         },
         body: JSON.stringify({ hostId: "host_forbidden_machine" }),
       });
+
       expect(response.status).toBe(403);
       expect(await readJson(response)).toMatchObject({
         code: "machine_host_management_forbidden",
@@ -162,13 +170,15 @@ describe("host enroll routes", () => {
       );
 
       expect(enrollResponse.status).toBe(201);
+
       const enrollBody = hostDaemonEnrollResponseSchema.parse(
         await readJson(enrollResponse),
       );
+
       expect(enrollBody).toMatchObject({
         hostId: enrollKeyBody.hostId,
       });
-      expect(enrollBody.hostKey).toMatch(/^bbdh_/u);
+      expect(enrollBody.hostKey).toMatch(/^omnyodh_/u);
       expect(getHost(harness.db, enrollKeyBody.hostId)).toMatchObject({
         id: enrollKeyBody.hostId,
         name: "real-host-name",
@@ -222,6 +232,7 @@ describe("host enroll routes", () => {
         harness.deps,
         "host_reissue_enroll_key",
       );
+
       const secondEnrollKeyBody = await requestHostEnrollKey(
         harness.deps,
         "host_reissue_enroll_key",

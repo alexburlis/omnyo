@@ -1,5 +1,5 @@
 import { itemStatusToExecStatus } from "./exec-lifecycle.js";
-import type { ThreadEvent, ThreadEventBackgroundTaskItem } from "@bb/domain";
+import type { ThreadEvent, ThreadEventBackgroundTaskItem } from "@omnyo/domain";
 import type { EventMeta } from "./event-decode.js";
 import type {
   EventProjectionMessage,
@@ -28,12 +28,15 @@ export function parseBackgroundTaskLifecycleEvent(
       item: decoded.item,
     };
   }
+
   if (decoded.type === "item/backgroundTask/progress") {
     return { kind: "update", item: decoded.item };
   }
+
   if (decoded.type === "item/backgroundTask/completed") {
     return { kind: "end", item: decoded.item };
   }
+
   return null;
 }
 
@@ -54,8 +57,11 @@ function applyBackgroundTaskItem(
   message.usage = item.usage ?? null;
   message.summary = item.summary ?? null;
   message.error = item.error ?? null;
-  if (lifecycle.kind === "end" && message.completedAt === null) {
+
+  if (lifecycle.kind === "end") {
     message.completedAt = meta.createdAt;
+  } else if (item.status === "pending") {
+    message.completedAt = null;
   }
 }
 
@@ -65,14 +71,17 @@ export function upsertBackgroundTaskMessage(
   decoded: ThreadEvent,
 ): boolean {
   const lifecycle = parseBackgroundTaskLifecycleEvent(decoded);
+
   if (!lifecycle) {
     return false;
   }
 
   const existing = state.backgroundTasksByItemId.get(lifecycle.item.id);
+
   if (existing) {
     applyBackgroundTaskItem(existing, lifecycle, meta);
     existing.createdAt = Math.max(existing.createdAt, meta.createdAt);
+
     return true;
   }
 
@@ -107,7 +116,9 @@ export function upsertBackgroundTaskMessage(
     error: lifecycle.item.error ?? null,
     completedAt: lifecycle.kind === "end" ? meta.createdAt : null,
   };
+
   state.backgroundTasksByItemId.set(lifecycle.item.id, message);
   state.messages.push(message);
+
   return true;
 }

@@ -1,7 +1,11 @@
 import { useId, useState, type ReactNode } from "react";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  DISCLOSURE_CHEVRON_TRANSITION,
+  getDisclosureRevealClass,
+} from "@omnyo/shared-ui/motion";
 
-import type { ContextCategory, ContextSnapshot } from "@bb/domain";
+import type { ContextCategory, ContextSnapshot } from "@omnyo/domain";
 
 type ContextWindowDetails = Pick<ContextSnapshot, "categories">;
 
@@ -28,8 +32,10 @@ export function ThreadContextWindowSegments({
     <div
       aria-hidden="true"
       className={cn(
-        "pointer-events-none absolute inset-0 flex transition-opacity duration-200 ease-out motion-reduce:transition-none",
-        visible ? "opacity-100" : "opacity-0",
+        "pointer-events-none absolute inset-0 flex transition-opacity motion-reduce:transition-none",
+        visible
+          ? "opacity-100 duration-(--motion-duration-slow)"
+          : "opacity-0 duration-(--motion-duration-base)",
       )}
     >
       {details.categories
@@ -62,10 +68,7 @@ export function ContextWindowReveal({
       id={id}
       aria-hidden={!open}
       inert={!open}
-      className={cn(
-        "grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
-        open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
-      )}
+      className={getDisclosureRevealClass(open)}
     >
       <div className="min-h-0 overflow-hidden">{children}</div>
     </div>
@@ -85,9 +88,11 @@ function CategoryRow({
   const contentId = useId();
   const hasItems = category.entries.length > 0;
   const inWindow = category.kind !== "deferred";
+
   const label = inWindow
     ? category.label
     : category.label.replace(/\s*\(deferred\)$/i, "");
+
   const summary = (
     <>
       <span
@@ -119,7 +124,8 @@ function CategoryRow({
         aria-hidden="true"
         data-icon-root=""
         className={cn(
-          "size-3 shrink-0 text-muted-foreground transition-transform duration-200 ease-out motion-reduce:transition-none",
+          "size-3 shrink-0 text-muted-foreground",
+          DISCLOSURE_CHEVRON_TRANSITION,
           expanded && "rotate-90",
           !hasItems && "invisible",
         )}
@@ -128,6 +134,7 @@ function CategoryRow({
       </svg>
     </>
   );
+
   const summaryClassName = cn(
     "flex w-full items-center gap-2 py-1.5 text-xs max-md:pointer-coarse:text-sm",
     category.kind === "used" ? "text-foreground" : "text-muted-foreground",
@@ -186,9 +193,11 @@ export function ThreadContextWindowDetails({
   const used = details.categories.filter(
     (category) => category.kind === "used",
   );
+
   const remaining = details.categories.filter(
     (category) => category.kind === "free" || category.kind === "reserved",
   );
+
   const deferred = details.categories.filter(
     (category) => category.kind === "deferred",
   );

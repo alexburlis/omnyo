@@ -6,13 +6,14 @@ import type {
   TerminalListResponse,
   TerminalSession,
   UpdateTerminalRequest,
-} from "@bb/server-contract";
-import { BbHttpError, sdk } from "@/lib/sdk";
+} from "@omnyo/server-contract";
+import { OmnyoHttpError, sdk } from "@/lib/sdk";
 import {
   applyTerminalSessionClose,
   applyTerminalSessionMissing,
   applyTerminalSessionUpsert,
 } from "../cache-owners/terminal-cache-owner";
+import { encodeTerminalInputChunks } from "@/lib/terminal-input-encoding";
 import { terminalsQueryKey, type TerminalQueryScope } from "./query-keys";
 import { requireEnabledQueryArg, type QueryOptions } from "./query-helpers";
 import { REALTIME_OWNED_NO_FOCUS_QUERY_POLICY } from "./query-policies";
@@ -30,6 +31,7 @@ export function terminalQueryScopeForTarget(
   target: TerminalCreateTarget,
 ): TerminalQueryScope {
   if (target.kind !== "host_path") return target;
+
   return {
     kind: "host_path",
     hostId: target.hostId,
@@ -87,6 +89,25 @@ export function useCreateTerminal() {
   });
 }
 
+export function useSendTerminalInput() {
+  return useMutation({
+    meta: {
+      errorMessage: "Failed to run command in terminal.",
+    },
+    mutationFn: async ({
+      terminalId,
+      text,
+    }: {
+      terminalId: string;
+      text: string;
+    }) => {
+      for (const dataBase64 of encodeTerminalInputChunks(text)) {
+        await sdk.terminals.input({ terminalId, dataBase64 });
+      }
+    },
+  });
+}
+
 export function useRenameTerminal() {
   const queryClient = useQueryClient();
 
@@ -111,7 +132,8 @@ export function useCloseTerminal() {
     },
     mutationFn: ({ mode, terminalId }: CloseTerminalMutationRequest) =>
       sdk.terminals.close({ mode, terminalId }).catch((error: unknown) => {
-        if (error instanceof BbHttpError && error.status === 404) return null;
+        if (error instanceof OmnyoHttpError && error.status === 404)
+          return null;
         throw error;
       }),
     onSuccess: (session: TerminalSession | null, variables) => {
@@ -120,8 +142,10 @@ export function useCloseTerminal() {
           queryClient,
           terminalId: variables.terminalId,
         });
+
         return;
       }
+
       applyTerminalSessionClose({
         queryClient,
         session,

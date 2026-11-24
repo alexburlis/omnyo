@@ -2,15 +2,15 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { PromptInput } from "@get-bb/plugin-sdk/provider-bridge";
+import type { PromptInput } from "@omnyo/plugin-sdk/provider-bridge";
 import {
   experimental_assembleCapturedThreadEvents as assembleCapturedThreadEvents,
   experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import type {
   BridgeJsonRpcTestHarness,
   ThreadEvent,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 
 import { handleLine } from "./bridge.js";
 import {
@@ -21,6 +21,7 @@ import {
 const THREAD_ID = "thr_zero_work_1";
 
 let harness: BridgeJsonRpcTestHarness;
+
 let workspaceDir: string;
 
 function compactCommandInput(): PromptInput[] {
@@ -55,11 +56,14 @@ async function waitForEvents(
   predicate: (events: ThreadEvent[]) => boolean,
 ): Promise<ThreadEvent[]> {
   const deadline = Date.now() + 15_000;
+
   while (Date.now() < deadline) {
     const events = threadEvents();
+
     if (predicate(events)) return events;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+
   throw new Error("Timed out waiting for thread events");
 }
 
@@ -71,17 +75,20 @@ async function startSession(): Promise<string> {
     options: { ...FULL_ACCESS_SESSION_OPTIONS },
   });
   const response = await harness.waitForResponse(1);
+
   const providerThreadId = (
     response.result as { providerThreadId: string } | undefined
   )?.providerThreadId;
+
   if (typeof providerThreadId !== "string") {
     throw new Error(`thread/start failed: ${JSON.stringify(response)}`);
   }
+
   return providerThreadId;
 }
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-zero-work-ws-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-zero-work-ws-"));
   stubFakeCodexAppServer();
   harness = createBridgeJsonRpcTestHarness(handleLine);
 });
@@ -114,12 +121,15 @@ it("settles a prompt the app-server accepts without any turn activity", async ()
   const events = await waitForEvents((all) =>
     all.some((event) => event.type === "turn/completed"),
   );
+
   const started = events.filter((event) => event.type === "turn/started");
   const completed = events.filter((event) => event.type === "turn/completed");
   expect(started).toHaveLength(1);
   expect(completed).toHaveLength(1);
+
   const turnId =
     started[0]?.scope.kind === "turn" ? started[0].scope.turnId : "";
+
   expect(turnId).not.toBe("");
   expect(completed[0]).toMatchObject({
     status: "completed",
@@ -164,6 +174,7 @@ it("preserves the native checkpoint when thread/stop interrupts a turn", async (
         event.type === "turn/completed" && event.status === "interrupted",
     ),
   );
+
   expect(events).toContainEqual(
     expect.objectContaining({
       type: "turn/completed",
@@ -187,19 +198,24 @@ it("keeps one lifecycle when turn/started lags the turn/start response past the 
   const events = await waitForEvents((all) =>
     all.some((event) => event.type === "turn/completed"),
   );
+
   await new Promise((resolve) => setTimeout(resolve, 500));
   const settledEvents = threadEvents();
 
   const started = settledEvents.filter(
     (event) => event.type === "turn/started",
   );
+
   const completed = settledEvents.filter(
     (event) => event.type === "turn/completed",
   );
+
   expect(started).toHaveLength(1);
   expect(completed).toHaveLength(1);
+
   const turnId =
     started[0]?.scope.kind === "turn" ? started[0].scope.turnId : "";
+
   expect(turnId).not.toBe("");
   expect(completed[0]).toMatchObject({
     status: "completed",
@@ -234,12 +250,15 @@ it("settles a response-proved turn as failed when codex dies before turn/started
   const events = await waitForEvents((all) =>
     all.some((event) => event.type === "turn/completed"),
   );
+
   const started = events.filter((event) => event.type === "turn/started");
   const completed = events.filter((event) => event.type === "turn/completed");
   expect(started).toHaveLength(1);
   expect(completed).toHaveLength(1);
+
   const turnId =
     started[0]?.scope.kind === "turn" ? started[0].scope.turnId : "";
+
   expect(turnId).not.toBe("");
   expect(completed[0]).toMatchObject({
     status: "failed",
@@ -269,12 +288,15 @@ it("settles a turn the turn/start response reports as already completed", async 
   const events = await waitForEvents((all) =>
     all.some((event) => event.type === "turn/completed"),
   );
+
   const started = events.filter((event) => event.type === "turn/started");
   const completed = events.filter((event) => event.type === "turn/completed");
   expect(started).toHaveLength(1);
   expect(completed).toHaveLength(1);
+
   const turnId =
     started[0]?.scope.kind === "turn" ? started[0].scope.turnId : "";
+
   expect(turnId).not.toBe("");
   expect(completed[0]).toMatchObject({
     status: "completed",
@@ -313,6 +335,7 @@ it("acknowledges a dispatch codex steers into the already-running turn", async (
     options: { ...FULL_ACCESS_SESSION_OPTIONS },
   });
   await harness.waitForResponse(3);
+
   const events = await waitForEvents(
     (all) =>
       all.filter((event) => event.type === "turn/input/accepted").length === 2,
@@ -320,8 +343,10 @@ it("acknowledges a dispatch codex steers into the already-running turn", async (
 
   const started = events.filter((event) => event.type === "turn/started");
   expect(started).toHaveLength(1);
+
   const turnId =
     started[0]?.scope.kind === "turn" ? started[0].scope.turnId : "";
+
   expect(turnId).not.toBe("");
   expect(
     events.filter((event) => event.type === "turn/input/accepted"),
@@ -378,8 +403,10 @@ it("does not resurrect a response-opened turn settled before its turn/started ar
   const events = threadEvents();
   const started = events.filter((event) => event.type === "turn/started");
   expect(started).toHaveLength(1);
+
   const turnId =
     started[0]?.scope.kind === "turn" ? started[0].scope.turnId : "";
+
   expect(turnId).not.toBe("");
   const completed = events.filter((event) => event.type === "turn/completed");
   expect(completed).toHaveLength(1);
@@ -397,39 +424,56 @@ it("does not resurrect a response-opened turn settled before its turn/started ar
   ]);
 }, 30_000);
 
-it("interrupts a response-opened turn once codex reports it started", async () => {
-  const providerThreadId = await startSession();
-  harness.sendRequest(2, "turn/start", {
-    threadId: THREAD_ID,
-    providerThreadId,
-    input: [{ type: "text", text: "/late-start-interruptible", mentions: [] }],
-    clientRequestId: "creq_ntrptate23",
-    options: { ...FULL_ACCESS_SESSION_OPTIONS },
-  });
-  await harness.waitForResponse(2);
-  await waitForEvents((events) =>
-    events.some((event) => event.type === "turn/started"),
-  );
+it.each([350, 6_500])(
+  "interrupts a response-opened turn with native activation delayed %i ms",
+  async (lateStartDelayMs) => {
+    const scriptPath = join(workspaceDir, "script.json");
+    writeFileSync(scriptPath, JSON.stringify({ lateStartDelayMs }));
+    stubFakeCodexAppServer(scriptPath);
+    const providerThreadId = await startSession();
+    const dispatchedAt = Date.now();
+    harness.sendRequest(2, "turn/start", {
+      threadId: THREAD_ID,
+      providerThreadId,
+      input: [
+        { type: "text", text: "/late-start-interruptible", mentions: [] },
+      ],
+      clientRequestId: "creq_ntrptate23",
+      options: { ...FULL_ACCESS_SESSION_OPTIONS },
+    });
+    await harness.waitForResponse(2);
+    await waitForEvents((events) =>
+      events.some((event) => event.type === "turn/started"),
+    );
 
-  harness.sendRequest(3, "thread/stop", {
-    threadId: THREAD_ID,
-    providerThreadId,
-    intent: "interrupt",
-    activeTurnId: "turn-fx-1",
-  });
-  const stopped = await harness.waitForResponse(3);
-  expect(stopped.error).toBeUndefined();
+    harness.sendRequest(3, "thread/stop", {
+      threadId: THREAD_ID,
+      providerThreadId,
+      intent: "interrupt",
+      activeTurnId: "turn-fx-1",
+    });
+    const stopped = await harness.waitForResponse(3);
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        Math.max(0, lateStartDelayMs + 200 - (Date.now() - dispatchedAt)),
+      ),
+    );
+    expect(stopped.error).toBeUndefined();
 
-  const events = await waitForEvents((all) =>
-    all.some((event) => event.type === "turn/completed"),
-  );
-  expect(events.filter((event) => event.type === "turn/started")).toHaveLength(
-    1,
-  );
-  expect(events.filter((event) => event.type === "turn/completed")).toEqual([
-    expect.objectContaining({ status: "interrupted" }),
-  ]);
-}, 30_000);
+    const events = await waitForEvents((all) =>
+      all.some((event) => event.type === "turn/completed"),
+    );
+
+    expect(
+      events.filter((event) => event.type === "turn/started"),
+    ).toHaveLength(1);
+    expect(events.filter((event) => event.type === "turn/completed")).toEqual([
+      expect.objectContaining({ status: "interrupted" }),
+    ]);
+  },
+  30_000,
+);
 
 async function compactAndWaitForCompletion(
   clientRequestId: string,
@@ -448,6 +492,7 @@ async function compactAndWaitForCompletion(
     all.some((event) => event.type === "turn/completed"),
   );
   await new Promise((resolve) => setTimeout(resolve, 400));
+
   return threadEvents();
 }
 
@@ -459,8 +504,10 @@ it("waits for a compaction turn that starts long after the empty compact respons
   const completed = events.filter((event) => event.type === "turn/completed");
   expect(started).toHaveLength(1);
   expect(completed).toHaveLength(1);
+
   const turnId =
     started[0]?.scope.kind === "turn" ? started[0].scope.turnId : "";
+
   expect(turnId).not.toMatch(/zero-work/);
   expect(completed[0]).toMatchObject({
     status: "completed",
@@ -501,6 +548,113 @@ it("fails a compaction when the app-server exits before its turn starts", async 
     events.filter((event) => event.type === "turn/input/accepted"),
   ).toEqual([expect.objectContaining({ clientRequestId: "creq_cmpktext23" })]);
 }, 30_000);
+
+it.each([
+  {
+    mode: "ordered",
+    requested: "turn-fx-3",
+    targets: ["turn-fx-3", "turn-fx-1", "turn-fx-3", "turn-fx-2", "turn-fx-3"],
+    succeeds: true,
+  },
+  {
+    mode: "ordered",
+    requested: "turn-untracked-fx",
+    targets: ["turn-untracked-fx"],
+    succeeds: false,
+  },
+  {
+    mode: "unknown",
+    requested: "turn-fx-3",
+    targets: ["turn-fx-3"],
+    succeeds: false,
+  },
+  {
+    mode: "child",
+    requested: "turn-fx-3",
+    targets: ["turn-fx-3"],
+    succeeds: false,
+  },
+  {
+    mode: "settled",
+    requested: "turn-fx-3",
+    targets: ["turn-fx-3"],
+    succeeds: false,
+  },
+  {
+    mode: "cycle",
+    requested: "turn-fx-3",
+    targets: ["turn-fx-3", "turn-fx-1", "turn-fx-3"],
+    succeeds: false,
+  },
+])(
+  "stops only owned root turns in a $mode interrupt queue for $requested",
+  async ({ mode, requested, targets, succeeds }) => {
+    const requestLogPath = join(workspaceDir, "requests.jsonl");
+    const scriptPath = join(workspaceDir, "script.json");
+    writeFileSync(
+      scriptPath,
+      JSON.stringify({ requestLogPath, interruptQueueMode: mode }),
+    );
+    stubFakeCodexAppServer(scriptPath);
+    const providerThreadId = await startSession();
+
+    for (let index = 0; index < 3; index += 1) {
+      harness.sendRequest(index + 2, "turn/start", {
+        threadId: THREAD_ID,
+        providerThreadId,
+        input: [{ type: "text", text: "/queued-interruptible", mentions: [] }],
+        clientRequestId: [
+          "creq_pausethr23",
+          "creq_pausethr45",
+          "creq_pausethr67",
+        ][index],
+        options: { ...FULL_ACCESS_SESSION_OPTIONS },
+      });
+      expect((await harness.waitForResponse(index + 2)).error).toBeUndefined();
+    }
+
+    await waitForEvents(
+      (events) =>
+        events.filter(
+          (event) => event.type === "turn/started" && !event.parentToolCallId,
+        ).length === 3,
+    );
+
+    const completedBefore = threadEvents().filter(
+      (event) => event.type === "turn/completed",
+    ).length;
+
+    harness.sendRequest(5, "thread/stop", {
+      threadId: THREAD_ID,
+      providerThreadId,
+      intent: "interrupt",
+      activeTurnId: requested,
+    });
+    const stopped = await harness.waitForResponse(5);
+
+    if (succeeds) {
+      expect(stopped.error).toBeUndefined();
+      expect(
+        threadEvents().filter((event) => event.type === "turn/completed"),
+      ).toHaveLength(3);
+    } else {
+      expect(stopped.error?.message).toContain("expected active turn id");
+      expect(
+        threadEvents().filter((event) => event.type === "turn/completed"),
+      ).toHaveLength(completedBefore + (mode === "settled" ? 1 : 0));
+    }
+
+    const interrupted = readFileSync(requestLogPath, "utf8")
+      .split("\n")
+      .filter((line) => line.includes('"method":"turn/interrupt"'))
+      .map((line) => JSON.parse(line).params);
+
+    expect(interrupted.map((params) => params.turnId)).toEqual(targets);
+    expect(
+      interrupted.every((params) => params.threadId === providerThreadId),
+    ).toBe(true);
+  },
+);
 
 it.each([
   { code: -32603, message: "interrupt storage failure" },
@@ -548,6 +702,100 @@ it.each([
   },
 );
 
+function interruptRequests(requestLogPath: string): { turnId: string }[] {
+  return readFileSync(requestLogPath, "utf8")
+    .split("\n")
+    .filter((line) => line.includes('"method":"turn/interrupt"'))
+    .map((line) => JSON.parse(line).params);
+}
+
+function writeIdleInterruptScript(): string {
+  const requestLogPath = join(workspaceDir, "requests.jsonl");
+  const scriptPath = join(workspaceDir, "script.json");
+  writeFileSync(
+    scriptPath,
+    JSON.stringify({ requestLogPath, rejectIdleInterrupt: true }),
+  );
+  stubFakeCodexAppServer(scriptPath);
+
+  return requestLogPath;
+}
+
+it("settles stop as interrupted when Codex already ended a started turn", async () => {
+  const requestLogPath = writeIdleInterruptScript();
+  const providerThreadId = await startSession();
+  harness.sendRequest(2, "turn/start", {
+    threadId: THREAD_ID,
+    providerThreadId,
+    input: [{ type: "text", text: "/lost-completion", mentions: [] }],
+    clientRequestId: "creq_ndedtwice2",
+    options: { ...FULL_ACCESS_SESSION_OPTIONS },
+  });
+  expect((await harness.waitForResponse(2)).error).toBeUndefined();
+  await waitForEvents((events) =>
+    events.some((event) => event.type === "turn/started"),
+  );
+
+  harness.sendRequest(3, "thread/stop", {
+    threadId: THREAD_ID,
+    providerThreadId,
+    intent: "interrupt",
+    activeTurnId: "turn-fx-1",
+  });
+  const stopped = await harness.waitForResponse(3);
+
+  expect(stopped.error).toBeUndefined();
+  expect(stopped.result).toEqual({ ok: true });
+
+  const events = threadEvents();
+  const turnStarted = events.find((event) => event.type === "turn/started");
+  expect(turnStarted?.scope.kind).toBe("turn");
+  expect(events.filter((event) => event.type === "turn/completed")).toEqual([
+    expect.objectContaining({
+      status: "interrupted",
+      scope: turnStarted?.scope,
+    }),
+  ]);
+  expect(interruptRequests(requestLogPath)).toEqual([
+    { threadId: providerThreadId, turnId: "turn-fx-1" },
+  ]);
+}, 20_000);
+
+it("settles stop for a turn this bridge process never opened", async () => {
+  const requestLogPath = writeIdleInterruptScript();
+  const providerThreadId = await startSession();
+
+  harness.sendRequest(2, "thread/stop", {
+    threadId: THREAD_ID,
+    providerThreadId,
+    intent: "interrupt",
+    activeTurnId: "turn-from-earlier-process",
+  });
+  const stopped = await harness.waitForResponse(2);
+
+  expect(stopped.error).toBeUndefined();
+  expect(stopped.result).toEqual({ ok: true });
+  expect(
+    threadEvents().filter((event) => event.type === "turn/completed"),
+  ).toEqual([]);
+  expect(interruptRequests(requestLogPath)).toEqual([
+    { threadId: providerThreadId, turnId: "turn-from-earlier-process" },
+  ]);
+}, 20_000);
+
+it("settles stop for a thread with no session in this bridge process", async () => {
+  harness.sendRequest(2, "thread/stop", {
+    threadId: THREAD_ID,
+    providerThreadId: "codex-thread-from-earlier-process",
+    intent: "interrupt",
+    activeTurnId: "turn-from-earlier-process",
+  });
+  const stopped = await harness.waitForResponse(2);
+
+  expect(stopped.error).toBeUndefined();
+  expect(stopped.result).toEqual({ ok: true });
+});
+
 it.each([
   "idle-before-response",
   "error-before-response",
@@ -580,7 +828,7 @@ it.each([
     delay: 450,
     script: {},
     attempts: 1,
-    succeeds: false,
+    succeeds: true,
   },
   {
     name: "native activation before rejection",
@@ -594,7 +842,7 @@ it.each([
     delay: 0,
     script: { interruptErrorCount: 2 },
     attempts: 2,
-    succeeds: false,
+    succeeds: true,
   },
   {
     name: "completion before rejection",
@@ -608,7 +856,7 @@ it.each([
     delay: 0,
     script: { neverStart: true },
     attempts: 1,
-    succeeds: false,
+    succeeds: true,
   },
 ])(
   "bounds interrupt retry for $name",
@@ -641,6 +889,7 @@ it.each([
     await waitForEvents((events) =>
       events.some((event) => event.type === "turn/started"),
     );
+
     if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
     harness.sendRequest(3, "thread/stop", {
       threadId: THREAD_ID,
@@ -649,8 +898,12 @@ it.each([
       activeTurnId: "turn-fx-1",
     });
     const stopped = await harness.waitForResponse(3);
+
     if (succeeds) {
       expect(stopped.error).toBeUndefined();
+      expect(
+        threadEvents().filter((event) => event.type === "turn/completed"),
+      ).toHaveLength(1);
     } else {
       expect(stopped.error).toMatchObject({
         message: "no active turn to interrupt",
@@ -659,6 +912,7 @@ it.each([
         threadEvents().filter((event) => event.type === "turn/completed"),
       ).toHaveLength(0);
     }
+
     expect(
       readFileSync(requestLogPath, "utf8")
         .split("\n")
@@ -674,6 +928,7 @@ it("binds delayed tool work to the accepted request on consecutive turns", async
   stubFakeCodexAppServer(scriptPath);
   const providerThreadId = await startSession();
   const requests = ["creq_first23456", "creq_after23456"];
+
   for (const [index, clientRequestId] of requests.entries()) {
     harness.sendRequest(index + 2, "turn/start", {
       threadId: THREAD_ID,
@@ -689,22 +944,28 @@ it("binds delayed tool work to the accepted request on consecutive turns", async
         index + 1,
     );
   }
+
   const events = threadEvents();
   expect(events.filter((event) => event.type === "turn/started")).toHaveLength(
     2,
   );
+
   const work = events.filter(
     (event) =>
       event.type === "item/started" && event.item.type === "commandExecution",
   );
+
   expect(work).toHaveLength(2);
+
   for (const [index, item] of work.entries()) {
     const accepted = events.find(
       (event) =>
         event.type === "turn/input/accepted" &&
         event.clientRequestId === requests[index],
     );
+
     expect(accepted).toBeDefined();
+
     if (accepted === undefined) throw new Error("Missing accepted input");
     expect(accepted.scope).toEqual(item.scope);
     expect(events.indexOf(accepted)).toBeLessThan(events.indexOf(item));

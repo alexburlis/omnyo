@@ -1,11 +1,15 @@
-import type { ThreadEvent } from "@bb/domain";
-import { getThreadEventScopeTurnId } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
+import { getThreadEventScopeTurnId } from "@omnyo/domain";
 import type { AgentRuntime } from "../types.js";
 
 export type RuntimeWaitPredicate = () => boolean;
+
 type RuntimeWaitFailureDescription = () => string | null | undefined;
+
 type RuntimeWaitConditionConfig = number | RuntimeWaitConditionOptions;
+
 type RuntimeThreadEventPredicate = (event: ThreadEvent) => boolean;
+
 type RuntimeErrorEvent = Extract<
   ThreadEvent,
   { type: "provider/error" | "system/error" }
@@ -75,6 +79,7 @@ function normalizeWaitConditionConfig(
   if (typeof config === "number") {
     return { timeoutMs: config };
   }
+
   return config ?? {};
 }
 
@@ -84,6 +89,7 @@ function isRuntimeErrorEvent(event: ThreadEvent): event is RuntimeErrorEvent {
 
 export function formatRuntimeErrorEvent(event: RuntimeErrorEvent): string {
   const detail = event.detail ? ` detail=${event.detail}` : "";
+
   return `${event.type}: ${event.message}${detail}`;
 }
 
@@ -94,8 +100,10 @@ function findLatestRuntimeErrorEvent(
   if (!events) {
     return null;
   }
+
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
+
     if (
       event &&
       isRuntimeErrorEvent(event) &&
@@ -104,6 +112,7 @@ function findLatestRuntimeErrorEvent(
       return event;
     }
   }
+
   return null;
 }
 
@@ -112,41 +121,52 @@ function formatRuntimeEvent(event: ThreadEvent): string {
     "providerThreadId" in event
       ? ` providerThreadId=${event.providerThreadId}`
       : "";
+
   const eventTurnId = getThreadEventScopeTurnId(event.scope);
   const turnId = eventTurnId ? ` turnId=${eventTurnId}` : "";
+
   return `${event.threadId} ${event.type}${providerThreadId}${turnId}`;
 }
 
 function describeRuntimeFailure(args: RuntimeFailureContext): string | null {
   const lines: string[] = [];
   const customFailure = args.describeFailure?.();
+
   if (customFailure) {
     lines.push(customFailure);
   }
+
   if (args.runtime) {
     lines.push(
       `runningProviders=[${args.runtime.listRunningProviders().join(",")}]`,
     );
   }
+
   if (args.events) {
     const scopedEvents = args.threadId
       ? args.events.filter((event) => event.threadId === args.threadId)
       : args.events;
+
     const recentEvents = scopedEvents.slice(-8).map(formatRuntimeEvent);
     lines.push(`recentEvents:\n${recentEvents.join("\n") || "none"}`);
   }
+
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
 function failFastRuntimeFailure(args: RuntimeFailureContext): string | null {
   const customFailure = args.failFast?.();
+
   if (customFailure) {
     return customFailure;
   }
+
   const latestError = findLatestRuntimeErrorEvent(args.events, args.threadId);
+
   if (latestError) {
     return formatRuntimeErrorEvent(latestError);
   }
+
   if (
     args.runtime &&
     args.providerId &&
@@ -154,6 +174,7 @@ function failFastRuntimeFailure(args: RuntimeFailureContext): string | null {
   ) {
     return `Provider "${args.providerId}" is no longer running`;
   }
+
   return null;
 }
 
@@ -171,13 +192,17 @@ export async function waitForRuntimeConditionUnsafe(
     if (condition()) {
       return;
     }
+
     if (Date.now() >= deadline) {
       break;
     }
+
     const failFastMessage = options.failFast?.();
+
     if (failFastMessage) {
       throw new Error(failFastMessage);
     }
+
     await sleep(intervalMs);
   }
 
@@ -215,6 +240,7 @@ export async function waitForThreadTurnStarted(
     event.type === "turn/started" &&
     event.threadId === args.threadId &&
     (!args.turnId || getThreadEventScopeTurnId(event.scope) === args.turnId);
+
   await waitForRuntimeThreadEvent({
     ...args,
     label: args.label ?? `turn/started for ${args.threadId}`,
@@ -222,11 +248,13 @@ export async function waitForThreadTurnStarted(
   });
   const event = args.events.find(predicate);
   const turnId = event ? getThreadEventScopeTurnId(event.scope) : undefined;
+
   if (!event || turnId === undefined) {
     throw new Error(
       `turn/started for ${args.threadId} vanished after it was observed`,
     );
   }
+
   return { event, turnId };
 }
 

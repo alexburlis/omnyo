@@ -8,6 +8,9 @@ import {
   preventOverlayTriggerSelection,
 } from "./overlay-trigger.js";
 
+const DRAWER_SHEET_TIMING_CLASS =
+  "[animation-duration:var(--motion-duration-sheet)]! [transition-duration:var(--motion-duration-sheet)]! [animation-timing-function:var(--motion-ease-sheet)]! [transition-timing-function:var(--motion-ease-sheet)]! motion-reduce:[animation-duration:var(--motion-duration-fast)]!";
+
 const Drawer = ({
   shouldScaleBackground = false,
   ...props
@@ -17,6 +20,7 @@ const Drawer = ({
     {...props}
   />
 );
+
 Drawer.displayName = "Drawer";
 
 const DrawerTrigger = React.forwardRef<
@@ -30,6 +34,7 @@ const DrawerTrigger = React.forwardRef<
     {...props}
   />
 ));
+
 DrawerTrigger.displayName = DrawerPrimitive.Trigger.displayName;
 
 const DrawerPortal = DrawerPrimitive.Portal;
@@ -43,10 +48,15 @@ const DrawerOverlay = React.forwardRef<
   <DrawerPrimitive.Overlay
     ref={ref}
     {...usePortalScopeProps()}
-    className={cn("fixed inset-0 z-50 bg-black/40", className)}
+    className={cn(
+      "fixed inset-0 z-50 bg-black/40",
+      DRAWER_SHEET_TIMING_CLASS,
+      className,
+    )}
     {...props}
   />
 ));
+
 DrawerOverlay.displayName = DrawerPrimitive.Overlay.displayName;
 
 const DrawerContent = React.forwardRef<
@@ -60,6 +70,8 @@ const DrawerContent = React.forwardRef<
       {...usePortalScopeProps()}
       className={cn(
         "fixed inset-x-0 bottom-0 z-50 mt-24 flex max-h-[85dvh] flex-col rounded-t-xl border bg-background",
+        DRAWER_SHEET_TIMING_CLASS,
+        "motion-reduce:data-[state=open]:[animation-name:fadeIn]! motion-reduce:data-[state=closed]:[animation-name:fadeOut]!",
         className,
       )}
       {...props}
@@ -69,6 +81,7 @@ const DrawerContent = React.forwardRef<
     </DrawerPrimitive.Content>
   </DrawerPortal>
 ));
+
 DrawerContent.displayName = "DrawerContent";
 
 const DrawerTitle = React.forwardRef<
@@ -84,6 +97,7 @@ const DrawerTitle = React.forwardRef<
     {...props}
   />
 ));
+
 DrawerTitle.displayName = DrawerPrimitive.Title.displayName;
 
 const DrawerDescription = React.forwardRef<
@@ -96,6 +110,7 @@ const DrawerDescription = React.forwardRef<
     {...props}
   />
 ));
+
 DrawerDescription.displayName = DrawerPrimitive.Description.displayName;
 
 export {

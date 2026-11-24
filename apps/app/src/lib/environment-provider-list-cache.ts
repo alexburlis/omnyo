@@ -1,9 +1,10 @@
-import { systemEnvironmentProviderSchema } from "@bb/server-contract";
+import { systemEnvironmentProviderSchema } from "@omnyo/server-contract";
 import { z } from "zod";
 import { createLastKnownCache } from "@/lib/last-known-cache";
 
 const environmentProviderListCache = createLastKnownCache({
-  prefix: "bb.environment-provider-list",
+  prefix: "omnyo.environment-provider-list",
+  obsoletePrefixes: ["bb.environment-provider-list"],
   version: "1",
   schema: z.array(systemEnvironmentProviderSchema),
   maxEntries: 64,
@@ -21,5 +22,9 @@ export function environmentProviderListCacheKey({
 
 export const readCachedEnvironmentProviderList =
   environmentProviderListCache.read;
+
 export const writeCachedEnvironmentProviderList =
   environmentProviderListCache.write;
+
+export const clearCachedEnvironmentProviderLists =
+  environmentProviderListCache.clear;

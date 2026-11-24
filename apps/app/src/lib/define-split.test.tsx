@@ -8,7 +8,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { downloadSplit } from "./split-prefetch";
+import { downloadSplit, readSplitFailureDiagnostic } from "./split-load";
 import { defineSplit } from "./define-split";
 
 afterEach(() => {
@@ -18,29 +18,118 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("downloads bytes without importing and shares an in-flight download with first use", async () => {
+function installSplitManifest(splits: Record<string, string[]>) {
+  const files = [...new Set(Object.values(splits).flat())];
   const manifest = document.createElement("script");
-  manifest.id = "bb-prefetch-download-only";
-  manifest.textContent = JSON.stringify(["/assets/download-only.js"]);
-  document.head.append(manifest);
-  let finish!: () => void;
-  const body = new Promise<void>((resolve) => {
-    finish = resolve;
+  manifest.id = "omnyo-prefetch-manifest";
+  manifest.type = "application/json";
+  manifest.textContent = JSON.stringify({
+    files,
+    splits: Object.fromEntries(
+      Object.entries(splits).map(([id, urls]) => [
+        id,
+        urls.map((url) => files.indexOf(url)),
+      ]),
+    ),
   });
-  const fetch = vi.fn(async () => ({ ok: true, arrayBuffer: () => body }));
+  document.head.append(manifest);
+
+  return manifest;
+}
+
+function stubRelay(isUp: () => boolean) {
+  const fetch = vi.fn(async () =>
+    isUp()
+      ? { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) }
+      : { ok: false, status: 503, arrayBuffer: async () => new ArrayBuffer(0) },
+  );
+
+  vi.stubGlobal("fetch", fetch);
+
+  return fetch;
+}
+
+function moduleThatStaysBrokenIfImportedOffline(
+  isUp: () => boolean,
+  View: React.ComponentType,
+) {
+  let failedOnce = false;
+
+  return vi.fn(async () => {
+    if (!isUp()) failedOnce = true;
+
+    if (failedOnce) throw new TypeError("Importing a module script failed.");
+
+    return View;
+  });
+}
+
+it("keeps a feature loadable after its explicit preload met a failing relay", async () => {
+  vi.useFakeTimers();
+  let relayUp = false;
+
+  const manifest = installSplitManifest({
+    "relay-thread": ["/assets/relay-thread.js"],
+  });
+
+  stubRelay(() => relayUp);
+
+  const load = moduleThatStaysBrokenIfImportedOffline(
+    () => relayUp,
+    () => <p>Thread opened</p>,
+  );
+
+  const Split = defineSplit({
+    id: "relay-thread",
+    load,
+    loading: () => <p>Loading thread</p>,
+  });
+
+  try {
+    const warm = Split.preload();
+    await act(async () => vi.runAllTimersAsync());
+    await warm;
+    expect(load).not.toHaveBeenCalled();
+    relayUp = true;
+    render(<Split />);
+    await act(async () => vi.runAllTimersAsync());
+    expect(screen.getByText("Thread opened")).toBeTruthy();
+    expect(load).toHaveBeenCalledOnce();
+  } finally {
+    manifest.remove();
+  }
+});
+
+it("joins an in-flight download when the feature is opened and fetches each file once", async () => {
+  const manifest = installSplitManifest({
+    "download-only": ["/assets/download-only.js"],
+  });
+
+  let finish!: () => void;
+
+  const body = new Promise<ArrayBuffer>((resolve) => {
+    finish = () => resolve(new ArrayBuffer(0));
+  });
+
+  const fetch = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    arrayBuffer: () => body,
+  }));
+
   vi.stubGlobal("fetch", fetch);
   const load = vi.fn(async () => () => <p>Downloaded editor</p>);
+
   const Split = defineSplit({
     id: "download-only",
     load,
     loading: () => <p>Waiting for bytes</p>,
-    tier: "intent",
   });
+
   try {
     const downloading = downloadSplit("download-only");
     await act(async () => {});
     expect(fetch).toHaveBeenCalledOnce();
-    expect(load).not.toHaveBeenCalled();
     render(<Split />);
     await act(async () => {});
     expect(screen.getByText("Waiting for bytes")).toBeTruthy();
@@ -50,41 +139,11 @@ it("downloads bytes without importing and shares an in-flight download with firs
       await downloading;
     });
     expect(await screen.findByText("Downloaded editor")).toBeTruthy();
-    await downloadSplit("download-only");
+    expect(await downloadSplit("download-only")).toBe("downloaded");
     expect(fetch).toHaveBeenCalledOnce();
     expect(load).toHaveBeenCalledOnce();
   } finally {
-    manifest.remove();
-  }
-});
-
-it("does not start a speculative download after an import has started", async () => {
-  const manifest = document.createElement("script");
-  manifest.id = "bb-prefetch-import-first";
-  manifest.textContent = JSON.stringify(["/assets/import-first.js"]);
-  document.head.append(manifest);
-  const fetch = vi.fn();
-  vi.stubGlobal("fetch", fetch);
-  let finish!: () => void;
-  const held = new Promise<void>((resolve) => {
-    finish = resolve;
-  });
-  const Split = defineSplit({
-    id: "import-first",
-    load: async () => {
-      await held;
-      return () => null;
-    },
-    loading: () => null,
-    tier: "intent",
-  });
-  try {
-    const importing = Split.preload();
-    await downloadSplit("import-first");
-    expect(fetch).not.toHaveBeenCalled();
     finish();
-    await importing;
-  } finally {
     manifest.remove();
   }
 });
@@ -93,18 +152,20 @@ it("shares a pending intent preload with rendering, preserves props, and stays m
   let finish: (
     value: React.ComponentType<{ label: string }>,
   ) => void = () => {};
+
   const load = vi.fn(
     () =>
       new Promise<React.ComponentType<{ label: string }>>((resolve) => {
         finish = resolve;
       }),
   );
+
   const Split = defineSplit({
     id: "editor",
     load,
     loading: ({ label }) => <p>Loading {label}</p>,
-    tier: "intent",
   });
+
   const view = render(<button {...Split.intentProps}>Open</button>);
   expect(load).not.toHaveBeenCalled();
   fireEvent.focus(screen.getByRole("button"));
@@ -131,12 +192,13 @@ it("keeps load failure local and retries a failed import instead of caching the 
   const load = vi.fn<() => Promise<React.ComponentType>>();
   load.mockRejectedValueOnce(new Error("offline"));
   load.mockResolvedValueOnce(() => <p>Editor ready</p>);
+
   const Split = defineSplit({
     id: "retry",
     load,
     loading: () => <p>Loading</p>,
-    tier: "intent",
   });
+
   render(
     <>
       <p>Shell stays</p>
@@ -154,12 +216,13 @@ it("recovers from a rejected speculative preload when the feature is opened", as
   const load = vi.fn<() => Promise<React.ComponentType>>();
   load.mockRejectedValueOnce(new Error("offline"));
   load.mockResolvedValueOnce(() => <p>Ready after preload failure</p>);
+
   const Split = defineSplit({
     id: "preload-retry",
     load,
     loading: () => null,
-    tier: "intent",
   });
+
   await Split.preload();
   render(<Split />);
   expect(await screen.findByText("Ready after preload failure")).toBeTruthy();
@@ -169,18 +232,21 @@ it.each(["preload", "previous mount"])(
   "does not commit a loading fallback after %s resolves the component",
   async (warmup) => {
     const fallbackCommitted = vi.fn();
+
     function Loading() {
       useLayoutEffect(() => {
         fallbackCommitted();
       }, []);
+
       return <p>Loading cached feature</p>;
     }
+
     const Split = defineSplit({
       id: "cached-mount",
       load: async () => () => <input aria-label="Cached editor" />,
       loading: Loading,
-      tier: "intent",
     });
+
     if (warmup === "preload") {
       await Split.preload();
     } else {
@@ -189,6 +255,7 @@ it.each(["preload", "previous mount"])(
       first.unmount();
       fallbackCommitted.mockClear();
     }
+
     const second = render(<Split />);
     expect(fallbackCommitted).not.toHaveBeenCalled();
     expect(screen.getByRole("textbox", { name: "Cached editor" })).toBeTruthy();
@@ -196,69 +263,272 @@ it.each(["preload", "previous mount"])(
   },
 );
 
-it.each([
-  new TypeError(
-    "Failed to fetch dynamically imported module: /assets/editor.js",
-  ),
-  new TypeError("error loading dynamically imported module: /assets/editor.js"),
-  new TypeError("Importing a module script failed."),
-])(
-  "shares bounded automatic download retries across preload and render: %s",
-  async (error) => {
-    vi.useFakeTimers();
-    const load = vi
-      .fn<() => Promise<React.ComponentType>>()
-      .mockRejectedValueOnce(error)
-      .mockRejectedValueOnce(error)
-      .mockResolvedValue(() => <p>Recovered editor</p>);
-    const Split = defineSplit({
-      id: "automatic-retry",
-      load,
-      loading: () => <p>Loading editor</p>,
-      tier: "intent",
-    });
+it("retries a failed download twice across preload and opening, then imports once", async () => {
+  vi.useFakeTimers();
+
+  const manifest = installSplitManifest({
+    "automatic-retry": ["/assets/automatic-retry.js"],
+  });
+
+  let failures = 2;
+  const fetch = stubRelay(() => failures-- <= 0);
+  const load = vi.fn(async () => () => <p>Recovered editor</p>);
+
+  const Split = defineSplit({
+    id: "automatic-retry",
+    load,
+    loading: () => <p>Loading editor</p>,
+  });
+
+  try {
     const warm = Split.preload();
     render(<Split />);
     await act(async () => {});
-    expect(load).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(load).not.toHaveBeenCalled();
     expect(screen.queryByRole("alert")).toBeNull();
     await act(async () => vi.advanceTimersByTimeAsync(499));
-    expect(load).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
     await act(async () => vi.advanceTimersByTimeAsync(1));
-    expect(load).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(screen.getByText("Loading editor")).toBeTruthy();
     await act(async () => vi.advanceTimersByTimeAsync(1500));
     await warm;
-    expect(load).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(load).toHaveBeenCalledOnce();
     expect(screen.getByText("Recovered editor")).toBeTruthy();
-  },
-);
+  } finally {
+    manifest.remove();
+  }
+});
 
-it("stops automatic retries after three attempts and permits a new manual attempt", async () => {
+it("stops after three failed downloads without importing, and Try again downloads again", async () => {
   vi.useFakeTimers();
   vi.spyOn(console, "error").mockImplementation(() => {});
-  const load = vi
-    .fn<() => Promise<React.ComponentType>>()
-    .mockRejectedValue(
-      new TypeError("Failed to fetch dynamically imported module: /editor.js"),
-    );
+  let relayUp = false;
+
+  const manifest = installSplitManifest({
+    "exhausted-retry": ["/assets/exhausted-retry.js"],
+  });
+
+  const fetch = stubRelay(() => relayUp);
+  const load = vi.fn(async () => () => <p>Editor after the relay recovered</p>);
+
   const Split = defineSplit({
     id: "exhausted-retry",
     load,
     loading: () => <p>Loading editor</p>,
-    tier: "intent",
   });
-  render(<Split />);
-  await act(async () => vi.runAllTimersAsync());
-  expect(load).toHaveBeenCalledTimes(3);
-  expect(screen.getByRole("alert")).toBeTruthy();
-  await act(async () => vi.advanceTimersByTimeAsync(60000));
-  expect(load).toHaveBeenCalledTimes(3);
-  load.mockResolvedValue(() => <p>Recovered editor</p>);
-  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-  await act(async () => vi.runAllTimersAsync());
-  expect(screen.getByText("Recovered editor")).toBeTruthy();
-  expect(load).toHaveBeenCalledTimes(4);
+
+  try {
+    render(<Split />);
+    await act(async () => vi.runAllTimersAsync());
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(load).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toBeTruthy();
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
+    expect(fetch).toHaveBeenCalledTimes(3);
+    relayUp = true;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await act(async () => vi.runAllTimersAsync());
+    expect(screen.getByText("Editor after the relay recovered")).toBeTruthy();
+    expect(load).toHaveBeenCalledOnce();
+  } finally {
+    manifest.remove();
+  }
+});
+
+it.each(["http", "timeout", "network"] as const)(
+  "preserves the safe terminal %s download cause without request content",
+  async (kind) => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const id = `diagnostic-${kind}`;
+
+    const manifest = installSplitManifest({
+      [id]: [
+        `https://private.example/assets/${id}-AbCd1234.js?private=request-content`,
+      ],
+    });
+
+    const fetch = vi.fn(async (_url: string, options?: RequestInit) => {
+      if (kind === "network")
+        throw new TypeError("private=request-content network detail");
+
+      if (kind === "timeout")
+        await new Promise<never>((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(new Error("private=request-content timeout detail")),
+            { once: true },
+          );
+        });
+
+      return new Response(null, { status: 503 });
+    });
+
+    vi.stubGlobal("fetch", fetch);
+    const load = vi.fn(async () => () => null);
+    let capturedError: Error | undefined;
+
+    const Split = defineSplit({
+      id,
+      load,
+      loading: () => null,
+      error: ({ error }) => {
+        capturedError = error;
+
+        return <p role="alert">{error?.message}</p>;
+      },
+    });
+
+    try {
+      render(<Split />);
+      await act(async () => vi.runAllTimersAsync());
+
+      const reason =
+        kind === "http"
+          ? "HTTP 503"
+          : kind === "timeout"
+            ? "timeout"
+            : "network failure";
+
+      expect(screen.getByRole("alert").textContent).toBe(
+        `Could not download the ${id} feature (${reason} after 3 attempts)`,
+      );
+      expect(screen.getByRole("alert").textContent).not.toContain(
+        "request-content",
+      );
+      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(load).not.toHaveBeenCalled();
+      expect(readSplitFailureDiagnostic(capturedError)).toEqual({
+        operation: "split-load",
+        stage: "download",
+        kind,
+        failureClass:
+          kind === "http"
+            ? "upstream-rejected"
+            : kind === "timeout"
+              ? "timeout"
+              : "connection",
+        outcome: "terminal",
+        attempt: 3,
+        assetName: `${id}-AbCd1234.js`,
+        downloadPhase: "request",
+        online: true,
+        ...(kind === "http" ? { status: 503 } : {}),
+      });
+    } finally {
+      manifest.remove();
+    }
+  },
+);
+
+it.each(["headers", "body"])(
+  "times out stalled response %s, reports failure, and recovers on request",
+  async (phase) => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const id = `stalled-${phase}`;
+
+    const manifest = installSplitManifest({
+      [id]: [`/assets/${id}.js`],
+    });
+
+    let recovered = false;
+
+    const fetch = vi.fn(async (_url: string, options?: RequestInit) => {
+      const stall = () =>
+        new Promise<never>((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            { once: true },
+          );
+        });
+
+      if (!recovered && phase === "headers") await stall();
+
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: () =>
+          recovered ? Promise.resolve(new ArrayBuffer(0)) : stall(),
+      };
+    });
+
+    vi.stubGlobal("fetch", fetch);
+    const load = vi.fn(async () => () => <p>Recovered stalled feature</p>);
+
+    const Split = defineSplit({
+      id,
+      load,
+      loading: () => <p>Waiting for stalled feature</p>,
+    });
+
+    try {
+      render(<Split />);
+      await act(async () => vi.advanceTimersByTimeAsync(32_000));
+      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(load).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toBeTruthy();
+      recovered = true;
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      await act(async () => vi.runAllTimersAsync());
+      expect(screen.getByText("Recovered stalled feature")).toBeTruthy();
+      expect(load).toHaveBeenCalledOnce();
+    } finally {
+      manifest.remove();
+    }
+  },
+);
+
+it("offers a full reload without retrying when the browser refuses a downloaded module", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const manifest = installSplitManifest({
+    "refused-module": ["/assets/refused-module-AbCd1234.js"],
+  });
+
+  stubRelay(() => true);
+
+  const originalError = new TypeError("Importing a module script failed.");
+  const originalStack = originalError.stack;
+
+  const load = vi
+    .fn<() => Promise<React.ComponentType>>()
+    .mockRejectedValue(originalError);
+
+  const Split = defineSplit({
+    id: "refused-module",
+    load,
+    loading: () => <p>Loading editor</p>,
+  });
+
+  try {
+    render(<Split />);
+    await act(async () => vi.runAllTimersAsync());
+    expect(load).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Reload Omnyo" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(originalError.stack).toBe(originalStack);
+    expect(readSplitFailureDiagnostic(originalError)).toEqual({
+      operation: "split-load",
+      stage: "import",
+      kind: "module",
+      failureClass: "unknown",
+      outcome: "terminal",
+      attempt: 1,
+      assetName: "refused-module-AbCd1234.js",
+      preflight: "downloaded",
+      importFailure: "fetch",
+      online: true,
+    });
+  } finally {
+    manifest.remove();
+  }
 });
 
 it.each([
@@ -269,15 +539,17 @@ it.each([
   async (error) => {
     vi.useFakeTimers();
     vi.spyOn(console, "error").mockImplementation(() => {});
+
     const load = vi
       .fn<() => Promise<React.ComponentType>>()
       .mockRejectedValue(error);
+
     const Split = defineSplit({
       id: "non-download-failure",
       load,
       loading: () => null,
-      tier: "intent",
     });
+
     render(<Split />);
     await act(async () => vi.runAllTimersAsync());
     expect(screen.getByRole("alert")).toBeTruthy();
@@ -293,8 +565,8 @@ it("mounts only when wanted and keeps a retained split mounted after it closes",
     unmounted: () => <p>Closed shell</p>,
     mountWhen: ({ open }) => open,
     keepMounted: true,
-    tier: "intent",
   });
+
   const view = render(<Split open={false} />);
   expect(screen.getByText("Closed shell")).toBeTruthy();
   view.rerender(<Split open />);
@@ -310,85 +582,21 @@ it("mounts only when wanted and keeps a retained split mounted after it closes",
   );
 });
 
-it.each([true, false])(
-  "preloads preload-tier splits at idle once preloading starts, including ones defined later (idle API: %s)",
-  async (hasIdleCallback) => {
-    vi.useFakeTimers();
-    vi.stubGlobal(
-      "requestIdleCallback",
-      hasIdleCallback
-        ? (callback: () => void) => window.setTimeout(callback, 1000)
-        : undefined,
-    );
-    vi.resetModules();
-    const { defineSplit: define } = await import("./define-split");
-    const { startSplitPreloading: start } = await import("./split-prefetch");
-    const load = vi.fn(async () => () => <p>Warm feature</p>);
-    const Split = define({
-      id: "preload",
-      load,
-      loading: () => null,
-      tier: "preload",
-    });
-    const intentLoad = vi.fn(async () => () => null);
-    define({
-      id: "intent",
-      load: intentLoad,
-      loading: () => null,
-      tier: "intent",
-    });
-    await act(async () => vi.runAllTimersAsync());
-    expect(load).not.toHaveBeenCalled();
-    start();
-    await act(async () => vi.runAllTimersAsync());
-    expect(load).toHaveBeenCalledOnce();
-    expect(intentLoad).not.toHaveBeenCalled();
-    const lateLoad = vi.fn(async () => () => null);
-    define({
-      id: "late-preload",
-      load: lateLoad,
-      loading: () => null,
-      tier: "preload",
-    });
-    await act(async () => vi.runAllTimersAsync());
-    expect(lateLoad).toHaveBeenCalledOnce();
-    render(<Split />);
-    expect(screen.getByText("Warm feature")).toBeTruthy();
-    expect(load).toHaveBeenCalledOnce();
-  },
-);
-
-it("holds preload-tier work until rendered splits have loaded", async () => {
+it("does not load an unused feature when the current route finishes", async () => {
   vi.useFakeTimers();
-  vi.stubGlobal("requestIdleCallback", undefined);
   vi.resetModules();
   const { defineSplit: define } = await import("./define-split");
-  const { startSplitPreloading: start } = await import("./split-prefetch");
-  let finishPage!: () => void;
-  const Page = define({
-    id: "page",
-    load: () =>
-      new Promise<React.ComponentType>((resolve) => {
-        finishPage = () => resolve(() => <p>Page content</p>);
-      }),
-    loading: () => null,
-    tier: "intent",
-  });
-  const preloadLoad = vi.fn(async () => () => null);
-  define({
-    id: "later",
-    load: preloadLoad,
-    loading: () => null,
-    tier: "preload",
-  });
-  render(<Page />);
-  start();
+
+  const { trackCriticalLoad, whenCriticalLoadsSettled } =
+    await import("./split-load");
+
+  const load = vi.fn(async () => () => <p>Optional editor</p>);
+  const Optional = define({ id: "unused-editor", load, loading: () => null });
+  const ready = whenCriticalLoadsSettled();
+  await trackCriticalLoad(Promise.resolve());
   await act(async () => vi.runAllTimersAsync());
-  expect(preloadLoad).not.toHaveBeenCalled();
-  await act(async () => {
-    finishPage();
-    await vi.runAllTimersAsync();
-  });
-  expect(screen.getByText("Page content")).toBeTruthy();
-  expect(preloadLoad).toHaveBeenCalledOnce();
+  await ready;
+  expect(load).not.toHaveBeenCalled();
+  await Optional.preload();
+  expect(load).toHaveBeenCalledOnce();
 });

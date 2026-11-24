@@ -1,6 +1,6 @@
-import type { BbDesktopServerChoice } from "@bb/desktop-contract";
+import type { OmnyoDesktopServerChoice } from "@omnyo/desktop-contract";
 
-export type ServerChoice = BbDesktopServerChoice;
+export type ServerChoice = OmnyoDesktopServerChoice;
 
 export interface ServerChoices {
   list(): Promise<ServerChoice[]>;
@@ -9,7 +9,9 @@ export interface ServerChoices {
 }
 
 export function getServerChoices(): ServerChoices | null {
-  const desktop = typeof window === "undefined" ? undefined : window.bbDesktop;
+  const desktop =
+    typeof window === "undefined" ? undefined : window.omnyoDesktop;
+
   if (
     desktop?.getServerChoices &&
     desktop.onServerChoicesChange &&
@@ -21,5 +23,6 @@ export function getServerChoices(): ServerChoices | null {
       select: desktop.selectServer.bind(desktop),
     };
   }
+
   return null;
 }

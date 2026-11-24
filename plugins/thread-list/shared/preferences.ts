@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 const STRING_MAX_LENGTH = 1_024;
+
 const LIST_MAX_LENGTH = 10_000;
 
 const listItemSchema = z.string().min(1).max(STRING_MAX_LENGTH);
+
 const stringListSchema = z.array(listItemSchema).max(LIST_MAX_LENGTH);
 
 export const organizationModeSchema = z.enum([
@@ -11,6 +13,7 @@ export const organizationModeSchema = z.enum([
   "chronological",
   "machine",
 ]);
+
 export type OrganizationMode = z.infer<typeof organizationModeSchema>;
 
 export const chronologicalSortSchema = z.enum([
@@ -19,6 +22,7 @@ export const chronologicalSortSchema = z.enum([
   "alpha",
   "none",
 ]);
+
 export type ChronologicalSort = z.infer<typeof chronologicalSortSchema>;
 
 export const sortDirectionSchema = z.enum([
@@ -26,6 +30,7 @@ export const sortDirectionSchema = z.enum([
   "ascending",
   "descending",
 ]);
+
 export type SortDirection = z.infer<typeof sortDirectionSchema>;
 
 export const environmentGroupingSchema = z.union([
@@ -34,34 +39,57 @@ export const environmentGroupingSchema = z.union([
 ]);
 
 export const THREAD_ROW_ACTION_LIMIT = 3;
-const LEGACY_THREAD_ROW_ACTION_KEYS = {
-  split: "bb--core/split",
-  copyLink: "bb--core/copyLink",
-  read: "bb--core/read",
-  pin: "bb--core/pin",
-  move: "thread-list/move",
-  rename: "bb--core/rename",
-  archive: "bb--core/archive",
-} as const;
-type LegacyThreadRowActionId = keyof typeof LEGACY_THREAD_ROW_ACTION_KEYS;
-const LEGACY_CORE_KEY_PREFIX = "core/";
 
-function isLegacyThreadRowActionId(
+const CORE_THREAD_ACTION_OWNER = "omnyo--core";
+
+const LEGACY_THREAD_ROW_ACTION_KEYS_V1 = {
+  split: "omnyo--core/split",
+  copyLink: "omnyo--core/copyLink",
+  read: "omnyo--core/read",
+  pin: "omnyo--core/pin",
+  move: "thread-list/move",
+  rename: "omnyo--core/rename",
+  archive: "omnyo--core/archive",
+} as const;
+
+type LegacyThreadRowActionIdV1 = keyof typeof LEGACY_THREAD_ROW_ACTION_KEYS_V1;
+
+const LEGACY_CORE_THREAD_ACTION_IDS_V1: ReadonlySet<string> = new Set([
+  "split",
+  "newThreadInEnvironment",
+  "copyLink",
+  "copyId",
+  "read",
+  "pin",
+  "shelve",
+  "rename",
+  "archive",
+  "delete",
+]);
+
+function isLegacyThreadRowActionIdV1(
   value: string,
-): value is LegacyThreadRowActionId {
-  return Object.hasOwn(LEGACY_THREAD_ROW_ACTION_KEYS, value);
+): value is LegacyThreadRowActionIdV1 {
+  return Object.hasOwn(LEGACY_THREAD_ROW_ACTION_KEYS_V1, value);
 }
 
-function migrateThreadRowActionKey(value: string): string {
-  if (isLegacyThreadRowActionId(value)) {
-    return LEGACY_THREAD_ROW_ACTION_KEYS[value];
-  }
-  return value.startsWith(LEGACY_CORE_KEY_PREFIX) ? `bb--${value}` : value;
+function importLegacyThreadRowActionKeyV1(value: string): string {
+  if (isLegacyThreadRowActionIdV1(value))
+    return LEGACY_THREAD_ROW_ACTION_KEYS_V1[value];
+  const slash = value.indexOf("/");
+
+  if (slash === -1) return value;
+  const owner = value.slice(0, slash);
+  const action = value.slice(slash + 1);
+
+  return owner === "core" && LEGACY_CORE_THREAD_ACTION_IDS_V1.has(action)
+    ? `${CORE_THREAD_ACTION_OWNER}/${action}`
+    : value;
 }
 
 export const threadRowActionKeySchema = z
   .string()
-  .transform(migrateThreadRowActionKey)
+  .transform(importLegacyThreadRowActionKeyV1)
   .pipe(
     z.string().regex(/^[^/\s]+\/[^/\s]+$/, {
       message: "Row actions are thread action keys: <owner>/<id>",
@@ -96,6 +124,12 @@ export const preferenceDefinitions = {
     "Show each thread's agent provider icon before its title.",
     null,
   ),
+  showEmptyProjects: definePreference(
+    z.boolean(),
+    true,
+    "Show project groups that have no visible threads when organized by project.",
+    null,
+  ),
   threadLifecycles: definePreference(
     z
       .array(z.enum(["active", "archived"]))
@@ -103,7 +137,7 @@ export const preferenceDefinitions = {
       .max(2)
       .refine((value) => new Set(value).size === value.length),
     ["active"],
-    "Thread lifecycles shown in the list: active, archived, or both. At least one is required.",
+    "Thread lifecycles shown in the list: active, archived, or both. At least one is required. Shelved threads load into the Shelf whenever active threads are shown.",
     null,
   ),
   organizationMode: definePreference(
@@ -138,20 +172,20 @@ export const preferenceDefinitions = {
   ),
   sectionOrder: definePreference(
     stringListSchema,
-    ["pinned", "projects", "threads"],
-    "Top-level order when organized by project.",
+    ["pinned", "projects", "threads", "shelf"],
+    "Top-level order when organized by project. Built-in sections are pinned, threads, and shelf. An order without shelf ends with it.",
     "sidebar.sectionOrder",
   ),
   manualSectionOrder: definePreference(
     stringListSchema,
-    ["pinned", "sections", "threads"],
-    "Top-level order when organized chronologically.",
+    ["pinned", "sections", "threads", "shelf"],
+    "Top-level order when organized chronologically. Built-in sections are pinned, threads, and shelf. An order without shelf ends with it.",
     "sidebar.manualSectionOrder",
   ),
   machineSectionOrder: definePreference(
     stringListSchema,
-    ["pinned", "machines", "threads"],
-    "Top-level order when organized by machine.",
+    ["pinned", "machines", "threads", "shelf"],
+    "Top-level order when organized by machine. Built-in sections are pinned, threads, and shelf. An order without shelf ends with it.",
     "sidebar.machineSectionOrder",
   ),
   hiddenGroups: definePreference(
@@ -168,26 +202,26 @@ export const preferenceDefinitions = {
       .refine((value) => value.length <= THREAD_ROW_ACTION_LIMIT, {
         message: `Choose at most ${THREAD_ROW_ACTION_LIMIT} row actions`,
       }),
-    ["bb--core/archive"],
-    `Up to ${THREAD_ROW_ACTION_LIMIT} quick actions shown on a thread row's hover, left to right before its actions menu, as thread action keys: bb--core/split, bb--core/copyLink, bb--core/read, bb--core/pin, thread-list/move, bb--core/rename, bb--core/archive, or a plugin's <pluginId>/<actionId>. Bare legacy ids such as archive and core/<id> keys are accepted. An empty list shows only the menu.`,
+    ["omnyo--core/archive"],
+    `Up to ${THREAD_ROW_ACTION_LIMIT} quick actions shown on a thread row's hover, left to right before its actions menu, as thread action keys: omnyo--core/split, omnyo--core/copyLink, omnyo--core/read, omnyo--core/pin, omnyo--core/shelve, thread-list/move, omnyo--core/rename, omnyo--core/archive, or a plugin's <pluginId>/<actionId>. Bare legacy ids such as archive and core/<id> keys are accepted. An empty list shows only the menu. Archived rows always show omnyo--core/archive and Shelf rows always show omnyo--core/shelve instead.`,
     null,
   ),
   collapsedSections: definePreference(
     z.array(collapsibleSectionIdSchema).max(LIST_MAX_LENGTH),
     [],
-    "Built-in sections (pinned, threads) that are collapsed.",
+    "Built-in sections (pinned, threads) that are collapsed. The Shelf uses shelfExpanded.",
+    null,
+  ),
+  shelfExpanded: definePreference(
+    z.boolean(),
+    false,
+    "Whether the Shelf section is open. It starts folded and appears only while shelved threads exist.",
     null,
   ),
   collapsedProjects: definePreference(
     stringListSchema,
     [],
     "Project ids whose rows are collapsed.",
-    null,
-  ),
-  collapsedThreads: definePreference(
-    stringListSchema,
-    [],
-    "Thread ids whose child threads are collapsed.",
     null,
   ),
   collapsedEnvironments: definePreference(
@@ -208,9 +242,16 @@ export const preferenceDefinitions = {
     "Machine ids whose rows are collapsed.",
     null,
   ),
+  collapsedGroups: definePreference(
+    stringListSchema,
+    [],
+    "Chat group ids whose folders are collapsed.",
+    null,
+  ),
 } as const;
 
 export type PreferenceKey = keyof typeof preferenceDefinitions;
+
 export const PREFERENCE_KEYS = Object.keys(
   preferenceDefinitions,
 ) as PreferenceKey[];
@@ -218,6 +259,7 @@ export const PREFERENCE_KEYS = Object.keys(
 export type PreferenceValue<Key extends PreferenceKey> = z.infer<
   (typeof preferenceDefinitions)[Key]["schema"]
 >;
+
 export type PreferenceValues = {
   [Key in PreferenceKey]: PreferenceValue<Key>;
 };
@@ -248,9 +290,11 @@ export function parsePreferenceValue<Key extends PreferenceKey>(
 ): PreferenceParseResult<Key> {
   const schema: z.ZodTypeAny = preferenceDefinitions[key].schema;
   const parsed = schema.safeParse(value);
+
   if (parsed.success) {
     return { success: true, value: parsed.data as PreferenceValue<Key> };
   }
+
   return {
     success: false,
     message: parsed.error.issues.map((issue) => issue.message).join("; "),
@@ -269,10 +313,13 @@ export function parseStoredPreferenceValue<Key extends PreferenceKey>(
 
 function knownRowActions(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
+
   const known = value.flatMap((id) => {
     const parsed = threadRowActionKeySchema.safeParse(id);
+
     return parsed.success ? [parsed.data] : [];
   });
+
   return [...new Set(known)].slice(0, THREAD_ROW_ACTION_LIMIT);
 }
 
@@ -282,9 +329,17 @@ export function describePreference(key: PreferenceKey): string {
 
 export const PREFERENCES_CHANGED_CHANNEL = "preferences";
 
+export const preferenceWriteReplySchema = z
+  .object({
+    key: z.enum(PREFERENCE_KEYS as [PreferenceKey, ...PreferenceKey[]]),
+    value: z.unknown(),
+  })
+  .strict();
+
 export const preferencesChangedSignalSchema = z
   .object({
     key: z.enum(PREFERENCE_KEYS as [PreferenceKey, ...PreferenceKey[]]),
     value: z.unknown(),
+    origin: z.string().nullable(),
   })
   .strict();

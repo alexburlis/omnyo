@@ -16,12 +16,13 @@ import { describe, expect, it } from "vitest";
 import { STREAMING_MARKDOWN_FIXTURES } from "@/test/fixtures/streaming-markdown";
 import {
   repairStreamingMarkdownTail,
-  splitStreamingMarkdown,
+  createStreamingMarkdownSplitter,
 } from "@/components/thread/timeline/streaming-markdown-split";
 import {
   createMarkdownPieceCache,
   findMarkdownPieceCandidates,
   resolveMarkdownPieces,
+  resolveMarkdownPiecesUnlessHtml,
   type MarkdownPieceCache,
   type MarkdownPieceRenderConfig,
 } from "./markdown-incremental-pieces";
@@ -47,6 +48,7 @@ const registry = buildMessageDirectiveRegistry([
 const config: MarkdownPieceRenderConfig = {
   codeFenceRendererRegistry: null,
   components: {},
+  leadingRehypePlugins: [],
   messageDirectiveRegistry: registry,
   rehypePlugins: [rehypeKatex],
   remarkPlugins: [
@@ -78,6 +80,7 @@ function renderWholeDocument(
   renderConfig: MarkdownPieceRenderConfig = config,
 ): RenderedMarkdownDocument {
   const mounts: MountedMessageDirective[] = [];
+
   const element = ReactMarkdown({
     children: body,
     components: renderConfig.components,
@@ -96,7 +99,9 @@ function renderWholeDocument(
     ],
     urlTransform: renderConfig.urlTransform,
   });
+
   const children = (element.props as { children?: ReactNode }).children;
+
   return describeMarkdownChildren(
     children === undefined
       ? []
@@ -113,6 +118,7 @@ function renderPieces(
   renderConfig: MarkdownPieceRenderConfig = config,
 ): RenderedMarkdownDocument {
   const result = resolveMarkdownPieces(cache, renderConfig, body);
+
   return describeMarkdownChildren(result.children, result.mounts);
 }
 
@@ -143,15 +149,19 @@ function findMarkdownElement(
   if (Array.isArray(node)) {
     for (const child of node) {
       const found = findMarkdownElement(child, type);
+
       if (found !== null) {
         return found;
       }
     }
+
     return null;
   }
+
   if (!isValidElement<{ children?: ReactNode; node?: object }>(node)) {
     return null;
   }
+
   return node.type === type
     ? node
     : findMarkdownElement(node.props.children, type);
@@ -184,6 +194,7 @@ function expectPiecesMatchWholeDocument(
 
 function streamEveryCharacter(document: string, label: string): void {
   const cache = createMarkdownPieceCache();
+
   for (let end = 1; end <= document.length; end += 1) {
     expectPiecesMatchWholeDocument(cache, document.slice(0, end), label);
   }
@@ -191,8 +202,10 @@ function streamEveryCharacter(document: string, label: string): void {
 
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0;
+
   return () => {
     state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+
     return state / 0x1_0000_0000;
   };
 }
@@ -201,10 +214,12 @@ function chunkEnds(text: string, seed: number): number[] {
   const next = seededRandom(seed);
   const ends: number[] = [];
   let end = 0;
+
   while (end < text.length) {
     end = Math.min(text.length, end + 1 + Math.floor(next() * 96));
     ends.push(end);
   }
+
   return ends;
 }
 
@@ -339,16 +354,19 @@ describe("resolveMarkdownPieces", () => {
       "~~~\ntilde fence\n~~~\n\n",
       "Closing paragraph.\n\n",
     ];
+
     const recorded: string[] = [];
     const recordingConfig = createRecordingConfig(recorded);
     const cache = createMarkdownPieceCache();
     let body = "";
+
     for (const block of blocks) {
       body += block;
       expect(renderPieces(cache, body, recordingConfig)).toEqual(
         renderWholeDocument(body),
       );
     }
+
     expect(recorded).toEqual(blocks);
   });
 
@@ -356,6 +374,7 @@ describe("resolveMarkdownPieces", () => {
     const body = normalizeMathFences(
       `${STREAMING_MARKDOWN_FIXTURES[0]?.text ?? ""}\n\nSee [the docs] and a note[^1].\n\n[the docs]: https://example.com\n\n[^1]: The note.`,
     );
+
     const recorded: string[] = [];
     resolveMarkdownPieces(
       createMarkdownPieceCache(),
@@ -412,9 +431,11 @@ describe("resolveMarkdownPieces", () => {
 
   it("keeps the settled parse volume near the message length while fixtures stream in chunks", () => {
     for (const { name, text } of STREAMING_MARKDOWN_FIXTURES) {
+      const splitStreamingMarkdown = createStreamingMarkdownSplitter();
       const recorded: string[] = [];
       const recordingConfig = createRecordingConfig(recorded);
       const cache = createMarkdownPieceCache();
+
       for (let end = 7; end < text.length; end += 7) {
         const streamed = text.slice(0, end);
         const split = splitStreamingMarkdown(streamed);
@@ -426,6 +447,7 @@ describe("resolveMarkdownPieces", () => {
           ),
         );
       }
+
       resolveMarkdownPieces(cache, recordingConfig, normalizeMathFences(text));
       expect(parsedLength(recorded), name).toBeLessThanOrEqual(text.length * 3);
     }
@@ -436,24 +458,30 @@ describe("resolveMarkdownPieces", () => {
       ...config,
       components: { a: MarkdownLinkComponent },
     };
+
     const settled =
       'Use [docs](https://example.com).\n\n::inline-vis{file="a.html"}\n\n';
+
     const cache = createMarkdownPieceCache();
     const first = resolveMarkdownPieces(cache, linkConfig, settled);
     expect(resolveMarkdownPieces(cache, linkConfig, settled)).toBe(first);
 
     const second = resolveMarkdownPieces(cache, linkConfig, `${settled}More.`);
+
     const firstLink = findMarkdownElement(
       first.children,
       MarkdownLinkComponent,
     );
+
     const secondLink = findMarkdownElement(
       second.children,
       MarkdownLinkComponent,
     );
+
     if (firstLink === null || secondLink === null) {
       throw new Error("Expected a rendered link component");
     }
+
     expect(second.children[0]).not.toBe(first.children[0]);
     expect(secondLink).not.toBe(firstLink);
     expect(secondLink.props.node).not.toBe(firstLink.props.node);
@@ -468,10 +496,12 @@ describe("resolveMarkdownPieces", () => {
 
   it("re-renders every piece when the render configuration changes", () => {
     const body = "Intro.\n\nMiddle paragraph.\n\n";
+
     const configured: MarkdownPieceRenderConfig = {
       ...config,
       components: { p: ConfiguredParagraph },
     };
+
     const cache = createMarkdownPieceCache();
     resolveMarkdownPieces(cache, config, "Intro.\n\n");
     resolveMarkdownPieces(cache, config, body);
@@ -509,10 +539,12 @@ describe("resolveMarkdownPieces", () => {
   it("matches a single document for every prefix of seeded block sequences", () => {
     for (let seed = 1; seed <= 24; seed += 1) {
       const next = seededRandom(seed);
+
       const blocks = Array.from(
         { length: 3 + Math.floor(next() * 5) },
         () => FUZZ_BLOCKS[Math.floor(next() * FUZZ_BLOCKS.length)] ?? "",
       );
+
       streamEveryCharacter(
         blocks
           .map(
@@ -528,13 +560,16 @@ describe("resolveMarkdownPieces", () => {
   it.each(STREAMING_MARKDOWN_FIXTURES)(
     "matches single documents for every streamed chunk of the $name fixture",
     ({ name, text }) => {
+      const splitStreamingMarkdown = createStreamingMarkdownSplitter();
       const settledCache = createMarkdownPieceCache();
       const tailCache = createMarkdownPieceCache();
       const completedCache = createMarkdownPieceCache();
+
       for (const end of chunkEnds(text, name.length)) {
         const streamed = text.slice(0, end);
         const split = splitStreamingMarkdown(streamed);
         const live = repairStreamingMarkdownTail(split?.tail ?? streamed);
+
         if (split === null) {
           expectPiecesMatchWholeDocument(settledCache, live, name);
         } else {
@@ -542,9 +577,64 @@ describe("resolveMarkdownPieces", () => {
           expectPiecesMatchWholeDocument(tailCache, live, name);
         }
       }
+
       expectPiecesMatchWholeDocument(settledCache, text, name);
       expectPiecesMatchWholeDocument(completedCache, text, name);
     },
     60_000,
   );
+});
+
+describe("resolveMarkdownPieces html detection", () => {
+  it("reports html only for parsed html nodes, not for '<' in code or prose", () => {
+    const hasHtml = (body: string) =>
+      resolveMarkdownPieces(createMarkdownPieceCache(), config, body).hasHtml;
+
+    expect(
+      hasHtml(
+        "Use `Array<T>` when a < b.\n\n```ts\nconst x: Map<string, number> = new Map();\nif (a <b) {}\n```\n\nArrows <- and <= stay text.",
+      ),
+    ).toBe(false);
+    expect(hasHtml("Press <kbd>Ctrl</kbd> to copy.")).toBe(true);
+    expect(hasHtml("Intro.\n\n<details>\n\nHidden.\n\n</details>")).toBe(true);
+    expect(hasHtml("Intro.\n\n<!-- note -->")).toBe(true);
+  });
+
+  it("keeps reporting html from a settled piece while later pieces stream", () => {
+    const cache = createMarkdownPieceCache();
+    const first = "<sub>note</sub>\n\nParagraph one.\n\n";
+
+    expect(resolveMarkdownPieces(cache, config, first).hasHtml).toBe(true);
+    expect(
+      resolveMarkdownPieces(cache, config, `${first}Paragraph two.`).hasHtml,
+    ).toBe(true);
+  });
+
+  it("stops parsing pieces while a message with html keeps growing", () => {
+    const recorded: string[] = [];
+    const recordingConfig = createRecordingConfig(recorded);
+    const cache = createMarkdownPieceCache();
+    const first = "<sub>note</sub>\n\nParagraph one.";
+
+    expect(
+      resolveMarkdownPiecesUnlessHtml(cache, recordingConfig, first),
+    ).toBeNull();
+    recorded.length = 0;
+    expect(
+      resolveMarkdownPiecesUnlessHtml(
+        cache,
+        recordingConfig,
+        `${first}\n\nParagraph two.`,
+      ),
+    ).toBeNull();
+    expect(recorded).toEqual([]);
+
+    const replaced = "Use `Array<T>` instead.";
+
+    expect(
+      resolveMarkdownPiecesUnlessHtml(cache, recordingConfig, replaced)
+        ?.hasHtml,
+    ).toBe(false);
+    expect(recorded).toEqual([replaced]);
+  });
 });

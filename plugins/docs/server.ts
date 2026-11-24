@@ -8,20 +8,29 @@ import {
   PluginCliError,
   cliCommand,
   defineCli,
-  type BbPluginApi,
+  type PluginApi,
   type PluginCliContext,
   type PluginCliResult,
   type PluginRpcHandlers,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 const DEFAULT_DIR = "~/Notes";
+
 const PREVIEW_LENGTH = 100;
+
 const MAX_TREE_ENTRIES = 5_000;
+
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-const SYNC_STATE_FILE = ".bb-docs-state.json";
-const SYNC_STATE_VERSION = 1;
+
+const SYNC_STATE_FILE = ".omnyo-docs-state.json";
+
+const LEGACY_SYNC_STATE_FILE_V1 = ".bb-docs-state.json";
+
+const SYNC_STATE_VERSION = 2;
+
 const MENTION_SUMMARY_TTL_MS = 10_000;
+
 const SUMMARY_READ_CONCURRENCY = 8;
 
 class CliUsageError extends PluginCliError {
@@ -42,21 +51,21 @@ const DOCS_STATUS_DESCRIPTION = [
   "Exit 3: local and remote changes conflict.",
   "Exit 4: changes present.",
   "",
-  "Exit 4 is a successful status result. Review the output, then run bb docs push separately.",
+  "Exit 4 is a successful status result. Review the output, then run omnyo docs push separately.",
 ].join("\n");
 
 const DEPRECATED_MUTATION_WARNING =
-  "Deprecated: direct Docs mutations will be removed; use bb docs pull, edit local files, then bb docs push.";
+  "Deprecated: direct Docs mutations will be removed; use omnyo docs pull, edit local files, then omnyo docs push.";
 
 const DEPRECATED_DELETION_WARNING =
-  "Deprecated: direct Docs mutations will be removed; use bb docs pull, edit local files, then bb docs push --delete.";
+  "Deprecated: direct Docs mutations will be removed; use omnyo docs pull, edit local files, then omnyo docs push --delete.";
 
 const VAULT_OPTION = {
   type: "string",
   placeholder: "id",
   aliases: ["vault-id", "vaultId"],
   description:
-    "Vault ID from `bb docs vaults`; defaults to the first configured vault",
+    "Vault ID from `omnyo docs vaults`; defaults to the first configured vault",
 } as const;
 
 const WORKSPACE_HOST_OPTION = {
@@ -104,6 +113,7 @@ type WatchVault = (rootPath: string, onChange: () => void) => VaultWatcher;
 
 const watchNativeVault: WatchVault = (rootPath, onChange) => {
   const watcher = watch(rootPath, { recursive: true }, onChange);
+
   return {
     close: () => watcher.close(),
     on: (event, listener) => {
@@ -131,6 +141,7 @@ interface ResolvedOpenerFile {
 }
 
 const vaultIdSchema = z.string().min(1).optional();
+
 const vaultSchema = z
   .object({
     id: z.string().min(1),
@@ -139,6 +150,7 @@ const vaultSchema = z
     rootPath: z.string().min(1),
   })
   .strict();
+
 const vaultPathSchema = z.string().transform((value, context) => {
   try {
     return requireVaultPath(value);
@@ -147,12 +159,15 @@ const vaultPathSchema = z.string().transform((value, context) => {
       code: "custom",
       message: errorMessage(error),
     });
+
     return z.NEVER;
   }
 });
+
 const vaultDirectorySchema = z
   .union([z.literal(""), vaultPathSchema])
   .optional();
+
 const openerSourceSchema = z
   .object({
     kind: z.enum(["workspace", "host", "thread-storage"]),
@@ -162,6 +177,7 @@ const openerSourceSchema = z
     experimental_hostId: z.string().min(1).optional(),
   })
   .strict();
+
 const fileReadSchema = z
   .object({
     path: z.string(),
@@ -173,6 +189,7 @@ const fileReadSchema = z
     sha256: z.string(),
   })
   .strict();
+
 const fileWriteSchema = z.discriminatedUnion("outcome", [
   z
     .object({
@@ -188,12 +205,14 @@ const fileWriteSchema = z.discriminatedUnion("outcome", [
     })
     .strict(),
 ]);
+
 const previewSchema = z
   .object({
     baseUrl: z.string().min(1),
     expiresAtMs: z.number().nonnegative(),
   })
   .strict();
+
 const hostSchema = z
   .object({
     id: z.string().min(1),
@@ -206,13 +225,17 @@ const hostSchema = z
     updatedAt: z.number(),
   })
   .strip();
+
 const pathResultSchema = z.object({ path: z.string().min(1) }).strict();
+
 const okResultSchema = z.object({ ok: z.literal(true) }).strict();
+
 const syncScopeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("all") }).strict(),
   z.object({ kind: z.literal("file"), path: vaultPathSchema }).strict(),
   z.object({ kind: z.literal("folder"), path: vaultPathSchema }).strict(),
 ]);
+
 const syncStateEntrySchema = z
   .object({
     remotePath: vaultPathSchema,
@@ -224,6 +247,7 @@ const syncStateEntrySchema = z
     modifiedAtMs: z.number().nonnegative().nullable(),
   })
   .strict();
+
 const syncStateSchema = z
   .object({
     schemaVersion: z.literal(SYNC_STATE_VERSION),
@@ -234,11 +258,26 @@ const syncStateSchema = z
     pulledAt: z.iso.datetime(),
     entries: z.array(syncStateEntrySchema).max(MAX_TREE_ENTRIES),
     directories: z.array(vaultPathSchema).max(MAX_TREE_ENTRIES),
+    legacyImport: z
+      .object({
+        formatVersion: z.literal(1),
+        sourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
+
+const legacySyncStateSchemaV1 = syncStateSchema
+  .omit({ legacyImport: true })
+  .extend({
+    schemaVersion: z.literal(1),
+  });
+
 const syncSnapshotEntrySchema = syncStateEntrySchema.extend({
   content: z.string(),
 });
+
 const syncWriteSchema = z
   .object({
     path: vaultPathSchema,
@@ -247,15 +286,21 @@ const syncWriteSchema = z
     expectedSha256: z.string().nullable(),
   })
   .strict();
+
 const syncDeleteSchema = z
   .object({ path: vaultPathSchema, expectedSha256: z.string().min(1) })
   .strict();
 
 type Vault = z.infer<typeof vaultSchema>;
+
 type SyncScope = z.infer<typeof syncScopeSchema>;
+
 type SyncStateEntry = z.infer<typeof syncStateEntrySchema>;
+
 type SyncState = z.infer<typeof syncStateSchema>;
+
 type SyncFile = z.infer<typeof syncSnapshotEntrySchema>;
+
 type OpenerSource = z.infer<typeof openerSourceSchema>;
 
 export const docsRpcContract = defineRpcContract({
@@ -504,6 +549,7 @@ function errorMessage(error: unknown): string {
 
 function requireRecord(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) throw new Error("Expected an object");
+
   return value;
 }
 
@@ -511,6 +557,7 @@ function requireString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`"${field}" must be a non-empty string`);
   }
+
   return value.trim();
 }
 
@@ -520,8 +567,10 @@ function optionalString(value: unknown): string | undefined {
 
 function expandHome(rawPath: string): string {
   if (rawPath === "~") return os.homedir();
+
   if (rawPath.startsWith("~/"))
     return path.join(os.homedir(), rawPath.slice(2));
+
   return rawPath;
 }
 
@@ -530,10 +579,13 @@ function requireVaultPath(
   options?: { extension?: string },
 ): string {
   const raw = requireString(value, "path").replace(/\\/g, "/");
+
   if (raw.startsWith("/") || /^[a-zA-Z]:\//.test(raw) || raw.includes("\0")) {
     throw new Error(`Invalid vault path: ${raw}`);
   }
+
   const segments = raw.split("/");
+
   if (
     segments.some(
       (segment) =>
@@ -545,23 +597,28 @@ function requireVaultPath(
   ) {
     throw new Error(`Invalid vault path: ${raw}`);
   }
+
   const normalized = path.posix.normalize(raw);
+
   if (
     options?.extension &&
     !normalized.toLowerCase().endsWith(options.extension)
   ) {
     throw new Error(`Path must end with ${options.extension}: ${normalized}`);
   }
+
   return normalized;
 }
 
 function requireOptionalDirectory(value: unknown): string {
   if (value === undefined || value === null || value === "") return "";
+
   return requireVaultPath(value);
 }
 
 function requireThreadStoragePath(value: unknown): string {
   const raw = requireString(value, "path").replace(/\\/g, "/");
+
   if (
     path.posix.isAbsolute(raw) ||
     path.win32.isAbsolute(raw) ||
@@ -570,11 +627,13 @@ function requireThreadStoragePath(value: unknown): string {
   ) {
     throw new Error(`Invalid thread-storage path: ${raw}`);
   }
+
   return path.posix.normalize(raw);
 }
 
 function absolutePath(vault: Vault, relativePath: string): string {
   const parts = relativePath.split("/");
+
   return /^[a-zA-Z]:[\\/]/.test(vault.rootPath) ||
     vault.rootPath.startsWith("\\\\")
     ? path.win32.join(vault.rootPath, ...parts)
@@ -601,7 +660,7 @@ function hostArgs(vault: Vault): { hostId?: string } {
 
 function syncEntryFromFile(
   relativePath: string,
-  file: Awaited<ReturnType<BbPluginApi["sdk"]["files"]["read"]>>,
+  file: Awaited<ReturnType<PluginApi["sdk"]["files"]["read"]>>,
 ): SyncStateEntry {
   return {
     remotePath: relativePath,
@@ -625,6 +684,7 @@ function cleanLine(line: string): string {
 
 function markdownHeadingLevel(line: string): number | null {
   const match = line.match(/^\s{0,3}(#{1,6})(?:[\t ]+|$)/);
+
   return match ? match[1]!.length : null;
 }
 
@@ -635,31 +695,38 @@ function summarizeMarkdown(
   const document = parseMarkdownDocument(content);
   const lines = document.body.split("\n");
   const cleanedLines = lines.map(cleanLine);
+
   const firstContentIndex = cleanedLines.findIndex(
     (line) => line && !line.startsWith("::html{"),
   );
+
   const documentHeadingIndex = document.frontmatter
     ? lines.findIndex((line) => markdownHeadingLevel(line) === 1)
     : -1;
+
   const titleLineIndex = document.title
     ? -1
     : documentHeadingIndex >= 0
       ? documentHeadingIndex
       : firstContentIndex;
+
   const title = (
     document.title ??
     (titleLineIndex >= 0 ? cleanedLines[titleLineIndex] : null) ??
     fallback
   ).slice(0, 120);
+
   const firstHeadingIndex = lines.findIndex(
     (line) => markdownHeadingLevel(line) !== null,
   );
+
   const previewHeadingIndex =
     titleLineIndex >= 0
       ? titleLineIndex
       : firstHeadingIndex >= 0 && cleanedLines[firstHeadingIndex] === title
         ? firstHeadingIndex
         : -1;
+
   const preview = cleanedLines
     .filter(
       (line, index) =>
@@ -670,6 +737,7 @@ function summarizeMarkdown(
     )
     .join(" ")
     .slice(0, PREVIEW_LENGTH);
+
   return { title, preview };
 }
 
@@ -697,6 +765,7 @@ function sanitizeName(raw: string): string {
 
 function parseVaultRow(value: unknown): Vault {
   const row = requireRecord(value);
+
   return {
     id: requireString(row.id, "id"),
     name: requireString(row.name, "name"),
@@ -707,23 +776,25 @@ function parseVaultRow(value: unknown): Vault {
 
 function waitForDelay(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
+
   return new Promise((resolve) => {
     const finish = () => {
       clearTimeout(timer);
       signal.removeEventListener("abort", finish);
       resolve();
     };
+
     const timer = setTimeout(finish, ms);
     signal.addEventListener("abort", finish, { once: true });
   });
 }
 
 export default async function plugin(
-  bb: BbPluginApi,
+  api: PluginApi,
   watchVault: WatchVault = watchNativeVault,
 ) {
-  const db = bb.storage.database();
-  bb.storage.migrate(db, [
+  const db = api.storage.database();
+  api.storage.migrate(db, [
     `CREATE TABLE IF NOT EXISTS vaults (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -747,6 +818,7 @@ export default async function plugin(
   ]);
 
   let seededDefaultVault = false;
+
   if (
     Number(db.prepare("SELECT COUNT(*) AS count FROM vaults").pluck().get()) ===
     0
@@ -769,13 +841,16 @@ export default async function plugin(
 
   function getVault(vaultId?: string): Vault {
     const vaults = listVaults();
+
     const vault = vaultId
       ? vaults.find((candidate) => candidate.id === vaultId)
       : vaults[0];
+
     if (!vault)
       throw new Error(
         vaultId ? `Unknown vault: ${vaultId}` : "No vault configured",
       );
+
     return vault;
   }
 
@@ -790,15 +865,16 @@ export default async function plugin(
 
   if (seededDefaultVault) {
     const vault = getVault("personal");
+
     try {
-      await bb.sdk.files.mkdir({ path: vault.rootPath, recursive: true });
+      await api.sdk.files.mkdir({ path: vault.rootPath, recursive: true });
     } catch (error) {
-      bb.log.warn(`could not create default vault: ${errorMessage(error)}`);
+      api.log.warn(`could not create default vault: ${errorMessage(error)}`);
     }
   }
 
   function listVaultPaths(vault: Vault, signal?: AbortSignal) {
-    return bb.sdk.files.listPaths({
+    return api.sdk.files.listPaths({
       ...hostArgs(vault),
       path: vault.rootPath,
       includeFiles: true,
@@ -814,6 +890,7 @@ export default async function plugin(
     signal?: AbortSignal,
   ): Promise<{ entries: VaultEntry[]; truncated: boolean }> {
     const result = await listVaultPaths(vault, signal);
+
     return {
       entries: result.paths
         .filter(
@@ -834,9 +911,11 @@ export default async function plugin(
     signal?: AbortSignal,
   ): Promise<NoteSummary[]> {
     const entries = knownEntries ?? (await listEntries(vault, signal)).entries;
+
     const markdownPaths = entries
       .filter((entry) => entry.kind === "file" && /\.md$/i.test(entry.path))
       .map((entry) => entry.path);
+
     const notes: Array<NoteSummary | null> = markdownPaths.map(() => null);
     let nextIndex = 0;
     await Promise.all(
@@ -847,16 +926,19 @@ export default async function plugin(
             signal?.throwIfAborted();
             const index = nextIndex++;
             const notePath = markdownPaths[index]!;
+
             try {
-              const file = await bb.sdk.files.read({
+              const file = await api.sdk.files.read({
                 ...hostArgs(vault),
                 path: absolutePath(vault, notePath),
                 rootPath: vault.rootPath,
                 ...(signal ? { signal } : {}),
               });
+
               const fallback = path.posix
                 .basename(notePath)
                 .replace(/\.md$/i, "");
+
               const summary = summarizeMarkdown(file.content, fallback);
               notes[index] = {
                 path: notePath,
@@ -870,6 +952,7 @@ export default async function plugin(
       ),
     );
     signal?.throwIfAborted();
+
     return notes
       .filter((note): note is NoteSummary => note !== null)
       .sort((a, b) => b.modifiedAtMs - a.modifiedAtMs);
@@ -884,14 +967,16 @@ export default async function plugin(
       notes: Promise<NoteSummary[]>;
     }
   >();
+
   const mentionLifetime = new AbortController();
-  bb.onDispose(() => {
+  api.onDispose(() => {
     mentionLifetime.abort();
     mentionSummaries.clear();
   });
 
   function mentionNoteSummaries(vault: Vault): Promise<NoteSummary[]> {
     const cached = mentionSummaries.get(vault.id);
+
     if (
       cached &&
       cached.rootPath === vault.rootPath &&
@@ -900,6 +985,7 @@ export default async function plugin(
     ) {
       return cached.notes;
     }
+
     const entry = {
       rootPath: vault.rootPath,
       hostId: vault.hostId,
@@ -913,30 +999,37 @@ export default async function plugin(
         ]),
       ),
     };
+
     entry.notes = entry.notes.then(
       (notes) => {
         entry.expiresAt = Date.now() + MENTION_SUMMARY_TTL_MS;
+
         return notes;
       },
       (error: unknown) => {
         if (mentionSummaries.get(vault.id) === entry) {
           mentionSummaries.delete(vault.id);
         }
+
         throw error;
       },
     );
     mentionSummaries.set(vault.id, entry);
+
     return entry.notes;
   }
 
   async function notebookData(vaultId?: string) {
     const vault = getVault(vaultId);
+
     try {
       const [{ entries, truncated }, hosts] = await Promise.all([
         listEntries(vault),
-        bb.sdk.hosts.list(),
+        api.sdk.hosts.list(),
       ]);
+
       const notes = await listNoteSummaries(vault, entries);
+
       return {
         vaults: listVaults(),
         vault,
@@ -951,7 +1044,7 @@ export default async function plugin(
       return {
         vaults: listVaults(),
         vault,
-        hosts: await bb.sdk.hosts.list().catch(() => []),
+        hosts: await api.sdk.hosts.list().catch(() => []),
         entries: [],
         entryOrder: listEntryOrder(vault.id),
         notes: [],
@@ -964,11 +1057,13 @@ export default async function plugin(
   async function readFile(vaultId: string | undefined, rawPath: unknown) {
     const vault = getVault(vaultId);
     const relativePath = requireVaultPath(rawPath);
-    const file = await bb.sdk.files.read({
+
+    const file = await api.sdk.files.read({
       ...hostArgs(vault),
       path: absolutePath(vault, relativePath),
       rootPath: vault.rootPath,
     });
+
     return { ...file, path: relativePath };
   }
 
@@ -983,9 +1078,11 @@ export default async function plugin(
   }) {
     const vault = getVault(args.vaultId);
     const relativePath = requireVaultPath(args.rawPath);
+
     if (typeof args.content !== "string")
       throw new Error('"content" must be a string');
-    const result = await bb.sdk.files.write({
+
+    const result = await api.sdk.files.write({
       ...hostArgs(vault),
       path: absolutePath(vault, relativePath),
       rootPath: vault.rootPath,
@@ -999,14 +1096,16 @@ export default async function plugin(
           ? { expectedSha256: args.expectedSha256 }
           : {}),
     });
+
     if (result.outcome === "written") {
       mentionSummaries.delete(vault.id);
-      bb.realtime.publish("vault-changed", {
+      api.realtime.publish("vault-changed", {
         vaultId: vault.id,
         path: relativePath,
         ...(args.proposalOnly ? { proposalOnly: true } : {}),
       });
     }
+
     return result;
   }
 
@@ -1018,13 +1117,17 @@ export default async function plugin(
   ): Promise<T> {
     const key = vaultId;
     const previous = vaultOperations.get(key) ?? Promise.resolve();
+
     const current = previous
       .catch(() => undefined)
       .then(() => {
         getVault(vaultId);
+
         return work();
       });
+
     vaultOperations.set(key, current);
+
     try {
       return await current;
     } finally {
@@ -1039,8 +1142,10 @@ export default async function plugin(
     const row = db
       .prepare("SELECT data FROM proposals WHERE vault_id = ? AND path = ?")
       .get(vaultId, relativePath);
+
     if (!row) return null;
     const data = z.object({ data: z.string() }).parse(row);
+
     return proposalSchema.parse(JSON.parse(data.data));
   }
 
@@ -1048,16 +1153,17 @@ export default async function plugin(
     db.prepare(
       "INSERT INTO proposals (vault_id, path, data) VALUES (?, ?, ?) ON CONFLICT(vault_id, path) DO UPDATE SET data = excluded.data",
     ).run(proposal.vaultId, proposal.path, JSON.stringify(proposal));
-    bb.realtime.publish("vault-changed", {
+    api.realtime.publish("vault-changed", {
       vaultId: proposal.vaultId,
       path: proposal.path,
       proposalOnly: true,
     });
-    bb.realtime.publish("proposal-changed", {
+    api.realtime.publish("proposal-changed", {
       vaultId: proposal.vaultId,
       path: proposal.path,
       version: proposal.version,
     });
+
     return proposal;
   }
 
@@ -1067,9 +1173,11 @@ export default async function plugin(
     expectedVersion: number,
   ): Proposal {
     const proposal = readProposal(vaultId, relativePath);
+
     if (!proposal || proposal.version !== expectedVersion) {
       throw new Error("The proposal changed. Read it again before continuing.");
     }
+
     return proposal;
   }
 
@@ -1078,47 +1186,60 @@ export default async function plugin(
     pathValue: unknown,
   ): Promise<ResolvedOpenerFile> {
     const filePath = requireString(pathValue, "path");
+
     if (source.kind === "host") {
       if (!isAbsoluteHostPath(filePath)) {
         throw new Error("Host file paths must be absolute");
       }
+
       const normalized = normalizeHostRoot(filePath);
+
       const pathApi = path.win32.isAbsolute(normalized)
         ? path.win32
         : path.posix;
+
       return {
         path: normalized,
         rootPath: pathApi.dirname(normalized),
         hostId: source.experimental_hostId ?? null,
       };
     }
+
     if (source.kind === "workspace" && source.environmentId) {
-      const environment = await bb.sdk.environments.get({
+      const environment = await api.sdk.environments.get({
         environmentId: source.environmentId,
       });
+
       if (!environment.path) {
         throw new Error("This environment has no workspace path");
       }
+
       return {
         path: path.join(environment.path, filePath),
         rootPath: environment.path,
         hostId: environment.hostId,
       };
     }
+
     if (source.kind === "workspace" && source.projectId) {
       const hostId =
         source.experimental_hostId ??
-        (await bb.sdk.system.config()).primaryHostId;
+        (await api.sdk.system.config()).primaryHostId;
+
       if (!hostId) {
-        throw new Error("This bb has no server machine yet");
+        throw new Error("This Omnyo has no server machine yet");
       }
-      const project = await bb.sdk.projects.get({
+
+      const project = await api.sdk.projects.get({
         projectId: source.projectId,
       });
+
       const matchingSources = project.sources.filter(
         (projectSource) => projectSource.hostId === hostId,
       );
+
       const [projectSource] = matchingSources;
+
       if (!projectSource) {
         throw new Error(
           source.experimental_hostId
@@ -1126,37 +1247,48 @@ export default async function plugin(
             : "This project has no workspace on the server machine",
         );
       }
+
       if (matchingSources.length > 1) {
         throw new Error("This project has multiple workspaces on that host");
       }
+
       const rootPath = normalizeHostRoot(projectSource.path);
+
       if (!isAbsoluteHostPath(rootPath)) {
         throw new Error("This project has no absolute workspace path");
       }
+
       return {
         path: hostPathApi(rootPath).join(rootPath, ...filePath.split("/")),
         rootPath,
         hostId,
       };
     }
+
     if (source.kind === "thread-storage") {
       if (!source.threadId) {
         throw new Error("Thread-storage files require a thread ID");
       }
+
       const relativePath = requireThreadStoragePath(filePath);
-      const storage = await bb.sdk.threads.storageLocation({
+
+      const storage = await api.sdk.threads.storageLocation({
         threadId: source.threadId,
       });
+
       if (!isAbsoluteHostPath(storage.storageRootPath)) {
         throw new Error("This thread has no absolute storage path");
       }
+
       const rootPath = normalizeHostRoot(storage.storageRootPath);
+
       return {
         path: hostPathApi(rootPath).join(rootPath, ...relativePath.split("/")),
         rootPath,
         hostId: storage.hostId,
       };
     }
+
     throw new Error(
       "Docs can open workspace, host, and thread-storage files only",
     );
@@ -1168,25 +1300,30 @@ export default async function plugin(
   ) {
     const vault = getVault(vaultId);
     const parent = requireOptionalDirectory(input.parent);
+
     const base =
       sanitizeName(typeof input.name === "string" ? input.name : "") ||
       "Untitled";
+
     const { entries } = await listEntries(vault);
     const existing = new Set(entries.map((entry) => entry.path.toLowerCase()));
     let relativePath = parent ? `${parent}/${base}.md` : `${base}.md`;
     let counter = 2;
+
     while (existing.has(relativePath.toLowerCase())) {
       relativePath = parent
         ? `${parent}/${base} ${counter}.md`
         : `${base} ${counter}.md`;
       counter += 1;
     }
+
     await writeFile({
       vaultId: vault.id,
       rawPath: relativePath,
       content: typeof input.content === "string" ? input.content : "",
       createOnly: true,
     });
+
     return { path: relativePath };
   }
 
@@ -1198,8 +1335,9 @@ export default async function plugin(
     const vault = getVault(vaultId);
     const from = requireVaultPath(fromValue);
     const to = requireVaultPath(toValue);
+
     return serializeVault(vault.id, async () => {
-      await bb.sdk.files.move({
+      await api.sdk.files.move({
         ...hostArgs(vault),
         sourcePath: absolutePath(vault, from),
         destinationPath: absolutePath(vault, to),
@@ -1211,11 +1349,14 @@ export default async function plugin(
             "SELECT data FROM proposals WHERE vault_id = ? AND (path = ? OR substr(path, 1, length(?)) = ?)",
           )
           .all(vault.id, from, `${from}/`, `${from}/`);
+
         deleteProposals(vault.id, from);
         deleteProposals(vault.id, to);
+
         const insert = db.prepare(
           "INSERT INTO proposals (vault_id, path, data) VALUES (?, ?, ?)",
         );
+
         for (const row of rows) {
           const { data } = z.object({ data: z.string() }).parse(row);
           const proposal = proposalSchema.parse(JSON.parse(data));
@@ -1224,7 +1365,8 @@ export default async function plugin(
         }
       })();
       mentionSummaries.delete(vault.id);
-      bb.realtime.publish("vault-changed", { vaultId: vault.id });
+      api.realtime.publish("vault-changed", { vaultId: vault.id });
+
       return { path: to };
     });
   }
@@ -1242,8 +1384,9 @@ export default async function plugin(
   ): Promise<{ ok: true }> {
     const vault = getVault(vaultId);
     const relativePath = requireVaultPath(rawPath);
+
     return serializeVault(vault.id, async () => {
-      await bb.sdk.files.remove({
+      await api.sdk.files.remove({
         ...hostArgs(vault),
         path: absolutePath(vault, relativePath),
         rootPath: vault.rootPath,
@@ -1251,14 +1394,17 @@ export default async function plugin(
       });
       deleteProposals(vault.id, relativePath);
       mentionSummaries.delete(vault.id);
-      bb.realtime.publish("vault-changed", { vaultId: vault.id });
+      api.realtime.publish("vault-changed", { vaultId: vault.id });
+
       return { ok: true };
     });
   }
 
   function scopeContains(scope: SyncScope, relativePath: string): boolean {
     if (scope.kind === "all") return true;
+
     if (scope.kind === "file") return relativePath === scope.path;
+
     return (
       relativePath === scope.path || relativePath.startsWith(`${scope.path}/`)
     );
@@ -1266,15 +1412,16 @@ export default async function plugin(
 
   function isMissingFileError(error: unknown): boolean {
     const message = errorMessage(error);
+
     return /\bENOENT\b|path does not exist|not found/i.test(message);
   }
 
   async function readExistingFile(
     vault: Vault,
     relativePath: string,
-  ): Promise<Awaited<ReturnType<typeof bb.sdk.files.read>> | null> {
+  ): Promise<Awaited<ReturnType<typeof api.sdk.files.read>> | null> {
     try {
-      return await bb.sdk.files.read({
+      return await api.sdk.files.read({
         ...hostArgs(vault),
         path: absolutePath(vault, relativePath),
         rootPath: vault.rootPath,
@@ -1287,12 +1434,15 @@ export default async function plugin(
 
   async function syncSnapshot(vaultId: string | undefined, scope: SyncScope) {
     const vault = getVault(vaultId);
+
     const normalizedScope: SyncScope =
       scope.kind === "all"
         ? scope
         : { kind: scope.kind, path: requireVaultPath(scope.path) };
+
     const files: SyncFile[] = [];
     const directories: string[] = [];
+
     if (normalizedScope.kind === "file") {
       const file = await readFile(vault.id, normalizedScope.path);
       files.push({
@@ -1301,11 +1451,13 @@ export default async function plugin(
       });
     } else {
       const result = await listVaultPaths(vault);
+
       if (result.truncated) {
         throw new Error(
           `Sync scope exceeds ${MAX_TREE_ENTRIES} entries; narrow the folder scope`,
         );
       }
+
       const accessible = result.paths
         .map((entry) => ({
           kind: entry.kind,
@@ -1314,12 +1466,14 @@ export default async function plugin(
         .filter((entry) => {
           try {
             requireVaultPath(entry.path);
+
             return scopeContains(normalizedScope, entry.path);
           } catch {
             return false;
           }
         })
         .sort((left, right) => left.path.localeCompare(right.path));
+
       if (
         normalizedScope.kind === "folder" &&
         !accessible.some(
@@ -1330,11 +1484,13 @@ export default async function plugin(
       ) {
         throw new Error(`Folder does not exist: ${normalizedScope.path}`);
       }
+
       for (const entry of accessible) {
         if (entry.kind === "directory") {
           directories.push(entry.path);
           continue;
         }
+
         const file = await readFile(vault.id, entry.path);
         files.push({
           ...syncEntryFromFile(entry.path, file),
@@ -1342,19 +1498,24 @@ export default async function plugin(
         });
       }
     }
+
     const folded = new Map<string, string>();
+
     for (const entry of [
       ...directories,
       ...files.map((file) => file.localPath),
     ]) {
       const collision = folded.get(entry.toLowerCase());
+
       if (collision && collision !== entry) {
         throw new Error(
           `Vault paths ${JSON.stringify(collision)} and ${JSON.stringify(entry)} collide on case-insensitive filesystems`,
         );
       }
+
       folded.set(entry.toLowerCase(), entry);
     }
+
     return { vault, scope: normalizedScope, files, directories };
   }
 
@@ -1372,43 +1533,56 @@ export default async function plugin(
     dryRun: boolean;
   }) {
     const vault = getVault(input.vaultId);
+
     const writes = input.writes.map((write) => ({
       ...write,
       path: requireVaultPath(write.path),
     }));
+
     const deletes = input.deletes.map((deletion) => ({
       ...deletion,
       path: requireVaultPath(deletion.path),
     }));
+
     const directories = input.directories.map((directory) =>
       requireVaultPath(directory),
     );
+
     const deleteDirectories = input.deleteDirectories.map((directory) =>
       requireVaultPath(directory),
     );
+
     type SyncTreeEntry = {
       path: string;
       kind: "directory" | "file";
       operation: string;
     };
+
     const assertValidTree = (entries: SyncTreeEntry[], label: string): void => {
       const folded = new Map<string, SyncTreeEntry>();
       const files = new Set<string>();
+
       for (const entry of entries) {
         const key = entry.path.toLowerCase();
         const existing = folded.get(key);
+
         if (existing) {
           throw new Error(
             `${label} paths ${JSON.stringify(existing.path)} (${existing.operation}) and ${JSON.stringify(entry.path)} (${entry.operation}) collide`,
           );
         }
+
         folded.set(key, entry);
+
         if (entry.kind === "file") files.add(key);
       }
+
       for (const entry of entries) {
         const parts = entry.path.toLowerCase().split("/");
+
         for (let index = 1; index < parts.length; index += 1) {
           const ancestor = parts.slice(0, index).join("/");
+
           if (files.has(ancestor)) {
             throw new Error(
               `${label} path ${JSON.stringify(entry.path)} is nested beneath a file`,
@@ -1417,6 +1591,7 @@ export default async function plugin(
         }
       }
     };
+
     assertValidTree(
       [
         ...writes.map((write) => ({
@@ -1443,11 +1618,13 @@ export default async function plugin(
       "Sync request",
     );
     const currentListing = await listVaultPaths(vault);
+
     if (currentListing.truncated) {
       throw new Error(
         `Vault exceeds ${MAX_TREE_ENTRIES} entries; narrow the sync scope`,
       );
     }
+
     const currentEntries: SyncTreeEntry[] = currentListing.paths.map(
       (entry) => ({
         path: requireVaultPath(entry.path.replace(/\\/g, "/")),
@@ -1455,13 +1632,17 @@ export default async function plugin(
         operation: "existing vault entry",
       }),
     );
+
     assertValidTree(currentEntries, "Vault");
+
     const currentByPath = new Map(
       currentEntries.map((entry) => [entry.path, entry]),
     );
+
     const fileDeletes = new Set(deletes.map((deletion) => deletion.path));
     const directoryDeletes = new Set(deleteDirectories);
     const writePaths = new Set(writes.map((write) => write.path));
+
     for (const directory of deleteDirectories) {
       if (
         writes.some((write) => write.path.startsWith(`${directory}/`)) ||
@@ -1474,24 +1655,29 @@ export default async function plugin(
           `Sync request both deletes ${JSON.stringify(directory)} and creates content beneath it`,
         );
       }
+
       const remainingChild = currentEntries.find(
         (entry) =>
           entry.path.startsWith(`${directory}/`) &&
           !fileDeletes.has(entry.path) &&
           !directoryDeletes.has(entry.path),
       );
+
       if (remainingChild) {
         throw new Error(
           `Directory ${JSON.stringify(directory)} is not empty; ${JSON.stringify(remainingChild.path)} is not scheduled for deletion`,
         );
       }
     }
+
     const futureEntries = currentEntries.filter((entry) => {
       if (entry.kind === "file") {
         return !fileDeletes.has(entry.path) && !writePaths.has(entry.path);
       }
+
       return !directoryDeletes.has(entry.path);
     });
+
     for (const directory of directories) {
       if (currentByPath.get(directory)?.kind !== "directory") {
         futureEntries.push({
@@ -1501,6 +1687,7 @@ export default async function plugin(
         });
       }
     }
+
     for (const write of writes) {
       futureEntries.push({
         path: write.path,
@@ -1508,14 +1695,18 @@ export default async function plugin(
         operation: "write",
       });
     }
+
     assertValidTree(futureEntries, "Resulting vault");
+
     const conflicts: Array<{
       path: string;
       expectedSha256: string | null;
       currentSha256: string | null;
     }> = [];
+
     for (const mutation of [...writes, ...deletes]) {
       const current = await readExistingFile(vault, mutation.path);
+
       if ((current?.sha256 ?? null) !== mutation.expectedSha256) {
         conflicts.push({
           path: mutation.path,
@@ -1524,6 +1715,7 @@ export default async function plugin(
         });
       }
     }
+
     if (conflicts.length > 0) {
       return {
         outcome: "conflict" as const,
@@ -1535,6 +1727,7 @@ export default async function plugin(
         errors: [],
       };
     }
+
     if (input.dryRun) {
       return {
         outcome: "applied" as const,
@@ -1546,15 +1739,18 @@ export default async function plugin(
         errors: [],
       };
     }
+
     const written: SyncStateEntry[] = [];
     const deleted: string[] = [];
     const createdDirectories: string[] = [];
     const deletedDirectories: string[] = [];
     const errors: Array<{ path: string; message: string }> = [];
+
     for (const directory of [...directories].sort()) {
       if (currentByPath.get(directory)?.kind === "directory") continue;
+
       try {
-        await bb.sdk.files.mkdir({
+        await api.sdk.files.mkdir({
           ...hostArgs(vault),
           path: absolutePath(vault, directory),
           rootPath: vault.rootPath,
@@ -1568,6 +1764,7 @@ export default async function plugin(
         });
       }
     }
+
     for (const write of writes) {
       try {
         const result = await writeFile({
@@ -1578,6 +1775,7 @@ export default async function plugin(
           expectedSha256: write.expectedSha256,
           createOnly: write.expectedSha256 === null,
         });
+
         if (result.outcome === "conflict") {
           conflicts.push({
             path: write.path,
@@ -1586,6 +1784,7 @@ export default async function plugin(
           });
           continue;
         }
+
         const refreshed = await readFile(vault.id, write.path);
         written.push(syncEntryFromFile(write.path, refreshed));
       } catch (error) {
@@ -1595,9 +1794,11 @@ export default async function plugin(
         });
       }
     }
+
     for (const deletion of deletes) {
       try {
         const current = await readExistingFile(vault, deletion.path);
+
         if (current?.sha256 !== deletion.expectedSha256) {
           conflicts.push({
             path: deletion.path,
@@ -1606,6 +1807,7 @@ export default async function plugin(
           });
           continue;
         }
+
         await removePath(vault.id, deletion.path, false);
         deleted.push(deletion.path);
       } catch (error) {
@@ -1615,6 +1817,7 @@ export default async function plugin(
         });
       }
     }
+
     for (const directory of [...deleteDirectories].sort(
       (left, right) =>
         right.split("/").length - left.split("/").length ||
@@ -1631,11 +1834,13 @@ export default async function plugin(
         });
       }
     }
+
     const appliedCount =
       written.length +
       deleted.length +
       createdDirectories.length +
       deletedDirectories.length;
+
     return {
       outcome:
         errors.length > 0 || (conflicts.length > 0 && appliedCount > 0)
@@ -1658,14 +1863,18 @@ export default async function plugin(
     },
     async proposeNote(input) {
       const vaultId = getVault(input.vaultId).id;
+
       return serializeVault(vaultId, async () => {
         const previous = readProposal(vaultId, input.path);
+
         if ((previous?.version ?? null) !== input.expectedVersion) {
           throw new Error(
             "The proposal changed. Read it again before proposing changes.",
           );
         }
+
         const file = await readFile(vaultId, input.path);
+
         if (
           file.contentEncoding !== "utf8" ||
           file.sha256 !== input.expectedSha256
@@ -1674,6 +1883,7 @@ export default async function plugin(
             "The document changed. Read it again before proposing changes.",
           );
         }
+
         return saveProposal({
           vaultId,
           path: input.path,
@@ -1688,14 +1898,17 @@ export default async function plugin(
     },
     async updateProposal(input) {
       const vaultId = getVault(input.vaultId).id;
+
       return serializeVault(vaultId, async () => {
         const proposal = requireProposal(
           vaultId,
           input.path,
           input.expectedVersion,
         );
+
         if (proposal.status !== "pending")
           throw new Error("This proposal is no longer pending.");
+
         return saveProposal({
           ...proposal,
           content: input.content,
@@ -1705,12 +1918,14 @@ export default async function plugin(
     },
     async resolveProposal(input) {
       const vaultId = getVault(input.vaultId).id;
+
       return serializeVault(vaultId, async () => {
         const proposal = requireProposal(
           vaultId,
           input.path,
           input.expectedVersion,
         );
+
         const status = (
           {
             accept: proposal.status === "pending" ? "accepted" : null,
@@ -1724,6 +1939,7 @@ export default async function plugin(
             redo: proposal.status === "undone" ? "pending" : null,
           } as const
         )[input.action];
+
         if (!status)
           throw new Error(
             input.action === "undo"
@@ -1734,14 +1950,18 @@ export default async function plugin(
           );
         const next = { ...proposal, status, version: proposal.version + 1 };
         const restoring = status === "undone";
+
         const conflictMessage = restoring
           ? "The document changed. Undo would overwrite newer edits."
           : "The document changed. Ask for an updated proposal.";
+
         if (status === "accepted" || restoring) {
           const expectedSha256 = restoring
             ? proposal.resolvedSha256
             : proposal.baseSha256;
+
           if (!expectedSha256) throw new Error("Nothing to undo.");
+
           const result = await writeFile({
             vaultId,
             rawPath: input.path,
@@ -1749,13 +1969,16 @@ export default async function plugin(
             expectedSha256,
             proposalOnly: true,
           });
+
           if (result.outcome === "conflict") throw new Error(conflictMessage);
           next.resolvedSha256 = result.sha256;
         } else if (status === "pending") {
           const file = await readFile(vaultId, input.path);
+
           if (file.sha256 !== proposal.baseSha256)
             throw new Error(conflictMessage);
         }
+
         return saveProposal(next);
       });
     },
@@ -1790,22 +2013,25 @@ export default async function plugin(
     async createFolder(input) {
       const vault = getVault(input.vaultId);
       const relativePath = requireVaultPath(input.path);
-      await bb.sdk.files.mkdir({
+      await api.sdk.files.mkdir({
         ...hostArgs(vault),
         path: absolutePath(vault, relativePath),
         rootPath: vault.rootPath,
         recursive: false,
       });
-      bb.realtime.publish("vault-changed", { vaultId: vault.id });
+      api.realtime.publish("vault-changed", { vaultId: vault.id });
+
       return { path: relativePath };
     },
     async reorderFiles(input) {
       const vault = getVault(input.vaultId);
       const parent = requireOptionalDirectory(input.parent);
       const paths = input.paths.map((value) => requireVaultPath(value));
+
       if (new Set(paths).size !== paths.length) {
         throw new Error('"paths" must not contain duplicates');
       }
+
       if (
         paths.some(
           (filePath) =>
@@ -1815,6 +2041,7 @@ export default async function plugin(
       ) {
         throw new Error('Every ordered path must be a file in "parent"');
       }
+
       const currentFiles = (await listEntries(vault)).entries
         .filter(
           (entry) =>
@@ -1822,6 +2049,7 @@ export default async function plugin(
             path.posix.dirname(entry.path) === (parent || "."),
         )
         .map((entry) => entry.path);
+
       if (
         paths.length !== currentFiles.length ||
         currentFiles.some((filePath) => !paths.includes(filePath))
@@ -1830,19 +2058,24 @@ export default async function plugin(
           "Files changed while reordering; refresh and try again",
         );
       }
+
       const replaceOrder = db.transaction(() => {
         db.prepare(
           "DELETE FROM entry_order WHERE vault_id = ? AND parent_path = ?",
         ).run(vault.id, parent);
+
         const insert = db.prepare(
           "INSERT INTO entry_order (vault_id, parent_path, child_path, position) VALUES (?, ?, ?, ?)",
         );
+
         paths.forEach((filePath, position) =>
           insert.run(vault.id, parent, filePath, position),
         );
       });
+
       replaceOrder();
-      bb.realtime.publish("vault-changed", { vaultId: vault.id });
+      api.realtime.publish("vault-changed", { vaultId: vault.id });
+
       return { paths };
     },
     async movePath(input) {
@@ -1852,15 +2085,20 @@ export default async function plugin(
       const vaultId = input.vaultId;
       const currentPath = requireVaultPath(input.path, { extension: ".md" });
       const file = await readFile(vaultId, currentPath);
+
       if (parseMarkdownDocument(file.content).title) {
         return { path: currentPath };
       }
+
       const base = kebabCase(deriveTitle(file.content, ""));
+
       if (!base) return { path: currentPath };
       const parent = path.posix.dirname(currentPath);
       const desired = parent === "." ? `${base}.md` : `${parent}/${base}.md`;
+
       if (desired.toLowerCase() === currentPath.toLowerCase())
         return { path: currentPath };
+
       try {
         return await movePath(vaultId, currentPath, desired);
       } catch {
@@ -1870,11 +2108,12 @@ export default async function plugin(
     async createVault(input) {
       const name = requireString(input.name, "name");
       const rootPath = requireString(input.rootPath, "rootPath");
+
       if (!isAbsoluteHostPath(rootPath))
         throw new Error('"rootPath" must be absolute');
       const hostId = optionalString(input.hostId) ?? null;
       const resolvedRoot = normalizeHostRoot(rootPath);
-      await bb.sdk.files.mkdir({
+      await api.sdk.files.mkdir({
         ...hostIdArgs(hostId),
         path: resolvedRoot,
         recursive: true,
@@ -1883,15 +2122,18 @@ export default async function plugin(
       const ids = new Set(listVaults().map((vault) => vault.id));
       let id = baseId;
       let counter = 2;
+
       while (ids.has(id)) id = `${baseId}-${counter++}`;
       db.prepare(
         "INSERT INTO vaults (id, name, host_id, root_path, created_at) VALUES (?, ?, ?, ?, ?)",
       ).run(id, name, hostId, resolvedRoot, Date.now());
-      bb.realtime.publish("vault-changed", { vaultId: id });
+      api.realtime.publish("vault-changed", { vaultId: id });
+
       return getVault(id);
     },
     async removeVault(input) {
       const id = requireString(input.vaultId, "vaultId");
+
       return serializeVault(id, async () => {
         if (listVaults().length <= 1)
           throw new Error("At least one vault is required");
@@ -1901,7 +2143,8 @@ export default async function plugin(
           db.prepare("DELETE FROM vaults WHERE id = ?").run(id);
         })();
         mentionSummaries.delete(id);
-        bb.realtime.publish("vault-changed", { vaultId: id });
+        api.realtime.publish("vault-changed", { vaultId: id });
+
         return { ok: true as const };
       });
     },
@@ -1910,12 +2153,15 @@ export default async function plugin(
       const notePath = requireVaultPath(input.notePath, { extension: ".md" });
       const content = requireString(input.content, "content");
       const bytes = Buffer.from(content, "base64");
+
       if (bytes.length > MAX_ATTACHMENT_BYTES)
         throw new Error("Attachment exceeds 20 MB");
       const rawName = requireString(input.name, "name");
       const extension = path.extname(rawName).toLowerCase();
+
       const original =
         sanitizeName(path.basename(rawName, extension)) || "image";
+
       if (
         !new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]).has(
           extension,
@@ -1923,12 +2169,15 @@ export default async function plugin(
       ) {
         throw new Error("Unsupported image type");
       }
+
       const parent = path.posix.dirname(notePath);
       const attachment = `${original}-${Date.now().toString(36)}${extension}`;
+
       const relativePath =
         parent === "."
           ? `_attachments/${attachment}`
           : `${parent}/_attachments/${attachment}`;
+
       const result = await writeFile({
         vaultId,
         rawPath: relativePath,
@@ -1936,6 +2185,7 @@ export default async function plugin(
         contentEncoding: "base64",
         createOnly: true,
       });
+
       return {
         path: relativePath,
         markdownPath: `./_attachments/${attachment}`,
@@ -1945,33 +2195,38 @@ export default async function plugin(
     async preparePreview(input) {
       const vault = getVault(input.vaultId);
       const relativePath = requireVaultPath(input.path);
-      await bb.sdk.files.read({
+      await api.sdk.files.read({
         ...hostArgs(vault),
         path: absolutePath(vault, relativePath),
         rootPath: vault.rootPath,
       });
-      return bb.sdk.files.createPreview({
+
+      return api.sdk.files.createPreview({
         ...hostArgs(vault),
         rootPath: vault.rootPath,
       });
     },
     async openFile(input) {
       const target = await resolveOpenerFile(input.source, input.path);
+
       const args = {
         ...hostIdArgs(target.hostId),
         path: target.path,
         rootPath: target.rootPath,
       };
+
       const [file, preview] = await Promise.all([
-        bb.sdk.files.read(args),
-        bb.sdk.files.createPreview({
+        api.sdk.files.read(args),
+        api.sdk.files.createPreview({
           ...hostIdArgs(target.hostId),
           rootPath: target.rootPath,
         }),
       ]);
+
       const pathApi = path.win32.isAbsolute(target.rootPath)
         ? path.win32
         : path.posix;
+
       return {
         file,
         preview,
@@ -1982,7 +2237,8 @@ export default async function plugin(
     },
     async saveOpenedFile(input) {
       const target = await resolveOpenerFile(input.source, input.path);
-      const result = await bb.sdk.files.write({
+
+      const result = await api.sdk.files.write({
         ...hostIdArgs(target.hostId),
         path: target.path,
         rootPath: target.rootPath,
@@ -1992,20 +2248,23 @@ export default async function plugin(
           ? { expectedSha256: input.expectedSha256 }
           : {}),
       });
+
       if (result.outcome === "written") mentionSummaries.clear();
+
       return result;
     },
   };
 
-  bb.rpc.register(docsRpcContract, handlers);
+  api.rpc.register(docsRpcContract, handlers);
 
   async function readHttpInput<Schema extends z.ZodType>(
-    context: Parameters<Parameters<BbPluginApi["http"]["route"]>[2]>[0],
+    context: Parameters<Parameters<PluginApi["http"]["route"]>[2]>[0],
     schema: Schema,
   ): Promise<
     { ok: true; value: z.output<Schema> } | { ok: false; response: Response }
   > {
     let input: unknown;
+
     try {
       input = await context.req.json();
     } catch {
@@ -2023,8 +2282,11 @@ export default async function plugin(
         ),
       };
     }
+
     const result = await schema.safeParseAsync(input);
+
     if (result.success) return { ok: true, value: result.data };
+
     return {
       ok: false,
       response: context.json(
@@ -2049,12 +2311,14 @@ export default async function plugin(
     schema: Schema,
     handle: (input: z.output<Schema>) => object | Promise<object>,
   ): void {
-    bb.http.route(
+    api.http.route(
       "POST",
       routePath,
       async (context) => {
         const input = await readHttpInput(context, schema);
+
         if (!input.ok) return input.response;
+
         return context.json(await handle(input.value));
       },
       { auth: "token" },
@@ -2073,6 +2337,7 @@ export default async function plugin(
 
   function resolveHostPath(rootPath: string, candidate: string): string {
     if (isAbsoluteHostPath(candidate)) return normalizeHostRoot(candidate);
+
     return hostPathApi(rootPath).resolve(rootPath, candidate);
   }
 
@@ -2085,12 +2350,16 @@ export default async function plugin(
     context: PluginCliContext,
   ): Promise<string | undefined> {
     if (args.workspaceHostId) return args.workspaceHostId;
+
     if (!context.threadId) return undefined;
-    const thread = await bb.sdk.threads.get({ threadId: context.threadId });
+    const thread = await api.sdk.threads.get({ threadId: context.threadId });
+
     if (!thread.environmentId) return undefined;
-    const environment = await bb.sdk.environments.get({
+
+    const environment = await api.sdk.environments.get({
       environmentId: thread.environmentId,
     });
+
     return environment.hostId;
   }
 
@@ -2098,9 +2367,9 @@ export default async function plugin(
     rootPath: string,
     hostId: string | undefined,
     relativePath: string,
-  ): Promise<Awaited<ReturnType<typeof bb.sdk.files.read>> | null> {
+  ): Promise<Awaited<ReturnType<typeof api.sdk.files.read>> | null> {
     try {
-      return await bb.sdk.files.read({
+      return await api.sdk.files.read({
         ...hostIdArgs(hostId),
         path: localFilePath(rootPath, relativePath),
         rootPath,
@@ -2118,33 +2387,121 @@ export default async function plugin(
     state: SyncState;
     sha256: string;
   } | null> {
-    const file = await readWorkspaceFile(rootPath, hostId, SYNC_STATE_FILE);
-    if (!file) return null;
-    if (file.contentEncoding !== "utf8") {
-      throw new Error(`${SYNC_STATE_FILE} must be UTF-8 JSON`);
+    let file = await readWorkspaceFile(rootPath, hostId, SYNC_STATE_FILE);
+
+    const legacyFile = await readWorkspaceFile(
+      rootPath,
+      hostId,
+      LEGACY_SYNC_STATE_FILE_V1,
+    );
+
+    if (legacyFile) {
+      const legacy = parseSyncStateFile(
+        legacyFile,
+        LEGACY_SYNC_STATE_FILE_V1,
+        true,
+      );
+
+      const current = file
+        ? parseSyncStateFile(file, SYNC_STATE_FILE, false)
+        : null;
+
+      if (current?.legacyImport) {
+        if (current.legacyImport.sourceSha256 !== legacyFile.sha256)
+          throw new Error(
+            "Docs legacy sync state changed after import; resolve the workspace conflict before syncing",
+          );
+      } else {
+        if (current && JSON.stringify(current) !== JSON.stringify(legacy))
+          throw new Error(
+            "Docs legacy and Omnyo sync states conflict; resolve the workspace conflict before syncing",
+          );
+
+        const imported: SyncState = {
+          ...legacy,
+          legacyImport: { formatVersion: 1, sourceSha256: legacyFile.sha256 },
+        };
+
+        await writeSyncState(rootPath, hostId, imported, file?.sha256 ?? null);
+        file = await readWorkspaceFile(rootPath, hostId, SYNC_STATE_FILE);
+
+        if (
+          !file ||
+          JSON.stringify(parseSyncStateFile(file, SYNC_STATE_FILE, false)) !==
+            JSON.stringify(imported)
+        )
+          throw new Error(
+            "Docs sync state import could not be verified; syncing was refused",
+          );
+      }
+
+      const source = await readWorkspaceFile(
+        rootPath,
+        hostId,
+        LEGACY_SYNC_STATE_FILE_V1,
+      );
+
+      if (!source || source.sha256 !== legacyFile.sha256)
+        throw new Error(
+          "Docs legacy sync state changed during import; syncing was refused",
+        );
     }
+
+    if (!file) return null;
+
+    return {
+      state: parseSyncStateFile(file, SYNC_STATE_FILE, false),
+      sha256: file.sha256,
+    };
+  }
+
+  function parseSyncStateFile(
+    file: Awaited<ReturnType<typeof api.sdk.files.read>>,
+    fileName: string,
+    legacy: boolean,
+  ): SyncState {
+    if (file.contentEncoding !== "utf8") {
+      throw new Error(`${fileName} must be UTF-8 JSON`);
+    }
+
     let parsed: unknown;
+
     try {
       parsed = JSON.parse(file.content);
     } catch {
       throw new Error(
-        `${SYNC_STATE_FILE} is malformed; move this workspace aside and pull into a clean directory`,
+        `${fileName} is malformed; move this workspace aside and pull into a clean directory`,
       );
     }
+
+    if (legacy) {
+      const imported = legacySyncStateSchemaV1.safeParse(parsed);
+
+      if (!imported.success)
+        throw new Error(
+          `${fileName} is invalid: ${z.prettifyError(imported.error)}`,
+        );
+      parsed = { ...imported.data, schemaVersion: SYNC_STATE_VERSION };
+    }
+
     const result = syncStateSchema.safeParse(parsed);
+
     if (!result.success) {
       throw new Error(
-        `${SYNC_STATE_FILE} is invalid: ${z.prettifyError(result.error)}. Move this workspace aside and pull into a clean directory`,
+        `${fileName} is invalid: ${z.prettifyError(result.error)}. Move this workspace aside and pull into a clean directory`,
       );
     }
+
     const remotePaths = result.data.entries.map((entry) => entry.remotePath);
     const localPaths = result.data.entries.map((entry) => entry.localPath);
+
     if (
       new Set(remotePaths).size !== remotePaths.length ||
       new Set(localPaths).size !== localPaths.length
     ) {
-      throw new Error(`${SYNC_STATE_FILE} contains duplicate identities`);
+      throw new Error(`${fileName} contains duplicate identities`);
     }
+
     if (
       result.data.entries.some(
         (entry) =>
@@ -2156,10 +2513,11 @@ export default async function plugin(
       )
     ) {
       throw new Error(
-        `${SYNC_STATE_FILE} contains an identity outside its declared scope`,
+        `${fileName} contains an identity outside its declared scope`,
       );
     }
-    return { state: result.data, sha256: file.sha256 };
+
+    return result.data;
   }
 
   async function writeSyncState(
@@ -2168,7 +2526,7 @@ export default async function plugin(
     state: SyncState,
     expectedSha256: string | null,
   ): Promise<void> {
-    const result = await bb.sdk.files.write({
+    const result = await api.sdk.files.write({
       ...hostIdArgs(hostId),
       path: localFilePath(rootPath, SYNC_STATE_FILE),
       rootPath,
@@ -2176,6 +2534,7 @@ export default async function plugin(
       createParents: true,
       expectedSha256,
     });
+
     if (result.outcome === "conflict") {
       throw new Error(
         `${SYNC_STATE_FILE} changed concurrently; remote changes were left intact and the workspace can be recovered by rerunning pull`,
@@ -2183,12 +2542,15 @@ export default async function plugin(
     }
   }
 
-  function stateFromSnapshot(snapshot: {
-    vault: Vault;
-    scope: SyncScope;
-    files: SyncFile[];
-    directories: string[];
-  }): SyncState {
+  function stateFromSnapshot(
+    snapshot: {
+      vault: Vault;
+      scope: SyncScope;
+      files: SyncFile[];
+      directories: string[];
+    },
+    legacyImport?: SyncState["legacyImport"],
+  ): SyncState {
     return {
       schemaVersion: SYNC_STATE_VERSION,
       vault: { id: snapshot.vault.id, name: snapshot.vault.name },
@@ -2196,6 +2558,7 @@ export default async function plugin(
       pulledAt: new Date().toISOString(),
       entries: snapshot.files.map(({ content: _content, ...entry }) => entry),
       directories: snapshot.directories,
+      ...(legacyImport ? { legacyImport } : {}),
     };
   }
 
@@ -2213,14 +2576,18 @@ export default async function plugin(
         "--all cannot be combined with a path or --folder",
       );
     }
+
     if (args.all) return { kind: "all" };
     const scopePath = args.positionals[0];
+
     if (!scopePath) {
       throw new CliUsageError("pull requires <path> or --all");
     }
+
     if (args.positionals.length > 1) {
       throw new CliUsageError("pull accepts only one vault path");
     }
+
     return {
       kind: args.folder ? "folder" : "file",
       path: requireVaultPath(scopePath),
@@ -2232,6 +2599,7 @@ export default async function plugin(
     const before = base.split("\n");
     const after = local.split("\n");
     let prefix = 0;
+
     while (
       prefix < before.length &&
       prefix < after.length &&
@@ -2239,6 +2607,7 @@ export default async function plugin(
     )
       prefix += 1;
     let suffix = 0;
+
     while (
       suffix < before.length - prefix &&
       suffix < after.length - prefix &&
@@ -2247,6 +2616,7 @@ export default async function plugin(
       suffix += 1;
     const removed = before.slice(prefix, before.length - suffix);
     const added = after.slice(prefix, after.length - suffix);
+
     return [
       `--- a/${remotePath}`,
       `+++ b/${remotePath}`,
@@ -2260,12 +2630,15 @@ export default async function plugin(
     const scope = parsePullScope(args);
     const snapshot = await syncSnapshot(args.vaultId, scope);
     const cwd = context.cwd ?? process.cwd();
+
     const rootPath = resolveHostPath(
       cwd,
       args.into ?? `docs-${snapshot.vault.id}`,
     );
+
     const hostId = await resolveWorkspaceHostId(args, context);
     const existing = await readSyncState(rootPath, hostId);
+
     if (
       existing &&
       (existing.state.vault.id !== snapshot.vault.id ||
@@ -2275,26 +2648,34 @@ export default async function plugin(
         `${SYNC_STATE_FILE} belongs to a different vault or scope; choose another --into directory`,
       );
     }
+
     const oldEntries = new Map(
       existing?.state.entries.map((entry) => [entry.remotePath, entry]) ?? [],
     );
+
     const remoteEntries = new Map(
       snapshot.files.map((entry) => [entry.remotePath, entry]),
     );
+
     const remoteDirectories = new Set(snapshot.directories);
+
     const removedDirectories =
       existing?.state.directories.filter(
         (directory) => !remoteDirectories.has(directory),
       ) ?? [];
+
     const writes: Array<{
       file: SyncFile;
       expectedSha256: string | null;
     }> = [];
+
     const deletes: Array<{ path: string; expectedSha256: string }> = [];
     const conflicts: Array<{ path: string; reason: string }> = [];
+
     for (const remote of snapshot.files) {
       const base = oldEntries.get(remote.remotePath);
       const local = await readWorkspaceFile(rootPath, hostId, remote.localPath);
+
       if (!base) {
         if (!local) writes.push({ file: remote, expectedSha256: null });
         else if (local.sha256 !== remote.sha256)
@@ -2304,6 +2685,7 @@ export default async function plugin(
           });
         continue;
       }
+
       if (!local) {
         if (remote.sha256 !== base.sha256)
           conflicts.push({
@@ -2312,7 +2694,9 @@ export default async function plugin(
           });
         continue;
       }
+
       if (local.sha256 === remote.sha256) continue;
+
       if (local.sha256 === base.sha256) {
         writes.push({ file: remote, expectedSha256: local.sha256 });
       } else if (remote.sha256 !== base.sha256) {
@@ -2322,10 +2706,13 @@ export default async function plugin(
         });
       }
     }
+
     for (const base of oldEntries.values()) {
       if (remoteEntries.has(base.remotePath)) continue;
       const local = await readWorkspaceFile(rootPath, hostId, base.localPath);
+
       if (!local) continue;
+
       if (local.sha256 === base.sha256)
         deletes.push({ path: base.localPath, expectedSha256: local.sha256 });
       else
@@ -2334,6 +2721,7 @@ export default async function plugin(
           reason: "vault file was deleted while the local copy changed",
         });
     }
+
     if (conflicts.length > 0) {
       return {
         outcome: "conflict" as const,
@@ -2346,25 +2734,29 @@ export default async function plugin(
         conflicts,
       };
     }
+
     const written: string[] = [];
     const deleted: string[] = [];
     const deletedDirectories: string[] = [];
+
     try {
-      await bb.sdk.files.mkdir({
+      await api.sdk.files.mkdir({
         ...hostIdArgs(hostId),
         path: rootPath,
         recursive: true,
       });
+
       for (const directory of snapshot.directories) {
-        await bb.sdk.files.mkdir({
+        await api.sdk.files.mkdir({
           ...hostIdArgs(hostId),
           path: localFilePath(rootPath, directory),
           rootPath,
           recursive: true,
         });
       }
+
       for (const write of writes) {
-        const result = await bb.sdk.files.write({
+        const result = await api.sdk.files.write({
           ...hostIdArgs(hostId),
           path: localFilePath(rootPath, write.file.localPath),
           rootPath,
@@ -2373,25 +2765,30 @@ export default async function plugin(
           createParents: true,
           expectedSha256: write.expectedSha256,
         });
+
         if (result.outcome === "conflict") {
           throw new Error(
             `Local file changed during pull: ${write.file.localPath}; rerun pull to recover`,
           );
         }
+
         written.push(write.file.localPath);
       }
+
       for (const deletion of deletes) {
         const current = await readWorkspaceFile(
           rootPath,
           hostId,
           deletion.path,
         );
+
         if (current?.sha256 !== deletion.expectedSha256) {
           throw new Error(
             `Local file changed during pull: ${deletion.path}; rerun pull to recover`,
           );
         }
-        await bb.sdk.files.remove({
+
+        await api.sdk.files.remove({
           ...hostIdArgs(hostId),
           path: localFilePath(rootPath, deletion.path),
           rootPath,
@@ -2399,13 +2796,14 @@ export default async function plugin(
         });
         deleted.push(deletion.path);
       }
+
       for (const directory of [...removedDirectories].sort(
         (left, right) =>
           right.split("/").length - left.split("/").length ||
           right.localeCompare(left),
       )) {
         try {
-          await bb.sdk.files.remove({
+          await api.sdk.files.remove({
             ...hostIdArgs(hostId),
             path: localFilePath(rootPath, directory),
             rootPath,
@@ -2416,10 +2814,11 @@ export default async function plugin(
           if (!isMissingFileError(error)) throw error;
         }
       }
+
       await writeSyncState(
         rootPath,
         hostId,
-        stateFromSnapshot(snapshot),
+        stateFromSnapshot(snapshot, existing?.state.legacyImport),
         existing?.sha256 ?? null,
       );
     } catch (error) {
@@ -2439,6 +2838,7 @@ export default async function plugin(
         ],
       };
     }
+
     return {
       outcome: "pulled" as const,
       rootPath,
@@ -2458,30 +2858,37 @@ export default async function plugin(
   ) {
     const cwd = context.cwd ?? process.cwd();
     const defaultVault = getVault(args.vaultId);
+
     const rootPath = resolveHostPath(
       cwd,
       args.positionals[0] ?? args.into ?? `docs-${defaultVault.id}`,
     );
+
     if (args.positionals.length > 1) {
       throw new Error("push/status accepts only one workspace directory");
     }
+
     const hostId = await resolveWorkspaceHostId(args, context);
     const existing = await readSyncState(rootPath, hostId);
+
     if (!existing) {
       throw new Error(
-        `${SYNC_STATE_FILE} was not found; run bb docs pull first`,
+        `${SYNC_STATE_FILE} was not found; run omnyo docs pull first`,
       );
     }
+
     if (args.vaultId && args.vaultId !== existing.state.vault.id) {
       throw new Error(
         `Workspace belongs to vault ${existing.state.vault.id}, not ${args.vaultId}`,
       );
     }
+
     const snapshot = await syncSnapshot(
       existing.state.vault.id,
       existing.state.scope,
     );
-    const listing = await bb.sdk.files.listPaths({
+
+    const listing = await api.sdk.files.listPaths({
       ...hostIdArgs(hostId),
       path: rootPath,
       includeFiles: true,
@@ -2489,61 +2896,79 @@ export default async function plugin(
       includeHidden: false,
       limit: MAX_TREE_ENTRIES,
     });
+
     if (listing.truncated) {
       throw new Error(
         `Local workspace exceeds ${MAX_TREE_ENTRIES} entries; narrow the pull scope`,
       );
     }
+
     const localPaths = listing.paths
       .map((entry) => ({
         kind: entry.kind,
         path: entry.path.replace(/\\/g, "/"),
       }))
-      .filter((entry) => entry.path !== SYNC_STATE_FILE)
+      .filter(
+        (entry) =>
+          entry.path !== SYNC_STATE_FILE &&
+          entry.path !== LEGACY_SYNC_STATE_FILE_V1,
+      )
       .filter((entry) => {
         try {
           requireVaultPath(entry.path);
+
           return true;
         } catch {
           return false;
         }
       });
+
     const localFiles = new Map<
       string,
-      Awaited<ReturnType<typeof bb.sdk.files.read>>
+      Awaited<ReturnType<typeof api.sdk.files.read>>
     >();
+
     for (const entry of localPaths) {
       if (entry.kind !== "file") continue;
       const file = await readWorkspaceFile(rootPath, hostId, entry.path);
+
       if (file) localFiles.set(entry.path, file);
     }
+
     const baseByLocal = new Map(
       existing.state.entries.map((entry) => [entry.localPath, entry]),
     );
+
     const remoteByPath = new Map(
       snapshot.files.map((entry) => [entry.remotePath, entry]),
     );
+
     const writes: Array<{
       path: string;
       content: string;
       contentEncoding: "base64" | "utf8";
       expectedSha256: string | null;
     }> = [];
+
     const deletes: Array<{ path: string; expectedSha256: string }> = [];
     const conflicts: Array<{ path: string; reason: string }> = [];
     const warnings: Array<{ path: string; reason: string }> = [];
     const diffs: string[] = [];
     const localFolded = new Map<string, string>();
+
     for (const entry of localPaths) {
       const collision = localFolded.get(entry.path.toLowerCase());
+
       if (collision && collision !== entry.path) {
         conflicts.push({
           path: entry.path,
           reason: `local path collides with ${collision} on case-insensitive filesystems`,
         });
       }
+
       localFolded.set(entry.path.toLowerCase(), entry.path);
     }
+
     for (const [localPath, local] of localFiles) {
       if (!scopeContains(existing.state.scope, localPath)) {
         conflicts.push({
@@ -2552,9 +2977,11 @@ export default async function plugin(
         });
         continue;
       }
+
       const base = baseByLocal.get(localPath);
       const remotePath = base?.remotePath ?? requireVaultPath(localPath);
       const remote = remoteByPath.get(remotePath);
+
       if (!base) {
         if (remote && remote.sha256 !== local.sha256) {
           conflicts.push({
@@ -2569,8 +2996,10 @@ export default async function plugin(
             expectedSha256: null,
           });
         }
+
         continue;
       }
+
       if (!remote) {
         conflicts.push({
           path: remotePath,
@@ -2578,7 +3007,9 @@ export default async function plugin(
         });
         continue;
       }
+
       if (local.sha256 === remote.sha256) continue;
+
       if (local.sha256 === base.sha256 && remote.sha256 !== base.sha256) {
         conflicts.push({
           path: remotePath,
@@ -2594,6 +3025,7 @@ export default async function plugin(
           contentEncoding: local.contentEncoding,
           expectedSha256: base.sha256,
         });
+
         if (
           args.diff &&
           local.contentEncoding === "utf8" &&
@@ -2608,10 +3040,13 @@ export default async function plugin(
         });
       }
     }
+
     for (const base of existing.state.entries) {
       if (localFiles.has(base.localPath)) continue;
       const remote = remoteByPath.get(base.remotePath);
+
       if (!remote) continue;
+
       if (!args.delete) {
         warnings.push({
           path: base.remotePath,
@@ -2626,11 +3061,14 @@ export default async function plugin(
         deletes.push({ path: base.remotePath, expectedSha256: base.sha256 });
       }
     }
+
     for (const remote of snapshot.files) {
       const tracked = existing.state.entries.some(
         (entry) => entry.remotePath === remote.remotePath,
       );
+
       const matchingLocal = localFiles.has(remote.localPath);
+
       if (!tracked && !matchingLocal) {
         conflicts.push({
           path: remote.remotePath,
@@ -2638,16 +3076,20 @@ export default async function plugin(
         });
       }
     }
+
     const discoveredLocalDirectories = localPaths
       .filter((entry) => entry.kind === "directory")
       .map((entry) => entry.path);
+
     const localDirectories = discoveredLocalDirectories.filter((directory) =>
       scopeContains(existing.state.scope, directory),
     );
+
     for (const directory of discoveredLocalDirectories) {
       const structuralAncestor =
         existing.state.scope.kind !== "all" &&
         existing.state.scope.path.startsWith(`${directory}/`);
+
       if (
         !scopeContains(existing.state.scope, directory) &&
         !structuralAncestor
@@ -2658,11 +3100,13 @@ export default async function plugin(
         });
       }
     }
+
     const localDirectorySet = new Set(localDirectories);
     const remoteDirectorySet = new Set(snapshot.directories);
     const trackedDirectorySet = new Set(existing.state.directories);
     const createDirectories: string[] = [];
     const deleteDirectories: string[] = [];
+
     for (const directory of localDirectories) {
       if (
         trackedDirectorySet.has(directory) &&
@@ -2676,12 +3120,14 @@ export default async function plugin(
         createDirectories.push(directory);
       }
     }
+
     for (const directory of existing.state.directories) {
       if (
         localDirectorySet.has(directory) ||
         !remoteDirectorySet.has(directory)
       )
         continue;
+
       if (
         existing.state.scope.kind === "folder" &&
         directory === existing.state.scope.path
@@ -2701,6 +3147,7 @@ export default async function plugin(
         deleteDirectories.push(directory);
       }
     }
+
     for (const directory of snapshot.directories) {
       if (
         !trackedDirectorySet.has(directory) &&
@@ -2713,6 +3160,7 @@ export default async function plugin(
         });
       }
     }
+
     const plan = {
       rootPath,
       vaultId: existing.state.vault.id,
@@ -2725,6 +3173,7 @@ export default async function plugin(
       warnings,
       diffs: diffs.filter(Boolean),
     };
+
     if (!apply || args.dryRun || conflicts.length > 0) {
       return {
         outcome:
@@ -2732,6 +3181,7 @@ export default async function plugin(
         ...plan,
       };
     }
+
     const applied = await syncApply({
       vaultId: existing.state.vault.id,
       writes,
@@ -2740,19 +3190,23 @@ export default async function plugin(
       deleteDirectories,
       dryRun: false,
     });
+
     if (applied.outcome !== "applied") {
       return { outcome: applied.outcome, ...plan, applied };
     }
+
     const refreshed = await syncSnapshot(
       existing.state.vault.id,
       existing.state.scope,
     );
+
     await writeSyncState(
       rootPath,
       hostId,
-      stateFromSnapshot(refreshed),
+      stateFromSnapshot(refreshed, existing.state.legacyImport),
       existing.sha256,
     );
+
     return { outcome: "pushed" as const, ...plan, applied };
   }
 
@@ -2764,15 +3218,19 @@ export default async function plugin(
 
   function formatSyncHumanOutput(command: string, result: unknown): string {
     if (!isRecord(result)) return JSON.stringify(result, null, 2);
+
     if (command === "pull") {
       if (result.outcome === "conflict") {
         return `Pull stopped: ${Array.isArray(result.conflicts) ? result.conflicts.length : 0} conflict(s). No files were changed.\n${JSON.stringify(result.conflicts, null, 2)}`;
       }
+
       if (result.outcome === "partial") {
         return `Pull partially completed in ${String(result.rootPath)}. The prior manifest remains valid; rerun pull to recover safely.\n${JSON.stringify(result.errors, null, 2)}`;
       }
+
       return `Pulled ${stringArray(result.written).length} file(s) into ${String(result.rootPath)}${stringArray(result.deleted).length > 0 ? `; removed ${stringArray(result.deleted).length} remotely deleted file(s)` : ""}${stringArray(result.deletedDirectories).length > 0 ? `; removed ${stringArray(result.deletedDirectories).length} remotely deleted director${stringArray(result.deletedDirectories).length === 1 ? "y" : "ies"}` : ""}.`;
     }
+
     if (command === "status" || command === "push") {
       const writes = stringArray(result.writes);
       const deletes = stringArray(result.deletes);
@@ -2780,23 +3238,32 @@ export default async function plugin(
       const deleteDirectories = stringArray(result.deleteDirectories);
       const warnings = Array.isArray(result.warnings) ? result.warnings : [];
       const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
+
       const lines = [
         `Docs workspace: ${String(result.rootPath)}`,
         `Vault: ${String(result.vaultId)}`,
         `Changes: ${writes.length} write(s), ${deletes.length} file deletion(s), ${directories.length} directory creation(s), ${deleteDirectories.length} directory deletion(s), ${warnings.length} warning(s), ${conflicts.length} conflict(s)`,
       ];
+
       if (writes.length > 0) lines.push(`Write:\n  ${writes.join("\n  ")}`);
+
       if (deletes.length > 0) lines.push(`Delete:\n  ${deletes.join("\n  ")}`);
+
       if (directories.length > 0)
         lines.push(`Create directories:\n  ${directories.join("\n  ")}`);
+
       if (deleteDirectories.length > 0)
         lines.push(`Delete directories:\n  ${deleteDirectories.join("\n  ")}`);
+
       if (warnings.length > 0)
         lines.push(`Warnings:\n${JSON.stringify(warnings, null, 2)}`);
+
       if (conflicts.length > 0)
         lines.push(`Conflicts:\n${JSON.stringify(conflicts, null, 2)}`);
       const diffs = stringArray(result.diffs);
+
       if (diffs.length > 0) lines.push(diffs.join("\n\n"));
+
       if (result.outcome === "pushed") lines.push("Push completed.");
       else if (result.outcome === "planned")
         lines.push(
@@ -2810,10 +3277,13 @@ export default async function plugin(
         lines.push(
           "No push changes were made; pull and merge the conflicts first.",
         );
+
       return lines.join("\n");
     }
+
     return JSON.stringify(result, null, 2);
   }
+
   routeRpc("/read", docsRpcContract.readNote.input, handlers.readNote);
   routeRpc("/write", docsRpcContract.saveNote.input, handlers.saveNote);
   routeRpc("/mkdir", docsRpcContract.createFolder.input, handlers.createFolder);
@@ -2875,7 +3345,9 @@ export default async function plugin(
 
   function statusExitCode(result: unknown): number {
     if (!isRecord(result)) return 0;
+
     if (result.outcome === "conflict") return 3;
+
     const changed = [
       "writes",
       "deletes",
@@ -2886,6 +3358,7 @@ export default async function plugin(
       (key) =>
         Array.isArray(result[key]) && (result[key] as unknown[]).length > 0,
     );
+
     return changed ? 4 : 0;
   }
 
@@ -2896,6 +3369,7 @@ export default async function plugin(
       required: true,
     },
   ] as const;
+
   const proposalVersionOption = {
     type: "string",
     required: true,
@@ -2906,8 +3380,10 @@ export default async function plugin(
   function parseProposalVersion(value: string): number | null {
     if (value === "none") return null;
     const version = Number(value);
+
     if (!Number.isSafeInteger(version) || version < 1)
       throw new CliUsageError("Expected a positive proposal version or none.");
+
     return version;
   }
 
@@ -2925,23 +3401,26 @@ export default async function plugin(
         run: (input) =>
           attemptCli(async () => {
             const expectedVersion = parseProposalVersion(input.options.version);
+
             if (expectedVersion === null)
               throw new CliUsageError(
                 "This action requires a proposal version.",
               );
+
             const result = await handlers.resolveProposal({
               vaultId: input.options.vault,
               path: requireVaultPath(input.positionals.path),
               action,
               expectedVersion,
             });
+
             return { exitCode: 0, stdout: JSON.stringify(result, null, 2) };
           }),
       }),
     ]),
   );
 
-  bb.cli.register(
+  api.cli.register(
     defineCli({
       name: "docs",
       summary: "Discover and safely sync Docs vaults",
@@ -2992,6 +3471,7 @@ export default async function plugin(
                 context.cwd ?? process.cwd(),
                 input.options.file,
               );
+
               const hostId = await resolveWorkspaceHostId(
                 workspaceArgs({
                   positionals: [],
@@ -3001,7 +3481,8 @@ export default async function plugin(
                 }),
                 context,
               );
-              const file = await bb.sdk.files.read({
+
+              const file = await api.sdk.files.read({
                 ...hostIdArgs(hostId),
                 path: candidatePath,
                 rootPath: (path.win32.isAbsolute(candidatePath) &&
@@ -3010,10 +3491,12 @@ export default async function plugin(
                   : path.posix
                 ).dirname(candidatePath),
               });
+
               if (file.contentEncoding !== "utf8")
                 throw new CliUsageError(
                   "Proposal file must be UTF-8 Markdown.",
                 );
+
               const result = await handlers.proposeNote({
                 vaultId: input.options.vault,
                 path: requireVaultPath(input.positionals.path, {
@@ -3023,6 +3506,7 @@ export default async function plugin(
                 expectedSha256: input.options["expected-sha256"],
                 expectedVersion: parseProposalVersion(input.options.version),
               });
+
               return { exitCode: 0, stdout: JSON.stringify(result, null, 2) };
             }),
         }),
@@ -3044,16 +3528,19 @@ export default async function plugin(
               const expectedVersion = parseProposalVersion(
                 input.options.version,
               );
+
               if (expectedVersion === null)
                 throw new CliUsageError(
                   "This action requires a proposal version.",
                 );
+
               const result = await handlers.updateProposal({
                 vaultId: input.options.vault,
                 path: requireVaultPath(input.positionals.path),
                 content: input.options.content,
                 expectedVersion,
               });
+
               return { exitCode: 0, stdout: JSON.stringify(result, null, 2) };
             }),
         }),
@@ -3113,7 +3600,7 @@ export default async function plugin(
           positionals: [
             {
               name: "id",
-              description: "Vault ID from `bb docs vaults`",
+              description: "Vault ID from `omnyo docs vaults`",
               required: true,
             },
           ],
@@ -3159,6 +3646,7 @@ export default async function plugin(
                 input.options.vault,
                 input.positionals.path,
               );
+
               return {
                 exitCode: 0,
                 stdout:
@@ -3173,7 +3661,7 @@ export default async function plugin(
         pull: cliCommand({
           summary: "Pull one file, a folder subtree, or a whole vault",
           description:
-            "Writes the scope into a workspace directory with a .bb-docs-state.json manifest. Edit the files with ordinary tools, then run bb docs status and bb docs push.",
+            "Writes the scope into a workspace directory with a .omnyo-docs-state.json manifest. Edit the files with ordinary tools, then run omnyo docs status and omnyo docs push.",
           suggestFor: ["fetch", "clone", "checkout"],
           positionals: [
             {
@@ -3207,6 +3695,7 @@ export default async function plugin(
           run: (input, context) =>
             attemptCli(async () => {
               const path = input.positionals.path;
+
               const result = await runPull(
                 workspaceArgs({
                   positionals: path === undefined ? [] : [path],
@@ -3218,6 +3707,7 @@ export default async function plugin(
                 }),
                 context,
               );
+
               return {
                 exitCode: !isRecord(result)
                   ? 0
@@ -3250,6 +3740,7 @@ export default async function plugin(
           run: (input, context) =>
             attemptCli(async () => {
               const directory = input.positionals["workspace-dir"];
+
               const result = await runPushPlan(
                 workspaceArgs({
                   positionals: directory === undefined ? [] : [directory],
@@ -3262,6 +3753,7 @@ export default async function plugin(
                 context,
                 false,
               );
+
               return {
                 exitCode: statusExitCode(result),
                 stdout: renderCliResult("status", result, input.options.json),
@@ -3294,6 +3786,7 @@ export default async function plugin(
           run: (input, context) =>
             attemptCli(async () => {
               const directory = input.positionals["workspace-dir"];
+
               const result = await runPushPlan(
                 workspaceArgs({
                   positionals: directory === undefined ? [] : [directory],
@@ -3307,6 +3800,7 @@ export default async function plugin(
                 context,
                 true,
               );
+
               return {
                 exitCode: !isRecord(result)
                   ? 0
@@ -3322,7 +3816,7 @@ export default async function plugin(
         write: cliCommand({
           summary: "Deprecated: write a UTF-8 file directly",
           description:
-            "Use bb docs pull, edit the files, then bb docs push instead.",
+            "Use omnyo docs pull, edit the files, then omnyo docs push instead.",
           positionals: [
             {
               name: "path",
@@ -3359,7 +3853,7 @@ export default async function plugin(
         mkdir: cliCommand({
           summary: "Deprecated: create a folder directly",
           description:
-            "Use bb docs pull, create the directory locally, then bb docs push instead.",
+            "Use omnyo docs pull, create the directory locally, then omnyo docs push instead.",
           positionals: [
             {
               name: "path",
@@ -3385,7 +3879,7 @@ export default async function plugin(
         move: cliCommand({
           summary: "Deprecated: move a path directly",
           description:
-            "Use bb docs pull, move the file locally, then bb docs push --delete instead.",
+            "Use omnyo docs pull, move the file locally, then omnyo docs push --delete instead.",
           positionals: [
             {
               name: "from",
@@ -3417,7 +3911,7 @@ export default async function plugin(
         remove: cliCommand({
           summary: "Deprecated: remove a file or directory directly",
           description:
-            "Use bb docs pull, delete the file locally, then bb docs push --delete instead.",
+            "Use omnyo docs pull, delete the file locally, then omnyo docs push --delete instead.",
           aliases: ["rm"],
           positionals: [
             {
@@ -3453,12 +3947,13 @@ export default async function plugin(
     }),
   );
 
-  bb.ui.registerMentionProvider({
+  api.ui.registerMentionProvider({
     id: "note",
     label: "Docs",
     async search({ query }) {
       const needle = query.trim().toLowerCase();
       const matches = [];
+
       for (const vault of listVaults()) {
         for (const note of await mentionNoteSummaries(vault)) {
           if (
@@ -3474,58 +3969,69 @@ export default async function plugin(
             subtitle: `${vault.name} · ${note.preview || note.path}`,
             icon: "FileText",
           });
+
           if (matches.length === 25) return matches;
         }
       }
+
       return matches;
     },
     async resolve(itemId) {
       const separator = itemId.indexOf(":");
+
       if (separator < 1) throw new Error("Invalid note mention");
       const vaultId = itemId.slice(0, separator);
       const relativePath = itemId.slice(separator + 1);
       const file = await readFile(vaultId, relativePath);
       const proposal = readProposal(getVault(vaultId).id, relativePath);
+
       return {
         context:
           `Docs document (${vaultId}/${relativePath}):\nSHA-256: ${file.sha256}\n\n${file.content}` +
           (proposal
-            ? `\n\nDocs proposal metadata:\n${JSON.stringify(proposal)}\nUse bb docs propose with this version and current document hash to propose a revision; do not push over the user's document.`
-            : "\n\nProposal version: none. Use bb docs propose to suggest changes for approval."),
+            ? `\n\nDocs proposal metadata:\n${JSON.stringify(proposal)}\nUse omnyo docs propose with this version and current document hash to propose a revision; do not push over the user's document.`
+            : "\n\nProposal version: none. Use omnyo docs propose to suggest changes for approval."),
       };
     },
   });
 
-  bb.background.service("watch-vaults", {
+  api.background.service("watch-vaults", {
     async start(signal) {
       const watchers = new Map<string, VaultWatcher>();
       const retryNative = new Set<string>();
       let debounce: NodeJS.Timeout | null = null;
       let previous = "";
+
       try {
         while (!signal.aborted) {
           const vaults = listVaults();
+
           const localIds = new Set(
             vaults.filter((vault) => !vault.hostId).map((vault) => vault.id),
           );
+
           for (const [vaultId, watcher] of watchers) {
             if (!localIds.has(vaultId)) {
               watcher.close();
               watchers.delete(vaultId);
             }
           }
+
           for (const vault of vaults) {
             if (vault.hostId || watchers.has(vault.id)) continue;
+
             try {
               const watcher = watchVault(vault.rootPath, () => {
                 mentionSummaries.delete(vault.id);
+
                 if (debounce) clearTimeout(debounce);
                 debounce = setTimeout(() => {
-                  bb.realtime.publish("vault-changed", {
+                  api.realtime.publish("vault-changed", {
                     vaultId: vault.id,
                   });
                 }, 250);
               });
+
               watcher.on("error", () => {
                 watcher.close();
                 watchers.delete(vault.id);
@@ -3535,17 +4041,20 @@ export default async function plugin(
               retryNative.delete(vault.id);
             } catch (error) {
               if (!retryNative.has(vault.id)) {
-                bb.log.warn(
+                api.log.warn(
                   `cannot watch ${vault.rootPath}; using polling: ${errorMessage(error)}`,
                 );
               }
+
               retryNative.add(vault.id);
             }
           }
 
           const snapshots: string[] = [];
+
           for (const vault of vaults) {
             if (watchers.has(vault.id)) continue;
+
             try {
               const { entries } = await listEntries(vault);
               const notes = await listNoteSummaries(vault, entries);
@@ -3564,15 +4073,19 @@ export default async function plugin(
               snapshots.push(`${vault.id}:offline`);
             }
           }
+
           const next = snapshots.join("\n");
+
           if (previous && previous !== next) {
-            bb.realtime.publish("vault-changed", {});
+            api.realtime.publish("vault-changed", {});
           }
+
           previous = next;
           await waitForDelay(10_000, signal);
         }
       } finally {
         if (debounce) clearTimeout(debounce);
+
         for (const watcher of watchers.values()) watcher.close();
       }
     },

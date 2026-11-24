@@ -21,9 +21,9 @@ describe("code theme resolution", () => {
   it("uses a built-in palette's matching Shiki pair", () => {
     const nord = resolveCodeTheme(null, "nord");
     expect(nord.dark).toBe("nord");
-    expect(nord.light).toBe("bb:nord:light");
-    expect(nord.files["bb:nord:light"]).toMatchObject({
-      name: "bb:nord:light",
+    expect(nord.light).toBe("omnyo:nord:light");
+    expect(nord.files["omnyo:nord:light"]).toMatchObject({
+      name: "omnyo:nord:light",
       type: "light",
       colors: { "editor.background": "#eceff4" },
     });
@@ -39,6 +39,7 @@ describe("code theme resolution", () => {
       const resolved = resolveCodeTheme(null, id);
       expect(resolved.light, id).not.toBe(resolved.dark);
       const shipped = resolved.files[resolved.light];
+
       if (shipped !== undefined) {
         expect(shipped, id).toMatchObject({
           name: resolved.light,
@@ -46,9 +47,10 @@ describe("code theme resolution", () => {
         });
       }
     }
+
     const dracula = resolveCodeTheme(null, "dracula");
-    expect(dracula.light).toBe("bb:dracula:light");
-    expect(dracula.files["bb:dracula:light"]).toMatchObject({
+    expect(dracula.light).toBe("omnyo:dracula:light");
+    expect(dracula.files["omnyo:dracula:light"]).toMatchObject({
       type: "light",
       colors: { "editor.background": "#f8f8f2" },
     });
@@ -58,15 +60,15 @@ describe("code theme resolution", () => {
     expect(
       resolveCodeTheme(
         {
-          dark: { name: "bb:ocean:dark", file: { name: "Ocean Dark" } },
+          dark: { name: "omnyo:ocean:dark", file: { name: "Ocean Dark" } },
           light: { name: "github-light" },
         },
         "nord",
       ),
     ).toEqual({
-      dark: "bb:ocean:dark",
+      dark: "omnyo:ocean:dark",
       light: "github-light",
-      files: { "bb:ocean:dark": { name: "bb:ocean:dark" } },
+      files: { "omnyo:ocean:dark": { name: "omnyo:ocean:dark" } },
     });
   });
 
@@ -74,11 +76,11 @@ describe("code theme resolution", () => {
     expect(
       resolveCodeTheme({
         dark: {
-          name: "bb:ocean:dark",
+          name: "omnyo:ocean:dark",
           file: { name: "Ocean Dark", type: "dark" },
         },
-      }).files["bb:ocean:dark"],
-    ).toEqual({ name: "bb:ocean:dark", type: "dark" });
+      }).files["omnyo:ocean:dark"],
+    ).toEqual({ name: "omnyo:ocean:dark", type: "dark" });
   });
 
   it("treats a .json or path-shaped declaration as a file", () => {
@@ -87,9 +89,9 @@ describe("code theme resolution", () => {
     expect(isCodeThemeFilePath("github-dark")).toBe(false);
   });
 
-  it("registers custom files under a stable bb: name", () => {
+  it("registers custom files under a stable omnyo: name", () => {
     expect(formatRegisteredCodeThemeName("midnight", "dark")).toBe(
-      "bb:midnight:dark",
+      "omnyo:midnight:dark",
     );
   });
 
@@ -103,9 +105,11 @@ describe("code theme resolution", () => {
 
   it("rejects deeply nested theme JSON instead of throwing", () => {
     let nested: unknown = { name: "Deep" };
+
     for (let depth = 0; depth < 64; depth += 1) {
       nested = { child: nested };
     }
+
     expect(parseVscodeThemeJson(nested)).toBeNull();
   });
 });

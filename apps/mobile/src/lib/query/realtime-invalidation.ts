@@ -1,9 +1,10 @@
-import { createDebouncedCallbackScheduler } from "@bb/domain";
+import { createDebouncedCallbackScheduler } from "@omnyo/domain";
 import type { QueryClient } from "@tanstack/react-query";
 import type { MobileRealtime } from "../realtime/mobile-realtime";
 import { systemConfigQueryKey } from "./query-keys";
 
 const INVALIDATION_DEBOUNCE_MS = 50;
+
 const INVALIDATION_MAX_WAIT_MS = 200;
 
 function invalidateQueriesStaleSince(
@@ -37,6 +38,7 @@ export function installRealtimeInvalidation(
       scheduler.schedule();
     }
   });
+
   const unsubscribeConnected = realtime.onConnected((event) => {
     if (!event.reconnected) return;
     invalidateQueriesStaleSince(queryClient, event.disconnectedAt);

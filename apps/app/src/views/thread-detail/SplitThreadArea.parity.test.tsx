@@ -41,7 +41,7 @@ vi.mock("@/hooks/useRouteState", () => ({
   useRouteState: () => ({ projectId: "p1", threadId: "t1" }),
 }));
 
-vi.mock("@bb/shared-ui/hooks/use-compact-viewport", () => ({
+vi.mock("@omnyo/shared-ui/hooks/use-compact-viewport", () => ({
   useIsCompactViewport: () => false,
 }));
 
@@ -57,9 +57,11 @@ function renderArea(layout: SplitLayout) {
   const store = createStore();
   store.set(splitLayoutAtom, layout);
   const storedLayout = store.get(splitLayoutAtom);
+
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+
   const rendered = render(
     <Provider store={store}>
       <QueryClientProvider client={queryClient}>
@@ -71,6 +73,7 @@ function renderArea(layout: SplitLayout) {
       </QueryClientProvider>
     </Provider>,
   );
+
   return { ...rendered, store, storedLayout };
 }
 
@@ -85,6 +88,7 @@ describe("SplitThreadArea single-pane parity", () => {
       root: pane("pane-1", "t1"),
       focusedPaneId: "pane-1",
     });
+
     expect(container.querySelectorAll("[data-split-pane-id]")).toHaveLength(0);
     expect(getAllByTestId("thread-view")).toHaveLength(1);
     expect(container.firstElementChild?.getAttribute("data-testid")).toBe(

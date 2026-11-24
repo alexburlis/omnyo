@@ -1,18 +1,26 @@
 import type {
   DiscoveredSkill,
   HostDaemonOnlineRpcRequestMessage,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setExperiments } from "@bb/db";
-import { defaultExperiments } from "@bb/domain";
+import { setExperiments } from "@omnyo/db";
+import { defaultExperiments } from "@omnyo/domain";
 import {
   skillContentResponseSchema,
   skillFilesResponseSchema,
   skillListResponseSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { writeRegistrySkillProvenance } from "../../src/services/skills/registry-skill-provenance.js";
 import { providerHasNativeRootSurface } from "../../src/services/providers/native-roots.js";
@@ -29,8 +37,11 @@ import {
 import { withTestHarness } from "../helpers/test-app.js";
 
 const installServerRegistrySkillMock = vi.hoisted(() => vi.fn());
+
 vi.mock("../../src/services/skills/registry-skill-install.js", () => ({
-  installServerRegistrySkill: installServerRegistrySkillMock,
+  createRegistrySkillInstaller: () => ({
+    install: installServerRegistrySkillMock,
+  }),
 }));
 
 interface SkillRpcStub {
@@ -49,6 +60,7 @@ function registryHtml(args: {
   installs?: number;
 }): string {
   const id = `${args.source}/${args.skillId}`;
+
   return `<script type="application/ld+json">${JSON.stringify({
     "@type": "SoftwareApplication",
     name: args.name ?? args.skillId,
@@ -74,6 +86,7 @@ function registerSkillRpc(
   },
 ): SkillRpcStub {
   const stub: SkillRpcStub = { requests: [] };
+
   const responder = registerHostRpcResponder(harness, {
     hostId: args.hostId,
     sessionId: args.sessionId,
@@ -86,20 +99,24 @@ function registerSkillRpc(
           },
         };
       }
+
       if (
         request.command.type === "plugin.host.call" &&
         request.command.method === "resolveNativeRoots"
       ) {
         return { ok: true, result: { output: { skills: [], commands: [] } } };
       }
+
       if (request.command.type === "host.delete_skill") {
         return {
           ok: true,
           result: { deletedPath: args.deletedPath ?? "/deleted" },
         };
       }
+
       if (request.command.type === "host.list_files") {
         const files = args.listedFiles ?? ["SKILL.md"];
+
         return {
           ok: true,
           result: {
@@ -111,6 +128,7 @@ function registerSkillRpc(
           },
         };
       }
+
       if (request.command.type === "host.read_file_relative") {
         return {
           ok: true,
@@ -130,6 +148,7 @@ function registerSkillRpc(
           },
         };
       }
+
       if (request.command.type === "host.write_file") {
         return {
           ok: true,
@@ -145,6 +164,7 @@ function registerSkillRpc(
               },
         };
       }
+
       if (request.command.type === "host.write_skill") {
         return {
           ok: true,
@@ -160,10 +180,13 @@ function registerSkillRpc(
               },
         };
       }
+
       throw new Error(`Unexpected RPC command ${request.command.type}`);
     },
   });
+
   stub.requests = responder.requests;
+
   return stub;
 }
 
@@ -190,15 +213,15 @@ async function writePluginSkillFixture(rootPath: string): Promise<{
   pluginRootPath: string;
   skillFilePath: string;
 }> {
-  const pluginRootPath = join(rootPath, "bb-plugin-skill-catalog-fixture");
+  const pluginRootPath = join(rootPath, "omnyo-plugin-skill-catalog-fixture");
   const skillRootPath = join(pluginRootPath, "skills", "plugin-notes");
   await mkdir(skillRootPath, { recursive: true });
   await writeFile(
     join(pluginRootPath, "package.json"),
     JSON.stringify({
-      name: "bb-plugin-skill-catalog-fixture",
+      name: "omnyo-plugin-skill-catalog-fixture",
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Skill catalog fixture",
         description: "Contributes one readable skill.",
         branding: { icon: "Zap" },
@@ -231,6 +254,7 @@ async function writePluginSkillFixture(rootPath: string): Promise<{
     "# Plugin reference\n",
     "utf8",
   );
+
   return { pluginRootPath, skillFilePath };
 }
 
@@ -247,29 +271,32 @@ describe("public project skills route", () => {
         const { host, session } = seedHostSession(harness.deps, {
           id: "host-shared-skill-list",
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
           path: "/tmp/shared-skill-list",
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
           path: "/tmp/shared-skill-list",
         });
+
         registerSkillRpc(harness, {
           hostId: host.id,
           sessionId: session.id,
           skillsByProvider: {
-            "bb-shared": [
+            "omnyo-shared": [
               discovered(
                 "portable-review",
                 "shared-project",
                 "/tmp/shared-skill-list/.agents/skills/portable-review/SKILL.md",
               ),
               discovered(
-                "repo-bb-skill",
-                "bb-project",
-                "/tmp/shared-skill-list/.bb/skills/repo-bb-skill/SKILL.md",
+                "repo-omnyo-skill",
+                "omnyo-project",
+                "/tmp/shared-skill-list/.omnyo/skills/repo-omnyo-skill/SKILL.md",
               ),
             ],
           },
@@ -279,6 +306,7 @@ describe("public project skills route", () => {
         const response = await harness.app.request(
           `/api/v1/projects/${project.id}/skills?environmentId=${environment.id}`,
         );
+
         expect(response.status).toBe(200);
         const body = skillListResponseSchema.parse(await readJson(response));
 
@@ -297,7 +325,7 @@ describe("public project skills route", () => {
           registrySkillId: null,
         });
         expect(body.skills.map((skill) => skill.name)).not.toContain(
-          "repo-bb-skill",
+          "repo-omnyo-skill",
         );
         expect(warn).not.toHaveBeenCalledWith(
           expect.anything(),
@@ -310,28 +338,34 @@ describe("public project skills route", () => {
   it("paginates the supported registry set before slicing pages", async () => {
     await withTestHarness(async (harness) => {
       vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+
       const homepage = [
         String.raw`\"source\":\"owner/first-repo\",\"skillId\":\"first-skill\",\"name\":\"First skill\",\"installs\":400`,
         String.raw`\"source\":\"catalog.example.com\",\"skillId\":\"unsupported-skill\",\"name\":\"Unsupported skill\",\"installs\":300`,
         String.raw`\"source\":\"owner/second-repo\",\"skillId\":\"second-skill\",\"name\":\"Second skill\",\"installs\":200`,
         String.raw`\"source\":\"owner/third-repo\",\"skillId\":\"third-skill\",\"name\":\"Third skill\",\"installs\":100`,
       ].join("\n");
+
       vi.stubGlobal(
         "fetch",
         vi.fn(async (input: string | URL) => {
           const url = String(input);
+
           if (url === "https://www.skills.sh/trending") {
             return new Response(homepage, { status: 200 });
           }
+
           if (
             url.startsWith("https://raw.githubusercontent.com/owner/") &&
             url.endsWith("/SKILL.md")
           ) {
             return new Response("# Available skill\n", { status: 200 });
           }
+
           const match = url.match(
             /^https:\/\/www\.skills\.sh\/owner\/(?<repo>[^/]+)\/(?<skillId>[^/]+)$/u,
           );
+
           if (match?.groups) {
             return new Response(
               registryHtml({
@@ -341,6 +375,7 @@ describe("public project skills route", () => {
               { status: 200 },
             );
           }
+
           return new Response(null, { status: 404 });
         }),
       );
@@ -348,6 +383,7 @@ describe("public project skills route", () => {
       const firstResponse = await harness.app.request(
         "/api/v1/skills-registry?page=0&perPage=2",
       );
+
       const firstBody = (await readJson(firstResponse)) as {
         skills: Array<{ id: string }>;
         pagination: {
@@ -357,6 +393,7 @@ describe("public project skills route", () => {
           hasMore: boolean;
         };
       };
+
       expect(firstBody.skills.map((skill) => skill.id)).toEqual([
         "owner/first-repo/first-skill",
         "owner/second-repo/second-skill",
@@ -371,6 +408,7 @@ describe("public project skills route", () => {
       const secondResponse = await harness.app.request(
         "/api/v1/skills-registry?page=1&perPage=2",
       );
+
       const secondBody = (await readJson(secondResponse)) as {
         skills: Array<{ id: string }>;
         pagination: {
@@ -380,6 +418,7 @@ describe("public project skills route", () => {
           hasMore: boolean;
         };
       };
+
       expect(secondBody.skills.map((skill) => skill.id)).toEqual([
         "owner/third-repo/third-skill",
       ]);
@@ -395,6 +434,7 @@ describe("public project skills route", () => {
   it("does not advertise authenticated search pages beyond its fetched window", async () => {
     await withTestHarness(async (harness) => {
       vi.stubEnv("VERCEL_OIDC_TOKEN", "test-token");
+
       const apiSkills = Array.from({ length: 200 }, (_, index) => ({
         id: `owner/repo-${index}/skill-${index}`,
         slug: `skill-${index}`,
@@ -404,22 +444,26 @@ describe("public project skills route", () => {
         installUrl: null,
         url: `https://www.skills.sh/owner/repo-${index}/skill-${index}`,
       }));
+
       vi.stubGlobal(
         "fetch",
         vi.fn(async (input: string | URL) => {
           const url = String(input);
+
           if (url.startsWith("https://www.skills.sh/api/v1/skills/search?")) {
             return Response.json({
               data: apiSkills,
               pagination: { total: 500, hasMore: true },
             });
           }
+
           if (url.startsWith("https://www.skills.sh/api/v1/skills/")) {
             return Response.json({
               hash: "registry-revision",
               files: [{ path: "SKILL.md", contents: "# Available skill\n" }],
             });
           }
+
           return new Response(null, { status: 404 });
         }),
       );
@@ -429,6 +473,7 @@ describe("public project skills route", () => {
       );
 
       expect(response.status).toBe(200);
+
       const body = (await readJson(response)) as {
         skills: Array<{ id: string }>;
         pagination: {
@@ -438,6 +483,7 @@ describe("public project skills route", () => {
           hasMore: boolean;
         };
       };
+
       expect(body.skills).toHaveLength(8);
       expect(body.pagination).toEqual({
         page: 16,
@@ -456,8 +502,10 @@ describe("public project skills route", () => {
         "fetch",
         vi.fn(async (input: string | URL) => {
           const url = String(input);
+
           if (url.startsWith("https://www.skills.sh/api/v1/skills?")) {
             requested.push(url);
+
             return Response.json({
               data: [
                 {
@@ -482,6 +530,7 @@ describe("public project skills route", () => {
               pagination: { total: 2, hasMore: false },
             });
           }
+
           return new Response(null, { status: 404 });
         }),
       );
@@ -489,6 +538,7 @@ describe("public project skills route", () => {
       const response = await harness.app.request(
         "/api/v1/skills-registry?page=0&perPage=24",
       );
+
       const body = (await readJson(response)) as {
         skills: Array<{ id: string }>;
         ranking: string;
@@ -509,20 +559,24 @@ describe("public project skills route", () => {
   it("keeps the trending page's own order but ranks a filtered search", async () => {
     await withTestHarness(async (harness) => {
       vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+
       const directory = [
         String.raw`\"source\":\"owner/zulu-repo\",\"skillId\":\"zulu-skill\",\"name\":\"Zulu skill\",\"installs\":500`,
         String.raw`\"source\":\"owner/alpha-repo\",\"skillId\":\"alpha-skill\",\"name\":\"Alpha skill\",\"installs\":500`,
       ].join("\n");
+
       vi.stubGlobal(
         "fetch",
         vi.fn(async (input: string | URL) => {
           const url = String(input);
+
           if (
             url === "https://www.skills.sh/trending" ||
             url === "https://www.skills.sh/"
           ) {
             return new Response(directory, { status: 200 });
           }
+
           return new Response(null, { status: 404 });
         }),
       );
@@ -530,6 +584,7 @@ describe("public project skills route", () => {
       const browse = (await readJson(
         await harness.app.request("/api/v1/skills-registry?page=0&perPage=24"),
       )) as { skills: Array<{ id: string }> };
+
       expect(browse.skills.map((skill) => skill.id)).toEqual([
         "owner/zulu-repo/zulu-skill",
         "owner/alpha-repo/alpha-skill",
@@ -540,6 +595,7 @@ describe("public project skills route", () => {
           "/api/v1/skills-registry?q=skill&page=0&perPage=24",
         ),
       )) as { skills: Array<{ id: string }> };
+
       expect(search.skills.map((skill) => skill.id)).toEqual([
         "owner/alpha-repo/alpha-skill",
         "owner/zulu-repo/zulu-skill",
@@ -555,14 +611,17 @@ describe("public project skills route", () => {
         "fetch",
         vi.fn(async (input: string | URL) => {
           const url = String(input);
+
           if (url === "https://www.skills.sh/trending") {
             return new Response("<html><body>redesigned</body></html>", {
               status: 200,
             });
           }
+
           if (url === "https://www.skills.sh/") {
             return new Response(allTime, { status: 200 });
           }
+
           return new Response(null, { status: 404 });
         }),
       );
@@ -582,6 +641,7 @@ describe("public project skills route", () => {
     await withTestHarness(async (harness) => {
       vi.stubEnv("VERCEL_OIDC_TOKEN", "");
       const allTime = String.raw`\"source\":\"owner/steady-repo\",\"skillId\":\"steady-skill\",\"name\":\"Steady skill\",\"installs\":700`;
+
       for (const trendingFailure of [
         async () => new Response(null, { status: 404 }),
         async () => {
@@ -592,12 +652,15 @@ describe("public project skills route", () => {
           "fetch",
           vi.fn(async (input: string | URL) => {
             const url = String(input);
+
             if (url === "https://www.skills.sh/trending") {
               return trendingFailure();
             }
+
             if (url === "https://www.skills.sh/") {
               return new Response(allTime, { status: 200 });
             }
+
             return new Response(null, { status: 404 });
           }),
         );
@@ -605,11 +668,14 @@ describe("public project skills route", () => {
         const response = await harness.app.request(
           "/api/v1/skills-registry?page=0&perPage=24",
         );
+
         expect(response.status).toBe(200);
+
         const body = (await readJson(response)) as {
           skills: Array<{ id: string }>;
           ranking: string;
         };
+
         expect(body.skills.map((skill) => skill.id)).toEqual([
           "owner/steady-repo/steady-skill",
         ]);
@@ -630,11 +696,14 @@ describe("public project skills route", () => {
       const response = await harness.app.request(
         "/api/v1/skills-registry?q=nothing-matches-this&page=0&perPage=24",
       );
+
       expect(response.status).toBe(200);
+
       const body = (await readJson(response)) as {
         skills: unknown[];
         pagination: { total: number };
       };
+
       expect(body.skills).toEqual([]);
       expect(body.pagination.total).toBe(0);
     });
@@ -651,6 +720,7 @@ describe("public project skills route", () => {
       const response = await harness.app.request(
         "/api/v1/skills-registry?page=0&perPage=24",
       );
+
       expect(response.status).toBe(503);
     });
   });
@@ -663,9 +733,11 @@ describe("public project skills route", () => {
         "fetch",
         vi.fn(async (input: string | URL) => {
           const url = String(input);
+
           if (url === "https://www.skills.sh/trending") {
             return new Response(homepage, { status: 200 });
           }
+
           if (
             url ===
             "https://api.github.com/repos/owner/nested-repo/git/trees/HEAD?recursive=1"
@@ -679,12 +751,14 @@ describe("public project skills route", () => {
               ],
             });
           }
+
           if (
             url ===
             "https://raw.githubusercontent.com/owner/nested-repo/HEAD/skills/productivity/nested-skill/SKILL.md"
           ) {
             return new Response("# Nested skill\n", { status: 200 });
           }
+
           if (url === "https://www.skills.sh/owner/nested-repo/nested-skill") {
             return new Response(
               registryHtml({
@@ -694,6 +768,7 @@ describe("public project skills route", () => {
               { status: 200 },
             );
           }
+
           return new Response(null, { status: 404 });
         }),
       );
@@ -701,9 +776,11 @@ describe("public project skills route", () => {
       const response = await harness.app.request(
         "/api/v1/skills-registry?page=0&perPage=24",
       );
+
       const body = (await readJson(response)) as {
         skills: Array<{ id: string }>;
       };
+
       expect(body.skills.map((skill) => skill.id)).toEqual([
         "owner/nested-repo/nested-skill",
       ]);
@@ -718,9 +795,11 @@ describe("public project skills route", () => {
         "fetch",
         vi.fn(async (input: string | URL) => {
           const url = String(input);
+
           if (url === "https://www.skills.sh/trending") {
             return new Response(homepage, { status: 200 });
           }
+
           if (url === "https://www.skills.sh/owner/aliased-repo/public-name") {
             return new Response(
               [
@@ -732,6 +811,7 @@ describe("public project skills route", () => {
               { status: 200 },
             );
           }
+
           if (
             url ===
             "https://api.github.com/repos/owner/aliased-repo/git/trees/HEAD?recursive=1"
@@ -745,6 +825,7 @@ describe("public project skills route", () => {
               ],
             });
           }
+
           return new Response(null, { status: 404 });
         }),
       );
@@ -752,9 +833,11 @@ describe("public project skills route", () => {
       const listResponse = await harness.app.request(
         "/api/v1/skills-registry?page=0&perPage=24",
       );
+
       const listBody = (await readJson(listResponse)) as {
         skills: Array<{ id: string }>;
       };
+
       expect(listBody.skills.map((skill) => skill.id)).toEqual([
         "owner/aliased-repo/public-name",
       ]);
@@ -762,9 +845,11 @@ describe("public project skills route", () => {
       const detailResponse = await harness.app.request(
         "/api/v1/skills-registry/detail?source=owner%2Faliased-repo&skillId=public-name",
       );
+
       const detailBody = (await readJson(detailResponse)) as {
         files: Array<{ contents: string }>;
       };
+
       expect(detailBody.files[0]?.contents).toContain("# Public name");
       expect(detailBody.files[0]?.contents).toContain(
         "Loaded from the real registry preview.",
@@ -775,24 +860,31 @@ describe("public project skills route", () => {
   it("lists registry entries without resolving every skill source", async () => {
     await withTestHarness(async (harness) => {
       vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+
       const homepage = [
         String.raw`\"source\":\"owner/available-repo\",\"skillId\":\"available-skill\",\"name\":\"Available skill\",\"installs\":200`,
         String.raw`\"source\":\"owner/stale-repo\",\"skillId\":\"stale-skill\",\"name\":\"Stale skill\",\"installs\":100`,
       ].join("\n");
+
       const allTime = [
         String.raw`\"source\":\"owner/available-repo\",\"skillId\":\"available-skill\",\"name\":\"Available skill\",\"installs\":900`,
         String.raw`\"source\":\"owner/stale-repo\",\"skillId\":\"stale-skill\",\"name\":\"Stale skill\",\"installs\":800`,
       ].join("\n");
+
       const fetchMock = vi.fn(async (input: string | URL) => {
         const url = String(input);
+
         if (url === "https://www.skills.sh/trending") {
           return new Response(homepage, { status: 200 });
         }
+
         if (url === "https://www.skills.sh/") {
           return new Response(allTime, { status: 200 });
         }
+
         return new Response(null, { status: 404 });
       });
+
       vi.stubGlobal("fetch", fetchMock);
 
       const response = await harness.app.request(
@@ -800,11 +892,13 @@ describe("public project skills route", () => {
       );
 
       expect(response.status).toBe(200);
+
       const body = (await readJson(response)) as {
         skills: Array<{ id: string }>;
         pagination: { total: number; hasMore: boolean };
         ranking: string;
       };
+
       expect(body.skills.map((skill) => skill.id)).toEqual([
         "owner/available-repo/available-skill",
         "owner/stale-repo/stale-skill",
@@ -819,11 +913,14 @@ describe("public project skills route", () => {
       const searchResponse = await harness.app.request(
         "/api/v1/skills-registry?q=stale&page=0&perPage=24",
       );
+
       expect(searchResponse.status).toBe(200);
+
       const searchBody = (await readJson(searchResponse)) as {
         skills: Array<{ id: string }>;
         ranking: string;
       };
+
       expect(searchBody.skills.map((skill) => skill.id)).toEqual([
         "owner/stale-repo/stale-skill",
       ]);
@@ -835,6 +932,7 @@ describe("public project skills route", () => {
       const staleDetail = await harness.app.request(
         "/api/v1/skills-registry/detail?source=owner%2Fstale-repo&skillId=stale-skill",
       );
+
       expect(staleDetail.status).toBe(404);
     });
   });
@@ -842,25 +940,32 @@ describe("public project skills route", () => {
   it("loads and caches GitHub stars separately from the registry list", async () => {
     await withTestHarness(async (harness) => {
       vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+
       const homepage = [
         String.raw`\"source\":\"owner/shared-repo\",\"skillId\":\"first-skill\",\"name\":\"First skill\",\"installs\":200`,
         String.raw`\"source\":\"owner/shared-repo\",\"skillId\":\"second-skill\",\"name\":\"Second skill\",\"installs\":100`,
       ].join("\n");
+
       const fetchMock = vi.fn(async (input: string | URL) => {
         const url = String(input);
+
         if (url === "https://www.skills.sh/trending") {
           return new Response(homepage, { status: 200 });
         }
+
         if (url === "https://api.github.com/repos/owner/shared-repo") {
           return Response.json({ stargazers_count: 27_053 });
         }
+
         return new Response(null, { status: 404 });
       });
+
       vi.stubGlobal("fetch", fetchMock);
 
       const listResponse = await harness.app.request(
         "/api/v1/skills-registry?page=0&perPage=24",
       );
+
       const listBody = (await readJson(listResponse)) as {
         skills: Array<{ stars: number | null }>;
       };
@@ -872,6 +977,7 @@ describe("public project skills route", () => {
       const firstStarsResponse = await harness.app.request(
         "/api/v1/skills-registry/repository-stars?source=owner%2Fshared-repo",
       );
+
       const secondStarsResponse = await harness.app.request(
         "/api/v1/skills-registry/repository-stars?source=github.com%2Fowner%2Fshared-repo",
       );
@@ -898,6 +1004,7 @@ describe("public project skills route", () => {
         }),
         "Summary</div><p>Loaded card description.</p>SKILL.md",
       ].join("");
+
       const fetchMock = vi.fn(async (input: string | URL) => {
         if (
           String(input) ===
@@ -905,13 +1012,16 @@ describe("public project skills route", () => {
         ) {
           return new Response(registryEntryHtml, { status: 200 });
         }
+
         return new Response(null, { status: 404 });
       });
+
       vi.stubGlobal("fetch", fetchMock);
 
       const firstResponse = await harness.app.request(
         "/api/v1/skills-registry/entry?id=owner%2Fsummary-repo%2Fsummary-skill",
       );
+
       const secondResponse = await harness.app.request(
         "/api/v1/skills-registry/entry?id=owner%2Fsummary-repo%2Fsummary-skill",
       );
@@ -928,7 +1038,7 @@ describe("public project skills route", () => {
     });
   });
 
-  it("imports a registry package into server-owned bb user storage", async () => {
+  it("imports a registry package into server-owned Omnyo user storage", async () => {
     await withTestHarness(async (harness) => {
       const filePath = "/data/skills/find-skills/SKILL.md";
       installServerRegistrySkillMock.mockResolvedValueOnce({ filePath });
@@ -960,11 +1070,48 @@ describe("public project skills route", () => {
       expect(response.status).toBe(200);
       expect(await readJson(response)).toEqual({ ok: true, filePath });
       expect(installServerRegistrySkillMock).toHaveBeenCalledWith({
-        dataDir: harness.deps.config.dataDir,
         packageRef: "vercel-labs/skills",
         registrySkillId: "github.com/vercel-labs/skills/find-skills",
         skillId: "find-skills",
       });
+    });
+  });
+
+  it("keeps composer queries out of route URLs and error logs", async () => {
+    await withTestHarness(async (harness) => {
+      vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+      const sentinel = "composer privacy fixture query";
+      const errorLog = vi.spyOn(harness.deps.logger, "error");
+      const warnLog = vi.spyOn(harness.deps.logger, "warn");
+
+      const fetch = vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValueOnce(
+          Response.json({ searchType: "semantic", skills: [] }),
+        )
+        .mockRejectedValueOnce(new Error(sentinel));
+
+      vi.stubGlobal("fetch", fetch);
+      const path = "/api/v1/skills-registry/search?perPage=8";
+
+      const request = (query: string) =>
+        harness.app.request(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query }),
+        });
+
+      const success = await request(sentinel);
+      expect(success.status).toBe(200);
+      expect(await readJson(success)).toMatchObject({ coverage: "semantic" });
+      const failure = await request(`${sentinel} fails`);
+      expect(failure.status).toBe(503);
+      expect(await readJson(failure)).toMatchObject({
+        code: "skills_registry_unavailable",
+      });
+      expect(
+        JSON.stringify([errorLog.mock.calls, warnLog.mock.calls]),
+      ).not.toContain(sentinel);
     });
   });
 
@@ -1056,31 +1203,35 @@ describe("public project skills route", () => {
     });
   });
 
-  it("maps scope, de-dupes shared bb skills, and sorts the listing", async () => {
+  it("maps scope, de-dupes shared Omnyo skills, and sorts the listing", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-skills",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/skills-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/skills-env",
       });
-      const bbSkill = discovered(
-        "bb-helper",
-        "bb-data-dir",
-        "/data/skills/bb-helper/SKILL.md",
+
+      const sharedSkill = discovered(
+        "omnyo-helper",
+        "omnyo-data-dir",
+        "/data/skills/omnyo-helper/SKILL.md",
       );
+
       const stub = registerSkillRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
         skillsByProvider: {
           "claude-code": [
-            bbSkill,
+            sharedSkill,
             discovered(
               "cp",
               "provider-project",
@@ -1093,7 +1244,7 @@ describe("public project skills route", () => {
             ),
           ],
           codex: [
-            bbSkill,
+            sharedSkill,
             discovered(
               "cx",
               "provider-user",
@@ -1121,13 +1272,13 @@ describe("public project skills route", () => {
       const body = skillListResponseSchema.parse(await readJson(response));
       expect(body.skills).toEqual([
         {
-          id: skillId("/data/skills/bb-helper/SKILL.md"),
-          name: "bb-helper",
-          description: "bb-helper skill",
+          id: skillId("/data/skills/omnyo-helper/SKILL.md"),
+          name: "omnyo-helper",
+          description: "omnyo-helper skill",
           provider: null,
-          scope: "bb-user",
+          scope: "omnyo-user",
           pluginId: null,
-          filePath: "/data/skills/bb-helper/SKILL.md",
+          filePath: "/data/skills/omnyo-helper/SKILL.md",
           manageable: true,
           registrySkillId: null,
         },
@@ -1176,20 +1327,24 @@ describe("public project skills route", () => {
           registrySkillId: null,
         },
       ]);
+
       const listed = stub.requests
         .map((request) => request.command)
         .filter((command) => command.type === "host.list_skills");
+
       const surfaced = harness.deps.providerRegistry
         .list()
         .filter(providerHasNativeRootSurface)
         .map((registration) => registration.info.id)
         .sort();
+
       expect(surfaced).toEqual(
         expect.arrayContaining(["acp-cursor", "claude-code", "codex", "pi"]),
       );
       expect(listed.map((command) => command.providerId).sort()).toEqual(
         surfaced,
       );
+
       for (const command of listed) {
         expect(command).toEqual({
           type: "host.list_skills",
@@ -1211,22 +1366,27 @@ describe("public project skills route", () => {
         "skills",
         "find-skills",
       );
+
       const builtinCollisionDirectory = join(
         harness.deps.config.builtinSkillsRootPath,
         "find-skills",
       );
+
       const manualSkillDirectory = join(
         harness.deps.config.dataDir,
         "skills",
         "manual-skill",
       );
+
       await Promise.all([
         mkdir(registrySkillDirectory, { recursive: true }),
         mkdir(builtinCollisionDirectory, { recursive: true }),
         mkdir(manualSkillDirectory, { recursive: true }),
       ]);
+
       const collidingSkillContent =
         "---\nname: find-skills\ndescription: Find skills.\n---\n";
+
       await Promise.all([
         writeFile(
           join(registrySkillDirectory, "SKILL.md"),
@@ -1249,11 +1409,14 @@ describe("public project skills route", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-registry-provenance",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/registry-provenance-project",
       });
+
       registerSkillRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -1265,6 +1428,7 @@ describe("public project skills route", () => {
 
       expect(response.status).toBe(200);
       const listed = skillListResponseSchema.parse(await readJson(response));
+
       const collidingSkills = listed.skills
         .filter((skill) => skill.name === "find-skills")
         .map(({ filePath, registrySkillId, scope }) => ({
@@ -1272,41 +1436,49 @@ describe("public project skills route", () => {
           registrySkillId,
           scope,
         }));
+
       expect(collidingSkills).toHaveLength(1);
       expect(collidingSkills).toEqual(
         expect.arrayContaining([
           {
             filePath: join(registrySkillDirectory, "SKILL.md"),
             registrySkillId: "github.com/vercel-labs/skills/find-skills",
-            scope: "bb-user",
+            scope: "omnyo-user",
           },
         ]),
       );
       expect(
         listed.skills.find((skill) => skill.name === "manual-skill"),
-      ).toMatchObject({ scope: "bb-user", registrySkillId: null });
+      ).toMatchObject({ scope: "omnyo-user", registrySkillId: null });
     });
   });
 
-  it("lists and reads a bb plugin skill from the authoritative runtime catalog", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "bb-plugin-skill-route-"));
+  it("lists and reads an Omnyo plugin skill from the authoritative runtime catalog", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-skill-route-"));
+
     try {
       await withTestHarness(async (harness) => {
         setExperiments(harness.db, {
           ...defaultExperiments,
         });
+
         const { pluginRootPath, skillFilePath } =
           await writePluginSkillFixture(workDir);
+
         const installed =
           await harness.pluginService.installPath(pluginRootPath);
+
         const { host, session } = seedHostSession(harness.deps, {
           id: "host-plugin-skill",
         });
+
         seedPrimaryHost(harness.deps, host.id);
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
           path: "/tmp/plugin-skill-project",
         });
+
         const stub = registerSkillRpc(harness, {
           hostId: host.id,
           sessionId: session.id,
@@ -1315,13 +1487,17 @@ describe("public project skills route", () => {
         const listResponse = await harness.app.request(
           `/api/v1/projects/${project.id}/skills?environmentId=`,
         );
+
         expect(listResponse.status).toBe(200);
+
         const listed = skillListResponseSchema.parse(
           await readJson(listResponse),
         );
+
         const matches = listed.skills.filter(
           (skill) => skill.name === "plugin-notes",
         );
+
         expect(matches).toHaveLength(1);
         expect(matches[0]).toMatchObject({
           name: "plugin-notes",
@@ -1334,15 +1510,19 @@ describe("public project skills route", () => {
         });
 
         const skill = matches[0];
+
         if (skill === undefined) throw new Error("Expected plugin skill");
+
         const query = new URLSearchParams({
           skillId: skill.id,
           environmentId: "",
           path: "reference.md",
         });
+
         const contentResponse = await harness.app.request(
           `/api/v1/projects/${project.id}/skills/content?${query}`,
         );
+
         expect(contentResponse.status).toBe(200);
         expect(
           skillContentResponseSchema.parse(await readJson(contentResponse)),
@@ -1358,33 +1538,36 @@ describe("public project skills route", () => {
     }
   });
 
-  it("deletes a bb skill via the confined daemon primitive", async () => {
+  it("deletes an Omnyo skill via the confined daemon primitive", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-skill-delete",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/skill-delete-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/skill-delete-env",
       });
+
       const stub = registerSkillRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
         skillsByProvider: {
           "claude-code": [
             discovered(
-              "bb-helper",
-              "bb-data-dir",
-              "/data/skills/bb-helper/SKILL.md",
+              "omnyo-helper",
+              "omnyo-data-dir",
+              "/data/skills/omnyo-helper/SKILL.md",
             ),
           ],
         },
-        deletedPath: "/data/skills/bb-helper",
+        deletedPath: "/data/skills/omnyo-helper",
       });
 
       const response = await harness.app.request(
@@ -1393,7 +1576,7 @@ describe("public project skills route", () => {
           method: "DELETE",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            skillId: skillId("/data/skills/bb-helper/SKILL.md"),
+            skillId: skillId("/data/skills/omnyo-helper/SKILL.md"),
             environmentId: environment.id,
           }),
         },
@@ -1401,15 +1584,17 @@ describe("public project skills route", () => {
 
       expect(response.status).toBe(200);
       expect(await readJson(response)).toEqual({
-        deletedPath: "/data/skills/bb-helper",
+        deletedPath: "/data/skills/omnyo-helper",
       });
+
       const deleteCommand = stub.requests
         .map((request) => request.command)
         .find((command) => command.type === "host.delete_skill");
+
       expect(deleteCommand).toEqual({
         type: "host.delete_skill",
-        scope: "bb-user",
-        name: "bb-helper",
+        scope: "omnyo-user",
+        name: "omnyo-helper",
         cwd: "/tmp/skill-delete-env",
         rootPath: null,
       });
@@ -1421,15 +1606,18 @@ describe("public project skills route", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-provider-skill-delete",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/provider-skill-delete-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/provider-skill-delete-env",
       });
+
       const stub = registerSkillRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -1459,9 +1647,11 @@ describe("public project skills route", () => {
       );
 
       expect(response.status).toBe(200);
+
       const deleteCommand = stub.requests
         .map((request) => request.command)
         .find((command) => command.type === "host.delete_skill");
+
       expect(deleteCommand).toEqual({
         type: "host.delete_skill",
         scope: "provider-user",
@@ -1477,15 +1667,18 @@ describe("public project skills route", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-skill-files",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/skill-files-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/skill-files-env",
       });
+
       const stub = registerSkillRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -1501,6 +1694,7 @@ describe("public project skills route", () => {
         listedFiles: ["references/layout.md", "SKILL.md"],
         fileContents: { "references/layout.md": "# Layout reference" },
       });
+
       const query = new URLSearchParams({
         skillId: skillId("/home/.codex/skills/documents/SKILL.md"),
         environmentId: environment.id,
@@ -1509,6 +1703,7 @@ describe("public project skills route", () => {
       const filesResponse = await harness.app.request(
         `/api/v1/projects/${project.id}/skills/files?${query}`,
       );
+
       expect(filesResponse.status).toBe(200);
       expect(
         skillFilesResponseSchema.parse(await readJson(filesResponse)),
@@ -1518,9 +1713,11 @@ describe("public project skills route", () => {
       });
 
       query.set("path", "references/layout.md");
+
       const contentResponse = await harness.app.request(
         `/api/v1/projects/${project.id}/skills/content?${query}`,
       );
+
       expect(contentResponse.status).toBe(200);
       expect(
         skillContentResponseSchema.parse(await readJson(contentResponse)),
@@ -1530,10 +1727,18 @@ describe("public project skills route", () => {
       });
       expect(stub.requests.map((request) => request.command)).toContainEqual({
         type: "host.read_file_relative",
+        followRootSymlink: true,
         rootPath: "/home/.codex/skills/documents",
         path: "references/layout.md",
         dotfiles: "deny",
       });
+      expect(stub.requests.map((request) => request.command)).toContainEqual(
+        expect.objectContaining({
+          type: "host.list_files",
+          followRootSymlink: true,
+          path: "/home/.codex/skills/documents",
+        }),
+      );
     });
   });
 
@@ -1542,11 +1747,14 @@ describe("public project skills route", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-duplicate-skills",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/duplicate-skills-project",
       });
+
       const claudePath = "/home/.claude/skills/review/SKILL.md";
       const codexPath = "/home/.codex/skills/review/SKILL.md";
       registerSkillRpc(harness, {
@@ -1568,10 +1776,13 @@ describe("public project skills route", () => {
           path: "SKILL.md",
           environmentId: "",
         });
+
         const response = await harness.app.request(
           `/api/v1/projects/${project.id}/skills/content?${query}`,
         );
+
         expect(response.status).toBe(200);
+
         return skillContentResponseSchema.parse(await readJson(response));
       };
 
@@ -1589,11 +1800,14 @@ describe("public project skills route", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-claude-skill-edit",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/claude-skill-edit-project",
       });
+
       const stub = registerSkillRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -1639,31 +1853,35 @@ describe("public project skills route", () => {
     });
   });
 
-  it("returns 409 for stale bb and provider skill revisions", async () => {
+  it("returns 409 for stale Omnyo and provider skill revisions", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-stale-skill-edit",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/stale-skill-edit-project",
       });
-      const bbPath = "/data/skills/review/SKILL.md";
+
+      const appSkillPath = "/data/skills/review/SKILL.md";
       const providerPath = "/home/.claude/skills/review/SKILL.md";
+
       const stub = registerSkillRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
         skillsByProvider: {
           "claude-code": [
-            discovered("review", "bb-data-dir", bbPath),
+            discovered("review", "omnyo-data-dir", appSkillPath),
             discovered("review", "provider-user", providerPath),
           ],
         },
         writeConflicts: true,
       });
 
-      for (const id of [skillId(bbPath), skillId(providerPath)]) {
+      for (const id of [skillId(appSkillPath), skillId(providerPath)]) {
         const response = await harness.app.request(
           `/api/v1/projects/${project.id}/skills/content`,
           {
@@ -1677,12 +1895,13 @@ describe("public project skills route", () => {
             }),
           },
         );
+
         expect(response.status).toBe(409);
       }
 
       expect(stub.requests.map((request) => request.command)).toContainEqual({
         type: "host.write_skill",
-        scope: "bb-user",
+        scope: "omnyo-user",
         name: "review",
         cwd: "/tmp/stale-skill-edit-project",
         content: "# Stale",
@@ -1700,26 +1919,119 @@ describe("public project skills route", () => {
     });
   });
 
-  it("rejects a bb-project delete when no workspace resolves", async () => {
+  it("saves a server-owned omnyo user skill on the server's disk with a revision check", async () => {
+    await withTestHarness(async (harness) => {
+      const skillDirectory = join(
+        harness.deps.config.dataDir,
+        "skills",
+        "notes",
+      );
+
+      const skillFilePath = join(skillDirectory, "SKILL.md");
+      await mkdir(skillDirectory, { recursive: true });
+
+      await writeFile(
+        skillFilePath,
+        "---\nname: notes\ndescription: Notes.\n---\n",
+      );
+
+      const { host, session } = seedHostSession(harness.deps, {
+        id: "host-server-owned-skill-edit",
+      });
+
+      seedPrimaryHost(harness.deps, host.id);
+
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: "/tmp/server-owned-skill-edit-project",
+      });
+
+      const stub = registerSkillRpc(harness, {
+        hostId: host.id,
+        sessionId: session.id,
+      });
+
+      const listed = skillListResponseSchema.parse(
+        await readJson(
+          await harness.app.request(
+            `/api/v1/projects/${project.id}/skills?environmentId=`,
+          ),
+        ),
+      );
+
+      const skill = listed.skills.find((entry) => entry.name === "notes");
+
+      if (skill === undefined) throw new Error("Expected server-owned skill");
+      expect(skill).toMatchObject({ scope: "omnyo-user", manageable: true });
+
+      const read = skillContentResponseSchema.parse(
+        await readJson(
+          await harness.app.request(
+            `/api/v1/projects/${project.id}/skills/content?${new URLSearchParams(
+              { skillId: skill.id, environmentId: "", path: "SKILL.md" },
+            )}`,
+          ),
+        ),
+      );
+
+      const savedContent = "---\nname: notes\ndescription: Saved.\n---\n";
+
+      const save = (revision: string) =>
+        harness.app.request(`/api/v1/projects/${project.id}/skills/content`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            skillId: skill.id,
+            environmentId: null,
+            content: savedContent,
+            revision,
+          }),
+        });
+
+      const saved = await save(read.revision);
+
+      expect(saved.status).toBe(200);
+      expect(await readJson(saved)).toEqual({
+        filePath: await realpath(skillFilePath),
+        revision: createHash("sha256").update(savedContent).digest("hex"),
+      });
+      await expect(readFile(skillFilePath, "utf8")).resolves.toBe(savedContent);
+      expect((await save(read.revision)).status).toBe(409);
+      await expect(readFile(skillFilePath, "utf8")).resolves.toBe(savedContent);
+      await expect(readdir(skillDirectory)).resolves.toEqual(["SKILL.md"]);
+      expect(
+        stub.requests.some((request) =>
+          ["host.write_file", "host.write_skill"].includes(
+            request.command.type,
+          ),
+        ),
+      ).toBe(false);
+    });
+  });
+
+  it("rejects an omnyo-project delete when no workspace resolves", async () => {
     await withTestHarness(async (harness) => {
       const { host: hostA, session } = seedHostSession(harness.deps, {
         id: "host-primary",
       });
+
       const hostB = seedHost(harness.deps, { id: "host-source" });
       seedPrimaryHost(harness.deps, hostA.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: hostB.id,
         path: "/tmp/other-host-project",
       });
+
       registerSkillRpc(harness, {
         hostId: hostA.id,
         sessionId: session.id,
         skillsByProvider: {
           "claude-code": [
             discovered(
-              "bb-helper",
-              "bb-project",
-              "/missing/.bb/skills/bb-helper/SKILL.md",
+              "omnyo-helper",
+              "omnyo-project",
+              "/missing/.omnyo/skills/omnyo-helper/SKILL.md",
             ),
           ],
         },
@@ -1731,7 +2043,7 @@ describe("public project skills route", () => {
           method: "DELETE",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            skillId: skillId("/missing/.bb/skills/bb-helper/SKILL.md"),
+            skillId: skillId("/missing/.omnyo/skills/omnyo-helper/SKILL.md"),
             environmentId: null,
           }),
         },
@@ -1741,3 +2053,120 @@ describe("public project skills route", () => {
     });
   });
 });
+
+it.each([
+  {
+    pluginId: "omnyo-guide",
+    previousId: "bb-guide",
+    previousName: "bb-cli",
+    currentName: "omnyo-cli",
+    builtinName: "omnyo-guide",
+  },
+  {
+    pluginId: "omnyo-guide",
+    previousId: "bb-guide",
+    previousName: "bb-plugin-authoring",
+    currentName: "omnyo-plugin-authoring",
+    builtinName: "omnyo-guide",
+  },
+  {
+    pluginId: "omnyo-account",
+    previousId: "bb-account",
+    previousName: "bb-account",
+    currentName: "omnyo-account",
+    builtinName: "omnyo-account",
+  },
+  {
+    pluginId: "theme-preview",
+    previousId: "theme-preview",
+    previousName: "bb-theme-authoring",
+    currentName: "omnyo-theme-authoring",
+    builtinName: "theme-preview",
+  },
+  {
+    pluginId: "foreign-guide",
+    previousId: "foreign-guide",
+    previousName: "omnyo-cli",
+    currentName: "omnyo-cli",
+    builtinName: null,
+  },
+])(
+  "keeps the stable plugin skill identity for $pluginId through owned source renames",
+  async ({ pluginId, previousId, previousName, currentName, builtinName }) => {
+    const workDir = await mkdtemp(join(tmpdir(), "omnyo-stable-plugin-skill-"));
+
+    try {
+      await withTestHarness(async (harness) => {
+        const root = join(workDir, "fixture");
+        const skillRoot = join(root, "skills", "omnyo-cli");
+        await mkdir(skillRoot, { recursive: true });
+        await writeFile(
+          join(root, "package.json"),
+          JSON.stringify({
+            name: `omnyo-plugin-${pluginId}`,
+            version: "0.1.0",
+            omnyo: {
+              name: "Owned skill identity fixture",
+              description: "Stable skill catalog identity.",
+              branding: { icon: "Zap" },
+              server: "./server.ts",
+            },
+          }),
+        );
+        await writeFile(
+          join(root, "server.ts"),
+          "export default function plugin() {}\n",
+        );
+        await writeFile(
+          join(skillRoot, "SKILL.md"),
+          "---\nname: omnyo-cli\ndescription: Retains its existing identity.\n---\nOpaque user notes.\n",
+        );
+
+        const installed =
+          builtinName !== null
+            ? await harness.pluginService.install(`builtin:${builtinName}`, {
+                kind: "root",
+              })
+            : await harness.pluginService.installPath(root);
+
+        expect(installed.id).toBe(pluginId);
+
+        const { host, session } = seedHostSession(harness.deps, {
+          id: "host-stable-skill",
+        });
+
+        seedPrimaryHost(harness.deps, host.id);
+
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+          path: "/tmp/stable-skill-project",
+        });
+
+        registerSkillRpc(harness, { hostId: host.id, sessionId: session.id });
+
+        const response = await harness.app.request(
+          `/api/v1/projects/${project.id}/skills?environmentId=`,
+        );
+
+        expect(response.status).toBe(200);
+        const listed = skillListResponseSchema.parse(await readJson(response));
+
+        const skill = listed.skills.find(
+          (row) => row.pluginId === pluginId && row.name === currentName,
+        );
+
+        expect(skill).toMatchObject({
+          name: currentName,
+          pluginId,
+          scope: "plugin",
+          manageable: false,
+        });
+        expect(skill?.id).toBe(
+          `skill_${createHash("sha256").update(`bb-plugin:${previousId}\0${previousName}/SKILL.md`).digest("hex")}`,
+        );
+      });
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+    }
+  },
+);

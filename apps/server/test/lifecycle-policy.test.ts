@@ -1,6 +1,6 @@
-import { getHost, updateHost } from "@bb/db";
-import type { HostDaemonOnlineRpcRequestMessage } from "@bb/host-daemon-contract";
-import { validatePluginMachineProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
+import { getHost, updateHost } from "@omnyo/db";
+import type { HostDaemonOnlineRpcRequestMessage } from "@omnyo/host-daemon-contract";
+import { validatePluginMachineProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setPluginMachineProviderBridge } from "../src/services/plugins/plugin-machine-provider-registry.js";
 import { registerHostRpcResponder } from "./helpers/host-rpc.js";
@@ -17,6 +17,7 @@ import { type TestAppHarness, withTestHarness } from "./helpers/test-app.js";
 
 function installMachineProvider(harness: TestAppHarness, hostId: string) {
   const resume = vi.fn(async () => ({ resource: { id: "owned" } }));
+
   const record = {
     pluginId: "test-machine",
     provider: validatePluginMachineProviderDeclaration({
@@ -36,6 +37,7 @@ function installMachineProvider(harness: TestAppHarness, hostId: string) {
       remove: async () => ({ status: "removed" }),
     }),
   };
+
   setPluginMachineProviderBridge({
     listMachineProviders: () => [record],
     getMachineProvider: () => record,
@@ -49,6 +51,7 @@ function installMachineProvider(harness: TestAppHarness, hostId: string) {
     machineProviderId: "test-machine",
     resource: { id: "owned" },
   });
+
   return {
     resume,
     suspend() {
@@ -86,9 +89,11 @@ describe.sequential("suspended machine lifecycle policy", () => {
   it("does not resume while computing environment provider availability", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const machine = installMachineProvider(harness, host.id);
       machine.suspend();
       const rpc = vi.spyOn(harness.hub, "requestHostOnlineRpc");
@@ -106,17 +111,21 @@ describe.sequential("suspended machine lifecycle policy", () => {
   it("uses the persisted daemon data directory for thread storage location", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
       });
+
       const machine = installMachineProvider(harness, host.id);
       machine.suspend();
       const rpc = vi.spyOn(harness.hub, "requestHostOnlineRpc");
@@ -128,7 +137,7 @@ describe.sequential("suspended machine lifecycle policy", () => {
       expect(response.status).toBe(200);
       expect(await readJson(response)).toEqual({
         hostId: host.id,
-        storageRootPath: `/tmp/bb-host-data/${host.id}/thread-storage/${thread.id}`,
+        storageRootPath: `/tmp/omnyo-host-data/${host.id}/thread-storage/${thread.id}`,
       });
       expect(machine.resume).not.toHaveBeenCalled();
       expect(rpc).not.toHaveBeenCalled();
@@ -167,6 +176,7 @@ describe.sequential("suspended machine lifecycle policy", () => {
         sessionId: session.id,
         handle: ({ command }) => {
           commands.push(command);
+
           if (command.type === "desktop.browser.list_tabs") {
             return {
               ok: true,
@@ -184,6 +194,7 @@ describe.sequential("suspended machine lifecycle policy", () => {
               },
             };
           }
+
           if (command.type === "desktop.browser.acquire_control") {
             return {
               ok: true,
@@ -196,13 +207,16 @@ describe.sequential("suspended machine lifecycle policy", () => {
               },
             };
           }
+
           if (command.type === "desktop.browser.reveal_tab") {
             return { ok: true, result: { ok: true } };
           }
+
           throw new Error(`Unexpected host RPC ${command.type}`);
         },
       });
       vi.useFakeTimers();
+
       const response = await harness.app.request(
         "/api/v1/desktop-browsers/acquire",
         {
@@ -219,6 +233,7 @@ describe.sequential("suspended machine lifecycle policy", () => {
           }),
         },
       );
+
       expect(response.status).toBe(200);
       machine.suspend();
       const commandCount = commands.length;
@@ -238,6 +253,7 @@ describe.sequential("suspended machine lifecycle policy", () => {
           thread: { status: "idle" },
         },
       );
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: environment.id,
         providerThreadId: "provider-thread-1",
@@ -250,6 +266,7 @@ describe.sequential("suspended machine lifecycle policy", () => {
           if (command.type === "turn.submit") {
             return { ok: true, result: {} };
           }
+
           throw new Error(`Unexpected host RPC ${command.type}`);
         },
       });

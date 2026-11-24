@@ -13,6 +13,7 @@ interface PhaseDispatch {
 }
 
 const phasesByTarget = new Map<Element, Set<RegisteredPhases>>();
+
 let sharedResizeObserver: ResizeObserver | null = null;
 
 function collectDispatches(
@@ -26,12 +27,15 @@ function collectDispatches(
       })),
     );
   }
+
   const dispatches: PhaseDispatch[] = [];
+
   for (const entry of entries) {
     for (const registration of phasesByTarget.get(entry.target) ?? []) {
       dispatches.push({ registration, entry });
     }
   }
+
   return dispatches;
 }
 
@@ -39,6 +43,7 @@ function dispatchPhased(dispatches: readonly PhaseDispatch[]): void {
   const writes = dispatches.map(({ registration, entry }) =>
     registration.read(entry),
   );
+
   for (const write of writes) {
     write();
   }
@@ -48,6 +53,7 @@ function getSharedResizeObserver(): ResizeObserver {
   sharedResizeObserver ??= new ResizeObserver((entries) => {
     dispatchPhased(collectDispatches(entries));
   });
+
   return sharedResizeObserver;
 }
 
@@ -58,16 +64,21 @@ export function observeSharedResize<T>(
   const registration: RegisteredPhases = {
     read: (entry) => {
       const value = phases.read(entry);
+
       return () => phases.write(value);
     },
   };
+
   let registrations = phasesByTarget.get(target);
   const isFirstForTarget = registrations === undefined;
+
   if (registrations === undefined) {
     registrations = new Set();
     phasesByTarget.set(target, registrations);
   }
+
   registrations.add(registration);
+
   if (isFirstForTarget) {
     getSharedResizeObserver().observe(target);
   }
@@ -75,9 +86,11 @@ export function observeSharedResize<T>(
   return () => {
     const currentRegistrations = phasesByTarget.get(target);
     currentRegistrations?.delete(registration);
+
     if (currentRegistrations?.size === 0) {
       phasesByTarget.delete(target);
       sharedResizeObserver?.unobserve?.(target);
+
       if (phasesByTarget.size === 0) {
         sharedResizeObserver?.disconnect?.();
         sharedResizeObserver = null;

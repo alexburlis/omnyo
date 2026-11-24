@@ -3,7 +3,7 @@ import type {
   ThreadSessionOption,
   ThreadSessionOptionValue,
   ThreadSessionOptionsState,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   AcpAvailableCommand,
   AcpBooleanConfigOption,
@@ -12,7 +12,9 @@ import type {
 } from "./session-types.js";
 
 const MAX_COMMANDS = 500;
+
 const MAX_OPTIONS = 64;
+
 const MAX_OPTION_VALUES = 1000;
 
 export function toThreadProviderCommandsState(
@@ -34,16 +36,19 @@ function selectValues(
   option: AcpSelectConfigOption,
 ): ThreadSessionOptionValue[] {
   const groupNameByValue = new Map<string, string>();
+
   for (const group of option.groups) {
     for (const value of group.options) {
       groupNameByValue.set(value.value, group.name);
     }
   }
+
   return option.values
     .filter((value) => value.value !== "")
     .slice(0, MAX_OPTION_VALUES)
     .map((value) => {
       const group = groupNameByValue.get(value.value);
+
       return {
         id: value.value,
         label: value.name.trim() === "" ? value.value : value.name,
@@ -54,6 +59,7 @@ function selectValues(
 }
 
 const BRIDGE_MANAGED_OPTION_CATEGORIES = new Set(["model", "thought_level"]);
+
 const BRIDGE_MANAGED_SERVICE_TIER_OPTION_ID = "fast";
 
 export function isUserSelectableSessionOption(
@@ -76,16 +82,19 @@ export function toThreadSessionOptionsState(
   options: readonly AcpConfigOption[],
 ): ThreadSessionOptionsState {
   const sessionOptions: ThreadSessionOption[] = [];
+
   for (const option of options) {
     if (!isUserSelectableSessionOption(option)) {
       continue;
     }
+
     const base = {
       id: option.id,
       label: option.name.trim() === "" ? option.id : option.name,
       ...(option.description ? { description: option.description } : {}),
       ...(option.category ? { category: option.category } : {}),
     };
+
     sessionOptions.push(
       option.type === "boolean"
         ? { ...base, type: "boolean", value: option.currentValue }
@@ -97,5 +106,6 @@ export function toThreadSessionOptionsState(
           },
     );
   }
+
   return { options: sessionOptions.slice(0, MAX_OPTIONS) };
 }

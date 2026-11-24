@@ -3,14 +3,18 @@
   "name": "collapsible",
   "type": "registry:ui",
   "title": "collapsible",
-  "description": "BB ui \"collapsible\" — vendored from the BB app's own source (version-matched to this BB release).",
+  "description": "Omnyo ui \"collapsible\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
   "dependencies": [
     "@radix-ui/react-collapsible"
+  ],
+  "registryDependencies": [
+    "@omnyo/motion",
+    "@omnyo/utils"
   ],
   "files": [
     {
       "path": "registry/components/ui/collapsible.tsx",
-      "content": "import * as CollapsiblePrimitive from \"@radix-ui/react-collapsible\";\n\nconst Collapsible = CollapsiblePrimitive.Root;\n\nconst CollapsibleTrigger = CollapsiblePrimitive.CollapsibleTrigger;\n\nconst CollapsibleContent = CollapsiblePrimitive.CollapsibleContent;\n\nexport { Collapsible, CollapsibleTrigger, CollapsibleContent };\n",
+      "content": "import * as React from \"react\";\nimport * as CollapsiblePrimitive from \"@radix-ui/react-collapsible\";\n\nimport { cn } from \"../../lib/utils\";\nimport { COLLAPSIBLE_CONTENT_MOTION } from \"./motion\";\n\nconst Collapsible = CollapsiblePrimitive.Root;\n\nconst CollapsibleTrigger = CollapsiblePrimitive.CollapsibleTrigger;\n\nconst CollapsibleContent = React.forwardRef<\n  React.ComponentRef<typeof CollapsiblePrimitive.CollapsibleContent>,\n  React.ComponentPropsWithoutRef<typeof CollapsiblePrimitive.CollapsibleContent>\n>(({ className, ...props }, ref) => (\n  <CollapsiblePrimitive.CollapsibleContent\n    ref={ref}\n    className={cn(COLLAPSIBLE_CONTENT_MOTION, className)}\n    {...props}\n  />\n));\n\nCollapsibleContent.displayName =\n  CollapsiblePrimitive.CollapsibleContent.displayName;\n\nexport { Collapsible, CollapsibleTrigger, CollapsibleContent };\n",
       "type": "registry:ui",
       "target": "components/ui/collapsible.tsx"
     }

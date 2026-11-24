@@ -4,6 +4,7 @@ import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectSelector } from "./ProjectSelector";
+import { expectNonmodalPicker } from "@/test/nonmodal-picker";
 
 const PROJECTS = [
   { id: "proj_alpha", name: "Alpha Web" },
@@ -17,9 +18,23 @@ const PROJECTS = [
 afterEach(cleanup);
 
 describe("ProjectSelector", () => {
+  it("keeps the page interactive and closes when focus leaves", async () => {
+    render(
+      <ProjectSelector projects={PROJECTS} value={null} onChange={vi.fn()} />,
+    );
+    const trigger = screen.getByRole("button", { name: /^Project/ });
+    await expectNonmodalPicker({
+      trigger,
+      open: () => fireEvent.click(trigger),
+      content: () =>
+        screen.queryByRole("combobox", { name: "Search projects" }),
+    });
+  });
+
   it("selects a searched project and returns to all projects without falling back to the first project", () => {
     function Picker() {
       const [value, setValue] = useState<string | null>("all");
+
       return (
         <ProjectSelector
           projects={PROJECTS}
@@ -32,6 +47,7 @@ describe("ProjectSelector", () => {
         />
       );
     }
+
     render(<Picker />);
     expect(
       screen.getByRole("button", { name: "Project: All projects" }),
@@ -65,6 +81,7 @@ describe("ProjectSelector", () => {
   it("reflects choosing no project in both trigger labels and its accessible name", () => {
     function Picker() {
       const [value, setValue] = useState<string | null>("proj_alpha");
+
       return (
         <ProjectSelector
           projects={PROJECTS}
@@ -76,6 +93,7 @@ describe("ProjectSelector", () => {
         />
       );
     }
+
     render(<Picker />);
     fireEvent.click(
       screen.getByRole("option", { name: "Don't work in a project" }),
@@ -160,6 +178,36 @@ describe("ProjectSelector", () => {
 
     expect(bravo.getAttribute("aria-selected")).toBe("true");
     expect(charlie.getAttribute("aria-current")).toBe("true");
+  });
+
+  it("opens the same searchable list from the icon-only search trigger", () => {
+    const onChange = vi.fn();
+
+    render(
+      <ProjectSelector
+        trigger="search"
+        projects={PROJECTS}
+        value="proj_alpha"
+        onChange={onChange}
+        allowNoProject
+        modal={false}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Search projects" });
+    expect(trigger.textContent).toBe("");
+    fireEvent.click(trigger);
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Search projects" }),
+      { target: { value: "echo" } },
+    );
+    fireEvent.keyDown(
+      screen.getByRole("combobox", { name: "Search projects" }),
+      { key: "Enter" },
+    );
+
+    expect(onChange).toHaveBeenCalledWith("proj_echo");
+    expect(screen.queryByRole("dialog", { name: "Project" })).toBeNull();
   });
 
   it("shows search only when there are more than five projects", () => {
@@ -270,7 +318,7 @@ describe("ProjectSelector", () => {
       { target: { value: "missing" } },
     );
 
-    expect(screen.getByText("No projects found")).toBeTruthy();
+    expect(screen.getByText("No projects match “missing”")).toBeTruthy();
     expect(screen.getByRole("option", { name: "New project" })).toBeTruthy();
     expect(
       screen.getByRole("option", { name: "Don't work in a project" }),
@@ -336,6 +384,7 @@ describe("ProjectSelector", () => {
     const list = screen
       .getByRole("group", { name: "Project" })
       .querySelector<HTMLElement>(".overflow-y-auto");
+
     expect(list).not.toBeNull();
     expect(list?.className).toContain("overflow-y-auto");
     expect(list?.className).toContain("overscroll-contain");

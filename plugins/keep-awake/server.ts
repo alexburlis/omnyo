@@ -3,14 +3,17 @@ import {
   PluginCliError,
   cliCommand,
   defineCli,
-  type BbPluginApi,
-} from "@get-bb/plugin-sdk";
+  type PluginApi,
+} from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import { keepAwakeHostContract } from "./contract.js";
 
 const RETRY_MIN_MS = 1_000;
+
 const RETRY_MAX_MS = 30_000;
+
 const CONFIGURATION_KEY = "configuration";
+
 const MAX_SELECTED_HOSTS = 256;
 
 const JSON_OPTION = {
@@ -27,6 +30,7 @@ const hostSelectionSchema = z.discriminatedUnion("mode", [
     })
     .strict(),
 ]);
+
 const hostSummarySchema = z
   .object({
     id: z.string().min(1),
@@ -34,12 +38,14 @@ const hostSummarySchema = z
     status: z.enum(["connected", "disconnected"]),
   })
   .strict();
+
 const keepAwakeConfigurationSchema = z
   .object({
     enabled: z.boolean(),
     selection: hostSelectionSchema,
   })
   .strict();
+
 const hostConfigurationSchema = z
   .object({
     enabled: z.boolean(),
@@ -60,6 +66,7 @@ export const keepAwakeRpcContract = defineRpcContract({
 });
 
 type HostSelection = z.infer<typeof hostSelectionSchema>;
+
 type KeepAwakeConfiguration = z.infer<typeof keepAwakeConfigurationSchema>;
 
 type ReconcileOutcome = "settled" | "retry";
@@ -70,6 +77,7 @@ function errorMessage(error: unknown): string {
 
 function normalizeSelection(selection: HostSelection): HostSelection {
   if (selection.mode === "all") return selection;
+
   return { mode: "selected", hostIds: [...new Set(selection.hostIds)] };
 }
 
@@ -82,17 +90,19 @@ function normalizeConfiguration(
   };
 }
 
-export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
-  const host = bb.hosts.experimental_client({
+export default async function keepAwakePlugin(api: PluginApi): Promise<void> {
+  const host = api.hosts.experimental_client({
     contract: keepAwakeHostContract,
   });
 
   let reconcileRequested = true;
   let retryRequested = false;
   let wakeWaiter: (() => void) | null = null;
+
   const storedConfiguration = keepAwakeConfigurationSchema.safeParse(
-    await bb.storage.kv.get<unknown>(CONFIGURATION_KEY),
+    await api.storage.kv.get<unknown>(CONFIGURATION_KEY),
   );
+
   let configuration: KeepAwakeConfiguration = storedConfiguration.success
     ? normalizeConfiguration(storedConfiguration.data)
     : { enabled: false, selection: { mode: "all" } };
@@ -108,7 +118,8 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
   }
 
   async function readHostConfiguration() {
-    const availableHosts = await bb.sdk.hosts.list();
+    const availableHosts = await api.sdk.hosts.list();
+
     return {
       ...configuration,
       hosts: availableHosts.map(({ id, name, status }) => ({
@@ -123,15 +134,16 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
     next: KeepAwakeConfiguration,
   ): Promise<void> {
     const normalized = normalizeConfiguration(next);
-    await bb.storage.kv.set(CONFIGURATION_KEY, normalized);
+    await api.storage.kv.set(CONFIGURATION_KEY, normalized);
     configuration = normalized;
     requestReconcile();
   }
 
-  bb.rpc.register(keepAwakeRpcContract, {
+  api.rpc.register(keepAwakeRpcContract, {
     getConfiguration: readHostConfiguration,
     async setConfiguration(next) {
       await saveConfiguration(next);
+
       return readHostConfiguration();
     },
   });
@@ -141,6 +153,7 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
     json: boolean,
   ): Promise<{ exitCode: number; stdout: string }> {
     await saveConfiguration({ ...configuration, enabled });
+
     return {
       exitCode: 0,
       stdout: json
@@ -149,12 +162,12 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
     };
   }
 
-  bb.cli.register(
+  api.cli.register(
     defineCli({
       name: "keep-awake",
       summary: "Configure idle-sleep prevention",
       description:
-        "Keep Awake keeps every selected macOS or Windows host from idle-sleeping while bb runs.",
+        "Keep Awake keeps every selected macOS or Windows host from idle-sleeping while Omnyo runs.",
       commands: {
         status: cliCommand({
           summary: "Show whether Keep Awake is enabled and which hosts it uses",
@@ -192,16 +205,18 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
           options: { json: JSON_OPTION },
           async run(input) {
             const requested = input.positionals["host-id"];
+
             if (requested[0] === "all") {
               if (requested.length !== 1) {
                 throw new PluginCliError(
                   '"all" cannot be combined with individual host ids',
                   {
                     code: "invalid_host_selection",
-                    hint: "Run `bb keep-awake hosts all`, or list only host ids.",
+                    hint: "Run `omnyo keep-awake hosts all`, or list only host ids.",
                   },
                 );
               }
+
               await saveConfiguration({
                 ...configuration,
                 selection: { mode: "all" },
@@ -213,16 +228,19 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
                   { code: "invalid_host_selection" },
                 );
               }
+
               if (requested.some((hostId) => hostId.length === 0)) {
                 throw new PluginCliError("Host ids cannot be empty", {
                   code: "invalid_host_selection",
                 });
               }
+
               await saveConfiguration({
                 ...configuration,
                 selection: { mode: "selected", hostIds: requested },
               });
             }
+
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -238,7 +256,7 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
   );
 
   host.experimental_onWorkerExit(({ hostId }) => {
-    bb.log.warn(
+    api.log.warn(
       `Keep Awake host worker exited unexpectedly on host ${hostId}; retrying`,
     );
     requestRetry();
@@ -247,12 +265,14 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
   async function reconcile(signal: AbortSignal): Promise<ReconcileOutcome> {
     try {
       const desiredConfiguration = configuration;
-      const availableHosts = await bb.sdk.hosts.list();
+      const availableHosts = await api.sdk.hosts.list();
+
       const selectedHostIds = new Set(
         desiredConfiguration.selection.mode === "selected"
           ? desiredConfiguration.selection.hostIds
           : [],
       );
+
       const outcomes = await Promise.all(
         availableHosts
           .filter((availableHost) => availableHost.status === "connected")
@@ -261,40 +281,49 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
               desiredConfiguration.enabled &&
               (desiredConfiguration.selection.mode === "all" ||
                 selectedHostIds.has(availableHost.id));
+
             try {
               const actual = await host.call(
                 "setEnabled",
                 { enabled: desired },
                 { hostId: availableHost.id, signal },
               );
+
               if (!actual.supported) {
                 if (desired) {
-                  bb.log.warn(
+                  api.log.warn(
                     `Keep Awake is enabled but host ${availableHost.id} is not macOS or Windows`,
                   );
                 }
+
                 return "settled";
               }
+
               if (actual.enabled !== desired) {
-                bb.log.warn(
+                api.log.warn(
                   `Keep Awake did not reach its configured state on host ${availableHost.id}; retrying`,
                 );
+
                 return "retry";
               }
+
               return "settled";
             } catch (error) {
               if (signal.aborted) return "settled";
-              bb.log.warn(
+              api.log.warn(
                 `Could not reconcile Keep Awake on host ${availableHost.id}: ${errorMessage(error)}`,
               );
+
               return "retry";
             }
           }),
       );
+
       return outcomes.includes("retry") ? "retry" : "settled";
     } catch (error) {
       if (signal.aborted) return "settled";
-      bb.log.warn(`Could not load Keep Awake state: ${errorMessage(error)}`);
+      api.log.warn(`Could not load Keep Awake state: ${errorMessage(error)}`);
+
       return "retry";
     }
   }
@@ -304,44 +333,55 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
     options: { readonly retryDelayMs: number; readonly retryPending: boolean },
   ): Promise<void> {
     if (signal.aborted || reconcileRequested) return Promise.resolve();
+
     return new Promise((resolve) => {
       let timer: ReturnType<typeof setTimeout> | null = null;
       let settled = false;
+
       const finish = (): void => {
         if (settled) return;
         settled = true;
+
         if (timer !== null) clearTimeout(timer);
+
         if (wakeWaiter === wake) wakeWaiter = null;
         signal.removeEventListener("abort", finish);
         resolve();
       };
+
       const armRetry = (): void => {
         if (timer !== null) return;
         timer = setTimeout(finish, options.retryDelayMs);
       };
+
       const wake = (): void => {
         if (signal.aborted || reconcileRequested) {
           finish();
+
           return;
         }
+
         if (retryRequested) armRetry();
       };
+
       wakeWaiter = wake;
       signal.addEventListener("abort", finish, { once: true });
+
       if (options.retryPending) armRetry();
       wake();
     });
   }
 
-  bb.background.service("desired-state-reconciler", {
+  api.background.service("desired-state-reconciler", {
     async start(signal) {
-      const unsubscribeHost = bb.sdk.subscribe({
+      const unsubscribeHost = api.sdk.subscribe({
         event: "host:changed",
         callback: (event) => {
           if (event.changes.includes("host-connected")) requestReconcile();
         },
       });
-      const unsubscribeRealtime = bb.sdk.subscribe({
+
+      const unsubscribeRealtime = api.sdk.subscribe({
         event: "realtime:connection",
         callback: (event) => {
           if (event.state === "connected" && event.reconnected) {
@@ -349,20 +389,26 @@ export default async function keepAwakePlugin(bb: BbPluginApi): Promise<void> {
           }
         },
       });
+
       let retryMs = RETRY_MIN_MS;
+
       try {
         while (!signal.aborted) {
           reconcileRequested = false;
           retryRequested = false;
           const outcome = await reconcile(signal);
+
           if (signal.aborted) break;
+
           if (reconcileRequested) continue;
           const retryPending = outcome === "retry" || retryRequested;
+
           if (!retryPending) retryMs = RETRY_MIN_MS;
           await waitForReconcile(signal, {
             retryDelayMs: retryMs,
             retryPending,
           });
+
           if (retryPending || retryRequested) {
             retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
           }

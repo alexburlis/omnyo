@@ -3,7 +3,9 @@ import { z } from "zod";
 type GitBranchNameCandidate = string;
 
 const gitBranchForbiddenCharacterPattern = /[\u0000-\u001f\u007f\\:~^?*\[]/u;
+
 const gitBranchWhitespacePattern = /[ \t]/u;
+
 const gitReservedBranchNames = new Set([
   "AUTO_MERGE",
   "BISECT_HEAD",
@@ -17,6 +19,7 @@ const gitReservedBranchNames = new Set([
 
 export function isValidGitBranchName(name: GitBranchNameCandidate) {
   const components = name.split("/");
+
   return (
     name.length > 0 &&
     name.trim().length > 0 &&
@@ -48,6 +51,7 @@ export const gitBranchSelectionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("named"), name: gitBranchNameSchema }),
   z.object({ kind: z.literal("default") }),
 ]);
+
 export type GitBranchSelection = z.infer<typeof gitBranchSelectionSchema>;
 
 export const gitCheckoutRefSchema = z.discriminatedUnion("kind", [
@@ -69,6 +73,7 @@ export const gitCheckoutRefSchema = z.discriminatedUnion("kind", [
     reason: z.string().min(1),
   }),
 ]);
+
 export type GitCheckoutRef = z.infer<typeof gitCheckoutRefSchema>;
 
 const workspaceGitOperationSchema = z.discriminatedUnion("kind", [
@@ -95,12 +100,14 @@ const workspaceGitOperationSchema = z.discriminatedUnion("kind", [
     hasConflicts: z.boolean(),
   }),
 ]);
+
 export type WorkspaceGitOperation = z.infer<typeof workspaceGitOperationSchema>;
 
 export const gitBranchRefClassificationSchema = z.object({
   name: z.string().min(1),
   kind: z.enum(["local", "remote", "missing"]),
 });
+
 export type GitBranchRefClassification = z.infer<
   typeof gitBranchRefClassificationSchema
 >;
@@ -112,6 +119,7 @@ const defaultBranchRelationSchema = z.enum([
   "diverged",
   "unknown",
 ]);
+
 export type DefaultBranchRelation = z.infer<typeof defaultBranchRelationSchema>;
 
 export const gitSourceInspectionSchema = z.object({
@@ -123,6 +131,7 @@ export const gitSourceInspectionSchema = z.object({
   operation: workspaceGitOperationSchema,
   originDefaultBranch: z.string().min(1).nullable(),
 });
+
 export type GitSourceInspection = z.infer<typeof gitSourceInspectionSchema>;
 
 export const gitBranchOptionsSchema = z.object({

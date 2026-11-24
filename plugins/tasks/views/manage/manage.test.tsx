@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import type { Task } from "../../shared/contract.js";
 import { makeTask, rpcInput } from "../../test-fixtures.js";
 
@@ -31,9 +31,12 @@ if (!window.matchMedia) {
 }
 
 const app = await loadPluginApp(() => import("../../app"));
+
 const { derivePrefix } = await import("./shared.js");
+
 const { describePresetEnvironment, savePresetDraft } =
   await import("./preset-dialog.js");
+
 const { NEW_TASK_DRAFT_STORAGE_KEY } = await import("./new-task-draft.js");
 
 afterEach(() => {
@@ -42,6 +45,7 @@ afterEach(() => {
 });
 
 const PROJECT_ID = "01HZZZZZZZZZZZZZZZZZZZZZP1";
+
 const TASK_ID = "01HZZZZZZZZZZZZZZZZZZZZZT1";
 
 const project = {
@@ -51,7 +55,7 @@ const project = {
   nextTaskNumber: 5,
   color: "blue",
   folderId: null,
-  linkedBbProjectId: null,
+  linkedAppProjectId: null,
   createdAt: "2026-07-15T00:00:00.000Z",
 };
 
@@ -111,13 +115,16 @@ describe("NewTaskDialog", () => {
           removeEventListener: () => {},
           dispatchEvent: () => false,
         }));
+
       const otherProject = {
         ...project,
         id: "01HZZZZZZZZZZZZZZZZZZZZZP2",
         name: "Personal",
         prefix: "HOME",
       };
+
       const createCalls: Array<Record<string, unknown>> = [];
+
       try {
         const slot = renderSlot(
           app.navPanels[0]!,
@@ -133,11 +140,13 @@ describe("NewTaskDialog", () => {
               createTask: (raw: unknown) => {
                 const input = rpcInput(raw);
                 createCalls.push(input);
+
                 return { ok: true, task: createdTask(input) };
               },
             },
           },
         );
+
         fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
         const title = await slot.findByLabelText("Task title");
         fireEvent.change(title, { target: { value: "Keep this draft open" } });
@@ -196,6 +205,7 @@ describe("NewTaskDialog", () => {
     },
   ])("submits exactly once for $name", async ({ field, ctrlKey, metaKey }) => {
     const createCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
@@ -210,11 +220,13 @@ describe("NewTaskDialog", () => {
           createTask: (raw: unknown) => {
             const input = rpcInput(raw);
             createCalls.push(input);
+
             return { ok: true, task: createdTask(input) };
           },
         },
       },
     );
+
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     fireEvent.change(await slot.findByLabelText("Task title"), {
       target: { value: "Keyboard submission" },
@@ -231,6 +243,7 @@ describe("NewTaskDialog", () => {
 
   it("creates a task in the route's project with column defaults and navigates to it", async () => {
     const createCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
@@ -245,11 +258,13 @@ describe("NewTaskDialog", () => {
           createTask: (raw: unknown) => {
             const input = rpcInput(raw);
             createCalls.push(input);
+
             return { ok: true, task: createdTask(input) };
           },
         },
       },
     );
+
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     const title = await slot.findByLabelText("Task title");
     fireEvent.change(title, { target: { value: "  Ship the dialog  " } });
@@ -276,6 +291,7 @@ describe("NewTaskDialog", () => {
 
   it("keeps the dialog open and clears the draft when Create more is on", async () => {
     const createCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
@@ -290,11 +306,13 @@ describe("NewTaskDialog", () => {
           createTask: (raw: unknown) => {
             const input = rpcInput(raw);
             createCalls.push(input);
+
             return { ok: true, task: createdTask(input) };
           },
         },
       },
     );
+
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     fireEvent.click(await slot.findByRole("checkbox", { name: "Create more" }));
     const title = await slot.findByLabelText("Task title");
@@ -329,6 +347,7 @@ describe("NewTaskDialog", () => {
         },
       },
     );
+
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     fireEvent.change(await slot.findByLabelText("Task title"), {
       target: { value: "Nested" },
@@ -340,6 +359,7 @@ describe("NewTaskDialog", () => {
 
   it("offers a compact create-label action when the query matches no label", async () => {
     const createLabelCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
@@ -363,6 +383,7 @@ describe("NewTaskDialog", () => {
           createLabel: (raw: unknown) => {
             const input = rpcInput(raw);
             createLabelCalls.push(input);
+
             return {
               label: {
                 id: "01HLABELNEW00000000000000",
@@ -375,6 +396,7 @@ describe("NewTaskDialog", () => {
         },
       },
     );
+
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     fireEvent.click(await slot.findByRole("button", { name: /Labels/ }));
     const search = await slot.findByPlaceholderText("Add labels…");
@@ -383,6 +405,7 @@ describe("NewTaskDialog", () => {
     const createBtn = await slot.findByRole("button", {
       name: /Create .*dank/,
     });
+
     const emptyContainer = createBtn.closest("[cmdk-empty]");
     expect(emptyContainer).not.toBeNull();
 
@@ -407,6 +430,7 @@ describe("NewTaskDialog drafts", () => {
       createTask: (raw: unknown) => {
         const input = rpcInput(raw);
         createCalls.push(input);
+
         return { ok: true, task: createdTask(input) };
       },
     };
@@ -416,16 +440,19 @@ describe("NewTaskDialog drafts", () => {
     fireEvent.keyDown(document.body, { key: "Escape" });
     await waitFor(() => expect(slot.queryByLabelText("Task title")).toBeNull());
     fireEvent.click(slot.getAllByRole("button", { name: /New task/ })[0]!);
+
     return (await slot.findByLabelText("Task title")) as HTMLInputElement;
   }
 
   it("restores an unsaved draft after the dialog is dismissed", async () => {
     const createCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       { rpc: draftRpc(createCalls) },
     );
+
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     fireEvent.change(await slot.findByLabelText("Task title"), {
       target: { value: "Twenty minutes of drafting" },
@@ -444,18 +471,21 @@ describe("NewTaskDialog drafts", () => {
 
   it("keeps the default project and labels when reopened from another project", async () => {
     const createCalls: Array<Record<string, unknown>> = [];
+
     const otherProject = {
       ...project,
       id: "01HZZZZZZZZZZZZZZZZZZZZZP2",
       name: "Personal",
       prefix: "HOME",
     };
+
     const label = {
       id: "01HZZZZZZZZZZZZZZZZZZZZZL1",
       projectId: PROJECT_ID,
       name: "Automation",
       color: "blue",
     };
+
     const rpc = {
       ...draftRpc(createCalls),
       listProjects: () => ({ projects: [project, otherProject] }),
@@ -463,6 +493,7 @@ describe("NewTaskDialog drafts", () => {
         labels: rpcInput(raw).projectId === PROJECT_ID ? [label] : [],
       }),
     };
+
     const initial = renderSlot(app.navPanels[0]!, { subPath: "all" }, { rpc });
     fireEvent.click(await initial.findByRole("button", { name: /New task/ }));
     fireEvent.change(await initial.findByLabelText("Task title"), {
@@ -471,11 +502,13 @@ describe("NewTaskDialog drafts", () => {
     fireEvent.click(initial.getByRole("button", { name: "Labels" }));
     fireEvent.click(await initial.findByRole("option", { name: "Automation" }));
     initial.unmount();
+
     const restored = renderSlot(
       app.navPanels[0]!,
       { subPath: otherProject.id },
       { rpc },
     );
+
     fireEvent.click(await restored.findByRole("button", { name: /New task/ }));
     await restored.findByLabelText("Task title");
     fireEvent.click(restored.getByRole("button", { name: "Create task" }));
@@ -491,11 +524,13 @@ describe("NewTaskDialog drafts", () => {
     let resolveProjects: (value: {
       projects: (typeof project)[];
     }) => void = () => {};
+
     const projects = new Promise<{ projects: (typeof project)[] }>(
       (resolve) => {
         resolveProjects = resolve;
       },
     );
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "all" },
@@ -506,6 +541,7 @@ describe("NewTaskDialog drafts", () => {
         },
       },
     );
+
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     fireEvent.change(await slot.findByLabelText("Task title"), {
       target: { value: "Started before projects loaded" },
@@ -525,12 +561,14 @@ describe("NewTaskDialog drafts", () => {
     "drops a restored label when its %s was deleted",
     async (removed) => {
       const createCalls: Array<Record<string, unknown>> = [];
+
       const otherProject = {
         ...project,
         id: "01HZZZZZZZZZZZZZZZZZZZZZP2",
         name: "Personal",
         prefix: "HOME",
       };
+
       window.localStorage.setItem(
         NEW_TASK_DRAFT_STORAGE_KEY,
         JSON.stringify({
@@ -544,6 +582,7 @@ describe("NewTaskDialog drafts", () => {
           dueDate: "",
         }),
       );
+
       const slot = renderSlot(
         app.navPanels[0]!,
         { subPath: otherProject.id },
@@ -559,6 +598,7 @@ describe("NewTaskDialog drafts", () => {
           },
         },
       );
+
       fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
       await slot.findByLabelText("Task title");
       fireEvent.click(slot.getByRole("button", { name: "Create task" }));
@@ -578,6 +618,7 @@ describe("NewTaskDialog drafts", () => {
       { subPath: PROJECT_ID },
       { rpc: draftRpc([]) },
     );
+
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     fireEvent.change(await slot.findByLabelText("Task title"), {
       target: { value: "Throwaway" },
@@ -597,15 +638,19 @@ describe("NewTaskDialog drafts", () => {
       NEW_TASK_DRAFT_STORAGE_KEY,
       JSON.stringify({ version: 1, title: "Partial", status: "nope" }),
     );
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       { rpc: draftRpc([]) },
     );
+
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
+
     const title = (await slot.findByLabelText(
       "Task title",
     )) as HTMLInputElement;
+
     expect(title.value).toBe("");
   });
 });
@@ -625,17 +670,21 @@ describe("NewTaskDialog attachments", () => {
       init?: RequestInit,
     ) => {
       const url = String(input);
+
       if (url.includes("/plugins/tasks/token")) {
         return new Response(JSON.stringify({ token: "test-token" }), {
           status: 200,
         });
       }
+
       if (url.includes("/attachments/upload")) {
         fetchCalls.push(url);
-        const query = new URL(url, "http://bb.test").searchParams;
+        const query = new URL(url, "http://omnyo.test").searchParams;
+
         if (uploadGate && query.get("fileName") === uploadGate.fileName) {
           await uploadGate.promise;
         }
+
         return failFileNames.has(query.get("fileName") ?? "")
           ? new Response(JSON.stringify({ error: "disk full" }), {
               status: 500,
@@ -645,6 +694,7 @@ describe("NewTaskDialog attachments", () => {
               { status: 201 },
             );
       }
+
       return originalFetch(input, init);
     }) as typeof fetch;
   });
@@ -672,6 +722,7 @@ describe("NewTaskDialog attachments", () => {
     fireEvent.click(await slot.findByRole("button", { name: /New task/ }));
     const titleInput = await slot.findByLabelText("Task title");
     fireEvent.change(titleInput, { target: { value: title } });
+
     return titleInput;
   };
 
@@ -684,12 +735,14 @@ describe("NewTaskDialog attachments", () => {
       { subPath: PROJECT_ID },
       { rpc: dialogRpc() },
     );
+
     const titleInput = await openDialogWithTitle(slot, "With files");
     pasteFile(titleInput, new File(["png"], "shot.png", { type: "image/png" }));
     await slot.findByText("shot.png");
 
     const picker =
       document.querySelector<HTMLInputElement>('input[type="file"]')!;
+
     fireEvent.change(picker, {
       target: {
         files: [new File(["doc"], "notes.txt", { type: "text/plain" })],
@@ -708,18 +761,20 @@ describe("NewTaskDialog attachments", () => {
       }),
     );
     expect(fetchCalls).toHaveLength(1);
-    const query = new URL(fetchCalls[0]!, "http://bb.test").searchParams;
+    const query = new URL(fetchCalls[0]!, "http://omnyo.test").searchParams;
     expect(query.get("taskId")).toBe(TASK_ID);
     expect(query.get("fileName")).toBe("shot.png");
   });
 
   it("recovers from a failed upload with a retryable chip bound to the created task", async () => {
     failFileNames.add("bad.bin");
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       { rpc: dialogRpc() },
     );
+
     const titleInput = await openDialogWithTitle(slot, "Partial failure");
     pasteFile(titleInput, new File(["ok"], "good.png", { type: "image/png" }));
     pasteFile(
@@ -747,8 +802,10 @@ describe("NewTaskDialog attachments", () => {
         options: { subPath: "task/TSK-5" },
       }),
     );
-    const retryQuery = new URL(fetchCalls.at(-1)!, "http://bb.test")
+
+    const retryQuery = new URL(fetchCalls.at(-1)!, "http://omnyo.test")
       .searchParams;
+
     expect(retryQuery.get("taskId")).toBe(TASK_ID);
     expect(retryQuery.get("fileName")).toBe("bad.bin");
   });
@@ -759,6 +816,7 @@ describe("NewTaskDialog attachments", () => {
       { subPath: PROJECT_ID },
       { rpc: dialogRpc() },
     );
+
     const titleInput = await openDialogWithTitle(slot, "Too big");
     const big = new File(["x"], "big.bin", { type: "application/zip" });
     Object.defineProperty(big, "size", { value: 25 * 1024 * 1024 + 1 });
@@ -769,9 +827,11 @@ describe("NewTaskDialog attachments", () => {
     ).toContain("Over the 25 MB attachment limit");
 
     await slot.findByText(/Remove attachments over the 25 MB limit/);
+
     const createButton = slot.getByRole("button", {
       name: "Create task",
     }) as HTMLButtonElement;
+
     expect(createButton.disabled).toBe(true);
     fireEvent.click(createButton);
     expect(slot.navigateCalls).toEqual([]);
@@ -794,11 +854,13 @@ describe("NewTaskDialog attachments", () => {
       fileName: "slow.png",
       promise: new Promise((resolve) => (release = resolve)),
     };
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       { rpc: dialogRpc() },
     );
+
     const titleInput = await openDialogWithTitle(slot, "In flight");
     pasteFile(titleInput, new File(["x"], "slow.png", { type: "image/png" }));
     await slot.findByText("slow.png");
@@ -808,9 +870,11 @@ describe("NewTaskDialog attachments", () => {
 
     pasteFile(titleInput, new File(["y"], "late.txt", { type: "text/plain" }));
     expect(slot.queryByText("late.txt")).toBeNull();
+
     const removeButton = slot.getByRole("button", {
       name: "Remove slow.png",
     }) as HTMLButtonElement;
+
     expect(removeButton.disabled).toBe(true);
     fireEvent.click(removeButton);
     expect(slot.getByText("slow.png")).toBeDefined();
@@ -828,11 +892,13 @@ describe("NewTaskDialog attachments", () => {
 
   it("blocks accidental dismissal during recovery until skipped explicitly", async () => {
     failFileNames.add("bad.bin");
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       { rpc: dialogRpc() },
     );
+
     const titleInput = await openDialogWithTitle(slot, "Sticky recovery");
     pasteFile(
       titleInput,
@@ -860,11 +926,13 @@ describe("NewTaskDialog attachments", () => {
 
   it("runs retry single-flight so double activation uploads exactly once", async () => {
     failFileNames.add("bad.bin");
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: PROJECT_ID },
       { rpc: dialogRpc() },
     );
+
     const titleInput = await openDialogWithTitle(slot, "Retry once");
     pasteFile(
       titleInput,
@@ -881,9 +949,11 @@ describe("NewTaskDialog attachments", () => {
       fileName: "bad.bin",
       promise: new Promise((resolve) => (release = resolve)),
     };
+
     const retryButton = slot.getByRole("button", {
       name: "Retry upload of bad.bin",
     });
+
     fireEvent.click(retryButton);
     fireEvent.click(retryButton);
     await slot.findByText("Retrying…");
@@ -923,26 +993,26 @@ function presetRow(overrides: Record<string, unknown> = {}) {
 describe("describePresetEnvironment", () => {
   it("summarizes worktree presets and falls back to defaults and raw ids", () => {
     expect(describePresetEnvironment(presetRow() as never, MACHINES)).toBe(
-      "Worktree · main · Sawyer Air",
+      "New worktree from main on Sawyer Air",
     );
     expect(
       describePresetEnvironment(
         presetRow({ baseBranch: null, machineId: null }) as never,
         MACHINES,
       ),
-    ).toBe("Worktree · default · default");
+    ).toBe("New worktree from the default branch");
     expect(
       describePresetEnvironment(
         presetRow({ machineId: "mach_gone" }) as never,
         MACHINES,
       ),
-    ).toBe("Worktree · main · mach_gone");
+    ).toBe("New worktree from main on mach_gone");
     expect(
       describePresetEnvironment(
         presetRow({ environmentKind: "project-default" }) as never,
         MACHINES,
       ),
-    ).toBe("Project default");
+    ).toBe("Project's default workspace");
   });
 });
 
@@ -962,12 +1032,15 @@ describe("savePresetDraft", () => {
 
   function captureRpc() {
     const calls: Array<{ method: string; input: unknown }> = [];
+
     const rpc = {
       call: (method: string, input: unknown) => {
         calls.push({ method, input });
+
         return Promise.resolve({});
       },
     };
+
     return { calls, rpc: rpc as never };
   }
 
@@ -1039,13 +1112,15 @@ describe("PresetDialog environment section", () => {
   it("shows the environment column and hydrates a worktree preset", async () => {
     const slot = renderManagePresets([presetRow({ reasoningLevel: "ultra" })]);
     fireEvent.mouseDown(await slot.findByRole("tab", { name: "Presets" }));
-    await slot.findByText("Worktree · main · Sawyer Air");
+    await slot.findByText("New worktree from main on Sawyer Air");
     fireEvent.click(
       slot.getByRole("button", { name: "Edit preset FB3 BE live worktree" }),
     );
+
     const branch = (await slot.findByLabelText(
       "Base branch",
     )) as HTMLInputElement;
+
     expect(branch.value).toBe("main");
     expect(branch.placeholder).toBe("project default base — leave empty");
     expect(slot.getByLabelText("Machine")).toBeDefined();
@@ -1055,12 +1130,12 @@ describe("PresetDialog environment section", () => {
       ).toBe("ultra"),
     );
     expect(
-      slot.getByTestId("bb-provider-model-picker").dataset.routingKind,
+      slot.getByTestId("omnyo-provider-model-picker").dataset.routingKind,
     ).toBe("host");
-    expect(slot.getByTestId("bb-provider-model-picker").dataset.routingId).toBe(
-      "mach_1",
-    );
-    expect(slot.getByTestId("bb-permission-mode-picker").dataset.align).toBe(
+    expect(
+      slot.getByTestId("omnyo-provider-model-picker").dataset.routingId,
+    ).toBe("mach_1");
+    expect(slot.getByTestId("omnyo-permission-mode-picker").dataset.align).toBe(
       "start",
     );
   });
@@ -1074,8 +1149,9 @@ describe("PresetDialog environment section", () => {
         machineId: null,
       }),
     ]);
+
     fireEvent.mouseDown(await slot.findByRole("tab", { name: "Presets" }));
-    await slot.findByText("Project default");
+    await slot.findByText("Project's default workspace");
     fireEvent.click(
       slot.getByRole("button", { name: "Edit preset Default env" }),
     );
@@ -1086,13 +1162,16 @@ describe("PresetDialog environment section", () => {
 
   it("saves the host picker's provider, model, reasoning, and tier together", async () => {
     const updates: Array<Record<string, unknown>> = [];
+
     const slot = renderManagePresets([presetRow()], {
       updatePreset: (raw: unknown) => {
         const input = rpcInput(raw);
         updates.push(input);
+
         return { preset: { ...presetRow(), ...input } };
       },
     });
+
     fireEvent.mouseDown(await slot.findByRole("tab", { name: "Presets" }));
     fireEvent.click(
       await slot.findByRole("button", {
@@ -1130,10 +1209,11 @@ describe("PresetDialog environment section", () => {
 describe("Manage folders", () => {
   const parentFolder = {
     id: "01HZZZZZZZZZZZZZZZZZZZZZF1",
-    name: "bb",
+    name: "omnyo",
     parentFolderId: null,
     createdAt: "2026-07-15T00:00:00.000Z",
   };
+
   const childFolder = {
     id: "01HZZZZZZZZZZZZZZZZZZZZZF2",
     name: "archive",
@@ -1163,9 +1243,11 @@ describe("Manage folders", () => {
 
   it("deletes a folder after naming what the delete unfiles", async () => {
     const deleteCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderFolders({
       deleteFolder: (input: Record<string, unknown>) => {
         deleteCalls.push(input);
+
         return {
           deleted: true,
           movedProjectIds: [PROJECT_ID],
@@ -1173,9 +1255,10 @@ describe("Manage folders", () => {
         };
       },
     });
+
     fireEvent.mouseDown(await slot.findByRole("tab", { name: "Folders" }));
     fireEvent.click(
-      await slot.findByRole("button", { name: "Delete folder bb" }),
+      await slot.findByRole("button", { name: "Delete folder omnyo" }),
     );
 
     await slot.findByText(
@@ -1188,17 +1271,22 @@ describe("Manage folders", () => {
 
   it("withholds the delete impact until the project list has loaded", async () => {
     let releaseProjects: (() => void) | undefined;
+
     const projectsLoaded = new Promise<void>((resolve) => {
       releaseProjects = resolve;
     });
+
     const deleteCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderFolders({
       listProjects: async () => {
         await projectsLoaded;
+
         return { projects: [{ ...project, folderId: parentFolder.id }] };
       },
       deleteFolder: (input: Record<string, unknown>) => {
         deleteCalls.push(input);
+
         return {
           deleted: true,
           movedProjectIds: [PROJECT_ID],
@@ -1206,9 +1294,10 @@ describe("Manage folders", () => {
         };
       },
     });
+
     fireEvent.mouseDown(await slot.findByRole("tab", { name: "Folders" }));
     fireEvent.click(
-      await slot.findByRole("button", { name: "Delete folder bb" }),
+      await slot.findByRole("button", { name: "Delete folder omnyo" }),
     );
 
     await slot.findByText("Checking what the folder contains…");
@@ -1237,9 +1326,10 @@ describe("Manage folders", () => {
         throw new Error("projects unavailable");
       },
     });
+
     fireEvent.mouseDown(await slot.findByRole("tab", { name: "Folders" }));
     fireEvent.click(
-      await slot.findByRole("button", { name: "Delete folder bb" }),
+      await slot.findByRole("button", { name: "Delete folder omnyo" }),
     );
     await slot.findByText(
       "Could not load the folder's contents: projects unavailable",
@@ -1253,19 +1343,23 @@ describe("Manage folders", () => {
   it("blocks deleting on stale rows after a refresh fails", async () => {
     let projectsUnavailable = false;
     const deleteCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderFolders({
       listProjects: () => {
         if (projectsUnavailable) throw new Error("projects unavailable");
+
         return { projects: [{ ...project, folderId: parentFolder.id }] };
       },
       deleteFolder: (input: Record<string, unknown>) => {
         deleteCalls.push(input);
+
         return { deleted: true, movedProjectIds: [], movedFolderIds: [] };
       },
     });
+
     fireEvent.mouseDown(await slot.findByRole("tab", { name: "Folders" }));
     fireEvent.click(
-      await slot.findByRole("button", { name: "Delete folder bb" }),
+      await slot.findByRole("button", { name: "Delete folder omnyo" }),
     );
     await slot.findByText(
       "1 project and 1 subfolder move to the top level. No tasks are deleted.",
@@ -1277,7 +1371,7 @@ describe("Manage folders", () => {
       projectId: PROJECT_ID,
     });
     fireEvent.click(
-      await slot.findByRole("button", { name: "Delete folder bb" }),
+      await slot.findByRole("button", { name: "Delete folder omnyo" }),
     );
     await slot.findByText(
       "Could not load the folder's contents: projects unavailable",
@@ -1295,6 +1389,7 @@ describe("Manage folders", () => {
         throw new Error("Folder not found");
       },
     });
+
     fireEvent.mouseDown(await slot.findByRole("tab", { name: "Folders" }));
     fireEvent.click(
       await slot.findByRole("button", { name: "Delete folder archive" }),
@@ -1306,9 +1401,11 @@ describe("Manage folders", () => {
 
   it("treats deleted: false as a conflict and refetches", async () => {
     let folderCalls = 0;
+
     const slot = renderFolders({
       listFolders: () => {
         folderCalls += 1;
+
         return { folders: [parentFolder, childFolder] };
       },
       deleteFolder: () => ({
@@ -1317,6 +1414,7 @@ describe("Manage folders", () => {
         movedFolderIds: [],
       }),
     });
+
     fireEvent.mouseDown(await slot.findByRole("tab", { name: "Folders" }));
     fireEvent.click(
       await slot.findByRole("button", { name: "Delete folder archive" }),
@@ -1350,12 +1448,15 @@ describe("NewProjectDialog", () => {
 
   it("derives the prefix from the name and creates the project", async () => {
     const createCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderEmptyState({
       createProject: (input: Record<string, unknown>) => {
         createCalls.push(input);
+
         return { project: { ...project, ...input, id: PROJECT_ID } };
       },
     });
+
     fireEvent.click(await slot.findByRole("button", { name: /New project/ }));
     fireEvent.change(await slot.findByPlaceholderText("e.g. Tasks Plugin"), {
       target: { value: "Home Lab" },
@@ -1369,7 +1470,7 @@ describe("NewProjectDialog", () => {
       name: "Home Lab",
       prefix: "HL",
       folderId: null,
-      linkedBbProjectId: null,
+      linkedAppProjectId: null,
     });
     await waitFor(() =>
       expect(slot.navigateCalls).toContainEqual({
@@ -1400,26 +1501,29 @@ describe("NewProjectDialog", () => {
 
   it("links the personal project from the discovered project picker", async () => {
     const createCalls: Array<Record<string, unknown>> = [];
+
     const slot = renderEmptyState({
-      listBbProjects: () => ({
-        bbProjects: [{ id: "proj_personal", name: "Personal" }],
+      listAppProjects: () => ({
+        appProjects: [{ id: "proj_personal", name: "Personal" }],
       }),
       createProject: (input: Record<string, unknown>) => {
         createCalls.push(input);
+
         return { project: { ...project, ...input, id: PROJECT_ID } };
       },
     });
+
     fireEvent.click(await slot.findByRole("button", { name: /New project/ }));
     fireEvent.change(await slot.findByPlaceholderText("e.g. Tasks Plugin"), {
       target: { value: "Personal Tasks" },
     });
-    fireEvent.click(slot.getByLabelText("Linked bb project"));
+    fireEvent.click(slot.getByLabelText("Linked Omnyo project"));
     fireEvent.click(await slot.findByRole("option", { name: "Personal" }));
     fireEvent.click(slot.getByRole("button", { name: "Create project" }));
 
     await waitFor(() => expect(createCalls).toHaveLength(1));
     expect(createCalls[0]).toMatchObject({
-      linkedBbProjectId: "proj_personal",
+      linkedAppProjectId: "proj_personal",
     });
     expect(slot.queryByPlaceholderText("proj_…")).toBeNull();
   });

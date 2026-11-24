@@ -2,16 +2,32 @@ import { useSyncExternalStore } from "react";
 import type {
   ProviderCliInstallAction,
   ProviderCliKey,
-  ProviderCliStatus,
-  ProviderCliStatusResponse,
-} from "@bb/host-daemon-contract";
-import { ProviderCliInstallLogDialog } from "@/components/dialogs/ProviderCliInstallLogDialog";
+} from "@omnyo/host-daemon-contract";
+import type { HostProviderCliStatusResponse as ProviderCliStatusResponse } from "@omnyo/server-contract";
+
+type ProviderCliStatus = ProviderCliStatusResponse[string];
+
+import { defineSplit } from "@/lib/define-split";
+
 import {
   closeProviderCliInstallLog,
   getProviderCliInstallSnapshot,
   startProviderCliInstall,
   subscribeProviderCliInstalls,
 } from "@/components/provider-cli/provider-cli-install-store";
+
+const ProviderCliInstallLogDialog = defineSplit<
+  import("@/components/dialogs/ProviderCliInstallLogDialog").ProviderCliInstallLogDialogProps
+>({
+  id: "provider-cli-install-log-dialog",
+  load: () =>
+    import("@/components/dialogs/ProviderCliInstallLogDialog").then(
+      (module) => module.ProviderCliInstallLogDialog,
+    ),
+  loading: () => null,
+  mountWhen: (props) => props.state !== null,
+  keepMounted: true,
+});
 
 export interface ProviderCliStatusEntry {
   provider: ProviderCliKey;
@@ -48,13 +64,14 @@ export function buildProviderCliIssue(
   entry: ProviderCliStatusEntry,
 ): ProviderCliIssue | null {
   const { provider, status } = entry;
+
   if (!status.installed) {
     return {
       provider,
       status,
       action: status.installAction,
       title: `${status.displayName} CLI not installed`,
-      description: `Install ${status.displayName} so bb can start ${status.displayName} sessions.`,
+      description: `Install ${status.displayName} so Omnyo can start ${status.displayName} sessions.`,
       fingerprint: `${provider}:missing:${status.latestVersion ?? "latest"}`,
     };
   }
@@ -62,9 +79,11 @@ export function buildProviderCliIssue(
   if (status.versionUnsupported) {
     const currentVersion = status.currentVersion ?? "Installed version unknown";
     const minimumVersion = status.minimumSupportedVersion ?? "a newer version";
+
     const requiredDescription = status.minimumSupportedVersion
       ? `required ${status.minimumSupportedVersion}+`
       : "requires a newer version";
+
     return {
       provider,
       status,
@@ -84,10 +103,12 @@ export function buildProviderCliIssue(
 
   if (status.needsUpdate) {
     const currentVersion = status.currentVersion ?? "Installed version unknown";
+
     const description =
       status.latestVersion === null
         ? `${currentVersion}; newer release available`
         : `${currentVersion} -> ${status.latestVersion}`;
+
     const fingerprint = [
       provider,
       "outdated",
@@ -96,6 +117,7 @@ export function buildProviderCliIssue(
       status.latestVersion ?? "unknown",
       status.executablePath ?? status.executableName,
     ].join(":");
+
     return {
       provider,
       status,
@@ -131,6 +153,7 @@ export function useProviderCliInstallRunner() {
     failuresByJobKey: snapshot.failuresByJobKey,
     queuedJobKeys: snapshot.queuedJobKeys,
     runningJobKey: snapshot.runningJobKey,
+    runningPhase: snapshot.runningPhase,
     startInstall: startProviderCliInstall,
   };
 }

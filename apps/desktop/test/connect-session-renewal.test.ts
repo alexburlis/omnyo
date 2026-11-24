@@ -5,13 +5,16 @@ import {
 } from "../src/connect-session-renewal.js";
 
 const HOUR_MS = 60 * 60 * 1000;
+
 const LEAD_MS = 5 * 60 * 1000;
 
 function createGate(): { promise: Promise<void>; release: () => void } {
   let release!: () => void;
+
   const promise = new Promise<void>((resolve) => {
     release = resolve;
   });
+
   return { promise, release };
 }
 
@@ -36,6 +39,7 @@ function createHarness(
       const handle = nextHandle;
       nextHandle += 1;
       timers.set(handle, { at: now + timeout, handler });
+
       return handle;
     },
     clearTimeoutFn(handle) {
@@ -71,11 +75,12 @@ describe("createConnectSessionRenewal", () => {
         ok: true,
       }),
     );
+
     const harness = createHarness(authenticate);
 
     harness.renewal.start({
       expiresAt: 1_000_000 + HOUR_MS,
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
     });
     expect(harness.pendingDelays).toEqual([HOUR_MS - LEAD_MS]);
 
@@ -84,7 +89,7 @@ describe("createConnectSessionRenewal", () => {
     await harness.renewal.renewNow();
 
     expect(authenticate).toHaveBeenCalledWith(
-      "https://laptop.getbb.app",
+      "https://laptop.example.test",
       expect.any(Function),
     );
     expect(harness.pendingDelays).toEqual([HOUR_MS]);
@@ -92,17 +97,20 @@ describe("createConnectSessionRenewal", () => {
 
   it("does not reschedule when the target changed during a successful renewal", async () => {
     const gate = createGate();
+
     const authenticate = vi.fn(
       async (): Promise<ConnectSessionAuthenticateResult> => {
         await gate.promise;
+
         return { expiresAt: 1_000_000 + 2 * HOUR_MS, ok: true };
       },
     );
+
     const harness = createHarness(authenticate);
 
     harness.renewal.start({
       expiresAt: 1_000_000 + HOUR_MS,
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
     });
     const renewing = harness.renewal.renewNow();
 
@@ -115,17 +123,20 @@ describe("createConnectSessionRenewal", () => {
 
   it("does not retry when the target changed during a failed renewal", async () => {
     const gate = createGate();
+
     const authenticate = vi.fn(
       async (): Promise<ConnectSessionAuthenticateResult> => {
         await gate.promise;
+
         return { detail: "network: offline", ok: false };
       },
     );
+
     const harness = createHarness(authenticate);
 
     harness.renewal.start({
       expiresAt: 1_000_000 + HOUR_MS,
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
     });
     const renewing = harness.renewal.renewNow();
 
@@ -140,16 +151,18 @@ describe("createConnectSessionRenewal", () => {
   it("tells the authenticate call when its target is gone", async () => {
     const seen: boolean[] = [];
     const gate = createGate();
+
     const harness = createHarness(async (_serverUrl, isCurrent) => {
       seen.push(isCurrent());
       await gate.promise;
       seen.push(isCurrent());
+
       return { expiresAt: 1_000_000 + 2 * HOUR_MS, ok: true };
     });
 
     harness.renewal.start({
       expiresAt: 1_000_000 + HOUR_MS,
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
     });
     const renewing = harness.renewal.renewNow();
     harness.renewal.stop();
@@ -166,11 +179,12 @@ describe("createConnectSessionRenewal", () => {
         ok: false,
       }),
     );
+
     const harness = createHarness(authenticate);
 
     harness.renewal.start({
       expiresAt: 1_000_000 + HOUR_MS,
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
     });
     await harness.renewal.renewNow();
 
@@ -185,11 +199,12 @@ describe("createConnectSessionRenewal", () => {
         ok: true,
       }),
     );
+
     const harness = createHarness(authenticate);
 
     harness.renewal.start({
       expiresAt: 1_000_000 + HOUR_MS,
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
     });
     harness.renewal.renewIfDue();
     expect(authenticate).not.toHaveBeenCalled();
@@ -207,11 +222,12 @@ describe("createConnectSessionRenewal", () => {
         ok: true,
       }),
     );
+
     const harness = createHarness(authenticate);
 
     harness.renewal.start({
       expiresAt: 1_000_000 + HOUR_MS,
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
     });
     harness.renewal.stop();
     expect(harness.pendingDelays).toEqual([]);
@@ -222,32 +238,34 @@ describe("createConnectSessionRenewal", () => {
 
     harness.renewal.start({
       expiresAt: 1_000_000 + HOUR_MS,
-      remoteServerUrl: "https://phone.getbb.app",
+      remoteServerUrl: "https://phone.example.test",
     });
     await harness.renewal.renewNow();
     expect(authenticate).toHaveBeenCalledWith(
-      "https://phone.getbb.app",
+      "https://phone.example.test",
       expect.any(Function),
     );
   });
 
   it("retires an in-flight renewal when a new session starts", async () => {
     const gate = createGate();
+
     const harness = createHarness(async (_serverUrl, isCurrent) => {
       await gate.promise;
       expect(isCurrent()).toBe(false);
+
       return { expiresAt: 1_000_000 + 2 * HOUR_MS, ok: true };
     });
 
     harness.renewal.start({
       expiresAt: 1_000_000 + HOUR_MS,
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
     });
     const renewing = harness.renewal.renewNow();
 
     harness.renewal.start({
       expiresAt: 1_000_000 + 3 * HOUR_MS,
-      remoteServerUrl: "https://phone.getbb.app",
+      remoteServerUrl: "https://phone.example.test",
     });
     gate.release();
     await renewing;

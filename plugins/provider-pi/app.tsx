@@ -1,10 +1,13 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useId, useMemo, useState, type FormEvent } from "react";
 import {
   definePluginApp,
   type PluginPendingInteractionProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
+import { Input } from "@/components/ui/input";
 import { QuestionForm } from "@/components/ui/question-form";
+import { Textarea } from "@/components/ui/textarea";
 import {
   PI_EXTENSION_UI_RENDERER_ID,
   piExtensionUiPayloadDataSchema,
@@ -14,9 +17,11 @@ import {
 function parseRequest(payload: unknown): PiExtensionUiPayloadData | null {
   if (typeof payload !== "object" || payload === null) return null;
   const direct = piExtensionUiPayloadDataSchema.safeParse(payload);
+
   if (direct.success) return direct.data;
   const data = (payload as { data?: unknown }).data;
   const wrapped = piExtensionUiPayloadDataSchema.safeParse(data);
+
   return wrapped.success ? wrapped.data : null;
 }
 
@@ -29,13 +34,22 @@ function ExtensionUiInteraction({
     () => parseRequest(interaction.payload),
     [interaction.payload],
   );
+
   const [text, setText] = useState(request?.prefill ?? "");
   const [busy, setBusy] = useState(false);
+  const messageId = useId();
 
   if (!request) {
     return (
       <div className="space-y-3 text-xs text-muted-foreground">
-        <p>This request could not be displayed.</p>
+        <p className="flex items-start gap-2 rounded-lg bg-state-hover px-3 py-2 leading-5">
+          <Icon
+            name="AlertCircle"
+            aria-hidden="true"
+            className="mt-0.5 size-3.5 shrink-0"
+          />
+          This request could not be displayed.
+        </p>
         <Button
           type="button"
           size="sm"
@@ -50,6 +64,7 @@ function ExtensionUiInteraction({
 
   const send = async (value: unknown) => {
     setBusy(true);
+
     try {
       await submit(value as never);
     } catch (cause) {
@@ -60,6 +75,7 @@ function ExtensionUiInteraction({
 
   const dismiss = async () => {
     setBusy(true);
+
     try {
       await cancel();
     } catch {
@@ -74,6 +90,7 @@ function ExtensionUiInteraction({
 
   if (request.method === "select") {
     const options = request.options ?? [];
+
     return (
       <QuestionForm
         key={interaction.id}
@@ -95,10 +112,13 @@ function ExtensionUiInteraction({
         onCancel={cancel}
         onSubmit={async (answers) => {
           const selected = answers[request.requestId]?.selected[0];
+
           const index = selected?.startsWith("option-")
             ? Number(selected.slice("option-".length))
             : Number.NaN;
+
           const option = options[index];
+
           if (option === undefined)
             throw new Error(`Unknown option: ${selected}`);
           await send(option);
@@ -109,6 +129,7 @@ function ExtensionUiInteraction({
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
+
     if (request.method === "confirm") return;
     finish(text);
   };
@@ -119,23 +140,31 @@ function ExtensionUiInteraction({
       className="flex flex-col gap-3 text-xs text-muted-foreground"
     >
       {request.message ? (
-        <p className="text-sm text-foreground">{request.message}</p>
+        <p
+          id={messageId}
+          className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground"
+        >
+          {request.message}
+        </p>
       ) : null}
       {request.method === "input" ? (
-        <input
+        <Input
           type="text"
-          className="w-full rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-foreground focus-visible:border-ring/50 focus-visible:outline-none"
           value={text}
           placeholder={request.placeholder}
+          aria-labelledby={request.message ? messageId : undefined}
+          aria-label={request.message ? undefined : "Answer"}
           autoFocus
           disabled={busy}
           onChange={(event) => setText(event.target.value)}
         />
       ) : null}
       {request.method === "editor" ? (
-        <textarea
-          className="min-h-32 w-full resize-y rounded-md border border-border bg-surface-raised px-3 py-2 font-mono text-sm text-foreground focus-visible:border-ring/50 focus-visible:outline-none"
+        <Textarea
+          className="min-h-32 resize-y font-mono"
           value={text}
+          aria-labelledby={request.message ? messageId : undefined}
+          aria-label={request.message ? undefined : "Text"}
           disabled={busy}
           onChange={(event) => setText(event.target.value)}
         />

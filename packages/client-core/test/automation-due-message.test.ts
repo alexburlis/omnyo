@@ -5,6 +5,16 @@ describe("parseAutomationDueMessage", () => {
   it("returns the automation id and the prompt offset after the marker", () => {
     const text =
       "[bb automation due:auto_zto0dtbcxme]\n\nWeekday unread digest.";
+
+    const parsed = parseAutomationDueMessage(text);
+    expect(parsed?.automationId).toBe("auto_zto0dtbcxme");
+    expect(text.slice(parsed?.bodyOffset ?? 0)).toBe("Weekday unread digest.");
+  });
+
+  it("reads the current omnyo marker the same way", () => {
+    const text =
+      "[omnyo automation due:auto_zto0dtbcxme]\n\nWeekday unread digest.";
+
     const parsed = parseAutomationDueMessage(text);
     expect(parsed?.automationId).toBe("auto_zto0dtbcxme");
     expect(text.slice(parsed?.bodyOffset ?? 0)).toBe("Weekday unread digest.");
@@ -22,5 +32,8 @@ describe("parseAutomationDueMessage", () => {
       parseAutomationDueMessage("[bb automation due:]\n\nhello"),
     ).toBeNull();
     expect(parseAutomationDueMessage("[bb automation due:auto_1")).toBeNull();
+    expect(
+      parseAutomationDueMessage("[other automation due:auto_1]\n\nhello"),
+    ).toBeNull();
   });
 });

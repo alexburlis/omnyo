@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useResponsiveOverlayBehavior } from "@bb/shared-ui/responsive-overlay";
+import { useResponsiveOverlayBehavior } from "@omnyo/shared-ui/responsive-overlay";
 
 interface HoverPopoverHandlers {
   onBlur: () => void;
@@ -24,8 +24,11 @@ interface UseHoverPopoverResult {
 }
 
 const DEFAULT_OPEN_DELAY_MS = 0;
+
 const DEFAULT_CLOSE_DELAY_MS = 160;
+
 const noop = () => undefined;
+
 const preventAutoFocus = (event: Event) => {
   event.preventDefault();
 };
@@ -63,16 +66,19 @@ export function useHoverPopover({
     if (toggleTimeoutRef.current === null) {
       return;
     }
+
     window.clearTimeout(toggleTimeoutRef.current);
     toggleTimeoutRef.current = null;
   }, []);
 
   useEffect(() => {
     clearToggleTimeout();
+
     if (!supportsHover) return;
 
     if (isFocusOverTrigger || isFocusOverContent) {
       if (!open) setOpen(true);
+
       return;
     }
 
@@ -81,6 +87,7 @@ export function useHoverPopover({
 
       if (openDelayMs <= 0) {
         setOpen(true);
+
         return;
       }
 
@@ -119,6 +126,7 @@ export function useHoverPopover({
       if (nextOpen) {
         clearToggleTimeout();
         setOpen(true);
+
         return;
       }
 

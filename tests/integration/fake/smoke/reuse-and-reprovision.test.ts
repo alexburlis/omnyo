@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { eq } from "drizzle-orm";
-import { environments } from "@bb/db";
-import { createDeferredPromise } from "@bb/test-helpers";
+import { environments } from "@omnyo/db";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { describe, expect, it, vi } from "vitest";
 import { hasLiveThreadStartInFlight } from "../../../../apps/server/src/services/threads/thread-lifecycle.js";
 import {
@@ -31,6 +31,7 @@ async function visibleProvisioningStatuses(
   threadId: string,
 ): Promise<string[]> {
   const events = await getThreadEvents(api, threadId);
+
   return events.flatMap((event) =>
     event.type === "system/thread-provisioning" &&
     !event.data.provisioningId.startsWith("thread-start:")
@@ -46,10 +47,12 @@ describe.sequential("fake provider smoke reuse integration", () => {
         harness,
         "Provision Failure Smoke",
       );
+
       const missingPath = path.join(
         path.dirname(harness.repoDir),
         `missing-provision-${randomUUID()}`,
       );
+
       await fs.rm(missingPath, { recursive: true, force: true });
 
       const thread = await createHostThread(harness.api, {
@@ -60,12 +63,14 @@ describe.sequential("fake provider smoke reuse integration", () => {
           path: missingPath,
         },
       });
+
       const erroredThread = await waitForThreadStatus(
         harness.api,
         thread.id,
         "error",
         TURN_TIMEOUT_MS,
       );
+
       expect(erroredThread.environmentId).toBeNull();
 
       const events = await getThreadEvents(harness.api, thread.id);
@@ -91,6 +96,7 @@ describe.sequential("fake provider smoke reuse integration", () => {
         harness,
         "Implicit Reuse Smoke",
       );
+
       const firstThread = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -116,6 +122,7 @@ describe.sequential("fake provider smoke reuse integration", () => {
   it("creates a reuse thread without provisioning a second environment", () =>
     withHarness(async (harness) => {
       const project = await createProjectFixture(harness, "Reuse Smoke");
+
       const { environment, thread } = await createReadyThread(harness, {
         projectId: project.id,
         workspace: {
@@ -129,6 +136,7 @@ describe.sequential("fake provider smoke reuse integration", () => {
         projectId: project.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,
       });
+
       expect(reusedThread.thread.environmentId).toBe(thread.environmentId);
       expect(reusedThread.thread.status).toBe("idle");
 
@@ -143,10 +151,12 @@ describe.sequential("fake provider smoke reuse integration", () => {
       );
 
       const output = await getThreadOutput(harness.api, reusedThread.thread.id);
+
       const reusedEnvironment = await getEnvironment(
         harness.api,
         environment.id,
       );
+
       expect(reusedEnvironment.id).toBe(environment.id);
       expect(output).toContain("reuse environment");
 
@@ -165,10 +175,12 @@ describe.sequential("fake provider smoke reuse integration", () => {
         const acknowledgment = createDeferredPromise<void>();
         const requestRpc = harness.hub.requestHostOnlineRpc.bind(harness.hub);
         let delayedStart = false;
+
         const rpcSpy = vi
           .spyOn(harness.hub, "requestHostOnlineRpc")
           .mockImplementation(async (args) => {
             const response = await requestRpc(args);
+
             if (
               delayStartAcknowledgment &&
               !delayedStart &&
@@ -177,13 +189,16 @@ describe.sequential("fake provider smoke reuse integration", () => {
               delayedStart = true;
               await acknowledgment.promise;
             }
+
             return response;
           });
+
         try {
           const project = await createProjectFixture(
             harness,
             "Checkout Reattach After Error",
           );
+
           const { environment, thread } = await createReadyThread(harness, {
             projectId: project.id,
             workspace: {
@@ -195,6 +210,7 @@ describe.sequential("fake provider smoke reuse integration", () => {
           if (delayStartAcknowledgment) {
             expect(hasLiveThreadStartInFlight(thread.id)).toBe(true);
           }
+
           harness.db
             .update(environments)
             .set({
@@ -214,25 +230,32 @@ describe.sequential("fake provider smoke reuse integration", () => {
               mode: "auto",
             },
           });
+
           expect(response.status).toBe(200);
           acknowledgment.resolve();
+
           const readyThread = await waitForThreadStatus(
             harness.api,
             thread.id,
             "idle",
             TURN_TIMEOUT_MS,
           );
+
           const environmentId = readyThread.environmentId;
+
           if (environmentId === null) {
             throw new Error("Thread lost its environment after the re-attach");
           }
+
           expect(environmentId).not.toBe(environment.id);
+
           const reattached = await waitForEnvironmentStatus(
             harness.api,
             environmentId,
             "ready",
             TURN_TIMEOUT_MS,
           );
+
           expect(reattached.path).toBe(harness.repoDir);
           expect(reattached.environmentProviderId).toBe("project-checkout");
           expect(await getThreadOutput(harness.api, thread.id)).toContain(

@@ -29,9 +29,11 @@ function parseProviderValue(
   value: string,
 ): ParsedProviderEnvironmentValue | null {
   const environmentProviderId = value.slice("provider:".length);
+
   if (!ENVIRONMENT_PROVIDER_ID_PATTERN.test(environmentProviderId)) {
     return null;
   }
+
   return { type: "provider", environmentProviderId };
 }
 
@@ -39,14 +41,18 @@ export function parseEnvironmentValue(value: string): ParsedEnvironmentValue {
   if (value === REUSE_VALUE_WITHOUT_ENVIRONMENT) {
     return { type: "reuse", environmentId: null };
   }
+
   if (value.startsWith("reuse:")) {
     const environmentId = value.slice("reuse:".length);
+
     if (environmentId.length > 0) {
       return { type: "reuse", environmentId };
     }
   }
+
   if (value.startsWith("provider:")) {
     return parseProviderValue(value);
   }
+
   return null;
 }

@@ -3,10 +3,10 @@
   "name": "confirm-delete-dialog",
   "type": "registry:ui",
   "title": "confirm-delete-dialog",
-  "description": "BB ui \"confirm-delete-dialog\" — vendored from the BB app's own source (version-matched to this BB release).",
+  "description": "Omnyo ui \"confirm-delete-dialog\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
   "registryDependencies": [
-    "@bb/button",
-    "@bb/dialog"
+    "@omnyo/button",
+    "@omnyo/dialog"
   ],
   "files": [
     {

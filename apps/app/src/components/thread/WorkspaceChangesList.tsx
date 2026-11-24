@@ -1,9 +1,13 @@
-import type { WorkspaceStatus } from "@bb/domain";
+import type { WorkspaceStatus } from "@omnyo/domain";
 import { DiffStatsTally } from "@/components/ui/diff-stats-tally.js";
-import { EmptyState } from "@bb/shared-ui/empty-state";
+import { EmptyState } from "@omnyo/shared-ui/empty-state";
 import { FilePathLink } from "@/components/ui/file-path-link.js";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { formatWorkspaceFileStatus } from "@/components/workspace/workspace-change-summary";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
+import {
+  formatOmittedChangedFilesLabel,
+  formatWorkspaceFileStatus,
+} from "@/components/workspace/workspace-change-summary";
 
 export type WorkspaceChangedFile =
   WorkspaceStatus["workingTree"]["files"][number];
@@ -11,7 +15,8 @@ export type WorkspaceChangedFile =
 type WorkspaceChangedFileClickHandler = (file: WorkspaceChangedFile) => void;
 
 interface WorkspaceChangesListProps {
-  files: readonly WorkspaceChangedFile[];
+  files: WorkspaceChangedFile[];
+  fileCount: number;
   className?: string;
   onFileClick?: WorkspaceChangedFileClickHandler;
 }
@@ -24,12 +29,6 @@ interface WorkspaceChangesListItemProps {
 const WORKSPACE_CHANGE_ROW_CLASS =
   "grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-start gap-x-3";
 
-export const WORKSPACE_CHANGES_LIST_MAX_ROWS = 200;
-
-function formatHiddenFileCount(count: number): string {
-  return `${count.toLocaleString()} more ${count === 1 ? "file" : "files"} not shown`;
-}
-
 function fileKey(file: WorkspaceChangedFile): string {
   return `${file.status}:${file.path}`;
 }
@@ -40,15 +39,12 @@ function WorkspaceChangesListItem({
 }: WorkspaceChangesListItemProps) {
   const rowContent = (
     <>
-      <span className="text-xs leading-5 text-muted-foreground opacity-70">
+      <span className="text-xs leading-5 text-subtle-foreground">
         {formatWorkspaceFileStatus(file.status)}
       </span>
       <FilePathLink
         path={file.path}
-        className={cn(
-          "opacity-70",
-          onFileClick ? "group-hover:underline" : undefined,
-        )}
+        className={onFileClick ? "group-hover:underline" : undefined}
       />
       {file.insertions !== null && file.deletions !== null ? (
         <DiffStatsTally
@@ -70,7 +66,8 @@ function WorkspaceChangesListItem({
       type="button"
       className={cn(
         WORKSPACE_CHANGE_ROW_CLASS,
-        "group w-full rounded px-1 text-left transition-colors hover:bg-state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group w-full rounded px-1 text-left hover:bg-state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        LIST_HOVER_TRANSITION,
       )}
       aria-label={`Open ${file.path}`}
       onClick={() => onFileClick(file)}
@@ -82,29 +79,29 @@ function WorkspaceChangesListItem({
 
 export function WorkspaceChangesList({
   files,
+  fileCount,
   className = "max-h-32",
   onFileClick,
 }: WorkspaceChangesListProps) {
-  if (!files || files.length === 0) {
+  if (files.length === 0) {
     return <EmptyState message="No changed files detected." />;
   }
 
-  const visibleFiles =
-    files.length > WORKSPACE_CHANGES_LIST_MAX_ROWS
-      ? files.slice(0, WORKSPACE_CHANGES_LIST_MAX_ROWS)
-      : files;
-  const hiddenFileCount = files.length - visibleFiles.length;
+  const omittedFilesLabel = formatOmittedChangedFilesLabel({
+    fileCount,
+    files,
+  });
 
   return (
     <ul className={cn("space-y-1 overflow-auto", className)}>
-      {visibleFiles.map((file) => (
+      {files.map((file) => (
         <li key={fileKey(file)}>
           <WorkspaceChangesListItem file={file} onFileClick={onFileClick} />
         </li>
       ))}
-      {hiddenFileCount > 0 ? (
+      {omittedFilesLabel ? (
         <li className="px-1 text-xs leading-5 text-muted-foreground">
-          {formatHiddenFileCount(hiddenFileCount)}
+          {omittedFilesLabel}
         </li>
       ) : null}
     </ul>

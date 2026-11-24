@@ -23,7 +23,9 @@ function readChildStdout(child: ChildProcess): Promise<string> {
   if (!child.stdout) {
     throw new Error("Expected child stdout to be readable");
   }
+
   const stdout = child.stdout;
+
   return new Promise((resolve) => {
     stdout.once("data", (chunk: ChildStdoutChunk) => {
       resolve(String(chunk));
@@ -35,6 +37,7 @@ function waitForChildExit(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return Promise.resolve();
   }
+
   return new Promise((resolve) => {
     child.once("exit", () => resolve());
   });
@@ -47,24 +50,31 @@ function readChildStdoutLines(
   if (!child.stdout) {
     throw new Error("Expected child stdout to be readable");
   }
+
   const stdout = child.stdout;
+
   return new Promise((resolve, reject) => {
     let buffered = "";
+
     const onData = (chunk: ChildStdoutChunk) => {
       buffered += String(chunk);
       const lines = buffered.split("\n");
+
       if (lines.length <= expectedCount) return;
       cleanup();
       resolve(lines.slice(0, expectedCount));
     };
+
     const onExit = () => {
       cleanup();
       reject(new Error("Child exited before emitting the expected JSON lines"));
     };
+
     const cleanup = () => {
       stdout.off("data", onData);
       child.off("exit", onExit);
     };
+
     stdout.on("data", onData);
     child.once("exit", onExit);
   });
@@ -80,6 +90,7 @@ async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
   }
+
   await waitForChildExit(child);
 }
 
@@ -132,9 +143,47 @@ describe("runtime JSON-RPC parsing", () => {
 });
 
 describe("runtime JSON-RPC response settlement", () => {
+  it("preserves structured startup provider failures without retaining arbitrary data", () => {
+    const reject = vi.fn();
+
+    const pending = new Map<string | number, PendingJsonRpcRequest>([
+      ["start", { resolve: vi.fn(), reject }],
+    ]);
+
+    settleJsonRpcResponse({
+      id: "start",
+      pending,
+      response: {
+        error: {
+          code: -32000,
+          message: "provider failed",
+          data: {
+            errorInfo: {
+              category: "rate-limit",
+              providerCode: "usage_limit_reached",
+              httpStatusCode: 429,
+            },
+            rawBody: "private-marker",
+          },
+        },
+      },
+    });
+    expect(reject.mock.calls[0]?.[0]).toMatchObject({
+      errorInfo: {
+        category: "rate-limit",
+        providerCode: "usage_limit_reached",
+        httpStatusCode: 429,
+      },
+    });
+    expect(JSON.stringify(reject.mock.calls[0]?.[0])).not.toContain(
+      "private-marker",
+    );
+  });
+
   it("settles a matching response exactly once and ignores unknown ids", () => {
     const resolve = vi.fn();
     const reject = vi.fn();
+
     const pending = new Map<string | number, PendingJsonRpcRequest>([
       [7, { resolve, reject }],
     ]);
@@ -151,6 +200,7 @@ describe("runtime JSON-RPC response settlement", () => {
   it("preserves structured provider error codes", () => {
     const resolve = vi.fn();
     const reject = vi.fn();
+
     const pending = new Map<string | number, PendingJsonRpcRequest>([
       ["request", { resolve, reject }],
     ]);
@@ -192,6 +242,7 @@ describe("runtime JSON-RPC transport", () => {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGKILL");
       }
+
       await waitForChildExit(child);
     }
   });
@@ -200,8 +251,10 @@ describe("runtime JSON-RPC transport", () => {
     const child = spawnEchoChild();
     const linesPromise = readChildStdoutLines(child, 2);
     const pending = new Map<string | number, PendingJsonRpcRequest>();
+
     try {
       let nextId = 10;
+
       const accepted = sendJsonRpcRequest({
         child,
         getNextId: () => nextId++,
@@ -213,6 +266,7 @@ describe("runtime JSON-RPC transport", () => {
         pending,
         resultSchema: z.object({ contents: z.string() }),
       });
+
       const rejected = sendJsonRpcRequest({
         child,
         getNextId: () => nextId++,
@@ -256,6 +310,7 @@ describe("runtime JSON-RPC transport", () => {
   it("removes timed-out requests from the pending map", async () => {
     const child = spawnEchoChild();
     const pending = new Map<string | number, PendingJsonRpcRequest>();
+
     try {
       const result = sendJsonRpcRequest({
         child,
@@ -278,6 +333,7 @@ describe("runtime JSON-RPC transport", () => {
   it("encodes protocol errors and only handles known boundary errors", async () => {
     const child = spawnEchoChild();
     const linesPromise = readChildStdoutLines(child, 2);
+
     try {
       sendJsonRpcError({
         child,

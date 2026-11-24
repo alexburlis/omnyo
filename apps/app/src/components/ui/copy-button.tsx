@@ -4,10 +4,51 @@ import {
   type ReactNode,
 } from "react";
 import { useClipboardCopy, type ClipboardCopyOptions } from "@/lib/clipboard";
-import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@bb/shared-ui/hover-reveal";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Icon } from "@bb/shared-ui/icon";
-import { CONTROL_HOVER_TRANSITION } from "@bb/shared-ui/motion";
+import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@omnyo/shared-ui/hover-reveal";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
+
+const COPY_GLYPH_CLASS =
+  "col-start-1 row-start-1 size-3 transition-[opacity,scale] motion-reduce:scale-100";
+
+export function CopyGlyph({
+  copied,
+  className,
+  iconClassName,
+}: {
+  copied: boolean;
+  className?: string;
+  iconClassName?: string;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn("grid place-items-center", className)}
+    >
+      <Icon
+        name="Copy"
+        className={cn(
+          COPY_GLYPH_CLASS,
+          copied
+            ? "scale-90 opacity-0 duration-(--motion-duration-fast)"
+            : "scale-100 opacity-100 duration-(--motion-duration-base) ease-(--motion-ease-snappy)",
+          iconClassName,
+        )}
+      />
+      <Icon
+        name="Check"
+        className={cn(
+          COPY_GLYPH_CLASS,
+          copied
+            ? "scale-100 opacity-100 duration-(--motion-duration-base) ease-(--motion-ease-snappy)"
+            : "scale-90 opacity-0 duration-(--motion-duration-fast)",
+          iconClassName,
+        )}
+      />
+    </span>
+  );
+}
 
 interface CopyButtonProps
   extends
@@ -52,11 +93,7 @@ export const CopyButton = forwardRef<HTMLButtonElement, CopyButtonProps>(
           void copy();
         }}
       >
-        {copied ? (
-          <Icon name="Check" className={cn("size-3", iconClassName)} />
-        ) : (
-          <Icon name="Copy" className={cn("size-3", iconClassName)} />
-        )}
+        <CopyGlyph copied={copied} iconClassName={iconClassName} />
       </button>
     );
   },
@@ -94,10 +131,10 @@ export function CopyableInlineLabel({
       <span className="min-w-0 truncate" title={title ?? text}>
         {children ?? text}
       </span>
-      <Icon
-        name={copied ? "Check" : "Copy"}
+      <CopyGlyph
+        copied={copied}
         className={cn(
-          "size-3 shrink-0 text-subtle-foreground transition-opacity group-hover/copy:opacity-100 group-focus-visible/copy:opacity-100",
+          "shrink-0 text-subtle-foreground transition-opacity group-hover/copy:opacity-100 group-focus-visible/copy:opacity-100",
           HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS,
           copied ? "opacity-100" : "opacity-0",
         )}

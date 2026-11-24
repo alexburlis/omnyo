@@ -1,8 +1,11 @@
 import { z } from "zod";
 
 export const TERMINAL_COLS_MAX = 500;
+
 export const TERMINAL_ROWS_MAX = 200;
+
 export const TERMINAL_DATA_MAX_BYTES = 64 * 1024;
+
 export const TERMINAL_DATA_MAX_BASE64_LENGTH =
   Math.ceil(TERMINAL_DATA_MAX_BYTES / 3) * 4;
 
@@ -15,7 +18,9 @@ const terminalSessionStatusValues = [
   "disconnected",
   "exited",
 ] as const;
+
 export const terminalSessionStatusSchema = z.enum(terminalSessionStatusValues);
+
 export type TerminalSessionStatus = z.infer<typeof terminalSessionStatusSchema>;
 
 export function isActiveTerminalSessionStatus(
@@ -40,9 +45,11 @@ const terminalSessionCloseReasonValues = [
   "thread-deleted",
   "open-timeout",
 ] as const;
+
 export const terminalSessionCloseReasonSchema = z.enum(
   terminalSessionCloseReasonValues,
 );
+
 export type TerminalSessionCloseReason = z.infer<
   typeof terminalSessionCloseReasonSchema
 >;
@@ -54,6 +61,7 @@ interface TerminalOutputLineReader {
 
 export function getTerminalBase64DecodedByteLength(value: string): number {
   const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+
   return (value.length / 4) * 3 - padding;
 }
 
@@ -65,6 +73,7 @@ export function createTerminalOutputLineReader(): TerminalOutputLineReader {
     if (currentLine.trim().length > 0) {
       lines.push(currentLine);
     }
+
     currentLine = "";
   };
 
@@ -73,30 +82,39 @@ export function createTerminalOutputLineReader(): TerminalOutputLineReader {
       const lines: string[] = [];
       pendingCarriageReturn = false;
       pushCompletedLine(lines);
+
       return lines;
     },
     push(text: string): string[] {
       const lines: string[] = [];
+
       for (let index = 0; index < text.length; index += 1) {
         const character = text[index];
+
         if (pendingCarriageReturn) {
           pendingCarriageReturn = false;
+
           if (character === "\n") {
             pushCompletedLine(lines);
             continue;
           }
+
           currentLine = "";
         }
+
         if (character === "\r") {
           pendingCarriageReturn = true;
           continue;
         }
+
         if (character === "\n") {
           pushCompletedLine(lines);
           continue;
         }
+
         currentLine += character;
       }
+
       return lines;
     },
   };
@@ -104,6 +122,7 @@ export function createTerminalOutputLineReader(): TerminalOutputLineReader {
 
 export function readTerminalOutputLines(text: string): string[] {
   const reader = createTerminalOutputLineReader();
+
   return [...reader.push(text), ...reader.flush()];
 }
 
@@ -112,11 +131,13 @@ export const terminalColsSchema = z
   .int()
   .positive()
   .max(TERMINAL_COLS_MAX);
+
 export const terminalRowsSchema = z
   .number()
   .int()
   .positive()
   .max(TERMINAL_ROWS_MAX);
+
 export const terminalDataBase64Schema = z
   .string()
   .min(1)

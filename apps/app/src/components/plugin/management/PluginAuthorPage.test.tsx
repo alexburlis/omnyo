@@ -32,10 +32,10 @@ function catalogEntry(
     publishedAt: "2026-08-01T00:00:00Z",
     source: `npm:${pluginId}`,
     repositoryUrl: null,
-    marketplace: "bb-community",
-    marketplaceDisplayName: "BB Community",
-    publisherKey: "bb-community",
-    publisherLabel: "BB Community",
+    marketplace: "acme-plugins",
+    marketplaceDisplayName: "Acme Plugins",
+    publisherKey: "acme-plugins",
+    publisherLabel: "Acme Plugins",
     official: true,
     author: {
       name: "Pat Lee",
@@ -45,7 +45,6 @@ function catalogEntry(
     installed: false,
     conflictingInstallSource: null,
     installedByDefault: false,
-    installs: 10,
     compatible: true,
     incompatibleReason: null,
     ...overrides,
@@ -62,7 +61,8 @@ function catalogEntryForAuthor(pluginId: string, name: string) {
   });
 }
 
-const ALPHA = catalogEntry("Alpha", { installs: null });
+const ALPHA = catalogEntry("Alpha");
+
 const BETA = catalogEntry("Beta", {
   author: {
     name: "Patricia Lee",
@@ -72,18 +72,19 @@ const BETA = catalogEntry("Beta", {
   categoryId: "security",
   category: "Security",
   publishedAt: "2026-08-20T00:00:00Z",
-  installs: 50,
 });
+
 const GAMMA = catalogEntry("Gamma", {
   publishedAt: undefined,
-  installs: 100,
 });
+
 const OTHER = catalogEntry("Other", {
   author: { name: "Pat Lee", github: null, url: null },
 });
 
 function LocationProbe() {
   const location = useLocation();
+
   return (
     <output data-testid="location">{`${location.pathname}${location.search}`}</output>
   );
@@ -116,13 +117,16 @@ function renderPage(
           : input instanceof URL
             ? input.href
             : input.url;
+
       const query = new URL(requestUrl, "http://localhost").searchParams.get(
         "q",
       );
+
       const results =
         query === "Beta" || query === "agent-interaction"
           ? [BETA]
           : catalogEntries;
+
       return new Response(
         JSON.stringify({
           results,
@@ -136,7 +140,7 @@ function renderPage(
   render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <PluginAuthorPage
-        authorKey="12:bb-community:github:patlee"
+        authorKey="12:acme-plugins:github:patlee"
         onInstall={() => undefined}
         onOpenPlugin={onOpenPlugin}
       />
@@ -144,6 +148,7 @@ function renderPage(
     </MemoryRouter>,
     { wrapper },
   );
+
   return onOpenPlugin;
 }
 
@@ -174,7 +179,7 @@ describe("PluginAuthorPage", () => {
     },
   ])("selects an author name by $rule", async ({ entries, expected }) => {
     renderPage(
-      "/plugins?author=12%3Abb-community%3Agithub%3Apatlee",
+      "/plugins?author=12%3Aacme-plugins%3Agithub%3Apatlee",
       vi.fn(),
       entries,
     );
@@ -185,7 +190,7 @@ describe("PluginAuthorPage", () => {
 
   it("restores the URL and shows only the selected author's plugins", async () => {
     renderPage(
-      "/plugins?author=12%3Abb-community%3Agithub%3Apatlee&sort=recently-added&direction=asc",
+      "/plugins?author=12%3Aacme-plugins%3Agithub%3Apatlee&sort=recently-added&direction=asc",
     );
 
     expect(
@@ -204,30 +209,32 @@ describe("PluginAuthorPage", () => {
     ]);
     expect(screen.queryByText("Other")).toBeNull();
     expect(screen.getByTestId("location").textContent).toContain(
-      "author=12%3Abb-community%3Agithub%3Apatlee",
+      "author=12%3Aacme-plugins%3Agithub%3Apatlee",
     );
   });
 
-  it("applies search, multiple categories, and both optional-value sorts", async () => {
+  it("applies search, multiple categories, and both published sort directions", async () => {
     const onOpenPlugin = renderPage(
-      "/plugins?author=12%3Abb-community%3Agithub%3Apatlee&sort=most-installed",
+      "/plugins?author=12%3Aacme-plugins%3Agithub%3Apatlee&sort=recently-added",
     );
 
     await screen.findByRole("heading", { name: /^Pat Lee/u });
     expect(cardOrder()).toEqual([
-      "Open Gamma details",
       "Open Beta details",
       "Open Alpha details",
+      "Open Gamma details",
     ]);
+
     const sort = screen.getByRole("button", {
-      name: "Sort: Installs, descending",
+      name: "Sort: Published, descending",
     });
+
     fireEvent.pointerDown(sort);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Installs" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Published" }));
     expect(cardOrder()).toEqual([
+      "Open Alpha details",
       "Open Beta details",
       "Open Gamma details",
-      "Open Alpha details",
     ]);
     fireEvent.keyDown(document, { key: "Escape" });
 
@@ -237,12 +244,12 @@ describe("PluginAuthorPage", () => {
       }),
     );
     fireEvent.click(screen.getByRole("option", { name: /Thread Content/u }));
-    expect(cardOrder()).toEqual(["Open Gamma details", "Open Alpha details"]);
+    expect(cardOrder()).toEqual(["Open Alpha details", "Open Gamma details"]);
     fireEvent.click(screen.getByRole("option", { name: /Security/u }));
     expect(cardOrder()).toEqual([
+      "Open Alpha details",
       "Open Beta details",
       "Open Gamma details",
-      "Open Alpha details",
     ]);
     fireEvent.click(screen.getByRole("button", { name: "Clear filter" }));
 
@@ -258,7 +265,7 @@ describe("PluginAuthorPage", () => {
 
   it("uses the catalog search result for a tag-only query", async () => {
     renderPage(
-      "/plugins?author=12%3Abb-community%3Agithub%3Apatlee&query=agent-interaction",
+      "/plugins?author=12%3Aacme-plugins%3Agithub%3Apatlee&query=agent-interaction",
     );
 
     expect(

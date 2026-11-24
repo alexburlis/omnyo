@@ -18,6 +18,7 @@ export function parseSafeRelativeRoutePath(
   }
 
   const segments = relativePath.split("/");
+
   if (
     segments.some(
       (segment) => segment.length === 0 || segment === "." || segment === "..",

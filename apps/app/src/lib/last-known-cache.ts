@@ -25,13 +25,17 @@ export function createLastKnownCache<T>({
   const zeroScopeKey = `${prefix}.${version}`;
   const versionPrefix = `${zeroScopeKey}.`;
   let pruned = false;
+
   const pruneOtherVersions = () => {
     if (pruned) return;
     pruned = true;
+
     try {
       const stale: string[] = [];
+
       for (let index = 0; index < window.localStorage.length; index += 1) {
         const stored = window.localStorage.key(index);
+
         if (
           stored !== null &&
           ((stored.startsWith(`${prefix}.`) &&
@@ -46,23 +50,29 @@ export function createLastKnownCache<T>({
           stale.push(stored);
         }
       }
+
       for (const key of stale) window.localStorage.removeItem(key);
     } catch {}
   };
+
   const pruneExcessEntries = (
     currentKey: string,
     reservesCurrentKey: boolean,
   ) => {
     if (maxEntries === undefined) return;
+
     try {
       const otherKeys: string[] = [];
       let hasCurrentKey = false;
+
       for (let index = 0; index < window.localStorage.length; index += 1) {
         const stored = window.localStorage.key(index);
+
         if (stored === currentKey) {
           hasCurrentKey = true;
           continue;
         }
+
         if (
           stored !== null &&
           (stored === zeroScopeKey || stored.startsWith(versionPrefix))
@@ -70,21 +80,26 @@ export function createLastKnownCache<T>({
           otherKeys.push(stored);
         }
       }
+
       const entryLimit = Math.max(1, Math.floor(maxEntries));
+
       const retainedOtherEntries = Math.max(
         0,
         entryLimit - (reservesCurrentKey || hasCurrentKey ? 1 : 0),
       );
+
       for (
         let index = 0;
         index < otherKeys.length - retainedOtherEntries;
         index += 1
       ) {
         const key = otherKeys[index];
+
         if (key !== undefined) window.localStorage.removeItem(key);
       }
     } catch {}
   };
+
   return {
     key: (...scope) =>
       [prefix, version, ...scope.map((part) => part ?? "-")].join("."),
@@ -93,8 +108,10 @@ export function createLastKnownCache<T>({
         pruneOtherVersions();
         pruneExcessEntries(key, false);
         const stored = storage.getItem(key, null);
+
         if (stored === null) return null;
         const parsed = schema.safeParse(stored);
+
         return parsed.success ? parsed.data : null;
       } catch {
         return null;
@@ -103,6 +120,7 @@ export function createLastKnownCache<T>({
     write: (key, value) => {
       pruneOtherVersions();
       pruneExcessEntries(key, true);
+
       try {
         storage.setItem(key, value);
       } catch {}
@@ -110,8 +128,10 @@ export function createLastKnownCache<T>({
     clear: () => {
       try {
         const owned: string[] = [];
+
         for (let index = 0; index < window.localStorage.length; index += 1) {
           const stored = window.localStorage.key(index);
+
           if (
             stored !== null &&
             (stored === zeroScopeKey || stored.startsWith(versionPrefix))
@@ -119,6 +139,7 @@ export function createLastKnownCache<T>({
             owned.push(stored);
           }
         }
+
         for (const key of owned) window.localStorage.removeItem(key);
       } catch {}
     },

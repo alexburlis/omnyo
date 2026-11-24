@@ -1,5 +1,5 @@
-import { getThread } from "@bb/db";
-import { threadOpenResponseSchema } from "@bb/server-contract";
+import { getThread } from "@omnyo/db";
+import { threadOpenResponseSchema } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { readJson } from "../helpers/json.js";
 import { createMockHubSocket } from "../helpers/mock-hub-socket.js";
@@ -40,10 +40,12 @@ describe("public thread open", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-open",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-open-source",
       });
+
       const thread = seedThread(harness.deps, { projectId: project.id });
 
       const socket = createMockHubSocket();
@@ -85,10 +87,12 @@ describe("public thread open", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-open-bad",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-open-bad-source",
       });
+
       const thread = seedThread(harness.deps, { projectId: project.id });
 
       const socket = createMockHubSocket();
@@ -127,14 +131,17 @@ describe("public thread open", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-open-hidden",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-open-hidden-source",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         visibility: "hidden",
       });
+
       const socket = createMockHubSocket();
       harness.deps.hub.registerClient(socket);
 
@@ -153,10 +160,12 @@ describe("public thread open", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-open-split",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-open-split-source",
       });
+
       const thread = seedThread(harness.deps, { projectId: project.id });
       const socket = createMockHubSocket();
       harness.deps.hub.registerClient(socket);
@@ -165,6 +174,7 @@ describe("public thread open", () => {
         split: "right",
         file: null,
       });
+
       expect(response.status).toBe(200);
       expect(JSON.parse(socket.messages[0]!)).toEqual({
         type: "thread-open",
@@ -178,6 +188,7 @@ describe("public thread open", () => {
         split: "diagonal",
         file: null,
       });
+
       expect(invalid.status).toBe(400);
       expect(socket.messages).toHaveLength(1);
     });
@@ -188,10 +199,12 @@ describe("public thread open", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-pane-action",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-pane-action-source",
       });
+
       const thread = seedThread(harness.deps, { projectId: project.id });
       const socket = createMockHubSocket();
       harness.deps.hub.registerClient(socket);

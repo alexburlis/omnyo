@@ -6,10 +6,11 @@ import { likePrefixPattern } from "./sql-like.js";
 export interface PluginArtifactRow {
   id: string;
   pluginId: string;
-  sourceKind: "npm" | "git";
+  sourceKind: "npm" | "git" | "builtin" | "path";
   npmResolvedVersion: string | null;
   gitResolvedCommit: string | null;
   gitCheckoutRoot: string | null;
+  bundledRootDir: string | null;
   path: string;
   integrity: string | null;
   contentHash: string | null;
@@ -31,11 +32,26 @@ interface PluginArtifactInputBase {
 export type CreatePluginArtifactInput = PluginArtifactInputBase &
   (
     | {
+        sourceKind: "path";
+        npmResolvedVersion: null;
+        gitResolvedCommit: null;
+        gitCheckoutRoot: null;
+        integrity: null;
+      }
+    | {
         sourceKind: "npm";
         npmResolvedVersion: string;
         gitResolvedCommit: null;
         gitCheckoutRoot: null;
         integrity: string;
+      }
+    | {
+        sourceKind: "builtin";
+        npmResolvedVersion: null;
+        gitResolvedCommit: null;
+        gitCheckoutRoot: null;
+        integrity: string;
+        bundledRootDir: string;
       }
     | {
         sourceKind: "git";
@@ -44,6 +60,16 @@ export type CreatePluginArtifactInput = PluginArtifactInputBase &
         gitCheckoutRoot: string;
         integrity: string | null;
       }
+    | {
+        sourceKind: "git";
+        npmResolvedVersion: null;
+        gitResolvedCommit: string;
+        gitCheckoutRoot: null;
+        integrity: string | null;
+        contentHash: string;
+        validationResult: "valid";
+        validatedAt: number;
+      }
   );
 
 export function createPluginArtifact(
@@ -51,6 +77,11 @@ export function createPluginArtifact(
   artifact: CreatePluginArtifactInput,
 ): PluginArtifactRow {
   if (
+    (artifact.sourceKind === "path" &&
+      (artifact.npmResolvedVersion !== null ||
+        artifact.gitResolvedCommit !== null ||
+        artifact.gitCheckoutRoot !== null ||
+        artifact.integrity !== null)) ||
     (artifact.sourceKind === "npm" &&
       (typeof artifact.npmResolvedVersion !== "string" ||
         artifact.npmResolvedVersion.length === 0 ||
@@ -60,20 +91,34 @@ export function createPluginArtifact(
     (artifact.sourceKind === "git" &&
       (typeof artifact.gitResolvedCommit !== "string" ||
         artifact.gitResolvedCommit.length === 0 ||
-        typeof artifact.gitCheckoutRoot !== "string" ||
-        artifact.gitCheckoutRoot.length === 0 ||
+        ((typeof artifact.gitCheckoutRoot !== "string" ||
+          artifact.gitCheckoutRoot.length === 0) &&
+          !(
+            artifact.gitCheckoutRoot === null &&
+            artifact.validationResult === "valid" &&
+            typeof artifact.validatedAt === "number" &&
+            Number.isFinite(artifact.validatedAt) &&
+            artifact.validatedAt >= 0 &&
+            typeof artifact.contentHash === "string" &&
+            /^sha256:[a-f0-9]{64}$/u.test(artifact.contentHash) &&
+            /^[a-f0-9]{40}$/u.test(artifact.gitResolvedCommit)
+          )) ||
         artifact.npmResolvedVersion !== null))
   ) {
     throw new Error(
       "plugin artifact resolution fields do not match its source kind",
     );
   }
+
   const now = Date.now();
   db.insert(pluginArtifacts)
     .values({ ...artifact, createdAt: now, updatedAt: now })
     .run();
   const row = getPluginArtifact(db, artifact.id);
-  if (!row) throw new Error(`plugin artifact missing after insert: ${artifact.id}`);
+
+  if (!row)
+    throw new Error(`plugin artifact missing after insert: ${artifact.id}`);
+
   return row;
 }
 
@@ -81,7 +126,11 @@ export function getPluginArtifact(
   db: DbConnection,
   id: string,
 ): PluginArtifactRow | undefined {
-  return db.select().from(pluginArtifacts).where(eq(pluginArtifacts.id, id)).get();
+  return db
+    .select()
+    .from(pluginArtifacts)
+    .where(eq(pluginArtifacts.id, id))
+    .get();
 }
 
 export function listPluginArtifacts(
@@ -127,6 +176,7 @@ export function listPluginArtifactsUnderPath(
   separator: string,
 ): PluginArtifactRow[] {
   const pattern = directoryContentsPattern(directory, separator);
+
   return db
     .select()
     .from(pluginArtifacts)
@@ -141,6 +191,7 @@ export function listPluginArtifactsAtOrUnderPath(
   separator: string,
 ): PluginArtifactRow[] {
   const pattern = directoryContentsPattern(directory, separator);
+
   return db
     .select()
     .from(pluginArtifacts)
@@ -160,6 +211,7 @@ export function listInstalledPluginIdsOverlappingPath(
   separator: string,
 ): string[] {
   const pattern = directoryContentsPattern(directory, separator);
+
   return db
     .select({ id: installedPlugins.id })
     .from(installedPlugins)
@@ -232,6 +284,7 @@ export function getPluginArtifactByResolution(
       )
       .get();
   }
+
   return db
     .select()
     .from(pluginArtifacts)
@@ -296,6 +349,7 @@ export function deletePluginArtifact(db: DbConnection, id: string): boolean {
       .set({ activeArtifactId: null, updatedAt: Date.now() })
       .where(eq(installedPlugins.activeArtifactId, id))
       .run();
+
     return (
       tx.delete(pluginArtifacts).where(eq(pluginArtifacts.id, id)).run()
         .changes > 0

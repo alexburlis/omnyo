@@ -8,18 +8,31 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { usePersistentOverlayFocus } from "@bb/shared-ui/responsive-overlay";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  dragSettleTransition,
+  MOTION_DURATION_MS,
+  prefersReducedMotion,
+} from "@omnyo/shared-ui/motion";
+import { usePersistentOverlayFocus } from "@omnyo/shared-ui/responsive-overlay";
 import { APP_OVERLAY_LAYER } from "@/components/ui/app-overlay-layers";
 import { hasTextSelectionWithin } from "@/components/ui/gesture-dom";
 import { useHorizontalDismissDrag } from "@/components/ui/use-horizontal-dismiss-drag";
 import { setCompactSecondaryPanelPresentation } from "@/components/ui/secondary-panel-shelf-visibility";
 
 const SHELF_TRANSITION_CLASS =
-  "[transition:translate_220ms_cubic-bezier(0.32,0.72,0,1),width_220ms_cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none!";
-const SHELF_SETTLE_MS = 220;
-const SHELF_DRAG_SETTLE_TRANSITION =
-  "translate 220ms cubic-bezier(0.32, 0.72, 0, 1)";
+  "[transition:translate_var(--motion-duration-drawer)_var(--motion-ease-sheet)] motion-reduce:transition-none!";
+
+const SHELF_CLOSED_TRANSITION_CLASS =
+  "data-[state=closed]:invisible data-[state=closed]:[transition:translate_var(--motion-duration-drawer)_var(--motion-ease-sheet),visibility_0s_linear_var(--motion-duration-drawer)]";
+
+function getShelfSettleTransition(settleMs: number): string {
+  const translate = dragSettleTransition(["translate"], settleMs);
+
+  return translate === "none"
+    ? translate
+    : `${translate}, visibility 0s linear ${settleMs}ms`;
+}
 
 interface CompactSecondaryPanelShelfProps {
   children: ReactNode;
@@ -47,7 +60,15 @@ export function CompactSecondaryPanelShelf({
   const requestClose = useCallback(() => onCloseRef.current(), []);
 
   const clearDragStyles = useCallback(() => {
+    const panel = panelRef.current;
+
+    if (panel !== null) {
+      panel.style.translate = "";
+      panel.style.transition = "";
+    }
+
     const inset = draggedInsetRef.current;
+
     if (inset !== null) {
       inset.style.translate = "";
       inset.style.transition = "";
@@ -60,26 +81,37 @@ export function CompactSecondaryPanelShelf({
       progress,
       width,
       settling,
+      settleMs,
     }: {
       progress: number;
       width: number;
       settling: boolean;
+      settleMs: number;
     }) => {
       const panel = panelRef.current;
+
       if (panel === null) {
         return;
       }
+
+      panel.style.translate = `${width * (1 - progress)}px`;
+      panel.style.transition = settling
+        ? getShelfSettleTransition(settleMs)
+        : "none";
+
       const inset = panel.ownerDocument.querySelector('[data-sidebar="inset"]');
+
       if (inset instanceof HTMLElement) {
         draggedInsetRef.current = inset;
         inset.style.translate = `${-width * progress}px`;
         inset.style.transition = settling
-          ? SHELF_DRAG_SETTLE_TRANSITION
+          ? dragSettleTransition(["translate"], settleMs)
           : "none";
       }
     },
     [],
   );
+
   const { beginPointerDrag, beginTouchDrag } = useHorizontalDismissDrag({
     direction: "right",
     dismissTiming: "immediate",
@@ -106,7 +138,9 @@ export function CompactSecondaryPanelShelf({
   useLayoutEffect(() => {
     if (open) return;
     const panel = panelRef.current;
+
     if (panel === null) return;
+
     if (hasTextSelectionWithin(panel)) {
       panel.ownerDocument.getSelection()?.removeAllRanges();
     }
@@ -114,15 +148,18 @@ export function CompactSecondaryPanelShelf({
 
   useEffect(() => {
     setCompactSecondaryPanelPresentation(state);
+
     return () => setCompactSecondaryPanelPresentation("closed");
   }, [state]);
 
   useEffect(() => {
     if (onContentAnimationEnd === undefined) return;
+
     const timer = window.setTimeout(
       () => onContentAnimationEnd(open),
-      SHELF_SETTLE_MS,
+      prefersReducedMotion() ? 0 : MOTION_DURATION_MS.drawer,
     );
+
     return () => window.clearTimeout(timer);
   }, [onContentAnimationEnd, open]);
 
@@ -136,7 +173,7 @@ export function CompactSecondaryPanelShelf({
       role="dialog"
       aria-modal="true"
       aria-labelledby={labelId}
-      data-bb-portaled-overlay=""
+      data-omnyo-portaled-overlay=""
       tabIndex={-1}
       inert={!open}
       data-testid="secondary-panel-shelf"
@@ -148,10 +185,10 @@ export function CompactSecondaryPanelShelf({
             : APP_OVERLAY_LAYER.secondaryPanel,
       }}
       className={cn(
-        "fixed inset-y-0 right-0 flex h-(--bb-shell-height) flex-col overflow-hidden border-l border-border-seam bg-sidebar pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[var(--bb-safe-area-bottom,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] outline-none",
-        "w-(--secondary-panel-width-mobile) data-[state=full]:w-full data-[state=full]:border-l-0",
+        "fixed inset-y-0 right-0 flex h-(--omnyo-shell-height) flex-col overflow-hidden bg-sidebar pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[var(--omnyo-safe-area-bottom,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] outline-none",
+        "w-full translate-x-full data-[state=full]:translate-x-0",
         SHELF_TRANSITION_CLASS,
-        "data-[state=closed]:invisible data-[state=closed]:[transition:visibility_0s_linear_220ms]",
+        SHELF_CLOSED_TRANSITION_CLASS,
       )}
       onPointerDown={beginPointerDrag}
       onTouchStart={beginTouchDrag}

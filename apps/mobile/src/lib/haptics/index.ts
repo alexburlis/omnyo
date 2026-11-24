@@ -1,1 +1,1 @@
-export { haptic, useHapticsEnabled } from "./haptics";
+export { haptic, iosHaptic, useHapticsEnabled } from "./haptics";

@@ -11,19 +11,22 @@ const desktop = vi.hoisted(() => ({
   openTab: null as null | ((event: { url: string }) => void),
   scoped: true,
 }));
+
 const external = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/bb-desktop", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/bb-desktop")>()),
+vi.mock("@/lib/omnyo-desktop", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/omnyo-desktop")>()),
   getDesktopBrowserApi: () => ({
     onScopedOpenTab: desktop.scoped
       ? (listener: (event: { tabId: string; url: string }) => void) => {
           desktop.scopedOpenTab = listener;
+
           return () => undefined;
         }
       : undefined,
     onOpenTab: (listener: (event: { url: string }) => void) => {
       desktop.openTab = listener;
+
       return () => undefined;
     },
   }),
@@ -49,7 +52,9 @@ function renderSurface(surface: SurfaceCase, isFocused = true) {
     id: `browser:${url ?? ""}`,
     kind: "browser",
   }));
+
   const reveal = vi.fn();
+
   const { result } = renderHook(() =>
     usePanelBrowser({
       available: surface.available,
@@ -60,6 +65,7 @@ function renderSurface(surface: SurfaceCase, isFocused = true) {
       reveal,
     }),
   );
+
   return { openTab, result, reveal };
 }
 
@@ -75,6 +81,7 @@ describe.each(SURFACES)("panel browser on the $name", (surface) => {
   it("opens a blank tab with address focus only when available", () => {
     const { openTab, result, reveal } = renderSurface(surface);
     expect(result.current.open === null).toBe(!surface.available);
+
     if (result.current.open === null) return;
 
     act(() => result.current.open?.());
@@ -105,6 +112,7 @@ describe.each(SURFACES)("panel browser on the $name", (surface) => {
     act(() =>
       desktop.scopedOpenTab?.({ tabId: "browser:mine", url: "https://a.test" }),
     );
+
     if (surface.available) {
       expect(openTab.mock.calls.length + external.mock.calls.length).toBe(1);
     } else {

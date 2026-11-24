@@ -1,13 +1,13 @@
 import path from "node:path";
 import { Command } from "commander";
-import { isRawThreadId } from "@bb/domain";
+import { isRawThreadId } from "@omnyo/domain";
 import {
   threadOpenSplitSchema,
   type PanelFileSource,
   type ThreadOpenFile,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { action } from "../../action.js";
-import { createCliBbSdk } from "../../client.js";
+import { createCliOmnyoSdk } from "../../client.js";
 import { requireThreadId, resolveContextThreadId } from "../../context-env.js";
 import {
   outputJson,
@@ -32,7 +32,7 @@ interface ThreadOpenFileRequest {
   path: string;
 }
 
-type CliBbSdk = ReturnType<typeof createCliBbSdk>;
+type CliOmnyoSdk = ReturnType<typeof createCliOmnyoSdk>;
 
 export function registerOpenCommand(
   parent: Command,
@@ -40,11 +40,11 @@ export function registerOpenCommand(
 ): void {
   parent
     .command("open")
-    .description("Open a BB thread, optionally with a file in its panel")
+    .description("Open an Omnyo thread, optionally with a file in its panel")
     .usage("[id] [path] [options]")
     .argument(
       "[id]",
-      "Thread ID. Inside a BB thread, omit it to target the current thread; a lone argument that is not a thread ID opens that file in the current thread",
+      "Thread ID. Inside an Omnyo thread, omit it to target the current thread; a lone argument that is not a thread ID opens that file in the current thread",
     )
     .argument("[path]", "Thread-relative or absolute file path to open")
     .option("--line <number>", "Line number to focus")
@@ -62,15 +62,20 @@ export function registerOpenCommand(
         ) => {
           const target = resolveThreadOpenTarget(first, second);
           const lineNumber = parseLineNumber(opts.line);
+
           const requestedSplit =
             opts.split === undefined
               ? undefined
               : threadOpenSplitSchema.parse(opts.split);
+
           const split = requestedSplit ?? "replace";
+
           if (target.inputPath === null && lineNumber !== null) {
             throw new Error("--line requires a file path.");
           }
-          const sdk = createCliBbSdk(getUrl());
+
+          const sdk = createCliOmnyoSdk(getUrl());
+
           const file: ThreadOpenFile | null =
             target.inputPath === null
               ? null
@@ -82,6 +87,7 @@ export function registerOpenCommand(
                   })),
                   lineNumber,
                 };
+
           const result = await sdk.threads.open({
             threadId: target.threadId,
             ...(requestedSplit === undefined ? {} : { split: requestedSplit }),
@@ -103,13 +109,16 @@ export function registerOpenCommand(
           printThreadContextLabel(target.resolved);
           console.log(`Thread: ${target.threadId}`);
           console.log(`Split: ${split}`);
+
           if (file !== null) {
             console.log(`Source: ${file.source}`);
             console.log(`Path: ${file.path}`);
+
             if (file.lineNumber !== null) {
               console.log(`Line: ${file.lineNumber}`);
             }
           }
+
           console.log(`Delivered: ${result.delivered}`);
         },
       ),
@@ -121,11 +130,13 @@ function resolveThreadOpenTarget(
   second: string | undefined,
 ): ThreadOpenTarget {
   const contextThreadId = resolveContextThreadId();
+
   if (
     first !== undefined &&
     (second !== undefined || !contextThreadId || isRawThreadId(first))
   ) {
     const threadId = requireThreadId(first);
+
     return {
       threadId,
       inputPath: second ?? null,
@@ -135,9 +146,10 @@ function resolveThreadOpenTarget(
 
   if (!contextThreadId) {
     throw new Error(
-      "Missing thread ID. Pass <threadId> [path], or run inside a BB thread.",
+      "Missing thread ID. Pass <threadId> [path], or run inside an Omnyo thread.",
     );
   }
+
   return {
     threadId: contextThreadId,
     inputPath: first ?? null,
@@ -147,22 +159,27 @@ function resolveThreadOpenTarget(
 
 function parseLineNumber(value: string | undefined): number | null {
   if (value === undefined) return null;
+
   if (!/^[0-9]+$/.test(value)) {
     throw new Error("Invalid --line value. Pass a positive integer.");
   }
+
   const parsed = Number(value);
+
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new Error("Invalid --line value. Pass a positive integer.");
   }
+
   return parsed;
 }
 
 async function resolveThreadOpenFileRequest(args: {
   inputPath: string;
-  sdk: CliBbSdk;
+  sdk: CliOmnyoSdk;
   threadId: string;
 }): Promise<ThreadOpenFileRequest> {
   const inputPath = args.inputPath.trim();
+
   if (inputPath.length === 0) {
     throw new Error("Missing path. Pass <path>.");
   }
@@ -176,6 +193,7 @@ async function resolveThreadOpenFileRequest(args: {
 
   const absoluteInputPath = path.resolve(inputPath);
   const threadStorageRoot = resolveThreadStorageRoot(args.threadId);
+
   if (threadStorageRoot && pathContains(threadStorageRoot, absoluteInputPath)) {
     return {
       source: "thread-storage",
@@ -189,6 +207,7 @@ async function resolveThreadOpenFileRequest(args: {
     args.sdk,
     args.threadId,
   );
+
   if (pathContains(workspaceRoot, absoluteInputPath)) {
     return {
       source: "workspace",
@@ -199,37 +218,45 @@ async function resolveThreadOpenFileRequest(args: {
   }
 
   const acceptedRoots = threadStorageRoot
-    ? "the target thread workspace or BB_THREAD_STORAGE"
+    ? "the target thread workspace or OMNYO_THREAD_STORAGE"
     : "the target thread workspace";
+
   throw new Error(`Absolute path must be inside ${acceptedRoots}.`);
 }
 
 async function resolveThreadWorkspaceRoot(
-  sdk: CliBbSdk,
+  sdk: CliOmnyoSdk,
   threadId: string,
 ): Promise<string> {
   const thread = await sdk.threads.get({ threadId });
+
   if (thread.environmentId === null) {
     throw new Error(`Thread ${threadId} does not have an attached workspace.`);
   }
+
   const environment = await sdk.environments.get({
     environmentId: thread.environmentId,
   });
+
   if (environment.path === null) {
     throw new Error(`Thread ${threadId} does not have a local workspace path.`);
   }
+
   return path.resolve(environment.path);
 }
 
 function resolveThreadStorageRoot(threadId: string): string | undefined {
   if (resolveContextThreadId() !== threadId) return undefined;
-  const rawRoot = process.env.BB_THREAD_STORAGE?.trim();
+  const rawRoot = process.env.OMNYO_THREAD_STORAGE?.trim();
+
   if (!rawRoot) return undefined;
+
   return path.resolve(rawRoot);
 }
 
 function pathContains(root: string, target: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(target));
+
   return (
     relative === "" ||
     (!relative.startsWith("..") && !path.isAbsolute(relative))
@@ -245,6 +272,7 @@ function toPanelRelativePath(root: string, target: string): string {
 
 function normalizePanelRelativePath(inputPath: string): string {
   const normalized = path.normalize(inputPath).split(path.sep).join("/");
+
   if (normalized.includes("\\") || path.posix.isAbsolute(normalized)) {
     throw new Error(
       "Open path must be a relative file path without absolute path syntax.",
@@ -252,6 +280,7 @@ function normalizePanelRelativePath(inputPath: string): string {
   }
 
   const segments = normalized.split("/");
+
   if (
     segments.length === 0 ||
     segments.some(

@@ -5,7 +5,7 @@ import {
   experimental_presentationTitle as presentationTitle,
   experimental_toolPresentation as toolPresentation,
   experimental_withTitle as withTitle,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 
 const SANDBOX_ESCAPED_BADGE = {
   glyph: "SquareUnlock02",
@@ -31,6 +31,7 @@ export function commandPresentation(args: {
     },
     presentationTitle(args.command),
   );
+
   return args.sandboxEscaped
     ? { ...presentation, badge: SANDBOX_ESCAPED_BADGE }
     : presentation;
@@ -48,6 +49,7 @@ export function fileChangePresentation(args: {
       : args.verb === "notebook"
         ? { pending: "Editing notebook", completed: "Edited notebook" }
         : { pending: "Editing file", completed: "Edited file" };
+
   return withTitle(
     { label, icon: { glyph: "EditFile" } },
     args.path === null
@@ -71,10 +73,12 @@ export function delegationPresentation(args: {
     },
     presentationTitle(args.description),
   );
+
   const detailParts = [
     ...(args.subagentType === null ? [] : [`${args.subagentType} agent`]),
     ...(args.model === null ? [] : [`model ${args.model}`]),
   ];
+
   return detailParts.length === 0
     ? presentation
     : { ...presentation, detail: presentationDetail(detailParts.join(" · ")) };
@@ -219,7 +223,9 @@ function titleFromArgs(
   if (field === undefined || args === null || typeof args !== "object") {
     return undefined;
   }
+
   const value = (args as Record<string, unknown>)[field];
+
   return typeof value === "string" ? presentationTitle(value) : undefined;
 }
 
@@ -228,9 +234,11 @@ export function builtinToolPresentation(
   args: unknown,
 ): DeltaPresentation {
   const spec = BUILTIN_TOOL_PRESENTATIONS[tool];
+
   if (spec === undefined) {
     return toolPresentation(tool);
   }
+
   return withTitle(
     {
       label: spec.label,

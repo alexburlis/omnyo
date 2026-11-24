@@ -45,6 +45,7 @@ describe("thread delta grammar v3", () => {
         explanation: "Two steps",
       },
     ];
+
     for (const item of shapes) {
       expect(
         threadDeltaSchema.safeParse({
@@ -73,6 +74,7 @@ describe("thread delta grammar v3", () => {
       kind: "codex/goal",
       payload: { objective: "Ship it" },
     };
+
     for (const delta of [
       { kind: "item.open", key: { providerItemId: "tc-1" }, item },
       {
@@ -92,6 +94,7 @@ describe("thread delta grammar v3", () => {
         `expected ${delta.kind} with presentation to parse`,
       ).toBe(true);
     }
+
     expect(
       deltaItemShapeSchema.parse({ ...item, presentation }),
     ).not.toHaveProperty("presentation");
@@ -139,6 +142,7 @@ describe("thread delta grammar v3", () => {
         background: false,
       }).success,
     ).toBe(false);
+
     for (const kind of ["goal", "Codex/goal", "codex/goal/x", "codex/"]) {
       expect(
         deltaItemShapeSchema.safeParse({
@@ -149,6 +153,7 @@ describe("thread delta grammar v3", () => {
         `expected extension kind ${JSON.stringify(kind)} to be rejected`,
       ).toBe(false);
     }
+
     expect(
       deltaItemShapeSchema.safeParse({
         type: "extension",
@@ -235,6 +240,7 @@ describe("handshake v3 capabilities", () => {
       grammarVersions: [2, 3],
       steerMode: "inject",
     });
+
     expect(parsed.grammarVersions).toEqual([2, 3]);
     expect(parsed.steerMode).toBe("inject");
   });
@@ -242,8 +248,9 @@ describe("handshake v3 capabilities", () => {
   it("negotiates the highest common grammar version in both directions", () => {
     const params = initializeParamsSchema.parse({
       protocolVersion: 2,
-      client: { name: "bb", version: "1.0.0" },
+      client: { name: "omnyo", version: "1.0.0" },
     });
+
     expect(params.grammarVersions).toEqual([2, 2]);
     expect(negotiateGrammarVersion(params.grammarVersions, [2, 3])).toBe(2);
     expect(negotiateGrammarVersion([2, 3], [2, 3])).toBe(3);
@@ -286,6 +293,7 @@ describe("provider/recovery notification", () => {
         `expected ${kind} to parse`,
       ).toBe(true);
     }
+
     expect(
       providerRecoveryNotificationSchema.safeParse({
         threadId: "thr_1",

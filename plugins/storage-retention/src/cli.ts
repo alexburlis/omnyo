@@ -2,38 +2,55 @@ import type { Storage } from "./storage.js";
 import {
   cliCommand,
   defineCli,
-  type BbPluginApi,
+  type PluginApi,
   type PluginCliResult,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { policySchema } from "./contract.js";
 import type { Service } from "./service.js";
+import type { ManagedService } from "./managed-service.js";
+import { managedCliCommands } from "./managed-cli.js";
+import { housekeepingCliCommands } from "./housekeeping-cli.js";
+import type { HousekeepingService } from "./housekeeping-service.js";
+
+import type { Worktrees } from "./worktrees/server.js";
 
 const MACHINE = { type: "string", description: "Machine ID" } as const;
+
 const YES = {
   type: "boolean",
   description: "Confirm this destructive operation",
 } as const;
+
 function required(value: string | undefined, name: string) {
   if (!value) throw new Error(`Provide --${name}.`);
+
   return value;
 }
+
 function booleanSetting(
   value: string | undefined,
   fallback: boolean,
   flag: string,
 ) {
   if (value === undefined) return fallback;
+
   if (value !== "true" && value !== "false")
     throw new Error(`Use true or false for --${flag}.`);
+
   return value === "true";
 }
+
 function days(value: string | undefined, fallback: number | null) {
   if (value === undefined) return fallback;
+
   if (value === "never") return null;
+
   if (!/^\d+$/.test(value))
     throw new Error("Use a number of days (1–3650) or never.");
+
   return Number(value);
 }
+
 async function output(work: () => Promise<unknown>): Promise<PluginCliResult> {
   try {
     return {
@@ -47,12 +64,16 @@ async function output(work: () => Promise<unknown>): Promise<PluginCliResult> {
     };
   }
 }
+
 export function registerCli(
-  bb: BbPluginApi,
+  api: PluginApi,
   service: Service,
   storage: Storage,
+  managed: ManagedService,
+  housekeeping: HousekeepingService,
+  worktrees: Worktrees,
 ) {
-  bb.cli.register(
+  api.cli.register(
     defineCli({
       name: "storage",
       summary: "Inspect storage and manage thread retention (JSON output)",
@@ -61,13 +82,45 @@ export function registerCli(
         run: (input) => ({ exitCode: 0, stdout: input.help }),
       }),
       commands: {
+        ...managedCliCommands(managed),
+        ...housekeepingCliCommands(housekeeping),
+        worktrees: cliCommand({
+          summary: "Read the saved worktree and branch inventory",
+          aliases: ["worktrees status"],
+          positionals: [{ name: "project", description: "Project ID" }],
+          run: (input) =>
+            output(async () => worktrees.status(input.positionals.project)),
+        }),
+        "worktrees rescan": cliCommand({
+          summary: "Start a fresh worktree and branch scan",
+          run: () => output(async () => worktrees.requestScan()),
+        }),
+        "worktrees clean": cliCommand({
+          summary: "Clean reviewed working folders and branches",
+          positionals: [
+            {
+              name: "scanId",
+              description: "Saved scan ID",
+              required: true,
+            },
+          ],
+          options: { yes: YES },
+          run: (input) =>
+            output(async () => {
+              if (!input.options.yes)
+                throw new Error("Pass --yes to clean the reviewed items.");
+
+              return worktrees.cleanSaved(input.positionals.scanId);
+            }),
+        }),
         cleanup: cliCommand({
           summary: "Start background cleanup; read progress with storage usage",
           options: {
             machine: MACHINE,
             kind: {
               type: "string",
-              description: "orphans, development, or worktrees",
+              description:
+                "orphans, development, worktrees, or externalWorktrees",
             },
             yes: YES,
           },
@@ -76,18 +129,21 @@ export function registerCli(
               if (!options.yes)
                 throw new Error("Pass --yes to confirm cleanup.");
               const kind = options.kind;
+
               if (
                 kind !== "orphans" &&
                 kind !== "development" &&
-                kind !== "worktrees"
+                kind !== "worktrees" &&
+                kind !== "externalWorktrees"
               )
                 throw new Error(
-                  "Use --kind orphans, development, or worktrees.",
+                  "Use --kind orphans, development, worktrees, or externalWorktrees.",
                 );
               await storage.startCleanup({
                 hostId: required(options.machine, "machine"),
                 kind,
               });
+
               return { started: true };
             }),
         }),
@@ -105,7 +161,8 @@ export function registerCli(
             },
             "delete-storage-on-archive": {
               type: "string",
-              description: "Delete thread storage on archive: true or false",
+              description:
+                "Delete thread storage once a day after 3 hours archived: true or false",
             },
             "delete-dev-data-on-checkout-removal": {
               type: "string",
@@ -116,14 +173,20 @@ export function registerCli(
               type: "boolean",
               description: "Save the supplied settings",
             },
+            run: {
+              type: "boolean",
+              description: "Run the saved retention policy now",
+            },
             yes: YES,
           },
           run: (input) =>
             output(async () => {
               const state = await service.state();
               const cleanup = input.options["delete-storage-on-archive"];
+
               const devCleanup =
                 input.options["delete-dev-data-on-checkout-removal"];
+
               const policy = policySchema.parse({
                 deleteStorageOnArchive: booleanSetting(
                   cleanup,
@@ -144,13 +207,26 @@ export function registerCli(
                   state.policy.deleteAfterDays,
                 ),
               });
+
+              if (input.options.run) {
+                if (!input.options.yes)
+                  throw new Error(
+                    "Pass --run --yes to run the saved retention policy.",
+                  );
+                await service.sweep();
+
+                return service.state();
+              }
+
               if (input.options.save) {
                 if (!input.options.yes)
                   throw new Error(
                     "Preview first, then pass --save --yes to confirm the policy.",
                   );
+
                 return service.configure(policy);
               }
+
               if (
                 input.options["archive-after"] !== undefined ||
                 input.options["delete-after"] !== undefined ||
@@ -158,6 +234,7 @@ export function registerCli(
                 devCleanup !== undefined
               )
                 return { policy, preview: await service.preview(policy) };
+
               return state;
             }),
         }),
@@ -178,6 +255,7 @@ export function registerCli(
                 return input.options.machine
                   ? storage.scanHost({ hostId: input.options.machine })
                   : storage.scanAll();
+
               return input.options.machine
                 ? storage.host({
                     hostId: input.options.machine,
@@ -194,6 +272,7 @@ export function registerCli(
                 throw new Error(
                   "Pass --yes to permanently remove orphaned storage.",
                 );
+
               return storage.removeOrphans({
                 hostId: required(input.options.machine, "machine"),
               });
@@ -209,6 +288,7 @@ export function registerCli(
                 throw new Error(
                   "Pass --yes to permanently delete large files from archived threads.",
                 );
+
               return storage.clearLargeFiles({
                 hostId: input.options.machine ?? null,
               });
@@ -224,6 +304,45 @@ export function registerCli(
               });
             }),
         }),
+        "remove-external-worktrees": cliCommand({
+          summary:
+            "Remove reviewed external working folders and keep their branches",
+          options: {
+            machine: MACHINE,
+            path: {
+              type: "string",
+              description:
+                "Remove only this worktree path from the last scan (default: every worktree created outside Omnyo)",
+            },
+            force: {
+              type: "boolean",
+              description:
+                "Legacy option. The shared worktree cleanup refuses forced removal.",
+            },
+            yes: YES,
+          },
+          run: (input) =>
+            output(async () => {
+              if (!input.options.yes)
+                throw new Error(
+                  "Pass --yes to permanently delete these worktree checkouts.",
+                );
+              const hostId = required(input.options.machine, "machine");
+
+              if (input.options.path === undefined) {
+                if (input.options.force)
+                  throw new Error("--force requires --path.");
+
+                return storage.removeExternalWorktrees({ hostId, paths: null });
+              }
+
+              return storage.removeExternalWorktrees({
+                hostId,
+                paths: [input.options.path],
+                force: input.options.force === true,
+              });
+            }),
+        }),
         "clear-thread": cliCommand({
           summary: "Empty a stopped thread's storage directory",
           options: {
@@ -236,6 +355,7 @@ export function registerCli(
                 throw new Error(
                   "Pass --yes to permanently clear thread storage.",
                 );
+
               return storage.clearThread({
                 threadId: required(input.options.thread, "thread"),
               });
@@ -251,6 +371,7 @@ export function registerCli(
                 throw new Error(
                   "Pass --yes to permanently clear archived thread files.",
                 );
+
               return storage.clearArchivedFiles({
                 hostId: required(input.options.machine, "machine"),
               });
@@ -258,13 +379,13 @@ export function registerCli(
         }),
         "remove-dev-instances": cliCommand({
           summary:
-            "Remove ~/.bb-dev instances whose source checkout no longer exists, stopping servers still running from them",
+            "Remove ~/.omnyo-dev instances whose source checkout no longer exists, stopping servers still running from them",
           options: {
             machine: MACHINE,
             instance: {
               type: "string",
               description:
-                "Remove only this ~/.bb-dev entry, stopping its dev server first if it is running (default: every instance with a missing checkout)",
+                "Remove only this ~/.omnyo-dev entry, stopping its dev server first if it is running (default: every instance with a missing checkout)",
             },
             yes: YES,
           },
@@ -274,6 +395,7 @@ export function registerCli(
                 throw new Error(
                   "Pass --yes to stop their servers and permanently remove development instance data.",
                 );
+
               return storage.removeDevInstances({
                 hostId: required(input.options.machine, "machine"),
                 ...(input.options.instance === undefined

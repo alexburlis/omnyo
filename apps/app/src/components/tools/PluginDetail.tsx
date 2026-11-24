@@ -1,6 +1,10 @@
-import { PluginCardAuthorAvatar } from "@/components/plugin/management/PluginCard";
-import { CURATED_PLUGIN_MARKETPLACE_NAME } from "@bb/server-contract";
-import { useSyncExternalStore } from "react";
+import {
+  OmnyoAuthorByline,
+  PluginAuthorByline,
+  PluginCardAuthorAvatar,
+} from "@/components/plugin/management/PluginCard";
+import { PluginOfficialBadge } from "@/components/plugin/management/PluginOfficialBadge";
+import { useSyncExternalStore, type ReactNode } from "react";
 import {
   ResourceActionButton,
   ResourceActivitySection,
@@ -11,16 +15,16 @@ import {
   ResourceListState,
   ResourceOverflowMenu,
   type ResourceOverflowMenuItem,
-} from "@bb/shared-ui/resource-list";
-import { Switch } from "@bb/shared-ui/switch";
+} from "@omnyo/shared-ui/resource-list";
+import { Switch } from "@omnyo/shared-ui/switch";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
-import { formatHomePathForDisplay } from "@bb/shared-ui/lib/utils";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/shared-ui/tooltip";
+import { formatHomePathForDisplay } from "@omnyo/shared-ui/lib/utils";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { useNavigate } from "react-router-dom";
 import { getPluginConfigurationRoutePath } from "@/lib/route-paths";
 import {
@@ -32,18 +36,18 @@ import {
   CatalogEntryIconChip,
   formatAbsoluteDate,
   PluginLogo,
-  pluginInstallCountPresentation,
 } from "@/components/plugin/management/plugin-ui";
 import {
+  PluginDetailAuthorItem,
   PluginDetailMetadata,
   PluginDetailMetadataItem,
   PluginMarketplaceByline,
   PluginMarketplaceDetailMetadata,
   PluginMarketplaceListingSections,
   PluginMarketplaceOverview,
-  PluginMarketplaceSource,
   PluginMoreFromAuthorSection,
   PluginOverviewLead,
+  PluginRepositoryLink,
 } from "@/components/plugin/management/PluginMarketplaceListing";
 import { pluginRuntimeStatusPresentation } from "@/components/plugin/management/plugin-status";
 import { PluginCatalogInstallControl } from "@/components/plugin/management/PluginCatalogInstallControl";
@@ -54,6 +58,7 @@ import {
 import {
   catalogEntryDetailKey,
   catalogEntryInstallBlocker,
+  pluginIsOfficial,
 } from "@/components/plugin/management/installed-plugin-catalog";
 import {
   PluginHealthBanner,
@@ -77,49 +82,19 @@ import {
   type PluginFrontendDiagnostic,
 } from "@/lib/plugin-frontend";
 import { usePluginSlots } from "@/lib/plugin-slots";
-import { copyToClipboardWithToast, useClipboardCopy } from "@/lib/clipboard";
-
-function pluginMarketplaceUrl({
-  marketplace,
-  entryId,
-}: {
-  marketplace: string | null;
-  entryId: string | null;
-}): string | null {
-  if (marketplace !== CURATED_PLUGIN_MARKETPLACE_NAME || entryId === null) {
-    return null;
-  }
-  return `https://getbb.app/marketplace/${encodeURIComponent(entryId)}`;
-}
-
-function copyMarketplaceLinkItems(
-  url: string | null,
-): ResourceOverflowMenuItem[] {
-  if (url === null) return [];
-  return [
-    {
-      label: "Copy marketplace link",
-      icon: "Copy",
-      onSelect: () =>
-        void copyToClipboardWithToast(url, {
-          successMessage: "Marketplace link copied",
-          errorMessage: "Failed to copy marketplace link.",
-        }),
-    },
-  ];
-}
+import { useClipboardCopy } from "@/lib/clipboard";
 
 export function pluginIsLocalSource(plugin: PluginListItem): boolean {
   return plugin.source.startsWith("path:");
 }
 
 export function pluginRemovalLabel(plugin: PluginListItem): string {
-  return pluginIsLocalSource(plugin) ? "Remove from bb" : "Uninstall";
+  return pluginIsLocalSource(plugin) ? "Remove from Omnyo" : "Uninstall";
 }
 
 export function pluginRemovalDescription(plugin: PluginListItem): string {
   return pluginIsLocalSource(plugin)
-    ? `Remove "${plugin.id}" from bb and delete its settings, secrets, and schedules? Its source files stay on disk. To move it to another directory, install the new path instead; that keeps its settings.`
+    ? `Remove "${plugin.id}" from Omnyo and delete its settings, secrets, and schedules? Its source files stay on disk. To move it to another directory, install the new path instead; that keeps its settings.`
     : `Uninstall "${plugin.id}" and delete its managed files, settings, secrets, and schedules?`;
 }
 
@@ -138,55 +113,68 @@ function PluginLocalSource({
   });
 
   return (
-    <ResourceDefinitionSection label="Source">
-      <div className="flex min-w-0 items-center gap-3">
-        <Icon
-          name="Folder"
-          className="size-4 shrink-0 text-muted-foreground"
-          aria-hidden
+    <div className="flex min-w-0 items-center gap-3">
+      <Icon
+        name="Folder"
+        className="size-4 shrink-0 text-muted-foreground"
+        aria-hidden
+      />
+      <div className="min-w-0 flex-1">
+        <TooltipProvider delayDuration={250}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                tabIndex={0}
+                className="block truncate rounded-sm font-mono text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {formatHomePathForDisplay(path)}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-sm break-all">
+              {path}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <ResourceActionButton
+          label="Open source"
+          icon="ExternalLink"
+          disabled={openDisabled}
+          disabledReason={openDisabled ? "No editor configured" : undefined}
+          onClick={onOpen}
         />
-        <div className="min-w-0 flex-1">
-          <TooltipProvider delayDuration={250}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  tabIndex={0}
-                  className="block truncate rounded-sm font-mono text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  {formatHomePathForDisplay(path)}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-sm break-all">
-                {path}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <ResourceActionButton
-            label="Open source"
-            icon="ExternalLink"
-            disabled={openDisabled}
-            disabledReason={openDisabled ? "No editor configured" : undefined}
-            onClick={onOpen}
-          />
-          <ResourceActionButton
-            label={`Copy plugin path: ${path}`}
-            tooltipLabel={copied ? "Copied" : "Copy path"}
-            icon={copied ? "Check" : "Copy"}
-            onClick={() => void copy()}
-          />
-        </div>
+        <ResourceActionButton
+          label={`Copy plugin path: ${path}`}
+          tooltipLabel={copied ? "Copied" : "Copy path"}
+          icon={copied ? "Check" : "Copy"}
+          onClick={() => void copy()}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PluginSourceSection({
+  repositoryUrl,
+  local,
+}: {
+  repositoryUrl: string | null;
+  local: ReactNode;
+}) {
+  if (repositoryUrl === null && local === null) return null;
+
+  return (
+    <ResourceDefinitionSection label="Source">
+      <div className="min-w-0 space-y-2">
+        {repositoryUrl === null ? null : (
+          <PluginRepositoryLink url={repositoryUrl} />
+        )}
+        {local}
       </div>
     </ResourceDefinitionSection>
   );
 }
-
-const OFFICIAL_BYLINE_ENTRY = {
-  author: null,
-  marketplace: "bb-official",
-  publisherLabel: "BB Official",
-} as const;
 
 export function CatalogPluginDetail({
   entry,
@@ -199,12 +187,10 @@ export function CatalogPluginDetail({
   catalogEntries: readonly PluginCatalogSearchEntry[];
   onOpenPlugin: (pluginId: string) => void;
 }) {
-  const presentation = pluginInstallCountPresentation(entry);
-  const count = presentation?.tone === "count" ? presentation : undefined;
   const installBlocker = catalogEntryInstallBlocker(entry);
   const installJob = useCatalogEntryInstallJob(entry);
   const { mutate: cancelInstall } = useCancelPluginInstallJob();
-  const overflowItems = copyMarketplaceLinkItems(pluginMarketplaceUrl(entry));
+
   return (
     <ResourceDetailPage
       maxWidthClassName="max-w-5xl"
@@ -220,19 +206,10 @@ export function CatalogPluginDetail({
           showLabel
           disabled={installBlocker !== null}
           unavailableReason={installBlocker}
-          count={count}
           onInstall={() => onInstall(entry)}
           installJob={installJob}
           onCancelInstall={cancelInstall}
         />
-      }
-      overflowMenu={
-        overflowItems.length === 0 ? undefined : (
-          <ResourceOverflowMenu
-            label={`${entry.displayName} actions`}
-            items={overflowItems}
-          />
-        )
       }
     >
       <ResourceDetailStack>
@@ -259,12 +236,14 @@ export function CatalogPluginDetailBanner({
       <PluginBannerBar
         tone="warning"
         icon="AlertTriangle"
-        title="Update bb to install this plugin"
+        title="Update Omnyo to install this plugin"
         detail={entry.incompatibleReason}
       />
     );
   }
+
   if (entry.conflictingInstallSource === null) return null;
+
   return (
     <PluginBannerBar
       tone="warning"
@@ -286,6 +265,7 @@ function pluginHealthBannerState(
   frontendDiagnostic: PluginFrontendDiagnostic | undefined,
 ): { plugin: PluginListItem } | null {
   if (!plugin.enabled) return null;
+
   if (pluginRuntimeStatusPresentation(plugin) !== null) return { plugin };
 
   if (pluginFrontendDiagnosticRequiresFailureBanner(frontendDiagnostic)) {
@@ -297,6 +277,7 @@ function pluginHealthBannerState(
       },
     };
   }
+
   return null;
 }
 
@@ -322,12 +303,15 @@ export function PluginDetailBanners({
     getPluginFrontendDiagnostics,
     getPluginFrontendDiagnostics,
   );
+
   const frontendDiagnostic = frontendDiagnostics.get(plugin.id);
   const banner = pluginHealthBannerState(plugin, frontendDiagnostic);
+
   const publishedListing = catalogEntries.find(
     (entry) =>
       entry.pluginId === plugin.id && entry.conflictingInstallSource !== null,
   );
+
   return (
     <>
       {banner === null ? null : (
@@ -387,12 +371,15 @@ export function PluginDetail({
 }) {
   const navigate = useNavigate();
   const { settingsSections } = usePluginSlots();
+
   const sourceQuery = usePluginSource(plugin?.id ?? "", {
     enabled: plugin !== null && !plugin.source.startsWith("builtin:"),
   });
+
   usePluginUpdateCheck(plugin?.id ?? null, {
     enabled: plugin !== null && pluginHasUpdateSurfaces(plugin),
   });
+
   if (isLoading) {
     return (
       <ResourceListState
@@ -417,35 +404,33 @@ export function PluginDetail({
 
   const hasUpdateManagement = pluginHasUpdateSurfaces(plugin);
   const canEditSource = pluginIsLocalSource(plugin);
-  const updatesWithBb = plugin.source.startsWith("builtin:");
+  const updatesWithOmnyo = plugin.source.startsWith("builtin:");
   const installedAt = sourceQuery.data?.installedAt ?? null;
-  const installedValue = updatesWithBb
-    ? "Updates with bb"
+
+  const installedValue = updatesWithOmnyo
+    ? "Updates with Omnyo"
     : installedAt !== null
       ? formatAbsoluteDate(installedAt)
       : sourceQuery.isPending
         ? "Loading…"
         : "Install date unavailable";
+
   const hasReleaseControl =
     hasUpdateManagement && plugin.updateState.availableVersion !== null;
+
   const hasReleaseUpdate =
     hasUpdateManagement &&
     (plugin.updateState.availableVersion !== null ||
       plugin.updateState.blockedVersion !== null ||
       plugin.updateState.lastFailure !== null);
+
   const hasConfiguration =
     plugin.hasSettings ||
     settingsSections.some((section) => section.pluginId === plugin.id);
 
   const pluginName = plugin.name ?? plugin.id;
-  const marketplaceUrl = pluginMarketplaceUrl(
-    catalogEntry ?? {
-      marketplace: plugin.catalogMarketplaceName,
-      entryId: plugin.catalogEntryId,
-    },
-  );
+
   const overflowItems: ResourceOverflowMenuItem[] = [
-    ...copyMarketplaceLinkItems(marketplaceUrl),
     ...(canEditSource
       ? [
           {
@@ -460,20 +445,25 @@ export function PluginDetail({
       label: pluginRemovalLabel(plugin),
       icon: "Trash2" as const,
       tone: "destructive" as const,
-      disabled: pending || plugin.provenance === "builtin",
-      disabledReason:
-        plugin.provenance === "builtin"
-          ? "Included with BB; disable this plugin instead."
-          : undefined,
+      disabled: pending || !plugin.removable,
+      disabledReason: plugin.removable
+        ? undefined
+        : "Included with Omnyo; disable this plugin instead.",
       onSelect: () => onDelete(plugin),
     },
   ];
+
+  const official = pluginIsOfficial(plugin, catalogEntry);
+  const author = plugin.author ?? catalogEntry?.author ?? null;
+
   const bylineEntry =
-    catalogEntry ??
-    (plugin.provenance === "builtin" ||
-    plugin.catalogMarketplaceName === "bb-official"
-      ? OFFICIAL_BYLINE_ENTRY
-      : undefined);
+    catalogEntry === undefined
+      ? undefined
+      : { ...catalogEntry, author, official };
+
+  const repositoryUrl =
+    catalogEntry?.repositoryUrl ?? plugin.repositoryUrl ?? null;
+
   return (
     <ResourceDetailPage
       maxWidthClassName="max-w-5xl"
@@ -485,9 +475,21 @@ export function PluginDetail({
         )
       }
       metadata={
-        bylineEntry === undefined ? undefined : (
+        bylineEntry !== undefined ? (
           <PluginMarketplaceByline entry={bylineEntry} />
-        )
+        ) : author !== null ? (
+          <PluginAuthorByline
+            name={author.name}
+            github={author.github}
+            official={official}
+          >
+            {author.name}
+          </PluginAuthorByline>
+        ) : plugin.provenance === "builtin" ? (
+          <OmnyoAuthorByline official={official} />
+        ) : official ? (
+          <PluginOfficialBadge />
+        ) : undefined
       }
       actions={
         hasConfiguration ? (
@@ -506,12 +508,17 @@ export function PluginDetail({
         ) : undefined
       }
       lifecycleControl={
-        <Switch
-          checked={plugin.enabled}
-          disabled={pending}
-          aria-label={`${plugin.enabled ? "Disable" : "Enable"} ${pluginName}`}
-          onCheckedChange={() => onToggle(plugin)}
-        />
+        <label className="flex cursor-pointer items-center gap-2 rounded-md py-0.5 pl-2 text-xs text-muted-foreground">
+          <span aria-hidden="true" className="min-w-5 text-right">
+            {plugin.enabled ? "On" : "Off"}
+          </span>
+          <Switch
+            checked={plugin.enabled}
+            disabled={pending}
+            aria-label={`${plugin.enabled ? "Disable" : "Enable"} ${pluginName}`}
+            onCheckedChange={() => onToggle(plugin)}
+          />
+        </label>
       }
       overflowMenu={
         <ResourceOverflowMenu
@@ -535,15 +542,18 @@ export function PluginDetail({
         ) : (
           <PluginMarketplaceOverview entry={catalogEntry} />
         )}
-        {canEditSource ? (
-          <PluginLocalSource
-            path={plugin.rootDir}
-            openDisabled={pending || openSourceDisabled}
-            onOpen={() => onOpenSource(plugin)}
-          />
-        ) : catalogEntry !== undefined ? (
-          <PluginMarketplaceSource entry={catalogEntry} />
-        ) : null}
+        <PluginSourceSection
+          repositoryUrl={repositoryUrl}
+          local={
+            canEditSource ? (
+              <PluginLocalSource
+                path={plugin.rootDir}
+                openDisabled={pending || openSourceDisabled}
+                onOpen={() => onOpenSource(plugin)}
+              />
+            ) : null
+          }
+        />
         <ResourceDetailReleaseSection
           label="Details"
           actions={
@@ -553,11 +563,13 @@ export function PluginDetail({
           }
         >
           <PluginDetailMetadata>
-            {catalogEntry === undefined ? null : (
-              <PluginMarketplaceDetailMetadata entry={catalogEntry} />
+            {bylineEntry === undefined ? (
+              <PluginDetailAuthorItem author={author} />
+            ) : (
+              <PluginMarketplaceDetailMetadata entry={bylineEntry} />
             )}
             <PluginDetailMetadataItem
-              label={updatesWithBb ? "Delivery" : "Installed"}
+              label={updatesWithOmnyo ? "Delivery" : "Installed"}
             >
               {installedValue}
             </PluginDetailMetadataItem>

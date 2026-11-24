@@ -2,8 +2,8 @@ import {
   toPositiveNumber,
   type ContextSnapshot,
   type ThreadUsageCost,
-} from "@bb/domain";
-import type { ThreadContextWindowUsage } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { ThreadContextWindowUsage } from "@omnyo/server-contract";
 import type { ThreadEventWithMeta } from "./build-event-projection.js";
 
 interface ThreadContextWindowSignal {
@@ -19,6 +19,7 @@ function toNonNegativeNumber(value: number): number | null {
   if (!Number.isFinite(value) || value < 0) {
     return null;
   }
+
   return value;
 }
 
@@ -26,10 +27,13 @@ function decodeContextWindowSignal(
   eventWithMeta: ThreadEventWithMeta,
 ): ThreadContextWindowSignal | null {
   const { event } = eventWithMeta;
+
   if (event.type !== "thread/contextWindowUsage/updated") {
     return null;
   }
+
   const { contextWindowUsage } = event;
+
   return {
     providerThreadId: event.providerThreadId,
     snapshot: contextWindowUsage.snapshot,
@@ -54,6 +58,7 @@ function getOrderedContextWindowEvents(
       return [...events].sort((left, right) => left.meta.seq - right.meta.seq);
     }
   }
+
   return events;
 }
 
@@ -73,11 +78,13 @@ export function extractThreadContextWindowUsage(
 
   for (let index = orderedEvents.length - 1; index >= 0; index -= 1) {
     const signal = decodeContextWindowSignal(orderedEvents[index]);
+
     if (!signal) continue;
 
     if (providerThreadId === undefined) {
       providerThreadId = signal.providerThreadId;
     }
+
     if (
       cost === undefined &&
       signal.cost !== undefined &&
@@ -85,6 +92,7 @@ export function extractThreadContextWindowUsage(
     ) {
       cost = signal.cost;
     }
+
     if (!windowResolved) {
       if (
         signal.providerThreadId !== providerThreadId ||
@@ -96,12 +104,14 @@ export function extractThreadContextWindowUsage(
         if (signal.snapshot.autoCompactAtTokens !== null) {
           retainedWindow = signal.snapshot.contextWindowTokens;
         }
+
         windowResolved = true;
       }
     }
 
     if (usedTokens === undefined && !usageIsUnknown) {
       snapshot = signal.snapshot;
+
       if (signal.usedTokens === null) {
         usageIsUnknown = true;
         estimated = signal.estimated;

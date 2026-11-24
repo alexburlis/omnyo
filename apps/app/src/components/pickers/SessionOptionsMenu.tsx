@@ -1,30 +1,33 @@
 import { Fragment } from "react";
-import type { ThreadSessionOption } from "@bb/domain";
-import type { ThreadTimelineSessionOption } from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { COARSE_POINTER_ICON_SIZE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
+import type { ThreadSessionOption } from "@omnyo/domain";
+import type { ThreadTimelineSessionOption } from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { COARSE_POINTER_ICON_SIZE_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from "@bb/shared-ui/dropdown-menu";
-import { LIST_HOVER_TRANSITION } from "@bb/shared-ui/motion";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/dropdown-menu";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   OPTION_BASE_CLASS_NAME,
   OPTION_INTERACTIVE_CLASS_NAME,
   OPTION_MENU_CONTENT_CLASS_NAME,
   OPTION_MUTED_CLASS_NAME,
   OPTION_TRIGGER_CONTENT_CLASS_NAME,
-} from "@bb/shared-ui/option-display";
+} from "@omnyo/shared-ui/option-display";
+import { usePickerModal } from "./use-picker-modal";
 
 const SESSION_OPTIONS_MENU_LABEL = "Agent options";
+
 const SESSION_OPTION_MODE_CATEGORY = "mode";
 
 export type SessionOptionChoice = string | boolean;
+
 export type SessionOptionChoices = Readonly<
   Record<string, SessionOptionChoice>
 >;
@@ -55,7 +58,9 @@ export function buildSessionOptionMenuSections(
     const chosen = Object.hasOwn(choices, option.id)
       ? choices[option.id]
       : undefined;
+
     const effective = chosen ?? option.pendingValue ?? option.value;
+
     const items: SessionOptionMenuItem[] =
       option.type === "boolean"
         ? [
@@ -69,6 +74,7 @@ export function buildSessionOptionMenuSections(
             value: value.id,
             selected: value.id === effective,
           }));
+
     return {
       id: option.id,
       label: option.label,
@@ -87,12 +93,14 @@ export function sessionOptionViewSelections(
   choices: SessionOptionChoices,
 ): Record<string, SessionOptionChoice> {
   const selections: Record<string, SessionOptionChoice> = {};
+
   for (const option of options) {
     selections[option.id] =
       (Object.hasOwn(choices, option.id) ? choices[option.id] : undefined) ??
       option.pendingValue ??
       option.value;
   }
+
   return selections;
 }
 
@@ -121,6 +129,7 @@ export function declaredSessionOptionViews(
     const active = activeModelOptions.find(
       (candidate) => candidate.id === option.id,
     );
+
     const base = {
       id: option.id,
       label: option.label,
@@ -128,9 +137,11 @@ export function declaredSessionOptionViews(
       category: option.category ?? null,
       pendingValue: null,
     };
+
     const selected = Object.hasOwn(selections, option.id)
       ? selections[option.id]
       : undefined;
+
     return option.type === "boolean"
       ? {
           ...base,
@@ -167,10 +178,13 @@ export function sessionOptionsTriggerLabel(
   const mode = sections.find(
     (section) => section.category === SESSION_OPTION_MODE_CATEGORY,
   );
+
   if (mode !== undefined) {
     return mode.selectedLabel;
   }
+
   const only = sections.length === 1 ? sections[0] : undefined;
+
   return only === undefined
     ? "Options"
     : `${only.label}: ${only.selectedLabel}`;
@@ -189,11 +203,15 @@ export function SessionOptionsMenu({
   onChange,
   disabled,
 }: SessionOptionsMenuProps) {
+  const { modal, modalHostRef } = usePickerModal();
+
   if (options.length === 0) {
     return null;
   }
+
   const sections = buildSessionOptionMenuSections(options, choices);
   const triggerLabel = sessionOptionsTriggerLabel(sections);
+
   const trigger = (
     <Button
       type="button"
@@ -204,7 +222,6 @@ export function SessionOptionsMenu({
       className={cn(
         OPTION_BASE_CLASS_NAME,
         OPTION_INTERACTIVE_CLASS_NAME,
-        LIST_HOVER_TRANSITION,
         OPTION_MUTED_CLASS_NAME,
         disabled && "cursor-default disabled:opacity-100",
       )}
@@ -225,12 +242,16 @@ export function SessionOptionsMenu({
       )}
     </Button>
   );
+
   if (disabled) {
     return trigger;
   }
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+    <DropdownMenu modal={modal}>
+      <DropdownMenuTrigger ref={modalHostRef} asChild>
+        {trigger}
+      </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
         className={OPTION_MENU_CONTENT_CLASS_NAME}

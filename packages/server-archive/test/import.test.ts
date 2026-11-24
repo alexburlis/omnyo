@@ -38,8 +38,9 @@ import {
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "bb-server-import-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "omnyo-server-import-"));
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 
@@ -80,12 +81,13 @@ async function expectArchiveError(
     () => null,
     (reason: unknown) => reason,
   );
+
   expect(error).toBeInstanceOf(ServerArchiveError);
   expect(error instanceof ServerArchiveError ? error.code : null).toBe(code);
 }
 
 const SOURCE_CONFIG = {
-  config: { BB_INFERENCE: "codex/gpt-5.4-mini", BB_LOG_LEVEL: "info" },
+  config: { BB_INFERENCE: "codex/gpt-5.4-mini", OMNYO_LOG_LEVEL: "info" },
   customModels: [{ providerId: "codex", model: "gpt-5.4" }],
   customAcpAgents: [
     { id: "grok", displayName: "Grok", command: "grok", unknownField: true },
@@ -94,9 +96,9 @@ const SOURCE_CONFIG = {
 };
 
 const TARGET_CONFIG = {
-  config: { BB_LOG_LEVEL: "debug", BB_APP_URL: "https://target.example" },
+  config: { OMNYO_LOG_LEVEL: "debug", OMNYO_APP_URL: "https://target.example" },
   serverUrl: "https://old-server.example",
-  serverHeaders: { "x-bb-connect-machine": "credential" },
+  serverHeaders: { "x-omnyo-connect-machine": "credential" },
   machineCredential: "credential",
   connectMachineId: "machine-1",
 };
@@ -106,7 +108,7 @@ async function stageImport(): Promise<{
   manifest: ServerArchiveManifest;
 }> {
   const sourceDataDir = await makeTempDir();
-  await writeDataFile(sourceDataDir, "bb.db", "server database");
+  await writeDataFile(sourceDataDir, "app.db", "server database");
   await writeDataFile(
     sourceDataDir,
     "config.json",
@@ -145,7 +147,7 @@ async function stageImport(): Promise<{
       })),
     manifest: {
       createdAt: 1,
-      bbVersion: "0.43.1",
+      appVersion: "0.43.1",
       protocolVersion: 209,
       migrationCount: 142,
       sourceDataDir,
@@ -154,10 +156,12 @@ async function stageImport(): Promise<{
     },
   });
   const stagingDir = path.join(workDir, "staging");
+
   const manifest = await extractServerArchive({
     archivePath,
     destinationDir: stagingDir,
   });
+
   return { stagingDir, manifest };
 }
 
@@ -174,6 +178,7 @@ async function createTargetDataDir(): Promise<string> {
   await writeDataFile(dataDir, "skills/review/SKILL.md", "target skill");
   await writeDataFile(dataDir, "plugins/docs/host-data/vault.md", "vault");
   await writeDataFile(dataDir, "thread-storage/thr_1/notes.md", "notes");
+
   return dataDir;
 }
 
@@ -181,14 +186,17 @@ describe("mergeImportedManagedConfig", () => {
   it("keeps server keys, drops machine keys, and points serverUrl at the local server", () => {
     const merged = mergeImportedManagedConfig({
       importedConfig: {
-        config: { BB_LOG_LEVEL: "info" },
+        config: { OMNYO_LOG_LEVEL: "info" },
         serverUrl: "https://ignored.example",
         machineCredential: "source-credential",
       },
       existingConfig: {
-        config: { BB_LOG_LEVEL: "debug", BB_APP_URL: "https://target.example" },
+        config: {
+          OMNYO_LOG_LEVEL: "debug",
+          OMNYO_APP_URL: "https://target.example",
+        },
         customModels: [{ providerId: "codex", model: "gpt-5.4" }],
-        serverHeaders: { "x-bb-connect-machine": "target-credential" },
+        serverHeaders: { "x-omnyo-connect-machine": "target-credential" },
         machineCredential: "target-credential",
         connectMachineId: "machine-1",
       },
@@ -196,7 +204,10 @@ describe("mergeImportedManagedConfig", () => {
     });
 
     expect(merged).toEqual({
-      config: { BB_LOG_LEVEL: "info", BB_APP_URL: "https://target.example" },
+      config: {
+        OMNYO_LOG_LEVEL: "info",
+        OMNYO_APP_URL: "https://target.example",
+      },
       serverUrl: "http://127.0.0.1:39886",
     });
   });
@@ -243,22 +254,22 @@ describe("installImportedServerFiles and removeImportedServerFiles", () => {
     });
 
     expect([...result.importedEntries].sort()).toEqual([
+      "app.db",
       "attachments/thr_1/image.png",
       "auth-secret",
-      "bb.db",
       "config.json",
       "env.json",
       "plugins/docs/data.db",
       "plugins/docs/secrets/token",
       "skills/review/SKILL.md",
     ]);
-    expect(result.importedEntries.at(-1)).toBe("bb.db");
+    expect(result.importedEntries.at(-1)).toBe("app.db");
     expect([...result.backups].sort()).toEqual([
       "config.json",
       "env.json",
       "skills/review/SKILL.md",
     ]);
-    expect(await readDataFile(dataDir, "bb.db")).toBe("server database");
+    expect(await readDataFile(dataDir, "app.db")).toBe("server database");
     expect(await readDataFile(dataDir, "skills/review/SKILL.md")).toBe(
       "imported skill",
     );
@@ -274,18 +285,20 @@ describe("installImportedServerFiles and removeImportedServerFiles", () => {
     );
     expect(await readJson(dataDir, "config.json")).toEqual({
       config: {
-        BB_APP_URL: "https://target.example",
-        BB_LOG_LEVEL: "info",
+        OMNYO_APP_URL: "https://target.example",
+        OMNYO_LOG_LEVEL: "info",
       },
       customModels: SOURCE_CONFIG.customModels,
       sharedSkillRoots: SOURCE_CONFIG.sharedSkillRoots,
       serverUrl: "http://127.0.0.1:39886",
     });
+
     if (process.platform !== "win32") {
       expect((await stat(path.join(dataDir, "config.json"))).mode & 0o777).toBe(
         0o600,
       );
     }
+
     expect(await readJson(dataDir, "env.json")).toEqual({
       env: { SHARED: "from-source", SOURCE_ONLY: "1", TARGET_ONLY: "1" },
     });
@@ -296,7 +309,7 @@ describe("installImportedServerFiles and removeImportedServerFiles", () => {
       ),
     ).toBe(originalConfig);
 
-    await writeDataFile(dataDir, "bb.db-wal", "pending server wal");
+    await writeDataFile(dataDir, "app.db-wal", "pending server wal");
     await removeImportedServerFiles({
       dataDir,
       importedEntries: result.importedEntries,
@@ -325,9 +338,10 @@ describe("installImportedServerFiles and removeImportedServerFiles", () => {
 
   it("refuses to import over existing server data without touching the target", async () => {
     const { stagingDir, manifest } = await stageImport();
+
     for (const existing of [
-      "bb.db",
-      "bb.db-wal",
+      "app.db",
+      "app.db-wal",
       SERVER_IMPORT_BACKUP_DIR_NAME,
     ]) {
       const dataDir = await createTargetDataDir();
@@ -373,7 +387,7 @@ describe("installImportedServerFiles and removeImportedServerFiles", () => {
     );
 
     expect(await readdir(outside)).toEqual([]);
-    expect(await readdir(dataDir)).not.toContain("bb.db");
+    expect(await readdir(dataDir)).not.toContain("app.db");
   });
 
   it("rejects an invalid imported config before changing the target", async () => {
@@ -382,15 +396,18 @@ describe("installImportedServerFiles and removeImportedServerFiles", () => {
       path.join(stagingDir, "files", "config.json"),
       JSON.stringify({ config: {}, unexpectedTopLevelKey: true }),
     );
+
     const invalidSize = (
       await stat(path.join(stagingDir, "files", "config.json"))
     ).size;
+
     const invalidManifest: ServerArchiveManifest = {
       ...manifest,
       entries: manifest.entries.map((entry) =>
         entry.path === "config.json" ? { ...entry, size: invalidSize } : entry,
       ),
     };
+
     const dataDir = await createTargetDataDir();
     const originalConfig = await readDataFile(dataDir, "config.json");
 
@@ -418,6 +435,7 @@ async function stageManifestEntries(paths: readonly string[]): Promise<{
 }> {
   const stagingDir = await makeTempDir();
   const entries = [];
+
   for (const relativePath of paths) {
     const body = fixtureBody(relativePath);
     await writeFixtureFile(path.join(stagingDir, "files"), relativePath, body);
@@ -427,30 +445,34 @@ async function stageManifestEntries(paths: readonly string[]): Promise<{
       sha256: createHash("sha256").update(body).digest("hex"),
     });
   }
+
   const manifest = serverArchiveManifestSchema.parse({
-    format: "bb-server-archive",
+    format: "omnyo-server-archive",
     version: SERVER_ARCHIVE_VERSION,
     createdAt: 1,
-    bbVersion: "0.43.1",
+    appVersion: "0.43.1",
     protocolVersion: 209,
     migrationCount: 142,
-    sourceDataDir: "/home/old/.bb",
+    sourceDataDir: "/home/old/.omnyo",
     sourceServerHostId: "host-old",
     serverMoveExperiment: true,
     entries,
   });
+
   return { stagingDir, manifest };
 }
 
 describe("server-owned allowlist on import", () => {
   it("installs every file the inventory classifies as server-owned", async () => {
     const sourceDataDir = await makeTempDir();
+
     for (const relativePath of [
       ...SERVER_OWNED_FIXTURE_PATHS,
       ...HOST_OWNED_FIXTURE_PATHS,
     ]) {
       await writeFixtureFile(sourceDataDir, relativePath);
     }
+
     const inventory = await listServerOwnedEntries(sourceDataDir);
     const workDir = await makeTempDir();
     const archivePath = path.join(workDir, "server.tar.gz");
@@ -464,7 +486,7 @@ describe("server-owned allowlist on import", () => {
         })),
       manifest: {
         createdAt: 1,
-        bbVersion: "0.43.1",
+        appVersion: "0.43.1",
         protocolVersion: 209,
         migrationCount: 142,
         sourceDataDir,
@@ -473,10 +495,12 @@ describe("server-owned allowlist on import", () => {
       },
     });
     const stagingDir = path.join(workDir, "staging");
+
     const manifest = await extractServerArchive({
       archivePath,
       destinationDir: stagingDir,
     });
+
     const dataDir = await makeTempDir();
 
     const result = await installImportedServerFiles({
@@ -489,11 +513,21 @@ describe("server-owned allowlist on import", () => {
     expect([...result.importedEntries].sort()).toEqual(
       [...SERVER_OWNED_FIXTURE_PATHS].sort(),
     );
+
+    for (const relativePath of SERVER_OWNED_FIXTURE_PATHS.filter(
+      (file) =>
+        file.startsWith("private-web-updates/") ||
+        file.startsWith("web-asset-generations/"),
+    )) {
+      expect(await readFile(path.join(dataDir, relativePath), "utf8")).toBe(
+        fixtureBody(relativePath),
+      );
+    }
   });
 
   it.each([
     ...HOST_OWNED_FIXTURE_PATHS,
-    "bb.db/nested",
+    "app.db/nested",
     "plugins/docs",
     "plugins/docs/host-data",
   ])(
@@ -503,6 +537,7 @@ describe("server-owned allowlist on import", () => {
         "attachments/thr_1/image.png",
         hostOwnedPath,
       ]);
+
       const dataDir = await createTargetDataDir();
 
       await expectArchiveError(
@@ -538,17 +573,17 @@ describe("server-owned allowlist on import", () => {
 
   it("refuses to remove host-owned entries", async () => {
     const dataDir = await createTargetDataDir();
-    await writeDataFile(dataDir, "bb.db", "imported database");
+    await writeDataFile(dataDir, "app.db", "imported database");
 
     await expectArchiveError(
       removeImportedServerFiles({
         dataDir,
-        importedEntries: ["bb.db", "auth.json"],
+        importedEntries: ["app.db", "auth.json"],
       }),
       "unsafe_entry",
     );
 
-    expect(await readDataFile(dataDir, "bb.db")).toBe("imported database");
+    expect(await readDataFile(dataDir, "app.db")).toBe("imported database");
     expect(await readDataFile(dataDir, "auth.json")).toBe("{}");
   });
 });
@@ -604,6 +639,7 @@ describe("discardImportBackups", () => {
     );
 
     await discardImportBackups(dataDir);
+
     const result = await installImportedServerFiles({
       stagingDir,
       dataDir,
@@ -611,15 +647,15 @@ describe("discardImportBackups", () => {
       localServerUrl: null,
     });
 
-    expect(result.importedEntries).toContain("bb.db");
+    expect(result.importedEntries).toContain("app.db");
   });
 });
 
 describe("archiveExistingServerData", () => {
   it("renames the data directory with a local timestamp suffix and avoids collisions", async () => {
     const parent = await makeTempDir();
-    const dataDir = path.join(parent, ".bb");
-    await writeDataFile(dataDir, "bb.db", "standalone");
+    const dataDir = path.join(parent, ".omnyo");
+    await writeDataFile(dataDir, "app.db", "standalone");
     const now = new Date(2026, 8, 15, 9, 5, 7).getTime();
 
     const archivedPath = await archiveExistingServerData({
@@ -628,19 +664,22 @@ describe("archiveExistingServerData", () => {
     });
 
     expect(archivedPath).toBe(`${dataDir}.before-move-20260915-090507`);
-    expect(await readDataFile(archivedPath, "bb.db")).toBe("standalone");
-    expect(await readdir(parent)).toEqual([".bb.before-move-20260915-090507"]);
+    expect(await readDataFile(archivedPath, "app.db")).toBe("standalone");
+    expect(await readdir(parent)).toEqual([
+      ".omnyo.before-move-20260915-090507",
+    ]);
 
-    await writeDataFile(dataDir, "bb.db", "second standalone");
+    await writeDataFile(dataDir, "app.db", "second standalone");
+
     const secondArchivedPath = await archiveExistingServerData({
       dataDir,
       now,
     });
 
     expect(secondArchivedPath).toBe(`${dataDir}.before-move-20260915-090507-2`);
-    expect(await readDataFile(secondArchivedPath, "bb.db")).toBe(
+    expect(await readDataFile(secondArchivedPath, "app.db")).toBe(
       "second standalone",
     );
-    expect(await readDataFile(archivedPath, "bb.db")).toBe("standalone");
+    expect(await readDataFile(archivedPath, "app.db")).toBe("standalone");
   });
 });

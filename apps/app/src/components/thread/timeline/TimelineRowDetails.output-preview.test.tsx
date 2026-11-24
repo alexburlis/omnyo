@@ -3,7 +3,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TimelineCommandWorkRow } from "@bb/server-contract";
+import type { TimelineCommandWorkRow } from "@omnyo/server-contract";
 import { commandRow } from "@/test/fixtures/thread-timeline-rows";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { sdk } from "@/lib/sdk";
@@ -18,6 +18,7 @@ const timelineTurnSummaryDetails = vi.mocked(
 );
 
 const FULL_OUTPUT = `FULL-HEAD ${"x".repeat(5_000)} FULL-TAIL`;
+
 const PREVIEW_OUTPUT =
   "FULL-HEAD xxx\n…[4,000 characters omitted from preview]\nxxx FULL-TAIL";
 
@@ -45,6 +46,7 @@ function previewedCommandRow(
 
 function renderExpandedRow(row: TimelineCommandWorkRow) {
   const { wrapper: Wrapper } = createQueryClientTestHarness();
+
   return render(
     <MemoryRouter>
       <Wrapper>
@@ -134,6 +136,7 @@ describe("previewed command output", () => {
   it("keeps a preview warning when row details cannot hydrate the full output", async () => {
     const detailPreview =
       "FULL-HEAD detail preview\n…[output remains truncated]\nFULL-TAIL";
+
     timelineTurnSummaryDetails.mockResolvedValue({
       rows: [
         {
@@ -185,6 +188,7 @@ describe("previewed command output", () => {
   it("explains when output retention expires while details load", async () => {
     const expiredPreview =
       "FULL-HEAD expired preview\n…[output remains truncated]\nFULL-TAIL";
+
     timelineTurnSummaryDetails.mockResolvedValue({
       rows: [
         {

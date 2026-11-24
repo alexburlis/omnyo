@@ -57,11 +57,13 @@ describe("default usage source", () => {
     providers: [],
     error: null,
   };
+
   const pool: UsageMachine = {
     ...machine,
     id: "source:account-pool",
     displayName: "Account Pooler",
   };
+
   it("prefers even an empty pool to thread-local usage, while preserving explicit selection", () => {
     expect(selectUsageMachine([machine, pool], null, machine.id)).toBe(pool);
     expect(selectUsageMachine([machine, pool], machine.id, null)).toBe(machine);

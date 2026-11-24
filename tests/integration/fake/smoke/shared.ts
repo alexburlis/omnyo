@@ -1,4 +1,4 @@
-import type { ThreadEventRow } from "@bb/domain";
+import type { ThreadEventRow } from "@omnyo/domain";
 import { expect } from "vitest";
 import {
   createProjectFixture as createProjectFixtureForHarness,
@@ -11,8 +11,11 @@ import type { IntegrationHarness } from "../../helpers/harness.js";
 import { scaleTimeoutMs } from "../../helpers/time.js";
 
 export const DEFAULT_TIMEOUT_MS = scaleTimeoutMs(10_000);
+
 export const TURN_TIMEOUT_MS = scaleTimeoutMs(15_000);
+
 export const ACTIVE_TURN_TIMEOUT_MS = scaleTimeoutMs(5_000);
+
 export const STOP_DELAY_TEXT = "delay:5000 stop me";
 
 export async function createProjectFixture(
@@ -45,5 +48,6 @@ export async function expectThreadMissing(
   const response = await harness.api.threads[":id"].$get({
     param: { id: threadId },
   });
+
   expect(response.status).toBe(404);
 }

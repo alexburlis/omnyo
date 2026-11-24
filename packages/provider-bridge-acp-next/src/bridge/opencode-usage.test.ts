@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { providerUsageResultSchema } from "@bb/provider-bridge-protocol";
-import { captureBridgeJsonRpcOutput } from "@bb/provider-bridge-protocol/testing";
-import { readOpenCodeGoUsage } from "./opencode-usage.js";
+import { providerUsageResultSchema } from "@omnyo/provider-bridge-protocol";
+import { captureBridgeJsonRpcOutput } from "@omnyo/provider-bridge-protocol/testing";
+import { readOpenCodeGoUsage } from "@omnyo/provider-bridge-protocol/acp/opencode-usage";
 
 const reportedUsage = {
   usage: {
@@ -28,11 +28,13 @@ const reportedUsage = {
 };
 
 let directory: string;
+
 let env: NodeJS.ProcessEnv;
+
 const fetchUsage = vi.fn<typeof fetch>();
 
 beforeEach(async () => {
-  directory = await fs.mkdtemp(path.join(os.tmpdir(), "bb-opencode-usage-"));
+  directory = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-opencode-usage-"));
   env = { XDG_DATA_HOME: directory, HOME: directory };
   fetchUsage.mockReset();
   fetchUsage.mockImplementation(async () => Response.json(reportedUsage));
@@ -61,9 +63,11 @@ async function writeAccount(
   } = {},
 ) {
   await fs.mkdir(path.join(directory, "opencode"), { recursive: true });
+
   const database = new DatabaseSync(
     path.join(directory, "opencode", "opencode.db"),
   );
+
   try {
     database.exec(
       "CREATE TABLE account (id TEXT PRIMARY KEY, email TEXT NOT NULL, url TEXT NOT NULL, access_token TEXT NOT NULL, token_expiry INTEGER); CREATE TABLE account_state (id INTEGER PRIMARY KEY, active_account_id TEXT, active_org_id TEXT)",
@@ -93,13 +97,16 @@ async function writeCredentials(
   rows: { integration: string; value: string; active: number | null }[],
 ) {
   await fs.mkdir(path.join(directory, "opencode"), { recursive: true });
+
   const database = new DatabaseSync(
     path.join(directory, "opencode", "opencode.db"),
   );
+
   try {
     database.exec(
       "CREATE TABLE credential (id TEXT PRIMARY KEY, integration_id TEXT, label TEXT NOT NULL, value TEXT NOT NULL, connector_id TEXT, method_id TEXT, active INTEGER, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)",
     );
+
     for (const [index, row] of rows.entries()) {
       database
         .prepare(
@@ -160,9 +167,11 @@ describe("OpenCode Go usage", () => {
       ]);
       const databasePath = path.join(directory, "opencode", "opencode.db");
       const before = await fs.readFile(databasePath);
+
       const result = providerUsageResultSchema.parse(
         await readOpenCodeGoUsage(env),
       );
+
       expect(result).toMatchObject({
         usage: {
           status: "ok",
@@ -253,6 +262,7 @@ describe("OpenCode Go usage", () => {
     const before = await fs.readFile(databasePath);
     const result = await readOpenCodeGoUsage(env);
     expect(result).toMatchObject({ usage: { status } });
+
     if (status === "ok") {
       expect(result).toMatchObject({
         usage: {
@@ -277,6 +287,7 @@ describe("OpenCode Go usage", () => {
     } else {
       expect(fetchUsage).not.toHaveBeenCalled();
     }
+
     expect(await fs.readFile(databasePath)).toEqual(before);
     expect(JSON.stringify(result)).not.toContain("oauth-token");
     expect(JSON.stringify(result)).not.toContain("refresh-secret");
@@ -345,9 +356,11 @@ describe("OpenCode Go usage", () => {
     await writeAuth({ "opencode-go": { type: "api", key: "old-key" } });
     const databasePath = path.join(directory, "opencode", "opencode.db");
     const before = await fs.readFile(databasePath);
+
     const result = providerUsageResultSchema.parse(
       await readOpenCodeGoUsage(env),
     );
+
     expect(result).toMatchObject({
       supported: true,
       usage: {
@@ -424,9 +437,11 @@ describe("OpenCode Go usage", () => {
 
   it("supports older OpenCode databases without Console account tables", async () => {
     await writeAuth({ "opencode-go": { type: "api", key: "legacy-key" } });
+
     const database = new DatabaseSync(
       path.join(directory, "opencode", "opencode.db"),
     );
+
     database.exec("CREATE TABLE session (id TEXT PRIMARY KEY)");
     database.close();
     expect(await readOpenCodeGoUsage(env)).toMatchObject({
@@ -447,9 +462,11 @@ describe("OpenCode Go usage", () => {
       "opencode-go": { type: "api", key: "go-test-key" },
       opencode: { type: "api", key: "zen-test-key" },
     });
+
     const result = providerUsageResultSchema.parse(
       await readOpenCodeGoUsage(env),
     );
+
     expect(result).toEqual({
       supported: true,
       usage: {
@@ -651,6 +668,7 @@ describe("OpenCode Go usage", () => {
     const { handleLine } = await import("./bridge.js");
     vi.stubEnv("OPENCODE_API_KEY", "inherited-key");
     const output = captureBridgeJsonRpcOutput();
+
     try {
       handleLine(
         JSON.stringify({
@@ -676,9 +694,11 @@ describe("OpenCode Go usage", () => {
           output.messages.some((message) => message.id === "go-usage-test"),
         ).toBe(true),
       );
+
       const result = output.messages.find(
         (message) => message.id === "go-usage-test",
       )?.result;
+
       expect(providerUsageResultSchema.parse(result)).toMatchObject({
         supported: true,
         usage: {

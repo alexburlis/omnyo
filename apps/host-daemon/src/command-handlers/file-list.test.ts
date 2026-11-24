@@ -89,6 +89,24 @@ describe("finalizeListedFiles", () => {
 });
 
 describe("finalizeListedPaths", () => {
+  it("finalizes a listing larger than the call stack can spread", () => {
+    const pathCount = 150_000;
+
+    const result = finalizeListedPaths({
+      paths: Array.from({ length: pathCount }, (_, index) => ({
+        kind: "file" as const,
+        path: `many/f${index}.txt`,
+        name: `f${index}.txt`,
+      })),
+      includeFiles: true,
+      includeDirectories: false,
+      limit: pathCount,
+    });
+
+    expect(result.paths).toHaveLength(pathCount);
+    expect(result.truncated).toBe(false);
+  });
+
   it("excludes directories when directory results are disabled", () => {
     const result = finalizeListedPaths({
       paths: [

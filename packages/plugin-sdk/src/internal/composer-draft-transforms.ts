@@ -7,14 +7,18 @@ export function removeComposerMentions<Draft extends ComposerDraft>(
   const removed = draft.mentions
     .filter(matches)
     .sort((a, b) => a.from - b.from);
+
   if (removed.length === 0) return draft;
   let text = "";
   let cursor = 0;
+
   for (const mention of removed) {
     text += draft.text.slice(cursor, mention.from);
     cursor = mention.to;
   }
+
   const removedSet = new Set(removed);
+
   const mentions = draft.mentions
     .filter((mention) => !removedSet.has(mention))
     .map((mention) => {
@@ -23,10 +27,12 @@ export function removeComposerMentions<Draft extends ComposerDraft>(
           sum + (item.to <= mention.from ? item.to - item.from : 0),
         0,
       );
+
       return offset === 0
         ? mention
         : { ...mention, from: mention.from - offset, to: mention.to - offset };
     });
+
   return { ...draft, text: text + draft.text.slice(cursor), mentions };
 }
 
@@ -35,12 +41,14 @@ export function setComposerText<Draft extends ComposerDraft>(
   text: string,
 ): Draft {
   if (text === draft.text) return draft;
+
   return {
     ...draft,
     text,
     mentions: reconcileComposerMentions(draft.text, text, draft.mentions),
   };
 }
+
 export function reconcileComposerMentions(
   currentText: string,
   nextText: string,
@@ -50,6 +58,7 @@ export function reconcileComposerMentions(
 
   let unchangedPrefixLength = 0;
   const maximumPrefixLength = Math.min(currentText.length, nextText.length);
+
   while (
     unchangedPrefixLength < maximumPrefixLength &&
     currentText[unchangedPrefixLength] === nextText[unchangedPrefixLength]
@@ -58,6 +67,7 @@ export function reconcileComposerMentions(
   }
 
   let unchangedSuffixLength = 0;
+
   while (
     unchangedSuffixLength < currentText.length - unchangedPrefixLength &&
     unchangedSuffixLength < nextText.length - unchangedPrefixLength &&
@@ -69,8 +79,10 @@ export function reconcileComposerMentions(
 
   const replacedCurrentEnd = currentText.length - unchangedSuffixLength;
   const replacementDelta = nextText.length - currentText.length;
+
   return mentions.flatMap((mention) => {
     if (mention.to <= unchangedPrefixLength) return [mention];
+
     if (mention.from >= replacedCurrentEnd) {
       return [
         {
@@ -80,6 +92,7 @@ export function reconcileComposerMentions(
         },
       ];
     }
+
     return [];
   });
 }

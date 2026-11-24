@@ -1,19 +1,44 @@
-import type { ProviderCliStatus } from "@bb/host-daemon-contract";
+import type { ProviderCliStatus } from "@omnyo/host-daemon-contract";
 import type {
   HostDiscoveredRepo,
   ServerAccessStatus,
   SystemProviderState,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
+  adjacentOnboardingStep,
   connectAccessUrl,
   defaultSelectedRepoPaths,
   hasReadyAgent,
+  ONBOARDING_STARTERS,
+  onboardingPluginGroups,
+  onboardingSteps,
+  starterAutomationInput,
+  usesSentrySdk,
   parseSignInOutput,
   resolveAgentSetupState,
   resolveSignInCommand,
   shortRemoteName,
 } from "./onboarding-model";
+
+describe("onboardingSteps", () => {
+  it("puts the browser step after projects only where login sync exists", () => {
+    expect(
+      onboardingSteps({
+        browserLogins: true,
+        chatImporterEnabled: false,
+        automationsEnabled: false,
+      }).map((step) => step.id),
+    ).toEqual(["agent", "projects", "browser", "plugins", "devices"]);
+    expect(
+      onboardingSteps({
+        browserLogins: false,
+        chatImporterEnabled: false,
+        automationsEnabled: false,
+      }).map((step) => step.id),
+    ).toEqual(["agent", "projects", "plugins", "devices"]);
+  });
+});
 
 function health(
   overrides: Partial<SystemProviderState> = {},
@@ -72,7 +97,7 @@ describe("resolveAgentSetupState", () => {
   it("shows the account and plan for a ready agent, even while a stale install job lingers", () => {
     expect(
       resolveAgentSetupState({
-        health: health({ accountEmail: "a@b.dev", planLabel: "Max (20x)" }),
+        health: health({ accountEmail: "a@b.dev", planLabel: "Ultra" }),
         cliStatus: cliStatus(),
         installing: true,
         installFailure: "old failure",
@@ -80,7 +105,7 @@ describe("resolveAgentSetupState", () => {
         signInFailed: true,
         installInfoPending: true,
       }),
-    ).toEqual({ status: "ready", detail: "a@b.dev · Max (20x)" });
+    ).toEqual({ status: "ready", detail: "a@b.dev · Ultra" });
     expect(
       resolveAgentSetupState({
         health: health(),
@@ -141,6 +166,7 @@ describe("resolveAgentSetupState", () => {
       signInFailed: false,
       installInfoPending: false,
     };
+
     expect(
       resolveAgentSetupState({
         ...base,
@@ -362,14 +388,15 @@ describe("connectAccessUrl", () => {
       urlSource: null,
     };
   }
+
   const connect = {
     id: "connect",
-    displayName: "bb connect",
+    displayName: "Omnyo connect",
     description: "",
     pluginId: "connect",
   };
 
-  it("is on only when bb connect is available with an address", () => {
+  it("is on only when Omnyo connect is available with an address", () => {
     expect(
       connectAccessUrl(
         access([
@@ -377,12 +404,12 @@ describe("connectAccessUrl", () => {
             ...connect,
             availability: {
               status: "available",
-              serverUrl: "https://sawyer.getbb.app",
+              serverUrl: "https://sawyer.example.test",
             },
           },
         ]),
       ),
-    ).toEqual({ status: "on", url: "https://sawyer.getbb.app" });
+    ).toEqual({ status: "on", url: "https://sawyer.example.test" });
     expect(
       connectAccessUrl(
         access([{ ...connect, availability: { status: "available" } }]),
@@ -411,7 +438,7 @@ describe("connectAccessUrl", () => {
             pluginId: null,
             availability: {
               status: "available",
-              serverUrl: "https://bb.example.com",
+              serverUrl: "https://omnyo.example.com",
             },
           },
         ]),
@@ -422,7 +449,9 @@ describe("connectAccessUrl", () => {
 });
 
 const ESC = String.fromCharCode(27);
+
 const BEL = String.fromCharCode(7);
+
 const CLAUDE_URL =
   "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=tabUM2J3-ABCD";
 
@@ -507,5 +536,239 @@ describe("parseSignInOutput", () => {
       userCode: null,
       acceptsPastedCode: false,
     });
+  });
+});
+
+describe("onboardingSteps with the chat importer", () => {
+  it("places chats between projects and plugins", () => {
+    expect(
+      onboardingSteps({
+        browserLogins: false,
+        chatImporterEnabled: true,
+        automationsEnabled: false,
+      }).map((entry) => entry.id),
+    ).toEqual(["agent", "projects", "chats", "plugins", "devices"]);
+  });
+
+  it("keeps chats right after projects when browser logins are also offered", () => {
+    expect(
+      onboardingSteps({
+        browserLogins: true,
+        chatImporterEnabled: true,
+        automationsEnabled: false,
+      }).map((entry) => entry.id),
+    ).toEqual(["agent", "projects", "chats", "browser", "plugins", "devices"]);
+  });
+
+  it("drops chats when the chat importer is not enabled", () => {
+    expect(
+      onboardingSteps({
+        browserLogins: false,
+        chatImporterEnabled: false,
+        automationsEnabled: false,
+      }).map((entry) => entry.id),
+    ).toEqual(["agent", "projects", "plugins", "devices"]);
+  });
+});
+
+describe("adjacentOnboardingStep", () => {
+  const withChats = onboardingSteps({
+    browserLogins: false,
+    chatImporterEnabled: true,
+    automationsEnabled: false,
+  });
+
+  const withoutChats = onboardingSteps({
+    browserLogins: false,
+    chatImporterEnabled: false,
+    automationsEnabled: false,
+  });
+
+  it("walks through chats in both directions when it is visible", () => {
+    expect(
+      adjacentOnboardingStep({
+        steps: withChats,
+        step: "projects",
+        direction: 1,
+      }),
+    ).toBe("chats");
+
+    expect(
+      adjacentOnboardingStep({
+        steps: withChats,
+        step: "plugins",
+        direction: -1,
+      }),
+    ).toBe("chats");
+  });
+
+  it("skips chats in both directions when it is hidden", () => {
+    expect(
+      adjacentOnboardingStep({
+        steps: withoutChats,
+        step: "projects",
+        direction: 1,
+      }),
+    ).toBe("plugins");
+
+    expect(
+      adjacentOnboardingStep({
+        steps: withoutChats,
+        step: "plugins",
+        direction: -1,
+      }),
+    ).toBe("projects");
+  });
+
+  it("moves on from chats even after it became hidden", () => {
+    expect(
+      adjacentOnboardingStep({
+        steps: withoutChats,
+        step: "chats",
+        direction: 1,
+      }),
+    ).toBe("plugins");
+
+    expect(
+      adjacentOnboardingStep({
+        steps: withoutChats,
+        step: "chats",
+        direction: -1,
+      }),
+    ).toBe("projects");
+  });
+
+  it("stops at both ends", () => {
+    expect(
+      adjacentOnboardingStep({
+        steps: withChats,
+        step: "agent",
+        direction: -1,
+      }),
+    ).toBeNull();
+
+    expect(
+      adjacentOnboardingStep({
+        steps: withChats,
+        step: "devices",
+        direction: 1,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("onboardingPluginGroups", () => {
+  const plugin = (id: string, enabled = true) => ({
+    id,
+    name: id,
+    description: null,
+    icon: null,
+    enabled,
+  });
+
+  it("shows installed recommended plugins in their groups and leaves infrastructure out", () => {
+    const groups = onboardingPluginGroups([
+      plugin("provider-codex"),
+      plugin("tidy"),
+      plugin("glance", false),
+      plugin("thread-list"),
+      plugin("omnyo--git"),
+    ]);
+
+    expect(
+      groups.map((group) => [group.id, group.plugins.map((entry) => entry.id)]),
+    ).toEqual([
+      ["chats", ["glance"]],
+      ["upkeep", ["omnyo--git", "tidy"]],
+    ]);
+    expect(groups[0]?.plugins[0]?.enabled).toBe(false);
+  });
+
+  it("drops groups with nothing installed", () => {
+    expect(onboardingPluginGroups([plugin("provider-claude-code")])).toEqual(
+      [],
+    );
+  });
+});
+
+describe("automations step", () => {
+  it("appears before devices only while the automations plugin is on", () => {
+    const ids = (automationsEnabled: boolean) =>
+      onboardingSteps({
+        browserLogins: false,
+        chatImporterEnabled: false,
+        automationsEnabled,
+      }).map((step) => step.id);
+
+    expect(ids(true)).toEqual([
+      "agent",
+      "projects",
+      "plugins",
+      "automations",
+      "devices",
+    ]);
+    expect(ids(false)).not.toContain("automations");
+  });
+
+  it("schedules starters in the owner's timezone and keeps dependency work in a worktree", () => {
+    const [briefing, dependencies] = ONBOARDING_STARTERS;
+
+    if (briefing === undefined || dependencies === undefined)
+      throw new Error("missing starters");
+
+    const args = {
+      projectId: "proj_1",
+      hostId: "host_1",
+      providerId: "claude-code",
+      model: "claude-opus-5-5",
+      timezone: "Europe/Berlin",
+    };
+
+    expect(
+      starterAutomationInput({ starter: briefing, ...args }),
+    ).toMatchObject({
+      trigger: {
+        triggerType: "schedule",
+        cron: "0 9 * * 1-5",
+        timezone: "Europe/Berlin",
+      },
+      execution: {
+        environment: { type: "project-default" },
+        permissionMode: "auto",
+      },
+      origin: "app",
+    });
+    expect(
+      starterAutomationInput({ starter: dependencies, ...args }).execution
+        .environment,
+    ).toEqual({
+      type: "host",
+      hostId: "host_1",
+      workspace: { type: "managed-worktree", baseBranch: { kind: "default" } },
+    });
+    expect(dependencies.prompt).toContain("Do not push");
+  });
+});
+
+describe("usesSentrySdk", () => {
+  it.each([
+    ["package.json", '{"dependencies":{"@sentry/react":"^8.0.0"}}'],
+    ["requirements.txt", "django==5.0\nsentry-sdk[django]==2.1\n"],
+    ["pyproject.toml", 'dependencies = ["sentry-sdk>=2"]'],
+    ["Gemfile", "gem 'sentry-ruby'"],
+    ["go.mod", "require github.com/getsentry/sentry-go v0.27.0"],
+  ] as const)("finds the Sentry SDK in %s", (file, content) => {
+    expect(usesSentrySdk([{ file, content }])).toBe(true);
+  });
+
+  it("ignores projects that only mention Sentry elsewhere", () => {
+    expect(
+      usesSentrySdk([
+        {
+          file: "package.json",
+          content: '{"name":"sentry-dashboard","dependencies":{"react":"19"}}',
+        },
+      ]),
+    ).toBe(false);
   });
 });

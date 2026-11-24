@@ -1,12 +1,14 @@
 import {
+  claimNextQueuedThreadMessageGroup,
   createQueuedThreadMessage,
   listEvents,
+  getQueuedThreadMessage,
   listQueuedThreadMessages,
   setQueuedThreadMessageFailureReason,
   setQueuedThreadMessageGroupBoundary,
-} from "@bb/db";
-import { turnRequestEventDataSchema } from "@bb/domain";
-import type { PluginHookName } from "@get-bb/plugin-sdk";
+} from "@omnyo/db";
+import { turnRequestEventDataSchema } from "@omnyo/domain";
+import type { PluginHookName } from "@omnyo/plugin-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   setPluginHookProvider,
@@ -16,6 +18,7 @@ import {
   requestQueuedMessageDispatch,
   runQueuedMessageDispatch,
 } from "../../src/services/threads/queued-message-dispatch.js";
+import { runStartupRecoverySweep } from "../../src/services/system/periodic-sweeps.js";
 import { applyLoggedThreadLifecycleEvent } from "../../src/services/threads/lifecycle-outcome.js";
 import { acceptThreadSendRequest } from "../../src/services/threads/thread-send-request.js";
 import { textInput } from "../helpers/prompt-input.js";
@@ -73,25 +76,30 @@ function seedRunnableThread(
   args: { hostId: string; status: "idle" | "active" },
 ) {
   const { host } = seedHostSession(harness.deps, { id: args.hostId });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: WORKSPACE_PATH,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: WORKSPACE_PATH,
   });
+
   const thread = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
     status: args.status,
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     providerThreadId: `provider-${args.hostId}`,
     threadId: thread.id,
   });
+
   if (args.status === "active") {
     seedTurnStarted(harness.deps, {
       environmentId: environment.id,
@@ -100,6 +108,7 @@ function seedRunnableThread(
       providerThreadId: `provider-${args.hostId}`,
     });
   }
+
   return { environment, project, thread };
 }
 
@@ -113,11 +122,13 @@ async function stopThread(harness: TestAppHarness, threadId: string) {
   const response = harness.app.request(`/api/v1/threads/${threadId}/stop`, {
     method: "POST",
   });
+
   const stop = await waitForQueuedCommand(
     harness,
     ({ command }) =>
       command.type === "thread.stop" && command.threadId === threadId,
   );
+
   await reportQueuedCommandSuccess(harness, stop, {
     providerCheckpointId: null,
   });
@@ -136,20 +147,25 @@ describe("the requested queue drain", () => {
           hostId: `host-edit-hold-${finish}`,
           status: "active",
         });
+
         const edited = seedQueuedMessage(harness.deps, {
           threadId: thread.id,
           content: textInput("ORIGINAL"),
           waitingOn: { kind: "thread-busy" },
         });
+
         const behind = seedQueuedMessage(harness.deps, {
           threadId: thread.id,
           content: textInput("BEHIND"),
           waitingOn: { kind: "thread-busy" },
         });
+
         const editHoldPath = `/api/v1/threads/${thread.id}/queued-messages/${edited.id}/edit-hold`;
+
         const holdResponse = await harness.app.request(editHoldPath, {
           method: "POST",
         });
+
         expect(holdResponse.status).toBe(200);
         const turnsBefore = turnRequests(harness, thread.id).length;
 
@@ -185,6 +201,7 @@ describe("the requested queue drain", () => {
                 },
               )
             : await harness.app.request(editHoldPath, { method: "DELETE" });
+
         expect(finishResponse.status).toBe(200);
 
         await vi.waitFor(() => {
@@ -208,6 +225,7 @@ describe("the requested queue drain", () => {
         hostId: "host-child-outcome-notice",
         status: "idle",
       });
+
       createQueuedThreadMessage(harness.db, harness.deps.hub, {
         threadId: thread.id,
         content: textInput(
@@ -251,6 +269,7 @@ describe("the requested queue drain", () => {
           turnRequestEventDataSchema.parse(JSON.parse(event.data)),
         )
         .filter((event) => event.initiator === "system");
+
       expect(requests).toHaveLength(1);
       expect(requests[0]?.systemMessageSubject).toMatchObject({
         outcomes: [
@@ -274,15 +293,18 @@ describe("the requested queue drain", () => {
         hostId: "host-queue-senders",
         status: "active",
       });
+
       const user = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("User follow-up"),
       });
+
       const agent = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Agent follow-up"),
         senderThreadId: "thr_sender",
       });
+
       const system = createQueuedThreadMessage(harness.db, harness.deps.hub, {
         threadId: thread.id,
         content: textInput("System notice"),
@@ -296,6 +318,7 @@ describe("the requested queue drain", () => {
         payload: { kind: "inline" },
         systemNotice: { kind: "unlabeled", subject: null },
       });
+
       for (const path of [
         `/api/v1/threads/${thread.id}/queued-messages`,
         "/api/v1/queued-messages",
@@ -340,22 +363,26 @@ describe("the requested queue drain", () => {
           },
         ],
       });
+
       const { thread } = seedRunnableThread(harness, {
         hostId: "host-scheduled-group",
         status: "idle",
       });
+
       const lead = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("lead"),
         waitingOn: { kind: "time" },
         sendAt: Date.now() - 2_000,
       });
+
       const tail = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("tail"),
         waitingOn: { kind: "time" },
         sendAt: Date.now() - 1_000,
       });
+
       setQueuedThreadMessageGroupBoundary({
         db: harness.db,
         notifier: harness.deps.hub,
@@ -384,6 +411,7 @@ describe("the requested queue drain", () => {
             pluginId: "limiter",
             handler: () => {
               attempts += 1;
+
               return released
                 ? ({ action: "proceed" } as const)
                 : ({ action: "wait", reason: "At capacity" } as const);
@@ -391,10 +419,12 @@ describe("the requested queue drain", () => {
           },
         ],
       });
+
       const { thread } = seedRunnableThread(harness, {
         hostId: "host-mixed-group",
         status: "idle",
       });
+
       await acceptThreadSendRequest(harness.deps, {
         payload: { input: textInput("plugin-held lead"), mode: "auto" },
         thread,
@@ -443,6 +473,7 @@ describe("the requested queue drain", () => {
               pluginId: "limiter",
               handler: () => {
                 attempts += 1;
+
                 return released
                   ? ({ action: "proceed" } as const)
                   : ({ action: "wait", reason: "At capacity" } as const);
@@ -450,10 +481,12 @@ describe("the requested queue drain", () => {
             },
           ],
         });
+
         const { thread } = seedRunnableThread(harness, {
           hostId: `host-plugin-thread-${first}`,
           status: "active",
         });
+
         const pluginHeld = seedQueuedMessage(harness.deps, {
           threadId: thread.id,
           content: textInput("plugin-held lead"),
@@ -463,11 +496,13 @@ describe("the requested queue drain", () => {
             reason: "At capacity",
           },
         });
+
         const threadBusy = seedQueuedMessage(harness.deps, {
           threadId: thread.id,
           content: textInput("thread-busy tail"),
           waitingOn: { kind: "thread-busy" },
         });
+
         setQueuedThreadMessageGroupBoundary({
           db: harness.db,
           notifier: harness.deps.hub,
@@ -528,10 +563,12 @@ describe("the requested queue drain", () => {
             },
           ],
         });
+
         const { thread } = seedRunnableThread(harness, {
           hostId: `host-stopped-${kind}`,
           status: "active",
         });
+
         seedQueuedMessage(harness.deps, {
           threadId: thread.id,
           content: textInput(`${kind} work`),
@@ -562,11 +599,13 @@ describe("the requested queue drain", () => {
         hostId: "host-stopped-offline",
         status: "active",
       });
+
       const ordinary = seedQueuedMessage(harness.deps, {
         threadId: thread.id,
         content: textInput("Work queued before Stop"),
         waitingOn: { kind: "thread-busy" },
       });
+
       await stopThread(harness, thread.id);
       seedQueuedMessage(harness.deps, {
         threadId: thread.id,
@@ -598,15 +637,18 @@ describe("the requested queue drain", () => {
               pluginId: "limiter",
               handler: () => {
                 attempts += 1;
+
                 return { action: "wait", reason: "At capacity" } as const;
               },
             },
           ],
         });
+
         const { thread } = seedRunnableThread(harness, {
           hostId: `host-failed-${drain}-group`,
           status: "idle",
         });
+
         const waitingOn =
           drain === "scheduled"
             ? ({ kind: "time" } as const)
@@ -615,19 +657,23 @@ describe("the requested queue drain", () => {
                 pluginId: "limiter",
                 reason: "At capacity",
               } as const);
+
         const sendAt = drain === "scheduled" ? Date.now() - 1_000 : null;
+
         const lead = seedQueuedMessage(harness.deps, {
           threadId: thread.id,
           content: textInput("lead"),
           waitingOn,
           sendAt,
         });
+
         const failed = seedQueuedMessage(harness.deps, {
           threadId: thread.id,
           content: textInput("failed"),
           waitingOn,
           sendAt,
         });
+
         setQueuedThreadMessageGroupBoundary({
           db: harness.db,
           notifier: harness.deps.hub,
@@ -653,16 +699,15 @@ describe("the requested queue drain", () => {
   );
 
   it("leaves rows on core waits alone", async () => {
-    // A `thread-busy` row is waiting on its own thread's turn ending, not on
-    // somebody else's slot. Re-attempting it on every completion in the server
-    // would be pure churn.
     await withTestHarness(async (harness) => {
       const seen: string[] = [];
       const registry: HookRegistry = { "message.dispatch": [] };
+
       const { thread } = seedRunnableThread(harness, {
         hostId: "host-core-wait",
         status: "active",
       });
+
       await acceptThreadSendRequest(harness.deps, {
         payload: {
           input: textInput("after this turn"),
@@ -677,6 +722,7 @@ describe("the requested queue drain", () => {
         pluginId: "limiter",
         handler: (context) => {
           seen.push(context.thread.id);
+
           return { action: "proceed" } as const;
         },
       });
@@ -696,23 +742,23 @@ describe("the requested queue drain", () => {
         pluginId: "limiter",
         handler: () => {
           passes += 1;
+
           return { action: "wait", reason: "still full" } as const;
         },
       });
       installHooks(registry);
+
       const { thread } = seedRunnableThread(harness, {
         hostId: "host-freed-pacing",
         status: "idle",
       });
+
       await acceptThreadSendRequest(harness.deps, {
         payload: { input: textInput("held work"), mode: "auto" },
         thread,
       });
       expect(passes).toBe(1);
 
-      // The first drain re-queues, which starts the thread's cooldown; the
-      // second finds it and does nothing, so a burst of completions costs one
-      // hook pass per thread rather than one per completion.
       await runPluginWake(harness);
       expect(passes).toBe(2);
       await runPluginWake(harness);
@@ -721,9 +767,6 @@ describe("the requested queue drain", () => {
   });
 
   it("walks the queued rows in queue order", async () => {
-    // A limit can be expressed over any grouping, so core cannot pick which
-    // row deserves the freed slot — it re-offers them oldest first and lets the
-    // hook decide. A full pool therefore drains in the order it filled.
     await withTestHarness(async (harness) => {
       let admit = false;
       const seen: string[] = [];
@@ -732,24 +775,29 @@ describe("the requested queue drain", () => {
         pluginId: "limiter",
         handler: (context) => {
           seen.push(context.thread.id);
+
           return admit
             ? ({ action: "proceed" } as const)
             : ({ action: "wait", reason: "full" } as const);
         },
       });
       installHooks(registry);
+
       const first = seedRunnableThread(harness, {
         hostId: "host-order-first",
         status: "idle",
       }).thread;
+
       await acceptThreadSendRequest(harness.deps, {
         payload: { input: textInput("first in"), mode: "auto" },
         thread: first,
       });
+
       const second = seedRunnableThread(harness, {
         hostId: "host-order-second",
         status: "idle",
       }).thread;
+
       await acceptThreadSendRequest(harness.deps, {
         payload: { input: textInput("second in"), mode: "auto" },
         thread: second,
@@ -773,6 +821,7 @@ describe("requesting a drain", () => {
         (hostId) =>
           seedRunnableThread(harness, { hostId, status: "idle" }).thread,
       );
+
       for (const thread of threads) {
         seedQueuedMessage(harness.deps, {
           content: textInput("released by plugin removal"),
@@ -786,6 +835,7 @@ describe("requesting a drain", () => {
       }
 
       vi.useFakeTimers();
+
       try {
         requestQueuedMessageDispatch(harness.deps, {
           kind: "plugin-unregistered",
@@ -804,12 +854,6 @@ describe("requesting a drain", () => {
   });
 
   it("coalesces a burst of requests into one walk", async () => {
-    // Five turns finishing together are five requests, and one walk of the
-    // queue fills as many freed slots as the hook allows. Without the
-    // coalescing flag each request would schedule its own walk over the same
-    // rows. Asserted on the scheduled work itself: the re-queue pacing makes a
-    // redundant walk invisible in the hook-pass count, which is exactly why it
-    // must not be the thing under test here.
     await withTestHarness(async (harness) => {
       let passes = 0;
       const registry: HookRegistry = { "message.dispatch": [] };
@@ -817,14 +861,17 @@ describe("requesting a drain", () => {
         pluginId: "limiter",
         handler: () => {
           passes += 1;
+
           return { action: "wait", reason: "full" } as const;
         },
       });
       installHooks(registry);
+
       const { thread } = seedRunnableThread(harness, {
         hostId: "host-burst",
         status: "idle",
       });
+
       await acceptThreadSendRequest(harness.deps, {
         payload: { input: textInput("held work"), mode: "auto" },
         thread,
@@ -832,23 +879,22 @@ describe("requesting a drain", () => {
       expect(passes).toBe(1);
 
       vi.useFakeTimers();
+
       try {
         requestPluginWake(harness);
         requestPluginWake(harness);
         requestPluginWake(harness);
         expect(vi.getTimerCount()).toBe(1);
-        // Let it run rather than dropping it: the pending flag clears when the
-        // walk starts, and a walk that never starts would suppress every later
-        // request in the process.
+
         await vi.runAllTimersAsync();
       } finally {
         vi.useRealTimers();
       }
+
       expect(passes).toBe(2);
 
-      // The flag cleared when that walk started, so the next burst is its own
-      // walk — a thread freeing mid-walk is not silently dropped.
       vi.useFakeTimers();
+
       try {
         requestPluginWake(harness);
         expect(vi.getTimerCount()).toBe(1);
@@ -863,6 +909,7 @@ describe("requesting a drain", () => {
     await withTestHarness(async (first) => {
       await withTestHarness(async (second) => {
         vi.useFakeTimers();
+
         try {
           requestPluginWake(first);
           requestPluginWake(first);
@@ -884,14 +931,17 @@ describe("queue recovery", () => {
         hostId: "host-missing-plugin",
         status: "idle",
       }).thread;
+
       const loaded = seedRunnableThread(harness, {
         hostId: "host-loaded-plugin",
         status: "idle",
       }).thread;
+
       const pending = seedRunnableThread(harness, {
         hostId: "host-pending-plugin",
         status: "idle",
       }).thread;
+
       seedQueuedMessage(harness.deps, {
         content: textInput("missing plugin work"),
         threadId: missing.id,
@@ -930,6 +980,378 @@ describe("queue recovery", () => {
       expect(listQueuedThreadMessages(harness.db, missing.id)).toEqual([]);
       expect(listQueuedThreadMessages(harness.db, loaded.id)).toHaveLength(1);
       expect(listQueuedThreadMessages(harness.db, pending.id)).toHaveLength(1);
+    });
+  });
+
+  it("releases a claim left by a killed server at startup while keeping the message visible until sent", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedRunnableThread(harness, {
+        hostId: "host-orphaned-claim",
+        status: "idle",
+      });
+
+      const queued = seedQueuedMessage(harness.deps, {
+        content: textInput("ORPHANED CLAIM"),
+        threadId: thread.id,
+      });
+
+      expect(
+        claimNextQueuedThreadMessageGroup(
+          harness.db,
+          harness.deps.hub,
+          thread.id,
+          () => true,
+        ),
+      ).toHaveLength(1);
+
+      const listedIds = async () => {
+        const response = await harness.app.request(
+          `/api/v1/threads/${thread.id}/queued-messages`,
+        );
+
+        const rows: { id: string }[] = await response.json();
+
+        return rows.map((row) => row.id);
+      };
+
+      const turnsBefore = turnRequests(harness, thread.id).length;
+      expect(await listedIds()).toEqual([queued.id]);
+      expect(getQueuedThreadMessage(harness.db, queued.id)).toMatchObject({
+        claimedAt: expect.any(Number),
+        claimToken: expect.any(String),
+      });
+
+      await runStartupRecoverySweep(harness.deps);
+
+      expect(getQueuedThreadMessage(harness.db, queued.id)).toMatchObject({
+        claimedAt: null,
+        claimToken: null,
+      });
+      expect(await listedIds()).toEqual([queued.id]);
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "idle-recovery",
+        now: Date.now(),
+      });
+      const turns = turnRequests(harness, thread.id);
+      expect(turns).toHaveLength(turnsBefore + 1);
+      expect(turns.at(-1)?.data).toContain("ORPHANED CLAIM");
+      expect(await listedIds()).toEqual([]);
+    });
+  });
+});
+
+describe("a thread-ready wake during a running drain", () => {
+  it("drains a message queued while the previous drain was finishing", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedRunnableThread(harness, {
+        hostId: "host-drain-rerun",
+        status: "idle",
+      });
+
+      let wokeDuringDrain = false;
+      installHooks({
+        "message.dispatch": [
+          {
+            pluginId: "limiter",
+            handler: (context) => {
+              const held = context.input.text === "held by the plugin";
+
+              if (held && !wokeDuringDrain) {
+                wokeDuringDrain = true;
+                seedQueuedMessage(harness.deps, {
+                  threadId: thread.id,
+                  content: textInput("queued during the drain"),
+                });
+                void runQueuedMessageDispatch(harness.deps, {
+                  kind: "thread-ready",
+                  threadId: thread.id,
+                });
+              }
+
+              return held
+                ? ({ action: "wait", reason: "full" } as const)
+                : ({ action: "proceed" } as const);
+            },
+          },
+        ],
+      });
+      seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: textInput("held by the plugin"),
+      });
+
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+
+      expect(wokeDuringDrain).toBe(true);
+      expect(
+        turnRequests(harness, thread.id).map(
+          (event) =>
+            turnRequestEventDataSchema.parse(JSON.parse(event.data)).input,
+        ),
+      ).toContainEqual(textInput("queued during the drain"));
+    });
+  });
+});
+
+describe("a targeted attempt that holds its claim while the turn completes", () => {
+  it("drains the rest of the queue when the attempt does not start a turn", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedRunnableThread(harness, {
+        hostId: "host-claim-held",
+        status: "active",
+      });
+
+      installHooks({
+        "message.dispatch": [
+          {
+            pluginId: "limiter",
+            handler: async (context) => {
+              if (context.input.text !== "scheduled") {
+                return { action: "proceed" } as const;
+              }
+
+              applyLoggedThreadLifecycleEvent(harness.deps, {
+                event: { type: "run.succeeded" },
+                threadId: thread.id,
+              });
+              await new Promise((resolve) => setImmediate(resolve));
+
+              return { action: "wait", reason: "full" } as const;
+            },
+          },
+        ],
+      });
+      seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: textInput("scheduled"),
+        waitingOn: { kind: "time" },
+        sendAt: Date.now() - 1,
+      });
+      seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: textInput("queued behind"),
+        waitingOn: { kind: "thread-busy" },
+      });
+
+      await runTimeWake(harness, Date.now());
+
+      await vi.waitFor(() => {
+        expect(
+          turnRequests(harness, thread.id).map(
+            (event) =>
+              turnRequestEventDataSchema.parse(JSON.parse(event.data)).input,
+          ),
+        ).toContainEqual(textInput("queued behind"));
+      });
+      expect(
+        listQueuedThreadMessages(harness.db, thread.id).map((row) =>
+          JSON.parse(row.content),
+        ),
+      ).toEqual([textInput("scheduled")]);
+    });
+  });
+});
+
+describe("a plugin hold beside other queued work", () => {
+  function turnInputs(harness: TestAppHarness, threadId: string) {
+    return turnRequests(harness, threadId).map(
+      (event) => turnRequestEventDataSchema.parse(JSON.parse(event.data)).input,
+    );
+  }
+
+  function queuedWaits(harness: TestAppHarness, threadId: string) {
+    return listQueuedThreadMessages(harness.db, threadId).map((row) => ({
+      id: row.id,
+      waitingOn: row.waitingOn === null ? null : JSON.parse(row.waitingOn),
+    }));
+  }
+
+  it("re-evaluates another plugin's held message on a thread that also holds an older draft", async () => {
+    await withTestHarness(async (harness) => {
+      installHooks({
+        "message.dispatch": [
+          {
+            pluginId: "drafts",
+            handler: (context) => {
+              const lead = context.queuedMessages[0]?.waitingOn;
+
+              return lead?.kind === "plugin" && lead.pluginId === "drafts"
+                ? ({ action: "wait", reason: "Draft" } as const)
+                : ({ action: "proceed" } as const);
+            },
+          },
+          {
+            pluginId: "limiter",
+            handler: () => ({ action: "proceed" }) as const,
+          },
+        ],
+      });
+
+      const { thread } = seedRunnableThread(harness, {
+        hostId: "host-draft-ahead",
+        status: "idle",
+      });
+
+      const draft = seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: textInput("saved draft"),
+        waitingOn: { kind: "plugin", pluginId: "drafts", reason: "Draft" },
+      });
+
+      seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: textInput("held by the limiter"),
+        waitingOn: {
+          kind: "plugin",
+          pluginId: "limiter",
+          reason: "At capacity",
+        },
+      });
+      const turnsBefore = turnRequests(harness, thread.id).length;
+
+      await runPluginWake(harness);
+
+      expect(turnInputs(harness, thread.id)).toHaveLength(turnsBefore + 1);
+      expect(turnInputs(harness, thread.id).at(-1)).toEqual(
+        textInput("held by the limiter"),
+      );
+      expect(queuedWaits(harness, thread.id)).toEqual([
+        {
+          id: draft.id,
+          waitingOn: { kind: "plugin", pluginId: "drafts", reason: "Draft" },
+        },
+      ]);
+    });
+  });
+
+  it("runs another drain pass when a plugin holds the claimed lead on an idle thread", async () => {
+    await withTestHarness(async (harness) => {
+      installHooks({
+        "message.dispatch": [
+          {
+            pluginId: "gate",
+            handler: (context) =>
+              context.input.text === "held lead"
+                ? ({ action: "wait", reason: "Gated" } as const)
+                : ({ action: "proceed" } as const),
+          },
+        ],
+      });
+
+      const { thread } = seedRunnableThread(harness, {
+        hostId: "host-held-lead",
+        status: "idle",
+      });
+
+      const lead = seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: textInput("held lead"),
+        waitingOn: { kind: "thread-busy" },
+      });
+
+      seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: textInput("next"),
+        waitingOn: { kind: "thread-busy" },
+      });
+
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+
+      await vi.waitFor(() => {
+        expect(turnInputs(harness, thread.id)).toContainEqual(
+          textInput("next"),
+        );
+      });
+      expect(turnInputs(harness, thread.id)).not.toContainEqual(
+        textInput("held lead"),
+      );
+      expect(queuedWaits(harness, thread.id)).toEqual([
+        {
+          id: lead.id,
+          waitingOn: { kind: "plugin", pluginId: "gate", reason: "Gated" },
+        },
+      ]);
+    });
+  });
+
+  it("returns queued follow-ups to thread-busy in order once a plugin that held each lead frees", async () => {
+    await withTestHarness(async (harness) => {
+      let atCapacity = true;
+      installHooks({
+        "message.dispatch": [
+          {
+            pluginId: "limiter",
+            handler: () =>
+              atCapacity
+                ? ({ action: "wait", reason: "At capacity" } as const)
+                : ({ action: "proceed" } as const),
+          },
+        ],
+      });
+
+      const { thread } = seedRunnableThread(harness, {
+        hostId: "host-held-cascade",
+        status: "idle",
+      });
+
+      const rows = ["first", "second", "third"].map((text) =>
+        createQueuedThreadMessage(harness.db, harness.deps.hub, {
+          threadId: thread.id,
+          content: textInput(text),
+          model: "gpt-5",
+          reasoningLevel: "medium",
+          permissionMode: "full",
+          serviceTier: "default",
+          senderThreadId: null,
+          waitingOn: { kind: "thread-busy" },
+          sendAt: null,
+          payload: { kind: "inline" },
+          systemNotice: null,
+          deliveryMode: "queue",
+        }),
+      );
+
+      const turnsBefore = turnRequests(harness, thread.id).length;
+
+      await runQueuedMessageDispatch(harness.deps, {
+        kind: "thread-ready",
+        threadId: thread.id,
+      });
+
+      const held = {
+        kind: "plugin",
+        pluginId: "limiter",
+        reason: "At capacity",
+      };
+
+      await vi.waitFor(() => {
+        expect(queuedWaits(harness, thread.id)).toEqual(
+          rows.map((row) => ({ id: row.id, waitingOn: held })),
+        );
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(turnRequests(harness, thread.id)).toHaveLength(turnsBefore);
+
+      atCapacity = false;
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.now() + 1_001);
+      await runPluginWake(harness);
+
+      expect(turnInputs(harness, thread.id).slice(turnsBefore)).toEqual([
+        textInput("first"),
+      ]);
+      expect(queuedWaits(harness, thread.id)).toEqual(
+        rows.slice(1).map((row) => ({
+          id: row.id,
+          waitingOn: { kind: "thread-busy" },
+        })),
+      );
     });
   });
 });

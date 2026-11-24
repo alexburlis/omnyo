@@ -37,6 +37,7 @@ export function getBrowserLocalNetworkPermissionQuery(): LocalNetworkPermissionQ
     return null;
   }
 
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions
   return navigator.permissions as unknown as LocalNetworkPermissionQuery;
 }
 
@@ -50,6 +51,7 @@ async function queryLoopbackPermissionState(
   for (const name of LOCAL_NETWORK_PERMISSION_NAMES) {
     try {
       const result = await permissions.query({ name });
+
       return result.state;
     } catch {}
   }
@@ -77,6 +79,7 @@ export async function resolveLocalHostDaemonAccess({
   }
 
   const permissionState = await queryLoopbackPermissionState(permissions);
+
   switch (permissionState) {
     case "granted":
       return "available";

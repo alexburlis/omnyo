@@ -1,98 +1,78 @@
 import { describe, expect, it } from "vitest";
-import { rewriteLocalhostLinkHref } from "../src/localhost-link-rewrite.js";
+import {
+  parseLoopbackPreviewUrl,
+  rewriteLocalhostLinkHref,
+} from "../src/localhost-link-rewrite.js";
 
-describe("rewriteLocalhostLinkHref", () => {
-  it("rewrites localhost and 127.0.0.1 http links to the current page hostname", () => {
+describe("device-aware preview links", () => {
+  const href = "http://localhost:4399/compare/superwhisper?debug=1#ready";
+  const remoteBaseUrl = "/preview/prv_original_host";
+  it("preserves the exact original URL on a confirmed owner device", () => {
     expect(
       rewriteLocalhostLinkHref({
-        currentHostname: "100.64.158.8",
         enabled: true,
-        href: "http://localhost:5173/app?debug=1#ready",
+        href,
+        sourceHostId: "mac",
+        viewerHostId: "mac",
+        remoteBaseUrl,
       }),
-    ).toBe("http://100.64.158.8:5173/app?debug=1#ready");
-
-    expect(
-      rewriteLocalhostLinkHref({
-        currentHostname: "100.64.158.8",
-        enabled: true,
-        href: "https://127.0.0.1:8443/",
-      }),
-    ).toBe("https://100.64.158.8:8443/");
+    ).toBe(href);
   });
-
-  it("leaves visible hrefs unchanged when disabled or not a localhost http link", () => {
-    expect(
-      rewriteLocalhostLinkHref({
-        currentHostname: "100.64.158.8",
-        enabled: false,
-        href: "http://localhost:5173/",
-      }),
-    ).toBe("http://localhost:5173/");
-
-    for (const href of [
-      "https://example.com/docs",
-      "mailto:hi@example.com",
-      "/projects/proj_123",
-      "file:///workspace/app.ts",
-      "not a url",
-      undefined,
-    ]) {
+  it.each(["phone", null, undefined])(
+    "uses Omnyo access for a different or unproven viewer %s",
+    (viewerHostId) => {
       expect(
         rewriteLocalhostLinkHref({
-          currentHostname: "100.64.158.8",
           enabled: true,
           href,
+          sourceHostId: "mac",
+          viewerHostId,
+          remoteBaseUrl,
         }),
-      ).toBe(href);
-    }
+      ).toBe(`${remoteBaseUrl}/compare/superwhisper?debug=1#ready`);
+    },
+  );
+  it("never invents a coordinator hostname with a development port", () => {
+    expect(rewriteLocalhostLinkHref({ enabled: true, href })).toBe(href);
   });
-
-  it("leaves localhost links alone on getbb.app hosts", () => {
-    for (const currentHostname of [
-      "sawyer.getbb.app",
-      "sawyer--8000.getbb.app",
-      "getbb.app",
-      "SAWYER.GETBB.APP",
-    ]) {
+  it.each(["http://127.0.0.1:4399/a?q=1#x", "https://[::1]:8443/a?q=1#x"])(
+    "preserves paths, query and fragment for %s",
+    (href) => {
       expect(
-        rewriteLocalhostLinkHref({
-          currentHostname,
-          enabled: true,
-          href: "http://localhost:5173/app",
-        }),
-      ).toBe("http://localhost:5173/app");
-    }
+        rewriteLocalhostLinkHref({ enabled: true, href, remoteBaseUrl }),
+      ).toBe(`${remoteBaseUrl}/a?q=1#x`);
+    },
+  );
+  it("keeps two owners on the same port separate", () => {
+    expect(
+      rewriteLocalhostLinkHref({
+        enabled: true,
+        href,
+        sourceHostId: "air",
+        viewerHostId: "mac",
+        remoteBaseUrl: "/preview/prv_air",
+      }),
+    ).toBe("/preview/prv_air/compare/superwhisper?debug=1#ready");
   });
-
-  it("does not ignore unrelated hostnames", () => {
-    for (const currentHostname of [
-      "notgetbb.app",
-      "sawyer.localhost",
-      "sawyer--8000.localhost",
-      "sawyer.bb.localhost",
-    ]) {
-      expect(
-        rewriteLocalhostLinkHref({
-          currentHostname,
-          enabled: true,
-          href: "http://localhost:5173/app",
-        }),
-      ).toBe(`http://${currentHostname}:5173/app`);
-    }
+  it.each([
+    "https://example.com/docs",
+    "mailto:hi@example.com",
+    "/projects/proj_123",
+    "file:///workspace/app.ts",
+    "http://localhost.evil:4399/",
+    "http://user:password@localhost:4399/",
+    "ftp://localhost:4399/",
+    "not a url",
+    undefined,
+  ])("leaves other links unchanged: %s", (href) => {
+    expect(parseLoopbackPreviewUrl(href)).toBeNull();
+    expect(
+      rewriteLocalhostLinkHref({ enabled: true, href, remoteBaseUrl }),
+    ).toBe(href);
   });
-
-  it("preserves bb Connect share links", () => {
-    for (const href of [
-      "https://sawyer--5173.getbb.app/app",
-      "http://sawyer--5173.localhost:59332/app",
-    ]) {
-      expect(
-        rewriteLocalhostLinkHref({
-          currentHostname: "100.64.158.8",
-          enabled: true,
-          href,
-        }),
-      ).toBe(href);
-    }
+  it("honors an explicit disabled preference", () => {
+    expect(
+      rewriteLocalhostLinkHref({ enabled: false, href, remoteBaseUrl }),
+    ).toBe(href);
   });
 });

@@ -40,6 +40,7 @@ describe("ACP sign-in guidance", () => {
       args: ["login", "--device"],
       env: {},
     };
+
     expect(
       describeAcpSignIn({
         command: "C:\\Tools\\node\\node.exe",

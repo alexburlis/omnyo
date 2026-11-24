@@ -1,4 +1,5 @@
 const CONNECT_SESSION_RENEWAL_LEAD_MS = 5 * 60 * 1000;
+
 const CONNECT_SESSION_MIN_RENEWAL_DELAY_MS = 30 * 1000;
 
 export type ConnectSessionAuthenticateResult =
@@ -31,13 +32,16 @@ export function createConnectSessionRenewal(
   const leadMs = CONNECT_SESSION_RENEWAL_LEAD_MS;
   const minDelayMs = CONNECT_SESSION_MIN_RENEWAL_DELAY_MS;
   const now = args.now ?? Date.now;
+
   const setTimeoutFn =
     args.setTimeoutFn ??
     ((handler: () => void, timeout: number) => {
       const handle = setTimeout(handler, timeout);
       handle.unref();
+
       return handle;
     });
+
   const clearTimeoutFn =
     args.clearTimeoutFn ??
     ((handle: unknown) => {
@@ -52,10 +56,12 @@ export function createConnectSessionRenewal(
 
   function retire(): void {
     generation += 1;
+
     if (timer !== null) {
       clearTimeoutFn(timer);
       timer = null;
     }
+
     expiresAt = null;
     serverUrl = null;
   }
@@ -73,6 +79,7 @@ export function createConnectSessionRenewal(
         if (generation !== startedGeneration) {
           return;
         }
+
         timer = null;
         void renewNow();
       },
@@ -86,30 +93,38 @@ export function createConnectSessionRenewal(
   ): Promise<void> {
     const isCurrent = (): boolean => generation === startedGeneration;
     const result = await args.authenticate(remoteServerUrl, isCurrent);
+
     if (!isCurrent()) {
       return;
     }
+
     if (result.ok) {
       start({ expiresAt: result.expiresAt, remoteServerUrl });
+
       return;
     }
+
     args.log?.(
-      `could not renew the bb Connect session: ${result.detail} — retrying`,
+      `could not renew the Omnyo Connect session: ${result.detail} — retrying`,
     );
     start({ expiresAt: now() + leadMs, remoteServerUrl });
   }
 
   function renewNow(): Promise<void> {
     const remoteServerUrl = serverUrl;
+
     if (remoteServerUrl === null) {
       return Promise.resolve();
     }
+
     if (inFlight !== null) {
       return inFlight;
     }
+
     inFlight = runRenewal(remoteServerUrl, generation).finally(() => {
       inFlight = null;
     });
+
     return inFlight;
   }
 
@@ -118,6 +133,7 @@ export function createConnectSessionRenewal(
       if (expiresAt === null || expiresAt - now() > leadMs) {
         return;
       }
+
       void renewNow();
     },
     renewNow,

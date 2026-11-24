@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import { PI_EXTENSION_UI_KIND } from "./src/extension-ui-contract.js";
 
 const app = await loadPluginApp(() => import("./app"));
@@ -33,10 +33,12 @@ function render(
 describe("pi extension ui interaction", () => {
   it("submits the chosen option label for a select dialog", async () => {
     const submit = vi.fn(async () => undefined);
+
     const view = render(
       { requestId: "ui-1", method: "select", options: ["Allow once", "Deny"] },
       { submit },
     );
+
     fireEvent.click(view.getByText("Allow once"));
     fireEvent.click(view.getByText("Submit answer"));
     await vi.waitFor(() => expect(submit).toHaveBeenCalledWith("Allow once"));
@@ -47,10 +49,12 @@ describe("pi extension ui interaction", () => {
       .fn<(value: unknown) => Promise<void>>()
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce(undefined);
+
     const view = render(
       { requestId: "ui-1", method: "select", options: ["Allow once", "Deny"] },
       { submit },
     );
+
     fireEvent.click(view.getByText("Allow once"));
     fireEvent.click(view.getByText("Submit answer"));
     await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
@@ -70,19 +74,24 @@ describe("pi extension ui interaction", () => {
       method: "select",
       options: ["A", "B"],
     });
-    expect((view.getByText("Submit answer") as HTMLButtonElement).disabled)
-      .toBe(true);
+
+    expect(
+      (view.getByText("Submit answer") as HTMLButtonElement).disabled,
+    ).toBe(true);
     fireEvent.click(view.getByText("B"));
-    expect((view.getByText("Submit answer") as HTMLButtonElement).disabled)
-      .toBe(false);
+    expect(
+      (view.getByText("Submit answer") as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   it("submits a boolean for a confirm dialog", async () => {
     const submit = vi.fn(async () => undefined);
+
     const view = render(
       { requestId: "ui-2", method: "confirm", message: "This modifies files." },
       { submit },
     );
+
     expect(view.getByText("This modifies files.")).toBeDefined();
     fireEvent.click(view.getByText("No"));
     await vi.waitFor(() => expect(submit).toHaveBeenCalledWith(false));
@@ -90,10 +99,12 @@ describe("pi extension ui interaction", () => {
 
   it("submits typed text for an input dialog", async () => {
     const submit = vi.fn(async () => undefined);
+
     const view = render(
       { requestId: "ui-3", method: "input", placeholder: "type here" },
       { submit },
     );
+
     fireEvent.change(view.getByPlaceholderText("type here"), {
       target: { value: "hello" },
     });
@@ -106,10 +117,12 @@ describe("pi extension ui interaction", () => {
       .fn<(value: unknown) => Promise<void>>()
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce(undefined);
+
     const view = render(
       { requestId: "ui-3", method: "input", placeholder: "type here" },
       { submit },
     );
+
     const input = view.getByPlaceholderText("type here") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "hello" } });
     fireEvent.click(view.getByText("Submit"));
@@ -125,10 +138,12 @@ describe("pi extension ui interaction", () => {
 
   it("renders editor prefill and submits the edited text", async () => {
     const submit = vi.fn(async () => undefined);
+
     const view = render(
       { requestId: "ui-4", method: "editor", prefill: "line one" },
       { submit },
     );
+
     const editor = view.container.querySelector("textarea")!;
     fireEvent.change(editor, { target: { value: "line one\nline two" } });
     fireEvent.click(view.getByText("Submit"));
@@ -139,6 +154,7 @@ describe("pi extension ui interaction", () => {
 
   it("still renders the wrapped stored-payload shape for robustness", async () => {
     const submit = vi.fn(async () => undefined);
+
     const view = render(
       undefined,
       { submit },
@@ -148,6 +164,7 @@ describe("pi extension ui interaction", () => {
         data: { requestId: "ui-1", method: "select", options: ["A"] },
       },
     );
+
     fireEvent.click(view.getByText("A"));
     fireEvent.click(view.getByText("Submit answer"));
     await vi.waitFor(() => expect(submit).toHaveBeenCalledWith("A"));
@@ -163,10 +180,12 @@ describe("pi extension ui interaction", () => {
 
   it("offers cancel for a rendered dialog", async () => {
     const cancel = vi.fn(async () => undefined);
+
     const view = render(
       { requestId: "ui-1", method: "select", options: ["A"] },
       { cancel },
     );
+
     fireEvent.click(view.getByText("Cancel"));
     await vi.waitFor(() => expect(cancel).toHaveBeenCalled());
   });

@@ -3,18 +3,18 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   useCloseMobileSidebar,
   useIsSidebarFramed,
 } from "@/components/ui/sidebar.js";
 import {
   CHROME_ROW_CLASS,
-  getBbDesktopInfo,
+  getOmnyoDesktopInfo,
   MACOS_CHROME_CONTROL_NO_DRAG_CLASS,
   MACOS_WINDOW_DRAG_CLASS,
   shouldUseMacosDesktopChrome,
-} from "@/lib/bb-desktop";
+} from "@/lib/omnyo-desktop";
 import { SidebarHistoryNavigationControls } from "./SidebarHistoryNavigationControls";
 
 export function SidebarTopReserveRow({
@@ -26,7 +26,7 @@ export function SidebarTopReserveRow({
 }) {
   const closeOnMobile = useCloseMobileSidebar();
   const isFramed = useIsSidebarFramed();
-  const [desktopInfo] = useState(getBbDesktopInfo);
+  const [desktopInfo] = useState(getOmnyoDesktopInfo);
   const usesDesktopChrome = shouldUseMacosDesktopChrome(desktopInfo);
 
   if (isFramed && headerSlot === undefined) {

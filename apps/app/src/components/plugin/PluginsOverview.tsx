@@ -5,19 +5,20 @@ import {
 import { usePluginCollectionParams } from "./management/usePluginCollectionParams";
 import { useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { LazyPluginDetailPaneView } from "@/views/ToolsViewSplits";
 import {
   ResourceInfiniteScrollSentinel,
   useResourceInfiniteItems,
   RESOURCE_GRID_PAGE_SIZE,
-} from "@bb/shared-ui/resource-pagination";
+} from "@omnyo/shared-ui/resource-pagination";
 import {
   ResourceCollectionPage,
   ResourceCollectionViewport,
   ResourceListState,
-} from "@bb/shared-ui/resource-list";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/resource-list";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { PluginCreateButton } from "./PluginCreateButton";
-import { CREATE_PLUGIN_PROMPT } from "@bb/client-core";
+import { CREATE_PLUGIN_PROMPT } from "@omnyo/client-core";
 import { TOOLS_PAGE_BAND_CLASSES } from "@/components/tools/tools-navigation";
 import {
   AddPluginDialog,
@@ -51,15 +52,18 @@ import {
   getRootComposeRoutePath,
 } from "@/lib/route-paths";
 
+export interface PluginsOverviewProps {
+  mode?: "installed" | "browse";
+  onOpenPlugin?: (pluginId: string, trigger: HTMLButtonElement) => void;
+}
+
 export function PluginsOverview({
   onOpenPlugin,
   mode,
-}: {
-  mode?: "installed" | "browse";
-  onOpenPlugin?: (pluginId: string, trigger: HTMLButtonElement) => void;
-} = {}) {
+}: PluginsOverviewProps = {}) {
   const navigate = useNavigate();
   const removal = usePluginRemoval();
+
   const {
     searchParams,
     query: installedQuery,
@@ -68,18 +72,24 @@ export function PluginsOverview({
     selectedCategories,
     changeSearchParams,
   } = usePluginCollectionParams();
+
   const listQuery = usePluginList({ enabled: true });
+
   const plugins = useMemo(
     () => listQuery.data?.plugins ?? [],
     [listQuery.data?.plugins],
   );
+
   const activeMode =
     mode ?? (searchParams.get("view") === "installed" ? "installed" : "browse");
+
   usePluginUpdateCheck(null, { enabled: activeMode === "installed" });
   const authorKey = searchParams.get("author");
+
   const catalogQuery = usePluginCatalogSearch("", {
     enabled: activeMode === "installed",
   });
+
   const installedEntries = useMemo(
     () =>
       plugins.map((plugin) => {
@@ -87,9 +97,12 @@ export function PluginsOverview({
           plugin,
           catalogQuery.data?.entries ?? [],
         );
+
         const isLocal = plugin.source.startsWith("path:");
+
         return {
           plugin,
+          catalogEntry: entry,
           entryId: plugin.id,
           displayName: plugin.name ?? plugin.id,
           categoryId: isLocal
@@ -97,29 +110,31 @@ export function PluginsOverview({
             : (entry?.categoryId ?? plugin.categoryId),
           category: isLocal ? "Local" : (entry?.category ?? plugin.category),
           publishedAt: entry?.publishedAt,
-          installs: entry?.installs ?? null,
         };
       }),
     [plugins, catalogQuery.data?.entries],
   );
+
   const sourceFilterOptions = useMemo(
     () => pluginSourceFilterOptions(plugins),
     [plugins],
   );
+
   const sourceFilters = searchParams.getAll("source");
+
   const activeSourceFilters = sourceFilters.filter((value) =>
     sourceFilterOptions.some((option) => option.id === value),
   );
+
   const categoryOptions = useMemo(
     () => pluginCategoryFilterOptions(installedEntries, selectedCategories),
     [installedEntries, selectedCategories],
   );
-  const installsKnown = installedEntries.some(
-    (entry) => entry.installs !== null,
-  );
-  const installedSort =
-    requestedSort === "most-installed" && !installsKnown ? null : requestedSort;
+
+  const installedSort = requestedSort;
+
   const normalizedInstalledQuery = installedQuery.trim().toLowerCase();
+
   const installedResetKey = [
     normalizedInstalledQuery,
     [...activeSourceFilters].sort().join(","),
@@ -127,6 +142,7 @@ export function PluginsOverview({
     installedSortDirection,
     [...selectedCategories].sort().join(","),
   ].join("\u0000");
+
   const [addDialog, setAddDialog] = useState<{
     open: boolean;
     initial: AddPluginInitial | null;
@@ -139,13 +155,16 @@ export function PluginsOverview({
         !activeSourceFilters.includes(pluginSourceFilterId(entry.plugin))
       )
         return false;
+
       if (
         selectedCategories.length > 0 &&
         !selectedCategories.includes(pluginCategoryFilterId(entry))
       )
         return false;
+
       if (normalizedInstalledQuery.length === 0) return true;
       const plugin = entry.plugin;
+
       return [
         plugin.id,
         plugin.name ?? "",
@@ -157,24 +176,22 @@ export function PluginsOverview({
         .toLowerCase()
         .includes(normalizedInstalledQuery);
     });
+
     if (installedSort !== null)
-      return sortPluginEntries(
-        filtered,
-        installedSort,
-        installedSortDirection,
-      ).map((entry) => entry.plugin);
-    return filtered
-      .map((entry) => entry.plugin)
-      .sort((left, right) => {
-        const publisherResult =
-          Number(left.publisherLabel === null) -
-          Number(right.publisherLabel === null);
-        if (publisherResult !== 0) return publisherResult;
-        return (
-          (left.name ?? left.id).localeCompare(right.name ?? right.id) ||
-          left.id.localeCompare(right.id)
-        );
-      });
+      return sortPluginEntries(filtered, installedSort, installedSortDirection);
+
+    return filtered.sort(({ plugin: left }, { plugin: right }) => {
+      const publisherResult =
+        Number(left.publisherLabel === null) -
+        Number(right.publisherLabel === null);
+
+      if (publisherResult !== 0) return publisherResult;
+
+      return (
+        (left.name ?? left.id).localeCompare(right.name ?? right.id) ||
+        left.id.localeCompare(right.id)
+      );
+    });
   }, [
     installedEntries,
     activeSourceFilters,
@@ -183,6 +200,7 @@ export function PluginsOverview({
     installedSort,
     installedSortDirection,
   ]);
+
   const installedList = useResourceInfiniteItems(visiblePlugins, {
     pageSize: RESOURCE_GRID_PAGE_SIZE,
     resetKey: installedResetKey,
@@ -203,6 +221,7 @@ export function PluginsOverview({
       (candidate) =>
         installedPluginCatalogEntry(candidate, [entry]) !== undefined,
     );
+
     if (plugin !== undefined) removal.open(plugin);
   };
 
@@ -221,7 +240,9 @@ export function PluginsOverview({
           ? getPluginDetailRoutePath({ pluginId: detailKey, view: "installed" })
           : pluginDetailLocation(detailKey, ""),
       ));
+
   let content: ReactNode;
+
   if (activeMode === "browse") {
     content =
       authorKey === null ? (
@@ -254,7 +275,6 @@ export function PluginsOverview({
             categoryOptions={categoryOptions}
             sort={installedSort}
             sortDirection={installedSortDirection}
-            installsKnown={installsKnown}
             changeSearchParams={changeSearchParams}
             action={installedActions}
             sourceFilter={{
@@ -263,13 +283,17 @@ export function PluginsOverview({
               onChange: (values) =>
                 changeSearchParams((next) => {
                   next.delete("source");
+
                   for (const value of values) next.append("source", value);
                 }),
             }}
           />
         }
       >
-        <div className={cn("space-y-3", TOOLS_PAGE_BAND_CLASSES)}>
+        <div
+          className={cn("space-y-3", TOOLS_PAGE_BAND_CLASSES)}
+          {...LazyPluginDetailPaneView.intentProps}
+        >
           <PluginAttentionBanner plugins={plugins} onOpenPlugin={openPlugin} />
           {listQuery.isError ? (
             <ResourceListState
@@ -294,7 +318,7 @@ export function PluginsOverview({
           ) : (
             <>
               <InstalledPluginsTab
-                plugins={installedList.items}
+                entries={installedList.items}
                 onOpenPlugin={openPlugin}
               />
               <ResourceInfiniteScrollSentinel

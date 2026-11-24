@@ -1,13 +1,17 @@
 import { z } from "zod";
 
-export const APP_INSTALL_KIND_ENV_NAME = "BB_APP_INSTALL_KIND";
-export const APP_SOURCE_ORIGIN_ENV_NAME = "BB_APP_SOURCE_ORIGIN";
-export const APP_SOURCE_COMMIT_ENV_NAME = "BB_APP_SOURCE_COMMIT";
+export const APP_INSTALL_KIND_ENV_NAME = "OMNYO_APP_INSTALL_KIND";
+
+export const APP_SOURCE_ORIGIN_ENV_NAME = "OMNYO_APP_SOURCE_ORIGIN";
+
+export const APP_SOURCE_COMMIT_ENV_NAME = "OMNYO_APP_SOURCE_COMMIT";
 
 export const appInstallKindSchema = z.enum(["desktop", "npm", "source"]);
+
 export type AppInstallKind = z.infer<typeof appInstallKindSchema>;
 
 export const appSourceOriginSchema = z.enum(["official", "fork", "none"]);
+
 export type AppSourceOrigin = z.infer<typeof appSourceOriginSchema>;
 
 export type AppInstall =

@@ -1,4 +1,4 @@
-import type { Environment } from "@bb/domain";
+import type { Environment } from "@omnyo/domain";
 
 type EnvironmentDisplayHostLocality = "local" | "remote";
 
@@ -62,6 +62,7 @@ export function resolveEnvironmentProviderLabel(
   if (environmentProviderId === null || lookup.status === "loading") {
     return null;
   }
+
   return lookup.provider === null
     ? environmentProviderId
     : lookup.provider.displayName;
@@ -72,6 +73,7 @@ function resolveWorkspaceFolderName(
 ): string | null {
   if (workspacePath === null) return null;
   const segments = workspacePath.split(/[\\/]+/u).filter(Boolean);
+
   return segments[segments.length - 1] ?? null;
 }
 
@@ -95,6 +97,7 @@ export function formatEnvironmentDisplay({
 }: FormatEnvironmentDisplayArgs): EnvironmentDisplayInfo {
   const hostLifecycle =
     environment.hostLifecycle === "active" ? null : environment.hostLifecycle;
+
   const lifecycle: EnvironmentDisplayInfo["lifecycle"] =
     hostLifecycle ??
     (environment.status === "destroyed"
@@ -102,6 +105,7 @@ export function formatEnvironmentDisplay({
       : environment.status === "provisioning"
         ? "provisioning"
         : null);
+
   const lifecycleLabel =
     lifecycle === "removed"
       ? "Unavailable — machine removed"
@@ -114,14 +118,18 @@ export function formatEnvironmentDisplay({
             : lifecycle === "provisioning"
               ? "Provisioning"
               : null;
+
   const providerLabel = resolveEnvironmentProviderLabel(
     environment.environmentProviderId,
     providerLookup,
   );
+
   const localityLabel = host.locality === "remote" ? "Remote" : "Local";
+
   const namedLabel =
     providerLabel ??
     (host.locality === "remote" ? "Working remotely" : "Working locally");
+
   const namedCompactLabel = providerLabel ?? localityLabel;
 
   return {

@@ -2,11 +2,16 @@ import type { ReactNode } from "react";
 import {
   ResourceBrowseCard,
   ResourceBrowseGrid,
-} from "@bb/shared-ui/resource-list";
+} from "@omnyo/shared-ui/resource-list";
 import type { PluginCatalogSearchEntry } from "@/hooks/queries/plugin-catalog-queries";
 import { PluginAuthorAvatar } from "./PluginAuthorAvatar";
 import { PluginAuthorLink } from "./PluginAuthorLink";
-import { pluginAuthorGithub } from "./plugin-marketplace-author";
+import { PluginOfficialBadge } from "./PluginOfficialBadge";
+import {
+  isOmnyoAuthoredEntry,
+  OMNYO_AUTHOR_NAME,
+  pluginAuthorGithub,
+} from "./plugin-marketplace-author";
 
 export function PluginCardGrid({ children }: { children: ReactNode }) {
   return (
@@ -26,7 +31,11 @@ interface PluginCardProps {
   onOpen: (trigger: HTMLButtonElement) => void;
 }
 
-export function PluginCard({ byline, footerAction, ...props }: PluginCardProps) {
+export function PluginCard({
+  byline,
+  footerAction,
+  ...props
+}: PluginCardProps) {
   return (
     <ResourceBrowseCard
       {...props}
@@ -39,7 +48,7 @@ export function PluginCard({ byline, footerAction, ...props }: PluginCardProps) 
         <span className="line-clamp-2 whitespace-normal">{props.title}</span>
       }
       footer={
-        <div className="flex min-w-0 items-center justify-between gap-2 border-t border-border/60 pt-2 text-xs text-subtle-foreground">
+        <div className="flex min-h-8 min-w-0 items-center justify-between gap-2 border-t border-border/60 pt-2 text-xs text-subtle-foreground">
           <span className="min-w-0 truncate">{byline}</span>
           <span className="pointer-events-auto shrink-0">{footerAction}</span>
         </div>
@@ -51,6 +60,7 @@ export function PluginCard({ byline, footerAction, ...props }: PluginCardProps) 
 interface PluginAuthorBylineProps {
   name: string;
   github: string | null;
+  omnyoLogo?: boolean;
   official?: boolean;
   children: ReactNode;
 }
@@ -58,7 +68,8 @@ interface PluginAuthorBylineProps {
 export function PluginAuthorByline({
   name,
   github,
-  official,
+  omnyoLogo,
+  official = false,
   children,
 }: PluginAuthorBylineProps) {
   return (
@@ -66,24 +77,38 @@ export function PluginAuthorByline({
       <PluginAuthorAvatar
         name={name}
         github={github}
-        official={official}
+        omnyoLogo={omnyoLogo}
         size="detail"
       />
       <span className="min-w-0 truncate">{children}</span>
+      {official ? <PluginOfficialBadge /> : null}
     </span>
+  );
+}
+
+export function OmnyoAuthorByline({ official }: { official: boolean }) {
+  return (
+    <PluginAuthorByline
+      name={OMNYO_AUTHOR_NAME}
+      github={null}
+      omnyoLogo
+      official={official}
+    >
+      {OMNYO_AUTHOR_NAME}
+    </PluginAuthorByline>
   );
 }
 
 interface PluginCardAuthorProps {
   entry: Pick<
     PluginCatalogSearchEntry,
-    "author" | "marketplace" | "publisherLabel"
+    "author" | "marketplace" | "publisherLabel" | "official"
   >;
 }
 
 function pluginCardAuthorName(entry: PluginCardAuthorProps["entry"]): string {
-  return entry.marketplace === "bb-official"
-    ? "BB Official"
+  return isOmnyoAuthoredEntry(entry)
+    ? OMNYO_AUTHOR_NAME
     : (entry.author?.name ?? entry.publisherLabel);
 }
 
@@ -92,7 +117,7 @@ export function PluginCardAuthorAvatar({ entry }: PluginCardAuthorProps) {
     <PluginAuthorAvatar
       name={pluginCardAuthorName(entry)}
       github={pluginAuthorGithub(entry.author)}
-      official={entry.marketplace === "bb-official"}
+      omnyoLogo={isOmnyoAuthoredEntry(entry)}
       size="detail"
     />
   );
@@ -100,6 +125,7 @@ export function PluginCardAuthorAvatar({ entry }: PluginCardAuthorProps) {
 
 export function PluginCardAuthorName({ entry }: PluginCardAuthorProps) {
   const name = pluginCardAuthorName(entry);
+
   return entry.author === null ? (
     name
   ) : (
@@ -117,7 +143,8 @@ export function PluginCardAuthor({ entry }: PluginCardAuthorProps) {
     <PluginAuthorByline
       name={pluginCardAuthorName(entry)}
       github={pluginAuthorGithub(entry.author)}
-      official={entry.marketplace === "bb-official"}
+      omnyoLogo={isOmnyoAuthoredEntry(entry)}
+      official={entry.official}
     >
       <PluginCardAuthorName entry={entry} />
     </PluginAuthorByline>

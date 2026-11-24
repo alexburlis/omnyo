@@ -17,6 +17,7 @@ it.each([false, true])(
       ],
       { encoding: "utf8" },
     );
+
     expect(output).toBe(`${tty ? "\x1b[2K" : ""}  ✓  Finished\n`);
   },
 );

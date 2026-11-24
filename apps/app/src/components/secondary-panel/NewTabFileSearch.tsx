@@ -8,18 +8,23 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { directoryFromPath } from "@bb/thread-view";
+import { directoryFromPath } from "@omnyo/thread-view";
 import {
   COARSE_POINTER_COMPACT_ICON_SIZE_CLASS,
   COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
   COARSE_POINTER_ICON_SIZE_CLASS,
   COARSE_POINTER_TEXT_SM_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { Icon } from "@bb/shared-ui/icon";
-import { EmptyStatePanel } from "@bb/shared-ui/empty-state";
-import { LIST_HOVER_TRANSITION } from "@bb/shared-ui/motion";
-import { usePointerCoarse } from "@bb/shared-ui/hooks/use-pointer-coarse";
-import { Input } from "@bb/shared-ui/input";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { EmptyStatePanel } from "@omnyo/shared-ui/empty-state";
+import {
+  CONTROL_PRESS_FEEDBACK,
+  CONTROL_PRESS_TRANSITION,
+  DISCLOSURE_CHEVRON_TRANSITION,
+  LIST_HOVER_TRANSITION,
+} from "@omnyo/shared-ui/motion";
+import { usePointerCoarse } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
+import { Input } from "@omnyo/shared-ui/input";
 import { TruncateStart } from "@/components/ui/truncate-start.js";
 import {
   useFileSearchSuggestions,
@@ -35,8 +40,10 @@ import {
   getFileNameFromPath,
   resolveRightPanelFileIconName,
 } from "./rightPanelFileVisuals";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
+import { appCommandTarget } from "@/lib/app-command-targets";
+import type { KeyboardCommandId } from "@omnyo/domain";
 import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider";
 import { formatRelativeTime } from "@/lib/relative-time";
 import {
@@ -110,7 +117,9 @@ interface FileSearchSection {
 }
 
 type LauncherKeyDownHandler = (event: KeyboardEvent<HTMLElement>) => void;
+
 type FileSearchSource = FilePathSearchSuggestion["source"];
+
 type FileSearchSectionKind = "actions" | "files" | "recent";
 
 interface GroupFileSearchSectionsArgs {
@@ -126,6 +135,7 @@ interface LauncherTileProps {
   onSelect: () => void;
   title?: string;
   disabled?: boolean;
+  command?: KeyboardCommandId;
   children: ReactNode;
 }
 
@@ -136,6 +146,7 @@ interface ShowMoreToggleProps {
 }
 
 const FILE_SEARCH_LIMIT = 20;
+
 const FILE_SEARCH_SECTION_ORDER: readonly FileSearchSectionKind[] = [
   "actions",
   "files",
@@ -165,11 +176,13 @@ function getFileSearchEntryId(entry: FileSearchSectionEntry): string {
   if (entry.kind === "action") {
     return entry.action.id;
   }
+
   if (entry.kind === "recent") {
     return `${RECENT_ENTRY_ID_PREFIX}-${entry.item.source}-${encodeURIComponent(
       entry.item.path,
     )}`;
   }
+
   return getFileSearchResultId(entry.suggestion);
 }
 
@@ -194,14 +207,18 @@ function groupFileSearchSections({
     sectionKind: FileSearchSectionKind,
   ): FileSearchSection => {
     const existing = sectionsByKind.get(sectionKind);
+
     if (existing) {
       return existing;
     }
+
     const created: FileSearchSection = {
       kind: sectionKind,
       items: [],
     };
+
     sectionsByKind.set(sectionKind, created);
+
     return created;
   };
 
@@ -224,11 +241,14 @@ function groupFileSearchSections({
   }
 
   let nextIndex = 0;
+
   return FILE_SEARCH_SECTION_ORDER.flatMap((sectionKind) => {
     const section = sectionsByKind.get(sectionKind);
+
     if (!section) {
       return [];
     }
+
     return [
       {
         ...section,
@@ -236,8 +256,10 @@ function groupFileSearchSections({
           if (!isNavigableEntry(entry)) {
             return { entry, index: -1 };
           }
+
           const index = nextIndex;
           nextIndex += 1;
+
           return { entry, index };
         }),
       },
@@ -274,12 +296,14 @@ function LauncherTile({
   onSelect,
   title,
   disabled = false,
+  command,
   children,
 }: LauncherTileProps) {
   return (
     <button
       type="button"
       id={id}
+      {...(command ? appCommandTarget(command) : {})}
       data-panel-new-tab-item=""
       role="option"
       aria-selected={isActive}
@@ -311,6 +335,7 @@ function FileResultRow({
   const handleSelect = useCallback(() => {
     onSelect(suggestion);
   }, [onSelect, suggestion]);
+
   const directory = directoryFromPath(suggestion.path);
   const secondaryDirectory = directory || null;
   const iconName = resolveRightPanelFileIconName(suggestion.path);
@@ -365,6 +390,7 @@ function ActionResultRow({
       onActivate={onActivate}
       onSelect={action.onSelect}
       disabled={action.disabled}
+      command={action.command}
     >
       <span className={LAUNCHER_ROW_ICON_CLASS}>{action.icon}</span>
       <span className="min-w-0 flex-1 truncate text-foreground">
@@ -386,9 +412,11 @@ function RecentResultRow({
   const handleSelect = useCallback(() => {
     onSelect(item);
   }, [item, onSelect]);
+
   const iconName = resolveRightPanelFileIconName(item.path);
   const name = getFileNameFromPath({ path: item.path });
   const directory = directoryFromPath(item.path);
+
   const relativeTime = formatRelativeTime({
     timestamp: item.openedAt,
     now: nowMs,
@@ -434,7 +462,9 @@ function ShowMoreToggle({
       aria-expanded={isExpanded}
       onClick={onToggle}
       className={cn(
-        "ml-1.5 mt-0.5 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-state-hover hover:text-foreground",
+        "ml-1.5 mt-0.5 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground hover:bg-state-hover hover:text-foreground",
+        CONTROL_PRESS_TRANSITION,
+        CONTROL_PRESS_FEEDBACK,
         COARSE_POINTER_TEXT_SM_CLASS,
       )}
     >
@@ -442,7 +472,7 @@ function ShowMoreToggle({
         name="ChevronDown"
         className={cn(
           COARSE_POINTER_COMPACT_ICON_SIZE_CLASS,
-          "transition-transform",
+          DISCLOSURE_CHEVRON_TRANSITION,
           isExpanded && "rotate-180",
         )}
         aria-hidden
@@ -474,15 +504,19 @@ export function NewTabFileSearch({
   const [activeIndex, setActiveIndex] = useState(-1);
   const [isRecentExpanded, setIsRecentExpanded] = useState(false);
   const [nowMs] = useState(() => Date.now());
+
   const defaultRecentItemsThreadId =
     currentThreadId.length > 0 ? currentThreadId : null;
+
   const recentItemsStorageThreadId =
     recentItemsThreadId === undefined
       ? defaultRecentItemsThreadId
       : recentItemsThreadId;
+
   const recentItems = useThreadRecentItems(recentItemsStorageThreadId);
   const trimmedQuery = query.trim();
   const hasQuery = trimmedQuery.length > 0;
+
   const {
     suggestions,
     isLoading,
@@ -497,14 +531,17 @@ export function NewTabFileSearch({
     hostId,
     currentThreadId,
   });
+
   const matchedActions = useMemo(
     () => matchNewTabActions(actions, trimmedQuery),
     [actions, trimmedQuery],
   );
+
   const searchSuggestions = useMemo(
     () => (hasQuery ? suggestions : []),
     [hasQuery, suggestions],
   );
+
   const visibleRecentItems = useMemo(
     () =>
       isRecentExpanded
@@ -512,6 +549,7 @@ export function NewTabFileSearch({
         : recentItems.slice(0, THREAD_RECENT_ITEMS_VISIBLE_LIMIT),
     [isRecentExpanded, recentItems],
   );
+
   const recentEntries = useMemo<FileSearchSectionEntry[]>(
     () =>
       hasQuery
@@ -519,6 +557,7 @@ export function NewTabFileSearch({
         : visibleRecentItems.map((item) => ({ kind: "recent", item })),
     [hasQuery, visibleRecentItems],
   );
+
   const sections = useMemo(
     () =>
       groupFileSearchSections({
@@ -528,6 +567,7 @@ export function NewTabFileSearch({
       }),
     [matchedActions, recentEntries, searchSuggestions],
   );
+
   const navigableEntries = useMemo(
     () =>
       sections.flatMap((section) =>
@@ -537,9 +577,11 @@ export function NewTabFileSearch({
       ),
     [sections],
   );
+
   const navigableEntriesKey = navigableEntries
     .map(getFileSearchEntryId)
     .join("\n");
+
   const activeEntry = useMemo(
     () =>
       activeIndex >= 0 && activeIndex < navigableEntries.length
@@ -567,6 +609,7 @@ export function NewTabFileSearch({
 
     if (isPointerCoarse) {
       onAutoFocusHandled();
+
       return;
     }
 
@@ -609,6 +652,7 @@ export function NewTabFileSearch({
       if (event.key === "ArrowDown") {
         event.preventDefault();
         setActiveIndex((current) => (current + 1) % navigableEntries.length);
+
         return;
       }
 
@@ -617,19 +661,25 @@ export function NewTabFileSearch({
         setActiveIndex((current) =>
           current <= 0 ? navigableEntries.length - 1 : current - 1,
         );
+
         return;
       }
 
       if (event.key === "Enter" && activeEntry) {
         event.preventDefault();
+
         if (activeEntry.kind === "action") {
           activeEntry.action.onSelect();
+
           return;
         }
+
         if (activeEntry.kind === "recent") {
           handleRecentSelect(activeEntry.item);
+
           return;
         }
+
         if (activeEntry.kind === "suggestion") {
           handleFileSelect(activeEntry.suggestion);
         }
@@ -646,7 +696,9 @@ export function NewTabFileSearch({
   const activeEntryId = activeEntry
     ? getFileSearchEntryId(activeEntry)
     : undefined;
+
   const hasListbox = !isUnavailable && navigableEntries.length > 0;
+
   const searchLabel =
     actions.length > 0 ? "Search files and actions" : "Search files";
 
@@ -669,6 +721,7 @@ export function NewTabFileSearch({
         <Input
           ref={inputRef}
           data-panel-new-tab-item=""
+          {...appCommandTarget("file.quickOpen")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={handleLauncherKeyDown}
@@ -776,10 +829,13 @@ function NewTabResults({
   const showFilesSection = sections.some((section) => section.kind === "files");
   const showLoading = isLoading && !showFilesSection;
   const showError = searchError && !showFilesSection && !showLoading;
+
   const showNoSearchResults =
     hasQuery && !showFilesSection && !showLoading && !showError;
+
   const showSearchMessage = showLoading || showError || showNoSearchResults;
   const hasRecentSectionPredecessor = !hasQuery && showSearchMessage;
+
   const showEmptyMessage =
     sections.length === 0 &&
     !recent.emptyHintVisible &&
@@ -821,6 +877,7 @@ function NewTabResults({
         <div id={listboxId} role="listbox" aria-label="Search results">
           {sections.map((section, sectionIndex) => {
             const spaced = sectionIndex > 0 || hasRecentSectionPredecessor;
+
             return (
               <section
                 key={section.kind}
@@ -843,6 +900,7 @@ function NewTabResults({
                     const id = getFileSearchEntryId(entry);
                     const isActive = index >= 0 && index === activeIndex;
                     const onActivate = () => onActivateIndex(index);
+
                     if (entry.kind === "action") {
                       return (
                         <ActionResultRow
@@ -853,6 +911,7 @@ function NewTabResults({
                         />
                       );
                     }
+
                     if (entry.kind === "suggestion") {
                       return (
                         <FileResultRow
@@ -865,6 +924,7 @@ function NewTabResults({
                         />
                       );
                     }
+
                     return (
                       <RecentResultRow
                         key={id}

@@ -6,20 +6,21 @@ import {
   approveCursorSessionMcpServer,
   buildCursorMcpApprovalIdentifier,
   revokeCursorSessionMcpServer,
-} from "./cursor-mcp-approval.js";
-import type { AcpMcpServerConfig } from "./tool-proxy-mcp.js";
+} from "@omnyo/provider-bridge-protocol/acp/cursor-mcp-approval";
+import type { AcpMcpServerConfig } from "@omnyo/provider-bridge-protocol/acp/tool-proxy-mcp";
 
 const tempDirs: string[] = [];
 
 function makeTempDir(prefix: string): string {
   const path = mkdtempSync(join(tmpdir(), prefix));
   tempDirs.push(path);
+
   return path;
 }
 
 function mcpConfig(threadId = "thread-1"): AcpMcpServerConfig {
   return {
-    name: "bb-bridge",
+    name: "omnyo-bridge",
     command: "/usr/local/bin/node",
     args: ["/app/bridge.js", "--mcp-stdio"],
     env: [
@@ -42,12 +43,12 @@ describe("Cursor ACP session MCP approvals", () => {
         config: mcpConfig(),
         projectRoot: "/workspace/project",
       }),
-    ).toBe("bb-bridge-d4709a3db84ddb48");
+    ).toBe("omnyo-bridge-d4709a3db84ddb48");
   });
 
   it("does not touch Cursor data for other ACP agents", async () => {
-    const cursorDataDir = makeTempDir("bb-cursor-data-");
-    const workspace = makeTempDir("bb-cursor-workspace-");
+    const cursorDataDir = makeTempDir("omnyo-cursor-data-");
+    const workspace = makeTempDir("omnyo-cursor-workspace-");
 
     await expect(
       approveCursorSessionMcpServer({
@@ -61,18 +62,21 @@ describe("Cursor ACP session MCP approvals", () => {
   });
 
   it("preserves unrelated approvals and removes its session approval on release", async () => {
-    const cursorDataDir = makeTempDir("bb-cursor-data-");
-    const workspace = makeTempDir("bb-cursor-workspace-");
+    const cursorDataDir = makeTempDir("omnyo-cursor-data-");
+    const workspace = makeTempDir("omnyo-cursor-workspace-");
     const env = { CURSOR_DATA_DIR: cursorDataDir };
+
     const first = await approveCursorSessionMcpServer({
       agentCommand: "/opt/cursor/cursor-agent",
       config: mcpConfig(),
       cwd: workspace,
       env,
     });
+
     if (!first) {
       throw new Error("Cursor approval was not installed");
     }
+
     await revokeCursorSessionMcpServer(first);
     writeFileSync(first.path, '["user-approved-server"]\n', "utf8");
 
@@ -90,10 +94,13 @@ describe("Cursor ACP session MCP approvals", () => {
         env,
       }),
     ]);
+
     expect(approvals.every(Boolean)).toBe(true);
+
     const installed = approvals.flatMap((approval) =>
       approval ? [approval] : [],
     );
+
     const stored = JSON.parse(readFileSync(first.path, "utf8")) as string[];
     expect(stored[0]).toBe("user-approved-server");
     expect(stored.slice(1).sort()).toEqual(
@@ -104,22 +111,25 @@ describe("Cursor ACP session MCP approvals", () => {
     expect(JSON.parse(readFileSync(first.path, "utf8")) as unknown).toEqual([
       "user-approved-server",
     ]);
-    expect(() => readFileSync(`${first.path}.bb-lock`)).toThrow();
+    expect(() => readFileSync(`${first.path}.omnyo-lock`)).toThrow();
   });
 
   it("does not remove an approval Cursor already had", async () => {
-    const cursorDataDir = makeTempDir("bb-cursor-data-");
-    const workspace = makeTempDir("bb-cursor-workspace-");
+    const cursorDataDir = makeTempDir("omnyo-cursor-data-");
+    const workspace = makeTempDir("omnyo-cursor-workspace-");
     const env = { CURSOR_DATA_DIR: cursorDataDir };
+
     const installed = await approveCursorSessionMcpServer({
       agentCommand: "cursor-agent",
       config: mcpConfig(),
       cwd: workspace,
       env,
     });
+
     if (!installed) {
       throw new Error("Cursor approval was not installed");
     }
+
     await revokeCursorSessionMcpServer(installed);
     writeFileSync(installed.path, JSON.stringify([installed.approval]), "utf8");
 
@@ -129,10 +139,13 @@ describe("Cursor ACP session MCP approvals", () => {
       cwd: workspace,
       env,
     });
-    expect(existing?.installedByBb).toBe(false);
+
+    expect(existing?.installedByOmnyo).toBe(false);
+
     if (existing) {
       await revokeCursorSessionMcpServer(existing);
     }
+
     expect(JSON.parse(readFileSync(installed.path, "utf8")) as unknown).toEqual(
       [installed.approval],
     );

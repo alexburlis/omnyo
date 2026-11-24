@@ -34,6 +34,7 @@ it("restarts the delay each time the flag turns on again", () => {
     ({ flag }) => useSustainedFlag(flag, 1_000),
     { initialProps: { flag: true } },
   );
+
   act(() => vi.advanceTimersByTime(1_000));
   expect(result.current).toBe(true);
 

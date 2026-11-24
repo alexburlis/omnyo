@@ -12,7 +12,7 @@ import { createStore, Provider } from "jotai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CompactViewportOverrideProvider } from "@/components/ui/hooks/use-compact-viewport";
-import { installTestPluginRuntime } from "@get-bb/plugin-sdk/testing/app";
+import { installTestPluginRuntime } from "@omnyo/plugin-sdk/testing/app";
 import { SIDEBAR_CONTROL_STATE_CLASS } from "@/components/ui/sidebar-row-classes";
 import {
   sidebarThreadLifecyclesAtom,
@@ -25,6 +25,7 @@ import {
 import type { OrganizationMode } from "../../shared/preferences.js";
 
 installTestPluginRuntime();
+
 const {
   SidebarHeaderActionsProvider,
   SidebarHeaderControls,
@@ -68,6 +69,7 @@ function setup(
       </CompactViewportOverrideProvider>
     </Provider>,
   );
+
   return { store, newThread, newSection };
 }
 
@@ -97,9 +99,11 @@ describe("sidebar header controls", () => {
     fireEvent.keyDown(newSection.closest('[role="menu"]')!, { key: "Home" });
     await waitFor(() => expect(document.activeElement).toBe(newSection));
     await openSubmenu("Organize");
+
     const project = await screen.findByRole("menuitemradio", {
       name: "By project",
     });
+
     fireEvent.keyDown(project.closest('[role="menu"]')!, { key: "ArrowDown" });
     await waitFor(() => expect(document.activeElement).toBe(project));
     fireEvent.keyDown(project, { key: "Enter" });
@@ -110,9 +114,11 @@ describe("sidebar header controls", () => {
     setup();
     await openMenu();
     await openSubmenu("Organize");
+
     const toggle = await screen.findByRole("menuitemcheckbox", {
       name: "By environment",
     });
+
     fireEvent.pointerDown(toggle, { button: 0, pointerType: "mouse" });
     fireEvent.pointerUp(toggle, { button: 0, pointerType: "mouse" });
     fireEvent.click(toggle);
@@ -133,24 +139,31 @@ describe("sidebar header controls", () => {
 
   it("keeps the primary before overflow and applies the shared control state", async () => {
     const { newThread } = setup("Pinned", false, "chronological");
+
     const primary = screen.getByRole("button", {
       name: "New thread in Pinned",
     });
+
     expect(primary.nextElementSibling?.getAttribute("aria-label")).toBe(
       "Pinned actions",
     );
+
     for (const control of [primary, primary.nextElementSibling]) {
       for (const token of SIDEBAR_CONTROL_STATE_CLASS.split(" ")) {
         expect(control?.classList.contains(token)).toBe(true);
       }
+
       expect(control?.classList.contains("hover:bg-sidebar-accent")).toBe(
         false,
       );
       expect(control?.classList.contains("hover:text-foreground")).toBe(false);
-      expect(control?.classList.contains("focus-visible:ring-1")).toBe(true);
-      expect(control?.classList.contains("focus-visible:ring-ring")).toBe(true);
+      expect(control?.classList.contains("focus-visible:outline-2")).toBe(true);
+      expect(control?.classList.contains("focus-visible:outline-ring/60")).toBe(
+        true,
+      );
       expect(control?.className).not.toMatch(/focus-visible:(bg-|ring-[02]\b)/);
     }
+
     expect(primary.classList.contains("max-md:pointer-coarse:w-8")).toBe(true);
     expect(
       primary.nextElementSibling?.classList.contains(
@@ -171,7 +184,14 @@ describe("sidebar header controls", () => {
     await openMenu("Review");
     expect(
       screen.getAllByRole("menuitem").map((item) => item.textContent),
-    ).toEqual(["New section", "Organize", "Sort by", "Filter", "Rename", "Remove"]);
+    ).toEqual([
+      "New section",
+      "Organize",
+      "Sort by",
+      "Filter",
+      "Rename",
+      "Remove",
+    ]);
     expect(screen.getAllByRole("separator")).toHaveLength(3);
     fireEvent.click(screen.getByRole("menuitem", { name: "New section" }));
     expect(newSection).toHaveBeenCalledOnce();
@@ -203,9 +223,11 @@ describe("sidebar header controls", () => {
     const { store } = setup();
     await openMenu();
     await openSubmenu("Organize");
+
     const machine = await screen.findByRole("menuitemradio", {
       name: "By machine",
     });
+
     expect(
       screen
         .getByRole("menuitemradio", { name: "By project" })
@@ -243,9 +265,11 @@ describe("sidebar header controls", () => {
     act(() => store.set(sidebarEnvironmentGroupingAtom, true));
     await openMenu();
     await openSubmenu("Organize");
+
     const grouping = await screen.findByRole("menuitemcheckbox", {
       name: "By environment",
     });
+
     expect(screen.getByRole("group", { name: "Groups" })).toBeTruthy();
     expect(grouping.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(grouping);
@@ -262,9 +286,11 @@ describe("sidebar header controls", () => {
     const { store } = setup();
     await openMenu();
     await openSubmenu("Organize");
+
     const toggle = await screen.findByRole("menuitemcheckbox", {
       name: "Provider icons",
     });
+
     expect(screen.getByRole("group", { name: "Rows" })).toBeTruthy();
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(toggle);
@@ -277,9 +303,11 @@ describe("sidebar header controls", () => {
     act(() => store.set(sidebarChronologicalSortAtom, "none"));
     await openMenu();
     await openSubmenu("Sort by");
+
     const updated = await screen.findByRole("menuitemradio", {
       name: "Updated at, descending. Sort ascending",
     });
+
     expect(updated.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(updated);
     expect(store.get(sidebarSortDirectionAtom)).toBe("ascending");
@@ -352,16 +380,21 @@ it.each([false, true])(
   "keeps at least one lifecycle selected in the filter (compact=%s)",
   async (compact) => {
     const { store } = setup("Pinned", false, "project", compact);
+
     if (compact) {
-      fireEvent.click(screen.getByRole("button", { name: /^Pinned actions(?:;|$)/ }));
+      fireEvent.click(
+        screen.getByRole("button", { name: /^Pinned actions(?:;|$)/ }),
+      );
       fireEvent.click(await screen.findByRole("menuitem", { name: "Filter" }));
     } else {
       await openMenu();
       await openSubmenu("Filter");
     }
+
     const active = await screen.findByRole("menuitemcheckbox", {
       name: "Active",
     });
+
     fireEvent.click(active);
     expect(store.get(sidebarThreadLifecyclesAtom)).toEqual(["active"]);
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Archived" }));

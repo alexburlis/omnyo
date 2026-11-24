@@ -2,9 +2,9 @@ import {
   cliCommand,
   defineCli,
   PluginCliError,
-  type BbPluginApi,
-} from "@get-bb/plugin-sdk";
-import type { ComposerDraft } from "@get-bb/plugin-sdk";
+  type PluginApi,
+} from "@omnyo/plugin-sdk";
+import type { ComposerDraft } from "@omnyo/plugin-sdk";
 import {
   promptLibraryRpcContract,
   type PromptRow,
@@ -24,7 +24,9 @@ import {
 } from "./store.js";
 
 const STARRED_RESULT_LIMIT = 20;
+
 const RECENT_RESULT_LIMIT = 30;
+
 const INDEX_CHUNK_SIZE = 500;
 
 type SearchItem =
@@ -36,13 +38,13 @@ const JSON_OPTION = {
   description: "Emit machine-readable JSON",
 } as const;
 
-export default function promptLibraryPlugin(bb: BbPluginApi): void {
-  const db = bb.storage.database();
-  bb.storage.migrate(db, STARRED_PROMPT_MIGRATIONS);
+export default function promptLibraryPlugin(api: PluginApi): void {
+  const db = api.storage.database();
+  api.storage.migrate(db, STARRED_PROMPT_MIGRATIONS);
   const store = createStarredPromptStore(db);
 
   const historyCache = createHistoryCache((args) =>
-    bb.sdk.experimental_promptHistory.list(args),
+    api.sdk.experimental_promptHistory.list(args),
   );
 
   const index = createSearchIndex<SearchItem>();
@@ -51,11 +53,13 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
 
   async function indexNewHistory(): Promise<readonly HistoryCandidate[]> {
     const candidates = await historyCache.refresh();
+
     while (indexedCount < candidates.length) {
       const chunkEnd = Math.max(
         0,
         candidates.length - indexedCount - INDEX_CHUNK_SIZE,
       );
+
       for (
         let position = candidates.length - indexedCount - 1;
         position >= chunkEnd;
@@ -69,27 +73,34 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
         });
         indexedCount += 1;
       }
+
       await new Promise((resolve) => setImmediate(resolve));
     }
+
     return candidates;
   }
 
   function loadHistory(): Promise<readonly HistoryCandidate[]> {
     indexing = indexing.catch(() => []).then(indexNewHistory);
+
     return indexing;
   }
 
   function inScope(candidate: HistoryCandidate, input: SearchPromptsInput) {
     if (input.scope === "thread") return candidate.threadId === input.threadId;
+
     if (input.scope === "project") {
       return candidate.projectId === input.projectId;
     }
+
     return true;
   }
 
   function historySearchable(input: SearchPromptsInput): boolean {
     if (input.scope === "thread") return input.threadId !== null;
+
     if (input.scope === "project") return input.projectId !== null;
+
     return true;
   }
 
@@ -99,6 +110,7 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
     history: readonly HistoryCandidate[],
   ): SearchItem[] {
     const searching = queryTerms(input.query).length > 0;
+
     const items: SearchItem[] = searching
       ? index
           .search(
@@ -125,13 +137,16 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
             candidate,
           })),
         ];
+
     const seenTexts = new Set(
       searching ? starredPrompts.map((prompt) => prompt.prompt.text) : [],
     );
+
     const includeHistory = historySearchable(input);
     let starredCount = 0;
     let recentCount = 0;
     const ordered: SearchItem[] = [];
+
     for (const item of items) {
       if (item.kind === "starred") {
         if (starredCount === STARRED_RESULT_LIMIT) continue;
@@ -139,15 +154,20 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
         ordered.push(item);
         continue;
       }
+
       const { candidate } = item;
       const text = candidate.prompt.text;
+
       if (!includeHistory || recentCount === RECENT_RESULT_LIMIT) continue;
+
       if (!inScope(candidate, input)) continue;
+
       if (text.trim().length === 0 || seenTexts.has(text)) continue;
       seenTexts.add(text);
       recentCount += 1;
       ordered.push(item);
     }
+
     return ordered;
   }
 
@@ -155,7 +175,8 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
     projectIds: ReadonlySet<string>,
   ): Promise<Map<string, string>> {
     if (projectIds.size === 0) return new Map();
-    const projects = await bb.sdk.projects.list({ includePersonal: true });
+    const projects = await api.sdk.projects.list({ includePersonal: true });
+
     return new Map(
       projects
         .filter((project) => projectIds.has(project.id))
@@ -169,11 +190,14 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
 
   async function search(input: SearchPromptsInput) {
     const starredPrompts = store.list();
+
     const starredIdsByText = new Map(
       starredPrompts.map((prompt) => [prompt.prompt.text, prompt.id]),
     );
+
     const history = historySearchable(input) ? await loadHistory() : [];
     const items = orderedItems(input, starredPrompts, history);
+
     const names = await projectNames(
       new Set(
         items.flatMap((item) =>
@@ -181,9 +205,11 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
         ),
       ),
     );
+
     const prompts = items.map((item): PromptRow => {
       if (item.kind === "starred") {
         const { prompt } = item;
+
         return {
           kind: "starred",
           id: prompt.id,
@@ -193,8 +219,10 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
           lastUsedAt: prompt.lastUsedAt,
         };
       }
+
       const { candidate } = item;
       const text = candidate.prompt.text;
+
       return {
         kind: "recent",
         id: candidate.id,
@@ -207,18 +235,21 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
         starredId: starredIdsByText.get(text) ?? null,
       };
     });
+
     return { prompts };
   }
 
   function star(prompt: ComposerDraft): StarredPrompt {
     const starred = store.star(prompt, Date.now());
+
     if (starred === null) {
       throw new Error("A starred prompt needs some text.");
     }
+
     return starred;
   }
 
-  bb.rpc.register(promptLibraryRpcContract, {
+  api.rpc.register(promptLibraryRpcContract, {
     search,
     star: ({ prompt }) => ({
       id: star({ text: prompt.text, mentions: prompt.mentions }).id,
@@ -226,23 +257,25 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
     unstar: ({ id }) => ({ unstarred: store.unstar(id) }),
     markUsed({ id }) {
       store.markUsed(id, Date.now());
+
       return null;
     },
   });
 
-  bb.cli.register(
+  api.cli.register(
     defineCli({
       name: "prompts",
       summary: "Search previous prompts and manage starred prompts",
       description:
-        "Without a query, starred prompts appear before recent ones in the composer's Prompts… picker (Ctrl+R). A query ranks both in one list: prompts that start with the query first, then by match type (exact, word start, typo, inside a word, abbreviation), then starred prompts and prompts of the searching composer's kind (thread starts in the new-thread composer, follow-ups in a thread), then by relevance decayed by age. Previous prompts come from bb's prompt history.",
+        "Without a query, starred prompts appear before recent ones in the composer's Prompts… picker (Ctrl+R). A query ranks both in one list: prompts that start with the query first, then by match type (exact, word start, typo, inside a word, abbreviation), then starred prompts and prompts of the searching composer's kind (thread starts in the new-thread composer, follow-ups in a thread), then by relevance decayed by age. Previous prompts come from Omnyo's prompt history.",
       commands: {
         search: cliCommand({
           summary: "Search starred and previous prompts",
           positionals: [
             {
               name: "query",
-              description: "Words that must each match a prompt word exactly, as its start, with one typo, inside it, or as an abbreviation; omit to list the most recent",
+              description:
+                "Words that must each match a prompt word exactly, as its start, with one typo, inside it, or as an abbreviation; omit to list the most recent",
               variadic: true,
             },
           ],
@@ -280,14 +313,17 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
               threadId: options.thread ?? null,
               composer: options.composer,
             });
+
             if (options.json) {
               return { exitCode: 0, stdout: JSON.stringify(result) };
             }
+
             const lines = result.prompts.map((row) =>
               row.kind === "starred"
                 ? `★ ${row.id}  ${row.snippet.text}`
                 : `  ${new Date(row.createdAt).toISOString()}  ${row.snippet.text}`,
             );
+
             return {
               exitCode: 0,
               stdout: lines.length > 0 ? lines.join("\n") : "No prompts found",
@@ -299,6 +335,7 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
           options: { json: JSON_OPTION },
           run({ options }) {
             const prompts = store.list();
+
             if (options.json) {
               return {
                 exitCode: 0,
@@ -312,6 +349,7 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
                 ),
               };
             }
+
             return {
               exitCode: 0,
               stdout:
@@ -342,6 +380,7 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
               text: positionals.text.join(" "),
               mentions: [],
             });
+
             return {
               exitCode: 0,
               stdout: options.json
@@ -355,7 +394,8 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
           positionals: [
             {
               name: "id",
-              description: "Starred prompt id, as `bb prompts list` prints it",
+              description:
+                "Starred prompt id, as `omnyo prompts list` prints it",
               required: true,
             },
           ],
@@ -366,10 +406,11 @@ export default function promptLibraryPlugin(bb: BbPluginApi): void {
                 `Unknown starred prompt: ${positionals.id}`,
                 {
                   code: "unknown_prompt",
-                  hint: "Run `bb prompts list` for starred prompt ids.",
+                  hint: "Run `omnyo prompts list` for starred prompt ids.",
                 },
               );
             }
+
             return {
               exitCode: 0,
               stdout: options.json

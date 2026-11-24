@@ -57,6 +57,7 @@ interface ThreadListVisibilityState {
 }
 
 const VisibilityContext = createContext<ThreadListVisibilityState | null>(null);
+
 const GroupContext = createContext<string | null>(null);
 
 export function ThreadListVisibility({
@@ -76,19 +77,24 @@ export function ThreadListVisibility({
 }) {
   const [hidden, setHidden] = useAtom(sidebarHiddenGroupsAtom);
   const [customizing, setCustomizing] = useState<"list" | null>(null);
+
   const [rowActionsThreadId, setRowActionsThreadId] = useState<string | null>(
     null,
   );
+
   const compact = useIsCompactViewport();
   const container = useRef<HTMLDivElement>(null);
   const focusTarget = useRef<string | null>(null);
   const rowActionsFocusTarget = useRef<string | null>(null);
   const hiddenIds = useMemo(() => new Set(hidden), [hidden]);
   const groupsById = new Map(groups.map((group) => [group.id, group]));
+
   const orderedGroups = order.flatMap((id) => {
     const group = groupsById.get(id);
+
     return group ? [group] : [];
   });
+
   const setVisible = (id: string, visible: boolean) => {
     setHidden((current) =>
       visible
@@ -98,12 +104,15 @@ export function ThreadListVisibility({
           : [...current, id],
     );
   };
+
   useEffect(() => {
     if (focusTarget.current === null || customizing) return;
     const id = focusTarget.current;
     focusTarget.current = null;
+
     const frame = requestAnimationFrame(() => {
       const root = container.current;
+
       const target =
         id === "more"
           ? root?.querySelector<HTMLElement>(
@@ -118,14 +127,18 @@ export function ThreadListVisibility({
               ?.querySelector<HTMLElement>(
                 'button[aria-label$=" actions"], button',
               );
+
       (target ?? root)?.focus();
     });
+
     return () => cancelAnimationFrame(frame);
   }, [hidden, customizing]);
   useEffect(() => {
     const threadId = rowActionsFocusTarget.current;
+
     if (threadId === null || rowActionsThreadId !== null) return;
     rowActionsFocusTarget.current = null;
+
     let frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => {
         const link = Array.from(
@@ -133,20 +146,25 @@ export function ThreadListVisibility({
             "[data-sidebar-thread-id]",
           ) ?? [],
         ).find((element) => element.dataset.sidebarThreadId === threadId);
+
         const target =
           link
             ?.closest("[data-sidebar-rename-row]")
             ?.querySelector<HTMLElement>("[data-thread-actions-trigger]") ??
           link ??
           container.current;
+
         target?.focus({ preventScroll: true });
       });
     });
+
     return () => cancelAnimationFrame(frame);
   }, [rowActionsThreadId]);
-  const customizeRowActions = (threadId: string) => {
+
+  const customizeRowActions = useCallback((threadId: string) => {
     setRowActionsThreadId(threadId);
-  };
+  }, []);
+
   const finishCustomizingRowActions = useCallback(
     (restoreFocus: boolean) => {
       rowActionsFocusTarget.current = restoreFocus ? rowActionsThreadId : null;
@@ -154,9 +172,11 @@ export function ThreadListVisibility({
     },
     [rowActionsThreadId],
   );
+
   useFinishRowActionsOnOutsideClick(
     rowActionsThreadId === null ? null : finishCustomizingRowActions,
   );
+
   const rowActionsCustomizing = useMemo<ThreadRowActionsCustomizing | null>(
     () =>
       rowActionsThreadId === null
@@ -167,6 +187,7 @@ export function ThreadListVisibility({
           },
     [finishCustomizingRowActions, rowActionsThreadId],
   );
+
   const value: ThreadListVisibilityState = {
     hiddenGroups: orderedGroups.filter((group) => hiddenIds.has(group.id)),
     label,
@@ -184,6 +205,7 @@ export function ThreadListVisibility({
       setVisible(id, true);
     },
   };
+
   return (
     <VisibilityContext.Provider value={value}>
       <CustomizeRowActionsContext.Provider value={customizeRowActions}>
@@ -201,12 +223,14 @@ export function ThreadListVisibility({
                 onVisibleChange={setVisible}
                 onReorder={(activeId, overId) => {
                   const groupIds = orderedGroups.map((group) => group.id);
+
                   const next = reorderStoredOrder({
                     activeId,
                     overId,
                     order: groupIds,
                     visibleIds: groupIds,
                   });
+
                   if (next) onOrderChange(next);
                 }}
                 onDone={() => {
@@ -253,8 +277,10 @@ export function ThreadListVisibilityMenuItems({
 }) {
   const state = useContext(VisibilityContext);
   const id = useContext(GroupContext);
+
   if (!state) return null;
   const Item = surface === "context" ? ContextMenuItem : DropdownMenuItem;
+
   return (
     <>
       {leadingSeparator && <ActionMenuSeparator surface={surface} />}
@@ -272,6 +298,7 @@ export function ThreadListVisibilityMenuItems({
 
 function GroupActivity({ threads }: { threads: readonly SidebarThread[] }) {
   const pluginStatus = usePluginThreadRowStatusForThreads(threads);
+
   return (
     <CollapsedThreadStatusGlyph
       activity={getCollapsedChildActivity(threads)}
@@ -308,11 +335,14 @@ function HiddenGroup({
 
 export function ThreadListMore() {
   const state = useContext(VisibilityContext);
+
   if (!state || state.hiddenGroups.length === 0) return null;
   const groups = state.hiddenGroups;
+
   const selectedGroupId = groups.find((group) =>
     group.threads.some((thread) => thread.id === state.selectedThreadId),
   )?.id;
+
   const threads = [
     ...new Map(
       groups
@@ -320,6 +350,7 @@ export function ThreadListMore() {
         .map((thread) => [thread.id, thread]),
     ).values(),
   ];
+
   return (
     <div className="mt-4">
       <SidebarMore

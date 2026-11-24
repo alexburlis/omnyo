@@ -41,6 +41,7 @@ export function parseLegacyImageGenerationCompletion(
   const params = jsonObject(rawEvent?.params);
   const item = jsonObject(params?.item);
   const status = imageGenerationStatus(item?.status);
+
   if (
     payload?.rawType !== "item/completed" ||
     rawEvent?.method !== "item/completed" ||

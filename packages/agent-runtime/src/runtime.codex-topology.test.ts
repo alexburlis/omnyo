@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { createAgentRuntime } from "./runtime.js";
 import {
   createScriptedEchoLaunch,
@@ -25,6 +25,7 @@ const codexBridgeModulePath = fileURLToPath(
     import.meta.url,
   ),
 );
+
 const fakeAppServerPath = fileURLToPath(
   new URL(
     "../../../plugins/provider-codex/src/bridge/fake-codex-app-server.mjs",
@@ -48,7 +49,7 @@ describe("codex process topology", () => {
   const runtimes: AgentRuntime[] = [];
 
   beforeEach(() => {
-    workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-topology-"));
+    workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-topology-"));
   });
 
   afterEach(async () => {
@@ -80,19 +81,21 @@ describe("codex process topology", () => {
     const events: ThreadEvent[] = [];
     const bridgeExits: { expected: boolean }[] = [];
     const record = createScriptedEchoRequestRecord();
+
     const launch = (digest: string): AgentRuntimeBridgeLaunch =>
       createScriptedEchoLaunch({
         pluginId: "provider-codex",
         digest,
         modulePath: codexBridgeModulePath,
       });
+
     const runtime = withBridgeLaunch(
       createAgentRuntime({
         workspacePath: workspaceDir,
         env: {
           ...record.env,
-          BB_CODEX_BRIDGE_APP_SERVER_COMMAND: process.execPath,
-          BB_CODEX_BRIDGE_APP_SERVER_ARGS: JSON.stringify([
+          OMNYO_CODEX_BRIDGE_APP_SERVER_COMMAND: process.execPath,
+          OMNYO_CODEX_BRIDGE_APP_SERVER_ARGS: JSON.stringify([
             fakeAppServerPath,
             scriptPath,
           ]),
@@ -110,7 +113,9 @@ describe("codex process topology", () => {
       }),
       launch("codex-v1"),
     );
+
     runtimes.push(runtime);
+
     const readLog = (): string[] => {
       try {
         return readFileSync(processLogPath, "utf8")
@@ -120,8 +125,10 @@ describe("codex process topology", () => {
         return [];
       }
     };
+
     const spawnLines = (): string[] =>
       readLog().filter((line) => line.startsWith("spawn:"));
+
     return {
       events,
       runtime,
@@ -154,11 +161,13 @@ describe("codex process topology", () => {
       threadId,
       options: fullRuntimeOptions,
     });
+
     return providerThreadId;
   }
 
   it("keeps a fork checkpoint paired with its session after another thread starts", async () => {
     const { runtime, events } = createCodexTopologyRuntime();
+
     const source = await runtime.startThread({
       environmentId: "env-1",
       providerId: "codex",
@@ -167,6 +176,7 @@ describe("codex process topology", () => {
       options: fullRuntimeOptions,
       fork: { sourceProviderThreadId: "historical-session" },
     });
+
     const sibling = await startCodexThread(runtime, "sibling");
     await runtime.runTurn({
       clientRequestId: "creq_cdxtpgy328",
@@ -231,6 +241,7 @@ describe("codex process topology", () => {
     expect(hosted(runtime)).toEqual(["t2", "t3"]);
 
     const session2 = runtime.getProviderSession("t2");
+
     if (!session2) throw new Error("expected a codex session for t2");
     await runtime.archiveThread({
       providerId: "codex",
@@ -329,17 +340,21 @@ describe("codex process topology", () => {
 
   it("releases the thread on the bridge when a construction times out on the runtime's side", async () => {
     const realSetTimeout = setTimeout;
+
     const sleepReal = (ms: number): Promise<void> =>
       new Promise((resolve) => {
         realSetTimeout(resolve, ms);
       });
+
     const topology = createCodexTopologyRuntime({
       fakeScript: { stallThreadStart: true },
       threadCreationTimeoutMs: 200,
     });
+
     const { runtime } = topology;
     await runtime.ensureProvider({ providerId: "codex" });
     vi.useFakeTimers();
+
     try {
       const startOutcome = startCodexThread(runtime, "t1").then(
         (providerThreadId) => ({
@@ -348,20 +363,24 @@ describe("codex process topology", () => {
         }),
         (error: unknown) => ({ status: "rejected" as const, error }),
       );
+
       for (let attempt = 0; topology.spawned() === 0; attempt += 1) {
         if (attempt >= 1_000) {
           throw new Error("The fake app-server child never started");
         }
+
         await sleepReal(10);
       }
 
       await vi.advanceTimersByTimeAsync(201);
       const outcome = await startOutcome;
+
       if (outcome.status === "resolved") {
         throw new Error(
           `Expected thread construction to time out, but it resolved as ${outcome.providerThreadId}`,
         );
       }
+
       expect(outcome.error).toBeInstanceOf(Error);
       expect(String(outcome.error)).toMatch(/timed out: thread\/start/i);
     } finally {
@@ -370,9 +389,11 @@ describe("codex process topology", () => {
 
     expect(runtime.hasThread("t1")).toBe(false);
     const [childPid] = topology.childPids();
+
     if (childPid === undefined) {
       throw new Error("Expected the stalled construction to spawn a child");
     }
+
     await waitForRuntimeState({
       label: "the stalled construction child exited gracefully",
       predicate: () => topology.exited() === 1 && !isAlive(childPid),
@@ -416,9 +437,11 @@ describe("codex process topology", () => {
     await startCodexThread(runtime, "t2");
     expect(topology.spawned()).toBe(2);
     const [child1, child2] = topology.childPids();
+
     if (child1 === undefined || child2 === undefined) {
       throw new Error("expected two app-server children");
     }
+
     const bridgePid = Number(
       readFileSync(join(workspaceDir, "app-server-processes.log"), "utf8")
         .split("\n")[0]
@@ -445,6 +468,7 @@ describe("codex process topology", () => {
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;

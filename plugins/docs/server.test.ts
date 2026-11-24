@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFakePluginHost,
   makeHostResponse,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import simpleNotes from "./server";
 
 const temporaryDirectories: string[] = [];
@@ -27,13 +27,17 @@ async function loadNotebook(
   notes: Record<string, string>,
   watchVault?: NonNullable<Parameters<typeof simpleNotes>[1]>,
 ) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "bb-simple-notes-"));
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "omnyo-simple-notes-"),
+  );
+
   temporaryDirectories.push(directory);
   await Promise.all(
     Object.entries(notes).map(([name, content]) =>
       writeFile(path.join(directory, name), content),
     ),
   );
+
   const host = createFakePluginHost({
     pluginId: "simple-notes",
     sdk: {
@@ -50,6 +54,7 @@ async function loadNotebook(
         }),
         read: async ({ path: filePath }) => {
           const content = await readFile(filePath, "utf8");
+
           return {
             path: filePath,
             content,
@@ -76,12 +81,14 @@ async function loadNotebook(
       hosts: { list: async () => [] },
     },
   });
-  await simpleNotes(host.bb, watchVault);
-  host.bb.storage
+
+  await simpleNotes(host.api, watchVault);
+  host.api.storage
     .database()
     .prepare("UPDATE vaults SET root_path = ? WHERE id = 'personal'")
     .run(directory);
   host.harness.sdk.calls.length = 0;
+
   return host;
 }
 
@@ -101,14 +108,19 @@ async function loadVirtualSyncVault(initial: Record<string, VirtualFile>) {
   const files = new Map<string, VirtualFile>(Object.entries(initial));
   const directories = new Set<string>(["/vault", "/work"]);
   let concurrentWrite: { path: string; content: string } | null = null;
+  let failedWrite: { path: string; afterCommit: boolean } | null = null;
+
   const addParents = (filePath: string) => {
     let current = path.posix.dirname(filePath);
+
     while (current !== "/" && !directories.has(current)) {
       directories.add(current);
       current = path.posix.dirname(current);
     }
   };
+
   for (const filePath of files.keys()) addParents(filePath);
+
   const setUtf8 = (filePath: string, content: string) => {
     addParents(filePath);
     files.set(filePath, {
@@ -117,12 +129,14 @@ async function loadVirtualSyncVault(initial: Record<string, VirtualFile>) {
       modifiedAtMs: Date.now(),
     });
   };
+
   const host = createFakePluginHost({
     pluginId: "simple-notes-sync",
     sdk: {
       files: {
         async listPaths(args) {
           const prefix = args.path.endsWith("/") ? args.path : `${args.path}/`;
+
           const paths = [
             ...(args.includeDirectories
               ? [...directories]
@@ -147,12 +161,15 @@ async function loadVirtualSyncVault(initial: Record<string, VirtualFile>) {
                   }))
               : []),
           ];
+
           return { paths, truncated: false };
         },
         async read(args) {
           const file = files.get(args.path);
+
           if (!file)
             throw new Error(`ENOENT: Path does not exist: ${args.path}`);
+
           return {
             path: args.path,
             content: file.content,
@@ -164,33 +181,49 @@ async function loadVirtualSyncVault(initial: Record<string, VirtualFile>) {
           };
         },
         async write(args) {
+          const failure = failedWrite?.path === args.path ? failedWrite : null;
+
+          if (failure) failedWrite = null;
+
+          if (failure && !failure.afterCommit)
+            throw new Error("Injected write denied");
           const pending = concurrentWrite;
+
           if (pending && pending.path === args.path) {
             concurrentWrite = null;
             setUtf8(pending.path, pending.content);
             const current = files.get(pending.path);
+
             if (!current)
               throw new Error("Concurrent test write was not stored");
+
             return {
               outcome: "conflict" as const,
               currentSha256: virtualSha(current),
             };
           }
+
           const current = files.get(args.path);
           const currentSha = current ? virtualSha(current) : null;
+
           if (
             args.expectedSha256 !== undefined &&
             args.expectedSha256 !== currentSha
           ) {
             return { outcome: "conflict" as const, currentSha256: currentSha };
           }
+
           const next = {
             content: args.content,
             contentEncoding: args.contentEncoding ?? "utf8",
             modifiedAtMs: Date.now(),
           } satisfies VirtualFile;
+
           addParents(args.path);
           files.set(args.path, next);
+
+          if (failure) throw new Error("Injected response lost after write");
+
           return {
             outcome: "written" as const,
             sha256: virtualSha(next),
@@ -200,13 +233,16 @@ async function loadVirtualSyncVault(initial: Record<string, VirtualFile>) {
         async mkdir(args) {
           directories.add(args.path);
           addParents(args.path);
+
           return { ok: true as const };
         },
         async remove(args) {
           if (files.delete(args.path)) return { ok: true as const };
+
           if (!directories.has(args.path))
             throw new Error(`ENOENT: Path does not exist: ${args.path}`);
           const prefix = `${args.path}/`;
+
           if (
             !args.recursive &&
             ([...files.keys()].some((entry) => entry.startsWith(prefix)) ||
@@ -214,31 +250,40 @@ async function loadVirtualSyncVault(initial: Record<string, VirtualFile>) {
           )
             throw new Error("Directory is not empty");
           directories.delete(args.path);
+
           for (const entry of files.keys())
             if (entry.startsWith(prefix)) files.delete(entry);
+
           for (const entry of directories)
             if (entry.startsWith(prefix)) directories.delete(entry);
+
           return { ok: true as const };
         },
         async move(args) {
           const from = args.sourcePath;
           const to = args.destinationPath;
+
           if (!files.has(from) && !directories.has(from))
             throw new Error("ENOENT");
+
           if (files.has(to) || directories.has(to)) throw new Error("EEXIST");
+
           for (const [entry, file] of [...files]) {
             if (entry === from || entry.startsWith(`${from}/`)) {
               files.delete(entry);
               files.set(to + entry.slice(from.length), file);
             }
           }
+
           for (const entry of [...directories]) {
             if (entry === from || entry.startsWith(`${from}/`)) {
               directories.delete(entry);
               directories.add(to + entry.slice(from.length));
             }
           }
+
           addParents(to);
+
           return { ok: true as const };
         },
         async createPreview() {
@@ -251,12 +296,14 @@ async function loadVirtualSyncVault(initial: Record<string, VirtualFile>) {
       hosts: { list: async () => [] },
     },
   });
-  await simpleNotes(host.bb);
-  host.bb.storage
+
+  await simpleNotes(host.api);
+  host.api.storage
     .database()
     .prepare("UPDATE vaults SET root_path = ? WHERE id = 'personal'")
     .run("/vault");
   host.harness.sdk.calls.length = 0;
+
   return {
     ...host,
     files,
@@ -265,8 +312,209 @@ async function loadVirtualSyncVault(initial: Record<string, VirtualFile>) {
     conflictNextWrite(path: string, content: string) {
       concurrentWrite = { path, content };
     },
+    failNextWrite(path: string, afterCommit = false) {
+      failedWrite = { path, afterCommit };
+    },
   };
 }
+
+describe("Omnyo Docs sync state transition", () => {
+  const currentPath = "/work/sync/.omnyo-docs-state.json";
+  const legacyPath = "/work/sync/.bb-docs-state.json";
+
+  async function legacyWorkspace() {
+    const host = await loadVirtualSyncVault({
+      "/vault/plan.md": {
+        content: "User bb prose",
+        contentEncoding: "utf8",
+        modifiedAtMs: 1,
+      },
+      "/vault/image.bin": {
+        content: "AP+AQA==",
+        contentEncoding: "base64",
+        modifiedAtMs: 1,
+      },
+    });
+
+    expect(
+      (
+        await host.harness.runCli(
+          ["pull", "--all", "--into", "sync", "--json"],
+          { cwd: "/work" },
+        )
+      ).exitCode,
+    ).toBe(0);
+    const original = host.files.get(currentPath);
+
+    if (!original) throw new Error("Missing current sync state");
+    const state = JSON.parse(original.content);
+    state.schemaVersion = 1;
+    host.setUtf8(legacyPath, JSON.stringify(state));
+    host.files.delete(currentPath);
+    host.harness.sdk.calls.length = 0;
+
+    return host;
+  }
+
+  it("adopts an exact V1 marker and pushes one edit with stable attachment bytes and import receipt", async () => {
+    const host = await legacyWorkspace();
+    const legacy = host.files.get(legacyPath)?.content;
+    host.setUtf8("/work/sync/plan.md", "Edited user bb prose");
+
+    const status = await host.harness.runCli(["status", "sync", "--json"], {
+      cwd: "/work",
+    });
+
+    expect(status.exitCode).toBe(4);
+    expect(JSON.parse(status.stdout ?? "{}")).toMatchObject({
+      writes: ["plan.md"],
+    });
+    const imported = JSON.parse(host.files.get(currentPath)?.content ?? "{}");
+    expect(imported).toMatchObject({
+      schemaVersion: 2,
+      legacyImport: {
+        formatVersion: 1,
+        sourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+    });
+    expect(
+      (await host.harness.runCli(["push", "sync", "--json"], { cwd: "/work" }))
+        .exitCode,
+    ).toBe(0);
+
+    const remoteWrites = host.harness.sdk
+      .callsTo("files.write")
+      .filter(
+        ([args]) =>
+          isRecord(args) &&
+          typeof args.path === "string" &&
+          args.path.startsWith("/vault/"),
+      );
+
+    expect(remoteWrites).toHaveLength(1);
+    expect(host.files.get("/vault/plan.md")?.content).toBe(
+      "Edited user bb prose",
+    );
+    expect(host.files.get("/vault/image.bin")?.content).toBe("AP+AQA==");
+    expect(host.files.get(legacyPath)?.content).toBe(legacy);
+    expect(
+      JSON.parse(host.files.get(currentPath)?.content ?? "{}").legacyImport,
+    ).toEqual(imported.legacyImport);
+    expect(
+      (
+        await host.harness.runCli(["status", "sync", "--json"], {
+          cwd: "/work",
+        })
+      ).exitCode,
+    ).toBe(0);
+    expect(
+      (await host.harness.runCli(["push", "sync", "--json"], { cwd: "/work" }))
+        .exitCode,
+    ).toBe(0);
+    expect(
+      host.harness.sdk
+        .callsTo("files.write")
+        .filter(
+          ([args]) =>
+            isRecord(args) &&
+            typeof args.path === "string" &&
+            args.path.startsWith("/vault/"),
+        ),
+    ).toHaveLength(1);
+  });
+
+  it("refuses a conflicting destination without remote writes", async () => {
+    const host = await legacyWorkspace();
+    const legacy = JSON.parse(host.files.get(legacyPath)?.content ?? "{}");
+    host.setUtf8(
+      currentPath,
+      JSON.stringify({
+        ...legacy,
+        schemaVersion: 2,
+        vault: { id: "foreign", name: "Other" },
+      }),
+    );
+    const before = new Map(host.files);
+
+    const result = await host.harness.runCli(["push", "sync", "--json"], {
+      cwd: "/work",
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("sync states conflict");
+    expect(host.files).toEqual(before);
+    expect(host.harness.sdk.callsTo("files.write")).toEqual([]);
+  });
+
+  it("refuses an old writer changing an accepted source marker", async () => {
+    const host = await legacyWorkspace();
+    expect(
+      (await host.harness.runCli(["status", "sync"], { cwd: "/work" }))
+        .exitCode,
+    ).toBe(0);
+    const source = JSON.parse(host.files.get(legacyPath)?.content ?? "{}");
+    source.pulledAt = "2026-11-04T00:00:00.000Z";
+    host.setUtf8(legacyPath, JSON.stringify(source));
+    host.harness.sdk.calls.length = 0;
+
+    const result = await host.harness.runCli(["push", "sync", "--json"], {
+      cwd: "/work",
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("changed after import");
+    expect(host.harness.sdk.callsTo("files.write")).toEqual([]);
+  });
+
+  it.each([false, true])(
+    "recovers an interrupted local import without remote effects: committed=%s",
+    async (afterCommit) => {
+      const host = await legacyWorkspace();
+      const legacy = host.files.get(legacyPath)?.content;
+      host.failNextWrite(currentPath, afterCommit);
+      expect(
+        (
+          await host.harness.runCli(["push", "sync", "--json"], {
+            cwd: "/work",
+          })
+        ).exitCode,
+      ).toBe(1);
+      expect(host.files.get("/vault/plan.md")?.content).toBe("User bb prose");
+      expect(host.files.has(currentPath)).toBe(afterCommit);
+      expect(host.files.get(legacyPath)?.content).toBe(legacy);
+      expect(
+        (
+          await host.harness.runCli(["status", "sync", "--json"], {
+            cwd: "/work",
+          })
+        ).exitCode,
+      ).toBe(0);
+      expect(
+        host.harness.sdk
+          .callsTo("files.write")
+          .filter(
+            ([args]) =>
+              isRecord(args) &&
+              typeof args.path === "string" &&
+              args.path.startsWith("/vault/"),
+          ),
+      ).toEqual([]);
+    },
+  );
+
+  it("refuses a concurrent target creation and leaves it intact", async () => {
+    const host = await legacyWorkspace();
+    host.conflictNextWrite(currentPath, "concurrent user bytes");
+
+    const result = await host.harness.runCli(["push", "sync", "--json"], {
+      cwd: "/work",
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(host.files.get(currentPath)?.content).toBe("concurrent user bytes");
+    expect(host.files.get("/vault/plan.md")?.content).toBe("User bb prose");
+  });
+});
 
 describe("Docs RPC contract", () => {
   it("returns HTTP 400 envelopes for invalid JSON and request input", async () => {
@@ -276,6 +524,7 @@ describe("Docs RPC contract", () => {
       headers: { "content-type": "application/json" },
       body: "{",
     });
+
     expect(invalidJson.status).toBe(400);
     await expect(invalidJson.json()).resolves.toMatchObject({
       ok: false,
@@ -286,6 +535,7 @@ describe("Docs RPC contract", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ path: "../outside.md" }),
     });
+
     expect(invalidInput.status).toBe(400);
     await expect(invalidInput.json()).resolves.toMatchObject({
       ok: false,
@@ -299,6 +549,7 @@ describe("Docs RPC contract", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ path: "plan.md", content: 42 }),
     });
+
     expect(invalidContent.status).toBe(400);
     await expect(invalidContent.json()).resolves.toMatchObject({
       ok: false,
@@ -315,6 +566,7 @@ async function waitForSignal(
   timeoutMs = 2_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error("Timed out waiting for signal");
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -327,7 +579,9 @@ describe("Docs mention provider", () => {
       "roadmap.md": "# Product Roadmap\n\nQuarterly priorities",
       "meeting.md": "# Standup\n\nLaunch checklist",
     });
+
     const provider = harness.registrations.mentionProviders[0]!;
+
     const search = (query: string) =>
       provider.search({ trigger: "@", query, projectId: null, threadId: null });
 
@@ -335,6 +589,7 @@ describe("Docs mention provider", () => {
       search("roadmap"),
       search("launch"),
     ]);
+
     expect(roadmap.map((item) => item.title)).toEqual(["Product Roadmap"]);
     expect(meeting.map((item) => item.title)).toEqual(["Standup"]);
     expect(await search("quarterly")).toEqual(roadmap);
@@ -350,7 +605,9 @@ describe("Docs mention provider", () => {
         modifiedAtMs: 1,
       },
     });
+
     const provider = harness.registrations.mentionProviders[0]!;
+
     const search = () =>
       provider.search({
         trigger: "@",
@@ -358,6 +615,7 @@ describe("Docs mention provider", () => {
         projectId: null,
         threadId: null,
       });
+
     expect(await search()).toMatchObject([{ title: "Original" }]);
     await harness.callRpc("saveNote", { path: "plan.md", content: "# Saved" });
     expect(await search()).toMatchObject([{ title: "Saved" }]);
@@ -381,17 +639,20 @@ describe("Docs mention provider", () => {
     });
     const now = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(now + 10_001);
+
     try {
       expect(await search()).toMatchObject([{ title: "External edit" }]);
     } finally {
       clock.mockRestore();
     }
+
     await harness.callRpc("deletePath", { path: "renamed.md" });
     expect(await search()).toEqual([]);
   });
 
   it("retries a failed vault scan instead of caching the failure", async () => {
     const { harness } = await loadNotebook({ "plan.md": "# Plan" });
+
     const listPaths = vi
       .fn()
       .mockRejectedValueOnce(new Error("Host offline"))
@@ -407,14 +668,17 @@ describe("Docs mention provider", () => {
         ],
         truncated: false,
       });
+
     harness.sdk.stub("files.listPaths", listPaths);
     const provider = harness.registrations.mentionProviders[0]!;
+
     const context = {
       trigger: "@" as const,
       query: "plan",
       projectId: null,
       threadId: null,
     };
+
     await expect(provider.search(context)).rejects.toThrow("Host offline");
     expect(await provider.search(context)).toMatchObject([{ title: "Plan" }]);
     expect(listPaths).toHaveBeenCalledTimes(2);
@@ -426,6 +690,7 @@ describe("Docs mention provider", () => {
         Array.from({ length: 20 }, (_, i) => [`plan-${i}.md`, "# Plan"]),
       ),
     );
+
     let active = 0;
     let peak = 0;
     harness.sdk.stub("files.read", async () => {
@@ -433,6 +698,7 @@ describe("Docs mention provider", () => {
       peak = Math.max(peak, active);
       await Promise.resolve();
       active--;
+
       return {
         path: "/plan.md",
         content: "# Plan",
@@ -442,12 +708,14 @@ describe("Docs mention provider", () => {
         sha256: "test-sha",
       };
     });
+
     const rows = await harness.registrations.mentionProviders[0]!.search({
       trigger: "@",
       query: "plan",
       projectId: null,
       threadId: null,
     });
+
     expect(peak).toBeGreaterThan(1);
     expect(peak).toBeLessThanOrEqual(8);
     expect(rows.map((row) => row.id)).toEqual(
@@ -460,6 +728,7 @@ describe("Docs mention provider", () => {
       "roadmap.md": "# Product Roadmap\n\nQuarterly priorities",
       "meeting-notes.md": "# Standup\n\nLaunch checklist",
     });
+
     const provider = harness.registrations.mentionProviders[0]!;
 
     expect(provider).toMatchObject({
@@ -496,6 +765,7 @@ describe("Docs mention provider", () => {
         "Durable product strategy.",
       ].join("\n"),
     });
+
     const provider = harness.registrations.mentionProviders[0]!;
 
     await expect(
@@ -527,6 +797,7 @@ describe("Docs mention provider", () => {
         "CareNav assessments identify unmet caregiver needs.",
       ].join("\n"),
     });
+
     const provider = harness.registrations.mentionProviders[0]!;
 
     await expect(
@@ -559,6 +830,7 @@ describe("Docs mention provider", () => {
         "CareNav assessments identify unmet caregiver needs.",
       ].join("\n"),
     });
+
     const provider = harness.registrations.mentionProviders[0]!;
 
     await expect(
@@ -583,6 +855,7 @@ describe("Docs mention provider", () => {
     const { harness } = await loadNotebook({
       "thematic-break.md": "---\n\nSome intro text.\n\n---\n\nMore text.\n",
     });
+
     const provider = harness.registrations.mentionProviders[0]!;
 
     await expect(
@@ -601,11 +874,12 @@ describe("Docs mention provider", () => {
     const { harness } = await loadNotebook({
       "ideas.md": "# Fresh Ideas\n\nBuild the mention flow.",
     });
+
     const provider = harness.registrations.mentionProviders[0]!;
 
     await expect(provider.resolve("personal:ideas.md")).resolves.toEqual({
       context:
-        "Docs document (personal/ideas.md):\nSHA-256: test-sha\n\n# Fresh Ideas\n\nBuild the mention flow.\n\nProposal version: none. Use bb docs propose to suggest changes for approval.",
+        "Docs document (personal/ideas.md):\nSHA-256: test-sha\n\n# Fresh Ideas\n\nBuild the mention flow.\n\nProposal version: none. Use omnyo docs propose to suggest changes for approval.",
     });
     expect(harness.sdk.callsTo("files.read")).toEqual([
       [
@@ -625,6 +899,7 @@ describe("Docs vault operations", () => {
       const { harness } = await loadNotebook({ "draft.md": "# Draft" });
       const host = makeHostResponse();
       harness.sdk.stub("hosts.list", async () => [host]);
+
       if (listingFails) {
         harness.sdk.stub("files.listPaths", async () => {
           throw new Error("Host unavailable");
@@ -658,7 +933,7 @@ describe("Docs vault operations", () => {
       },
     });
 
-    await simpleNotes(host.bb);
+    await simpleNotes(host.api);
 
     const result = await host.harness.runCli(["vaults", "--json"]);
     expect(result.exitCode).toBe(0);
@@ -729,18 +1004,21 @@ describe("Docs vault operations", () => {
       ["pull", "plans", "--folder", "--into", "sync", "--json"],
       { cwd: "/work" },
     );
+
     expect(pulled).toMatchObject({ exitCode: 0 });
     expect(files.get("/work/sync/plans/image.bin")).toMatchObject({
       content: "AP+AQA==",
       contentEncoding: "base64",
     });
-    expect(files.has("/work/sync/.bb-docs-state.json")).toBe(true);
+    expect(files.has("/work/sync/.omnyo-docs-state.json")).toBe(true);
 
     setUtf8("/work/sync/plans/plan.md", "# Plan\n\nEdited locally\n");
+
     const status = await harness.runCli(
       ["status", "sync", "--diff", "--json"],
       { cwd: "/work" },
     );
+
     expect(status.exitCode).toBe(4);
     expect(JSON.parse(status.stdout ?? "{}")).toMatchObject({
       outcome: "planned",
@@ -750,6 +1028,7 @@ describe("Docs vault operations", () => {
     const pushed = await harness.runCli(["push", "sync", "--json"], {
       cwd: "/work",
     });
+
     expect(pushed.exitCode).toBe(0);
     expect(files.get("/vault/plans/plan.md")?.content).toBe(
       "# Plan\n\nEdited locally\n",
@@ -765,6 +1044,7 @@ describe("Docs vault operations", () => {
         modifiedAtMs: 1,
       },
     });
+
     await harness.runCli(
       ["pull", "plans", "--folder", "--into", "sync", "--json"],
       { cwd: "/work" },
@@ -791,6 +1071,7 @@ describe("Docs vault operations", () => {
         modifiedAtMs: 1,
       },
     });
+
     directories.add("/vault/folder/remote-gone");
     directories.add("/vault/folder/local-gone");
     await harness.runCli(
@@ -799,10 +1080,12 @@ describe("Docs vault operations", () => {
     );
 
     directories.delete("/vault/folder/remote-gone");
+
     const refreshed = await harness.runCli(
       ["pull", "folder", "--folder", "--into", "sync", "--json"],
       { cwd: "/work" },
     );
+
     expect(refreshed.exitCode).toBe(0);
     expect(JSON.parse(refreshed.stdout ?? "{}")).toMatchObject({
       deletedDirectories: ["folder/remote-gone"],
@@ -810,9 +1093,11 @@ describe("Docs vault operations", () => {
     expect(directories.has("/work/sync/folder/remote-gone")).toBe(false);
 
     directories.delete("/work/sync/folder/local-gone");
+
     const safePush = await harness.runCli(["push", "sync", "--json"], {
       cwd: "/work",
     });
+
     expect(safePush.exitCode).toBe(0);
     expect(directories.has("/vault/folder/local-gone")).toBe(true);
     expect(JSON.parse(safePush.stdout ?? "{}")).toMatchObject({
@@ -823,6 +1108,7 @@ describe("Docs vault operations", () => {
       ["push", "sync", "--delete", "--json"],
       { cwd: "/work" },
     );
+
     expect(deletingPush.exitCode).toBe(0);
     expect(directories.has("/vault/folder/local-gone")).toBe(false);
     expect(files.has("/vault/folder/keep.md")).toBe(true);
@@ -836,10 +1122,12 @@ describe("Docs vault operations", () => {
         modifiedAtMs: 1,
       },
     });
+
     const pulled = await harness.runCli(
       ["pull", "plan.md", "--dir", "sync", "--json"],
       { cwd: "/work" },
     );
+
     expect(pulled.exitCode).toBe(0);
     setUtf8("/work/sync/plan.md", "local edit");
     setUtf8("/vault/plan.md", "remote edit");
@@ -847,6 +1135,7 @@ describe("Docs vault operations", () => {
     const pushed = await harness.runCli(["push", "sync", "--json"], {
       cwd: "/work",
     });
+
     expect(pushed.exitCode).toBe(3);
     expect(JSON.parse(pushed.stdout ?? "{}")).toMatchObject({
       outcome: "conflict",
@@ -866,6 +1155,7 @@ describe("Docs vault operations", () => {
           modifiedAtMs: 1,
         },
       });
+
     await harness.runCli(["pull", "plan.md", "--into", "sync"], {
       cwd: "/work",
     });
@@ -896,7 +1186,9 @@ describe("Docs vault operations", () => {
         modifiedAtMs: 1,
       },
     });
+
     directories.add("/vault/existing");
+
     const emptyApply = {
       vaultId: "personal",
       writes: [],
@@ -930,6 +1222,7 @@ describe("Docs vault operations", () => {
       ...emptyApply,
       directories: ["existing", "created"],
     });
+
     expect(applied).toMatchObject({
       outcome: "applied",
       createdDirectories: ["created"],
@@ -945,6 +1238,7 @@ describe("Docs vault operations", () => {
         modifiedAtMs: 1,
       },
     });
+
     await harness.runCli(["pull", "archive", "--folder", "--into", "sync"], {
       cwd: "/work",
     });
@@ -953,6 +1247,7 @@ describe("Docs vault operations", () => {
     const safePush = await harness.runCli(["push", "sync", "--json"], {
       cwd: "/work",
     });
+
     expect(safePush.exitCode).toBe(0);
     expect(files.has("/vault/archive/old.md")).toBe(true);
     expect(JSON.parse(safePush.stdout ?? "{}")).toMatchObject({
@@ -963,6 +1258,7 @@ describe("Docs vault operations", () => {
       ["push", "sync", "--delete", "--json"],
       { cwd: "/work" },
     );
+
     expect(deletingPush.exitCode).toBe(0);
     expect(files.has("/vault/archive/old.md")).toBe(false);
   });
@@ -975,11 +1271,13 @@ describe("Docs vault operations", () => {
         modifiedAtMs: 1,
       },
     });
+
     setUtf8("/work/sync/.bb-docs-state.json", "{not-json");
 
     const result = await harness.runCli(["push", "sync", "--json"], {
       cwd: "/work",
     });
+
     expect(result.exitCode).toBe(1);
     expect(JSON.parse(result.stdout ?? "{}")).toMatchObject({
       ok: false,
@@ -1004,6 +1302,7 @@ describe("Docs vault operations", () => {
         modifiedAtMs: 1,
       },
     });
+
     await expect(
       harness.runCli(["pull", "a.md", "--into", "one"], { cwd: "/work" }),
     ).resolves.toMatchObject({ exitCode: 0 });
@@ -1028,6 +1327,7 @@ describe("Docs vault operations", () => {
       "--content",
       "legacy",
     ]);
+
     expect(direct).toMatchObject({ exitCode: 0 });
     expect(direct.stderr).toContain("Deprecated");
   });
@@ -1043,20 +1343,21 @@ describe("Docs vault operations", () => {
 
     const help = await harness.runCli(["--help"]);
     expect(help).toMatchObject({ exitCode: 0 });
-    expect(help.stdout).toContain("bb docs pull");
-    expect(help.stdout).toContain("bb docs status");
-    expect(help.stdout).toContain("bb docs push");
+    expect(help.stdout).toContain("omnyo docs pull");
+    expect(help.stdout).toContain("omnyo docs status");
+    expect(help.stdout).toContain("omnyo docs push");
 
     const statusHelp = await harness.runCli(["status", "--help"]);
     expect(statusHelp).toMatchObject({ exitCode: 0 });
     expect(statusHelp.stdout).toContain("Exit 4: changes present");
-    expect(statusHelp.stdout).toContain("run bb docs push separately");
+    expect(statusHelp.stdout).toContain("run omnyo docs push separately");
     expect(statusHelp.stdout).toContain("[<workspace-dir>]");
 
     const unsafePull = await harness.runCli(
       ["pull", "plan.md", "--into", "sync", "--dry-run", "--json"],
       { cwd: "/work" },
     );
+
     expect(unsafePull.exitCode).toBe(2);
     expect(JSON.parse(unsafePull.stdout ?? "{}")).toMatchObject({
       ok: false,
@@ -1074,12 +1375,13 @@ describe("Docs vault operations", () => {
       "--dry-run",
       "--json",
     ]);
+
     expect(unsafeRemove.exitCode).toBe(2);
     expect(files.has("/vault/plan.md")).toBe(true);
 
     const noCommand = await harness.runCli([]);
     expect(noCommand.exitCode).toBe(2);
-    expect(noCommand.stdout).toContain("bb docs <command> [options]");
+    expect(noCommand.stdout).toContain("omnyo docs <command> [options]");
 
     const strayArgument = await harness.runCli(["vaults", "personal"]);
     expect(strayArgument.exitCode).toBe(2);
@@ -1101,6 +1403,7 @@ describe("Docs vault operations", () => {
       ["pull", "--all", "--folder", "--into", "sync"],
       { cwd: "/work" },
     );
+
     expect(combined.exitCode).toBe(2);
     expect(combined.stderr).toContain("--all and --folder cannot be combined");
     expect(files.has("/work/sync/plan.md")).toBe(false);
@@ -1197,6 +1500,7 @@ describe("Docs vault operations", () => {
     const { harness } = await loadNotebook({ "plan.md": "# Plan" });
     const rootPath = temporaryDirectories[0]!;
     const filePath = path.join(rootPath, "plan.md");
+
     const source = {
       kind: "host",
       threadId: "thread_1",
@@ -1231,6 +1535,7 @@ describe("Docs vault operations", () => {
   it("routes explicit host opener reads, previews, and saves to that host", async () => {
     const rootPath = "/shared";
     const filePath = "/shared/plan.md";
+
     const host = createFakePluginHost({
       pluginId: "simple-notes",
       sdk: {
@@ -1262,8 +1567,10 @@ describe("Docs vault operations", () => {
         },
       },
     });
-    await simpleNotes(host.bb);
+
+    await simpleNotes(host.api);
     host.harness.sdk.calls.length = 0;
+
     const source = {
       kind: "host",
       threadId: "thread_1",
@@ -1367,8 +1674,10 @@ describe("Docs vault operations", () => {
         },
       },
     });
-    await simpleNotes(host.bb);
+
+    await simpleNotes(host.api);
     host.harness.sdk.calls.length = 0;
+
     const selectedSource = {
       kind: "workspace",
       threadId: null,
@@ -1452,8 +1761,9 @@ describe("Docs vault operations", () => {
   });
 
   it("opens and saves thread-storage Markdown files on the thread's host", async () => {
-    const storageRootPath = String.raw`C:\bb\thread-storage\thread_1`;
-    const openedPath = String.raw`C:\bb\thread-storage\thread_1\reports\plan.md`;
+    const storageRootPath = String.raw`C:\omnyo\thread-storage\thread_1`;
+    const openedPath = String.raw`C:\omnyo\thread-storage\thread_1\reports\plan.md`;
+
     const host = createFakePluginHost({
       pluginId: "simple-notes",
       sdk: {
@@ -1486,8 +1796,10 @@ describe("Docs vault operations", () => {
         },
       },
     });
-    await simpleNotes(host.bb);
+
+    await simpleNotes(host.api);
     host.harness.sdk.calls.length = 0;
+
     const source = {
       kind: "thread-storage",
       threadId: "thread_1",
@@ -1566,31 +1878,39 @@ describe("Docs vault operations", () => {
     const changeListeners: Array<() => void> = [];
     const closeWatcher = vi.fn();
     const watchedRoots: string[] = [];
+
     const { harness } = await loadNotebook(
       { "plan.md": "# Plan" },
       (rootPath, onChange) => {
         watchedRoots.push(rootPath);
         changeListeners.push(onChange);
+
         return {
           close: closeWatcher,
           on: () => undefined,
         };
       },
     );
+
     const service = harness.runService("watch-vaults");
+
     try {
       expect(watchedRoots).toEqual([temporaryDirectories[0]]);
       const notifyChange = changeListeners[0];
+
       if (!notifyChange) {
         throw new Error("Expected vault watcher callback");
       }
+
       const provider = harness.registrations.mentionProviders[0]!;
+
       const context = {
         trigger: "@" as const,
         query: "",
         projectId: null,
         threadId: null,
       };
+
       expect(await provider.search(context)).toMatchObject([{ title: "Plan" }]);
       await writeFile(
         path.join(temporaryDirectories[0]!, "plan.md"),
@@ -1614,6 +1934,7 @@ describe("Docs vault operations", () => {
       service.controller.abort();
       await service.done;
     }
+
     expect(closeWatcher).toHaveBeenCalledOnce();
   });
 });
@@ -1627,13 +1948,16 @@ describe("Docs proposals", () => {
         modifiedAtMs: 1,
       },
     });
+
     const file = host.files.get("/vault/letter.md")!;
+
     const proposal = await host.harness.behavior.callRpc("proposeNote", {
       path: "letter.md",
       content: "A calmer space.",
       expectedSha256: virtualSha(file),
       expectedVersion: null,
     });
+
     return { ...host, proposal };
   }
 
@@ -1821,6 +2145,7 @@ describe("Docs proposals", () => {
         modifiedAtMs: 1,
       },
     });
+
     const result = await harness.behavior.runCli([
       "propose",
       "letter.md",
@@ -1832,6 +2157,7 @@ describe("Docs proposals", () => {
       "none",
       "--json",
     ]);
+
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(result.stdout ?? "")).toMatchObject({
       content: "Proposed",
@@ -1844,6 +2170,7 @@ describe("Docs proposals", () => {
 
   it("serializes concurrent resolutions and candidate edits", async () => {
     const { harness } = await setupProposal();
+
     const results = await Promise.allSettled([
       harness.behavior.callRpc("updateProposal", {
         path: "letter.md",
@@ -1856,6 +2183,7 @@ describe("Docs proposals", () => {
         action: "accept",
       }),
     ]);
+
     expect(results.map((result) => result.status)).toEqual([
       "fulfilled",
       "rejected",

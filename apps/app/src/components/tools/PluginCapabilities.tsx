@@ -1,18 +1,20 @@
 import type { ReactNode } from "react";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
-import { pluginCliCall } from "@bb/domain/plugin-cli";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
+import { pluginCliCall } from "@omnyo/domain/plugin-cli";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Button } from "@bb/shared-ui/button";
-import type { PluginCapability, SkillListResponse } from "@bb/server-contract";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
+import type {
+  PluginCapability,
+  SkillListResponse,
+} from "@omnyo/server-contract";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
 import {
-  ResourceActionButton,
   ResourceDetailIncludesSection,
   ResourceStatus,
   type ResourceStatusTone,
-} from "@bb/shared-ui/resource-list";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/resource-list";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { PluginBannerBar } from "@/components/tools/plugin-detail-banner";
 import {
   PluginDetailGlyph,
@@ -53,6 +55,7 @@ function pluginActivityIcon(state: "running" | "ok" | "error" | null): {
       label: "Scheduled",
     };
   }
+
   if (state === "running") {
     return {
       name: "Clock",
@@ -60,6 +63,7 @@ function pluginActivityIcon(state: "running" | "ok" | "error" | null): {
       label: "Running",
     };
   }
+
   if (state === "ok") {
     return {
       name: "CircleCheck",
@@ -67,9 +71,11 @@ function pluginActivityIcon(state: "running" | "ok" | "error" | null): {
       label: "Succeeded",
     };
   }
+
   if (state === "error") {
     return { name: "CircleX", className: "text-destructive", label: "Failed" };
   }
+
   return {
     name: "Clock",
     className: "text-muted-foreground",
@@ -90,6 +96,7 @@ function pluginServiceStatus(state: "running" | "backoff" | "stopped"): {
       tone: "success",
     };
   }
+
   if (state === "backoff") {
     return {
       label: "Restarting",
@@ -97,6 +104,7 @@ function pluginServiceStatus(state: "running" | "backoff" | "stopped"): {
       tone: "muted",
     };
   }
+
   return {
     label: "Stopped",
     statusClassName: "opacity-50",
@@ -110,6 +118,7 @@ function PluginActivityState({
   state: "running" | "ok" | "error" | null;
 }) {
   const icon = pluginActivityIcon(state);
+
   return (
     <PluginDetailGlyph
       icon={icon.name}
@@ -135,6 +144,7 @@ function namedSurface(
   destinationPath?: string,
 ): PluginCapabilityItem {
   const label = title?.trim() || id;
+
   return {
     key: `${prefix}:${id}`,
     label,
@@ -182,9 +192,11 @@ function pluginAppSurfaceItems(
   configurationPath: string | undefined,
 ): PluginCapabilityItem[] {
   const pluginId = plugin.id;
+
   const settingsSections = slots.settingsSections.filter(
     (section) => section.pluginId === pluginId,
   );
+
   return [
     ...(plugin.hasSettings || settingsSections.length > 0
       ? [
@@ -221,6 +233,30 @@ function pluginAppSurfaceItems(
       slots.appOverlays,
       "app-overlay",
       "Renders app-wide floating interface content.",
+    ),
+    ...namedSlotItems(
+      pluginId,
+      slots.sidebarFooterCards,
+      "sidebar-footer-card",
+      "Renders an additive card above the sidebar footer controls.",
+    ),
+    ...namedSlotItems(
+      pluginId,
+      slots.titleBarCenters,
+      "title-bar-center",
+      "Renders content in the center of the window's top bar.",
+    ),
+    ...namedSlotItems(
+      pluginId,
+      slots.sidebarEntries,
+      "sidebar-entry",
+      "Adds a labeled row under New thread that opens its page.",
+    ),
+    ...namedSlotItems(
+      pluginId,
+      slots.threadCompanions,
+      "thread-companion",
+      "Shows a live companion beside threads, folded into the top bar when there is no room.",
     ),
     ...namedSlotItems(
       pluginId,
@@ -282,6 +318,12 @@ function pluginAppSurfaceItems(
       slots.threadHeaderActions,
       "thread-header",
       "Adds an action to thread headers.",
+    ),
+    ...namedSlotItems(
+      pluginId,
+      slots.threadViews,
+      "thread-view",
+      "Can replace the main pane of open threads.",
     ),
     ...namedSlotItems(
       pluginId,
@@ -386,17 +428,21 @@ export function PluginIncludes({
 }) {
   const slots = usePluginSlots();
   const queryClient = useQueryClient();
+
   const cachedSkills = queryClient.getQueryData<SkillListResponse>(
     projectSkillsQueryKey(PERSONAL_PROJECT_ID),
   );
+
   const appItems = pluginAppSurfaceItems(plugin, slots, configurationPath);
 
   const skillDestination = (capabilityId: string): string => {
     const installedSkill = cachedSkills?.skills.find((skill) => {
       if (skill.pluginId !== plugin.id) return false;
       const segments = skill.filePath.split(/[\\/]/u);
+
       return segments.at(-2) === capabilityId || skill.name === capabilityId;
     });
+
     return installedSkill === undefined
       ? `${getSkillsRoutePath()}?view=library`
       : getSkillDetailRoutePath({ skillId: installedSkill.id });
@@ -463,6 +509,7 @@ export function PluginIncludes({
       items: declared("theme"),
     },
   ];
+
   const items = categories.flatMap(({ icon, kind, items: groupItems }) =>
     groupItems.map((item) => ({ ...item, icon, kind })),
   );
@@ -473,6 +520,7 @@ export function PluginIncludes({
     plugin.status === "running" ||
     plugin.status === "degraded" ||
     plugin.status === "needs-configuration";
+
   const liveCapabilitiesNote =
     "This plugin isn't running, so its commands, settings, agent tools, app surfaces, and thread integrations can't be listed.";
 
@@ -491,16 +539,24 @@ export function PluginIncludes({
                 />
               }
               name={
-                item.destinationPath === undefined ? (
-                  item.label
-                ) : (
-                  <Link
-                    to={item.destinationPath}
-                    className="rounded-sm text-xs underline decoration-border underline-offset-4 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  {item.destinationPath === undefined ? (
+                    <span>{item.label}</span>
+                  ) : (
+                    <Link
+                      to={item.destinationPath}
+                      className="self-start rounded-sm text-xs underline decoration-border underline-offset-4 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      {item.label}
+                    </Link>
+                  )}
+                  <span
+                    aria-hidden="true"
+                    className="font-sans text-2xs text-subtle-foreground"
                   >
-                    {item.label}
-                  </Link>
-                )
+                    {item.kind}
+                  </span>
+                </span>
               }
               nameClassName="text-xs"
               mono={item.mono}
@@ -532,23 +588,29 @@ function PluginRuntimeStatusAlert({
   reloadPending: boolean;
 }) {
   const { settingsSections } = usePluginSlots();
+
   const hasSettingsPage =
     plugin.hasSettings ||
     settingsSections.some((section) => section.pluginId === plugin.id);
+
   const canOpenSettings =
     plugin.status === "needs-configuration" && hasSettingsPage;
+
   const canReload =
     plugin.status === "error" ||
     plugin.status === "degraded" ||
     (plugin.status === "missing" && plugin.source.startsWith("path:")) ||
     (plugin.status === "needs-configuration" && !plugin.hasSettings);
+
   const detail = [runtimeStatus.condition, runtimeStatus.recovery]
     .filter((part): part is string => part !== null && part.length > 0)
     .map((part) => {
       const capitalized = `${part.charAt(0).toUpperCase()}${part.slice(1)}`;
+
       return /[.!?]$/u.test(capitalized) ? capitalized : `${capitalized}.`;
     })
     .join(" ");
+
   return (
     <PluginBannerBar
       role={plugin.status === "starting" ? "status" : "alert"}
@@ -561,12 +623,7 @@ function PluginRuntimeStatusAlert({
         canOpenSettings || canReload ? (
           <span className="flex items-center gap-2">
             {canOpenSettings ? (
-              <Button
-                asChild
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-0.5 px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground [&_[data-icon-root]]:size-3"
-              >
+              <Button asChild variant="soft" size="xs">
                 <Link
                   to={
                     configurationPath ??
@@ -574,19 +631,26 @@ function PluginRuntimeStatusAlert({
                   }
                 >
                   Open settings
-                  <Icon name="ChevronRight" className="size-3.5" aria-hidden />
+                  <Icon name="ChevronRight" aria-hidden />
                 </Link>
               </Button>
             ) : null}
             {canReload ? (
-              <ResourceActionButton
-                icon="RotateCcw"
-                className="[&_[data-icon-root]]:size-3.5"
-                label={reloadPending ? "Reloading…" : "Reload"}
-                loading={reloadPending}
+              <Button
+                type="button"
+                variant="soft"
+                size="xs"
+                aria-busy={reloadPending}
                 disabled={reloadPending}
                 onClick={onReload}
-              />
+              >
+                <Icon
+                  name={reloadPending ? "Loading" : "RotateCcw"}
+                  aria-hidden
+                  className={cn(reloadPending && "animate-spin")}
+                />
+                {reloadPending ? "Reloading…" : "Reload"}
+              </Button>
             ) : null}
           </span>
         ) : undefined
@@ -605,6 +669,7 @@ export function PluginHealthBanner({
   configurationPath?: string;
 }) {
   const queryClient = useQueryClient();
+
   const reload = useMutation({
     meta: { showErrorToast: false },
     mutationFn: () => reloadPlugin(fetch, plugin.id),
@@ -615,8 +680,11 @@ export function PluginHealthBanner({
       });
     },
   });
+
   const showOverallState = plugin.enabled && runtimeStatus !== null;
+
   if (!showOverallState || runtimeStatus === null) return null;
+
   return (
     <PluginRuntimeStatusAlert
       plugin={plugin}
@@ -664,6 +732,7 @@ export function PluginServices({ plugin }: { plugin: PluginListItem }) {
         <tbody className="divide-y divide-border">
           {plugin.services.map((service) => {
             const status = pluginServiceStatus(service.state);
+
             return (
               <tr key={service.name}>
                 <td

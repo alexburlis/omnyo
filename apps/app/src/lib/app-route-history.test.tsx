@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { PluginContext } from "@/components/plugin/plugin-context";
 import { SidebarHistoryNavigationControls } from "@/components/sidebar/SidebarHistoryNavigationControls";
-import { useBbNavigate } from "./plugin-sdk-hooks";
+import { experimental_useAppNavigate as useAppNavigate } from "./plugin-sdk-hooks";
 import {
   AUTOMATIONS_PLUGIN_ID,
   getAutomationDetailRoutePath,
@@ -42,6 +42,7 @@ const TOOL_ROUTE_SEQUENCE = [
 function HistoryHarness() {
   const location = useLocation();
   const navigate = useNavigate();
+
   const { canGoBack, canGoForward, goBack, goForward } =
     useRouteStateHistoryNavigation();
 
@@ -68,6 +69,7 @@ function HistoryHarness() {
 function RemountableHistoryHarness() {
   const [mounted, setMounted] = useState(true);
   const navigate = useNavigate();
+
   return (
     <div>
       <button type="button" onClick={() => setMounted((value) => !value)}>
@@ -84,6 +86,7 @@ function RemountableHistoryHarness() {
 function SidebarControlsHarness() {
   const location = useLocation();
   const navigate = useNavigate();
+
   return (
     <div>
       <div data-testid="path">{location.pathname}</div>
@@ -107,7 +110,7 @@ const AUTOMATION_ROUTE = {
 function PluginNavigationHarness() {
   const location = useLocation();
   const navigate = useNavigate();
-  const pluginNavigate = useBbNavigate();
+  const pluginNavigate = useAppNavigate();
   const detailPath = getAutomationDetailRoutePath(AUTOMATION_ROUTE);
   const editSubPath = `${AUTOMATION_ROUTE.projectId}/${AUTOMATION_ROUTE.automationId}/edit`;
   const detailSubPath = `${AUTOMATION_ROUTE.projectId}/${AUTOMATION_ROUTE.automationId}`;
@@ -168,6 +171,7 @@ function PluginNavigationHarness() {
 
 function RemountablePluginNavigationHarness() {
   const [mountKey, setMountKey] = useState(0);
+
   return (
     <>
       <button type="button" onClick={() => setMountKey((value) => value + 1)}>
@@ -193,8 +197,9 @@ async function expectSidebarButtonState(
 ) {
   await waitFor(() => {
     expect(
-      screen.getByRole("button", { name: label }).getAttribute("aria-disabled") ===
-        "true",
+      screen
+        .getByRole("button", { name: label })
+        .getAttribute("aria-disabled") === "true",
     ).toBe(disabled);
   });
 }

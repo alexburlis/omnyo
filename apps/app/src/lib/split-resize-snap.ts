@@ -4,6 +4,7 @@ import { clampSplitPairFraction } from "@/lib/split-layout";
 export type SplitResizeAxis = "x" | "y";
 
 export const SPLIT_RESIZE_SNAP_CAPTURE_PX = 12;
+
 export const SPLIT_RESIZE_SNAP_RELEASE_PX = 30;
 
 interface ResolveSplitResizePositionArgs {
@@ -43,17 +44,21 @@ export function createSplitResizeFlexPair(
   const previousGrow = Number.parseFloat(
     ownerWindow.getComputedStyle(previous).flexGrow,
   );
+
   const nextGrow = Number.parseFloat(
     ownerWindow.getComputedStyle(next).flexGrow,
   );
+
   const total =
     Number.isFinite(previousGrow) &&
     Number.isFinite(nextGrow) &&
     previousGrow + nextGrow > 0
       ? previousGrow + nextGrow
       : 1;
+
   const previousFlex = previous.style.flex;
   const nextFlex = next.style.flex;
+
   return {
     apply: (fraction) => {
       previous.style.flex = `${total * fraction} 1 0px`;
@@ -79,6 +84,7 @@ function createGuide(
     axis === "x"
       ? "pointer-events-none fixed z-[100] w-px -translate-x-1/2 bg-ring/50"
       : "pointer-events-none fixed z-[100] h-px -translate-y-1/2 bg-ring/50";
+
   if (axis === "x") {
     guide.style.height = `${gridRect.height}px`;
     guide.style.left = `${coordinate}px`;
@@ -88,7 +94,9 @@ function createGuide(
     guide.style.top = `${coordinate}px`;
     guide.style.width = `${gridRect.width}px`;
   }
+
   document.body.appendChild(guide);
+
   return guide;
 }
 
@@ -103,6 +111,7 @@ function equalGridCoordinate(
   target: SplitResizeGridTarget,
 ): number | null {
   const { boundaryIndex, childCount } = target;
+
   if (
     !Number.isInteger(boundaryIndex) ||
     !Number.isInteger(childCount) ||
@@ -112,10 +121,13 @@ function equalGridCoordinate(
   ) {
     return null;
   }
+
   const span = axisExtent(gridRect, axis);
   const contentSpan = span - dividerExtent * (childCount - 1);
+
   if (contentSpan <= 0) return null;
   const start = axis === "x" ? gridRect.left : gridRect.top;
+
   return (
     start +
     (contentSpan * boundaryIndex) / childCount +
@@ -136,8 +148,10 @@ export function createSplitResizeSnapSession(
   const grid = divider.closest<HTMLElement>("[data-split-resize-grid-root]");
   const gridRect = grid?.getBoundingClientRect() ?? null;
   const extent = axisExtent(divider.getBoundingClientRect(), axis);
+
   const usesPanelWidthLimits =
     axis === "x" && divider.matches("[data-panel-resize-snap-handle]");
+
   const gridCoordinate =
     gridRect === null
       ? null
@@ -155,6 +169,7 @@ export function createSplitResizeSnapSession(
   const showGuide = (coordinate: number) => {
     if (gridRect === null) return;
     guide ??= createGuide(divider.ownerDocument, axis, coordinate, gridRect);
+
     if (axis === "x") guide.style.left = `${coordinate}px`;
     else guide.style.top = `${coordinate}px`;
   };
@@ -169,22 +184,28 @@ export function createSplitResizeSnapSession(
     resolve: ({ end, pointer, start }) => {
       const span = end - start;
       const contentSpan = span - extent;
+
       const panelLimits = usesPanelWidthLimits
         ? splitWidthLimits(contentSpan)
         : null;
+
       const clamp = (fraction: number) =>
         panelLimits === null
           ? clampSplitPairFraction(fraction)
           : Math.min(panelLimits.max, Math.max(panelLimits.min, fraction));
+
       const unsnappedFraction = clamp(
         contentSpan > 0 ? (pointer - start - extent / 2) / contentSpan : 0.5,
       );
+
       const previousPointer = lastPointer;
       lastPointer = pointer;
+
       if (gridCoordinate === null || contentSpan <= 0) {
         releasePending = false;
         snapped = false;
         hideGuide();
+
         return {
           coordinate:
             start + Math.max(0, contentSpan) * unsnappedFraction + extent / 2,
@@ -196,17 +217,23 @@ export function createSplitResizeSnapSession(
       const fraction = clamp(
         (gridCoordinate - start - extent / 2) / contentSpan,
       );
+
       const coordinate = start + contentSpan * fraction + extent / 2;
       const reachable = Math.abs(coordinate - gridCoordinate) <= 0.01;
       const distance = Math.abs(pointer - gridCoordinate);
+
       const previousDelta =
         previousPointer === null ? null : previousPointer - gridCoordinate;
+
       const pointerDelta = pointer - gridCoordinate;
+
       const crossedGrid =
         previousDelta !== null &&
         ((previousDelta < 0 && pointerDelta >= 0) ||
           (previousDelta > 0 && pointerDelta <= 0));
+
       let shouldSnap = false;
+
       if (reachable) {
         if (distance <= SPLIT_RESIZE_SNAP_CAPTURE_PX) {
           fastCrossingAnchor = null;
@@ -235,11 +262,13 @@ export function createSplitResizeSnapSession(
           }
         }
       }
+
       if (!shouldSnap) {
         fastCrossingAnchor = null;
         releasePending = false;
         snapped = false;
         hideGuide();
+
         return {
           coordinate:
             start + Math.max(0, contentSpan) * unsnappedFraction + extent / 2,
@@ -250,6 +279,7 @@ export function createSplitResizeSnapSession(
 
       snapped = true;
       showGuide(coordinate);
+
       return { coordinate, fraction, snapped: true };
     },
   };

@@ -17,6 +17,7 @@ import {
   preventOverlayTriggerSelection,
 } from "./overlay-trigger.js";
 import { usePointerCoarse } from "./hooks/use-pointer-coarse.js";
+import { FLOATING_POPOVER_MOTION } from "./motion.js";
 
 const ResponsivePopoverContext =
   React.createContext<ResponsiveOverlayContextValue>({
@@ -94,6 +95,7 @@ const PopoverTrigger = React.forwardRef<
         if (!open) {
           blurActiveKeyboardInputBeforeOverlayOpen();
         }
+
         preventOverlayTriggerSelection(event);
       }}
       {...props}
@@ -102,6 +104,7 @@ const PopoverTrigger = React.forwardRef<
     </PopoverPrimitive.Trigger>
   );
 });
+
 PopoverTrigger.displayName = "PopoverTrigger";
 
 const PopoverContent = React.forwardRef<
@@ -138,11 +141,14 @@ const PopoverContent = React.forwardRef<
     React.useEffect(() => {
       if (!open || isCompactViewport || isPointerCoarse || !autoFocusRef)
         return;
+
       const frame = window.requestAnimationFrame(() => {
         const target = autoFocusRef.current;
         target?.focus();
+
         if (target instanceof HTMLInputElement) target.select();
       });
+
       return () => window.cancelAnimationFrame(frame);
     }, [autoFocusRef, isCompactViewport, isPointerCoarse, open]);
 
@@ -163,10 +169,7 @@ const PopoverContent = React.forwardRef<
         >
           <div
             ref={ref}
-            className={cn(
-              "overflow-y-auto px-4 pt-2 pb-4",
-              className,
-            )}
+            className={cn("overflow-y-auto px-4 pt-2 pb-4", className)}
             {...domProps}
             style={{ ...style, ...COMPACT_SHEET_CONTENT_STYLE }}
           >
@@ -185,10 +188,12 @@ const PopoverContent = React.forwardRef<
           sideOffset={sideOffset}
           onOpenAutoFocus={(event) => {
             if (isPointerCoarse || autoFocusRef) event.preventDefault();
+
             if (!isPointerCoarse) onOpenAutoFocus?.(event);
           }}
           className={cn(
-            "z-50 w-96 rounded-md border bg-popover p-4 text-popover-foreground shadow-md outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+            "z-50 w-96 rounded-md border bg-popover p-4 text-popover-foreground shadow-md outline-none origin-(--radix-popover-content-transform-origin)",
+            FLOATING_POPOVER_MOTION,
             className,
           )}
           {...props}
@@ -203,6 +208,7 @@ const PopoverContent = React.forwardRef<
     );
   },
 );
+
 PopoverContent.displayName = "PopoverContent";
 
 const PopoverAnchor = React.forwardRef<
@@ -221,6 +227,7 @@ const PopoverAnchor = React.forwardRef<
     </PopoverPrimitive.Anchor>
   );
 });
+
 PopoverAnchor.displayName = "PopoverAnchor";
 
 export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor };

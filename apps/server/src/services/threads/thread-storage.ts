@@ -1,4 +1,4 @@
-import { getLatestSessionForHost } from "@bb/db";
+import { getLatestSessionForHost } from "@omnyo/db";
 import { ApiError } from "../../errors.js";
 import { joinHostPathSegments } from "../lib/host-path.js";
 import type { WorkSessionDeps } from "../../types.js";
@@ -22,6 +22,7 @@ export async function requireThreadStoragePath(
   args: RequireThreadStoragePathArgs,
 ): Promise<string> {
   const session = getLatestSessionForHost(deps.db, { hostId: args.hostId });
+
   if (session === null) {
     throw new ApiError(
       502,
@@ -30,6 +31,7 @@ export async function requireThreadStoragePath(
       false,
     );
   }
+
   return joinHostPathSegments(session.dataDir, "thread-storage", args.threadId);
 }
 
@@ -38,6 +40,7 @@ export async function requireLiveThreadStoragePath(
   args: RequireThreadStoragePathArgs,
 ): Promise<string> {
   const session = requireConnectedHostSession(deps, args.hostId);
+
   return joinHostPathSegments(session.dataDir, "thread-storage", args.threadId);
 }
 
@@ -51,11 +54,13 @@ export function requireThreadEnvironmentHostId(
   threadId: string,
 ): string {
   const thread = requirePublicThread(deps.db, threadId);
+
   if (!thread.environmentId) {
     throwThreadEnvironmentUnavailable(
       threadEnvironmentUnavailableDetails("never_attached", null),
     );
   }
+
   return requireEnvironment(deps.db, thread.environmentId).hostId;
 }
 
@@ -64,6 +69,7 @@ export async function requireThreadStorageTarget(
   threadId: string,
 ): Promise<ThreadStorageTarget> {
   const hostId = requireThreadEnvironmentHostId(deps, threadId);
+
   return {
     hostId,
     storagePath: await requireThreadStoragePath(deps, { hostId, threadId }),

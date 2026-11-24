@@ -12,6 +12,7 @@ export function pluginAuthorPageSearch(
   params.delete("view");
   params.set("author", authorKey);
   const next = params.toString();
+
   return next === "" ? "" : `?${next}`;
 }
 
@@ -26,7 +27,9 @@ export function PluginAuthorLink({
 }) {
   const location = useLocation();
   const authorKey = pluginMarketplaceAuthorKey(entry);
+
   if (authorKey === null) return <>{children}</>;
+
   return (
     <Link
       to={{

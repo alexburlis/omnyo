@@ -9,7 +9,9 @@ import type {
 } from "./types.js";
 
 export const MAX_WORKFLOW_SOURCE_BYTES = 512 * 1024;
+
 export const AGENT_OPTION_KEYS = new Set([
+  "environmentId",
   "provider",
   "model",
   "reasoningLevel",
@@ -19,10 +21,15 @@ export const AGENT_OPTION_KEYS = new Set([
   "label",
   "phase",
 ]);
+
 const MAX_SCHEMA_BYTES = 64 * 1024;
+
 const MAX_SCHEMA_DEPTH = 32;
+
 const MAX_SCHEMA_NODES = 4_096;
+
 const MAX_SCHEMA_PROPERTIES = 256;
+
 const MAX_SCHEMA_ENUM_VALUES = 256;
 
 const SUPPORTED_SCHEMA_KEYWORDS = new Set([
@@ -87,12 +94,15 @@ const HIDDEN_CONTROL_CHARACTER =
 
 export function assertValidWorkflowSourceText(source: string): void {
   const sizeBytes = new TextEncoder().encode(source).byteLength;
+
   if (sizeBytes > MAX_WORKFLOW_SOURCE_BYTES) {
     throw new Error(
       `Workflow source exceeds ${MAX_WORKFLOW_SOURCE_BYTES} bytes (${sizeBytes} bytes)`,
     );
   }
+
   const match = HIDDEN_CONTROL_CHARACTER.exec(source);
+
   if (match !== null) {
     const codePoint = match[0]!.codePointAt(0)!;
     const before = source.slice(0, match.index);
@@ -118,6 +128,7 @@ const jsonSchemaValueSchema = z.union([
 
 const storedAgentOptionsSchema = z
   .object({
+    environmentId: z.string().trim().min(1).nullable().default(null),
     selection: z
       .object({
         provider: z.string().min(1),
@@ -134,9 +145,11 @@ const storedAgentOptionsSchema = z
 
 export function parseStoredAgentOptions(value: unknown): WorkflowAgentOptions {
   const options = storedAgentOptionsSchema.parse(value) as WorkflowAgentOptions;
+
   if (options.outputSchema !== null) {
     assertValidJsonSchema(options.outputSchema, "stored agent outputSchema");
   }
+
   return options;
 }
 
@@ -145,10 +158,13 @@ function optionalNonEmptyString(
   key: string,
 ): string | null {
   const value = object[key];
+
   if (value === undefined) return null;
+
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`agent options.${key} must be a non-empty string`);
   }
+
   return value;
 }
 
@@ -159,30 +175,39 @@ export function assertValidJsonSchema(
   if (typeof schema !== "boolean" && !isObject(schema)) {
     throw new Error(`${path} must be a JSON Schema object or boolean`);
   }
+
   const stack: Array<{
     value: unknown;
     depth: number;
     path: string;
     exiting?: boolean;
   }> = [{ value: schema, depth: 0, path }];
+
   const ancestors = new Set<object>();
   let nodes = 0;
+
   while (stack.length > 0) {
     const current = stack.pop()!;
+
     if (current.exiting) {
       ancestors.delete(current.value as object);
       continue;
     }
+
     nodes += 1;
+
     if (nodes > MAX_SCHEMA_NODES) {
       throw new Error(`${path} exceeds the ${MAX_SCHEMA_NODES}-node limit`);
     }
+
     if (current.depth > MAX_SCHEMA_DEPTH) {
       throw new Error(
         `${path} exceeds the maximum depth of ${MAX_SCHEMA_DEPTH}`,
       );
     }
+
     const value = current.value;
+
     if (
       value === null ||
       typeof value === "string" ||
@@ -190,28 +215,36 @@ export function assertValidJsonSchema(
     ) {
       continue;
     }
+
     if (typeof value === "number") {
       if (!Number.isFinite(value)) {
         throw new Error(`${current.path} contains a non-finite number`);
       }
+
       continue;
     }
+
     if (typeof value !== "object") {
       throw new Error(`${current.path} contains a non-JSON value`);
     }
+
     if (ancestors.has(value)) {
       throw new Error(`${current.path} contains a cyclic value`);
     }
+
     ancestors.add(value);
     stack.push({ ...current, exiting: true });
+
     if (Array.isArray(value)) {
       const keys = Object.keys(value);
+
       if (
         keys.length !== value.length ||
         keys.some((key, index) => key !== String(index))
       ) {
         throw new Error(`${current.path} contains a sparse or decorated array`);
       }
+
       for (let index = value.length - 1; index >= 0; index -= 1) {
         stack.push({
           value: value[index],
@@ -221,17 +254,22 @@ export function assertValidJsonSchema(
       }
     } else {
       const prototype = Object.getPrototypeOf(value);
+
       if (prototype !== Object.prototype && prototype !== null) {
         throw new Error(
           `${current.path} contains an object with an unsafe prototype`,
         );
       }
+
       const keys = Reflect.ownKeys(value);
+
       for (let index = keys.length - 1; index >= 0; index -= 1) {
         const key = keys[index]!;
+
         if (typeof key !== "string") {
           throw new Error(`${current.path} contains a symbol-keyed property`);
         }
+
         if (
           key === "__proto__" ||
           key === "constructor" ||
@@ -241,7 +279,9 @@ export function assertValidJsonSchema(
             `${current.path} contains forbidden key ${JSON.stringify(key)}`,
           );
         }
+
         const descriptor = Object.getOwnPropertyDescriptor(value, key);
+
         if (
           descriptor === undefined ||
           !descriptor.enumerable ||
@@ -249,6 +289,7 @@ export function assertValidJsonSchema(
         ) {
           throw new Error(`${current.path}.${key} contains an unsafe property`);
         }
+
         stack.push({
           value: descriptor.value,
           depth: current.depth + 1,
@@ -257,9 +298,12 @@ export function assertValidJsonSchema(
       }
     }
   }
+
   const serialized = JSON.stringify(schema);
+
   if (serialized === undefined) throw new Error(`${path} is not JSON`);
   const sizeBytes = new TextEncoder().encode(serialized).byteLength;
+
   if (sizeBytes > MAX_SCHEMA_BYTES) {
     throw new Error(
       `${path} exceeds the ${MAX_SCHEMA_BYTES} byte limit (${sizeBytes} bytes)`,
@@ -267,6 +311,7 @@ export function assertValidJsonSchema(
   }
 
   assertSupportedSchema(schema, path);
+
   try {
     new Ajv({ strict: false, allErrors: true }).compile(schema);
   } catch (error) {
@@ -278,47 +323,58 @@ export function assertValidJsonSchema(
 
 function assertSupportedSchema(schema: JsonSchema, path: string): void {
   if (typeof schema === "boolean") return;
+
   for (const keyword of Object.keys(schema)) {
     if (SUPPORTED_SCHEMA_KEYWORDS.has(keyword)) continue;
     const reason = UNSAFE_SCHEMA_KEYWORD_REASONS[keyword];
+
     if (reason !== undefined) {
       throw new Error(
         `${path}.${keyword} is not supported by the safe workflow schema subset: ${reason}; schema validation runs in the Node host, outside the QuickJS deadline`,
       );
     }
+
     throw new Error(
       `${path}.${keyword} is not supported by the safe workflow schema subset`,
     );
   }
 
   const properties = schema.properties;
+
   if (properties !== undefined) {
     if (!isObject(properties)) {
       throw new Error(`${path}.properties must be an object`);
     }
+
     const entries = Object.entries(properties);
+
     if (entries.length > MAX_SCHEMA_PROPERTIES) {
       throw new Error(
         `${path}.properties exceeds the ${MAX_SCHEMA_PROPERTIES}-property limit`,
       );
     }
+
     for (const [name, child] of entries) {
       if (typeof child !== "boolean" && !isObject(child)) {
         throw new Error(`${path}.properties.${name} must be a schema`);
       }
+
       assertSupportedSchema(child, `${path}.properties.${name}`);
     }
   }
 
   const items = schema.items;
+
   if (items !== undefined) {
     if (typeof items !== "boolean" && !isObject(items)) {
       throw new Error(`${path}.items must be a single schema`);
     }
+
     assertSupportedSchema(items, `${path}.items`);
   }
 
   const additionalProperties = schema.additionalProperties;
+
   if (
     additionalProperties !== undefined &&
     typeof additionalProperties !== "boolean"
@@ -328,19 +384,23 @@ function assertSupportedSchema(schema: JsonSchema, path: string): void {
         `${path}.additionalProperties must be a boolean or schema`,
       );
     }
+
     assertSupportedSchema(additionalProperties, `${path}.additionalProperties`);
   }
 
   const enumValues = schema.enum;
+
   if (enumValues !== undefined) {
     if (!Array.isArray(enumValues)) {
       throw new Error(`${path}.enum must be an array`);
     }
+
     if (enumValues.length > MAX_SCHEMA_ENUM_VALUES) {
       throw new Error(
         `${path}.enum exceeds the ${MAX_SCHEMA_ENUM_VALUES}-value limit`,
       );
     }
+
     if (
       enumValues.some((value) => value !== null && typeof value === "object")
     ) {
@@ -356,12 +416,14 @@ export function parseAgentOptions(
 ): WorkflowAgentOptions {
   if (value === undefined) {
     return {
+      environmentId: null,
       selection: null,
       outputSchema: null,
       title: null,
       phase: null,
     };
   }
+
   if (!isObject(value)) throw new Error("agent options must be an object");
 
   for (const key of Object.keys(value)) {
@@ -372,9 +434,11 @@ export function parseAgentOptions(
   const provider = optionalNonEmptyString(value, "provider");
   const model = optionalNonEmptyString(value, "model");
   const reasoningLevel = optionalNonEmptyString(value, "reasoningLevel");
+
   const selectionCount = [provider, model, reasoningLevel].filter(
     (item) => item !== null,
   ).length;
+
   if (selectionCount !== 0 && selectionCount !== 3) {
     throw new Error(
       "agent options must provide provider, model, and reasoningLevel together, or omit all three",
@@ -385,12 +449,15 @@ export function parseAgentOptions(
   const hasSchema = Object.hasOwn(value, "schema");
   const outputSchemaAlias = hasOutputSchema ? value.outputSchema! : null;
   const schemaAlias = hasSchema ? value.schema! : null;
+
   if (outputSchemaAlias !== null) {
     assertValidJsonSchema(outputSchemaAlias, "agent options.outputSchema");
   }
+
   if (schemaAlias !== null) {
     assertValidJsonSchema(schemaAlias, "agent options.schema");
   }
+
   if (
     hasOutputSchema &&
     hasSchema &&
@@ -400,10 +467,12 @@ export function parseAgentOptions(
       "agent options.outputSchema and agent options.schema must be structurally identical when both are provided",
     );
   }
+
   const outputSchema = hasOutputSchema ? outputSchemaAlias : schemaAlias;
 
   const title = optionalNonEmptyString(value, "title");
   const label = optionalNonEmptyString(value, "label");
+
   if (title !== null && label !== null && title !== label) {
     throw new Error(
       "agent options.title and agent options.label must match when both are provided",
@@ -411,6 +480,7 @@ export function parseAgentOptions(
   }
 
   return {
+    environmentId: optionalNonEmptyString(value, "environmentId"),
     selection:
       provider !== null && model !== null && reasoningLevel !== null
         ? { provider, model, reasoningLevel }

@@ -1,11 +1,15 @@
 import { Command } from "commander";
-import { collectDeclaredSessionOptions, type AvailableModel } from "@bb/domain";
+import {
+  collectDeclaredSessionOptions,
+  type AvailableModel,
+} from "@omnyo/domain";
 import type {
   SystemExecutionOptionsModelLoadError,
+  SystemExecutionOptionsModelNotice,
   SystemProviderInfo,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { action } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { columnWidths, printBorderlessTable } from "../table.js";
 import { outputJson } from "./helpers.js";
 import { resolveMachineEnvironmentRouting } from "./machine.js";
@@ -60,14 +64,17 @@ export function registerProviderCommands(
     .action(
       action(async (opts: ProviderListCommandOptions) => {
         const serverUrl = getUrl();
-        const sdk = createCliBbSdk(serverUrl);
+        const sdk = createCliOmnyoSdk(serverUrl);
+
         if (opts.all) {
           if (opts.machine || opts.host || opts.environment)
             throw new Error(
               "--all shows the global provider catalog; omit --machine, --host and --environment.",
             );
           const catalog = await sdk.providers.catalog();
+
           if (outputJson(opts, catalog)) return;
+
           const rows = catalog.map((entry) => [
             entry.id,
             entry.displayName,
@@ -79,6 +86,7 @@ export function registerProviderCommands(
                   ? "Enabled"
                   : "Unavailable",
           ]);
+
           printBorderlessTable(
             {
               head: ["ID", "Name", "Status"],
@@ -86,16 +94,22 @@ export function registerProviderCommands(
             },
             rows,
           );
+
           return;
         }
+
         const providers = await sdk.providers.list(
           await resolveMachineEnvironmentRouting(opts, serverUrl),
         );
+
         if (outputJson(opts, providers)) return;
+
         if (providers.length === 0) {
           console.log("No providers available");
+
           return;
         }
+
         printProviderTable(providers);
       }),
     );
@@ -111,10 +125,13 @@ export function registerProviderCommands(
       .option("--json", "Print machine-readable JSON output")
       .action(
         action(async (providerId: string, opts: { json?: boolean }) => {
-          const catalog = await createCliBbSdk(getUrl()).providers.setEnabled({
+          const catalog = await createCliOmnyoSdk(
+            getUrl(),
+          ).providers.setEnabled({
             providerId,
             enabled,
           });
+
           if (outputJson(opts, catalog)) return;
           console.log(`${providerId} ${enabled ? "enabled" : "disabled"}`);
         }),
@@ -135,22 +152,30 @@ export function registerProviderCommands(
           opts: ProviderModelsCommandOptions,
         ) => {
           const serverUrl = getUrl();
-          const sdk = createCliBbSdk(serverUrl);
+          const sdk = createCliOmnyoSdk(serverUrl);
+
           const executionOptions = await sdk.providers.models({
             ...(await resolveMachineEnvironmentRouting(opts, serverUrl)),
             ...(providerId ? { providerId } : {}),
           });
+
           const models = includeSelectedOnlyModel({
             models: executionOptions.models,
             selectedOnlyModels: executionOptions.selectedOnlyModels,
             selectedModel: opts.selectedModel,
           });
+
           printModelLoadError(executionOptions.modelLoadError);
+          printModelNotice(executionOptions.modelNotice, Date.now());
+
           if (outputJson(opts, models)) return;
+
           if (models.length === 0) {
             console.log("No models available");
+
             return;
           }
+
           printModelTable(models, providerId);
         },
       ),
@@ -163,12 +188,15 @@ function includeSelectedOnlyModel(
   if (!args.selectedModel) {
     return args.models;
   }
+
   if (args.models.some((model) => model.model === args.selectedModel)) {
     return args.models;
   }
+
   const selectedOnlyModel = args.selectedOnlyModels.find(
     (model) => model.model === args.selectedModel,
   );
+
   return selectedOnlyModel ? [selectedOnlyModel, ...args.models] : args.models;
 }
 
@@ -189,11 +217,55 @@ function printModelLoadError(
   if (modelLoadError === null) {
     return;
   }
+
   console.error(
     `Could not load models for ${modelLoadError.providerId} (${modelLoadError.code})`,
   );
+
   if (modelLoadError.detail !== null) {
     console.error(`  ${modelLoadError.detail}`);
+  }
+}
+
+const NOTICE_SOON_FORMAT = new Intl.DateTimeFormat(undefined, {
+  weekday: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+const NOTICE_LATER_FORMAT = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+const NOTICE_SOON_MS = 6 * 24 * 60 * 60 * 1000;
+
+function formatModelNotice(
+  notice: SystemExecutionOptionsModelNotice,
+  now: number,
+): string | null {
+  if (notice.until !== null && notice.until <= now) {
+    return null;
+  }
+
+  const until =
+    notice.until === null
+      ? ""
+      : ` until ${(notice.until - now < NOTICE_SOON_MS ? NOTICE_SOON_FORMAT : NOTICE_LATER_FORMAT).format(notice.until)}`;
+
+  return `${notice.message}${until}${notice.detail === null ? "" : ` · ${notice.detail}`}`;
+}
+
+function printModelNotice(
+  notice: SystemExecutionOptionsModelNotice | null,
+  now: number,
+): void {
+  const line = notice === null ? null : formatModelNotice(notice, now);
+
+  if (line !== null) {
+    console.error(line);
   }
 }
 
@@ -205,6 +277,7 @@ function printModelTable(models: AvailableModel[], providerId?: string): void {
   const listsServiceTiers = models.some(
     (model) => model.supportedServiceTiers !== undefined,
   );
+
   const rows = models.map((model) => [
     model.model,
     model.displayName ?? model.model,
@@ -219,6 +292,7 @@ function printModelTable(models: AvailableModel[], providerId?: string): void {
         ]
       : []),
   ]);
+
   printBorderlessTable(
     {
       head: [
@@ -235,6 +309,7 @@ function printModelTable(models: AvailableModel[], providerId?: string): void {
     },
     rows,
   );
+
   for (const line of formatDeclaredSessionOptions(models)) {
     console.log(line);
   }
@@ -244,12 +319,14 @@ export function formatDeclaredSessionOptions(
   models: readonly AvailableModel[],
 ): string[] {
   const options = collectDeclaredSessionOptions(models);
+
   if (options.length === 0) {
     return [];
   }
+
   return [
     "",
-    "Options (set with bb thread spawn --option <id>=<value>):",
+    "Options (set with omnyo thread spawn --option <id>=<value>):",
     ...options.map((option) =>
       option.type === "boolean"
         ? `  ${option.id} (${option.label}): true | false, default ${String(option.value)}`

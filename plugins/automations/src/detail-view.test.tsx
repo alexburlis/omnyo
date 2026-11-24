@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ExperimentalPermissionModePickerProps,
   ExperimentalProviderModelPickerProps,
-} from "@get-bb/plugin-sdk/app";
-import { installTestPluginRuntime } from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/app";
+import { installTestPluginRuntime } from "@omnyo/plugin-sdk/testing/app";
 import type {
   AgentExecutionUpdate,
   AutomationDetailResponse,
@@ -19,7 +19,7 @@ import {
   ScriptAutomationDefinition,
 } from "../detail-view.js";
 
-vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
+vi.mock("@omnyo/plugin-sdk/app", async (importOriginal) => ({
   ...(await importOriginal()),
   experimental_ProviderModelPicker: ({
     value,
@@ -30,7 +30,7 @@ vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
   }: ExperimentalProviderModelPickerProps) => (
     <button
       type="button"
-      data-testid="bb-provider-model-picker"
+      data-testid="omnyo-provider-model-picker"
       data-routing-kind={routing?.kind ?? "primary"}
       data-routing-id={
         routing === undefined
@@ -67,7 +67,7 @@ vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
     <button
       type="button"
       aria-label="Permission mode"
-      data-testid="bb-permission-mode-picker"
+      data-testid="omnyo-permission-mode-picker"
       data-provider-id={providerId}
       data-routing-kind={routing?.kind ?? "primary"}
       disabled={disabled}
@@ -175,6 +175,67 @@ function AutomationDetailView({
 }
 
 describe("Automation detail recipe", () => {
+  it("explains a failed agent run in the header and in its run row", () => {
+    const error = "Target thread thr_target was archived";
+
+    const run = {
+      automationId: "auto_1",
+      runMode: "agent",
+      trigger: "schedule",
+      skipReason: null,
+      output: null,
+      exitCode: null,
+      scheduledFor: 1_800_000_000_000,
+      startedAt: 1_800_000_000_000,
+      finishedAt: 1_800_000_000_030,
+    } as const;
+
+    const { container } = render(
+      <AutomationDetailView
+        automation={{
+          ...AUTOMATION,
+          enabled: false,
+          nextRunAt: null,
+          lastRunStatus: "failed",
+          lastError: error,
+        }}
+        projectLabel="Personal"
+        runsState={{
+          ...NO_RUNS,
+          runs: [
+            {
+              ...run,
+              id: "run_failed",
+              threadId: null,
+              status: "failed",
+              error,
+            },
+            {
+              ...run,
+              id: "run_succeeded",
+              threadId: "thr_target",
+              status: "succeeded",
+              error: null,
+            },
+          ],
+        }}
+        actionPending={false}
+        onToggle={() => {}}
+        onEdit={() => {}}
+        onRunNow={() => {}}
+        onDelete={() => {}}
+        onOpenThread={() => {}}
+      />,
+    );
+
+    expect(
+      container.querySelector('[data-automation-error=""]')?.textContent,
+    ).toBe(error);
+    expect(
+      [...container.querySelectorAll("pre")].map((block) => block.textContent),
+    ).toEqual([error]);
+  });
+
   it("renders the personal workspace through the host's environment provider icon", () => {
     const { container } = render(
       <AgentAutomationDefinition
@@ -195,6 +256,7 @@ describe("Automation detail recipe", () => {
         onUpdate={async () => {}}
       />,
     );
+
     const footer = container.querySelector("[data-automation-prompt-footer]")!;
     const icon = footer.querySelector('[data-provider-kind="environment"]');
     expect(icon?.getAttribute("data-provider-id")).toBe("personal-workspace");
@@ -203,8 +265,10 @@ describe("Automation detail recipe", () => {
 
   it("keeps Definition ahead of Runs, including with no runs yet", async () => {
     const updateAgent = vi.fn(async (_update: AgentExecutionUpdate) => {});
+
     function Harness() {
       const [editing, setEditing] = useState(false);
+
       return (
         <AutomationDetailView
           automation={AUTOMATION}
@@ -233,20 +297,25 @@ describe("Automation detail recipe", () => {
         />
       );
     }
+
     const { container } = render(<Harness />);
 
     const recipe = renderedRecipe(container);
     expect(recipe.map(([kind]) => kind)).toEqual(["definition", "activity"]);
     expect(recipe.at(-1)?.[1]).toBe("Runs");
+
     const projectMetadataIcon = screen.getByRole("img", {
       name: "Project: Personal",
     });
+
     const scheduleMetadataIcon = screen.getByRole("img", {
       name: "Schedule",
     });
+
     const nextRunMetadataIcon = screen.getByRole("img", {
       name: "Next run",
     });
+
     expect(projectMetadataIcon.tabIndex).toBe(0);
     expect(scheduleMetadataIcon.tabIndex).toBe(0);
     expect(nextRunMetadataIcon.tabIndex).toBe(0);
@@ -264,30 +333,38 @@ describe("Automation detail recipe", () => {
     const emptyRuns = screen
       .getByText("No runs yet.")
       .closest('[data-automation-runs-state="empty"]') as HTMLElement;
+
     expect(emptyRuns).not.toBeNull();
 
     const savedPrompt = screen.getByRole("textbox", { name: "Saved prompt" });
     expect(savedPrompt.getAttribute("aria-readonly")).toBe("true");
     expect(savedPrompt.getAttribute("aria-disabled")).toBe("true");
+
     const readOnlyPromptShell = container.querySelector(
       '[data-automation-prompt-readonly-shell=""]',
     ) as HTMLElement;
+
     expect(readOnlyPromptShell.contains(savedPrompt)).toBe(true);
     expect(savedPrompt.textContent).toBe("Summarize yesterday's commits.");
     expect(screen.queryByRole("button", { name: "Save Prompt" })).toBeNull();
+
     const disabledModelSelector = container.querySelector(
-      '[data-testid="bb-provider-model-picker"]',
+      '[data-testid="omnyo-provider-model-picker"]',
     ) as HTMLButtonElement;
+
     const disabledPermissionSelector = container.querySelector(
-      '[data-testid="bb-permission-mode-picker"]',
+      '[data-testid="omnyo-permission-mode-picker"]',
     ) as HTMLButtonElement;
+
     expect(disabledModelSelector.disabled).toBe(true);
     expect(disabledPermissionSelector.disabled).toBe(true);
     expect(readOnlyPromptShell.contains(disabledModelSelector)).toBe(true);
     expect(readOnlyPromptShell.contains(disabledPermissionSelector)).toBe(true);
+
     const readOnlyPromptFooter = container.querySelector(
       '[data-automation-prompt-footer=""]',
     ) as HTMLElement;
+
     expect(readOnlyPromptShell.contains(readOnlyPromptFooter)).toBe(true);
     const editButton = screen.getByRole("button", { name: "Edit prompt" });
     expect(editButton.querySelector('[data-icon="Edit"]')).not.toBeNull();
@@ -301,19 +378,24 @@ describe("Automation detail recipe", () => {
     const promptContent = screen.getByRole("textbox", {
       name: "Automation prompt",
     }) as HTMLTextAreaElement;
+
     const promptPanel = promptContent.closest("form") as HTMLElement;
     expect(
       container.querySelector('[data-automation-prompt-readonly-shell=""]'),
     ).toBeNull();
     expect(promptContent.value).toBe("Summarize yesterday's commits.");
     expect(promptContent.readOnly).toBe(false);
+
     const promptActionRow = container.querySelector(
       '[data-automation-prompt-action-row=""]',
     ) as HTMLElement;
+
     expect(promptPanel.contains(promptActionRow)).toBe(true);
+
     const promptFooter = container.querySelector(
       '[data-automation-prompt-footer=""]',
     ) as HTMLElement;
+
     expect(promptFooter.textContent).toContain("Personal workspace");
     expect(
       promptFooter.querySelector('[title="Environment: Personal workspace"]'),
@@ -322,16 +404,20 @@ describe("Automation detail recipe", () => {
     expect(
       promptFooter.querySelectorAll('[data-option-display=""]'),
     ).toHaveLength(1);
+
     const accessSelector = promptFooter.querySelector(
-      '[data-testid="bb-permission-mode-picker"]',
+      '[data-testid="omnyo-permission-mode-picker"]',
     ) as HTMLButtonElement;
+
     expect(accessSelector.disabled).toBe(false);
     expect(accessSelector.getAttribute("aria-label")).toBe("Permission mode");
     expect(promptPanel.textContent).toContain("Opus 5");
     expect(promptPanel.textContent).toContain("Claude");
+
     const modelSelector = promptPanel.querySelector(
-      '[data-testid="bb-provider-model-picker"]',
+      '[data-testid="omnyo-provider-model-picker"]',
     ) as HTMLButtonElement;
+
     expect(modelSelector.disabled).toBe(false);
     expect(modelSelector.textContent).toContain("medium");
     const savePrompt = screen.getByRole("button", { name: "Save Prompt" });
@@ -347,19 +433,25 @@ describe("Automation detail recipe", () => {
     expect(updateAgent).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit prompt" }));
+
     const reopenedPrompt = screen.getByRole("textbox", {
       name: "Automation prompt",
     }) as HTMLTextAreaElement;
+
     const reopenedPanel = reopenedPrompt.closest("form") as HTMLElement;
+
     const reopenedModelSelector = reopenedPanel.querySelector(
-      '[data-testid="bb-provider-model-picker"]',
+      '[data-testid="omnyo-provider-model-picker"]',
     ) as HTMLButtonElement;
+
     const reopenedAccessSelector = container.querySelector(
-      '[data-testid="bb-permission-mode-picker"]',
+      '[data-testid="omnyo-permission-mode-picker"]',
     ) as HTMLButtonElement;
+
     const reopenedSavePrompt = screen.getByRole("button", {
       name: "Save Prompt",
     });
+
     fireEvent.change(reopenedPrompt, {
       target: { value: "Summarize the last two days." },
     });
@@ -452,7 +544,7 @@ describe("Automation detail recipe", () => {
       />,
     );
 
-    const picker = screen.getByTestId("bb-provider-model-picker");
+    const picker = screen.getByTestId("omnyo-provider-model-picker");
     expect(picker.getAttribute("data-routing-kind")).toBe("environment");
     expect(picker.getAttribute("data-routing-id")).toBe("env_test");
     expect(picker.getAttribute("data-provider-change-allowed")).toBe("true");
@@ -478,7 +570,7 @@ describe("Automation detail recipe", () => {
       <AutomationDetailView
         automation={{
           ...AUTOMATION,
-          projectId: "proj_bb",
+          projectId: "proj_omnyo",
           execution: {
             mode: "agent",
             prompt: "Summarize yesterday's commits.",
@@ -491,7 +583,7 @@ describe("Automation detail recipe", () => {
               hostId: "host_local",
               workspace: {
                 type: "unmanaged",
-                path: "/Users/you/Code/bb",
+                path: "/Users/you/Code/omnyo",
                 branch: {
                   kind: "existing",
                   name: "agent/tools-hub-schedules",
@@ -500,7 +592,7 @@ describe("Automation detail recipe", () => {
             },
           },
         }}
-        projectLabel="bb"
+        projectLabel="omnyo"
         runsState={{
           runs: [],
           nextCursor: null,
@@ -522,20 +614,24 @@ describe("Automation detail recipe", () => {
     const promptShell = container.querySelector(
       '[data-promptbox-shell=""]',
     ) as HTMLElement;
+
     const promptFooter = promptShell.querySelector(
       '[data-automation-prompt-footer=""]',
     ) as HTMLElement;
+
     expect(promptShell.textContent).toContain("Claude");
     expect(promptShell.textContent).toContain("Opus 5");
-    expect(promptFooter.textContent).toContain("bb");
-    expect(promptFooter.textContent).toContain("~/Code/bb");
+    expect(promptFooter.textContent).toContain("omnyo");
+    expect(promptFooter.textContent).toContain("~/Code/omnyo");
     expect(promptFooter.textContent).toContain("Approve for me");
     expect(promptShell.textContent).toContain("medium");
     expect(
       promptShell.querySelectorAll('[data-option-display=""]'),
     ).toHaveLength(2);
     expect(
-      promptShell.querySelectorAll('[data-testid="bb-provider-model-picker"]'),
+      promptShell.querySelectorAll(
+        '[data-testid="omnyo-provider-model-picker"]',
+      ),
     ).toHaveLength(1);
   });
 
@@ -584,15 +680,17 @@ describe("Automation detail recipe", () => {
     expect(
       container.querySelector('[aria-label="Project"] [data-icon="Folder"]'),
     ).toBeTruthy();
+
     const promptFooter = container.querySelector(
       '[data-automation-prompt-footer=""]',
     ) as HTMLElement;
+
     expect(promptFooter.textContent).toContain("Local");
     expect(
       promptFooter.querySelectorAll('[data-option-display=""]'),
     ).toHaveLength(2);
     expect(
-      container.querySelector('[data-testid="bb-provider-model-picker"]'),
+      container.querySelector('[data-testid="omnyo-provider-model-picker"]'),
     ).not.toBeNull();
   });
 
@@ -601,6 +699,7 @@ describe("Automation detail recipe", () => {
       { length: 20 },
       (_, index) => `echo "report ${index + 1}"`,
     ).join("\n");
+
     const { container } = render(
       <AutomationDetailView
         automation={{
@@ -648,6 +747,7 @@ describe("Automation detail recipe", () => {
     const scriptScroll = screen.getByRole("region", {
       name: "Script contents",
     });
+
     expect(scriptScroll.querySelector("pre")?.textContent).toContain(
       storedScript,
     );
@@ -673,6 +773,7 @@ describe("Automation detail recipe", () => {
 
     const scriptPanel = scriptScroll.parentElement
       ?.parentElement as HTMLElement;
+
     expect(scriptPanel.className).toContain("bg-background");
     expect(scriptPanel.className).not.toContain("shadow-xs");
     expect(scriptPanel.className).not.toContain("shadow-sm");
@@ -684,10 +785,14 @@ describe("Automation detail recipe", () => {
   it.each([
     [
       { type: "automation-storage" } as const,
-      "/var/lib/bb/plugins/automations/scripts/auto_1",
-      "/var/lib/bb/plugins/automations/scripts/auto_1",
+      "/var/lib/omnyo/plugins/automations/scripts/auto_1",
+      "/var/lib/omnyo/plugins/automations/scripts/auto_1",
     ],
-    [{ type: "project" } as const, "/srv/projects/bb", "/srv/projects/bb"],
+    [
+      { type: "project" } as const,
+      "/srv/projects/omnyo",
+      "/srv/projects/omnyo",
+    ],
     [
       { type: "path", path: "/srv/automation-work" } as const,
       "/srv/automation-work",
@@ -748,6 +853,7 @@ describe("Automation detail recipe", () => {
     const loading = await screen.findByRole("status", {
       name: "Loading runs",
     });
+
     expect(loading.textContent).toBe("");
     expect(loading.querySelectorAll(".animate-pulse")).toHaveLength(3);
     expect(container.textContent).not.toContain("Loading…");
@@ -779,6 +885,7 @@ describe("Automation detail recipe", () => {
     const errorState = screen
       .getByText("Runs unavailable.")
       .closest('[data-automation-runs-state="error"]') as HTMLElement;
+
     expect(errorState.className).not.toContain("text-destructive");
     expect(container.querySelector('[data-icon="CircleX"]')).toBeNull();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
@@ -789,10 +896,12 @@ describe("Automation detail recipe", () => {
     ["succeeded", "Succeeded", "CircleCheck", "text-success"],
     ["running", "Running", "Loading", "text-muted-foreground"],
     ["skipped", "Skipped", "ArrowTurnForward", "text-subtle-foreground"],
+    ["recovered", "Recovered", "RotateCcw", "text-subtle-foreground"],
   ] as const)(
     "renders a %s run row with its semantic status glyph",
     (status, label, iconName, iconClass) => {
       const startedAt = 1_750_000_000_000;
+
       const run: AutomationRunResponse = {
         id: `run_${status}`,
         automationId: AUTOMATION.id,
@@ -808,6 +917,7 @@ describe("Automation detail recipe", () => {
         startedAt,
         finishedAt: status === "running" ? null : startedAt + 42_000,
       };
+
       render(
         <AutomationDetailView
           automation={AUTOMATION}

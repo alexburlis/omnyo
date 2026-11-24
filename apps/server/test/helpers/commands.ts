@@ -2,15 +2,15 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
-import { hostDaemonSessions } from "@bb/db";
+import { hostDaemonSessions } from "@omnyo/db";
 import {
   hostDaemonCommandSchema,
   hostDaemonOnlineRpcResponseMessageSchema,
   hostDaemonRpcCommandSchema,
   hostDaemonServerWsMessageSchema,
   parseHostDaemonRpcResultForCommand,
-} from "@bb/host-daemon-contract";
-import { type ThreadEvent } from "@bb/domain";
+} from "@omnyo/host-daemon-contract";
+import { type ThreadEvent } from "@omnyo/domain";
 import type {
   HostDaemonCommand,
   HostDaemonEventEnvelope,
@@ -18,7 +18,7 @@ import type {
   HostDaemonOnlineRpcRequestMessage,
   HostDaemonRpcCommand,
   HostDaemonRpcResultForCommand,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { TestAppHarness } from "./test-app.js";
 import { availableModelFixture } from "./available-models.js";
 import { createTestDaemonHostKey } from "./test-app.js";
@@ -39,6 +39,7 @@ interface CapturedRpcRow {
 }
 
 type QueuedCommandPayload = HostDaemonRpcCommand;
+
 type QueuedCommandResult<TCommand extends QueuedCommandPayload> =
   HostDaemonRpcResultForCommand<TCommand>;
 
@@ -80,6 +81,7 @@ export function listQueuedThreadCommands(
 }
 
 const pendingHostRpcRequests: QueuedCommand[] = [];
+
 const testRpcCursorByHost = new Map<string, number>();
 
 interface RegisterTestHostRpcCaptureArgs {
@@ -116,8 +118,9 @@ export interface TestHostRpcSocket {
 function readWorkspaceAgentContextFromDisk(
   rootPath: string,
 ): HostDaemonOnlineRpcResult<"host.read_workspace_agent_context"> {
-  const skillsRootPath = path.join(rootPath, ".bb", "skills");
+  const skillsRootPath = path.join(rootPath, ".omnyo", "skills");
   let directoryNames: string[] = [];
+
   try {
     directoryNames = readdirSync(skillsRootPath, { withFileTypes: true })
       .filter((entry) => !entry.isSymbolicLink() && entry.isDirectory())
@@ -126,10 +129,13 @@ function readWorkspaceAgentContextFromDisk(
   } catch {
     directoryNames = [];
   }
+
   const projectSkills = directoryNames.flatMap((directoryName) => {
     const skillFilePath = path.join(skillsRootPath, directoryName, "SKILL.md");
+
     try {
       if (!lstatSync(skillFilePath).isFile()) return [];
+
       return [
         {
           kind: "file" as const,
@@ -141,16 +147,20 @@ function readWorkspaceAgentContextFromDisk(
       return [];
     }
   });
+
   let agentInstructions: string | null = null;
+
   try {
     const trimmed = readFileSync(
-      path.join(rootPath, ".bb", "AGENTS.md"),
+      path.join(rootPath, ".omnyo", "AGENTS.md"),
       "utf8",
     ).trim();
+
     agentInstructions = trimmed.length > 0 ? trimmed : null;
   } catch {
     agentInstructions = null;
   }
+
   return {
     agentInstructions,
     projectSkills,
@@ -165,6 +175,25 @@ function respondToRuntimeWorkspaceFileCommand(
   message: HostDaemonOnlineRpcRequestMessage,
 ): boolean {
   const command = message.command;
+
+  if (command.type === "host.prepare_workspace_identity_v1") {
+    deps.hub.recordHostOnlineRpcResponse({
+      message: hostDaemonOnlineRpcResponseMessageSchema.parse({
+        type: "host-rpc.response",
+        requestId: message.requestId,
+        commandType: command.type,
+        ok: true,
+        result: {
+          status: "current",
+          rootPath: path.join(command.rootPath, ".omnyo"),
+        },
+      }),
+      sessionId: args.sessionId,
+    });
+
+    return true;
+  }
+
   if (command.type !== "host.read_workspace_agent_context") return false;
   deps.hub.recordHostOnlineRpcResponse({
     message: hostDaemonOnlineRpcResponseMessageSchema.parse({
@@ -176,6 +205,7 @@ function respondToRuntimeWorkspaceFileCommand(
     }),
     sessionId: args.sessionId,
   });
+
   return true;
 }
 
@@ -206,6 +236,41 @@ function respondToProviderModelListCommand(
     }),
     sessionId: args.sessionId,
   });
+
+  return true;
+}
+
+function respondToProviderInstallationStatusCommand(
+  deps: Pick<TestAppHarness, "hub">,
+  args: RegisterTestHostRpcCaptureArgs,
+  message: HostDaemonOnlineRpcRequestMessage,
+): boolean {
+  if (message.command.type !== "provider.installation.status") return false;
+
+  deps.hub.recordHostOnlineRpcResponse({
+    message: hostDaemonOnlineRpcResponseMessageSchema.parse({
+      type: "host-rpc.response",
+      requestId: message.requestId,
+      commandType: message.command.type,
+      ok: true,
+      result: {
+        executableName: message.command.providerId,
+        executablePath: `/usr/local/bin/${message.command.providerId}`,
+        installed: true,
+        installSource: "external",
+        currentVersion: "1.0.0",
+        latestVersion: "1.0.0",
+        minimumSupportedVersion: null,
+        npmPackageName: null,
+        npmGlobalPackageVersion: null,
+        installAction: null,
+        needsUpdate: false,
+        versionUnsupported: false,
+      },
+    }),
+    sessionId: args.sessionId,
+  });
+
   return true;
 }
 
@@ -286,37 +351,41 @@ function nextTestRpcCursor(
   const previousCursor = Math.max(testRpcCursorByHost.get(hostId) ?? 0);
   const nextCursor = previousCursor + 0.0001;
   testRpcCursorByHost.set(hostId, nextCursor);
+
   return nextCursor;
 }
 
-/**
- * Registers the capturing daemon socket for a host and returns it, so a test
- * that reconnects a host can hand the same socket to the real
- * `onDaemonSocketOpen` instead of replacing the capture with a stub.
- */
 export function registerTestHostRpcCapture(
   deps: Pick<TestAppHarness, "db" | "hub">,
   args: RegisterTestHostRpcCaptureArgs,
 ): TestHostRpcSocket {
   testRpcCursorByHost.delete(args.hostId);
+
   for (let index = pendingHostRpcRequests.length - 1; index >= 0; index -= 1) {
     const queued = pendingHostRpcRequests[index];
+
     if (queued?.row.hostId === args.hostId) {
       pendingHostRpcRequests.splice(index, 1);
     }
   }
+
   const socket: TestHostRpcSocket = {
     close() {},
     send(data) {
       const message = hostDaemonServerWsMessageSchema.parse(JSON.parse(data));
+
       if (message.type === "machine.shutdown") {
         deps.hub.unregisterDaemon(args.sessionId);
+
         return;
       }
+
       if (message.type !== "host-rpc.request") {
         return;
       }
+
       const command = hostDaemonRpcCommandSchema.parse(message.command);
+
       if (
         command.type === "plugin.host.dispose" ||
         command.type === "plugin.host.cancel"
@@ -334,8 +403,10 @@ export function registerTestHostRpcCapture(
           }),
           sessionId: args.sessionId,
         });
+
         return;
       }
+
       if (
         command.type === "environment.hook.run" ||
         command.type === "environment.hook.cancel"
@@ -375,8 +446,10 @@ export function registerTestHostRpcCapture(
                 sessionId: args.sessionId,
               }),
           );
+
         return;
       }
+
       if (
         command.type === "plugin.host.call" &&
         args.onPluginHostCall !== undefined
@@ -407,14 +480,22 @@ export function registerTestHostRpcCapture(
               sessionId: args.sessionId,
             }),
         );
+
         return;
       }
+
       if (respondToRuntimeWorkspaceFileCommand(deps, args, message)) {
         return;
       }
+
       if (respondToProviderModelListCommand(deps, args, message)) {
         return;
       }
+
+      if (respondToProviderInstallationStatusCommand(deps, args, message)) {
+        return;
+      }
+
       if (
         command.type === "host.list_branch_options" &&
         !args.queueBranchOptions
@@ -432,8 +513,10 @@ export function registerTestHostRpcCapture(
           }),
           sessionId: args.sessionId,
         });
+
         return;
       }
+
       if (command.type === "host.inspect_git_source") {
         args.onInspectGitSource?.(command);
         deps.hub.recordHostOnlineRpcResponse({
@@ -448,9 +531,12 @@ export function registerTestHostRpcCapture(
           }),
           sessionId: args.sessionId,
         });
+
         return;
       }
+
       const now = Date.now();
+
       const row: CapturedRpcRow = {
         id: `rpc-${message.requestId}`,
         hostId: args.hostId,
@@ -465,6 +551,7 @@ export function registerTestHostRpcCapture(
         fetchedAt: now,
         completedAt: null,
       };
+
       pendingHostRpcRequests.push({
         command,
         row,
@@ -472,7 +559,9 @@ export function registerTestHostRpcCapture(
       });
     },
   };
+
   deps.hub.registerDaemon(args.sessionId, args.hostId, socket);
+
   return socket;
 }
 
@@ -480,6 +569,7 @@ function removePendingHostRpcRequest(requestId: string): void {
   const index = pendingHostRpcRequests.findIndex(
     (queued) => queued.rpcRequest?.requestId === requestId,
   );
+
   if (index >= 0) {
     pendingHostRpcRequests.splice(index, 1);
   }
@@ -496,6 +586,12 @@ function isCapturedRpcForHarness(
       .where(eq(hostDaemonSessions.hostId, queued.row.hostId))
       .get() !== undefined
   );
+}
+
+export function forgetQueuedCommand(queued: QueuedCommand): void {
+  if (queued.rpcRequest) {
+    removePendingHostRpcRequest(queued.rpcRequest.requestId);
+  }
 }
 
 export async function waitForQueuedCommand(
@@ -522,6 +618,7 @@ export async function waitForQueuedCommand(
         ? `${queued.command.type}:${queued.command.pluginId}/${queued.command.method}`
         : queued.command.type,
     );
+
   throw new Error(
     `Timed out waiting for queued command; captured: ${captured.join(", ") || "none"}`,
   );
@@ -549,16 +646,20 @@ export async function reportQueuedCommandSuccess<
   args: { hostId?: string } = {},
 ): Promise<Response> {
   const sessionId = queued.row.sessionId;
+
   if (!sessionId) {
     throw new Error("Queued host RPC is missing sessionId");
   }
+
   if (!queued.rpcRequest) {
     throw new Error("Queued command is missing RPC request metadata");
   }
+
   const parsedResult = parseHostDaemonRpcResultForCommand(
     queued.rpcRequest.command,
     result,
   );
+
   harness.hub.recordHostOnlineRpcResponse({
     message: hostDaemonOnlineRpcResponseMessageSchema.parse({
       type: "host-rpc.response",
@@ -572,6 +673,7 @@ export async function reportQueuedCommandSuccess<
   removePendingHostRpcRequest(queued.rpcRequest.requestId);
   await sleep(0);
   void args;
+
   return new Response(null, { status: 200 });
 }
 
@@ -585,9 +687,11 @@ export async function reportNextEnvironmentAttachSuccess(
       command.type === "environment.attach" &&
       command.initiator?.threadId === threadId,
   );
+
   if (queued.command.type !== "environment.attach") {
     throw new Error("Expected environment.attach command");
   }
+
   await reportQueuedCommandSuccess(harness, queued, {
     path: queued.command.path,
     isGitRepo: true,
@@ -605,12 +709,15 @@ export async function reportQueuedCommandError(
   auth: { hostId?: string } = {},
 ): Promise<Response> {
   const sessionId = queued.row.sessionId;
+
   if (!sessionId) {
     throw new Error("Queued host RPC is missing sessionId");
   }
+
   if (!queued.rpcRequest) {
     throw new Error("Queued command is missing RPC request metadata");
   }
+
   harness.hub.recordHostOnlineRpcResponse({
     message: {
       type: "host-rpc.response",
@@ -625,5 +732,6 @@ export async function reportQueuedCommandError(
   removePendingHostRpcRequest(queued.rpcRequest.requestId);
   await sleep(0);
   void auth;
+
   return new Response(null, { status: 200 });
 }

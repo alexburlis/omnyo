@@ -4,21 +4,23 @@ import {
   listThreadSections,
   normalizeThreadSectionName,
   renameThreadSection,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   publicApiRoutes,
   typedRoutes,
   type PublicApiSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { Hono } from "hono";
 import type { AppDeps } from "../types.js";
 import { ApiError } from "../errors.js";
 
 function requireSectionName(name: string): string {
   const normalized = normalizeThreadSectionName(name);
+
   if (!normalized) {
     throw new ApiError(400, "invalid_request", "Section name cannot be empty");
   }
+
   return normalized;
 }
 
@@ -34,6 +36,7 @@ export function registerThreadSectionRoutes(app: Hono, deps: AppDeps): void {
   const { del, get, patch, post } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
+
   const routes = publicApiRoutes.threadSections;
 
   get(routes.list, (context) => context.json(listThreadSections(deps.db)));
@@ -42,9 +45,11 @@ export function registerThreadSectionRoutes(app: Hono, deps: AppDeps): void {
     const result = createThreadSection(deps.db, deps.hub, {
       name: requireSectionName(payload.name),
     });
+
     if (result.status === "duplicate") {
       throwDuplicateSectionName();
     }
+
     return context.json(result.section, 201);
   });
 
@@ -53,20 +58,25 @@ export function registerThreadSectionRoutes(app: Hono, deps: AppDeps): void {
       id: payload.id,
       name: requireSectionName(payload.name),
     });
+
     if (result.status === "not_found") {
       throw new ApiError(404, "section_not_found", "Section not found");
     }
+
     if (result.status === "duplicate") {
       throwDuplicateSectionName();
     }
+
     return context.json(result.result);
   });
 
   del(routes.delete, (context, payload) => {
     const result = deleteThreadSection(deps.db, deps.hub, { id: payload.id });
+
     if (!result) {
       throw new ApiError(404, "section_not_found", "Section not found");
     }
+
     return context.json(result);
   });
 }

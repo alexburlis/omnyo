@@ -15,6 +15,8 @@ import type {
   SerializedParcelEvent,
 } from "./messages.js";
 
+const MAX_EVENTS_PER_MESSAGE = 10_000;
+
 function serializeEvents(
   events: ParcelWatcherEventBatch,
 ): SerializedParcelEvent[] {
@@ -36,14 +38,17 @@ export function createParcelChildHandler(args: {
 
   async function emitRescan(id: string, dir: string): Promise<void> {
     let entries: string[];
+
     try {
       entries = await args.listEntries(dir);
     } catch {
       return;
     }
+
     if (entries.length === 0) {
       return;
     }
+
     args.send({
       kind: "events",
       id,
@@ -71,8 +76,20 @@ export function createParcelChildHandler(args: {
                 ? "rescan-subscription"
                 : "recycle-child",
             });
+
             return;
           }
+
+          if (events.length > MAX_EVENTS_PER_MESSAGE) {
+            args.send({
+              kind: "events-dropped",
+              id: message.id,
+              count: events.length,
+            });
+
+            return;
+          }
+
           args.send({
             kind: "events",
             id: message.id,
@@ -84,10 +101,13 @@ export function createParcelChildHandler(args: {
       .then(async (subscription) => {
         if (cancelledBeforeReady.delete(message.id)) {
           void subscription.unsubscribe().catch(() => {});
+
           return;
         }
+
         subscriptions.set(message.id, subscription);
         args.send({ kind: "subscribed", id: message.id });
+
         if (message.rescan) {
           await emitRescan(message.id, message.dir);
         }
@@ -108,14 +128,17 @@ export function createParcelChildHandler(args: {
 
   async function handleUnsubscribe(id: string): Promise<void> {
     const subscription = subscriptions.get(id);
+
     if (subscription) {
       subscriptions.delete(id);
+
       try {
         await subscription.unsubscribe();
       } catch {}
     } else {
       cancelledBeforeReady.add(id);
     }
+
     args.send({ kind: "unsubscribed", id });
   }
 
@@ -144,4 +167,13 @@ export function createParcelChildHandler(args: {
       );
     },
   };
+}
+
+export function disposeThenExit(args: {
+  deadlineMs: number;
+  dispose: () => Promise<void>;
+  exit: () => void;
+}): void {
+  setTimeout(args.exit, args.deadlineMs);
+  void args.dispose().finally(args.exit);
 }

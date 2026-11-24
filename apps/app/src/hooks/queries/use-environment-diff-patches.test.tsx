@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { WorkspaceDiffTarget } from "@bb/domain";
+import type { WorkspaceDiffTarget } from "@omnyo/domain";
 import type {
   DiffPatchEntry,
   EnvironmentDiffPatchResponse,
-} from "@bb/server-contract";
-import { createDeferredPromise } from "@bb/test-helpers";
+} from "@omnyo/server-contract";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { sdk } from "@/lib/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -24,7 +24,9 @@ vi.mock("@/lib/sdk", () => ({
 }));
 
 const ENVIRONMENT_ID = "env-1";
+
 const TARGET: WorkspaceDiffTarget = { type: "all", mergeBaseBranch: "main" };
+
 const PATH = "file.ts";
 
 function patchKey() {
@@ -49,10 +51,12 @@ beforeEach(() => {
 describe("useEnvironmentDiffPatches", () => {
   it("aborts in-flight patch fetches when the target changes", async () => {
     const { wrapper } = createQueryClientTestHarness();
+
     const changedTarget: WorkspaceDiffTarget = {
       type: "branch_committed",
       mergeBaseBranch: "main",
     };
+
     const firstFetch = createDeferredPromise<EnvironmentDiffPatchResponse>();
     vi.mocked(sdk.environments.diffPatch).mockReturnValue(firstFetch.promise);
 
@@ -84,6 +88,7 @@ describe("useEnvironmentDiffPatches", () => {
       patch: "diff --git a/file.ts b/file.ts\n+stale\n",
       truncated: false,
     };
+
     const freshPatch: DiffPatchEntry = {
       path: PATH,
       patch: "diff --git a/file.ts b/file.ts\n+fresh\n",
@@ -151,6 +156,7 @@ describe("useEnvironmentDiffPatches", () => {
       patch: "diff --git a/file.ts b/file.ts\n+stale\n",
       truncated: false,
     };
+
     const freshPatch: DiffPatchEntry = {
       path: PATH,
       patch: "diff --git a/file.ts b/file.ts\n+fresh\n",
@@ -214,6 +220,7 @@ describe("useEnvironmentDiffPatches", () => {
     const { wrapper, queryClient } = createQueryClientTestHarness();
 
     const RECONNECT_ENV = "env-reconnect-only";
+
     const reconnectKey = environmentDiffPatchQueryKey(
       RECONNECT_ENV,
       "all",
@@ -226,6 +233,7 @@ describe("useEnvironmentDiffPatches", () => {
       patch: "diff --git a/file.ts b/file.ts\n+stale\n",
       truncated: false,
     };
+
     const freshPatch: DiffPatchEntry = {
       path: PATH,
       patch: "diff --git a/file.ts b/file.ts\n+fresh\n",
@@ -281,16 +289,19 @@ describe("useEnvironmentDiffPatches", () => {
 
   it("refreshes a retained patch without returning its card to loading", async () => {
     const { wrapper, queryClient } = createQueryClientTestHarness();
+
     const currentPatch: DiffPatchEntry = {
       path: PATH,
       patch: "diff --git a/file.ts b/file.ts\n+current\n",
       truncated: false,
     };
+
     const refreshedPatch: DiffPatchEntry = {
       path: PATH,
       patch: "diff --git a/file.ts b/file.ts\n+refreshed\n",
       truncated: false,
     };
+
     const refresh = createDeferredPromise<EnvironmentDiffPatchResponse>();
     vi.mocked(sdk.environments.diffPatch).mockReturnValue(refresh.promise);
 
@@ -298,6 +309,7 @@ describe("useEnvironmentDiffPatches", () => {
       () => useEnvironmentDiffPatches(ENVIRONMENT_ID, { target: TARGET }),
       { wrapper },
     );
+
     act(() => {
       result.current.seedInitialPatches([currentPatch]);
       bumpDiffPatchFreshnessGeneration(ENVIRONMENT_ID);
@@ -333,14 +345,17 @@ describe("useEnvironmentDiffPatches", () => {
 
   it("loads on demand after a failed generation becomes stale", async () => {
     const { wrapper } = createQueryClientTestHarness();
+
     const patch: DiffPatchEntry = {
       path: PATH,
       patch: "fresh",
       truncated: false,
     };
+
     vi.mocked(sdk.environments.diffPatch)
       .mockRejectedValueOnce(new Error("Failed to fetch"))
       .mockResolvedValueOnce(availableResponse(patch));
+
     const { result } = renderHook(
       () => useEnvironmentDiffPatches(ENVIRONMENT_ID, { target: TARGET }),
       { wrapper },
@@ -373,23 +388,28 @@ describe("useEnvironmentDiffPatches", () => {
     const { wrapper, queryClient } = createQueryClientTestHarness();
     const staleRequest = createDeferredPromise<EnvironmentDiffPatchResponse>();
     const freshRequest = createDeferredPromise<EnvironmentDiffPatchResponse>();
+
     const stalePatch: DiffPatchEntry = {
       path: PATH,
       patch: "stale",
       truncated: false,
     };
+
     const freshPatch: DiffPatchEntry = {
       path: PATH,
       patch: "fresh",
       truncated: false,
     };
+
     vi.mocked(sdk.environments.diffPatch)
       .mockReturnValueOnce(staleRequest.promise)
       .mockReturnValueOnce(freshRequest.promise);
+
     const { result } = renderHook(
       () => useEnvironmentDiffPatches(ENVIRONMENT_ID, { target: TARGET }),
       { wrapper },
     );
+
     act(() => {
       result.current.requestPaths({ visible: [PATH], overscan: [] });
     });
@@ -421,8 +441,10 @@ describe("useEnvironmentDiffPatches", () => {
 describe("useEnvironmentDiffPatches cache retention", () => {
   it("keeps patches while a reader is mounted and evicts them one minute after the last reader leaves", () => {
     vi.useFakeTimers();
+
     try {
       const { wrapper, queryClient } = createQueryClientTestHarness();
+
       const patch: DiffPatchEntry = {
         path: PATH,
         patch: "diff --git a/file.ts b/file.ts\n+kept\n",
@@ -433,6 +455,7 @@ describe("useEnvironmentDiffPatches cache retention", () => {
         () => useEnvironmentDiffPatches(ENVIRONMENT_ID, { target: TARGET }),
         { wrapper },
       );
+
       act(() => {
         first.result.current.seedInitialPatches([patch]);
       });
@@ -447,6 +470,7 @@ describe("useEnvironmentDiffPatches cache retention", () => {
         () => useEnvironmentDiffPatches(ENVIRONMENT_ID, { target: TARGET }),
         { wrapper },
       );
+
       first.unmount();
       act(() => {
         vi.advanceTimersByTime(HEAVY_PAYLOAD_GC_TIME_MS * 2);
@@ -463,6 +487,7 @@ describe("useEnvironmentDiffPatches cache retention", () => {
         () => useEnvironmentDiffPatches(ENVIRONMENT_ID, { target: TARGET }),
         { wrapper },
       );
+
       act(() => {
         vi.advanceTimersByTime(HEAVY_PAYLOAD_GC_TIME_MS * 2);
       });

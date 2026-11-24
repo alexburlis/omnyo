@@ -54,6 +54,7 @@ export function replaceStoredProviderModelCatalog(
         },
       })
       .run();
+
     if (pruneWorkspaceRowsFetchedBefore !== null) {
       tx.delete(providerModelCatalogs)
         .where(

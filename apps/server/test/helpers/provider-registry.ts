@@ -5,12 +5,15 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { HostDaemonBridgeLaunch } from "@bb/host-daemon-contract";
-import { buildPluginHost, resolvePluginBuildToolchain } from "@bb/plugin-build";
+import type { HostDaemonBridgeLaunch } from "@omnyo/host-daemon-contract";
+import {
+  buildPluginHost,
+  resolvePluginBuildToolchain,
+} from "@omnyo/plugin-build";
 import {
   validatePluginProviderDeclaration,
   type NormalizedPluginProviderDeclaration,
-} from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/plugin-sdk/internal/host-policy";
 import {
   EMPTY_PROVIDER_NATIVE_ROOTS,
   EMPTY_PROVIDER_RESOLVED_NATIVE_ROOTS,
@@ -19,12 +22,12 @@ import {
   pluginPackageJsonSchema,
   type ProviderInfo,
   type ProviderNativeRootSet,
-} from "@bb/domain";
-import type { PluginProviderDeclaration } from "@get-bb/plugin-sdk";
+} from "@omnyo/domain";
+import type { PluginProviderDeclaration } from "@omnyo/plugin-sdk";
 import {
   captureFirstPartyProviderDeclarations,
   firstPartyPluginRootDir,
-} from "@bb/agent-runtime/test";
+} from "@omnyo/agent-runtime/test";
 import { buildPluginProviderRegistration } from "../../src/services/providers/plugin-provider-registration.js";
 import { readPluginProviderIcon } from "../../src/services/plugins/plugin-runtime.js";
 import {
@@ -55,6 +58,7 @@ export async function loadFirstPartyProviderDeclarations(): Promise<
         ] as const,
     ),
   );
+
   return new Map(entries);
 }
 
@@ -69,7 +73,10 @@ async function declaredIcons(pluginId: string): Promise<Map<string, string>> {
       ),
     ),
   );
-  return new Map(Object.entries(manifest.bb.branding.experimental_icons ?? {}));
+
+  return new Map(
+    Object.entries(manifest.omnyo.branding.experimental_icons ?? {}),
+  );
 }
 
 function providerIconSnapshot(args: {
@@ -79,12 +86,14 @@ function providerIconSnapshot(args: {
 }): { bytes: Uint8Array; contentType: string; hash: string } | null {
   const namespaced =
     args.icon === undefined ? null : parseNamespacedGlyph(args.icon);
+
   const asset =
     namespaced === null
       ? args.icon
       : namespaced.pluginId === args.pluginId
         ? args.icons.get(namespaced.name)
         : undefined;
+
   return readPluginProviderIcon(firstPartyPluginRootDir(args.pluginId), asset);
 }
 
@@ -94,16 +103,20 @@ export async function registerFirstPartyProviders(
     excludePluginIds?: readonly string[];
     unavailablePluginIds?: readonly string[];
     artifacts?: PluginHostArtifactRegistry;
+    installationMaintenance?: boolean;
   } = {},
 ): Promise<void> {
   const excluded = new Set(options.excludePluginIds ?? []);
   const unavailable = new Set(options.unavailablePluginIds ?? []);
+
   for (const pluginId of FIRST_PARTY_PROVIDER_PLUGIN_IDS) {
     if (excluded.has(pluginId)) {
       continue;
     }
+
     const declarations = await captureFirstPartyProviderDeclarations(pluginId);
     const icons = await declaredIcons(pluginId);
+
     if (
       options.artifacts !== undefined &&
       !unavailable.has(pluginId) &&
@@ -111,17 +124,28 @@ export async function registerFirstPartyProviders(
     ) {
       options.artifacts.set(pluginId, stubHostArtifact(pluginId));
     }
+
     for (const declaration of declarations) {
       const icon = providerIconSnapshot({
         pluginId,
         icon: declaration.icon,
         icons,
       });
+
       registry.register({
         ...buildPluginProviderRegistration({
           available: !unavailable.has(pluginId),
           pluginId,
-          declaration,
+          declaration:
+            options.installationMaintenance === false
+              ? {
+                  ...declaration,
+                  maintenance: {
+                    ...declaration.maintenance,
+                    installation: false,
+                  },
+                }
+              : declaration,
           iconHash: null,
           readSettings: NO_PLUGIN_SETTINGS,
         }),
@@ -161,8 +185,9 @@ export function minimalProviderRegistration(args: {
 
 export function stubHostArtifact(pluginId: string): PluginHostArtifactSnapshot {
   const bytes = Buffer.from(`// stub host artifact for ${pluginId}\n`);
-  const path = join(tmpdir(), `bb-stub-host-artifact-${pluginId}.mjs`);
+  const path = join(tmpdir(), `omnyo-stub-host-artifact-${pluginId}.mjs`);
   writeFileSync(path, bytes);
+
   return {
     digest: createHash("sha256").update(bytes).digest("hex"),
     byteLength: bytes.byteLength,
@@ -180,14 +205,18 @@ async function buildFirstPartyBridgeArtifact(
   pluginId: string,
 ): Promise<PluginHostArtifactSnapshot | null> {
   const rootDir = firstPartyPluginRootDir(pluginId);
+
   if (!(await hasHostEntry(rootDir))) {
     return null;
   }
+
   const toolchain = await resolvePluginBuildToolchain(
-    join(tmpdir(), "bb-plugin-build-toolchain"),
+    join(tmpdir(), "omnyo-plugin-build-toolchain"),
   );
+
   const build = await buildPluginHost(rootDir, "0.0.0-test", toolchain);
   const bytes = await readFile(build.jsPath);
+
   return {
     digest: build.artifactDigest,
     byteLength: bytes.byteLength,
@@ -201,11 +230,14 @@ export async function recordFirstPartyProviderBridgeArtifacts(
 ): Promise<void> {
   for (const pluginId of FIRST_PARTY_PROVIDER_PLUGIN_IDS) {
     let build = firstPartyBridgeArtifactBuilds.get(pluginId);
+
     if (!build) {
       build = buildFirstPartyBridgeArtifact(pluginId);
       firstPartyBridgeArtifactBuilds.set(pluginId, build);
     }
+
     const snapshot = await build;
+
     if (snapshot !== null) {
       artifacts.set(pluginId, snapshot);
     }
@@ -214,13 +246,9 @@ export async function recordFirstPartyProviderBridgeArtifacts(
 
 async function hasHostEntry(rootDir: string): Promise<boolean> {
   const raw = await readFile(join(rootDir, "package.json"), "utf8");
-  const parsed: unknown = JSON.parse(raw);
-  return (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    typeof (parsed as { bb?: unknown }).bb === "object" &&
-    (parsed as { bb: { host?: unknown } }).bb.host !== undefined
-  );
+  const manifest = pluginPackageJsonSchema.parse(JSON.parse(raw));
+
+  return manifest.omnyo.host !== undefined;
 }
 
 export function declaredNativeRootSet(
@@ -228,9 +256,11 @@ export function declaredNativeRootSet(
   providerId: string,
 ): ProviderNativeRootSet {
   const registration = registry.get(providerId);
+
   if (registration === null) {
     throw new Error(`provider "${providerId}" is not registered`);
   }
+
   return {
     skills: registration.nativeSkillRoots,
     commands: registration.nativeCommandRoots,
@@ -241,6 +271,7 @@ export function declaredNativeRootSet(
 export async function createTestProviderRegistry(): Promise<ProviderRegistryService> {
   const registry = createProviderRegistryService();
   await registerFirstPartyProviders(registry);
+
   return registry;
 }
 
@@ -269,14 +300,17 @@ export function scriptedEchoProviderRootDir(): string {
 
 export async function buildScriptedEchoProviderArtifact(): Promise<PluginHostArtifactSnapshot> {
   const toolchain = await resolvePluginBuildToolchain(
-    join(tmpdir(), "bb-plugin-build-toolchain"),
+    join(tmpdir(), "omnyo-plugin-build-toolchain"),
   );
+
   const build = await buildPluginHost(
     scriptedEchoProviderRootDir(),
     "0.0.0-test",
     toolchain,
   );
+
   const bytes = await readFile(build.jsPath);
+
   return {
     digest: build.artifactDigest,
     byteLength: bytes.byteLength,
@@ -290,6 +324,7 @@ export async function registerFakeProviders(
   artifacts: PluginHostArtifactRegistry,
 ): Promise<void> {
   const artifact = await buildScriptedEchoProviderArtifact();
+
   for (const providerId of FAKE_PROVIDER_IDS) {
     const pluginId = `provider-${providerId}`;
     registry.register({
@@ -330,20 +365,24 @@ export async function acpProviderDeclarationsFromSetting(
       (declaration) => declaration.id,
     ),
   );
+
   const withSetting = await captureFirstPartyProviderDeclarations(
     "provider-acp",
     {
       settings: { customAgents: JSON.stringify(entries) },
     },
   );
+
   const configured = withSetting.filter(
     (declaration) => !shipped.has(declaration.id),
   );
+
   if (configured.length !== entries.length) {
     throw new Error(
       `the ACP plugin registered ${configured.length} of ${entries.length} configured agents; check the setting entries`,
     );
   }
+
   return configured;
 }
 
@@ -351,9 +390,11 @@ export async function configuredAcpProvider(
   entry: Record<string, JsonValue>,
 ): Promise<{ declaration: PluginProviderDeclaration; pluginId: string }> {
   const [declaration] = await acpProviderDeclarationsFromSetting([entry]);
+
   if (declaration === undefined) {
     throw new Error("the ACP plugin registered no provider for this entry");
   }
+
   return { declaration, pluginId: "provider-acp" };
 }
 
@@ -362,6 +403,7 @@ export async function registerConfiguredAcpProvider(
   entry: Record<string, JsonValue>,
 ): Promise<void> {
   const pluginId = "provider-acp";
+
   for (const declaration of await acpProviderDeclarationsFromSetting([entry])) {
     registry.register({
       ...buildPluginProviderRegistration({

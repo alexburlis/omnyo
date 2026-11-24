@@ -1,5 +1,5 @@
 import type { AcpAgentDefinition } from "./agents.js";
-import type { AcpAgentProbe } from "@get-bb/plugin-sdk/provider-bridge/acp-next";
+import type { AcpAgentProbe } from "@omnyo/plugin-sdk/provider-bridge/acp-next";
 
 export interface AcpProbeApplication {
   agent: AcpAgentDefinition;
@@ -13,12 +13,15 @@ export function applyAcpAgentProbe(
   if (!probe.reachable) {
     return null;
   }
+
   const declaredFork = agent.fork ?? "none";
+
   if (declaredFork === "none" || probe.fork) {
     return null;
   }
+
   return {
     agent: { ...agent, fork: "none" },
-    reason: `the agent does not advertise session/fork, but bb declared fork "${declaredFork}"`,
+    reason: `the agent does not advertise session/fork, but Omnyo declared fork "${declaredFork}"`,
   };
 }

@@ -1,15 +1,22 @@
+import { hostHousekeepingStatusSchema } from "./housekeeping.js";
 import {
   desktopBrowserCommandSchemas,
   desktopBrowserResultSchemas,
 } from "./desktop-browser.js";
+import {
+  desktopBrowserCookieSyncCommandSchemas,
+  desktopBrowserCookieSyncResultSchemas,
+} from "./desktop-browser-cookie-sync.js";
 import {
   serverMoveCommandSchemas,
   serverMoveResultSchemas,
 } from "./server-move.js";
 import {
   availableModelSchema,
+  serviceTierSchema,
   discoveredWorkspacePropertiesSchema,
   dynamicToolSchema,
+  gitActivitySchema,
   gitBranchOptionsSchema,
   gitSourceInspectionSchema,
   instructionModeSchema,
@@ -36,8 +43,16 @@ import {
   FILE_LIST_LIMIT_MAX,
   FILE_LIST_QUERY_MAX_LENGTH,
   flattenPromptInputGroups,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { z } from "zod";
+import {
+  managedPreviewLaunchSchema,
+  managedPreviewStatusSchema,
+} from "./previews.js";
+import {
+  previewTransportCommandSchemas,
+  previewTransportResultSchemas,
+} from "./preview-transport.js";
 import {
   pathsExistRequestSchema,
   pathsExistResponseSchema,
@@ -53,12 +68,13 @@ import {
   providerUsageResultSchema,
   providerUsageSchema,
   providerUsageWindowSchema,
-} from "@bb/provider-bridge-protocol";
+} from "@omnyo/provider-bridge-protocol";
 
 export {
   HOST_ARTIFACT_MAX_BYTES,
   HOST_DAEMON_PROTOCOL_VERSION,
 } from "./protocol.js";
+
 export {
   workspaceResolutionFailureCodeSchema,
   type WorkspaceResolutionFailure,
@@ -69,18 +85,21 @@ export {
   FILE_LIST_EXCLUDE_NAMES_MAX,
   FILE_LIST_LIMIT_MAX,
   FILE_LIST_QUERY_MAX_LENGTH,
-} from "@bb/domain";
+} from "@omnyo/domain";
+
 const INJECTED_SKILL_NAME_PATTERN =
   /^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
 
 export const workspaceContextSchema = z.object({
   workspacePath: z.string().min(1),
 });
+
 export type WorkspaceContext = z.infer<typeof workspaceContextSchema>;
 
 function isConnectBaseDomain(value: string): boolean {
   try {
     const parsed = new URL(`https://${value}`);
+
     return (
       parsed.host === value &&
       parsed.username === "" &&
@@ -105,6 +124,7 @@ export const hostDaemonConnectTunnelIdentitySchema = z
     baseDomain: z.string().min(1).refine(isConnectBaseDomain),
   })
   .strict();
+
 export type HostDaemonConnectTunnelIdentity = z.infer<
   typeof hostDaemonConnectTunnelIdentitySchema
 >;
@@ -152,6 +172,7 @@ export const hostDaemonInjectedSkillSourceSchema = z.discriminatedUnion(
       .strict(),
   ],
 );
+
 export type HostDaemonInjectedSkillSource = z.infer<
   typeof hostDaemonInjectedSkillSourceSchema
 >;
@@ -180,6 +201,7 @@ const hostDaemonBridgeLaunchSchema = z
     envPassthrough: z.array(z.string().min(1)),
   })
   .strict();
+
 export type HostDaemonBridgeLaunch = z.infer<
   typeof hostDaemonBridgeLaunchSchema
 >;
@@ -206,9 +228,48 @@ export const hostDaemonContributedEnvEntrySchema = z
     reason: z.string(),
   })
   .strict();
+
 export type HostDaemonContributedEnvEntry = z.infer<
   typeof hostDaemonContributedEnvEntrySchema
 >;
+
+const hostPreviewStatusCommandSchema = z
+  .object({
+    type: z.literal("host.preview.status"),
+    preview: managedPreviewLaunchSchema,
+  })
+  .strict();
+
+const terminalForegroundCommandSchema = z
+  .object({
+    type: z.literal("terminal.foreground"),
+    terminalId: z.string().min(1),
+  })
+  .strict();
+
+export const terminalForegroundResultSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("idle") }).strict(),
+  z
+    .object({
+      state: z.literal("busy"),
+      command: z.string().min(1).nullable(),
+    })
+    .strict(),
+  z.object({ state: z.literal("unknown") }).strict(),
+]);
+
+export type TerminalForegroundResult = z.infer<
+  typeof terminalForegroundResultSchema
+>;
+
+const hostPreviewEnsureCommandSchema = z
+  .object({
+    type: z.literal("host.preview.ensure"),
+    preview: managedPreviewLaunchSchema,
+    workspaceContext: workspaceContextSchema,
+    contributedEnv: z.array(hostDaemonContributedEnvEntrySchema),
+  })
+  .strict();
 
 const hostDaemonThreadRuntimeContextSchema = z
   .object({
@@ -263,6 +324,7 @@ function refineGroupedInputMatchesFlatInput(
   ctx: z.RefinementCtx,
 ): void {
   if (value.inputGroups === undefined) return;
+
   if (
     JSON.stringify(value.input) ===
     JSON.stringify(flattenPromptInputGroups(value.inputGroups))
@@ -289,6 +351,7 @@ const threadStartCommandSchema = hostDaemonThreadTargetSchema
       .object({
         sourceProviderThreadId: z.string().min(1),
         sourceProviderCheckpointId: z.string().min(1).optional(),
+        restoreArchivedSource: z.boolean().optional(),
       })
       .optional(),
   })
@@ -301,6 +364,7 @@ const threadStartCommandSchema = hostDaemonThreadTargetSchema
         path: ["input"],
       });
     }
+
     refineGroupedInputMatchesFlatInput(value, ctx);
   });
 
@@ -334,6 +398,7 @@ const turnSubmitTargetSchema = z.discriminatedUnion("mode", [
     expectedTurnId: z.string().min(1).nullable(),
   }),
 ]);
+
 export type TurnSubmitTarget = z.infer<typeof turnSubmitTargetSchema>;
 
 const turnSubmitCommandSchema = hostDaemonThreadTargetSchema
@@ -364,6 +429,13 @@ export const threadStopCommandSchema = hostDaemonThreadTargetSchema
 const threadStorageDeleteCommandSchema = hostDaemonThreadTargetSchema.extend({
   type: z.literal("thread.storage.delete"),
 });
+
+const threadSpeedSetCommandSchema = hostDaemonThreadTargetSchema
+  .extend({
+    type: z.literal("thread.speed.set"),
+    serviceTier: serviceTierSchema,
+  })
+  .strict();
 
 const threadGoalClearCommandSchema = hostDaemonThreadTargetSchema
   .extend({
@@ -426,6 +498,7 @@ const hostReadFileIfNoneMatchSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
 export type HostReadFileIfNoneMatch = z.infer<
   typeof hostReadFileIfNoneMatchSchema
 >;
@@ -448,7 +521,7 @@ const hostReadFileCommandSchema = z
     }
   });
 
-export const HOST_FILE_CHUNK_MAX_BYTES = 1024 * 1024;
+export const HOST_FILE_CHUNK_MAX_BYTES = 64 * 1024;
 
 const hostReadFileChunkCommandSchema = z
   .object({
@@ -472,11 +545,14 @@ const hostReadFileChunkResultSchema = z
     mimeType: z.string().nullable(),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
     offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    content: z.string().max(4 * Math.ceil(HOST_FILE_CHUNK_MAX_BYTES / 3)),
+    content: z
+      .instanceof(Uint8Array)
+      .refine((content) => content.byteLength <= HOST_FILE_CHUNK_MAX_BYTES),
   })
   .strict();
 
 const hostReadFileRelativeDotfilePolicySchema = z.enum(["allow", "deny"]);
+
 export type HostReadFileRelativeDotfilePolicy = z.infer<
   typeof hostReadFileRelativeDotfilePolicySchema
 >;
@@ -484,6 +560,7 @@ export type HostReadFileRelativeDotfilePolicy = z.infer<
 const hostReadFileRelativeCommandSchema = z
   .object({
     type: z.literal("host.read_file_relative"),
+    followRootSymlink: z.boolean(),
     rootPath: z.string().min(1),
     path: z.string().min(1),
     dotfiles: hostReadFileRelativeDotfilePolicySchema,
@@ -509,6 +586,8 @@ const fileListExcludeNamesSchema = z
 
 const hostListFilesCommandSchema = z.object({
   type: z.literal("host.list_files"),
+  discovery: z.literal("icons").optional(),
+  followRootSymlink: z.boolean(),
   path: z.string().min(1),
   query: z.string().max(FILE_LIST_QUERY_MAX_LENGTH).optional(),
   limit: z.number().int().positive().max(FILE_LIST_LIMIT_MAX),
@@ -518,6 +597,7 @@ const hostListFilesCommandSchema = z.object({
 });
 
 const hostPathEntryKindSchema = z.enum(["file", "directory"]);
+
 export type HostPathEntryKind = z.infer<typeof hostPathEntryKindSchema>;
 
 const hostPathEntrySchema = z.object({
@@ -527,6 +607,7 @@ const hostPathEntrySchema = z.object({
   score: z.number(),
   positions: z.array(z.number().int().nonnegative()),
 });
+
 export type HostPathEntry = z.infer<typeof hostPathEntrySchema>;
 
 const hostListPathsCommandSchema = z
@@ -580,6 +661,33 @@ const hostBrowseDirectoryCommandSchema = z.object({
 const hostPathsExistCommandSchema = pathsExistRequestSchema
   .extend({
     type: z.literal("host.paths_exist"),
+  })
+  .strict();
+
+const hostAgentProcessesTerminateCommandSchema = z
+  .object({
+    type: z.literal("host.agent_processes.terminate"),
+  })
+  .strict();
+
+const hostAgentProcessesTerminateResultSchema = z
+  .object({
+    contained: z.boolean(),
+    terminatedProcessCount: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const prepareWorkspaceIdentityV1CommandSchema = z
+  .object({
+    type: z.literal("host.prepare_workspace_identity_v1"),
+    rootPath: z.string().min(1),
+  })
+  .strict();
+
+const prepareWorkspaceIdentityV1ResultSchema = z
+  .object({
+    status: z.enum(["current", "adopted"]),
+    rootPath: z.string().min(1),
   })
   .strict();
 
@@ -651,6 +759,7 @@ const pluginHostCallCommandSchema = z
     artifact: pluginHostArtifactSchema,
     callId: z.string().min(1),
     method: z.string().min(1),
+    replacementKey: z.string().min(1).max(128).nullable().default(null),
     input: jsonValueSchema,
     timeoutMs: z.number().int().positive().max(MAX_NODE_TIMER_DELAY_MS),
   })
@@ -670,6 +779,7 @@ const pluginHostDisposeCommandSchema = z
     type: z.literal("plugin.host.dispose"),
     pluginId: z.string().min(1),
     generation: z.string().min(1),
+    includeRetained: z.boolean().default(false),
   })
   .strict();
 
@@ -684,6 +794,7 @@ const directoryEntrySchema = z.object({
   name: z.string(),
   path: z.string(),
 });
+
 export type DirectoryEntry = z.infer<typeof directoryEntrySchema>;
 
 const directoryListingSchema = z.object({
@@ -693,9 +804,11 @@ const directoryListingSchema = z.object({
 });
 
 const hostCommandSourceSchema = z.enum(["skill", "command"]);
+
 export type HostCommandSource = z.infer<typeof hostCommandSourceSchema>;
 
 const hostCommandOriginSchema = z.enum(["project", "user"]);
+
 export type HostCommandOrigin = z.infer<typeof hostCommandOriginSchema>;
 
 const hostProviderCommandSchema = z.object({
@@ -705,6 +818,7 @@ const hostProviderCommandSchema = z.object({
   description: z.string().nullable(),
   argumentHint: z.string().nullable(),
 });
+
 export type HostProviderCommand = z.infer<typeof hostProviderCommandSchema>;
 
 const hostListCommandsCommandSchema = z
@@ -716,16 +830,31 @@ const hostListCommandsCommandSchema = z
   })
   .strict();
 
+const hostListCommandMetadataCommandSchema = hostListCommandsCommandSchema
+  .extend({
+    type: z.literal("host.list_command_metadata"),
+    sharedSkillRoots: providerNativeRootsSchema,
+    projectSkillRead: z
+      .object({
+        limit: z.number().int().positive(),
+        maxFileBytes: z.number().int().positive(),
+        excludeNames: z.array(z.string()),
+      })
+      .strict(),
+  })
+  .strict();
+
 const skillRootKindSchema = z.enum([
-  "bb-project",
-  "bb-data-dir",
-  "bb-builtin",
+  "omnyo-project",
+  "omnyo-data-dir",
+  "omnyo-builtin",
   "provider-project",
   "provider-user",
   "shared-project",
   "shared-user",
   "plugin",
 ]);
+
 export type SkillRootKind = z.infer<typeof skillRootKindSchema>;
 
 const discoveredSkillSchema = z.object({
@@ -736,6 +865,7 @@ const discoveredSkillSchema = z.object({
   rootKind: skillRootKindSchema,
   linked: z.boolean(),
 });
+
 export type DiscoveredSkill = z.infer<typeof discoveredSkillSchema>;
 
 const hostListSkillsCommandSchema = z
@@ -786,13 +916,14 @@ const workspaceProjectSkillFileSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
 export type WorkspaceProjectSkillFile = z.infer<
   typeof workspaceProjectSkillFileSchema
 >;
 
 export const deletableSkillScopeSchema = z.enum([
-  "bb-user",
-  "bb-project",
+  "omnyo-user",
+  "omnyo-project",
   "provider-user",
   "provider-project",
 ]);
@@ -807,23 +938,26 @@ const hostDeleteSkillCommandSchema = z
   })
   .strict()
   .superRefine((command, context) => {
-    if (command.scope === "bb-project" && command.cwd === null) {
+    if (command.scope === "omnyo-project" && command.cwd === null) {
       context.addIssue({
         code: "custom",
         path: ["cwd"],
-        message: "cwd is required to delete a bb-project skill",
+        message: "cwd is required to delete an Omnyo project skill",
       });
     }
-    const isBbScope =
-      command.scope === "bb-user" || command.scope === "bb-project";
-    if (isBbScope && command.rootPath !== null) {
+
+    const isOwnedScope =
+      command.scope === "omnyo-user" || command.scope === "omnyo-project";
+
+    if (isOwnedScope && command.rootPath !== null) {
       context.addIssue({
         code: "custom",
         path: ["rootPath"],
-        message: "rootPath must be null for a bb skill",
+        message: "rootPath must be null for an Omnyo skill",
       });
     }
-    if (!isBbScope && command.rootPath === null) {
+
+    if (!isOwnedScope && command.rootPath === null) {
       context.addIssue({
         code: "custom",
         path: ["rootPath"],
@@ -832,12 +966,12 @@ const hostDeleteSkillCommandSchema = z
     }
   });
 
-const writableBbSkillScopeSchema = z.enum(["bb-user", "bb-project"]);
+const writableOwnedSkillScopeSchema = z.enum(["omnyo-user", "omnyo-project"]);
 
 const hostWriteSkillCommandSchema = z
   .object({
     type: z.literal("host.write_skill"),
-    scope: writableBbSkillScopeSchema,
+    scope: writableOwnedSkillScopeSchema,
     name: z.string().min(1),
     cwd: z.string().min(1).nullable(),
     content: z.string().min(1).max(1_000_000),
@@ -845,11 +979,11 @@ const hostWriteSkillCommandSchema = z
   })
   .strict()
   .superRefine((command, context) => {
-    if (command.scope === "bb-project" && command.cwd === null) {
+    if (command.scope === "omnyo-project" && command.cwd === null) {
       context.addIssue({
         code: "custom",
         path: ["cwd"],
-        message: "cwd is required to edit a bb-project skill",
+        message: "cwd is required to edit an Omnyo project skill",
       });
     }
   });
@@ -861,6 +995,7 @@ const hostInstallGlobalSkillSchema = z
     entryPath: z.string().min(1),
   })
   .strict();
+
 export type HostInstallGlobalSkill = z.infer<
   typeof hostInstallGlobalSkillSchema
 >;
@@ -906,6 +1041,7 @@ const providerListModelsCommandSchema = z.object({
   providerId: z.string().min(1),
   bridgeLaunch: hostDaemonBridgeLaunchSchema,
   cwd: z.string().min(1).optional(),
+  contributedEnv: z.array(hostDaemonContributedEnvEntrySchema).default([]),
 });
 
 const providerHealthCommandSchema = z
@@ -934,10 +1070,37 @@ const providerInstallationRunCommandSchema = z
   })
   .strict();
 
+const providerInstallationStartCommandSchema =
+  providerInstallationRunCommandSchema.extend({
+    type: z.literal("provider.installation.start"),
+    operationId: z.string().min(1).max(128),
+  });
+
+const providerInstallationGetCommandSchema = z
+  .object({
+    type: z.literal("provider.installation.get"),
+    operationId: z.string().min(1).max(128),
+  })
+  .strict();
+
+export const providerInstallationOperationSchema = z
+  .object({
+    operationId: z.string().min(1).max(128),
+    providerId: z.string().min(1),
+    action: providerCliInstallActionKindSchema,
+    state: z.enum(["installing", "verifying", "completed", "failed"]),
+    events: z.array(providerCliInstallEventSchema),
+  })
+  .strict();
+
+export type ProviderInstallationOperation = z.infer<
+  typeof providerInstallationOperationSchema
+>;
+
 export type {
   ProviderHealth,
   ProviderHealthResult,
-} from "@bb/provider-bridge-protocol";
+} from "@omnyo/provider-bridge-protocol";
 
 const provisionInitiatorSchema = z
   .object({
@@ -963,6 +1126,7 @@ const unmanagedEnvironmentProvisionCommandSchema =
 
 const environmentProvisionCommandSchema =
   unmanagedEnvironmentProvisionCommandSchema;
+
 export type EnvironmentProvisionCommand = z.infer<
   typeof environmentProvisionCommandSchema
 >;
@@ -977,6 +1141,7 @@ const environmentProvisionCancelCommandSchema =
 const workspaceStatusCommandSchema = hostDaemonWorkspaceTargetSchema.extend({
   type: z.literal("workspace.status"),
   mergeBaseBranch: gitBranchNameSchema.optional(),
+  maxFiles: z.number().int().positive(),
   maxUntrackedLineStatFiles: z.number().int().positive(),
   maxUntrackedLineStatBytes: z.number().int().positive(),
 });
@@ -1001,6 +1166,23 @@ const workspaceDiffPatchCommandSchema = hostDaemonWorkspaceTargetSchema.extend({
   paths: z.array(z.string()),
   maxBytesPerFile: z.number().int().positive(),
 });
+
+const workspaceGitActivityCommandSchema =
+  hostDaemonWorkspaceTargetSchema.extend({
+    type: z.literal("workspace.gitActivity"),
+    repositoryPath: z.string().optional(),
+    windows: z
+      .array(
+        z.object({
+          startMs: z.number().int().nonnegative(),
+          endMs: z.number().int().nonnegative(),
+        }),
+      )
+      .min(1)
+      .max(200),
+    maxCommits: z.number().int().positive(),
+    maxPushes: z.number().int().positive(),
+  });
 
 const workspacePullRequestCommandSchema =
   hostDaemonWorkspaceTargetSchema.extend({
@@ -1082,11 +1264,18 @@ const fileWriteResultSchema = z.discriminatedUnion("outcome", [
     .strict(),
 ]);
 
+const hostWorkspaceStatusSchema = workspaceStatusSchema.extend({
+  mergeBase: workspaceStatusSchema.shape.mergeBase
+    .unwrap()
+    .extend({ squashMergeCheckComplete: z.boolean().default(true) })
+    .nullable(),
+});
+
 const workspaceStatusResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
       outcome: z.literal("available"),
-      workspaceStatus: workspaceStatusSchema,
+      workspaceStatus: hostWorkspaceStatusSchema,
     })
     .strict(),
   z
@@ -1153,6 +1342,21 @@ const workspaceDiffPatchResultSchema = z.discriminatedUnion("outcome", [
     .strict(),
 ]);
 
+const workspaceGitActivityResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("available"),
+      activity: gitActivitySchema,
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("unavailable"),
+      failure: workspaceResolutionFailureSchema,
+    })
+    .strict(),
+]);
+
 const workspacePullRequestResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
@@ -1196,6 +1400,22 @@ const pluginHostDisposeResultSchema = z
 const commandListResultSchema = z.object({
   commands: z.array(hostProviderCommandSchema),
 });
+
+const commandMetadataResultSchema = z
+  .object({
+    commands: z.array(hostProviderCommandSchema),
+    projectSkills: z.array(
+      z
+        .object({
+          name: z.string(),
+          description: z.string(),
+          sourceRootPath: z.string(),
+        })
+        .strict(),
+    ),
+    sharedSkills: z.array(discoveredSkillSchema),
+  })
+  .strict();
 
 const skillListResultSchema = z.object({
   skills: z.array(discoveredSkillSchema),
@@ -1243,6 +1463,7 @@ const globalSkillsStatusResultSchema = z
     ),
   })
   .strict();
+
 export type HostGlobalSkillsStatusResult = z.infer<
   typeof globalSkillsStatusResultSchema
 >;
@@ -1270,7 +1491,15 @@ const providerListModelsResultSchema = z.object({
 const threadStartResultSchema = z.object({
   providerThreadId: z.string().min(1),
 });
+
 export const COMPETING_TURN_ERROR_CODE = "competing_turn" as const;
+
+export const STALE_TURN_ERROR_CODE = "stale_turn" as const;
+
+export const STEER_UNCONFIRMED_ERROR_CODE = "steer_unconfirmed" as const;
+
+export const TURN_START_UNCONFIRMED_ERROR_CODE =
+  "turn_start_unconfirmed" as const;
 
 const threadStopResultSchema = z
   .object({
@@ -1278,7 +1507,9 @@ const threadStopResultSchema = z
     activeTurnRetained: z.boolean().optional(),
   })
   .strict();
+
 const emptyCommandResultSchema = z.object({});
+
 const turnSubmitTraceSpanNameSchema = z.enum([
   "lanes.entered",
   "skills.staged",
@@ -1287,9 +1518,11 @@ const turnSubmitTraceSpanNameSchema = z.enum([
   "bridge.turnStarted",
   "events.flushed",
 ]);
+
 export type TurnSubmitTraceSpanName = z.infer<
   typeof turnSubmitTraceSpanNameSchema
 >;
+
 const turnSubmitTraceSchema = z
   .object({
     spans: z.array(
@@ -1302,21 +1535,30 @@ const turnSubmitTraceSchema = z
     ),
   })
   .strict();
+
 export type TurnSubmitTrace = z.infer<typeof turnSubmitTraceSchema>;
+
 const turnSubmitResultSchema = z.object({ trace: turnSubmitTraceSchema });
+
 const projectPathResultSchema = z.object({ path: z.string().min(1) }).strict();
+
 const projectInspectResultSchema = projectPathResultSchema
   .extend({ gitRemoteUrl: z.string().min(1).nullable() })
   .strict();
+
 const projectCloneResultSchema = projectInspectResultSchema;
+
 const environmentProvisionResultSchema = discoveredWorkspacePropertiesSchema;
+
 const environmentProvisionCancelResultSchema = z.object({
   aborted: z.boolean(),
 });
+
 const workspaceCommitResultSchema = z.object({
   commitSha: z.string().min(1),
   commitSubject: z.string().min(1),
 });
+
 const workspacePullRequestActionResultSchema = z.object({}).strict();
 
 export { providerUsageWindowSchema };
@@ -1324,12 +1566,13 @@ export { providerUsageWindowSchema };
 export type {
   ProviderUsage,
   ProviderUsageResult,
-} from "@bb/provider-bridge-protocol";
+} from "@omnyo/provider-bridge-protocol";
 
 export const providerUsageResponseSchema = z.record(
   z.string().min(1),
   providerUsageSchema,
 );
+
 export type ProviderUsageResponse = z.infer<typeof providerUsageResponseSchema>;
 
 const providerUsageCommandSchema = z
@@ -1354,6 +1597,7 @@ export const discoveredRepoSchema = z
     originUrl: z.string().min(1).nullable(),
   })
   .strict();
+
 export type DiscoveredRepo = z.infer<typeof discoveredRepoSchema>;
 
 export const discoverReposResultSchema = z
@@ -1362,6 +1606,7 @@ export const discoverReposResultSchema = z
     truncated: z.boolean(),
   })
   .strict();
+
 export type DiscoverReposResult = z.infer<typeof discoverReposResultSchema>;
 
 const discoverReposCommandSchema = z
@@ -1374,7 +1619,9 @@ const discoverReposCommandSchema = z
   .strict();
 
 type HostDaemonCommandTransport = "settled" | "onlineRpc";
+
 export type HostDaemonCommandEnvironmentLane = "read" | "write";
+
 type HostDaemonFlushEventsBeforeResult = boolean | "when-initiated";
 
 interface HostDaemonCommandDescriptor<
@@ -1418,10 +1665,92 @@ function defineHostDaemonCommandDescriptor<
 }
 
 export const hostDaemonCommandRegistry = {
+  "preview.http": defineHostDaemonCommandDescriptor({
+    type: "preview.http",
+    schema: previewTransportCommandSchemas["preview.http"],
+    resultSchema: previewTransportResultSchemas["preview.http"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "preview.socket.open": defineHostDaemonCommandDescriptor({
+    type: "preview.socket.open",
+    schema: previewTransportCommandSchemas["preview.socket.open"],
+    resultSchema: previewTransportResultSchemas["preview.socket.open"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "preview.socket.read": defineHostDaemonCommandDescriptor({
+    type: "preview.socket.read",
+    schema: previewTransportCommandSchemas["preview.socket.read"],
+    resultSchema: previewTransportResultSchemas["preview.socket.read"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "preview.socket.write": defineHostDaemonCommandDescriptor({
+    type: "preview.socket.write",
+    schema: previewTransportCommandSchemas["preview.socket.write"],
+    resultSchema: previewTransportResultSchemas["preview.socket.write"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "preview.socket.close": defineHostDaemonCommandDescriptor({
+    type: "preview.socket.close",
+    schema: previewTransportCommandSchemas["preview.socket.close"],
+    resultSchema: previewTransportResultSchemas["preview.socket.close"],
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "host.preview.status": defineHostDaemonCommandDescriptor({
+    type: "host.preview.status",
+    schema: hostPreviewStatusCommandSchema,
+    resultSchema: managedPreviewStatusSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "terminal.foreground": defineHostDaemonCommandDescriptor({
+    type: "terminal.foreground",
+    schema: terminalForegroundCommandSchema,
+    resultSchema: terminalForegroundResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "host.preview.ensure": defineHostDaemonCommandDescriptor({
+    type: "host.preview.ensure",
+    schema: hostPreviewEnsureCommandSchema,
+    resultSchema: managedPreviewStatusSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
   "desktop.browser.list_instances": defineHostDaemonCommandDescriptor({
     type: "desktop.browser.list_instances",
     schema: desktopBrowserCommandSchemas["desktop.browser.list_instances"],
     resultSchema: desktopBrowserResultSchemas["desktop.browser.list_instances"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "desktop.browser.profile_renderer": defineHostDaemonCommandDescriptor({
+    type: "desktop.browser.profile_renderer",
+    schema: desktopBrowserCommandSchemas["desktop.browser.profile_renderer"],
+    resultSchema:
+      desktopBrowserResultSchemas["desktop.browser.profile_renderer"],
     transport: "onlineRpc",
     retryable: false,
     flushEventsBeforeResult: false,
@@ -1521,6 +1850,47 @@ export const hostDaemonCommandRegistry = {
     flushEventsBeforeResult: false,
     envLane: null,
   }),
+  "desktop.browser.cookie_sync_status": defineHostDaemonCommandDescriptor({
+    type: "desktop.browser.cookie_sync_status",
+    schema:
+      desktopBrowserCookieSyncCommandSchemas[
+        "desktop.browser.cookie_sync_status"
+      ],
+    resultSchema:
+      desktopBrowserCookieSyncResultSchemas[
+        "desktop.browser.cookie_sync_status"
+      ],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "desktop.browser.cookie_sync_configure": defineHostDaemonCommandDescriptor({
+    type: "desktop.browser.cookie_sync_configure",
+    schema:
+      desktopBrowserCookieSyncCommandSchemas[
+        "desktop.browser.cookie_sync_configure"
+      ],
+    resultSchema:
+      desktopBrowserCookieSyncResultSchemas[
+        "desktop.browser.cookie_sync_configure"
+      ],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "desktop.browser.cookie_sync_run": defineHostDaemonCommandDescriptor({
+    type: "desktop.browser.cookie_sync_run",
+    schema:
+      desktopBrowserCookieSyncCommandSchemas["desktop.browser.cookie_sync_run"],
+    resultSchema:
+      desktopBrowserCookieSyncResultSchemas["desktop.browser.cookie_sync_run"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
   "thread.rewind.discard": defineHostDaemonCommandDescriptor({
     type: "thread.rewind.discard",
     schema: threadRewindDiscardCommandSchema,
@@ -1575,6 +1945,15 @@ export const hostDaemonCommandRegistry = {
     flushEventsBeforeResult: true,
     envLane: null,
   }),
+  "thread.speed.set": defineHostDaemonCommandDescriptor({
+    type: "thread.speed.set",
+    schema: threadSpeedSetCommandSchema,
+    resultSchema: z.object({ ok: z.literal(true) }).strict(),
+    transport: "settled",
+    retryable: false,
+    flushEventsBeforeResult: true,
+    envLane: "read",
+  }),
   "thread.goal.clear": defineHostDaemonCommandDescriptor({
     type: "thread.goal.clear",
     schema: threadGoalClearCommandSchema,
@@ -1626,7 +2005,7 @@ export const hostDaemonCommandRegistry = {
     resultSchema: emptyCommandResultSchema,
     transport: "settled",
     retryable: false,
-    flushEventsBeforeResult: true,
+    flushEventsBeforeResult: false,
     envLane: null,
   }),
   "environment.attach": defineHostDaemonCommandDescriptor({
@@ -1737,6 +2116,24 @@ export const hostDaemonCommandRegistry = {
     flushEventsBeforeResult: false,
     envLane: null,
   }),
+  "host.agent_processes.terminate": defineHostDaemonCommandDescriptor({
+    type: "host.agent_processes.terminate",
+    schema: hostAgentProcessesTerminateCommandSchema,
+    resultSchema: hostAgentProcessesTerminateResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "host.prepare_workspace_identity_v1": defineHostDaemonCommandDescriptor({
+    type: "host.prepare_workspace_identity_v1",
+    schema: prepareWorkspaceIdentityV1CommandSchema,
+    resultSchema: prepareWorkspaceIdentityV1ResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
   "project.inspect": defineHostDaemonCommandDescriptor({
     type: "project.inspect",
     schema: projectInspectCommandSchema,
@@ -1829,6 +2226,15 @@ export const hostDaemonCommandRegistry = {
     flushEventsBeforeResult: false,
     envLane: null,
   }),
+  "host.list_command_metadata": defineHostDaemonCommandDescriptor({
+    type: "host.list_command_metadata",
+    schema: hostListCommandMetadataCommandSchema,
+    resultSchema: commandMetadataResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
   "host.list_skills": defineHostDaemonCommandDescriptor({
     type: "host.list_skills",
     schema: hostListSkillsCommandSchema,
@@ -1871,6 +2277,15 @@ export const hostDaemonCommandRegistry = {
     resultSchema: installGlobalSkillsResultSchema,
     transport: "onlineRpc",
     retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "host.housekeeping.status": defineHostDaemonCommandDescriptor({
+    type: "host.housekeeping.status",
+    schema: z.object({ type: z.literal("host.housekeeping.status") }).strict(),
+    resultSchema: hostHousekeepingStatusSchema,
+    transport: "onlineRpc",
+    retryable: true,
     flushEventsBeforeResult: false,
     envLane: null,
   }),
@@ -1973,6 +2388,59 @@ export const hostDaemonCommandRegistry = {
     flushEventsBeforeResult: false,
     envLane: null,
   }),
+  "provider.installation.start": defineHostDaemonCommandDescriptor({
+    type: "provider.installation.start",
+    schema: providerInstallationStartCommandSchema,
+    resultSchema: providerInstallationOperationSchema,
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "provider.installation.get": defineHostDaemonCommandDescriptor({
+    type: "provider.installation.get",
+    schema: providerInstallationGetCommandSchema,
+    resultSchema: z
+      .object({
+        operation: providerInstallationOperationSchema.nullable(),
+        held: z.boolean(),
+        holdOwner: z.string().nullable(),
+      })
+      .strict(),
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "runtime_update.acquire": defineHostDaemonCommandDescriptor({
+    type: "runtime_update.acquire",
+    schema: z
+      .object({
+        type: z.literal("runtime_update.acquire"),
+        ownerId: z.string().min(1).max(128),
+        closePluginLeases: z.array(z.string().min(1).max(128)).max(32),
+      })
+      .strict(),
+    resultSchema: z.object({ held: z.literal(true) }).strict(),
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "runtime_update.release": defineHostDaemonCommandDescriptor({
+    type: "runtime_update.release",
+    schema: z
+      .object({
+        type: z.literal("runtime_update.release"),
+        ownerId: z.string().min(1).max(128),
+      })
+      .strict(),
+    resultSchema: z.object({ released: z.literal(true) }).strict(),
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
   "provider.usage": defineHostDaemonCommandDescriptor({
     type: "provider.usage",
     schema: providerUsageCommandSchema,
@@ -2027,12 +2495,58 @@ export const hostDaemonCommandRegistry = {
     flushEventsBeforeResult: false,
     envLane: "read",
   }),
+  "workspace.gitActivity": defineHostDaemonCommandDescriptor({
+    type: "workspace.gitActivity",
+    schema: workspaceGitActivityCommandSchema,
+    resultSchema: workspaceGitActivityResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: "read",
+  }),
   "workspace.pull_request": defineHostDaemonCommandDescriptor({
     type: "workspace.pull_request",
     schema: workspacePullRequestCommandSchema,
     resultSchema: workspacePullRequestResultSchema,
     transport: "onlineRpc",
     retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "server_access.prove_current_primary": defineHostDaemonCommandDescriptor({
+    type: "server_access.prove_current_primary",
+    schema: serverMoveCommandSchemas["server_access.prove_current_primary"],
+    resultSchema:
+      serverMoveResultSchemas["server_access.prove_current_primary"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "server_access.inspect_direct_probe": defineHostDaemonCommandDescriptor({
+    type: "server_access.inspect_direct_probe",
+    schema: serverMoveCommandSchemas["server_access.inspect_direct_probe"],
+    resultSchema: serverMoveResultSchemas["server_access.inspect_direct_probe"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "server_access.probe_direct": defineHostDaemonCommandDescriptor({
+    type: "server_access.probe_direct",
+    schema: serverMoveCommandSchemas["server_access.probe_direct"],
+    resultSchema: serverMoveResultSchemas["server_access.probe_direct"],
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "server_access.release_direct_probe": defineHostDaemonCommandDescriptor({
+    type: "server_access.release_direct_probe",
+    schema: serverMoveCommandSchemas["server_access.release_direct_probe"],
+    resultSchema: serverMoveResultSchemas["server_access.release_direct_probe"],
+    transport: "onlineRpc",
+    retryable: false,
     flushEventsBeforeResult: false,
     envLane: null,
   }),
@@ -2093,21 +2607,27 @@ export const hostDaemonCommandRegistry = {
 };
 
 type HostDaemonCommandRegistry = typeof hostDaemonCommandRegistry;
+
 type AnyHostDaemonCommandDescriptor =
   HostDaemonCommandRegistry[keyof HostDaemonCommandRegistry];
+
 type HostDaemonCommandDescriptorForTransport<
   Transport extends HostDaemonCommandTransport,
 > = Extract<AnyHostDaemonCommandDescriptor, { transport: Transport }>;
+
 type HostDaemonRetryableOnlineRpcCommandDescriptor = Extract<
   HostDaemonCommandDescriptorForTransport<"onlineRpc">,
   { retryable: true }
 >;
+
 type HostDaemonCommandTypeForTransport<
   Transport extends HostDaemonCommandTransport,
 > = HostDaemonCommandDescriptorForTransport<Transport>["type"];
+
 type HostDaemonSchemaForTransport<
   Transport extends HostDaemonCommandTransport,
 > = HostDaemonCommandDescriptorForTransport<Transport>["schema"];
+
 type HostDaemonRetryableOnlineRpcCommandSchema =
   HostDaemonRetryableOnlineRpcCommandDescriptor["schema"];
 
@@ -2121,13 +2641,16 @@ type HostDaemonResultSchemaMapForTransport<
 
 type HostDaemonCommandResultSchemaMap =
   HostDaemonResultSchemaMapForTransport<"settled">;
+
 type HostDaemonOnlineRpcResultSchemaMap =
   HostDaemonResultSchemaMapForTransport<"onlineRpc">;
 
 export type HostDaemonSettledCommandType =
   HostDaemonCommandTypeForTransport<"settled">;
+
 export type HostDaemonOnlineRpcCommandType =
   HostDaemonCommandTypeForTransport<"onlineRpc">;
+
 export type HostDaemonRpcCommandType =
   | HostDaemonSettledCommandType
   | HostDaemonOnlineRpcCommandType;
@@ -2135,11 +2658,14 @@ export type HostDaemonRpcCommandType =
 export type HostDaemonCommand = z.infer<
   HostDaemonSchemaForTransport<"settled">
 >;
+
 export type HostDaemonOnlineRpcCommand = z.infer<
   HostDaemonSchemaForTransport<"onlineRpc">
 >;
+
 export type HostDaemonRetryableOnlineRpcCommand =
   z.infer<HostDaemonRetryableOnlineRpcCommandSchema>;
+
 export type HostDaemonRpcCommand =
   | HostDaemonCommand
   | HostDaemonOnlineRpcCommand;
@@ -2171,7 +2697,9 @@ function hostDaemonCommandSchemaForTransport<
   const schemas = hostDaemonCommandDescriptorsForTransport(transport).map(
     (descriptor) => descriptor.schema,
   );
-  return z.union(
+
+  return z.discriminatedUnion(
+    "type",
     schemas as [
       HostDaemonSchemaForTransport<Transport>,
       HostDaemonSchemaForTransport<Transport>,
@@ -2193,12 +2721,14 @@ function hostDaemonResultSchemaByTypeForTransport<
 
 export const HOST_DAEMON_SETTLED_COMMAND_TYPES =
   hostDaemonCommandTypesForTransport("settled");
+
 export const HOST_DAEMON_ONLINE_RPC_COMMAND_TYPES =
   hostDaemonCommandTypesForTransport("onlineRpc");
 
 const hostDaemonSettledCommandTypes = new Set<string>(
   HOST_DAEMON_SETTLED_COMMAND_TYPES,
 );
+
 const hostDaemonOnlineRpcCommandTypes = new Set<string>(
   HOST_DAEMON_ONLINE_RPC_COMMAND_TYPES,
 );
@@ -2229,6 +2759,7 @@ function isHostDaemonOnlineRpcCommandTypeValue(
 
 export const hostDaemonSettledCommandTypeSchema =
   z.custom<HostDaemonSettledCommandType>(isHostDaemonSettledCommandTypeValue);
+
 const hostDaemonOnlineRpcCommandTypeSchema =
   z.custom<HostDaemonOnlineRpcCommandType>(
     isHostDaemonOnlineRpcCommandTypeValue,
@@ -2236,12 +2767,15 @@ const hostDaemonOnlineRpcCommandTypeSchema =
 
 export const hostDaemonCommandSchema =
   hostDaemonCommandSchemaForTransport("settled");
+
 export const hostDaemonOnlineRpcCommandSchema =
   hostDaemonCommandSchemaForTransport("onlineRpc");
+
 export const hostDaemonRpcCommandSchema = z.union([
   hostDaemonOnlineRpcCommandSchema,
   hostDaemonCommandSchema,
 ]);
+
 export const hostDaemonRpcCommandTypeSchema = z.union([
   hostDaemonOnlineRpcCommandTypeSchema,
   hostDaemonSettledCommandTypeSchema,
@@ -2255,6 +2789,7 @@ export function isHostDaemonCommand(
 
 export const hostDaemonCommandResultSchemaByType =
   hostDaemonResultSchemaByTypeForTransport("settled");
+
 export const hostDaemonOnlineRpcResultSchemaByType =
   hostDaemonResultSchemaByTypeForTransport("onlineRpc");
 
@@ -2289,9 +2824,11 @@ export function shouldFlushEventsBeforeReportingCommandResult(
 ): boolean {
   const policy =
     hostDaemonCommandRegistry[command.type].flushEventsBeforeResult;
+
   if (policy === "when-initiated") {
     return "initiator" in command && command.initiator !== null;
   }
+
   return policy;
 }
 
@@ -2355,5 +2892,6 @@ export function parseHostDaemonRpcResultForCommand(
   if (isHostDaemonCommand(command)) {
     return parseHostDaemonCommandResultForCommand(command, value);
   }
+
   return parseHostDaemonOnlineRpcResultForCommand(command, value);
 }

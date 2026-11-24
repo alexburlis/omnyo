@@ -1,5 +1,5 @@
-import type { ClientTurnRequestId, ThreadEvent } from "@bb/domain";
-import { requireThreadEventScopeTurnId } from "@bb/domain";
+import type { ClientTurnRequestId, ThreadEvent } from "@omnyo/domain";
+import { requireThreadEventScopeTurnId } from "@omnyo/domain";
 import type { EventMeta } from "./event-decode.js";
 
 export interface ThreadEventWithMetaLike {
@@ -28,6 +28,7 @@ export function buildRejectedClientRequestById(
   events: readonly ThreadEventWithMetaLike[],
 ): Map<ClientTurnRequestId, EventMeta> {
   const rejectedRequestById = new Map<ClientTurnRequestId, EventMeta>();
+
   for (const { event, meta } of [
     ...events,
     ...context.rejectedClientRequestEvents,
@@ -39,6 +40,7 @@ export function buildRejectedClientRequestById(
       rejectedRequestById.set(event.requestId, meta);
     }
   }
+
   return rejectedRequestById;
 }
 
@@ -66,6 +68,7 @@ function addAcceptedClientRequestEvents({
     if (event.type !== "turn/input/accepted") {
       continue;
     }
+
     onAccepted({
       meta,
       requestId: event.clientRequestId,
@@ -85,15 +88,18 @@ export function buildAcceptedClientRequestById({
   AcceptedClientRequest
 > {
   const acceptedById = new Map<ClientTurnRequestId, AcceptedClientRequest>();
+
   const addAccepted = (accepted: AcceptedClientRequestEvent): void => {
     if (acceptedById.has(accepted.requestId)) {
       return;
     }
+
     acceptedById.set(accepted.requestId, {
       meta: accepted.meta,
       turnId: accepted.turnId,
     });
   };
+
   addAcceptedClientRequestEvents({
     events,
     onAccepted: addAccepted,
@@ -102,5 +108,6 @@ export function buildAcceptedClientRequestById({
     events: context.acceptedClientRequestEvents,
     onAccepted: addAccepted,
   });
+
   return acceptedById;
 }

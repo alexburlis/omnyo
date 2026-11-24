@@ -1,20 +1,22 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   PluginCliError,
   cliCommand,
   defineCli,
-  type BbPluginApi,
-} from "@get-bb/plugin-sdk";
+  type PluginApi,
+} from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import {
   addPushSubscriptionInputSchema,
   CLIENT_NOTIFICATION_CHANNEL,
+  clientNotificationSchema,
   THREAD_NOTIFICATIONS_CHANNEL,
   clientChannelSchema,
   DEFAULT_EXPO_PUSH_URL,
   DEVICE_LABEL_MAX_LENGTH,
   EXPO_PUSH_TOKEN_MAX_LENGTH,
   pushNotificationsRpcContract,
+  type queuedNotificationInputSchema,
   type ClientNotification,
   type PushSubscriptionSummary,
   type ThreadNotificationsUpdate,
@@ -32,19 +34,29 @@ import {
   type CreatePushSenderArgs,
   type LastSendOutcome,
 } from "./sender.js";
+import { createPresence } from "./presence.js";
 import { createPushSubscriptionStore } from "./subscriptions.js";
 
 interface PushNotificationsPluginOptions {
   coalesceMs?: number;
+  assessmentWaitMs?: number;
+  assessmentStartGraceMs?: number;
+  assessmentPollMs?: number;
   createId?: () => string;
   fetch?: CreatePushSenderArgs["fetch"];
   now?: () => number;
+  presenceIdleMs?: number;
+  presenceStaleMs?: number;
+  receiptDelayMs?: number;
 }
 
 interface StatusView {
   enabled: true;
   subscriptionCount: number;
   mobileEnabled: boolean;
+  mobileOnlyWhenAway: boolean;
+  desktopPresence: "active" | "away";
+  heldMobileCount: number;
   webEnabled: boolean;
   desktopEnabled: boolean;
   defaultLevel: string;
@@ -62,6 +74,7 @@ function formatSubscriptions(
   subscriptions: readonly PushSubscriptionSummary[],
 ): string {
   if (subscriptions.length === 0) return "No push devices registered";
+
   return [
     "ID\tDevice\tPlatform\tLast seen\tToken suffix",
     ...subscriptions.map((subscription) =>
@@ -78,9 +91,11 @@ function formatSubscriptions(
 
 function formatLastOutcome(outcome: LastSendOutcome): string {
   if (outcome.status === "never") return "Never";
+
   if (outcome.status === "sent") {
     return `Sent ${outcome.sentCount} at ${new Date(outcome.at).toISOString()}`;
   }
+
   return `Failed at ${new Date(outcome.at).toISOString()}: ${outcome.reason}`;
 }
 
@@ -88,6 +103,9 @@ function formatStatus(status: StatusView): string {
   return [
     `Enabled: ${status.enabled}`,
     `Mobile: ${status.mobileEnabled}`,
+    `Mobile only when away: ${status.mobileOnlyWhenAway}`,
+    `Desktop presence: ${status.desktopPresence}`,
+    `Held for phone: ${status.heldMobileCount}`,
     `Web: ${status.webEnabled}`,
     `Desktop: ${status.desktopEnabled}`,
     `Default level: ${status.defaultLevel}`,
@@ -107,6 +125,7 @@ function formatThreadNotifications(
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
+
   return new Promise((resolve) => {
     signal.addEventListener("abort", () => resolve(), { once: true });
   });
@@ -115,10 +134,8 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
 export function createPushNotificationsPlugin(
   options: PushNotificationsPluginOptions = {},
 ) {
-  return async function pushNotificationsPlugin(
-    bb: BbPluginApi,
-  ): Promise<void> {
-    const settings = bb.settings.define({
+  return async function pushNotificationsPlugin(api: PluginApi): Promise<void> {
+    const settings = api.settings.define({
       mobileEnabled: {
         type: "boolean",
         label: "Mobile notifications",
@@ -126,18 +143,25 @@ export function createPushNotificationsPlugin(
           "Send push messages to your registered phones and tablets.",
         default: true,
       },
+      mobileOnlyWhenAway: {
+        type: "boolean",
+        label: "Phone only when away",
+        description:
+          "While you use a computer running the Omnyo desktop app, notify only there. Anything still unread reaches your phone once that computer locks or sits idle for 2 minutes.",
+        default: true,
+      },
       webEnabled: {
         type: "boolean",
         label: "Web notifications",
         description:
-          "Show system notifications while bb is open in a browser. Each browser needs notification permission.",
+          "Show system notifications while Omnyo is open in a browser. Each browser needs notification permission.",
         default: true,
       },
       desktopEnabled: {
         type: "boolean",
         label: "Desktop notifications",
         description:
-          "Show system notifications while the bb desktop app is running.",
+          "Show system notifications while the Omnyo desktop app is running.",
         default: true,
       },
       defaultLevel: {
@@ -177,34 +201,67 @@ export function createPushNotificationsPlugin(
         experimental_schema: z.string().url(),
       },
     });
+
     const preferences = createNotificationPreferences({
-      bb,
+      api,
       getDefaults: async () => {
         const { defaultLevel, childLevel } = await settings.get();
+
         return {
           defaultLevel: notificationLevelSchema.parse(defaultLevel),
           childLevel: ownNotificationLevelSchema.parse(childLevel),
         };
       },
       publish: (threads) =>
-        bb.realtime.publish(THREAD_NOTIFICATIONS_CHANNEL, {
+        api.realtime.publish(THREAD_NOTIFICATIONS_CHANNEL, {
           threads,
         } satisfies ThreadNotificationsUpdate),
     });
-    const subscriptions = createPushSubscriptionStore(bb, {
+
+    const presence = createPresence({
+      now: options.now ?? Date.now,
+      ...(options.presenceIdleMs === undefined
+        ? {}
+        : { idleMs: options.presenceIdleMs }),
+      ...(options.presenceStaleMs === undefined
+        ? {}
+        : { staleMs: options.presenceStaleMs }),
+    });
+
+    const subscriptions = createPushSubscriptionStore(api, {
       ...(options.now === undefined ? {} : { now: options.now }),
       ...(options.createId === undefined ? {} : { createId: options.createId }),
     });
+
     const sender = createPushSender({
-      bb,
+      api,
       subscriptions,
+      queueClientNotification: async (message) => {
+        await queueNotice(message, true);
+      },
       getDeliverySettings: () => settings.get(),
+      presence,
+      ...(options.presenceStaleMs === undefined
+        ? {}
+        : { restoredHoldMs: options.presenceStaleMs }),
       getExpoPushUrl: async () => (await settings.get()).expoPushUrl,
       getNotificationLevel: (thread) => preferences.effectiveLevel(thread),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options.coalesceMs === undefined
         ? {}
         : { coalesceMs: options.coalesceMs }),
+      ...(options.assessmentWaitMs === undefined
+        ? {}
+        : { assessmentWaitMs: options.assessmentWaitMs }),
+      ...(options.assessmentStartGraceMs === undefined
+        ? {}
+        : { assessmentStartGraceMs: options.assessmentStartGraceMs }),
+      ...(options.assessmentPollMs === undefined
+        ? {}
+        : { assessmentPollMs: options.assessmentPollMs }),
+      ...(options.receiptDelayMs === undefined
+        ? {}
+        : { receiptDelayMs: options.receiptDelayMs }),
       ...(options.now === undefined ? {} : { now: options.now }),
     });
 
@@ -213,6 +270,7 @@ export function createPushNotificationsPlugin(
         {
           expoPushUrl,
           mobileEnabled,
+          mobileOnlyWhenAway,
           webEnabled,
           desktopEnabled,
           defaultLevel,
@@ -220,10 +278,14 @@ export function createPushNotificationsPlugin(
         },
         rows,
       ] = await Promise.all([settings.get(), subscriptions.list()]);
+
       return {
         enabled: true,
         subscriptionCount: rows.length,
         mobileEnabled,
+        mobileOnlyWhenAway,
+        desktopPresence: presence.activeUntil() === null ? "away" : "active",
+        heldMobileCount: sender.getHeldCount(),
         webEnabled,
         desktopEnabled,
         defaultLevel,
@@ -235,21 +297,435 @@ export function createPushNotificationsPlugin(
 
     async function sendTest(channel: "web" | "desktop") {
       const config = await settings.get();
+
       if (!(channel === "web" ? config.webEnabled : config.desktopEnabled)) {
         throw new Error(`${channel} notifications are disabled`);
       }
-      bb.realtime.publish(CLIENT_NOTIFICATION_CHANNEL, {
-        id: randomUUID(),
-        title: "bb notifications are working",
-        body: "You’ll be notified when a thread needs your attention.",
-        threadId: null,
-        channels: [channel],
-      } satisfies ClientNotification);
+
+      await queueNotice(
+        {
+          id: randomUUID(),
+          title: "Omnyo notifications are working",
+          body: "You’ll be notified when a thread needs your attention.",
+          threadId: null,
+          kind: null,
+          channels: [channel],
+        },
+        true,
+      );
+
       return { ok: true as const };
     }
 
-    bb.rpc.register(pushNotificationsRpcContract, {
+    const noticePrefix = "queued-notification:";
+    const automaticNoticePrefix = "pending-automatic-notification:";
+
+    const noticeSchema = z
+      .object({
+        message: clientNotificationSchema,
+        acceptedTargets: z.array(z.string()),
+        queuedAt: z.number().int().nonnegative().optional(),
+      })
+      .strict();
+
+    const noticeLifetimeMs = 24 * 60 * 60 * 1_000;
+
+    type NoticeRecord = z.infer<typeof noticeSchema>;
+
+    function noticeExpired(record: NoticeRecord) {
+      return (
+        record.queuedAt === undefined ||
+        Date.now() - record.queuedAt >= noticeLifetimeMs
+      );
+    }
+
+    const automaticReceiptPrefix = "automatic-notification-receipt:";
+    const explicitReceiptPrefix = "explicit-notification-receipt:";
+    const receiptLifetimeMs = 2 * noticeLifetimeMs;
+    const drainBatchSize = 100;
+
+    const automaticReceiptSchema = z
+      .object({
+        acceptedTargets: z.array(z.string()),
+        queuedAt: z.number().int().nonnegative().optional(),
+      })
+      .strict();
+
+    const explicitReceiptSchema = z
+      .object({
+        acceptedTargets: z.array(z.string()),
+        queuedAt: z.number().int().nonnegative(),
+        digest: z.string(),
+      })
+      .strict();
+
+    function noticeDigest(message: ClientNotification) {
+      return createHash("sha256")
+        .update(
+          JSON.stringify([
+            message.title,
+            message.body,
+            message.threadId,
+            message.channels,
+          ]),
+        )
+        .digest("hex");
+    }
+
+    let noticeMutations: Promise<void> = Promise.resolve();
+    let pendingNoticeIndex: Map<string, NoticeRecord> | undefined;
+
+    function mutateNotice<T>(operation: () => Promise<T>): Promise<T> {
+      const result = noticeMutations.then(operation, operation);
+      noticeMutations = result.then(
+        () => undefined,
+        () => {
+          pendingNoticeIndex = undefined;
+        },
+      );
+
+      return result;
+    }
+
+    function noticeAccepted(record: NoticeRecord, channel?: "web" | "desktop") {
+      return channel === undefined
+        ? record.acceptedTargets.length > 0
+        : record.acceptedTargets.some((target) =>
+            target.startsWith(`${channel}:`),
+          );
+    }
+
+    function noticeSettled(record: NoticeRecord) {
+      return (
+        noticeExpired(record) ||
+        record.message.channels.every((channel) =>
+          noticeAccepted(record, channel),
+        )
+      );
+    }
+
+    function updatePendingNotice(
+      key: string,
+      record: NoticeRecord,
+      index = pendingNoticeIndex,
+    ) {
+      if (index === undefined) return;
+
+      if (noticeSettled(record)) index.delete(key);
+      else index.set(key, record);
+    }
+
+    function queueNotice(message: ClientNotification, automatic = false) {
+      return mutateNotice(async () => {
+        const key = `${automatic ? automaticNoticePrefix : noticePrefix}${message.id}`;
+        const otherKey = `${automatic ? noticePrefix : automaticNoticePrefix}${message.id}`;
+
+        if ((await api.storage.kv.get<unknown>(otherKey)) !== undefined)
+          throw new Error("Notification id belongs to another delivery");
+        const stored = await api.storage.kv.get<unknown>(key);
+
+        if (stored === undefined && !automatic) {
+          const savedReceipt = await api.storage.kv.get<unknown>(
+            `${explicitReceiptPrefix}${message.id}`,
+          );
+
+          if (savedReceipt !== undefined) {
+            const receipt = explicitReceiptSchema.parse(savedReceipt);
+
+            if (receipt.digest !== noticeDigest(message))
+              throw new Error("Notification id already has different content");
+
+            return {
+              id: message.id,
+              status:
+                receipt.acceptedTargets.length > 0
+                  ? ("dispatched" as const)
+                  : ("expired" as const),
+              duplicate: true,
+              durable: true as const,
+              acceptedTargetCount: receipt.acceptedTargets.length,
+            };
+          }
+        }
+
+        const existing =
+          stored === undefined ? null : noticeSchema.parse(stored);
+
+        if (
+          existing !== null &&
+          (existing.message.title !== message.title ||
+            existing.message.body !== message.body ||
+            existing.message.threadId !== message.threadId ||
+            existing.message.channels.join(",") !== message.channels.join(","))
+        ) {
+          throw new Error("Notification id already has different content");
+        }
+
+        const record = existing ?? {
+          message,
+          acceptedTargets: [],
+          queuedAt: Date.now(),
+        };
+
+        if (existing === null) await api.storage.kv.set(key, record);
+        updatePendingNotice(key, record);
+        const expired = noticeExpired(record);
+
+        if (record.acceptedTargets.length === 0 && !expired) {
+          api.realtime.publish(CLIENT_NOTIFICATION_CHANNEL, record.message);
+        }
+
+        return {
+          id: message.id,
+          status:
+            record.acceptedTargets.length > 0
+              ? ("dispatched" as const)
+              : expired
+                ? ("expired" as const)
+                : ("queued" as const),
+          duplicate: existing !== null,
+          durable: true as const,
+          acceptedTargetCount: record.acceptedTargets.length,
+        };
+      });
+    }
+
+    function sendNotice(input: z.infer<typeof queuedNotificationInputSchema>) {
+      return queueNotice({
+        ...input,
+        threadId: null,
+        kind: null,
+        channels: ["web", "desktop"],
+      });
+    }
+
+    async function retireNotice(key: string, record: NoticeRecord) {
+      if (!noticeSettled(record)) return false;
+
+      const queuedAt = record.queuedAt ?? 0;
+
+      if (Date.now() - queuedAt < receiptLifetimeMs) {
+        const { acceptedTargets, message } = record;
+
+        if (key.startsWith(automaticNoticePrefix))
+          await api.storage.kv.set(`${automaticReceiptPrefix}${message.id}`, {
+            acceptedTargets,
+            queuedAt,
+          });
+        else
+          await api.storage.kv.set(`${explicitReceiptPrefix}${message.id}`, {
+            acceptedTargets,
+            queuedAt,
+            digest: noticeDigest(message),
+          });
+      }
+
+      await api.storage.kv.delete(key);
+      pendingNoticeIndex?.delete(key);
+
+      return true;
+    }
+
+    async function loadPendingNotices() {
+      const index = new Map<string, NoticeRecord>();
+
+      const keys = await Promise.all([
+        api.storage.kv.list(noticePrefix),
+        api.storage.kv.list(automaticNoticePrefix),
+      ]);
+
+      for (const [offset, key] of keys.flat().entries()) {
+        if (offset > 0 && offset % 64 === 0)
+          await new Promise<void>((resolve) => setImmediate(resolve));
+
+        const record = noticeSchema.parse(
+          await api.storage.kv.get<unknown>(key),
+        );
+
+        updatePendingNotice(key, record, index);
+        await retireNotice(key, record);
+      }
+
+      return index;
+    }
+
+    function pendingNotices(input: { channel?: "web" | "desktop" }) {
+      return mutateNotice(async () => {
+        const messages: ClientNotification[] = [];
+
+        if (input.channel !== undefined) {
+          const config = await settings.get();
+
+          if (!config[`${input.channel}Enabled`]) return { messages };
+        }
+
+        const index = pendingNoticeIndex ?? (await loadPendingNotices());
+
+        pendingNoticeIndex = index;
+
+        const entries = [...index].sort(([left], [right]) => {
+          const regularLeft = left.startsWith(noticePrefix);
+          const regularRight = right.startsWith(noticePrefix);
+
+          if (regularLeft !== regularRight) return regularLeft ? -1 : 1;
+
+          return left < right ? -1 : left > right ? 1 : 0;
+        });
+
+        for (const [key, record] of entries) {
+          if (await retireNotice(key, record)) continue;
+
+          if (
+            !noticeAccepted(record, input.channel) &&
+            (input.channel === undefined ||
+              record.message.channels.includes(input.channel))
+          )
+            messages.push(record.message);
+        }
+
+        return { messages };
+      });
+    }
+
+    function acknowledgeNotice(input: {
+      id: string;
+      clientId: string;
+      channel: "web" | "desktop";
+    }) {
+      return mutateNotice(async () => {
+        let key = `${noticePrefix}${input.id}`;
+        let stored = await api.storage.kv.get<unknown>(key);
+
+        if (stored === undefined) {
+          key = `${automaticNoticePrefix}${input.id}`;
+          stored = await api.storage.kv.get<unknown>(key);
+        }
+
+        const target = `${input.channel}:${input.clientId}`;
+
+        if (stored === undefined) {
+          const explicitKey = `${explicitReceiptPrefix}${input.id}`;
+
+          const explicitReceipt =
+            await api.storage.kv.get<unknown>(explicitKey);
+
+          const receiptKey =
+            explicitReceipt === undefined
+              ? `${automaticReceiptPrefix}${input.id}`
+              : explicitKey;
+
+          const savedReceipt =
+            explicitReceipt ?? (await api.storage.kv.get<unknown>(receiptKey));
+
+          if (savedReceipt === undefined)
+            throw new Error("Queued notification not found");
+
+          const receipt =
+            explicitReceipt === undefined
+              ? automaticReceiptSchema.parse(savedReceipt)
+              : explicitReceiptSchema.parse(savedReceipt);
+
+          if (!receipt.acceptedTargets.includes(target)) {
+            receipt.acceptedTargets.push(target);
+            await api.storage.kv.set(receiptKey, receipt);
+          }
+
+          return {
+            ok: true as const,
+            acceptedTargetCount: receipt.acceptedTargets.length,
+          };
+        }
+
+        const record = noticeSchema.parse(stored);
+
+        if (!record.acceptedTargets.includes(target)) {
+          record.acceptedTargets.push(target);
+          await api.storage.kv.set(key, record);
+        }
+
+        updatePendingNotice(key, record);
+        await retireNotice(key, record);
+
+        return {
+          ok: true as const,
+          acceptedTargetCount: record.acceptedTargets.length,
+        };
+      });
+    }
+
+    async function drainKeys(
+      prefix: string,
+      drainKey: (key: string, stored: unknown) => Promise<boolean>,
+    ) {
+      const keys = await api.storage.kv.list(prefix);
+      let drained = 0;
+
+      for (let offset = 0; offset < keys.length; offset += drainBatchSize) {
+        drained += await mutateNotice(async () => {
+          let count = 0;
+
+          for (const key of keys.slice(offset, offset + drainBatchSize)) {
+            const stored = await api.storage.kv.get<unknown>(key);
+
+            if (stored !== undefined && (await drainKey(key, stored)))
+              count += 1;
+          }
+
+          return count;
+        });
+      }
+
+      return drained;
+    }
+
+    async function forgetReceipt(
+      key: string,
+      receipt: { queuedAt?: number | undefined },
+    ) {
+      if (
+        receipt.queuedAt !== undefined &&
+        Date.now() - receipt.queuedAt < receiptLifetimeMs
+      )
+        return false;
+
+      await api.storage.kv.delete(key);
+
+      return true;
+    }
+
+    async function drainNotices() {
+      let retired = 0;
+
+      for (const prefix of [noticePrefix, automaticNoticePrefix])
+        retired += await drainKeys(prefix, (key, stored) =>
+          retireNotice(key, noticeSchema.parse(stored)),
+        );
+
+      const forgotten =
+        (await drainKeys(explicitReceiptPrefix, (key, stored) =>
+          forgetReceipt(key, explicitReceiptSchema.parse(stored)),
+        )) +
+        (await drainKeys(automaticReceiptPrefix, (key, stored) =>
+          forgetReceipt(key, automaticReceiptSchema.parse(stored)),
+        ));
+
+      if (retired + forgotten > 0)
+        api.log.info(
+          `Retired ${retired} settled notifications and forgot ${forgotten} receipts older than two days`,
+        );
+    }
+
+    api.rpc.register(pushNotificationsRpcContract, {
+      "notifications.send": sendNotice,
+      "notifications.pending": pendingNotices,
+      "notifications.ack": acknowledgeNotice,
       "notifications.test": ({ channel }) => sendTest(channel),
+      "presence.report": (input) => {
+        presence.report(input);
+        sender.onPresenceReported();
+
+        return { ok: true as const };
+      },
       "pushSubscriptions.list": async () => ({
         subscriptions: await subscriptions.listSummaries(),
       }),
@@ -258,8 +734,10 @@ export function createPushNotificationsPlugin(
         if (!(await subscriptions.remove(id))) {
           throw new Error(`Push subscription not found: ${id}`);
         }
+
         return { ok: true as const };
       },
+      "threadNotifications.get": ({ threadId }) => preferences.get(threadId),
       "threadNotifications.list": async ({ threadIds }) => ({
         threads: await preferences.list(threadIds),
       }),
@@ -267,16 +745,15 @@ export function createPushNotificationsPlugin(
         preferences.set(threadId, level),
     });
 
-    bb.cli.register(
+    api.cli.register(
       defineCli({
         name: "push-notifications",
         summary: "Manage mobile, web, and desktop notifications",
         description:
-          "Mobile devices receive Expo push messages; web and desktop clients receive system notifications while they are open.",
+          "Mobile devices receive Expo push messages. Web delivery needs an open tab; desktop delivery needs the app running. Mac windows can be closed; closing the last window quits on Windows and Linux.",
         commands: {
           test: cliCommand({
-            summary:
-              "Send a test to connected web or desktop clients with permission",
+            summary: "Queue a test for web or desktop clients with permission",
             positionals: [
               {
                 name: "channel",
@@ -289,12 +766,14 @@ export function createPushNotificationsPlugin(
               const channel = clientChannelSchema.safeParse(
                 input.positionals.channel,
               );
+
               if (!channel.success) {
                 throw new PluginCliError("Use web or desktop", {
                   code: "invalid_channel",
                   hint: "Mobile devices are tested from the phone itself; this command only reaches web and desktop clients.",
                 });
               }
+
               try {
                 await sendTest(channel.data);
               } catch (error) {
@@ -302,15 +781,16 @@ export function createPushNotificationsPlugin(
                   error instanceof Error ? error.message : String(error),
                   {
                     code: "channel_disabled",
-                    hint: `Turn it on with \`bb plugin config push-notifications set ${channel.data}Enabled true\`.`,
+                    hint: `Turn it on with \`omnyo plugin config push-notifications set ${channel.data}Enabled true\`.`,
                   },
                 );
               }
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
                   ? JSON.stringify({ ok: true, channel: channel.data })
-                  : `Test sent to connected ${channel.data} clients with notification permission`,
+                  : `Test queued for ${channel.data} clients with notification permission`,
               };
             },
           }),
@@ -319,6 +799,7 @@ export function createPushNotificationsPlugin(
             options: { json: JSON_OPTION },
             async run(input) {
               const rows = await subscriptions.listSummaries();
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -359,13 +840,16 @@ export function createPushNotificationsPlugin(
                 platform: input.options.platform,
                 deviceLabel: input.options.label,
               });
+
               if (!parsed.success) {
                 throw new PluginCliError(
                   parsed.error.issues.map((issue) => issue.message).join("; "),
                   { code: "invalid_device" },
                 );
               }
+
               const result = await subscriptions.add(parsed.data);
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -380,19 +864,21 @@ export function createPushNotificationsPlugin(
               {
                 name: "id",
                 description:
-                  "Subscription id, as `bb push-notifications list` prints it",
+                  "Subscription id, as `omnyo push-notifications list` prints it",
                 required: true,
               },
             ],
             options: { json: JSON_OPTION },
             async run(input) {
               const id = input.positionals.id;
+
               if (!(await subscriptions.remove(id))) {
                 throw new PluginCliError(`Push subscription not found: ${id}`, {
                   code: "subscription_not_found",
-                  hint: "Run `bb push-notifications list` for the registered ids.",
+                  hint: "Run `omnyo push-notifications list` for the registered ids.",
                 });
               }
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -424,10 +910,12 @@ export function createPushNotificationsPlugin(
             async run(input) {
               const threadId = input.positionals.thread;
               let row: ThreadNotifications;
+
               try {
                 if (input.options.level !== undefined) {
                   await preferences.set(threadId, input.options.level);
                 }
+
                 row = await preferences.get(threadId);
               } catch (error) {
                 throw new PluginCliError(
@@ -435,6 +923,7 @@ export function createPushNotificationsPlugin(
                   { code: "thread_not_found" },
                 );
               }
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -448,6 +937,7 @@ export function createPushNotificationsPlugin(
             options: { json: JSON_OPTION },
             async run(input) {
               const view = await status();
+
               return {
                 exitCode: 0,
                 stdout: input.options.json
@@ -460,24 +950,35 @@ export function createPushNotificationsPlugin(
       }),
     );
 
-    bb.events.on("interaction.pending", (payload) => {
+    api.events.on("interaction.pending", (payload) => {
       sender.onInteractionPending(payload);
     });
-    bb.events.on("thread.idle", (payload) => {
+    api.events.on("thread.idle", (payload) => {
       sender.onThreadIdle(payload);
     });
-    bb.events.on("thread.failed", (payload) => {
+    api.events.on("thread.failed", (payload) => {
       sender.onThreadFailed(payload);
     });
-    bb.events.on("experimental_thread.parentChanged", ({ thread }) =>
+    api.onDispose(
+      api.sdk.subscribe({
+        event: "thread:changed",
+        callback: (event) => {
+          if (event.id && event.changes.includes("interactions-changed"))
+            sender.onAttentionChanged(event.id);
+        },
+      }),
+    );
+    api.events.on("experimental_thread.parentChanged", ({ thread }) =>
       preferences.publishSubtree(thread.id),
     );
-    bb.events.on("thread.unarchived", ({ thread }) =>
+    api.events.on("thread.unarchived", ({ thread }) =>
       preferences.publishSubtree(thread.id),
     );
-    bb.background.service("push-sender", {
+    api.background.schedule("notification-drain", "*/15 * * * *", drainNotices);
+    api.background.service("push-sender", {
       async start(signal) {
         await sender.start();
+
         try {
           await waitForAbort(signal);
         } finally {

@@ -2,7 +2,7 @@ import type {
   ComposerRichTextSpec,
   ComposerStructuredDraft,
   ComposerView,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { Extension, type Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import {
@@ -12,7 +12,7 @@ import {
   type Transaction,
 } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import type { PromptTextMention } from "@bb/domain";
+import type { PromptTextMention } from "@omnyo/domain";
 import {
   promptEditorSerializationFromDoc,
   type PromptEditorOffsetSegment,
@@ -62,9 +62,11 @@ const promptDecorationPluginKey = new PluginKey<PromptDecorationPluginState>(
 type PromptDecorationMeta = "refresh" | "deferred-rebuild";
 
 export const PROMPT_DECORATION_LARGE_DOC_SIZE = 100_000;
+
 export const PROMPT_DECORATION_LARGE_DOC_REBUILD_DELAY_MS = 200;
 
 const EMPTY_SOURCES: readonly PromptDecorationSource[] = [];
+
 const EMPTY_OBSERVERS: readonly PromptDraftObserver[] = [];
 
 function ultracodePattern(): RegExp {
@@ -75,9 +77,11 @@ export function findUltracodeRanges(text: string): PromptDecorationRange[] {
   const ranges: PromptDecorationRange[] = [];
   const pattern = ultracodePattern();
   let match: RegExpExecArray | null;
+
   while ((match = pattern.exec(text)) !== null) {
     ranges.push({ from: match.index, to: match.index + match[0].length });
   }
+
   return ranges;
 }
 
@@ -96,6 +100,7 @@ const BUILT_IN_HOST_SOURCE: PromptDecorationSource = {
 function parseRanges(value: unknown): PromptDecorationRange[] | null {
   if (!Array.isArray(value)) return null;
   const ranges: PromptDecorationRange[] = [];
+
   for (const range of value) {
     if (
       typeof range !== "object" ||
@@ -111,8 +116,10 @@ function parseRanges(value: unknown): PromptDecorationRange[] | null {
     ) {
       return null;
     }
+
     ranges.push({ from: range.from, to: range.to });
   }
+
   return ranges;
 }
 
@@ -125,11 +132,14 @@ function decorationForIntersection(
 ): Decoration | null {
   const textFrom = Math.max(segment.textFrom, range.from);
   const textTo = Math.min(segment.textTo, range.to);
+
   if (textFrom >= textTo) return null;
 
   if (segment.kind === "mention") {
     const node = doc.nodeAt(segment.docFrom);
+
     if (node === null) return null;
+
     return Decoration.node(
       segment.docFrom,
       segment.docTo,
@@ -140,6 +150,7 @@ function decorationForIntersection(
 
   const docFrom = segment.docFrom + textFrom - segment.textFrom;
   const docTo = segment.docFrom + textTo - segment.textFrom;
+
   return docFrom < docTo
     ? Decoration.inline(docFrom, docTo, { class: className }, spec)
     : null;
@@ -170,26 +181,33 @@ function buildDecorations(
   onRuleError: PromptDecorationExtensionOptions["onRuleError"],
 ): DecorationSet | null {
   const serialization = promptEditorSerializationFromDoc(doc);
+
   const orderedSources: PromptDecorationSource[] = [
     BUILT_IN_HOST_SOURCE,
     ...sources,
   ];
+
   const decorations: Decoration[] = [];
 
   for (const [sourceIndex, source] of orderedSources.entries()) {
     for (const [ruleIndex, rule] of source.effects.entries()) {
       const failureKey = `${source.id}\0${rule.id}\0${ruleIndex}`;
       const disabledGeneration = disabledRules.get(failureKey);
+
       if (disabledGeneration === source.generation) continue;
+
       if (disabledGeneration !== undefined) disabledRules.delete(failureKey);
 
       let ranges: PromptDecorationRange[];
+
       try {
         const result: unknown = rule.match(serialization.text);
         const parsed = parseRanges(result);
+
         if (parsed === null) {
           throw new TypeError("match must return valid integer ranges");
         }
+
         ranges = parsed;
       } catch (error) {
         disabledRules.set(failureKey, source.generation);
@@ -201,10 +219,12 @@ function buildDecorations(
         if (range.from >= serialization.text.length) {
           continue;
         }
+
         const boundedRange = {
           from: range.from,
           to: Math.min(range.to, serialization.text.length),
         };
+
         for (const segment of serialization.offsetMapping) {
           const decoration = decorationForIntersection(
             doc,
@@ -214,13 +234,14 @@ function buildDecorations(
             {
               className: rule.className,
               ...(source.pluginId
-                ? { "data-bb-plugin-decoration": source.pluginId }
+                ? { "data-omnyo-plugin-decoration": source.pluginId }
                 : {}),
               ruleId: rule.id,
               sourceId: source.id,
               sourceOrder: `${sourceIndex}:${ruleIndex}`,
             },
           );
+
           if (decoration !== null) decorations.push(decoration);
         }
       }
@@ -236,8 +257,10 @@ function structuredMention(
   mention: PromptTextMention,
 ): ComposerStructuredDraft["mentions"][number] {
   const { resource } = mention;
+
   if (resource.kind === "plugin") {
     const separator = resource.itemId.indexOf(":");
+
     return {
       from: mention.start,
       to: mention.end,
@@ -254,12 +277,14 @@ function structuredMention(
   }
 
   let id: string;
+
   if (resource.kind === "thread") id = resource.threadId;
   else if (resource.kind === "project") id = resource.projectId;
   else if (resource.kind === "section") id = resource.sectionId;
   else if (resource.kind === "path" || resource.kind === "attachment")
     id = resource.path;
   else id = `${resource.trigger}${resource.name}`;
+
   return {
     from: mention.start,
     to: mention.end,
@@ -273,6 +298,7 @@ function composerStructuredDraftFromDoc(
   doc: ProseMirrorNode,
 ): ComposerStructuredDraft {
   const value = promptEditorSerializationFromDoc(doc);
+
   return {
     text: value.text,
     mentions: value.mentions.map(structuredMention),
@@ -292,6 +318,7 @@ function promptDecorationMeta(
   transaction: Transaction,
 ): PromptDecorationMeta | null {
   const meta: unknown = transaction.getMeta(promptDecorationPluginKey);
+
   return meta === "refresh" || meta === "deferred-rebuild" ? meta : null;
 }
 
@@ -314,6 +341,7 @@ export const PromptDecorationExtension =
     addProseMirrorPlugins() {
       const disabledRules = new Map<string, string | number>();
       const options = this.options;
+
       return [
         new Plugin<PromptDecorationPluginState>({
           key: promptDecorationPluginKey,
@@ -331,7 +359,9 @@ export const PromptDecorationExtension =
             apply(transaction, previous, _oldState, newState) {
               const meta = promptDecorationMeta(transaction);
               const refreshed = meta === "refresh";
+
               if (meta === null && !transaction.docChanged) return previous;
+
               if (
                 meta === null &&
                 newState.doc.content.size > PROMPT_DECORATION_LARGE_DOC_SIZE
@@ -346,6 +376,7 @@ export const PromptDecorationExtension =
                   rebuildPending: true,
                 };
               }
+
               return {
                 decorations: buildDecorations(
                   newState.doc,
@@ -369,10 +400,12 @@ export const PromptDecorationExtension =
             let timeout: ReturnType<typeof setTimeout> | null = null;
             let rebuildTimeout: ReturnType<typeof setTimeout> | null = null;
             let latestDoc = initialView.state.doc;
+
             const scheduleDeferredRebuild = (view: typeof initialView) => {
               if (rebuildTimeout !== null) return;
               rebuildTimeout = setTimeout(() => {
                 rebuildTimeout = null;
+
                 if (view.isDestroyed) return;
                 view.dispatch(
                   view.state.tr.setMeta(
@@ -382,15 +415,20 @@ export const PromptDecorationExtension =
                 );
               }, PROMPT_DECORATION_LARGE_DOC_REBUILD_DELAY_MS);
             };
+
             const schedule = (doc: ProseMirrorNode) => {
               latestDoc = doc;
+
               if (timeout !== null) clearTimeout(timeout);
               timeout = setTimeout(() => {
                 timeout = null;
+
                 const observers =
                   options.getDraftObservers?.() ?? EMPTY_OBSERVERS;
+
                 if (observers.length === 0) return;
                 const draft = composerStructuredDraftFromDoc(latestDoc);
+
                 for (const observer of observers) {
                   try {
                     observer.onDraftChange(draft, observer.getView());
@@ -400,21 +438,27 @@ export const PromptDecorationExtension =
                 }
               }, options.draftObserverDebounceMs ?? 100);
             };
+
             schedule(initialView.state.doc);
+
             return {
               update(updatedView, previousState) {
                 latestDoc = updatedView.state.doc;
+
                 const previousPluginState =
                   promptDecorationPluginKey.getState(previousState);
+
                 const nextPluginState = promptDecorationPluginKey.getState(
                   updatedView.state,
                 );
+
                 if (
                   !updatedView.state.doc.eq(previousState.doc) ||
                   previousPluginState?.revision !== nextPluginState?.revision
                 ) {
                   schedule(updatedView.state.doc);
                 }
+
                 if (nextPluginState?.rebuildPending) {
                   scheduleDeferredRebuild(updatedView);
                 } else if (rebuildTimeout !== null) {
@@ -424,6 +468,7 @@ export const PromptDecorationExtension =
               },
               destroy() {
                 if (timeout !== null) clearTimeout(timeout);
+
                 if (rebuildTimeout !== null) clearTimeout(rebuildTimeout);
               },
             };

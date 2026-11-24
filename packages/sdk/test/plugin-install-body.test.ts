@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createBbSdk } from "../src/core.js";
+import { createOmnyoSdk } from "../src/core.js";
 import type { FetchImplementation } from "../src/response.js";
 import { createHttpTransport } from "../src/transport-http.js";
 
@@ -36,14 +36,16 @@ const legacyInstalledPlugin = {
 };
 
 function createLegacyServerSdk(): {
-  sdk: ReturnType<typeof createBbSdk>;
+  sdk: ReturnType<typeof createOmnyoSdk>;
   bodies: unknown[];
 } {
   const bodies: unknown[] = [];
+
   const fetch: FetchImplementation = async (_input, init) => {
     const body: unknown = JSON.parse(String(init?.body));
     bodies.push(body);
     const ok = legacyPluginInstallRequestSchema.safeParse(body).success;
+
     return new Response(
       JSON.stringify(
         ok
@@ -56,13 +58,15 @@ function createLegacyServerSdk(): {
       },
     );
   };
-  const sdk = createBbSdk({
+
+  const sdk = createOmnyoSdk({
     transport: createHttpTransport({
-      baseUrl: "http://bb.test",
+      baseUrl: "http://omnyo.test",
       fetch,
       runtime: "node",
     }),
   });
+
   return { sdk, bodies };
 }
 
@@ -74,10 +78,11 @@ describe("issue #1662: plugin install against a pre-0.38.0 server", () => {
     ).resolves.toEqual({
       ...legacyInstalledPlugin,
       publisherLabel: null,
+      removable: false,
       screenshots: [],
       collections: [],
       providerIds: [],
-      // Likewise for the declared-icon map, added later still.
+
       icons: {},
     });
     expect(bodies).toEqual([{ source: "path:/tmp/my-plugin" }]);

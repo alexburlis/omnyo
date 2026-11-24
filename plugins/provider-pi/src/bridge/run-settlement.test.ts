@@ -4,7 +4,7 @@ import {
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
-import { BB_PI_EXTENSION_SOURCE } from "./bb-pi-extension.js";
+import { OMNYO_PI_EXTENSION_SOURCE } from "./omnyo-pi-extension.js";
 import { runSettlementError } from "./run-settlement.js";
 
 it.each([{}, { aborted: false }])(
@@ -21,6 +21,7 @@ it.each([{}, { aborted: false }])(
     ).toBeUndefined();
   },
 );
+
 it.each([null, "false", 0, {}, []])(
   "fails safely for malformed aborted=%j",
   (aborted) => {
@@ -29,6 +30,7 @@ it.each([null, "false", 0, {}, []])(
     );
   },
 );
+
 it("recognizes abort without an error message, including trailing tool results", () => {
   expect(
     runSettlementError({}, [
@@ -48,6 +50,7 @@ it("recognizes abort without an error message, including trailing tool results",
     runSettlementError({}, [{ role: "assistant", stopReason: "error" }]),
   ).toBe("Pi run failed");
 });
+
 it("uses the final assistant rather than earlier retry failures", () => {
   expect(
     runSettlementError({}, [
@@ -73,9 +76,10 @@ it.each([
 ])(
   "extension advertises authoritative settlement for runtime %s: %s",
   (version, expected) => {
-    const definition = BB_PI_EXTENSION_SOURCE.match(
+    const definition = OMNYO_PI_EXTENSION_SOURCE.match(
       /function supportsAgentSettlement\(version\) \{[\s\S]*?\n\}/,
     )?.[0];
+
     expect(definition).toBeDefined();
     expect(
       runInNewContext(`${definition}; supportsAgentSettlement(version)`, {
@@ -88,9 +92,11 @@ it.each([
 it("the installed official runtime exports VERSION and types agent_settled", () => {
   const event: AgentSessionEvent = { type: "agent_settled" };
   expect(event.type).toBe("agent_settled");
-  const definition = BB_PI_EXTENSION_SOURCE.match(
+
+  const definition = OMNYO_PI_EXTENSION_SOURCE.match(
     /function supportsAgentSettlement\(version\) \{[\s\S]*?\n\}/,
   )?.[0];
+
   expect(
     runInNewContext(`${definition}; supportsAgentSettlement(version)`, {
       version: VERSION,

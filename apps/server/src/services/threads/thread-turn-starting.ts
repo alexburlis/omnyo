@@ -1,5 +1,5 @@
-import { getThread, type ClaimedQueuedThreadMessageRow } from "@bb/db";
-import type { Thread, ThreadQueuedMessage } from "@bb/domain";
+import { getThread, type ClaimedQueuedThreadMessageRow } from "@omnyo/db";
+import type { Thread, ThreadQueuedMessage } from "@omnyo/domain";
 import type { AppDeps } from "../../types.js";
 import { NotificationBuffer } from "../lib/notification-buffer.js";
 import {
@@ -25,9 +25,11 @@ export function queueInputForStartingTurn(
 ): QueueInputForStartingTurnResult {
   if (args.input.input.length === 0) return { kind: "dispatched" };
   const notifications = new NotificationBuffer();
+
   const outcome: QueueInputForStartingTurnResult = deps.db.transaction(
     (tx) => {
       const thread = getThread(tx, args.threadId);
+
       if (
         !thread ||
         thread.archivedAt !== null ||
@@ -36,9 +38,11 @@ export function queueInputForStartingTurn(
       ) {
         return { kind: "retry", thread };
       }
+
       if (getActiveTurnId({ db: tx }, args.threadId) !== null) {
         return { kind: "retry", thread };
       }
+
       const entry = recordQueuedMessageWait(
         { db: tx, hub: notifications },
         {
@@ -49,18 +53,22 @@ export function queueInputForStartingTurn(
           claimed: args.claimed,
         },
       );
+
       return entry === null
         ? { kind: "dispatched" }
         : { kind: "queued", entry };
     },
     { behavior: "immediate" },
   );
+
   notifications.flushInto(deps.hub);
+
   if (outcome.kind === "queued") {
     deps.logger.info(
       { queuedMessageId: outcome.entry.id, threadId: args.threadId },
       "Queued input until the current turn starts",
     );
   }
+
   return outcome;
 }

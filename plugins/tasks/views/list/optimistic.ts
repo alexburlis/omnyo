@@ -9,6 +9,7 @@ export interface TaskEdit {
 }
 
 type EditField = keyof TaskEdit;
+
 const EDIT_FIELDS: readonly EditField[] = [
   "status",
   "priority",
@@ -31,8 +32,10 @@ function sameIds(
 ): boolean {
   const left = a ?? [];
   const right = b ?? [];
+
   if (left.length !== right.length) return false;
   const set = new Set(right);
+
   return left.every((id) => set.has(id));
 }
 
@@ -42,11 +45,13 @@ function hasFields(edit: TaskEdit): boolean {
 
 function fieldSettled(task: Task, field: EditField, edit: TaskEdit): boolean {
   if (field === "labelIds") return sameIds(edit.labelIds, task.labelIds);
+
   return task[field] === edit[field];
 }
 
 export function applyEdit(task: Task, edit: TaskEdit | undefined): Task {
   if (edit === undefined || !hasFields(edit)) return task;
+
   return {
     ...task,
     ...(edit.status !== undefined ? { status: edit.status } : {}),
@@ -62,6 +67,7 @@ export function editedTasks(
   entries: TaskEntries,
 ): Task[] {
   if (entries.size === 0) return [...serverTasks];
+
   return serverTasks.map((task) => applyEdit(task, entries.get(task.id)?.edit));
 }
 
@@ -94,11 +100,14 @@ export function beginEdit(
   const prev = entries.get(taskId);
   const edit: TaskEdit = { ...prev?.edit, ...patch };
   const gens = { ...prev?.gens };
+
   for (const field of EDIT_FIELDS) {
     if (patch[field] !== undefined) gens[field] = gen;
   }
+
   const next = new Map(entries);
   next.set(taskId, { edit, gens, inFlight: (prev?.inFlight ?? 0) + 1 });
+
   return next;
 }
 
@@ -110,8 +119,10 @@ function finalize(
   inFlight: number,
 ): TaskEntries {
   const next = new Map(entries);
+
   if (!hasFields(edit) && inFlight <= 0) next.delete(taskId);
   else next.set(taskId, { edit, gens, inFlight: Math.max(0, inFlight) });
+
   return next;
 }
 
@@ -123,12 +134,15 @@ export function settleSuccess(
   serverTask: Task,
 ): TaskEntries {
   const prev = entries.get(taskId);
+
   if (prev === undefined) return entries;
   const { edit, gens } = makeEntry(prev);
+
   if (patch.status !== undefined && gens.status === gen) {
     edit.position = serverTask.position;
     gens.position = gen;
   }
+
   return finalize(entries, taskId, edit, gens, prev.inFlight - 1);
 }
 
@@ -139,36 +153,45 @@ export function settleFailure(
   gen: number,
 ): TaskEntries {
   const prev = entries.get(taskId);
+
   if (prev === undefined) return entries;
   const { edit, gens } = makeEntry(prev);
+
   for (const field of EDIT_FIELDS) {
     if (patch[field] !== undefined && gens[field] === gen) {
       delete edit[field];
       delete gens[field];
     }
   }
+
   return finalize(entries, taskId, edit, gens, prev.inFlight - 1);
 }
 
 function sameEntry(a: TaskEntry, b: TaskEntry): boolean {
   if (a.inFlight !== b.inFlight) return false;
+
   for (const field of EDIT_FIELDS) {
     if (a.gens[field] !== b.gens[field]) return false;
+
     if (field === "labelIds") {
       if (!sameIds(a.edit.labelIds, b.edit.labelIds)) return false;
     } else if (a.edit[field] !== b.edit[field]) {
       return false;
     }
   }
+
   return true;
 }
 
 function sameEntries(a: TaskEntries, b: TaskEntries): boolean {
   if (a.size !== b.size) return false;
+
   for (const [id, entryA] of a) {
     const entryB = b.get(id);
+
     if (entryB === undefined || !sameEntry(entryA, entryB)) return false;
   }
+
   return true;
 }
 
@@ -179,29 +202,37 @@ export function reconcileEntries(
   if (entries.size === 0) return entries;
   const byId = new Map(tasks.map((task) => [task.id, task]));
   const next = new Map<string, TaskEntry>();
+
   for (const [id, entry] of entries) {
     const task = byId.get(id);
+
     if (task === undefined) continue;
     const edit: TaskEdit = {};
     const gens: Partial<Record<EditField, number>> = {};
+
     for (const field of EDIT_FIELDS) {
       const value = entry.edit[field];
+
       if (value === undefined || fieldSettled(task, field, entry.edit))
         continue;
       Object.assign(edit, { [field]: value });
       gens[field] = entry.gens[field];
     }
+
     if (hasFields(edit) || entry.inFlight > 0) {
       next.set(id, { edit, gens, inFlight: entry.inFlight });
     }
   }
+
   return sameEntries(entries, next) ? entries : next;
 }
 
 export function pendingIds(entries: TaskEntries): ReadonlySet<string> {
   const ids = new Set<string>();
+
   for (const [id, entry] of entries) {
     if (entry.inFlight > 0) ids.add(id);
   }
+
   return ids;
 }

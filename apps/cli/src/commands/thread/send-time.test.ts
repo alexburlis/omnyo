@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatQueueSendCountdown, parseSendAt } from "./send-time.js";
 
-// A fixed local wall clock so duration arithmetic and the "already passed"
-// boundary are both exact.
 const NOW = Date.parse("2026-08-25T12:00:00Z");
 
 describe("parseSendAt", () => {
@@ -26,8 +24,6 @@ describe("parseSendAt", () => {
     );
   });
 
-  // Rejecting the past is the whole point of the flag: a `sendAt` already
-  // behind the sweep would dispatch immediately, silently ignoring the request.
   it("rejects a timestamp that has already passed", () => {
     expect(() => parseSendAt("2026-08-25T11:59:00Z", NOW)).toThrow(
       /must be in the future/,
@@ -38,22 +34,14 @@ describe("parseSendAt", () => {
     expect(() => parseSendAt("0m", NOW)).toThrow(/must be in the future/);
   });
 
-  // `Date.parse` reads a bare date as UTC midnight while the user meant their
-  // own midnight, so the ambiguity is refused rather than guessed at.
   it("rejects a date with no time of day", () => {
     expect(() => parseSendAt("2026-12-01", NOW)).toThrow(/no time of day/);
   });
 
-  // `Date.parse("10")` yields a date in 2001; only the two documented shapes
-  // are accepted so no such fallback can reach the server.
   it("rejects values that are neither a timestamp nor a duration", () => {
     expect(() => parseSendAt("10", NOW)).toThrow(/neither a timestamp/);
-    expect(() => parseSendAt("tomorrow", NOW)).toThrow(
-      /neither a timestamp/,
-    );
-    expect(() => parseSendAt("10 minutes", NOW)).toThrow(
-      /neither a timestamp/,
-    );
+    expect(() => parseSendAt("tomorrow", NOW)).toThrow(/neither a timestamp/);
+    expect(() => parseSendAt("10 minutes", NOW)).toThrow(/neither a timestamp/);
     expect(() => parseSendAt("", NOW)).toThrow(/It is empty/);
   });
 

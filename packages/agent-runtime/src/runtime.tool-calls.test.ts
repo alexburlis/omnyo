@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ThreadEvent, ToolCallResponse } from "@bb/domain";
+import type { ThreadEvent, ToolCallResponse } from "@omnyo/domain";
 import { createProviderForId } from "./provider-registry.js";
 import {
   handleRuntimeProviderRequest,
@@ -12,7 +12,7 @@ import {
 import {
   parseJsonRpcLine,
   type JsonRpcMessage,
-} from "@bb/provider-bridge-protocol/bridge-kit";
+} from "@omnyo/provider-bridge-protocol/bridge-kit";
 import { promptTextInput } from "./test/prompt-input.js";
 import {
   createScriptedEchoLaunch,
@@ -29,7 +29,9 @@ function readChildStdoutLine(child: ChildProcess): Promise<string> {
   if (!child.stdout) {
     throw new Error("Expected child stdout to be readable");
   }
+
   const stdout = child.stdout;
+
   return new Promise((resolve) => {
     stdout.once("data", (chunk: ChildStdoutChunk) => {
       resolve(String(chunk));
@@ -48,7 +50,7 @@ describe("createAgentRuntime tool calls", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "bb-runtime-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "omnyo-runtime-test-"));
   });
 
   afterEach(() => {
@@ -59,18 +61,21 @@ describe("createAgentRuntime tool calls", () => {
     const events: ThreadEvent[] = [];
     let signal: AbortSignal | undefined;
     let finish!: (result: ToolCallResponse) => void;
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
         onEvent: (event) => events.push(event),
         onToolCall: (_request, abortSignal) => {
           signal = abortSignal;
+
           return new Promise((resolve) => {
             finish = resolve;
           });
         },
       },
     });
+
     try {
       await runtime.startThread({
         environmentId: "env-1",
@@ -106,7 +111,9 @@ describe("createAgentRuntime tool calls", () => {
       turnId: string;
       tool: string;
     }> = [];
+
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
@@ -118,6 +125,7 @@ describe("createAgentRuntime tool calls", () => {
             turnId: req.turnId,
             tool: req.tool,
           });
+
           return {
             contentItems: [{ type: "inputText", text: "tool result" }],
             success: true,
@@ -133,18 +141,21 @@ describe("createAgentRuntime tool calls", () => {
       providerId: "fake",
       options: fullRuntimeOptions,
     });
+
     await runtime.runTurn({
       clientRequestId: "creq_222222223z",
       threadId: "t1",
       input: [promptTextInput({ text: "call_tool:my_test_tool" })],
       options: fullRuntimeOptions,
     });
+
     const { turnId } = await waitForThreadTurnStarted({
       events,
       providerId: "fake",
       runtime,
       threadId: "t1",
     });
+
     await waitForRuntimeState({
       events,
       label: "tool call routed and turn completed",
@@ -173,12 +184,14 @@ describe("createAgentRuntime tool calls", () => {
   it("resolves unresolved provider tool call turn ids from the active turn", async () => {
     const toolCalls: Array<{ turnId: string; tool: string }> = [];
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
         onEvent: (event) => events.push(event),
         onToolCall: async (req) => {
           toolCalls.push({ turnId: req.turnId, tool: req.tool });
+
           return {
             contentItems: [{ type: "inputText", text: "tool result" }],
             success: true,
@@ -200,12 +213,14 @@ describe("createAgentRuntime tool calls", () => {
       input: [promptTextInput({ text: "call_tool_unresolved:my_test_tool" })],
       options: fullRuntimeOptions,
     });
+
     const { turnId } = await waitForThreadTurnStarted({
       events,
       providerId: "fake",
       runtime,
       threadId: "t1",
     });
+
     await waitForRuntimeState({
       events,
       label: "tool call with resolved turn id routed and turn completed",
@@ -225,12 +240,16 @@ describe("createAgentRuntime tool calls", () => {
       "-e",
       "process.stdin.pipe(process.stdout)",
     ]);
+
     const adapter = createBridgeAdapter();
+
     const toolCallResponse = {
       contentItems: [{ type: "inputText", text: "tool result" }],
       success: true,
     } satisfies ToolCallResponse;
+
     const onToolCall = vi.fn(async () => toolCallResponse);
+
     const rawRequest = {
       jsonrpc: "2.0",
       id: 42,
@@ -267,9 +286,11 @@ describe("createAgentRuntime tool calls", () => {
       const parsed = parseJsonRpcLine(
         (await readChildStdoutLine(child)).trim(),
       );
+
       if (parsed.kind !== "response") {
         throw new Error(`Expected JSON-RPC response, got ${parsed.kind}`);
       }
+
       expect(parsed.parsed).toMatchObject({
         jsonrpc: "2.0",
         id: 42,
@@ -289,12 +310,16 @@ describe("createAgentRuntime tool calls", () => {
       "-e",
       "process.stdin.pipe(process.stdout)",
     ]);
+
     const adapter = createBridgeAdapter();
+
     const toolCallResponse = {
       contentItems: [{ type: "inputText", text: "tool result" }],
       success: true,
     } satisfies ToolCallResponse;
+
     const onToolCall = vi.fn(async () => toolCallResponse);
+
     const rawRequest = {
       jsonrpc: "2.0",
       id: 43,
@@ -331,9 +356,11 @@ describe("createAgentRuntime tool calls", () => {
       const parsed = parseJsonRpcLine(
         (await readChildStdoutLine(child)).trim(),
       );
+
       if (parsed.kind !== "response") {
         throw new Error(`Expected JSON-RPC response, got ${parsed.kind}`);
       }
+
       expect(parsed.parsed).toMatchObject({
         jsonrpc: "2.0",
         id: 43,
@@ -345,15 +372,17 @@ describe("createAgentRuntime tool calls", () => {
     }
   });
 
-  it("rejects tool calls whose BB thread hint disagrees with the provider-thread mapping", async () => {
+  it("rejects tool calls whose Omnyo thread hint disagrees with the provider-thread mapping", async () => {
     const toolCalls: string[] = [];
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,
         onEvent: (event) => events.push(event),
         onToolCall: async (req) => {
           toolCalls.push(req.tool);
+
           return {
             contentItems: [{ type: "inputText", text: "tool result" }],
             success: true,
@@ -396,6 +425,7 @@ describe("createAgentRuntime tool calls", () => {
 
   it("sends JSON-RPC error back when onToolCall throws", async () => {
     const events: ThreadEvent[] = [];
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath: tmpDir,

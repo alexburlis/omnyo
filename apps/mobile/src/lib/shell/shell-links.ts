@@ -1,3 +1,4 @@
+import { isWorkflowImportLink, workflowShareId } from "./workflow-import-link";
 import {
   isDeveloperRoutePath,
   matchProfileForWebLink,
@@ -12,7 +13,6 @@ export const SHELL_ROUTE_PATH = "/webview";
 const NATIVE_ONLY_PREFIXES = [
   "/connect",
   "/settings/servers",
-  "/settings/machines",
   "/settings/device",
   "/settings/notifications",
 ] as const;
@@ -28,9 +28,12 @@ interface ShellHrefParams {
 
 function shellHref({ profileId, path }: ShellHrefParams): string {
   const params = new URLSearchParams();
+
   if (profileId !== null) params.set("profileId", profileId);
+
   if (path !== "/") params.set("path", path);
   const query = params.toString();
+
   return query.length > 0 ? `${SHELL_ROUTE_PATH}?${query}` : SHELL_ROUTE_PATH;
 }
 
@@ -44,7 +47,23 @@ export function resolveShellIncomingLink(
   url: string,
   context: ResolveShellLinkContext,
 ): LinkResolution {
+  if (url.startsWith("https://omnyohq.com/w/")) return { kind: "passthrough" };
+
+  if (isWorkflowImportLink(url)) {
+    const shareId = workflowShareId(url);
+
+    return {
+      kind: "navigate",
+      path:
+        shareId === null
+          ? "/workflows/import"
+          : `/workflows/import?shareId=${shareId}`,
+      profileId: null,
+    };
+  }
+
   const link = parseIncomingLink(url);
+
   switch (link.kind) {
     case "foreign":
       return { kind: "passthrough" };
@@ -56,21 +75,25 @@ export function resolveShellIncomingLink(
           profileId: null,
         };
       }
+
       if (isNativeOnlyShellPath(link.path)) {
         return { kind: "navigate", path: link.path, profileId: null };
       }
+
       return {
         kind: "navigate",
         path: shellHref({ profileId: null, path: link.path }),
         profileId: null,
       };
     }
+
     case "web": {
       const match = matchProfileForWebLink(
         context.profiles,
         link.origin,
         link.pathname,
       );
+
       if (!match) {
         return {
           kind: "unknown-server",
@@ -81,7 +104,9 @@ export function resolveShellIncomingLink(
           }),
         };
       }
+
       const switching = match.profile.id !== context.activeProfileId;
+
       return {
         kind: "navigate",
         path: shellHref({

@@ -1,24 +1,59 @@
 import { DndContext } from "@dnd-kit/core";
+import { useEffect, useRef } from "react";
 import {
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { Icon } from "@bb/shared-ui/icon";
-import { Button } from "@bb/shared-ui/button";
-import { Switch } from "@bb/shared-ui/switch";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
+import { Switch } from "@omnyo/shared-ui/switch";
 import { SettingsWithControl } from "@/components/ui/settings-section";
-import { useReorderDnd } from "@bb/shared-ui/use-reorder-dnd";
-import { useSidebarSortable } from "@bb/shared-ui/sortable-motion";
+import { useReorderDnd } from "@omnyo/shared-ui/use-reorder-dnd";
+import { useSidebarSortable } from "@omnyo/shared-ui/sortable-motion";
 import {
   useSidebarFooterPreferences,
   type FooterItem,
+  type SidebarFooterPlacement,
 } from "@/components/sidebar/sidebarFooterPreferences";
 import { FooterItemIcon } from "@/components/plugin/PluginSidebarFooterItems";
 
 export function SidebarFooterSettings() {
-  const preferences = useSidebarFooterPreferences();
+  return (
+    <SettingsWithControl
+      label="Footer actions"
+      description="Drag to reorder."
+      controlPlacement="below"
+    >
+      <FooterItemControls placement="footer" />
+    </SettingsWithControl>
+  );
+}
+
+export function FooterItemControls({
+  placement,
+  onReorderingChange,
+}: {
+  placement: SidebarFooterPlacement;
+  onReorderingChange?: (reordering: boolean) => void;
+}) {
+  const preferences = useSidebarFooterPreferences(placement);
+  const dragging = useRef(false);
+
+  useEffect(() => () => onReorderingChange?.(false), [onReorderingChange]);
+
   const { dndContextProps, onClickCapture } = useReorderDnd({
+    onDragStart() {
+      dragging.current = true;
+      onReorderingChange?.(true);
+    },
+    onDragCancel() {
+      dragging.current = false;
+      onReorderingChange?.(false);
+    },
     onDragEnd(event) {
+      dragging.current = false;
+      onReorderingChange?.(false);
+
       if (
         typeof event.active.id === "string" &&
         typeof event.over?.id === "string"
@@ -26,40 +61,40 @@ export function SidebarFooterSettings() {
         preferences.move(event.active.id, event.over.id);
     },
   });
+
   return (
-    <SettingsWithControl
-      label="Sidebar footer"
-      description="Drag to reorder."
-      controlPlacement="below"
+    <div
+      className="rounded-md border border-border"
+      role="group"
+      aria-label="Footer actions"
+      onClickCapture={onClickCapture}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && dragging.current) event.preventDefault();
+      }}
     >
-      <div
-        className="rounded-md border border-border"
-        onClickCapture={onClickCapture}
-      >
-        <DndContext {...dndContextProps}>
-          <SortableContext
-            items={preferences.items.map((item) => item.key)}
-            strategy={verticalListSortingStrategy}
-          >
-            {preferences.items.map((item) => (
-              <FooterSettingsRow
-                key={item.key}
-                item={item}
-                visible={preferences.footer.includes(item)}
-                disabled={
-                  preferences.isFull && !preferences.footer.includes(item)
-                }
-                onVisibleChange={(visible) =>
-                  visible
-                    ? preferences.addToFooter(item.key)
-                    : preferences.hideFromFooter(item.key)
-                }
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
-      </div>
-    </SettingsWithControl>
+      <DndContext {...dndContextProps}>
+        <SortableContext
+          items={preferences.items.map((item) => item.key)}
+          strategy={verticalListSortingStrategy}
+        >
+          {preferences.items.map((item) => (
+            <FooterSettingsRow
+              key={item.key}
+              item={item}
+              visible={preferences.footer.includes(item)}
+              disabled={
+                preferences.isFull && !preferences.footer.includes(item)
+              }
+              onVisibleChange={(visible) =>
+                visible
+                  ? preferences.addToFooter(item.key)
+                  : preferences.removeFromFooter(item.key)
+              }
+            />
+          ))}
+        </SortableContext>
+      </DndContext>
+    </div>
   );
 }
 
@@ -78,6 +113,7 @@ function FooterSettingsRow({
     id: item.key,
     disabled: false,
   });
+
   return (
     <div
       ref={setNodeRef}

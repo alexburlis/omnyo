@@ -6,6 +6,7 @@ import {
 import type { SidebarThread } from "../model/sidebar-thread.js";
 import { describe, expect, it } from "vitest";
 import { buildPinnedSidebarState } from "../model/pinned-sidebar-threads.js";
+import { buildSidebarData } from "../model/use-sidebar-data.js";
 import {
   buildSectionThreadList,
   CHRONOLOGICAL_CONTAINER_ID,
@@ -495,22 +496,84 @@ describe("section thread nest drop decisions", () => {
     });
   });
 
+  it("keeps the real parent of a chat shown only under its continuation", () => {
+    const project = {
+      id: "project",
+      name: "Project",
+      isPersonal: false,
+      href: "/projects/project",
+      settingsHref: "/projects/project/settings",
+    };
+
+    const grouped = buildSidebarData(
+      "ready",
+      [
+        createThread({
+          id: "source",
+          parentThreadId: "archived-parent",
+          sectionId: "a",
+        }),
+        createThread({
+          id: "continuation",
+          originKind: "handoff",
+          sourceThreadId: "source",
+          sectionId: "a",
+          createdAt: 3,
+        }),
+      ],
+      [project],
+      [],
+    );
+
+    const lookup = collectSectionThreadDndLookup(
+      buildSectionThreadList(grouped.projects[0]?.threads ?? [], undefined, [
+        { id: "a", name: "Section A" },
+        { id: "b", name: "Section B" },
+      ]),
+      CHRONOLOGICAL_CONTAINER_ID,
+    );
+
+    expect(lookup.nestParentIdByItemId.get("source")).toBe("continuation");
+
+    const sectionBKey = lookup.sectionParentKeyBySectionId.get("section:b");
+
+    expect(
+      resolveSectionThreadDropDecision(lookup, "source", sectionBKey ?? null),
+    ).toEqual({
+      kind: "move",
+      toParentKey: sectionBKey,
+      ...dropChanges("source", {
+        updates: [{ threadId: "source", sectionId: "b" }],
+      }),
+    });
+    expect(
+      resolveSectionThreadDropDecision(lookup, "source", "pinned"),
+    ).toEqual({
+      kind: "pin",
+      ...dropChanges("source", { pinThreadIds: ["source"] }),
+    });
+  });
+
   it("detaches a child of a pinned thread dropped on the Pinned header", () => {
     const pinnedRoot = createThread({ id: "pinned-1", pinnedAt: 10 });
+
     const pinnedChild = createThread({
       id: "pinned-child",
       parentThreadId: "pinned-1",
       createdAt: 2,
     });
+
     const pinnedState = buildPinnedSidebarState({
       threads: [pinnedRoot, pinnedChild],
     });
+
     const lookup = collectSectionThreadDndLookup(
       buildSectionThreadList([], undefined, []),
       CHRONOLOGICAL_CONTAINER_ID,
       [pinnedRoot],
       pinnedState.rootNodes,
     );
+
     expect(
       resolveSectionThreadDropDecision(lookup, "pinned-child", "pinned"),
     ).toEqual({
@@ -538,6 +601,7 @@ describe("section thread nest drop decisions", () => {
       createThread({ id: "pinned-1", pinnedAt: 10 }),
       createThread({ id: "pinned-2", pinnedAt: 9 }),
     ]);
+
     expect(
       resolveSectionThreadDropDecision(lookup, "pinned-1", rowId("parent-a")),
     ).toEqual({
@@ -635,15 +699,18 @@ describe("pin insert requests", () => {
 
   it("uses thread neighbours when Pinned shows an environment group", () => {
     const environment = makeSidebarEnvironment({ id: "env", isWorktree: true });
+
     const pinnedThreads = [
       createThread({ id: "pinned-1", pinnedAt: 10 }),
       createThread({ id: "grouped-1", environment, pinnedAt: 9 }),
       createThread({ id: "grouped-2", environment, pinnedAt: 8 }),
     ];
+
     const pinnedState = buildPinnedSidebarState({
       groupEnvironmentThreads: true,
       threads: pinnedThreads,
     });
+
     const lookup = collectSectionThreadDndLookup(
       buildSectionThreadList([createThread({ id: "loose" })], undefined, []),
       CHRONOLOGICAL_CONTAINER_ID,
@@ -651,6 +718,7 @@ describe("pin insert requests", () => {
       pinnedState.rootNodes,
       { pinnedRootItems: pinnedState.rootItems },
     );
+
     expect(
       buildPinInsertRequests(lookup, ["loose"], {
         threadId: "pinned-1",
@@ -671,9 +739,11 @@ describe("thread row nest collisions", () => {
     right: 200,
     bottom: 128,
   };
+
   const rowCollision = { id: rowId("parent-a") };
   const groupCollision = { id: "parent-a" };
   const droppableRects = new Map([[rowId("parent-a"), rect]]);
+
   const resolve = (y: number, band: number | null, pointerX = 20) =>
     resolveThreadRowNestCollisions({
       collisions: [rowCollision, groupCollision],
@@ -701,6 +771,7 @@ describe("thread row nest collisions", () => {
 
   it("still requires a dwell after moving to the right", () => {
     const candidates: unknown[] = [];
+
     const collisions = resolveThreadRowNestCollisions({
       collisions: [rowCollision, groupCollision],
       droppableRects,
@@ -708,6 +779,7 @@ describe("thread row nest collisions", () => {
       getBandFraction: () => NEST_BAND_FRACTION,
       holdNestCandidate: (threadId) => {
         candidates.push(threadId);
+
         return false;
       },
     });
@@ -768,6 +840,7 @@ describe("thread row nest collisions", () => {
   it("holds the row target until the candidate is ready", () => {
     const held: (string | null)[] = [];
     const seen: unknown[] = [];
+
     const resolveHeld = (y: number, ready: boolean) =>
       resolveThreadRowNestCollisions({
         collisions: [rowCollision, groupCollision],
@@ -777,9 +850,11 @@ describe("thread row nest collisions", () => {
         onRowPointer: (info) => seen.push(info),
         holdNestCandidate: (threadId) => {
           held.push(threadId);
+
           return ready;
         },
       });
+
     expect(resolveHeld(114, false)).toEqual([groupCollision]);
     expect(resolveHeld(114, true)).toEqual([rowCollision, groupCollision]);
     expect(resolveHeld(103, true)).toEqual([groupCollision]);
@@ -910,6 +985,7 @@ describe("worktree group section dragging", () => {
       id: "env",
       isWorktree: true,
     });
+
     const pinnedRoots = [
       createThread({
         id: "first",
@@ -926,10 +1002,12 @@ describe("worktree group section dragging", () => {
         createdAt: 9,
       }),
     ];
+
     const pinnedState = buildPinnedSidebarState({
       groupEnvironmentThreads: true,
       threads: pinnedRoots,
     });
+
     return collectSectionThreadDndLookup(
       buildSectionThreadList(
         [createThread({ id: "outside", sectionId: "b", createdAt: 11 })],
@@ -1034,6 +1112,7 @@ describe("worktree group section dragging", () => {
 
   it("moves the first and other group members independently", () => {
     const lookup = groupLookup();
+
     for (const id of ["first", "second"]) {
       expect(
         resolveSectionThreadDropDecision(lookup, id, "section:b"),
@@ -1043,6 +1122,7 @@ describe("worktree group section dragging", () => {
         updates: [{ threadId: id, sectionId: "b" }],
       });
     }
+
     expect(
       resolveSectionThreadDropDecision(lookup, "child", "section:b"),
     ).toMatchObject({

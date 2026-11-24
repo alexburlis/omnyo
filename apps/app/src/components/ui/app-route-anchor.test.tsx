@@ -1,16 +1,27 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { createPortal } from "react-dom";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
+import {
+  installNativeShellForTest,
+  removeNativeShellForTest,
+} from "@/test/native-shell-test-utils";
 import {
   PluginDetailRouteNavigationProvider,
   RouteAnchor,
   RouteNavigationProvider,
   useIsRouteNavigationPending,
   useRouteAnchorDelegate,
+  useRouteNavigate,
 } from "./app-route-anchor";
 
 const openPaneContentInSplit = vi.hoisted(() => vi.fn());
@@ -21,6 +32,7 @@ vi.mock("@/lib/split-layout/openPaneContentInSplit", () => ({
 
 afterEach(() => {
   cleanup();
+  removeNativeShellForTest();
   openPaneContentInSplit.mockReset();
 });
 
@@ -35,11 +47,13 @@ function NavigationSampler() {
   const isPending = useIsRouteNavigationPending();
   const { pathname } = useLocation();
   samples.push({ isPending, pathname });
+
   return null;
 }
 
 function PluginDetailLinkDelegate() {
   const onRouteAnchorClick = useRouteAnchorDelegate();
+
   return (
     <div onClick={onRouteAnchorClick}>
       <a href="/plugins/secrets">Open Secrets plugin</a>
@@ -53,10 +67,11 @@ function PortaledThreadLinkDelegate({
   overlayPluginId: string;
 }) {
   const onRouteAnchorClick = useRouteAnchorDelegate();
+
   return (
-    <div data-bb-plugin="thread-list" onClick={onRouteAnchorClick}>
+    <div data-omnyo-plugin="thread-list" onClick={onRouteAnchorClick}>
       {createPortal(
-        <div data-bb-portaled-overlay="" data-bb-plugin={overlayPluginId}>
+        <div data-omnyo-portaled-overlay="" data-omnyo-plugin={overlayPluginId}>
           <a href="/threads/thr-next">Open next thread</a>
         </div>,
         document.body,
@@ -69,8 +84,19 @@ function CurrentPath() {
   return <output data-testid="current-path">{useLocation().pathname}</output>;
 }
 
+function ProgrammaticNavigation() {
+  const navigate = useRouteNavigate();
+
+  return (
+    <button type="button" onClick={() => navigate("/threads/thr-next")}>
+      Trigger background navigation
+    </button>
+  );
+}
+
 describe("RouteAnchor transition navigation", () => {
   it("swaps the route in a later commit than the tap and signals pending in between", () => {
+    const shell = installNativeShellForTest();
     samples.length = 0;
     render(
       <MemoryRouter initialEntries={["/threads/thr-old"]}>
@@ -84,7 +110,14 @@ describe("RouteAnchor transition navigation", () => {
       { isPending: false, pathname: "/threads/thr-old" },
     ]);
 
-    fireEvent.click(screen.getByRole("link", { name: "open thr-new" }));
+    act(() => {
+      fireEvent.click(screen.getByRole("link", { name: "open thr-new" }));
+      fireEvent.click(screen.getByRole("link", { name: "open thr-new" }));
+    });
+    expect(shell.messages()).toEqual([
+      { type: "haptic", kind: "impact-light" },
+      { type: "haptic", kind: "impact-light" },
+    ]);
 
     expect(samples).toContainEqual({
       isPending: true,
@@ -144,6 +177,7 @@ describe("RouteAnchor transition navigation", () => {
   );
 
   it("leaves shift-click to the browser", () => {
+    const shell = installNativeShellForTest();
     render(
       <MemoryRouter initialEntries={["/threads/thr-current"]}>
         <RouteNavigationProvider>
@@ -161,10 +195,42 @@ describe("RouteAnchor transition navigation", () => {
     );
 
     expect(notPrevented).toBe(true);
+    expect(shell.messages()).toEqual([]);
     expect(openPaneContentInSplit).not.toHaveBeenCalled();
     expect(screen.getByTestId("current-path").textContent).toBe(
       "/threads/thr-current",
     );
+  });
+
+  it("keeps prevented clicks and programmatic chat changes quiet", () => {
+    const shell = installNativeShellForTest();
+    render(
+      <MemoryRouter initialEntries={["/threads/thr-current"]}>
+        <RouteNavigationProvider>
+          <CurrentPath />
+          <RouteAnchor
+            href="/threads/thr-next"
+            onClick={(event) => event.preventDefault()}
+          >
+            Cancelled chat tap
+          </RouteAnchor>
+          <ProgrammaticNavigation />
+        </RouteNavigationProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Cancelled chat tap" }));
+    expect(screen.getByTestId("current-path").textContent).toBe(
+      "/threads/thr-current",
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Trigger background navigation" }),
+    );
+    expect(screen.getByTestId("current-path").textContent).toBe(
+      "/threads/thr-next",
+    );
+    expect(shell.messages()).toEqual([]);
   });
 });
 
@@ -226,6 +292,7 @@ describe("useRouteAnchorDelegate plugin-detail links", () => {
 
 describe("useRouteAnchorDelegate portaled overlays", () => {
   it("navigates in-app for a link in the plugin's own portaled menu", () => {
+    const shell = installNativeShellForTest();
     render(
       <MemoryRouter initialEntries={["/threads/thr-current"]}>
         <RouteNavigationProvider>
@@ -240,6 +307,9 @@ describe("useRouteAnchorDelegate portaled overlays", () => {
     );
 
     expect(notPrevented).toBe(false);
+    expect(shell.messages()).toEqual([
+      { type: "haptic", kind: "impact-light" },
+    ]);
     expect(screen.getByTestId("current-path").textContent).toBe(
       "/threads/thr-next",
     );

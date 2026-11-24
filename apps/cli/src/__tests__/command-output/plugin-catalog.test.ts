@@ -23,16 +23,15 @@ const searchResult = {
   collections: [],
   source: "builtin:linear",
   repositoryUrl: null,
-  marketplace: "bb-official",
-  marketplaceDisplayName: "BB Official",
-  publisherKey: "bb-official",
-  publisherLabel: "BB Official",
+  marketplace: "omnyo-official",
+  marketplaceDisplayName: "Omnyo Official",
+  publisherKey: "omnyo-official",
+  publisherLabel: "Omnyo Official",
   official: true,
   author: null,
   installed: false,
   installedByDefault: false,
   conflictingInstallSource: null,
-  installs: null,
   compatible: true,
   incompatibleReason: null,
 };
@@ -79,8 +78,9 @@ const installedPlugin = {
   version: "1.4.2",
   provenance: "catalog",
   isOrphanedBuiltin: false,
+  removable: true,
   catalogEntryId: "linear",
-  publisherLabel: "BB Community",
+  publisherLabel: "Omnyo Official",
   sourceDisplay: "builtin · linear",
   updateState: {},
   enabled: true,
@@ -112,8 +112,9 @@ function json(value: object, status = 200): Response {
   });
 }
 
-describe("bb plugin catalog", () => {
+describe("omnyo plugin catalog", () => {
   setupCommandOutputTestEnvironment();
+
   const register: CommandRegistrar = (program) =>
     registerPluginCommands(program, () => "http://server");
 
@@ -175,38 +176,27 @@ describe("bb plugin catalog", () => {
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
     expect(output).toContain("Marketplace");
     expect(output).toContain("Acme Plugins");
-    expect(output).toContain("BB Official");
+    expect(output).toContain("Omnyo Official");
   });
 
-  it("adds an Installs column only once a listing reports counts", async () => {
+  it("adds a Badge column only once a listing has a badge", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(json({ results: [searchResult] }));
     await runCommand(["plugin", "search", "lin"], register);
     expect(collectLogPayloads(vi.mocked(console.log)).join("\n")).not.toContain(
-      "Installs",
+      "Badge",
     );
-
-    vi.mocked(console.log).mockClear();
-    vi.mocked(fetch).mockResolvedValueOnce(
-      json({ results: [{ ...searchResult, installs: 4210 }] }),
-    );
-    await runCommand(["plugin", "search", "lin"], register);
-
-    const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
-    expect(output).toContain("Installs");
-    expect(output).toContain("4,210");
   });
 
   it("labels built-in and new listings like the plugin store", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       json({
         results: [
-          { ...searchResult, installedByDefault: true, installs: 2 },
+          { ...searchResult, installed: true, installedByDefault: true },
           {
             ...searchResult,
             entryId: "notes",
             pluginId: "notes",
             displayName: "Notes",
-            installs: 3,
             publishedAt: new Date().toISOString(),
           },
         ],
@@ -215,6 +205,7 @@ describe("bb plugin catalog", () => {
     await runCommand(["plugin", "search", "lin"], register);
 
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
+    expect(output).toContain("Badge");
     expect(output).toContain("Built in");
     expect(output).toContain("New");
   });
@@ -246,7 +237,7 @@ describe("bb plugin catalog", () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       json({ ok: true, plugin: installedPlugin }),
     );
-    const source = "https://github.com/acme/bb-plugin-linear";
+    const source = "https://github.com/acme/omnyo-plugin-linear";
 
     await runCommand(["plugin", "install", source, "--yes"], register);
 
@@ -263,7 +254,7 @@ describe("bb plugin catalog", () => {
     vi.mocked(fetch).mockImplementation(async () =>
       json({ ok: true, plugin: installedPlugin }),
     );
-    const source = "git:github.com/acme/bb-plugins@main";
+    const source = "git:github.com/acme/omnyo-plugins@main";
 
     await runCommand(
       ["plugin", "install", source, "--plugin", "linear", "--yes"],
@@ -303,7 +294,7 @@ describe("bb plugin catalog", () => {
       [
         "plugin",
         "install",
-        "git:github.com/acme/bb-plugins@^1.2.0",
+        "git:github.com/acme/omnyo-plugins@^1.2.0",
         "--tag-prefix",
         "linear/",
         "--yes",
@@ -317,15 +308,16 @@ describe("bb plugin catalog", () => {
           (call) =>
             (JSON.parse(String(call[1]?.body)) as { source: string }).source,
         ),
-    ).toEqual(["git:github.com/acme/bb-plugins@semver:linear/:^1.2.0"]);
+    ).toEqual(["git:github.com/acme/omnyo-plugins@semver:linear/:^1.2.0"]);
 
     const errorSpy = vi.mocked(console.error);
+
     for (const args of [
-      ["plugin", "install", "git:github.com/acme/bb-plugins", "--yes"],
+      ["plugin", "install", "git:github.com/acme/omnyo-plugins", "--yes"],
       [
         "plugin",
         "install",
-        "git:github.com/acme/bb-plugins@semver:^1.2.0",
+        "git:github.com/acme/omnyo-plugins@semver:^1.2.0",
         "--yes",
       ],
     ]) {
@@ -333,6 +325,7 @@ describe("bb plugin catalog", () => {
         runCommand([...args, "--tag-prefix", "linear/"], register),
       ).rejects.toThrowError("process.exit:1");
     }
+
     expect(
       errorSpy.mock.calls.map((call) => call.join(" ")).join("\n"),
     ).toMatch(/--tag-prefix applies to a git: source[\s\S]*not both/);
@@ -346,7 +339,7 @@ describe("bb plugin catalog", () => {
         [
           "plugin",
           "install",
-          "git:github.com/acme/bb-plugins@main",
+          "git:github.com/acme/omnyo-plugins@main",
           "--plugin",
           "linear",
           "--subdirectory",
@@ -399,7 +392,49 @@ describe("bb plugin catalog", () => {
       entryId: "linear",
     });
     expect(collectLogPayloads(vi.mocked(console.log)).join("\n")).toContain(
-      "bundled with BB",
+      "bundled with Omnyo",
+    );
+  });
+
+  it("installs a bundled entry by its plugin id", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock
+      .mockResolvedValueOnce(
+        json({
+          results: [
+            {
+              ...searchResult,
+              entryId: "chime",
+              pluginId: "chime-local",
+              displayName: "Chime",
+              source: "builtin:chime",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          plan: {
+            ...bundledPlan,
+            entryId: "chime",
+            pluginId: "chime-local",
+            displayName: "Chime",
+            source: "builtin:chime",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(json({ ok: true, plugin: installedPlugin }));
+
+    await runCommand(["plugin", "install", "chime-local", "--yes"], register);
+
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "http://server/api/v1/plugin-catalog/install-plan?entryId=chime-local",
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      entryId: "chime",
+    });
+    expect(collectLogPayloads(vi.mocked(console.log)).join("\n")).toContain(
+      "Installing Chime, bundled with Omnyo (builtin:chime)",
     );
   });
 
@@ -441,10 +476,10 @@ describe("bb plugin catalog", () => {
         json({
           plan: {
             ...thirdPartyPlan,
-            source: "npm:bb-plugin-notes@beta",
+            source: "npm:omnyo-plugin-notes@beta",
             resolvedSource: {
               kind: "npm",
-              package: "bb-plugin-notes",
+              package: "omnyo-plugin-notes",
               tag: "beta",
               registry: "https://npm.acme.test",
             },
@@ -459,7 +494,7 @@ describe("bb plugin catalog", () => {
     );
 
     const output = collectLogPayloads(vi.mocked(console.log)).join("\n");
-    expect(output).toContain("npm package: bb-plugin-notes@beta");
+    expect(output).toContain("npm package: omnyo-plugin-notes@beta");
     expect(output).toContain("registry: https://npm.acme.test");
   });
 

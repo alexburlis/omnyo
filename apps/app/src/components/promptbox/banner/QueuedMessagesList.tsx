@@ -1,6 +1,7 @@
 import {
   memo,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -9,8 +10,18 @@ import {
   useState,
   type ReactElement,
   type ReactNode,
+  type RefObject,
 } from "react";
 import ReactMarkdown from "react-markdown";
+import { matchPath } from "react-router-dom";
+import { RouteAnchor } from "@/components/ui/app-route-anchor";
+import {
+  PROJECTLESS_THREAD_DETAIL_ROUTE_PATH,
+  THREAD_DETAIL_ROUTE_PATH,
+  resolveRouteHref,
+} from "@/lib/route-paths";
+import { QueryClientContext } from "@tanstack/react-query";
+import { queuedMessageRenderKey } from "@/hooks/cache-owners/queued-message-render-keys";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -23,10 +34,13 @@ import { PluginIcon } from "@/components/plugin/PluginIcon";
 import {
   describeQueuedMessageWait,
   formatQueuedMessageCountdown,
+  isQueuedInboxNotice,
   isQueuedMessageSendNowAllowed,
+  isQueuedWaitWakeUp,
   queuedMessageCountdownInstant,
   queuedMessageFallbackTitle,
   queuedMessageHasWaitLine,
+  queuedMessageSystemTitle,
   queuedMessageWaitIcon,
 } from "@/lib/queued-message-wait";
 import type {
@@ -38,8 +52,10 @@ import type {
 } from "@/components/promptbox/banner/LazyQueuedMessagesList";
 import { QueuedMessagesCountPill } from "@/components/promptbox/banner/QueuedMessagesCountPill";
 import {
+  getQueuedMessagesCollapsedHeight,
   getQueuedMessagesDrawerHeight,
   QUEUED_MESSAGES_COLLAPSED_HEIGHT,
+  queuedMessagesEndOnGroupBoundary,
 } from "@/components/promptbox/banner/queued-messages-layout";
 import {
   DndContext,
@@ -68,33 +84,41 @@ import type {
   PromptInput,
   PromptTextMention,
   ThreadQueuedMessage,
-} from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
 import {
-  PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
-  PromptStackCard,
-} from "@/components/promptbox/banner/PromptStackCard";
-import {
-  PromptStackCollapseRow,
-  useDisclosureFocusHandoff,
-} from "@bb/shared-ui/prompt-stack-disclosure";
+  CONTROL_HOVER_TRANSITION,
+  CONTROL_PRESS_FEEDBACK,
+  CONTROL_PRESS_TRANSITION,
+  DISCLOSURE_CHEVRON_TRANSITION,
+  getSortableTransition,
+  MOTION_DURATION_MS,
+  resolveMotionEase,
+  usePrefersReducedMotion,
+} from "@omnyo/shared-ui/motion";
+import { PromptStackCard } from "@/components/promptbox/banner/PromptStackCard";
 import { PROMPT_STACK_ROW_ACTION_TAKEOVER_CLASS } from "@/components/promptbox/banner/prompt-banner-actions";
+import { QueuedMessageStartOnMenu } from "@/components/promptbox/banner/QueuedMessageStartOnMenu";
 import { useScrollOverflowState } from "@/components/thread/timeline/useScrollOverflowState";
 import { OverflowFade } from "@/components/ui/overflow-fade";
 import { InlineMessageEditorFrame } from "@/components/promptbox/InlineMessageEditorFrame";
 import { useBottomAnchoredScroll } from "@/components/ui/bottom-anchored-scroll-body";
 import {
+  buildThreadMentionComponent,
+  remarkThreadMentions,
+} from "@/components/ui/markdown-thread-mentions";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/tooltip";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   countQueuedMessageAttachments,
   formatQueuedMessagePreview,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import {
   collectLeadQueuedMessageGroupIds,
   preserveLeadQueuedMessageGroupAfterReorder,
@@ -139,14 +163,34 @@ interface QueuedMessageRowProps {
   onDelete: (id: string) => void;
   compact: boolean;
   isGroupBoundary: boolean;
+  entering: boolean;
+  startOnThreadId: string | null;
+  toggleGutter: boolean;
+  tuckedAway: boolean;
+  soleVisible: boolean;
 }
 
+type QueueSurfacePresence = "appeared" | "entered" | "exiting";
+
+const QUEUE_SURFACE_EXIT_KEYFRAME = {
+  height: "0px",
+  marginBottom: "0px",
+  paddingBottom: "0px",
+  opacity: 0,
+};
+
 const GROUP_DIVIDER_ID = "__queued_message_group_divider__";
-const WORKSPACE_MIN_HEIGHT = 240;
+
+const WORKSPACE_MIN_HEIGHT = 96;
+
 const WORKSPACE_MAX_HEIGHT = 360;
+
 const WORKSPACE_CHROME_HEIGHT = 56;
+
 const WORKSPACE_ROW_HEIGHT = 40;
+
 const TYPEAHEAD_MENU_GAP = 8;
+
 type QueueSurfaceMode = "collapsed" | "drawer" | "workspace";
 
 function getWorkspaceHeight({
@@ -156,6 +200,7 @@ function getWorkspaceHeight({
 }): number {
   const estimatedHeight =
     WORKSPACE_CHROME_HEIGHT + Math.max(1, messageCount) * WORKSPACE_ROW_HEIGHT;
+
   return clamp(estimatedHeight, WORKSPACE_MIN_HEIGHT, WORKSPACE_MAX_HEIGHT);
 }
 
@@ -172,6 +217,7 @@ export function getInlineEditorSurfaceMaxHeight({
     0,
     containerHeight - surfaceHeight,
   );
+
   return Math.max(
     QUEUED_MESSAGES_COLLAPSED_HEIGHT,
     Math.floor(viewportHeight - occupiedHeightOutsideQueue),
@@ -185,14 +231,39 @@ function queuedMarkdownPreviewClass(compact: boolean): string {
   );
 }
 
-const QUEUED_MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkPromptMentions];
+const QUEUED_MARKDOWN_REMARK_PLUGINS = [
+  remarkGfm,
+  remarkPromptMentions,
+  remarkThreadMentions,
+];
 
 function compactInline(children: ReactNode): ReactElement {
   return <span>{children} </span>;
 }
 
 const QUEUED_MARKDOWN_COMPONENTS: Components = {
-  a: ({ children }) => <span>{children}</span>,
+  a: ({ children, href }) => {
+    const route =
+      href === undefined
+        ? null
+        : resolveRouteHref({
+            currentOrigin: window.location.origin,
+            href,
+          });
+
+    const pathname = route?.path.split(/[?#]/u, 1)[0];
+
+    return route &&
+      pathname &&
+      (matchPath(THREAD_DETAIL_ROUTE_PATH, pathname) ||
+        matchPath(PROJECTLESS_THREAD_DETAIL_ROUTE_PATH, pathname)) ? (
+      <RouteAnchor className="underline decoration-dotted" href={route.path}>
+        {children}
+      </RouteAnchor>
+    ) : (
+      <span>{children}</span>
+    );
+  },
   blockquote: ({ children }) => (
     <span className="inline border-l-2 border-surface-selected-border pl-2 text-muted-foreground">
       {children}
@@ -249,20 +320,25 @@ function CompactQueuedMarkdownPreview({
     () => substitutePromptMentions(preview.text, preview.mentions),
     [preview.mentions, preview.text],
   );
+
   const markdownContent = useMemo(
     () =>
       normalizePromptBlockquoteBoundaries(promptMentionSubstitution.content),
     [promptMentionSubstitution.content],
   );
+
   const components = useMemo<Components>(
     () => ({
       ...QUEUED_MARKDOWN_COMPONENTS,
-      "bb-prompt-mention": buildPromptMentionComponent({
+      "omnyo-prompt-mention": buildPromptMentionComponent({
         mentions: promptMentionSubstitution.mentions,
         resolveMentionLink,
       }),
+      "omnyo-thread-mention": buildThreadMentionComponent({
+        mentions: preview.mentions,
+      }),
     }),
-    [promptMentionSubstitution.mentions, resolveMentionLink],
+    [preview.mentions, promptMentionSubstitution.mentions, resolveMentionLink],
   );
 
   return (
@@ -302,17 +378,22 @@ export function resolveQueuedMessageDrag({
   if (activeId === overId) {
     return null;
   }
+
   const oldIndex = combinedIds.indexOf(activeId);
   const newIndex = combinedIds.indexOf(overId);
+
   if (oldIndex === -1 || newIndex === -1) {
     return null;
   }
 
   const movedIds = arrayMove([...combinedIds], oldIndex, newIndex);
+
   const byId = new Map(
     orderedMessages.map((queuedMessage) => [queuedMessage.id, queuedMessage]),
   );
+
   const dividerIndex = movedIds.indexOf(GROUP_DIVIDER_ID);
+
   const nextMessages = movedIds
     .filter((id) => id !== GROUP_DIVIDER_ID)
     .map((id) => byId.get(id))
@@ -324,9 +405,11 @@ export function resolveQueuedMessageDrag({
   if (activeId === GROUP_DIVIDER_ID) {
     const boundaryIndex = Math.max(dividerIndex - 1, 0);
     const groupBoundaryQueuedMessageId = nextMessages[boundaryIndex]?.id;
+
     if (!groupBoundaryQueuedMessageId) {
       return null;
     }
+
     return {
       kind: "divider",
       orderedMessages: nextMessages.map((queuedMessage, index) => ({
@@ -345,6 +428,7 @@ export function resolveQueuedMessageDrag({
   const messageIndex = nextMessages.findIndex(
     (queuedMessage) => queuedMessage.id === activeId,
   );
+
   if (messageIndex === -1) {
     return null;
   }
@@ -382,10 +466,12 @@ export function clampQueuedMessageDragTransform({
     listRect?.top ?? Number.NEGATIVE_INFINITY,
     scrollRect?.top ?? Number.NEGATIVE_INFINITY,
   );
+
   const boundsBottom = Math.min(
     listRect?.bottom ?? Number.POSITIVE_INFINITY,
     scrollRect?.bottom ?? Number.POSITIVE_INFINITY,
   );
+
   const minY = boundsTop - draggingNodeRect.top;
   const maxY = boundsBottom - draggingNodeRect.bottom;
 
@@ -412,11 +498,13 @@ export function snapGroupBoundaryDragTransform({
   if (activeId !== GROUP_DIVIDER_ID || !activeNodeRect) {
     return transform;
   }
+
   if (overId === GROUP_DIVIDER_ID || !overRect) {
     return { ...transform, x: 0 };
   }
 
   const activeCenterY = activeNodeRect.top + activeNodeRect.height / 2;
+
   return {
     ...transform,
     x: 0,
@@ -426,6 +514,7 @@ export function snapGroupBoundaryDragTransform({
 
 function collisionDistance(collision: Collision): number {
   const value = collision.data?.value;
+
   return typeof value === "number" ? value : Number.POSITIVE_INFINITY;
 }
 
@@ -435,9 +524,11 @@ export const queuedMessageCollisionDetection: CollisionDetection = (args) => {
   }
 
   const collisions: Collision[] = [];
+
   for (const droppableContainer of args.droppableContainers) {
     if (String(droppableContainer.id) === GROUP_DIVIDER_ID) continue;
     const rect = args.droppableRects.get(droppableContainer.id);
+
     if (!rect) continue;
     collisions.push({
       id: droppableContainer.id,
@@ -447,6 +538,7 @@ export const queuedMessageCollisionDetection: CollisionDetection = (args) => {
       },
     });
   }
+
   return collisions.sort(
     (left, right) => collisionDistance(left) - collisionDistance(right),
   );
@@ -457,9 +549,11 @@ export function queuedMessageSortingStrategy(
   args: Parameters<SortingStrategy>[0],
 ): ReturnType<SortingStrategy> {
   const activeId = sortableIds[args.activeIndex];
+
   if (activeId === GROUP_DIVIDER_ID && args.index !== args.activeIndex) {
     return null;
   }
+
   return verticalListSortingStrategy(args);
 }
 
@@ -476,14 +570,28 @@ function queuedMessageSenderLabel(
   queuedMessage: ThreadQueuedMessage,
   senderThreadMetadataById: ReadonlyMap<string, SenderThreadMetadata>,
 ): string | null {
-  if (queuedMessage.payload.kind === "retry") return null;
+  if (queuedMessage.senderThreadId !== null) {
+    return (
+      senderThreadMetadataById.get(queuedMessage.senderThreadId)?.title ??
+      queuedMessage.senderThreadId
+    );
+  }
+
+  if (queuedMessage.payload.kind !== "inline") return null;
+
+  if (isQueuedWaitWakeUp(queuedMessage)) return null;
+
+  if (isQueuedInboxNotice(queuedMessage)) return "Inbox";
+
+  if (queuedMessage.messageSource?.kind === "script")
+    return `Script ${queuedMessage.messageSource.label}`;
+
+  if (queuedMessage.messageSource?.kind === "plugin")
+    return `Plugin ${queuedMessage.messageSource.pluginId}`;
+
   if (queuedMessage.initiator === "system") return "System";
-  if (queuedMessage.initiator !== "agent") return null;
-  return (
-    senderThreadMetadataById.get(queuedMessage.senderThreadId ?? "")?.title ??
-    queuedMessage.senderThreadId ??
-    "Agent"
-  );
+
+  return queuedMessage.initiator === "agent" ? "Agent" : null;
 }
 
 function shiftMentionsBy(
@@ -491,6 +599,7 @@ function shiftMentionsBy(
   offset: number,
 ): PromptTextMention[] {
   if (offset === 0) return [...mentions];
+
   return mentions.map((mention) => ({
     ...mention,
     start: mention.start + offset,
@@ -512,12 +621,14 @@ function trimQueuedMessagePreviewTextRange({
   const rawText = text.slice(rangeStart, rangeEnd);
   const leadingWhitespaceLength = rawText.length - rawText.trimStart().length;
   const trimmedRelativeEnd = rawText.trimEnd().length;
+
   if (trimmedRelativeEnd <= leadingWhitespaceLength) {
     return null;
   }
 
   const trimmedStart = rangeStart + leadingWhitespaceLength;
   const trimmedEnd = rangeStart + trimmedRelativeEnd;
+
   return {
     text: text.slice(trimmedStart, trimmedEnd),
     mentions: shiftMentionsToTextRange({
@@ -541,6 +652,7 @@ function buildQueuedMessagePreviewText(
       rangeStart: 0,
       rangeEnd: chunk.text.length,
     });
+
     if (!trimmedChunk) continue;
 
     const separator = text.length > 0 ? "\n\n" : "";
@@ -560,11 +672,13 @@ function QueuedMessageFallbackTitle({
   queuedMessage: ThreadQueuedMessage;
 }) {
   const now = useSecondTick();
+
   const title = queuedMessageFallbackTitle({
     createdAt: queuedMessage.createdAt,
     now,
     payload: queuedMessage.payload,
   });
+
   return (
     <span className={queuedMarkdownPreviewClass(compact)} title={title}>
       {title}
@@ -588,6 +702,7 @@ function QueuedMessagePreview({
       }),
     [queuedMessage.content],
   );
+
   const markdownPreview = useMemo(
     () => buildQueuedMessagePreviewText(queuedMessage.content),
     [queuedMessage.content],
@@ -600,6 +715,21 @@ function QueuedMessagePreview({
           compact={compact}
           queuedMessage={queuedMessage}
         />
+      </div>
+    );
+  }
+
+  const systemTitle = queuedMessageSystemTitle(queuedMessage);
+
+  if (systemTitle !== null) {
+    return (
+      <div
+        className="min-w-0 flex-1 overflow-hidden text-foreground"
+        title={systemTitle}
+      >
+        <span className={queuedMarkdownPreviewClass(compact)}>
+          {systemTitle}
+        </span>
       </div>
     );
   }
@@ -630,6 +760,7 @@ function QueuedMessageWaitLine({
   queuedMessage: ThreadQueuedMessage;
 }) {
   const now = useSecondTick();
+
   const label = describeQueuedMessageWait({
     failureReason: queuedMessage.failureReason,
     now,
@@ -638,14 +769,17 @@ function QueuedMessageWaitLine({
     sendAt: queuedMessage.sendAt,
     waitingOn: queuedMessage.waitingOn,
   });
+
   if (label === null) return null;
   const failed = queuedMessage.failureReason !== null;
   const icon = queuedMessageWaitIcon(queuedMessage);
   const countdownInstant = queuedMessageCountdownInstant(queuedMessage);
+
   const countdown =
     countdownInstant === null
       ? null
       : formatQueuedMessageCountdown(countdownInstant - now);
+
   return (
     <span
       data-queued-message-wait=""
@@ -656,7 +790,14 @@ function QueuedMessageWaitLine({
       )}
     >
       {icon !== null ? (
-        <Icon name={icon} className="size-3 shrink-0" aria-hidden />
+        <Icon
+          name={icon}
+          className={cn(
+            "size-3 shrink-0",
+            icon === "Spinner" && "animate-spin",
+          )}
+          aria-hidden
+        />
       ) : queuedMessage.waitingOn?.kind === "plugin" ? (
         <PluginIcon
           pluginId={queuedMessage.waitingOn.pluginId}
@@ -673,31 +814,6 @@ function QueuedMessageWaitLine({
   );
 }
 
-function QueuedMessagesHeaderWait({
-  queuedMessages,
-}: {
-  queuedMessages: readonly ThreadQueuedMessage[];
-}) {
-  const newestFirst = [...queuedMessages].sort(
-    (first, second) => second.createdAt - first.createdAt,
-  );
-  const attentionMessage =
-    newestFirst.find((queuedMessage) => queuedMessage.failureReason !== null) ??
-    newestFirst.find(queuedMessageHasWaitLine);
-  const pluginDisplayName = usePluginDisplayName(
-    attentionMessage?.waitingOn?.kind === "plugin"
-      ? attentionMessage.waitingOn.pluginId
-      : "",
-  );
-  if (!attentionMessage) return null;
-  return (
-    <QueuedMessageWaitLine
-      pluginDisplayName={pluginDisplayName}
-      queuedMessage={attentionMessage}
-    />
-  );
-}
-
 function useQueuedMessageArrivals(
   queuedMessages: readonly ThreadQueuedMessage[],
 ): number {
@@ -706,9 +822,11 @@ function useQueuedMessageArrivals(
     count: queuedMessages.length,
     seenIds: new Set(queuedMessages.map((queuedMessage) => queuedMessage.id)),
   }));
+
   const hasUnseen = queuedMessages.some(
     (queuedMessage) => !tracker.seenIds.has(queuedMessage.id),
   );
+
   if (hasUnseen || tracker.count !== queuedMessages.length) {
     setTracker({
       arrivals:
@@ -724,7 +842,28 @@ function useQueuedMessageArrivals(
         : tracker.seenIds,
     });
   }
+
   return tracker.arrivals;
+}
+
+function useEnteringRenderKeys(
+  renderKeys: readonly string[],
+): ReadonlySet<string> {
+  const [tracker, setTracker] = useState(() => ({
+    entering: new Set<string>(),
+    known: new Set(renderKeys),
+  }));
+
+  const unseen = renderKeys.filter((key) => !tracker.known.has(key));
+
+  if (unseen.length > 0) {
+    setTracker({
+      entering: new Set(unseen),
+      known: new Set([...tracker.known, ...unseen]),
+    });
+  }
+
+  return tracker.entering;
 }
 
 function QueuedMessageProcessingLine({ label }: { label: string }) {
@@ -761,6 +900,11 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
   onDelete,
   compact,
   isGroupBoundary,
+  entering,
+  startOnThreadId,
+  toggleGutter,
+  tuckedAway,
+  soleVisible,
 }: QueuedMessageRowProps) {
   const actionsRef = useRef<HTMLDivElement>(null);
   const focusActionsOnExpandRef = useRef(false);
@@ -771,25 +915,35 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
       ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
       ?.focus({ preventScroll: true });
   }, [mobileActionsExpanded]);
+
   const attachmentCount = useMemo(
     () => countQueuedMessageAttachments(queuedMessage.content),
     [queuedMessage.content],
   );
+
   const pluginDisplayName = usePluginDisplayName(
     queuedMessage.waitingOn?.kind === "plugin"
       ? queuedMessage.waitingOn.pluginId
       : "",
   );
+
   const hasWaitLine = queuedMessageHasWaitLine(queuedMessage);
+
   const sendAllowed =
-    sendAction === "steer-when-ready" ||
-    isQueuedMessageSendNowAllowed(queuedMessage);
+    queuedMessage.waitingOn?.kind !== "server-update" &&
+    (sendAction === "steer-when-ready" ||
+      isQueuedMessageSendNowAllowed(queuedMessage));
+
   const sendAriaLabel =
     sendAction === "steer-when-ready"
       ? `Steer queued message ${index + 1} when ready`
       : `Send queued message ${index + 1} now`;
+
   const sendLabel =
     sendAction === "steer-when-ready" ? "Steer when ready" : "Send now";
+
+  const prefersReducedMotion = usePrefersReducedMotion();
+
   const {
     attributes,
     isDragging,
@@ -801,7 +955,9 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
   } = useSortable({
     id: queuedMessage.id,
     disabled: dragDisabled,
+    transition: getSortableTransition(prefersReducedMotion),
   });
+
   const rowStyle = {
     transform: CSS.Translate.toString(transform),
     transition,
@@ -814,9 +970,14 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
       data-queued-message-row=""
       data-queued-message-id={queuedMessage.id}
       data-queued-message-group-boundary-row={isGroupBoundary ? "" : undefined}
+      aria-hidden={tuckedAway ? true : undefined}
+      inert={tuckedAway ? true : undefined}
       className={cn(
-        "group/dispatch-row relative border-b border-border/35 px-2.5 py-0.5",
+        "group/dispatch-row relative border-b border-border/35 py-0.5 pl-2.5",
+        toggleGutter ? "pr-16" : "pr-2.5",
         !isGroupBoundary && "last:border-b-0",
+        soleVisible && "border-b-transparent",
+        entering && "omnyo-queue-row-enter",
         isDragging &&
           "z-20 rounded-lg border border-border bg-background opacity-90 shadow-lift",
       )}
@@ -827,7 +988,7 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
           type="button"
           variant="ghost"
           className={cn(
-            "-ml-2 flex h-7 w-5 shrink-0 touch-none items-center justify-center rounded-md px-0.5 text-muted-foreground",
+            "relative -ml-2 flex h-7 w-5 shrink-0 touch-none items-center justify-center rounded-md px-0.5 text-muted-foreground disabled:opacity-100",
             !dragDisabled && "cursor-grab active:cursor-grabbing",
           )}
           disabled={dragDisabled}
@@ -835,10 +996,22 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
           {...attributes}
           {...listeners}
         >
+          <span
+            aria-hidden="true"
+            data-queued-message-position=""
+            className={cn(
+              "absolute text-2xs tabular-nums text-subtle-foreground",
+              !dragDisabled &&
+                "group-hover/dispatch-row:opacity-0 group-focus-within/dispatch-row:opacity-0 [@media(hover:none)]:opacity-0",
+              isDragging && "opacity-0",
+            )}
+          >
+            {index + 1}
+          </span>
           <Icon
             name="DragDropVertical"
             className={cn(
-              "size-3.5 shrink-0 opacity-0 transition-opacity",
+              "size-3.5 shrink-0 opacity-0",
               !dragDisabled &&
                 "group-hover/dispatch-row:opacity-100 group-focus-within/dispatch-row:opacity-100 [@media(hover:none)]:opacity-100",
               isDragging && "opacity-100",
@@ -862,7 +1035,7 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
               <span
                 data-queued-message-attachment=""
                 className={cn(
-                  "ml-auto inline-flex shrink-0 items-center gap-0.5 text-2xs text-subtle-foreground opacity-70 transition-opacity duration-[120ms] ease-out",
+                  "ml-auto inline-flex shrink-0 items-center gap-0.5 text-2xs text-subtle-foreground opacity-70",
                   !isProcessing &&
                     "group-hover/dispatch-row:opacity-0 group-focus-within/dispatch-row:opacity-0 [@media(hover:none)]:opacity-0",
                 )}
@@ -893,11 +1066,14 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
                   title={`From ${senderLabel}`}
                 >
                   <span className="shrink-0">From</span>
-                  {queuedMessage.initiator === "agent" &&
-                  queuedMessage.senderThreadId !== null ? (
-                    <span className="flex min-w-0 [&>.prompt-mention-pill]:text-2xs">
+                  {queuedMessage.senderThreadId !== null ? (
+                    <span
+                      className="flex min-w-0 [&>.prompt-mention-pill]:text-2xs"
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                    >
                       <PromptMentionPill
-                        interactive={false}
+                        interactive
                         resource={{
                           kind: "thread",
                           threadId: queuedMessage.senderThreadId,
@@ -935,14 +1111,22 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
                 data-queued-message-actions=""
                 className={cn(
                   PROMPT_STACK_ROW_ACTION_TAKEOVER_CLASS,
-                  "pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 items-center gap-0.5 rounded-md opacity-0 transition-opacity duration-[120ms] ease-out md:flex",
+                  "pointer-events-none absolute top-1/2 -translate-y-1/2 items-center gap-0.5 rounded-md opacity-0 md:flex",
+                  toggleGutter ? "right-16" : "right-2.5",
                   mobileActionsExpanded
-                    ? "flex max-md:pointer-events-auto max-md:opacity-100"
+                    ? "flex pointer-events-auto opacity-100"
                     : "max-md:hidden",
                   "group-hover/dispatch-row:pointer-events-auto group-hover/dispatch-row:opacity-100",
                   "group-focus-within/dispatch-row:pointer-events-auto group-focus-within/dispatch-row:opacity-100",
                 )}
               >
+                {startOnThreadId === null ? null : (
+                  <QueuedMessageStartOnMenu
+                    threadId={startOnThreadId}
+                    compact={compact}
+                    disabled={actionDisabled}
+                  />
+                )}
                 {sendAllowed ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -1023,7 +1207,8 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
               variant="ghost"
               className={cn(
                 PROMPT_STACK_ROW_ACTION_TAKEOVER_CLASS,
-                "pointer-events-none absolute right-2.5 top-1/2 shrink-0 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity duration-[120ms] ease-out md:hidden",
+                "pointer-events-none absolute top-1/2 shrink-0 -translate-y-1/2 text-muted-foreground opacity-0 md:[@media(hover:hover)]:hidden",
+                toggleGutter ? "right-16" : "right-2.5",
                 "group-hover/dispatch-row:pointer-events-auto group-hover/dispatch-row:opacity-100",
                 "group-focus-within/dispatch-row:pointer-events-auto group-focus-within/dispatch-row:opacity-100",
                 "[@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100",
@@ -1047,7 +1232,15 @@ const QueuedMessageRow = memo(function QueuedMessageRow({
   );
 });
 
-function SortableGroupBoundaryHandle({ disabled }: { disabled: boolean }) {
+function SortableGroupBoundaryHandle({
+  disabled,
+  tuckedAway,
+}: {
+  disabled: boolean;
+  tuckedAway: boolean;
+}) {
+  const prefersReducedMotion = usePrefersReducedMotion();
+
   const {
     active,
     attributes,
@@ -1057,7 +1250,12 @@ function SortableGroupBoundaryHandle({ disabled }: { disabled: boolean }) {
     setNodeRef,
     transform,
     transition,
-  } = useSortable({ id: GROUP_DIVIDER_ID, disabled });
+  } = useSortable({
+    id: GROUP_DIVIDER_ID,
+    disabled,
+    transition: getSortableTransition(prefersReducedMotion),
+  });
+
   const anotherItemIsDragging =
     active !== null && active.id !== GROUP_DIVIDER_ID;
 
@@ -1069,7 +1267,12 @@ function SortableGroupBoundaryHandle({ disabled }: { disabled: boolean }) {
         transform: isDragging ? CSS.Translate.toString(transform) : undefined,
         transition: isDragging ? transition : undefined,
       }}
-      className="pointer-events-none relative z-10 h-0 list-none"
+      aria-hidden={tuckedAway ? true : undefined}
+      inert={tuckedAway ? true : undefined}
+      className={cn(
+        "pointer-events-none relative z-10 h-0 list-none",
+        tuckedAway && "invisible",
+      )}
     >
       <div className="absolute left-1/2 top-[-0.5px] -translate-x-1/2 -translate-y-1/2">
         <div className="pointer-events-none">
@@ -1123,17 +1326,21 @@ function findInlineEditorNeighborhood(list: HTMLUListElement): {
   const editorElement = list.querySelector<HTMLElement>(
     "[data-queued-message-inline-editor]",
   );
+
   if (!editorElement) return null;
 
   const items = Array.from(list.children);
   const editorIndex = items.indexOf(editorElement);
+
   const previousRow = items
     .slice(0, editorIndex)
     .reverse()
     .find((item) => item.hasAttribute("data-queued-message-row"));
+
   const followingRow = items
     .slice(editorIndex + 1)
     .find((item) => item.hasAttribute("data-queued-message-row"));
+
   return {
     editorElement,
     firstElement: (previousRow ?? editorElement) as HTMLElement,
@@ -1148,9 +1355,11 @@ function QueuedMessageInlineEditorSlot({
 }) {
   const [typeaheadLayout, setTypeaheadLayout] =
     useState<QueuedEditorTypeaheadLayout>({ height: 0, isOpen: false });
+
   const typeaheadReservation = typeaheadLayout.isOpen
     ? Math.ceil(typeaheadLayout.height) + TYPEAHEAD_MENU_GAP
     : 0;
+
   return (
     <li
       data-queued-message-inline-editor=""
@@ -1176,7 +1385,101 @@ function QueuedMessageInlineEditorSlot({
   );
 }
 
-export function QueuedMessagesList({
+function queuedMessageOrder(
+  messages: readonly ThreadQueuedMessage[],
+): Pick<ThreadQueuedMessage, "id" | "groupWithNext">[] {
+  return messages.map(({ id, groupWithNext }) => ({ id, groupWithNext }));
+}
+
+type QueuePresence = QueueSurfacePresence | "hidden";
+
+export function QueuedMessagesList(props: QueuedMessagesListProps) {
+  const present =
+    props.queuedMessages.length > 0 || props.inlineEditor !== undefined;
+
+  const prefersReducedMotion = usePrefersReducedMotion();
+
+  const [presence, setPresence] = useState<QueuePresence>(
+    present ? "appeared" : "hidden",
+  );
+
+  const [retainedMessages, setRetainedMessages] = useState(
+    props.queuedMessages,
+  );
+
+  if (
+    props.queuedMessages.length > 0 &&
+    props.queuedMessages !== retainedMessages
+  ) {
+    setRetainedMessages(props.queuedMessages);
+  }
+
+  if (present && presence === "hidden") {
+    setPresence(prefersReducedMotion ? "appeared" : "entered");
+  } else if (present && presence === "exiting") {
+    setPresence("appeared");
+  } else if (!present && (presence === "appeared" || presence === "entered")) {
+    setPresence(prefersReducedMotion ? "hidden" : "exiting");
+  }
+
+  const handleExitComplete = useCallback(() => setPresence("hidden"), []);
+
+  if (presence === "hidden") return null;
+
+  return (
+    <QueuedMessagesSurface
+      {...props}
+      queuedMessages={present ? props.queuedMessages : retainedMessages}
+      presence={presence}
+      onExitComplete={handleExitComplete}
+    />
+  );
+}
+
+function useQueueSurfaceExit(
+  surfaceRef: RefObject<HTMLElement | null>,
+  exiting: boolean,
+  onExitComplete: () => void,
+): void {
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current;
+
+    if (!exiting || surface === null) return;
+
+    const easing = resolveMotionEase("smooth");
+
+    if (easing === "") {
+      onExitComplete();
+
+      return;
+    }
+
+    const style = getComputedStyle(surface);
+
+    const animation = surface.animate(
+      [
+        {
+          height: style.height,
+          marginBottom: style.marginBottom,
+          paddingBottom: style.paddingBottom,
+          opacity: 1,
+        },
+        QUEUE_SURFACE_EXIT_KEYFRAME,
+      ],
+      {
+        duration: MOTION_DURATION_MS.base,
+        easing,
+        fill: "forwards",
+      },
+    );
+
+    animation.finished.then(onExitComplete, () => {});
+
+    return () => animation.cancel();
+  }, [exiting, onExitComplete, surfaceRef]);
+}
+
+function QueuedMessagesSurface({
   attachedToComposer,
   queuedMessages,
   resolveMentionLink,
@@ -1193,14 +1496,23 @@ export function QueuedMessagesList({
   onDelete,
   expanded,
   onExpandedChange,
-}: QueuedMessagesListProps) {
+  waitingStartThreadId,
+  presence,
+  onExitComplete,
+}: QueuedMessagesListProps & {
+  presence: QueueSurfacePresence;
+  onExitComplete: () => void;
+}) {
   const senderThreadMetadataById = useSenderThreadMetadataById();
+  const queryClient = useContext(QueryClientContext) ?? null;
+
   const processingLabel =
     processingAction === "edit"
       ? "Editing…"
       : processingAction === "delete"
         ? "Deleting…"
         : "Sending…";
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 4 },
@@ -1209,28 +1521,34 @@ export function QueuedMessagesList({
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const mode: QueueSurfaceMode = workspaceOpen
+
+  const mode: QueueSurfaceMode = inlineEditor
     ? "workspace"
-    : expanded
+    : expanded && queuedMessages.length > 1
       ? "drawer"
       : "collapsed";
+
   const arrivals = useQueuedMessageArrivals(queuedMessages);
+
   const [expandedMobileActionsId, setExpandedMobileActionsId] = useState<
     string | null
   >(null);
+
   const listId = useId();
+
   const [inlineEditorMaxHeight, setInlineEditorMaxHeight] = useState<
     number | null
   >(null);
+
   const [inlineEditorDesiredHeight, setInlineEditorDesiredHeight] = useState<
     number | null
   >(null);
+
   const inlineEditorActive = inlineEditor !== undefined;
   const getScrollElement = useBottomAnchoredScroll()?.getScrollElement;
   const surfaceRef = useRef<HTMLElement>(null);
+  useQueueSurfaceExit(surfaceRef, presence === "exiting", onExitComplete);
   const listRef = useRef<HTMLUListElement>(null);
-  const wasInlineEditingRef = useRef(false);
   useEffect(() => {
     if (expandedMobileActionsId === null) return;
 
@@ -1242,11 +1560,14 @@ export function QueuedMessagesList({
         setExpandedMobileActionsId(null);
       }
     };
+
     document.addEventListener("pointerdown", handlePointerDown, true);
+
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown, true);
     };
   }, [expandedMobileActionsId]);
+
   const {
     aboveOverflow,
     belowOverflow,
@@ -1261,6 +1582,7 @@ export function QueuedMessagesList({
     const list = listRef.current;
     const scroll = scrollRef.current;
     const neighborhood = list ? findInlineEditorNeighborhood(list) : null;
+
     if (!scroll || !neighborhood) return;
 
     const { editorElement, firstElement, lastElement } = neighborhood;
@@ -1278,6 +1600,7 @@ export function QueuedMessagesList({
       }
     } else {
       const editorRect = editorElement.getBoundingClientRect();
+
       if (editorRect.height > viewportRect.height) {
         delta = editorRect.top - viewportRect.top;
       } else if (editorRect.top < viewportRect.top) {
@@ -1286,6 +1609,7 @@ export function QueuedMessagesList({
         delta = editorRect.bottom - viewportRect.bottom;
       }
     }
+
     if (delta !== 0) {
       scroll.scrollTop += delta;
     }
@@ -1295,14 +1619,18 @@ export function QueuedMessagesList({
     if (!inlineEditorActive) {
       setInlineEditorMaxHeight(null);
       setInlineEditorDesiredHeight(null);
+
       return;
     }
+
     const viewport = getScrollElement?.();
     const surface = surfaceRef.current;
     const composerShell = surface?.closest<HTMLElement>("[data-app-composer]");
     const container = composerShell?.parentElement;
+
     if (!viewport || !surface || !container) {
       setInlineEditorMaxHeight(null);
+
       return;
     }
 
@@ -1311,6 +1639,7 @@ export function QueuedMessagesList({
       surfaceHeight: surface.getBoundingClientRect().height,
       viewportHeight: viewport.clientHeight,
     });
+
     setInlineEditorMaxHeight((currentHeight) =>
       currentHeight === nextHeight ? currentHeight : nextHeight,
     );
@@ -1318,21 +1647,28 @@ export function QueuedMessagesList({
     const list = listRef.current;
     const scroll = scrollRef.current;
     const neighborhood = list ? findInlineEditorNeighborhood(list) : null;
+
     if (!scroll || !neighborhood) {
       setInlineEditorDesiredHeight(null);
+
       return;
     }
+
     const { firstElement, lastElement } = neighborhood;
     const surfaceRect = surface.getBoundingClientRect();
     const scrollRect = scroll.getBoundingClientRect();
+
     const contentHeight =
       lastElement.getBoundingClientRect().bottom -
       firstElement.getBoundingClientRect().top;
+
     const chromeHeight = Math.max(0, surfaceRect.height - scrollRect.height);
+
     const desiredHeight = Math.max(
       WORKSPACE_MIN_HEIGHT,
       Math.ceil(contentHeight + chromeHeight),
     );
+
     setInlineEditorDesiredHeight((currentHeight) =>
       currentHeight === desiredHeight ? currentHeight : desiredHeight,
     );
@@ -1346,29 +1682,40 @@ export function QueuedMessagesList({
 
   useLayoutEffect(() => {
     measureInlineEditorMaxHeight();
+
     if (!inlineEditorActive) return;
 
     const viewport = getScrollElement?.();
     const surface = surfaceRef.current;
     const composerShell = surface?.closest<HTMLElement>("[data-app-composer]");
     const container = composerShell?.parentElement;
+
     const animationFrame = window.requestAnimationFrame(
       measureInlineEditorMaxHeight,
     );
+
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(measureInlineEditorMaxHeight);
+
     if (viewport) resizeObserver?.observe(viewport);
+
     if (surface) resizeObserver?.observe(surface);
+
     if (listRef.current) resizeObserver?.observe(listRef.current);
+
     const editorElement = listRef.current?.querySelector<HTMLElement>(
       "[data-queued-message-inline-editor]",
     );
+
     if (editorElement) resizeObserver?.observe(editorElement);
+
     if (composerShell) resizeObserver?.observe(composerShell);
+
     if (container) resizeObserver?.observe(container);
     window.addEventListener("resize", measureInlineEditorMaxHeight);
+
     return () => {
       window.cancelAnimationFrame(animationFrame);
       resizeObserver?.disconnect();
@@ -1376,38 +1723,67 @@ export function QueuedMessagesList({
     };
   }, [getScrollElement, inlineEditorActive, measureInlineEditorMaxHeight]);
 
-  const [orderedMessages, setOrderedMessages] = useState(queuedMessages);
+  const [messageOrder, setMessageOrder] = useState(() =>
+    queuedMessageOrder(queuedMessages),
+  );
+
   const orderKey = queuedMessages
     .map(
       (queuedMessage) =>
         `${queuedMessage.id}:${queuedMessage.groupWithNext ? "1" : "0"}:${queuedMessage.updatedAt}`,
     )
     .join("|");
+
   const [syncedOrderKey, setSyncedOrderKey] = useState(orderKey);
+
   if (orderKey !== syncedOrderKey) {
     setSyncedOrderKey(orderKey);
-    setOrderedMessages(queuedMessages);
+    setMessageOrder(queuedMessageOrder(queuedMessages));
   }
+
+  const orderedMessages = useMemo(() => {
+    const messagesById = new Map(
+      queuedMessages.map((message) => [message.id, message]),
+    );
+
+    return messageOrder.flatMap(({ id, groupWithNext }) => {
+      const message = messagesById.get(id);
+
+      if (message === undefined) return [];
+
+      return [
+        message.groupWithNext === groupWithNext
+          ? message
+          : { ...message, groupWithNext },
+      ];
+    });
+  }, [messageOrder, queuedMessages]);
 
   const groupBoundaryIndex = useMemo(() => {
     const firstUngroupedIndex = orderedMessages.findIndex(
       (queuedMessage) => !queuedMessage.groupWithNext,
     );
+
     return firstUngroupedIndex === -1
       ? Math.max(0, orderedMessages.length - 1)
       : firstUngroupedIndex;
   }, [orderedMessages]);
+
   const combinedIds = useMemo(() => {
     const ids = orderedMessages.map((queuedMessage) => queuedMessage.id);
+
     if (ids.length < 2) return ids;
+
     return [
       ...ids.slice(0, groupBoundaryIndex + 1),
       GROUP_DIVIDER_ID,
       ...ids.slice(groupBoundaryIndex + 1),
     ];
   }, [groupBoundaryIndex, orderedMessages]);
+
   const sortingDisabled =
     actionDisabled || processingMessageId !== null || queuedMessages.length < 2;
+
   const sortableIds = useMemo(
     () =>
       inlineEditor
@@ -1415,10 +1791,12 @@ export function QueuedMessagesList({
         : combinedIds,
     [combinedIds, inlineEditor],
   );
+
   const sortingStrategy = useCallback<SortingStrategy>(
     (args) => queuedMessageSortingStrategy(sortableIds, args),
     [sortableIds],
   );
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       if (!event.over) {
@@ -1431,12 +1809,29 @@ export function QueuedMessagesList({
         orderedMessages,
         overId: String(event.over.id),
       });
+
       if (!dragResult) return;
 
-      setOrderedMessages(dragResult.orderedMessages);
+      const requestIds =
+        dragResult.kind === "divider"
+          ? [
+              dragResult.request.groupBoundaryQueuedMessageId,
+              ...dragResult.request.expectedGroupedPrefixQueuedMessageIds,
+            ]
+          : [
+              dragResult.request.queuedMessageId,
+              dragResult.request.previousQueuedMessageId,
+              dragResult.request.nextQueuedMessageId,
+              dragResult.request.groupBoundaryQueuedMessageId,
+            ];
+
+      if (requestIds.some((id) => id?.startsWith("optimistic-queued-"))) return;
+
+      setMessageOrder(queuedMessageOrder(dragResult.orderedMessages));
 
       if (dragResult.kind === "divider") {
         onSetGroupBoundary(dragResult.request);
+
         return;
       }
 
@@ -1444,6 +1839,7 @@ export function QueuedMessagesList({
     },
     [combinedIds, onReorder, onSetGroupBoundary, orderedMessages],
   );
+
   const restrictToListBounds = useCallback<Modifier>(
     ({ draggingNodeRect, transform }) => {
       return clampQueuedMessageDragTransform({
@@ -1455,6 +1851,7 @@ export function QueuedMessagesList({
     },
     [scrollRef],
   );
+
   const snapGroupBoundaryToRowStroke = useCallback<Modifier>(
     ({ active, activeNodeRect, over, transform }) =>
       snapGroupBoundaryDragTransform({
@@ -1467,40 +1864,49 @@ export function QueuedMessagesList({
     [],
   );
 
-  useEffect(() => {
-    if (inlineEditor) {
-      setWorkspaceOpen(true);
-    } else if (wasInlineEditingRef.current) {
-      setWorkspaceOpen(false);
-    }
-    wasInlineEditingRef.current = inlineEditor !== undefined;
-  }, [inlineEditor]);
-
-  const openWorkspace = useCallback(() => {
-    setWorkspaceOpen(true);
-  }, []);
   const collapseDrawer = useCallback(() => {
     setExpandedMobileActionsId(null);
-    setWorkspaceOpen(false);
     onExpandedChange(false);
     inlineEditor?.onDismiss();
   }, [inlineEditor, onExpandedChange]);
+
   const showDrawer = useCallback(() => {
     onExpandedChange(true);
   }, [onExpandedChange]);
+
   const isExpanded = mode !== "collapsed";
-  const focus = useDisclosureFocusHandoff(
-    isExpanded,
-    isExpanded ? collapseDrawer : showDrawer,
-  );
+
+  const showToggle = inlineEditor === undefined && queuedMessages.length > 1;
+  const showSummary = !isExpanded && queuedMessages.length > 1;
+
+  const queueToggleHint = isExpanded
+    ? `${queuedMessages.length} queued messages. Click to collapse the queue.`
+    : `Show all ${queuedMessages.length} queued messages`;
+
+  const boundaryClosesList =
+    isExpanded && queuedMessagesEndOnGroupBoundary(orderedMessages);
+
+  const hiddenFailure =
+    !isExpanded &&
+    orderedMessages.some(
+      (queuedMessage) => queuedMessage.failureReason !== null,
+    );
+
+  useLayoutEffect(() => {
+    if (isExpanded) return;
+    const scroll = scrollRef.current;
+
+    if (scroll) scroll.scrollTop = 0;
+  }, [isExpanded, scrollRef]);
+
   const handleEdit = useCallback(
     (request: QueuedMessageEditRequest) => {
       setExpandedMobileActionsId(null);
-      openWorkspace();
       onEdit(request);
     },
-    [onEdit, openWorkspace],
+    [onEdit],
   );
+
   const baseSurfaceHeight =
     inlineEditor || mode === "workspace"
       ? getWorkspaceHeight({
@@ -1508,10 +1914,14 @@ export function QueuedMessagesList({
         })
       : mode === "drawer"
         ? getQueuedMessagesDrawerHeight({
-            queuedMessages,
+            queuedMessages: orderedMessages,
             processingMessageId,
           })
-        : QUEUED_MESSAGES_COLLAPSED_HEIGHT;
+        : getQueuedMessagesCollapsedHeight({
+            queuedMessages: orderedMessages,
+            processingMessageId,
+          });
+
   const surfaceHeight =
     inlineEditor && inlineEditorMaxHeight !== null
       ? Math.min(
@@ -1522,27 +1932,40 @@ export function QueuedMessagesList({
 
   useLayoutEffect(() => {
     if (!inlineEditor) return;
+
     const animationFrame = window.requestAnimationFrame(() => {
       scrollInlineEditorNeighborhoodIntoView();
     });
+
     return () => window.cancelAnimationFrame(animationFrame);
   }, [inlineEditor, scrollInlineEditorNeighborhoodIntoView, surfaceHeight]);
+
+  const enteringRenderKeys = useEnteringRenderKeys(
+    orderedMessages.map((queuedMessage) =>
+      queuedMessageRenderKey(queryClient, queuedMessage.id),
+    ),
+  );
 
   const queueItems: ReactNode[] = [];
   let messageIndex = 0;
   let inlineEditorInserted = false;
+
   for (const id of combinedIds) {
     if (id === GROUP_DIVIDER_ID) {
       queueItems.push(
         <SortableGroupBoundaryHandle
           key={GROUP_DIVIDER_ID}
           disabled={sortingDisabled || inlineEditor !== undefined}
+          tuckedAway={!isExpanded}
         />,
       );
       continue;
     }
+
     const queuedMessage = orderedMessages.find((message) => message.id === id);
+
     if (!queuedMessage) continue;
+
     if (
       inlineEditor &&
       !inlineEditorInserted &&
@@ -1556,10 +1979,14 @@ export function QueuedMessagesList({
       );
       inlineEditorInserted = true;
     }
+
     if (queuedMessage.id !== inlineEditor?.queuedMessageId) {
+      const renderKey = queuedMessageRenderKey(queryClient, queuedMessage.id);
+
       queueItems.push(
         <QueuedMessageRow
-          key={queuedMessage.id}
+          key={renderKey}
+          entering={enteringRenderKeys.has(renderKey)}
           queuedMessage={queuedMessage}
           senderLabel={queuedMessageSenderLabel(
             queuedMessage,
@@ -1569,22 +1996,38 @@ export function QueuedMessagesList({
           index={messageIndex}
           isProcessing={processingMessageId === queuedMessage.id}
           processingLabel={processingLabel}
-          dragDisabled={sortingDisabled || inlineEditor !== undefined}
+          dragDisabled={
+            sortingDisabled ||
+            inlineEditor !== undefined ||
+            queuedMessage.id.startsWith("optimistic-queued-")
+          }
           sendAction={sendAction}
           sendDisabled={sendDisabled}
-          actionDisabled={actionDisabled}
+          actionDisabled={
+            actionDisabled || queuedMessage.id.startsWith("optimistic-queued-")
+          }
           mobileActionsExpanded={expandedMobileActionsId === queuedMessage.id}
           onExpandMobileActions={setExpandedMobileActionsId}
           compact={mode !== "workspace"}
           isGroupBoundary={messageIndex === groupBoundaryIndex}
+          startOnThreadId={
+            messageIndex === 0 ? (waitingStartThreadId ?? null) : null
+          }
+          toggleGutter={showToggle}
+          tuckedAway={!isExpanded && messageIndex > 0}
+          soleVisible={
+            orderedMessages.length === 1 || (!isExpanded && messageIndex === 0)
+          }
           onSend={onSend}
           onEdit={handleEdit}
           onDelete={onDelete}
         />,
       );
     }
+
     messageIndex += 1;
   }
+
   if (inlineEditor && !inlineEditorInserted) {
     queueItems.push(
       <QueuedMessageInlineEditorSlot
@@ -1594,57 +2037,131 @@ export function QueuedMessagesList({
     );
   }
 
-  if (queuedMessages.length === 0 && !inlineEditor) return null;
-
   return (
     <PromptStackCard
       rootRef={surfaceRef}
       ariaLabel="Queued messages"
-      style={{ height: surfaceHeight }}
+      attachedToComposer={attachedToComposer && !inlineEditor}
+      style={
+        showSummary
+          ? { height: attachedToComposer ? 61 : 42 }
+          : queuedMessages.length === 1 && !inlineEditor
+            ? undefined
+            : { height: surfaceHeight }
+      }
       className={cn(
         "relative z-10 flex min-h-0 flex-col overflow-hidden bg-surface-raised-solid shadow-lift",
         inlineEditor || !attachedToComposer
           ? "mb-0 rounded-xl pb-4"
-          : "-mb-5 rounded-xl rounded-b-none border-b-0 pb-3",
-        "transition-[height,margin,border-radius,padding] duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+          : "rounded-xl rounded-b-none border-b-0 pb-3",
+        "transition-[height,margin,border-radius,padding,opacity] ease-smooth motion-reduce:transition-none",
+        showSummary && "pb-0",
+        presence === "entered" && "omnyo-queue-card-enter",
+        presence === "exiting" && "pointer-events-none",
+        !inlineEditor && isExpanded
+          ? "duration-(--motion-duration-slow)"
+          : "duration-(--motion-duration-base)",
       )}
     >
-      <header data-queued-messages-mode={mode} className="shrink-0">
-        <button
-          ref={focus.triggerRef}
-          type="button"
-          aria-label="Toggle queued messages"
-          aria-expanded={isExpanded}
-          aria-controls={listId}
-          onClick={focus.onTriggerClick}
-          className={cn(
-            PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
-            "hover:bg-state-hover focus-visible:bg-state-hover active:bg-state-hover",
-            isExpanded && "border-b border-border/35",
-          )}
-        >
-          <span className="font-normal">Queue</span>
-          {isExpanded ? null : (
-            <QueuedMessagesHeaderWait queuedMessages={queuedMessages} />
-          )}
-          <QueuedMessagesCountPill
-            arrivals={arrivals}
-            count={queuedMessages.length}
-          />
-        </button>
+      <header
+        data-queued-messages-mode={mode}
+        className={
+          showSummary ? "relative z-30" : "absolute right-[13px] top-[5px] z-30"
+        }
+      >
+        {showSummary || showToggle ? (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {showSummary ? (
+                  <button
+                    type="button"
+                    aria-label={`Show ${queuedMessages.length} queued messages`}
+                    aria-expanded={false}
+                    aria-controls={listId}
+                    onClick={showDrawer}
+                    className={cn(
+                      "flex min-h-10 w-full items-center gap-2 px-3 text-left text-xs text-muted-foreground hover:bg-state-hover",
+                      CONTROL_HOVER_TRANSITION,
+                    )}
+                  >
+                    <Icon name="ListEnd" className="size-4" aria-hidden />
+                    <span className="flex flex-1 items-center gap-1">
+                      <QueuedMessagesCountPill
+                        arrivals={arrivals}
+                        count={queuedMessages.length}
+                        prefix=""
+                        tone={hiddenFailure ? "failed" : "neutral"}
+                      />
+                      <span>queued messages</span>
+                    </span>
+                    {hiddenFailure ? (
+                      <Icon
+                        name="AlertTriangle"
+                        className="size-3.5 text-destructive-text"
+                        aria-label="A queued message needs attention"
+                      />
+                    ) : null}
+                    <Icon name="ChevronDown" className="size-3.5" aria-hidden />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label="Toggle queued messages"
+                    aria-expanded={isExpanded}
+                    aria-controls={listId}
+                    onClick={isExpanded ? collapseDrawer : showDrawer}
+                    className={cn(
+                      PROMPT_STACK_ROW_ACTION_TAKEOVER_CLASS,
+                      "flex h-6 cursor-pointer items-center gap-0.5 rounded-full pl-1 pr-1.5 text-subtle-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                      CONTROL_PRESS_TRANSITION,
+                      CONTROL_PRESS_FEEDBACK,
+                    )}
+                  >
+                    <QueuedMessagesCountPill
+                      arrivals={arrivals}
+                      count={
+                        isExpanded
+                          ? queuedMessages.length
+                          : queuedMessages.length - 1
+                      }
+                      prefix={isExpanded ? "" : "+"}
+                      tone={hiddenFailure ? "failed" : "neutral"}
+                    />
+                    <Icon
+                      name="ChevronDown"
+                      className={cn(
+                        "size-3 shrink-0",
+                        DISCLOSURE_CHEVRON_TRANSITION,
+                        isExpanded && "rotate-180",
+                      )}
+                      aria-hidden="true"
+                    />
+                  </button>
+                )}
+              </TooltipTrigger>
+              {showSummary ? null : (
+                <TooltipContent side="top">{queueToggleHint}</TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
+        ) : null}
       </header>
       <div
         className="relative min-h-0 flex-1"
         id={listId}
         data-queued-messages-scroll-frame=""
-        aria-hidden={mode === "collapsed"}
-        inert={mode === "collapsed" ? true : undefined}
+        hidden={showSummary}
+        inert={showSummary || undefined}
       >
         <div
           ref={scrollRef}
           data-queued-messages-scroll=""
-          className="h-full min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain"
-          tabIndex={mode === "collapsed" ? -1 : 0}
+          className={cn(
+            "h-full min-w-0 overflow-x-hidden overscroll-contain",
+            isExpanded ? "overflow-y-auto" : "overflow-y-hidden",
+          )}
+          tabIndex={isExpanded ? 0 : -1}
         >
           <div ref={topSentinelRef} aria-hidden className="h-px w-full" />
           <DndContext
@@ -1654,14 +2171,17 @@ export function QueuedMessagesList({
             onDragEnd={handleDragEnd}
           >
             <SortableContext items={sortableIds} strategy={sortingStrategy}>
-              <ul ref={listRef} className="group/queue pt-1">
+              <ul
+                ref={listRef}
+                className={cn("group/queue", boundaryClosesList && "pb-3")}
+              >
                 {queueItems}
               </ul>
             </SortableContext>
           </DndContext>
           <div ref={bottomSentinelRef} aria-hidden className="h-px w-full" />
         </div>
-        {aboveOverflow && mode !== "collapsed" ? (
+        {aboveOverflow && isExpanded ? (
           <OverflowFade
             placement="above"
             tone="surface-raised"
@@ -1669,7 +2189,7 @@ export function QueuedMessagesList({
             className="z-10"
           />
         ) : null}
-        {belowOverflow && mode !== "collapsed" ? (
+        {belowOverflow && isExpanded ? (
           <OverflowFade
             placement="below"
             tone="surface-raised"
@@ -1678,20 +2198,6 @@ export function QueuedMessagesList({
           />
         ) : null}
       </div>
-      {isExpanded ? (
-        <div className="shrink-0">
-          <PromptStackCollapseRow
-            buttonRef={focus.collapseRef}
-            className={cn(
-              "rounded-none",
-              attachedToComposer && !inlineEditor && "-mb-3 min-h-7.5 pb-3",
-            )}
-            controlsId={listId}
-            label="Collapse queued messages"
-            onCollapse={focus.onCollapseClick}
-          />
-        </div>
-      ) : null}
     </PromptStackCard>
   );
 }

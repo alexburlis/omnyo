@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { GitHostPullRequest } from "@bb/domain";
+import type { GitHostPullRequest } from "@omnyo/domain";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   dispatchCommand,
@@ -16,33 +16,55 @@ import {
 
 afterEach(cleanupTempDirs);
 
+async function initCommittedRepo(prefix: string): Promise<string> {
+  const repoPath = await makeTempDir(prefix);
+  await runGitCommand(["init", "-b", "main"], { cwd: repoPath });
+  await runGitCommand(["config", "user.name", "Omnyo Tests"], {
+    cwd: repoPath,
+  });
+  await runGitCommand(["config", "user.email", "tests@example.com"], {
+    cwd: repoPath,
+  });
+  await fs.writeFile(path.join(repoPath, "README.md"), "hello\n", "utf8");
+  await runGitCommand(["add", "."], { cwd: repoPath });
+  await runGitCommand(["commit", "-m", "Initial commit"], { cwd: repoPath });
+
+  return repoPath;
+}
+
 describe("workspace command dispatch", () => {
   it("covers workspace git commands", async () => {
-    const harness = createHarness();
+    const workspacePath = await initCommittedRepo(
+      "omnyo-workspace-git-commands-",
+    );
+
+    const harness = createHarness({ workspacePath });
     await harness.manager.ensureEnvironment({
       environmentId: "env-1",
-      workspacePath: "/tmp/env-1",
+      workspacePath,
     });
 
     const statusResult = await dispatchOnlineRpcCommand(
       {
         type: "workspace.status",
+        maxFiles: 200,
         environmentId: "env-1",
         maxUntrackedLineStatFiles: 50,
         maxUntrackedLineStatBytes: 8 * 1024 * 1024,
         workspaceContext: {
-          workspacePath: "/tmp/env-1",
+          workspacePath,
         },
         mergeBaseBranch: "main",
       },
       harness.dispatchOptions(),
     );
+
     const diffResult = await dispatchOnlineRpcCommand(
       {
         type: "workspace.diff",
         environmentId: "env-1",
         workspaceContext: {
-          workspacePath: "/tmp/env-1",
+          workspacePath,
         },
         target: { type: "all", mergeBaseBranch: "main" },
         maxDiffBytes: 2 * 1024 * 1024,
@@ -51,37 +73,47 @@ describe("workspace command dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     const commitResult = await dispatchCommand(
       {
         type: "workspace.commit",
         environmentId: "env-1",
         workspaceContext: {
-          workspacePath: "/tmp/env-1",
+          workspacePath,
         },
         message: "Commit message",
       },
       harness.dispatchOptions(),
     );
+
     expect(statusResult.outcome).toBe("available");
     expect(diffResult.outcome).toBe("available");
+
     if (statusResult.outcome !== "available") {
       throw new Error("Expected workspace status to be available");
     }
+
     if (diffResult.outcome !== "available") {
       throw new Error("Expected workspace diff to be available");
     }
+
     expect(statusResult.workspaceStatus.workingTree.state).toBe("clean");
+    expect(statusResult.workspaceStatus.checkout).toMatchObject({
+      kind: "branch",
+      branchName: "main",
+      headSha: expect.stringMatching(/^[0-9a-f]{40}$/u),
+    });
     expect(diffResult.diff.diff).toBe("");
     expect(commitResult).toEqual({
       commitSha: "commit-1",
       commitSubject: "Commit message",
     });
-    expect(harness.workspaceState.statusReads).toBe(1);
+    expect(harness.workspaceState.statusReads).toBe(0);
     expect(harness.workspaceState.lastCommitMessage).toBe("Commit message");
   });
 
   it("uses a repository added after the runtime cached a plain workspace", async () => {
-    const workspacePath = await makeTempDir("bb-runtime-late-git-");
+    const workspacePath = await makeTempDir("omnyo-runtime-late-git-");
     const harness = createHarness({ workspacePath });
     harness.workspace.isGitRepo = false;
     await harness.manager.ensureEnvironment({
@@ -95,6 +127,7 @@ describe("workspace command dispatch", () => {
     const result = await dispatchOnlineRpcCommand(
       {
         type: "workspace.status",
+        maxFiles: 200,
         environmentId: "env-late-git",
         maxUntrackedLineStatFiles: 50,
         maxUntrackedLineStatBytes: 8 * 1024 * 1024,
@@ -106,7 +139,9 @@ describe("workspace command dispatch", () => {
     );
 
     expect(result.outcome).toBe("available");
-    expect(refreshed.state.statusReads).toBe(1);
+    expect(harness.manager.get("env-late-git")?.workspace).toBe(
+      refreshed.workspace,
+    );
     expect(harness.manager.get("env-late-git")?.workspace.isGitRepo).toBe(true);
   });
 
@@ -124,10 +159,10 @@ describe("workspace command dispatch", () => {
       number: 42,
       title: "Add timeline polish",
       state: "OPEN",
-      url: "https://github.com/bb/bb/pull/42",
+      url: "https://github.com/omnyo/omnyo/pull/42",
       isDraft: false,
       baseRefName: "main",
-      headRefName: "bb/timeline-polish",
+      headRefName: "omnyo/timeline-polish",
       updatedAt: "2026-06-16T12:30:00Z",
       autoMerge: false,
       inMergeQueue: false,
@@ -137,6 +172,7 @@ describe("workspace command dispatch", () => {
       mergeStateStatus: "CLEAN",
       mergeable: "MERGEABLE",
     };
+
     harness.workspaceState.pullRequest = pullRequest;
 
     const presentResult = await dispatchOnlineRpcCommand(
@@ -149,12 +185,14 @@ describe("workspace command dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     expect(presentResult).toEqual({ outcome: "available", pullRequest });
     expect(harness.workspaceState.pullRequestLookupShellPath).toBe(
       "/Users/test/.local/bin:/usr/bin",
     );
 
     harness.workspaceState.pullRequest = null;
+
     const absentResult = await dispatchOnlineRpcCommand(
       {
         type: "workspace.pull_request",
@@ -165,10 +203,12 @@ describe("workspace command dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     expect(absentResult).toEqual({ outcome: "absent" });
 
     harness.workspaceState.pullRequestLookupError =
       "gh pr view failed: authentication required";
+
     const unavailableResult = await dispatchOnlineRpcCommand(
       {
         type: "workspace.pull_request",
@@ -179,6 +219,7 @@ describe("workspace command dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     expect(unavailableResult).toEqual({
       outcome: "unavailable",
       message: "gh pr view failed: authentication required",
@@ -192,10 +233,10 @@ describe("workspace command dispatch", () => {
       number: 7,
       title: "Should not surface",
       state: "OPEN",
-      url: "https://github.com/bb/bb/pull/7",
+      url: "https://github.com/omnyo/omnyo/pull/7",
       isDraft: false,
       baseRefName: "main",
-      headRefName: "bb/hidden-pr",
+      headRefName: "omnyo/hidden-pr",
       updatedAt: "2026-06-16T12:30:00Z",
       autoMerge: false,
       inMergeQueue: false,
@@ -292,29 +333,33 @@ describe("workspace command dispatch", () => {
   });
 
   it("rehydrates a missing workspace runtime from workspaceContext", async () => {
-    const harness = createHarness({ workspacePath: "/tmp/env-rehydrate" });
+    const workspacePath = await initCommittedRepo("omnyo-workspace-rehydrate-");
+    const harness = createHarness({ workspacePath });
 
     const result = await dispatchOnlineRpcCommand(
       {
         type: "workspace.status",
+        maxFiles: 200,
         environmentId: "env-rehydrate",
         maxUntrackedLineStatFiles: 50,
         maxUntrackedLineStatBytes: 8 * 1024 * 1024,
         workspaceContext: {
-          workspacePath: "/tmp/env-rehydrate",
+          workspacePath,
         },
       },
       harness.dispatchOptions(),
     );
 
     expect(result.outcome).toBe("available");
+
     if (result.outcome !== "available") {
       throw new Error("Expected workspace status to be available");
     }
+
     expect(result.workspaceStatus.workingTree.state).toBe("clean");
     expect(harness.provisions).toEqual([
       expect.objectContaining({
-        path: "/tmp/env-rehydrate",
+        path: workspacePath,
         signal: expect.any(AbortSignal),
       }),
     ]);
@@ -331,6 +376,7 @@ describe("workspace command dispatch", () => {
     const statusResult = await dispatchOnlineRpcCommand(
       {
         type: "workspace.status",
+        maxFiles: 200,
         environmentId: "env-non-git",
         maxUntrackedLineStatFiles: 50,
         maxUntrackedLineStatBytes: 8 * 1024 * 1024,
@@ -340,6 +386,7 @@ describe("workspace command dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     const diffResult = await dispatchOnlineRpcCommand(
       {
         type: "workspace.diff",
@@ -369,15 +416,17 @@ describe("workspace command dispatch", () => {
   });
 
   it("covers host.list_files", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-list-files-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-list-files-");
     await fs.writeFile(path.join(tempDir, "notes.md"), "hello");
     await fs.mkdir(path.join(tempDir, "notes"));
     await fs.writeFile(path.join(tempDir, "notes", "todo.md"), "world");
 
     const harness = createHarness();
+
     const result = await dispatchOnlineRpcCommand(
       {
         type: "host.list_files",
+        followRootSymlink: false,
         path: tempDir,
         limit: 1000,
         includeHidden: false,
@@ -393,7 +442,7 @@ describe("workspace command dispatch", () => {
   });
 
   it("covers host.list_paths with directories included", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-list-paths-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-list-paths-");
     await fs.mkdir(path.join(tempDir, "notes", "daily"), { recursive: true });
     await fs.writeFile(
       path.join(tempDir, "notes", "daily", "todo.md"),
@@ -401,6 +450,7 @@ describe("workspace command dispatch", () => {
     );
 
     const harness = createHarness();
+
     const result = await dispatchOnlineRpcCommand(
       {
         type: "host.list_paths",
@@ -432,13 +482,15 @@ describe("workspace command dispatch", () => {
   });
 
   it("returns empty files for host.list_files when path does not exist", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-list-missing-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-list-missing-");
     const missingPath = path.join(tempDir, "does-not-exist");
 
     const harness = createHarness();
+
     const result = await dispatchOnlineRpcCommand(
       {
         type: "host.list_files",
+        followRootSymlink: false,
         path: missingPath,
         limit: 1000,
         includeHidden: false,
@@ -453,10 +505,14 @@ describe("workspace command dispatch", () => {
   });
 
   it("returns empty paths for host.list_paths when path does not exist", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-list-paths-missing-");
+    const tempDir = await makeTempDir(
+      "omnyo-dispatch-host-list-paths-missing-",
+    );
+
     const missingPath = path.join(tempDir, "does-not-exist");
 
     const harness = createHarness();
+
     const result = await dispatchOnlineRpcCommand(
       {
         type: "host.list_paths",
@@ -476,7 +532,7 @@ describe("workspace command dispatch", () => {
   });
 
   it("rejects host.list_files when path itself is a symlink", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-list-symlink-root-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-list-symlink-root-");
     const targetRoot = path.join(tempDir, "target-root");
     const symlinkRoot = path.join(tempDir, "root-link");
     await fs.mkdir(targetRoot);
@@ -489,6 +545,7 @@ describe("workspace command dispatch", () => {
       dispatchOnlineRpcCommand(
         {
           type: "host.list_files",
+          followRootSymlink: false,
           path: symlinkRoot,
           limit: 1000,
           includeHidden: false,
@@ -503,13 +560,82 @@ describe("workspace command dispatch", () => {
     });
   });
 
+  it("reads and lists a linked skill while confining files to its resolved root", async () => {
+    const tempDir = await makeTempDir("omnyo-dispatch-linked-skill-");
+    const skillRoot = path.join(tempDir, "shared", "research");
+    const linkedRoot = path.join(tempDir, "research");
+    await fs.mkdir(path.join(skillRoot, "references"), { recursive: true });
+    await fs.writeFile(path.join(skillRoot, "SKILL.md"), "# Research");
+    await fs.writeFile(
+      path.join(skillRoot, "references", "guide.md"),
+      "# Guide",
+    );
+    await fs.writeFile(path.join(skillRoot, ".env"), "hidden");
+    await fs.writeFile(path.join(tempDir, "outside.md"), "outside");
+    await fs.symlink(skillRoot, linkedRoot, "dir");
+    await fs.symlink(
+      path.join(tempDir, "outside.md"),
+      path.join(skillRoot, "escape.md"),
+    );
+    const harness = createHarness();
+
+    const files = await dispatchOnlineRpcCommand(
+      {
+        type: "host.list_files",
+        followRootSymlink: true,
+        path: linkedRoot,
+        limit: 200,
+        includeHidden: false,
+        respectGitIgnore: false,
+        excludeNames: [],
+      },
+      harness.dispatchOptions(),
+    );
+
+    expect(files.files.map((file) => file.path).sort()).toEqual([
+      "SKILL.md",
+      "references/guide.md",
+    ]);
+
+    const read = (relativePath: string) =>
+      dispatchOnlineRpcCommand(
+        {
+          type: "host.read_file_relative",
+          followRootSymlink: true,
+          rootPath: linkedRoot,
+          path: relativePath,
+          dotfiles: "deny",
+        },
+        harness.dispatchOptions(),
+      );
+
+    await expect(read("SKILL.md")).resolves.toMatchObject({
+      content: "# Research",
+    });
+    await expect(read("references/guide.md")).resolves.toMatchObject({
+      content: "# Guide",
+    });
+    await expect(read("escape.md")).rejects.toMatchObject({
+      code: "invalid_path",
+      message: expect.stringContaining("escapes read root"),
+    });
+    await expect(read("../outside.md")).rejects.toMatchObject({
+      code: "invalid_path",
+    });
+    await expect(read(".env")).rejects.toMatchObject({ code: "ENOENT" });
+
+    await fs.rm(skillRoot, { recursive: true });
+    await expect(read("SKILL.md")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("returns base64 for image files", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-read-image-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-read-image-");
     const imagePath = path.join(tempDir, "preview.png");
     const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
     await fs.writeFile(imagePath, imageBytes);
 
     const harness = createHarness();
+
     const result = await dispatchOnlineRpcCommand(
       {
         type: "host.read_file",
@@ -529,7 +655,7 @@ describe("workspace command dispatch", () => {
   });
 
   it("covers host.read_file_relative for nested status assets", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-read-relative-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-read-relative-");
     const assetDir = path.join(tempDir, "assets");
     const assetPath = path.join(assetDir, "logo.png");
     const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
@@ -537,9 +663,11 @@ describe("workspace command dispatch", () => {
     await fs.writeFile(assetPath, imageBytes);
 
     const harness = createHarness();
+
     const result = await dispatchOnlineRpcCommand(
       {
         type: "host.read_file_relative",
+        followRootSymlink: false,
         rootPath: tempDir,
         path: "assets/logo.png",
         dotfiles: "deny",
@@ -555,15 +683,20 @@ describe("workspace command dispatch", () => {
   });
 
   it("does not apply host.read_file size caps to host.read_file_relative", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-read-relative-large-");
+    const tempDir = await makeTempDir(
+      "omnyo-dispatch-host-read-relative-large-",
+    );
+
     const imagePath = path.join(tempDir, "large.png");
     const imageBytes = Buffer.alloc(10 * 1024 * 1024 + 1);
     await fs.writeFile(imagePath, imageBytes);
 
     const harness = createHarness();
+
     const result = await dispatchOnlineRpcCommand(
       {
         type: "host.read_file_relative",
+        followRootSymlink: false,
         rootPath: tempDir,
         path: "large.png",
         dotfiles: "deny",
@@ -577,13 +710,17 @@ describe("workspace command dispatch", () => {
   });
 
   it("rejects host.read_file_relative traversal", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-read-relative-dotdot-");
+    const tempDir = await makeTempDir(
+      "omnyo-dispatch-host-read-relative-dotdot-",
+    );
+
     const harness = createHarness();
 
     await expect(
       dispatchOnlineRpcCommand(
         {
           type: "host.read_file_relative",
+          followRootSymlink: false,
           rootPath: tempDir,
           path: "../secrets.txt",
           dotfiles: "deny",
@@ -598,8 +735,9 @@ describe("workspace command dispatch", () => {
 
   it("hides host.read_file_relative dotfiles when dotfiles are denied", async () => {
     const tempDir = await makeTempDir(
-      "bb-dispatch-host-read-relative-dotfile-",
+      "omnyo-dispatch-host-read-relative-dotfile-",
     );
+
     await fs.writeFile(path.join(tempDir, ".env"), "secret");
     const harness = createHarness();
 
@@ -607,6 +745,7 @@ describe("workspace command dispatch", () => {
       dispatchOnlineRpcCommand(
         {
           type: "host.read_file_relative",
+          followRootSymlink: false,
           rootPath: tempDir,
           path: ".env",
           dotfiles: "deny",
@@ -621,8 +760,9 @@ describe("workspace command dispatch", () => {
 
   it("rejects host.read_file_relative symlink escapes", async () => {
     const tempDir = await makeTempDir(
-      "bb-dispatch-host-read-relative-symlink-",
+      "omnyo-dispatch-host-read-relative-symlink-",
     );
+
     const outsidePath = path.join(tempDir, "..", "outside.txt");
     await fs.writeFile(outsidePath, "outside");
     await fs.symlink(outsidePath, path.join(tempDir, "outside-link.txt"));
@@ -632,6 +772,7 @@ describe("workspace command dispatch", () => {
       dispatchOnlineRpcCommand(
         {
           type: "host.read_file_relative",
+          followRootSymlink: false,
           rootPath: tempDir,
           path: "outside-link.txt",
           dotfiles: "deny",
@@ -646,8 +787,9 @@ describe("workspace command dispatch", () => {
 
   it("rejects host.read_file_relative when rootPath itself is a symlink", async () => {
     const tempDir = await makeTempDir(
-      "bb-dispatch-host-read-relative-root-symlink-",
+      "omnyo-dispatch-host-read-relative-root-symlink-",
     );
+
     const targetRoot = path.join(tempDir, "target-root");
     const symlinkRoot = path.join(tempDir, "root-link");
     await fs.mkdir(targetRoot);
@@ -660,6 +802,7 @@ describe("workspace command dispatch", () => {
       dispatchOnlineRpcCommand(
         {
           type: "host.read_file_relative",
+          followRootSymlink: false,
           rootPath: symlinkRoot,
           path: "index.html",
           dotfiles: "deny",
@@ -673,7 +816,7 @@ describe("workspace command dispatch", () => {
   });
 
   it("rejects host.read_file when the resolved path escapes rootPath through a symlink", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-read-root-escape-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-read-root-escape-");
     const outsidePath = path.join(tempDir, "..", "outside.txt");
     const nestedDir = path.join(tempDir, "notes");
     const symlinkPath = path.join(nestedDir, "secrets");
@@ -699,7 +842,7 @@ describe("workspace command dispatch", () => {
   });
 
   it("rejects host.read_file when rootPath itself is a symlink", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-read-root-symlink-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-read-root-symlink-");
     const targetRoot = path.join(tempDir, "target-root");
     const symlinkRoot = path.join(tempDir, "root-link");
     const filePath = path.join(symlinkRoot, "notes.txt");
@@ -725,7 +868,7 @@ describe("workspace command dispatch", () => {
   });
 
   it("enforces the 10 MB image read limit", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-read-large-image-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-read-large-image-");
     const imagePath = path.join(tempDir, "large.png");
     await fs.writeFile(imagePath, Buffer.alloc(10 * 1024 * 1024 + 1));
 
@@ -747,7 +890,7 @@ describe("workspace command dispatch", () => {
   });
 
   it("enforces the 25 MB non-image read limit", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-read-large-file-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-read-large-file-");
     const filePath = path.join(tempDir, "large.bin");
     await fs.writeFile(filePath, Buffer.alloc(25 * 1024 * 1024 + 1));
 
@@ -769,12 +912,13 @@ describe("workspace command dispatch", () => {
   });
 
   it("treats svg files as utf8 text with the non-image size limit", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-read-svg-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-read-svg-");
     const filePath = path.join(tempDir, "diagram.svg");
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
     await fs.writeFile(filePath, svg);
 
     const harness = createHarness();
+
     const result = await dispatchOnlineRpcCommand(
       {
         type: "host.read_file",
@@ -790,12 +934,13 @@ describe("workspace command dispatch", () => {
   });
 
   it("falls back to base64 for declared text files whose bytes are not valid utf8", async () => {
-    const tempDir = await makeTempDir("bb-dispatch-host-read-invalid-utf8-");
+    const tempDir = await makeTempDir("omnyo-dispatch-host-read-invalid-utf8-");
     const filePath = path.join(tempDir, "notes.txt");
     const bytes = Buffer.from([0x63, 0x61, 0x66, 0xe9]);
     await fs.writeFile(filePath, bytes);
 
     const harness = createHarness();
+
     const result = await dispatchOnlineRpcCommand(
       {
         type: "host.read_file",

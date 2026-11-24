@@ -1,10 +1,11 @@
-import type { SystemMessageKind, ThreadEventTurnStatus } from "@bb/domain";
-import type { TemplateId } from "@bb/templates";
+import type { SystemMessageKind, ThreadEventTurnStatus } from "@omnyo/domain";
+import type { TemplateId } from "@omnyo/templates";
 
 const STATIC_SYSTEM_MESSAGE_KIND_BY_TEMPLATE = {
   systemMessageThreadOwnershipAssigned: "ownership-assigned",
   systemMessageThreadOwnershipRemoved: "ownership-removed",
   systemMessageChildThreadNeedsAttention: "child-needs-attention",
+  systemMessageChildThreadQuestion: "child-needs-attention",
 } satisfies Partial<Record<TemplateId, SystemMessageKind>>;
 
 type StaticSystemMessageTemplateId =
@@ -28,6 +29,7 @@ export function childOutcomeSystemMessageKind(
       return "child-interrupted";
     default: {
       const exhaustiveCheck: never = turnStatus;
+
       return exhaustiveCheck;
     }
   }

@@ -26,7 +26,7 @@ export interface PluginRpcError {
 /**
  * The validator-neutral subset of Standard Schema v1 used by plugin contracts.
  * Zod 4 schemas implement this interface directly; other validators can do
- * the same without becoming part of BB's public protocol.
+ * the same without becoming part of Omnyo's public protocol.
  */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
   readonly "~standard": {
@@ -70,6 +70,12 @@ export interface PluginRpcMethodContract<
   OutputSchema extends StandardSchemaV1 = StandardSchemaV1,
 > {
   readonly experimental_description?: string;
+  /** Include this fast local read in threads.get with experimental_pluginData; input is {threadId}. */
+  readonly experimental_threadBootstrap?: true;
+  /** Include a side-effect-free local admission read in the thread bootstrap; input is {thread:{id,status},host:{id,name}|null}, output is {action:"proceed"}|{action:"wait",reason:string}. Core uses this hint without executing dispatch hooks. */
+  readonly experimental_dispatchReadiness?: true;
+  /** Stable host-control contract shared by caller and retiring worker; change the key when input, output or meaning becomes incompatible. */
+  readonly experimental_hostReplacementKey?: string;
   readonly input: InputSchema;
   readonly output: OutputSchema;
 }
@@ -87,9 +93,9 @@ export function defineRpcContract<const Contract extends PluginRpcContract>(
 
 /**
  * Who invoked an rpc method. `plugin` means another loaded plugin (or this
- * one) called through its own `bb.sdk.plugins.callRpc`; the host verifies
+ * one) called through its own `api.sdk.plugins.callRpc`; the host verifies
  * that with a per-load token only the server knows. Every other caller — the
- * app, the `bb` CLI, agents, and bb itself — is `client`.
+ * app, the `omnyo` CLI, agents, and Omnyo itself — is `client`.
  */
 export type ExperimentalPluginRpcCaller =
   | { readonly kind: "plugin"; readonly pluginId: string }
@@ -98,6 +104,13 @@ export type ExperimentalPluginRpcCaller =
 /** Second argument of every rpc handler. */
 export interface ExperimentalPluginRpcHandlerContext {
   readonly experimental_caller: ExperimentalPluginRpcCaller;
+  /**
+   * Aborts when the caller stops waiting (its HTTP request disconnects) or
+   * when this plugin instance is reloaded, disabled or removed. A disposing
+   * instance's callers still waiting when the dispose drain ends are
+   * released with an error, so work finished after that reaches nobody.
+   */
+  readonly experimental_signal: AbortSignal;
 }
 
 export type PluginRpcHandlers<Contract extends PluginRpcContract> = {
@@ -109,7 +122,7 @@ export type PluginRpcHandlers<Contract extends PluginRpcContract> = {
 };
 
 /**
- * Handlers as `bb.rpc.register` calls them: the validated input, then the
+ * Handlers as `api.rpc.register` calls them: the validated input, then the
  * call's context. A `PluginRpcHandlers` map is assignable to this type, so
  * handlers that ignore the context keep their one-argument signature.
  */

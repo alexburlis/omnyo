@@ -11,62 +11,69 @@ import {
 } from "../../src/data/threads.js";
 import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
-/**
- * Two hosts, two projects and threads spread across both, so every grouping
- * has more than one bucket and a filter that ignored its argument would show.
- */
 function setup() {
   const db = createMigratedConnection();
+
   const hostA = upsertHost(db, noopNotifier, {
     name: "host-a",
   });
+
   const hostB = upsertHost(db, noopNotifier, {
     name: "host-b",
   });
+
   const { project: projectA } = createProject(db, noopNotifier, {
     name: "project-a",
     source: { type: "local_path", hostId: hostA.id, path: "/tmp/a" },
   });
+
   const { project: projectB } = createProject(db, noopNotifier, {
     name: "project-b",
     source: { type: "local_path", hostId: hostB.id, path: "/tmp/b" },
   });
+
   const environmentA = createEnvironment(db, noopNotifier, {
-      providerOwnsPath: false,
+    providerOwnsPath: false,
     hostId: hostA.id,
     projectId: projectA.id,
     path: "/tmp/a",
   });
+
   const environmentB = createEnvironment(db, noopNotifier, {
-      providerOwnsPath: false,
+    providerOwnsPath: false,
     hostId: hostB.id,
     projectId: projectB.id,
     path: "/tmp/b",
   });
+
   return { db, environmentA, environmentB, hostA, hostB, projectA, projectB };
 }
 
 describe("countThreads", () => {
   it("counts live visible threads and excludes archived and deleted ones", () => {
     const { db, environmentA, projectA } = setup();
+
     const live = createThread(db, noopNotifier, {
       environmentId: environmentA.id,
       projectId: projectA.id,
       providerId: "codex",
       status: "active",
     });
+
     const archived = createThread(db, noopNotifier, {
       environmentId: environmentA.id,
       projectId: projectA.id,
       providerId: "codex",
       status: "active",
     });
+
     const deleted = createThread(db, noopNotifier, {
       environmentId: environmentA.id,
       projectId: projectA.id,
       providerId: "codex",
       status: "active",
     });
+
     const hidden = createThread(db, noopNotifier, {
       environmentId: environmentA.id,
       projectId: projectA.id,
@@ -74,11 +81,12 @@ describe("countThreads", () => {
       status: "active",
       visibility: "hidden",
     });
+
     archiveThread(db, noopNotifier, archived.id);
     markThreadDeleted(db, noopNotifier, { threadId: deleted.id });
 
     expect(countThreads(db, {})).toEqual({ total: 1 });
-    // Archived rows are countable on request; deleted ones never are.
+
     expect(countThreads(db, { includeArchived: true })).toEqual({ total: 2 });
     expect(countThreads(db, { includeHidden: true })).toEqual({ total: 2 });
     expect(
@@ -92,6 +100,7 @@ describe("countThreads", () => {
   it("groups by host, provider and project", () => {
     const { db, environmentA, environmentB, hostA, hostB, projectA, projectB } =
       setup();
+
     createThread(db, noopNotifier, {
       environmentId: environmentA.id,
       projectId: projectA.id,
@@ -110,8 +119,7 @@ describe("countThreads", () => {
       providerId: "codex",
       status: "active",
     });
-    // A thread with no environment yet — the case a host grouping has to place
-    // somewhere rather than drop.
+
     createThread(db, noopNotifier, {
       environmentId: null,
       projectId: projectA.id,
@@ -140,6 +148,7 @@ describe("countThreads", () => {
   it("filters by host through the environment join", () => {
     const { db, environmentA, environmentB, hostA, projectA, projectB } =
       setup();
+
     createThread(db, noopNotifier, {
       environmentId: environmentA.id,
       projectId: projectA.id,
@@ -159,12 +168,14 @@ describe("countThreads", () => {
 
   it("distinguishes root threads from a named parent and from no filter", () => {
     const { db, environmentA, projectA } = setup();
+
     const root = createThread(db, noopNotifier, {
       environmentId: environmentA.id,
       projectId: projectA.id,
       providerId: "codex",
       status: "active",
     });
+
     createThread(db, noopNotifier, {
       environmentId: environmentA.id,
       parentThreadId: root.id,
@@ -180,8 +191,6 @@ describe("countThreads", () => {
       status: "active",
     });
 
-    // Three states, three answers — this is what the route's "none" sentinel
-    // buys over an empty-string parameter.
     expect(countThreads(db, {}).total).toBe(3);
     expect(countThreads(db, { parent: { kind: "root" } }).total).toBe(1);
     expect(
@@ -192,7 +201,6 @@ describe("countThreads", () => {
   });
 });
 
-/** Group ids are random, so compare as a keyed map rather than an ordered list. */
 function byKey(groups: { key: string | null; count: number }[] | undefined) {
   return Object.fromEntries(
     (groups ?? []).map((group) => [group.key ?? "<none>", group.count]),

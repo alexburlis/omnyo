@@ -4,10 +4,13 @@ import {
   type EnvLoaderArgs,
   type EnvVarDefinition,
 } from "./env.js";
-import { BB_HOST_DAEMON_PORT_ENV, BB_SERVER_PORT_ENV } from "./env-vars.js";
 import {
-  BB_PROD_HOST_DAEMON_PORT,
-  BB_PROD_SERVER_PORT,
+  OMNYO_HOST_DAEMON_PORT_ENV,
+  OMNYO_SERVER_PORT_ENV,
+} from "./env-vars.js";
+import {
+  OMNYO_PROD_HOST_DAEMON_PORT,
+  OMNYO_PROD_SERVER_PORT,
   resolveDevInstanceConfig,
 } from "./runtime.js";
 
@@ -54,11 +57,13 @@ function resolveDevHostDaemonPortDefault(
 
 function loadRuntimePortValue(args: LoadRuntimePortValueArgs): number {
   const loader = resolveEnvLoader(args);
+
   const configuredPort = readOptionalEnvVar({
     context: loader.context,
     definition: args.definition,
     env: loader.env,
   });
+
   if (configuredPort !== undefined) {
     return configuredPort;
   }
@@ -78,9 +83,10 @@ function loadRuntimePortValue(args: LoadRuntimePortValueArgs): number {
 
 export function loadServerPortValue(args: RuntimePortLoaderArgs = {}): number {
   const loader = resolveEnvLoader(args);
+
   return loadRuntimePortValue({
     ...args,
-    definition: BB_SERVER_PORT_ENV,
+    definition: OMNYO_SERVER_PORT_ENV,
     devDefault: resolveDevServerPortDefault({
       homeDir: loader.context.homeDir,
       repoRoot: args.repoRoot,
@@ -88,7 +94,7 @@ export function loadServerPortValue(args: RuntimePortLoaderArgs = {}): number {
     env: loader.env,
     homeDir: loader.context.homeDir,
     mode: loader.mode,
-    prodDefault: BB_PROD_SERVER_PORT,
+    prodDefault: OMNYO_PROD_SERVER_PORT,
   });
 }
 
@@ -96,9 +102,10 @@ export function loadHostDaemonPortValue(
   args: RuntimePortLoaderArgs = {},
 ): number {
   const loader = resolveEnvLoader(args);
+
   return loadRuntimePortValue({
     ...args,
-    definition: BB_HOST_DAEMON_PORT_ENV,
+    definition: OMNYO_HOST_DAEMON_PORT_ENV,
     devDefault: resolveDevHostDaemonPortDefault({
       homeDir: loader.context.homeDir,
       repoRoot: args.repoRoot,
@@ -106,6 +113,6 @@ export function loadHostDaemonPortValue(
     env: loader.env,
     homeDir: loader.context.homeDir,
     mode: loader.mode,
-    prodDefault: BB_PROD_HOST_DAEMON_PORT,
+    prodDefault: OMNYO_PROD_HOST_DAEMON_PORT,
   });
 }

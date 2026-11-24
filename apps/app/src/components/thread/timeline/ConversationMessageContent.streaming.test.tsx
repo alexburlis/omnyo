@@ -7,9 +7,11 @@ import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import { ConversationMessageContent } from "./ConversationMessageContent";
 
 const markdownRenders = vi.hoisted(() => [] as string[]);
+
 vi.mock("react-markdown", () => ({
   default: ({ children }: { children: string }) => {
     markdownRenders.push(children);
+
     return <div data-markdown-document="">{children}</div>;
   },
   defaultUrlTransform: (url: string) => url,
@@ -21,12 +23,12 @@ function renderAssistantMessage(text: string, streaming: boolean) {
       <RouteNavigationProvider>
         <ConversationMessageContent
           role="assistant"
+          turnGit={null}
           attachments={null}
           id="msg_stream"
           threadId="thr_stream"
           turnId="turn_stream"
           showActions={false}
-          mobileActionDisplay="overflow"
           streaming={streaming}
           text={text}
           timestamp={0}
@@ -34,7 +36,9 @@ function renderAssistantMessage(text: string, streaming: boolean) {
       </RouteNavigationProvider>
     </MemoryRouter>
   );
+
   const view = render(element);
+
   return {
     view,
     update: (nextText: string, nextStreaming: boolean) =>
@@ -43,12 +47,12 @@ function renderAssistantMessage(text: string, streaming: boolean) {
           <RouteNavigationProvider>
             <ConversationMessageContent
               role="assistant"
+              turnGit={null}
               attachments={null}
               id="msg_stream"
               threadId="thr_stream"
               turnId="turn_stream"
               showActions={false}
-              mobileActionDisplay="overflow"
               streaming={nextStreaming}
               text={nextText}
               timestamp={0}
@@ -98,6 +102,7 @@ describe("ConversationMessageContent streaming split", () => {
       "Settled **source.\n\nSecond paragraph.\n\n`live code",
       true,
     );
+
     expect(documents(view.container)).toEqual([
       "Settled **source.\n\n",
       "Second paragraph.\n\n`live code`",
@@ -147,10 +152,12 @@ describe("ConversationMessageContent streaming split", () => {
 
   it("resumes repair after a directive moves into the settled prefix", () => {
     const source = '::inline-vis{file="[draft.html"}';
+
     const { view, update } = renderAssistantMessage(
       source + "\n\n**live",
       true,
     );
+
     expect(documents(view.container)).toEqual([source + "\n\n**live"]);
 
     update(source + "\n\nSecond paragraph.\n\n**live", true);
@@ -165,6 +172,7 @@ describe("ConversationMessageContent streaming split", () => {
       "Para one.\n\nPara two.\n\nPara th",
       true,
     );
+
     expect(documents(view.container)).toEqual([
       "Para one.\n\n",
       "Para two.\n\nPara th",
@@ -212,6 +220,7 @@ describe("ConversationMessageContent streaming split", () => {
       "Intro.\n\n```ts\nconst a = 1;\n\nconst b = 2;\n",
       true,
     );
+
     expect(documents(view.container)).toEqual([
       "Intro.\n\n",
       "```ts\nconst a = 1;\n\nconst b = 2;\n",

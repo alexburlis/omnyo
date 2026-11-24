@@ -9,6 +9,7 @@ import {
 } from "./machine-auth-proxy.js";
 
 const proxies: MachineAuthProxy[] = [];
+
 const servers: Array<http.Server | net.Server> = [];
 
 async function listen(server: http.Server | net.Server): Promise<number> {
@@ -17,6 +18,7 @@ async function listen(server: http.Server | net.Server): Promise<number> {
     server.listen(0, "127.0.0.1", resolve);
   });
   servers.push(server);
+
   return (server.address() as AddressInfo).port;
 }
 
@@ -32,6 +34,110 @@ afterEach(async () => {
 });
 
 describe("startMachineAuthProxy", () => {
+  it.each(["before headers", "during response", "during upload"])(
+    "closes upstream when the client disconnects %s",
+    async (phase) => {
+      let upstreamResponse: http.ServerResponse | undefined;
+      let upstreamSocket: net.Socket | undefined;
+      let resolveReady: () => void = () => undefined;
+
+      const ready = new Promise<void>((resolve) => {
+        resolveReady = resolve;
+      });
+
+      const upstream = http.createServer((request, response) => {
+        upstreamResponse = response;
+        upstreamSocket = request.socket;
+
+        if (phase === "during response") {
+          response.writeHead(200, { "content-length": 4 * 1024 * 1024 });
+          response.write(Buffer.alloc(128 * 1024));
+        } else if (phase === "during upload") {
+          request.once("data", resolveReady);
+        } else resolveReady();
+      });
+
+      const port = await listen(upstream);
+
+      const proxy = await startMachineAuthProxy({
+        serverUrl: `http://127.0.0.1:${port}`,
+        serverHeaders: { "x-omnyo-connect-machine": "test-machine" },
+      });
+
+      proxies.push(proxy);
+
+      const client = http.request(`${proxy.serverUrl}/models`, {
+        method: phase === "during upload" ? "POST" : "GET",
+        headers: phase === "during upload" ? { "content-length": 100_000 } : {},
+      });
+
+      client.on("error", () => undefined);
+      client.on("response", (response) => response.once("data", resolveReady));
+
+      if (phase === "during upload") client.write(Buffer.alloc(1024));
+      else client.end();
+
+      try {
+        await ready;
+        client.destroy();
+        await expect
+          .poll(() => upstreamSocket?.destroyed, { timeout: 1000 })
+          .toBe(true);
+        expect(() => upstreamResponse?.end("late response")).not.toThrow();
+      } finally {
+        client.destroy();
+        upstreamResponse?.destroy();
+        upstream.closeAllConnections();
+      }
+    },
+  );
+
+  it("preserves completed HTTP keepalive connections", async () => {
+    let connections = 0;
+
+    const upstream = http.createServer((_request, response) =>
+      response.end("complete"),
+    );
+
+    upstream.on("connection", () => {
+      connections += 1;
+    });
+    const port = await listen(upstream);
+
+    const proxy = await startMachineAuthProxy({
+      serverUrl: `http://127.0.0.1:${port}`,
+      serverHeaders: { "x-omnyo-connect-machine": "test-machine" },
+    });
+
+    proxies.push(proxy);
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        const body = await new Promise<string>((resolve, reject) => {
+          http
+            .get(`${proxy.serverUrl}/models`, { agent }, (response) => {
+              let text = "";
+              response.setEncoding("utf8");
+              response.on("data", (chunk) => {
+                text += chunk;
+              });
+              response.on("end", () => resolve(text));
+              response.on("error", reject);
+            })
+            .on("error", reject);
+        });
+
+        expect(body).toBe("complete");
+      }
+
+      expect(connections).toBe(1);
+    } finally {
+      agent.destroy();
+      upstream.closeAllConnections();
+    }
+  });
+
   it.each(["upstream", "client"])(
     "contains a %s connection reset after a WebSocket upgrade",
     async (resetSide) => {
@@ -43,15 +149,19 @@ describe("startMachineAuthProxy", () => {
           socket.once("data", () => socket.resetAndDestroy());
         });
       });
+
       const upstreamConnected = once(upstream, "connection");
       const upstreamPort = await listen(upstream);
+
       const proxy = await startMachineAuthProxy({
-        serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
+        serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
         serverUrl: `http://127.0.0.1:${upstreamPort}`,
       });
+
       proxies.push(proxy);
       const proxyUrl = new URL(proxy.serverUrl);
       const client = net.connect(Number(proxyUrl.port), proxyUrl.hostname);
+
       try {
         await once(client, "connect");
         client.write(
@@ -61,11 +171,13 @@ describe("startMachineAuthProxy", () => {
         const [upstreamSocket] = await upstreamConnected;
         const upstreamClosed = once(upstreamSocket, "close");
         const closed = once(client, "close");
+
         if (resetSide === "upstream") {
           client.write("trigger reset");
         } else {
           client.resetAndDestroy();
         }
+
         await Promise.all([closed, upstreamClosed]);
         expect(client.destroyed).toBe(true);
       } finally {
@@ -78,6 +190,7 @@ describe("startMachineAuthProxy", () => {
     "fails the caller's response when the upstream connection %s mid-body",
     async (drop) => {
       let dropUpstream = () => {};
+
       const upstream = http.createServer((_request, response) => {
         response.writeHead(200, { "content-type": "text/event-stream" });
         response.write("data: first\n\n");
@@ -86,11 +199,14 @@ describe("startMachineAuthProxy", () => {
           else response.socket?.destroy();
         };
       });
+
       const upstreamPort = await listen(upstream);
+
       const proxy = await startMachineAuthProxy({
         serverHeaders: {},
         serverUrl: `http://127.0.0.1:${upstreamPort}`,
       });
+
       proxies.push(proxy);
 
       const response = await new Promise<http.IncomingMessage>(
@@ -98,9 +214,11 @@ describe("startMachineAuthProxy", () => {
           http.get(`${proxy.serverUrl}/stream`, resolve).on("error", reject);
         },
       );
+
       const closed = new Promise<void>((resolve) =>
         response.on("close", resolve),
       );
+
       response.on("error", () => {});
       response.once("data", () => dropUpstream());
       response.resume();
@@ -114,7 +232,7 @@ describe("startMachineAuthProxy", () => {
     const upstream = http.createServer((request, response) => {
       expect(request.method).toBe("POST");
       expect(request.url).toBe("/api/v1/threads?state=open");
-      expect(request.headers["x-bb-connect-machine"]).toBe("bbcm_machine");
+      expect(request.headers["x-omnyo-connect-machine"]).toBe("bbcm_machine");
       expect(request.headers["x-request-id"]).toBe("request-1");
       let body = "";
       request.setEncoding("utf8");
@@ -124,11 +242,14 @@ describe("startMachineAuthProxy", () => {
         response.writeHead(201, { "x-upstream": "yes" }).end("created");
       });
     });
+
     const upstreamPort = await listen(upstream);
+
     const proxy = await startMachineAuthProxy({
-      serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
       serverUrl: `http://127.0.0.1:${upstreamPort}`,
     });
+
     proxies.push(proxy);
 
     const response = await fetch(
@@ -136,7 +257,7 @@ describe("startMachineAuthProxy", () => {
       {
         method: "POST",
         headers: {
-          "x-bb-connect-machine": "caller-must-not-override",
+          "x-omnyo-connect-machine": "caller-must-not-override",
           "x-request-id": "request-1",
         },
         body: "payload",
@@ -152,30 +273,36 @@ describe("startMachineAuthProxy", () => {
     const binary = new Uint8Array([0, 255, 1, 128, 42]);
     let resolveReceived: (() => void) | undefined;
     let rejectReceived: ((error: unknown) => void) | undefined;
+
     const received = new Promise<void>((resolve, reject) => {
       resolveReceived = resolve;
       rejectReceived = reject;
     });
+
     const upstream = http.createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => {
         void (async () => {
-          expect(request.headers["x-bb-connect-machine"]).toBe(
+          expect(request.headers["x-omnyo-connect-machine"]).toBe(
             "bbcm_attachment_machine",
           );
           const contentType = request.headers["content-type"];
           expect(contentType).toMatch(/^multipart\/form-data; boundary=/u);
+
           const form = await new Response(Buffer.concat(chunks), {
             headers: { "content-type": contentType ?? "" },
           }).formData();
+
           const file = form.get("file");
           expect(file).toBeInstanceOf(File);
+
           if (!(file instanceof File)) {
             throw new Error("Expected proxied multipart file");
           }
+
           expect(file.name).toBe("payload.bin");
-          expect(file.type).toBe("application/x-bb-test");
+          expect(file.type).toBe("application/x-omnyo-test");
           expect(new Uint8Array(await file.arrayBuffer())).toEqual(binary);
           response.writeHead(201).end();
           resolveReceived?.();
@@ -185,16 +312,19 @@ describe("startMachineAuthProxy", () => {
         });
       });
     });
+
     const upstreamPort = await listen(upstream);
+
     const proxy = await startMachineAuthProxy({
-      serverHeaders: { "x-bb-connect-machine": "bbcm_attachment_machine" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_attachment_machine" },
       serverUrl: `http://127.0.0.1:${upstreamPort}`,
     });
+
     proxies.push(proxy);
     const form = new FormData();
     form.set(
       "file",
-      new Blob([binary], { type: "application/x-bb-test" }),
+      new Blob([binary], { type: "application/x-omnyo-test" }),
       "payload.bin",
     );
 
@@ -211,7 +341,7 @@ describe("startMachineAuthProxy", () => {
     const upstream = http.createServer();
     const websocketServer = new WebSocketServer({ noServer: true });
     upstream.on("upgrade", (request, socket, head) => {
-      expect(request.headers["x-bb-connect-machine"]).toBe("bbcm_machine");
+      expect(request.headers["x-omnyo-connect-machine"]).toBe("bbcm_machine");
       websocketServer.handleUpgrade(request, socket, head, (websocket) => {
         websocketServer.emit("connection", websocket, request);
       });
@@ -222,16 +352,19 @@ describe("startMachineAuthProxy", () => {
       );
     });
     const upstreamPort = await listen(upstream);
+
     const proxy = await startMachineAuthProxy({
-      serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
       serverUrl: `http://127.0.0.1:${upstreamPort}`,
     });
+
     proxies.push(proxy);
 
     const response = await new Promise<string>((resolve, reject) => {
       const socket = new WebSocket(
         `${proxy.serverUrl.replace("http:", "ws:")}/ws/threads/thread-1/terminals/terminal-1`,
       );
+
       socket.once("open", () => socket.send("ping"));
       socket.once("message", (message: RawData) => {
         resolve(String(message));
@@ -246,15 +379,19 @@ describe("startMachineAuthProxy", () => {
 
   it("rejects absolute request targets and CONNECT without reaching upstream", async () => {
     let upstreamRequests = 0;
+
     const upstream = http.createServer((_request, response) => {
       upstreamRequests += 1;
       response.end();
     });
+
     const upstreamPort = await listen(upstream);
+
     const proxy = await startMachineAuthProxy({
-      serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
       serverUrl: `http://127.0.0.1:${upstreamPort}`,
     });
+
     proxies.push(proxy);
     const proxyUrl = new URL(proxy.serverUrl);
 
@@ -268,10 +405,12 @@ describe("startMachineAuthProxy", () => {
           },
           (response) => resolve(response.statusCode),
         );
+
         request.once("error", reject);
         request.end();
       },
     );
+
     const connectResponse = await new Promise<string>((resolve, reject) => {
       const socket = net.connect(
         Number(proxyUrl.port),
@@ -282,6 +421,7 @@ describe("startMachineAuthProxy", () => {
           );
         },
       );
+
       socket.setEncoding("utf8");
       socket.once("data", (chunk) => resolve(String(chunk)));
       socket.once("error", reject);
@@ -294,35 +434,43 @@ describe("startMachineAuthProxy", () => {
 
   it("rejects browser-originated requests without reaching upstream", async () => {
     let upstreamRequests = 0;
+
     const upstream = http.createServer((_request, response) => {
       upstreamRequests += 1;
       response.end();
     });
+
     const upstreamPort = await listen(upstream);
+
     const proxy = await startMachineAuthProxy({
-      serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
       serverUrl: `http://127.0.0.1:${upstreamPort}`,
     });
+
     proxies.push(proxy);
 
     const browserHeaders: Array<Record<string, string>> = [
       { origin: "http://127.0.0.1:3009", "content-type": "text/plain" },
       { "sec-fetch-site": "cross-site" },
     ];
+
     for (const headers of browserHeaders) {
       const response = await fetch(`${proxy.serverUrl}/api/v1/threads`, {
         method: "POST",
         headers,
         body: "{}",
       });
+
       expect(response.status).toBe(403);
     }
+
     expect(upstreamRequests).toBe(0);
 
     const allowed = await fetch(`${proxy.serverUrl}/api/v1/threads`, {
       method: "POST",
       body: "{}",
     });
+
     expect(allowed.status).toBe(200);
     expect(upstreamRequests).toBe(1);
   });
@@ -335,10 +483,12 @@ describe("startMachineAuthProxy", () => {
       socket.destroy();
     });
     const upstreamPort = await listen(upstream);
+
     const proxy = await startMachineAuthProxy({
-      serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
       serverUrl: `http://127.0.0.1:${upstreamPort}`,
     });
+
     proxies.push(proxy);
     const proxyUrl = new URL(proxy.serverUrl);
 
@@ -352,6 +502,7 @@ describe("startMachineAuthProxy", () => {
           );
         },
       );
+
       socket.setEncoding("utf8");
       socket.once("data", (chunk) => resolve(String(chunk)));
       socket.once("error", reject);
@@ -361,17 +512,77 @@ describe("startMachineAuthProxy", () => {
     expect(upstreamUpgrades).toBe(0);
   });
 
+  it.each([
+    {
+      name: "WebSocket upgrade",
+      request: (host: string) =>
+        `GET /ws HTTP/1.1\r\nHost: ${host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nOrigin: http://127.0.0.1:3009\r\n\r\n`,
+      status: "403",
+    },
+    {
+      name: "CONNECT",
+      request: (host: string) =>
+        `CONNECT example.com:443 HTTP/1.1\r\nHost: ${host}\r\n\r\n`,
+      status: "405",
+    },
+  ])(
+    "contains a reset from a client whose $name it rejects",
+    async ({ request, status }) => {
+      const upstream = http.createServer((_request, response) =>
+        response.end(),
+      );
+
+      const upstreamPort = await listen(upstream);
+
+      const proxy = await startMachineAuthProxy({
+        serverHeaders: {},
+        serverUrl: `http://127.0.0.1:${upstreamPort}`,
+      });
+
+      proxies.push(proxy);
+      const proxyUrl = new URL(proxy.serverUrl);
+      const client = net.connect(Number(proxyUrl.port), proxyUrl.hostname);
+
+      try {
+        await once(client, "connect");
+        const closed = once(client, "close");
+        client.write(request(proxyUrl.host));
+        const [response] = await once(client, "data");
+        expect(String(response)).toContain(status);
+        client.resetAndDestroy();
+        await closed;
+      } finally {
+        client.destroy();
+      }
+
+      const after = await new Promise<number>((resolve, reject) => {
+        http
+          .get(`${proxy.serverUrl}/health`, (response) => {
+            response.resume();
+            resolve(response.statusCode ?? 0);
+          })
+          .on("error", reject);
+      });
+
+      expect(after).toBe(200);
+    },
+  );
+
   it("rejects a rebound public Host without reaching upstream", async () => {
     let upstreamRequests = 0;
+
     const upstream = http.createServer((_request, response) => {
       upstreamRequests += 1;
       response.end();
     });
+
     const upstreamPort = await listen(upstream);
+
     const proxy = await startMachineAuthProxy({
-      serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
       serverUrl: `http://127.0.0.1:${upstreamPort}`,
     });
+
     proxies.push(proxy);
     const proxyUrl = new URL(proxy.serverUrl);
 
@@ -386,6 +597,7 @@ describe("startMachineAuthProxy", () => {
           },
           (response) => resolve(response.statusCode),
         );
+
         request.once("error", reject);
         request.end();
       });
@@ -402,6 +614,7 @@ describe("startMachineAuthProxy", () => {
     ]) {
       expect(await statusForHost(host)).toBe(200);
     }
+
     expect(upstreamRequests).toBe(3);
   });
 
@@ -411,7 +624,7 @@ describe("startMachineAuthProxy", () => {
 
     await expect(
       startMachineAuthProxy({
-        serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
+        serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
         port,
         serverUrl: "http://server.test",
       }),

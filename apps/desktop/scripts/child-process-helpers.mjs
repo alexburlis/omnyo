@@ -40,6 +40,7 @@ export async function forwardSignalsAndMirrorExit(child) {
   });
 
   const [code, signal] = await once(child, "exit");
+
   if (typeof code === "number") {
     process.exitCode = code;
   } else {

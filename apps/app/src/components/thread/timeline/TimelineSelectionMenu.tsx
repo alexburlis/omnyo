@@ -7,17 +7,21 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { preventOverlayTriggerSelection } from "@bb/shared-ui/overlay-trigger";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { FLOATING_POPOVER_MOTION } from "@omnyo/shared-ui/motion";
+import { preventOverlayTriggerSelection } from "@omnyo/shared-ui/overlay-trigger";
 import { usePortalScopeProps } from "@/lib/portal-scope";
 import { PluginItemIcon, pluginIconName } from "@/components/plugin/PluginIcon";
 import type { MessageProseSelection } from "./SelectableMessageProse.js";
-import type { ThreadTimelinePluginMessageAction } from "./types.js";
+import type {
+  ThreadTimelineAddToChatHandler,
+  ThreadTimelinePluginMessageAction,
+} from "./types.js";
 
 const SELECTION_ACTION_BUTTON_CLASS =
   "inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-xs text-foreground transition-colors hover:bg-surface-recessed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring select-none max-md:pointer-coarse:min-h-7 max-md:pointer-coarse:px-2 max-md:pointer-coarse:py-1";
-const SELECTION_MENU_CONTENT_CLASS =
-  "z-50 flex w-auto items-center gap-0.5 rounded-md border bg-popover p-0.5 text-popover-foreground shadow-md outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95";
+
+const SELECTION_MENU_CONTENT_CLASS = `z-50 flex w-auto origin-(--radix-popover-content-transform-origin) items-center gap-0.5 rounded-md border bg-popover p-0.5 text-popover-foreground shadow-md outline-none data-[state=closed]:pointer-events-none ${FLOATING_POPOVER_MOTION}`;
 
 interface SelectionAction {
   icon: IconName;
@@ -29,7 +33,7 @@ interface SelectionAction {
 
 export interface TimelineSelectionMenuProps {
   selection: MessageProseSelection | null;
-  onAddToChat?: (text: string) => void;
+  onAddToChat?: ThreadTimelineAddToChatHandler;
   pluginActions?: readonly ThreadTimelinePluginMessageAction[];
   onDismiss: () => void;
 }
@@ -44,6 +48,7 @@ function ActionButton({
   selection: MessageProseSelection;
 }) {
   const ignoreNextClickRef = useRef(false);
+
   const activate = () => {
     flushSync(() => {
       action.onSelect(selection);
@@ -51,15 +56,18 @@ function ActionButton({
       onDismiss();
     });
   };
+
   const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.pointerType === "mouse") return;
     event.preventDefault();
     ignoreNextClickRef.current = true;
   };
+
   const handlePointerUp = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.pointerType === "mouse" || !ignoreNextClickRef.current) return;
     activate();
   };
+
   return (
     <button
       type="button"
@@ -73,8 +81,10 @@ function ActionButton({
       onClick={() => {
         if (ignoreNextClickRef.current) {
           ignoreNextClickRef.current = false;
+
           return;
         }
+
         activate();
       }}
     >
@@ -112,39 +122,50 @@ export function TimelineSelectionMenu({
 }: TimelineSelectionMenuProps) {
   const open = selection !== null;
   const portalScopeProps = usePortalScopeProps();
+  const lastSelectionRef = useRef(selection);
+
+  if (selection !== null) lastSelectionRef.current = selection;
+  const displayedSelection = selection ?? lastSelectionRef.current;
 
   useEffect(() => {
     if (!open || typeof window === "undefined") return;
     const dismiss = () => onDismiss();
     window.addEventListener("scroll", dismiss, true);
     window.addEventListener("resize", dismiss);
+
     return () => {
       window.removeEventListener("scroll", dismiss, true);
       window.removeEventListener("resize", dismiss);
     };
   }, [open, onDismiss]);
 
-  const anchorSide = selection?.anchorSide ?? "top";
+  const anchorSide = displayedSelection?.anchorSide ?? "top";
+
   const anchorLeft =
-    selection?.anchorPoint?.x ??
-    (selection === null ? 0 : selection.rect.left + selection.rect.width / 2);
+    displayedSelection?.anchorPoint?.x ??
+    (displayedSelection === null
+      ? 0
+      : displayedSelection.rect.left + displayedSelection.rect.width / 2);
+
   const anchorTop =
-    selection?.anchorPoint?.y ??
-    (selection === null
+    displayedSelection?.anchorPoint?.y ??
+    (displayedSelection === null
       ? 0
       : anchorSide === "bottom"
-        ? selection.rect.bottom
-        : selection.rect.top);
+        ? displayedSelection.rect.bottom
+        : displayedSelection.rect.top);
+
   const virtualAnchor = useMemo(
     () => ({
       getBoundingClientRect: () => new DOMRect(anchorLeft, anchorTop, 0, 0),
     }),
     [anchorLeft, anchorTop],
   );
+
   const virtualAnchorRef = useRef(virtualAnchor);
   virtualAnchorRef.current = virtualAnchor;
 
-  if (!selection) return null;
+  if (!displayedSelection) return null;
 
   const actions: SelectionAction[] = [
     ...(onAddToChat
@@ -152,8 +173,12 @@ export function TimelineSelectionMenu({
           {
             icon: "MessageSquarePlus" as const,
             label: "Add to chat",
-            onSelect: (currentSelection: MessageProseSelection) =>
-              onAddToChat(currentSelection.text),
+            onSelect: (currentSelection: MessageProseSelection) => {
+              const { quote, text } = currentSelection;
+
+              if (quote) onAddToChat(quote.text, undefined, quote.mentions);
+              else onAddToChat(text);
+            },
           },
         ]
       : []),
@@ -165,13 +190,14 @@ export function TimelineSelectionMenu({
       onSelect: () => action.onSelect(),
     })),
   ];
+
   if (actions.length === 0) return null;
 
   return (
     <PopoverPrimitive.Root
-      open
+      open={open}
       onOpenChange={(next) => {
-        if (!next) onDismiss();
+        if (!next && open) onDismiss();
       }}
     >
       <PopoverPrimitive.Anchor virtualRef={virtualAnchorRef} />
@@ -183,7 +209,9 @@ export function TimelineSelectionMenu({
           sideOffset={6}
           collisionPadding={8}
           className={SELECTION_MENU_CONTENT_CLASS}
-          onEscapeKeyDown={() => onDismiss()}
+          onEscapeKeyDown={() => {
+            if (open) onDismiss();
+          }}
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
@@ -198,7 +226,7 @@ export function TimelineSelectionMenu({
               <ActionButton
                 action={action}
                 onDismiss={onDismiss}
-                selection={selection}
+                selection={displayedSelection}
               />
             </div>
           ))}

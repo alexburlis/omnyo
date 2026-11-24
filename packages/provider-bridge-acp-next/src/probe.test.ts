@@ -4,7 +4,7 @@ import { acpAgentProbeSchema, probeAcpAgent } from "./probe.js";
 describe("probeAcpAgent", () => {
   it("reports a missing agent instead of throwing", async () => {
     const probe = await probeAcpAgent({
-      command: "bb-acp-agent-that-does-not-exist",
+      command: "omnyo-acp-agent-that-does-not-exist",
       args: [],
       cwd: process.cwd(),
       timeoutMs: 5_000,
@@ -32,6 +32,7 @@ describe("probeAcpAgent", () => {
   it("strips the bridge runtime environment the way a real launch does", async () => {
     const previous = process.env.ELECTRON_RUN_AS_NODE;
     process.env.ELECTRON_RUN_AS_NODE = "1";
+
     try {
       const probe = await probeAcpAgent({
         command: process.execPath,

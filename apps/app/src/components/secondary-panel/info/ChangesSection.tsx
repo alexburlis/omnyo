@@ -1,12 +1,13 @@
-import type { WorkspaceFileStatus, WorkspaceStatus } from "@bb/domain";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { directoryFromPath } from "@bb/thread-view";
+import type { WorkspaceFileStatus, WorkspaceStatus } from "@omnyo/domain";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { directoryFromPath } from "@omnyo/thread-view";
 import {
   DiffSizeBar,
   DiffStatsTally,
 } from "@/components/ui/diff-stats-tally.js";
 import {
+  formatOmittedChangedFilesLabel,
   selectWorkspaceChangedFilesSections,
   toChangeTally,
   type WorkspaceChangedFileSelection,
@@ -19,6 +20,7 @@ import { useInfoSectionCollapse } from "./useInfoSectionCollapse";
 
 function toFolderHint(path: string): string | null {
   const folderPath = directoryFromPath(path);
+
   return folderPath === "" ? null : `${folderPath}/`;
 }
 
@@ -45,7 +47,9 @@ export function ChangedFilesTally({
   section: WorkspaceChangedFilesSection;
 }) {
   const tally = toChangeTally(section.stats);
+
   if (!tally.lineStatsComplete) return null;
+
   return (
     <DiffStatsTally
       insertions={tally.insertions}
@@ -60,19 +64,28 @@ export function ChangedFilesList({
   onChangedFileClick,
   onOpenChangedFile,
 }: ChangedFilesHandlers & { section: WorkspaceChangedFilesSection }) {
+  const omittedFilesLabel = formatOmittedChangedFilesLabel(section.stats);
+
   return (
-    <InfoList
-      items={section.files}
-      getKey={(file) => `${file.status}:${file.path}`}
-      renderItem={(file) => (
-        <ChangedFileRow
-          file={file}
-          section={section}
-          onChangedFileClick={onChangedFileClick}
-          onOpenChangedFile={onOpenChangedFile}
-        />
-      )}
-    />
+    <>
+      <InfoList
+        items={section.files}
+        getKey={(file) => `${file.status}:${file.path}`}
+        renderItem={(file) => (
+          <ChangedFileRow
+            file={file}
+            section={section}
+            onChangedFileClick={onChangedFileClick}
+            onOpenChangedFile={onOpenChangedFile}
+          />
+        )}
+      />
+      {omittedFilesLabel ? (
+        <p className="m-0 text-2xs leading-6 text-subtle-foreground">
+          {omittedFilesLabel}
+        </p>
+      ) : null}
+    </>
   );
 }
 
@@ -83,11 +96,13 @@ export function UncommittedChangesSection({
 }: ChangedFilesHandlers & { workspaceStatus: WorkspaceStatus | undefined }) {
   const collapse = useInfoSectionCollapse("uncommittedChanges");
   const section = selectChangedFilesSection(workspaceStatus, "uncommitted");
+
   if (section === undefined) return null;
+
   return (
     <InfoSection
       label="Uncommitted files"
-      count={section.files.length}
+      count={section.stats.fileCount}
       collapse={collapse}
       trailing={<ChangedFilesTally section={section} />}
     >
@@ -113,12 +128,14 @@ function ChangedFileRow({
 }) {
   const glyph = FILE_STATUS_GLYPHS[file.status];
   const fileName = getFileNameFromPath({ path: file.path });
+
   const lineStats =
     file.insertions !== null &&
     file.deletions !== null &&
     file.insertions + file.deletions > 0
       ? { insertions: file.insertions, deletions: file.deletions }
       : null;
+
   return (
     <InfoListRow
       leading={

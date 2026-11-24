@@ -9,19 +9,23 @@ import { fileURLToPath } from "node:url";
 import { compareSemver, resolveVersionArgument } from "./lib/semver.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
+
 const USAGE =
   "Usage: node scripts/bump-version.mjs <new-version>|--patch|--minor|--major";
+
 const defaultRepoRoot = resolve(dirname(scriptPath), "..");
+
 const packageTargets = [
   {
-    label: "bb-app",
-    path: "packages/bb-app/package.json",
+    label: "omnyo-app",
+    path: "packages/omnyo-app/package.json",
   },
   {
-    label: "@bb/desktop",
+    label: "@omnyo/desktop",
     path: "apps/desktop/package.json",
   },
 ];
+
 const defaultFileSystem = {
   readFile,
   rename,
@@ -32,6 +36,7 @@ const defaultFileSystem = {
 async function readPackageTarget({ fileSystem, repoRoot, target }) {
   const absolutePath = resolve(repoRoot, target.path);
   const content = await fileSystem.readFile(absolutePath, "utf8");
+
   const packageJson = parsePackageJsonWithVersion({
     content,
     path: target.path,
@@ -93,6 +98,7 @@ export async function bumpVersion(options) {
 
   const packageReads = await readPackageTargets({ fileSystem, repoRoot });
   const maxCurrentVersion = findMaxCurrentVersion(packageReads);
+
   const newVersion = resolveVersionArgument({
     argument: args[0],
     currentVersion: maxCurrentVersion,
@@ -120,11 +126,11 @@ export async function bumpVersion(options) {
       `${update.target.label.replaceAll("/", "-")}.json`,
     updates,
   });
-  log(`Bumped: bb-app + @bb/desktop → ${newVersion}`);
+  log(`Bumped: omnyo-app + @omnyo/desktop → ${newVersion}`);
 }
 
 async function main() {
-  const repoRoot = process.env.BB_BUMP_VERSION_REPO_ROOT ?? defaultRepoRoot;
+  const repoRoot = process.env.OMNYO_BUMP_VERSION_REPO_ROOT ?? defaultRepoRoot;
 
   await bumpVersion({
     args: process.argv.slice(2),

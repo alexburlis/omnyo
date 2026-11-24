@@ -4,24 +4,23 @@ import { SourceLoadingSkeleton } from "./code-loading-skeletons";
 import { useSourceCodeRendererReplacement } from "./codeRendererProvider";
 import {
   DEFAULT_CODE_OVERFLOW,
-  type BbSourceCodeProps,
+  type OmnyoSourceCodeProps,
 } from "./code-rendering";
 
 const SOURCE_CODE_RENDERER_SLOT_KIND = "sourceCodeRenderer";
 
-export const BbSourceCodeSplit = defineSplit<BbSourceCodeProps>({
-  id: "bb-source-code",
-  load: () => import("./BbSourceCode").then((module) => module.default),
+export const OmnyoSourceCodeSplit = defineSplit<OmnyoSourceCodeProps>({
+  id: "omnyo-source-code",
+  load: () => import("./OmnyoSourceCode").then((module) => module.default),
   loading: () => <SourceLoadingSkeleton />,
-  tier: "intent",
 });
 
 interface SourceCodeHostProps extends Omit<
-  BbSourceCodeProps,
+  OmnyoSourceCodeProps,
   "overflow" | "highlightedLines"
 > {
-  overflow?: BbSourceCodeProps["overflow"];
-  highlightedLines?: BbSourceCodeProps["highlightedLines"];
+  overflow?: OmnyoSourceCodeProps["overflow"];
+  highlightedLines?: OmnyoSourceCodeProps["highlightedLines"];
 }
 
 export function SourceCodeHost({
@@ -37,7 +36,7 @@ export function SourceCodeHost({
   const replacement = useSourceCodeRendererReplacement();
 
   const original = (
-    <BbSourceCodeSplit
+    <OmnyoSourceCodeSplit
       content={content}
       path={path}
       cacheKey={cacheKey}

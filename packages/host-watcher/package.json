@@ -1,5 +1,6 @@
 {
-  "name": "@bb/host-watcher",
+  "name": "@omnyo/host-watcher",
+  "private": true,
   "version": "0.0.1",
   "type": "module",
   "exports": {
@@ -16,13 +17,13 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
-    "@bb/domain": "workspace:*",
-    "@bb/process-utils": "workspace:*",
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/process-utils": "workspace:*",
     "@parcel/watcher": "2.5.6"
   },
   "devDependencies": {
-    "@bb/test-helpers": "workspace:*",
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/test-helpers": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2"

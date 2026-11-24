@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { THREAD_CONTEXT_CLEAR_OPERATION } from "@bb/domain";
+import { THREAD_CONTEXT_CLEAR_OPERATION } from "@omnyo/domain";
 import {
   advanceThreadPruning,
   deleteThreadEventSuffixInTransaction,
   getLatestCompletedThreadContextClearSequence,
   getLatestThreadSequence,
-} from "@bb/db";
+  getThreadHistoryEpoch,
+} from "@omnyo/db";
 import {
   clearTimelineOrderingContextCache,
   getTimelineGroupingContext,
@@ -34,6 +35,7 @@ function expectCachedEqualsCold(
   expect(cached, JSON.stringify(args)).toEqual(
     getTimelineGroupingContext(testThread.coldDb, args),
   );
+
   return cached;
 }
 
@@ -46,9 +48,11 @@ function captureStatementSql(db: TestThread["db"], run: () => void): string[] {
     writable: true,
     value: (source: string) => {
       captured.push(source);
+
       return originalPrepare(source);
     },
   });
+
   try {
     run();
   } finally {
@@ -58,6 +62,7 @@ function captureStatementSql(db: TestThread["db"], run: () => void): string[] {
       value: originalPrepare,
     });
   }
+
   return captured;
 }
 
@@ -195,11 +200,13 @@ describe("timeline grouping context cache", () => {
           },
           accepted("request-2", "turn-2"),
         ]);
+
         const context = getTimelineGroupingContext(testThread.db, {
           threadId: testThread.thread.id,
           sequenceStart: 0,
           maxSeq,
         });
+
         expect(context.orderingBoundarySequence).toBe(boundary);
         expect([...context.acceptedTurnIds]).toEqual([["request-2", "turn-2"]]);
       });
@@ -209,6 +216,7 @@ describe("timeline grouping context cache", () => {
   it("preserves the parented cutoff before a late accepted steer", () => {
     withTestThread((testThread) => {
       const steer = userRequest("steer");
+
       const maxSeq = appendRows(testThread, [
         turnStarted("turn-a"),
         turnCompleted("turn-a"),
@@ -227,6 +235,7 @@ describe("timeline grouping context cache", () => {
         child("parent", 1),
         accepted("steer", "turn-a"),
       ]);
+
       expect(
         expectCachedEqualsCold(testThread, maxSeq).orderingBoundarySequence,
       ).toBe(8);
@@ -239,7 +248,7 @@ describe("timeline grouping context cache", () => {
     });
   });
 
-  it("updates parented boundaries without rereading unchanged request and turn history", () => {
+  it("recomputes parented boundaries when late children change a closed turn", () => {
     withTestThread((testThread) => {
       const beforeChildren = appendRows(testThread, [
         turnStarted("turn-1"),
@@ -248,30 +257,37 @@ describe("timeline grouping context cache", () => {
         turnCompleted("turn-1"),
         userRequest("request-1"),
       ]);
+
       expect(
         expectCachedEqualsCold(testThread, beforeChildren)
           .orderingBoundarySequence,
       ).toBeNull();
-      const statements = captureStatementSql(testThread.db, () => {
-        for (let index = 0; index < 20; index += 1) {
-          const maxSeq = appendRows(testThread, [
-            {
-              ...delta("nested-call-1", "child text"),
-              parentToolCallId: "call-1",
-            },
-          ]);
-          expect(
-            expectCachedEqualsCold(testThread, maxSeq).orderingBoundarySequence,
-          ).toBe(5);
-        }
+      let epoch = getThreadHistoryEpoch(testThread.db, testThread.thread.id);
+
+      for (let index = 0; index < 20; index += 1) {
+        const maxSeq = appendRows(testThread, [
+          {
+            ...delta("nested-call-1", "child text"),
+            parentToolCallId: "call-1",
+          },
+        ]);
+
+        const nextEpoch = getThreadHistoryEpoch(
+          testThread.db,
+          testThread.thread.id,
+        );
+
+        expect(nextEpoch).not.toBe(epoch);
+        epoch = nextEpoch;
         expect(
-          expectCachedEqualsCold(testThread, beforeChildren)
-            .orderingBoundarySequence,
-        ).toBeNull();
-      });
+          expectCachedEqualsCold(testThread, maxSeq).orderingBoundarySequence,
+        ).toBe(5);
+      }
+
       expect(
-        statements.filter((source) => source.includes("'$.clientRequestId'")),
-      ).toEqual([]);
+        expectCachedEqualsCold(testThread, beforeChildren)
+          .orderingBoundarySequence,
+      ).toBeNull();
     });
   });
 
@@ -285,10 +301,12 @@ describe("timeline grouping context cache", () => {
         child("call-1", 1),
         userRequest("request-2"),
       ]);
+
       const warm = expectCachedEqualsCold(
         testThread,
         appendRows(testThread, [child("call-1", 2)]),
       );
+
       expect(warm.orderingBoundarySequence).toBe(6);
 
       const maxSeq = appendRows(testThread, [
@@ -298,9 +316,11 @@ describe("timeline grouping context cache", () => {
         rootToolCall("call-2", "turn-1", "item/started"),
         rootToolCall("call-2", "turn-1", "item/completed"),
       ]);
+
       const statements = captureStatementSql(testThread.db, () => {
         expect(expectCachedEqualsCold(testThread, maxSeq)).toBe(warm);
       });
+
       expect(statements).toEqual([
         expect.stringContaining('"parent_tool_call_id" is not null'),
       ]);
@@ -367,6 +387,7 @@ describe("timeline grouping context cache", () => {
         testThread,
         appendRows(testThread, testCase.seed),
       );
+
       expect(warm.orderingBoundarySequence).toBe(testCase.before);
 
       const maxSeq = appendRows(testThread, [
@@ -374,6 +395,7 @@ describe("timeline grouping context cache", () => {
         ...testCase.appended,
         delta("turn-1", "after"),
       ]);
+
       expect(
         expectCachedEqualsCold(testThread, maxSeq).orderingBoundarySequence,
       ).toBe(testCase.after);
@@ -393,12 +415,14 @@ describe("timeline grouping context cache", () => {
           turnStarted("turn-2"),
         ]),
       );
+
       expect(warm.orderingBoundarySequence).toBe(3);
 
       const reusedMaxSeq = appendRows(testThread, [
         rootToolCall("call-1", "turn-2", "item/started"),
         rootToolCall("call-1", "turn-2", "item/completed"),
       ]);
+
       expect(expectCachedEqualsCold(testThread, reusedMaxSeq)).toBe(warm);
       expectCachedEqualsCold(
         testThread,
@@ -439,16 +463,19 @@ describe("timeline grouping context cache", () => {
           userRequest("request-1"),
           child("call-1", 1),
         ]);
+
         expect(
           expectCachedEqualsCold(testThread, warmMaxSeq)
             .orderingBoundarySequence,
         ).toBe(4);
 
         remove(testThread, warmMaxSeq);
+
         const maxSeq = appendRows(testThread, [
           delta("turn-1", "replacement"),
           delta("turn-1", " text"),
         ]);
+
         expect(
           expectCachedEqualsCold(testThread, maxSeq).orderingBoundarySequence,
         ).toBeNull();
@@ -463,16 +490,20 @@ describe("timeline grouping context cache", () => {
         userRequest("request-1"),
         delta("turn-1", "a"),
       ]);
+
       const latest = expectCachedEqualsCold(
         testThread,
         appendRows(testThread, [delta("turn-1", "b"), delta("turn-1", "c")]),
       );
+
       expect(expectCachedEqualsCold(testThread, olderMaxSeq)).toBe(latest);
 
       expect(latest.orderingBoundarySequence).toBe(2);
+
       const acceptedMaxSeq = appendRows(testThread, [
         accepted("request-1", "turn-1"),
       ]);
+
       expect(
         expectCachedEqualsCold(testThread, acceptedMaxSeq)
           .orderingBoundarySequence,
@@ -488,18 +519,24 @@ describe("timeline grouping context cache", () => {
     let comparisons = 0;
     let changedContexts = 0;
     let prunedRows = 0;
+
     for (let seed = 1; seed <= SEEDS; seed += 1) {
       const random = createRandom(seed);
       withTestThread((testThread) => {
         let previousBoundary: number | null = null;
+
         for (let step = 0; step < 40; step += 1) {
           prunedRows += applyRandomStep(testThread, random, step);
+
           const latest = getLatestThreadSequence(testThread.db, {
             threadId: testThread.thread.id,
           });
+
           const probes = [latest, latest - randomInteger(random, 1, 6), latest];
+
           for (const maxSeq of probes) {
             if (maxSeq < 0) continue;
+
             const sequenceStart =
               random() < 0.8
                 ? (getLatestCompletedThreadContextClearSequence(testThread.db, {
@@ -507,12 +544,15 @@ describe("timeline grouping context cache", () => {
                     threadId: testThread.thread.id,
                   }) ?? 0)
                 : randomInteger(random, 0, Math.max(0, maxSeq));
+
             const cached = expectCachedEqualsCold(
               testThread,
               maxSeq,
               sequenceStart,
             );
+
             comparisons += 1;
+
             if (cached.orderingBoundarySequence !== previousBoundary) {
               changedContexts += 1;
               previousBoundary = cached.orderingBoundarySequence;
@@ -521,6 +561,7 @@ describe("timeline grouping context cache", () => {
         }
       });
     }
+
     expect(comparisons).toBeGreaterThan(SEEDS * 100);
     expect(changedContexts).toBeGreaterThan(SEEDS * 10);
     expect(prunedRows).toBeGreaterThan(0);
@@ -528,15 +569,21 @@ describe("timeline grouping context cache", () => {
 });
 
 const RANDOM_TURN_IDS = ["turn-a", "turn-b", "turn-c"] as const;
+
 const RANDOM_CALL_IDS = ["call-a", "call-b"] as const;
+
 const RANDOM_REQUEST_IDS = ["request-a", "request-b", "request-c"] as const;
 
 function randomRow(random: Random): RowSpec {
   const turnId = pick(random, RANDOM_TURN_IDS);
   const choice = random();
+
   if (choice < 0.26) return delta(turnId, pick(random, ["x", "y\n"]));
+
   if (choice < 0.3) return { data: {}, turnId, type: "turn/diff/updated" };
+
   if (choice < 0.36) return reasoningDelta(turnId);
+
   if (choice < 0.46) {
     return rootToolCall(
       pick(random, RANDOM_CALL_IDS),
@@ -544,20 +591,27 @@ function randomRow(random: Random): RowSpec {
       pick(random, ["item/started", "item/completed"]),
     );
   }
+
   if (choice < 0.56) {
     return child(pick(random, RANDOM_CALL_IDS), randomInteger(random, 1, 99));
   }
+
   if (choice < 0.66) {
     const request = userRequest(pick(random, RANDOM_REQUEST_IDS));
+
     return random() < 0.8
       ? request
       : { ...request, data: { ...request.data, initiator: "agent" } };
   }
+
   if (choice < 0.74) {
     return accepted(pick(random, RANDOM_REQUEST_IDS), turnId);
   }
+
   if (choice < 0.82) return turnStarted(turnId);
+
   if (choice < 0.9) return turnCompleted(turnId);
+
   if (choice < 0.95) {
     return {
       data: { status: "completed" },
@@ -566,6 +620,7 @@ function randomRow(random: Random): RowSpec {
       type: "turn/started",
     };
   }
+
   return {
     data: {
       initiator: "user",
@@ -584,12 +639,14 @@ function applyRandomStep(
   const threadId = testThread.thread.id;
   const latest = getLatestThreadSequence(testThread.db, { threadId });
   const choice = random();
+
   if (step > 3 && choice < 0.08) {
     const cutoffSequence = randomInteger(
       random,
       Math.max(1, latest - 4),
       latest,
     );
+
     testThread.db.transaction((tx) => {
       deleteThreadEventSuffixInTransaction(tx, {
         cutoffSequence,
@@ -597,16 +654,20 @@ function applyRandomStep(
         threadId,
       });
     });
+
     return 0;
   }
+
   if (step > 3 && choice < 0.14) {
     return advanceThreadPruning(testThread.db, { threadId }).removed;
   }
+
   appendRows(
     testThread,
     Array.from({ length: randomInteger(random, 1, 4) }, () =>
       randomRow(random),
     ),
   );
+
   return 0;
 }

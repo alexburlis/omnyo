@@ -2,26 +2,26 @@ import { clearTimelineOrderingContextCache } from "../../src/services/threads/ti
 import fs from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { describe, expect, it } from "vitest";
-import { corpusAvailable, loadCorpusThread } from "@bb/test-helpers";
+import { corpusAvailable, loadCorpusThread } from "@omnyo/test-helpers";
 import {
   getLatestThreadSequence,
   listStoredTimelineWindowEventRows,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   buildThreadTimelineFromEvents,
   compactThreadTimelineSummaryEvents,
   THREAD_TIMELINE_EXCLUDED_EVENT_TYPES,
-} from "@bb/thread-view";
+} from "@omnyo/thread-view";
 import {
   threadTimelineResponseSchema,
   type TimelineRow,
-} from "@bb/server-contract";
-import { prependOlderTimelineRows } from "@bb/client-core";
+} from "@omnyo/server-contract";
+import { prependOlderTimelineRows } from "@omnyo/client-core";
 import {
   prepareCompletedEventOutputData,
   insertPreparedRetainedEventOutput,
   RETAINED_EVENT_OUTPUT_TARGETS,
-} from "@bb/db";
+} from "@omnyo/db";
 import { createTestAppHarness } from "../helpers/test-app.js";
 import { loadCorpusThreadIntoDb } from "./corpus-harness.js";
 import {
@@ -44,12 +44,14 @@ describe.skipIf(!corpusAvailable())(
   () => {
     it("walks canonical content without duplicate or missing rows", async () => {
       const results = [];
+
       for (const threadId of threadIds.filter(
         (id) =>
-          !process.env.BB_TIMELINE_PAGINATION_THREAD ||
-          id === process.env.BB_TIMELINE_PAGINATION_THREAD,
+          !process.env.OMNYO_TIMELINE_PAGINATION_THREAD ||
+          id === process.env.OMNYO_TIMELINE_PAGINATION_THREAD,
       )) {
         const harness = await createTestAppHarness();
+
         try {
           const corpus = loadCorpusThread(threadId);
           const { db, thread } = loadCorpusThreadIntoDb(corpus, harness.db);
@@ -57,6 +59,7 @@ describe.skipIf(!corpusAvailable())(
             const update = db.$client.prepare(
               "UPDATE events SET data = ? WHERE id = ?",
             );
+
             for (const event of corpus.eventRows) {
               const prepared = prepareCompletedEventOutputData({
                 ...event,
@@ -65,6 +68,7 @@ describe.skipIf(!corpusAvailable())(
                     (target) => target.itemKind === event.itemKind,
                   )?.itemKind ?? null,
               });
+
               if (prepared.retainedOutput !== null) {
                 update.run(prepared.data, event.id);
                 insertPreparedRetainedEventOutput(db, {
@@ -75,6 +79,7 @@ describe.skipIf(!corpusAvailable())(
             }
           });
           const canonicalStart = performance.now();
+
           const events = listStoredTimelineWindowEventRows(db, {
             threadId,
             sequenceStart: 0,
@@ -82,6 +87,7 @@ describe.skipIf(!corpusAvailable())(
             excludedTypes: THREAD_TIMELINE_EXCLUDED_EVENT_TYPES,
             excludeDiagnosticEvents: true,
           }).map(toThreadEventWithMeta);
+
           const canonical = buildThreadTimelineFromEvents({
             events: compactThreadTimelineSummaryEvents(events),
             contextWindowEvents: [],
@@ -103,31 +109,38 @@ describe.skipIf(!corpusAvailable())(
               workspaceRoot: null,
             },
           });
+
           const canonicalMs = performance.now() - canonicalStart;
           let rows: TimelineRow[] = [];
           let query = "segmentLimit=20";
           const durations = [];
           let expected: TimelineRow[] = [];
           let responseBytes = 0;
+
           for (let page = 0; page < 2_000; page += 1) {
             const start = performance.now();
+
             const response = await harness.app.request(
               `/api/v1/threads/${threadId}/timeline?${query}`,
             );
+
             if (response.status !== 200)
               throw new Error(
                 `${threadId}: ${response.status} ${await response.text()}`,
               );
             const body = await response.text();
             responseBytes += Buffer.byteLength(body);
+
             const timeline = threadTimelineResponseSchema.parse(
               JSON.parse(body),
             );
+
             rows = prependOlderTimelineRows({
               loadedRows: rows,
               olderRows: timeline.rows,
             });
             durations.push(performance.now() - start);
+
             if (page === 0) {
               expected = previewTimelineResponseOutputs(
                 truncateTimelineResponseOutputs(
@@ -143,7 +156,9 @@ describe.skipIf(!corpusAvailable())(
                 ),
               ).rows;
             }
+
             const cursor = timeline.timelinePage.olderCursor;
+
             if (cursor === null) break;
             query = new URLSearchParams({
               segmentLimit: "20",
@@ -151,13 +166,15 @@ describe.skipIf(!corpusAvailable())(
               beforeAnchorId: cursor.anchorId,
             }).toString();
           }
+
           expected = expected.filter(
             (row, index) =>
               expected.findIndex((other) => isDeepStrictEqual(other, row)) ===
               index,
           );
           const same = isDeepStrictEqual(rows, expected);
-          if (process.env.BB_TIMELINE_PAGINATION_REPORT)
+
+          if (process.env.OMNYO_TIMELINE_PAGINATION_REPORT)
             fs.writeFileSync(
               `/tmp/timeline-diff-${threadId}.json`,
               JSON.stringify({ expected, rows }, null, 2),
@@ -165,15 +182,18 @@ describe.skipIf(!corpusAvailable())(
           const expectedIds = new Set(expected.map((row) => row.id));
           const actualIds = new Set(rows.map((row) => row.id));
           clearTimelineOrderingContextCache(db);
+
           const { profile } = buildThreadTimelineWithProfile(db, thread, {
             completedTurnDisplay: "collapse",
             eventBudget: 1_500,
             includeClearedContextHistory: false,
             includeDiagnosticOperations: false,
+            compactionOfferEnabled: false,
             maxInlineOutputChars: 32_000,
             maxSeq: getLatestThreadSequence(db, { threadId }),
             page: { kind: "latest", segmentLimit: 20 },
           });
+
           results.push({
             profile,
             threadId,
@@ -198,7 +218,9 @@ describe.skipIf(!corpusAvailable())(
           await harness.cleanup();
         }
       }
-      const output = process.env.BB_TIMELINE_PAGINATION_REPORT;
+
+      const output = process.env.OMNYO_TIMELINE_PAGINATION_REPORT;
+
       if (output) fs.writeFileSync(output, JSON.stringify(results, null, 2));
       expect(results.filter((result) => !result.same)).toEqual([]);
     }, 300_000);

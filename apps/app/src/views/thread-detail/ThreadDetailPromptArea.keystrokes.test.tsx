@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 
+import { ActionHistoryProvider } from "@/components/layout/ActionHistoryProvider";
 import type {
   PendingInteraction,
   ThreadQueuedMessage,
   ThreadWithRuntime,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   makeThreadQueuedMessage,
   makeThreadWithRuntime,
-} from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/test-helpers/domain-fixtures";
 import {
   act,
   cleanup,
@@ -35,11 +36,28 @@ import {
 import { LazyQueuedMessagesList } from "@/components/promptbox/banner/LazyQueuedMessagesList";
 import { getPromptDraftAccessor } from "@/hooks/usePromptDraftStorage";
 import { ThreadDetailPromptArea } from "./ThreadDetailPromptArea";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+vi.mock("./PendingThreadChat", () => ({ PendingThreadChat: () => null }));
+
+vi.mock("./LazyThreadDetailView", () => ({
+  LazyThreadDetailView: { preload: vi.fn(async () => {}) },
+}));
 
 const mocks = vi.hoisted(() => ({
+  executionInputSources: {},
+  createThreadMutateAsync: vi.fn(),
+  reserveMessageSend: () => ({
+    run: <T,>(send: () => Promise<T>) => send(),
+    cancel: () => {},
+  }),
   sendMessageMutateAsync: vi.fn(),
   shellProbeRenders: vi.fn(),
   updateQueuedMessageMutateAsync: vi.fn(),
+}));
+
+vi.mock("@/components/thread/ThreadContinueControl", () => ({
+  ThreadContinueControl: () => null,
 }));
 
 vi.mock("@/components/promptbox/FollowUpPromptBox", () => ({
@@ -47,6 +65,7 @@ vi.mock("@/components/promptbox/FollowUpPromptBox", () => ({
     composer,
     pendingInteraction = null,
     stack,
+    queue = null,
   }: {
     composer: {
       message: string;
@@ -55,10 +74,12 @@ vi.mock("@/components/promptbox/FollowUpPromptBox", () => ({
     } | null;
     pendingInteraction?: ReactNode;
     stack: ReactNode;
+    queue?: ReactNode;
   }) => (
     <div data-testid="follow-up-prompt-box">
       <div data-testid="prompt-stack">
         {stack}
+        {queue}
         {pendingInteraction}
       </div>
       {composer ? (
@@ -77,10 +98,6 @@ vi.mock("@/components/promptbox/FollowUpPromptBox", () => ({
       ) : null}
     </div>
   ),
-}));
-
-vi.mock("@/components/promptbox/ThreadEnvironmentSummary", () => ({
-  ThreadEnvironmentSummary: () => <div />,
 }));
 
 vi.mock("@/components/promptbox/banner/QueuedMessagesList", () => ({
@@ -122,10 +139,6 @@ vi.mock("@/components/promptbox/banner/QueuedMessagesList", () => ({
 
 vi.mock("@/components/promptbox/banner/ThreadBackgroundCommandsCard", () => ({
   ThreadBackgroundCommandsCard: () => null,
-}));
-
-vi.mock("@/components/promptbox/banner/ThreadGoalCard", () => ({
-  ThreadGoalCard: () => null,
 }));
 
 vi.mock("@/components/promptbox/banner/ThreadPromptContextBanner", () => ({
@@ -181,12 +194,13 @@ vi.mock("@/hooks/usePromptMentions", () => ({
 vi.mock("@/hooks/useThreadCreationOptions", () => ({
   useThreadCreationOptions: () => ({
     activeModel: null,
-    executionInputSources: {},
+    executionInputSources: mocks.executionInputSources,
     hasMultipleProviders: false,
     isLoadingModels: false,
     modelLoadError: null,
     modelLoadFailed: false,
     modelOptions: [],
+    catalogModelOptions: [],
     moreModelOptions: [],
     permissionMode: "auto",
     permissionModeOptions: [],
@@ -223,12 +237,16 @@ vi.mock("@/hooks/mutations/thread-runtime-mutations", () => {
     mutateAsync: vi.fn(),
     variables: null,
   });
+
   return {
     useCancelThreadPlan: idleMutation,
-    useClearThreadGoal: idleMutation,
-    useCreateThread: idleMutation,
+    useCreateThread: () => ({
+      ...idleMutation(),
+      mutateAsync: mocks.createThreadMutateAsync,
+    }),
     useCreateThreadQueuedMessage: idleMutation,
     useDeleteThreadQueuedMessage: idleMutation,
+    useRestoreThreadQueuedMessage: idleMutation,
     useReorderThreadQueuedMessage: idleMutation,
     useSetThreadQueuedMessageGroupBoundary: idleMutation,
     useSendThreadQueuedMessage: idleMutation,
@@ -241,6 +259,7 @@ vi.mock("@/hooks/mutations/thread-runtime-mutations", () => {
 });
 
 vi.mock("@/hooks/mutations/thread-state-mutations", () => ({
+  useSetThreadAutoCompaction: () => ({ isPending: false, mutate: vi.fn() }),
   useRestoreThreadEnvironment: () => ({
     isPending: false,
     mutate: vi.fn(),
@@ -252,10 +271,6 @@ vi.mock("@/hooks/mutations/thread-state-mutations", () => ({
     variables: null,
   }),
   useUpdateThread: () => ({ isPending: false, mutate: vi.fn() }),
-}));
-
-vi.mock("@/hooks/queries/sidebar-navigation-query", () => ({
-  useProjectDisplayName: () => null,
 }));
 
 vi.mock("@/hooks/queries/thread-default-execution-options-query", () => ({
@@ -276,6 +291,7 @@ const queryMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/queries/thread-queries", () => ({
+  prefetchThreadOpen: vi.fn(async () => {}),
   orderPendingInteractions: (
     interactions: readonly PendingInteraction[] | undefined,
   ) => interactions ?? [],
@@ -339,12 +355,14 @@ function makePendingInteraction(threadId: string): PendingInteraction {
 
 function ShellProbe() {
   mocks.shellProbeRenders(usePluginComposerHost());
+
   return null;
 }
 
 function PublishedHostDraftProbe() {
   const host = usePluginComposerHost();
   const draft = usePluginComposerHostDraft(host);
+
   return <div data-testid="published-host-draft">{draft?.text ?? ""}</div>;
 }
 
@@ -366,46 +384,42 @@ function buildPromptArea({
   pendingInteractions = [],
 }: RenderPromptAreaArgs) {
   return (
-    <PluginComposerHostScopeProvider>
-      <ShellProbe />
-      <PublishedHostDraftProbe />
-      <ThreadDetailPromptArea
-        showGitChanges={true}
-        activeBackgroundAgentCount={0}
-        activeBackgroundCommands={[]}
-        activePromptMode={null}
-        activeWorkflows={[]}
-        canUseGitUi={false}
-        childPendingInteractions={[]}
-        childThreadsSection={null}
-        composerFocusRequestNonce={0}
-        contextBannerMergeBase={null}
-        canRestoreEnvironment={false}
-        environmentGoneStatus={null}
-        goal={null}
-        providerCommands={null}
-        sessionOptions={null}
-        modelFallback={null}
-        isEnvironmentActionPending={false}
-        onChangedFileClick={vi.fn()}
-        parentThreadSection={null}
-        pendingInteractions={pendingInteractions}
-        queuedMessageCount={0}
-        pendingTodos={null}
-        projectId={PROJECT_ID}
-        pullRequest={null}
-        pullRequestMergeMethod="squash"
-        resolveMentionLink={() => null}
-        sendMessage={{
-          isPending: false,
-          mutateAsync: mocks.sendMessageMutateAsync,
-        }}
-        steerActiveThreadOnEnter={false}
-        thread={thread}
-        workspaceChangedFilesSection={null}
-        workspaceStatusPending={false}
-      />
-    </PluginComposerHostScopeProvider>
+    <QueryClientProvider client={testQueryClient}>
+      <ActionHistoryProvider>
+        <PluginComposerHostScopeProvider>
+          <ShellProbe />
+          <PublishedHostDraftProbe />
+          <ThreadDetailPromptArea
+            activeBackgroundAgentCount={0}
+            activeBackgroundCommands={[]}
+            activePromptMode={null}
+            activeWorkflows={[]}
+            childPendingInteractions={[]}
+            childThreadsSection={null}
+            composerFocusRequestNonce={0}
+            canRestoreEnvironment={false}
+            environmentGoneStatus={null}
+            providerCommands={null}
+            sessionOptions={null}
+            modelFallback={null}
+            parentThreadSection={null}
+            pendingInteractions={pendingInteractions}
+            queuedMessageCount={0}
+            pendingTodos={null}
+            projectId={PROJECT_ID}
+            resolveMentionLink={() => null}
+            sendMessage={{
+              isPending: false,
+              reserve: mocks.reserveMessageSend,
+              mutateAsync: mocks.sendMessageMutateAsync,
+            }}
+            steerActiveThreadOnEnter={false}
+            thread={thread}
+            working={null}
+          />
+        </PluginComposerHostScopeProvider>
+      </ActionHistoryProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -420,11 +434,17 @@ function getBottomComposerInput(): HTMLInputElement {
 }
 
 let threadCounter = 0;
+
 let threadId = "";
+
+let testQueryClient: QueryClient;
 
 beforeAll(() => LazyQueuedMessagesList.preload());
 
 beforeEach(() => {
+  testQueryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   threadCounter += 1;
   threadId = `thr_keystrokes_${threadCounter}`;
   queryMocks.queuedMessages = [];
@@ -434,6 +454,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  testQueryClient.clear();
   window.localStorage.clear();
   vi.clearAllMocks();
 });
@@ -447,6 +468,7 @@ describe("ThreadDetailPromptArea published composer host", () => {
     expect(hostAfterMount).not.toBe(null);
 
     const typed = "abcdefghijklmnopqrstu";
+
     for (let index = 1; index <= typed.length; index += 1) {
       fireEvent.change(input, { target: { value: typed.slice(0, index) } });
     }
@@ -460,6 +482,7 @@ describe("ThreadDetailPromptArea published composer host", () => {
   it("submits the draft as typed, read imperatively at event time", async () => {
     renderPromptArea({ thread: makeThread(threadId) });
     const input = getBottomComposerInput();
+
     for (const index of Array.from({ length: 7 }, (_, i) => i + 1)) {
       fireEvent.change(input, { target: { value: "Ship it".slice(0, index) } });
     }
@@ -487,6 +510,7 @@ describe("ThreadDetailPromptArea published composer host", () => {
       projectId: PROJECT_ID,
       threadId,
     });
+
     renderPromptArea({
       thread: makeThread(threadId),
       pendingInteractions: [makePendingInteraction(threadId)],
@@ -537,7 +561,9 @@ describe("ThreadDetailPromptArea published composer host", () => {
     const inlineInput = within(
       screen.getByTestId("inline-queued-message-editor"),
     ).getByRole("textbox", { name: "Composer message" }) as HTMLInputElement;
+
     const typed = "Already queued and refined";
+
     for (
       let index = "Already queued".length + 1;
       index <= typed.length;

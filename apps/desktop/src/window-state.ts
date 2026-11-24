@@ -13,6 +13,7 @@ import {
 } from "./types.js";
 
 const WINDOW_STATE_FILE_NAME = "window-state.json";
+
 const MIN_VISIBLE_AREA = 10_000;
 
 const windowBoundsSchema = z.object({
@@ -112,22 +113,28 @@ function parsePersistedWindowStateFile(
 ): PersistedWindowStateFile | null {
   const parsedJson = JSON.parse(rawState);
   const parsedFile = persistedWindowStateFileSchema.safeParse(parsedJson);
+
   return parsedFile.success ? parsedFile.data : null;
 }
 
 function intersectionArea(args: IntersectingAreaArgs): number {
   const left = Math.max(args.bounds.x, args.workArea.x);
+
   const right = Math.min(
     args.bounds.x + args.bounds.width,
     args.workArea.x + args.workArea.width,
   );
+
   const top = Math.max(args.bounds.y, args.workArea.y);
+
   const bottom = Math.min(
     args.bounds.y + args.bounds.height,
     args.workArea.y + args.workArea.height,
   );
+
   const width = Math.max(0, right - left);
   const height = Math.max(0, bottom - top);
+
   return width * height;
 }
 
@@ -166,12 +173,15 @@ export async function readPersistedWindowState(
   const entries = await readPersistedWindowStateEntries({
     userDataPath: args.userDataPath,
   });
+
   const entry = entries.find(
     (candidate) => candidate.stateKey === args.stateKey,
   );
+
   if (entry === undefined) {
     return null;
   }
+
   return {
     bounds: entry.bounds,
     isFullScreen: entry.isFullScreen,
@@ -185,6 +195,7 @@ export async function readPersistedWindowStateEntries(
   try {
     const rawState = await readFile(windowStatePath(args.userDataPath), "utf8");
     const parsed = parsePersistedWindowStateFile(rawState);
+
     return parsed === null ? [] : parsed.windows;
   } catch {
     return [];
@@ -210,6 +221,7 @@ function browserWindowBounds(
   browserWindow: StatefulBrowserWindow,
 ): WindowBounds {
   const bounds = browserWindow.getBounds();
+
   return {
     height: bounds.height,
     width: bounds.width,
@@ -245,11 +257,13 @@ function removePersistedWindowStateEntry(
   args: RemovePersistedWindowStateEntryArgs,
 ): PersistedWindowStateEntry[] {
   const entries: PersistedWindowStateEntry[] = [];
+
   for (const entry of args.entries) {
     if (entry.stateKey !== args.stateKey) {
       entries.push(entry);
     }
   }
+
   return entries;
 }
 
@@ -259,6 +273,7 @@ export async function removePersistedWindowState(
   const entries = await readPersistedWindowStateEntries({
     userDataPath: args.userDataPath,
   });
+
   await writePersistedWindowStateEntries({
     entries: removePersistedWindowStateEntry({
       entries,
@@ -272,6 +287,7 @@ export async function persistBrowserWindowStates(
   args: PersistBrowserWindowStatesArgs,
 ): Promise<void> {
   const entries: PersistedWindowStateEntry[] = [];
+
   for (const snapshot of args.snapshots) {
     if (!snapshot.browserWindow.isDestroyed()) {
       entries.push(

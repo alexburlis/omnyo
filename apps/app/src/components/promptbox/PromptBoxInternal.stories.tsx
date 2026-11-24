@@ -1,11 +1,19 @@
-import { useState } from "react";
-import type { PromptMentionResource, PromptTextMention } from "@bb/domain";
-import type { UploadedPromptAttachment } from "@bb/server-contract";
+import { QuestionForm } from "@/components/ui/question-form";
+import {
+  MarkdownPreview,
+  MarkdownTablesContainedContext,
+} from "@/components/ui/markdown-preview";
+import { PendingInteractionShell } from "@/components/thread/pending-interactions/PendingInteractionShell";
+import { MobilePendingInteractionProvider } from "@/components/thread/pending-interactions/MobilePendingInteraction";
+import { useState, type ReactNode } from "react";
+import type { PromptMentionResource, PromptTextMention } from "@omnyo/domain";
+import type { UploadedPromptAttachment } from "@omnyo/server-contract";
+import { CompactBeforeSendChip } from "@/components/promptbox/CompactBeforeSendChip";
 import { ExecutionControls } from "@/components/promptbox/ExecutionControls";
 import type {
   PromptMentionSuggestion,
   ProviderCommandSuggestion,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import {
   PromptBoxInternal,
   type HistoryConfig,
@@ -28,6 +36,7 @@ export default {
 const noop = () => {};
 
 const mockExecution = makeExecutionControlsProps();
+
 const promptActions: readonly PromptBoxAction[] = [
   { kind: "skills", text: "/" },
   {
@@ -223,17 +232,22 @@ function suggestionHaystack(suggestion: PromptMentionSuggestion): string {
   if (suggestion.kind === "thread") {
     return `${suggestion.title ?? ""} ${suggestion.threadId}`.toLowerCase();
   }
+
   if (suggestion.kind === "plugin") {
     return `${suggestion.title} ${suggestion.subtitle ?? ""}`.toLowerCase();
   }
+
   return `${suggestion.path} ${suggestion.name}`.toLowerCase();
 }
 
 function filterLiveMentions(query: string): PromptMentionSuggestion[] {
   const needle = query.trim().toLowerCase();
+
   if (needle.length === 0) return [];
+
   const matches = (suggestion: PromptMentionSuggestion) =>
     suggestionHaystack(suggestion).includes(needle);
+
   return [
     ...liveMentionThreads.filter(matches),
     ...liveMentionPaths.filter(matches),
@@ -252,7 +266,9 @@ function commandHaystack(suggestion: ProviderCommandSuggestion): string {
 
 function filterLiveCommands(query: string): ProviderCommandSuggestion[] {
   const needle = query.trim().toLowerCase();
+
   if (needle.length === 0) return liveCommandSuggestions;
+
   return liveCommandSuggestions.filter((suggestion) =>
     commandHaystack(suggestion).includes(needle),
   );
@@ -280,9 +296,11 @@ function storyMention({
   token,
 }: StoryMentionArgs): PromptTextMention {
   const start = text.indexOf(token);
+
   if (start < 0) {
     throw new Error(`Missing story mention token: ${token}`);
   }
+
   return {
     start,
     end: start + token.length,
@@ -308,10 +326,12 @@ function useControlledValue(
 ) {
   const [value, setValue] = useState(initial);
   const [mentionRanges, setMentionRanges] = useState(initialMentions);
+
   const onChange = (nextValue: string, nextMentions: PromptTextMention[]) => {
     setValue(nextValue);
     setMentionRanges(nextMentions);
   };
+
   return { value, mentionRanges, onChange };
 }
 
@@ -326,6 +346,7 @@ function PromptBoxStoryInstance({
     fixture.text,
     fixture.mentions,
   );
+
   return (
     <PromptBoxInternal
       value={value}
@@ -613,6 +634,7 @@ const planGoalCommandPillsFixture = buildPromptPillsFixture(
 
 function DefaultRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
+
   return (
     <PromptBoxInternal
       value={value}
@@ -634,6 +656,7 @@ function WithAttachmentsRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "Take a look at this screenshot and the diff.",
   );
+
   return (
     <PromptBoxInternal
       value={value}
@@ -655,6 +678,7 @@ function WithBlockquoteRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "> First we backfill the new column with a default value at the server\n> boundary, then flip reads once every row is populated.\nWhich phase is safe to deploy on a Friday?",
   );
+
   return (
     <PromptBoxInternal
       value={value}
@@ -675,6 +699,7 @@ function WithBlockquoteRow() {
 function WithMentionsRow() {
   const initialValue =
     "Ask @thread:thr_parent to inspect @apps/app/src/components/promptbox/PromptBoxInternal.tsx.";
+
   const { value, mentionRanges, onChange } = useControlledValue(initialValue, [
     storyMention({
       text: initialValue,
@@ -697,6 +722,7 @@ function WithMentionsRow() {
       },
     }),
   ]);
+
   return (
     <PromptBoxInternal
       value={value}
@@ -717,6 +743,7 @@ function WithMentionsRow() {
 function WithSkillPillRow() {
   const argumentHint = "[branch | staged] [base=<ref>]";
   const initialValue = "/moss-hardening-review ";
+
   const { value, mentionRanges, onChange } = useControlledValue(initialValue, [
     storyMention({
       text: initialValue,
@@ -732,6 +759,7 @@ function WithSkillPillRow() {
       },
     }),
   ]);
+
   return (
     <PromptBoxInternal
       value={value}
@@ -752,8 +780,10 @@ function WithSkillPillRow() {
 function WithLiveSkillsRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
   const [query, setQuery] = useState<string | null>(null);
+
   const suggestions =
     query === null ? [] : filterLiveCommands(query).slice(0, 4);
+
   return (
     <PromptBoxInternal
       value={value}
@@ -786,6 +816,7 @@ function WithLiveSkillsRow() {
 
 function WithPromptActionsRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
+
   return (
     <PromptBoxInternal
       value={value}
@@ -809,6 +840,7 @@ function WithLiveMentionsRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
   const [query, setQuery] = useState<string | null>(null);
   const suggestions = filterLiveMentions(query ?? "");
+
   return (
     <PromptBoxInternal
       value={value}
@@ -837,6 +869,7 @@ function SubmittingRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "Review thread workspace.",
   );
+
   return (
     <PromptBoxInternal
       value={value}
@@ -860,6 +893,7 @@ function SubmittingRow() {
 
 function RunningWithStopRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
+
   return (
     <PromptBoxInternal
       value={value}
@@ -884,6 +918,7 @@ function RunningWithStopRow() {
 
 function RecordingActiveRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
+
   return (
     <PromptBoxInternal
       value={value}
@@ -905,6 +940,7 @@ function RecordingWithExistingDraftRow() {
   const { value, mentionRanges, onChange } = useControlledValue(
     "Keep this existing prompt visible while I dictate the rest of the request.",
   );
+
   return (
     <PromptBoxInternal
       value={value}
@@ -924,6 +960,7 @@ function RecordingWithExistingDraftRow() {
 
 function RecordingProcessingRow() {
   const { value, mentionRanges, onChange } = useControlledValue("");
+
   return (
     <PromptBoxInternal
       value={value}
@@ -1098,13 +1135,18 @@ function CompactVoiceComparisonRow({
   compact = true,
   initialValue = "",
   running = false,
+  attachmentItems = [],
+  submitAccessory = null,
 }: {
   compact?: boolean;
   initialValue?: string;
   running?: boolean;
+  attachmentItems?: UploadedPromptAttachment[];
+  submitAccessory?: ReactNode;
 }) {
   const { value, mentionRanges, onChange } = useControlledValue(initialValue);
   const [state, setState] = useState<PromptVoiceConfig["state"]>("idle");
+
   return (
     <PromptBoxInternal
       value={value}
@@ -1119,9 +1161,10 @@ function CompactVoiceComparisonRow({
       }
       typeahead={makeTypeahead()}
       mentionMenuPlacement="bottom"
-      attachments={makeAttachments()}
+      attachments={makeAttachments({ items: attachmentItems })}
       history={baseHistory}
       submission={makeSubmission({ isRunning: running, onStop: noop })}
+      submitAccessory={submitAccessory}
       voice={{
         ...idleVoice,
         state,
@@ -1149,6 +1192,96 @@ export function CompactVoiceComparison() {
       <StoryRow label="Compact stop">
         <CompactVoiceComparisonRow running />
       </StoryRow>
+      <StoryRow label="Compact long text with attachments">
+        <CompactVoiceComparisonRow
+          initialValue="Take a look at this screenshot and the diff, then explain why the compact composer clips its text"
+          attachmentItems={mockAttachments}
+        />
+      </StoryRow>
+      <StoryRow label="Compact long text with attachments and accessory">
+        <CompactVoiceComparisonRow
+          initialValue="Take a look at this screenshot and the diff, then explain why the compact composer clips its text"
+          attachmentItems={mockAttachments}
+          submitAccessory={
+            <CompactBeforeSendChip
+              compactFirst
+              tokens={331_000}
+              onCompactFirstChange={noop}
+            />
+          }
+        />
+      </StoryRow>
     </StoryCard>
+  );
+}
+
+export function CompactChatReview() {
+  const [result, setResult] = useState("");
+
+  const table = [
+    "| Customer | Subject | Status | Notes |",
+    "| - | - | - | - |",
+    ...Array.from(
+      { length: 10 },
+      (_, index) =>
+        `| Customer ${index + 1} | A detailed subject for review ${index + 1} | Ready | The reply includes a progress update and a clear next step for review. |`,
+    ),
+  ].join("\n");
+
+  return (
+    <MobilePendingInteractionProvider>
+      <div className="mx-auto w-full max-w-[760px] space-y-4 p-4">
+        <MarkdownTablesContainedContext.Provider value>
+          <MarkdownPreview content={table} />
+        </MarkdownTablesContainedContext.Provider>
+        <PendingInteractionShell
+          label="Optional questions"
+          expandedByDefault
+          testId="compact-review"
+        >
+          {() => (
+            <QuestionForm
+              questions={[
+                {
+                  id: "review",
+                  shortLabel: "Reply 1",
+                  prompt: "Review this reply before sending it manually.",
+                  optional: true,
+                  multiSelect: false,
+                  allowFreeText: true,
+                  additiveNotes: true,
+                  options: [
+                    {
+                      value: "approve",
+                      label: "Approve manual send",
+                      description:
+                        "Approve the saved text for you to send manually.",
+                    },
+                    {
+                      value: "revise",
+                      label: "Revise",
+                      description:
+                        "Request changes before approving this reply.",
+                    },
+                    {
+                      value: "hold",
+                      label: "Hold",
+                      description: "Keep the draft unsent and unapproved.",
+                    },
+                  ],
+                },
+              ]}
+              disabled={false}
+              cancelDisabled={false}
+              cancelLabel="Skip"
+              onSubmit={() => setResult("Answer saved")}
+              onCancel={() => setResult("Skipped")}
+            />
+          )}
+        </PendingInteractionShell>
+        {result ? <p role="status">{result}</p> : null}
+        <DefaultRow />
+      </div>
+    </MobilePendingInteractionProvider>
   );
 }

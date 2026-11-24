@@ -1,15 +1,22 @@
 import { Buffer } from "node:buffer";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveDataDirSkillsRootPath } from "@bb/config/skill-storage-paths";
-import type { DiscoveredSkill, SkillRootKind } from "@bb/host-daemon-contract";
+import {
+  resolveDataDirSkillsRootPath,
+  legacyOwnedSkillIdentitySeedV1,
+} from "@omnyo/config/skill-storage-paths";
+import { replaceFile } from "@omnyo/file-transfer";
+import type {
+  DiscoveredSkill,
+  SkillRootKind,
+} from "@omnyo/host-daemon-contract";
 import type {
   SkillProvider,
   SkillScope,
   SkillSummary,
-} from "@bb/server-contract";
-import { editableSkillScopeSchema } from "@bb/server-contract";
+} from "@omnyo/server-contract";
+import { editableSkillScopeSchema } from "@omnyo/server-contract";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
 import { ApiError } from "../../errors.js";
 import type { AppDeps } from "../../types.js";
@@ -20,6 +27,7 @@ import {
 import type { ProjectCommandWorkspace as CommandWorkspace } from "../projects/project-workspace.js";
 import { resolveServerOwnedSkillCatalogEntries } from "./injected-skills.js";
 import { resolveSkillCatalog } from "./skill-catalog.js";
+import { legacyPluginSkillIdentityV1 } from "./legacy-plugin-skill-identity-v1.js";
 import { readRegistrySkillProvenance } from "./registry-skill-provenance.js";
 import { hostPathDirname, resolveSharedSkills } from "./shared-skills.js";
 import {
@@ -32,13 +40,15 @@ import {
 } from "../providers/native-roots.js";
 
 const SKILL_FILE_NAME = "SKILL.md";
+
 const SERVER_SKILL_FILE_LIMIT = 200;
+
 const SERVER_SKILL_CONTENT_LIMIT_BYTES = 25 * 1024 * 1024;
 
 const SKILL_SCOPE_ORDER: readonly SkillScope[] = [
-  "bb-project",
-  "bb-user",
-  "bb-builtin",
+  "omnyo-project",
+  "omnyo-user",
+  "omnyo-builtin",
   "shared-project",
   "shared-user",
   "provider-project",
@@ -68,12 +78,12 @@ export function mapSkillScope(
   filePath: string,
 ): MappedScope {
   switch (rootKind) {
-    case "bb-project":
-      return { scope: "bb-project", provider: null, manageable: true };
-    case "bb-data-dir":
-      return { scope: "bb-user", provider: null, manageable: true };
-    case "bb-builtin":
-      return { scope: "bb-builtin", provider: null, manageable: false };
+    case "omnyo-project":
+      return { scope: "omnyo-project", provider: null, manageable: true };
+    case "omnyo-data-dir":
+      return { scope: "omnyo-user", provider: null, manageable: true };
+    case "omnyo-builtin":
+      return { scope: "omnyo-builtin", provider: null, manageable: false };
     case "provider-project":
       return { scope: "provider-project", provider, manageable: true };
     case "provider-user":
@@ -103,19 +113,25 @@ function compareSkillSummaries(
   const scopeDelta =
     SKILL_SCOPE_ORDER.indexOf(left.scope) -
     SKILL_SCOPE_ORDER.indexOf(right.scope);
+
   if (scopeDelta !== 0) {
     return scopeDelta;
   }
+
   const providerDelta = (left.provider ?? "").localeCompare(
     right.provider ?? "",
   );
+
   if (providerDelta !== 0) {
     return providerDelta;
   }
+
   const nameDelta = left.name.localeCompare(right.name);
+
   if (nameDelta !== 0) {
     return nameDelta;
   }
+
   return left.filePath.localeCompare(right.filePath);
 }
 
@@ -123,12 +139,24 @@ export function assembleSkillList(
   perProvider: readonly ProviderSkillDiscovery[],
 ): SkillSummary[] {
   const byPath = new Map<string, SkillSummary>();
+  const discoveringProviders = new Map<string, Set<SkillProvider>>();
+
   for (const { provider, skills } of perProvider) {
     for (const skill of skills) {
+      const mapped = mapSkillScope(provider, skill.rootKind, skill.filePath);
+
+      if (mapped.provider !== null && mapped.scope.startsWith("provider-")) {
+        const providers =
+          discoveringProviders.get(skill.filePath) ?? new Set<SkillProvider>();
+
+        providers.add(mapped.provider);
+        discoveringProviders.set(skill.filePath, providers);
+      }
+
       if (byPath.has(skill.filePath)) {
         continue;
       }
-      const mapped = mapSkillScope(provider, skill.rootKind, skill.filePath);
+
       byPath.set(skill.filePath, {
         id: skill.id,
         name: skill.name,
@@ -145,7 +173,14 @@ export function assembleSkillList(
       });
     }
   }
-  return [...byPath.values()].sort(compareSkillSummaries);
+
+  return [...byPath.values()]
+    .map((skill) =>
+      (discoveringProviders.get(skill.filePath)?.size ?? 0) > 1
+        ? { ...skill, provider: null }
+        : skill,
+    )
+    .sort(compareSkillSummaries);
 }
 
 function skillId(identitySeed: string, logicalPath: string): string {
@@ -163,17 +198,23 @@ function listServerOwnedSkills(deps: AppDeps): SkillSummary[] {
   })
     .map(({ runtimeSource }): SkillSummary | null => {
       if (runtimeSource.kind !== "tree") return null;
+
       const rootPath = path.join(
         resolveDataDirSkillsRootPath(deps.config.dataDir),
         runtimeSource.name,
       );
+
       const logicalPath = `${runtimeSource.name}/${runtimeSource.entryPath}`;
+
       return {
-        id: skillId("bb-data-dir", logicalPath),
+        id: skillId(
+          legacyOwnedSkillIdentitySeedV1("omnyo-data-dir"),
+          logicalPath,
+        ),
         name: runtimeSource.name,
         description: runtimeSource.description,
         provider: null,
-        scope: "bb-user",
+        scope: "omnyo-user",
         pluginId: null,
         filePath: path.join(rootPath, runtimeSource.entryPath),
         manageable: true,
@@ -184,17 +225,25 @@ function listServerOwnedSkills(deps: AppDeps): SkillSummary[] {
     .sort(compareSkillSummaries);
 }
 
-function listBbPluginSkills(deps: AppDeps): SkillSummary[] {
+function listPluginSkills(deps: AppDeps): SkillSummary[] {
   return resolveSkillCatalog(deps)
     .map(({ provenance, runtimeSource }): SkillSummary | null => {
       if (provenance.kind !== "plugin" || runtimeSource.kind !== "tree") {
         return null;
       }
+
       const rootPath = deps.skillTreeRegistry.resolve(runtimeSource.treeHash);
+
       if (rootPath === undefined) return null;
-      const logicalPath = `${runtimeSource.name}/${runtimeSource.entryPath}`;
+
+      const identity = legacyPluginSkillIdentityV1(
+        provenance.pluginId,
+        runtimeSource.name,
+        runtimeSource.entryPath,
+      );
+
       return {
-        id: skillId(`bb-plugin:${provenance.pluginId}`, logicalPath),
+        id: skillId(identity.identitySeed, identity.logicalPath),
         name: runtimeSource.name,
         description: runtimeSource.description,
         provider: null,
@@ -216,6 +265,7 @@ export async function listProjectSkills(
   const skillProviders = deps.providerRegistry
     .list()
     .filter(providerHasNativeRootSurface);
+
   const [perProvider, sharedSkills] = await Promise.all([
     Promise.all(
       skillProviders.map(
@@ -226,6 +276,7 @@ export async function listProjectSkills(
             hostId: args.workspace.hostId,
             cwd: args.workspace.cwd,
           });
+
           return { provider: registration.info.id, skills: result.skills };
         },
       ),
@@ -235,16 +286,18 @@ export async function listProjectSkills(
       cwd: args.workspace.cwd,
     }),
   ]);
+
   return [
     ...assembleSkillList(perProvider),
     ...sharedSkills.summaries,
     ...listServerOwnedSkills(deps),
-    ...listBbPluginSkills(deps),
+    ...listPluginSkills(deps),
   ].sort(compareSkillSummaries);
 }
 
 function isServerOwnedSkill(deps: AppDeps, skill: SkillSummary): boolean {
   const skillDirectoryPath = path.dirname(skill.filePath);
+
   if (
     skill.scope === "plugin" &&
     skill.provider === null &&
@@ -252,14 +305,16 @@ function isServerOwnedSkill(deps: AppDeps, skill: SkillSummary): boolean {
   ) {
     return true;
   }
-  if (skill.scope === "bb-user") {
+
+  if (skill.scope === "omnyo-user") {
     return (
       path.dirname(skillDirectoryPath) ===
       resolveDataDirSkillsRootPath(deps.config.dataDir)
     );
   }
+
   return (
-    skill.scope === "bb-builtin" &&
+    skill.scope === "omnyo-builtin" &&
     path.dirname(skillDirectoryPath) === deps.config.builtinSkillsRootPath
   );
 }
@@ -272,7 +327,9 @@ function validateServerSkillRelativePath(relativePath: string): string[] {
   ) {
     throw new ApiError(400, "invalid_path", "Path must be relative");
   }
+
   const segments = relativePath.split("/");
+
   if (
     segments.some(
       (segment) =>
@@ -284,11 +341,13 @@ function validateServerSkillRelativePath(relativePath: string): string[] {
   ) {
     throw new ApiError(404, "not_found", "Skill file not found");
   }
+
   return segments;
 }
 
 function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
   const relativePath = path.relative(rootPath, candidatePath);
+
   return (
     relativePath === "" ||
     (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
@@ -302,11 +361,13 @@ async function resolveServerSkillFile(
   const segments = validateServerSkillRelativePath(relativePath);
   const rootPath = path.dirname(skill.filePath);
   const candidatePath = path.join(rootPath, ...segments);
+
   const [realRootPath, realCandidatePath, candidateStat] = await Promise.all([
     fs.realpath(rootPath).catch(() => null),
     fs.realpath(candidatePath).catch(() => null),
     fs.lstat(candidatePath).catch(() => null),
   ]);
+
   if (
     realRootPath === null ||
     realCandidatePath === null ||
@@ -317,6 +378,7 @@ async function resolveServerSkillFile(
   ) {
     throw new ApiError(404, "not_found", "Skill file not found");
   }
+
   return realCandidatePath;
 }
 
@@ -326,21 +388,28 @@ async function listServerSkillFiles(
   const rootPath = path.dirname(skill.filePath);
   const files: string[] = [];
   let truncated = false;
+
   async function walk(currentPath: string): Promise<void> {
     const entries = await fs
       .readdir(currentPath, { withFileTypes: true })
       .catch(() => null);
+
     if (entries === null) return;
     entries.sort((left, right) => left.name.localeCompare(right.name));
+
     for (const entry of entries) {
       if (files.length >= SERVER_SKILL_FILE_LIMIT) {
         truncated = true;
+
         return;
       }
+
       if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
       const entryPath = path.join(currentPath, entry.name);
+
       if (entry.isDirectory()) {
         await walk(entryPath);
+
         if (truncated) return;
       } else if (entry.isFile()) {
         files.push(
@@ -349,12 +418,16 @@ async function listServerSkillFiles(
       }
     }
   }
+
   await walk(rootPath);
   files.sort((left, right) => {
     if (left === SKILL_FILE_NAME) return -1;
+
     if (right === SKILL_FILE_NAME) return 1;
+
     return left.localeCompare(right);
   });
+
   return { files, truncated };
 }
 
@@ -367,9 +440,11 @@ async function resolveProjectSkill(
 ): Promise<SkillSummary> {
   const skills = await listProjectSkills(deps, { workspace: args.workspace });
   const match = skills.find((skill) => skill.id === args.skillId);
+
   if (!match) {
     throw new ApiError(404, "not_found", "Skill not found");
   }
+
   return match;
 }
 
@@ -381,15 +456,19 @@ export async function listProjectSkillFiles(
   },
 ): Promise<{ files: string[]; truncated: boolean }> {
   const skill = await resolveProjectSkill(deps, args);
+
   if (isServerOwnedSkill(deps, skill)) {
     return listServerSkillFiles(skill);
   }
+
   const rootPath = hostPathDirname(skill.filePath);
+
   const result = await callHostRetryableOnlineRpc(deps, {
     hostId: args.workspace.hostId,
     timeoutMs: COMMAND_TIMEOUT_MS,
     command: {
       type: "host.list_files",
+      followRootSymlink: true,
       path: rootPath,
       limit: 200,
       includeHidden: SKILL_PATH_LIST_INCLUDE_HIDDEN,
@@ -397,13 +476,17 @@ export async function listProjectSkillFiles(
       excludeNames: [...DEFAULT_PATH_LIST_EXCLUDE_NAMES],
     },
   });
+
   const files = result.files
     .map((file) => file.path)
     .sort((left, right) => {
       if (left === "SKILL.md") return -1;
+
       if (right === "SKILL.md") return 1;
+
       return left.localeCompare(right);
     });
+
   return { files, truncated: result.truncated };
 }
 
@@ -416,29 +499,37 @@ export async function readProjectSkill(
   },
 ): Promise<{ content: string; revision: string }> {
   const skill = await resolveProjectSkill(deps, args);
+
   if (isServerOwnedSkill(deps, skill)) {
     const filePath = await resolveServerSkillFile(skill, args.path);
     const stat = await fs.stat(filePath);
+
     if (stat.size > SERVER_SKILL_CONTENT_LIMIT_BYTES) {
       throw new ApiError(413, "file_too_large", "Skill file is too large");
     }
+
     const contents = await fs.readFile(filePath);
+
     return {
       content: contents.toString("utf8"),
       revision: createHash("sha256").update(contents).digest("hex"),
     };
   }
+
   const rootPath = hostPathDirname(skill.filePath);
+
   const result = await callHostRetryableOnlineRpc(deps, {
     hostId: args.workspace.hostId,
     timeoutMs: COMMAND_TIMEOUT_MS,
     command: {
       type: "host.read_file_relative",
+      followRootSymlink: true,
       rootPath,
       path: args.path,
       dotfiles: "deny",
     },
   });
+
   return {
     content:
       result.contentEncoding === "utf8"
@@ -459,58 +550,43 @@ export async function writeProjectSkill(
 ): Promise<{ filePath: string; revision: string }> {
   const skill = await resolveProjectSkill(deps, args);
   const editableScope = editableSkillScopeSchema.safeParse(skill.scope);
+
   if (!skill.manageable || !editableScope.success) {
     throw new ApiError(
       403,
       "forbidden",
-      "Bundled skills cannot be edited in bb",
+      "Bundled skills cannot be edited in Omnyo",
     );
   }
-  if (editableScope.data === "bb-project" && args.workspace.cwd === null) {
+
+  if (editableScope.data === "omnyo-project" && args.workspace.cwd === null) {
     throw new ApiError(
       409,
       "invalid_request",
       "No workspace resolved for this project's skills",
     );
   }
-  if (editableScope.data === "bb-user" && isServerOwnedSkill(deps, skill)) {
+
+  if (editableScope.data === "omnyo-user" && isServerOwnedSkill(deps, skill)) {
     const skillFilePath = await resolveServerSkillFile(skill, SKILL_FILE_NAME);
-    const currentContents = await fs.readFile(skillFilePath);
-    const currentRevision = createHash("sha256")
-      .update(currentContents)
-      .digest("hex");
-    if (currentRevision !== args.revision) {
+
+    const result = await replaceFile({
+      contents: Buffer.from(args.content, "utf8"),
+      expectedSha256: args.revision,
+      path: skillFilePath,
+    });
+
+    if (result.outcome === "conflict") {
       throw new ApiError(409, "conflict", "Skill changed before it was saved");
     }
-    const currentMode = (await fs.stat(skillFilePath)).mode & 0o777;
-    const temporaryPath = `${skillFilePath}.bb-write-${randomUUID()}`;
-    try {
-      const handle = await fs.open(temporaryPath, "wx", currentMode);
-      try {
-        await handle.writeFile(args.content, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      const latestContents = await fs.readFile(skillFilePath);
-      const latestRevision = createHash("sha256")
-        .update(latestContents)
-        .digest("hex");
-      if (latestRevision !== args.revision) {
-        throw new ApiError(
-          409,
-          "conflict",
-          "Skill changed before it was saved",
-        );
-      }
-      await fs.rename(temporaryPath, skillFilePath);
-    } finally {
-      await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
-    }
-    const revision = createHash("sha256").update(args.content).digest("hex");
-    return { filePath: skillFilePath, revision };
+
+    return { filePath: skillFilePath, revision: result.sha256 };
   }
-  if (editableScope.data !== "bb-user" && editableScope.data !== "bb-project") {
+
+  if (
+    editableScope.data !== "omnyo-user" &&
+    editableScope.data !== "omnyo-project"
+  ) {
     const result = await callHostOnlineRpcForWork(deps, {
       hostId: args.workspace.hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
@@ -524,11 +600,14 @@ export async function writeProjectSkill(
         expectedSha256: args.revision,
       },
     });
+
     if (result.outcome !== "written") {
       throw new ApiError(409, "conflict", "Skill changed before it was saved");
     }
+
     return { filePath: skill.filePath, revision: result.sha256 };
   }
+
   const result = await callHostOnlineRpcForWork(deps, {
     hostId: args.workspace.hostId,
     timeoutMs: COMMAND_TIMEOUT_MS,
@@ -541,9 +620,11 @@ export async function writeProjectSkill(
       expectedSha256: args.revision,
     },
   });
+
   if (result.outcome === "conflict") {
     throw new ApiError(409, "conflict", "Skill changed before it was saved");
   }
+
   return { filePath: result.filePath, revision: result.sha256 };
 }
 
@@ -556,27 +637,32 @@ export async function deleteProjectSkill(
 ): Promise<string> {
   const skill = await resolveProjectSkill(deps, args);
   const editableScope = editableSkillScopeSchema.safeParse(skill.scope);
+
   if (!skill.manageable || !editableScope.success) {
     throw new ApiError(
       403,
       "forbidden",
-      "Bundled skills cannot be deleted in bb",
+      "Bundled skills cannot be deleted in Omnyo",
     );
   }
-  if (editableScope.data === "bb-project" && args.workspace.cwd === null) {
+
+  if (editableScope.data === "omnyo-project" && args.workspace.cwd === null) {
     throw new ApiError(
       409,
       "invalid_request",
       "No workspace resolved for this project's skills",
     );
   }
-  if (editableScope.data === "bb-user" && isServerOwnedSkill(deps, skill)) {
+
+  if (editableScope.data === "omnyo-user" && isServerOwnedSkill(deps, skill)) {
     const skillsRootPath = resolveDataDirSkillsRootPath(deps.config.dataDir);
     const skillDirectoryPath = path.dirname(skill.filePath);
+
     const [realRootPath, realSkillPath] = await Promise.all([
       fs.realpath(skillsRootPath).catch(() => null),
       fs.realpath(skillDirectoryPath).catch(() => null),
     ]);
+
     if (
       realRootPath === null ||
       realSkillPath === null ||
@@ -585,9 +671,11 @@ export async function deleteProjectSkill(
     ) {
       throw new ApiError(404, "not_found", "Skill not found");
     }
+
     const skillFileStat = await fs
       .lstat(path.join(realSkillPath, SKILL_FILE_NAME))
       .catch(() => null);
+
     if (
       skillFileStat === null ||
       !skillFileStat.isFile() ||
@@ -595,16 +683,24 @@ export async function deleteProjectSkill(
     ) {
       throw new ApiError(404, "not_found", "Skill not found");
     }
+
     await fs.rm(realSkillPath, { recursive: true, force: false });
+
     return realSkillPath;
   }
+
   let daemonName = skill.name;
   let rootPath: string | null = null;
-  if (editableScope.data !== "bb-user" && editableScope.data !== "bb-project") {
+
+  if (
+    editableScope.data !== "omnyo-user" &&
+    editableScope.data !== "omnyo-project"
+  ) {
     const skillDirPath = hostPathDirname(skill.filePath);
     daemonName = hostPathBasename(skillDirPath);
     rootPath = hostPathDirname(skillDirPath);
   }
+
   const result = await callHostOnlineRpcForWork(deps, {
     hostId: args.workspace.hostId,
     timeoutMs: COMMAND_TIMEOUT_MS,
@@ -616,5 +712,6 @@ export async function deleteProjectSkill(
       rootPath,
     },
   });
+
   return result.deletedPath;
 }

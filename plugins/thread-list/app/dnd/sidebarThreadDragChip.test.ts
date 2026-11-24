@@ -37,7 +37,9 @@ function rect(left: number, top: number, width: number, height: number) {
 }
 
 const ROW_RECT = rect(8, 8, 244, 28);
+
 const CHIP_WIDTH = 100;
+
 const CHIP_HEIGHT = 24;
 
 function chipCenterFor(
@@ -64,6 +66,7 @@ function chipCenterFor(
     draggingNodeRect,
     transform: { ...transform, scaleX: 1, scaleY: 1 },
   });
+
   return {
     x: ROW_RECT.left + result.x + draggingNodeRect.width / 2,
     y: ROW_RECT.top + result.y + draggingNodeRect.height / 2,
@@ -97,6 +100,7 @@ describe("sidebar thread drag chip", () => {
     const modifier = createSnapSidebarThreadDragChipToCursor();
     const pointerDown = { x: 130, y: 22 };
     const transform = { x: 25, y: 300 };
+
     const measuredWhileDragging = rect(
       ROW_RECT.left + transform.x,
       ROW_RECT.top + transform.y,
@@ -119,12 +123,14 @@ describe("sidebar thread drag chip", () => {
   it("keeps the origin fixed when the dragged row is remeasured mid-drag", () => {
     const modifier = createSnapSidebarThreadDragChipToCursor();
     const pointerDown = { x: 130, y: 22 };
+
     const draggingNodeRect = rect(
       ROW_RECT.left,
       ROW_RECT.top,
       CHIP_WIDTH,
       CHIP_HEIGHT,
     );
+
     chipCenterFor(modifier, {
       transform: { x: 0, y: 0 },
       draggingNodeRect,
@@ -147,12 +153,14 @@ describe("sidebar thread drag chip", () => {
 
   it("re-anchors on the next drag after the previous one ends", () => {
     const modifier = createSnapSidebarThreadDragChipToCursor();
+
     const draggingNodeRect = rect(
       ROW_RECT.left,
       ROW_RECT.top,
       CHIP_WIDTH,
       CHIP_HEIGHT,
     );
+
     chipCenterFor(modifier, {
       transform: { x: 0, y: 0 },
       draggingNodeRect,
@@ -174,6 +182,7 @@ describe("sidebar thread drag chip", () => {
     const secondRow = rect(8, 200, 244, 28);
     const pointerDown = { x: 140, y: 214 };
     const transform = { x: 12, y: 40 };
+
     const result = modifier({
       ...MODIFIER_CONTEXT,
       activatorEvent: new MouseEvent("mousedown", {
@@ -202,6 +211,7 @@ describe("sidebar thread drag chip", () => {
   it("preserves keyboard positioning without pointer coordinates", () => {
     const modifier = createSnapSidebarThreadDragChipToCursor();
     const transform = { x: 15, y: 30, scaleX: 1, scaleY: 1 };
+
     const result = modifier({
       ...MODIFIER_CONTEXT,
       activatorEvent: new KeyboardEvent("keydown", { key: " " }),

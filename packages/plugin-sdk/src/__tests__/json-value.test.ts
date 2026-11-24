@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
-  BbNavigate,
+  experimental_AppNavigate,
   JsonValue,
   PluginThreadPanelActionContext,
   PluginThreadPanelProps,
@@ -11,7 +11,8 @@ import type { JsonValue as AppJsonValue } from "../app.js";
 type OpenPanelOptions = NonNullable<
   Parameters<PluginThreadPanelActionContext["openPanel"]>[0]
 >;
-type NavigatePanelOptions = Parameters<BbNavigate["openThreadPanel"]>[0];
+
+type NavigatePanelOptions = Parameters<experimental_AppNavigate["openThreadPanel"]>[0];
 
 describe("plugin SDK JsonValue contract", () => {
   it("types parameter writes as JsonValue and persisted reads as JsonValue or null", () => {
@@ -31,17 +32,18 @@ describe("plugin SDK JsonValue contract", () => {
       flags: [true, null],
       nested: { count: 2 },
     };
+
     expectTypeOf(recursive).toMatchTypeOf<JsonValue>();
   });
 
   it("exports JsonValue from both bundled frontend declaration surfaces", async () => {
     const [rootDeclarations, appDeclarations] = await Promise.all([
       readFile(
-        new URL("../../bundled-types/bb-plugin-sdk.d.ts", import.meta.url),
+        new URL("../../bundled-types/omnyo-plugin-sdk.d.ts", import.meta.url),
         "utf8",
       ),
       readFile(
-        new URL("../../bundled-types/bb-plugin-sdk-app.d.ts", import.meta.url),
+        new URL("../../bundled-types/omnyo-plugin-sdk-app.d.ts", import.meta.url),
         "utf8",
       ),
     ]);

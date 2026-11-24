@@ -1,4 +1,4 @@
-import type { ThreadTimelineResponse, TimelineRow } from "@bb/server-contract";
+import type { ThreadTimelineResponse, TimelineRow } from "@omnyo/server-contract";
 
 export function timelineHasAssistantConversation(
   timeline: ThreadTimelineResponse,
@@ -18,24 +18,29 @@ export function formatTimelineRowKindsForDiagnostics(
 
 function flattenTimelineRows(rows: readonly TimelineRow[]): TimelineRow[] {
   const flattened: TimelineRow[] = [];
+
   for (const row of rows) {
     flattened.push(row);
+
     switch (row.kind) {
       case "turn":
         if (row.children) {
           flattened.push(...flattenTimelineRows(row.children));
         }
+
         break;
       case "work":
         if (row.workKind === "delegation" && row.childRows !== null) {
           flattened.push(...flattenTimelineRows(row.childRows));
         }
+
         break;
       case "conversation":
       case "system":
         break;
     }
   }
+
   return flattened;
 }
 

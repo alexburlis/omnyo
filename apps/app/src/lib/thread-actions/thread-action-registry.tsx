@@ -10,22 +10,23 @@ import {
   type ReactNode,
 } from "react";
 import type {
-  BbNavigate,
+  experimental_AppNavigate,
   PluginBoundThreadAction,
-  PluginBrowserBbSdk,
+  experimental_PluginBrowserSdk,
   PluginThreadAction,
   PluginThreadActionEntry,
   PluginThreadActionRegistration,
   PluginThreadActionRegistrationInfo,
   PluginThreadActionTarget,
   PluginThreadActionsOptions,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { PluginContext } from "@/components/plugin/plugin-context";
 import { getActiveThreadPanelOpener } from "@/components/plugin/plugin-thread-panel-navigation";
-import { useBbNavigate, useSdk } from "@/lib/plugin-sdk-hooks";
+import { experimental_useAppNavigate, useSdk } from "@/lib/plugin-sdk-hooks";
 import { usePluginSlots } from "@/lib/plugin-slots";
+import { isPendingChatId } from "@/lib/pending-chat-creations";
 
-export const CORE_THREAD_ACTION_OWNER = "bb--core";
+export const CORE_THREAD_ACTION_OWNER = "omnyo--core";
 
 export interface ThreadActionRegistrationRecord {
   key: string;
@@ -36,8 +37,8 @@ export interface ThreadActionRegistrationRecord {
 
 interface CollectedThreadAction {
   data: unknown;
-  sdk: PluginBrowserBbSdk;
-  navigate: BbNavigate;
+  sdk: experimental_PluginBrowserSdk;
+  navigate: experimental_AppNavigate;
 }
 
 interface ThreadActionRegistrySnapshot {
@@ -55,15 +56,18 @@ let snapshot: ThreadActionRegistrySnapshot = {
   collected: new Map(),
   requestRename: requestRenameUnavailable,
 };
+
 const listeners = new Set<() => void>();
 
 function setSnapshot(next: ThreadActionRegistrySnapshot): void {
   snapshot = next;
+
   for (const listener of listeners) listener();
 }
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };
@@ -75,6 +79,7 @@ function getSnapshot(): ThreadActionRegistrySnapshot {
 
 function publishCollected(key: string, value: CollectedThreadAction): void {
   const current = snapshot.collected.get(key);
+
   if (
     current !== undefined &&
     Object.is(current.data, value.data) &&
@@ -83,6 +88,7 @@ function publishCollected(key: string, value: CollectedThreadAction): void {
   ) {
     return;
   }
+
   const collected = new Map(snapshot.collected);
   collected.set(key, value);
   setSnapshot({ ...snapshot, collected });
@@ -107,15 +113,19 @@ function publishRecords(
   ) {
     return;
   }
+
   setSnapshot({ ...snapshot, records });
 }
 
 const subscribedThreadCounts = new Map<string, number>();
+
 let subscribedThreadIds: readonly string[] = [];
+
 const threadIdListeners = new Set<() => void>();
 
 function subscribeThreadIds(listener: () => void): () => void {
   threadIdListeners.add(listener);
+
   return () => {
     threadIdListeners.delete(listener);
   };
@@ -126,8 +136,11 @@ function getSubscribedThreadIds(): readonly string[] {
 }
 
 const THREAD_IDS_QUIET_MS = 32;
+
 const THREAD_IDS_MAX_WAIT_MS = 100;
+
 let threadIdsFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
 let threadIdsPendingSince: number | null = null;
 
 function cancelThreadIdsFlush(): void {
@@ -139,19 +152,23 @@ function cancelThreadIdsFlush(): void {
 function flushSubscribedThreadIds(): void {
   cancelThreadIdsFlush();
   const next = [...subscribedThreadCounts.keys()].sort();
+
   if (
     next.length === subscribedThreadIds.length &&
     next.every((id, index) => id === subscribedThreadIds[index])
   ) {
     return;
   }
+
   subscribedThreadIds = next;
+
   for (const listener of threadIdListeners) listener();
 }
 
 function scheduleSubscribedThreadIdsFlush(): void {
   const now = performance.now();
   threadIdsPendingSince ??= now;
+
   if (threadIdsFlushTimer !== null) clearTimeout(threadIdsFlushTimer);
   const remaining = THREAD_IDS_MAX_WAIT_MS - (now - threadIdsPendingSince);
   threadIdsFlushTimer = setTimeout(
@@ -166,15 +183,73 @@ function retainThreadId(threadId: string): () => void {
     (subscribedThreadCounts.get(threadId) ?? 0) + 1,
   );
   scheduleSubscribedThreadIdsFlush();
+
   return () => {
     const count = subscribedThreadCounts.get(threadId) ?? 0;
+
     if (count <= 1) subscribedThreadCounts.delete(threadId);
     else subscribedThreadCounts.set(threadId, count - 1);
     scheduleSubscribedThreadIdsFlush();
   };
 }
 
-const ThreadActionSurfaceVisibleContext = createContext(true);
+interface ThreadActionSurface {
+  retain: (threadId: string) => () => void;
+}
+
+interface GatedThreadActionSurface extends ThreadActionSurface {
+  setVisible: (visible: boolean) => void;
+}
+
+function createGatedThreadActionSurface(
+  initiallyVisible: boolean,
+): GatedThreadActionSurface {
+  let visible = initiallyVisible;
+  const counts = new Map<string, number>();
+  const releases = new Map<string, () => void>();
+
+  return {
+    retain: (threadId) => {
+      const count = counts.get(threadId) ?? 0;
+      counts.set(threadId, count + 1);
+
+      if (count === 0 && visible)
+        releases.set(threadId, retainThreadId(threadId));
+
+      return () => {
+        const remaining = (counts.get(threadId) ?? 0) - 1;
+
+        if (remaining > 0) {
+          counts.set(threadId, remaining);
+
+          return;
+        }
+
+        counts.delete(threadId);
+        releases.get(threadId)?.();
+        releases.delete(threadId);
+      };
+    },
+    setVisible: (next) => {
+      if (next === visible) return;
+      visible = next;
+
+      if (next) {
+        for (const threadId of counts.keys())
+          releases.set(threadId, retainThreadId(threadId));
+
+        return;
+      }
+
+      for (const release of releases.values()) release();
+      releases.clear();
+    },
+  };
+}
+
+const ThreadActionSurfaceContext = createContext<ThreadActionSurface>({
+  retain: retainThreadId,
+});
 
 export function ThreadActionSurfaceVisibility({
   visible,
@@ -183,10 +258,13 @@ export function ThreadActionSurfaceVisibility({
   visible: boolean;
   children: ReactNode;
 }) {
+  const [surface] = useState(() => createGatedThreadActionSurface(visible));
+  useEffect(() => surface.setVisible(visible), [surface, visible]);
+
   return (
-    <ThreadActionSurfaceVisibleContext.Provider value={visible}>
+    <ThreadActionSurfaceContext.Provider value={surface}>
       {children}
-    </ThreadActionSurfaceVisibleContext.Provider>
+    </ThreadActionSurfaceContext.Provider>
   );
 }
 
@@ -206,17 +284,24 @@ const reportedFailures = new Set<string>();
 
 function reportFailure(key: string, phase: string, error: unknown): void {
   const id = `${key}:${phase}`;
+
   if (reportedFailures.has(id)) return;
   reportedFailures.add(id);
   console.error(`thread action "${key}" failed in ${phase}`, error);
 }
 
-function useLatestNavigate(navigate: BbNavigate, pluginId: string): BbNavigate {
+function useLatestNavigate(
+  navigate: experimental_AppNavigate,
+  pluginId: string,
+): experimental_AppNavigate {
   const latest = useRef(navigate);
   useLayoutEffect(() => {
     latest.current = navigate;
   });
-  const [stable] = useState<BbNavigate>(() => ({
+
+  const [stable] = useState<experimental_AppNavigate>(() => ({
+    experimental_prefetchThreadOpen: (...args) =>
+      latest.current.experimental_prefetchThreadOpen(...args),
     toThread: (...args) => latest.current.toThread(...args),
     toProject: (...args) => latest.current.toProject(...args),
     toPluginPanel: (...args) => latest.current.toPluginPanel(...args),
@@ -231,6 +316,7 @@ function useLatestNavigate(navigate: BbNavigate, pluginId: string): BbNavigate {
     experimental_openTerminal: (...args) =>
       latest.current.experimental_openTerminal(...args),
   }));
+
   return stable;
 }
 
@@ -243,13 +329,20 @@ function ThreadActionCollector({
     subscribeThreadIds,
     getSubscribedThreadIds,
   );
+
   const data = record.registration.useData?.({ threadIds });
   const sdk = useSdk();
-  const navigate = useLatestNavigate(useBbNavigate(), record.pluginId);
+
+  const navigate = useLatestNavigate(
+    experimental_useAppNavigate(),
+    record.pluginId,
+  );
+
   useLayoutEffect(() => {
     publishCollected(record.key, { data, sdk, navigate });
   }, [data, navigate, record.key, sdk]);
   useLayoutEffect(() => () => dropCollected(record.key), [record.key]);
+
   return null;
 }
 
@@ -277,6 +370,7 @@ function useThreadActionRecords(
   coreRegistrations: readonly PluginThreadActionRegistration<unknown>[],
 ): readonly ThreadActionRegistrationRecord[] {
   const slots = usePluginSlots().threadActions;
+
   const records = [
     ...coreRegistrations.map((registration) => ({
       key: `${CORE_THREAD_ACTION_OWNER}/${registration.id}`,
@@ -291,6 +385,7 @@ function useThreadActionRecords(
       registration: slot,
     })),
   ];
+
   return records
     .map((record, index) => ({ record, index }))
     .sort((left, right) =>
@@ -324,10 +419,12 @@ export function ThreadActionCollectors({
       ...snapshot,
       requestRename: (threadId) => latestRename.current(threadId),
     });
+
     return () => {
       setSnapshot({ ...snapshot, requestRename: requestRenameUnavailable });
     };
   }, []);
+
   return records.map((record) => (
     <PluginContext.Provider key={record.instanceKey} value={record.pluginId}>
       <ThreadActionCollectorBoundary registrationKey={record.key}>
@@ -347,6 +444,7 @@ function containRun(
     });
   } catch (error) {
     console.error(`thread action "${key}" failed`, error);
+
     return Promise.resolve();
   }
 }
@@ -377,7 +475,9 @@ export function compareThreadActionPlacement(
   if (left.group !== right.group) return left.group < right.group ? -1 : 1;
   const leftOrder = left.order ?? Number.POSITIVE_INFINITY;
   const rightOrder = right.order ?? Number.POSITIVE_INFINITY;
+
   if (leftOrder !== rightOrder) return leftOrder < rightOrder ? -1 : 1;
+
   return leftIndex - rightIndex;
 }
 
@@ -388,7 +488,9 @@ function evaluateRecord(
   requestRename: (threadId: string) => void,
 ): PluginThreadActionEntry | null {
   const input = registry.collected.get(record.key);
+
   if (input === undefined) return null;
+
   try {
     const action = record.registration.item({
       thread,
@@ -396,7 +498,9 @@ function evaluateRecord(
       sdk: input.sdk,
       navigate: input.navigate,
     });
+
     if (action === null) return null;
+
     return {
       key: record.key,
       pluginId: record.pluginId,
@@ -405,6 +509,7 @@ function evaluateRecord(
     };
   } catch (error) {
     reportFailure(record.key, "item", error);
+
     return null;
   }
 }
@@ -414,7 +519,9 @@ function evaluateThreadActions(
   thread: PluginThreadActionTarget,
   options: PluginThreadActionsOptions | undefined,
 ): PluginThreadActionEntry[] {
+  if (isPendingChatId(thread.id)) return [];
   const requestRename = options?.requestRename ?? registry.requestRename;
+
   const records =
     options?.keys === undefined
       ? registry.records
@@ -422,10 +529,13 @@ function evaluateThreadActions(
           const record = registry.records.find(
             (candidate) => candidate.key === key,
           );
+
           return record === undefined ? [] : [record];
         });
+
   return records.flatMap((record) => {
     const entry = evaluateRecord(record, thread, registry, requestRename);
+
     return entry === null ? [] : [entry];
   });
 }
@@ -435,11 +545,9 @@ export function useThreadActionEntries(
   options?: PluginThreadActionsOptions,
 ): readonly PluginThreadActionEntry[] {
   const registry = useSyncExternalStore(subscribe, getSnapshot);
-  const surfaceVisible = useContext(ThreadActionSurfaceVisibleContext);
-  useEffect(
-    () => (surfaceVisible ? retainThreadId(thread.id) : undefined),
-    [surfaceVisible, thread.id],
-  );
+  const surface = useContext(ThreadActionSurfaceContext);
+  useEffect(() => surface.retain(thread.id), [surface, thread.id]);
+
   return evaluateThreadActions(registry, thread, options);
 }
 
@@ -449,6 +557,7 @@ export function useDefaultRequestRename(): (threadId: string) => void {
 
 export function useThreadActionRegistrationInfos(): readonly PluginThreadActionRegistrationInfo[] {
   const { records } = useSyncExternalStore(subscribe, getSnapshot);
+
   return records.map((record) => ({
     key: record.key,
     pluginId: record.pluginId,

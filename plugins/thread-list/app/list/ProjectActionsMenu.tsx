@@ -5,7 +5,10 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { useIsCompactViewport } from "@/components/ui/hooks/use-compact-viewport";
-import { ActionMenuItem, ActionMenuSeparator } from "@/components/ui/action-menu-items";
+import {
+  ActionMenuItem,
+  ActionMenuSeparator,
+} from "@/components/ui/action-menu-items";
 import { CompactLongPressMenu } from "@/components/ui/compact-long-press-menu";
 import type { SidebarProject } from "../model/use-sidebar-data.js";
 
@@ -42,7 +45,11 @@ export function ProjectActionsMenuItems({
 }: ProjectActionsMenuItemsProps) {
   return (
     <>
-      <ActionMenuItem surface={surface} icon="Settings" href={project.settingsHref}>
+      <ActionMenuItem
+        surface={surface}
+        icon="Settings"
+        href={project.settingsHref}
+      >
         Project settings
       </ActionMenuItem>
       <ActionMenuItem surface={surface} icon="Edit" onSelect={onRename}>
@@ -66,9 +73,11 @@ export function ProjectActionsContextMenu(
   props: ProjectActionsContextMenuProps,
 ) {
   const isCompactViewport = useIsCompactViewport();
+
   if (isCompactViewport) {
     return <ProjectActionsCompactLongPressMenu {...props} />;
   }
+
   return <ProjectActionsDesktopContextMenu {...props} />;
 }
 

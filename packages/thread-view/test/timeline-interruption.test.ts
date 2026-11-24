@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadEventRow } from "@bb/domain";
-import type { TimelineRow } from "@bb/server-contract";
+import type { ThreadEventRow } from "@omnyo/domain";
+import type { TimelineRow } from "@omnyo/server-contract";
 import {
   createTimelineEventFactory,
   flattenTimelineRows,
@@ -8,6 +8,7 @@ import {
 } from "./timeline-test-harness.js";
 
 type TimelineWorkRow = Extract<TimelineRow, { kind: "work" }>;
+
 type TimelineSystemRow = Extract<TimelineRow, { kind: "system" }>;
 
 function getOnlyWorkRowByCallId(
@@ -18,11 +19,14 @@ function getOnlyWorkRowByCallId(
     (row): row is TimelineWorkRow =>
       row.kind === "work" && "callId" in row && row.callId === callId,
   );
+
   expect(matches).toHaveLength(1);
   const row = matches[0];
+
   if (!row) {
     throw new Error(`Expected work row for ${callId}`);
   }
+
   return row;
 }
 
@@ -43,13 +47,71 @@ function renderIdleTimeline(events: ThreadEventRow[]) {
 }
 
 describe("timeline interruption projection", () => {
+  it("renders a completed reply after Stop without accepting late deltas", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+    const stoppedEvents = [
+      event.turnStarted({ createdAt: 0 }),
+      event.systemThreadInterrupted({ createdAt: 1_000 }),
+      event.assistantDelta({
+        itemId: "reply-after-stop",
+        delta: "Discard this unfinished text.",
+        createdAt: 2_000,
+      }),
+    ];
+
+    expect(
+      renderIdleTimeline(stoppedEvents).messages.filter(
+        (message) => message.kind === "assistant-text",
+      ),
+    ).toEqual([]);
+
+    const timeline = renderIdleTimeline([
+      ...stoppedEvents,
+      event.assistantCompleted({
+        itemId: "reply-after-stop",
+        text: "Persisted reply.",
+        createdAt: 3_000,
+      }),
+      event.assistantDelta({
+        itemId: "another-late-reply",
+        delta: "This must not reopen the stopped turn.",
+        createdAt: 4_000,
+      }),
+      event.assistantCompleted({
+        itemId: "reply-after-stop",
+        text: "Duplicate completion must not replace the reply.",
+        createdAt: 5_000,
+      }),
+      event.turnCompleted({ status: "interrupted", createdAt: 6_000 }),
+    ]);
+
+    expect(
+      timeline.messages.filter((message) => message.kind === "assistant-text"),
+    ).toEqual([
+      expect.objectContaining({
+        text: "Persisted reply.",
+        status: "completed",
+      }),
+    ]);
+    expect(flattenTimelineRows(timeline.rows)).toContainEqual(
+      expect.objectContaining({
+        kind: "conversation",
+        role: "assistant",
+        text: "Persisted reply.",
+      }),
+    );
+  });
+
   it("keeps post-turn automatic compaction pending while the thread is idle", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const events = [
       event.turnStarted({ createdAt: 0 }),
       event.turnCompleted({ createdAt: 1_000 }),
       event.contextCompactionStarted({ createdAt: 2_000 }),
     ];
+
     const timeline = renderIdleTimeline(events);
 
     expect(timeline.messages).toContainEqual(
@@ -66,6 +128,7 @@ describe("timeline interruption projection", () => {
       ...events,
       event.threadCompacted({ createdAt: 3_000 }),
     ]);
+
     expect(completedTimeline.messages).toContainEqual(
       expect.objectContaining({
         kind: "operation",
@@ -79,6 +142,7 @@ describe("timeline interruption projection", () => {
 
   it("settles a skipped manual compaction from the provider warning", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted({ createdAt: 0 }),
       event.contextCompactionStarted({ createdAt: 1_000 }),
@@ -111,6 +175,7 @@ describe("timeline interruption projection", () => {
 
   it("keeps a pending compaction and renders an unrelated warning in the same turn", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderTimelineFixture({
       events: [
         event.turnStarted({ createdAt: 0 }),
@@ -148,6 +213,7 @@ describe("timeline interruption projection", () => {
 
   it("interrupts post-turn compaction when the thread is explicitly interrupted", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted({ createdAt: 0 }),
       event.turnCompleted({ createdAt: 1_000 }),
@@ -168,6 +234,7 @@ describe("timeline interruption projection", () => {
 
   it("does not apply an old thread interruption to a later compaction", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted({ turnId: "turn-a", createdAt: 0 }),
       event.turnCompleted({
@@ -197,6 +264,7 @@ describe("timeline interruption projection", () => {
 
   it("uses interrupted turn completion time for pending command and tool rows", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted({ createdAt: 0 }),
       event.commandStarted({
@@ -235,6 +303,7 @@ describe("timeline interruption projection", () => {
 
   it("uses system interruption time for pending command and web rows", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted({ createdAt: 0 }),
       event.commandStarted({
@@ -269,6 +338,7 @@ describe("timeline interruption projection", () => {
 
   it("omits an interruption operation row when the preceding error already explains the failed turn", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted({ createdAt: 0 }),
       event.commandStarted({

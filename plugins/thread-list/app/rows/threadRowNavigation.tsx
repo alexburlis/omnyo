@@ -6,9 +6,13 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import { useBbNavigate } from "@get-bb/plugin-sdk/app";
+import { experimental_useAppNavigate } from "@omnyo/plugin-sdk/app";
 
 const OpenThreadInSplitContext = createContext<
+  ((threadId: string) => void) | null
+>(null);
+
+const PrefetchThreadOpenContext = createContext<
   ((threadId: string) => void) | null
 >(null);
 
@@ -17,27 +21,49 @@ export function ThreadRowNavigationProvider({
 }: {
   children: ReactNode;
 }) {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const latest = useRef(navigate);
   useLayoutEffect(() => {
     latest.current = navigate;
   });
+
   const openInSplit = useCallback((threadId: string) => {
     latest.current.toThread(threadId, { split: true });
   }, []);
+
+  const prefetchThreadOpen = useCallback((threadId: string) => {
+    latest.current.experimental_prefetchThreadOpen(threadId);
+  }, []);
+
   return (
     <OpenThreadInSplitContext.Provider value={openInSplit}>
-      {children}
+      <PrefetchThreadOpenContext.Provider value={prefetchThreadOpen}>
+        {children}
+      </PrefetchThreadOpenContext.Provider>
     </OpenThreadInSplitContext.Provider>
   );
 }
 
 export function useOpenThreadInSplit(): (threadId: string) => void {
   const openInSplit = useContext(OpenThreadInSplitContext);
+
   if (openInSplit === null) {
     throw new Error(
       "useOpenThreadInSplit must be used within a <ThreadRowNavigationProvider>",
     );
   }
+
   return openInSplit;
+}
+
+export function usePrefetchThreadOpen(): (threadId: string) => void {
+  const prefetchThreadOpen = useContext(PrefetchThreadOpenContext);
+
+  if (prefetchThreadOpen === null) {
+    throw new Error(
+      "usePrefetchThreadOpen must be used within a <ThreadRowNavigationProvider>",
+    );
+  }
+
+  return prefetchThreadOpen;
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { splitStreamingMarkdown } from "./streaming-markdown-split";
+import {
+  createStreamingMarkdownSplitter,
+  repairStreamingMarkdownTail,
+  splitStreamingMarkdown,
+} from "./streaming-markdown-split";
+import { STREAMING_MARKDOWN_FIXTURES } from "@/test/fixtures/streaming-markdown";
 
 function expectSplit(text: string, settled: string) {
   const split = splitStreamingMarkdown(text);
@@ -46,16 +51,20 @@ describe("splitStreamingMarkdown", () => {
       "\n",
       "Done.\n",
     ];
+
     let text = "";
     let previousSettledLength = 0;
+
     for (const chunk of chunks) {
       text += chunk;
       const split = splitStreamingMarkdown(text);
       const settledLength = split?.settled.length ?? 0;
       expect(settledLength).toBeGreaterThanOrEqual(previousSettledLength);
+
       if (split !== null) {
         expect(text.startsWith(split.settled)).toBe(true);
       }
+
       previousSettledLength = settledLength;
     }
   });
@@ -110,5 +119,62 @@ describe("splitStreamingMarkdown", () => {
       "Intro text.\n\n## Section\n\nBody paragraph.\n\nMore",
       "Intro text.\n\n## Section\n\n",
     );
+  });
+});
+
+describe("retained streaming Markdown boundaries", () => {
+  it.each(STREAMING_MARKDOWN_FIXTURES)(
+    "matches the full scanner across $name appends and replacements",
+    ({ text }) => {
+      const split = createStreamingMarkdownSplitter();
+
+      for (let end = 1; end < text.length; end += 37) {
+        const content = text.slice(0, end);
+        expect(split(content)).toEqual(splitStreamingMarkdown(content));
+      }
+
+      for (const content of [
+        text,
+        text,
+        text.slice(0, 20),
+        "Replacement.\n\nNew text.\n",
+        `${text}\n\nFinal.\n`,
+      ]) {
+        expect(split(content)).toEqual(splitStreamingMarkdown(content));
+      }
+    },
+  );
+
+  it("keeps independent message histories separate", () => {
+    const first = createStreamingMarkdownSplitter();
+    const second = createStreamingMarkdownSplitter();
+    expect(first("First.\n\nMore.\n")).toEqual({
+      settled: "First.\n\n",
+      tail: "More.\n",
+    });
+    expect(second("```ts\n\nStill code.\n")).toBeNull();
+    expect(first("First.\n\nMore.\nappended")).toEqual({
+      settled: "First.\n\n",
+      tail: "More.\nappended",
+    });
+  });
+});
+
+describe("streaming tail repair", () => {
+  it.each([
+    ["Plain text", "Plain text"],
+    ["Plain text ", "Plain text"],
+    ["Plain text  ", "Plain text  "],
+    ["Plain text\n", "Plain text\n"],
+    ["Unicode café 東京 ", "Unicode café 東京"],
+    ["**bold", "**bold**"],
+    ["_italic", "_italic_"],
+    ["`code", "`code`"],
+    ["~~strike", "~~strike~~"],
+    ["[label", "label"],
+    ["[label](https://example", "label"],
+    ["::widget{text=1} ", "::widget{text=1} "],
+  ])("repairs %j without changing completed prose", (input, expected) => {
+    expect(repairStreamingMarkdownTail(input)).toBe(expected);
   });
 });

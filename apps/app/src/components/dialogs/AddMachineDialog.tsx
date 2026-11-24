@@ -4,16 +4,22 @@ import { useSystemConfig } from "@/hooks/queries/system-queries";
 import { machineServerAccessReady } from "@/components/machines/machine-server-access";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
-import type { Host } from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
+import type { Host } from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
+import { DelayedLoading } from "@omnyo/shared-ui/delayed-loading";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/shared-ui/dialog";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  SegmentedControl,
+  type SegmentedControlOption,
+} from "@omnyo/shared-ui/segmented-control";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
 import { useHosts } from "@/hooks/queries/host-queries";
 import { sdk } from "@/lib/sdk";
@@ -32,10 +38,12 @@ export function AddMachineDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const hosts = useHosts();
+
   const close = (next: boolean) => {
     if (!next) void hosts.refetch();
     onOpenChange(next);
   };
+
   return (
     <Dialog open={open} onOpenChange={close} modal={false}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
@@ -53,6 +61,7 @@ export function AddMachineContent({
   const config = useSystemConfig();
   const hosts = useHosts();
   const accessReady = machineServerAccessReady(config.data?.serverAccess);
+
   if (!accessReady) {
     return (
       <MachineAccessGate
@@ -68,9 +77,12 @@ export function AddMachineContent({
       </MachineAccessGate>
     );
   }
+
   const serverPrimaryHostId = config.data?.primaryHostId ?? null;
+
   const serverMachineName =
     hosts.data?.find((host) => host.id === serverPrimaryHostId)?.name ?? null;
+
   return (
     <ManualMachineSetup
       serverMachineName={serverMachineName}
@@ -81,8 +93,8 @@ export function AddMachineContent({
 
 function serverMachineNotice(serverMachineName: string | null): string {
   return serverMachineName === null
-    ? "The new machine will connect to your bb server. Keep the server machine on so the new machine can keep working."
-    : `The new machine will connect to the bb server on ${serverMachineName}. Keep that computer on so the new machine can keep working.`;
+    ? "The new machine will connect to your Omnyo server. Keep the server machine on so the new machine can keep working."
+    : `The new machine will connect to the Omnyo server on ${serverMachineName}. Keep that computer on so the new machine can keep working.`;
 }
 
 export type MachineAccessGateState =
@@ -101,12 +113,17 @@ export function MachineAccessGate({
     return (
       <>
         <DialogTitle className="sr-only">Add a machine</DialogTitle>
-        <p role="status" className="text-sm text-subtle-foreground">
-          Checking machine access…
-        </p>
+        <div className="min-h-5">
+          <DelayedLoading>
+            <p role="status" className="text-sm text-subtle-foreground">
+              Checking machine access…
+            </p>
+          </DelayedLoading>
+        </div>
       </>
     );
   }
+
   if (state.status === "failed") {
     return (
       <>
@@ -124,6 +141,7 @@ export function MachineAccessGate({
       </>
     );
   }
+
   return (
     <>
       <DialogHeader>
@@ -142,7 +160,20 @@ export interface EnrollmentCommand {
   value: string;
   windowsValue: string;
   expiresAt: number;
+  shortCommand: ShortEnrollmentCommand | null;
   unavailable: boolean;
+}
+
+export interface ShortEnrollmentCommand {
+  code: string;
+  command: string;
+  windowsCommand: string;
+  pageUrl?: string;
+  expiresAt: number;
+}
+
+function typedPageUrl(pageUrl: string): string {
+  return pageUrl.replace(/^https:\/\//u, "");
 }
 
 export function ManualMachineSetup({
@@ -163,17 +194,21 @@ export function ManualMachineSetup({
       lifecycleGeneration.current += 1;
       createController.current?.abort();
       createKey.current = null;
+
       for (const hostId of pendingHostIds.current) {
         void sdk.hosts.delete({ hostId }).catch(() => undefined);
       }
+
       pendingHostIds.current.clear();
     },
     [],
   );
+
   const createMachine = useMutation({
     meta: { showErrorToast: false },
     mutationFn: async (options: { replaceLaunch: boolean }) => {
       const generation = lifecycleGeneration.current;
+
       if (options.replaceLaunch) {
         createController.current?.abort();
         createController.current = null;
@@ -182,10 +217,12 @@ export function ManualMachineSetup({
         await Promise.all(ids.map((hostId) => sdk.hosts.delete({ hostId })));
         createKey.current = null;
       }
+
       setCommand(null);
       const controller = new AbortController();
       createController.current = controller;
       createKey.current ??= nanoid();
+
       try {
         let host = await sdk.hosts.experimental_create({
           key: createKey.current,
@@ -194,28 +231,35 @@ export function ManualMachineSetup({
           wait: false,
           signal: controller.signal,
         });
+
         pendingHostIds.current.add(host.id);
+
         if (generation !== lifecycleGeneration.current) {
           pendingHostIds.current.delete(host.id);
           await sdk.hosts.delete({ hostId: host.id });
           throw new Error("Machine setup closed");
         }
+
         let enrollment: Awaited<
           ReturnType<typeof sdk.hosts.experimental_getEnrollmentCommand>
         > = null;
+
         while (host.lifecycle.phase === "creating") {
           controller.signal.throwIfAborted();
+
           const currentEnrollment =
             await sdk.hosts.experimental_getEnrollmentCommand({
               hostId: host.id,
               signal: controller.signal,
             });
+
           if (currentEnrollment !== null) {
             enrollment = currentEnrollment;
             setCommand({
               value: currentEnrollment.command,
               windowsValue: currentEnrollment.windowsCommand,
               expiresAt: currentEnrollment.expiresAt,
+              shortCommand: currentEnrollment.shortCommand ?? null,
               unavailable: false,
             });
           } else if (enrollment !== null) {
@@ -227,10 +271,12 @@ export function ManualMachineSetup({
                     value: usedEnrollment.command,
                     windowsValue: usedEnrollment.windowsCommand,
                     expiresAt: usedEnrollment.expiresAt,
+                    shortCommand: usedEnrollment.shortCommand ?? null,
                     unavailable: true,
                   },
             );
           }
+
           await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
           controller.signal.throwIfAborted();
           host = await sdk.hosts.get({
@@ -238,11 +284,14 @@ export function ManualMachineSetup({
             signal: controller.signal,
           });
         }
+
         createKey.current = null;
         pendingHostIds.current.delete(host.id);
+
         if (host.lifecycle.phase !== "active") {
           throw new Error(host.lifecycle.message ?? "Machine setup cancelled");
         }
+
         return host;
       } finally {
         if (createController.current === controller)
@@ -254,6 +303,7 @@ export function ManualMachineSetup({
       setConnectedHost(host);
     },
   });
+
   const start = createMachine.mutate;
   useEffect(() => {
     start({ replaceLaunch: false });
@@ -306,7 +356,7 @@ export function ManualMachineSetupView({
           }
         >
           {errorMessage ??
-            "Run this command on the machine you want to add. It installs bb and keeps the machine connected to this server."}
+            "Run this command on the machine you want to add. It installs Omnyo and keeps the machine connected to this server."}
         </DialogDescription>
       </DialogHeader>
       {errorMessage === null ? null : (
@@ -322,12 +372,18 @@ export function ManualMachineSetupView({
           command={command.value}
           windowsCommand={command.windowsValue}
           expiresAt={command.expiresAt}
+          shortCommand={command.shortCommand}
           unavailable={command.unavailable}
           onRegenerate={onRegenerate}
         />
       )}
       {errorMessage === null ? (
-        <div className="flex items-center gap-2.5 rounded-md bg-muted/40 px-3 py-2.5">
+        <div
+          className={cn(
+            "flex items-center gap-2.5 rounded-md px-3 py-2.5",
+            connectedHost === null ? "bg-muted/40" : "bg-success/10",
+          )}
+        >
           {connectedHost === null ? (
             <>
               <Icon
@@ -380,73 +436,107 @@ function formatCountdown(remainingMs: number): string {
   const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
+
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 type MachineLaunchPlatform = "posix" | "windows";
 
-const MACHINE_LAUNCH_PLATFORMS: readonly {
-  id: MachineLaunchPlatform;
-  label: string;
-}[] = [
-  { id: "posix", label: "macOS or Linux" },
-  { id: "windows", label: "Windows" },
-];
+const MACHINE_LAUNCH_PLATFORMS: readonly SegmentedControlOption<MachineLaunchPlatform>[] =
+  [
+    { value: "posix", label: "macOS or Linux" },
+    { value: "windows", label: "Windows" },
+  ];
+
+const EXPIRY_WARNING_MS = 60_000;
 
 export function MachineLaunchCommand({
   command,
   windowsCommand,
   expiresAt,
+  shortCommand = null,
   unavailable = false,
   onRegenerate,
 }: {
   command: string;
   windowsCommand: string;
   expiresAt: number;
+  shortCommand?: ShortEnrollmentCommand | null;
   unavailable?: boolean;
   onRegenerate: () => void;
 }) {
   const [platform, setPlatform] = useState<MachineLaunchPlatform>("posix");
-  const shownCommand = platform === "windows" ? windowsCommand : command;
+  const fullCommand = platform === "windows" ? windowsCommand : command;
+
+  const shownCommand =
+    shortCommand === null
+      ? fullCommand
+      : platform === "windows"
+        ? shortCommand.windowsCommand
+        : shortCommand.command;
+
   const { copied, copy } = useClipboardCopy({ text: shownCommand });
-  const [remaining, setRemaining] = useState(() => expiresAt - Date.now());
+  const fullCopy = useClipboardCopy({ text: fullCommand });
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(
-      () => setRemaining(expiresAt - Date.now()),
-      1_000,
-    );
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+
     return () => clearInterval(timer);
-  }, [expiresAt]);
+  }, []);
+  const remaining = (shortCommand?.expiresAt ?? expiresAt) - now;
   const expired = remaining <= 0;
+  const fullExpired = expiresAt - now <= 0;
+
   return (
     <div className="overflow-hidden rounded-md border border-border bg-muted/30">
-      <div
-        role="group"
-        aria-label="Machine operating system"
-        className="flex items-center gap-1 border-b border-border px-2 py-1.5"
-      >
-        {MACHINE_LAUNCH_PLATFORMS.map((option) => (
-          <Button
-            key={option.id}
-            type="button"
-            size="sm"
-            variant={platform === option.id ? "secondary" : "ghost"}
-            aria-pressed={platform === option.id}
-            className="h-6 px-2 text-xs"
-            onClick={() => setPlatform(option.id)}
-          >
-            {option.label}
-          </Button>
-        ))}
+      <div className="flex items-center gap-2 border-b border-border px-2 py-1.5">
+        <SegmentedControl
+          ariaLabel="Machine operating system"
+          size="sm"
+          value={platform}
+          onValueChange={setPlatform}
+          options={MACHINE_LAUNCH_PLATFORMS}
+        />
         {platform === "windows" ? (
           <span className="ml-auto text-xs text-subtle-foreground">
             Run in PowerShell
           </span>
         ) : null}
       </div>
-      <pre className="overflow-x-auto whitespace-pre-wrap break-all p-3 font-mono text-xs text-foreground">
-        {shownCommand}
-      </pre>
+      {shortCommand === null ? (
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all p-3 font-mono text-xs text-foreground">
+          {shownCommand}
+        </pre>
+      ) : (
+        <>
+          <div className="flex flex-col items-center gap-1 border-b border-border px-3 py-3">
+            <span className="text-xs text-subtle-foreground">Setup code</span>
+            <span
+              aria-label="Setup code"
+              className="select-all font-mono text-xl font-semibold tracking-widest text-foreground"
+            >
+              {shortCommand.code}
+            </span>
+          </div>
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all p-3 font-mono text-sm text-foreground">
+            {shownCommand}
+          </pre>
+          {shortCommand.pageUrl === undefined ||
+          expired ||
+          unavailable ? null : (
+            <p className="px-3 pb-3 text-xs text-subtle-foreground">
+              Or open{" "}
+              <span
+                aria-label="Setup page"
+                className="select-all font-mono text-foreground"
+              >
+                {typedPageUrl(shortCommand.pageUrl)}
+              </span>{" "}
+              in a browser on that machine and copy the command there.
+            </p>
+          )}
+        </>
+      )}
       <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2">
         {unavailable ? (
           <span role="status" className="text-xs text-subtle-foreground">
@@ -470,21 +560,40 @@ export function MachineLaunchCommand({
         ) : (
           <span
             role="status"
-            className="text-xs tabular-nums text-subtle-foreground"
+            className={cn(
+              "text-xs tabular-nums",
+              remaining <= EXPIRY_WARNING_MS
+                ? "font-medium text-warning-text"
+                : "text-subtle-foreground",
+            )}
           >
             Command expires in {formatCountdown(remaining)}
           </span>
         )}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="ml-auto h-7 px-2.5 text-xs"
-          disabled={expired || unavailable}
-          onClick={() => void copy()}
-        >
-          {copied ? "Copied" : "Copy"}
-        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          {shortCommand === null ? null : (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              disabled={fullExpired || unavailable}
+              onClick={() => void fullCopy.copy()}
+            >
+              {fullCopy.copied ? "Copied full command" : "Copy full command"}
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 gap-1.5 px-2.5 text-xs"
+            disabled={expired || unavailable}
+            onClick={() => void copy()}
+          >
+            <Icon name={copied ? "Check" : "Copy"} aria-hidden />
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </div>
       </div>
     </div>
   );

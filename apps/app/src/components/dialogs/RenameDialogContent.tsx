@@ -1,14 +1,14 @@
-import { capitalize } from "@bb/thread-view";
+import { capitalize } from "@omnyo/thread-view";
 import { useId, useState, type FormEvent, type RefObject } from "react";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Input } from "@bb/shared-ui/input";
-import { useNameValidation } from "@bb/shared-ui/rename-dialog";
+} from "@omnyo/shared-ui/dialog";
+import { Input } from "@omnyo/shared-ui/input";
+import { useNameValidation } from "@omnyo/shared-ui/rename-dialog";
 
 interface RenameDialogContentProps {
   entityLabel: string;
@@ -31,15 +31,18 @@ export function RenameDialogContent({
 }: RenameDialogContentProps) {
   const inputId = useId();
   const [nextName, setNextName] = useState(initialName);
+
   const { validationMessage, validate, clearMessage } = useNameValidation({
     emptyMessage: `${capitalize(entityLabel)} name cannot be empty.`,
   });
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
     if (pending) return;
 
     const trimmedName = validate(nextName);
+
     if (trimmedName === null) return;
 
     onRename(trimmedName);

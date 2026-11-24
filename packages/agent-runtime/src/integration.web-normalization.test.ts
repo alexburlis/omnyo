@@ -3,7 +3,7 @@ import type {
   ThreadEvent,
   ThreadEventWebFetchItem,
   ThreadEventWebSearchItem,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { promptTextInput } from "./test/prompt-input.js";
 import {
   cleanup,
@@ -17,8 +17,11 @@ import {
 } from "./test/runtime-integration-harness.js";
 
 const webQuery = "IANA example domains";
+
 const webUrl = "https://example.com";
-const codexOpenPageUrl = "https://example.com/?bb-web-normalization=open-page";
+
+const codexOpenPageUrl =
+  "https://example.com/?omnyo-web-normalization=open-page";
 
 type ThreadItemLifecycleEvent = Extract<
   ThreadEvent,
@@ -107,6 +110,7 @@ describe("web normalization integration", () => {
         providerId,
         preset: "full",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -131,6 +135,7 @@ describe("web normalization integration", () => {
 
       let threadEvents = getEventsForThread(ctx.events, threadId);
       let webSearchEvents = threadEvents.filter(isWebSearchLifecycleEvent);
+
       if (
         !webSearchEvents.some((event) => matchesExpectedWebQuery(event.item))
       ) {
@@ -150,6 +155,7 @@ describe("web normalization integration", () => {
         threadEvents = getEventsForThread(ctx.events, threadId);
         webSearchEvents = threadEvents.filter(isWebSearchLifecycleEvent);
       }
+
       const providerUnhandledEvents = threadEvents.filter(
         (event) =>
           event.type === "provider/unhandled" &&
@@ -179,6 +185,7 @@ describe("web normalization integration", () => {
         providerId,
         preset: "full",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -203,12 +210,14 @@ describe("web normalization integration", () => {
 
       const threadEvents = getEventsForThread(ctx.events, threadId);
       const webSearchEvents = threadEvents.filter(isWebSearchLifecycleEvent);
+
       const completedWebFetch = threadEvents.find(
         (event): event is WebFetchLifecycleEvent =>
           isWebFetchLifecycleEvent(event) &&
           event.type === "item/completed" &&
           matchesExpectedWebUrl(event.item),
       );
+
       const providerUnhandledEvents = threadEvents.filter(
         (event) =>
           event.type === "provider/unhandled" &&
@@ -242,6 +251,7 @@ describe("web normalization integration", () => {
         providerId,
         preset: "full",
       });
+
       await ctx.runtime.startThread({
         environmentId: "env-1",
         threadId,
@@ -265,12 +275,14 @@ describe("web normalization integration", () => {
       });
 
       const threadEvents = getEventsForThread(ctx.events, threadId);
+
       const completedWebSearch = threadEvents.find(
         (event): event is WebSearchLifecycleEvent =>
           isWebSearchLifecycleEvent(event) &&
           event.type === "item/completed" &&
           matchesExpectedWebQuery(event.item),
       );
+
       const completedWebFetch = threadEvents.find(
         (event): event is WebFetchLifecycleEvent =>
           isWebFetchLifecycleEvent(event) &&

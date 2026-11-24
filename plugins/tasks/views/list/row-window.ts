@@ -8,8 +8,11 @@ import {
 import type { RefObject } from "react";
 
 export const ROW_WINDOW_THRESHOLD = 120;
+
 const ROW_WINDOW_OVERSCAN_PX = 800;
+
 const ROW_WINDOW_FALLBACK_ROWS = 60;
+
 const ROW_WINDOW_SCROLL_STEP_PX = 200;
 
 export interface RowWindowInput {
@@ -31,8 +34,10 @@ export function rowWindows({
 }: RowWindowInput): RowRange[] {
   const ranges: RowRange[] = [];
   let top = 0;
+
   for (const count of counts) {
     top += headerHeight;
+
     if (count < ROW_WINDOW_THRESHOLD) {
       ranges.push([0, count]);
     } else if (viewportHeight <= 0 || rowHeight <= 0) {
@@ -44,8 +49,10 @@ export function rowWindows({
       const end = Math.min(count, Math.max(start, Math.ceil(to / rowHeight)));
       ranges.push([start, end]);
     }
+
     top += count * rowHeight;
   }
+
   return ranges;
 }
 
@@ -66,15 +73,19 @@ export function useRowWindowViewport(
     rowHeight: 0,
     headerHeight: 0,
   });
+
   const frame = useRef<number | null>(null);
 
   const read = useCallback(() => {
     const element = scrollRef.current;
+
     if (element === null) return;
     const row = element.querySelector<HTMLElement>("[data-task-key]");
+
     const header = element.querySelector<HTMLElement>(
       "[data-status-group-header]",
     );
+
     setViewport((current) => {
       const next: Viewport = {
         scrollTop:
@@ -84,6 +95,7 @@ export function useRowWindowViewport(
         rowHeight: row?.offsetHeight ?? current.rowHeight,
         headerHeight: header?.offsetHeight ?? current.headerHeight,
       };
+
       return next.scrollTop === current.scrollTop &&
         next.height === current.height &&
         next.rowHeight === current.rowHeight &&
@@ -99,7 +111,9 @@ export function useRowWindowViewport(
 
   useEffect(() => {
     const element = scrollRef.current;
+
     if (element === null) return;
+
     const onScroll = () => {
       if (frame.current !== null) return;
       frame.current = requestAnimationFrame(() => {
@@ -107,13 +121,18 @@ export function useRowWindowViewport(
         read();
       });
     };
+
     element.addEventListener("scroll", onScroll, { passive: true });
+
     const observer =
       typeof ResizeObserver === "function" ? new ResizeObserver(read) : null;
+
     observer?.observe(element);
+
     return () => {
       element.removeEventListener("scroll", onScroll);
       observer?.disconnect();
+
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       frame.current = null;
     };

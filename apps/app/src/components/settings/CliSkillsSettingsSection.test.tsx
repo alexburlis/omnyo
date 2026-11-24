@@ -12,10 +12,14 @@ afterEach(() => {
 });
 
 function installButton(): HTMLButtonElement {
-  const button = screen.getByRole("button", { name: "Install bb CLI skills" });
+  const button = screen.getByRole("button", {
+    name: "Install Omnyo CLI skills",
+  });
+
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error("Install control is not a button");
   }
+
   return button;
 }
 
@@ -31,6 +35,11 @@ describe("CliSkillsSettingsSectionContent", () => {
     );
 
     expect(installButton().disabled).toBe(false);
+    expect(
+      screen.getByText(
+        "Install them into ~/.agents/skills and ~/.claude/skills so agents outside Omnyo can use the Omnyo CLI.",
+      ),
+    ).toBeDefined();
   });
 
   it("explains why the install is unavailable with no connected machine", () => {

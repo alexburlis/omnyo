@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export interface ClaudeSkillPluginRoot {
   id: string;
@@ -25,6 +25,12 @@ interface ClaudePluginManifest {
   skills: string;
 }
 
+export function directoryLinkType(
+  platform: NodeJS.Platform = process.platform,
+): "dir" | "junction" {
+  return platform === "win32" ? "junction" : "dir";
+}
+
 const MANIFEST_SCHEMA = "https://anthropic.com/claude-code/plugin.schema.json";
 
 function pluginDirectoryName(root: ClaudeSkillPluginRoot): string {
@@ -34,7 +40,7 @@ function pluginDirectoryName(root: ClaudeSkillPluginRoot): string {
     .slice(0, 16);
 }
 
-export const CLAUDE_SKILL_PLUGIN_NAME = "bb-global-skills";
+export const CLAUDE_SKILL_PLUGIN_NAME = "omnyo-global-skills";
 
 function pluginNameFor(
   root: ClaudeSkillPluginRoot,
@@ -42,9 +48,11 @@ function pluginNameFor(
 ): string {
   const directory = pluginDirectoryName(root);
   const owner = takenBy.get(CLAUDE_SKILL_PLUGIN_NAME);
+
   if (owner === undefined || owner === directory) {
     return CLAUDE_SKILL_PLUGIN_NAME;
   }
+
   return `${CLAUDE_SKILL_PLUGIN_NAME}-${directory.slice(0, 8)}`;
 }
 
@@ -59,14 +67,16 @@ export function ensureClaudeSkillPlugin(args: {
   const name = pluginNameFor(args.root, takenNames);
   takenNames.set(name, directory);
   mkdirSync(join(pluginPath, ".claude-plugin"), { recursive: true });
+
   const manifest: ClaudePluginManifest = {
     $schema: MANIFEST_SCHEMA,
     name,
     version: "0.1.0",
-    description: `Skills injected by bb (${args.root.id}).`,
-    author: { name: "bb" },
+    description: `Skills injected by Omnyo (${args.root.id}).`,
+    author: { name: "Omnyo" },
     skills: "./skills",
   };
+
   writeFileSync(
     join(pluginPath, ".claude-plugin", "plugin.json"),
     `${JSON.stringify(manifest, null, 2)}\n`,
@@ -74,21 +84,25 @@ export function ensureClaudeSkillPlugin(args: {
   );
   const skillsLink = join(pluginPath, "skills");
   let current: string | null = null;
+
   try {
     current = lstatSync(skillsLink).isSymbolicLink()
-      ? readlinkSync(skillsLink)
+      ? resolve(dirname(skillsLink), readlinkSync(skillsLink))
       : "";
   } catch {
     current = null;
   }
-  if (current !== args.root.path) {
+
+  if (current !== resolve(args.root.path)) {
     rmSync(skillsLink, { recursive: true, force: true });
-    symlinkSync(args.root.path, skillsLink, "dir");
+    symlinkSync(args.root.path, skillsLink, directoryLinkType());
   }
+
   return pluginPath;
 }
 
 export function createClaudeSkillPluginsRoot(baseDir = tmpdir()): string {
   mkdirSync(baseDir, { recursive: true });
-  return mkdtempSync(join(baseDir, "bb-claude-skill-plugins-"));
+
+  return mkdtempSync(join(baseDir, "omnyo-claude-skill-plugins-"));
 }

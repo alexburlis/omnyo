@@ -1,10 +1,11 @@
-import type { InstalledPluginRow, PluginGitSelector } from "@bb/db";
+import type { InstalledPluginRow, PluginGitSelector } from "@omnyo/db";
 
 export function gitSelectorForRow(
   row: InstalledPluginRow,
 ): PluginGitSelector | null {
   const hasAnyRef =
     row.sourceGitRequestedRef !== null || row.sourceGitRefKind !== null;
+
   const hasAnyRange =
     row.sourceGitRange !== null ||
     row.sourceGitTagPrefix !== null ||
@@ -16,8 +17,10 @@ export function gitSelectorForRow(
         `plugin "${row.id}" has git selector columns on a ${row.sourceKind} row`,
       );
     }
+
     return null;
   }
+
   if (
     row.sourceGitRequestedRef !== null &&
     row.sourceGitRefKind !== null &&
@@ -29,6 +32,7 @@ export function gitSelectorForRow(
       refKind: row.sourceGitRefKind,
     };
   }
+
   if (
     row.sourceGitRange !== null &&
     row.sourceGitTagPrefix !== null &&
@@ -42,6 +46,7 @@ export function gitSelectorForRow(
       resolvedTag: row.sourceGitResolvedTag,
     };
   }
+
   if (
     row.sourceGitRequestedRef !== null &&
     row.sourceGitRefKind === null &&
@@ -49,13 +54,10 @@ export function gitSelectorForRow(
   ) {
     return null;
   }
+
   throw new Error(`plugin "${row.id}" has corrupt normalized git selector`);
 }
 
 export function gitRefNameForRow(row: InstalledPluginRow): string | null {
   return row.sourceGitResolvedTag ?? row.sourceGitRequestedRef;
-}
-
-export function gitSelectorRefName(selector: PluginGitSelector): string {
-  return selector.kind === "ref" ? selector.ref : selector.resolvedTag;
 }

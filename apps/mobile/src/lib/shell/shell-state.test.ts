@@ -9,7 +9,9 @@ import {
 } from "./shell-state";
 
 const READY: ShellLoadPhase = { kind: "ready" };
+
 const IDLE: SessionState = { status: "idle" };
+
 const AUTHENTICATED: SessionState = {
   status: "authenticated",
   expiresAt: 1_000,
@@ -44,7 +46,7 @@ describe("resolveShellScreenState", () => {
       }).kind,
     ).toBe("loading");
   });
-  it("keeps a bb connect profile off the page until its session starts", () => {
+  it("keeps an Omnyo connect profile off the page until its session starts", () => {
     expect(
       resolveShellScreenState({
         ...BASE,
@@ -74,11 +76,12 @@ describe("resolveShellScreenState", () => {
       session: { status: "auth-required", detail: "credential revoked" },
       load: READY,
     });
+
     expect(state).toEqual({
       kind: "error",
       title: "Could not sign in",
       detail:
-        "bb connect could not renew this phone’s sign-in. Pair again to reconnect.",
+        "Omnyo connect could not renew this phone’s sign-in. Pair again to reconnect.",
       action: "re-pair",
     });
   });
@@ -90,35 +93,102 @@ describe("resolveShellScreenState", () => {
       session: { status: "error", detail: "offline", retryAt: 0 },
       load: READY,
     });
+
     expect(state.kind).toBe("error");
+
     if (state.kind !== "error") throw new Error("unreachable");
     expect(state.action).toBe("retry");
   });
 
-  it("reports a failed load with a retry", () => {
+  it("keeps an unclassified load failure available for manual retry", () => {
     const state = resolveShellScreenState({
       ...BASE,
       hasProfile: true,
       session: AUTHENTICATED,
-      load: { kind: "failed", detail: "The network connection was lost." },
+      load: {
+        kind: "failed",
+        detail: "The page could not load.",
+        code: null,
+      },
     });
+
     expect(state).toEqual({
       kind: "error",
       title: "The page did not load",
-      detail: "The network connection was lost.",
+      detail: "The page could not load.",
       action: "retry",
     });
   });
 
-  it("shows the server's own error page instead of replacing it", () => {
+  it.each([500, 502, 503, 504, 599])(
+    "reconnects automatically when the server returns %s",
+    (status) => {
+      expect(
+        resolveShellScreenState({
+          ...BASE,
+          hasProfile: true,
+          session: AUTHENTICATED,
+          load: { kind: "http-error", status },
+        }),
+      ).toEqual({ kind: "reconnecting", message: "Reconnecting to server" });
+    },
+  );
+
+  it.each([-1001, -1003, -1004, -1005, -1006, -1009])(
+    "reconnects automatically after transient network error %s",
+    (code) => {
+      expect(
+        resolveShellScreenState({
+          ...BASE,
+          hasProfile: true,
+          session: IDLE,
+          load: { kind: "failed", detail: "The connection was lost.", code },
+        }).kind,
+      ).toBe("reconnecting");
+    },
+  );
+
+  it.each([-1002, -1200, -1201, -1202, -1203, -1204, -1205, -1206])(
+    "keeps permanent network error %s visible for manual recovery",
+    (code) => {
+      expect(
+        resolveShellScreenState({
+          ...BASE,
+          hasProfile: true,
+          session: IDLE,
+          load: {
+            kind: "failed",
+            detail: "The connection was rejected.",
+            code,
+          },
+        }).kind,
+      ).toBe("error");
+    },
+  );
+
+  it.each([400, 401, 403, 404])(
+    "keeps the server's own %s response for manual or authentication recovery",
+    (status) => {
+      expect(
+        resolveShellScreenState({
+          ...BASE,
+          hasProfile: true,
+          session: AUTHENTICATED,
+          load: { kind: "http-error", status },
+        }),
+      ).toEqual({ kind: "webview", serverErrorStatus: status });
+    },
+  );
+
+  it("does not reconnect a failed page when its profile is no longer active", () => {
     expect(
       resolveShellScreenState({
         ...BASE,
-        hasProfile: true,
-        session: AUTHENTICATED,
+        hasProfile: false,
+        session: IDLE,
         load: { kind: "http-error", status: 503 },
       }),
-    ).toEqual({ kind: "webview", serverErrorStatus: 503 });
+    ).toEqual({ kind: "loading", message: "Opening server" });
   });
 
   it("keeps the WebView mounted while a load is in flight", () => {
@@ -166,9 +236,15 @@ describe("revealsShellFailure", () => {
     expect(revealsShellFailure(page(500), true)).toBe(true);
     expect(revealsShellFailure(page(401), false)).toBe(true);
     expect(revealsShellFailure(page(null), true)).toBe(false);
+    expect(
+      revealsShellFailure(
+        { kind: "reconnecting", message: "Reconnecting to server" },
+        false,
+      ),
+    ).toBe(true);
   });
 
-  it("keeps a bb connect page the gate rejected covered while the session is repaired", () => {
+  it("keeps an Omnyo connect page the gate rejected covered while the session is repaired", () => {
     expect(revealsShellFailure(page(401), true)).toBe(false);
     expect(revealsShellFailure(page(403), true)).toBe(false);
   });
@@ -236,6 +312,7 @@ describe("shouldReloadForSession", () => {
           }),
         ).toBe(true);
       }
+
       expect(
         shouldReloadForSession(AUTHENTICATED, AUTHENTICATED, 999, {
           kind: "http-error",

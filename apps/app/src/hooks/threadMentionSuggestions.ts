@@ -1,10 +1,10 @@
-import { fuzzyMatchText } from "@bb/fuzzy-match";
-import { PERSONAL_PROJECT_ID, type Thread } from "@bb/domain";
+import { fuzzyMatchText } from "@omnyo/fuzzy-match";
+import { PERSONAL_PROJECT_ID, type Thread } from "@omnyo/domain";
 import type {
   PromptMentionSuggestion,
   ThreadMentionRelation,
-} from "@bb/client-core";
-import { compareCodepoint, mentionIdentityMatchRank } from "@bb/client-core";
+} from "@omnyo/client-core";
+import { compareCodepoint, mentionIdentityMatchRank } from "@omnyo/client-core";
 
 type ThreadMentionSuggestion = Extract<
   PromptMentionSuggestion,
@@ -47,16 +47,19 @@ const THREAD_RELATION_RANK = {
 
 function getThreadDisplayTitle(thread: Thread): string | undefined {
   const title = thread.title?.trim();
+
   if (title) {
     return title;
   }
 
   const titleFallback = thread.titleFallback?.trim();
+
   return titleFallback || undefined;
 }
 
 function getThreadSearchText(thread: Thread): string {
   const title = getThreadDisplayTitle(thread);
+
   return title ?? thread.id;
 }
 
@@ -89,6 +92,7 @@ function toThreadMentionSuggestion(
   const projectName = shouldShowProjectName(thread, context)
     ? projectNamesById.get(thread.projectId)
     : undefined;
+
   return {
     kind: "thread",
     path: `thread:${thread.id}`,
@@ -127,24 +131,28 @@ function getThreadMentionRelation(
   ) {
     return "parent";
   }
+
   if (
     context.currentThreadId !== undefined &&
     thread.parentThreadId === context.currentThreadId
   ) {
     return "child";
   }
+
   if (
     context.currentParentThreadId !== null &&
     thread.parentThreadId === context.currentParentThreadId
   ) {
     return "same-parent";
   }
+
   if (
     context.currentEnvironmentId !== null &&
     thread.environmentId === context.currentEnvironmentId
   ) {
     return "same-environment";
   }
+
   return null;
 }
 
@@ -156,18 +164,22 @@ function getThreadRelationRank(
   if (relation === "parent" || relation === "child") {
     return THREAD_RELATION_RANK.directParentOrChild;
   }
+
   if (relation === "same-parent") {
     return THREAD_RELATION_RANK.sameParent;
   }
+
   if (relation === "same-environment") {
     return THREAD_RELATION_RANK.sameEnvironment;
   }
+
   if (
     context.currentProjectId !== undefined &&
     thread.projectId === context.currentProjectId
   ) {
     return THREAD_RELATION_RANK.sameProject;
   }
+
   return THREAD_RELATION_RANK.unrelated;
 }
 
@@ -178,15 +190,19 @@ function compareRankedThreadMentionSuggestions(
   if (left.matchRank !== right.matchRank) {
     return left.matchRank - right.matchRank;
   }
+
   if (left.relationRank !== right.relationRank) {
     return left.relationRank - right.relationRank;
   }
+
   if (left.score !== right.score) {
     return right.score - left.score;
   }
+
   if (left.activityAt !== right.activityAt) {
     return right.activityAt - left.activityAt;
   }
+
   return compareCodepoint(left.suggestion.threadId, right.suggestion.threadId);
 }
 
@@ -194,6 +210,7 @@ export function buildThreadMentionSuggestions(
   args: BuildThreadMentionSuggestionsArgs,
 ): ThreadMentionSuggestion[] {
   const trimmedQuery = args.query.trim();
+
   if (trimmedQuery.length === 0 || args.limit <= 0) {
     return [];
   }
@@ -201,15 +218,19 @@ export function buildThreadMentionSuggestions(
   const candidateThreads = args.threads.filter((thread) =>
     canSuggestThread(thread, args),
   );
+
   const context = getThreadMentionContext(args);
+
   const matches = fuzzyMatchText({
     items: candidateThreads,
     query: trimmedQuery,
     getText: getThreadSearchText,
     getAliases: (thread) => {
       const title = getThreadDisplayTitle(thread);
+
       const resolvedTitle =
         title === undefined ? undefined : args.resolveTitle(title);
+
       return resolvedTitle === undefined || resolvedTitle === title
         ? [thread.id]
         : [thread.id, resolvedTitle];
@@ -224,6 +245,7 @@ export function buildThreadMentionSuggestions(
         context,
         args.projectNamesById,
       );
+
       return {
         suggestion,
         matchRank: mentionIdentityMatchRank(

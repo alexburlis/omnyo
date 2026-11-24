@@ -18,6 +18,7 @@ function expectKeyBetween({
   if (previousKey !== null) {
     expect(key > previousKey).toBe(true);
   }
+
   if (nextKey !== null) {
     expect(key < nextKey).toBe(true);
   }
@@ -33,16 +34,19 @@ describe("order keys", () => {
       previousKey: null,
       nextKey: null,
     });
+
     const secondKey = createOrderKeyAfter({ previousKey: firstKey });
 
     const frontKey = createOrderKeyBetween({
       previousKey: null,
       nextKey: firstKey,
     });
+
     const middleKey = createOrderKeyBetween({
       previousKey: firstKey,
       nextKey: secondKey,
     });
+
     const endKey = createOrderKeyAfter({ previousKey: secondKey });
 
     expectKeyBetween({
@@ -60,13 +64,14 @@ describe("order keys", () => {
       previousKey: secondKey,
       nextKey: null,
     });
-    expect(sortKeys([frontKey, firstKey, middleKey, secondKey, endKey])).toEqual(
-      [frontKey, firstKey, middleKey, secondKey, endKey],
-    );
+    expect(
+      sortKeys([frontKey, firstKey, middleKey, secondKey, endKey]),
+    ).toEqual([frontKey, firstKey, middleKey, secondKey, endKey]);
   });
 
   it("creates dense front-insertion keys before zero-padded migrated keys", () => {
     const migratedFirstKey = "0000000000000001";
+
     const frontKey = createOrderKeyBetween({
       previousKey: null,
       nextKey: migratedFirstKey,

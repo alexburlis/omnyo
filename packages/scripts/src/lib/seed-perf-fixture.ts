@@ -8,7 +8,7 @@ import {
   threadSearchSegments,
   threads,
   type DbConnection,
-} from "@bb/db";
+} from "@omnyo/db";
 
 export interface SeedPerfFixtureOptions {
   hostId: string;
@@ -30,15 +30,23 @@ export interface SeedPerfFixtureResult {
 }
 
 type ProjectInsert = typeof projects.$inferInsert;
+
 type EnvironmentInsert = typeof environments.$inferInsert;
+
 type ThreadInsert = typeof threads.$inferInsert;
+
 type EventInsert = typeof events.$inferInsert;
+
 type SearchSegmentInsert = typeof threadSearchSegments.$inferInsert;
+
 type PromptHistoryInsert = typeof promptHistoryEntries.$inferInsert;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
 const FIXTURE_AGE_DAYS = 120;
+
 const ID_ALPHABET = "23456789abcdefghijkmnpqrstuvwxyz";
+
 const EVENT_INSERT_CHUNK_SIZE = 500;
 
 const PROJECT_NAMES = [
@@ -160,24 +168,32 @@ interface Rng {
 
 function createRng(seed: number): Rng {
   let state = seed >>> 0;
+
   const next = (): number => {
     state = (state + 0x6d2b79f5) >>> 0;
     let t = state;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+
   const int = (minInclusive: number, maxInclusive: number): number =>
     minInclusive + Math.floor(next() * (maxInclusive - minInclusive + 1));
+
   const pick = <T>(values: readonly T[]): T =>
     values[int(0, values.length - 1)];
+
   const hex = (length: number): string => {
     let value = "";
+
     for (let index = 0; index < length; index += 1) {
       value += "0123456789abcdef"[int(0, 15)];
     }
+
     return value;
   };
+
   return {
     next,
     int,
@@ -185,9 +201,11 @@ function createRng(seed: number): Rng {
     chance: (probability: number) => next() < probability,
     idSuffix: () => {
       let value = "";
+
       for (let index = 0; index < 10; index += 1) {
         value += ID_ALPHABET[int(0, ID_ALPHABET.length - 1)];
       }
+
       return value;
     },
     hex,
@@ -197,52 +215,64 @@ function createRng(seed: number): Rng {
 
 function sentences(rng: Rng, pool: readonly string[], count: number): string {
   const parts: string[] = [];
+
   for (let index = 0; index < count; index += 1) {
     parts.push(rng.pick(pool));
   }
+
   return parts.join(" ");
 }
 
 function makeOutput(rng: Rng, lineCount: number): string {
   const lines: string[] = [];
+
   for (let index = 0; index < lineCount; index += 1) {
     lines.push(rng.pick(OUTPUT_LINES));
   }
+
   return lines.join("\n");
 }
 
 function makeDiff(rng: Rng, hunkCount: number): string {
   const path = rng.pick(FILE_PATHS);
+
   const lines: string[] = [
     `diff --git a/${path} b/${path}`,
     `index ${rng.hex(12)}..${rng.hex(12)} 100644`,
     `--- a/${path}`,
     `+++ b/${path}`,
   ];
+
   for (let hunk = 0; hunk < hunkCount; hunk += 1) {
     const start = rng.int(10, 400);
     lines.push(`@@ -${start},7 +${start},9 @@`);
+
     for (let index = 0; index < rng.int(4, 12); index += 1) {
       const marker = rng.pick([" ", "-", "+", "+"]);
       lines.push(`${marker}  ${rng.pick(AGENT_SENTENCES)}`);
     }
   }
+
   return lines.join("\n");
 }
 
 function makeAgentMarkdown(rng: Rng): string {
   const parts: string[] = [sentences(rng, AGENT_SENTENCES, rng.int(1, 3))];
+
   if (rng.chance(0.4)) {
     parts.push(
       `- ${rng.pick(AGENT_SENTENCES)}\n- ${rng.pick(AGENT_SENTENCES)}\n- ${rng.pick(AGENT_SENTENCES)}`,
     );
   }
+
   if (rng.chance(0.3)) {
     parts.push("```ts\n" + makeOutput(rng, rng.int(3, 8)) + "\n```");
   }
+
   if (rng.chance(0.5)) {
     parts.push(sentences(rng, AGENT_SENTENCES, rng.int(1, 4)));
   }
+
   return parts.join("\n\n");
 }
 
@@ -275,6 +305,7 @@ interface ThreadEventState {
 function buildThreadEvents(args: ThreadEventBuildArgs): void {
   const { rng, threadId, writer } = args;
   const providerThreadId = rng.uuid();
+
   const state: ThreadEventState = {
     at: args.startAt,
     sequence: 0,
@@ -310,10 +341,12 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
       data: JSON.stringify(row.data),
       createdAt: Math.min(state.at, args.endAt),
     });
+
     return state.sequence;
   };
 
   const userText = `${args.title}. ${sentences(rng, USER_SENTENCES, rng.int(1, 4))}`;
+
   const executionOptions = {
     model: args.providerId === "codex" ? "gpt-5.2-codex" : "claude-opus-5",
     permissionMode: "full",
@@ -321,6 +354,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
     serviceTier: "default",
     source: "client/turn/requested",
   };
+
   emit({
     type: "client/turn/requested",
     data: {
@@ -344,6 +378,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
       request: { method: "thread/start", params: {} },
     },
   });
+
   for (let index = 0; index < 3; index += 1) {
     emit({
       type: "system/thread-provisioning",
@@ -355,6 +390,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
       },
     });
   }
+
   emit({ type: "thread/identity", data: { providerThreadId } });
 
   args.searchSegments.push({
@@ -387,6 +423,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
     turnIndex += 1;
     requestSequence += 1;
     const turnId = `turn_${turnBase}_${turnIndex}`;
+
     const turnUserText =
       turnIndex === 1
         ? userText
@@ -407,6 +444,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
           execution: executionOptions,
         },
       });
+
       args.searchSegments.push({
         id: `${threadId}:user_message:event:${requestedAtSequence}`,
         threadId,
@@ -418,6 +456,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
         updatedAt: state.at,
       });
     }
+
     args.promptHistory.push({
       id: `phist_${rng.idSuffix()}`,
       projectId: args.projectId,
@@ -441,12 +480,16 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
       args.eventTarget - state.sequence - 4,
       rng.int(8, 60),
     );
+
     let itemBudget = itemTarget;
+
     while (itemBudget > 0) {
       const roll = rng.next();
+
       if (roll < 0.3) {
         const itemId = `claude-reasoning-${state.sequence}`;
         const deltaCount = Math.min(itemBudget - 1, rng.int(2, 6));
+
         for (let index = 0; index < deltaCount; index += 1) {
           emit({
             type: "item/reasoning/textDelta",
@@ -459,6 +502,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
             },
           });
         }
+
         emit({
           type: "item/completed",
           turnId,
@@ -497,6 +541,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
           },
         });
         const deltaCount = Math.min(itemBudget - 2, rng.int(0, 3));
+
         for (let index = 0; index < deltaCount; index += 1) {
           emit({
             type: "item/commandExecution/outputDelta",
@@ -509,6 +554,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
             },
           });
         }
+
         emit({
           type: "item/completed",
           turnId,
@@ -532,6 +578,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
         const itemId = `msg_${rng.hex(24)}`;
         const text = makeAgentMarkdown(rng);
         const deltaCount = Math.min(itemBudget - 1, rng.int(1, 3));
+
         for (let index = 0; index < deltaCount; index += 1) {
           emit({
             type: "item/agentMessage/delta",
@@ -544,6 +591,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
             },
           });
         }
+
         const completedSequence = emit({
           type: "item/completed",
           turnId,
@@ -554,6 +602,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
             item: { type: "agentMessage", id: itemId, text },
           },
         });
+
         if (assistantSegmentCount < 30) {
           assistantSegmentCount += 1;
           args.searchSegments.push({
@@ -567,6 +616,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
             updatedAt: state.at,
           });
         }
+
         itemBudget -= deltaCount + 1;
       } else if (roll < 0.9) {
         const itemId = `toolu_${rng.hex(24)}`;
@@ -652,6 +702,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
       turnId,
       data: { providerThreadId, status: "completed" },
     });
+
     if (rng.chance(0.6)) {
       emit({
         type: "turn/diff/updated",
@@ -659,6 +710,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
         data: { providerThreadId, diff: makeDiff(rng, rng.int(4, 24)) },
       });
     }
+
     if (rng.chance(0.3)) {
       emit({
         type: "turn/plan/updated",
@@ -674,6 +726,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
         },
       });
     }
+
     const usedTokens = rng.int(20_000, 220_000);
     emit({
       type: "thread/tokenUsage/updated",
@@ -710,6 +763,7 @@ function buildThreadEvents(args: ThreadEventBuildArgs): void {
         },
       },
     });
+
     if (rng.chance(0.4)) {
       emit({
         type: "provider/rateLimits/updated",
@@ -744,11 +798,13 @@ function buildThreadEventTargets(
 ): number[] {
   const weights: number[] = [];
   let weightSum = 0;
+
   for (let index = 0; index < threadCount; index += 1) {
     const weight = Math.exp(rng.next() * 4.2);
     weights.push(weight);
     weightSum += weight;
   }
+
   return weights.map((weight) =>
     Math.max(
       20,
@@ -795,10 +851,12 @@ export function seedPerfFixture(
   }
 
   const seededProjects: SeededProject[] = [];
+
   for (let index = 0; index < options.projectCount; index += 1) {
     const name = `${PROJECT_NAMES[index % PROJECT_NAMES.length]}${
       index >= PROJECT_NAMES.length ? `-${index}` : ""
     }`;
+
     const projectId = `proj_${rng.idSuffix()}`;
     const workspacePath = `${options.workspacesRootPath}/${name}`;
     const createdAt = fixtureStart + rng.int(0, 20) * DAY_MS;
@@ -851,8 +909,10 @@ export function seedPerfFixture(
 
   for (let index = 0; index < options.threadCount; index += 1) {
     const roll = rng.next();
+
     const projectIndex =
       roll < 0.45 ? 0 : rng.int(0, seededProjects.length - 1);
+
     seededProjects[projectIndex].threadCount += 1;
   }
 
@@ -875,6 +935,7 @@ export function seedPerfFixture(
 
   const seededThreads: SeededThread[] = [];
   let threadIndex = 0;
+
   for (const project of seededProjects) {
     for (
       let projectThread = 0;
@@ -884,19 +945,23 @@ export function seedPerfFixture(
       const topic = rng.pick(THREAD_TOPICS);
       const title = rng.chance(0.15) ? topic : `${topic} ${rng.int(2, 99)}`;
       const threadId = `thr_${rng.idSuffix()}`;
+
       const startAt =
         fixtureStart +
         rng.int(20, FIXTURE_AGE_DAYS - 1) * DAY_MS +
         rng.int(0, DAY_MS - 1);
+
       const endAt = Math.min(
         now - rng.int(0, 6) * 60 * 60 * 1000,
         startAt + rng.int(1, 72) * 60 * 60 * 1000,
       );
+
       const archived = rng.chance(0.85);
       const hidden = rng.chance(0.18);
       const unread = !archived && rng.chance(0.4);
       const usesWorktree = rng.chance(0.5);
       let environmentId = project.rootEnvironmentId;
+
       if (usesWorktree) {
         environmentId = `env_${rng.idSuffix()}`;
         environmentRows.push({
@@ -906,7 +971,7 @@ export function seedPerfFixture(
           hostId: options.hostId,
           path: `${options.workspacesRootPath}/plugins/environment-git-worktree/host-data/worktrees/${threadId}/${project.name}`,
           isGitRepo: true,
-          branchName: `bb/${title
+          branchName: `omnyo/${title
             .toLowerCase()
             .slice(0, 24)
             .replace(/[^a-z0-9]+/gu, "-")}-${threadId}`,
@@ -923,6 +988,7 @@ export function seedPerfFixture(
           updatedAt: endAt,
         });
       }
+
       const providerId = rng.chance(0.5) ? "claude-code" : "codex";
       const eventTarget = eventTargets[threadIndex];
       threadIndex += 1;
@@ -942,6 +1008,7 @@ export function seedPerfFixture(
         pinSortKey: pinned ? "V" : null,
         lastReadAt: unread ? startAt : endAt + 60_000,
         latestAttentionAt: endAt,
+        lastMessageAt: endAt,
         createdAt: startAt,
         updatedAt: endAt,
       });
@@ -966,12 +1033,15 @@ export function seedPerfFixture(
     for (const row of projectRows) {
       tx.insert(projects).values(row).run();
     }
+
     for (const row of sourceRows) {
       tx.insert(projectSources).values(row).run();
     }
+
     for (const row of environmentRows) {
       tx.insert(environments).values(row).run();
     }
+
     for (const row of threadRows) {
       tx.insert(threads).values(row).run();
     }
@@ -979,10 +1049,12 @@ export function seedPerfFixture(
 
   let eventRowCount = 0;
   let pendingEvents: EventInsert[] = [];
+
   const flushEvents = (): void => {
     if (pendingEvents.length === 0) {
       return;
     }
+
     const batch = pendingEvents;
     pendingEvents = [];
     db.transaction((tx) => {
@@ -997,10 +1069,12 @@ export function seedPerfFixture(
       }
     });
   };
+
   const writer: EventWriter = {
     push: (row) => {
       eventRowCount += 1;
       pendingEvents.push(row);
+
       if (pendingEvents.length >= 20_000) {
         flushEvents();
       }
@@ -1009,6 +1083,7 @@ export function seedPerfFixture(
   };
 
   let seededThreadCount = 0;
+
   for (const thread of seededThreads) {
     buildThreadEvents({
       environmentId: thread.environmentId,
@@ -1025,12 +1100,14 @@ export function seedPerfFixture(
       projectId: thread.projectId,
     });
     seededThreadCount += 1;
+
     if (seededThreadCount % 200 === 0) {
       progress(
         `built events for ${seededThreadCount}/${seededThreads.length} threads (${writer.count()} rows)`,
       );
     }
   }
+
   flushEvents();
   progress(`inserted ${eventRowCount} event rows`);
 
@@ -1046,6 +1123,7 @@ export function seedPerfFixture(
         )
         .run();
     }
+
     for (
       let offset = 0;
       offset < promptHistoryRows.length;

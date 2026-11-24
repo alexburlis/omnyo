@@ -3,10 +3,10 @@ import {
   type HostDaemonCommand,
   type HostDaemonCommandResult,
   type HostDaemonSettledCommandType,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
-import { roundDurationMs } from "@bb/process-utils";
+import { roundDurationMs } from "@omnyo/process-utils";
 import { callHostOnlineRpcForWork } from "./online-rpc.js";
 
 interface RunLiveCommandAndWaitArgs<
@@ -52,6 +52,7 @@ function logSlowCommandWait(
   if (args.durationMs < SLOW_HOST_COMMAND_WAIT_LOG_THRESHOLD_MS) {
     return;
   }
+
   deps.logger.debug(
     {
       commandType: args.commandType,
@@ -72,6 +73,7 @@ function classifySlowCommandWaitFailure(
 ): SlowCommandWaitFailureLogFields {
   if (error instanceof ApiError) {
     const errorCode = error.body.code;
+
     if (errorCode === "command_timeout") {
       return {
         errorCode,
@@ -79,6 +81,7 @@ function classifySlowCommandWaitFailure(
         status: error.status,
       };
     }
+
     if (errorCode === "command_result_type_mismatch") {
       return {
         errorCode,
@@ -86,6 +89,7 @@ function classifySlowCommandWaitFailure(
         status: error.status,
       };
     }
+
     if (error.status === 502) {
       return {
         errorCode,
@@ -93,6 +97,7 @@ function classifySlowCommandWaitFailure(
         status: error.status,
       };
     }
+
     return {
       errorCode,
       outcome: "api_error",
@@ -126,6 +131,7 @@ export async function runLiveCommandAndWait(
   let logOutcome: SlowCommandWaitOutcome = "success";
   let completed = true;
   let failureLogFields: SlowCommandWaitFailureLogFields | null = null;
+
   try {
     return await callHostOnlineRpcForWork(deps, {
       command: args.command,

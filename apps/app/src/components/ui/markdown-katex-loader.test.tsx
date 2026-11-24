@@ -8,6 +8,7 @@ const katexChunkLoads = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock("./markdown-katex.js", async (importOriginal) => {
   katexChunkLoads.count += 1;
+
   return importOriginal();
 });
 
@@ -22,6 +23,7 @@ describe("MarkdownPreview lazy KaTeX", () => {
         content={"Plain prose with $5 and $x$ and \\$10 escaped."}
       />,
     );
+
     await act(async () => {
       await Promise.resolve();
     });
@@ -32,11 +34,14 @@ describe("MarkdownPreview lazy KaTeX", () => {
 
     const first = render(<MarkdownPreview content={"One: $$a^2$$"} />);
     const second = render(<MarkdownPreview content={"Two: $$b^2$$"} />);
+
     const mathPieces =
       "Intro.\n\n$$\n\\frac{1}{2}\n$$\n\nMiddle paragraph.\n\n";
+
     const incremental = render(
       <MarkdownPreview content={"Intro.\n\n"} incrementalBlocks />,
     );
+
     incremental.rerender(
       <MarkdownPreview content={mathPieces} incrementalBlocks />,
     );

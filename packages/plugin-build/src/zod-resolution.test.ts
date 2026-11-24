@@ -23,15 +23,19 @@ async function installPackage(
 ): Promise<void> {
   if (installed.has(name)) return;
   installed.add(name);
+
   const manifestPath = createRequire(requiredFrom).resolve(
     `${name}/package.json`,
   );
+
   await cp(dirname(manifestPath), join(nodeModules, name), {
     recursive: true,
   });
+
   const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
     dependencies?: Record<string, string>;
   };
+
   for (const dependency of Object.keys(manifest.dependencies ?? {})) {
     await installPackage(dependency, manifestPath, nodeModules, installed);
   }
@@ -42,16 +46,21 @@ async function installSdk(
   options?: { omitZod?: boolean },
 ): Promise<void> {
   const sdkSource = resolve(import.meta.dirname, "../../plugin-sdk");
-  const target = join(pluginDir, "node_modules", "@get-bb", "plugin-sdk");
+  const target = join(pluginDir, "node_modules", "@omnyo", "plugin-sdk");
   await mkdir(target, { recursive: true });
+
   for (const entry of ["dist", "bundled-types", "package.json"]) {
     await cp(join(sdkSource, entry), join(target, entry), { recursive: true });
   }
+
   const sdkManifestPath = join(sdkSource, "package.json");
+
   const sdkManifest = JSON.parse(await readFile(sdkManifestPath, "utf8")) as {
     dependencies: Record<string, string>;
   };
+
   const installed = new Set(options?.omitZod === true ? ["zod"] : []);
+
   for (const dependency of Object.keys(sdkManifest.dependencies)) {
     await installPackage(
       dependency,
@@ -63,14 +72,14 @@ async function installSdk(
 }
 
 it("bundles SDK-owned Zod without requiring the plugin to declare it", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "bb-host-zod-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-host-zod-"));
   tempDirs.push(dir);
   await writeFile(
     join(dir, "package.json"),
     JSON.stringify({
-      name: "bb-plugin-zodless",
+      name: "omnyo-plugin-zodless",
       version: "0.0.0",
-      bb: {
+      omnyo: {
         name: "Zodless",
         description: "Host entry whose plugin never installed zod.",
         branding: { icon: "Zap" },
@@ -85,7 +94,7 @@ it("bundles SDK-owned Zod without requiring the plugin to declare it", async () 
       "import {",
       "  experimental_defineHostEntry,",
       "  experimental_nativeRootsHostContract,",
-      '} from "@get-bb/plugin-sdk/host";',
+      '} from "@omnyo/plugin-sdk/host";',
       "export default experimental_defineHostEntry({",
       "  contract: experimental_nativeRootsHostContract,",
       "  handlers: { resolveNativeRoots: async () => ({ skills: [], commands: [] }) },",
@@ -99,6 +108,7 @@ it("bundles SDK-owned Zod without requiring the plugin to declare it", async () 
   const toolchain = await resolvePluginBuildToolchain(
     join(process.cwd(), ".unused-toolchain"),
   );
+
   const { jsPath } = await buildPluginHost(dir, "0.0.0-test", toolchain);
   await rm(join(dir, "node_modules"), { recursive: true });
   const module = await import(pathToFileURL(jsPath).href);
@@ -112,14 +122,14 @@ it("bundles SDK-owned Zod without requiring the plugin to declare it", async () 
 }, 30_000);
 
 it("reports a broken SDK installation separately from plugin dependencies", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "bb-host-sdk-zodless-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-host-sdk-zodless-"));
   tempDirs.push(dir);
   await writeFile(
     join(dir, "package.json"),
     JSON.stringify({
-      name: "bb-plugin-broken-sdk",
+      name: "omnyo-plugin-broken-sdk",
       version: "0.0.0",
-      bb: {
+      omnyo: {
         name: "Broken SDK",
         description: "Host entry using an incomplete SDK installation.",
         branding: { icon: "Zap" },
@@ -130,27 +140,28 @@ it("reports a broken SDK installation separately from plugin dependencies", asyn
   );
   await writeFile(
     join(dir, "host.ts"),
-    'import { experimental_nativeRootsHostContract } from "@get-bb/plugin-sdk/host";\nexport default experimental_nativeRootsHostContract;\n',
+    'import { experimental_nativeRootsHostContract } from "@omnyo/plugin-sdk/host";\nexport default experimental_nativeRootsHostContract;\n',
   );
   await installSdk(dir, { omitZod: true });
 
   const toolchain = await resolvePluginBuildToolchain(
     join(process.cwd(), ".unused-toolchain"),
   );
+
   await expect(buildPluginHost(dir, "0.0.0-test", toolchain)).rejects.toThrow(
-    /reinstall @get-bb\/plugin-sdk/,
+    /reinstall @omnyo\/plugin-sdk/,
   );
 }, 30_000);
 
 it("requires Zod when the plugin imports it directly", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "bb-host-direct-zod-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-host-direct-zod-"));
   tempDirs.push(dir);
   await writeFile(
     join(dir, "package.json"),
     JSON.stringify({
-      name: "bb-plugin-direct-zod",
+      name: "omnyo-plugin-direct-zod",
       version: "0.0.0",
-      bb: {
+      omnyo: {
         name: "Direct Zod",
         description: "Host entry importing Zod directly.",
         branding: { icon: "Zap" },
@@ -168,6 +179,7 @@ it("requires Zod when the plugin imports it directly", async () => {
   const toolchain = await resolvePluginBuildToolchain(
     join(process.cwd(), ".unused-toolchain"),
   );
+
   await expect(buildPluginHost(dir, "0.0.0-test", toolchain)).rejects.toThrow(
     /add zod to the plugin's dependencies/,
   );

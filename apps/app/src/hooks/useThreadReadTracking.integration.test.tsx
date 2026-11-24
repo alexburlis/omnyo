@@ -3,9 +3,9 @@
 import { StrictMode } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { useQuery } from "@tanstack/react-query";
-import type { ThreadWithRuntime } from "@bb/domain";
-import { makeThreadWithRuntime } from "@bb/test-helpers/domain-fixtures";
-import { afterEach, expect, it, vi } from "vitest";
+import type { ThreadWithRuntime } from "@omnyo/domain";
+import { makeThreadWithRuntime } from "@omnyo/test-helpers/domain-fixtures";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { makeThreadResponse } from "@/test/fixtures/thread-responses";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -20,6 +20,10 @@ vi.mock("@/lib/sdk", () => ({
   sdk: { threads: { markRead: vi.fn(), markUnread: vi.fn() } },
 }));
 
+beforeEach(() => {
+  window.dispatchEvent(new KeyboardEvent("keydown"));
+});
+
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
@@ -27,18 +31,21 @@ afterEach(() => {
 
 function setup(deferAbort = false) {
   const harness = createQueryClientTestHarness();
+
   const requests: {
     signal: AbortSignal | undefined;
     threadId: string;
     resolve: () => void;
     reject: () => void;
   }[] = [];
+
   for (const id of ["A", "B"]) {
     harness.queryClient.setQueryData(
       threadQueryKey(id),
       makeThreadWithRuntime({ id, lastReadAt: 10, latestAttentionAt: 20 }),
     );
   }
+
   vi.mocked(sdk.threads.markRead).mockImplementation(
     ({ threadId, signal }) =>
       new Promise((resolve, reject) => {
@@ -56,6 +63,7 @@ function setup(deferAbort = false) {
               }),
             ),
         });
+
         if (!deferAbort)
           signal?.addEventListener(
             "abort",
@@ -64,6 +72,7 @@ function setup(deferAbort = false) {
           );
       }),
   );
+
   const mount = () =>
     renderHook(
       ({ id }) => {
@@ -71,10 +80,12 @@ function setup(deferAbort = false) {
           queryKey: threadQueryKey(id),
           enabled: false,
         });
+
         useThreadReadTracking({
           thread: query.data,
           markThreadRead: useMarkThreadRead(),
         });
+
         return useMarkThreadUnread();
       },
       {
@@ -86,6 +97,7 @@ function setup(deferAbort = false) {
         ),
       },
     );
+
   return { ...harness, ...mount(), requests, mount };
 }
 
@@ -179,9 +191,11 @@ it("cancels every attention request without rolling back newer thread data", asy
     ),
   );
   await waitFor(() => expect(requests).toHaveLength(2));
+
   const attention = queryClient.getQueryData<ThreadWithRuntime>(
     threadQueryKey("A"),
   )?.latestAttentionAt;
+
   unmount();
   await waitFor(() => expect(queryClient.isMutating()).toBe(0));
   expect(requests.every((request) => request.signal?.aborted)).toBe(true);

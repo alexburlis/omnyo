@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BbDesktopVersionFeed } from "@bb/desktop-contract";
+import type { OmnyoDesktopVersionFeed } from "@omnyo/desktop-contract";
 import {
   createDesktopUpdateService,
   DESKTOP_UPDATE_CHECK_TIMEOUT_MS,
@@ -9,21 +9,21 @@ import { DESKTOP_UPDATE_ACTIVE_MIN_INTERVAL_MS } from "../src/desktop-update-sch
 
 const checkedAt = "2026-05-21T00:00:00.000Z";
 
-function createFeed(version: string): BbDesktopVersionFeed {
+function createFeed(version: string): OmnyoDesktopVersionFeed {
   return {
     channel: "latest",
     files: [
       {
         sha512: "BASE64_SHA512_FROM_ELECTRON_BUILDER",
         size: 123456789,
-        url: `bb-${version}-universal.zip`,
+        url: `omnyo-${version}-universal.zip`,
       },
     ],
     minimumSystemVersion: null,
-    path: `bb-${version}-universal.zip`,
+    path: `omnyo-${version}-universal.zip`,
     platform: "macos",
     releaseDate: checkedAt,
-    releaseName: `bb desktop ${version}`,
+    releaseName: `Omnyo desktop ${version}`,
     releaseNotes: null,
     schemaVersion: 1,
     sha512: "BASE64_SHA512_FROM_ELECTRON_BUILDER",
@@ -49,9 +49,11 @@ describe("desktop update feed parsing", () => {
     });
 
     expect(result.kind).toBe("valid");
+
     if (result.kind !== "valid") {
       throw new Error(result.reason);
     }
+
     expect(result.info).toEqual({
       lastCheckedAt: checkedAt,
       latestVersion: "0.0.2",
@@ -70,14 +72,14 @@ describe("desktop update feed parsing", () => {
         {
           sha512: "BASE64_SHA512_FROM_ELECTRON_BUILDER",
           size: 123456789,
-          url: "bb-0.0.2-universal.zip",
+          url: "omnyo-0.0.2-universal.zip",
         },
       ],
       minimumSystemVersion: null,
-      path: "bb-0.0.2-universal.zip",
+      path: "omnyo-0.0.2-universal.zip",
       platform: "macos",
       releaseDate: checkedAt,
-      releaseName: "bb desktop 0.0.2",
+      releaseName: "Omnyo desktop 0.0.2",
       releaseNotes: null,
       schemaVersion: 1,
       sha512: "BASE64_SHA512_FROM_ELECTRON_BUILDER",
@@ -120,9 +122,11 @@ describe("desktop update feed parsing", () => {
     });
 
     expect(result.kind).toBe("malformed");
+
     if (result.kind !== "malformed") {
       throw new Error("Expected a cross-platform feed to be rejected");
     }
+
     expect(result.reason).toContain("another platform");
   });
 
@@ -139,9 +143,11 @@ describe("desktop update feed parsing", () => {
     });
 
     expect(result.kind).toBe("malformed");
+
     if (result.kind !== "malformed") {
       throw new Error("Expected a cross-channel feed to be rejected");
     }
+
     expect(result.reason).toContain("another channel");
   });
 
@@ -170,9 +176,11 @@ describe("desktop update feed parsing", () => {
     });
 
     expect(result.kind).toBe("valid");
+
     if (result.kind !== "valid") {
       throw new Error(result.reason);
     }
+
     expect(result.info).toEqual({
       lastCheckedAt: checkedAt,
       latestVersion: "0.0.1",
@@ -190,13 +198,17 @@ describe("desktop update service", () => {
     let fetchCount = 0;
     let nowMs = Date.parse(checkedAt);
     const failedCheckedAt = "2026-05-21T00:01:00.000Z";
+
     const fetchImpl: typeof fetch = async () => {
       fetchCount += 1;
+
       if (fetchCount === 1) {
         return createFeedResponse("0.0.2");
       }
+
       throw new Error("network offline");
     };
+
     const service = createDesktopUpdateService({
       channel: "latest",
       currentVersion: "0.0.1",
@@ -236,19 +248,25 @@ describe("desktop update service", () => {
 
   it("preserves prior version state after a timeout failure", async () => {
     vi.useFakeTimers();
+
     try {
       let fetchCount = 0;
       let nowMs = Date.parse(checkedAt);
       const timeoutCheckedAt = "2026-05-21T00:02:00.000Z";
+
       const fetchImpl: typeof fetch = async (_input, init) => {
         fetchCount += 1;
+
         if (fetchCount === 1) {
           return createFeedResponse("0.0.2");
         }
+
         const signal = init?.signal;
+
         if (!signal) {
           throw new Error("timeout test expected an abort signal");
         }
+
         return await new Promise<Response>((_resolve, reject) => {
           signal.addEventListener(
             "abort",
@@ -257,6 +275,7 @@ describe("desktop update service", () => {
           );
         });
       };
+
       const service = createDesktopUpdateService({
         channel: "latest",
         currentVersion: "0.0.1",
@@ -292,10 +311,13 @@ describe("desktop update service", () => {
   it("throttles rapid active-trigger checks", async () => {
     let fetchCount = 0;
     let nowMs = Date.parse(checkedAt);
+
     const fetchImpl: typeof fetch = async () => {
       fetchCount += 1;
+
       return createFeedResponse("0.0.2");
     };
+
     const service = createDesktopUpdateService({
       channel: "latest",
       currentVersion: "0.0.1",
@@ -308,9 +330,11 @@ describe("desktop update service", () => {
     });
 
     const firstInfo = await service.checkAfterActive();
+
     if (firstInfo === null) {
       throw new Error("enabled active check returned null");
     }
+
     nowMs += 1_000;
     const throttledInfo = await service.checkAfterActive();
 

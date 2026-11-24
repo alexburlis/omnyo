@@ -3,18 +3,24 @@ import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-reg
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createConnection, migrate } from "@bb/db";
-import type { Logger } from "@bb/logger";
+import { createConnection, migrate } from "@omnyo/db";
+import type { Logger } from "@omnyo/logger";
+import { openSecretVault } from "@omnyo/secret-storage";
 import { createPluginRuntime } from "../../../src/services/plugins/plugin-runtime.js";
+import { createPluginSecretStores } from "../../../src/services/plugins/plugin-secrets.js";
 import { testLogger } from "../../helpers/test-app.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
 
 async function createRuntime() {
   const db = createConnection(":memory:");
   migrate(db);
+  const dataDir = await mkdtemp(join(tmpdir(), "omnyo-dev-build-problems-"));
+  const vault = await openSecretVault(dataDir);
+
   return createPluginRuntime({
     machineEnrollments: null,
     includedBuiltinNames: new Set(),
+    secretStores: createPluginSecretStores({ logger: testLogger, vault }),
     deps: {
       db,
       hub: {
@@ -25,7 +31,8 @@ async function createRuntime() {
       logger: testLogger as unknown as Logger,
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
-      dataDir: await mkdtemp(join(tmpdir(), "bb-dev-build-problems-")),
+      dataDir,
+      vault,
       appVersion: "0.9.0",
     },
   });

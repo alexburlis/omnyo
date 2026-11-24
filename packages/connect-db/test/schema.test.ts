@@ -20,6 +20,7 @@ import {
 } from "../src/index.js";
 
 const MIGRATIONS_DIR = fileURLToPath(new URL("../migrations", import.meta.url));
+
 const LABEL_CLAIM_TRIGGERS = [
   "machine_label_claim_delete",
   "machine_label_claim_insert",
@@ -43,15 +44,18 @@ function applyMigration(sqlite: Database.Database, file: string): void {
 }
 
 let sqlite: Database.Database;
+
 let db: ReturnType<typeof drizzle>;
 
 beforeEach(() => {
   sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
+
   for (const file of readdirSync(MIGRATIONS_DIR).sort()) {
     if (!file.endsWith(".sql")) continue;
     sqlite.exec(readFileSync(join(MIGRATIONS_DIR, file), "utf8"));
   }
+
   db = drizzle(sqlite, { schema });
 });
 
@@ -114,6 +118,7 @@ describe("migration matches the drizzle schema", () => {
       .from(profile)
       .where(eq(profile.handle, "sawyer"))
       .get();
+
     expect(p?.userId).toBe("u1");
   });
 
@@ -451,6 +456,7 @@ describe("validateLabel", () => {
     expect(validateLabel("has_underscore")).toBe("invalid-format");
     expect(validateLabel("foo--bar")).toBe("invalid-format");
     expect(validateLabel("a--b")).toBe("invalid-format");
+
     for (const h of [
       "api",
       "www",
@@ -467,40 +473,56 @@ describe("validateLabel", () => {
 
 describe("parseVisitorHost", () => {
   it("extracts a bare handle", () => {
-    expect(parseVisitorHost("sawyer.getbb.app", "getbb.app")).toEqual({
+    expect(parseVisitorHost("sawyer.example.test", "example.test")).toEqual({
       handle: "sawyer",
       target: null,
     });
-    expect(parseVisitorHost("Sawyer.getbb.app", "getbb.app")).toEqual({
+    expect(parseVisitorHost("Sawyer.example.test", "example.test")).toEqual({
       handle: "sawyer",
       target: null,
     });
   });
 
   it("extracts handle--port share hosts", () => {
-    expect(parseVisitorHost("sawyer--8000.getbb.app", "getbb.app")).toEqual({
+    expect(
+      parseVisitorHost("sawyer--8000.example.test", "example.test"),
+    ).toEqual({
       handle: "sawyer",
       target: "8000",
     });
-    expect(parseVisitorHost("Sawyer--5173.getbb.app", "getbb.app")).toEqual({
+    expect(
+      parseVisitorHost("Sawyer--5173.example.test", "example.test"),
+    ).toEqual({
       handle: "sawyer",
       target: "5173",
     });
   });
 
   it("rejects invalid share targets as unroutable", () => {
-    expect(parseVisitorHost("sawyer--0.getbb.app", "getbb.app")).toBeNull();
-    expect(parseVisitorHost("sawyer--99999.getbb.app", "getbb.app")).toBeNull();
-    expect(parseVisitorHost("sawyer--08000.getbb.app", "getbb.app")).toBeNull();
-    expect(parseVisitorHost("sawyer--x.getbb.app", "getbb.app")).toBeNull();
-    expect(parseVisitorHost("foo--80--00.getbb.app", "getbb.app")).toBeNull();
+    expect(
+      parseVisitorHost("sawyer--0.example.test", "example.test"),
+    ).toBeNull();
+    expect(
+      parseVisitorHost("sawyer--99999.example.test", "example.test"),
+    ).toBeNull();
+    expect(
+      parseVisitorHost("sawyer--08000.example.test", "example.test"),
+    ).toBeNull();
+    expect(
+      parseVisitorHost("sawyer--x.example.test", "example.test"),
+    ).toBeNull();
+    expect(
+      parseVisitorHost("foo--80--00.example.test", "example.test"),
+    ).toBeNull();
   });
 
   it("rejects the apex, multi-label, and foreign hosts", () => {
-    expect(parseVisitorHost("getbb.app", "getbb.app")).toBeNull();
-    expect(parseVisitorHost("a.b.getbb.app", "getbb.app")).toBeNull();
-    expect(parseVisitorHost("evil.com", "getbb.app")).toBeNull();
-    expect(parseVisitorHost("getbb.app.evil.com", "getbb.app")).toBeNull();
+    expect(parseVisitorHost("example.test", "example.test")).toBeNull();
+    expect(parseVisitorHost("a.b.example.test", "example.test")).toBeNull();
+    expect(parseVisitorHost("evil.com", "example.test")).toBeNull();
+    expect(
+      parseVisitorHost("example.test.evil.com", "example.test"),
+    ).toBeNull();
   });
 });
 
@@ -508,11 +530,13 @@ describe("0003 backfill (staged application on real prior data)", () => {
   it("backfills server.subdomain from the owner's handle before enforcing NOT NULL/UNIQUE", () => {
     const staged = new Database(":memory:");
     staged.pragma("foreign_keys = ON");
+
     try {
       const files = migrationFiles();
       const subdomainMigration = "0003_server_subdomain.sql";
       const priorFiles = files.filter((f) => f < subdomainMigration);
       expect(priorFiles.length).toBeGreaterThan(0);
+
       for (const f of priorFiles) applyMigration(staged, f);
 
       const now = Date.now();
@@ -551,6 +575,7 @@ describe("0003 backfill (staged application on real prior data)", () => {
         .get("s1") as {
         subdomain: string;
       };
+
       expect(row.subdomain).toBe("sawyer");
 
       const codes = staged
@@ -558,6 +583,7 @@ describe("0003 backfill (staged application on real prior data)", () => {
         .all() as {
         server_id: string;
       }[];
+
       expect(codes).toHaveLength(1);
       expect(codes[0].server_id).toBe("s1");
 
@@ -576,19 +602,24 @@ describe("0003 backfill (staged application on real prior data)", () => {
   it("applies the full migration chain from scratch cleanly", () => {
     const fresh = new Database(":memory:");
     fresh.pragma("foreign_keys = ON");
+
     try {
       for (const f of migrationFiles()) applyMigration(fresh, f);
+
       const cols = fresh.prepare("PRAGMA table_info(server)").all() as {
         name: string;
         notnull: number;
       }[];
+
       const subdomainCol = cols.find((c) => c.name === "subdomain");
       expect(subdomainCol).toBeDefined();
       expect(subdomainCol?.notnull).toBe(1);
+
       const machineCols = fresh.prepare("PRAGMA table_info(machine)").all() as {
         name: string;
         notnull: number;
       }[];
+
       const machineSubdomain = machineCols.find((c) => c.name === "subdomain");
       expect(machineSubdomain).toBeDefined();
       expect(machineSubdomain?.notnull).toBe(0);
@@ -616,10 +647,12 @@ describe("0004 global label claims", () => {
   it("backfills handles and secondary servers without duplicating the primary label", () => {
     const staged = new Database(":memory:");
     staged.pragma("foreign_keys = ON");
+
     try {
       for (const file of migrationFiles().filter((name) => name < "0004")) {
         applyMigration(staged, file);
       }
+
       const now = Date.now();
       staged
         .prepare(
@@ -673,14 +706,18 @@ describe("0004 global label claims", () => {
   it("fails instead of silently orphaning a historical cross-tenant collision", () => {
     const staged = new Database(":memory:");
     staged.pragma("foreign_keys = ON");
+
     try {
       for (const file of migrationFiles().filter((name) => name < "0004")) {
         applyMigration(staged, file);
       }
+
       const now = Date.now();
+
       const insertUser = staged.prepare(
         "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?,?,?,?,?,?)",
       );
+
       insertUser.run("u1", "One", "u1@example.com", 1, now, now);
       insertUser.run("u2", "Two", "u2@example.com", 1, now, now);
       staged
@@ -712,14 +749,18 @@ describe("0005 label-claim reconciliation", () => {
   it("claims an old-worker row written after 0004 and prevents cross-tenant reuse", () => {
     const staged = new Database(":memory:");
     staged.pragma("foreign_keys = ON");
+
     try {
       for (const file of migrationFiles().filter((name) => name < "0005")) {
         applyMigration(staged, file);
       }
+
       const now = Date.now();
+
       const insertUser = staged.prepare(
         "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?,?,?,?,?,?)",
       );
+
       insertUser.run("u1", "One", "u1@example.com", 1, now, now);
       insertUser.run("u2", "Two", "u2@example.com", 1, now, now);
 
@@ -768,14 +809,18 @@ describe("0005 label-claim reconciliation", () => {
   it("removes a claim orphaned by an old-worker delete and makes the label reusable", () => {
     const staged = new Database(":memory:");
     staged.pragma("foreign_keys = ON");
+
     try {
       for (const file of migrationFiles().filter((name) => name < "0004")) {
         applyMigration(staged, file);
       }
+
       const now = Date.now();
+
       const insertUser = staged.prepare(
         "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?,?,?,?,?,?)",
       );
+
       insertUser.run("u1", "One", "u1@example.com", 1, now, now);
       insertUser.run("u2", "Two", "u2@example.com", 1, now, now);
       staged
@@ -827,24 +872,32 @@ describe("0005 label-claim reconciliation", () => {
   it("reassigns a stale claim to the current owner after a gap ownership swap", () => {
     const staged = new Database(":memory:");
     staged.pragma("foreign_keys = ON");
+
     try {
       for (const file of migrationFiles().filter((name) => name < "0004")) {
         applyMigration(staged, file);
       }
+
       const now = Date.now();
+
       const insertUser = staged.prepare(
         "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?,?,?,?,?,?)",
       );
+
       insertUser.run("u1", "One", "u1@example.com", 1, now, now);
       insertUser.run("u2", "Two", "u2@example.com", 1, now, now);
+
       const insertProfile = staged.prepare(
         "INSERT INTO profile (user_id, handle, created_at) VALUES (?,?,?)",
       );
+
       insertProfile.run("u1", "owner-one", now);
       insertProfile.run("u2", "owner-two", now);
+
       const insertServer = staged.prepare(
         "INSERT INTO server (id, user_id, name, subdomain, created_at) VALUES (?,?,?,?,?)",
       );
+
       insertServer.run("old-server", "u1", "desktop", "reused-label", now);
       applyMigration(staged, "0004_machine_labels.sql");
       expect(
@@ -889,10 +942,12 @@ describe("0005 label-claim reconciliation", () => {
   it("moves a claim when an old worker updates a server label in the gap", () => {
     const staged = new Database(":memory:");
     staged.pragma("foreign_keys = ON");
+
     try {
       for (const file of migrationFiles().filter((name) => name < "0004")) {
         applyMigration(staged, file);
       }
+
       const now = Date.now();
       staged
         .prepare(
@@ -948,14 +1003,18 @@ describe("0005 label-claim reconciliation", () => {
   it("fails atomically when gap writes contain a genuine cross-source collision", () => {
     const staged = new Database(":memory:");
     staged.pragma("foreign_keys = ON");
+
     try {
       for (const file of migrationFiles().filter((name) => name < "0005")) {
         applyMigration(staged, file);
       }
+
       const now = Date.now();
+
       const insertUser = staged.prepare(
         "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?,?,?,?,?,?)",
       );
+
       insertUser.run("u1", "One", "u1@example.com", 1, now, now);
       insertUser.run("u2", "Two", "u2@example.com", 1, now, now);
       staged
@@ -972,6 +1031,7 @@ describe("0005 label-claim reconciliation", () => {
       const apply = staged.transaction(() => {
         applyMigration(staged, "0005_label_claim_triggers.sql");
       });
+
       expect(apply).toThrow(/label_claim_reconciliation_conflict/iu);
       expect(staged.prepare("SELECT label FROM label_claim").all()).toEqual([]);
       expect(

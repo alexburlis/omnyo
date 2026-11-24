@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import {
   commandRow,
   conversationRow,
@@ -23,12 +29,20 @@ const timelineTurnSummaryDetails = vi.mocked(
   sdk.threads.timelineTurnSummaryDetails,
 );
 
-function renderExpandedRow(row: TimelineRow) {
-  return renderRow(row, new Set([row.id]));
+function renderExpandedRow(
+  row: TimelineRow,
+  harness = createQueryClientTestHarness(),
+) {
+  return renderRow(row, new Set([row.id]), harness);
 }
 
-function renderRow(row: TimelineRow, initialExpanded: ReadonlySet<string>) {
-  const { wrapper: Wrapper } = createQueryClientTestHarness();
+function renderRow(
+  row: TimelineRow,
+  initialExpanded: ReadonlySet<string>,
+  harness = createQueryClientTestHarness(),
+) {
+  const { wrapper: Wrapper } = harness;
+
   return render(
     <MemoryRouter>
       <Wrapper>
@@ -50,9 +64,92 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe("deferred timeline details", () => {
+  it("reuses a small completed detail after the normal heavy-payload minute", async () => {
+    timelineTurnSummaryDetails.mockResolvedValue({
+      olderCursor: null,
+      rows: [
+        conversationRow({
+          id: "small-completed-detail",
+          text: "A retained completed answer.",
+          threadId: "thr_main",
+          turnId: "turn_1",
+        }),
+      ],
+    });
+    const harness = createQueryClientTestHarness();
+
+    const deferredTurn = turnRow({
+      sourceSeqEnd: 40,
+      threadId: "thr_main",
+      turnId: "turn_1",
+    });
+
+    const first = renderExpandedRow(deferredTurn, harness);
+    expect(
+      await screen.findByText("A retained completed answer."),
+    ).toBeTruthy();
+    vi.useFakeTimers();
+    first.unmount();
+    await act(async () => vi.advanceTimersByTimeAsync(65_000));
+
+    const returned = renderExpandedRow(deferredTurn, harness);
+    expect(screen.getByText("A retained completed answer.")).toBeTruthy();
+    expect(timelineTurnSummaryDetails).toHaveBeenCalledTimes(1);
+    returned.unmount();
+    vi.useRealTimers();
+  });
+
+  it("refetches an oversized completed detail after the one-minute heavy-payload window", async () => {
+    const largeOutput = "x".repeat(17 * 1024);
+
+    const deferredCommand: TimelineRow = {
+      ...commandRow({
+        id: "large-output",
+        command: "large-output",
+        output: "",
+        sourceSeqStart: 4,
+        sourceSeqEnd: 7,
+        status: "completed",
+        threadId: "thr_main",
+        turnId: "turn_1",
+      }),
+      contentDeferred: true,
+    };
+
+    timelineTurnSummaryDetails.mockResolvedValue({
+      olderCursor: null,
+      rows: [
+        commandRow({
+          id: "large-output",
+          command: "large-output",
+          output: largeOutput,
+          sourceSeqStart: 4,
+          sourceSeqEnd: 7,
+          status: "completed",
+          threadId: "thr_main",
+          turnId: "turn_1",
+        }),
+      ],
+    });
+    const harness = createQueryClientTestHarness();
+    const first = renderExpandedRow(deferredCommand, harness);
+    expect((await screen.findByText(/x{200}/)).textContent).toContain("x");
+    vi.useFakeTimers();
+    first.unmount();
+    await act(async () => vi.advanceTimersByTimeAsync(65_000));
+
+    vi.useRealTimers();
+    const returned = renderExpandedRow(deferredCommand, harness);
+    expect(await screen.findByText(/x{200}/)).toBeTruthy();
+    expect(timelineTurnSummaryDetails).toHaveBeenCalledTimes(2);
+    returned.unmount();
+    vi.useRealTimers();
+  });
+
   it("loads a settled delegation's children by call when it is expanded", async () => {
     const deferred = delegationRow({
       callId: "agent-call",
@@ -62,6 +159,7 @@ describe("deferred timeline details", () => {
       threadId: "thr_main",
       turnId: "turn_1",
     });
+
     timelineTurnSummaryDetails.mockResolvedValue({
       olderCursor: null,
       rows: [
@@ -156,6 +254,7 @@ describe("deferred timeline details", () => {
       threadId: "thr_main",
       turnId: "turn_1",
     });
+
     timelineTurnSummaryDetails.mockResolvedValue({
       olderCursor: null,
       rows: [loaded],
@@ -184,12 +283,14 @@ describe("deferred timeline details", () => {
       title: "Thought",
       turnId: "turn_1",
     });
+
     if (
       reasoning.systemKind !== "operation" ||
       reasoning.operationKind === "parent-change"
     ) {
       throw new Error("Expected a reasoning operation row");
     }
+
     const loaded = { ...reasoning, reasoningId: "reasoning-item" };
     timelineTurnSummaryDetails.mockResolvedValue({
       olderCursor: null,
@@ -211,12 +312,14 @@ describe("deferred timeline details", () => {
       olderCursor: null;
       rows: TimelineRow[];
     }) => void = () => {};
+
     timelineTurnSummaryDetails.mockImplementation(
       () =>
         new Promise((resolve) => {
           resolveDetails = resolve;
         }),
     );
+
     const running = commandRow({
       id: "cmd-streaming",
       command: "long-task",
@@ -227,7 +330,9 @@ describe("deferred timeline details", () => {
       threadId: "thr_main",
       turnId: "turn_1",
     });
+
     const { wrapper: Wrapper } = createQueryClientTestHarness();
+
     const renderRows = (rows: TimelineRow[]) => (
       <MemoryRouter>
         <Wrapper>
@@ -241,6 +346,7 @@ describe("deferred timeline details", () => {
         </Wrapper>
       </MemoryRouter>
     );
+
     const view = render(renderRows([running]));
     const streamed = await screen.findByText(/STREAMED LINE 1/);
 
@@ -287,6 +393,7 @@ describe("deferred timeline details", () => {
       threadId: "thr_main",
       turnId: "turn_1",
     });
+
     timelineTurnSummaryDetails.mockResolvedValue({
       olderCursor: null,
       rows: [loaded],

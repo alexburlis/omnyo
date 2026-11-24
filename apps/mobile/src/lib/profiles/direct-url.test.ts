@@ -3,9 +3,9 @@ import { validateDirectServerUrl } from "./direct-url";
 
 describe("validateDirectServerUrl", () => {
   it("accepts https to any host without a warning", () => {
-    expect(validateDirectServerUrl("https://mac.tail1234.ts.net/")).toEqual({
+    expect(validateDirectServerUrl("https://device-348a629f.example-tailnet.ts.net/")).toEqual({
       ok: true,
-      serverUrl: "https://mac.tail1234.ts.net",
+      serverUrl: "https://device-348a629f.example-tailnet.ts.net",
       warning: null,
     });
   });
@@ -39,7 +39,7 @@ describe("validateDirectServerUrl", () => {
   });
 
   it("rejects http to a domain name (ATS blocks it; users need the https URL)", () => {
-    expect(validateDirectServerUrl("http://mac.tail1234.ts.net")).toMatchObject(
+    expect(validateDirectServerUrl("http://device-348a629f.example-tailnet.ts.net")).toMatchObject(
       {
         ok: false,
         code: "http-domain",
@@ -52,7 +52,7 @@ describe("validateDirectServerUrl", () => {
       ok: false,
       code: "unsupported-scheme",
     });
-    expect(validateDirectServerUrl("bb://host")).toMatchObject({
+    expect(validateDirectServerUrl("omnyo://host")).toMatchObject({
       ok: false,
       code: "unsupported-scheme",
     });
@@ -72,10 +72,10 @@ describe("validateDirectServerUrl", () => {
 
   it("normalizes: trims, drops trailing slashes/search/hash, keeps a path prefix", () => {
     expect(
-      validateDirectServerUrl("  https://Host.example/bb/?x=1#y  "),
+      validateDirectServerUrl("  https://Host.example/omnyo/?x=1#y  "),
     ).toEqual({
       ok: true,
-      serverUrl: "https://host.example/bb",
+      serverUrl: "https://host.example/omnyo",
       warning: null,
     });
   });

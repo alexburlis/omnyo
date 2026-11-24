@@ -4,8 +4,7 @@ import { resolveGrokNativeRoots } from "./native-roots/grok.js";
 import { resolveHermesNativeRoots } from "./native-roots/hermes.js";
 import { resolveOmpNativeRoots } from "./native-roots/omp.js";
 import { resolveOpenCodeNativeRoots } from "./native-roots/opencode.js";
-
-const PLUGIN_ID = "bb--provider-acp-next";
+import { PLUGIN_ID } from "./plugin-id.js";
 
 function declaredIcon(name: string): string {
   return `${PLUGIN_ID}/${name}`;
@@ -15,12 +14,15 @@ const CLAUDE_SKILLS_ROOT = {
   path: ".claude/skills",
   skipIfManifest: ".claude-plugin/plugin.json",
 } as const;
+
 type RootEntry =
   | string
   | { readonly path: string; readonly skipIfManifest?: string };
+
 function entryOf(entry: RootEntry) {
   return typeof entry === "string" ? { path: entry } : entry;
 }
+
 function plainRoots(entries: readonly RootEntry[]) {
   return entries.map(entryOf);
 }

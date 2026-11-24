@@ -1,6 +1,9 @@
-import type { DiscoveredSkill, SkillRootKind } from "@bb/host-daemon-contract";
+import type {
+  DiscoveredSkill,
+  SkillRootKind,
+} from "@omnyo/host-daemon-contract";
 import { createHash } from "node:crypto";
-import type { SkillProvider } from "@bb/server-contract";
+import type { SkillProvider } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
   assembleSkillList,
@@ -18,22 +21,22 @@ describe("mapSkillScope", () => {
   }> = [
     {
       provider: "claude-code",
-      rootKind: "bb-project",
-      scope: "bb-project",
+      rootKind: "omnyo-project",
+      scope: "omnyo-project",
       listedProvider: null,
       manageable: true,
     },
     {
       provider: "claude-code",
-      rootKind: "bb-data-dir",
-      scope: "bb-user",
+      rootKind: "omnyo-data-dir",
+      scope: "omnyo-user",
       listedProvider: null,
       manageable: true,
     },
     {
       provider: "claude-code",
-      rootKind: "bb-builtin",
-      scope: "bb-builtin",
+      rootKind: "omnyo-builtin",
+      scope: "omnyo-builtin",
       listedProvider: null,
       manageable: false,
     },
@@ -110,21 +113,23 @@ describe("assembleSkillList", () => {
     };
   }
 
-  it("de-dupes a bb skill discovered under both providers", () => {
-    const bb = discovered(
+  it("de-dupes an Omnyo skill discovered under both providers", () => {
+    const sharedSkill = discovered(
       "shared",
-      "bb-data-dir",
+      "omnyo-data-dir",
       "/data/skills/shared/SKILL.md",
     );
+
     const result = assembleSkillList([
-      { provider: "claude-code", skills: [bb] },
-      { provider: "codex", skills: [bb] },
+      { provider: "claude-code", skills: [sharedSkill] },
+      { provider: "codex", skills: [sharedSkill] },
     ]);
+
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       name: "shared",
       provider: null,
-      scope: "bb-user",
+      scope: "omnyo-user",
     });
   });
 
@@ -138,7 +143,11 @@ describe("assembleSkillList", () => {
             "provider-user",
             "/home/.claude/skills/zed/SKILL.md",
           ),
-          discovered("alpha", "bb-project", "/cwd/.bb/skills/alpha/SKILL.md"),
+          discovered(
+            "alpha",
+            "omnyo-project",
+            "/cwd/.omnyo/skills/alpha/SKILL.md",
+          ),
         ],
       },
       {
@@ -152,11 +161,39 @@ describe("assembleSkillList", () => {
         ],
       },
     ]);
+
     expect(result.map((skill) => [skill.scope, skill.name])).toEqual([
-      ["bb-project", "alpha"],
+      ["omnyo-project", "alpha"],
       ["provider-user", "zed"],
       ["provider-user", "zed"],
     ]);
+  });
+
+  it("lists a provider skill root that several providers read as shared", () => {
+    const shared = discovered(
+      "omnyo-cli",
+      "provider-user",
+      "/home/.agents/skills/omnyo-cli/SKILL.md",
+    );
+
+    const cursorOnly = discovered(
+      "cursor-only",
+      "provider-user",
+      "/home/.cursor/skills/cursor-only/SKILL.md",
+    );
+
+    const result = assembleSkillList([
+      { provider: "acp-cursor", skills: [shared, cursorOnly] },
+      { provider: "codex", skills: [shared] },
+    ]);
+
+    expect(
+      result.map((skill) => [skill.name, skill.scope, skill.provider]),
+    ).toEqual([
+      ["omnyo-cli", "provider-user", null],
+      ["cursor-only", "provider-user", "acp-cursor"],
+    ]);
+    expect(result[0]?.manageable).toBe(true);
   });
 
   it("protects a Cursor skill discovered through a symlinked root", () => {

@@ -1,14 +1,14 @@
 import type { Hono } from "hono";
-import type { PromptHistoryPosition } from "@bb/db";
+import type { PromptHistoryPosition } from "@omnyo/db";
 import {
   PROMPT_HISTORY_PAGE_DEFAULT_LIMIT,
   PROMPT_HISTORY_PAGE_MAX_LIMIT,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   publicApiRoutes,
   typedRoutes,
   type PublicApiSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { ApiError } from "../errors.js";
 import { parseBoundedPositiveOptionalInteger } from "../services/lib/validation.js";
 import {
@@ -30,9 +30,12 @@ export function registerPromptHistoryRoutes(app: Hono, deps: AppDeps): void {
       name: "limit",
       value: query.limit,
     });
+
     let before: PromptHistoryPosition | null = null;
+
     if (query.cursor !== undefined) {
       before = decodePromptHistoryCursor(query.cursor);
+
       if (before === null) {
         throw new ApiError(
           400,
@@ -41,6 +44,7 @@ export function registerPromptHistoryRoutes(app: Hono, deps: AppDeps): void {
         );
       }
     }
+
     return context.json(listPromptHistory(deps, { before, limit }));
   });
 }

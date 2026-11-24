@@ -1,0 +1,27 @@
+diff --git a/ios/ExpoNotifications/Permissions/PermissionsModule.swift b/ios/ExpoNotifications/Permissions/PermissionsModule.swift
+index c98a625935915304adf44d7eee01de96dadcff2c..878f959f3a58b96d37ae9a06ec4405c242ed19d4 100644
+--- a/ios/ExpoNotifications/Permissions/PermissionsModule.swift
++++ b/ios/ExpoNotifications/Permissions/PermissionsModule.swift
+@@ -6,6 +6,7 @@ import UIKit
+ public class PermissionsModule: Module {
+   var permissionsManager: (any EXPermissionsInterface)?
+   let requester = ExpoNotificationsPermissionsRequester()
++  let permissionsQueue = DispatchQueue(label: "expo.modules.notifications.permissions")
+ 
+   public func definition() -> ModuleDefinition {
+     Name("ExpoNotificationPermissionsModule")
+@@ -25,6 +26,7 @@ public class PermissionsModule: Module {
+           reject: promise.legacyRejecter
+         )
+     }
++    .runOnQueue(permissionsQueue)
+ 
+     AsyncFunction("requestPermissionsAsync") { (requestedPermissions: NotificationPermissionRecord, promise: Promise) in
+       let defaultAuthorizationOptions: UNAuthorizationOptions = [.alert, .badge, .sound]
+@@ -46,5 +48,6 @@ public class PermissionsModule: Module {
+       }
+       requester.requestAuthorizationOptions(options, resolver: resolver, rejecter: promise.legacyRejecter)
+     }
++    .runOnQueue(permissionsQueue)
+   }
+ }

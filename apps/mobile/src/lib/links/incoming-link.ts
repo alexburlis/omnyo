@@ -1,6 +1,6 @@
 import { parseServerUrl } from "../shell/shell-url";
 
-const BB_URL_SCHEME = "bb";
+export const OMNYO_URL_SCHEMES: readonly string[] = ["omnyo"];
 
 export interface LinkProfileLike {
   id: string;
@@ -34,6 +34,7 @@ export function pathMatchesPrefix(
   prefixes: readonly string[],
 ): boolean {
   const pathname = path.split("?", 1)[0] ?? "";
+
   return prefixes.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
@@ -51,10 +52,13 @@ function splitPathAndSearch(rest: string): {
 } {
   const withoutHash = rest.split("#", 1)[0] ?? "";
   const queryIndex = withoutHash.indexOf("?");
+
   const rawPath =
     queryIndex === -1 ? withoutHash : withoutHash.slice(0, queryIndex);
+
   const search = queryIndex === -1 ? "" : withoutHash.slice(queryIndex);
   const pathname = `/${rawPath.replace(/^\/+/u, "")}`;
+
   return {
     pathname: pathname.length > 1 ? pathname.replace(/\/+$/u, "") : "/",
     search,
@@ -63,21 +67,28 @@ function splitPathAndSearch(rest: string): {
 
 export function parseIncomingLink(
   url: string,
-  scheme: string = BB_URL_SCHEME,
+  schemes: readonly string[] = OMNYO_URL_SCHEMES,
 ): IncomingLink {
   const match = SCHEME_URL_PATTERN.exec(url.trim());
+
   if (!match) return { kind: "foreign" };
   const [, protocol, rest] = match;
+
   if (!protocol || rest === undefined) return { kind: "foreign" };
-  if (protocol.toLowerCase() === scheme) {
+
+  if (schemes.includes(protocol.toLowerCase())) {
     const { pathname, search } = splitPathAndSearch(rest);
+
     return { kind: "scheme", path: `${pathname}${search}` };
   }
+
   if (protocol === "http" || protocol === "https") {
     try {
       const parsed = new URL(url.trim());
+
       const pathname =
         parsed.pathname.length > 1 ? parsed.pathname.replace(/\/+$/u, "") : "/";
+
       return {
         kind: "web",
         origin: parsed.origin,
@@ -88,40 +99,48 @@ export function parseIncomingLink(
       return { kind: "foreign" };
     }
   }
+
   return { kind: "foreign" };
 }
 
-interface ProfileMatch {
-  profile: LinkProfileLike;
+interface ProfileMatch<Profile extends LinkProfileLike> {
+  profile: Profile;
   pathname: string;
 }
 
-export function matchProfileForWebLink(
-  profiles: readonly LinkProfileLike[],
+export function matchProfileForWebLink<Profile extends LinkProfileLike>(
+  profiles: readonly Profile[],
   origin: string,
   pathname: string,
-): ProfileMatch | null {
-  let best: ProfileMatch | null = null;
+): ProfileMatch<Profile> | null {
+  let best: ProfileMatch<Profile> | null = null;
   let bestPrefixLength = -1;
+
   for (const profile of profiles) {
     const parsed = parseServerUrl(profile.serverUrl);
+
     if (!parsed || parsed.origin !== origin) continue;
     const { prefix } = parsed;
+
     const inside =
       prefix.length === 0 ||
       pathname === prefix ||
       pathname.startsWith(`${prefix}/`);
+
     if (!inside || prefix.length <= bestPrefixLength) continue;
     bestPrefixLength = prefix.length;
     const remainder = pathname.slice(prefix.length);
     best = { profile, pathname: remainder.length > 0 ? remainder : "/" };
   }
+
   return best;
 }
 
 export function addServerPathForLink(serverUrl: string, next: string): string {
   const params = new URLSearchParams();
   params.set("serverUrl", serverUrl);
+
   if (next !== "/") params.set("next", next);
+
   return `${ADD_SERVER_PATH}?${params.toString()}`;
 }

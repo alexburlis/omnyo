@@ -30,19 +30,24 @@ function AgentMessageWithMenu({
   handlers?: Handlers;
 }) {
   const spanRef = useRef<HTMLSpanElement>(null);
+
   const [selection, setSelection] = useState<MessageProseSelection | null>(
     null,
   );
 
   useLayoutEffect(() => {
     const el = spanRef.current;
+
     if (!el) return;
+
     const measure = () =>
       setSelection({ text: selected, rect: el.getBoundingClientRect() });
+
     measure();
     const raf = requestAnimationFrame(measure);
     window.addEventListener("resize", measure);
     window.addEventListener("scroll", measure, true);
+
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", measure);
@@ -55,11 +60,8 @@ function AgentMessageWithMenu({
   const after = start >= 0 ? text.slice(start + selected.length) : "";
 
   return (
-    <div
-      data-thread-window
-      className="relative w-full overflow-hidden rounded-md border bg-background p-3"
-    >
-      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-subtle-foreground">
+    <div className="relative w-full overflow-hidden rounded-md border bg-background p-3">
+      <p className="mb-1 text-2xs font-semibold uppercase tracking-wide text-subtle-foreground">
         Agent
       </p>
       <div className="group/message text-sm leading-relaxed">
@@ -116,6 +118,7 @@ export function CompactViewport() {
 
 export function Interactive() {
   const [log, setLog] = useState<string[]>([]);
+
   const push = (entry: string) =>
     setLog((prev) => [entry, ...prev].slice(0, 6));
 

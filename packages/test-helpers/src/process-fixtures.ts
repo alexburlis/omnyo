@@ -17,12 +17,14 @@ export async function resolveProjectEnvCandidates(
 
   try {
     const gitMetadata = await fs.stat(gitMetadataPath);
+
     if (!gitMetadata.isFile()) {
       return [...candidates];
     }
 
     const gitdirPointer = await fs.readFile(gitMetadataPath, "utf8");
     const match = /^gitdir:\s*(.+)\s*$/m.exec(gitdirPointer);
+
     if (!match?.[1]) {
       return [...candidates];
     }
@@ -34,6 +36,7 @@ export async function resolveProjectEnvCandidates(
     if (readErrorCode(error) === "ENOENT") {
       return [...candidates];
     }
+
     throw error;
   }
 
@@ -45,15 +48,18 @@ export async function listOpenFilePids(targetPath: string): Promise<number[]> {
     const { stdout } = await execFile("lsof", ["-t", "+D", targetPath], {
       encoding: "utf8",
     });
+
     return stdout
       .split("\n")
       .map((value) => Number.parseInt(value.trim(), 10))
       .filter((value) => Number.isInteger(value) && value > 0);
   } catch (error) {
     const code = readErrorCode(error);
+
     if (code === "ENOENT" || code === 1) {
       return [];
     }
+
     throw error;
   }
 }
@@ -64,11 +70,13 @@ export async function readPositivePidFile(
   try {
     const rawPid = await fs.readFile(filePath, "utf8");
     const pid = Number.parseInt(rawPid.trim(), 10);
+
     return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch (error) {
     if (readErrorCode(error) === "ENOENT") {
       return null;
     }
+
     throw error;
   }
 }

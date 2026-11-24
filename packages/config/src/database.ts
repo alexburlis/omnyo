@@ -17,9 +17,10 @@ export function loadDatabaseConfig(
   args: LoadDatabaseConfigArgs = {},
 ): DatabaseConfig {
   const commonConfig = args.commonConfig ?? loadCommonConfig(args);
+
   return {
     databasePath: resolveDataDirDatabasePath({
-      dataDir: commonConfig.BB_DATA_DIR,
+      dataDir: commonConfig.OMNYO_DATA_DIR,
     }),
   };
 }

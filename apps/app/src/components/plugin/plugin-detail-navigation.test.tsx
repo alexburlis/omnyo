@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { arrayMove } from "@bb/client-core";
+import { arrayMove } from "@omnyo/client-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ThreadSecondaryPanelProps } from "@/components/secondary-panel/ThreadSecondaryPanel";
 import {
@@ -20,8 +20,11 @@ import { useThreadFileTabs } from "@/components/secondary-panel/useThreadFileTab
 import { resetFixedPanelTabsStateForTest } from "@/lib/fixed-panel-tabs";
 
 const selectExisting = vi.fn();
+
 const closePanel = vi.fn();
+
 const existingTab = { id: "new-tab:existing", kind: "new-tab" as const };
+
 const baseProps: ThreadSecondaryPanelProps = {
   activeTab: existingTab,
   canUseGitUi: false,
@@ -57,6 +60,7 @@ function PanelProbe({
   input?: ThreadSecondaryPanelProps;
 }) {
   const props = usePluginDetailPanelProps(input);
+
   return (
     <div
       data-testid={id}
@@ -96,6 +100,7 @@ function PanelProbe({
 
 function ReorderingWorkspace() {
   const state = usePluginDetailPanelState("reordering", true, "reordering");
+
   const [tabs, setTabs] = useState([
     baseProps.tabs[0],
     {
@@ -104,6 +109,7 @@ function ReorderingWorkspace() {
       tab: { id: "new-tab:another", kind: "new-tab" as const },
     },
   ]);
+
   return (
     <PluginDetailPanelContext.Provider value={state}>
       <button
@@ -118,6 +124,7 @@ function ReorderingWorkspace() {
             ]),
             true,
           );
+
           if (entry?.kind === "plugin-detail") state.restore(entry);
         }}
       >
@@ -131,6 +138,7 @@ function ReorderingWorkspace() {
           onTabReorder: ({ activeTabId, overTabId }) => {
             const from = tabs.findIndex((tab) => tab.tab.id === activeTabId);
             const to = tabs.findIndex((tab) => tab.tab.id === overTabId);
+
             if (from !== -1 && to !== -1) setTabs(arrayMove(tabs, from, to));
           },
         }}
@@ -149,6 +157,7 @@ function Workspace({
   revision?: string;
 }) {
   const state = usePluginDetailPanelState(revision, focused);
+
   return (
     <PluginDetailPanelContext.Provider value={state}>
       <PanelProbe id={id} />
@@ -164,6 +173,7 @@ function HistoryWorkspace() {
     storageFiles: undefined,
     terminalSessions: undefined,
   });
+
   const details = usePluginDetailPanelState(
     "combined-history",
     true,
@@ -173,6 +183,7 @@ function HistoryWorkspace() {
       environmentId: "env-1",
     }),
   );
+
   return (
     <PluginDetailPanelContext.Provider value={details}>
       <button
@@ -245,9 +256,11 @@ describe("plugin details in the active workspace", () => {
       act(() =>
         openPluginDetailsInWorkspace({ pluginId: "docs", title: "Docs" }),
       );
+
       if (scenario === "mixed") {
         act(() => screen.getByRole("button", { name: "Close A.md" }).click());
       }
+
       act(() =>
         screen
           .getByRole("button", {
@@ -256,16 +269,20 @@ describe("plugin details in the active workspace", () => {
           })
           .click(),
       );
+
       if (scenario === "remount") {
         view.unmount();
         renderHistoryWorkspace();
       }
+
       act(() => screen.getByRole("button", { name: "Restore latest" }).click());
+
       if (scenario === "mixed") {
         act(() =>
           screen.getByRole("button", { name: "Restore latest" }).click(),
         );
       }
+
       expect(
         screen
           .getAllByRole("button", { name: /^Move .* left$/ })
@@ -283,11 +300,13 @@ describe("plugin details in the active workspace", () => {
       act(() =>
         openPluginDetailsInWorkspace({ pluginId: "tasks", title: "Tasks" }),
       );
+
       if (reordered) {
         act(() =>
           screen.getByRole("button", { name: "Move Docs left" }).click(),
         );
       }
+
       act(() => screen.getByRole("button", { name: "Close Docs" }).click());
       act(() => screen.getByRole("button", { name: "Close Tasks" }).click());
       act(() =>
@@ -355,10 +374,12 @@ describe("plugin details in the active workspace", () => {
     act(() =>
       openPluginDetailsInWorkspace({ pluginId: "tasks", title: "Tasks" }),
     );
+
     const order = () =>
       screen
         .getAllByRole("button", { name: /^Move .* left$/ })
         .map((button) => button.textContent);
+
     act(() => screen.getByRole("button", { name: "Move Tasks left" }).click());
     expect(order()).toEqual([
       "Move Existing tab left",
@@ -418,6 +439,7 @@ describe("plugin details in the active workspace", () => {
         <Workspace id="right" focused={false} />
       </>,
     );
+
     act(() =>
       openPluginDetailsInWorkspace({ pluginId: "docs", title: "Docs" }),
     );

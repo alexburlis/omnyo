@@ -1,14 +1,21 @@
-import { memo, useState } from "react";
+import { memo, useState, type CSSProperties } from "react";
 import type {
   Label,
   Project,
   Task,
   TaskThread,
 } from "../../shared/contract.js";
+import { TaskWorkingDot } from "../../components/working-dot.js";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import type { TaskRowMeta } from "./data.js";
-import { activeWorkLabel, formatDueDate, partitionLabels } from "./lib.js";
+import {
+  activeWorkLabel,
+  dueUrgency,
+  formatDueDate,
+  partitionLabels,
+  type DueUrgency,
+} from "./lib.js";
 import type { EditFn } from "./property-menus.js";
 import {
   isBareKey,
@@ -22,13 +29,68 @@ const RAIL_CHIP_CLASS =
 
 function ActiveChip({ threads }: { threads: readonly TaskThread[] }) {
   if (threads.length === 0) return null;
+
   return (
     <span title={activeWorkLabel(threads)} className={RAIL_CHIP_CLASS}>
+      <TaskWorkingDot />
+      Active
+    </span>
+  );
+}
+
+const DUE_CHIP_CLASS: Record<DueUrgency, string> = {
+  overdue:
+    "border-surface-destructive-border bg-surface-destructive text-destructive-text",
+  today: "border-transparent bg-surface-attention text-foreground",
+  upcoming: "",
+};
+
+const DUE_PREFIX: Record<DueUrgency, string | null> = {
+  overdue: "Overdue",
+  today: "Due today",
+  upcoming: null,
+};
+
+export function DueChip({ task, dueDate }: { task: Task; dueDate: string }) {
+  const urgency = dueUrgency(dueDate, task.status);
+  const prefix = DUE_PREFIX[urgency];
+  const date = formatDueDate(dueDate);
+
+  return (
+    <span
+      title={prefix === null ? `Due ${date}` : `${prefix} · ${date}`}
+      className={cn(
+        RAIL_CHIP_CLASS,
+        "shrink-0 tabular-nums",
+        DUE_CHIP_CLASS[urgency],
+      )}
+    >
+      <Icon
+        name={urgency === "overdue" ? "AlertCircle" : "Clock"}
+        className="size-3 shrink-0"
+      />
+      {prefix === null ? null : (
+        <span className="hidden @2xl:inline">{prefix} ·</span>
+      )}
+      {date}
+    </span>
+  );
+}
+
+function ProjectChip({ project }: { project: Project }) {
+  return (
+    <span
+      title={project.name}
+      className="flex min-w-0 shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+    >
       <span
         aria-hidden
-        className="size-1.5 shrink-0 animate-pulse rounded-full bg-success"
+        className="size-2.5 shrink-0 rounded-sm"
+        style={{ backgroundColor: project.color }}
       />
-      Active
+      <span className="sr-only @3xl:not-sr-only @3xl:max-w-28 @3xl:truncate">
+        {project.name}
+      </span>
     </span>
   );
 }
@@ -54,6 +116,7 @@ function LabelChipRow({
   maxVisible: number;
 }) {
   const { visible, hidden } = partitionLabels(labels, maxVisible);
+
   return (
     <>
       {visible.map((label) => (
@@ -79,7 +142,9 @@ function LabelChips({
   labelsById: Map<string, Label>;
 }) {
   const labels = task.labelIds.flatMap((id) => labelsById.get(id) ?? []);
+
   if (labels.length === 0) return null;
+
   return (
     <>
       <span className="hidden items-center gap-1.5 @xl:flex">
@@ -104,6 +169,8 @@ interface TaskRowProps {
   onMoveToProject: (task: Task, projectId: string) => void;
   onOpen: (taskKey: string) => void;
   pending: boolean;
+  className?: string;
+  style?: CSSProperties;
 }
 
 export const TaskRow = memo(function TaskRow({
@@ -118,6 +185,8 @@ export const TaskRow = memo(function TaskRow({
   onMoveToProject,
   onOpen,
   pending,
+  className,
+  style,
 }: TaskRowProps) {
   const [openMenu, setOpenMenu] = useState<"status" | "priority" | null>(null);
 
@@ -136,7 +205,9 @@ export const TaskRow = memo(function TaskRow({
           "relative grid w-full grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 border-b border-border-hairline px-3.5 py-1.5 text-left transition-opacity hover:bg-state-hover",
           "@md:flex @md:h-[34px] @md:py-0",
           pending && "opacity-70",
+          className,
         )}
+        style={style}
       >
         <button
           type="button"
@@ -145,6 +216,7 @@ export const TaskRow = memo(function TaskRow({
           onKeyDown={(event) => {
             if (!isBareKey(event)) return;
             const key = event.key.toLowerCase();
+
             if (key === "s") {
               event.preventDefault();
               setOpenMenu("status");
@@ -179,18 +251,10 @@ export const TaskRow = memo(function TaskRow({
           {meta ? <ActiveChip threads={meta.activeThreads} /> : null}
           <LabelChips task={task} labelsById={labelsById} />
           {task.dueDate !== null ? (
-            <span className={`${RAIL_CHIP_CLASS} shrink-0 tabular-nums`}>
-              <Icon name="Clock" className="size-3 shrink-0" />
-              {formatDueDate(task.dueDate)}
-            </span>
+            <DueChip task={task} dueDate={task.dueDate} />
           ) : null}
           {showProject && project !== undefined ? (
-            <span
-              aria-hidden
-              title={project.name}
-              className="size-2.5 shrink-0 rounded-sm"
-              style={{ backgroundColor: project.color }}
-            />
+            <ProjectChip project={project} />
           ) : null}
         </span>
       </div>

@@ -1,4 +1,4 @@
-import type { IconName } from "@bb/shared-ui/icon";
+import type { IconName } from "@omnyo/shared-ui/icon";
 
 interface GetFileNameFromPathArgs {
   path: string;
@@ -20,6 +20,7 @@ export function getFileNameFromPath({ path }: GetFileNameFromPathArgs): string {
 function getFileExtension({ path }: GetFileExtensionArgs): string {
   const name = getFileNameFromPath({ path });
   const dotIndex = name.lastIndexOf(".");
+
   return dotIndex <= 0 ? "" : name.slice(dotIndex + 1).toLowerCase();
 }
 
@@ -39,11 +40,14 @@ export function resolveRightPanelFileIconName(path: string): IconName {
   if (inReports && (isMarkdown || isHtml)) {
     return "ChartColumn";
   }
+
   if (isMarkdown) {
     return "File";
   }
+
   if (isHtml) {
     return "AppWindow";
   }
+
   return "Code";
 }

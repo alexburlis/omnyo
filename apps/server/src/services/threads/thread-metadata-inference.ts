@@ -1,4 +1,4 @@
-import type { PromptInput, ProvisioningTranscriptEntry } from "@bb/domain";
+import type { PromptInput, ProvisioningTranscriptEntry } from "@omnyo/domain";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { appendThreadProvisioningEvent } from "./thread-events.js";
 import {
@@ -29,6 +29,7 @@ function metadataCompletedEntry(
   args: MetadataCompletedEntryArgs,
 ): ProvisioningTranscriptEntry {
   const titleGenerated = Boolean(args.outcome.metadata?.title);
+
   return {
     type: "step",
     key: "metadata-completed",
@@ -49,6 +50,7 @@ export async function inferThreadMetadata(
 ): Promise<ThreadMetadataInferenceResult> {
   const startedAt = Date.now();
   const provisioningId = args.provisioningId;
+
   if (args.writeTranscript) {
     appendThreadProvisioningEvent(deps, {
       threadId: args.threadId,
@@ -83,6 +85,7 @@ export async function inferThreadMetadata(
   }
 
   let titleApplied = false;
+
   if (outcome.metadata?.title) {
     try {
       titleApplied = applyGeneratedThreadTitle(deps, {

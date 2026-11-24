@@ -88,19 +88,32 @@ describe("resolveAutomationBreadcrumbs", () => {
       resolveAutomationBreadcrumbs("/plugins/automations/automations"),
     ).toEqual([
       {
-        label: "Automations",
+        label: "Workflows",
         to: "/plugins/automations/automations",
       },
-      { label: "Installed" },
     ]);
     expect(
       resolveAutomationBreadcrumbs("/plugins/automations/automations/browse"),
     ).toEqual([
       {
-        label: "Automations",
+        label: "Workflows",
         to: "/plugins/automations/automations",
       },
       { label: "Browse" },
+    ]);
+  });
+
+  it("resolves graph and package routes before automation detail routes", () => {
+    const root = "/plugins/automations/automations";
+    expect(resolveAutomationBreadcrumbs(`${root}/graphs/new`)).toEqual([
+      { label: "Workflows", to: root },
+      { label: "State machines", to: `${root}/graphs` },
+    ]);
+    expect(
+      resolveAutomationBreadcrumbs(`${root}/copies/proj_1/import_1`),
+    ).toEqual([
+      { label: "Workflows", to: root },
+      { label: "Installed workflows", to: `${root}/copies` },
     ]);
   });
 
@@ -110,22 +123,22 @@ describe("resolveAutomationBreadcrumbs", () => {
 
     expect(resolveAutomationBreadcrumbs(detailPath)).toEqual([
       {
-        label: "Automations",
+        label: "Workflows",
         to: "/plugins/automations/automations",
       },
       {
-        label: "Installed",
+        label: "Automations",
         to: "/plugins/automations/automations",
       },
       { label: "weekly-review" },
     ]);
     expect(resolveAutomationBreadcrumbs(detailPath, "Weekly review")).toEqual([
       {
-        label: "Automations",
+        label: "Workflows",
         to: "/plugins/automations/automations",
       },
       {
-        label: "Installed",
+        label: "Automations",
         to: "/plugins/automations/automations",
       },
       { label: "Weekly review" },
@@ -134,11 +147,11 @@ describe("resolveAutomationBreadcrumbs", () => {
       resolveAutomationBreadcrumbs(`${detailPath}/edit`, "Weekly review"),
     ).toEqual([
       {
-        label: "Automations",
+        label: "Workflows",
         to: "/plugins/automations/automations",
       },
       {
-        label: "Installed",
+        label: "Automations",
         to: "/plugins/automations/automations",
       },
       { label: "Weekly review" },

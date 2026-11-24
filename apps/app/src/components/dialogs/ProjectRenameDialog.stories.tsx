@@ -14,8 +14,8 @@ export default {
 const noop = () => {};
 
 const target: ProjectRenameDialogTarget = {
-  id: PROJECT_IDS.bb,
-  currentName: PROJECT_NAMES.bb,
+  id: PROJECT_IDS.omnyo,
+  currentName: PROJECT_NAMES.omnyo,
 };
 
 const longTarget: ProjectRenameDialogTarget = {
@@ -30,6 +30,7 @@ const emptyTarget: ProjectRenameDialogTarget = {
 
 export function Overview() {
   const inputRef = useRef<HTMLInputElement | null>(null);
+
   return (
     <StoryCard>
       <StoryRow label="default" hint="standard project name in the input">

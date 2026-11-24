@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Host } from "@bb/domain";
+import type { Host } from "@omnyo/domain";
 import type {
   ServerMoveCheckResponse,
   ServerMoveStatus,
   ServerMoveStatusResponse,
   ServerMoveStep,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   collectLogPayloads,
   readlineMocks,
@@ -34,8 +34,10 @@ const desktop: Host = {
     teardown: null,
   },
   maxPermissionMode: "full",
+  availability: "available",
   lastSeenAt: 1_700_000_000_000,
   lastRejectedProtocolVersion: null,
+  runtimeVersion: null,
   createdAt: 1,
   updatedAt: 2,
 };
@@ -49,7 +51,7 @@ function check(
     mode: "connect",
     serverUrl: null,
     requiresServerUrl: false,
-    targetDataDir: "/home/me/.bb-machines/laptop",
+    targetDataDir: "/home/me/.omnyo-machines/laptop",
     existingTargetServerData: null,
     items: [
       {
@@ -86,13 +88,14 @@ function moveStatus(
     "verify-address",
     "switch",
   ];
+
   return {
     moveId: "move-1",
     state,
     mode: "connect",
     targetHostId: desktop.id,
     targetHostName: desktop.name,
-    serverUrl: "https://me.getbb.app",
+    serverUrl: "https://me.example.test",
     destinationStatusUrl: null,
     startedAt: 1_700_000_000_000,
     finishedAt: null,
@@ -140,10 +143,10 @@ function recovering(): ServerMoveStatus {
 }
 
 const RECOVERY_GUIDANCE = [
-  "bb couldn't confirm that desktop took over (desktop disconnected before confirming).",
-  "This server stays up but read-only, and bb finishes the move on its own as soon as desktop answers.",
-  "If desktop isn't running the server, run bb server move cancel --yes to abandon the move and keep the server here.",
-  "If this server stops, run bb server unlock on this computer.",
+  "Omnyo couldn't confirm that desktop took over (desktop disconnected before confirming).",
+  "This server stays up but read-only, and Omnyo finishes the move on its own as soon as desktop answers.",
+  "If desktop isn't running the server, run omnyo server move cancel --yes to abandon the move and keep the server here.",
+  "If this server stops, run omnyo server unlock on this computer.",
 ];
 
 function statusResponse(
@@ -160,7 +163,7 @@ function errorResponse(status: number, body: object): Response {
   });
 }
 
-describe("bb server move", () => {
+describe("omnyo server move", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -188,8 +191,8 @@ describe("bb server move", () => {
     });
     expect(startMove).not.toHaveBeenCalled();
     expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
-      "Moving the bb server to desktop (bb connect)",
-      "Target data directory: /home/me/.bb-machines/laptop",
+      "Moving the Omnyo server to desktop (Omnyo connect)",
+      "Target data directory: /home/me/.omnyo-machines/laptop",
       "",
       "Warnings",
       "  - 2 turns are running",
@@ -267,7 +270,7 @@ describe("bb server move", () => {
 
     expect(startMove).not.toHaveBeenCalled();
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
-      "Error: This bb server uses a direct address, so the new server needs one too. Re-run with --address <url>: the URL every machine and app will use to reach bb on desktop, such as a Tailscale Serve URL.",
+      "Error: This Omnyo server uses a direct address, so the new server needs one too. Re-run with --address <url>: the URL every machine and app will use to reach Omnyo on desktop, such as a Tailscale Serve URL.",
     ]);
   });
 
@@ -278,7 +281,7 @@ describe("bb server move", () => {
       "v1.server.move.check.$post": vi.fn(async () =>
         check({
           existingTargetServerData: {
-            path: "/home/me/.bb",
+            path: "/home/me/.omnyo",
             sizeBytes: 5 * 1024 * 1024,
           },
         }),
@@ -292,7 +295,7 @@ describe("bb server move", () => {
 
     expect(startMove).not.toHaveBeenCalled();
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
-      "Error: desktop already has bb server data at /home/me/.bb (5.0 MB). Re-run with --archive-existing-data to move it aside to a .before-move-<date> directory; it is never merged.",
+      "Error: desktop already has Omnyo server data at /home/me/.omnyo (5.0 MB). Re-run with --archive-existing-data to move it aside to a .before-move-<date> directory; it is never merged.",
     ]);
   });
 
@@ -301,6 +304,7 @@ describe("bb server move", () => {
       mode: "direct" as const,
       serverUrl: "https://desk.ts.net",
     };
+
     const startMove = vi.fn(async () =>
       moveStatus(
         "preparing",
@@ -308,6 +312,7 @@ describe("bb server move", () => {
         direct,
       ),
     );
+
     const getStatus = vi
       .fn()
       .mockResolvedValueOnce(
@@ -355,6 +360,7 @@ describe("bb server move", () => {
           ),
         ),
       );
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [desktop]),
       "v1.server.move.check.$post": vi.fn(async () =>
@@ -362,7 +368,7 @@ describe("bb server move", () => {
           mode: "direct",
           requiresServerUrl: true,
           serverUrl: direct.serverUrl,
-          existingTargetServerData: { path: "/home/me/.bb", sizeBytes: 10 },
+          existingTargetServerData: { path: "/home/me/.omnyo", sizeBytes: 10 },
         }),
       ),
       "v1.server.move.$post": startMove,
@@ -384,7 +390,7 @@ describe("bb server move", () => {
     );
 
     expect(readlineMocks.question).toHaveBeenCalledWith(
-      "Stop all running work and move the bb server to desktop? [y/N] ",
+      "Stop all running work and move the Omnyo server to desktop? [y/N] ",
     );
     expect(startMove).toHaveBeenCalledWith({
       json: {
@@ -401,7 +407,7 @@ describe("bb server move", () => {
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
       "[running] Stop running work",
       "[done] Stop running work",
-      "[skipped] Update bb on desktop",
+      "[skipped] Update Omnyo on desktop",
       "[done] Export server data",
       "[running] Send data to desktop: Sent 212 MB of 480 MB",
       "[done] Send data to desktop",
@@ -453,6 +459,7 @@ describe("bb server move", () => {
       "stop-work": step("stop-work", "done"),
       switch: step("switch", "running"),
     });
+
     const getStatus = vi
       .fn()
       .mockResolvedValueOnce(statusResponse(switching))
@@ -463,6 +470,7 @@ describe("bb server move", () => {
           }),
         }),
       );
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [desktop]),
       "v1.server.move.check.$post": vi.fn(async () => check()),
@@ -500,6 +508,7 @@ describe("bb server move", () => {
           oldCopyDeletedAt: null,
         }),
       );
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [desktop]),
       "v1.server.move.check.$post": vi.fn(async () => check()),
@@ -510,7 +519,7 @@ describe("bb server move", () => {
     await runCommand(["server", "move", "--to", "desktop", "--yes"], register);
 
     expect(collectLogPayloads(vi.mocked(console.log)).at(-1)).toBe(
-      "The server moved to desktop: https://me.getbb.app",
+      "The server moved to desktop: https://me.example.test",
     );
   });
 
@@ -522,9 +531,9 @@ describe("bb server move", () => {
       "v1.server.move.$get": vi.fn(async () =>
         errorResponse(410, {
           code: "server_moved",
-          message: "This bb server moved to desktop",
+          message: "This Omnyo server moved to desktop",
           details: {
-            serverUrl: "https://me.getbb.app",
+            serverUrl: "https://me.example.test",
             toHostName: "desktop",
             movedAt: 1_700_000_100_000,
           },
@@ -535,7 +544,7 @@ describe("bb server move", () => {
     await runCommand(["server", "move", "--to", "desktop", "--yes"], register);
 
     expect(collectLogPayloads(vi.mocked(console.log)).at(-1)).toBe(
-      "The server moved to desktop: https://me.getbb.app",
+      "The server moved to desktop: https://me.example.test",
     );
   });
 
@@ -551,6 +560,7 @@ describe("bb server move", () => {
         finishedAt: 1_700_000_100_000,
       },
     );
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [desktop]),
       "v1.server.move.check.$post": vi.fn(async () => check()),
@@ -566,7 +576,7 @@ describe("bb server move", () => {
       'Error: The server move failed at "Send data to desktop": Download digest mismatch',
     );
     expect(collectLogPayloads(vi.mocked(console.log))).not.toContain(
-      "The server moved to desktop: https://me.getbb.app",
+      "The server moved to desktop: https://me.example.test",
     );
   });
 
@@ -628,7 +638,7 @@ describe("bb server move", () => {
     ).rejects.toThrow("process.exit:1");
 
     expect(collectLogPayloads(vi.mocked(console.error)).at(-1)).toBe(
-      "Error: The bb server no longer reports this move. A server restart before the switch abandons the move and keeps the server where it was.",
+      "Error: The Omnyo server no longer reports this move. A server restart before the switch abandons the move and keeps the server where it was.",
     );
   });
 
@@ -636,6 +646,7 @@ describe("bb server move", () => {
     const getStatus = vi.fn(async () => {
       throw new Error("socket hang up");
     });
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [desktop]),
       "v1.server.move.check.$post": vi.fn(async () => check()),
@@ -649,7 +660,7 @@ describe("bb server move", () => {
 
     expect(getStatus).toHaveBeenCalledTimes(5);
     expect(collectLogPayloads(vi.mocked(console.error)).at(-1)).toBe(
-      "Error: Lost contact with the bb server before the switch (socket hang up). Run bb server move status once it answers again.",
+      "Error: Lost contact with the Omnyo server before the switch (socket hang up). Run omnyo server move status once it answers again.",
     );
   });
 
@@ -694,7 +705,7 @@ describe("bb server move", () => {
           errorResponse(403, {
             code: "server_move_experiment_disabled",
             message:
-              'Moving the server is off. Turn on the "Server move" experiment in Settings → Experiments, or run bb settings experiment serverMove true, then try again.',
+              "Moving the server is off. Run omnyo settings experiment serverMove true, then try again.",
           }),
         ),
         "v1.server.move.$post": startMove,
@@ -708,8 +719,10 @@ describe("bb server move", () => {
       ).rejects.toThrow("process.exit:1");
 
       expect(startMove).not.toHaveBeenCalled();
+
       const message =
-        'Moving the server is off. Turn on the "Server move" experiment in Settings → Experiments, or run bb settings experiment serverMove true, then try again.';
+        "Moving the server is off. Run omnyo settings experiment serverMove true, then try again.";
+
       expect(
         collectLogPayloads(vi.mocked(console.log)).map((payload) =>
           JSON.parse(payload),
@@ -737,7 +750,7 @@ describe("bb server move", () => {
   });
 });
 
-describe("bb server move status and cancel", () => {
+describe("omnyo server move status and cancel", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -752,7 +765,7 @@ describe("bb server move status and cancel", () => {
         statusResponse(
           moveStatus("preparing", {
             "stop-work": step("stop-work", "done"),
-            export: step("export", "running", "Snapshotting bb.db"),
+            export: step("export", "running", "Snapshotting app.db"),
           }),
         ),
       ),
@@ -761,13 +774,13 @@ describe("bb server move status and cancel", () => {
     await runCommand(["server", "move", "status"], register);
 
     const payloads = collectLogPayloads(vi.mocked(console.log));
-    expect(payloads[0]).toBe("Moving the bb server to desktop (preparing)");
+    expect(payloads[0]).toBe("Moving the Omnyo server to desktop (preparing)");
     expect(payloads).toContain("  done     Stop running work");
     expect(payloads).toContain(
-      "  running  Export server data: Snapshotting bb.db",
+      "  running  Export server data: Snapshotting app.db",
     );
     expect(payloads).toContain("  pending  Switch machines over");
-    expect(payloads.at(-1)).toBe("Cancel it with bb server move cancel.");
+    expect(payloads.at(-1)).toBe("Cancel it with omnyo server move cancel.");
   });
 
   it("status --json passes the subcommand's own flag through to JSON output", async () => {
@@ -814,13 +827,13 @@ describe("bb server move status and cancel", () => {
 
     const payloads = collectLogPayloads(vi.mocked(console.log));
     expect(payloads[0]).toBe(
-      "Moving the bb server to desktop (recovery required)",
+      "Moving the Omnyo server to desktop (recovery required)",
     );
     expect(payloads).toContain(
       "  running  Switch machines over: Waiting for desktop to confirm it took over",
     );
     expect(payloads.slice(-4)).toEqual(RECOVERY_GUIDANCE);
-    expect(payloads).not.toContain("Cancel it with bb server move cancel.");
+    expect(payloads).not.toContain("Cancel it with omnyo server move cancel.");
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
       "Error: The move to desktop wasn't confirmed and needs recovery.",
     ]);
@@ -847,6 +860,7 @@ describe("bb server move status and cancel", () => {
         { error: { step: "export", message: "The move was cancelled" } },
       ),
     );
+
     stubServerApi({
       "v1.server.move.$get": vi.fn(async () =>
         statusResponse(moveStatus("preparing")),
@@ -879,7 +893,7 @@ describe("bb server move status and cancel", () => {
     );
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
       "The move to desktop wasn't confirmed. Abandoning rolls back the switch and keeps the server on this computer.",
-      "If desktop already took over, two servers will run with the same data and bb connect credential. Stop the server on desktop first.",
+      "If desktop already took over, two servers will run with the same data and Omnyo connect credential. Stop the server on desktop first.",
     ]);
   });
 
@@ -897,6 +911,7 @@ describe("bb server move status and cancel", () => {
         },
       ),
     );
+
     stubServerApi({
       "v1.server.move.$get": vi.fn(async () => statusResponse(recovering())),
       "v1.server.move.cancel.$post": cancel,

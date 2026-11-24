@@ -1,12 +1,12 @@
-import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
-import { readdir, rm } from "node:fs/promises";
-import { createHostProgress } from "bb-environment-provider-host/progress";
+import { experimental_defineHostEntry } from "@omnyo/plugin-sdk/host";
+import { readdir } from "node:fs/promises";
+import { createHostProgress } from "omnyo-environment-provider-host/progress";
 import { worktreeHostContract, worktreeHostSignals } from "./contract.js";
-import { readDefaultBranchRefs } from "bb-environment-provider-host/git";
 import {
-  resolveDefaultWorktreeBaseBranch,
-  resolveWorktreeBaseBranch,
-} from "./host/base-branch.js";
+  readDefaultBranchRefs,
+  resolveDefaultBaseBranch,
+} from "omnyo-environment-provider-host/git";
+import { resolveWorktreeBaseBranch } from "./host/base-branch.js";
 import {
   resolveWorktreeChildPath,
   resolveWorktreesRoot,
@@ -29,8 +29,10 @@ async function worktreePathsForPathKey(args: {
   pathKey: string;
 }): Promise<string[]> {
   const root = resolveWorktreeAttemptRoot(args);
+
   try {
     const entries = await readdir(root, { withFileTypes: true });
+
     return entries
       .filter((entry) => entry.isDirectory())
       .map((entry) =>
@@ -44,6 +46,7 @@ async function worktreePathsForPathKey(args: {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return [];
     }
+
     throw error;
   }
 }
@@ -55,8 +58,9 @@ export function createWorktreeHostEntry() {
     handlers: {
       async defaultBaseBranch(input) {
         const refs = await readDefaultBranchRefs(input.sourcePath);
+
         return {
-          branch: resolveDefaultWorktreeBaseBranch({
+          branch: resolveDefaultBaseBranch({
             defaultBranch: refs.defaultBranch ?? null,
             originDefaultBranch: refs.originDefaultBranch ?? null,
             defaultBranchRelation: refs.defaultBranchRelation ?? null,
@@ -68,6 +72,7 @@ export function createWorktreeHostEntry() {
           sourcePath: input.sourcePath,
           managedRoot: resolveWorktreesRoot(context.experimental_paths.dataDir),
         });
+
         return {
           worktrees: worktrees.map((entry) => ({
             path: entry.path,
@@ -90,11 +95,13 @@ export function createWorktreeHostEntry() {
           pathKey: input.pathKey,
           sourcePath: input.sourcePath,
         });
+
         try {
           const baseBranch = await resolveWorktreeBaseBranch(
             input.sourcePath,
             input.baseBranch,
           );
+
           const created = await createWorktree({
             sourcePath: input.sourcePath,
             targetPath,
@@ -112,9 +119,15 @@ export function createWorktreeHostEntry() {
             }),
             signal: context.signal,
           });
-          return { status: "created", path: created.path, baseBranch } as const;
+
+          return {
+            status: "created",
+            path: created.path,
+            baseBranch: baseBranch?.ref ?? null,
+          } as const;
         } catch (error) {
           if (context.signal.aborted) throw error;
+
           return {
             status: "failed",
             message: error instanceof Error ? error.message : String(error),
@@ -131,10 +144,11 @@ export function createWorktreeHostEntry() {
                   pathKey: input.pathKey,
                 })
               : [input.path];
+
           for (const path of paths) {
-            await rm(completionPathForWorktree(path), { force: true });
             await removeWorktree({
               path,
+              completionPath: completionPathForWorktree(path),
               onProgress: createHostProgress({
                 operationId: input.operationId,
                 emit: (payload) =>
@@ -143,9 +157,11 @@ export function createWorktreeHostEntry() {
               signal: context.signal,
             });
           }
+
           return { status: "removed" } as const;
         } catch (error) {
           if (context.signal.aborted) throw error;
+
           return {
             status: "failed",
             message: error instanceof Error ? error.message : String(error),

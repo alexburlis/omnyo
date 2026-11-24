@@ -11,6 +11,7 @@ const threadSearchSourceKindValues = [
 export const threadSearchSourceKindSchema = z.enum(
   threadSearchSourceKindValues,
 );
+
 export type ThreadSearchSourceKind = z.infer<
   typeof threadSearchSourceKindSchema
 >;

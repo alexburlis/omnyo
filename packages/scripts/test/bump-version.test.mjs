@@ -21,25 +21,26 @@ import {
 const scriptPath = fileURLToPath(
   new URL("../../../scripts/bump-version.mjs", import.meta.url),
 );
+
 const testRoots = [];
 
 function createPackageJson({ name, version }) {
   return `${JSON.stringify({ name, version, type: "module" }, null, 2)}\n`;
 }
 
-function createTestRepo({ bbAppVersion, desktopVersion }) {
-  const repoRoot = mkdtempSync(join(tmpdir(), "bb-bump-version-"));
+function createTestRepo({ omnyoAppVersion, desktopVersion }) {
+  const repoRoot = mkdtempSync(join(tmpdir(), "omnyo-bump-version-"));
   testRoots.push(repoRoot);
 
-  mkdirSync(join(repoRoot, "packages", "bb-app"), { recursive: true });
+  mkdirSync(join(repoRoot, "packages", "omnyo-app"), { recursive: true });
   mkdirSync(join(repoRoot, "apps", "desktop"), { recursive: true });
   writeFileSync(
-    join(repoRoot, "packages", "bb-app", "package.json"),
-    createPackageJson({ name: "bb-app", version: bbAppVersion }),
+    join(repoRoot, "packages", "omnyo-app", "package.json"),
+    createPackageJson({ name: "omnyo-app", version: omnyoAppVersion }),
   );
   writeFileSync(
     join(repoRoot, "apps", "desktop", "package.json"),
-    createPackageJson({ name: "@bb/desktop", version: desktopVersion }),
+    createPackageJson({ name: "@omnyo/desktop", version: desktopVersion }),
   );
 
   return repoRoot;
@@ -58,7 +59,7 @@ function runScript(repoRoot, args) {
     encoding: "utf8",
     env: {
       ...process.env,
-      BB_BUMP_VERSION_REPO_ROOT: repoRoot,
+      OMNYO_BUMP_VERSION_REPO_ROOT: repoRoot,
     },
   });
 }
@@ -72,39 +73,45 @@ afterEach(() => {
 describe("bump-version", () => {
   it("exits non-zero for an invalid version argument", () => {
     const repoRoot = createTestRepo({
-      bbAppVersion: "0.0.6",
+      omnyoAppVersion: "0.0.6",
       desktopVersion: "0.0.6",
     });
+
     const result = runScript(repoRoot, ["not-semver"]);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Invalid version: not-semver");
-    expect(readVersion(repoRoot, "packages/bb-app/package.json")).toBe("0.0.6");
+    expect(readVersion(repoRoot, "packages/omnyo-app/package.json")).toBe(
+      "0.0.6",
+    );
     expect(readVersion(repoRoot, "apps/desktop/package.json")).toBe("0.0.6");
   });
 
   it("rejects a bump lower than the highest current target version", () => {
     const repoRoot = createTestRepo({
-      bbAppVersion: "0.0.6",
+      omnyoAppVersion: "0.0.6",
       desktopVersion: "0.0.9",
     });
-    const originalBbAppContent = readPackageContent(
+
+    const originalOmnyoAppContent = readPackageContent(
       repoRoot,
-      "packages/bb-app/package.json",
+      "packages/omnyo-app/package.json",
     );
+
     const originalDesktopContent = readPackageContent(
       repoRoot,
       "apps/desktop/package.json",
     );
+
     const result = runScript(repoRoot, ["0.0.7"]);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(
-      "New version 0.0.7 must be greater than current max 0.0.9 across bb-app=0.0.6 @bb/desktop=0.0.9.",
+      "New version 0.0.7 must be greater than current max 0.0.9 across omnyo-app=0.0.6 @omnyo/desktop=0.0.9.",
     );
-    expect(readPackageContent(repoRoot, "packages/bb-app/package.json")).toBe(
-      originalBbAppContent,
-    );
+    expect(
+      readPackageContent(repoRoot, "packages/omnyo-app/package.json"),
+    ).toBe(originalOmnyoAppContent);
     expect(readPackageContent(repoRoot, "apps/desktop/package.json")).toBe(
       originalDesktopContent,
     );
@@ -112,30 +119,38 @@ describe("bump-version", () => {
 
   it("updates both package versions for a valid version argument", () => {
     const repoRoot = createTestRepo({
-      bbAppVersion: "0.0.6",
+      omnyoAppVersion: "0.0.6",
       desktopVersion: "0.0.6",
     });
+
     const result = runScript(repoRoot, ["0.0.7"]);
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Bumped: bb-app + @bb/desktop → 0.0.7");
-    expect(readVersion(repoRoot, "packages/bb-app/package.json")).toBe("0.0.7");
+    expect(result.stdout).toContain(
+      "Bumped: omnyo-app + @omnyo/desktop → 0.0.7",
+    );
+    expect(readVersion(repoRoot, "packages/omnyo-app/package.json")).toBe(
+      "0.0.7",
+    );
     expect(readVersion(repoRoot, "apps/desktop/package.json")).toBe("0.0.7");
   });
 
   it("restores the first package file when the second rename fails", async () => {
     const repoRoot = createTestRepo({
-      bbAppVersion: "0.0.6",
+      omnyoAppVersion: "0.0.6",
       desktopVersion: "0.0.6",
     });
-    const originalBbAppContent = readPackageContent(
+
+    const originalOmnyoAppContent = readPackageContent(
       repoRoot,
-      "packages/bb-app/package.json",
+      "packages/omnyo-app/package.json",
     );
+
     const originalDesktopContent = readPackageContent(
       repoRoot,
       "apps/desktop/package.json",
     );
+
     const { fileSystem, getRenameCalls } = createRenameFailingFileSystem(2);
 
     await expect(
@@ -148,14 +163,14 @@ describe("bump-version", () => {
     ).rejects.toThrow("simulated rename failure");
 
     expect(getRenameCalls()).toBe(2);
-    expect(readPackageContent(repoRoot, "packages/bb-app/package.json")).toBe(
-      originalBbAppContent,
-    );
+    expect(
+      readPackageContent(repoRoot, "packages/omnyo-app/package.json"),
+    ).toBe(originalOmnyoAppContent);
     expect(readPackageContent(repoRoot, "apps/desktop/package.json")).toBe(
       originalDesktopContent,
     );
     expect(
-      readdirSync(join(repoRoot, "packages", "bb-app")),
+      readdirSync(join(repoRoot, "packages", "omnyo-app")),
     ).not.toContainEqual(expect.stringMatching(/^\.tmp-/u));
     expect(readdirSync(join(repoRoot, "apps", "desktop"))).not.toContainEqual(
       expect.stringMatching(/^\.tmp-/u),
@@ -182,9 +197,9 @@ describe("prepare-nightly-version", () => {
     );
   });
 
-  it("updates bb-app and desktop to the same nightly version", async () => {
+  it("updates omnyo-app and desktop to the same nightly version", async () => {
     const repoRoot = createTestRepo({
-      bbAppVersion: "1.2.3",
+      omnyoAppVersion: "1.2.3",
       desktopVersion: "1.2.3",
     });
 
@@ -195,7 +210,7 @@ describe("prepare-nightly-version", () => {
         runId: "987654",
       }),
     ).resolves.toBe("1.2.4-nightly.987654.1");
-    expect(readVersion(repoRoot, "packages/bb-app/package.json")).toBe(
+    expect(readVersion(repoRoot, "packages/omnyo-app/package.json")).toBe(
       "1.2.4-nightly.987654.1",
     );
     expect(readVersion(repoRoot, "apps/desktop/package.json")).toBe(

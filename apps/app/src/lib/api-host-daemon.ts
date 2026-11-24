@@ -5,10 +5,11 @@ import {
   type OpenInTargetRequest,
   type StatusResponse,
   type WorkspaceOpenTarget,
-} from "@bb/host-daemon-contract/local";
+} from "@omnyo/host-daemon-contract/local";
 import { z } from "zod";
 
 let client: ReturnType<typeof createHostDaemonLocalClient> | null = null;
+
 let clientPort: number | null = null;
 
 export interface HostDaemonStatusSnapshot extends StatusResponse {}
@@ -24,6 +25,7 @@ function getHostDaemonClient(port: number) {
     );
     clientPort = port;
   }
+
   return client;
 }
 
@@ -33,7 +35,9 @@ export async function fetchHostStatus(
   try {
     const daemon = getHostDaemonClient(port);
     const res = await daemon.status.$get();
+
     if (!res.ok) return null;
+
     return await res.json();
   } catch {
     return null;
@@ -45,17 +49,23 @@ export async function fetchWorkspaceOpenTargets(
   options: { path?: string } = {},
 ): Promise<WorkspaceOpenTarget[]> {
   const daemon = getHostDaemonClient(port);
+
   const res = await daemon["workspace-open-targets"].$get({
     query: options.path === undefined ? {} : { path: options.path },
   });
+
   const status = Number(res.status);
+
   if (status === 404) {
     return [];
   }
+
   if (!res.ok) {
     throw new Error(`Workspace open target discovery failed: HTTP ${status}`);
   }
+
   const body = await res.json();
+
   return workspaceOpenTargetsResponseSchema.parse(body).targets;
 }
 
@@ -64,9 +74,11 @@ export async function openInTarget(
   request: OpenInTargetRequest,
 ): Promise<void> {
   const daemon = getHostDaemonClient(port);
+
   const res = await daemon["open-in-target"].$post({
     json: request,
   });
+
   if (!res.ok) {
     const status = Number(res.status);
     throw new Error(
@@ -84,6 +96,7 @@ async function readHostDaemonErrorMessage(
 ): Promise<string> {
   const text = await response.text().catch(() => "");
   const trimmedText = text.trim();
+
   if (trimmedText === "") {
     return fallbackMessage;
   }
@@ -92,6 +105,7 @@ async function readHostDaemonErrorMessage(
     const parsed = hostDaemonErrorResponseSchema.safeParse(
       JSON.parse(trimmedText),
     );
+
     if (parsed.success) {
       return parsed.data.message;
     }

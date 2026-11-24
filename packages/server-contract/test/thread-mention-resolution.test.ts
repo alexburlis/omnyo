@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GENERATED_ID_ALPHABET, GENERATED_ID_SUFFIX_LENGTH } from "@bb/domain";
+import { GENERATED_ID_ALPHABET, GENERATED_ID_SUFFIX_LENGTH } from "@omnyo/domain";
 import {
   resolveThreadMentionsRequestSchema,
   resolveThreadMentionsResponseSchema,
@@ -9,11 +9,13 @@ import {
 function validThreadId(index: number): string {
   let value = index;
   let suffix = "";
+
   for (let position = 0; position < GENERATED_ID_SUFFIX_LENGTH; position += 1) {
     suffix =
       GENERATED_ID_ALPHABET[value % GENERATED_ID_ALPHABET.length] + suffix;
     value = Math.floor(value / GENERATED_ID_ALPHABET.length);
   }
+
   return `thr_${suffix}`;
 }
 

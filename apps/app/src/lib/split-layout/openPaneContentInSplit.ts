@@ -34,17 +34,22 @@ export function openPaneContentInSplit({
   enabled,
 }: OpenPaneContentInSplitArgs): void {
   const layout = store.get(splitLayoutAtom);
+
   if (!enabled || layout === null) {
     void navigate(route);
+
     return;
   }
+
   const existing = findPaneByContent(layout.root, content);
+
   const next =
     existing !== null
       ? setFocus(layout, existing.paneId)
       : countPanes(layout.root) >= MAX_PANES
         ? replacePaneContent(layout, layout.focusedPaneId, content)
         : splitPane(layout, layout.focusedPaneId, "right", content);
+
   if (next !== layout) store.set(splitLayoutAtom, next);
   void navigate(route, existing !== null ? { replace: true } : undefined);
 }
@@ -54,6 +59,7 @@ export function holdsPluginDetailPane(
   pluginId: string,
 ): boolean {
   if (layout === null) return false;
+
   return (
     findPaneByContent(layout.root, { kind: "plugin-detail", pluginId }) !== null
   );

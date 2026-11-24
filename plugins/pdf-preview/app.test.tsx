@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 
 const app = await loadPluginApp(() => import("./app"));
 
@@ -42,6 +42,7 @@ describe("PDF file opener", () => {
         headers: { "content-type": "application/pdf" },
       }),
     );
+
     const slot = renderSlot(app.fileOpeners[0]!, {
       path: "reports/quarter one.pdf",
       source,
@@ -51,6 +52,7 @@ describe("PDF file opener", () => {
     const frame = await waitFor(() => {
       const element = slot.container.querySelector("iframe");
       expect(element).toBeTruthy();
+
       return element as HTMLIFrameElement;
     });
 
@@ -79,6 +81,7 @@ describe("PDF file opener", () => {
         headers: { "content-type": "text/html" },
       }),
     );
+
     const slot = renderSlot(app.fileOpeners[0]!, {
       path: "spoofed.pdf",
       source,

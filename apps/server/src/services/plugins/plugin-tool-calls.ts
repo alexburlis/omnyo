@@ -1,5 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ToolCallResponse } from "@bb/domain";
+import {
+  CredentialRedactionError,
+  createCredentialTextRedactor,
+  getErrorMessage,
+  type ToolCallResponse,
+} from "@omnyo/domain";
 import type { ServerLogger } from "../../types.js";
 
 export const PLUGIN_TOOL_CALL_AWAITING_USER_RESULT_TEXT =
@@ -11,6 +16,7 @@ export interface RunPluginToolCallArgs {
   callId: string;
   toolName: string;
   roundTrip: AbortSignal;
+  knownCredentialValues?: readonly string[];
   invoke(signal: AbortSignal): Promise<ToolCallResponse>;
   onDetachedResult(response: ToolCallResponse): Promise<void>;
 }
@@ -45,7 +51,7 @@ function failedToolCallResponse(
     contentItems: [
       {
         type: "inputText",
-        text: `Tool "${toolName}" failed: ${error instanceof Error ? error.message : String(error)}`,
+        text: `Tool "${toolName}" failed: ${getErrorMessage(error)}`,
       },
     ],
   };
@@ -62,6 +68,7 @@ export class PluginToolCallRegistry {
   run(args: RunPluginToolCallArgs): Promise<ToolCallResponse> {
     const controller = new AbortController();
     let detachWith: (response: ToolCallResponse) => void = () => undefined;
+
     const tracked: TrackedPluginToolCall = {
       pluginId: args.pluginId,
       threadId: args.threadId,
@@ -70,15 +77,18 @@ export class PluginToolCallRegistry {
       controller,
       detachWith: (response) => detachWith(response),
     };
+
     this.calls.add(tracked);
 
     return new Promise<ToolCallResponse>((resolve) => {
       let detached = false;
       let settled = false;
+
       const abort = () => {
         controller.abort(args.roundTrip.reason);
         settle(failedToolCallResponse(args.toolName, args.roundTrip.reason));
       };
+
       detachWith = (response) => {
         if (settled || detached || controller.signal.aborted) return;
         detached = true;
@@ -86,15 +96,46 @@ export class PluginToolCallRegistry {
         resolve(response);
       };
 
-      const settle = (response: ToolCallResponse) => {
+      const settle = (result: ToolCallResponse) => {
         if (settled) return;
         settled = true;
+        let response: ToolCallResponse;
+
+        try {
+          const redactText = createCredentialTextRedactor(
+            args.knownCredentialValues ?? [],
+          );
+
+          response = {
+            ...result,
+            contentItems: result.contentItems.map((item) =>
+              item.type === "inputText"
+                ? { ...item, text: redactText(item.text) }
+                : item,
+            ),
+          };
+        } catch (error) {
+          if (!(error instanceof CredentialRedactionError)) throw error;
+          response = {
+            success: false,
+            contentItems: [
+              {
+                type: "inputText",
+                text: "Tool result could not be safely redacted; content withheld",
+              },
+            ],
+          };
+        }
+
         args.roundTrip.removeEventListener("abort", abort);
         this.calls.delete(tracked);
+
         if (!detached) {
           resolve(response);
+
           return;
         }
+
         if (controller.signal.aborted) {
           this.logger.info(
             {
@@ -105,8 +146,10 @@ export class PluginToolCallRegistry {
             },
             "Dropped a detached plugin tool result after its thread or plugin went away",
           );
+
           return;
         }
+
         void args.onDetachedResult(response).catch((error: unknown) => {
           this.logger.warn(
             {
@@ -121,12 +164,15 @@ export class PluginToolCallRegistry {
       };
 
       args.roundTrip.addEventListener("abort", abort, { once: true });
+
       if (args.roundTrip.aborted) {
         abort();
+
         return;
       }
 
       let invocation: Promise<ToolCallResponse>;
+
       try {
         invocation = activeCall.run(tracked, () =>
           args.invoke(controller.signal),
@@ -134,6 +180,7 @@ export class PluginToolCallRegistry {
       } catch (error) {
         invocation = Promise.reject(error);
       }
+
       invocation.then(settle, (error: unknown) => {
         settle(failedToolCallResponse(args.toolName, error));
       });
@@ -142,6 +189,7 @@ export class PluginToolCallRegistry {
 
   abortForThreads(threadIds: readonly string[], reason: string): void {
     const ids = new Set(threadIds);
+
     for (const call of this.calls) {
       if (ids.has(call.threadId)) call.controller.abort(reason);
     }
@@ -170,6 +218,7 @@ export function requirePluginToolCallRegistry(): PluginToolCallRegistry {
   if (!registry) {
     throw new Error("Plugin tool call registry is not installed");
   }
+
   return registry;
 }
 

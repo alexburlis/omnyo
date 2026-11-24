@@ -6,22 +6,26 @@ import {
   createAgentRuntime,
   type AgentRuntime,
   type AgentRuntimeProcessExitInfo,
-} from "@bb/agent-runtime";
+} from "@omnyo/agent-runtime";
 import {
   createScriptedEchoRequestRecord,
   type ScriptedEchoLaunchScript,
   type ScriptedEchoRequestRecord,
-} from "@bb/agent-runtime/test";
-import { buildPluginHost, resolvePluginBuildToolchain } from "@bb/plugin-build";
+} from "@omnyo/agent-runtime/test";
+import {
+  buildPluginHost,
+  resolvePluginBuildToolchain,
+} from "@omnyo/plugin-build";
 import {
   encodeClientTurnRequestIdNumber,
   type ClientTurnRequestId,
   type ThreadEvent,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   HostDaemonBridgeLaunch,
+  HostDaemonCommand,
   HostDaemonOnlineRpcResponseMessage,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchCommand } from "../../src/command-dispatch.js";
 import {
@@ -34,6 +38,7 @@ import { RuntimeManager } from "../../src/runtime-manager.js";
 import {
   cleanupTempDirs,
   createFakeWorkspace,
+  createTestWorkspaceReads,
   makeDispatchOptions,
   makeTempDir,
   noopEventSink,
@@ -43,6 +48,7 @@ import {
 } from "./dispatch-helpers.js";
 
 const ENVIRONMENT_ID = "env-stop-race";
+
 const THREAD_STOP_ACTIVE_TURN_WAIT_MS = 5_000;
 
 interface RaceHarness {
@@ -69,7 +75,9 @@ interface TurnSubmitArgs {
 }
 
 const managers: RuntimeManager[] = [];
+
 let nextClientRequestIdValue = 1;
+
 let nextRpcRequestIdValue = 1;
 
 afterEach(async () => {
@@ -82,11 +90,13 @@ function nextClientRequestId(): ClientTurnRequestId {
   const requestId = encodeClientTurnRequestIdNumber({
     value: nextClientRequestIdValue,
   });
+
   nextClientRequestIdValue += 1;
+
   return requestId;
 }
 
-function flushMicrotasks(): Promise<void> {
+function nextMacrotask(): Promise<void> {
   return new Promise((resolve) => {
     setImmediate(resolve);
   });
@@ -105,15 +115,19 @@ function buildScriptedEchoArtifact(): Promise<{
     const rootDir = fileURLToPath(
       new URL("../../../../tests/scripted-echo-provider", import.meta.url),
     );
+
     const toolchain = await resolvePluginBuildToolchain(
-      path.join(os.tmpdir(), "bb-plugin-build-toolchain"),
+      path.join(os.tmpdir(), "omnyo-plugin-build-toolchain"),
     );
+
     const build = await buildPluginHost(rootDir, "0.0.0-test", toolchain);
+
     return {
       bytes: await readFile(build.jsPath),
       digest: build.artifactDigest,
     };
   })();
+
   return scriptedEchoArtifact;
 }
 
@@ -121,6 +135,7 @@ async function scriptedEchoDispatchLaunch(
   options: { pluginId?: string; scripted?: ScriptedEchoLaunchScript } = {},
 ): Promise<HostDaemonBridgeLaunch> {
   const artifact = await buildScriptedEchoArtifact();
+
   return {
     pluginId: options.pluginId ?? "provider-scripted-echo",
     source: {
@@ -145,18 +160,22 @@ async function scriptedEchoDispatchLaunch(
 }
 
 async function createRaceHarness(): Promise<RaceHarness> {
-  const workspacePath = await makeTempDir("bb-stop-race-workspace-");
+  const workspacePath = await makeTempDir("omnyo-stop-race-workspace-");
   const events: ThreadEvent[] = [];
   const record = createScriptedEchoRequestRecord();
+
   let resolveUnexpectedProcessExit: (
     info: AgentRuntimeProcessExitInfo,
   ) => void = () => undefined;
+
   const unexpectedProcessExit = new Promise<AgentRuntimeProcessExitInfo>(
     (resolve) => {
       resolveUnexpectedProcessExit = resolve;
     },
   );
+
   let runtime: AgentRuntime | null = null;
+
   const manager = new RuntimeManager({
     provisionWorkspace: async () =>
       createFakeWorkspace(workspacePath).workspace,
@@ -165,6 +184,7 @@ async function createRaceHarness(): Promise<RaceHarness> {
         ...options,
         env: { ...options.env, ...record.env },
       });
+
       return runtime;
     },
     onEvent: ({ event }) => {
@@ -176,10 +196,12 @@ async function createRaceHarness(): Promise<RaceHarness> {
       }
     },
   });
+
   managers.push(manager);
 
   const artifact = await buildScriptedEchoArtifact();
-  const dataDir = await makeTempDir("bb-stop-race-daemon-data-");
+  const dataDir = await makeTempDir("omnyo-stop-race-daemon-data-");
+
   return {
     dispatchOptions: makeDispatchOptions({
       runtimeManager: manager,
@@ -188,6 +210,7 @@ async function createRaceHarness(): Promise<RaceHarness> {
         if (digest !== artifact.digest) {
           throw new Error(`unknown plugin host artifact ${digest}`);
         }
+
         return artifact.bytes;
       },
     }),
@@ -199,6 +222,7 @@ async function createRaceHarness(): Promise<RaceHarness> {
       if (!runtime) {
         throw new Error("Runtime has not been created yet");
       }
+
       return runtime;
     },
     unexpectedProcessExit,
@@ -298,22 +322,45 @@ function recordedThreadStops(harness: RaceHarness): Record<string, unknown>[] {
     .map((request) => request.params ?? {});
 }
 
+function routerCommand(
+  router: CommandRouter,
+  command: HostDaemonCommand,
+): Promise<HostDaemonOnlineRpcResponseMessage> {
+  const requestId = `stop-race-rpc-${nextRpcRequestIdValue}`;
+  nextRpcRequestIdValue += 1;
+
+  return router.handleOnlineRpcRequest({
+    type: "host-rpc.request",
+    requestId,
+    command,
+  });
+}
+
 function routerStop(
   router: CommandRouter,
   threadId: string,
 ): Promise<HostDaemonOnlineRpcResponseMessage> {
-  const requestId = `stop-race-rpc-${nextRpcRequestIdValue}`;
-  nextRpcRequestIdValue += 1;
-  return router.handleOnlineRpcRequest({
-    type: "host-rpc.request",
-    requestId,
-    command: threadStopCommand(threadId),
+  return routerCommand(router, threadStopCommand(threadId));
+}
+
+function createRaceRouter(harness: RaceHarness): CommandRouter {
+  return new CommandRouter({
+    dataDir: "/tmp/omnyo-stop-race-data",
+    eventSink: noopEventSink,
+    fetchProjectAttachment: unexpectedProjectAttachmentFetch,
+    fetchPluginHostArtifact: fetchDispatchTestArtifact,
+    ...unexpectedProviderMaintenance,
+    logger: { debug: () => undefined, warn: () => undefined },
+    runtimeManager: harness.manager,
+    workspaceReads: createTestWorkspaceReads(harness.manager),
+    threadStorageRootPath: "/tmp/omnyo-stop-race-thread-storage",
   });
 }
 
 describe("thread.stop race semantics", () => {
-  it("resolves a stop dispatched before turn/started event-driven and stops the right turn", async () => {
+  it("interrupts the turn of a submit that was still in flight when the stop arrived", async () => {
     const harness = await createRaceHarness();
+    const router = createRaceRouter(harness);
     await dispatchCommand(
       threadStartCommand(harness, { threadId: "t-race" }),
       harness.dispatchOptions,
@@ -322,22 +369,22 @@ describe("thread.stop race semantics", () => {
     expect(runtime.hasThread("t-race")).toBe(true);
     expect(runtime.getActiveTurnId("t-race")).toBeNull();
 
-    const stopPromise = dispatchCommand(
-      threadStopCommand("t-race"),
-      harness.dispatchOptions,
-    );
-    await flushMicrotasks();
-    expect(recordedThreadStops(harness)).toHaveLength(0);
-
-    const submitPromise = dispatchCommand(
+    const submitPromise = routerCommand(
+      router,
       turnSubmitCommand(harness, {
         threadId: "t-race",
         inputText: "delay:60000",
       }),
-      harness.dispatchOptions,
     );
-    await expect(stopPromise).resolves.toEqual({ providerCheckpointId: null });
-    await expect(submitPromise).resolves.toEqual({ trace: { spans: [] } });
+
+    await nextMacrotask();
+    const stopPromise = routerStop(router, "t-race");
+
+    await expect(submitPromise).resolves.toMatchObject({ ok: true });
+    await expect(stopPromise).resolves.toMatchObject({
+      ok: true,
+      result: { providerCheckpointId: null },
+    });
 
     expect(recordedThreadStops(harness)).toEqual([
       expect.objectContaining({
@@ -357,7 +404,7 @@ describe("thread.stop race semantics", () => {
     expect(runtime.hasThread("t-race")).toBe(false);
   });
 
-  it("noops a stop after the turn-start wait times out without hanging", async () => {
+  it("stops an idle loaded thread without waiting for a turn to start", async () => {
     const harness = await createRaceHarness();
     await dispatchCommand(
       threadStartCommand(harness, { threadId: "t-idle" }),
@@ -366,16 +413,13 @@ describe("thread.stop race semantics", () => {
     const runtime = harness.requireRuntime();
     expect(runtime.getActiveTurnId("t-idle")).toBeNull();
 
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const stopPromise = dispatchCommand(
-      threadStopCommand("t-idle"),
-      harness.dispatchOptions,
+    const startedAt = performance.now();
+    await expect(
+      dispatchCommand(threadStopCommand("t-idle"), harness.dispatchOptions),
+    ).resolves.toEqual({ providerCheckpointId: null });
+    expect(performance.now() - startedAt).toBeLessThan(
+      THREAD_STOP_ACTIVE_TURN_WAIT_MS,
     );
-    await flushMicrotasks();
-    await vi.advanceTimersByTimeAsync(THREAD_STOP_ACTIVE_TURN_WAIT_MS);
-    vi.useRealTimers();
-
-    await expect(stopPromise).resolves.toEqual({ providerCheckpointId: null });
     expect(recordedThreadStops(harness)).toEqual([
       expect.objectContaining({
         threadId: "t-idle",
@@ -391,22 +435,27 @@ describe("thread.stop race semantics", () => {
 
   it("clears the active turn when the provider crashes mid-turn so a later stop noops", async () => {
     const harness = await createRaceHarness();
+
     const crasherLaunch = await scriptedEchoDispatchLaunch({
       pluginId: "provider-crasher",
       scripted: { exitAfter: "turn/start" },
     });
+
     const entry = await harness.manager.ensureEnvironment({
       environmentId: ENVIRONMENT_ID,
       workspacePath: harness.workspacePath,
     });
+
     const healthyLaunch = await resolveRuntimeBridgeLaunch(
       harness.launch,
       harness.dispatchOptions,
     );
+
     const healthyStart = entry.runtime.ensureProvider({
       providerId: "fake",
       bridgeLaunch: healthyLaunch,
     });
+
     const crashStart = dispatchCommand(
       threadStartCommand(harness, {
         threadId: "t-crash",
@@ -416,6 +465,7 @@ describe("thread.stop race semantics", () => {
       }),
       harness.dispatchOptions,
     );
+
     await Promise.all([healthyStart, crashStart]);
 
     const crashExit = await harness.unexpectedProcessExit;
@@ -447,16 +497,9 @@ describe("thread.stop race semantics", () => {
 
   it("treats the second of two racing stops as an idempotent no-op", async () => {
     const harness = await createRaceHarness();
-    const router = new CommandRouter({
-      dataDir: "/tmp/bb-stop-race-data",
-      eventSink: noopEventSink,
-      fetchProjectAttachment: unexpectedProjectAttachmentFetch,
-      fetchPluginHostArtifact: fetchDispatchTestArtifact,
-      ...unexpectedProviderMaintenance,
-      logger: { debug: () => undefined, warn: () => undefined },
-      runtimeManager: harness.manager,
-      threadStorageRootPath: "/tmp/bb-stop-race-thread-storage",
-    });
+
+    const router = createRaceRouter(harness);
+
     await dispatchCommand(
       threadStartCommand(harness, {
         threadId: "t-double",

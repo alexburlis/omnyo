@@ -4,10 +4,13 @@ import { fileURLToPath } from "node:url";
 import { buildNodeEsmEntry } from "../../../scripts/build-utils.mjs";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
 const workspaceRoot = resolve(packageRoot, "..", "..");
+
 const outputDir = resolve(packageRoot, "dist", "test-bridges");
 
 await mkdir(outputDir, { recursive: true });
+
 await Promise.all([
   buildNodeEsmEntry({
     cleanDist: false,
@@ -15,7 +18,7 @@ await Promise.all([
       workspaceRoot,
       "packages/provider-bridge-protocol/src/bridge-worker-entry.ts",
     ),
-    outfile: resolve(outputDir, "bb-provider-bridge-worker.mjs"),
+    outfile: resolve(outputDir, "omnyo-provider-bridge-worker.mjs"),
     packageRoot,
     sourcemap: false,
   }),

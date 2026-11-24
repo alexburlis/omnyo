@@ -2,12 +2,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { createConnection, migrate } from "@bb/db";
+import { createConnection, migrate } from "@omnyo/db";
 import {
   resolveDataDirDatabasePath,
   resolveProdDataDir,
-} from "@bb/config/runtime";
-import { HOST_ID_FILE_NAME } from "@bb/host-daemon-contract";
+} from "@omnyo/config/runtime";
+import { HOST_ID_FILE_NAME } from "@omnyo/host-daemon-contract";
 import { resolveDevDataDir } from "../lib/dev-restart-utils.js";
 import { runMainIfEntrypoint } from "../lib/script-entry.js";
 import { seedPerfFixture } from "../lib/seed-perf-fixture.js";
@@ -24,9 +24,9 @@ interface SeedCommandArgs {
 
 function renderHelpText(): string {
   return `
-  ${bold("bb seed-perf-db")}
+  ${bold("omnyo seed-perf-db")}
 
-  Seed a large, realistic BB database for performance testing.
+  Seed a large, realistic Omnyo database for performance testing.
 
   ${dim("Usage")}
     pnpm seed:perf [-- options]
@@ -40,7 +40,7 @@ function renderHelpText(): string {
     --reset            Delete the existing database file before seeding
 
   ${dim("Notes")}
-    The command refuses to touch the production data dir (~/.bb).
+    The command refuses to touch the production data dir (~/.omnyo).
     Without --reset the fixture is added to the existing database.
     Start the dev app once before seeding so the fixture attaches to
     the real local host; otherwise a synthetic offline host is used.
@@ -49,9 +49,11 @@ function renderHelpText(): string {
 
 function parsePositiveInteger(name: string, rawValue: string): number {
   const value = Number(rawValue);
+
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`${name} must be a positive integer`);
   }
+
   return value;
 }
 
@@ -64,16 +66,22 @@ function parseArgs(argv: string[]): SeedCommandArgs | null {
     reset: false,
     threadCount: 1_200,
   };
+
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
+
     const readValue = (): string => {
       const value = argv[index + 1];
+
       if (value === undefined) {
         throw new Error(`${argument} requires a value`);
       }
+
       index += 1;
+
       return value;
     };
+
     switch (argument) {
       case "--":
         break;
@@ -102,6 +110,7 @@ function parseArgs(argv: string[]): SeedCommandArgs | null {
         throw new Error(`Unknown option: ${argument}`);
     }
   }
+
   return args;
 }
 
@@ -109,44 +118,53 @@ function resolveTargetDataDir(args: SeedCommandArgs): string {
   if (args.dataDir !== null) {
     return args.dataDir;
   }
+
   return resolveDevDataDir();
 }
 
 function readSeedHostId(dataDir: string): string {
   const hostIdPath = join(dataDir, HOST_ID_FILE_NAME);
+
   if (existsSync(hostIdPath)) {
     const hostId = readFileSync(hostIdPath, "utf8").trim();
+
     if (hostId.length > 0) {
       return hostId;
     }
   }
+
   return "host_seedfixture";
 }
 
 async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   const args = parseArgs(argv);
+
   if (args === null) {
     process.stdout.write(renderHelpText());
+
     return;
   }
 
   const dataDir = resolveTargetDataDir(args);
   const prodDataDir = resolveProdDataDir({ homeDir: homedir() });
+
   if (resolve(dataDir) === resolve(prodDataDir)) {
     throw new Error(
       `Refusing to seed the production data dir (${prodDataDir}). Pass a dev data dir with --data-dir.`,
     );
   }
 
-  process.stdout.write(`\n  ${bold("bb seed-perf-db")}\n\n`);
+  process.stdout.write(`\n  ${bold("omnyo seed-perf-db")}\n\n`);
   log(dim("●"), `data dir ${cyan(dataDir)}`);
 
   mkdirSync(dataDir, { recursive: true });
   const databasePath = resolveDataDirDatabasePath({ dataDir });
+
   if (args.reset) {
     for (const suffix of ["", "-shm", "-wal"]) {
       rmSync(`${databasePath}${suffix}`, { force: true });
     }
+
     rmSync(join(dataDir, "auth.json"), { force: true });
     log(dim("●"), "removed the existing database file and host credentials");
   }
@@ -156,8 +174,10 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
 
   const startedAt = Date.now();
   const db = createConnection(databasePath);
+
   try {
     migrate(db);
+
     const result = seedPerfFixture(db, {
       hostId,
       workspacesRootPath: join(dataDir, "seed-workspaces"),
@@ -167,12 +187,16 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
       randomSeed: args.randomSeed,
       onProgress: (message) => log(dim("○"), dim(message)),
     });
+
     db.$client.pragma("wal_checkpoint(TRUNCATE)");
+
     for (const workspacePath of result.projectWorkspacePaths) {
       if (existsSync(join(workspacePath, ".git"))) {
         continue;
       }
+
       mkdirSync(workspacePath, { recursive: true });
+
       try {
         execFileSync("git", ["init", "--quiet", "--initial-branch=main"], {
           cwd: workspacePath,
@@ -182,6 +206,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
         log(dim("●"), `git init failed for ${workspacePath}; left a plain dir`);
       }
     }
+
     const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
     endStep(
       green("✓"),

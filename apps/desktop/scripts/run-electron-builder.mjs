@@ -1,23 +1,38 @@
+import { signDesktopProtectedStoreConsumersV1 } from "./prepare-protected-store-consumers.mjs";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createDesktopReleaseConfig,
-  createDesktopUpdateReleaseBaseUrl,
+  desktopBuildSelection,
+  desktopNativeVersion,
+  resolveDesktopBuildPlatform,
   resolveDesktopReleaseChannel,
 } from "./desktop-release-channel.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+
 const desktopPackageRoot = resolve(scriptDirectory, "..");
+
 const baseConfigPath = resolve(
   desktopPackageRoot,
   "electron-builder.config.json",
 );
+
 const generatedConfigPath = resolve(
   desktopPackageRoot,
   ".electron-builder.generated.json",
 );
+
 const electronBuilderCli = resolve(
   desktopPackageRoot,
   "node_modules",
@@ -26,11 +41,13 @@ const electronBuilderCli = resolve(
 );
 
 const codeSigningKeys = ["CSC_LINK", "CSC_KEY_PASSWORD"];
+
 const notarizationKeys = [
   "APPLE_ID",
   "APPLE_APP_SPECIFIC_PASSWORD",
   "APPLE_TEAM_ID",
 ];
+
 const requiredSigningEnvironmentKeys = [
   ...codeSigningKeys,
   ...notarizationKeys,
@@ -65,6 +82,7 @@ function cloneJson(value) {
 function logWarning(message) {
   if (process.env.GITHUB_ACTIONS === "true") {
     console.warn(`::warning::${message}`);
+
     return;
   }
 
@@ -104,30 +122,17 @@ function autoDiscoveryExplicitlyDisabled(env) {
   );
 }
 
-/**
- * Resolves one of three signing modes:
- *
- * - "environment": all CI signing/notarization secrets are set — sign with the
- *   provided certificate and notarize (the published-release path).
- * - "keychain": no secrets — sign with an auto-discovered keychain identity and
- *   skip notarization. Locally built apps never get the quarantine xattr, so
- *   notarization is unnecessary, but a valid signature is not optional: an
- *   unsigned bundle is provenance-tracked by macOS, which forces syspolicyd to
- *   evaluate every exec in the app's process tree and can stall execs
- *   system-wide. Machines without a signing identity fall back to unsigned
- *   artifacts inside electron-builder.
- * - "disabled": no secrets and CSC_IDENTITY_AUTO_DISCOVERY=false — explicitly
- *   unsigned (the CI path for workflow-artifact-only builds).
- */
 function createSigningPlan(env) {
   const presentSigningKeys = presentEnvironmentKeys(
     requiredSigningEnvironmentKeys,
     env,
   );
+
   const missingSigningKeys = missingEnvironmentKeys(
     requiredSigningEnvironmentKeys,
     env,
   );
+
   const hasAnySigningKeys = presentSigningKeys.length > 0;
   const hasAllSigningKeys = missingSigningKeys.length === 0;
 
@@ -158,15 +163,47 @@ function createSigningPlan(env) {
   };
 }
 
-function resolveElectronBuilderConfig(baseConfig, env, electronBuilderArgs) {
-  const signingPlan = createSigningPlan(env);
+function resolveElectronBuilderConfig(
+  baseConfig,
+  env,
+  electronBuilderArgs,
+  version,
+) {
   const releaseChannel = resolveDesktopReleaseChannel(env);
-  const releaseConfig = createDesktopReleaseConfig(releaseChannel);
+
+  const nativeVersion = desktopNativeVersion(version);
+  const signingPlan = createSigningPlan(env);
+
+  if (releaseChannel === "public-beta" && signingPlan.notarizationEnabled)
+    throw new Error(
+      "Local beta preparation forbids notarization; remove provider signing environment",
+    );
+
+  const selectedPlatforms = [
+    ["--mac", "macos"],
+    ["--win", "windows"],
+    ["--linux", "linux"],
+  ].filter(([flag]) => electronBuilderArgs.includes(flag));
+
+  if (selectedPlatforms.length > 1)
+    throw new Error("Private packaging requires one exact native platform");
+
+  const buildPlatform =
+    selectedPlatforms[0]?.[1] ?? resolveDesktopBuildPlatform(process.platform);
+
+  const releaseConfig = createDesktopReleaseConfig(
+    releaseChannel,
+    buildPlatform,
+  );
+
   const config = cloneJson(baseConfig);
+
   const mac = {
     ...config.mac,
     icon: releaseConfig.macIconPath,
     notarize: signingPlan.notarizationEnabled,
+    bundleShortVersion: nativeVersion.shortVersion,
+    bundleVersion: nativeVersion.bundleVersion,
   };
 
   if (signingPlan.mode === "disabled") {
@@ -174,7 +211,6 @@ function resolveElectronBuilderConfig(baseConfig, env, electronBuilderArgs) {
   } else if (signingPlan.identityName) {
     mac.identity = signingPlan.identityName;
   } else {
-    // Let electron-builder resolve the identity (CSC_LINK or keychain).
     delete mac.identity;
   }
 
@@ -188,25 +224,60 @@ function resolveElectronBuilderConfig(baseConfig, env, electronBuilderArgs) {
     ...config.win,
     icon: "assets/" + releaseConfig.iconFileName,
   };
+
   if (electronBuilderArgs.includes("--win")) {
     config.extraMetadata = {
       ...config.extraMetadata,
       name: releaseConfig.windowsInstallName,
     };
+
+    if (releaseConfig.windowsInstallGuid !== null)
+      config.nsis = { ...config.nsis, guid: releaseConfig.windowsInstallGuid };
   }
+
+  if (buildPlatform === "macos") {
+    config.extraMetadata = {
+      ...config.extraMetadata,
+      productName: releaseConfig.applicationName,
+    };
+  }
+
+  if (releaseChannel === "public-beta") {
+    const selection = desktopBuildSelection(releaseChannel);
+    config.asarUnpack = config.asarUnpack.filter(
+      (entry) =>
+        entry !== "dist/omnyo-app-bridge.mjs" &&
+        entry !== "dist/desktop-profile-adoption-v1.cjs" &&
+        entry !== "dist/desktop-protected-store-*",
+    );
+    config.asarUnpack.push(selection.outputDirectory + "/omnyo-app-bridge.mjs");
+    config.files = config.files.filter(
+      (entry) => entry !== "dist/**" && entry !== "node_modules/**",
+    );
+    config.files.push({ from: "../..", to: ".", filter: ["LICENSE"] });
+    config.files.push({
+      from: selection.outputDirectory,
+      to: "dist",
+      filter: [
+        "**/*",
+        ...selection.excludedArtifacts.map((file) => "!" + file),
+      ],
+    });
+  }
+
   config.appId = releaseConfig.appId;
-  config.artifactName = releaseConfig.artifactName;
+  config.artifactName = releaseConfig.artifactName.replace(
+    "${version}",
+    nativeVersion.shortVersion,
+  );
+  config.buildNumber = nativeVersion.buildNumber;
+  config.buildVersion = nativeVersion.buildVersion;
   config.productName = releaseConfig.applicationName;
-  config.publish = [
-    {
-      channel: releaseChannel,
-      provider: "generic",
-      url: createDesktopUpdateReleaseBaseUrl(releaseConfig.releaseTag),
-    },
-  ];
+  config.publish = [];
 
   return {
     config,
+    profileName: releaseConfig.profileName,
     releaseChannel,
     signingPlan,
   };
@@ -227,6 +298,7 @@ function createElectronBuilderEnv(signingPlan) {
 
 async function readBaseConfig() {
   const configText = await readFile(baseConfigPath, "utf8");
+
   return JSON.parse(configText);
 }
 
@@ -258,6 +330,7 @@ async function runElectronBuilder(args, signingPlan) {
 
   if (typeof exitCode === "number") {
     process.exitCode = exitCode;
+
     return;
   }
 
@@ -266,17 +339,91 @@ async function runElectronBuilder(args, signingPlan) {
 
 async function main() {
   const args = process.argv.slice(2);
+
+  if (args.some((arg) => arg === "--publish" || arg.startsWith("--publish="))) {
+    throw new Error(
+      "Private fork publication is disabled. Build locally and review upstream update PRs.",
+    );
+  }
+
   const printConfig = args.includes(printConfigFlag);
-  const electronBuilderArgs = args.filter((arg) => arg !== printConfigFlag);
-  const baseConfig = await readBaseConfig();
-  const { config, signingPlan } = resolveElectronBuilderConfig(
-    baseConfig,
-    process.env,
-    electronBuilderArgs,
+
+  const internalFlags = [
+    "--protected-store-build-job",
+    "--protected-store-build-job-sha256",
+  ];
+
+  if (
+    args.some(
+      (arg) =>
+        arg.startsWith("--protected-store-") && !internalFlags.includes(arg),
+    )
+  )
+    throw new Error("Unsupported protected-store build argument");
+
+  const internalValues = internalFlags.map((flag) => {
+    const index = args.indexOf(flag);
+
+    if (index < 0) return null;
+
+    if (
+      args.lastIndexOf(flag) !== index ||
+      !args[index + 1] ||
+      args[index + 1].startsWith("--")
+    )
+      throw new Error("Protected-store build job arguments differ");
+
+    return args[index + 1];
+  });
+
+  if (
+    internalValues.some((value) => value !== null) &&
+    internalValues.some((value) => value === null)
+  )
+    throw new Error("Protected-store build job requires its exact digest");
+
+  const electronBuilderArgs = args.filter(
+    (arg, index) =>
+      arg !== printConfigFlag &&
+      !internalFlags.includes(arg) &&
+      !internalFlags.includes(args[index - 1]),
   );
+
+  const baseConfig = await readBaseConfig();
+
+  const metadata = JSON.parse(
+    await readFile(resolve(desktopPackageRoot, "package.json"), "utf8"),
+  );
+
+  const { config, profileName, signingPlan, releaseChannel } =
+    resolveElectronBuilderConfig(
+      baseConfig,
+      process.env,
+      electronBuilderArgs,
+      metadata.version,
+    );
+
+  if (
+    releaseChannel === "public-beta" &&
+    internalValues.some((value) => value !== null)
+  )
+    throw new Error("Public beta refuses private protected-store build jobs");
+
+  if (
+    internalValues[0] !== null &&
+    (process.platform !== "darwin" ||
+      metadata.desktopProfileAdoptionProtocol !== 2 ||
+      ((electronBuilderArgs.includes("--linux") ||
+        electronBuilderArgs.includes("--win")) &&
+        !electronBuilderArgs.includes("--mac")))
+  )
+    throw new Error(
+      "Protected-store build job requires the selected Mac surface",
+    );
 
   if (printConfig) {
     console.log(JSON.stringify(config, null, 2));
+
     return;
   }
 
@@ -289,8 +436,75 @@ async function main() {
   } else {
     logSigningPlan(signingPlan);
   }
+
+  if (
+    desktopBuildSelection(releaseChannel).privateContinuity &&
+    process.platform === "darwin" &&
+    metadata.desktopProfileAdoptionProtocol === 2 &&
+    !(
+      (electronBuilderArgs.includes("--linux") ||
+        electronBuilderArgs.includes("--win")) &&
+      !electronBuilderArgs.includes("--mac")
+    )
+  ) {
+    if (signingPlan.mode === "disabled")
+      throw new Error(
+        "Replacement native profile consumers require the existing signing owner",
+      );
+
+    let selectedBuild;
+
+    if (internalValues[0] !== null) {
+      const [path, expectedSha256] = internalValues;
+
+      if (resolve(path) !== path || !/^[a-f0-9]{64}$/u.test(expectedSha256))
+        throw new Error("Protected-store build job path or digest differs");
+      const info = await lstat(path);
+
+      if (
+        !info.isFile() ||
+        info.isSymbolicLink() ||
+        info.nlink !== 1 ||
+        info.uid !== process.getuid() ||
+        (info.mode & 0o077) !== 0 ||
+        info.size > 16384 ||
+        (await realpath(path)) !== path
+      )
+        throw new Error(
+          "Protected-store build job is not an exact private file",
+        );
+      const bytes = await readFile(path);
+
+      if (createHash("sha256").update(bytes).digest("hex") !== expectedSha256)
+        throw new Error("Protected-store build job bytes differ");
+
+      try {
+        selectedBuild = JSON.parse(bytes.toString("utf8"));
+      } catch {
+        throw new Error("Protected-store build job JSON is invalid");
+      }
+
+      if (
+        selectedBuild?.appId !== config.appId ||
+        selectedBuild?.applicationName !== profileName
+      )
+        throw new Error("Protected-store selected build identity differs");
+    }
+
+    const consumerPatterns = await signDesktopProtectedStoreConsumersV1(
+      desktopPackageRoot,
+      selectedBuild,
+    );
+
+    config.mac.signIgnore = [
+      ...(config.mac.signIgnore ?? []),
+      ...consumerPatterns,
+    ];
+  }
+
   await mkdir(dirname(generatedConfigPath), { recursive: true });
   await writeGeneratedConfig(config);
+
   try {
     await runElectronBuilder(electronBuilderArgs, signingPlan);
   } finally {

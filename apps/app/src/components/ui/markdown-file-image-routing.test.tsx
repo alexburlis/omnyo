@@ -104,6 +104,7 @@ describe("Markdown file preview image routing", () => {
         resolveSrc: vi.fn(() => "/custom/image.png"),
       },
     };
+
     expect(
       buildMarkdownFileImageRouting({
         path: "docs/report.md",
@@ -137,11 +138,13 @@ describe("Markdown file preview image routing", () => {
         }}
       />,
     );
+
     for (const name of ["relative", "absolute"]) {
       expect(screen.getByRole("img", { name }).getAttribute("src")).toBe(
         "/api/v1/hosts/host_skill/files/skills/example/assets/chart.png",
       );
     }
+
     expect(
       screen.getByRole("img", { name: "escape" }).getAttribute("src"),
     ).toBe("../../outside.png");
@@ -150,18 +153,18 @@ describe("Markdown file preview image routing", () => {
   it("routes absolute and file-relative images in thread-storage Markdown previews", () => {
     renderMarkdownFilePreview({
       content: [
-        "![absolute](/Users/me/.bb/thread-storage/thr_preview/generated.png)",
+        "![absolute](/Users/me/.omnyo/thread-storage/thr_preview/generated.png)",
         "![relative](screenshots/chart.png)",
       ].join("\n\n"),
       imageContent: { kind: "thread-storage", threadId: "thr_preview" },
       path: "reports/nested/report.md",
-      rootPath: "/Users/me/.bb/thread-storage/thr_preview",
+      rootPath: "/Users/me/.omnyo/thread-storage/thr_preview",
     });
 
     expect(
       screen.getByRole("img", { name: "absolute" }).getAttribute("src"),
     ).toBe(
-      "/api/v1/threads/thr_preview/host-files/Users/me/.bb/thread-storage/thr_preview/generated.png",
+      "/api/v1/threads/thr_preview/host-files/Users/me/.omnyo/thread-storage/thr_preview/generated.png",
     );
     expect(
       screen.getByRole("img", { name: "relative" }).getAttribute("src"),

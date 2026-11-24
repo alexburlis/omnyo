@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BB_DESKTOP_FOCUS_WINDOW_CHANNEL } from "../src/desktop-window-command-ipc.js";
+import { OMNYO_DESKTOP_FOCUS_WINDOW_CHANNEL } from "../src/desktop-window-command-ipc.js";
 import { registerDesktopWindowFocusIpc } from "../src/desktop-window-focus.js";
 
 const mock = vi.hoisted(() => {
@@ -7,6 +7,7 @@ const mock = vi.hoisted(() => {
     string,
     (event: { sender: { id: number } }) => void
   >();
+
   const window = {
     isDestroyed: vi.fn(() => false),
     isMinimized: vi.fn(() => false),
@@ -14,6 +15,7 @@ const mock = vi.hoisted(() => {
     show: vi.fn(),
     focus: vi.fn(),
   };
+
   return {
     listeners,
     window,
@@ -43,7 +45,7 @@ beforeEach(() => {
 });
 
 function request(id: number) {
-  mock.listeners.get(BB_DESKTOP_FOCUS_WINDOW_CHANNEL)?.({ sender: { id } });
+  mock.listeners.get(OMNYO_DESKTOP_FOCUS_WINDOW_CHANNEL)?.({ sender: { id } });
 }
 
 describe("desktop notification window activation", () => {
@@ -70,8 +72,10 @@ describe("desktop notification window activation", () => {
       show: vi.fn(),
       focus: vi.fn(),
     };
+
     mock.fromWebContents.mockImplementation((sender) => {
       expect(sender).toEqual({ id: 43 });
+
       return secondWindow;
     });
     request(43);

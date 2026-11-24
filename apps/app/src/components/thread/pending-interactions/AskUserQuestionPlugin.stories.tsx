@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { installTestPluginRuntime } from "@get-bb/plugin-sdk/testing/app";
+import { installTestPluginRuntime } from "@omnyo/plugin-sdk/testing/app";
 import { collectPluginAppRegistrations } from "@/lib/plugin-app-definition";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 import {
@@ -10,6 +10,7 @@ import { PluginPendingInteractionComposer } from "@/components/plugin/PluginPend
 import { loadPluginAppDefinition } from "../../../../.ladle/plugin-app-module";
 
 installTestPluginRuntime();
+
 const questionApp = await loadPluginAppDefinition(
   import.meta.glob<unknown>(
     "../../../../../../plugins/ask-user-question/app.tsx",
@@ -27,8 +28,10 @@ export function CompactQuestion() {
           collectPluginAppRegistrations(questionApp).pendingInteractions,
       }),
     );
+
     return () => removePluginSlotRegistrations("ask-user-question");
   }, []);
+
   return (
     <div className="mx-auto flex min-h-[80vh] w-full max-w-3xl flex-col justify-end p-4">
       <PluginPendingInteractionComposer

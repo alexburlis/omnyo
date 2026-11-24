@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { performance } from "node:perf_hooks";
 import {
   buildBridgeEventScript,
   buildBridgeInjectionScript,
@@ -8,7 +11,7 @@ import {
 } from "../src/index.js";
 
 const handshake: NativeShellHandshake = {
-  bridgeVersion: 2,
+  bridgeVersion: 3,
   appVersion: "0.39.0",
   platform: "ios",
   profileMode: "connect",
@@ -27,7 +30,7 @@ const handshake: NativeShellHandshake = {
 interface FakeWindow {
   location: { href: string };
   ReactNativeWebView: { postMessage(raw: string): void };
-  bb?: { native?: NativeShellApi };
+  omnyo?: { native?: NativeShellApi };
 }
 
 function installBridge(
@@ -35,6 +38,7 @@ function installBridge(
   page: Record<string, unknown> = {},
 ) {
   const posted: string[] = [];
+
   const fakeWindow: FakeWindow = {
     location: { href: "https://test/threads/one" },
     ReactNativeWebView: {
@@ -43,6 +47,7 @@ function installBridge(
       },
     },
   };
+
   const run = (script: string) => {
     // eslint-disable-next-line no-new-func
     new Function(
@@ -60,9 +65,12 @@ function installBridge(
       page.fetch,
     );
   };
+
   run(buildBridgeInjectionScript({ ...handshake, ...overrides }));
-  const native = fakeWindow.bb?.native;
+  const native = fakeWindow.omnyo?.native;
+
   if (native === undefined) throw new Error("bridge did not install");
+
   return { native, posted, run, fakeWindow };
 }
 
@@ -71,11 +79,14 @@ describe("buildBridgeInjectionScript", () => {
     "sends Android %s copy through the request/reply bridge",
     async (format) => {
       const { native, posted, run } = installBridge({ platform: "android" });
+
       const promise =
         format === "image"
           ? native.copyTextAndImage?.("A photo", "https://test/photo.png")
           : native.copyRichText?.("A photo", "<pre>A photo</pre>");
+
       const parsed = parsePageToShellMessage(posted[0]);
+
       if (!parsed.ok || parsed.message.type !== "request")
         throw new Error("Invalid clipboard request");
       expect(parsed.message.request).toEqual(
@@ -106,7 +117,7 @@ describe("buildBridgeInjectionScript", () => {
   );
   it("installs the handshake the page reads at boot", () => {
     const { native } = installBridge();
-    expect(native.bridgeVersion).toBe(2);
+    expect(native.bridgeVersion).toBe(3);
     expect(native.platform).toBe("ios");
     expect(native.profileMode).toBe("connect");
     expect(native.safeArea).toEqual({ top: 59, right: 0, bottom: 34, left: 0 });
@@ -115,11 +126,15 @@ describe("buildBridgeInjectionScript", () => {
 
   it("posts a request the shell can parse, and resolves it on the reply", async () => {
     const { native, posted, run } = installBridge();
+
     const promise = native.request("share", {
-      url: "https://bee.getbb.app/threads/thr_1",
+      url: "https://bee.example.test/threads/thr_1",
     });
+
     const parsed = parsePageToShellMessage(posted[0]);
+
     if (!parsed.ok) throw new Error(`shell could not parse: ${parsed.reason}`);
+
     if (parsed.message.type !== "request") throw new Error("wrong type");
     const { id } = parsed.message;
     run(
@@ -136,9 +151,11 @@ describe("buildBridgeInjectionScript", () => {
     const { native, posted, run } = installBridge();
     const promise = native.request("share", { text: "hello" });
     const parsed = parsePageToShellMessage(posted[0]);
+
     if (!parsed.ok || parsed.message.type !== "request") {
       throw new Error("unexpected message");
     }
+
     run(
       buildBridgeEventScript({
         type: "response",
@@ -151,6 +168,7 @@ describe("buildBridgeInjectionScript", () => {
 
   it("times out a request the shell never answers", async () => {
     vi.useFakeTimers();
+
     try {
       const { native } = installBridge();
       const promise = native.request("share", { text: "hello" });
@@ -164,12 +182,15 @@ describe("buildBridgeInjectionScript", () => {
 
   it("allows image copies longer than the default request timeout", async () => {
     vi.useFakeTimers();
+
     try {
       const { native } = installBridge();
+
       const promise = native.request("clipboard", {
         text: "hello",
         imageUrl: "https://example.com/image.png",
       });
+
       const rejected = vi.fn();
       void promise.catch(rejected);
       await vi.advanceTimersByTimeAsync(10_001);
@@ -215,7 +236,7 @@ describe("buildBridgeInjectionScript", () => {
         safeArea: { top: 10, right: 0, bottom: 0, left: 0 },
       }),
     );
-    expect(fakeWindow.bb?.native).toBe(native);
+    expect(fakeWindow.omnyo?.native).toBe(native);
     expect(native.appVersion).toBe("0.40.0");
     run(buildBridgeEventScript({ type: "resume" }));
     expect(seen).toHaveLength(1);
@@ -226,6 +247,7 @@ describe("buildBridgeInjectionScript", () => {
       ...handshake,
       appVersion: "</script><script>alert(1)</script>",
     });
+
     expect(script).not.toContain("</script>");
   });
 
@@ -233,7 +255,7 @@ describe("buildBridgeInjectionScript", () => {
     const fakeWindow: Record<string, unknown> = {};
     // eslint-disable-next-line no-new-func
     new Function("window", buildBridgeInjectionScript(handshake))(fakeWindow);
-    const native = (fakeWindow.bb as { native: NativeShellApi }).native;
+    const native = (fakeWindow.omnyo as { native: NativeShellApi }).native;
     expect(() => native.post({ type: "ready", path: "/" })).not.toThrow();
   });
 });
@@ -247,8 +269,10 @@ interface ImagePasteApi extends NativeShellApi {
 }
 
 const image = { name: "screenshot.png", type: "image/png" };
+
 const imageBytes = new Uint8Array([0, 1, 2, 3, 255]);
-const imageUrl = "https://test/__bb_keyboard_image/image";
+
+const imageUrl = "https://test/__omnyo_keyboard_image/image";
 
 function installImageBridge(
   fetch = vi
@@ -256,27 +280,33 @@ function installImageBridge(
     .mockImplementation(async () => new Response(imageBytes)),
 ) {
   const dispatchEvent = vi.fn();
+
   const target = {
     isContentEditable: true,
     isConnected: true,
     closest: vi.fn<() => object | null>(() => ({})),
     dispatchEvent,
   };
+
   const document = { activeElement: target };
+
   class Transfer {
     files: File[] = [];
     items = { add: (file: File) => this.files.push(file) };
   }
+
   class Paste {
     constructor(
       public type: string,
       public options: { clipboardData: Transfer },
     ) {}
   }
+
   const { native, fakeWindow } = installBridge(
     { platform: "android" },
     { document, DataTransfer: Transfer, ClipboardEvent: Paste, fetch },
   );
+
   return {
     native: native as ImagePasteApi,
     document,
@@ -289,6 +319,7 @@ function installImageBridge(
 
 function pendingImageResponse() {
   let finish!: () => void;
+
   const response = new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
@@ -299,7 +330,9 @@ function pendingImageResponse() {
       },
     }),
   );
+
   const blob = vi.spyOn(response, "blob");
+
   return { response, finish, blob };
 }
 
@@ -308,23 +341,28 @@ describe("native keyboard image paste", () => {
     "delivers bytes and metadata to the original editor when native completion arrives %s the body",
     async (order) => {
       const body = pendingImageResponse();
+
       const fetch = vi
         .fn<typeof globalThis.fetch>()
         .mockResolvedValue(body.response);
+
       const { native, document, dispatchEvent } = installImageBridge(fetch);
       expect(native.__beginImagePaste("image", imageUrl)).toBe(true);
       document.activeElement = {
         ...document.activeElement,
         dispatchEvent: vi.fn(),
       };
+
       if (order === "before") native.__finishImagePaste("image", image);
       body.finish();
       await vi.waitFor(() => expect(body.blob).toHaveBeenCalled());
       await body.blob.mock.results[0]?.value;
+
       if (order === "after") {
         expect(dispatchEvent).not.toHaveBeenCalled();
         native.__finishImagePaste("image", image);
       }
+
       await vi.waitFor(() => expect(dispatchEvent).toHaveBeenCalledTimes(1));
       const event = dispatchEvent.mock.calls[0]?.[0];
       expect(event.type).toBe("paste");
@@ -355,13 +393,17 @@ describe("native keyboard image paste", () => {
     "discards a pending body after %s",
     async (change) => {
       const body = pendingImageResponse();
+
       const fetch = vi
         .fn<typeof globalThis.fetch>()
         .mockResolvedValue(body.response);
+
       const { native, target, fakeWindow, dispatchEvent } =
         installImageBridge(fetch);
+
       native.__beginImagePaste("image", imageUrl);
       native.__finishImagePaste("image", image);
+
       if (change === "removed") target.isConnected = false;
       else fakeWindow.location.href = "https://test/threads/two";
       body.finish();
@@ -376,6 +418,7 @@ describe("native keyboard image paste", () => {
     "discards a %s failure and allows the next image",
     async (failure) => {
       const fetch = vi.fn<typeof globalThis.fetch>();
+
       if (failure === "read")
         fetch.mockRejectedValueOnce(new Error("Stream failed"));
       else if (failure === "http")
@@ -403,11 +446,14 @@ describe("native keyboard image paste", () => {
 
   it("aborts an expired body and ignores its late completion", async () => {
     vi.useFakeTimers();
+
     try {
       const body = pendingImageResponse();
+
       const fetch = vi
         .fn<typeof globalThis.fetch>()
         .mockResolvedValue(body.response);
+
       const { native, dispatchEvent } = installImageBridge(fetch);
       native.__beginImagePaste("expired", imageUrl);
       await vi.advanceTimersByTimeAsync(30000);
@@ -421,4 +467,72 @@ describe("native keyboard image paste", () => {
       vi.useRealTimers();
     }
   });
+});
+
+it.skipIf(!process.env.OMNYO_MOBILE_BRIDGE_MEASUREMENT_OUTPUT)(
+  "measures fixed bridge injection generation",
+  async () => {
+    const output = process.env.OMNYO_MOBILE_BRIDGE_MEASUREMENT_OUTPUT;
+
+    if (!output) throw new Error("Measurement output required");
+    const samplesMs: number[] = [];
+    let script = "";
+
+    for (let sample = -5; sample < 20; sample++) {
+      const start = performance.now();
+
+      for (let i = 0; i < 2000; i++)
+        script = buildBridgeInjectionScript(handshake);
+      const elapsed = performance.now() - start;
+
+      if (sample >= 0) samplesMs.push(elapsed);
+    }
+
+    const { native, run } = installBridge();
+    run(
+      buildBridgeInjectionScript({
+        ...handshake,
+        appVersion: "<updated>\u2028\u2029",
+        safeArea: { top: 1, right: 2, bottom: 3, left: 4 },
+      }),
+    );
+    expect(native.appVersion).toBe("<updated>\u2028\u2029");
+    expect(native.safeArea).toEqual({ top: 1, right: 2, bottom: 3, left: 4 });
+    await writeFile(
+      output,
+      JSON.stringify(
+        {
+          fixture: handshake,
+          iterationsPerSample: 2000,
+          warmups: 5,
+          samplesMs,
+          scriptBytes: Buffer.byteLength(script),
+          scriptHash: createHash("sha256").update(script).digest("hex"),
+        },
+        null,
+        2,
+      ),
+    );
+  },
+);
+
+it("installs only the Omnyo native bridge global", () => {
+  const { fakeWindow } = installBridge();
+  const legacyNativeGlobalV1 = "bb";
+
+  expect(Reflect.get(fakeWindow, "omnyo")).toBeDefined();
+  expect(Reflect.get(fakeWindow, legacyNativeGlobalV1)).toBeUndefined();
+});
+
+it("refuses a legacy native singleton before admitting an Omnyo writer", () => {
+  const legacyNativeGlobalV1 = "bb";
+  const previous = { native: { __installed: true } };
+  const window = { [legacyNativeGlobalV1]: previous };
+  const inject = new Function("window", buildBridgeInjectionScript(handshake));
+
+  expect(() => inject(window)).toThrow(
+    "Legacy native bridge requires an Omnyo native update",
+  );
+  expect(Reflect.get(window, legacyNativeGlobalV1)).toBe(previous);
+  expect(Reflect.get(window, "omnyo")).toBeUndefined();
 });

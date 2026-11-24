@@ -5,13 +5,13 @@ import {
   experimental_FileLink as FileLink,
   experimental_copyToClipboard,
   UrlLink,
-  useBbNavigate,
+  experimental_useAppNavigate,
   useRealtime,
   useRpc,
   type PluginNavPanelProps,
   type PluginRpcResult,
   type PluginThreadPanelProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import {
   buildSuggestions,
   matchesQuery,
@@ -39,6 +39,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
+  CONTROL_HOVER_TRANSITION,
+  DISCLOSURE_CHEVRON_TRANSITION,
+} from "@/components/ui/motion";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -54,17 +58,25 @@ import { Markdown } from "./components/markdown-lite.js";
 type IssueDetail = PluginRpcResult<
   (typeof githubRpcContract)["getIssue"]
 >["issue"];
+
 type PullDetail = PluginRpcResult<
   (typeof githubRpcContract)["getPull"]
 >["pull"];
+
 type PullCheck = PullDetail["checks"][number];
+
 type ReviewThread = PullDetail["reviewThreads"][number];
+
 type PullFile = PullDetail["files"][number];
+
 type Status = PluginRpcResult<(typeof githubRpcContract)["status"]>;
+
 type RepoInfo = Status["repos"][number];
+
 type LinksMap = PluginRpcResult<
   (typeof githubRpcContract)["listLinks"]
 >["links"];
+
 type ThreadLink = LinksMap[string][number];
 
 function errorText(error: unknown): string {
@@ -73,24 +85,32 @@ function errorText(error: unknown): string {
 
 function relativeTime(iso: string): string {
   const then = Date.parse(iso);
+
   if (Number.isNaN(then)) return "";
   const seconds = Math.max(0, (Date.now() - then) / 1000);
+
   if (seconds < 3600) return `${Math.max(1, Math.floor(seconds / 60))}m ago`;
+
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
 const PANEL_PATH = "github";
 
 function useSubPathRoute(subPath: string): [Route, (route: Route) => void] {
-  const bbNavigate = useBbNavigate();
+  const omnyoNavigate = experimental_useAppNavigate();
   const route = useMemo(() => parseSubPath(subPath), [subPath]);
+
   const navigate = useCallback(
     (next: Route) => {
-      bbNavigate.toPluginPanel(PANEL_PATH, { subPath: routeToSubPath(next) });
+      omnyoNavigate.toPluginPanel(PANEL_PATH, {
+        subPath: routeToSubPath(next),
+      });
     },
-    [bbNavigate],
+    [omnyoNavigate],
   );
+
   return [route, navigate];
 }
 
@@ -99,6 +119,7 @@ function useItems(kind: "issue" | "pr"): {
   error: string | null;
 } {
   const rpc = useRpc<typeof githubRpcContract>();
+
   const [state, setState] = useState<{
     items: Item[] | null;
     error: string | null;
@@ -106,32 +127,38 @@ function useItems(kind: "issue" | "pr"): {
     items: null,
     error: null,
   });
+
   const refetch = useCallback(() => {
     rpc.call("listItems", { kind }).then(
       (result) => setState({ items: result.items, error: null }),
       (error: unknown) => setState({ items: null, error: errorText(error) }),
     );
   }, [rpc, kind]);
+
   useEffect(() => {
     refetch();
   }, [refetch]);
   useRealtime("data-changed", refetch);
+
   return state;
 }
 
 function useLinks(): LinksMap {
   const rpc = useRpc<typeof githubRpcContract>();
   const [links, setLinks] = useState<LinksMap>({});
+
   const refetch = useCallback(() => {
     rpc.call("listLinks").then(
       (result) => setLinks(result.links),
       () => {},
     );
   }, [rpc]);
+
   useEffect(() => {
     refetch();
   }, [refetch]);
   useRealtime("links-changed", refetch);
+
   return links;
 }
 
@@ -144,8 +171,9 @@ function useSpawn(): {
   spawningKey: string | null;
 } {
   const rpc = useRpc<typeof githubRpcContract>();
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const [spawningKey, setSpawningKey] = useState<string | null>(null);
+
   const spawn = useCallback(
     (method: "startWork" | "startReview", repo: string, number: number) => {
       setSpawningKey(`${repo}#${number}`);
@@ -159,6 +187,7 @@ function useSpawn(): {
     },
     [rpc, navigate],
   );
+
   return { spawn, spawningKey };
 }
 
@@ -177,6 +206,7 @@ function useViewer(): string | null {
       () => {},
     );
   }, [rpc]);
+
   return login;
 }
 
@@ -218,6 +248,25 @@ function ChevronDownIcon() {
   );
 }
 
+function DisclosureChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={`shrink-0 ${DISCLOSURE_CHEVRON_TRANSITION} ${open ? "rotate-90" : ""}`}
+    >
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
 function RefreshIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -242,8 +291,11 @@ function RefreshIcon({ className }: { className?: string }) {
 
 function stateDotClass(kind: "issue" | "pr", state: string): string {
   if (state === "OPEN") return "bg-green-500";
+
   if (kind === "pr" && state === "MERGED") return "bg-purple-500";
+
   if (kind === "pr") return "bg-red-500";
+
   return "bg-purple-500";
 }
 
@@ -265,17 +317,21 @@ function StateBadge({ kind, state }: { kind: "issue" | "pr"; state: string }) {
 }
 
 function ThreadPills({ links }: { links: ThreadLink[] | undefined }) {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   if (links === undefined || links.length === 0) return null;
+
   return (
     <span className="flex shrink-0 items-center gap-1">
       {links.map((link, index) => (
         <Badge
           key={link.threadId}
-          title={`Open BB thread ${link.threadId}`}
+          title={`Open Omnyo thread ${link.threadId}`}
           onClick={(event) => {
             event.stopPropagation();
-            navigate.toThread(link.threadId);
+            navigate.toThread(link.threadId, {
+              experimental_userInitiated: true,
+            });
           }}
           variant="secondary"
           className="cursor-pointer whitespace-nowrap hover:bg-accent"
@@ -295,6 +351,7 @@ function LabelChips({
   className?: string;
 }) {
   if (labels.length === 0) return null;
+
   return (
     <span className={`items-center gap-1 ${className ?? "flex shrink-0"}`}>
       {labels.slice(0, 3).map((label) => (
@@ -312,6 +369,7 @@ function LabelChips({
 
 function useIssueMutations() {
   const rpc = useRpc<typeof githubRpcContract>();
+
   const setIssueState = useCallback(
     (repo: string, number: number, state: "open" | "closed") =>
       rpc
@@ -323,16 +381,19 @@ function useIssueMutations() {
         ),
     [rpc],
   );
+
   const setAssignees = useCallback(
     (repo: string, number: number, assignees: string[]) =>
       rpc.call("setAssignees", { repo, number, assignees }),
     [rpc],
   );
+
   const setLabels = useCallback(
     (repo: string, number: number, labels: string[]) =>
       rpc.call("setLabels", { repo, number, labels }),
     [rpc],
   );
+
   return { setIssueState, setAssignees, setLabels };
 }
 
@@ -340,6 +401,7 @@ function FilterSuggestionIcon({ icon }: { icon: SuggestionIcon }) {
   if (icon.kind === "state") {
     return <StateDot kind={icon.itemKind} state={icon.state} />;
   }
+
   return <Avatar login={icon.login} size="size-4" />;
 }
 
@@ -365,11 +427,15 @@ function FilterBar({
   const vocab = useMemo(() => {
     const users = new Set<string>();
     const labels = new Set<string>();
+
     for (const item of items ?? []) {
       if (item.author.length > 0) users.add(item.author);
+
       for (const login of item.assignees) users.add(login);
+
       for (const label of item.labels) labels.add(label);
     }
+
     return {
       users: [...users].sort((a, b) => a.localeCompare(b)),
       labels: [...labels].sort((a, b) => a.localeCompare(b)),
@@ -380,10 +446,12 @@ function FilterBar({
   const upToCaret = value.slice(0, caret);
   const tokenStart = upToCaret.lastIndexOf(" ") + 1;
   const token = upToCaret.slice(tokenStart);
+
   const suggestions = useMemo(
     () => buildSuggestions(token, vocab, kind, viewer).slice(0, 8),
     [token, vocab, kind, viewer],
   );
+
   const active = Math.min(highlight, Math.max(0, suggestions.length - 1));
 
   const syncCaret = () =>
@@ -392,6 +460,7 @@ function FilterBar({
   const accept = (suggestion: Suggestion) => {
     const next =
       value.slice(0, tokenStart) + suggestion.insert + value.slice(caret);
+
     onChange(next);
     const position = tokenStart + suggestion.insert.length;
     setCaret(position);
@@ -405,12 +474,16 @@ function FilterBar({
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
       setOpen(false);
+
       return;
     }
+
     if (!open || suggestions.length === 0) {
       if (event.key === "ArrowDown") setOpen(true);
+
       return;
     }
+
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setHighlight((active + 1) % suggestions.length);
@@ -445,7 +518,7 @@ function FilterBar({
       />
       {value.length > 0 ? (
         <button
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+          className={`absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground ${CONTROL_HOVER_TRANSITION}`}
           onMouseDown={(event) => {
             event.preventDefault();
             onChange("");
@@ -458,7 +531,7 @@ function FilterBar({
         </button>
       ) : null}
       {open && suggestions.length > 0 ? (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-md border border-border bg-popover py-1 shadow-md">
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 animate-in overflow-y-auto rounded-md border border-border bg-popover py-1 shadow-md duration-(--motion-duration-fast) fade-in-0 slide-in-from-top-1">
           {suggestions.map((suggestion, index) => (
             <button
               key={suggestion.insert}
@@ -505,6 +578,7 @@ function AssigneeCell({ assignees }: { assignees: string[] }) {
   if (assignees.length === 0) {
     return <span className="text-muted-foreground/50">—</span>;
   }
+
   return (
     <span
       className="flex items-center -space-x-1.5"
@@ -525,9 +599,11 @@ function AssigneeCell({ assignees }: { assignees: string[] }) {
 function StatusCell({ item }: { item: Item }) {
   const { setIssueState } = useIssueMutations();
   const [pending, setPending] = useState(false);
+
   if (item.kind === "pr") {
     return <StateBadge kind="pr" state={item.state} />;
   }
+
   const change = (next: "open" | "closed") => {
     if ((item.state === "OPEN") === (next === "open")) return;
     setPending(true);
@@ -535,6 +611,7 @@ function StatusCell({ item }: { item: Item }) {
       .catch((error: unknown) => toast.error(errorText(error)))
       .finally(() => setPending(false));
   };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild disabled={pending}>
@@ -566,16 +643,18 @@ function StatusCell({ item }: { item: Item }) {
 }
 
 function RowMenu({ item }: { item: Item }) {
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const viewer = useViewer();
   const { setIssueState, setAssignees } = useIssueMutations();
   const assignedToMe = viewer !== null && item.assignees.includes(viewer);
 
   const toggleSelfAssign = () => {
     if (viewer === null) return;
+
     const next = assignedToMe
       ? item.assignees.filter((login) => login !== viewer)
       : [...item.assignees, viewer];
+
     setAssignees(item.repo, item.number, next)
       .then(() =>
         toast.success(
@@ -654,6 +733,7 @@ function ItemRow({
 }) {
   const { spawn, spawningKey } = useSpawn();
   const busy = spawningKey === `${item.repo}#${item.number}`;
+
   return (
     <div
       className="grid cursor-pointer grid-cols-1 gap-y-2 px-3 py-3 hover:bg-accent/50 @[48rem]:flex @[48rem]:items-center @[48rem]:gap-3 @[48rem]:py-2"
@@ -774,18 +854,32 @@ function ItemsTable({
   const links = useLinks();
 
   let body: React.ReactNode;
+
   if (error !== null) {
-    body = <EmptyState message={error} />;
+    body = (
+      <EmptyState
+        icon="AlertTriangle"
+        tone="error"
+        title="Couldn’t load from GitHub"
+        message={error}
+      />
+    );
   } else if (items === null) {
     body = <TableSkeleton />;
   } else if (items.length === 0) {
-    body = (
+    const noun = kind === "issue" ? "issues" : "pull requests";
+
+    body = hasFilter ? (
       <EmptyState
-        message={
-          hasFilter
-            ? `No ${kind === "issue" ? "issues" : "pull requests"} match this filter.`
-            : `No ${kind === "issue" ? "issues" : "pull requests"} in the tracked repos.`
-        }
+        icon="Search"
+        title={`No ${noun} match this filter`}
+        message="Try a different filter, or clear it to see everything."
+      />
+    ) : (
+      <EmptyState
+        icon={kind === "issue" ? "CircleCheck" : "GitPullRequest"}
+        title={`No ${noun} to show`}
+        message={`The tracked repos have no ${noun} right now.`}
       />
     );
   } else {
@@ -992,6 +1086,7 @@ function IssueDetailView({
       (err: unknown) => setError(errorText(err)),
     );
   }, [rpc, repo, number]);
+
   useEffect(() => {
     setDetail(null);
     load();
@@ -1020,6 +1115,7 @@ function IssueDetailView({
         next = assigned
           ? [...new Set([...prev.assignees, login])]
           : prev.assignees.filter((entry) => entry !== login);
+
         return { ...prev, assignees: next };
       });
       setAssignees(repo, number, next).catch((err: unknown) => {
@@ -1038,6 +1134,7 @@ function IssueDetailView({
         next = enabled
           ? [...new Set([...prev.labels, label])]
           : prev.labels.filter((entry) => entry !== label);
+
         return { ...prev, labels: next };
       });
       setLabels(repo, number, next).catch((err: unknown) => {
@@ -1061,12 +1158,22 @@ function IssueDetailView({
       .finally(() => setPosting(false));
   }, [rpc, repo, number, comment, load]);
 
-  if (error !== null) return <EmptyState message={error} />;
+  if (error !== null)
+    return (
+      <EmptyState
+        icon="AlertTriangle"
+        tone="error"
+        title="Couldn’t load this issue"
+        message={error}
+      />
+    );
+
   if (detail === null) {
     return <DetailSkeleton />;
   }
 
   const issueLinks = links[`issue:${repo}#${number}`];
+
   return (
     <div className="@container/github-detail flex flex-col gap-4">
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -1243,13 +1350,17 @@ function IssueDetailView({
 function pullStateBadgeParts(state: string): { dot: string; label: string } {
   if (state === "DRAFT")
     return { dot: "bg-muted-foreground/60", label: "draft" };
+
   if (state === "OPEN") return { dot: "bg-green-500", label: "open" };
+
   if (state === "MERGED") return { dot: "bg-purple-500", label: "merged" };
+
   return { dot: "bg-red-500", label: "closed" };
 }
 
 function PullStateBadge({ state }: { state: string }) {
   const { dot, label } = pullStateBadgeParts(state);
+
   return (
     <Badge variant="outline" className="gap-1.5 font-normal">
       <span className={`size-2 shrink-0 rounded-full ${dot}`} />
@@ -1268,7 +1379,9 @@ const REVIEW_STATE_LABELS: Record<string, string> = {
 
 function reviewStateClass(state: string): string {
   if (state === "APPROVED") return "text-green-600 dark:text-green-400";
+
   if (state === "CHANGES_REQUESTED") return "text-red-600 dark:text-red-400";
+
   return "text-muted-foreground";
 }
 
@@ -1280,19 +1393,26 @@ function ReviewDecisionBadge({ decision }: { decision: string }) {
       </Badge>
     );
   }
+
   if (decision === "CHANGES_REQUESTED") {
     return <Badge variant="destructive">changes requested</Badge>;
   }
+
   if (decision === "REVIEW_REQUIRED") {
     return <Badge variant="secondary">review required</Badge>;
   }
+
   return null;
 }
 
 function checkDotClass(status: PullCheck["status"]): string {
   if (status === "success") return "bg-green-500";
+
   if (status === "failure") return "bg-red-500";
-  if (status === "pending") return "animate-pulse bg-yellow-500";
+
+  if (status === "pending")
+    return "animate-pulse bg-yellow-500 motion-reduce:animate-none";
+
   return "bg-muted-foreground/50";
 }
 
@@ -1300,9 +1420,11 @@ function ChecksSection({ checks }: { checks: PullCheck[] }) {
   const [open, setOpen] = useState(() =>
     checks.some((check) => check.status === "failure"),
   );
+
   if (checks.length === 0) return null;
   const passing = checks.filter((check) => check.status === "success").length;
   const failing = checks.filter((check) => check.status === "failure").length;
+
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
       <button
@@ -1315,7 +1437,7 @@ function ChecksSection({ checks }: { checks: PullCheck[] }) {
               ? "bg-red-500"
               : passing === checks.length
                 ? "bg-green-500"
-                : "animate-pulse bg-yellow-500"
+                : "animate-pulse bg-yellow-500 motion-reduce:animate-none"
           }`}
         />
         <span className="font-medium text-foreground">Checks</span>
@@ -1323,8 +1445,8 @@ function ChecksSection({ checks }: { checks: PullCheck[] }) {
           {passing}/{checks.length} passing
           {failing > 0 ? ` · ${failing} failing` : ""}
         </span>
-        <span className="ml-auto text-xs text-muted-foreground">
-          {open ? "▾" : "▸"}
+        <span className="ml-auto text-muted-foreground">
+          <DisclosureChevron open={open} />
         </span>
       </button>
       {open ? (
@@ -1366,16 +1488,18 @@ function FileDiffCard({
   url: string;
 }) {
   const [open, setOpen] = useState(false);
+
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent/50">
+      <div className="relative flex w-full select-none items-center gap-2 px-3 py-2 hover:bg-accent/50">
         <button
           type="button"
-          className="shrink-0 text-xs text-muted-foreground"
+          className="shrink-0 text-muted-foreground after:absolute after:inset-0 after:content-['']"
           aria-label={`${open ? "Collapse" : "Expand"} ${file.path} diff`}
+          aria-expanded={open}
           onClick={() => setOpen((prev) => !prev)}
         >
-          {open ? "▾" : "▸"}
+          <DisclosureChevron open={open} />
         </button>
         {environmentId === null || file.status === "removed" ? (
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
@@ -1383,7 +1507,7 @@ function FileDiffCard({
           </span>
         ) : (
           <FileLink
-            className="min-w-0 flex-1 truncate font-mono text-xs text-foreground hover:underline"
+            className="relative min-w-0 flex-1 truncate font-mono text-xs text-foreground hover:underline"
             target={{
               kind: "workspace",
               environmentId,
@@ -1481,9 +1605,12 @@ function PullTimeline({ pull }: { pull: PullDetail }) {
         )
         .map((review) => ({ type: "review" as const, ...review })),
     ];
+
     return merged.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }, [pull]);
+
   if (entries.length === 0 && pull.reviewThreads.length === 0) return null;
+
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-semibold text-muted-foreground">
@@ -1519,6 +1646,7 @@ function PullTimeline({ pull }: { pull: PullDetail }) {
 function PullReviewersList({ pull }: { pull: PullDetail }) {
   const rows = useMemo(() => {
     const latest = new Map<string, { login: string; state: string }>();
+
     for (const review of pull.reviews) {
       if (review.author.length > 0) {
         latest.set(review.author, {
@@ -1527,13 +1655,17 @@ function PullReviewersList({ pull }: { pull: PullDetail }) {
         });
       }
     }
+
     for (const login of pull.reviewRequests) {
       latest.set(login, { login, state: "PENDING" });
     }
+
     return [...latest.values()];
   }, [pull]);
+
   if (rows.length === 0)
     return <p className="text-sm text-muted-foreground">No reviewers</p>;
+
   return (
     <>
       {rows.map((row) => (
@@ -1566,6 +1698,7 @@ function PullCommentBox({
   const rpc = useRpc<typeof githubRpcContract>();
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
+
   const post = useCallback(() => {
     if (comment.trim().length === 0) return;
     setPosting(true);
@@ -1578,6 +1711,7 @@ function PullCommentBox({
       .catch((error: unknown) => toast.error(errorText(error)))
       .finally(() => setPosting(false));
   }, [rpc, repo, number, comment, onPosted]);
+
   return (
     <div className="flex flex-col gap-2">
       <Textarea
@@ -1629,17 +1763,28 @@ function PullDetailView({
       (err: unknown) => setError(errorText(err)),
     );
   }, [rpc, repo, number]);
+
   useEffect(() => {
     setPull(null);
     load();
   }, [load]);
 
-  if (error !== null) return <EmptyState message={error} />;
+  if (error !== null)
+    return (
+      <EmptyState
+        icon="AlertTriangle"
+        tone="error"
+        title="Couldn’t load this pull request"
+        message={error}
+      />
+    );
+
   if (pull === null) {
     return <DetailSkeleton />;
   }
 
   const pullLinks = links[`pr:${repo}#${number}`];
+
   const mainColumn = (
     <div className="flex min-w-0 flex-1 flex-col gap-4">
       <ChecksSection checks={pull.checks} />
@@ -1804,7 +1949,17 @@ function PullPickerList({
   onPick: (repo: string, number: number) => void;
 }) {
   const { items, error } = useItems("pr");
-  if (error !== null) return <EmptyState message={error} />;
+
+  if (error !== null)
+    return (
+      <EmptyState
+        icon="AlertTriangle"
+        tone="error"
+        title="Couldn’t load pull requests"
+        message={error}
+      />
+    );
+
   if (items === null) {
     return (
       <DelayedLoading>
@@ -1816,10 +1971,19 @@ function PullPickerList({
       </DelayedLoading>
     );
   }
+
   const open = items.filter((item) => item.state === "OPEN");
+
   if (open.length === 0) {
-    return <EmptyState message="No open pull requests in the tracked repos." />;
+    return (
+      <EmptyState
+        icon="GitPullRequest"
+        title="No open pull requests"
+        message="The tracked repos have no open pull requests to link right now."
+      />
+    );
   }
+
   return (
     <div className="@container/github-picker overflow-hidden rounded-lg border border-border bg-card">
       <div className="divide-y divide-border">
@@ -1849,6 +2013,7 @@ function PullPickerList({
 function PullPanelTab({ threadId }: PluginThreadPanelProps) {
   const rpc = useRpc<typeof githubRpcContract>();
   const [resolved, setResolved] = useState(false);
+
   const [selected, setSelected] = useState<{
     repo: string;
     number: number;
@@ -1860,6 +2025,7 @@ function PullPanelTab({ threadId }: PluginThreadPanelProps) {
     rpc.call("pullForThread", { threadId }).then(
       (result) => {
         if (cancelled) return;
+
         if (result.pull !== null) setSelected(result.pull);
         setResolved(true);
       },
@@ -1867,6 +2033,7 @@ function PullPanelTab({ threadId }: PluginThreadPanelProps) {
         if (!cancelled) setResolved(true);
       },
     );
+
     return () => {
       cancelled = true;
     };
@@ -1875,6 +2042,7 @@ function PullPanelTab({ threadId }: PluginThreadPanelProps) {
   if (!resolved) {
     return <DetailSkeleton />;
   }
+
   if (selected === null) {
     return (
       <div className="flex flex-col gap-3">
@@ -1889,6 +2057,7 @@ function PullPanelTab({ threadId }: PluginThreadPanelProps) {
       </div>
     );
   }
+
   return (
     <PullDetailView
       repo={selected.repo}
@@ -1973,16 +2142,19 @@ function NewIssueForm({
 function useStatus(): { status: Status | null; refetch: () => void } {
   const rpc = useRpc<typeof githubRpcContract>();
   const [status, setStatus] = useState<Status | null>(null);
+
   const refetch = useCallback(() => {
     rpc.call("status").then(
       (result) => setStatus(result),
       () => {},
     );
   }, [rpc]);
+
   useEffect(() => {
     refetch();
   }, [refetch]);
   useRealtime("data-changed", refetch);
+
   return { status, refetch };
 }
 
@@ -1991,6 +2163,7 @@ function PanelHeader() {
   const { status } = useStatus();
   const [syncing, setSyncing] = useState(false);
   const [failed, setFailed] = useState(false);
+
   const refresh = useCallback(() => {
     setSyncing(true);
     setFailed(false);
@@ -1999,6 +2172,7 @@ function PanelHeader() {
       .catch(() => setFailed(true))
       .finally(() => setSyncing(false));
   }, [rpc]);
+
   return (
     <>
       <span className="hidden text-xs text-muted-foreground @min-[40rem]/page-header:inline">
@@ -2035,21 +2209,42 @@ function PanelHeader() {
   );
 }
 
-const QUERY_KEY = "bb-plugin-github:query";
+const QUERY_KEY = "omnyo-plugin-github:query";
+
+const LEGACY_QUERY_KEY_V1 = "bb-plugin-github:query";
+
 const DEFAULT_QUERY = "is:open ";
+
+function readStoredQuery(): string {
+  try {
+    const canonical = window.localStorage.getItem(QUERY_KEY);
+
+    if (canonical !== null) return canonical;
+
+    const legacy = window.localStorage.getItem(LEGACY_QUERY_KEY_V1);
+
+    if (legacy === null) return DEFAULT_QUERY;
+
+    try {
+      window.localStorage.setItem(QUERY_KEY, legacy);
+      window.localStorage.removeItem(LEGACY_QUERY_KEY_V1);
+    } catch {}
+
+    return legacy;
+  } catch {
+    return DEFAULT_QUERY;
+  }
+}
 
 function GithubPanel({ subPath }: PluginNavPanelProps) {
   const [route, navigate] = useSubPathRoute(subPath);
   const { status } = useStatus();
-  const [query, setQueryState] = useState<string>(() => {
-    try {
-      return window.localStorage.getItem(QUERY_KEY) ?? DEFAULT_QUERY;
-    } catch {
-      return DEFAULT_QUERY;
-    }
-  });
+
+  const [query, setQueryState] = useState<string>(readStoredQuery);
+
   const setQuery = useCallback((next: string) => {
     setQueryState(next);
+
     try {
       window.localStorage.setItem(QUERY_KEY, next);
     } catch {}
@@ -2086,6 +2281,7 @@ function ListView({
   const { items, error } = useItems(kind);
   const viewer = useViewer();
   const parsed = useMemo(() => parseQuery(query), [query]);
+
   const filtered = useMemo(
     () =>
       items === null
@@ -2093,6 +2289,7 @@ function ListView({
         : items.filter((item) => matchesQuery(item, parsed, viewer)),
     [items, parsed, viewer],
   );
+
   return (
     <>
       <FilterBar
@@ -2136,23 +2333,34 @@ function GithubPanelBody({
     },
     [navigate],
   );
+
   if (status !== null && status.ghState === "unavailable") {
     return (
       <EmptyState
-        message={`GitHub CLI could not reach GitHub. Check your network or keychain; the plugin retries by itself. (${status.ghError ?? ""})`}
+        icon="CloudOff"
+        tone="error"
+        title="Can’t reach GitHub"
+        message={`The GitHub CLI couldn’t reach GitHub. Check your network or keychain; the plugin retries by itself.${status.ghError ? ` (${status.ghError})` : ""}`}
       />
     );
   }
+
   if (status !== null && !status.ghOk) {
     return (
       <EmptyState
-        message={`GitHub CLI is not available or not authenticated. Install it from cli.github.com, run \`gh auth login\`, then reload the plugin. (${status.ghError ?? ""})`}
+        icon="Terminal"
+        title="Set up the GitHub CLI"
+        message={`The GitHub CLI is missing or not signed in. Install it from cli.github.com, run \`gh auth login\`, then reload the plugin.${status.ghError ? ` (${status.ghError})` : ""}`}
       />
     );
   }
+
   if (status !== null && status.repos.length === 0) {
     return (
-      <EmptyState message="No GitHub repos tracked yet. Create a BB project whose checkout has a GitHub origin remote, or add repos via the extraRepos plugin setting." />
+      <EmptyState
+        title="No GitHub repos tracked yet"
+        message="Create an Omnyo project whose checkout has a GitHub origin remote, or add repos with the extraRepos plugin setting."
+      />
     );
   }
 
@@ -2165,6 +2373,7 @@ function GithubPanelBody({
       />
     );
   }
+
   if (route.view === "pull") {
     return (
       <PullDetailView
@@ -2174,6 +2383,7 @@ function GithubPanelBody({
       />
     );
   }
+
   if (route.view === "new") {
     return (
       <NewIssueForm
@@ -2191,6 +2401,7 @@ function GithubPanelBody({
   }
 
   const kind = route.view === "pulls" ? "pr" : "issue";
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">

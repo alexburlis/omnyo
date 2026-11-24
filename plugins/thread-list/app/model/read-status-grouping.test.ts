@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { makeSidebarThread, type SidebarThreadOverrides } from "./fixtures.js";
+import {
+  makeSidebarThread,
+  makeSidebarWork,
+  type SidebarThreadOverrides,
+} from "./fixtures.js";
 import {
   buildSectionThreadList,
   compareStandardThreads,
   type ThreadComparator,
 } from "./project-thread-groups.js";
 import {
-  collapseParentThreads,
   createThreadUnreadPredicate,
   groupComparatorByReadStatus,
 } from "./read-status-grouping.js";
@@ -23,14 +26,33 @@ function thread(id: string, overrides: SidebarThreadOverrides = {}) {
 }
 
 describe("createThreadUnreadPredicate", () => {
+  it.each([false, true])(
+    "keeps working chats out of unread grouping with a held unread state=%s",
+    (held) => {
+      const isUnread = createThreadUnreadPredicate(
+        held ? { threadId: "working", isUnread: true } : null,
+      );
+
+      const working = thread("working", {
+        isUnread: true,
+        experimental_work: makeSidebarWork("working"),
+      });
+
+      expect(isUnread(working)).toBe(false);
+      expect(
+        isUnread({ ...working, experimental_work: makeSidebarWork("open") }),
+      ).toBe(true);
+    },
+  );
+
   it("counts only threads that show an unread dot", () => {
     const isUnread = createThreadUnreadPredicate(null);
 
     expect(isUnread(thread("root"))).toBe(true);
     expect(isUnread(thread("error", { status: "error" }))).toBe(true);
     expect(isUnread(thread("read", read))).toBe(false);
-    expect(isUnread(thread("child", { parentThreadId: "root" }))).toBe(false);
-    expect(isUnread(thread("running", { status: "active" }))).toBe(false);
+    expect(isUnread(thread("child", { parentThreadId: "root" }))).toBe(true);
+    expect(isUnread(thread("running", { status: "active" }))).toBe(true);
   });
 });
 
@@ -42,6 +64,7 @@ describe("groupComparatorByReadStatus", () => {
       thread("read-old", { latestAttentionAt: 200, ...read }),
       thread("unread-old", { latestAttentionAt: 100 }),
     ];
+
     const compare = groupComparatorByReadStatus(
       compareStandardThreads,
       createThreadUnreadPredicate(null),
@@ -58,10 +81,12 @@ describe("groupComparatorByReadStatus", () => {
   it("applies read status before an item comparator", () => {
     const byTitleDescending = ((left, right) =>
       right.displayTitle.localeCompare(left.displayTitle)) as ThreadComparator;
+
     byTitleDescending.compareItems = (left, right) =>
       left.kind === "thread" && right.kind === "thread"
         ? byTitleDescending(left.node.thread, right.node.thread)
         : 0;
+
     const items = buildSectionThreadList(
       [thread("alpha"), thread("zulu", read)],
       groupComparatorByReadStatus(
@@ -73,22 +98,5 @@ describe("groupComparatorByReadStatus", () => {
     expect(
       items.map((item) => (item.kind === "thread" ? item.node.thread.id : "")),
     ).toEqual(["alpha", "zulu"]);
-  });
-});
-
-describe("collapseParentThreads", () => {
-  it("collapses every parent except the expanded ones", () => {
-    const threads = [
-      thread("parent"),
-      thread("child", { parentThreadId: "parent" }),
-      thread("grandchild", { parentThreadId: "child" }),
-      thread("other-parent"),
-      thread("other-child", { parentThreadId: "other-parent" }),
-      thread("leaf"),
-    ];
-
-    expect(
-      [...collapseParentThreads(threads, ["other-parent"])].sort(),
-    ).toEqual(["child", "parent"]);
   });
 });

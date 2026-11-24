@@ -1,13 +1,17 @@
 import { z } from "zod";
 
-export const bbDesktopServerChoiceSchema = z
+export const omnyoDesktopServerChoiceSchema = z
   .object({
     id: z.string().min(1).max(256),
     name: z.string().min(1),
     active: z.boolean(),
   })
   .strict();
-export const bbDesktopServerChoicesSchema = z.array(
-  bbDesktopServerChoiceSchema,
+
+export const omnyoDesktopServerChoicesSchema = z.array(
+  omnyoDesktopServerChoiceSchema,
 );
-export type BbDesktopServerChoice = z.infer<typeof bbDesktopServerChoiceSchema>;
+
+export type OmnyoDesktopServerChoice = z.infer<
+  typeof omnyoDesktopServerChoiceSchema
+>;

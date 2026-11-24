@@ -8,7 +8,9 @@ import { PluginSlotMount } from "./PluginSlotMount";
 
 export function PluginHomepageSections() {
   const { homepageSections } = usePluginSlots();
+
   if (homepageSections.length === 0) return null;
+
   return <PluginHomepageSectionList sections={homepageSections} />;
 }
 
@@ -18,6 +20,7 @@ function PluginHomepageSectionList({
   sections: readonly PluginHomepageSectionSlot[];
 }) {
   const { projectId } = useRouteState();
+
   return (
     <div className="mt-6 space-y-6" data-testid="plugin-homepage-sections">
       {sections.map((section) => (

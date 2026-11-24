@@ -1,34 +1,47 @@
-import { atom, useAtom, useStore } from "jotai";
+import { atom, useAtom, useAtomValue, useStore } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { atomFamily } from "jotai-family";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import {
   sessionOptionSelectionsSchema,
   type PermissionMode,
   type ReasoningLevel,
   type ServiceTier,
   type SessionOptionSelections,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { createTabScopedStorage } from "@/lib/browser-storage";
 import { getProjectScopedStorageKey } from "@/lib/project-scoped-storage";
 
-const MODEL_STORAGE_KEY = "bb.promptbox.model";
-const SERVICE_TIER_STORAGE_KEY = "bb.promptbox.service-tier";
-const REASONING_STORAGE_KEY = "bb.promptbox.reasoning";
-const PERMISSION_MODE_STORAGE_KEY = "bb.promptbox.permission-mode";
-const ENVIRONMENT_STORAGE_KEY = "bb.promptbox.environment";
-const MACHINE_STORAGE_KEY = "bb.promptbox.machine";
-const PROVIDER_STORAGE_KEY = "bb.promptbox.provider";
-const SESSION_OPTIONS_STORAGE_KEY = "bb.promptbox.session-options";
+const MODEL_STORAGE_KEY = "omnyo.promptbox.model";
+
+const SERVICE_TIER_STORAGE_KEY = "omnyo.promptbox.service-tier";
+
+const REASONING_STORAGE_KEY = "omnyo.promptbox.reasoning";
+
+const PERMISSION_MODE_STORAGE_KEY = "omnyo.promptbox.permission-mode";
+
+const ENVIRONMENT_STORAGE_KEY = "omnyo.promptbox.environment";
+
+const MACHINE_STORAGE_KEY = "omnyo.promptbox.machine";
+
+const PROVIDER_STORAGE_KEY = "omnyo.promptbox.provider";
+
+const SESSION_OPTIONS_STORAGE_KEY = "omnyo.promptbox.session-options";
+
 const PROVIDER_SELECTION_STORAGE_VERSION = "1";
 
 export type StoredServiceTier = "" | ServiceTier;
+
 export type StoredReasoningLevel = "" | ReasoningLevel;
+
 export type StoredPermissionMode = "" | PermissionMode;
 
 type StringSelectionSetter = (value: string) => void;
+
 type StoredServiceTierSetter = (value: StoredServiceTier) => void;
+
 type StoredReasoningLevelSetter = (value: StoredReasoningLevel) => void;
+
 type StoredPermissionModeSetter = (value: StoredPermissionMode) => void;
 
 interface PersistedStringSelectionField {
@@ -87,7 +100,9 @@ const providerIdAtom = atomWithStorage<string>(
   stringSelectionStorage,
   { getOnInit: true },
 );
+
 const emptyModelAtom = atom("");
+
 const emptyReasoningLevelAtom = atom<StoredReasoningLevel>("");
 
 function getProviderSelectionStorageKey(
@@ -114,6 +129,7 @@ const modelAtomFamily = atomFamily((providerId: string) =>
     { getOnInit: true },
   ),
 );
+
 const serviceTierAtom = atomWithStorage<StoredServiceTier>(
   SERVICE_TIER_STORAGE_KEY,
   "",
@@ -126,6 +142,7 @@ const serviceTierAtom = atomWithStorage<StoredServiceTier>(
   ),
   { getOnInit: true },
 );
+
 const reasoningLevelAtomFamily = atomFamily((providerId: string) =>
   atomWithStorage<StoredReasoningLevel>(
     getProviderSelectionStorageKey(REASONING_STORAGE_KEY, providerId),
@@ -134,17 +151,21 @@ const reasoningLevelAtomFamily = atomFamily((providerId: string) =>
     { getOnInit: true },
   ),
 );
+
 const NO_SESSION_OPTION_SELECTIONS: SessionOptionSelections = {};
+
 const sessionOptionsStorage = createTabScopedStorage<SessionOptionSelections>(
   {
     parse: (value, initialValue) => {
       if (value === null) {
         return initialValue;
       }
+
       try {
         const parsed = sessionOptionSelectionsSchema.safeParse(
           JSON.parse(value),
         );
+
         return parsed.success ? parsed.data : initialValue;
       } catch {
         return initialValue;
@@ -154,6 +175,7 @@ const sessionOptionsStorage = createTabScopedStorage<SessionOptionSelections>(
   },
   { persistInitialValue: false },
 );
+
 const sessionOptionsAtomFamily = atomFamily((providerId: string) =>
   atomWithStorage<SessionOptionSelections>(
     getProviderSelectionStorageKey(SESSION_OPTIONS_STORAGE_KEY, providerId),
@@ -162,6 +184,7 @@ const sessionOptionsAtomFamily = atomFamily((providerId: string) =>
     { getOnInit: true },
   ),
 );
+
 const emptySessionOptionsAtom = atom<SessionOptionSelections>(
   NO_SESSION_OPTION_SELECTIONS,
 );
@@ -173,13 +196,32 @@ export function usePromptBoxSessionOptionsPreference(providerId: string): {
   const [value, setAtomValue] = useAtom(
     providerId ? sessionOptionsAtomFamily(providerId) : emptySessionOptionsAtom,
   );
+
   const setValue = useCallback(
     (nextValue: SessionOptionSelections) => {
       setAtomValue(nextValue);
     },
     [setAtomValue],
   );
+
   return { setValue, value };
+}
+
+export function usePromptBoxSessionOptionsPreferences(
+  providerIds: readonly string[],
+): ReadonlyMap<string, SessionOptionSelections> {
+  const providerIdsKey = providerIds.join("\0");
+
+  const selectionsAtom = useMemo(() => {
+    const ids = providerIdsKey === "" ? [] : providerIdsKey.split("\0");
+
+    return atom(
+      (get) =>
+        new Map(ids.map((id) => [id, get(sessionOptionsAtomFamily(id))])),
+    );
+  }, [providerIdsKey]);
+
+  return useAtomValue(selectionsAtom);
 }
 
 const permissionModePreferenceStorage =
@@ -189,6 +231,7 @@ const permissionModePreferenceStorage =
         if (storedValue === "workspace-write") {
           return "accept-edits";
         }
+
         return storedValue !== null && isStoredPermissionMode(storedValue)
           ? storedValue
           : initialValue;
@@ -204,12 +247,14 @@ const permissionModeAtom = atomWithStorage<StoredPermissionMode>(
   permissionModePreferenceStorage,
   { getOnInit: true },
 );
+
 const environmentSelectionAtom = atomWithStorage<string>(
   ENVIRONMENT_STORAGE_KEY,
   "",
   stringSelectionStorage,
   { getOnInit: true },
 );
+
 const projectEnvironmentSelectionAtomFamily = atomFamily((projectId: string) =>
   atomWithStorage<string>(
     getProjectScopedStorageKey(ENVIRONMENT_STORAGE_KEY, projectId),
@@ -232,19 +277,23 @@ export function usePromptBoxMachinePreference(
   projectId: string,
 ): PersistedStringSelectionField {
   const [value, setAtomValue] = useAtom(machineSelectionAtomFamily(projectId));
+
   const setValue = useCallback(
     (nextValue: string) => setAtomValue(nextValue),
     [setAtomValue],
   );
+
   return { value, setValue };
 }
 
 export function usePromptBoxProviderPreference(): PersistedStringSelectionField {
   const [value, setAtomValue] = useAtom(providerIdAtom);
+
   const setValue = useCallback(
     (nextValue: string) => setAtomValue(nextValue),
     [setAtomValue],
   );
+
   return { setValue, value };
 }
 
@@ -254,24 +303,29 @@ export function usePromptBoxModelPreference(
   const selectionAtom = providerId
     ? modelAtomFamily(providerId)
     : emptyModelAtom;
+
   const [value, setAtomValue] = useAtom(selectionAtom);
+
   const setValue = useCallback(
     (nextValue: string) => {
       setAtomValue(nextValue);
     },
     [setAtomValue],
   );
+
   return { setValue, value };
 }
 
 export function usePromptBoxServiceTierPreference(): PersistedServiceTierSelectionField {
   const [value, setAtomValue] = useAtom(serviceTierAtom);
+
   const setValue = useCallback(
     (nextValue: StoredServiceTier) => {
       setAtomValue(nextValue);
     },
     [setAtomValue],
   );
+
   return { setValue, value };
 }
 
@@ -281,13 +335,16 @@ export function usePromptBoxReasoningLevelPreference(
   const selectionAtom = providerId
     ? reasoningLevelAtomFamily(providerId)
     : emptyReasoningLevelAtom;
+
   const [value, setAtomValue] = useAtom(selectionAtom);
+
   const setValue = useCallback(
     (nextValue: StoredReasoningLevel) => {
       setAtomValue(nextValue);
     },
     [setAtomValue],
   );
+
   return { setValue, value };
 }
 
@@ -295,6 +352,7 @@ export function useSetPromptBoxProviderModelReasoningPreference(): (
   preference: PromptBoxProviderModelReasoningPreference,
 ) => void {
   const store = useStore();
+
   return useCallback(
     ({ providerId, model, reasoningLevel }) => {
       if (providerId.length === 0) return;
@@ -307,12 +365,14 @@ export function useSetPromptBoxProviderModelReasoningPreference(): (
 
 export function usePromptBoxPermissionModePreference(): PersistedPermissionModeSelectionField {
   const [value, setAtomValue] = useAtom(permissionModeAtom);
+
   const setValue = useCallback(
     (nextValue: StoredPermissionMode) => {
       setAtomValue(nextValue);
     },
     [setAtomValue],
   );
+
   return { setValue, value };
 }
 
@@ -320,16 +380,20 @@ export function usePromptBoxEnvironmentPreference(
   projectId?: string | null,
 ): PersistedStringSelectionField {
   const normalizedProjectId = projectId?.trim();
+
   const atom =
     normalizedProjectId && normalizedProjectId.length > 0
       ? projectEnvironmentSelectionAtomFamily(normalizedProjectId)
       : environmentSelectionAtom;
+
   const [value, setAtomValue] = useAtom(atom);
+
   const setValue = useCallback(
     (nextValue: string) => {
       setAtomValue(nextValue);
     },
     [setAtomValue],
   );
+
   return { setValue, value };
 }

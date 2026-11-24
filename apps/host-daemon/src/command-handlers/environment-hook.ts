@@ -19,6 +19,7 @@ interface HookOperation {
   path: string;
   kind: "setup" | "teardown";
 }
+
 const operations = new WeakMap<
   object,
   Map<string, HookOperation | "cancelled">
@@ -28,10 +29,12 @@ function controllers(
   options: CommandDispatchOptions,
 ): Map<string, HookOperation | "cancelled"> {
   let active = operations.get(options.runtimeManager);
+
   if (active === undefined) {
     active = new Map();
     operations.set(options.runtimeManager, active);
   }
+
   return active;
 }
 
@@ -41,20 +44,26 @@ export async function runEnvironmentHook(
 ): Promise<Record<string, never>> {
   const active = controllers(options);
   const existing = active.get(command.operationId);
+
   if (existing === "cancelled")
     throw new Error("Environment hook cancelled before dispatch");
+
   if (existing !== undefined) {
     if (existing.path !== command.path || existing.kind !== command.kind)
       throw new Error("Environment hook identity mismatch");
+
     return existing.done;
   }
+
   if (command.resumeOnly)
     throw new Error("Environment hook outcome is unknown after daemon restart");
   const controller = new AbortController();
   const outcome: HookOutcome = { terminationUnverified: false };
+
   const done = Promise.resolve().then(
     async (): Promise<Record<string, never>> => {
       const run = command.kind === "setup" ? runSetupScript : runTeardownScript;
+
       try {
         await run({
           workspacePath: command.path,
@@ -78,11 +87,14 @@ export async function runEnvironmentHook(
         if (error instanceof LifecycleScriptTerminationUnverifiedError) {
           outcome.terminationUnverified = true;
         }
+
         throw new Error(error instanceof Error ? error.message : String(error));
       }
+
       return {};
     },
   );
+
   active.set(command.operationId, {
     controller,
     done,
@@ -90,6 +102,7 @@ export async function runEnvironmentHook(
     path: command.path,
     kind: command.kind,
   });
+
   return done;
 }
 
@@ -99,12 +112,16 @@ export async function cancelEnvironmentHook(
 ): Promise<{ status: "unknown" | "terminated" }> {
   const active = controllers(options);
   const operation = active.get(command.operationId);
+
   if (operation === undefined || operation === "cancelled") {
     active.set(command.operationId, "cancelled");
+
     return { status: "unknown" };
   }
+
   operation.controller.abort();
   await operation.done.catch(() => undefined);
+
   return {
     status: operation.outcome.terminationUnverified ? "unknown" : "terminated",
   };

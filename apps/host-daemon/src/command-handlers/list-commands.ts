@@ -6,13 +6,11 @@ import type {
   ProviderNativeRootSet,
   ProviderNativeRoots,
   ProviderResolvedNativeRoot,
-} from "@bb/domain";
-import type { HostDaemonOnlineRpcResult } from "@bb/host-daemon-contract";
-import { isPathWithinDirectory } from "@bb/process-utils";
-import {
-  CommandDispatchError,
-  type CommandOf,
-} from "../command-dispatch-support.js";
+} from "@omnyo/domain";
+import type { HostDaemonOnlineRpcResult } from "@omnyo/host-daemon-contract";
+import { isPathWithinDirectory } from "@omnyo/process-utils";
+import type { CommandOf } from "../command-dispatch-support.js";
+import { CommandDispatchError } from "../command-errors.js";
 import {
   discoverProviderCommands,
   type CommandScanRoot,
@@ -26,6 +24,7 @@ export interface DeclaredScanRootResolution {
 }
 
 type RootOrigin = "project" | "user";
+
 type RootSide = "skills" | "commands";
 
 interface ProjectAncestors {
@@ -41,6 +40,7 @@ interface Workspace {
 async function hasProjectRootMarker(directoryPath: string): Promise<boolean> {
   try {
     await fs.lstat(path.join(directoryPath, ".git"));
+
     return true;
   } catch {
     return false;
@@ -52,20 +52,26 @@ async function resolveProjectAncestorDirectories(
 ): Promise<ProjectAncestors> {
   const directories: string[] = [];
   let directoryPath = cwd;
+
   while (true) {
     directories.push(directoryPath);
+
     if (await hasProjectRootMarker(directoryPath)) {
       break;
     }
+
     const parentPath = path.dirname(directoryPath);
+
     if (parentPath === directoryPath) {
       directories.splice(1);
       break;
     }
+
     directoryPath = parentPath;
   }
 
   const projectRootPath = directories.at(-1) ?? cwd;
+
   return { directories: directories.reverse(), projectRootPath };
 }
 
@@ -73,11 +79,14 @@ function workspaceFor(cwd: string | null): Workspace | null {
   if (cwd === null) {
     return null;
   }
+
   let ancestors: Promise<ProjectAncestors> | null = null;
+
   return {
     cwd,
     ancestors: () => {
       ancestors ??= resolveProjectAncestorDirectories(cwd);
+
       return ancestors;
     },
   };
@@ -100,11 +109,14 @@ function appendUniqueRoots(
   candidates: readonly CommandScanRoot[],
 ): void {
   const seen = new Set(target.map(rootPathForDeduplication));
+
   for (const candidate of candidates) {
     const candidatePath = rootPathForDeduplication(candidate);
+
     if (seen.has(candidatePath)) {
       continue;
     }
+
     seen.add(candidatePath);
     target.push(candidate);
   }
@@ -127,10 +139,12 @@ function directoryScanRoot(args: {
 }): CommandScanRoot {
   const boundary =
     args.boundaryPath === null ? {} : { boundaryPath: args.boundaryPath };
+
   const marker =
     args.skipIfManifest === undefined
       ? {}
       : { skipIfManifest: args.skipIfManifest };
+
   if (args.side === "commands") {
     return {
       ...boundary,
@@ -141,6 +155,7 @@ function directoryScanRoot(args: {
       origin: args.origin,
     };
   }
+
   return {
     ...boundary,
     ...marker,
@@ -171,6 +186,7 @@ async function ancestorScanRoots(args: {
   workspace: Workspace;
 }): Promise<CommandScanRoot[]> {
   const { directories, projectRootPath } = await args.workspace.ancestors();
+
   return directories.map((directoryPath) =>
     directoryScanRoot({
       boundaryPath: projectRootPath,
@@ -193,6 +209,7 @@ async function declaredProjectScanRoots(args: {
   workspace: Workspace;
 }): Promise<CommandScanRoot[]> {
   const roots: CommandScanRoot[] = [];
+
   for (const entry of args.entries) {
     if (entry.ancestors) {
       roots.push(
@@ -208,6 +225,7 @@ async function declaredProjectScanRoots(args: {
       );
       continue;
     }
+
     roots.push(
       directoryScanRoot({
         boundaryPath: args.workspace.cwd,
@@ -222,6 +240,7 @@ async function declaredProjectScanRoots(args: {
       }),
     );
   }
+
   return roots;
 }
 
@@ -271,6 +290,7 @@ function resolvedSingleScanRoot(
           ),
         }
       : {};
+
   switch (root.shape) {
     case "skill":
       return {
@@ -313,13 +333,17 @@ async function resolvedScanRoots(args: {
   workspace: Workspace | null;
 }): Promise<CommandScanRoot[]> {
   const roots: CommandScanRoot[] = [];
+
   for (const root of args.roots) {
     const single = resolvedSingleScanRoot(root, args.providerId);
+
     if (single !== null) {
       roots.push(single);
       continue;
     }
+
     const workspace = root.origin === "project" ? args.workspace : null;
+
     if (
       root.ancestors &&
       workspace !== null &&
@@ -338,6 +362,7 @@ async function resolvedScanRoots(args: {
       );
       continue;
     }
+
     roots.push(
       directoryScanRoot({
         boundaryPath:
@@ -355,6 +380,7 @@ async function resolvedScanRoots(args: {
       }),
     );
   }
+
   return roots;
 }
 
@@ -364,6 +390,7 @@ export async function resolveDeclaredScanRoots(
   const { homeDir, nativeRoots, providerId } = resolution;
   const workspace = workspaceFor(resolution.cwd);
   const roots: CommandScanRoot[] = [];
+
   for (const side of ["skills", "commands"] as const) {
     appendUniqueRoots(
       roots,
@@ -376,6 +403,7 @@ export async function resolveDeclaredScanRoots(
       }),
     );
   }
+
   for (const side of ["skills", "commands"] as const) {
     appendUniqueRoots(
       roots,
@@ -387,6 +415,7 @@ export async function resolveDeclaredScanRoots(
       }),
     );
   }
+
   return roots;
 }
 
@@ -396,12 +425,15 @@ export async function listHostCommands(
   if (command.cwd !== null && !path.isAbsolute(command.cwd)) {
     throw new CommandDispatchError("invalid_path", "cwd must be absolute");
   }
+
   const roots = await resolveDeclaredScanRoots({
     cwd: command.cwd,
     homeDir: os.homedir(),
     providerId: command.providerId,
     nativeRoots: command.nativeRoots,
   });
+
   const commands = await discoverProviderCommands({ roots });
+
   return { commands };
 }

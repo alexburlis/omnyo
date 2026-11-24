@@ -18,11 +18,16 @@ export interface LiteralAgentSelection {
   model: string;
   reasoningLevel: string;
   line: number | null;
+  target:
+    | { kind: "origin" }
+    | { kind: "existing"; environmentId: string }
+    | { kind: "dynamic" };
 }
 
 interface InspectedWorkflowSource {
   workflow: ParsedWorkflow;
   literalSelections: LiteralAgentSelection[];
+  literalEnvironmentIds: string[];
 }
 
 function locationSuffix(node: {
@@ -37,6 +42,7 @@ function literalValue(node: Expression, path: string): JsonValue {
   switch (node.type) {
     case "Literal": {
       const value = node.value;
+
       if (
         value === null ||
         typeof value === "string" ||
@@ -45,18 +51,22 @@ function literalValue(node: Expression, path: string): JsonValue {
       ) {
         return value;
       }
+
       throw new Error(`${path} contains a non-JSON literal`);
     }
+
     case "ArrayExpression":
       return node.elements.map((element, index) => {
         if (element === null || element.type === "SpreadElement") {
           throw new Error(`${path}[${index}] must be a literal value`);
         }
+
         return literalValue(element, `${path}[${index}]`);
       });
     case "ObjectExpression": {
       const result: JsonObject = {};
       const seen = new Set<string>();
+
       for (const property of node.properties) {
         if (
           property.type !== "Property" ||
@@ -67,14 +77,19 @@ function literalValue(node: Expression, path: string): JsonValue {
         ) {
           throw new Error(`${path} must use plain literal properties`);
         }
+
         const key = propertyName(property);
+
         if (key === null) throw new Error(`${path} contains an invalid key`);
+
         if (seen.has(key)) {
           throw new Error(
             `${path} contains duplicate key ${JSON.stringify(key)}`,
           );
         }
+
         seen.add(key);
+
         if (
           key === "__proto__" ||
           key === "constructor" ||
@@ -84,10 +99,13 @@ function literalValue(node: Expression, path: string): JsonValue {
             `${path} contains forbidden key ${JSON.stringify(key)}`,
           );
         }
+
         result[key] = literalValue(property.value, `${path}.${key}`);
       }
+
       return result;
     }
+
     case "UnaryExpression":
       if (
         (node.operator === "+" || node.operator === "-") &&
@@ -96,8 +114,10 @@ function literalValue(node: Expression, path: string): JsonValue {
       ) {
         const value =
           node.operator === "-" ? -node.argument.value : node.argument.value;
+
         if (Number.isFinite(value)) return value;
       }
+
       throw new Error(`${path} contains a non-JSON expression`);
     default:
       throw new Error(`${path} must be a JSON-compatible literal`);
@@ -108,7 +128,9 @@ function propertyName(
   property: ObjectExpression["properties"][number],
 ): string | null {
   if (property.type !== "Property" || property.computed) return null;
+
   if (property.key.type === "Identifier") return property.key.name;
+
   return property.key.type === "Literal" &&
     typeof property.key.value === "string"
     ? property.key.value
@@ -118,8 +140,10 @@ function propertyName(
 function inspectAgentOptions(
   node: ObjectExpression,
   selections: LiteralAgentSelection[],
+  environmentIds: Set<string>,
 ): void {
   const properties = new Map<string, Expression>();
+
   for (const property of node.properties) {
     if (
       property.type !== "Property" ||
@@ -129,31 +153,61 @@ function inspectAgentOptions(
     ) {
       throw new Error("agent options must use plain properties");
     }
+
     const key = propertyName(property);
+
     if (key === null) throw new Error("agent options contain an invalid key");
+
     if (!AGENT_OPTION_KEYS.has(key)) {
       throw new Error(`Unknown agent option ${JSON.stringify(key)}`);
     }
+
     if (properties.has(key)) {
       throw new Error(
         `agent options contain duplicate key ${JSON.stringify(key)}`,
       );
     }
+
     properties.set(key, property.value);
   }
 
+  const environment = properties.get("environmentId");
+  let target: LiteralAgentSelection["target"] = { kind: "origin" };
+
+  if (environment !== undefined) {
+    if (environment.type === "Literal") {
+      if (
+        typeof environment.value !== "string" ||
+        environment.value.trim() === ""
+      ) {
+        throw new Error(
+          "agent options.environmentId must be a non-empty string",
+        );
+      }
+
+      target = { kind: "existing", environmentId: environment.value };
+      environmentIds.add(environment.value);
+    } else {
+      target = { kind: "dynamic" };
+    }
+  }
+
   const selectionKeys = ["provider", "model", "reasoningLevel"] as const;
+
   const presentCount = selectionKeys.filter((key) =>
     properties.has(key),
   ).length;
+
   if (presentCount !== 0 && presentCount !== selectionKeys.length) {
     throw new Error(
       "agent options must provide provider, model, and reasoningLevel together, or omit all three",
     );
   }
+
   if (presentCount === selectionKeys.length) {
     const values = selectionKeys.map((key) => {
       const expression = properties.get(key)!;
+
       if (
         expression.type !== "Literal" ||
         typeof expression.value !== "string" ||
@@ -163,35 +217,45 @@ function inspectAgentOptions(
           `agent options.${key} must be a non-empty string literal when selecting a provider`,
         );
       }
+
       return expression.value;
     });
+
     selections.push({
       provider: values[0]!,
       model: values[1]!,
       reasoningLevel: values[2]!,
       line: node.loc?.start.line ?? null,
+      target,
     });
   }
 
   const literalSchemas = new Map<"outputSchema" | "schema", JsonValue>();
+
   for (const key of ["outputSchema", "schema"] as const) {
     const expression = properties.get(key);
+
     if (expression === undefined) continue;
     let schemaValue: JsonValue | undefined;
+
     try {
       schemaValue = literalValue(expression, `agent options.${key}`);
     } catch {
       schemaValue = undefined;
     }
+
     if (schemaValue !== undefined) {
       literalSchemas.set(key, schemaValue);
+
       if (schemaValue !== null) {
         assertValidJsonSchema(schemaValue, `agent options.${key}`);
       }
     }
   }
+
   const literalOutputSchema = literalSchemas.get("outputSchema");
   const literalSchema = literalSchemas.get("schema");
+
   if (
     literalOutputSchema !== undefined &&
     literalSchema !== undefined &&
@@ -201,8 +265,10 @@ function inspectAgentOptions(
       "agent options.outputSchema and agent options.schema must be structurally identical when both are provided",
     );
   }
+
   for (const key of ["title", "label", "phase"] as const) {
     const expression = properties.get(key);
+
     if (
       expression?.type === "Literal" &&
       (typeof expression.value !== "string" || expression.value.trim() === "")
@@ -210,8 +276,10 @@ function inspectAgentOptions(
       throw new Error(`agent options.${key} must be a non-empty string`);
     }
   }
+
   const title = properties.get("title");
   const label = properties.get("label");
+
   if (
     title?.type === "Literal" &&
     typeof title.value === "string" &&
@@ -227,9 +295,11 @@ function inspectAgentOptions(
 
 function readMetadata(node: ObjectExpression): ParsedWorkflow["metadata"] {
   const value = literalValue(node, "meta");
+
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("meta must be an object literal");
   }
+
   const allowed = new Set([
     "name",
     "description",
@@ -237,10 +307,12 @@ function readMetadata(node: ObjectExpression): ParsedWorkflow["metadata"] {
     "outputSchema",
     "phases",
   ]);
+
   for (const key of Object.keys(value)) {
     if (!allowed.has(key))
       throw new Error(`Unknown meta field ${JSON.stringify(key)}`);
   }
+
   if (
     typeof value.name !== "string" ||
     !/^[a-z][a-z0-9-]{0,63}$/.test(value.name)
@@ -249,27 +321,35 @@ function readMetadata(node: ObjectExpression): ParsedWorkflow["metadata"] {
       "meta.name must be a lowercase kebab-case name up to 64 characters",
     );
   }
+
   if (
     typeof value.description !== "string" ||
     value.description.trim() === ""
   ) {
     throw new Error("meta.description must be a non-empty string");
   }
+
   const inputSchema = value.inputSchema ?? null;
   const outputSchema = value.outputSchema ?? null;
+
   if (inputSchema !== null)
     assertValidJsonSchema(inputSchema, "meta.inputSchema");
+
   if (outputSchema !== null)
     assertValidJsonSchema(outputSchema, "meta.outputSchema");
   const phasesValue = value.phases === undefined ? [] : value.phases;
+
   if (!Array.isArray(phasesValue)) {
     throw new Error("meta.phases must be an array");
   }
+
   const phaseTitles = new Set<string>();
+
   const phases = phasesValue.map((phase, index) => {
     if (typeof phase !== "object" || phase === null || Array.isArray(phase)) {
       throw new Error(`meta.phases[${index}] must be an object`);
     }
+
     for (const key of Object.keys(phase)) {
       if (key !== "title" && key !== "detail") {
         throw new Error(
@@ -277,16 +357,20 @@ function readMetadata(node: ObjectExpression): ParsedWorkflow["metadata"] {
         );
       }
     }
+
     if (typeof phase.title !== "string" || phase.title.trim() === "") {
       throw new Error(`meta.phases[${index}].title must be a non-empty string`);
     }
+
     if (phaseTitles.has(phase.title)) {
       throw new Error(
         `meta.phases contains duplicate title ${JSON.stringify(phase.title)}`,
       );
     }
+
     phaseTitles.add(phase.title);
     let detail: string | null;
+
     if (phase.detail === undefined) {
       detail = null;
     } else if (typeof phase.detail !== "string" || phase.detail.trim() === "") {
@@ -296,8 +380,10 @@ function readMetadata(node: ObjectExpression): ParsedWorkflow["metadata"] {
     } else {
       detail = phase.detail;
     }
+
     return { title: phase.title, detail };
   });
+
   return {
     name: value.name,
     description: value.description,
@@ -310,6 +396,7 @@ function readMetadata(node: ObjectExpression): ParsedWorkflow["metadata"] {
 function rejectUnsafeSyntax(
   program: Program,
   selections: LiteralAgentSelection[],
+  environmentIds: Set<string>,
 ): void {
   ancestor(program, {
     ImportDeclaration(node) {
@@ -354,6 +441,7 @@ function rejectUnsafeSyntax(
           : node.computed && node.property.type === "Literal"
             ? node.property.value
             : null;
+
       if (
         ["constructor", "__proto__", "prototype"].includes(String(property))
       ) {
@@ -361,6 +449,7 @@ function rejectUnsafeSyntax(
           `Dynamic prototype access is unavailable in workflows${locationSuffix(node)}`,
         );
       }
+
       if (
         node.object.type === "Identifier" &&
         node.object.name === "Math" &&
@@ -380,18 +469,21 @@ function rejectUnsafeSyntax(
           `${node.callee.name} is unavailable in workflows${locationSuffix(node)}`,
         );
       }
+
       if (
         node.callee.type === "Identifier" &&
         node.callee.name === "agent" &&
         node.arguments[1]?.type === "ObjectExpression"
       ) {
-        inspectAgentOptions(node.arguments[1], selections);
+        inspectAgentOptions(node.arguments[1], selections, environmentIds);
       }
     },
     Identifier(node, _state, ancestors) {
       const parent = ancestors.at(-2);
+
       const isPropertyKey =
         parent?.type === "Property" && parent.key === node && !parent.computed;
+
       if (
         !isPropertyKey &&
         [
@@ -416,6 +508,7 @@ function rejectUnsafeSyntax(
 export function inspectWorkflowSource(source: string): InspectedWorkflowSource {
   assertValidWorkflowSourceText(source);
   let program: Program;
+
   try {
     program = parse(source, {
       ecmaVersion: "latest",
@@ -431,6 +524,7 @@ export function inspectWorkflowSource(source: string): InspectedWorkflowSource {
   }
 
   const declaration = program.body[0];
+
   if (
     declaration?.type !== "ExportNamedDeclaration" ||
     declaration.declaration?.type !== "VariableDeclaration" ||
@@ -439,7 +533,9 @@ export function inspectWorkflowSource(source: string): InspectedWorkflowSource {
   ) {
     throw new Error("A workflow must begin with `export const meta = { ... }`");
   }
+
   const binding = declaration.declaration.declarations[0]!;
+
   if (
     binding.id.type !== "Identifier" ||
     binding.id.name !== "meta" ||
@@ -447,6 +543,7 @@ export function inspectWorkflowSource(source: string): InspectedWorkflowSource {
   ) {
     throw new Error("A workflow must begin with `export const meta = { ... }`");
   }
+
   for (const statement of program.body.slice(1)) {
     if (
       statement.type === "ExportNamedDeclaration" ||
@@ -459,12 +556,16 @@ export function inspectWorkflowSource(source: string): InspectedWorkflowSource {
   }
 
   const literalSelections: LiteralAgentSelection[] = [];
-  rejectUnsafeSyntax(program, literalSelections);
+  const environmentIds = new Set<string>();
+  rejectUnsafeSyntax(program, literalSelections, environmentIds);
   const body = source.slice(declaration.end).trim();
+
   if (body === "") throw new Error("Workflow body cannot be empty");
+
   return {
     workflow: { metadata: readMetadata(binding.init), body },
     literalSelections,
+    literalEnvironmentIds: [...environmentIds],
   };
 }
 

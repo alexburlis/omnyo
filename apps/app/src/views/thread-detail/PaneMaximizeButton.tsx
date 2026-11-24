@@ -1,18 +1,29 @@
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { Popover, PopoverAnchor, PopoverContent } from "@bb/shared-ui/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@omnyo/shared-ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@omnyo/shared-ui/tooltip";
 import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider";
 import { HEADER_PANE_ACTION_ICON_BUTTON_CLASS } from "@/components/layout/AppPageHeader";
-import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@bb/shared-ui/chrome-style-tokens";
+import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@omnyo/shared-ui/chrome-style-tokens";
 import { useHoverPopover } from "@/components/ui/hooks/use-hover-popover";
 import { useBrowserDimmingOverlay } from "@/hooks/useBrowserDimmingModal";
+import { appCommandTarget } from "@/lib/app-command-targets";
 import type { AppShortcutPresentation } from "@/lib/app-keybindings";
-import { getBbDesktopInfo } from "@/lib/bb-desktop";
+import type { KeyboardCommandId } from "@omnyo/domain";
+import { getOmnyoDesktopInfo } from "@/lib/omnyo-desktop";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useRef } from "react";
 import type { SplitSide } from "@/lib/split-layout";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import { usePaneContext } from "./PaneContext";
 
 const ARRANGEMENT_ACTIONS: ReadonlyArray<{
@@ -25,8 +36,10 @@ const ARRANGEMENT_ACTIONS: ReadonlyArray<{
   { label: "Move bottom", side: "bottom" },
 ];
 
-const MENU_ITEM_CLASS =
-  "flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-foreground outline-none transition-colors hover:bg-state-hover focus-visible:bg-state-hover focus-visible:outline-none [&>[data-icon-root]]:size-4 [&>[data-icon-root]]:shrink-0";
+const MENU_ITEM_CLASS = cn(
+  "flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-foreground outline-none hover:bg-state-hover focus-visible:bg-state-hover focus-visible:outline-none [&>[data-icon-root]]:size-4 [&>[data-icon-root]]:shrink-0",
+  LIST_HOVER_TRANSITION,
+);
 
 const ARRANGEMENT_REGION_CLASS: Record<SplitSide, string> = {
   left: "inset-y-[3px] left-[3px] w-2.5",
@@ -45,6 +58,7 @@ export function resolvePaneArrangementLabel({
   if (isDesktopApp) {
     return isFullScreen ? "Exit Full Screen" : "Full Screen";
   }
+
   return isFullScreen ? "Restore split" : "Maximize pane";
 }
 
@@ -73,6 +87,7 @@ export function PaneMaximizeButton() {
 
   return (
     <PaneArrangementButton
+      command="pane.maximize.toggle"
       isFullScreen={isMaximized}
       onMoveToSide={onMoveToSide ?? undefined}
       onToggleFullScreen={onToggleMaximize}
@@ -83,12 +98,14 @@ export function PaneMaximizeButton() {
 
 export function PaneArrangementButton({
   className,
+  command,
   isFullScreen,
   onMoveToSide,
   onToggleFullScreen,
   shortcut,
 }: {
   className?: string;
+  command: KeyboardCommandId;
   isFullScreen: boolean;
   onMoveToSide?: (side: SplitSide) => void;
   onToggleFullScreen: () => void;
@@ -102,17 +119,20 @@ export function PaneArrangementButton({
   } = useHoverPopover({ openDelayMs: 400, closeDelayMs: 100 });
 
   const label = resolvePaneArrangementLabel({
-    isDesktopApp: getBbDesktopInfo() !== null,
+    isDesktopApp: getOmnyoDesktopInfo() !== null,
     isFullScreen,
   });
+
   const accessibleLabel = shortcut ? `${label} (${shortcut.label})` : label;
   const menuOpen = !isFullScreen && hoverOpen;
   const menuRef = useRef<HTMLDivElement>(null);
+
   const focusFirstMenuItem = () => {
     window.setTimeout(() => {
       menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
     }, 0);
   };
+
   const handleTriggerKeyDown = (
     event: ReactKeyboardEvent<HTMLButtonElement>,
   ) => {
@@ -121,7 +141,9 @@ export function PaneArrangementButton({
     handleOpenChange(true);
     focusFirstMenuItem();
   };
+
   useBrowserDimmingOverlay(menuOpen);
+
   const button = (
     <Button
       type="button"
@@ -132,6 +154,7 @@ export function PaneArrangementButton({
         CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS,
         className,
       )}
+      {...appCommandTarget(command)}
       aria-label={accessibleLabel}
       aria-keyshortcuts={shortcut?.ariaKeyshortcuts}
       aria-pressed={isFullScreen}

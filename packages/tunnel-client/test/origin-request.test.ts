@@ -9,14 +9,18 @@ interface SeenRequest {
 }
 
 let server: Server;
+
 let origin: string;
+
 const seen: SeenRequest[] = [];
 
 async function readBody(response: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
+
   for await (const chunk of response) {
     chunks.push(chunk instanceof Buffer ? chunk : Buffer.from(String(chunk)));
   }
+
   return Buffer.concat(chunks).toString();
 }
 
@@ -39,9 +43,11 @@ beforeAll(async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
+
   if (address === null || typeof address === "string") {
     throw new Error("test server has no port");
   }
+
   origin = `http://127.0.0.1:${address.port}`;
 });
 
@@ -56,6 +62,7 @@ describe("requestOriginHttp", () => {
       const body = Buffer.from(
         JSON.stringify({ childThreadsConfirmed: false }),
       );
+
       const response = await requestOriginHttp({
         body,
         headers: { "Content-Type": "application/json" },
@@ -63,6 +70,7 @@ describe("requestOriginHttp", () => {
         signal: new AbortController().signal,
         url: new URL(`${origin}/api/v1/threads/t1`),
       });
+
       expect(response.statusCode).toBe(200);
       expect(await readBody(response)).toBe('{"ok":true}');
       const last = seen.at(-1);
@@ -80,6 +88,7 @@ describe("requestOriginHttp", () => {
       signal: new AbortController().signal,
       url: new URL(`${origin}/api/v1/threads/t1`),
     });
+
     expect(response.statusCode).toBe(200);
     await readBody(response);
     expect(seen.at(-1)?.contentLength).toBeUndefined();

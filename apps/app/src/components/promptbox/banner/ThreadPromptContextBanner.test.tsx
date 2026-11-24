@@ -3,73 +3,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import type { ThreadPullRequest } from "@bb/domain";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   isThreadDisplayStatusBannerActive,
   ThreadPromptContextBanner,
-  type ThreadPromptGitSection,
 } from "./ThreadPromptContextBanner";
 
 const noop = () => {};
-
-const changedFile = {
-  path: "apps/app/src/components/promptbox/banner/ThreadPromptContextBanner.tsx",
-  status: "M" as const,
-  insertions: 2,
-  deletions: 0,
-};
-
-const pullRequestFixture: ThreadPullRequest = {
-  number: 128,
-  title: "Show pull request status in the prompt context banner",
-  state: "open",
-  url: "https://github.com/acme/bb/pull/128",
-  baseRefName: "main",
-  headRefName: "bb/pr-context-banner",
-  updatedAt: "2026-06-16T12:30:00Z",
-  autoMerge: false,
-  inMergeQueue: false,
-  checks: {
-    state: "passing",
-    totalCount: 1,
-    passedCount: 1,
-    failedCount: 0,
-    pendingCount: 0,
-  },
-  review: {
-    state: "none",
-    reviewRequestCount: 0,
-  },
-  mergeability: {
-    state: "mergeable",
-    mergeStateStatus: "CLEAN",
-    mergeable: "MERGEABLE",
-  },
-  attention: "ready_to_merge",
-};
-
-function makeGitSection(
-  kind: ThreadPromptGitSection["changedFiles"]["kind"] = "uncommitted",
-  mergeBase: ThreadPromptGitSection["mergeBase"] = null,
-): ThreadPromptGitSection {
-  return {
-    changedFiles: {
-      kind,
-      label: kind === "committed" ? "Committed" : "Uncommitted",
-      files: [changedFile],
-      mergeBaseRef: kind === "committed" ? "abc1234" : null,
-      stats: {
-        insertions: 2,
-        deletions: 0,
-        lineStatsComplete: true,
-        files: [changedFile],
-      },
-    },
-    mergeBase,
-    onPromptBannerFileClick: noop,
-  };
-}
 
 afterEach(cleanup);
 
@@ -77,13 +17,11 @@ describe("ThreadPromptContextBanner", () => {
   it("renders the archived read-only status without an action", () => {
     const markup = renderToStaticMarkup(
       <ThreadPromptContextBanner
-        gitSection={null}
-        gitSectionPending={false}
         archivedSection={{ archivedAt: 1_731_456_000_000 }}
         environmentGoneSection={null}
         parentThreadSection={null}
+        continuedInSection={null}
         childThreadsSection={null}
-        pullRequestSection={null}
         expandedSection={null}
         onToggleSection={noop}
       />,
@@ -105,13 +43,11 @@ describe("ThreadPromptContextBanner", () => {
       const toggled: string[] = [];
       render(
         <ThreadPromptContextBanner
-          gitSection={null}
-          gitSectionPending={false}
           archivedSection={null}
           environmentGoneSection={{ status }}
           parentThreadSection={null}
+          continuedInSection={null}
           childThreadsSection={null}
-          pullRequestSection={null}
           expandedSection={null}
           onToggleSection={(section) => toggled.push(section)}
         />,
@@ -128,13 +64,11 @@ describe("ThreadPromptContextBanner", () => {
   it("shows the machine removal explanation once the status is expanded", () => {
     render(
       <ThreadPromptContextBanner
-        gitSection={null}
-        gitSectionPending={false}
         archivedSection={null}
         environmentGoneSection={{ status: "cleanup-failed" }}
         parentThreadSection={null}
+        continuedInSection={null}
         childThreadsSection={null}
-        pullRequestSection={null}
         expandedSection="status"
         onToggleSection={noop}
       />,
@@ -170,8 +104,6 @@ describe("ThreadPromptContextBanner", () => {
       const markup = renderToStaticMarkup(
         <MemoryRouter>
           <ThreadPromptContextBanner
-            gitSection={null}
-            gitSectionPending={false}
             archivedSection={archivedSection}
             environmentGoneSection={environmentGoneSection}
             parentThreadSection={{
@@ -179,8 +111,8 @@ describe("ThreadPromptContextBanner", () => {
               href: "/threads/thr_parent",
               relationship: "parent",
             }}
+            continuedInSection={null}
             childThreadsSection={null}
-            pullRequestSection={null}
             expandedSection={null}
             onToggleSection={noop}
           />
@@ -197,16 +129,14 @@ describe("ThreadPromptContextBanner", () => {
   it("offers unarchiving first when an archived thread also lost its environment", () => {
     const markup = renderToStaticMarkup(
       <ThreadPromptContextBanner
-        gitSection={null}
-        gitSectionPending={false}
         archivedSection={{
           archivedAt: 1_731_456_000_000,
           onUnarchive: noop,
         }}
         environmentGoneSection={{ status: "destroyed" }}
         parentThreadSection={null}
+        continuedInSection={null}
         childThreadsSection={null}
-        pullRequestSection={null}
         expandedSection={null}
         onToggleSection={noop}
       />,
@@ -220,13 +150,11 @@ describe("ThreadPromptContextBanner", () => {
   it("offers restoring the workspace once the thread is live again", () => {
     const markup = renderToStaticMarkup(
       <ThreadPromptContextBanner
-        gitSection={null}
-        gitSectionPending={false}
         archivedSection={null}
         environmentGoneSection={{ status: "destroyed", onRestore: noop }}
         parentThreadSection={null}
+        continuedInSection={null}
         childThreadsSection={null}
-        pullRequestSection={null}
         expandedSection={null}
         onToggleSection={noop}
       />,
@@ -239,8 +167,6 @@ describe("ThreadPromptContextBanner", () => {
   it("shows the restore action as pending while it runs", () => {
     const markup = renderToStaticMarkup(
       <ThreadPromptContextBanner
-        gitSection={null}
-        gitSectionPending={false}
         archivedSection={null}
         environmentGoneSection={{
           status: "destroyed",
@@ -248,8 +174,8 @@ describe("ThreadPromptContextBanner", () => {
           restorePending: true,
         }}
         parentThreadSection={null}
+        continuedInSection={null}
         childThreadsSection={null}
-        pullRequestSection={null}
         expandedSection={null}
         onToggleSection={noop}
       />,
@@ -259,143 +185,14 @@ describe("ThreadPromptContextBanner", () => {
     expect(markup).toContain("disabled");
   });
 
-  it("keeps ready-to-merge status out of standalone visible labels", () => {
-    const markup = renderToStaticMarkup(
-      <ThreadPromptContextBanner
-        gitSection={null}
-        gitSectionPending={false}
-        archivedSection={null}
-        environmentGoneSection={null}
-        parentThreadSection={null}
-        childThreadsSection={null}
-        pullRequestSection={{ pullRequest: pullRequestFixture }}
-        expandedSection={null}
-        onToggleSection={noop}
-      />,
-    );
-
-    expect(markup).toContain("PR #128");
-    expect(markup).not.toContain("PR #128 · Open");
-    expect(markup).not.toContain(">Ready to merge</span>");
-    expect(markup).not.toContain('alt="Checks success"');
-  });
-
-  it("uses the selected pull request merge method as the action label", () => {
-    const markup = renderToStaticMarkup(
-      <ThreadPromptContextBanner
-        gitSection={null}
-        gitSectionPending={false}
-        archivedSection={null}
-        environmentGoneSection={null}
-        parentThreadSection={null}
-        childThreadsSection={null}
-        pullRequestSection={{
-          pullRequest: pullRequestFixture,
-          actions: {
-            onMerge: noop,
-            selectedMergeMethod: "squash",
-          },
-        }}
-        expandedSection={null}
-        onToggleSection={noop}
-      />,
-    );
-
-    expect(markup).toContain("Squash merge");
-  });
-
-  it.each([
-    ["checks_pending", false, null],
-    ["checks_failed", false, null],
-    ["checks_failed", true, null],
-    ["checks_pending", true, null],
-    ["ready_to_merge", true, null],
-    ["queued", true, "Queued to merge"],
-  ] as const)(
-    "shows the next step and an auto-merge icon for %s with auto-merge %s",
-    (attention, autoMerge, label) => {
-      const markup = renderToStaticMarkup(
-        <ThreadPromptContextBanner
-          gitSection={null}
-          gitSectionPending={false}
-          archivedSection={null}
-          environmentGoneSection={null}
-          parentThreadSection={null}
-          childThreadsSection={null}
-          pullRequestSection={{
-            pullRequest: {
-              ...pullRequestFixture,
-              autoMerge,
-              inMergeQueue: attention === "queued",
-              review: { state: "approved", reviewRequestCount: 0 },
-              checks: {
-                state: attention === "checks_failed" ? "failing" : "pending",
-                totalCount: 1,
-                passedCount: 0,
-                failedCount: 0,
-                pendingCount: 1,
-              },
-              attention,
-            },
-          }}
-          expandedSection={null}
-          onToggleSection={noop}
-        />,
-      );
-
-      expect(markup).toContain("PR #128");
-      expect(markup).not.toContain("PR #128 · Open");
-      if (label) {
-        expect(markup).toContain(`>${label}</span>`);
-      } else {
-        expect(markup).not.toContain('aria-hidden="true">·</span>');
-      }
-      expect(markup.includes('aria-label="Auto-merge on"')).toBe(autoMerge);
-      expect(markup).toContain('class="size-4 shrink-0 text-success"');
-      expect(markup).toContain('data-icon="GitPullRequestArrow"');
-      expect(markup).not.toContain('data-icon="GitMerge"');
-      expect(markup).toContain(
-        attention === "checks_failed"
-          ? 'class="fill-destructive"'
-          : 'class="fill-attention"',
-      );
-      expect(markup).not.toContain('alt="Checks pending"');
-    },
-  );
-
-  it("keeps useful standalone terminal pull request state labels", () => {
-    const markup = renderToStaticMarkup(
-      <ThreadPromptContextBanner
-        gitSection={null}
-        gitSectionPending={false}
-        archivedSection={null}
-        environmentGoneSection={null}
-        parentThreadSection={null}
-        childThreadsSection={null}
-        pullRequestSection={{
-          pullRequest: {
-            ...pullRequestFixture,
-            state: "closed",
-            attention: "closed",
-          },
-        }}
-        expandedSection={null}
-        onToggleSection={noop}
-      />,
-    );
-
-    expect(markup).toContain("PR #128 · Closed");
-  });
-
   it("summarizes child work without flashing the banner", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
         <ThreadPromptContextBanner
-          gitSection={null}
-          gitSectionPending={false}
           archivedSection={null}
           environmentGoneSection={null}
           parentThreadSection={null}
+          continuedInSection={null}
           childThreadsSection={{
             items: [
               {
@@ -406,7 +203,6 @@ describe("ThreadPromptContextBanner", () => {
               },
             ],
           }}
-          pullRequestSection={null}
           expandedSection={null}
           onToggleSection={noop}
         />
@@ -428,11 +224,10 @@ describe("ThreadPromptContextBanner", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
         <ThreadPromptContextBanner
-          gitSection={null}
-          gitSectionPending={false}
           archivedSection={null}
           environmentGoneSection={null}
           parentThreadSection={null}
+          continuedInSection={null}
           childThreadsSection={{
             items: [
               {
@@ -449,7 +244,6 @@ describe("ThreadPromptContextBanner", () => {
               },
             ],
           }}
-          pullRequestSection={null}
           expandedSection={null}
           onToggleSection={noop}
         />
@@ -459,18 +253,21 @@ describe("ThreadPromptContextBanner", () => {
     expect(markup).toContain(
       "2 active child threads: Investigate failing checks",
     );
-    expect(markup).toContain(">+1<");
+    expect(markup).toContain(">+1 more<");
   });
 
   it("lets combined child and context cards shrink inside the composer stack", () => {
     render(
       <MemoryRouter>
         <ThreadPromptContextBanner
-          gitSection={makeGitSection("uncommitted")}
-          gitSectionPending={false}
           archivedSection={null}
           environmentGoneSection={null}
-          parentThreadSection={null}
+          parentThreadSection={{
+            parentThreadTitle: "Parent thread",
+            href: "/threads/thr_parent",
+            relationship: "parent",
+          }}
+          continuedInSection={null}
           childThreadsSection={{
             items: [
               {
@@ -481,7 +278,6 @@ describe("ThreadPromptContextBanner", () => {
               },
             ],
           }}
-          pullRequestSection={null}
           expandedSection={null}
           onToggleSection={noop}
         />
@@ -489,12 +285,100 @@ describe("ThreadPromptContextBanner", () => {
     );
 
     const childCard = screen.getByRole("region", { name: "Child threads" });
+
     const contextCard = screen.getByRole("region", {
       name: "Thread context before sending",
     });
 
     expect(childCard.parentElement).toBe(contextCard.parentElement);
     expect(childCard.parentElement?.classList.contains("min-w-0")).toBe(true);
+  });
+
+  it("links a handoff back to the chat it continues", () => {
+    render(
+      <MemoryRouter>
+        <ThreadPromptContextBanner
+          archivedSection={null}
+          environmentGoneSection={null}
+          parentThreadSection={{
+            parentThreadTitle: "Fix the importer",
+            href: "/projects/proj_1/threads/thr_source",
+            relationship: "handoff",
+          }}
+          continuedInSection={null}
+          childThreadsSection={null}
+          expandedSection={null}
+          onToggleSection={noop}
+        />
+      </MemoryRouter>,
+    );
+
+    const segment = screen.getByTitle("Continued from Fix the importer");
+    expect(segment.textContent).toBe("Continued from Fix the importer");
+    expect(
+      screen
+        .getByRole("link", { name: "Fix the importer" })
+        .getAttribute("href"),
+    ).toBe("/projects/proj_1/threads/thr_source");
+  });
+
+  it("links the source chat to the newest chat that continues it", () => {
+    render(
+      <MemoryRouter>
+        <ThreadPromptContextBanner
+          archivedSection={null}
+          environmentGoneSection={null}
+          parentThreadSection={null}
+          continuedInSection={{
+            title: "Fix the importer on Fable",
+            href: "/projects/proj_1/threads/thr_target",
+            otherCount: 2,
+          }}
+          childThreadsSection={null}
+          expandedSection={null}
+          onToggleSection={noop}
+        />
+      </MemoryRouter>,
+    );
+
+    const segment = screen.getByTitle("Continued in Fix the importer on Fable");
+    expect(segment.textContent).toBe(
+      "Continued in Fix the importer on Fable+2 more",
+    );
+    expect(
+      screen
+        .getByRole("link", { name: "Fix the importer on Fable" })
+        .getAttribute("href"),
+    ).toBe("/projects/proj_1/threads/thr_target");
+    expect(
+      screen.getByLabelText("Also continued in 2 other threads"),
+    ).toBeTruthy();
+  });
+
+  it("keeps Unarchive beside the Continued in link on an archived source", () => {
+    render(
+      <MemoryRouter>
+        <ThreadPromptContextBanner
+          archivedSection={{ archivedAt: 1_731_456_000_000, onUnarchive: noop }}
+          environmentGoneSection={null}
+          parentThreadSection={null}
+          continuedInSection={{
+            title: "Fix the importer on Fable",
+            href: "/projects/proj_1/threads/thr_target",
+            otherCount: 0,
+          }}
+          childThreadsSection={null}
+          expandedSection={null}
+          onToggleSection={noop}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "Fix the importer on Fable" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Unarchive" })).toBeTruthy();
+    expect(screen.queryByText(/^\+/)).toBeNull();
   });
 
   it("counts a child waiting for a host as active banner work", () => {
@@ -505,11 +389,10 @@ describe("ThreadPromptContextBanner", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
         <ThreadPromptContextBanner
-          gitSection={null}
-          gitSectionPending={false}
           archivedSection={null}
           environmentGoneSection={null}
           parentThreadSection={null}
+          continuedInSection={null}
           childThreadsSection={{
             items: [
               {
@@ -520,7 +403,6 @@ describe("ThreadPromptContextBanner", () => {
               },
             ],
           }}
-          pullRequestSection={null}
           expandedSection={null}
           onToggleSection={noop}
         />
@@ -535,194 +417,5 @@ describe("ThreadPromptContextBanner", () => {
     expect(markup).toContain('data-icon="CircleQuestion"');
     expect(markup).not.toContain("Active child thread:");
     expect(markup).not.toContain("animate-shine-icon");
-  });
-
-  it("keeps failed-check detail accessible without a redundant label", () => {
-    const markup = renderToStaticMarkup(
-      <ThreadPromptContextBanner
-        gitSection={null}
-        gitSectionPending={false}
-        archivedSection={null}
-        environmentGoneSection={null}
-        parentThreadSection={null}
-        childThreadsSection={null}
-        pullRequestSection={{
-          pullRequest: {
-            ...pullRequestFixture,
-            checks: {
-              state: "failing",
-              totalCount: 1,
-              passedCount: 0,
-              failedCount: 1,
-              pendingCount: 0,
-            },
-            attention: "checks_failed",
-          },
-        }}
-        expandedSection={null}
-        onToggleSection={noop}
-      />,
-    );
-
-    expect(markup).toContain("PR #128");
-    expect(markup).not.toContain(">Checks failing</span>");
-    expect(markup).toContain('title="Open, Checks failing"');
-    expect(markup).not.toContain("Checks failure");
-  });
-
-  it("shows pull request and diff labels together when only PR and git context are visible", () => {
-    const markup = renderToStaticMarkup(
-      <ThreadPromptContextBanner
-        gitSection={makeGitSection("uncommitted")}
-        gitSectionPending={false}
-        archivedSection={null}
-        environmentGoneSection={null}
-        parentThreadSection={null}
-        childThreadsSection={null}
-        pullRequestSection={{ pullRequest: pullRequestFixture }}
-        expandedSection={null}
-        onToggleSection={noop}
-      />,
-    );
-
-    expect(markup).toContain("PR #128");
-    expect(markup).not.toContain("Open PR #128");
-    expect(markup).not.toContain(">Ready to merge</span>");
-    expect(markup).toContain("Uncommitted");
-    expect(markup).toContain("1 file");
-  });
-
-  it("keeps the pull request action visible beside other context segments", () => {
-    const markup = renderToStaticMarkup(
-      <ThreadPromptContextBanner
-        gitSection={makeGitSection("uncommitted")}
-        gitSectionPending={false}
-        archivedSection={null}
-        environmentGoneSection={null}
-        parentThreadSection={null}
-        childThreadsSection={null}
-        pullRequestSection={{
-          pullRequest: pullRequestFixture,
-          actions: {
-            onMerge: noop,
-            selectedMergeMethod: "rebase",
-          },
-        }}
-        expandedSection={null}
-        onToggleSection={noop}
-      />,
-    );
-
-    expect(markup).toContain("PR #128");
-    expect(markup).toContain("Uncommitted");
-    expect(markup).toContain("Rebase and merge");
-  });
-
-  it("uses the shared committed git label beside pull request context", () => {
-    const markup = renderToStaticMarkup(
-      <ThreadPromptContextBanner
-        gitSection={makeGitSection("committed")}
-        gitSectionPending={false}
-        archivedSection={null}
-        environmentGoneSection={null}
-        parentThreadSection={null}
-        childThreadsSection={null}
-        pullRequestSection={{ pullRequest: pullRequestFixture }}
-        expandedSection={null}
-        onToggleSection={noop}
-      />,
-    );
-
-    expect(markup).toContain("PR #128");
-    expect(markup).toContain("Committed");
-    expect(markup).toContain("1 file");
-  });
-
-  it.each([
-    {
-      label: "checked open",
-      pullRequest: pullRequestFixture,
-      expectedMinWidthClass: "min-w-13",
-    },
-    {
-      label: "merged",
-      pullRequest: {
-        ...pullRequestFixture,
-        state: "merged" as const,
-        attention: "merged" as const,
-      },
-      expectedMinWidthClass: "min-w-8",
-    },
-    {
-      label: "closed",
-      pullRequest: {
-        ...pullRequestFixture,
-        state: "closed" as const,
-        attention: "closed" as const,
-      },
-      expectedMinWidthClass: "min-w-8",
-    },
-  ])(
-    "reserves only the width needed by a $label pull request status pill",
-    ({ pullRequest, expectedMinWidthClass }) => {
-      render(
-        <MemoryRouter>
-          <ThreadPromptContextBanner
-            gitSection={makeGitSection("committed")}
-            gitSectionPending={false}
-            archivedSection={null}
-            environmentGoneSection={null}
-            parentThreadSection={null}
-            childThreadsSection={null}
-            pullRequestSection={{ pullRequest }}
-            expandedSection={null}
-            onToggleSection={noop}
-          />
-        </MemoryRouter>,
-      );
-
-      const pullRequestLink = screen.getByRole("link", {
-        name: /Pull request 128:/,
-      });
-      expect(
-        ["min-w-8", "min-w-13"].filter((className) =>
-          pullRequestLink.classList.contains(className),
-        ),
-      ).toEqual([expectedMinWidthClass]);
-    },
-  );
-});
-
-describe("ThreadPromptContextBanner git section body", () => {
-  function renderBanner(expandedSection: "git" | null) {
-    return (
-      <MemoryRouter>
-        <ThreadPromptContextBanner
-          gitSection={makeGitSection("uncommitted")}
-          gitSectionPending={false}
-          archivedSection={null}
-          environmentGoneSection={null}
-          parentThreadSection={null}
-          childThreadsSection={null}
-          pullRequestSection={null}
-          expandedSection={expandedSection}
-          onToggleSection={noop}
-        />
-      </MemoryRouter>
-    );
-  }
-
-  it("does not mount the changed-files list until the section first expands", () => {
-    const { rerender } = render(renderBanner(null));
-    expect(screen.queryByRole("list", { hidden: true })).toBeNull();
-
-    rerender(renderBanner("git"));
-    expect(screen.getByRole("list")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: `Open ${changedFile.path}` }),
-    ).toBeTruthy();
-
-    rerender(renderBanner(null));
-    expect(screen.getByRole("list", { hidden: true })).toBeTruthy();
   });
 });

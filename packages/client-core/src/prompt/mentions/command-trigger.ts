@@ -2,7 +2,7 @@ import type {
   ProviderComposerCommand,
   PromptMentionCommandTrigger,
   ProviderComposerAction,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 export type ProviderPromptActionCommand = ProviderComposerCommand;
 
@@ -27,12 +27,14 @@ export function buildProviderPromptActionProps(
     switch (action.kind) {
       case "skills":
         skillsTriggers.push(action.trigger);
+
         if (!promptActions.some((candidate) => candidate.kind === "skills")) {
           promptActions.push({
             kind: action.kind,
             text: action.trigger,
           });
         }
+
         break;
       case "goal":
       case "plan":

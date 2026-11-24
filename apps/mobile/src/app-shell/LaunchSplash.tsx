@@ -9,17 +9,20 @@ import {
   Platform,
   StyleSheet,
 } from "react-native";
+import { MOBILE_EASE_OUT, MOBILE_MOTION_MS } from "@/ui/motion";
 import splashLogo from "../../assets/splash-logo.png";
 import splashLogoDark from "../../assets/splash-logo-dark.png";
 import splashLogoDev from "../../assets/splash-logo-dev.png";
 
 const LAUNCH_SPLASH_MAX_MS = 8000;
-const LAUNCH_SPLASH_FADE_MS = 250;
+
 const SPLASH_HOLDING_PATHS = new Set(["/", "/webview"]);
 
 const LOGO_WIDTH = 88;
+
 const LOGO_HEIGHT = (LOGO_WIDTH * 487) / 581;
-const isDevApp = Constants.expoConfig?.extra?.bbMobileVariant === "dev";
+
+const isDevApp = Constants.expoConfig?.extra?.omnyoMobileVariant === "dev";
 
 const launchArt =
   Appearance.getColorScheme() === "dark"
@@ -30,10 +33,12 @@ const launchArt =
     : { background: "#ffffff", logo: isDevApp ? splashLogoDev : splashLogo };
 
 let revealed = false;
+
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };
@@ -49,8 +54,10 @@ export function holdLaunchSplash(): void {
 
 export function revealApp(): void {
   hideNativeSplash();
+
   if (revealed) return;
   revealed = true;
+
   for (const listener of listeners) listener();
 }
 
@@ -71,6 +78,7 @@ export function LaunchSplash() {
 
   useEffect(() => {
     const timer = setTimeout(revealApp, LAUNCH_SPLASH_MAX_MS);
+
     return () => clearTimeout(timer);
   }, []);
 
@@ -78,7 +86,8 @@ export function LaunchSplash() {
     if (!isRevealed) return;
     Animated.timing(opacity, {
       toValue: 0,
-      duration: LAUNCH_SPLASH_FADE_MS,
+      duration: MOBILE_MOTION_MS.base,
+      easing: MOBILE_EASE_OUT,
       useNativeDriver: true,
     }).start(() => setFaded(true));
   }, [isRevealed, opacity]);

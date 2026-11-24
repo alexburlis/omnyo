@@ -2,15 +2,15 @@ import {
   createQueuedThreadMessage,
   getLastStoredProviderThreadId,
   listQueuedThreadMessages,
-} from "@bb/db";
-import { createDeferredPromise } from "@bb/test-helpers";
+} from "@omnyo/db";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as mentions from "../../src/services/plugins/plugin-mentions.js";
-import * as commands from "../../src/services/threads/thread-commands.js";
 import { queueParentSystemMessage } from "../../src/services/threads/parent-system-messages.js";
 import { sendNextQueuedMessageIfPresent } from "../../src/services/threads/queued-messages.js";
 import {
   type HostRpcHandlerResult,
+  currentWorkspaceIdentity,
   registerHostRpcResponder,
   EMPTY_WORKSPACE_AGENT_CONTEXT,
 } from "../helpers/host-rpc.js";
@@ -30,21 +30,25 @@ afterEach(() => vi.restoreAllMocks());
 function seedFixture(harness: TestAppHarness) {
   const { host, session } = seedHostSession(harness.deps);
   const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
   });
+
   const thread = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
     providerId: "codex",
     status: "idle",
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     providerThreadId: "provider-before-clear",
     threadId: thread.id,
   });
+
   return { host, session, thread };
 }
 
@@ -60,6 +64,7 @@ function registerResponder(
       switch (command.type) {
         case "thread.stop":
           await stop();
+
           return { ok: true, result: { providerCheckpointId: null } };
         case "thread.start":
           return {
@@ -68,6 +73,11 @@ function registerResponder(
           };
         case "turn.submit":
           return { ok: true, result: { trace: { spans: [] } } };
+        case "host.prepare_workspace_identity_v1":
+          return {
+            ok: true,
+            result: currentWorkspaceIdentity(command.rootPath),
+          };
         case "host.read_workspace_agent_context":
           return { ok: true, result: EMPTY_WORKSPACE_AGENT_CONTEXT };
         default:
@@ -87,29 +97,24 @@ describe("context clear dispatch races", () => {
         const entered = createDeferredPromise<void>();
         const release = createDeferredPromise<void>();
         const responder = registerResponder(harness, fixture, async () => {});
+
         if (source === "queue") {
           seedQueuedMessage(harness.deps, {
             threadId: thread.id,
             content: textInput("Queued follow-up"),
           });
-          vi.spyOn(
-            mentions,
-            "resolvePluginMentionContextInputs",
-          ).mockImplementationOnce(async () => {
-            entered.resolve();
-            await release.promise;
-            return [];
-          });
-        } else {
-          const buildExecutionOptions = commands.buildExecutionOptions;
-          vi.spyOn(commands, "buildExecutionOptions").mockImplementationOnce(
-            async (...args) => {
-              entered.resolve();
-              await release.promise;
-              return buildExecutionOptions(...args);
-            },
-          );
         }
+
+        vi.spyOn(
+          mentions,
+          "resolvePluginMentionContextInputs",
+        ).mockImplementationOnce(async () => {
+          entered.resolve();
+          await release.promise;
+
+          return [];
+        });
+
         const sending =
           source === "queue"
             ? sendNextQueuedMessageIfPresent(harness.deps, {
@@ -121,12 +126,15 @@ describe("context clear dispatch races", () => {
                 systemMessageKind: "child-completed",
                 systemMessageSubject: null,
               });
+
         try {
           await entered.promise;
+
           const response = await harness.app.request(
             `/api/v1/threads/${thread.id}/context/clear`,
             { method: "POST" },
           );
+
           expect(response.status).toBe(409);
           expect(getLastStoredProviderThreadId(harness.db, thread.id)).toBe(
             "provider-before-clear",
@@ -140,6 +148,7 @@ describe("context clear dispatch races", () => {
           release.resolve();
           await sending;
         }
+
         await vi.waitFor(() => {
           expect(
             responder.requests.some(
@@ -159,10 +168,12 @@ describe("context clear dispatch races", () => {
         const { thread } = fixture;
         const stopping = createDeferredPromise<void>();
         const release = createDeferredPromise<void>();
+
         const responder = registerResponder(harness, fixture, async () => {
           stopping.resolve();
           await release.promise;
         });
+
         if (source !== "new notice") {
           createQueuedThreadMessage(harness.db, harness.hub, {
             threadId: thread.id,
@@ -181,12 +192,15 @@ describe("context clear dispatch races", () => {
                 : null,
           });
         }
+
         const clearing = harness.app.request(
           `/api/v1/threads/${thread.id}/context/clear`,
           { method: "POST" },
         );
+
         try {
           await stopping.promise;
+
           if (source === "new notice") {
             await expect(
               queueParentSystemMessage(harness.deps, {
@@ -197,6 +211,7 @@ describe("context clear dispatch races", () => {
               }),
             ).resolves.toBe(true);
           }
+
           await expect(
             sendNextQueuedMessageIfPresent(harness.deps, {
               threadId: thread.id,
@@ -216,6 +231,7 @@ describe("context clear dispatch races", () => {
           release.resolve();
           expect((await clearing).status).toBe(200);
         }
+
         await vi.waitFor(() => {
           expect(
             responder.requests.filter(

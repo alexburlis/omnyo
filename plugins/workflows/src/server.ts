@@ -1,4 +1,4 @@
-import type { BbPluginApi, PluginAgentToolResult } from "@get-bb/plugin-sdk";
+import type { PluginApi, PluginAgentToolResult } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import { registerWorkflowCli } from "./cli.js";
 import { migrations } from "./data.js";
@@ -37,10 +37,11 @@ const sourceInputFields = {
     .string()
     .min(1)
     .describe(
-      "Name of a saved workflow from the current workspace's .bb/workflows/ directory. Resolves to a self-contained script.",
+      "Name of a saved workflow from the current workspace's .omnyo/workflows/ directory. Resolves to a self-contained script.",
     )
     .optional(),
 } as const;
+
 const freeformJson = z.unknown();
 
 const runInputSchema = z
@@ -56,11 +57,12 @@ const runInputSchema = z
       .min(1)
       .nullable()
       .describe(
-        "Run ID of a prior BB workflow to resume from. Calls in the causally safe, longest unchanged prefix return cached results; the first edited, new, or concurrent call and everything after it run live. The prior run must be terminal and from the same project and environment.",
+        "Run ID of a prior Omnyo workflow to resume from. Calls in the causally safe, longest unchanged prefix return cached results; the first edited, new, or concurrent call and everything after it run live. The prior run must be terminal and from the same project and environment.",
       )
       .default(null),
   })
   .strict();
+
 const resultInputSchema = z
   .object({
     value: freeformJson.describe(
@@ -77,41 +79,49 @@ function errorResult(error: string): PluginAgentToolResult {
   return { content: [{ type: "text", text: error }], isError: true };
 }
 
-export default async function plugin(bb: BbPluginApi) {
-  const settings = registerWorkflowSettings(bb);
-  const db = bb.storage.database();
-  bb.storage.migrate(db, migrations);
+export default async function plugin(api: PluginApi) {
+  const settings = registerWorkflowSettings(api);
+  const db = api.storage.database();
+  api.storage.migrate(db, migrations);
   let initialSettings = DEFAULT_WORKFLOW_SETTINGS;
+
   try {
     initialSettings = await settings.get();
   } catch (error) {
-    bb.status.needsConfiguration(
+    api.status.needsConfiguration(
       `Workflow settings are invalid; defaults are active until the settings are corrected: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const service = createWorkflowService(bb, db, initialSettings);
+
+  const service = createWorkflowService(api, db, initialSettings);
   settings.onChange(
     (next) => service.updateSettings(next),
     (error) =>
-      bb.status.needsConfiguration(
+      api.status.needsConfiguration(
         `Workflow settings are invalid; the last valid values remain active: ${error.message}`,
       ),
   );
-  registerWorkflowCli(bb, service);
+  registerWorkflowCli(api, service);
 
   function workflowForThread(threadId: string, runId: string | null) {
     const run =
       runId === null
         ? service.inspectLatestForThread(threadId)
         : service.inspect(runId);
+
     if (run === null) return null;
+
     if (run.originThreadId !== threadId) {
       throw new Error("This workflow run is not available in this thread");
     }
+
     return run;
   }
 
-  bb.rpc.register(workflowUiRpcContract, {
+  api.rpc.register(workflowUiRpcContract, {
+    workflowActiveThreadCounts() {
+      return { counts: service.activeThreadCounts() };
+    },
     workflowActiveRuns({ threadId }) {
       return {
         runs: service
@@ -121,30 +131,35 @@ export default async function plugin(bb: BbPluginApi) {
     },
     workflowRunView({ threadId, runId }) {
       const run = workflowForThread(threadId, runId);
+
       return { run: run === null ? null : buildWorkflowRunView(run) };
     },
     async workflowStopRun({ threadId, runId }) {
       const run = workflowForThread(threadId, runId);
+
       if (run === null) throw new Error(`Unknown workflow run ${runId}`);
       const stopped = await service.stop(run.id);
       const latest = workflowForThread(threadId, run.id);
+
       if (latest === null) throw new Error(`Unknown workflow run ${runId}`);
+
       return { stopped, run: buildWorkflowRunView(latest) };
     },
   });
 
-  bb.agents.registerTool({
-    name: "bb_workflow_run",
+  api.agents.registerTool({
+    name: "omnyo_workflow_run",
     presentation: {
       label: { pending: "Starting workflow", completed: "Started workflow" },
       icon: { glyph: "Workflow" },
     },
     description:
-      "Execute a workflow script that orchestrates multiple subagents deterministically. Workflows run in the background — this tool returns immediately with a run ID and a `previewDirective`. After a successful call, emit that directive exactly once on its own line (not in a code fence) so BB renders live progress in chat. A completion notification is sent to the origin thread. Use `bb workflows status <run-id>` for a compact summary. For detailed history, redirect a bounded JSONL page from `bb workflows history <run-id> --cursor <call-index> --limit <1-100>` into `$BB_THREAD_STORAGE`, then inspect the file with normal filesystem tools.",
+      "Execute a workflow script that orchestrates multiple subagents deterministically. Workflows run in the background — this tool returns immediately with a run ID and a `previewDirective`. After a successful call, emit that directive exactly once on its own line (not in a code fence) so Omnyo renders live progress in chat. A completion notification is sent to the origin thread. Use `omnyo workflows status <run-id>` for a compact summary. For detailed history, redirect a bounded JSONL page from `omnyo workflows history <run-id> --cursor <call-index> --limit <1-100>` into `$OMNYO_THREAD_STORAGE`, then inspect the file with normal filesystem tools.",
     parameters: runInputSchema,
     async execute(input, ctx) {
       try {
-        const prepared = await prepareWorkflowSource(bb, ctx, input);
+        const prepared = await prepareWorkflowSource(api, ctx, input);
+
         const run = await service.start({
           projectId: ctx.projectId,
           originThreadId: ctx.threadId,
@@ -152,7 +167,9 @@ export default async function plugin(bb: BbPluginApi) {
           args: toJsonValue(input.args, "args"),
           resumedFromRunId: input.resumeRunId,
         });
+
         const previewDirective = `::workflow-preview{run="${run.id}"}`;
+
         return jsonResult({
           runId: run.id,
           status: run.status,
@@ -167,8 +184,8 @@ export default async function plugin(bb: BbPluginApi) {
     },
   });
 
-  bb.agents.registerTool({
-    name: "bb_workflow_result",
+  api.agents.registerTool({
+    name: "omnyo_workflow_result",
     presentation: {
       label: {
         pending: "Returning structured result",
@@ -182,6 +199,7 @@ export default async function plugin(bb: BbPluginApi) {
     parameters: resultInputSchema,
     async execute({ value }, ctx) {
       let parsed: JsonValue;
+
       try {
         parsed = toJsonValue(value, "value");
       } catch (error) {
@@ -189,14 +207,18 @@ export default async function plugin(bb: BbPluginApi) {
           error instanceof Error ? error.message : String(error),
         );
       }
+
       const result = await service.submitStructuredResult(ctx.threadId, parsed);
+
       if (result.ok) return jsonResult({ accepted: true });
+
       return errorResult(result.error);
     },
   });
 
-  bb.agents.configure((context) => {
+  api.agents.configure((context) => {
     const worker = service.agentConfiguration(context.thread.id);
+
     if (worker !== null) {
       return {
         tools:
@@ -204,7 +226,7 @@ export default async function plugin(bb: BbPluginApi) {
             ? []
             : [
                 {
-                  name: "bb_workflow_result",
+                  name: "omnyo_workflow_result",
                   parameters: worker.resultParameters,
                 },
               ],
@@ -214,38 +236,41 @@ export default async function plugin(bb: BbPluginApi) {
           : { instructions: worker.instructions }),
       };
     }
-    if (context.origin.pluginId === bb.pluginId) {
+
+    if (context.origin.pluginId === api.pluginId) {
       return {
-        tools: ["bb_workflow_result"],
+        tools: ["omnyo_workflow_result"],
         skills: [],
         instructions:
-          "You are starting as a BB workflow worker. Follow the workflow prompt. Your final text IS the return value, not a human-facing message. If the prompt requests structured output, call bb_workflow_result exactly once at the end of your response.",
+          "You are starting as an Omnyo workflow worker. Follow the workflow prompt. Your final text IS the return value, not a human-facing message. If the prompt requests structured output, call omnyo_workflow_result exactly once at the end of your response.",
       };
     }
+
     return {
-      tools: ["bb_workflow_run"],
+      tools: ["omnyo_workflow_run"],
       skills: ["workflows"],
       instructions:
-        "When bb_workflow_run succeeds, copy its previewDirective into your response exactly once as a standalone line. Do not wrap it in backticks or a code fence, and do not invent or edit the run ID. The directive renders live workflow progress in BB chat. `bb workflows status <run-id>` returns a compact summary. For detailed history, redirect `bb workflows history <run-id> --cursor <call-index> --limit <1-100>` into a file under `$BB_THREAD_STORAGE`, then inspect that JSONL file with normal filesystem tools. Use each page record's `nextCursor` to continue.",
+        "When omnyo_workflow_run succeeds, copy its previewDirective into your response exactly once as a standalone line. Do not wrap it in backticks or a code fence, and do not invent or edit the run ID. The directive renders live workflow progress in Omnyo chat. `omnyo workflows status <run-id>` returns a compact summary. For detailed history, redirect `omnyo workflows history <run-id> --cursor <call-index> --limit <1-100>` into a file under `$OMNYO_THREAD_STORAGE`, then inspect that JSONL file with normal filesystem tools. Use each page record's `nextCursor` to continue.",
     };
   });
 
-  bb.events.on("thread.idle", ({ thread, lastAssistantText }) => {
+  api.events.on("thread.idle", ({ thread, lastAssistantText }) => {
     service.onThreadIdle(thread.id, lastAssistantText);
   });
-  bb.events.on("thread.failed", ({ thread, error }) => {
+  api.events.on("thread.failed", ({ thread, error }) => {
     service.onThreadFailed(thread.id, error);
   });
-  bb.events.on("thread.archived", ({ thread }) => {
+  api.events.on("thread.archived", ({ thread }) => {
     service.onThreadArchived(thread.id);
+
     return service.onOriginUnavailable(thread.id);
   });
-  bb.events.on("thread.deleted", async ({ thread }) => {
+  api.events.on("thread.deleted", async ({ thread }) => {
     service.onThreadDeleted(thread.id);
     await service.onOriginUnavailable(thread.id);
   });
 
-  bb.background.service("workflow-worker", {
+  api.background.service("workflow-worker", {
     start(signal) {
       return service.runWorker(signal);
     },

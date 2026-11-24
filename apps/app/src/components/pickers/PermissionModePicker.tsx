@@ -1,10 +1,17 @@
-import { useMemo } from "react";
-import type { PermissionMode } from "@bb/domain";
-import { LIST_HOVER_TRANSITION } from "@bb/shared-ui/motion";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { useMemo, type ReactElement } from "react";
+import type { PermissionMode } from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
+import { COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { PERMISSION_MODE_ICONS } from "@/lib/permission-mode-options";
 import { OptionPicker, type PickerOption } from "./OptionPicker";
 
 type PermissionModeOption = PickerOption<PermissionMode>;
+
+const APPROVALS_LABEL = "Approvals";
+
+const DISPLAY_OVERRIDE_ICON: IconName = "ListTodo";
 
 function getPermissionModeCompactLabel(value: PermissionMode): string {
   switch (value) {
@@ -24,6 +31,7 @@ function addPermissionModeCompactLabels(
     ...option,
     compactLabel:
       option.compactLabel ?? getPermissionModeCompactLabel(option.value),
+    menuIconName: option.menuIconName ?? PERMISSION_MODE_ICONS[option.value],
   }));
 }
 
@@ -46,6 +54,7 @@ export interface PermissionModePickerProps {
   disabled?: boolean;
   showChevronWhenDisabled?: boolean;
   showWhenSingleOption?: boolean;
+  presentation?: "label" | "icon";
 }
 
 export function PermissionModePicker({
@@ -62,11 +71,13 @@ export function PermissionModePicker({
   disabled,
   showChevronWhenDisabled,
   showWhenSingleOption = false,
+  presentation = "label",
 }: PermissionModePickerProps) {
   const compactOptions = useMemo(
     () => addPermissionModeCompactLabels(options),
     [options],
   );
+
   if (
     !supported ||
     value === undefined ||
@@ -74,13 +85,16 @@ export function PermissionModePicker({
   ) {
     return null;
   }
+
+  const pickerDisabled = disabled || options.length <= 1;
+
   return (
     <OptionPicker
-      label="Permission mode"
+      label={presentation === "icon" ? APPROVALS_LABEL : "Permission mode"}
       value={value}
       options={compactOptions}
       onChange={onChange}
-      className={cn(LIST_HOVER_TRANSITION, className)}
+      className={className}
       caretClassName="text-subtle-foreground/75"
       contentClassName="max-w-72"
       muted={muted}
@@ -88,8 +102,81 @@ export function PermissionModePicker({
       modal={modal}
       align={align}
       displayOverride={displayOverride}
-      disabled={disabled || options.length <= 1}
+      disabled={pickerDisabled}
       showChevronWhenDisabled={showChevronWhenDisabled}
+      trigger={
+        presentation === "icon"
+          ? permissionModeIconTrigger({
+              value,
+              options,
+              displayOverride,
+              disabled: pickerDisabled,
+              className,
+            })
+          : undefined
+      }
     />
+  );
+}
+
+interface PermissionModeIconTriggerArgs extends Pick<
+  PermissionModePickerProps,
+  "options" | "displayOverride" | "className"
+> {
+  value: PermissionMode;
+  disabled: boolean;
+}
+
+function permissionModeIconTrigger({
+  value,
+  options,
+  displayOverride,
+  disabled,
+  className,
+}: PermissionModeIconTriggerArgs): ReactElement {
+  const selectedOption = options.find((option) => option.value === value);
+  const label = displayOverride?.label ?? selectedOption?.label ?? value;
+
+  const description =
+    displayOverride?.description ?? selectedOption?.description;
+
+  const isWarning = !displayOverride && selectedOption?.tone === "warning";
+
+  const title =
+    displayOverride?.title ??
+    (description
+      ? `${APPROVALS_LABEL}: ${label} - ${description}`
+      : `${APPROVALS_LABEL}: ${label}`);
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label={`${APPROVALS_LABEL}: ${label}`}
+      disabled={disabled}
+      className={cn(
+        COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS,
+        className,
+        isWarning &&
+          "text-warning-text hover:text-warning-text data-[state=open]:text-warning-text",
+        disabled && "cursor-default disabled:opacity-100",
+      )}
+    >
+      <span
+        className="flex size-full items-center justify-center"
+        title={title}
+      >
+        <Icon
+          name={
+            displayOverride
+              ? DISPLAY_OVERRIDE_ICON
+              : PERMISSION_MODE_ICONS[value]
+          }
+          className="size-4"
+          aria-hidden
+        />
+      </span>
+    </Button>
   );
 }

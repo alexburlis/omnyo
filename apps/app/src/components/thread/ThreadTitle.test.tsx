@@ -2,7 +2,7 @@
 
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import {
   ThreadTitle,
   ThreadTitleMentionResourcesProvider,
@@ -17,6 +17,7 @@ describe("ThreadTitle", () => {
       title: "Design review",
       titleFallback: "Design review",
     });
+
     const title = "Follow up on @thread:thr_mentioned auth";
 
     const { container } = render(

@@ -1,4 +1,9 @@
-import type { TimelineRow } from "@bb/server-contract";
+import type {
+  GitActivity,
+  GitActivityCommit,
+  GitActivityPush,
+} from "@omnyo/domain";
+import type { TimelineRow } from "@omnyo/server-contract";
 import { ConversationMessageContent } from "@/components/thread/timeline/ConversationMessageContent";
 import { ThreadTimelineRows } from "@/components/thread/timeline/ThreadTimelineRows";
 import { PAGE_SHELL_CONTENT_STYLE } from "@/components/ui/page-shell-content-style";
@@ -8,6 +13,8 @@ import { StoryCard, StoryRow } from "../../../../../.ladle/story-card";
 export default {
   title: "thread/timeline/rows/Assistant Message",
 };
+
+const STORY_TIMESTAMP = Date.UTC(2026, 8, 30, 16, 5);
 
 function TimelineStage({ children }: { children: React.ReactNode }) {
   return (
@@ -36,7 +43,7 @@ const longMessage = `# Merge-readiness report
 
 ## Branch / main / merge base
 
-- **Branch:** \`bb/investigate-file-list-inconsistency-thr_3vw9r8igrb\`
+- **Branch:** \`omnyo/investigate-file-list-inconsistency-thr_3vw9r8igrb\`
 - **Branch HEAD:** \`d61c0cf8\` — \`chore: drop dead onOpenFileDiff prop in ThreadDetailView after rebase\`
 - **Local main:** \`f49ae132\` — \`Classify provider status noise events\`
 - **Merge-base of branch and main:** \`f49ae132\` (branch is now linear on top of current main)
@@ -60,7 +67,7 @@ const longMessage = `# Merge-readiness report
 
 | Area | Change |
 |---|---|
-| **\`@bb/ui-core\` primitive (new)** | \`FilePathLink\` — clickable filename with hover-underline, optional \`external-link\` icon variant, integrates \`TruncateStart\` for path text. |
+| **\`@omnyo/ui-core\` primitive (new)** | \`FilePathLink\` — clickable filename with hover-underline, optional \`external-link\` icon variant, integrates \`TruncateStart\` for path text. |
 | **\`apps/app\` Info tab** | \`WorkspaceChangesList\` files open the diff panel via \`onChangedFileClick\`, gated on \`canUseGitUi\`. |
 | **\`apps/app\` diff banner header** | \`GitDiffFileCard\` renders \`FilePathLink\` with \`variant="external"\` and a \`MoreHorizontal\` kebab → "Copy path". |
 | **Docs** | \`plans/tab-split-layout.md\` — Phase 2a (this branch) + Phase 2b (file tabs, blocked). |
@@ -109,7 +116,7 @@ export function FilePathLink({
 | \`WorkspaceChangesList\` migration | ✅ Preserved. Single \`onFileClick\` API. |
 | Info tab \`onChangedFileClick\` → opens diff panel | ✅ Preserved, gated on \`canUseGitUi\`. |
 | **DelegationRow "Working…" empty-state** | ✅ **Reimplemented** in \`WorkRowBody\`'s \`delegation\` case. Same trigger, same shimmer. |
-| **Click filename → open diff** | ❌ Dropped — needs a \`TimelineTitle\` contract change in \`@bb/thread-view\`. Outside scope. |
+| **Click filename → open diff** | ❌ Dropped — needs a \`TimelineTitle\` contract change in \`@omnyo/thread-view\`. Outside scope. |
 
 ## Validation
 
@@ -141,9 +148,12 @@ a9a0838a feat: enhance workspace changes functionality with new hooks and props
 Branch is merge-ready on top of \`f49ae132\`.`;
 
 const MOBILE_REVIEW_THREAD_ID = "thr_mobile_actions_review";
+
 const mobileReviewRows: TimelineRow[] = [
   conversationRow({
     id: "mobile_actions_earlier_user_message",
+    createdAt: STORY_TIMESTAMP,
+    startedAt: STORY_TIMESTAMP,
     threadId: MOBILE_REVIEW_THREAD_ID,
     turnId: "turn_mobile_actions_earlier_user",
     sourceSeqStart: 5,
@@ -153,6 +163,8 @@ const mobileReviewRows: TimelineRow[] = [
   }),
   conversationRow({
     id: "mobile_actions_earlier_agent_message",
+    createdAt: STORY_TIMESTAMP + 60_000,
+    startedAt: STORY_TIMESTAMP + 60_000,
     threadId: MOBILE_REVIEW_THREAD_ID,
     turnId: "turn_mobile_actions_earlier",
     sourceSeqStart: 10,
@@ -162,6 +174,8 @@ const mobileReviewRows: TimelineRow[] = [
   }),
   conversationRow({
     id: "mobile_actions_latest_user_message",
+    createdAt: STORY_TIMESTAMP + 2 * 60_000,
+    startedAt: STORY_TIMESTAMP + 2 * 60_000,
     threadId: MOBILE_REVIEW_THREAD_ID,
     turnId: "turn_mobile_actions_latest_user",
     sourceSeqStart: 15,
@@ -171,6 +185,8 @@ const mobileReviewRows: TimelineRow[] = [
   }),
   conversationRow({
     id: "mobile_actions_latest_agent_message",
+    createdAt: STORY_TIMESTAMP + 3 * 60_000,
+    startedAt: STORY_TIMESTAMP + 3 * 60_000,
     threadId: MOBILE_REVIEW_THREAD_ID,
     turnId: "turn_mobile_actions_latest",
     sourceSeqStart: 20,
@@ -189,15 +205,15 @@ export function Overview() {
         <TimelineStage>
           <ConversationMessageContent
             role="assistant"
+            turnGit={null}
             id="row_story_short"
             threadId="thr_story"
             turnId="turn_story_short"
             text={shortMessage}
             attachments={null}
             showActions={true}
-            mobileActionDisplay="inline"
             streaming={false}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
           />
         </TimelineStage>
       </StoryRow>
@@ -208,15 +224,15 @@ export function Overview() {
         <TimelineStage>
           <ConversationMessageContent
             role="assistant"
+            turnGit={null}
             id="row_story_long"
             threadId="thr_story"
             turnId="turn_story_long"
             text={longMessage}
             attachments={null}
             showActions={true}
-            mobileActionDisplay="inline"
             streaming={false}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
           />
         </TimelineStage>
       </StoryRow>
@@ -273,15 +289,15 @@ export function ActionOverflow() {
           <div className="[&_button]:opacity-100">
             <ConversationMessageContent
               role="assistant"
+              turnGit={null}
               id="row_story_overflow_wide"
               threadId="thr_story"
               turnId="turn_story_overflow_wide"
               text="Done — the migration ran cleanly on all three environments."
               attachments={null}
               showActions={true}
-              mobileActionDisplay="inline"
               streaming={false}
-              timestamp={0}
+              timestamp={STORY_TIMESTAMP}
               onAddToChat={noop}
               onFork={noop}
               pluginActions={overflowStoryPluginActions}
@@ -296,15 +312,15 @@ export function ActionOverflow() {
         <div className="w-[160px] [&_button]:opacity-100">
           <ConversationMessageContent
             role="assistant"
+            turnGit={null}
             id="row_story_overflow_narrow"
             threadId="thr_story"
             turnId="turn_story_overflow_narrow"
             text="Done — migration complete."
             attachments={null}
             showActions={true}
-            mobileActionDisplay="inline"
             streaming={false}
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             onAddToChat={noop}
             onFork={noop}
             pluginActions={overflowStoryPluginActions}
@@ -319,11 +335,11 @@ export function MobileActionsAndSelection() {
   return (
     <div className="mx-auto w-full max-w-[390px] rounded-lg border border-border bg-background p-4">
       <p className="mb-4 text-xs leading-relaxed text-muted-foreground">
-        Earlier user and agent messages: overflow menu. Latest user and agent
-        messages: Copy and an overflow menu. Fork is in the agent overflow menu.
-        Use a compact touch viewport to review mobile actions. Drag-select with a
-        mouse or long-press agent text on touch to exercise the floating selection
-        menu.
+        On touch, messages show no action row. Long-press a user or agent
+        message to open its action sheet; Select text in that sheet enables text
+        selection for that message and the floating selection menu. With a
+        mouse, hover a message to reveal its action row and drag-select agent
+        text to exercise the floating selection menu.
       </p>
       <ThreadTimelineRows
         canSpawnChild
@@ -339,3 +355,132 @@ export function MobileActionsAndSelection() {
 }
 
 MobileActionsAndSelection.meta = { width: "xsmall" };
+
+function storySha(prefix: string): string {
+  return prefix.padEnd(40, "0");
+}
+
+function storyCommit(
+  sha: string,
+  subject: string,
+  branch: string,
+  remoteRefs: string[],
+): GitActivityCommit {
+  return {
+    sha: storySha(sha),
+    subject,
+    kind: "commit",
+    branch,
+    replacedSha: null,
+    committedAt: 0,
+    remoteRefs,
+  };
+}
+
+const storyRemotes = [
+  { name: "origin", url: "git@github.com:example/omnyo.git" },
+];
+
+const storyMainPush: GitActivityPush = {
+  remote: "origin",
+  branch: "main",
+  oldSha: storySha("0123456"),
+  newSha: storySha("def5678"),
+  forced: false,
+  pushedAt: 0,
+  commitCount: 2,
+};
+
+const storyPushedCommits = [
+  storyCommit("abc1234", "Fix the flaky checkout test", "main", [
+    "origin/main",
+  ]),
+  storyCommit("def5678", "Add a regression test for retries", "main", [
+    "origin/main",
+  ]),
+];
+
+const TURN_GIT_STORIES: ReadonlyArray<{
+  label: string;
+  hint: string;
+  text: string;
+  turnGit: GitActivity;
+}> = [
+  {
+    label: "pushed",
+    hint: "every commit reached the remote",
+    text: "Fixed the flaky test and pushed both commits to main.",
+    turnGit: {
+      commits: storyPushedCommits,
+      pushes: [storyMainPush],
+      remotes: storyRemotes,
+    },
+  },
+  {
+    label: "not pushed",
+    hint: "local commit on one branch",
+    text: "Committed the draft on feat. Nothing is pushed yet.",
+    turnGit: {
+      commits: [storyCommit("aaa1111", "Draft the retry policy", "feat", [])],
+      pushes: [],
+      remotes: storyRemotes,
+    },
+  },
+  {
+    label: "partly pushed",
+    hint: "one commit is still local",
+    text: "Pushed the fix. The follow-up commit is still local.",
+    turnGit: {
+      commits: [
+        ...storyPushedCommits,
+        storyCommit("bbb2222", "Tidy the retry helper", "feat", []),
+      ],
+      pushes: [storyMainPush],
+      remotes: storyRemotes,
+    },
+  },
+  {
+    label: "push only",
+    hint: "pushed existing commits to two branches",
+    text: "Pushed the existing commits to main and release.",
+    turnGit: {
+      commits: [],
+      pushes: [
+        storyMainPush,
+        {
+          ...storyMainPush,
+          branch: "release",
+          oldSha: null,
+          forced: true,
+          commitCount: 1,
+        },
+      ],
+      remotes: storyRemotes,
+    },
+  },
+];
+
+export function TurnGitActivity() {
+  return (
+    <StoryCard>
+      {TURN_GIT_STORIES.map((story) => (
+        <StoryRow key={story.label} label={story.label} hint={story.hint}>
+          <TimelineStage>
+            <ConversationMessageContent
+              role="assistant"
+              id={`row_story_git_${story.label}`}
+              threadId="thr_story"
+              turnId={`turn_story_git_${story.label}`}
+              text={story.text}
+              attachments={null}
+              showActions={true}
+              streaming={false}
+              timestamp={STORY_TIMESTAMP}
+              turnGit={story.turnGit}
+            />
+          </TimelineStage>
+        </StoryRow>
+      ))}
+    </StoryCard>
+  );
+}

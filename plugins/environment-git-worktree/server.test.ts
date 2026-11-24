@@ -2,34 +2,39 @@ import type {
   PluginEnvironmentProviderCreateContext,
   PluginEnvironmentProviderProgress,
   PluginEnvironmentProviderRestoreContext,
-} from "@get-bb/plugin-sdk/environment-provider";
+} from "@omnyo/plugin-sdk/environment-provider";
 import {
   createFakePluginHost,
   makeHostResponse,
   makeThreadResponse,
   type FakePluginHarness,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import { describe, expect, it, vi } from "vitest";
 import { worktreeHostContract } from "./contract.js";
 import { GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
 import plugin, { worktreeInputsSchema } from "./server.js";
 
 type Project = PluginEnvironmentProviderCreateContext["project"];
+
 type HostRpcCall = FakePluginHarness["experimental_hostRpcCalls"][number];
 
 const HOST_ID = "host-a";
+
 const PROJECT_ID = "project-1";
+
 const THREAD_ID = "thr_1";
-const SOURCE_PATH = "/checkouts/bb";
+
+const SOURCE_PATH = "/checkouts/omnyo";
+
 const WORKTREE_PATH =
-  "/data/plugins/environment-git-worktree/worktrees/thr_1/bb";
+  "/data/plugins/environment-git-worktree/worktrees/thr_1/omnyo";
 
 const PROVISION_HOST = makeHostResponse({ id: HOST_ID, name: "Fake machine" });
 
 const PROJECT: Project = {
   id: PROJECT_ID,
   kind: "standard",
-  name: "bb",
+  name: "omnyo",
   gitRemoteUrl: null,
   createdAt: 1,
   updatedAt: 1,
@@ -44,25 +49,32 @@ async function setup(
         baseBranch: "main",
       };
     }
+
     if (call.method === "remove") return { status: "removed" };
     throw new Error(`unexpected host method ${call.method}`);
   },
 ) {
-  const { bb, harness } = createFakePluginHost({
+  const { api, harness } = createFakePluginHost({
     experimental_callHostRpc: callHost,
   });
-  await plugin(bb);
+
+  await plugin(api);
+
   const provider = harness.registrations.environmentProviders.get(
     GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID,
   );
+
   if (provider === undefined) throw new Error("Provider not registered");
   const steps: string[] = [];
   const logs: string[] = [];
+
   const report: PluginEnvironmentProviderProgress = {
     step: (text) => steps.push(text),
     log: (text) => logs.push(text),
   };
+
   const signal = new AbortController().signal;
+
   const context: PluginEnvironmentProviderCreateContext = {
     thread: makeThreadResponse({ id: THREAD_ID, projectId: PROJECT_ID }),
     project: PROJECT,
@@ -70,15 +82,18 @@ async function setup(
     projectCheckout: { experimental_ownsPath: false, path: SOURCE_PATH },
     gitRemote: null,
     inputs: { branch: { kind: "default" } },
-    suggestedBranchName: "bb/test",
+    suggestedBranchName: "omnyo/test",
     attempt: 1,
     pathKey: THREAD_ID,
     experimental_claimPath: async () => true,
     report,
     signal,
   };
+
   const restore = provider.restore;
+
   if (restore === null) throw new Error("Provider cannot restore");
+
   return { context, harness, logs, provider, report, restore, signal, steps };
 }
 
@@ -87,6 +102,7 @@ function restoreContext(
   branchName: string | null,
 ): PluginEnvironmentProviderRestoreContext {
   const { suggestedBranchName: _suggested, ...operation } = context;
+
   return {
     ...operation,
     pathKey: "replacement",
@@ -146,7 +162,7 @@ describe("worktree resource operations", () => {
       hostId: HOST_ID,
       input: {
         operationId: `create#${THREAD_ID}#1`,
-        branchName: "bb/test",
+        branchName: "omnyo/test",
         pathKey: THREAD_ID,
         baseBranch: { kind: "default" },
         branchMode: "reset",
@@ -158,11 +174,11 @@ describe("worktree resource operations", () => {
   it("restores on the destroyed environment's branch, keeping its commits", async () => {
     const fixture = await setup();
     await fixture.restore({
-      ...restoreContext(fixture.context, "bb/original-thread"),
+      ...restoreContext(fixture.context, "omnyo/original-thread"),
       inputs: { branch: { kind: "named", name: "release" } },
     });
     expect(fixture.harness.experimental_hostRpcCalls[0]?.input).toMatchObject({
-      branchName: "bb/original-thread",
+      branchName: "omnyo/original-thread",
       baseBranch: { kind: "named", name: "release" },
       branchMode: "reuse-existing",
       pathKey: "replacement",
@@ -182,12 +198,14 @@ describe("worktree resource operations", () => {
 
   it("forwards host progress while create is running", async () => {
     let finish: (value: unknown) => void = () => {};
+
     const fixture = await setup(
       () =>
         new Promise((resolve) => {
           finish = resolve;
         }),
     );
+
     const creating = fixture.provider.create(fixture.context);
     await vi.waitFor(() => {
       expect(fixture.harness.experimental_hostRpcCalls).toHaveLength(1);
@@ -217,9 +235,11 @@ describe("worktree resource operations", () => {
 
       message: "dirty",
     });
+
     const offline = await setup(() => {
       throw new Error("offline");
     });
+
     await expect(offline.provider.create(offline.context)).resolves.toEqual({
       status: "failed",
 
@@ -250,7 +270,7 @@ describe("worktree resource operations", () => {
 });
 
 describe("adopting an existing worktree", () => {
-  const EXISTING_PATH = "/code/bb-feature";
+  const EXISTING_PATH = "/code/omnyo-feature";
 
   async function setupAdoption(
     overrides: {
@@ -268,10 +288,13 @@ describe("adopting an existing worktree", () => {
           }
         );
       }
+
       if (call.method === "remove") return { status: "removed" };
       throw new Error(`unexpected host method ${call.method}`);
     });
+
     const claimed = vi.fn(async () => overrides.claim ?? true);
+
     return {
       ...fixture,
       claimed,
@@ -401,7 +424,7 @@ describe("default branch label routing", () => {
   ])(
     "uses the selected source for $hostId",
     async ({ hostId, expectedHost, expectedPath }) => {
-      const { bb, harness } = createFakePluginHost({
+      const { api, harness } = createFakePluginHost({
         sdk: {
           projects: {
             get: () => ({
@@ -424,13 +447,15 @@ describe("default branch label routing", () => {
         },
         experimental_callHostRpc: () => ({ branch: "origin/main" }),
       });
-      await plugin(bb);
+
+      await plugin(api);
       expect(
         await harness.callRpc("defaultBaseBranch", {
           projectId: PROJECT_ID,
           hostId,
         }),
       ).toEqual({ branch: expectedHost === null ? null : "origin/main" });
+
       if (expectedHost === null) {
         expect(harness.experimental_hostRpcCalls).toHaveLength(0);
       } else {

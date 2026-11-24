@@ -1,9 +1,9 @@
-import { getThread } from "@bb/db";
-import type { ThreadEvent, ThreadEventWithItem } from "@bb/domain";
-import { isThreadEventWithItem, parseNamespacedGlyph } from "@bb/domain";
-import type { HostDaemonEventEnvelope } from "@bb/host-daemon-contract";
+import { getThread } from "@omnyo/db";
+import type { ThreadEvent, ThreadEventWithItem } from "@omnyo/domain";
+import { isThreadEventWithItem, parseNamespacedGlyph } from "@omnyo/domain";
+import type { HostDaemonEventEnvelope } from "@omnyo/host-daemon-contract";
 import { findPluginAgentTool } from "../services/plugins/plugin-agent-contributions.js";
-import { undeclaredIconProblem } from "@get-bb/plugin-sdk/internal/host-policy";
+import { undeclaredIconProblem } from "@omnyo/plugin-sdk/internal/host-policy";
 import type { AppDeps } from "../types.js";
 
 export type PresentationIconValidationDeps = Pick<
@@ -11,7 +11,7 @@ export type PresentationIconValidationDeps = Pick<
   "db" | "logger" | "providerRegistry"
 >;
 
-const BB_TOOL_SERVER = "bb";
+const OMNYO_TOOL_SERVER = "omnyo";
 
 interface PresentationIconSite {
   glyph: string;
@@ -25,23 +25,30 @@ function presentationIconSiteOf(
   if (!isThreadEventWithItem(event)) {
     return null;
   }
+
   const glyph =
     "presentation" in event.item
       ? event.item.presentation?.icon.glyph
       : undefined;
+
   const parsed = glyph === undefined ? null : parseNamespacedGlyph(glyph);
+
   if (glyph === undefined || parsed === null) {
     return null;
   }
+
   return { glyph, glyphPluginId: parsed.pluginId, event };
 }
 
-function isRegisteredBbToolIcon(site: PresentationIconSite): boolean {
+function isRegisteredOmnyoToolIcon(site: PresentationIconSite): boolean {
   const { item } = site.event;
-  if (item.type !== "toolCall" || item.server !== BB_TOOL_SERVER) {
+
+  if (item.type !== "toolCall" || item.server !== OMNYO_TOOL_SERVER) {
     return false;
   }
+
   const tool = findPluginAgentTool(item.tool);
+
   return (
     tool !== undefined &&
     tool.pluginId === site.glyphPluginId &&
@@ -54,19 +61,23 @@ function presentationIconProblem(
   site: PresentationIconSite,
   providerId: string | null,
 ): string | null {
-  if (isRegisteredBbToolIcon(site)) {
+  if (isRegisteredOmnyoToolIcon(site)) {
     return null;
   }
+
   const registration =
     providerId === null ? null : deps.providerRegistry.get(providerId);
+
   if (registration === null) {
     return `presentation.icon "${site.glyph}" names a plugin icon, but the thread's provider has no live registration to check it against`;
   }
+
   const problem = undeclaredIconProblem(
     registration.pluginId,
     registration.iconNames,
     site.glyph,
   );
+
   return problem === null ? null : `presentation.icon ${problem}`;
 }
 
@@ -76,6 +87,7 @@ function toUnhandledEvent(
   reason: string,
 ): ThreadEvent {
   const { event } = site;
+
   return {
     type: "provider/unhandled",
     threadId: event.threadId,
@@ -105,15 +117,20 @@ export function validatePresentationIcons(
 ): HostDaemonEventEnvelope[] {
   return envelopes.map((envelope) => {
     const site = presentationIconSiteOf(envelope.event);
+
     if (site === null) {
       return envelope;
     }
+
     const providerId =
       getThread(deps.db, site.event.threadId)?.providerId ?? null;
+
     const reason = presentationIconProblem(deps, site, providerId);
+
     if (reason === null) {
       return envelope;
     }
+
     deps.logger.warn(
       {
         threadId: envelope.threadId,
@@ -124,6 +141,7 @@ export function validatePresentationIcons(
       },
       "Rejected provider presentation icon at ingest",
     );
+
     return { ...envelope, event: toUnhandledEvent(site, providerId, reason) };
   });
 }

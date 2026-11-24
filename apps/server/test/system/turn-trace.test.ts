@@ -1,9 +1,9 @@
-import { setExperiments } from "@bb/db";
-import { turnScope, type Thread } from "@bb/domain";
+import { setExperiments } from "@omnyo/db";
+import { turnScope, type Thread } from "@omnyo/domain";
 import {
   groupHostDaemonEvents,
   type HostDaemonEventEnvelope,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acceptThreadSendRequest } from "../../src/services/threads/thread-send-request.js";
 import {
@@ -32,26 +32,31 @@ function seedIdleThread(harness: TestAppHarness): {
   const { host, session } = seedHostSession(harness.deps, {
     id: "host-turn-trace",
   });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: "/tmp/turn-trace",
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: "/tmp/turn-trace",
     status: "ready",
   });
+
   const thread = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
     status: "idle",
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     providerThreadId: PROVIDER_THREAD_ID,
     threadId: thread.id,
   });
+
   return { sessionId: session.id, thread };
 }
 
@@ -68,11 +73,13 @@ async function postEvents(
       eventGroups: groupHostDaemonEvents(envelopes),
     }),
   });
+
   expect(response.status).toBe(200);
 }
 
 function spyOnTurnTraceLogs(harness: TestAppHarness): () => unknown[] {
   const info = vi.spyOn(harness.deps.logger, "info");
+
   return () =>
     info.mock.calls
       .filter((call) => call[1] === "Turn trace")
@@ -108,16 +115,19 @@ describe("turn trace", () => {
         const { sessionId, thread } = seedIdleThread(harness);
 
         await sendFollowUp(harness, thread);
+
         const submit = await waitForQueuedCommand(
           harness,
           ({ command }) => command.type === "turn.submit",
         );
+
         const daemonTrace = {
           spans: [
             { name: "skills.staged" as const, atMs: 1.5 },
             { name: "bridge.turnStarted" as const, atMs: 4 },
           ],
         };
+
         await reportQueuedCommandSuccess(harness, submit, {
           trace: daemonTrace,
         });
@@ -185,10 +195,12 @@ describe("turn trace", () => {
         const { sessionId, thread } = seedIdleThread(harness);
 
         await sendFollowUp(harness, thread);
+
         const submit = await waitForQueuedCommand(
           harness,
           ({ command }) => command.type === "turn.submit",
         );
+
         await reportQueuedCommandSuccess(harness, submit, {
           trace: { spans: [] },
         });

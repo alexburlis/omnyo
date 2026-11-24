@@ -23,11 +23,13 @@ function compareByPinnedFallback(
   right: SidebarThread,
 ): number {
   const pinnedAtDelta = (right.pinnedAt ?? 0) - (left.pinnedAt ?? 0);
+
   if (pinnedAtDelta !== 0) {
     return pinnedAtDelta;
   }
 
   const createdAtDelta = right.createdAt - left.createdAt;
+
   if (createdAtDelta !== 0) {
     return createdAtDelta;
   }
@@ -38,6 +40,7 @@ function compareByPinnedFallback(
 function comparePinnedRoots(left: SidebarThread, right: SidebarThread): number {
   if (left.pinSortKey !== null && right.pinSortKey !== null) {
     const pinSortKeyDelta = compareCodepoint(left.pinSortKey, right.pinSortKey);
+
     if (pinSortKeyDelta !== 0) {
       return pinSortKeyDelta;
     }
@@ -55,6 +58,7 @@ function addDescendantThreadIds({
   if (visitedThreadIds.has(parentThreadId)) return;
 
   visitedThreadIds.add(parentThreadId);
+
   for (const child of childrenByParentId.get(parentThreadId) ?? []) {
     effectivePinnedThreadIds.add(child.id);
     addDescendantThreadIds({
@@ -83,6 +87,7 @@ function collectRootNodes(
       case "environment":
         return item.group.nodes;
       case "section":
+      case "chatGroup":
         return collectRootNodes(item.group.items);
     }
   });
@@ -95,6 +100,7 @@ function getPinnedItemThread(item: ProjectThreadItem): SidebarThread {
     case "environment":
       return item.group.nodes[0].thread;
     case "section":
+    case "chatGroup":
       return getPinnedItemThread(item.group.items[0]);
   }
 }
@@ -106,12 +112,14 @@ export function buildPinnedSidebarState({
   const explicitlyPinnedThreads = threads.filter(
     (thread) => thread.pinnedAt !== null,
   );
+
   const childrenByParentId = new Map<string, SidebarThread[]>();
 
   for (const thread of threads) {
     if (thread.parentThreadId === null) continue;
 
     const children = childrenByParentId.get(thread.parentThreadId);
+
     if (children) {
       children.push(thread);
     } else {
@@ -122,6 +130,7 @@ export function buildPinnedSidebarState({
   const effectivePinnedThreadIds = new Set(
     explicitlyPinnedThreads.map((thread) => thread.id),
   );
+
   for (const thread of explicitlyPinnedThreads) {
     addDescendantThreadIds({
       childrenByParentId,
@@ -134,11 +143,13 @@ export function buildPinnedSidebarState({
   const effectivePinnedThreads = threads.filter((thread) =>
     effectivePinnedThreadIds.has(thread.id),
   );
+
   const rootItems = buildProjectThreadGroups(
     effectivePinnedThreads,
     compareStandardThreads,
     groupEnvironmentThreads,
   );
+
   for (const item of rootItems) {
     if (item.kind === "environment") {
       item.group.nodes.sort((left, right) =>
@@ -146,6 +157,7 @@ export function buildPinnedSidebarState({
       );
     }
   }
+
   rootItems.sort((left, right) =>
     comparePinnedRoots(getPinnedItemThread(left), getPinnedItemThread(right)),
   );

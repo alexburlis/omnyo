@@ -1,7 +1,12 @@
 import * as React from "react";
 import * as RechartsPrimitive from "recharts";
+import type {
+  NameType,
+  ValueType,
+} from "recharts/types/component/DefaultTooltipContent";
 
 import { cn } from "../../lib/utils";
+import { MOTION_DURATION_MS, usePrefersReducedMotion } from "./motion";
 
 const THEMES = { light: "", dark: ".dark" } as const;
 
@@ -17,6 +22,8 @@ export type ChartConfig = {
 
 type ChartContextProps = {
   config: ChartConfig;
+  reducedMotion: boolean;
+  animationDuration: number;
 };
 
 const ChartContext = React.createContext<ChartContextProps | null>(null);
@@ -42,9 +49,19 @@ const ChartContainer = React.forwardRef<
 >(({ id, className, children, config, ...props }, ref) => {
   const uniqueId = React.useId();
   const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+  const reducedMotion = usePrefersReducedMotion();
+
+  const contextValue = React.useMemo(
+    () => ({
+      config,
+      reducedMotion,
+      animationDuration: MOTION_DURATION_MS.slow,
+    }),
+    [config, reducedMotion],
+  );
 
   return (
-    <ChartContext.Provider value={{ config }}>
+    <ChartContext.Provider value={contextValue}>
       <div
         data-chart={chartId}
         ref={ref}
@@ -62,6 +79,7 @@ const ChartContainer = React.forwardRef<
     </ChartContext.Provider>
   );
 });
+
 ChartContainer.displayName = "Chart";
 
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
@@ -85,6 +103,7 @@ ${colorConfig
     const color =
       itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
       itemConfig.color;
+
     return color ? `  --color-${key}: ${color};` : null;
   })
   .join("\n")}
@@ -97,7 +116,15 @@ ${colorConfig
   );
 };
 
-const ChartTooltip = RechartsPrimitive.Tooltip;
+class ChartTooltip<
+  TValue extends ValueType,
+  TName extends NameType,
+> extends RechartsPrimitive.Tooltip<TValue, TName> {
+  static defaultProps = {
+    ...RechartsPrimitive.Tooltip.defaultProps,
+    isAnimationActive: false,
+  };
+}
 
 const ChartTooltipContent = React.forwardRef<
   HTMLDivElement,
@@ -138,6 +165,7 @@ const ChartTooltipContent = React.forwardRef<
       const [item] = payload;
       const key = `${labelKey || item?.dataKey || item?.name || "value"}`;
       const itemConfig = getPayloadConfigFromPayload(config, item, key);
+
       const value =
         !labelKey && typeof label === "string"
           ? config[label as keyof typeof config]?.label || label
@@ -253,6 +281,7 @@ const ChartTooltipContent = React.forwardRef<
     );
   },
 );
+
 ChartTooltipContent.displayName = "ChartTooltip";
 
 const ChartLegend = RechartsPrimitive.Legend;
@@ -315,6 +344,7 @@ const ChartLegendContent = React.forwardRef<
     );
   },
 );
+
 ChartLegendContent.displayName = "ChartLegend";
 
 function getPayloadConfigFromPayload(
@@ -362,4 +392,5 @@ export {
   ChartLegend,
   ChartLegendContent,
   ChartStyle,
+  useChart,
 };

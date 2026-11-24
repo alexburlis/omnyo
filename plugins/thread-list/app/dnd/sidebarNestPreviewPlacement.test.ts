@@ -19,11 +19,13 @@ function makeThread(overrides: SidebarThreadOverrides): SidebarThread {
 }
 
 const parent = makeThread({ id: "thr_parent", latestAttentionAt: 500 });
+
 const newerChild = makeThread({
   id: "thr_newer",
   parentThreadId: "thr_parent",
   latestAttentionAt: 300,
 });
+
 const olderChild = makeThread({
   id: "thr_older",
   parentThreadId: "thr_parent",
@@ -71,7 +73,9 @@ describe("resolveSidebarNestPreviewBeforeKey", () => {
       latestAttentionAt: 500,
       pinnedAt: 1,
     });
+
     const dragged = makeThread({ id: "thr_dragged", latestAttentionAt: 200 });
+
     const pinnedRootNodes = buildPinnedSidebarState({
       threads: [pinnedParent, newerChild, olderChild],
     }).rootNodes;

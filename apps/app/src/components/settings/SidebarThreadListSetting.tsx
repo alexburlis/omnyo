@@ -7,6 +7,7 @@ import { ReplacementProviderSetting } from "./ReplacementProviderSetting";
 
 export function SidebarThreadListSetting() {
   const { threadLists } = usePluginSlots();
+
   return (
     <ReplacementProviderSetting
       label="Sidebar"

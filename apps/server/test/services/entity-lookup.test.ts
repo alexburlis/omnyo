@@ -14,9 +14,9 @@ import {
   updateHost,
   upsertHost,
   type DbConnection,
-} from "@bb/db";
-import type { Host, Project } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/db";
+import type { Host, Project } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { ApiError } from "../../src/errors.js";
 import { NotificationHub } from "../../src/ws/hub.js";
 import { createMockHubSocket } from "../helpers/mock-hub-socket.js";
@@ -42,10 +42,12 @@ function setup(): SetupResult {
   const db = createConnection(":memory:");
   migrate(db);
   const hub = new NotificationHub();
+
   const hostRow = upsertHost(db, noopNotifier, {
     id: "host_entity_lookup",
     name: "Entity Lookup Host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "Entity Lookup Project",
     source: {
@@ -54,6 +56,7 @@ function setup(): SetupResult {
       path: "/tmp/entity-lookup",
     },
   });
+
   const host = makeHost({
     id: hostRow.id,
     name: hostRow.name,
@@ -63,6 +66,7 @@ function setup(): SetupResult {
     createdAt: hostRow.createdAt,
     updatedAt: hostRow.updatedAt,
   });
+
   return { db, host, hub, project };
 }
 
@@ -100,14 +104,17 @@ function captureApiError(callback: ThrowingCallback): ApiError {
     if (error instanceof ApiError) {
       return error;
     }
+
     throw error;
   }
+
   throw new Error("Expected ApiError");
 }
 
 describe("entity lookup lifecycle errors", () => {
   it("returns structured environment_not_ready details", () => {
     const { db, host, project } = setup();
+
     try {
       const environment = createEnvironment(db, noopNotifier, {
         providerOwnsPath: false,
@@ -145,14 +152,17 @@ describe("entity lookup lifecycle errors", () => {
 
   it("returns structured thread_environment_unavailable details", () => {
     const { db, host, project } = setup();
+
     try {
       const unattachedThread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
       });
+
       const unattachedError = captureApiError(() => {
         requireThreadEnvironment(db, unattachedThread.id);
       });
+
       expect(unattachedError.body).toEqual({
         code: "thread_environment_unavailable",
         message: "Thread environment is unavailable",
@@ -177,14 +187,17 @@ describe("entity lookup lifecycle errors", () => {
         path: null,
         status: "destroyed",
       });
+
       const destroyedEnvironmentThread = createThread(db, noopNotifier, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
       });
+
       const destroyedError = captureApiError(() => {
         requireThreadEnvironment(db, destroyedEnvironmentThread.id);
       });
+
       expect(destroyedError.body).toEqual({
         code: "thread_environment_unavailable",
         message: "Thread environment is unavailable",
@@ -200,10 +213,12 @@ describe("entity lookup lifecycle errors", () => {
 
   it("returns structured host_unavailable details", () => {
     const { db, host, hub } = setup();
+
     try {
       const disconnectedError = captureApiError(() => {
         requireConnectedHostSession({ db, hub }, host.id);
       });
+
       expect(disconnectedError.status).toBe(502);
       expect(disconnectedError.body).toEqual({
         code: "host_unavailable",
@@ -220,9 +235,11 @@ describe("entity lookup lifecycle errors", () => {
         phase: "suspended",
         suspendedAt: 123,
       });
+
       const suspendedError = captureApiError(() => {
         requireConnectedHostSession({ db, hub }, host.id);
       });
+
       expect(suspendedError.status).toBe(502);
       expect(suspendedError.body).toEqual({
         code: "host_unavailable",
@@ -236,18 +253,22 @@ describe("entity lookup lifecycle errors", () => {
       });
 
       updateHost(db, noopNotifier, host.id, { suspendedAt: null });
+
       const legacySuspendedError = captureApiError(() => {
         requireConnectedHostSession({ db, hub }, host.id);
       });
+
       expect(legacySuspendedError.body.details).toMatchObject({
         reason: "suspended",
         suspendedAt: null,
       });
 
       updateHost(db, noopNotifier, host.id, { destroyedAt: 456 });
+
       const destroyedError = captureApiError(() => {
         requireNonDestroyedHostWithStatus({ db, hub }, host.id);
       });
+
       expect(destroyedError.status).toBe(404);
       expect(destroyedError.body).toEqual({
         code: "host_unavailable",
@@ -266,6 +287,7 @@ describe("entity lookup lifecycle errors", () => {
 
   it("returns project_unavailable for pending project deletion", () => {
     const { db, project } = setup();
+
     try {
       markProjectDeleted(db, noopNotifier, {
         deletedAt: 123,
@@ -292,15 +314,18 @@ describe("entity lookup lifecycle errors", () => {
 
   it("returns project_unavailable for repeated project deletion", () => {
     const { db, project } = setup();
+
     try {
       markProjectDeleted(db, noopNotifier, {
         deletedAt: 123,
         projectId: project.id,
       });
+
       const repeated = markProjectDeleted(db, noopNotifier, {
         deletedAt: 456,
         projectId: project.id,
       });
+
       expect(repeated).toBeNull();
 
       const error = captureApiError(() => {
@@ -327,6 +352,7 @@ describe("host status after a lost daemon connection", () => {
     "reports a host whose session closed (%s) as disconnected immediately",
     (closeReason) => {
       const { db, host, hub } = setup();
+
       try {
         const session = openTestSession(db, host.id);
         closeTestSession(db, {
@@ -349,6 +375,7 @@ describe("host status after a lost daemon connection", () => {
 
   it("reports a reconnecting host as connected only once its daemon socket registers", () => {
     const { db, host, hub } = setup();
+
     try {
       const lost = openTestSession(db, host.id);
       closeTestSession(db, {

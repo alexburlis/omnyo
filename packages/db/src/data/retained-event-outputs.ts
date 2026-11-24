@@ -3,8 +3,8 @@ import {
   parseLegacyImageGenerationCompletion,
   type ThreadEventItemType,
   type ThreadEventType,
-} from "@bb/domain";
-import { sliceUtf16HeadAndTail } from "@bb/text-utils";
+} from "@omnyo/domain";
+import { sliceUtf16HeadAndTail } from "@omnyo/text-utils";
 import type { DbQueryConnection } from "../connection.js";
 import {
   COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
@@ -81,6 +81,7 @@ interface DeleteExpiredRetainedEventOutputsArgs {
 
 export interface DeleteExpiredRetainedEventOutputsResult {
   deleted: number;
+  deletedBytes: number;
   threadIds: string[];
 }
 
@@ -104,6 +105,7 @@ function truncateOutput(value: string): TruncatedOutput {
     COMPLETED_EVENT_OUTPUT_RETAINED_HEAD_CHARS,
     COMPLETED_EVENT_OUTPUT_RETAINED_TAIL_CHARS,
   );
+
   return {
     retainedHeadLength: head.length,
     retainedTailLength: tail.length,
@@ -119,13 +121,16 @@ function prepareRetainedOutputData(args: {
   payload: Record<string, unknown>;
 }): PreparedCompletedEventOutputData {
   const value = args.item[args.outputPath];
+
   if (
     typeof value !== "string" ||
     value.length <= COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS
   ) {
     return { data: args.data, retainedOutput: null };
   }
+
   const existingTruncation = args.item.truncation;
+
   if (
     isJsonObject(existingTruncation) &&
     existingTruncation[args.outputPath] !== undefined
@@ -160,6 +165,7 @@ export function prepareCompletedEventOutputData(
 ): PreparedCompletedEventOutputData {
   const target =
     args.type === "item/completed" ? targetForItemKind(args.itemKind) : null;
+
   if (
     target === null ||
     args.data.length <= COMPLETED_EVENT_OUTPUT_TRUNCATION_THRESHOLD_CHARS
@@ -168,18 +174,23 @@ export function prepareCompletedEventOutputData(
   }
 
   let payload: unknown;
+
   try {
     payload = JSON.parse(args.data);
   } catch {
     return { data: args.data, retainedOutput: null };
   }
+
   if (!isJsonObject(payload) || !isJsonObject(payload.item)) {
     return { data: args.data, retainedOutput: null };
   }
+
   const item = payload.item;
+
   if (item.type !== target.itemKind) {
     return { data: args.data, retainedOutput: null };
   }
+
   return prepareRetainedOutputData({
     createdAt: args.createdAt,
     data: args.data,
@@ -194,15 +205,19 @@ export function prepareLegacyImageGenerationOutputData(args: {
   data: string;
 }): PreparedCompletedEventOutputData {
   let payload: unknown;
+
   try {
     payload = JSON.parse(args.data);
   } catch {
     return { data: args.data, retainedOutput: null };
   }
+
   const imageGeneration = parseLegacyImageGenerationCompletion(payload);
+
   if (!isJsonObject(payload) || imageGeneration === null) {
     return { data: args.data, retainedOutput: null };
   }
+
   return prepareRetainedOutputData({
     createdAt: args.createdAt,
     data: args.data,
@@ -245,9 +260,11 @@ export function copyRetainedEventOutput(
 
 function decodeRetainedOutputValue(encodedValue: string): string {
   const value: unknown = JSON.parse(encodedValue);
+
   if (typeof value !== "string") {
     throw new Error("Retained output value is not an encoded string");
   }
+
   return value;
 }
 
@@ -258,6 +275,7 @@ function hydratableOutputItem(
   if (row.type === "item/completed" && isJsonObject(payload.item)) {
     return payload.item;
   }
+
   if (
     row.type === "provider/unhandled" &&
     payload.rawType === "item/completed" &&
@@ -269,6 +287,7 @@ function hydratableOutputItem(
   ) {
     return payload.rawEvent.params.item;
   }
+
   throw new Error("Retained output event payload has no hydratable item");
 }
 
@@ -277,12 +296,15 @@ function hydrateEventData(
   output: RetainedEventOutputHydrationRow,
 ): string {
   const payload: unknown = JSON.parse(row.data);
+
   if (!isJsonObject(payload)) {
     throw new Error("Retained output event payload is not an object");
   }
+
   const item = hydratableOutputItem(row, payload);
   item[output.outputPath] = decodeRetainedOutputValue(output.encodedValue);
   removeOutputTruncation(item, output.outputPath);
+
   return JSON.stringify(payload);
 }
 
@@ -291,8 +313,10 @@ function removeOutputTruncation(
   outputPath: RetainedEventOutputPath,
 ): void {
   const truncation = item.truncation;
+
   if (isJsonObject(truncation)) {
     delete truncation[outputPath];
+
     if (Object.keys(truncation).length === 0) {
       delete item.truncation;
     }
@@ -309,6 +333,7 @@ export function hydrateRetainedEventOutputRows<
   if (rows.length === 0) {
     return [];
   }
+
   const outputs = queryInSqliteVariableBatches({
     dedupeKey: (eventId) => eventId,
     fixedVariableCount: 1,
@@ -330,14 +355,18 @@ export function hydrateRetainedEventOutputRows<
         )
         .all(),
   });
+
   if (outputs.length === 0) {
     return [...rows];
   }
+
   const outputsByEventId = new Map(
     outputs.map((output) => [output.eventId, output]),
   );
+
   return rows.map((row) => {
     const output = outputsByEventId.get(row.id);
+
     return output ? { ...row, data: hydrateEventData(row, output) } : row;
   });
 }
@@ -386,12 +415,15 @@ function hydratedEventDataBaseBytes(
   outputPath: RetainedEventOutputPath,
 ): number {
   const payload: unknown = JSON.parse(row.data);
+
   if (!isJsonObject(payload)) {
     throw new Error("Retained output event payload is not an object");
   }
+
   const item = hydratableOutputItem(row, payload);
   item[outputPath] = "";
   removeOutputTruncation(item, outputPath);
+
   return Buffer.byteLength(JSON.stringify(payload)) - 2;
 }
 
@@ -400,11 +432,14 @@ function projectedHydratedDataBytes<TRow extends HydratableStoredEventRow>(
   sizes: readonly RetainedEventOutputSizeRow[],
 ): number {
   const sizesByEventId = new Map(sizes.map((size) => [size.eventId, size]));
+
   return rows.reduce((total, row) => {
     const size = sizesByEventId.get(row.id);
+
     if (!size) {
       return total + Buffer.byteLength(row.data);
     }
+
     return (
       total + hydratedEventDataBaseBytes(row, size.outputPath) + size.valueBytes
     );
@@ -422,25 +457,33 @@ export function canHydrateRetainedEventOutputRowsWithinDataByteLimit<
   if (rows.length === 0) {
     return true;
   }
+
   const storedDataBytes = rows.reduce(
     (total, row) => total + Buffer.byteLength(row.data),
     0,
   );
+
   if (storedDataBytes > maxDataBytes) {
     return false;
   }
+
   const rowCountsByEventId = new Map<string, number>();
+
   for (const row of rows) {
     rowCountsByEventId.set(row.id, (rowCountsByEventId.get(row.id) ?? 0) + 1);
   }
+
   const eventIds = [...rowCountsByEventId.keys()];
   const sizes = listRetainedEventOutputSizes(db, eventIds, now);
+
   if (sizes.length === 0) {
     return true;
   }
+
   if (retainedOutputSizeTotal(sizes, rowCountsByEventId) > maxDataBytes) {
     return false;
   }
+
   return projectedHydratedDataBytes(rows, sizes) <= maxDataBytes;
 }
 
@@ -462,6 +505,7 @@ export function hydrateRetainedEventOutputRowsWithinDataByteLimit<
   ) {
     return [...rows];
   }
+
   return hydrateRetainedEventOutputRows(db, rows, now);
 }
 
@@ -470,12 +514,14 @@ export function deleteExpiredRetainedEventOutputs(
   args: DeleteExpiredRetainedEventOutputsArgs,
 ): DeleteExpiredRetainedEventOutputsResult {
   if (args.limit <= 0) {
-    return { deleted: 0, threadIds: [] };
+    return { deleted: 0, deletedBytes: 0, threadIds: [] };
   }
+
   const rows = db
     .select({
       eventId: retainedEventOutputs.eventId,
       threadId: events.threadId,
+      valueBytes: sql<number>`octet_length(${retainedEventOutputs.value})`,
     })
     .from(retainedEventOutputs)
     .innerJoin(events, eq(events.id, retainedEventOutputs.eventId))
@@ -483,16 +529,21 @@ export function deleteExpiredRetainedEventOutputs(
     .orderBy(retainedEventOutputs.expiresAt, retainedEventOutputs.eventId)
     .limit(args.limit)
     .all();
+
   if (rows.length === 0) {
-    return { deleted: 0, threadIds: [] };
+    return { deleted: 0, deletedBytes: 0, threadIds: [] };
   }
+
   const eventIds = rows.map((row) => row.eventId);
+
   const result = db
     .delete(retainedEventOutputs)
     .where(inArray(retainedEventOutputs.eventId, eventIds))
     .run();
+
   return {
     deleted: result.changes,
+    deletedBytes: rows.reduce((total, row) => total + row.valueBytes, 0),
     threadIds: [...new Set(rows.map((row) => row.threadId))],
   };
 }

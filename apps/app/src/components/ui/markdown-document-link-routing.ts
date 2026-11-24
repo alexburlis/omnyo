@@ -1,4 +1,4 @@
-import type { ExperimentalFileOpenOptions } from "@get-bb/plugin-sdk";
+import type { ExperimentalFileOpenOptions } from "@omnyo/plugin-sdk";
 import { normalizeExperimentalLiveFileTarget } from "@/lib/live-file-navigation";
 import {
   buildAbsoluteFilePath,
@@ -22,6 +22,7 @@ export function buildMarkdownDocumentLinkRouting({
   openFilePreview: (intent: ExperimentalFileOpenOptions) => boolean;
 }): MarkdownLinkRouting {
   if (typeof document !== "object" || document === null) return {};
+
   if (
     !("target" in document) ||
     !("rootPath" in document) ||
@@ -29,6 +30,7 @@ export function buildMarkdownDocumentLinkRouting({
   )
     return {};
   const target = normalizeExperimentalLiveFileTarget(document.target);
+
   if (
     target === null ||
     target.kind === "host" ||
@@ -39,8 +41,10 @@ export function buildMarkdownDocumentLinkRouting({
   )
     return {};
   const rootPath = normalizeAbsoluteFilePath({ path: document.rootPath });
+
   if (rootPath === null) return {};
   const threadId = document.threadId;
+
   const routing = buildMarkdownFileImageRouting({
     path: buildAbsoluteFilePath({ path: target.path, rootPath }),
     rootPath,
@@ -54,6 +58,7 @@ export function buildMarkdownDocumentLinkRouting({
           )
         : buildThreadStorageRawContentUrl(threadId, path),
   });
+
   return {
     ...routing,
     onOpenLink: messageRouting.onOpenLink,
@@ -66,6 +71,7 @@ export function buildMarkdownDocumentLinkRouting({
         ) {
           return messageRouting.localFile?.onOpenLink(link) ?? false;
         }
+
         return openFilePreview({
           target: {
             ...target,

@@ -2,8 +2,8 @@ import { createHmac } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getLatestThreadSequence, getThread } from "@bb/db";
-import { turnScope } from "@bb/domain";
+import { getLatestThreadSequence, getThread } from "@omnyo/db";
+import { turnScope } from "@omnyo/domain";
 import { applyLoggedThreadLifecycleEvent } from "../../../src/services/threads/lifecycle-outcome.js";
 import {
   seedEvent,
@@ -32,11 +32,13 @@ function slackHeaders(
   rawBody: string,
 ): Record<string, string> {
   const timestamp = String(Math.floor(Date.now() / 1000));
+
   const signature =
     "v0=" +
     createHmac("sha256", signingSecret)
       .update(`v0:${timestamp}:${rawBody}`)
       .digest("hex");
+
   return {
     "content-type": "application/json",
     "x-slack-request-timestamp": timestamp,
@@ -49,9 +51,11 @@ describe("hero plugin: agent-enrichment", () => {
 
   beforeEach(async () => {
     harness = await createTestAppHarness({ appVersion: APP_VERSION });
+
     const entry = await harness.pluginService.installPath(
       join(EXAMPLES_DIR, "agent-enrichment"),
     );
+
     expect(entry.id).toBe("agent-enrichment");
     expect(entry.status).toBe("running");
   });
@@ -74,7 +78,9 @@ describe("hero plugin: agent-enrichment", () => {
         body: JSON.stringify({ argv }),
       },
     );
+
     expect(response.status).toBe(200);
+
     return (await response.json()) as {
       exitCode: number;
       stdout: string;
@@ -100,11 +106,14 @@ describe("hero plugin: slack-bot", () => {
     const server = await startTestServer({ appVersion: APP_VERSION });
     installFakeGitWorktreeProvider();
     const realFetch = globalThis.fetch;
+
     const slackCalls: Array<{ url: string; body: Record<string, unknown> }> =
       [];
+
     try {
       const { host } = seedHostSession(server.deps);
       seedPrimaryHost(server.deps, host.id);
+
       const { project } = seedProjectWithSource(server.deps, {
         hostId: host.id,
         path: "/tmp/slack-bot-hero-source",
@@ -120,25 +129,30 @@ describe("hero plugin: slack-bot", () => {
             : input instanceof URL
               ? input.href
               : input.url;
+
         if (url.startsWith("https://slack.com/")) {
           slackCalls.push({
             url,
             body: JSON.parse(String(init?.body)) as Record<string, unknown>,
           });
+
           return new Response(JSON.stringify({ ok: true }), {
             headers: { "content-type": "application/json" },
           });
         }
+
         return realFetch(input, init);
       }) as typeof fetch;
 
       server.pluginService.bindSdk({ baseUrl: server.baseUrl });
+
       const entry = await server.pluginService.installPath(
         join(EXAMPLES_DIR, "slack-bot"),
       );
+
       expect(entry.id).toBe("slack-bot");
       expect(entry.status).toBe("needs-configuration");
-      expect(entry.statusDetail).toContain("bb plugin config slack-bot");
+      expect(entry.statusDetail).toContain("omnyo plugin config slack-bot");
 
       const signingSecret = "test-signing-secret";
       await server.pluginService.updateSettings("slack-bot", {
@@ -163,17 +177,20 @@ describe("hero plugin: slack-bot", () => {
         },
         body: JSON.stringify({ type: "url_verification", challenge: "nope" }),
       });
+
       expect(forged.status).toBe(401);
 
       const challengeBody = JSON.stringify({
         type: "url_verification",
         challenge: "challenge-123",
       });
+
       const verification = await realFetch(eventsUrl, {
         method: "POST",
         headers: slackHeaders(signingSecret, challengeBody),
         body: challengeBody,
       });
+
       expect(verification.status).toBe(200);
       expect(await verification.json()).toEqual({
         challenge: "challenge-123",
@@ -188,19 +205,23 @@ describe("hero plugin: slack-bot", () => {
           ts: "1720000000.000100",
         },
       });
+
       const mention = await realFetch(eventsUrl, {
         method: "POST",
         headers: slackHeaders(signingSecret, mentionBody),
         body: mentionBody,
       });
+
       expect(mention.status).toBe(200);
       expect(await mention.json()).toEqual({ ok: true });
 
       const api = server.pluginService.getApi("slack-bot");
       expect(api).toBeDefined();
+
       const threadId = await api?.storage.kv.get<string>(
         "slack:1720000000.000100",
       );
+
       expect(threadId).toBeDefined();
       const threadRow = getThread(server.db, threadId as string);
       expect(threadRow?.originPluginId).toBe("slack-bot");
@@ -212,6 +233,7 @@ describe("hero plugin: slack-bot", () => {
         logger: testLogger,
         providerRegistry: server.deps.providerRegistry,
       };
+
       applyLoggedThreadLifecycleEvent(lifecycleDeps, {
         threadId: threadId as string,
         event: { type: "run.started" },
@@ -234,10 +256,12 @@ describe("hero plugin: slack-bot", () => {
           },
         },
       });
+
       const outcome = applyLoggedThreadLifecycleEvent(lifecycleDeps, {
         threadId: threadId as string,
         event: { type: "run.succeeded" },
       });
+
       expect(outcome.applied).toBe(true);
 
       await vi.waitFor(() => expect(slackCalls).toHaveLength(1));
@@ -251,6 +275,7 @@ describe("hero plugin: slack-bot", () => {
       const listed = server.pluginService
         .list()
         .find((p) => p.id === "slack-bot");
+
       expect(listed?.handlerStats.errorCount).toBe(0);
     } finally {
       globalThis.fetch = realFetch;

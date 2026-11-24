@@ -11,13 +11,13 @@ import {
   listEnvironments,
   listQueuedThreadMessages,
   threads,
-} from "@bb/db";
-import { threadScope, turnScope, type ToolCallResponse } from "@bb/domain";
+} from "@omnyo/db";
+import { threadScope, turnScope, type ToolCallResponse } from "@omnyo/domain";
 import {
   groupHostDaemonEvents,
   hostDaemonEventBatchResponseSchema,
   type HostDaemonEventEnvelope,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { describe, expect, it, vi } from "vitest";
 import { serve } from "@hono/node-server";
 import {
@@ -44,6 +44,8 @@ import { startTestServer, withTestHarness } from "../helpers/test-app.js";
 import type { TestAppHarness } from "../helpers/test-app.js";
 import { setPluginAgentContributions } from "../../src/services/plugins/plugin-agent-contributions.js";
 import type { PluginAgentToolRecord } from "../../src/services/plugins/plugin-api.js";
+import { runEnvironmentProvisioningSweep } from "../../src/services/system/periodic-sweeps.js";
+import { resumeEnvironmentProvisioningForHost } from "../../src/services/environments/environment-engine.js";
 
 async function postEventBatch(args: {
   acceptEncoding?: string;
@@ -52,9 +54,11 @@ async function postEventBatch(args: {
   sessionId: string;
 }): Promise<Response> {
   const headers = new Headers(internalAuthHeaders(args.harness));
+
   if (args.acceptEncoding !== undefined) {
     headers.set("accept-encoding", args.acceptEncoding);
   }
+
   return args.harness.app.request("/internal/session/events", {
     method: "POST",
     headers,
@@ -111,10 +115,13 @@ describe("internal event and tool-call routes", () => {
       const record = {
         name: "wait_for_user",
       } as PluginAgentToolRecord;
+
       let completeTool!: (value: ToolCallResponse) => void;
+
       const toolResult = new Promise<ToolCallResponse>((resolve) => {
         completeTool = resolve;
       });
+
       setPluginAgentContributions({
         listSkillRootContributions: () => [],
         listAgentTools: () => [],
@@ -129,13 +136,16 @@ describe("internal event and tool-call routes", () => {
         const { host, session } = seedHostSession(harness.deps, {
           id: "host-streaming-tool-call",
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
         });
+
         const thread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
@@ -146,12 +156,15 @@ describe("internal event and tool-call routes", () => {
           hostname: "127.0.0.1",
           port: 0,
         });
+
         try {
           if (!server.listening) await once(server, "listening");
           const address = server.address();
+
           if (address === null || typeof address === "string") {
             throw new Error("Expected a TCP server address");
           }
+
           const responsePromise = fetch(
             `http://127.0.0.1:${address.port}/internal/session/tool-call`,
             {
@@ -167,6 +180,7 @@ describe("internal event and tool-call routes", () => {
               }),
             },
           );
+
           const earlyResponse = await Promise.race([
             responsePromise,
             sleep(1_000).then(() => null),
@@ -197,12 +211,15 @@ describe("internal event and tool-call routes", () => {
 
   it("serves a small event batch response over HTTP with an exact Content-Length", async () => {
     const server = await startTestServer();
+
     try {
       const { session, thread } = seedThreadFixture(server, {
         thread: { status: "active" },
       });
+
       const headers = new Headers(internalAuthHeaders(server));
       headers.set("accept-encoding", "gzip, deflate");
+
       const response = await fetch(
         `${server.baseUrl}/internal/session/events`,
         {
@@ -273,13 +290,16 @@ describe("internal event and tool-call routes", () => {
       const info = vi.fn();
       harness.deps.logger.info = info;
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -351,13 +371,16 @@ describe("internal event and tool-call routes", () => {
   it("rejects daemon turn-scoped events before turn/started is stored", async () => {
     await withTestHarness(async (harness) => {
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -398,13 +421,16 @@ describe("internal event and tool-call routes", () => {
   it("transitions active threads back to idle for a started/completed event batch", async () => {
     await withTestHarness(async (harness) => {
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -448,13 +474,16 @@ describe("internal event and tool-call routes", () => {
   it("keeps active root turns queueable when a delegated child turn completes", async () => {
     await withTestHarness(async (harness) => {
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -563,13 +592,16 @@ describe("internal event and tool-call routes", () => {
   it("does not activate an idle thread for a delegated child turn", async () => {
     await withTestHarness(async (harness) => {
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -615,19 +647,23 @@ describe("internal event and tool-call routes", () => {
   it("does not notify a parent when a child thread nested turn completes", async () => {
     await withChildThreadNotificationClock(async (harness) => {
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const parentThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
         status: "active",
       });
+
       seedEvent(harness.deps, {
         threadId: parentThread.id,
         environmentId: environment.id,
@@ -639,6 +675,7 @@ describe("internal event and tool-call routes", () => {
           providerThreadId: "provider-parent-thread",
         },
       });
+
       const childThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -684,7 +721,7 @@ describe("internal event and tool-call routes", () => {
       });
 
       expect(response.status).toBe(200);
-      await flushChildThreadNotifications();
+      await flushChildThreadNotifications(harness);
 
       expect(
         harness.db
@@ -707,25 +744,30 @@ describe("internal event and tool-call routes", () => {
   it("notifies a parent when a hidden delegated child root turn completes", async () => {
     await withChildThreadNotificationClock(async (harness) => {
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const parentThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
         status: "idle",
       });
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: environment.id,
         inputText: "Coordinate hidden child work",
         providerThreadId: "provider-hidden-parent",
         threadId: parentThread.id,
       });
+
       const childThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -762,7 +804,7 @@ describe("internal event and tool-call routes", () => {
       });
 
       expect(response.status).toBe(200);
-      await flushChildThreadNotifications();
+      await flushChildThreadNotifications(harness);
       expect(getThread(harness.db, childThread.id)?.status).toBe("idle");
       expect(
         listQueuedThreadCommands(harness, "turn.submit", parentThread.id),
@@ -773,25 +815,30 @@ describe("internal event and tool-call routes", () => {
   it("does not notify a parent when a side-chat child root turn completes", async () => {
     await withChildThreadNotificationClock(async (harness) => {
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const parentThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
         status: "idle",
       });
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: environment.id,
         inputText: "Coordinate side chat child work",
         providerThreadId: "provider-side-chat-parent",
         threadId: parentThread.id,
       });
+
       const childThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -830,7 +877,7 @@ describe("internal event and tool-call routes", () => {
       });
 
       expect(response.status).toBe(200);
-      await flushChildThreadNotifications();
+      await flushChildThreadNotifications(harness);
       expect(getThread(harness.db, childThread.id)?.status).toBe("idle");
       expect(
         listQueuedThreadCommands(harness, "turn.submit", parentThread.id),
@@ -841,18 +888,22 @@ describe("internal event and tool-call routes", () => {
   it("does not reactivate a stopped thread when provider turn start arrives after interruption", async () => {
     await withTestHarness(async (harness) => {
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "idle",
       });
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: environment.id,
         inputText: "Run this command and wait before replying: sleep 60",
@@ -899,18 +950,22 @@ describe("internal event and tool-call routes", () => {
   it("keeps a thread idle when a started/completed batch is posted again", async () => {
     await withTestHarness(async (harness) => {
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "active",
       });
+
       const eventBatch: HostDaemonEventEnvelope[] = [
         {
           threadId: thread.id,
@@ -938,12 +993,15 @@ describe("internal event and tool-call routes", () => {
         sessionId: session.id,
         events: eventBatch,
       });
+
       expect(firstResponse.status).toBe(200);
+
       const duplicateResponse = await postEventBatch({
         harness,
         sessionId: session.id,
         events: eventBatch,
       });
+
       expect(duplicateResponse.status).toBe(200);
 
       expect(
@@ -963,6 +1021,7 @@ describe("internal event and tool-call routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
     });
   });
@@ -970,18 +1029,22 @@ describe("internal event and tool-call routes", () => {
   it("leaves a settled thread untouched when a stale turn completion is redelivered alone", async () => {
     await withTestHarness(async (harness) => {
       const { session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: session.hostId,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: session.hostId,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "idle",
       });
+
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -1000,6 +1063,7 @@ describe("internal event and tool-call routes", () => {
         scope: turnScope("turn-stale-completion"),
         data: { status: "completed" },
       });
+
       const settledRow = harness.db
         .select()
         .from(threads)
@@ -1037,24 +1101,29 @@ describe("internal event and tool-call routes", () => {
   it("updates a thread to an existing environment for the requested host path", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const currentEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/current-environment",
       });
+
       const targetEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/existing-managed-worktree",
         environmentProviderId: "git-worktree",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: currentEnvironment.id,
       });
+
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: currentEnvironment.id,
@@ -1094,11 +1163,13 @@ describe("internal event and tool-call routes", () => {
       expect(
         listEnvironments(harness.db, { projectId: project.id }),
       ).toHaveLength(2);
+
       const storedEvents = harness.db
         .select()
         .from(events)
         .where(eq(events.threadId, thread.id))
         .all();
+
       expect(storedEvents.map((event) => event.type)).toEqual([
         "turn/started",
         "system/operation",
@@ -1111,120 +1182,145 @@ describe("internal event and tool-call routes", () => {
     });
   });
 
-  it("creates an unmanaged environment for a new requested host path", async () => {
-    await withTestHarness(async (harness) => {
-      const { host, session } = seedHostSession(harness.deps);
-      const { project } = seedProjectWithSource(harness.deps, {
-        hostId: host.id,
-      });
-      const currentEnvironment = seedEnvironment(harness.deps, {
-        hostId: host.id,
-        projectId: project.id,
-        path: "/tmp/current-environment",
-      });
-      const thread = seedThread(harness.deps, {
-        projectId: project.id,
-        environmentId: currentEnvironment.id,
-      });
-      seedEvent(harness.deps, {
-        threadId: thread.id,
-        environmentId: currentEnvironment.id,
-        providerThreadId: "provider-tool-call",
-        sequence: 1,
-        type: "turn/started",
-        scope: turnScope("turn-new-environment"),
-        data: {
+  it.each(["none", "periodic sweep", "host resume"] as const)(
+    "creates an unmanaged environment for a new requested host path during %s",
+    async (recheck) => {
+      await withTestHarness(async (harness) => {
+        const { host, session } = seedHostSession(harness.deps);
+
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+        });
+
+        const currentEnvironment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          projectId: project.id,
+          path: "/tmp/current-environment",
+        });
+
+        const thread = seedThread(harness.deps, {
+          projectId: project.id,
+          environmentId: currentEnvironment.id,
+        });
+
+        seedEvent(harness.deps, {
+          threadId: thread.id,
+          environmentId: currentEnvironment.id,
           providerThreadId: "provider-tool-call",
-        },
-      });
-
-      const responsePromise = postToolCall({
-        harness,
-        sessionId: session.id,
-        threadId: thread.id,
-        turnId: "turn-new-environment",
-        tool: "update_environment_directory",
-        arguments: { path: "/tmp/new-unmanaged-worktree" },
-      });
-      const provisionCommand = await waitForQueuedCommand(
-        harness,
-        ({ command }) =>
-          command.type === "environment.attach" &&
-          command.path === "/tmp/new-unmanaged-worktree",
-      );
-      if (provisionCommand.command.type !== "environment.attach") {
-        throw new Error("Expected environment.attach command");
-      }
-      expect(provisionCommand.command.initiator).toBeNull();
-
-      await reportQueuedCommandSuccess(harness, provisionCommand, {
-        path: "/tmp/new-unmanaged-worktree",
-        isGitRepo: true,
-        isWorktree: false,
-        branchName: "feature/new-worktree",
-        defaultBranch: "main",
-        transcript: [],
-      });
-      const response = await responsePromise;
-
-      expect(response.status).toBe(200);
-      await expect(readJson(response)).resolves.toMatchObject({
-        success: true,
-        contentItems: [
-          {
-            type: "inputText",
-            text: expect.stringContaining(
-              "Environment directory updated to /tmp/new-unmanaged-worktree",
-            ),
+          sequence: 1,
+          type: "turn/started",
+          scope: turnScope("turn-new-environment"),
+          data: {
+            providerThreadId: "provider-tool-call",
           },
-        ],
+        });
+
+        const responsePromise = postToolCall({
+          harness,
+          sessionId: session.id,
+          threadId: thread.id,
+          turnId: "turn-new-environment",
+          tool: "update_environment_directory",
+          arguments: { path: "/tmp/new-unmanaged-worktree" },
+        });
+
+        const provisionCommand = await waitForQueuedCommand(
+          harness,
+          ({ command }) =>
+            command.type === "environment.attach" &&
+            command.path === "/tmp/new-unmanaged-worktree",
+        );
+
+        if (provisionCommand.command.type !== "environment.attach") {
+          throw new Error("Expected environment.attach command");
+        }
+
+        expect(provisionCommand.command.initiator).toBeNull();
+
+        if (recheck === "periodic sweep") {
+          await runEnvironmentProvisioningSweep(harness.deps);
+        } else if (recheck === "host resume") {
+          await resumeEnvironmentProvisioningForHost(harness.deps, {
+            hostId: host.id,
+          });
+        }
+
+        await reportQueuedCommandSuccess(harness, provisionCommand, {
+          path: "/tmp/new-unmanaged-worktree",
+          isGitRepo: true,
+          isWorktree: false,
+          branchName: "feature/new-worktree",
+          defaultBranch: "main",
+          transcript: [],
+        });
+
+        const response = await responsePromise;
+
+        expect(response.status).toBe(200);
+        await expect(readJson(response)).resolves.toMatchObject({
+          success: true,
+          contentItems: [
+            {
+              type: "inputText",
+              text: expect.stringContaining(
+                "Environment directory updated to /tmp/new-unmanaged-worktree",
+              ),
+            },
+          ],
+        });
+
+        const targetEnvironment = listEnvironments(harness.db, {
+          projectId: project.id,
+        }).find(
+          (environment) => environment.path === "/tmp/new-unmanaged-worktree",
+        );
+
+        expect(targetEnvironment).toMatchObject({
+          hostId: host.id,
+          projectId: project.id,
+          status: "ready",
+        });
+        expect(getThread(harness.db, thread.id)?.environmentId).toBe(
+          targetEnvironment?.id,
+        );
+        expect(
+          targetEnvironment
+            ? getEnvironment(harness.db, targetEnvironment.id)
+            : null,
+        ).toMatchObject({
+          branchName: "feature/new-worktree",
+          isGitRepo: true,
+        });
+
+        const storedEvents = harness.db
+          .select()
+          .from(events)
+          .where(eq(events.threadId, thread.id))
+          .all();
+
+        expect(storedEvents.map((event) => event.type)).toEqual([
+          "turn/started",
+          "system/operation",
+        ]);
+        expect(storedEvents[1]).toMatchObject({
+          scopeKind: "turn",
+          turnId: "turn-new-environment",
+        });
       });
-      const targetEnvironment = listEnvironments(harness.db, {
-        projectId: project.id,
-      }).find(
-        (environment) => environment.path === "/tmp/new-unmanaged-worktree",
-      );
-      expect(targetEnvironment).toMatchObject({
-        hostId: host.id,
-        projectId: project.id,
-        status: "ready",
-      });
-      expect(getThread(harness.db, thread.id)?.environmentId).toBe(
-        targetEnvironment?.id,
-      );
-      expect(
-        targetEnvironment
-          ? getEnvironment(harness.db, targetEnvironment.id)
-          : null,
-      ).toMatchObject({
-        branchName: "feature/new-worktree",
-        isGitRepo: true,
-      });
-      const storedEvents = harness.db
-        .select()
-        .from(events)
-        .where(eq(events.threadId, thread.id))
-        .all();
-      expect(storedEvents.map((event) => event.type)).toEqual([
-        "turn/started",
-        "system/operation",
-      ]);
-      expect(storedEvents[1]).toMatchObject({
-        scopeKind: "turn",
-        turnId: "turn-new-environment",
-      });
-    });
-  });
+    },
+  );
 
   it("switches into a directory another project already uses", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
       const sharedPath = "/tmp/shared-with-another-project";
+
       const { project: otherProject } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Other Project",
         path: sharedPath,
       });
+
       const otherEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: otherProject.id,
@@ -1235,15 +1331,18 @@ describe("internal event and tool-call routes", () => {
         hostId: host.id,
         path: "/tmp/switching-project",
       });
+
       const currentEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/switching-project",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: currentEnvironment.id,
       });
+
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: currentEnvironment.id,
@@ -1264,11 +1363,13 @@ describe("internal event and tool-call routes", () => {
         tool: "update_environment_directory",
         arguments: { path: sharedPath },
       });
+
       const provisionCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "environment.attach" && command.path === sharedPath,
       );
+
       await reportQueuedCommandSuccess(harness, provisionCommand, {
         path: sharedPath,
         isGitRepo: true,
@@ -1297,11 +1398,13 @@ describe("internal event and tool-call routes", () => {
   it("refuses to switch into another project's managed worktree", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
-      const worktreePath = "/tmp/bb-worktrees/env_owner/repo";
+      const worktreePath = "/tmp/omnyo-worktrees/env_owner/repo";
+
       const { project: owner } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         name: "Owning Project",
       });
+
       seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: owner.id,
@@ -1315,15 +1418,18 @@ describe("internal event and tool-call routes", () => {
         name: "Aliasing Project",
         path: "/tmp/aliasing-project",
       });
+
       const currentEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/aliasing-project",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: currentEnvironment.id,
       });
+
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: currentEnvironment.id,
@@ -1350,7 +1456,7 @@ describe("internal event and tool-call routes", () => {
           {
             type: "inputText",
             text: expect.stringContaining(
-              "bb-managed workspace owned by another project",
+              "Omnyo-managed workspace owned by another project",
             ),
           },
         ],
@@ -1367,13 +1473,16 @@ describe("internal event and tool-call routes", () => {
   it("rejects relative update_environment_directory paths without changing the thread", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -1411,13 +1520,16 @@ describe("internal event and tool-call routes", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-tool-call-unsupported",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -1447,11 +1559,13 @@ describe("internal event and tool-call routes", () => {
           { type: "inputText", text: "Unsupported tool: spawn_thread" },
         ],
       });
+
       const childThreads = harness.db
         .select()
         .from(threads)
         .where(eq(threads.parentThreadId, thread.id))
         .all();
+
       expect(childThreads).toHaveLength(0);
     });
   });
@@ -1459,13 +1573,16 @@ describe("internal event and tool-call routes", () => {
   it("rejects empty tool call turn ids at the internal contract boundary", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,

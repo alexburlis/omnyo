@@ -149,6 +149,7 @@ describe("loadListPreference / storeListPreference", () => {
         },
       },
     });
+
     window.localStorage.setItem(LIST_PREFERENCE_STORAGE_KEY, future);
     expect(loadListPreference("all")).toEqual({
       filters: { statuses: ["todo"], priorities: [], labelNames: [] },

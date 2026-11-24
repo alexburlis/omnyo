@@ -1,11 +1,11 @@
-import { Icon, ICON_NAMES, type IconName } from "@bb/shared-ui/icon";
-import { Button } from "@bb/shared-ui/button";
+import { Icon, ICON_NAMES, type IconName } from "@omnyo/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
+} from "@omnyo/shared-ui/tooltip";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 
 export default {
@@ -23,7 +23,7 @@ const USAGE: Partial<Record<IconName, string>> = {
   ArrowRight: "Rename arrow in diff file headers (old → new)",
   ArrowUp: "Submit prompt button",
   Beaker: "Experiments section in Settings navigation",
-  Bug: "Report a bug link in sidebar footer",
+  Bug: "Report a bug action in sidebar footer",
   Check:
     "Selected item in pickers/menus, CopyButton confirmation, completed todo",
   ChartColumn: "Right-panel report file visual",
@@ -48,8 +48,6 @@ const USAGE: Partial<Record<IconName, string>> = {
   CornerDownLeft: "Mod+Enter submit hint in prompt footer",
   CornerDownRight:
     "Queued message indicator, steer/edit request label marker in conversation",
-  DiscordLogo: "Join Discord link in Settings → Community",
-  GithubLogo: "View on GitHub link in Settings → Community",
   Edit: "Rename project, edit queued message, edit project source",
   ExternalLink: "FilePathLink external indicator",
   File: "Right-panel markdown/doc file visual, Open file action",
@@ -60,6 +58,7 @@ const USAGE: Partial<Record<IconName, string>> = {
   FolderPlus: "(currently unused — was Add local path in project actions menu)",
   GitBranch:
     "Worktree environment icon (resolved via environment-workspace helpers)",
+  GitCommit: "Turn git pill under the final assistant message",
   GitMerge: "Branch name display, branch picker selected/option glyph",
   GitPullRequest: "Available pull request glyph",
   GitPullRequestArrow: "Open pull request glyph",

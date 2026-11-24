@@ -2,8 +2,8 @@ import {
   RESOURCE_GRID_PAGE_SIZE,
   ResourceInfiniteScrollSentinel,
   useResourceInfiniteItems,
-} from "@bb/shared-ui/resource-pagination";
-import { Switch } from "@bb/shared-ui/switch";
+} from "@omnyo/shared-ui/resource-pagination";
+import { Switch } from "@omnyo/shared-ui/switch";
 import { usePluginEnabledMutation } from "@/components/plugin/usePluginEnabledMutation";
 import { PluginCatalogInstallControl } from "./PluginCatalogInstallControl";
 import type { PluginCatalogSearchEntry } from "@/hooks/queries/plugin-catalog-queries";
@@ -43,6 +43,7 @@ export function PluginCatalogGrid({
     pageSize: RESOURCE_GRID_PAGE_SIZE,
     resetKey,
   });
+
   return (
     <>
       <PluginCardGrid>
@@ -73,6 +74,7 @@ function PluginCatalogEnabledSwitch({
   displayName: string;
 }) {
   const { toggle, enabled } = usePluginEnabledMutation(plugin);
+
   return (
     <Switch
       checked={enabled}
@@ -98,9 +100,11 @@ export function PluginCatalogCard({
   const installBlocker = catalogEntryInstallBlocker(entry);
   const installJob = useCatalogEntryInstallJob(entry);
   const { mutate: cancelInstall } = useCancelPluginInstallJob();
+
   const installedPlugin = usePluginList({
     enabled: entry.installed,
   }).data?.plugins.find((plugin) => plugin.id === entry.pluginId);
+
   return (
     <PluginCard
       leading={<CatalogEntryIconChip entry={entry} compact />}

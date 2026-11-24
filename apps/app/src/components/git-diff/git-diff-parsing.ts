@@ -1,5 +1,5 @@
 import { parsePatchFiles, processFile, type FileContents } from "@pierre/diffs";
-import type { GitDiffFileChangeKind } from "@bb/server-contract";
+import type { GitDiffFileChangeKind } from "@omnyo/server-contract";
 
 export type ParsedGitDiffFile = ReturnType<
   typeof parsePatchFiles
@@ -15,6 +15,7 @@ export function parseGitDiffFiles(
   diff: string,
 ): ReturnType<typeof parsePatchFiles>[number]["files"] {
   if (diff.trim().length === 0) return [];
+
   try {
     return parsePatchFiles(diff).flatMap((patch) => patch.files);
   } catch {
@@ -35,13 +36,18 @@ export function normalizeFilePatch({
   path: string;
 }): NormalizedFilePatch | null {
   const normalizedPatch = patch.replace(/\r\n/g, "\n").trimEnd();
+
   if (normalizedPatch.length === 0) return null;
   const normalizedPath = normalizeGitDiffPath(path) ?? path;
+
   const patchText = normalizedPatch.startsWith("diff --git")
     ? `${normalizedPatch}\n`
     : `diff --git a/${normalizedPath} b/${normalizedPath}\n--- a/${normalizedPath}\n+++ b/${normalizedPath}\n${normalizedPatch}\n`;
+
   const file = parseGitDiffFiles(patchText)[0];
+
   if (file === undefined || file.hunks.length === 0) return null;
+
   return { patch: patchText, file };
 }
 
@@ -63,6 +69,7 @@ export function enrichGitDiffFileForContext({
   }
 
   const enrichedFile = processFile(patchText, { oldFile, newFile });
+
   if (
     enrichedFile === undefined ||
     enrichedFile.isPartial ||
@@ -70,6 +77,7 @@ export function enrichGitDiffFileForContext({
   ) {
     return fileDiff;
   }
+
   return enrichedFile;
 }
 
@@ -79,8 +87,10 @@ function doFullFilePathsMatch(
   newFile: FileContents,
 ): boolean {
   const expectedNewPath = normalizeGitDiffPath(fileDiff.name);
+
   const expectedOldPath =
     normalizeGitDiffPath(fileDiff.prevName) ?? expectedNewPath;
+
   return (
     expectedOldPath !== undefined &&
     expectedNewPath !== undefined &&
@@ -134,6 +144,7 @@ function doLineRangesMatch({
   ) {
     return false;
   }
+
   for (let index = 0; index < count; index += 1) {
     if (
       normalizeComparableDiffLine(expectedLines[expectedStart + index]) !==
@@ -142,6 +153,7 @@ function doLineRangesMatch({
       return false;
     }
   }
+
   return true;
 }
 
@@ -154,10 +166,12 @@ export function summarizeGitDiffFile(
 ): Pick<GitDiffStats, "insertions" | "deletions"> {
   let insertions = 0;
   let deletions = 0;
+
   for (const hunk of file.hunks) {
     insertions += hunk.additionLines;
     deletions += hunk.deletionLines;
   }
+
   return { insertions, deletions };
 }
 
@@ -176,6 +190,7 @@ export function getGitDiffFileChangeKind(
       return "modified";
     default: {
       const _exhaustive: never = file.type;
+
       return _exhaustive;
     }
   }
@@ -184,9 +199,11 @@ export function getGitDiffFileChangeKind(
 export function formatGitDiffFileLabel(file: ParsedGitDiffFile): string {
   const name = normalizeGitDiffPath(file.name) ?? file.name;
   const prevName = normalizeGitDiffPath(file.prevName);
+
   if (prevName && prevName !== name) {
     return `${prevName} -> ${name}`;
   }
+
   return name;
 }
 
@@ -194,6 +211,7 @@ export function normalizeGitDiffPath(
   path: string | undefined,
 ): string | undefined {
   const trimmedPath = path?.trim();
+
   return trimmedPath && trimmedPath.length > 0 ? trimmedPath : undefined;
 }
 
@@ -210,8 +228,10 @@ const IMAGE_GIT_DIFF_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
 
 export function isPreviewableImagePath(path: string | undefined): boolean {
   const normalizedPath = normalizeGitDiffPath(path);
+
   if (normalizedPath === undefined) return false;
   const extension = normalizedPath.split(".").pop()?.toLowerCase();
+
   return (
     extension !== undefined && IMAGE_GIT_DIFF_FILE_EXTENSIONS.has(extension)
   );
@@ -219,29 +239,37 @@ export function isPreviewableImagePath(path: string | undefined): boolean {
 
 export function isSvgGitDiffFile(file: ParsedGitDiffFile): boolean {
   const path = normalizeGitDiffPath(file.name) ?? file.name;
+
   return path.toLowerCase().endsWith(".svg");
 }
 
 function getGitDiffPathAliases(path: string | undefined): string[] {
   const cleanPath = normalizeGitDiffPath(path);
+
   if (!cleanPath || cleanPath === "/dev/null") return [];
+
   const normalizedPath = cleanPath.startsWith("./")
     ? cleanPath.slice(2)
     : cleanPath;
+
   if (normalizedPath.length === 0) return [];
   const aliases = [normalizedPath];
+
   if (normalizedPath.startsWith("a/") || normalizedPath.startsWith("b/")) {
     aliases.push(normalizedPath.slice(2));
   }
+
   return Array.from(new Set(aliases.filter((alias) => alias.length > 0)));
 }
 
 export function getOpenableGitDiffPath(file: ParsedGitDiffFile): string | null {
   for (const candidatePath of [file.name, file.prevName]) {
     const aliases = getGitDiffPathAliases(candidatePath);
+
     if (aliases.length > 0) {
       return aliases[aliases.length - 1] ?? null;
     }
   }
+
   return null;
 }

@@ -1,6 +1,9 @@
-import { type LocalPathProjectSource, PERSONAL_PROJECT_ID } from "@bb/domain";
-import type { EnvironmentRow } from "@bb/db";
-import type { EnvironmentArgs } from "@bb/server-contract";
+import {
+  type LocalPathProjectSource,
+  PERSONAL_PROJECT_ID,
+} from "@omnyo/domain";
+import type { EnvironmentRow } from "@omnyo/db";
+import type { EnvironmentArgs } from "@omnyo/server-contract";
 import { ApiError } from "../../errors.js";
 import type { AppDeps } from "../../types.js";
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
@@ -12,21 +15,25 @@ import {
 import { requireSourceForHost } from "./thread-create-helpers.js";
 
 type ThreadRequestEnvironment = EnvironmentArgs;
+
 type ThreadRequestEnvironmentDeps = Pick<AppDeps, "config" | "db" | "hub">;
+
 type HostThreadRequestEnvironment = Extract<
   ThreadRequestEnvironment,
   { type: "host" }
 >;
+
 type WorkspaceBackedHostWorkspace = Exclude<
   HostThreadRequestEnvironment["workspace"],
   { type: "personal" }
 >;
+
 type ReuseThreadRequestEnvironment = Extract<
   ThreadRequestEnvironment,
   { type: "reuse" }
 >;
+
 interface ResolveStableThreadRequestEnvironmentArgs {
-  allowUnmanagedPersonalProjectReuseEnvironmentId?: string;
   environment: ThreadRequestEnvironment;
   projectId: string;
 }
@@ -60,6 +67,7 @@ function requireHostEnvironmentId(
   if (environment.hostId !== undefined) {
     return environment.hostId;
   }
+
   throw new ApiError(
     400,
     "invalid_request",
@@ -77,40 +85,6 @@ function assertPersonalWorkspaceProjectCompatibility(projectId: string): void {
   }
 }
 
-function isPersonalWorkspaceEnvironment(environment: EnvironmentRow): boolean {
-  return (
-    environment.projectId === PERSONAL_PROJECT_ID &&
-    environment.environmentProviderId !== null
-  );
-}
-
-function assertReuseWorkspaceProjectCompatibility(
-  projectId: string,
-  environment: EnvironmentRow,
-  allowUnmanagedPersonalProjectReuseEnvironmentId: string | undefined,
-): void {
-  const projectIsPersonal = projectId === PERSONAL_PROJECT_ID;
-  const environmentIsPersonal = isPersonalWorkspaceEnvironment(environment);
-  if (
-    projectIsPersonal &&
-    !environmentIsPersonal &&
-    allowUnmanagedPersonalProjectReuseEnvironmentId !== environment.id
-  ) {
-    throw new ApiError(
-      409,
-      "invalid_request",
-      "Personal project threads must reuse a personal workspace",
-    );
-  }
-  if (!projectIsPersonal && environmentIsPersonal) {
-    throw new ApiError(
-      409,
-      "invalid_request",
-      "Standard project threads cannot reuse personal workspaces",
-    );
-  }
-}
-
 function resolveHostThreadRequestEnvironment(
   deps: ThreadRequestEnvironmentDeps,
   environment: HostThreadRequestEnvironment,
@@ -122,6 +96,7 @@ function resolveHostThreadRequestEnvironment(
     assertPersonalWorkspaceProjectCompatibility(projectId);
     const hostId = environment.hostId ?? requireConnectedPrimaryHostId(deps);
     assertUsableHostId(deps, { hostId });
+
     return {
       hostId,
       type: "personal",
@@ -160,12 +135,12 @@ export function resolveReuseThreadRequestEnvironment(
   deps: ThreadRequestEnvironmentDeps,
   environment: ReuseThreadRequestEnvironment,
   projectId: string,
-  allowUnmanagedPersonalProjectReuseEnvironmentId: string | undefined,
 ): ResolvedReuseThreadRequestEnvironment {
   let reusedEnvironment = requireEnvironment(
     deps.db,
     environment.environmentId,
   );
+
   if (reusedEnvironment.projectId !== projectId) {
     throw new ApiError(
       409,
@@ -173,11 +148,7 @@ export function resolveReuseThreadRequestEnvironment(
       "Environment belongs to a different project",
     );
   }
-  assertReuseWorkspaceProjectCompatibility(
-    projectId,
-    reusedEnvironment,
-    allowUnmanagedPersonalProjectReuseEnvironmentId,
-  );
+
   assertUsableHostId(deps, { hostId: reusedEnvironment.hostId });
   assertEnvironmentPathAvailable(deps, {
     hostId: reusedEnvironment.hostId,
@@ -185,6 +156,7 @@ export function resolveReuseThreadRequestEnvironment(
     threadId: null,
   });
   reusedEnvironment = requireEnvironment(deps.db, environment.environmentId);
+
   if (reusedEnvironment.ownerThreadId !== null) {
     throw new ApiError(
       409,
@@ -194,6 +166,7 @@ export function resolveReuseThreadRequestEnvironment(
         : "Cannot checkout branch while another thread is using this workspace",
     );
   }
+
   return {
     environment: reusedEnvironment,
     type: "reuse",
@@ -216,7 +189,6 @@ export function resolveStableThreadRequestEnvironment(
         deps,
         args.environment,
         args.projectId,
-        args.allowUnmanagedPersonalProjectReuseEnvironmentId,
       );
     default: {
       const exhaustiveCheck: never = args.environment;

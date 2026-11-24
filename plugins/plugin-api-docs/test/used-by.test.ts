@@ -4,6 +4,7 @@ import { scrollUsedBy, usedByScrollStep } from "../src/used-by";
 import { scrollEdgeState } from "../src/scroll-edges";
 
 const FITS = { scrollLeft: 0, scrollWidth: 180, clientWidth: 240 };
+
 const AT_START = { scrollLeft: 0, scrollWidth: 900, clientWidth: 240 };
 
 describe("scrollEdgeState", () => {

@@ -1,0 +1,33 @@
+:where([data-compact-questions]) {
+  container-name: compact-question;
+  container-type: inline-size;
+}
+
+:where([data-compact-questions] [data-question-form-actions]) {
+  margin-top: 0.375rem;
+}
+
+:where([data-compact-questions] [data-question-option]) {
+  min-height: 2.5rem;
+  padding-block: 0.5rem;
+}
+
+:where([data-compact-questions] textarea) {
+  min-height: 2.75rem !important;
+}
+
+:where([data-compact-questions] textarea:placeholder-shown) {
+  height: 2.75rem !important;
+}
+
+@container compact-question (min-width: 520px) {
+  :where([data-compact-questions] [data-question-option]) {
+    min-height: 2rem;
+    padding-block: 0.375rem;
+  }
+}
+
+:where([data-compact-questions] [data-voice-input-idle] > textarea) {
+  padding-bottom: 0.5rem;
+  padding-right: 3rem;
+}

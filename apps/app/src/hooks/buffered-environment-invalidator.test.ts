@@ -9,6 +9,7 @@ describe("createBufferedEnvironmentInvalidator", () => {
   it("deduplicates repeated environment changes within the debounce window", () => {
     vi.useFakeTimers();
     const flushChangedEnvironmentIds = vi.fn();
+
     const invalidator = createBufferedEnvironmentInvalidator({
       debounceMs: 100,
       flushChangedEnvironmentIds,
@@ -36,6 +37,7 @@ describe("createBufferedEnvironmentInvalidator", () => {
   it("flushes multiple changed environments together at max wait", () => {
     vi.useFakeTimers();
     const flushChangedEnvironmentIds = vi.fn();
+
     const invalidator = createBufferedEnvironmentInvalidator({
       debounceMs: 100,
       flushChangedEnvironmentIds,
@@ -69,6 +71,7 @@ describe("createBufferedEnvironmentInvalidator", () => {
   it("cancels pending flushes during dispose", () => {
     vi.useFakeTimers();
     const flushChangedEnvironmentIds = vi.fn();
+
     const invalidator = createBufferedEnvironmentInvalidator({
       debounceMs: 100,
       flushChangedEnvironmentIds,

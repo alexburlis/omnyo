@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PendingInteraction } from "@bb/domain";
+import type { PendingInteraction } from "@omnyo/domain";
 import { createIntegrationHarness } from "../helpers/harness.js";
 import type { IntegrationHarness } from "../helpers/harness.js";
 import {
@@ -21,31 +21,38 @@ const DEFAULT_PORT = 41999;
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function readStaticDir(): string | undefined {
-  if (process.env.BB_MOBILE_E2E_SERVE_APP !== "1") return undefined;
+  if (process.env.OMNYO_MOBILE_E2E_SERVE_APP !== "1") return undefined;
   const dist = resolve(repoRoot, "apps/app/dist");
+
   if (!existsSync(resolve(dist, "index.html"))) {
     throw new Error(
-      `BB_MOBILE_E2E_SERVE_APP=1 but ${dist}/index.html is missing. Run: pnpm exec turbo run build --filter=@bb/app`,
+      `OMNYO_MOBILE_E2E_SERVE_APP=1 but ${dist}/index.html is missing. Run: pnpm exec turbo run build --filter=@omnyo/app`,
     );
   }
+
   return dist;
 }
 
 function readPort(): number {
-  const raw = process.env.BB_MOBILE_E2E_PORT;
+  const raw = process.env.OMNYO_MOBILE_E2E_PORT;
+
   if (!raw) return DEFAULT_PORT;
   const parsed = Number.parseInt(raw, 10);
+
   if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
-    throw new Error(`Invalid BB_MOBILE_E2E_PORT: ${raw}`);
+    throw new Error(`Invalid OMNYO_MOBILE_E2E_PORT: ${raw}`);
   }
+
   return parsed;
 }
 
 function readBindHost(): "127.0.0.1" | "0.0.0.0" {
-  const raw = process.env.BB_MOBILE_E2E_BIND_HOST;
+  const raw = process.env.OMNYO_MOBILE_E2E_BIND_HOST;
+
   if (raw === undefined || raw === "127.0.0.1") return "127.0.0.1";
+
   if (raw === "0.0.0.0") return "0.0.0.0";
-  throw new Error(`Invalid BB_MOBILE_E2E_BIND_HOST: ${raw}`);
+  throw new Error(`Invalid OMNYO_MOBILE_E2E_BIND_HOST: ${raw}`);
 }
 
 function listLanIpv4Addresses(): string[] {
@@ -59,12 +66,13 @@ function warnWildcardBind(port: number): void {
   const lanUrls = listLanIpv4Addresses().map(
     (address) => `http://${address}:${port}`,
   );
+
   process.stderr.write(
     [
       "mobile-e2e backend: SECURITY WARNING: binding on 0.0.0.0. The harness",
       "server is unauthenticated and runs a real host daemon that permits",
       "command execution (terminal sessions) and file reads as your user.",
-      "Use BB_MOBILE_E2E_BIND_HOST=0.0.0.0 only behind a trusted network",
+      "Use OMNYO_MOBILE_E2E_BIND_HOST=0.0.0.0 only behind a trusted network",
       "boundary and stop the backend when you are done.",
     ].join(" ") +
       "\n" +
@@ -75,6 +83,7 @@ function warnWildcardBind(port: number): void {
 }
 
 const TURN_TIMEOUT_MS = 15_000;
+
 const INTERACTION_POLL_INTERVAL_MS = 100;
 
 async function waitForPendingInteraction(
@@ -83,17 +92,22 @@ async function waitForPendingInteraction(
   timeoutMs = TURN_TIMEOUT_MS,
 ): Promise<PendingInteraction> {
   const deadline = Date.now() + timeoutMs;
+
   for (;;) {
     const interactions = await listThreadInteractions(harness.api, threadId);
+
     const pending = interactions.find(
       (interaction) => interaction.status === "pending",
     );
+
     if (pending) return pending;
+
     if (Date.now() >= deadline) {
       throw new Error(
         `Timed out waiting for a pending interaction on thread ${threadId}`,
       );
     }
+
     await new Promise((resolve) =>
       setTimeout(resolve, INTERACTION_POLL_INTERVAL_MS),
     );
@@ -131,7 +145,7 @@ const LONG_MARKDOWN_MESSAGE = [
   "## Commands",
   "",
   "```bash",
-  "pnpm exec turbo run typecheck lint test --filter=@bb/mobile",
+  "pnpm exec turbo run typecheck lint test --filter=@omnyo/mobile",
   "cd apps/mobile && pnpm e2e:ios",
   "xcrun simctl io booted screenshot /tmp/timeline.png",
   "```",
@@ -180,7 +194,9 @@ const LONG_MARKDOWN_MESSAGE = [
 async function main(): Promise<void> {
   const bindHost = readBindHost();
   const serverPort = readPort();
+
   if (bindHost === "0.0.0.0") warnWildcardBind(serverPort);
+
   const harness = await createIntegrationHarness({
     bindHost,
     serverPort,
@@ -192,6 +208,7 @@ async function main(): Promise<void> {
     await harness.cleanup();
     process.exit(0);
   };
+
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
@@ -204,6 +221,7 @@ async function main(): Promise<void> {
     title: "Completed thread",
     workspace: { type: "unmanaged", path: null },
   });
+
   await sendTextMessage(harness.api, completed.thread.id, {
     text: "Hello from the seed",
   });
@@ -220,6 +238,7 @@ async function main(): Promise<void> {
     title: "Rich thread",
     workspace: { type: "unmanaged", path: null },
   });
+
   const richId = rich.thread.id;
   await runTurn(harness, richId, "Hello rich thread, first message");
   await runTurn(harness, richId, "delay:300 second message");
@@ -238,9 +257,11 @@ async function main(): Promise<void> {
   await runTurn(harness, richId, LONG_MARKDOWN_MESSAGE);
   await sendTextMessage(harness.api, richId, { text: "ask_user" });
   await waitForPendingInteraction(harness, richId);
+
   const unreadResponse = await harness.api.threads[":id"].unread.$post({
     param: { id: richId },
   });
+
   if (unreadResponse.status !== 200) {
     throw new Error(
       `mark rich thread unread failed: ${unreadResponse.status} ${await unreadResponse.text()}`,
@@ -267,11 +288,13 @@ async function main(): Promise<void> {
       originKind: "fork",
     },
   });
+
   if (rowsThreadResponse.status !== 201) {
     throw new Error(
       `create rows thread failed: ${rowsThreadResponse.status} ${await rowsThreadResponse.text()}`,
     );
   }
+
   const rowsThread = (await rowsThreadResponse.json()) as { id: string };
   await waitForThreadStatus(
     harness.api,
@@ -292,6 +315,7 @@ async function main(): Promise<void> {
       rows: rowsThread.id,
     },
   };
+
   process.stdout.write(`${JSON.stringify(details)}\n`);
   process.stderr.write(
     `mobile-e2e backend ready at ${harness.serverUrl} (Ctrl-C to stop)\n`,

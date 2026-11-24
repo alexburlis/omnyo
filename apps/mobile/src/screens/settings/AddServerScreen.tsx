@@ -1,4 +1,10 @@
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { iosHaptic } from "@/lib/haptics";
+import {
+  Stack,
+  useLocalSearchParams,
+  useNavigation,
+  useRouter,
+} from "expo-router";
 import { useRef, useState } from "react";
 import { View, type TextInput } from "react-native";
 import { useProfiles } from "@/app-shell";
@@ -9,7 +15,12 @@ import {
 } from "@/lib/profiles";
 import { describeError } from "@/lib/describe-error";
 import { Button, GroupedRow, Input, Text, toast } from "@/ui";
-import { connectEnrollHref, rawPathHref } from "../shell/hrefs";
+import {
+  connectEnrollHref,
+  rawPathHref,
+  webViewShellHref,
+} from "../shell/hrefs";
+import { dismissToShell } from "../shell/dismiss-to-shell";
 import { GroupedScreen } from "./GroupedScreen";
 import { useBadgeColors } from "./settings-badges";
 import { SettingsSection } from "./SettingsRows";
@@ -33,6 +44,7 @@ const URL_HELP =
 
 export function AddServerScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const params = useLocalSearchParams<{ serverUrl?: string; next?: string }>();
   const colors = useBadgeColors();
   const { profiles, addProfile, setActiveProfile } = useProfiles();
@@ -50,24 +62,36 @@ export function AddServerScreen() {
 
   const onSubmit = async () => {
     setUrlTouched(true);
+
     if (!validation.ok) {
+      iosHaptic("error");
       setSubmit({ phase: "failed", message: validation.message });
+
       return;
     }
+
     const { serverUrl } = validation;
     setSubmit({ phase: "probing" });
     const probe = await probeServer(serverUrl, fetch);
+
     if (!probe.ok) {
+      iosHaptic("error");
+
       const where =
         probe.stage === "health"
           ? "Could not reach the server"
-          : "Reached the server, but it does not look like bb";
+          : "Reached the server, but it does not look like Omnyo";
+
       setSubmit({ phase: "failed", message: `${where}: ${probe.error}` });
+
       return;
     }
+
     setSubmit({ phase: "saving" });
+
     try {
       const trimmedLabel = label.trim();
+
       const profile = await addProfile({
         mode: "direct",
         serverUrl,
@@ -76,15 +100,23 @@ export function AddServerScreen() {
           PROFILE_LABEL_MAX_LENGTH,
         ),
       });
+
       await setActiveProfile(profile.id);
+      iosHaptic("success");
       toast.success(`Added ${profile.label}`, {
         description: probe.advertisedServerUrl
           ? `Server reports ${probe.advertisedServerUrl}; keeping ${serverUrl}.`
           : undefined,
       });
-      router.dismissTo("/");
-      if (params.next?.startsWith("/")) router.push(rawPathHref(params.next));
+      dismissToShell(
+        router,
+        navigation,
+        params.next?.startsWith("/")
+          ? rawPathHref(params.next)
+          : webViewShellHref(),
+      );
     } catch (error) {
+      iosHaptic("error");
       setSubmit({ phase: "failed", message: describeError(error) });
     }
   };
@@ -92,12 +124,14 @@ export function AddServerScreen() {
   return (
     <>
       <Stack.Screen
-        options={{ title: firstRun ? "Connect to a bb server" : "Add server" }}
+        options={{
+          title: firstRun ? "Connect to an Omnyo server" : "Add server",
+        }}
       />
       <GroupedScreen testID="add-server-screen">
-        <SettingsSection footnote="Pair through getbb.app from anywhere: scan or type a pairing code from bb Settings → Mobile.">
+        <SettingsSection footnote="Pair through Omnyo connect from anywhere: scan or type a pairing code from Omnyo Settings → Mobile.">
           <GroupedRow
-            title="Connect with bb connect"
+            title="Connect with Omnyo connect"
             badge={{ icon: "Globe", symbol: "globe", color: colors.blue }}
             trailing="chevron"
             onPress={() => router.push(connectEnrollHref())}
@@ -136,10 +170,11 @@ export function AddServerScreen() {
               value={url}
               onChangeText={(next) => {
                 setUrl(next);
+
                 if (submit.phase === "failed") setSubmit({ phase: "idle" });
               }}
               onBlur={() => setUrlTouched(true)}
-              placeholder="https://bb.example.ts.net"
+              placeholder="https://omnyo.example.ts.net"
               keyboardType="url"
               textContentType="URL"
               autoCapitalize="none"

@@ -9,31 +9,38 @@ export const NONE_REASONING_EFFORT: ModelReasoningEffort = {
   reasoningEffort: "none",
   description: "No extended thinking",
 };
+
 export const LOW_REASONING_EFFORT: ModelReasoningEffort = {
   reasoningEffort: "low",
   description: "Low reasoning effort",
 };
+
 export const MEDIUM_REASONING_EFFORT: ModelReasoningEffort = {
   reasoningEffort: "medium",
   description: "Medium reasoning effort",
 };
+
 export const HIGH_REASONING_EFFORT: ModelReasoningEffort = {
   reasoningEffort: "high",
   description: "High reasoning effort",
 };
+
 export const XHIGH_REASONING_EFFORT: ModelReasoningEffort = {
   reasoningEffort: "xhigh",
   description: "Extra high reasoning effort",
 };
+
 export const ULTRACODE_REASONING_EFFORT: ModelReasoningEffort = {
   reasoningEffort: "ultracode",
   description:
     "Extra high reasoning effort plus multi-agent workflow orchestration",
 };
+
 export const MAX_REASONING_EFFORT: ModelReasoningEffort = {
   reasoningEffort: "max",
   description: "Maximum reasoning effort",
 };
+
 const ULTRA_REASONING_EFFORT: ModelReasoningEffort = {
   reasoningEffort: "ultra",
   description: "Maximum reasoning with automatic task delegation",

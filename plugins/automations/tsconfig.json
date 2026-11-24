@@ -26,6 +26,15 @@
     "detail-view.tsx",
     "metadata.tsx",
     "overview-view.tsx",
+    "workflow-draft-reader.tsx",
+    "workflow-draft-text.tsx",
+    "workflow-run-history.tsx",
+    "workflow-runs.tsx",
+    "workflow-runs.stories.tsx",
+    "workflow-panel.tsx",
+    "workflow-panel-shared.ts",
+    "workflow-research.tsx",
+    "workflow-setup.tsx",
     "lib",
     "vitest.config.ts"
   ]

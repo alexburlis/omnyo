@@ -9,72 +9,101 @@ import path from "node:path";
 import type { Duplex } from "node:stream";
 
 const DEFAULT_GATE_PORT = 42998;
+
 const DEFAULT_CONTROL_PORT = 42997;
+
 const DEFAULT_UPSTREAM_PORT = 41999;
+
 const DEFAULT_CODE = "STUB-PAIR";
+
 const DEFAULT_HANDLE = "stub";
+
 const OTHER_HANDLE = "other";
+
 const DEFAULT_SESSION_TTL_MS = 60 * 60 * 1000;
-const DESKTOP_SESSION_COOKIE = "__Secure-bb-connect.desktop_session";
-const MACHINE_CREDENTIAL_HEADER = "x-bb-connect-machine";
-const GATE_AUTH_HEADER = "x-bb-gate-auth";
-const GATE_MACHINE_ID_HEADER = "x-bb-gate-machine-id";
+
+const DESKTOP_SESSION_COOKIE = "__Secure-omnyo-connect.desktop_session";
+
+const MACHINE_CREDENTIAL_HEADER = "x-omnyo-connect-machine";
+
+const GATE_AUTH_HEADER = "x-omnyo-gate-auth";
+
+const GATE_MACHINE_ID_HEADER = "x-omnyo-gate-machine-id";
 
 function readPort(name: string, fallback: number): number {
   const raw = process.env[name];
+
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
+
   if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
     throw new Error(`Invalid ${name}: ${raw}`);
   }
+
   return parsed;
 }
 
 function readPositiveInt(name: string, fallback: number): number {
   const raw = process.env[name];
+
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
+
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(`Invalid ${name}: ${raw}`);
   }
+
   return parsed;
 }
 
-const gatePort = readPort("BB_MOBILE_E2E_GATE_PORT", DEFAULT_GATE_PORT);
+const gatePort = readPort("OMNYO_MOBILE_E2E_GATE_PORT", DEFAULT_GATE_PORT);
+
 const controlPort = readPort(
-  "BB_MOBILE_E2E_STUB_CONTROL_PORT",
+  "OMNYO_MOBILE_E2E_STUB_CONTROL_PORT",
   DEFAULT_CONTROL_PORT,
 );
+
 const upstreamUrl = new URL(
-  process.env.BB_MOBILE_E2E_UPSTREAM_URL ??
-    `http://127.0.0.1:${readPort("BB_MOBILE_E2E_PORT", DEFAULT_UPSTREAM_PORT)}`,
+  process.env.OMNYO_MOBILE_E2E_UPSTREAM_URL ??
+    `http://127.0.0.1:${readPort("OMNYO_MOBILE_E2E_PORT", DEFAULT_UPSTREAM_PORT)}`,
 );
+
 if (upstreamUrl.protocol !== "http:") {
-  throw new Error("BB_MOBILE_E2E_UPSTREAM_URL must be http://");
+  throw new Error("OMNYO_MOBILE_E2E_UPSTREAM_URL must be http://");
 }
+
 const upstreamHost = upstreamUrl.hostname;
+
 const upstreamPort = Number.parseInt(upstreamUrl.port, 10) || 80;
-const handle = (process.env.BB_MOBILE_E2E_STUB_HANDLE ?? DEFAULT_HANDLE)
+
+const handle = (process.env.OMNYO_MOBILE_E2E_STUB_HANDLE ?? DEFAULT_HANDLE)
   .trim()
   .toLowerCase();
+
 if (!/^[a-z0-9-]+$/u.test(handle)) {
-  throw new Error(`Invalid BB_MOBILE_E2E_STUB_HANDLE: ${handle}`);
+  throw new Error(`Invalid OMNYO_MOBILE_E2E_STUB_HANDLE: ${handle}`);
 }
-const pairingCode = (process.env.BB_MOBILE_E2E_CONNECT_CODE ?? DEFAULT_CODE)
+
+const pairingCode = (process.env.OMNYO_MOBILE_E2E_CONNECT_CODE ?? DEFAULT_CODE)
   .trim()
   .toUpperCase();
+
 const sessionTtlMs = readPositiveInt(
-  "BB_MOBILE_E2E_SESSION_TTL_MS",
+  "OMNYO_MOBILE_E2E_SESSION_TTL_MS",
   DEFAULT_SESSION_TTL_MS,
 );
+
 const certDir =
-  process.env.BB_MOBILE_E2E_STUB_CERT_DIR ??
-  path.join(os.homedir(), ".bb-mobile-e2e", "connect-stub-certs");
+  process.env.OMNYO_MOBILE_E2E_STUB_CERT_DIR ??
+  path.join(os.homedir(), ".omnyo-mobile-e2e", "connect-stub-certs");
 
 const apexUrl = `https://localhost:${gatePort}`;
+
 const serverUrl = `https://${handle}.localhost:${gatePort}`;
+
 const otherServerUrl = `https://${OTHER_HANDLE}.localhost:${gatePort}`;
-const cookieDomain = process.env.BB_MOBILE_E2E_COOKIE_DOMAIN ?? ".localhost";
+
+const cookieDomain = process.env.OMNYO_MOBILE_E2E_COOKIE_DOMAIN ?? ".localhost";
 
 interface TlsMaterial {
   key: Buffer;
@@ -89,6 +118,7 @@ function ensureCertificates(): TlsMaterial {
   const leafKey = path.join(certDir, "leaf.key");
   const leafPem = path.join(certDir, "leaf.pem");
   const sanFile = path.join(certDir, "leaf.san");
+
   const sans = [
     "DNS:localhost",
     `DNS:${handle}.localhost`,
@@ -117,15 +147,17 @@ function ensureCertificates(): TlsMaterial {
       "-days",
       "3650",
       "-subj",
-      "/CN=bb mobile e2e connect stub CA",
+      "/CN=Omnyo mobile e2e connect stub CA",
       "-addext",
       "basicConstraints=critical,CA:TRUE",
       "-addext",
       "keyUsage=critical,keyCertSign,cRLSign",
     ]);
   }
+
   const sanStale =
     !existsSync(sanFile) || readFileSync(sanFile, "utf8") !== sans;
+
   if (!existsSync(leafKey) || !existsSync(leafPem) || sanStale) {
     process.stderr.write(
       `connect-stub: issuing leaf certificate for ${sans}\n`,
@@ -173,6 +205,7 @@ function ensureCertificates(): TlsMaterial {
     ]);
     writeFileSync(sanFile, sans);
   }
+
   return {
     key: readFileSync(leafKey),
     cert: readFileSync(leafPem),
@@ -212,8 +245,11 @@ interface Session {
 }
 
 const machines = new Map<string, Machine>();
+
 const sessions = new Map<string, Session>();
+
 const liveSockets = new Set<Duplex>();
+
 const counters = {
   redeems: 0,
   desktopSessions: 0,
@@ -228,7 +264,7 @@ function now(): number {
   return Date.now();
 }
 
-const verbose = process.env.BB_MOBILE_E2E_STUB_LOG === "1";
+const verbose = process.env.OMNYO_MOBILE_E2E_STUB_LOG === "1";
 
 function trace(line: string): void {
   if (verbose) process.stderr.write(`connect-stub: ${line}\n`);
@@ -236,65 +272,81 @@ function trace(line: string): void {
 
 function describeCookies(header: string | undefined): string {
   if (!header) return "no cookie";
+
   const names = header
     .split(";")
     .map((part) => part.trim().split("=")[0] ?? "")
     .filter((name) => name.length > 0);
+
   return `cookies ${names.join(",")}`;
 }
 
 function activeMachine(credential: string | null): Machine | null {
   if (!credential) return null;
   const machine = machines.get(credential);
+
   return machine && machine.revokedAt === null ? machine : null;
 }
 
 function activeSession(value: string | null): Session | null {
   if (!value) return null;
   const session = sessions.get(value);
+
   if (!session || session.invalidatedAt !== null) return null;
+
   if (session.expiresAt <= now()) return null;
+
   const machine = Array.from(machines.values()).find(
     (candidate) => candidate.id === session.machineId,
   );
+
   return machine && machine.revokedAt === null ? session : null;
 }
 
 function closeLiveSockets(): number {
   const count = liveSockets.size;
+
   for (const socket of liveSockets) socket.destroy();
   liveSockets.clear();
+
   return count;
 }
 
 function expireSessions(): number {
   let count = 0;
+
   for (const session of sessions.values()) {
     if (session.invalidatedAt === null) {
       session.invalidatedAt = now();
       count += 1;
     }
   }
+
   return count;
 }
 
 function revokeMachines(): number {
   let count = 0;
+
   for (const machine of machines.values()) {
     if (machine.revokedAt === null) {
       machine.revokedAt = now();
       count += 1;
     }
   }
+
   return count;
 }
 
 function parseCookie(header: string | undefined, name: string): string | null {
   if (!header) return null;
+
   for (const part of header.split(";")) {
     const [rawName, ...rest] = part.trim().split("=");
+
     if (rawName === name) return rest.join("=");
   }
+
   return null;
 }
 
@@ -304,7 +356,7 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
 }
 
 function signInPage(label: string, url: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Sign in · ${label}</title></head><body><h1>Sign in to bb connect</h1><p>You need a session to reach <code>${label}</code>.</p><p><a href="${apexUrl}/dashboard?returnTo=${encodeURIComponent(url)}">Sign in</a></p></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Sign in · ${label}</title></head><body><h1>Sign in to Omnyo connect</h1><p>You need a session to reach <code>${label}</code>.</p><p><a href="${apexUrl}/dashboard?returnTo=${encodeURIComponent(url)}">Sign in</a></p></body></html>`;
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -326,6 +378,7 @@ function isMachinePath(pathname: string): boolean {
 
 function headerValue(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) return value[0] ?? null;
+
   return value ?? null;
 }
 
@@ -336,9 +389,11 @@ function upstreamHeaders(
 ): http.OutgoingHttpHeaders {
   const headers: http.OutgoingHttpHeaders = {};
   const publicOrigin = `https://${headerValue(req.headers.host) ?? ""}`;
+
   for (const [name, value] of Object.entries(req.headers)) {
     if (value === undefined) continue;
     const lower = name.toLowerCase();
+
     if (
       lower === "host" ||
       lower === MACHINE_CREDENTIAL_HEADER ||
@@ -347,12 +402,16 @@ function upstreamHeaders(
     ) {
       continue;
     }
+
     headers[name] =
       lower === "origin" && value === publicOrigin ? upstreamUrl.origin : value;
   }
+
   headers.host = `${upstreamHost}:${upstreamPort}`;
   headers[GATE_AUTH_HEADER] = auth;
+
   if (machineId) headers[GATE_MACHINE_ID_HEADER] = machineId;
+
   return headers;
 }
 
@@ -363,8 +422,10 @@ async function handleRedeemMachine(
   if (req.method !== "POST")
     return json(res, 405, { error: "method_not_allowed" });
   let code = "";
+
   try {
     const body: unknown = JSON.parse((await readBody(req)) || "{}");
+
     if (typeof body === "object" && body !== null && "code" in body) {
       const raw = (body as { code?: unknown }).code;
       code = typeof raw === "string" ? raw.trim().toUpperCase() : "";
@@ -372,22 +433,31 @@ async function handleRedeemMachine(
   } catch {
     return json(res, 400, { error: "invalid-json" });
   }
+
   counters.redeems += 1;
+
   if (!code) return json(res, 400, { error: "missing-code" });
+
   if (code === "EXPIRED-CODE") return json(res, 410, { error: "expired" });
+
   if (code === "USED-CODE") return json(res, 409, { error: "already-used" });
+
   if (code === "LIMIT-CODE") return json(res, 409, { error: "machine-limit" });
+
   if (code !== pairingCode) return json(res, 404, { error: "invalid-code" });
+
   const machine: Machine = {
     id: randomUUID(),
     credential: `bbcm_${randomBytes(24).toString("base64url")}`,
     createdAt: now(),
     revokedAt: null,
   };
+
   machines.set(machine.credential, machine);
   process.stderr.write(
     `connect-stub: redeemed ${code} → machine ${machine.id}\n`,
   );
+
   return json(res, 200, {
     credential: machine.credential,
     machineId: machine.id,
@@ -403,20 +473,25 @@ function handleDesktopSession(
   if (req.method !== "POST")
     return json(res, 405, { error: "method_not_allowed" });
   counters.desktopSessions += 1;
+
   const machine = activeMachine(
     headerValue(req.headers[MACHINE_CREDENTIAL_HEADER]),
   );
+
   if (!machine) return json(res, 401, { error: "unauthorized" });
+
   const session: Session = {
     value: `${randomBytes(18).toString("base64url")}.${randomBytes(16).toString("base64url")}`,
     machineId: machine.id,
     expiresAt: now() + sessionTtlMs,
     invalidatedAt: null,
   };
+
   sessions.set(session.value, session);
   process.stderr.write(
     `connect-stub: desktop session minted for machine ${machine.id} (expires in ${sessionTtlMs}ms)\n`,
   );
+
   return json(res, 200, {
     cookie: {
       domain: cookieDomain,
@@ -434,10 +509,13 @@ function handleListServers(
   if (req.method !== "GET")
     return json(res, 405, { error: "method_not_allowed" });
   counters.listServers += 1;
+
   const machine = activeMachine(
     headerValue(req.headers[MACHINE_CREDENTIAL_HEADER]),
   );
+
   if (!machine) return json(res, 401, { error: "unauthorized" });
+
   return json(res, 200, {
     servers: [
       { handle, name: "Stub server", live: true },
@@ -472,16 +550,20 @@ function handleControl(
       counters,
     });
   }
+
   if (req.method !== "POST")
     return json(res, 405, { error: "method_not_allowed" });
+
   if (pathname === "/__stub/expire-session") {
     const expired = expireSessions();
     const closed = closeLiveSockets();
     process.stderr.write(
       `connect-stub: expired ${expired} session(s), closed ${closed} socket(s)\n`,
     );
+
     return json(res, 200, { ok: true, expired, closed });
   }
+
   if (pathname === "/__stub/revoke-machine") {
     const revoked = revokeMachines();
     const expired = expireSessions();
@@ -489,15 +571,19 @@ function handleControl(
     process.stderr.write(
       `connect-stub: revoked ${revoked} machine(s), expired ${expired} session(s), closed ${closed} socket(s)\n`,
     );
+
     return json(res, 200, { ok: true, revoked, expired, closed });
   }
+
   if (pathname === "/__stub/reset") {
     const closed = closeLiveSockets();
     machines.clear();
     sessions.clear();
     process.stderr.write(`connect-stub: reset (closed ${closed} socket(s))\n`);
+
     return json(res, 200, { ok: true, closed });
   }
+
   return json(res, 404, { error: "not_found" });
 }
 
@@ -508,6 +594,7 @@ function proxyRequest(
   machineId: string | null,
 ): void {
   counters.proxiedRequests += 1;
+
   const upstream = http.request(
     {
       host: upstreamHost,
@@ -521,12 +608,15 @@ function proxyRequest(
       upstreamRes.pipe(res);
     },
   );
+
   upstream.on("error", (error) => {
     process.stderr.write(`connect-stub: upstream error ${String(error)}\n`);
+
     if (!res.headersSent) {
       res.writeHead(503, { "content-type": "text/plain" });
     }
-    res.end("bb connect: server offline\n");
+
+    res.end("Omnyo connect: server offline\n");
   });
   req.pipe(upstream);
 }
@@ -539,46 +629,64 @@ async function handleRequest(
     req.url ?? "/",
     `https://${req.headers.host ?? "localhost"}`,
   );
+
   const pathname = url.pathname;
+
   if (pathname === "/api/connect/redeem-machine") {
     return handleRedeemMachine(req, res);
   }
+
   if (pathname === "/api/connect/desktop-session") {
     return handleDesktopSession(req, res);
   }
+
   if (pathname === "/api/connect/servers") return handleListServers(req, res);
+
   if (pathname.startsWith("/__stub/")) return handleControl(req, res, pathname);
+
   if (pathname.startsWith("/__")) {
     res.writeHead(404, { "content-type": "text/plain" });
-    return void res.end("bb connect: not found\n");
+
+    return void res.end("Omnyo connect: not found\n");
   }
 
   const presented = headerValue(req.headers[MACHINE_CREDENTIAL_HEADER]);
+
   if (isMachinePath(pathname) && presented !== null) {
     const machine = activeMachine(presented);
+
     if (!machine) {
       res.writeHead(403, { "content-type": "text/plain" });
-      return void res.end("bb connect: machine not authorized\n");
+
+      return void res.end("Omnyo connect: machine not authorized\n");
     }
+
     return proxyRequest(req, res, "machine", machine.id);
   }
+
   if (pathname.startsWith("/internal")) {
     res.writeHead(403, { "content-type": "text/plain" });
-    return void res.end("bb connect: machine not authorized\n");
+
+    return void res.end("Omnyo connect: machine not authorized\n");
   }
 
   const cookieHeader = headerValue(req.headers.cookie) ?? undefined;
+
   const session = activeSession(
     parseCookie(cookieHeader, DESKTOP_SESSION_COOKIE),
   );
+
   trace(
     `${req.method ?? "GET"} ${url.host}${pathname} (${describeCookies(cookieHeader)}) → ${session ? "proxy" : "401 sign-in"}`,
   );
+
   if (!session) {
     counters.unauthenticatedRequests += 1;
     res.writeHead(401, { "content-type": "text/html; charset=utf-8" });
+
     return void res.end(signInPage(url.host, url.toString()));
   }
+
   return proxyRequest(req, res, "session", null);
 }
 
@@ -591,13 +699,17 @@ function handleUpgrade(
     req.url ?? "/",
     `https://${req.headers.host ?? "localhost"}`,
   );
+
   const cookieHeader = headerValue(req.headers.cookie) ?? undefined;
+
   const session = activeSession(
     parseCookie(cookieHeader, DESKTOP_SESSION_COOKIE),
   );
+
   trace(
     `UPGRADE ${url.host}${url.pathname} (${describeCookies(cookieHeader)}) → ${session ? "proxy" : "401 sign-in"}`,
   );
+
   if (!session) {
     counters.unauthenticatedUpgrades += 1;
     const body = signInPage(url.host, url.toString());
@@ -611,19 +723,26 @@ function handleUpgrade(
         body,
       ].join("\r\n"),
     );
+
     return;
   }
+
   counters.proxiedUpgrades += 1;
+
   const upstream = net.connect(upstreamPort, upstreamHost, () => {
     const headers = upstreamHeaders(req, "session", null);
     const lines = [`${req.method ?? "GET"} ${req.url ?? "/"} HTTP/1.1`];
+
     for (const [name, value] of Object.entries(headers)) {
       if (value === undefined) continue;
+
       for (const entry of Array.isArray(value) ? value : [String(value)]) {
         lines.push(`${name}: ${entry}`);
       }
     }
+
     upstream.write(`${lines.join("\r\n")}\r\n\r\n`);
+
     if (head.length > 0) upstream.write(head);
     upstream.once("data", (chunk: Buffer) => {
       trace(
@@ -633,12 +752,15 @@ function handleUpgrade(
     upstream.pipe(socket);
     socket.pipe(upstream);
   });
+
   liveSockets.add(socket);
+
   const cleanup = (): void => {
     liveSockets.delete(socket);
     upstream.destroy();
     socket.destroy();
   };
+
   upstream.on("error", cleanup);
   upstream.on("close", cleanup);
   socket.on("error", cleanup);
@@ -647,10 +769,12 @@ function handleUpgrade(
 
 function main(): void {
   const tls = ensureCertificates();
-  const simulator = process.env.BB_MOBILE_E2E_SIMULATOR;
+  const simulator = process.env.OMNYO_MOBILE_E2E_SIMULATOR;
+
   if (simulator) installRootCertificate(simulator, tls.caPath);
 
   const listeners: https.Server[] = [];
+
   for (const host of ["127.0.0.1", "::1"]) {
     const server = https.createServer(
       { key: tls.key, cert: tls.cert },
@@ -659,11 +783,13 @@ function main(): void {
           process.stderr.write(
             `connect-stub: handler error ${String(error)}\n`,
           );
+
           if (!res.headersSent) json(res, 500, { error: "internal" });
           else res.end();
         });
       },
     );
+
     server.on("upgrade", handleUpgrade);
     server.on("error", (error) => {
       process.stderr.write(
@@ -677,11 +803,13 @@ function main(): void {
 
   const control = http.createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+
     if (pathname.startsWith("/__stub/"))
       return handleControl(req, res, pathname);
     res.writeHead(404, { "content-type": "text/plain" });
-    res.end("bb connect stub: control port only answers /__stub/*\n");
+    res.end("Omnyo connect stub: control port only answers /__stub/*\n");
   });
+
   control.on("error", (error) => {
     process.stderr.write(
       `connect-stub: control listen error on ${controlPort}: ${String(error)}\n`,
@@ -693,10 +821,12 @@ function main(): void {
   const shutdown = (signal: string): void => {
     process.stderr.write(`connect-stub: ${signal}, shutting down\n`);
     closeLiveSockets();
+
     for (const server of listeners) server.close();
     control.close();
     process.exit(0);
   };
+
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
@@ -711,6 +841,7 @@ function main(): void {
     caPath: tls.caPath,
     installRootCert: `xcrun simctl keychain booted add-root-cert ${tls.caPath}`,
   };
+
   process.stdout.write(`${JSON.stringify(details)}\n`);
   process.stderr.write(
     `mobile-e2e connect stub ready: apex ${apexUrl}, gate ${serverUrl} → ${upstreamUrl.origin} (code ${pairingCode}; control http://127.0.0.1:${controlPort}/__stub/*; Ctrl-C to stop)\n` +

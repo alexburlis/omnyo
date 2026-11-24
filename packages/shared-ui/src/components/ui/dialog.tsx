@@ -18,6 +18,7 @@ import {
   preventOverlayTriggerSelection,
 } from "./overlay-trigger.js";
 import { Icon } from "../../components/ui/icon.js";
+import { MODAL_CONTENT_MOTION, MODAL_OVERLAY_MOTION } from "./motion.js";
 
 interface ResponsiveDialogContextValue extends ResponsiveOverlayContextValue {
   titleId: string;
@@ -51,23 +52,29 @@ function Dialog({
   const generatedTitleId = React.useId();
   const generatedDescriptionId = React.useId();
   const [titleId, setTitleId] = React.useState(generatedTitleId);
+
   const [descriptionId, setDescriptionId] = React.useState(
     generatedDescriptionId,
   );
+
   const registerTitleId = React.useCallback(
     (id: string) => {
       setTitleId(id);
+
       return () => setTitleId(generatedTitleId);
     },
     [generatedTitleId],
   );
+
   const registerDescriptionId = React.useCallback(
     (id: string) => {
       setDescriptionId(id);
+
       return () => setDescriptionId(generatedDescriptionId);
     },
     [generatedDescriptionId],
   );
+
   const ctx = React.useMemo(
     () => ({
       ...responsiveRoot,
@@ -135,6 +142,7 @@ const DialogTrigger = React.forwardRef<
         if (!open) {
           blurActiveKeyboardInputBeforeOverlayOpen();
         }
+
         preventOverlayTriggerSelection(event);
       }}
       {...props}
@@ -143,6 +151,7 @@ const DialogTrigger = React.forwardRef<
     </DialogPrimitive.Trigger>
   );
 });
+
 DialogTrigger.displayName = "DialogTrigger";
 
 interface DialogCloseProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -155,14 +164,17 @@ const DialogClose = React.forwardRef<HTMLButtonElement, DialogCloseProps>(
 
     if (isCompactViewport) {
       const Comp = asChild ? Slot : "button";
+
       const handleClick: React.MouseEventHandler<HTMLButtonElement> = (
         event,
       ) => {
         onClick?.(event);
+
         if (!event.defaultPrevented) {
           onOpenChange(false);
         }
       };
+
       return (
         <Comp ref={ref} onClick={handleClick} {...props}>
           {children}
@@ -182,6 +194,7 @@ const DialogClose = React.forwardRef<HTMLButtonElement, DialogCloseProps>(
     );
   },
 );
+
 DialogClose.displayName = "DialogClose";
 
 const DialogOverlay = React.forwardRef<
@@ -192,12 +205,14 @@ const DialogOverlay = React.forwardRef<
     ref={ref}
     {...usePortalScopeProps()}
     className={cn(
-      "fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 z-50 bg-black/40",
+      MODAL_OVERLAY_MOTION,
       className,
     )}
     {...props}
   />
 ));
+
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 function useChildrenRetainedWhileClosing(
@@ -206,17 +221,22 @@ function useChildrenRetainedWhileClosing(
 ) {
   const [wasOpen, setWasOpen] = React.useState(open);
   const [closing, setClosing] = React.useState(false);
+
   const [lastOpenChildren, setLastOpenChildren] =
     React.useState<React.ReactNode>(open ? children : null);
+
   if (wasOpen !== open) {
     setWasOpen(open);
     setClosing(!open);
   }
+
   if (open && lastOpenChildren !== children) setLastOpenChildren(children);
+
   const finishClosing = React.useCallback(() => {
     setClosing(false);
     setLastOpenChildren(null);
   }, []);
+
   return {
     content: !open && closing ? lastOpenChildren : children,
     finishClosing,
@@ -229,6 +249,7 @@ type DialogContentProps = React.ComponentPropsWithoutRef<
   onAfterCloseAutoFocus?: () => void;
   hideCloseButton?: boolean;
   compactContentClassName?: string;
+  overlayClassName?: string;
 };
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
@@ -238,6 +259,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
       children,
       hideCloseButton = false,
       compactContentClassName,
+      overlayClassName,
       onAfterCloseAutoFocus,
       onCloseAutoFocus,
       ...props
@@ -246,8 +268,10 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
   ) => {
     const { isCompactViewport, open, onOpenChange, titleId, descriptionId } =
       useResponsiveDialog();
+
     useBrowserDimmingModal(open);
     const scopeProps = usePortalScopeProps();
+
     const { content, finishClosing } = useChildrenRetainedWhileClosing(
       open,
       children,
@@ -255,6 +279,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
 
     if (isCompactViewport) {
       const domProps = stripRadixContentProps(props);
+
       return (
         <ResponsiveDrawerShell
           open={open}
@@ -287,7 +312,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
 
     return (
       <DialogPrimitive.Portal>
-        <DialogOverlay />
+        <DialogOverlay className={overlayClassName} />
         <DialogPrimitive.Content
           ref={ref}
           {...scopeProps}
@@ -297,7 +322,8 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
             queueMicrotask(() => onAfterCloseAutoFocus?.());
           }}
           className={cn(
-            "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg grid-cols-[minmax(0,1fr)] translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-sm duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:rounded-lg",
+            "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg grid-cols-[minmax(0,1fr)] translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-sm sm:rounded-lg",
+            MODAL_CONTENT_MOTION,
             className,
           )}
           {...props}
@@ -314,6 +340,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
     );
   },
 );
+
 DialogContent.displayName = "DialogContent";
 
 const DialogHeader = ({
@@ -325,6 +352,7 @@ const DialogHeader = ({
     {...props}
   />
 );
+
 DialogHeader.displayName = "DialogHeader";
 
 const DialogFooter = ({
@@ -339,6 +367,7 @@ const DialogFooter = ({
     {...props}
   />
 );
+
 DialogFooter.displayName = "DialogFooter";
 
 const DialogTitle = React.forwardRef<
@@ -351,6 +380,7 @@ const DialogTitle = React.forwardRef<
     if (!isCompactViewport) {
       return;
     }
+
     return registerTitleId(resolvedId);
   }, [isCompactViewport, registerTitleId, resolvedId]);
 
@@ -363,6 +393,7 @@ const DialogTitle = React.forwardRef<
       ),
       ...props,
     };
+
     if (asChild) {
       return (
         <Slot ref={ref} {...titleProps}>
@@ -370,12 +401,14 @@ const DialogTitle = React.forwardRef<
         </Slot>
       );
     }
+
     return (
       <h2 ref={ref} {...titleProps}>
         {children}
       </h2>
     );
   }
+
   return (
     <DialogPrimitive.Title
       ref={ref}
@@ -391,6 +424,7 @@ const DialogTitle = React.forwardRef<
     </DialogPrimitive.Title>
   );
 });
+
 DialogTitle.displayName = "DialogTitle";
 
 const DialogDescription = React.forwardRef<
@@ -399,11 +433,13 @@ const DialogDescription = React.forwardRef<
 >(({ asChild, className, id, children, ...props }, ref) => {
   const { isCompactViewport, descriptionId, registerDescriptionId } =
     useResponsiveDialog();
+
   const resolvedId = id ?? descriptionId;
   React.useLayoutEffect(() => {
     if (!isCompactViewport) {
       return;
     }
+
     return registerDescriptionId(resolvedId);
   }, [isCompactViewport, registerDescriptionId, resolvedId]);
 
@@ -413,6 +449,7 @@ const DialogDescription = React.forwardRef<
       className: cn("text-sm text-muted-foreground", className),
       ...props,
     };
+
     if (asChild) {
       return (
         <Slot ref={ref} {...descriptionProps}>
@@ -420,12 +457,14 @@ const DialogDescription = React.forwardRef<
         </Slot>
       );
     }
+
     return (
       <p ref={ref} {...descriptionProps}>
         {children}
       </p>
     );
   }
+
   return (
     <DialogPrimitive.Description
       ref={ref}
@@ -438,6 +477,7 @@ const DialogDescription = React.forwardRef<
     </DialogPrimitive.Description>
   );
 });
+
 DialogDescription.displayName = DialogPrimitive.Description.displayName;
 
 export {

@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { Icon } from "@bb/shared-ui/icon";
-import { collectPluginAppRegistrations } from "@get-bb/plugin-sdk/internal/plugin-app-collector";
-import type { PluginAppBuilder } from "@get-bb/plugin-sdk/app";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { collectPluginAppRegistrations } from "@omnyo/plugin-sdk/internal/plugin-app-collector";
+import type { PluginAppBuilder } from "@omnyo/plugin-sdk/app";
 import {
   removePluginSlotRegistrations,
   resetPluginSlotStoreForTest,
@@ -19,7 +19,7 @@ function register(setup: (app: PluginAppBuilder) => void) {
   act(() =>
     setPluginSlotRegistrations(
       "acme",
-      collectPluginAppRegistrations({ __bbPluginApp: true, setup }),
+      collectPluginAppRegistrations({ __omnyoPluginApp: true, setup }),
     ),
   );
 }
@@ -44,6 +44,7 @@ it("resolves slot, asset, registered glyph and fallback in order", () => {
       aria-label="Acme"
     />,
   );
+
   expect(view.getByRole("img", { name: "Acme" }).className).toContain("size-4");
   expect(
     view.container.querySelector('[data-provider-logo="/mark.svg"]'),
@@ -87,6 +88,7 @@ it("accepts the environment provider string icon shape", () => {
       provider={{ id: "worktree", icon: "Check" }}
     />,
   );
+
   expect(view.container.querySelector('[data-icon="Check"]')).not.toBeNull();
   expect(view.container.firstElementChild?.getAttribute("aria-hidden")).toBe(
     "true",
@@ -101,6 +103,7 @@ it("renders the caller's fallback glyph when the provider declares none", () => 
       fallback="Folder"
     />,
   );
+
   expect(view.container.querySelector('[data-icon="Folder"]')).not.toBeNull();
   expect(view.container.querySelector('[data-icon="Code"]')).toBeNull();
   register((app) =>
@@ -121,19 +124,24 @@ it("renders the caller's fallback glyph when the provider declares none", () => 
 
 it("remounts the same provider component on reload and restores fallback on unload", () => {
   let mounts = 0;
+
   function Mark() {
     const [generation] = useState(() => ++mounts);
+
     return <svg data-generation={generation} />;
   }
+
   const setup = (app: PluginAppBuilder) =>
     app.slots.experimental_providerIcon({
       providerKind: "agent",
       providerId: "env",
       icon: Mark,
     });
+
   const view = render(
     <ProviderIcon providerKind="agent" provider={{ id: "env" }} />,
   );
+
   expect(view.container.querySelector('[data-icon="Code"]')).not.toBeNull();
   register(setup);
   expect(view.container.querySelector('[data-generation="1"]')).not.toBeNull();
@@ -145,12 +153,14 @@ it("remounts the same provider component on reload and restores fallback on unlo
 
 it("contains throwing overrides and recovers after reload", () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+
   const view = render(
     <ProviderIcon
       providerKind="agent"
       provider={{ id: "acme", logoUrl: "/mark.svg" }}
     />,
   );
+
   register((app) =>
     app.slots.experimental_providerIcon({
       providerKind: "agent",
@@ -184,9 +194,11 @@ it("breaks recursive provider overrides at their declared artwork", () => {
       ),
     }),
   );
+
   const view = render(
     <ProviderIcon providerKind="agent" provider={{ id: "acme" }} />,
   );
+
   expect(view.container.querySelector('[data-icon="Check"]')).not.toBeNull();
 });
 
@@ -202,9 +214,11 @@ it("escapes asset URLs and applies only valid theme tints", () => {
       aria-label="Acme"
     />,
   );
+
   const mask = view.container.querySelector<HTMLElement>(
     "[data-provider-logo]",
   );
+
   expect(mask?.style.maskImage).toContain('\\"');
   expect(view.getByRole("img").style.color).toBe(
     "light-dark(rgb(18, 52, 86), rgb(171, 205, 239))",
@@ -237,9 +251,11 @@ it("allows a provider override to render another kind with the same id", () => {
       icon: () => <svg data-cross-kind="machine" />,
     });
   });
+
   const view = render(
     <ProviderIcon providerKind="agent" provider={{ id: "shared" }} />,
   );
+
   expect(
     view.container.querySelector('[data-cross-kind="machine"]'),
   ).not.toBeNull();

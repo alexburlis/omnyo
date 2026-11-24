@@ -83,9 +83,10 @@ describe("PluginDetailReleaseControl", () => {
     const update = screen.getByRole("button", {
       name: "Update Linear to 1.9.0",
     });
+
     expect(update).toBeTruthy();
     expect(update.querySelector('[data-icon="Download"]')).not.toBeNull();
-    expect(screen.queryByText("Compatible with your bb.")).toBeNull();
+    expect(screen.queryByText("Compatible with your Omnyo.")).toBeNull();
   });
 
   it("shows a blocked update inline without a modal or disabled action", () => {
@@ -96,7 +97,7 @@ describe("PluginDetailReleaseControl", () => {
           updateState: {
             ...EMPTY_PLUGIN_UPDATE_STATE,
             blockedVersion: "1.9.0",
-            blockedReasons: ["requires bb >= 0.15"],
+            blockedReasons: ["requires Omnyo >= 0.15"],
           },
         })}
       />,
@@ -110,18 +111,19 @@ describe("PluginDetailReleaseControl", () => {
     const blockedStatus = screen.getByRole("status", {
       name: "Update blocked",
     });
+
     expect(screen.queryByText("Update blocked")).toBeNull();
-    expect(blockedStatus.textContent).toContain("Requires bb >= 0.15.");
+    expect(blockedStatus.textContent).toContain("Requires Omnyo >= 0.15.");
     expect(blockedStatus.textContent).toContain("1.6.2 remains installed");
     expect(blockedStatus.textContent).toContain(
       "check again when a compatible plugin version is available",
     );
-    expect(blockedStatus.textContent).not.toContain("Update bb");
+    expect(blockedStatus.textContent).not.toContain("Update Omnyo");
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("does not prescribe a bb upgrade for a candidate requiring an older bb", () => {
+  it("does not prescribe an Omnyo upgrade for a candidate requiring an older Omnyo", () => {
     const { wrapper } = createQueryClientTestHarness();
     render(
       <PluginDetailReleaseStatus
@@ -129,7 +131,7 @@ describe("PluginDetailReleaseControl", () => {
           updateState: {
             ...EMPTY_PLUGIN_UPDATE_STATE,
             blockedVersion: "1.9.0",
-            blockedReasons: ["requires bb < 0.20, running bb is 0.21.0"],
+            blockedReasons: ["requires Omnyo < 0.20, running Omnyo is 0.21.0"],
           },
         })}
       />,
@@ -143,12 +145,14 @@ describe("PluginDetailReleaseControl", () => {
     const blockedStatus = screen.getByRole("status", {
       name: "Update blocked",
     });
-    expect(blockedStatus.textContent).toContain("Requires bb < 0.20");
-    expect(blockedStatus.textContent).not.toContain("Update bb");
+
+    expect(blockedStatus.textContent).toContain("Requires Omnyo < 0.20");
+    expect(blockedStatus.textContent).not.toContain("Update Omnyo");
   });
 
   it("retries a failed update from the release action without opening a modal", async () => {
     let completeUpdate: (() => void) | undefined;
+
     const fetchMock = vi.fn(
       () =>
         new Promise<Response>((resolve) => {
@@ -172,6 +176,7 @@ describe("PluginDetailReleaseControl", () => {
             );
         }),
     );
+
     vi.stubGlobal("fetch", fetchMock);
     const { wrapper, queryClient } = createQueryClientTestHarness();
     render(
@@ -213,14 +218,16 @@ describe("PluginDetailReleaseControl", () => {
     const failedStatus = screen.getByRole("status", { name: "Update failed" });
     expect(screen.queryByText("Update failed")).toBeNull();
     expect(failedStatus.textContent).toContain(
-      "bb couldn’t activate 1.9.0. It restored 1.6.2 and its data.",
+      "Omnyo couldn’t activate 1.9.0. It restored 1.6.2 and its data.",
     );
     expect(screen.queryByText("Technical details")).toBeNull();
     expect(screen.queryByText("The plugin failed to load.")).toBeNull();
     expect(failedStatus.querySelector("button")).toBeNull();
+
     const retry = screen.getByRole("button", {
       name: "Retry update to 1.9.0",
     });
+
     fireEvent.click(retry);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(retry.getAttribute("aria-busy")).toBe("true");
@@ -239,8 +246,9 @@ describe("PluginDetailReleaseControl", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("renders nothing for builtins (their update channel is the bb release)", () => {
+  it("renders nothing for builtins (their update channel is the Omnyo release)", () => {
     const { wrapper } = createQueryClientTestHarness();
+
     const { container } = render(
       <PluginDetailReleaseControl
         plugin={{
@@ -254,6 +262,7 @@ describe("PluginDetailReleaseControl", () => {
         ),
       },
     );
+
     expect(container.textContent).toBe("");
   });
 });

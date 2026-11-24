@@ -6,7 +6,7 @@ import {
   experimental_assembleCapturedThreadEvents as assembleCapturedThreadEvents,
   experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness,
   type ThreadEvent,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 
 import { handleLine } from "./bridge.js";
 import {
@@ -15,13 +15,15 @@ import {
 } from "./fake-codex-app-server-harness.js";
 
 const THREAD_ID = "thr_1727_resume_usage";
+
 const PROVIDER_THREAD_ID = "usage-replay-1727";
 
 let harness: ReturnType<typeof createBridgeJsonRpcTestHarness>;
+
 let workspaceDir: string;
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-1727-ws-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-1727-ws-"));
   stubFakeCodexAppServer();
   harness = createBridgeJsonRpcTestHarness(handleLine);
 });
@@ -52,11 +54,13 @@ function turnIdOf(event: { scope: { kind: string; turnId?: string } }) {
   if (event.scope.kind !== "turn" || event.scope.turnId === undefined) {
     throw new Error(`expected a turn-scoped event, got ${event.scope.kind}`);
   }
+
   return event.scope.turnId;
 }
 
 async function waitFor(predicate: () => boolean, label: string) {
   const deadline = Date.now() + 10_000;
+
   while (!predicate()) {
     if (Date.now() > deadline)
       throw new Error(`timed out waiting for ${label}`);
@@ -89,14 +93,18 @@ it("drops replayed token usage and thread-scopes replayed context usage on resum
   );
 
   const session1Events = assembledEvents();
+
   const [turnStarted1] = session1Events.filter(
     (event) => event.type === "turn/started",
   );
+
   expect(turnStarted1).toBeDefined();
   const storedTurnId = turnIdOf(turnStarted1!);
+
   const liveUsage = session1Events.filter(
     (event) => event.type === "thread/tokenUsage/updated",
   );
+
   expect(liveUsage.length).toBeGreaterThan(0);
   expect(turnIdOf(liveUsage.at(-1)!)).toBe(storedTurnId);
 
@@ -107,9 +115,11 @@ it("drops replayed token usage and thread-scopes replayed context usage on resum
     activeTurnId: null,
   });
   await harness.waitForResponse(3);
+
   const usageCountBeforeResume = threadEventsOfType(
     "thread/tokenUsage/updated",
   ).length;
+
   const contextCountBeforeResume = threadEventsOfType(
     "thread/contextWindowUsage/updated",
   ).length;
@@ -132,9 +142,11 @@ it("drops replayed token usage and thread-scopes replayed context usage on resum
   expect(threadEventsOfType("thread/tokenUsage/updated").length).toBe(
     usageCountBeforeResume,
   );
+
   const replayedContext = threadEventsOfType(
     "thread/contextWindowUsage/updated",
   ).at(-1)!;
+
   expect(replayedContext.scope).toEqual({ kind: "thread" });
 }, 30_000);
 
@@ -148,6 +160,7 @@ it("drops replayed token usage and thread-scopes replayed context usage on fork"
   });
   const forked = await harness.waitForResponse(1);
   expect(forked.error).toBeUndefined();
+
   const forkedProviderThreadId = (forked.result as { providerThreadId: string })
     .providerThreadId;
 
@@ -176,12 +189,15 @@ it("drops replayed token usage and thread-scopes replayed context usage on fork"
     "fork turn/completed",
   );
   const forkEvents = assembledEvents();
+
   const [turnStarted] = forkEvents.filter(
     (event) => event.type === "turn/started",
   );
+
   const ownUsage = forkEvents.filter(
     (event) => event.type === "thread/tokenUsage/updated",
   );
+
   expect(ownUsage.length).toBeGreaterThan(0);
   expect(turnIdOf(ownUsage.at(-1)!)).toBe(turnIdOf(turnStarted!));
 }, 30_000);

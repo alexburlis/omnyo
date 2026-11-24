@@ -1,8 +1,8 @@
+import type { ReasoningLevel } from "@omnyo/domain";
 import {
-  compareReasoningLevels,
-  standardReasoningLevelRank,
-  type ReasoningLevel,
-} from "@bb/domain";
+  compareModelPickerLevels,
+  modelPickerLevelRank,
+} from "./model-picker-menu";
 import type { PickerOption } from "./OptionPicker";
 
 export function nextCycleValue<T extends string>(
@@ -12,8 +12,19 @@ export function nextCycleValue<T extends string>(
   if (options.length === 0) return null;
   const index = options.findIndex((option) => option.value === current);
   const next = options[(index + 1) % options.length];
+
   if (next === undefined || next.value === current) return null;
+
   return next.value;
+}
+
+export function cyclableModelOptions<Option extends PickerOption<string>>(
+  options: readonly Option[],
+  hiddenModels: ReadonlySet<string>,
+): Option[] {
+  return options.filter(
+    (option) => option.disabled !== true && !hiddenModels.has(option.value),
+  );
 }
 
 export function previousCycleValue<T extends string>(
@@ -28,21 +39,25 @@ export function cycleReasoningValue(
   current: ReasoningLevel,
   direction: "forward" | "backward",
 ): ReasoningLevel | null {
-  const currentRank = standardReasoningLevelRank(current);
+  const currentRank = modelPickerLevelRank(current);
+
   if (
     currentRank === null ||
-    options.some((option) => standardReasoningLevelRank(option.value) === null)
+    options.some((option) => modelPickerLevelRank(option.value) === null)
   ) {
     return direction === "forward"
       ? nextCycleValue(options, current)
       : previousCycleValue(options, current);
   }
+
   const orderedOptions = options
     .map((option) => option.value)
-    .sort(compareReasoningLevels);
-  const rankOf = (level: ReasoningLevel) =>
-    standardReasoningLevelRank(level) ?? -1;
+    .sort(compareModelPickerLevels);
+
+  const rankOf = (level: ReasoningLevel) => modelPickerLevelRank(level) ?? -1;
+
   let candidate: ReasoningLevel | undefined;
+
   if (direction === "forward") {
     candidate = orderedOptions.find((level) => rankOf(level) > currentRank);
     candidate ??= orderedOptions[0];
@@ -52,6 +67,8 @@ export function cycleReasoningValue(
       .find((level) => rankOf(level) < currentRank);
     candidate ??= orderedOptions.at(-1);
   }
+
   if (candidate === undefined || candidate === current) return null;
+
   return candidate;
 }

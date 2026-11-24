@@ -12,16 +12,19 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Host } from "@bb/domain";
-import { makeHost as makeHostFixture } from "@bb/test-helpers/domain-fixtures";
-import type { BbDesktopApi, BbDesktopInfo } from "@bb/desktop-contract";
-import { BbHttpError } from "@bb/sdk/browser";
-import type { SystemAppUpdateStatus } from "@bb/server-contract";
+import { appSettingsSchema, type Host } from "@omnyo/domain";
+import { makeHost as makeHostFixture } from "@omnyo/test-helpers/domain-fixtures";
+import type {
+  OmnyoDesktopApi,
+  OmnyoDesktopInfo,
+} from "@omnyo/desktop-contract";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
+import type { SystemAppUpdateStatus } from "@omnyo/server-contract";
 import {
   HOST_DAEMON_PROTOCOL_VERSION,
   type ProviderCliKey,
-} from "@bb/host-daemon-contract";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+} from "@omnyo/host-daemon-contract";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import type {
   ProviderCliIssue,
   ProviderCliActionableIssue,
@@ -33,10 +36,11 @@ import {
   resetProviderCliInstallStoreForTests,
 } from "@/components/provider-cli/provider-cli-install-store";
 import { appToast } from "@/components/ui/app-toast";
+import { formatScheduledTime } from "@/lib/relative-time";
 import { sdk } from "@/lib/sdk";
+import { makeSystemConfig } from "@/test/fixtures/system-config";
 import { useDesktopUpdateInfo } from "@/hooks/useDesktopUpdateInfo";
 import {
-  useUpdateInventory,
   type UpdateInventory,
   type UpdateInventoryMachine,
 } from "@/hooks/useUpdateInventory";
@@ -57,15 +61,20 @@ vi.mock("@/components/ui/app-toast", () => ({
 }));
 
 vi.mock("@/lib/sdk", async () => {
-  const { makeProviderInfo } = await import("@bb/test-helpers/domain-fixtures");
+  const { makeProviderInfo } =
+    await import("@omnyo/test-helpers/domain-fixtures");
+
   const { makeSystemConfig } = await import("@/test/fixtures/system-config");
+
   return {
     sdk: {
       system: {
         acknowledgeAppUpdate: vi.fn(),
         appUpdate: vi.fn(),
         applyAppUpdate: vi.fn(),
+        cancelAppUpdate: vi.fn(),
         version: vi.fn(),
+        updateGeneralSettings: vi.fn(),
         config: vi.fn(async () =>
           makeSystemConfig({ primaryHostId: "host_primary" }),
         ),
@@ -85,9 +94,22 @@ vi.mock("@/lib/ws", () => ({
   wsManager: { subscribe: vi.fn(), unsubscribe: vi.fn() },
 }));
 
-vi.mock("@/hooks/useUpdateInventory", () => ({
-  useUpdateInventory: vi.fn(),
-}));
+const useUpdateInventoryMock = vi.hoisted(() => vi.fn<() => UpdateInventory>());
+
+vi.mock("@/hooks/useUpdateInventory", async () => {
+  const { useAppUpdateStatus } =
+    await import("@/hooks/queries/app-update-queries");
+
+  const { useDesktopUpdateInfo } = await import("@/hooks/useDesktopUpdateInfo");
+
+  return {
+    useUpdateInventory: () => ({
+      ...useUpdateInventoryMock(),
+      ...useDesktopUpdateInfo(),
+      appUpdate: useAppUpdateStatus().data,
+    }),
+  };
+});
 
 vi.mock("@/hooks/useDesktopUpdateInfo", () => ({
   useDesktopUpdateInfo: vi.fn(),
@@ -126,12 +148,14 @@ vi.mock("@/components/provider-cli/provider-cli-install", async (original) => {
     await original<
       typeof import("@/components/provider-cli/provider-cli-install")
     >();
+
   return {
     ...actual,
     useProviderCliInstallRunner: vi.fn(() => ({
       failuresByJobKey: new Map(),
       queuedJobKeys: new Set<string>(),
       runningJobKey: null,
+      runningPhase: null,
       startInstall: startInstallMock,
     })),
   };
@@ -155,12 +179,15 @@ function makeUpdateIssue(args: {
       : args.provider === "claude-code"
         ? { displayName: "Claude Code", executableName: "claude" }
         : { displayName: "Cursor", executableName: "agent" };
+
   const { displayName, executableName } = identity;
+
   const action = {
     kind: "update" as const,
     label: "Update" as const,
     command: `${executableName} update`,
   };
+
   return {
     provider: args.provider,
     status: {
@@ -189,6 +216,7 @@ function makeManualUpdateIssue(args: {
   provider: "codex" | "claude-code";
 }): ProviderCliIssue {
   const issue = makeUpdateIssue(args);
+
   return {
     ...issue,
     action: null,
@@ -203,25 +231,30 @@ function makeManualUpdateIssue(args: {
 function makeMachine(args: {
   host: Host;
   issues?: ProviderCliIssue[];
-  isPrimary?: boolean;
   statusPending?: boolean;
   statusError?: boolean;
   canRetryDaemonUpdate?: boolean;
 }): UpdateInventoryMachine {
   const issues = args.issues ?? [];
+
   const upToDate = (provider: ProviderCliKey) => {
     const issue = issues.find((entry) => entry.provider === provider);
+
     if (issue !== undefined) {
       return issue.status;
     }
+
     const base = makeUpdateIssue({ provider }).status;
+
     return {
       ...base,
       latestVersion: base.currentVersion,
       needsUpdate: false,
     };
   };
+
   const cursorIssue = issues.find((entry) => entry.provider === "acp-cursor");
+
   const cursorStatus =
     cursorIssue?.status ??
     ({
@@ -232,9 +265,9 @@ function makeMachine(args: {
       needsUpdate: false,
       installAction: null,
     } as const);
+
   return {
     host: args.host,
-    isPrimary: args.isPrimary ?? false,
     providerStatus:
       args.host.status === "connected"
         ? {
@@ -253,6 +286,7 @@ function makeMachine(args: {
 
 function makeInventory(overrides: Partial<UpdateInventory>): UpdateInventory {
   return {
+    appUpdate: undefined,
     isLoading: false,
     systemVersion: {
       currentVersion: "0.0.5",
@@ -262,28 +296,32 @@ function makeInventory(overrides: Partial<UpdateInventory>): UpdateInventory {
       source: "npm",
       updateAvailable: false,
       isDevelopment: false,
-      upgradeCommand: "npx bb-app@latest",
+      upgradeCommand: "npx omnyo-app@latest",
     },
     desktopInfo: null,
+    desktopApi: null,
+    isDesktop: false,
     appUpdateAvailable: false,
     desktopUpdateReady: false,
     machines: [
       makeMachine({
         host: makeHost({ id: "host_primary", name: "workstation" }),
-        isPrimary: true,
       }),
     ],
-    pluginAttentionCount: 0,
-    actionableCount: 0,
-    hasAttention: false,
-    lastCheckedAt: null,
     ...overrides,
   };
 }
 
-function renderSection({
-  showChangelogPreview = false,
-}: { showChangelogPreview?: boolean } = {}): void {
+function machineDetailIsClosed(row: Element): boolean {
+  const detail = row.querySelector("[data-updates-machine-detail]");
+
+  return (
+    detail === null ||
+    (detail.hasAttribute("hidden") && detail.childElementCount === 0)
+  );
+}
+
+function renderSection(): void {
   render(
     <MemoryRouter>
       <TooltipProvider>
@@ -292,15 +330,15 @@ function renderSection({
             new QueryClient({ defaultOptions: { queries: { retry: false } } })
           }
         >
-          <UpdatesSettingsSection showChangelogPreview={showChangelogPreview} />
+          <UpdatesSettingsSection />
         </QueryClientProvider>
       </TooltipProvider>
     </MemoryRouter>,
   );
 }
 
-const useUpdateInventoryMock = vi.mocked(useUpdateInventory);
 const useDesktopUpdateInfoMock = vi.mocked(useDesktopUpdateInfo);
+
 const useProviderCliInstallRunnerMock = vi.mocked(useProviderCliInstallRunner);
 
 function makeAppUpdateStatus(
@@ -317,7 +355,9 @@ function makeAppUpdateStatus(
     },
     blocked: null,
     current: { commit: null, version: "0.0.5" },
+    installsWhenIdle: false,
     lastResult: null,
+    newTurnsPausedForUpdate: false,
     runningThreadCount: 0,
     support: { kind: "supported", mode: "npm" },
     ...overrides,
@@ -339,11 +379,14 @@ function useWebApp(): void {
     installKind: "npm",
     source: "npm",
     updateAvailable: true,
-    upgradeCommand: "npx bb-app@latest",
+    upgradeCommand: "npx omnyo-app@latest",
   });
 }
 
 beforeEach(() => {
+  vi.mocked(sdk.system.config).mockResolvedValue(
+    makeSystemConfig({ primaryHostId: "host_primary" }),
+  );
   hostDaemon.localDaemonHostId = null;
   vi.mocked(sdk.system.appUpdate).mockResolvedValue(
     makeAppUpdateStatus({
@@ -351,14 +394,11 @@ beforeEach(() => {
       support: { kind: "unsupported", reason: "unmanaged" },
     }),
   );
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockRejectedValue(new Error("Changelog unavailable offline")),
-  );
   useProviderCliInstallRunnerMock.mockReturnValue({
     failuresByJobKey: new Map(),
     queuedJobKeys: new Set<string>(),
     runningJobKey: null,
+    runningPhase: null,
     startInstall: startInstallMock,
   });
 });
@@ -374,6 +414,95 @@ afterEach(() => {
 });
 
 describe("UpdatesSettingsSection", () => {
+  it("saves the default-on startup CLI setting and reloads the saved choice", async () => {
+    useWebApp();
+    let config = makeSystemConfig({ primaryHostId: "host_primary" });
+    vi.mocked(sdk.system.config).mockImplementation(async () => config);
+    vi.mocked(sdk.system.updateGeneralSettings).mockImplementation(
+      async (settings) => {
+        config = {
+          ...config,
+          generalSettings: appSettingsSchema.parse({
+            ...config.generalSettings,
+            ...settings,
+          }),
+        };
+
+        return config.generalSettings;
+      },
+    );
+    renderSection();
+
+    const toggle = await screen.findByRole("switch", {
+      name: "Update provider CLIs on startup",
+    });
+
+    await waitFor(() =>
+      expect(toggle.getAttribute("aria-checked")).toBe("true"),
+    );
+    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(sdk.system.updateGeneralSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ autoUpdateProviderClisOnStartup: false }),
+      ),
+    );
+    await waitFor(() =>
+      expect(toggle.getAttribute("aria-checked")).toBe("false"),
+    );
+    cleanup();
+    renderSection();
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("switch", { name: "Update provider CLIs on startup" })
+          .getAttribute("aria-checked"),
+      ).toBe("false"),
+    );
+  });
+
+  it("shows a startup failure on the collapsed machine even when its CLIs are current", () => {
+    useWebApp();
+
+    const machine = makeMachine({
+      host: makeHost({ id: "host_primary", name: "workstation" }),
+    });
+
+    const statuses = machine.providerStatus;
+
+    if (statuses === null || statuses.codex === undefined)
+      throw new Error("Missing fixture provider");
+    statuses.codex = {
+      ...statuses.codex,
+      startupUpdateError: "Automatic CLI update failed.",
+    };
+    useUpdateInventoryMock.mockReturnValue(
+      makeInventory({ machines: [machine] }),
+    );
+    renderSection();
+    expect(screen.getByText("Automatic CLI update failed")).toBeTruthy();
+    expect(screen.queryByText(/Nothing to update/)).toBeNull();
+  });
+
+  it("credits upstream bb and opens its repository externally", () => {
+    useWebApp();
+    renderSection();
+
+    const credit = document.querySelector("[data-upstream-credit]");
+
+    expect(credit?.textContent).toBe(
+      "Omnyo is built on bb, the MIT-licensed open-source project by its original authors.",
+    );
+
+    const link = screen.getByRole("link", { name: "bb" });
+
+    expect(link.getAttribute("href")).toBe("https://github.com/get-bb/bb");
+    fireEvent.click(link);
+    expect(openUrlInExternalBrowserMock).toHaveBeenCalledWith(
+      "https://github.com/get-bb/bb",
+    );
+  });
+
   it("checks for updates once when the view mounts", async () => {
     useDesktopUpdateInfoMock.mockReturnValue({
       desktopApi: null,
@@ -423,72 +552,41 @@ describe("UpdatesSettingsSection", () => {
     const bulkActions = screen.getByRole("toolbar", {
       name: "Bulk update actions",
     });
+
     const updateAll = bulkActions.querySelector(
-      '[aria-label="Update all 2 CLI tools"]',
+      '[aria-label="Update all 2 CLI tools now"]',
     );
+
     expect(updateAll).not.toBeNull();
-    expect(updateAll?.className).toContain("bg-foreground");
-    expect(updateAll?.className).toContain("text-background");
-    expect(updateAll?.textContent).toBe("Update all");
+    expect(updateAll?.className).toContain("bg-control-primary");
+    expect(updateAll?.className).toContain("text-control-primary-foreground");
+    expect(updateAll?.textContent).toBe("Update all now");
     expect(updateAll?.firstElementChild?.getAttribute("data-icon")).toBe(
       "Download",
     );
+
     const fleetSection = screen
       .getByRole("heading", { name: "Provider CLIs" })
       .closest("section");
+
     const fleetHeader = fleetSection?.firstElementChild;
     const fleetBody = fleetSection?.children.item(1);
     const machineRows = document.querySelectorAll("[data-updates-machine]");
     expect(machineRows).toHaveLength(2);
     expect(fleetHeader?.contains(bulkActions)).toBe(true);
+
     for (const row of machineRows) {
       expect(fleetBody?.contains(row)).toBe(true);
       expect(row.contains(bulkActions)).toBe(false);
     }
+
     expect(screen.queryByRole("heading", { name: "workstation" })).toBeNull();
     expect(
       screen.queryByRole("heading", { name: "Machine updates" }),
     ).toBeNull();
   });
 
-  it("keeps the changelog preview behind its experiment", () => {
-    useDesktopUpdateInfoMock.mockReturnValue({
-      desktopApi: null,
-      desktopInfo: null,
-      isDesktop: false,
-    });
-    useUpdateInventoryMock.mockReturnValue(makeInventory({}));
-
-    renderSection();
-
-    expect(
-      document.querySelector('[data-updates-domain="changelog"]'),
-    ).toBeNull();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
   it("keeps a recently checked healthy fleet quiet and accessible", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(() =>
-        Promise.resolve(
-          new Response(`# Changelog
-
-## 9.9.9
-
-The canonical release summary.
-
-### New features
-
-- One current feature.
-
-### Fixes
-
-- One current fix.
-`),
-        ),
-      ),
-    );
     useDesktopUpdateInfoMock.mockReturnValue({
       desktopApi: null,
       desktopInfo: null,
@@ -496,11 +594,9 @@ The canonical release summary.
     });
     useUpdateInventoryMock.mockReturnValue(
       makeInventory({
-        lastCheckedAt: Date.now() - 2 * 60 * 1000,
         machines: [
           makeMachine({
             host: makeHost({ id: "host_1", name: "workstation" }),
-            isPrimary: true,
           }),
           makeMachine({
             host: makeHost({ id: "host_2", name: "studio-mac" }),
@@ -509,7 +605,7 @@ The canonical release summary.
       }),
     );
 
-    renderSection({ showChangelogPreview: true });
+    renderSection();
 
     await waitFor(() => {
       expect(
@@ -532,151 +628,6 @@ The canonical release summary.
     expect(screen.queryByText("workstation, studio-mac")).toBeNull();
     expect(screen.queryByRole("button", { name: /check/i })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Updates" })).toBeNull();
-    expect(
-      screen.getByRole("button", { name: /^Open the full bb .* changelog$/ }),
-    ).toBeDefined();
-    const changelog = document.querySelector(
-      '[data-updates-domain="changelog"]',
-    );
-    await waitFor(() => {
-      expect(changelog?.textContent).toContain("9.9.9");
-    });
-    expect(
-      within(changelog as HTMLElement).getByRole("heading", {
-        level: 2,
-        name: "What's new",
-      }),
-    ).toBeDefined();
-    expect(
-      within(changelog as HTMLElement).getByRole("heading", {
-        level: 3,
-        name: "9.9.9",
-      }),
-    ).toBeDefined();
-    expect(changelog?.textContent).toContain("The canonical release summary.");
-    expect(
-      changelog?.querySelector('[data-changelog-version="9.9.9"]'),
-    ).toBeNull();
-    const changelogLabel = changelog?.querySelector("[data-changelog-label]");
-    expect(changelogLabel?.className).toContain("rounded-sm");
-    expect(changelogLabel?.className).not.toContain("rounded-full");
-    expect(changelogLabel?.className).toContain("bg-muted/40");
-    const changelogPreview = changelog?.querySelector(
-      "[data-changelog-preview]",
-    );
-    expect(changelogPreview?.className).toContain("p-4");
-    expect(changelogPreview?.className).not.toContain("grid");
-    expect(
-      changelog?.querySelector("[data-changelog-release-scroll]")?.className,
-    ).toContain("max-h-56");
-    expect(
-      changelog?.querySelector("[data-changelog-footer]")?.className,
-    ).toContain("border-t");
-    expect(
-      changelog?.querySelector("[data-changelog-footer]")?.className,
-    ).toContain("bg-foreground");
-    expect(
-      changelog?.querySelector("[data-changelog-footer]")?.className,
-    ).toContain("text-background");
-    expect(changelog?.textContent).toContain("Full changelog");
-    expect(
-      screen.getByRole("button", {
-        name: "Open the full bb 9.9.9 changelog",
-      }).className,
-    ).toContain("font-semibold");
-    for (const highlight of ["New features", "Fixes"]) {
-      expect(
-        within(changelog as HTMLElement).getByRole("heading", {
-          level: 4,
-          name: highlight,
-        }),
-      ).toBeDefined();
-    }
-    expect(changelog?.textContent).toContain("One current feature.");
-    expect(changelog?.textContent).toContain("One current fix.");
-    const dismissChangelog = screen.getByRole("button", {
-      name: "Dismiss bb 9.9.9 changelog preview",
-    });
-    const changelogHeader = changelog?.querySelector("[data-changelog-header]");
-    const changelogCard = changelogHeader?.closest("section");
-    expect(changelogPreview?.firstElementChild).toBe(changelogHeader);
-    expect(changelogHeader?.className).not.toContain("border-b");
-    expect(changelogHeader?.contains(dismissChangelog)).toBe(true);
-    expect(changelogCard?.contains(changelogPreview ?? null)).toBe(true);
-    expect(dismissChangelog.querySelector('[data-icon="X"]')).not.toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Open the full bb 9.9.9 changelog",
-      }),
-    );
-    expect(openUrlInExternalBrowserMock).toHaveBeenCalledWith(
-      "https://getbb.app/changelog#9-9-9",
-    );
-    vi.useFakeTimers();
-    fireEvent.click(dismissChangelog);
-    expect(screen.getByRole("status").textContent).toContain(
-      "You're all caught up",
-    );
-    expect(
-      screen.queryByRole("button", {
-        name: "Open the full bb 9.9.9 changelog",
-      }),
-    ).toBeNull();
-    expect(changelog?.getAttribute("data-changelog-dismiss-phase")).toBe(
-      "confirming",
-    );
-    expect(
-      changelog?.querySelector("[data-changelog-release-panel]")?.className,
-    ).toContain("grid-rows-[0fr]");
-    const confirmation = changelog?.querySelector(
-      "[data-changelog-dismiss-confirmation]",
-    );
-    expect(confirmation?.className).toContain("grid-rows-[1fr]");
-    expect(confirmation?.className).not.toContain("absolute");
-    expect(changelog?.className).toContain("motion-reduce:transition-none");
-    expect(
-      window.localStorage.getItem(
-        "bb.settings.updates.dismissed-changelog-version",
-      ),
-    ).toBe("9.9.9");
-
-    act(() => vi.advanceTimersByTime(1_999));
-    expect(changelog?.getAttribute("data-changelog-dismiss-phase")).toBe(
-      "confirming",
-    );
-    act(() => vi.advanceTimersByTime(1));
-    expect(changelog?.getAttribute("data-changelog-dismiss-phase")).toBe(
-      "exiting",
-    );
-    expect(changelog?.className).toContain("grid-rows-[0fr]");
-    act(() => vi.advanceTimersByTime(180));
-    expect(
-      document.querySelector('[data-updates-domain="changelog"]'),
-    ).toBeNull();
-    vi.useRealTimers();
-
-    cleanup();
-    renderSection({ showChangelogPreview: true });
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledTimes(2);
-    });
-    expect(
-      document.querySelector('[data-updates-domain="changelog"]'),
-    ).toBeNull();
-
-    cleanup();
-    window.localStorage.setItem(
-      "bb.settings.updates.dismissed-changelog-version",
-      "9.9.8",
-    );
-    renderSection({ showChangelogPreview: true });
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", {
-          name: "Dismiss bb 9.9.9 changelog preview",
-        }),
-      ).toBeDefined();
-    });
 
     const settledRows = screen.getAllByText(/^Up to date/);
     expect(
@@ -708,17 +659,18 @@ The canonical release summary.
       desktopInfo: null,
       isDesktop: false,
     });
+
     const machine = makeMachine({
       host: makeHost({ id: "host_1", name: "workstation" }),
-      isPrimary: true,
     });
+
     const codex = machine.providerStatus!.codex;
     machine.providerStatus!.codex = { ...codex, latestVersion: null };
     useUpdateInventoryMock.mockReturnValue(
-      makeInventory({ lastCheckedAt: Date.now(), machines: [machine] }),
+      makeInventory({ machines: [machine] }),
     );
 
-    renderSection({});
+    renderSection();
 
     expect(screen.getByText("Nothing to update on workstation.")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Show machines" }));
@@ -757,14 +709,16 @@ The canonical release summary.
     expect(screen.queryByText(/all in sync/)).toBeNull();
     expect(document.querySelector("[data-updates-machine]")).toBeNull();
     expect(
-      document.querySelector('[data-bb-update-role="app"]'),
+      document.querySelector('[data-omnyo-update-role="app"]'),
     ).not.toBeNull();
     expect(screen.getByText("Server")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Show machines" }));
+
     const row = document.querySelector<HTMLElement>(
       '[data-updates-machine="host_1"]',
     );
+
     expect(row).not.toBeNull();
     expect(within(row as HTMLElement).getByText("Offline")).toBeDefined();
     expect(
@@ -781,6 +735,7 @@ The canonical release summary.
       desktopInfo: null,
       isDesktop: false,
     });
+
     const stalledHost = makeHost({
       id: "host_3",
       name: "homelab",
@@ -788,6 +743,7 @@ The canonical release summary.
       lastRejectedProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION - 1,
       updatedAt: Date.now() - 3 * 60 * 1000,
     });
+
     useUpdateInventoryMock.mockReturnValue(
       makeInventory({
         machines: [
@@ -842,12 +798,14 @@ The canonical release summary.
       desktopInfo: null,
       isDesktop: false,
     });
+
     const host = makeHost({
       id: "host_1",
       name: "homelab",
       status: "disconnected",
       lastRejectedProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION - 1,
     });
+
     useUpdateInventoryMock.mockReturnValue(
       makeInventory({
         machines: [
@@ -864,9 +822,12 @@ The canonical release summary.
     const row = document.querySelector<HTMLElement>(
       '[data-updates-machine="host_1"]',
     );
+
     expect(row).not.toBeNull();
     expect(within(row as HTMLElement).getByText("homelab")).toBeDefined();
-    expect(within(row as HTMLElement).getByText("Updating bb")).toBeDefined();
+    expect(
+      within(row as HTMLElement).getByText("Updating Omnyo"),
+    ).toBeDefined();
     expect(
       row?.querySelector('[data-update-state="in-progress"]'),
     ).not.toBeNull();
@@ -881,6 +842,7 @@ The canonical release summary.
       desktopInfo: null,
       isDesktop: false,
     });
+
     const host = makeHost({
       id: "host_1",
       name: "homelab",
@@ -888,6 +850,7 @@ The canonical release summary.
       lastRejectedProtocolVersion: HOST_DAEMON_PROTOCOL_VERSION - 1,
       updatedAt: Date.now() - 3 * 60 * 1000,
     });
+
     useUpdateInventoryMock.mockReturnValue(
       makeInventory({
         machines: [
@@ -935,7 +898,7 @@ The canonical release summary.
     );
   });
 
-  it("names a machine running a newer bb than the server", () => {
+  it("names a machine running a newer Omnyo than the server", () => {
     useDesktopUpdateInfoMock.mockReturnValue({
       desktopApi: null,
       desktopInfo: null,
@@ -965,12 +928,13 @@ The canonical release summary.
     ).toBeNull();
   });
 
-  it("sweeps every machine stalled on the same bb update", () => {
+  it("sweeps every machine stalled on the same Omnyo update", () => {
     useDesktopUpdateInfoMock.mockReturnValue({
       desktopApi: null,
       desktopInfo: null,
       isDesktop: false,
     });
+
     const stalled = ["workstation", "studio-mac", "homelab"].map(
       (name, index) =>
         makeHost({
@@ -981,6 +945,7 @@ The canonical release summary.
           updatedAt: Date.now() - 3 * 60 * 1000,
         }),
     );
+
     useUpdateInventoryMock.mockReturnValue(
       makeInventory({
         machines: stalled.map((host) =>
@@ -998,9 +963,11 @@ The canonical release summary.
       }),
     );
     expect(retryHostUpdateMutateMock).toHaveBeenCalledTimes(3);
+
     for (const host of stalled) {
       expect(retryHostUpdateMutateMock).toHaveBeenCalledWith(host.id);
     }
+
     expect(
       screen.getByRole("button", {
         name: "Failed · Retry on studio-mac now",
@@ -1018,9 +985,7 @@ The canonical release summary.
     const codexIssue = makeUpdateIssue({ provider: "codex" });
     useUpdateInventoryMock.mockReturnValue(
       makeInventory({
-        machines: [
-          makeMachine({ host, issues: [codexIssue], isPrimary: true }),
-        ],
+        machines: [makeMachine({ host, issues: [codexIssue] })],
       }),
     );
 
@@ -1029,6 +994,7 @@ The canonical release summary.
     const row = document.querySelector<HTMLElement>(
       '[data-updates-machine="host_1"]',
     );
+
     if (row === null) throw new Error("expected the machine row");
     expect(screen.getAllByText("workstation")).toHaveLength(1);
     expect(row.querySelector('[data-icon="Laptop"]')).not.toBeNull();
@@ -1037,7 +1003,7 @@ The canonical release summary.
         avatar.getAttribute("data-provider-avatar"),
       ),
     ).toEqual(["codex"]);
-    expect(row.querySelector("[data-updates-machine-detail]")).toBeNull();
+    expect(machineDetailIsClosed(row)).toBe(true);
     expect(screen.queryByText("Codex")).toBeNull();
     expect(screen.queryByText(/^Update available/)).toBeNull();
     expect(
@@ -1048,9 +1014,11 @@ The canonical release summary.
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
     const detail = row.querySelector<HTMLElement>(
       "[data-updates-machine-detail]",
     );
+
     if (detail === null) throw new Error("expected the expanded detail");
     expect(toggle.getAttribute("aria-controls")).toBe(detail.id);
 
@@ -1086,7 +1054,9 @@ The canonical release summary.
       claudeRow?.querySelector("[data-version-metadata]")?.textContent,
     ).toBe("1.0.0");
 
-    fireEvent.click(screen.getByRole("button", { name: "Update workstation" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Update workstation now" }),
+    );
     expect(startInstallMock).toHaveBeenCalledTimes(1);
     expect(startInstallMock).toHaveBeenCalledWith({
       hostId: "host_1",
@@ -1094,7 +1064,7 @@ The canonical release summary.
     });
 
     fireEvent.click(toggle);
-    expect(row.querySelector("[data-updates-machine-detail]")).toBeNull();
+    expect(machineDetailIsClosed(row)).toBe(true);
   });
 
   it("names the updater from the command the machine reports", () => {
@@ -1104,18 +1074,21 @@ The canonical release summary.
       isDesktop: false,
     });
     const host = makeHost({ id: "host_1", name: "workstation" });
+
     const withCommand = (
       provider: "codex" | "claude-code",
       command: string,
     ): ProviderCliActionableIssue => {
       const issue = makeUpdateIssue({ provider });
       const action = { ...issue.action, command };
+
       return {
         ...issue,
         action,
         status: { ...issue.status, installAction: action },
       };
     };
+
     useUpdateInventoryMock.mockReturnValue(
       makeInventory({
         machines: [
@@ -1158,7 +1131,6 @@ The canonical release summary.
           makeMachine({
             host: primary,
             issues: [makeUpdateIssue({ provider: "codex" })],
-            isPrimary: true,
           }),
           makeMachine({
             host: local,
@@ -1173,9 +1145,11 @@ The canonical release summary.
     const primaryHeading = document.querySelector<HTMLElement>(
       '[data-updates-machine="host_primary"]',
     )!;
+
     const localHeading = document.querySelector<HTMLElement>(
       '[data-updates-machine="host_local"]',
     )!;
+
     await waitFor(() => {
       expect(
         within(primaryHeading)
@@ -1202,7 +1176,6 @@ The canonical release summary.
           makeMachine({
             host: primary,
             issues: [makeUpdateIssue({ provider: "codex" })],
-            isPrimary: true,
           }),
         ],
       }),
@@ -1213,6 +1186,7 @@ The canonical release summary.
     const primaryHeading = document.querySelector<HTMLElement>(
       '[data-updates-machine="host_primary"]',
     )!;
+
     await waitFor(() => {
       expect(
         within(primaryHeading)
@@ -1246,7 +1220,9 @@ The canonical release summary.
     expect(
       document.querySelector('[data-provider-row="acp-cursor"]')?.textContent,
     ).toContain("Cursor");
-    fireEvent.click(screen.getByRole("button", { name: "Update workstation" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Update workstation now" }),
+    );
     expect(startInstallMock).toHaveBeenCalledWith({
       hostId: "host_1",
       issue: cursorIssue,
@@ -1354,9 +1330,11 @@ The canonical release summary.
     expect(screen.getByText("Couldn't check for updates").className).toContain(
       "text-destructive",
     );
+
     const retry = screen.getByRole("button", {
       name: /Check workstation's CLIs again/,
     });
+
     expect(retry.className).not.toContain("text-destructive");
     expect(retry.hasAttribute("disabled")).toBe(false);
   });
@@ -1420,6 +1398,7 @@ The canonical release summary.
       failuresByJobKey: new Map(),
       queuedJobKeys: new Set(["host_1:claude-code"]),
       runningJobKey: "host_1:codex",
+      runningPhase: "pausing",
       startInstall: startInstallMock,
     });
 
@@ -1427,7 +1406,7 @@ The canonical release summary.
 
     expect(screen.queryByRole("button", { name: /Update all/ })).toBeNull();
     expect(document.querySelector("[data-updates-progress]")?.textContent).toBe(
-      "Updating 1 of 2",
+      "Pausing chats 1 of 2",
     );
     expect(
       document
@@ -1447,7 +1426,7 @@ The canonical release summary.
       ).length,
     ).toBe(2);
     expect(
-      screen.queryByRole("button", { name: "Update workstation" }),
+      screen.queryByRole("button", { name: "Update workstation now" }),
     ).toBeNull();
   });
 
@@ -1472,13 +1451,17 @@ The canonical release summary.
         ],
       }),
     );
+
     const runner = (runningJobKey: string | null, queued: string[]) => ({
       failuresByJobKey: new Map(),
       queuedJobKeys: new Set(queued),
       runningJobKey,
+      runningPhase: null,
       startInstall: startInstallMock,
     });
+
     const queryClient = new QueryClient();
+
     const tree = () => (
       <MemoryRouter>
         <TooltipProvider>
@@ -1488,6 +1471,7 @@ The canonical release summary.
         </TooltipProvider>
       </MemoryRouter>
     );
+
     const progress = () =>
       document.querySelector("[data-updates-progress]")?.textContent ?? null;
 
@@ -1513,7 +1497,7 @@ The canonical release summary.
     view.rerender(tree());
     expect(progress()).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Update all 3 CLI tools" }),
+      screen.getByRole("button", { name: "Update all 3 CLI tools now" }),
     ).toBeDefined();
   });
 
@@ -1525,12 +1509,14 @@ The canonical release summary.
     });
     const host = makeHost({ id: "host_1", name: "workstation" });
     const issue = makeUpdateIssue({ provider: "claude-code" });
+
     const logDialogState = {
       displayName: "Claude Code",
       log: "$ claude update\npermission denied\n",
       message: "Command exited with code 1",
       title: "Claude Code update log",
     };
+
     useUpdateInventoryMock.mockReturnValue(
       makeInventory({
         machines: [makeMachine({ host, issues: [issue] })],
@@ -1549,6 +1535,7 @@ The canonical release summary.
       ]),
       queuedJobKeys: new Set(),
       runningJobKey: null,
+      runningPhase: null,
       startInstall: startInstallMock,
     });
 
@@ -1593,6 +1580,7 @@ The canonical release summary.
       desktopInfo: null,
       isDesktop: false,
     });
+
     const availableVersion = {
       currentVersion: "0.0.5",
       latestVersion: "0.0.6",
@@ -1601,27 +1589,32 @@ The canonical release summary.
       source: "npm" as const,
       updateAvailable: true,
       isDevelopment: false,
-      upgradeCommand: "npx bb-app@latest",
+      upgradeCommand: "npx omnyo-app@latest",
     };
+
     useUpdateInventoryMock.mockReturnValue(
       makeInventory({
         systemVersion: availableVersion,
         appUpdateAvailable: true,
-        actionableCount: 1,
-        hasAttention: true,
       }),
     );
     vi.mocked(sdk.system.version).mockResolvedValue(availableVersion);
 
     renderSection();
-    expect(screen.getByText("npx bb-app@latest")).toBeDefined();
+    expect(screen.getByText("npx omnyo-app@latest")).toBeDefined();
     expect(screen.getByText("0.0.6")).toBeDefined();
+
     const copyButton = screen.getByRole("button", {
       name: "Update available · Copy the upgrade command",
     });
+
     expect(copyButton.textContent).toBe("");
     expect(copyButton.className).not.toContain("bg-secondary");
-    const updateSurface = document.querySelector('[data-updates-domain="bb"]');
+
+    const updateSurface = document.querySelector(
+      '[data-updates-domain="omnyo"]',
+    );
+
     expect(updateSurface?.querySelector(".bg-card")).not.toBeNull();
     expect(updateSurface?.querySelector(".divide-y")).not.toBeNull();
     expect(
@@ -1634,8 +1627,50 @@ The canonical release summary.
     });
   });
 
+  it("shows private server release ownership without reporting an npm failure", async () => {
+    useWebApp();
+    useUpdateInventoryMock.mockReturnValue(
+      makeInventory({
+        systemVersion: {
+          currentVersion: "0.46.3+private.1",
+          currentCommit: null,
+          installKind: "npm",
+          source: "private",
+          latestVersion: null,
+          updateAvailable: false,
+          isDevelopment: false,
+          upgradeCommand: "Use the verified private release installer",
+        },
+      }),
+    );
+
+    renderSection();
+
+    expect(await screen.findByText("Private release")).toBeDefined();
+    expect(
+      screen.getByText("Use the verified private release installer"),
+    ).toBeDefined();
+
+    const updateSurface = document.querySelector(
+      '[data-updates-domain="omnyo"]',
+    );
+
+    if (!(updateSurface instanceof HTMLElement)) {
+      throw new Error("Omnyo update section is missing");
+    }
+
+    const server = within(updateSurface);
+    expect(
+      server.queryByText("Couldn't check npm for a newer release."),
+    ).toBeNull();
+    expect(server.queryByText("Up to date")).toBeNull();
+    expect(
+      server.queryByRole("button", { name: /Retry the release check/ }),
+    ).toBeNull();
+  });
+
   it("checks for desktop updates through the desktop bridge", async () => {
-    const desktopInfo: BbDesktopInfo = {
+    const desktopInfo: OmnyoDesktopInfo = {
       downloadState: "downloaded",
       lastCheckedAt: null,
       latestVersion: "0.0.6",
@@ -1645,10 +1680,14 @@ The canonical release summary.
       updateDownloaded: true,
       version: "0.0.5",
     };
+
     const checkForUpdates = vi.fn().mockResolvedValue(desktopInfo);
     const installUpdate = vi.fn().mockResolvedValue(undefined);
     useDesktopUpdateInfoMock.mockReturnValue({
-      desktopApi: { checkForUpdates, installUpdate } as unknown as BbDesktopApi,
+      desktopApi: {
+        checkForUpdates,
+        installUpdate,
+      } as unknown as OmnyoDesktopApi,
       desktopInfo,
       isDesktop: true,
     });
@@ -1656,16 +1695,18 @@ The canonical release summary.
       makeInventory({
         desktopInfo,
         desktopUpdateReady: true,
-        actionableCount: 1,
-        hasAttention: true,
       }),
     );
 
     renderSection();
+
     const relaunch = screen.getByRole("button", {
-      name: /Relaunch bb to finish updating/,
+      name: /Relaunch Omnyo to finish updating/,
     });
-    expect(relaunch.querySelector("img")?.className).toContain("size-3");
+
+    expect(relaunch.querySelector("img")?.parentElement?.className).toContain(
+      "size-3",
+    );
     expect(relaunch.className).toContain("border");
     fireEvent.click(relaunch);
     expect(installUpdate).toHaveBeenCalledOnce();
@@ -1677,7 +1718,7 @@ The canonical release summary.
   });
 
   it("explains an unknown desktop release and retries through the desktop bridge", async () => {
-    const desktopInfo: BbDesktopInfo = {
+    const desktopInfo: OmnyoDesktopInfo = {
       downloadState: "idle",
       lastCheckedAt: "2026-07-19T00:00:00.000Z",
       latestVersion: null,
@@ -1687,9 +1728,10 @@ The canonical release summary.
       updateDownloaded: false,
       version: "0.0.5",
     };
+
     const checkForUpdates = vi.fn().mockResolvedValue(desktopInfo);
     useDesktopUpdateInfoMock.mockReturnValue({
-      desktopApi: { checkForUpdates } as unknown as BbDesktopApi,
+      desktopApi: { checkForUpdates } as unknown as OmnyoDesktopApi,
       desktopInfo,
       isDesktop: true,
     });
@@ -1746,7 +1788,7 @@ The canonical release summary.
   });
 
   it("does not claim a legacy desktop shell is downloading an available update", () => {
-    const desktopInfo: BbDesktopInfo = {
+    const desktopInfo: OmnyoDesktopInfo = {
       lastCheckedAt: null,
       latestVersion: "0.0.6",
       pendingVersion: null,
@@ -1755,8 +1797,9 @@ The canonical release summary.
       updateDownloaded: false,
       version: "0.0.5",
     };
+
     useDesktopUpdateInfoMock.mockReturnValue({
-      desktopApi: {} as BbDesktopApi,
+      desktopApi: {} as OmnyoDesktopApi,
       desktopInfo,
       isDesktop: true,
     });
@@ -1769,7 +1812,7 @@ The canonical release summary.
   });
 
   it("retries a failed desktop download through the desktop bridge", async () => {
-    const desktopInfo: BbDesktopInfo = {
+    const desktopInfo: OmnyoDesktopInfo = {
       downloadState: "failed",
       lastCheckedAt: null,
       latestVersion: "0.0.6",
@@ -1779,9 +1822,10 @@ The canonical release summary.
       updateDownloaded: false,
       version: "0.0.5",
     };
+
     const checkForUpdates = vi.fn().mockResolvedValue(desktopInfo);
     useDesktopUpdateInfoMock.mockReturnValue({
-      desktopApi: { checkForUpdates } as unknown as BbDesktopApi,
+      desktopApi: { checkForUpdates } as unknown as OmnyoDesktopApi,
       desktopInfo,
       isDesktop: true,
     });
@@ -1816,8 +1860,6 @@ The canonical release summary.
           makeMachine({ host: laptop, issues: [laptopIssue] }),
           makeMachine({ host: homelab, issues: [homelabIssue] }),
         ],
-        actionableCount: 2,
-        hasAttention: true,
       }),
     );
 
@@ -1825,10 +1867,12 @@ The canonical release summary.
     expect(useProviderCliInstallRunnerMock).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "laptop" })).toBeDefined();
     expect(screen.getByRole("button", { name: "homelab" })).toBeDefined();
+
     const updateAll = screen.getByRole("button", {
-      name: "Update all 2 CLI tools",
+      name: "Update all 2 CLI tools now",
     });
-    expect(updateAll.textContent).toBe("Update all");
+
+    expect(updateAll.textContent).toBe("Update all now");
     expect(updateAll.firstElementChild?.getAttribute("data-icon")).toBe(
       "Download",
     );
@@ -1856,14 +1900,12 @@ The canonical release summary.
     useUpdateInventoryMock.mockReturnValue(
       makeInventory({
         machines: [makeMachine({ host, issues: [issue] })],
-        actionableCount: 1,
-        hasAttention: true,
       }),
     );
 
     renderSection();
 
-    expect(screen.getByText("1 manual")).toBeDefined();
+    expect(screen.getByText("1 CLI to update in terminal")).toBeDefined();
     expect(
       document
         .querySelector('[data-provider-avatar="claude-code"]')
@@ -1876,7 +1918,7 @@ The canonical release summary.
       document.querySelector('[data-provider-row="claude-code"]')?.textContent,
     ).toContain("Update in terminal");
     expect(
-      screen.queryByRole("button", { name: "Update workstation" }),
+      screen.queryByRole("button", { name: "Update workstation now" }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
   });
@@ -1896,7 +1938,7 @@ The canonical release summary.
     expect(screen.getByText("No machines available.")).toBeDefined();
   });
 
-  it("updates bb from the app when the launcher supports it", async () => {
+  it("updates Omnyo from the app when the launcher supports it", async () => {
     useWebApp();
     vi.mocked(sdk.system.appUpdate).mockResolvedValue(makeAppUpdateStatus());
     vi.mocked(sdk.system.applyAppUpdate).mockResolvedValue(
@@ -1905,7 +1947,7 @@ The canonical release summary.
           output: [],
           phase: "preparing",
           startedAt: "2026-09-23T00:00:00.000Z",
-          step: "Downloading bb-app 0.0.6",
+          step: "Downloading omnyo-app 0.0.6",
           targetVersion: "0.0.6",
         },
       }),
@@ -1914,7 +1956,7 @@ The canonical release summary.
     renderSection();
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "Update available · Download the update and restart bb",
+        name: "Update available · Download the update and restart Omnyo",
       }),
     );
 
@@ -1923,7 +1965,9 @@ The canonical release summary.
         confirmInterruptingThreads: false,
       });
     });
-    expect(await screen.findByText("Downloading bb-app 0.0.6")).toBeDefined();
+    expect(
+      await screen.findByText("Downloading omnyo-app 0.0.6"),
+    ).toBeDefined();
     expect(sdk.system.appUpdate).toHaveBeenCalledWith({ force: true });
   });
 
@@ -1939,7 +1983,7 @@ The canonical release summary.
     renderSection();
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "Update available · Download the update and restart bb",
+        name: "Update available · Download the update and restart Omnyo",
       }),
     );
 
@@ -1962,7 +2006,7 @@ The canonical release summary.
     vi.mocked(sdk.system.appUpdate).mockResolvedValue(makeAppUpdateStatus());
     vi.mocked(sdk.system.applyAppUpdate)
       .mockRejectedValueOnce(
-        new BbHttpError({
+        new OmnyoHttpError({
           body: {
             code: "threads_running",
             details: { runningThreadCount: 1 },
@@ -1978,7 +2022,7 @@ The canonical release summary.
     renderSection();
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "Update available · Download the update and restart bb",
+        name: "Update available · Download the update and restart Omnyo",
       }),
     );
 
@@ -1992,6 +2036,121 @@ The canonical release summary.
       expect(sdk.system.applyAppUpdate).toHaveBeenLastCalledWith({
         confirmInterruptingThreads: true,
       });
+    });
+  });
+
+  function makePrivateUpdateStatus(
+    overrides: Partial<SystemAppUpdateStatus> = {},
+  ): SystemAppUpdateStatus {
+    return makeAppUpdateStatus({
+      available: {
+        channel: "private",
+        commit: "b".repeat(40),
+        commitCount: null,
+        subjects: [],
+        version: "0.46.20+private.1",
+      },
+      current: { commit: null, version: "0.46.19+private.1" },
+      support: { kind: "supported", mode: "private" },
+      ...overrides,
+    });
+  }
+
+  const waitingForThreads = {
+    phase: "draining" as const,
+    startedAt: "2026-10-18T10:00:00.000Z",
+    stopsRunningChatsAt: "2026-10-18T10:10:00.000Z",
+    targetVersion: "0.46.20+private.1",
+  };
+
+  const stopsAt = () =>
+    formatScheduledTime({
+      timestamp: Date.parse(waitingForThreads.stopsRunningChatsAt),
+      now: Date.now(),
+    });
+
+  it("installs a private server update once running chats finish without interrupting them", async () => {
+    useWebApp();
+    vi.mocked(sdk.system.appUpdate).mockResolvedValue(
+      makePrivateUpdateStatus({ runningThreadCount: 2 }),
+    );
+    vi.mocked(sdk.system.applyAppUpdate).mockResolvedValue(
+      makePrivateUpdateStatus({
+        activity: waitingForThreads,
+        runningThreadCount: 2,
+      }),
+    );
+
+    renderSection();
+    expect(await screen.findByText("0.46.20+private.1")).toBeDefined();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Update available · Download the update and restart Omnyo",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(sdk.system.applyAppUpdate).toHaveBeenCalledWith({
+        confirmInterruptingThreads: false,
+      });
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      await screen.findByText(
+        `Installs once 2 running chats finish, or at ${stopsAt()}`,
+      ),
+    ).toBeDefined();
+  });
+
+  it("updates a waiting private update now, resuming chats, or cancels it", async () => {
+    useWebApp();
+    vi.mocked(sdk.system.appUpdate).mockResolvedValue(
+      makePrivateUpdateStatus({
+        activity: waitingForThreads,
+        runningThreadCount: 1,
+      }),
+    );
+    vi.mocked(sdk.system.applyAppUpdate).mockResolvedValue(
+      makePrivateUpdateStatus({
+        activity: waitingForThreads,
+        runningThreadCount: 1,
+      }),
+    );
+    vi.mocked(sdk.system.cancelAppUpdate).mockResolvedValue(
+      makePrivateUpdateStatus(),
+    );
+
+    renderSection();
+    expect(
+      await screen.findByText(
+        `Installs once 1 running chat finishes, or at ${stopsAt()}`,
+      ),
+    ).toBeDefined();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Stop running chats, update Omnyo now and resume them/,
+      }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(
+        "1 running chat pauses now and resumes automatically after Omnyo updates.",
+      ),
+    ).toBeDefined();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Update and restart" }),
+    );
+    await waitFor(() => {
+      expect(sdk.system.applyAppUpdate).toHaveBeenCalledWith({
+        confirmInterruptingThreads: true,
+      });
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Cancel the update/ }),
+    );
+    await waitFor(() => {
+      expect(sdk.system.cancelAppUpdate).toHaveBeenCalled();
     });
   });
 
@@ -2016,14 +2175,16 @@ The canonical release summary.
           latestVersion: null,
           updateAvailable: false,
           isDevelopment: false,
-          upgradeCommand: "npx bb-app@latest",
+          upgradeCommand: "npx omnyo-app@latest",
         },
       }),
     );
     renderSection();
+
     const retry = await screen.findByRole("button", {
       name: "Latest unknown · Retry the release check",
     });
+
     expect(
       screen.getByText("Couldn't check npm for a newer release."),
     ).toBeDefined();
@@ -2082,33 +2243,138 @@ The canonical release summary.
     ).toBeDefined();
   });
 
-  it("keeps a failed update on the row with its details and a retry", async () => {
+  it.each(["failed", "cancelled"] as const)(
+    "renders the appropriate update controls for a %s result",
+    async (outcome) => {
+      useWebApp();
+      vi.mocked(sdk.system.appUpdate).mockResolvedValue(
+        makeAppUpdateStatus({
+          lastResult: {
+            acknowledged: false,
+            finishedAt: "2026-09-23T00:00:00.000Z",
+            from: { commit: null, version: "0.0.5" },
+            id: "update-1",
+            logTail: ["npm error code E404"],
+            message:
+              outcome === "cancelled"
+                ? "The update was cancelled."
+                : "npm install failed",
+            outcome,
+            phase: outcome === "cancelled" ? null : "install",
+            to: { commit: null, version: "0.0.6" },
+          },
+        }),
+      );
+
+      renderSection();
+
+      if (outcome === "cancelled") {
+        expect(
+          await screen.findByRole("button", {
+            name: "Update available · Download the update and restart Omnyo",
+          }),
+        ).toBeDefined();
+        expect(screen.queryByText("Last update failed")).toBeNull();
+
+        return;
+      }
+
+      expect(await screen.findByText("Last update failed")).toBeDefined();
+      expect(
+        screen.getByRole("button", { name: "View the failed Omnyo update" }),
+      ).toBeDefined();
+      expect(
+        screen.getByRole("button", {
+          name: "Failed · Download the update and restart Omnyo",
+        }),
+      ).toBeDefined();
+    },
+  );
+
+  it("shows worker blockers and their code while waiting to restart", async () => {
+    useWebApp();
+    vi.mocked(sdk.system.appUpdate).mockResolvedValue(
+      makeAppUpdateStatus({
+        activity: {
+          code: "runtime_update_busy",
+          output: ["The worker is finishing interrupted chat work."],
+          phase: "preparing",
+          startedAt: "2026-11-01T06:20:00.000Z",
+          step: "Waiting for worker",
+          targetVersion: "0.0.6",
+        },
+        newTurnsPausedForUpdate: true,
+      }),
+    );
+    renderSection();
+
+    expect(await screen.findByText("Waiting for worker")).toBeDefined();
+    expect(screen.getByText("runtime_update_busy")).toBeDefined();
+    expect(
+      screen.getByText(/The worker is finishing interrupted chat work/),
+    ).toBeDefined();
+    expect(screen.queryByText("Restarting")).toBeNull();
+  });
+
+  it("shows uncertain handoff recovery details instead of ongoing worker progress", async () => {
+    useWebApp();
+    vi.mocked(sdk.system.appUpdate).mockResolvedValue(
+      makeAppUpdateStatus({
+        activity: {
+          code: "runtime_update_busy",
+          output: ["The worker is finishing interrupted chat work."],
+          phase: "preparing",
+          startedAt: "2026-11-01T06:20:00.000Z",
+          step: "Waiting for worker",
+          targetVersion: "0.0.6",
+        },
+        blocked: {
+          code: "app_update_handoff_uncertain",
+          reason: "update-unreadable",
+          message:
+            "The update handoff is uncertain. Recover this update before starting new work.",
+        },
+        newTurnsPausedForUpdate: true,
+      }),
+    );
+    renderSection();
+
+    expect(await screen.findByText("Update blocked")).toBeDefined();
+    expect(screen.getByText("app_update_handoff_uncertain")).toBeDefined();
+    expect(screen.getByText(/The update handoff is uncertain/)).toBeDefined();
+    expect(screen.queryByText("runtime_update_busy")).toBeNull();
+    expect(
+      document.querySelector('[data-update-state="in-progress"]'),
+    ).toBeNull();
+  });
+
+  it("keeps acknowledged update failures available for inspection and retry", async () => {
     useWebApp();
     vi.mocked(sdk.system.appUpdate).mockResolvedValue(
       makeAppUpdateStatus({
         lastResult: {
-          acknowledged: false,
-          finishedAt: "2026-09-23T00:00:00.000Z",
+          acknowledged: true,
+          errorCode: "runtime_update_busy",
+          finishedAt: "2026-11-01T06:24:56.542Z",
           from: { commit: null, version: "0.0.5" },
           id: "update-1",
-          logTail: ["npm error code E404"],
-          message: "npm install failed",
+          logTail: [],
+          message: "The worker did not finish stopping. Chats resumed.",
           outcome: "failed",
-          phase: "install",
+          phase: "prepare",
           to: { commit: null, version: "0.0.6" },
         },
       }),
     );
-
     renderSection();
 
     expect(await screen.findByText("Last update failed")).toBeDefined();
     expect(
-      screen.getByRole("button", { name: "View the failed bb update" }),
+      screen.getByRole("button", { name: "View the failed Omnyo update" }),
     ).toBeDefined();
     expect(
       screen.getByRole("button", {
-        name: "Failed · Download the update and restart bb",
+        name: "Failed · Download the update and restart Omnyo",
       }),
     ).toBeDefined();
   });
@@ -2135,7 +2401,9 @@ The canonical release summary.
     renderSection();
 
     expect(
-      await screen.findByRole("button", { name: "View the failed bb update" }),
+      await screen.findByRole("button", {
+        name: "View the failed Omnyo update",
+      }),
     ).toBeDefined();
     expect(document.querySelector('[data-update-state="failed"]')).toBeNull();
   });
@@ -2169,7 +2437,6 @@ The canonical release summary.
             {
               ...makeMachine({
                 host: makeHost({ id: "host_primary", name: "workstation" }),
-                isPrimary: true,
               }),
               providerStatus: null,
             },
@@ -2178,7 +2445,7 @@ The canonical release summary.
             currentVersion: "0.0.5",
             source: "npm",
             isDevelopment: false,
-            upgradeCommand: "npx bb-app@latest",
+            upgradeCommand: "npx omnyo-app@latest",
             ...version,
           },
         }),
@@ -2195,11 +2462,13 @@ The canonical release summary.
           name: "Update available · Copy the upgrade command",
         }),
       ).toBeNull();
+
       if (version.installKind === "npm") {
         expect(
           await screen.findByText("Couldn't check npm for a newer release."),
         ).toBeDefined();
       }
+
       if (version.installKind === "source") {
         expect(
           screen.queryByText(
@@ -2231,7 +2500,7 @@ The canonical release summary.
             installKind: "source",
             updateAvailable: false,
             isDevelopment: false,
-            upgradeCommand: "npx bb-app@latest",
+            upgradeCommand: "npx omnyo-app@latest",
           },
         }),
       );
@@ -2263,6 +2532,7 @@ The canonical release summary.
           "The checkout is on feature. Only main can be updated from the app.",
         ),
       ).toBeDefined();
+
       if (incoming)
         expect(screen.getByText("bbbbbbb (+3 commits)")).toBeDefined();
       else expect(screen.queryByText("bbbbbbb (+3 commits)")).toBeNull();
@@ -2273,14 +2543,14 @@ The canonical release summary.
       expect(screen.getByText("Source checkout")).toBeDefined();
       expect(
         screen.queryByRole("button", {
-          name: "Update available · Download the update and restart bb",
+          name: "Update available · Download the update and restart Omnyo",
         }),
       ).toBeNull();
     },
   );
 
   function useDesktopApp(): { checkForUpdates: ReturnType<typeof vi.fn> } {
-    const desktopInfo: BbDesktopInfo = {
+    const desktopInfo: OmnyoDesktopInfo = {
       downloadState: "idle",
       lastCheckedAt: null,
       latestVersion: "0.0.5",
@@ -2290,15 +2560,17 @@ The canonical release summary.
       updateDownloaded: false,
       version: "0.0.5",
     };
+
     const checkForUpdates = vi.fn().mockResolvedValue(desktopInfo);
     useDesktopUpdateInfoMock.mockReturnValue({
       desktopApi: {
         checkForUpdates,
         installUpdate: vi.fn(),
-      } as unknown as BbDesktopApi,
+      } as unknown as OmnyoDesktopApi,
       desktopInfo,
       isDesktop: true,
     });
+
     return { checkForUpdates };
   }
 
@@ -2307,7 +2579,6 @@ The canonical release summary.
       machines: [
         makeMachine({
           host: makeHost({ id: "host_primary", name: "bee" }),
-          isPrimary: true,
         }),
         makeMachine({ host: makeHost({ id: "host_laptop", name: "laptop" }) }),
       ],
@@ -2325,20 +2596,21 @@ The canonical release summary.
 
     renderSection();
 
-    const bbCard = document.querySelector<HTMLElement>(
-      '[data-updates-domain="bb"]',
+    const omnyoCard = document.querySelector<HTMLElement>(
+      '[data-updates-domain="omnyo"]',
     );
-    if (bbCard === null) throw new Error("expected the bb card");
+
+    if (omnyoCard === null) throw new Error("expected the Omnyo card");
     fireEvent.click(
-      await within(bbCard).findByRole("button", {
-        name: "Update available · Download the update and restart bb",
+      await within(omnyoCard).findByRole("button", {
+        name: "Update available · Download the update and restart Omnyo",
       }),
     );
-    expect(within(bbCard).getByText("Server")).toBeDefined();
-    expect(within(bbCard).queryByText("Desktop")).toBeNull();
-    expect(bbCard.querySelectorAll('[data-bb-update-role="app"]')).toHaveLength(
-      1,
-    );
+    expect(within(omnyoCard).getByText("Server")).toBeDefined();
+    expect(within(omnyoCard).queryByText("Desktop")).toBeNull();
+    expect(
+      omnyoCard.querySelectorAll('[data-omnyo-update-role="app"]'),
+    ).toHaveLength(1);
     await waitFor(() => {
       expect(sdk.system.applyAppUpdate).toHaveBeenCalledWith({
         confirmInterruptingThreads: false,
@@ -2351,7 +2623,7 @@ The canonical release summary.
   });
 
   it("adds a Desktop row under Server only while the desktop needs an update", async () => {
-    const desktopInfo: BbDesktopInfo = {
+    const desktopInfo: OmnyoDesktopInfo = {
       downloadState: "downloaded",
       lastCheckedAt: null,
       latestVersion: "0.0.6",
@@ -2361,12 +2633,13 @@ The canonical release summary.
       updateDownloaded: true,
       version: "0.0.5",
     };
+
     const installUpdate = vi.fn().mockResolvedValue(undefined);
     useDesktopUpdateInfoMock.mockReturnValue({
       desktopApi: {
         checkForUpdates: vi.fn().mockResolvedValue(desktopInfo),
         installUpdate,
-      } as unknown as BbDesktopApi,
+      } as unknown as OmnyoDesktopApi,
       desktopInfo,
       isDesktop: true,
     });
@@ -2375,12 +2648,13 @@ The canonical release summary.
 
     renderSection();
 
-    const bbCard = document.querySelector<HTMLElement>(
-      '[data-updates-domain="bb"]',
+    const omnyoCard = document.querySelector<HTMLElement>(
+      '[data-updates-domain="omnyo"]',
     );
-    if (bbCard === null) throw new Error("expected the bb card");
-    const desktopName = await within(bbCard).findByText("Desktop");
-    const serverName = within(bbCard).getByText("Server");
+
+    if (omnyoCard === null) throw new Error("expected the Omnyo card");
+    const desktopName = await within(omnyoCard).findByText("Desktop");
+    const serverName = within(omnyoCard).getByText("Server");
     expect(
       serverName.compareDocumentPosition(desktopName) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -2389,8 +2663,8 @@ The canonical release summary.
     expect(serverName.className).toContain("w-16");
     expect(document.querySelector("[data-updates-device]")).toBeNull();
     fireEvent.click(
-      within(bbCard).getByRole("button", {
-        name: /Relaunch bb to finish updating/,
+      within(omnyoCard).getByRole("button", {
+        name: /Relaunch Omnyo to finish updating/,
       }),
     );
     expect(installUpdate).toHaveBeenCalledOnce();
@@ -2412,11 +2686,11 @@ The canonical release summary.
     expect(screen.getByText("Desktop")).toBeDefined();
     expect(screen.queryByText("Server")).toBeNull();
     expect(
-      document.querySelectorAll('[data-bb-update-role="app"]'),
+      document.querySelectorAll('[data-omnyo-update-role="app"]'),
     ).toHaveLength(1);
     expect(
       screen.queryByRole("button", {
-        name: "Update available · Download the update and restart bb",
+        name: "Update available · Download the update and restart Omnyo",
       }),
     ).toBeNull();
   });

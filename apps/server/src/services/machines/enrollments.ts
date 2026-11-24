@@ -9,14 +9,20 @@ import {
   getLatestSessionForHost,
   getNonDestroyedHostByLaunchKey,
   type DbConnection,
-} from "@bb/db";
-import type { ServerAccessGrant } from "@get-bb/plugin-sdk";
+} from "@omnyo/db";
+import type { ServerAccessGrant } from "@omnyo/plugin-sdk";
 import {
   DAEMON_ENROLL_CONFIG_ID,
   DAEMON_HOST_CONFIG_ID,
   type MachineAuthService,
 } from "../machine-auth.js";
 import { runSerialized } from "../lib/async-deduper.js";
+import {
+  type ShortEnrollmentCode,
+  hashShortEnrollmentCode,
+  issueShortEnrollmentCode,
+  normalizeShortEnrollmentCode,
+} from "./short-enrollment-code.js";
 
 export interface EnrollmentBootstrap {
   hostId: string;
@@ -26,6 +32,13 @@ export interface EnrollmentBootstrap {
   expiresAt: number;
   reconnect?: true;
   dataDir?: string;
+}
+
+interface PendingEnrollment {
+  owner: string;
+  launchKey: string;
+  bootstrap: EnrollmentBootstrap;
+  shortCode?: ShortEnrollmentCode;
 }
 
 export type MachineEnrollment =
@@ -91,7 +104,9 @@ export async function findUnusedEnrollmentCredential(
     )
     .limit(1)
     .get();
+
   if (!row?.expiresAt) return null;
+
   return {
     hostId: row.hostId,
     enrollSource: row.enrollSource,
@@ -102,11 +117,18 @@ export async function findUnusedEnrollmentCredential(
 export function createMachineEnrollmentService(
   deps: EnrollmentServiceDependencies,
 ) {
-  const pending = new Map<
-    string,
-    { owner: string; launchKey: string; bootstrap: EnrollmentBootstrap }
-  >();
+  const pending = new Map<string, PendingEnrollment>();
+
+  const hostIdByShortCodeHash = new Map<string, string>();
+
   const locks = new Map<string, Promise<unknown>>();
+
+  function deletePending(hostId: string) {
+    const shortCode = pending.get(hostId)?.shortCode;
+
+    if (shortCode !== undefined) hostIdByShortCodeHash.delete(shortCode.hash);
+    pending.delete(hostId);
+  }
 
   function hasIssuedDaemonCredential(hostId: string): boolean {
     return (
@@ -138,43 +160,55 @@ export function createMachineEnrollmentService(
   function scoped(owner: string): MachineEnrollments {
     function hostForId(id: string) {
       const host = getHost(deps.db, id);
+
       const provider =
         host?.machineProviderId === null
           ? undefined
           : getMachineProvider(host?.machineProviderId ?? "");
+
       if (!host || provider?.pluginId !== owner)
         throw new Error("Machine enrollment was not found");
+
       return host;
     }
+
     return {
       clearPending(key) {
         for (const [hostId, entry] of pending) {
           if (entry.owner === owner && entry.launchKey === key)
-            pending.delete(hostId);
+            deletePending(hostId);
         }
       },
       async prepare(request) {
         request.signal.throwIfAborted();
+
         if (!request.key.trim())
           throw new Error("Machine enrollment key must not be empty");
         const lockKey = JSON.stringify([owner, request.key]);
+
         return runSerialized(locks, lockKey, async () => {
           request.signal.throwIfAborted();
           const host = getNonDestroyedHostByLaunchKey(deps.db, request.key);
+
           if (!host) throw new Error("Machine creation host was not found");
+
           if (
             host.phase === "destroyed" ||
             (host.phase === "removing" && !isHostCleanupAllowed(deps, host.id))
           )
             throw new Error("Machine enrollment was cancelled");
+
           if (
             getMachineProvider(host.machineProviderId ?? "")?.pluginId !== owner
           )
             throw new Error("Machine creation belongs to a different plugin");
+
           if (host.lastSeenAt !== null || deps.isConnected(host.id)) {
-            pending.delete(host.id);
+            deletePending(host.id);
+
             return { id: host.id, hostId: host.id, state: "enrolled" };
           }
+
           const grant = await deps.serverAccess.resolve({
             key: lockKey,
             hostId: host.id,
@@ -183,13 +217,17 @@ export function createMachineEnrollmentService(
               AbortSignal.timeout(60_000),
             ]),
           });
+
           request.signal.throwIfAborted();
           await deps.machineAuth.revokeHostEnrollKeys({ hostId: host.id });
+
           const credential = await deps.machineAuth.issueHostEnrollKey({
             hostId: host.id,
             enrollSource: "public-multi-machine",
           });
+
           const expiresAt = credential.expiresAt;
+
           const result: Extract<MachineEnrollment, { state: "pending" }> = {
             id: host.id,
             hostId: host.id,
@@ -204,15 +242,19 @@ export function createMachineEnrollmentService(
               expiresAt,
             },
           };
+
           if (request.signal.aborted) {
             await deps.machineAuth.revokeHostEnrollKeys({ hostId: host.id });
             request.signal.throwIfAborted();
           }
+
+          deletePending(host.id);
           pending.set(host.id, {
             owner,
             launchKey: request.key,
             bootstrap: result.bootstrap,
           });
+
           return result;
         });
       },
@@ -220,16 +262,20 @@ export function createMachineEnrollmentService(
         if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
           throw new Error("Connection timeout must be positive");
         const deadline = Date.now() + timeoutMs;
+
         while (true) {
           signal.throwIfAborted();
           const host = hostForId(enrollmentId);
+
           if (
             host.destroyedAt !== null ||
             (host.phase === "removing" && !isHostCleanupAllowed(deps, host.id))
           )
             throw new Error("Machine enrollment was cancelled");
+
           if (deps.isConnected(host.id)) {
-            pending.delete(host.id);
+            deletePending(host.id);
+
             return {
               hostId: host.id,
               hostName:
@@ -237,7 +283,9 @@ export function createMachineEnrollmentService(
                   ?.hostName ?? host.name,
             };
           }
+
           const remaining = deadline - Date.now();
+
           if (remaining <= 0)
             throw new Error("Timed out waiting for machine connection");
           await delay(Math.min(250, remaining), undefined, { signal });
@@ -245,12 +293,14 @@ export function createMachineEnrollmentService(
       },
     };
   }
+
   async function pendingBootstrapForHost(request: {
     hostId: string;
     owner: string;
   }): Promise<EnrollmentBootstrap | null> {
     const host = getHost(deps.db, request.hostId);
     const entry = pending.get(request.hostId);
+
     if (
       !host ||
       host.phase !== "creating" ||
@@ -263,13 +313,15 @@ export function createMachineEnrollmentService(
     )
       return null;
     const bootstrap = entry.bootstrap;
-    if (
-      !(await hasUnusedEnrollmentCredential(host.id, bootstrap.credential))
-    )
+
+    if (!(await hasUnusedEnrollmentCredential(host.id, bootstrap.credential)))
       return null;
+
     if (pending.get(request.hostId) !== entry) return null;
+
     return bootstrap;
   }
+
   return {
     forOwner: scoped,
     pendingBootstrapForHost,
@@ -277,16 +329,71 @@ export function createMachineEnrollmentService(
       credential: string,
     ): Promise<EnrollmentBootstrap | null> {
       if (!credential || credential.length > 512) return null;
+
       const row = [...pending].find(
         ([, entry]) => entry.bootstrap.credential === credential,
       );
+
       if (!row) return null;
       const [hostId, entry] = row;
+
       const bootstrap = await pendingBootstrapForHost({
         hostId,
         owner: entry.owner,
       });
+
       return bootstrap?.credential === credential ? bootstrap : null;
+    },
+    shortCodeForBootstrap(
+      bootstrap: EnrollmentBootstrap,
+    ): ShortEnrollmentCode | null {
+      const entry = pending.get(bootstrap.hostId);
+
+      if (entry?.bootstrap !== bootstrap) return null;
+      const now = Date.now();
+
+      if (entry.shortCode === undefined) {
+        let issued: ShortEnrollmentCode;
+
+        do {
+          issued = issueShortEnrollmentCode({
+            now,
+            enrollmentExpiresAt: bootstrap.expiresAt,
+          });
+        } while (hostIdByShortCodeHash.has(issued.hash));
+
+        entry.shortCode = issued;
+        hostIdByShortCodeHash.set(issued.hash, bootstrap.hostId);
+      }
+
+      return entry.shortCode.expiresAt > now ? entry.shortCode : null;
+    },
+    async pendingBootstrapForShortCode(
+      input: string,
+    ): Promise<EnrollmentBootstrap | null> {
+      const normalized = normalizeShortEnrollmentCode(input);
+
+      if (normalized === null) return null;
+      const hash = hashShortEnrollmentCode(normalized);
+      const hostId = hostIdByShortCodeHash.get(hash);
+      const entry = hostId === undefined ? undefined : pending.get(hostId);
+
+      if (
+        hostId === undefined ||
+        entry?.shortCode?.hash !== hash ||
+        entry.shortCode.expiresAt <= Date.now()
+      )
+        return null;
+
+      const bootstrap = await pendingBootstrapForHost({
+        hostId,
+        owner: entry.owner,
+      });
+
+      return bootstrap === entry.bootstrap &&
+        pending.get(hostId)?.shortCode?.hash === hash
+        ? bootstrap
+        : null;
     },
   };
 }

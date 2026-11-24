@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createBbSdk } from "../src/core.js";
+import { createOmnyoSdk } from "../src/core.js";
 import type { FetchImplementation } from "../src/response.js";
 import { createHttpTransport } from "../src/transport-http.js";
 
@@ -10,6 +10,7 @@ const plugin = {
   version: "1.0.0",
   provenance: "direct",
   isOrphanedBuiltin: false,
+  removable: true,
   publisherLabel: null,
   sourceDisplay: "npm · notes",
   updateState: {},
@@ -44,26 +45,58 @@ const job = {
 function serverWithJobStates(states: readonly object[]) {
   const requests: { url: string; prefer: string | null }[] = [];
   let polls = 0;
+
   const fetch: FetchImplementation = async (input, init) => {
     const url = String(input);
     requests.push({ url, prefer: new Headers(init?.headers).get("prefer") });
+
     const body = url.endsWith("/api/v1/plugins/install")
       ? { ok: true, job: { ...job, state: "queued" } }
       : { job: { ...job, ...states[Math.min(polls++, states.length - 1)] } };
+
     return new Response(JSON.stringify(body), {
       status: url.endsWith("/install") ? 202 : 200,
       headers: { "content-type": "application/json" },
     });
   };
-  const sdk = createBbSdk({
+
+  const sdk = createOmnyoSdk({
     transport: createHttpTransport({
-      baseUrl: "http://bb.test",
+      baseUrl: "http://omnyo.test",
       fetch,
       runtime: "node",
     }),
   });
+
   return { sdk, requests };
 }
+
+it("keeps legacy installed responses and names Omnyo when a caller requires a job", async () => {
+  let calls = 0;
+
+  const sdk = createOmnyoSdk({
+    transport: createHttpTransport({
+      baseUrl: "http://omnyo.test",
+      runtime: "node",
+      fetch: async () => {
+        calls += 1;
+
+        return Response.json({ ok: true, plugin });
+      },
+    }),
+  });
+
+  await expect(
+    sdk.plugins.startInstall({ source: "npm:notes" }),
+  ).rejects.toThrow(
+    'installed "notes" without an install job; this Omnyo server predates background installs',
+  );
+  expect(calls).toBe(1);
+  await expect(sdk.plugins.install({ source: "npm:notes" })).resolves.toEqual(
+    plugin,
+  );
+  expect(calls).toBe(2);
+});
 
 describe("plugin installs through server jobs", () => {
   it("asks for a job and waits for it to install the plugin", async () => {
@@ -76,12 +109,12 @@ describe("plugin installs through server jobs", () => {
       plugin,
     );
     expect(requests[0]).toEqual({
-      url: "http://bb.test/api/v1/plugins/install",
+      url: "http://omnyo.test/api/v1/plugins/install",
       prefer: "respond-async",
     });
     expect(requests.slice(1).map((request) => request.url)).toEqual([
-      "http://bb.test/api/v1/plugins/install-jobs/job-1",
-      "http://bb.test/api/v1/plugins/install-jobs/job-1",
+      "http://omnyo.test/api/v1/plugins/install-jobs/job-1",
+      "http://omnyo.test/api/v1/plugins/install-jobs/job-1",
     ]);
   });
 

@@ -8,21 +8,29 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import plugin from "./server";
 import { installFakeGh } from "./testing/fake-gh";
 
 let binDir: string;
+
 let offlineFlag: string;
+
 let noTokenFlag: string;
+
 let badSecondaryFlag: string;
+
 let apiDownFlag: string;
+
 let slowStatusFlag: string;
+
 let callLog: string;
+
 let restoreEnv: () => void;
 
 function ghCalls(): string[] {
   if (!existsSync(callLog)) return [];
+
   return readFileSync(callLog, "utf8")
     .trim()
     .split("\n")
@@ -30,7 +38,7 @@ function ghCalls(): string[] {
 }
 
 beforeEach(() => {
-  binDir = mkdtempSync(join(tmpdir(), "bb-1758-gh-"));
+  binDir = mkdtempSync(join(tmpdir(), "omnyo-1758-gh-"));
   offlineFlag = join(binDir, "gh-offline");
   noTokenFlag = join(binDir, "gh-no-token");
   badSecondaryFlag = join(binDir, "gh-bad-secondary");
@@ -86,11 +94,12 @@ afterEach(() => {
 async function loadWithSyncServiceOnce(
   options: { settings?: Record<string, string> } = {},
 ) {
-  const { bb, harness } = createFakePluginHost({
+  const { api, harness } = createFakePluginHost({
     pluginId: "github",
     settings: options.settings,
   });
-  await plugin(bb);
+
+  await plugin(api);
   const callsBeforeService = ghCalls().length;
   const { controller, done } = harness.runService("sync");
   await vi.waitFor(
@@ -101,17 +110,20 @@ async function loadWithSyncServiceOnce(
   );
   controller.abort();
   await done;
-  return { bb, harness };
+
+  return { api, harness };
 }
 
 describe("github plugin gh auth probe (#1758)", () => {
   it("re-probes gh after a transient auth-status failure instead of latching", async () => {
     writeFileSync(offlineFlag, "");
     const { harness } = await loadWithSyncServiceOnce();
+
     const before = (await harness.callRpc("status")) as {
       ghOk: boolean;
       ghState: string;
     };
+
     expect(before.ghOk).toBe(false);
     expect(before.ghState).toBe("unavailable");
     const callsWhileOffline = ghCalls().length;
@@ -123,6 +135,7 @@ describe("github plugin gh auth probe (#1758)", () => {
       ghState: string;
       ghError: string | null;
     };
+
     expect(ghCalls().length).toBeGreaterThan(callsWhileOffline);
     expect(after.ghOk).toBe(true);
     expect(after.ghState).toBe("ready");
@@ -156,17 +169,22 @@ describe("github plugin gh auth probe (#1758)", () => {
     expect(harness.needsConfigurationMessages).toEqual([]);
     const status = (await harness.callRpc("status")) as { ghState: string };
     expect(status.ghState).toBe("ready");
+
     const statusCalls = ghCalls().filter((call) =>
       call.startsWith("auth status"),
     );
+
     expect(statusCalls.length).toBeGreaterThan(0);
+
     for (const call of statusCalls) {
       expect(call).toContain("--hostname github.com");
       expect(call).toContain("--active");
     }
+
     const tokenCalls = ghCalls().filter((call) =>
       call.startsWith("auth token"),
     );
+
     for (const call of tokenCalls) {
       expect(call).toContain("--hostname github.com");
     }
@@ -178,27 +196,33 @@ describe("github plugin gh auth probe (#1758)", () => {
     rmSync(offlineFlag);
     writeFileSync(slowStatusFlag, "");
     const callsBefore = ghCalls().length;
+
     const [a, b] = (await Promise.all([
       harness.callRpc("status"),
       harness.callRpc("status"),
     ])) as Array<{ ghState: string }>;
+
     expect(a.ghState).toBe("ready");
     expect(b.ghState).toBe("ready");
+
     const probes = ghCalls()
       .slice(callsBefore)
       .filter((call) => call.startsWith("auth status"));
+
     expect(probes).toHaveLength(1);
   });
 
   it("stops promptly when aborted during an all-repos failure and keeps the old sync time", async () => {
     writeFileSync(apiDownFlag, "");
     writeFileSync(slowStatusFlag, "");
-    const { bb, harness } = await loadWithSyncServiceOnce({
+
+    const { api, harness } = await loadWithSyncServiceOnce({
       settings: { extraRepos: "acme/one acme/two" },
     });
+
     rmSync(slowStatusFlag);
     expect(harness.needsConfigurationMessages).toEqual([]);
-    expect(await bb.storage.kv.get("sync-cursor")).toBeUndefined();
+    expect(await api.storage.kv.get("sync-cursor")).toBeUndefined();
     expect(harness.logEntries).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -211,6 +235,6 @@ describe("github plugin gh auth probe (#1758)", () => {
     rmSync(apiDownFlag);
     const result = (await harness.callRpc("refresh")) as { repos: number };
     expect(result.repos).toBe(2);
-    expect(await bb.storage.kv.get("sync-cursor")).toBeDefined();
+    expect(await api.storage.kv.get("sync-cursor")).toBeDefined();
   }, 20_000);
 });

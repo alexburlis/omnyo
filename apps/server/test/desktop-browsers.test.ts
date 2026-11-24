@@ -1,14 +1,15 @@
-import { getStoredThreadTabs, markThreadDeleted } from "@bb/db";
+import { getStoredThreadTabs, markThreadDeleted } from "@omnyo/db";
 import {
   desktopBrowserLeaseSchema,
   desktopBrowserResultSchemas,
   type DesktopBrowserTab,
   type HostDaemonOnlineRpcRequestMessage,
-} from "@bb/host-daemon-contract";
+  type DesktopRendererProfile,
+} from "@omnyo/host-daemon-contract";
 import {
   desktopBrowserScopeSchema,
   threadTabsSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 import { revokeThreadDesktopBrowserControl } from "../src/services/desktop-browsers.js";
@@ -30,20 +31,24 @@ const leaseSchema = desktopBrowserScopeSchema
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => {};
+
   const promise = new Promise<T>((done) => {
     resolve = done;
   });
+
   return { promise, resolve };
 }
 
 function fixture(harness: TestAppHarness) {
   const seeded = seedThreadFixture(harness);
+
   const scope = {
     hostId: seeded.host.id,
     instanceId: "desktop-window",
     generation: "window-generation",
     threadId: seeded.thread.id,
   };
+
   let tabs: DesktopBrowserTab[] = [
     {
       tabId: "automation-tab",
@@ -54,16 +59,20 @@ function fixture(harness: TestAppHarness) {
       control: null,
     },
   ];
+
   let intercept: (
     request: HostDaemonOnlineRpcRequestMessage,
   ) => HostRpcHandlerResult | Promise<HostRpcHandlerResult> | null = () => null;
+
   const responder = registerHostRpcResponder(harness, {
     hostId: seeded.host.id,
     sessionId: seeded.session.id,
     handle(request) {
       const intercepted = intercept(request);
+
       if (intercepted !== null) return intercepted;
       const command = request.command;
+
       switch (command.type) {
         case "thread.stop":
           return { ok: true, result: { providerCheckpointId: null } };
@@ -91,8 +100,10 @@ function fixture(harness: TestAppHarness) {
             presentation: command.presentation,
             control: null,
           };
+
           return { ok: true, result: { tab } };
         }
+
         case "desktop.browser.acquire_control":
           return {
             ok: true,
@@ -139,6 +150,21 @@ function fixture(harness: TestAppHarness) {
               skippedDomains: [],
             },
           };
+        case "desktop.browser.cookie_sync_status":
+        case "desktop.browser.cookie_sync_configure":
+        case "desktop.browser.cookie_sync_run":
+          return {
+            ok: true,
+            result: {
+              source:
+                command.type === "desktop.browser.cookie_sync_configure"
+                  ? command.source
+                  : null,
+              running: false,
+              lastRun: null,
+              nextRunAt: null,
+            },
+          };
         case "desktop.browser.capture_tab":
           return {
             ok: true,
@@ -154,6 +180,7 @@ function fixture(harness: TestAppHarness) {
       }
     },
   });
+
   function post(
     action: string,
     body: object = scope,
@@ -165,10 +192,13 @@ function fixture(harness: TestAppHarness) {
       body: JSON.stringify(body),
     });
   }
+
   function stored(threadId = scope.threadId) {
     const row = getStoredThreadTabs(harness.db, threadId);
+
     return row ? threadTabsSchema.parse(JSON.parse(row.tabsJson)) : [];
   }
+
   function change(
     overrides: Partial<typeof scope>,
     nativeTabs: DesktopBrowserTab[],
@@ -188,8 +218,10 @@ function fixture(harness: TestAppHarness) {
         tabs: nativeTabs,
       }),
     });
+
     return socket;
   }
+
   return {
     ...seeded,
     scope,
@@ -211,7 +243,9 @@ function fixture(harness: TestAppHarness) {
         controllerLabel: "Test agent",
         ...extra,
       });
+
       expect(response.status).toBe(200);
+
       return leaseSchema.parse(await response.json());
     },
     leaseRequest(leaseId: string) {
@@ -233,6 +267,7 @@ async function withBrowserTest(
 ) {
   await withTestHarness(async (harness) => {
     const test = fixture(harness);
+
     try {
       await run(test, harness);
     } finally {
@@ -246,10 +281,122 @@ async function withBrowserTest(
 }
 
 describe("desktop browser public API", () => {
+  it("refuses renderer profiling on old clients before sending the new command", async () => {
+    await withTestHarness(async (harness) => {
+      const f = fixture(harness);
+      const { hostId, instanceId, generation } = f.scope;
+
+      const response = await f.post("profile-renderer", {
+        hostId,
+        instanceId,
+        generation,
+      });
+
+      expect(response.status).toBe(409);
+      expect(JSON.stringify(await response.json())).toContain(
+        "desktop_renderer_profile_unsupported",
+      );
+      expect(
+        f.responder.requests.some(
+          (request) =>
+            request.command.type === "desktop.browser.profile_renderer",
+        ),
+      ).toBe(false);
+    });
+  });
+
+  it("dispatches renderer profiling only to a capable matching window and returns sanitized counts", async () => {
+    await withTestHarness(async (harness) => {
+      const f = fixture(harness);
+
+      const profile: DesktopRendererProfile = {
+        requestedDurationMs: 2000,
+        actualDurationMs: 2001,
+        sampleIntervalUs: 1000,
+        totalSamples: 0,
+        omittedSamples: 0,
+        hotspots: [],
+        builtinSamples: { idle: 0, program: 0, garbageCollection: 0 },
+        truncated: false,
+      };
+
+      f.intercept((request) => {
+        if (request.command.type === "desktop.browser.list_instances")
+          return {
+            ok: true,
+            result: {
+              instances: [
+                {
+                  instanceId: f.scope.instanceId,
+                  generation: f.scope.generation,
+                  label: "Desktop",
+                  rendererProfiling: true,
+                },
+              ],
+            },
+          };
+
+        if (request.command.type === "desktop.browser.profile_renderer")
+          return { ok: true, result: profile };
+
+        return null;
+      });
+      const { hostId, instanceId, generation } = f.scope;
+
+      const response = await f.post("profile-renderer", {
+        hostId,
+        instanceId,
+        generation,
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual(profile);
+      expect(
+        f.responder.requests
+          .filter(
+            (request) =>
+              request.command.type === "desktop.browser.profile_renderer",
+          )
+          .map((request) => request.command),
+      ).toEqual([
+        {
+          type: "desktop.browser.profile_renderer",
+          instanceId,
+          generation,
+          durationMs: 2000,
+        },
+      ]);
+
+      const stale = await f.post("profile-renderer", {
+        hostId,
+        instanceId,
+        generation: "stale",
+      });
+
+      expect(stale.status).toBe(409);
+
+      const invalid = await f.post("profile-renderer", {
+        hostId,
+        instanceId,
+        generation,
+        durationMs: 5001,
+      });
+
+      expect(invalid.status).toBe(400);
+      expect(
+        f.responder.requests.filter(
+          (request) =>
+            request.command.type === "desktop.browser.profile_renderer",
+        ),
+      ).toHaveLength(1);
+    });
+  });
   it("blocks hostile origins and simple requests before any host RPC", async () => {
     await withBrowserTest(async (test) => {
       for (const action of [
         "instances",
+        "profile-renderer",
         "tabs",
         "create",
         "acquire",
@@ -273,6 +420,7 @@ describe("desktop browser public API", () => {
                 : ["close", "reveal", "capture"].includes(action)
                   ? { ...test.scope, tabId: test.tab().tabId }
                   : test.scope;
+
         expect(
           (await test.post(action, body, { origin: "https://evil.example" }))
             .status,
@@ -284,6 +432,7 @@ describe("desktop browser public API", () => {
           action,
         ).toBe(415);
       }
+
       expect(test.responder.requests).toEqual([]);
     });
   });
@@ -313,11 +462,13 @@ describe("desktop browser public API", () => {
                 : ["capture", "reveal", "close"].includes(action)
                   ? { ...test.scope, threadId, tabId: test.tab().tabId }
                   : { ...test.scope, threadId };
+
           expect(
             (await test.post(action, body)).status,
             `${action} ${threadId}`,
           ).toBe(404);
         }
+
         expect(
           (
             await test.post("release", {
@@ -328,6 +479,7 @@ describe("desktop browser public API", () => {
           ).status,
         ).toBe(200);
       }
+
       expect(test.responder.requests).toEqual([]);
     });
   });
@@ -336,9 +488,11 @@ describe("desktop browser public API", () => {
     await withBrowserTest(async (test) => {
       const response = await test.post("create");
       expect(response.status).toBe(200);
+
       const { tab } = desktopBrowserResultSchemas[
         "desktop.browser.create_tab"
       ].parse(await response.json());
+
       const command = test.responder.requests[0]?.command;
       expect(command).toMatchObject({
         type: "desktop.browser.create_tab",
@@ -387,16 +541,20 @@ describe("desktop browser public API", () => {
           expiresAt: Date.now() + 1000,
         },
       };
+
       test.setTabs([tab]);
       const response = await test.post("tabs");
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ tabs: [tab] });
+
       for (const action of ["reveal", "capture"]) {
         const response = await test.post(action, {
           ...test.scope,
           tabId: tab.tabId,
         });
+
         expect(response.status).toBe(200);
+
         if (action === "capture") {
           expect(response.headers.get("cache-control")).toBe("no-store");
           expect(await response.json()).toEqual({
@@ -407,6 +565,7 @@ describe("desktop browser public API", () => {
           });
         }
       }
+
       for (const { command } of test.responder.requests) {
         expect(command).toMatchObject({
           instanceId: test.scope.instanceId,
@@ -423,9 +582,11 @@ describe("desktop browser public API", () => {
         projectId: test.project.id,
         environmentId: test.environment.id,
       });
+
       test.setTabs([{ ...test.tab(), threadId: other.id }]);
       const response = await test.post("tabs");
       const body: unknown = await response.json();
+
       if (response.status === 200) {
         expect(
           desktopBrowserResultSchemas["desktop.browser.list_tabs"].parse(body)
@@ -434,11 +595,13 @@ describe("desktop browser public API", () => {
       } else {
         expect(response.status).toBeGreaterThanOrEqual(400);
       }
+
       const acquire = await test.post("acquire", {
         ...test.scope,
         tabIds: [test.tab().tabId],
         controllerLabel: "Agent",
       });
+
       expect(acquire.status).toBeGreaterThanOrEqual(400);
       expect(
         test.responder.requests.some(
@@ -483,19 +646,23 @@ describe("desktop browser public API", () => {
             }
           : null,
       );
+
       const response = await test.post("acquire", {
         ...test.scope,
         tabIds: [test.tab().tabId],
         controllerLabel: "Agent",
       });
+
       expect(response.status).toBe(502);
       expect(await response.json()).toMatchObject({
         code: "desktop_control_conflict",
         message: "Tab is already controlled",
       });
+
       const command = test.responder.requests.find(
         ({ command }) => command.type === "desktop.browser.acquire_control",
       )?.command;
+
       if (!command || command.type !== "desktop.browser.acquire_control")
         throw new Error("Expected acquire RPC");
       expect(
@@ -516,12 +683,15 @@ describe("desktop browser public API", () => {
     await withBrowserTest(async (test) => {
       const lease = await test.acquire();
       const commands = test.responder.requests.map(({ command }) => command);
+
       const acquired = commands.findIndex(
         (command) => command.type === "desktop.browser.acquire_control",
       );
+
       const revealed = commands.findIndex(
         (command) => command.type === "desktop.browser.reveal_tab",
       );
+
       expect(revealed).toBeGreaterThan(acquired);
       expect(commands[revealed]).toMatchObject({
         type: "desktop.browser.reveal_tab",
@@ -538,11 +708,13 @@ describe("desktop browser public API", () => {
             }
           : null,
       );
+
       const response = await test.post("acquire", {
         ...test.scope,
         tabIds: [test.tab().tabId],
         controllerLabel: "Agent",
       });
+
       expect(response.status).toBe(502);
       expect(test.responder.requests.at(-1)?.command.type).toBe(
         "desktop.browser.release_control",
@@ -557,6 +729,7 @@ describe("desktop browser public API", () => {
         instanceId: test.scope.instanceId,
         generation: test.scope.generation,
       };
+
       const sources = await test.post("import-sources", instance);
       expect(sources.status).toBe(200);
       expect(await sources.json()).toEqual({
@@ -568,11 +741,13 @@ describe("desktop browser public API", () => {
           },
         ],
       });
+
       const imported = await test.post("import-cookies", {
         ...instance,
         sourceId: "firefox",
         sourceProfileDirectory: "Profiles/p1",
       });
+
       expect(imported.status).toBe(200);
       expect(imported.headers.get("cache-control")).toBe("no-store");
       expect(await imported.json()).toEqual({
@@ -588,11 +763,63 @@ describe("desktop browser public API", () => {
         sourceId: "firefox",
         sourceProfileDirectory: "Profiles/p1",
       });
+
       const rejected = await test.post("import-cookies", {
         ...instance,
         sourceId: "netscape",
         sourceProfileDirectory: "Profiles/p1",
       });
+
+      expect(rejected.status).toBe(400);
+    });
+  });
+
+  it("forwards cookie sync configuration and runs to the desktop without cookie data", async () => {
+    await withBrowserTest(async (test) => {
+      const instance = {
+        hostId: test.scope.hostId,
+        instanceId: test.scope.instanceId,
+        generation: test.scope.generation,
+      };
+
+      const source = { sourceId: "dia", sourceProfileDirectory: "Profile 7" };
+
+      const configured = await test.post("cookie-sync-configure", {
+        ...instance,
+        source,
+      });
+
+      expect(configured.status).toBe(200);
+      expect(await configured.json()).toEqual({
+        source,
+        running: false,
+        lastRun: null,
+        nextRunAt: null,
+      });
+      expect(test.responder.requests.at(-1)?.command).toEqual({
+        type: "desktop.browser.cookie_sync_configure",
+        instanceId: instance.instanceId,
+        generation: instance.generation,
+        source,
+      });
+
+      for (const [action, type] of [
+        ["cookie-sync-status", "desktop.browser.cookie_sync_status"],
+        ["cookie-sync-run", "desktop.browser.cookie_sync_run"],
+      ] as const) {
+        expect((await test.post(action, instance)).status).toBe(200);
+        expect(test.responder.requests.at(-1)?.command).toEqual({
+          type,
+          instanceId: instance.instanceId,
+          generation: instance.generation,
+        });
+      }
+
+      const rejected = await test.post("cookie-sync-configure", {
+        ...instance,
+        source: { sourceId: "netscape", sourceProfileDirectory: "Default" },
+      });
+
       expect(rejected.status).toBe(400);
     });
   });
@@ -600,11 +827,14 @@ describe("desktop browser public API", () => {
   it("binds open and release to host, instance, generation, thread, and granted tabs", async () => {
     await withBrowserTest(async (test, harness) => {
       const lease = await test.acquire();
+
       const other = seedThread(harness.deps, {
         projectId: test.project.id,
         environmentId: test.environment.id,
       });
+
       const otherHost = seedHostSession(harness.deps);
+
       for (const override of [
         { hostId: otherHost.host.id },
         { instanceId: "other-window" },
@@ -630,10 +860,12 @@ describe("desktop browser public API", () => {
         ).toBe(403);
         expect(test.responder.requests).toHaveLength(before);
       }
+
       const connection = await test.post(
         "connection",
         test.leaseRequest(lease.leaseId),
       );
+
       expect(connection.status).toBe(200);
       expect(connection.headers.get("cache-control")).toBe("no-store");
       expect(await connection.json()).toEqual({
@@ -746,20 +978,25 @@ describe("desktop browser public API", () => {
       test.intercept(({ command }) => {
         if (command.type !== "desktop.browser.acquire_control") return null;
         started.resolve();
+
         return gate.promise;
       });
+
       const acquiring = test.post("acquire", {
         ...test.scope,
         tabIds: [test.tab().tabId],
         controllerLabel: "Delayed agent",
       });
+
       await started.promise;
       expect((await test.stop()).status).toBe(200);
+
       const command = test.responder.requests
         .filter(
           ({ command }) => command.type === "desktop.browser.acquire_control",
         )
         .at(-1)?.command;
+
       if (!command || command.type !== "desktop.browser.acquire_control")
         throw new Error("Expected delayed acquire");
       gate.resolve({
@@ -790,13 +1027,16 @@ describe("desktop browser public API", () => {
       test.intercept(({ command }) => {
         if (command.type !== "desktop.browser.list_tabs") return null;
         started.resolve();
+
         return gate.promise;
       });
+
       const acquiring = test.post("acquire", {
         ...test.scope,
         tabIds: [test.tab().tabId],
         controllerLabel: "Delayed agent",
       });
+
       await started.promise;
       expect((await test.stop()).status).toBe(200);
       gate.resolve({ ok: true, result: { tabs: [test.tab()] } });
@@ -815,6 +1055,7 @@ describe("desktop browser public API", () => {
         projectId: test.project.id,
         environmentId: test.environment.id,
       });
+
       const original = test.tab();
       expect(test.change({}, [original]).close).not.toHaveBeenCalled();
       expect(test.stored()).toEqual([
@@ -869,7 +1110,9 @@ describe("desktop browser public API", () => {
         projectId: test.project.id,
         environmentId: test.environment.id,
       });
+
       markThreadDeleted(harness.db, harness.hub, { threadId: deleted.id });
+
       for (const threadId of [
         "plugin-panel:cloud-sandbox:cloud-machines:pane-1",
         "thr_missing",
@@ -879,6 +1122,7 @@ describe("desktop browser public API", () => {
         expect(socket.close, threadId).not.toHaveBeenCalled();
         expect(test.stored(threadId), threadId).toEqual([]);
       }
+
       expect(test.change({}, [test.tab()]).close).not.toHaveBeenCalled();
       expect(test.stored()).toEqual([
         expect.objectContaining({ id: test.tab().tabId }),
@@ -892,18 +1136,23 @@ describe("desktop browser public API", () => {
       test.intercept(({ command }) => {
         if (command.type !== "desktop.browser.acquire_control") return null;
         started.resolve();
+
         return gate.promise;
       });
+
       const acquiring = test.post("acquire", {
         ...test.scope,
         tabIds: [test.tab().tabId],
         controllerLabel: "Slow agent",
         ttlMs: 1000,
       });
+
       await started.promise;
+
       const command = test.responder.requests.find(
         ({ command }) => command.type === "desktop.browser.acquire_control",
       )?.command;
+
       if (!command || command.type !== "desktop.browser.acquire_control")
         throw new Error("Expected pending acquire");
       await vi.waitFor(
@@ -955,11 +1204,13 @@ describe("desktop browser public API", () => {
         );
         test.change({}, [tab]);
         await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+
         const updated = {
           ...tab,
           url: "https://example.com/new",
           title: "New",
         };
+
         test.change({}, change === "closed" ? [] : [updated]);
         listed.resolve({
           ok: true,
@@ -1032,12 +1283,15 @@ describe("desktop browser public API", () => {
           ],
         },
       }));
+
       const closed = vi.fn();
       test.intercept((request) => {
         if (request.command.type === "desktop.browser.list_instances")
           return instances();
+
         if (request.command.type === "desktop.browser.close_tab")
           closed(request.command);
+
         return null;
       });
       const tab = test.tab();
@@ -1070,7 +1324,9 @@ describe("desktop browser public API", () => {
       const closed = vi.fn();
       test.intercept(({ command }) => {
         if (command.type === "desktop.browser.list_instances") return list();
+
         if (command.type === "desktop.browser.close_tab") closed(command);
+
         return null;
       });
       test.change({}, [tab]);

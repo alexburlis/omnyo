@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   Sidebar,
   SidebarProvider,
@@ -20,9 +20,11 @@ afterEach(() => {
 
 function getPanel(): HTMLElement {
   const panel = document.querySelector('[data-sidebar="panel"]');
+
   if (!(panel instanceof HTMLElement)) {
     throw new Error("Expected a sidebar panel");
   }
+
   return panel;
 }
 
@@ -76,9 +78,11 @@ describe("app chrome opts out of text selection", () => {
       join(dirname(fileURLToPath(import.meta.url)), "../../app.css"),
       "utf8",
     );
+
     const rule = css.match(
       /\.select-none\s+:where\(input, textarea, \[contenteditable\]:not\(\[contenteditable="false"\]\)\)\s*\{([^}]*)\}/,
     );
+
     expect(rule?.[1]).toContain("user-select: text;");
   });
 });

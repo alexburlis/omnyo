@@ -2,8 +2,8 @@ import {
   hostDaemonToolCallRequestSchema,
   typedRoutes,
   type HostDaemonInternalSchema,
-} from "@bb/host-daemon-contract";
-import type { ToolCallResponse } from "@bb/domain";
+} from "@omnyo/host-daemon-contract";
+import type { ToolCallResponse } from "@omnyo/domain";
 import type { Hono } from "hono";
 import type { AppDeps } from "../types.js";
 import { ApiError } from "../errors.js";
@@ -13,12 +13,14 @@ import {
   invokePluginAgentTool,
 } from "../services/plugins/plugin-agent-contributions.js";
 import { deliverDetachedToolResult } from "../services/plugins/detached-tool-result-delivery.js";
+import { loadThreadHistoryCredentialValues } from "../services/threads/thread-history-redaction.js";
 import { requirePluginToolCallRegistry } from "../services/plugins/plugin-tool-calls.js";
 import {
   handleUpdateEnvironmentDirectoryToolCall,
   UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
 } from "../services/threads/thread-environment-directory.js";
 import { requireAuthenticatedDaemonSession } from "./session-state.js";
+import { awaitRequestEventsThrough } from "../services/hosts/event-receipt-watermarks.js";
 
 const textEncoder = new TextEncoder();
 
@@ -26,13 +28,22 @@ function streamToolCallResponse(
   result: Promise<ToolCallResponse>,
   abortController: AbortController,
 ): Response {
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+
   const body = new ReadableStream<Uint8Array>({
     cancel() {
+      clearInterval(heartbeat);
       abortController.abort();
     },
     start(controller) {
+      heartbeat = setInterval(() => {
+        controller.enqueue(textEncoder.encode(" "));
+      }, 30_000);
+      heartbeat.unref();
       void result.then(
         (response) => {
+          clearInterval(heartbeat);
+
           try {
             controller.enqueue(textEncoder.encode(JSON.stringify(response)));
             controller.close();
@@ -40,12 +51,19 @@ function streamToolCallResponse(
             controller.error(error);
           }
         },
-        (error) => controller.error(error),
+        (error) => {
+          clearInterval(heartbeat);
+          controller.error(error);
+        },
       );
     },
   });
+
   return new Response(body, {
-    headers: { "content-type": "application/json; charset=UTF-8" },
+    headers: {
+      "content-type": "application/json; charset=UTF-8",
+      "cache-control": "no-transform",
+    },
   });
 }
 
@@ -63,15 +81,32 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
         db: deps.db,
         sessionId: payload.sessionId,
       });
+
       const { environment, thread } = requireThreadEnvironment(
         deps.db,
         payload.threadId,
       );
+
       if (environment.hostId !== session.hostId) {
         throw new ApiError(
           403,
           "invalid_request",
           "Thread does not belong to the session host",
+        );
+      }
+
+      await awaitRequestEventsThrough(deps, {
+        eventsThrough: payload.eventsThrough,
+        key: { hostId: session.hostId, instanceId: session.instanceId },
+        request: "tool-call",
+        threadId: thread.id,
+      });
+
+      if (context.req.raw.signal.aborted) {
+        throw new ApiError(
+          409,
+          "request_cancelled",
+          "The daemon cancelled the tool call while its events were pending",
         );
       }
 
@@ -87,9 +122,15 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
       }
 
       const pluginTool = findPluginAgentTool(payload.tool);
+
       if (pluginTool) {
         const roundTrip = new AbortController();
+
         const response = requirePluginToolCallRegistry().run({
+          knownCredentialValues: loadThreadHistoryCredentialValues(
+            deps.db,
+            thread.id,
+          ),
           pluginId: pluginTool.pluginId,
           threadId: thread.id,
           callId: payload.callId,
@@ -115,6 +156,7 @@ export function registerInternalToolCallRoutes(app: Hono, deps: AppDeps): void {
               response: result,
             }),
         });
+
         return streamToolCallResponse(response, roundTrip);
       }
 

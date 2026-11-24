@@ -3,28 +3,31 @@ import { access, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import {
-  bbAppRuntimeVerifyTokens,
-  clearOwnBbAppRuntimeFile,
-  readBbAppRuntimeFile,
-} from "@bb/config/app-runtime-file";
+  appRuntimeVerifyTokens,
+  clearOwnAppRuntimeFile,
+  readAppRuntimeFile,
+} from "@omnyo/config/app-runtime-file";
 import {
-  formatBbAppConfigPath,
-  parseBbAppManagedConfig,
-} from "@bb/config/bb-app-managed-config";
-import { waitForProcessExit } from "@bb/config/child-process-exit";
+  formatAppConfigPath,
+  parseAppManagedConfig,
+} from "@omnyo/config/managed-app-config";
+import { waitForProcessExit } from "@omnyo/config/child-process-exit";
 import {
   findMachineServiceFile,
   MACHINE_INSTALLER_ENV_NAME,
-} from "@bb/config/machine-service";
-import { stopVerifiedProcess } from "@bb/config/verified-process-stop";
-import { readServerMovedFile } from "@bb/server-archive";
+} from "@omnyo/config/machine-service";
+import { stopVerifiedProcess } from "@omnyo/config/verified-process-stop";
+import { readServerMovedFile } from "@omnyo/server-archive";
 
 const NODE_REQUIREMENT = "Node.js 22.19 or newer";
+
 const NODE_VERSION_TIMEOUT_MS = 10_000;
+
 const RUNTIME_STOP_TIMEOUT_MS = 15_000;
+
 const RUNTIME_STOP_KILL_TIMEOUT_MS = 3_000;
-const INSTALL_COMMAND =
-  "npx -y --package bb-app bb server install-machine-service";
+
+const INSTALL_COMMAND = "omnyo server install-machine-service";
 
 export interface InstallMachineServiceArgs {
   confirm(message: string): Promise<boolean>;
@@ -43,6 +46,7 @@ export interface InstallMachineServiceResult {
 async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
+
     return true;
   } catch {
     return false;
@@ -55,8 +59,10 @@ async function assertMachineIdentity(dataDir: string): Promise<void> {
       `${dataDir} has no machine credentials (auth.json), so there is no machine to keep connected.`,
     );
   }
-  const configPath = formatBbAppConfigPath(dataDir);
+
+  const configPath = formatAppConfigPath(dataDir);
   let text: string;
+
   try {
     text = await readFile(configPath, "utf8");
   } catch {
@@ -64,18 +70,21 @@ async function assertMachineIdentity(dataDir: string): Promise<void> {
       `${dataDir} has no server address (${configPath} is missing).`,
     );
   }
-  if (parseBbAppManagedConfig(JSON.parse(text)).serverUrl === undefined) {
+
+  if (parseAppManagedConfig(JSON.parse(text)).serverUrl === undefined) {
     throw new Error(`${configPath} has no server address.`);
   }
 }
 
 async function resolveInstallerPath(): Promise<string> {
   const installerPath = process.env[MACHINE_INSTALLER_ENV_NAME]?.trim() ?? "";
+
   if (installerPath.length === 0 || !(await pathExists(installerPath))) {
     throw new Error(
-      `This bb installation doesn't include the machine installer. Run ${INSTALL_COMMAND} instead.`,
+      `This Omnyo installation doesn't include the machine installer. Install the verified private runtime, then run ${INSTALL_COMMAND}.`,
     );
   }
+
   return installerPath;
 }
 
@@ -94,52 +103,61 @@ function readPathNodeVersion(): Promise<string | null> {
 
 function supportsServiceNode(version: string): boolean {
   const [major = 0, minor = 0] = version.split(".").map(Number);
+
   return major > 22 || (major === 22 && minor >= 19);
 }
 
 async function assertServiceNode(): Promise<void> {
   const version = await readPathNodeVersion();
+
   if (version === null) {
     throw new Error(
-      `The background service runs bb with the node on your PATH, and none was found. Install ${NODE_REQUIREMENT}, then run this command again.`,
+      `The background service runs Omnyo with the node on your PATH, and none was found. Install ${NODE_REQUIREMENT}, then run this command again.`,
     );
   }
+
   if (!supportsServiceNode(version)) {
     throw new Error(
-      `The background service runs bb with the node on your PATH, which is Node.js ${version}. Install ${NODE_REQUIREMENT}, then run this command again.`,
+      `The background service runs Omnyo with the node on your PATH, which is Node.js ${version}. Install ${NODE_REQUIREMENT}, then run this command again.`,
     );
   }
 }
 
-async function stopLocalBb(
+async function stopLocalApp(
   dataDir: string,
   report: (line: string) => void,
 ): Promise<void> {
-  const runtime = await readBbAppRuntimeFile(dataDir);
+  const runtime = await readAppRuntimeFile(dataDir);
+
   if (runtime === null) {
     return;
   }
+
   const result = await stopVerifiedProcess({
     killTimeoutMs: RUNTIME_STOP_KILL_TIMEOUT_MS,
     pid: runtime.pid,
     signal: "SIGTERM",
     startedAt: runtime.startedAt,
     timeoutMs: RUNTIME_STOP_TIMEOUT_MS,
-    verifyTokens: bbAppRuntimeVerifyTokens(runtime.entryPath),
+    verifyTokens: appRuntimeVerifyTokens(runtime.entryPath),
   });
+
   if (result.kind === "unverified") {
     throw new Error(
-      `bb on this computer is recorded as pid ${String(runtime.pid)}, but that process doesn't look like it, so it was left alone. Quit the bb desktop app or stop bb, then run this command again.`,
+      `Omnyo on this computer is recorded as pid ${String(runtime.pid)}, but that process doesn't look like it, so it was left alone. Quit the Omnyo desktop app or stop Omnyo, then run this command again.`,
     );
   }
+
   if (result.kind === "still-running") {
     throw new Error(
-      `bb (pid ${String(runtime.pid)}) did not stop, even after SIGKILL.`,
+      `Omnyo (pid ${String(runtime.pid)}) did not stop, even after SIGKILL.`,
     );
   }
-  await clearOwnBbAppRuntimeFile({ dataDir, pid: runtime.pid });
+
+  await clearOwnAppRuntimeFile({ dataDir, pid: runtime.pid });
+
   if (result.kind === "stopped") {
-    report(`Stopped bb on this computer (pid ${String(runtime.pid)}).`);
+    report(`Stopped Omnyo on this computer (pid ${String(runtime.pid)}).`);
   }
 }
 
@@ -153,7 +171,9 @@ async function runInstaller(args: {
     [args.installerPath, "--adopt", "--data-dir", args.dataDir],
     { stdio: ["ignore", args.output === "stderr" ? 2 : "inherit", "inherit"] },
   );
+
   const exit = await waitForProcessExit(installer);
+
   return exit.code === 0;
 }
 
@@ -178,27 +198,33 @@ export async function installMachineService(
 ): Promise<InstallMachineServiceResult | null> {
   const { dataDir } = args;
   const lock = await readServerMovedFile(dataDir);
+
   if (lock === null) {
     throw new Error(
-      `${dataDir} is not locked by a server move. This command keeps a computer connected as a machine after its bb server moved to another machine.`,
+      `${dataDir} is not locked by a server move. This command keeps a computer connected as a machine after its Omnyo server moved to another machine.`,
     );
   }
+
   if (process.platform === "win32") {
     throw new Error(
-      "bb cannot install the background machine service on Windows. It is available on macOS and Linux.",
+      "Omnyo cannot install the background machine service on Windows. It is available on macOS and Linux.",
     );
   }
+
   await assertMachineIdentity(dataDir);
   const installerPath = await resolveInstallerPath();
   await assertServiceNode();
+
   if (
     !(await args.confirm(
-      `Stop bb on this computer and install a background service that keeps it connected to ${lock.toHostName}?`,
+      `Stop Omnyo on this computer and install a background service that keeps it connected to ${lock.toHostName}?`,
     ))
   ) {
     return null;
   }
-  await stopLocalBb(dataDir, args.report);
+
+  await stopLocalApp(dataDir, args.report);
+
   if (
     !(await runInstaller({
       dataDir,
@@ -207,9 +233,10 @@ export async function installMachineService(
     }))
   ) {
     throw new Error(
-      "The background service install failed; see the installer output above. Until it succeeds, this computer stays connected only while the bb desktop app or npx bb-app runs, so start one of them to reconnect it now.",
+      "The background service install failed; see the installer output above. Until it succeeds, run the installed Omnyo desktop app or `omnyo-app` to keep this computer connected.",
     );
   }
+
   return {
     dataDir,
     serverUrl: lock.serverUrl,

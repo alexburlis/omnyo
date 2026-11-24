@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
 const requestedPaths = process.argv.slice(2).filter((value) => value !== "--");
+
 const trackedFiles = execFileSync(
   "git",
   ["ls-files", "-z", "--", "*.ts", "*.tsx", "*.mts", "*.cts"],
@@ -56,6 +58,7 @@ function findCommentRanges(sourceFile, sourceText) {
       for (const child of children) {
         visit(child);
       }
+
       return;
     }
 
@@ -75,6 +78,7 @@ function findCommentRanges(sourceFile, sourceText) {
   }
 
   visit(sourceFile);
+
   return [...ranges.values()]
     .filter(
       (range) => !isSemanticComment(sourceText.slice(range.pos, range.end)),
@@ -82,8 +86,10 @@ function findCommentRanges(sourceFile, sourceText) {
     .map((range) => {
       const lineStart = sourceText.lastIndexOf("\n", range.pos - 1) + 1;
       const nextLineFeed = sourceText.indexOf("\n", range.end);
+
       const lineEnd =
         nextLineFeed === -1 ? sourceText.length : nextLineFeed + 1;
+
       const before = sourceText.slice(lineStart, range.pos);
       const after = sourceText.slice(range.end, lineEnd).replace(/\r?\n$/, "");
 
@@ -109,6 +115,7 @@ function replacementForComment(sourceText, range) {
 
   const before = sourceText[range.pos - 1];
   const after = sourceText[range.end];
+
   const needsSeparator =
     commentText.startsWith("/*") &&
     before !== undefined &&
@@ -120,11 +127,13 @@ function replacementForComment(sourceText, range) {
 }
 
 let changedFiles = 0;
+
 let removedComments = 0;
 
 for (const file of selectedFiles) {
   const absolutePath = resolve(repositoryRoot, file);
   const sourceText = readFileSync(absolutePath, "utf8");
+
   const sourceFile = ts.createSourceFile(
     file,
     sourceText,
@@ -132,6 +141,7 @@ for (const file of selectedFiles) {
     true,
     file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
+
   const commentRanges = findCommentRanges(sourceFile, sourceText);
 
   if (commentRanges.length === 0) {

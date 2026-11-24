@@ -5,7 +5,7 @@ import {
   removeServerConnectHoldFile,
   SERVER_CONNECT_HOLD_FILE_NAME,
   writeServerConnectHoldFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PluginStartOptions } from "../../src/services/plugins/plugin-service.js";
 import {
@@ -23,8 +23,9 @@ afterEach(async () => {
 });
 
 async function makeDataDir(): Promise<string> {
-  const dataDir = await mkdtemp(join(tmpdir(), "bb-connect-hold-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "omnyo-connect-hold-"));
   tempDirs.push(dataDir);
+
   return dataDir;
 }
 
@@ -36,14 +37,18 @@ async function writeHold(dataDir: string): Promise<void> {
   });
 }
 
-describe("bb connect hold", () => {
-  it("holds the builtin connect and bb account plugins while server-connect-hold.json exists, even when it can't be read", async () => {
+describe("Omnyo connect hold", () => {
+  it("holds the builtin connect and Omnyo account plugins while server-connect-hold.json exists, even when it can't be read", async () => {
     const dataDir = await makeDataDir();
     const logger = { warn: vi.fn() };
     const hold = createConnectHold({ dataDir, logger });
 
     expect(hold).toMatchObject({
-      sources: ["builtin:connect", "builtin:bb-account"],
+      sources: [
+        "builtin:connect",
+        "builtin:omnyo-account",
+        "builtin:bb-account",
+      ],
       detail: CONNECT_HOLD_DETAIL,
     });
     expect(await hold.isActive()).toBe(false);
@@ -88,7 +93,11 @@ describe("bb connect hold", () => {
     expect(events).toEqual(["start", "registrations-settled", "update-checks"]);
     const hold = starts[0]?.hold;
     expect(hold).toMatchObject({
-      sources: ["builtin:connect", "builtin:bb-account"],
+      sources: [
+        "builtin:connect",
+        "builtin:omnyo-account",
+        "builtin:bb-account",
+      ],
       detail: CONNECT_HOLD_DETAIL,
     });
     expect(await hold?.isActive()).toBe(true);

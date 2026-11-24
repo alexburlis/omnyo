@@ -1,12 +1,13 @@
-import type { ThreadChatMessageReference } from "@get-bb/plugin-sdk";
-import type { PromptInput } from "@bb/domain";
+import type { ThreadChatMessageReference } from "@omnyo/plugin-sdk";
+import type { PromptInput, PromptTextMention } from "@omnyo/domain";
 import type {
   MarkdownPreviewLocalFileLink,
   MarkdownPreviewLocalFileLinkHandler,
 } from "../../ui/markdown-local-file-link.js";
 import type { MarkdownPreviewLinkHandler } from "../../ui/markdown-link.js";
-import type { PromptDraftAttachment } from "@bb/client-core";
+import type { PromptDraftAttachment } from "@omnyo/client-core";
 import type { MarkdownMessageDirectiveOpenThreadPanel } from "@/components/ui/markdown-message-directives";
+import type { UserAttachmentImageSrcOptions } from "@/lib/user-attachment-images";
 
 export type ThreadTimelineLocalFileLink = MarkdownPreviewLocalFileLink;
 
@@ -44,6 +45,7 @@ export interface ThreadTimelineInlineMessageEditor {
 export type ThreadTimelineAddToChatHandler = (
   text: string,
   attachments?: readonly PromptDraftAttachment[],
+  mentions?: readonly PromptTextMention[],
 ) => void;
 
 export interface ThreadTimelinePluginMessageAction {
@@ -75,6 +77,7 @@ export type ThreadTimelineUnreadDividerPlacement =
 export type UserAttachmentImageSrcResolver = (
   pathOrUrl: string,
   projectId?: string,
+  options?: UserAttachmentImageSrcOptions,
 ) => string;
 
 export interface ThreadTimelineImageViewSrcTarget {

@@ -9,18 +9,18 @@ import {
 } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import type { Environment, Host, Thread } from "@bb/domain";
-import type { EnvironmentDisplayHostContext } from "@bb/core-ui";
+import type { Environment, Host, Thread } from "@omnyo/domain";
+import type { EnvironmentDisplayHostContext } from "@omnyo/core-ui";
 import type {
   SystemEnvironmentProvider,
   SystemMachineProvider,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { systemEnvironmentProvidersQueryKey } from "@/hooks/queries/environment-provider-queries";
 import {
   hostsQueryKey,
   systemMachineProvidersQueryKey,
 } from "@/hooks/queries/query-keys";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,8 +29,8 @@ import {
   makeEnvironment,
   makeHost,
   makeThread as makeThreadFixture,
-} from "@bb/test-helpers/domain-fixtures";
-import { makeWorkspaceMergeBase, makeWorkspaceStatus } from "@bb/test-helpers";
+} from "@omnyo/test-helpers/domain-fixtures";
+import { makeWorkspaceMergeBase, makeWorkspaceStatus } from "@omnyo/test-helpers";
 import {
   EnvironmentProvisioningFailureRow,
   EnvironmentRow,
@@ -40,6 +40,7 @@ import {
 } from "./ThreadMetadataContent";
 
 const localHost = { locality: "local", identity: null } as const;
+
 const connectedLocalHost: EnvironmentDisplayHostContext = {
   locality: "local",
   identity: { name: "Michael-M4", connected: true },
@@ -59,12 +60,14 @@ function withQueryClient(
     systemMachineProvidersQueryKey(),
     machines?.providers ?? [],
   );
+
   if (registeredProviders !== undefined) {
     queryClient.setQueryData(
       systemEnvironmentProvidersQueryKey({}),
       registeredProviders,
     );
   }
+
   return (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
@@ -175,12 +178,15 @@ afterEach(() => {
 describe("ThreadMetadataCard", () => {
   it("shows its scrollbar only during active scrolling", () => {
     vi.useFakeTimers();
+
     const { container } = render(
       <ThreadMetadataCard>
         <div>Thread information</div>
       </ThreadMetadataCard>,
     );
+
     const scrollArea = container.querySelector("dl");
+
     if (!(scrollArea instanceof HTMLElement)) {
       throw new Error("missing info scroll area");
     }
@@ -212,6 +218,7 @@ describe("EnvironmentRow", () => {
 
   it("shows the provider icon and host name without provider kind text", () => {
     const environment = makeEnvironment({ hostId: "host_modal" });
+
     const markup = renderEnvironmentRow(
       environment,
       [],
@@ -258,6 +265,7 @@ describe("EnvironmentRow", () => {
         identity: { name: "Old laptop", connected: false },
       },
     );
+
     expect(markup).toContain("Unavailable — machine removed");
     expect(markup).toContain("Old laptop");
     expect(markup).not.toContain("(offline)");
@@ -378,6 +386,30 @@ describe("EnvironmentProvisioningFailureRow", () => {
 });
 
 describe("GitStatusRow", () => {
+  it("qualifies counts when squash detection is incomplete", () => {
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <GitStatusRow
+          thread={makeThread()}
+          environment={null}
+          workspaceStatus={makeWorkspaceStatus({
+            mergeBase: makeWorkspaceMergeBase({
+              aheadCount: 3,
+              squashMergeCheckComplete: false,
+            }),
+          })}
+          workspaceStatusError={null}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain("3 ahead of main");
+    expect(markup).toContain(
+      'aria-label="Squash-merge check incomplete; counts may include already-merged commits."',
+    );
+    expect(markup).not.toContain(">Squash-merge check incomplete");
+  });
+
   it("shows no live git status for an archived attached checkout", () => {
     const markup = renderToStaticMarkup(
       <GitStatusRow
@@ -416,9 +448,49 @@ describe("GitStatusRow", () => {
     expect(render(null)).toBe("");
   });
 
+  it("keeps the last known comparison when a refresh fails and flags it as stale", () => {
+    const render = (workspaceStatusError: Error | null) =>
+      renderToStaticMarkup(
+        <TooltipProvider>
+          <GitStatusRow
+            thread={makeThread()}
+            environment={null}
+            workspaceStatus={makeWorkspaceStatus({
+              mergeBase: makeWorkspaceMergeBase({
+                mergeBaseBranch: "main",
+                aheadCount: 3,
+              }),
+            })}
+            workspaceStatusError={workspaceStatusError}
+          />
+        </TooltipProvider>,
+      );
+
+    const stale = render(new Error("relay hit a temporary problem"));
+    expect(stale).toContain("3 ahead of main");
+    expect(stale).toContain(
+      "Couldn&#x27;t refresh: Workspace status unavailable. Showing the last known status.",
+    );
+    expect(render(null)).not.toContain("Couldn&#x27;t refresh");
+  });
+
+  it("shows the failure when no status has loaded", () => {
+    const markup = renderToStaticMarkup(
+      <GitStatusRow
+        thread={makeThread()}
+        environment={null}
+        workspaceStatus={undefined}
+        workspaceStatusError={new Error("relay hit a temporary problem")}
+      />,
+    );
+
+    expect(markup).toContain("Workspace status unavailable");
+  });
+
   it("phrases the branch comparison against its merge base", () => {
     const compare = (aheadCount: number, behindCount: number) =>
       formatBranchComparison({ aheadCount, behindCount, baseBranch: "main" });
+
     expect(compare(0, 0)).toBe("Even with main");
     expect(compare(6, 0)).toBe("6 ahead of main");
     expect(compare(0, 3)).toBe("3 behind main");

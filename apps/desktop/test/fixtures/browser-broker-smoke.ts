@@ -16,17 +16,21 @@ async function main() {
     .parse(
       JSON.parse(readFileSync(z.string().parse(process.argv.at(-1)), "utf8")),
     );
+
   app.setPath("userData", join(config.artifacts, "electron-profile"));
   app.disableHardwareAcceleration();
+
   const keepAlive = setInterval(() => {
     if (existsSync(join(config.artifacts, "stop-electron"))) stop();
   }, 100);
+
   app.on("window-all-closed", () => {});
   await app.whenReady();
   const window = new BrowserWindow({ width: 1000, height: 800, show: true });
   await window.loadURL(
     "data:text/html,<title>Broker smoke host</title>Trusted host sentinel",
   );
+
   const manager = createDesktopBrowserViewManager({
     partition: "broker-smoke-personal",
     dispatchAppCommand: () => {},
@@ -34,33 +38,44 @@ async function main() {
     pagePreloadPath: null,
     resolveAppCommand: () => null,
   });
-  const broker = createDesktopBrowserBroker({ manager, product: "BB smoke" });
+
+  const broker = createDesktopBrowserBroker({
+    manager,
+    product: "Omnyo smoke",
+  });
+
   broker.registerWindow(window);
+
   const client = createDesktopBrowserBrokerClient({
     broker,
     dataDir: config.dataDir,
     homeDir: config.artifacts,
     getServerUrl: () => config.serverUrl,
   });
+
   writeFileSync(
     join(config.artifacts, "electron-ready.json"),
     JSON.stringify({ ready: true }),
     { mode: 0o600 },
   );
   let stopping = false;
+
   function stop() {
     if (stopping) return;
     stopping = true;
     client.stop();
     broker.dispose();
     manager.destroyAll();
+
     if (!window.isDestroyed()) window.destroy();
     clearInterval(keepAlive);
     app.quit();
   }
+
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
 }
+
 void main().catch((error) => {
   console.error(error);
   app.exit(1);

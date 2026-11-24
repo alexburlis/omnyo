@@ -19,6 +19,7 @@ const mermaidRender = vi.hoisted(() =>
     bindFunctions: undefined,
   })),
 );
+
 vi.mock("./markdown-mermaid-loader.js", () => ({
   loadMermaid: async () => ({
     initialize: () => undefined,
@@ -29,11 +30,13 @@ vi.mock("./markdown-mermaid-loader.js", () => ({
 type ObserverCallback = (
   entries: { isIntersecting: boolean; target: Element }[],
 ) => void;
+
 const observers: {
   callback: ObserverCallback;
   targets: Set<Element>;
   disconnected: boolean;
 }[] = [];
+
 class FakeIntersectionObserver {
   private readonly record: (typeof observers)[number];
   constructor(callback: ObserverCallback) {
@@ -65,9 +68,11 @@ function enterViewport(target: Element) {
 
 function diagramContainer(container: HTMLElement): Element {
   const element = container.firstElementChild;
+
   if (element === null) {
     throw new Error("diagram container did not render");
   }
+
   return element;
 }
 
@@ -100,12 +105,14 @@ describe("MarkdownMermaidDiagram render gating", () => {
         source="graph TD; A-->B"
       />,
     );
+
     const second = render(
       <MarkdownMermaidDiagram
         preferredTheme="light"
         source="graph TD; C-->D"
       />,
     );
+
     await flushRenders();
     expect(mermaidRender).not.toHaveBeenCalled();
     expect(observers.filter((observer) => !observer.disconnected)).toHaveLength(
@@ -128,6 +135,7 @@ describe("MarkdownMermaidDiagram render gating", () => {
     const view = render(
       <MarkdownMermaidDiagram preferredTheme="light" source="graph TD; A" />,
     );
+
     act(() => {
       enterViewport(diagramContainer(view.container));
     });
@@ -171,6 +179,7 @@ describe("MarkdownMermaidDiagram render gating", () => {
     const view = render(
       <MarkdownMermaidDiagram preferredTheme="light" source="graph TD; A" />,
     );
+
     act(() => {
       enterViewport(diagramContainer(view.container));
     });
@@ -181,6 +190,7 @@ describe("MarkdownMermaidDiagram render gating", () => {
     let finishRender: (() => void) | undefined;
     mermaidRender.mockImplementationOnce((id, source) => {
       document.getElementById(id)?.remove();
+
       return new Promise((resolve) => {
         finishRender = () =>
           resolve({
@@ -215,6 +225,7 @@ describe("MarkdownMermaidDiagram render gating", () => {
     const view = render(
       <MarkdownMermaidDiagram preferredTheme="light" source="graph TD; A" />,
     );
+
     act(() => {
       enterViewport(diagramContainer(view.container));
     });
@@ -252,9 +263,11 @@ describe("MarkdownMermaidDiagram render gating", () => {
 
   it("shows source when no diagram has rendered successfully and recovers on valid input", async () => {
     mermaidRender.mockRejectedValueOnce(new Error("Incomplete Mermaid input"));
+
     const view = render(
       <MarkdownMermaidDiagram preferredTheme="light" source="graph TD; A[" />,
     );
+
     act(() => {
       enterViewport(diagramContainer(view.container));
     });
@@ -284,6 +297,7 @@ describe("MarkdownMermaidDiagram render gating", () => {
       const view = render(
         <MarkdownMermaidDiagram preferredTheme="light" source="graph TD; A" />,
       );
+
       act(() => {
         enterViewport(diagramContainer(view.container));
       });
@@ -325,9 +339,11 @@ describe("MarkdownMermaidDiagram render gating", () => {
         vi.advanceTimersByTime(MERMAID_SOURCE_RENDER_DEBOUNCE_MS);
       });
       await flushRenders();
+
       const currentSvg = view.container.querySelector(
         'svg[data-source="graph TD; A-->B-->C"]',
       );
+
       expect(currentSvg).not.toBeNull();
       await act(async () => finishRender?.());
       await flushRenders();
@@ -339,6 +355,7 @@ describe("MarkdownMermaidDiagram render gating", () => {
     const view = render(
       <MarkdownMermaidDiagram preferredTheme="dark" source="graph TD; X-->Y" />,
     );
+
     act(() => {
       enterViewport(diagramContainer(view.container));
     });
@@ -349,6 +366,7 @@ describe("MarkdownMermaidDiagram render gating", () => {
     const remounted = render(
       <MarkdownMermaidDiagram preferredTheme="dark" source="graph TD; X-->Y" />,
     );
+
     expect(
       remounted.container.querySelector('svg[data-source="graph TD; X-->Y"]'),
     ).not.toBeNull();
@@ -369,15 +387,18 @@ describe("MarkdownMermaidDiagram render gating", () => {
 describe("mermaid render cache", () => {
   it("evicts the least recently used entry past the limit", () => {
     const diagram = { svg: "<svg></svg>", bindFunctions: undefined };
+
     const keyFor = (index: number) =>
       buildMermaidRenderCacheKey({
         appThemeEpoch: 0,
         preferredTheme: "light",
         source: `graph ${index}`,
       });
+
     for (let index = 0; index < MERMAID_RENDER_CACHE_LIMIT; index += 1) {
       storeMermaidRenderCache(keyFor(index), diagram);
     }
+
     expect(readMermaidRenderCache(keyFor(0))).toBe(diagram);
     storeMermaidRenderCache(keyFor(MERMAID_RENDER_CACHE_LIMIT), diagram);
     expect(getMermaidRenderCacheSize()).toBe(MERMAID_RENDER_CACHE_LIMIT);

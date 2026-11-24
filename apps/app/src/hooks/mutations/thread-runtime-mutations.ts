@@ -1,15 +1,43 @@
+import { promptInputToDraft } from "@omnyo/client-core";
+import { composerDraftFromPromptDraft } from "@/lib/plugin-composer-handle";
 import { notifyComposerSubmitted } from "@/lib/composer-submissions";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { ThreadQueuedMessage } from "@bb/domain";
+import {
+  reserveComposerSend,
+  type ComposerSendSlot,
+} from "@/lib/composer-send-queue";
+import { useCallback } from "react";
+import {
+  useMutation,
+  useQueryClient,
+  type MutationOptions,
+  type QueryClient,
+} from "@tanstack/react-query";
+import {
+  CLIENT_TURN_REQUEST_ID_ALPHABET,
+  CLIENT_TURN_REQUEST_ID_SUFFIX_LENGTH,
+  formatClientTurnRequestIdSuffix,
+  type ClientTurnRequestId,
+  type PromptInput,
+  type ThreadQueuedMessage,
+} from "@omnyo/domain";
+import { customAlphabet } from "nanoid";
 import type {
   CreateQueuedMessageRequest,
+  CreateThreadRequest,
   SendQueuedMessageMode,
+  SendQueuedMessageRequest,
   SendQueuedMessageResponse,
   ThreadQueuedMessageListResponse,
   UpdateQueuedMessageRequest,
-} from "@bb/server-contract";
-import type { AppCreateThreadRequest } from "@bb/client-core";
-import { BbHttpError, sdk } from "@/lib/sdk";
+} from "@omnyo/server-contract";
+import type { AppCreateThreadRequest } from "@omnyo/client-core";
+import {
+  createThreadThroughOutbox,
+  type NewChatOutboxContext,
+} from "@/lib/send-outbox/send-outbox";
+import type { OmnyoSdkAreas } from "@omnyo/sdk";
+import { isQueuedMessageNotFoundError } from "@/lib/http-error";
+import { sdk } from "@/lib/sdk";
 import { wsManager } from "@/lib/ws";
 import type { QueuedMessageReorderRequest } from "@/lib/queued-message-reorder";
 import type {
@@ -18,6 +46,7 @@ import type {
 } from "./mutation-request-types";
 import {
   applyCreateThreadResult,
+  applyEditMessageResult,
   applyQueuedMessageCreateResult,
   applyQueuedMessageDeleteResult,
   applyQueuedMessagesResult,
@@ -28,6 +57,7 @@ import {
   applyThreadPlanCancellationResult,
   beginCreateQueuedMessageTransaction,
   beginCreateThreadTransaction,
+  beginEditMessageTransaction,
   beginRemoveQueuedMessageTransaction,
   beginReorderQueuedMessageTransaction,
   beginSetQueuedMessageGroupBoundaryTransaction,
@@ -37,13 +67,16 @@ import {
   beginUpdateQueuedMessageTransaction,
   prefetchThreadQueuedMessages,
   rollbackCreateQueuedMessageTransaction,
+  rollbackEditMessageTransaction,
   rollbackRemoveQueuedMessageTransaction,
+  settleQueuedMessageAlreadySent,
   rollbackReorderQueuedMessageTransaction,
   rollbackSendThreadMessageTransaction,
   rollbackStopThreadTransaction,
   rollbackUpdateQueuedMessageTransaction,
   settleStopThreadTransaction,
   type CreateQueuedMessageTransaction,
+  type EditMessageTransaction,
   type RemoveQueuedMessageTransaction,
   type ReorderQueuedMessageTransaction,
   type SendThreadMessageTransaction,
@@ -53,10 +86,85 @@ import {
 import {
   invalidateThreadBannerQueries,
   invalidateThreadHistoryRewriteQueries,
+  invalidateThreadQueueQueries,
+  invalidateThreadQueuedMessageSendQueries,
 } from "../cache-owners/mutation-cache-effects";
+
+const composerTransports = new WeakMap<object, ComposerSendSlot>();
+
+const createComposerRequestSuffix = customAlphabet(
+  CLIENT_TURN_REQUEST_ID_ALPHABET,
+  CLIENT_TURN_REQUEST_ID_SUFFIX_LENGTH,
+);
+
+const composerInputPreparations = new WeakMap<
+  object,
+  () => Promise<PromptInput[]>
+>();
+
+function prepareComposerSend<T extends { id: string }>(
+  queryClient: object,
+  variables: T,
+  reservation?: ComposerSendSlot,
+  prepareInput?: () => Promise<PromptInput[]>,
+): T {
+  const request = structuredClone(variables);
+  composerTransports.set(
+    request,
+    reservation ?? reserveComposerSend(queryClient, request.id),
+  );
+
+  if (prepareInput) composerInputPreparations.set(request, prepareInput);
+
+  return request;
+}
+
+function runComposerSend<T>(
+  request: object,
+  send: (preparedInput?: PromptInput[]) => Promise<T>,
+): Promise<T> {
+  const transport = composerTransports.get(request);
+
+  if (transport === undefined)
+    throw new Error("The message has no transport reservation.");
+
+  const prepareInput = composerInputPreparations.get(request);
+  composerInputPreparations.delete(request);
+
+  return transport.run(async () => send(await prepareInput?.()));
+}
+
+function prepareComposerTurnSend<
+  T extends { id: string; requestId?: ClientTurnRequestId },
+>(
+  queryClient: object,
+  variables: T,
+  reservation?: ComposerSendSlot,
+  prepareInput?: () => Promise<PromptInput[]>,
+): T & { requestId: ClientTurnRequestId } {
+  return prepareComposerSend(
+    queryClient,
+    {
+      ...variables,
+      requestId:
+        variables.requestId ??
+        formatClientTurnRequestIdSuffix({
+          suffix: createComposerRequestSuffix(),
+        }),
+    },
+    reservation,
+    prepareInput,
+  );
+}
 
 interface CreateThreadQueuedMessageMutationRequest extends CreateQueuedMessageRequest {
   id: string;
+  sendReservation?: ComposerSendSlot;
+  prepareInput?: () => Promise<PromptInput[]>;
+}
+
+interface EditThreadMessageMutationRequest extends EditMessageMutationRequest {
+  messageId: string;
 }
 
 interface UpdateThreadQueuedMessageMutationRequest extends UpdateQueuedMessageRequest {
@@ -64,7 +172,7 @@ interface UpdateThreadQueuedMessageMutationRequest extends UpdateQueuedMessageRe
   queuedMessageId: string;
 }
 
-interface SendThreadQueuedMessageMutationRequest {
+interface SendThreadQueuedMessageMutationRequest extends SendQueuedMessageRequest {
   id: string;
   mode: SendQueuedMessageMode;
   queuedMessageId: string;
@@ -85,38 +193,19 @@ interface SetThreadQueuedMessageGroupBoundaryMutationRequest {
   id: string;
 }
 
-function getHttpErrorBodyMessage(error: BbHttpError): string | null {
-  const body = error.body;
-  if (
-    typeof body !== "object" ||
-    body === null ||
-    !("message" in body) ||
-    typeof body.message !== "string"
-  ) {
-    return null;
-  }
-  return body.message;
-}
-
-function isQueuedMessageNotFoundError(error: unknown): boolean {
-  return (
-    error instanceof BbHttpError &&
-    error.status === 404 &&
-    error.code === "invalid_request" &&
-    getHttpErrorBodyMessage(error) === "Queued message not found"
-  );
-}
-
 async function deleteThreadQueuedMessageOrConfirmMissing({
   id,
   queuedMessageId,
-}: DeleteThreadQueuedMessageMutationRequest): Promise<void> {
+}: DeleteThreadQueuedMessageMutationRequest): Promise<"deleted" | "missing"> {
   try {
     await sdk.threads.queuedMessages.delete({ threadId: id, queuedMessageId });
+
+    return "deleted";
   } catch (error) {
     if (isQueuedMessageNotFoundError(error)) {
-      return;
+      return "missing";
     }
+
     throw error;
   }
 }
@@ -125,23 +214,51 @@ export function useCreateThread() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["createThread"],
     meta: {
       errorMessage: "Failed to create thread.",
       lifecycleOperation: "create_thread",
     },
-    mutationFn: (request: AppCreateThreadRequest) =>
-      sdk.threads.spawn({
+    mutationFn: async ({
+      outbox,
+      ...request
+    }: AppCreateThreadRequest & { outbox?: NewChatOutboxContext }) => {
+      const thread: CreateThreadRequest = {
         ...request,
         origin: "app",
         originKind: request.originKind ?? null,
         startedOnBehalfOf: request.startedOnBehalfOf ?? null,
-      }),
+      };
+
+      if (
+        outbox !== undefined &&
+        thread.originKind === null &&
+        thread.sourceThreadId === undefined &&
+        thread.pluginSubmission === undefined
+      ) {
+        const accepted = await createThreadThroughOutbox({
+          onStaged: outbox.onStaged,
+          pendingChatId: outbox.pendingChatId,
+          thread,
+        });
+
+        if (accepted !== null) {
+          return sdk.threads.get({ threadId: accepted.threadId });
+        }
+      }
+
+      return sdk.threads.spawn(thread);
+    },
     onMutate: async () => beginCreateThreadTransaction({ queryClient }),
     onSuccess: (thread, variables) => {
-      notifyComposerSubmitted({
-        kind: "new-thread",
-        projectId: variables.projectId,
-      });
+      notifyComposerSubmitted(
+        {
+          kind: "new-thread",
+          projectId: variables.projectId,
+        },
+        composerDraftFromPromptDraft(promptInputToDraft(variables.input)),
+      );
+
       if (thread.queuedMessageCount > 0) {
         void prefetchThreadQueuedMessages({
           queryClient,
@@ -153,6 +270,7 @@ export function useCreateThread() {
             }),
         });
       }
+
       applyCreateThreadResult({
         queryClient,
         request: variables,
@@ -162,29 +280,65 @@ export function useCreateThread() {
   });
 }
 
-export function useSendThreadMessage() {
-  const queryClient = useQueryClient();
+type ThreadSendTransport = OmnyoSdkAreas["threads"]["send"];
 
-  return useMutation({
+type ThreadQueuedMessageCreateTransport =
+  OmnyoSdkAreas["threads"]["queuedMessages"]["create"];
+
+type ThreadSendResult = Awaited<ReturnType<ThreadSendTransport>>;
+
+type ThreadMessageSendMutationOptions = MutationOptions<
+  ThreadSendResult,
+  Error,
+  SendThreadMessageMutationRequest,
+  SendThreadMessageTransaction
+>;
+
+type ThreadQueuedMessageCreateMutationOptions = MutationOptions<
+  ThreadQueuedMessage,
+  Error,
+  CreateThreadQueuedMessageMutationRequest,
+  CreateQueuedMessageTransaction
+>;
+
+interface ThreadMessageMutationSource<Transport> {
+  queryClient: QueryClient;
+  transport: Transport;
+  notifiesComposer: boolean;
+}
+
+function threadMessageSendMutation({
+  notifiesComposer,
+  queryClient,
+  transport,
+}: ThreadMessageMutationSource<ThreadSendTransport>): ThreadMessageSendMutationOptions {
+  return {
     meta: {
       errorMessage: "Failed to send message.",
       lifecycleOperation: "send_message",
       showErrorToast: false,
     },
-    mutationFn: async ({
-      id,
-      input,
-      model,
-      serviceTier,
-      reasoningLevel,
-      permissionMode,
-      mode,
-      sendAt,
-      senderThreadId,
-      pluginSubmission,
-      executionInputSources,
-    }: SendThreadMessageMutationRequest) => {
-      return await sdk.threads.send({
+    mutationFn: (variables) => {
+      const {
+        id,
+        input,
+        model,
+        serviceTier,
+        reasoningLevel,
+        permissionMode,
+        mode,
+        sendAt,
+        sendNow,
+        senderThreadId,
+        messageSource,
+        pluginSubmission,
+        executionInputSources,
+        compactFirst,
+        requestId,
+      } = variables;
+
+      const request = {
+        requestId,
         threadId: id,
         input,
         model,
@@ -192,18 +346,30 @@ export function useSendThreadMessage() {
         reasoningLevel,
         permissionMode,
         ...(sendAt === undefined ? {} : { sendAt }),
+        ...(sendNow === undefined ? {} : { sendNow }),
         ...(pluginSubmission === undefined ? {} : { pluginSubmission }),
+        ...(compactFirst === undefined ? {} : { compactFirst }),
         executionInputSources,
         mode,
         ...(senderThreadId !== undefined ? { senderThreadId } : {}),
+        ...(messageSource === undefined ? {} : { messageSource }),
+      };
+
+      return runComposerSend(variables, (preparedInput) => {
+        if (preparedInput !== undefined) variables.input = preparedInput;
+
+        return transport({ ...request, input: variables.input });
       });
     },
-    onMutate: async (variables): Promise<SendThreadMessageTransaction> =>
+    onMutate: (variables) =>
       beginSendThreadMessageTransaction({
         queryClient,
         request: variables,
       }),
     onError: (_error, variables, context) => {
+      composerTransports.get(variables)?.cancel();
+      composerTransports.delete(variables);
+      composerInputPreparations.delete(variables);
       rollbackSendThreadMessageTransaction({
         queryClient,
         request: variables,
@@ -211,7 +377,13 @@ export function useSendThreadMessage() {
       });
     },
     onSuccess: (data, variables, context) => {
-      notifyComposerSubmitted({ kind: "thread", threadId: variables.id });
+      composerTransports.delete(variables);
+
+      if (notifiesComposer)
+        notifyComposerSubmitted(
+          { kind: "thread", threadId: variables.id },
+          composerDraftFromPromptDraft(promptInputToDraft(variables.input)),
+        );
       applySendThreadMessageSuccess({
         queryClient,
         realtimeConnected: wsManager.getConnectionState() === "connected",
@@ -220,23 +392,241 @@ export function useSendThreadMessage() {
         transaction: context,
       });
     },
-  });
+  };
+}
+
+function threadQueuedMessageCreateMutation({
+  notifiesComposer,
+  queryClient,
+  transport,
+}: ThreadMessageMutationSource<ThreadQueuedMessageCreateTransport>): ThreadQueuedMessageCreateMutationOptions {
+  return {
+    meta: {
+      errorMessage: "Failed to queue message.",
+      lifecycleOperation: "queue_message",
+      showErrorToast: false,
+    },
+    mutationFn: (variables) => {
+      const {
+        id,
+        input,
+        model,
+        serviceTier,
+        reasoningLevel,
+        permissionMode,
+        senderThreadId,
+        messageSource,
+        executionInputSources,
+      } = variables;
+
+      const request = {
+        threadId: id,
+        input,
+        model,
+        serviceTier,
+        reasoningLevel,
+        permissionMode,
+        executionInputSources,
+        ...(senderThreadId !== undefined ? { senderThreadId } : {}),
+        ...(messageSource === undefined ? {} : { messageSource }),
+      };
+
+      return runComposerSend(variables, (preparedInput) => {
+        if (preparedInput !== undefined) variables.input = preparedInput;
+
+        return transport({ ...request, input: variables.input });
+      });
+    },
+    onMutate: (variables) =>
+      beginCreateQueuedMessageTransaction({
+        queryClient,
+        request: variables,
+      }),
+    onError: (_error, variables, context) => {
+      composerTransports.get(variables)?.cancel();
+      composerTransports.delete(variables);
+      composerInputPreparations.delete(variables);
+      rollbackCreateQueuedMessageTransaction({
+        queryClient,
+        request: variables,
+        transaction: context,
+      });
+    },
+    onSuccess: (queuedMessage, variables, context) => {
+      composerTransports.delete(variables);
+
+      if (notifiesComposer)
+        notifyComposerSubmitted(
+          { kind: "thread", threadId: variables.id },
+          composerDraftFromPromptDraft(promptInputToDraft(variables.input)),
+        );
+      applyQueuedMessageCreateResult({
+        queryClient,
+        queuedMessage,
+        threadId: variables.id,
+        transaction: context,
+      });
+    },
+  };
+}
+
+function executeMutation<Data, Variables, Context>(
+  queryClient: QueryClient,
+  options: MutationOptions<Data, Error, Variables, Context>,
+  variables: Variables,
+): Promise<Data> {
+  return queryClient
+    .getMutationCache()
+    .build(queryClient, options)
+    .execute(variables);
+}
+
+export function runThreadMessageSend({
+  queryClient,
+  request,
+  transport,
+}: {
+  queryClient: QueryClient;
+  request: SendThreadMessageMutationRequest;
+  transport: ThreadSendTransport;
+}): Promise<ThreadSendResult> {
+  const { sendReservation, prepareInput, ...variables } = request;
+
+  return executeMutation(
+    queryClient,
+    threadMessageSendMutation({
+      notifiesComposer: false,
+      queryClient,
+      transport,
+    }),
+    prepareComposerTurnSend(
+      queryClient,
+      variables,
+      sendReservation,
+      prepareInput,
+    ),
+  );
+}
+
+export function runThreadQueuedMessageCreate({
+  queryClient,
+  request,
+  transport,
+}: {
+  queryClient: QueryClient;
+  request: CreateThreadQueuedMessageMutationRequest;
+  transport: ThreadQueuedMessageCreateTransport;
+}): Promise<ThreadQueuedMessage> {
+  const { sendReservation, prepareInput, ...variables } = request;
+
+  return executeMutation(
+    queryClient,
+    threadQueuedMessageCreateMutation({
+      notifiesComposer: false,
+      queryClient,
+      transport,
+    }),
+    prepareComposerSend(queryClient, variables, sendReservation, prepareInput),
+  );
+}
+
+export function useSendThreadMessage() {
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation(
+    threadMessageSendMutation({
+      notifiesComposer: true,
+      queryClient,
+      transport: (args) => sdk.threads.send(args),
+    }),
+  );
+
+  const sendAsync = mutation.mutateAsync;
+  const send = mutation.mutate;
+
+  const mutateAsync = useCallback(
+    (
+      variables: SendThreadMessageMutationRequest,
+      options?: Parameters<typeof sendAsync>[1],
+    ) => {
+      const { sendReservation, prepareInput, ...request } = variables;
+
+      return sendAsync(
+        prepareComposerTurnSend(
+          queryClient,
+          request,
+          sendReservation,
+          prepareInput,
+        ),
+        options,
+      );
+    },
+    [sendAsync, queryClient],
+  );
+
+  const mutate = useCallback(
+    (
+      variables: SendThreadMessageMutationRequest,
+      options?: Parameters<typeof send>[1],
+    ) => {
+      const { sendReservation, prepareInput, ...request } = variables;
+
+      return send(
+        prepareComposerTurnSend(
+          queryClient,
+          request,
+          sendReservation,
+          prepareInput,
+        ),
+        options,
+      );
+    },
+    [send, queryClient],
+  );
+
+  const reserve = useCallback(
+    (threadId: string) => reserveComposerSend(queryClient, threadId),
+    [queryClient],
+  );
+
+  return { ...mutation, mutate, mutateAsync, reserve };
 }
 
 export function useEditThreadMessage() {
   const queryClient = useQueryClient();
+
   return useMutation({
     meta: {
       errorMessage: "Failed to edit the message.",
       lifecycleOperation: "edit_message",
       showErrorToast: false,
     },
-    mutationFn: ({ id, ...request }: EditMessageMutationRequest) =>
+    mutationFn: ({
+      id,
+      messageId: _messageId,
+      ...request
+    }: EditThreadMessageMutationRequest) =>
       sdk.threads.editMessage({ threadId: id, ...request }),
-    onSuccess: (_result, variables) => {
+    onMutate: (variables): EditMessageTransaction =>
+      beginEditMessageTransaction({ queryClient, request: variables }),
+    onError: (_error, variables, context) => {
+      rollbackEditMessageTransaction({
+        queryClient,
+        threadId: variables.id,
+        transaction: context,
+      });
+    },
+    onSuccess: (_result, variables, context) => {
+      applyEditMessageResult({
+        queryClient,
+        threadId: variables.id,
+        transaction: context,
+      });
+
       if (wsManager.getConnectionState() === "connected") {
         return;
       }
+
       invalidateThreadHistoryRewriteQueries({
         queryClient,
         threadId: variables.id,
@@ -248,54 +638,63 @@ export function useEditThreadMessage() {
 export function useCreateThreadQueuedMessage() {
   const queryClient = useQueryClient();
 
-  return useMutation({
-    meta: {
-      errorMessage: "Failed to queue message.",
-      lifecycleOperation: "queue_message",
-      showErrorToast: false,
+  const mutation = useMutation(
+    threadQueuedMessageCreateMutation({
+      notifiesComposer: true,
+      queryClient,
+      transport: (args) => sdk.threads.queuedMessages.create(args),
+    }),
+  );
+
+  const sendAsync = mutation.mutateAsync;
+  const send = mutation.mutate;
+
+  const mutateAsync = useCallback(
+    (
+      variables: CreateThreadQueuedMessageMutationRequest,
+      options?: Parameters<typeof sendAsync>[1],
+    ) => {
+      const { sendReservation, prepareInput, ...request } = variables;
+
+      return sendAsync(
+        prepareComposerSend(
+          queryClient,
+          request,
+          sendReservation,
+          prepareInput,
+        ),
+        options,
+      );
     },
-    mutationFn: ({
-      id,
-      input,
-      model,
-      serviceTier,
-      reasoningLevel,
-      permissionMode,
-      senderThreadId,
-      executionInputSources,
-    }: CreateThreadQueuedMessageMutationRequest): Promise<ThreadQueuedMessage> =>
-      sdk.threads.queuedMessages.create({
-        threadId: id,
-        input,
-        model,
-        serviceTier,
-        reasoningLevel,
-        permissionMode,
-        executionInputSources,
-        ...(senderThreadId !== undefined ? { senderThreadId } : {}),
-      }),
-    onMutate: async (variables): Promise<CreateQueuedMessageTransaction> =>
-      beginCreateQueuedMessageTransaction({
-        queryClient,
-        request: variables,
-      }),
-    onError: (_error, variables, context) => {
-      rollbackCreateQueuedMessageTransaction({
-        queryClient,
-        request: variables,
-        transaction: context,
-      });
+    [sendAsync, queryClient],
+  );
+
+  const mutate = useCallback(
+    (
+      variables: CreateThreadQueuedMessageMutationRequest,
+      options?: Parameters<typeof send>[1],
+    ) => {
+      const { sendReservation, prepareInput, ...request } = variables;
+
+      return send(
+        prepareComposerSend(
+          queryClient,
+          request,
+          sendReservation,
+          prepareInput,
+        ),
+        options,
+      );
     },
-    onSuccess: (queuedMessage, variables, context) => {
-      notifyComposerSubmitted({ kind: "thread", threadId: variables.id });
-      applyQueuedMessageCreateResult({
-        queryClient,
-        queuedMessage,
-        threadId: variables.id,
-        transaction: context,
-      });
-    },
-  });
+    [send, queryClient],
+  );
+
+  const reserve = useCallback(
+    (threadId: string) => reserveComposerSend(queryClient, threadId),
+    [queryClient],
+  );
+
+  return { ...mutation, mutate, mutateAsync, reserve };
 }
 
 export function useUpdateThreadQueuedMessage() {
@@ -308,17 +707,10 @@ export function useUpdateThreadQueuedMessage() {
       showErrorToast: false,
     },
     mutationFn: ({
-      expectedUpdatedAt,
       id,
-      input,
-      queuedMessageId,
+      ...request
     }: UpdateThreadQueuedMessageMutationRequest): Promise<ThreadQueuedMessage> =>
-      sdk.threads.queuedMessages.update({
-        expectedUpdatedAt,
-        input,
-        queuedMessageId,
-        threadId: id,
-      }),
+      sdk.threads.queuedMessages.update({ ...request, threadId: id }),
     onMutate: async (variables): Promise<UpdateQueuedMessageTransaction> =>
       beginUpdateQueuedMessageTransaction({
         queryClient,
@@ -344,31 +736,60 @@ export function useUpdateThreadQueuedMessage() {
 export function useSendThreadQueuedMessage() {
   const queryClient = useQueryClient();
 
-  return useMutation({
+  const mutation = useMutation({
     meta: {
       errorMessage: "Failed to send queued message.",
       lifecycleOperation: "send_queued_message",
       showErrorToast: false,
     },
-    mutationFn: ({
-      id,
-      mode,
-      queuedMessageId,
-    }: SendThreadQueuedMessageMutationRequest): Promise<SendQueuedMessageResponse> =>
-      sdk.threads.queuedMessages.send({ threadId: id, queuedMessageId, mode }),
+    mutationFn: (
+      variables: SendThreadQueuedMessageMutationRequest,
+    ): Promise<SendQueuedMessageResponse> => {
+      const { id, mode, queuedMessageId, requestId } = variables;
+
+      return runComposerSend(variables, () =>
+        sdk.threads.queuedMessages.send({
+          threadId: id,
+          queuedMessageId,
+          mode,
+          requestId,
+        }),
+      );
+    },
     onMutate: async (variables): Promise<RemoveQueuedMessageTransaction> =>
       beginSendQueuedMessageTransaction({
         queryClient,
         request: variables,
       }),
-    onError: (_error, variables, context) => {
+    onError: (error, variables, context) => {
+      composerTransports.get(variables)?.cancel();
+      composerTransports.delete(variables);
       rollbackRemoveQueuedMessageTransaction({
         queryClient,
         request: variables,
         transaction: context,
       });
+
+      if (isQueuedMessageNotFoundError(error)) {
+        invalidateThreadQueuedMessageSendQueries({
+          queryClient,
+          threadId: variables.id,
+        });
+      }
     },
     onSuccess: (data, variables, transaction) => {
+      composerTransports.delete(variables);
+
+      if (data.delivery === "already-sent") {
+        settleQueuedMessageAlreadySent({
+          queryClient,
+          request: variables,
+          transaction,
+        });
+
+        return;
+      }
+
       applyQueuedMessageSendResult({
         queryClient,
         request: variables,
@@ -377,6 +798,27 @@ export function useSendThreadQueuedMessage() {
       });
     },
   });
+
+  const sendAsync = mutation.mutateAsync;
+  const send = mutation.mutate;
+
+  const mutateAsync = useCallback(
+    (
+      variables: SendThreadQueuedMessageMutationRequest,
+      options?: Parameters<typeof sendAsync>[1],
+    ) => sendAsync(prepareComposerTurnSend(queryClient, variables), options),
+    [queryClient, sendAsync],
+  );
+
+  const mutate = useCallback(
+    (
+      variables: SendThreadQueuedMessageMutationRequest,
+      options?: Parameters<typeof send>[1],
+    ) => send(prepareComposerTurnSend(queryClient, variables), options),
+    [queryClient, send],
+  );
+
+  return { ...mutation, mutate, mutateAsync };
 }
 
 export function useReorderThreadQueuedMessage() {
@@ -500,6 +942,31 @@ export function useDeleteThreadQueuedMessage() {
   });
 }
 
+export function useRestoreThreadQueuedMessage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    meta: {
+      errorMessage: "Failed to restore queued message.",
+      showErrorToast: false,
+    },
+    mutationFn: ({
+      id,
+      queuedMessageId,
+    }: DeleteThreadQueuedMessageMutationRequest): Promise<ThreadQueuedMessage> =>
+      sdk.threads.queuedMessages.experimental_restore({
+        threadId: id,
+        queuedMessageId,
+      }),
+    onSuccess: (_queuedMessage, variables) => {
+      invalidateThreadQueueQueries({
+        queryClient,
+        threadId: variables.id,
+      });
+    },
+  });
+}
+
 export function useStopThread() {
   const queryClient = useQueryClient();
 
@@ -514,7 +981,6 @@ export function useStopThread() {
     onMutate: async (threadId): Promise<StopThreadTransaction> =>
       beginStopThreadTransaction({
         queryClient,
-        requestedAt: Date.now(),
         threadId,
       }),
     onError: (_error, threadId, context) => {
@@ -524,8 +990,12 @@ export function useStopThread() {
         transaction: context,
       });
     },
-    onSettled: (_data, _error, threadId) => {
-      settleStopThreadTransaction({ queryClient, threadId });
+    onSettled: (_data, _error, threadId, context) => {
+      settleStopThreadTransaction({
+        queryClient,
+        threadId,
+        transaction: context,
+      });
     },
   });
 }

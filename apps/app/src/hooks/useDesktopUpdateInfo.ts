@@ -1,19 +1,26 @@
 import { useEffect, useState } from "react";
-import type { BbDesktopApi, BbDesktopInfo } from "@bb/desktop-contract";
-import { getBbDesktopInfo } from "@/lib/bb-desktop";
+import type {
+  OmnyoDesktopApi,
+  OmnyoDesktopInfo,
+} from "@omnyo/desktop-contract";
+import { getOmnyoDesktopInfo } from "@/lib/omnyo-desktop";
 
 interface DesktopUpdateInfo {
-  desktopApi: BbDesktopApi | null;
-  desktopInfo: BbDesktopInfo | null;
+  desktopApi: OmnyoDesktopApi | null;
+  desktopInfo: OmnyoDesktopInfo | null;
   isDesktop: boolean;
 }
 
 export function useDesktopUpdateInfo(): DesktopUpdateInfo {
-  const [desktopApi] = useState<BbDesktopApi | null>(() => getBbDesktopInfo());
-  const [desktopInfo, setDesktopInfo] = useState<BbDesktopInfo | null>(null);
+  const [desktopApi] = useState<OmnyoDesktopApi | null>(() =>
+    getOmnyoDesktopInfo(),
+  );
+
+  const [desktopInfo, setDesktopInfo] = useState<OmnyoDesktopInfo | null>(null);
 
   useEffect(() => {
-    const api = getBbDesktopInfo();
+    const api = getOmnyoDesktopInfo();
+
     if (api === null) {
       return;
     }
@@ -27,6 +34,7 @@ export function useDesktopUpdateInfo(): DesktopUpdateInfo {
         }
       })
       .catch(() => undefined);
+
     const unsubscribe = api.onChange((info) => {
       setDesktopInfo(info);
     });

@@ -10,11 +10,12 @@ import {
 const CREDENTIAL = {
   credential: "bbcm_desktop",
   handle: "laptop",
-  serverUrl: "https://laptop.getbb.app",
+  serverUrl: "https://laptop.example.test",
 };
 
 function createCookieStore(): DesktopCookieStore {
   let installed: { name: string; value: string } | null = null;
+
   return {
     async get() {
       return installed === null ? [] : [installed];
@@ -26,7 +27,7 @@ function createCookieStore(): DesktopCookieStore {
 }
 
 const COOKIE = {
-  domain: ".getbb.app",
+  domain: ".example.test",
   expiresAt: 1_800_000,
   name: "__Secure-bb-connect.desktop_session",
   value: "signed-session",
@@ -47,6 +48,7 @@ describe("createAccountCookieSource", () => {
         ? new Response(JSON.stringify({ servers: [{ handle: "laptop" }] }))
         : gateResponse(),
     );
+
     const result = await installConnectDesktopSession({
       cookieStore: createCookieStore(),
       mintCookie: createAccountCookieSource({
@@ -55,25 +57,28 @@ describe("createAccountCookieSource", () => {
           value: "account-token",
         },
         fetchImpl: fetchImpl as typeof fetch,
-        remoteServerUrl: "https://laptop.getbb.app",
+        remoteServerUrl: "https://laptop.example.test",
         targetHandle: "laptop",
       }),
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
     });
+
     expect(result).toEqual({ expiresAt: 1_800_000, ok: true });
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
-      "https://laptop.getbb.app/api/connect/servers",
+      "https://laptop.example.test/api/connect/servers",
       {
         headers: { cookie: "__Secure-better-auth.session_token=account-token" },
+        redirect: "error",
       },
     );
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
-      "https://laptop.getbb.app/api/connect/desktop-session",
+      "https://laptop.example.test/api/connect/desktop-session",
       {
         method: "POST",
         headers: { cookie: "__Secure-better-auth.session_token=account-token" },
+        redirect: "error",
       },
     );
   });
@@ -83,28 +88,33 @@ describe("createAccountCookieSource", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ servers: [{ handle: "laptop" }] }))
       .mockResolvedValueOnce(gateResponse());
+
     const source = createAccountCookieSource({
       accountCookie: {
         name: "better-auth.session_token",
         value: "account-token",
       },
       fetchImpl,
-      remoteServerUrl: "http://laptop.bb.localhost:8787/threads?view=full",
+      remoteServerUrl: "http://laptop.omnyo.localhost:8787/threads?view=full",
       targetHandle: "laptop",
     });
 
     await expect(source()).resolves.toEqual({ cookie: COOKIE, ok: true });
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
-      "http://laptop.bb.localhost:8787/api/connect/servers",
-      { headers: { cookie: "better-auth.session_token=account-token" } },
+      "http://laptop.omnyo.localhost:8787/api/connect/servers",
+      {
+        headers: { cookie: "better-auth.session_token=account-token" },
+        redirect: "error",
+      },
     );
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
-      "http://laptop.bb.localhost:8787/api/connect/desktop-session",
+      "http://laptop.omnyo.localhost:8787/api/connect/desktop-session",
       {
         method: "POST",
         headers: { cookie: "better-auth.session_token=account-token" },
+        redirect: "error",
       },
     );
   });
@@ -114,13 +124,14 @@ describe("createAccountCookieSource", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ servers: [{ handle: "laptop" }] }))
       .mockResolvedValueOnce(gateResponse());
+
     const source = createAccountCookieSource({
       accountCookie: {
         name: "__Secure-better-auth.session_token",
         value: "account-token",
       },
       fetchImpl,
-      remoteServerUrl: "https://bb.example.com",
+      remoteServerUrl: "https://omnyo.example.com",
       targetHandle: "laptop",
     });
 
@@ -132,12 +143,13 @@ describe("createAccountCookieSource", () => {
     const source = createAccountCookieSource({
       accountCookie: { name: "better-auth.session_token", value: "expired" },
       fetchImpl: async () => new Response(null, { status: 401 }),
-      remoteServerUrl: "http://laptop.getbb.localhost:8787",
+      remoteServerUrl: "http://laptop.omnyo.localhost:8787",
       targetHandle: "laptop",
     });
+
     await expect(source()).resolves.toEqual({
       code: "unauthorized",
-      detail: "bb Connect sign-in is no longer valid",
+      detail: "Omnyo Connect sign-in is no longer valid",
       ok: false,
     });
   });
@@ -147,15 +159,17 @@ describe("createAccountCookieSource", () => {
       async () =>
         new Response(JSON.stringify({ servers: [{ handle: "other" }] })),
     );
+
     const source = createAccountCookieSource({
       accountCookie: {
         name: "__Secure-better-auth.session_token",
         value: "other-account",
       },
       fetchImpl: fetchImpl as typeof fetch,
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
       targetHandle: "laptop",
     });
+
     await expect(source()).resolves.toEqual({
       code: "unauthorized",
       detail: "this account does not own the selected server",
@@ -179,23 +193,23 @@ describe("installConnectDesktopSession", () => {
       installConnectDesktopSession({
         cookieStore,
         mintCookie: successfulSource(),
-        remoteServerUrl: "https://laptop.getbb.app",
+        remoteServerUrl: "https://laptop.example.test",
       }),
     ).resolves.toEqual({ expiresAt: 1_800_000, ok: true });
     expect(set).toHaveBeenCalledWith({
-      domain: ".getbb.app",
+      domain: ".example.test",
       expirationDate: 1800,
       httpOnly: true,
       name: "__Secure-bb-connect.desktop_session",
       path: "/",
       sameSite: "lax",
       secure: true,
-      url: "https://laptop.getbb.app",
+      url: "https://laptop.example.test",
       value: "signed-session",
     });
     expect(get).toHaveBeenCalledWith({
       name: "__Secure-bb-connect.desktop_session",
-      url: "https://laptop.getbb.app",
+      url: "https://laptop.example.test",
     });
   });
 
@@ -208,7 +222,7 @@ describe("installConnectDesktopSession", () => {
           detail: "revoked",
           ok: false,
         }),
-        remoteServerUrl: "https://laptop.getbb.app",
+        remoteServerUrl: "https://laptop.example.test",
       }),
     ).resolves.toEqual({ code: "unauthorized", detail: "revoked", ok: false });
   });
@@ -225,7 +239,7 @@ describe("installConnectDesktopSession", () => {
           },
         },
         mintCookie: successfulSource(),
-        remoteServerUrl: "https://laptop.getbb.app",
+        remoteServerUrl: "https://laptop.example.test",
       }),
     ).resolves.toEqual({
       code: "cookie_install_failed",
@@ -242,7 +256,7 @@ describe("installConnectDesktopSession", () => {
           async set() {},
         },
         mintCookie: successfulSource(),
-        remoteServerUrl: "https://laptop.getbb.app",
+        remoteServerUrl: "https://laptop.example.test",
       }),
     ).resolves.toEqual({
       code: "cookie_verification_failed",
@@ -310,9 +324,9 @@ describe("createCredentialCookieSource", () => {
       createCredentialCookieSource({ credential: CREDENTIAL, fetchImpl })(),
     ).resolves.toEqual({ cookie: COOKIE, ok: true });
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://laptop.getbb.app/api/connect/desktop-session",
+      "https://laptop.example.test/api/connect/desktop-session",
       expect.objectContaining({
-        headers: { "x-bb-connect-machine": "bbcm_desktop" },
+        headers: { "x-omnyo-connect-machine": "bbcm_desktop" },
         method: "POST",
       }),
     );

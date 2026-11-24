@@ -35,14 +35,19 @@ export function useNameValidation({
   const validate = useCallback(
     (value: string): string | null => {
       const trimmed = value.trim();
+
       if (!trimmed) {
         setValidationMessage(emptyMessage);
+
         return null;
       }
+
       if (maxLength && trimmed.length > maxLength.limit) {
         setValidationMessage(maxLength.message);
+
         return null;
       }
+
       return trimmed;
     },
     [emptyMessage, maxLength],
@@ -61,12 +66,15 @@ interface RenameDialogAutoFocus {
 export function useRenameDialogAutoFocus(): RenameDialogAutoFocus {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const isPointerCoarse = usePointerCoarse();
+
   const handleOpenAutoFocus = useCallback(
     (event: Event) => {
       event.preventDefault();
+
       if (isPointerCoarse) return;
 
       const input = inputRef.current;
+
       if (input) {
         input.focus();
         input.select();
@@ -74,6 +82,7 @@ export function useRenameDialogAutoFocus(): RenameDialogAutoFocus {
     },
     [isPointerCoarse],
   );
+
   return { inputRef, handleOpenAutoFocus };
 }
 
@@ -92,8 +101,10 @@ export function RenameDialog({
 }: RenameDialogProps) {
   const { inputRef, handleOpenAutoFocus: focusInputOnOpen } =
     useRenameDialogAutoFocus();
+
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const capturedOpenFocusRef = useRef(false);
+
   const handleOpenAutoFocus = useCallback(
     (event: Event) => {
       if (!capturedOpenFocusRef.current) {
@@ -105,14 +116,17 @@ export function RenameDialog({
             : null;
         capturedOpenFocusRef.current = true;
       }
+
       focusInputOnOpen(event);
     },
     [focusInputOnOpen],
   );
+
   const handleAfterCloseAutoFocus = useCallback(() => {
     const returnFocus = returnFocusRef.current;
     returnFocusRef.current = null;
     capturedOpenFocusRef.current = false;
+
     if (
       returnFocus?.isConnected &&
       returnFocus.closest('[aria-hidden="true"], [inert]') === null
@@ -120,6 +134,7 @@ export function RenameDialog({
       returnFocus.focus({ preventScroll: true });
     }
   }, []);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent

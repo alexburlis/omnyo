@@ -1,14 +1,8 @@
-import {
-  PERSONAL_PROJECT_ID,
-  type ProjectSource,
-  type ThreadListEntry,
-} from "@bb/domain";
+import type { ProjectSource } from "@omnyo/domain";
 import type {
-  ProjectWithThreadsResponse,
-  SidebarBootstrapResponse,
   SystemEnvironmentProvider,
   TerminalSession,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import type { ReuseThreadOption } from "@/components/pickers/ReuseEnvironmentPicker";
 import {
@@ -17,11 +11,10 @@ import {
   restorePromptDraftAfterOptionChange,
   type ResolveNewThreadSubmitDisabledReasonArgs,
 } from "@/components/promptbox/NewThreadComposer";
-import { getProjectStoredPromptAttachmentPaths } from "@bb/client-core";
+import { getProjectStoredPromptAttachmentPaths } from "@omnyo/client-core";
 import {
   buildRootComposeTerminalSessions,
   isRootComposeTerminalSession,
-  buildMobileRecentThreads,
   canCreateRootComposeTerminal,
   hasSingleUseRootComposeTargetState,
   readNewEnvironmentHostIdFromLocationState,
@@ -32,11 +25,7 @@ import {
   shouldStartComposingFromLocationState,
 } from "./RootComposeView";
 import { resolveRootComposeProjectFileRouting } from "./RootComposePanelTabContent";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
-import {
-  makeProjectWithThreadsResponse,
-  makeSidebarBootstrapResponse,
-} from "@/test/fixtures/projects";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import { makeTerminalSession as makeTerminalSessionFixture } from "@/test/fixtures/terminal-sessions";
 import {
   buildReuseThreadOptions,
@@ -54,6 +43,7 @@ describe("resolveHostEnvironmentProvider", () => {
       resolveHostEnvironmentProvider({
         currentProvider: worktreeProvider,
         providers: [checkoutProvider, worktreeProvider],
+        inputsControlProviderIds: new Set(),
       }),
     ).toBe(worktreeProvider);
   });
@@ -66,10 +56,12 @@ describe("resolveHostEnvironmentProvider", () => {
         message: "Not installed",
       },
     };
+
     expect(
       resolveHostEnvironmentProvider({
         currentProvider: unavailableWorktree,
         providers: [checkoutProvider, unavailableWorktree],
+        inputsControlProviderIds: new Set(),
       }),
     ).toBe(checkoutProvider);
   });
@@ -79,6 +71,7 @@ describe("resolveHostEnvironmentProvider", () => {
       resolveHostEnvironmentProvider({
         currentProvider: worktreeProvider,
         providers: [],
+        inputsControlProviderIds: new Set(),
       }),
     ).toBe(worktreeProvider);
   });
@@ -88,8 +81,39 @@ describe("resolveHostEnvironmentProvider", () => {
       resolveHostEnvironmentProvider({
         currentProvider: null,
         providers: [],
+        inputsControlProviderIds: new Set(),
       }),
     ).toBeNull();
+  });
+
+  it("never lands a machine pick on a type that needs a missing plugin control", () => {
+    const sentryWorktree = {
+      ...makeProjectProvider("sentry-worktree"),
+      inputs: { type: "object" },
+      acceptsEmptyInputs: false,
+    };
+
+    expect(
+      resolveHostEnvironmentProvider({
+        currentProvider: null,
+        providers: [sentryWorktree, checkoutProvider],
+        inputsControlProviderIds: new Set(),
+      }),
+    ).toBe(checkoutProvider);
+    expect(
+      resolveHostEnvironmentProvider({
+        currentProvider: sentryWorktree,
+        providers: [sentryWorktree, worktreeProvider],
+        inputsControlProviderIds: new Set(),
+      }),
+    ).toBe(worktreeProvider);
+    expect(
+      resolveHostEnvironmentProvider({
+        currentProvider: null,
+        providers: [sentryWorktree, checkoutProvider],
+        inputsControlProviderIds: new Set([sentryWorktree.id]),
+      }),
+    ).toBe(sentryWorktree);
   });
 });
 
@@ -114,6 +138,7 @@ describe("resolveNewThreadHostEnvironmentProvider", () => {
         message: "Not installed",
       },
     };
+
     expect(
       resolveNewThreadHostEnvironmentProvider({
         currentProviderId: worktree.id,
@@ -158,6 +183,7 @@ describe("root-compose project file routing", () => {
     });
   });
 });
+
 describe("resolveNewThreadProjectDefaultsState", () => {
   const storedDefaults = {
     providerId: "codex",
@@ -167,54 +193,29 @@ describe("resolveNewThreadProjectDefaultsState", () => {
     permissionMode: "auto" as const,
   };
 
-  it("keeps optimistic null defaults unresolved while the fallback query is pending", () => {
+  it("accepts the sidebar's loaded absence without another defaults request", () => {
     expect(
       resolveNewThreadProjectDefaultsState({
         cachedDefaults: null,
         projectFound: true,
-        queryData: undefined,
-        queryIsError: false,
-        queryIsPlaceholderData: false,
-        queryIsSuccess: false,
-      }),
-    ).toEqual({ status: "pending" });
-  });
-
-  it("uses the authoritative saved defaults when the delayed query resolves", () => {
-    expect(
-      resolveNewThreadProjectDefaultsState({
-        cachedDefaults: null,
-        projectFound: true,
-        queryData: storedDefaults,
-        queryIsError: false,
-        queryIsPlaceholderData: false,
-        queryIsSuccess: true,
-      }),
-    ).toEqual({ status: "resolved", defaults: storedDefaults });
-  });
-
-  it("only confirms absence after the fallback query succeeds with null", () => {
-    expect(
-      resolveNewThreadProjectDefaultsState({
-        cachedDefaults: null,
-        projectFound: true,
-        queryData: null,
-        queryIsError: false,
-        queryIsPlaceholderData: false,
-        queryIsSuccess: true,
       }),
     ).toEqual({ status: "resolved", defaults: null });
   });
 
-  it("does not treat a previous project's placeholder as authoritative", () => {
+  it("uses the saved defaults included in the project snapshot", () => {
     expect(
       resolveNewThreadProjectDefaultsState({
-        cachedDefaults: null,
+        cachedDefaults: storedDefaults,
         projectFound: true,
-        queryData: storedDefaults,
-        queryIsError: false,
-        queryIsPlaceholderData: true,
-        queryIsSuccess: true,
+      }),
+    ).toEqual({ status: "resolved", defaults: storedDefaults });
+  });
+
+  it("waits when the sidebar has not loaded the project yet", () => {
+    expect(
+      resolveNewThreadProjectDefaultsState({
+        cachedDefaults: undefined,
+        projectFound: false,
       }),
     ).toEqual({ status: "pending" });
   });
@@ -332,18 +333,6 @@ describe("resolveNewThreadSubmitDisabledReason", () => {
   });
 });
 
-interface MakeThreadArgs {
-  id: string;
-  projectId: string;
-}
-
-interface MakeProjectArgs {
-  id: string;
-  kind: ProjectWithThreadsResponse["kind"];
-  name: string;
-  threads: readonly ThreadListEntry[];
-}
-
 function makeProjectSource(hostId = "host_1"): ProjectSource {
   return {
     id: "src_1",
@@ -415,27 +404,6 @@ function makeReuseThreadOption(environmentId: string): ReuseThreadOption {
   };
 }
 
-function makeThread(args: MakeThreadArgs): ThreadListEntry {
-  return makeThreadListEntry({
-    id: args.id,
-    projectId: args.projectId,
-    title: args.id,
-    titleFallback: args.id,
-    createdAt: 100,
-  });
-}
-
-function makeProject(args: MakeProjectArgs): ProjectWithThreadsResponse {
-  return makeProjectWithThreadsResponse({
-    id: args.id,
-    kind: args.kind,
-    name: args.name,
-    threads: [...args.threads],
-    createdAt: 1,
-    updatedAt: 1,
-  });
-}
-
 function makeTerminalSession(
   overrides: Partial<TerminalSession>,
 ): TerminalSession {
@@ -451,63 +419,14 @@ function makeTerminalSession(
   });
 }
 
-describe("buildMobileRecentThreads", () => {
-  it("includes projectless and every project thread", () => {
-    const sidebarNavigation: SidebarBootstrapResponse =
-      makeSidebarBootstrapResponse({
-        personalProject: makeProject({
-          id: PERSONAL_PROJECT_ID,
-          kind: "personal",
-          name: "Personal",
-          threads: [
-            makeThread({
-              id: "thr_personal",
-              projectId: PERSONAL_PROJECT_ID,
-            }),
-          ],
-        }),
-        projects: [
-          makeProject({
-            id: "proj_app",
-            kind: "standard",
-            name: "App",
-            threads: [
-              makeThread({
-                id: "thr_app",
-                projectId: "proj_app",
-              }),
-            ],
-          }),
-          makeProject({
-            id: "proj_docs",
-            kind: "standard",
-            name: "Docs",
-            threads: [
-              makeThread({
-                id: "thr_docs",
-                projectId: "proj_docs",
-              }),
-            ],
-          }),
-        ],
-      });
-
-    const threadIds = buildMobileRecentThreads({ sidebarNavigation }).map(
-      (thread) => thread.id,
-    );
-
-    expect(threadIds).toEqual(["thr_personal", "thr_app", "thr_docs"]);
-  });
-});
-
 describe("readInitialPromptFromLocationState", () => {
   it("returns the initialPrompt string seeded by navigation state", () => {
     expect(
       readInitialPromptFromLocationState({
         focusPrompt: true,
-        initialPrompt: "Create a new bb automation to ",
+        initialPrompt: "Create a new Omnyo automation to ",
       }),
-    ).toBe("Create a new bb automation to ");
+    ).toBe("Create a new Omnyo automation to ");
   });
 
   it("returns null when no usable initialPrompt is present", () => {
@@ -526,13 +445,13 @@ describe("shouldReplaceInitialPromptFromLocationState", () => {
   it("returns true only for explicit replacement seed intents", () => {
     expect(
       shouldReplaceInitialPromptFromLocationState({
-        initialPrompt: "Create a new bb skill to review PRs.",
+        initialPrompt: "Create a new Omnyo skill to review PRs.",
         replaceInitialPrompt: true,
       }),
     ).toBe(true);
     expect(
       shouldReplaceInitialPromptFromLocationState({
-        initialPrompt: "Create a new bb skill to review PRs.",
+        initialPrompt: "Create a new Omnyo skill to review PRs.",
       }),
     ).toBe(false);
     expect(shouldReplaceInitialPromptFromLocationState(null)).toBe(false);
@@ -663,6 +582,7 @@ describe("restorePromptDraftAfterOptionChange", () => {
       mimeType: "text/markdown",
       sizeBytes: 32,
     };
+
     const screenshot = {
       type: "localImage" as const,
       path: "screenshot.png",
@@ -843,6 +763,7 @@ describe("resolveRootComposeEffectiveEnvironmentValue", () => {
       reuseThreadOptions: [],
       reuseThreadOptionsLoading: false,
     };
+
     expect(
       resolveRootComposeEffectiveEnvironmentValue({
         seededReuseEnvironment: null,
@@ -1122,11 +1043,13 @@ describe("buildRootComposeTerminalSessions", () => {
       hostId: "host_1",
       initialCwd: "/repo",
     });
+
     const otherHost = makeTerminalSession({
       id: "term_other_host",
       hostId: "host_2",
       initialCwd: "/repo",
     });
+
     const threadTerminal = makeTerminalSession({
       id: "term_thread",
       threadId: "thr_1",
@@ -1252,12 +1175,15 @@ it("offers a core-owned directory attachment for reuse", () => {
     environmentId: "env_attachment",
     environmentProviderId: null,
     environmentPath: "/tmp/attached",
+    environmentHostId: "host_mac",
   });
+
   expect(buildReuseThreadOptions([thread])).toEqual([
     expect.objectContaining({
       environmentId: "env_attachment",
       environmentProviderId: null,
       path: "/tmp/attached",
+      hostId: "host_mac",
     }),
   ]);
 });

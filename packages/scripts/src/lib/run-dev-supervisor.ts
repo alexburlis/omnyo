@@ -1,5 +1,5 @@
-import { calculateExponentialBackoffDelay } from "@bb/domain";
-import { spawnPortableProcess } from "@bb/process-utils";
+import { calculateExponentialBackoffDelay } from "@omnyo/domain";
+import { spawnPortableProcess } from "@omnyo/process-utils";
 import { resolveSupervisorPidPath } from "./dev-restart-utils.js";
 import {
   removePidFileSync,
@@ -44,9 +44,13 @@ export interface DevSupervisorUnexpectedRestartBackoff {
 }
 
 export type DevSupervisorTimerCallback = () => void;
+
 export type DevSupervisorRestartSignalHandler = () => void;
+
 export type DevSupervisorSignalHandlerCleanup = () => void;
+
 export type DevSupervisorExitHandler = () => void;
+
 export type DevSupervisorTerminationSignalHandler = (
   signal: ForwardedSignal,
 ) => void;
@@ -99,6 +103,7 @@ interface InterruptibleDelay {
 }
 
 const DEV_SUPERVISOR_FORCE_KILL_AFTER_MS = 5_000;
+
 export const DEFAULT_UNEXPECTED_RESTART_BACKOFF: DevSupervisorUnexpectedRestartBackoff =
   {
     initialDelayMs: 1_000,
@@ -137,7 +142,9 @@ function scheduleForcedKill(args: ScheduleForcedKillArgs): DevSupervisorTimer {
     );
     args.child.kill("SIGKILL");
   }, args.forceKillAfterMs);
+
   timeout.unref();
+
   return timeout;
 }
 
@@ -157,6 +164,7 @@ function createInterruptibleDelay(
       await new Promise<void>((resolvePromise) => {
         let settled = false;
         let timeout: DevSupervisorTimer | null = null;
+
         const finish = () => {
           if (settled) {
             return;
@@ -165,9 +173,11 @@ function createInterruptibleDelay(
           settled = true;
           timeout?.clear();
           controller.signal.removeEventListener("abort", finish);
+
           if (activeController === controller) {
             activeController = null;
           }
+
           resolvePromise();
         };
 
@@ -183,6 +193,7 @@ function createNodeTimer(
   delayMs: number,
 ): DevSupervisorTimer {
   const timeout = setTimeout(callback, delayMs);
+
   return {
     clear(): void {
       clearTimeout(timeout);
@@ -234,6 +245,7 @@ function createNodeDevSupervisorRuntime(): DevSupervisorRuntime {
       handler: DevSupervisorRestartSignalHandler,
     ): DevSupervisorSignalHandlerCleanup {
       process.on("SIGUSR1", handler);
+
       return () => {
         process.off("SIGUSR1", handler);
       };
@@ -320,6 +332,7 @@ export async function runDevSupervisorWithRuntime(
 
   const removeSignalForwarding =
     runtime.installTerminationSignalForwarding(requestStop);
+
   const handleRestartSignal = () => {
     if (stopRequested || restartRequested) {
       return;
@@ -333,8 +346,10 @@ export async function runDevSupervisorWithRuntime(
     terminateActiveChild("SIGTERM");
     interruptPendingRestartDelay();
   };
+
   const removeRestartSignalHandler =
     runtime.installRestartSignalHandler(handleRestartSignal);
+
   const removeSignalHandlers = () => {
     removeSignalForwarding();
     removeRestartSignalHandler();
@@ -361,6 +376,7 @@ export async function runDevSupervisorWithRuntime(
     if (stopRequested) {
       runtime.setExitCode(0);
       removeSignalHandlers();
+
       return;
     }
 
@@ -375,18 +391,22 @@ export async function runDevSupervisorWithRuntime(
       childRuntimeMs >= unexpectedRestartBackoff.stableChildRuntimeMs
         ? 1
         : unexpectedRestartAttempt + 1;
+
     const restartDelayMs = calculateExponentialBackoffDelay({
       attempt: unexpectedRestartAttempt,
       baseDelayMs: unexpectedRestartBackoff.initialDelayMs,
       maxDelayMs: unexpectedRestartBackoff.maxDelayMs,
     });
+
     runtime.writeStderr(
       `[dev-supervisor:${options.serviceName}] Child exited unexpectedly with ${formatExit(code, signal)}. Restarting in ${formatDurationMs(restartDelayMs)}.\n`,
     );
     await restartDelay.wait(restartDelayMs);
+
     if (stopRequested) {
       runtime.setExitCode(0);
       removeSignalHandlers();
+
       return;
     }
 

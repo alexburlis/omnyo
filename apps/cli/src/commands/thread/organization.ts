@@ -1,11 +1,12 @@
 import { Command } from "commander";
-import { updateThreadTabsRequestSchema } from "@bb/server-contract";
+import { updateThreadTabsRequestSchema } from "@omnyo/server-contract";
 import {
   queuedMessageWaitHolderSchema,
+  suggestThreadGroupName,
   type PromptInput,
   type QueuedMessageWaitHolder,
-} from "@bb/domain";
-import type { ThreadQueuedMessagesResult } from "@bb/sdk";
+} from "@omnyo/domain";
+import type { ThreadQueuedMessagesResult } from "@omnyo/sdk";
 import {
   columnWidths,
   printBorderlessTable,
@@ -14,7 +15,7 @@ import {
 import { describeQueueWait } from "./actions.js";
 import { formatQueueSendCountdown } from "./send-time.js";
 import { action } from "../../action.js";
-import { createCliBbSdk } from "../../client.js";
+import { createCliOmnyoSdk } from "../../client.js";
 import { requireTextInput, TEXT_FILE_HELP_SUFFIX } from "../../text-input.js";
 import {
   collectOption,
@@ -34,6 +35,14 @@ interface SelfOptions extends JsonOptions {
 
 interface SectionDeleteOptions extends JsonOptions {
   yes?: boolean;
+}
+
+interface GroupListOptions extends JsonOptions {
+  project?: string;
+}
+
+interface GroupCreateOptions extends JsonOptions {
+  name?: string;
 }
 
 interface SearchOptions extends JsonOptions {
@@ -59,6 +68,8 @@ interface QueueUpdateOptions extends JsonOptions {
   file?: string[];
   image?: string[];
   messageFile?: string;
+  model?: string;
+  reasoningLevel?: string;
 }
 
 interface QueueSendOptions extends JsonOptions {
@@ -75,7 +86,7 @@ interface QueueGroupOptions extends JsonOptions {
   prefix: string;
 }
 
-interface ReorderPinnedOptions extends JsonOptions {
+interface ReorderNeighborOptions extends JsonOptions {
   after?: string;
   before?: string;
 }
@@ -88,12 +99,15 @@ function parsePositiveInteger(
   maximum?: number,
 ): string | undefined {
   if (value === undefined) return undefined;
+
   if (!/^\d+$/u.test(value) || Number(value) < 1) {
     throw new Error(`${flag} must be a positive integer.`);
   }
+
   if (maximum !== undefined && Number(value) > maximum) {
     throw new Error(`${flag} must be at most ${maximum}.`);
   }
+
   return value;
 }
 
@@ -105,6 +119,7 @@ const MAX_QUEUE_TEXT_WIDTH = 40;
 
 function printQueueTable(rows: ThreadQueuedMessagesResult): void {
   const now = Date.now();
+
   const table = rows.map((row) => [
     row.id,
     row.threadId,
@@ -122,6 +137,7 @@ function printQueueTable(rows: ThreadQueuedMessagesResult): void {
     ),
     formatQueueSendCountdown(row.sendAt, now),
   ]);
+
   printBorderlessTable(
     {
       head: ["ID", "Thread", "Sender", "Message", "Waiting on", "Send at"],
@@ -129,10 +145,11 @@ function printQueueTable(rows: ThreadQueuedMessagesResult): void {
     },
     table,
   );
+
   for (const row of rows) {
     if (row.failureReason === null) continue;
     console.log(`Failed ${row.id}: ${row.failureReason}`);
-    console.log(`Retry: bb thread queue send ${row.threadId} ${row.id}`);
+    console.log(`Retry: omnyo thread queue send ${row.threadId} ${row.id}`);
   }
 }
 
@@ -141,11 +158,13 @@ function queuedMessagePreview(content: PromptInput[]): string {
     .filter((block) => block.type === "text")
     .map((block) => block.text)
     .join(" ");
+
   return text.trim() === "" ? "(no text)" : text;
 }
 
 function parseWaitHolder(value: string): QueuedMessageWaitHolder {
   const parsed = queuedMessageWaitHolderSchema.safeParse(value.trim());
+
   if (parsed.success) return parsed.data;
   throw new Error(
     `Invalid --wait-holder value '${value}'. Expected 'plugin:<plugin-id>'.`,
@@ -166,12 +185,17 @@ export function registerOrganizationCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: JsonOptions) => {
-        const sections = await createCliBbSdk(getUrl()).threadSections.list();
+        const sections =
+          await createCliOmnyoSdk(getUrl()).threadSections.list();
+
         if (outputJson(opts, sections)) return;
+
         if (sections.length === 0) {
           console.log("No thread sections found");
+
           return;
         }
+
         for (const item of sections) console.log(`${item.id}\t${item.name}`);
       }),
     );
@@ -182,9 +206,10 @@ export function registerOrganizationCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (name: string, opts: JsonOptions) => {
-        const result = await createCliBbSdk(getUrl()).threadSections.create({
+        const result = await createCliOmnyoSdk(getUrl()).threadSections.create({
           name,
         });
+
         if (outputJson(opts, result)) return;
         console.log(`Thread section ${result.id} created: ${result.name}`);
       }),
@@ -196,10 +221,11 @@ export function registerOrganizationCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, name: string, opts: JsonOptions) => {
-        const result = await createCliBbSdk(getUrl()).threadSections.update({
+        const result = await createCliOmnyoSdk(getUrl()).threadSections.update({
           id,
           name,
         });
+
         if (outputJson(opts, result)) return;
         console.log(`Thread section ${result.id} renamed: ${result.name}`);
       }),
@@ -217,12 +243,111 @@ export function registerOrganizationCommands(
           !(await confirmDestructiveAction(`Delete thread section ${id}?`))
         )
           return;
-        const result = await createCliBbSdk(getUrl()).threadSections.delete({
+
+        const result = await createCliOmnyoSdk(getUrl()).threadSections.delete({
           id,
         });
+
         if (outputJson(opts, result)) return;
         console.log(
           `Thread section ${result.id} deleted; ${result.updatedThreadCount} thread(s) unsectioned`,
+        );
+      }),
+    );
+
+  const group = parent
+    .command("group")
+    .description(
+      "Manage chat groups: named folders that hold chats from one project",
+    );
+
+  group
+    .command("list")
+    .description("List chat groups")
+    .option("--project <id>", "Only groups in this project")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (opts: GroupListOptions) => {
+        const groups = await createCliOmnyoSdk(getUrl()).threadGroups.list(
+          opts.project ? { projectId: opts.project } : {},
+        );
+
+        if (outputJson(opts, groups)) return;
+
+        if (groups.length === 0) {
+          console.log("No chat groups found");
+
+          return;
+        }
+
+        for (const item of groups) {
+          console.log(`${item.id}\t${item.projectId}\t${item.name}`);
+        }
+      }),
+    );
+
+  group
+    .command("create <threadIds...>")
+    .description(
+      "Group chats from one project; the name defaults to words their titles share",
+    )
+    .option("--name <name>", "Group name")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (threadIds: string[], opts: GroupCreateOptions) => {
+        const sdk = createCliOmnyoSdk(getUrl());
+
+        const titles = async () => {
+          const threads = new Map(
+            (await sdk.threads.list({ threadIds, includeHidden: true })).map(
+              (thread) => [thread.id, thread.title ?? thread.titleFallback],
+            ),
+          );
+
+          return threadIds.map((threadId) => threads.get(threadId) ?? "");
+        };
+
+        const result = await sdk.threadGroups.create({
+          name: opts.name ?? suggestThreadGroupName(await titles()),
+          threadIds,
+        });
+
+        if (outputJson(opts, result)) return;
+        console.log(
+          `Chat group ${result.group.id} created: ${result.group.name} (${result.threadIds.length} chat(s))`,
+        );
+      }),
+    );
+
+  group
+    .command("rename <id> <name>")
+    .description("Rename a chat group")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (id: string, name: string, opts: JsonOptions) => {
+        const result = await createCliOmnyoSdk(getUrl()).threadGroups.update({
+          id,
+          name,
+        });
+
+        if (outputJson(opts, result)) return;
+        console.log(`Chat group ${result.id} renamed: ${result.name}`);
+      }),
+    );
+
+  group
+    .command("delete <id>")
+    .description("Ungroup: delete a chat group; its chats stay where they are")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (id: string, opts: JsonOptions) => {
+        const result = await createCliOmnyoSdk(getUrl()).threadGroups.delete({
+          id,
+        });
+
+        if (outputJson(opts, result)) return;
+        console.log(
+          `Chat group ${result.id} deleted; ${result.updatedThreadCount} chat(s) ungrouped`,
         );
       }),
     );
@@ -237,7 +362,7 @@ export function registerOrganizationCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (query: string, opts: SearchOptions) => {
-        const result = await createCliBbSdk(getUrl()).threads.search({
+        const result = await createCliOmnyoSdk(getUrl()).threads.search({
           query,
           limitPerGroup: parsePositiveInteger(
             opts.limit,
@@ -245,6 +370,7 @@ export function registerOrganizationCommands(
             THREAD_SEARCH_LIMIT_PER_GROUP_MAX,
           ),
         });
+
         if (outputJson(opts, result)) return;
         printHumanJson(result);
       }),
@@ -257,10 +383,11 @@ export function registerOrganizationCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: HistoryOptions) => {
-        const result = await createCliBbSdk(getUrl()).threads.promptHistory({
+        const result = await createCliOmnyoSdk(getUrl()).threads.promptHistory({
           threadId: id,
           limit: parsePositiveInteger(opts.limit, "--limit"),
         });
+
         if (outputJson(opts, result)) return;
         printHumanJson(result);
       }),
@@ -273,15 +400,17 @@ export function registerOrganizationCommands(
     parent
       .command(`${name} [id]`)
       .description(`Mark a thread ${name}`)
-      .option("--self", "Target the current thread (from BB_THREAD_ID)")
+      .option("--self", "Target the current thread (from OMNYO_THREAD_ID)")
       .option("--json", "Print machine-readable JSON output")
       .action(
         action(async (id: string | undefined, opts: SelfOptions) => {
           const threadId = requireThreadIdOrSelf(id, opts);
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
+
           const result = markRead
             ? await sdk.threads.markRead({ threadId })
             : await sdk.threads.markUnread({ threadId });
+
           if (outputJson(opts, result)) return;
           console.log(`Thread ${threadId} marked ${name}`);
         }),
@@ -295,20 +424,43 @@ export function registerOrganizationCommands(
     .option("--before <id>", "Next pinned thread, or omit for the end")
     .option("--json", "Print machine-readable JSON output")
     .action(
-      action(async (id: string, opts: ReorderPinnedOptions) => {
-        const result = await createCliBbSdk(getUrl()).threads.reorderPinned({
+      action(async (id: string, opts: ReorderNeighborOptions) => {
+        const result = await createCliOmnyoSdk(getUrl()).threads.reorderPinned({
           threadId: id,
           previousThreadId: opts.after ?? null,
           nextThreadId: opts.before ?? null,
         });
+
         if (outputJson(opts, result)) return;
         console.log(`Pinned thread ${id} reordered`);
+      }),
+    );
+
+  parent
+    .command("reorder-shelved <id>")
+    .description("Move a chat on the Shelf between adjacent Shelf chats")
+    .option("--after <id>", "Previous Shelf chat, or omit for the top")
+    .option("--before <id>", "Next Shelf chat, or omit for the bottom")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (id: string, opts: ReorderNeighborOptions) => {
+        const result = await createCliOmnyoSdk(
+          getUrl(),
+        ).threads.experimental_reorderShelved({
+          threadId: id,
+          previousThreadId: opts.after ?? null,
+          nextThreadId: opts.before ?? null,
+        });
+
+        if (outputJson(opts, result)) return;
+        console.log(`Shelf chat ${id} reordered`);
       }),
     );
 
   const queue = parent
     .command("queue")
     .description("Manage queued thread messages");
+
   queue
     .command("list [threadId]")
     .description("List queued messages; omit the thread to list every one")
@@ -319,7 +471,8 @@ export function registerOrganizationCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (threadId: string | undefined, opts: QueueListOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const result =
           threadId === undefined
             ? await sdk.threads.queue.list({
@@ -328,11 +481,15 @@ export function registerOrganizationCommands(
                   : {}),
               })
             : await sdk.threads.queuedMessages.list({ threadId });
+
         if (outputJson(opts, result)) return;
+
         if (result.length === 0) {
           console.log("No queued messages found");
+
           return;
         }
+
         printQueueTable(result);
       }),
     );
@@ -370,7 +527,9 @@ export function registerOrganizationCommands(
             inline: inlineMessage,
             inlineLabel: "<message>",
           });
-          const sdk = createCliBbSdk(getUrl());
+
+          const sdk = createCliOmnyoSdk(getUrl());
+
           const input = await uploadClientAttachmentInputs({
             input: buildPromptInputs({
               message,
@@ -381,11 +540,13 @@ export function registerOrganizationCommands(
               (await sdk.threads.get({ threadId })).projectId,
             sdk,
           });
+
           const result = await sdk.threads.queuedMessages.create({
             threadId,
             input,
             ...(opts.model ? { model: opts.model } : {}),
           });
+
           if (outputJson(opts, result)) return;
           console.log(
             `Queued message ${result.id} created for thread ${threadId}`,
@@ -396,6 +557,11 @@ export function registerOrganizationCommands(
   queue
     .command("update <threadId> <messageId> [message]")
     .description("Update a queued message in place")
+    .option("--model <model>", "Change the queued message's model")
+    .option(
+      "--reasoning-level <level>",
+      "Change the queued message's reasoning level (provider-dependent)",
+    )
     .option(
       "--message-file <path>",
       `Read the message from a file instead of [message]; ${TEXT_FILE_HELP_SUFFIX}`,
@@ -427,16 +593,20 @@ export function registerOrganizationCommands(
             inline: inlineMessage,
             inlineLabel: "<message>",
           });
-          const sdk = createCliBbSdk(getUrl());
+
+          const sdk = createCliOmnyoSdk(getUrl());
           const queuedMessages = sdk.threads.queuedMessages;
+
           const existing = (await queuedMessages.list({ threadId })).find(
             (queuedMessage) => queuedMessage.id === messageId,
           );
+
           if (!existing) {
             throw new Error(
               `Queued message ${messageId} not found on thread ${threadId}.`,
             );
           }
+
           const input = await uploadClientAttachmentInputs({
             input: buildPromptInputs({
               message,
@@ -447,12 +617,18 @@ export function registerOrganizationCommands(
               (await sdk.threads.get({ threadId })).projectId,
             sdk,
           });
+
           const result = await queuedMessages.update({
             threadId,
             queuedMessageId: messageId,
             expectedUpdatedAt: existing.updatedAt,
             input,
+            ...(opts.model ? { model: opts.model } : {}),
+            ...(opts.reasoningLevel
+              ? { reasoningLevel: opts.reasoningLevel }
+              : {}),
           });
+
           if (outputJson(opts, result)) return;
           console.log(`Queued message ${messageId} updated`);
         },
@@ -468,21 +644,30 @@ export function registerOrganizationCommands(
         async (threadId: string, messageId: string, opts: QueueSendOptions) => {
           if (opts.mode !== "auto" && opts.mode !== "steer")
             throw new Error("--mode must be auto or steer.");
-          const result = await createCliBbSdk(
+
+          const result = await createCliOmnyoSdk(
             getUrl(),
           ).threads.queuedMessages.send({
             threadId,
             queuedMessageId: messageId,
             mode: opts.mode,
           });
+
           if (outputJson(opts, result)) return;
+
           if (result.delivery === "queued") {
             console.log(
               `Queued message ${messageId} is still queued (${describeQueueWait(result.queuedMessage)})`,
             );
+
             return;
           }
-          console.log(`Queued message ${messageId} sent`);
+
+          console.log(
+            result.delivery === "already-sent"
+              ? `Queued message ${messageId} was already sent`
+              : `Queued message ${messageId} sent`,
+          );
         },
       ),
     );
@@ -492,14 +677,32 @@ export function registerOrganizationCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (threadId: string, messageId: string, opts: JsonOptions) => {
-        const result = await createCliBbSdk(
+        const result = await createCliOmnyoSdk(
           getUrl(),
         ).threads.queuedMessages.delete({
           threadId,
           queuedMessageId: messageId,
         });
+
         if (outputJson(opts, result)) return;
         console.log(`Queued message ${messageId} deleted`);
+      }),
+    );
+  queue
+    .command("restore <threadId> <messageId>")
+    .description("Put back a recently deleted queued message")
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (threadId: string, messageId: string, opts: JsonOptions) => {
+        const result = await createCliOmnyoSdk(
+          getUrl(),
+        ).threads.queuedMessages.experimental_restore({
+          threadId,
+          queuedMessageId: messageId,
+        });
+
+        if (outputJson(opts, result)) return;
+        console.log(`Queued message ${messageId} restored`);
       }),
     );
   queue
@@ -516,7 +719,7 @@ export function registerOrganizationCommands(
           messageId: string,
           opts: QueueReorderOptions,
         ) => {
-          const result = await createCliBbSdk(
+          const result = await createCliOmnyoSdk(
             getUrl(),
           ).threads.queuedMessages.reorder({
             threadId,
@@ -527,6 +730,7 @@ export function registerOrganizationCommands(
               ? { groupBoundaryQueuedMessageId: opts.groupBoundary }
               : {}),
           });
+
           if (outputJson(opts, result)) return;
           console.log(`Queued message ${messageId} reordered`);
         },
@@ -551,15 +755,18 @@ export function registerOrganizationCommands(
             .split(",")
             .map((id) => id.trim())
             .filter(Boolean);
+
           if (prefix.length === 0)
             throw new Error("--prefix must contain at least one message id.");
-          const result = await createCliBbSdk(
+
+          const result = await createCliOmnyoSdk(
             getUrl(),
           ).threads.queuedMessages.setGroupBoundary({
             threadId,
             groupBoundaryQueuedMessageId: boundaryMessageId,
             expectedGroupedPrefixQueuedMessageIds: prefix,
           });
+
           if (outputJson(opts, result)) return;
           console.log(
             `Queued message group boundary set to ${boundaryMessageId}`,
@@ -571,15 +778,17 @@ export function registerOrganizationCommands(
   const tabs = parent
     .command("tabs")
     .description("Inspect and update persisted thread panel tabs");
+
   tabs
     .command("show <threadId>")
     .description("Show persisted panel tabs")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (threadId: string, opts: JsonOptions) => {
-        const result = await createCliBbSdk(getUrl()).threads.tabs.get({
+        const result = await createCliOmnyoSdk(getUrl()).threads.tabs.get({
           threadId,
         });
+
         if (outputJson(opts, result)) return;
         printHumanJson(result);
       }),
@@ -603,10 +812,12 @@ export function registerOrganizationCommands(
             expectedRevision: Number(opts.expectedRevision),
             tabs: JSON.parse(opts.tabsJson),
           });
-          const result = await createCliBbSdk(getUrl()).threads.tabs.update({
+
+          const result = await createCliOmnyoSdk(getUrl()).threads.tabs.update({
             threadId,
             ...request,
           });
+
           if (outputJson(opts, result)) return;
           console.log(
             `Thread ${threadId} tabs updated to revision ${result.revision}`,

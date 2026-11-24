@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createGitDiffFixedPanelTab,
@@ -7,11 +7,7 @@ import {
   type HostFilePreviewFixedPanelTab,
   type SecondaryFixedPanelTab,
 } from "@/lib/fixed-panel-tabs-state";
-import {
-  CompactHomePage,
-  MOBILE_RECENTS_VISIBILITY_CLASS,
-  MobileRecentsVisibilityStyle,
-} from "@/views/mobile-home-story-fixtures";
+import { CompactHomePage } from "@/views/mobile-home-story-fixtures";
 import { CompactSecondaryPanelShelf } from "./CompactSecondaryPanelShelf";
 import {
   ThreadSecondaryPanel,
@@ -30,6 +26,7 @@ export default {
 const noop = () => {};
 
 const STORY_FILE_PATH = "apps/app/src/views/RootComposeCompactHome.tsx";
+
 const STORY_FILE_SOURCE = `export function RootComposeCompactHome({
   children,
   composer,
@@ -104,6 +101,7 @@ function ShelfPanel({
 }: ShelfPanelProps) {
   const tabs: SecondaryPanelRenderableTab[] = filePaths.map((path, index) => {
     const tab = path === STORY_FILE_PATH ? fileTab : createStoryFileTab(path);
+
     return {
       label: path.split("/").at(-1) ?? path,
       isPinned: index === 0 && filePaths.length > 1,
@@ -115,6 +113,7 @@ function ShelfPanel({
       tab,
     };
   });
+
   const infoTab = createThreadInfoFixedPanelTab();
   const diffTab = createGitDiffFixedPanelTab();
 
@@ -164,6 +163,7 @@ function Stage({ children }: { children: ReactNode }) {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
+
     client.setQueryData(
       threadListQueryKey({
         projectId: baseMetadataProps.thread.projectId,
@@ -173,14 +173,13 @@ function Stage({ children }: { children: ReactNode }) {
       }),
       [],
     );
+
     return client;
   });
+
   return (
     <QueryClientProvider client={queryClient}>
-      <div
-        className={`${MOBILE_RECENTS_VISIBILITY_CLASS} fixed inset-0 flex flex-col bg-background`}
-      >
-        <MobileRecentsVisibilityStyle />
+      <div className="fixed inset-0 flex flex-col bg-background">
         <SidebarProvider defaultOpen={false} className="min-h-0">
           <SidebarInset className="min-h-0 overflow-hidden">
             <CompactHomePage />
@@ -215,6 +214,7 @@ export function FullPage() {
 
 export function ManyTabs() {
   const [activeTab, setActiveTab] = useState<SecondaryFixedPanelTab>(fileTab);
+
   return (
     <Stage>
       <CompactSecondaryPanelShelf open onClose={noop} srLabel="Right panel">

@@ -20,39 +20,50 @@ interface ResolveBuiltinPluginRootPathArgs {
 
 export const BUILTIN_PLUGINS_DIRECTORY_NAME = "builtin-plugins";
 
-export const BUILTIN_PLUGIN_ID_PREFIX = "bb--";
-
-const ACCOUNT_POOL_PARENT_URL_ENV = "BB_ACCOUNT_POOL_PARENT_URL";
-
-export function accountPoolDefaultEnabled(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  const value = env[ACCOUNT_POOL_PARENT_URL_ENV];
-  return typeof value === "string" && value.length > 0;
-}
+export const BUILTIN_PLUGIN_ID_PREFIX = "omnyo--";
 
 const REPO_PLUGINS_DIRECTORY_NAME = "plugins";
 
-export const BUILTIN_PLUGINS = [
+export const BUILTIN_PLUGINS: readonly BundledPluginDefinition[] = [
   {
     name: "storage-retention",
-    pluginId: "bb--storage-retention",
-    defaultEnabled: false,
+    pluginId: "omnyo--storage-retention",
+    defaultEnabled: true,
   },
   {
-    name: "bb-guide",
-    pluginId: "bb-guide",
+    name: "omnyo-guide",
+    pluginId: "omnyo-guide",
     defaultEnabled: true,
   },
   {
     name: "account-pool",
     pluginId: "account-pool",
-    defaultEnabled: accountPoolDefaultEnabled(),
+    defaultEnabled: true,
+  },
+  {
+    name: "composer-predictions",
+    pluginId: "omnyo--composer-predictions",
+    defaultEnabled: true,
+  },
+  {
+    name: "account-usage",
+    pluginId: "omnyo--account-usage",
+    defaultEnabled: true,
+  },
+  {
+    name: "git",
+    pluginId: "omnyo--git",
+    defaultEnabled: true,
+  },
+  {
+    name: "wait-sources",
+    pluginId: "omnyo--wait-sources",
+    defaultEnabled: true,
   },
   {
     name: "ask-user-question",
     pluginId: "ask-user-question",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     name: "automations",
@@ -60,13 +71,8 @@ export const BUILTIN_PLUGINS = [
     defaultEnabled: true,
   },
   {
-    name: "bb-account",
-    pluginId: "bb-account",
-    defaultEnabled: true,
-  },
-  {
-    name: "bb-ai",
-    pluginId: "bb-ai",
+    name: "omnyo-account",
+    pluginId: "omnyo-account",
     defaultEnabled: true,
   },
   {
@@ -87,6 +93,11 @@ export const BUILTIN_PLUGINS = [
   {
     name: "environment-personal-workspace",
     pluginId: "environment-personal-workspace",
+    defaultEnabled: true,
+  },
+  {
+    name: "environment-temporary-copy",
+    pluginId: "environment-temporary-copy",
     defaultEnabled: true,
   },
   {
@@ -127,21 +138,21 @@ export const BUILTIN_PLUGINS = [
   {
     name: "provider-pi",
     pluginId: "provider-pi",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     name: "provider-usage",
-    pluginId: "bb--provider-usage",
-    defaultEnabled: true,
+    pluginId: "omnyo--provider-usage",
+    defaultEnabled: false,
   },
   {
     name: "provider-acp",
     pluginId: "provider-acp",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     name: "provider-acp-next",
-    pluginId: "bb--provider-acp-next",
+    pluginId: "omnyo--provider-acp-next",
     defaultEnabled: false,
   },
   {
@@ -181,8 +192,8 @@ export const BUILTIN_PLUGINS = [
   },
   {
     name: "prompt-library",
-    pluginId: "bb--prompt-library",
-    defaultEnabled: false,
+    pluginId: "omnyo--prompt-library",
+    defaultEnabled: true,
   },
   {
     name: "scheduled-send",
@@ -192,7 +203,7 @@ export const BUILTIN_PLUGINS = [
   {
     name: "agent-annotations",
     pluginId: "agent-annotations",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     name: "concurrency-limit",
@@ -207,7 +218,17 @@ export const BUILTIN_PLUGINS = [
   {
     name: "workflows",
     pluginId: "workflows",
-    defaultEnabled: false,
+    defaultEnabled: true,
+  },
+  {
+    name: "browser-automation",
+    pluginId: "browser-automation",
+    defaultEnabled: true,
+  },
+  {
+    name: "chat-importer",
+    pluginId: "omnyo--chat-importer",
+    defaultEnabled: true,
   },
 ].map((plugin): BundledPluginDefinition => ({
   ...plugin,
@@ -218,16 +239,6 @@ export const OFFICIAL_PLUGINS = [
   {
     name: "environment-modal-sandbox",
     pluginId: "environment-modal-sandbox",
-    defaultEnabled: true,
-  },
-  {
-    name: "browser-automation",
-    pluginId: "browser-automation",
-    defaultEnabled: false,
-  },
-  {
-    name: "github",
-    pluginId: "github",
     defaultEnabled: true,
   },
   {
@@ -260,6 +271,12 @@ export const BUNDLED_PLUGINS: readonly BundledPluginDefinition[] = [
   ...OFFICIAL_PLUGINS,
 ];
 
+export function isRemovableBundledPlugin(
+  plugin: Pick<BundledPluginDefinition, "autoInstall">,
+): boolean {
+  return !plugin.autoInstall;
+}
+
 export interface BundledPluginReplacement {
   pluginId: string;
   replaces: string;
@@ -269,7 +286,7 @@ export interface BundledPluginReplacement {
 export const BUNDLED_PLUGIN_REPLACEMENTS: readonly BundledPluginReplacement[] =
   [
     {
-      pluginId: "bb--provider-acp-next",
+      pluginId: "omnyo--provider-acp-next",
       replaces: "provider-acp",
       carriedSettings: ["customAgents"],
     },
@@ -289,6 +306,7 @@ export function resolveBuiltinPluginRootPathForModuleDir(
     "../../../packages/bundled-plugins/dist",
     args.name,
   );
+
   if (existsSync(preparedCandidate)) return preparedCandidate;
 
   const packagedCandidate = path.resolve(
@@ -296,6 +314,7 @@ export function resolveBuiltinPluginRootPathForModuleDir(
     BUILTIN_PLUGINS_DIRECTORY_NAME,
     args.name,
   );
+
   if (existsSync(packagedCandidate)) return packagedCandidate;
 
   const builtCheckoutCandidate = path.resolve(
@@ -304,6 +323,7 @@ export function resolveBuiltinPluginRootPathForModuleDir(
     REPO_PLUGINS_DIRECTORY_NAME,
     args.name,
   );
+
   if (existsSync(builtCheckoutCandidate)) return builtCheckoutCandidate;
 
   return path.resolve(

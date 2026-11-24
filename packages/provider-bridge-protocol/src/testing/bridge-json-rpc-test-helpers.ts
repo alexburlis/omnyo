@@ -1,7 +1,8 @@
-import type { JsonValue } from "@bb/domain";
+import type { JsonValue } from "@omnyo/domain";
 import { z } from "zod";
 
 export type BridgeJsonRpcId = string | number;
+
 export type BridgeJsonRpcLineHandler = (line: string) => void;
 
 export interface BridgeJsonRpcObject {
@@ -92,6 +93,7 @@ function waitForNextBridgeTick(): Promise<void> {
 export function captureBridgeJsonRpcOutput(): CapturedBridgeJsonRpcOutput {
   const messages: BridgeJsonRpcOutputMessage[] = [];
   const originalWrite = process.stdout.write;
+
   const capturingWrite: typeof process.stdout.write = (
     buffer: string | Uint8Array,
   ) => {
@@ -99,20 +101,25 @@ export function captureBridgeJsonRpcOutput(): CapturedBridgeJsonRpcOutput {
       typeof buffer === "string"
         ? buffer
         : Buffer.from(buffer).toString("utf8");
+
     for (const line of text.split("\n")) {
       if (line.trim().length > 0) {
         messages.push(bridgeJsonRpcOutputSchema.parse(JSON.parse(line)));
       }
     }
+
     return true;
   };
+
   process.stdout.write = capturingWrite;
   let drained = 0;
+
   return {
     messages,
     takeMessages() {
       const fresh = messages.slice(drained);
       drained = messages.length;
+
       return fresh;
     },
     restore() {
@@ -138,15 +145,19 @@ async function waitForBridgeJsonRpcResponse(
   args: WaitForBridgeJsonRpcResponseArgs,
 ): Promise<BridgeJsonRpcOutputMessage> {
   const deadline = Date.now() + 15_000;
+
   while (Date.now() < deadline) {
     const response = args.output.messages.find(
       (message) => message.id === args.id,
     );
+
     if (response) {
       return response;
     }
+
     await waitForNextBridgeTick();
   }
+
   throw new Error(`Timed out waiting for JSON-RPC response ${String(args.id)}`);
 }
 
@@ -160,6 +171,7 @@ export function createBridgeJsonRpcTestHarness(
   handleLine: BridgeJsonRpcLineHandler,
 ): BridgeJsonRpcTestHarness {
   const output = captureBridgeJsonRpcOutput();
+
   return {
     messages: output.messages,
     takeMessages: output.takeMessages,

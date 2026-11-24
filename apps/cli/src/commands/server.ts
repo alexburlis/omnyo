@@ -4,17 +4,22 @@ import { open, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { Command } from "commander";
-import { formatServerDataSize } from "@bb/domain";
+import { formatServerDataSize } from "@omnyo/domain";
 import {
   deleteOldServerCopy,
+  repairHeldRuntime,
   readServerMovedFile,
   removeServerConnectHoldFile,
   SERVER_CONNECT_HOLD_FILE_NAME,
-} from "@bb/server-archive";
-import type { ServerMoveStatus } from "@bb/server-contract";
+} from "@omnyo/server-archive";
+import type {
+  MaintenancePreparationOperation,
+  ServerMoveStartRequest,
+  ServerMoveStatus,
+} from "@omnyo/server-contract";
 import { action, CliExitError } from "../action.js";
-import { createCliBbSdk } from "../client.js";
-import { resolveBbCliVersion } from "../version.js";
+import { createCliOmnyoSdk } from "../client.js";
+import { resolveOmnyoCliVersion } from "../version.js";
 import { confirmDestructiveAction, outputJson } from "./helpers.js";
 import { resolveMachineHostId } from "./machine.js";
 import {
@@ -23,6 +28,7 @@ import {
   probeMovedServer,
   resolveLocalDataDir,
   unlockServerCopy,
+  runIdentityAdoptionLocal,
 } from "./server-local.js";
 import {
   findLocalMachineServiceFile,
@@ -57,6 +63,16 @@ interface ServerMoveCommandOptions extends JsonCommandOptions {
   check?: boolean;
   archiveExistingData?: boolean;
   yes?: boolean;
+  startupHoldId?: string;
+  startupOwnerId?: string;
+}
+
+interface MaintenancePrepareCommandOptions {
+  id: string;
+  ownerId: string;
+  runtimeId: string;
+  hostId: string;
+  dataDir: string;
 }
 
 interface ServerMoveCancelCommandOptions extends JsonCommandOptions {
@@ -77,37 +93,97 @@ interface UnlockCommandOptions extends LocalServerCommandOptions {
 }
 
 const SERVER_EXPORT_UNENCRYPTED_WARNING =
-  "This export is not encrypted and holds the server's credentials and plugin secrets. Keep it private; bb wrote it with mode 0600.";
+  "This export is not encrypted and holds the server's credentials and plugin secrets. Keep it private; Omnyo wrote it with mode 0600.";
 
 function startServerHint(dataDir: string): string {
   return isDefaultDataDir(dataDir)
-    ? "npx bb-app or the desktop app"
-    : `npx bb-app --data-dir ${dataDir}`;
+    ? "omnyo-app or the desktop app"
+    : `omnyo-app --data-dir ${dataDir}`;
 }
 
 function allowConnectCommand(dataDir: string): string {
   return isDefaultDataDir(dataDir)
-    ? "bb server allow-connect"
-    : `bb server allow-connect --data-dir ${dataDir}`;
+    ? "omnyo server allow-connect"
+    : `omnyo server allow-connect --data-dir ${dataDir}`;
 }
 
 const STOPPED_FOLLOWING_MESSAGE =
-  "Stopped following; the move continues. Run bb server move status to check on it or bb server move cancel to cancel it.";
+  "Stopped following; the move continues. Run omnyo server move status to check on it or omnyo server move cancel to cancel it.";
 
 function parseAddress(address: string | undefined): string | null {
   if (address === undefined) return null;
   const trimmed = address.trim();
+
   if (trimmed.length === 0) throw new Error("--address must not be empty.");
+
   return trimmed;
+}
+
+function startupOwnership(
+  opts: ServerMoveCommandOptions,
+): ServerMoveStartRequest["startupOwnership"] {
+  if (opts.startupHoldId === undefined && opts.startupOwnerId === undefined)
+    return undefined;
+
+  if (!opts.startupHoldId?.trim() || !opts.startupOwnerId?.trim()) {
+    throw new Error(
+      "Pass both --startup-hold-id and --startup-owner-id with the exact startup hold ownership.",
+    );
+  }
+
+  return { id: opts.startupHoldId, ownerId: opts.startupOwnerId };
+}
+
+function maintenancePreparationCommand(
+  parent: Command,
+  name: string,
+  description: string,
+): Command {
+  return parent
+    .command(name)
+    .description(description)
+    .requiredOption("--id <id>", "Exact startup hold ID")
+    .requiredOption("--owner-id <id>", "Exact startup hold owner ID")
+    .requiredOption("--runtime-id <id>", "Expected running server ID")
+    .requiredOption("--host-id <id>", "Expected server host ID")
+    .requiredOption(
+      "--data-dir <path>",
+      "Expected owned runtime data directory",
+    )
+    .option("--json", "Print JSON");
+}
+
+async function prepareMaintenance(
+  getUrl: () => string,
+  input: MaintenancePrepareCommandOptions,
+  operation: MaintenancePreparationOperation,
+): Promise<void> {
+  console.log(
+    JSON.stringify(
+      await createCliOmnyoSdk(getUrl()).server.maintenance.prepare({
+        id: input.id,
+        ownerId: input.ownerId,
+        expectedRuntimeId: input.runtimeId,
+        expectedServerHostId: input.hostId,
+        expectedDataDir: input.dataDir,
+        operation,
+      }),
+      null,
+      2,
+    ),
+  );
 }
 
 async function assertWritableOutPath(outPath: string): Promise<void> {
   const parent = dirname(outPath);
   const parentStats = await stat(parent).catch(() => null);
+
   if (parentStats === null || !parentStats.isDirectory()) {
     throw new Error(`Directory ${parent} does not exist.`);
   }
+
   const existing = await stat(outPath).catch(() => null);
+
   if (existing?.isDirectory() === true) {
     throw new Error(`${outPath} is a directory.`);
   }
@@ -119,16 +195,21 @@ async function writeExportFile(args: {
   expectedSha256: string;
 }): Promise<number> {
   const { outPath } = args;
+
   const tempPath = join(
     dirname(outPath),
     `.${basename(outPath)}.${randomBytes(6).toString("hex")}.tmp`,
   );
+
   const hash = createHash("sha256");
+
   async function* chunks(): AsyncGenerator<Uint8Array> {
     const reader = args.body.getReader();
+
     try {
       for (;;) {
         const result = await reader.read();
+
         if (result.done) return;
         hash.update(result.value);
         yield result.value;
@@ -137,27 +218,34 @@ async function writeExportFile(args: {
       await reader.cancel().catch(() => undefined);
     }
   }
+
   const file = await open(tempPath, "wx", 0o600).catch(async (error) => {
     await args.body.cancel().catch(() => undefined);
     throw error;
   });
+
   try {
     const destination = file.createWriteStream();
+
     const closed = new Promise<void>((resolve) =>
       destination.once("close", resolve),
     );
+
     await pipeline(chunks, destination).finally(() => closed);
+
     if (hash.digest("hex") !== args.expectedSha256) {
       throw new Error(
         `The downloaded export does not match the SHA-256 digest the server sent, so ${outPath} was not written. Try the export again.`,
       );
     }
+
     await rename(tempPath, outPath);
   } catch (error) {
     await file.close();
     await rm(tempPath, { force: true });
     throw error;
   }
+
   return (await stat(outPath)).size;
 }
 
@@ -168,12 +256,14 @@ async function withSigint<T>(
   const controller = new AbortController();
   const cancel = (): void => controller.abort();
   process.once("SIGINT", cancel);
+
   try {
     return await run(controller.signal);
   } catch (error) {
     if (controller.signal.aborted) {
       throw new CliExitError(stoppedMessage, 130);
     }
+
     throw error;
   } finally {
     process.off("SIGINT", cancel);
@@ -186,52 +276,67 @@ async function runServerMove(
 ): Promise<void> {
   if (opts.to === undefined || opts.to.trim().length === 0) {
     throw new Error(
-      "Pass --to <machine> with the ID or name of the machine that should run the server. Run bb server move status to check on a move in progress.",
+      "Pass --to <machine> with the ID or name of the machine that should run the server. Run omnyo server move status to check on a move in progress.",
     );
   }
+
   const serverUrl = parseAddress(opts.address);
-  const sdk = createCliBbSdk(getUrl());
+  const ownership = startupOwnership(opts);
+  const sdk = createCliOmnyoSdk(getUrl());
+
   const targetHostId = await resolveMachineHostId({
     serverUrl: getUrl(),
     target: opts.to,
   });
+
   const check = await callServerMoveRoute(() =>
     sdk.experimental_server.checkMove({ targetHostId, serverUrl }),
   );
+
   const stopAtCheck = (message: string): never => {
     outputJson(opts, check);
     throw new CliExitError(message, 1);
   };
+
   if (!opts.json) printServerMoveCheck(check);
+
   if (check.requiresServerUrl && serverUrl === null) {
     stopAtCheck(missingAddressGuidance(check));
   }
+
   if (!check.canMove) {
     stopAtCheck(
       `The server can't move to ${check.targetHostName} yet. Resolve the blockers above and try again.`,
     );
   }
+
   if (opts.check) {
     if (!outputJson(opts, check)) {
       console.log(`The server can move to ${check.targetHostName}.`);
+
       if (check.existingTargetServerData !== null) {
         console.log(existingDataGuidance(check));
       }
     }
+
     return;
   }
+
   if (check.existingTargetServerData !== null && !opts.archiveExistingData) {
     stopAtCheck(existingDataGuidance(check));
   }
+
   if (
     !opts.yes &&
     !(await confirmDestructiveAction(
-      `Stop all running work and move the bb server to ${check.targetHostName}?`,
+      `Stop all running work and move the Omnyo server to ${check.targetHostName}?`,
     ))
   ) {
     return;
   }
+
   let started: ServerMoveStatus;
+
   try {
     started = await callServerMoveRoute(() =>
       sdk.experimental_server.startMove({
@@ -239,13 +344,16 @@ async function runServerMove(
         serverUrl,
         stopRunningWork: true,
         archiveExistingTargetServerData: opts.archiveExistingData === true,
+        startupOwnership: ownership,
       }),
     );
   } catch (error) {
     const items = blockedStartItems(error);
+
     if (items !== null && !opts.json) printServerMoveCheckItems(items);
     throw error;
   }
+
   const outcome = await withSigint(
     (signal) =>
       followServerMove({
@@ -256,7 +364,9 @@ async function runServerMove(
       }),
     STOPPED_FOLLOWING_MESSAGE,
   );
+
   outputJson(opts, outcome.status);
+
   if (outcome.kind === "recovery") {
     if (!opts.json) printServerMoveRecovery(outcome.status);
     throw new CliExitError(
@@ -264,9 +374,11 @@ async function runServerMove(
       SERVER_MOVE_RECOVERY_EXIT_CODE,
     );
   }
+
   if (outcome.kind === "ended") {
     throw new CliExitError(formatServerMoveFailure(outcome.status), 1);
   }
+
   if (!opts.json) console.log(formatServerMovedMessage(outcome.status));
 }
 
@@ -276,11 +388,276 @@ export function registerServerCommands(
 ): void {
   const server = program
     .command("server")
-    .description("Move, export, and import the bb server");
+    .description("Move, export, and import the Omnyo server");
+
+  const maintenance = server
+    .command("maintenance")
+    .description("Inspect or control a server-owned maintenance hold");
+
+  maintenance
+    .command("adopt-identity")
+    .description(
+      "Run the exact verified stopped-state identity controller; never stops active work",
+    )
+    .requiredOption(
+      "--request-file <path>",
+      "Owned version-one source/destination/artifact request",
+    )
+    .requiredOption("--phase <phase>", "preflight, stage, or rollback")
+    .option("--json", "Print JSON")
+    .action(
+      action(async (input: { requestFile: string; phase: string }) => {
+        process.env.OMNYO_CLI_ERROR_LOG = "0";
+
+        if (
+          input.phase !== "preflight" &&
+          input.phase !== "stage" &&
+          input.phase !== "rollback"
+        )
+          throw new Error(
+            "Identity control phase must be preflight, stage, or rollback",
+          );
+        console.log(
+          JSON.stringify(
+            await runIdentityAdoptionLocal({
+              requestFile: input.requestFile,
+              phase: input.phase,
+            }),
+            null,
+            2,
+          ),
+        );
+      }),
+    );
+
+  maintenance
+    .command("repair-runtime")
+    .description(
+      "Bind an approved repair runtime to a stopped, promoted migration hold",
+    )
+    .requiredOption("--id <id>", "Exact migration hold ID")
+    .requiredOption("--owner-id <id>", "Exact migration hold owner")
+    .requiredOption("--host-id <id>", "Exact promoted server host ID")
+    .requiredOption("--data-dir <path>", "Exact owned server data directory")
+    .requiredOption(
+      "--hold-sha256 <digest>",
+      "Expected complete historical hold digest",
+    )
+    .requiredOption(
+      "--runtime-root <path>",
+      "Installed complete repair package root",
+    )
+    .requiredOption(
+      "--runtime-sha256 <digest>",
+      "Approved complete repair runtime digest",
+    )
+    .option("--json", "Print JSON")
+    .action(
+      action(
+        async (input: {
+          id: string;
+          ownerId: string;
+          hostId: string;
+          dataDir: string;
+          holdSha256: string;
+          runtimeRoot: string;
+          runtimeSha256: string;
+          json?: boolean;
+        }) => {
+          const result = await repairHeldRuntime({
+            dataDir: input.dataDir,
+            id: input.id,
+            ownerId: input.ownerId,
+            serverHostId: input.hostId,
+            expectedHoldSha256: input.holdSha256,
+            runtimeRoot: input.runtimeRoot,
+            expectedRuntimeSha256: input.runtimeSha256,
+          });
+
+          if (!outputJson(input, result))
+            console.log(
+              `Bound the approved repair runtime to migration ${result.id}. The server remains stopped and held.`,
+            );
+        },
+      ),
+    );
+
+  maintenance
+    .command("status")
+    .option("--json", "Print JSON")
+    .action(
+      action(async () => {
+        console.log(
+          JSON.stringify(
+            await createCliOmnyoSdk(getUrl()).server.maintenance.status(),
+            null,
+            2,
+          ),
+        );
+      }),
+    );
+  maintenance
+    .command("acquire")
+    .requiredOption("--id <id>", "Chosen hold ID")
+    .requiredOption("--owner-id <id>", "Chosen owner ID")
+    .requiredOption("--runtime-id <id>", "Expected running server ID")
+    .requiredOption("--host-id <id>", "Expected server host ID")
+    .requiredOption(
+      "--data-dir <path>",
+      "Expected owned runtime data directory",
+    )
+    .option("--json", "Print JSON")
+    .action(
+      action(
+        async (input: {
+          id: string;
+          ownerId: string;
+          runtimeId: string;
+          hostId: string;
+          dataDir: string;
+        }) => {
+          console.log(
+            JSON.stringify(
+              await createCliOmnyoSdk(getUrl()).server.maintenance.acquire({
+                id: input.id,
+                ownerId: input.ownerId,
+                expectedRuntimeId: input.runtimeId,
+                expectedServerHostId: input.hostId,
+                expectedDataDir: input.dataDir,
+              }),
+              null,
+              2,
+            ),
+          );
+        },
+      ),
+    );
+  maintenance
+    .command("release")
+    .requiredOption("--id <id>", "Exact held ID")
+    .requiredOption("--owner-id <id>", "Exact owner ID")
+    .requiredOption("--host-id <id>", "Expected server host ID")
+    .option("--json", "Print JSON")
+    .action(
+      action(async (input: { id: string; ownerId: string; hostId: string }) => {
+        console.log(
+          JSON.stringify(
+            await createCliOmnyoSdk(getUrl()).server.maintenance.release({
+              id: input.id,
+              ownerId: input.ownerId,
+              expectedServerHostId: input.hostId,
+            }),
+            null,
+            2,
+          ),
+        );
+      }),
+    );
+
+  const preparation = maintenance
+    .command("prepare")
+    .description(
+      "Prepare a migration while an exact startup hold stays active",
+    );
+
+  maintenancePreparationCommand(
+    preparation,
+    "quiesce",
+    "Stop running threads through the normal stop path",
+  ).action(
+    action(async (input: MaintenancePrepareCommandOptions) =>
+      prepareMaintenance(getUrl, input, { type: "quiesce" }),
+    ),
+  );
+
+  maintenancePreparationCommand(
+    preparation,
+    "create-manual-target",
+    "Prepare the hold-owned manual target",
+  )
+    .requiredOption("--name <name>", "Name for the manual target")
+    .action(
+      action(
+        async (input: MaintenancePrepareCommandOptions & { name: string }) =>
+          prepareMaintenance(getUrl, input, {
+            type: "create-manual-target",
+            name: input.name,
+          }),
+      ),
+    );
+
+  maintenancePreparationCommand(
+    preparation,
+    "configure-direct-access",
+    "Set the canonical machine URL and direct default access",
+  )
+    .requiredOption("--server-url <url>", "Canonical URL reachable by machines")
+    .action(
+      action(
+        async (
+          input: MaintenancePrepareCommandOptions & { serverUrl: string },
+        ) =>
+          prepareMaintenance(getUrl, input, {
+            type: "configure-direct-access",
+            machineServerUrl: input.serverUrl,
+          }),
+      ),
+    );
+
+  maintenancePreparationCommand(
+    preparation,
+    "convert-to-direct",
+    "Convert one existing idle worker to direct access",
+  )
+    .requiredOption("--worker-id <id>", "Exact existing worker ID")
+    .action(
+      action(
+        async (
+          input: MaintenancePrepareCommandOptions & { workerId: string },
+        ) =>
+          prepareMaintenance(getUrl, input, {
+            type: "convert-to-direct",
+            hostId: input.workerId,
+          }),
+      ),
+    );
+
+  maintenancePreparationCommand(
+    preparation,
+    "enable-server-move",
+    "Enable only the serverMove experiment",
+  ).action(
+    action(async (input: MaintenancePrepareCommandOptions) =>
+      prepareMaintenance(getUrl, input, { type: "enable-server-move" }),
+    ),
+  );
+
+  maintenancePreparationCommand(
+    preparation,
+    "rebind-plugin",
+    "Rebind an installed direct-path plugin without starting its factory",
+  )
+    .requiredOption("--plugin-id <id>", "Exact installed plugin ID")
+    .requiredOption("--root-path <path>", "New plugin root path")
+    .action(
+      action(
+        async (
+          input: MaintenancePrepareCommandOptions & {
+            pluginId: string;
+            rootPath: string;
+          },
+        ) =>
+          prepareMaintenance(getUrl, input, {
+            type: "rebind-plugin",
+            pluginId: input.pluginId,
+            rootDir: input.rootPath,
+          }),
+      ),
+    );
 
   const move = server
     .command("move")
-    .description("Move the bb server to another machine (experimental)")
+    .description("Move the Omnyo server to another machine (experimental)")
     .option("--to <machine>", "Machine ID or name that should run the server")
     .option(
       "--address <url>",
@@ -288,8 +665,16 @@ export function registerServerCommands(
     )
     .option("--check", "Print the checklist without moving")
     .option(
+      "--startup-hold-id <id>",
+      "Exact startup hold ID when starting held",
+    )
+    .option(
+      "--startup-owner-id <id>",
+      "Exact startup hold owner ID when starting held",
+    )
+    .option(
       "--archive-existing-data",
-      "Move existing bb server data on the target aside before the move",
+      "Move existing Omnyo server data on the target aside before the move",
     )
     .option("--yes", "Skip the confirmation prompt")
     .option("--json", "Print machine-readable JSON output")
@@ -306,10 +691,12 @@ export function registerServerCommands(
     .action(
       action(async (opts: JsonCommandOptions) => {
         const response =
-          await createCliBbSdk(getUrl()).experimental_server.moveStatus();
+          await createCliOmnyoSdk(getUrl()).experimental_server.moveStatus();
+
         if (!outputJson(opts, response)) {
           printServerMoveStatusResponse(response);
         }
+
         if (response.move?.state === "recovery_required") {
           throw new CliExitError(
             formatServerMoveRecoveryExit(response.move),
@@ -331,12 +718,14 @@ export function registerServerCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: ServerMoveCancelCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const { move: current } = await sdk.experimental_server.moveStatus();
+
         if (current?.state === "recovery_required") {
           for (const line of serverMoveAbandonWarning(current)) {
             console.error(line);
           }
+
           if (
             !opts.yes &&
             !(await confirmDestructiveAction(
@@ -346,49 +735,59 @@ export function registerServerCommands(
             return;
           }
         }
+
         const status = await sdk.experimental_server.cancelMove();
+
         if (outputJson(opts, status)) return;
+
         if (status.state === "cancelled") {
           console.log(
             status.error?.step === "switch"
               ? `Abandoned the server move to ${status.targetHostName}. The server stays on this computer.`
               : `Cancelled the server move to ${status.targetHostName}. The server stays where it is.`,
           );
+
           return;
         }
+
         printServerMoveStatus(status);
       }),
     );
 
   server
     .command("export")
-    .description("Export the bb server's data to an archive")
+    .description("Export the Omnyo server's data to an archive")
     .requiredOption("--out <file>", "Write the archive to this file")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: ServerExportCommandOptions) => {
         const outPath = resolve(opts.out);
         await assertWritableOutPath(outPath);
+
         const exported = await withSigint(async (signal) => {
           const response = await callServerMoveRoute(() =>
-            createCliBbSdk(getUrl()).experimental_server.export({ signal }),
+            createCliOmnyoSdk(getUrl()).experimental_server.export({ signal }),
           );
+
           const sizeBytes = await writeExportFile({
             body: response.body,
             outPath,
             expectedSha256: response.sha256,
           });
+
           return { sizeBytes, sha256: response.sha256 };
         }, "Stopped the export.");
+
         const result = {
           path: outPath,
           sizeBytes: exported.sizeBytes,
           sha256: exported.sha256,
           warning: SERVER_EXPORT_UNENCRYPTED_WARNING,
         };
+
         if (outputJson(opts, result)) return;
         console.log(
-          `Exported the bb server to ${outPath} (${formatServerDataSize(exported.sizeBytes)})`,
+          `Exported the Omnyo server to ${outPath} (${formatServerDataSize(exported.sizeBytes)})`,
         );
         console.error(SERVER_EXPORT_UNENCRYPTED_WARNING);
       }),
@@ -401,13 +800,14 @@ export function registerServerCommands(
     )
     .option(
       "--data-dir <dir>",
-      "Data directory to import into (default: BB_DATA_DIR or ~/.bb)",
+      "Data directory to import into (default: OMNYO_DATA_DIR or ~/.omnyo)",
     )
     .option("--yes", "Skip the confirmation prompt")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (file: string, opts: LocalServerCommandOptions) => {
         const dataDir = resolveLocalDataDir(opts.dataDir);
+
         const result = await importServerArchive({
           archivePath: resolve(file),
           dataDir,
@@ -416,22 +816,26 @@ export function registerServerCommands(
               ? Promise.resolve(true)
               : confirmDestructiveAction(message),
           now: () => Date.now(),
-          cliVersion: resolveBbCliVersion(),
+          cliVersion: resolveOmnyoCliVersion(),
         });
+
         if (result === null) return;
+
         if (outputJson(opts, result)) return;
+
         if (result.rolledBackInterruptedImport) {
           console.log(`Rolled back an interrupted import in ${dataDir}.`);
         }
+
         console.log(
-          `Imported the bb server into ${dataDir} (${String(result.importedEntries.length)} files from ${result.sourceDataDir}, exported by bb ${result.bbVersion}).`,
+          `Imported the Omnyo server into ${dataDir} (${String(result.importedEntries.length)} files from ${result.sourceDataDir}, exported by Omnyo ${result.appVersion}).`,
         );
         console.log("");
         console.log(
-          "Stop the original bb server before you start this one. Two servers holding the same bb connect credential take each other's tunnel.",
+          "Stop the original Omnyo server before you start this one. Two servers holding the same Omnyo connect credential take each other's tunnel.",
         );
         console.log(
-          `bb connect stays off in this copy until you run ${allowConnectCommand(dataDir)}.`,
+          `Omnyo connect stays off in this copy until you run ${allowConnectCommand(dataDir)}.`,
         );
         console.log(`Then start it with ${startServerHint(dataDir)}.`);
       }),
@@ -444,7 +848,7 @@ export function registerServerCommands(
     )
     .option(
       "--data-dir <dir>",
-      "Data directory of the old server copy (default: BB_DATA_DIR or ~/.bb)",
+      "Data directory of the old server copy (default: OMNYO_DATA_DIR or ~/.omnyo)",
     )
     .option(
       "--force",
@@ -456,64 +860,79 @@ export function registerServerCommands(
       action(async (opts: UnlockCommandOptions) => {
         const dataDir = resolveLocalDataDir(opts.dataDir);
         const lock = await readServerMovedFile(dataDir);
+
         if (lock === null) {
           const result = { dataDir, unlocked: false, removedConfigKeys: [] };
+
           if (!outputJson(opts, result)) {
             console.log(`${dataDir} is not locked by a server move.`);
           }
+
           return;
         }
+
         if (lock.oldCopyEntries.length === 0) {
           throw new Error(
-            `The old server copy in ${dataDir} was deleted, so there is nothing to unlock. Unlocking would start an empty bb server.`,
+            `The old server copy in ${dataDir} was deleted, so there is nothing to unlock. Unlocking would start an empty Omnyo server.`,
           );
         }
+
         const serviceFile = await findLocalMachineServiceFile(dataDir);
+
         if (serviceFile !== null) {
           throw new Error(
             `A background service (${serviceFile}) runs this computer as a machine from ${dataDir}. Unlocking would start a second host daemon on the same data. Remove the service first: ${formatMachineServiceRemoval(serviceFile)}`,
           );
         }
+
         if (!opts.force) {
           const probe = await probeMovedServer({ dataDir, lock });
+
           if (probe.kind === "running") {
             throw new Error(
-              `The server at ${lock.serverUrl} is running. Unlocking now would run two servers with the same data and bb connect credential. Stop it first, or pass --force.`,
+              `The server at ${lock.serverUrl} is running. Unlocking now would run two servers with the same data and Omnyo connect credential. Stop it first, or pass --force.`,
             );
           }
+
           if (probe.kind === "unconfirmed") {
             console.error(
               `Couldn't confirm whether the server at ${lock.serverUrl} is running (HTTP ${String(probe.status)}). Make sure it is stopped before this old copy starts.`,
             );
           }
         }
+
         console.error(
-          `This bb server moved to ${lock.toHostName} (${lock.serverUrl}) on ${new Date(lock.movedAt).toLocaleString()}.`,
+          `This Omnyo server moved to ${lock.toHostName} (${lock.serverUrl}) on ${new Date(lock.movedAt).toLocaleString()}.`,
         );
         console.error(
           `Unlocking starts this old copy again. Everything since the move is lost here: threads, settings, and plugin data changed on ${lock.toHostName} stay there.`,
         );
         console.error(
-          `Stop the bb server on ${lock.toHostName} first. Two servers holding the same bb connect credential take each other's tunnel.`,
+          `Stop the Omnyo server on ${lock.toHostName} first. Two servers holding the same Omnyo connect credential take each other's tunnel.`,
         );
+
         if (
           !opts.yes &&
           !(await confirmDestructiveAction(
-            `Unlock the old bb server copy in ${dataDir}?`,
+            `Unlock the old Omnyo server copy in ${dataDir}?`,
           ))
         ) {
           return;
         }
+
         const removedConfigKeys = await unlockServerCopy(dataDir);
+
         if (outputJson(opts, { dataDir, unlocked: true, removedConfigKeys }))
           return;
+
         if (removedConfigKeys.length > 0) {
           console.log(
             `Removed the new server's address from ${join(dataDir, "config.json")} (${removedConfigKeys.join(", ")}).`,
           );
         }
+
         console.log(
-          `Unlocked ${dataDir}. bb on this computer starts the old server again within a few seconds; if bb isn't running, start it with ${startServerHint(dataDir)}.`,
+          `Unlocked ${dataDir}. Omnyo on this computer starts the old server again within a few seconds; if Omnyo isn't running, start it with ${startServerHint(dataDir)}.`,
         );
       }),
     );
@@ -525,7 +944,7 @@ export function registerServerCommands(
     )
     .option(
       "--data-dir <dir>",
-      "Data directory the server moved away from (default: BB_DATA_DIR or ~/.bb)",
+      "Data directory the server moved away from (default: OMNYO_DATA_DIR or ~/.omnyo)",
     )
     .option("--yes", "Skip the confirmation prompt")
     .option("--json", "Print machine-readable JSON output")
@@ -540,10 +959,12 @@ export function registerServerCommands(
           installerOutput: opts.json ? "stderr" : "stdout",
           report: (line) => console.error(line),
         });
+
         if (result === null) return;
+
         if (outputJson(opts, result)) return;
         console.log(
-          `This computer now stays connected to ${result.toHostName} as a machine, even when bb is closed. The service updates bb whenever the server does.`,
+          `This computer now stays connected to ${result.toHostName} as a machine, even when Omnyo is closed. The service updates Omnyo whenever the server does.`,
         );
       }),
     );
@@ -551,38 +972,44 @@ export function registerServerCommands(
   server
     .command("allow-connect")
     .description(
-      "Let bb account and bb connect start from an imported server copy (does not call a server)",
+      "Let Omnyo account and Omnyo connect start from an imported server copy (does not call a server)",
     )
     .option(
       "--data-dir <dir>",
-      "Data directory of the imported server (default: BB_DATA_DIR or ~/.bb)",
+      "Data directory of the imported server (default: OMNYO_DATA_DIR or ~/.omnyo)",
     )
     .option("--yes", "Skip the confirmation prompt")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: LocalServerCommandOptions) => {
         const dataDir = resolveLocalDataDir(opts.dataDir);
+
         if (!existsSync(join(dataDir, SERVER_CONNECT_HOLD_FILE_NAME))) {
           if (!outputJson(opts, { dataDir, connectHoldRemoved: false })) {
-            console.log(`${dataDir} has no bb connect hold.`);
+            console.log(`${dataDir} has no Omnyo connect hold.`);
           }
+
           return;
         }
+
         console.error(
-          "Stop the original bb server first. Two servers holding the same bb account credential take each other's tunnel and spend the same hosted quota.",
+          "Stop the original Omnyo server first. Two servers holding the same Omnyo account credential take each other's tunnel and spend the same hosted quota.",
         );
+
         if (
           !opts.yes &&
           !(await confirmDestructiveAction(
-            `Let bb account and bb connect start from the imported bb server in ${dataDir}?`,
+            `Let Omnyo account and Omnyo connect start from the imported Omnyo server in ${dataDir}?`,
           ))
         ) {
           return;
         }
+
         const connectHoldRemoved = await removeServerConnectHoldFile(dataDir);
+
         if (outputJson(opts, { dataDir, connectHoldRemoved })) return;
         console.log(
-          `Removed the bb connect hold from ${dataDir}. bb account and bb connect start the next time this server starts; restart bb if it's already running.`,
+          `Removed the Omnyo connect hold from ${dataDir}. Omnyo account and Omnyo connect start the next time this server starts; restart Omnyo if it's already running.`,
         );
       }),
     );
@@ -594,7 +1021,7 @@ export function registerServerCommands(
     )
     .option(
       "--data-dir <dir>",
-      "Data directory of the old server copy (default: BB_DATA_DIR or ~/.bb)",
+      "Data directory of the old server copy (default: OMNYO_DATA_DIR or ~/.omnyo)",
     )
     .option("--yes", "Skip the confirmation prompt")
     .option("--json", "Print machine-readable JSON output")
@@ -602,8 +1029,10 @@ export function registerServerCommands(
       action(async (opts: LocalServerCommandOptions) => {
         const dataDir = resolveLocalDataDir(opts.dataDir);
         const lock = await readServerMovedFile(dataDir);
+
         if (lock === null || lock.oldCopyEntries.length === 0) {
           const result = { dataDir, deleted: false, deletedEntries: [] };
+
           if (!outputJson(opts, result)) {
             console.log(
               lock === null
@@ -611,20 +1040,24 @@ export function registerServerCommands(
                 : `The old server copy in ${dataDir} was already deleted.`,
             );
           }
+
           return;
         }
+
         if (
           !opts.yes &&
           !(await confirmDestructiveAction(
-            `Delete the old bb server copy in ${dataDir} (${String(lock.oldCopyEntries.length)} entries)? The server now runs on ${lock.toHostName}; this cannot be undone.`,
+            `Delete the old Omnyo server copy in ${dataDir} (${String(lock.oldCopyEntries.length)} entries)? The server now runs on ${lock.toHostName}; this cannot be undone.`,
           ))
         ) {
           return;
         }
+
         const result = await deleteOldServerCopy(dataDir, lock);
+
         if (outputJson(opts, result)) return;
         console.log(
-          `Deleted the old bb server copy from ${dataDir} (${String(result.deletedEntries.length)} entries). This computer keeps running as a regular machine.`,
+          `Deleted the old Omnyo server copy from ${dataDir} (${String(result.deletedEntries.length)} entries). This computer keeps running as a regular machine.`,
         );
       }),
     );

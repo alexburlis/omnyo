@@ -18,6 +18,7 @@ export interface BadgeColors {
 
 export function useBadgeColors(): BadgeColors {
   const { tokens, mode } = useTheme();
+
   return {
     blue: process.env.EXPO_OS === "ios" ? tokens.primary : "#007aff",
     green: tokens.success,

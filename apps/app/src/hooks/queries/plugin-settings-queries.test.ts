@@ -24,6 +24,7 @@ function fetchReturning(body: unknown, status = 200): typeof fetch {
 function receiverSensitiveFetch(body: unknown): typeof fetch {
   return function (this: typeof globalThis) {
     if (this !== globalThis) throw new TypeError("Illegal invocation");
+
     return Promise.resolve(
       new Response(JSON.stringify(body), {
         status: 200,
@@ -107,7 +108,9 @@ describe("plugin list envelope", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
+
     let resolveOlderRequest = (_response: Response): void => {};
+
     const networkFetch = vi
       .fn<typeof fetch>()
       .mockImplementationOnce(
@@ -119,6 +122,7 @@ describe("plugin list envelope", () => {
       .mockImplementationOnce(
         fetchReturning({ plugins: [pluginWithBundle("new")] }),
       );
+
     vi.stubGlobal("fetch", networkFetch);
 
     const olderCandidates = fetchFrontendCandidates(queryClient);
@@ -148,6 +152,7 @@ describe("plugin list envelope", () => {
     const result = await listPlugins(
       receiverSensitiveFetch({ plugins: [ROW] }),
     );
+
     expect(result.plugins).toHaveLength(1);
   });
 
@@ -237,6 +242,7 @@ describe("plugin list envelope", () => {
       ...ROW,
       updateState: { lastFailure: { version: "1.7.0" } },
     };
+
     await expect(
       listPlugins(fetchReturning({ plugins: [partialFailure] })),
     ).rejects.toThrow();
@@ -262,10 +268,13 @@ describe("plugin list envelope", () => {
 describe("removePlugin", () => {
   it("DELETEs the plugin by encoded id and resolves on ok", async () => {
     const calls: Array<{ url: string; init?: { method?: string } }> = [];
+
     const fetchImpl = (async (url: string, init?: { method?: string }) => {
       calls.push({ url, init });
+
       return { ok: true, status: 200, json: async () => ({ ok: true }) };
     }) as unknown as typeof fetch;
+
     await removePlugin(fetchImpl, "demo/widget");
     expect(calls[0]?.url).toBe("/api/v1/plugins/demo%2Fwidget");
     expect(calls[0]?.init).toMatchObject({ method: "DELETE" });

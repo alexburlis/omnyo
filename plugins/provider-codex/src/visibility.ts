@@ -7,7 +7,7 @@ import {
   type ProviderRawEventCoverage,
   type ProviderRawEventDescription,
   type ProviderVisibilityMetadata,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import type { ServerNotification } from "./generated/codex-app-server/schema/ServerNotification.js";
 
 type CodexServerNotificationMethod = ServerNotification["method"];
@@ -168,7 +168,7 @@ const CODEX_NOTIFICATION_COVERAGE = {
   "serverRequest/resolved": "noise",
   "skills/changed": "noise",
   "thread/archived": "noise",
-  "thread/closed": "unknown",
+  "thread/closed": "noise",
   "thread/compacted": "normalized",
   "thread/deleted": "unknown",
   "thread/environment/connected": "unknown",
@@ -266,7 +266,9 @@ function describeParsedCodexRawEvent(
         const run = isRecord(event.params)
           ? getRecordProperty(event.params, "run")
           : undefined;
+
         const status = run ? getStringProperty(run, "status") : undefined;
+
         return {
           kind: event.method,
           coverage:
@@ -275,6 +277,7 @@ function describeParsedCodexRawEvent(
               : "unknown",
         };
       }
+
       if (
         (event.method === "item/started" ||
           event.method === "item/completed") &&
@@ -282,15 +285,19 @@ function describeParsedCodexRawEvent(
       ) {
         return { kind: event.method, coverage: "noise" };
       }
+
       if (event.method === "item/commandExecution/terminalInteraction") {
         if (isRecord(event.params)) {
           const stdin = getStringProperty(event.params, "stdin");
+
           if (stdin !== undefined && stdin.length === 0) {
             return { kind: event.method, coverage: "noise" };
           }
         }
+
         return { kind: event.method, coverage: "unknown" };
       }
+
       return {
         kind: event.method,
         coverage: CODEX_NOTIFICATION_COVERAGE[event.method],
@@ -310,7 +317,9 @@ function isCodexUserMessageItemEvent(
   if (!isRecord(event.params)) {
     return false;
   }
+
   const item = getRecordProperty(event.params, "item");
+
   return item ? getStringProperty(item, "type") === "userMessage" : false;
 }
 

@@ -12,6 +12,7 @@ const SidebarRenameContext = createContext<RenameController | null>(null);
 
 export function SidebarRenameProvider({ children }: { children: ReactNode }) {
   const controller = useRenameController();
+
   return (
     <SidebarRenameContext.Provider value={controller}>
       {children}
@@ -29,8 +30,10 @@ export function useSidebarRenameState() {
 
 export function useSidebarRename(args: InlineRenameArgs) {
   const controller = useContext(SidebarRenameContext);
+
   if (!controller) {
     throw new Error("useSidebarRename requires a SidebarRenameProvider");
   }
+
   return useInlineRename(args, { controller, Editor: InlineRenameEditor });
 }

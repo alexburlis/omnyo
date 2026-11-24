@@ -9,11 +9,12 @@ import {
 } from "./test-support.js";
 
 let harness: FakePiBridgeHarness;
+
 let nextId = 2000;
 
 beforeEach(async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-ext-ui-",
+    prefix: "omnyo-pi-ext-ui-",
     initialize: true,
     processLog: true,
   });
@@ -25,10 +26,13 @@ afterEach(async () => {
 
 async function startThread(threadId: string): Promise<string> {
   const started = await harness.startThread(threadId);
+
   const providerThreadId = String(
     (started.result as { providerThreadId?: unknown }).providerThreadId,
   );
+
   expect(providerThreadId).toMatch(/^pi_[0-9a-f-]{36}$/u);
+
   return providerThreadId;
 }
 
@@ -93,11 +97,13 @@ function resolveInteraction(
 
 async function extensionUiReplyOf(threadId: string): Promise<string> {
   await harness.waitForTurnBoundary(threadId);
+
   const textDeltas = harness
     .deltasOf(threadId)
     .filter((delta) => delta.kind === "item.textDelta")
     .map((delta) => String(delta.text))
     .join("");
+
   return textDeltas;
 }
 
@@ -186,12 +192,14 @@ it("cancels a pending dialog when the thread is stopped mid-prompt", async () =>
     '/ui {"method":"select","title":"Pick","options":["A","B"]}',
   );
   const interaction = await waitForInteractionRequest(threadId);
+
   const stopResponse = await harness.request((nextId += 1), "thread/stop", {
     threadId,
     providerThreadId,
     intent: "interrupt",
     activeTurnId: null,
   });
+
   expect(stopResponse.result).toMatchObject({ ok: true });
   const response = JSON.parse(readFileSync(uiLogPath, "utf8"));
   expect(response).toMatchObject({

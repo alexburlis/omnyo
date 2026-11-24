@@ -8,15 +8,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runtimeBuildOptions, runtimeEntries } from "./runtime-entries.mjs";
 
 const run = promisify(execFile);
+
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+
 const {
   exports: packageExports,
   dependencies,
   peerDependencies,
 } = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"));
+
 const libraryEntries = runtimeEntries(packageExports).filter(
   (entry) => entry.subpath !== undefined,
 );
@@ -27,6 +30,7 @@ describe("published runtime entries", () => {
 
   beforeAll(async () => {
     outDir = await mkdtemp(path.join(packageRoot, ".runtime-test-"));
+
     for (const entry of libraryEntries) {
       const outfile = path.join(outDir, path.relative("dist", entry.output));
       await build({
@@ -43,6 +47,7 @@ describe("published runtime entries", () => {
 
   it("inline no CommonJS module that would need a require shim", async () => {
     const shimmed = [];
+
     for (const [subpath, outfile] of outputs) {
       if ((await readFile(outfile, "utf8")).includes("Dynamic require of")) {
         shimmed.push(subpath);

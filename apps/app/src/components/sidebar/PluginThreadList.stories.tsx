@@ -1,9 +1,11 @@
+import { ActionHistoryProvider } from "@/components/layout/ActionHistoryProvider";
 import { useEffect, useState } from "react";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
-import type { SidebarBootstrapResponse } from "@bb/server-contract";
-import { installTestPluginRuntime } from "@get-bb/plugin-sdk/testing/app";
+import { PERSONAL_PROJECT_ID, projectThreadWork } from "@omnyo/domain";
+import type { SidebarBootstrapResponse } from "@omnyo/server-contract";
+import { installTestPluginRuntime } from "@omnyo/plugin-sdk/testing/app";
+import { Button } from "@omnyo/shared-ui/button";
 import { ThreadActionsProvider } from "@/components/thread/ThreadActionsProvider";
 import { SidebarContent, SidebarProvider } from "@/components/ui/sidebar";
 import {
@@ -25,8 +27,11 @@ import {
 } from "../../../.ladle/story-fixtures";
 import { PluginThreadList } from "./PluginThreadList";
 import { useThreadListReplacement } from "./threadListProvider";
+import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
+import { SidebarThreadEntriesProvider } from "@/lib/sidebar-thread-entries";
 
 installTestPluginRuntime();
+
 const threadListApp = await loadPluginAppDefinition(
   import.meta.glob<unknown>("../../../../../plugins/thread-list/app.tsx"),
 );
@@ -34,8 +39,12 @@ const threadListApp = await loadPluginAppDefinition(
 export default { title: "sidebar/Thread list" };
 
 const THREAD_LIST_PLUGIN_ID = "thread-list";
+
 const INBOX = { id: "sec_inbox", name: "Inbox", createdAt: 1, updatedAt: 1 };
+
 const READ_AT = 10_000;
+
+const STORY_NOW = Date.now();
 
 function inboxEntry(
   id: string,
@@ -46,13 +55,14 @@ function inboxEntry(
 ) {
   return makeThreadListEntry({
     id,
-    projectId: PROJECT_IDS.bb,
+    projectId: PROJECT_IDS.omnyo,
     title,
     titleFallback: title,
     sectionId: INBOX.id,
     environmentId: null,
     latestAttentionAt,
-    createdAt: latestAttentionAt,
+    lastMessageAt: STORY_NOW - (1_000 - latestAttentionAt) ** 2 * 1_000,
+    createdAt: STORY_NOW - (1_000 - latestAttentionAt) * 3_600_000,
     updatedAt: latestAttentionAt,
     lastReadAt: unread ? 0 : READ_AT,
     ...overrides,
@@ -75,11 +85,55 @@ const INBOX_THREADS = [
   }),
 ];
 
+const WORKING_SUMMARY = projectThreadWork({
+  revision: "story-working",
+  basis: "story",
+  activity: [
+    {
+      id: "story:turn",
+      kind: "turn",
+      label: "Working",
+      phase: "running",
+      actor: { kind: "agent", id: null, label: "Agent" },
+    },
+  ],
+  requiredInput: [],
+  optionalInput: [],
+  failures: [],
+  waits: [],
+  coverageComplete: true,
+  unknownReason: null,
+  assessment: null,
+  postponement: null,
+  closed: false,
+});
+
+const SUBAGENT_THREADS = [
+  ["Improve Omnyo bottom-bar toggle", 0],
+  ["Reduce Omnyo agent time sinks", 1],
+  ["Context menu glow redesign", 3],
+  ["Sidebar chat status flicker", 12],
+] as const satisfies readonly (readonly [string, number])[];
+
+const WORKING_SUBAGENT_THREADS = SUBAGENT_THREADS.map(([title, count], index) =>
+  inboxEntry(`thr_subagents_${count}`, title, 900 - index, false, {
+    status: "active",
+    runtime: { displayStatus: "active" },
+    work: WORKING_SUMMARY,
+    activity: {
+      activeBackgroundAgentCount: count === 0 ? 0 : 1,
+      activeSubagentCount: count,
+    },
+  }),
+);
+
 function sidebarNavigation(
   threads: SidebarBootstrapResponse["projects"][number]["threads"],
 ): SidebarBootstrapResponse {
   return {
     sections: [INBOX],
+    groups: [],
+    orderedProjectIds: [PROJECT_IDS.omnyo, PERSONAL_PROJECT_ID],
     projects: [{ ...makeProject(), defaultExecutionOptions: null, threads }],
     personalProject: {
       ...makeProject({
@@ -94,7 +148,9 @@ function sidebarNavigation(
   };
 }
 
-function createThreadListQueryClient() {
+function createThreadListQueryClient(
+  threads: SidebarBootstrapResponse["projects"][number]["threads"] = INBOX_THREADS,
+) {
   const queryClient = createAppQueryClient({
     showMutationErrorToasts: false,
     defaultOptions: {
@@ -102,11 +158,13 @@ function createThreadListQueryClient() {
       queries: { gcTime: Infinity, retry: false, staleTime: Infinity },
     },
   });
+
   queryClient.setQueryData(hostsQueryKey(), []);
   queryClient.setQueryData(
     sidebarNavigationQueryKey(),
-    sidebarNavigation(INBOX_THREADS),
+    sidebarNavigation(threads),
   );
+
   return queryClient;
 }
 
@@ -123,27 +181,37 @@ function useThreadListPreferenceRpc(initial: Record<string, unknown>) {
           : input instanceof URL
             ? input.href
             : input.url;
+
       const method = url.includes(prefix) ? url.split(prefix)[1] : null;
+
       const reply = (result: unknown) =>
         new Response(JSON.stringify({ ok: true, result }), {
           headers: { "content-type": "application/json" },
         });
+
       if (method === "listPreferences") return reply({ preferences });
+
       if (method === "setPreference" && typeof init?.body === "string") {
         const { key, value } = JSON.parse(init.body) as {
           key: string;
           value: unknown;
         };
+
         preferences[key] = value;
+
         return reply({ key, value });
       }
+
       return originalFetch(input, init);
     };
+
     setReady(true);
+
     return () => {
       globalThis.fetch = originalFetch;
     };
   }, [initial]);
+
   return ready;
 }
 
@@ -155,20 +223,25 @@ function useThreadListPlugin() {
         threadLists: collectPluginAppRegistrations(threadListApp).threadLists,
       }),
     );
+
     return () => removePluginSlotRegistrations(THREAD_LIST_PLUGIN_ID);
   }, []);
 }
 
 function ThreadListSidebar() {
   const replacement = useThreadListReplacement();
+  const { data } = useSidebarNavigation();
+
   return (
-    <SidebarProvider defaultOpen className="min-h-0 w-auto">
-      <div className="flex h-[560px] w-72 shrink-0 flex-col overflow-hidden rounded-lg border border-sidebar-border bg-sidebar text-sidebar-foreground">
-        <SidebarContent>
-          <PluginThreadList replacement={replacement} onNavigate={() => {}} />
-        </SidebarContent>
-      </div>
-    </SidebarProvider>
+    <SidebarThreadEntriesProvider navigation={data}>
+      <SidebarProvider defaultOpen className="min-h-0 w-auto">
+        <div className="flex h-[560px] w-72 shrink-0 flex-col overflow-hidden rounded-lg border border-sidebar-border bg-sidebar text-sidebar-foreground">
+          <SidebarContent>
+            <PluginThreadList replacement={replacement} onNavigate={() => {}} />
+          </SidebarContent>
+        </div>
+      </SidebarProvider>
+    </SidebarThreadEntriesProvider>
   );
 }
 
@@ -178,15 +251,19 @@ function OpenThreadControls() {
   const { pathname } = useLocation();
   const [, refresh] = useState(0);
   const openThreadId = pathname.match(/\/threads\/([^/]+)/)?.[1] ?? null;
+
   const navigation = queryClient.getQueryData<SidebarBootstrapResponse>(
     sidebarNavigationQueryKey(),
   );
+
   const openThread = navigation?.projects[0]?.threads.find(
     (thread) => thread.id === openThreadId,
   );
+
   const openThreadIsUnread =
     openThread !== undefined &&
     (openThread.lastReadAt ?? 0) < openThread.latestAttentionAt;
+
   const markOpenThreadRead = () => {
     queryClient.setQueryData<SidebarBootstrapResponse>(
       sidebarNavigationQueryKey(),
@@ -205,28 +282,31 @@ function OpenThreadControls() {
     );
     refresh((count) => count + 1);
   };
+
   return (
     <section className="grid max-w-xs content-start gap-3 text-sm">
       <p className="text-muted-foreground">
         Organize → Groups → By read status starts on. Click a thread to open it,
-        then mark it read the way bb does when you view it. It keeps its group
-        until you open another thread.
+        then mark it read the way Omnyo does when you view it. It keeps its
+        group until you open another thread.
       </p>
       <p className="text-xs text-muted-foreground">
         Open thread: {openThread?.title ?? "none"}
       </p>
       <div className="flex flex-wrap gap-2">
-        <button
+        <Button
           type="button"
-          className="rounded-md border border-border px-2 py-1 disabled:opacity-50"
+          variant="outline"
+          size="sm"
           disabled={!openThreadIsUnread}
           onClick={markOpenThreadRead}
         >
           Mark open thread read
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="rounded-md border border-border px-2 py-1"
+          variant="outline"
+          size="sm"
           onClick={() => {
             queryClient.setQueryData(
               sidebarNavigationQueryKey(),
@@ -236,7 +316,7 @@ function OpenThreadControls() {
           }}
         >
           Reset
-        </button>
+        </Button>
       </div>
     </section>
   );
@@ -251,15 +331,44 @@ export function InboxReadStatus() {
   const [queryClient] = useState(createThreadListQueryClient);
   const rpcReady = useThreadListPreferenceRpc(READ_STATUS_PREFERENCES);
   useThreadListPlugin();
+
   if (!rpcReady) return null;
+
   return (
     <QueryClientProvider client={queryClient}>
-      <ThreadActionsProvider>
-        <main className="flex gap-6 p-6">
-          <ThreadListSidebar />
-          <OpenThreadControls />
-        </main>
-      </ThreadActionsProvider>
+      <ActionHistoryProvider>
+        <ThreadActionsProvider>
+          <main className="flex gap-6 p-6">
+            <ThreadListSidebar />
+            <OpenThreadControls />
+          </main>
+        </ThreadActionsProvider>
+      </ActionHistoryProvider>
+    </QueryClientProvider>
+  );
+}
+
+const CHRONOLOGICAL_PREFERENCES = { organizationMode: "chronological" };
+
+export function WorkingSubagents() {
+  const [queryClient] = useState(() =>
+    createThreadListQueryClient(WORKING_SUBAGENT_THREADS),
+  );
+
+  const rpcReady = useThreadListPreferenceRpc(CHRONOLOGICAL_PREFERENCES);
+  useThreadListPlugin();
+
+  if (!rpcReady) return null;
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ActionHistoryProvider>
+        <ThreadActionsProvider>
+          <main className="flex gap-6 p-6">
+            <ThreadListSidebar />
+          </main>
+        </ThreadActionsProvider>
+      </ActionHistoryProvider>
     </QueryClientProvider>
   );
 }

@@ -14,7 +14,7 @@ import {
   defaultAppSettings,
   type AppCommandId,
   type AppKeybinding,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { AppCommandProvider, useAppCommandHandler } from "./AppCommandProvider";
 import { CommandPalette } from "./CommandPalette";
 
@@ -22,6 +22,7 @@ const body = vi.hoisted(() => ({
   imports: 0,
   release: () => {},
 }));
+
 const calls = vi.hoisted(() => [] as AppCommandId[]);
 
 vi.mock("./CommandPaletteBody", async (importOriginal) => {
@@ -29,6 +30,7 @@ vi.mock("./CommandPaletteBody", async (importOriginal) => {
   await new Promise<void>((resolve) => {
     body.release = resolve;
   });
+
   return importOriginal();
 });
 
@@ -68,8 +70,8 @@ vi.mock("@/hooks/queries/system-queries", () => ({
   }),
 }));
 
-vi.mock("@/lib/bb-desktop", () => ({
-  getBbDesktopInfo: () => null,
+vi.mock("@/lib/omnyo-desktop", () => ({
+  getOmnyoDesktopInfo: () => null,
 }));
 
 vi.mock("@/hooks/useHostDaemon", () => ({
@@ -89,8 +91,10 @@ afterEach(() => {
 function NewThreadHandler() {
   useAppCommandHandler("thread.new", () => {
     calls.push("thread.new");
+
     return true;
   });
+
   return null;
 }
 
@@ -140,14 +144,18 @@ it("stays usable before its body downloads on first open and keeps typed text", 
   expect(body.imports).toBe(1);
 
   await act(async () => body.release());
+
   const combobox = await screen.findByRole("combobox", {
     name: "Search commands",
   });
+
   expect(combobox).toHaveProperty("value", "new thr");
   expect(document.activeElement).toBe(combobox);
+
   const selected = screen
     .getAllByRole("option")
     .find((option) => option.getAttribute("aria-selected") === "true");
+
   expect(selected?.textContent).toContain("New thread");
 
   fireEvent.keyDown(combobox, { key: "Enter" });

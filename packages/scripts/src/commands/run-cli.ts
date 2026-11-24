@@ -1,4 +1,4 @@
-import { resolveCurrentDevProcessEnv } from "@bb/config/runtime";
+import { resolveCurrentDevProcessEnv } from "@omnyo/config/runtime";
 import { runScriptProcess } from "../lib/process-helpers.js";
 import { repoRoot, runMainIfEntrypoint } from "../lib/script-entry.js";
 
@@ -15,11 +15,13 @@ export function resolveCliExecution(
   const forwardedArgs = cliArgs[0] === "--" ? cliArgs.slice(1) : cliArgs;
   const env = { ...process.env };
   let args = ["apps/cli/dist/index.js", ...forwardedArgs];
+
   if (process.env.NODE_ENV !== "production") {
     const devEnv = resolveCurrentDevProcessEnv(repoRoot, process.env);
-    env.BB_SERVER_URL = process.env.BB_SERVER_URL ?? devEnv.BB_SERVER_URL;
-    env.BB_HOST_DAEMON_PORT =
-      process.env.BB_HOST_DAEMON_PORT ?? devEnv.BB_HOST_DAEMON_PORT;
+    env.OMNYO_SERVER_URL =
+      process.env.OMNYO_SERVER_URL ?? devEnv.OMNYO_SERVER_URL;
+    env.OMNYO_HOST_DAEMON_PORT =
+      process.env.OMNYO_HOST_DAEMON_PORT ?? devEnv.OMNYO_HOST_DAEMON_PORT;
     args = [
       "--conditions=source",
       "--import",
@@ -28,6 +30,7 @@ export function resolveCliExecution(
       ...forwardedArgs,
     ];
   }
+
   return {
     args,
     command: process.execPath,

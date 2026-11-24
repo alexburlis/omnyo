@@ -15,6 +15,7 @@ export const modelReasoningEffortSchema = z.object({
   label: z.string().min(1).optional(),
   description: z.string(),
 });
+
 export type ModelReasoningEffort = z.infer<typeof modelReasoningEffortSchema>;
 
 export const modelServiceTierSchema = z.object({
@@ -22,6 +23,7 @@ export const modelServiceTierSchema = z.object({
   label: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
 });
+
 export type ModelServiceTier = z.infer<typeof modelServiceTierSchema>;
 
 export const availableModelSchema = z.object({
@@ -36,9 +38,11 @@ export const availableModelSchema = z.object({
   sessionOptions: z.array(threadSessionOptionSchema).max(64).optional(),
   isDefault: z.boolean(),
 });
+
 export type AvailableModel = z.infer<typeof availableModelSchema>;
 
 export const providerModelCatalogScopeSchema = z.enum(["host", "workspace"]);
+
 export type ProviderModelCatalogScope = z.infer<
   typeof providerModelCatalogScopeSchema
 >;
@@ -53,6 +57,7 @@ const providerCapabilitiesSchema = z.object({
   permissionModes: z.array(permissionModeSchema).min(1),
   modelCatalogScope: providerModelCatalogScopeSchema,
 });
+
 export type ProviderCapabilities = z.infer<typeof providerCapabilitiesSchema>;
 
 const providerComposerCommandSchema = z.object({
@@ -63,6 +68,7 @@ const providerComposerCommandSchema = z.object({
     .regex(/^[^\s/$]+$/u),
   trailingText: z.string().regex(/^\s*$/u),
 });
+
 export type ProviderComposerCommand = z.infer<
   typeof providerComposerCommandSchema
 >;
@@ -81,6 +87,7 @@ const providerComposerActionSchema = z.discriminatedUnion("kind", [
     command: providerComposerCommandSchema,
   }),
 ]);
+
 export type ProviderComposerAction = z.infer<
   typeof providerComposerActionSchema
 >;
@@ -101,6 +108,7 @@ export const providerOptionDescriptorSchema = z.object({
   label: z.string().min(1),
   description: z.string().min(1).optional(),
 });
+
 export type ProviderOptionDescriptor = z.infer<
   typeof providerOptionDescriptorSchema
 >;
@@ -114,6 +122,7 @@ export const providerExtensionKindsSchema = z.record(
   extensionKindSchema,
   providerExtensionKindInfoSchema,
 );
+
 export type ProviderExtensionKinds = z.infer<
   typeof providerExtensionKindsSchema
 >;
@@ -139,6 +148,7 @@ export const providerInfoSchema = z.object({
   reasoningLevels: z.array(providerOptionDescriptorSchema).optional(),
   extensionKinds: providerExtensionKindsSchema.optional(),
 });
+
 export type ProviderInfo = z.infer<typeof providerInfoSchema>;
 
 export const providerRecoveryKindValues = [
@@ -148,7 +158,9 @@ export const providerRecoveryKindValues = [
   "staleTurn",
   "rateLimited",
 ] as const;
+
 export const providerRecoveryKindSchema = z.enum(providerRecoveryKindValues);
+
 export type ProviderRecoveryKind = z.infer<typeof providerRecoveryKindSchema>;
 
 export const toolCallOutputItemSchema = z.discriminatedUnion("type", [
@@ -171,12 +183,14 @@ export const toolCallRequestSchema = z.object({
   tool: z.string().min(1),
   arguments: z.unknown().optional(),
 });
+
 export type ToolCallRequest = z.infer<typeof toolCallRequestSchema>;
 
 export const toolCallResponseSchema = z.object({
   contentItems: z.array(toolCallOutputItemSchema),
   success: z.boolean(),
 });
+
 export type ToolCallResponse = z.infer<typeof toolCallResponseSchema>;
 
 export const dynamicToolSchema = z.object({
@@ -185,4 +199,5 @@ export const dynamicToolSchema = z.object({
   inputSchema: z.unknown(),
   presentation: threadEventItemPresentationSchema.optional(),
 });
+
 export type DynamicTool = z.infer<typeof dynamicToolSchema>;

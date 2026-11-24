@@ -3,14 +3,16 @@ import type {
   PluginMachineValidateDecision,
   StandardSchemaV1,
   StandardSchemaV1InferOutput,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 
 export type PluginMachineProviderResource = Exclude<JsonValue, null>;
 
 export type PluginMachineProviderInputsSchema = StandardSchemaV1 | undefined;
+
 type InputsValue<S> = S extends StandardSchemaV1
   ? StandardSchemaV1InferOutput<S>
   : null;
+
 export interface PluginMachineProviderProgress {
   step(text: string): void;
   log(text: string): void;

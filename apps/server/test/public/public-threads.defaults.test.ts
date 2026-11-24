@@ -9,9 +9,9 @@ import {
   listThreadsWithPendingInteractionState,
   setExperiments,
   upsertProjectExecutionDefaults,
-} from "@bb/db";
-import { defaultExperiments, threadSchema } from "@bb/domain";
-import { sidebarBootstrapResponseSchema } from "@bb/server-contract";
+} from "@omnyo/db";
+import { defaultExperiments, threadSchema } from "@omnyo/domain";
+import { sidebarBootstrapResponseSchema } from "@omnyo/server-contract";
 import { waitForQueuedCommand } from "../helpers/commands.js";
 import { availableModelFixture } from "../helpers/available-models.js";
 import { registerProviderHostRpcResponder } from "../helpers/host-rpc.js";
@@ -37,10 +37,12 @@ describe("public thread default routes", () => {
   it("remembers resolved execution options after thread creation", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-defaults-create",
       });
+
       seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -76,12 +78,14 @@ describe("public thread default routes", () => {
 
       expect(response.status).toBe(201);
       const createdThread = threadSchema.parse(await readJson(response));
+
       const queuedStart = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" &&
           command.threadId === createdThread.id,
       );
+
       expect(queuedStart.command).toMatchObject({
         options: {
           model: "gpt-5-mini",
@@ -108,26 +112,33 @@ describe("public thread default routes", () => {
   it("allows managed-worktree threads on a secondary host", async () => {
     await withTestHarness(async (harness) => {
       const provider = installFakeGitWorktreeProvider();
+
       const { host: localHost } = seedHostSession(harness.deps, {
         id: "host-managed-default",
       });
+
       seedPrimaryHost(harness.deps, localHost.id);
+
       const { host: secondaryHost } = seedHostSession(harness.deps, {
         id: "host-managed-secondary",
       });
+
       setExperiments(harness.db, {
         ...defaultExperiments,
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: localHost.id,
         path: "/tmp/default-managed-source",
       });
+
       const secondarySource = createProjectSource(harness.db, harness.hub, {
         projectId: project.id,
         type: "local_path",
         hostId: secondaryHost.id,
         path: "/tmp/secondary-managed-source",
       });
+
       if (secondarySource.type !== "local_path") {
         throw new Error("Expected local_path project source");
       }
@@ -168,10 +179,12 @@ describe("public thread default routes", () => {
   it("does not remember project defaults after CLI-origin thread creation", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-defaults-cli-origin",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -213,10 +226,12 @@ describe("public thread default routes", () => {
   it("inherits the remembered provider and execution defaults when thread creation omits them", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-defaults-inherit",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -250,12 +265,14 @@ describe("public thread default routes", () => {
 
       expect(response.status).toBe(201);
       const createdThread = threadSchema.parse(await readJson(response));
+
       const queuedStart = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" &&
           command.threadId === createdThread.id,
       );
+
       expect(queuedStart.command).toMatchObject({
         options: {
           model: "gpt-5",
@@ -287,10 +304,12 @@ describe("public thread default routes", () => {
           },
         },
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-defaults-provider-mismatch",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -327,12 +346,14 @@ describe("public thread default routes", () => {
 
       expect(response.status).toBe(201);
       const createdThread = threadSchema.parse(await readJson(response));
+
       const queuedStart = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" &&
           command.threadId === createdThread.id,
       );
+
       expect(queuedStart.command).toMatchObject({
         options: { model: "claude-opus-catalog-default" },
       });
@@ -342,6 +363,7 @@ describe("public thread default routes", () => {
   it("uses the catalog isDefault model when provider and project defaults are omitted", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps);
+
       const providerResponder = registerProviderHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -359,10 +381,12 @@ describe("public thread default routes", () => {
           },
         },
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-defaults-missing",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -387,12 +411,14 @@ describe("public thread default routes", () => {
 
       expect(response.status).toBe(201);
       const createdThread = threadSchema.parse(await readJson(response));
+
       const queuedStart = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" &&
           command.threadId === createdThread.id,
       );
+
       expect(queuedStart.command).toMatchObject({
         providerId: "codex",
         options: { model: "gpt-provider-default" },
@@ -428,10 +454,12 @@ describe("public thread default routes", () => {
           },
         },
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-defaults-client-provider",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -465,12 +493,14 @@ describe("public thread default routes", () => {
 
       expect(response.status).toBe(201);
       const createdThread = threadSchema.parse(await readJson(response));
+
       const queuedStart = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" &&
           command.threadId === createdThread.id,
       );
+
       expect(queuedStart.command).toMatchObject({
         providerId: "codex",
         options: {
@@ -495,10 +525,12 @@ describe("public thread default routes", () => {
           },
         },
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-defaults-catalog-error",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -562,10 +594,12 @@ describe("public thread default routes", () => {
                 }
               : {},
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
           path: "/tmp/thread-defaults-catalog-fallback",
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
@@ -589,12 +623,14 @@ describe("public thread default routes", () => {
         expect(response.status).toBe(201);
         const createdThread = threadSchema.parse(await readJson(response));
         expect(createdThread.providerId).toBe("claude-code");
+
         const queuedStart = await waitForQueuedCommand(
           harness,
           ({ command }) =>
             command.type === "thread.start" &&
             command.threadId === createdThread.id,
         );
+
         expect(queuedStart.command).toMatchObject({
           providerId: "claude-code",
           options: { model: "test-provider-default" },
@@ -606,10 +642,12 @@ describe("public thread default routes", () => {
   it("rejects thread creation without an origin at the public API boundary", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-defaults-missing-origin",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -644,20 +682,24 @@ describe("public thread default routes", () => {
   it("does not overwrite project execution defaults after a thread send", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-send-defaults",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/thread-send-defaults",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "idle",
       });
+
       seedThreadRuntimeState(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -692,11 +734,13 @@ describe("public thread default routes", () => {
       );
 
       expect(response.status).toBe(200);
+
       const queuedRun = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === thread.id,
       );
+
       expect(queuedRun.command).toMatchObject({
         options: {
           model: "gpt-5-mini",
@@ -723,6 +767,7 @@ describe("public thread default routes", () => {
   it("does not synthesize project defaults in sidebar bootstrap", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-defaults-sidebar",
@@ -731,12 +776,15 @@ describe("public thread default routes", () => {
       const response = await harness.app.request("/api/v1/sidebar-bootstrap");
 
       expect(response.status).toBe(200);
+
       const bootstrap = sidebarBootstrapResponseSchema.parse(
         await readJson(response),
       );
+
       const sidebarProject = bootstrap.projects.find(
         (candidate) => candidate.id === project.id,
       );
+
       expect(sidebarProject?.defaultExecutionOptions).toBeNull();
       expect(
         getProjectExecutionDefaults(harness.db, {
@@ -749,14 +797,17 @@ describe("public thread default routes", () => {
   it("excludes hidden threads from sidebar bootstrap", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/thread-defaults-sidebar-hidden",
       });
+
       const visibleThread = seedThread(harness.deps, {
         projectId: project.id,
         title: "Visible thread",
       });
+
       const hiddenThread = seedThread(harness.deps, {
         projectId: project.id,
         title: "Hidden worker",
@@ -766,12 +817,15 @@ describe("public thread default routes", () => {
       const response = await harness.app.request("/api/v1/sidebar-bootstrap");
 
       expect(response.status).toBe(200);
+
       const bootstrap = sidebarBootstrapResponseSchema.parse(
         await readJson(response),
       );
+
       const sidebarProject = bootstrap.projects.find(
         (candidate) => candidate.id === project.id,
       );
+
       expect(sidebarProject?.threads.map((thread) => thread.id)).toContain(
         visibleThread.id,
       );

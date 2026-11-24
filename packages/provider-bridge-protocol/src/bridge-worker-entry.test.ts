@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { recoverProcessPrivateTemps } from "@omnyo/process-utils";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,10 @@ const workerEntry = fileURLToPath(
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  for (const dir of tempDirs)
+    await recoverProcessPrivateTemps({
+      registryDirectory: join(dir, ".omnyo", "process-private-temp"),
+    });
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
@@ -22,10 +27,11 @@ async function createFixture(bridgeSource: string): Promise<{
   bridgeModulePath: string;
   dataDir: string;
 }> {
-  const dir = await mkdtemp(join(tmpdir(), "bb-bridge-bootstrap-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-bridge-bootstrap-"));
   tempDirs.push(dir);
   const bridgeModulePath = join(dir, "artifact.mjs");
   await writeFile(bridgeModulePath, bridgeSource);
+
   return { bridgeModulePath, dataDir: dir };
 }
 
@@ -45,8 +51,12 @@ function runWorker(
           workerEntry,
           ...args,
         ],
-        { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } },
+        {
+          stdio: ["pipe", "pipe", "pipe"],
+          env: { ...process.env, HOME: args[2], USERPROFILE: args[2], ...env },
+        },
       );
+
       let stdout = "";
       let stderr = "";
       child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
@@ -81,15 +91,76 @@ it("starts an exported bridge with its plugin-scoped directories", async () => {
   );
 
   expect(result.code).toBe(0);
+
   const reported = JSON.parse(result.stdout.trim()) as {
     line: string;
     context: { pluginId: string; dataDir: string; tempDir: string };
   };
+
   expect(reported.line).toBe('{"hello":true}');
   expect(reported.context.pluginId).toBe("provider-fixture");
   expect(reported.context.dataDir).toBe(fixture.dataDir);
   expect(reported.context.tempDir).toContain("provider-fixture");
   expect(existsSync(reported.context.tempDir)).toBe(false);
+});
+
+it("keeps temporary files available throughout asynchronous EOF draining", async () => {
+  const fixture = await createFixture(
+    [
+      "import { readFile, writeFile } from 'node:fs/promises';",
+      "import { join } from 'node:path';",
+      "let tempDir;",
+      "export const experimental_providerBridge = {",
+      "  experimental_apiVersion: 1,",
+      "  start(context) { tempDir = context.tempDir; },",
+      "  handleLine() {},",
+      "  async onClose() {",
+      "    try {",
+      "      await new Promise(resolve => setTimeout(resolve, 120));",
+      "      await writeFile(join(tempDir, 'drained.txt'), 'drained');",
+      "      const value = await readFile(join(tempDir, 'drained.txt'), 'utf8');",
+      "      process.stdout.write(JSON.stringify({ tempDir, value }) + '\\n');",
+      "    } catch (error) { process.stderr.write(error.message); process.exitCode = 1; }",
+      "  },",
+      "};",
+    ].join("\n"),
+  );
+
+  const result = await runWorker(
+    [fixture.bridgeModulePath, "provider-drain-fixture", fixture.dataDir],
+    "",
+  );
+
+  expect(result.stderr).toBe("");
+  expect(result.code).toBe(0);
+
+  const reported: { tempDir: string; value: string } = JSON.parse(
+    result.stdout,
+  );
+
+  expect(reported.value).toBe("drained");
+  expect(existsSync(reported.tempDir)).toBe(false);
+
+  const closedDirectory = join(
+    fixture.dataDir,
+    ".omnyo",
+    "process-private-temp",
+    "closed",
+  );
+
+  const receipts = await readdir(closedDirectory);
+  expect(receipts).toHaveLength(1);
+
+  const receipt = JSON.parse(
+    await readFile(join(closedDirectory, receipts[0] ?? "missing"), "utf8"),
+  );
+
+  expect(receipt).toMatchObject({
+    pluginId: "provider-drain-fixture",
+    origin: "provider-bridge",
+    tempDir: reported.tempDir,
+    result: { status: "removed", reason: "producer-exit" },
+  });
 });
 
 it("refuses an artifact with no bridge export, naming the plugin", async () => {
@@ -168,18 +239,20 @@ it("tees both sides of the runtime wire when record mode is on", async () => {
       "};",
     ].join("\n"),
   );
+
   const recordDir = join(fixture.dataDir, "recordings");
 
   const result = await runWorker(
     [fixture.bridgeModulePath, "provider-fixture", fixture.dataDir],
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"thread/start","params":{"threadId":"thr_rec"}}\n',
-    { BB_PROVIDER_BRIDGE_RECORD_DIR: recordDir },
+    { OMNYO_PROVIDER_BRIDGE_RECORD_DIR: recordDir },
   );
 
   expect(result.code).toBe(0);
   expect(result.stdout).toBe(
     '{"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n{"jsonrpc":"2.0","id":2,"result":{"ok":true}}\n',
   );
+
   const read = async (scope: string, direction: string) =>
     (await readFile(join(recordDir, scope, `${direction}.ndjson`), "utf8"))
       .trim()
@@ -188,6 +261,7 @@ it("tees both sides of the runtime wire when record mode is on", async () => {
         (line) =>
           JSON.parse(line) as { seq: number; dir: string; line: string },
       );
+
   expect((await read("_process", "runtime→bridge")).map((e) => e.line)).toEqual(
     ['{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'],
   );

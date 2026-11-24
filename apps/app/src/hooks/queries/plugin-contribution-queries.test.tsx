@@ -16,13 +16,16 @@ vi.mock("@/lib/sdk", () => ({
 
 function mockFetchJsonOnce(body: unknown, init: { status?: number } = {}) {
   const status = init.status ?? 200;
+
   const fetchMock = vi.fn().mockResolvedValue(
     new Response(JSON.stringify(body), {
       status,
       headers: { "content-type": "application/json" },
     }),
   );
+
   vi.stubGlobal("fetch", fetchMock);
+
   return fetchMock;
 }
 
@@ -35,6 +38,7 @@ afterEach(() => {
 describe("usePluginContributions", () => {
   it("fetches contributions and drops malformed entries", async () => {
     vi.mocked(sdk.system.config).mockResolvedValue(makeSystemConfig());
+
     const fetchMock = mockFetchJsonOnce({
       cliCommands: [],
       mentionProviders: [
@@ -131,6 +135,7 @@ describe("usePluginMentionSearch", () => {
     });
 
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         usePluginMentionSearch(

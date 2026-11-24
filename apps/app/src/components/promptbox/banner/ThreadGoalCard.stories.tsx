@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ThreadTimelineGoal } from "@bb/domain";
+import type { ThreadTimelineGoal } from "@omnyo/domain";
 import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
 import { ResponsiveStage } from "./banner-story-stages";
 import { ThreadGoalCard } from "./ThreadGoalCard";
@@ -37,27 +37,35 @@ function ToggleableGoalCard({
   initiallyExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(initiallyExpanded);
+
   return (
     <ThreadGoalCard
       goal={goal}
       isExpanded={expanded}
       onClearGoal={() => {}}
-      onToggle={() => setExpanded((value) => !value)}
+      onExpandedChange={setExpanded}
     />
   );
 }
 
-function FauxComposer() {
+function FauxTranscript() {
   return (
-    <div className="rounded-lg border border-border bg-popover p-3">
-      <div className="pb-3 text-sm text-subtle-foreground">
-        Reply to the agent...
+    <div className="relative h-48 rounded-lg border border-border bg-background p-3">
+      <div className="absolute right-3 top-3 z-20">
+        <ToggleableGoalCard goal={activeGoal} />
       </div>
-      <div className="flex items-center gap-2">
-        <span className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
-          gpt-5.5
-        </span>
-      </div>
+      <p className="max-w-[70%] text-sm text-muted-foreground">
+        Transcript content keeps its full width and height; the goal floats in
+        the upper-right corner.
+      </p>
+    </div>
+  );
+}
+
+function OpenGoalStage({ goal }: { goal: ThreadTimelineGoal }) {
+  return (
+    <div className="flex h-48 w-full max-w-xl justify-end">
+      <ToggleableGoalCard goal={goal} initiallyExpanded />
     </div>
   );
 }
@@ -66,28 +74,39 @@ export function Overview() {
   return (
     <StoryCard>
       <StoryRow
-        label="prompt stack"
-        hint="goal card above the composer; click to expand"
+        label="floating pill"
+        hint="upper-right of the chat; click to expand, Escape to collapse"
       >
         <ResponsiveStage>
-          <div className="flex flex-col gap-2">
-            <ToggleableGoalCard goal={activeGoal} />
-            <FauxComposer />
-          </div>
+          <FauxTranscript />
         </ResponsiveStage>
       </StoryRow>
       <StoryRow
         label="expanded"
-        hint="full objective with token budget and elapsed time"
+        hint="full objective with token budget and elapsed time; the popover grows from the pill"
+      >
+        <OpenGoalStage goal={activeGoal} />
+      </StoryRow>
+      <StoryRow
+        label="no token budget"
+        hint="unbounded goal usage summary; click to expand (open in Expanded Without Budget)"
       >
         <ResponsiveStage>
-          <ToggleableGoalCard goal={activeGoal} initiallyExpanded />
+          <ToggleableGoalCard goal={unboundedGoal} />
         </ResponsiveStage>
       </StoryRow>
-      <StoryRow label="no token budget" hint="unbounded goal usage summary">
-        <ResponsiveStage>
-          <ToggleableGoalCard goal={unboundedGoal} initiallyExpanded />
-        </ResponsiveStage>
+    </StoryCard>
+  );
+}
+
+export function ExpandedWithoutBudget() {
+  return (
+    <StoryCard>
+      <StoryRow
+        label="no token budget"
+        hint="unbounded goal usage summary shows tokens used without a cap"
+      >
+        <OpenGoalStage goal={unboundedGoal} />
       </StoryRow>
     </StoryCard>
   );

@@ -4,6 +4,7 @@ export const WORKSPACE_STATUS_WATCH_CHANGE_KINDS = [
   "workspace-git-repository-created",
   "shared-git-refs-changed",
 ] as const;
+
 export type WorkspaceStatusWatchChangeKind =
   (typeof WORKSPACE_STATUS_WATCH_CHANGE_KINDS)[number];
 

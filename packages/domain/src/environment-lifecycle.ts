@@ -68,15 +68,18 @@ export function evaluateEnvironmentLifecycleEvent(
 ): EnvironmentLifecycleEvaluation {
   const { environment, event } = args;
   const target = ENVIRONMENT_LIFECYCLE[environment.status][event.type];
+
   if (target === undefined) {
     return {
       noop: "illegal-transition",
       detail: `no transition for ${event.type} from status ${environment.status}`,
     };
   }
+
   if (typeof target === "string") {
     return { to: target };
   }
+
   return {
     to:
       environment.path !== null

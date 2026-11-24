@@ -1,13 +1,23 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
-import { loadPluginApp } from "@get-bb/plugin-sdk/testing/app";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loadPluginApp } from "@omnyo/plugin-sdk/testing/app";
 import type {
   ComposerSubmitOptions,
   PluginComposerApi,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
+
+const toastMock = vi.hoisted(() => ({
+  success: vi.fn(() => "saved-toast"),
+  error: vi.fn(),
+  dismiss: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({ toast: toastMock }));
 
 const app = await loadPluginApp(() => import("./app"));
+
 const customization = app.composerCustomizations[0]!;
+
 const sendMenuItem = customization.sendMenu![0]!;
 
 function fakeComposer(fields: Partial<PluginComposerApi>): PluginComposerApi {
@@ -30,13 +40,16 @@ describe("registration", () => {
     const disabled = sendMenuItem.disabled as (
       composer: PluginComposerApi,
     ) => boolean;
+
     expect(disabled(fakeComposer({ isSubmittingBlocked: true }))).toBe(true);
     expect(disabled(fakeComposer({ isSubmittingBlocked: false }))).toBe(false);
   });
 });
 
 describe("saving", () => {
-  it("submits the active composer with draft metadata", async () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("submits the active composer as a draft the host shows as held", async () => {
     const submits: ComposerSubmitOptions[] = [];
     await sendMenuItem.run({
       composer: fakeComposer({
@@ -46,7 +59,37 @@ describe("saving", () => {
         },
       }),
     });
-    expect(submits).toEqual([{ experimental_data: { kind: "draft" } }]);
+    expect(submits).toEqual([
+      {
+        experimental_data: { kind: "draft" },
+        experimental_expectHeld: { reason: "Draft" },
+      },
+    ]);
+  });
+
+  it("confirms the draft before the server answers", () => {
+    void sendMenuItem.run({
+      composer: fakeComposer({
+        isEmpty: false,
+        submit: () => new Promise<void>(() => {}),
+      }),
+    });
+
+    expect(toastMock.success).toHaveBeenCalledWith("Draft saved");
+  });
+
+  it("replaces the confirmation with the error when saving fails", async () => {
+    await sendMenuItem.run({
+      composer: fakeComposer({
+        isEmpty: false,
+        submit: async () => {
+          throw new Error("Offline");
+        },
+      }),
+    });
+
+    expect(toastMock.dismiss).toHaveBeenCalledWith("saved-toast");
+    expect(toastMock.error).toHaveBeenCalledWith("Offline");
   });
 
   it("does not submit an empty draft", async () => {

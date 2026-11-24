@@ -1,12 +1,19 @@
 import path from "path";
+import { tsImport } from "tsx/esm/api";
 import { defineConfig } from "vite";
 import tailwindcss from "@tailwindcss/vite";
-import { resolveCurrentDevInstanceConfig } from "@bb/config/runtime";
 import { forkablePluginPaths } from "../vite-forkable-plugin-paths.js";
 import { sharedUiEnvSeam } from "../vite-shared-ui-seam.js";
 
 const repoRoot = path.resolve(__dirname, "../../..");
-const devInstance = resolveCurrentDevInstanceConfig(repoRoot);
+
+const runtime: typeof import("@omnyo/config/runtime") = await tsImport(
+  "@omnyo/config/runtime",
+  import.meta.url,
+);
+
+const devInstance = runtime.resolveCurrentDevInstanceConfig(repoRoot);
+
 const trustedDevAppHeaders = {
   origin: devInstance.serverUrl,
 };
@@ -26,7 +33,7 @@ export default defineConfig({
     conditions: ["source"],
     dedupe: ["react", "react-dom"],
     alias: {
-      "@get-bb/plugin-sdk/app": path.resolve(__dirname, "./plugin-sdk-app.ts"),
+      "@omnyo/plugin-sdk/app": path.resolve(__dirname, "./plugin-sdk-app.ts"),
       "@": path.resolve(__dirname, "../src"),
     },
   },
@@ -38,7 +45,6 @@ export default defineConfig({
     },
   },
   server: {
-    allowedHosts: [".getbb.app"],
     proxy: {
       "/api": {
         target: devInstance.serverUrl,

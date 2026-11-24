@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as react from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import clsx from "clsx";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 import {
   createPluginFrontendPageLifecycle,
   installPluginRuntime,
-  loadPluginFrontends,
+  loadOneBundle,
   type PluginFrontendCandidate,
 } from "./plugin-frontend";
 import { pluginSdkAppImplementation } from "./plugin-sdk-app-impl";
@@ -30,28 +30,32 @@ function candidate(
   };
 }
 
-describe("loadPluginFrontends", () => {
+describe("loadOneBundle", () => {
   it("contains an import failure to its own plugin", async () => {
     const good = { default: {} };
+
     const importModule = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("/plugins/broken/")) {
         throw new Error("SyntaxError: unexpected token");
       }
+
       return good;
     });
+
     const warn = vi.fn();
 
-    const records = await loadPluginFrontends(
-      [candidate("broken"), candidate("fine", { cssUrl: null })],
-      { importModule, warn },
+    const [broken, fine] = await Promise.all(
+      [candidate("broken"), candidate("fine", { cssUrl: null })].map((entry) =>
+        loadOneBundle(entry, { importModule, warn }),
+      ),
     );
 
-    expect(records.get("broken")).toEqual({
+    expect(broken).toEqual({
       pluginId: "broken",
       status: "failed",
       error: "SyntaxError: unexpected token",
     });
-    expect(records.get("fine")).toEqual({
+    expect(fine).toEqual({
       pluginId: "fine",
       status: "loaded",
       module: good,
@@ -62,14 +66,12 @@ describe("loadPluginFrontends", () => {
   });
 
   it("records a bundle that evaluates to a non-module as failed", async () => {
-    const records = await loadPluginFrontends(
-      [candidate("odd", { cssUrl: null })],
-      {
-        importModule: async () => undefined,
-        warn: vi.fn(),
-      },
-    );
-    expect(records.get("odd")).toMatchObject({
+    const record = await loadOneBundle(candidate("odd", { cssUrl: null }), {
+      importModule: async () => undefined,
+      warn: vi.fn(),
+    });
+
+    expect(record).toMatchObject({
       status: "failed",
       error: expect.stringContaining("module namespace"),
     });
@@ -79,18 +81,16 @@ describe("loadPluginFrontends", () => {
     const importModule = vi.fn();
     const warn = vi.fn();
 
-    const records = await loadPluginFrontends(
-      [
-        candidate("stale", {
-          compatible: false,
-          sdkMajor: 9,
-          sdkVersion: "9.2.0",
-        }),
-      ],
+    const record = await loadOneBundle(
+      candidate("stale", {
+        compatible: false,
+        sdkMajor: 9,
+        sdkVersion: "9.2.0",
+      }),
       { importModule, warn },
     );
 
-    expect(records.get("stale")).toEqual({
+    expect(record).toEqual({
       pluginId: "stale",
       status: "needs-update",
       sdkMajor: 9,
@@ -104,18 +104,20 @@ describe("loadPluginFrontends", () => {
 });
 
 describe("installPluginRuntime", () => {
-  type RuntimeHost = typeof globalThis & { __bbPluginRuntime?: unknown };
+  type RuntimeHost = typeof globalThis & { __omnyoPluginRuntime?: unknown };
 
   afterEach(() => {
-    delete (globalThis as RuntimeHost).__bbPluginRuntime;
+    delete (globalThis as RuntimeHost).__omnyoPluginRuntime;
   });
 
   it("exposes the app's own runtime modules on every shim slot, exactly once", () => {
     installPluginRuntime();
-    const runtime = (globalThis as RuntimeHost).__bbPluginRuntime as Record<
+
+    const runtime = (globalThis as RuntimeHost).__omnyoPluginRuntime as Record<
       string,
       unknown
     >;
+
     expect(Object.keys(runtime).sort()).toEqual([
       "classVarianceAuthority",
       "clsx",
@@ -153,15 +155,17 @@ describe("installPluginRuntime", () => {
     expect(runtime.pluginSdkApp).toBe(pluginSdkAppImplementation);
 
     installPluginRuntime();
-    expect((globalThis as RuntimeHost).__bbPluginRuntime).toBe(runtime);
+    expect((globalThis as RuntimeHost).__omnyoPluginRuntime).toBe(runtime);
   });
 
   it("hands plugins every @pierre/diffs/react export, with the diff components gated", async () => {
     installPluginRuntime();
-    const runtime = (globalThis as RuntimeHost).__bbPluginRuntime as Record<
+
+    const runtime = (globalThis as RuntimeHost).__omnyoPluginRuntime as Record<
       string,
       unknown
     >;
+
     const pierreDiffsReact = await import("@pierre/diffs/react");
     const slot = runtime.pierreDiffsReact as Record<string, unknown>;
     expect(Object.keys(slot).sort()).toEqual(

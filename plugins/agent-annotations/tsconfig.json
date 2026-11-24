@@ -18,6 +18,9 @@
   },
   "include": [
     "annotations.ts",
+    "tab-state.ts",
+    "visual-capture.ts",
+    "visual-capture.test.ts",
     "annotations.test.ts",
     "page-script.ts",
     "page-script.test.ts",

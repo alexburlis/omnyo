@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import type {
   ProviderCliStatus,
   ProviderCliStatusResponse,
-} from "@bb/host-daemon-contract";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/host-daemon-contract";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import type {
   SystemAppUpdateStatus,
   SystemVersionResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   buildUpdateInventoryProviderIssues,
   resolveAppUpdateAvailable,
@@ -63,10 +63,12 @@ describe("updateInventoryHosts", () => {
       type: "ephemeral",
       machineProviderId: "modal-sandbox",
     });
+
     const persistent = makeHost({
       id: "host_persistent",
       machineProviderId: "persistent-cloud",
     });
+
     const manual = makeHost({ id: "host_manual" });
     expect(updateInventoryHosts([modal, persistent, manual])).toEqual([
       persistent,
@@ -84,7 +86,7 @@ describe("resolveAppUpdateAvailable", () => {
     installKind: "npm",
     source: "npm",
     updateAvailable: true,
-    upgradeCommand: "npx bb-app@latest",
+    upgradeCommand: "npx omnyo-app@latest",
   };
 
   function status(
@@ -101,7 +103,9 @@ describe("resolveAppUpdateAvailable", () => {
       },
       blocked: null,
       current: { commit: null, version: "1.0.0" },
+      installsWhenIdle: false,
       lastResult: null,
+      newTurnsPausedForUpdate: false,
       runningThreadCount: 0,
       support: { kind: "supported", mode: "npm" },
       ...overrides,
@@ -139,6 +143,25 @@ describe("resolveAppUpdateAvailable", () => {
         systemVersion: undefined,
       }),
     ).toBe(false);
+  });
+
+  it("badges an update staged for a private server", () => {
+    expect(
+      resolveAppUpdateAvailable({
+        appUpdate: status({
+          available: {
+            channel: "private",
+            commit: "b".repeat(40),
+            commitCount: null,
+            subjects: [],
+            version: "1.1.0+private.1",
+          },
+          support: { kind: "supported", mode: "private" },
+        }),
+        isDesktop: true,
+        systemVersion: undefined,
+      }),
+    ).toBe(true);
   });
 
   it("keeps the npm version badge for web installs without the launcher shim", () => {

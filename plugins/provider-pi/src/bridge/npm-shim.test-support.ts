@@ -36,5 +36,6 @@ export function npmNodeShim(
             '" %*',
           "",
         ];
+
   return lines.join("\r\n");
 }

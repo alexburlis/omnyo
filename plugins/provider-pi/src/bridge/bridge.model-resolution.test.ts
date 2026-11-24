@@ -10,7 +10,7 @@ let harness: FakePiBridgeHarness;
 
 beforeEach(async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-model-resolution-",
+    prefix: "omnyo-pi-model-resolution-",
     initialize: true,
   });
 }, 30_000);
@@ -32,16 +32,22 @@ for (const warm of [false, true]) {
         const catalog = await harness.request(1, "model/list", {
           cwd: harness.workspaceDir,
         });
+
         expect(catalog.error).toBeUndefined();
       }
+
       const threadId = "thr_model_resolution";
+
       const response = await harness.startThread(threadId, {
         options: { ...FULL_PERMISSION_OPTIONS, model },
       });
+
       expect(response.error, JSON.stringify(response)).toBeUndefined();
+
       const { providerThreadId } = z
         .object({ providerThreadId: z.string() })
         .parse(response.result);
+
       const turn = await harness.request(2, "turn/start", {
         threadId,
         providerThreadId,
@@ -49,6 +55,7 @@ for (const warm of [false, true]) {
         input: [{ type: "text", text: "hello", mentions: [] }],
         options: { ...FULL_PERMISSION_OPTIONS, model },
       });
+
       expect(turn.error, JSON.stringify(turn)).toBeUndefined();
       await harness.waitForTurnBoundary(threadId, 0);
       expect(harness.deltasOf(threadId)).toContainEqual(
@@ -69,11 +76,14 @@ for (const warm of [false, true]) {
         const catalog = await harness.request(1, "model/list", {
           cwd: harness.workspaceDir,
         });
+
         expect(catalog.error).toBeUndefined();
       }
+
       const response = await harness.startThread("thr_model_resolution", {
         options: { ...FULL_PERMISSION_OPTIONS, model },
       });
+
       expect(response.error).toMatchObject({
         message: expect.stringContaining(message),
       });

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import type { ServerMoveHealth } from "@bb/host-daemon-contract";
-import type { ServerMoveStatus } from "@bb/server-contract";
+import type { ServerMoveHealth } from "@omnyo/host-daemon-contract";
+import type { ServerMoveStatus } from "@omnyo/server-contract";
 import { appToast } from "@/components/ui/app-toast";
 import { invalidateQueriesAfterServerMove } from "@/hooks/cache-owners/server-move-cache-owner";
 import { useCancelServerMove } from "@/hooks/mutations/server-move-mutations";
@@ -32,7 +32,8 @@ const ServerMoveOverlayView = defineSplit<
       (module) => module.ServerMoveOverlayView,
     ),
   loading: () => null,
-  tier: "preload",
+  mountWhen: (props) => props.content !== null,
+  keepMounted: true,
 });
 
 function assignWindowLocation(url: string): void {
@@ -53,29 +54,37 @@ function useServerMoveDestinationHealth(
     if (url === null) {
       return;
     }
+
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+
     const poll = async (): Promise<void> => {
       const health = await fetchServerMoveDestinationHealth(
         url,
         controller.signal,
       );
+
       if (controller.signal.aborted) {
         return;
       }
+
       setReading({ health, url });
       timer = setTimeout(() => {
         void poll();
       }, intervalMs);
     };
+
     void poll();
+
     return () => {
       controller.abort();
+
       if (timer !== undefined) {
         clearTimeout(timer);
       }
     };
   }, [intervalMs, url]);
+
   return reading !== null && reading.url === url ? reading.health : null;
 }
 
@@ -101,6 +110,7 @@ export function ServerMoveOverlay({
     followed,
     status.data?.move ?? null,
   );
+
   if (nextFollowed !== followed) {
     setFollowed(nextFollowed);
   }
@@ -108,6 +118,7 @@ export function ServerMoveOverlay({
   const arrivalMoveId = new URLSearchParams(location.search).get(
     SERVER_MOVE_ARRIVAL_PARAM,
   );
+
   const destinationHealth = useServerMoveDestinationHealth(
     serverMoveDestinationProbeUrl({ move: nextFollowed, error: status.error }),
     pollIntervalMs,
@@ -137,19 +148,23 @@ export function ServerMoveOverlay({
 
   const destination =
     content?.kind === "redirecting" ? content.destination : null;
+
   const navigatedDestination = useRef<string | null>(null);
   useEffect(() => {
     if (destination === null || navigatedDestination.current === destination) {
       return;
     }
+
     navigatedDestination.current = destination;
     navigateTo(destination);
   }, [destination, navigateTo]);
 
   const arrivedMoveId =
     content?.kind === "arrived" ? content.lastMove.moveId : null;
+
   const arrivedHostName =
     content?.kind === "arrived" ? content.lastMove.toHostName : null;
+
   const announcedMoveId = useRef<string | null>(null);
   useEffect(() => {
     if (
@@ -159,6 +174,7 @@ export function ServerMoveOverlay({
     ) {
       return;
     }
+
     announcedMoveId.current = arrivedMoveId;
     appToast.success(`Server moved to ${arrivedHostName}`);
     invalidateQueriesAfterServerMove({ queryClient });
@@ -169,6 +185,7 @@ export function ServerMoveOverlay({
     if (arrivalMoveId === null || !statusLoaded) {
       return;
     }
+
     const params = new URLSearchParams(location.search);
     params.delete(SERVER_MOVE_ARRIVAL_PARAM);
     const search = params.toString();
@@ -189,13 +206,12 @@ export function ServerMoveOverlay({
     statusLoaded,
   ]);
 
-  if (content === null || content.kind === "arrived") {
-    return null;
-  }
+  const visibleContent =
+    content === null || content.kind === "arrived" ? null : content;
 
   return (
     <ServerMoveOverlayView
-      content={content}
+      content={visibleContent}
       cancelPending={cancelMove.isPending}
       cancelError={
         cancelMove.isError
@@ -208,9 +224,11 @@ export function ServerMoveOverlay({
       onCancel={() => cancelMove.mutate()}
       onClose={() => {
         cancelMove.reset();
-        setDismissedMoveId(content.move.moveId);
+
+        if (visibleContent !== null) {
+          setDismissedMoveId(visibleContent.move.moveId);
+        }
       }}
     />
   );
 }
-

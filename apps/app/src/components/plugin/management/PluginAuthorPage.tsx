@@ -1,12 +1,12 @@
 import { usePluginCollectionParams } from "./usePluginCollectionParams";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 import {
   ResourceCollectionViewport,
   ResourceListState,
-} from "@bb/shared-ui/resource-list";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/resource-list";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { TOOLS_PAGE_BAND_CLASSES } from "@/components/tools/tools-navigation";
 import {
   type PluginCatalogSearchEntry,
@@ -24,6 +24,8 @@ import {
 } from "./plugin-browse-discovery";
 import {
   entriesByMarketplaceAuthor,
+  isOmnyoAuthoredEntry,
+  OMNYO_AUTHOR_NAME,
   pluginAuthorGithub,
 } from "./plugin-marketplace-author";
 import { formatUrlLabel } from "./plugin-ui";
@@ -32,6 +34,7 @@ function authorForEntries(
   entries: readonly PluginCatalogSearchEntry[],
 ): PluginCatalogSearchEntry["author"] {
   const nameCounts = new Map<string, number>();
+
   for (const entry of entries) {
     if (entry.author === null) continue;
     nameCounts.set(
@@ -39,12 +42,16 @@ function authorForEntries(
       (nameCounts.get(entry.author.name) ?? 0) + 1,
     );
   }
+
   let selected: PluginCatalogSearchEntry["author"] = null;
+
   for (const entry of entries) {
     if (entry.author === null) continue;
     const candidateCount = nameCounts.get(entry.author.name) ?? 0;
+
     const selectedCount =
       selected === null ? 0 : (nameCounts.get(selected.name) ?? 0);
+
     if (
       selected === null ||
       candidateCount > selectedCount ||
@@ -54,6 +61,7 @@ function authorForEntries(
       selected = entry.author;
     }
   }
+
   return selected;
 }
 
@@ -76,11 +84,14 @@ export function PluginAuthorPage({
     selectedCategories,
     changeSearchParams,
   } = usePluginCollectionParams();
+
   const trimmedQuery = query.trim();
   const catalogQuery = usePluginCatalogSearch("", { enabled: true });
+
   const searchQuery = usePluginCatalogSearch(trimmedQuery, {
     enabled: trimmedQuery !== "",
   });
+
   const entries = useMemo(
     () =>
       entriesByMarketplaceAuthor(
@@ -89,24 +100,28 @@ export function PluginAuthorPage({
       ),
     [authorKey, catalogQuery.data?.entries],
   );
+
   const author = useMemo(() => authorForEntries(entries), [entries]);
-  const official =
-    entries.length > 0 &&
-    entries.every((entry) => entry.marketplace === "bb-official");
-  const authorName = official ? "BB Official" : author?.name;
-  const installsKnown = entries.some((entry) => entry.installs !== null);
-  const sort =
-    requestedSort === "most-installed" && !installsKnown ? null : requestedSort;
+
+  const omnyoAuthored =
+    entries.length > 0 && entries.every(isOmnyoAuthoredEntry);
+
+  const authorName = omnyoAuthored ? OMNYO_AUTHOR_NAME : author?.name;
+  const sort = requestedSort;
+
   const categoryOptions = useMemo(
     () => pluginCategoryFilterOptions(entries, selectedCategories),
     [entries, selectedCategories],
   );
+
   const visibleEntries = useMemo(() => {
     const selected = new Set(selectedCategories);
+
     const searchEntries =
       trimmedQuery === ""
         ? (catalogQuery.data?.entries ?? [])
         : (searchQuery.data?.entries ?? []);
+
     const filtered = entriesByMarketplaceAuthor(
       searchEntries.filter((entry) => entry.compatible),
       authorKey,
@@ -114,6 +129,7 @@ export function PluginAuthorPage({
       (entry) =>
         selected.size === 0 || selected.has(pluginCategoryFilterId(entry)),
     );
+
     return sort === null
       ? filtered
       : sortPluginEntries(filtered, sort, sortDirection);
@@ -126,6 +142,7 @@ export function PluginAuthorPage({
     sort,
     sortDirection,
   ]);
+
   const searchPending = trimmedQuery !== "" && searchQuery.isPending;
   const browseParams = new URLSearchParams(searchParams);
   browseParams.delete("author");
@@ -152,7 +169,7 @@ export function PluginAuthorPage({
             <div className="flex items-center gap-3">
               <PluginAuthorAvatar
                 name={authorName ?? author.name}
-                official={official}
+                omnyoLogo={omnyoAuthored}
                 github={pluginAuthorGithub(author)}
                 size="page"
               />
@@ -206,7 +223,6 @@ export function PluginAuthorPage({
               categoryOptions={categoryOptions}
               sort={sort}
               sortDirection={sortDirection}
-              installsKnown={installsKnown}
               changeSearchParams={changeSearchParams}
             />
             {catalogQuery.isError || searchQuery.isError ? (

@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import type {
   OpenInTargetRequest,
   WorkspaceOpenTarget,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   hostDaemonPortAtom,
   localHostDaemonReachableAtom,
@@ -16,8 +16,11 @@ import {
 import { useAsyncAtomState } from "@/lib/use-async-atom-value";
 
 const disabledLocalHostDaemonReachableAtom = atom(false);
+
 const disabledHostDaemonPortAtom = atom<number | null>(null);
+
 const disabledWorkspaceOpenTargetsAtom = atom<WorkspaceOpenTarget[]>([]);
+
 const NO_WORKSPACE_OPEN_TARGETS: WorkspaceOpenTarget[] = [];
 
 interface UseWorkspaceOpenTargetsArgs {
@@ -42,19 +45,23 @@ export function useWorkspaceOpenTargets(
       : disabledLocalHostDaemonReachableAtom,
     false,
   );
+
   const daemonPortState = useAsyncAtomState(
     args.enabled ? hostDaemonPortAtom : disabledHostDaemonPortAtom,
     null,
   );
+
   const workspaceOpenTargetsState = useAsyncAtomState(
     args.enabled
       ? localWorkspaceOpenTargetsAtom
       : disabledWorkspaceOpenTargetsAtom,
     NO_WORKSPACE_OPEN_TARGETS,
   );
+
   const localHostDaemonReachable = localHostDaemonReachableState.data;
   const daemonPort = daemonPortState.data;
   const workspaceOpenTargets = workspaceOpenTargetsState.data;
+
   const isLoading =
     args.enabled &&
     (localHostDaemonReachableState.isLoading ||
@@ -70,7 +77,9 @@ export function useWorkspaceOpenTargets(
     ) {
       return null;
     }
+
     const port = daemonPort;
+
     return (request: OpenInTargetRequest) => daemonOpenInTarget(port, request);
   }, [
     args.enabled,
@@ -83,7 +92,9 @@ export function useWorkspaceOpenTargets(
     if (!args.enabled || !localHostDaemonReachable || !daemonPort) {
       return null;
     }
+
     const port = daemonPort;
+
     return (path: string) => fetchWorkspaceOpenTargets(port, { path });
   }, [args.enabled, localHostDaemonReachable, daemonPort]);
 

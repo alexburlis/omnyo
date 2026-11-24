@@ -1,4 +1,4 @@
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import {
   ThreadTimelineRows,
   type ThreadTimelineUnreadDividerPlacement,
@@ -19,6 +19,7 @@ const baseProps = {
 };
 
 const THREAD_ID = "thr_threadUnreadDivider";
+
 const TURN_PREFIX = "019dd000-0000-7000-aa00-00000000000";
 
 function userRow(args: {
@@ -44,7 +45,12 @@ function userRow(args: {
     text: args.text,
     mentions: [],
     attachments: null,
-    turnRequest: { isGrouped: false, kind: "message", status: "accepted" },
+    turnRequest: {
+      clientRequestId: null,
+      isGrouped: false,
+      kind: "message",
+      status: "accepted",
+    },
   };
 }
 
@@ -67,10 +73,12 @@ function assistantRow(args: {
     text: args.text,
     attachments: null,
     turnRequest: null,
+    turnGit: null,
   };
 }
 
 const T0 = 1777337000000;
+
 const MINUTE = 60_000;
 
 const conversationRows: TimelineRow[] = [

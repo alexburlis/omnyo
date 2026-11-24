@@ -1,4 +1,4 @@
-import type { PendingInteraction } from "@bb/domain";
+import type { PendingInteraction } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   describePendingInteractionToolUse,
@@ -52,10 +52,13 @@ describe("describePendingInteractionToolUse", () => {
       detail: "Opens a **bug** issue",
       tint: { light: "#123456", dark: "#abcdef" },
     });
+
     if (interaction.payload.kind !== "approval") throw new Error("unexpected");
+
     if (interaction.payload.subject.kind !== "tool_use") {
       throw new Error("unexpected");
     }
+
     expect(
       describePendingInteractionToolUse({
         ...interaction.payload,
@@ -87,6 +90,7 @@ describe("describePendingInteractionToolUse", () => {
       title: "",
       detail: "  ",
     });
+
     expect(formatPendingInteractionSubjectDetailLines(interaction)).toEqual([
       "Tool: mcp__github__create_issue",
     ]);
@@ -98,6 +102,7 @@ describe("describePendingInteractionToolUse", () => {
       title: "get-bb/bb#42",
       detail: "Opens a bug issue",
     });
+
     expect(formatPendingInteractionSubjectDetailLines(interaction)).toEqual([
       "Tool: mcp__github__create_issue",
       "get-bb/bb#42",

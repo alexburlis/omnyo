@@ -1,5 +1,5 @@
 import http from "node:http";
-import { createNodeBbSdk } from "@bb/sdk/node";
+import { createNodeOmnyoSdk } from "@omnyo/sdk/node";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   startTestServer,
@@ -30,6 +30,7 @@ async function statusFor(
       ...(args.headers === undefined ? {} : { headers: args.headers }),
     },
   );
+
   return response.status;
 }
 
@@ -40,6 +41,7 @@ function rawStatus(
   method = "GET",
 ): Promise<number> {
   const url = new URL(path, baseUrl);
+
   return new Promise((resolve, reject) => {
     const request = http.request(
       {
@@ -54,13 +56,14 @@ function rawStatus(
         resolve(response.statusCode ?? 0);
       },
     );
+
     request.once("error", reject);
     request.end();
   });
 }
 
 describe("/api/v1 browser origin guard", () => {
-  it("passes callers that send no Origin: curl, the bb CLI, and the SDK", async () => {
+  it("passes callers that send no Origin: curl, the omnyo CLI, and the SDK", async () => {
     server = await startTestServer();
 
     expect(await statusFor(server.baseUrl)).toBe(200);
@@ -80,7 +83,7 @@ describe("/api/v1 browser origin guard", () => {
       }),
     ).not.toBe(415);
 
-    const sdk = createNodeBbSdk({ baseUrl: server.baseUrl });
+    const sdk = createNodeOmnyoSdk({ baseUrl: server.baseUrl });
     await expect(sdk.threads.list()).resolves.toBeDefined();
   });
 
@@ -97,10 +100,12 @@ describe("/api/v1 browser origin guard", () => {
     ]) {
       for (const origin of [undefined, `http://${host}`]) {
         const headers: Record<string, string> = { host };
+
         if (origin !== undefined) headers.origin = origin;
         expect(await rawStatus(server.baseUrl, headers, path)).toBe(403);
       }
     }
+
     expect(
       await rawStatus(
         server.baseUrl,
@@ -135,6 +140,7 @@ describe("/api/v1 browser origin guard", () => {
 
   it("rejects malformed Host authorities", async () => {
     server = await startTestServer();
+
     for (const host of [
       "localhost@attacker.example",
       "attacker.example@localhost",
@@ -206,7 +212,7 @@ describe("/api/v1 browser origin guard", () => {
 
     expect(
       await statusFor(server.baseUrl, {
-        headers: { origin: "https://bee.getbb.app" },
+        headers: { origin: "https://bee.example.test" },
       }),
     ).toBe(403);
   });
@@ -272,6 +278,56 @@ describe("/api/v1 browser origin guard", () => {
       await rawStatus(server.baseUrl, {
         origin: `http://192.168.1.5:${port}`,
         host: `127.0.0.1:${port}`,
+      }),
+    ).toBe(403);
+  });
+
+  it("accepts configured alias hosts and origins beside the canonical app URL", async () => {
+    server = await startTestServer({
+      appUrl: "https://omnyo.canonical.example",
+      appAliasOrigins: ["https://app.alias.example"],
+    });
+    const port = new URL(server.baseUrl).port;
+
+    for (const host of ["omnyo.canonical.example", "app.alias.example"]) {
+      expect(await rawStatus(server.baseUrl, { host })).toBe(200);
+      expect(
+        await rawStatus(server.baseUrl, {
+          host,
+          origin: `https://${host}`,
+          "x-forwarded-proto": "https",
+        }),
+      ).toBe(200);
+    }
+
+    expect(
+      await statusFor(server.baseUrl, {
+        headers: { origin: "https://app.alias.example" },
+      }),
+    ).toBe(200);
+    expect(
+      await rawStatus(server.baseUrl, {
+        host: `127.0.0.1:${port}`,
+        origin: "https://app.alias.example",
+        "x-forwarded-host": "app.alias.example",
+        "x-forwarded-proto": "https",
+      }),
+    ).toBe(200);
+
+    expect(await rawStatus(server.baseUrl, { host: "unrelated.example" })).toBe(
+      403,
+    );
+    expect(
+      await rawStatus(server.baseUrl, { host: "evil.app.alias.example" }),
+    ).toBe(403);
+    expect(
+      await statusFor(server.baseUrl, {
+        headers: { origin: "https://unrelated.example" },
+      }),
+    ).toBe(403);
+    expect(
+      await statusFor(server.baseUrl, {
+        headers: { origin: "http://app.alias.example" },
       }),
     ).toBe(403);
   });

@@ -37,6 +37,7 @@ export function PluginReplacementSlot<
   if (replacement.kind === "owner") return original;
 
   const registration = replacement.registration;
+
   return (
     <PluginOwnerRendererContext.Provider value={original}>
       <PluginSlotMount

@@ -22,7 +22,7 @@ describe("app.commands.register", () => {
       defaultShortcut: PluginCommandRegistration["defaultShortcut"],
     ) =>
       collectPluginAppRegistrations({
-        __bbPluginApp: true,
+        __omnyoPluginApp: true,
         setup(app) {
           app.commands.register({
             id: "open",
@@ -32,6 +32,7 @@ describe("app.commands.register", () => {
           });
         },
       });
+
     expect(
       collect({ key: "i", mod: true }).commandPaletteActions[0]
         ?.defaultShortcut,
@@ -46,6 +47,7 @@ describe("app.commands.register", () => {
     expect(
       collect(undefined).commandPaletteActions[0]?.defaultShortcut,
     ).toBeNull();
+
     for (const keys of [
       { key: "i" },
       { key: "" },
@@ -60,8 +62,9 @@ describe("app.commands.register", () => {
     (entryPoint) => {
       const run = vi.fn();
       const isAvailable = vi.fn(() => true);
+
       const collected = collectPluginAppRegistrations({
-        __bbPluginApp: true,
+        __omnyoPluginApp: true,
         setup(app) {
           register(app, entryPoint, {
             id: "open-issue",
@@ -71,12 +74,15 @@ describe("app.commands.register", () => {
           });
         },
       });
+
       const context = {
         threadId: "thread-1",
         projectId: "project-1",
         openPanel: vi.fn(() => true),
       };
+
       const command = collected.commandPaletteActions[0]!;
+
       if (command.target !== "app") throw new Error("expected an app command");
       expect(command.isAvailable?.(context)).toBe(true);
       command.run(context);
@@ -93,13 +99,14 @@ describe("app.commands.register", () => {
   )("rejects duplicate IDs registered through %s then %s", (first, second) => {
     expect(() =>
       collectPluginAppRegistrations({
-        __bbPluginApp: true,
+        __omnyoPluginApp: true,
         setup(app) {
           const command = {
             id: "open-issue",
             title: "Open issue",
             run: vi.fn(),
           };
+
           register(app, first, command);
           register(app, second, command);
         },
@@ -109,8 +116,9 @@ describe("app.commands.register", () => {
 
   it("collects composer commands in the shared command namespace", () => {
     const run = vi.fn();
+
     const collected = collectPluginAppRegistrations({
-      __bbPluginApp: true,
+      __omnyoPluginApp: true,
       setup(app) {
         app.composer.experimental_registerCommand({
           id: "search",
@@ -120,6 +128,7 @@ describe("app.commands.register", () => {
         });
       },
     });
+
     expect(collected.commandPaletteActions).toEqual([
       {
         target: "composer",
@@ -138,7 +147,7 @@ describe("app.commands.register", () => {
     ]);
     expect(() =>
       collectPluginAppRegistrations({
-        __bbPluginApp: true,
+        __omnyoPluginApp: true,
         setup(app) {
           app.commands.register({ id: "search", title: "Search", run() {} });
           app.composer.experimental_registerCommand({
@@ -160,7 +169,7 @@ describe("app.commands.register", () => {
       ]) {
         expect(() =>
           collectPluginAppRegistrations({
-            __bbPluginApp: true,
+            __omnyoPluginApp: true,
             setup: (app) => register(app, entryPoint, command),
           }),
         ).toThrow();

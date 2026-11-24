@@ -1,6 +1,6 @@
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import { DetailCard, DetailRow } from "./detail-card";
-import { Input } from "@bb/shared-ui/input";
+import { Input } from "@omnyo/shared-ui/input";
 import { BranchPicker } from "../pickers/BranchPicker";
 import { OptionPicker } from "../pickers/OptionPicker";
 import {
@@ -8,7 +8,7 @@ import {
   type WorkspaceChangedFile,
 } from "../thread/WorkspaceChangesList";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
-import { Icon } from "@bb/shared-ui/icon";
+import { Icon } from "@omnyo/shared-ui/icon";
 
 export default {
   title: "ui/Detail Card",
@@ -54,7 +54,7 @@ export function Overview() {
             <div className="inline-flex max-w-full min-w-0 items-center gap-1 text-xs text-foreground">
               <a
                 href="#manager"
-                className="min-w-0 truncate text-xs text-foreground no-underline transition-[text-decoration-color] duration-150 hover:underline hover:underline-offset-2"
+                className="min-w-0 truncate text-xs text-foreground no-underline transition-[text-decoration-color] hover:underline hover:underline-offset-2"
               >
                 Frontend Parent
               </a>
@@ -82,7 +82,7 @@ export function Overview() {
               title="Copy branch name"
             >
               <span className="truncate">
-                bb/implement-server-daemon-protocol-simplification-thr_qfk8ksbxkk
+                omnyo/implement-server-daemon-protocol-simplification-thr_qfk8ksbxkk
               </span>
               <Icon
                 name="Copy"
@@ -113,7 +113,10 @@ export function Overview() {
             </div>
           </DetailRow>
           <DetailRow label="Changed files" orientation="vertical">
-            <WorkspaceChangesList files={mockChangedFiles} />
+            <WorkspaceChangesList
+              files={mockChangedFiles}
+              fileCount={mockChangedFiles.length}
+            />
           </DetailRow>
         </DetailCard>
       </StoryRow>

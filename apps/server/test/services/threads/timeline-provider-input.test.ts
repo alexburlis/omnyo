@@ -3,8 +3,8 @@ import {
   encodeClientTurnRequestIdNumber,
   threadScope,
   turnScope,
-} from "@bb/domain";
-import type { Thread } from "@bb/domain";
+} from "@omnyo/domain";
+import type { Thread } from "@omnyo/domain";
 import {
   createConnection,
   createProject,
@@ -13,26 +13,31 @@ import {
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
-import type { DbConnection } from "@bb/db";
-import type { TimelineRow } from "@bb/server-contract";
+} from "@omnyo/db";
+import type { DbConnection } from "@omnyo/db";
+import type { TimelineRow } from "@omnyo/server-contract";
 import { buildThreadTimelineWithProfile } from "../../../src/services/threads/timeline.js";
 
 const providerThreadId = "pi-thread-1";
+
 const PLUGIN_METADATA_MARKER = "timeline-plugin-metadata-must-stay-private";
+
 const PROCESS_EVENT =
   '<process_event kind="success" process_id="proc_551c">Process completed successfully</process_event>';
 
 function setup(): { db: DbConnection; thread: Thread } {
   const db = createConnection(":memory:");
   migrate(db);
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   const thread = createThread(db, noopNotifier, {
     originPluginId: "timeline-launcher",
     pluginMetadata: {
@@ -42,6 +47,7 @@ function setup(): { db: DbConnection; thread: Thread } {
     projectId: project.id,
     providerId: "pi",
   });
+
   return { db, thread };
 }
 
@@ -50,11 +56,14 @@ type EventInput = Parameters<typeof insertEvents>[2][number];
 function seedExtensionTriggeredTurn(db: DbConnection, thread: Thread): void {
   const events: EventInput[] = [];
   let sequence = 0;
+
   const push = (event: Omit<EventInput, "sequence" | "threadId">): void => {
     sequence += 1;
     events.push({ ...event, sequence, threadId: thread.id });
   };
+
   const clientRequestId = encodeClientTurnRequestIdNumber({ value: 1 });
+
   const providerEvent = (
     type: EventInput["type"],
     turnId: string,
@@ -147,9 +156,11 @@ function conversationTexts(rows: readonly TimelineRow[]): string[] {
     if (row.kind === "conversation") {
       return [`${row.role}:${row.text}`];
     }
+
     if (row.kind === "turn") {
       return conversationTexts(row.children ?? []);
     }
+
     return [];
   });
 }
@@ -164,9 +175,10 @@ describe("timeline pages with provider-recorded input", () => {
       eventBudget: 1_000_000,
       includeClearedContextHistory: false,
       includeDiagnosticOperations: false,
+      compactionOfferEnabled: false,
       includeNestedRows: true,
       maxInlineOutputChars: 32_000,
-      maxSeq: 0,
+      maxSeq: undefined,
       page: { kind: "latest", segmentLimit: 20 },
     });
 
@@ -185,15 +197,22 @@ describe("timeline pages with provider-recorded input", () => {
     ]);
     expect(JSON.stringify(response)).not.toContain("pluginMetadata");
     expect(JSON.stringify(response)).not.toContain(PLUGIN_METADATA_MARKER);
+
     const turnRow = response.rows.find(
       (row) => row.kind === "turn" && row.turnId === "turn-2",
     );
+
     expect(turnRow?.kind === "turn" ? turnRow.children : undefined).toEqual([
       expect.objectContaining({
         kind: "conversation",
         role: "user",
         initiator: "system",
-        turnRequest: { isGrouped: false, kind: "steer", status: "accepted" },
+        turnRequest: {
+          clientRequestId: null,
+          isGrouped: false,
+          kind: "steer",
+          status: "accepted",
+        },
         text: PROCESS_EVENT,
       }),
     ]);

@@ -1,5 +1,6 @@
-import { extractErrorMessage, toRecord } from "@bb/core-ui";
-import type { SystemVoiceTranscriptionResponse } from "@bb/server-contract";
+import { extractErrorMessage, toRecord } from "@omnyo/core-ui";
+import type { SystemVoiceTranscriptionResponse } from "@omnyo/server-contract";
+import type { VoiceTranscriptionContext } from "@omnyo/server-contract";
 import { apiClient, toRelativeUrl } from "./api-server";
 import { appSurfaceRequestInit } from "./app-surface";
 import {
@@ -9,7 +10,7 @@ import {
   normalizeFilePreviewMimeType,
   type FilePreview,
   type FilePreviewTarget,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import {
   buildThreadHostFileContentUrl,
   buildThreadStorageRawContentUrl,
@@ -51,29 +52,37 @@ function parseHttpError(
   contentType: string | null,
 ): { message: string; body: unknown } {
   const normalized = normalizeErrorText(rawBody);
+
   if (normalized.length === 0) {
     return { message: statusText || "Request failed", body: undefined };
   }
+
   const shouldParseAsJson =
     (contentType?.includes("application/json") ?? false) ||
     normalized.startsWith("{") ||
     normalized.startsWith("[");
+
   let body: unknown;
+
   if (shouldParseAsJson) {
     try {
       body = JSON.parse(normalized);
       const message = extractErrorMessage(body);
+
       if (message) {
         return { message, body };
       }
     } catch {}
   }
+
   if (HTML_DOCUMENT_PATTERN.test(normalized)) {
     if (status === 401 || status === 403) {
       return { message: "Authentication failed", body };
     }
+
     return { message: statusText || "Request failed", body };
   }
+
   return {
     message:
       (extractErrorMessage(normalized) ?? statusText) || "Request failed",
@@ -83,9 +92,11 @@ function parseHttpError(
 
 function extractErrorCode(value: unknown): string | undefined {
   const record = toRecord(value);
+
   if (!record) {
     return undefined;
   }
+
   return typeof record.code === "string" && record.code.trim().length > 0
     ? record.code
     : undefined;
@@ -93,12 +104,14 @@ function extractErrorCode(value: unknown): string | undefined {
 
 async function throwHttpError(res: Response): Promise<never> {
   const rawBody = await res.text().catch(() => "");
+
   const { message, body } = parseHttpError(
     res.status,
     res.statusText,
     rawBody,
     res.headers.get("content-type"),
   );
+
   throw new HttpError({
     status: res.status,
     message,
@@ -111,9 +124,11 @@ async function requestResponse(
   responsePromise: Promise<Response>,
 ): Promise<Response> {
   const res = await responsePromise;
+
   if (!res.ok) {
     await throwHttpError(res);
   }
+
   return res;
 }
 
@@ -122,18 +137,23 @@ export async function request<T>(
 ): Promise<T> {
   const res = await requestResponse(responsePromise);
   const text = await res.text();
+
   return JSON.parse(text) as T;
 }
 
 const FILE_PREVIEW_SAMPLE_RANGE = `bytes=0-${FILE_PREVIEW_SAMPLE_BYTES - 1}`;
+
 const EMPTY_RANGE_STATUS = 416;
+
 const PARTIAL_CONTENT_STATUS = 206;
 
 function parseContentRangeSize(value: string | null): number {
   const size = Number(value?.split("/")[1]);
+
   if (!Number.isSafeInteger(size) || size < 0) {
     throw new Error("File response has no usable Content-Range size");
   }
+
   return size;
 }
 
@@ -154,6 +174,7 @@ export async function loadFilePreview(
       signal,
     }),
   );
+
   if (sample.status === EMPTY_RANGE_STATUS) {
     return buildFilePreview({
       ...target,
@@ -161,33 +182,42 @@ export async function loadFilePreview(
       mimeType: responseMimeType(sample),
     });
   }
+
   if (!sample.ok) {
     await throwHttpError(sample);
   }
+
   const sampleBytes = new Uint8Array(await sample.arrayBuffer());
+
   const sizeBytes =
     sample.status === PARTIAL_CONTENT_STATUS
       ? parseContentRangeSize(sample.headers.get("content-range"))
       : sampleBytes.byteLength;
+
   const mimeType = responseMimeType(sample);
+
   if (sampleBytes.byteLength >= sizeBytes) {
     return buildFilePreview({ ...target, contentBytes: sampleBytes, mimeType });
   }
+
   const samplePreview = buildFilePreviewFromSample({
     ...target,
     mimeType,
     sampleBytes,
     sizeBytes,
   });
+
   if (samplePreview !== null) {
     return samplePreview;
   }
+
   const response = await requestResponse(
     fetch(
       target.url,
       appSurfaceRequestInit({ method: "GET", cache: "default", signal }),
     ),
   );
+
   return buildFilePreview({
     ...target,
     contentBytes: new Uint8Array(await response.arrayBuffer()),
@@ -202,12 +232,15 @@ async function postMultipart<T>(
   fields?: Record<string, string>,
 ): Promise<T> {
   const formData = new FormData();
+
   if (fields) {
     for (const [key, value] of Object.entries(fields)) {
       formData.set(key, value);
     }
   }
+
   formData.set("file", file, file.name);
+
   return request<T>(
     fetch(
       toRelativeUrl(url),
@@ -224,14 +257,33 @@ export async function transcribeVoiceInput(
   file: File,
   prompt?: string,
   signal?: AbortSignal,
+  diagnostic?: VoiceTranscriptionContext,
 ): Promise<SystemVoiceTranscriptionResponse> {
   const trimmedPrompt = prompt?.trim();
+
   return postMultipart<SystemVoiceTranscriptionResponse>(
     apiClient.system["voice-transcription"].$url(),
     file,
     signal,
-    trimmedPrompt ? { prompt: trimmedPrompt } : undefined,
+    {
+      ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),
+      ...(diagnostic
+        ? {
+            recordingId: diagnostic.recordingId,
+            attempt: String(diagnostic.attempt),
+          }
+        : {}),
+    },
   );
+}
+
+export function prepareVoiceInput(): void {
+  request<{ ok: true }>(
+    fetch(
+      toRelativeUrl(apiClient.system["voice-transcription"].prepare.$url()),
+      appSurfaceRequestInit({ method: "POST" }),
+    ),
+  ).catch(() => {});
 }
 
 export async function getThreadStorageFilePreview(

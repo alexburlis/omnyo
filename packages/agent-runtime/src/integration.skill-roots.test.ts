@@ -21,9 +21,11 @@ const providers: readonly SkillRootProviderId[] = [
   "claude-code",
   "pi",
 ];
-const skillName = "bb-runtime-skill-integration";
+
+const skillName = "omnyo-runtime-skill-integration";
+
 const skillDescription =
-  "Use when asked for the BB runtime dynamic skill integration token.";
+  "Use when asked for the Omnyo runtime dynamic skill integration token.";
 
 interface CreateSkillRootArgs {
   token: string;
@@ -37,7 +39,7 @@ function createSkillMarkdown(token: string): string {
     `description: ${skillDescription}`,
     "---",
     "",
-    "# BB Runtime Skill Integration",
+    "# Omnyo Runtime Skill Integration",
     "",
     "When asked for the runtime skill integration token, reply with exactly:",
     token,
@@ -53,6 +55,7 @@ function createSkillRoot(args: CreateSkillRootArgs): AgentRuntimeSkillRoot {
     createSkillMarkdown(args.token),
     "utf8",
   );
+
   return {
     id: skillName,
     path: rootPath,
@@ -64,12 +67,15 @@ for (const providerId of providers) {
   describe.concurrent(`${providerId} provider skill roots`, () => {
     it("uses a runtime-injected skill root", async () => {
       const workspacePath = mkdtempSync(
-        join(tmpdir(), `bb-integ-skill-${providerId}-`),
+        join(tmpdir(), `omnyo-integ-skill-${providerId}-`),
       );
-      const token = `BB_SKILL_TOKEN_${randomUUID()
+
+      const token = `OMNYO_SKILL_TOKEN_${randomUUID()
         .replaceAll("-", "")
         .toUpperCase()}`;
+
       const skillRoot = createSkillRoot({ token, workspacePath });
+
       const ctx = createTestRuntime(providerId, {
         skillRoots: [skillRoot],
         workspacePath,
@@ -77,11 +83,13 @@ for (const providerId of providers) {
 
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId,
           preset: "full",
         });
+
         await ctx.runtime.startThread({
           environmentId: "env-1",
           threadId,

@@ -11,16 +11,19 @@ import {
 } from "./mobile-realtime";
 
 const THREAD_TARGET = { kind: "thread-detail", threadId: "t1" } as const;
+
 const LIST_TARGET = { kind: "thread-list" } as const;
 
 function setup(overrides: Partial<CreateMobileRealtimeOptions> = {}) {
   const factory = createFakeSocketFactory();
+
   const realtime: MobileRealtime = createMobileRealtime({
     url: "ws://127.0.0.1:20304/ws",
     socketFactory: factory,
     onInvalidMessage: () => {},
     ...overrides,
   });
+
   return { factory, realtime };
 }
 
@@ -234,9 +237,11 @@ describe("createMobileRealtime", () => {
 
   it("routes thread-open, pane-action, plugin-signal and changed frames leniently", () => {
     const invalid: unknown[] = [];
+
     const { factory, realtime } = setup({
       onInvalidMessage: (error) => invalid.push(error),
     });
+
     const changed: unknown[] = [];
     const opens: unknown[] = [];
     realtime.onChanged((m) => changed.push(m));
@@ -309,9 +314,11 @@ describe("createMobileRealtime", () => {
 
   it("ignores pong frames without reporting them as invalid", () => {
     const invalid: unknown[] = [];
+
     const { factory, realtime } = setup({
       onInvalidMessage: (error) => invalid.push(error),
     });
+
     const changed: unknown[] = [];
     realtime.onChanged((m) => changed.push(m));
     realtime.connect();

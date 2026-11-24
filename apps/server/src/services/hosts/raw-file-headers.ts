@@ -1,5 +1,7 @@
 const HTML_MIME_TYPE = "text/html";
+
 const HTML_PREVIEW_CONTENT_TYPE = "text/html; charset=utf-8";
+
 const RAW_FILE_CSP = "sandbox allow-scripts";
 
 interface RawFileMetadata {
@@ -15,10 +17,13 @@ export function createRawFileHeaders(file: RawFileMetadata): Headers {
     "x-content-type-options": "nosniff",
     "content-security-policy": RAW_FILE_CSP,
   });
+
   if (!isHtmlMimeType(file.mimeType)) {
     return headers;
   }
+
   headers.set("cache-control", "no-store");
   headers.set("content-type", HTML_PREVIEW_CONTENT_TYPE);
+
   return headers;
 }

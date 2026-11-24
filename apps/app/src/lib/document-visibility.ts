@@ -1,10 +1,12 @@
 import { useSyncExternalStore } from "react";
 
 const listeners = new Set<() => void>();
+
 let revision = 0;
 
 function notifyListeners(): void {
   revision += 1;
+
   for (const listener of listeners) {
     listener();
   }
@@ -20,6 +22,7 @@ export function subscribeToDocumentVisibility(
   listener: () => void,
 ): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };

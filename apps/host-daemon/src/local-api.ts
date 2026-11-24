@@ -1,17 +1,19 @@
 import fs from "node:fs/promises";
+import { timingSafeEqual } from "node:crypto";
 import { serve } from "@hono/node-server";
 import {
   buildLocalAppOrigins,
   type BuildLocalAppOriginsArgs,
-} from "@bb/config/local-app-origins";
+} from "@omnyo/config/local-app-origins";
 import {
   formatClientConfigPath,
   normalizeClientServerOrigin,
   parseClientConfig,
   resolveClientSshAuthority,
   type ClientConfig,
-} from "@bb/config/client-config";
-import { assignIfDefined } from "@bb/config/objects";
+} from "@omnyo/config/client-config";
+import { assignIfDefined } from "@omnyo/config/objects";
+import { RELEASE_VERSION_PATTERN } from "@omnyo/config/release-version";
 import {
   healthResponseSchema,
   HOST_DAEMON_PROTOCOL_VERSION,
@@ -22,25 +24,61 @@ import {
   type OpenInTargetRequest,
   type WorkspaceOpenTarget,
   type WorkspaceOpenTargetsQuery,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   createWorkspaceOpenTargetRuntime,
   listWorkspaceOpenTargetsWithRuntime,
   openPathInTargetWithRuntime,
   type OpenPathInTargetArgs,
   WorkspaceOpenTargetError,
-} from "@bb/local-open-targets";
+} from "@omnyo/local-open-targets";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
+import { z } from "zod";
 import { isFsErrorWithCode } from "./fs-errors.js";
 import type { HostDaemonLocalApiConfig } from "./local-api-config.js";
 import { resolveHostPlatform } from "./host-platform.js";
 import { userExecutableProcessOptions } from "./user-executable-env.js";
+import type {
+  ProtocolSelfUpdateStatus,
+  ProtocolSelfUpdateTarget,
+} from "./protocol-self-update.js";
+import type { ServerMoveService } from "./server-move/service.js";
+import type { PluginHostManager } from "./plugin-host-manager.js";
+
+export interface WorkerManagementStatus {
+  managementVersion: 1;
+  hostId: string;
+  instanceId: string;
+  runtimeVersion: string | null;
+  protocolVersion: number;
+  serverUrl: string;
+  connected: boolean;
+  automaticUpdates: boolean;
+  admission: ReturnType<ServerMoveService["runtimeUpdateStatus"]>;
+  pluginBlockers: ReturnType<PluginHostManager["getRuntimeUpdateBlockers"]>;
+  update: ProtocolSelfUpdateStatus;
+}
+
+const workerUpdateRequestSchema = z
+  .object({
+    expectedHostId: z.string().min(1).max(200),
+    expectedInstanceId: z.string().min(1).max(200),
+    target: z
+      .object({
+        version: z.string().regex(RELEASE_VERSION_PATTERN),
+        protocolVersion: z.number().int().positive(),
+        artifactDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+      })
+      .strict(),
+  })
+  .strict();
 
 type WorkspaceOpenTargetListHandler = (
   query: WorkspaceOpenTargetsQuery,
 ) => Promise<WorkspaceOpenTarget[]>;
+
 type OpenInTargetHandler = (request: OpenPathInTargetArgs) => Promise<void>;
 
 interface StartLocalApiServerOptions {
@@ -52,6 +90,13 @@ interface StartLocalApiServerOptions {
   devAppPort?: number;
   appUrl?: string;
   getConnected: () => boolean;
+  management?: {
+    hostKey: string;
+    getStatus: () => WorkerManagementStatus;
+    requestUpdate: (
+      target: ProtocolSelfUpdateTarget,
+    ) => Promise<"failed" | "skipped" | "updated">;
+  };
   listWorkspaceOpenTargets?: WorkspaceOpenTargetListHandler;
   openInTarget?: OpenInTargetHandler;
   shellEnv?: () => NodeJS.ProcessEnv;
@@ -73,15 +118,18 @@ interface ResolveOpenPathInTargetArgs {
 }
 
 const CLIENT_CONFIG_CACHE_TTL_MS = 1_000;
+
 const EMPTY_CLIENT_CONFIG: ClientConfig = { servers: {} };
 
 function isSelfEvidentLocalHostname(hostname: string): boolean {
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     return true;
   }
+
   if (hostname.startsWith("[") && hostname.endsWith("]")) {
     return true;
   }
+
   return /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(hostname);
 }
 
@@ -99,14 +147,18 @@ function createClientConfigLoader(
       if (dataDir === undefined) {
         return EMPTY_CLIENT_CONFIG;
       }
+
       const now = nowMs();
+
       if (cache !== null && cache.expiresAtMs > now) {
         return cache.promise;
       }
+
       cache = {
         expiresAtMs: now + CLIENT_CONFIG_CACHE_TTL_MS,
         promise: readClientConfig(dataDir),
       };
+
       return cache.promise;
     },
   };
@@ -121,6 +173,7 @@ async function readClientConfig(dataDir: string): Promise<ClientConfig> {
     if (!isFsErrorWithCode(error, "ENOENT")) {
       throw error;
     }
+
     return EMPTY_CLIENT_CONFIG;
   }
 }
@@ -132,6 +185,7 @@ async function isConfiguredClientOrigin(
   try {
     const serverOrigin = normalizeClientServerOrigin(origin);
     const config = await configLoader.load();
+
     return config.servers[serverOrigin] !== undefined;
   } catch {
     return false;
@@ -155,15 +209,18 @@ async function resolveOpenPathInTargetArgs({
   const serverOrigin = normalizeClientServerOrigin(
     request.context.serverOrigin,
   );
+
   const config = await configLoader.load();
+
   const sshAuthority = resolveClientSshAuthority(config, {
     serverOrigin,
     hostId: request.context.hostId,
   });
+
   if (sshAuthority === null) {
     throw new WorkspaceOpenTargetError({
       code: "remote_mapping_missing",
-      message: `No SSH target configured for host ${request.context.hostId} on ${serverOrigin}. Run: bb-app client ssh-target set ${serverOrigin} <ssh-target> --host-id ${request.context.hostId}`,
+      message: `No SSH target configured for host ${request.context.hostId} on ${serverOrigin}. Run: omnyo-app client ssh-target set ${serverOrigin} <ssh-target> --host-id ${request.context.hostId}`,
     });
   }
 
@@ -188,11 +245,20 @@ function workspaceOpenTargetRuntime(options: StartLocalApiServerOptions) {
 export async function startLocalApiServer(
   options: StartLocalApiServerOptions,
 ): Promise<LocalApiServer> {
+  if (
+    options.management &&
+    !["127.0.0.1", "::1", "localhost"].includes(options.localApiConfig.bindHost)
+  ) {
+    throw new Error("Worker management requires a loopback local API");
+  }
+
   const app = new Hono();
   const clientConfigLoader = createClientConfigLoader(options.dataDir);
+
   const originArgs: BuildLocalAppOriginsArgs = {
     serverPort: options.serverPort,
   };
+
   assignIfDefined({
     key: "appUrl",
     target: originArgs,
@@ -204,9 +270,11 @@ export async function startLocalApiServer(
     value: options.devAppPort,
   });
   const allowedCorsOrigins = new Set<string>(buildLocalAppOrigins(originArgs));
+
   try {
     allowedCorsOrigins.add(new URL(options.serverUrl).origin);
   } catch {}
+
   const isAllowedAppOrigin = async (
     origin: string,
     requestUrl: string,
@@ -217,12 +285,15 @@ export async function startLocalApiServer(
     ) {
       return true;
     }
+
     let originUrl: URL;
+
     try {
       originUrl = new URL(origin);
     } catch {
       return false;
     }
+
     return (
       isSelfEvidentLocalHostname(originUrl.hostname) &&
       origin === new URL(requestUrl).origin
@@ -242,16 +313,61 @@ export async function startLocalApiServer(
   );
   app.use("*", async (c, next) => {
     const origin = c.req.header("origin");
+
     if (
       origin !== undefined &&
       !(await isAllowedAppOrigin(origin, c.req.url))
     ) {
       return c.json(
-        { error: `origin "${origin}" is not a local BB app origin` },
+        { error: `origin "${origin}" is not a local Omnyo app origin` },
         403,
       );
     }
+
     await next();
+  });
+
+  app.use("/management/v1/*", async (c, next) => {
+    const management = options.management;
+
+    if (!management)
+      return c.json({ error: "Worker management is unavailable" }, 503);
+    const supplied = Buffer.from(c.req.header("authorization") ?? "");
+    const expected = Buffer.from(`Bearer ${management.hostKey}`);
+
+    if (
+      supplied.length !== expected.length ||
+      !timingSafeEqual(supplied, expected)
+    ) {
+      return c.json({ error: "Worker authentication required" }, 401);
+    }
+
+    await next();
+  });
+
+  app.get("/management/v1/status", (c) =>
+    c.json(options.management!.getStatus()),
+  );
+  app.post("/management/v1/update", async (c) => {
+    const payload = workerUpdateRequestSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+
+    if (!payload.success)
+      return c.json({ error: "Invalid worker update request" }, 400);
+    const management = options.management!;
+    const current = management.getStatus();
+
+    if (
+      payload.data.expectedHostId !== options.hostId ||
+      payload.data.expectedInstanceId !== current.instanceId
+    ) {
+      return c.json({ error: "Worker instance changed" }, 409);
+    }
+
+    const result = await management.requestUpdate(payload.data.target);
+
+    return c.json({ result, status: management.getStatus() });
   });
 
   const { get, post } = typedRoutes<HostDaemonLocalSchema>(app);
@@ -303,6 +419,7 @@ export async function startLocalApiServer(
       if (error instanceof WorkspaceOpenTargetError) {
         throw new HTTPException(400, { message: error.message });
       }
+
       throw error;
     }
 
@@ -313,6 +430,7 @@ export async function startLocalApiServer(
     server: ReturnType<typeof serve>;
     port: number;
   };
+
   try {
     boundServer = await new Promise<{
       server: ReturnType<typeof serve>;
@@ -326,6 +444,7 @@ export async function startLocalApiServer(
         },
         (info) => resolve({ server: s, port: info.port }),
       );
+
       s.on("error", reject);
     });
   } catch (error) {
@@ -335,6 +454,7 @@ export async function startLocalApiServer(
         { cause: error },
       );
     }
+
     throw error;
   }
 
@@ -348,8 +468,10 @@ export async function startLocalApiServer(
         server.close((error) => {
           if (error) {
             reject(error);
+
             return;
           }
+
           resolve();
         });
       });

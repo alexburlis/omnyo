@@ -1,6 +1,6 @@
-import type { Thread, ThreadListEntry } from "@bb/domain";
-import { isThreadRead } from "@bb/client-core";
-import type { PluginThreadActionTarget } from "@get-bb/plugin-sdk";
+import type { Thread, ThreadListEntry } from "@omnyo/domain";
+import { isThreadRead } from "@omnyo/client-core";
+import type { PluginThreadActionTarget } from "@omnyo/plugin-sdk";
 
 export function toThreadActionTarget(
   thread: Thread,
@@ -12,6 +12,7 @@ export function toThreadActionTarget(
     parentThreadId: thread.parentThreadId,
     archivedAt: thread.archivedAt,
     pinnedAt: thread.pinnedAt,
+    shelvedAt: thread.shelvedAt,
     sectionId: thread.sectionId,
     isUnread: !isThreadRead(thread),
     status: thread.status,

@@ -1,16 +1,20 @@
 import {
   createThread,
+  getEnvironment,
   getThread,
   listEvents,
   setAiServiceSelection,
-} from "@bb/db";
+  updateThread,
+} from "@omnyo/db";
 import {
+  type JsonValue,
   type ResolvedThreadExecutionOptions,
   systemThreadProvisioningEventDataSchema,
   threadSchema,
   turnScope,
-} from "@bb/domain";
-import { groupHostDaemonEvents } from "@bb/host-daemon-contract";
+} from "@omnyo/domain";
+import { groupHostDaemonEvents } from "@omnyo/host-daemon-contract";
+import type { ProviderEnvironmentArgs } from "@omnyo/server-contract";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   internalAuthHeaders,
@@ -35,9 +39,15 @@ import {
   type TestAppHarness,
 } from "../helpers/test-app.js";
 import { registerFakeAiService } from "../helpers/ai-services.js";
-import { installFakeGitWorktreeProvider } from "../helpers/environment-provider.js";
+import {
+  checkoutProviderInputsSchema,
+  installFakeEnvironmentProvider,
+  installFakeGitWorktreeProvider,
+  worktreeProviderInputsSchema,
+} from "../helpers/environment-provider.js";
 import { runEnvironmentProvisioningSweep } from "../../src/services/system/periodic-sweeps.js";
 import { createThreadFromRequest } from "../../src/services/threads/thread-create.js";
+import { dispatchThreadRenameCommand } from "../../src/services/threads/thread-commands.js";
 import { requestThreadStopForCurrentState } from "../../src/services/threads/thread-lifecycle.js";
 import {
   advanceThreadProvisioning,
@@ -58,6 +68,7 @@ function registerTitleService(harness: TestAppHarness): TestAppHarness {
     builtin: true,
     complete: (prompt) => completeTitle(prompt),
   });
+
   return harness;
 }
 
@@ -82,9 +93,11 @@ function deferredTitle(): {
   let resolve: (metadata: MockThreadMetadata) => void = () => {
     throw new Error("Title generation was not started");
   };
+
   const promise = new Promise<string>((settle) => {
     resolve = (metadata) => settle(metadata.title ?? "");
   });
+
   return { promise, resolve };
 }
 
@@ -92,12 +105,15 @@ function pendingThreadMetadata(): (metadata: MockThreadMetadata) => void {
   let current: ReturnType<typeof deferredTitle> | null = null;
   completeTitle.mockImplementation(() => {
     current = deferredTitle();
+
     return current.promise;
   });
+
   return (metadata) => {
     if (current === null) {
       throw new Error("Title generation was not started");
     }
+
     current.resolve(metadata);
   };
 }
@@ -110,16 +126,17 @@ const THREAD_START_EXECUTION = {
   source: "client/turn/requested",
 } satisfies ResolvedThreadExecutionOptions;
 
-interface CreateManagedWorktreeThreadArgs {
+interface CreateThreadWithEnvironmentArgs {
   hostId: string;
   projectId: string;
   text: string;
   title?: string;
+  environment?: ProviderEnvironmentArgs;
 }
 
-async function createManagedWorktreeThread(
+async function createThreadWithEnvironment(
   harness: TestAppHarness,
-  args: CreateManagedWorktreeThreadArgs,
+  args: CreateThreadWithEnvironmentArgs,
 ) {
   const response = await harness.app.request("/api/v1/threads", {
     method: "POST",
@@ -131,7 +148,7 @@ async function createManagedWorktreeThread(
       model: "gpt-5",
       ...(args.title === undefined ? {} : { title: args.title }),
       input: [{ type: "text", text: args.text }],
-      environment: {
+      environment: args.environment ?? {
         type: "host",
         hostId: args.hostId,
         workspace: {
@@ -141,7 +158,9 @@ async function createManagedWorktreeThread(
       },
     }),
   });
+
   expect(response.status).toBe(201);
+
   return threadSchema.parse(await readJson(response));
 }
 
@@ -160,23 +179,509 @@ describe("generated thread titles", () => {
     completeTitle.mockReset();
   });
 
+  const checkoutCases: Array<{
+    name: string;
+    inputs: JsonValue;
+    branchName: string;
+    titleBeforeStartAcknowledgement: boolean;
+    manualTitle: boolean;
+  }> = [
+    {
+      name: "an unchanged branch",
+      inputs: {},
+      branchName: "main",
+      titleBeforeStartAcknowledgement: false,
+      manualTitle: false,
+    },
+    {
+      name: "an existing branch",
+      inputs: { branch: { kind: "existing", name: "release" } },
+      branchName: "release",
+      titleBeforeStartAcknowledgement: true,
+      manualTitle: false,
+    },
+    {
+      name: "a manual title change",
+      inputs: {},
+      branchName: "main",
+      titleBeforeStartAcknowledgement: false,
+      manualTitle: true,
+    },
+  ];
+
+  it.each(checkoutCases)(
+    "starts Project checkout with $name before title generation finishes",
+    async ({
+      inputs,
+      branchName,
+      titleBeforeStartAcknowledgement,
+      manualTitle,
+    }) => {
+      const metadata = deferredTitle();
+      completeTitle.mockReturnValue(metadata.promise);
+
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps, {
+          id: "host-checkout-pending-title",
+        });
+
+        const path = "/tmp/checkout-pending-title-project";
+
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+          path,
+        });
+
+        const thread = await createThreadWithEnvironment(harness, {
+          hostId: host.id,
+          projectId: project.id,
+          text: "Start work before the automatic title is ready",
+          environment: {
+            type: "provider",
+            environmentProviderId: "project-checkout",
+            machine: { type: "existing", hostId: host.id },
+            inputs,
+          },
+        });
+
+        try {
+          await vi.waitFor(() => {
+            expect(completeTitle).toHaveBeenCalledTimes(1);
+          });
+
+          const attach = await waitForQueuedCommand(
+            harness,
+            ({ command }) =>
+              command.type === "environment.attach" &&
+              command.initiator?.threadId === thread.id,
+          );
+
+          await reportQueuedCommandSuccess(harness, attach, {
+            path,
+            isGitRepo: true,
+            isWorktree: false,
+            branchName,
+            defaultBranch: "main",
+            transcript: [],
+          });
+
+          const start = await waitForQueuedCommand(
+            harness,
+            ({ command }) =>
+              command.type === "thread.start" && command.threadId === thread.id,
+          );
+
+          expect(getThread(harness.db, thread.id)?.title).toBeNull();
+          expect(completeTitle).toHaveBeenCalledTimes(1);
+
+          if (titleBeforeStartAcknowledgement) {
+            metadata.resolve({ title: "Generated Checkout Title" });
+            await vi.waitFor(() => {
+              expect(getThread(harness.db, thread.id)?.title).toBe(
+                "Generated Checkout Title",
+              );
+            });
+          }
+
+          await reportQueuedCommandSuccess(
+            harness,
+            start,
+            { providerThreadId: "provider-checkout-pending-title" },
+            { hostId: host.id },
+          );
+          expect(getThread(harness.db, thread.id)?.status).toBe("active");
+
+          if (manualTitle) {
+            const response = await harness.app.request(
+              `/api/v1/threads/${thread.id}`,
+              {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ title: "My Checkout Title" }),
+              },
+            );
+
+            expect(response.status).toBe(200);
+          }
+
+          if (!titleBeforeStartAcknowledgement) {
+            metadata.resolve({ title: "Generated Checkout Title" });
+          }
+
+          const rename = await waitForQueuedCommandAfter(
+            harness,
+            start.row.cursor,
+            ({ command }) =>
+              command.type === "thread.rename" &&
+              command.threadId === thread.id,
+          );
+
+          const expectedTitle = manualTitle
+            ? "My Checkout Title"
+            : "Generated Checkout Title";
+
+          expect(rename.command).toMatchObject({ title: expectedTitle });
+          expect(getThread(harness.db, thread.id)?.title).toBe(expectedTitle);
+
+          if (manualTitle) {
+            await expect(
+              waitForQueuedCommandAfter(
+                harness,
+                rename.row.cursor,
+                ({ command }) =>
+                  command.type === "thread.rename" &&
+                  command.threadId === thread.id,
+                100,
+              ),
+            ).rejects.toThrow("Timed out waiting for queued command");
+          }
+
+          const provisioning = listEvents(harness.db, { threadId: thread.id })
+            .filter((event) => event.type === "system/thread-provisioning")
+            .map((event) =>
+              systemThreadProvisioningEventDataSchema.parse(
+                JSON.parse(event.data),
+              ),
+            );
+
+          expect(provisioning.at(-1)?.status).toBe("completed");
+        } finally {
+          metadata.resolve({ title: "Generated Checkout Title" });
+          await vi.waitFor(() => {
+            expect(getThread(harness.db, thread.id)?.title).not.toBeNull();
+          });
+        }
+      });
+    },
+  );
+
+  const titleApplicationRaceCases: Array<{
+    name: string;
+    environmentType: "provider" | "reuse";
+    manualTitle: string | null;
+  }> = [
+    {
+      name: "Project checkout with a replacement title",
+      environmentType: "provider",
+      manualTitle: "My Latest Title",
+    },
+    {
+      name: "a ready reused environment with a replacement title",
+      environmentType: "reuse",
+      manualTitle: "My Latest Title",
+    },
+    {
+      name: "Project checkout with a cleared title",
+      environmentType: "provider",
+      manualTitle: null,
+    },
+    {
+      name: "a ready reused environment with a cleared title",
+      environmentType: "reuse",
+      manualTitle: null,
+    },
+  ];
+
+  it.each(titleApplicationRaceCases)(
+    "preserves a manual title changed after generated title application in $name",
+    async ({ environmentType, manualTitle }) => {
+      const metadata = deferredTitle();
+      completeTitle.mockReturnValue(metadata.promise);
+
+      await withTestHarness(async (harness) => {
+        const { host } = seedHostSession(harness.deps, {
+          id: "host-title-application-race",
+        });
+
+        const path = "/tmp/title-application-race-project";
+
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+          path,
+        });
+
+        const existingEnvironment =
+          environmentType === "reuse"
+            ? seedEnvironment(harness.deps, {
+                hostId: host.id,
+                projectId: project.id,
+                path,
+                status: "ready",
+              })
+            : null;
+
+        const thread = await createThreadFromRequest(harness.deps, {
+          environment: existingEnvironment
+            ? { type: "reuse", environmentId: existingEnvironment.id }
+            : {
+                type: "provider",
+                environmentProviderId: "project-checkout",
+                machine: { type: "existing", hostId: host.id },
+                inputs: {},
+              },
+          input: textInput(
+            "Keep a newer manual title during automatic title sync",
+          ),
+          model: "gpt-5",
+          origin: "app",
+          projectId: project.id,
+          providerId: "codex",
+          startedOnBehalfOf: null,
+        });
+
+        try {
+          await vi.waitFor(() => {
+            expect(completeTitle).toHaveBeenCalledTimes(1);
+          });
+
+          if (environmentType === "provider") {
+            const attach = await waitForQueuedCommand(
+              harness,
+              ({ command }) =>
+                command.type === "environment.attach" &&
+                command.initiator?.threadId === thread.id,
+            );
+
+            await reportQueuedCommandSuccess(harness, attach, {
+              path,
+              isGitRepo: true,
+              isWorktree: false,
+              branchName: "main",
+              defaultBranch: "main",
+              transcript: [],
+            });
+          }
+
+          const start = await waitForQueuedCommand(
+            harness,
+            ({ command }) =>
+              command.type === "thread.start" && command.threadId === thread.id,
+          );
+
+          await reportQueuedCommandSuccess(
+            harness,
+            start,
+            { providerThreadId: "provider-title-application-race" },
+            { hostId: host.id },
+          );
+          const activeThread = getThread(harness.db, thread.id);
+
+          if (!activeThread?.environmentId) {
+            throw new Error("Expected a started thread with an environment");
+          }
+
+          const environment = getEnvironment(
+            harness.db,
+            activeThread.environmentId,
+          );
+
+          if (!environment) {
+            throw new Error("Expected the thread environment");
+          }
+
+          expect(activeThread.status).toBe("active");
+          expect(activeThread.title).toBeNull();
+
+          const generatedTitle = "Generated Before Manual Edit";
+          let generatedTitleObserved = false;
+          let manualEditCompleted = false;
+
+          const unsubscribe = harness.hub.onChangedMessage((message) => {
+            if (
+              message.entity !== "thread" ||
+              message.id !== thread.id ||
+              !message.changes.includes("title-changed") ||
+              generatedTitleObserved ||
+              getThread(harness.db, thread.id)?.title !== generatedTitle
+            ) {
+              return;
+            }
+
+            generatedTitleObserved = true;
+            queueMicrotask(() => {
+              updateThread(harness.db, harness.hub, thread.id, {
+                title: manualTitle,
+              });
+
+              if (manualTitle) {
+                dispatchThreadRenameCommand(harness.deps, {
+                  environment: {
+                    id: environment.id,
+                    hostId: environment.hostId,
+                  },
+                  providerId: activeThread.providerId,
+                  threadId: thread.id,
+                  title: manualTitle,
+                });
+              }
+
+              manualEditCompleted = true;
+            });
+          });
+
+          try {
+            metadata.resolve({ title: generatedTitle });
+            await vi.waitFor(() => {
+              expect(manualEditCompleted).toBe(true);
+            });
+            expect(generatedTitleObserved).toBe(true);
+            expect(getThread(harness.db, thread.id)?.title).toBe(manualTitle);
+            await expect(
+              waitForQueuedCommandAfter(
+                harness,
+                start.row.cursor,
+                ({ command }) =>
+                  command.type === "thread.rename" &&
+                  command.threadId === thread.id &&
+                  command.title === generatedTitle,
+                100,
+              ),
+            ).rejects.toThrow("Timed out waiting for queued command");
+
+            const renames = listQueuedThreadCommands(
+              harness,
+              "thread.rename",
+              thread.id,
+            );
+
+            if (manualTitle === null) {
+              expect(renames).toEqual([]);
+            } else {
+              expect(renames.at(-1)).toMatchObject({ title: manualTitle });
+            }
+
+            expect(completeTitle).toHaveBeenCalledTimes(1);
+          } finally {
+            unsubscribe();
+          }
+        } finally {
+          metadata.resolve({ title: "Generated Before Manual Edit" });
+        }
+      });
+    },
+  );
+
+  const titleDependentProviderCases: Array<{
+    name: string;
+    environmentProviderId: string;
+    inputs: JsonValue;
+  }> = [
+    {
+      name: "a new checkout branch",
+      environmentProviderId: "project-checkout",
+      inputs: { branch: { kind: "new", baseBranch: "main" } },
+    },
+    {
+      name: "a new worktree",
+      environmentProviderId: "git-worktree",
+      inputs: { branch: { kind: "default" } },
+    },
+    {
+      name: "a custom environment provider",
+      environmentProviderId: "custom-checkout",
+      inputs: {},
+    },
+  ];
+
+  it.each(titleDependentProviderCases)(
+    "waits for a title before provisioning $name",
+    async ({ environmentProviderId, inputs }) => {
+      const metadata = deferredTitle();
+      completeTitle.mockReturnValue(metadata.promise);
+
+      await withTestHarness(async (harness) => {
+        const provider = installFakeEnvironmentProvider({
+          id: environmentProviderId,
+          pluginId: `environment-${environmentProviderId}`,
+          displayName: "Title-dependent provider",
+          requires: {
+            projectCheckout: true,
+            gitCheckout: false,
+            gitRemote: false,
+            projectless: false,
+          },
+          inputs:
+            environmentProviderId === "git-worktree"
+              ? worktreeProviderInputsSchema
+              : checkoutProviderInputsSchema,
+          decide: () => ({ action: "wait", reason: "Waiting for setup" }),
+        });
+
+        const { host } = seedHostSession(harness.deps, {
+          id: "host-title-dependent-provider",
+        });
+
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+          path: "/tmp/title-dependent-provider-project",
+        });
+
+        const thread = await createThreadWithEnvironment(harness, {
+          hostId: host.id,
+          projectId: project.id,
+          text: "Use the generated title before provisioning the workspace",
+          environment: {
+            type: "provider",
+            environmentProviderId,
+            machine: { type: "existing", hostId: host.id },
+            inputs,
+          },
+        });
+
+        try {
+          await vi.waitFor(() => {
+            expect(completeTitle).toHaveBeenCalledTimes(1);
+          });
+          await expect(
+            vi.waitFor(
+              () => {
+                expect(provider.contexts.length).toBeGreaterThan(0);
+              },
+              { timeout: 100, interval: 10 },
+            ),
+          ).rejects.toThrow();
+          expect(provider.contexts).toHaveLength(0);
+          expect(getThread(harness.db, thread.id)?.environmentId).toBeNull();
+
+          metadata.resolve({ title: "Generated Dependency Title" });
+          const context = await provider.waitForProvision();
+          expect(context).toMatchObject({
+            thread: { id: thread.id, title: "Generated Dependency Title" },
+            suggestedBranchName: `omnyo/generated-dependency-title-${thread.id}`,
+          });
+          expect(completeTitle).toHaveBeenCalledTimes(1);
+        } finally {
+          metadata.resolve({ title: "Generated Dependency Title" });
+          await vi.waitFor(() => {
+            expect(getThread(harness.db, thread.id)?.title).toBe(
+              "Generated Dependency Title",
+            );
+          });
+        }
+      });
+    },
+  );
+
   it("resolves a managed-worktree request to the worktree provider once the title is generated", async () => {
     mockThreadMetadata({ title: "Improve Branch Names" });
     await withTestHarness(async (harness) => {
       const provider = installFakeGitWorktreeProvider();
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-generated-branch",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/generated-branch-project",
       });
 
-      const thread = await createManagedWorktreeThread(harness, {
+      const thread = await createThreadWithEnvironment(harness, {
         hostId: host.id,
         projectId: project.id,
         text: "Improve the generated branch naming path",
       });
+
       expect(thread.title).toBeNull();
 
       const context = await provider.waitForProvision();
@@ -196,15 +701,17 @@ describe("generated thread titles", () => {
 
     await withTestHarness(async (harness) => {
       const provider = installFakeGitWorktreeProvider();
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-managed-early-provisioning-row",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/managed-early-provisioning-row-project",
       });
 
-      const thread = await createManagedWorktreeThread(harness, {
+      const thread = await createThreadWithEnvironment(harness, {
         hostId: host.id,
         projectId: project.id,
         text: "Show provisioning before generated branch metadata finishes",
@@ -231,21 +738,26 @@ describe("generated thread titles", () => {
 
     await withTestHarness(async (harness) => {
       const provider = installFakeGitWorktreeProvider();
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-stop-during-metadata",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/stop-during-metadata-project",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         status: "starting",
         title: null,
         titleFallback: "Stop during metadata inference",
       });
+
       const input = textInput("Stop during metadata inference before setup");
       requestThreadProvision(harness.deps, {
+        author: { initiator: "user", senderThreadId: null },
         environmentIntent: {
           type: "provider",
           environmentProviderId: "git-worktree",
@@ -260,6 +772,7 @@ describe("generated thread titles", () => {
         thread,
         titleProvided: false,
       });
+
       const advance = advanceThreadProvisioning(harness.deps, {
         threadId: thread.id,
       });
@@ -269,9 +782,11 @@ describe("generated thread titles", () => {
       });
 
       const startingThread = getThread(harness.db, thread.id);
+
       if (!startingThread) {
         throw new Error("Expected the starting thread");
       }
+
       expect(startingThread.environmentId).toBeNull();
       requestThreadStopForCurrentState(harness.deps, startingThread, null);
       expect(getThread(harness.db, thread.id)).toMatchObject({
@@ -296,15 +811,17 @@ describe("generated thread titles", () => {
 
     await withTestHarness(async (harness) => {
       const provider = installFakeGitWorktreeProvider();
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-managed-prepared-sweep",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/managed-prepared-sweep-project",
       });
 
-      const thread = await createManagedWorktreeThread(harness, {
+      const thread = await createThreadWithEnvironment(harness, {
         hostId: host.id,
         projectId: project.id,
         text: "Keep prepared provisioning safe during sweeps",
@@ -334,24 +851,26 @@ describe("generated thread titles", () => {
   it("falls through to the next Automatic service for provider-path titles", async () => {
     completeTitle.mockResolvedValueOnce("Recovered Managed Metadata");
     await withTestHarness(async (harness) => {
-      const cloud = registerFakeAiService(harness.deps.aiServices, {
-        id: "bb",
-        pluginId: "bb-ai",
-        builtin: true,
+      const failing = registerFakeAiService(harness.deps.aiServices, {
+        id: "helper",
+        pluginId: "helper-plugin",
         complete: async () => {
-          throw new Error("bb cloud is overloaded");
+          throw new Error("Helper is overloaded");
         },
       });
+
       const provider = installFakeGitWorktreeProvider();
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-managed-metadata-retry",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/managed-metadata-retry-project",
       });
 
-      const thread = await createManagedWorktreeThread(harness, {
+      const thread = await createThreadWithEnvironment(harness, {
         hostId: host.id,
         projectId: project.id,
         text: "Recover managed metadata after a failed first service",
@@ -363,7 +882,7 @@ describe("generated thread titles", () => {
         "Recovered Managed Metadata",
       );
       expect(completeTitle).toHaveBeenCalledTimes(1);
-      expect(cloud.completeCalls).toHaveLength(1);
+      expect(failing.completeCalls).toHaveLength(1);
     });
   });
 
@@ -373,10 +892,12 @@ describe("generated thread titles", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-generated-title-rename",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/generated-title-rename-project",
       });
+
       seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -392,16 +913,18 @@ describe("generated thread titles", () => {
         },
       }));
 
-      const thread = await createManagedWorktreeThread(harness, {
+      const thread = await createThreadWithEnvironment(harness, {
         hostId: host.id,
         projectId: project.id,
         text: "Generate a title then sync it after startup",
       });
+
       const start = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" && command.threadId === thread.id,
       );
+
       await reportQueuedCommandSuccess(
         harness,
         start,
@@ -415,6 +938,7 @@ describe("generated thread titles", () => {
         ({ command }) =>
           command.type === "thread.rename" && command.threadId === thread.id,
       );
+
       expect(rename.command).toMatchObject({
         type: "thread.rename",
         threadId: thread.id,
@@ -430,20 +954,24 @@ describe("generated thread titles", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-generated-fork-title",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/generated-fork-title-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/generated-fork-title-project",
         status: "ready",
       });
+
       const sourceThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       seedThreadIdentity(harness.deps, {
         threadId: sourceThread.id,
         providerThreadId: "provider-generated-fork-title-source",
@@ -455,6 +983,7 @@ describe("generated thread titles", () => {
       });
 
       const input = textInput("Continue this fork and generate a useful title");
+
       const fork = await createThreadFromRequest(harness.deps, {
         environment: { type: "reuse", environmentId: environment.id },
         input,
@@ -476,12 +1005,15 @@ describe("generated thread titles", () => {
         ({ command }) =>
           command.type === "thread.start" && command.threadId === fork.id,
       );
+
       if (start.command.type !== "thread.start") {
         throw new Error("Expected a thread.start command");
       }
+
       expect(start.command.input).toEqual(input);
       expect(start.command.fork).toEqual({
         sourceProviderThreadId: "provider-generated-fork-title-source",
+        restoreArchivedSource: true,
       });
 
       await reportQueuedCommandSuccess(
@@ -504,10 +1036,12 @@ describe("generated thread titles", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-user-title-no-rename",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/user-title-no-rename-project",
       });
+
       seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -523,17 +1057,19 @@ describe("generated thread titles", () => {
         },
       }));
 
-      const thread = await createManagedWorktreeThread(harness, {
+      const thread = await createThreadWithEnvironment(harness, {
         hostId: host.id,
         projectId: project.id,
         text: "Use the user supplied title without daemon rename",
         title: "User Picked Title",
       });
+
       const start = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" && command.threadId === thread.id,
       );
+
       await reportQueuedCommandSuccess(
         harness,
         start,
@@ -561,16 +1097,19 @@ describe("generated thread titles", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-idle-late-title-rename",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/idle-late-title-rename-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/idle-late-title-rename-workspace",
         status: "ready",
       });
+
       const thread = createThread(harness.db, harness.hub, {
         projectId: project.id,
         environmentId: environment.id,
@@ -581,6 +1120,7 @@ describe("generated thread titles", () => {
       });
 
       requestThreadProvision(harness.deps, {
+        author: { initiator: "user", senderThreadId: null },
         environmentIntent: {
           type: "reuse",
           environmentId: environment.id,
@@ -601,6 +1141,7 @@ describe("generated thread titles", () => {
         ({ command }) =>
           command.type === "thread.start" && command.threadId === thread.id,
       );
+
       await reportQueuedCommandSuccess(
         harness,
         start,
@@ -641,6 +1182,7 @@ describe("generated thread titles", () => {
           }),
         },
       );
+
       expect(eventsResponse.status).toBe(200);
       expect(getThread(harness.db, thread.id)?.status).toBe("idle");
 
@@ -656,6 +1198,7 @@ describe("generated thread titles", () => {
         ({ command }) =>
           command.type === "thread.rename" && command.threadId === thread.id,
       );
+
       expect(rename.command).toMatchObject({
         type: "thread.rename",
         threadId: thread.id,
@@ -672,16 +1215,19 @@ describe("generated thread titles", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-errored-late-title-no-rename",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/errored-late-title-no-rename-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/errored-late-title-no-rename-workspace",
         status: "ready",
       });
+
       const thread = createThread(harness.db, harness.hub, {
         projectId: project.id,
         environmentId: environment.id,
@@ -692,6 +1238,7 @@ describe("generated thread titles", () => {
       });
 
       requestThreadProvision(harness.deps, {
+        author: { initiator: "user", senderThreadId: null },
         environmentIntent: {
           type: "reuse",
           environmentId: environment.id,
@@ -712,6 +1259,7 @@ describe("generated thread titles", () => {
         ({ command }) =>
           command.type === "thread.start" && command.threadId === thread.id,
       );
+
       await reportQueuedCommandError(
         harness,
         start,
@@ -778,6 +1326,7 @@ describe("generated thread titles", () => {
         input: textInput("Make generated branch names easier to read"),
         threadId: "thr_chatty_title",
       });
+
       expect(outcome.metadata?.title).toBe(
         "Make the generated branch names easier to read",
       );
@@ -812,6 +1361,7 @@ describe("generated thread titles", () => {
     await withTestHarness(async (harness) => {
       const task =
         'For the plan graph tooling, can we show in the background of the plan graph visualizer the "burndown" chart? Show how many plan items have been completed over time, from the beginning of the ledger to now.';
+
       await generateThreadMetadataWithOutcome(harness.deps, {
         input: textInput(task),
         threadId: "thr_full_task_metadata",

@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { omitNpmScriptPolicyEnv } from "@bb/process-utils";
+import { omitNpmScriptPolicyEnv } from "@omnyo/process-utils";
 import { resolveBundledNpmCli } from "./npm-cli.js";
 
 const run = promisify(execFile);
@@ -19,6 +19,10 @@ export const NODE_ESM_REQUIRE_BANNER = [
   "var __filename = __fileURLToPath(import.meta.url);",
   "var __dirname = __pathDirname(__filename);",
 ].join("\n");
+
+const TOOLCHAIN_MARKER = ".omnyo-toolchain.json";
+
+const LEGACY_TOOLCHAIN_MARKER_V1 = ".bb-toolchain.json";
 
 export const PLUGIN_TOOLCHAIN_PINS = {
   esbuild: "0.28.1",
@@ -43,21 +47,26 @@ function pinKey(): string {
 
 export function toolchainCacheDir(baseDir: string): string {
   const key = Object.values(PLUGIN_TOOLCHAIN_PINS).join("-");
+
   return join(baseDir, `toolchain-${key}`);
 }
 
 function packageDir(require: NodeRequire, name: string): string | null {
   let dir: string;
+
   try {
     dir = dirname(require.resolve(name));
   } catch {
     return null;
   }
+
   for (let depth = 0; depth < 10; depth += 1) {
     const manifest = join(dir, "package.json");
+
     if (existsSync(manifest)) {
       try {
         const parsed: unknown = JSON.parse(readFileSync(manifest, "utf8"));
+
         if (
           typeof parsed === "object" &&
           parsed !== null &&
@@ -69,24 +78,31 @@ function packageDir(require: NodeRequire, name: string): string | null {
         return null;
       }
     }
+
     const parent = dirname(dir);
+
     if (parent === dir) return null;
     dir = parent;
   }
+
   return null;
 }
 
 function readVersion(require: NodeRequire, name: string): string | null {
   const dir = packageDir(require, name);
+
   if (dir === null) return null;
+
   try {
     const parsed: unknown = JSON.parse(
       readFileSync(join(dir, "package.json"), "utf8"),
     );
+
     const version =
       typeof parsed === "object" && parsed !== null
         ? (parsed as { version?: unknown }).version
         : undefined;
+
     return typeof version === "string" ? version : null;
   } catch {
     return null;
@@ -97,9 +113,12 @@ function toolchainFrom(require: NodeRequire): PluginBuildToolchain | null {
   for (const [name, pinned] of Object.entries(PLUGIN_TOOLCHAIN_PINS)) {
     if (readVersion(require, name) !== pinned) return null;
   }
+
   try {
     const tailwindCssDir = packageDir(require, "tailwindcss");
+
     if (tailwindCssDir === null) return null;
+
     return {
       esbuild: pathToFileURL(require.resolve("esbuild")).href,
       tailwindNode: pathToFileURL(require.resolve("@tailwindcss/node")).href,
@@ -115,21 +134,60 @@ function resolveLocalToolchain(): PluginBuildToolchain | null {
   return toolchainFrom(createRequire(import.meta.url));
 }
 
-async function isInstalled(dir: string): Promise<boolean> {
+async function readToolchainMarker(path: string): Promise<string | null> {
   try {
-    const raw = await readFile(join(dir, ".bb-toolchain.json"), "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      (parsed as { pins?: unknown }).pins !== pinKey()
-    ) {
-      return false;
-    }
-  } catch {
-    return false;
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT")
+      return null;
+    throw error;
   }
+}
+
+async function readInstalledToolchainMarker(
+  dir: string,
+): Promise<string | null> {
+  const canonicalPath = join(dir, TOOLCHAIN_MARKER);
+  const canonical = await readToolchainMarker(canonicalPath);
+
+  const legacyV1 = await readToolchainMarker(
+    join(dir, LEGACY_TOOLCHAIN_MARKER_V1),
+  );
+
+  if (canonical !== null && legacyV1 !== null)
+    throw new Error("plugin build cache has both toolchain identity markers");
+
+  return canonical ?? legacyV1 ?? (await readToolchainMarker(canonicalPath));
+}
+
+async function isInstalled(dir: string): Promise<boolean> {
+  const raw = await readInstalledToolchainMarker(dir);
+
+  if (raw === null) return false;
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    throw new Error("invalid plugin build toolchain cache marker", { cause });
+  }
+
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("pins" in parsed) ||
+    parsed.pins !== pinKey()
+  )
+    throw new Error("invalid plugin build toolchain cache marker");
+
   return toolchainFrom(createRequire(join(dir, "noop.js"))) !== null;
+}
+
+async function adoptLegacyToolchainMarkerV1(dir: string): Promise<void> {
+  await rename(
+    join(dir, LEGACY_TOOLCHAIN_MARKER_V1),
+    join(dir, TOOLCHAIN_MARKER),
+  ).catch(() => undefined);
 }
 
 export async function resolvePluginBuildToolchain(
@@ -142,23 +200,28 @@ export async function resolvePluginBuildToolchain(
 ): Promise<PluginBuildToolchain> {
   if (options?.ignoreLocal !== true) {
     const local = resolveLocalToolchain();
+
     if (local !== null) return local;
   }
 
   const dir = toolchainCacheDir(baseDir);
+
   if (await isInstalled(dir)) {
+    await adoptLegacyToolchainMarkerV1(dir);
     const cached = toolchainFrom(createRequire(join(dir, "noop.js")));
+
     if (cached !== null) return cached;
   }
 
   options?.onFetchStart?.();
   const startedAt = Date.now();
   const staging = `${dir}.staging-${randomUUID()}`;
+
   try {
     await mkdir(staging, { recursive: true });
     await writeFile(
       join(staging, "package.json"),
-      `${JSON.stringify({ name: "bb-plugin-toolchain", private: true, version: "0.0.0" }, null, 2)}\n`,
+      `${JSON.stringify({ name: "omnyo-plugin-toolchain", private: true, version: "0.0.0" }, null, 2)}\n`,
     );
     await run(
       process.execPath,
@@ -181,16 +244,19 @@ export async function resolvePluginBuildToolchain(
       },
     );
     const staged = toolchainFrom(createRequire(join(staging, "noop.js")));
+
     if (staged === null) {
       throw new Error(
         "the downloaded plugin build toolchain is incomplete or misversioned",
       );
     }
+
     await writeFile(
-      join(staging, ".bb-toolchain.json"),
+      join(staging, TOOLCHAIN_MARKER),
       `${JSON.stringify({ pins: pinKey() }, null, 2)}\n`,
     );
     await mkdir(dirname(dir), { recursive: true });
+
     try {
       await rename(staging, dir);
     } catch {
@@ -201,8 +267,10 @@ export async function resolvePluginBuildToolchain(
   }
 
   const promoted = toolchainFrom(createRequire(join(dir, "noop.js")));
+
   if (promoted === null) throw new Error(errorPromoting(dir));
   options?.onFetchDone?.(Date.now() - startedAt);
+
   return promoted;
 }
 

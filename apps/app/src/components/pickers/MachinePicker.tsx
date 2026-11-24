@@ -1,25 +1,31 @@
+import { shellHaptic } from "@/lib/native-shell/native-shell";
+import { PickerEmptyState, pickerNoMatchMessage } from "./PickerEmptyState";
 import { useMemo, useRef, useState } from "react";
-import type { Host } from "@bb/domain";
-import { Icon } from "@bb/shared-ui/icon";
-import { Button } from "@bb/shared-ui/button";
+import type { Host } from "@omnyo/domain";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Command,
   CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
-} from "@bb/shared-ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
+} from "@omnyo/shared-ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@omnyo/shared-ui/popover";
 import {
   COARSE_POINTER_COMPACT_ICON_SIZE_CLASS,
   COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
   COARSE_POINTER_ICON_SIZE_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { LIST_HOVER_TRANSITION } from "@bb/shared-ui/motion";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
 import { selectHosts, selectPrimaryHost } from "@/hooks/queries/host-queries";
 import { formatRelativeTime } from "@/lib/relative-time";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { formatHostUpdateStatus } from "@/lib/host-update-status";
 import {
   MachineLabel,
@@ -31,12 +37,13 @@ import {
   OPTION_INTERACTIVE_CLASS_NAME,
   OPTION_MUTED_CLASS_NAME,
   OPTION_TRIGGER_CONTENT_CLASS_NAME,
-} from "@bb/shared-ui/option-display";
+} from "@omnyo/shared-ui/option-display";
 import {
   MACHINE_SEARCH_MIN_OPTIONS,
   searchMachineHosts,
 } from "./machine-picker-search";
 import { useResetPickerScroll } from "./useResetPickerScroll";
+import { usePickerModal } from "./use-picker-modal";
 
 export const MACHINE_BADGE_CLASS_NAME =
   "shrink-0 rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-2xs leading-none text-subtle-foreground";
@@ -74,34 +81,42 @@ export function MachinePickerUI({
   muted,
   disabled = false,
   className,
-  modal = true,
+  modal: modalProp,
   machineProviders = [],
 }: MachinePickerUIProps) {
+  const { modal, modalHostRef } = usePickerModal(modalProp);
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const commandRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRef = useResetPickerScroll<HTMLDivElement>(searchQuery);
   const availableHosts = useMemo(() => selectHosts(hosts, "all"), [hosts]);
+
   const selectedHost = useMemo(
     () =>
       availableHosts.find((host) => host.id === selectedHostId) ??
       selectPrimaryHost(availableHosts, primaryHostId),
     [availableHosts, primaryHostId, selectedHostId],
   );
+
   const orderedHosts = useMemo(
     () => orderLocalHostFirst(availableHosts, localDaemonHostId),
     [availableHosts, localDaemonHostId],
   );
+
   const showSearch = availableHosts.length > MACHINE_SEARCH_MIN_OPTIONS;
+
   const filteredHosts = useMemo(
     () =>
       showSearch ? searchMachineHosts(orderedHosts, searchQuery) : orderedHosts,
     [orderedHosts, searchQuery, showSearch],
   );
+
   const now = Date.now();
+
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
+
     if (!nextOpen) {
       setSearchQuery("");
     }
@@ -109,7 +124,7 @@ export function MachinePickerUI({
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange} modal={modal}>
-      <PopoverTrigger asChild disabled={disabled}>
+      <PopoverTrigger ref={modalHostRef} asChild disabled={disabled}>
         <Button
           type="button"
           variant="ghost"
@@ -120,7 +135,6 @@ export function MachinePickerUI({
           className={cn(
             OPTION_BASE_CLASS_NAME,
             !disabled && OPTION_INTERACTIVE_CLASS_NAME,
-            !disabled && LIST_HOVER_TRANSITION,
             muted && OPTION_MUTED_CLASS_NAME,
             disabled && "cursor-default disabled:opacity-100",
             className,
@@ -181,6 +195,7 @@ export function MachinePickerUI({
             <CommandGroup>
               {filteredHosts.map((host) => {
                 const connected = host.status === "connected";
+
                 return (
                   <CommandItem
                     key={host.id}
@@ -191,6 +206,9 @@ export function MachinePickerUI({
                     }
                     onSelect={() => {
                       if (!connected) return;
+
+                      if (host.id !== selectedHost?.id)
+                        shellHaptic("selection");
                       onChange(host.id);
                       handleOpenChange(false);
                     }}
@@ -200,7 +218,7 @@ export function MachinePickerUI({
                     )}
                   >
                     <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                      <MachineStatusDot connected={connected} />
+                      <TitledMachineStatusDot connected={connected} />
                       <MachineLabel
                         host={host}
                         machineProvider={findMachineProvider(
@@ -220,13 +238,9 @@ export function MachinePickerUI({
                       <span className="shrink-0 text-2xs text-warning-foreground">
                         {formatHostUpdateStatus(host)}
                       </span>
-                    ) : !connected && host.lastSeenAt !== null ? (
+                    ) : !connected ? (
                       <span className="shrink-0 text-2xs text-muted-foreground">
-                        last seen{" "}
-                        {formatRelativeTime({
-                          timestamp: host.lastSeenAt,
-                          now,
-                        })}
+                        {formatOfflineMachineStatus(host.lastSeenAt, now)}
                       </span>
                     ) : null}
                     <Icon
@@ -243,9 +257,11 @@ export function MachinePickerUI({
                 );
               })}
               {showSearch && filteredHosts.length === 0 ? (
-                <div className="px-2 py-1.5 text-xs text-muted-foreground max-md:pointer-coarse:py-2">
-                  No machines found
-                </div>
+                <PickerEmptyState
+                  icon="Search"
+                  message={pickerNoMatchMessage("machines", searchQuery)}
+                  className="py-3"
+                />
               ) : null}
             </CommandGroup>
           </CommandList>
@@ -255,11 +271,40 @@ export function MachinePickerUI({
   );
 }
 
+export function TitledMachineStatusDot({
+  connected,
+  className,
+}: {
+  connected: boolean;
+  className?: string;
+}) {
+  return (
+    <span className={cn("flex size-1.5 shrink-0", className)}>
+      <MachineStatusDot
+        connected={connected}
+        label={connected ? "Online" : "Offline"}
+        decorative
+        className="size-full"
+      />
+    </span>
+  );
+}
+
+export function formatOfflineMachineStatus(
+  lastSeenAt: number | null,
+  now: number,
+): string {
+  return lastSeenAt === null
+    ? "Offline"
+    : `Offline · last seen ${formatRelativeTime({ timestamp: lastSeenAt, now })}`;
+}
+
 function findMachineProvider(
   host: MachineLabelHost,
   machineProviders: readonly MachineProviderPresentation[],
 ): MachineProviderPresentation | null {
   if (host.machineProviderId === null) return null;
+
   return (
     machineProviders.find(
       (provider) => provider.id === host.machineProviderId,

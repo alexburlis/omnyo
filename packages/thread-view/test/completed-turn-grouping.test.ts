@@ -1,4 +1,4 @@
-import { turnScope } from "@bb/domain";
+import { turnScope } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { groupCompletedTurnMessages } from "../src/completed-turn-grouping.js";
 import type { CompletedTurnMessageGroups } from "../src/completed-turn-grouping.js";
@@ -73,6 +73,7 @@ function userMessage(args: UserMessageArgs): EventProjectionUserMessage {
     systemMessageKind: "unlabeled",
     systemMessageSubject: null,
     turnRequest: args.turnRequest ?? {
+      clientRequestId: null,
       isGrouped: false,
       kind: "message",
       status: "accepted",
@@ -119,6 +120,7 @@ function completedTurn(
     completedAt: messages.length,
     status: "completed",
     summaryCount,
+    gitActivity: null,
     messages,
     ...(terminalMessage ? { terminalMessage } : {}),
   };
@@ -135,13 +137,16 @@ function summarySourceMessageIds(
 }
 
 describe("groupCompletedTurnMessages", () => {
-  it("keeps a bb thread tell command out of the summary", () => {
+  it("keeps an omnyo thread tell command out of the summary", () => {
     const before = commandMessage({ id: "command-1", seq: 1 });
+
     const sent = {
       ...commandMessage({ id: "sent", seq: 2 }),
-      command: 'bb thread tell thr_wrkr234567 "Is it ready?"',
+      command: 'omnyo thread tell thr_wrkr234567 "Is it ready?"',
     };
+
     const after = commandMessage({ id: "command-2", seq: 3 });
+
     const groups = groupCompletedTurnMessages(
       completedTurn([before, sent, after], undefined),
     );
@@ -176,6 +181,7 @@ describe("groupCompletedTurnMessages", () => {
       assistantMessage({ id: "assistant-1", seq: 1 }),
       commandMessage({ id: "command-1", seq: 2 }),
     ];
+
     const groups = groupCompletedTurnMessages(
       completedTurn(messages, undefined),
     );
@@ -199,6 +205,7 @@ describe("groupCompletedTurnMessages", () => {
     const command = commandMessage({ id: "command", seq: 2 });
     const answer = assistantMessage({ id: "answer", seq: 3 });
     const hookReply = assistantMessage({ id: "hook-reply", seq: 4 });
+
     const groups = groupCompletedTurnMessages(
       completedTurn([narration, command, answer, hookReply], hookReply),
     );
@@ -222,6 +229,7 @@ describe("groupCompletedTurnMessages", () => {
     const second = assistantMessage({ id: "second", seq: 2 });
     const command = commandMessage({ id: "command", seq: 3 });
     const terminal = assistantMessage({ id: "terminal", seq: 4 });
+
     const groups = groupCompletedTurnMessages(
       completedTurn([first, second, command, terminal], terminal),
     );
@@ -241,14 +249,17 @@ describe("groupCompletedTurnMessages", () => {
       id: "assistant-before",
       seq: 1,
     });
+
     const assistantAfter = assistantMessage({
       id: "assistant-after",
       seq: 3,
     });
+
     const turn = completedTurn(
       [assistantBefore, userMessage({ id: "user", seq: 2 }), assistantAfter],
       assistantAfter,
     );
+
     const groups = groupCompletedTurnMessages(turn);
 
     expect(groups.summaryItems).toMatchObject([
@@ -280,6 +291,7 @@ describe("groupCompletedTurnMessages", () => {
       ],
       undefined,
     );
+
     const groups = groupCompletedTurnMessages(turn);
 
     expect(groups.summaryItems).toMatchObject([
@@ -314,6 +326,7 @@ describe("groupCompletedTurnMessages", () => {
     const before = commandMessage({ id: "before", seq: 1 });
     const terminal = assistantMessage({ id: "terminal", seq: 2 });
     const trailing = assistantMessage({ id: "trailing", seq: 3 });
+
     const groups = groupCompletedTurnMessages(
       completedTurn([before, terminal, trailing], terminal),
     );

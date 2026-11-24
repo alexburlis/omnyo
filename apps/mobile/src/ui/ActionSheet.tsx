@@ -49,6 +49,7 @@ export function ActionSheet({
   const { tokens } = useTheme();
   const hasHeader = Boolean(title || message || status);
   const hasIcons = actions.some((action) => action.icon);
+
   if (!IS_IOS && presentation === "menu") {
     return (
       <Sheet controller={controller} onDismiss={onDismiss}>
@@ -98,6 +99,7 @@ export function ActionSheet({
                 testID={`action-sheet-${action.key}`}
                 onPress={() => {
                   if (action.destructive) haptic("warning");
+
                   if (action.dismissOnPress !== false) controller.dismiss();
                   action.onPress();
                 }}
@@ -128,6 +130,7 @@ export function ActionSheet({
       </Sheet>
     );
   }
+
   if (!IS_IOS) {
     return (
       <Sheet controller={controller} onDismiss={onDismiss}>
@@ -163,9 +166,11 @@ export function ActionSheet({
             {actions.map((action, index) => {
               const onPress = () => {
                 if (action.destructive) haptic("warning");
+
                 if (action.dismissOnPress !== false) controller.dismiss();
                 action.onPress();
               };
+
               return (
                 <Button
                   key={action.key}
@@ -203,10 +208,12 @@ export function ActionSheet({
       </Sheet>
     );
   }
+
   const card = {
     borderRadius: GROUPED_CARD_RADIUS,
     borderCurve: "continuous" as const,
   };
+
   return (
     <Sheet controller={controller} onDismiss={onDismiss}>
       <View className="gap-2 px-4 pt-1">
@@ -261,7 +268,6 @@ export function ActionSheet({
                 destructive={action.destructive}
                 disabled={action.disabled}
                 onPress={() => {
-                  if (action.destructive) haptic("warning");
                   if (action.dismissOnPress !== false) controller.dismiss();
                   action.onPress();
                 }}

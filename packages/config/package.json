@@ -1,5 +1,6 @@
 {
-  "name": "@bb/config",
+  "name": "@omnyo/config",
+  "private": true,
   "version": "0.0.1",
   "type": "module",
   "exports": {
@@ -78,10 +79,10 @@
       "types": "./src/public-url.ts",
       "default": "./src/public-url.ts"
     },
-    "./bb-app-managed-config": {
-      "source": "./src/bb-app-managed-config.ts",
-      "types": "./src/bb-app-managed-config.ts",
-      "default": "./src/bb-app-managed-config.ts"
+    "./managed-app-config": {
+      "source": "./src/managed-app-config.ts",
+      "types": "./src/managed-app-config.ts",
+      "default": "./src/managed-app-config.ts"
     },
     "./managed-json-file": {
       "source": "./src/managed-json-file.ts",
@@ -102,6 +103,16 @@
       "source": "./src/app-runtime-file.ts",
       "types": "./src/app-runtime-file.ts",
       "default": "./src/app-runtime-file.ts"
+    },
+    "./omnyo-environment": {
+      "source": "./src/omnyo-environment.ts",
+      "types": "./src/omnyo-environment.ts",
+      "default": "./src/omnyo-environment.ts"
+    },
+    "./omnyo-state-admission": {
+      "source": "./src/omnyo-state-admission.ts",
+      "types": "./src/omnyo-state-admission.ts",
+      "default": "./src/omnyo-state-admission.ts"
     },
     "./app-install": {
       "source": "./src/app-install.ts",
@@ -142,6 +153,36 @@
       "source": "./src/child-process-exit.ts",
       "types": "./src/child-process-exit.ts",
       "default": "./src/child-process-exit.ts"
+    },
+    "./omnyo-state-startup": {
+      "source": "./src/omnyo-state-startup.ts",
+      "types": "./src/omnyo-state-startup.ts",
+      "default": "./src/omnyo-state-startup.ts"
+    },
+    "./common": {
+      "source": "./src/common.ts",
+      "types": "./src/common.ts",
+      "default": "./src/common.ts"
+    },
+    "./windows-state-process": {
+      "source": "./src/windows-state-process.ts",
+      "types": "./src/windows-state-process.ts",
+      "default": "./src/windows-state-process.ts"
+    },
+    "./windows-state-file": {
+      "source": "./src/windows-state-file.ts",
+      "types": "./src/windows-state-file.ts",
+      "default": "./src/windows-state-file.ts"
+    },
+    "./release-version": {
+      "source": "./src/release-version.mjs",
+      "types": "./src/release-version.d.mts",
+      "default": "./src/release-version.mjs"
+    },
+    "./usage-collector-url": {
+      "source": "./src/usage-collector-url.ts",
+      "types": "./src/usage-collector-url.ts",
+      "default": "./src/usage-collector-url.ts"
     }
   },
   "scripts": {
@@ -151,13 +192,13 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
-    "@bb/domain": "workspace:*",
-    "@bb/process-utils": "workspace:*",
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/process-utils": "workspace:*",
     "fs-native-extensions": "1.5.0",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2"

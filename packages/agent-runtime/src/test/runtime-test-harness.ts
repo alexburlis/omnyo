@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { JsonObject, ProviderRecoveryKind } from "@bb/domain";
+import type { JsonObject, ProviderRecoveryKind } from "@omnyo/domain";
 import { createAgentRuntime } from "../runtime.js";
 import type {
   AgentRuntime,
@@ -10,6 +10,7 @@ import type {
   AgentRuntimeExecutionOptions,
   AgentRuntimeOptions,
 } from "../types.js";
+
 export {
   waitForRuntimeState,
   waitForRuntimeThreadEvent,
@@ -45,6 +46,9 @@ export const scriptedEchoBridgeModulePath = join(
 export interface ScriptedEchoLaunchScript {
   startDelayMs?: number;
   turnStartResponseDelayMs?: number;
+  turnStartErrorAfterMs?: number;
+  steerResponseDelayMs?: number;
+  steerFindsNewTurn?: boolean;
   answerStartWithoutIdentity?: boolean;
   identityAfterResponse?: boolean;
   identityNotificationsBeforeTurn?: {
@@ -92,9 +96,10 @@ export function createScriptedEchoLaunch(
   options: CreateScriptedEchoLaunchOptions = {},
 ): AgentRuntimeBridgeLaunch {
   const pluginId = options.pluginId ?? "provider-scripted-echo";
+
   return {
     pluginId,
-    dataDir: mkdtempSync(join(tmpdir(), `bb-${pluginId}-data-`)),
+    dataDir: mkdtempSync(join(tmpdir(), `omnyo-${pluginId}-data-`)),
     source: {
       kind: "artifact",
       digest: options.digest ?? "scripted-echo",
@@ -197,6 +202,7 @@ export function createScriptedEchoRuntime(
       : {}),
     ...args.runtime,
   });
+
   return withBridgeLaunch(runtime, createScriptedEchoLaunch(args.launch));
 }
 
@@ -208,19 +214,22 @@ export interface ScriptedEchoProcessLog {
 
 export function createScriptedEchoProcessLog(): ScriptedEchoProcessLog {
   const path = join(
-    mkdtempSync(join(tmpdir(), "bb-scripted-echo-process-log-")),
+    mkdtempSync(join(tmpdir(), "omnyo-scripted-echo-process-log-")),
     "process.log",
   );
+
   return {
     env: { SCRIPTED_ECHO_PROCESS_LOG_PATH: path },
     path,
     read() {
       let raw: string;
+
       try {
         raw = readFileSync(path, "utf8");
       } catch {
         return [];
       }
+
       return raw.split("\n").filter((line) => line.length > 0);
     },
   };
@@ -240,32 +249,38 @@ export interface ScriptedEchoRequestRecord {
 
 export function createScriptedEchoRequestRecord(): ScriptedEchoRequestRecord {
   const path = join(
-    mkdtempSync(join(tmpdir(), "bb-scripted-echo-record-")),
+    mkdtempSync(join(tmpdir(), "omnyo-scripted-echo-record-")),
     "requests.jsonl",
   );
+
   const read = (): RecordedBridgeRequest[] => {
     let raw: string;
+
     try {
       raw = readFileSync(path, "utf8");
     } catch {
       return [];
     }
+
     return raw
       .split("\n")
       .filter((line) => line.length > 0)
       .map((line) => JSON.parse(line) as RecordedBridgeRequest);
   };
+
   return {
     env: { SCRIPTED_ECHO_RECORD_PATH: path },
     path,
     read,
     last(method) {
       const requests = read();
+
       for (let index = requests.length - 1; index >= 0; index -= 1) {
         if (requests[index]?.method === method) {
           return requests[index];
         }
       }
+
       return undefined;
     },
   };

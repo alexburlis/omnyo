@@ -1,15 +1,15 @@
 import { join, resolve } from "node:path";
-import { modalAllocations } from "./allocations.js";
+import { modalAllocations, type ModalAllocation } from "./allocations.js";
 import { sweepModalAllocations } from "./allocation-sweep.js";
-import type { BbPluginApi, JsonValue } from "@get-bb/plugin-sdk";
+import type { PluginApi, JsonValue } from "@omnyo/plugin-sdk";
 import type {
   PluginMachineProviderCreateContext,
   PluginMachineProviderProgress,
-} from "@get-bb/plugin-sdk/machine-provider";
+} from "@omnyo/plugin-sdk/machine-provider";
 import {
   createFakePluginHost,
   makeThreadResponse,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import { describe, expect, it, vi } from "vitest";
 import type {
   ModalSandboxClient,
@@ -22,16 +22,20 @@ import { createModalSandboxPlugin } from "./server.js";
 import { PROVIDER_ID } from "./provider-id.js";
 
 const PLUGIN_ID = "environment-modal-sandbox";
+
 const HOST_ID = "host_modal";
+
 const SETTINGS = {
   tokenId: "tok-id",
   tokenSecret: "tok-secret",
 };
+
 const report: PluginMachineProviderProgress = {
   step() {},
   log() {},
 };
-type Host = Awaited<ReturnType<BbPluginApi["sdk"]["hosts"]["list"]>>[number];
+
+type Host = Awaited<ReturnType<PluginApi["sdk"]["hosts"]["list"]>>[number];
 
 function host(status: Host["status"]): Host {
   return {
@@ -48,8 +52,10 @@ function host(status: Host["status"]): Host {
       teardown: null,
     },
     maxPermissionMode: "full",
+    availability: "available",
     lastSeenAt: null,
     lastRejectedProtocolVersion: null,
+    runtimeVersion: null,
     createdAt: 1,
     updatedAt: 1,
   };
@@ -83,11 +89,13 @@ function createBackend(
       sandboxId: state.id,
       async exec(command) {
         if (command[0] === "bootstrap-test") state.connected = true;
+
         return { exitCode: 0, stdout: "ok", stderr: "" };
       },
       async terminate() {
         state.terminated = true;
         state.connected = false;
+
         if (crashAfterTerminate) {
           crashAfterTerminate = false;
           throw new Error("server crashed after sandbox termination");
@@ -98,14 +106,18 @@ function createBackend(
           failSnapshot = false;
           throw new Error("snapshot creation failed");
         }
+
         nextSnapshot += 1;
+
         return `image-${nextSnapshot}`;
       },
     };
   }
 
   const image = vi.fn(async () => "im-standard");
+
   const backend: ModalSandboxClient = {
+    ...{ async validateOwnership() {} },
     accountIdentity: async () => "modal-account",
     ensureModalImage: image,
     close() {},
@@ -120,6 +132,7 @@ function createBackend(
     async create(request) {
       creates.push(request);
       nextSandbox += 1;
+
       const state = {
         id: `sandbox-${nextSandbox}`,
         name: request.name,
@@ -128,13 +141,16 @@ function createBackend(
         connected: false,
         terminated: false,
       } satisfies FakeSandboxState;
+
       states.push(state);
+
       return handle(state);
     },
     async fromId(sandboxId) {
       const state = states.find(
         (candidate) => candidate.id === sandboxId && !candidate.terminated,
       );
+
       return state === undefined ? null : handle(state);
     },
     async fromName(appName, name) {
@@ -144,11 +160,12 @@ function createBackend(
           candidate.name === name &&
           !candidate.terminated,
       );
+
       return state === undefined ? null : handle(state);
     },
     async *listByKey(key) {
       for (const state of states) {
-        if (!state.terminated && state.tags.bbMachineKey === key)
+        if (!state.terminated && state.tags.omnyoMachineKey === key)
           yield handle(state);
       }
     },
@@ -156,6 +173,7 @@ function createBackend(
       deletedSnapshots.push(imageId);
     },
   };
+
   return {
     backend,
     image,
@@ -176,9 +194,11 @@ async function setup(
   } = {},
 ) {
   const backend = createBackend(options);
+
   const machineResource = vi.fn(
     async (_hostId: string): Promise<JsonValue | null> => null,
   );
+
   const fake = createFakePluginHost({
     pluginId: PLUGIN_ID,
     machineResource,
@@ -195,6 +215,7 @@ async function setup(
       },
     },
   });
+
   const bootstrap = vi.fn(
     async (request: {
       key: string;
@@ -215,10 +236,12 @@ async function setup(
         signal: request.signal,
         stdin: "bootstrap-secret",
       });
+
       return { hostId: HOST_ID };
     },
   );
-  Object.assign(fake.bb.experimental_machines, {
+
+  Object.assign(fake.api.experimental_machines, {
     bootstrap,
   });
   await createModalSandboxPlugin({
@@ -235,10 +258,12 @@ async function setup(
     }),
     now: () => Date.now(),
     sleep: async () => {},
-  })(fake.bb);
+  })(fake.api);
   const provider = fake.harness.registrations.machineProviders.get(PROVIDER_ID);
+
   if (provider === undefined)
     throw new Error("machine provider not registered");
+
   return {
     ...fake,
     machineResource,
@@ -274,10 +299,12 @@ describe("Modal machine provider", () => {
     const harness = await setup();
     const log = vi.fn();
     const progress = { step: vi.fn(), log };
+
     const first = await harness.provider.create({
       ...createContext(),
       report: progress,
     });
+
     const second = await harness.provider.create(createContext());
     expect(first).toMatchObject({
       status: "created",
@@ -303,6 +330,7 @@ describe("Modal machine provider", () => {
   it("reserves the default size for a machine created without a preset", async () => {
     const harness = await setup();
     const created = await harness.provider.create(createContext());
+
     if (created.status !== "created")
       throw new Error("Expected created machine");
     expect(harness.backend.creates[0]).toMatchObject({
@@ -314,9 +342,11 @@ describe("Modal machine provider", () => {
 
   it("resolves configured preset and image names for validation and creation", async () => {
     const harness = await setup();
+
     const current = modalLaunchOptionsSchema.parse(
       await harness.harness.callRpc("launch.options", {}),
     );
+
     await harness.harness.callRpc("launch.options.set", {
       presets: [
         { name: "Small", cpu: 0.5, memoryMiB: 512 },
@@ -351,13 +381,17 @@ describe("Modal machine provider", () => {
 
   it("passes a named Dockerfile image label into image preparation", async () => {
     const harness = await setup();
+
     const current = modalLaunchOptionsSchema.parse(
       await harness.harness.callRpc("launch.options", {}),
     );
+
     const defaultImage = current.images[0];
+
     if (defaultImage?.source !== "dockerfile") {
       throw new Error("Default image is not a Dockerfile");
     }
+
     await harness.harness.callRpc("launch.options.set", {
       presets: current.presets,
       images: [
@@ -404,8 +438,10 @@ describe("Modal machine provider", () => {
   it("resumes without receiving a host identity from bootstrap", async () => {
     const harness = await setup();
     const created = await harness.provider.create(createContext());
+
     if (created.status !== "created") throw new Error(created.message);
     const log = vi.fn();
+
     const context = {
       hostId: HOST_ID,
       resource: created.resource,
@@ -413,7 +449,9 @@ describe("Modal machine provider", () => {
       signal: new AbortController().signal,
       async checkpoint() {},
     };
+
     const suspended = await harness.provider.suspend?.(context);
+
     if (suspended === undefined) throw new Error("suspend not registered");
     await expect(
       harness.provider.resume?.({ ...context, resource: suspended.resource }),
@@ -433,17 +471,21 @@ describe("Modal machine provider", () => {
     "checkpoints a %s result despite cancellation so core can remove without bootstrap",
     async (phase) => {
       const test = await setup();
+
       if (phase === "lookup") {
         await test.provider.create(createContext());
         test.bootstrap.mockClear();
       }
+
       const controller = new AbortController();
+
       if (phase === "create") {
         const create = test.backend.backend.create;
         vi.spyOn(test.backend.backend, "create").mockImplementationOnce(
           async (request) => {
             const sandbox = await create(request);
             controller.abort(new Error("cancelled"));
+
             return sandbox;
           },
         );
@@ -453,10 +495,12 @@ describe("Modal machine provider", () => {
           async (appName, name) => {
             const sandbox = await fromName(appName, name);
             controller.abort(new Error("cancelled"));
+
             return sandbox;
           },
         );
       }
+
       const checkpoint = vi.fn(async (_resource: JsonValue) => {});
       await expect(
         test.provider.create({
@@ -474,6 +518,7 @@ describe("Modal machine provider", () => {
       });
       expect(test.bootstrap).not.toHaveBeenCalled();
       expect(test.backend.states[0]?.terminated).toBe(false);
+
       if (resource == null) throw new Error("missing checkpoint");
       await test.provider.remove({
         hostId: HOST_ID,
@@ -487,9 +532,11 @@ describe("Modal machine provider", () => {
 
   it("does not bootstrap or tear down when checkpoint persistence fails", async () => {
     const test = await setup();
+
     const checkpoint = vi.fn(async (_resource: JsonValue) => {
       throw new Error("checkpoint failed");
     });
+
     expect(
       await test.provider.create({ ...createContext(), checkpoint }),
     ).toMatchObject({ status: "failed" });
@@ -503,11 +550,13 @@ describe("Modal machine provider", () => {
 
   it("cleans matching allocations across apps after checkpoint failure without touching unrelated compute", async () => {
     const test = await setup({ ...SETTINGS, appName: "original" });
+
     try {
       const context = createContext();
       context.checkpoint = async () => {
         throw new Error("checkpoint refused");
       };
+
       expect(await test.provider.create(context)).toMatchObject({
         status: "failed",
       });
@@ -547,16 +596,19 @@ describe("Modal machine provider", () => {
       const test = await setup(SETTINGS, {
         crashAfterTerminateOnce: failure === "termination",
       });
+
       try {
         const context = createContext();
         await test.provider.create(context);
         const list = test.backend.backend.listByKey;
         const lookup = vi.spyOn(test.backend.backend, "listByKey");
+
         if (failure === "enumeration")
           lookup.mockImplementationOnce(async function* (key) {
             yield* list(key);
             throw new Error("enumeration failed");
           });
+
         if (failure === "still running")
           lookup.mockImplementationOnce(async function* (key) {
             for await (const sandbox of list(key))
@@ -584,8 +636,11 @@ describe("Modal machine provider", () => {
       ...SETTINGS,
       environmentVariables: "GH_TOKEN=image-secret-sentinel",
     });
+
     const created = await harness.provider.create(createContext());
+
     if (created.status !== "created") throw new Error(created.message);
+
     const lifecycleContext = {
       hostId: HOST_ID,
       resource: created.resource,
@@ -593,6 +648,7 @@ describe("Modal machine provider", () => {
       signal: new AbortController().signal,
       async checkpoint() {},
     };
+
     expect(JSON.stringify(harness.backend.creates)).not.toContain(
       "image-secret-sentinel",
     );
@@ -604,11 +660,14 @@ describe("Modal machine provider", () => {
       sandboxId: null,
       snapshotImageId: "image-1",
     });
+
     if (suspended === undefined) throw new Error("suspend not registered");
+
     const resumed = await harness.provider.resume?.({
       ...lifecycleContext,
       resource: suspended.resource,
     });
+
     expect(harness.bootstrap).toHaveBeenLastCalledWith({
       key: "modal-machine-key",
       executor: { exec: expect.any(Function) },
@@ -622,6 +681,7 @@ describe("Modal machine provider", () => {
       sandboxId: "sandbox-2",
       snapshotImageId: "image-1",
     });
+
     if (resumed === undefined) throw new Error("resume not registered");
     await expect(
       harness.provider.remove({
@@ -635,7 +695,9 @@ describe("Modal machine provider", () => {
   it("awaits the resume allocation checkpoint before bootstrap and recovers without allocating again", async () => {
     const harness = await setup();
     const created = await harness.provider.create(createContext());
+
     if (created.status !== "created") throw new Error(created.message);
+
     const context = {
       hostId: HOST_ID,
       resource: created.resource,
@@ -643,7 +705,9 @@ describe("Modal machine provider", () => {
       signal: new AbortController().signal,
       checkpoint: vi.fn(async (_resource: JsonValue) => {}),
     };
+
     const suspended = await harness.provider.suspend?.(context);
+
     if (suspended === undefined) throw new Error("suspend missing");
     let persisted: JsonValue | null = null;
     harness.bootstrap.mockClear();
@@ -658,12 +722,15 @@ describe("Modal machine provider", () => {
       }),
     ).rejects.toThrow("crash after durable checkpoint");
     expect(harness.bootstrap).not.toHaveBeenCalled();
+
     if (persisted === null) throw new Error("checkpoint missing");
     expect(persisted).toMatchObject({ sandboxId: "sandbox-2" });
+
     const resumed = await harness.provider.resume?.({
       ...context,
       resource: persisted,
     });
+
     expect(resumed?.resource).toMatchObject({ sandboxId: "sandbox-2" });
     expect(context.checkpoint.mock.invocationCallOrder[0]).toBeLessThan(
       harness.bootstrap.mock.invocationCallOrder[0]!,
@@ -674,6 +741,7 @@ describe("Modal machine provider", () => {
   it("checkpoints a restorable snapshot before termination and recovers a crashed suspend", async () => {
     const harness = await setup(SETTINGS, { crashAfterTerminateOnce: true });
     const created = await harness.provider.create(createContext());
+
     if (created.status !== "created") throw new Error(created.message);
     let checkpoint: JsonValue | null = null;
     await expect(
@@ -692,6 +760,7 @@ describe("Modal machine provider", () => {
       snapshotImageId: "image-1",
     });
     expect(harness.backend.states[0]?.terminated).toBe(true);
+
     if (checkpoint === null) throw new Error("checkpoint was not persisted");
 
     await expect(
@@ -708,7 +777,9 @@ describe("Modal machine provider", () => {
   it("reboots surviving compute when resume receives a resource without a snapshot", async () => {
     const harness = await setup(SETTINGS, { failSnapshotOnce: true });
     const created = await harness.provider.create(createContext());
+
     if (created.status !== "created") throw new Error(created.message);
+
     const lifecycleContext = {
       hostId: HOST_ID,
       resource: created.resource,
@@ -716,6 +787,7 @@ describe("Modal machine provider", () => {
       signal: new AbortController().signal,
       async checkpoint() {},
     };
+
     harness.backend.states[0]!.connected = false;
 
     await expect(harness.provider.suspend?.(lifecycleContext)).rejects.toThrow(
@@ -740,7 +812,9 @@ describe("Modal machine provider", () => {
   it("retains superseded snapshots until recovery or removal deletes them", async () => {
     const harness = await setup();
     const created = await harness.provider.create(createContext());
+
     if (created.status !== "created") throw new Error(created.message);
+
     const lifecycleContext = {
       hostId: HOST_ID,
       resource: created.resource,
@@ -748,13 +822,17 @@ describe("Modal machine provider", () => {
       signal: new AbortController().signal,
       async checkpoint() {},
     };
+
     const firstSuspension = await harness.provider.suspend?.(lifecycleContext);
+
     if (firstSuspension === undefined)
       throw new Error("suspend not registered");
+
     const firstResume = await harness.provider.resume?.({
       ...lifecycleContext,
       resource: firstSuspension.resource,
     });
+
     if (firstResume === undefined) throw new Error("resume not registered");
     harness.backend.crashAfterNextTerminate();
     let checkpoint: JsonValue | null = null;
@@ -772,17 +850,20 @@ describe("Modal machine provider", () => {
       snapshotImageId: "image-2",
       pendingSnapshotImageIds: ["image-1"],
     });
+
     if (checkpoint === null) throw new Error("checkpoint was not persisted");
 
     const recovered = await harness.provider.resume?.({
       ...lifecycleContext,
       resource: checkpoint,
     });
+
     expect(recovered?.resource).toMatchObject({
       snapshotImageId: "image-2",
       pendingSnapshotImageIds: [],
     });
     expect(harness.backend.deletedSnapshots).toEqual(["image-1"]);
+
     if (recovered === undefined) throw new Error("resume not registered");
     const recoveredResource = readModalMachineResource(recovered.resource);
 
@@ -809,14 +890,17 @@ describe("Modal machine provider", () => {
   it("stops snapshot cleanup when persisting a deletion checkpoint fails", async () => {
     const harness = await setup();
     const created = await harness.provider.create(createContext());
+
     if (created.status !== "created") throw new Error(created.message);
     harness.backend.states[0]!.terminated = true;
+
     const resource = {
       ...readModalMachineResource(created.resource),
       snapshotImageId: "image-current",
       snapshotSandboxId: "sandbox-1",
       pendingSnapshotImageIds: ["image-old-1", "image-old-2"],
     };
+
     const checkpoint = vi.fn(async () => {
       throw new Error("checkpoint refused");
     });
@@ -844,8 +928,8 @@ it("reconciles uncertain named allocations without creating or bootstrapping", a
   test.backend.states.push({
     id: "uncertain",
     name: request.key,
-    appName: "bb-sandboxes",
-    tags: { bbMachineKey: request.key },
+    appName: "omnyo-sandboxes",
+    tags: { omnyoMachineKey: request.key },
     connected: false,
     terminated: false,
   });
@@ -860,9 +944,11 @@ it("reconciles uncertain named allocations without creating or bootstrapping", a
   expect(test.bootstrap).not.toHaveBeenCalled();
   await test.harness.lifecycle.dispose();
 });
+
 it("observes vendor deadlines", async () => {
   const harness = await setup();
   const created = await harness.provider.create(createContext());
+
   if (created.status !== "created") throw new Error("creation failed");
   harness.machineResource.mockImplementation(async (hostId) =>
     hostId === HOST_ID ? created.resource : null,
@@ -877,11 +963,13 @@ it("observes vendor deadlines", async () => {
 it("blocks observation and resume after the configured account identity changes", async () => {
   const harness = await setup();
   const created = await harness.provider.create(createContext());
+
   if (created.status !== "created") throw new Error("creation failed");
   harness.machineResource.mockImplementation(async (hostId) =>
     hostId === HOST_ID ? created.resource : null,
   );
   await harness.harness.setSettings({ tokenId: "different-account" });
+
   const context = {
     hostId: HOST_ID,
     resource: created.resource,
@@ -889,6 +977,7 @@ it("blocks observation and resume after the configured account identity changes"
     report,
     checkpoint: async () => {},
   };
+
   await expect(
     harness.harness.callRpc("machine.inspect", { hostId: HOST_ID }),
   ).rejects.toThrow("pinned Modal account");
@@ -916,6 +1005,7 @@ it("does not allocate a sandbox when cancelled during standard image preparation
   const controller = new AbortController();
   test.backend.image.mockImplementationOnce(async () => {
     controller.abort(new Error("cancelled"));
+
     return "im-standard";
   });
   await expect(
@@ -928,8 +1018,10 @@ it("does not allocate a sandbox when cancelled during standard image preparation
 it("refuses an older snapshot when running compute disappears unexpectedly", async () => {
   const test = await setup();
   const created = await test.provider.create(createContext());
+
   if (created.status !== "created") throw new Error("creation failed");
   test.backend.states[0]!.terminated = true;
+
   const context = {
     hostId: HOST_ID,
     resource: {
@@ -941,6 +1033,7 @@ it("refuses an older snapshot when running compute disappears unexpectedly", asy
     signal: new AbortController().signal,
     checkpoint: async () => {},
   };
+
   await expect(test.provider.resume?.(context)).rejects.toThrow(
     "potentially stale snapshot",
   );
@@ -952,8 +1045,10 @@ it("refuses an older snapshot when running compute disappears unexpectedly", asy
 
 it("validates and persists a Dockerfile override used by new machines, then resets it", async () => {
   const test = await setup();
+
   const dockerfile =
     "# Custom tools\nFROM node:22-bookworm-slim\nRUN echo custom\nUSER node\n";
+
   await expect(
     test.harness.behavior.callRpc("image.set", {
       dockerfile: "FROM node:22\nCOPY . /app\n",
@@ -987,11 +1082,13 @@ it("reads CLI Dockerfiles on the invoking thread's host and leaves a saved overr
   test.harness.sdk.stub("environments.get", async () => ({
     hostId: "host_remote",
   }));
+
   const read = vi.fn(async () => ({
     content: dockerfile,
     contentEncoding: "utf8",
     sizeBytes: dockerfile.length,
   }));
+
   test.harness.sdk.stub("files.read", read);
   const projectDir = resolve("/project");
   const context = { threadId: "thr_remote", cwd: projectDir };
@@ -1025,11 +1122,13 @@ it("reads CLI Dockerfiles on the invoking thread's host and leaves a saved overr
 
 it("builds without enrollment and runs a bounded debug sandbox with no runtime secrets", async () => {
   const test = await setup();
+
   const built = await test.harness.behavior.runCli([
     "image",
     "build",
     "--json",
   ]);
+
   expect(built.exitCode).toBe(0);
   expect(JSON.parse(built.stdout)).toMatchObject({ imageId: "im-standard" });
   expect(test.backend.creates).toHaveLength(0);
@@ -1046,12 +1145,15 @@ it("preserves command argv, output and exit codes while preventing access to unr
   const test = await setup();
   await test.harness.behavior.callRpc("sandbox.run", {});
   const sandbox = await test.backend.backend.fromId("sandbox-1");
+
   if (!sandbox) throw new Error("missing test sandbox");
+
   const exec = vi.fn(async () => ({
     exitCode: 7,
     stdout: "out",
     stderr: "err",
   }));
+
   vi.spyOn(test.backend.backend, "fromId").mockResolvedValue({
     ...sandbox,
     exec,
@@ -1123,7 +1225,7 @@ it("stops debug compute without snapshots and refuses commands after expiry", as
 
 it("cleans debug compute when recording its ownership fails", async () => {
   const test = await setup();
-  vi.spyOn(test.bb.storage.kv, "set").mockRejectedValueOnce(
+  vi.spyOn(test.api.storage.kv, "set").mockRejectedValueOnce(
     new Error("storage unavailable"),
   );
   await expect(
@@ -1148,23 +1250,24 @@ describe("modal CLI surface", () => {
 
     const help = await test.harness.behavior.runCli(["--help"]);
     expect(help.exitCode).toBe(0);
-    expect(help.stdout).toContain("bb modal machine inspect");
-    expect(help.stdout).toContain("bb modal sandbox exec");
+    expect(help.stdout).toContain("omnyo modal machine inspect");
+    expect(help.stdout).toContain("omnyo modal sandbox exec");
 
     const commandHelp = await test.harness.behavior.runCli([
       "image",
       "set",
       "--help",
     ]);
+
     expect(commandHelp.exitCode).toBe(0);
-    expect(commandHelp.stdout).toContain("bb modal image set --file <PATH>");
+    expect(commandHelp.stdout).toContain("omnyo modal image set --file <PATH>");
 
     expect(
       await test.harness.behavior.runCli(["sandbox", "exec", "sandbox-1"]),
     ).toMatchObject({
       exitCode: 1,
       stderr: expect.stringContaining(
-        "bb modal sandbox exec requires a command after --",
+        "omnyo modal sandbox exec requires a command after --",
       ),
     });
   });
@@ -1194,11 +1297,14 @@ describe("plugin-owned idle timing", () => {
   it("bumps starting and active thread notifications and real terminal input, and reads current settings", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const test = await setup();
+
     try {
       vi.setSystemTime(0);
       const created = await test.provider.create(createContext("thread-1"));
+
       if (created.status !== "created") throw new Error(created.message);
       test.machineResource.mockResolvedValue(created.resource);
+
       const suspend = vi.fn(async () => ({
         ...host("disconnected"),
         lifecycle: {
@@ -1206,15 +1312,18 @@ describe("plugin-owned idle timing", () => {
           phase: "suspended" as const,
         },
       }));
+
       test.harness.sdk.stub("hosts.experimental_suspend", suspend);
       test.harness.sdk.stub("hosts.list", () => [
         { ...host("connected"), machineProviderId: PROVIDER_ID },
       ]);
+
       const getHost = vi.fn(async () => ({
         ...host("connected"),
         machineProviderId: PROVIDER_ID,
         connectMachineId: null,
       }));
+
       test.harness.sdk.stub("hosts.get", getHost);
       const lookup = vi.fn(async () => ({ hostId: HOST_ID }));
       test.harness.sdk.stub("environments.get", lookup);
@@ -1284,7 +1393,7 @@ describe("plugin-owned idle timing", () => {
       await test.harness.runSchedule("pause-idle-machines");
       expect(suspend).toHaveBeenCalledWith({ hostId: HOST_ID });
       suspend.mockRejectedValueOnce(
-        new Error("BB request timed out after 75 seconds"),
+        new Error("Omnyo request timed out after 75 seconds"),
       );
       getHost.mockResolvedValueOnce({
         ...host("disconnected"),
@@ -1330,11 +1439,13 @@ describe("Modal allocation tracking", () => {
   it("tracks creates and resumes and removes confirmed terminated allocations", async () => {
     const h = await setup();
     const created = await h.provider.create(createContext());
+
     if (created.status !== "created")
       throw new Error("Expected created machine");
-    expect(await h.bb.storage.kv.list("allocations/")).toEqual([
+    expect(await h.api.storage.kv.list("allocations/")).toEqual([
       "allocations/sandbox/sandbox-1",
     ]);
+
     const context = {
       hostId: HOST_ID,
       resource: created.resource,
@@ -1342,36 +1453,45 @@ describe("Modal allocation tracking", () => {
       signal: AbortSignal.timeout(10_000),
       checkpoint: vi.fn(async () => {}),
     };
+
     const paused = await h.provider.suspend!(context);
-    expect(await h.bb.storage.kv.list("allocations/")).toEqual([]);
+    expect(await h.api.storage.kv.list("allocations/")).toEqual([]);
+
     const pausedAgain = await h.provider.suspend!({
       ...context,
       resource: paused.resource,
     });
+
     expect(pausedAgain.resource).toEqual(paused.resource);
+
     const resumed = await h.provider.resume!({
       ...context,
       resource: paused.resource,
     });
-    expect(await h.bb.storage.kv.list("allocations/")).toEqual([
+
+    expect(await h.api.storage.kv.list("allocations/")).toEqual([
       "allocations/sandbox/sandbox-2",
     ]);
+
     const resumedAgain = await h.provider.resume!({
       ...context,
       resource: resumed.resource,
     });
+
     expect(resumedAgain.resource).toEqual(resumed.resource);
     expect(h.backend.states).toHaveLength(2);
     await h.provider.remove({ ...context, resource: resumed.resource });
-    expect(await h.bb.storage.kv.list("allocations/")).toEqual([]);
+    expect(await h.api.storage.kv.list("allocations/")).toEqual([]);
   });
 
   it("reconciles tracked running compute only for suspended owners and retains failed observations", async () => {
     const h = await setup();
     const created = await h.provider.create(createContext());
+
     if (created.status !== "created")
       throw new Error("Expected created machine");
     h.machineResource.mockResolvedValue(created.resource);
+
     const owner = {
       ...host("disconnected"),
       machineProviderId: PROVIDER_ID,
@@ -1380,12 +1500,13 @@ describe("Modal allocation tracking", () => {
         phase: "suspended" as const,
       },
     };
+
     const reconcile = vi.fn(async () => owner);
     h.harness.sdk.stub("hosts.list", () => [owner]);
     h.harness.sdk.stub("hosts.experimental_reconcile", reconcile);
-    const allocations = modalAllocations(h.bb, Date.now);
+    const allocations = modalAllocations(h.api, Date.now);
     await sweepModalAllocations(
-      h.bb,
+      h.api,
       allocations,
       h.backend.backend,
       Date.now(),
@@ -1393,17 +1514,19 @@ describe("Modal allocation tracking", () => {
     expect(reconcile).toHaveBeenCalledExactlyOnceWith({ hostId: HOST_ID });
     Object.assign(owner.lifecycle, { phase: "active" });
     await sweepModalAllocations(
-      h.bb,
+      h.api,
       allocations,
       h.backend.backend,
       Date.now(),
     );
     expect(reconcile).toHaveBeenCalledTimes(1);
+
     const lookup = vi
       .spyOn(h.backend.backend, "fromId")
       .mockRejectedValueOnce(new Error("Modal unavailable"));
+
     await sweepModalAllocations(
-      h.bb,
+      h.api,
       allocations,
       h.backend.backend,
       Date.now(),
@@ -1412,10 +1535,10 @@ describe("Modal allocation tracking", () => {
     lookup.mockRestore();
     h.backend.states[0]!.terminated = true;
     await sweepModalAllocations(
-      h.bb,
+      h.api,
       allocations,
       h.backend.backend,
-      Date.now(),
+      Date.now() + 60_000,
     );
     expect(await allocations.keys()).toEqual([]);
   });
@@ -1423,9 +1546,11 @@ describe("Modal allocation tracking", () => {
   it("runs allocation reconciliation even when idle pausing is disabled", async () => {
     const h = await setup();
     const created = await h.provider.create(createContext());
+
     if (created.status !== "created")
       throw new Error("Expected created machine");
     h.machineResource.mockResolvedValue(created.resource);
+
     const owner = {
       ...host("disconnected"),
       machineProviderId: PROVIDER_ID,
@@ -1434,6 +1559,7 @@ describe("Modal allocation tracking", () => {
         phase: "suspended" as const,
       },
     };
+
     const reconcile = vi.fn(async () => owner);
     h.harness.sdk.stub("hosts.list", () => [owner]);
     h.harness.sdk.stub("hosts.experimental_reconcile", reconcile);
@@ -1451,16 +1577,67 @@ describe("Modal allocation tracking", () => {
     const original = h.backend.backend.fromId;
     vi.spyOn(h.backend.backend, "fromId").mockImplementation(async (id) => {
       if (id === "sandbox-1") throw new Error("lookup unavailable");
+
       return original(id);
     });
-    const allocations = modalAllocations(h.bb, Date.now);
+    const allocations = modalAllocations(h.api, Date.now);
     await sweepModalAllocations(
-      h.bb,
+      h.api,
       allocations,
       h.backend.backend,
       Date.now(),
     );
     expect(await allocations.keys()).toEqual(["allocations/sandbox/sandbox-1"]);
+  });
+
+  it("persists per-allocation exponential backoff, caps it, and resumes cleanup after recovery", async () => {
+    const h = await setup();
+    await h.provider.create(createContext("first"));
+    await h.provider.create(createContext("second"));
+    h.backend.states[1]!.terminated = true;
+    const original = h.backend.backend.fromId;
+    let failing = true;
+
+    const lookup = vi
+      .spyOn(h.backend.backend, "fromId")
+      .mockImplementation(async (id) => {
+        if (id === "sandbox-1" && failing) throw new Error("unavailable");
+
+        return original(id);
+      });
+
+    let now = Date.now();
+    let allocations = modalAllocations(h.api, () => now);
+    await sweepModalAllocations(h.api, allocations, h.backend.backend, now);
+    expect(await allocations.keys()).toEqual(["allocations/sandbox/sandbox-1"]);
+
+    for (const delay of [
+      60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000, 3_600_000,
+      3_600_000,
+    ]) {
+      const calls = lookup.mock.calls.length;
+      allocations = modalAllocations(h.api, () => now);
+      await sweepModalAllocations(
+        h.api,
+        allocations,
+        h.backend.backend,
+        now + delay - 1,
+      );
+      expect(lookup).toHaveBeenCalledTimes(calls);
+      now += delay;
+      await sweepModalAllocations(h.api, allocations, h.backend.backend, now);
+      expect(lookup).toHaveBeenCalledTimes(calls + 1);
+    }
+
+    failing = false;
+    h.backend.states[0]!.terminated = true;
+    await sweepModalAllocations(
+      h.api,
+      allocations,
+      h.backend.backend,
+      now + 3_600_000,
+    );
+    expect(await allocations.keys()).toEqual([]);
   });
 
   it("rediscovers allocation after create loses its response and prunes it after termination", async () => {
@@ -1472,53 +1649,67 @@ describe("Modal allocation tracking", () => {
         throw new Error("lost allocation response");
       },
     );
-    const client = modalAllocations(h.bb, Date.now).wrap(h.backend.backend);
+    const client = modalAllocations(h.api, Date.now).wrap(h.backend.backend);
     await expect(
       client.create({
-        appName: "bb-sandboxes",
+        appName: "omnyo-sandboxes",
         name: "lost-response",
         image: { type: "image", imageId: "im-test" },
         timeoutMs: 60_000,
         cpu: null,
         memoryMiB: null,
-        tags: { bbMachineKey: "lost-response" },
+        tags: { omnyoMachineKey: "lost-response" },
       }),
     ).rejects.toThrow("lost allocation response");
-    expect(await h.bb.storage.kv.list("allocations/pending/")).toHaveLength(1);
-    const restarted = modalAllocations(h.bb, Date.now);
-    await sweepModalAllocations(h.bb, restarted, h.backend.backend, Date.now());
+    expect(await h.api.storage.kv.list("allocations/pending/")).toHaveLength(1);
+    const restarted = modalAllocations(h.api, Date.now);
+    await sweepModalAllocations(
+      h.api,
+      restarted,
+      h.backend.backend,
+      Date.now(),
+    );
     expect(await restarted.keys()).toEqual(["allocations/sandbox/sandbox-1"]);
     h.backend.states[0]!.terminated = true;
-    await sweepModalAllocations(h.bb, restarted, h.backend.backend, Date.now());
+    await sweepModalAllocations(
+      h.api,
+      restarted,
+      h.backend.backend,
+      Date.now(),
+    );
     expect(await restarted.keys()).toEqual([]);
   });
 
-  it("does not inspect another BB's untracked allocation or prune entries against another account", async () => {
+  it("does not inspect another Omnyo's untracked allocation or prune entries against another account", async () => {
     const h = await setup();
     const created = await h.provider.create(createContext());
+
     if (created.status !== "created")
       throw new Error("Expected created machine");
     await h.backend.backend.create({
-      appName: "bb-sandboxes",
-      name: "other-bb",
+      appName: "omnyo-sandboxes",
+      name: "other-omnyo",
       image: { type: "image", imageId: "im-test" },
       timeoutMs: 60_000,
       cpu: null,
       memoryMiB: null,
-      tags: { bbMachineKey: "other-bb" },
+      tags: { omnyoMachineKey: "other-omnyo" },
     });
-    const allocations = modalAllocations(h.bb, Date.now);
+    const allocations = modalAllocations(h.api, Date.now);
     const lookup = vi.spyOn(h.backend.backend, "fromId");
     await sweepModalAllocations(
-      h.bb,
+      h.api,
       allocations,
       h.backend.backend,
       Date.now(),
     );
-    expect(lookup).toHaveBeenCalledExactlyOnceWith("sandbox-1");
+    expect(lookup).toHaveBeenCalledExactlyOnceWith(
+      "sandbox-1",
+      "modal-machine-key",
+    );
     lookup.mockClear();
     await sweepModalAllocations(
-      h.bb,
+      h.api,
       allocations,
       {
         ...h.backend.backend,
@@ -1532,30 +1723,32 @@ describe("Modal allocation tracking", () => {
 
   it("retains pending creates until their lifetime expires and never treats a lookup error as absence", async () => {
     const h = await setup();
-    const allocations = modalAllocations(h.bb, () => 0);
+    const allocations = modalAllocations(h.api, () => 0);
+
     const create = vi
       .spyOn(h.backend.backend, "create")
       .mockRejectedValue(new Error("allocation failed"));
+
     const client = allocations.wrap(h.backend.backend);
     await expect(
       client.create({
-        appName: "bb-sandboxes",
+        appName: "omnyo-sandboxes",
         name: "pending",
         image: { type: "image", imageId: "im-test" },
         timeoutMs: 60_000,
         cpu: null,
         memoryMiB: null,
-        tags: { bbMachineKey: "pending" },
+        tags: { omnyoMachineKey: "pending" },
       }),
     ).rejects.toThrow();
-    await sweepModalAllocations(h.bb, allocations, h.backend.backend, 59_999);
+    await sweepModalAllocations(h.api, allocations, h.backend.backend, 59_999);
     expect(await allocations.keys()).toHaveLength(1);
     vi.spyOn(h.backend.backend, "fromName").mockRejectedValueOnce(
       new Error("lookup failed"),
     );
-    await sweepModalAllocations(h.bb, allocations, h.backend.backend, 60_001);
+    await sweepModalAllocations(h.api, allocations, h.backend.backend, 60_001);
     expect(await allocations.keys()).toHaveLength(1);
-    await sweepModalAllocations(h.bb, allocations, h.backend.backend, 60_001);
+    await sweepModalAllocations(h.api, allocations, h.backend.backend, 120_001);
     expect(await allocations.keys()).toEqual([]);
     create.mockRestore();
   });
@@ -1565,28 +1758,249 @@ it.each(["lookup", "delete"] as const)(
   "keeps successful termination successful when tracking %s fails",
   async (failure) => {
     const h = await setup();
-    const tracker = modalAllocations(h.bb, Date.now);
+    const tracker = modalAllocations(h.api, Date.now);
     const client = tracker.wrap(h.backend.backend);
     const created = await h.provider.create(createContext());
+
     if (created.status !== "created")
       throw new Error("Expected created machine");
     const sandbox = await client.fromId("sandbox-1");
+
     if (sandbox === null) throw new Error("Expected sandbox");
+
     const spy =
       failure === "lookup"
         ? vi
             .spyOn(h.backend.backend, "fromId")
             .mockRejectedValueOnce(new Error("lookup unavailable"))
         : vi
-            .spyOn(h.bb.storage.kv, "delete")
+            .spyOn(h.api.storage.kv, "delete")
             .mockRejectedValueOnce(new Error("storage unavailable"));
+
     await expect(sandbox.terminate()).resolves.toBeUndefined();
     expect(h.backend.states[0]?.terminated).toBe(true);
-    expect(await h.bb.storage.kv.list("allocations/")).toEqual([
+    expect(await h.api.storage.kv.list("allocations/")).toEqual([
       "allocations/sandbox/sandbox-1",
     ]);
     spy.mockRestore();
     await h.harness.runSchedule("pause-idle-machines");
-    expect(await h.bb.storage.kv.list("allocations/")).toEqual([]);
+    expect(await h.api.storage.kv.list("allocations/")).toEqual([]);
   },
 );
+
+describe("Modal original pending-create continuity", () => {
+  it.each(["omnyoMachineKey"] as const)(
+    "reconciles the original pending shape with one %s resource without resubmitting",
+    async (tagName) => {
+      const h = await setup();
+
+      const request = {
+        appName: "omnyo-sandboxes",
+        name: "pending-owner",
+        image: { type: "image" as const, imageId: "im-test" },
+        timeoutMs: 60_000,
+        cpu: null,
+        memoryMiB: null,
+        tags: { omnyoMachineKey: "pending-owner" },
+      };
+
+      const create = vi
+        .spyOn(h.backend.backend, "create")
+        .mockRejectedValueOnce(new Error("lost response"));
+
+      await expect(
+        modalAllocations(h.api, () => 100)
+          .wrap(h.backend.backend)
+          .create({ ...request, tags: { omnyoMachineKey: request.name } }),
+      ).rejects.toThrow("lost response");
+
+      const pendingKey = (
+        await h.api.storage.kv.list("allocations/pending/")
+      )[0]!;
+
+      const pending = await h.api.storage.kv.get(pendingKey);
+      const raw = JSON.stringify(pending);
+      h.backend.states.push({
+        id: "original-resource",
+        appName: request.appName,
+        name: request.name,
+        tags: { [tagName]: request.name },
+        connected: false,
+        terminated: false,
+      });
+      create.mockClear();
+
+      const sandbox = await modalAllocations(h.api, () => 999)
+        .wrap(h.backend.backend)
+        .create(request);
+
+      expect(sandbox.sandboxId).toBe("original-resource");
+      expect(create).not.toHaveBeenCalled();
+      expect(JSON.stringify(pending)).toBe(raw);
+      expect(
+        await h.api.storage.kv.get("allocations/sandbox/original-resource"),
+      ).toEqual({
+        accountIdentity: "modal-account",
+        appName: request.appName,
+        name: request.name,
+        sandboxId: "original-resource",
+        expiresAt: 60_100,
+      });
+      expect(await h.api.storage.kv.list("allocations/pending/")).toEqual([]);
+    },
+  );
+
+  it("retains an uncertain original pending row byte-for-byte after restart and never resubmits", async () => {
+    const h = await setup();
+
+    const request = {
+      appName: "omnyo-sandboxes",
+      name: "pending-owner",
+      image: { type: "image" as const, imageId: "im-test" },
+      timeoutMs: 60_000,
+      cpu: null,
+      memoryMiB: null,
+      tags: { omnyoMachineKey: "pending-owner" },
+    };
+
+    const create = vi
+      .spyOn(h.backend.backend, "create")
+      .mockRejectedValue(new Error("uncertain"));
+
+    await expect(
+      modalAllocations(h.api, () => 100)
+        .wrap(h.backend.backend)
+        .create({ ...request, tags: { omnyoMachineKey: request.name } }),
+    ).rejects.toThrow("uncertain");
+
+    const pendingKey = (
+      await h.api.storage.kv.list("allocations/pending/")
+    )[0]!;
+
+    const raw = JSON.stringify(await h.api.storage.kv.get(pendingKey));
+    const set = vi.spyOn(h.api.storage.kv, "set");
+    const remove = vi.spyOn(h.api.storage.kv, "delete");
+    create.mockClear();
+    await expect(
+      modalAllocations(h.api, () => 999)
+        .wrap(h.backend.backend)
+        .create(request),
+    ).rejects.toThrow("outcome is uncertain");
+    expect(create).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(JSON.stringify(await h.api.storage.kv.get(pendingKey))).toBe(raw);
+  });
+
+  it.each(["account", "extra-field", "bound-id"] as const)(
+    "retains a foreign or malformed original pending row (%s) before any write or resubmit",
+    async (kind) => {
+      const h = await setup();
+
+      const request = {
+        appName: "omnyo-sandboxes",
+        name: "pending-owner",
+        image: { type: "image" as const, imageId: "im-test" },
+        timeoutMs: 60_000,
+        cpu: null,
+        memoryMiB: null,
+        tags: { omnyoMachineKey: "pending-owner" },
+      };
+
+      const create = vi
+        .spyOn(h.backend.backend, "create")
+        .mockRejectedValueOnce(new Error("uncertain"));
+
+      await expect(
+        modalAllocations(h.api, () => 100)
+          .wrap(h.backend.backend)
+          .create({ ...request, tags: { omnyoMachineKey: request.name } }),
+      ).rejects.toThrow("uncertain");
+      const key = (await h.api.storage.kv.list("allocations/pending/"))[0]!;
+      const pending = await h.api.storage.kv.get<ModalAllocation>(key);
+
+      if (pending === undefined)
+        throw new Error("Expected original pending record");
+
+      if (kind === "account")
+        await h.api.storage.kv.set(key, {
+          ...pending,
+          accountIdentity: "foreign-account",
+        });
+      else if (kind === "extra-field")
+        await h.api.storage.kv.set(key, { ...pending, foreignVersion: 2 });
+      else
+        await h.api.storage.kv.set(key, {
+          ...pending,
+          sandboxId: "already-bound",
+        });
+      const raw = JSON.stringify(await h.api.storage.kv.get(key));
+      const set = vi.spyOn(h.api.storage.kv, "set");
+      const remove = vi.spyOn(h.api.storage.kv, "delete");
+      create.mockClear();
+      await expect(
+        modalAllocations(h.api, () => 999)
+          .wrap(h.backend.backend)
+          .create(request),
+      ).rejects.toThrow();
+      expect(create).not.toHaveBeenCalled();
+      expect(set).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+      expect(JSON.stringify(await h.api.storage.kv.get(key))).toBe(raw);
+    },
+  );
+
+  it.each(["foreign", "uncertain"] as const)(
+    "refuses a %s pending owner before backend image preparation",
+    async (kind) => {
+      const h = await setup();
+
+      const request = {
+        appName: "omnyo-sandboxes",
+        name: "pending-owner",
+        image: { type: "image" as const, imageId: "im-test" },
+        timeoutMs: 60_000,
+        cpu: null,
+        memoryMiB: null,
+        tags: { omnyoMachineKey: "pending-owner" },
+      };
+
+      const create = vi
+        .spyOn(h.backend.backend, "create")
+        .mockRejectedValueOnce(new Error("uncertain"));
+
+      await expect(
+        modalAllocations(h.api, () => 100)
+          .wrap(h.backend.backend)
+          .create(request),
+      ).rejects.toThrow("uncertain");
+      const key = (await h.api.storage.kv.list("allocations/pending/"))[0]!;
+      const pending = await h.api.storage.kv.get<ModalAllocation>(key);
+
+      if (pending === undefined)
+        throw new Error("Expected original pending record");
+
+      if (kind === "foreign")
+        await h.api.storage.kv.set(key, {
+          ...pending,
+          accountIdentity: "foreign-account",
+        });
+      const raw = JSON.stringify(await h.api.storage.kv.get(key));
+      const set = vi.spyOn(h.api.storage.kv, "set");
+      h.backend.image.mockClear();
+      create.mockClear();
+      await expect(
+        h.provider.create(createContext("pending-owner")),
+      ).resolves.toEqual({
+        status: "failed",
+        message: expect.stringContaining(
+          kind === "foreign" ? "Foreign" : "outcome is uncertain",
+        ),
+      });
+      expect(h.backend.image).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(set).not.toHaveBeenCalled();
+      expect(JSON.stringify(await h.api.storage.kv.get(key))).toBe(raw);
+    },
+  );
+});

@@ -1,5 +1,5 @@
-import { createNodeBbSdk } from "@bb/sdk/node";
-import { createNodeWebsocketFactory } from "@bb/sdk/node-websocket";
+import { createNodeOmnyoSdk } from "@omnyo/sdk/node";
+import { createNodeWebsocketFactory } from "@omnyo/sdk/node-websocket";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
@@ -8,11 +8,13 @@ import {
 } from "../helpers/test-app.js";
 
 const sockets = new Set<WebSocket>();
+
 let server: RunningTestServer | null = null;
 
 function websocketUrl(baseUrl: string, path: string): string {
   const url = new URL(path, baseUrl);
   url.protocol = "ws:";
+
   return url.href;
 }
 
@@ -43,10 +45,13 @@ function rejectedWebSocketStatus(
     socket.once("unexpected-response", (_request, response) => {
       const status = response.statusCode;
       response.resume();
+
       if (status === undefined) {
         reject(new Error("WebSocket rejection omitted an HTTP status"));
+
         return;
       }
+
       resolve(status);
     });
     socket.once("error", () => {});
@@ -56,8 +61,10 @@ function rejectedWebSocketStatus(
 async function closeSocket(socket: WebSocket): Promise<void> {
   if (socket.readyState === WebSocket.CLOSED) {
     sockets.delete(socket);
+
     return;
   }
+
   await new Promise<void>((resolve) => {
     socket.once("close", resolve);
     socket.close();
@@ -69,7 +76,9 @@ afterEach(async () => {
   for (const socket of sockets) {
     socket.terminate();
   }
+
   sockets.clear();
+
   if (server !== null) {
     await server.close();
     server = null;
@@ -80,6 +89,7 @@ describe("browser WebSocket origin boundary", () => {
   it("rejects hostile browser origins on realtime and terminal sockets", async () => {
     server = await startTestServer();
     const realtimeUrl = websocketUrl(server.baseUrl, "/ws");
+
     const terminalUrl = websocketUrl(
       server.baseUrl,
       "/ws/terminals/known-to-attacker",
@@ -96,6 +106,7 @@ describe("browser WebSocket origin boundary", () => {
   it("rejects rebinding upgrade hosts with and without Origin", async () => {
     server = await startTestServer();
     const host = `attacker.example:${new URL(server.baseUrl).port}`;
+
     for (const path of [
       "/ws",
       "/ws/terminals/missing-terminal",
@@ -116,6 +127,7 @@ describe("browser WebSocket origin boundary", () => {
   it("accepts direct IP and configured proxy WebSocket hosts", async () => {
     server = await startTestServer({ appUrl: "https://box.ts.net" });
     const port = new URL(server.baseUrl).port;
+
     for (const origin of [
       `http://192.168.1.5:${port}`,
       `http://[::1]:${port}`,
@@ -129,8 +141,10 @@ describe("browser WebSocket origin boundary", () => {
           "x-forwarded-proto": new URL(origin).protocol.slice(0, -1),
         },
       );
+
       await closeSocket(socket);
     }
+
     const proxied = await openWebSocket(
       websocketUrl(server.baseUrl, "/ws"),
       "https://box.ts.net",
@@ -140,15 +154,17 @@ describe("browser WebSocket origin boundary", () => {
         "x-forwarded-proto": "https",
       },
     );
+
     await closeSocket(proxied);
   });
 
   it("accepts trusted browser origins for both browser-facing sockets", async () => {
     server = await startTestServer({
-      appUrl: "https://bb.example.test",
+      appUrl: "https://omnyo.example.test",
       devAppPort: 5173,
     });
     const realtimeUrl = websocketUrl(server.baseUrl, "/ws");
+
     const terminalUrl = websocketUrl(
       server.baseUrl,
       "/ws/terminals/missing-terminal",
@@ -159,8 +175,9 @@ describe("browser WebSocket origin boundary", () => {
 
     const configuredApp = await openWebSocket(
       realtimeUrl,
-      "https://bb.example.test",
+      "https://omnyo.example.test",
     );
+
     await closeSocket(configuredApp);
 
     const devOrigin = new URL(server.baseUrl);
@@ -174,10 +191,12 @@ describe("browser WebSocket origin boundary", () => {
 
   it("keeps absent-Origin Node SDK realtime and CLI terminal sockets working", async () => {
     server = await startTestServer();
-    const sdk = createNodeBbSdk({ baseUrl: server.baseUrl });
+    const sdk = createNodeOmnyoSdk({ baseUrl: server.baseUrl });
 
     let stopTarget = (): void => {};
+
     let stopConnection = (): void => {};
+
     const connected = new Promise<void>((resolve) => {
       stopConnection = sdk.subscribe({
         event: "realtime:connection",
@@ -192,6 +211,7 @@ describe("browser WebSocket origin boundary", () => {
         callback: () => {},
       });
     });
+
     await connected;
     stopTarget();
     stopConnection();
@@ -199,6 +219,7 @@ describe("browser WebSocket origin boundary", () => {
     const terminalSocket = createNodeWebsocketFactory()(
       websocketUrl(server.baseUrl, "/ws/terminals/missing-terminal"),
     );
+
     await new Promise<void>((resolve, reject) => {
       terminalSocket.onopen = () => resolve();
       terminalSocket.onerror = () =>

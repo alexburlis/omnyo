@@ -6,6 +6,8 @@ import {
   type CodexDeviceAccount,
 } from "./codex-device-login.js";
 
+const NEW_ACCOUNT = { kind: "add", label: null, priority: 100 } as const;
+
 type Handler = (
   request: IncomingMessage,
   response: ServerResponse,
@@ -16,6 +18,7 @@ const servers: Array<() => Promise<void>> = [];
 afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+
   while (servers.length > 0) await servers.pop()?.();
 });
 
@@ -26,11 +29,14 @@ async function startAuth(handler: Handler): Promise<string> {
       response.end();
     });
   });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
+
   if (address === null || typeof address === "string") {
     throw new Error("Fake auth server did not bind.");
   }
+
   servers.push(
     () =>
       new Promise<void>((resolve, reject) => {
@@ -38,14 +44,17 @@ async function startAuth(handler: Handler): Promise<string> {
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   );
+
   return `http://127.0.0.1:${address.port}`;
 }
 
 async function body(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
+
   for await (const chunk of request) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
+
   return Buffer.concat(chunks).toString("utf8");
 }
 
@@ -94,6 +103,9 @@ function summary(account: CodexDeviceAccount): AccountSummary {
     observedAt: null,
     heldUntil: null,
     error: null,
+    incompatibleModels: [],
+    modelCatalog: null,
+    composerPredictionsDisabled: null,
     inFlight: 0,
     status: "ready",
   };
@@ -106,10 +118,12 @@ function createPollingHarness(args?: {
   const clock = { now: Date.parse("2026-09-04T12:00:00Z") };
   let tokenPolls = 0;
   const tokenResponses = args?.tokenResponses ?? [];
+
   const login = new CodexDeviceLogin({
     now: () => clock.now,
     fetch: async (input) => {
       const url = String(input);
+
       if (url.endsWith("/api/accounts/deviceauth/usercode")) {
         return Response.json({
           device_auth_id: "device-secret",
@@ -118,15 +132,20 @@ function createPollingHarness(args?: {
           expires_in: args?.expiresIn ?? 600,
         });
       }
+
       if (url.endsWith("/api/accounts/deviceauth/token")) {
         const response = tokenResponses[tokenPolls];
         tokenPolls += 1;
+
         return response ?? new Response(null, { status: 404 });
       }
+
       throw new Error(`Unexpected request to ${url}`);
     },
-    addAccount: async (account) => summary(account),
+    validateTarget: async () => {},
+    saveLogin: async (account) => summary(account),
   });
+
   return { clock, login, tokenPolls: () => tokenPolls };
 }
 
@@ -136,16 +155,19 @@ describe("Codex device login", () => {
     let polls = 0;
     const requests: Array<{ url: string; body: string }> = [];
     const accessToken = jwt({ exp: 2_000_000_000 });
+
     const idToken = jwt({
       email: "codex@example.com",
       "https://api.openai.com/auth": {
         chatgpt_account_id: "chatgpt-account-1",
       },
     });
+
     const authBaseUrl = await startAuth(async (request, response) => {
       const requestBody = await body(request);
       requests.push({ url: request.url ?? "", body: requestBody });
       response.setHeader("content-type", "application/json");
+
       if (request.url === "/api/accounts/deviceauth/usercode") {
         response.end(
           JSON.stringify({
@@ -155,10 +177,13 @@ describe("Codex device login", () => {
             expires_at: "2026-09-04T12:10:00Z",
           }),
         );
+
         return;
       }
+
       if (request.url === "/api/accounts/deviceauth/token") {
         polls += 1;
+
         if (polls === 1) {
           response.statusCode = 403;
           response.end(
@@ -166,8 +191,10 @@ describe("Codex device login", () => {
               error: { code: "deviceauth_authorization_pending" },
             }),
           );
+
           return;
         }
+
         response.end(
           JSON.stringify({
             authorization_code: "authorization-secret",
@@ -175,8 +202,10 @@ describe("Codex device login", () => {
             code_verifier: "verifier-secret",
           }),
         );
+
         return;
       }
+
       if (request.url === "/oauth/token") {
         response.end(
           JSON.stringify({
@@ -185,22 +214,28 @@ describe("Codex device login", () => {
             id_token: idToken,
           }),
         );
+
         return;
       }
+
       response.statusCode = 404;
       response.end("{}");
     });
+
     const added: CodexDeviceAccount[] = [];
+
     const login = new CodexDeviceLogin({
       authBaseUrl,
       now: () => now,
-      addAccount: async (account) => {
+      validateTarget: async () => {},
+      saveLogin: async (account) => {
         added.push(account);
+
         return summary(account);
       },
     });
 
-    const started = await login.start();
+    const started = await login.start(NEW_ACCOUNT);
     expect(started).toMatchObject({
       verificationUri: `${authBaseUrl}/codex/device`,
       userCode: "USER-SECRET",
@@ -263,7 +298,9 @@ describe("Codex device login", () => {
         ),
       ],
     });
-    const started = await login.start();
+
+    const started = await login.start(NEW_ACCOUNT);
+
     clock.now += 5_000;
 
     expect(await login.poll({ sessionId: started.sessionId })).toEqual({
@@ -288,7 +325,9 @@ describe("Codex device login", () => {
         Response.json({ error: { code: "deviceauth_slow_down" } }),
       ],
     });
-    const started = await login.start();
+
+    const started = await login.start(NEW_ACCOUNT);
+
     clock.now += 5_000;
 
     expect(await login.poll({ sessionId: started.sessionId })).toEqual({
@@ -302,7 +341,9 @@ describe("Codex device login", () => {
     const { clock, login, tokenPolls } = createPollingHarness({
       tokenResponses: [new Response(null, { status: 500 })],
     });
-    const started = await login.start();
+
+    const started = await login.start(NEW_ACCOUNT);
+
     clock.now += 5_000;
 
     expect(await login.poll({ sessionId: started.sessionId })).toEqual({
@@ -317,7 +358,7 @@ describe("Codex device login", () => {
 
   it("removes a cancelled session", async () => {
     const { login } = createPollingHarness();
-    const started = await login.start();
+    const started = await login.start(NEW_ACCOUNT);
 
     expect(login.cancel({ sessionId: started.sessionId })).toBe(true);
     expect(await login.poll({ sessionId: started.sessionId })).toEqual({
@@ -329,7 +370,7 @@ describe("Codex device login", () => {
   it("removes an expired session with its timer", async () => {
     vi.useFakeTimers();
     const { login } = createPollingHarness({ expiresIn: 1 });
-    const started = await login.start();
+    const started = await login.start(NEW_ACCOUNT);
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(await login.poll({ sessionId: started.sessionId })).toEqual({
@@ -341,7 +382,7 @@ describe("Codex device login", () => {
   it("clears session timers and state on dispose", async () => {
     vi.useFakeTimers();
     const { login } = createPollingHarness();
-    const started = await login.start();
+    const started = await login.start(NEW_ACCOUNT);
     expect(vi.getTimerCount()).toBe(1);
 
     login.dispose();
@@ -356,8 +397,10 @@ describe("Codex device login", () => {
   it("expires the session after ten minutes without polling auth", async () => {
     let now = Date.parse("2026-09-04T12:00:00Z");
     let tokenPolls = 0;
+
     const authBaseUrl = await startAuth((request, response) => {
       response.setHeader("content-type", "application/json");
+
       if (request.url === "/api/accounts/deviceauth/usercode") {
         response.end(
           JSON.stringify({
@@ -367,17 +410,23 @@ describe("Codex device login", () => {
             expires_at: "2026-09-04T12:15:00Z",
           }),
         );
+
         return;
       }
+
       tokenPolls += 1;
       response.end("{}");
     });
+
     const login = new CodexDeviceLogin({
       authBaseUrl,
       now: () => now,
-      addAccount: async (account) => summary(account),
+      validateTarget: async () => {},
+      saveLogin: async (account) => summary(account),
     });
-    const started = await login.start();
+
+    const started = await login.start(NEW_ACCOUNT);
+
     now += 10 * 60 * 1_000;
     expect(await login.poll({ sessionId: started.sessionId })).toEqual({
       status: "error",
@@ -390,13 +439,16 @@ describe("Codex device login", () => {
     let now = Date.parse("2026-09-04T12:00:00Z");
     const logged: string[] = [];
     const methods: Array<"log" | "warn" | "error"> = ["log", "warn", "error"];
+
     for (const method of methods) {
       vi.spyOn(console, method).mockImplementation((...values) => {
         logged.push(values.map(String).join(" "));
       });
     }
+
     const authBaseUrl = await startAuth((request, response) => {
       response.setHeader("content-type", "application/json");
+
       if (request.url === "/api/accounts/deviceauth/usercode") {
         response.end(
           JSON.stringify({
@@ -406,8 +458,10 @@ describe("Codex device login", () => {
             expires_in: 600,
           }),
         );
+
         return;
       }
+
       if (request.url === "/api/accounts/deviceauth/token") {
         response.end(
           JSON.stringify({
@@ -416,17 +470,23 @@ describe("Codex device login", () => {
             code_verifier: "verifier-secret",
           }),
         );
+
         return;
       }
+
       response.statusCode = 400;
       response.end("refresh-secret rejected");
     });
+
     const login = new CodexDeviceLogin({
       authBaseUrl,
       now: () => now,
-      addAccount: async (account) => summary(account),
+      validateTarget: async () => {},
+      saveLogin: async (account) => summary(account),
     });
-    const started = await login.start();
+
+    const started = await login.start(NEW_ACCOUNT);
+
     now += 5_000;
     const result = await login.poll({ sessionId: started.sessionId });
     expect(result).toEqual({

@@ -1,4 +1,4 @@
-import { pendingInteractionPayloadSchema } from "@bb/domain";
+import { pendingInteractionPayloadSchema } from "@omnyo/domain";
 import { z } from "zod";
 
 export const BRIDGE_INBOUND_REQUEST_METHODS = {
@@ -14,7 +14,6 @@ export const toolCallRequestParamsSchema = z
     callId: z.string().min(1),
     tool: z.string().min(1),
     arguments: z.unknown(),
-    providerNativeIds: z.boolean().optional(),
   })
   .passthrough();
 
@@ -39,6 +38,5 @@ export const interactionRequestParamsSchema = z
     threadId: z.string().min(1).optional(),
     turnId: z.union([z.string().min(1), z.null()]),
     payload: pendingInteractionPayloadSchema,
-    providerNativeIds: z.boolean().optional(),
   })
   .passthrough();

@@ -9,7 +9,7 @@ import {
   type AppCommandContextKey,
   type AppCommandId,
   type AppDefaultKeybinding,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   AppCommandProvider,
   useAppCommandContext,
@@ -72,19 +72,24 @@ vi.mock("@/hooks/queries/system-queries", () => ({
   }),
 }));
 
-vi.mock("@/lib/bb-desktop", () => ({
-  getBbDesktopInfo: () => (testState.isDesktop ? {
-    setSplitNavigationEnabled: testState.setSplitNavigationEnabled,
-  } : null),
+vi.mock("@/lib/omnyo-desktop", () => ({
+  getOmnyoDesktopInfo: () =>
+    testState.isDesktop
+      ? {
+          setSplitNavigationEnabled: testState.setSplitNavigationEnabled,
+        }
+      : null,
 }));
 
 function Handler({ command }: { command: AppCommandId }) {
   useAppCommandHandler(command, () => true);
+
   return null;
 }
 
 function SplitContext() {
   useAppCommandContext("splitActive", true);
+
   return null;
 }
 
@@ -97,6 +102,7 @@ function Availability({
 }) {
   const runner = useAppCommandRunner();
   const [answer, setAnswer] = useState("unasked");
+
   return (
     <button
       type="button"
@@ -121,6 +127,7 @@ function renderProvider(children: ReactNode) {
 function availabilityOf(command: AppCommandId): string | null {
   const probe = screen.getByTestId(`available-${command}`);
   fireEvent.click(probe);
+
   return probe.textContent;
 }
 
@@ -216,13 +223,20 @@ describe("isCommandAvailable", () => {
 
 it("keeps native split availability until the last registered split unmounts", () => {
   testState.isDesktop = true;
+
   const { rerender, unmount } = renderProvider(
-    <><SplitContext key="first" /><SplitContext key="second" /></>,
+    <>
+      <SplitContext key="first" />
+      <SplitContext key="second" />
+    </>,
   );
+
   expect(testState.setSplitNavigationEnabled).toHaveBeenLastCalledWith(true);
   rerender(
     <MemoryRouter>
-      <AppCommandProvider><SplitContext key="first" /></AppCommandProvider>
+      <AppCommandProvider>
+        <SplitContext key="first" />
+      </AppCommandProvider>
     </MemoryRouter>,
   );
   expect(testState.setSplitNavigationEnabled).toHaveBeenLastCalledWith(true);

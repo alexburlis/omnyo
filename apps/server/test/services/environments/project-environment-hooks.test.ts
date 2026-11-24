@@ -1,4 +1,4 @@
-import { projects, updateHost } from "@bb/db";
+import { projects, updateHost } from "@omnyo/db";
 import { expect, it } from "vitest";
 import { runEnvironmentHook } from "../../../src/services/environments/environment-hooks.js";
 import { setMachineEnvironmentVariable } from "../../../src/services/machines/environment-storage.js";
@@ -18,7 +18,7 @@ it("resolves project overrides for teardown, including recovery dispatch", async
       .run();
     await setMachineEnvironmentVariable(
       harness.db,
-      harness.config.dataDir,
+      harness.deps.vault,
       { name: "REGION", value: "hook-region", note: null },
       "hook-project",
     );
@@ -30,9 +30,11 @@ it("resolves project overrides for teardown, including recovery dispatch", async
         if (request.command.type !== "environment.hook.run")
           throw new Error("Unexpected command");
         captured.push(request.command);
+
         return { ok: true, result: {} };
       },
     });
+
     for (const resumeOnly of [false, true]) {
       await runEnvironmentHook(harness.deps, {
         id: `hook-${resumeOnly}`,
@@ -45,7 +47,9 @@ it("resolves project overrides for teardown, including recovery dispatch", async
         signal: new AbortController().signal,
       });
     }
+
     expect(captured).toHaveLength(2);
+
     for (const command of captured)
       expect(command).toMatchObject({
         contributedEnv: expect.arrayContaining([

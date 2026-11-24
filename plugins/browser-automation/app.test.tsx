@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import type { PreviewFrame, Session } from "./contracts.js";
 import { closeLightbox } from "./lightbox-store.js";
 
 const app = await loadPluginApp(() => import("./app"));
+
 const directive = app.messageDirectives[0]!;
+
 const overlay = app.appOverlays[0]!;
 
 afterEach(() => {
@@ -23,12 +25,14 @@ const session: Session = {
   createdAt: 1,
   expiresAt: 4_000_000_000_000,
 };
+
 const frame = (
   sequence: number,
   title = "Cart",
   url = "https://shop.test/cart?step=2",
 ): PreviewFrame => ({
   sequence,
+  targetId: "preview-target",
   mimeType: "image/jpeg",
   data: `bytes${sequence}`,
   width: 1280,
@@ -36,13 +40,16 @@ const frame = (
   url,
   title,
 });
+
 const hang = () => new Promise<never>(() => {});
+
 const props = (sessionId: string = session.id) => ({
   attributes: { session: sessionId },
   source: `::browser-preview{session="${sessionId}"}`,
   message: { id: "msg_1", threadId: "thr_1", turnId: "turn_1", projectId: "p" },
   openWorkspaceFile: null,
 });
+
 const previewInputs = (slot: {
   rpcCalls: { method: string; input: unknown }[];
 }) =>
@@ -75,22 +82,29 @@ describe("inline browser preview", () => {
   it("streams frames by resuming from the last sequence", async () => {
     let polls = 0;
     let deliverFirst!: () => void;
+
     const firstRequested = new Promise<void>((resolve) => {
       deliverFirst = resolve;
     });
+
     const slot = renderSlot(directive, props(), {
       rpc: {
         preview: async () => {
           polls += 1;
+
           if (polls === 1) {
             await firstRequested;
+
             return { session, frame: frame(4) };
           }
+
           if (polls === 2) return { session, frame: frame(5, "Checkout") };
+
           return hang();
         },
       },
     });
+
     expect(await slot.findByRole("status")).toBeTruthy();
     expect(slot.getByText("Connecting")).toBeTruthy();
     deliverFirst();
@@ -98,11 +112,13 @@ describe("inline browser preview", () => {
     expect(first.getAttribute("src")).toBe("data:image/jpeg;base64,bytes4");
     expect(slot.getByText("shop.test/cart")).toBeTruthy();
     expect(slot.getByText("Live")).toBeTruthy();
+
     const second = await slot.findByAltText(
       "Live view of Checkout",
       {},
       { timeout: 3_000 },
     );
+
     expect(second.getAttribute("src")).toBe("data:image/jpeg;base64,bytes5");
     await waitFor(() =>
       expect(previewInputs(slot)).toEqual(
@@ -125,6 +141,7 @@ describe("inline browser preview", () => {
         }),
       },
     });
+
     await slot.findByAltText("Live view of Headless browser");
     expect(slot.getByText("data:")).toBeTruthy();
     expect(slot.queryByText(/very-long-inline-page/)).toBeNull();
@@ -139,20 +156,24 @@ describe("inline browser preview", () => {
         }),
       },
     });
+
     await slot.findByAltText("Live view of Headless browser");
     expect(slot.getAllByText("about:blank")).toHaveLength(1);
   });
 
   it("stops polling while collapsed", async () => {
     let polls = 0;
+
     const slot = renderSlot(directive, props(), {
       rpc: {
         preview: () => {
           polls += 1;
+
           return { session, frame: frame(polls) };
         },
       },
     });
+
     await slot.findByAltText("Live view of Cart");
     fireEvent.click(slot.getByRole("button", { name: /^Browser preview:/ }));
     expect(slot.queryByRole("img")).toBeNull();
@@ -177,16 +198,20 @@ describe("inline browser preview", () => {
         disconnect() {}
       },
     );
+
     try {
       let polls = 0;
+
       const slot = renderSlot(directive, props(), {
         rpc: {
           preview: () => {
             polls += 1;
+
             return { session, frame: frame(polls) };
           },
         },
       });
+
       await slot.findByAltText("Live view of Cart");
       expect(observers).toHaveLength(1);
       act(() => observers[0]!([{ isIntersecting: false }]));
@@ -203,21 +228,25 @@ describe("inline browser preview", () => {
 
   it("keeps the last view when the session ends and stops asking", async () => {
     let polls = 0;
+
     const slot = renderSlot(directive, props(), {
       rpc: {
         preview: () => {
           polls += 1;
+
           return polls === 1
             ? { session, frame: frame(1) }
             : { session: { ...session, state: "closed" }, frame: null };
         },
       },
     });
+
     const last = await slot.findByAltText(
       "Last view of Cart",
       {},
       { timeout: 3_000 },
     );
+
     expect(last.getAttribute("src")).toBe("data:image/jpeg;base64,bytes1");
     expect(slot.getByText("Ended")).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 600));
@@ -236,6 +265,7 @@ describe("inline browser preview", () => {
         }),
       },
     });
+
     await slot.findByText("Ended");
     expect(slot.queryByRole("img")).toBeNull();
     expect(slot.queryByRole("status")).toBeNull();
@@ -253,6 +283,7 @@ describe("inline browser preview", () => {
         }),
       },
     });
+
     await slot.findByText("Unavailable");
     expect(slot.queryByRole("img")).toBeNull();
     expect(previewInputs(slot)).toHaveLength(1);
@@ -260,6 +291,7 @@ describe("inline browser preview", () => {
 
   it("gives up on a session it can never read, such as one copied into a fork", async () => {
     vi.useFakeTimers();
+
     try {
       const slot = renderSlot(directive, props(), {
         rpc: {
@@ -268,6 +300,7 @@ describe("inline browser preview", () => {
           },
         },
       });
+
       for (let attempt = 0; attempt < 8; attempt++)
         await act(() => vi.advanceTimersByTimeAsync(16_000));
       expect(slot.getByText("Unavailable")).toBeTruthy();
@@ -289,14 +322,17 @@ describe("expanded browser preview", () => {
   it("opens instantly from the card's frame, streams full size, and hands back on close", async () => {
     let cardPolls = 0;
     let overlayPolls = 0;
+
     const card = renderSlot(directive, props(), {
       rpc: {
         preview: () => {
           cardPolls += 1;
+
           return { session, frame: frame(cardPolls, "Thumbnail") };
         },
       },
     });
+
     const lightbox = renderSlot(
       overlay,
       {},
@@ -304,11 +340,13 @@ describe("expanded browser preview", () => {
         rpc: {
           preview: () => {
             overlayPolls += 1;
+
             return { session, frame: frame(100 + overlayPolls, "Full size") };
           },
         },
       },
     );
+
     await card.findByAltText("Live view of Thumbnail");
     expect(lightbox.queryByRole("dialog")).toBeNull();
     expect(overlayPolls).toBe(0);
@@ -340,9 +378,11 @@ describe("expanded browser preview", () => {
 
   it("stays open and live when the inline card is paginated out of the timeline", async () => {
     let overlayPolls = 0;
+
     const card = renderSlot(directive, props(), {
       rpc: { preview: () => ({ session, frame: frame(1) }) },
     });
+
     const lightbox = renderSlot(
       overlay,
       {},
@@ -350,11 +390,13 @@ describe("expanded browser preview", () => {
         rpc: {
           preview: () => {
             overlayPolls += 1;
+
             return { session, frame: frame(100 + overlayPolls) };
           },
         },
       },
     );
+
     await card.findByAltText("Live view of Cart");
     fireEvent.click(
       card.getByRole("button", { name: "Expand browser preview" }),
@@ -372,6 +414,7 @@ describe("expanded browser preview", () => {
     const card = renderSlot(directive, props(), {
       rpc: { preview: () => ({ session, frame: frame(1) }) },
     });
+
     const lightbox = renderSlot(
       overlay,
       {},
@@ -384,6 +427,7 @@ describe("expanded browser preview", () => {
         },
       },
     );
+
     await card.findByAltText("Live view of Cart");
     fireEvent.click(
       card.getByRole("button", { name: "Expand browser preview" }),

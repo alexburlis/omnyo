@@ -7,9 +7,10 @@ import {
 } from "react";
 import type {
   AutomationReadProblem,
-  AutomationResponse,
+  AutomationOverview,
   AutomationsOverviewResponse,
 } from "./src/rpc-types.js";
+import { experimental_useAppNavigate, UrlLink } from "@omnyo/plugin-sdk/app";
 import { CREATE_AUTOMATION_PROMPT } from "./composer";
 import {
   AutomationLifecycleControl,
@@ -24,6 +25,7 @@ import {
 } from "@/components/ui/resource-pagination";
 import { COARSE_POINTER_ICON_SIZE_SHRINK_CLASS } from "@/components/ui/coarse-pointer-sizing";
 import {
+  ResourceBrowseCard,
   ResourceBrowseGrid,
   ResourceCollectionPage,
   ResourceCollectionViewport,
@@ -50,8 +52,9 @@ import {
   oneShotLifecycleAllowsToggle,
   PERSONAL_PROJECT_ID,
 } from "./lib/format-schedule.js";
-import { AutomationMetadataItem } from "./metadata.js";
+import { AutomationMetadataItem, automationErrorMessage } from "./metadata.js";
 import { AutomationActionsMenu } from "./actions-menu.js";
+import { WorkflowCopies, WorkflowGraphs } from "./workflow-panel";
 
 const AUTOMATION_STATUS_FILTER_OPTIONS = [
   { id: "active", label: "Active" },
@@ -89,13 +92,95 @@ export const AUTOMATION_CREATE_TEMPLATES = [
   },
 ] as const;
 
+const WORKFLOW_DISCOVERY = [
+  {
+    id: "weekly-content-feed",
+    label: "Weekly Content Feed",
+    icon: "News01",
+    description:
+      "Seven independently reviewed Markdown drafts and a seven-day delivery calendar from your startup’s supplied facts, written with your connected Codex or Claude Code CLI.",
+    byline: "Built-in template · Review before saving",
+    subPath: "import",
+  },
+  {
+    id: "import",
+    label: "Import a workflow",
+    icon: "PackageReceive",
+    description:
+      "Review an .omnyoworkflow file or pasted JSON before installing it.",
+    byline: "File or paste",
+    subPath: "import",
+  },
+] as const;
+
+function WorkflowDiscovery() {
+  const navigate = experimental_useAppNavigate();
+
+  return (
+    <section
+      aria-labelledby="automations-workflow-discovery"
+      className="space-y-2"
+    >
+      <h2
+        id="automations-workflow-discovery"
+        className="px-1 text-xs font-medium text-muted-foreground"
+      >
+        Workflow packages
+      </h2>
+      <ResourceBrowseGrid>
+        {WORKFLOW_DISCOVERY.map((item) => (
+          <ResourceBrowseCard
+            key={item.id}
+            leading={
+              <Icon
+                name={item.icon}
+                className="size-4 text-muted-foreground"
+                aria-hidden
+              />
+            }
+            title={item.label}
+            description={item.description}
+            byline={item.byline}
+            openLabel={`Open ${item.label}`}
+            onOpen={() =>
+              navigate.toPluginPanel("automations", { subPath: item.subPath })
+            }
+            headerAction={
+              <Icon
+                name="ChevronRight"
+                className="size-3.5 text-subtle-foreground"
+                aria-hidden
+              />
+            }
+          />
+        ))}
+      </ResourceBrowseGrid>
+      <Button variant="outline" size="sm" asChild>
+        <UrlLink href="https://omnyohq.com/explore?type=workflow">
+          Browse Marketplace
+          <Icon name="ExternalLink" aria-hidden />
+        </UrlLink>
+      </Button>
+    </section>
+  );
+}
+
 type OverviewEntry = AutomationsOverviewResponse["automations"][number];
+
 type AutomationProjectFilter = `project:${string}`;
+
 type AutomationSortMode = "project" | "alpha";
+
 type AutomationSortDirection = "asc" | "desc";
-export type AutomationCollectionMode = "installed" | "browse";
+
+export type AutomationCollectionMode =
+  | "installed"
+  | "graphs"
+  | "copies"
+  | "browse";
+
 type ReadableOverviewAutomation =
-  | AutomationResponse
+  | AutomationOverview
   | Extract<AutomationReadProblem, { problem: "missing-agent-prompt" }>;
 
 interface AutomationDetailRoute {
@@ -108,7 +193,7 @@ interface AutomationDetailNavigationOptions {
 }
 
 function routeOf(
-  automation: Pick<AutomationResponse, "id" | "projectId">,
+  automation: Pick<AutomationOverview, "id" | "projectId">,
 ): AutomationDetailRoute {
   return { projectId: automation.projectId, automationId: automation.id };
 }
@@ -116,9 +201,9 @@ function routeOf(
 function AutomationRowLeading({
   automation,
 }: {
-  automation: AutomationResponse;
+  automation: AutomationOverview;
 }) {
-  if (automation.lastRunStatus === "failed") {
+  if (automationErrorMessage(automation) !== null) {
     return (
       <Icon
         name="CircleX"
@@ -130,6 +215,7 @@ function AutomationRowLeading({
       />
     );
   }
+
   if (automation.lastRunStatus === "running") {
     return (
       <Icon
@@ -142,9 +228,14 @@ function AutomationRowLeading({
       />
     );
   }
+
   return (
     <Icon
-      name={automationIconName(automation)}
+      name={
+        automation.execution.mode === "workflow"
+          ? "Workflow"
+          : automationIconName(automation)
+      }
       className={cn(
         "text-muted-foreground",
         COARSE_POINTER_ICON_SIZE_SHRINK_CLASS,
@@ -164,6 +255,7 @@ function automationProjectFilterId(
   entry: OverviewEntry,
 ): AutomationProjectFilter {
   const projectId = entry.project.id;
+
   return `project:${projectId}`;
 }
 
@@ -186,16 +278,21 @@ function applyAutomationSortDirection(
   return direction === "asc" ? result : -result;
 }
 
-function automationLifecycleSortRank(automation: AutomationResponse): number {
+function automationLifecycleSortRank(automation: AutomationOverview): number {
   const oneShotLifecycle = getOneShotLifecycle({
     enabled: automation.enabled,
     trigger: automation.trigger,
     runCount: automation.runCount,
     lastRunStatus: automation.lastRunStatus,
   });
-  if (oneShotLifecycle === "completed") return 3;
+
+  if (oneShotLifecycle === "completed" || oneShotLifecycle === "recovered")
+    return 3;
+
   if (!automation.enabled && oneShotLifecycle !== "running") return 2;
+
   if (oneShotLifecycle === "scheduled") return 1;
+
   return 0;
 }
 
@@ -208,6 +305,7 @@ function AutomationRowMetadata({
 }) {
   const projectLabel = automationProjectLabel(project);
   const personalProject = project.id === PERSONAL_PROJECT_ID;
+
   const scheduleMetadata =
     automation === null
       ? null
@@ -218,6 +316,10 @@ function AutomationRowMetadata({
           runCount: automation.runCount,
           lastRunStatus: automation.lastRunStatus,
         });
+
+  const errorMessage =
+    automation === null ? null : automationErrorMessage(automation);
+
   return (
     <ResourceMeta
       items={[
@@ -228,6 +330,13 @@ function AutomationRowMetadata({
         >
           {projectLabel}
         </AutomationMetadataItem>,
+        automation !== null &&
+        "execution" in automation &&
+        automation.execution.mode === "workflow" ? (
+          <AutomationMetadataItem icon="Workflow" iconLabel="Type">
+            Workflow
+          </AutomationMetadataItem>
+        ) : null,
         automation !== null ? (
           <AutomationMetadataItem icon="DateTime" iconLabel="Schedule">
             {formatAutomationTrigger(automation.trigger)}
@@ -240,6 +349,15 @@ function AutomationRowMetadata({
           >
             {scheduleMetadata.text}
           </AutomationMetadataItem>
+        ) : null,
+        errorMessage !== null ? (
+          <span
+            data-automation-error=""
+            className="text-destructive-text"
+            title={errorMessage}
+          >
+            {errorMessage}
+          </span>
         ) : null,
         automation === null ? "The stored configuration cannot be read." : null,
       ]}
@@ -255,7 +373,7 @@ export function OverviewRow({
   onRunNow,
   onDelete,
 }: {
-  automation: AutomationResponse;
+  automation: AutomationOverview;
   project: OverviewEntry["project"];
   onNavigate: (route: AutomationDetailRoute) => void;
   onEnabledChange: (
@@ -268,12 +386,14 @@ export function OverviewRow({
   const [togglePending, setTogglePending] = useState(false);
   const [runPending, setRunPending] = useState(false);
   const route = routeOf(automation);
+
   const oneShotLifecycle = getOneShotLifecycle({
     enabled: automation.enabled,
     trigger: automation.trigger,
     runCount: automation.runCount,
     lastRunStatus: automation.lastRunStatus,
   });
+
   const lifecycleLocked = !oneShotLifecycleAllowsToggle(oneShotLifecycle);
 
   return (
@@ -338,8 +458,10 @@ function AutomationProblemRow({
 }) {
   const repairTarget =
     automation.problem === "missing-agent-prompt" ? automation : null;
+
   const problemLabel = automationProblemLabel(automation);
   const route = routeOf(automation);
+
   return (
     <ResourceRow
       leading={
@@ -423,6 +545,7 @@ function matchesAutomationReadStatusFilters(
   if ("problem" in automation && automation.problem === "invalid-stored-data") {
     return statusFilters.length === 0;
   }
+
   return matchesAutomationStatusFilters(automation, statusFilters);
 }
 
@@ -431,12 +554,19 @@ function automationSearchValues(
   projectName: string,
 ): string[] {
   const values = [automation.name, projectName];
+
   if ("problem" in automation) {
     values.push(automationProblemSearchText(automation));
+
     if (automation.problem === "invalid-stored-data") return values;
   }
+
   values.push(formatScheduleStatusLabel(automation));
   values.push(formatAutomationTrigger(automation.trigger));
+
+  if ("execution" in automation && automation.execution.mode === "workflow")
+    values.push("Workflow");
+
   return values;
 }
 
@@ -451,6 +581,7 @@ export function AutomationOverviewView({
   onCreateViaChat,
   activeMode,
   onModeChange,
+  libraryProjectId,
 }: {
   entries: OverviewEntry[] | null;
   error: string | null;
@@ -468,38 +599,51 @@ export function AutomationOverviewView({
   onCreateViaChat: (prompt?: string) => void;
   activeMode: AutomationCollectionMode;
   onModeChange: (mode: AutomationCollectionMode) => void;
+  libraryProjectId?: string;
 }) {
   const [query, setQuery] = useState("");
+
   const [projectFilters, setProjectFilters] = useState<
     AutomationProjectFilter[]
   >([]);
+
   const [statusFilters, setStatusFilters] = useState<AutomationStatusFilter[]>(
     [],
   );
+
   const [sortMode, setSortMode] = useState<AutomationSortMode>("alpha");
+
   const [sortDirection, setSortDirection] =
     useState<AutomationSortDirection>("asc");
 
   const normalizedQuery = query.trim().toLowerCase();
+
   const projectCounts = useMemo(() => {
     const counts = new Map<AutomationProjectFilter, number>();
+
     for (const entry of entries ?? []) {
       const project = automationProjectFilterId(entry);
       counts.set(project, (counts.get(project) ?? 0) + 1);
     }
+
     return counts;
   }, [entries]);
+
   const projectBucketCount = projectCounts.size;
+
   const projectOptions = useMemo(() => {
     const options = new Map<AutomationProjectFilter, string>();
+
     for (const entry of entries ?? []) {
       options.set(
         automationProjectFilterId(entry),
         automationProjectLabel(entry.project),
       );
     }
+
     return [...options].map(([id, label]) => ({ id, label }));
   }, [entries]);
+
   useEffect(() => {
     setProjectFilters((current) =>
       current.filter((project) => projectCounts.has(project)),
@@ -511,19 +655,24 @@ export function AutomationOverviewView({
       setSortDirection("asc");
     }
   }, [projectBucketCount, sortMode]);
+
   const filteredEntries = useMemo(() => {
     if (entries === null) return [];
+
     return entries.filter((entry) => {
       const { automation, project } = entry;
+
       if (
         projectFilters.length > 0 &&
         !projectFilters.includes(automationProjectFilterId(entry))
       ) {
         return false;
       }
+
       if (!matchesAutomationReadStatusFilters(automation, statusFilters)) {
         return false;
       }
+
       return (
         normalizedQuery.length === 0 ||
         automationSearchValues(automation, project.name).some((value) =>
@@ -532,6 +681,7 @@ export function AutomationOverviewView({
       );
     });
   }, [entries, normalizedQuery, projectFilters, statusFilters]);
+
   const visibleEntries = useMemo(() => {
     return [...filteredEntries].sort((left, right) => {
       if ("problem" in left.automation && "problem" in right.automation) {
@@ -540,24 +690,33 @@ export function AutomationOverviewView({
           sortDirection,
         );
       }
+
       if ("problem" in left.automation) return -1;
+
       if ("problem" in right.automation) return 1;
+
       const lifecycleOrder =
         automationLifecycleSortRank(left.automation) -
         automationLifecycleSortRank(right.automation);
+
       if (lifecycleOrder !== 0) return lifecycleOrder;
+
       const base =
         sortMode === "project"
           ? automationProjectLabel(left.project).localeCompare(
               automationProjectLabel(right.project),
             ) || left.automation.name.localeCompare(right.automation.name)
           : left.automation.name.localeCompare(right.automation.name);
+
       return applyAutomationSortDirection(base, sortDirection);
     });
   }, [filteredEntries, sortDirection, sortMode]);
+
   const [installedViewport, setInstalledViewport] =
     useState<HTMLDivElement | null>(null);
+
   const installedPageSize = useResourceViewportPageSize(installedViewport);
+
   const installedPagination = useResourcePagination(visibleEntries, {
     pageSize: installedPageSize,
     resetKey: [
@@ -568,18 +727,24 @@ export function AutomationOverviewView({
       sortDirection,
     ].join("\u0000"),
   });
+
   const hasInstalledPagination =
     error === null &&
     entries !== null &&
     installedPagination.total > installedPagination.pageSize;
+
   const handleSortChange = useCallback(
     (nextSort: string) => {
       if (nextSort !== "project" && nextSort !== "alpha") return;
+
       if (nextSort === "project" && projectBucketCount <= 1) return;
+
       if (nextSort === sortMode) {
         setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+
         return;
       }
+
       setSortMode(nextSort);
       setSortDirection("asc");
     },
@@ -587,6 +752,7 @@ export function AutomationOverviewView({
   );
 
   let body: ReactNode;
+
   if (error !== null) {
     body = (
       <ResourceListState
@@ -623,6 +789,7 @@ export function AutomationOverviewView({
       <ResourceListPanel>
         {installedPagination.items.map((entry) => {
           const { automation, project } = entry;
+
           return "problem" in automation ? (
             <AutomationProblemRow
               key={automation.id}
@@ -650,37 +817,62 @@ export function AutomationOverviewView({
   return (
     <ResourceCollectionPage
       id="automations-collection"
-      description="Manage scheduled bb work across projects and folders. Automations run recurring or one-time tasks without manual prompting."
+      bandClassName="[&_[role=tablist]]:flex-wrap"
+      description="Manage scheduled automations, state machines and installed workflows."
       modes={[
         {
           id: "installed",
-          label: "Installed",
+          label: "Automations",
           count: entries?.length ?? undefined,
         },
+        { id: "graphs", label: "State machines" },
+        { id: "copies", label: "Installed workflows" },
         { id: "browse", label: "Browse" },
       ]}
       activeMode={activeMode}
       onModeChange={onModeChange}
       actions={
-        <ResourceCreateButton
-          label="New automation"
-          templates={AUTOMATION_CREATE_TEMPLATES}
-          onCreate={onCreateViaChat}
-        />
+        activeMode === "installed" && (
+          <ResourceCreateButton
+            label="New automation"
+            templates={AUTOMATION_CREATE_TEMPLATES}
+            onCreate={onCreateViaChat}
+          />
+        )
       }
     >
-      {activeMode === "browse" ? (
-        <ResourceCollectionViewport contentClassName="space-y-3">
-          <ResourceBrowseGrid>
-            {AUTOMATION_CREATE_TEMPLATES.map((template) => (
-              <ResourceTemplateBrowseCard
-                key={template.label}
-                title={template.label}
-                description={template.description}
-                onUse={() => onCreateViaChat(template.prompt)}
-              />
-            ))}
-          </ResourceBrowseGrid>
+      {activeMode === "graphs" ? (
+        <ResourceCollectionViewport>
+          <WorkflowGraphs />
+        </ResourceCollectionViewport>
+      ) : activeMode === "copies" ? (
+        <ResourceCollectionViewport>
+          <WorkflowCopies key={libraryProjectId} projectId={libraryProjectId} />
+        </ResourceCollectionViewport>
+      ) : activeMode === "browse" ? (
+        <ResourceCollectionViewport contentClassName="space-y-6">
+          <WorkflowDiscovery />
+          <section
+            aria-labelledby="automations-template-discovery"
+            className="space-y-2"
+          >
+            <h2
+              id="automations-template-discovery"
+              className="px-1 text-xs font-medium text-muted-foreground"
+            >
+              Automation templates
+            </h2>
+            <ResourceBrowseGrid>
+              {AUTOMATION_CREATE_TEMPLATES.map((template) => (
+                <ResourceTemplateBrowseCard
+                  key={template.label}
+                  title={template.label}
+                  description={template.description}
+                  onUse={() => onCreateViaChat(template.prompt)}
+                />
+              ))}
+            </ResourceBrowseGrid>
+          </section>
         </ResourceCollectionViewport>
       ) : (
         <ResourceCollectionViewport

@@ -3,7 +3,7 @@ import type {
   JsonValue,
   ThreadEvent,
   ThreadTimelineModelFallback,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { ThreadEventWithMeta } from "./group-event-projection-turns.js";
 
 interface ProviderModelFallbackData {
@@ -34,6 +34,7 @@ export function getProviderModelFallbackData(
       message: event.message,
     };
   }
+
   if (
     event.type !== "provider/unhandled" ||
     event.rawEvent.method !== "sdk/message"
@@ -43,15 +44,20 @@ export function getProviderModelFallbackData(
 
   const params = jsonObject(event.rawEvent.params);
   const rawMessage = jsonObject(params?.message);
+
   if (rawMessage === null) {
     return null;
   }
+
   const subtype = nonEmptyString(rawMessage.subtype);
+
   if (subtype !== "model_fallback" && subtype !== "model_refusal_fallback") {
     return null;
   }
+
   const originalModel = nonEmptyString(rawMessage.original_model);
   const fallbackModel = nonEmptyString(rawMessage.fallback_model);
+
   if (originalModel === null || fallbackModel === null) {
     return null;
   }
@@ -76,15 +82,19 @@ export function extractThreadTimelineModelFallback(
     if (meta.seq < latestRelevantSeq) {
       continue;
     }
+
     if (event.type === "client/turn/requested") {
       latestRelevantSeq = meta.seq;
       fallback = null;
       continue;
     }
+
     const eventFallback = getProviderModelFallbackData(event);
+
     if (eventFallback === null) {
       continue;
     }
+
     latestRelevantSeq = meta.seq;
     fallback = {
       sourceSeq: meta.seq,

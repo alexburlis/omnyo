@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import type { WorkspaceFile } from "@bb/server-contract";
+import type { WorkspaceFile } from "@omnyo/server-contract";
 import { DetailCard } from "@/components/ui/detail-card.js";
 import { ThreadStorageSection } from "./info/ThreadStorageSection";
 import { useThreadStorageBrowser } from "./useThreadStorageBrowser";
@@ -21,6 +21,7 @@ function PanelStage({ children }: { children: ReactNode }) {
 
 function makeFile(path: string): WorkspaceFile {
   const segments = path.split("/");
+
   return { path, name: segments[segments.length - 1] ?? path };
 }
 
@@ -42,12 +43,14 @@ function InteractiveRow({
   filesError?: Error | null;
 }) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
   const controller = useThreadStorageBrowser({
     files,
     onSelectPath: setSelectedPath,
     selectedPath,
     threadId: "thr_story",
   });
+
   return (
     <ThreadStorageSection
       controller={controller}
@@ -72,7 +75,10 @@ export function Overview() {
           <InteractiveRow filesError={new Error("Failed to load file list.")} />
         </PanelStage>
       </StoryRow>
-      <StoryRow label="empty" hint="Thread has no storage files yet">
+      <StoryRow
+        label="empty"
+        hint="Thread has no storage files yet, so the section hides itself and the panel stays blank"
+      >
         <PanelStage>
           <InteractiveRow files={[]} />
         </PanelStage>

@@ -13,6 +13,7 @@ const ran = vi.fn();
 
 function memoryLikeCli(): PluginCliRegistration {
   ran.mockClear();
+
   return defineCli({
     name: "memory",
     summary: "Read and maintain durable memories",
@@ -38,6 +39,7 @@ function memoryLikeCli(): PluginCliRegistration {
         },
         run(input) {
           ran(input.options);
+
           return {
             exitCode: 0,
             stdout: `${input.options.scope}:${input.options.limit}`,
@@ -57,6 +59,7 @@ function memoryLikeCli(): PluginCliRegistration {
         options: { json: { type: "boolean", description: "Emit JSON" } },
         run(input) {
           ran(input.positionals);
+
           return { exitCode: 0, stdout: input.positionals.query.join(" ") };
         },
       }),
@@ -111,6 +114,7 @@ function memoryLikeCli(): PluginCliRegistration {
         },
         run(input) {
           ran(input.options);
+
           return { exitCode: 0, stdout: "saved" };
         },
       }),
@@ -121,14 +125,16 @@ function memoryLikeCli(): PluginCliRegistration {
 describe("defineCli help", () => {
   it("prints the command list at the top level and never runs a command", async () => {
     const cli = memoryLikeCli();
+
     for (const argv of [["--help"], ["-h"], ["help"]]) {
       const result = await run(cli, argv);
       expect(result.exitCode, argv.join(" ")).toBe(0);
-      expect(result.stdout).toContain("bb memory catalog");
+      expect(result.stdout).toContain("omnyo memory catalog");
       expect(result.stdout).toContain("List compact memory summaries");
-      expect(result.stdout).toContain("bb memory add");
+      expect(result.stdout).toContain("omnyo memory add");
       expect(result.stderr).toBeUndefined();
     }
+
     expect(ran).not.toHaveBeenCalled();
   });
 
@@ -136,7 +142,9 @@ describe("defineCli help", () => {
     const cli = memoryLikeCli();
     const result = await run(cli, ["add", "--help"]);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("bb memory add --scope <project|global>");
+    expect(result.stdout).toContain(
+      "omnyo memory add --scope <project|global>",
+    );
     expect(result.stdout).toContain("--summary <TEXT>");
     expect(result.stdout).toContain("at most 400 characters (required)");
     expect(result.stdout).toContain("--tag <TAG>");
@@ -168,6 +176,7 @@ describe("defineCli help", () => {
       "--tag",
       "three",
     ]);
+
     expect(result.exitCode, result.stderr).toBe(0);
     expect(ran).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -180,14 +189,14 @@ describe("defineCli help", () => {
 
   it("documents positional arguments", async () => {
     const result = await run(memoryLikeCli(), ["search", "--help"]);
-    expect(result.stdout).toContain("bb memory search <query...>");
+    expect(result.stdout).toContain("omnyo memory search <query...>");
     expect(result.stdout).toContain("Words to search for (required)");
   });
 
   it("shows help with exit 1 when no command is named", async () => {
     const result = await run(memoryLikeCli(), []);
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain("bb memory catalog");
+    expect(result.stdout).toContain("omnyo memory catalog");
     expect(ran).not.toHaveBeenCalled();
   });
 });
@@ -198,7 +207,7 @@ describe("defineCli errors", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("unknown command 'catlog'");
     expect(result.stderr).toContain("(Did you mean catalog?)");
-    expect(result.stderr).toContain("bb memory search");
+    expect(result.stderr).toContain("omnyo memory search");
     expect(result.stdout).toBeUndefined();
   });
 
@@ -214,6 +223,7 @@ describe("defineCli errors", () => {
         }),
       },
     });
+
     const result = await run(cli, ["list"]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("unknown command 'list'");
@@ -232,7 +242,7 @@ describe("defineCli errors", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("unknown option '--limits'");
     expect(result.stderr).toContain("(Did you mean --limit?)");
-    expect(result.stderr).toContain("Usage:\n  bb memory catalog");
+    expect(result.stderr).toContain("Usage:\n  omnyo memory catalog");
     expect(ran).not.toHaveBeenCalled();
   });
 
@@ -249,7 +259,7 @@ describe("defineCli errors", () => {
     expect(result.stderr).toContain(
       "missing required options: --name, --summary, --details",
     );
-    expect(result.stderr).toContain("Usage:\n  bb memory add");
+    expect(result.stderr).toContain("Usage:\n  omnyo memory add");
   });
 
   it("reports missing positionals together with missing options", async () => {
@@ -270,6 +280,7 @@ describe("defineCli errors", () => {
         }),
       },
     });
+
     const result = await run(cli, ["move", "a"]);
     expect(result.stderr).toContain("missing required arguments: <to>");
     expect(result.stderr).toContain("missing required options: --reason");
@@ -288,6 +299,7 @@ describe("defineCli errors", () => {
       "d",
       "extra text",
     ]);
+
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("unexpected argument 'extra text'");
     expect(result.stderr).toContain("belongs in --details");
@@ -300,6 +312,7 @@ describe("defineCli errors", () => {
       "--scope",
       "readonly",
     ]);
+
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
       "invalid value 'readonly' for --scope. Expected one of: all, project, global",
@@ -311,11 +324,13 @@ describe("defineCli errors", () => {
     expect(tooBig.stderr).toContain(
       "invalid value '900' for --limit. Expected an integer between 1 and 100",
     );
+
     const notNumeric = await run(memoryLikeCli(), [
       "catalog",
       "--limit",
       "few",
     ]);
+
     expect(notNumeric.stderr).toContain("invalid value 'few' for --limit");
   });
 
@@ -327,6 +342,7 @@ describe("defineCli errors", () => {
       "--limit",
       "6",
     ]);
+
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("--limit was given more than once");
     expect(ran).not.toHaveBeenCalled();
@@ -373,6 +389,7 @@ describe("defineCli errors", () => {
       const result = await run(cli, argv);
       expect(result.exitCode, argv.join(" ")).toBe(2);
     }
+
     await expect(run(cli, ["queue", "cancel", "a"])).resolves.toMatchObject({
       exitCode: 0,
     });
@@ -405,6 +422,7 @@ describe("defineCli parsing", () => {
         }),
       },
     });
+
     expect(
       (await run(cli, ["set", "--offset=-3", "--note=hi there"])).stdout,
     ).toBe("-3|hi there");
@@ -433,6 +451,7 @@ describe("defineCli parsing", () => {
         }),
       },
     });
+
     expect(
       (await run(cli, ["say", "--body", "- first\n- second", "--title", "--x"]))
         .stdout,
@@ -451,6 +470,7 @@ describe("defineCli parsing", () => {
         summary,
         run: () => ({ exitCode: 0, stdout: summary }),
       });
+
     const cli = defineCli({
       name: "pool",
       summary: "pool",
@@ -508,6 +528,7 @@ describe("defineCli parsing", () => {
         }),
       },
     });
+
     const passthrough = await run(cli, [
       "exec",
       "abc",
@@ -516,6 +537,7 @@ describe("defineCli parsing", () => {
       "ls",
       "--all",
     ]);
+
     expect(passthrough.stdout).toBe(JSON.stringify(["ls", "--all"]));
 
     const positional = await run(cli, ["echo", "--", "--all", "x"]);
@@ -524,6 +546,7 @@ describe("defineCli parsing", () => {
 
   it("parses booleans without swallowing the next token", async () => {
     const cli = memoryLikeCli();
+
     const result = await run(cli, [
       "add",
       "--pinned",
@@ -536,6 +559,7 @@ describe("defineCli parsing", () => {
       "--details",
       "d",
     ]);
+
     expect(result.exitCode, result.stderr).toBe(0);
     expect(ran).toHaveBeenCalledWith(
       expect.objectContaining({ pinned: true, scope: "global" }),
@@ -573,6 +597,7 @@ describe("defineCli parsing", () => {
         }),
       },
     });
+
     expect((await run(cli, ["show", "-f", "json"])).stdout).toBe("json");
     expect((await run(cli, ["show", "-x"])).stderr).toContain(
       "unknown option '-x'",
@@ -607,6 +632,7 @@ describe("defineCli parsing", () => {
         }),
       },
     });
+
     expect(
       (await run(cli, ["account", "add", "--provider", "codex"])).stdout,
     ).toBe("codex");
@@ -616,31 +642,32 @@ describe("defineCli parsing", () => {
         name: "account-add",
         summary: "Add an account",
         usage:
-          "bb pool account add --provider <claude|codex> [--api-key <value>]",
+          "omnyo pool account add --provider <claude|codex> [--api-key <value>]",
       },
       {
         name: "account-list",
         summary: "List accounts",
-        usage: "bb pool account list",
+        usage: "omnyo pool account list",
       },
     ]);
     const help = await run(cli, ["account", "add", "--help"]);
     expect(help.exitCode).toBe(0);
-    expect(help.stdout).toContain("bb pool account add");
+    expect(help.stdout).toContain("omnyo pool account add");
 
     const stdin = await run(cli, ["account", "add", "--api-key-stdin"]);
     expect(stdin.exitCode).toBe(1);
-    expect(stdin.stderr).toContain("--api-key-stdin is read by the bb CLI");
+    expect(stdin.stderr).toContain("--api-key-stdin is read by the omnyo CLI");
   });
 
   it("runs a root command when no command word is given", async () => {
     const pair = vi.fn();
+
     const cli = defineCli({
       name: "connect",
       summary: "Remote access",
-      description: "Pair from https://getbb.app",
+      description: "Pair from https://example.test",
       root: cliCommand({
-        summary: "Pair this bb",
+        summary: "Pair this omnyo",
         options: {
           code: { type: "string", description: "Pairing code" },
           json: { type: "boolean", description: "Emit JSON" },
@@ -649,7 +676,9 @@ describe("defineCli parsing", () => {
           if (input.options.code === undefined) {
             return { exitCode: 0, stdout: input.help };
           }
+
           pair(input.options.code);
+
           return { exitCode: 0, stdout: "paired" };
         },
       }),
@@ -660,10 +689,11 @@ describe("defineCli parsing", () => {
         }),
       },
     });
+
     const bare = await run(cli, []);
     expect(bare.exitCode).toBe(0);
-    expect(bare.stdout).toContain("Pair from https://getbb.app");
-    expect(bare.stdout).toContain("bb connect status");
+    expect(bare.stdout).toContain("Pair from https://example.test");
+    expect(bare.stdout).toContain("omnyo connect status");
     expect(bare.stdout).toContain("--code <value>");
 
     expect((await run(cli, ["--code", "ABCD"])).stdout).toBe("paired");
@@ -672,7 +702,7 @@ describe("defineCli parsing", () => {
       "unknown command 'bogus'",
     );
     expect(cli.commands).toEqual([
-      { name: "status", summary: "Show status", usage: "bb connect status" },
+      { name: "status", summary: "Show status", usage: "omnyo connect status" },
     ]);
   });
 });
@@ -788,6 +818,7 @@ describe("defineCli constraints", () => {
     expect(neither.stderr).toContain(
       "missing required options: one of --body, --body-file",
     );
+
     const both = await run(cli, [
       "post",
       "--body",
@@ -797,6 +828,7 @@ describe("defineCli constraints", () => {
       "--host",
       "h",
     ]);
+
     expect(both.stderr).toContain("--body and --body-file cannot be combined");
     expect((await run(cli, ["post", "--body", "a"])).stdout).toBe("posted");
   });
@@ -823,13 +855,14 @@ describe("defineCli json failures", () => {
       "--scope",
       "global",
     ]);
+
     expect(result.exitCode).toBe(1);
     expect(JSON.parse(result.stdout ?? "")).toEqual({
       ok: false,
       error: {
         code: "missing_required",
         message: "missing required options: --name, --summary, --details",
-        hint: expect.stringContaining("bb memory add"),
+        hint: expect.stringContaining("omnyo memory add"),
       },
     });
     expect(result.stderr).toContain(
@@ -839,6 +872,7 @@ describe("defineCli json failures", () => {
 
   it("uses the code for each failure kind", async () => {
     const cli = memoryLikeCli();
+
     const codes = await Promise.all(
       [
         ["bogus", "--json"],
@@ -847,12 +881,15 @@ describe("defineCli json failures", () => {
         ["catalog", "extra", "--json"],
       ].map(async (argv) => {
         const result = await run(cli, argv);
+
         const parsed = JSON.parse(result.stdout ?? "") as {
           error: { code: string };
         };
+
         return parsed.error.code;
       }),
     );
+
     expect(codes).toEqual([
       "unknown_command",
       "unknown_option",
@@ -910,14 +947,15 @@ describe("PluginCliError", () => {
     const cli = failing(
       new PluginCliError("Session stopped or expired", {
         code: "session_unavailable",
-        hint: "Reopen with `bb demo open`",
+        hint: "Reopen with `omnyo demo open`",
         exitCode: 3,
       }),
     );
+
     const text = await run(cli, ["go"]);
     expect(text.exitCode).toBe(3);
     expect(text.stderr).toContain(
-      "Session stopped or expired (Reopen with `bb demo open`)",
+      "Session stopped or expired (Reopen with `omnyo demo open`)",
     );
     expect(text.stdout).toBeUndefined();
 
@@ -928,7 +966,7 @@ describe("PluginCliError", () => {
       error: {
         code: "session_unavailable",
         message: "Session stopped or expired",
-        hint: "Reopen with `bb demo open`",
+        hint: "Reopen with `omnyo demo open`",
       },
     });
     expect(json.stderr).toContain("Session stopped or expired");
@@ -960,20 +998,21 @@ describe("defineCli registration", () => {
         name: "catalog",
         summary: "List compact memory summaries",
         usage:
-          "bb memory catalog [--scope <all|project|global>] [--limit <1-100>] [--json]",
+          "omnyo memory catalog [--scope <all|project|global>] [--limit <1-100>] [--json]",
       },
       {
         name: "search",
         summary: "Search memory summaries",
-        usage: "bb memory search <query...> [--json]",
+        usage: "omnyo memory search <query...> [--json]",
       },
       {
         name: "add",
         summary: "Save a project or global memory",
         usage:
-          "bb memory add --scope <project|global> --name <NAME> --summary <TEXT> --details <TEXT> [--tag <TAG>]... [--importance <0-100>] [--pinned] [--json]",
+          "omnyo memory add --scope <project|global> --name <NAME> --summary <TEXT> --details <TEXT> [--tag <TAG>]... [--importance <0-100>] [--pinned] [--json]",
       },
     ]);
+
     for (const command of cli.commands ?? []) {
       expect(command.name).toMatch(/^[a-z0-9-]+$/u);
       expect(command.usage).not.toContain("\n");
@@ -996,6 +1035,7 @@ describe("defineCli registration", () => {
         }),
       },
     });
+
     expect(cli.commands?.map((command) => command.name)).toEqual(["visible"]);
     expect((await run(cli, ["--help"])).stdout).not.toContain("legacy");
     expect((await run(cli, ["legacy"])).stdout).toBe("legacy");
@@ -1052,9 +1092,9 @@ describe("defineCli review regressions", () => {
 
     const help = await run(cli, ["project", "--help"]);
     expect(help.exitCode).toBe(0);
-    expect(help.stdout).toContain("bb tasks project list");
-    expect(help.stdout).toContain("bb tasks project create");
-    expect(help.stdout).not.toContain("bb tasks status");
+    expect(help.stdout).toContain("omnyo tasks project list");
+    expect(help.stdout).toContain("omnyo tasks project create");
+    expect(help.stdout).not.toContain("omnyo tasks status");
 
     const unknown = await run(cli, ["projcet", "--help"]);
     expect(unknown.exitCode).toBe(1);
@@ -1099,7 +1139,7 @@ describe("defineCli review regressions", () => {
           }),
         },
       }),
-    ).toThrow("bb docs pull: --dir is declared by both --into and --folder");
+    ).toThrow("omnyo docs pull: --dir is declared by both --into and --folder");
   });
 
   it("emits the JSON envelope for --json=true and not for --json=false", async () => {

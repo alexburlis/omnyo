@@ -1,59 +1,59 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalEnv": ["BB_BUILD_TOOLCHAIN"],
+  "globalEnv": ["OMNYO_BUILD_TOOLCHAIN", "OMNYO_DESKTOP_RELEASE_CHANNEL"],
   "globalPassThroughEnv": ["npm_config_store_dir", "pnpm_config_store_dir"],
   "tasks": {
-    "@bb/db#db:generate": { "cache": false },
-    "@bb/desktop#smoke:browser-broker": {
+    "@omnyo/plugin-sdk#pack:private": {
+      "dependsOn": ["build", "build:types"],
+      "inputs": ["$TURBO_DEFAULT$", "dist/**", "bundled-types/**"],
+      "outputs": ["private-artifact/**"]
+    },
+    "@omnyo/db#db:generate": { "cache": false },
+    "@omnyo/desktop#smoke:browser-broker": {
       "cache": false,
       "dependsOn": [
-        "@bb/templates#generate:templates",
-        "@get-bb/plugin-sdk#build:types",
-        "@bb/cli#build"
+        "@omnyo/templates#generate:templates",
+        "@omnyo/plugin-sdk#build:types",
+        "@omnyo/cli#build"
       ],
       "outputs": []
     },
-    "@bb/desktop#smoke:browser-cdp": {
+    "@omnyo/desktop#smoke:browser-cdp": {
       "cache": false,
       "dependsOn": ["topo"],
       "passThroughEnv": ["DISPLAY"]
     },
-    "@bb/web#build": {
-      "dependsOn": ["topo"],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/apps/server/src/generated/bb-official-marketplace/marketplace.json",
-        "$TURBO_ROOT$/plugins/*/icons/*.svg",
-        "$TURBO_ROOT$/plugins/*/*.svg",
-        "$TURBO_ROOT$/CHANGELOG.md",
-        "$TURBO_ROOT$/changelog-metadata.ts",
-        "$TURBO_ROOT$/changelog-parser.ts",
-        "$TURBO_ROOT$/apps/web/package.json",
-        "$TURBO_ROOT$/apps/web/src/**",
-        "$TURBO_ROOT$/apps/web/tsconfig.json",
-        "$TURBO_ROOT$/apps/web/vite.config.ts",
-        "$TURBO_ROOT$/assets/bb-logo.svg",
-        "$TURBO_ROOT$/packages/shared-ui/src/**",
-        "$TURBO_ROOT$/packages/tsconfig/*.json",
-        "$TURBO_ROOT$/plugins/plugin-api-docs/src/**",
-        "$TURBO_ROOT$/pnpm-lock.yaml",
-        "$TURBO_ROOT$/pnpm-workspace.yaml",
-        "$TURBO_ROOT$/turbo.json"
-      ],
-      "env": ["CLOUDFLARE_ENV", "VITE_POSTHOG_KEY", "VITE_POSTHOG_HOST"],
-      "outputs": ["dist/**"]
-    },
     // Mirrors "build" but also caches bundle-stats.json, which the
-    // bb:bundle-stats Vite plugin writes beside dist for the boot-payload
+    // omnyo:bundle-stats Vite plugin writes beside dist for the boot-payload
     // budget check. Without it a cache hit would leave CI checking a stale
     // file, or none at all.
     // The docs' UI-anatomy manifest is the contract this test checks the real
     // app components against, so a manifest edit must re-run it.
-    "@bb/app#test": {
-      "dependsOn": ["//#ensure-native-modules", "topo"],
+    "@omnyo/client-core#test": {
+      "env": ["OMNYO_CLIENT_PROJECTION_MEASUREMENT_OUTPUT"],
+      "dependsOn": ["topo"]
+    },
+    "@omnyo/app#check:pwa-icons": {
+      "inputs": [
+        "scripts/generate-pwa-icons.mjs",
+        "public/icon-*.png",
+        "public/apple-touch-icon*.png",
+        "public/manifest*.webmanifest",
+        "package.json",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml"
+      ],
+      "outputs": []
+    },
+    "@omnyo/app#test": {
+      "env": [
+        "OMNYO_MARKDOWN_MEASUREMENT_OUTPUT",
+        "OMNYO_SIDEBAR_MEASUREMENT_OUTPUT"
+      ],
+      "dependsOn": ["//#ensure-native-modules", "check:pwa-icons", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/CHANGELOG.md",
         "$TURBO_ROOT$/changelog-metadata.ts",
         "$TURBO_ROOT$/changelog-parser.ts",
         "$TURBO_ROOT$/plugins/plugin-api-docs/src/anatomy-manifest.json",
@@ -61,20 +61,7 @@
         "$TURBO_ROOT$/vitest*.ts"
       ]
     },
-    "@bb/demo-server#test": {
-      "dependsOn": ["@bb/demo-server#build", "topo"]
-    },
-    "@bb/demo-server#build": {
-      "dependsOn": ["@bb/app#build", "bb-plugin-thread-list#prepare:bundled"],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/plugins/provider-codex/icons/codex.svg",
-        "$TURBO_ROOT$/plugins/provider-claude-code/icons/claude-code.svg",
-        "$TURBO_ROOT$/plugins/provider-pi/icons/pi.svg"
-      ],
-      "outputs": ["dist/**"]
-    },
-    "@bb/app#build": {
+    "@omnyo/app#build": {
       "env": [
         "NODE_OPTIONS",
         "NODE_ENV",
@@ -87,7 +74,6 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/.env*",
         ".env*",
-        "$TURBO_ROOT$/CHANGELOG.md",
         "$TURBO_ROOT$/changelog-metadata.ts",
         "$TURBO_ROOT$/changelog-parser.ts",
         "$TURBO_ROOT$/package.json",
@@ -97,6 +83,7 @@
         "$TURBO_ROOT$/scripts/build-node-entry.mjs",
         "$TURBO_ROOT$/scripts/build-package.mjs",
         "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
         "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
         "$TURBO_ROOT$/scripts/precompress-app-dist.mjs",
         "$TURBO_ROOT$/turbo.json"
@@ -114,13 +101,14 @@
         "$TURBO_ROOT$/scripts/build-node-entry.mjs",
         "$TURBO_ROOT$/scripts/build-package.mjs",
         "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
         "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
         "$TURBO_ROOT$/scripts/precompress-app-dist.mjs",
         "$TURBO_ROOT$/turbo.json"
       ],
       "outputs": ["dist/**"]
     },
-    "@bb/sdk#test": {
+    "@omnyo/sdk#test": {
       "dependsOn": ["//#ensure-native-modules", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -143,12 +131,22 @@
         "$TURBO_ROOT$/vitest*.ts"
       ]
     },
-    "@bb/server#build": {
+    "@omnyo/server#build": {
       "dependsOn": ["topo"],
       "outputs": ["dist/**"],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/plugins/bb-guide/skills/**",
+        "$TURBO_ROOT$/apps/app/.env*",
+        "$TURBO_ROOT$/apps/app/*.html",
+        "$TURBO_ROOT$/apps/app/package.json",
+        "$TURBO_ROOT$/apps/app/scripts/**",
+        "$TURBO_ROOT$/apps/app/src/**",
+        "$TURBO_ROOT$/apps/app/tsconfig*.json",
+        "$TURBO_ROOT$/apps/app/vite*.ts",
+        "$TURBO_ROOT$/packages/desktop-contract/package.json",
+        "$TURBO_ROOT$/packages/desktop-contract/src/**",
+        "$TURBO_ROOT$/packages/desktop-contract/tsconfig*.json",
+        "$TURBO_ROOT$/plugins/omnyo-guide/skills/**",
         "$TURBO_ROOT$/package.json",
         "$TURBO_ROOT$/packages/tsconfig/*.json",
         "$TURBO_ROOT$/pnpm-lock.yaml",
@@ -156,23 +154,24 @@
         "$TURBO_ROOT$/scripts/build-node-entry.mjs",
         "$TURBO_ROOT$/scripts/build-package.mjs",
         "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
         "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
         "$TURBO_ROOT$/turbo.json"
       ]
     },
-    "@bb/plugin-build#build": {
-      "dependsOn": ["topo"],
+    "@omnyo/plugin-build#build": {
+      "dependsOn": ["topo", "generate"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
         "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
-        "$TURBO_ROOT$/scripts/build-node-entry.mjs",
-        "$TURBO_ROOT$/packages/bb-app/package.json"
+        "$TURBO_ROOT$/scripts/build-node-entry.mjs"
       ],
       "outputs": ["dist/**"]
     },
     "prepare:bundled": {
-      "dependsOn": ["topo", "^build"],
+      "dependsOn": ["topo", "^build", "@omnyo/plugin-sdk#pack:private"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -181,10 +180,10 @@
       ],
       "outputs": [".bundled-runtime/**"]
     },
-    "@bb/bundled-plugins#build": {
+    "@omnyo/bundled-plugins#build": {
       "dependsOn": [
         "^prepare:bundled",
-        "@bb/server#generate:bb-official-marketplace"
+        "@omnyo/server#generate:omnyo-official-marketplace"
       ],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -193,22 +192,25 @@
       ],
       "outputs": ["dist/**"]
     },
-    "bb-app#build": {
+    "omnyo-app#build": {
+      "cache": false,
+      "passThroughEnv": ["OMNYO_RUNTIME_MAC_SIGNING_TEAM"],
       "dependsOn": [
-        "@bb/app#build",
-        "@bb/server#build",
-        "@bb/bundled-plugins#build",
-        "@bb/host-daemon#build",
-        "@bb/cli#build",
-        "@bb/sdk#build",
-        "@get-bb/plugin-sdk#build"
+        "@omnyo/app#build",
+        "@omnyo/server#build",
+        "@omnyo/bundled-plugins#build",
+        "@omnyo/host-daemon#build",
+        "@omnyo/cli#build",
+        "@omnyo/sdk#build",
+        "@omnyo/plugin-sdk#build",
+        "@omnyo/plugin-sdk#pack:private"
       ],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/packages/bb-app/package.json",
-        "$TURBO_ROOT$/packages/bb-app/scripts/**",
-        "$TURBO_ROOT$/packages/bb-app/src/**",
-        "$TURBO_ROOT$/packages/bb-app/tsconfig.json",
+        "$TURBO_ROOT$/packages/omnyo-app/package.json",
+        "$TURBO_ROOT$/packages/omnyo-app/scripts/**",
+        "$TURBO_ROOT$/packages/omnyo-app/src/**",
+        "$TURBO_ROOT$/packages/omnyo-app/tsconfig.json",
         "$TURBO_ROOT$/packages/sdk/package.json",
         "$TURBO_ROOT$/packages/sdk/src/**",
         "$TURBO_ROOT$/packages/sdk/tsconfig.json",
@@ -216,123 +218,132 @@
         "$TURBO_ROOT$/packages/shared-ui/src/**",
         "$TURBO_ROOT$/packages/shared-ui/tsconfig.json",
         "$TURBO_ROOT$/packages/tsconfig/*.json",
-        "$TURBO_ROOT$/scripts/*.mjs"
+        "$TURBO_ROOT$/scripts/*.mjs",
+        "$TURBO_ROOT$/packages/plugin-sdk/scripts/private-artifact.mjs",
+        "$TURBO_ROOT$/packages/plugin-sdk/private-artifact/**"
       ],
       "outputs": ["app/**", "dist/**", "host-daemon/**", "server/**"]
     },
-    "bb-app#build:host": {
-      "dependsOn": ["@bb/host-daemon#build"],
+    "omnyo-app#build:host": {
+      "dependsOn": [
+        "@omnyo/host-daemon#build",
+        "@omnyo/plugin-sdk#pack:private"
+      ],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/apps/host-daemon/dist/**",
-        "$TURBO_ROOT$/packages/bb-app/package.json",
-        "$TURBO_ROOT$/packages/bb-app/scripts/build-host.mjs",
-        "$TURBO_ROOT$/packages/bb-app/src/**",
-        "$TURBO_ROOT$/packages/bb-app/tsconfig.json",
+        "$TURBO_ROOT$/packages/omnyo-app/package.json",
+        "$TURBO_ROOT$/packages/omnyo-app/scripts/build-host.mjs",
+        "$TURBO_ROOT$/packages/omnyo-app/src/**",
+        "$TURBO_ROOT$/packages/omnyo-app/tsconfig.json",
         "$TURBO_ROOT$/packages/config/package.json",
         "$TURBO_ROOT$/packages/config/src/**",
         "$TURBO_ROOT$/packages/config/tsconfig.json",
         "$TURBO_ROOT$/packages/tsconfig/*.json",
         "$TURBO_ROOT$/scripts/build-utils.mjs",
-        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
+        "$TURBO_ROOT$/packages/plugin-sdk/scripts/private-artifact.mjs",
+        "$TURBO_ROOT$/packages/plugin-sdk/private-artifact/**"
       ],
       "outputs": ["host-package/**"]
     },
-    "bb-plugin-tasks#build": {
-      // The tasks plugin's app bundle imports the @get-bb/plugin-sdk root at
+    "omnyo-plugin-tasks#build": {
+      // The tasks plugin's app bundle imports the @omnyo/plugin-sdk root at
       // runtime (shared RPC contract), so the SDK dist must exist first.
-      "dependsOn": ["topo", "@get-bb/plugin-sdk#build"]
+      "dependsOn": ["topo", "@omnyo/plugin-sdk#build"]
     },
-    "@bb/desktop#build": {
-      "dependsOn": ["bb-app#build"],
-      "env": ["BB_DESKTOP_RELEASE_CHANNEL"],
+    "@omnyo/desktop#build": {
+      "dependsOn": ["omnyo-app#build"],
+      "env": ["OMNYO_DESKTOP_RELEASE_CHANNEL"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/apps/desktop/**",
-        "$TURBO_ROOT$/packages/bb-app/app/**",
-        "$TURBO_ROOT$/packages/bb-app/dist/**",
-        "$TURBO_ROOT$/packages/bb-app/host-daemon/**",
-        "$TURBO_ROOT$/packages/bb-app/package.json",
-        "$TURBO_ROOT$/packages/bb-app/server/**",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/omnyo-app/app/**",
+        "$TURBO_ROOT$/packages/omnyo-app/dist/**",
+        "$TURBO_ROOT$/packages/omnyo-app/host-daemon/**",
+        "$TURBO_ROOT$/packages/omnyo-app/package.json",
+        "$TURBO_ROOT$/packages/omnyo-app/server/**",
         "$TURBO_ROOT$/pnpm-lock.yaml",
         "$TURBO_ROOT$/pnpm-workspace.yaml",
         "$TURBO_ROOT$/turbo.json"
       ],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", "dist-public-beta/**"]
     },
-    "@bb/desktop#desktop:build": {
-      "dependsOn": ["bb-app#build", "@bb/desktop#build"],
+    "@omnyo/desktop#desktop:build": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
       "cache": false,
       "outputs": ["release/**"],
       "passThroughEnv": ["*"]
     },
-    "@bb/desktop#desktop:build:linux": {
-      "dependsOn": ["bb-app#build", "@bb/desktop#build"],
+    "@omnyo/desktop#desktop:build:linux": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
       "cache": false,
       "outputs": ["release/**"],
       "passThroughEnv": ["*"]
     },
-    "@bb/desktop#desktop:build:win": {
-      "dependsOn": ["bb-app#build", "@bb/desktop#build"],
+    "@omnyo/desktop#desktop:build:win": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
       "cache": false,
       "outputs": ["release/**"],
       "passThroughEnv": ["*"]
     },
-    "@bb/desktop#smoke:packaged": {
+    "@omnyo/desktop#smoke:packaged": {
       "cache": false,
       "outputs": [],
       "passThroughEnv": ["*"]
     },
-    "@bb/desktop#smoke:packaged-npm": {
+    "@omnyo/desktop#smoke:packaged-npm": {
       "cache": false,
       "outputs": [],
-      "passThroughEnv": ["BB_DESKTOP_RELEASE_CHANNEL"]
+      "passThroughEnv": ["OMNYO_DESKTOP_RELEASE_CHANNEL"]
     },
-    "@bb/desktop#package": {
-      "dependsOn": ["bb-app#build", "@bb/desktop#build"],
+    "@omnyo/desktop#package": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
       "cache": false,
       "outputs": ["release/**"],
       "passThroughEnv": ["*"]
     },
-    "@bb/desktop#package:linux": {
-      "dependsOn": ["bb-app#build", "@bb/desktop#build"],
+    "@omnyo/desktop#package:linux": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
       "cache": false,
       "outputs": ["release/**"],
       "passThroughEnv": ["*"]
     },
-    "@bb/desktop#package:win": {
-      "dependsOn": ["bb-app#build", "@bb/desktop#build"],
+    "@omnyo/desktop#package:win": {
+      "dependsOn": ["omnyo-app#build", "@omnyo/desktop#build"],
       "cache": false,
       "outputs": ["release/**"],
       "passThroughEnv": ["*"]
     },
-    "@bb/desktop#smoke:appimage-lifecycle": {
+    "@omnyo/desktop#smoke:appimage-lifecycle": {
       "cache": false,
       "outputs": [],
       "passThroughEnv": ["*"]
     },
-    "@bb/desktop#dev": {
-      "dependsOn": ["bb-app#build"],
+    "@omnyo/desktop#dev": {
+      "dependsOn": ["omnyo-app#build"],
       "cache": false,
       "persistent": true,
       "passThroughEnv": ["*"]
     },
-    "@bb/desktop#start": {
-      "dependsOn": ["bb-app#build"],
+    "@omnyo/desktop#start": {
+      "dependsOn": ["omnyo-app#build"],
       "cache": false,
       "persistent": true,
       "passThroughEnv": ["*"]
     },
-    "@bb/app#dev": {
-      "dependsOn": ["@bb/templates#generate:templates"],
+    "@omnyo/app#dev": {
+      "dependsOn": ["@omnyo/templates#generate:templates"],
       "cache": false,
       "persistent": true,
       "passThroughEnv": ["*"]
     },
-    "@bb/mobile#theme:generate": {
+    "@omnyo/mobile#theme:generate": {
       "cache": false
     },
-    "@bb/mobile#test": {
+    "@omnyo/mobile#test": {
       "dependsOn": ["//#ensure-native-modules", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -341,54 +352,54 @@
         "$TURBO_ROOT$/apps/app/src/lib/themes/**"
       ]
     },
-    "@bb/mobile#dev": {
+    "@omnyo/mobile#dev": {
       "cache": false,
       "persistent": true,
       "passThroughEnv": ["*"]
     },
-    "@bb/mobile#build:android:local": {
+    "@omnyo/mobile#build:android:local": {
       "cache": false,
       "outputs": ["build-output/**"],
       "passThroughEnv": ["*"]
     },
-    "@bb/mobile#build:android:dev": {
+    "@omnyo/mobile#build:android:dev": {
       "cache": false,
       "outputs": ["build-output/**"],
       "passThroughEnv": ["*"]
     },
-    "@bb/mobile#e2e:android": {
+    "@omnyo/mobile#e2e:android": {
       "cache": false,
       "passThroughEnv": ["*"]
     },
     "storybook": {
-      "dependsOn": ["@bb/templates#generate:templates"],
+      "dependsOn": ["@omnyo/templates#generate:templates"],
       "cache": false,
       "persistent": true,
       "passThroughEnv": ["*"]
     },
-    "@bb/host-daemon#dev": {
-      // The source daemon injects apps/cli/bin/bb into agent shells. Build its
+    "@omnyo/host-daemon#dev": {
+      // The source daemon injects apps/cli/bin/omnyo into agent shells. Build its
       // gitignored runtime before the daemon starts so a sandboxed thread never
-      // has to write back into the daemon's checkout to bootstrap `bb`.
+      // has to write back into the daemon's checkout to bootstrap `omnyo`.
       "dependsOn": [
-        "@bb/cli#build",
-        "@bb/templates#generate:templates",
-        "@bb/plugin-build#generate"
+        "@omnyo/cli#build",
+        "@omnyo/templates#generate:templates",
+        "@omnyo/plugin-build#generate"
       ],
       "cache": false,
       "persistent": true,
       "passThroughEnv": ["*"]
     },
-    "@bb/server#dev": {
+    "@omnyo/server#dev": {
       // The server installs first-party provider plugins during startup and
       // builds their host artifacts. Those builds resolve the published
-      // `@get-bb/plugin-sdk/provider-bridge` entry from the SDK dist, so a
+      // `@omnyo/plugin-sdk/provider-bridge` entry from the SDK dist, so a
       // clean worktree must build that runtime before the server starts.
       "dependsOn": [
-        "@bb/server#generate:bb-official-marketplace",
-        "@bb/templates#generate:templates",
-        "@bb/plugin-build#generate",
-        "@get-bb/plugin-sdk#build:runtime"
+        "@omnyo/server#generate:omnyo-official-marketplace",
+        "@omnyo/templates#generate:templates",
+        "@omnyo/plugin-build#generate",
+        "@omnyo/plugin-sdk#build:runtime"
       ],
       "cache": false,
       "persistent": true,
@@ -420,10 +431,10 @@
       "outputs": []
     },
     // Transit node (no package defines a `topo` script; nothing executes).
-    // It exists so tasks that resolve `@bb/*` imports to *sources* — vitest
+    // It exists so tasks that resolve `@omnyo/*` imports to *sources* — vitest
     // and tsc both use the `source` export condition — hash the sources of
     // dependency packages. Without it, a change in e.g. packages/domain
-    // would cache-hit @bb/server#test/#typecheck and skip them stale.
+    // would cache-hit @omnyo/server#test/#typecheck and skip them stale.
     "topo": {
       "dependsOn": ["^topo"]
     },
@@ -436,26 +447,26 @@
     // task of that package and of every package that (transitively) depends
     // on it — the ones that can resolve the generated sources — is ordered
     // after them and hashes them. Unrelated packages are untouched.
-    "@bb/templates#topo": {
+    "@omnyo/templates#topo": {
       "dependsOn": [
         "^topo",
-        "@bb/templates#generate:templates",
-        "@bb/templates#generate:plugin-scaffold"
+        "@omnyo/templates#generate:templates",
+        "@omnyo/templates#generate:plugin-scaffold"
       ]
     },
-    "@bb/plugin-build#topo": {
-      "dependsOn": ["^topo", "@bb/plugin-build#generate"]
+    "@omnyo/plugin-build#topo": {
+      "dependsOn": ["^topo", "@omnyo/plugin-build#generate"]
     },
-    "@bb/web#topo": {
-      "dependsOn": ["^topo", "@bb/server#generate:bb-official-marketplace"]
+    "@omnyo/server#topo": {
+      "dependsOn": [
+        "^topo",
+        "@omnyo/server#generate:omnyo-official-marketplace"
+      ]
     },
-    "@bb/server#topo": {
-      "dependsOn": ["^topo", "@bb/server#generate:bb-official-marketplace"]
-    },
-    "@bb/server#generate:bb-official-marketplace": {
+    "@omnyo/server#generate:omnyo-official-marketplace": {
       "dependsOn": [],
       "inputs": [
-        "scripts/generate-bb-official-marketplace.ts",
+        "scripts/generate-omnyo-official-marketplace.ts",
         "src/services/plugin-catalog/bundled-marketplace-paths.ts",
         "src/services/plugins/builtin-registry.ts",
         "$TURBO_ROOT$/packages/domain/src/plugin-catalog-category.ts",
@@ -463,11 +474,11 @@
         "$TURBO_ROOT$/packages/domain/src/plugin-manifest.ts",
         "$TURBO_ROOT$/plugins/*/package.json",
         "$TURBO_ROOT$/plugins/*/PLUGIN_OVERVIEW.md",
-        "$TURBO_ROOT$/plugins/bb-official.json"
+        "$TURBO_ROOT$/plugins/omnyo-official.json"
       ],
-      "outputs": ["src/generated/bb-official-marketplace/marketplace.json"]
+      "outputs": ["src/generated/omnyo-official-marketplace/marketplace.json"]
     },
-    "@bb/templates#generate:templates": {
+    "@omnyo/templates#generate:templates": {
       "dependsOn": [],
       "inputs": [
         "scripts/generate-templates.mjs",
@@ -476,10 +487,20 @@
       ],
       "outputs": ["src/generated/templates.generated.ts"]
     },
-    // The `bb plugin new` starter files from the (committed) component
+    // The `omnyo plugin new` starter files from the (committed) component
     // registry.
-    "@bb/templates#generate:plugin-scaffold": {
+    "@omnyo/plugin-registry#generate": {
       "dependsOn": [],
+      "inputs": [
+        "scripts/build-registry.mjs",
+        "registry.json",
+        "flavors/**",
+        "$TURBO_ROOT$/packages/shared-ui/src/**"
+      ],
+      "outputs": ["r/**"]
+    },
+    "@omnyo/templates#generate:plugin-scaffold": {
+      "dependsOn": ["@omnyo/plugin-registry#generate"],
       "inputs": [
         "scripts/generate-plugin-scaffold.mjs",
         "scripts/write-generated.mjs",
@@ -491,7 +512,7 @@
     },
     // Plugin theme CSS (from the app's theme.css + tw-animate-css) and the
     // shared-runtime export manifest (introspected from installed packages).
-    "@bb/plugin-build#generate": {
+    "@omnyo/plugin-build#generate": {
       "dependsOn": [],
       "inputs": [
         "scripts/generate-plugin-theme.mjs",
@@ -508,7 +529,7 @@
     "typecheck": {
       "dependsOn": ["topo"]
     },
-    "@bb/app#typecheck": {
+    "@omnyo/app#typecheck": {
       "dependsOn": ["topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -516,17 +537,7 @@
         "$TURBO_ROOT$/changelog-parser.ts"
       ]
     },
-    "@bb/web#typecheck": {
-      "dependsOn": ["topo"],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/changelog-metadata.ts",
-        "$TURBO_ROOT$/changelog-parser.ts",
-        "$TURBO_ROOT$/packages/shared-ui/src/**",
-        "$TURBO_ROOT$/plugins/plugin-api-docs/src/**"
-      ]
-    },
-    "@bb/host-daemon#build": {
+    "@omnyo/host-daemon#build": {
       "dependsOn": ["topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -537,25 +548,30 @@
         "$TURBO_ROOT$/scripts/build-node-entry.mjs",
         "$TURBO_ROOT$/scripts/build-package.mjs",
         "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
         "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
         "$TURBO_ROOT$/scripts/precompress-app-dist.mjs",
         "$TURBO_ROOT$/turbo.json"
       ],
       "outputs": ["dist/**"]
     },
-    "@bb/cli#test": {
-      "dependsOn": ["//#ensure-native-modules", "topo"],
+    "@omnyo/cli#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#pack:private",
+        "topo"
+      ],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/plugins/bb-guide/skills/bb-cli/**",
+        "$TURBO_ROOT$/plugins/omnyo-guide/skills/omnyo-cli/**",
         "$TURBO_ROOT$/vitest*.ts"
       ]
     },
     // Integration tests typecheck without the `source` condition, so
-    // @get-bb/plugin-sdk (reached through apps/server sources) resolves to the
+    // @omnyo/plugin-sdk (reached through apps/server sources) resolves to the
     // package's published `types`: bundled-types/.
-    "@bb/integration-tests#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "@omnyo/integration-tests#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/apps/server/package.json",
@@ -567,24 +583,11 @@
         "$TURBO_ROOT$/vitest*.ts"
       ]
     },
-    // The source-wrapper test invokes the root `pnpm bb` script, which builds
-    // and executes @bb/cli. Model that cross-package dependency so CLI changes
+    // The source-wrapper test invokes the root `pnpm omnyo` script, which builds
+    // and executes @omnyo/cli. Model that cross-package dependency so CLI changes
     // cannot leave this test hidden behind a stale Turbo cache entry.
-    "@bb/web#test": {
-      "dependsOn": ["//#ensure-native-modules", "topo"],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/vitest*.ts",
-        "$TURBO_ROOT$/plugins/plugin-api-docs/src/**",
-        "$TURBO_ROOT$/plugins/*/package.json"
-      ],
-      "passThroughEnv": [
-        "UPDATE_PARITY_ROW_COUNTS",
-        "UPDATE_TRANSCRIPT_EXPECTATIONS"
-      ]
-    },
-    "@bb/scripts#test": {
-      "dependsOn": ["//#ensure-native-modules", "@bb/cli#build", "topo"],
+    "@omnyo/scripts#test": {
+      "dependsOn": ["//#ensure-native-modules", "@omnyo/cli#build", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/.github/actions/setup-workspace/**",
@@ -602,12 +605,15 @@
         "$TURBO_ROOT$/turbo.json",
         "$TURBO_ROOT$/plugins/*/package.json",
         "$TURBO_ROOT$/plugins/plugin-api-docs/src/first-party-plugins.json",
-        "$TURBO_ROOT$/packages/bundled-plugins/package.json",
+        "$TURBO_ROOT$/apps/*/package.json",
+        "$TURBO_ROOT$/packages/*/package.json",
+        "$TURBO_ROOT$/packages/omnyo-app/scripts/build-host-artifact.mjs",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
         "$TURBO_ROOT$/apps/server/src/services/plugins/builtin-registry.ts",
         "$TURBO_ROOT$/vitest*.ts"
       ]
     },
-    "@bb/provider-bridge-protocol#test": {
+    "@omnyo/provider-bridge-protocol#test": {
       "dependsOn": ["//#ensure-native-modules", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -619,7 +625,7 @@
         "$TURBO_ROOT$/packages/plugin-sdk/src/**"
       ]
     },
-    "@bb/provider-parity#test": {
+    "@omnyo/provider-parity#test": {
       "dependsOn": ["//#ensure-native-modules", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -649,43 +655,83 @@
       // (`UPDATE_PARITY_ROW_COUNTS=1 pnpm exec turbo run test …`) silently
       // does nothing without them.
       "passThroughEnv": [
+        "TMPDIR",
         "UPDATE_PARITY_ROW_COUNTS",
         "UPDATE_TRANSCRIPT_EXPECTATIONS"
       ]
     },
-    "@bb/desktop#test": {
-      "dependsOn": ["//#ensure-native-modules", "topo"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest*.ts"],
-      "passThroughEnv": ["DISPLAY"]
+    "@omnyo/mobile-bridge#test": {
+      "env": ["OMNYO_MOBILE_BRIDGE_MEASUREMENT_OUTPUT"],
+      "dependsOn": ["//#ensure-native-modules", "topo"]
     },
-    // plugin-scaffold-external packs @get-bb/plugin-sdk (prepack rebuilds its
+    "@omnyo/desktop#test:prepare": {
+      "cache": false,
+      "inputs": ["package.json", "$TURBO_ROOT$/pnpm-lock.yaml"],
+      "outputs": []
+    },
+    "@omnyo/desktop#test": {
+      "dependsOn": ["//#ensure-native-modules", "test:prepare", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/vitest*.ts",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs"
+      ],
+      "passThroughEnv": ["DISPLAY", "OMNYO_PROFILE_NATIVE_FIXTURE_MANIFEST"]
+    },
+    // plugin-scaffold-external packs @omnyo/plugin-sdk (prepack rebuilds its
     // dist), so the SDK build is a dependency.
-    "@bb/templates#test": {
+    "@omnyo/templates#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "@get-bb/plugin-sdk#build:types",
+        "@omnyo/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build:types",
+        "@omnyo/plugin-sdk#pack:private",
         "topo"
       ],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest*.ts"]
     },
     // Installs first-party provider plugins, which makes the plugin runtime
     // build their host artifacts. esbuild resolves the plugin sources'
-    // `@get-bb/plugin-sdk/provider-bridge` import through the package export
+    // `@omnyo/plugin-sdk/provider-bridge` import through the package export
     // map to `packages/plugin-sdk/dist/provider-bridge.js` — the `source`
     // condition that lets vitest read `src/` does not apply inside that
     // bundling step — so the SDK dist must exist before the suite runs.
-    "@bb/server#test": {
+    "@omnyo/server#test": {
+      "env": [
+        "OMNYO_CHAT_OPEN_FIXTURE",
+        "OMNYO_TIMELINE_MEASUREMENT_OUTPUT",
+        "OMNYO_CATALOG_MEASUREMENT_OUTPUT",
+        "OMNYO_FRONTEND_MEASUREMENT_OUTPUT",
+        "OMNYO_FRONTEND_PLAYWRIGHT_MODULE",
+        "OMNYO_FRONTEND_APP_DIST",
+        "OMNYO_FRONTEND_EXPECT_PERSISTED_DISPLAY",
+        "OMNYO_FRONTEND_EXPECT_MARKDOWN_WORKER",
+        "OMNYO_FRONTEND_SIDEBAR_PROOF_OUTPUT",
+        "OMNYO_FRONTEND_SIDEBAR_USAGE_DIR",
+        "OMNYO_FRONTEND_SIDEBAR_RESOURCES_DIR",
+        "OMNYO_FRONTEND_REQUEST_DELAY_MS",
+        "OMNYO_PERFORMANCE_SUITE",
+        "OMNYO_PERFORMANCE_BINDING",
+        "OMNYO_PERFORMANCE_SAMPLES",
+        "OMNYO_PERFORMANCE_DIAGNOSTIC"
+      ],
       "dependsOn": [
-        "@bb/agent-runtime#generate:test-bridges",
+        "@omnyo/agent-runtime#generate:test-bridges",
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "@get-bb/plugin-sdk#build:types",
+        "@omnyo/plugin-build#build",
+        "@omnyo/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build:types",
+        "@omnyo/plugin-sdk#pack:private",
         "topo"
       ],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/plugins/*/skills/**",
+        "$TURBO_ROOT$/plugins/automations/src/**",
+        "$TURBO_ROOT$/plugins/automations/package.json",
+        "$TURBO_ROOT$/plugins/provider-retry/*.ts",
+        "$TURBO_ROOT$/plugins/provider-retry/src/**",
+        "$TURBO_ROOT$/plugins/provider-retry/package.json",
         "$TURBO_ROOT$/tests/scripted-echo-provider/host.ts",
         "$TURBO_ROOT$/tests/scripted-echo-provider/src/**",
         "$TURBO_ROOT$/examples/plugins/echo-provider/*.ts",
@@ -696,11 +742,13 @@
     },
     // The thread.stop race suite builds the scripted echo bridge artifact and
     // serves it through the daemon's artifact cache, so it needs the SDK dist
-    // for the same reason as @bb/server#test.
-    "@bb/host-daemon#test": {
+    // for the same reason as @omnyo/server#test.
+    "@omnyo/host-daemon#test": {
+      "passThroughEnv": ["TMPDIR"],
       "dependsOn": [
+        "@omnyo/agent-runtime#generate:test-bridges",
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -711,28 +759,28 @@
       ]
     },
     // The provider-corpus gates read a private corpus through
-    // BB_PROVIDER_CORPUS_DIR and write snapshots next to it, so the task is
+    // OMNYO_PROVIDER_CORPUS_DIR and write snapshots next to it, so the task is
     // uncacheable and must see those two variables (strict env mode strips
     // everything undeclared). Without the variable the suites skip.
-    "@bb/server#test:provider-corpus": {
+    "@omnyo/server#test:provider-corpus": {
       "dependsOn": ["//#ensure-native-modules", "topo"],
       "cache": false,
       "passThroughEnv": [
-        "BB_PROVIDER_CORPUS_DIR",
-        "BB_PROVIDER_CORPUS_SNAPSHOT",
-        "BB_PROVIDER_CORPUS_SNAPSHOT_DIR",
-        "BB_PROVIDER_CORPUS_ALLOWLIST",
-        "BB_PROVIDER_CORPUS_ROW_CLASSES"
+        "OMNYO_PROVIDER_CORPUS_DIR",
+        "OMNYO_PROVIDER_CORPUS_SNAPSHOT",
+        "OMNYO_PROVIDER_CORPUS_SNAPSHOT_DIR",
+        "OMNYO_PROVIDER_CORPUS_ALLOWLIST",
+        "OMNYO_PROVIDER_CORPUS_ROW_CLASSES"
       ]
     },
     // Builds real plugin host artifacts (the builtin artifacts suite, plus the
     // fixture that pins the published bridge surface as bundled-not-stubbed),
-    // so it needs the SDK dist for the same reason as @bb/server#test.
-    "@bb/plugin-build#test": {
+    // so it needs the SDK dist for the same reason as @omnyo/server#test.
+    "@omnyo/plugin-build#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "@get-bb/plugin-sdk#build:types",
+        "@omnyo/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build:types",
         "topo"
       ],
       // The SVG validator suite reads every first-party branding SVG.
@@ -747,7 +795,7 @@
     // Runtime unit suites restart the scripted echo provider repeatedly. Build
     // the real bridge worker and bridge artifact once so each child launch
     // executes JavaScript instead of re-transforming the TypeScript sources.
-    "@bb/agent-runtime#generate:test-bridges": {
+    "@omnyo/agent-runtime#generate:test-bridges": {
       "dependsOn": ["topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -755,15 +803,16 @@
         "$TURBO_ROOT$/packages/plugin-sdk/src/**",
         "$TURBO_ROOT$/packages/provider-bridge-protocol/src/**",
         "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
         "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs",
         "$TURBO_ROOT$/tests/scripted-echo-provider/src/**"
       ],
       "outputs": ["dist/test-bridges/**"]
     },
-    "@bb/agent-runtime#test": {
+    "@omnyo/agent-runtime#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@bb/agent-runtime#generate:test-bridges",
+        "@omnyo/agent-runtime#generate:test-bridges",
         "topo"
       ],
       "inputs": [
@@ -774,16 +823,19 @@
     },
     // The live-CLI suite's global setup rebuilds every first-party provider
     // bridge from source, so it needs the SDK dist too.
-    "@bb/agent-runtime#test:integration": {
+    "@omnyo/agent-runtime#test:integration": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest*.ts"],
       // The live-CLI suites spawn real provider CLIs. Turbo strips undeclared
       // variables, so without these they start unauthenticated.
-      "passThroughEnv": ["CLAUDE_CODE_OAUTH_TOKEN", "BB_CLAUDE_CODE_EXECUTABLE"]
+      "passThroughEnv": [
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "OMNYO_CLAUDE_CODE_EXECUTABLE"
+      ]
     },
     "smoke:tarball": {
       "dependsOn": ["build"],
@@ -797,11 +849,21 @@
     },
     // Boots the real server, which installs the first-party provider plugins
     // and builds their host artifacts; those bundles resolve
-    // `@get-bb/plugin-sdk/provider-bridge` to the SDK dist.
-    "@bb/integration-tests#test": {
+    // `@omnyo/plugin-sdk/provider-bridge` to the SDK dist.
+    "@omnyo/integration-tests#test:local-server-move": {
+      "cache": false,
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "omnyo-app#build",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "@omnyo/integration-tests#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "omnyo-app#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -817,17 +879,17 @@
         "$TURBO_ROOT$/vitest*.ts"
       ]
     },
-    "@bb/integration-tests#e2e:mobile-backend": {
+    "@omnyo/integration-tests#e2e:mobile-backend": {
       "cache": false,
       "persistent": true,
       "passThroughEnv": ["*"],
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ]
     },
-    "@bb/integration-tests#e2e:mobile-connect-stub": {
+    "@omnyo/integration-tests#e2e:mobile-connect-stub": {
       "cache": false,
       "persistent": true,
       "passThroughEnv": ["*"]
@@ -837,13 +899,16 @@
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest*.ts"],
       // The live-CLI suites spawn real provider CLIs. Turbo strips undeclared
       // variables, so without these they start unauthenticated.
-      "passThroughEnv": ["CLAUDE_CODE_OAUTH_TOKEN", "BB_CLAUDE_CODE_EXECUTABLE"]
+      "passThroughEnv": [
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "OMNYO_CLAUDE_CODE_EXECUTABLE"
+      ]
     },
-    "@bb/integration-tests#test:integration": {
+    "@omnyo/integration-tests#test:integration": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@bb/agent-runtime#test:integration",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/agent-runtime#test:integration",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -856,46 +921,120 @@
         "$TURBO_ROOT$/packages/templates/src/**",
         "$TURBO_ROOT$/vitest*.ts"
       ],
-      "passThroughEnv": ["CLAUDE_CODE_OAUTH_TOKEN", "BB_CLAUDE_CODE_EXECUTABLE"]
+      "passThroughEnv": [
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "OMNYO_CLAUDE_CODE_EXECUTABLE"
+      ]
     },
     // bundled-types/*.d.ts: the package's published `types` surface and the
     // in-repo plugins' typecheck surface. ~20s (rollup-plugin-dts), so only
     // real consumers depend on it. Generated modules are excluded from the
     // hash: they are derived from sources already hashed here.
-    "@get-bb/plugin-sdk#build:types": {
+    "@omnyo/plugin-sdk#build:types:backend": {
       "dependsOn": ["topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
         "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
       ],
-      "outputs": ["bundled-types/**"]
+      "outputs": [
+        "bundled-types/omnyo-plugin-sdk.d.ts",
+        "bundled-types/omnyo-plugin-sdk-environment-provider.d.ts",
+        "bundled-types/omnyo-plugin-sdk-machine-provider.d.ts",
+        "bundled-types/omnyo-plugin-sdk-provider-usage.d.ts",
+        "bundled-types/omnyo-plugin-sdk-host.d.ts"
+      ]
     },
-    "@get-bb/plugin-sdk#build": {
+    "@omnyo/plugin-sdk#build:types:providers": {
       "dependsOn": ["topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": [
+        "bundled-types/omnyo-plugin-sdk-provider-bridge.d.ts",
+        "bundled-types/omnyo-plugin-sdk-provider-bridge-acp.d.ts",
+        "bundled-types/omnyo-plugin-sdk-provider-bridge-acp-next.d.ts"
+      ]
+    },
+    "@omnyo/plugin-sdk#build:types:app": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": ["bundled-types/omnyo-plugin-sdk-app.d.ts"]
+    },
+    "@omnyo/plugin-sdk#build:types:internal": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": [
+        "bundled-types/omnyo-plugin-sdk-internal-composer-customization-validation.d.ts",
+        "bundled-types/omnyo-plugin-sdk-internal-composer-handle.d.ts",
+        "bundled-types/omnyo-plugin-sdk-internal-composer-view.d.ts",
+        "bundled-types/omnyo-plugin-sdk-internal-file-navigation-validation.d.ts",
+        "bundled-types/omnyo-plugin-sdk-internal-host-policy.d.ts",
+        "bundled-types/omnyo-plugin-sdk-internal-plugin-app-collector.d.ts"
+      ]
+    },
+    "@omnyo/plugin-sdk#build:types": {
+      "dependsOn": [
+        "topo",
+        "build:types:backend",
+        "build:types:providers",
+        "build:types:app",
+        "build:types:internal"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
+        "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
+      ],
+      "outputs": [
+        "bundled-types/omnyo-plugin-sdk-provider-bridge-testing.d.ts",
+        "bundled-types/omnyo-plugin-sdk-testing.d.ts",
+        "bundled-types/omnyo-plugin-sdk-testing-app.d.ts",
+        "bundled-types/omnyo-plugin-sdk-testing-host.d.ts"
+      ]
+    },
+    "@omnyo/plugin-sdk#build": {
+      "dependsOn": ["topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
         "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
       ],
       "outputs": ["dist/**"]
     },
-    "@get-bb/plugin-sdk#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    "@omnyo/plugin-sdk#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
     },
     // Several suites read bundled-types/*.d.ts from disk.
-    "@get-bb/plugin-sdk#test": {
+    "@omnyo/plugin-sdk#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build:types",
+        "@omnyo/plugin-sdk#build:types",
         "topo"
       ],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest*.ts"]
     },
-    "@get-bb/plugin-sdk#build:runtime": {
+    "@omnyo/plugin-sdk#build:runtime": {
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/scripts/build-utils.mjs",
+        "$TURBO_ROOT$/scripts/public-beta-collection.mjs",
         "$TURBO_ROOT$/packages/plugin-build/src/zod-locale-stub.mjs"
       ],
       "outputs": ["dist/**"],
@@ -904,27 +1043,27 @@
     // ---- In-repo plugins typecheck against the SDK's bundled .d.ts ----------
     // Either through a tsconfig `paths` map or through the workspace symlink's
     // package `types` field; both land on bundled-types/, a build output.
-    "bb-plugin-bb--storage-retention#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-omnyo--storage-retention#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-composer-customization#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    "omnyo-plugin-composer-customization#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
     },
-    "bb-plugin-plugin-api-docs#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-plugin-api-docs#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-plugin-api-docs#test": {
+    "omnyo-plugin-plugin-api-docs#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -932,35 +1071,35 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-plugin-api-docs#scaffold:surface-entry": {
+    "omnyo-plugin-plugin-api-docs#scaffold:surface-entry": {
       "cache": false
     },
-    "bb-plugin-echo-provider#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    "omnyo-plugin-echo-provider#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
     },
-    "bb-plugin-scripted-echo-provider#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    "omnyo-plugin-scripted-echo-provider#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
     },
-    "bb-plugin-replacement-lab-alpha#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    "omnyo-plugin-replacement-lab-alpha#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
     },
-    "bb-plugin-replacement-lab-beta#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    "omnyo-plugin-replacement-lab-beta#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
     },
-    "bb-plugin-thread-chat-demo#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    "omnyo-plugin-thread-chat-demo#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
     },
-    "bb-plugin-ask-user-question#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-ask-user-question#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-ask-user-question#test": {
+    "omnyo-plugin-ask-user-question#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -968,17 +1107,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-account-pool#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-account-pool#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-account-pool#test": {
+    "omnyo-plugin-account-pool#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -986,17 +1125,27 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-automations#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-omnyo--wait-sources#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-omnyo--wait-sources#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-omnyo--git#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-automations#test": {
+    "omnyo-plugin-omnyo--git#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1004,17 +1153,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-concurrency-limit#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-omnyo--composer-predictions#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-concurrency-limit#test": {
+    "omnyo-plugin-omnyo--composer-predictions#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1022,33 +1171,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-environment-project-checkout#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-environment-git-worktree#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-environment-personal-workspace#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-environment-personal-workspace#test": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ]
-    },
-    "bb-plugin-environment-modal-sandbox#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-omnyo--account-usage#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-environment-modal-sandbox#test": {
+    "omnyo-plugin-omnyo--account-usage#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1056,46 +1189,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-connect#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-bb-account#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-bb-ai#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-bb-guide#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-bb-guide#test": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ]
-    },
-    "bb-plugin-custom-instructions#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-custom-instructions#test": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ]
-    },
-    "bb-plugin-simple-notes#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-automations#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-simple-notes#test": {
+    "omnyo-plugin-automations#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1103,17 +1207,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-github#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-concurrency-limit#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-github#test": {
+    "omnyo-plugin-concurrency-limit#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1121,17 +1225,36 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-inline-vis#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-environment-project-checkout#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-environment-git-worktree#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-environment-personal-workspace#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-environment-temporary-copy#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-environment-personal-workspace#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-environment-modal-sandbox#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-inline-vis#test": {
+    "omnyo-plugin-environment-modal-sandbox#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1139,17 +1262,43 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-agent-annotations#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-connect#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-omnyo-account#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-omnyo-guide#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-omnyo-guide#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-custom-instructions#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-custom-instructions#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-simple-notes#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-agent-annotations#test": {
+    "omnyo-plugin-simple-notes#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1157,27 +1306,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-push-notifications#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-push-notifications#test": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ]
-    },
-    "bb-plugin-keep-awake#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-github#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-keep-awake#test": {
+    "omnyo-plugin-github#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1185,17 +1324,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-memory#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-inline-vis#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-memory#test": {
+    "omnyo-plugin-inline-vis#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1203,17 +1342,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-monaco-editor#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-agent-annotations#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-monaco-editor#test": {
+    "omnyo-plugin-agent-annotations#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1221,47 +1360,27 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-pdf-preview#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    "omnyo-plugin-push-notifications#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
     },
-    "bb-plugin-pdf-preview#test": {
+    "omnyo-plugin-push-notifications#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ]
     },
-    "bb-plugin-plugin-api-tester#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-plugin-api-tester#test": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ]
-    },
-    "bb-plugin-provider-acp#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-provider-acp#test": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ]
-    },
-    "bb-plugin-bb--provider-acp-next#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-omnyo--chat-importer#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-bb--provider-acp-next#test": {
+    "omnyo-plugin-omnyo--chat-importer#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1269,37 +1388,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-provider-claude-code#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-provider-claude-code#test": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ]
-    },
-    "bb-plugin-provider-codex#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-provider-codex#test": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ]
-    },
-    "bb-plugin-provider-pi#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-keep-awake#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-provider-pi#test": {
+    "omnyo-plugin-keep-awake#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1307,27 +1406,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-bb--prompt-library#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-bb--prompt-library#test": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ]
-    },
-    "bb-plugin-bb--provider-usage#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-memory#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-bb--provider-usage#test": {
+    "omnyo-plugin-memory#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1335,27 +1424,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-provider-retry#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
-    },
-    "bb-plugin-provider-retry#test": {
-      "dependsOn": [
-        "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
-        "topo"
-      ]
-    },
-    "bb-plugin-secrets#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-monaco-editor#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-secrets#test": {
+    "omnyo-plugin-monaco-editor#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1363,17 +1442,47 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-scheduled-send#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-pdf-preview#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-pdf-preview#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-plugin-api-tester#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-plugin-api-tester#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-provider-acp#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-provider-acp#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-omnyo--provider-acp-next#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-scheduled-send#test": {
+    "omnyo-plugin-omnyo--provider-acp-next#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1381,45 +1490,37 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-drafts#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"]
+    "omnyo-plugin-provider-claude-code#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
     },
-    "bb-plugin-drafts#test": {
+    "omnyo-plugin-provider-claude-code#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ]
     },
-    "bb-plugin-side-chat#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
-      ]
+    "omnyo-plugin-provider-codex#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
     },
-    "bb-plugin-side-chat#test": {
+    "omnyo-plugin-provider-codex#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
-      ],
+      ]
+    },
+    "omnyo-plugin-provider-pi#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-theme-preview#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
-      ]
-    },
-    "bb-plugin-theme-preview#test": {
+    "omnyo-plugin-provider-pi#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1427,17 +1528,27 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-thread-list#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-omnyo--prompt-library#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-omnyo--prompt-library#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-omnyo--provider-usage#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-thread-list#test": {
+    "omnyo-plugin-omnyo--provider-usage#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1445,17 +1556,27 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-tasks#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-provider-retry#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-provider-retry#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-secrets#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-tasks#test": {
+    "omnyo-plugin-secrets#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1463,17 +1584,17 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-workflows#typecheck": {
-      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+    "omnyo-plugin-scheduled-send#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-workflows#test": {
+    "omnyo-plugin-scheduled-send#test": {
       "dependsOn": [
         "//#ensure-native-modules",
-        "@get-bb/plugin-sdk#build",
+        "@omnyo/plugin-sdk#build",
         "topo"
       ],
       "inputs": [
@@ -1481,11 +1602,111 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "@bb/plugin-registry#typecheck": {
+    "omnyo-plugin-drafts#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"]
+    },
+    "omnyo-plugin-drafts#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ]
+    },
+    "omnyo-plugin-side-chat#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-side-chat#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-theme-preview#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-theme-preview#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-thread-list#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-thread-list#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-tasks#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-tasks#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-workflows#typecheck": {
+      "dependsOn": ["@omnyo/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "omnyo-plugin-workflows#test": {
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@omnyo/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "@omnyo/plugin-registry#typecheck": {
       "dependsOn": ["topo"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/packages/shared-ui/src/**"]
     },
-    "@bb/plugin-registry#test": {
+    "@omnyo/plugin-registry#test": {
       "dependsOn": ["//#ensure-native-modules", "topo"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/packages/shared-ui/src/**"]
     }

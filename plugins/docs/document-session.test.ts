@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Proposal } from "./proposals.js";
 import { createDocumentSession } from "./document-session.js";
 
-vi.mock("@get-bb/plugin-sdk/app", () => ({
+vi.mock("@omnyo/plugin-sdk/app", () => ({
   useRealtime: vi.fn(),
   useRpc: vi.fn(),
 }));
@@ -37,9 +37,11 @@ function proposal(
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((complete) => {
     resolve = complete;
   });
+
   return { promise, resolve };
 }
 
@@ -57,10 +59,12 @@ async function loadedSession(
   const session = createDocumentSession({ call }, "personal", "letter.md");
   await session.refresh();
   call.mockClear();
+
   return { session, call };
 }
 
 beforeEach(() => vi.useFakeTimers());
+
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
@@ -86,11 +90,13 @@ describe("Docs document sessions", () => {
 
   it("drains edits made during a save using the returned file hash", async () => {
     const { session, call } = await loadedSession();
+
     const first = deferred<{
       outcome: "written";
       sha256: string;
       sizeBytes: number;
     }>();
+
     call.mockReturnValueOnce(first.promise);
     call.mockResolvedValueOnce({
       outcome: "written",

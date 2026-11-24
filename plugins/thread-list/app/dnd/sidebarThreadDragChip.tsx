@@ -50,6 +50,7 @@ export function SidebarThreadDragChip({
 
 export function createSnapSidebarThreadDragChipToCursor(): Modifier {
   let overlayOriginRect: ClientRect | null = null;
+
   return ({
     activatorEvent,
     active,
@@ -59,9 +60,12 @@ export function createSnapSidebarThreadDragChipToCursor(): Modifier {
   }) => {
     if (active === null) {
       overlayOriginRect = null;
+
       return transform;
     }
+
     overlayOriginRect ??= activeNodeRect;
+
     if (
       overlayOriginRect === null ||
       draggingNodeRect === null ||
@@ -69,8 +73,11 @@ export function createSnapSidebarThreadDragChipToCursor(): Modifier {
     ) {
       return transform;
     }
+
     const coordinates = getEventCoordinates(activatorEvent);
+
     if (coordinates === null) return transform;
+
     return {
       ...transform,
       x:

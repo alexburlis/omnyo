@@ -4,7 +4,9 @@ import { collectOptionalFieldPaths } from "../src/collect-optional-field-paths.j
 
 describe("collectOptionalFieldPaths", () => {
   it("reports an optional field inside an array element", () => {
-    const rows = z.array(z.object({ id: z.string(), note: z.string().optional() }));
+    const rows = z.array(
+      z.object({ id: z.string(), note: z.string().optional() }),
+    );
 
     expect(collectOptionalFieldPaths({ rows })).toEqual(["rows.note"]);
   });
@@ -22,6 +24,7 @@ describe("collectOptionalFieldPaths", () => {
       note?: string;
       children: Branch[];
     }
+
     const branch: z.ZodType<Branch> = z.lazy(() =>
       z.object({
         note: z.string().optional(),

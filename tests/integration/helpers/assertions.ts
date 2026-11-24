@@ -6,8 +6,8 @@ import type {
   Thread,
   ThreadEventRow,
   ThreadStatus,
-} from "@bb/domain";
-import { createPublicApiClient } from "@bb/server-contract";
+} from "@omnyo/domain";
+import { createPublicApiClient } from "@omnyo/server-contract";
 import {
   previewThreadText,
   stringifyThreadEventData,
@@ -40,9 +40,11 @@ async function pollUntil<T>(
 
   while (Date.now() - startedAt <= timeoutMs) {
     const value = await check();
+
     if (value) {
       return value;
     }
+
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 
@@ -53,9 +55,11 @@ async function readHost(api: PublicApiClient, hostId: string): Promise<Host> {
   const response = await api.hosts[":id"].$get({
     param: { id: hostId },
   });
+
   if (response.status !== 200) {
     throw new Error(`Expected host ${hostId} to exist, got ${response.status}`);
   }
+
   return response.json();
 }
 
@@ -67,6 +71,7 @@ async function buildThreadStatusFailureMessage(
     getThreadEvents(api, context.threadId),
     getThreadOutput(api, context.threadId).catch(() => null),
   ]);
+
   const { lastError, lastTurnCompleted, lastTurnStarted, recentEvents } =
     summarizeThreadEventTail(events, 12);
 
@@ -88,11 +93,13 @@ export async function waitForThreadStatus(
   timeoutMs = 10_000,
 ): Promise<Thread> {
   let currentStatus: ThreadStatus | "unknown" = "unknown";
+
   try {
     return await pollUntil(
       async () => {
         const thread = await getThread(api, threadId);
         currentStatus = thread.status;
+
         if (thread.status === "error" && status !== "error") {
           throw new Error(
             await buildThreadStatusFailureMessage(api, {
@@ -102,9 +109,11 @@ export async function waitForThreadStatus(
             }),
           );
         }
+
         if (thread.status === status) {
           return thread;
         }
+
         return null;
       },
       `Timed out waiting for thread ${threadId} to reach status ${status}`,
@@ -124,6 +133,7 @@ export async function waitForThreadStatus(
         }),
       );
     }
+
     throw error;
   }
 }
@@ -135,10 +145,12 @@ export async function waitForThreadOutputContaining(
   timeoutMs = 10_000,
 ): Promise<string> {
   let currentOutput = "";
+
   return pollUntil(
     async () => {
       const output = await getThreadOutput(api, threadId);
       currentOutput = previewThreadText(output);
+
       return output?.includes(expectedText) ? output : null;
     },
     `Timed out waiting for thread ${threadId} output to contain ${JSON.stringify(expectedText)}`,
@@ -154,10 +166,12 @@ export async function waitForEventType(
   timeoutMs = 10_000,
 ): Promise<ThreadEventRow> {
   let lastTypes = "none";
+
   return pollUntil(
     async () => {
       const events = await getThreadEvents(api, threadId);
       lastTypes = events.map((event) => event.type).join(", ") || "none";
+
       return events.find((event) => event.type === eventType) ?? null;
     },
     `Timed out waiting for event ${eventType} on thread ${threadId}`,
@@ -171,15 +185,19 @@ export async function waitForHostConnected(
   timeoutMs = 10_000,
 ): Promise<Host> {
   let currentHosts = "none";
+
   return pollUntil(
     async () => {
       const response = await api.hosts.$get({});
+
       if (response.status !== 200) {
         throw new Error(`Expected hosts list, got ${response.status}`);
       }
+
       const hosts: Host[] = await response.json();
       currentHosts =
         hosts.map((host) => `${host.id}:${host.status}`).join(", ") || "none";
+
       return hosts.find((host) => host.status === "connected") ?? null;
     },
     "Timed out waiting for a connected host",
@@ -198,6 +216,7 @@ export async function waitForHostDisconnected(
     async () => {
       const host = await readHost(api, hostId);
       currentStatus = host.status;
+
       return host.status === "disconnected" ? host : null;
     },
     `Timed out waiting for host ${hostId} to disconnect`,
@@ -213,10 +232,12 @@ export async function waitForEnvironmentStatus(
   timeoutMs = 10_000,
 ): Promise<Environment> {
   let currentStatus = "unknown";
+
   return pollUntil(
     async () => {
       const environment = await getEnvironment(api, environmentId);
       currentStatus = environment.status;
+
       return environment.status === status ? environment : null;
     },
     `Timed out waiting for environment ${environmentId} to reach ${status}`,
@@ -233,6 +254,7 @@ export async function waitForPathRemoval(
     async () => {
       try {
         await fs.access(pathToCheck);
+
         return null;
       } catch {
         return true;

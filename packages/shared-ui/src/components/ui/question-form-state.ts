@@ -3,15 +3,19 @@ export interface QuestionOption {
   label: string;
   description?: string;
   preview?: string;
+  recommended?: boolean;
 }
 
 export interface Question {
+  additiveNotes?: boolean;
   id: string;
   prompt: string;
   shortLabel: string;
   multiSelect: boolean;
   allowFreeText: boolean;
   options: readonly QuestionOption[];
+  context?: string;
+  optional?: boolean;
 }
 
 export type QuestionAnswer = {
@@ -35,6 +39,7 @@ export function createInitialFormState(
   questions: readonly Question[],
 ): QuestionFormState {
   const state: QuestionFormState = {};
+
   for (const question of questions) {
     state[question.id] = {
       selected: [],
@@ -42,6 +47,7 @@ export function createInitialFormState(
       otherText: "",
     };
   }
+
   return state;
 }
 
@@ -63,6 +69,7 @@ function validSelectedValues(
   selectedValues: readonly string[],
 ): string[] {
   const optionValues = new Set(question.options.map((option) => option.value));
+
   return selectedValues.filter((value) => optionValues.has(value));
 }
 
@@ -71,6 +78,7 @@ export function isQuestionAnswered(
   state: QuestionAnswerState,
 ): boolean {
   if (validSelectedValues(question, state.selected).length > 0) return true;
+
   return state.otherSelected && state.otherText.trim().length > 0;
 }
 
@@ -80,13 +88,17 @@ function buildQuestionAnswer(
 ): QuestionAnswer {
   const freeText = state.otherText.trim();
   const includeFreeText = state.otherSelected && freeText.length > 0;
-  if (question.multiSelect) {
+
+  if (question.multiSelect || question.additiveNotes) {
     const selected = validSelectedValues(question, state.selected);
+
     return includeFreeText ? { selected, freeText } : { selected };
   }
+
   if (state.otherSelected) {
     return includeFreeText ? { selected: [], freeText } : { selected: [] };
   }
+
   return { selected: validSelectedValues(question, state.selected) };
 }
 
@@ -95,12 +107,14 @@ export function buildQuestionAnswers(
   formState: QuestionFormState,
 ): Record<string, QuestionAnswer> {
   const answers: Record<string, QuestionAnswer> = {};
+
   for (const question of questions) {
     answers[question.id] = buildQuestionAnswer(
       question,
       answerStateFor(formState, question),
     );
   }
+
   return answers;
 }
 
@@ -114,7 +128,9 @@ export function resolveQuestionShortcutChoice(
   index: number,
 ): QuestionShortcutChoice {
   const option = question.options[index];
+
   if (option) return { kind: "option", value: option.value };
+
   if (
     index === question.options.length &&
     question.options.length > 0 &&
@@ -122,5 +138,6 @@ export function resolveQuestionShortcutChoice(
   ) {
     return { kind: "other" };
   }
+
   return null;
 }

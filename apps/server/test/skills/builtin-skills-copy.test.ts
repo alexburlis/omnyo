@@ -12,8 +12,9 @@ import {
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), "bb-builtin-skills-copy-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "omnyo-builtin-skills-copy-"));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -44,8 +45,8 @@ describe("builtin skills copy", () => {
       targetPath,
     );
     await expect(
-      readFile(path.join(targetPath, "bb-cli", "SKILL.md"), "utf8"),
-    ).resolves.toBe(await readBuiltinSkill("bb-cli"));
+      readFile(path.join(targetPath, "omnyo-cli", "SKILL.md"), "utf8"),
+    ).resolves.toBe(await readBuiltinSkill("omnyo-cli"));
   });
 
   it("throws when the sentinel skill is missing beside the module", async () => {

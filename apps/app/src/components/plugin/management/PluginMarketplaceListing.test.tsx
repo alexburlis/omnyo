@@ -21,10 +21,10 @@ function catalogEntry(pluginId: string): PluginCatalogSearchEntry {
     collections: [],
     source: `npm:${pluginId}`,
     repositoryUrl: null,
-    marketplace: "bb-community",
-    marketplaceDisplayName: "BB Community",
-    publisherKey: "bb-community",
-    publisherLabel: "BB Community",
+    marketplace: "acme-plugins",
+    marketplaceDisplayName: "Acme Plugins",
+    publisherKey: "acme-plugins",
+    publisherLabel: "Acme Plugins",
     official: true,
     author: {
       name: "Pat Lee",
@@ -34,7 +34,6 @@ function catalogEntry(pluginId: string): PluginCatalogSearchEntry {
     installed: false,
     conflictingInstallSource: null,
     installedByDefault: false,
-    installs: null,
     compatible: true,
     incompatibleReason: null,
   };
@@ -43,6 +42,28 @@ function catalogEntry(pluginId: string): PluginCatalogSearchEntry {
 afterEach(cleanup);
 
 describe("plugin marketplace author links", () => {
+  it("keeps a private bundled plugin's author distinct from its marketplace", () => {
+    render(
+      <MemoryRouter>
+        <PluginCardAuthor
+          entry={{
+            ...catalogEntry("ours"),
+            marketplace: "omnyo-official",
+            author: {
+              name: "alexburlis",
+              github: "alexburlis",
+              url: "https://github.com/alexburlis",
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.getByRole("link", { name: "alexburlis" }).getAttribute("href"),
+    ).toContain("github%3Aalexburlis");
+    expect(screen.queryByText("Omnyo Official")).toBeNull();
+  });
+
   it("routes the detail author name to the author page", () => {
     render(
       <MemoryRouter initialEntries={["/plugins/Current?category=security"]}>
@@ -54,12 +75,13 @@ describe("plugin marketplace author links", () => {
     expect(
       screen.getByRole("link", { name: "Pat Lee" }).getAttribute("href"),
     ).toBe(
-      "/plugins?category=security&author=12%3Abb-community%3Agithub%3Apatlee",
+      "/plugins?category=security&author=12%3Aacme-plugins%3Agithub%3Apatlee",
     );
   });
 
   it("excludes the current plugin and caps plain teaser rows at four", () => {
     const current = catalogEntry("Current");
+
     const entries = [
       current,
       catalogEntry("Echo"),
@@ -72,6 +94,7 @@ describe("plugin marketplace author links", () => {
         author: { name: "Other", github: null, url: null },
       },
     ];
+
     const onOpenPlugin = vi.fn();
     render(
       <MemoryRouter>

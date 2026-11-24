@@ -6,17 +6,76 @@ import {
 } from "./desktop-browser-import.js";
 
 const id = z.string().min(1).max(256);
+
 export const desktopBrowserInstanceSchema = z.object({
   instanceId: id,
   generation: id,
   label: z.string().min(1).max(256),
+  rendererProfiling: z.literal(true).optional(),
 });
+
+const rendererProfileDuration = z.number().int().min(200).max(5000);
+
+export const desktopRendererProfileDurationSchema =
+  rendererProfileDuration.default(2000);
+
+const sampleCount = z.number().int().nonnegative().max(1_000_000);
+
+export const desktopRendererProfileSchema = z
+  .object({
+    requestedDurationMs: rendererProfileDuration,
+    actualDurationMs: z.number().finite().nonnegative().max(60_000),
+    sampleIntervalUs: z.literal(1000),
+    totalSamples: sampleCount,
+    omittedSamples: sampleCount,
+    hotspots: z
+      .array(
+        z
+          .object({
+            assetPath: z
+              .string()
+              .max(256)
+              .regex(/^\/assets\/[A-Za-z0-9_-][A-Za-z0-9_.-]*\.js$/u),
+            line: z.number().int().positive().max(10_000_000),
+            column: z.number().int().positive().max(10_000_000),
+            hits: sampleCount,
+          })
+          .strict(),
+      )
+      .max(100),
+    builtinSamples: z
+      .object({
+        idle: sampleCount,
+        program: sampleCount,
+        garbageCollection: sampleCount,
+      })
+      .strict(),
+    truncated: z.boolean(),
+  })
+  .strict()
+  .refine(
+    (profile) =>
+      profile.totalSamples ===
+      profile.omittedSamples +
+        profile.hotspots.reduce((sum, frame) => sum + frame.hits, 0) +
+        profile.builtinSamples.idle +
+        profile.builtinSamples.program +
+        profile.builtinSamples.garbageCollection,
+    "Profile sample counts must be conserved",
+  );
+
+export type DesktopRendererProfile = z.infer<
+  typeof desktopRendererProfileSchema
+>;
+
 export const desktopBrowserLeaseSchema = z.object({
   leaseId: id,
   controllerLabel: z.string().min(1).max(256),
   expiresAt: z.number().int().positive(),
 });
+
 export type DesktopBrowserLease = z.infer<typeof desktopBrowserLeaseSchema>;
+
 export const desktopBrowserTabSchema = z.object({
   tabId: id,
   threadId: id,
@@ -25,22 +84,30 @@ export const desktopBrowserTabSchema = z.object({
   control: desktopBrowserLeaseSchema.nullable(),
   presentation: z.enum(["hidden", "reveal"]),
 });
+
 const instanceTarget = { instanceId: id, generation: id };
+
 const target = { ...instanceTarget, threadId: id };
+
 const tabTarget = { ...target, tabId: id };
+
 const leaseTarget = { ...target, leaseId: id };
+
 const tabIds = z
   .array(id)
   .min(1)
   .max(100)
   .refine((ids) => new Set(ids).size === ids.length);
+
 export const desktopBrowserNavigationUrlSchema = z
   .string()
   .max(32768)
   .refine((value) => {
     if (value === "about:blank") return true;
+
     try {
       const url = new URL(value);
+
       return (
         (url.protocol === "https:" || url.protocol === "http:") &&
         !url.username &&
@@ -50,9 +117,17 @@ export const desktopBrowserNavigationUrlSchema = z
       return false;
     }
   }, "Expected an HTTP(S) URL or about:blank");
+
 export const desktopBrowserCommandSchemas = {
   "desktop.browser.list_instances": z
     .object({ type: z.literal("desktop.browser.list_instances") })
+    .strict(),
+  "desktop.browser.profile_renderer": z
+    .object({
+      type: z.literal("desktop.browser.profile_renderer"),
+      ...instanceTarget,
+      durationMs: desktopRendererProfileDurationSchema,
+    })
     .strict(),
   "desktop.browser.list_tabs": z
     .object({ type: z.literal("desktop.browser.list_tabs"), ...target })
@@ -110,8 +185,10 @@ export const desktopBrowserCommandSchemas = {
     })
     .strict(),
 };
+
 export const desktopBrowserCommandSchema = z.discriminatedUnion("type", [
   desktopBrowserCommandSchemas["desktop.browser.list_instances"],
+  desktopBrowserCommandSchemas["desktop.browser.profile_renderer"],
   desktopBrowserCommandSchemas["desktop.browser.list_tabs"],
   desktopBrowserCommandSchemas["desktop.browser.create_tab"],
   desktopBrowserCommandSchemas["desktop.browser.reveal_tab"],
@@ -123,11 +200,14 @@ export const desktopBrowserCommandSchema = z.discriminatedUnion("type", [
   desktopBrowserCommandSchemas["desktop.browser.list_import_sources"],
   desktopBrowserCommandSchemas["desktop.browser.import_cookies"],
 ]);
+
 const ok = z.object({ ok: z.literal(true) });
+
 export const desktopBrowserResultSchemas = {
   "desktop.browser.list_instances": z.object({
     instances: z.array(desktopBrowserInstanceSchema).max(100),
   }),
+  "desktop.browser.profile_renderer": desktopRendererProfileSchema,
   "desktop.browser.list_tabs": z.object({
     tabs: z.array(desktopBrowserTabSchema).max(1000),
   }),
@@ -150,6 +230,7 @@ export const desktopBrowserResultSchemas = {
       .url()
       .refine((value) => {
         const url = new URL(value);
+
         return (
           url.protocol === "ws:" &&
           url.hostname === "127.0.0.1" &&
@@ -161,21 +242,28 @@ export const desktopBrowserResultSchemas = {
   "desktop.browser.release_control": ok,
   "desktop.browser.list_import_sources": z.object({
     sources: z.array(desktopBrowserImportSourceSchema).max(20),
+    recommended: desktopBrowserImportSelectionSchema.optional(),
   }),
   "desktop.browser.import_cookies": desktopBrowserImportOutcomeSchema,
 };
+
 export type DesktopBrowserCommand = z.infer<typeof desktopBrowserCommandSchema>;
+
 export type DesktopBrowserCommandType = DesktopBrowserCommand["type"];
+
 export type DesktopBrowserResult<
   T extends DesktopBrowserCommandType = DesktopBrowserCommandType,
 > = z.infer<(typeof desktopBrowserResultSchemas)[T]>;
+
 export type DesktopBrowserInstance = z.infer<
   typeof desktopBrowserInstanceSchema
 >;
+
 export type DesktopBrowserTab = z.infer<typeof desktopBrowserTabSchema>;
 
 export const DESKTOP_BROWSER_BROKER_DESCRIPTOR_FILE =
   "desktop-browser-broker.json";
+
 export const desktopBrowserBrokerDescriptorSchema = z
   .object({
     version: z.literal(1),
@@ -186,6 +274,7 @@ export const desktopBrowserBrokerDescriptorSchema = z
       .url()
       .refine((value) => {
         const url = new URL(value);
+
         return (
           url.protocol === "ws:" &&
           url.hostname === "127.0.0.1" &&
@@ -197,9 +286,11 @@ export const desktopBrowserBrokerDescriptorSchema = z
     token: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict();
+
 export type DesktopBrowserBrokerDescriptor = z.infer<
   typeof desktopBrowserBrokerDescriptorSchema
 >;
+
 export const desktopBrowserRegistrationSchema = z
   .object({
     type: z.literal("register"),
@@ -208,6 +299,7 @@ export const desktopBrowserRegistrationSchema = z
     instances: z.array(desktopBrowserInstanceSchema).max(100),
   })
   .strict();
+
 export const desktopBrowserBrokerRequestSchema = z
   .object({
     type: z.literal("request"),
@@ -215,6 +307,7 @@ export const desktopBrowserBrokerRequestSchema = z
     command: desktopBrowserCommandSchema,
   })
   .strict();
+
 export const desktopBrowserBrokerResponseSchema = z.discriminatedUnion("type", [
   z
     .object({ type: z.literal("result"), requestId: id, result: z.unknown() })
@@ -237,4 +330,5 @@ export const desktopBrowserChangedSchema = z
     tabs: z.array(desktopBrowserTabSchema).max(1000),
   })
   .strict();
+
 export type DesktopBrowserChanged = z.infer<typeof desktopBrowserChangedSchema>;

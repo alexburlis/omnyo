@@ -5,19 +5,21 @@ import { isFsErrorWithCode } from "../lib/fs-errors.js";
 
 export const DATA_DIR_AGENT_INSTRUCTIONS_RELATIVE_PATH = "AGENTS.md";
 
-export const WORKSPACE_AGENT_INSTRUCTIONS_RELATIVE_PATH = ".bb/AGENTS.md";
+export const WORKSPACE_AGENT_INSTRUCTIONS_RELATIVE_PATH = ".omnyo/AGENTS.md";
 
 function readAgentInstructionsFile(
   logger: ServerLogger,
   filePath: string,
 ): string | null {
   let content: string;
+
   try {
     content = fs.readFileSync(filePath, "utf8");
   } catch (error) {
     if (error instanceof Error && isFsErrorWithCode(error, "ENOENT")) {
       return null;
     }
+
     logger.warn(
       {
         filePath,
@@ -25,10 +27,12 @@ function readAgentInstructionsFile(
       },
       "Skipping unreadable agent instructions file",
     );
+
     return null;
   }
 
   const trimmed = content.trim();
+
   return trimmed.length > 0 ? trimmed : null;
 }
 

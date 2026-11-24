@@ -8,6 +8,10 @@ import { registerProviderCommands } from "../commands/provider.js";
 import { registerMachineCommands } from "../commands/machine.js";
 import { registerServerCommands } from "../commands/server.js";
 import { registerThreadCommands } from "../commands/thread/index.js";
+import { registerInboxCommands } from "../commands/inbox.js";
+import { registerWaitCommands } from "../commands/wait.js";
+import { registerExploreCommand } from "../commands/explore.js";
+
 const EXCLUDED_COMMANDS = new Set<string>();
 
 function collectLeafCommands(
@@ -15,15 +19,18 @@ function collectLeafCommands(
   prefix = "",
 ): Array<{ path: string; cmd: Command }> {
   const results: Array<{ path: string; cmd: Command }> = [];
+
   for (const sub of cmd.commands) {
     const fullPath = prefix ? `${prefix} ${sub.name()}` : sub.name();
     const children = sub.commands;
+
     if (children.length === 0) {
       results.push({ path: fullPath, cmd: sub });
     } else {
       results.push(...collectLeafCommands(sub, fullPath));
     }
   }
+
   return results;
 }
 
@@ -39,6 +46,9 @@ describe("CLI --json flag enforcement", () => {
     registerMachineCommands(program, getUrl);
     registerServerCommands(program, getUrl);
     registerThreadCommands(program, getUrl);
+    registerInboxCommands(program, getUrl);
+    registerWaitCommands(program, getUrl);
+    registerExploreCommand(program);
 
     const commands = collectLeafCommands(program);
     const missing: string[] = [];
@@ -46,6 +56,7 @@ describe("CLI --json flag enforcement", () => {
     for (const { path, cmd } of commands) {
       if (EXCLUDED_COMMANDS.has(path)) continue;
       const hasJson = cmd.options.some((opt) => opt.long === "--json");
+
       if (!hasJson) missing.push(path);
     }
 

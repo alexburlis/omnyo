@@ -1,7 +1,11 @@
 import { watch, type FSWatcher } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
+import {
+  defineRpcContract,
+  experimental_pluginPackageJsonSchemaV1,
+  type PluginApi,
+} from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 const swatchSchema = z
@@ -62,12 +66,15 @@ export function classifySelector(
     .split(",")
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
+
   if (parts.length === 0) return null;
   let sawShared = false;
   let sawLight = false;
   let sawDark = false;
+
   for (const part of parts) {
     if (/\s/.test(part.replace(/:not\([^)]*\)/g, ""))) return null;
+
     if (part === ":root") sawShared = true;
     else if (
       part === ".light" ||
@@ -80,9 +87,13 @@ export function classifySelector(
       sawDark = true;
     else return null;
   }
+
   if (sawShared) return "shared";
+
   if (sawDark && !sawLight) return "dark";
+
   if (sawLight && !sawDark) return "light";
+
   return null;
 }
 
@@ -97,11 +108,15 @@ export function parseThemeSwatches(css: string): {
     light: new Map(),
     dark: new Map(),
   };
+
   const source = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const blocks = source.matchAll(/([^{}]+)\{([^{}]*)\}/g);
+
   for (const block of blocks) {
     const mode = classifySelector(block[1]);
+
     if (!mode) continue;
+
     for (const declaration of block[2].matchAll(
       /--([a-zA-Z0-9-]+)\s*:\s*([^;]+);/g,
     )) {
@@ -121,9 +136,11 @@ export function parseThemeSwatches(css: string): {
   ): string | null => {
     if (seen.has(name)) return null;
     const value = tokens.get(name);
+
     if (value === undefined) return null;
     const nextSeen = new Set(seen).add(name);
     let resolved = value;
+
     for (let depth = 0; depth < 16 && resolved.includes("var("); depth += 1) {
       const before = resolved;
       resolved = resolved.replace(
@@ -133,8 +150,10 @@ export function parseThemeSwatches(css: string): {
           fallback?.trim() ??
           whole,
       );
+
       if (resolved === before) break;
     }
+
     return resolved.includes("var(") ? null : resolved;
   };
 
@@ -144,19 +163,25 @@ export function parseThemeSwatches(css: string): {
   ): ThemeSwatch => {
     const base = BUILTIN_SWATCHES.default[mode];
     const tokens = new Map<string, string>();
+
     for (const [key, candidates] of SWATCH_TOKENS) {
       for (const candidate of candidates)
         tokens.set(candidate, base[key] ?? "");
     }
+
     for (const [name, value] of source) tokens.set(name, value);
     const swatch = {} as ThemeSwatch;
+
     for (const [key, candidates] of SWATCH_TOKENS) {
       const token =
         candidates.find((candidate) => source.has(candidate)) ?? candidates[0];
+
       swatch[key] = resolveToken(token, tokens) ?? base[key];
     }
+
     return swatch;
   };
+
   return {
     light: build(declarations.light, "light"),
     dark: build(declarations.dark, "dark"),
@@ -179,6 +204,7 @@ async function readCustomThemeCss(
       signal?.throwIfAborted();
     }
   }
+
   return null;
 }
 
@@ -208,12 +234,13 @@ export const BUILTIN_SWATCHES: Record<
         'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     },
     dark: {
-      canvas: "oklch(0.195 0 0)",
-      sidebar: "color-mix(in oklch, oklch(0.81 0 0) 4.3%, oklch(0.195 0 0))",
-      card: "oklch(0.195 0 0)",
+      canvas: "oklch(0.178 0.011 268)",
+      sidebar:
+        "color-mix(in oklch, oklch(0.897 0.01 267) 4.3%, oklch(0.178 0.011 268))",
+      card: "oklch(0.178 0.011 268)",
       primary: "oklch(0.82 0 0)",
       accent: "oklch(0.72 0.09 250)",
-      foreground: "oklch(0.81 0 0)",
+      foreground: "oklch(0.897 0.01 267)",
       fontSans: '"Inter Variable", Inter, sans-serif',
       fontMono:
         'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
@@ -347,15 +374,19 @@ export async function buildCatalog(
 ): Promise<z.infer<typeof catalogSchema>> {
   const c = (result ?? {}) as Record<string, unknown>;
   const active = c.active as Record<string, unknown> | undefined;
+
   const activeThemeId =
     typeof active?.themeId === "string" ? active.themeId : null;
 
   const entries: Array<{ id: string; name: string }> = [];
+
   for (const id of Array.isArray(c.custom) ? c.custom : []) {
     if (typeof id === "string") entries.push({ id, name: id });
   }
+
   for (const plugin of Array.isArray(c.plugins) ? c.plugins : []) {
     const entry = plugin as Record<string, unknown>;
+
     if (typeof entry.id === "string") {
       entries.push({
         id: entry.id,
@@ -363,10 +394,12 @@ export async function buildCatalog(
       });
     }
   }
+
   for (const builtin of BUILTIN_THEMES) {
     if (!entries.some((entry) => entry.id === builtin.id))
       entries.push(builtin);
   }
+
   if (activeThemeId && !entries.some((entry) => entry.id === activeThemeId)) {
     entries.unshift({ id: activeThemeId, name: activeThemeId });
   }
@@ -374,12 +407,15 @@ export async function buildCatalog(
   const themes = await Promise.all(
     entries.map(async (entry) => {
       const css = await readCss(entry.id);
+
       const swatches = css
         ? parseThemeSwatches(css)
         : (BUILTIN_SWATCHES[entry.id] ?? { light: null, dark: null });
+
       return { ...entry, light: swatches.light, dark: swatches.dark };
     }),
   );
+
   return { activeThemeId, themes, revision: 0 };
 }
 
@@ -390,37 +426,44 @@ async function pluginThemeCssPath(
   localId: string,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const manifest = JSON.parse(
-    await readFile(resolve(rootDir, "package.json"), {
-      encoding: "utf8",
-      signal,
-    }),
-  ) as {
-    bb?: { themes?: Array<{ id?: string; css?: string }> };
-  };
-  const entry = manifest.bb?.themes?.find((theme) => theme.id === localId);
+  const manifest = experimental_pluginPackageJsonSchemaV1.parse(
+    JSON.parse(
+      await readFile(resolve(rootDir, "package.json"), {
+        encoding: "utf8",
+        signal,
+      }),
+    ),
+  );
+
+  const entry = manifest.omnyo.themes?.find((theme) => theme.id === localId);
+
   return entry?.css ? resolve(rootDir, entry.css) : null;
 }
 
 async function readPluginThemeCss(
-  bb: BbPluginApi,
+  api: PluginApi,
   themeId: string,
   rootDirs: Map<string, string>,
   signal?: AbortSignal,
 ): Promise<string | null> {
   const m = PLUGIN_THEME_ID_PATTERN.exec(themeId);
+
   if (!m) return null;
   const [, pluginId, localId] = m;
   const rootDir = rootDirs.get(pluginId);
+
   if (!rootDir) return null;
+
   try {
     const cssPath = await pluginThemeCssPath(rootDir, localId, signal);
+
     return cssPath
       ? await readFile(cssPath, { encoding: "utf8", signal })
       : null;
   } catch (error) {
     signal?.throwIfAborted();
-    bb.log.warn(`theme-preview: could not read ${themeId}: ${String(error)}`);
+    api.log.warn(`theme-preview: could not read ${themeId}: ${String(error)}`);
+
     return null;
   }
 }
@@ -432,31 +475,39 @@ async function activeThemePath(
   signal?: AbortSignal,
 ) {
   const pluginMatch = PLUGIN_THEME_ID_PATTERN.exec(themeId);
+
   if (pluginMatch) {
     const rootDir = rootDirs.get(pluginMatch[1]);
+
     if (!rootDir) return null;
+
     try {
       return await pluginThemeCssPath(rootDir, pluginMatch[2], signal);
     } catch {
       signal?.throwIfAborted();
+
       return null;
     }
   }
+
   if (!dir) return null;
+
   for (const candidate of customThemeCssCandidates(dir, themeId)) {
     try {
       signal?.throwIfAborted();
       await stat(candidate);
       signal?.throwIfAborted();
+
       return candidate;
     } catch {
       signal?.throwIfAborted();
     }
   }
+
   return null;
 }
 
-export function createCatalogLoader(bb: BbPluginApi) {
+export function createCatalogLoader(api: PluginApi) {
   const slowWarningMs = 5_000;
   const catalogOperationTimeoutMs = 15_000;
   const stamps = new Map<string, string>();
@@ -464,6 +515,7 @@ export function createCatalogLoader(bb: BbPluginApi) {
   let selectionGeneration = 0;
   let selectionQueue: Promise<void> = Promise.resolve();
   let latestCatalog: z.infer<typeof catalogSchema> | null = null;
+
   let catalogInFlight: {
     generation: number;
     promise: Promise<z.infer<typeof catalogSchema>>;
@@ -474,10 +526,11 @@ export function createCatalogLoader(bb: BbPluginApi) {
     operation: () => Promise<T>,
   ): Promise<T> => {
     const warning = setTimeout(() => {
-      bb.log.warn(
+      api.log.warn(
         `theme-preview: ${label} still pending after ${slowWarningMs}ms`,
       );
     }, slowWarningMs);
+
     try {
       return await operation();
     } finally {
@@ -491,15 +544,18 @@ export function createCatalogLoader(bb: BbPluginApi) {
   ): Promise<T> => {
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
+
     const deadline = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
         const error = new Error(
           `theme-preview: ${label} timed out after ${catalogOperationTimeoutMs}ms`,
         );
+
         controller.abort(error);
         reject(error);
       }, catalogOperationTimeoutMs);
     });
+
     try {
       return await warnIfSlow(label, () =>
         Promise.race([operation(controller.signal), deadline]),
@@ -511,31 +567,35 @@ export function createCatalogLoader(bb: BbPluginApi) {
 
   const loadCatalog = async (selectionAtStart: number) => {
     const raw = (await observeCatalogOperation("theme catalog", (signal) =>
-      bb.sdk.theme.catalog({ signal }),
+      api.sdk.theme.catalog({ signal }),
     )) as {
       dir?: unknown;
     };
+
     const dir = typeof raw?.dir === "string" ? raw.dir : null;
     const rootDirs = new Map<string, string>();
+
     try {
       const listed = (await observeCatalogOperation("plugin list", (signal) =>
-        bb.sdk.plugins.list({ signal }),
+        api.sdk.plugins.list({ signal }),
       )) as {
         plugins?: Array<{ id?: string; rootDir?: string }>;
       };
+
       for (const entry of listed.plugins ?? []) {
         if (typeof entry.id === "string" && typeof entry.rootDir === "string")
           rootDirs.set(entry.id, entry.rootDir);
       }
     } catch (error) {
-      bb.log.warn(`theme-preview: plugin list unavailable: ${String(error)}`);
+      api.log.warn(`theme-preview: plugin list unavailable: ${String(error)}`);
     }
+
     const built = await observeCatalogOperation(
       "catalog enrichment",
       (signal) =>
         buildCatalog(raw, async (id) =>
           id.startsWith("plugin:")
-            ? readPluginThemeCss(bb, id, rootDirs, signal)
+            ? readPluginThemeCss(api, id, rootDirs, signal)
             : dir
               ? readCustomThemeCss(dir, id, signal)
               : null,
@@ -548,6 +608,7 @@ export function createCatalogLoader(bb: BbPluginApi) {
         (signal) =>
           activeThemePath(built.activeThemeId!, dir, rootDirs, signal),
       );
+
       if (path) {
         try {
           const info = await observeCatalogOperation(
@@ -555,119 +616,141 @@ export function createCatalogLoader(bb: BbPluginApi) {
             async (signal) => {
               const result = await stat(path);
               signal.throwIfAborted();
+
               return result;
             },
           );
+
           const stamp = `${path}:${info.mtimeMs}:${info.size}`;
           const previousStamp = stamps.get(path);
           stamps.set(path, stamp);
+
           if (previousStamp !== undefined && stamp !== previousStamp) {
             const current = (await observeCatalogOperation(
               "active theme confirmation",
-              (signal) => bb.sdk.theme.catalog({ signal }),
+              (signal) => api.sdk.theme.catalog({ signal }),
             )) as { active?: { themeId?: unknown } };
+
             const currentThemeId =
               typeof current.active?.themeId === "string"
                 ? current.active.themeId
                 : null;
+
             if (
               selectionGeneration === selectionAtStart &&
               currentThemeId === built.activeThemeId
             ) {
               await warnIfSlow(`theme re-apply (${built.activeThemeId})`, () =>
-                bb.sdk.theme.set(built.activeThemeId!),
+                api.sdk.theme.set(built.activeThemeId!),
               );
               revision += 1;
-              bb.log.info(
+              api.log.info(
                 `theme-preview: ${built.activeThemeId} changed on disk — re-applied (rev ${revision})`,
               );
             }
           }
         } catch (error) {
-          bb.log.warn(
+          api.log.warn(
             `theme-preview: could not stat ${path}: ${String(error)}`,
           );
         }
       }
     }
+
     const next = { ...built, revision };
+
     if (selectionGeneration === selectionAtStart) latestCatalog = next;
+
     return next;
   };
 
   const catalog = () => {
     const generation = selectionGeneration;
+
     if (catalogInFlight?.generation === generation)
       return catalogInFlight.promise;
 
     const promise = loadCatalog(generation).finally(() => {
       if (catalogInFlight?.promise === promise) catalogInFlight = null;
     });
+
     catalogInFlight = { generation, promise };
+
     return promise;
   };
 
   const setTheme = async (themeId: string) => {
     selectionGeneration += 1;
     const generation = selectionGeneration;
+
     const apply = selectionQueue.then(async () => {
       await warnIfSlow(`theme apply (${themeId})`, () =>
-        bb.sdk.theme.set(themeId),
+        api.sdk.theme.set(themeId),
       );
     });
+
     selectionQueue = apply.catch(() => undefined);
     await apply;
 
     const base = latestCatalog ?? (await catalog());
     const selected = { ...base, activeThemeId: themeId };
+
     if (selectionGeneration === generation) latestCatalog = selected;
+
     return selected;
   };
 
   return { catalog, setTheme };
 }
 
-export default async function plugin(bb: BbPluginApi) {
-  const catalogLoader = createCatalogLoader(bb);
+export default async function plugin(api: PluginApi) {
+  const catalogLoader = createCatalogLoader(api);
   const catalog = catalogLoader.catalog;
 
-  bb.background.service("theme-watch", {
+  api.background.service("theme-watch", {
     async start(signal) {
       let watcher: FSWatcher | null = null;
       let timer: ReturnType<typeof setTimeout> | null = null;
+
       try {
-        const raw = (await bb.sdk.theme.catalog({ signal })) as {
+        const raw = (await api.sdk.theme.catalog({ signal })) as {
           dir?: unknown;
         };
+
         if (signal.aborted) return;
         const dir = typeof raw?.dir === "string" ? raw.dir : null;
+
         if (!dir) return;
+
         const onChange = () => {
           if (timer) clearTimeout(timer);
           timer = setTimeout(async () => {
             try {
               const next = await catalog();
-              bb.realtime.publish("theme-preview:changed", {
+              api.realtime.publish("theme-preview:changed", {
                 revision: next.revision,
                 at: Date.now(),
               });
             } catch (error) {
-              bb.log.warn(
+              api.log.warn(
                 `theme-preview: watch refresh failed: ${String(error)}`,
               );
             }
           }, 120);
         };
+
         try {
           watcher = watch(dir, { recursive: true }, onChange);
           watcher.on("error", (error) =>
-            bb.log.warn(`theme-preview: watcher error: ${String(error)}`),
+            api.log.warn(`theme-preview: watcher error: ${String(error)}`),
           );
-          bb.log.info(`theme-preview: watching ${dir}`);
+          api.log.info(`theme-preview: watching ${dir}`);
         } catch (error) {
-          bb.log.warn(`theme-preview: cannot watch ${dir}: ${String(error)}`);
+          api.log.warn(`theme-preview: cannot watch ${dir}: ${String(error)}`);
+
           return;
         }
+
         await new Promise<void>((resolve) => {
           if (signal.aborted) resolve();
           else
@@ -682,7 +765,7 @@ export default async function plugin(bb: BbPluginApi) {
     },
   });
 
-  bb.rpc.register(rpcContract, {
+  api.rpc.register(rpcContract, {
     async themeCatalog() {
       return catalog();
     },
@@ -691,5 +774,5 @@ export default async function plugin(bb: BbPluginApi) {
     },
   });
 
-  bb.log.info("theme-preview ready");
+  api.log.info("theme-preview ready");
 }

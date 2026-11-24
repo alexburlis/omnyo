@@ -7,6 +7,7 @@ export interface LinkRowProps extends Omit<GroupedRowProps, "onPress"> {
 
 export function LinkRow({ href, trailing = "chevron", ...row }: LinkRowProps) {
   const router = useRouter();
+
   return (
     <GroupedRow
       {...row}

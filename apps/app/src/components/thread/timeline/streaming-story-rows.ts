@@ -1,4 +1,4 @@
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 
 export interface ExplorationStep {
   callId: string;
@@ -27,6 +27,7 @@ export function explorationRow(
     cmd: null,
     completedAt: seq,
   };
+
   switch (step.intent.type) {
     case "read":
       return { ...base, workKind: "file-read", path: step.intent.path };

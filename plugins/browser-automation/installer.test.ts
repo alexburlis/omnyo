@@ -39,15 +39,21 @@ import { resolveRuntime } from "./runtime-pin.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof fsPromises>();
+
   return { ...actual, unlink: vi.fn(actual.unlink) };
 });
 
 const platform = currentPlatform() as RuntimePlatform;
+
 const version = "1.0.0-test";
+
 const binaryContent = `#!/bin/sh\necho "dev-browser ${version}"\n`;
+
 const sha256 = (text: string) =>
   createHash("sha256").update(text).digest("hex");
+
 const tarballIntegrity = `sha512-${createHash("sha512").update("tarball").digest("base64")}`;
+
 const release: RuntimeRelease = {
   package: "dev-browser",
   version,
@@ -55,8 +61,11 @@ const release: RuntimeRelease = {
   repository: "example/dev-browser",
   artifacts: { [platform]: sha256(binaryContent) },
 };
+
 const asset = `dev-browser-${platform}`;
+
 const attestationPath = `/-/npm/v1/attestations/dev-browser@${version}`;
+
 const noWindowsRuntime =
   "DevBrowser publishes no Windows runtime, so the runtime installer never runs on Windows";
 
@@ -77,6 +86,7 @@ function provenance(
       },
     },
   };
+
   return {
     attestations: [
       {
@@ -90,6 +100,7 @@ function provenance(
     ],
   };
 }
+
 const validProvenance = provenance(
   "example/dev-browser",
   `refs/tags/v${version}`,
@@ -123,11 +134,17 @@ void main().catch((error) => { console.error(error); process.exit(1); });
 `;
 
 let fixture: string;
+
 let npmDir: string;
+
 let server: Server;
+
 let base: string;
+
 let served: Record<string, string> = {};
+
 let requests: string[] = [];
+
 const dirs: string[] = [];
 
 async function configureNpm(config: object) {
@@ -142,11 +159,13 @@ async function configureNpm(config: object) {
   );
   await rm(join(npmDir, "calls"), { force: true });
 }
+
 async function npmCalls(): Promise<string[]> {
   return (await readFile(join(npmDir, "calls"), "utf8").catch(() => ""))
     .split("\n")
     .filter(Boolean);
 }
+
 function env(withNpm = true): NodeJS.ProcessEnv {
   return {
     PATH: withNpm
@@ -155,14 +174,18 @@ function env(withNpm = true): NodeJS.ProcessEnv {
     HOME: fixture,
   };
 }
+
 async function entries(dir: string): Promise<string[]> {
   return (await readdir(installRoot(dir))).filter((entry) => entry !== "cache");
 }
+
 async function dataDir(): Promise<string> {
   const dir = await mkdtemp(join(fixture, "data-"));
   dirs.push(dir);
+
   return dir;
 }
+
 function install(
   dir: string,
   overrides: Partial<Parameters<typeof installRuntime>[0]> = {},
@@ -179,7 +202,7 @@ function install(
 }
 
 beforeAll(async () => {
-  fixture = await mkdtemp(join(tmpdir(), "bb-dev-browser-installer-"));
+  fixture = await mkdtemp(join(tmpdir(), "omnyo-dev-browser-installer-"));
   npmDir = join(fixture, "npm-bin");
   await mkdir(npmDir);
   await writeFile(join(npmDir, "fake-npm.js"), fakeNpmSource);
@@ -191,29 +214,36 @@ beforeAll(async () => {
   server = createServer((request, response) => {
     requests.push(request.url ?? "");
     const body = served[request.url ?? ""];
+
     if (body === undefined) {
       response.statusCode = 404;
       response.end("missing");
+
       return;
     }
+
     response.setHeader("content-length", Buffer.byteLength(body));
     response.end(body);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
+
   if (typeof address !== "object" || address === null)
     throw new Error("no port");
   base = `http://127.0.0.1:${address.port}`;
 });
+
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await rm(fixture, { recursive: true, force: true });
 });
+
 afterEach(async () => {
   await Promise.all(
     dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
 });
+
 beforeEach(async () => {
   requests = [];
   served = {
@@ -232,9 +262,11 @@ describe("runtime installer", () => {
       await configureNpm({ omitLockfileRegistryResolved });
       const dir = await dataDir();
       const progress: string[] = [];
+
       const installed = await install(dir, {
         onProgress: (detail) => progress.push(detail),
       });
+
       expect(installed.sha256).toBe(sha256(binaryContent));
       expect(installed.binary).toBe(
         join(
@@ -253,10 +285,12 @@ describe("runtime installer", () => {
         "verifying npm registry signature and provenance",
       );
       expect(await entries(dir)).toEqual([`dev-browser@${version}`]);
+
       const warm = await install(dir, {
         env: env(false),
         downloadBase: "http://127.0.0.1:9/unreachable",
       });
+
       expect(warm.binary).toBe(installed.binary);
       expect(requests).toHaveLength(3);
     },
@@ -376,13 +410,18 @@ describe("runtime installer", () => {
     const ours = join(installRoot(dir), `.staging-dev-browser@${version}-old`);
     await mkdir(foreign);
     await mkdir(ours);
+
     const { unlink: originalUnlink } =
       await vi.importActual<typeof fsPromises>("node:fs/promises");
+
     let publishInstalling: () => void = () => {};
+
     const installing = new Promise<void>((resolve) => {
       publishInstalling = resolve;
     });
+
     let delayed = false;
+
     const unlinkSpy = vi
       .spyOn(fsPromises, "unlink")
       .mockImplementation(async (path) => {
@@ -390,12 +429,16 @@ describe("runtime installer", () => {
           delayed = true;
           await installing;
         }
+
         await originalUnlink(path);
       });
+
     let installed;
+
     const onProgress = (detail: string) => {
       if (detail.startsWith("installing ")) publishInstalling();
     };
+
     try {
       installed = await Promise.all([
         install(dir, { onProgress }),
@@ -405,6 +448,7 @@ describe("runtime installer", () => {
     } finally {
       unlinkSpy.mockRestore();
     }
+
     const [a, b, c] = installed;
     expect(b.binary).toBe(a.binary);
     expect(c.binary).toBe(a.binary);
@@ -432,10 +476,13 @@ describe("runtime installer", () => {
       new RegExp(`^${process.pid} [0-9a-f]{16}$`),
     );
     let bHeld = false;
+
     const b = acquireLock(path, signal).then((unlock) => {
       bHeld = true;
+
       return unlock;
     });
+
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(bHeld).toBe(false);
     await unlockA();
@@ -456,10 +503,12 @@ describe("runtime installer", () => {
     const dir = await dataDir();
     await configureNpm({ installDelayMs: 60_000 });
     const controller = new AbortController();
+
     const pending = install(dir, { signal: controller.signal }).then(
       () => null,
       (error: unknown) => error,
     );
+
     try {
       await vi.waitFor(
         async () => {
@@ -475,6 +524,7 @@ describe("runtime installer", () => {
         message: expect.stringContaining("cancelled"),
       });
     }
+
     expect(await entries(dir)).toEqual([]);
     await configureNpm({});
     await expect(install(dir)).resolves.toMatchObject({ version });

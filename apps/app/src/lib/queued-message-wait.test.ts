@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { QueuedMessageWaitingOn } from "@bb/domain";
+import type { PromptInput, QueuedMessageWaitingOn } from "@omnyo/domain";
+import { makeThreadQueuedMessage } from "@omnyo/test-helpers/domain-fixtures";
 import {
   describeQueuedMessageWait,
   formatQueuedMessageCountdown,
@@ -7,7 +8,9 @@ import {
   queuedMessageCountdownInstant,
   queuedMessageFallbackTitle,
   queuedMessageHasWaitLine,
+  queuedMessageSystemTitle,
   queuedMessageWaitIcon,
+  projectQueuedMessagesForUpdate,
 } from "./queued-message-wait";
 
 const NOW = new Date(2026, 7, 28, 9, 0, 0).getTime();
@@ -18,7 +21,9 @@ function clockAt(timestamp: number): string {
     minute: "2-digit",
   });
 }
+
 const MINUTE = 60_000;
+
 const HOUR = 60 * MINUTE;
 
 function describeWait(
@@ -59,6 +64,12 @@ describe("describeQueuedMessageWait", () => {
     expect(describeWait({ kind: "interaction" })).toBe(
       "Waiting for your reply",
     );
+    expect(describeWait({ kind: "server-update" })).toBe(
+      "Sending after the update",
+    );
+    expect(describeWait({ kind: "superseded" })).toBe(
+      "Not sent · a newer message was sent after it",
+    );
   });
 
   it("names the absent machine a host-offline row is waiting on", () => {
@@ -89,6 +100,7 @@ describe("describeQueuedMessageWait", () => {
       pluginId: "concurrency-limit",
       reason: "4 of 4 running",
     };
+
     expect(
       describeWait(waitingOn, { pluginDisplayName: "Concurrency Limit" }),
     ).toBe("Held by Concurrency Limit · 4 of 4 running");
@@ -141,6 +153,48 @@ describe("describeQueuedMessageWait", () => {
     ).toBe(
       "Rate limited · held by Concurrency limit · 2 of 2 running on all hosts · attempt 2",
     );
+    expect(
+      describeQueuedMessageWait({
+        failureReason: null,
+        now: NOW,
+        payload: {
+          kind: "retry",
+          retryOfTurnRequestId: "req-1",
+          attempt: 2,
+          reason: "Rate limited",
+        },
+        pluginDisplayName: "Provider Retry",
+        sendAt: NOW + HOUR,
+        waitingOn: {
+          kind: "plugin",
+          pluginId: "provider-retry",
+          reason: "Rate limited",
+        },
+      }),
+    ).toBe(
+      `Rate limited · held by Provider Retry · retrying at ${clockAt(NOW + HOUR)} · attempt 2`,
+    );
+    expect(
+      describeQueuedMessageWait({
+        failureReason: null,
+        now: NOW,
+        payload: {
+          kind: "retry",
+          retryOfTurnRequestId: "req-1",
+          attempt: 3,
+          reason: "Rate limited",
+        },
+        pluginDisplayName: "Provider Retry",
+        sendAt: null,
+        waitingOn: {
+          kind: "plugin",
+          pluginId: "provider-retry",
+          reason: "Rate limited until the account resets",
+        },
+      }),
+    ).toBe(
+      "Rate limited until the account resets · held by Provider Retry · attempt 3",
+    );
   });
 });
 
@@ -162,6 +216,7 @@ describe("queuedMessageWaitIcon", () => {
     expect(icon({ kind: "host-offline", hostName: "M4" })).toBe("CloudOff");
     expect(icon({ kind: "interaction" })).toBe("CircleQuestion");
     expect(icon({ kind: "plugin", pluginId: "p", reason: "r" })).toBeNull();
+    expect(icon({ kind: "superseded" })).toBe("AlertCircle");
     expect(icon({ kind: "thread-busy" })).toBeNull();
     expect(icon(null)).toBeNull();
     expect(icon({ kind: "time" }, "Host is not connected")).toBe("AlertCircle");
@@ -204,6 +259,7 @@ describe("isQueuedMessageSendNowAllowed", () => {
   it.each([
     { waitingOn: null, allowed: true },
     { waitingOn: { kind: "time" }, allowed: true },
+    { waitingOn: { kind: "superseded" }, allowed: true },
     {
       waitingOn: { kind: "plugin", pluginId: "limiter", reason: "busy" },
       allowed: true,
@@ -214,6 +270,7 @@ describe("isQueuedMessageSendNowAllowed", () => {
     { waitingOn: { kind: "provisioning" }, allowed: false },
     { waitingOn: { kind: "interaction" }, allowed: false },
     { waitingOn: { kind: "host-offline", hostName: "M4" }, allowed: false },
+    { waitingOn: { kind: "server-update" }, allowed: false },
   ] as const)(
     "allows manual recovery for $waitingOn",
     ({ waitingOn, allowed }) => {
@@ -225,7 +282,65 @@ describe("isQueuedMessageSendNowAllowed", () => {
           waitingOn,
           failureReason: "Provider unavailable",
         }),
-      ).toBe(true);
+      ).toBe(waitingOn?.kind !== "server-update");
+    },
+  );
+});
+
+describe("projectQueuedMessagesForUpdate", () => {
+  it("gives the actual update pause precedence while preserving the stored plugin hold", () => {
+    const messages = [
+      makeThreadQueuedMessage({
+        waitingOn: { kind: "plugin", pluginId: "drafts", reason: "Draft" },
+        failureReason: "The previous attempt failed",
+      }),
+    ];
+
+    const paused = projectQueuedMessagesForUpdate({
+      queuedMessages: messages,
+      threadStatus: "idle",
+      newTurnsPausedForUpdate: true,
+    });
+
+    const message = paused[0]!;
+    expect(message.waitingOn).toEqual({ kind: "server-update" });
+    expect(isQueuedMessageSendNowAllowed(message)).toBe(false);
+    expect(
+      describeQueuedMessageWait({
+        ...message,
+        now: NOW,
+        pluginDisplayName: "Drafts",
+      }),
+    ).toBe("Sending after the update");
+    expect(queuedMessageWaitIcon(message)).toBe("Download");
+    expect(messages[0]?.waitingOn).toEqual({
+      kind: "plugin",
+      pluginId: "drafts",
+      reason: "Draft",
+    });
+    expect(
+      projectQueuedMessagesForUpdate({
+        queuedMessages: messages,
+        threadStatus: "idle",
+        newTurnsPausedForUpdate: false,
+      }),
+    ).toBe(messages);
+  });
+
+  it.each(["active", "starting", "stopping"] as const)(
+    "preserves the existing wait for a %s thread",
+    (threadStatus) => {
+      const messages = [
+        makeThreadQueuedMessage({ waitingOn: { kind: "thread-busy" } }),
+      ];
+
+      expect(
+        projectQueuedMessagesForUpdate({
+          queuedMessages: messages,
+          threadStatus,
+          newTurnsPausedForUpdate: true,
+        }),
+      ).toBe(messages);
     },
   );
 });
@@ -274,6 +389,118 @@ describe("queuedMessageCountdownInstant", () => {
         sendAt: NOW + HOUR,
         waitingOn: { kind: "time" },
       }),
+    ).toBeNull();
+  });
+});
+
+describe("queuedMessageSystemTitle", () => {
+  const hiddenText: PromptInput = {
+    type: "text",
+    text: "Omnyo paused this turn to install an update.",
+    mentions: [],
+    visibility: "agent-only",
+  };
+
+  it("names a continuation held by an Omnyo update", () => {
+    const message = makeThreadQueuedMessage({
+      initiator: "system",
+      payload: { kind: "continuation" },
+      waitingOn: { kind: "server-update" },
+      content: [hiddenText],
+    });
+
+    expect(queuedMessageSystemTitle(message)).toBe("Resume after update");
+    expect(
+      describeQueuedMessageWait({
+        ...message,
+        now: NOW,
+        pluginDisplayName: null,
+      }),
+    ).toBe("Omnyo continues this turn when the update finishes");
+    expect(queuedMessageWaitIcon(message)).toBe("Spinner");
+  });
+
+  it("names a continuation that is not held by an update", () => {
+    expect(
+      queuedMessageSystemTitle(
+        makeThreadQueuedMessage({
+          initiator: "system",
+          payload: { kind: "continuation" },
+          waitingOn: { kind: "thread-busy" },
+          content: [hiddenText],
+        }),
+      ),
+    ).toBe("Continue this turn");
+  });
+
+  it("names a wait wake-up instead of showing its marker", () => {
+    expect(
+      queuedMessageSystemTitle(
+        makeThreadQueuedMessage({
+          initiator: "system",
+          messageSource: { kind: "script", label: "Wait" },
+          content: [
+            {
+              type: "text",
+              text: "[callback-wait:0f0e5b9d-5a7e-4c22-9d1f-4d3a8e6b1c2a] Ready: build.",
+              mentions: [],
+            },
+          ],
+        }),
+      ),
+    ).toBe("Wait check-in");
+  });
+
+  it("does not treat a user script named Wait as a system wake-up", () => {
+    expect(
+      queuedMessageSystemTitle(
+        makeThreadQueuedMessage({
+          messageSource: { kind: "script", label: "Wait" },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("names inline input that only the agent can read", () => {
+    expect(
+      queuedMessageSystemTitle(
+        makeThreadQueuedMessage({
+          initiator: "system",
+          content: [hiddenText],
+        }),
+      ),
+    ).toBe("Message for the agent");
+  });
+
+  it("leaves retries and visible messages to their existing titles", () => {
+    expect(
+      queuedMessageSystemTitle(
+        makeThreadQueuedMessage({
+          payload: {
+            kind: "retry",
+            retryOfTurnRequestId: "req_1",
+            attempt: 2,
+            reason: "Network error",
+          },
+          content: [hiddenText],
+        }),
+      ),
+    ).toBeNull();
+    expect(queuedMessageSystemTitle(makeThreadQueuedMessage())).toBeNull();
+    expect(
+      queuedMessageSystemTitle(
+        makeThreadQueuedMessage({
+          initiator: "system",
+          messageSource: { kind: "script", label: "Inbox" },
+          content: [
+            {
+              type: "text",
+              text: "1 chat waits on your result.",
+              mentions: [],
+            },
+          ],
+        }),
+      ),
     ).toBeNull();
   });
 });

@@ -9,11 +9,13 @@ const repositoryRoot = resolve(import.meta.dirname, "../../..");
 
 function bundledSdkSpecifiers(bundle: string): string[] {
   const specifiers = new Set<string>();
+
   for (const match of bundle.matchAll(
     /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](@get-bb\/plugin-sdk[^"']*)["']/gu,
   )) {
     specifiers.add(match[1] ?? "");
   }
+
   return [...specifiers].sort();
 }
 
@@ -40,9 +42,11 @@ describe("builtin server artifacts", () => {
       const root = await mkdtemp(join(repositoryRoot, ".builtin-server-test-"));
       tempDirs.push(root);
       const source = join(repositoryRoot, "plugins", pluginDir);
+
       for (const fileName of ["package.json", "server.ts"]) {
         await cp(join(source, fileName), join(root, fileName));
       }
+
       await cp(join(source, "src"), join(root, "src"), { recursive: true });
       await cp(join(source, "icons"), join(root, "icons"), { recursive: true });
       await symlink(
@@ -50,9 +54,11 @@ describe("builtin server artifacts", () => {
         join(root, "node_modules"),
         "dir",
       );
+
       const toolchain = await resolvePluginBuildToolchain(
         join(repositoryRoot, "node_modules", ".unused-toolchain"),
       );
+
       const built = await buildPluginServer(root, "0.9.0-test", toolchain);
 
       const bundle = await readFile(built.jsPath, "utf8");
@@ -65,6 +71,7 @@ describe("builtin server artifacts", () => {
       const imported: unknown = await import(
         `${pathToFileURL(built.jsPath).href}?test=${Date.now()}`
       );
+
       expect(typeof Reflect.get(Object(imported), "default")).toBe("function");
     },
     90_000,
@@ -85,16 +92,20 @@ describe("builtin server artifacts", () => {
       await cp(source, root, {
         recursive: true,
         filter: (path) =>
-          !["node_modules", "dist", ".bundled-runtime"].includes(basename(path)),
+          !["node_modules", "dist", ".bundled-runtime"].includes(
+            basename(path),
+          ),
       });
       await symlink(
         join(source, "node_modules"),
         join(root, "node_modules"),
         "dir",
       );
+
       const toolchain = await resolvePluginBuildToolchain(
         join(repositoryRoot, "node_modules", ".unused-toolchain"),
       );
+
       const built = await buildPluginServer(root, "0.9.0-test", toolchain);
 
       if (pluginDir === "environment-modal-sandbox") {

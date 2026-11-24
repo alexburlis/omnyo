@@ -19,6 +19,7 @@ export function usePluginSafeModeCommands(): void {
       .then(
         (result) => {
           applyPluginSafeMode({ queryClient, enabled: result.enabled });
+
           if (result.problems.length > 0) {
             appToast.warning(
               result.enabled
@@ -26,15 +27,17 @@ export function usePluginSafeModeCommands(): void {
                 : "Some plugins did not start",
               { description: result.problems.join("\n") },
             );
+
             return;
           }
+
           appToast.success(
             result.enabled
               ? "Plugin safe mode is on"
               : "Plugin safe mode is off",
             {
               description: result.enabled
-                ? "Only plugins included with bb are running."
+                ? "Only plugins included with Omnyo are running."
                 : "Your enabled plugins are running again.",
             },
           );
@@ -52,6 +55,7 @@ export function usePluginSafeModeCommands(): void {
         },
       )
       .finally(() => invalidatePluginList({ queryClient }));
+
     return true;
   }
 

@@ -7,6 +7,7 @@ interface TestOption {
 }
 
 const getLabel = (option: TestOption) => option.label;
+
 const getAliases = (option: TestOption) => option.aliases;
 
 describe("searchPickerOptions", () => {
@@ -58,6 +59,7 @@ describe("searchPickerOptions", () => {
       label: "NVIDIA: Nemotron 3 Ultra",
       aliases: ["openrouter/nvidia/nemotron-3-ultra-550b-a55b"],
     };
+
     const gpt = {
       label: "GPT-5.5",
       aliases: ["openai/gpt-5.5"],

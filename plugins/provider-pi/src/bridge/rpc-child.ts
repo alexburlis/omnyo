@@ -8,19 +8,24 @@ import {
   experimental_spawnPortableProcess,
   sanitizeInheritedChildProcessEnv,
   withoutBridgeRuntimeEnv,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 
 import { resolveWindowsPiProcessLaunch } from "./windows-pi-launch.js";
 
-export const PI_BRIDGE_COMMAND_ENV = "BB_PI_BRIDGE_COMMAND";
-export const PI_BRIDGE_ARGS_ENV = "BB_PI_BRIDGE_ARGS";
+export const PI_BRIDGE_COMMAND_ENV = "OMNYO_PI_BRIDGE_COMMAND";
 
-export const PI_CHANNEL_RECORDING_KEY = "bbChannel";
+export const PI_BRIDGE_ARGS_ENV = "OMNYO_PI_BRIDGE_ARGS";
+
+export const PI_CHANNEL_RECORDING_KEY = "omnyoChannel";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
 export const NO_REQUEST_TIMEOUT = 0;
+
 const STDERR_TAIL_BYTES = 4_096;
+
 const SIGTERM_GRACE_MS = 4_000;
+
 const SIGKILL_ESCALATION_MS = 4_000;
 
 export interface PiRpcChildExitInfo {
@@ -71,20 +76,26 @@ export function resolvePiLaunch(env: NodeJS.ProcessEnv): {
   args: string[];
 } {
   const command = env[PI_BRIDGE_COMMAND_ENV];
+
   if (!command) {
     return { command: "pi", args: [] };
   }
+
   const rawArgs = env[PI_BRIDGE_ARGS_ENV];
+
   if (!rawArgs) {
     return { command, args: [] };
   }
+
   const parsed: unknown = JSON.parse(rawArgs);
+
   if (
     !Array.isArray(parsed) ||
     !parsed.every((entry): entry is string => typeof entry === "string")
   ) {
     throw new Error(`${PI_BRIDGE_ARGS_ENV} must be a JSON array of strings`);
   }
+
   return { command, args: parsed };
 }
 
@@ -94,6 +105,7 @@ export function resolvePiProcessLaunch(
   cwd = process.cwd(),
 ): { command: string; args: string[] } {
   const launch = resolvePiLaunch(configEnv);
+
   return resolveWindowsPiProcessLaunch(launch, childEnv, cwd);
 }
 
@@ -124,6 +136,7 @@ export class PiRpcChild {
   constructor(private readonly args: SpawnPiRpcChildArgs) {
     let resolveSettledExit: (info: PiRpcChildExitInfo) => void = () =>
       undefined;
+
     this.settledExit = new Promise((resolve) => {
       resolveSettledExit = resolve;
     });
@@ -145,6 +158,7 @@ export class PiRpcChild {
     this.channelWriter = (this.child.stdio[4] as Writable | null) ?? null;
     this.child.stdin?.on("error", () => undefined);
     this.channelWriter?.on("error", () => undefined);
+
     if (stdout) {
       experimental_readBoundedLines({
         input: stdout,
@@ -156,6 +170,7 @@ export class PiRpcChild {
         },
       });
     }
+
     if (stderr) {
       stderr.on("data", (chunk: Buffer | string) => {
         const text = chunk.toString();
@@ -163,6 +178,7 @@ export class PiRpcChild {
         process.stderr.write(`pi[${String(this.child.pid ?? "?")}]: ${text}`);
       });
     }
+
     if (channelIn) {
       experimental_readBoundedLines({
         input: channelIn,
@@ -174,28 +190,35 @@ export class PiRpcChild {
         },
       });
     }
+
     const settleExit = (code: number | null, signal: NodeJS.Signals | null) => {
       if (this.exitInfo !== null) {
         return;
       }
+
       if (this.killEscalation !== null) {
         clearTimeout(this.killEscalation);
         this.killEscalation = null;
       }
+
       const info: PiRpcChildExitInfo = {
         code,
         signal,
         stderrTail: this.stderrTail,
       };
+
       this.exitInfo = info;
       resolveSettledExit(info);
+
       for (const [, pending] of this.pending) {
         if (pending.timer !== null) clearTimeout(pending.timer);
         pending.reject(new PiRpcChildExitedError(info));
       }
+
       this.pending.clear();
       args.onExit(info);
     };
+
     this.child.on("error", (error) => {
       this.stderrTail = `${this.stderrTail}${error.message}`;
     });
@@ -218,8 +241,10 @@ export class PiRpcChild {
     if (this.exitInfo !== null) {
       return Promise.reject(new PiRpcChildExitedError(this.exitInfo));
     }
+
     this.nextRequestId += 1;
-    const id = `bb-${this.nextRequestId}`;
+    const id = `rpc-${this.nextRequestId}`;
+
     return new Promise<PiRpcResponse>((resolve, reject) => {
       const timer =
         timeoutMs === NO_REQUEST_TIMEOUT
@@ -230,6 +255,7 @@ export class PiRpcChild {
                 new Error(`pi did not answer ${String(command.type)} in time`),
               );
             }, timeoutMs);
+
       timer?.unref?.();
       this.pending.set(id, { resolve, reject, timer });
       this.writeStdin(`${JSON.stringify({ ...command, id })}\n`);
@@ -241,17 +267,21 @@ export class PiRpcChild {
     timeoutMs?: number,
   ): Promise<unknown> {
     const response = await this.request(command, timeoutMs);
+
     if (!response.success) {
       throw new Error(response.error ?? `pi rejected ${String(command.type)}`);
     }
+
     return response.data;
   }
 
   sendChannel(message: Record<string, unknown>): void {
     const writer = this.channelWriter;
+
     if (!writer || writer.destroyed || writer.writableEnded) {
       return;
     }
+
     this.channelRecorder?.toChild(message);
     writer.write(`${JSON.stringify(message)}\n`);
   }
@@ -260,12 +290,15 @@ export class PiRpcChild {
     if (this.exitInfo !== null) {
       return;
     }
+
     this.endWriters();
+
     const timer = setTimeout(() => {
       if (this.exitInfo === null) {
         this.kill();
       }
     }, SIGTERM_GRACE_MS);
+
     timer.unref?.();
   }
 
@@ -273,16 +306,20 @@ export class PiRpcChild {
     if (this.exitInfo !== null) {
       return;
     }
+
     this.endWriters();
+
     if (this.killEscalation === null) {
       this.killEscalation = setTimeout(() => {
         this.killEscalation = null;
+
         if (this.exitInfo === null) {
           experimental_killPortableProcess(this.child, "SIGKILL");
         }
       }, SIGKILL_ESCALATION_MS);
       this.killEscalation.unref?.();
     }
+
     experimental_killPortableProcess(this.child, "SIGTERM");
   }
 
@@ -299,6 +336,7 @@ export class PiRpcChild {
     try {
       this.child.stdin?.end();
     } catch {}
+
     try {
       this.channelWriter?.end();
     } catch {}
@@ -306,14 +344,17 @@ export class PiRpcChild {
 
   private writeStdin(line: string): void {
     const stdin = this.child.stdin;
+
     if (!stdin || stdin.destroyed) {
       return;
     }
+
     stdin.write(line);
   }
 
   private queueStdoutLine(line: string): void {
     this.stdoutLines.push(line);
+
     if (!this.stdoutDraining) {
       this.stdoutDraining = true;
       this.drainStdoutLine();
@@ -322,10 +363,13 @@ export class PiRpcChild {
 
   private drainStdoutLine(): void {
     const line = this.stdoutLines.shift();
+
     if (line === undefined) {
       this.stdoutDraining = false;
+
       return;
     }
+
     try {
       this.handleStdoutLine(line);
     } finally {
@@ -335,29 +379,39 @@ export class PiRpcChild {
 
   private handleStdoutLine(line: string): void {
     const trimmed = line.trim();
+
     if (!trimmed) {
       return;
     }
+
     let parsed: unknown;
+
     try {
       parsed = JSON.parse(trimmed);
     } catch {
       return;
     }
+
     if (typeof parsed !== "object" || parsed === null) {
       return;
     }
+
     const message = parsed as Record<string, unknown>;
+
     if (message.type === "response") {
       const id = typeof message.id === "string" ? message.id : undefined;
       const pending = id === undefined ? undefined : this.pending.get(id);
+
       if (pending && id !== undefined) {
         this.pending.delete(id);
+
         if (pending.timer !== null) clearTimeout(pending.timer);
-        pending.resolve(message as unknown as PiRpcResponse);
+        pending.resolve(parsed as PiRpcResponse);
       }
+
       return;
     }
+
     if (message.type === "extension_ui_request") {
       if (this.args.onExtensionUiRequest) {
         this.args.onExtensionUiRequest(message);
@@ -370,8 +424,10 @@ export class PiRpcChild {
           })}\n`,
         );
       }
+
       return;
     }
+
     if (typeof message.type === "string") {
       this.args.onEvent(message);
     }
@@ -379,11 +435,14 @@ export class PiRpcChild {
 
   private handleChannelLine(line: string): void {
     const trimmed = line.trim();
+
     if (!trimmed) {
       return;
     }
+
     try {
       const parsed: unknown = JSON.parse(trimmed);
+
       if (typeof parsed === "object" && parsed !== null) {
         this.channelRecorder?.fromChild(parsed);
         this.args.onChannelMessage(parsed as Record<string, unknown>);
@@ -403,18 +462,23 @@ function createChannelRecorder(
   if (!experimental_isProviderBridgeRecording()) {
     return null;
   }
+
   const fromChild = new PassThrough();
+
   const toChild = new Writable({
     write(_chunk, _encoding, callback) {
       callback();
     },
   });
+
   experimental_recordProviderChildIo(
     { stdin: toChild, stdout: fromChild },
     { threadId },
   );
+
   const wrap = (message: unknown): string =>
     `${JSON.stringify({ [PI_CHANNEL_RECORDING_KEY]: message })}\n`;
+
   return {
     fromChild: (message) => {
       fromChild.push(wrap(message));

@@ -1,9 +1,11 @@
-import { rm, readFile, writeFile } from "node:fs/promises";
+import { rm, readFile, writeFile, rename } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   connectCredentialSchema,
+  migrateLegacyRelayServerUrl,
   type ConnectCredential,
-} from "@bb/connect-client";
+} from "@omnyo/connect-client";
 
 const CONNECT_CREDENTIAL_FILE_NAME = "connect-credential.bin";
 
@@ -35,7 +37,16 @@ export interface ConnectCredentialCache {
 const defaultFs: ConnectCredentialCacheFs = {
   readFile,
   rm,
-  writeFile,
+  async writeFile(path, data) {
+    const temporaryPath = `${path}.${randomUUID()}.tmp`;
+
+    try {
+      await writeFile(temporaryPath, data, { mode: 0o600, flag: "wx" });
+      await rename(temporaryPath, path);
+    } finally {
+      await rm(temporaryPath, { force: true });
+    }
+  },
 };
 
 export function createConnectCredentialCache(
@@ -57,37 +68,65 @@ export function createConnectCredentialCache(
       if (!args.encryption.isEncryptionAvailable()) {
         return null;
       }
+
       let encrypted: Buffer;
+
       try {
         encrypted = await fsImpl.readFile(filePath);
-      } catch {
-        return null;
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "ENOENT"
+        )
+          return null;
+        throw error;
       }
+
       let plainText: string;
+
       try {
         plainText = args.encryption.decryptString(encrypted);
       } catch {
-        await clear();
-        return null;
+        throw new Error(
+          "Stored desktop sign-in cannot be decrypted; its protected file was preserved",
+        );
       }
+
       let parsedJson: unknown;
+
       try {
         parsedJson = JSON.parse(plainText);
       } catch {
-        await clear();
-        return null;
+        throw new Error(
+          "Stored desktop sign-in is malformed; its protected file was preserved",
+        );
       }
+
       const parsed = connectCredentialSchema.safeParse(parsedJson);
+
       if (!parsed.success) {
-        await clear();
-        return null;
+        throw new Error(
+          "Stored desktop sign-in has an unsupported format; its protected file was preserved",
+        );
       }
-      return parsed.data;
+
+      const serverUrl = migrateLegacyRelayServerUrl(parsed.data.serverUrl);
+
+      if (serverUrl === null) return parsed.data;
+      const migrated = { ...parsed.data, serverUrl };
+      await fsImpl.writeFile(
+        filePath,
+        args.encryption.encryptString(JSON.stringify(migrated)),
+      );
+
+      return migrated;
     },
     async write(credential) {
       if (!args.encryption.isEncryptionAvailable()) {
         return;
       }
+
       await fsImpl.writeFile(
         filePath,
         args.encryption.encryptString(JSON.stringify(credential)),

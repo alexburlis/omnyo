@@ -112,6 +112,7 @@ describe("dropIndexForPointer", () => {
 
 describe("applyBoardMove", () => {
   const task = (id: string, status: TaskStatus) => ({ id, status });
+
   const columns = () => ({
     backlog: [task("a", "backlog"), task("b", "backlog")],
     todo: [task("c", "todo")],

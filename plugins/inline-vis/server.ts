@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   defineRpcContract,
-  type BbPluginApi,
+  type PluginApi,
   type MarkdownProps,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 export const MAX_PREVIEW_BYTES = 5 * 1024 * 1024;
@@ -22,6 +22,7 @@ function requireNonEmptyString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`"${field}" must be a non-empty string`);
   }
+
   return value.trim();
 }
 
@@ -32,27 +33,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function previewKind(file: string): PreviewKind {
   const extension = path.posix.extname(file).toLowerCase();
   const kind = PREVIEW_KIND_BY_EXTENSION.get(extension);
+
   if (kind === undefined) {
     throw new Error(
       `"file" must end with .html, .htm, .md, or .markdown, got ${JSON.stringify(file)}`,
     );
   }
+
   return kind;
 }
 
 export function requireRelativePreviewFile(value: unknown): string {
   const file = requireNonEmptyString(value, "file");
-  if (path.isAbsolute(file)) {
+
+  if (path.posix.isAbsolute(file) || path.win32.isAbsolute(file)) {
     throw new Error(`"file" must be source-relative, not absolute: ${file}`);
   }
-  if (/^[a-zA-Z]:[\\/]/.test(file) || file.startsWith("\\\\")) {
+
+  if (/^[a-zA-Z]:/.test(file)) {
     throw new Error(`"file" must be source-relative, not absolute: ${file}`);
   }
+
   const slashNormalized = file.replace(/\\/g, "/");
+
   if (slashNormalized.split("/").includes("..")) {
     throw new Error(`"file" must not contain traversal segments: ${file}`);
   }
+
   const normalized = path.posix.normalize(slashNormalized);
+
   if (
     normalized === ".." ||
     normalized.startsWith("../") ||
@@ -62,7 +71,9 @@ export function requireRelativePreviewFile(value: unknown): string {
   ) {
     throw new Error(`"file" must not escape its source: ${file}`);
   }
+
   previewKind(normalized);
+
   return normalized;
 }
 
@@ -70,16 +81,23 @@ export function resolveContainedPreviewPath(
   rootPath: string,
   relativeFile: string,
 ): string {
-  const root = path.resolve(rootPath);
-  const absolute = path.resolve(root, relativeFile);
-  const relative = path.relative(root, absolute);
+  const hostPath =
+    path.win32.isAbsolute(rootPath) && !path.posix.isAbsolute(rootPath)
+      ? path.win32
+      : path.posix;
+
+  const root = hostPath.resolve(rootPath);
+  const absolute = hostPath.resolve(root, relativeFile);
+  const relative = hostPath.relative(root, absolute);
+
   if (
     relative === ".." ||
-    relative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relative)
+    relative.startsWith(`..${hostPath.sep}`) ||
+    hostPath.isAbsolute(relative)
   ) {
     throw new Error(`"file" must not escape its source: ${relativeFile}`);
   }
+
   return absolute;
 }
 
@@ -87,7 +105,9 @@ function httpStatus(error: unknown): number | null {
   if (!isRecord(error)) {
     return null;
   }
+
   const status = error.status;
+
   return typeof status === "number" ? status : null;
 }
 
@@ -150,20 +170,20 @@ export const inlineVisRpcContract = defineRpcContract({
   },
 });
 
-export default async function plugin(bb: BbPluginApi) {
-  bb.rpc.register(inlineVisRpcContract, {
+export default async function plugin(api: PluginApi) {
+  api.rpc.register(inlineVisRpcContract, {
     async preparePreview({ threadId, file, source }) {
       let rootPath: string;
       let hostId: string;
       let target: NonNullable<MarkdownProps["experimental_document"]>["target"];
 
       if (source === "thread-storage") {
-        const storage = await bb.sdk.threads.storageLocation({ threadId });
+        const storage = await api.sdk.threads.storageLocation({ threadId });
         rootPath = storage.storageRootPath;
         hostId = storage.hostId;
         target = { kind: source, threadId, path: file };
       } else {
-        const thread = await bb.sdk.threads.get({
+        const thread = await api.sdk.threads.get({
           threadId,
           include: "environment",
         });
@@ -175,20 +195,25 @@ export default async function plugin(bb: BbPluginApi) {
         }
 
         const environment = thread.environment;
+
         const workspacePath =
           typeof environment?.path === "string" ? environment.path : null;
+
         if (!environment || !workspacePath) {
           throw new Error(
             "This thread has no workspace path — inline-vis needs a live environment.",
           );
         }
+
         const workspaceHostId =
           typeof environment?.hostId === "string" ? environment.hostId : null;
+
         if (!workspaceHostId) {
           throw new Error(
             "This thread's environment has no hostId — cannot read workspace files.",
           );
         }
+
         rootPath = workspacePath;
         hostId = workspaceHostId;
         target = { kind: source, environmentId: environment.id, path: file };
@@ -197,8 +222,9 @@ export default async function plugin(bb: BbPluginApi) {
       const absolutePath = resolveContainedPreviewPath(rootPath, file);
 
       let result;
+
       try {
-        result = await bb.sdk.files.read({
+        result = await api.sdk.files.read({
           path: absolutePath,
           rootPath,
           hostId,
@@ -207,6 +233,7 @@ export default async function plugin(bb: BbPluginApi) {
         if (httpStatus(error) === 404) {
           return { kind: "not-found" as const, file };
         }
+
         throw error;
       }
 
@@ -215,7 +242,9 @@ export default async function plugin(bb: BbPluginApi) {
           `Preview file is not valid UTF-8 text (encoding=${result.contentEncoding}).`,
         );
       }
+
       const sizeBytes = result.sizeBytes;
+
       if (sizeBytes > MAX_PREVIEW_BYTES) {
         throw new Error(
           `Preview file is too large (${sizeBytes} bytes; max ${MAX_PREVIEW_BYTES}).`,
@@ -223,6 +252,7 @@ export default async function plugin(bb: BbPluginApi) {
       }
 
       const kind = previewKind(file);
+
       if (kind === "markdown") {
         return {
           kind,
@@ -233,14 +263,18 @@ export default async function plugin(bb: BbPluginApi) {
           content: result.content,
         };
       }
+
       const encodedFile = file.split("/").map(encodeURIComponent).join("/");
+
       const url =
         target.kind === "thread-storage"
           ? `/api/v1/threads/${encodeURIComponent(threadId)}/thread-storage/files/${encodedFile}`
           : `/api/v1/environments/${encodeURIComponent(target.environmentId)}/files/${encodedFile}`;
+
       const sha256 = createHash("sha256")
         .update(result.content, "utf8")
         .digest("hex");
+
       return {
         kind,
         file,

@@ -74,12 +74,15 @@ function expectBridgeSpawn(
     "/data/plugins/provider-fixture/bridge-data",
   ]);
   const moduleArg = args.at(-3) ?? "";
+
   if (typeof expected.module === "string") {
     expect(moduleArg).toBe(expected.module);
   } else {
     expect(moduleArg).toMatch(expected.module);
   }
+
   const workerArgs = args.slice(0, -3);
+
   if (expected.bundleDir === undefined) {
     expect(workerArgs.slice(0, 3)).toEqual([
       "--conditions=source",
@@ -89,7 +92,7 @@ function expectBridgeSpawn(
     expect(workerArgs.at(-1)).toMatch(/bridge-worker-entry\.ts$/u);
   } else {
     expect(workerArgs).toEqual([
-      path.resolve(expected.bundleDir, "bb-provider-bridge-worker.mjs"),
+      path.resolve(expected.bundleDir, "omnyo-provider-bridge-worker.mjs"),
     ]);
   }
 }
@@ -110,15 +113,16 @@ describe("provider registry", () => {
 
   it("runs the bridge under the configured bridge node runtime", () => {
     const bridgeNodeEnv = { ELECTRON_RUN_AS_NODE: "1" };
+
     const provider = createProviderForId("pi", {
       additionalWorkspaceWriteRoots: [],
       bridgeLaunch: PI_BRIDGE_LAUNCH,
       bridgeNodeEnv,
-      bridgeNodeExecutablePath: "/Applications/bb.app/Contents/MacOS/bb",
+      bridgeNodeExecutablePath: "/Applications/Omnyo.app/Contents/MacOS/omnyo",
     });
 
     expect(provider.process.command).toBe(
-      "/Applications/bb.app/Contents/MacOS/bb",
+      "/Applications/Omnyo.app/Contents/MacOS/omnyo",
     );
     expect(provider.process.env).toEqual(bridgeNodeEnv);
   });
@@ -128,6 +132,7 @@ describe("provider registry", () => {
       additionalWorkspaceWriteRoots: [],
       bridgeLaunch: PI_BRIDGE_LAUNCH,
     });
+
     expect(provider.id).toBe("pi");
     expect(provider.process.command).toBe("node");
     expectBridgeSpawn(provider, { module: "/data/provider-bridges/pi.mjs" });
@@ -180,10 +185,11 @@ describe("provider registry", () => {
         permissionScope: "full",
         approvalReviewer: null,
         permissionEscalation: null,
-        envVars: { BB_THREAD_ID: "thread-1" },
+        envVars: { OMNYO_THREAD_ID: "thread-1" },
       },
       instructionMode: "append",
     });
+
     expect(startPlan).toMatchObject({
       kind: "request",
       method: "thread/start",
@@ -229,6 +235,7 @@ describe("provider registry", () => {
       supportsServiceTier: true,
       permissionModes: ["accept-edits", "auto", "full"],
     });
+
     const plan = provider.buildCommandPlan({
       type: "thread/start",
       threadId: "thread-1",
@@ -242,6 +249,7 @@ describe("provider registry", () => {
       },
       instructionMode: "append",
     });
+
     expect(plan).toMatchObject({
       kind: "request",
       method: "thread/start",

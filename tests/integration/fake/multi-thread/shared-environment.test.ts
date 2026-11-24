@@ -28,6 +28,7 @@ describe.sequential("fake provider shared-environment multi-thread integration",
       const project = await createProjectFixture(harness, {
         name: "Shared Environment Same Provider",
       });
+
       const threadA = await createReadyHostThread(harness, {
         projectId: project.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,
@@ -36,23 +37,28 @@ describe.sequential("fake provider shared-environment multi-thread integration",
           path: harness.repoDir,
         },
       });
+
       const threadB = await createReadyReuseThread(harness, {
         environmentId: threadA.environment.id,
         projectId: project.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,
       });
+
       const baselineEventsA = await getThreadEvents(
         harness.api,
         threadA.thread.id,
       );
+
       const baselineEventsB = await getThreadEvents(
         harness.api,
         threadB.thread.id,
       );
+
       const baselineCompletedA = countTurnEvents(
         baselineEventsA,
         "turn/completed",
       );
+
       const baselineCompletedB = countTurnEvents(
         baselineEventsB,
         "turn/completed",
@@ -118,6 +124,7 @@ describe.sequential("fake provider shared-environment multi-thread integration",
       const project = await createProjectFixture(harness, {
         name: "Shared Environment Follow Ups",
       });
+
       const threadA = await createReadyHostThread(harness, {
         projectId: project.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,
@@ -126,25 +133,32 @@ describe.sequential("fake provider shared-environment multi-thread integration",
           path: harness.repoDir,
         },
       });
+
       const threadB = await createReadyReuseThread(harness, {
         environmentId: threadA.environment.id,
         projectId: project.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,
       });
+
       const baselineEventsA = await getThreadEvents(
         harness.api,
         threadA.thread.id,
       );
+
       const baselineEventsB = await getThreadEvents(
         harness.api,
         threadB.thread.id,
       );
+
       const baselineStartedA = countTurnEvents(baselineEventsA, "turn/started");
+
       const baselineCompletedA = countTurnEvents(
         baselineEventsA,
         "turn/completed",
       );
+
       const baselineStartedB = countTurnEvents(baselineEventsB, "turn/started");
+
       const baselineCompletedB = countTurnEvents(
         baselineEventsB,
         "turn/completed",
@@ -215,6 +229,7 @@ describe.sequential("fake provider shared-environment multi-thread integration",
       const project = await createProjectFixture(harness, {
         name: "Archive One Sibling",
       });
+
       const threadA = await createReadyHostThread(harness, {
         projectId: project.id,
         timeoutMs: DEFAULT_TIMEOUT_MS,
@@ -223,6 +238,7 @@ describe.sequential("fake provider shared-environment multi-thread integration",
           path: harness.repoDir,
         },
       });
+
       const threadB = await createReadyReuseThread(harness, {
         environmentId: threadA.environment.id,
         projectId: project.id,
@@ -267,6 +283,7 @@ describe.sequential("fake provider shared-environment multi-thread integration",
         harness.api,
         threadA.environment.id,
       );
+
       expect(environment.status).toBe("ready");
       expect(await getThreadOutput(harness.api, threadB.thread.id)).toContain(
         "thread-b still works",

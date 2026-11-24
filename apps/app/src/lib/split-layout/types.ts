@@ -39,4 +39,5 @@ export interface SplitLayout {
 }
 
 export type SplitSide = "left" | "right" | "top" | "bottom";
+
 export type SplitPath = readonly number[];

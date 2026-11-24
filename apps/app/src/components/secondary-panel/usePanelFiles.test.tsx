@@ -2,7 +2,7 @@
 
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ExperimentalLiveFileTarget } from "@get-bb/plugin-sdk";
+import type { ExperimentalLiveFileTarget } from "@omnyo/plugin-sdk";
 import { usePanelFiles, type PanelFileScope } from "./usePanelFiles";
 import type { OpenSecondaryPanelTabRequest } from "./useThreadFileTabs";
 
@@ -20,16 +20,19 @@ const OWN_WORKSPACE: ExperimentalLiveFileTarget = {
   environmentId: "env_1",
   path: "src/a.ts",
 };
+
 const OTHER_WORKSPACE: ExperimentalLiveFileTarget = {
   kind: "workspace",
   environmentId: "env_other",
   path: "src/a.ts",
 };
+
 const OWN_HOST: ExperimentalLiveFileTarget = {
   kind: "host",
   hostId: "host_1",
   path: "/tmp/log.txt",
 };
+
 const OWN_STORAGE: ExperimentalLiveFileTarget = {
   kind: "thread-storage",
   threadId: "thr_1",
@@ -73,10 +76,13 @@ function renderSurface(surface: SurfaceCase, available = true) {
   const openTab = vi.fn((_request: OpenSecondaryPanelTabRequest) => ({
     id: "tab",
   }));
+
   const reveal = vi.fn();
+
   const { result } = renderHook(() =>
     usePanelFiles({ available, openTab, reveal, scope: surface.scope }),
   );
+
   return { openTab, result, reveal };
 }
 
@@ -111,6 +117,7 @@ describe.each(SURFACES)("panel files on the $name", (surface) => {
     const [apiRequest, coreRequest] = openTab.mock.calls.map(
       ([request]) => request,
     );
+
     expect(apiRequest).toEqual(
       surface.scope === null
         ? { ...coreRequest, hostId: OWN_HOST.hostId }

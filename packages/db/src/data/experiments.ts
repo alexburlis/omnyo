@@ -5,12 +5,13 @@ import {
   experimentKeySchema,
   type ExperimentUpdates,
   type Experiments,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { DbConnection } from "../connection.js";
 import { systemExperiments } from "../schema.js";
 
 export function getExperiments(db: DbConnection): Experiments {
   const experiments = { ...defaultExperiments };
+
   const rows = db
     .select()
     .from(systemExperiments)
@@ -19,6 +20,7 @@ export function getExperiments(db: DbConnection): Experiments {
 
   for (const row of rows) {
     const key = experimentKeySchema.safeParse(row.key);
+
     if (key.success) {
       experiments[key.data] = row.value;
     }
@@ -35,6 +37,7 @@ export function setExperiments(
   db.transaction((transaction) => {
     for (const key of experimentKeys) {
       const value = updates[key];
+
       if (value === undefined) continue;
       transaction
         .insert(systemExperiments)

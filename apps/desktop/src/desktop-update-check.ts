@@ -1,9 +1,9 @@
 import semver from "semver";
 import {
-  bbDesktopVersionFeedSchema,
-  type BbDesktopInfo,
-  type BbDesktopVersionFeed,
-} from "@bb/desktop-contract";
+  omnyoDesktopVersionFeedSchema,
+  type OmnyoDesktopInfo,
+  type OmnyoDesktopVersionFeed,
+} from "@omnyo/desktop-contract";
 import {
   createDesktopUpdateScheduler,
   type DesktopUpdateService,
@@ -16,16 +16,16 @@ interface DesktopUpdateLogger {
 }
 
 interface ParseDesktopVersionFeedArgs {
-  channel: BbDesktopVersionFeed["channel"];
+  channel: OmnyoDesktopVersionFeed["channel"];
   checkedAt: string;
   currentVersion: string;
   payloadText: string;
-  platform: BbDesktopInfo["platform"];
+  platform: OmnyoDesktopInfo["platform"];
 }
 
 interface ValidDesktopVersionFeedParseResult {
-  feed: BbDesktopVersionFeed;
-  info: BbDesktopInfo;
+  feed: OmnyoDesktopVersionFeed;
+  info: OmnyoDesktopInfo;
   kind: "valid";
 }
 
@@ -39,14 +39,14 @@ type DesktopVersionFeedParseResult =
   | ValidDesktopVersionFeedParseResult;
 
 interface CreateDesktopUpdateServiceArgs {
-  channel: BbDesktopVersionFeed["channel"];
+  channel: OmnyoDesktopVersionFeed["channel"];
   currentVersion: string;
   enabled: boolean;
   feedUrl: string;
   fetchImpl?: typeof fetch;
   logger: DesktopUpdateLogger;
   now?: () => number;
-  platform: BbDesktopInfo["platform"];
+  platform: OmnyoDesktopInfo["platform"];
 }
 
 interface FetchDesktopVersionFeedArgs {
@@ -61,8 +61,8 @@ interface ApplyFailureArgs {
 
 function createBaseInfo(
   currentVersion: string,
-  platform: BbDesktopInfo["platform"],
-): BbDesktopInfo {
+  platform: OmnyoDesktopInfo["platform"],
+): OmnyoDesktopInfo {
   return {
     lastCheckedAt: null,
     latestVersion: null,
@@ -82,6 +82,7 @@ export function parseDesktopVersionFeed(
   args: ParseDesktopVersionFeedArgs,
 ): DesktopVersionFeedParseResult {
   let payload: unknown;
+
   try {
     payload = JSON.parse(args.payloadText);
   } catch (error) {
@@ -93,7 +94,8 @@ export function parseDesktopVersionFeed(
     };
   }
 
-  const parsedFeed = bbDesktopVersionFeedSchema.safeParse(payload);
+  const parsedFeed = omnyoDesktopVersionFeedSchema.safeParse(payload);
+
   if (!parsedFeed.success) {
     return {
       kind: "malformed",
@@ -107,6 +109,7 @@ export function parseDesktopVersionFeed(
       reason: `The desktop version feed is for another platform: expected ${args.platform}, got ${parsedFeed.data.platform}`,
     };
   }
+
   if (parsedFeed.data.channel !== args.channel) {
     return {
       kind: "malformed",
@@ -116,6 +119,7 @@ export function parseDesktopVersionFeed(
 
   const parsedCurrentVersion = semver.parse(args.currentVersion);
   const parsedFeedVersion = semver.parse(parsedFeed.data.version);
+
   if (parsedCurrentVersion === null || parsedFeedVersion === null) {
     return {
       kind: "malformed",
@@ -142,6 +146,7 @@ async function fetchDesktopVersionFeed(
   args: FetchDesktopVersionFeedArgs,
 ): Promise<string> {
   const controller = new AbortController();
+
   const timeoutHandle = setTimeout(
     () => controller.abort(),
     DESKTOP_UPDATE_CHECK_TIMEOUT_MS,
@@ -152,9 +157,11 @@ async function fetchDesktopVersionFeed(
       headers: { accept: "application/json" },
       signal: controller.signal,
     });
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
+
     return await response.text();
   } finally {
     clearTimeout(timeoutHandle);
@@ -165,6 +172,7 @@ export function createDesktopUpdateService(
   args: CreateDesktopUpdateServiceArgs,
 ): DesktopUpdateService {
   const fetchImpl = args.fetchImpl ?? fetch;
+
   const scheduler = createDesktopUpdateScheduler({
     enabled: args.enabled,
     initialInfo: createBaseInfo(args.currentVersion, args.platform),
@@ -182,6 +190,7 @@ export function createDesktopUpdateService(
 
   async function runCheck(checkedAt: string): Promise<void> {
     let payloadText: string;
+
     try {
       payloadText = await fetchDesktopVersionFeed({
         feedUrl: args.feedUrl,
@@ -194,6 +203,7 @@ export function createDesktopUpdateService(
           error,
         )}`,
       });
+
       return;
     }
 
@@ -204,11 +214,13 @@ export function createDesktopUpdateService(
       payloadText,
       platform: args.platform,
     });
+
     if (parsed.kind === "malformed") {
       applyFailure({
         checkedAt,
         message: `Desktop update check malformed feed; ignoring response and keeping prior valid session state, with update prompts disabled if none exists: ${parsed.reason}`,
       });
+
       return;
     }
 
@@ -217,6 +229,7 @@ export function createDesktopUpdateService(
         `Desktop update check saw a lower feed version; downgrade feeds never trigger desktop update prompts: current=${args.currentVersion} feed=${parsed.feed.version}`,
       );
     }
+
     scheduler.updateInfo(parsed.info);
   }
 

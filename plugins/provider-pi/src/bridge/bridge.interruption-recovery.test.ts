@@ -9,7 +9,9 @@ import {
 } from "./test-support.js";
 
 let h: FakePiBridgeHarness | undefined;
+
 let nextId = 2000;
+
 afterEach(async () => {
   await h?.teardown();
   h = undefined;
@@ -24,21 +26,25 @@ async function start(
   } = {},
 ) {
   const harness = await startFakePiBridge({
-    prefix: "bb-pi-settlement-",
+    prefix: "omnyo-pi-settlement-",
     initialize: true,
     processLog: true,
   });
+
   h = harness;
   vi.stubEnv("FAKE_PI_SETTLEMENT", options.settlement === false ? "0" : "1");
   vi.stubEnv("FAKE_PI_VERSION", options.version ?? "0.84.0");
   vi.stubEnv("FAKE_PI_FINAL_LEAF", "settled-leaf");
   vi.stubEnv("FAKE_PI_COMMAND_LOG", join(harness.workspaceDir, "commands.log"));
   vi.stubEnv("FAKE_PI_EVENT_LOG", join(harness.workspaceDir, "events.jsonl"));
+
   if (options.aborted !== undefined)
     vi.stubEnv("FAKE_PI_SETTLED_ABORTED", options.aborted);
+
   if (options.duplicate) vi.stubEnv("FAKE_PI_DUPLICATE_SETTLED", "1");
   const response = await harness.startThread("thread");
   const result = response.result;
+
   if (
     !result ||
     typeof result !== "object" ||
@@ -47,13 +53,16 @@ async function start(
   )
     throw new Error("missing provider identity");
   const providerThreadId = result.providerThreadId;
+
   const send = (method: string, fields: Record<string, unknown>) =>
     harness.request(++nextId, method, {
       threadId: "thread",
       providerThreadId,
       ...fields,
     });
+
   let turnCount = 0;
+
   const turn = async (text: string) => {
     const response = await send("turn/start", {
       clientRequestId:
@@ -61,17 +70,24 @@ async function start(
       input: [{ type: "text", text, mentions: [] }],
       options: FULL_PERMISSION_OPTIONS,
     });
+
     expect(response.error).toBeUndefined();
+
     return response;
   };
+
   const deltas = () => harness.deltasOf("thread");
+
   const run = async (text: string) => {
     await turn(text);
     await harness.waitForTurnBoundary("thread");
+
     return deltas();
   };
+
   const wireEvents = (): Record<string, unknown>[] => {
     const path = join(harness.workspaceDir, "events.jsonl");
+
     return existsSync(path)
       ? readFileSync(path, "utf8")
           .trim()
@@ -80,10 +96,12 @@ async function start(
           .map((line) => JSON.parse(line))
       : [];
   };
+
   const commands = () =>
     readFileSync(join(harness.workspaceDir, "commands.log"), "utf8")
       .trim()
       .split("\n");
+
   return { harness, send, turn, run, deltas, wireEvents, commands };
 }
 
@@ -115,6 +133,7 @@ it.each([undefined, "false", "true", '"bad"', "null", "0"])(
     expect(deltas.filter((d) => d.kind === "provider.error")).toHaveLength(
       failed ? 1 : 0,
     );
+
     if (failed)
       expect(JSON.stringify(deltas)).toMatch(
         /interrupted|Invalid Pi settlement/,
@@ -155,6 +174,11 @@ it("shows a failed run's error when queued work continues to a completed turn", 
       kind: "provider.error",
       message: "Provider error",
       detail: "scripted unrecovered failure",
+      errorInfo: {
+        category: "unknown",
+        httpStatusCode: null,
+        providerCode: null,
+      },
     },
   ]);
   expect(deltas.filter((d) => d.kind === "turn.boundary")).toEqual([
@@ -248,6 +272,7 @@ it.each(["/hold", "/wait-hold"])(
     const t = await start();
     await t.turn(text);
     await t.harness.waitForDelta("thread", (d) => d.kind === "turn.open");
+
     if (text === "/wait-hold")
       await t.harness.waitForDelta("thread", (d) => d.kind === "item.open");
     expect(t.deltas().some((d) => d.kind === "turn.boundary")).toBe(false);
@@ -307,10 +332,12 @@ it.each(["Approved answer", "Permission refused"])(
   async (answer) => {
     const t = await start();
     await t.turn('/ui {"method":"input","title":"Missing material decision"}');
+
     const question = await t.harness.waitForMessage(
       (m) => m.method === "interaction/request",
       "question",
     );
+
     expect(t.deltas().some((d) => d.kind === "turn.boundary")).toBe(false);
     handleLine(
       JSON.stringify({

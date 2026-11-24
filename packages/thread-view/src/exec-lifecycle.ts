@@ -6,7 +6,7 @@ import {
   ThreadEventItemApprovalStatus,
   ThreadEventItemPresentation,
   ThreadEventItemStatus,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { getEventParentToolCallId, type EventMeta } from "./event-decode.js";
 import type {
   EventProjectionApprovalLifecycleStatus,
@@ -29,9 +29,11 @@ function parseToolArgs(
 ): JsonObject | null {
   if (!args) return null;
   const toolArgs: JsonObject = {};
+
   for (const [key, value] of Object.entries(args)) {
     toolArgs[key] = jsonValueSchema.parse(value);
   }
+
   return toolArgs;
 }
 
@@ -130,6 +132,7 @@ export function parseExecLifecycleEvent(
 ): ExecLifecycleEvent | null {
   const parentToolCallId =
     parentToolCallIdOverride ?? getEventParentToolCallId(decoded);
+
   if (
     decoded.type === "system/interaction/lifecycle" &&
     isApprovalInteractionLifecycle(decoded.interaction) &&
@@ -139,6 +142,7 @@ export function parseExecLifecycleEvent(
     decoded.interaction.payload.subject.kind === "command"
   ) {
     const subject = decoded.interaction.payload.subject;
+
     return {
       kind: "begin",
       call: {
@@ -152,9 +156,12 @@ export function parseExecLifecycleEvent(
       },
     };
   }
+
   if (decoded.type === "item/commandExecution/outputDelta") {
     const callId = decoded.itemId;
+
     if (!callId) return null;
+
     return {
       kind: "output",
       output: {
@@ -172,18 +179,22 @@ export function parseExecLifecycleEvent(
     decoded.item.type === "commandExecution"
   ) {
     const callId = decoded.item.id;
+
     if (!callId) return null;
 
     const kind = decoded.type === "item/started" ? "begin" : "end";
     const exitCode = decoded.item.exitCode;
+
     const status =
       exitCode !== undefined && exitCode !== 0
         ? "error"
         : itemStatusToExecStatus(decoded.item.status);
+
     const completedAt = kind === "end" ? meta.createdAt : null;
 
     const command = extractShellCommandFromString(decoded.item.command);
     const presentation = decoded.item.presentation;
+
     return {
       kind,
       call: {
@@ -221,17 +232,22 @@ function parseDelegationItemLifecycleEvent(
   ) {
     return null;
   }
+
   if (decoded.item.type !== "delegation") {
     return null;
   }
+
   const kind =
     decoded.type === "item/started" ||
     decoded.type === "item/delegation/progress"
       ? "begin"
       : "end";
+
   const status =
     kind === "end" ? itemStatusToExecStatus(decoded.item.status) : "pending";
+
   const presentation = decoded.item.presentation;
+
   return {
     kind,
     call: {
@@ -257,6 +273,7 @@ export function parseToolCallLifecycleEvent(
 ): ExecLifecycleEvent | null {
   const parentToolCallId =
     parentToolCallIdOverride ?? getEventParentToolCallId(decoded);
+
   if (
     decoded.type === "item/toolCall/progress" ||
     decoded.type === "item/mcpToolCall/progress"
@@ -277,6 +294,7 @@ export function parseToolCallLifecycleEvent(
     meta,
     parentToolCallId,
   );
+
   if (delegationEvent) {
     return delegationEvent;
   }
@@ -285,6 +303,7 @@ export function parseToolCallLifecycleEvent(
     if (decoded.item.type !== "toolCall") return null;
 
     const callId = decoded.item.id;
+
     if (!callId) return null;
     const toolName = decoded.item.tool;
     const serverPrefix = decoded.item.server ? `${decoded.item.server}:` : "";
@@ -292,16 +311,20 @@ export function parseToolCallLifecycleEvent(
     const parsedArgs = decoded.item.arguments ?? null;
 
     const kind = decoded.type === "item/started" ? "begin" : "end";
+
     const status =
       kind === "end" ? itemStatusToExecStatus(decoded.item.status) : "pending";
+
     const completedAt = kind === "end" ? meta.createdAt : null;
     const result = decoded.item.result;
+
     const output =
       typeof result === "string"
         ? result
         : result !== undefined
           ? JSON.stringify(result)
           : undefined;
+
     const errorField = decoded.item.error;
     const toolArgs = parseToolArgs(parsedArgs);
     const presentation = decoded.item.presentation;

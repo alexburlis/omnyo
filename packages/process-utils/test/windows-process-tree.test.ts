@@ -5,6 +5,7 @@ import { stopWindowsProcessTree } from "../src/windows-process-tree.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
+
   return {
     ...actual,
     execFile: vi.fn((...args: unknown[]) => {
@@ -14,6 +15,7 @@ vi.mock("node:child_process", async (importOriginal) => {
           callback(new Error("taskkill unavailable"), "", "");
         }
       });
+
       return new actual.ChildProcess();
     }),
   };
@@ -25,12 +27,14 @@ async function startChild() {
     ["-e", 'process.stdout.write("ready"); setInterval(() => {}, 1000);'],
     { stdio: ["ignore", "pipe", "ignore"] },
   );
+
   onTestFinished(() => {
     vi.restoreAllMocks();
     child.kill("SIGKILL");
     vi.mocked(execFile).mockClear();
   });
   await once(child.stdout, "data");
+
   return child;
 }
 
@@ -44,6 +48,7 @@ it("reports unverified tree cleanup when taskkill fails but the root exits", asy
 
 it("falls back within a deadline when taskkill never completes", async () => {
   const child = await startChild();
+
   const killer = spawn(
     process.execPath,
     ["-e", "setInterval(() => {}, 1000)"],
@@ -51,6 +56,7 @@ it("falls back within a deadline when taskkill never completes", async () => {
       stdio: "ignore",
     },
   );
+
   onTestFinished(() => {
     killer.kill("SIGKILL");
   });

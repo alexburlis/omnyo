@@ -9,11 +9,12 @@ import {
 } from "./test-support.js";
 
 let harness: FakePiBridgeHarness;
+
 let sessionDir: string;
 
 beforeEach(async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-checkpoint-fork-",
+    prefix: "omnyo-pi-checkpoint-fork-",
     initialize: true,
   });
   sessionDir = harness.sessionDir;
@@ -70,6 +71,7 @@ it("branches the source session at the checkpoint and leaves the source untouche
     options: FULL_PERMISSION_OPTIONS,
     instructionMode: "append",
   });
+
   expect(fork.result).toMatchObject({
     providerThreadId: "thr_ckpt_fork",
     sessionRestorable: true,
@@ -77,19 +79,23 @@ it("branches the source session at the checkpoint and leaves the source untouche
 
   const forkFile = join(sessionDir, "thr_ckpt_fork.jsonl");
   expect(existsSync(forkFile)).toBe(true);
+
   const forked = SessionManager.open(
     forkFile,
     sessionDir,
     harness.workspaceDir,
   );
+
   const texts = forked
     .getBranch()
     .filter((entry) => entry.type === "message")
     .map((entry) => {
       const message = (entry as { message: { role: string; content: unknown } })
         .message;
+
       return `${message.role}:${typeof message.content === "string" ? message.content : (message.content as { text: string }[]).map((c) => c.text).join("")}`;
     });
+
   expect(texts).toEqual(["user:first question", "assistant:first answer"]);
   expect(forked.getLeafId()).toBe(checkpointId);
   expect(readFileSync(sourceFile, "utf8")).toBe(sourceBefore);
@@ -103,6 +109,7 @@ it("refuses a fork whose source session is missing", async () => {
     options: FULL_PERMISSION_OPTIONS,
     instructionMode: "append",
   });
+
   expect(fork.error).toMatchObject({
     message: expect.stringContaining("source pi session file not found"),
   });

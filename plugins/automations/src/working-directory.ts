@@ -1,4 +1,4 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import type { AutomationScriptWorkingDirectory } from "./rpc-types.js";
 import { scriptsRoot } from "./script-files.js";
@@ -17,7 +17,7 @@ const localPathProjectSourceSchema = z
 
 export type ProjectsSdk = {
   get(
-    args: Parameters<BbPluginApi["sdk"]["projects"]["get"]>[0],
+    args: Parameters<PluginApi["sdk"]["projects"]["get"]>[0],
   ): Promise<unknown>;
 };
 
@@ -31,13 +31,17 @@ export function projectPathForHost(
   hostId: string,
 ): string | null {
   const parsed = projectSourcesSchema.safeParse(project);
+
   if (!parsed.success) return null;
+
   for (const source of parsed.data.sources) {
     const local = localPathProjectSourceSchema.safeParse(source);
+
     if (local.success && local.data.hostId === hostId) {
       return local.data.path;
     }
   }
+
   return null;
 }
 
@@ -48,19 +52,24 @@ export function createScriptWorkingDirectoryResolver(args: {
 }): ScriptWorkingDirectoryResolver {
   const { sdk, pluginDataDir, serverHostId } = args;
   const projectPaths = new Map<string, Promise<string | null>>();
+
   return async (projectId, workingDirectory) => {
     if (workingDirectory.type === "automation-storage") {
       return scriptsRoot(pluginDataDir);
     }
+
     if (workingDirectory.type === "path") return workingDirectory.path;
+
     if (serverHostId === null) return null;
     let projectPath = projectPaths.get(projectId);
+
     if (projectPath === undefined) {
       projectPath = sdk.projects
         .get({ projectId })
         .then((project) => projectPathForHost(project, serverHostId));
       projectPaths.set(projectId, projectPath);
     }
+
     return projectPath;
   };
 }

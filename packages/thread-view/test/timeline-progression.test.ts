@@ -5,7 +5,7 @@ import type {
   TimelineConversationRow,
   TimelineFileChangeWorkRow,
   TimelineRowBase,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   buildTimelineViewRows,
   findActiveLatestBundleId,
@@ -23,11 +23,13 @@ let nextSeq = 1;
 function nextSequence(): number {
   const seq = nextSeq;
   nextSeq += 1;
+
   return seq;
 }
 
 function baseRow(id: string): TimelineRowBase {
   const seq = nextSequence();
+
   return {
     id,
     threadId: "thread-1",
@@ -41,6 +43,7 @@ function baseRow(id: string): TimelineRowBase {
 
 function conversationBase(id: string) {
   const base = baseRow(id);
+
   return { ...base, messageSeq: base.sourceSeqEnd };
 }
 
@@ -56,7 +59,12 @@ function userRow(text: string): TimelineConversationRow {
     senderThreadId: null,
     systemMessageKind: "unlabeled",
     systemMessageSubject: null,
-    turnRequest: { isGrouped: false, kind: "message", status: "accepted" },
+    turnRequest: {
+      clientRequestId: null,
+      isGrouped: false,
+      kind: "message",
+      status: "accepted",
+    },
   };
 }
 
@@ -68,6 +76,7 @@ function assistantRow(text: string): TimelineConversationRow {
     text,
     attachments: null,
     turnRequest: null,
+    turnGit: null,
   };
 }
 
@@ -151,6 +160,7 @@ function expectBundle(row: ThreadTimelineViewRow): TimelineBundleSummaryRow {
   if (row.kind !== "bundle-summary") {
     throw new Error(`expected bundle-summary, got ${row.kind}`);
   }
+
   return row;
 }
 
@@ -158,12 +168,14 @@ function expectStep(row: ThreadTimelineViewRow): TimelineStepSummaryRow {
   if (row.kind !== "step-summary") {
     throw new Error(`expected step-summary, got ${row.kind}`);
   }
+
   return row;
 }
 
 describe("timeline progression frames", () => {
   it("frame 0: user-only timeline has no work yet", () => {
     nextSeq = 1;
+
     const rows = buildTimelineViewRows([
       userRow("Create the timeline ASCII layout artifact."),
     ]);
@@ -175,6 +187,7 @@ describe("timeline progression frames", () => {
 
   it("frame 1: assistant + single read renders as a leaf, not a bundle", () => {
     nextSeq = 1;
+
     const rows = buildTimelineViewRows([
       userRow("Create the timeline ASCII layout artifact."),
       assistantRow("I am reading the relevant docs."),
@@ -190,6 +203,7 @@ describe("timeline progression frames", () => {
 
   it("frame 2: two same-concept reads form an active-latest exploration bundle", () => {
     nextSeq = 1;
+
     const rows = buildTimelineViewRows([
       userRow("Create the timeline ASCII layout artifact."),
       assistantRow("I am reading the relevant docs."),
@@ -208,6 +222,7 @@ describe("timeline progression frames", () => {
 
   it("frame 3: adding a list to the exploration keeps a single bundle", () => {
     nextSeq = 1;
+
     const rows = buildTimelineViewRows([
       userRow("Create the timeline ASCII layout artifact."),
       assistantRow("I am reading the relevant docs."),
@@ -227,6 +242,7 @@ describe("timeline progression frames", () => {
 
   it("frame 4: a file edit displaces the exploration bundle to completed-not-latest", () => {
     nextSeq = 1;
+
     const rows = buildTimelineViewRows([
       userRow("Create the timeline ASCII layout artifact."),
       assistantRow("I am drafting the artifact."),
@@ -249,6 +265,7 @@ describe("timeline progression frames", () => {
 
   it("frame 5: the next assistant message closes the step into one step-summary", () => {
     nextSeq = 1;
+
     const rows = buildTimelineViewRows([
       userRow("Create the timeline ASCII layout artifact."),
       assistantRow("I am drafting the artifact."),
@@ -271,6 +288,7 @@ describe("timeline progression frames", () => {
 
   it("turn-completion lazy detail collapses trailing work into a step-summary", () => {
     nextSeq = 1;
+
     const lazyTurnRows = buildTimelineViewRows(
       [
         assistantRow("I am drafting the artifact."),
@@ -303,6 +321,7 @@ describe("findTimelineFrontierRow", () => {
 
   it("looks past a trailing user-role conversation row to the prior agent row", () => {
     nextSeq = 1;
+
     const rows = buildTimelineViewRows([
       userRow("Initial request."),
       assistantRow("Working on it."),
@@ -319,7 +338,12 @@ describe("findTimelineFrontierRow", () => {
         senderThreadId: null,
         systemMessageKind: "unlabeled",
         systemMessageSubject: null,
-        turnRequest: { isGrouped: false, kind: "steer", status: "pending" },
+        turnRequest: {
+          clientRequestId: null,
+          isGrouped: false,
+          kind: "steer",
+          status: "pending",
+        },
       },
     ]);
 
@@ -329,6 +353,7 @@ describe("findTimelineFrontierRow", () => {
 
   it("treats a trailing assistant-role conversation row as the frontier", () => {
     nextSeq = 1;
+
     const rows = buildTimelineViewRows([
       userRow("Initial request."),
       readRow("AGENTS.md"),
@@ -338,6 +363,7 @@ describe("findTimelineFrontierRow", () => {
 
     const frontier = findTimelineFrontierRow(rows);
     expect(frontier?.kind).toBe("conversation");
+
     if (frontier?.kind === "conversation") {
       expect(frontier.role).toBe("assistant");
     }

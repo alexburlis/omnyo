@@ -21,9 +21,11 @@ export function PluginUpdateJobsHost() {
     for (const job of jobs ?? []) {
       const state = job.state;
       const previous = seen.current.get(job.id);
+
       if (previous === state) continue;
       seen.current.set(job.id, state);
       const id = `plugin-update:${job.id}`;
+
       if (job.state === "queued" || job.state === "running") {
         trackPluginUpdate(job.id, true);
         appToast.loading(
@@ -35,10 +37,12 @@ export function PluginUpdateJobsHost() {
         );
         continue;
       }
+
       if (previous === undefined && !isWatchedPluginUpdate(job.id)) continue;
       trackPluginUpdate(job.id, false);
       void invalidatePluginList({ queryClient });
       invalidatePluginCatalogSearch({ queryClient });
+
       if (job.state === "failed") {
         appToast.error("Plugin update failed", {
           id,
@@ -56,6 +60,7 @@ export function PluginUpdateJobsHost() {
           job.result.applied ? "Plugin updated" : "Plugin is up to date",
           {
             id,
+            badge: true,
             description: job.displayName,
             action: action(job.pluginId, "app"),
           },
@@ -63,5 +68,6 @@ export function PluginUpdateJobsHost() {
       }
     }
   }, [jobs, queryClient, action]);
+
   return null;
 }

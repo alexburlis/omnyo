@@ -16,10 +16,26 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  getSortableTransition,
+  MOTION_DURATION_MS,
+  MOTION_EASE,
+  usePrefersReducedMotion,
+} from "@omnyo/shared-ui/motion";
 import { SettingsRowList } from "@/components/ui/settings-section";
+
+const SORTABLE_ROW_LIFT_TRANSITION = ["box-shadow", "opacity"]
+  .map(
+    (property) =>
+      `${property} ${MOTION_DURATION_MS.fast}ms ${MOTION_EASE.standard}`,
+  )
+  .join(", ");
+
+const SORTABLE_ROW_LIFT_CLASS =
+  "relative z-10 rounded-md bg-card opacity-90 shadow-lift";
 
 const restrictDragToVerticalAxis: Modifier = ({ transform }) => ({
   ...transform,
@@ -28,17 +44,27 @@ const restrictDragToVerticalAxis: Modifier = ({ transform }) => ({
 
 const sortableSettingsRowModifiers: Modifier[] = [restrictDragToVerticalAxis];
 
-export function SortableSettingsRowList({
-  ids,
-  disabled,
-  onReorder,
-  children,
-}: {
+interface SortableSettingsRowsProps {
   ids: string[];
   disabled: boolean;
   onReorder: (activeId: string, overId: string) => void;
   children: ReactNode;
-}) {
+}
+
+export function SortableSettingsRowList(props: SortableSettingsRowsProps) {
+  return (
+    <SortableSettingsRows {...props}>
+      <SettingsRowList>{props.children}</SettingsRowList>
+    </SortableSettingsRows>
+  );
+}
+
+export function SortableSettingsRows({
+  ids,
+  disabled,
+  onReorder,
+  children,
+}: SortableSettingsRowsProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, {
@@ -54,6 +80,7 @@ export function SortableSettingsRowList({
     ) {
       return;
     }
+
     onReorder(event.active.id, event.over.id);
   };
 
@@ -65,7 +92,7 @@ export function SortableSettingsRowList({
       onDragEnd={handleDragEnd}
     >
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-        <SettingsRowList>{children}</SettingsRowList>
+        {children}
       </SortableContext>
     </DndContext>
   );
@@ -88,11 +115,23 @@ export function useSortableSettingsRow({
     setNodeRef,
     transform,
     transition,
-  } = useSortable({ id, disabled });
+  } = useSortable({
+    id,
+    disabled,
+    transition: getSortableTransition(usePrefersReducedMotion()),
+  });
+
   const style = useMemo<CSSProperties>(
-    () => ({ transform: CSS.Translate.toString(transform), transition }),
+    () => ({
+      transform: CSS.Translate.toString(transform),
+      transition:
+        transition === undefined
+          ? SORTABLE_ROW_LIFT_TRANSITION
+          : `${transition}, ${SORTABLE_ROW_LIFT_TRANSITION}`,
+    }),
     [transform, transition],
   );
+
   const handle = (
     <Button
       ref={setActivatorNodeRef}
@@ -111,5 +150,8 @@ export function useSortableSettingsRow({
       <Icon name="DragDropVertical" aria-hidden="true" />
     </Button>
   );
-  return { setNodeRef, style, isDragging, handle };
+
+  const liftClassName = isDragging ? SORTABLE_ROW_LIFT_CLASS : undefined;
+
+  return { setNodeRef, style, isDragging, handle, liftClassName };
 }

@@ -1,16 +1,20 @@
 // @vitest-environment jsdom
 
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import {
   commandRow,
   conversationRow,
   turnRow,
 } from "@/test/fixtures/thread-timeline-rows";
 import type { ThreadTimelineUnreadDividerPlacement } from "./types";
+import {
+  BottomAnchorContext,
+  type BottomAnchorContextValue,
+} from "@/components/ui/bottom-anchored-scroll-body";
 import { ThreadProviderContext } from "../thread-provider-context";
 import { ThreadTimelineRows } from "./ThreadTimelineRows";
 
@@ -39,16 +43,32 @@ function renderTopLevelSequence(
       </MemoryRouter>
     </QueryClientProvider>,
   );
+
   const list = container.querySelector('[data-timeline-row-list="top-level"]');
+
   if (list === null) {
     throw new Error("Timeline did not render a top-level row list");
   }
-  return [...list.querySelectorAll(":scope > [data-timeline-items] > *")].map(
-    (child) =>
-      child.querySelector('[data-testid="thread-unread-divider"]') === null
-        ? (child.textContent ?? "")
-        : DIVIDER,
+
+  return [...list.querySelectorAll(":scope > *")].map((child) =>
+    child.querySelector('[data-testid="thread-unread-divider"]') === null
+      ? messageRowText(child)
+      : DIVIDER,
   );
+}
+
+function messageRowText(row: Element): string {
+  const copy = row.cloneNode(true);
+
+  if (!(copy instanceof Element)) return "";
+
+  for (const time of copy.querySelectorAll(
+    "[data-message-time], [data-turn-receipt-time]",
+  )) {
+    time.remove();
+  }
+
+  return copy.textContent ?? "";
 }
 
 function userMessage(createdAt: number): TimelineRow {
@@ -99,7 +119,12 @@ describe("unread divider placement", () => {
       { kind: "after-cutoff", cutoffAt: 350 },
     );
 
-    expect(sequence).toEqual(["PROMPT", "Ran 3 commands", DIVIDER, "ANSWER"]);
+    expect(sequence).toEqual([
+      "PROMPT",
+      "Ran 3 commands 6.9s",
+      DIVIDER,
+      "ANSWER",
+    ]);
   });
 
   it("places the divider above a work group that started after the cutoff", () => {
@@ -118,7 +143,7 @@ describe("unread divider placement", () => {
       "PROMPT",
       "ANSWER",
       DIVIDER,
-      "Ran 2 commands",
+      "Ran 2 commands 4.6s",
       "ANSWER",
     ]);
   });
@@ -141,7 +166,7 @@ describe("unread divider placement", () => {
       { kind: "after-cutoff", cutoffAt: 350 },
     );
 
-    expect(collapsed).toEqual(["PROMPT", "Worked for 4s", DIVIDER, "ANSWER"]);
+    expect(collapsed).toEqual(["PROMPT", "Worked for 4s ", DIVIDER, "ANSWER"]);
   });
 
   it("never anchors the divider on the reader's own message", () => {
@@ -150,7 +175,12 @@ describe("unread divider placement", () => {
       { kind: "after-cutoff", cutoffAt: 300 },
     );
 
-    expect(sequence).toEqual(["ANSWER", "PROMPT", DIVIDER, "Ran echo 500 2s"]);
+    expect(sequence).toEqual([
+      "ANSWER",
+      "PROMPT",
+      DIVIDER,
+      "Ran echo 500 2.3s",
+    ]);
   });
 
   it("omits the divider when no row started after the cutoff", () => {
@@ -169,5 +199,118 @@ describe("unread divider placement", () => {
     );
 
     expect(sequence[0]).toBe(DIVIDER);
+  });
+});
+
+describe("unread divider retraction", () => {
+  function bottomAnchor(isAtBottom: boolean): BottomAnchorContextValue {
+    return {
+      getScrollElement: () => null,
+      isAtBottom,
+      scrollToBottom: () => undefined,
+      scrollElementIntoView: () => undefined,
+      scrollElementIntoViewClampedToMaxScroll: () => undefined,
+      holdContentPosition: () => undefined,
+    };
+  }
+
+  function dividerTimeline(anchor: BottomAnchorContextValue) {
+    return (
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <ThreadProviderContext.Provider
+            value={{ providerId: "echo-agent", pluginId: "echo-provider" }}
+          >
+            <BottomAnchorContext.Provider value={anchor}>
+              <ThreadTimelineRows
+                threadId="thr_main"
+                threadRuntimeDisplayStatus="idle"
+                workspaceRootPath={undefined}
+                timelineRows={[userMessage(100), assistantMessage(500)]}
+                unreadDividerAutoScroll={false}
+                unreadDividerPlacement={{ kind: "after-cutoff", cutoffAt: 200 }}
+              />
+            </BottomAnchorContext.Provider>
+          </ThreadProviderContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("draws the word New beside a short rule", () => {
+    render(dividerTimeline(bottomAnchor(false)));
+
+    const divider = screen.getByTestId("thread-unread-divider");
+
+    expect(divider.textContent).toBe("New");
+    expect(divider.className).not.toContain("uppercase");
+    expect(
+      divider.querySelector("[data-unread-divider-rule]")?.className,
+    ).toContain("w-14");
+  });
+
+  it("retracts after the reader stays at the bottom and keeps the row", () => {
+    vi.useFakeTimers();
+
+    try {
+      const view = render(dividerTimeline(bottomAnchor(true)));
+
+      act(() => {
+        vi.advanceTimersByTime(2_499);
+      });
+
+      expect(
+        screen
+          .getByTestId("thread-unread-divider")
+          .hasAttribute("data-retracted"),
+      ).toBe(false);
+      expect(
+        screen.getByRole("separator", { name: "New messages" }),
+      ).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+
+      const retracted = screen.getByTestId("thread-unread-divider");
+
+      expect(retracted.hasAttribute("data-retracted")).toBe(true);
+      expect(retracted.getAttribute("aria-hidden")).toBe("true");
+      expect(
+        screen.queryByRole("separator", { name: "New messages" }),
+      ).toBeNull();
+
+      view.rerender(dividerTimeline(bottomAnchor(false)));
+
+      expect(screen.getByTestId("thread-unread-divider")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits while the reader is away from the bottom", () => {
+    vi.useFakeTimers();
+
+    try {
+      const view = render(dividerTimeline(bottomAnchor(true)));
+
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+
+      view.rerender(dividerTimeline(bottomAnchor(false)));
+
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+
+      expect(
+        screen
+          .getByTestId("thread-unread-divider")
+          .hasAttribute("data-retracted"),
+      ).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

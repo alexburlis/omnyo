@@ -1,5 +1,5 @@
 import { forwardRef, type HTMLAttributes, type ReactNode } from "react";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 interface SettingsSectionProps {
   action?: ReactNode;
@@ -41,7 +41,7 @@ export function SettingsSection({
             </h2>
           </div>
           {description ? (
-            <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
+            <p className="mt-0.5 text-xs leading-snug text-subtle-foreground">
               {description}
             </p>
           ) : null}
@@ -89,6 +89,7 @@ export const SettingsRow = forwardRef<HTMLDivElement, SettingsRowProps>(
     </div>
   ),
 );
+
 SettingsRow.displayName = "SettingsRow";
 
 export function SettingsDetailRow({
@@ -137,6 +138,7 @@ export function SettingsWithControl({
 }: SettingsWithControlProps) {
   const inline = controlPlacement === "inline";
   const trailing = controlPlacement === "trailing";
+
   return (
     <div className="@container/settings w-full min-w-0">
       <div
@@ -162,7 +164,7 @@ export function SettingsWithControl({
             {labelBadge ? <SettingsBadge>{labelBadge}</SettingsBadge> : null}
           </div>
           {description ? (
-            <p className="mt-0.5 text-xs leading-snug text-subtle-foreground/75">
+            <p className="mt-0.5 text-xs leading-snug text-subtle-foreground">
               {description}
             </p>
           ) : null}

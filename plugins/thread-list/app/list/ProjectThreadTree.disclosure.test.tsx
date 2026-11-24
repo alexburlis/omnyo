@@ -9,11 +9,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   installTestPluginRuntime,
   renderSlot,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 import { makeSidebarThread } from "../model/fixtures.js";
 import { SidebarRenameProvider } from "../rows/SidebarInlineRename.js";
 
 installTestPluginRuntime();
+
 const { ProjectThreadTree } = await import("./ProjectRow.js");
 
 function Slot({ children }: { children: ReactNode }) {
@@ -52,9 +53,7 @@ function renderThreadTree(
           threadListState={{ status: "ready", threads }}
           compareThreads={() => 0}
           selectedThreadId={selectedThreadId}
-          collapsedThreadIds={new Set()}
           collapsedEnvironmentIds={new Set()}
-          onToggleThreadCollapsed={vi.fn()}
           onToggleEnvironmentCollapsed={vi.fn()}
         />
       ),
@@ -90,8 +89,24 @@ describe("ProjectThreadTree without progressive disclosure", () => {
     expect(screen.getByText("Thread 6")).not.toBeNull();
     expect(screen.getByText("Thread 7")).not.toBeNull();
     expect(
-      screen.getByRole("button", { name: "Collapse Thread 6 threads" }),
-    ).not.toBeNull();
+      screen.queryByRole("button", { name: "Collapse Thread 6 threads" }),
+    ).toBeNull();
+  });
+
+  it("keeps child chats visible whichever chat is open", () => {
+    const threads = makePlainThreads(3);
+    threads[1] = { ...threads[1], parentThreadId: threads[0].id };
+
+    for (const selectedThreadId of [
+      undefined,
+      threads[0].id,
+      threads[1].id,
+      threads[2].id,
+    ]) {
+      renderThreadTree(threads, { selectedThreadId });
+      expect(screen.getByText("Thread 1")).not.toBeNull();
+      cleanup();
+    }
   });
 
   it("shows the unavailable state instead of rows when threads cannot load", () => {
@@ -102,15 +117,13 @@ describe("ProjectThreadTree without progressive disclosure", () => {
           <ProjectThreadTree
             threadListState={{ status: "unavailable" }}
             compareThreads={() => 0}
-            collapsedThreadIds={new Set()}
             collapsedEnvironmentIds={new Set()}
-            onToggleThreadCollapsed={vi.fn()}
             onToggleEnvironmentCollapsed={vi.fn()}
           />
         ),
       },
     );
 
-    expect(screen.getByText("Threads unavailable")).not.toBeNull();
+    expect(screen.getByText("Couldn’t load threads")).not.toBeNull();
   });
 });

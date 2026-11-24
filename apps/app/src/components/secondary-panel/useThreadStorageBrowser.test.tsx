@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
-import type { WorkspaceFile } from "@bb/server-contract";
+import type { WorkspaceFile } from "@omnyo/server-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useThreadStorageBrowser } from "./useThreadStorageBrowser";
 
@@ -46,6 +46,7 @@ describe("useThreadStorageBrowser", () => {
         }),
       { initialProps: { selectedPath: null as string | null } },
     );
+
     expect(result.current.expandedFolders.size).toBe(0);
 
     rerender({ selectedPath: "docs/notes.md" });
@@ -70,6 +71,7 @@ describe("useThreadStorageBrowser", () => {
         threadId: "thr_a",
       }),
     );
+
     act(() => {
       result.current.toggleFolder(["qa", "qa/shots"]);
     });
@@ -92,6 +94,7 @@ describe("useThreadStorageBrowser", () => {
         }),
       { initialProps: { threadId: "thr_a" } },
     );
+
     act(() => {
       result.current.toggleFolder(["docs"]);
       result.current.showAllInFolder("docs");

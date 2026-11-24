@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import type { Host } from "@bb/domain";
-import { OptionDisplay } from "@bb/shared-ui/option-display";
+import type { Host } from "@omnyo/domain";
+import { OptionDisplay } from "@omnyo/shared-ui/option-display";
 import {
   OptionPicker,
   type PickerOption,
@@ -29,11 +29,13 @@ export function resolveTerminalHost({
 }: ResolveTerminalHostArgs): Host | null {
   const preferredHost =
     hosts.find((host) => host.id === preferredHostId) ?? null;
+
   if (preferredHost?.status === "connected") {
     return preferredHost;
   }
 
   const primaryHost = hosts.find((host) => host.id === primaryHostId) ?? null;
+
   if (primaryHost?.status === "connected") {
     return primaryHost;
   }
@@ -88,9 +90,11 @@ export function TerminalHostSelector({
 
   const selectedHost =
     hosts.find((host) => host.id === selectedHostId) ?? hosts[0];
+
   if (selectedHost === undefined) {
     return null;
   }
+
   if (hosts.length === 1) {
     return (
       <OptionDisplay

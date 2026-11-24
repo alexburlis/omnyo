@@ -4,6 +4,7 @@ import type * as z from "zod";
 import type { EmptyInput, Endpoint } from "./endpoint.js";
 
 export type RouteMethod = "get" | "post" | "patch" | "delete" | "put";
+
 export type RouteResponseFormat = "json" | "text" | "binary";
 
 export interface RouteResponseDescriptor<
@@ -163,6 +164,7 @@ export function jsonResponse<Output, const Status extends ContentfulStatusCode>(
   options?: RouteResponseOptions<Status>,
 ): RouteResponseDescriptor<Output, 200 | Status, "json"> {
   const status = options && "status" in options ? options.status : 200;
+
   return {
     status,
     format: "json",

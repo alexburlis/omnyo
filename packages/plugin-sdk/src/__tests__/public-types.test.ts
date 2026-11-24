@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
-  BbPluginApi,
+  PluginApi,
   JsonValue,
   PluginAgentConfigurationContext,
   PluginEnvironmentProviderDeclaration,
@@ -15,7 +15,7 @@ import type {
   PluginProviderIconRegistration,
 } from "../app-contract.js";
 
-type ExpectedBbPluginApiKey =
+type ExpectedPluginApiKey =
   | "agents"
   | "background"
   | "cli"
@@ -24,8 +24,11 @@ type ExpectedBbPluginApiKey =
   | "experimental_environments"
   | "experimental_hooks"
   | "experimental_machines"
+  | "experimental_reportError"
   | "onInstall"
   | "experimental_serverAccess"
+  | "experimental_eventSources"
+  | "experimental_secrets"
   | "hosts"
   | "http"
   | "log"
@@ -42,11 +45,12 @@ type ExpectedBbPluginApiKey =
   | "ui";
 
 const EXPECTED_BACKEND_ROOT_TYPE_EXPORTS = [
-  "BbPluginApi",
+  "PluginApi",
   "MessageDispatchHookContext",
   "MessageDispatchHookDecision",
   "PluginAgents",
   "PluginAiCompleteOptions",
+  "PluginAiPrepareOptions",
   "PluginAiServiceDeclaration",
   "PluginAiServiceStatus",
   "PluginAiServices",
@@ -61,7 +65,7 @@ const EXPECTED_BACKEND_ROOT_TYPE_EXPORTS = [
   "PluginAgentToolResult",
   "PluginAgentToolSelection",
   "PluginBackground",
-  "PluginBbSdk",
+  "PluginSdk",
   "PluginCli",
   "PluginCliCommandInfo",
   "PluginCliContext",
@@ -78,7 +82,14 @@ const EXPECTED_BACKEND_ROOT_TYPE_EXPORTS = [
   "PluginDispatchExecution",
   "PluginDispatchExecutionSources",
   "PluginDispatchInput",
+  "PluginEventSourceContext",
+  "PluginEventSourceDeclaration",
+  "PluginEventSourceFiring",
+  "PluginEventSourcePoll",
+  "PluginEventSourceProblem",
+  "PluginEventSources",
   "PluginEvents",
+  "ExperimentalPluginErrorReport",
   "ExperimentalPluginWebSocket",
   "ExperimentalPluginWebSocketContext",
   "ExperimentalPluginWebSocketHandler",
@@ -113,6 +124,8 @@ const EXPECTED_BACKEND_ROOT_TYPE_EXPORTS = [
   "ExperimentalPluginProviderEnvEntry",
   "ExperimentalPluginProviderEnvHealth",
   "ExperimentalPluginProviderEnvHealthContext",
+  "ExperimentalPluginProviderModelNotice",
+  "ExperimentalPluginProviderModelNoticeContext",
   "PluginProviderExtensionKindDeclaration",
   "PluginProviderFallbackModel",
   "PluginProviderMaintenance",
@@ -127,6 +140,7 @@ const EXPECTED_BACKEND_ROOT_TYPE_EXPORTS = [
   "PluginProviders",
   "PluginRealtime",
   "PluginRpc",
+  "PluginSecrets",
   "PluginServerApi",
   "PluginSettingDescriptor",
   "PluginSettingDescriptors",
@@ -229,18 +243,20 @@ function rootExportNames(
   kind: "type" | "value",
 ): Set<string> {
   const prefix = kind === "type" ? "export type" : "export";
+
   const match = declarations.match(
     new RegExp(`^${prefix} \\{ ([^}]+) \\};$`, "mu"),
   );
 
   if (kind === "value" && match === null) return new Set();
   expect(match, `${prefix} declaration`).not.toBeNull();
+
   return new Set(match?.[1].split(", ") ?? []);
 }
 
 describe("backend plugin SDK public surface", () => {
-  it("snapshots every BbPluginApi root member", () => {
-    expectTypeOf<keyof BbPluginApi>().toEqualTypeOf<ExpectedBbPluginApiKey>();
+  it("snapshots every PluginApi root member", () => {
+    expectTypeOf<keyof PluginApi>().toEqualTypeOf<ExpectedPluginApiKey>();
   });
 
   it("types configure plugin metadata as deep-readonly JSON", () => {
@@ -255,12 +271,14 @@ describe("backend plugin SDK public surface", () => {
       // @ts-expect-error configure receives a deep-frozen snapshot
       delete context.pluginMetadata.counter;
     }
+
     function borrowNestedValue(
       context: PluginAgentConfigurationContext,
     ): JsonValue | undefined {
       // @ts-expect-error nested snapshot values are read-only too
       return context.pluginMetadata.nested;
     }
+
     expectTypeOf(writeMetadata).toBeFunction();
     expectTypeOf(borrowNestedValue).toBeFunction();
   });
@@ -269,18 +287,21 @@ describe("backend plugin SDK public surface", () => {
     const [backendContract, declarations] = await Promise.all([
       readFile(new URL("../backend-contract.ts", import.meta.url), "utf8"),
       readFile(
-        new URL("../../bundled-types/bb-plugin-sdk.d.ts", import.meta.url),
+        new URL("../../bundled-types/omnyo-plugin-sdk.d.ts", import.meta.url),
         "utf8",
       ),
     ]);
+
     const declaredBackendTypes = namesFromMatches(
       backendContract,
       /^export (?:interface|type) ([A-Za-z0-9_]+)/gmu,
     );
+
     const declaredBackendValues = namesFromMatches(
       backendContract,
       /^export (?:class|const|function) ([A-Za-z0-9_]+)/gmu,
     );
+
     const rootTypeExports = rootExportNames(declarations, "type");
     const rootValueExports = rootExportNames(declarations, "value");
 
@@ -288,9 +309,11 @@ describe("backend plugin SDK public surface", () => {
       [...EXPECTED_BACKEND_ROOT_TYPE_EXPORTS].sort(),
     );
     expect(declaredBackendValues).toEqual(EXPECTED_BACKEND_ROOT_VALUE_EXPORTS);
+
     for (const exportName of EXPECTED_BACKEND_ROOT_TYPE_EXPORTS) {
       expect(rootTypeExports.has(exportName), exportName).toBe(true);
     }
+
     for (const exportName of EXPECTED_BACKEND_ROOT_VALUE_EXPORTS) {
       expect(rootValueExports.has(exportName), exportName).toBe(true);
     }
@@ -300,26 +323,31 @@ describe("backend plugin SDK public surface", () => {
     const [rpcContract, declarations] = await Promise.all([
       readFile(new URL("../rpc-contract.ts", import.meta.url), "utf8"),
       readFile(
-        new URL("../../bundled-types/bb-plugin-sdk.d.ts", import.meta.url),
+        new URL("../../bundled-types/omnyo-plugin-sdk.d.ts", import.meta.url),
         "utf8",
       ),
     ]);
+
     const declaredTypes = namesFromMatches(
       rpcContract,
       /^export (?:interface|type) ([A-Za-z0-9_]+)/gmu,
     );
+
     const declaredValues = namesFromMatches(
       rpcContract,
       /^export (?:class|const|function) ([A-Za-z0-9_]+)/gmu,
     );
+
     expect(declaredTypes).toEqual([...EXPECTED_RPC_ROOT_TYPE_EXPORTS].sort());
     expect(declaredValues).toEqual([...EXPECTED_RPC_ROOT_VALUE_EXPORTS]);
 
     const rootTypeExports = rootExportNames(declarations, "type");
     const rootValueExports = rootExportNames(declarations, "value");
+
     for (const exportName of EXPECTED_RPC_ROOT_TYPE_EXPORTS) {
       expect(rootTypeExports.has(exportName), exportName).toBe(true);
     }
+
     for (const exportName of EXPECTED_RPC_ROOT_VALUE_EXPORTS) {
       expect(rootValueExports.has(exportName), exportName).toBe(true);
     }
@@ -329,18 +357,21 @@ describe("backend plugin SDK public surface", () => {
     const [cliSpec, declarations] = await Promise.all([
       readFile(new URL("../cli-spec.ts", import.meta.url), "utf8"),
       readFile(
-        new URL("../../bundled-types/bb-plugin-sdk.d.ts", import.meta.url),
+        new URL("../../bundled-types/omnyo-plugin-sdk.d.ts", import.meta.url),
         "utf8",
       ),
     ]);
+
     const declaredTypes = namesFromMatches(
       cliSpec,
       /^export (?:interface|type) ([A-Za-z0-9_]+)/gmu,
     );
+
     const declaredValues = namesFromMatches(
       cliSpec,
       /^export (?:class|const|function) ([A-Za-z0-9_]+)/gmu,
     );
+
     expect(declaredTypes).toEqual(
       [...EXPECTED_CLI_SPEC_ROOT_TYPE_EXPORTS].sort(),
     );
@@ -350,9 +381,11 @@ describe("backend plugin SDK public surface", () => {
 
     const rootTypeExports = rootExportNames(declarations, "type");
     const rootValueExports = rootExportNames(declarations, "value");
+
     for (const exportName of EXPECTED_CLI_SPEC_ROOT_TYPE_EXPORTS) {
       expect(rootTypeExports.has(exportName), exportName).toBe(true);
     }
+
     for (const exportName of EXPECTED_CLI_SPEC_ROOT_VALUE_EXPORTS) {
       expect(rootValueExports.has(exportName), exportName).toBe(true);
     }
@@ -362,18 +395,21 @@ describe("backend plugin SDK public surface", () => {
     const [hostContract, declarations] = await Promise.all([
       readFile(new URL("../host-contract.ts", import.meta.url), "utf8"),
       readFile(
-        new URL("../../bundled-types/bb-plugin-sdk.d.ts", import.meta.url),
+        new URL("../../bundled-types/omnyo-plugin-sdk.d.ts", import.meta.url),
         "utf8",
       ),
     ]);
+
     const declaredTypes = namesFromMatches(
       hostContract,
       /^export (?:interface|type) ([A-Za-z0-9_]+)/gmu,
     );
+
     const declaredValues = namesFromMatches(
       hostContract,
       /^export (?:class|const|function) ([A-Za-z0-9_]+)/gmu,
     );
+
     expect(declaredTypes).toEqual([...EXPECTED_HOST_ROOT_TYPE_EXPORTS].sort());
     expect(declaredValues).toEqual(
       [...EXPECTED_HOST_ROOT_VALUE_EXPORTS].sort(),
@@ -381,9 +417,11 @@ describe("backend plugin SDK public surface", () => {
 
     const rootTypeExports = rootExportNames(declarations, "type");
     const rootValueExports = rootExportNames(declarations, "value");
+
     for (const exportName of EXPECTED_HOST_ROOT_TYPE_EXPORTS) {
       expect(rootTypeExports.has(exportName), exportName).toBe(true);
     }
+
     for (const exportName of EXPECTED_HOST_ROOT_VALUE_EXPORTS) {
       expect(rootValueExports.has(exportName), exportName).toBe(true);
     }
@@ -416,6 +454,7 @@ it("gives composer attachments one owner and round-trips draft snapshots", () =>
     path: "/tmp/a.txt",
     name: "a.txt",
   } as const;
+
   expectTypeOf({
     ...base,
     hostId: "host_1",

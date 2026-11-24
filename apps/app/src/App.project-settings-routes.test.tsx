@@ -14,12 +14,15 @@ import { AppRoutes } from "./App";
 vi.mock("./components/layout/AppLayout", () => ({
   AppLayout: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
+
 vi.mock("./views/ProjectDetailSettingsView", () => ({
   ProjectDetailSettingsView: () => {
     const { projectId } = useParams();
+
     return <h1>Project detail: {projectId}</h1>;
   },
 }));
+
 vi.mock("./views/SettingsView", () => ({
   SettingsView: () => <h1>Settings</h1>,
 }));
@@ -27,6 +30,7 @@ vi.mock("./views/SettingsView", () => ({
 function NavigationProbe() {
   const location = useLocation();
   const navigate = useNavigate();
+
   return (
     <>
       <output>

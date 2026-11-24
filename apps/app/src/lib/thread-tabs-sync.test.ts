@@ -1,8 +1,9 @@
-import { openSecondaryPanelTabInState } from "@bb/client-core";
-import type { ThreadTab } from "@bb/server-contract";
+import { openSecondaryPanelTabInState } from "@omnyo/client-core";
+import type { ThreadTab } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import {
   createEmptyFixedPanelTabsState,
+  createGitDiffFixedPanelTab,
   createTerminalFixedPanelTab,
   createThreadInfoFixedPanelTab,
 } from "./fixed-panel-tabs-state";
@@ -55,22 +56,40 @@ describe("thread tab synchronization", () => {
     ).toEqual([terminal, neighbor]);
   });
 
+  it("keeps a server tab in place when a device that never loaded the list adds it", () => {
+    const info = createThreadInfoFixedPanelTab();
+    const diff = createGitDiffFixedPanelTab();
+    const terminal = createTerminalFixedPanelTab({ terminalId: "new" });
+    expect(mergeThreadTabChanges([info, diff], [], [info])).toEqual([
+      info,
+      diff,
+    ]);
+    expect(mergeThreadTabChanges([info, diff], [], [info, terminal])).toEqual([
+      info,
+      diff,
+      terminal,
+    ]);
+  });
+
   it("keeps the server's desktop window when saving a local page update", () => {
     const closedWindow = {
       hostId: "host-1",
       instanceId: "closed-window",
       generation: "g1",
     };
+
     const liveWindow = {
       hostId: "host-1",
       instanceId: "live-window",
       generation: "g2",
     };
+
     const local = {
       ...browserTab("native", "Before"),
       id: "native-tab",
       desktopTarget: closedWindow,
     };
+
     const adopted = { ...local, desktopTarget: liveWindow };
     expect(
       mergeThreadTabChanges(
@@ -95,6 +114,7 @@ describe("thread tab synchronization", () => {
   it("preserves local presentation state while adopting remote tabs", () => {
     const first = browserTab("first", "First");
     const second = browserTab("second", "Second");
+
     const current = createEmptyFixedPanelTabsState({
       lastUsedAt: 123,
       secondary: {
@@ -120,6 +140,7 @@ describe("thread tab synchronization", () => {
 
   it("drops legacy native side-chat tabs persisted before their removal", () => {
     const browser = browserTab("first", "First");
+
     const legacySideChat: ThreadTab = {
       id: "side-chat:legacy",
       kind: "side-chat",
@@ -128,6 +149,7 @@ describe("thread tab synchronization", () => {
       threadId: "thr_legacy",
       title: "Side chat",
     };
+
     const current = createEmptyFixedPanelTabsState({
       lastUsedAt: 123,
       secondary: { activeTabId: null, isOpen: true, tabs: [] },
@@ -155,6 +177,7 @@ describe("thread tab synchronization", () => {
 it("returns to the prior terminal when another client removes the active terminal before its close callback", () => {
   const source = createTerminalFixedPanelTab({ terminalId: "source" });
   const detour = createTerminalFixedPanelTab({ terminalId: "detour" });
+
   const state = openSecondaryPanelTabInState({
     state: createEmptyFixedPanelTabsState({
       secondary: {
@@ -165,9 +188,11 @@ it("returns to the prior terminal when another client removes the active termina
     }),
     tab: detour,
   });
+
   const reconciled = reconcileFixedPanelTabsState(state, [
     createThreadInfoFixedPanelTab(),
     source,
   ]);
+
   expect(reconciled.secondary.activeTabId).toBe(source.id);
 });

@@ -1,5 +1,6 @@
 {
-  "name": "@bb/thread-view",
+  "name": "@omnyo/thread-view",
+  "private": true,
   "version": "0.0.1",
   "type": "module",
   "sideEffects": false,
@@ -17,13 +18,13 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
-    "@bb/domain": "workspace:*",
-    "@bb/server-contract": "workspace:*",
-    "@bb/text-utils": "workspace:*",
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/server-contract": "workspace:*",
+    "@omnyo/text-utils": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2"

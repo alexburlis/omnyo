@@ -28,20 +28,26 @@ function belongsToList(
   filters: ListTaskFilters,
 ): boolean {
   if (task.parentTaskId !== null) return false;
+
   if (projectId !== null && task.projectId !== projectId) return false;
+
   if (filters.statuses.length > 0 && !filters.statuses.includes(task.status)) {
     return false;
   }
+
   if (
     filters.priorities.length > 0 &&
     !filters.priorities.includes(task.priority)
   ) {
     return false;
   }
+
   if (filters.labelIds !== null) {
     const wanted = new Set(filters.labelIds);
+
     if (!task.labelIds.some((labelId) => wanted.has(labelId))) return false;
   }
+
   return true;
 }
 
@@ -59,6 +65,7 @@ export function useListTasks(
     activeOnly,
     parentTaskId: null,
   };
+
   return useTasksQuery<Task[]>(
     async (rpc, publish) =>
       filters.statuses.length > 0 || activeOnly
@@ -97,6 +104,7 @@ export function useLabels(projectIds: readonly string[]) {
       const results = await Promise.all(
         projectIds.map((projectId) => rpc.call("listLabels", { projectId })),
       );
+
       return results.flatMap((result) => result.labels);
     },
     ["projects:changed"],
@@ -113,6 +121,7 @@ async function activeThreadsFor(
   taskId: string,
 ): Promise<TaskThread[]> {
   const { taskThreads } = await rpc.call("listTaskThreads", { taskId });
+
   return taskThreads.filter(isActiveThread);
 }
 
@@ -125,14 +134,17 @@ async function patchListMeta(
     ...signalTaskIds(signals, "threads:changed"),
     ...signalTaskIds(signals, "tasks:changed"),
   ]);
+
   const next = new Map(current);
   await Promise.all(
     [...taskIds].map(async (taskId) => {
       const activeThreads = await activeThreadsFor(rpc, taskId);
+
       if (activeThreads.length > 0) next.set(taskId, { activeThreads });
       else next.delete(taskId);
     }),
   );
+
   return next;
 }
 
@@ -144,6 +156,7 @@ export function useTaskListMeta(projectId: string | null) {
         activeOnly: true,
         parentTaskId: null,
       });
+
       const entries = await Promise.all(
         activeTasks.map(
           async (task) =>
@@ -153,6 +166,7 @@ export function useTaskListMeta(projectId: string | null) {
             ] as const,
         ),
       );
+
       return new Map(
         entries.filter(([, meta]) => meta.activeThreads.length > 0),
       );

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { Question } from "@bb/shared-ui/question-form-state";
+import type { Question } from "@omnyo/shared-ui/question-form-state";
 import {
   buildQuestionAnswers,
   createInitialFormState,
   isQuestionAnswered,
-} from "@bb/shared-ui/question-form-state";
+} from "@omnyo/shared-ui/question-form-state";
 
 const singleSelect: Question = {
   id: "branch",
@@ -40,6 +40,17 @@ const freeTextOnly: Question = {
 };
 
 describe("buildQuestionAnswers", () => {
+  it("preserves a single choice with an additive note for native steering questions", () => {
+    const question = { ...singleSelect, additiveNotes: true };
+    const state = createInitialFormState([question]);
+    state.branch.selected = ["main"];
+    state.branch.otherSelected = true;
+    state.branch.otherText = "  Keep release available  ";
+    expect(buildQuestionAnswers([question], state).branch).toEqual({
+      selected: ["main"],
+      freeText: "Keep release available",
+    });
+  });
   it("treats Other as free text that replaces the selection (single-select)", () => {
     const state = createInitialFormState([singleSelect]);
     state.branch.otherSelected = true;

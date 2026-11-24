@@ -33,16 +33,16 @@ describe("plugin host build", () => {
   });
 
   it("builds a self-contained Node artifact with identity and digest metadata", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-host-build-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-host-build-test-"));
     tempDirs.push(dir);
     await mkdir(join(dir, "dist"), { recursive: true });
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-host-build-fixture",
+        name: "omnyo-plugin-host-build-fixture",
         version: "1.2.3",
-        engines: { bb: ">=0.0" },
-        bb: {
+        engines: { omnyo: ">=0.0" },
+        omnyo: {
           name: "Host fixture",
           description: "Exercises the host artifact builder.",
           branding: { icon: "Cpu" },
@@ -58,8 +58,8 @@ describe("plugin host build", () => {
     await writeFile(
       join(dir, "host.ts"),
       [
-        'import { experimental_defineHostEntry, type ExperimentalHostEntry } from "@get-bb/plugin-sdk/host";',
-        'import { defineRpcContract } from "@get-bb/plugin-sdk";',
+        'import { experimental_defineHostEntry, type ExperimentalHostEntry } from "@omnyo/plugin-sdk/host";',
+        'import { defineRpcContract } from "@omnyo/plugin-sdk";',
         'const schema = { "~standard": { validate(value: unknown) { return { value }; } } };',
         "const contract = defineRpcContract({ echo: {",
         "  input: schema,",
@@ -80,12 +80,14 @@ describe("plugin host build", () => {
       "0.9.0-test",
       await testToolchain(),
     );
+
     const bytes = await readFile(result.jsPath);
     const bundle = bytes.toString("utf8");
+
     const metadata = JSON.parse(await readFile(result.metaPath, "utf8")) as {
       pluginId: string;
       pluginVersion: string;
-      builtWith: { bbVersion: string };
+      builtWith: { coreVersion: string };
       artifactDigest: string;
     };
 
@@ -93,7 +95,7 @@ describe("plugin host build", () => {
     expect(metadata).toMatchObject({
       pluginId: "host-build-fixture",
       pluginVersion: "1.2.3",
-      builtWith: { bbVersion: "0.9.0-test" },
+      builtWith: { coreVersion: "0.9.0-test" },
       artifactDigest: result.artifactDigest,
     });
     expect(result.artifactDigest).toBe(
@@ -107,6 +109,7 @@ describe("plugin host build", () => {
         handlers: { echo: (input: string) => string };
       };
     };
+
     expect(builtEntry.default.experimental_apiVersion).toBe(1);
     expect(builtEntry.default.experimental_signals).toHaveProperty("changed");
     expect(builtEntry.default.handlers.echo("from-artifact")).toBe(
@@ -114,8 +117,76 @@ describe("plugin host build", () => {
     );
   });
 
+  it.each([
+    { name: "escaped public imports", privateImport: "" },
+    {
+      name: "adjacent private type imports",
+      privateImport: 'import type { JsonValue } from "@omnyo/domain";',
+    },
+    {
+      name: "adjacent escaped private requires",
+      privateImport: String.raw`if (false) require("@\u006fmnyo/domain");`,
+    },
+  ])("preserves long encoded bytes beside $name", async ({ privateImport }) => {
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-host-encoded-test-"));
+    tempDirs.push(dir);
+    const data = Buffer.alloc(1024 * 1024, 0xa5);
+    const encoded = data.toString("base64");
+    const quotedBoundary = 'quote" and slash\\ beside import("@omnyo/domain")';
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({
+        name: "omnyo-plugin-host-encoded-fixture",
+        version: "1.0.0",
+        type: "module",
+        engines: { omnyo: ">=0.0" },
+        omnyo: {
+          name: "Encoded host fixture",
+          description: "Exercises encoded host data and import ownership.",
+          branding: { icon: "Cpu" },
+          server: "./server.ts",
+          host: "./host.ts",
+        },
+      }),
+    );
+    await writeFile(
+      join(dir, "server.ts"),
+      "export default function plugin() {}\n",
+    );
+    await writeFile(
+      join(dir, "host.ts"),
+      [
+        `export const encoded = ${JSON.stringify(encoded)};`,
+        `export const quotedBoundary = ${JSON.stringify(quotedBoundary)};`,
+        String.raw`import { experimental_defineHostEntry } from "@\u006fmnyo/plugin-sdk/host";`,
+        privateImport,
+        "export default experimental_defineHostEntry({ contract: {}, handlers: {} });",
+      ].join("\n"),
+    );
+    const toolchain = await testToolchain();
+
+    if (privateImport) {
+      await expect(
+        buildPluginHost(dir, "0.9.0-test", toolchain),
+      ).rejects.toThrow(/cannot import private Omnyo workspace package/u);
+
+      return;
+    }
+
+    const result = await buildPluginHost(dir, "0.9.0-test", toolchain);
+    const built = await import(pathToFileURL(result.jsPath).href);
+    expect(built.encoded).toBe(encoded);
+    expect(built.quotedBoundary).toBe(quotedBoundary);
+    expect(
+      createHash("sha256")
+        .update(Buffer.from(built.encoded, "base64"))
+        .digest("hex"),
+    ).toBe(createHash("sha256").update(data).digest("hex"));
+    expect(built.default.experimental_apiVersion).toBe(1);
+  });
+
   it("removes old host staging directories without deleting an active concurrent build", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-host-stage-cleanup-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-host-stage-cleanup-test-"));
     tempDirs.push(dir);
     const distDir = join(dir, "dist");
     await mkdir(join(distDir, ".host-stage-abandoned"), { recursive: true });
@@ -138,10 +209,10 @@ describe("plugin host build", () => {
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-host-stage-cleanup-fixture",
+        name: "omnyo-plugin-host-stage-cleanup-fixture",
         version: "1.0.0",
-        engines: { bb: ">=0.0" },
-        bb: {
+        engines: { omnyo: ">=0.0" },
+        omnyo: {
           name: "Host stage cleanup fixture",
           description: "Exercises stale host staging directory cleanup.",
           branding: { icon: "Cpu" },
@@ -170,16 +241,72 @@ describe("plugin host build", () => {
     ).toEqual([]);
   });
 
+  it("keeps the previous host artifact when an input changes during the build", async () => {
+    const dir = await mkdtemp(join(process.cwd(), ".host-build-bridge-test-"));
+    tempDirs.push(dir);
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({
+        name: "omnyo-plugin-host-build-race",
+        version: "1.0.0",
+        type: "module",
+        omnyo: {
+          name: "Host build race",
+          description: "Build input race fixture",
+          branding: { icon: "Cpu" },
+          server: "./server.ts",
+          host: "./host.ts",
+        },
+      }),
+    );
+    await writeFile(
+      join(dir, "server.ts"),
+      "export default function plugin() {}",
+    );
+    await writeFile(
+      join(dir, "host.ts"),
+      'import { value } from "./value.ts"; export default { value };',
+    );
+    const input = join(dir, "value.ts");
+    await writeFile(input, 'export const value = "initial";');
+    const toolchain = await testToolchain();
+    const initial = await buildPluginHost(dir, "0.9.0-test", toolchain);
+    const artifact = await readFile(initial.jsPath);
+    const metadata = await readFile(initial.metaPath);
+    const bridge = join(dir, "esbuild-bridge.mjs");
+    await writeFile(
+      bridge,
+      [
+        `import { build as actualBuild } from ${JSON.stringify(toolchain.esbuild)};`,
+        'import { writeFile } from "node:fs/promises";',
+        "export async function build(options) {",
+        "  const result = await actualBuild(options);",
+        `  await writeFile(${JSON.stringify(input)}, 'export const value = "changed";');`,
+        "  return result;",
+        "}",
+      ].join("\n"),
+    );
+
+    await expect(
+      buildPluginHost(dir, "0.9.0-test", {
+        ...toolchain,
+        esbuild: pathToFileURL(bridge).href,
+      }),
+    ).rejects.toThrow("inputs changed while building");
+    expect(await readFile(initial.jsPath)).toEqual(artifact);
+    expect(await readFile(initial.metaPath)).toEqual(metadata);
+  });
+
   it("rejects a host entry outside the plugin directory", async () => {
     const dir = await mkdtemp(join(process.cwd(), ".host-build-escape-test-"));
     tempDirs.push(dir);
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-host-escape-fixture",
+        name: "omnyo-plugin-host-escape-fixture",
         version: "1.0.0",
-        engines: { bb: ">=0.0" },
-        bb: {
+        engines: { omnyo: ">=0.0" },
+        omnyo: {
           name: "Escape fixture",
           description: "Invalid host path.",
           branding: { icon: "Cpu" },
@@ -198,41 +325,49 @@ describe("plugin host build", () => {
     ).rejects.toThrow(/escapes the plugin directory/u);
   });
 
-  it("rejects private BB workspace imports from host entries", async () => {
-    const dir = await mkdtemp(join(process.cwd(), ".host-build-private-test-"));
-    tempDirs.push(dir);
-    await writeFile(
-      join(dir, "package.json"),
-      JSON.stringify({
-        name: "bb-plugin-host-private-fixture",
-        version: "1.0.0",
-        engines: { bb: ">=0.0" },
-        bb: {
-          name: "Private import fixture",
-          description: "Invalid host dependency.",
-          branding: { icon: "Cpu" },
-          server: "./server.ts",
-          host: "./host.ts",
-        },
-      }),
-    );
-    await writeFile(
-      join(dir, "server.ts"),
-      "export default function plugin() {}\n",
-    );
-    await writeFile(
-      join(dir, "host.ts"),
-      'import value from "./helper.js";\nexport default value;\n',
-    );
-    await writeFile(
-      join(dir, "helper.ts"),
-      'import type { JsonValue } from "@bb/domain";\nexport default function helper(value: JsonValue) { return value; }\n',
-    );
+  it.each([
+    'import type { JsonValue } from "@omnyo/domain";\nexport default function helper(value: JsonValue) { return value; }\n',
+    String.raw`import type { JsonValue } from "@\u006fmnyo/domain"; export default function helper(value: JsonValue) { return value; }`,
+    String.raw`export type { JsonValue } from "@\u006fmnyo/domain"; export default function helper() { return 1; }`,
+    String.raw`if(false) require("@\u006fmnyo/domain"); export default function helper() { return 1; }`,
+  ])(
+    "rejects private Omnyo workspace imports from host entries (%#)",
+    async (helperSource) => {
+      const dir = await mkdtemp(
+        join(process.cwd(), ".host-build-private-test-"),
+      );
 
-    await expect(
-      buildPluginHost(dir, "0.9.0-test", await testToolchain()),
-    ).rejects.toThrow(/cannot import private BB workspace package/u);
-  });
+      tempDirs.push(dir);
+      await writeFile(
+        join(dir, "package.json"),
+        JSON.stringify({
+          name: "omnyo-plugin-host-private-fixture",
+          version: "1.0.0",
+          engines: { omnyo: ">=0.0" },
+          omnyo: {
+            name: "Private import fixture",
+            description: "Invalid host dependency.",
+            branding: { icon: "Cpu" },
+            server: "./server.ts",
+            host: "./host.ts",
+          },
+        }),
+      );
+      await writeFile(
+        join(dir, "server.ts"),
+        "export default function plugin() {}\n",
+      );
+      await writeFile(
+        join(dir, "host.ts"),
+        'import value from "./helper.js";\nexport default value;\n',
+      );
+      await writeFile(join(dir, "helper.ts"), helperSource);
+
+      await expect(
+        buildPluginHost(dir, "0.9.0-test", await testToolchain()),
+      ).rejects.toThrow(/cannot import private Omnyo workspace package/u);
+    },
+  );
 
   it("bundles the published bridge surface without stubbing it", async () => {
     const dir = await mkdtemp(join(process.cwd(), ".host-build-bridge-test-"));
@@ -240,11 +375,11 @@ describe("plugin host build", () => {
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-host-bridge-fixture",
+        name: "omnyo-plugin-host-bridge-fixture",
         version: "1.0.0",
         type: "module",
-        engines: { bb: ">=0.0" },
-        bb: {
+        engines: { omnyo: ">=0.0" },
+        omnyo: {
           name: "Bridge surface fixture",
           description: "Imports the published bridge surface.",
           branding: { icon: "Cpu" },
@@ -260,7 +395,7 @@ describe("plugin host build", () => {
     await writeFile(
       join(dir, "host.ts"),
       [
-        'import { experimental_compareVersions, experimental_defineProviderBridge, threadDeltaSchema, threadStartParamsSchema } from "@get-bb/plugin-sdk/provider-bridge";',
+        'import { experimental_compareVersions, experimental_defineProviderBridge, threadDeltaSchema, threadStartParamsSchema } from "@omnyo/plugin-sdk/provider-bridge";',
         "export const compareVersions = experimental_compareVersions;",
         "export const experimental_providerBridge = experimental_defineProviderBridge({",
         "  handleLine(line) {",
@@ -271,18 +406,22 @@ describe("plugin host build", () => {
         "export default {};",
       ].join("\n"),
     );
+
     const result = await buildPluginHost(
       dir,
       "0.9.0-test",
       await testToolchain(),
     );
+
     const bundle = await readFile(result.jsPath, "utf8");
-    expect(bundle).not.toMatch(/from\s*"@bb\//u);
+    expect(bundle).not.toMatch(/from\s*"@omnyo\//u);
     expect(bundle).toContain("experimental_apiVersion");
     expect(bundle).not.toMatch(/(?:from\s*|require\()["']semver/u);
+
     const builtEntry = await import(
       `${pathToFileURL(result.jsPath).href}?test=${Date.now()}`
     );
+
     expect(
       builtEntry.compareVersions("1.0.0-beta.9", "1.0.0-beta.10"),
     ).toBeLessThan(0);
@@ -294,10 +433,10 @@ describe("plugin host build", () => {
 
   describe("host contract imports without a usable SDK", () => {
     const manifest = {
-      name: "bb-plugin-host-contract-fixture",
+      name: "omnyo-plugin-host-contract-fixture",
       version: "1.0.0",
-      engines: { bb: ">=0.0" },
-      bb: {
+      engines: { omnyo: ">=0.0" },
+      omnyo: {
         name: "Host contract fixture",
         description: "Imports a host contract from the SDK.",
         branding: { icon: "Cpu" },
@@ -305,12 +444,13 @@ describe("plugin host build", () => {
         host: "./host.ts",
       },
     };
+
     const hostSource = [
       "import {",
       "  experimental_defineHostEntry,",
       "  experimental_nativeRootsHostContract,",
       "  type ExperimentalHostEntry,",
-      '} from "@get-bb/plugin-sdk/host";',
+      '} from "@omnyo/plugin-sdk/host";',
       "export default experimental_defineHostEntry({",
       "  contract: experimental_nativeRootsHostContract,",
       "  handlers: { resolveNativeRoots: () => ({ roots: [] }) },",
@@ -328,32 +468,32 @@ describe("plugin host build", () => {
     }
 
     it("names the missing SDK dependency when the plugin has no node_modules", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "bb-host-no-sdk-test-"));
+      const dir = await mkdtemp(join(tmpdir(), "omnyo-host-no-sdk-test-"));
       tempDirs.push(dir);
       await writeFixture(dir);
 
       await expect(
         buildPluginHost(dir, "0.9.0-test", await testToolchain()),
       ).rejects.toThrow(
-        '"@get-bb/plugin-sdk/host" is not installed for this plugin (no node_modules/@get-bb/plugin-sdk); a host entry that imports experimental_nativeRootsHostContract needs the SDK as a dependency',
+        '"@omnyo/plugin-sdk/host" is not installed for this plugin (no node_modules/@omnyo/plugin-sdk); a host entry that imports experimental_nativeRootsHostContract needs the SDK as a dependency',
       );
     });
 
     it("names the unbuilt SDK dist when the package is installed without it", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "bb-host-unbuilt-sdk-test-"));
+      const dir = await mkdtemp(join(tmpdir(), "omnyo-host-unbuilt-sdk-test-"));
       tempDirs.push(dir);
       await writeFixture(dir);
-      const sdkDir = join(dir, "node_modules", "@get-bb", "plugin-sdk");
+      const sdkDir = join(dir, "node_modules", "@omnyo", "plugin-sdk");
       await mkdir(sdkDir, { recursive: true });
       await writeFile(
         join(sdkDir, "package.json"),
         JSON.stringify({
-          name: "@get-bb/plugin-sdk",
+          name: "@omnyo/plugin-sdk",
           version: "0.0.0-test",
           type: "module",
           exports: {
             "./host": {
-              types: "./bundled-types/bb-plugin-sdk-host.d.ts",
+              types: "./bundled-types/omnyo-plugin-sdk-host.d.ts",
               import: "./dist/host.js",
               default: "./dist/host.js",
             },
@@ -364,7 +504,7 @@ describe("plugin host build", () => {
       await expect(
         buildPluginHost(dir, "0.9.0-test", await testToolchain()),
       ).rejects.toThrow(
-        `"@get-bb/plugin-sdk/host" is installed for this plugin but its dist is not built: run the SDK build (${join(await realpath(sdkDir), "dist", "host.js")} is missing); a host entry that imports experimental_nativeRootsHostContract needs the built SDK`,
+        `"@omnyo/plugin-sdk/host" is installed for this plugin but its dist is not built: run the SDK build (${join(await realpath(sdkDir), "dist", "host.js")} is missing); a host entry that imports experimental_nativeRootsHostContract needs the built SDK`,
       );
     });
   });
@@ -410,7 +550,7 @@ describe("plugin host build", () => {
     ["alias", 'import { value } from "private-alias"; export default value;'],
     ["transitive", 'export { default } from "./helper.js";'],
   ])("rejects private packages reached by %s", async (_name, source) => {
-    const parent = await mkdtemp(join(tmpdir(), "bb-host-private-graph-"));
+    const parent = await mkdtemp(join(tmpdir(), "omnyo-host-private-graph-"));
     tempDirs.push(parent);
     const dir = join(parent, "plugin");
     const privatePackage = join(parent, "private-package");
@@ -418,7 +558,7 @@ describe("plugin host build", () => {
     await mkdir(privatePackage);
     await writeFile(
       join(privatePackage, "package.json"),
-      JSON.stringify({ name: "@bb/private-fixture", type: "module" }),
+      JSON.stringify({ name: "@omnyo/private-fixture", type: "module" }),
     );
     await writeFile(
       join(privatePackage, "index.ts"),
@@ -437,10 +577,10 @@ describe("plugin host build", () => {
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-private-graph",
+        name: "omnyo-plugin-private-graph",
         version: "1.0.0",
-        engines: { bb: ">=0.0" },
-        bb: {
+        engines: { omnyo: ">=0.0" },
+        omnyo: {
           name: "Private graph",
           description: "Private graph fixture",
           branding: { icon: "Cpu" },
@@ -462,7 +602,7 @@ describe("plugin host build", () => {
     );
     await expect(
       buildPluginHost(dir, "0.9.0-test", await testToolchain()),
-    ).rejects.toThrow(/@bb\/private-fixture/u);
+    ).rejects.toThrow(/@omnyo\/private-fixture/u);
     expect(await readFile(join(dir, "dist", "host.js"), "utf8")).toBe(
       "previous validated artifact",
     );
@@ -470,15 +610,15 @@ describe("plugin host build", () => {
   });
 
   it("allows unresolved relative type imports without replacing runtime validation", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-host-erased-missing-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-host-erased-missing-"));
     tempDirs.push(dir);
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-erased-missing",
+        name: "omnyo-plugin-erased-missing",
         version: "1.0.0",
-        engines: { bb: ">=0.0" },
-        bb: {
+        engines: { omnyo: ">=0.0" },
+        omnyo: {
           name: "Erased missing",
           description: "Erased missing fixture",
           branding: { icon: "Cpu" },
@@ -503,10 +643,10 @@ describe("plugin host build", () => {
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-host-prose-fixture",
+        name: "omnyo-plugin-host-prose-fixture",
         version: "1.0.0",
-        engines: { bb: ">=0.0" },
-        bb: {
+        engines: { omnyo: ">=0.0" },
+        omnyo: {
           name: "Prose fixture",
           description: "Valid host source.",
           branding: { icon: "Cpu" },
@@ -521,7 +661,7 @@ describe("plugin host build", () => {
     );
     await writeFile(
       join(dir, "host.ts"),
-      '// Do not import from "@bb/domain".\nexport default "import type X from \'@bb/domain\'";\n',
+      '// Do not import from "@omnyo/domain".\nexport default "import type X from \'@omnyo/domain\'";\n',
     );
 
     await expect(

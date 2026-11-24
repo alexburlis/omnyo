@@ -1,7 +1,7 @@
 import {
   typedRoutes,
   type HostDaemonInternalSchema,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { Hono } from "hono";
 import type { AppDeps } from "../types.js";
 import { ApiError } from "../errors.js";
@@ -14,20 +14,25 @@ export function registerInternalSkillRoutes(app: Hono, deps: AppDeps): void {
 
   get("/skills/tree/:hash", (context) => {
     const requestedHash = context.req.param("hash");
+
     if (!TREE_HASH_PATTERN.test(requestedHash)) {
       throw new ApiError(404, "skill_tree_not_found", "Skill tree not found");
     }
+
     const sourceRootPath = deps.skillTreeRegistry.resolve(requestedHash);
+
     if (sourceRootPath === undefined) {
       throw new ApiError(404, "skill_tree_not_found", "Skill tree not found");
     }
 
     let manifest;
+
     try {
       manifest = readSkillTreeManifest(sourceRootPath);
     } catch {
       throw new ApiError(404, "skill_tree_not_found", "Skill tree not found");
     }
+
     if (manifest.treeHash !== requestedHash) {
       throw new ApiError(404, "skill_tree_not_found", "Skill tree not found");
     }

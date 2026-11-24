@@ -1,4 +1,4 @@
-import { isBuiltInThemeId, type BuiltInThemeId } from "@bb/domain";
+import { isBuiltInThemeId, type BuiltInThemeId } from "@omnyo/domain";
 import {
   createContext,
   useContext,
@@ -19,6 +19,7 @@ export function PaletteProvider({
   children: (palette: BuiltInThemeId) => ReactNode;
 }) {
   const [palette, setPalette] = useState<BuiltInThemeId>("default");
+
   return (
     <PaletteContext.Provider value={setPalette}>
       {children(palette)}
@@ -28,9 +29,11 @@ export function PaletteProvider({
 
 function usePaletteSetter(): (palette: BuiltInThemeId) => void {
   const setPalette = useContext(PaletteContext);
+
   if (!setPalette) {
     throw new Error("usePaletteSetter must be used inside <PaletteProvider>");
   }
+
   return setPalette;
 }
 
@@ -45,10 +48,12 @@ function ActiveServerPaletteSync() {
   useEffect(() => {
     if (themeId !== undefined) setPalette(paletteFromThemeId(themeId));
   }, [themeId, setPalette]);
+
   return null;
 }
 
 export function ServerPaletteSync() {
   const { connection } = useProfiles();
-  return connection ? <ActiveServerPaletteSync /> : null;
+
+  return connection?.client ? <ActiveServerPaletteSync /> : null;
 }

@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { HugeiconsIcon } from "@hugeicons/react";
-import SmilePlusIcon from "@hugeicons/core-free-icons/SmilePlusIcon";
+import { toast } from "sonner";
 import type { Task } from "../../shared/contract.js";
 import { errorMessage } from "../../shared/errors.js";
 import type { DelegationRpcContract } from "../../delegate/contract.js";
-import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
+import { experimental_useAppNavigate, useRpc } from "@omnyo/plugin-sdk/app";
 import {
   listAllTasks,
   useMentionItems,
@@ -20,14 +19,15 @@ import {
   type DescriptionSaver,
 } from "./description-save.js";
 import { StatusIcon } from "./meta.js";
-import { STATUS_LABELS } from "../list/lib.js";
 import {
   InlineProperties,
   PropertiesRail,
   type TaskPropertyUpdate,
 } from "./rail.js";
 import { ThreadsSection } from "./threads.js";
-import { DetailToasts, useDetailToasts } from "./toast.js";
+import { SubTaskList } from "./sections.js";
+import { EmptyState } from "../../components/empty-state.js";
+import { Button } from "@/components/ui/button";
 import { DelayedLoading } from "@/components/ui/delayed-loading";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -35,9 +35,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 interface DetailViewProps {
   taskKey: string;
   onCanonicalKey?: (taskKey: string) => void;
+  onBrowse?: () => void;
 }
 
 const DESCRIPTION_SAVE_DELAY_MS = 800;
+
 const ACTIVE_PULL_REQUEST_REFRESH_MS = 60_000;
 
 function SubTaskDonut({
@@ -50,6 +52,7 @@ function SubTaskDonut({
   if (subtasks.length === 0) return null;
   const done = subtasks.filter((subtask) => subtask.status === "done").length;
   const degrees = (done / subtasks.length) * 360;
+
   return (
     <button
       type="button"
@@ -92,10 +95,13 @@ function EditableTitle({
       }}
       onBlur={(event) => {
         const next = event.currentTarget.textContent?.trim() ?? "";
+
         if (!next) {
           event.currentTarget.textContent = task.title;
+
           return;
         }
+
         if (next !== task.title) onSave(next);
       }}
     >
@@ -116,67 +122,15 @@ function SubTasksSection({
   onCreate: (title: string) => Promise<boolean>;
 }) {
   const navigation = useTasksNavigation();
-  const [adding, setAdding] = useState(false);
-  const [title, setTitle] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    const trimmed = title.trim();
-    if (!trimmed || busy) return;
-    setBusy(true);
-    const created = await onCreate(trimmed);
-    setBusy(false);
-    if (created) setTitle("");
-  };
 
   return (
-    <section ref={ref} className="mt-5">
-      {subtasks.map((subtask) => (
-        <button
-          key={subtask.id}
-          type="button"
-          className="flex h-8 w-full items-center gap-2 border-b border-border-hairline px-0.5 text-left text-sm hover:bg-state-hover"
-          title={STATUS_LABELS[subtask.status]}
-          onClick={() => navigation.go({ kind: "task", taskKey: subtask.key })}
-        >
-          <StatusIcon status={subtask.status} />
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {subtask.key}
-          </span>
-          <span className="min-w-0 truncate">{subtask.title}</span>
-        </button>
-      ))}
-      {adding ? (
-        <div className="flex h-8 items-center gap-2 border-b border-border-hairline px-0.5">
-          <StatusIcon status="todo" className="opacity-60" />
-          <input
-            autoFocus
-            value={title}
-            placeholder={`Sub-task of ${task.key}…`}
-            className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            onChange={(event) => setTitle(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void submit();
-              if (event.key === "Escape") {
-                setAdding(false);
-                setTitle("");
-              }
-            }}
-            onBlur={() => {
-              if (!title.trim()) setAdding(false);
-            }}
-          />
-        </div>
-      ) : null}
-      <button
-        type="button"
-        className="flex items-center gap-1.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-        onClick={() => setAdding(true)}
-      >
-        <Icon name="Plus" className="size-3" />
-        Add sub-task
-      </button>
-    </section>
+    <SubTaskList
+      ref={ref}
+      task={task}
+      subtasks={subtasks}
+      onOpen={(taskKey) => navigation.go({ kind: "task", taskKey })}
+      onCreate={onCreate}
+    />
   );
 }
 
@@ -197,15 +151,12 @@ function TaskDetail({ task }: { task: Task }) {
   const rpc = useTasksRpc();
   const delegationRpc = useRpc<DelegationRpcContract>();
   const navigation = useTasksNavigation();
-  const { toasts, push, dismiss } = useDetailToasts();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const subtasksRef = useRef<HTMLElement>(null);
 
   const [draft, setDraft] = useState<{ taskId: string; markdown: string }>();
   const rpcRef = useRef(rpc);
   rpcRef.current = rpc;
-  const pushRef = useRef(push);
-  pushRef.current = push;
   const saverRef = useRef<DescriptionSaver | null>(null);
   saverRef.current ??= createDescriptionSaver({
     save: async (taskId, markdown) => {
@@ -213,11 +164,12 @@ function TaskDetail({ task }: { task: Task }) {
         taskId,
         description: markdown,
       });
+
       return result.ok
         ? { ok: true }
         : { ok: false, errorMessage: result.error.message };
     },
-    onError: (message) => pushRef.current(message),
+    onError: (message) => toast.error(message),
     delayMs: DESCRIPTION_SAVE_DELAY_MS,
   });
 
@@ -225,6 +177,7 @@ function TaskDetail({ task }: { task: Task }) {
     async (query) => (await query.call("listProjects", {})).projects,
     ["projects:changed"],
   );
+
   const project = projects.data?.find((entry) => entry.id === task.projectId);
 
   const parent = useTasksQuery(
@@ -236,17 +189,20 @@ function TaskDetail({ task }: { task: Task }) {
     [task.parentTaskId],
     { relevantTaskIds: task.parentTaskId ? [task.parentTaskId] : [] },
   );
+
   const subtasks = useTasksQuery(
     async (query) => listAllTasks(query, { parentTaskId: task.id }),
     ["tasks:changed"],
     [task.id],
   );
+
   const labels = useTasksQuery(
     async (query) =>
       (await query.call("listLabels", { projectId: task.projectId })).labels,
     ["projects:changed"],
     [task.projectId],
   );
+
   const attachments = useTasksQuery(
     async (query) =>
       (await query.call("listAttachments", { taskId: task.id })).attachments,
@@ -254,6 +210,7 @@ function TaskDetail({ task }: { task: Task }) {
     [task.id],
     { relevantTaskIds: [task.id] },
   );
+
   const threads = useTasksQuery(
     async (query) =>
       (await query.call("listTaskThreads", { taskId: task.id })).taskThreads,
@@ -261,30 +218,38 @@ function TaskDetail({ task }: { task: Task }) {
     [task.id],
     { relevantTaskIds: [task.id] },
   );
+
   const presets = useTasksQuery(
     async (query) => (await query.call("listPresets")).presets,
     ["projects:changed"],
   );
+
   const pullRequests = useTasksQuery(
     async (query) => query.call("listTaskPullRequests", { taskId: task.id }),
     ["threads:changed"],
     [task.id],
     { relevantTaskIds: [task.id] },
   );
+
   const refreshPullRequests = pullRequests.refresh;
+
   const hasActivePullRequest = (pullRequests.data?.pullRequests ?? []).some(
     (pullRequest) =>
       pullRequest.state === "open" || pullRequest.state === "draft",
   );
+
   useEffect(() => {
     window.addEventListener("focus", refreshPullRequests);
+
     return () => window.removeEventListener("focus", refreshPullRequests);
   }, [refreshPullRequests]);
   useEffect(() => {
     if (!hasActivePullRequest) return;
+
     const timer = window.setInterval(() => {
       if (document.visibilityState !== "hidden") refreshPullRequests();
     }, ACTIVE_PULL_REQUEST_REFRESH_MS);
+
     return () => window.clearInterval(timer);
   }, [hasActivePullRequest, refreshPullRequests]);
 
@@ -296,29 +261,34 @@ function TaskDetail({ task }: { task: Task }) {
         taskId: task.id,
         ...input,
       });
-      if (!result.ok) push(result.error.message);
+
+      if (!result.ok) toast.error(result.error.message);
     } catch (error) {
-      push(errorMessage(error));
+      toast.error(errorMessage(error));
     }
   };
 
   const moveToProject = async (projectId: string) => {
     saverRef.current?.flush(task.id);
+
     try {
       const result = await rpc.call("moveTaskToProject", {
         taskId: task.id,
         projectId,
       });
+
       if (!result.ok) {
-        push(result.error.message);
+        toast.error(result.error.message);
+
         return;
       }
+
       navigation.go(
         { kind: "task", taskKey: result.task.key },
         { replace: true },
       );
     } catch (error) {
-      push(errorMessage(error));
+      toast.error(errorMessage(error));
     }
   };
 
@@ -334,6 +304,7 @@ function TaskDetail({ task }: { task: Task }) {
   const uploadForTask = async (file: File) => {
     const result = await uploadAttachment(file, { taskId: task.id });
     attachments.refresh();
+
     return result;
   };
 
@@ -342,9 +313,10 @@ function TaskDetail({ task }: { task: Task }) {
       try {
         await uploadAttachment(file, { taskId: task.id });
       } catch (error) {
-        push(errorMessage(error));
+        toast.error(errorMessage(error));
       }
     }
+
     attachments.refresh();
   };
 
@@ -356,23 +328,29 @@ function TaskDetail({ task }: { task: Task }) {
         parentTaskId: task.id,
         status: "todo",
       });
+
       if (!result.ok) {
-        push(result.error.message);
+        toast.error(result.error.message);
+
         return false;
       }
+
       subtasks.refresh();
+
       return true;
     } catch (error) {
-      push(errorMessage(error));
+      toast.error(errorMessage(error));
+
       return false;
     }
   };
 
   const mentionItems = useMentionItems();
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
 
   const descriptionValue =
     draft && draft.taskId === task.id ? draft.markdown : task.description;
+
   const parentTask = parent.data ?? null;
 
   return (
@@ -422,7 +400,7 @@ function TaskDetail({ task }: { task: Task }) {
             presets={presets.data}
             onUpdate={(update) => void updateTask(update)}
             onMoveToProject={(projectId) => void moveToProject(projectId)}
-            onError={(message) => push(message)}
+            onError={(message) => toast.error(message)}
             className="mb-4 @[45rem]:hidden"
           />
 
@@ -431,31 +409,25 @@ function TaskDetail({ task }: { task: Task }) {
             onChange={onDescriptionChange}
             variant="doc"
             className="min-h-24"
-            placeholder="Add a description… rich text: headings, lists, code, checkboxes, @mentions"
+            placeholder="Describe the task. Markdown works for headings, lists and checkboxes; type @ to link a task or chat."
             onUploadImage={uploadForTask}
             mentionItems={mentionItems}
-            onOpenThread={(threadId) => navigate.toThread(threadId)}
+            onOpenThread={(threadId) =>
+              navigate.toThread(threadId, { experimental_userInitiated: true })
+            }
           />
 
           <div className="mb-1 mt-3 flex items-center gap-1">
-            <button
+            <Button
               type="button"
-              title="Reactions coming soon"
-              aria-label="Add reaction"
-              disabled
-              className="flex size-6.5 items-center justify-center rounded-md text-muted-foreground opacity-50"
-            >
-              <HugeiconsIcon icon={SmilePlusIcon} className="size-4" />
-            </button>
-            <button
-              type="button"
-              title="Attach file"
-              aria-label="Attach file"
-              className="flex size-6.5 items-center justify-center rounded-md text-muted-foreground hover:bg-state-hover hover:text-foreground"
+              variant="ghost"
+              size="xs"
+              className="-ml-2 text-muted-foreground"
               onClick={() => fileInputRef.current?.click()}
             >
-              <Icon name="Paperclip" className="size-4" />
-            </button>
+              <Icon name="Paperclip" />
+              Attach files
+            </Button>
             <input
               ref={fileInputRef}
               type="file"
@@ -475,10 +447,11 @@ function TaskDetail({ task }: { task: Task }) {
                 attachmentId: attachment.id,
                 removeDescriptionReferences: true,
               });
+
               if (!result.ok) throw new Error(result.error.message);
               attachments.refresh();
             }}
-            onError={(message) => push(message)}
+            onError={(message) => toast.error(message)}
           />
 
           <SubTasksSection
@@ -489,8 +462,13 @@ function TaskDetail({ task }: { task: Task }) {
           />
 
           {(threads.data ?? []).length > 0 ? (
-            <div className="mt-6">
+            <div className="mt-7">
               <ThreadsSection
+                onOpenThread={(threadId) =>
+                  navigate.toThread(threadId, {
+                    experimental_userInitiated: true,
+                  })
+                }
                 threads={threads.data ?? []}
                 pullRequests={pullRequests.data?.pullRequests}
                 unavailableThreadIds={
@@ -504,7 +482,7 @@ function TaskDetail({ task }: { task: Task }) {
                   threads.refresh();
                   pullRequests.refresh();
                 }}
-                onError={(message) => push(message)}
+                onError={(message) => toast.error(message)}
               />
             </div>
           ) : null}
@@ -523,21 +501,25 @@ function TaskDetail({ task }: { task: Task }) {
           presets={presets.data}
           onUpdate={(update) => void updateTask(update)}
           onMoveToProject={(projectId) => void moveToProject(projectId)}
-          onError={(message) => push(message)}
+          onError={(message) => toast.error(message)}
           className="hidden @[45rem]:block"
         />
       </div>
-      <DetailToasts toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }
 
-export function DetailView({ taskKey, onCanonicalKey }: DetailViewProps) {
+export function DetailView({
+  taskKey,
+  onCanonicalKey,
+  onBrowse,
+}: DetailViewProps) {
   const query = useTasksQuery(
     async (rpc) => (await rpc.call("getTaskByKey", { taskKey })).task,
     ["tasks:changed"],
     [taskKey],
   );
+
   const canonicalKey = query.data?.key;
   useEffect(() => {
     if (canonicalKey) onCanonicalKey?.(canonicalKey);
@@ -545,20 +527,40 @@ export function DetailView({ taskKey, onCanonicalKey }: DetailViewProps) {
 
   if (query.data === undefined) {
     return query.error ? (
-      <div className="flex h-full items-center justify-center p-6 text-sm text-destructive">
-        {query.error}
-      </div>
+      <EmptyState
+        icon="AlertCircle"
+        tone="error"
+        title={`Couldn't load ${taskKey}`}
+        description={query.error}
+        action={
+          <Button size="sm" variant="outline" onClick={query.refresh}>
+            <Icon name="RotateCcw" className="size-3.5" />
+            Try again
+          </Button>
+        }
+      />
     ) : (
       <DetailSkeleton />
     );
   }
+
   if (query.data === null) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-        <Icon name="FileQuestion" className="size-5" />
-        Task {taskKey} was not found.
-      </div>
+      <EmptyState
+        icon="FileQuestion"
+        title={`Task ${taskKey} was not found`}
+        description="It may have been deleted, or its key changed when it moved to another project."
+        action={
+          onBrowse === undefined ? undefined : (
+            <Button size="sm" variant="outline" onClick={onBrowse}>
+              <Icon name="ListView" className="size-3.5" />
+              Show all tasks
+            </Button>
+          )
+        }
+      />
     );
   }
+
   return <TaskDetail task={query.data} />;
 }

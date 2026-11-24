@@ -1,9 +1,10 @@
 import { join } from "node:path";
 import { ensureCachedNodeArtifact } from "./node-artifact-cache.js";
-import { safePluginSegment } from "@bb/process-utils";
+import { safePluginSegment } from "@omnyo/process-utils";
 import type { HostDaemonLogger } from "./logger.js";
 
 const PLUGIN_HOST_ARTIFACT_CACHE_SEGMENT = "plugin-host-artifacts";
+
 const ARTIFACT_FILE_NAME = "host.mjs";
 
 export type FetchPluginHostArtifact = (args: {

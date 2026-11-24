@@ -5,6 +5,7 @@ import { useRouteStateHistoryNavigation } from "@/lib/app-route-history";
 export function HistoryCommandHandlers() {
   const { canGoBack, canGoForward, goBack, goForward } =
     useRouteStateHistoryNavigation();
+
   const closeOnMobile = useCloseMobileSidebar();
 
   useAppCommandHandler(
@@ -12,6 +13,7 @@ export function HistoryCommandHandlers() {
     () => {
       goBack();
       closeOnMobile();
+
       return true;
     },
     0,
@@ -23,6 +25,7 @@ export function HistoryCommandHandlers() {
     () => {
       goForward();
       closeOnMobile();
+
       return true;
     },
     0,

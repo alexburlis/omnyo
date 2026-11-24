@@ -14,6 +14,7 @@ describe("SurfaceCard annotation navigation", () => {
     const names = SURFACE_GROUPS.flatMap((group) =>
       group.surfaces.flatMap((surface) => surface.firstParty ?? []),
     );
+
     for (const name of new Set(names)) {
       expect(firstPartyPluginId(name), name).not.toBeNull();
     }
@@ -35,7 +36,7 @@ describe("SurfaceCard annotation navigation", () => {
           },
         },
         createElement(SurfaceCard, {
-          surface: { ...surfaces[1]!, firstParty: ["Codex provider"] },
+          surface: { ...surfaces[1]!, firstParty: ["Codex Provider"] },
           number: 2,
           onDismiss: () => undefined,
         }),
@@ -45,7 +46,7 @@ describe("SurfaceCard annotation navigation", () => {
     expect(markup).toMatch(
       /href="\/plugins\/provider-codex"[^>]*><img[^>]*src="\/codex.svg"/,
     );
-    expect(markup).toContain("Codex provider");
+    expect(markup).toContain("Codex Provider");
   });
 
   it("renders compact previous and next annotation actions", () => {
@@ -100,6 +101,6 @@ describe("SurfaceCard annotation navigation", () => {
     );
 
     expect(markup).toContain("Copy for agent");
-    expect(markup).not.toContain("bb-plugin-authoring skill");
+    expect(markup).not.toContain("omnyo-plugin-authoring skill");
   });
 });

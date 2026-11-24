@@ -2,7 +2,7 @@ import {
   type AppCommandId,
   type AppKeybindings,
   type AppShortcut,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 export interface ApplicationMenuAccelerators {
   closeWindowOrSideTab: string | undefined;
@@ -54,13 +54,19 @@ export function formatElectronAccelerator(
   shortcut: AppShortcut,
 ): string | undefined {
   const parts: string[] = [];
+
   if (shortcut.mod) parts.push("CommandOrControl");
+
   if (shortcut.control) parts.push("Control");
+
   if (shortcut.alt) parts.push("Alt");
+
   if (shortcut.shift) parts.push("Shift");
+
   if (shortcut.meta) parts.push("Command");
   const rawKey = ELECTRON_KEY_NAMES[shortcut.key] ?? shortcut.key;
   const key = rawKey === "+" ? "Plus" : rawKey;
+
   if (
     key.length !== 1 &&
     !/^F(?:[1-9]|1[0-9]|2[0-4])$/u.test(key) &&
@@ -68,7 +74,9 @@ export function formatElectronAccelerator(
   ) {
     return undefined;
   }
+
   parts.push(key.length === 1 ? key.toUpperCase() : key);
+
   return parts.join("+");
 }
 
@@ -78,10 +86,12 @@ function acceleratorForCommand(
 ): string | undefined {
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
+
     if (binding?.command === command) {
       return formatElectronAccelerator(binding.shortcut);
     }
   }
+
   return undefined;
 }
 

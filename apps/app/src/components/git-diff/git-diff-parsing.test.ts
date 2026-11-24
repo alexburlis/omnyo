@@ -72,7 +72,9 @@ const OLD_CONTEXT_CONTENT = Array.from(
 
 const NEW_CONTEXT_CONTENT = Array.from({ length: 10 }, (_, index) => {
   if (index === 1) return "line two";
+
   if (index === 7) return "line eight";
+
   return `line ${index + 1}`;
 }).join("\n");
 
@@ -94,6 +96,7 @@ describe("threadDetailGitDiff", () => {
   it("normalizes the openable path and label from a renamed file's sides", () => {
     const [file] = parseGitDiffFiles(SAMPLE_DIFF);
     expect(file).toBeDefined();
+
     if (!file) return;
 
     expect(getOpenableGitDiffPath(file)).toBe("src/new.ts");
@@ -103,6 +106,7 @@ describe("threadDetailGitDiff", () => {
   it("summarizes parsed diffs from changed lines, not hunk range sizes", () => {
     const [file] = parseGitDiffFiles(DIFF_WITH_CONTEXT);
     expect(file).toBeDefined();
+
     if (!file) return;
 
     expect(summarizeGitDiffFile(file)).toEqual({
@@ -114,6 +118,7 @@ describe("threadDetailGitDiff", () => {
   it("parses new-file diffs so untracked files can render in the secondary panel diff view", () => {
     const [file] = parseGitDiffFiles(NEW_FILE_DIFF);
     expect(file).toBeDefined();
+
     if (!file) return;
 
     expect(formatGitDiffFileLabel(file)).toBe("src/new-file.ts");
@@ -127,6 +132,7 @@ describe("threadDetailGitDiff", () => {
 
     expect(deletedFile).toBeDefined();
     expect(renamedFile).toBeDefined();
+
     if (!deletedFile || !renamedFile) return;
 
     expect(getGitDiffFileChangeKind(deletedFile)).toBe("deleted");
@@ -139,6 +145,7 @@ describe("threadDetailGitDiff", () => {
   it("reparses a patch with full file contents so diff context can expand", () => {
     const [file] = parseGitDiffFiles(MULTI_HUNK_DIFF);
     expect(file).toBeDefined();
+
     if (!file) throw new Error("expected parsed file");
 
     expect(file.isPartial).toBe(true);
@@ -167,6 +174,7 @@ describe("threadDetailGitDiff", () => {
     const secondHunk = enrichedFile.hunks[1];
     expect(firstHunk).toBeDefined();
     expect(secondHunk).toBeDefined();
+
     if (!firstHunk || !secondHunk) {
       throw new Error("expected two hunks");
     }
@@ -220,6 +228,7 @@ describe("threadDetailGitDiff", () => {
   ])("keeps the patch partial for $name", ({ oldFile, newFile }) => {
     const [file] = parseGitDiffFiles(MULTI_HUNK_DIFF);
     expect(file).toBeDefined();
+
     if (!file) throw new Error("expected parsed file");
 
     const result = enrichGitDiffFileForContext({

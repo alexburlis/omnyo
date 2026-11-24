@@ -38,7 +38,7 @@ import {
   type InitializeResult,
   type ThreadDelta,
   type ThreadEventContextWindowUsage,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { createPiDeltaTranslator } from "../delta-translation.js";
 import {
@@ -47,7 +47,7 @@ import {
   type PiSessionParams,
 } from "../session-params.js";
 import { piSessionNeedsRelocation } from "./session-cwd.js";
-import { BB_PI_EXTENSION_SOURCE } from "./bb-pi-extension.js";
+import { OMNYO_PI_EXTENSION_SOURCE } from "./omnyo-pi-extension.js";
 import {
   createExtensionUiCoordinator,
   type ExtensionUiCoordinator,
@@ -145,19 +145,23 @@ type DecodedPiBridgeRequest =
 
 function decodePiJsonRpcRequest(raw: unknown): DecodedPiBridgeRequest {
   const envelope = bridgeRequestEnvelopeSchema.safeParse(raw);
+
   if (!envelope.success) {
     return { kind: "ignored" };
   }
+
   const command = piCommandSchema.safeParse({
     method: envelope.data.method,
     params: envelope.data.params ?? {},
   });
+
   if (command.success) {
     return {
       kind: "request",
       request: { ...command.data, id: envelope.data.id },
     };
   }
+
   if (
     !(piCommandMethodValues as readonly string[]).includes(envelope.data.method)
   ) {
@@ -167,6 +171,7 @@ function decodePiJsonRpcRequest(raw: unknown): DecodedPiBridgeRequest {
       method: envelope.data.method,
     };
   }
+
   return {
     kind: "invalid-params",
     id: envelope.data.id,
@@ -199,6 +204,7 @@ interface ThreadSession {
 }
 
 let sessionSerialCounter = 0;
+
 const THREAD_STOP_CLOSE_TIMEOUT_MS = 8_000;
 
 const { send, sendResult, sendError } = createBridgeIo<
@@ -206,7 +212,9 @@ const { send, sendResult, sendError } = createBridgeIo<
 >();
 
 const sessions = new Map<string, ThreadSession>();
+
 const closingSessions = new Map<string, Promise<string | undefined>>();
+
 const { forwardToolCall, handleToolCallResponse, resolvePendingToolCalls } =
   createPendingToolCallTracker({ sendToolCall: send });
 
@@ -217,31 +225,38 @@ const extensionUi: ExtensionUiCoordinator = createExtensionUiCoordinator({
 let configuredSkillPaths: string[] | null = null;
 
 let scratchDir: string | null = null;
+
 let scratchDirIsPrivate = false;
+
 let extensionPath: string | null = null;
+
+let bridgeDataDir: string | null = null;
 
 function requireScratchDir(): string {
   if (scratchDir === null) {
     scratchDir = join(
       tmpdir(),
-      `bb-pi-bridge-${process.pid}-${Math.random().toString(16).slice(2)}`,
+      `omnyo-pi-bridge-${process.pid}-${Math.random().toString(16).slice(2)}`,
     );
     scratchDirIsPrivate = true;
     mkdirSync(scratchDir, { recursive: true });
   }
+
   return scratchDir;
 }
 
 function requireExtensionPath(): string {
   if (extensionPath === null) {
-    const path = join(requireScratchDir(), "bb-pi-extension.mjs");
-    writeFileSync(path, BB_PI_EXTENSION_SOURCE, "utf8");
+    const path = join(requireScratchDir(), "omnyo-pi-extension.mjs");
+    writeFileSync(path, OMNYO_PI_EXTENSION_SOURCE, "utf8");
     extensionPath = path;
   }
+
   return extensionPath;
 }
 
 const contextWindows = createLiveContextWindowResolver();
+
 const piDeltaTranslator = createPiDeltaTranslator({
   resolveModelContextWindow: contextWindows.resolve,
 });
@@ -250,12 +265,14 @@ function createForwardToolCall(getThreadId: () => string): ToolCallForwarder {
   return (toolName, args) => {
     const threadId = getThreadId();
     const threadSession = sessions.get(threadId);
+
     if (!threadSession || threadSession.closing) {
       return Promise.resolve({
         content: "Thread session not found",
         isError: true,
       });
     }
+
     return forwardToolCall({
       arguments: args,
       providerThreadId: threadSession.providerThreadId,
@@ -271,16 +288,21 @@ async function closeThreadSession(args: {
   threadId: string;
 }): Promise<string | undefined> {
   const existingClose = closingSessions.get(args.threadId);
+
   if (existingClose) {
     return existingClose;
   }
+
   const threadSession = sessions.get(args.threadId);
+
   if (!threadSession) {
     return;
   }
+
   threadSession.closing = true;
   resolvePendingToolCalls(threadSession, args.message);
   extensionUi.cancelPendingForScope(threadSession);
+
   const closePromise = Promise.resolve()
     .then(() =>
       threadSession.session.closeGracefully(THREAD_STOP_CLOSE_TIMEOUT_MS),
@@ -289,9 +311,12 @@ async function closeThreadSession(args: {
       if (sessions.get(args.threadId) === threadSession) {
         sessions.delete(args.threadId);
       }
+
       closingSessions.delete(args.threadId);
     });
+
   closingSessions.set(args.threadId, closePromise);
+
   return closePromise;
 }
 
@@ -310,6 +335,7 @@ function sendThreadDeltas(
   if (deltas.length === 0) {
     return;
   }
+
   send({
     jsonrpc: "2.0",
     method: THREAD_DELTA_NOTIFICATION_METHOD,
@@ -366,6 +392,7 @@ function toContextWindowUsagePayload(
   if (!contextUsage) {
     return null;
   }
+
   return {
     usedTokens: contextUsage.tokens,
     modelContextWindow:
@@ -376,15 +403,19 @@ function toContextWindowUsagePayload(
 
 function emitContextWindowUsage(threadId: string): void {
   const threadSession = sessions.get(threadId);
+
   if (!threadSession) {
     return;
   }
+
   const contextWindowUsage = toContextWindowUsagePayload(
     threadSession.session.getContextUsage(),
   );
+
   if (!contextWindowUsage) {
     return;
   }
+
   emitForSession(threadId, "thread/contextWindowUsage/updated", {
     threadId,
     contextWindowUsage,
@@ -393,6 +424,7 @@ function emitContextWindowUsage(threadId: string): void {
 
 function nextSessionSerial(): number {
   sessionSerialCounter += 1;
+
   return sessionSerialCounter;
 }
 
@@ -400,6 +432,7 @@ function getCurrentThreadSession(
   args: CurrentThreadSessionArgs,
 ): ThreadSession | undefined {
   const threadSession = sessions.get(args.threadId);
+
   if (
     !threadSession ||
     threadSession.closing ||
@@ -407,6 +440,7 @@ function getCurrentThreadSession(
   ) {
     return undefined;
   }
+
   return threadSession;
 }
 
@@ -415,11 +449,13 @@ function createOnPiEvent(
 ): (event: Record<string, unknown>) => void {
   return (event) => {
     const threadSession = getCurrentThreadSession(args);
+
     if (!threadSession) return;
     emitForSession(args.threadId, "sdk/message", {
       threadId: args.threadId,
       message: event,
     });
+
     if (event.type === "turn_end" || event.type === "compaction_end") {
       emitContextWindowUsage(args.threadId);
     }
@@ -431,6 +467,7 @@ function createOnExtensionUiRequest(
 ): (request: Record<string, unknown>) => void {
   return (request) => {
     const threadSession = getCurrentThreadSession(args);
+
     if (!threadSession || threadSession.closing) return;
     extensionUi.handle({
       scope: threadSession,
@@ -449,12 +486,16 @@ function createOnSessionDone(
   return (error?: unknown) => {
     if (error) {
       reportSessionError({ ...args, error });
+
       return;
     }
+
     const threadSession = getCurrentThreadSession(args);
+
     if (!threadSession) {
       return;
     }
+
     void closeThreadSession({
       message: "Pi session ended while tool call was pending",
       threadId: args.threadId,
@@ -476,15 +517,18 @@ function reportPromptSettled(args: {
   threadId: string;
 }): void {
   const threadSession = getCurrentThreadSession(args);
+
   if (!threadSession) {
     return;
   }
+
   const errorMessage =
     args.error === undefined
       ? undefined
       : args.error instanceof Error
         ? args.error.message
         : String(args.error);
+
   emitForSession(args.threadId, "pi/prompt/settled", {
     threadId: args.threadId,
     status: errorMessage === undefined ? "completed" : "failed",
@@ -496,6 +540,7 @@ function reportSessionError(
   args: CurrentThreadSessionArgs & { error: unknown },
 ): void {
   const threadSession = getCurrentThreadSession(args);
+
   if (!threadSession) return;
   emitSessionError(
     threadSession,
@@ -523,9 +568,11 @@ async function handleRequest(
           skills: { configure: true },
         },
       };
+
       sendResult(request.id, result);
       break;
     }
+
     case "model/list":
       await handleModelList(request.id, request.params);
       break;
@@ -564,6 +611,7 @@ async function handleRequest(
       );
       break;
     }
+
     case "thread/fork":
       await handleThreadFork(request.id, request.params);
       break;
@@ -587,9 +635,13 @@ async function handleRequest(
 }
 
 type ThreadForkParams = z.infer<typeof threadForkParamsSchema>;
+
 type TurnStartParams = z.infer<typeof turnStartParamsSchema>;
+
 type TurnSteerParams = z.infer<typeof turnSteerParamsSchema>;
+
 type ThreadStopParams = z.infer<typeof threadStopParamsSchema>;
+
 type ThreadRefParams = z.infer<typeof threadDiscardParamsSchema>;
 
 function toPiSessionParams(
@@ -610,6 +662,7 @@ async function handleModelList(
   params: { cwd?: string },
 ): Promise<void> {
   const gate = await getPiInstallGate();
+
   if (!gate.ok) {
     sendError(
       id,
@@ -620,13 +673,16 @@ async function handleModelList(
         ? "Could not find the pi CLI on this host. Install @earendil-works/pi-coding-agent and retry."
         : (gate.statusMessage ?? "Pi is not supported on this host."),
     );
+
     return;
   }
+
   try {
     const catalog = await getPiCatalog(
       params.cwd ?? process.cwd(),
       requireExtensionPath(),
     );
+
     contextWindows.learn(await catalog.rawModels());
     sendResult(id, await catalog.listModels());
   } catch (error) {
@@ -643,16 +699,21 @@ async function handleProviderHealth(
   params: { cwd?: string },
 ): Promise<void> {
   const gate = await getPiInstallGate();
+
   if (!gate.ok) {
     sendResult(id, gate.result);
+
     return;
   }
+
   const installedVersion = gate.installedVersion;
+
   try {
     const catalog = await getPiCatalog(
       params.cwd ?? process.cwd(),
       requireExtensionPath(),
     );
+
     await catalog.probe();
     const models = await catalog.rawModels();
     sendResult(
@@ -681,13 +742,17 @@ async function resolvePiModel(
 ): Promise<{ provider: string; id: string }> {
   const catalog = await getPiCatalog(cwd, requireExtensionPath());
   const models = await catalog.rawModels();
+
   const canonical = models.find(
     (model) => `${model.provider}/${model.id}` === modelStr,
   );
+
   if (canonical) {
     return { provider: canonical.provider, id: canonical.id };
   }
+
   const served = models.filter((model) => model.id === modelStr);
+
   if (served.length > 1) {
     throw new Error(
       `Ambiguous Pi model "${modelStr}": served by ${served
@@ -695,10 +760,13 @@ async function resolvePiModel(
         .join(", ")}. Prefix it with the provider you want.`,
     );
   }
+
   const match = served[0];
+
   if (!match || typeof match.provider !== "string") {
     throw new Error(`Failed to resolve Pi model "${modelStr}"`);
   }
+
   return { provider: match.provider, id: modelStr };
 }
 
@@ -715,9 +783,10 @@ async function buildSessionOptions(args: {
       : {}),
     sessionFilePath: resolvePiSessionFilePath({
       env: process.env,
+      bridgeDataDir,
       threadId: args.providerThreadId,
     }),
-    sessionDir: resolvePiBridgeSessionDir({ env: process.env }),
+    sessionDir: resolvePiBridgeSessionDir({ env: process.env, bridgeDataDir }),
     systemPrompt: args.params.baseInstructions,
     appendSystemPrompt: args.params.appendSystemPrompt,
     shellEnvOverrides: args.params.shellEnvOverrides,
@@ -746,18 +815,21 @@ async function constructPiThreadSession(
   params: PiSessionParams,
 ): Promise<ThreadSession> {
   const sessionSerial = nextSessionSerial();
+
   const sessionOptions = await buildSessionOptions({
     params,
     providerThreadId,
     threadId,
     sessionSerial,
   });
+
   const session = new PiRpcSession(
     sessionOptions,
     createForwardToolCall(() => threadId),
     createOnPiEvent({ sessionSerial, threadId }),
     createOnSessionDone({ sessionSerial, threadId }),
   );
+
   const threadSession: ThreadSession = {
     session,
     sessionSerial,
@@ -767,10 +839,13 @@ async function constructPiThreadSession(
     construction: params,
     constructionModel: sessionOptions.model,
   };
+
   sessions.set(threadId, threadSession);
+
   try {
     await session.start();
     const liveModel = session.getLiveModel();
+
     if (
       liveModel &&
       typeof liveModel.id === "string" &&
@@ -784,11 +859,13 @@ async function constructPiThreadSession(
         },
       ]);
     }
+
     return threadSession;
   } catch (error) {
     if (sessions.get(threadId) === threadSession) {
       sessions.delete(threadId);
     }
+
     session.kill();
     throw error;
   }
@@ -812,6 +889,7 @@ async function rebuildThreadSession(
   params: PiSessionParams,
 ): Promise<ThreadSession> {
   let replacement: ThreadSession;
+
   try {
     replacement = await constructPiThreadSession(
       threadId,
@@ -822,9 +900,12 @@ async function rebuildThreadSession(
     if (!sessions.has(threadId) && !previous.closing) {
       sessions.set(threadId, previous);
     }
+
     throw error;
   }
+
   retireReplacedPiChild(previous);
+
   return replacement;
 }
 
@@ -850,41 +931,54 @@ async function handleThreadConstruction(
   params: PiSessionParams,
 ): Promise<void> {
   const existing = sessions.get(threadId);
+
   if (existing) {
     await closeThreadSession({
       message: "Pi thread session replaced while tool call was pending",
       threadId,
     });
   }
+
   const sourceFile = resolvePiSessionFilePath({
     env: process.env,
+    bridgeDataDir,
     threadId: providerThreadId,
   });
+
   const relocate = piSessionNeedsRelocation(sourceFile, params.cwd);
+
   const nextProviderThreadId = relocate
     ? `pi_${randomUUID()}`
     : providerThreadId;
+
   const targetFile = resolvePiSessionFilePath({
     env: process.env,
+    bridgeDataDir,
     threadId: nextProviderThreadId,
   });
+
   try {
     if (relocate) {
       await PiRpcSession.forkSessionFile({
         sourceFile,
         targetFile,
         cwd: params.cwd,
-        sessionDir: resolvePiBridgeSessionDir({ env: process.env }),
+        sessionDir: resolvePiBridgeSessionDir({
+          env: process.env,
+          bridgeDataDir,
+        }),
         extensionPath: requireExtensionPath(),
         scratchDir: requireScratchDir(),
         recordThreadId: threadId,
       });
     }
+
     await constructPiThreadSession(threadId, nextProviderThreadId, params);
   } catch (error) {
     if (relocate) rmSync(targetFile, { force: true });
     throw error;
   }
+
   sendThreadSessionResult(id, threadId, nextProviderThreadId);
 }
 
@@ -894,29 +988,39 @@ async function handleThreadFork(
 ): Promise<void> {
   const sourceSessionFile = resolvePiSessionFilePath({
     env: process.env,
+    bridgeDataDir,
     threadId: params.sourceProviderThreadId,
   });
+
   if (!existsSync(sourceSessionFile)) {
     sendError(
       id,
       -32000,
       `Cannot fork: source pi session file not found for thread "${params.sourceProviderThreadId}"`,
     );
+
     return;
   }
+
   const targetSessionFile = resolvePiSessionFilePath({
     env: process.env,
+    bridgeDataDir,
     threadId: params.threadId,
   });
-  mkdirSync(resolvePiBridgeSessionDir({ env: process.env }), {
+
+  mkdirSync(resolvePiBridgeSessionDir({ env: process.env, bridgeDataDir }), {
     recursive: true,
   });
+
   try {
     await PiRpcSession.forkSessionFile({
       sourceFile: sourceSessionFile,
       targetFile: targetSessionFile,
       cwd: params.cwd,
-      sessionDir: resolvePiBridgeSessionDir({ env: process.env }),
+      sessionDir: resolvePiBridgeSessionDir({
+        env: process.env,
+        bridgeDataDir,
+      }),
       ...(params.sourceProviderCheckpointId === undefined
         ? {}
         : { checkpointId: params.sourceProviderCheckpointId }),
@@ -931,8 +1035,10 @@ async function handleThreadFork(
       -32000,
       error instanceof Error ? error.message : String(error),
     );
+
     return;
   }
+
   await handleThreadConstruction(
     id,
     params.threadId,
@@ -951,16 +1057,19 @@ function startPiPrompt(
     text,
     images.length > 0 ? images : undefined,
   );
+
   void dispatch.settled.then((outcome) => {
     if (outcome === null || outcome.boundaryDelivered) {
       return;
     }
+
     reportPromptSettled({
       ...(outcome.error !== undefined ? { error: outcome.error } : {}),
       sessionSerial: threadSession.sessionSerial,
       threadId,
     });
   });
+
   return dispatch.consumed;
 }
 
@@ -996,20 +1105,28 @@ async function reconcileTurnOptions(
 ): Promise<ThreadSession> {
   const turnOptions = buildPiTurnOptions(options);
   const construction = threadSession.construction;
+
   const shellEnvOverrides =
     options.envVars && Object.keys(options.envVars).length > 0
-      ? { BB_THREAD_ID: threadId, ...buildShellEnvOverrides(options.envVars) }
+      ? {
+          OMNYO_THREAD_ID: threadId,
+          ...buildShellEnvOverrides(options.envVars),
+        }
       : undefined;
+
   const environmentChanged =
     shellEnvOverrides !== undefined &&
     !isDeepStrictEqual(shellEnvOverrides, construction.shellEnvOverrides);
+
   const changedModelRequest =
     turnOptions.model !== undefined && turnOptions.model !== construction.model
       ? turnOptions.model
       : undefined;
+
   const thinkingLevelChanged =
     turnOptions.thinkingLevel !== undefined &&
     turnOptions.thinkingLevel !== construction.thinkingLevel;
+
   if (
     !environmentChanged &&
     changedModelRequest === undefined &&
@@ -1017,18 +1134,22 @@ async function reconcileTurnOptions(
   ) {
     return threadSession;
   }
+
   const nextModel =
     changedModelRequest === undefined
       ? undefined
       : await resolvePiModel(changedModelRequest, construction.cwd);
+
   const modelChanged =
     nextModel !== undefined &&
     (threadSession.constructionModel === undefined ||
       threadSession.constructionModel.provider !== nextModel.provider ||
       threadSession.constructionModel.id !== nextModel.id);
+
   if (!environmentChanged && !modelChanged && !thinkingLevelChanged) {
     return threadSession;
   }
+
   const replacement = await rebuildThreadSession(threadId, threadSession, {
     ...construction,
     ...(shellEnvOverrides === undefined ? {} : { shellEnvOverrides }),
@@ -1037,6 +1158,7 @@ async function reconcileTurnOptions(
       ? {}
       : { thinkingLevel: turnOptions.thinkingLevel }),
   });
+
   sendThreadIdentity(threadId, replacement.providerThreadId);
   sendSessionResetBoundary(threadId);
   send({
@@ -1050,6 +1172,7 @@ async function reconcileTurnOptions(
       contextLost: false,
     },
   });
+
   return replacement;
 }
 
@@ -1058,11 +1181,15 @@ async function handleTurnStart(
   params: TurnStartParams,
 ): Promise<void> {
   const liveSession = sessions.get(params.threadId);
+
   if (!liveSession || liveSession.closing) {
     sendError(id, -32000, "No active pi session");
+
     return;
   }
+
   let threadSession: ThreadSession;
+
   try {
     threadSession = await reconcileTurnOptions(
       params.threadId,
@@ -1075,20 +1202,28 @@ async function handleTurnStart(
       -32000,
       error instanceof Error ? error.message : String(error),
     );
+
     return;
   }
+
   if (isStandaloneBuiltinCompactCommand(params.input)) {
     recordAcceptedTurnInput(params);
     startPiCompaction(threadSession, params.threadId);
     sendResult(id, { threadId: params.threadId });
+
     return;
   }
+
   const input = extractPiPromptInput(params.input);
+
   if (input === null) {
     sendError(id, BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS, "Missing input text");
+
     return;
   }
+
   const { text, images } = input;
+
   try {
     await startPiPrompt(threadSession, params.threadId, text, images);
     recordAcceptedTurnInput(params);
@@ -1107,20 +1242,29 @@ async function handleTurnSteer(
   params: TurnSteerParams,
 ): Promise<void> {
   const threadSession = sessions.get(params.threadId);
+
   if (!threadSession || threadSession.closing) {
     sendError(id, -32000, "No active pi session");
+
     return;
   }
+
   const input = extractPiPromptInput(params.input);
+
   if (input === null) {
     sendError(id, BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS, "Missing input text");
+
     return;
   }
+
   const { text, images } = input;
+
   if (threadSession.session.getIsCompacting()) {
     sendError(id, -32000, "Cannot steer while context compaction is active");
+
     return;
   }
+
   try {
     await threadSession.session.steer(
       text,
@@ -1144,6 +1288,7 @@ async function handleThreadStop(
   params: ThreadStopParams,
 ): Promise<void> {
   const threadSession = sessions.get(params.threadId);
+
   if (
     params.intent === "interrupt" &&
     threadSession !== undefined &&
@@ -1151,11 +1296,13 @@ async function handleThreadStop(
   ) {
     sendThreadDeltas(params.threadId, [{ kind: "session.ended" }]);
   }
+
   const providerCheckpointId =
     (await closeThreadSession({
       message: "Pi thread stopped while tool call was pending",
       threadId: params.threadId,
     })) ?? null;
+
   sendResult(id, { ok: true, providerCheckpointId });
 }
 
@@ -1169,45 +1316,56 @@ async function handleThreadDiscard(
   rmSync(
     resolvePiSessionFilePath({
       env: process.env,
+      bridgeDataDir,
       threadId: params.providerThreadId,
     }),
     {
       force: true,
     },
   );
+
   return { ok: true };
 }
 
 function handleParsedMessage(parsed: unknown): void {
   const response = decodeBridgeJsonRpcResponse(parsed);
+
   if (response) {
     if (extensionUi.handleRuntimeResponse(response)) {
       return;
     }
+
     if (handleToolCallResponse(response)) {
       return;
     }
   }
+
   const decoded = decodePiJsonRpcRequest(parsed);
+
   if (decoded.kind === "ignored") {
     return;
   }
+
   if (decoded.kind === "unknown-method") {
     sendError(
       decoded.id,
       BRIDGE_JSON_RPC_ERRORS.METHOD_NOT_FOUND,
       `Unknown method "${decoded.method}"`,
     );
+
     return;
   }
+
   if (decoded.kind === "invalid-params") {
     sendError(
       decoded.id,
       BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS,
       `Invalid params for "${decoded.method}": ${decoded.issues}`,
     );
+
     return;
   }
+
   runBridgeRequest({ request: decoded.request, handleRequest, sendError });
 }
 
@@ -1227,6 +1385,7 @@ export async function experimental_closeAllForTests(): Promise<void> {
   await closeThreadSessionsGracefully("Pi bridge test teardown");
   await closeAllPiCatalogs();
   resetPiInstallGateForTests();
+
   if (scratchDir !== null && scratchDirIsPrivate) {
     rmSync(scratchDir, { recursive: true, force: true });
     scratchDir = null;
@@ -1238,6 +1397,7 @@ export async function experimental_closeAllForTests(): Promise<void> {
 export const experimental_providerBridge = experimental_defineProviderBridge({
   handleLine,
   start: (context) => {
+    bridgeDataDir = context.dataDir;
     scratchDir = join(context.tempDir, "pi");
     scratchDirIsPrivate = false;
     mkdirSync(scratchDir, { recursive: true });

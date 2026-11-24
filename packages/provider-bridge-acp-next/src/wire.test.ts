@@ -13,6 +13,7 @@ describe("acpToolCallUpdateEventSchema", () => {
       toolCallId: "call-1",
       status: "queued",
     });
+
     expect(unknownStatus.status).toBe("pending");
 
     const nulls = acpToolCallUpdateEventSchema.parse({
@@ -21,6 +22,7 @@ describe("acpToolCallUpdateEventSchema", () => {
       kind: null,
       status: null,
     });
+
     expect(nulls.kind).toBeUndefined();
     expect(nulls.status).toBeUndefined();
   });
@@ -98,9 +100,11 @@ describe("acpSessionNewResultSchema", () => {
     });
 
     expect(parsed.success).toBe(true);
+
     if (!parsed.success) {
       return;
     }
+
     expect(
       parsed.data.models?.availableModels?.[0].description,
     ).toBeUndefined();
@@ -158,9 +162,11 @@ describe("acpSessionNewResultSchema", () => {
     });
 
     expect(parsed.success).toBe(true);
+
     if (!parsed.success) {
       return;
     }
+
     expect(
       parsed.data.configOptions?.[0].options?.map((option) => option.value),
     ).toEqual(["model-a", "model-b", "model-c"]);

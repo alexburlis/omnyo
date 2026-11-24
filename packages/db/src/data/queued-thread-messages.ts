@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   exists,
+  gt,
   inArray,
   isNotNull,
   isNull,
@@ -18,12 +19,14 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+import { alias, type SQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
   QUEUED_MESSAGE_PLUGIN_WAIT_HOLDER_PREFIX,
   projectAttachmentPaths,
-} from "@bb/domain";
+  queuedMessageSystemNoticeSchema,
+} from "@omnyo/domain";
 import type {
+  QueuedMessageDeliveryMode,
   PermissionMode,
   PromptInput,
   QueuedMessagePayload,
@@ -33,7 +36,7 @@ import type {
   QueuedMessageWaitHolder,
   QueuedMessageWaitingOn,
   QueuedMessageWaitingOnKind,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   DbConnection,
   DbQueryConnection,
@@ -41,6 +44,7 @@ import type {
 } from "../connection.js";
 import type { DbNotifier } from "../notifier.js";
 import {
+  dispatchedQueuedThreadMessages,
   environments,
   events,
   queuedThreadMessages,
@@ -50,45 +54,47 @@ import {
   createQueuedThreadMessageClaimToken,
   createQueuedThreadMessageId,
 } from "../ids.js";
-import { createOrderKeyAfter, createOrderKeyBetween } from "./order-keys.js";
-import { queryInSqliteVariableBatches } from "./sqlite-variable-batches.js";
+import { createOrderKeyBetween } from "./order-keys.js";
 
 export interface CreateQueuedThreadMessageInput {
   threadId: string;
+  position?: "first" | "last";
   content: PromptInput[];
   senderThreadId?: string | null;
-  /**
-   * How the dispatch this row is queued from was requested, and the plugin
-   * that requested it, so a drained re-attempt carries the provenance its
-   * first attempt had. Both null for everything but a thread's first dispatch.
-   */
+
   origin?: ThreadCreateOrigin | null;
   originPluginId?: string | null;
-  /**
-   * The thread that asked for this dispatch, when one did. Distinct from
-   * `senderThreadId`, which is the sender of a message TO an existing thread:
-   * a thread-start has a requester and no message sender.
-   */
+
   requestedBy?: StartedOnBehalfOf | null;
   model: string;
   reasoningLevel: string;
   permissionMode: PermissionMode;
   serviceTier: string;
-  /**
-   * Why the row is queued, written in the SAME insert rather than by a
-   * follow-up update: a row that existed with no wait for even one statement
-   * could be claimed by a concurrent drain, which is exactly the dispatch the
-   * wait exists to prevent.
-   */
+
   waitingOn: QueuedMessageWaitingOn | null;
   sendAt: number | null;
   payload: QueuedMessagePayload;
-  /** Non-null only for one of core's own system notices. */
+
   systemNotice: QueuedMessageSystemNotice | null;
+  deliveryMode?: QueuedMessageDeliveryMode;
+  coalesce?: { key: string; state: string } | null;
+}
+
+export interface UpdateCoalescedQueuedThreadMessageInput {
+  coalesceState: string;
+  content: PromptInput[];
+  id: string;
+  sendAt: number;
+  systemNotice: QueuedMessageSystemNotice;
+  threadId: string;
 }
 
 export interface UpdateQueuedThreadMessageInput {
   content: PromptInput[];
+  execution: Pick<
+    QueuedThreadMessageRow,
+    "model" | "permissionMode" | "reasoningLevel" | "serviceTier"
+  > | null;
   expectedUpdatedAt: number;
   id: string;
   threadId: string;
@@ -230,8 +236,7 @@ export interface QueuedThreadMessageEditHoldArgs {
   threadId: string;
 }
 
-export interface HoldQueuedThreadMessageForEditArgs
-  extends QueuedThreadMessageEditHoldArgs {
+export interface HoldQueuedThreadMessageForEditArgs extends QueuedThreadMessageEditHoldArgs {
   heldUntil: number;
 }
 
@@ -254,10 +259,13 @@ function collectLeadGroupIds(
 ): string[] {
   const ids: string[] = [];
   const firstQueuedMessage = queuedMessages[0] ?? null;
+
   for (const [index, queuedMessage] of queuedMessages.entries()) {
     ids.push(queuedMessage.id);
+
     if (!queuedMessage.groupWithNext) break;
     const nextQueuedMessage = queuedMessages[index + 1];
+
     if (
       !nextQueuedMessage ||
       !queuedMessageGroupingEnvelopeMatches(
@@ -268,56 +276,39 @@ function collectLeadGroupIds(
       break;
     }
   }
+
   return ids;
 }
 
-/**
- * A thread's live queue split into its groups: each maximal `groupWithNext`
- * chain with a matching envelope, in queue order.
- *
- * Grouping is computed over ALL live rows, never over an eligibility-filtered
- * subset. A filtered list has holes, and walking `groupWithNext` across a hole
- * either splits a group (dispatching a tail without the head that a re-queue
- * left waiting) or staples an unrelated later row onto it. Membership is one
- * question, eligibility another; callers apply eligibility to whole groups.
- */
 function partitionQueuedMessageGroups(
   queuedMessages: readonly QueuedThreadMessageRow[],
 ): QueuedThreadMessageRow[][] {
   const groups: QueuedThreadMessageRow[][] = [];
   let index = 0;
+
   while (index < queuedMessages.length) {
     const size = collectLeadGroupIds(queuedMessages.slice(index)).length;
     groups.push(queuedMessages.slice(index, index + size));
     index += size;
   }
+
   return groups;
 }
 
-/**
- * The waits that mean "this row is only behind the turn that is running". The
- * manual-stop queue pause exists to hold exactly these back, because a user
- * who stopped a thread did not thereby ask for whatever was lined up behind
- * it.
- */
 const ORDINARY_TURN_END_WAIT_KINDS = ["thread-busy", "turn-starting"] as const;
 
-/**
- * Every wait an idle thread clears by being idle. `stopping` joins the
- * ordinary two rather than replacing them: it is drainable for the same
- * reason, and deliberately outside {@link ORDINARY_TURN_END_WAIT_KINDS} so the
- * manual-stop pause lets it through — a row acquires it only from an action
- * the user took after requesting the stop.
- */
 const IDLE_DRAINABLE_WAIT_KINDS = [
   ...ORDINARY_TURN_END_WAIT_KINDS,
   "stopping",
+  "server-update",
 ] as const;
 
 function hasOrdinaryTurnEndWait(row: QueuedThreadMessageRow): boolean {
   if (row.waitingOn === null) return true;
+
   try {
     const parsed = JSON.parse(row.waitingOn) as { kind?: unknown };
+
     return ORDINARY_TURN_END_WAIT_KINDS.some(
       (waitKind) => waitKind === parsed.kind,
     );
@@ -329,19 +320,24 @@ function hasOrdinaryTurnEndWait(row: QueuedThreadMessageRow): boolean {
 export function isOrdinaryTurnEndQueuedMessage(
   row: QueuedThreadMessageRow,
 ): boolean {
-  return row.systemNotice === null && hasOrdinaryTurnEndWait(row);
+  return (
+    (row.systemNotice === null ||
+      queuedMessageSystemNoticeSchema.parse(JSON.parse(row.systemNotice))
+        .kind === "external-message") &&
+    (row.payloadKind === "continuation" || hasOrdinaryTurnEndWait(row))
+  );
 }
 
-/**
- * The JS mirror of {@link drainableQueuedThreadMessage}'s wait condition, for
- * deciding whole-group eligibility over rows already in hand. Kept next to a
- * pointer at the SQL so the two cannot drift silently.
- */
-function isIdleDrainableQueuedMessage(row: QueuedThreadMessageRow): boolean {
+export function isIdleDrainableQueuedMessage(
+  row: QueuedThreadMessageRow,
+): boolean {
   if (row.failureReason !== null) return false;
+
   if (row.waitingOn === null) return true;
+
   try {
     const parsed = JSON.parse(row.waitingOn) as { kind?: unknown };
+
     return IDLE_DRAINABLE_WAIT_KINDS.some(
       (waitKind) => waitKind === parsed.kind,
     );
@@ -367,6 +363,7 @@ function queuedMessageGroupingEnvelopeMatches(
   return (
     firstQueuedMessage !== null &&
     queuedMessage.senderThreadId === firstQueuedMessage.senderThreadId &&
+    queuedMessage.systemNotice === firstQueuedMessage.systemNotice &&
     queuedMessage.model === firstQueuedMessage.model &&
     queuedMessage.reasoningLevel === firstQueuedMessage.reasoningLevel &&
     queuedMessage.permissionMode === firstQueuedMessage.permissionMode &&
@@ -393,6 +390,7 @@ function requireClaimedQueuedThreadMessage(
   if (!row || row.claimedAt === null || row.claimToken === null) {
     return null;
   }
+
   return {
     ...row,
     claimedAt: row.claimedAt,
@@ -403,6 +401,7 @@ function requireClaimedQueuedThreadMessage(
 export function listQueuedThreadMessages(
   db: DbQueryConnection,
   threadId: string,
+  { includeClaimed = false }: { includeClaimed?: boolean } = {},
 ): QueuedThreadMessageRow[] {
   return db
     .select()
@@ -410,15 +409,14 @@ export function listQueuedThreadMessages(
     .where(
       and(
         eq(queuedThreadMessages.threadId, threadId),
-        isNull(queuedThreadMessages.claimedAt),
-        isNull(queuedThreadMessages.claimToken),
+        includeClaimed ? undefined : liveQueuedThreadMessage(),
       ),
     )
     .orderBy(asc(queuedThreadMessages.sortKey), asc(queuedThreadMessages.id))
     .all();
 }
 
-function getLastQueuedThreadMessage(
+export function getQueuedThreadStartMessage(
   db: DbQueryConnection,
   threadId: string,
 ): QueuedThreadMessageRow | null {
@@ -426,10 +424,33 @@ function getLastQueuedThreadMessage(
     db
       .select()
       .from(queuedThreadMessages)
+      .where(
+        and(
+          eq(queuedThreadMessages.threadId, threadId),
+          isNotNull(queuedThreadMessages.origin),
+        ),
+      )
+      .orderBy(asc(queuedThreadMessages.sortKey), asc(queuedThreadMessages.id))
+      .limit(1)
+      .get() ?? null
+  );
+}
+
+function getQueueEdgeMessage(
+  db: DbQueryConnection,
+  threadId: string,
+  position: "first" | "last",
+): QueuedThreadMessageRow | null {
+  const order = position === "first" ? asc : desc;
+
+  return (
+    db
+      .select()
+      .from(queuedThreadMessages)
       .where(eq(queuedThreadMessages.threadId, threadId))
       .orderBy(
-        desc(queuedThreadMessages.sortKey),
-        desc(queuedThreadMessages.id),
+        order(queuedThreadMessages.sortKey),
+        order(queuedThreadMessages.id),
       )
       .limit(1)
       .get() ?? null
@@ -476,6 +497,7 @@ function clearPreviousQueuedMessageGroupEdgeInTransaction(
     db,
     queuedMessage,
   );
+
   if (!previousQueuedMessage?.groupWithNext) return;
   db.update(queuedThreadMessages)
     .set({ groupWithNext: false, updatedAt: now })
@@ -502,14 +524,13 @@ function resolveQueuedThreadMessageNeighbor(
   if (args.neighborQueuedMessageId === null) {
     return null;
   }
+
   if (args.neighborQueuedMessageId === args.movedQueuedMessageId) {
     return false;
   }
 
-  const neighbor = getQueuedThreadMessage(
-    db,
-    args.neighborQueuedMessageId,
-  );
+  const neighbor = getQueuedThreadMessage(db, args.neighborQueuedMessageId);
+
   if (
     !neighbor ||
     neighbor.threadId !== args.threadId ||
@@ -517,6 +538,7 @@ function resolveQueuedThreadMessageNeighbor(
   ) {
     return false;
   }
+
   return neighbor;
 }
 
@@ -527,23 +549,28 @@ function applyQueuedThreadMessageGroupBoundary(
   groupBoundaryQueuedMessageId: string,
 ): SetQueuedThreadMessageGroupBoundaryResult {
   const queuedMessages = listQueuedThreadMessages(db, threadId);
+
   const boundaryIndex = queuedMessages.findIndex(
     (queuedMessage) => queuedMessage.id === groupBoundaryQueuedMessageId,
   );
+
   if (boundaryIndex === -1) {
     const claimedBoundary = getQueuedThreadMessage(
       db,
       groupBoundaryQueuedMessageId,
     );
+
     return claimedBoundary?.threadId === threadId &&
       isQueuedThreadMessageClaimed(claimedBoundary)
       ? { kind: "claimed" }
       : { kind: "not_found" };
   }
+
   if (expectedGroupedPrefixQueuedMessageIds !== null) {
     const currentGroupedPrefixIds = queuedMessages
       .slice(0, boundaryIndex + 1)
       .map((queuedMessage) => queuedMessage.id);
+
     if (
       !stringArraysEqual(
         currentGroupedPrefixIds,
@@ -553,16 +580,21 @@ function applyQueuedThreadMessageGroupBoundary(
       return { kind: "stale_neighbor" };
     }
   }
+
   if (boundaryIndex > 0) {
     const firstQueuedMessage = queuedMessages[0] ?? null;
     const groupedMessages = queuedMessages.slice(0, boundaryIndex + 1);
+
     const hasMixedSender = groupedMessages.some(
       (queuedMessage) =>
-        queuedMessage.senderThreadId !== firstQueuedMessage?.senderThreadId,
+        queuedMessage.senderThreadId !== firstQueuedMessage?.senderThreadId ||
+        queuedMessage.systemNotice !== firstQueuedMessage?.systemNotice,
     );
+
     if (hasMixedSender) {
       return { kind: "invalid_sender" };
     }
+
     const hasMixedExecutionOptions = groupedMessages.some(
       (queuedMessage) =>
         !queuedMessageGroupingEnvelopeMatches(
@@ -570,6 +602,7 @@ function applyQueuedThreadMessageGroupBoundary(
           queuedMessage,
         ),
     );
+
     if (hasMixedExecutionOptions) {
       return { kind: "invalid_execution_options" };
     }
@@ -577,8 +610,10 @@ function applyQueuedThreadMessageGroupBoundary(
 
   let changed = false;
   const now = Date.now();
+
   for (const [index, queuedMessage] of queuedMessages.entries()) {
     const groupWithNext = index < boundaryIndex;
+
     if (queuedMessage.groupWithNext === groupWithNext) continue;
     changed = true;
     db.update(queuedThreadMessages)
@@ -587,12 +622,11 @@ function applyQueuedThreadMessageGroupBoundary(
       .run();
   }
 
-  if (!changed) {
-    return { kind: "unchanged", queuedMessages };
-  }
   return {
-    kind: "updated",
-    queuedMessages: listQueuedThreadMessages(db, threadId),
+    kind: changed ? "updated" : "unchanged",
+    queuedMessages: listQueuedThreadMessages(db, threadId, {
+      includeClaimed: true,
+    }),
   };
 }
 
@@ -600,30 +634,29 @@ function applyPreservedLeadGroupAfterReorder(
   db: DbTransaction,
   threadId: string,
   originalLeadGroupIds: readonly string[],
-): QueuedThreadMessageRow[] {
+): void {
+  if (originalLeadGroupIds.length <= 1) return;
+
   const queuedMessages = listQueuedThreadMessages(db, threadId);
-  if (originalLeadGroupIds.length <= 1) {
-    return queuedMessages;
-  }
 
   const originalLeadGroupIdSet = new Set(originalLeadGroupIds);
+
   const preservesLeadGroup = queuedMessages
     .slice(0, originalLeadGroupIds.length)
     .every((queuedMessage) => originalLeadGroupIdSet.has(queuedMessage.id));
-  let changed = false;
+
   const now = Date.now();
+
   for (const [index, queuedMessage] of queuedMessages.entries()) {
     const groupWithNext =
       preservesLeadGroup && index < originalLeadGroupIds.length - 1;
+
     if (queuedMessage.groupWithNext === groupWithNext) continue;
-    changed = true;
     db.update(queuedThreadMessages)
       .set({ groupWithNext, updatedAt: now })
       .where(eq(queuedThreadMessages.id, queuedMessage.id))
       .run();
   }
-
-  return changed ? listQueuedThreadMessages(db, threadId) : queuedMessages;
 }
 
 export function createQueuedThreadMessageInTransaction(
@@ -637,10 +670,14 @@ export function createQueuedThreadMessageInTransaction(
     projectAttachmentPaths(input.content),
   );
   const id = createQueuedThreadMessageId();
-  const lastQueuedMessage = getLastQueuedThreadMessage(tx, input.threadId);
-  const sortKey = lastQueuedMessage
-    ? createOrderKeyAfter({ previousKey: lastQueuedMessage.sortKey })
-    : createOrderKeyBetween({ previousKey: null, nextKey: null });
+  const position = input.position ?? "last";
+  const edge = getQueueEdgeMessage(tx, input.threadId, position);
+
+  const sortKey = createOrderKeyBetween({
+    previousKey: position === "last" ? (edge?.sortKey ?? null) : null,
+    nextKey: position === "first" ? (edge?.sortKey ?? null) : null,
+  });
+
   return tx
     .insert(queuedThreadMessages)
     .values({
@@ -671,6 +708,9 @@ export function createQueuedThreadMessageInTransaction(
       retryAttempt:
         input.payload.kind === "retry" ? input.payload.attempt : null,
       retryReason: input.payload.kind === "retry" ? input.payload.reason : null,
+      deliveryMode: input.deliveryMode ?? "steer",
+      coalesceKey: input.coalesce?.key ?? null,
+      coalesceState: input.coalesce?.state ?? null,
       groupWithNext: false,
       claimedAt: null,
       claimToken: null,
@@ -683,6 +723,65 @@ export function createQueuedThreadMessageInTransaction(
     .get();
 }
 
+export function getPendingCoalescedQueuedThreadMessage(
+  db: DbQueryConnection,
+  args: { coalesceKey: string; now: number; threadId: string },
+): QueuedThreadMessageRow | null {
+  return (
+    db
+      .select()
+      .from(queuedThreadMessages)
+      .where(
+        and(
+          eq(queuedThreadMessages.threadId, args.threadId),
+          eq(queuedThreadMessages.coalesceKey, args.coalesceKey),
+          liveQueuedThreadMessage(),
+          isNull(queuedThreadMessages.failureReason),
+          isNull(queuedThreadMessages.editHeldUntil),
+          gt(queuedThreadMessages.sendAt, args.now),
+          sql`json_extract(${queuedThreadMessages.waitingOn}, '$.kind') = 'time'`,
+        ),
+      )
+      .orderBy(asc(queuedThreadMessages.sortKey), asc(queuedThreadMessages.id))
+      .limit(1)
+      .get() ?? null
+  );
+}
+
+export function updateCoalescedQueuedThreadMessageInTransaction(
+  tx: DbTransaction,
+  input: UpdateCoalescedQueuedThreadMessageInput,
+): QueuedThreadMessageRow | null {
+  acquireProjectAttachmentOwnership(
+    tx,
+    input.threadId,
+    projectAttachmentPaths(input.content),
+  );
+
+  return (
+    tx
+      .update(queuedThreadMessages)
+      .set({
+        content: JSON.stringify(input.content),
+        systemNotice: JSON.stringify(input.systemNotice),
+        coalesceState: input.coalesceState,
+        sendAt: input.sendAt,
+        updatedAt: Date.now(),
+      })
+      .where(
+        and(
+          eq(queuedThreadMessages.id, input.id),
+          eq(queuedThreadMessages.threadId, input.threadId),
+          liveQueuedThreadMessage(),
+          isNull(queuedThreadMessages.failureReason),
+          isNull(queuedThreadMessages.editHeldUntil),
+        ),
+      )
+      .returning()
+      .get() ?? null
+  );
+}
+
 export function createQueuedThreadMessage(
   db: DbConnection,
   notifier: DbNotifier,
@@ -692,8 +791,94 @@ export function createQueuedThreadMessage(
     (tx) => createQueuedThreadMessageInTransaction(tx, input),
     { behavior: "immediate" },
   );
+
   notifier.notifyThread(input.threadId, ["queue-changed"]);
+
   return row;
+}
+
+export interface CreateUniqueQueuedThreadMessageResult {
+  created: boolean;
+  row: QueuedThreadMessageRow;
+}
+
+export function createUniqueQueuedThreadMessageInTransaction(
+  tx: DbTransaction,
+  input: CreateQueuedThreadMessageInput,
+): CreateUniqueQueuedThreadMessageResult {
+  const pending = findPendingDuplicateQueuedThreadMessage(tx, input);
+
+  if (pending !== null) return { created: false, row: pending };
+
+  return {
+    created: true,
+    row: createQueuedThreadMessageInTransaction(tx, input),
+  };
+}
+
+function matchesNullable(column: SQLiteColumn, value: string | number | null) {
+  return value === null ? isNull(column) : eq(column, value);
+}
+
+function findPendingDuplicateQueuedThreadMessage(
+  db: DbQueryConnection,
+  input: CreateQueuedThreadMessageInput,
+): QueuedThreadMessageRow | null {
+  const retry = input.payload.kind === "retry" ? input.payload : null;
+
+  return (
+    db
+      .select()
+      .from(queuedThreadMessages)
+      .where(
+        and(
+          eq(queuedThreadMessages.threadId, input.threadId),
+          eq(queuedThreadMessages.content, JSON.stringify(input.content)),
+          matchesNullable(
+            queuedThreadMessages.senderThreadId,
+            input.senderThreadId ?? null,
+          ),
+          matchesNullable(queuedThreadMessages.origin, input.origin ?? null),
+          matchesNullable(
+            queuedThreadMessages.originPluginId,
+            input.originPluginId ?? null,
+          ),
+          matchesNullable(
+            queuedThreadMessages.requestedByInitiator,
+            input.requestedBy?.initiator ?? null,
+          ),
+          matchesNullable(
+            queuedThreadMessages.requestedByThreadId,
+            input.requestedBy?.senderThreadId ?? null,
+          ),
+          eq(queuedThreadMessages.model, input.model),
+          eq(queuedThreadMessages.reasoningLevel, input.reasoningLevel),
+          eq(queuedThreadMessages.permissionMode, input.permissionMode),
+          eq(queuedThreadMessages.serviceTier, input.serviceTier),
+          eq(queuedThreadMessages.payloadKind, input.payload.kind),
+          eq(queuedThreadMessages.deliveryMode, input.deliveryMode ?? "steer"),
+          matchesNullable(
+            queuedThreadMessages.retryOfTurnRequestId,
+            retry?.retryOfTurnRequestId ?? null,
+          ),
+          matchesNullable(
+            queuedThreadMessages.retryAttempt,
+            retry?.attempt ?? null,
+          ),
+          matchesNullable(queuedThreadMessages.sendAt, input.sendAt),
+          matchesNullable(
+            queuedThreadMessages.systemNotice,
+            input.systemNotice === null
+              ? null
+              : JSON.stringify(input.systemNotice),
+          ),
+          isNull(queuedThreadMessages.failureReason),
+        ),
+      )
+      .orderBy(asc(queuedThreadMessages.sortKey))
+      .limit(1)
+      .get() ?? null
+  );
 }
 
 export function updateQueuedThreadMessage(
@@ -704,12 +889,15 @@ export function updateQueuedThreadMessage(
   const result = db.transaction(
     (tx): UpdateQueuedThreadMessageResult => {
       const existing = getQueuedThreadMessage(tx, input.id);
+
       if (!existing || existing.threadId !== input.threadId) {
         return { kind: "not_found" };
       }
+
       if (isQueuedThreadMessageClaimed(existing)) {
         return { kind: "claimed" };
       }
+
       if (existing.updatedAt !== input.expectedUpdatedAt) {
         return { kind: "stale" };
       }
@@ -719,19 +907,25 @@ export function updateQueuedThreadMessage(
         input.threadId,
         projectAttachmentPaths(input.content),
       );
+
       const queuedMessage = tx
         .update(queuedThreadMessages)
         .set({
           content: JSON.stringify(input.content),
+          ...(input.execution ?? {}),
+          coalesceKey: null,
+          coalesceState: null,
           editHeldUntil: null,
           updatedAt: Math.max(Date.now(), existing.updatedAt + 1),
         })
         .where(eq(queuedThreadMessages.id, input.id))
         .returning()
         .get();
+
       if (!queuedMessage) {
         return { kind: "not_found" };
       }
+
       return {
         kind: "updated",
         queuedMessage,
@@ -744,6 +938,7 @@ export function updateQueuedThreadMessage(
   if (result.kind === "updated") {
     notifier.notifyThread(input.threadId, ["queue-changed"]);
   }
+
   return result;
 }
 
@@ -754,16 +949,20 @@ export function holdQueuedThreadMessageForEdit(
   return db.transaction(
     (tx): HoldQueuedThreadMessageForEditResult => {
       const existing = getQueuedThreadMessage(tx, args.id);
+
       if (!existing || existing.threadId !== args.threadId) {
         return { kind: "not_found" };
       }
+
       if (isQueuedThreadMessageClaimed(existing)) {
         return { kind: "claimed" };
       }
+
       tx.update(queuedThreadMessages)
         .set({ editHeldUntil: args.heldUntil })
         .where(eq(queuedThreadMessages.id, args.id))
         .run();
+
       return { kind: "held" };
     },
     { behavior: "immediate" },
@@ -796,6 +995,55 @@ export function getQueuedThreadMessage(db: DbQueryConnection, id: string) {
       .from(queuedThreadMessages)
       .where(eq(queuedThreadMessages.id, id))
       .get() ?? null
+  );
+}
+
+export const DISPATCHED_QUEUED_THREAD_MESSAGE_RETENTION_MS =
+  24 * 60 * 60 * 1000;
+
+function recordDispatchedQueuedThreadMessages(
+  db: DbTransaction,
+  rows: readonly { id: string; threadId: string }[],
+  now: number,
+): void {
+  db.delete(dispatchedQueuedThreadMessages)
+    .where(
+      lt(
+        dispatchedQueuedThreadMessages.dispatchedAt,
+        now - DISPATCHED_QUEUED_THREAD_MESSAGE_RETENTION_MS,
+      ),
+    )
+    .run();
+  db.insert(dispatchedQueuedThreadMessages)
+    .values(
+      rows.map((row) => ({
+        queuedMessageId: row.id,
+        threadId: row.threadId,
+        dispatchedAt: now,
+      })),
+    )
+    .onConflictDoNothing()
+    .run();
+}
+
+export function wasQueuedThreadMessageDispatched(
+  db: DbQueryConnection,
+  args: { queuedMessageId: string; threadId: string },
+): boolean {
+  return (
+    db
+      .select({ id: dispatchedQueuedThreadMessages.queuedMessageId })
+      .from(dispatchedQueuedThreadMessages)
+      .where(
+        and(
+          eq(
+            dispatchedQueuedThreadMessages.queuedMessageId,
+            args.queuedMessageId,
+          ),
+          eq(dispatchedQueuedThreadMessages.threadId, args.threadId),
+        ),
+      )
+      .get() !== undefined
   );
 }
 
@@ -850,13 +1098,114 @@ export function deleteQueuedRetriesForThreadEventSuffixInTransaction(
       ),
     )
     .all();
+
   for (const retry of retries) {
     clearPreviousQueuedMessageGroupEdgeInTransaction(db, retry);
     db.delete(queuedThreadMessages)
       .where(eq(queuedThreadMessages.id, retry.id))
       .run();
   }
+
   return retries.length;
+}
+
+function hasAcceptedQueuedRetryInput(
+  db: DbQueryConnection,
+  retry: QueuedThreadMessageRow,
+): boolean {
+  const accepted = alias(events, "retry_chain_accepted");
+  const chainRequest = alias(events, "retry_chain_request");
+
+  return (
+    db
+      .select({ sequence: accepted.sequence })
+      .from(accepted)
+      .where(
+        and(
+          eq(accepted.threadId, retry.threadId),
+          eq(accepted.type, "turn/input/accepted"),
+          inArray(
+            sql`json_extract(${accepted.data}, '$.clientRequestId')`,
+            db
+              .select({
+                requestId: sql`json_extract(${chainRequest.data}, '$.requestId')`,
+              })
+              .from(chainRequest)
+              .where(
+                and(
+                  eq(chainRequest.threadId, retry.threadId),
+                  eq(chainRequest.type, "client/turn/requested"),
+                  or(
+                    sql`json_extract(${chainRequest.data}, '$.requestId') = ${retry.retryOfTurnRequestId}`,
+                    sql`json_extract(${chainRequest.data}, '$.retryOfRequestId') = ${retry.retryOfTurnRequestId}`,
+                  ),
+                ),
+              ),
+          ),
+        ),
+      )
+      .limit(1)
+      .get() !== undefined
+  );
+}
+
+export function supersedeQueuedRetriesInTransaction(
+  tx: DbTransaction,
+  args: { threadId: string; retryOfTurnRequestId: string | null },
+): number {
+  const overtaken = tx
+    .select()
+    .from(queuedThreadMessages)
+    .where(
+      and(
+        eq(queuedThreadMessages.threadId, args.threadId),
+        eq(queuedThreadMessages.payloadKind, "retry"),
+        liveQueuedThreadMessage(),
+        notSupersededQueuedThreadMessage(),
+        ...(args.retryOfTurnRequestId === null
+          ? []
+          : [
+              ne(
+                queuedThreadMessages.retryOfTurnRequestId,
+                args.retryOfTurnRequestId,
+              ),
+            ]),
+      ),
+    )
+    .all();
+
+  const now = Date.now();
+
+  for (const retry of overtaken) {
+    clearPreviousQueuedMessageGroupEdgeInTransaction(tx, retry, now);
+    clearQueuedMessageGroupEdgeInTransaction(tx, retry, now);
+
+    if (hasAcceptedQueuedRetryInput(tx, retry)) {
+      tx.delete(queuedThreadMessages)
+        .where(eq(queuedThreadMessages.id, retry.id))
+        .run();
+      continue;
+    }
+
+    tx.update(queuedThreadMessages)
+      .set({
+        waitingOn: JSON.stringify({ kind: "superseded" }),
+        waitHolder: null,
+        sendAt: null,
+        updatedAt: now,
+      })
+      .where(eq(queuedThreadMessages.id, retry.id))
+      .run();
+  }
+
+  return overtaken.length;
+}
+
+function notSupersededQueuedThreadMessage() {
+  return or(
+    isNull(queuedThreadMessages.waitingOn),
+    sql`json_extract(${queuedThreadMessages.waitingOn}, '$.kind') != 'superseded'`,
+  );
 }
 
 function manuallyStoppedQueuePauseQuery(
@@ -867,6 +1216,7 @@ function manuallyStoppedQueuePauseQuery(
   const laterInterruption = alias(events, "queue_pause_later_interruption");
   const laterRootTurnStart = alias(events, "queue_pause_later_turn_start");
   const laterTurnRequest = alias(events, "queue_pause_later_turn_request");
+
   return db
     .select({ sequence: interruption.sequence })
     .from(interruption)
@@ -925,15 +1275,17 @@ export function isThreadQueueAutoSendPaused(
   return manuallyStoppedQueuePauseQuery(db, threadId).get() !== undefined;
 }
 
-/**
- * The SQL mirror of {@link isOrdinaryTurnEndQueuedMessage}, negated: the rows
- * the manual-stop queue pause does not apply to. Kept beside the JS predicate
- * it mirrors so the two cannot drift silently.
- */
 function notOrdinaryTurnEndQueuedThreadMessage() {
   return or(
-    isNotNull(queuedThreadMessages.systemNotice),
     and(
+      isNotNull(queuedThreadMessages.systemNotice),
+      ne(
+        sql<string>`json_extract(${queuedThreadMessages.systemNotice}, '$.kind')`,
+        "external-message",
+      ),
+    ),
+    and(
+      ne(queuedThreadMessages.payloadKind, "continuation"),
       isNotNull(queuedThreadMessages.waitingOn),
       notInArray(
         sql<string>`json_extract(${queuedThreadMessages.waitingOn}, '$.kind')`,
@@ -943,14 +1295,30 @@ function notOrdinaryTurnEndQueuedThreadMessage() {
   );
 }
 
-/**
- * Threads a drain could move right now.
- *
- * `pending` is included alongside `idle`, and the environment join is a LEFT
- * join because of it: a `pending` thread has never provisioned, so it has no
- * environment row to join to, and an inner join silently dropped exactly the
- * threads whose first message is waiting to start them.
- */
+export function listReadySystemNoticesOnBusyThreads(
+  db: DbQueryConnection,
+): QueuedThreadMessageRow[] {
+  return db
+    .select({ row: queuedThreadMessages })
+    .from(queuedThreadMessages)
+    .innerJoin(threads, eq(threads.id, queuedThreadMessages.threadId))
+    .where(
+      and(
+        liveQueuedThreadMessage(),
+        isNull(queuedThreadMessages.failureReason),
+        isNotNull(queuedThreadMessages.systemNotice),
+        sql`json_extract(${queuedThreadMessages.systemNotice}, '$.kind') != 'external-message'`,
+        isNull(queuedThreadMessages.waitingOn),
+        notInArray(threads.status, ["idle", "pending"]),
+        isNull(threads.archivedAt),
+        isNull(threads.deletedAt),
+      ),
+    )
+    .orderBy(asc(queuedThreadMessages.createdAt), asc(queuedThreadMessages.id))
+    .all()
+    .map(({ row }) => row);
+}
+
 export function listIdleThreadsWithQueuedMessages(
   db: DbConnection,
 ): QueuedMessageThreadRow[] {
@@ -964,21 +1332,24 @@ export function listIdleThreadsWithQueuedMessages(
     .leftJoin(environments, eq(environments.id, threads.environmentId))
     .where(
       and(
-        inArray(threads.status, ["idle", "pending"]),
+        or(
+          inArray(threads.status, ["idle", "pending"]),
+          and(
+            eq(threads.status, "error"),
+            inArray(queuedThreadMessages.payloadKind, [
+              "continuation",
+              "retry",
+            ]),
+          ),
+        ),
         isNull(threads.archivedAt),
         isNull(threads.deletedAt),
         or(
           notExists(manuallyStoppedQueuePauseQuery(db, threads.id)),
           notOrdinaryTurnEndQueuedThreadMessage(),
         ),
-        or(
-          isNull(threads.environmentId),
-          ne(environments.status, "destroyed"),
-        ),
-        // Only rows an idle thread actually unblocks. A thread whose only
-        // queued row is waiting on a clock or a plugin is not a drain
-        // candidate, and listing it would re-run the whole send pipeline
-        // every sweep tick for a row that cannot move.
+        or(isNull(threads.environmentId), ne(environments.status, "destroyed")),
+
         drainableQueuedThreadMessage(),
       ),
     )
@@ -995,6 +1366,7 @@ function claimQueuedThreadMessageIdsInTransaction(
 
   const now = Date.now();
   const claimToken = createQueuedThreadMessageClaimToken();
+
   const updated = tx
     .update(queuedThreadMessages)
     .set({ claimedAt: now, claimToken, updatedAt: now })
@@ -1015,12 +1387,16 @@ function claimQueuedThreadMessageIdsInTransaction(
   const byId = new Map(
     updated.map((row) => [row.id, requireClaimedQueuedThreadMessage(row)]),
   );
+
   const claimedRows: ClaimedQueuedThreadMessageRow[] = [];
+
   for (const id of ids) {
     const row = byId.get(id);
+
     if (!row) return null;
     claimedRows.push(row);
   }
+
   return claimedRows;
 }
 
@@ -1032,12 +1408,7 @@ export type QueuedThreadMessageGroupClaimPolicy =
   | {
       kind: "automatic";
       isGroupEligible: QueuedThreadMessageGroupEligibility;
-      /**
-       * True only for the retry the row's own `next_attempt_at` booked. A recorded
-       * failure hides a row from every other automatic claim — otherwise the
-       * idle drain would re-run a failing send every sweep tick — and the one
-       * claim that must see through it is the retry of that failure.
-       */
+
       retryingFailure: boolean;
     }
   | { kind: "explicit-send" };
@@ -1065,18 +1436,29 @@ export function claimQueuedThreadMessageGroup(
   const claimedQueuedMessages = db.transaction(
     (tx) => {
       const existing = getQueuedThreadMessage(tx, id);
+
       if (!existing || isQueuedThreadMessageClaimed(existing)) {
         return null;
       }
 
+      if (
+        policy.kind === "automatic" &&
+        hasClaimedQueuedThreadMessages(tx, existing.threadId)
+      ) {
+        return null;
+      }
+
       const queuedMessages = listQueuedThreadMessages(tx, existing.threadId);
+
       const group =
         partitionQueuedMessageGroups(queuedMessages).find((rows) =>
           rows.some((row) => row.id === id),
         ) ?? null;
+
       if (group === null) {
         return null;
       }
+
       if (
         (policy.kind === "automatic" &&
           !isAutomaticQueuedThreadMessageGroupClaimAllowed(
@@ -1089,12 +1471,15 @@ export function claimQueuedThreadMessageGroup(
       ) {
         return null;
       }
+
       if (policy.kind === "explicit-send" && group[0]?.id !== id) {
         const now = Date.now();
         clearPreviousQueuedMessageGroupEdgeInTransaction(tx, existing, now);
         clearQueuedMessageGroupEdgeInTransaction(tx, existing, now);
+
         return claimQueuedThreadMessageIdsInTransaction(tx, [existing.id]);
       }
+
       return claimQueuedThreadMessageIdsInTransaction(
         tx,
         group.map((row) => row.id),
@@ -1108,6 +1493,7 @@ export function claimQueuedThreadMessageGroup(
       "queue-changed",
     ]);
   }
+
   return claimedQueuedMessages;
 }
 
@@ -1119,22 +1505,22 @@ export function claimNextQueuedThreadMessageGroup(
 ): ClaimedQueuedThreadMessageRow[] | null {
   const claimedQueuedMessages = db.transaction(
     (tx) => {
-      // The idle drain takes the first group whose EVERY member it may act
-      // on. A group with one waiting member is skipped whole — dispatching
-      // its drainable tail alone would split a batch the sender composed as
-      // one prompt — and skipping it does not block the independent rows
-      // behind it: the queue is a queue, not a pipeline. The one exception is
-      // a group someone is editing: the drainable rows behind it wait for the
-      // edit, so it still goes first once it is saved or cancelled.
+      if (hasClaimedQueuedThreadMessages(tx, threadId)) {
+        return null;
+      }
+
       const queuedMessages = listQueuedThreadMessages(tx, threadId);
       const pauseOrdinaryMessages = isThreadQueueAutoSendPaused(tx, threadId);
       const now = Date.now();
+
       const drainableGroups = partitionQueuedMessageGroups(
         queuedMessages,
       ).filter((rows) => rows.some(isIdleDrainableQueuedMessage));
+
       const editHeldIndex = drainableGroups.findIndex((rows) =>
         isQueuedThreadMessageGroupEditHeld(rows, now),
       );
+
       const group =
         drainableGroups
           .slice(0, editHeldIndex === -1 ? undefined : editHeldIndex)
@@ -1148,9 +1534,11 @@ export function claimNextQueuedThreadMessageGroup(
                 now,
               ),
           ) ?? null;
+
       if (group === null) {
         return null;
       }
+
       return claimQueuedThreadMessageIdsInTransaction(
         tx,
         group.map((row) => row.id),
@@ -1162,6 +1550,7 @@ export function claimNextQueuedThreadMessageGroup(
   if (claimedQueuedMessages && claimedQueuedMessages.length > 0) {
     notifier.notifyThread(threadId, ["queue-changed"]);
   }
+
   return claimedQueuedMessages;
 }
 
@@ -1175,16 +1564,16 @@ export function reorderQueuedThreadMessage({
   threadId,
 }: ReorderQueuedThreadMessageArgs): ReorderQueuedThreadMessageResult {
   let result: ReorderQueuedThreadMessageResult;
+
   try {
     result = db.transaction(
       (tx): ReorderQueuedThreadMessageResult => {
-        const movedQueuedMessage = getQueuedThreadMessage(
-          tx,
-          queuedMessageId,
-        );
+        const movedQueuedMessage = getQueuedThreadMessage(tx, queuedMessageId);
+
         if (!movedQueuedMessage || movedQueuedMessage.threadId !== threadId) {
           return { kind: "not_found" };
         }
+
         if (isQueuedThreadMessageClaimed(movedQueuedMessage)) {
           return { kind: "claimed" };
         }
@@ -1194,14 +1583,17 @@ export function reorderQueuedThreadMessage({
           neighborQueuedMessageId: previousQueuedMessageId,
           threadId,
         });
+
         const nextQueuedMessage = resolveQueuedThreadMessageNeighbor(tx, {
           movedQueuedMessageId: queuedMessageId,
           neighborQueuedMessageId: nextQueuedMessageId,
           threadId,
         });
+
         if (previousQueuedMessage === false || nextQueuedMessage === false) {
           return { kind: "stale_neighbor" };
         }
+
         if (
           previousQueuedMessage !== null &&
           nextQueuedMessage !== null &&
@@ -1212,13 +1604,17 @@ export function reorderQueuedThreadMessage({
 
         const currentQueuedMessages = listQueuedThreadMessages(tx, threadId);
         const originalLeadGroupIds = collectLeadGroupIds(currentQueuedMessages);
+
         const currentIndex = currentQueuedMessages.findIndex(
           (queuedMessage) => queuedMessage.id === queuedMessageId,
         );
+
         const currentPreviousQueuedMessageId =
           currentQueuedMessages[currentIndex - 1]?.id ?? null;
+
         const currentNextQueuedMessageId =
           currentQueuedMessages[currentIndex + 1]?.id ?? null;
+
         if (
           currentPreviousQueuedMessageId === previousQueuedMessageId &&
           currentNextQueuedMessageId === nextQueuedMessageId
@@ -1230,21 +1626,27 @@ export function reorderQueuedThreadMessage({
               threadId,
               groupBoundaryQueuedMessageId,
             );
+
             if (groupResult.kind === "not_found") {
               return { kind: "stale_neighbor" };
             }
+
             if (groupResult.kind === "claimed") {
               return { kind: "claimed" };
             }
+
             if (groupResult.kind === "stale_neighbor") {
               return { kind: "stale_neighbor" };
             }
+
             if (groupResult.kind === "invalid_sender") {
               return { kind: "invalid_sender" };
             }
+
             if (groupResult.kind === "invalid_execution_options") {
               return { kind: "invalid_execution_options" };
             }
+
             if (groupResult.kind === "updated") {
               return {
                 kind: "reordered",
@@ -1252,9 +1654,12 @@ export function reorderQueuedThreadMessage({
               };
             }
           }
+
           return {
             kind: "unchanged",
-            queuedMessages: currentQueuedMessages,
+            queuedMessages: listQueuedThreadMessages(tx, threadId, {
+              includeClaimed: true,
+            }),
           };
         }
 
@@ -1262,6 +1667,7 @@ export function reorderQueuedThreadMessage({
           previousKey: previousQueuedMessage?.sortKey ?? null,
           nextKey: nextQueuedMessage?.sortKey ?? null,
         });
+
         const updated = tx
           .update(queuedThreadMessages)
           .set({ sortKey, updatedAt: Date.now() })
@@ -1274,6 +1680,7 @@ export function reorderQueuedThreadMessage({
           )
           .returning({ id: queuedThreadMessages.id })
           .get();
+
         if (!updated) {
           return { kind: "stale_neighbor" };
         }
@@ -1285,29 +1692,35 @@ export function reorderQueuedThreadMessage({
             threadId,
             groupBoundaryQueuedMessageId,
           );
+
           if (groupResult.kind === "not_found") {
             throw new ReorderQueuedThreadMessageRollback({
               kind: "stale_neighbor",
             });
           }
+
           if (groupResult.kind === "claimed") {
             throw new ReorderQueuedThreadMessageRollback({ kind: "claimed" });
           }
+
           if (groupResult.kind === "stale_neighbor") {
             throw new ReorderQueuedThreadMessageRollback({
               kind: "stale_neighbor",
             });
           }
+
           if (groupResult.kind === "invalid_sender") {
             throw new ReorderQueuedThreadMessageRollback({
               kind: "invalid_sender",
             });
           }
+
           if (groupResult.kind === "invalid_execution_options") {
             throw new ReorderQueuedThreadMessageRollback({
               kind: "invalid_execution_options",
             });
           }
+
           if (groupResult.kind === "updated") {
             return {
               kind: "reordered",
@@ -1315,19 +1728,18 @@ export function reorderQueuedThreadMessage({
             };
           }
         } else {
-          return {
-            kind: "reordered",
-            queuedMessages: applyPreservedLeadGroupAfterReorder(
-              tx,
-              threadId,
-              originalLeadGroupIds,
-            ),
-          };
+          applyPreservedLeadGroupAfterReorder(
+            tx,
+            threadId,
+            originalLeadGroupIds,
+          );
         }
 
         return {
           kind: "reordered",
-          queuedMessages: listQueuedThreadMessages(tx, threadId),
+          queuedMessages: listQueuedThreadMessages(tx, threadId, {
+            includeClaimed: true,
+          }),
         };
       },
       { behavior: "immediate" },
@@ -1343,6 +1755,7 @@ export function reorderQueuedThreadMessage({
   if (result.kind === "reordered") {
     notifier.notifyThread(threadId, ["queue-changed"]);
   }
+
   return result;
 }
 
@@ -1367,11 +1780,11 @@ export function setQueuedThreadMessageGroupBoundary({
   if (result.kind === "updated") {
     notifier.notifyThread(threadId, ["queue-changed"]);
   }
+
   return result;
 }
 
 export interface RequeueClaimedQueuedThreadMessagesArgs {
-  /** Every row the drain claimed, lead first. */
   claims: readonly ClaimedQueuedThreadMessageMutationArgs[];
   threadId: string;
   waitingOn: QueuedMessageWaitingOn;
@@ -1384,10 +1797,13 @@ export function requeueClaimedQueuedThreadMessages(
   args: RequeueClaimedQueuedThreadMessagesArgs,
 ): QueuedThreadMessageRow | null {
   const lead = args.claims[0];
+
   if (lead === undefined) return null;
+
   const queued = db.transaction(
     (tx) => {
       const now = Date.now();
+
       for (const claim of args.claims) {
         tx.update(queuedThreadMessages)
           .set({
@@ -1409,6 +1825,7 @@ export function requeueClaimedQueuedThreadMessages(
           )
           .run();
       }
+
       return (
         tx
           .update(queuedThreadMessages)
@@ -1416,12 +1833,7 @@ export function requeueClaimedQueuedThreadMessages(
             waitingOn: JSON.stringify(args.waitingOn),
             waitHolder: waitHolderFor(args.waitingOn),
             sendAt: args.sendAt,
-            // A re-queue is a fresh, successful statement of why this row is
-            // waiting, which supersedes whatever the previous attempt failed
-            // with. Leaving a stale failure next to a current wait would show
-            // the user two contradictory explanations of the same row, and
-            // would spend the row's remaining attempts against a failure it
-            // has since got past.
+
             failureReason: null,
             failureCount: 0,
             nextAttemptAt: null,
@@ -1440,9 +1852,11 @@ export function requeueClaimedQueuedThreadMessages(
     },
     { behavior: "immediate" },
   );
+
   if (queued) {
     notifier.notifyThread(args.threadId, ["queue-changed"]);
   }
+
   return queued;
 }
 
@@ -1456,6 +1870,7 @@ export function releaseQueuedMessageClaim(
     .from(queuedThreadMessages)
     .where(eq(queuedThreadMessages.id, args.id))
     .get();
+
   if (
     !existing ||
     existing.claimedAt === null ||
@@ -1465,6 +1880,7 @@ export function releaseQueuedMessageClaim(
   }
 
   const now = Date.now();
+
   const result = db
     .update(queuedThreadMessages)
     .set({ claimedAt: null, claimToken: null, updatedAt: now })
@@ -1476,11 +1892,13 @@ export function releaseQueuedMessageClaim(
       ),
     )
     .run();
+
   if (result.changes === 0) {
     return false;
   }
 
   notifier.notifyThread(existing.threadId, ["queue-changed"]);
+
   return true;
 }
 
@@ -1490,6 +1908,7 @@ export function releaseStaleQueuedMessageClaims(
   args: ReleaseStaleQueuedMessageClaimsArgs,
 ): number {
   const protectedClaimTokens = [...args.protectedClaimTokens];
+
   const staleClaimWhere = and(
     isNotNull(queuedThreadMessages.claimedAt),
     lt(queuedThreadMessages.claimedAt, args.claimedBefore),
@@ -1502,6 +1921,7 @@ export function releaseStaleQueuedMessageClaims(
         ]
       : []),
   );
+
   const staleRows = db
     .select({
       id: queuedThreadMessages.id,
@@ -1510,11 +1930,13 @@ export function releaseStaleQueuedMessageClaims(
     .from(queuedThreadMessages)
     .where(staleClaimWhere)
     .all();
+
   if (staleRows.length === 0) {
     return 0;
   }
 
   const now = Date.now();
+
   const result = db
     .update(queuedThreadMessages)
     .set({ claimedAt: null, claimToken: null, updatedAt: now })
@@ -1534,6 +1956,7 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
 ): boolean {
   if (args.queuedMessages.length === 0) return false;
   const claimToken = args.queuedMessages[0]!.claimToken;
+
   if (
     args.queuedMessages.some(
       (queuedMessage) => queuedMessage.claimToken !== claimToken,
@@ -1543,6 +1966,7 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
   }
 
   const ids = args.queuedMessages.map((queuedMessage) => queuedMessage.id);
+
   const existingRows = db
     .select()
     .from(queuedThreadMessages)
@@ -1553,6 +1977,7 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
       ),
     )
     .all();
+
   if (existingRows.length !== ids.length) {
     return false;
   }
@@ -1567,17 +1992,22 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
     )
     .returning({ id: queuedThreadMessages.id })
     .all();
+
   if (deletedRows.length !== ids.length) {
     return false;
   }
 
   const removingIds = new Set(ids);
   const now = Date.now();
+
+  recordDispatchedQueuedThreadMessages(db, existingRows, now);
+
   for (const existing of existingRows) {
     const previousQueuedMessage = getPreviousUnclaimedQueuedThreadMessage(
       db,
       existing,
     );
+
     if (
       previousQueuedMessage &&
       !removingIds.has(previousQueuedMessage.id) &&
@@ -1589,15 +2019,10 @@ export function deleteClaimedQueuedThreadMessageBatchInTransaction(
         .run();
     }
   }
+
   return true;
 }
 
-/**
- * A row is live while no drain worker holds it. Queueing, re-queueing and
- * clearing a wait are all lost updates against a row that is already being
- * dispatched, so every wait mutation is gated on liveness in the same
- * statement that performs it.
- */
 function liveQueuedThreadMessage() {
   return and(
     isNull(queuedThreadMessages.claimedAt),
@@ -1612,20 +2037,6 @@ function automaticallyDrainableQueuedThreadMessage() {
   );
 }
 
-/**
- * Rows the IDLE drain may claim: a row with no wait at all, or one waiting
- * on the thread being busy or its turn starting — waits an idle thread
- * clears.
- *
- * Every other wait belongs to a different drain and must be invisible here, or
- * the idle sweep would dispatch a message scheduled for 9am the moment the
- * thread went quiet. That is also why an ineligible row does not BLOCK the
- * ones behind it: the queue is a queue, not a pipeline, so a row queued
- * on a plugin for an hour is overtaken by the follow-up the user sent after
- * it rather than stalling the whole thread. Plain queued rows are all
- * `thread-busy`, so among themselves they keep strict FIFO order, which is
- * what makes today's queue behaviour unchanged.
- */
 function drainableQueuedThreadMessage() {
   return and(
     automaticallyDrainableQueuedThreadMessage(),
@@ -1644,11 +2055,6 @@ export interface ListQueuedThreadMessagesForApiArgs {
   waitHolder?: QueuedMessageWaitHolder;
 }
 
-/**
- * The cross-thread queued-row list behind `GET /queued-messages`. Both filters
- * are genuinely absent by default: unfiltered means every live row in the
- * workspace, which is what a whole-workspace pending view asks for.
- */
 export function listQueuedThreadMessagesForApi(
   db: DbQueryConnection,
   args: ListQueuedThreadMessagesForApiArgs,
@@ -1674,58 +2080,32 @@ export function listQueuedThreadMessagesForApi(
 export interface QueuedThreadMessageCounts {
   threadId: string;
   queuedMessageCount: number;
-  /**
-   * How many of those rows last failed to dispatch. Counted in the same pass
-   * as the total because both answers come from the same rows, and the thread
-   * list needs them together: a thread with queued work shows a clock, and one
-   * whose queued work failed shows the failure instead.
-   */
+
   failedQueuedMessageCount: number;
 }
 
-/**
- * How many live rows each of these threads has queued, and how many of those
- * failed. One grouped query rather than one per thread: the thread list renders
- * a glyph per row and would otherwise issue a query per visible thread.
- *
- * Batched over the SQLite variable limit because the thread list is unbounded —
- * a workspace with tens of thousands of threads builds its sidebar from one
- * call.
- */
 export function listQueuedThreadMessageCountsByThreadIds(
   db: DbQueryConnection,
   args: { threadIds: readonly string[] },
 ): QueuedThreadMessageCounts[] {
-  return queryInSqliteVariableBatches({
-    dedupeKey: (threadId) => threadId,
-    fixedVariableCount: 0,
-    variableCountPerValue: 1,
-    values: args.threadIds,
-    queryBatch: (threadIds) =>
-      db
-        .select({
-          threadId: queuedThreadMessages.threadId,
-          queuedMessageCount: count(queuedThreadMessages.id),
-          failedQueuedMessageCount: count(queuedThreadMessages.failureReason),
-        })
-        .from(queuedThreadMessages)
-        .where(
-          and(
-            inArray(queuedThreadMessages.threadId, [...threadIds]),
-            liveQueuedThreadMessage(),
-          ),
-        )
-        .groupBy(queuedThreadMessages.threadId)
-        .all(),
-  });
+  const threadIds = [...new Set(args.threadIds)];
+
+  if (threadIds.length === 0) return [];
+
+  return db
+    .select({
+      threadId: queuedThreadMessages.threadId,
+      queuedMessageCount: count(queuedThreadMessages.id),
+      failedQueuedMessageCount: count(queuedThreadMessages.failureReason),
+    })
+    .from(queuedThreadMessages)
+    .where(
+      sql`${queuedThreadMessages.threadId} IN (SELECT value FROM json_each(${JSON.stringify(threadIds)}))`,
+    )
+    .groupBy(queuedThreadMessages.threadId)
+    .all();
 }
 
-/**
- * The single place `wait_holder` is derived from `waiting_on`. Keeping it here
- * — rather than letting callers pass a holder — is what makes the
- * denormalization safe: the two columns are always written together, from the
- * same value.
- */
 function waitHolderFor(
   waitingOn: QueuedMessageWaitingOn,
 ): QueuedMessageWaitHolder | null {
@@ -1738,17 +2118,14 @@ export interface SetQueuedThreadMessageWaitingOnArgs {
   id: string;
   threadId: string;
   waitingOn: QueuedMessageWaitingOn;
-  /**
-   * The row's scheduled instant. Passed on every call rather than left alone,
-   * because a re-queue is a fresh statement of when this row may run: a
-   * `time` wait sets it, and every other wait kind clears it by passing null.
-   */
+
   sendAt: number | null;
 }
 
 export interface ClearQueuedThreadMessageWaitingOnArgs {
   id: string;
   threadId: string;
+  retainSendAt?: number;
 }
 
 export interface ListQueuedThreadMessagesWaitingOnKindArgs {
@@ -1756,10 +2133,6 @@ export interface ListQueuedThreadMessagesWaitingOnKindArgs {
   threadId: string;
 }
 
-/**
- * Queue a live row on a typed wait. Returns the updated row, or null when the
- * row is gone, belongs to another thread, or has already been claimed.
- */
 export function setQueuedThreadMessageWaitingOn(
   db: DbConnection,
   notifier: DbNotifier,
@@ -1772,12 +2145,7 @@ export function setQueuedThreadMessageWaitingOn(
         waitingOn: JSON.stringify(args.waitingOn),
         waitHolder: waitHolderFor(args.waitingOn),
         sendAt: args.sendAt,
-        // Same rule as `requeueClaimedQueuedThreadMessages`: any fresh,
-        // successful statement of why this row is waiting supersedes whatever
-        // a previous attempt failed with. Leaving a stale failure beside a
-        // current wait would show the reader two contradictory explanations of
-        // one row, and would spend the row's remaining attempts against a
-        // failure it has since got past.
+
         failureReason: null,
         failureCount: 0,
         nextAttemptAt: null,
@@ -1796,6 +2164,7 @@ export function setQueuedThreadMessageWaitingOn(
   if (updated) {
     notifier.notifyThread(args.threadId, ["queue-changed"]);
   }
+
   return updated;
 }
 
@@ -1804,30 +2173,10 @@ export interface SetQueuedThreadMessageFailureReasonArgs {
   threadId: string;
   failureReason: string;
   now: number;
-  /**
-   * How long to wait before each further automatic attempt, indexed by the
-   * failures already recorded. Running off the end is what makes a failure
-   * terminal, so the caller decides how many attempts a row gets and how far
-   * apart — the policy is the server's, the counting is this row's.
-   */
+
   retryDelaysMs: readonly number[];
 }
 
-/**
- * Records why a drain attempt on this row failed outright.
- *
- * Only the drain writes this: an inline attempt has a caller still listening
- * and reports to them instead. The row's wait is deliberately untouched — it
- * is still waiting on whatever it was waiting on, and the failure is a separate
- * fact about the last attempt rather than a new reason to wait. A later
- * successful re-queue clears it (see `requeueClaimedQueuedThreadMessages`).
- *
- * Recording a failure also spends one of the row's attempts and books the next
- * one. What failed a dispatch is usually a condition with an end — a provider
- * whose plugin is still loading, a workspace mid-rebuild — so the row is owed
- * another try before anybody is asked to look at it. It is terminal only once
- * `retryDelaysMs` runs out, which is the state `next_attempt_at` NULL records.
- */
 export function setQueuedThreadMessageFailureReason(
   db: DbConnection,
   notifier: DbNotifier,
@@ -1836,6 +2185,7 @@ export function setQueuedThreadMessageFailureReason(
   const updated = db.transaction(
     (tx): QueuedThreadMessageRow | null => {
       const existing = getQueuedThreadMessage(tx, args.id);
+
       if (
         !existing ||
         existing.threadId !== args.threadId ||
@@ -1843,8 +2193,10 @@ export function setQueuedThreadMessageFailureReason(
       ) {
         return null;
       }
+
       const failureCount = existing.failureCount + 1;
       const delayMs = args.retryDelaysMs[failureCount - 1];
+
       return (
         tx
           .update(queuedThreadMessages)
@@ -1871,19 +2223,10 @@ export function setQueuedThreadMessageFailureReason(
   if (updated) {
     notifier.notifyThread(args.threadId, ["queue-changed"]);
   }
+
   return updated;
 }
 
-/**
- * Every live row whose booked retry has come due, oldest first.
- *
- * Deliberately not filtered by wait: the retry is not the wait's wake firing
- * again, it is core re-asking the whole question from scratch, which is the
- * only thing that can move a row whose wait went stale while it sat failed
- * (a `host-offline` row whose host came back during the failure, say). Rows
- * on archived or deleted threads are excluded for the same reason the due
- * sweep excludes them: nobody is waiting for those to send.
- */
 export function listRetryableFailedQueuedThreadMessages(
   db: DbQueryConnection,
   now: number,
@@ -1911,15 +2254,13 @@ export function listRetryableFailedQueuedThreadMessages(
         ),
       ),
     )
-    .orderBy(asc(queuedThreadMessages.nextAttemptAt), asc(queuedThreadMessages.id))
+    .orderBy(
+      asc(queuedThreadMessages.nextAttemptAt),
+      asc(queuedThreadMessages.id),
+    )
     .all();
 }
 
-/**
- * Drop a live row's wait, leaving it an ordinary queued row eligible at the
- * next drain. `sendAt` is cleared with it: a row with no wait is not waiting
- * for a clock either.
- */
 export function clearQueuedThreadMessageWaitingOn(
   db: DbConnection,
   notifier: DbNotifier,
@@ -1929,9 +2270,12 @@ export function clearQueuedThreadMessageWaitingOn(
     db
       .update(queuedThreadMessages)
       .set({
-        waitingOn: null,
+        waitingOn:
+          args.retainSendAt === undefined
+            ? null
+            : JSON.stringify({ kind: "time" }),
         waitHolder: null,
-        sendAt: null,
+        sendAt: args.retainSendAt ?? null,
         updatedAt: Date.now(),
       })
       .where(
@@ -1947,21 +2291,10 @@ export function clearQueuedThreadMessageWaitingOn(
   if (updated) {
     notifier.notifyThread(args.threadId, ["queue-changed"]);
   }
+
   return updated;
 }
 
-/**
- * Rows whose scheduled instant has arrived and that a drain may act on now,
- * oldest-due first. Threads that are archived or deleted are excluded here
- * rather than by the caller, so a scheduled send into a thread the user threw
- * away never wakes the sweep every cycle (the #1789 shape).
- *
- * The thread check is a correlated EXISTS rather than a join on purpose. A
- * join lets SQLite drive from `threads` — scanning every live thread to find
- * the few with a due row — which throws away the partial due index entirely.
- * EXISTS forces the queue table to be the outer loop, so the sweep costs one
- * index range scan plus a primary-key probe per hit.
- */
 export function listDueScheduledQueuedThreadMessages(
   db: DbQueryConnection,
   now: number,
@@ -1992,17 +2325,6 @@ export function listDueScheduledQueuedThreadMessages(
     .all();
 }
 
-/**
- * Every live row a given wait owner holds, in queue order. Asked when one
- * plugin's waits must be cleared at once, on its disable or uninstall —
- * clearing by holder is what `wait_holder`'s indexed equality lookup exists
- * for.
- *
- * Ordered by `createdAt` for the same reason as
- * {@link listQueuedThreadMessagesWithPluginWait}: `id` is a random suffix, so
- * it sorts nothing, and one holder's rows span threads so `sortKey` alone
- * cannot order them either.
- */
 export function listQueuedThreadMessagesByWaitHolder(
   db: DbQueryConnection,
   waitHolder: QueuedMessageWaitHolder,
@@ -2024,33 +2346,12 @@ export function listQueuedThreadMessagesByWaitHolder(
     .all();
 }
 
-/** The columns the plugin-wait walkers act on; see the query below. */
 export interface QueuedThreadMessagePluginWaitRef {
   id: string;
   threadId: string;
   waitHolder: QueuedMessageWaitHolder;
 }
 
-/**
- * Every live row on SOME plugin's wait, across every thread, in queue order.
- *
- * The orphan sweep asks this once per tick and then filters by which plugins
- * are loaded, rather than asking per plugin: the set of holders is not known
- * up front (it is whichever plugins happen to be holding something), and the
- * partial wait index covers exactly these rows, so one range scan answers it.
- *
- * Deliberately a projection, not full rows: both walkers only clear waits or
- * re-attempt by id, so returning prompt bodies here would ship every held
- * message's content on a ten-second timer for nothing.
- *
- * Ordered by `createdAt` and NOT by `id`: row ids are random suffixes, so
- * sorting by them is sorting by nothing. It matters because the requested
- * drain re-offers these rows to the dispatch hook in this order, and a full
- * pool is supposed to drain in the order it filled. `sortKey` cannot do the
- * job either — its fractional keys are seeded per thread, so they order a
- * thread's own rows and are meaningless between threads; it breaks a
- * same-millisecond tie within one thread, and `id` makes the sort total.
- */
 export function listQueuedThreadMessagePluginWaitRefs(
   db: DbQueryConnection,
 ): QueuedThreadMessagePluginWaitRef[] {
@@ -2078,12 +2379,6 @@ export function listQueuedThreadMessagePluginWaitRefs(
     );
 }
 
-/**
- * A thread's live rows on one kind of wait, in queue order. Read
- * straight out of the stored JSON so the kind has exactly one home; the
- * thread predicate is what makes this selective, so no index on the extracted
- * kind is warranted.
- */
 export function listQueuedThreadMessagesWaitingOnKind(
   db: DbQueryConnection,
   args: ListQueuedThreadMessagesWaitingOnKindArgs,
@@ -2102,15 +2397,6 @@ export function listQueuedThreadMessagesWaitingOnKind(
     .all();
 }
 
-/**
- * Whether a retry of this original turn request already exists on the queue.
- *
- * Claimed rows count on purpose: a retry a drain has claimed and is deciding
- * about is as live as a waiting one, and the window between its claim and its
- * dispatch is exactly when a second retry of the same turn would otherwise
- * slip past. Targeted on the retry column rather than loading the thread's
- * rows to inspect their payloads.
- */
 export function hasQueuedRetryOfTurnRequest(
   db: DbQueryConnection,
   args: { threadId: string; retryOfTurnRequestId: string },
@@ -2133,14 +2419,27 @@ export function hasQueuedRetryOfTurnRequest(
   );
 }
 
-/**
- * Threads on one host with live rows parked on a `host-offline` wait.
- *
- * Joined through the thread's environment by host ID rather than matched on
- * the wait's stored `hostName`: the name on the wait is display text captured
- * at failure time, and a renamed host would orphan every row that matched on
- * it.
- */
+export function getQueuedThreadContinuation(
+  db: DbQueryConnection,
+  threadId: string,
+): QueuedThreadMessageRow | null {
+  return (
+    db
+      .select()
+      .from(queuedThreadMessages)
+      .where(
+        and(
+          eq(queuedThreadMessages.threadId, threadId),
+          inArray(queuedThreadMessages.payloadKind, ["retry", "continuation"]),
+          notSupersededQueuedThreadMessage(),
+        ),
+      )
+      .orderBy(asc(queuedThreadMessages.sortKey), asc(queuedThreadMessages.id))
+      .limit(1)
+      .get() ?? null
+  );
+}
+
 export function listThreadIdsWithHostOfflineQueueWaits(
   db: DbQueryConnection,
   hostId: string,
@@ -2163,24 +2462,194 @@ export function listThreadIdsWithHostOfflineQueueWaits(
     .map((row) => row.threadId);
 }
 
+export function listThreadIdsWithHostAwayQueueWaits(
+  db: DbQueryConnection,
+): string[] {
+  return db
+    .selectDistinct({ threadId: queuedThreadMessages.threadId })
+    .from(queuedThreadMessages)
+    .innerJoin(threads, eq(threads.id, queuedThreadMessages.threadId))
+    .where(
+      and(
+        isNull(threads.archivedAt),
+        isNull(threads.deletedAt),
+        sql`json_extract(${queuedThreadMessages.waitingOn}, '$.kind') = 'host-away'`,
+        automaticallyDrainableQueuedThreadMessage(),
+      ),
+    )
+    .all()
+    .map((row) => row.threadId);
+}
+
+export function listThreadIdsWithServerUpdateQueueWaits(
+  db: DbQueryConnection,
+): string[] {
+  return db
+    .selectDistinct({ threadId: queuedThreadMessages.threadId })
+    .from(queuedThreadMessages)
+    .innerJoin(threads, eq(threads.id, queuedThreadMessages.threadId))
+    .where(
+      and(
+        isNull(threads.archivedAt),
+        isNull(threads.deletedAt),
+        sql`json_extract(${queuedThreadMessages.waitingOn}, '$.kind') = 'server-update'`,
+        automaticallyDrainableQueuedThreadMessage(),
+      ),
+    )
+    .all()
+    .map((row) => row.threadId);
+}
+
+export interface DeletedQueuedThreadMessage {
+  row: QueuedThreadMessageRow;
+  previousGroupedQueuedMessageId: string | null;
+  nextQueuedMessageId: string | null;
+}
+
+export type RestoreDeletedQueuedThreadMessageResult =
+  | { kind: "restored"; queuedMessage: QueuedThreadMessageRow }
+  | { kind: "exists" }
+  | { kind: "thread_not_found" };
+
+function getNextUnclaimedQueuedThreadMessage(
+  db: DbQueryConnection,
+  queuedMessage: QueuedThreadMessageRow,
+): QueuedThreadMessageRow | null {
+  return (
+    db
+      .select()
+      .from(queuedThreadMessages)
+      .where(
+        and(
+          eq(queuedThreadMessages.threadId, queuedMessage.threadId),
+          isNull(queuedThreadMessages.claimedAt),
+          isNull(queuedThreadMessages.claimToken),
+          or(
+            gt(queuedThreadMessages.sortKey, queuedMessage.sortKey),
+            and(
+              eq(queuedThreadMessages.sortKey, queuedMessage.sortKey),
+              gt(queuedThreadMessages.id, queuedMessage.id),
+            ),
+          ),
+        ),
+      )
+      .orderBy(asc(queuedThreadMessages.sortKey), asc(queuedThreadMessages.id))
+      .limit(1)
+      .get() ?? null
+  );
+}
+
 export function deleteQueuedThreadMessage(
   db: DbConnection,
   notifier: DbNotifier,
   id: string,
-) {
-  const existing = db.transaction(
-    (tx) => {
+): DeletedQueuedThreadMessage | null {
+  const deleted = db.transaction(
+    (tx): DeletedQueuedThreadMessage | null => {
       const existing = getQueuedThreadMessage(tx, id);
+
       if (!existing) return null;
+
+      const previous = getPreviousUnclaimedQueuedThreadMessage(tx, existing);
+      const next = getNextUnclaimedQueuedThreadMessage(tx, existing);
       clearPreviousQueuedMessageGroupEdgeInTransaction(tx, existing);
       tx.delete(queuedThreadMessages)
         .where(eq(queuedThreadMessages.id, id))
         .run();
-      return existing;
+
+      return {
+        row: existing,
+        previousGroupedQueuedMessageId: previous?.groupWithNext
+          ? previous.id
+          : null,
+        nextQueuedMessageId: next?.id ?? null,
+      };
     },
     { behavior: "immediate" },
   );
-  if (!existing) return false;
-  notifier.notifyThread(existing.threadId, ["queue-changed"]);
-  return true;
+
+  if (!deleted) return null;
+  notifier.notifyThread(deleted.row.threadId, ["queue-changed"]);
+
+  return deleted;
+}
+
+export function restoreDeletedQueuedThreadMessage(
+  db: DbConnection,
+  notifier: DbNotifier,
+  deleted: DeletedQueuedThreadMessage,
+): RestoreDeletedQueuedThreadMessageResult {
+  const { row } = deleted;
+
+  const result = db.transaction(
+    (tx): RestoreDeletedQueuedThreadMessageResult => {
+      if (getQueuedThreadMessage(tx, row.id)) return { kind: "exists" };
+
+      const thread = tx
+        .select({ id: threads.id })
+        .from(threads)
+        .where(eq(threads.id, row.threadId))
+        .get();
+
+      if (!thread) return { kind: "thread_not_found" };
+
+      const now = Date.now();
+
+      const inserted = tx
+        .insert(queuedThreadMessages)
+        .values({
+          ...row,
+          groupWithNext: false,
+          claimedAt: null,
+          claimToken: null,
+          editHeldUntil: null,
+          updatedAt: Math.max(now, row.updatedAt + 1),
+        })
+        .returning()
+        .get();
+
+      const previous = getPreviousUnclaimedQueuedThreadMessage(tx, inserted);
+
+      if (
+        previous !== null &&
+        previous.id === deleted.previousGroupedQueuedMessageId &&
+        !previous.groupWithNext &&
+        queuedMessageGroupingEnvelopeMatches(previous, inserted)
+      ) {
+        tx.update(queuedThreadMessages)
+          .set({ groupWithNext: true, updatedAt: now })
+          .where(eq(queuedThreadMessages.id, previous.id))
+          .run();
+      }
+
+      const next = row.groupWithNext
+        ? getNextUnclaimedQueuedThreadMessage(tx, inserted)
+        : null;
+
+      if (
+        next !== null &&
+        next.id === deleted.nextQueuedMessageId &&
+        queuedMessageGroupingEnvelopeMatches(inserted, next)
+      ) {
+        return {
+          kind: "restored",
+          queuedMessage: tx
+            .update(queuedThreadMessages)
+            .set({ groupWithNext: true })
+            .where(eq(queuedThreadMessages.id, inserted.id))
+            .returning()
+            .get(),
+        };
+      }
+
+      return { kind: "restored", queuedMessage: inserted };
+    },
+    { behavior: "immediate" },
+  );
+
+  if (result.kind === "restored") {
+    notifier.notifyThread(row.threadId, ["queue-changed"]);
+  }
+
+  return result;
 }

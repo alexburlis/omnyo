@@ -38,11 +38,14 @@ export function readMermaidRenderCache(
   key: string,
 ): RenderedMermaidDiagram | null {
   const cached = renderCache.get(key);
+
   if (cached === undefined) {
     return null;
   }
+
   renderCache.delete(key);
   renderCache.set(key, cached);
+
   return cached;
 }
 
@@ -52,11 +55,14 @@ export function storeMermaidRenderCache(
 ): void {
   renderCache.delete(key);
   renderCache.set(key, diagram);
+
   while (renderCache.size > MERMAID_RENDER_CACHE_LIMIT) {
     const oldestKey = renderCache.keys().next().value;
+
     if (oldestKey === undefined) {
       break;
     }
+
     renderCache.delete(oldestKey);
   }
 }
@@ -72,6 +78,7 @@ export function getMermaidRenderCacheSize(): number {
 type ViewportEntryCallback = () => void;
 
 let sharedViewportObserver: IntersectionObserver | null = null;
+
 const viewportEntryCallbacks = new Map<Element, ViewportEntryCallback>();
 
 function getSharedViewportObserver(): IntersectionObserver {
@@ -81,18 +88,23 @@ function getSharedViewportObserver(): IntersectionObserver {
         if (!entry.isIntersecting) {
           continue;
         }
+
         const callback = viewportEntryCallbacks.get(entry.target);
+
         if (callback === undefined) {
           continue;
         }
+
         viewportEntryCallbacks.delete(entry.target);
         sharedViewportObserver?.unobserve(entry.target);
         callback();
       }
+
       releaseSharedViewportObserverIfIdle();
     },
     { rootMargin: MERMAID_VIEWPORT_ROOT_MARGIN },
   );
+
   return sharedViewportObserver;
 }
 
@@ -109,14 +121,18 @@ export function observeMermaidViewportEntry(
 ): () => void {
   if (typeof IntersectionObserver === "undefined") {
     onEnter();
+
     return () => {};
   }
+
   viewportEntryCallbacks.set(element, onEnter);
   getSharedViewportObserver().observe(element);
+
   return () => {
     if (viewportEntryCallbacks.delete(element)) {
       sharedViewportObserver?.unobserve(element);
     }
+
     releaseSharedViewportObserverIfIdle();
   };
 }

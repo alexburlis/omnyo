@@ -10,12 +10,32 @@ const ReasoningExpansionContext = createContext<Map<string, boolean> | null>(
   null,
 );
 
+const sessionOverridesByThread = new Map<string, Map<string, boolean>>();
+
+function sessionOverridesForThread(
+  threadId: string | undefined,
+): Map<string, boolean> {
+  if (threadId === undefined) return new Map();
+
+  const existing = sessionOverridesByThread.get(threadId);
+
+  if (existing) return existing;
+
+  const created = new Map<string, boolean>();
+  sessionOverridesByThread.set(threadId, created);
+
+  return created;
+}
+
 export function TimelineReasoningExpansionProvider({
   children,
+  threadId,
 }: {
   children: ReactNode;
+  threadId?: string;
 }) {
-  const [overrides] = useState(() => new Map<string, boolean>());
+  const [overrides] = useState(() => sessionOverridesForThread(threadId));
+
   return (
     <ReasoningExpansionContext.Provider value={overrides}>
       {children}
@@ -25,9 +45,11 @@ export function TimelineReasoningExpansionProvider({
 
 export function useTimelineReasoningExpansion(key: string | undefined) {
   const overrides = useContext(ReasoningExpansionContext);
+
   const [expanded, setExpanded] = useState<boolean | null>(() =>
     key === undefined ? null : (overrides?.get(key) ?? null),
   );
+
   const setOverride = useCallback(
     (value: boolean) => {
       if (key !== undefined) overrides?.set(key, value);
@@ -35,5 +57,6 @@ export function useTimelineReasoningExpansion(key: string | undefined) {
     },
     [key, overrides],
   );
+
   return [expanded, setOverride] as const;
 }

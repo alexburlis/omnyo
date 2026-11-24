@@ -2,11 +2,12 @@ import type { QueryClient } from "@tanstack/react-query";
 import type {
   ProviderCliInstallActionKind,
   ProviderCliInstallEvent,
+  ProviderCliInstallPhase,
   ProviderCliKey,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { ProviderCliInstallLogDialogState } from "@/components/dialogs/ProviderCliInstallLogDialog";
 import type { ProviderCliActionableIssue } from "@/components/provider-cli/provider-cli-install";
-import { BbRequestTimeoutError } from "@bb/sdk/browser";
+import { OmnyoRequestTimeoutError } from "@omnyo/sdk/browser";
 import { appToast } from "@/components/ui/app-toast";
 import { invalidateHostProviderCliStatus } from "@/hooks/cache-owners/provider-cli-status-cache-owner";
 import { invalidateSystemExecutionOptions } from "@/hooks/cache-owners/system-cache-effects";
@@ -19,10 +20,24 @@ type ProviderCliInstallCompletedEvent = Extract<
 >;
 
 type ProviderCliTitlePhase = "failure" | "log";
+
 type ProviderCliTitleTemplate = (displayName: string) => string;
 
 export const PROVIDER_CLI_FAILURE_LOG_MAX_BYTES = 128 * 1024;
+
 export const PROVIDER_CLI_FAILURE_MAX_ENTRIES = 32;
+
+export const PROVIDER_CLI_INSTALL_PHASE_LABELS: Record<
+  ProviderCliInstallPhase,
+  string
+> = {
+  pausing: "Pausing chats",
+  "waiting-for-host": "Waiting for machine",
+  installing: "Updating CLI",
+  verifying: "Checking version",
+  resuming: "Resuming chats",
+};
+
 const PROVIDER_CLI_FAILURE_LOG_TRUNCATION_MARKER =
   "\n\n… provider update output truncated …\n\n";
 
@@ -49,6 +64,7 @@ export interface ProviderCliInstallFailure {
 
 interface ProviderCliInstallSnapshot {
   runningJobKey: string | null;
+  runningPhase: ProviderCliInstallPhase | null;
   queuedJobKeys: ReadonlySet<string>;
   logDialogState: ProviderCliInstallLogDialogState | null;
   failuresByJobKey: ReadonlyMap<string, ProviderCliInstallFailure>;
@@ -69,6 +85,7 @@ const PROVIDER_CLI_TITLE_TEMPLATES = {
 >;
 
 const EMPTY_QUEUED_JOB_KEYS: ReadonlySet<string> = new Set();
+
 const EMPTY_FAILURES_BY_JOB_KEY: ReadonlyMap<
   string,
   ProviderCliInstallFailure
@@ -76,18 +93,23 @@ const EMPTY_FAILURES_BY_JOB_KEY: ReadonlyMap<
 
 const INITIAL_SNAPSHOT: ProviderCliInstallSnapshot = {
   runningJobKey: null,
+  runningPhase: null,
   queuedJobKeys: EMPTY_QUEUED_JOB_KEYS,
   logDialogState: null,
   failuresByJobKey: EMPTY_FAILURES_BY_JOB_KEY,
 };
 
 let snapshot: ProviderCliInstallSnapshot = INITIAL_SNAPSHOT;
+
 let queuedJobs: ProviderCliInstallJob[] = [];
+
 let queryClient: QueryClient | null = null;
+
 const listeners = new Set<() => void>();
 
 function setSnapshot(patch: Partial<ProviderCliInstallSnapshot>): void {
   snapshot = { ...snapshot, ...patch };
+
   for (const listener of listeners) {
     listener();
   }
@@ -102,6 +124,7 @@ export function providerCliJobKey(
 
 export function subscribeProviderCliInstalls(listener: () => void): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };
@@ -131,12 +154,15 @@ function setQueuedJobKey(jobKey: string, queued: boolean): void {
   if (queued === snapshot.queuedJobKeys.has(jobKey)) {
     return;
   }
+
   const next = new Set(snapshot.queuedJobKeys);
+
   if (queued) {
     next.add(jobKey);
   } else {
     next.delete(jobKey);
   }
+
   setSnapshot({ queuedJobKeys: next });
 }
 
@@ -144,6 +170,7 @@ function exitDescription(event: ProviderCliInstallCompletedEvent): string {
   if (event.exitCode !== null) {
     return `Command exited with code ${event.exitCode}`;
   }
+
   return `Command exited after signal ${event.signal ?? "unknown"}`;
 }
 
@@ -154,22 +181,28 @@ const CONNECTION_LOST_HTTP_STATUSES: ReadonlySet<number> = new Set([
 function describeInstallRequestFailure(error: unknown): {
   kind: ProviderCliInstallFailureKind;
   message: string;
+  code: string | null;
 } {
   const httpError = asHttpError(error);
+
   const connectionLost =
     httpError === null
-      ? error instanceof TypeError || error instanceof BbRequestTimeoutError
+      ? error instanceof TypeError || error instanceof OmnyoRequestTimeoutError
       : CONNECTION_LOST_HTTP_STATUSES.has(httpError.status);
+
   if (connectionLost) {
     return {
       kind: "interrupted",
       message: PROVIDER_CLI_FAILURE_SUMMARIES.interrupted,
+      code: httpError?.code ?? "provider_update_connection_lost",
     };
   }
+
   const message =
     (httpError === null ? null : getHttpErrorMessage(httpError)) ??
     (error instanceof Error ? error.message : String(error));
-  return { kind: "command", message };
+
+  return { kind: "command", message, code: httpError?.code ?? null };
 }
 
 function getProviderCliTitle(args: {
@@ -184,6 +217,7 @@ function getProviderCliTitle(args: {
 function truncateProviderCliFailureLog(log: string): string {
   const encoder = new TextEncoder();
   const encodedLog = encoder.encode(log);
+
   if (encodedLog.byteLength <= PROVIDER_CLI_FAILURE_LOG_MAX_BYTES) {
     return log;
   }
@@ -191,16 +225,21 @@ function truncateProviderCliFailureLog(log: string): string {
   const encodedMarker = encoder.encode(
     PROVIDER_CLI_FAILURE_LOG_TRUNCATION_MARKER,
   );
+
   const outputBudget =
     PROVIDER_CLI_FAILURE_LOG_MAX_BYTES - encodedMarker.byteLength;
+
   const headBudget = Math.floor(outputBudget / 2);
   const tailBudget = outputBudget - headBudget;
+
   const head = new TextDecoder()
     .decode(encodedLog.slice(0, headBudget))
     .replace(/\uFFFD$/u, "");
+
   const tail = new TextDecoder()
     .decode(encodedLog.slice(-tailBudget))
     .replace(/^\uFFFD/u, "");
+
   return `${head}${PROVIDER_CLI_FAILURE_LOG_TRUNCATION_MARKER}${tail}`;
 }
 
@@ -211,13 +250,17 @@ function setProviderCliInstallFailure(args: {
   const failuresByJobKey = new Map(snapshot.failuresByJobKey);
   failuresByJobKey.delete(args.jobKey);
   failuresByJobKey.set(args.jobKey, args.failure);
+
   while (failuresByJobKey.size > PROVIDER_CLI_FAILURE_MAX_ENTRIES) {
     const oldest = failuresByJobKey.keys().next();
+
     if (oldest.done) {
       break;
     }
+
     failuresByJobKey.delete(oldest.value);
   }
+
   setSnapshot({ failuresByJobKey });
 }
 
@@ -228,13 +271,16 @@ function showProviderCliInstallFailureToast(args: {
   log: string;
   message: string;
   toastId: string;
+  code?: string | null;
 }): void {
   const logDialogState: ProviderCliInstallLogDialogState = {
     displayName: args.issue.status.displayName,
     log: truncateProviderCliFailureLog(args.log),
     message: args.message,
     title: getProviderCliTitle({ issue: args.issue, phase: "log" }),
+    code: args.code ?? null,
   };
+
   setProviderCliInstallFailure({
     jobKey: args.jobKey,
     failure: {
@@ -261,19 +307,31 @@ function runInstall(job: ProviderCliInstallJob): void {
 
   const failuresByJobKey = new Map(snapshot.failuresByJobKey);
   failuresByJobKey.delete(jobKey);
-  setSnapshot({ failuresByJobKey, runningJobKey: jobKey });
+  setSnapshot({ failuresByJobKey, runningJobKey: jobKey, runningPhase: null });
   const failureToastId = `provider-cli-install-failure:${jobKey}`;
   let installLogChunks = [`$ ${action.command}\n`];
   let completedEvent: ProviderCliInstallCompletedEvent | null = null;
   let errorMessage: string | null = null;
+  let errorCode: string | null = null;
 
   void sdk.hosts
-    .installProviderCli({ hostId, provider, actionKind: action.kind })
+    .installProviderCli({
+      hostId,
+      provider,
+      actionKind: action.kind,
+      confirmInterruptingThreads: action.kind === "update",
+      onEvent: (event) => {
+        if (event.provider === provider && event.type === "progress") {
+          setSnapshot({ runningPhase: event.phase });
+        }
+      },
+    })
     .then((events) => {
       for (const event of events) {
         if (event.provider !== provider) {
           continue;
         }
+
         switch (event.type) {
           case "started":
             installLogChunks = [`$ ${event.command}\n`];
@@ -282,13 +340,17 @@ function runInstall(job: ProviderCliInstallJob): void {
             if (event.text.length > 0) {
               installLogChunks.push(event.text);
             }
+
             break;
           case "completed":
             completedEvent = event;
             break;
           case "error":
             errorMessage = event.message;
+            errorCode = event.code ?? null;
             installLogChunks.push(`\n${event.message}\n`);
+            break;
+          case "progress":
             break;
         }
       }
@@ -298,6 +360,7 @@ function runInstall(job: ProviderCliInstallJob): void {
           void invalidateHostProviderCliStatus({ queryClient, hostId });
           void invalidateSystemExecutionOptions({ queryClient, hostId });
         }
+
         return;
       }
 
@@ -306,12 +369,14 @@ function runInstall(job: ProviderCliInstallJob): void {
         (completedEvent
           ? exitDescription(completedEvent)
           : "Command finished without reporting success.");
+
       showProviderCliInstallFailureToast({
         jobKey,
         issue,
         kind: "command",
         log: installLogChunks.join(""),
         message: failureMessage,
+        code: errorCode,
         toastId: failureToastId,
       });
     })
@@ -328,8 +393,9 @@ function runInstall(job: ProviderCliInstallJob): void {
     })
     .finally(() => {
       if (snapshot.runningJobKey === jobKey) {
-        setSnapshot({ runningJobKey: null });
+        setSnapshot({ runningJobKey: null, runningPhase: null });
       }
+
       processNextInstall();
     });
 }
@@ -338,10 +404,13 @@ function processNextInstall(): void {
   if (snapshot.runningJobKey !== null) {
     return;
   }
+
   const nextJob = queuedJobs.shift();
+
   if (nextJob === undefined) {
     return;
   }
+
   setQueuedJobKey(
     providerCliJobKey(nextJob.hostId, nextJob.issue.provider),
     false,
@@ -351,9 +420,11 @@ function processNextInstall(): void {
 
 export function startProviderCliInstall(job: ProviderCliInstallJob): void {
   const jobKey = providerCliJobKey(job.hostId, job.issue.provider);
+
   if (snapshot.runningJobKey === jobKey) {
     return;
   }
+
   if (
     queuedJobs.some(
       (queued) =>
@@ -362,9 +433,11 @@ export function startProviderCliInstall(job: ProviderCliInstallJob): void {
   ) {
     return;
   }
+
   if (snapshot.runningJobKey !== null) {
     queuedJobs.push(job);
     setQueuedJobKey(jobKey, true);
+
     return;
   }
 

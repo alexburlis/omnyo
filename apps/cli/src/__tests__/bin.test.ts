@@ -15,18 +15,20 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
+
 const testDir = dirname(fileURLToPath(import.meta.url));
+
 const repoRoot = resolve(testDir, "..", "..", "..", "..");
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/gu, "'\\''")}'`;
 }
 
-describe("bb bin wrapper", () => {
+describe("omnyo bin wrapper", () => {
   let tempRoot: string;
 
   beforeEach(async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "bb-cli-bin-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "omnyo-cli-bin-"));
   });
 
   afterEach(async () => {
@@ -39,13 +41,14 @@ describe("bb bin wrapper", () => {
     await mkdir(fakeBinDir, { recursive: true });
     await writeFile(
       join(fakeRepoRoot, "package.json"),
-      JSON.stringify({ name: "bb", private: true }),
+      JSON.stringify({ name: "Omnyo", private: true }),
     );
     await copyFile(
-      join(repoRoot, "apps", "cli", "bin", "bb"),
-      join(fakeBinDir, "bb"),
+      join(repoRoot, "apps", "cli", "bin", "Omnyo"),
+      join(fakeBinDir, "Omnyo"),
     );
-    await chmod(join(fakeBinDir, "bb"), 0o755);
+    await chmod(join(fakeBinDir, "Omnyo"), 0o755);
+
     return fakeRepoRoot;
   }
 
@@ -55,15 +58,17 @@ describe("bb bin wrapper", () => {
     const fakePnpmPath = join(fakeBinDir, "pnpm");
     await writeFile(fakePnpmPath, content, { mode: 0o755 });
     await chmod(fakePnpmPath, 0o755);
+
     return fakeBinDir;
   }
 
   it("builds the source CLI before executing when dist is missing", async ({
     skip,
   }) => {
-    skip(process.platform === "win32", "bin/bb is a POSIX sh wrapper");
+    skip(process.platform === "win32", "bin/omnyo is a POSIX sh wrapper");
     const fakeRepoRoot = await createFakeRepo();
     const pnpmArgsPath = join(tempRoot, "pnpm-args.txt");
+
     const fakePnpmDir = await writeFakePnpm(`#!/bin/sh
 printf '%s\\n' "$@" > ${shellQuote(pnpmArgsPath)}
 repo_root=""
@@ -82,7 +87,7 @@ NODE
 `);
 
     const result = await execFileAsync(
-      join(fakeRepoRoot, "apps", "cli", "bin", "bb"),
+      join(fakeRepoRoot, "apps", "cli", "bin", "Omnyo"),
       ["status", "--json"],
       {
         cwd: fakeRepoRoot,
@@ -103,14 +108,16 @@ NODE
   });
 
   it("uses the built CLI directly when dist exists", async ({ skip }) => {
-    skip(process.platform === "win32", "bin/bb is a POSIX sh wrapper");
+    skip(process.platform === "win32", "bin/omnyo is a POSIX sh wrapper");
     const fakeRepoRoot = await createFakeRepo();
     const fakeDistDir = join(fakeRepoRoot, "apps", "cli", "dist");
     const pnpmCalledPath = join(tempRoot, "pnpm-called.txt");
+
     const fakePnpmDir = await writeFakePnpm(`#!/bin/sh
 echo called > ${shellQuote(pnpmCalledPath)}
 exit 42
 `);
+
     await mkdir(fakeDistDir, { recursive: true });
     await writeFile(
       join(fakeDistDir, "index.js"),
@@ -118,7 +125,7 @@ exit 42
     );
 
     const result = await execFileAsync(
-      join(fakeRepoRoot, "apps", "cli", "bin", "bb"),
+      join(fakeRepoRoot, "apps", "cli", "bin", "Omnyo"),
       ["--help"],
       {
         cwd: fakeRepoRoot,

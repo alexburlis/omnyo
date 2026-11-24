@@ -6,7 +6,7 @@ import type {
   CheckoutState,
   UseBranchesArgs,
   UseCheckoutStateArgs,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 
 export function usePluginBranches({
   hostId,
@@ -16,15 +16,19 @@ export function usePluginBranches({
   const navigation = useSidebarNavigation({
     enabled: hostId === null && projectId !== null,
   });
+
   const sources = navigation.data?.projects.find(
     (project) => project.id === projectId,
   )?.sources;
+
   const source =
     sources?.find(
       (source) => source.type === "local_path" && source.isDefault,
     ) ?? sources?.find((source) => source.type === "local_path");
+
   const branchHostId = hostId ?? source?.hostId ?? null;
   const enabled = branchHostId !== null && projectId !== null;
+
   const branchesQuery = useProjectSourceBranches(
     projectId ?? undefined,
     branchHostId,
@@ -34,7 +38,9 @@ export function usePluginBranches({
       selectedBranch: "",
     },
   );
+
   const refreshFromRemote = branchesQuery.refreshFromRemote;
+
   const refresh = useCallback(async () => {
     if (!enabled) return;
     await refreshFromRemote();
@@ -62,11 +68,13 @@ export function usePluginCheckoutState({
   projectId,
 }: UseCheckoutStateArgs): CheckoutState {
   const enabled = hostId !== null && projectId !== null;
+
   const query = useProjectSourceBranches(projectId ?? undefined, hostId, {
     enabled,
     query: "",
     selectedBranch: "",
   });
+
   const checkout = query.data?.checkout;
 
   return useMemo(

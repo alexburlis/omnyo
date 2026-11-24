@@ -1,7 +1,7 @@
 import type { ThreadTimelineLocalFileLink } from "@/components/thread/timeline";
-import type { FilePreviewLineRange } from "@bb/client-core";
-import { areHostPathsEqual, getRelativeHostPath } from "@bb/domain";
-import type { WorkspaceOpenTargetId } from "@bb/host-daemon-contract";
+import type { FilePreviewLineRange } from "@omnyo/client-core";
+import { areHostPathsEqual, getRelativeHostPath } from "@omnyo/domain";
+import type { WorkspaceOpenTargetId } from "@omnyo/host-daemon-contract";
 import {
   isAbsoluteFilePathWithinRoot,
   normalizeAbsoluteFilePath,
@@ -10,6 +10,7 @@ import { isRoutePath } from "./route-paths";
 
 const THREAD_LOCAL_FILE_LINK_UNAVAILABLE_DESCRIPTION =
   "Thread file links are only available when the thread has an environment.";
+
 const THREAD_LOCAL_FILE_LINK_INVALID_PATH_DESCRIPTION =
   "Thread file links must use absolute file paths.";
 
@@ -98,11 +99,13 @@ function normalizeLocalFilePathWithinRoot(
   args: NormalizeLocalFilePathWithinRootArgs,
 ): NormalizedLocalFilePathWithinRoot | null {
   const normalizedRootPath = normalizeAbsoluteFilePath({ path: args.rootPath });
+
   if (!normalizedRootPath) {
     return null;
   }
 
   const normalizedPath = normalizeAbsoluteFilePath({ path: args.linkPath });
+
   if (!normalizedPath) {
     return null;
   }
@@ -140,6 +143,7 @@ export function resolveThreadLocalFileLink(
   }
 
   const normalizedPath = normalizeAbsoluteFilePath({ path: args.link.path });
+
   if (!normalizedPath) {
     return {
       description: THREAD_LOCAL_FILE_LINK_INVALID_PATH_DESCRIPTION,
@@ -148,6 +152,7 @@ export function resolveThreadLocalFileLink(
   }
 
   const openTargetId = args.link.openTargetId;
+
   if (openTargetId !== null && args.fileOpenTargetIds.includes(openTargetId)) {
     return {
       kind: "open-in-target",

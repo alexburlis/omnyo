@@ -23,8 +23,8 @@ vi.hoisted(() => {
   });
 });
 
-import type { PromptTextMention } from "@bb/domain";
-import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@bb/client-core";
+import type { PromptTextMention } from "@omnyo/domain";
+import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@omnyo/client-core";
 import { useState } from "react";
 import {
   act,
@@ -43,9 +43,11 @@ const IOS_ENTER_REPLAY_MS = 200;
 
 function getPromptEditorElement(): HTMLElement {
   const editorElement = document.querySelector(".ProseMirror");
+
   if (!(editorElement instanceof HTMLElement)) {
     throw new Error("Prompt editor element was not rendered");
   }
+
   return editorElement;
 }
 
@@ -76,9 +78,11 @@ describe("PromptBoxInternal on a real iPadOS ProseMirror build", () => {
 
     function Harness() {
       const [value, setValue] = useState("/");
+
       const [mentionRanges, setMentionRanges] = useState<PromptTextMention[]>(
         [],
       );
+
       return (
         <PromptBoxInternal
           value={value}
@@ -94,6 +98,7 @@ describe("PromptBoxInternal on a real iPadOS ProseMirror build", () => {
             mention: {
               results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
               isLoading: false,
+              isRefreshing: false,
               isError: false,
               onQueryChange: vi.fn(),
             },
@@ -159,6 +164,7 @@ describe("PromptBoxInternal on a real iPadOS ProseMirror build", () => {
           mention: {
             results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
             isLoading: false,
+            isRefreshing: false,
             isError: false,
             onQueryChange: vi.fn(),
           },
@@ -196,6 +202,7 @@ describe("PromptBoxInternal on a real iPadOS ProseMirror build", () => {
           mention: {
             results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
             isLoading: false,
+            isRefreshing: false,
             isError: false,
             onQueryChange: vi.fn(),
           },

@@ -30,7 +30,7 @@ import {
   providerRecoveryKindSchema,
   runBridgeRequest,
   type ProviderRecoveryHint,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { appendFileSync } from "node:fs";
 import { z } from "zod";
 
@@ -50,10 +50,14 @@ const scriptedMethodSchema = z.enum([
   "thread/goal/clear",
   "skills/configure",
 ]);
+
 export const scriptedEchoOptionsSchema = z
   .object({
     startDelayMs: z.number().int().nonnegative().optional(),
     turnStartResponseDelayMs: z.number().int().nonnegative().optional(),
+    turnStartErrorAfterMs: z.number().int().nonnegative().optional(),
+    steerResponseDelayMs: z.number().int().nonnegative().optional(),
+    steerFindsNewTurn: z.boolean().optional(),
     answerStartWithoutIdentity: z.boolean().optional(),
     identityAfterResponse: z.boolean().optional(),
     identityNotificationsBeforeTurn: z
@@ -102,30 +106,39 @@ export const scriptedEchoOptionsSchema = z
     emitIdentityOnSigterm: z.boolean().optional(),
   })
   .strict();
+
 export type ScriptedEchoOptions = z.infer<typeof scriptedEchoOptionsSchema>;
 
 const SCRIPTED_OPTIONS_ENV = "SCRIPTED_ECHO_OPTIONS";
+
 const SCRIPTED_RECORD_PATH_ENV = "SCRIPTED_ECHO_RECORD_PATH";
+
 const SCRIPTED_PROCESS_LOG_PATH_ENV = "SCRIPTED_ECHO_PROCESS_LOG_PATH";
 
 function logProcessStep(step: string): void {
   const logPath = process.env[SCRIPTED_PROCESS_LOG_PATH_ENV];
+
   if (logPath === undefined || logPath.length === 0) {
     return;
   }
+
   appendFileSync(logPath, `${step}\n`);
 }
+
 logProcessStep(`spawn:${process.pid}`);
 
 function readEnvOptions(): ScriptedEchoOptions {
   const raw = process.env[SCRIPTED_OPTIONS_ENV];
+
   if (raw === undefined || raw.length === 0) {
     return {};
   }
+
   return scriptedEchoOptionsSchema.parse(JSON.parse(raw));
 }
 
 let processOptions: ScriptedEchoOptions = {};
+
 try {
   processOptions = readEnvOptions();
 } catch (error) {
@@ -138,16 +151,21 @@ function scriptedOptionsFor(
   providerOptions: Record<string, unknown> | undefined,
 ): ScriptedEchoOptions {
   const fromCommand = providerOptions?.scripted;
+
   if (fromCommand === undefined) {
     return processOptions;
   }
+
   const parsed = scriptedEchoOptionsSchema.safeParse(fromCommand);
+
   if (!parsed.success) {
     process.stderr.write(
       `scripted echo bridge: ignoring invalid providerOptions.scripted: ${parsed.error.message}\n`,
     );
+
     return processOptions;
   }
+
   return { ...processOptions, ...parsed.data };
 }
 
@@ -178,17 +196,26 @@ type PendingReply =
     };
 
 const sessions = new Map<string, Session>();
+
 const pendingReplies = new Map<JsonRpcId, PendingReply>();
+
 const unarchivedSessionIds = new Set<string>();
+
 const archivedSessionIds = new Set<string>();
+
 const scriptedFailureCounts = new Map<number, number>();
+
 const openBackgroundTasks = new Map<
   string,
   { providerItemId: string; familyId: string }[]
 >();
+
 let discardFailed = false;
+
 let providerThreadCounter = 0;
+
 const providerThreadNonce = randomUUID().slice(0, 8);
+
 let outboundRequestCounter = 0;
 
 type OutboundMessage = { jsonrpc: "2.0" } & Record<string, unknown>;
@@ -210,6 +237,7 @@ function emitRecoveryHint(
   if (kind === null) {
     return;
   }
+
   notify(BRIDGE_NOTIFICATION_METHODS.providerRecovery, {
     threadId: sessions.get(threadId)?.options.recoveryThreadIdHint ?? threadId,
     kind,
@@ -225,6 +253,7 @@ function sendRequest(
   outboundRequestCounter += 1;
   const id = `scripted-${outboundRequestCounter}`;
   io.send({ jsonrpc: "2.0", id, method, params });
+
   return id;
 }
 
@@ -233,6 +262,7 @@ function exitProcess(): void {
 }
 
 type ApprovalKind = "command" | "file_change" | "permission_grant" | "plan";
+
 const APPROVAL_KINDS: readonly ApprovalKind[] = [
   "command",
   "file_change",
@@ -253,6 +283,7 @@ interface TurnPlan {
   recoverNowKind: ProviderRecoveryHint["kind"] | null;
   backgroundTask: boolean;
   settleBackgroundTasks: boolean;
+  backgroundTaskSettleAfterMs: number | null;
 }
 
 function promptText(input: readonly PromptInput[]): string {
@@ -267,34 +298,51 @@ function promptText(input: readonly PromptInput[]): string {
 
 function parseTurnPlan(inputText: string): TurnPlan {
   const delayMatch = /(?:^|\s)delay:(\d+)(?:\s|$)/u.exec(inputText);
+
+  const backgroundTaskSettleAfterMatch =
+    /(?:^|\s)bg_task_settle_after:(\d+)(?:\s|$)/u.exec(inputText);
+
   const questionMatch = /(?:^|\s)ask_user(?:\s|$)/u.exec(inputText);
   const approvalMatch = /(?:^|\s)approve:([^\s]+)(?:\s|$)/u.exec(inputText);
+
   const unresolvedToolMatch =
     /(?:^|\s)call_tool_unresolved:([^\s]+)(?:\s|$)/u.exec(inputText);
+
   const toolMatch =
     unresolvedToolMatch ??
     /(?:^|\s)call_tool:([^\s]+)(?:\s|$)/u.exec(inputText);
+
   const approvalKind =
     APPROVAL_KINDS.find((kind) => kind === approvalMatch?.[1]) ?? null;
+
   const holdMatch = /(?:^|\s)hold_turn(?:\s|$)/u.exec(inputText);
   const failMatch = /(?:^|\s)fail_turn:([^\s]+)(?:\s|$)/u.exec(inputText);
+
   const prestartFailMatch = /(?:^|\s)prestart_fail:([^\s]+)(?:\s|$)/u.exec(
     inputText,
   );
+
   const failureText = prestartFailMatch?.[1] ?? failMatch?.[1];
   const recoverMatch = /(?:^|\s)recover:([^\s]+)(?:\s|$)/u.exec(inputText);
   const recoverKind = providerRecoveryKindSchema.safeParse(recoverMatch?.[1]);
+
   const recoverNowMatch = /(?:^|\s)recover_now:([^\s]+)(?:\s|$)/u.exec(
     inputText,
   );
+
   const recoverNowKind = providerRecoveryKindSchema.safeParse(
     recoverNowMatch?.[1],
   );
+
   return {
     recoverKind: recoverKind.success ? recoverKind.data : null,
     recoverNowKind: recoverNowKind.success ? recoverNowKind.data : null,
     backgroundTask: /(?:^|\s)bg_task(?:\s|$)/u.test(inputText),
     settleBackgroundTasks: /(?:^|\s)bg_task_done(?:\s|$)/u.test(inputText),
+    backgroundTaskSettleAfterMs:
+      backgroundTaskSettleAfterMatch?.[1] === undefined
+        ? null
+        : Number(backgroundTaskSettleAfterMatch[1]),
     approvalKind,
     delayMs: delayMatch?.[1] === undefined ? 0 : Number(delayMatch[1]),
     questionRequested: questionMatch !== null,
@@ -405,6 +453,7 @@ function clearActiveTurn(session: Session): void {
   if (session.activeTurn?.timer) {
     clearTimeout(session.activeTurn.timer);
   }
+
   session.activeTurn = null;
 }
 
@@ -414,15 +463,20 @@ function completeTurn(
   text: string,
 ): void {
   const turn = session.activeTurn;
+
   if (turn === null) {
     return;
   }
+
   clearActiveTurn(session);
+
   const responseText =
     session.options.identifyProcess === true
       ? `pid:${process.pid}:${text}`
       : text;
+
   const deltas: ThreadDelta[] = [];
+
   if (status === "completed") {
     session.messageCount += 1;
     const key = { providerItemId: `msg-${session.messageCount}` };
@@ -442,11 +496,13 @@ function completeTurn(
       },
     );
   }
+
   deltas.push({
     kind: "turn.boundary",
     status,
     providerTurnId: turn.providerTurnId,
   });
+
   if (session.options.completionIdentity !== undefined) {
     session.providerThreadId = session.options.completionIdentity;
     deltas.push({
@@ -454,6 +510,7 @@ function completeTurn(
       providerThreadId: session.providerThreadId,
     });
   }
+
   emitDeltas(session.threadId, deltas);
 }
 
@@ -513,6 +570,7 @@ function scheduleCompletion(
   if (session.activeTurn === null) {
     return;
   }
+
   session.activeTurn.timer = setTimeout(() => {
     completeTurn(session, "completed", responseText);
     emitRecoveryHint(session.threadId, recoverKind);
@@ -525,6 +583,7 @@ function beginTurn(args: {
   clientRequestId?: ClientTurnRequestId;
 }): void {
   const { session } = args;
+
   for (const identity of session.options.identityNotificationsBeforeTurn ??
     []) {
     if (identity.asDelta === true) {
@@ -541,14 +600,17 @@ function beginTurn(args: {
       });
     }
   }
+
   clearActiveTurn(session);
   const plan = parseTurnPlan(promptText(args.input));
+
   if (plan.failure !== null && plan.failure.beforeTurn) {
     if (args.clientRequestId !== undefined) {
       emitDeltas(session.threadId, [
         { kind: "input.accepted", clientRequestId: args.clientRequestId },
       ]);
     }
+
     emitDeltas(session.threadId, [
       {
         kind: "provider.error",
@@ -559,13 +621,16 @@ function beginTurn(args: {
       },
     ]);
     emitRecoveryHint(session.threadId, plan.recoverKind);
+
     return;
   }
+
   session.turnCount += 1;
   const providerTurnId = `turn-${session.turnCount}`;
   session.activeTurn = { providerTurnId, timer: null };
 
   const deltas: ThreadDelta[] = [];
+
   if (args.clientRequestId !== undefined) {
     deltas.push({
       kind: "input.accepted",
@@ -573,20 +638,33 @@ function beginTurn(args: {
       providerTurnId,
     });
   }
+
   deltas.push({ kind: "turn.open", providerTurnId });
   emitDeltas(session.threadId, deltas);
   emitRecoveryHint(session.threadId, plan.recoverNowKind);
+
   if (plan.backgroundTask) {
     openBackgroundTask(session, providerTurnId);
   }
+
   if (plan.settleBackgroundTasks) {
     settleBackgroundTasks(session);
   }
 
+  if (plan.backgroundTaskSettleAfterMs !== null) {
+    openBackgroundTask(session, providerTurnId);
+    setTimeout(
+      () => settleBackgroundTasks(session),
+      plan.backgroundTaskSettleAfterMs,
+    );
+  }
+
   if (plan.holdTurn) {
     emitRecoveryHint(session.threadId, plan.recoverKind);
+
     return;
   }
+
   if (plan.failure !== null) {
     clearActiveTurn(session);
     emitDeltas(session.threadId, [
@@ -600,6 +678,7 @@ function beginTurn(args: {
       },
     ]);
     emitRecoveryHint(session.threadId, plan.recoverKind);
+
     return;
   }
 
@@ -614,17 +693,19 @@ function beginTurn(args: {
           plan.approvalKind,
           `approval-${providerTurnId}`,
         ),
-        providerNativeIds: true,
       },
     );
+
     pendingReplies.set(requestId, {
       kind: "approval",
       threadId: session.threadId,
       responseText: plan.responseText,
       delayMs: plan.delayMs,
     });
+
     return;
   }
+
   if (plan.questionRequested) {
     outboundRequestCounter += 1;
     const requestId = `scripted-${outboundRequestCounter}`;
@@ -637,7 +718,6 @@ function beginTurn(args: {
         threadId: session.threadId,
         turnId: providerTurnId,
         payload: userQuestionPayload(requestId),
-        providerNativeIds: true,
       },
     });
     pendingReplies.set(requestId, {
@@ -645,8 +725,10 @@ function beginTurn(args: {
       threadId: session.threadId,
       delayMs: plan.delayMs,
     });
+
     return;
   }
+
   if (plan.toolName !== null) {
     const requestId = sendRequest(BRIDGE_INBOUND_REQUEST_METHODS.toolCall, {
       providerThreadId: session.providerThreadId,
@@ -655,16 +737,18 @@ function beginTurn(args: {
       callId: `call-${session.turnCount}`,
       tool: plan.toolName,
       arguments: {},
-      providerNativeIds: true,
     });
+
     pendingReplies.set(requestId, {
       kind: "tool",
       threadId: session.threadId,
       toolName: plan.toolName,
       delayMs: plan.delayMs,
     });
+
     return;
   }
+
   scheduleCompletion(
     session,
     plan.responseText,
@@ -685,12 +769,15 @@ function describeAnswer(result: unknown): string {
       ),
     })
     .safeParse(result);
+
   const first = parsed.success
     ? Object.values(parsed.data.answers)[0]
     : undefined;
+
   if (first === undefined) {
     return "no answer";
   }
+
   return [...first.selected, first.freeText]
     .filter((part) => part.length > 0)
     .join(", ");
@@ -698,6 +785,7 @@ function describeAnswer(result: unknown): string {
 
 function isAllowedDecision(result: unknown): boolean {
   const parsed = z.object({ decision: z.string() }).safeParse(result);
+
   return (
     parsed.success &&
     (parsed.data.decision === "allow_once" ||
@@ -715,17 +803,23 @@ function handleResponse(
   error: unknown,
 ): boolean {
   const pending = pendingReplies.get(id);
+
   if (pending === undefined) {
     return false;
   }
+
   pendingReplies.delete(id);
   const session = sessions.get(pending.threadId);
+
   if (session === undefined) {
     return true;
   }
+
   const parsedError = jsonRpcErrorSchema.safeParse(error);
+
   if (parsedError.success) {
     const turn = session.activeTurn;
+
     if (turn !== null) {
       clearActiveTurn(session);
       emitDeltas(session.threadId, [
@@ -738,8 +832,10 @@ function handleResponse(
         },
       ]);
     }
+
     return true;
   }
+
   switch (pending.kind) {
     case "tool":
       scheduleCompletion(
@@ -747,6 +843,7 @@ function handleResponse(
         `Tool called: ${pending.toolName}`,
         pending.delayMs,
       );
+
       return true;
     case "question":
       scheduleCompletion(
@@ -754,6 +851,7 @@ function handleResponse(
         `Question answered: ${describeAnswer(result)}`,
         pending.delayMs,
       );
+
       return true;
     case "approval":
       scheduleCompletion(
@@ -761,6 +859,7 @@ function handleResponse(
         isAllowedDecision(result) ? pending.responseText : "Denied",
         pending.delayMs,
       );
+
       return true;
   }
 }
@@ -777,9 +876,11 @@ function rejectIfArchived(
   const scriptedArchived =
     options.archivedSession === true &&
     !unarchivedSessionIds.has(providerThreadId);
+
   if (!scriptedArchived && !archivedSessionIds.has(providerThreadId)) {
     return false;
   }
+
   const message = archivedSessionError(providerThreadId);
   io.sendError(id, -32000, message, {
     recovery: {
@@ -788,9 +889,11 @@ function rejectIfArchived(
       retryable: true,
     } satisfies ProviderRecoveryHint,
   });
+
   if (options.exitAfterArchivedError === true) {
     exitProcess();
   }
+
   return true;
 }
 
@@ -807,11 +910,15 @@ function openSession(args: {
     activeTurn: null,
     options: args.options,
   };
+
   sessions.set(args.threadId, session);
+
   if (args.options.identityAfterResponse !== true) {
     notifySessionIdentity(session);
   }
+
   emitDeltas(args.threadId, [{ kind: "session.reset" }]);
+
   return session;
 }
 
@@ -827,9 +934,11 @@ function notifySessionIdentity(session: Session): void {
 
 function mintProviderThreadId(options: ScriptedEchoOptions): string {
   providerThreadCounter += 1;
+
   if (options.identifyProcess === true) {
     return `prov-${process.pid}-${providerThreadCounter}`;
   }
+
   return options.uniqueProviderThreadIds === true
     ? `prov-${providerThreadCounter}-${providerThreadNonce}`
     : `prov-${providerThreadCounter}`;
@@ -839,6 +948,7 @@ function identityResult(session: Session): Record<string, unknown> {
   if (session.options.answerStartWithoutIdentity === true) {
     return { threadId: session.threadId };
   }
+
   return {
     providerThreadId: session.providerThreadId,
     ...(session.options.sessionRestorable === undefined
@@ -850,8 +960,10 @@ function identityResult(session: Session): Record<string, unknown> {
 function afterStartDelay(options: ScriptedEchoOptions, run: () => void): void {
   if (options.startDelayMs === undefined || options.startDelayMs === 0) {
     run();
+
     return;
   }
+
   setTimeout(run, options.startDelayMs);
 }
 
@@ -889,10 +1001,13 @@ const MODEL_LIST = {
 const handlers: Record<string, RequestHandler> = {
   [BRIDGE_REQUEST_METHODS.initialize]: (id, params) => {
     const parsed = initializeParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.initialize, parsed.error.issues);
+
       return;
     }
+
     io.sendResult(id, {
       protocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
       capabilities: {
@@ -911,10 +1026,13 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.modelList]: (id, params) => {
     const parsed = modelListParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.modelList, parsed.error.issues);
+
       return;
     }
+
     io.sendResult(id, MODEL_LIST);
   },
 
@@ -968,27 +1086,33 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.skillsConfigure]: (id, params) => {
     const parsed = skillsConfigureParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.skillsConfigure,
         parsed.error.issues,
       );
+
       return;
     }
+
     io.sendResult(id, {});
   },
 
   [BRIDGE_REQUEST_METHODS.threadStart]: (id, params) => {
     const parsed = threadStartParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.threadStart,
         parsed.error.issues,
       );
+
       return;
     }
+
     const options = scriptedOptionsFor(parsed.data.options.providerOptions);
     afterStartDelay(options, () => {
       const session = openSession({
@@ -996,11 +1120,14 @@ const handlers: Record<string, RequestHandler> = {
         providerThreadId: mintProviderThreadId(options),
         options,
       });
+
       logProcessStep(`thread/start:${process.pid}:${parsed.data.threadId}`);
       io.sendResult(id, identityResult(session));
+
       if (session.options.identityAfterResponse === true) {
         notifySessionIdentity(session);
       }
+
       if (parsed.data.input !== undefined && parsed.data.input.length > 0) {
         beginTurn({ session, input: parsed.data.input });
       }
@@ -1009,28 +1136,35 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.threadResume]: (id, params) => {
     const parsed = threadResumeParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.threadResume,
         parsed.error.issues,
       );
+
       return;
     }
+
     const options = scriptedOptionsFor(parsed.data.options.providerOptions);
+
     if (rejectIfArchived(id, options, parsed.data.providerThreadId)) {
       return;
     }
+
     afterStartDelay(options, () => {
       const session = openSession({
         threadId: parsed.data.threadId,
         providerThreadId: parsed.data.providerThreadId,
         options,
       });
+
       logProcessStep(
         `thread/resume:${process.pid}:${parsed.data.threadId}:${parsed.data.providerThreadId}`,
       );
       io.sendResult(id, identityResult(session));
+
       if (session.options.identityAfterResponse === true) {
         notifySessionIdentity(session);
       }
@@ -1039,21 +1173,28 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.threadFork]: (id, params) => {
     const parsed = threadForkParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.threadFork, parsed.error.issues);
+
       return;
     }
+
     const options = scriptedOptionsFor(parsed.data.options.providerOptions);
+
     if (rejectIfArchived(id, options, parsed.data.sourceProviderThreadId)) {
       return;
     }
+
     afterStartDelay(options, () => {
       const session = openSession({
         threadId: parsed.data.threadId,
         providerThreadId: mintProviderThreadId(options),
         options,
       });
+
       io.sendResult(id, identityResult(session));
+
       if (session.options.identityAfterResponse === true) {
         notifySessionIdentity(session);
       }
@@ -1062,26 +1203,47 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.turnStart]: (id, params) => {
     const parsed = turnStartParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.turnStart, parsed.error.issues);
+
       return;
     }
+
     const session = sessions.get(parsed.data.threadId);
+
     if (session === undefined) {
       io.sendError(id, -32000, `Unknown thread: ${parsed.data.threadId}`);
+
       return;
     }
+
     session.options = scriptedOptionsFor(parsed.data.options.providerOptions);
+
     if (rejectIfArchived(id, session.options, session.providerThreadId)) {
       return;
     }
+
     logProcessStep(
       `turn/start:${process.pid}:${parsed.data.threadId}:${promptText(parsed.data.input)}`,
     );
+    const errorAfterMs = session.options.turnStartErrorAfterMs;
+
+    if (errorAfterMs !== undefined) {
+      setTimeout(
+        () => io.sendError(id, -32000, "The provider lost the turn start"),
+        errorAfterMs,
+      );
+
+      return;
+    }
+
     const responseDelayMs = session.options.turnStartResponseDelayMs;
+
     if (responseDelayMs === undefined) {
       io.sendResult(id, {});
     }
+
     if (session.options.swallowTurnStart !== true) {
       beginTurn({
         session,
@@ -1089,6 +1251,7 @@ const handlers: Record<string, RequestHandler> = {
         clientRequestId: parsed.data.clientRequestId,
       });
     }
+
     if (responseDelayMs !== undefined) {
       setTimeout(() => io.sendResult(id, {}), responseDelayMs);
     }
@@ -1096,19 +1259,27 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.turnSteer]: (id, params) => {
     const parsed = turnSteerParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.turnSteer, parsed.error.issues);
+
       return;
     }
+
     const session = sessions.get(parsed.data.threadId);
+
     if (session === undefined) {
       io.sendError(id, -32000, `Unknown thread: ${parsed.data.threadId}`);
+
       return;
     }
+
     const options = scriptedOptionsFor(parsed.data.options.providerOptions);
+
     if (rejectIfArchived(id, options, session.providerThreadId)) {
       return;
     }
+
     if (session.activeTurn === null) {
       const message = `No active turn to steer (expected ${parsed.data.expectedTurnId})`;
       io.sendError(id, BRIDGE_JSON_RPC_ERRORS.NO_ACTIVE_TURN, message, {
@@ -1118,31 +1289,71 @@ const handlers: Record<string, RequestHandler> = {
           retryable: false,
         } satisfies ProviderRecoveryHint,
       });
+
       return;
     }
-    emitDeltas(session.threadId, [
-      {
-        kind: "input.accepted",
-        clientRequestId: parsed.data.clientRequestId,
-        providerTurnId: session.activeTurn.providerTurnId,
-      },
-    ]);
-    io.sendResult(id, {});
+
+    if (options.steerFindsNewTurn === true) {
+      completeTurn(session, "completed", "finished before the steer");
+      session.turnCount += 1;
+      const newTurnId = `turn-${session.turnCount}`;
+      session.activeTurn = { providerTurnId: newTurnId, timer: null };
+      emitDeltas(session.threadId, [
+        { kind: "turn.open", providerTurnId: newTurnId },
+      ]);
+      const message = `expected active turn id \`${parsed.data.expectedTurnId}\` but found \`${newTurnId}\``;
+      io.sendError(id, BRIDGE_JSON_RPC_ERRORS.NO_ACTIVE_TURN, message, {
+        recovery: {
+          kind: "staleTurn",
+          message,
+          retryable: false,
+        } satisfies ProviderRecoveryHint,
+      });
+
+      return;
+    }
+
+    const providerTurnId = session.activeTurn.providerTurnId;
+
+    const acceptSteer = (): void => {
+      emitDeltas(session.threadId, [
+        {
+          kind: "input.accepted",
+          clientRequestId: parsed.data.clientRequestId,
+          providerTurnId,
+        },
+      ]);
+      io.sendResult(id, {});
+    };
+
+    if (options.steerResponseDelayMs === undefined) {
+      acceptSteer();
+
+      return;
+    }
+
+    setTimeout(acceptSteer, options.steerResponseDelayMs);
   },
 
   [BRIDGE_REQUEST_METHODS.threadStop]: (id, params) => {
     const parsed = threadStopParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(id, BRIDGE_REQUEST_METHODS.threadStop, parsed.error.issues);
+
       return;
     }
+
     const session = sessions.get(parsed.data.threadId);
     logProcessStep(`thread/stop:${process.pid}:${parsed.data.threadId}`);
     const stopOptions = session?.options ?? processOptions;
+
     if (stopOptions.failStopForThreadIds?.includes(parsed.data.threadId)) {
       io.sendError(id, -32000, `stop refused for ${parsed.data.threadId}`);
+
       return;
     }
+
     if (
       session !== undefined &&
       parsed.data.intent === "interrupt" &&
@@ -1150,6 +1361,7 @@ const handlers: Record<string, RequestHandler> = {
     ) {
       completeTurn(session, "interrupted", "");
     }
+
     sessions.delete(parsed.data.threadId);
     openBackgroundTasks.delete(parsed.data.threadId);
     io.sendResult(id, {});
@@ -1157,55 +1369,70 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.threadDiscard]: (id, params) => {
     const parsed = threadDiscardParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.threadDiscard,
         parsed.error.issues,
       );
+
       return;
     }
+
     const session = sessions.get(parsed.data.threadId);
     const options = session?.options ?? processOptions;
+
     if (options.discardFailsOnce === true && !discardFailed) {
       discardFailed = true;
       io.sendError(id, -32000, "discard is temporarily unavailable");
+
       return;
     }
+
     sessions.delete(parsed.data.threadId);
     io.sendResult(id, {});
   },
 
   [BRIDGE_REQUEST_METHODS.threadArchive]: (id, params) => {
     const parsed = threadArchiveParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.threadArchive,
         parsed.error.issues,
       );
+
       return;
     }
+
     archivedSessionIds.add(parsed.data.providerThreadId);
     io.sendResult(id, {});
   },
 
   [BRIDGE_REQUEST_METHODS.threadUnarchive]: (id, params) => {
     const parsed = threadUnarchiveParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.threadUnarchive,
         parsed.error.issues,
       );
+
       return;
     }
+
     const session = sessions.get(parsed.data.threadId);
     const options = session?.options ?? processOptions;
+
     if (options.unarchiveFails === true) {
       io.sendError(id, -32000, "unarchive is unavailable");
+
       return;
     }
+
     unarchivedSessionIds.add(parsed.data.providerThreadId);
     archivedSessionIds.delete(parsed.data.providerThreadId);
     io.sendResult(id, {});
@@ -1213,15 +1440,19 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.threadNameSet]: (id, params) => {
     const parsed = threadNameSetParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.threadNameSet,
         parsed.error.issues,
       );
+
       return;
     }
+
     io.sendResult(id, {});
+
     if (sessions.has(parsed.data.threadId)) {
       emitDeltas(parsed.data.threadId, [
         { kind: "thread.name", name: parsed.data.title },
@@ -1231,16 +1462,20 @@ const handlers: Record<string, RequestHandler> = {
 
   [BRIDGE_REQUEST_METHODS.threadGoalClear]: (id, params) => {
     const parsed = threadGoalClearParamsSchema.safeParse(params);
+
     if (!parsed.success) {
       invalidParams(
         id,
         BRIDGE_REQUEST_METHODS.threadGoalClear,
         parsed.error.issues,
       );
+
       return;
     }
+
     const session = sessions.get(parsed.data.threadId);
     const options = session?.options ?? processOptions;
+
     const notifyCleared = (): void => {
       emitDeltas(parsed.data.threadId, [
         {
@@ -1250,12 +1485,16 @@ const handlers: Record<string, RequestHandler> = {
         },
       ]);
     };
+
     const answer = { cleared: options.goalClearReportsCleared ?? true };
+
     if (options.goalClearNotifyDelayMs === undefined) {
       notifyCleared();
       io.sendResult(id, answer);
+
       return;
     }
+
     io.sendResult(id, answer);
     setTimeout(notifyCleared, options.goalClearNotifyDelayMs);
   },
@@ -1263,9 +1502,11 @@ const handlers: Record<string, RequestHandler> = {
 
 function recordRequest(method: string, params: unknown): void {
   const recordPath = process.env[SCRIPTED_RECORD_PATH_ENV];
+
   if (recordPath === undefined || recordPath.length === 0) {
     return;
   }
+
   appendFileSync(
     recordPath,
     `${JSON.stringify({ method, params: params ?? null })}\n`,
@@ -1278,28 +1519,35 @@ function applyScriptedMethodPolicy(
   options: ScriptedEchoOptions,
 ): "handled" | "continue" {
   const scripted = scriptedMethodSchema.safeParse(method);
+
   if (!scripted.success) {
     return "continue";
   }
+
   if (options.crashOn === scripted.data) {
     exitProcess();
   }
+
   if (options.unsupportedMethods?.includes(scripted.data)) {
     io.sendError(
       id,
       BRIDGE_JSON_RPC_ERRORS.METHOD_NOT_FOUND,
       `Method not found: ${method}`,
     );
+
     return "handled";
   }
+
   const failureIndex = (options.failMethods ?? []).findIndex(
     (entry, index) =>
       entry.method === scripted.data &&
       (entry.times === undefined ||
         (scriptedFailureCounts.get(index) ?? 0) < entry.times),
   );
+
   const failure =
     failureIndex === -1 ? undefined : options.failMethods?.[failureIndex];
+
   if (failure !== undefined) {
     const failedSoFar = scriptedFailureCounts.get(failureIndex) ?? 0;
     {
@@ -1318,9 +1566,11 @@ function applyScriptedMethodPolicy(
               } satisfies ProviderRecoveryHint,
             },
       );
+
       return "handled";
     }
   }
+
   return "continue";
 }
 
@@ -1337,26 +1587,32 @@ function optionsForRequest(params: unknown): ScriptedEchoOptions {
     })
     .passthrough()
     .safeParse(params);
+
   if (!parsed.success) {
     return processOptions;
   }
+
   if (parsed.data.options?.providerOptions !== undefined) {
     return scriptedOptionsFor(parsed.data.options.providerOptions);
   }
+
   const session =
     parsed.data.threadId === undefined
       ? undefined
       : sessions.get(parsed.data.threadId);
+
   return session?.options ?? processOptions;
 }
 
 export function handleLine(line: string): void {
   let message: unknown;
+
   try {
     message = JSON.parse(line);
   } catch {
     return;
   }
+
   if (
     typeof message !== "object" ||
     message === null ||
@@ -1364,6 +1620,7 @@ export function handleLine(line: string): void {
   ) {
     return;
   }
+
   const { id, method, params, result, error } = message as {
     id?: unknown;
     method?: unknown;
@@ -1371,34 +1628,44 @@ export function handleLine(line: string): void {
     result?: unknown;
     error?: unknown;
   };
+
   if (typeof method !== "string") {
     if (typeof id === "string" || typeof id === "number") {
       handleResponse(id, result, error);
     }
+
     return;
   }
+
   if (typeof id !== "string" && typeof id !== "number") {
     return;
   }
+
   recordRequest(method, params);
   const options = optionsForRequest(params);
+
   if (applyScriptedMethodPolicy(id, method, options) === "handled") {
     return;
   }
+
   const handler = handlers[method];
+
   if (handler === undefined) {
     io.sendError(
       id,
       BRIDGE_JSON_RPC_ERRORS.METHOD_NOT_FOUND,
       `Method not found: ${method}`,
     );
+
     return;
   }
+
   runBridgeRequest({
     request: { id, method, params },
     sendError: io.sendError,
     handleRequest: async (request) => handler(request.id, request.params),
   });
+
   if (options.exitAfter === method) {
     exitProcess();
   }
@@ -1408,6 +1675,7 @@ export const experimental_providerBridge = experimental_defineProviderBridge({
   handleLine,
   onSigterm: () => {
     logProcessStep(`exit:${process.pid}`);
+
     if (processOptions.emitIdentityOnSigterm === true) {
       for (const session of sessions.values()) {
         notify(BRIDGE_NOTIFICATION_METHODS.threadIdentity, {
@@ -1415,9 +1683,12 @@ export const experimental_providerBridge = experimental_defineProviderBridge({
           providerThreadId: `late-${session.providerThreadId}`,
         });
       }
+
       setTimeout(() => process.exit(0), 10);
+
       return;
     }
+
     process.exit(0);
   },
 });

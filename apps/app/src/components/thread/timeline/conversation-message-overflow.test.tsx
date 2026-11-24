@@ -26,11 +26,13 @@ afterEach(() => {
 
 function OverflowProbe({ name }: { name: string }) {
   const ref = useRef<HTMLDivElement>(null);
+
   const measurement = useOverflowMeasurement({
     elementRef: ref,
     enabled: true,
     measurementKey: name,
   });
+
   return <div ref={ref} data-testid={name} data-measurement={measurement} />;
 }
 
@@ -53,17 +55,21 @@ describe("useOverflowMeasurement", () => {
         disconnect = disconnect;
       },
     );
+
     const scrollHeight = vi
       .spyOn(HTMLElement.prototype, "scrollHeight", "get")
       .mockImplementation(function (this: HTMLElement) {
         return this.dataset.testid === "first" ? 80 : 20;
       });
+
     const clientHeight = vi
       .spyOn(HTMLElement.prototype, "clientHeight", "get")
       .mockReturnValue(20);
+
     const scrollWidth = vi
       .spyOn(HTMLElement.prototype, "scrollWidth", "get")
       .mockReturnValue(20);
+
     const clientWidth = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(20);
@@ -117,19 +123,22 @@ describe("ConversationMessageOverflowToggle", () => {
     vi.spyOn(scrollArea, "getBoundingClientRect").mockReturnValue(
       new DOMRect(0, 50, 100, 500),
     );
+
     const holdContentPosition = vi.fn<
       BottomAnchorContextValue["holdContentPosition"]
     >(({ update }) => update());
+
     const onToggle = vi.fn();
+
     const bottomAnchor: BottomAnchorContextValue = {
       getScrollElement: () => scrollArea,
       isAtBottom: true,
       scrollToBottom: vi.fn(),
       scrollElementIntoView: vi.fn(),
       scrollElementIntoViewClampedToMaxScroll: vi.fn(),
-      captureScrollAnchor: vi.fn(),
       holdContentPosition,
     };
+
     render(
       <BottomAnchorContext.Provider value={bottomAnchor}>
         <div data-timeline-row-id="row" data-testid="row">
@@ -145,6 +154,7 @@ describe("ConversationMessageOverflowToggle", () => {
       new DOMRect(0, rowTop, 100, 1_000),
     );
     fireEvent.click(screen.getByRole("button"));
+
     return { holdContentPosition, onToggle, row };
   }
 

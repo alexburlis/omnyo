@@ -3,17 +3,13 @@
 import { fireEvent, render } from "@testing-library/react";
 import { DndContext, useDraggable } from "@dnd-kit/core";
 import { describe, expect, it, vi } from "vitest";
-import { useReorderDnd } from "@bb/shared-ui/use-reorder-dnd";
+import { useReorderDnd } from "@omnyo/shared-ui/use-reorder-dnd";
 
 function DraggableRow({ onClick }: { onClick: () => void }) {
   const { attributes, listeners, setNodeRef } = useDraggable({ id: "row" });
+
   return (
-    <button
-      ref={setNodeRef}
-      onClick={onClick}
-      {...attributes}
-      {...listeners}
-    >
+    <button ref={setNodeRef} onClick={onClick} {...attributes} {...listeners}>
       Open row
     </button>
   );
@@ -32,6 +28,7 @@ describe("useReorderDnd", () => {
         onDragStart,
         onDragCancel,
       });
+
       return (
         <DndContext {...dndContextProps}>
           <DraggableRow onClick={onClick} />

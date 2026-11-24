@@ -13,8 +13,8 @@ export default {
 const noop = () => {};
 
 const target: ProjectDeleteDialogTarget = {
-  id: PROJECT_IDS.bb,
-  name: PROJECT_NAMES.bb,
+  id: PROJECT_IDS.omnyo,
+  name: PROJECT_NAMES.omnyo,
 };
 
 const longName: ProjectDeleteDialogTarget = {
@@ -31,6 +31,7 @@ export function Overview() {
             target={target}
             pending={false}
             onDelete={noop}
+            onCancel={noop}
           />
         </DialogStage>
       </StoryRow>
@@ -43,12 +44,18 @@ export function Overview() {
             target={longName}
             pending={false}
             onDelete={noop}
+            onCancel={noop}
           />
         </DialogStage>
       </StoryRow>
       <StoryRow label="pending" hint="destructive button disabled">
         <DialogStage>
-          <ProjectDeleteDialogContent target={target} pending onDelete={noop} />
+          <ProjectDeleteDialogContent
+            target={target}
+            pending
+            onDelete={noop}
+            onCancel={noop}
+          />
         </DialogStage>
       </StoryRow>
     </StoryCard>

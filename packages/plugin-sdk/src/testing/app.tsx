@@ -1,3 +1,4 @@
+import { threadIndicators } from "@omnyo/domain";
 import * as React from "react";
 import {
   createContext,
@@ -16,8 +17,9 @@ import {
 } from "react";
 import { act, render, type RenderResult } from "@testing-library/react";
 import {
-  type BbContext,
-  type BbNavigate,
+  type experimental_AppContext,
+  type ExperimentalVisibleAppContext,
+  type experimental_AppNavigate,
   type BranchesState,
   type ComposerCustomization,
   type ComposerAttachment,
@@ -27,6 +29,10 @@ import {
   type ComposerSubmitOptions,
   type ComposerView,
   type ExperimentalAppOverlayRegistration,
+  type ExperimentalSidebarFooterCardRegistration,
+  type ExperimentalTitleBarCenterRegistration,
+  type ExperimentalSidebarEntryRegistration,
+  type ExperimentalThreadCompanionRegistration,
   type ExperimentalQuestionFormHost,
   type PluginAppDefinition,
   type PluginAppSetup,
@@ -38,7 +44,9 @@ import {
   type PluginComposerMention,
   type PluginComposerScope,
   type PluginComposerTextEffect,
+  type ExperimentalComposerSuggestion,
   type PluginComposerThreadRowStatus,
+  type ExperimentalThreadRowSubtitle,
   type PluginFileOpenerRegistration,
   type PluginHomepageSectionRegistration,
   type PluginMessageActionRegistration,
@@ -58,7 +66,7 @@ import {
   type PluginSidebarFooterActionRegistration,
   type PluginSidebarPullRequest,
   type PluginSidebarThreadActions,
-  type PluginBrowserBbSdk,
+  type experimental_PluginBrowserSdk,
   type PluginEnvironmentProvidersState,
   type PluginSidebarSplitLayout,
   type PluginSidebarThreadDraftState,
@@ -68,6 +76,7 @@ import {
   type PluginSidebarThreadSplit,
   type PluginProvidersState,
   type PluginSidebarThreadsState,
+  type PluginThreadGroupActions,
   type PluginSourceCodeRendererRegistration,
   type PluginThreadHeaderActionRegistration,
   type PluginThreadActionEntry,
@@ -81,6 +90,7 @@ import {
   type ExperimentalPluginBrowserToolbarActionRegistration,
   type PluginThreadListRegistration,
   type PluginThreadPanelActionRegistration,
+  type PluginThreadViewRegistration,
   type PluginRpcContract,
   type PluginRpcResult,
   type StandardSchemaV1InferInput,
@@ -89,12 +99,16 @@ import {
   type ExperimentalFileLinkProps,
   type ExperimentalFileOpenOptions,
   type ExperimentalAppPanel,
+  type ExperimentalActionHistory,
+  type ExperimentalActionHistoryEntry,
   type ExperimentalFixedTabTargetState,
   type ExperimentalOpenFixedTabOptions,
   type ExperimentalPluginFixedTabReference,
   type NewThreadComposerProps,
   type BranchPickerProps,
   type CheckoutState,
+  type ExperimentalThreadGit,
+  type ExperimentalThreadMergeBasePickerProps,
   type ExperimentalPermissionModePickerProps,
   type ExperimentalProviderModelPickerProps,
   type ExperimentalVoiceInputTextareaProps,
@@ -104,7 +118,7 @@ import {
   type DiffProps,
   type SourceCodeProps,
   type JsonValue,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { isComposerDraftEmpty } from "../internal/composer-view.js";
 import {
   appendComposerDraft,
@@ -112,7 +126,10 @@ import {
   reconcileComposerMentions,
   type ComposerHandleTarget,
 } from "../internal/composer-handle.js";
-import { normalizePluginThreadRowStatus } from "../internal/composer-customization-validation.js";
+import {
+  normalizePluginThreadRowStatus,
+  normalizePluginThreadRowSubtitle,
+} from "../internal/composer-customization-validation.js";
 import { normalizeExperimentalFileOpenOptions } from "../internal/file-navigation-validation.js";
 import { experimental_THREAD_ACTION_GROUPS } from "../thread-action-groups.js";
 import {
@@ -122,19 +139,19 @@ import {
 } from "../internal/plugin-app-collector.js";
 
 /**
- * `@get-bb/plugin-sdk/testing/app` — the frontend plugin test harness. Tests a
- * plugin's `app.tsx` source directly under vitest + jsdom, without the bb
+ * `@omnyo/plugin-sdk/testing/app` — the frontend plugin test harness. Tests a
+ * plugin's `app.tsx` source directly under vitest + jsdom, without the Omnyo
  * host or the esbuild bundle:
  *
- * - {@link installTestPluginRuntime} fills `globalThis.__bbPluginRuntime.
- *   pluginSdkApp` with a test implementation of the `@get-bb/plugin-sdk/app`
- *   surface (the same seam `bb plugin build` shims to the real app). The
- *   `@get-bb/plugin-sdk/app` exports look the runtime up when they are called
+ * - {@link installTestPluginRuntime} fills `globalThis.__omnyoPluginRuntime.
+ *   pluginSdkApp` with a test implementation of the `@omnyo/plugin-sdk/app`
+ *   surface (the same seam `omnyo plugin build` shims to the real app). The
+ *   `@omnyo/plugin-sdk/app` exports look the runtime up when they are called
  *   or rendered, so import order does not matter: install the runtime any time
  *   before the first hook runs ({@link loadPluginApp} and {@link renderSlot}
  *   install it for you).
  * - {@link loadPluginApp} runs the definition's setup against a validating
- *   collector (ported from the BB app's interpreter, same error messages)
+ *   collector (ported from the Omnyo app's interpreter, same error messages)
  *   and returns the typed slot registrations.
  * - {@link renderSlot} mounts one registration's component with mock hook
  *   backends: rpc as a method→handler map with a call log, realtime as a
@@ -154,11 +171,13 @@ export interface RpcCall {
   method: string;
   input: unknown;
 }
+
 /** One recorded `useSdk()` call, as `"<area>.<method>"` plus its arguments. */
 export interface SdkCall {
   method: string;
   args: unknown[];
 }
+
 type PluginSdkFakeTree<T> = {
   [Key in keyof T]?: T[Key] extends (...args: never[]) => unknown
     ? T[Key]
@@ -171,14 +190,21 @@ type PluginSdkFakeTree<T> = {
  * methods the slot calls; a call to anything else throws with the missing
  * dot-path so the test fails loudly instead of returning undefined.
  */
-export type PluginSdkTestFakes = PluginSdkFakeTree<PluginBrowserBbSdk>;
+export type PluginSdkTestFakes =
+  PluginSdkFakeTree<experimental_PluginBrowserSdk>;
+
 export type NavigateCall =
   | {
       method: "toThread";
       threadId: string;
-      options?: Parameters<BbNavigate["toThread"]>[1];
+      options?: Parameters<experimental_AppNavigate["toThread"]>[1];
+    }
+  | {
+      method: "experimental_prefetchThreadOpen";
+      threadId: string;
     }
   | { method: "toProject"; projectId: string }
+  | { method: "experimental_openProjectCreator" }
   | {
       method: "toPluginPanel";
       path: string;
@@ -186,11 +212,11 @@ export type NavigateCall =
     }
   | {
       method: "toCompose";
-      options?: Parameters<BbNavigate["toCompose"]>[0];
+      options?: Parameters<experimental_AppNavigate["toCompose"]>[0];
     }
   | {
       method: "openThreadPanel";
-      options: Parameters<BbNavigate["openThreadPanel"]>[0];
+      options: Parameters<experimental_AppNavigate["openThreadPanel"]>[0];
     }
   | { method: "openUrl"; url: string }
   | {
@@ -203,7 +229,9 @@ export type NavigateCall =
     }
   | {
       method: "experimental_openTerminal";
-      options: Parameters<BbNavigate["experimental_openTerminal"]>[0];
+      options: Parameters<
+        experimental_AppNavigate["experimental_openTerminal"]
+      >[0];
     };
 
 export interface ExperimentalFixedTabOpenCall {
@@ -232,6 +260,9 @@ export interface ComposerLog {
   /** Latest host-rendered text effect requested by the plugin. */
   textEffect: PluginComposerTextEffect | null;
   textEffectCalls: Array<PluginComposerTextEffect | null>;
+  /** Latest suggested next message the plugin asked the composer to show. */
+  suggestion: ExperimentalComposerSuggestion | null;
+  suggestionCalls: Array<ExperimentalComposerSuggestion | null>;
   /** Whether this plugin currently holds the composer input lock. */
   inputLocked: boolean;
   inputLockCalls: boolean[];
@@ -267,22 +298,34 @@ interface TestComposerStore {
 }
 
 interface SlotEnv {
+  threadBootstrapData: Readonly<
+    Record<string, import("../app-contract.js").ExperimentalThreadBootstrapData>
+  >;
   rpcClient: PluginRpcClient;
   rpcCalls: RpcCall[];
   realtimeHandlers: Map<string, Set<(payload: unknown) => void>>;
   realtimeConnection: TestRealtimeConnectionStore;
   settingsState: PluginSettingsState;
-  bbContext: BbContext;
+  appContext: experimental_AppContext;
+  visibleAppContext: ExperimentalVisibleAppContext;
   pluginId: string;
   questionFormHost: ExperimentalQuestionFormHost;
-  navigate: BbNavigate;
+  navigate: experimental_AppNavigate;
   navigateCalls: NavigateCall[];
   appPanel: ExperimentalAppPanel;
+  actionHistory: TestActionHistoryStore;
   experimental_fixedTabOpenCalls: ExperimentalFixedTabOpenCall[];
   fixedTabTarget: TestFixedTabTargetStore;
   composer: TestComposerStore;
   composerLog: ComposerLog;
+  threadWork: Readonly<
+    Record<string, ReturnType<PluginSdkApp["experimental_useThreadWork"]>>
+  >;
+  inboxSnapshot: ReturnType<PluginSdkApp["experimental_useInboxSnapshot"]>;
+  projectSidebarItems: readonly import("../app-contract.js").ExperimentalProjectSidebarGroup[];
   sidebarThreads: PluginSidebarThreadsState;
+  chatSelection: TestChatSelectionStore;
+  threadGroupActionCalls: ThreadGroupActionCall[];
   sidebarActions: PluginSidebarThreadActions;
   sidebarActionCalls: SidebarActionCall[];
   environmentArchiveCalls: string[];
@@ -294,12 +337,83 @@ interface SlotEnv {
   sidebarShortcuts: ReadonlyMap<string, PluginSidebarThreadShortcut>;
   sidebarSplitLayout: PluginSidebarSplitLayout | null;
   environmentProviders: PluginEnvironmentProvidersState;
-  sdk: PluginBrowserBbSdk;
+  sdk: experimental_PluginBrowserSdk;
   sdkCalls: SdkCall[];
   providers: PluginProvidersState;
   codeTheme: PluginCodeThemeState;
   branchesState: BranchesState;
   checkoutState: CheckoutState;
+  threadGit: ExperimentalThreadGit | null;
+}
+
+/**
+ * The test stand-in for Omnyo's single undo history. `undo` and `redo` replay the
+ * newest entry the way Cmd+Z and Cmd+Shift+Z do; the label lists are oldest
+ * first.
+ */
+export interface ExperimentalTestActionHistory {
+  readonly undoLabels: string[];
+  readonly redoLabels: string[];
+  undo(): Promise<void>;
+  redo(): Promise<void>;
+}
+
+interface TestActionHistoryStore extends ExperimentalTestActionHistory {
+  record(entry: ExperimentalActionHistoryEntry): void;
+  subscribe(listener: () => void): () => void;
+  getVersion(): number;
+}
+
+function createTestActionHistory(): TestActionHistoryStore {
+  let undoStack: ExperimentalActionHistoryEntry[] = [];
+  let redoStack: ExperimentalActionHistoryEntry[] = [];
+  let version = 0;
+  const listeners = new Set<() => void>();
+
+  const changed = () => {
+    version += 1;
+
+    for (const listener of listeners) listener();
+  };
+
+  const replay = async (direction: "undo" | "redo") => {
+    const entry = (direction === "undo" ? undoStack : redoStack).at(-1);
+
+    if (entry === undefined) return;
+
+    if (direction === "undo") undoStack = undoStack.slice(0, -1);
+    else redoStack = redoStack.slice(0, -1);
+    await act(async () => {
+      changed();
+      await entry[direction]();
+
+      if (direction === "undo") redoStack = [...redoStack, entry];
+      else undoStack = [...undoStack, entry];
+      changed();
+    });
+  };
+
+  return {
+    get undoLabels() {
+      return undoStack.map((entry) => entry.label);
+    },
+    get redoLabels() {
+      return redoStack.map((entry) => entry.label);
+    },
+    record(entry) {
+      undoStack = [...undoStack, entry];
+      redoStack = [];
+      changed();
+    },
+    undo: () => replay("undo"),
+    redo: () => replay("redo"),
+    subscribe(listener) {
+      listeners.add(listener);
+
+      return () => listeners.delete(listener);
+    },
+    getVersion: () => version,
+  };
 }
 
 interface TestFixedTabTargetStore {
@@ -327,6 +441,50 @@ export type TestThreadActionsResolver = (
   thread: PluginThreadActionTarget,
   options: { requestRename(threadId: string): void },
 ) => readonly PluginThreadActionEntry[];
+
+/** One recorded `experimental_useThreadGroupActions()` call. */
+export type ThreadGroupActionCall =
+  | { action: "group"; threadIds: readonly string[] }
+  | { action: "rename"; groupId: string; name: string }
+  | { action: "ungroup"; groupId: string }
+  | { action: "move"; threadId: string; groupId: string | null };
+
+interface TestChatSelectionStore {
+  getSnapshot(): readonly string[];
+  publish(threadIds: readonly string[]): void;
+  replace(threadIds: readonly string[]): void;
+  subscribe(listener: () => void): () => void;
+}
+
+function createChatSelectionStore(
+  initial: readonly string[],
+  writes: (readonly string[])[],
+): TestChatSelectionStore {
+  let snapshot: readonly string[] = [...initial];
+  const listeners = new Set<() => void>();
+
+  const replace = (threadIds: readonly string[]) => {
+    snapshot = [...threadIds];
+
+    for (const listener of listeners) listener();
+  };
+
+  return {
+    getSnapshot: () => snapshot,
+    publish(threadIds) {
+      writes.push([...threadIds]);
+      replace(threadIds);
+    },
+    replace,
+    subscribe(listener) {
+      listeners.add(listener);
+
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+let activeChatSelection: TestChatSelectionStore | null = null;
 
 /** @internal One recorded `experimental_useSidebarThreadActions()` call; kept for plugins built against older SDKs. */
 export interface SidebarActionCall {
@@ -368,6 +526,7 @@ function testComposerMentionText(mention: ComposerMention): string {
         mention.source === "thread-storage"
           ? `thread-storage:${mention.path}`
           : mention.path;
+
       return `@${path}${mention.entryKind === "directory" && !path.endsWith("/") ? "/" : ""}`;
     }
   }
@@ -379,24 +538,29 @@ function createSdkFakeNode(
   calls: SdkCall[],
 ): unknown {
   const callable = function sdkFakeNode() {};
+
   return new Proxy(callable, {
     apply(_target, _thisArg, args: unknown[]) {
       calls.push({ method: path, args });
+
       if (typeof provided !== "function") {
         throw new Error(
           `no sdk fake for "${path}" — add it to renderSlot options.sdk`,
         );
       }
+
       return (provided as (...input: unknown[]) => unknown)(...args);
     },
     get(_target, key) {
       if (typeof key !== "string" || key === "then") return undefined;
+
       const next =
         provided !== null &&
         typeof provided === "object" &&
         !Array.isArray(provided)
           ? (provided as Record<string, unknown>)[key]
           : undefined;
+
       return createSdkFakeNode(
         next,
         path === "" ? key : `${path}.${key}`,
@@ -409,21 +573,24 @@ function createSdkFakeNode(
 function createSdkFake(
   fakes: PluginSdkTestFakes,
   calls: SdkCall[],
-): PluginBrowserBbSdk {
-  return createSdkFakeNode(fakes, "", calls) as PluginBrowserBbSdk;
+): experimental_PluginBrowserSdk {
+  return createSdkFakeNode(fakes, "", calls) as experimental_PluginBrowserSdk;
 }
 
 function TestThreadTitle({ threadId }: { threadId: string }) {
   const env = useSlotEnv("ThreadTitle");
   const thread = env.sidebarThreads.threads.find((row) => row.id === threadId);
+
   if (thread === undefined) return null;
+
   return <span data-thread-title={threadId}>{thread.displayTitle}</span>;
 }
 
 /**
  * `experimental_ThreadStatusGlyph` draws nothing for "none" without a row
  * status, and otherwise exposes what the row asked for as data attributes:
- * the indicator (or "archived"), the row status label and tone, and the size.
+ * the indicator (or "archived"), the row status label and tone, the size,
+ * and the subagent count.
  */
 function TestThreadStatusGlyph({
   indicator,
@@ -431,8 +598,10 @@ function TestThreadStatusGlyph({
   rowStatus = null,
   hideIdleDraftLabel = false,
   size = "default",
+  experimental_subagents,
 }: PluginThreadStatusGlyphProps) {
   if (!archived && indicator === "none" && rowStatus === null) return null;
+
   return (
     <span
       data-thread-status-glyph={archived ? "archived" : indicator}
@@ -440,6 +609,7 @@ function TestThreadStatusGlyph({
       data-row-status-tone={rowStatus?.tone}
       data-hide-idle-draft-label={hideIdleDraftLabel ? "" : undefined}
       data-size={size}
+      data-subagents={experimental_subagents}
     />
   );
 }
@@ -452,6 +622,7 @@ function SlotLifecycleGuard({
   onUnmount: () => void;
 }) {
   useEffect(() => () => onUnmount(), [onUnmount]);
+
   return children;
 }
 
@@ -464,6 +635,7 @@ interface TestRealtimeConnectionStore {
 const SlotEnvContext = createContext<SlotEnv | null>(null);
 
 const NO_THREAD_ACTIONS: TestThreadActionsResolver = () => [];
+
 const NO_THREAD_ACTION_REGISTRATIONS: readonly PluginThreadActionRegistrationInfo[] =
   [];
 
@@ -477,10 +649,14 @@ function useTestThreadActions(
   const entries = useSlotEnv(hook).threadActions(thread, {
     requestRename: options?.requestRename ?? noRenameEditor,
   });
+
   const keys = options?.keys;
+
   if (keys === undefined) return entries;
+
   return keys.flatMap((key) => {
     const entry = entries.find((candidate) => candidate.key === key);
+
     return entry === undefined ? [] : [entry];
   });
 }
@@ -500,6 +676,7 @@ function TestThreadActionsMenuItems({
 }) {
   const rename = requestRename ?? noRenameEditor;
   const entries = useTestThreadActions(hook, thread, { requestRename: rename });
+
   const rows = [
     ...entries.map((entry) => ({
       key: entry.key,
@@ -512,6 +689,7 @@ function TestThreadActionsMenuItems({
       run: () => item.action.run({ requestRename: rename }),
     })),
   ];
+
   return (
     <div role="menu" aria-label="Thread actions">
       {rows.map((row) => (
@@ -541,6 +719,7 @@ function useTestMenuOpenState({
   onCloseAutoFocus?: (event: Event) => void;
 }) {
   const [open, setOpen] = useState(false);
+
   return {
     open,
     show: () => {
@@ -555,7 +734,7 @@ function useTestMenuOpenState({
   };
 }
 
-const TEST_TRIGGER_HOST_CLASS = "bb-test-thread-actions-trigger";
+const TEST_TRIGGER_HOST_CLASS = "omnyo-test-thread-actions-trigger";
 
 function TestThreadActionsMenu({
   thread,
@@ -569,19 +748,22 @@ function TestThreadActionsMenu({
   const triggerElement = useRef<HTMLButtonElement | null>(null);
   useLayoutEffect(() => {
     const element = triggerElement.current;
+
     if (element?.getAttribute("aria-haspopup") !== "menu") {
       throw new Error(
         "experimental_ThreadActionsMenu: `trigger` must spread the props and ref it receives onto the button it renders, or the menu never opens",
       );
     }
+
     if (!element.classList.contains(TEST_TRIGGER_HOST_CLASS)) {
       throw new Error(
         "experimental_ThreadActionsMenu: `trigger` replaced the host's className; merge props.className into its own",
       );
     }
   });
+
   return (
-    <span data-testid="bb-thread-actions-menu" data-thread-id={thread.id}>
+    <span data-testid="omnyo-thread-actions-menu" data-thread-id={thread.id}>
       {trigger({
         ref: triggerElement,
         type: "button",
@@ -614,9 +796,10 @@ function TestThreadActionsContextMenu({
   dragging,
 }: PluginThreadActionsContextMenuProps) {
   const menu = useTestMenuOpenState({ onOpenChange, onCloseAutoFocus });
+
   return (
     <div
-      data-testid="bb-thread-actions-context-menu"
+      data-testid="omnyo-thread-actions-context-menu"
       data-thread-id={thread.id}
       data-disabled={disabled === true ? "true" : "false"}
       data-dragging={dragging === true ? "true" : "false"}
@@ -643,31 +826,34 @@ function TestThreadActionsContextMenu({
 
 function useSlotEnv(hook: string): SlotEnv {
   const env = useContext(SlotEnvContext);
+
   if (!env) {
     throw new Error(
-      `${hook}() needs the test slot environment — mount the component via renderSlot(...) from @get-bb/plugin-sdk/testing/app`,
+      `${hook}() needs the test slot environment — mount the component via renderSlot(...) from @omnyo/plugin-sdk/testing/app`,
     );
   }
+
   return env;
 }
 
 // ---------------------------------------------------------------------------
-// The fake @get-bb/plugin-sdk/app runtime.
+// The fake @omnyo/plugin-sdk/app runtime.
 // ---------------------------------------------------------------------------
 
-/** Same shape (and checks) as the BB app's real definePluginApp. */
+/** Same shape (and checks) as the Omnyo app's real definePluginApp. */
 function definePluginApp(setup: PluginAppSetup): PluginAppDefinition {
   if (typeof setup !== "function") {
     throw new Error("definePluginApp expects a setup function");
   }
-  return Object.freeze({ __bbPluginApp: true as const, setup });
+
+  return Object.freeze({ __omnyoPluginApp: true as const, setup });
 }
 
 function isPluginAppDefinition(value: unknown): value is PluginAppDefinition {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as { __bbPluginApp?: unknown }).__bbPluginApp === true &&
+    (value as { __omnyoPluginApp?: unknown }).__omnyoPluginApp === true &&
     typeof (value as { setup?: unknown }).setup === "function"
   );
 }
@@ -677,7 +863,7 @@ function isPluginAppDefinition(value: unknown): value is PluginAppDefinition {
  * records every public prop as a data attribute so plugin tests can assert
  * what their slot component passed without the real chat engine.
  * `leadingContent` renders inside the stub; each `messageActions` entry
- * renders as a button (`data-testid="bb-thread-chat-action-<id>"`) that
+ * renders as a button (`data-testid="Omnyo-thread-chat-action-<id>"`) that
  * invokes its `run` with a synthetic assistant message reference, so plugin
  * tests can drive the action without the real timeline.
  */
@@ -693,7 +879,7 @@ function TestThreadChat({
 }: ThreadChatProps) {
   return (
     <div
-      data-testid="bb-thread-chat"
+      data-testid="omnyo-thread-chat"
       data-thread-id={threadId}
       data-variant={variant}
       data-layout={layout}
@@ -705,14 +891,16 @@ function TestThreadChat({
       className={className}
     >
       {leadingContent === undefined ? null : (
-        <div data-testid="bb-thread-chat-leading-content">{leadingContent}</div>
+        <div data-testid="omnyo-thread-chat-leading-content">
+          {leadingContent}
+        </div>
       )}
       ThreadChat stub ({threadId})
       {(messageActions ?? []).map((action) => (
         <button
           key={action.id}
           type="button"
-          data-testid={`bb-thread-chat-action-${action.id}`}
+          data-testid={`omnyo-thread-chat-action-${action.id}`}
           data-roles={action.roles === undefined ? "" : action.roles.join(" ")}
           onClick={() => {
             void action.run({
@@ -739,7 +927,7 @@ function TestThreadChat({
  */
 function TestMarkdown({ content, className }: MarkdownProps) {
   return (
-    <div data-testid="bb-markdown" className={className}>
+    <div data-testid="omnyo-markdown" className={className}>
       {content}
     </div>
   );
@@ -755,6 +943,7 @@ function TestUrlLink({
 }: UrlLinkProps) {
   const navigate = useSlotEnv("UrlLink").navigate;
   const normalizedTarget = target?.toLowerCase();
+
   const opensNewBrowsingContext =
     normalizedTarget !== undefined &&
     normalizedTarget !== "" &&
@@ -762,8 +951,10 @@ function TestUrlLink({
     normalizedTarget !== "_parent" &&
     normalizedTarget !== "_top" &&
     normalizedTarget !== "_unfencedtop";
+
   const relTokens = rel?.split(/\s+/u).filter(Boolean) ?? [];
   const normalizedRelTokens = relTokens.map((token) => token.toLowerCase());
+
   const resolvedRel =
     opensNewBrowsingContext && !normalizedRelTokens.includes("opener")
       ? [
@@ -772,6 +963,7 @@ function TestUrlLink({
           ...(normalizedRelTokens.includes("noreferrer") ? [] : ["noreferrer"]),
         ].join(" ")
       : rel;
+
   return (
     <a
       {...anchorProps}
@@ -780,6 +972,7 @@ function TestUrlLink({
       rel={resolvedRel}
       onClick={(event: ReactMouseEvent<HTMLAnchorElement>) => {
         onClick?.(event);
+
         if (
           event.defaultPrevented ||
           event.button !== 0 ||
@@ -792,6 +985,7 @@ function TestUrlLink({
         ) {
           return;
         }
+
         if (navigate.openUrl(href)) event.preventDefault();
       }}
     />
@@ -807,16 +1001,19 @@ function TestFileLink({
 }: ExperimentalFileLinkProps) {
   const navigate = useSlotEnv("experimental_FileLink").navigate;
   const options = normalizeExperimentalFileOpenOptions({ target, location });
+
   const href =
     options === null
       ? undefined
       : `./${encodeURIComponent(options.target.path)}`;
+
   return (
     <a
       {...anchorProps}
       href={href}
       onClick={(event: ReactMouseEvent<HTMLAnchorElement>) => {
         onClick?.(event);
+
         if (
           options === null ||
           event.defaultPrevented ||
@@ -829,6 +1026,7 @@ function TestFileLink({
         ) {
           return;
         }
+
         event.preventDefault();
         navigate.experimental_openFilePreview(options);
       }}
@@ -858,9 +1056,10 @@ function TestNewThreadComposer({
   onSubmit,
 }: NewThreadComposerProps) {
   const [text, setText] = useState(initialPrompt ?? "");
+
   return (
     <div
-      data-testid="bb-new-thread-composer"
+      data-testid="omnyo-new-thread-composer"
       data-default-project-id={defaultProjectId ?? ""}
       data-default-provider-id={defaultProviderId ?? ""}
       data-default-model={defaultModel ?? ""}
@@ -878,14 +1077,14 @@ function TestNewThreadComposer({
       className={className}
     >
       <textarea
-        data-testid="bb-new-thread-composer-input"
+        data-testid="omnyo-new-thread-composer-input"
         placeholder={placeholder}
         value={text}
         onChange={(event) => setText(event.target.value)}
       />
       <button
         type="button"
-        data-testid="bb-new-thread-composer-submit"
+        data-testid="omnyo-new-thread-composer-submit"
         onClick={() => {
           // Untouched submits echo the `default*` seeds back, mirroring the
           // real composer's round-trip guarantee so plugin tests can cover
@@ -932,6 +1131,7 @@ function TestProviderModelPicker({
       }),
     [providerId, model, reasoningLevel, serviceTier],
   );
+
   const reasoningLevels = [
     "none",
     "low",
@@ -945,7 +1145,7 @@ function TestProviderModelPicker({
 
   return (
     <div
-      data-testid="bb-provider-model-picker"
+      data-testid="omnyo-provider-model-picker"
       data-routing-kind={routing?.kind ?? "primary"}
       data-routing-id={
         routing === undefined
@@ -985,6 +1185,7 @@ function TestProviderModelPicker({
             const reasoningLevel = reasoningLevels.find(
               (candidate) => candidate === event.target.value,
             );
+
             if (reasoningLevel === undefined) return;
             setDraft((current) => ({ ...current, reasoningLevel }));
           }}
@@ -995,11 +1196,14 @@ function TestProviderModelPicker({
           onChange={(event) =>
             setDraft((current) => {
               const serviceTier = event.target.value;
+
               if (serviceTier === "") {
                 const next = { ...current };
                 delete next.serviceTier;
+
                 return next;
               }
+
               return { ...current, serviceTier };
             })
           }
@@ -1026,9 +1230,10 @@ function TestBranchPicker({
   disabled,
 }: BranchPickerProps) {
   const inert = hostId === null || projectId === null || disabled === true;
+
   return (
     <div
-      data-testid="bb-branch-picker"
+      data-testid="omnyo-branch-picker"
       data-host-id={hostId ?? ""}
       data-project-id={projectId ?? ""}
       data-disabled={inert ? "true" : "false"}
@@ -1040,6 +1245,7 @@ function TestBranchPicker({
         value={value ?? ""}
         onChange={(event) => {
           const next = event.target.value;
+
           if (next.length === 0) {
             onChange(null);
           } else {
@@ -1048,6 +1254,26 @@ function TestBranchPicker({
         }}
       />
     </div>
+  );
+}
+
+/**
+ * Stand-in for the host-owned merge base picker: a recognizable button with
+ * the requested alignment and no branch loading.
+ */
+function TestThreadMergeBasePicker({
+  align = "end",
+  className,
+}: ExperimentalThreadMergeBasePickerProps) {
+  return (
+    <button
+      type="button"
+      data-testid="omnyo-thread-merge-base-picker"
+      data-align={align}
+      className={className}
+    >
+      Merge base
+    </button>
   );
 }
 
@@ -1065,7 +1291,7 @@ function TestPermissionModePicker({
       aria-label="Permission mode"
       value={value}
       disabled={disabled}
-      data-testid="bb-permission-mode-picker"
+      data-testid="omnyo-permission-mode-picker"
       data-provider-id={providerId}
       data-align={align}
       data-routing-kind={routing?.kind ?? "primary"}
@@ -1079,6 +1305,7 @@ function TestPermissionModePicker({
       className={className}
       onChange={(event) => {
         const permissionMode = event.target.value;
+
         if (
           permissionMode === "accept-edits" ||
           permissionMode === "auto" ||
@@ -1127,7 +1354,7 @@ function TestSourceCode({
 }: SourceCodeProps) {
   return (
     <pre
-      data-testid="bb-source-code"
+      data-testid="omnyo-source-code"
       data-path={path}
       data-overflow={overflow}
       data-highlighted-lines={
@@ -1157,7 +1384,7 @@ function TestDiff({
 }: DiffProps) {
   return (
     <pre
-      data-testid="bb-diff"
+      data-testid="omnyo-diff"
       data-path={path}
       data-view={view}
       data-overflow={overflow}
@@ -1172,7 +1399,9 @@ function TestDiff({
   );
 }
 
-type TestClipboard = (content: ExperimentalClipboardContent) => Promise<boolean>;
+type TestClipboard = (
+  content: ExperimentalClipboardContent,
+) => Promise<boolean>;
 
 let activeClipboard: TestClipboard | null = null;
 
@@ -1182,17 +1411,36 @@ function captureClipboardWrites(
   const writes: ExperimentalClipboardContent[] = [];
   activeClipboard = (content) => {
     writes.push({ ...content });
+
     return result?.(content) ?? Promise.resolve(true);
   };
+
   return writes;
 }
 
 const testPluginSdkApp = {
+  experimental_useProjectSidebarItems: function useProjectSidebarItems() {
+    return useSlotEnv("experimental_useProjectSidebarItems")
+      .projectSidebarItems;
+  },
+  experimental_useInitialLoadPending: function useInitialLoadPending() {
+    useSlotEnv("experimental_useInitialLoadPending");
+  },
   definePluginApp,
   useRpc<
     Contract extends PluginRpcContract = PluginRpcContract,
   >(): PluginRpcClient<Contract> {
     return useSlotEnv("useRpc").rpcClient as PluginRpcClient<Contract>;
+  },
+  experimental_useThreadBootstrapData: function useThreadBootstrapData(
+    threadId: string,
+    method: string,
+  ) {
+    return (
+      useSlotEnv("experimental_useThreadBootstrapData").threadBootstrapData[
+        `${threadId}:${method}`
+      ] ?? { status: "unavailable" as const }
+    );
   },
   useRealtime(channel: string, handler: (payload: unknown) => void): void {
     const env = useSlotEnv("useRealtime");
@@ -1204,11 +1452,14 @@ const testPluginSdkApp = {
     useEffect(() => {
       const listener = (payload: unknown) => handlerRef.current(payload);
       let listeners = env.realtimeHandlers.get(channel);
+
       if (!listeners) {
         listeners = new Set();
         env.realtimeHandlers.set(channel, listeners);
       }
+
       listeners.add(listener);
+
       return () => {
         listeners.delete(listener);
       };
@@ -1218,6 +1469,7 @@ const testPluginSdkApp = {
     const connection = useSlotEnv(
       "useRealtimeConnectionState",
     ).realtimeConnection;
+
     return useSyncExternalStore(
       connection.subscribe,
       connection.getSnapshot,
@@ -1227,30 +1479,66 @@ const testPluginSdkApp = {
   useSettings(): PluginSettingsState {
     return useSlotEnv("useSettings").settingsState;
   },
-  useBbContext(): BbContext {
-    return useSlotEnv("useBbContext").bbContext;
+  experimental_useVisibleAppContext: function useVisibleAppContext() {
+    return useSlotEnv("experimental_useVisibleAppContext").visibleAppContext;
   },
-  experimental_usePluginId(): string {
+  experimental_useAppContext:
+    function useAppContext(): experimental_AppContext {
+      return useSlotEnv("experimental_useAppContext").appContext;
+    },
+  experimental_useInboxSnapshot: function useInboxSnapshot() {
+    return useSlotEnv("experimental_useInboxSnapshot").inboxSnapshot;
+  },
+  experimental_useThreadWork: function useThreadWork(threadId) {
+    const work = useSlotEnv("experimental_useThreadWork").threadWork;
+
+    return threadId === null ? null : (work[threadId] ?? null);
+  },
+  experimental_usePluginId: function usePluginId(): string {
     return useSlotEnv("experimental_usePluginId").pluginId;
   },
-  experimental_useQuestionFormHost(): ExperimentalQuestionFormHost {
-    return useSlotEnv("experimental_useQuestionFormHost").questionFormHost;
-  },
-  useBbNavigate(): BbNavigate {
-    return useSlotEnv("useBbNavigate").navigate;
-  },
-  experimental_useAppPanel(): ExperimentalAppPanel {
+  experimental_useQuestionFormHost:
+    function useQuestionFormHost(): ExperimentalQuestionFormHost {
+      return useSlotEnv("experimental_useQuestionFormHost").questionFormHost;
+    },
+  experimental_useAppNavigate:
+    function useAppNavigate(): experimental_AppNavigate {
+      return useSlotEnv("experimental_useAppNavigate").navigate;
+    },
+  experimental_useAppPanel: function useAppPanel(): ExperimentalAppPanel {
     return useSlotEnv("experimental_useAppPanel").appPanel;
   },
-  experimental_useFixedTabTarget<Target extends JsonValue>(
+  experimental_useActionHistory:
+    function useActionHistory(): ExperimentalActionHistory {
+      const store = useSlotEnv("experimental_useActionHistory").actionHistory;
+      useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
+      const canUndo = store.undoLabels.length > 0;
+      const canRedo = store.redoLabels.length > 0;
+
+      return useMemo(
+        () => ({
+          record: (entry) => store.record(entry),
+          undo: () => store.undo(),
+          redo: () => store.redo(),
+          canUndo,
+          canRedo,
+        }),
+        [store, canUndo, canRedo],
+      );
+    },
+  experimental_useFixedTabTarget: function useFixedTabTarget<
+    Target extends JsonValue,
+  >(
     tab: ExperimentalPluginFixedTabReference<Target>,
   ): ExperimentalFixedTabTargetState<Target> | null {
     const store = useSlotEnv("experimental_useFixedTabTarget").fixedTabTarget;
+
     const state = useSyncExternalStore(
       store.subscribe,
       store.getSnapshot,
       store.getSnapshot,
     );
+
     if (
       state === null ||
       state.panelId !== tab.panelId ||
@@ -1259,11 +1547,13 @@ const testPluginSdkApp = {
     ) {
       return null;
     }
+
     try {
       if (!tab.experimental_target.validate(state.target)) return null;
     } catch {
       return null;
     }
+
     return {
       clear: () => store.clear(state.sequence),
       sequence: state.sequence,
@@ -1277,6 +1567,7 @@ const testPluginSdkApp = {
       composer.getVersionSnapshot,
       composer.getVersionSnapshot,
     );
+
     return composer.api;
   },
   useComposers(): readonly PluginComposerApi[] {
@@ -1286,13 +1577,47 @@ const testPluginSdkApp = {
       composer.getVersionSnapshot,
       composer.getVersionSnapshot,
     );
+
     return composer.apiList;
   },
   ThreadChat: TestThreadChat,
+  experimental_ResponsiveDrawerShell: ({
+    open,
+    children,
+    srLabel,
+    labelledBy,
+    describedBy,
+    contentClassName,
+    onOpenChange,
+    onEscapeKeyDown,
+  }) => (
+    <div
+      role="dialog"
+      aria-label={srLabel}
+      aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
+      className={contentClassName}
+      hidden={!open}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        onEscapeKeyDown?.(event.nativeEvent);
+
+        if (!event.nativeEvent.defaultPrevented) onOpenChange(false);
+      }}
+    >
+      {children}
+    </div>
+  ),
   Markdown: TestMarkdown,
+  experimental_ImagePreview: ({ src, alt, className }) => (
+    <img src={src} alt={alt} className={className} loading="lazy" />
+  ),
   experimental_FileLink: TestFileLink,
   experimental_Icon: ({ name, fallback, ...props }) => (
     <span {...props} data-icon={name} data-icon-fallback={fallback} />
+  ),
+  experimental_ProjectIcon: ({ projectId, ...props }) => (
+    <span {...props} aria-hidden="true" data-project-icon={projectId} />
   ),
   experimental_ProviderIcon: ({
     providerKind,
@@ -1324,21 +1649,72 @@ const testPluginSdkApp = {
   experimental_ProviderModelPicker: TestProviderModelPicker,
   experimental_PermissionModePicker: TestPermissionModePicker,
   experimental_BranchPicker: TestBranchPicker,
-  experimental_useBranches(): BranchesState {
+  experimental_useBranches: function useBranches(): BranchesState {
     return useSlotEnv("experimental_useBranches").branchesState;
   },
-  experimental_useCheckoutState(): CheckoutState {
+  experimental_useCheckoutState: function useCheckoutState(): CheckoutState {
     return useSlotEnv("experimental_useCheckoutState").checkoutState;
   },
+  experimental_useThreadGit:
+    function useThreadGit(): ExperimentalThreadGit | null {
+      return useSlotEnv("experimental_useThreadGit").threadGit;
+    },
+  experimental_ThreadMergeBasePicker: TestThreadMergeBasePicker,
   experimental_SourceCode: TestSourceCode,
   experimental_Diff: TestDiff,
-  experimental_useSidebarThreads(): PluginSidebarThreadsState {
-    return useSlotEnv("experimental_useSidebarThreads").sidebarThreads;
+  experimental_useSidebarThreads:
+    function useSidebarThreads(): PluginSidebarThreadsState {
+      return useSlotEnv("experimental_useSidebarThreads").sidebarThreads;
+    },
+  experimental_useChatSelection:
+    function useChatSelection(): readonly string[] {
+      const store = useSlotEnv("experimental_useChatSelection").chatSelection;
+
+      return useSyncExternalStore(
+        store.subscribe,
+        store.getSnapshot,
+        store.getSnapshot,
+      );
+    },
+  experimental_setChatSelection(threadIds: readonly string[]): void {
+    activeChatSelection?.publish(threadIds);
   },
-  experimental_useProviders(): PluginProvidersState {
+  experimental_useThreadGroupActions:
+    function useThreadGroupActions(): PluginThreadGroupActions {
+      const { chatSelection, threadGroupActionCalls } = useSlotEnv(
+        "experimental_useThreadGroupActions",
+      );
+
+      return useMemo(
+        () => ({
+          async group(threadIds: readonly string[]) {
+            threadGroupActionCalls.push({
+              action: "group",
+              threadIds: [...threadIds],
+            });
+            chatSelection.replace([]);
+
+            return threadIds.length > 0
+              ? `grp_test_${threadGroupActionCalls.length}`
+              : null;
+          },
+          async rename(groupId: string, name: string) {
+            threadGroupActionCalls.push({ action: "rename", groupId, name });
+          },
+          async ungroup(groupId: string) {
+            threadGroupActionCalls.push({ action: "ungroup", groupId });
+          },
+          async move(threadId: string, groupId: string | null) {
+            threadGroupActionCalls.push({ action: "move", threadId, groupId });
+          },
+        }),
+        [chatSelection, threadGroupActionCalls],
+      );
+    },
+  experimental_useProviders: function useProviders(): PluginProvidersState {
     return useSlotEnv("experimental_useProviders").providers;
   },
-  experimental_useCodeTheme(): PluginCodeThemeState {
+  experimental_useCodeTheme: function useCodeTheme(): PluginCodeThemeState {
     return useSlotEnv("experimental_useCodeTheme").codeTheme;
   },
   experimental_copyToClipboard(
@@ -1346,10 +1722,14 @@ const testPluginSdkApp = {
   ): Promise<boolean> {
     return activeClipboard?.(content) ?? Promise.resolve(true);
   },
-  experimental_useSidebarThreadActions(): PluginSidebarThreadActions {
-    return useSlotEnv("experimental_useSidebarThreadActions").sidebarActions;
+  experimental_getNativeFileResolver() {
+    return null;
   },
-  experimental_useThreadActions(
+  experimental_useSidebarThreadActions:
+    function useSidebarThreadActions(): PluginSidebarThreadActions {
+      return useSlotEnv("experimental_useSidebarThreadActions").sidebarActions;
+    },
+  experimental_useThreadActions: function useThreadActions(
     thread: PluginThreadActionTarget,
     options?: PluginThreadActionsOptions,
   ): readonly PluginThreadActionEntry[] {
@@ -1359,43 +1739,57 @@ const testPluginSdkApp = {
       options,
     );
   },
-  experimental_useArchiveEnvironmentThreads(): (
-    environmentId: string,
-  ) => Promise<void> {
-    const calls = useSlotEnv(
-      "experimental_useArchiveEnvironmentThreads",
-    ).environmentArchiveCalls;
-    return useCallback(
-      async (environmentId: string) => {
-        calls.push(environmentId);
-      },
-      [calls],
-    );
-  },
-  experimental_useThreadActionRegistrations(): readonly PluginThreadActionRegistrationInfo[] {
-    return useSlotEnv("experimental_useThreadActionRegistrations")
-      .threadActionRegistrations;
-  },
+  experimental_useArchiveEnvironmentThreads:
+    function useArchiveEnvironmentThreads(): (
+      environmentId: string,
+    ) => Promise<void> {
+      const calls = useSlotEnv(
+        "experimental_useArchiveEnvironmentThreads",
+      ).environmentArchiveCalls;
+
+      return useCallback(
+        async (environmentId: string) => {
+          calls.push(environmentId);
+        },
+        [calls],
+      );
+    },
+  experimental_useThreadActionRegistrations:
+    function useThreadActionRegistrations(): readonly PluginThreadActionRegistrationInfo[] {
+      return useSlotEnv("experimental_useThreadActionRegistrations")
+        .threadActionRegistrations;
+    },
   experimental_ThreadActionsMenu: TestThreadActionsMenu,
   experimental_ThreadActionsContextMenu: TestThreadActionsContextMenu,
   experimental_THREAD_ACTION_GROUPS,
-  experimental_useSidebarThreadSplit(threadId): PluginSidebarThreadSplit {
+  experimental_useSidebarThreadSplit: function useSidebarThreadSplit(
+    threadId,
+  ): PluginSidebarThreadSplit {
     const env = useSlotEnv("experimental_useSidebarThreadSplit");
-    return useMemo(
-      () => ({
+
+    return useMemo(() => {
+      const panes =
+        env.sidebarSplitLayout?.panes.map((pane) => ({
+          paneId: pane.paneId,
+          rect: pane.rect,
+          isMe: pane.threadId === threadId,
+          isFocused: pane.isFocused,
+        })) ?? [];
+
+      return {
         splitProps: {
           onPointerDown: () => {
             env.sidebarActionCalls.push({ method: "open", threadId });
           },
         },
         isAvailable: true,
-        layout: null,
-      }),
-      [env, threadId],
-    );
+        layout: panes.some((pane) => pane.isMe) ? { panes } : null,
+      };
+    }, [env, threadId]);
   },
   useSidebarThreadDraft(threadId): PluginSidebarThreadDraftState {
     const env = useSlotEnv("useSidebarThreadDraft");
+
     return useMemo(
       () => ({ hasUnsubmittedDraft: env.sidebarDraftThreadIds.has(threadId) }),
       [env, threadId],
@@ -1406,6 +1800,7 @@ const testPluginSdkApp = {
   },
   useSidebarThreadRowStatus(threadId): PluginSidebarThreadRowStatus | null {
     const env = useSlotEnv("useSidebarThreadRowStatus");
+
     return env.sidebarRowStatuses.get(threadId) ?? null;
   },
   useSidebarThreadRowStatuses(): ReadonlyMap<
@@ -1419,38 +1814,48 @@ const testPluginSdkApp = {
   },
   useSidebarThreadShortcut(threadId): PluginSidebarThreadShortcut | null {
     const env = useSlotEnv("useSidebarThreadShortcut");
+
     return env.sidebarShortcuts.get(threadId) ?? null;
   },
   ThreadTitle: TestThreadTitle,
   experimental_ThreadStatusGlyph: TestThreadStatusGlyph,
+  experimental_threadIndicators: threadIndicators,
+  experimental_ThreadAttention: ({ threadId }) => (
+    <div data-native-thread-attention={threadId} />
+  ),
   useEnvironmentProviders(): PluginEnvironmentProvidersState {
     return useSlotEnv("useEnvironmentProviders").environmentProviders;
   },
-  useSdk(): PluginBrowserBbSdk {
+  useSdk(): experimental_PluginBrowserSdk {
     return useSlotEnv("useSdk").sdk;
   },
-  experimental_useSidebarThreadPullRequest(
-    threadId,
-  ): PluginSidebarThreadPullRequestState {
-    const env = useSlotEnv("experimental_useSidebarThreadPullRequest");
-    return useMemo(
-      () => ({
-        isLoading: false,
-        pullRequest: env.sidebarPullRequests.get(threadId) ?? null,
-      }),
-      [env, threadId],
-    );
-  },
+  experimental_useSidebarThreadPullRequest:
+    function useSidebarThreadPullRequest(
+      threadId,
+    ): PluginSidebarThreadPullRequestState {
+      const env = useSlotEnv("experimental_useSidebarThreadPullRequest");
+
+      return useMemo(
+        () => ({
+          isLoading: false,
+          pullRequest: env.sidebarPullRequests.get(threadId) ?? null,
+        }),
+        [env, threadId],
+      );
+    },
   useComposerView(): ComposerView {
     const composer = useSlotEnv("useComposerView").composer;
+
     const version = useSyncExternalStore(
       composer.subscribe,
       composer.getVersionSnapshot,
       composer.getVersionSnapshot,
     );
+
     return useMemo(() => {
       const text = composer.getText();
       const attachmentCount = composer.getAttachmentCount();
+
       return {
         scope: composer.getScope(),
         layout: composer.getLayout(),
@@ -1461,26 +1866,27 @@ const testPluginSdkApp = {
         },
         run: composer.getRun(),
       };
+      // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [composer, version]);
   },
 } satisfies PluginSdkApp;
 
 interface PluginRuntimeHost {
-  __bbPluginRuntime?: { pluginSdkApp?: unknown; react?: unknown };
+  __omnyoPluginRuntime?: { pluginSdkApp?: unknown; react?: unknown };
 }
 
 /**
- * Install the test runtime at `globalThis.__bbPluginRuntime.pluginSdkApp`,
- * plus the React the `@get-bb/plugin-sdk/app` components render through.
+ * Install the test runtime at `globalThis.__omnyoPluginRuntime.pluginSdkApp`,
+ * plus the React the `@omnyo/plugin-sdk/app` components render through.
  * Idempotent per module instance. Call it before the first SDK hook runs or
  * SDK component renders; when the plugin's modules are imported does not
  * matter.
  */
 export function installTestPluginRuntime(): void {
   const host = globalThis as PluginRuntimeHost;
-  host.__bbPluginRuntime = {
-    ...host.__bbPluginRuntime,
-    react: host.__bbPluginRuntime?.react ?? React,
+  host.__omnyoPluginRuntime = {
+    ...host.__omnyoPluginRuntime,
+    react: host.__omnyoPluginRuntime?.react ?? React,
     pluginSdkApp: testPluginSdkApp,
   };
 }
@@ -1493,6 +1899,9 @@ export interface CapturedPluginApp {
   homepageSections: PluginHomepageSectionRegistration[];
   settingsSections: PluginSettingsSectionRegistration[];
   appOverlays: ExperimentalAppOverlayRegistration[];
+  sidebarFooterCards: ExperimentalSidebarFooterCardRegistration[];
+  titleBarCenters: ExperimentalTitleBarCenterRegistration[];
+  sidebarEntries: ExperimentalSidebarEntryRegistration[];
   navPanels: PluginNavPanelRegistration[];
   threadPanelActions: PluginThreadPanelActionRegistration[];
   newThreadPanelActions: PluginNewThreadPanelActionRegistration[];
@@ -1502,6 +1911,8 @@ export interface CapturedPluginApp {
   experimentalSidebarFooterItems: CollectedExperimentalSidebarFooterItem[];
   threadLists: PluginThreadListRegistration[];
   threadHeaderActions: PluginThreadHeaderActionRegistration[];
+  threadCompanions: ExperimentalThreadCompanionRegistration[];
+  threadViews: PluginThreadViewRegistration[];
   threadActions: PluginThreadActionRegistration<unknown>[];
   browserToolbarActions: ExperimentalPluginBrowserToolbarActionRegistration[];
   fileOpeners: PluginFileOpenerRegistration[];
@@ -1535,14 +1946,17 @@ export async function loadPluginApp(
 ): Promise<CapturedPluginApp> {
   installTestPluginRuntime();
   const resolved = typeof source === "function" ? await source() : source;
+
   const definition = isPluginAppDefinition(resolved)
     ? resolved
     : (resolved as PluginAppModule).default;
+
   if (!isPluginAppDefinition(definition)) {
     throw new Error(
-      "the bundle's default export is not definePluginApp(...) from @get-bb/plugin-sdk/app",
+      "the bundle's default export is not definePluginApp(...) from @omnyo/plugin-sdk/app",
     );
   }
+
   return collectPluginAppRegistrations(definition);
 }
 
@@ -1555,6 +1969,8 @@ export interface ContentScriptTestMountOptions {
    * thread-row status API. Current-host behavior is enabled by default.
    */
   omitExperimentalThreadRowStatus?: boolean;
+  /** Simulate a host that predates sidebar subtitles. */
+  omitExperimentalThreadRowSubtitle?: boolean;
   /**
    * Host result for `experimental_copyToClipboard()` writes, which are
    * recorded in `inspection.experimental_clipboardWrites` until another
@@ -1576,6 +1992,13 @@ export interface MountedPluginContentScripts {
     readonly disposed: boolean;
     readonly threadRowStatusCalls: readonly ContentScriptThreadRowStatusCall[];
     getThreadRowStatus(threadId: string): PluginComposerThreadRowStatus | null;
+    readonly experimental_threadRowSubtitleCalls: readonly {
+      threadId: string;
+      subtitle: ExperimentalThreadRowSubtitle | null;
+    }[];
+    experimental_getThreadRowSubtitle(
+      threadId: string,
+    ): ExperimentalThreadRowSubtitle | null;
     /** Every `experimental_copyToClipboard()` write, in order. */
     readonly experimental_clipboardWrites: readonly ExperimentalClipboardContent[];
   };
@@ -1596,35 +2019,54 @@ export async function mountPluginContentScripts(
 ): Promise<MountedPluginContentScripts> {
   const controller = new AbortController();
   const generation = options.generation ?? 1;
+
   const mounted: Array<{
     id: string;
     dispose: PluginContentScriptDisposer | null;
   }> = [];
+
   const threadRowStatuses = new Map<string, PluginComposerThreadRowStatus>();
   const threadRowStatusCalls: ContentScriptThreadRowStatusCall[] = [];
+  const threadRowSubtitles = new Map<string, ExperimentalThreadRowSubtitle>();
+
+  const threadRowSubtitleCalls: {
+    threadId: string;
+    subtitle: ExperimentalThreadRowSubtitle | null;
+  }[] = [];
+
   const experimental_clipboardWrites = captureClipboardWrites(
     options.experimental_copyToClipboard,
   );
+
   let disposed = false;
+
   const setThreadRowStatus = (threadId: unknown, status: unknown): void => {
     if (controller.signal.aborted) return;
+
     if (typeof threadId !== "string" || threadId.trim().length === 0) {
       console.warn(
-        `bb plugin "${options.pluginId}": contentScript.experimental_setThreadRowStatus: "threadId" must be a non-empty string`,
+        `omnyo plugin "${options.pluginId}": contentScript.experimental_setThreadRowStatus: "threadId" must be a non-empty string`,
       );
+
       return;
     }
+
     const normalizedThreadId = threadId.trim();
+
     const normalizedStatus = normalizePluginThreadRowStatus(status, (reason) =>
-      console.warn(`bb plugin "${options.pluginId}": ${reason}`),
+      console.warn(`omnyo plugin "${options.pluginId}": ${reason}`),
     );
+
     if (normalizedStatus === undefined) return;
+
     const recordedStatus =
       normalizedStatus === null ? null : { ...normalizedStatus };
+
     threadRowStatusCalls.push({
       threadId: normalizedThreadId,
       status: recordedStatus,
     });
+
     if (recordedStatus === null) {
       threadRowStatuses.delete(normalizedThreadId);
     } else {
@@ -1636,8 +2078,10 @@ export async function mountPluginContentScripts(
     if (disposed) return;
     disposed = true;
     controller.abort();
+
     for (const script of [...mounted].reverse()) {
       if (script.dispose === null) continue;
+
       try {
         await script.dispose();
       } catch (error) {
@@ -1646,7 +2090,9 @@ export async function mountPluginContentScripts(
         );
       }
     }
+
     threadRowStatuses.clear();
+    threadRowSubtitles.clear();
   };
 
   try {
@@ -1658,12 +2104,53 @@ export async function mountPluginContentScripts(
         ...(!options.omitExperimentalThreadRowStatus
           ? { experimental_setThreadRowStatus: setThreadRowStatus }
           : {}),
+        ...(!options.omitExperimentalThreadRowSubtitle
+          ? {
+              experimental_setThreadRowSubtitle: (
+                threadId: unknown,
+                subtitle: unknown,
+              ) => {
+                if (controller.signal.aborted) return;
+
+                if (
+                  typeof threadId !== "string" ||
+                  threadId.trim().length === 0
+                ) {
+                  console.warn(
+                    `omnyo plugin "${options.pluginId}": contentScript.experimental_setThreadRowSubtitle: "threadId" must be a non-empty string`,
+                  );
+
+                  return;
+                }
+
+                const normalized = normalizePluginThreadRowSubtitle(
+                  subtitle,
+                  (reason) =>
+                    console.warn(
+                      `omnyo plugin "${options.pluginId}": ${reason}`,
+                    ),
+                );
+
+                if (normalized === undefined) return;
+                const id = threadId.trim();
+                threadRowSubtitleCalls.push({
+                  threadId: id,
+                  subtitle: normalized,
+                });
+
+                if (normalized === null) threadRowSubtitles.delete(id);
+                else threadRowSubtitles.set(id, normalized);
+              },
+            }
+          : {}),
       });
+
       if (result !== undefined && typeof result !== "function") {
         throw new Error(
           `content script "${registration.id}" mount must return a cleanup function, a promise of one, or nothing`,
         );
       }
+
       mounted.push({ id: registration.id, dispose: result ?? null });
     }
   } catch (error) {
@@ -1688,7 +2175,19 @@ export async function mountPluginContentScripts(
       },
       getThreadRowStatus(threadId) {
         const status = threadRowStatuses.get(threadId);
+
         return status === undefined ? null : { ...status };
+      },
+      get experimental_threadRowSubtitleCalls() {
+        return threadRowSubtitleCalls.map(({ threadId, subtitle }) => ({
+          threadId,
+          subtitle: subtitle === null ? null : { ...subtitle },
+        }));
+      },
+      experimental_getThreadRowSubtitle(threadId) {
+        const subtitle = threadRowSubtitles.get(threadId);
+
+        return subtitle === undefined ? null : { ...subtitle };
       },
       experimental_clipboardWrites,
     },
@@ -1718,10 +2217,15 @@ export interface RenderSlotOptions<
    * message (what the real rpc client surfaces).
    */
   rpc?: PluginRpcTestHandlers<Contract>;
+  /** Thread and method keys use `${threadId}:${method}`. Values come from the conversation bootstrap. */
+  threadBootstrapData?: Readonly<
+    Record<string, import("../app-contract.js").ExperimentalThreadBootstrapData>
+  >;
   /** `useSettings()` values; omitted → `{ values: undefined, isLoading: false }`. */
   settings?: Record<string, string | number | boolean>;
-  /** `useBbContext()` selection; both default to null. */
+  /** `experimental_useAppContext()` selection; both default to null. */
   context?: { projectId?: string | null; threadId?: string | null };
+  visibleContext?: ExperimentalVisibleAppContext;
   /** `experimental_usePluginId()` value; defaults to `test-plugin`. */
   pluginId?: string;
   /** Initial `useRealtimeConnectionState()` value; defaults to `connected`. */
@@ -1749,7 +2253,16 @@ export interface RenderSlotOptions<
    * Threads and projects `experimental_useSidebarThreads()` reports. Omitted →
    * a ready, empty list. Pass `{ status: "loading" }` to test that branch.
    */
+  inboxSnapshot?: Partial<
+    ReturnType<PluginSdkApp["experimental_useInboxSnapshot"]>
+  >;
+  projectSidebarItems?: readonly import("../app-contract.js").ExperimentalProjectSidebarGroup[];
   sidebarThreads?: Partial<PluginSidebarThreadsState>;
+  /** The chats `experimental_useChatSelection()` starts with. Omitted → none. */
+  experimental_chatSelection?: readonly string[];
+  experimental_threadWork?: Readonly<
+    Record<string, ReturnType<PluginSdkApp["experimental_useThreadWork"]>>
+  >;
   /**
    * The provider directory `experimental_useProviders()` reports. Omitted →
    * a ready, empty list. Pass `{ status: "loading" }` to test that branch.
@@ -1772,6 +2285,12 @@ export interface RenderSlotOptions<
   /** Checkout facts `experimental_useCheckoutState()` reports. */
   checkoutState?: Partial<CheckoutState>;
   /**
+   * What `experimental_useThreadGit()` reports. Omitted → null, a thread
+   * without a git workspace. The fake `experimental_ThreadMergeBasePicker`
+   * renders a button with `data-testid="Omnyo-thread-merge-base-picker"`.
+   */
+  threadGit?: ExperimentalThreadGit | null;
+  /**
    * Pull requests `experimental_useSidebarThreadPullRequest()` reports, keyed
    * by thread id. Omitted → every thread reports none.
    */
@@ -1792,7 +2311,10 @@ export interface RenderSlotOptions<
    * null.
    */
   sidebarShortcuts?: Record<string, PluginSidebarThreadShortcut>;
-  /** The split layout `useSidebarSplitLayout()` reports. Omitted → null. */
+  /**
+   * The split layout `useSidebarSplitLayout()` reports, and the source of each
+   * thread's `experimental_useSidebarThreadSplit().layout`. Omitted → null.
+   */
   sidebarSplitLayout?: PluginSidebarSplitLayout;
   /**
    * What `experimental_useThreadActions()` reports for a thread, in menu
@@ -1815,19 +2337,25 @@ export interface RenderSlotOptions<
    * in `inspection.sdkCalls`; a call to a method you did not provide throws.
    */
   sdk?: PluginSdkTestFakes;
-  /** Host acceptance for `useBbNavigate().openThreadPanel`. */
+  /** Host acceptance for `experimental_useAppNavigate().openThreadPanel`. */
   openThreadPanel?: (
-    options: Parameters<BbNavigate["openThreadPanel"]>[0],
+    options: Parameters<experimental_AppNavigate["openThreadPanel"]>[0],
   ) => boolean;
+  /** Host acceptance for the add-project picker. */
+  openProjectCreator?: NonNullable<
+    experimental_AppNavigate["experimental_openProjectCreator"]
+  >;
   /** Host acceptance for URL intents from the hook or `UrlLink`. */
   openUrl?: (url: string) => boolean;
   /** Host acceptance for preview intents from the hook or file link. */
   openFilePreview?: (options: ExperimentalFileOpenOptions) => boolean;
   /** Host acceptance for preferred-external file intents. */
   openFileExternally?: (options: ExperimentalFileOpenOptions) => boolean;
-  /** Host acceptance for `useBbNavigate().experimental_openTerminal`. */
+  /** Host acceptance for `experimental_useAppNavigate().experimental_openTerminal`. */
   openTerminal?: (
-    options: Parameters<BbNavigate["experimental_openTerminal"]>[0],
+    options: Parameters<
+      experimental_AppNavigate["experimental_openTerminal"]
+    >[0],
   ) => boolean;
   /** Host acceptance for an owner-scoped fixed-tab selection. */
   experimental_openFixedTab?: (call: ExperimentalFixedTabOpenCall) => boolean;
@@ -1843,7 +2371,7 @@ export interface RenderSlotOptions<
 export interface RenderedSlotBehaviorDrivers {
   /**
    * Push a realtime event to `useRealtime(channel, …)` subscribers, wrapped
-   * in act. The payload is JSON-round-tripped like `bb.realtime.publish`.
+   * in act. The payload is JSON-round-tripped like `api.realtime.publish`.
    */
   emitRealtime(channel: string, payload: unknown): Promise<void>;
   /** Drive the lifecycle of the same connection used by realtime events. */
@@ -1860,12 +2388,18 @@ export interface RenderedSlotBehaviorDrivers {
 export interface RenderedSlotInspectionState {
   /** Every `useRpc().call`, in order. */
   readonly rpcCalls: RpcCall[];
-  /** Every `useBbNavigate()` call, in order. */
+  /** Every `experimental_useAppNavigate()` call, in order. */
   readonly navigateCalls: NavigateCall[];
   /** Every validated `experimental_useAppPanel().openFixedTab` call. */
   readonly experimental_fixedTabOpenCalls: ExperimentalFixedTabOpenCall[];
+  /** Entries recorded through `experimental_useActionHistory()`, with Cmd+Z / Cmd+Shift+Z drivers. */
+  readonly experimental_actionHistory: ExperimentalTestActionHistory;
   /** @internal Every `experimental_useSidebarThreadActions()` call, in order; kept for plugins built against older SDKs. */
   readonly sidebarActionCalls: SidebarActionCall[];
+  /** Every `experimental_setChatSelection()` write, in order. */
+  readonly experimental_chatSelectionWrites: (readonly string[])[];
+  /** Every `experimental_useThreadGroupActions()` call, in order. */
+  readonly experimental_threadGroupActionCalls: ThreadGroupActionCall[];
   /**
    * The environment id of every `experimental_useArchiveEnvironmentThreads()`
    * call, in order.
@@ -1886,7 +2420,7 @@ export interface RenderedSlotLifecycleControls {
 }
 
 /**
- * Testing Library result plus BB-specific helpers. Direct members are
+ * Testing Library result plus Omnyo-specific helpers. Direct members are
  * retained for compatibility; named views make intent explicit in new tests.
  */
 export interface RenderedSlot
@@ -1901,6 +2435,7 @@ export interface RenderedSlot
 
 function strictJsonRoundTrip(value: unknown, label: string): JsonValue {
   const ancestors = new Set<object>();
+
   function visit(current: unknown, path: string): void {
     if (
       current === null ||
@@ -1909,31 +2444,42 @@ function strictJsonRoundTrip(value: unknown, label: string): JsonValue {
     ) {
       return;
     }
+
     if (typeof current === "number") {
       if (!Number.isFinite(current)) {
         throw new Error(`${label} at ${path} contains a non-finite number`);
       }
+
       return;
     }
+
     if (typeof current !== "object") {
       throw new Error(`${label} at ${path} is not a JSON value`);
     }
+
     if (ancestors.has(current)) {
       throw new Error(`${label} at ${path} is cyclic`);
     }
+
     ancestors.add(current);
+
     try {
       if (Array.isArray(current)) {
         current.forEach((item, index) => visit(item, `${path}[${index}]`));
+
         return;
       }
+
       const prototype = Object.getPrototypeOf(current) as object | null;
+
       if (prototype !== Object.prototype && prototype !== null) {
         throw new Error(`${label} at ${path} must be a plain JSON object`);
       }
+
       if (Reflect.ownKeys(current).some((key) => typeof key === "symbol")) {
         throw new Error(`${label} at ${path} contains a symbol key`);
       }
+
       for (const [key, child] of Object.entries(current)) {
         visit(child, `${path}.${key}`);
       }
@@ -1941,7 +2487,9 @@ function strictJsonRoundTrip(value: unknown, label: string): JsonValue {
       ancestors.delete(current);
     }
   }
+
   visit(value, "$");
+
   return JSON.parse(JSON.stringify(value)) as JsonValue;
 }
 
@@ -1955,47 +2503,60 @@ export function renderSlot<
 ): RenderedSlot {
   installTestPluginRuntime();
   const rpcCalls: RpcCall[] = [];
+
   const rpcHandlers = (options.rpc ?? {}) as Record<
     string,
     (input: unknown) => unknown
   >;
+
   const rpcClient: PluginRpcClient = {
     async call(method, input) {
       const normalizedInput =
         input === undefined
           ? null
           : strictJsonRoundTrip(input, `rpc "${method}" input`);
+
       rpcCalls.push({ method, input: normalizedInput });
       const handler = rpcHandlers[method];
+
       if (!handler) {
         throw new Error(
           `no rpc handler for "${method}" — add it to renderSlot options.rpc`,
         );
       }
+
       const result = await handler(normalizedInput);
+
       return strictJsonRoundTrip(result, `rpc "${method}" result`);
     },
   };
 
   const realtimeHandlers = new Map<string, Set<(payload: unknown) => void>>();
+
   let realtimeConnectionState =
     options.realtimeConnectionState ?? ("connected" as const);
+
   const realtimeConnectionListeners = new Set<() => void>();
+
   const realtimeConnection: TestRealtimeConnectionStore = {
     getSnapshot: () => realtimeConnectionState,
     subscribe(listener) {
       realtimeConnectionListeners.add(listener);
+
       return () => realtimeConnectionListeners.delete(listener);
     },
     setState(state) {
       if (state === realtimeConnectionState) return;
       realtimeConnectionState = state;
+
       for (const listener of realtimeConnectionListeners) listener();
     },
   };
 
   const navigateCalls: NavigateCall[] = [];
   const experimental_fixedTabOpenCalls: ExperimentalFixedTabOpenCall[] = [];
+  const actionHistory = createTestActionHistory();
+
   let fixedTabTargetSnapshot =
     options.experimental_fixedTabTarget === undefined
       ? null
@@ -2008,22 +2569,28 @@ export function renderSlot<
             "fixed tab target",
           ),
         };
+
   const fixedTabTargetListeners = new Set<() => void>();
+
   const fixedTabTarget: TestFixedTabTargetStore = {
     getSnapshot: () => fixedTabTargetSnapshot,
     subscribe(listener) {
       fixedTabTargetListeners.add(listener);
+
       return () => fixedTabTargetListeners.delete(listener);
     },
     clear(sequence) {
       if (fixedTabTargetSnapshot?.sequence !== sequence) return;
       fixedTabTargetSnapshot = null;
+
       for (const listener of fixedTabTargetListeners) listener();
     },
   };
+
   const appPanel: ExperimentalAppPanel = {
     openFixedTab(panelOptions) {
       let target: JsonValue | undefined;
+
       if (panelOptions.target !== undefined) {
         try {
           target = strictJsonRoundTrip(
@@ -2033,7 +2600,9 @@ export function renderSlot<
         } catch {
           return false;
         }
+
         if (panelOptions.tab.experimental_target === undefined) return false;
+
         try {
           if (!panelOptions.tab.experimental_target.validate(target)) {
             return false;
@@ -2042,14 +2611,17 @@ export function renderSlot<
           return false;
         }
       }
+
       const call: ExperimentalFixedTabOpenCall = {
         surface: panelOptions.surface,
         panelId: panelOptions.tab.panelId,
         tabId: panelOptions.tab.id,
         ...(target === undefined ? {} : { target }),
       };
+
       experimental_fixedTabOpenCalls.push(call);
       const accepted = options.experimental_openFixedTab?.(call) ?? false;
+
       if (accepted && target !== undefined) {
         fixedTabTargetSnapshot = {
           panelId: panelOptions.tab.panelId,
@@ -2057,52 +2629,78 @@ export function renderSlot<
           tabId: panelOptions.tab.id,
           target,
         };
+
         for (const listener of fixedTabTargetListeners) listener();
       }
+
       return accepted;
     },
   };
+
   const sidebarActionCalls: SidebarActionCall[] = [];
   const environmentArchiveCalls: string[] = [];
+
   const sidebarPullRequests = new Map(
     Object.entries(options.sidebarPullRequests ?? {}),
   );
+
   const sidebarDraftThreadIds: ReadonlySet<string> = new Set(
     options.sidebarDraftThreadIds ?? [],
   );
+
   const sidebarRowStatuses = new Map(
     Object.entries(options.sidebarRowStatuses ?? {}),
   );
+
   const sidebarShortcuts = new Map(
     Object.entries(options.sidebarShortcuts ?? {}),
   );
+
   const sidebarThreads: PluginSidebarThreadsState = {
     experimental_archived:
       options.sidebarThreads?.experimental_archived ?? null,
+    experimental_shelved: options.sidebarThreads?.experimental_shelved ?? null,
     status: options.sidebarThreads?.status ?? "ready",
     threads: options.sidebarThreads?.threads ?? [],
     experimental_hosts: options.sidebarThreads?.experimental_hosts ?? [],
     projects: options.sidebarThreads?.projects ?? [],
     sections: options.sidebarThreads?.sections ?? [],
+    experimental_groups: options.sidebarThreads?.experimental_groups ?? [],
   };
+
+  const experimental_chatSelectionWrites: (readonly string[])[] = [];
+  const threadGroupActionCalls: ThreadGroupActionCall[] = [];
+
+  const chatSelection = createChatSelectionStore(
+    options.experimental_chatSelection ?? [],
+    experimental_chatSelectionWrites,
+  );
+
+  activeChatSelection = chatSelection;
+
   const providers: PluginProvidersState = {
     status: options.providers?.status ?? "ready",
     providers: options.providers?.providers ?? [],
   };
+
   const environmentProviders: PluginEnvironmentProvidersState = {
     status: options.environmentProviders?.status ?? "ready",
     providers: options.environmentProviders?.providers ?? [],
   };
+
   const sdkCalls: SdkCall[] = [];
   const sdk = createSdkFake(options.sdk ?? {}, sdkCalls);
+
   const codeTheme: PluginCodeThemeState = {
     mode: options.codeTheme?.mode ?? "light",
     name: options.codeTheme?.name ?? "pierre-light",
     theme: options.codeTheme?.theme ?? null,
   };
+
   const experimental_clipboardWrites = captureClipboardWrites(
     options.experimental_copyToClipboard,
   );
+
   const sidebarActions: PluginSidebarThreadActions = {
     open(threadId, openOptions) {
       sidebarActionCalls.push({
@@ -2139,7 +2737,8 @@ export function renderSlot<
       sidebarActionCalls.push({ method: "requestDelete", threadId });
     },
   };
-  const navigate: BbNavigate = {
+
+  const navigate: experimental_AppNavigate = {
     toThread(threadId, threadOptions) {
       navigateCalls.push({
         method: "toThread",
@@ -2147,8 +2746,19 @@ export function renderSlot<
         ...(threadOptions !== undefined ? { options: threadOptions } : {}),
       });
     },
+    experimental_prefetchThreadOpen(threadId) {
+      navigateCalls.push({
+        method: "experimental_prefetchThreadOpen",
+        threadId,
+      });
+    },
     toProject(projectId) {
       navigateCalls.push({ method: "toProject", projectId });
+    },
+    experimental_openProjectCreator(onCreated) {
+      navigateCalls.push({ method: "experimental_openProjectCreator" });
+
+      return options.openProjectCreator?.(onCreated) ?? false;
     },
     toPluginPanel(path, panelOptions) {
       navigateCalls.push({
@@ -2168,10 +2778,12 @@ export function renderSlot<
         method: "openThreadPanel",
         options: panelOptions,
       });
+
       return options.openThreadPanel?.(panelOptions) ?? false;
     },
     openUrl(url) {
       navigateCalls.push({ method: "openUrl", url });
+
       return options.openUrl?.(url) ?? false;
     },
     experimental_openFilePreview(fileOptions) {
@@ -2179,6 +2791,7 @@ export function renderSlot<
         method: "experimental_openFilePreview",
         options: fileOptions,
       });
+
       return options.openFilePreview?.(fileOptions) ?? false;
     },
     experimental_openFileExternally(fileOptions) {
@@ -2186,6 +2799,7 @@ export function renderSlot<
         method: "experimental_openFileExternally",
         options: fileOptions,
       });
+
       return options.openFileExternally?.(fileOptions) ?? false;
     },
     async experimental_openTerminal(terminalOptions) {
@@ -2193,17 +2807,20 @@ export function renderSlot<
         method: "experimental_openTerminal",
         options: terminalOptions,
       });
+
       return options.openTerminal?.(terminalOptions) ?? false;
     },
   };
 
   const projectId = options.context?.projectId ?? null;
   const threadId = options.context?.threadId ?? null;
+
   let composerScope: PluginComposerScope =
     options.composer?.scope ??
     (threadId !== null
       ? { kind: "thread", threadId }
       : { kind: "new-thread", projectId });
+
   let composerSelection: ComposerSelection | null =
     composerScope.kind === "queued-message"
       ? null
@@ -2215,22 +2832,29 @@ export function renderSlot<
         };
 
   let composerText = options.composer?.text ?? "";
+
   let composerMentions: ComposerMention[] = [
     ...(options.composer?.mentions ?? []),
   ];
+
   let composerAttachments = [...(options.composer?.attachments ?? [])];
+
   let composerAttachmentCount =
     options.composer?.attachmentCount ?? composerAttachments.length;
+
   const composerLayout = options.composer?.layout ?? "expanded";
   const composerIsRunning = options.composer?.isRunning ?? false;
   const composerIsSubmitting = options.composer?.isSubmitting ?? false;
   const composerPluginId = options.pluginId ?? "test-plugin";
   let composerVersion = 0;
   const composerListeners = new Set<() => void>();
+
   const notifyComposerListeners = () => {
     composerVersion += 1;
+
     for (const listener of composerListeners) listener();
   };
+
   const commitComposerDraft = (
     nextText: string,
     nextMentions: ComposerMention[],
@@ -2240,6 +2864,7 @@ export function renderSlot<
     composerMentions = nextMentions;
     notifyComposerListeners();
   };
+
   const commitComposerText = (next: string) => {
     if (next === composerText) return;
     commitComposerDraft(
@@ -2247,19 +2872,24 @@ export function renderSlot<
       reconcileComposerMentions(composerText, next, composerMentions),
     );
   };
+
   const composerBlockedReason = (): string | null => {
     if (options.composer?.submittingBlockedReason !== undefined) {
       return options.composer.submittingBlockedReason;
     }
+
     if (composerIsSubmitting) return "Submitting...";
+
     return composerText.trim() === "" && composerAttachmentCount === 0
       ? "Type a message first."
       : null;
   };
+
   let composerDraftCache: {
     version: number;
     draft: ComposerDraftSnapshot;
   } | null = null;
+
   const composerDraft = (): ComposerDraftSnapshot => {
     if (composerDraftCache?.version !== composerVersion) {
       composerDraftCache = {
@@ -2271,8 +2901,10 @@ export function renderSlot<
         },
       };
     }
+
     return composerDraftCache.draft;
   };
+
   const composerLog: ComposerLog = {
     get text() {
       return composerText;
@@ -2294,6 +2926,8 @@ export function renderSlot<
     },
     textEffect: null,
     textEffectCalls: [],
+    suggestion: null,
+    suggestionCalls: [],
     inputLocked: false,
     inputLockCalls: [],
     quotes: [],
@@ -2302,10 +2936,16 @@ export function renderSlot<
     submits: [],
     selections: [],
   };
+
   const composerOwnership = { active: true };
+
   const composerIsAvailable = () =>
     composerOwnership.active || composerScope.kind !== "queued-message";
-  const submissionListeners = new Set<() => void>();
+
+  const submissionListeners = new Set<
+    (draft?: ComposerDraftSnapshot) => void
+  >();
+
   const composerTarget: ComposerHandleTarget = {
     get key() {
       return testComposerKey(composerScope);
@@ -2321,15 +2961,19 @@ export function renderSlot<
         composerAttachments = [...next.attachments];
         composerAttachmentCount = composerAttachments.length;
       }
+
       commitComposerDraft(next.text, [...next.mentions]);
     },
     addQuote(text) {
       const trimmed = text.replace(/\r\n|\r/gu, "\n").trim();
+
       if (trimmed === "") return;
+
       const block = trimmed
         .split("\n")
         .map((line) => (line.length > 0 ? `> ${line}` : ">"))
         .join("\n");
+
       commitComposerText(
         composerText === "" ? `${block}\n` : `${composerText}\n${block}\n`,
       );
@@ -2337,6 +2981,7 @@ export function renderSlot<
     },
     getEditorState: () => {
       const reason = composerBlockedReason();
+
       return {
         layout: composerLayout,
         isRunning: composerIsRunning,
@@ -2352,6 +2997,7 @@ export function renderSlot<
       composerTarget.setDraft(
         appendComposerDraft(composerDraft(), value, block),
       );
+
       return true;
     },
     isAvailable: composerIsAvailable,
@@ -2360,26 +3006,33 @@ export function renderSlot<
     },
     async submit(submitOptions) {
       composerLog.submits.push(submitOptions);
+      const accepted = structuredClone(composerTarget.getDraft());
       commitComposerDraft("", []);
-      for (const listener of submissionListeners) listener();
+
+      for (const listener of submissionListeners) listener(accepted);
     },
     async setSelection(selection) {
       if (composerScope.kind === "queued-message") {
         throw new Error("This composer has no pickers to set.");
       }
+
       const {
         projectId: _projectId,
         environment: _environment,
         ...rest
       } = selection;
+
       const accepted: ComposerSelection =
         composerScope.kind === "thread" ? rest : { ...selection };
+
       composerLog.selections.push(accepted);
       composerSelection = { ...composerSelection, ...accepted };
       notifyComposerListeners();
+
       return composerSelection;
     },
   };
+
   const composerHandle = createComposerHandleBinding(
     testComposerKey(composerScope),
     {
@@ -2396,14 +3049,21 @@ export function renderSlot<
         composerLog.inputLocked = locked;
         composerLog.inputLockCalls.push(locked);
       },
+      setSuggestion(suggestion) {
+        if (!composerOwnership.active) return;
+        composerLog.suggestion = suggestion;
+        composerLog.suggestionCalls.push(suggestion);
+      },
       onSubmitted(listener) {
         submissionListeners.add(listener);
+
         return () => {
           submissionListeners.delete(listener);
         };
       },
     },
   ).handle;
+
   const forgetLoggedMention = ({
     provider,
     id,
@@ -2413,13 +3073,16 @@ export function renderSlot<
   }) => {
     for (let index = composerLog.mentions.length - 1; index >= 0; index -= 1) {
       const mention = composerLog.mentions[index];
+
       if (mention?.provider === provider && mention.id === id) {
         composerLog.mentions.splice(index, 1);
       }
     }
   };
+
   const { insertMention, removeMention, experimental_removeMention } =
     composerHandle;
+
   Object.assign(composerHandle, {
     insertMention(mention: PluginComposerMention) {
       insertMention(mention);
@@ -2434,6 +3097,7 @@ export function renderSlot<
       forgetLoggedMention(mention);
     },
   });
+
   const composer: TestComposerStore = {
     api: composerHandle,
     apiList: [composerHandle],
@@ -2448,17 +3112,25 @@ export function renderSlot<
     getVersionSnapshot: () => composerVersion,
     subscribe(listener) {
       composerListeners.add(listener);
+
       return () => composerListeners.delete(listener);
     },
   };
 
   const env: SlotEnv = {
+    threadBootstrapData: options.threadBootstrapData ?? {},
     rpcClient,
     rpcCalls,
     realtimeHandlers,
     realtimeConnection,
     settingsState: { values: options.settings, isLoading: false },
-    bbContext: { projectId, threadId },
+    appContext: { projectId, threadId },
+    visibleAppContext: options.visibleContext ?? {
+      view: threadId === null ? "compose" : "thread",
+      projectId,
+      threadId,
+      panel: null,
+    },
     pluginId: options.pluginId ?? "test-plugin",
     questionFormHost: {
       shortcuts: new Map(),
@@ -2467,11 +3139,24 @@ export function renderSlot<
     navigate,
     navigateCalls,
     appPanel,
+    actionHistory,
     experimental_fixedTabOpenCalls,
     fixedTabTarget,
     composer,
     composerLog,
+    threadWork: options.experimental_threadWork ?? {},
+    inboxSnapshot: {
+      snapshot: options.inboxSnapshot?.snapshot ?? null,
+      status:
+        options.inboxSnapshot?.status ??
+        (options.inboxSnapshot?.snapshot ? "ready" : "loading"),
+      stale: options.inboxSnapshot?.stale ?? false,
+      refresh: options.inboxSnapshot?.refresh ?? (() => {}),
+    },
+    projectSidebarItems: options.projectSidebarItems ?? [],
     sidebarThreads,
+    chatSelection,
+    threadGroupActionCalls,
     sidebarActions,
     sidebarActionCalls,
     environmentArchiveCalls,
@@ -2503,6 +3188,7 @@ export function renderSlot<
       operation: { kind: "none" },
       ...options.checkoutState,
     },
+    threadGit: options.threadGit ?? null,
   };
 
   const releaseComposerOwnership = (): void => {
@@ -2510,7 +3196,9 @@ export function renderSlot<
     composerOwnership.active = false;
     composerLog.textEffect = null;
     composerLog.inputLocked = false;
+    composerLog.suggestion = null;
   };
+
   const renderSlotTree = (ui: ReactNode): ReactElement => (
     <SlotEnvContext.Provider value={env}>
       <SlotLifecycleGuard onUnmount={releaseComposerOwnership}>
@@ -2518,6 +3206,7 @@ export function renderSlot<
       </SlotLifecycleGuard>
     </SlotEnvContext.Provider>
   );
+
   const Component = registration.component;
   const element = renderSlotTree(<Component {...props} />);
   const result = render(element);
@@ -2525,6 +3214,7 @@ export function renderSlot<
   const rerenderSlot = (ui: ReactNode): void => {
     result.rerender(renderSlotTree(ui));
   };
+
   const emitRealtime = async (
     channel: string,
     payload: unknown,
@@ -2533,6 +3223,7 @@ export function renderSlot<
       payload === undefined
         ? null
         : strictJsonRoundTrip(payload, `realtime "${channel}" payload`);
+
     const listeners = realtimeHandlers.get(channel);
     await act(async () => {
       for (const listener of [...(listeners ?? [])]) {
@@ -2540,14 +3231,17 @@ export function renderSlot<
       }
     });
   };
+
   const setRealtimeConnectionState = async (
     state: PluginRealtimeConnectionState,
   ): Promise<void> => {
     await act(async () => realtimeConnection.setState(state));
   };
+
   const setComposerText = async (text: string): Promise<void> => {
     await act(async () => commitComposerText(text));
   };
+
   const setComposerScope = async (
     scope: PluginComposerScope,
   ): Promise<void> => {
@@ -2556,6 +3250,7 @@ export function renderSlot<
       notifyComposerListeners();
     });
   };
+
   const unmountSlot = (): void => {
     if (!composerOwnership.active) return;
     result.unmount();
@@ -2572,7 +3267,10 @@ export function renderSlot<
     setComposerScope,
     navigateCalls,
     experimental_fixedTabOpenCalls,
+    experimental_actionHistory: actionHistory,
     sidebarActionCalls,
+    experimental_chatSelectionWrites,
+    experimental_threadGroupActionCalls: threadGroupActionCalls,
     experimental_environmentArchiveCalls: environmentArchiveCalls,
     sdkCalls,
     experimental_clipboardWrites,
@@ -2587,7 +3285,10 @@ export function renderSlot<
       rpcCalls,
       navigateCalls,
       experimental_fixedTabOpenCalls,
+      experimental_actionHistory: actionHistory,
       sidebarActionCalls,
+      experimental_chatSelectionWrites,
+      experimental_threadGroupActionCalls: threadGroupActionCalls,
       experimental_environmentArchiveCalls: environmentArchiveCalls,
       sdkCalls,
       experimental_clipboardWrites,

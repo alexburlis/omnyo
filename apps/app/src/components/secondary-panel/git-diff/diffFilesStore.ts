@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react";
 import { atom, useAtomValue } from "jotai";
 import { useAtomCallback } from "jotai/utils";
 import { atomFamily } from "jotai-family";
-import type { DiffFileEntry } from "@bb/server-contract";
+import type { DiffFileEntry } from "@omnyo/server-contract";
 import type { GitDiffStats } from "../../git-diff/git-diff-parsing";
 import { GIT_DIFF_AUTO_COLLAPSE_FILE_THRESHOLD } from "./gitDiffPanelHelpers";
 
@@ -11,10 +11,12 @@ export function summarizeDiffFileEntries(
 ): GitDiffStats {
   let insertions = 0;
   let deletions = 0;
+
   for (const file of files) {
     insertions += file.additions;
     deletions += file.deletions;
   }
+
   return { filesCount: files.length, insertions, deletions };
 }
 
@@ -34,6 +36,7 @@ export function resolveDiffFileCardInitialState({
   const collapsed =
     fileCount > GIT_DIFF_AUTO_COLLAPSE_FILE_THRESHOLD ||
     entry.changeKind === "deleted";
+
   return { collapsed };
 }
 
@@ -65,6 +68,37 @@ export function resolveCardCollapsed(
   );
 }
 
+export function useDiffFileCardCollapsedStates(
+  diffIdentity: string,
+  files: readonly DiffFileEntry[],
+  fileCount: number,
+): ReadonlyMap<string, boolean> {
+  const collapsedByPathAtom = useMemo(
+    () =>
+      atom((get) => {
+        const collapsedByPath = new Map<string, boolean>();
+
+        for (const entry of files) {
+          collapsedByPath.set(
+            entry.path,
+            resolveCardCollapsed(
+              get(
+                diffFileCardStateAtomFamily({ diffIdentity, path: entry.path }),
+              ),
+              entry,
+              fileCount,
+            ),
+          );
+        }
+
+        return collapsedByPath;
+      }),
+    [diffIdentity, fileCount, files],
+  );
+
+  return useAtomValue(collapsedByPathAtom);
+}
+
 interface DiffFilesCollapseControls {
   areAllCollapsed: boolean;
   toggleAllCollapsed: () => void;
@@ -82,6 +116,7 @@ export function useDiffFilesCollapseControls(
         if (files.length === 0) {
           return false;
         }
+
         return files.every((entry) =>
           resolveCardCollapsed(
             get(
@@ -94,6 +129,7 @@ export function useDiffFilesCollapseControls(
       }),
     [diffIdentity, fileCount, files],
   );
+
   const areAllCollapsed = useAtomValue(areAllCollapsedAtom);
 
   const setAllCollapsed = useAtomCallback(
@@ -104,10 +140,13 @@ export function useDiffFilesCollapseControls(
             diffIdentity,
             path: entry.path,
           });
+
           const current = get(stateAtom);
+
           if (current?.collapsed === collapsed) {
             continue;
           }
+
           set(stateAtom, { ...(current ?? {}), collapsed });
         }
       },
@@ -134,10 +173,27 @@ export function clearDiffFileCardStates(activeDiffIdentity: string): void {
   }
 }
 
-export const DIFF_CARD_HEADER_HEIGHT_PX = 40;
+export const DIFF_CARD_HEADER_HEIGHT_PX = 33;
+
 const DIFF_CARD_LINE_HEIGHT_PX = 18;
-const DIFF_CARD_BODY_PADDING_PX = 16;
-const DIFF_CARD_MAX_ESTIMATED_LINES = 80;
+
+const DIFF_CARD_BODY_PADDING_PX = 17;
+
+const DIFF_CARD_NOTICE_HEIGHT_PX = 41;
+
+export function estimateCardBodyHeight(entry: DiffFileEntry): number {
+  if (entry.loadMode !== "auto") {
+    return DIFF_CARD_NOTICE_HEIGHT_PX;
+  }
+
+  const changedLines = entry.additions + entry.deletions;
+
+  if (changedLines === 0) {
+    return 0;
+  }
+
+  return DIFF_CARD_BODY_PADDING_PX + changedLines * DIFF_CARD_LINE_HEIGHT_PX;
+}
 
 interface EstimateCardHeightArgs {
   entry: DiffFileEntry;
@@ -151,14 +207,6 @@ export function estimateCardHeight({
   if (collapsed) {
     return DIFF_CARD_HEADER_HEIGHT_PX;
   }
-  const changedLines = entry.additions + entry.deletions;
-  if (changedLines === 0) {
-    return DIFF_CARD_HEADER_HEIGHT_PX;
-  }
-  const renderedLines = Math.min(changedLines, DIFF_CARD_MAX_ESTIMATED_LINES);
-  return (
-    DIFF_CARD_HEADER_HEIGHT_PX +
-    DIFF_CARD_BODY_PADDING_PX +
-    renderedLines * DIFF_CARD_LINE_HEIGHT_PX
-  );
+
+  return DIFF_CARD_HEADER_HEIGHT_PX + estimateCardBodyHeight(entry);
 }

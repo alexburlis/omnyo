@@ -10,6 +10,7 @@ const shapeSchema = z
     nested: z.boolean().optional(),
   })
   .strict();
+
 export type RowShapeSpec = z.infer<typeof shapeSchema>;
 
 const matcherSchema = z.union([
@@ -45,9 +46,10 @@ const rowClassSchema = z
     match: matcherSchema,
   })
   .strict();
+
 export type RowDiffClass = z.infer<typeof rowClassSchema>;
 
-export const ROW_CLASSES_FILE_ENV = "BB_PROVIDER_CORPUS_ROW_CLASSES";
+export const ROW_CLASSES_FILE_ENV = "OMNYO_PROVIDER_CORPUS_ROW_CLASSES";
 
 export function readRowDiffClasses(filePath: string): RowDiffClass[] {
   return z
@@ -59,6 +61,7 @@ export function resolveRowDiffClassesPath(
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
   const value = env[ROW_CLASSES_FILE_ENV];
+
   return value === undefined || value === ""
     ? null
     : resolveRepoRelativeFile(ROW_CLASSES_FILE_ENV, value);
@@ -115,6 +118,7 @@ export type RowChange =
 export const CONTAINER_BOUNDS_CLASS = "container-bounds";
 
 const CONTAINER_FIELDS = ["children", "childRows"] as const;
+
 const CONTAINER_BOUND_FIELDS = new Set([
   "summaryCount",
   "sourceSeqEnd",
@@ -131,16 +135,21 @@ function str(value: unknown): string | undefined {
 function ownRowId(id: string): string {
   const marker = ":child:";
   const index = id.lastIndexOf(marker);
+
   return index === -1 ? id : id.slice(index + marker.length);
 }
 
 export function rowIdentity(row: SnapshotRow): string {
   const id = str(row.id) ?? "";
+
   if (row.kind === "work") {
     const key = str(row.callId) ?? str(row.itemId) ?? str(row.interactionId);
+
     if (key !== undefined) return `work:${key}`;
   }
+
   if (row.kind === "turn") return `turn:${str(row.turnId) ?? id}`;
+
   return `${String(row.kind)}:${ownRowId(id)}`;
 }
 
@@ -155,27 +164,35 @@ function matchesShape(
   row: SnapshotRow,
 ): boolean {
   if (!spec) return true;
+
   if (spec.kind !== undefined && row.kind !== spec.kind) return false;
+
   if (spec.workKind !== undefined && row.workKind !== spec.workKind)
     return false;
+
   if (spec.role !== undefined && row.role !== spec.role) return false;
+
   if (
     spec.nested !== undefined &&
     (str(row.id) ?? "").includes(":child:") !== spec.nested
   ) {
     return false;
   }
+
   return true;
 }
 
 function classMatches(cls: RowDiffClass, change: RowChange): boolean {
   const m = cls.match;
+
   if ("added" in m) {
     return change.type === "added" && matchesShape(m.added, change.row);
   }
+
   if ("removed" in m) {
     return change.type === "removed" && matchesShape(m.removed, change.row);
   }
+
   if ("changed" in m) {
     return (
       change.type === "changed" &&
@@ -183,8 +200,10 @@ function classMatches(cls: RowDiffClass, change: RowChange): boolean {
       change.fields.every((field) => m.changed.fields.includes(field))
     );
   }
+
   if ("reshaped" in m) {
     const allowed = m.reshaped.fields;
+
     return (
       change.type === "reshaped" &&
       matchesShape(m.reshaped.from, change.before) &&
@@ -193,12 +212,15 @@ function classMatches(cls: RowDiffClass, change: RowChange): boolean {
         change.fields.every((field) => allowed.includes(field)))
     );
   }
+
   if ("moved" in m) {
     return change.type === "moved" && matchesShape(m.moved, change.after);
   }
+
   if ("pageField" in m) {
     return change.type === "pageField" && change.field === m.pageField.field;
   }
+
   return (
     change.type === "resegmented" &&
     change.after.length > 0 &&
@@ -214,8 +236,10 @@ export function describeRowChange(change: RowChange): string {
       return `reshaped ${rowShape(change.before)} → ${rowShape(change.after)} [${change.fields.join(",")}]`;
     case "resegmented": {
       const sample = change.after[0] ?? change.before[0];
+
       return `resegmented ${sample ? rowShape(sample) : "?"} ${change.before.length}→${change.after.length}`;
     }
+
     case "pageField":
       return `changed page.${change.field}`;
     default:
@@ -248,16 +272,20 @@ export function mergeRowDiffReport(
   for (const [name, count] of from.claims) {
     into.claims.set(name, (into.claims.get(name) ?? 0) + count);
   }
+
   for (const index of from.claimedEntries) into.claimedEntries.add(index);
+
   for (const [name, count] of from.containerBoundsBy) {
     into.containerBoundsBy.set(
       name,
       (into.containerBoundsBy.get(name) ?? 0) + count,
     );
   }
+
   for (const [name, example] of from.examples) {
     if (!into.examples.has(name)) into.examples.set(name, example);
   }
+
   into.unclassified.push(...from.unclassified);
 }
 
@@ -285,13 +313,17 @@ interface VariantDiff {
 
 function claim(diff: VariantDiff, name: string, change: RowChange): void {
   diff.report.claims.set(name, (diff.report.claims.get(name) ?? 0) + 1);
+
   if (!diff.report.examples.has(name)) diff.report.examples.set(name, change);
+
   for (const turnId of diff.turnStack) {
     let classes = diff.shared.turnChildClasses.get(turnId);
+
     if (!classes) {
       classes = new Set();
       diff.shared.turnChildClasses.set(turnId, classes);
     }
+
     classes.add(name);
   }
 }
@@ -300,18 +332,23 @@ function classify(diff: VariantDiff, change: RowChange): void {
   const index = diff.classes.findIndex((candidate) =>
     classMatches(candidate, change),
   );
+
   const cls = diff.classes[index];
+
   if (cls) {
     diff.report.claimedEntries.add(index);
     claim(diff, cls.name, change);
   } else {
     diff.report.unclassified.push(change);
+
     for (const turnId of diff.turnStack) {
       let classes = diff.shared.turnChildClasses.get(turnId);
+
       if (!classes) {
         classes = new Set();
         diff.shared.turnChildClasses.set(turnId, classes);
       }
+
       classes.add("(unclassified)");
     }
   }
@@ -328,10 +365,12 @@ function claimContainerBounds(
 function settleContainerBounds(diff: VariantDiff): void {
   for (const { turnId, change } of diff.pendingBounds) {
     claim(diff, CONTAINER_BOUNDS_CLASS, change);
+
     const causes =
       turnId === undefined
         ? undefined
         : diff.shared.turnChildClasses.get(turnId);
+
     for (const name of causes ?? ["(unknown)"]) {
       diff.report.containerBoundsBy.set(
         name,
@@ -339,17 +378,21 @@ function settleContainerBounds(diff: VariantDiff): void {
       );
     }
   }
+
   diff.pendingBounds = [];
 }
 
 function childRowsOf(rows: readonly SnapshotRow[]): SnapshotRow[] {
   const children: SnapshotRow[] = [];
+
   for (const row of rows) {
     for (const key of CONTAINER_FIELDS) {
       const value = row[key];
+
       if (Array.isArray(value)) children.push(...(value as SnapshotRow[]));
     }
   }
+
   return children;
 }
 
@@ -365,6 +408,7 @@ function pool(
 ): void {
   const entry = { row, turns: [...diff.turnStack] };
   const rows = map.get(id);
+
   if (rows) rows.push(entry);
   else map.set(id, [entry]);
 }
@@ -373,18 +417,22 @@ function groupByIdentity(
   rows: readonly SnapshotRow[],
 ): Map<string, SnapshotRow[]> {
   const groups = new Map<string, SnapshotRow[]>();
+
   for (const row of rows) {
     const id = rowIdentity(row);
     const group = groups.get(id);
+
     if (group) group.push(row);
     else groups.set(id, [row]);
   }
+
   return groups;
 }
 
 function underTurns<T>(diff: VariantDiff, turns: string[], fn: () => T): T {
   const saved = diff.turnStack;
   diff.turnStack = turns;
+
   try {
     return fn();
   } finally {
@@ -402,11 +450,14 @@ function diffRow(
   const reshaped = rowShape(a) !== rowShape(b);
   const fields: string[] = [];
   let boundsOnly = true;
+
   for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
     if ((CONTAINER_FIELDS as readonly string[]).includes(key)) continue;
+
     if (JSON.stringify(a[key]) === JSON.stringify(b[key])) continue;
     const aId = str(a.id);
     const bId = str(b.id);
+
     if (
       key === "id" &&
       aId !== undefined &&
@@ -416,10 +467,14 @@ function diffRow(
       fields.push("id:prefix");
       continue;
     }
+
     fields.push(key);
+
     if (!CONTAINER_BOUND_FIELDS.has(key)) boundsOnly = false;
   }
+
   fields.sort();
+
   if (reshaped) {
     classify(diff, {
       type: "reshaped",
@@ -432,20 +487,27 @@ function diffRow(
       ),
     });
   }
+
   const turnId = b.kind === "turn" ? str(b.turnId) : undefined;
+
   if (turnId !== undefined) diff.turnStack.push(turnId);
   const nestedChanges = diffRows(diff, childRowsOf([b]), childRowsOf([a]));
+
   if (turnId !== undefined) diff.turnStack.pop();
+
   if (nestedChanges > 0 && turnId !== undefined) {
     diff.shared.turnsWithChildChanges.add(turnId);
   }
+
   let own = reshaped ? 1 : 0;
+
   if (fields.length > 0 && !reshaped) {
     const explainedByChildren =
       nestedChanges > 0 ||
       (turnId !== undefined &&
         !hasContainer(b) &&
         diff.shared.turnsWithChildChanges.has(turnId));
+
     if (boundsOnly && explainedByChildren) {
       claimContainerBounds(diff, turnId, {
         type: "changed",
@@ -467,6 +529,7 @@ function diffRow(
       own = 1;
     }
   }
+
   return nestedChanges + own;
 }
 
@@ -479,15 +542,19 @@ function diffRows(
   const beforeById = groupByIdentity(before);
   const afterById = groupByIdentity(after);
   let changes = 0;
+
   for (const [id, bs] of beforeById) {
     const as = afterById.get(id);
+
     if (as === undefined) {
       for (const b of bs) pool(diff, diff.removed, id, b);
       changes += bs.length;
       continue;
     }
+
     if (bs.length !== as.length) {
       const turnId = as[0]?.kind === "turn" ? str(as[0].turnId) : undefined;
+
       if (turnId !== undefined) diff.turnStack.push(turnId);
       classify(diff, {
         type: "resegmented",
@@ -497,12 +564,15 @@ function diffRows(
         after: as,
       });
       changes += 1 + diffRows(diff, childRowsOf(bs), childRowsOf(as));
+
       if (turnId !== undefined) {
         diff.turnStack.pop();
         diff.shared.turnsWithChildChanges.add(turnId);
       }
+
       continue;
     }
+
     for (let index = 0; index < bs.length; index += 1) {
       changes += diffRow(
         diff,
@@ -512,21 +582,27 @@ function diffRows(
       );
     }
   }
+
   for (const [id, as] of afterById) {
     if (beforeById.has(id)) continue;
+
     for (const a of as) pool(diff, diff.added, id, a);
     changes += as.length;
   }
+
   return changes;
 }
 
 function settleVariantDiff(diff: VariantDiff): void {
   const { thread, removed, added, shared } = diff;
+
   for (const [id, removedRows] of removed) {
     const addedRows = added.get(id);
+
     if (addedRows) {
       added.delete(id);
       const pairs = Math.min(removedRows.length, addedRows.length);
+
       for (let index = 0; index < pairs; index += 1) {
         const b = removedRows[index] as PooledRow;
         const a = addedRows[index] as PooledRow;
@@ -542,19 +618,24 @@ function settleVariantDiff(diff: VariantDiff): void {
           diffRows(diff, childRowsOf([b.row]), childRowsOf([a.row]));
         });
       }
+
       for (const b of removedRows.slice(pairs)) {
         underTurns(diff, b.turns, () =>
           classify(diff, { type: "removed", thread, id, row: b.row }),
         );
       }
+
       for (const a of addedRows.slice(pairs)) {
         underTurns(diff, a.turns, () =>
           classify(diff, { type: "added", thread, id, row: a.row }),
         );
       }
+
       continue;
     }
+
     const movedTo = shared.movedRows.get(id);
+
     for (const b of removedRows) {
       underTurns(diff, b.turns, () => {
         if (movedTo) {
@@ -571,6 +652,7 @@ function settleVariantDiff(diff: VariantDiff): void {
       });
     }
   }
+
   for (const [id, addedRows] of added) {
     for (const a of addedRows) {
       underTurns(diff, a.turns, () =>
@@ -585,9 +667,11 @@ function variantRows(
   variant: string,
 ): SnapshotRow[] {
   const rows: SnapshotRow[] = [];
+
   for (const page of snapshot.variants?.[variant]?.pages ?? []) {
     rows.push(...(page.rows ?? []));
   }
+
   return rows;
 }
 
@@ -604,12 +688,15 @@ export function classifyRowSnapshotDiff(
       ...Object.keys(after.variants ?? {}),
     ]),
   ].sort((x, y) => (x === "nested" ? -1 : y === "nested" ? 1 : 0));
+
   const shared: SharedThreadState = {
     turnsWithChildChanges: new Set(),
     turnChildClasses: new Map(),
     movedRows: new Map(),
   };
+
   let changes = 0;
+
   for (const variant of variants) {
     const diff: VariantDiff = {
       thread: `${thread}@${variant}`,
@@ -621,6 +708,7 @@ export function classifyRowSnapshotDiff(
       turnStack: [],
       pendingBounds: [],
     };
+
     changes += diffRows(
       diff,
       variantRows(before, variant),
@@ -630,6 +718,7 @@ export function classifyRowSnapshotDiff(
     settleContainerBounds(diff);
     changes += diffPageFields(diff, before, after, variant);
   }
+
   return changes;
 }
 
@@ -643,11 +732,14 @@ function diffPageFields(
   const afterPages = after.variants?.[variant]?.pages ?? [];
   let changes = 0;
   const pages = Math.max(beforePages.length, afterPages.length);
+
   for (let index = 0; index < pages; index += 1) {
     const b = (beforePages[index] ?? {}) as Record<string, unknown>;
     const a = (afterPages[index] ?? {}) as Record<string, unknown>;
+
     for (const field of new Set([...Object.keys(b), ...Object.keys(a)])) {
       if (field === "rows") continue;
+
       if (JSON.stringify(b[field]) === JSON.stringify(a[field])) continue;
       changes += 1;
       classify(diff, {
@@ -660,6 +752,7 @@ function diffPageFields(
       });
     }
   }
+
   return changes;
 }
 
@@ -675,6 +768,7 @@ export function idleRowDiffClasses(
       )
       .map((cls) => cls.name),
   );
+
   return classes.flatMap((cls, index) =>
     report.claimedEntries.has(index)
       ? []
@@ -692,16 +786,19 @@ export function formatRowDiffReport(
   options: { examples?: boolean } = {},
 ): string {
   const lines: string[] = [];
+
   for (const [name, count] of [...report.claims].sort((x, y) => y[1] - x[1])) {
     const cls = classes.find((candidate) => candidate.name === name);
     lines.push(
       `  ${count.toString().padStart(6)}  ${name}${cls ? ` — ${cls.reason}` : ""}`,
     );
     const example = report.examples.get(name);
+
     if (options.examples && example) {
       lines.push(`          e.g. ${JSON.stringify(example).slice(0, 300)}`);
     }
   }
+
   if (report.containerBoundsBy.size > 0) {
     lines.push(
       `  ${CONTAINER_BOUNDS_CLASS} by child class: ${[
@@ -712,22 +809,28 @@ export function formatRowDiffReport(
         .join(", ")}`,
     );
   }
+
   const idle = idleRowDiffClasses(classes, report);
+
   if (idle.length > 0) {
     lines.push(`classes that claimed nothing: ${idle.join(", ")}`);
   }
+
   if (report.unclassified.length > 0) {
     lines.push(`UNCLASSIFIED: ${report.unclassified.length}`);
     const byShape = new Map<string, number>();
+
     for (const change of report.unclassified) {
       const key = describeRowChange(change);
       byShape.set(key, (byShape.get(key) ?? 0) + 1);
     }
+
     for (const [key, count] of [...byShape]
       .sort((x, y) => y[1] - x[1])
       .slice(0, 40)) {
       lines.push(`  ${count.toString().padStart(6)}  ${key}`);
     }
   }
+
   return lines.join("\n");
 }

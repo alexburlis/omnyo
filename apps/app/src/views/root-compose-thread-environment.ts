@@ -1,8 +1,9 @@
-import type { EnvironmentMachineSelection, JsonValue } from "@bb/domain";
+import type { EnvironmentMachineSelection, JsonValue } from "@omnyo/domain";
 import type {
   CreateThreadRequest,
+  MachineChoice,
   SystemEnvironmentProvider,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { parseEnvironmentValue } from "@/components/pickers/environment-picker-value";
 
 interface ResolveRootComposeThreadEnvironmentArgs {
@@ -11,6 +12,7 @@ interface ResolveRootComposeThreadEnvironmentArgs {
   environmentProviders?: readonly SystemEnvironmentProvider[];
   providerHostId?: string | null;
   providerMachine?: EnvironmentMachineSelection | null;
+  providerMachineChoice?: MachineChoice;
   providerInputs?: JsonValue | null;
 }
 
@@ -19,30 +21,41 @@ export function resolveRootComposeThreadEnvironment(
 ): CreateThreadRequest["environment"] | null {
   if (!args.projectId) return null;
   const parsed = parseEnvironmentValue(args.environmentValue);
+
   if (!parsed) return null;
 
   if (parsed.type === "provider") {
     const provider = args.environmentProviders?.find(
       (candidate) => candidate.id === parsed.environmentProviderId,
     );
+
     if (provider === undefined) return null;
+
     const machine =
       args.providerMachine ??
       (args.providerHostId === undefined || args.providerHostId === null
         ? null
         : { type: "existing" as const, hostId: args.providerHostId });
+
     if (machine === null && !provider.machineProviderId) return null;
+
     const inputs =
       provider.inputs === null ? null : (args.providerInputs ?? null);
+
     if (provider.inputs !== null && inputs === null) return null;
+
     return {
       type: "provider",
       environmentProviderId: provider.id,
       ...(machine === null ? {} : { machine }),
       inputs,
+      ...(machine?.type === "existing" && args.providerMachineChoice === "default"
+        ? { machineChoice: "default" as const }
+        : {}),
     };
   }
 
   if (parsed.environmentId === null) return null;
+
   return { type: "reuse", environmentId: parsed.environmentId };
 }

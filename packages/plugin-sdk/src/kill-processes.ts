@@ -1,4 +1,4 @@
-import { killProcessesWithCwdUnder } from "@bb/process-utils";
+import { killProcessesWithCwdUnder } from "@omnyo/process-utils";
 
 /**
  * Kills every process whose working directory is at or under any of `directories`,
@@ -14,5 +14,6 @@ export function experimental_killProcessesWithCwdUnder(
       ...args,
       directories: [args.directory],
     });
+
   return killProcessesWithCwdUnder(args);
 }

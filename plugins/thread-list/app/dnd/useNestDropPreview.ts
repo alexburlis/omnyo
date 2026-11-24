@@ -27,9 +27,12 @@ export function useNestDropPreview({
   const groupThreadsByEnvironment = useAtomValue(
     sidebarGroupThreadsByEnvironmentAtom,
   );
+
   if (!sectionDnd) return null;
   const { activeThread, nestTarget } = sectionDnd;
+
   if (!activeThread || nestTarget?.state !== "valid") return sectionDnd;
+
   return {
     ...sectionDnd,
     nestPreviewBeforeKey: resolveSidebarNestPreviewBeforeKey({

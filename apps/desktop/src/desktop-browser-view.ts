@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { captureDesktopBrowserPage } from "./desktop-browser-capture.js";
+import { resolveDesktopReloadShortcut } from "./desktop-reload-shortcut.js";
 import {
   BrowserWindow,
   Menu,
@@ -11,47 +12,47 @@ import {
   type WebPreferences,
 } from "electron";
 import {
-  BB_DESKTOP_BROWSER_MAX_TITLE_LENGTH,
-  BB_DESKTOP_BROWSER_MAX_URL_LENGTH,
-  bbDesktopBrowserEvaluateResultSchema,
-  bbDesktopBrowserPageMessageSchema,
-  clampBbDesktopBrowserViewBounds,
-  type BbDesktopBrowserEvaluateRequest,
-  type BbDesktopBrowserEvaluateResult,
-  type BbDesktopBrowserPageMessage,
-  type BbDesktopBrowserAttachRequest,
-  type BbDesktopBrowserFindInPageRequest,
-  type BbDesktopBrowserFindResult,
-  type BbDesktopBrowserNavigateRequest,
-  type BbDesktopBrowserOpenTabRequest,
-  type BbDesktopBrowserScopedOpenTabRequest,
-  type BbDesktopBrowserSetBoundsRequest,
-  type BbDesktopBrowserSetVisibleRequest,
-  type BbDesktopBrowserSnapshot,
-  type BbDesktopBrowserState,
-  type BbDesktopBrowserControlState,
-  type BbDesktopBrowserRevealRequest,
-  type BbDesktopBrowserTabRef,
-  type BbDesktopBrowserStopFindInPageRequest,
-  type BbDesktopBrowserViewportBounds,
-  type BbDesktopBrowserViewBounds,
-} from "@bb/desktop-contract";
+  OMNYO_DESKTOP_BROWSER_MAX_TITLE_LENGTH,
+  OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH,
+  omnyoDesktopBrowserEvaluateResultSchema,
+  omnyoDesktopBrowserPageMessageSchema,
+  clampOmnyoDesktopBrowserViewBounds,
+  type OmnyoDesktopBrowserEvaluateRequest,
+  type OmnyoDesktopBrowserEvaluateResult,
+  type OmnyoDesktopBrowserPageMessage,
+  type OmnyoDesktopBrowserAttachRequest,
+  type OmnyoDesktopBrowserFindInPageRequest,
+  type OmnyoDesktopBrowserFindResult,
+  type OmnyoDesktopBrowserNavigateRequest,
+  type OmnyoDesktopBrowserOpenTabRequest,
+  type OmnyoDesktopBrowserScopedOpenTabRequest,
+  type OmnyoDesktopBrowserSetBoundsRequest,
+  type OmnyoDesktopBrowserSetVisibleRequest,
+  type OmnyoDesktopBrowserSnapshot,
+  type OmnyoDesktopBrowserState,
+  type OmnyoDesktopBrowserControlState,
+  type OmnyoDesktopBrowserRevealRequest,
+  type OmnyoDesktopBrowserTabRef,
+  type OmnyoDesktopBrowserStopFindInPageRequest,
+  type OmnyoDesktopBrowserViewportBounds,
+  type OmnyoDesktopBrowserViewBounds,
+} from "@omnyo/desktop-contract";
 import {
   PANE_DIRECTION_APP_COMMAND_IDS,
   type AppCommandId,
   type AppShortcutInput,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
-  BB_DESKTOP_BROWSER_FIND_RESULT_CHANNEL,
-  BB_DESKTOP_BROWSER_GUEST_MESSAGE_CHANNEL,
-  BB_DESKTOP_BROWSER_PAGE_BRIDGE_KEY,
-  BB_DESKTOP_BROWSER_PAGE_MESSAGE_CHANNEL,
-  BB_DESKTOP_BROWSER_PAGE_WORLD_ID,
-  BB_DESKTOP_BROWSER_OPEN_TAB_CHANNEL,
-  BB_DESKTOP_BROWSER_FOCUSED_CHANNEL,
-  BB_DESKTOP_BROWSER_SCOPED_OPEN_TAB_CHANNEL,
-  BB_DESKTOP_BROWSER_SNAPSHOT_CHANNEL,
-  BB_DESKTOP_BROWSER_STATE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_FIND_RESULT_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_GUEST_MESSAGE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_PAGE_BRIDGE_KEY,
+  OMNYO_DESKTOP_BROWSER_PAGE_MESSAGE_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_PAGE_WORLD_ID,
+  OMNYO_DESKTOP_BROWSER_OPEN_TAB_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_FOCUSED_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_SCOPED_OPEN_TAB_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_SNAPSHOT_CHANNEL,
+  OMNYO_DESKTOP_BROWSER_STATE_CHANNEL,
 } from "./desktop-browser-ipc.js";
 import {
   evaluatePopupRate,
@@ -59,19 +60,31 @@ import {
 } from "./desktop-browser-policy.js";
 
 const POPUP_RATE_WINDOW_MS = 10_000;
+
 const POPUP_RATE_MAX_IN_WINDOW = 3;
+
 const POPUP_MAX_OPEN_PER_TAB = 3;
+
 const POPUP_MAX_OPEN_GLOBAL = 8;
+
 const POPUP_DEFAULT_WIDTH = 520;
+
 const POPUP_DEFAULT_HEIGHT = 700;
+
 const POPUP_MIN_WIDTH = 320;
+
 const POPUP_MIN_HEIGHT = 240;
+
 const POPUP_MAX_WIDTH = 960;
+
 const POPUP_MAX_HEIGHT = 900;
 
 const RESIZE_SNAPSHOT_HIDE_CAP_MS = 80;
+
 const RESIZE_SNAPSHOT_JPEG_QUALITY = 70;
+
 const RENDERER_RECOVERY_DELAY_MS = 250;
+
 const RENDERER_RECOVERY_MAX_ATTEMPTS = 2;
 
 function truncate(value: string, max: number): string {
@@ -87,6 +100,7 @@ function clampPopupDimension(
   if (value === undefined || !Number.isFinite(value)) {
     return fallback;
   }
+
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
@@ -103,12 +117,15 @@ function isAllowedPopupNavigationUrl(url: string): boolean {
   if (url === "about:blank") {
     return true;
   }
+
   let parsed: URL;
+
   try {
     parsed = new URL(url);
   } catch {
     return false;
   }
+
   return (
     parsed.protocol === "https:" ||
     (parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname))
@@ -117,12 +134,13 @@ function isAllowedPopupNavigationUrl(url: string): boolean {
 
 function popupWindowTitle(url: string | null): string {
   if (url === null || url === "about:blank" || url.length === 0) {
-    return "bb browser popup";
+    return "Omnyo browser popup";
   }
+
   try {
-    return `bb browser — ${new URL(url).origin}`;
+    return `Omnyo browser — ${new URL(url).origin}`;
   } catch {
-    return "bb browser popup";
+    return "Omnyo browser popup";
   }
 }
 
@@ -146,11 +164,11 @@ function guardMainFrameNavigation(
   });
 }
 
-const BB_BROWSER_PARTITION = "persist:bb-browser";
+const BROWSER_PARTITION = "persist:omnyo-browser";
 
 const ERR_ABORTED = -3;
 
-export interface DesktopBrowserNativeTab extends BbDesktopBrowserState {
+export interface DesktopBrowserNativeTab extends OmnyoDesktopBrowserState {
   threadId: string;
   generation: string;
   presentation: "hidden" | "reveal";
@@ -174,7 +192,7 @@ interface BrowserViewEntry {
   threadId: string;
   generation: string;
   lastErrorText: string | null;
-  desiredBounds: BbDesktopBrowserViewBounds;
+  desiredBounds: OmnyoDesktopBrowserViewBounds;
   popupTimestamps: number[];
   popupWindows: Set<BrowserWindow>;
   rendererRecoveryAttempts: number;
@@ -186,15 +204,15 @@ interface BrowserViewEntry {
 }
 
 export type DesktopBrowserHostWebContentsPayload =
-  | BbDesktopBrowserControlState
-  | BbDesktopBrowserRevealRequest
-  | BbDesktopBrowserState
-  | BbDesktopBrowserOpenTabRequest
-  | BbDesktopBrowserScopedOpenTabRequest
-  | BbDesktopBrowserSnapshot
-  | BbDesktopBrowserTabRef
-  | BbDesktopBrowserFindResult
-  | BbDesktopBrowserPageMessage;
+  | OmnyoDesktopBrowserControlState
+  | OmnyoDesktopBrowserRevealRequest
+  | OmnyoDesktopBrowserState
+  | OmnyoDesktopBrowserOpenTabRequest
+  | OmnyoDesktopBrowserScopedOpenTabRequest
+  | OmnyoDesktopBrowserSnapshot
+  | OmnyoDesktopBrowserTabRef
+  | OmnyoDesktopBrowserFindResult
+  | OmnyoDesktopBrowserPageMessage;
 
 export interface DesktopBrowserHostContentBounds {
   height: number;
@@ -248,7 +266,7 @@ interface HostScopedTabArgs {
 }
 
 interface CreateEntryArgs {
-  desiredBounds: BbDesktopBrowserViewBounds;
+  desiredBounds: OmnyoDesktopBrowserViewBounds;
   hostWindow: DesktopBrowserHostWindow;
   tabId: string;
   threadId: string;
@@ -260,7 +278,7 @@ interface HostWindowViewportBoundsArgs {
 }
 
 interface SetEntryDesiredBoundsArgs {
-  bounds: BbDesktopBrowserViewBounds;
+  bounds: OmnyoDesktopBrowserViewBounds;
   entry: BrowserViewEntry;
   hostWindow: DesktopBrowserHostWindow;
 }
@@ -271,7 +289,7 @@ export interface DesktopBrowserViewManager {
     tabId: string;
     threadId: string;
     url: string;
-    viewport: BbDesktopBrowserViewportBounds;
+    viewport: OmnyoDesktopBrowserViewportBounds;
   }): DesktopBrowserNativeTab;
   listTabs(args: NativeTabScope): DesktopBrowserNativeTab[];
   closeTab(args: NativeTabRef): void;
@@ -289,32 +307,39 @@ export interface DesktopBrowserViewManager {
   subscribeAutomationTabs(listener: () => void): () => void;
   setAutomationControlled(webContents: WebContents, controlled: boolean): void;
   session(): Session;
-  attach(args: HostScopedRequestArgs<BbDesktopBrowserAttachRequest>): void;
+  attach(args: HostScopedRequestArgs<OmnyoDesktopBrowserAttachRequest>): void;
   detach(args: HostScopedTabArgs): void;
   focus(args: HostScopedTabArgs): void;
-  navigate(args: HostScopedRequestArgs<BbDesktopBrowserNavigateRequest>): void;
+  setHostFocus(args: {
+    hostWindow: DesktopBrowserHostWindow;
+    tabId: string | null;
+  }): void;
+  reloadHostFocusedTab(hostWindow: DesktopBrowserHostWindow): boolean;
+  navigate(
+    args: HostScopedRequestArgs<OmnyoDesktopBrowserNavigateRequest>,
+  ): void;
   goBack(args: HostScopedTabArgs): void;
   goForward(args: HostScopedTabArgs): void;
   reload(args: HostScopedTabArgs): void;
   stop(args: HostScopedTabArgs): void;
   setBounds(
-    args: HostScopedRequestArgs<BbDesktopBrowserSetBoundsRequest>,
+    args: HostScopedRequestArgs<OmnyoDesktopBrowserSetBoundsRequest>,
   ): void;
   setVisible(
-    args: HostScopedRequestArgs<BbDesktopBrowserSetVisibleRequest>,
+    args: HostScopedRequestArgs<OmnyoDesktopBrowserSetVisibleRequest>,
   ): void;
   setVisibleWithoutFocus(
-    args: HostScopedRequestArgs<BbDesktopBrowserSetVisibleRequest>,
+    args: HostScopedRequestArgs<OmnyoDesktopBrowserSetVisibleRequest>,
   ): void;
   findInPage(
-    args: HostScopedRequestArgs<BbDesktopBrowserFindInPageRequest>,
+    args: HostScopedRequestArgs<OmnyoDesktopBrowserFindInPageRequest>,
   ): void;
   stopFindInPage(
-    args: HostScopedRequestArgs<BbDesktopBrowserStopFindInPageRequest>,
+    args: HostScopedRequestArgs<OmnyoDesktopBrowserStopFindInPageRequest>,
   ): void;
   evaluate(
-    args: HostScopedRequestArgs<BbDesktopBrowserEvaluateRequest>,
-  ): Promise<BbDesktopBrowserEvaluateResult>;
+    args: HostScopedRequestArgs<OmnyoDesktopBrowserEvaluateRequest>,
+  ): Promise<OmnyoDesktopBrowserEvaluateResult>;
   beginWindowResize(hostWindow: DesktopBrowserHostWindow): void;
   endWindowResize(hostWindow: DesktopBrowserHostWindow): void;
   prepareWindowReload(hostWindow: DesktopBrowserHostWindow): void;
@@ -329,21 +354,22 @@ function browserViewKey(
   return `${hostWindow.webContents.id}:${tabId}`;
 }
 
-const BB_DESKTOP_BROWSER_MAX_PAGE_MESSAGE_LENGTH = 1_000_000;
+const OMNYO_DESKTOP_BROWSER_MAX_PAGE_MESSAGE_LENGTH = 1_000_000;
 
-const guestPageMessageSchema = bbDesktopBrowserPageMessageSchema.omit({
+const guestPageMessageSchema = omnyoDesktopBrowserPageMessageSchema.omit({
   tabId: true,
 });
 
 export function browserPageEvaluationSource(
-  request: BbDesktopBrowserEvaluateRequest,
+  request: OmnyoDesktopBrowserEvaluateRequest,
 ): string {
   const bridge =
     request.world === "isolated"
-      ? `{ postMessage: (data) => globalThis[${JSON.stringify(BB_DESKTOP_BROWSER_PAGE_BRIDGE_KEY)}].postMessage(${JSON.stringify(request.channel)}, data) }`
+      ? `{ postMessage: (data) => globalThis[${JSON.stringify(OMNYO_DESKTOP_BROWSER_PAGE_BRIDGE_KEY)}].postMessage(${JSON.stringify(request.channel)}, data) }`
       : "null";
+
   return [
-    "(async (bb) => {",
+    "(async (omnyo) => {",
     "  try {",
     `    const json = JSON.stringify(await (${request.expression}\n));`,
     "    return { ok: true, value: json === undefined ? null : JSON.parse(json) };",
@@ -362,13 +388,15 @@ function send(
   if (hostWindow.isDestroyed() || hostWindow.webContents.isDestroyed()) {
     return;
   }
+
   hostWindow.webContents.send(channel, payload);
 }
 
 function hostWindowViewportBounds(
   args: HostWindowViewportBoundsArgs,
-): BbDesktopBrowserViewportBounds {
+): OmnyoDesktopBrowserViewportBounds {
   const contentBounds = args.hostWindow.getContentBounds();
+
   return {
     width: contentBounds.width,
     height: contentBounds.height,
@@ -380,7 +408,7 @@ function applyEntryDesiredBounds(
   hostWindow: DesktopBrowserHostWindow,
 ): void {
   entry.view.setBounds(
-    clampBbDesktopBrowserViewBounds({
+    clampOmnyoDesktopBrowserViewBounds({
       bounds: entry.desiredBounds,
       viewport: hostWindowViewportBounds({ hostWindow }),
     }),
@@ -395,25 +423,26 @@ function setEntryDesiredBounds(args: SetEntryDesiredBoundsArgs): void {
 function buildBrowserState(
   tabId: string,
   entry: BrowserViewEntry,
-): BbDesktopBrowserState {
+): OmnyoDesktopBrowserState {
   const webContents = entry.webContents;
   const url = webContents.getURL();
   const rawTitle = webContents.getTitle();
   const title = rawTitle.length > 0 && rawTitle !== url ? rawTitle : null;
+
   return {
     tabId,
-    url: truncate(url, BB_DESKTOP_BROWSER_MAX_URL_LENGTH),
+    url: truncate(url, OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH),
     title:
       title === null
         ? null
-        : truncate(title, BB_DESKTOP_BROWSER_MAX_TITLE_LENGTH),
+        : truncate(title, OMNYO_DESKTOP_BROWSER_MAX_TITLE_LENGTH),
     isLoading: webContents.isLoadingMainFrame(),
     canGoBack: webContents.navigationHistory.canGoBack(),
     canGoForward: webContents.navigationHistory.canGoForward(),
     errorText:
       entry.lastErrorText === null
         ? null
-        : truncate(entry.lastErrorText, BB_DESKTOP_BROWSER_MAX_TITLE_LENGTH),
+        : truncate(entry.lastErrorText, OMNYO_DESKTOP_BROWSER_MAX_TITLE_LENGTH),
   };
 }
 
@@ -424,12 +453,13 @@ function isAllowedBrowserPermission(permission: string): boolean {
 export function createDesktopBrowserViewManager(
   args: CreateDesktopBrowserViewManagerArgs,
 ): DesktopBrowserViewManager {
-  const partition = args.partition ?? BB_BROWSER_PARTITION;
+  const partition = args.partition ?? BROWSER_PARTITION;
   const pagePreloadPath = args.pagePreloadPath;
   const entries = new Map<string, BrowserViewEntry>();
   const automationTabListeners = new Set<() => void>();
   const popupWindows = new Set<BrowserWindow>();
   const resizingHostIds = new Set<number>();
+  const hostFocusedTabIds = new Map<number, string>();
   let hardenedSession: Session | null = null;
   const automationControlled = new WeakSet<WebContents>();
   const pendingHostFocusReturns = new WeakSet<DesktopBrowserHostWindow>();
@@ -452,6 +482,7 @@ export function createDesktopBrowserViewManager(
     ) {
       return;
     }
+
     for (const frame of entry.webContents.mainFrame.framesInSubtree) {
       if (frame.detached) continue;
       frame
@@ -477,6 +508,7 @@ export function createDesktopBrowserViewManager(
     if (entry.webContents.isDestroyed()) {
       return;
     }
+
     entry.webContents.setAudioMuted(!entry.visible);
     pauseHiddenMedia(entry);
     entry.view.setVisible(
@@ -511,15 +543,19 @@ export function createDesktopBrowserViewManager(
     ) {
       return;
     }
+
     if (entry.rendererRecoveryAttempts >= RENDERER_RECOVERY_MAX_ATTEMPTS) {
       entry.rendererRecoveryState = "blocked";
       entry.lastErrorText = "The page renderer stopped repeatedly";
       pushState(hostWindow, tabId);
+
       return;
     }
+
     entry.rendererRecoveryTimer = setTimeout(() => {
       entry.rendererRecoveryTimer = null;
       const webContents = entry.webContents;
+
       if (
         webContents.isDestroyed() ||
         entry.rendererRecoveryState !== "pending" ||
@@ -527,6 +563,7 @@ export function createDesktopBrowserViewManager(
       ) {
         return;
       }
+
       entry.rendererRecoveryAttempts += 1;
       entry.rendererRecoveryState = "healthy";
       entry.lastErrorText = null;
@@ -543,16 +580,19 @@ export function createDesktopBrowserViewManager(
     const hideCap = setTimeout(() => {
       applyEntryVisibility(entry, hostWindow);
     }, RESIZE_SNAPSHOT_HIDE_CAP_MS);
+
     entry.webContents
       .capturePage()
       .then((image) => {
         if (!isHostResizing(hostWindow) || image.isEmpty()) {
           return;
         }
+
         const dataUrl = `data:image/jpeg;base64,${image
           .toJPEG(RESIZE_SNAPSHOT_JPEG_QUALITY)
           .toString("base64")}`;
-        send(hostWindow, BB_DESKTOP_BROWSER_SNAPSHOT_CHANNEL, {
+
+        send(hostWindow, OMNYO_DESKTOP_BROWSER_SNAPSHOT_CHANNEL, {
           tabId,
           dataUrl,
         });
@@ -568,6 +608,7 @@ export function createDesktopBrowserViewManager(
     if (hardenedSession !== null) {
       return hardenedSession;
     }
+
     const browserSession = session.fromPartition(partition);
     browserSession.setPermissionRequestHandler((_wc, permission, callback) => {
       callback(isAllowedBrowserPermission(permission));
@@ -576,6 +617,7 @@ export function createDesktopBrowserViewManager(
       isAllowedBrowserPermission(permission),
     );
     hardenedSession = browserSession;
+
     return browserSession;
   }
 
@@ -584,12 +626,14 @@ export function createDesktopBrowserViewManager(
     tabId: string,
   ): void {
     const entry = entries.get(browserViewKey(hostWindow, tabId));
+
     if (!entry || entry.webContents.isDestroyed()) {
       return;
     }
+
     send(
       hostWindow,
-      BB_DESKTOP_BROWSER_STATE_CHANNEL,
+      OMNYO_DESKTOP_BROWSER_STATE_CHANNEL,
       buildBrowserState(tabId, entry),
     );
   }
@@ -630,6 +674,7 @@ export function createDesktopBrowserViewManager(
         POPUP_MAX_WIDTH,
       ),
     };
+
     const popupWindow = new BrowserWindow(popupOptions);
     popupWindows.add(popupWindow);
     entry.popupWindows.add(popupWindow);
@@ -638,11 +683,13 @@ export function createDesktopBrowserViewManager(
       entry.popupWindows.delete(popupWindow);
     });
     const popupContents = popupWindow.webContents;
+
     const updatePopupTitle = (currentUrl: string | null): void => {
       if (!popupWindow.isDestroyed()) {
         popupWindow.setTitle(popupWindowTitle(currentUrl));
       }
     };
+
     updatePopupTitle(popupContents.getURL());
     guardMainFrameNavigation(popupContents, isAllowedPopupNavigationUrl);
     popupContents.on("did-navigate", (_event, currentUrl) => {
@@ -653,9 +700,11 @@ export function createDesktopBrowserViewManager(
       updatePopupTitle(popupContents.getURL());
     });
     popupContents.setWindowOpenHandler(() => ({ action: "deny" }));
+
     if (options.webContents === undefined) {
       void popupWindow.loadURL(url);
     }
+
     return popupContents;
   }
 
@@ -678,17 +727,19 @@ export function createDesktopBrowserViewManager(
 
     if (pagePreloadPath !== null) {
       webContents.ipc.on(
-        BB_DESKTOP_BROWSER_GUEST_MESSAGE_CHANNEL,
+        OMNYO_DESKTOP_BROWSER_GUEST_MESSAGE_CHANNEL,
         (_event, payload: unknown) => {
           const parsed = guestPageMessageSchema.safeParse(payload);
+
           if (
             !parsed.success ||
             JSON.stringify(parsed.data.data).length >
-              BB_DESKTOP_BROWSER_MAX_PAGE_MESSAGE_LENGTH
+              OMNYO_DESKTOP_BROWSER_MAX_PAGE_MESSAGE_LENGTH
           ) {
             return;
           }
-          send(hostWindow, BB_DESKTOP_BROWSER_PAGE_MESSAGE_CHANNEL, {
+
+          send(hostWindow, OMNYO_DESKTOP_BROWSER_PAGE_MESSAGE_CHANNEL, {
             tabId,
             channel: parsed.data.channel,
             data: parsed.data.data,
@@ -700,19 +751,24 @@ export function createDesktopBrowserViewManager(
     webContents.on("focus", () => {
       if (entry.suppressNextFocusNotification) {
         entry.suppressNextFocusNotification = false;
+
         return;
       }
+
       if (automationControlled.has(webContents) || !entry.visible) {
         setTimeout(() => returnFocusToHost(hostWindow), 0);
+
         return;
       }
-      send(hostWindow, BB_DESKTOP_BROWSER_FOCUSED_CHANNEL, { tabId });
+
+      send(hostWindow, OMNYO_DESKTOP_BROWSER_FOCUSED_CHANNEL, { tabId });
     });
 
     webContents.on("before-input-event", (event, input) => {
       if (input.type !== "keyDown" || input.isAutoRepeat || input.isComposing) {
         return;
       }
+
       const command = args.resolveAppCommand(
         {
           altKey: input.alt,
@@ -724,8 +780,20 @@ export function createDesktopBrowserViewManager(
         },
         hostWindow.webContents.id,
       );
+
+      if (
+        command === "browser.reload" ||
+        (command === null && resolveDesktopReloadShortcut(input) !== null)
+      ) {
+        event.preventDefault();
+        hardReloadEntry(entry, hostWindow);
+
+        return;
+      }
+
       if (command === null) return;
       event.preventDefault();
+
       if (
         command === "browser.focusLocation" ||
         command === "browser.find" ||
@@ -737,6 +805,7 @@ export function createDesktopBrowserViewManager(
       ) {
         args.focusHostWebContents(hostWindow.webContents.id);
       }
+
       args.dispatchAppCommand({
         command,
         hostWebContentsId: hostWindow.webContents.id,
@@ -747,26 +816,33 @@ export function createDesktopBrowserViewManager(
 
     webContents.setWindowOpenHandler((details) => {
       const opensPopup = details.disposition === "new-window";
+
       const allowedUrl = opensPopup
         ? isAllowedPopupNavigationUrl(details.url)
         : isAllowedBrowserUrl(details.url);
+
       const popupCapReached =
         opensPopup &&
         (entry.popupWindows.size >= POPUP_MAX_OPEN_PER_TAB ||
           popupWindows.size >= POPUP_MAX_OPEN_GLOBAL);
+
       if (!allowedUrl || popupCapReached) {
         return { action: "deny" };
       }
+
       const decision = evaluatePopupRate({
         timestamps: entry.popupTimestamps,
         now: Date.now(),
         windowMs: POPUP_RATE_WINDOW_MS,
         maxInWindow: POPUP_RATE_MAX_IN_WINDOW,
       });
+
       entry.popupTimestamps = decision.timestamps;
+
       if (!decision.allowed) {
         return { action: "deny" };
       }
+
       if (opensPopup) {
         return {
           action: "allow",
@@ -774,13 +850,15 @@ export function createDesktopBrowserViewManager(
             createPopupWindow(options, details.url, entry),
         };
       }
-      send(hostWindow, BB_DESKTOP_BROWSER_OPEN_TAB_CHANNEL, {
+
+      send(hostWindow, OMNYO_DESKTOP_BROWSER_OPEN_TAB_CHANNEL, {
         url: details.url,
       });
-      send(hostWindow, BB_DESKTOP_BROWSER_SCOPED_OPEN_TAB_CHANNEL, {
+      send(hostWindow, OMNYO_DESKTOP_BROWSER_SCOPED_OPEN_TAB_CHANNEL, {
         tabId,
         url: details.url,
       });
+
       return { action: "deny" };
     });
 
@@ -788,7 +866,9 @@ export function createDesktopBrowserViewManager(
       if (webContents.isDestroyed()) {
         return;
       }
+
       const { editFlags } = params;
+
       const menu = Menu.buildFromTemplate([
         {
           role: "cut",
@@ -808,6 +888,7 @@ export function createDesktopBrowserViewManager(
           enabled: editFlags.canSelectAll,
         },
       ]);
+
       menu.popup();
     });
 
@@ -815,7 +896,8 @@ export function createDesktopBrowserViewManager(
       if (result.requestId !== entry.activeFindRequestId) {
         return;
       }
-      send(hostWindow, BB_DESKTOP_BROWSER_FIND_RESULT_CHANNEL, {
+
+      send(hostWindow, OMNYO_DESKTOP_BROWSER_FIND_RESULT_CHANNEL, {
         tabId,
         requestId: result.requestId,
         activeMatchOrdinal: result.activeMatchOrdinal,
@@ -828,8 +910,10 @@ export function createDesktopBrowserViewManager(
       if (webContents.isDestroyed() || webContents.getURL().length === 0) {
         return;
       }
+
       clearEntryRendererRecoveryTimer(entry);
       entry.rendererRecoveryState = "blocked";
+
       if (
         details.reason === "launch-failed" ||
         details.reason === "integrity-failure"
@@ -837,8 +921,10 @@ export function createDesktopBrowserViewManager(
         entry.lastErrorText = "The page renderer could not start";
         applyEntryVisibility(entry, hostWindow);
         pushState(hostWindow, tabId);
+
         return;
       }
+
       entry.rendererRecoveryState = "pending";
       entry.lastErrorText = null;
       applyEntryVisibility(entry, hostWindow);
@@ -873,6 +959,7 @@ export function createDesktopBrowserViewManager(
         if (!isMainFrame || errorCode === ERR_ABORTED) {
           return;
         }
+
         entry.lastErrorText =
           errorDescription.length > 0
             ? errorDescription
@@ -884,6 +971,7 @@ export function createDesktopBrowserViewManager(
 
   function createEntry(args: CreateEntryArgs): BrowserViewEntry {
     ensureHardenedSession();
+
     const view = new WebContentsView({
       webPreferences: {
         ...hardenedWebPreferences(),
@@ -891,6 +979,7 @@ export function createDesktopBrowserViewManager(
         ...(pagePreloadPath === null ? {} : { preload: pagePreloadPath }),
       },
     });
+
     const entry: BrowserViewEntry = {
       view,
       webContents: view.webContents,
@@ -908,9 +997,11 @@ export function createDesktopBrowserViewManager(
       visible: false,
       activeFindRequestId: null,
     };
+
     wireWebContents(args.hostWindow, args.tabId, entry);
     args.hostWindow.contentView.addChildView(view);
     entries.set(browserViewKey(args.hostWindow, args.tabId), entry);
+
     return entry;
   }
 
@@ -918,12 +1009,15 @@ export function createDesktopBrowserViewManager(
     if (url.length === 0) {
       return;
     }
+
     if (entry.webContents.getURL() === url) {
       return;
     }
+
     if (!isAllowedBrowserUrl(url)) {
       return;
     }
+
     entry.lastErrorText = null;
     entry.webContents.loadURL(url).catch(() => {});
   }
@@ -931,13 +1025,17 @@ export function createDesktopBrowserViewManager(
   function disposeEntry(key: string, entry: BrowserViewEntry): void {
     entries.delete(key);
     clearEntryRendererRecoveryTimer(entry);
+
     for (const popupWindow of [...entry.popupWindows]) {
       if (!popupWindow.isDestroyed()) popupWindow.destroy();
     }
+
     entry.popupWindows.clear();
+
     if (!entry.webContents.isDestroyed()) {
       entry.webContents.close();
     }
+
     notifyAutomationTabs();
   }
 
@@ -946,13 +1044,25 @@ export function createDesktopBrowserViewManager(
     key: string,
   ): void {
     const entry = entries.get(key);
+
     if (!entry) {
       return;
     }
+
     if (!hostWindow.isDestroyed()) {
       hostWindow.contentView.removeChildView(entry.view);
     }
+
     disposeEntry(key, entry);
+  }
+
+  function hardReloadEntry(
+    entry: BrowserViewEntry,
+    hostWindow: DesktopBrowserHostWindow,
+  ): void {
+    resetEntryRendererRecovery(entry);
+    entry.webContents.reloadIgnoringCache();
+    applyEntryVisibility(entry, hostWindow);
   }
 
   function withEntry(
@@ -960,14 +1070,17 @@ export function createDesktopBrowserViewManager(
     fn: (entry: BrowserViewEntry) => void,
   ): void {
     const entry = entries.get(browserViewKey(args.hostWindow, args.tabId));
+
     if (!entry || entry.webContents.isDestroyed()) {
       return;
     }
+
     fn(entry);
   }
 
   function requireNativeEntry(ref: NativeTabRef): BrowserViewEntry {
     const entry = entries.get(`${ref.hostWebContentsId}:${ref.tabId}`);
+
     if (
       entry === undefined ||
       entry.threadId !== ref.threadId ||
@@ -976,6 +1089,7 @@ export function createDesktopBrowserViewManager(
     ) {
       throw new Error("Native browser tab is unavailable or has been replaced");
     }
+
     return entry;
   }
 
@@ -997,11 +1111,13 @@ export function createDesktopBrowserViewManager(
   ): boolean {
     const hostPrefix = `${hostWindow.webContents.id}:`;
     const currentKey = browserViewKey(hostWindow, tabId);
+
     for (const [key, entry] of entries) {
       if (key !== currentKey && key.startsWith(hostPrefix) && entry.visible) {
         return true;
       }
     }
+
     return false;
   }
 
@@ -1009,6 +1125,7 @@ export function createDesktopBrowserViewManager(
     hostWindow: DesktopBrowserHostWindow,
   ): boolean {
     const hostPrefix = `${hostWindow.webContents.id}:`;
+
     for (const [key, entry] of entries) {
       if (
         key.startsWith(hostPrefix) &&
@@ -1019,6 +1136,7 @@ export function createDesktopBrowserViewManager(
         return true;
       }
     }
+
     return false;
   }
 
@@ -1026,6 +1144,7 @@ export function createDesktopBrowserViewManager(
     if (hostWindow.isDestroyed() || hostWindow.webContents.isDestroyed()) {
       return;
     }
+
     if (!hostWindow.isFocused()) {
       if (pendingHostFocusReturns.has(hostWindow)) return;
       pendingHostFocusReturns.add(hostWindow);
@@ -1033,8 +1152,10 @@ export function createDesktopBrowserViewManager(
         pendingHostFocusReturns.delete(hostWindow);
         returnFocusToHost(hostWindow);
       });
+
       return;
     }
+
     if (controlledViewHasFocus(hostWindow)) {
       args.focusHostWebContents(hostWindow.webContents.id);
     }
@@ -1052,7 +1173,7 @@ export function createDesktopBrowserViewManager(
     {
       hostWindow,
       request,
-    }: HostScopedRequestArgs<BbDesktopBrowserSetVisibleRequest>,
+    }: HostScopedRequestArgs<OmnyoDesktopBrowserSetVisibleRequest>,
     focusOnShow: boolean,
   ): void {
     withEntry({ hostWindow, tabId: request.tabId }, (entry) => {
@@ -1060,6 +1181,7 @@ export function createDesktopBrowserViewManager(
       entry.visible = request.visible;
       applyEntryVisibility(entry, hostWindow);
       scheduleEntryRendererRecovery(entry, hostWindow, request.tabId);
+
       if (
         focusOnShow &&
         request.visible &&
@@ -1076,30 +1198,37 @@ export function createDesktopBrowserViewManager(
     createTab(request) {
       if (!isAllowedBrowserUrl(request.url))
         throw new Error("Unsupported browser URL");
+
       if (
         request.hostWindow.isDestroyed() ||
         request.hostWindow.webContents.isDestroyed()
       ) {
         throw new Error("Desktop window is unavailable");
       }
+
       const key = browserViewKey(request.hostWindow, request.tabId);
+
       if (entries.has(key))
         throw new Error("Native browser tab already exists");
+
       const entry = createEntry({
         ...request,
         desiredBounds: { x: 0, y: 0, ...request.viewport },
         backgroundThrottling: false,
       });
+
       applyEntryDesiredBounds(entry, request.hostWindow);
       applyEntryVisibility(entry, request.hostWindow);
       loadIfNeeded(entry, request.url);
       notifyAutomationTabs();
       pushState(request.hostWindow, request.tabId);
+
       return nativeTab(request.tabId, entry);
     },
     listTabs({ hostWebContentsId, threadId }) {
       const prefix = `${hostWebContentsId}:`;
       const tabs: DesktopBrowserNativeTab[] = [];
+
       for (const [key, entry] of entries) {
         if (
           key.startsWith(prefix) &&
@@ -1109,6 +1238,7 @@ export function createDesktopBrowserViewManager(
           tabs.push(nativeTab(key.slice(prefix.length), entry));
         }
       }
+
       return tabs;
     },
     closeTab(ref) {
@@ -1123,6 +1253,7 @@ export function createDesktopBrowserViewManager(
     },
     async captureTab(request) {
       const entry = requireNativeEntry(request);
+
       if (
         ![request.maxWidth, request.maxHeight].every(
           (size) => Number.isInteger(size) && size > 0 && size <= 4096,
@@ -1133,15 +1264,19 @@ export function createDesktopBrowserViewManager(
       ) {
         throw new Error("Invalid browser capture dimensions or quality");
       }
+
       const image = await captureDesktopBrowserPage(entry.webContents);
       requireNativeEntry(request);
+
       if (image.isEmpty()) throw new Error("Native browser capture is empty");
       const size = image.getSize();
+
       const scale = Math.min(
         1,
         request.maxWidth / size.width,
         request.maxHeight / size.height,
       );
+
       const resized =
         scale < 1
           ? image.resize({
@@ -1149,14 +1284,18 @@ export function createDesktopBrowserViewManager(
               height: Math.max(1, Math.round(size.height * scale)),
             })
           : image;
+
       const data = resized.toJPEG(request.quality);
+
       if (data.byteLength > 8 * 1024 * 1024)
         throw new Error("Native browser capture exceeds the size limit");
+
       return { data, ...resized.getSize() };
     },
     getAutomationTabs({ hostWebContentsId, threadId }) {
       const prefix = `${hostWebContentsId}:`;
       const tabs: Array<{ tabId: string; webContents: WebContents }> = [];
+
       for (const [key, entry] of entries) {
         if (
           key.startsWith(prefix) &&
@@ -1169,10 +1308,12 @@ export function createDesktopBrowserViewManager(
           });
         }
       }
+
       return tabs;
     },
     subscribeAutomationTabs(listener) {
       automationTabListeners.add(listener);
+
       return () => {
         automationTabListeners.delete(listener);
       };
@@ -1184,11 +1325,15 @@ export function createDesktopBrowserViewManager(
     attach({ hostWindow, request }) {
       const key = browserViewKey(hostWindow, request.tabId);
       const existing = entries.get(key) ?? null;
+
       if (existing === null && request.existingOnly === true) return;
+
       if (existing !== null && existing.threadId !== request.threadId) {
         return;
       }
+
       const wasVisible = existing?.visible ?? false;
+
       const entry =
         existing ??
         createEntry({
@@ -1198,9 +1343,11 @@ export function createDesktopBrowserViewManager(
           threadId: request.threadId,
           backgroundThrottling: true,
         });
+
       setEntryDesiredBounds({ bounds: request.bounds, entry, hostWindow });
       entry.visible = request.visible;
       applyEntryVisibility(entry, hostWindow);
+
       if (
         request.visible &&
         !wasVisible &&
@@ -1209,10 +1356,12 @@ export function createDesktopBrowserViewManager(
       ) {
         focusEntryWithoutNotifying(entry);
       }
+
       if (existing === null) {
         loadIfNeeded(entry, request.url);
         notifyAutomationTabs();
       }
+
       pushState(hostWindow, request.tabId);
     },
     detach({ hostWindow, tabId }) {
@@ -1223,22 +1372,29 @@ export function createDesktopBrowserViewManager(
     },
     async evaluate({ hostWindow, request }) {
       const entry = entries.get(browserViewKey(hostWindow, request.tabId));
+
       if (!entry || entry.webContents.isDestroyed()) {
         return { ok: false, error: "Browser tab is not available" };
       }
+
       if (request.world === "isolated" && pagePreloadPath === null) {
         return { ok: false, error: "Browser page scripts are not available" };
       }
+
       const source = browserPageEvaluationSource(request);
+
       try {
         const result: unknown =
           request.world === "main"
             ? await entry.webContents.executeJavaScript(source)
             : await entry.webContents.executeJavaScriptInIsolatedWorld(
-                BB_DESKTOP_BROWSER_PAGE_WORLD_ID,
+                OMNYO_DESKTOP_BROWSER_PAGE_WORLD_ID,
                 [{ code: source }],
               );
-        const parsed = bbDesktopBrowserEvaluateResultSchema.safeParse(result);
+
+        const parsed =
+          omnyoDesktopBrowserEvaluateResultSchema.safeParse(result);
+
         return parsed.success
           ? parsed.data
           : { ok: false, error: "Browser page script returned no result" };
@@ -1276,10 +1432,34 @@ export function createDesktopBrowserViewManager(
     },
     reload({ hostWindow, tabId }) {
       withEntry({ hostWindow, tabId }, (entry) => {
-        resetEntryRendererRecovery(entry);
-        entry.webContents.reload();
-        applyEntryVisibility(entry, hostWindow);
+        hardReloadEntry(entry, hostWindow);
       });
+    },
+    setHostFocus({ hostWindow, tabId }) {
+      if (tabId === null) {
+        hostFocusedTabIds.delete(hostWindow.webContents.id);
+      } else {
+        hostFocusedTabIds.set(hostWindow.webContents.id, tabId);
+      }
+    },
+    reloadHostFocusedTab(hostWindow) {
+      const tabId = hostFocusedTabIds.get(hostWindow.webContents.id);
+
+      if (tabId === undefined) {
+        return false;
+      }
+
+      let reloaded = false;
+      withEntry({ hostWindow, tabId }, (entry) => {
+        if (!entry.visible) {
+          return;
+        }
+
+        hardReloadEntry(entry, hostWindow);
+        reloaded = true;
+      });
+
+      return reloaded;
     },
     stop({ hostWindow, tabId }) {
       withEntry({ hostWindow, tabId }, (entry) => {
@@ -1315,12 +1495,15 @@ export function createDesktopBrowserViewManager(
       if (isHostResizing(hostWindow)) {
         return;
       }
+
       resizingHostIds.add(hostWindow.webContents.id);
       const prefix = `${hostWindow.webContents.id}:`;
+
       for (const [key, entry] of entries.entries()) {
         if (!key.startsWith(prefix) || entry.webContents.isDestroyed()) {
           continue;
         }
+
         if (entry.visible) {
           startResizeSnapshot(hostWindow, key.slice(prefix.length), entry);
         }
@@ -1330,17 +1513,21 @@ export function createDesktopBrowserViewManager(
       if (!isHostResizing(hostWindow)) {
         return;
       }
+
       resizingHostIds.delete(hostWindow.webContents.id);
       const prefix = `${hostWindow.webContents.id}:`;
+
       for (const [key, entry] of entries.entries()) {
         if (!key.startsWith(prefix) || entry.webContents.isDestroyed()) {
           continue;
         }
+
         if (entry.visible) {
           applyEntryDesiredBounds(entry, hostWindow);
         }
+
         applyEntryVisibility(entry, hostWindow);
-        send(hostWindow, BB_DESKTOP_BROWSER_SNAPSHOT_CHANNEL, {
+        send(hostWindow, OMNYO_DESKTOP_BROWSER_SNAPSHOT_CHANNEL, {
           tabId: key.slice(prefix.length),
           dataUrl: null,
         });
@@ -1349,32 +1536,41 @@ export function createDesktopBrowserViewManager(
     prepareWindowReload(hostWindow) {
       resizingHostIds.delete(hostWindow.webContents.id);
       const prefix = `${hostWindow.webContents.id}:`;
+
       for (const [key, entry] of entries.entries()) {
         if (!key.startsWith(prefix) || entry.webContents.isDestroyed()) {
           continue;
         }
+
         entry.visible = false;
         applyEntryVisibility(entry, hostWindow);
       }
     },
     releaseWindow(hostWebContentsId) {
       resizingHostIds.delete(hostWebContentsId);
+      hostFocusedTabIds.delete(hostWebContentsId);
       const prefix = `${hostWebContentsId}:`;
+
       for (const [key, entry] of [...entries.entries()]) {
         if (!key.startsWith(prefix)) {
           continue;
         }
+
         disposeEntry(key, entry);
       }
     },
     destroyAll() {
       resizingHostIds.clear();
+      hostFocusedTabIds.clear();
+
       for (const popupWindow of [...popupWindows]) {
         if (!popupWindow.isDestroyed()) {
           popupWindow.destroy();
         }
       }
+
       popupWindows.clear();
+
       for (const [key, entry] of [...entries.entries()]) {
         disposeEntry(key, entry);
       }

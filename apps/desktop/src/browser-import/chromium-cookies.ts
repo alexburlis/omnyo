@@ -16,8 +16,11 @@ import {
 } from "./cookie-database.js";
 
 const AES_CBC_IV = Buffer.alloc(16, 0x20);
+
 const WEBKIT_EPOCH_OFFSET_SECONDS = 11_644_473_600;
+
 const DOMAIN_BOUND_SCHEMA_VERSION = 24;
+
 const TOP_FRAME_SITE_KEY_SCHEMA_VERSION = 15;
 
 interface CookieRow {
@@ -35,13 +38,17 @@ interface CookieRow {
 
 function sameSiteFromColumn(value: number): ImportedCookie["sameSite"] {
   if (value === 0) return "no_restriction";
+
   if (value === 1) return "lax";
+
   if (value === 2) return "strict";
+
   return "unspecified";
 }
 
 function toUnixSeconds(webkitSeconds: number): number | undefined {
   if (webkitSeconds <= 0) return undefined;
+
   return webkitSeconds - WEBKIT_EPOCH_OFFSET_SECONDS;
 }
 
@@ -52,6 +59,7 @@ function stripDomainBinding(
 ): Buffer | null {
   if (schemaVersion < DOMAIN_BOUND_SCHEMA_VERSION) return plaintext;
   const domainHash = createHash("sha256").update(domain).digest();
+
   return plaintext.length >= 32 && plaintext.subarray(0, 32).equals(domainHash)
     ? plaintext.subarray(32)
     : null;
@@ -66,10 +74,12 @@ function decryptCbc(
   try {
     const decipher = createDecipheriv("aes-128-cbc", key, AES_CBC_IV);
     decipher.setAutoPadding(true);
+
     const plaintext = Buffer.concat([
       decipher.update(payload),
       decipher.final(),
     ]);
+
     return (
       stripDomainBinding(plaintext, domain, schemaVersion)?.toString("utf8") ??
       null
@@ -86,11 +96,14 @@ export function decryptChromiumValue(
   schemaVersion = 23,
 ): string | null {
   const buffer = Buffer.from(encrypted);
+
   if (buffer.length === 0) return "";
   const prefix = buffer.subarray(0, 3).toString("latin1");
   const payload = buffer.subarray(3);
+
   if (prefix === "v10") {
     if (!keys.cbcV10) return null;
+
     return (
       decryptCbc(payload, keys.cbcV10, domain, schemaVersion) ??
       (keys.cbcEmpty
@@ -98,8 +111,10 @@ export function decryptChromiumValue(
         : null)
     );
   }
+
   if (prefix === "v11") {
     if (!keys.cbcV11) return null;
+
     return (
       decryptCbc(payload, keys.cbcV11, domain, schemaVersion) ??
       (keys.cbcEmpty
@@ -107,7 +122,9 @@ export function decryptChromiumValue(
         : null)
     );
   }
+
   if (/^v\d\d$/.test(prefix)) return null;
+
   return (
     stripDomainBinding(buffer, domain, schemaVersion)?.toString("utf8") ?? null
   );
@@ -117,8 +134,11 @@ function readSchemaVersion(database: DatabaseSync): number {
   const row = database
     .prepare("select value from meta where key = 'version' limit 1")
     .get() as { value?: unknown } | undefined;
+
   const value = row?.value;
+
   if (typeof value === "number") return value;
+
   if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
   throw new BrowserImportError("readFailed", "Chromium meta table unreadable");
 }
@@ -128,10 +148,13 @@ export function readChromiumCookieDatabase(
   keys: ChromiumKeyMaterial,
 ): CookieReadResult {
   const schemaVersion = readSchemaVersion(database);
+
   const topFrameColumn =
     schemaVersion >= TOP_FRAME_SITE_KEY_SCHEMA_VERSION
       ? "top_frame_site_key"
       : "'' as top_frame_site_key";
+
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions
   const rows = database
     .prepare(
       `select host_key, name, value, encrypted_value, path,
@@ -139,31 +162,38 @@ export function readChromiumCookieDatabase(
               samesite, ${topFrameColumn} from cookies`,
     )
     .all() as unknown as CookieRow[];
+
   const cookies: ImportedCookie[] = [];
   let undecryptable = 0;
   const undecryptableHosts = new Set<string>();
   let sawKeyringRecord = false;
+
   for (const row of rows) {
     if (row.top_frame_site_key !== "") {
       undecryptable += 1;
       undecryptableHosts.add(bareHost(row.host_key));
       continue;
     }
+
     const encrypted = row.encrypted_value ?? new Uint8Array();
+
     if (
       encrypted.length >= 3 &&
       Buffer.from(encrypted.subarray(0, 3)).toString("latin1") === "v11"
     )
       sawKeyringRecord = true;
+
     const value =
       encrypted.length === 0
         ? row.value
         : decryptChromiumValue(encrypted, keys, row.host_key, schemaVersion);
+
     if (value === null) {
       undecryptable += 1;
       undecryptableHosts.add(bareHost(row.host_key));
       continue;
     }
+
     const secure = row.is_secure === 1;
     const scope = cookieScope(row.host_key, row.path, secure);
     cookies.push({
@@ -178,8 +208,10 @@ export function readChromiumCookieDatabase(
       sameSite: sameSiteFromColumn(row.samesite),
     });
   }
+
   if (cookies.length === 0 && keys.cbcV11Error && sawKeyringRecord)
     throw keys.cbcV11Error;
+
   return {
     cookies,
     undecryptable,
@@ -208,7 +240,9 @@ export async function readChromiumCookies(
             "select 1 from cookies where substr(encrypted_value, 1, 3) in (x'763130', x'763131') limit 1",
           )
           .get();
+
         const keys = encrypted ? await resolveChromiumKeys(source, run) : {};
+
         return readChromiumCookieDatabase(database, keys);
       },
     );

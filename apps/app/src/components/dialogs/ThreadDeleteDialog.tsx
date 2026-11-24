@@ -1,25 +1,26 @@
-import type { Thread } from "@bb/domain";
+import type { Thread } from "@omnyo/domain";
 import {
   ConfirmDeleteDialog,
   ConfirmDeleteDialogContent,
-} from "@bb/shared-ui/confirm-delete-dialog";
+} from "@omnyo/shared-ui/confirm-delete-dialog";
 import { formatChildThreadCount } from "@/lib/child-thread-copy";
 
 export interface ThreadDeleteDialogTarget {
   thread: Thread;
+  childSummaryLoaded: boolean;
   childThreadCount?: number;
 }
 
 interface ThreadDeleteDialogProps {
   target: ThreadDeleteDialogTarget | null;
-  pending: boolean;
+  pending?: boolean;
   onOpenChange: (open: boolean) => void;
   onDelete: (target: ThreadDeleteDialogTarget) => void;
 }
 
 export function ThreadDeleteDialog({
   target,
-  pending,
+  pending = false,
   onOpenChange,
   onDelete,
 }: ThreadDeleteDialogProps) {
@@ -70,7 +71,7 @@ export function ThreadDeleteDialogContent({
         </>
       }
       confirmLabel={`Delete ${label}`}
-      pending={pending}
+      pending={pending || !target.childSummaryLoaded}
       onConfirm={() => onDelete(target)}
       onCancel={() => onOpenChange(false)}
     />

@@ -11,7 +11,7 @@
 
 Minimum runtime: Node.js 22.19. Pi no longer sets the floor: its bridge is a
 plugin and the `pi` CLI is user-installed like `codex` and `claude`, so the
-22.19 line is bb's own tested floor (`install-machine.sh` and the root
+22.19 line is Omnyo's own tested floor (`install-machine.sh` and the root
 `engines` gate on it). A lower floor needs its own test pass before it moves.
 
 Tested npm package runtimes:
@@ -22,20 +22,20 @@ Tested npm package runtimes:
 
 Newer release lines are not blocked. `install-machine.sh` gates on the 22.19
 floor only, so a release line we have not tested yet still installs rather than
-failing hard on the day it ships. The `bb-app` npm `engines` field lists the
+failing hard on the day it ships. The `omnyo-app` npm `engines` field lists the
 tested lines, which npm surfaces as a warning rather than an install failure.
 
 Windows has two host paths. Inside WSL2 the Linux stack runs unchanged:
 
-- all `bb` processes run inside the same Ubuntu WSL2 distro
+- all Omnyo processes run inside the same Ubuntu WSL2 distro
 - Node.js, Git, provider CLIs, and pnpm for source-development flows are
   installed inside WSL2
 - local project paths use Linux-style absolute paths from inside WSL2
 
 The native Windows host is alpha. It runs from the Windows desktop installer or
-`npx bb-app` in PowerShell or CMD:
+`omnyo-app` in PowerShell or CMD:
 
-- Git for Windows is required; bb uses its Git and its bash for environment
+- Git for Windows is required; Omnyo uses its Git and its bash for environment
   setup and teardown scripts
 - project paths are drive-letter paths such as `C:\Users\me\repo`; UNC paths
   are refused
@@ -47,7 +47,7 @@ The native Windows host is alpha. It runs from the Windows desktop installer or
 ## Mobile app
 
 [`apps/mobile`](../apps/mobile/README.md) is an Expo / React Native shell
-around the server's PWA in one WebView, connected through `@bb/mobile-bridge`.
+around the server's PWA in one WebView, connected through `@omnyo/mobile-bridge`.
 Pairing, saved servers, device, appearance and notification settings are native;
 threads, projects, server settings and plugin frontends run in the page.
 Agents, host daemons and plugin backends run on the server or enrolled hosts.
@@ -58,16 +58,16 @@ Agents, host daemons and plugin backends run on the server or enrolled hosts.
   `--server-bind-host 0.0.0.0`, a Tailscale Serve HTTPS URL). It is
   unauthenticated, the same trust model as the browser PWA on a LAN; iOS
   allows plain `http://` only for LAN IPs and `.local` names, so Tailscale
-  hosts need Serve HTTPS. **bb connect** mode pairs the phone as a connect
+  hosts need Serve HTTPS. **Omnyo connect** mode pairs the phone as a connect
   machine (QR / code from Settings → Mobile or
-  `bb connect machine-code`, without an experiment), keeps the credential in the device keychain, and mints
+  `omnyo connect machine-code`, without an experiment), keeps the credential in the device keychain, and mints
   seven-day rolling sessions that end when the device is revoked; see
   [multiple-devices.md](multiple-devices.md).
 - Distribution: iOS beta through TestFlight and Android alpha APKs from the
   [Android testing release](https://github.com/get-bb/bb/releases/tag/android-testing).
   EAS builds and developer builds from source are available; see the
   [mobile README](../apps/mobile/README.md#release-eas). No public store release yet.
-- The built-in Push notifications plugin works on iOS and Android when the bb
+- The built-in Push notifications plugin works on iOS and Android when the Omnyo
   server can reach `exp.host`. The server needs no Apple or Google keys.
   Android builds need Firebase configuration and an FCM V1 credential in EAS;
   see the [Android setup](../apps/mobile/README.md#android-production-setup).
@@ -90,8 +90,8 @@ Device boundaries:
 
 ### Supported product flows
 
-- `npx bb-app`
-- `npx --package bb-app bb ...`
+- `omnyo-app`
+- `omnyo ...`
 - source checkout package startup with `pnpm start`, `pnpm start:worktree`, or
   `pnpm start:worktree-remote`
 - source checkout validation with `pnpm install`, `pnpm build`,
@@ -102,26 +102,26 @@ Device boundaries:
 - managed worktree environments
 - provider runtime startup where the provider itself supports the host
   environment
-- `npx bb-app` package startup on supported npm package runtimes
-- `npx --package bb-app bb ...` CLI execution through the published package
+- `omnyo-app` package startup on supported npm package runtimes
+- `omnyo ...` CLI execution through the installed package
 
 ### Command ownership and mode selection
 
-- `@bb/config` is the only source of dev/prod defaults.
-- Repo-root source-development commands such as `pnpm start`, `pnpm bb`,
-  `pnpm bb:dev`, and `pnpm reset` are thin wrappers around local packages and
+- `@omnyo/config` is the only source of dev/prod defaults.
+- Repo-root source-development commands such as `pnpm start`, `pnpm omnyo`,
+  `pnpm omnyo:dev`, and `pnpm reset` are thin wrappers around local packages and
   scripts.
 - Those wrappers set `NODE_ENV` explicitly so ambient shell state does not
-  change which bb instance they target.
-- Explicit `BB_*` values override the `NODE_ENV`-selected defaults.
+  change which Omnyo instance they target.
+- Explicit `OMNYO_*` values override the `NODE_ENV`-selected defaults.
 - Process-to-process handoff, such as daemon-injected CLI environment, must use
-  explicit `BB_*` values for the exact target instance instead of relying on
+  explicit `OMNYO_*` values for the exact target instance instead of relying on
   mode defaults.
 
 ### WSL2-specific expectations
 
-- Run `npx bb-app`, source checkout commands such as `pnpm install`,
-  `pnpm dev`, `pnpm bb:dev`, and host-daemon commands from a WSL2 shell, not
+- Run `omnyo-app`, source checkout commands such as `pnpm install`,
+  `pnpm dev`, `pnpm omnyo:dev`, and host-daemon commands from a WSL2 shell, not
   from native Windows terminals.
 - Repositories inside the WSL filesystem are recommended for best behavior.
 - `/mnt/c/...` mounted paths are deliberately supported so WSL2 users can keep
@@ -153,7 +153,7 @@ Native Windows hosts use drive-letter paths for projects and workspaces:
 
 - workspace-owned QA helpers under [`tests/qa/`](../tests/qa/)
 - dev restart internals that are not part of the shipped product path
-- source-development flows (`pnpm dev`, `pnpm bb:dev`) on native Windows
+- source-development flows (`pnpm dev`, `pnpm omnyo:dev`) on native Windows
 
 ## Dependency Policy
 
@@ -180,7 +180,7 @@ We are explicitly not adopting:
 ### Native npm dependencies
 
 The npm package keeps native add-ons as runtime dependencies instead of bundling
-one platform-specific `.node` binary into bb's JavaScript artifacts. This lets
+one platform-specific `.node` binary into Omnyo's JavaScript artifacts. This lets
 npm install the correct native artifacts on the target machine for packages such
 as `better-sqlite3` and `@parcel/watcher`.
 
@@ -198,14 +198,14 @@ rebuild the native dependency, for example `npm rebuild better-sqlite3`.
 
 ## Setup Hook Policy
 
-- The supported setup hook is POSIX `.bb-env-setup.sh`.
-- The supported teardown hook is POSIX `.bb-env-teardown.sh`.
+- The supported setup hook is POSIX `.omnyo-env-setup.sh`.
+- The supported teardown hook is POSIX `.omnyo-env-teardown.sh`.
 - The same shell-based hook contract is used across macOS, Linux, and WSL2.
-- On native Windows bb runs the same scripts with the bash that Git for Windows
+- On native Windows Omnyo runs the same scripts with the bash that Git for Windows
   installs, found through `git var GIT_SHELL_PATH`, with that directory first on
   `PATH` so the script's standard tools resolve. Without Git for Windows the
   hook fails with a message naming it.
-- No parallel `.bb-env-setup.ts` product-path mechanism is supported.
+- No parallel `.omnyo-env-setup.ts` product-path mechanism is supported.
 - The `.worktreeinclude` copy step runs no shell. It works on every platform,
   including native Windows.
 
@@ -223,9 +223,9 @@ rebuild the native dependency, for example `npm rebuild better-sqlite3`.
   typecheck, lint, test, and Linux smoke coverage.
 - Full build, typecheck, lint, and test checks run on Ubuntu with Node.js 22
   only.
-- Pull requests run the `bb-app` tarball smoke on Ubuntu and macOS with Node.js
+- Pull requests run the `omnyo-app` tarball smoke on Ubuntu and macOS with Node.js
   22, validating the packed npm artifact through `npx --package`.
-- Pushes to `main` and manually dispatched CI runs also run the `bb-app` tarball
+- Pushes to `main` and manually dispatched CI runs also run the `omnyo-app` tarball
   smoke on Ubuntu and macOS with Node.js 24 and 26.
 - Branch protection should require `Checks (ubuntu-latest, Node 22.x)`,
   `Package Smoke (ubuntu-latest, Node 22.x)`, and
@@ -235,7 +235,7 @@ rebuild the native dependency, for example `npm rebuild better-sqlite3`.
 - Native Windows CI runs on every pull request, described in
   [windows-ci.md](windows-ci.md): the host package tests with lint and
   typecheck, the remaining test suites in seven shards, and an app smoke that
-  boots `bb-app`, runs the `bb-app` tarball smoke, packages the desktop app, and
+  boots `omnyo-app`, runs the `omnyo-app` tarball smoke, packages the desktop app, and
   smoke tests the packaged app.
 - `apps/mobile` typecheck, lint, and unit tests run inside the Ubuntu
   `Checks` and the `Tests (packages-*)` jobs like every other workspace package. The

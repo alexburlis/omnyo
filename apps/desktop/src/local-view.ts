@@ -1,8 +1,8 @@
 import { stripVTControlCharacters } from "node:util";
-import { escapeHtmlText } from "@bb/text-utils";
+import { escapeHtmlText } from "@omnyo/text-utils";
 import { z } from "zod";
 
-export const STARTUP_ACTION_CHANNEL = "bb-desktop:startup-action";
+export const STARTUP_ACTION_CHANNEL = "omnyo-desktop:startup-action";
 
 export const startupActionIdSchema = z.enum([
   "choose-server",
@@ -56,16 +56,20 @@ function renderLoadingView(viewModel: LoadingViewModel): string {
 
 function renderErrorView(viewModel: StartupErrorViewModel): string {
   const logText = formatPlainLogText(viewModel.logText);
+
   const logs =
     logText.trim().length > 0 ? `<pre>${escapeHtmlText(logText)}</pre>` : "";
+
   const buttons = viewModel.actions
     .map(
       (action) =>
         `<button type="button" data-startup-action="${action.id}">${escapeHtmlText(action.label)}</button>`,
     )
     .join("");
+
   const actions =
     buttons.length > 0 ? `<div class="actions">${buttons}</div>` : "";
+
   return `
     <main class="shell shell-error">
       <h1>${escapeHtmlText(viewModel.title)}</h1>
@@ -81,13 +85,14 @@ function renderLocalView(viewModel: LocalViewModel): string {
     viewModel.kind === "loading"
       ? renderLoadingView(viewModel)
       : renderErrorView(viewModel);
+
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>bb</title>
+  <title>Omnyo</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -200,12 +205,6 @@ function renderLocalView(viewModel: LocalViewModel): string {
       width: 24px;
     }
 
-    @media (prefers-reduced-motion: reduce) {
-      .spinner {
-        animation: none;
-      }
-    }
-
     @keyframes spin {
       to {
         transform: rotate(360deg);
@@ -214,7 +213,7 @@ function renderLocalView(viewModel: LocalViewModel): string {
   </style>
 </head>
 <body>
-<div class="titlebar-drag-region" data-testid="bb-local-view-window-drag-region" aria-hidden="true"></div>
+<div class="titlebar-drag-region" data-testid="omnyo-local-view-window-drag-region" aria-hidden="true"></div>
 ${body}
 </body>
 </html>`;

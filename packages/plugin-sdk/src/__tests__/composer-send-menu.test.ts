@@ -5,23 +5,63 @@ import { collectComposerCustomization } from "../internal/composer-customization
 describe("composer plus-menu upgrade from SDK 0.4.108", () => {
   it("retains legacy action callbacks in the plus menu after removing the send-menu API", () => {
     const legacy = { id: "legacy", label: "Legacy", run: vi.fn() };
+
     const scheduled = {
       id: "schedule",
       label: "Send later",
       experimental_sendMenu: true,
       run: vi.fn(),
     };
+
     const onRejected = vi.fn();
+
     const registration = collectComposerCustomization(
       { id: "actions", plusMenu: [legacy, scheduled] },
       new Set(),
       onRejected,
     );
+
     expect(registration?.plusMenu).toEqual([
       legacy,
       { id: scheduled.id, label: scheduled.label, run: scheduled.run },
     ]);
     expect(onRejected).not.toHaveBeenCalled();
+  });
+});
+
+describe("composer banner placement", () => {
+  it("keeps adjacent-to-composer placement and rejects unknown placements per banner", () => {
+    const component = () => null;
+    const onRejected = vi.fn();
+
+    const registration = collectComposerCustomization(
+      {
+        id: "banners",
+        banners: [
+          {
+            id: "adjacent",
+            experimental_placement: "adjacent-to-composer",
+            component,
+          },
+          { id: "unknown", experimental_placement: "top", component },
+          { id: "default", component },
+        ],
+      },
+      new Set(),
+      onRejected,
+    );
+
+    expect(registration?.banners).toEqual([
+      {
+        id: "adjacent",
+        experimental_placement: "adjacent-to-composer",
+        component,
+      },
+      { id: "default", component },
+    ]);
+    expect(onRejected.mock.calls.flat()).toEqual([
+      expect.stringContaining('"experimental_placement" must be'),
+    ]);
   });
 });
 
@@ -32,9 +72,10 @@ describe("composer popup registration", () => {
     const recent = { id: "recent", label: "Recent files", component };
     const run = vi.fn();
     const rejected = vi.fn();
+
     const collected = collectPluginAppRegistrations(
       {
-        __bbPluginApp: true,
+        __omnyoPluginApp: true,
         setup(app) {
           app.composer.customize({
             id: "library",
@@ -58,6 +99,7 @@ describe("composer popup registration", () => {
       },
       rejected,
     );
+
     expect(collected.composerCustomizations[0]?.experimental_popups).toEqual([
       saved,
       recent,

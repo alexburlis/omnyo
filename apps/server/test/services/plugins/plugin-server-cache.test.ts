@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { resolvePluginBuildToolchain } from "@bb/plugin-build";
+import { resolvePluginBuildToolchain } from "@omnyo/plugin-build";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildCachedPluginServer,
@@ -20,7 +20,7 @@ describe("plugin server cache", () => {
   });
 
   it("keys the cache from bundled inputs and prunes old artifacts", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "bb-server-cache-graph-"));
+    const workDir = await mkdtemp(join(tmpdir(), "omnyo-server-cache-graph-"));
     tempDirs.push(workDir);
     const rootDir = join(workDir, "plugin");
     const dataDir = join(workDir, "data");
@@ -35,16 +35,17 @@ describe("plugin server cache", () => {
       join(rootDir, "server.ts"),
       'import { value } from "cache-dependency"; export default () => value;\n',
     );
+
     const build = () =>
       buildCachedPluginServer({
         rootDir,
         dataDir,
         pluginId: "cache-graph",
         sdkVersion: "0.4.0",
-        bbVersion: "0.9.0",
+        coreVersion: "0.9.0",
         validatedConfig: {
           serverEntry: join(rootDir, "server.ts"),
-          packageName: "bb-plugin-cache-graph",
+          packageName: "omnyo-plugin-cache-graph",
           pluginVersion: "1.0.0",
         },
         toolchain: () =>
@@ -55,6 +56,7 @@ describe("plugin server cache", () => {
 
     const paths = new Set<string>();
     let lastPath = "";
+
     for (let version = 0; version < 6; version += 1) {
       await writeFile(
         join(dependencyDir, "index.js"),
@@ -77,9 +79,10 @@ describe("plugin server cache", () => {
       rootDir: "/plugins/example",
       artifactDigest: "abc",
       sdkVersion: "0.4.0",
-      bbVersion: "0.9.0",
+      coreVersion: "0.9.0",
       nodeVersion: "22.0.0",
     };
+
     const first = pluginServerCacheDirectory(base);
 
     expect(pluginServerCacheDirectory(base)).toBe(first);
@@ -90,7 +93,7 @@ describe("plugin server cache", () => {
       pluginServerCacheDirectory({ ...base, sdkVersion: "0.5.0" }),
     ).not.toBe(first);
     expect(
-      pluginServerCacheDirectory({ ...base, bbVersion: "0.10.0" }),
+      pluginServerCacheDirectory({ ...base, coreVersion: "0.10.0" }),
     ).not.toBe(first);
     expect(
       pluginServerCacheDirectory({ ...base, nodeVersion: "23.0.0" }),

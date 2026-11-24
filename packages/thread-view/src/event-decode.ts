@@ -1,5 +1,5 @@
-import { getThreadEventScopeTurnId } from "@bb/domain";
-import type { ThreadEvent } from "@bb/domain";
+import { getThreadEventScopeTurnId } from "@omnyo/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { assertNever } from "./assert-never.js";
 
 export function getEventTurnId(decoded: ThreadEvent): string | undefined {
@@ -36,6 +36,7 @@ export function getEventProviderThreadId(
     case "thread/contextWindowUsage/updated":
     case "turn/plan/updated":
     case "turn/diff/updated":
+    case "turn/mainRun/updated":
     case "provider/error":
     case "provider/warning":
     case "provider/modelFallback":
@@ -59,6 +60,7 @@ export function getEventProviderThreadId(
     case "system/permissionGrant/lifecycle":
     case "system/userQuestion/lifecycle":
     case "system/thread-provisioning":
+    case "system/git-activity":
     case "system/provider-turn-watchdog":
       return undefined;
     default:
@@ -101,6 +103,7 @@ export function getEventParentToolCallId(
     case "thread/contextWindowUsage/updated":
     case "turn/plan/updated":
     case "turn/diff/updated":
+    case "turn/mainRun/updated":
     case "provider/error":
     case "provider/warning":
     case "provider/modelFallback":
@@ -119,6 +122,7 @@ export function getEventParentToolCallId(
     case "system/permissionGrant/lifecycle":
     case "system/userQuestion/lifecycle":
     case "system/thread-provisioning":
+    case "system/git-activity":
     case "system/provider-turn-watchdog":
       return undefined;
     default:

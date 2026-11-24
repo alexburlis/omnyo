@@ -1,7 +1,7 @@
 import type {
   ProviderUsage,
   ProviderUsageResponse,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { describe, expect, it } from "vitest";
 import { registerHostRpcResponder } from "../helpers/host-rpc.js";
 import { readJson } from "../helpers/json.js";
@@ -48,8 +48,10 @@ function handleUsageRequest(
       },
     };
   }
+
   if (request.command.type === "provider.usage") {
     const usage = providerUsage(request.command.providerId);
+
     return usage === null
       ? { ok: true as const, result: { supported: false as const } }
       : {
@@ -57,6 +59,7 @@ function handleUsageRequest(
           result: { supported: true as const, usage },
         };
   }
+
   throw new Error(`Unexpected command ${request.command.type}`);
 }
 
@@ -66,25 +69,31 @@ describe("GET /api/v1/system/usage-limits", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "shared-usage",
       });
+
       const responder = registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
         async handle(request) {
           await new Promise((resolve) => setTimeout(resolve, 10));
+
           return handleUsageRequest(request);
         },
       });
+
       const read = async (refresh = false) => {
         const response = await harness.app.request(
           `/api/v1/system/usage-limits?hostId=${host.id}&refresh=${refresh}`,
         );
+
         expect(response.status).toBe(200);
         expect(await response.json()).toEqual(USAGE_RESPONSE);
       };
+
       const count = () =>
         responder.requests.filter(
           (request) => request.command.type === "provider.usage",
         ).length;
+
       try {
         await Promise.all(Array.from({ length: 8 }, read));
         expect(count()).toBe(3);
@@ -108,7 +117,9 @@ describe("GET /api/v1/system/usage-limits", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "retry-usage",
       });
+
       let probes = 0;
+
       const responder = registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -127,9 +138,11 @@ describe("GET /api/v1/system/usage-limits", () => {
               },
             };
           }
+
           return handleUsageRequest(request);
         },
       });
+
       try {
         const url = `/api/v1/system/usage-limits?hostId=${host.id}&providerId=codex`;
         const failed = await harness.app.request(url);
@@ -184,6 +197,7 @@ describe("GET /api/v1/system/usage-limits", () => {
       );
       const primary = seedHostSession(harness.deps, { id: "host-primary" });
       seedPrimaryHost(harness.deps, primary.host.id);
+
       const responder = registerHostRpcResponder(harness, {
         hostId: primary.host.id,
         sessionId: primary.session.id,
@@ -215,6 +229,7 @@ describe("GET /api/v1/system/usage-limits", () => {
     await withTestHarness(async (harness) => {
       const primary = seedHostSession(harness.deps, { id: "host-primary" });
       seedPrimaryHost(harness.deps, primary.host.id);
+
       const responder = registerHostRpcResponder(harness, {
         hostId: primary.host.id,
         sessionId: primary.session.id,
@@ -246,10 +261,12 @@ describe("GET /api/v1/system/usage-limits", () => {
     await withTestHarness(async (harness) => {
       const primary = seedHost(harness.deps, { id: "host-primary" });
       seedPrimaryHost(harness.deps, primary.id);
+
       const remote = seedHostSession(harness.deps, {
         id: "host-remote",
         name: "builder",
       });
+
       const responder = registerHostRpcResponder(harness, {
         hostId: remote.host.id,
         sessionId: remote.session.id,

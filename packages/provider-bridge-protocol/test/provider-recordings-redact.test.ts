@@ -17,9 +17,10 @@ const REDACT_SCRIPT = new URL(
 );
 
 it("redacts every documented GitHub token prefix", () => {
-  const root = mkdtempSync(join(tmpdir(), "bb-recording-redact-"));
+  const root = mkdtempSync(join(tmpdir(), "omnyo-recording-redact-"));
   const inputDir = join(root, "input");
   const outputDir = join(root, "output");
+
   const tokens = [
     `ghp_${"a".repeat(36)}`,
     `gho_${"b".repeat(36)}`,
@@ -48,9 +49,11 @@ it("redacts every documented GitHub token prefix", () => {
       ],
       { encoding: "utf8" },
     );
+
     const output = readFileSync(join(outputDir, "github.ndjson"), "utf8");
 
     expect(stdout).toContain("0 survivors");
+
     for (const token of tokens) expect(output).not.toContain(token);
     expect(output.match(/REDACTED/g)).toHaveLength(tokens.length);
   } finally {

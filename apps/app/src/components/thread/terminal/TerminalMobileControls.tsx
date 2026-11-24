@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { getNativeShell } from "@/lib/native-shell/native-shell";
 import type { TerminalNavigationKey } from "./terminal-mobile-input";
 
@@ -40,6 +40,7 @@ function Key({
       onPointerDown={(event) => event.preventDefault()}
       onClick={() => {
         const shell = getNativeShell();
+
         if (shell?.has("haptic"))
           shell.post({ type: "haptic", kind: "selection" });
         onPress();
@@ -66,6 +67,7 @@ export function TerminalMobileControls({
 }: TerminalMobileControlsProps) {
   const [expanded, setExpanded] = useState(false);
   const keyProps = { disabled };
+
   return (
     <div
       role="group"

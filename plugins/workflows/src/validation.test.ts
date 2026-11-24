@@ -109,6 +109,7 @@ describe("safe workflow JSON Schema subset", () => {
       string,
       unknown
     >;
+
     inherited.type = "object";
     expect(() => assertValidJsonSchema(inherited as never, "schema")).toThrow(
       "unsafe prototype",
@@ -125,6 +126,7 @@ describe("workflow agent option validation", () => {
         outputSchema: { type: "object" },
       }),
     ).toEqual({
+      environmentId: null,
       selection: null,
       outputSchema: { type: "object" },
       title: "Correctness review",
@@ -182,6 +184,7 @@ describe("workflow agent option validation", () => {
         title: "Worker",
       }),
     ).toEqual({
+      environmentId: null,
       selection: null,
       outputSchema: null,
       title: "Worker",
@@ -216,4 +219,25 @@ describe("workflow agent option validation", () => {
       }),
     ).toThrow("stored agent outputSchema.pattern");
   });
+});
+
+it("normalizes omitted placement once and validates explicit environment identifiers", () => {
+  expect(parseAgentOptions(undefined).environmentId).toBeNull();
+  expect(parseAgentOptions({ environmentId: "env-target" }).environmentId).toBe(
+    "env-target",
+  );
+
+  for (const environmentId of [null, "", " ", 42, {}]) {
+    expect(() => parseAgentOptions({ environmentId })).toThrow(
+      "environmentId must be a non-empty string",
+    );
+  }
+
+  expect(
+    parseStoredAgentOptions({
+      selection: null,
+      outputSchema: null,
+      title: null,
+    }).environmentId,
+  ).toBeNull();
 });

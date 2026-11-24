@@ -1,4 +1,4 @@
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { createBridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
 import type { ProviderExecutionContext } from "./provider-adapter.js";
@@ -103,12 +103,14 @@ describe("handshake version gate", () => {
 describe("handshake gating", () => {
   it("never sends capability-gated methods a bridge did not advertise", () => {
     const adapter = makeAdapter();
+
     const before = adapter.buildCommandPlan({
       type: "thread/name/set",
       threadId: "thr_1",
       providerThreadId: "p_1",
       title: "New title",
     });
+
     expect(before).toMatchObject({ kind: "noop" });
 
     completeHandshake(adapter, { threadRename: true, threadArchive: true });
@@ -264,6 +266,7 @@ describe("thread/stop intent", () => {
 describe("options mapping", () => {
   it("keeps core fields top-level and merges the plugin-derived bag over the static options", () => {
     const adapter = makeAdapter({ acpLaunchSpec: { command: "echo" } });
+
     const plan = adapter.buildCommandPlan({
       type: "turn/start",
       threadId: "thr_1",
@@ -277,6 +280,7 @@ describe("options mapping", () => {
         providerOptions: { memoryEnabled: false },
       },
     });
+
     expect(plan).toMatchObject({
       kind: "request",
       params: {
@@ -291,8 +295,10 @@ describe("options mapping", () => {
         },
       },
     });
+
     const options = (plan as { params: { options: Record<string, unknown> } })
       .params.options;
+
     expect(options).not.toHaveProperty("memoryEnabled");
   });
 });
@@ -300,12 +306,14 @@ describe("options mapping", () => {
 describe("skills/configure", () => {
   it("is a noop until the handshake declares skills.configure", () => {
     const adapter = makeAdapter();
+
     const command = {
       type: "skills/configure" as const,
       skillRoots: [
         { id: "global-skills:abc", path: "/staged/skills", skills: [] },
       ],
     };
+
     expect(adapter.buildCommandPlan(command)).toMatchObject({ kind: "noop" });
     completeHandshake(adapter, { skills: { configure: true } });
     expect(adapter.buildCommandPlan(command)).toMatchObject({
@@ -317,6 +325,7 @@ describe("skills/configure", () => {
   it("forwards the generic skill root unchanged", () => {
     const adapter = makeAdapter();
     completeHandshake(adapter, { skills: { configure: true } });
+
     const plan = adapter.buildCommandPlan({
       type: "skills/configure",
       skillRoots: [
@@ -402,6 +411,7 @@ describe("translateEvent", () => {
         contextLost: true,
       },
     });
+
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       type: "provider/warning",
@@ -418,6 +428,7 @@ describe("translateEvent", () => {
 describe("provider/recovery", () => {
   it("decodes a typed recovery hint as a runtime signal, never a timeline event", () => {
     const adapter = makeAdapter();
+
     const event = {
       jsonrpc: "2.0" as const,
       method: "provider/recovery",
@@ -428,6 +439,7 @@ describe("provider/recovery", () => {
         retryable: true,
       },
     };
+
     expect(adapter.decodeRecoveryHint(event)).toEqual({
       threadId: "thr_1",
       kind: "sessionArchived",
@@ -466,6 +478,7 @@ describe("provider/recovery", () => {
 describe("inbound request decoding", () => {
   it("decodes canonical tool calls and rejects other methods", () => {
     const adapter = makeAdapter();
+
     const decoded = adapter.decodeToolCallRequest({
       id: 7,
       method: "item/tool/call",
@@ -477,6 +490,7 @@ describe("inbound request decoding", () => {
         arguments: { q: "hi" },
       },
     });
+
     expect(decoded).toMatchObject({
       requestId: 7,
       providerThreadId: "p_1",
@@ -494,6 +508,7 @@ describe("inbound request decoding", () => {
 
   it("decodes canonical interaction requests with the domain payload", () => {
     const adapter = makeAdapter();
+
     const decoded = adapter.decodeInteractiveRequest?.({
       id: 9,
       method: "interaction/request",
@@ -515,6 +530,7 @@ describe("inbound request decoding", () => {
         },
       },
     });
+
     expect(decoded).toMatchObject({
       requestId: 9,
       providerThreadId: "p_1",
@@ -539,24 +555,28 @@ function feedDeltas(
 describe("provider-native id translation", () => {
   it("reverse-maps steer/interrupt turn ids to provider-native ids", () => {
     const adapter = makeAdapter();
+
     const [started] = feedDeltas(adapter, "t_1", [
       { kind: "turn.open", providerTurnId: "codex-turn-1" },
     ]);
-    const bbTurnId =
+
+    const appTurnId =
       started?.type === "turn/started" && started.scope.kind === "turn"
         ? started.scope.turnId
         : "";
-    expect(bbTurnId).not.toBe("");
+
+    expect(appTurnId).not.toBe("");
 
     const steer = adapter.buildCommandPlan({
       type: "turn/steer",
       threadId: "t_1",
       providerThreadId: "p_1",
-      expectedTurnId: bbTurnId,
+      expectedTurnId: appTurnId,
       input: [],
       clientRequestId: "creq_abcdefghjk",
       options: fullModeOptions,
     });
+
     expect(steer).toMatchObject({
       params: { expectedTurnId: "codex-turn-1" },
     });
@@ -565,8 +585,9 @@ describe("provider-native id translation", () => {
       type: "thread/stop",
       threadId: "t_1",
       providerThreadId: "p_1",
-      activeTurnId: bbTurnId,
+      activeTurnId: appTurnId,
     });
+
     expect(stop).toMatchObject({
       params: { intent: "interrupt", activeTurnId: "codex-turn-1" },
     });
@@ -580,13 +601,15 @@ describe("provider-native id translation", () => {
       clientRequestId: "creq_abcdefghjk",
       options: fullModeOptions,
     });
+
     expect(passthrough).toMatchObject({
       params: { expectedTurnId: "unmapped-turn" },
     });
   });
 
-  it("maps providerNativeIds interaction requests onto assembler-minted ids", () => {
+  it("maps interaction request ids onto assembler-minted ids", () => {
     const adapter = makeAdapter();
+
     const events = feedDeltas(adapter, "t_1", [
       { kind: "turn.open", providerTurnId: "codex-turn-1" },
       {
@@ -596,9 +619,11 @@ describe("provider-native id translation", () => {
         providerTurnId: "codex-turn-1",
       },
     ]);
-    const bbItemId =
+
+    const appItemId =
       events[1]?.type === "item/started" ? events[1].item.id : "";
-    const bbTurnId =
+
+    const appTurnId =
       events[0]?.type === "turn/started" && events[0].scope.kind === "turn"
         ? events[0].scope.turnId
         : "";
@@ -607,7 +632,6 @@ describe("provider-native id translation", () => {
       providerThreadId: "p_1",
       threadId: "t_1",
       turnId: "codex-turn-1",
-      providerNativeIds: true,
       payload: {
         kind: "approval",
         subject: {
@@ -622,41 +646,54 @@ describe("provider-native id translation", () => {
         availableDecisions: ["allow_once", "deny"],
       },
     };
+
     const decoded = adapter.decodeInteractiveRequest?.({
       id: 11,
       method: "interaction/request",
       params,
     });
+
     expect(decoded).toMatchObject({
-      turnId: bbTurnId,
-      payload: { subject: { itemId: bbItemId } },
+      turnId: appTurnId,
+      payload: { subject: { itemId: appItemId } },
     });
 
-    const unmarked = adapter.decodeInteractiveRequest?.({
+    const unknown = adapter.decodeInteractiveRequest?.({
       id: 12,
       method: "interaction/request",
-      params: { ...params, providerNativeIds: undefined },
+      params: {
+        ...params,
+        turnId: "unmapped-turn",
+        payload: {
+          ...params.payload,
+          subject: { ...params.payload.subject, itemId: "acp-permission" },
+        },
+      },
     });
-    expect(unmarked).toMatchObject({
-      turnId: "codex-turn-1",
-      payload: { subject: { itemId: "cmd-1" } },
+
+    expect(unknown).toMatchObject({
+      turnId: "unmapped-turn",
+      payload: { subject: { itemId: "acp-permission" } },
     });
   });
 
-  it("maps providerNativeIds tool-call requests onto assembler-minted ids", () => {
+  it("maps tool-call request ids onto assembler-minted ids", () => {
     const adapter = makeAdapter();
+
     const events = feedDeltas(adapter, "t_1", [
       { kind: "turn.open", providerTurnId: "codex-turn-1" },
       {
         kind: "item.open",
         key: { providerItemId: "dyn-1" },
-        item: { type: "tool", tool: "bb_test_ping" },
+        item: { type: "tool", tool: "omnyo_test_ping" },
         providerTurnId: "codex-turn-1",
       },
     ]);
-    const bbItemId =
+
+    const appItemId =
       events[1]?.type === "item/started" ? events[1].item.id : "";
-    const bbTurnId =
+
+    const appTurnId =
       events[0]?.type === "turn/started" && events[0].scope.kind === "turn"
         ? events[0].scope.turnId
         : "";
@@ -669,11 +706,11 @@ describe("provider-native id translation", () => {
         threadId: "t_1",
         turnId: "codex-turn-1",
         callId: "dyn-1",
-        tool: "bb_test_ping",
+        tool: "omnyo_test_ping",
         arguments: {},
-        providerNativeIds: true,
       },
     });
-    expect(decoded).toMatchObject({ turnId: bbTurnId, callId: bbItemId });
+
+    expect(decoded).toMatchObject({ turnId: appTurnId, callId: appItemId });
   });
 });

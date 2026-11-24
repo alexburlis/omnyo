@@ -21,6 +21,7 @@ export function deriveConnectionBanner(
   input: ConnectionBannerInput,
 ): ConnectionBannerKind {
   if (input.suspended) return "hidden";
+
   switch (input.session.status) {
     case "auth-required":
       return "auth-required";
@@ -31,6 +32,7 @@ export function deriveConnectionBanner(
     case "authenticated":
       break;
   }
+
   switch (input.realtime) {
     case "connected":
       return "hidden";

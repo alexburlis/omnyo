@@ -25,17 +25,18 @@ describe("createPushSubscriptionsApi", () => {
         result: { id: "sub_1", created: true },
       }),
     );
+
     const api = createPushSubscriptionsApi(fetchImpl);
 
     await expect(
-      api.register("https://bee.getbb.app/", {
+      api.register("https://bee.example.test/", {
         expoPushToken: "ExponentPushToken[abc]",
         platform: "ios",
         deviceLabel: "Sawyer's iPhone",
       }),
     ).resolves.toEqual({ subscriptionId: "sub_1" });
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://bee.getbb.app/api/v1/plugins/push-notifications/rpc/pushSubscriptions.add",
+      "https://bee.example.test/api/v1/plugins/push-notifications/rpc/pushSubscriptions.add",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -57,10 +58,11 @@ describe("createPushSubscriptionsApi", () => {
         },
       }),
     );
+
     const api = createPushSubscriptionsApi(fetchImpl);
 
     await expect(
-      api.unregister("https://bee.getbb.app", subscriptionRef),
+      api.unregister("https://bee.example.test", subscriptionRef),
     ).resolves.toBeUndefined();
   });
 
@@ -79,10 +81,11 @@ describe("createPushSubscriptionsApi", () => {
           error: message,
         }),
       );
+
       const api = createPushSubscriptionsApi(fetchImpl);
 
       await expect(
-        api.register("https://bee.getbb.app", {
+        api.register("https://bee.example.test", {
           expoPushToken: "ExponentPushToken[abc]",
           platform: "ios",
           deviceLabel: "Sawyer's iPhone",

@@ -1,16 +1,25 @@
 {
-  "name": "bb-plugin-provider-acp",
+  "name": "omnyo-plugin-provider-acp",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Run bb threads with ACP agents (supports Cursor, opencode, omp and more).",
-  "engines": {
-    "bb": ">=0.0",
-    "bbPluginSdk": ">=0.4.90"
+  "description": "Run omnyo threads with ACP agents (supports Cursor, opencode, omp and more).",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
   },
-  "bb": {
-    "name": "ACP providers",
-    "description": "Run bb threads with ACP agents (supports Cursor, opencode, omp and more).",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/provider-acp"
+  },
+  "engines": {
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.4.90 >=0.6.44"
+  },
+  "omnyo": {
+    "name": "ACP Providers",
+    "description": "Run omnyo threads with ACP agents (supports Cursor, opencode, omp and more).",
     "branding": {
       "icon": "./icons/acp.svg",
       "experimental_icons": {
@@ -49,31 +58,34 @@
         "id": "acp-hermes-agent",
         "displayName": "Hermes"
       }
+    ],
+    "skills": [
+      "skills"
     ]
   },
   "keywords": [
-    "bb-plugin"
+    "omnyo-plugin"
   ],
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
-    "prepare:bundled": "bb-plugin-build prepare-bundled"
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
   },
   "devDependencies": {
-    "@bb/plugin-build": "workspace:*",
+    "@omnyo/plugin-build": "workspace:*",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.0.0",
     "better-sqlite3": "12.10.0",
     "cron-parser": "^5.5.0",
-    "hono": "4.11.9",
+    "hono": "4.13.18",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^4.1.1"
+    "vitest": "4.1.11"
   },
   "dependencies": {
-    "@get-bb/plugin-sdk": "workspace:*",
-    "smol-toml": "^1.7.1",
+    "@omnyo/plugin-sdk": "workspace:*",
+    "smol-toml": "^1.9.1",
     "yaml": "^2.9.0",
     "zod": "^4.3.6"
   }

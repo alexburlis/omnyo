@@ -2,7 +2,7 @@ import type {
   PluginProviderCapabilities,
   PluginProviderDeclaration,
   PluginProviderStrings,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { ACP_FAMILY, type AcpAgentDefinition } from "./agents.js";
 
 const ACP_BASE_CAPABILITIES: PluginProviderCapabilities = {
@@ -25,6 +25,7 @@ const DEFAULT_FORK = "none" as const;
 
 function acpStrings(agent: AcpAgentDefinition): PluginProviderStrings {
   const signIn = agent.signInCommand;
+
   return {
     signInHint:
       signIn === undefined

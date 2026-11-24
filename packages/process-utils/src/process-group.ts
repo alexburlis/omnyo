@@ -19,6 +19,16 @@ export interface ProcessStopResult {
   treeTermination: "confirmed" | "unverified";
 }
 
+let inheritProcessGroup = false;
+
+export function enableInheritedProcessGroup(): void {
+  inheritProcessGroup = true;
+}
+
+export function shouldCreateProcessGroup(): boolean {
+  return supportsProcessGroups() && !inheritProcessGroup;
+}
+
 export function supportsProcessGroups(): boolean {
   return process.platform !== "win32";
 }
@@ -27,9 +37,11 @@ export function killProcessGroup(args: KillProcessGroupArgs): void {
   if (supportsProcessGroups() && args.child.pid !== undefined) {
     try {
       process.kill(-args.child.pid, args.signal);
+
       return;
     } catch {}
   }
+
   args.child.kill(args.signal);
 }
 
@@ -39,8 +51,10 @@ export function killPortableProcess(
 ): void {
   if (process.platform === "win32") {
     stopWindowsProcessTree(child).catch(() => undefined);
+
     return;
   }
+
   child.kill(signal);
 }
 
@@ -50,8 +64,10 @@ export function isProcessGroupAlive(child: {
   if (!supportsProcessGroups() || child.pid === undefined) {
     return false;
   }
+
   try {
     process.kill(-child.pid, 0);
+
     return true;
   } catch (error) {
     return !(
@@ -72,51 +88,68 @@ export function stopProcessGroupLeaderFirst(
   args: StopProcessGroupLeaderFirstArgs,
 ): Promise<ProcessStopResult> {
   const { child, timeoutMs, killGraceMs } = args;
+
   if (process.platform === "win32") return stopWindowsProcessTree(child);
+
   if (hasChildExited(child) && !isProcessGroupAlive(child)) {
     return Promise.resolve({ treeTermination: "confirmed" });
   }
+
   return new Promise<ProcessStopResult>((resolveStop) => {
     let settled = false;
     let hardTimer: NodeJS.Timeout | undefined;
     let poll: NodeJS.Timeout | undefined;
+
     const finish = (): void => {
       if (settled) {
         return;
       }
+
       settled = true;
       child.off("exit", stopSurvivingMembers);
       clearTimeout(softTimer);
+
       if (hardTimer !== undefined) {
         clearTimeout(hardTimer);
       }
+
       if (poll !== undefined) {
         clearInterval(poll);
       }
+
       resolveStop({
         treeTermination: groupGone() ? "confirmed" : "unverified",
       });
     };
+
     const groupGone = (): boolean =>
       hasChildExited(child) && !isProcessGroupAlive(child);
+
     const softTimer = setTimeout(() => {
       if (groupGone()) {
         finish();
+
         return;
       }
+
       killProcessGroup({ child, signal: "SIGKILL" });
+
       if (killGraceMs <= 0) {
         finish();
+
         return;
       }
+
       hardTimer = setTimeout(finish, killGraceMs);
     }, timeoutMs);
 
     const stopSurvivingMembers = (): void => {
       if (!isProcessGroupAlive(child)) {
         finish();
+
         return;
       }
+
       killProcessGroup({ child, signal: "SIGTERM" });
       poll = setInterval(() => {
         if (!isProcessGroupAlive(child)) {
@@ -127,8 +160,10 @@ export function stopProcessGroupLeaderFirst(
 
     if (hasChildExited(child)) {
       stopSurvivingMembers();
+
       return;
     }
+
     child.once("exit", stopSurvivingMembers);
     child.kill("SIGTERM");
   });

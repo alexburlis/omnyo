@@ -9,6 +9,7 @@ export const claudeFileEditArgsSchema = z
     content: z.string().optional(),
   })
   .passthrough();
+
 export type ClaudeFileEditArgs = z.infer<typeof claudeFileEditArgsSchema>;
 
 export const claudeWebSearchArgsSchema = z
@@ -42,6 +43,7 @@ const claudeToolUseResultSchema = z.union([
   claudeToolUseProcessResultSchema,
   z.string(),
 ]);
+
 export type ClaudeToolUseResult = z.infer<typeof claudeToolUseResultSchema>;
 
 export const toolResultBlockSchema = z.object({
@@ -65,6 +67,7 @@ export const messageContentSchema = z
     content: z.array(z.object({ type: z.string() }).passthrough()).optional(),
   })
   .passthrough();
+
 export type ClaudeMessageContentBlock = NonNullable<
   z.infer<typeof messageContentSchema>["content"]
 >[number];
@@ -75,8 +78,17 @@ export const sdkUsageSchema = z
     output_tokens: z.number().optional(),
     cache_read_input_tokens: z.number().nonnegative().optional(),
     cache_creation_input_tokens: z.number().nonnegative().optional(),
+    cache_creation: z
+      .object({
+        ephemeral_5m_input_tokens: z.number().nonnegative().optional(),
+        ephemeral_1h_input_tokens: z.number().nonnegative().optional(),
+      })
+      .nullable()
+      .optional()
+      .catch(undefined),
   })
   .passthrough();
+
 export type ClaudeSdkUsage = z.infer<typeof sdkUsageSchema>;
 
 export const claudeModelUsageSchema = z.record(
@@ -132,6 +144,7 @@ const claudeAssistantMessageErrorSchema = z.enum([
   "unknown",
   "max_output_tokens",
 ]);
+
 export type ClaudeAssistantMessageError = z.infer<
   typeof claudeAssistantMessageErrorSchema
 >;
@@ -140,6 +153,7 @@ export const claudeSdkMessageTypeSchema = z
   .object({
     type: z.enum([
       "assistant",
+      "command_lifecycle",
       "conversation_reset",
       "rate_limit_event",
       "result",
@@ -147,6 +161,14 @@ export const claudeSdkMessageTypeSchema = z
       "system",
       "user",
     ]),
+  })
+  .passthrough();
+
+export const claudeCommandLifecycleMessageSchema = z
+  .object({
+    type: z.literal("command_lifecycle"),
+    command_uuid: z.string().min(1),
+    state: z.string().min(1),
   })
   .passthrough();
 
@@ -162,6 +184,22 @@ export const claudeSystemMessageSchema = z
   })
   .passthrough();
 
+export const claudeBlockingInformationalSystemMessageSchema =
+  claudeSystemMessageSchema
+    .extend({
+      subtype: z.literal("informational"),
+      content: z.string(),
+      prevent_continuation: z.literal(true),
+    })
+    .passthrough();
+
+export const claudePromptBlockedByHookOutcomeSchema = z
+  .object({
+    kind: z.literal("blocked_by_hook"),
+    reason: z.string().trim().min(1),
+  })
+  .passthrough();
+
 export const claudeApiRetryMessageSchema = claudeSystemMessageSchema
   .extend({
     subtype: z.literal("api_retry"),
@@ -172,6 +210,7 @@ export const claudeApiRetryMessageSchema = claudeSystemMessageSchema
     error: claudeAssistantMessageErrorSchema,
   })
   .passthrough();
+
 export type ClaudeApiRetryMessage = z.infer<typeof claudeApiRetryMessageSchema>;
 
 export const claudeStatusSystemMessageSchema = claudeSystemMessageSchema
@@ -224,6 +263,7 @@ const claudeTaskUsageSchema = z
     duration_ms: z.number(),
   })
   .passthrough();
+
 export type ClaudeTaskUsage = z.infer<typeof claudeTaskUsageSchema>;
 
 export const claudeTaskStartedMessageSchema = claudeSystemMessageSchema
@@ -237,6 +277,7 @@ export const claudeTaskStartedMessageSchema = claudeSystemMessageSchema
     workflow_name: z.string().optional(),
     prompt: z.string().optional(),
     skip_transcript: z.boolean().optional(),
+    is_backgrounded: z.boolean().optional(),
   })
   .passthrough();
 
@@ -322,6 +363,7 @@ export const claudeWorkflowAgentRecordSchema = z
     durationMs: z.number().optional(),
   })
   .passthrough();
+
 export type ClaudeWorkflowAgentRecord = z.infer<
   typeof claudeWorkflowAgentRecordSchema
 >;
@@ -342,6 +384,7 @@ export const claudeAssistantMessageSchema = z
     uuid: z.string().min(1).optional(),
   })
   .passthrough();
+
 export type ClaudeAssistantMessage = z.infer<
   typeof claudeAssistantMessageSchema
 >;
@@ -358,6 +401,7 @@ export const claudeStreamEventMessageSchema = z
     event: z.unknown(),
   })
   .passthrough();
+
 export type ClaudeStreamEventMessage = z.infer<
   typeof claudeStreamEventMessageSchema
 >;
@@ -371,6 +415,7 @@ export const claudeUserMessageSchema = z
     parent_tool_use_id: z.string().nullable().optional(),
   })
   .passthrough();
+
 export type ClaudeUserMessage = z.infer<typeof claudeUserMessageSchema>;
 
 const claudeResultSubtypeSchema = z.enum([
@@ -380,6 +425,7 @@ const claudeResultSubtypeSchema = z.enum([
   "error_max_budget_usd",
   "error_max_structured_output_retries",
 ]);
+
 export type ClaudeResultSubtype = z.infer<typeof claudeResultSubtypeSchema>;
 
 const claudeMessageOriginSchema = z
@@ -401,6 +447,7 @@ export const claudeResultMessageSchema = z
     origin: claudeMessageOriginSchema.optional(),
   })
   .passthrough();
+
 export type ClaudeResultMessage = z.infer<typeof claudeResultMessageSchema>;
 
 const claudeRateLimitInfoSchema = z
@@ -419,4 +466,5 @@ export const claudeRateLimitEventSchema = z
     rate_limit_info: claudeRateLimitInfoSchema,
   })
   .passthrough();
+
 export type ClaudeRateLimitEvent = z.infer<typeof claudeRateLimitEventSchema>;

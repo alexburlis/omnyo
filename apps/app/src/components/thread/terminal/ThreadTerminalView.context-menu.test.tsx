@@ -27,11 +27,13 @@ describe("terminal context menu", () => {
       },
     );
     const { Terminal } = await import("@xterm/xterm");
+
     const terminal = new Terminal({
       cols: 12,
       rightClickSelectsWord: true,
       rows: 5,
     });
+
     let capturedSelection = "";
 
     render(
@@ -55,9 +57,11 @@ describe("terminal context menu", () => {
     const terminalScreen = screen
       .getByTestId("terminal-host")
       .querySelector<HTMLElement>(".xterm-screen");
+
     if (terminalScreen === null) {
       throw new Error("Expected xterm screen");
     }
+
     terminalScreen.style.padding = "0";
     vi.spyOn(terminalScreen, "getBoundingClientRect").mockReturnValue(
       new DOMRect(0, 0, 108, 90),

@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import type { BbDesktopBrowserTarget } from "@bb/desktop-contract";
-import { COARSE_POINTER_TEXT_SM_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import type { OmnyoDesktopBrowserTarget } from "@omnyo/desktop-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
 import type { BrowserFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
-import { getDesktopBrowserApi } from "@/lib/bb-desktop";
+import { getDesktopBrowserApi } from "@/lib/omnyo-desktop";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
 import { sdk } from "@/lib/sdk";
 import { openUrlInExternalBrowser } from "@/lib/url-open-routing";
@@ -13,6 +11,7 @@ import {
   BrowserTabContent,
   type BrowserAddressFocusRequest,
 } from "./BrowserTabContent";
+import { BrowserStatePage } from "./BrowserStatePage";
 import { createBrowserViewVisibilityCoordinator } from "./browserViewVisibilityCoordinator";
 import type { UpdateBrowserTabArgs } from "./useThreadFileTabs";
 
@@ -36,11 +35,14 @@ export function selectActiveBrowserTab(
   if (activeBrowserTabId === null) {
     return null;
   }
+
   return browserTabs.find((tab) => tab.id === activeBrowserTabId) ?? null;
 }
 
 const WINDOW_TARGET_PENDING_ATTEMPTS = 4;
+
 const WINDOW_CHECK_MAX_ATTEMPTS = 32;
+
 const WINDOW_TARGET_MAX_RETRY_MS = 2000;
 
 function windowRetryDelay(attempt: number): number {
@@ -49,7 +51,7 @@ function windowRetryDelay(attempt: number): number {
 
 type WindowTargetCheck =
   | { status: "pending" }
-  | { status: "ready"; target: BbDesktopBrowserTarget | null };
+  | { status: "ready"; target: OmnyoDesktopBrowserTarget | null };
 
 type SavedWindowCheck = {
   key: string;
@@ -64,13 +66,16 @@ type BrowserTabPlacement =
   | "unavailable";
 
 function resolveBrowserTabPlacement(
-  saved: BbDesktopBrowserTarget | undefined,
+  saved: OmnyoDesktopBrowserTarget | undefined,
   windowTarget: WindowTargetCheck,
 ): BrowserTabPlacement {
   if (windowTarget.status === "pending") return "pending";
+
   if (saved === undefined) return "open";
   const actual = windowTarget.target;
+
   if (actual === null || actual.hostId !== saved.hostId) return "unavailable";
+
   return actual.instanceId === saved.instanceId
     ? "attach"
     : "check-saved-window";
@@ -89,6 +94,7 @@ export function BrowserTabDeck({
   onUpdate,
 }: BrowserTabDeckProps) {
   const desktopBrowser = useMemo(() => getDesktopBrowserApi(), []);
+
   const visibilityCoordinator = useMemo(
     () =>
       desktopBrowser === null
@@ -101,45 +107,61 @@ export function BrowserTabDeck({
     browserTabs,
     activeBrowserTabId,
   );
+
   const target = activeBrowserTab?.desktopTarget;
   const targetHostId = target?.hostId;
+
   const [windowTarget, setWindowTarget] = useState<WindowTargetCheck>(() =>
     desktopBrowser?.getTarget === undefined
       ? { status: "ready", target: null }
       : { status: "pending" },
   );
+
   const [checkRound, setCheckRound] = useState(0);
+
   const checkKey =
     target === undefined
       ? null
       : `${activeBrowserTab?.id}:${checkRound}:${target.hostId}:${target.instanceId}:${target.generation}`;
+
   const [stoppedCheckKey, setStoppedCheckKey] = useState<string | null>(null);
   useEffect(() => {
     const getTarget = desktopBrowser?.getTarget?.bind(desktopBrowser);
+
     if (getTarget === undefined) return;
     let current = true;
     let attempt = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
+
     const check = () => {
       void getTarget()
         .catch(() => null)
         .then((actual) => {
           if (!current) return;
+
           if (actual !== null) {
             setWindowTarget({ status: "ready", target: actual });
+
             return;
           }
+
           attempt += 1;
+
           if (attempt >= WINDOW_TARGET_PENDING_ATTEMPTS)
             setWindowTarget({ status: "ready", target: null });
+
           if (attempt >= WINDOW_CHECK_MAX_ATTEMPTS) {
             setStoppedCheckKey(checkKey);
+
             return;
           }
+
           retry = setTimeout(check, windowRetryDelay(attempt));
         });
     };
+
     check();
+
     return () => {
       current = false;
       clearTimeout(retry);
@@ -154,8 +176,10 @@ export function BrowserTabDeck({
 
   const placement = resolveBrowserTabPlacement(target, windowTarget);
   const savedWindowKey = placement === "check-saved-window" ? checkKey : null;
+
   const [savedWindowCheck, setSavedWindowCheck] =
     useState<SavedWindowCheck | null>(null);
+
   const savedInstanceId = target?.instanceId;
   useEffect(() => {
     if (
@@ -167,15 +191,18 @@ export function BrowserTabDeck({
     let current = true;
     let attempt = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
+
     const check = () => {
       void sdk.experimental_desktopBrowsers
         .listInstances({ hostId: targetHostId })
         .then(
           ({ instances }) => {
             if (!current) return;
+
             const live = instances.some(
               (instance) => instance.instanceId === savedInstanceId,
             );
+
             setSavedWindowCheck({
               key: savedWindowKey,
               status: live ? "live" : "gone",
@@ -184,17 +211,23 @@ export function BrowserTabDeck({
           () => {
             if (!current) return;
             attempt += 1;
+
             if (attempt >= WINDOW_TARGET_PENDING_ATTEMPTS)
               setSavedWindowCheck({ key: savedWindowKey, status: "unknown" });
+
             if (attempt >= WINDOW_CHECK_MAX_ATTEMPTS) {
               setStoppedCheckKey(checkKey);
+
               return;
             }
+
             retry = setTimeout(check, windowRetryDelay(attempt));
           },
         );
     };
+
     check();
+
     return () => {
       current = false;
       clearTimeout(retry);
@@ -204,15 +237,19 @@ export function BrowserTabDeck({
   if (activeBrowserTab === null) {
     return null;
   }
+
   const savedWindowStatus =
     savedWindowCheck?.key === savedWindowKey ? savedWindowCheck.status : null;
+
   const checksStopped = checkKey !== null && stoppedCheckKey === checkKey;
+
   if (
     placement === "pending" ||
     (placement === "check-saved-window" && savedWindowStatus === null)
   ) {
     return <div className="flex min-h-0 flex-1 bg-sidebar" />;
   }
+
   if (
     placement === "unavailable" ||
     (placement === "check-saved-window" && savedWindowStatus !== "gone")
@@ -268,28 +305,45 @@ export function BrowserTabDeck({
   );
 }
 
-const BROWSER_TAB_ELSEWHERE_COPY = {
+const BROWSER_TAB_ELSEWHERE_COPY: Record<
+  | "desktop-required"
+  | "other-window"
+  | "other-computer"
+  | "reconnecting"
+  | "unreachable",
+  { icon: IconName; tone: "neutral" | "error"; title: string; body: string }
+> = {
   "desktop-required": {
+    icon: "Laptop",
+    tone: "neutral",
     title: "Browser tabs need the desktop app",
-    body: "This tab is open in the bb desktop app.",
+    body: "This tab is open in the Omnyo desktop app.",
   },
   "other-window": {
-    title: "This tab is open in another bb window",
+    icon: "AppWindow",
+    tone: "neutral",
+    title: "This tab is open in another Omnyo window",
     body: "Switch to that window to keep browsing.",
   },
   "other-computer": {
+    icon: "ComputerCloud",
+    tone: "neutral",
     title: "This tab is open on another computer",
-    body: "It was opened in bb on a different computer.",
+    body: "It was opened in Omnyo on a different computer.",
   },
   reconnecting: {
+    icon: "ArrowReloadHorizontal",
+    tone: "neutral",
     title: "Reconnecting to this tab",
-    body: "bb can't reach this computer's browser right now. The tab opens once it reconnects.",
+    body: "Omnyo can't reach this computer's browser right now. The tab opens once it reconnects.",
   },
   unreachable: {
+    icon: "CloudOff",
+    tone: "error",
     title: "Can't reach this tab",
-    body: "bb couldn't reach this computer's browser. Try again once bb has reconnected.",
+    body: "Omnyo couldn't reach this computer's browser. Try again once Omnyo has reconnected.",
   },
-} as const;
+};
 
 function BrowserTabElsewhere({
   url,
@@ -302,69 +356,60 @@ function BrowserTabElsewhere({
 }) {
   const copy = BROWSER_TAB_ELSEWHERE_COPY[reason];
   const parsedUrl = URL.canParse(url) ? new URL(url) : null;
+
   const canOpenExternally =
     parsedUrl?.protocol === "https:" || parsedUrl?.protocol === "http:";
+
+  const hasRetry = onRetry !== null;
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-sidebar px-6 text-center">
-      <span className="flex size-11 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground">
-        <Icon name="Globe" className="size-6" aria-hidden />
-      </span>
-      <div className="text-sm font-medium text-foreground">{copy.title}</div>
-      <p
-        className={cn(
-          "max-w-xs text-muted-foreground",
-          COARSE_POINTER_TEXT_SM_CLASS,
-        )}
-      >
-        {copy.body}
-      </p>
-      {url.length > 0 ? (
-        <p
-          className={cn(
-            "max-w-full truncate font-mono text-muted-foreground select-text",
-            COARSE_POINTER_TEXT_SM_CLASS,
-          )}
-          title={url}
-        >
-          {url}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        {onRetry !== null ? (
-          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-            <Icon name="RotateCcw" aria-hidden />
-            Try again
-          </Button>
-        ) : null}
-        {url.length > 0 ? (
+    <BrowserStatePage
+      icon={copy.icon}
+      tone={copy.tone}
+      title={copy.title}
+      description={copy.body}
+      detail={url}
+      className="flex-1 bg-sidebar"
+      actions={
+        hasRetry || url.length > 0 ? (
           <>
-            {canOpenExternally ? (
-              <Button
-                type="button"
-                variant={onRetry !== null ? "ghost" : "outline"}
-                size="sm"
-                onClick={() => openUrlInExternalBrowser(url)}
-              >
-                <Icon name="ExternalLink" aria-hidden />
-                Open in browser
+            {onRetry !== null ? (
+              <Button type="button" size="sm" onClick={onRetry}>
+                <Icon name="RotateCcw" aria-hidden />
+                Try again
               </Button>
             ) : null}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                void copyToClipboardWithToast(url, {
-                  successMessage: "Link copied",
-                });
-              }}
-            >
-              <Icon name="Copy" aria-hidden />
-              Copy link
-            </Button>
+            {url.length > 0 ? (
+              <>
+                {canOpenExternally ? (
+                  <Button
+                    type="button"
+                    variant={hasRetry ? "ghost" : "outline"}
+                    size="sm"
+                    onClick={() => openUrlInExternalBrowser(url)}
+                  >
+                    <Icon name="ExternalLink" aria-hidden />
+                    Open in browser
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    void copyToClipboardWithToast(url, {
+                      successMessage: "Link copied",
+                    });
+                  }}
+                >
+                  <Icon name="Copy" aria-hidden />
+                  Copy link
+                </Button>
+              </>
+            ) : null}
           </>
-        ) : null}
-      </div>
-    </div>
+        ) : undefined
+      }
+    />
   );
 }

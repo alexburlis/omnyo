@@ -7,8 +7,8 @@ import {
   setPluginLogoUrls,
   resetPluginLogoStoreForTest,
 } from "@/lib/plugin-logos";
-import { COMPACT_VIEWPORT_QUERY } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { POINTER_COARSE_QUERY } from "@bb/shared-ui/hooks/use-pointer-coarse";
+import { COMPACT_VIEWPORT_QUERY } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import { POINTER_COARSE_QUERY } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import { TimelineSelectionMenu } from "./TimelineSelectionMenu";
 import type { MessageProseSelection } from "./SelectableMessageProse";
 
@@ -69,8 +69,39 @@ describe("TimelineSelectionMenu", () => {
     expect(
       screen
         .getByRole("button", { name: "Add to chat" })
-        .closest("[data-bb-portaled-overlay]"),
+        .closest("[data-omnyo-portaled-overlay]"),
     ).not.toBeNull();
+  });
+
+  it("quotes the source of a rendered thread mention", () => {
+    const onAddToChat = vi.fn();
+    const text = "@thread:thr_build_notes";
+
+    const mentions = [
+      {
+        start: 0,
+        end: text.length,
+        resource: {
+          kind: "thread" as const,
+          threadId: "thr_build_notes",
+          label: "Build notes",
+        },
+      },
+    ];
+
+    render(
+      <TimelineSelectionMenu
+        selection={makeSelection({
+          text: "Build notes",
+          quote: { text, mentions },
+        })}
+        onAddToChat={onAddToChat}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
+    expect(onAddToChat).toHaveBeenCalledWith(text, undefined, mentions);
   });
 
   it("does not mount when no action handlers are supplied", () => {
@@ -163,6 +194,7 @@ describe("TimelineSelectionMenu", () => {
       const [selection, setSelection] = useState<MessageProseSelection | null>(
         makeSelection(),
       );
+
       const [focusRequest, setFocusRequest] = useState(0);
       const inputRef = useRef<HTMLInputElement>(null);
       useLayoutEffect(() => {

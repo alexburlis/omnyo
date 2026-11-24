@@ -3,13 +3,13 @@ import type {
   DbNotifier,
   DbQueryConnection,
   DbTransaction,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   applyEnvironmentLifecycleEvent,
   applyEnvironmentLifecycleEventInTransaction,
   type ApplyEnvironmentLifecycleEventArgs,
   type ApplyEnvironmentLifecycleEventOutcome,
-} from "@bb/db/internal-environment-lifecycle";
+} from "@omnyo/db/internal-environment-lifecycle";
 import type { ServerLogger } from "../../types.js";
 
 interface ApplyLoggedEnvironmentLifecycleEventDeps {
@@ -31,6 +31,7 @@ function logUnappliedEnvironmentLifecycleEvent(
   if (outcome.applied) {
     return;
   }
+
   logger.info(
     {
       detail: outcome.detail,
@@ -53,10 +54,13 @@ export function applyLoggedEnvironmentLifecycleEvent(
   const outcome = isDbConnection(deps.db)
     ? applyEnvironmentLifecycleEvent(deps.db, deps.hub, args)
     : applyEnvironmentLifecycleEventInTransaction(deps.db, args);
+
   if (!isDbConnection(deps.db) && outcome.applied) {
     deps.hub.notifyEnvironment(args.environmentId, outcome.changes);
   }
+
   logUnappliedEnvironmentLifecycleEvent(deps.logger, args, outcome);
+
   return outcome;
 }
 
@@ -66,5 +70,6 @@ export function applyLoggedEnvironmentLifecycleEventInTransaction(
 ): ApplyEnvironmentLifecycleEventOutcome {
   const outcome = applyEnvironmentLifecycleEventInTransaction(deps.db, args);
   logUnappliedEnvironmentLifecycleEvent(deps.logger, args, outcome);
+
   return outcome;
 }

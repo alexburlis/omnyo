@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 export const PALETTE_INPUT_CLASS =
-  "min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-subtle-foreground placeholder:font-light placeholder:opacity-70";
+  "min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-subtle-foreground";
 
 export function PaletteInputBand({ children }: { children: ReactNode }) {
   return (

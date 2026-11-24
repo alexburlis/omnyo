@@ -1,5 +1,5 @@
-import { upsertProjectExecutionDefaults } from "@bb/db";
-import { threadSchema } from "@bb/domain";
+import { upsertProjectExecutionDefaults } from "@omnyo/db";
+import { threadSchema } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { waitForQueuedCommand } from "../helpers/commands.js";
 import { readJson } from "../helpers/json.js";
@@ -57,11 +57,13 @@ function registerDaybreakCatalog(
 async function startedModel(harness: TestAppHarness, response: Response) {
   expect(response.status).toBe(201);
   const thread = threadSchema.parse(await readJson(response));
+
   const start = await waitForQueuedCommand(
     harness,
     ({ command }) =>
       command.type === "thread.start" && command.threadId === thread.id,
   );
+
   return start.command.type === "thread.start"
     ? start.command.options.model
     : null;
@@ -104,10 +106,12 @@ function seedWorkspace(harness: TestAppHarness, name: string) {
   const { host, session } = seedHostSession(harness.deps, {
     id: `host-${name}`,
   });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: `/tmp/${name}-project`,
   });
+
   seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
@@ -122,6 +126,7 @@ function seedWorkspace(harness: TestAppHarness, name: string) {
       path: `/tmp/${name}-workspace`,
     },
   }));
+
   return { host, session, project };
 }
 
@@ -135,6 +140,7 @@ describe("session options chosen when a thread is created", () => {
         projectId: project.id,
         sessionOptions: { daybreak: true, mode: "plan" },
       });
+
       expect(response.status).toBe(201);
       const thread = threadSchema.parse(await readJson(response));
 
@@ -143,6 +149,7 @@ describe("session options chosen when a thread is created", () => {
         ({ command }) =>
           command.type === "thread.start" && command.threadId === thread.id,
       );
+
       expect(
         start.command.type === "thread.start"
           ? start.command.options.sessionOptions
@@ -162,13 +169,16 @@ describe("session options chosen when a thread is created", () => {
         hostId: host.id,
         projectId: project.id,
       });
+
       expect(plain.status).toBe(201);
       const thread = threadSchema.parse(await readJson(plain));
+
       const start = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" && command.threadId === thread.id,
       );
+
       expect(
         start.command.type === "thread.start" ? start.command.options : null,
       ).not.toHaveProperty("sessionOptions");
@@ -178,16 +188,18 @@ describe("session options chosen when a thread is created", () => {
         projectId: project.id,
         sessionOptions: { daybreak: 1 },
       });
+
       expect(invalid.status).toBe(400);
     });
   });
 
-  it("starts on a model that fits the chosen options when the caller left the model to bb, keeping a remembered model that fits", async () => {
+  it("starts on a model that fits the chosen options when the caller left the model to Omnyo, keeping a remembered model that fits", async () => {
     await withTestHarness(async (harness) => {
       const { host, session, project } = seedWorkspace(
         harness,
         "create-options-default-model",
       );
+
       registerDaybreakCatalog(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -244,6 +256,7 @@ describe("session options chosen when a thread is created", () => {
         harness,
         "create-options-explicit-model",
       );
+
       registerDaybreakCatalog(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -255,6 +268,7 @@ describe("session options chosen when a thread is created", () => {
         model: "gpt-standard",
         sessionOptions: { daybreak: true },
       });
+
       expect(refused.status).toBe(400);
       expect(JSON.stringify(await readJson(refused))).toContain(
         "gpt-standard cannot run with the chosen options: Turn off Daybreak to use this model. gpt-both can.",

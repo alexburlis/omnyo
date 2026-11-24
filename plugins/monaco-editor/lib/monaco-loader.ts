@@ -4,6 +4,7 @@ let bootPromise: Promise<typeof MonacoNs> | null = null;
 
 export function loadMonaco(baseUrl: string): Promise<typeof MonacoNs> {
   bootPromise ??= boot(baseUrl);
+
   return bootPromise;
 }
 
@@ -27,11 +28,15 @@ async function boot(baseUrl: string): Promise<typeof MonacoNs> {
   const loaded: MonacoModule = await import(
     /* @vite-ignore */ `${baseUrl}/editor.js`
   );
+
   const monaco = loaded.monaco;
+
   if (!monaco) {
     throw new Error("the Monaco bundle did not expose its API");
   }
+
   registerOccurrenceHighlighting(monaco);
+
   return monaco;
 }
 
@@ -40,7 +45,9 @@ function registerOccurrenceHighlighting(monaco: typeof MonacoNs): void {
   monaco.languages.registerDocumentHighlightProvider(languageIds, {
     provideDocumentHighlights(model, position) {
       const word = model.getWordAtPosition(position);
+
       if (word === null) return [];
+
       return model
         .findMatches(
           word.word,
@@ -74,10 +81,11 @@ function injectStylesheet(href: string): Promise<void> {
   });
 }
 
-const OVERFLOW_NODE_ID = "bb-plugin-monaco-editor-overflow-widgets";
+const OVERFLOW_NODE_ID = "omnyo-plugin-monaco-editor-overflow-widgets";
 
 export function overflowWidgetsNode(): HTMLElement {
   const existing = document.getElementById(OVERFLOW_NODE_ID);
+
   if (existing !== null) return existing;
   const node = document.createElement("div");
   node.id = OVERFLOW_NODE_ID;
@@ -87,10 +95,12 @@ export function overflowWidgetsNode(): HTMLElement {
   node.style.left = "0";
   node.style.zIndex = "40";
   document.body.appendChild(node);
+
   return node;
 }
 
 export function setOverflowWidgetsTheme(base: "vs" | "vs-dark"): void {
   const node = document.getElementById(OVERFLOW_NODE_ID);
+
   if (node !== null) node.className = `monaco-editor ${base}`;
 }

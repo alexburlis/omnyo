@@ -4,23 +4,22 @@ import { describe, expect, it } from "vitest";
 import {
   systemCliSkillsStatusResponseSchema,
   systemInstallCliSkillsResponseSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { readJson } from "../helpers/json.js";
 import { registerHostRpcResponder } from "../helpers/host-rpc.js";
 import { seedHost, seedHostSession } from "../helpers/seed.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 import { resolveServerOwnedSkillCatalogEntries } from "../../src/services/skills/injected-skills.js";
+import {
+  copyBuiltinSkills,
+  resolveBuiltinSkillsRootPath,
+} from "../../src/services/skills/builtin-skills-copy.js";
 
 async function writeBuiltinCliSkill(harness: TestAppHarness): Promise<void> {
-  const skillDirectory = join(
-    harness.deps.config.builtinSkillsRootPath,
-    "bb-cli",
-  );
-  await mkdir(skillDirectory, { recursive: true });
-  await writeFile(
-    join(skillDirectory, "SKILL.md"),
-    "---\nname: bb-cli\ndescription: Control bb from the CLI.\n---\n",
-  );
+  await copyBuiltinSkills({
+    skillsRootPath: join(resolveBuiltinSkillsRootPath(), "omnyo-cli"),
+    targetPath: join(harness.deps.config.builtinSkillsRootPath, "omnyo-cli"),
+  });
 }
 
 function expectedCliSkillTreeHash(harness: TestAppHarness): string {
@@ -29,10 +28,12 @@ function expectedCliSkillTreeHash(harness: TestAppHarness): string {
     dataDir: harness.deps.config.dataDir,
     logger: harness.deps.logger,
     skillTreeRegistry: harness.deps.skillTreeRegistry,
-  }).find(({ runtimeSource }) => runtimeSource.name === "bb-cli");
+  }).find(({ runtimeSource }) => runtimeSource.name === "omnyo-cli");
+
   if (entry?.runtimeSource.kind !== "tree") {
-    throw new Error("The built-in bb-cli skill did not resolve to a tree");
+    throw new Error("The built-in omnyo-cli skill did not resolve to a tree");
   }
+
   return entry.runtimeSource.treeHash;
 }
 
@@ -45,11 +46,12 @@ function installRequest(hostIds: string[]): Request {
 }
 
 describe("install cli skills", () => {
-  it("installs the built-in bb-cli tree on every requested machine", async () => {
+  it("installs the built-in omnyo-cli tree on every requested machine", async () => {
     await withTestHarness(async (harness) => {
       await writeBuiltinCliSkill(harness);
       const laptop = seedHostSession(harness.deps, { id: "host-laptop" });
       const studio = seedHostSession(harness.deps, { id: "host-studio" });
+
       const responders = [laptop, studio].map(({ host, session }) =>
         registerHostRpcResponder(harness, {
           hostId: host.id,
@@ -57,13 +59,17 @@ describe("install cli skills", () => {
           handle: (request) => {
             expect(request.command).toMatchObject({
               type: "host.install_global_skills",
-              skills: [{ name: "bb-cli", entryPath: "SKILL.md" }],
+              skills: [{ name: "omnyo-cli", entryPath: "SKILL.md" }],
             });
+
             return {
               ok: true,
               result: {
                 installations: [
-                  { name: "bb-cli", path: `/home/${host.id}/.agents/skills` },
+                  {
+                    name: "omnyo-cli",
+                    path: `/home/${host.id}/.agents/skills`,
+                  },
                 ],
               },
             };
@@ -74,17 +80,93 @@ describe("install cli skills", () => {
       const response = await harness.app.request(
         installRequest([laptop.host.id, studio.host.id]),
       );
+
       expect(response.status).toBe(200);
+
       const body = systemInstallCliSkillsResponseSchema.parse(
         await readJson(response),
       );
+
       expect(body.results.map((entry) => [entry.hostId, entry.ok])).toEqual([
         ["host-laptop", true],
         ["host-studio", true],
       ]);
+
       for (const responder of responders) {
         expect(responder.requests).toHaveLength(1);
       }
+    });
+  });
+
+  it("selects only the canonical built-in CLI tree when a legacy-name tree is present", async () => {
+    await withTestHarness(async (harness) => {
+      await writeBuiltinCliSkill(harness);
+
+      const legacyDirectory = join(
+        harness.deps.config.builtinSkillsRootPath,
+        "bb-cli",
+      );
+
+      await mkdir(legacyDirectory, { recursive: true });
+      await writeFile(
+        join(legacyDirectory, "SKILL.md"),
+        "---\nname: bb-cli\ndescription: Legacy input must not be selected.\n---\n",
+      );
+      const machine = seedHostSession(harness.deps, { id: "host-canonical" });
+      const expectedHash = expectedCliSkillTreeHash(harness);
+
+      const responder = registerHostRpcResponder(harness, {
+        hostId: machine.host.id,
+        sessionId: machine.session.id,
+        handle: (request) => {
+          expect(request.command).toEqual({
+            type: "host.install_global_skills",
+            skills: [
+              {
+                name: "omnyo-cli",
+                treeHash: expectedHash,
+                entryPath: "SKILL.md",
+              },
+            ],
+          });
+
+          return {
+            ok: true,
+            result: {
+              installations: [
+                { name: "omnyo-cli", path: "/home/u/.agents/skills/omnyo-cli" },
+              ],
+            },
+          };
+        },
+      });
+
+      const response = await harness.app.request(
+        installRequest([machine.host.id]),
+      );
+
+      expect(response.status).toBe(200);
+      expect(responder.requests.map((request) => request.command)).toEqual([
+        {
+          type: "host.install_global_skills",
+          skills: [
+            {
+              name: "omnyo-cli",
+              treeHash: expectedHash,
+              entryPath: "SKILL.md",
+            },
+          ],
+        },
+      ]);
+
+      const body = systemInstallCliSkillsResponseSchema.parse(
+        await readJson(response),
+      );
+
+      expect(body.results).toMatchObject([
+        { hostId: machine.host.id, ok: true },
+      ]);
+      expect(responder.requests).toHaveLength(1);
     });
   });
 
@@ -99,7 +181,9 @@ describe("install cli skills", () => {
         handle: () => ({
           ok: true,
           result: {
-            installations: [{ name: "bb-cli", path: "/home/u/.agents/skills" }],
+            installations: [
+              { name: "omnyo-cli", path: "/home/u/.agents/skills" },
+            ],
           },
         }),
       });
@@ -116,10 +200,13 @@ describe("install cli skills", () => {
       const response = await harness.app.request(
         installRequest([laptop.host.id, studio.host.id]),
       );
+
       expect(response.status).toBe(200);
+
       const body = systemInstallCliSkillsResponseSchema.parse(
         await readJson(response),
       );
+
       const [installed, failed] = body.results;
       expect(installed).toMatchObject({ hostId: "host-laptop", ok: true });
       expect(failed).toMatchObject({ hostId: "host-studio", ok: false });
@@ -151,11 +238,13 @@ describe("install cli skills", () => {
       const stale = seedHostSession(harness.deps, { id: "host-stale" });
       const empty = seedHostSession(harness.deps, { id: "host-empty" });
       const expectedHash = expectedCliSkillTreeHash(harness);
+
       const hashByHostId: Record<string, string | null> = {
         "host-current": expectedHash,
         "host-stale": "b".repeat(64),
         "host-empty": null,
       };
+
       for (const { host, session } of [current, stale, empty]) {
         registerHostRpcResponder(harness, {
           hostId: host.id,
@@ -163,15 +252,16 @@ describe("install cli skills", () => {
           handle: (request) => {
             expect(request.command).toMatchObject({
               type: "host.global_skills_status",
-              names: ["bb-cli"],
+              names: ["omnyo-cli"],
             });
+
             return {
               ok: true,
               result: {
                 entries: [
                   {
-                    name: "bb-cli",
-                    path: `/home/${host.id}/.agents/skills/bb-cli`,
+                    name: "omnyo-cli",
+                    path: `/home/${host.id}/.agents/skills/omnyo-cli`,
                     treeHash: hashByHostId[host.id] ?? null,
                   },
                 ],
@@ -183,9 +273,11 @@ describe("install cli skills", () => {
 
       const response = await harness.app.request("/api/v1/system/cli-skills");
       expect(response.status).toBe(200);
+
       const body = systemCliSkillsStatusResponseSchema.parse(
         await readJson(response),
       );
+
       expect(
         Object.fromEntries(
           body.machines.map((machine) => [machine.hostId, machine.status]),
@@ -204,9 +296,11 @@ describe("install cli skills", () => {
       seedHost(harness.deps, { id: "host-offline" });
 
       const response = await harness.app.request("/api/v1/system/cli-skills");
+
       const body = systemCliSkillsStatusResponseSchema.parse(
         await readJson(response),
       );
+
       expect(body.machines).toEqual([
         { hostId: "host-offline", hostName: "Test Host", status: "unknown" },
       ]);

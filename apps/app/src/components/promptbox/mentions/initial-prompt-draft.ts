@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { isRawThreadId } from "@bb/domain";
-import type { PromptDraftState } from "@bb/client-core";
-import { THREAD_MENTION_RESOLVE_MAX_IDS } from "@bb/server-contract";
+import { isRawThreadId } from "@omnyo/domain";
+import type { PromptDraftState } from "@omnyo/client-core";
+import { THREAD_MENTION_RESOLVE_MAX_IDS } from "@omnyo/server-contract";
 import {
   resolveSerializedPromptMentions,
   useSidebarThreadTitleMentionResources,
@@ -26,8 +26,10 @@ export async function resolveInitialPromptDraft(
       ),
     ),
   ];
+
   const resolvedById = new Map<string, { projectId: string; label: string }>();
   const unavailableIds = new Set<string>();
+
   for (
     let offset = 0;
     offset < threadIds.length;
@@ -37,21 +39,27 @@ export async function resolveInitialPromptDraft(
       offset,
       offset + THREAD_MENTION_RESOLVE_MAX_IDS,
     );
+
     try {
       const resolutions = await resolveMentions({ threadIds: batch, signal });
+
       for (const resolution of resolutions)
         resolvedById.set(resolution.threadId, resolution);
+
       for (const id of batch) if (!resolvedById.has(id)) unavailableIds.add(id);
     } catch {
       if (signal.aborted) return draft;
     }
   }
+
   return {
     ...draft,
     mentions: draft.mentions.map((mention) => {
       const { resource } = mention;
+
       if (resource.kind !== "thread") return mention;
       const resolved = resolvedById.get(resource.threadId);
+
       if (resolved !== undefined) {
         return {
           ...mention,
@@ -62,6 +70,7 @@ export async function resolveInitialPromptDraft(
           },
         };
       }
+
       return unavailableIds.has(resource.threadId)
         ? { ...mention, resource: { ...resource, label: "Unavailable thread" } }
         : mention;
@@ -74,6 +83,7 @@ export function useInitialPromptDraft(
 ): PromptDraftState | undefined {
   const navigation = useSidebarNavigation({ enabled: text !== null });
   const resources = useSidebarThreadTitleMentionResources(navigation.data);
+
   const draft = useMemo<PromptDraftState>(
     () => ({
       text: text ?? "",
@@ -82,6 +92,7 @@ export function useInitialPromptDraft(
     }),
     [resources, text],
   );
+
   return useQuery({
     queryKey: ["initial-prompt-draft", draft],
     queryFn: ({ signal }) =>

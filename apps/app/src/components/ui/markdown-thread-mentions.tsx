@@ -7,7 +7,7 @@ import {
   RAW_THREAD_ID_PATTERN_SOURCE,
   type PromptMentionResource,
   type PromptTextMention,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   MessageMentionPill,
   PromptMentionPill,
@@ -28,16 +28,25 @@ const THREAD_MENTION_PATTERN = new RegExp(
   `@thread:([A-Za-z0-9_-]+)(?:#msg=(0|[1-9]\\d*))?|(${RAW_THREAD_ID_PATTERN_SOURCE})`,
   "gu",
 );
+
 const MESSAGE_SUFFIX_PATTERN = /^#msg=(0|[1-9]\d*)/u;
+
 const RAW_THREAD_ID_PATTERN = new RegExp(RAW_THREAD_ID_PATTERN_SOURCE, "gu");
+
 const CHARACTER_REFERENCE_PATTERN = /&(?:#\d+|#x[\da-f]+|[a-z][a-z\d]*);/iu;
+
 const THREAD_MENTION_PREFIX = "@thread";
+
 const THREAD_MENTION_ID_PATTERN = /^[A-Za-z0-9_-]+$/u;
 
-const THREAD_MENTION_HAST_NAME = "bb-thread-mention";
+const THREAD_MENTION_HAST_NAME = "omnyo-thread-mention";
+
 const THREAD_MENTION_THREAD_ID_PROPERTY = "dataThreadId";
+
 const RAW_THREAD_ID_PROPERTY = "dataRawThreadId";
+
 const RAW_THREAD_INLINE_CODE_PROPERTY = "dataRawThreadInlineCode";
+
 const MESSAGE_SEQ_PROPERTY = "dataMessageSeq";
 
 interface ThreadMentionNodeArgs {
@@ -94,20 +103,26 @@ function collectPhrasingTextContexts(
       if (descendant.type === "text" || descendant.type === "inlineCode") {
         leaves.push({ node: descendant, offset: visibleText.length });
         visibleText += descendant.value;
+
         return;
       }
+
       if (descendant.type === "image" || descendant.type === "imageReference") {
         visibleText += descendant.alt ?? "";
+
         return;
       }
+
       if (descendant.type === "break") {
         visibleText += "\n";
       }
     });
+
     for (const leaf of leaves) {
       contexts.set(leaf.node, { offset: leaf.offset, text: visibleText });
     }
   });
+
   return contexts;
 }
 
@@ -116,6 +131,7 @@ function splitTextNodeOnMentions(
   context: PhrasingTextContext | undefined,
 ): PhrasingContent[] {
   const { value } = node;
+
   return replaceTextMatches(node, THREAD_MENTION_PATTERN, (match) => {
     const serializedThreadId = match[1];
     const messageSeq = match[2] ?? null;
@@ -123,11 +139,14 @@ function splitTextNodeOnMentions(
     const threadId = serializedThreadId ?? rawThreadId;
     const matchEnd = match.index + match[0].length;
     const boundaryText = rawThreadId === undefined ? value : context?.text;
+
     const boundaryStart =
       rawThreadId === undefined
         ? match.index
         : (context?.offset ?? 0) + match.index;
+
     const boundaryEnd = boundaryStart + match[0].length;
+
     if (
       threadId === undefined ||
       !(rawThreadId === undefined
@@ -139,6 +158,7 @@ function splitTextNodeOnMentions(
     ) {
       return null;
     }
+
     return threadMentionNode({
       threadId,
       messageSeq,
@@ -159,12 +179,14 @@ function parseTextDirective(node: unknown): ParsedTextDirective | null {
   if (typeof node !== "object" || node === null) {
     return null;
   }
+
   const candidate = node as {
     attributes?: unknown;
     children?: unknown;
     name?: unknown;
     type?: unknown;
   };
+
   return candidate.type === "textDirective" &&
     typeof candidate.name === "string"
     ? {
@@ -193,10 +215,12 @@ function collectAuthoredMarkdownLinkNodes(tree: Nodes): WeakSet<object> {
     if (node.type !== "link" && node.type !== "linkReference") {
       return;
     }
+
     visit(node, (descendant) => {
       linkNodes.add(descendant);
     });
   });
+
   return linkNodes;
 }
 
@@ -212,29 +236,36 @@ export function splitRawThreadIdsInText(
   const segments: RawThreadIdTextSegment[] = [];
   let cursor = 0;
   let match: RegExpExecArray | null;
+
   while ((match = RAW_THREAD_ID_PATTERN.exec(text)) !== null) {
     const matchEnd = match.index + match[0].length;
+
     if (
       !isRawThreadIdBoundary(text, match.index) ||
       !isRawThreadIdEndBoundary(text, matchEnd)
     ) {
       continue;
     }
+
     if (match.index > cursor) {
       segments.push({
         rawThreadId: null,
         text: text.slice(cursor, match.index),
       });
     }
+
     segments.push({ rawThreadId: match[0], text: match[0] });
     cursor = matchEnd;
   }
+
   if (segments.length === 0) {
     return [{ rawThreadId: null, text }];
   }
+
   if (cursor < text.length) {
     segments.push({ rawThreadId: null, text: text.slice(cursor) });
   }
+
   return segments;
 }
 
@@ -243,8 +274,10 @@ function directiveMessageSuffix(
   index: number,
 ): { messageSeq: string; length: number } | null {
   const next = parent.children[index + 1];
+
   const match =
     next?.type === "text" ? MESSAGE_SUFFIX_PATTERN.exec(next.value) : null;
+
   return match === null || match[1] === undefined
     ? null
     : { messageSeq: match[1], length: match[0].length };
@@ -256,6 +289,7 @@ function isDirectiveMentionEndBoundary(
   suffixLength: number,
 ): boolean {
   const next = parent.children[index + 1];
+
   return (
     next?.type !== "text" || isMentionEndBoundary(next.value, suffixLength)
   );
@@ -265,9 +299,11 @@ function markdownMayContainThreadMention(markdown: string): boolean {
   if (CHARACTER_REFERENCE_PATTERN.test(markdown)) {
     return true;
   }
+
   const unescaped = markdown.includes("\\")
     ? markdown.replaceAll("\\", "")
     : markdown;
+
   return (
     unescaped.includes(THREAD_MENTION_PREFIX) ||
     unescaped.search(RAW_THREAD_ID_PATTERN) !== -1
@@ -282,6 +318,7 @@ export function remarkThreadMentions() {
     ) {
       return;
     }
+
     const authoredMarkdownLinkNodes = collectAuthoredMarkdownLinkNodes(tree);
     const phrasingTextContexts = collectPhrasingTextContexts(tree);
     visit(
@@ -304,6 +341,7 @@ export function remarkThreadMentions() {
         ) {
           return;
         }
+
         parent.children.splice(
           index,
           1,
@@ -314,6 +352,7 @@ export function remarkThreadMentions() {
             rawThreadInlineCode: true,
           }),
         );
+
         return index + 1;
       },
     );
@@ -325,18 +364,23 @@ export function remarkThreadMentions() {
       ) {
         return;
       }
+
       const replacements = splitTextNodeOnMentions(
         node,
         phrasingTextContexts.get(node),
       );
+
       if (replacements.length === 1 && replacements[0] === node) {
         return;
       }
+
       parent.children.splice(index, 1, ...replacements);
+
       return index + replacements.length;
     });
     visit(tree, (node, index, parent: Parent | undefined) => {
       const directive = parseTextDirective(node);
+
       if (
         directive === null ||
         index === undefined ||
@@ -347,15 +391,21 @@ export function remarkThreadMentions() {
       ) {
         return;
       }
+
       const previous = parent.children[index - 1];
+
       if (previous?.type !== "text") {
         return;
       }
+
       const prefixStart = previous.value.length - THREAD_MENTION_PREFIX.length;
+
       if (prefixStart < 0 || !previous.value.endsWith(THREAD_MENTION_PREFIX)) {
         return;
       }
+
       const messageSuffix = directiveMessageSuffix(parent, index);
+
       if (
         !isMentionBoundary(previous.value, prefixStart) ||
         !isDirectiveMentionEndBoundary(
@@ -366,23 +416,31 @@ export function remarkThreadMentions() {
         authoredMarkdownLinkNodes.has(node)
       ) {
         const leadingText = previous.value.slice(0, prefixStart);
+
         const mentionText: Text = {
           type: "text",
           value: `${THREAD_MENTION_PREFIX}:${directive.name}`,
         };
+
         if (leadingText.length === 0) {
           parent.children.splice(index - 1, 2, mentionText);
+
           return index;
         }
+
         previous.value = leadingText;
         parent.children.splice(index, 1, mentionText);
+
         return index + 1;
       }
+
       previous.value = previous.value.slice(0, prefixStart);
       const next = parent.children[index + 1];
+
       if (messageSuffix !== null && next?.type === "text") {
         next.value = next.value.slice(messageSuffix.length);
       }
+
       parent.children.splice(
         index,
         1,
@@ -393,12 +451,14 @@ export function remarkThreadMentions() {
           rawThreadInlineCode: false,
         }),
       );
+
       return index + 1;
     });
   };
 }
 
 interface BuildThreadMentionComponentArgs {
+  interactive?: boolean;
   mentions: readonly PromptTextMention[];
 }
 
@@ -412,12 +472,13 @@ interface ThreadMentionElementProps {
 declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
-      "bb-thread-mention": ThreadMentionElementProps;
+      "omnyo-thread-mention": ThreadMentionElementProps;
     }
   }
 }
 
 export function buildThreadMentionComponent({
+  interactive = true,
   mentions,
 }: BuildThreadMentionComponentArgs): ComponentType<ThreadMentionElementProps> {
   function RawThreadMentionPillWithQuery({
@@ -428,6 +489,7 @@ export function buildThreadMentionComponent({
     threadId: string;
   }) {
     const resource = useRawThreadMentionResource(threadId);
+
     if (resource === null) {
       return inlineCode ? (
         <code className="rounded bg-muted/70 px-1.5 py-0.5 font-mono text-xs">
@@ -437,7 +499,14 @@ export function buildThreadMentionComponent({
         threadId
       );
     }
-    return <PromptMentionPill resource={resource} serializedText={threadId} />;
+
+    return (
+      <PromptMentionPill
+        interactive={interactive}
+        resource={resource}
+        serializedText={threadId}
+      />
+    );
   }
 
   function ResolvedThreadMentionPill({
@@ -452,14 +521,17 @@ export function buildThreadMentionComponent({
     if (messageSeq !== null) {
       return (
         <MessageMentionPill
+          interactive={interactive}
           messageSeq={messageSeq}
           resource={resource}
           threadId={threadId}
         />
       );
     }
+
     return (
       <PromptMentionPill
+        interactive={interactive}
         resource={resource}
         serializedText={`@thread:${threadId}`}
       />
@@ -474,8 +546,10 @@ export function buildThreadMentionComponent({
     threadId: string;
   }) {
     const liveResource = useThreadMentionResource(threadId);
+
     const resource =
       liveResource ?? resolveThreadMentionResource(mentions, threadId);
+
     return (
       <ResolvedThreadMentionPill
         messageSeq={messageSeq}
@@ -489,12 +563,16 @@ export function buildThreadMentionComponent({
     const threadId = props["data-thread-id"] ?? "";
     const rawThreadId = props["data-raw-thread-id"];
     const rawMessageSeq = props["data-message-seq"];
+
     const messageSeq =
       rawMessageSeq === undefined ? null : Number(rawMessageSeq);
+
     const sidebarResource = useSidebarThreadMentionResource(threadId);
+
     if (threadId.length === 0) {
       return null;
     }
+
     if (rawThreadId !== undefined) {
       return (
         <RawThreadMentionPillWithQuery
@@ -503,12 +581,15 @@ export function buildThreadMentionComponent({
         />
       );
     }
+
     const persistedResource = mentions.find(
       (mention) =>
         mention.resource.kind === "thread" &&
         mention.resource.threadId === threadId,
     )?.resource;
+
     const resource = sidebarResource ?? persistedResource;
+
     if (resource === undefined) {
       return (
         <ThreadMentionPillWithQuery
@@ -517,6 +598,7 @@ export function buildThreadMentionComponent({
         />
       );
     }
+
     return (
       <ResolvedThreadMentionPill
         messageSeq={messageSeq}

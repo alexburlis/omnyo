@@ -9,7 +9,7 @@ export default defineWorkspaceTestConfig({
     testTimeout: 15_000,
     projects: sharedWorkerProjects({
       pkgDir: __dirname,
-      name: "@bb/db",
+      name: "@omnyo/db",
       include: ["test/**/*.test.ts"],
     }),
   },

@@ -1,4 +1,4 @@
-import { joinHostPath } from "@bb/domain";
+import { joinHostPath } from "@omnyo/domain";
 
 export function joinHostPathSegments(
   rootPath: string,
@@ -8,8 +8,10 @@ export function joinHostPathSegments(
     rootPath,
     relativePath: segments.join("/"),
   });
+
   if (joined === null) {
     throw new Error(`Host path is not absolute: ${rootPath}`);
   }
+
   return joined;
 }

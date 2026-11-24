@@ -1,5 +1,5 @@
-import type { PromptInput } from "@bb/domain";
-import type { TimelineConversationAttachments } from "@bb/server-contract";
+import type { PromptInput } from "@omnyo/domain";
+import type { TimelineConversationAttachments } from "@omnyo/server-contract";
 
 interface PromptAttachmentCounts {
   webImages: number;
@@ -20,6 +20,7 @@ export function collectPromptAttachments(
   const imageUrls: string[] = [];
   const localImagePaths: string[] = [];
   const localFilePaths: string[] = [];
+
   const localFileDetails: TimelineConversationAttachments["localFileDetails"] =
     [];
 
@@ -38,6 +39,7 @@ export function collectPromptAttachments(
       case "localFile":
         localFiles += 1;
         localFilePaths.push(entry.path);
+
         if (entry.name)
           localFileDetails.push({
             path: entry.path,

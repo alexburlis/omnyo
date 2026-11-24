@@ -40,6 +40,7 @@ describe("rankPaletteActions", () => {
     const actions = Array.from({ length: 60 }, (_, index) =>
       action(`plugin:${index}`, `Plugin action ${index}`, "Plugins"),
     );
+
     expect(
       rankPaletteActions({ actions, query: " ", recentIds: [] }),
     ).toHaveLength(60);
@@ -66,6 +67,7 @@ describe("rankPaletteActions", () => {
       query: "nt",
       recentIds: [],
     });
+
     expect(first?.action.title).toBe("New thread");
     expect(first?.positions).toEqual([0, 4]);
   });
@@ -76,6 +78,7 @@ describe("rankPaletteActions", () => {
       query: "browser",
       recentIds: [],
     });
+
     expect(first?.positions).toEqual([]);
   });
 
@@ -84,11 +87,13 @@ describe("rankPaletteActions", () => {
       action("app:a", "Toggle diff", "Workspace"),
       action("app:b", "Toggle diff", "Window and layout"),
     ];
+
     const ranked = rankPaletteActions({
       actions: tied,
       query: "toggle diff",
       recentIds: ["app:b"],
     });
+
     expect(ranked.map((entry) => entry.action.id)).toEqual(["app:b", "app:a"]);
   });
 });

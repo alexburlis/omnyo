@@ -2,7 +2,7 @@ import { join } from "node:path";
 import {
   resolvePluginBuildToolchain,
   type PluginBuildToolchain,
-} from "@bb/plugin-build";
+} from "@omnyo/plugin-build";
 import type { PluginServiceDeps } from "./plugin-service-internal.js";
 
 const byDataDir = new Map<string, Promise<PluginBuildToolchain>>();
@@ -11,7 +11,9 @@ export async function getPluginBuildToolchain(
   args: Pick<PluginServiceDeps, "dataDir" | "logger">,
 ): Promise<PluginBuildToolchain> {
   const existing = byDataDir.get(args.dataDir);
+
   if (existing !== undefined) return existing;
+
   const pending = resolvePluginBuildToolchain(join(args.dataDir, "plugins"), {
     onFetchStart: () => {
       args.logger.info(
@@ -24,7 +26,9 @@ export async function getPluginBuildToolchain(
       );
     },
   });
+
   byDataDir.set(args.dataDir, pending);
+
   try {
     return await pending;
   } catch (error) {

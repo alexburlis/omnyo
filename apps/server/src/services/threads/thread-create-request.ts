@@ -5,23 +5,23 @@ import type {
   ThreadCreateOrigin,
   ThreadOriginKind,
   ThreadVisibility,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   CreateThreadEnvironmentArgs,
   CreateThreadRequest,
   EnvironmentArgs,
   ProviderEnvironmentArgs,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 
 export interface ThreadCreateServiceRequestInput {
   environment: CreateThreadEnvironmentArgs;
   executionInputSources?: CreateThreadRequest["executionInputSources"];
-  /**
-   * Epoch ms the first message should dispatch at. Present ⇒ the thread is
-   * created `pending` with no turn and the first message is queued as a row
-   * waiting on the clock.
-   */
+
   sendAt?: CreateThreadRequest["sendAt"];
+  idle?: CreateThreadRequest["idle"];
+  pluginHome?: CreateThreadRequest["pluginHome"];
+  quiet?: CreateThreadRequest["quiet"];
+  callerPluginId?: string | null;
   input: PromptInput[];
   pluginMetadata?: CreateThreadRequest["pluginMetadata"];
   pluginSubmission?: CreateThreadRequest["pluginSubmission"];
@@ -33,6 +33,7 @@ export interface ThreadCreateServiceRequestInput {
   originKind?: ThreadOriginKind | null;
   parentThreadId?: string;
   lifecycleOwnerThreadId?: string;
+  launchedByThreadId?: string;
   permissionMode?: CreateThreadRequest["permissionMode"];
   projectId: string;
   providerId?: CreateThreadRequest["providerId"];
@@ -51,8 +52,30 @@ export interface ThreadCreateServiceRequest extends Omit<
   "environment" | "pluginMetadata" | "providerId"
 > {
   environment: EnvironmentArgs | ProviderEnvironmentArgs;
+  machinePinned: boolean;
   pluginMetadata: { pluginId: string; metadata: JsonObject } | null;
   providerId: string;
   titleFallback: string | null;
   visibility: ThreadVisibility;
+}
+
+export function machineCameFromDefault(
+  environment: CreateThreadEnvironmentArgs,
+): boolean {
+  switch (environment.type) {
+    case "project-default":
+      return true;
+    case "host":
+      return (
+        environment.hostId === undefined ||
+        environment.machineChoice === "default"
+      );
+    case "provider":
+      return (
+        environment.machine === undefined ||
+        environment.machineChoice === "default"
+      );
+    case "reuse":
+      return false;
+  }
 }

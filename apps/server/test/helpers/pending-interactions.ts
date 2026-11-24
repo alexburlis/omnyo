@@ -6,7 +6,7 @@ import type {
   PendingInteractionGrantablePermissionProfile,
   UserQuestionPendingInteractionPayload,
   UserQuestionPendingInteractionResolution,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 type PendingInteractionFileChangeWriteScope = string;
 
@@ -116,6 +116,7 @@ export function createPermissionGrantApprovalPayload(
   options: PermissionGrantApprovalPayloadOptions = {},
 ): ApprovalPendingInteractionPayload {
   const permissions = options.permissions ?? defaultGrantablePermissions;
+
   return {
     kind: "approval",
     subject: {

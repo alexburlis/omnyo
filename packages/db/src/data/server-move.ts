@@ -41,6 +41,7 @@ const MANUAL_MACHINE_PROVIDER_ID = "manual";
 
 function isUnderRoot(column: SQLiteColumn, root: string): SQL {
   const prefix = `${root}/`;
+
   return or(
     eq(column, root),
     sql`substr(${column}, 1, length(${prefix})) = ${prefix}`,
@@ -56,6 +57,7 @@ function rerootCondition(
   args: RerootServerOwnedPathsArgs,
 ): SQL {
   const toRootNestedInFromRoot = args.toRoot.startsWith(`${args.fromRoot}/`);
+
   return toRootNestedInFromRoot
     ? and(
         isUnderRoot(column, args.fromRoot),
@@ -73,6 +75,7 @@ function rerootPluginColumns(
     .set({ rootDir: rerootedValue(installedPlugins.rootDir, args) })
     .where(rerootCondition(installedPlugins.rootDir, args))
     .run().changes;
+
   changes += transaction
     .update(installedPlugins)
     .set({ sourcePath: rerootedValue(installedPlugins.sourcePath, args) })
@@ -83,6 +86,7 @@ function rerootPluginColumns(
       ),
     )
     .run().changes;
+
   return changes;
 }
 
@@ -95,6 +99,7 @@ function rerootArtifactColumns(
     .set({ path: rerootedValue(pluginArtifacts.path, args) })
     .where(rerootCondition(pluginArtifacts.path, args))
     .run().changes;
+
   changes += transaction
     .update(pluginArtifacts)
     .set({
@@ -107,6 +112,7 @@ function rerootArtifactColumns(
       ),
     )
     .run().changes;
+
   return changes;
 }
 
@@ -116,9 +122,12 @@ function rerootSnapshotColumns(
 ): number {
   let changes = transaction
     .update(pluginStateSnapshots)
-    .set({ snapshotPath: rerootedValue(pluginStateSnapshots.snapshotPath, args) })
+    .set({
+      snapshotPath: rerootedValue(pluginStateSnapshots.snapshotPath, args),
+    })
     .where(rerootCondition(pluginStateSnapshots.snapshotPath, args))
     .run().changes;
+
   changes += transaction
     .update(pluginStateSnapshots)
     .set({ statePath: rerootedValue(pluginStateSnapshots.statePath, args) })
@@ -126,7 +135,9 @@ function rerootSnapshotColumns(
     .run().changes;
   changes += transaction
     .update(pluginStateSnapshots)
-    .set({ databasePath: rerootedValue(pluginStateSnapshots.databasePath, args) })
+    .set({
+      databasePath: rerootedValue(pluginStateSnapshots.databasePath, args),
+    })
     .where(
       and(
         isNotNull(pluginStateSnapshots.databasePath),
@@ -159,6 +170,7 @@ function rerootSnapshotColumns(
       ),
     )
     .run().changes;
+
   return changes;
 }
 
@@ -190,6 +202,7 @@ export function rerootServerOwnedPluginPaths(
       plugins: 0,
     };
   }
+
   return db.transaction((transaction) => ({
     plugins: rerootPluginColumns(transaction, args),
     pluginArtifacts: rerootArtifactColumns(transaction, args),
@@ -214,7 +227,9 @@ export function swapServerHostRoles(
           ),
         )
         .run().changes > 0;
+
     const sourceServerHostId = args.sourceServerHostId;
+
     const sourceServerHostBecameManual =
       sourceServerHostId !== null &&
       sourceServerHostId !== args.targetHostId &&
@@ -232,6 +247,7 @@ export function swapServerHostRoles(
           ),
         )
         .run().changes > 0;
+
     return { sourceServerHostBecameManual, targetHostBecameServer };
   });
 }
@@ -254,6 +270,8 @@ export function listPathInstalledPluginSources(
     )
     .all()
     .flatMap((row) =>
-      row.sourcePath === null ? [] : [{ id: row.id, sourcePath: row.sourcePath }],
+      row.sourcePath === null
+        ? []
+        : [{ id: row.id, sourcePath: row.sourcePath }],
     );
 }

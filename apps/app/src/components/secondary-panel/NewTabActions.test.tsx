@@ -7,7 +7,7 @@ import {
   setPluginLogoUrls,
   resetPluginLogoStoreForTest,
 } from "@/lib/plugin-logos";
-import { COMPACT_VIEWPORT_QUERY } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { COMPACT_VIEWPORT_QUERY } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import type { PluginPanelActionEntry } from "@/components/plugin/PluginPanelActions";
 import { setCompactSidebarDrawerShowing } from "@/components/ui/sidebar-mobile-drawer-visibility";
 import {
@@ -37,6 +37,7 @@ function pluginAction(id: string, title: string): PluginPanelActionEntry {
 }
 
 const sideChat = pluginAction("side-chat", "Start side chat");
+
 const quickstart = pluginAction("quickstart", "Quickstart");
 
 function ActionsHarness(props: UseNewTabActionsArgs) {
@@ -49,6 +50,7 @@ function renderActions(
 ) {
   const store = createStore();
   store.set(newTabActionOrderAtom, storedOrder);
+
   return render(
     <Provider store={store}>
       <ActionsHarness
@@ -83,17 +85,16 @@ describe("matchNewTabActions", () => {
     "PR",
     "Review",
     "Start side chat",
-  ].map(
-    (label): NewTabAction => ({
-      id: label,
-      icon: null,
-      label,
-      disabled: false,
-      shortcut: null,
-      trailing: null,
-      onSelect: () => undefined,
-    }),
-  );
+  ].map((label): NewTabAction => ({
+    id: label,
+    icon: null,
+    label,
+    disabled: false,
+    shortcut: null,
+    trailing: null,
+    onSelect: () => undefined,
+  }));
+
   const labels = (query: string) =>
     matchNewTabActions(actions, query).map((action) => action.label);
 
@@ -119,6 +120,7 @@ describe("NewTabActions", () => {
   it("keeps a trailing terminal control separate from the terminal action", () => {
     const onSelectHost = vi.fn();
     const onStartTerminal = vi.fn();
+
     const { container } = render(
       <ActionsHarness
         onStartTerminal={onStartTerminal}
@@ -193,6 +195,7 @@ describe("NewTabActions", () => {
     const touchMoveInstalls = addSpy.mock.calls.filter(
       ([type]) => type === "touchmove",
     );
+
     expect(touchMoveInstalls).toHaveLength(1);
     expect(touchMoveInstalls[0]?.[2]).toEqual({
       capture: false,
@@ -201,7 +204,7 @@ describe("NewTabActions", () => {
   });
 
   it("uses the default order after stored data has an invalid shape", () => {
-    window.localStorage.setItem("bb.newTab.actionOrder", JSON.stringify({}));
+    window.localStorage.setItem("omnyo.newTab.actionOrder", JSON.stringify({}));
     const store = createStore();
 
     render(

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { experimental_threadIndicatorCases } from "@omnyo/plugin-sdk/testing";
 import {
   buildSectionThreadList,
   buildProjectThreadGroups,
@@ -13,6 +14,7 @@ import {
 import {
   makeSidebarEnvironment,
   makeSidebarThread,
+  makeSidebarWork,
   type SidebarThreadOverrides,
 } from "./fixtures.js";
 import type { SidebarThread } from "./sidebar-thread.js";
@@ -21,11 +23,13 @@ type TreeSummary =
   | string
   | { id: string; children: TreeSummary[] }
   | { env: string; threads: TreeSummary[] }
-  | { section: string; name: string; items: TreeSummary[] };
+  | { section: string; name: string; items: TreeSummary[] }
+  | { group: string; name: string; items: TreeSummary[] };
 
 function getItemAlphaLabel(item: ProjectThreadItem): string {
   switch (item.kind) {
     case "section":
+    case "chatGroup":
       return item.group.name;
     case "thread":
       return item.node.thread.title ?? item.node.thread.titleFallback ?? "";
@@ -42,6 +46,7 @@ const compareAlphaDescending = ((left, right) =>
   (right.title ?? right.titleFallback ?? "").localeCompare(
     left.title ?? left.titleFallback ?? "",
   )) as ThreadComparator;
+
 compareAlphaDescending.compareItems = (left, right) =>
   getItemAlphaLabel(right).localeCompare(getItemAlphaLabel(left));
 
@@ -86,6 +91,12 @@ function summarizeItems(items: readonly ProjectThreadItem[]): TreeSummary[] {
           name: item.group.name,
           items: summarizeItems(item.group.items),
         };
+      case "chatGroup":
+        return {
+          group: item.group.id,
+          name: item.group.name,
+          items: summarizeItems(item.group.items),
+        };
     }
   });
 }
@@ -95,19 +106,25 @@ function findNode(
   threadId: string,
 ): ProjectThreadNode | null {
   for (const item of items) {
-    if (item.kind === "section") {
+    if (item.kind === "section" || item.kind === "chatGroup") {
       const sectionNode = findNode(item.group.items, threadId);
+
       if (sectionNode) {
         return sectionNode;
       }
+
       continue;
     }
+
     const nodes = item.kind === "thread" ? [item.node] : item.group.nodes;
+
     for (const node of nodes) {
       if (node.thread.id === threadId) {
         return node;
       }
+
       const childNode = findNode(node.children, threadId);
+
       if (childNode) {
         return childNode;
       }
@@ -358,6 +375,54 @@ describe("buildProjectThreadGroups", () => {
     ]);
   });
 
+  it.each([false, true])(
+    "does not repeat the parent's worktree around its children (outer group: %s)",
+    (outerGroup) => {
+      const environment = makeSidebarEnvironment({
+        id: "env_shared",
+        isWorktree: true,
+      });
+
+      const otherEnvironment = makeSidebarEnvironment({
+        id: "env_other",
+        isWorktree: true,
+      });
+
+      const threads = [
+        createThread({ id: "parent", environment, createdAt: 100 }),
+        ...["child-a", "child-b"].map((id) =>
+          createThread({ id, parentThreadId: "parent", environment }),
+        ),
+        ...["other-a", "other-b"].map((id) =>
+          createThread({
+            id,
+            parentThreadId: "parent",
+            environment: otherEnvironment,
+          }),
+        ),
+      ];
+
+      if (outerGroup) {
+        threads.push(createThread({ id: "sibling", environment }));
+      }
+
+      const parent = {
+        id: "parent",
+        children: [
+          "child-a",
+          "child-b",
+          { env: "env_other", threads: ["other-a", "other-b"] },
+        ],
+      };
+
+      expect(summarizeItems(buildProjectThreadGroups(threads))).toEqual(
+        outerGroup
+          ? [{ env: "env_shared", threads: [parent, "sibling"] }]
+          : [parent],
+      );
+    },
+  );
+
   it("sorts siblings with active rows first, then inactive attention recency", () => {
     const rootItems = buildProjectThreadGroups([
       createThread({
@@ -406,7 +471,55 @@ describe("buildProjectThreadGroups", () => {
     ]);
   });
 
+  it.each([
+    { runtimeStatus: "starting", status: "starting", running: true },
+    { runtimeStatus: "active", status: "active", running: true },
+    { runtimeStatus: "stopping", status: "stopping", running: true },
+    { runtimeStatus: "waiting-for-host", status: "active", running: false },
+  ] as const)(
+    "sorts a $runtimeStatus chat by its execution state",
+    ({ runtimeStatus, status, running }) => {
+      const rootItems = buildProjectThreadGroups([
+        createThread({ id: "root" }),
+        createThread({
+          id: "busy-older",
+          parentThreadId: "root",
+          status: "active",
+          createdAt: 10,
+          latestAttentionAt: 2_000,
+          runtimeStatus: "active",
+        }),
+        createThread({
+          id: "new-chat",
+          parentThreadId: "root",
+          status,
+          createdAt: 20,
+          latestAttentionAt: 1_000,
+          runtimeStatus,
+        }),
+        createThread({
+          id: "idle-recent",
+          parentThreadId: "root",
+          createdAt: 30,
+          latestAttentionAt: 3_000,
+        }),
+      ]);
+
+      expect(summarizeItems(rootItems)).toEqual([
+        {
+          id: "root",
+          children: running
+            ? ["new-chat", "busy-older", "idle-recent"]
+            : ["busy-older", "idle-recent", "new-chat"],
+        },
+      ]);
+    },
+  );
+
   it("rolls collapsed child activity up from all descendants", () => {
+    const working = makeSidebarWork("working");
+    const required = { ...makeSidebarWork("needs-you"), activity: [] };
+
     const rootItems = buildProjectThreadGroups([
       createThread({
         id: "parent",
@@ -414,17 +527,22 @@ describe("buildProjectThreadGroups", () => {
       createThread({
         id: "quiet-child",
         parentThreadId: "parent",
+        isUnread: false,
       }),
       createThread({
         id: "busy-grandchild",
         parentThreadId: "quiet-child",
         status: "active",
         runtimeStatus: "active",
+        experimental_work: working,
+        isUnread: false,
       }),
       createThread({
         id: "pending-grandchild",
         parentThreadId: "quiet-child",
         hasPendingInteraction: true,
+        experimental_work: required,
+        isUnread: false,
       }),
     ]);
 
@@ -435,14 +553,9 @@ describe("buildProjectThreadGroups", () => {
           "busy-grandchild",
           "pending-grandchild",
         ]),
-        pending: true,
-        working: true,
-        runtimeWorking: true,
-        workflow: false,
-        backgroundAgent: false,
-        backgroundCommand: false,
-        planMode: false,
-        goal: false,
+        work: required,
+        parentRowWork: expect.arrayContaining([working]),
+        summaries: expect.arrayContaining([working, required]),
         unread: false,
         unreadError: false,
       },
@@ -454,19 +567,17 @@ describe("buildProjectThreadGroups", () => {
           "busy-grandchild",
           "pending-grandchild",
         ]),
-        pending: true,
-        working: true,
-        runtimeWorking: true,
-        workflow: false,
-        backgroundAgent: false,
-        backgroundCommand: false,
-        planMode: false,
-        goal: false,
+        work: required,
+        parentRowWork: expect.arrayContaining([working]),
+        summaries: expect.arrayContaining([working, required]),
         unread: false,
         unreadError: false,
       },
       childCount: 2,
     });
+    expect(
+      findNode(rootItems, "parent")?.stats.childActivity.parentRowWork,
+    ).not.toContain(required);
   });
 
   it("orders roots by literal createdAt when given the created comparator", () => {
@@ -514,6 +625,7 @@ describe("worktree grouping preference", () => {
       createdAt: 20,
     }),
   ];
+
   const sections = [{ id: "sec_work", name: "Work" }];
 
   it.each([false, true])(
@@ -539,12 +651,14 @@ describe("worktree grouping preference", () => {
           createdAt: 40,
         }),
       ];
+
       const items = buildSectionThreadList(
         threads,
         compareStandardThreads,
         [...sections, { id: "sec_later", name: "Later" }],
         groupEnvironmentThreads,
       );
+
       expect(summarizeItems(items)).toEqual([
         {
           section: "chronological::sec_work",
@@ -583,12 +697,14 @@ describe("worktree grouping preference", () => {
       }),
       createThread({ id: "child", parentThreadId: "wt-a", createdAt: 50 }),
     ];
+
     const items = buildSectionThreadList(
       threads,
       compareStandardThreads,
       sections,
       true,
     );
+
     expect(summarizeItems(items)).toEqual([
       {
         section: "chronological::sec_work",
@@ -782,6 +898,10 @@ describe("section bucketing", () => {
           title: "Busy",
           sectionId: "sec_work",
           hasPendingInteraction: true,
+          experimental_work:
+            experimental_threadIndicatorCases.find(
+              (entry) => entry.state.work?.primary.label === "needs-you",
+            )?.state.work ?? null,
         }),
         createThread({ id: "quiet", title: "Quiet", sectionId: "sec_work" }),
       ],
@@ -791,11 +911,13 @@ describe("section bucketing", () => {
 
     expect(items).toHaveLength(1);
     const section = items[0];
+
     if (section.kind !== "section") {
       throw new Error("expected a section item");
     }
+
     expect(section.group.threadCount).toBe(2);
-    expect(section.group.activity.pending).toBe(true);
+    expect(section.group.activity.work?.requiredInput).toHaveLength(1);
   });
 
   it("combines threads from different projects that share the same section id", () => {
@@ -829,16 +951,19 @@ describe("section bucketing", () => {
 describe("resolveSidebarProjectId", () => {
   it("files a child from another project under its root ancestor's project", () => {
     const root = createThread({ id: "thr_root", projectId: "proj_a" });
+
     const child = createThread({
       id: "thr_child",
       parentThreadId: "thr_root",
       projectId: "proj_b",
     });
+
     const grandchild = createThread({
       id: "thr_grandchild",
       parentThreadId: "thr_child",
       projectId: "proj_c",
     });
+
     const threadById = new Map(
       [root, child, grandchild].map((thread) => [thread.id, thread]),
     );
@@ -854,6 +979,7 @@ describe("resolveSidebarProjectId", () => {
       parentThreadId: "thr_missing",
       projectId: "proj_b",
     });
+
     expect(
       resolveSidebarProjectId(orphan, new Map([[orphan.id, orphan]])),
     ).toBe("proj_b");
@@ -865,25 +991,30 @@ describe("resolveSidebarProjectId", () => {
       parentThreadId: "thr_right",
       projectId: "proj_a",
     });
+
     const right = createThread({
       id: "thr_right",
       parentThreadId: "thr_left",
       projectId: "proj_b",
     });
+
     const threadById = new Map([
       [left.id, left],
       [right.id, right],
     ]);
+
     expect(resolveSidebarProjectId(left, threadById)).toBe("proj_b");
   });
 
   it("memoizes ancestor walks across siblings and descendants", () => {
     const root = createThread({ id: "thr_root", projectId: "proj_a" });
+
     const child = createThread({
       id: "thr_child",
       parentThreadId: "thr_root",
       projectId: "proj_b",
     });
+
     const grandchildren = Array.from({ length: 5 }, (_, index) =>
       createThread({
         id: `thr_grandchild_${index}`,
@@ -891,16 +1022,20 @@ describe("resolveSidebarProjectId", () => {
         projectId: "proj_c",
       }),
     );
+
     const all = [root, child, ...grandchildren];
     const lookups: string[] = [];
     const threadById = new Map(all.map((thread) => [thread.id, thread]));
+
     const spyingMap: ReadonlyMap<string, SidebarThread> = {
       ...threadById,
       get: (id: string) => {
         lookups.push(id);
+
         return threadById.get(id);
       },
     } as unknown as ReadonlyMap<string, SidebarThread>;
+
     const resolve = createSidebarProjectIdResolver(spyingMap);
 
     expect(all.map(resolve)).toEqual(Array(all.length).fill("proj_a"));
@@ -911,6 +1046,93 @@ describe("resolveSidebarProjectId", () => {
       "thr_child",
       "thr_child",
       "thr_child",
+    ]);
+  });
+});
+
+describe("chat group folders", () => {
+  const groups = [
+    { id: "grp_a", projectId: "proj_1", name: "Importer work" },
+    { id: "grp_other", projectId: "proj_2", name: "Elsewhere" },
+  ];
+
+  it("nests top-level members in one folder placed at its highest-sorted member", () => {
+    const rootItems = buildProjectThreadGroups(
+      [
+        createThread({ id: "loose_new", createdAt: 50, latestAttentionAt: 50 }),
+        createThread({
+          id: "member_mid",
+          createdAt: 40,
+          latestAttentionAt: 40,
+          experimental_groupId: "grp_a",
+        }),
+        createThread({ id: "loose_mid", createdAt: 30, latestAttentionAt: 30 }),
+        createThread({
+          id: "member_old",
+          createdAt: 20,
+          latestAttentionAt: 20,
+          experimental_groupId: "grp_a",
+        }),
+        createThread({
+          id: "member_child",
+          parentThreadId: "member_old",
+          createdAt: 25,
+          latestAttentionAt: 25,
+        }),
+      ],
+      compareStandardThreads,
+      false,
+      groups,
+    );
+
+    expect(summarizeItems(rootItems)).toEqual([
+      "loose_new",
+      {
+        group: "grp_a",
+        name: "Importer work",
+        items: ["member_mid", { id: "member_old", children: ["member_child"] }],
+      },
+      "loose_mid",
+    ]);
+
+    const folder = rootItems[1];
+
+    expect(folder?.kind === "chatGroup" && folder.group.memberCount).toBe(2);
+  });
+
+  it("keeps a grouped sub-chat under its parent and ignores unknown or foreign groups", () => {
+    const rootItems = buildProjectThreadGroups(
+      [
+        createThread({ id: "parent", createdAt: 30, latestAttentionAt: 30 }),
+        createThread({
+          id: "grouped_child",
+          parentThreadId: "parent",
+          createdAt: 20,
+          latestAttentionAt: 20,
+          experimental_groupId: "grp_a",
+        }),
+        createThread({
+          id: "unknown_group",
+          createdAt: 10,
+          latestAttentionAt: 10,
+          experimental_groupId: "grp_missing",
+        }),
+        createThread({
+          id: "foreign_group",
+          createdAt: 5,
+          latestAttentionAt: 5,
+          experimental_groupId: "grp_other",
+        }),
+      ],
+      compareStandardThreads,
+      false,
+      groups,
+    );
+
+    expect(summarizeItems(rootItems)).toEqual([
+      { id: "parent", children: ["grouped_child"] },
+      "unknown_group",
+      "foreign_group",
     ]);
   });
 });

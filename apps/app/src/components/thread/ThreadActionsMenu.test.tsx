@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
 import {
+  ActionHistoryProvider,
+  useActionHistory,
+} from "@/components/layout/ActionHistoryProvider";
+import type { ActionHistory } from "@/lib/action-history";
+import {
   act,
   cleanup,
   fireEvent,
@@ -11,17 +16,23 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createStore, Provider } from "jotai";
-import type { ReactElement } from "react";
+import { memo, type ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   experimental_THREAD_ACTION_GROUPS,
   type PluginThreadActionRegistration,
   type PluginThreadActionsInlineItem,
-} from "@get-bb/plugin-sdk";
-import type { ThreadListEntry } from "@bb/domain";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+} from "@omnyo/plugin-sdk";
+import {
+  defaultAppSettings,
+  appKeybindingOverridesSchema,
+  applyAppKeybindingOverrides,
+  type ThreadListEntry,
+} from "@omnyo/domain";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import { AppCommandProvider } from "@/components/commands/AppCommandProvider";
 import { threadQueryKey } from "@/hooks/queries/query-keys";
 import {
   resetPluginSlotStoreForTest,
@@ -31,6 +42,8 @@ import { getThreadRoutePath } from "@/lib/route-paths";
 import type { SplitLayout } from "@/lib/split-layout";
 import { splitLayoutAtom } from "@/lib/split-layout/atoms";
 import { CORE_THREAD_ACTIONS } from "@/lib/thread-actions/core-thread-actions";
+import { getChatSelection, setChatSelection } from "@/lib/chat-selection";
+import { parseStoredPreferenceValue } from "../../../../../plugins/thread-list/shared/preferences.js";
 import { threadListEntryActionTarget } from "@/lib/thread-actions/thread-action-target";
 import {
   ThreadActionCollectors,
@@ -47,27 +60,69 @@ import {
 } from "./ThreadActionsMenu";
 
 const hostActions = vi.hoisted(() => ({
+  archiveThreadAsync: vi.fn(async () => {}),
   requestArchive: vi.fn(),
   requestDelete: vi.fn(),
+  requestShelve: vi.fn(),
 }));
+
 const sdkThreads = vi.hoisted(() => ({
   pin: vi.fn(),
   unpin: vi.fn(),
   markRead: vi.fn(),
   markUnread: vi.fn(),
   unarchive: vi.fn(),
+  shelve: vi.fn(),
+  unshelve: vi.fn(),
   update: vi.fn(),
   get: vi.fn(),
 }));
+
+const shortcutState = vi.hoisted(() => ({
+  keybindings: [] as unknown[],
+}));
+
 const copyToClipboardWithToast = vi.hoisted(() => vi.fn(async () => true));
 
 vi.mock("@/lib/sdk", () => ({ sdk: { threads: sdkThreads } }));
+
 vi.mock("@/lib/clipboard", () => ({ copyToClipboardWithToast }));
-vi.mock("./ThreadActionsProvider", () => ({
+
+vi.mock("@/lib/thread-actions/thread-actions-context", () => ({
   useThreadActions: () => hostActions,
 }));
 
+vi.mock("@/hooks/queries/system-queries", () => ({
+  useSystemConfig: () => ({
+    data: {
+      generalSettings: defaultAppSettings,
+      keybindings: shortcutState.keybindings,
+    },
+  }),
+}));
+
+function commandBinding(
+  command: "thread.archive" | "thread.copyLink" | "thread.shelve",
+  key: string,
+  modifier: "alt" | "shift",
+): Parameters<typeof applyAppKeybindingOverrides>[0][number] {
+  return {
+    command,
+    desktopOnly: false,
+    shortcut: {
+      key,
+      mod: true,
+      meta: false,
+      control: false,
+      alt: modifier === "alt",
+      shift: modifier === "shift",
+    },
+    when: { all: ["mainSurface"], none: ["modalOpen"] },
+  };
+}
+
 const moveRun = vi.fn();
+
 const moveAction: PluginThreadActionRegistration = {
   id: "move",
   title: "Move to section",
@@ -89,7 +144,9 @@ const moveAction: PluginThreadActionRegistration = {
           run: moveRun,
         },
 };
+
 const pluginGroupRun = vi.fn();
+
 const pluginGroupAction: PluginThreadActionRegistration = {
   id: "notify",
   title: "Notifications",
@@ -216,7 +273,11 @@ function twoPaneLayout(focusedPaneId: string): SplitLayout {
         {
           type: "pane",
           paneId: "pane_other",
-          content: { kind: "thread", projectId: "proj_a", threadId: "thr_other" },
+          content: {
+            kind: "thread",
+            projectId: "proj_a",
+            threadId: "thr_other",
+          },
         },
         {
           type: "pane",
@@ -238,6 +299,21 @@ interface HostState {
   layout?: SplitLayout | null;
   cached?: boolean;
   threadActions?: readonly PluginThreadActionRegistration[];
+  commands?: boolean;
+}
+
+const historyProbe: { current: ActionHistory | null } = { current: null };
+
+function HistoryProbe() {
+  historyProbe.current = useActionHistory();
+
+  return null;
+}
+
+function recordedHistory(): ActionHistory {
+  if (historyProbe.current === null) throw new Error("Expected a history");
+
+  return historyProbe.current;
 }
 
 function renderSurface(
@@ -248,33 +324,53 @@ function renderSurface(
     layout = null,
     cached = true,
     threadActions = [],
+    commands = false,
   }: HostState = {},
 ) {
   const queryClient = new QueryClient();
   const store = createStore();
+
   if (layout !== null) store.set(splitLayoutAtom, layout);
+
   if (cached) {
     queryClient.setQueryData(threadQueryKey(options.thread.id), options.thread);
   }
+
   setPluginSlotRegistrations(
     "fixture",
     makePluginRegistrationSet({
       threadActions: [moveAction, pluginGroupAction, ...threadActions],
     }),
   );
+
+  const surfaceTree = (
+    <>
+      <HistoryProbe />
+      <ThreadActionCollectors
+        coreRegistrations={CORE_THREAD_ACTIONS}
+        requestRename={defaultRequestRename}
+      />
+      {surface.render(options)}
+    </>
+  );
+
   return render(
     <QueryClientProvider client={queryClient}>
-      <Provider store={store}>
-        <MemoryRouter initialEntries={[route]}>
-          <CompactViewportOverrideProvider isCompactViewport={surface.compact}>
-            <ThreadActionCollectors
-              coreRegistrations={CORE_THREAD_ACTIONS}
-              requestRename={defaultRequestRename}
-            />
-            {surface.render(options)}
-          </CompactViewportOverrideProvider>
-        </MemoryRouter>
-      </Provider>
+      <ActionHistoryProvider>
+        <Provider store={store}>
+          <MemoryRouter initialEntries={[route]}>
+            <CompactViewportOverrideProvider
+              isCompactViewport={surface.compact}
+            >
+              {commands ? (
+                <AppCommandProvider>{surfaceTree}</AppCommandProvider>
+              ) : (
+                surfaceTree
+              )}
+            </CompactViewportOverrideProvider>
+          </MemoryRouter>
+        </Provider>
+      </ActionHistoryProvider>
     </QueryClientProvider>,
   );
 }
@@ -282,15 +378,18 @@ function renderSurface(
 async function openMenu(): Promise<HTMLElement> {
   return waitFor(() => {
     const menu = screen.queryByRole("menu") ?? screen.queryByRole("dialog");
+
     if (menu?.querySelector('[role="menuitem"]') == null) {
       throw new Error("no open menu");
     }
+
     return menu;
   });
 }
 
 async function menuRows(): Promise<string[]> {
   const menu = await openMenu();
+
   return Array.from(
     menu.querySelectorAll('[role="menuitem"], [role="separator"]'),
   )
@@ -308,6 +407,7 @@ async function menuRows(): Promise<string[]> {
 
 async function choose(surface: Surface, actionLabel: string, choice: string) {
   const trigger = await screen.findByRole("menuitem", { name: actionLabel });
+
   if (surface.compact) fireEvent.click(trigger);
   else fireEvent.keyDown(trigger, { key: "ArrowRight" });
   fireEvent.click(await screen.findByRole("menuitem", { name: choice }));
@@ -315,6 +415,7 @@ async function choose(surface: Surface, actionLabel: string, choice: string) {
 
 afterEach(() => {
   cleanup();
+  shortcutState.keybindings = [];
   window.localStorage.clear();
   window.sessionStorage.clear();
   resetPluginSlotStoreForTest();
@@ -334,6 +435,14 @@ const CUSTOMIZE: PluginThreadActionsInlineItem = {
 };
 
 describe.each(SURFACES)("thread actions on the $name", (surface) => {
+  it("keeps the page accessible while its action menu is open", async () => {
+    const view = renderSurface(surface, { thread: baseThread });
+    await surface.open();
+    await openMenu();
+    expect(view.container.closest('[aria-hidden="true"]')).toBeNull();
+    expect(document.body.style.pointerEvents).not.toBe("none");
+  });
+
   it.each([
     {
       state: "a top-level thread",
@@ -342,15 +451,17 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
       layout: null,
       desktop: [
         "Open in split",
+        "New thread in environment",
+        "Copy link",
         "---",
-        "Copy thread link",
-        "Mark unread",
-        "Pin",
-        "Move to section",
         "Rename",
+        "Pin",
+        "Mark unread",
+        "Move to section",
         "---",
         "Customize row actions",
         "---",
+        "Shelve",
         "Archive",
         "Delete",
         "---",
@@ -358,12 +469,50 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
       ],
       compact: [
         "New thread in environment",
-        "Copy thread link",
-        "Mark unread",
-        "Pin",
-        "Move to section",
+        "Copy link",
         "Rename",
+        "Pin",
+        "Mark unread",
+        "Move to section",
         "Customize row actions",
+        "Shelve",
+        "Archive",
+        "Delete",
+        "Notifications",
+      ],
+    },
+    {
+      state: "a shelved top-level thread",
+      thread: makeThreadListEntry({ ...baseThread, shelvedAt: 30 }),
+      route: "/",
+      layout: null,
+      desktop: [
+        "Open in split",
+        "New thread in environment",
+        "Copy link",
+        "---",
+        "Rename",
+        "Pin",
+        "Mark unread",
+        "Move to section",
+        "---",
+        "Customize row actions",
+        "---",
+        "Unshelve",
+        "Archive",
+        "Delete",
+        "---",
+        "Notifications",
+      ],
+      compact: [
+        "New thread in environment",
+        "Copy link",
+        "Rename",
+        "Pin",
+        "Mark unread",
+        "Move to section",
+        "Customize row actions",
+        "Unshelve",
         "Archive",
         "Delete",
         "Notifications",
@@ -384,11 +533,11 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
       layout: null,
       desktop: [
         "Open in split",
+        "Copy link",
         "---",
-        "Copy thread link",
-        "Mark read",
-        "Unpin",
         "Rename",
+        "Unpin",
+        "Mark read",
         "---",
         "Customize row actions",
         "---",
@@ -398,10 +547,10 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
         "Notifications",
       ],
       compact: [
-        "Copy thread link",
-        "Mark read",
-        "Unpin",
+        "Copy link",
         "Rename",
+        "Unpin",
+        "Mark read",
         "Customize row actions",
         "Unarchive",
         "Delete",
@@ -417,14 +566,17 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
       }),
       layout: null,
       desktop: [
-        "Copy thread link",
-        "Mark unread",
-        "Pin",
-        "Move to section",
+        "New thread in environment",
+        "Copy link",
+        "---",
         "Rename",
+        "Pin",
+        "Mark unread",
+        "Move to section",
         "---",
         "Customize row actions",
         "---",
+        "Shelve",
         "Archive",
         "Delete",
         "---",
@@ -432,12 +584,13 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
       ],
       compact: [
         "New thread in environment",
-        "Copy thread link",
-        "Mark unread",
-        "Pin",
-        "Move to section",
+        "Copy link",
         "Rename",
+        "Pin",
+        "Mark unread",
+        "Move to section",
         "Customize row actions",
+        "Shelve",
         "Archive",
         "Delete",
         "Notifications",
@@ -450,15 +603,17 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
       layout: twoPaneLayout("pane_other"),
       desktop: [
         "Focus split",
+        "New thread in environment",
+        "Copy link",
         "---",
-        "Copy thread link",
-        "Mark unread",
-        "Pin",
-        "Move to section",
         "Rename",
+        "Pin",
+        "Mark unread",
+        "Move to section",
         "---",
         "Customize row actions",
         "---",
+        "Shelve",
         "Archive",
         "Delete",
         "---",
@@ -466,12 +621,13 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
       ],
       compact: [
         "New thread in environment",
-        "Copy thread link",
-        "Mark unread",
-        "Pin",
-        "Move to section",
+        "Copy link",
         "Rename",
+        "Pin",
+        "Mark unread",
+        "Move to section",
         "Customize row actions",
+        "Shelve",
         "Archive",
         "Delete",
         "Notifications",
@@ -486,14 +642,17 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
       }),
       layout: twoPaneLayout("pane_target"),
       desktop: [
-        "Copy thread link",
-        "Mark unread",
-        "Pin",
-        "Move to section",
+        "New thread in environment",
+        "Copy link",
+        "---",
         "Rename",
+        "Pin",
+        "Mark unread",
+        "Move to section",
         "---",
         "Customize row actions",
         "---",
+        "Shelve",
         "Archive",
         "Delete",
         "---",
@@ -501,12 +660,13 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
       ],
       compact: [
         "New thread in environment",
-        "Copy thread link",
-        "Mark unread",
-        "Pin",
-        "Move to section",
+        "Copy link",
         "Rename",
+        "Pin",
+        "Mark unread",
+        "Move to section",
         "Customize row actions",
+        "Shelve",
         "Archive",
         "Delete",
         "Notifications",
@@ -515,7 +675,11 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
   ])(
     "lists the items for $state",
     async ({ thread, route, layout, desktop, compact }) => {
-      renderSurface(surface, { thread, inline: [CUSTOMIZE] }, { route, layout });
+      renderSurface(
+        surface,
+        { thread, inline: [CUSTOMIZE] },
+        { route, layout },
+      );
       await surface.open();
       expect(await menuRows()).toEqual(surface.compact ? compact : desktop);
     },
@@ -553,10 +717,14 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
 
     await surface.open();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
-    await waitFor(() =>
-      expect(hostActions.requestArchive).toHaveBeenCalledWith(
-        expect.objectContaining({ id: baseThread.id }),
-      ),
+    expect(hostActions.requestArchive).toHaveBeenCalledWith(
+      expect.objectContaining({ id: baseThread.id }),
+    );
+
+    await surface.open();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Shelve" }));
+    expect(hostActions.requestShelve).toHaveBeenCalledWith(
+      expect.objectContaining({ id: baseThread.id }),
     );
 
     await surface.open();
@@ -574,9 +742,7 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
     );
 
     await surface.open();
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Copy thread link" }),
-    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy link" }));
     expect(copyToClipboardWithToast).toHaveBeenCalledWith(
       `${window.location.origin}/projects/proj_a/threads/thr_target`,
       {
@@ -586,7 +752,126 @@ describe.each(SURFACES)("thread actions on the $name", (surface) => {
     );
   });
 
-  it("falls back to bb's rename dialog when the surface has no editor", async () => {
+  it("unshelves a shelved thread in place", async () => {
+    const shelved = makeThreadListEntry({ ...baseThread, shelvedAt: 30 });
+    sdkThreads.unshelve.mockResolvedValue({ ...shelved, shelvedAt: null });
+    renderSurface(surface, { thread: shelved });
+
+    await surface.open();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Unshelve" }));
+    await waitFor(() =>
+      expect(sdkThreads.unshelve).toHaveBeenCalledWith({
+        threadId: shelved.id,
+      }),
+    );
+    expect(hostActions.requestShelve).not.toHaveBeenCalled();
+  });
+
+  it("records Unshelve so undo shelves the thread and redo unshelves it again", async () => {
+    const shelved = makeThreadListEntry({ ...baseThread, shelvedAt: 30 });
+    sdkThreads.unshelve.mockResolvedValue({ ...shelved, shelvedAt: null });
+    sdkThreads.shelve.mockResolvedValue(shelved);
+    renderSurface(surface, { thread: shelved });
+
+    await surface.open();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Unshelve" }));
+    await waitFor(() =>
+      expect(recordedHistory().peek("undo")?.label).toMatch(/^Unshelve “/),
+    );
+
+    await act(() => recordedHistory().undo());
+    expect(sdkThreads.shelve).toHaveBeenCalledWith({ threadId: shelved.id });
+
+    await act(() => recordedHistory().redo());
+    expect(sdkThreads.unshelve).toHaveBeenCalledTimes(2);
+    expect(recordedHistory().canRedo).toBe(false);
+  });
+
+  it("records Pin before the request answers and forgets it when the request fails", async () => {
+    let rejectPin!: () => void;
+    sdkThreads.pin.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectPin = () => reject(new Error("offline"));
+        }),
+    );
+    renderSurface(surface, { thread: baseThread });
+
+    await surface.open();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Pin" }));
+    await waitFor(() =>
+      expect(recordedHistory().peek("undo")?.label).toMatch(/^Pin “/),
+    );
+    await waitFor(() => expect(sdkThreads.pin).toHaveBeenCalled());
+
+    await act(async () => rejectPin());
+    await waitFor(() => expect(recordedHistory().canUndo).toBe(false));
+  });
+
+  it("routes the undo of Unarchive through Omnyo's archive action", async () => {
+    const archived = makeThreadListEntry({ ...baseThread, archivedAt: 20 });
+    sdkThreads.unarchive.mockResolvedValue({ ok: true });
+    renderSurface(surface, { thread: archived });
+
+    await surface.open();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Unarchive" }));
+    await waitFor(() =>
+      expect(recordedHistory().peek("undo")?.label).toMatch(/^Unarchive “/),
+    );
+    await waitFor(() =>
+      expect(sdkThreads.unarchive).toHaveBeenCalledWith({
+        threadId: archived.id,
+      }),
+    );
+
+    await act(() => recordedHistory().undo());
+    expect(hostActions.archiveThreadAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ id: archived.id }),
+    );
+  });
+
+  it("shows the effective shortcut beside core actions on desktop menus only", async () => {
+    const persisted = appKeybindingOverridesSchema.parse([
+      {
+        command: "thread.shelve",
+        shortcut: commandBinding("thread.shelve", "f", "shift").shortcut,
+      },
+      {
+        command: "thread.archive",
+        shortcut: commandBinding("thread.archive", "a", "alt").shortcut,
+      },
+    ]);
+
+    shortcutState.keybindings = applyAppKeybindingOverrides(
+      [
+        commandBinding("thread.shelve", "x", "alt"),
+        commandBinding("thread.archive", "y", "shift"),
+        commandBinding("thread.copyLink", "c", "shift"),
+      ],
+      persisted,
+    );
+    renderSurface(surface, { thread: baseThread }, { commands: true });
+    await surface.open();
+
+    const shortcutBeside = async (name: string) =>
+      (await screen.findByRole("menuitem", { name })).textContent?.slice(
+        name.length,
+      );
+
+    expect(await shortcutBeside("Shelve")).toBe(
+      surface.compact ? "" : "Ctrl + Shift + F",
+    );
+    expect(await shortcutBeside("Archive")).toBe(
+      surface.compact ? "" : "Ctrl + Alt + A",
+    );
+    expect(await shortcutBeside("Copy link")).toBe(
+      surface.compact ? "" : "Ctrl + Shift + C",
+    );
+    expect(await shortcutBeside("Rename")).toBe("");
+    expect(await shortcutBeside("Pin")).toBe("");
+  });
+
+  it("falls back to Omnyo's rename dialog when the surface has no editor", async () => {
     renderSurface(surface, { thread: baseThread });
     await surface.open();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
@@ -625,6 +910,7 @@ describe("thread action run containment", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     pluginGroupRun.mockRejectedValueOnce(new Error("nope"));
     const [surface] = SURFACES;
+
     if (surface === undefined) throw new Error("no surface");
     renderSurface(surface, { thread: baseThread });
     await surface.open();
@@ -643,6 +929,7 @@ describe("thread actions menu trigger", () => {
   it("reports a trigger that replaces the host's classes", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const [surface] = SURFACES;
+
     if (surface === undefined) throw new Error("no surface");
     renderSurface(
       {
@@ -668,6 +955,7 @@ describe("thread actions menu trigger", () => {
   it("keeps the host's classes on a trigger that merges them", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const [surface] = SURFACES;
+
     if (surface === undefined) throw new Error("no surface");
     renderSurface(surface, { thread: baseThread });
     expect(
@@ -681,6 +969,7 @@ describe("thread actions menu trigger", () => {
   it("reports a trigger that drops the props and ref it receives", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const [surface] = SURFACES;
+
     if (surface === undefined) throw new Error("no surface");
     renderSurface(
       {
@@ -705,6 +994,69 @@ describe("thread actions menu trigger", () => {
   });
 });
 
+it("resolves migrated row preferences against the actual core registry and executes Pin", async () => {
+  const input = ["core/pin", "core/copyLink", "omnyo--core/archive"];
+  const original = [...input];
+  sdkThreads.pin.mockResolvedValue({ ...baseThread, pinnedAt: 9 });
+  const completion: { current: Promise<void> | null } = { current: null };
+  const parsed = parseStoredPreferenceValue("rowActions", input);
+
+  if (!parsed.success) throw new Error(parsed.message);
+  const keys = parsed.value;
+
+  function ImportedPreferenceActions({ thread }: { thread: ThreadListEntry }) {
+    const entries = useThreadActionEntries(
+      threadListEntryActionTarget(thread),
+      { keys },
+    );
+
+    return (
+      <div>
+        {entries.map((entry) => (
+          <button
+            key={entry.key}
+            type="button"
+            onClick={() => {
+              completion.current = entry.action.run();
+            }}
+          >
+            {entry.action.label}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  const [surface] = SURFACES;
+
+  if (surface === undefined) throw new Error("no surface");
+  renderSurface(
+    {
+      ...surface,
+      render: ({ thread }) => <ImportedPreferenceActions thread={thread} />,
+    },
+    { thread: baseThread },
+  );
+  const pin = await screen.findByRole("button", { name: "Pin" });
+  expect(keys).toEqual([
+    "omnyo--core/pin",
+    "omnyo--core/copyLink",
+    "omnyo--core/archive",
+  ]);
+  expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Archive" })).toBeTruthy();
+  fireEvent.click(pin);
+  const settled = completion.current;
+
+  if (settled === null) throw new Error("Pin action did not run");
+  await act(() => settled);
+  await waitFor(() =>
+    expect(sdkThreads.pin).toHaveBeenCalledWith({ threadId: baseThread.id }),
+  );
+  expect(recordedHistory().peek("undo")?.label).toMatch(/^Pin /);
+  expect(input).toEqual(original);
+});
+
 describe("thread action registrations", () => {
   function RegistrationList() {
     return (
@@ -718,6 +1070,7 @@ describe("thread action registrations", () => {
 
   it("lists every registration in menu order, independent of any thread", () => {
     const [surface] = SURFACES;
+
     if (surface === undefined) throw new Error("no surface");
     renderSurface(
       { ...surface, render: () => <RegistrationList /> },
@@ -726,25 +1079,70 @@ describe("thread action registrations", () => {
     expect(
       screen.getAllByRole("listitem").map((item) => item.textContent),
     ).toEqual([
-      "bb--core/split",
-      "bb--core/newThreadInEnvironment",
-      "bb--core/copyLink",
-      "bb--core/read",
-      "bb--core/pin",
+      "omnyo--core/split",
+      "omnyo--core/newThreadInEnvironment",
+      "omnyo--core/copyLink",
+      "omnyo--core/rename",
+      "omnyo--core/pin",
+      "omnyo--core/read",
+      "omnyo--core/moveToGroup",
       "fixture/move",
-      "bb--core/rename",
-      "bb--core/archive",
-      "bb--core/delete",
+      "omnyo--core/shelve",
+      "omnyo--core/archive",
+      "omnyo--core/delete",
       "fixture/notify",
     ]);
   });
 });
 
-describe("thread actions outside bb's own surfaces", () => {
+describe("chat selection in the context menu", () => {
+  const surface = SURFACES.find(
+    (candidate) => candidate.name === "desktop context menu",
+  );
+
+  if (surface === undefined) throw new Error("no desktop context menu");
+
+  afterEach(() => setChatSelection([]));
+
+  it("offers grouping when the chat is part of a multi-selection", async () => {
+    setChatSelection([baseThread.id, "thr_other"]);
+    renderSurface(surface, { thread: baseThread });
+
+    await surface.open();
+    const menu = await openMenu();
+
+    expect(
+      within(menu).getByRole("menuitem", { name: "Group 2 chats" }),
+    ).toBeTruthy();
+    expect(within(menu).queryByRole("menuitem", { name: "Rename" })).toBeNull();
+
+    fireEvent.click(
+      within(menu).getByRole("menuitem", { name: "Clear selection" }),
+    );
+
+    expect(getChatSelection()).toEqual([]);
+  });
+
+  it("keeps the chat's own menu when it is outside the selection", async () => {
+    setChatSelection(["thr_a", "thr_b"]);
+    renderSurface(surface, { thread: baseThread });
+
+    await surface.open();
+    const menu = await openMenu();
+
+    expect(within(menu).getByRole("menuitem", { name: "Rename" })).toBeTruthy();
+    expect(
+      within(menu).queryByRole("menuitem", { name: /^Group \d+ chats$/ }),
+    ).toBeNull();
+  });
+});
+
+describe("thread actions outside Omnyo's own surfaces", () => {
   const [surface] = SURFACES;
+
   if (surface === undefined) throw new Error("no surface");
 
-  it("fetches a thread bb has not cached before archiving or deleting it", async () => {
+  it("fetches a thread Omnyo has not cached before archiving or deleting it", async () => {
     sdkThreads.get.mockResolvedValue(baseThread);
     renderSurface(surface, { thread: baseThread }, { cached: false });
 
@@ -769,10 +1167,13 @@ describe("thread actions outside bb's own surfaces", () => {
   it("opens a plugin's thread panel in the focused thread view", async () => {
     const opener = vi.fn(() => true);
     const opened = vi.fn();
+
     function FocusedThreadView() {
       usePublishThreadPanelOpener(opener, true);
+
       return null;
     }
+
     render(<FocusedThreadView />);
     renderSurface(
       surface,
@@ -809,16 +1210,23 @@ describe("thread actions outside bb's own surfaces", () => {
 });
 
 describe("thread action data input", () => {
+  const rowRenders = { count: 0 };
+
   function Row({ id }: { id: string }) {
+    rowRenders.count += 1;
     useThreadActionEntries(
       threadListEntryActionTarget({ ...baseThread, id }),
       {},
     );
+
     return null;
   }
 
+  const MemoRow = memo(Row);
+
   function renderRecorder() {
     const seen: (readonly string[])[] = [];
+
     const recorder: PluginThreadActionRegistration<null> = {
       id: "recorder",
       title: "Recorder",
@@ -826,15 +1234,18 @@ describe("thread action data input", () => {
       group: "5_plugin",
       useData: ({ threadIds }) => {
         if (seen.at(-1) !== threadIds) seen.push(threadIds);
+
         return null;
       },
       item: () => null,
     };
+
     setPluginSlotRegistrations(
       "fixture",
       makePluginRegistrationSet({ threadActions: [recorder] }),
     );
     const queryClient = new QueryClient();
+
     function Surface({
       ids,
       visible = true,
@@ -844,20 +1255,23 @@ describe("thread action data input", () => {
     }) {
       return (
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <ThreadActionCollectors
-              coreRegistrations={[]}
-              requestRename={defaultRequestRename}
-            />
-            <ThreadActionSurfaceVisibility visible={visible}>
-              {ids.map((id, index) => (
-                <Row key={`${id}-${index}`} id={id} />
-              ))}
-            </ThreadActionSurfaceVisibility>
-          </MemoryRouter>
+          <ActionHistoryProvider>
+            <MemoryRouter>
+              <ThreadActionCollectors
+                coreRegistrations={[]}
+                requestRename={defaultRequestRename}
+              />
+              <ThreadActionSurfaceVisibility visible={visible}>
+                {ids.map((id, index) => (
+                  <MemoRow key={`${id}-${index}`} id={id} />
+                ))}
+              </ThreadActionSurfaceVisibility>
+            </MemoryRouter>
+          </ActionHistoryProvider>
         </QueryClientProvider>
       );
     }
+
     return { seen, Surface };
   }
 
@@ -883,6 +1297,20 @@ describe("thread action data input", () => {
     view.rerender(<Surface ids={["thr_a", "thr_b", "thr_c"]} />);
     await settle();
     expect(seen).toEqual([[], ["thr_a", "thr_b", "thr_c"]]);
+  });
+
+  it("releases and restores ids on a visibility change without re-rendering rows", async () => {
+    const { seen, Surface } = renderRecorder();
+    const ids = ["thr_a", "thr_b"];
+    const view = render(<Surface ids={ids} />);
+    await waitFor(() => expect(seen.at(-1)).toEqual(ids));
+    await settle();
+    const rendersBefore = rowRenders.count;
+    view.rerender(<Surface ids={ids} visible={false} />);
+    await waitFor(() => expect(seen.at(-1)).toEqual([]));
+    view.rerender(<Surface ids={ids} visible />);
+    await waitFor(() => expect(seen.at(-1)).toEqual(ids));
+    expect(rowRenders.count).toBe(rendersBefore);
   });
 
   it("counts no ids from a hidden surface until it is shown", async () => {

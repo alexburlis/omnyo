@@ -2,24 +2,30 @@ import {
   publicApiRoutes,
   typedRoutes,
   type PublicApiSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { Hono } from "hono";
 import { ApiError } from "../errors.js";
+import { callHostOnlineRpc } from "../services/hosts/online-rpc.js";
 import type { AppDeps } from "../types.js";
+
+const TERMINAL_FOREGROUND_TIMEOUT_MS = 5_000;
 
 export function registerTerminalRoutes(app: Hono, deps: AppDeps): void {
   const { get, patch, post } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
+
   const routes = publicApiRoutes.terminals;
 
   get(routes.list, (context, query) => {
     const sessions = deps.terminalSessions.listTerminals({ query });
+
     return context.json({ sessions });
   });
 
   post(routes.create, async (context, payload) => {
     const session = await deps.terminalSessions.createTerminal({ payload });
+
     return context.json(session, 201);
   });
 
@@ -27,6 +33,7 @@ export function registerTerminalRoutes(app: Hono, deps: AppDeps): void {
     const session = deps.terminalSessions.getTerminal({
       terminalId: context.req.param("terminalId"),
     });
+
     return context.json(session);
   });
 
@@ -35,6 +42,7 @@ export function registerTerminalRoutes(app: Hono, deps: AppDeps): void {
       payload,
       terminalId: context.req.param("terminalId"),
     });
+
     return context.json(session);
   });
 
@@ -42,6 +50,7 @@ export function registerTerminalRoutes(app: Hono, deps: AppDeps): void {
     const session = await deps.terminalSessions.restartTerminal({
       terminalId: context.req.param("terminalId"),
     });
+
     return context.json(session, 201);
   });
 
@@ -50,6 +59,7 @@ export function registerTerminalRoutes(app: Hono, deps: AppDeps): void {
       payload,
       terminalId: context.req.param("terminalId"),
     });
+
     return context.json(session);
   });
 
@@ -58,6 +68,7 @@ export function registerTerminalRoutes(app: Hono, deps: AppDeps): void {
       payload,
       terminalId: context.req.param("terminalId"),
     });
+
     return context.json(session);
   });
 
@@ -66,7 +77,24 @@ export function registerTerminalRoutes(app: Hono, deps: AppDeps): void {
       payload,
       terminalId: context.req.param("terminalId"),
     });
+
     return context.json(session);
+  });
+
+  get(routes.foreground, async (context) => {
+    const session = deps.terminalSessions.getTerminal({
+      terminalId: context.req.param("terminalId"),
+    });
+
+    if (session.status !== "running") return context.json({ state: "idle" });
+
+    const foreground = await callHostOnlineRpc(deps, {
+      hostId: session.hostId,
+      timeoutMs: TERMINAL_FOREGROUND_TIMEOUT_MS,
+      command: { type: "terminal.foreground", terminalId: session.id },
+    });
+
+    return context.json(foreground);
   });
 
   get(routes.output, async (context, query) => {
@@ -74,6 +102,7 @@ export function registerTerminalRoutes(app: Hono, deps: AppDeps): void {
       query,
       terminalId: context.req.param("terminalId"),
     });
+
     return context.json(output);
   });
 }

@@ -3,7 +3,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   PaneContext,
   type PaneContextValue,
@@ -37,7 +37,7 @@ interface RenderRootComposeArgs {
 }
 
 type TestDesktopWindow = {
-  bbDesktop?: { platform: "macos" };
+  omnyoDesktop?: { platform: "macos" };
 };
 
 const panelGroupState = vi.hoisted(() => ({
@@ -48,11 +48,11 @@ const panelGroupState = vi.hoisted(() => ({
 const noop = () => {};
 
 function setMacosDesktopChrome(): void {
-  (window as unknown as TestDesktopWindow).bbDesktop = { platform: "macos" };
+  (window as unknown as TestDesktopWindow).omnyoDesktop = { platform: "macos" };
 }
 
 function clearDesktopChrome(): void {
-  delete (window as unknown as TestDesktopWindow).bbDesktop;
+  delete (window as unknown as TestDesktopWindow).omnyoDesktop;
 }
 
 vi.mock("jotai", async (importOriginal) => ({
@@ -73,6 +73,7 @@ vi.mock("react-resizable-panels", async () => {
         }),
         [],
       );
+
       return React.createElement(
         "div",
         { "data-testid": "panel-group" },
@@ -80,6 +81,7 @@ vi.mock("react-resizable-panels", async () => {
       );
     },
   );
+
   PanelGroup.displayName = "MockPanelGroup";
 
   const Panel = ({ children }: PanelProps) =>
@@ -88,10 +90,13 @@ vi.mock("react-resizable-panels", async () => {
   return { Panel, PanelGroup };
 });
 
-vi.mock("@bb/shared-ui/responsive-overlay", async (importOriginal) => {
+vi.mock("@omnyo/shared-ui/responsive-overlay", async (importOriginal) => {
   const React = await import("react");
+
   const actual =
-    await importOriginal<typeof import("@bb/shared-ui/responsive-overlay")>();
+    await importOriginal<
+      typeof import("@omnyo/shared-ui/responsive-overlay")
+    >();
 
   const PersistentResponsiveDrawerShell = ({
     children,
@@ -143,6 +148,7 @@ vi.mock("@/components/secondary-panel/ThreadSecondaryPanel", async () => {
 
 vi.mock("@/components/plugin/PluginHomepageSections", async () => {
   const React = await import("react");
+
   return {
     PluginHomepageSections: () =>
       React.createElement("div", { "data-testid": "plugin-homepage-sections" }),
@@ -172,6 +178,7 @@ function withPaneContext(
   isTopRow: boolean | undefined,
 ): ReactNode {
   if (isTopRow === undefined) return children;
+
   const value: PaneContextValue = {
     paneId: "pane-test",
     isFocused: true,
@@ -186,17 +193,18 @@ function withPaneContext(
     ownsWindowTopLeft: isTopRow,
     navigateInPane: noop,
   };
+
   return <PaneContext.Provider value={value}>{children}</PaneContext.Provider>;
 }
 
 function renderRootCompose(args: RenderRootComposeArgs) {
   let renderArgs = args;
+
   const content = (
     <CompactViewportOverrideProvider
       isCompactViewport={renderArgs.isCompactViewport}
     >
       <RootComposeSecondaryContent
-        compactScrollContent={null}
         isCompactHomeLayout={false}
         isSecondaryPanelOpen={renderArgs.isSecondaryPanelOpen}
         onToggleSecondaryPanel={() => undefined}
@@ -206,18 +214,19 @@ function renderRootCompose(args: RenderRootComposeArgs) {
       </RootComposeSecondaryContent>
     </CompactViewportOverrideProvider>
   );
+
   const view = render(withPaneContext(content, renderArgs.isTopRow));
 
   return {
     ...view,
     rerenderWith(nextArgs: Partial<RenderRootComposeArgs>) {
       renderArgs = { ...renderArgs, ...nextArgs };
+
       const nextContent = (
         <CompactViewportOverrideProvider
           isCompactViewport={renderArgs.isCompactViewport}
         >
           <RootComposeSecondaryContent
-            compactScrollContent={null}
             isCompactHomeLayout={false}
             isSecondaryPanelOpen={renderArgs.isSecondaryPanelOpen}
             onToggleSecondaryPanel={() => undefined}
@@ -229,6 +238,7 @@ function renderRootCompose(args: RenderRootComposeArgs) {
           </RootComposeSecondaryContent>
         </CompactViewportOverrideProvider>
       );
+
       view.rerender(withPaneContext(nextContent, renderArgs.isTopRow));
     },
   };
@@ -297,6 +307,7 @@ describe("RootComposeSecondaryContent desktop layout", () => {
     expect(cutout.parentElement).toBe(strip);
     expect(cutout.className).toContain("[app-region:no-drag]");
     expect(cutout.className).toContain("[-webkit-app-region:no-drag]");
+
     for (const positionClass of ROOT_COMPOSE_PINNED_PANEL_TOGGLE_POSITION_CLASS.split(
       " ",
     )) {
@@ -342,6 +353,7 @@ describe("RootComposeSecondaryContent desktop layout", () => {
 
   it("shows the root fallback before realizing compact drawer content", async () => {
     vi.useFakeTimers();
+
     try {
       renderRootCompose({
         isCompactViewport: true,

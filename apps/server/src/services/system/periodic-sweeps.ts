@@ -1,3 +1,6 @@
+import { runEventSourcePoll } from "../inbox/event-source-runner.js";
+import { runInboxSweep } from "../inbox/sweep.js";
+import { performance } from "node:perf_hooks";
 import {
   runThreadPruningSweep,
   THREAD_PRUNING_SWEEP_LIMITS,
@@ -17,16 +20,12 @@ import { and, eq, isNull, isNotNull, inArray } from "drizzle-orm";
 import { sweepMachineLifecycles } from "../machines/provider-orchestration.js";
 import {
   CLOSED_SESSION_ROW_RETENTION_MS,
-  compactDatabase,
-  DATABASE_COMPACTION_MIN_RECLAIMABLE_BYTES,
-  DATABASE_COMPACTION_MIN_RECLAIMABLE_RATIO,
   DATABASE_INCREMENTAL_VACUUM_MAX_PAGES,
   DATABASE_INCREMENTAL_VACUUM_MIN_FREELIST_PAGES,
   DEFAULT_CLOSED_SESSION_PRUNE_BATCH_SIZE,
   deleteExpiredRetainedEventOutputs,
   dropDeferredLegacyTables,
   getDatabaseAutoVacuumMode,
-  getDatabaseCompactionStats,
   getDatabaseFreelistStats,
   getDatabaseMaintenanceActivity,
   getEnvironment,
@@ -39,12 +38,12 @@ import {
   pruneClosedSessions,
   RETAINED_EVENT_OUTPUT_TARGETS,
   runIncrementalVacuum,
-  shouldCompactDatabase,
   shouldRunIncrementalVacuum,
   threads,
   DEFAULT_COMPLETED_EVENT_OUTPUT_MIGRATION_SCAN_LIMIT,
   DEFAULT_LEGACY_IMAGE_GENERATION_MIGRATION_SCAN_LIMIT,
-} from "@bb/db";
+  type DbConnection,
+} from "@omnyo/db";
 import type {
   AppDeps,
   LoggedPendingInteractionWorkSessionDeps,
@@ -59,6 +58,7 @@ import {
   hasLiveThreadStartInFlight,
   requestThreadStopForCurrentState,
   requestThreadStorageDeletion,
+  stopRunsWhoseTurnNeverStarted,
 } from "../threads/thread-lifecycle.js";
 import {
   archiveUndoGraceKeepsTerminals,
@@ -70,7 +70,10 @@ import {
   type QueueWaitPluginDirectory,
 } from "../threads/queued-message-dispatch.js";
 import { deliverLegacyDeferredThreadMessages } from "../threads/legacy-deferred-messages.js";
+import { releaseOrphanedQueuedMessageDispatchClaims } from "../threads/queued-messages.js";
 import { runEventLoopWork, runEventLoopWorkSync } from "./event-loop-work.js";
+import { purgeHistoryCacheThread } from "../threads/history-cache-writer.js";
+import { createAutoCompactionSweep } from "../threads/auto-compaction.js";
 
 type DatabaseMaintenanceSweepDeps = Pick<AppDeps, "db" | "logger">;
 
@@ -80,14 +83,77 @@ interface PluginScheduleSweeper {
 
 type PeriodicSweepDeps = LoggedPendingInteractionWorkSessionDeps & {
   pluginSchedules: PluginScheduleSweeper;
-  /** Liveness directory for `plugin:<id>` wait holders. */
+
   plugins: QueueWaitPluginDirectory;
 };
 
 const DATABASE_MAINTENANCE_CHECK_INTERVAL_MS = 60 * 60_000;
+
+const DATABASE_INCREMENTAL_VACUUM_CHUNK_PAGES = 64;
+
+const DELETED_THREAD_HISTORY_PURGE_BUDGET_MS = 200;
+
 const COMPLETED_EVENT_OUTPUT_MIGRATION_MAX_ADVANCES_PER_SWEEP = 64;
+
 const RETAINED_EVENT_OUTPUT_EXPIRY_MAX_ADVANCES_PER_SWEEP = 256;
+
 const RETAINED_EVENT_OUTPUT_EXPIRY_BATCH_SIZE = 1;
+
+const RETENTION_TRANSACTION_MAX_ADVANCES = 8;
+
+const RETENTION_TRANSACTION_MAX_BYTES = 256 * 1024;
+
+const RETENTION_TRANSACTION_BUDGET_MS = 5;
+
+interface RetentionAdvance {
+  bytes: number;
+  complete: boolean;
+  threadIds: readonly string[];
+}
+
+function runRetentionBatch(
+  db: DbConnection,
+  maxAdvances: number,
+  advance: () => RetentionAdvance,
+) {
+  const startedAt = performance.now();
+
+  return db.transaction(
+    () => {
+      const threadIds = new Set<string>();
+      let advances = 0;
+      let bytes = 0;
+      let complete = false;
+
+      while (
+        advances < Math.min(maxAdvances, RETENTION_TRANSACTION_MAX_ADVANCES)
+      ) {
+        const result = advance();
+        advances += 1;
+        bytes += result.bytes;
+        complete = result.complete;
+
+        for (const threadId of result.threadIds) threadIds.add(threadId);
+
+        if (
+          complete ||
+          bytes >= RETENTION_TRANSACTION_MAX_BYTES ||
+          performance.now() - startedAt >= RETENTION_TRANSACTION_BUDGET_MS
+        )
+          break;
+      }
+
+      return { advances, complete, threadIds };
+    },
+    { behavior: "immediate" },
+  );
+}
+
+const INBOX_EVENT_SOURCE_SWEEP_CADENCE_MS = 10_000;
+
+const AUTO_COMPACTION_SWEEP_CADENCE_MS = 60_000;
+
+const autoCompactionSweep = createAutoCompactionSweep();
 
 type PeriodicSweepJobCategory =
   | "retention"
@@ -109,12 +175,38 @@ interface PeriodicSweepJobState {
 }
 
 type PeriodicSweepJobList = readonly PeriodicSweepJob[];
+
 const periodicSweepJobStates = new Map<string, PeriodicSweepJobState>();
+
+async function purgeCompactedThreadHistories(
+  deps: Pick<AppDeps, "db" | "hub">,
+  threadIds: ReadonlySet<string>,
+): Promise<void> {
+  const failures: unknown[] = [];
+
+  for (const threadId of threadIds)
+    deps.hub.notifyThread(threadId, ["history-compacted"]);
+
+  for (const threadId of threadIds) {
+    try {
+      await purgeHistoryCacheThread(deps.db, threadId);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  if (failures.length > 0)
+    throw new AggregateError(
+      failures,
+      "Compacted history cache cleanup failed",
+    );
+}
 
 function getPeriodicSweepJobState(
   job: PeriodicSweepJob,
 ): PeriodicSweepJobState {
   const existing = periodicSweepJobStates.get(job.name);
+
   if (existing) {
     return existing;
   }
@@ -123,7 +215,9 @@ function getPeriodicSweepJobState(
     lastStartedAt: 0,
     running: false,
   };
+
   periodicSweepJobStates.set(job.name, created);
+
   return created;
 }
 
@@ -133,11 +227,13 @@ async function runPeriodicSweepJob(
   now: number,
 ): Promise<void> {
   const state = getPeriodicSweepJobState(job);
+
   if (state.running) {
     deps.logger.debug(
       { sweepJob: job.name, sweepJobCategory: job.category },
       "Periodic sweep job skipped while already running",
     );
+
     return;
   }
 
@@ -147,6 +243,7 @@ async function runPeriodicSweepJob(
 
   state.lastStartedAt = now;
   state.running = true;
+
   try {
     await runEventLoopWork(`sweep:${job.name}`, () => job.run(deps, now));
   } catch (error) {
@@ -173,17 +270,55 @@ export async function runPeriodicSweepJobs(
   }
 }
 
-export function runDatabaseMaintenanceSweep(
+async function runChunkedIncrementalVacuum(
+  db: DatabaseMaintenanceSweepDeps["db"],
+): Promise<ReturnType<typeof runIncrementalVacuum>> {
+  let first: ReturnType<typeof runIncrementalVacuum> | null = null;
+  let last: ReturnType<typeof runIncrementalVacuum> | null = null;
+
+  for (
+    let vacuumedPages = 0;
+    vacuumedPages < DATABASE_INCREMENTAL_VACUUM_MAX_PAGES;
+    vacuumedPages += DATABASE_INCREMENTAL_VACUUM_CHUNK_PAGES
+  ) {
+    if (last !== null) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    last = runIncrementalVacuum(db, {
+      maxPages: Math.min(
+        DATABASE_INCREMENTAL_VACUUM_CHUNK_PAGES,
+        DATABASE_INCREMENTAL_VACUUM_MAX_PAGES - vacuumedPages,
+      ),
+    });
+    first ??= last;
+
+    if (last.after.freelistCount === 0) {
+      break;
+    }
+  }
+
+  if (first === null || last === null) {
+    throw new Error("Incremental vacuum ran no chunks");
+  }
+
+  return { before: first.before, after: last.after };
+}
+
+export async function runDatabaseMaintenanceSweep(
   deps: DatabaseMaintenanceSweepDeps,
-): void {
+): Promise<void> {
   const deferredLegacyTables = listDeferredLegacyTables(deps.db);
+
   if (deferredLegacyTables.length > 0) {
     const activity = getDatabaseMaintenanceActivity(deps.db);
+
     if (!isDatabaseMaintenanceIdle(activity)) {
       deps.logger.debug(
         { activity, deferredLegacyTables },
         "Deferred legacy database table cleanup skipped while app work is active",
       );
+
       return;
     }
 
@@ -199,65 +334,35 @@ export function runDatabaseMaintenanceSweep(
         "Deferred legacy database table cleanup failed",
       );
     }
+
     return;
   }
 
-  const autoVacuumMode = getDatabaseAutoVacuumMode(deps.db);
-
-  if (autoVacuumMode === "incremental") {
-    const freelistStats = getDatabaseFreelistStats(deps.db);
-    if (
-      !shouldRunIncrementalVacuum({
-        minFreelistPages: DATABASE_INCREMENTAL_VACUUM_MIN_FREELIST_PAGES,
-        stats: freelistStats,
-      })
-    ) {
-      deps.logger.debug(
-        { freelistStats },
-        "Incremental database vacuum skipped below freelist threshold",
-      );
-      return;
-    }
-    try {
-      const result = runIncrementalVacuum(deps.db, {
-        maxPages: DATABASE_INCREMENTAL_VACUUM_MAX_PAGES,
-      });
-      deps.logger.info({ result }, "Incremental database vacuum completed");
-    } catch (error) {
-      deps.logger.warn({ err: error }, "Incremental database vacuum failed");
-    }
+  if (getDatabaseAutoVacuumMode(deps.db) !== "incremental") {
     return;
   }
 
-  const activity = getDatabaseMaintenanceActivity(deps.db);
-  if (!isDatabaseMaintenanceIdle(activity)) {
-    deps.logger.debug(
-      { activity },
-      "Database maintenance skipped while app work is active",
-    );
-    return;
-  }
+  const freelistStats = getDatabaseFreelistStats(deps.db);
 
-  const stats = getDatabaseCompactionStats(deps.db);
   if (
-    !shouldCompactDatabase({
-      minReclaimableBytes: DATABASE_COMPACTION_MIN_RECLAIMABLE_BYTES,
-      minReclaimableRatio: DATABASE_COMPACTION_MIN_RECLAIMABLE_RATIO,
-      stats,
+    !shouldRunIncrementalVacuum({
+      minFreelistPages: DATABASE_INCREMENTAL_VACUUM_MIN_FREELIST_PAGES,
+      stats: freelistStats,
     })
   ) {
     deps.logger.debug(
-      { stats },
-      "Database maintenance skipped below compaction threshold",
+      { freelistStats },
+      "Incremental database vacuum skipped below freelist threshold",
     );
+
     return;
   }
 
   try {
-    const result = compactDatabase(deps.db);
-    deps.logger.info({ result }, "Database compaction completed");
+    const result = await runChunkedIncrementalVacuum(deps.db);
+    deps.logger.info({ result }, "Incremental database vacuum completed");
   } catch (error) {
-    deps.logger.warn({ err: error }, "Database compaction failed");
+    deps.logger.warn({ err: error }, "Incremental database vacuum failed");
   }
 }
 
@@ -323,6 +428,7 @@ async function runThreadProvisioningOrphanCleanupSweep(
       if (hasLiveThreadStartInFlight(thread.id)) {
         continue;
       }
+
       await advanceThreadProvisioning(deps, {
         threadId: thread.id,
       });
@@ -336,15 +442,18 @@ async function runThreadProvisioningOrphanCleanupSweep(
       );
     }
   }
+
   for (const thread of listArchivedThreadsPendingTeardown(deps.db)) {
     if (!archiveUndoGraceKeepsTerminals(thread, now)) {
       deps.terminalSessions.closeArchivedThreadTerminals({
         threadId: thread.id,
       });
     }
+
     if (archiveUndoGraceKeepsTurnRunning(thread, now)) {
       continue;
     }
+
     requestThreadStopForCurrentState(
       deps,
       thread,
@@ -353,6 +462,7 @@ async function runThreadProvisioningOrphanCleanupSweep(
         : null,
     );
   }
+
   const deletedThreads = deps.db
     .select({
       environmentId: threads.environmentId,
@@ -362,15 +472,30 @@ async function runThreadProvisioningOrphanCleanupSweep(
     .from(threads)
     .where(isNotNull(threads.deletedAt))
     .all();
+
+  const purgeStartedAt = performance.now();
+  let purged = 0;
+
   for (const thread of deletedThreads) {
     deps.terminalSessions.closeDeletedThreadTerminals({ threadId: thread.id });
+
     if (thread.storageDeletedAt !== null) {
+      if (
+        purged > 0 &&
+        performance.now() - purgeStartedAt >=
+          DELETED_THREAD_HISTORY_PURGE_BUDGET_MS
+      )
+        continue;
+      purged += 1;
+      await purgeHistoryCacheThread(deps.db, thread.id);
       finalizeStoppedThread(deps, { threadId: thread.id });
       continue;
     }
+
     const environment = thread.environmentId
       ? getEnvironment(deps.db, thread.environmentId)
       : null;
+
     requestThreadStorageDeletion(deps, thread, environment);
   }
 }
@@ -389,89 +514,122 @@ async function runMachineAuthPruneSweep(
   await deps.machineAuth.pruneExpiredKeys();
 }
 
-async function runCompletedEventOutputMigrationSweep(
-  deps: LoggedPendingInteractionWorkSessionDeps,
+export async function runCompletedEventOutputMigrationSweep(
+  deps: Pick<AppDeps, "db" | "hub">,
   now: number,
 ): Promise<void> {
   const migrationTargetCount = RETAINED_EVENT_OUTPUT_TARGETS.length + 1;
   const exhaustedTargets = new Set<number>();
   const changedThreadIds = new Set<string>();
   let targetIndex = 0;
+
   try {
     for (
       let advance = 0;
       advance < COMPLETED_EVENT_OUTPUT_MIGRATION_MAX_ADVANCES_PER_SWEEP &&
       exhaustedTargets.size < migrationTargetCount;
-      advance += 1
     ) {
-      while (exhaustedTargets.has(targetIndex)) {
-        targetIndex = (targetIndex + 1) % migrationTargetCount;
-      }
-      const result = runEventLoopWorkSync(
-        "sweep:completed-event-output-migration:advance",
+      const batch = runRetentionBatch(
+        deps.db,
+        COMPLETED_EVENT_OUTPUT_MIGRATION_MAX_ADVANCES_PER_SWEEP - advance,
         () => {
-          const target = RETAINED_EVENT_OUTPUT_TARGETS[targetIndex];
-          return target
-            ? migrateNextCompletedEventItemOutput(deps.db, {
-                ...target,
-                limit: DEFAULT_COMPLETED_EVENT_OUTPUT_MIGRATION_SCAN_LIMIT,
-                migratedAt: now,
-              })
-            : migrateNextLegacyImageGenerationOutput(deps.db, {
-                limit: DEFAULT_LEGACY_IMAGE_GENERATION_MIGRATION_SCAN_LIMIT,
-                migratedAt: now,
-              });
+          while (exhaustedTargets.has(targetIndex)) {
+            targetIndex = (targetIndex + 1) % migrationTargetCount;
+          }
+
+          const result = runEventLoopWorkSync(
+            "sweep:completed-event-output-migration:advance",
+            () => {
+              const target = RETAINED_EVENT_OUTPUT_TARGETS[targetIndex];
+
+              return target
+                ? migrateNextCompletedEventItemOutput(deps.db, {
+                    ...target,
+                    limit: DEFAULT_COMPLETED_EVENT_OUTPUT_MIGRATION_SCAN_LIMIT,
+                    migratedAt: now,
+                  })
+                : migrateNextLegacyImageGenerationOutput(deps.db, {
+                    limit: DEFAULT_LEGACY_IMAGE_GENERATION_MIGRATION_SCAN_LIMIT,
+                    migratedAt: now,
+                  });
+            },
+          );
+
+          const threadIds: string[] = [];
+
+          if (result.action === "migrated") {
+            if (!result.threadId) {
+              throw new Error("Migrated completed output has no thread");
+            }
+
+            threadIds.push(result.threadId);
+          } else if (result.action === "complete" || result.action === "idle") {
+            exhaustedTargets.add(targetIndex);
+          }
+
+          targetIndex = (targetIndex + 1) % migrationTargetCount;
+
+          return {
+            bytes: result.migratedBytes,
+            complete: exhaustedTargets.size === migrationTargetCount,
+            threadIds,
+          };
         },
       );
-      if (result.action === "migrated") {
-        if (!result.threadId) {
-          throw new Error("Migrated completed output has no thread");
-        }
-        changedThreadIds.add(result.threadId);
-      } else if (result.action === "complete" || result.action === "idle") {
-        exhaustedTargets.add(targetIndex);
-      }
-      targetIndex = (targetIndex + 1) % migrationTargetCount;
+
+      advance += batch.advances;
+
+      for (const threadId of batch.threadIds) changedThreadIds.add(threadId);
+
+      if (batch.complete) break;
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
   } finally {
-    for (const threadId of changedThreadIds) {
-      deps.hub.notifyThread(threadId, ["history-compacted"]);
-    }
+    await purgeCompactedThreadHistories(deps, changedThreadIds);
   }
 }
 
-async function runRetainedEventOutputExpirySweep(
-  deps: LoggedPendingInteractionWorkSessionDeps,
+export async function runRetainedEventOutputExpirySweep(
+  deps: Pick<AppDeps, "db" | "hub">,
   now: number,
 ): Promise<void> {
   const changedThreadIds = new Set<string>();
+
   try {
     for (
       let advance = 0;
       advance < RETAINED_EVENT_OUTPUT_EXPIRY_MAX_ADVANCES_PER_SWEEP;
-      advance += 1
     ) {
-      const { deleted, threadIds } = runEventLoopWorkSync(
-        "sweep:retained-event-output-expiry:delete",
-        () =>
-          deleteExpiredRetainedEventOutputs(deps.db, {
-            expiredAtOrBefore: now,
-            limit: RETAINED_EVENT_OUTPUT_EXPIRY_BATCH_SIZE,
-          }),
+      const batch = runRetentionBatch(
+        deps.db,
+        RETAINED_EVENT_OUTPUT_EXPIRY_MAX_ADVANCES_PER_SWEEP - advance,
+        () => {
+          const result = runEventLoopWorkSync(
+            "sweep:retained-event-output-expiry:delete",
+            () =>
+              deleteExpiredRetainedEventOutputs(deps.db, {
+                expiredAtOrBefore: now,
+                limit: RETAINED_EVENT_OUTPUT_EXPIRY_BATCH_SIZE,
+              }),
+          );
+
+          return {
+            bytes: result.deletedBytes,
+            complete: result.deleted === 0,
+            threadIds: result.threadIds,
+          };
+        },
       );
-      for (const threadId of threadIds) {
-        changedThreadIds.add(threadId);
-      }
-      if (deleted === 0) {
-        break;
-      }
+
+      advance += batch.advances;
+
+      for (const threadId of batch.threadIds) changedThreadIds.add(threadId);
+
+      if (batch.complete) break;
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
   } finally {
-    for (const threadId of changedThreadIds) {
-      deps.hub.notifyThread(threadId, ["history-compacted"]);
-    }
+    await purgeCompactedThreadHistories(deps, changedThreadIds);
   }
 }
 
@@ -547,6 +705,12 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
   },
   {
     cadenceMs: 0,
+    category: "orphan-cleanup",
+    name: "turn-start-deadline",
+    run: stopRunsWhoseTurnNeverStarted,
+  },
+  {
+    cadenceMs: 0,
     category: "durable-intent-retry",
     name: "queued-message-auto-send",
     run: (deps, now) =>
@@ -561,6 +725,18 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
     name: "due-scheduled-queue-dispatch",
     run: (deps, now) =>
       runQueuedMessageDispatch(deps, { kind: "time-reached", now }),
+  },
+  {
+    cadenceMs: 0,
+    category: "durable-intent-retry",
+    name: "inbox-due-sweep",
+    run: (deps, now) => runInboxSweep(deps, now),
+  },
+  {
+    cadenceMs: INBOX_EVENT_SOURCE_SWEEP_CADENCE_MS,
+    category: "scheduler",
+    name: "inbox-event-sources",
+    run: (deps, now) => runEventSourcePoll(deps, now),
   },
   {
     cadenceMs: 0,
@@ -621,11 +797,29 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
     name: "thread-storage-orphan-cleanup",
     run: runThreadStorageOrphanSweep,
   },
+  {
+    cadenceMs: AUTO_COMPACTION_SWEEP_CADENCE_MS,
+    category: "scheduler",
+    name: "auto-compact-before-cache-expiry",
+    run: (deps, now) => autoCompactionSweep.run(deps, now),
+  },
 ];
 
 export async function runStartupRecoverySweep(
   deps: LoggedPendingInteractionWorkSessionDeps,
 ): Promise<void> {
+  const releasedClaims = releaseOrphanedQueuedMessageDispatchClaims(
+    deps,
+    Date.now(),
+  );
+
+  if (releasedClaims > 0) {
+    deps.logger.info(
+      { releasedClaims },
+      "Released queued message claims left by the previous server process",
+    );
+  }
+
   await deliverLegacyDeferredThreadMessages(deps);
   await runEnvironmentProvisioningSweep(deps);
   await runThreadLifecycleSweep(deps);

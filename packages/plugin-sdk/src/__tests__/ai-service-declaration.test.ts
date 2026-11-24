@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import { validatePluginAiServiceDeclaration } from "../internal/host-policy.js";
 
 const complete = async () => "a title";
+
 const transcribe = async () => "some words";
+
 const status = async () => ({ ready: true as const });
+
+const prepare = async () => {};
 
 describe("validatePluginAiServiceDeclaration", () => {
   it("normalizes a valid declaration to a frozen copy of the contract fields", () => {
@@ -15,14 +19,27 @@ describe("validatePluginAiServiceDeclaration", () => {
       // @ts-expect-error — a non-contract field is dropped, not carried.
       extra: true,
     });
+
     expect(normalized).toEqual({
       id: "acme-ai",
       displayName: "Acme AI",
       complete,
       transcribe: null,
       status,
+      experimental_prepare: null,
     });
     expect(Object.isFrozen(normalized)).toBe(true);
+  });
+
+  it("carries experimental_prepare when declared", () => {
+    expect(
+      validatePluginAiServiceDeclaration({
+        id: "acme-voice",
+        displayName: "Acme Voice",
+        transcribe,
+        experimental_prepare: prepare,
+      }),
+    ).toMatchObject({ transcribe, experimental_prepare: prepare });
   });
 
   it("accepts a transcribe-only service", () => {
@@ -61,7 +78,7 @@ describe("validatePluginAiServiceDeclaration", () => {
           complete,
         }),
       ).toThrow(
-        `AI service id "${id}" is reserved: bb uses "automatic" and "off" as selection modes. Choose another id.`,
+        `AI service id "${id}" is reserved: omnyo uses "automatic" and "off" as selection modes. Choose another id.`,
       );
     },
   );
@@ -108,5 +125,14 @@ describe("validatePluginAiServiceDeclaration", () => {
         status: { ready: true },
       }),
     ).toThrow(/status must be a function/u);
+    expect(() =>
+      validatePluginAiServiceDeclaration({
+        id: "acme-voice",
+        displayName: "Acme Voice",
+        transcribe,
+        // @ts-expect-error — experimental_prepare must be a function.
+        experimental_prepare: true,
+      }),
+    ).toThrow(/experimental_prepare must be a function/u);
   });
 });

@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ExperimentalVendorPluginRoots } from "@get-bb/plugin-sdk/host";
+import type { ExperimentalVendorPluginRoots } from "@omnyo/plugin-sdk/host";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveClaudeNativeRoots } from "./native-roots.js";
 
@@ -30,6 +30,7 @@ async function makeFixture(): Promise<Fixture> {
   const cwd = path.join(tempRoot, "workspace");
   await mkdir(homeDir, { recursive: true });
   await mkdir(cwd, { recursive: true });
+
   return { cwd, homeDir, claudeDir: path.join(homeDir, ".claude") };
 }
 
@@ -60,7 +61,7 @@ async function writePlugin(
 }
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), "bb-claude-native-roots-"));
+  tempRoot = await mkdtemp(path.join(tmpdir(), "omnyo-claude-native-roots-"));
 });
 
 afterEach(async () => {
@@ -200,12 +201,14 @@ describe("resolveClaudeNativeRoots contract filtering", () => {
   it("drops only the roots of a plugin whose name cannot be a name prefix", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fixture = await makeFixture();
+
     const cacheRoot = path.join(
       fixture.claudeDir,
       "plugins",
       "cache",
       "market",
     );
+
     const goodA = path.join(cacheRoot, "good-a", "1");
     const goodB = path.join(cacheRoot, "good-b", "1");
     const spaced = path.join(cacheRoot, "spaced", "1");
@@ -232,6 +235,7 @@ describe("resolveClaudeNativeRoots contract filtering", () => {
     await writePlugin(scoped, { name: "@scope/x" });
     await writePlugin(long, { name: "a".repeat(70) });
     await writePlugin(hidden, {});
+
     for (const root of [goodA, goodB, spaced, scoped, long, hidden]) {
       await mkdir(path.join(root, "skills"), { recursive: true });
       await mkdir(path.join(root, "commands"), { recursive: true });
@@ -251,6 +255,7 @@ describe("resolveClaudeNativeRoots contract filtering", () => {
     ]);
     expect(warn).toHaveBeenCalledTimes(8);
     const messages = warn.mock.calls.map(([message]) => String(message));
+
     for (const root of [spaced, scoped, long, hidden]) {
       for (const side of ["skills", "commands"]) {
         expect(

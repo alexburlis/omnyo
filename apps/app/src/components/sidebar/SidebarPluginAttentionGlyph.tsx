@@ -2,8 +2,8 @@ import { useEffect } from "react";
 import { useAtom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { Link } from "react-router-dom";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { getToolsOwnedCollectionRoutePath } from "@/components/tools/tools-navigation";
 import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar.js";
 import { usePluginList } from "@/hooks/queries/plugin-settings-queries";
@@ -14,7 +14,7 @@ import {
 import { createJsonLocalStorage } from "@/lib/browser-storage";
 
 const acknowledgedAttentionKeyAtom = atomWithStorage<string | null>(
-  "bb.sidebar.pluginAttentionAcknowledged",
+  "omnyo.sidebar.pluginAttentionAcknowledged",
   null,
   createJsonLocalStorage<string | null>(),
   { getOnInit: true },
@@ -30,9 +30,11 @@ export function SidebarPluginAttentionGlyph({
   const plugins = pluginsNeedingAttention(
     usePluginList({ enabled: true }).data?.plugins ?? [],
   );
+
   const [acknowledgedKey, setAcknowledgedKey] = useAtom(
     acknowledgedAttentionKeyAtom,
   );
+
   const key =
     plugins.length === 0
       ? null
@@ -48,6 +50,7 @@ export function SidebarPluginAttentionGlyph({
 
   if (key === null || key === acknowledgedKey) return null;
   const label = pluginAttentionLabel(plugins);
+
   return (
     <SidebarMenuItem className="shrink-0">
       <SidebarMenuButton

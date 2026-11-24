@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
-import { TooltipProvider } from "@bb/shared-ui/tooltip";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 import { useUpdateGeneralSettings } from "@/hooks/mutations/settings-mutations";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 
@@ -9,7 +9,20 @@ const OnboardingFlow = lazy(() =>
   })),
 );
 
-const ONBOARDING_SEEN_STORAGE_KEY = "bb.onboarding.seen";
+const ONBOARDING_SEEN_STORAGE_KEY = "omnyo.onboarding.seen";
+
+const ONBOARDING_SCREEN_CLASS =
+  "flex h-dvh w-full flex-col bg-background pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[var(--omnyo-safe-area-bottom,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)]";
+
+function OnboardingLoading() {
+  return (
+    <div className={ONBOARDING_SCREEN_CLASS}>
+      <p role="status" className="m-auto text-sm text-muted-foreground">
+        Opening Omnyo…
+      </p>
+    </div>
+  );
+}
 
 function readOnboardingSeen(): boolean {
   try {
@@ -44,18 +57,21 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   }
 
   if (settings === undefined) {
-    return seenBefore || configQuery.isError || configQuery.failureCount > 0
-      ? children
-      : null;
+    return seenBefore || configQuery.isError || configQuery.failureCount > 0 ? (
+      children
+    ) : (
+      <OnboardingLoading />
+    );
   }
 
   const firstRun = settings.onboardingCompletedAt === null && !firstRunClosed;
+
   if (!firstRun) return children;
 
   return (
     <TooltipProvider delayDuration={300} disableHoverableContent>
-      <div className="flex h-dvh w-full flex-col bg-background pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[var(--bb-safe-area-bottom,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)]">
-        <Suspense fallback={null}>
+      <Suspense fallback={<OnboardingLoading />}>
+        <div className={ONBOARDING_SCREEN_CLASS}>
           <OnboardingFlow
             initialStep="agent"
             entry={seenBefore ? "replay" : "first_run"}
@@ -67,8 +83,8 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
               });
             }}
           />
-        </Suspense>
-      </div>
+        </div>
+      </Suspense>
     </TooltipProvider>
   );
 }

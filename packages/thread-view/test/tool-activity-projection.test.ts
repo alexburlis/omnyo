@@ -122,6 +122,7 @@ function activeCommandMessage(
   state: ToolActivityProjectionState,
 ): EventProjectionCommandMessage | null {
   const { activeCell } = state.toolActivity;
+
   return activeCell?.kind === "command" ? activeCell : null;
 }
 
@@ -129,6 +130,7 @@ function activeDelegationMessage(
   state: ToolActivityProjectionState,
 ): EventProjectionDelegationMessage | null {
   const { activeCell } = state.toolActivity;
+
   return activeCell?.kind === "delegation" ? activeCell : null;
 }
 
@@ -230,6 +232,7 @@ function finalizedCommandStatusAfterError(
   beginCommand(state);
   endCommand(state, 2, status);
   endCommand(state, 3, "error");
+
   return commandMessages(state).map((message) => message.status);
 }
 

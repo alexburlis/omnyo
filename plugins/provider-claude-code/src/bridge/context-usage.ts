@@ -4,10 +4,12 @@ import {
   type ContextCategory,
   type ContextEntry,
   type ContextSnapshot,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 
 const tokens = z.number().int().nonnegative();
+
 const namedTokens = z.object({ name: z.string().min(1), tokens });
+
 const reportSchema = z.object({
   categories: z.array(
     namedTokens.extend({ isDeferred: z.boolean().default(false) }),
@@ -55,10 +57,12 @@ const reportSchema = z.object({
 });
 
 type Report = z.infer<typeof reportSchema>;
+
 type Category = Report["categories"][number];
 
 function categoryKind(category: Category): ContextCategory["kind"] {
   if (category.isDeferred) return "deferred";
+
   switch (category.name.toLowerCase()) {
     case "free space":
       return "free";
@@ -72,6 +76,7 @@ function categoryKind(category: Category): ContextCategory["kind"] {
 
 function categoryEntries(report: Report, category: Category): ContextEntry[] {
   let entries: { name: string; tokens: number }[] = [];
+
   switch (category.name.toLowerCase()) {
     case "system prompt":
       entries = report.systemPromptSections;
@@ -109,6 +114,7 @@ function categoryEntries(report: Report, category: Category): ContextEntry[] {
       break;
     case "messages": {
       const breakdown = report.messageBreakdown;
+
       if (breakdown) {
         entries = [
           { name: "Tool results", tokens: breakdown.toolResultTokens },
@@ -128,14 +134,17 @@ function categoryEntries(report: Report, category: Category): ContextEntry[] {
       }
     }
   }
+
   if (entries.reduce((sum, entry) => sum + entry.tokens, 0) > category.tokens)
     return [];
   const occurrences = new Map<string, number>();
+
   return entries
     .filter((entry) => entry.tokens > 0)
     .map((entry) => {
       const occurrence = occurrences.get(entry.name) ?? 0;
       occurrences.set(entry.name, occurrence + 1);
+
       return {
         id: JSON.stringify([entry.name, occurrence]),
         label: entry.name,
@@ -153,6 +162,7 @@ export function normalizeClaudeContextUsage(
 ): ContextSnapshot {
   const report = reportSchema.parse(value);
   const occurrences = new Map<string, number>();
+
   return contextSnapshotSchema.parse({
     ...metadata,
     model: report.model,
@@ -165,6 +175,7 @@ export function normalizeClaudeContextUsage(
     categories: report.categories.map((category) => {
       const occurrence = occurrences.get(category.name) ?? 0;
       occurrences.set(category.name, occurrence + 1);
+
       return {
         id: JSON.stringify(["claude", category.name, occurrence]),
         label: category.name,
@@ -177,6 +188,7 @@ export function normalizeClaudeContextUsage(
 }
 
 export class ClaudeContextUsageCollector {
+  private activeRead: AbortController | null = null;
   private revision = 0;
   private capacityRevision = 0;
 
@@ -189,25 +201,39 @@ export class ClaudeContextUsageCollector {
     this.invalidate();
   }
 
+  cancel(): void {
+    this.activeRead?.abort();
+    this.activeRead = null;
+  }
+
   async capture(args: {
-    read: () => Promise<unknown>;
+    read: (signal: AbortSignal) => Promise<unknown>;
     isCurrent: () => boolean;
     publish: (snapshot: ContextSnapshot, snapshotCurrent: boolean) => void;
     providerSessionId: string;
   }): Promise<void> {
+    this.cancel();
+    const activeRead = new AbortController();
+    this.activeRead = activeRead;
     const revision = ++this.revision;
     const capacityRevision = ++this.capacityRevision;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+
     try {
       const report = await Promise.race([
-        args.read(),
+        args.read(activeRead.signal),
         new Promise<null>((resolve) => {
-          timeout = setTimeout(() => resolve(null), 5_000);
+          activeRead.signal.addEventListener("abort", () => resolve(null), {
+            once: true,
+          });
+          timeout = setTimeout(() => activeRead.abort(), 5_000);
           timeout.unref();
         }),
       ]);
+
       if (
         report === null ||
+        activeRead.signal.aborted ||
         capacityRevision !== this.capacityRevision ||
         !args.isCurrent()
       )
@@ -224,6 +250,9 @@ export class ClaudeContextUsageCollector {
       return;
     } finally {
       clearTimeout(timeout);
+      activeRead.abort();
+
+      if (this.activeRead === activeRead) this.activeRead = null;
     }
   }
 }

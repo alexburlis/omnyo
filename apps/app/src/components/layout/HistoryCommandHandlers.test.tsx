@@ -20,7 +20,7 @@ import {
   defaultAppSettings,
   type AppDefaultKeybinding,
   type KeyboardCommandId,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   AppCommandProvider,
   useAppCommandRunner,
@@ -50,6 +50,7 @@ const mocks = vi.hoisted(() => {
       when: { all: ["mainSurface"], none: [] },
     };
   }
+
   return {
     backBinding: webBinding("history.back", "["),
     forwardBinding: webBinding("history.forward", "]"),
@@ -67,8 +68,8 @@ vi.mock("@/hooks/queries/system-queries", () => ({
   }),
 }));
 
-vi.mock("@/lib/bb-desktop", () => ({
-  getBbDesktopInfo: () => null,
+vi.mock("@/lib/omnyo-desktop", () => ({
+  getOmnyoDesktopInfo: () => null,
 }));
 
 vi.mock("@/components/ui/sidebar.js", () => ({
@@ -88,6 +89,7 @@ function Harness() {
     harness.runner = runner;
     harness.navigate = navigate;
   }, [navigate, runner]);
+
   return (
     <>
       <HistoryCommandHandlers />
@@ -118,6 +120,7 @@ function dispatch(command: KeyboardCommandId): boolean {
   act(() => {
     handled = harness.runner?.dispatch(command, null) ?? false;
   });
+
   return handled;
 }
 
@@ -132,6 +135,7 @@ async function expectPath(pathname: string) {
 }
 
 const A = "/projects/proj_1/threads/thr_a";
+
 const B = "/settings";
 
 describe("HistoryCommandHandlers", () => {
@@ -198,10 +202,13 @@ describe("HistoryCommandHandlers", () => {
     const forward = screen.getByRole("button", { name: "Go forward" });
     const backDefinition = mocks.backBinding.shortcut;
     const forwardDefinition = mocks.forwardBinding.shortcut;
+
     if (backDefinition === null || forwardDefinition === null) {
       throw new Error("Expected default shortcuts for history commands");
     }
+
     const backShortcut = presentAppShortcut(backDefinition, browserPlatform());
+
     const forwardShortcut = presentAppShortcut(
       forwardDefinition,
       browserPlatform(),
@@ -214,7 +221,9 @@ describe("HistoryCommandHandlers", () => {
       forwardShortcut.ariaKeyshortcuts,
     );
 
-    await waitFor(() => expect(back.getAttribute("aria-disabled") === "true").toBe(false));
+    await waitFor(() =>
+      expect(back.getAttribute("aria-disabled") === "true").toBe(false),
+    );
     fireEvent.keyDown(document.body, { key: "Tab" });
     fireEvent.focus(back);
 
@@ -231,9 +240,12 @@ describe("HistoryCommandHandlers", () => {
     const platform = vi
       .spyOn(navigator, "platform", "get")
       .mockReturnValue("MacIntel");
+
     renderAt(A);
+
     const hints = () =>
       document.querySelectorAll("[data-sidebar-history-shortcut-hints] kbd");
+
     expect(hints()).toHaveLength(0);
     fireEvent.keyDown(window, { key: "Meta", metaKey: true });
     await waitFor(() => expect(hints()).toHaveLength(2), { timeout: 2000 });

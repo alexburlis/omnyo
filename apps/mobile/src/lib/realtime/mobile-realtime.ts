@@ -9,7 +9,7 @@ import {
   type ClientMessage,
   type RealtimeSubscriptionTarget,
   type ThreadOpenSignal,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   SOCKET_OPEN,
   defaultRealtimeSocketFactory,
@@ -70,10 +70,15 @@ export interface CreateMobileRealtimeOptions {
 }
 
 const REALTIME_MIN_RECONNECT_DELAY_MS = 1000;
+
 const REALTIME_MAX_RECONNECT_DELAY_MS = 30_000;
+
 const REALTIME_RECONNECT_GROW_FACTOR = 1.5;
+
 const REALTIME_CONNECTION_TIMEOUT_MS = 10_000;
+
 export const REALTIME_PING_INTERVAL_MS = 25_000;
+
 export const REALTIME_PONG_TIMEOUT_MS = 5_000;
 
 interface ActiveSubscription {
@@ -99,13 +104,16 @@ export function createMobileRealtime(
   options: CreateMobileRealtimeOptions,
 ): MobileRealtime {
   const socketFactory = options.socketFactory ?? defaultRealtimeSocketFactory;
+
   const backoff = {
     minDelayMs: REALTIME_MIN_RECONNECT_DELAY_MS,
     maxDelayMs: REALTIME_MAX_RECONNECT_DELAY_MS,
     growFactor: REALTIME_RECONNECT_GROW_FACTOR,
   };
+
   const connectionTimeoutMs =
     options.connectionTimeoutMs ?? REALTIME_CONNECTION_TIMEOUT_MS;
+
   const onInvalidMessage =
     options.onInvalidMessage ??
     ((error: unknown) => {
@@ -115,12 +123,15 @@ export function createMobileRealtime(
   const subscriptions = new Map<string, ActiveSubscription>();
   const changedCallbacks = new Set<(message: ChangedMessage) => void>();
   const threadOpenCallbacks = new Set<(signal: ThreadOpenSignal) => void>();
+
   const connectedCallbacks = new Set<
     (event: MobileRealtimeConnectedEvent) => void
   >();
+
   const connectFailedCallbacks = new Set<
     (event: MobileRealtimeConnectFailedEvent) => void
   >();
+
   const connectionStateCallbacks = new Set<() => void>();
 
   let socket: RealtimeSocketLike | null = null;
@@ -142,6 +153,7 @@ export function createMobileRealtime(
   function setConnectionState(next: MobileRealtimeConnectionState): void {
     if (connectionState === next) return;
     connectionState = next;
+
     for (const callback of connectionStateCallbacks) callback();
   }
 
@@ -177,13 +189,16 @@ export function createMobileRealtime(
       clearInterval(pingTimer);
       pingTimer = null;
     }
+
     clearPongTimer();
   }
 
   function sendPing(): void {
     if (!socket || socket.readyState !== SOCKET_OPEN) return;
+
     if (Date.now() - lastServerActivityAt < REALTIME_PONG_TIMEOUT_MS) return;
     send({ type: "ping" });
+
     if (pongTimer !== null) return;
     pongTimer = setTimeout(() => {
       pongTimer = null;
@@ -193,6 +208,7 @@ export function createMobileRealtime(
 
   function startPingLoop(): void {
     if (pingTimer !== null) return;
+
     if (!socket || socket.readyState !== SOCKET_OPEN) return;
     pingTimer = setInterval(sendPing, REALTIME_PING_INTERVAL_MS);
   }
@@ -204,9 +220,11 @@ export function createMobileRealtime(
 
   function markSocketLost(at: number): void {
     stopPingLoop();
+
     if (hasConnected && disconnectedAt === null) {
       disconnectedAt = at;
     }
+
     setConnectionState(hasConnected ? "reconnecting" : "connecting");
   }
 
@@ -214,11 +232,13 @@ export function createMobileRealtime(
     clearConnectionTimer();
     const current = socket;
     socket = null;
+
     if (!current) return;
     current.onopen = null;
     current.onmessage = null;
     current.onclose = null;
     current.onerror = null;
+
     try {
       current.close(1000, "client closing");
     } catch {}
@@ -240,6 +260,7 @@ export function createMobileRealtime(
       message,
       authRejected: isAuthRejectionMessage(message),
     };
+
     for (const callback of connectFailedCallbacks) callback(event);
   }
 
@@ -247,20 +268,26 @@ export function createMobileRealtime(
     if (closed !== socket) return;
     clearConnectionTimer();
     socket = null;
+
     if (disposed) return;
+
     if (!socketOpened) {
       const message = socketErrorMessage;
       socketErrorMessage = null;
       markSocketLost(Date.now());
       emitConnectFailed(message);
       scheduleReconnect();
+
       return;
     }
+
     if (pongTimer !== null) {
       markSocketLost(lastServerActivityAt);
       openSocket();
+
       return;
     }
+
     markSocketLost(Date.now());
     scheduleReconnect();
   }
@@ -268,22 +295,28 @@ export function createMobileRealtime(
   function reconnectNow(): void {
     if (disposed || suspended || !started) return;
     const current = socket;
+
     if (current) {
       const watermark =
         current.readyState === SOCKET_OPEN ? lastServerActivityAt : Date.now();
+
       teardownSocket();
       markSocketLost(watermark);
     }
+
     clearReconnectTimer();
     openSocket();
   }
 
   function probeOrReconnect(): void {
     if (disposed || suspended || !started) return;
+
     if (!socket) {
       if (reconnectTimer !== null) reconnectNow();
+
       return;
     }
+
     if (socket.readyState === SOCKET_OPEN) sendPing();
   }
 
@@ -296,6 +329,7 @@ export function createMobileRealtime(
     socketErrorMessage = null;
     connectionTimer = setTimeout(() => {
       connectionTimer = null;
+
       if (socket !== next) return;
       teardownSocket();
       setConnectionState(hasConnected ? "reconnecting" : "connecting");
@@ -315,37 +349,47 @@ export function createMobileRealtime(
       hasConnected = true;
       setConnectionState("connected");
       startPingLoop();
+
       for (const subscription of subscriptions.values()) {
         send({ type: "subscribe", target: subscription.target });
       }
+
       const event: MobileRealtimeConnectedEvent = reconnected
         ? {
             reconnected,
             disconnectedAt: previousDisconnectedAt ?? Date.now(),
           }
         : { reconnected };
+
       for (const callback of connectedCallbacks) callback(event);
     };
+
     next.onmessage = (event) => {
       if (socket !== next) return;
+
       if (typeof event.data !== "string") return;
       noteServerActivity();
       handleIncomingMessage(event.data);
     };
+
     next.onclose = (event) => {
       if (socket === next && !socketOpened && socketErrorMessage === null) {
         socketErrorMessage = event.reason.length > 0 ? event.reason : null;
       }
+
       handleSocketClosed(next);
     };
+
     next.onerror = (event) => {
       if (socket !== next) return;
+
       if (event.message !== null) socketErrorMessage = event.message;
     };
   }
 
   function handleIncomingMessage(data: string): void {
     let parsed: unknown;
+
     try {
       parsed = JSON.parse(data);
     } catch {
@@ -355,8 +399,10 @@ export function createMobileRealtime(
     if (pongMessageLenientSchema.safeParse(parsed).success) return;
 
     const threadOpen = threadOpenSignalLenientSchema.safeParse(parsed);
+
     if (threadOpen.success) {
       for (const callback of threadOpenCallbacks) callback(threadOpen.data);
+
       return;
     }
 
@@ -365,15 +411,19 @@ export function createMobileRealtime(
     if (pluginSignalLenientSchema.safeParse(parsed).success) return;
 
     const changed = changedMessageLenientSchema.safeParse(parsed);
+
     if (changed.success) {
       for (const callback of changedCallbacks) callback(changed.data);
+
       return;
     }
+
     onInvalidMessage(changed.error);
   }
 
   function listen<T>(set: Set<T>, callback: T): () => void {
     set.add(callback);
+
     return () => {
       set.delete(callback);
     };
@@ -383,6 +433,7 @@ export function createMobileRealtime(
     connect() {
       if (disposed) return;
       started = true;
+
       if (suspended) return;
       openSocket();
     },
@@ -393,9 +444,11 @@ export function createMobileRealtime(
       const hadSocket = socket !== null;
       teardownSocket();
       reconnectAttempt = 0;
+
       if (hadSocket && hasConnected && disconnectedAt === null) {
         disconnectedAt = Date.now();
       }
+
       setConnectionState("connecting");
     },
     suspend() {
@@ -404,6 +457,7 @@ export function createMobileRealtime(
       clearReconnectTimer();
       teardownSocket();
       reconnectAttempt = 0;
+
       if (started) {
         markSocketLost(Date.now());
       } else {
@@ -413,9 +467,12 @@ export function createMobileRealtime(
     resume() {
       if (!suspended) {
         probeOrReconnect();
+
         return;
       }
+
       suspended = false;
+
       if (!started || disposed) return;
       openSocket();
     },
@@ -423,21 +480,28 @@ export function createMobileRealtime(
     subscribe(target) {
       const key = realtimeSubscriptionTargetKey(target);
       const existing = subscriptions.get(key);
+
       if (existing) {
         existing.count += 1;
+
         return;
       }
+
       subscriptions.set(key, { count: 1, target });
       send({ type: "subscribe", target });
     },
     unsubscribe(target) {
       const key = realtimeSubscriptionTargetKey(target);
       const existing = subscriptions.get(key);
+
       if (!existing) return;
+
       if (existing.count > 1) {
         existing.count -= 1;
+
         return;
       }
+
       subscriptions.delete(key);
       send({ type: "unsubscribe", target });
     },

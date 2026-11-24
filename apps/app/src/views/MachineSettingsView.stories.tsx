@@ -1,5 +1,5 @@
-import type { Host, MachineLifecycle } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import type { Host, MachineLifecycle } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { MachineSettingsHeader } from "./MachineSettingsView";
 import {
   MANUAL_MACHINE_PROVIDER,
@@ -12,7 +12,9 @@ export default {
 };
 
 const noop = () => {};
+
 const now = Date.parse("2026-09-09T12:00:00Z");
+
 const WEEKS_AGO = now - 3 * 7 * 24 * 60 * 60_000;
 
 function lifecycle(
@@ -76,7 +78,7 @@ export function Header() {
     <StoryCard labelWidth="220px" className="max-w-4xl">
       <StoryRow
         label="this machine"
-        hint="the machine bb itself runs on: no provider, so no tag and no lifecycle actions"
+        hint="the machine Omnyo itself runs on: no provider, so no tag and no lifecycle actions"
       >
         <Row
           host={makeHost({

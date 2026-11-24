@@ -42,6 +42,7 @@ export function ResourceCollectionPage<Mode extends string>({
   const changeMode = onModeChange ?? (() => {});
   const activeTabId = hasModes ? `${id}-${activeMode}-tab` : undefined;
   const activePanelId = hasModes ? `${id}-${activeMode}-panel` : undefined;
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-5">
       {}
@@ -65,6 +66,7 @@ export function ResourceCollectionPage<Mode extends string>({
               {modeList.map((mode) => {
                 const active = mode.id === activeMode;
                 const modeIndex = modeList.indexOf(mode);
+
                 return (
                   <button
                     key={mode.id}
@@ -84,6 +86,7 @@ export function ResourceCollectionPage<Mode extends string>({
                     onClick={() => changeMode(mode.id)}
                     onKeyDown={(event) => {
                       let nextIndex: number | null = null;
+
                       if (event.key === "ArrowRight") {
                         nextIndex = (modeIndex + 1) % modeList.length;
                       } else if (event.key === "ArrowLeft") {
@@ -95,9 +98,11 @@ export function ResourceCollectionPage<Mode extends string>({
                       } else if (event.key === "End") {
                         nextIndex = modeList.length - 1;
                       }
+
                       if (nextIndex === null) return;
                       event.preventDefault();
                       const nextMode = modeList[nextIndex];
+
                       if (nextMode === undefined) return;
                       changeMode(nextMode.id);
                       document
@@ -329,12 +334,13 @@ export function ResourceBrowseCard({
 }: ResourceBrowseCardProps) {
   const hasLeading =
     leading !== undefined && leading !== null && leading !== false;
+
   return (
     <div
       className={cn(
         "group relative grid min-h-28 w-full grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_1fr_auto] gap-2 rounded-lg border border-border bg-card p-3 text-left",
         onOpen &&
-          "transition-[border-color,box-shadow,background-color] duration-150 hover:border-foreground/30 hover:bg-[color-mix(in_oklab,var(--ink)_2.5%,transparent)] hover:shadow-sm",
+          "transition-[border-color,box-shadow,background-color] hover:border-foreground/30 hover:bg-[color-mix(in_oklab,var(--ink)_2.5%,transparent)] hover:shadow-sm",
         className,
       )}
     >

@@ -15,11 +15,13 @@ function mountRoot(): {
 } {
   const container = document.createElement("div");
   document.body.appendChild(container);
+
   const root = createRoot(container, {
     onUncaughtError: (error) => {
       throw error;
     },
   });
+
   return {
     container,
     render: (node) => act(() => root.render(node)),
@@ -38,14 +40,15 @@ describe("AppErrorBoundary", () => {
     function Boom(): never {
       throw new Error("render exploded");
     }
+
     render(
       <AppErrorBoundary>
         <Boom />
       </AppErrorBoundary>,
     );
 
-    expect(container.textContent).toContain("bb hit an error and stopped");
-    expect(container.querySelector("button")?.textContent).toBe("Reload bb");
+    expect(container.textContent).toContain("Omnyo hit an error and stopped");
+    expect(container.querySelector("button")?.textContent).toBe("Reload Omnyo");
     expect(container.textContent).toContain("render exploded");
     dispose();
   });
@@ -57,6 +60,7 @@ describe("AppErrorBoundary", () => {
     function Tree({ mounted }: { mounted: boolean }) {
       return <div>{mounted ? <p data-moved="">body</p> : null}</div>;
     }
+
     render(
       <AppErrorBoundary>
         <Tree mounted />
@@ -72,7 +76,7 @@ describe("AppErrorBoundary", () => {
       </AppErrorBoundary>,
     );
 
-    expect(container.textContent).toContain("bb hit an error and stopped");
+    expect(container.textContent).toContain("Omnyo hit an error and stopped");
     dispose();
   });
 });

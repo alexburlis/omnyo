@@ -6,6 +6,7 @@ export class DiskUsageError extends Error {
     super(message);
   }
 }
+
 export function isFsErrorWithCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
 }

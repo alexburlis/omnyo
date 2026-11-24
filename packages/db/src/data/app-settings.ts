@@ -6,24 +6,34 @@ import {
   appSettingsSchema,
   defaultAiServiceSelections,
   defaultAppSettings,
+  usageConsentSchema,
   disabledProviderIdsSchema,
-  pluginPackageJsonSchema,
+  pluginOmnyoManifestSchema,
   type AiServiceSelection,
   type AiServiceSelections,
   type AiTask,
   type AppKeybindingOverrides,
   type AppSettings,
-} from "@bb/domain";
-import type { DbConnection, DbQueryConnection } from "../connection.js";
+} from "@omnyo/domain";
+import {
+  prepareCachedQuery,
+  type DbConnection,
+  type DbQueryConnection,
+} from "../connection.js";
 import { appSettingsValues } from "../schema.js";
 
 const appSettingsKeySchema = appSettingsSchema.keyof();
+
 const appSettingsKeys = appSettingsKeySchema.options;
 
 const KEYBINDING_OVERRIDES_KEY = "keybindingOverrides";
+
 const AI_SERVICE_SELECTIONS_KEY = "aiServiceSelections";
+
 const PLUGIN_SAFE_MODE_KEY = "pluginSafeMode";
+
 const DISABLED_PROVIDER_IDS_KEY = "disabledProviderIds";
+
 const LEGACY_DIAGNOSTIC_EVENTS_KEY = "showUnhandledProviderEvents";
 
 function parseStoredValue(text: string): unknown {
@@ -50,9 +60,8 @@ function writeValue(
     .run();
 }
 
-export function getAppSettings(db: DbConnection): AppSettings {
-  const values: Record<string, unknown> = { ...defaultAppSettings };
-  const rows = db
+const prepareListAppSettingsValues = (db: DbQueryConnection) =>
+  db
     .select({ key: appSettingsValues.key, value: appSettingsValues.value })
     .from(appSettingsValues)
     .where(
@@ -61,28 +70,67 @@ export function getAppSettings(db: DbConnection): AppSettings {
         LEGACY_DIAGNOSTIC_EVENTS_KEY,
       ]),
     )
-    .all();
+    .prepare();
+
+export function getAppSettings(db: DbConnection): AppSettings {
+  const values: Record<string, unknown> = { ...defaultAppSettings };
+  const rows = prepareCachedQuery(db, prepareListAppSettingsValues).all();
 
   const legacyDiagnosticEvents = rows.find(
     (row) => row.key === LEGACY_DIAGNOSTIC_EVENTS_KEY,
   );
+
   if (legacyDiagnosticEvents) {
     const parsed = appSettingsSchema.shape.showDiagnosticEvents.safeParse(
       parseStoredValue(legacyDiagnosticEvents.value),
     );
+
     if (parsed.success) values.showDiagnosticEvents = parsed.data;
   }
 
   for (const row of rows) {
     const key = appSettingsKeySchema.safeParse(row.key);
+
     if (!key.success) continue;
+
     const value = appSettingsSchema.shape[key.data].safeParse(
       parseStoredValue(row.value),
     );
+
     if (value.success) values[key.data] = value.data;
   }
 
+  if (!rows.some((row) => row.key === "usageConsent")) {
+    const legacyRefusal = rows.some(
+      (row) =>
+        row.key === "telemetryEnabled" && parseStoredValue(row.value) === false,
+    );
+
+    values.usageConsent = usageConsentSchema.parse({
+      ...defaultAppSettings.usageConsent,
+      ...(legacyRefusal
+        ? {
+            count: "declined",
+            product: "declined",
+            countSource: "legacy-refusal",
+            productSource: "legacy-refusal",
+          }
+        : {}),
+    });
+  }
+
   return appSettingsSchema.parse(values);
+}
+
+export function migrateUsageConsent(db: DbConnection): void {
+  db.insert(appSettingsValues)
+    .values({
+      key: "usageConsent",
+      value: JSON.stringify(getAppSettings(db).usageConsent),
+      updatedAt: Date.now(),
+    })
+    .onConflictDoNothing()
+    .run();
 }
 
 export function setAppSettings(db: DbConnection, settings: AppSettings): void {
@@ -91,6 +139,7 @@ export function setAppSettings(db: DbConnection, settings: AppSettings): void {
     for (const key of appSettingsKeys) {
       writeValue(transaction, key, settings[key], updatedAt);
     }
+
     transaction
       .delete(appSettingsValues)
       .where(eq(appSettingsValues.key, LEGACY_DIAGNOSTIC_EVENTS_KEY))
@@ -110,6 +159,7 @@ export function getAppKeybindingOverrides(
   if (row === undefined) {
     return [];
   }
+
   return appKeybindingOverridesSchema.parse(parseStoredValue(row.value));
 }
 
@@ -126,14 +176,22 @@ export function getAiServiceSelections(db: DbConnection): AiServiceSelections {
     .from(appSettingsValues)
     .where(eq(appSettingsValues.key, AI_SERVICE_SELECTIONS_KEY))
     .get();
+
   const stored: unknown =
     row === undefined ? undefined : parseStoredValue(row.value);
+
   const selections: AiServiceSelections = { ...defaultAiServiceSelections };
+
   if (typeof stored !== "object" || stored === null) return selections;
+
   for (const task of AI_TASKS) {
-    const parsed = aiServiceSelectionSchema.safeParse(Reflect.get(stored, task));
+    const parsed = aiServiceSelectionSchema.safeParse(
+      Reflect.get(stored, task),
+    );
+
     if (parsed.success) selections[task] = parsed.data;
   }
+
   return selections;
 }
 
@@ -144,6 +202,7 @@ export function setAiServiceSelection(
 ): AiServiceSelections {
   const selections = { ...getAiServiceSelections(db), [task]: selection };
   writeValue(db, AI_SERVICE_SELECTIONS_KEY, selections, Date.now());
+
   return selections;
 }
 
@@ -153,6 +212,7 @@ export function getPluginSafeMode(db: DbConnection): boolean {
     .from(appSettingsValues)
     .where(eq(appSettingsValues.key, PLUGIN_SAFE_MODE_KEY))
     .get();
+
   return row !== undefined && parseStoredValue(row.value) === true;
 }
 
@@ -166,9 +226,11 @@ export function getDisabledProviderIds(db: DbConnection): string[] {
     .from(appSettingsValues)
     .where(eq(appSettingsValues.key, DISABLED_PROVIDER_IDS_KEY))
     .get();
+
   const parsed = disabledProviderIdsSchema.safeParse(
     row === undefined ? [] : parseStoredValue(row.value),
   );
+
   return parsed.success ? parsed.data : [];
 }
 
@@ -180,7 +242,7 @@ export function setDisabledProviderIds(
 }
 
 const pluginProviderCatalogSchema =
-  pluginPackageJsonSchema.shape.bb.shape.experimental_providers
+  pluginOmnyoManifestSchema.shape.experimental_providers
     .unwrap()
     .element.omit({ kind: true })
     .array();
@@ -198,9 +260,11 @@ export function getDisabledPluginProviderCatalog(
     .from(appSettingsValues)
     .where(eq(appSettingsValues.key, pluginProviderCatalogKey(pluginId)))
     .get();
+
   const parsed = pluginProviderCatalogSchema.safeParse(
     row === undefined ? [] : parseStoredValue(row.value),
   );
+
   return parsed.success ? parsed.data : [];
 }
 

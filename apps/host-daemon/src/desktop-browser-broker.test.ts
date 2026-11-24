@@ -2,12 +2,13 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
+import net from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import {
   DESKTOP_BROWSER_BROKER_DESCRIPTOR_FILE,
   desktopBrowserBrokerRequestSchema,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   startDesktopBrowserBroker,
   type DesktopBrowserBroker,
@@ -18,6 +19,7 @@ const scope = {
   generation: "generation-1",
   threadId: "thread-1",
 };
+
 const tab = {
   tabId: "tab-1",
   threadId: scope.threadId,
@@ -26,8 +28,11 @@ const tab = {
   presentation: "hidden",
   control: null,
 };
+
 const brokers: DesktopBrowserBroker[] = [];
+
 const directories: string[] = [];
+
 afterEach(async () => {
   await Promise.all(brokers.splice(0).map((broker) => broker.close()));
   await Promise.all(
@@ -36,28 +41,35 @@ afterEach(async () => {
       .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
+
 async function setup(timeoutMs = 1000) {
-  const dataDir = await mkdtemp(join(tmpdir(), "bb-browser-broker-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "omnyo-browser-broker-"));
   directories.push(dataDir);
   const onChanged = vi.fn();
+
   const broker = await startDesktopBrowserBroker({
     dataDir,
     hostId: "host-1",
-    serverUrl: "https://bb.example",
+    serverUrl: "https://omnyo.example.test",
     onChanged,
     requestTimeoutMs: timeoutMs,
   });
+
   brokers.push(broker);
   broker.setConnected(true);
+
   return { broker, dataDir, onChanged };
 }
+
 async function connect(
   broker: DesktopBrowserBroker,
-  serverUrl = "https://bb.example",
+  serverUrl = "https://omnyo.example.test",
+  rendererProfiling = false,
 ) {
   const socket = new WebSocket(broker.descriptor.url, {
     headers: { Authorization: `Bearer ${broker.descriptor.token}` },
   });
+
   await once(socket, "open");
   socket.send(
     JSON.stringify({
@@ -69,12 +81,15 @@ async function connect(
           instanceId: scope.instanceId,
           generation: scope.generation,
           label: "Window",
+          ...(rendererProfiling ? { rendererProfiling: true } : {}),
         },
       ],
     }),
   );
+
   return socket;
 }
+
 async function registered(broker: DesktopBrowserBroker) {
   await vi.waitFor(async () => {
     expect(
@@ -85,12 +100,80 @@ async function registered(broker: DesktopBrowserBroker) {
 }
 
 describe("desktop browser broker", () => {
+  it("refuses renderer profiling without a registered capability before native dispatch", async () => {
+    const { broker } = await setup();
+    const socket = await connect(broker);
+
+    await registered(broker);
+
+    const received = vi.fn();
+
+    socket.on("message", received);
+    await expect(
+      broker.request({
+        type: "desktop.browser.profile_renderer",
+        instanceId: scope.instanceId,
+        generation: scope.generation,
+        durationMs: 2000,
+      }),
+    ).rejects.toThrow("unavailable on this client");
+    expect(received).not.toHaveBeenCalled();
+  });
+
+  it("forwards a capable renderer profile and validates the bounded sanitized result", async () => {
+    const { broker } = await setup();
+    const socket = await connect(broker, undefined, true);
+
+    await registered(broker);
+    socket.on("message", (data) => {
+      const request = desktopBrowserBrokerRequestSchema.parse(
+        JSON.parse(data.toString()),
+      );
+
+      expect(request.command).toEqual({
+        type: "desktop.browser.profile_renderer",
+        instanceId: scope.instanceId,
+        generation: scope.generation,
+        durationMs: 200,
+      });
+      socket.send(
+        JSON.stringify({
+          type: "result",
+          requestId: request.requestId,
+          result: {
+            requestedDurationMs: 200,
+            actualDurationMs: 201,
+            sampleIntervalUs: 1000,
+            totalSamples: 1,
+            omittedSamples: 0,
+            hotspots: [
+              { assetPath: "/assets/app.js", line: 1, column: 1, hits: 1 },
+            ],
+            builtinSamples: { idle: 0, program: 0, garbageCollection: 0 },
+            truncated: false,
+          },
+        }),
+      );
+    });
+
+    await expect(
+      broker.request({
+        type: "desktop.browser.profile_renderer",
+        instanceId: scope.instanceId,
+        generation: scope.generation,
+        durationMs: 200,
+      }),
+    ).resolves.toMatchObject({ totalSamples: 1, omittedSamples: 0 });
+  });
+
   it("writes a private bound descriptor and removes it at shutdown", async () => {
     const { broker, dataDir } = await setup();
     const path = join(dataDir, DESKTOP_BROWSER_BROKER_DESCRIPTOR_FILE);
+
     if (process.platform !== "win32") {
       expect((await stat(path)).mode & 0o777).toBe(0o600);
     }
+
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual(broker.descriptor);
     expect(broker.descriptor.url).toMatch(
       /^ws:\/\/127\.0\.0\.1:\d+\/desktop-browser$/u,
@@ -101,18 +184,21 @@ describe("desktop browser broker", () => {
 
   it("rejects unauthenticated, renderer-origin, wrong-server, and offline clients", async () => {
     const { broker } = await setup();
+
     const invalidHeaders: Record<string, string>[] = [
       {},
       {
         Authorization: `Bearer ${broker.descriptor.token}`,
-        Origin: "https://bb.example",
+        Origin: "https://omnyo.example.test",
       },
     ];
+
     for (const headers of invalidHeaders) {
       const socket = new WebSocket(broker.descriptor.url, { headers });
       const [error] = await once(socket, "error");
       expect(error.message).toContain("401");
     }
+
     const wrongServer = await connect(broker, "https://other.example");
     await once(wrongServer, "close");
     expect(
@@ -120,9 +206,11 @@ describe("desktop browser broker", () => {
         .instances,
     ).toEqual([]);
     broker.setConnected(false);
+
     const offline = new WebSocket(broker.descriptor.url, {
       headers: { Authorization: `Bearer ${broker.descriptor.token}` },
     });
+
     expect((await once(offline, "error"))[0].message).toContain("401");
   });
 
@@ -134,6 +222,7 @@ describe("desktop browser broker", () => {
       const request = desktopBrowserBrokerRequestSchema.parse(
         JSON.parse(data.toString()),
       );
+
       expect(request.command).toEqual({
         type: "desktop.browser.list_tabs",
         ...scope,
@@ -169,10 +258,12 @@ describe("desktop browser broker", () => {
     const { broker } = await setup();
     const socket = await connect(broker);
     await registered(broker);
+
     const response = broker.request({
       type: "desktop.browser.list_tabs",
       ...scope,
     });
+
     const rejection = expect(response).rejects.toThrow("disconnected");
     const close = once(socket, "close");
     broker.setConnected(false);
@@ -185,6 +276,32 @@ describe("desktop browser broker", () => {
     expect(
       await broker.request({ type: "desktop.browser.list_instances" }),
     ).toEqual({ instances: [] });
+  });
+
+  it("contains a reset from a client it rejects while offline", async () => {
+    const { broker } = await setup();
+    broker.setConnected(false);
+    const url = new URL(broker.descriptor.url);
+    const client = net.connect(Number(url.port), url.hostname);
+
+    try {
+      await once(client, "connect");
+      const closed = once(client, "close");
+      client.write(
+        `GET ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\nAuthorization: Bearer ${broker.descriptor.token}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`,
+      );
+      const [response] = await once(client, "data");
+      expect(String(response)).toContain("401");
+      client.resetAndDestroy();
+      await closed;
+    } finally {
+      client.destroy();
+    }
+
+    broker.setConnected(true);
+    const socket = await connect(broker);
+    await registered(broker);
+    socket.close();
   });
 
   it("bounds unanswered requests and invalidates the native session", async () => {
@@ -213,6 +330,7 @@ describe("desktop browser broker", () => {
         const request = desktopBrowserBrokerRequestSchema.parse(
           JSON.parse(data.toString()),
         );
+
         socket.send(
           JSON.stringify({
             type: "result",
@@ -241,7 +359,7 @@ describe("desktop browser broker", () => {
       JSON.stringify({
         type: "register",
         hostId: "host-1",
-        serverUrl: "https://bb.example",
+        serverUrl: "https://omnyo.example.test",
         instances: [
           {
             instanceId: scope.instanceId,

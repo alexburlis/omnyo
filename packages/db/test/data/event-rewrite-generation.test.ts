@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { threadScope, turnScope } from "@bb/domain";
+import { threadScope, turnScope } from "@omnyo/domain";
 import type { DbConnection } from "../../src/connection.js";
 import { getThreadEventRewriteGeneration } from "../../src/data/event-rewrite-generation.js";
 import {
@@ -32,15 +32,18 @@ interface RewriteCase {
 function setup() {
   const db = createMigratedConnection();
   const host = upsertHost(db, noopNotifier, { name: "rewrite-host" });
+
   const { project } = createProject(db, noopNotifier, {
     name: "rewrite-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/rewrite" },
   });
+
   const createCodexThread = () =>
     createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     }).id;
+
   return {
     db,
     otherThreadId: createCodexThread(),
@@ -53,11 +56,14 @@ function pruneThreadEvents(
   policy: ThreadPruningPolicy,
 ): number {
   let removed = 0;
+
   for (let pass = 0; pass < 100; pass += 1) {
     const result = advanceThreadPruning(db, policy);
     removed += result.removed;
+
     if (result.action === "cycle-complete") return removed;
   }
+
   throw new Error("Pruning did not finish a cycle");
 }
 
@@ -172,6 +178,7 @@ function insertCommandOutput(
       type: "item/completed",
     })
     .run();
+
   return migrateNextCompletedEventItemOutput(db, {
     itemKind: "commandExecution",
     limit: 10,

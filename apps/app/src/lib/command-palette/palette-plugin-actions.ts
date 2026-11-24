@@ -1,5 +1,5 @@
-import { pluginCommandId, type PluginCommandId } from "@bb/domain";
-import type { PluginCommandContext } from "@get-bb/plugin-sdk";
+import { pluginCommandId, type PluginCommandId } from "@omnyo/domain";
+import type { PluginCommandContext } from "@omnyo/plugin-sdk";
 import type { PluginThreadPanelOpenHandler } from "@/components/plugin/plugin-thread-panel-navigation";
 import type { PluginCommandPaletteActionSlot } from "@/lib/plugin-slots";
 import { getPluginDisplayName } from "@/lib/plugin-logos";
@@ -9,6 +9,7 @@ type AppCommandSlot = Extract<
   PluginCommandPaletteActionSlot,
   { target: "app" }
 >;
+
 type ComposerCommandSlot = Extract<
   PluginCommandPaletteActionSlot,
   { target: "composer" }
@@ -37,8 +38,10 @@ function actionContext(
         console.warn(
           `[plugin:${slot.pluginId}] commandPaletteAction "${slot.id}" openPanel declined: no thread side panel on this surface`,
         );
+
         return false;
       }
+
       return args.openThreadPanel({ ...options, pluginId: slot.pluginId });
     },
   };
@@ -48,10 +51,13 @@ export function buildPluginPaletteActions(
   args: BuildPluginPaletteActionsArgs,
 ): PaletteAction[] {
   const actions: PaletteAction[] = [];
+
   for (const slot of args.slots) {
     const context = actionContext(slot, args);
+
     if (slot.isAvailable !== undefined) {
       let available: boolean;
+
       try {
         available = slot.isAvailable(context);
       } catch (error) {
@@ -60,8 +66,10 @@ export function buildPluginPaletteActions(
         );
         continue;
       }
+
       if (!available) continue;
     }
+
     actions.push({
       id: `plugin:${slot.pluginId}/${slot.id}`,
       bucket: "Plugins",
@@ -74,8 +82,10 @@ export function buildPluginPaletteActions(
             `[plugin:${slot.pluginId}] commandPaletteAction "${slot.id}" failed: ${describeError(error)}`,
           );
         };
+
         try {
           const result = slot.run(context);
+
           if (result instanceof Promise) result.catch(warn);
         } catch (error) {
           warn(error);
@@ -83,6 +93,7 @@ export function buildPluginPaletteActions(
       },
     });
   }
+
   return actions;
 }
 
@@ -101,7 +112,9 @@ export function buildPluginComposerCommandActions(
 ): PaletteAction[] {
   return args.slots.flatMap((slot) => {
     const command = pluginCommandId(slot.pluginId, slot.id);
+
     if (!args.isCommandAvailable(command, args.target)) return [];
+
     return [
       {
         id: command,

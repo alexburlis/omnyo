@@ -2,6 +2,7 @@ import path from "node:path";
 import { buildNodeEsmEntry, copyDirectory } from "./build-utils.mjs";
 
 const packageRoot = process.cwd();
+
 const [entryPointArg, outfileArg, ...flags] = process.argv.slice(2);
 
 if (!entryPointArg || !outfileArg) {
@@ -12,12 +13,14 @@ if (!entryPointArg || !outfileArg) {
 
 function parseExternalPatterns(args) {
   const external = [];
+
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] !== "--external") {
       continue;
     }
 
     const pattern = args[index + 1];
+
     if (!pattern) {
       throw new Error("--external requires <pattern>");
     }
@@ -25,11 +28,13 @@ function parseExternalPatterns(args) {
     external.push(pattern);
     index += 1;
   }
+
   return external;
 }
 
 function parseCopyDirectories(args) {
   const copyDirectories = [];
+
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] !== "--copy-dir") {
       continue;
@@ -37,6 +42,7 @@ function parseCopyDirectories(args) {
 
     const from = args[index + 1];
     const to = args[index + 2];
+
     if (!from || !to) {
       throw new Error("--copy-dir requires <from> and <to> arguments");
     }
@@ -47,6 +53,7 @@ function parseCopyDirectories(args) {
     });
     index += 2;
   }
+
   return copyDirectories;
 }
 

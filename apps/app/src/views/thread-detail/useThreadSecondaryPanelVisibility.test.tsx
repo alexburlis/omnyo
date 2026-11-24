@@ -41,11 +41,13 @@ describe("useThreadSecondaryPanelVisibility", () => {
       isCompactViewport: true,
       isPersistedOpen: true,
     });
+
     const { result } = renderHook(() => {
       const drawerVisibility = useThreadSecondaryPanelDrawerVisibility({
         isCompactViewport: args.isCompactViewport,
         threadId: "thr_1",
       });
+
       return useThreadSecondaryPanelVisibility({
         ...args,
         drawerVisibility,
@@ -66,11 +68,13 @@ describe("useThreadSecondaryPanelVisibility", () => {
       isCompactViewport: true,
       isPersistedOpen: false,
     });
+
     const { result } = renderHook(() => {
       const drawerVisibility = useThreadSecondaryPanelDrawerVisibility({
         isCompactViewport: args.isCompactViewport,
         threadId: "thr_1",
       });
+
       return useThreadSecondaryPanelVisibility({
         ...args,
         drawerVisibility,

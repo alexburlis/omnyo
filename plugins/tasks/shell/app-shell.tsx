@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PluginNavPanelProps } from "@get-bb/plugin-sdk/app";
+import type { PluginNavPanelProps } from "@omnyo/plugin-sdk/app";
 import { useProjects } from "./data.js";
 import {
   parseTasksRoute,
@@ -25,6 +25,7 @@ const BOARD_MIN_WIDTH = 448;
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
+
   return (
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
@@ -67,6 +68,7 @@ function RouteOutlet({
 
 function TaskRouteView({ taskKey }: { taskKey: string }) {
   const navigation = useTasksNavigation();
+
   const onCanonicalKey = useCallback(
     (canonicalKey: string) => {
       if (canonicalKey.toUpperCase() !== taskKey.toUpperCase()) {
@@ -78,34 +80,40 @@ function TaskRouteView({ taskKey }: { taskKey: string }) {
     },
     [navigation, taskKey],
   );
+
   return (
     <DetailView
       key={taskKey}
       taskKey={taskKey}
       onCanonicalKey={onCanonicalKey}
+      onBrowse={() => navigation.go({ kind: "all" })}
     />
   );
 }
 
 function resolveRoute(route: TasksRoute): ResolvedTasksRoute {
   if (route.kind !== "project") return route;
+
   return { ...route, view: route.view ?? loadViewMode(route.projectId) };
 }
 
 function TasksAppShellContent({ subPath }: PluginNavPanelProps) {
   const route = resolveRoute(parseTasksRoute(subPath));
   const tasksNavigation = useTasksNavigation();
+
   const navigation = useMemo<TasksNavigation>(
     () => ({
       go: (target, options) => {
         if (target.kind === "project" && target.view !== null) {
           storeViewMode(target.projectId, target.view);
         }
+
         tasksNavigation.go(target, options);
       },
     }),
     [tasksNavigation],
   );
+
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
@@ -113,14 +121,18 @@ function TasksAppShellContent({ subPath }: PluginNavPanelProps) {
   const [boardUsable, setBoardUsable] = useState(true);
   useEffect(() => {
     const main = mainRef.current;
+
     if (!main || typeof ResizeObserver === "undefined") return;
+
     const update = () => {
       const mainWidth = main.clientWidth;
       setBoardUsable(!(mainWidth > 0 && mainWidth < BOARD_MIN_WIDTH));
     };
+
     update();
     const observer = new ResizeObserver(update);
     observer.observe(main);
+
     return () => observer.disconnect();
   }, []);
   const projects = useProjects();
@@ -130,20 +142,27 @@ function TasksAppShellContent({ subPath }: PluginNavPanelProps) {
     if (route.kind !== "task") lastBrowseRouteRef.current = route;
     // oxlint-disable-next-line react/exhaustive-deps
   }, [subPath]);
+
   const backFromTask = () =>
     navigation.go(lastBrowseRouteRef.current ?? { kind: "all" });
+
   const onTaskRoute = route.kind === "task";
   const backRef = useRef(backFromTask);
   backRef.current = backFromTask;
   useEffect(() => {
     if (!onTaskRoute) return;
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
+
       if (isEditableTarget(event.target)) return;
+
       if (hasOpenOverlay()) return;
       backRef.current();
     };
+
     window.addEventListener("keydown", onKeyDown);
+
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onTaskRoute]);
 
@@ -154,13 +173,18 @@ function TasksAppShellContent({ subPath }: PluginNavPanelProps) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "c" || event.metaKey || event.ctrlKey || event.altKey)
         return;
+
       if (event.defaultPrevented || event.repeat) return;
+
       if (isEditableTarget(event.target)) return;
+
       if (hasOpenOverlay()) return;
       event.preventDefault();
       setNewTaskOpen(true);
     };
+
     window.addEventListener("keydown", onKeyDown);
+
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 

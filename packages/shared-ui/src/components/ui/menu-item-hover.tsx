@@ -26,6 +26,7 @@ const MenuHoverContext = React.createContext<MenuHoverContextValue>({
 
 export function MenuHoverProvider({ children }: { children: React.ReactNode }) {
   const [lastHoveredId, setLastHoveredId] = React.useState<string | null>(null);
+
   const value = React.useMemo<MenuHoverContextValue>(
     () => ({
       lastHoveredId,
@@ -34,6 +35,7 @@ export function MenuHoverProvider({ children }: { children: React.ReactNode }) {
     }),
     [lastHoveredId],
   );
+
   return (
     <MenuHoverContext.Provider value={value}>
       {children}
@@ -57,8 +59,10 @@ export function useMenuItemHover(handlers?: MenuItemHoverHandlers): {
   hoverProps: MenuItemHoverProps;
 } {
   const id = React.useId();
+
   const { lastHoveredId, setLastHovered, clearLastHovered } =
     React.useContext(MenuHoverContext);
+
   const isLastHovered = lastHoveredId === id;
 
   const handlersRef = React.useRef(handlers);
@@ -75,6 +79,7 @@ export function useMenuItemHover(handlers?: MenuItemHoverHandlers): {
   const onKeyDown = React.useCallback(
     (event: React.KeyboardEvent) => {
       handlersRef.current?.onKeyDown?.(event);
+
       if (MENU_NAV_KEYS.has(event.key)) {
         clearLastHovered();
       }

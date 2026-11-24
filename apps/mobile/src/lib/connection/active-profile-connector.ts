@@ -12,19 +12,27 @@ import type {
   SessionState,
 } from "../session/session-scheduler";
 
-export interface ActiveProfileConnection {
-  profile: ServerProfile;
-  client: ProfileClient;
-  session: SessionState;
-}
+export type ActiveProfileConnection =
+  | { profile: ServerProfile; client: ProfileClient; session: SessionState }
+  | {
+      profile: ServerProfile;
+      client: null;
+      session: { status: "unsupported"; detail: string };
+    };
+
+export const UNSUPPORTED_RELAY_DETAIL =
+  "This server uses a retired relay. Pair it again through omnyo.link, or choose another server in Servers.";
 
 export interface ActiveProfileConnector {
   activate(profile: ServerProfile | null): void;
   getSnapshot(): ActiveProfileConnection | null;
   subscribe(listener: () => void): () => void;
+  renewSession(profileId: string): Promise<void>;
+  reportShellAuthFailure(profileId: string): void;
 }
 
 export interface CreateActiveProfileConnectorDeps {
+  isSupportedRelay(serverUrl: string): boolean;
   registry: ProfileClientRegistry;
   appState: AppStateLike;
   createSessionScheduler: () => SessionScheduler;
@@ -33,11 +41,17 @@ export interface CreateActiveProfileConnectorDeps {
 const IDLE_SESSION: SessionState = { status: "idle" };
 
 export const CONNECT_FAILURE_VERIFY_INTERVAL_MS = 30_000;
+
 export const AUTH_FAILURE_VERIFY_DEBOUNCE_MS = 2000;
+
 export const AUTH_FAILURE_REFETCH_DELAY_MS = 250;
+
 export const AUTH_FAILURE_MAX_REMINTS = 3;
+
 export const AUTH_FAILURE_STREAK_WINDOW_MS = 60_000;
+
 export const AUTH_FAILURE_BREAKER_COOLDOWN_MS = 60_000;
+
 const AUTH_FAILURE_BREAKER_DETAIL =
   "The session was minted but the server keeps rejecting it; check the device clock or pair again";
 
@@ -55,8 +69,15 @@ export function createActiveProfileConnector(
   let identity: string | null = null;
   let teardown: (() => void) | null = null;
 
+  let sessionControl: {
+    profileId: string;
+    renew(): Promise<void>;
+    reportShellAuthFailure(): void;
+  } | null = null;
+
   function setSnapshot(next: ActiveProfileConnection | null): void {
     snapshot = next;
+
     for (const listener of listeners) listener();
   }
 
@@ -82,10 +103,12 @@ export function createActiveProfileConnector(
     let lastVerifyAt = -Infinity;
     let refetchTimer: ReturnType<typeof setTimeout> | null = null;
     let remints = 0;
+
     let breaker: {
       retryAt: number;
       timer: ReturnType<typeof setTimeout>;
     } | null = null;
+
     const publishSession = (session: SessionState): void => {
       if (snapshot?.client !== client) return;
       setSnapshot({
@@ -100,15 +123,18 @@ export function createActiveProfileConnector(
             : session,
       });
     };
+
     const resetBreaker = (): void => {
       if (breaker === null) return;
       clearTimeout(breaker.timer);
       breaker = null;
     };
+
     const unsubscribe = scheduler.onStateChange((session) => {
       if (session.status === "authenticated") {
         if (!session.restored) lastVerifyAt = Date.now();
         refetchQueriesRejectedBeforeSession(client.queryClient);
+
         if (disconnectRealtime === null) {
           disconnectRealtime = connectProfileClient(client, deps.appState);
         }
@@ -119,17 +145,19 @@ export function createActiveProfileConnector(
         disconnectRealtime();
         disconnectRealtime = null;
       }
+
       publishSession(session);
     });
+
     const unbindAppState = bindSessionToAppState(scheduler, deps.appState);
 
     let verifying = false;
-    const verifySession = (): void => {
+
+    const remintSession = (mode: "verify" | "renew"): void => {
       if (verifying) return;
       verifying = true;
       lastVerifyAt = Date.now();
-      void scheduler
-        .verifySession()
+      void (mode === "renew" ? scheduler.renewNow() : scheduler.verifySession())
         .then((session) => {
           if (session.status === "authenticated") {
             client.realtime.probeOrReconnect();
@@ -139,6 +167,7 @@ export function createActiveProfileConnector(
           verifying = false;
         });
     };
+
     const refetchRejectedSoon = (): void => {
       if (refetchTimer !== null) return;
       refetchTimer = setTimeout(() => {
@@ -146,6 +175,7 @@ export function createActiveProfileConnector(
         refetchQueriesRejectedBeforeSession(client.queryClient);
       }, AUTH_FAILURE_REFETCH_DELAY_MS);
     };
+
     const tripBreaker = (): void => {
       const retryAt = Date.now() + AUTH_FAILURE_BREAKER_COOLDOWN_MS;
       breaker = {
@@ -153,61 +183,93 @@ export function createActiveProfileConnector(
         timer: setTimeout(() => {
           breaker = null;
           publishSession(scheduler.getState());
-          verifySession();
+          remintSession("verify");
         }, AUTH_FAILURE_BREAKER_COOLDOWN_MS),
       };
       publishSession(scheduler.getState());
     };
-    const unsubscribeAuthFailure = client.onAuthFailure(() => {
+
+    const handleAuthFailure = (source: "client" | "shell"): void => {
       if (breaker !== null) return;
+
       if (scheduler.getState().status !== "authenticated") return;
       const sinceVerify = Date.now() - lastVerifyAt;
-      if (sinceVerify < AUTH_FAILURE_VERIFY_DEBOUNCE_MS) {
+
+      if (
+        source === "client" &&
+        sinceVerify < AUTH_FAILURE_VERIFY_DEBOUNCE_MS
+      ) {
         refetchRejectedSoon();
+
         return;
       }
+
       if (verifying) return;
+
       if (sinceVerify >= AUTH_FAILURE_STREAK_WINDOW_MS) remints = 0;
+
       if (remints >= AUTH_FAILURE_MAX_REMINTS) {
         tripBreaker();
+
         return;
       }
+
       remints += 1;
-      verifySession();
+      remintSession(source === "shell" ? "renew" : "verify");
+    };
+
+    const unsubscribeAuthFailure = client.onAuthFailure(() => {
+      handleAuthFailure("client");
     });
+
     const unsubscribeConnected = client.realtime.onConnected(() => {
       remints = 0;
+
       if (breaker === null) return;
       resetBreaker();
       publishSession(scheduler.getState());
       refetchQueriesRejectedBeforeSession(client.queryClient);
     });
+
     const unsubscribeConnectFailed = client.realtime.onConnectFailed(
       (event) => {
         if (event.authRejected) return;
+
         if (client.realtime.isSuspended()) return;
+
         if (Date.now() - lastVerifyAt < CONNECT_FAILURE_VERIFY_INTERVAL_MS) {
           return;
         }
-        verifySession();
+
+        remintSession("verify");
       },
     );
 
+    sessionControl = {
+      profileId: profile.id,
+      renew: () => scheduler.renewNow().then(() => undefined),
+      reportShellAuthFailure: () => handleAuthFailure("shell"),
+    };
+
     teardown = () => {
+      sessionControl = null;
       unsubscribe();
       unbindAppState();
       unsubscribeAuthFailure();
       unsubscribeConnectFailed();
       unsubscribeConnected();
+
       if (refetchTimer !== null) {
         clearTimeout(refetchTimer);
         refetchTimer = null;
       }
+
       resetBreaker();
       disconnectRealtime?.();
       disconnectRealtime = null;
       scheduler.stop();
     };
+
     setSnapshot({ profile, client, session: scheduler.getState() });
     void scheduler.start(profile);
   }
@@ -217,16 +279,36 @@ export function createActiveProfileConnector(
       if (profile === null) {
         teardownCurrent();
         setSnapshot(null);
+
         return;
       }
+
       const nextIdentity = connectionIdentity(profile);
+
       if (identity === nextIdentity && snapshot) {
         if (snapshot.profile !== profile) setSnapshot({ ...snapshot, profile });
+
         return;
       }
+
       teardownCurrent();
       identity = nextIdentity;
+
+      if (
+        profile.mode === "connect" &&
+        !deps.isSupportedRelay(profile.serverUrl)
+      ) {
+        setSnapshot({
+          profile,
+          client: null,
+          session: { status: "unsupported", detail: UNSUPPORTED_RELAY_DETAIL },
+        });
+
+        return;
+      }
+
       const client = deps.registry.getClientForProfile(profile);
+
       if (profile.mode === "connect") {
         activateConnect(profile, client);
       } else {
@@ -234,8 +316,19 @@ export function createActiveProfileConnector(
       }
     },
     getSnapshot: () => snapshot,
+    renewSession(profileId) {
+      return sessionControl?.profileId === profileId
+        ? sessionControl.renew()
+        : Promise.resolve();
+    },
+    reportShellAuthFailure(profileId) {
+      if (sessionControl?.profileId === profileId) {
+        sessionControl.reportShellAuthFailure();
+      }
+    },
     subscribe(listener) {
       listeners.add(listener);
+
       return () => {
         listeners.delete(listener);
       };

@@ -44,16 +44,20 @@ const EMPTY_EXECUTION_OPTIONS = {
 describe("environment cache effects", () => {
   it("removes env-scoped execution options caches on cleanup", () => {
     const queryClient = createCacheEffectQueryClient();
+
     const removedExecutionOptionsKey = scopedSystemExecutionOptionsKey({
       environmentId: "env-removed",
     });
+
     const retainedExecutionOptionsKey = scopedSystemExecutionOptionsKey({
       environmentId: "env-retained",
     });
+
     const removedWorkStatusKey = environmentWorkStatusQueryKey(
       "env-removed",
       "main",
     );
+
     queryClient.setQueryData(
       removedExecutionOptionsKey,
       EMPTY_EXECUTION_OPTIONS,
@@ -80,28 +84,33 @@ describe("environment cache effects", () => {
 
   it("removes both the diff TOC and the observer-less patch cache for the torn-down environment", () => {
     const queryClient = createCacheEffectQueryClient();
+
     const removedDiffFilesKey = environmentDiffFilesQueryKey(
       "env-removed",
       "all",
       "main",
     );
+
     const removedDiffPatchKey = environmentDiffPatchQueryKey(
       "env-removed",
       "all",
       "main",
       "file.ts",
     );
+
     const retainedDiffFilesKey = environmentDiffFilesQueryKey(
       "env-retained",
       "all",
       "main",
     );
+
     const retainedDiffPatchKey = environmentDiffPatchQueryKey(
       "env-retained",
       "all",
       "main",
       "file.ts",
     );
+
     queryClient.setQueryData(removedDiffFilesKey, {
       outcome: "available",
       files: [],

@@ -1,18 +1,19 @@
 import {
   readRetryDiagnostic,
   retryDiagnosticContract,
+  type RetryAvailabilityLookup,
 } from "./src/diagnostics.js";
 import {
   retryAvailabilityMethod,
   retryAvailabilitySchema,
-  type RetryAvailability,
 } from "./src/retry-contract.js";
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi, PluginTurnFailedEvent } from "@omnyo/plugin-sdk";
 import { registerProviderRetryCli } from "./src/cli.js";
 import {
   DEFAULT_MAXIMUM_WAIT_MS,
   decideRetry,
   isRateLimitFailure,
+  verifiedResetAtMs,
 } from "./src/retry-policy.js";
 
 const MAXIMUM_WAIT_OPTIONS = ["6 hours", "24 hours", "No limit"] as const;
@@ -32,53 +33,85 @@ function maximumWaitMs(value: string): number | null {
   }
 }
 
-export default async function plugin(bb: BbPluginApi) {
-  const settings = bb.settings.define({
+export default async function plugin(api: PluginApi) {
+  async function incidentOf(
+    event: PluginTurnFailedEvent,
+    availability: RetryAvailabilityLookup,
+    reason: string,
+  ) {
+    const thread = await api.sdk.threads.get({ threadId: event.threadId });
+    const providerId = event.rateLimits?.providerId ?? thread.providerId;
+
+    const account =
+      availability.kind === "not-routed"
+        ? thread.environmentId === null
+          ? null
+          : `host:${(await api.sdk.environments.get({ environmentId: thread.environmentId })).hostId}`
+        : "account-pool";
+
+    if (account === null) return null;
+
+    return {
+      key: `${providerId}:${event.errorInfo?.category ?? "rate-limit"}:${account}`,
+      label: `${providerId} usage limit`.slice(0, 60),
+      resetAt:
+        reason === "beyond-maximum-wait"
+          ? verifiedResetAtMs(event, availability)
+          : null,
+    };
+  }
+
+  const settings = api.settings.define({
     maximumWait: {
       type: "select",
       label: "Maximum automatic wait",
       description:
-        "Do not schedule a subscription-limit retry when its reset is farther away than this.",
+        "Longest wait for a subscription limit to reset, and roughly how long to keep retrying a model at capacity every 15 minutes.",
       options: [...MAXIMUM_WAIT_OPTIONS],
-      default: "6 hours",
+      default: "No limit",
     },
   });
+
   const initialSettings = await settings.get();
   let maximumWait = maximumWaitMs(initialSettings.maximumWait);
   settings.onChange((next) => {
     maximumWait = maximumWaitMs(next.maximumWait);
   });
 
-  bb.rpc.register(retryDiagnosticContract, {
-    "decision.get": ({ threadId }) => readRetryDiagnostic(bb, threadId),
+  api.rpc.register(retryDiagnosticContract, {
+    "decision.get": ({ threadId }) => readRetryDiagnostic(api, threadId),
   });
-  bb.events.on("turn.failed", async (event) => {
-    let availability: RetryAvailability = { kind: "not-routed" };
+  api.events.on("turn.failed", async (event) => {
+    let availability: RetryAvailabilityLookup = { kind: "not-routed" };
+
     if (isRateLimitFailure(event)) {
-      const sources = await bb.sdk.plugins.experimental_discoverRpc({
+      const sources = await api.sdk.plugins.experimental_discoverRpc({
         method: retryAvailabilityMethod,
       });
+
       for (const source of sources) {
         try {
-          const result = await bb.sdk.plugins.callRpc({
+          const result = await api.sdk.plugins.callRpc({
             pluginId: source.pluginId,
             method: retryAvailabilityMethod,
             input: { threadId: event.threadId, requestId: event.requestId },
             outputSchema: retryAvailabilitySchema,
             signal: AbortSignal.timeout(5_000),
           });
+
           if (result.kind !== "not-routed") {
             availability = result;
             break;
           }
         } catch (error) {
-          bb.log.warn(
+          api.log.warn(
             `Retry availability failed for ${event.threadId}: ${String(error)}`,
           );
-          availability = { kind: "unavailable", reason: "source-unavailable" };
+          availability = { kind: "lookup-failed" };
         }
       }
     }
+
     const decision = decideRetry({
       availability,
       failure: event,
@@ -86,21 +119,40 @@ export default async function plugin(bb: BbPluginApi) {
       now: Date.now(),
       random: Math.random(),
     });
+
     const recordDecision = () =>
-      bb.storage.kv.set(`decision:${event.threadId}`, {
+      api.storage.kv.set(`decision:${event.threadId}`, {
         requestId: event.requestId,
         observedAt: Date.now(),
         availability,
         decision,
       });
+
     if (decision.kind === "decline") {
       await recordDecision();
-      bb.log.info(
+      api.log.info(
         `Automatic retry skipped for ${event.threadId}: ${decision.reason}${availability.kind === "unavailable" ? ` (${availability.reason})` : ""}.`,
       );
+
+      try {
+        await api.sdk.experimental_inbox.declineRetry({
+          threadId: event.threadId,
+          turnRequestId: event.requestId,
+          reason: decision.reason,
+          incident: isRateLimitFailure(event)
+            ? await incidentOf(event, availability, decision.reason)
+            : null,
+        });
+      } catch (error) {
+        api.log.warn(
+          `Retry decline not recorded for ${event.threadId}; Omnyo decides after its window: ${String(error)}`,
+        );
+      }
+
       return;
     }
-    await bb.sdk.threads.retry({
+
+    await api.sdk.threads.retry({
       threadId: event.threadId,
       turnRequestId: event.requestId,
       sendAt: decision.sendAt,
@@ -109,5 +161,5 @@ export default async function plugin(bb: BbPluginApi) {
     await recordDecision();
   });
 
-  registerProviderRetryCli(bb);
+  registerProviderRetryCli(api);
 }

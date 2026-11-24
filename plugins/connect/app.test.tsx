@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import { CONNECT_REALTIME_CHANNEL, type ConnectStatus } from "@/src/types";
 
 const app = await loadPluginApp(() => import("./app"));
@@ -34,7 +34,7 @@ function status(overrides: Partial<ConnectStatus> = {}): ConnectStatus {
     enabled: true,
     handle: null,
     url: null,
-    dashboardUrl: "https://getbb.app/dashboard",
+    dashboardUrl: "https://omnyo.link/dashboard",
     lastError: null,
     nextRetryAt: null,
     since: 1_700_000_000_000,
@@ -54,6 +54,7 @@ interface AccountRpcCall {
 
 function fakeAccountSdk(handlers: Record<string, (input: unknown) => unknown>) {
   const calls: Array<{ pluginId: string; method: string; input: unknown }> = [];
+
   const callRpc = vi.fn(async (args: AccountRpcCall) => {
     calls.push({
       pluginId: args.pluginId,
@@ -61,9 +62,12 @@ function fakeAccountSdk(handlers: Record<string, (input: unknown) => unknown>) {
       input: args.input,
     });
     const handler = handlers[args.method];
+
     if (handler === undefined) throw new Error(`no handler ${args.method}`);
+
     return args.outputSchema.parse(await handler(args.input));
   });
+
   return { calls, sdk: { plugins: { callRpc: callRpc as never } } };
 }
 
@@ -78,8 +82,8 @@ const signedInAccount = {
     handle: "sawyer",
     serverId: "srv_1",
     serverLabel: "workstation",
-    serverUrl: "https://workstation.getbb.app",
-    baseUrl: "https://getbb.app",
+    serverUrl: "https://workstation.omnyo.link",
+    baseUrl: "https://omnyo.link",
   },
 };
 
@@ -88,7 +92,7 @@ function pendingLogin(state = "pending", message: string | null = null) {
     id: "login-1",
     state,
     userCode: "K7QP-2M4X",
-    verificationUrl: "https://getbb.app/link?code=K7QP-2M4X",
+    verificationUrl: "https://omnyo.link/link?code=K7QP-2M4X",
     expiresAt: Date.now() + 600_000,
     message,
   };
@@ -99,7 +103,7 @@ const connected = (overrides: Partial<ConnectStatus> = {}) =>
     state: "connected",
     paired: true,
     handle: "workstation",
-    url: "https://workstation.getbb.app",
+    url: "https://workstation.omnyo.link",
     since: 1_700_000_060_000,
     ...overrides,
   });
@@ -109,8 +113,9 @@ describe("connect settings section", () => {
     expect(app.settingsSections[0]?.title).toBeUndefined();
   });
 
-  it("asks to sign in to the bb account and names the local Cloud host", async () => {
-    const dashboardUrl = "http://bb.localhost:42745/dashboard";
+  it("asks to sign in to the Omnyo account and names the local Cloud host", async () => {
+    const dashboardUrl = "http://omnyo.localhost:42745/dashboard";
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -120,24 +125,30 @@ describe("connect settings section", () => {
       },
     );
 
-    await slot.findByRole("button", { name: "Sign in to your bb account" });
-    slot.getByText("you.bb.localhost:42745");
-    slot.getByText(/Only your bb\.localhost:42745 account can open this bb/);
+    await slot.findByRole("button", { name: "Sign in to your Omnyo account" });
+    slot.getByText("you.omnyo.localhost:42745");
+    slot.getByText(
+      /Only your omnyo\.localhost:42745 account can open this Omnyo/,
+    );
   });
 
-  it("signs in through bb account, shows the code, and waits for approval", async () => {
+  it("signs in through Omnyo account, shows the code, and waits for approval", async () => {
     let polls = 0;
+
     const account = fakeAccountSdk({
       "login.start": () => pendingLogin(),
       "login.poll": () => {
         polls += 1;
+
         return {
           login: pendingLogin(polls > 1 ? "signed-in" : "pending"),
           status: signedInAccount,
         };
       },
     });
+
     let currentStatus = status();
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -149,20 +160,23 @@ describe("connect settings section", () => {
     );
 
     const signIn = await slot.findByRole("button", {
-      name: "Sign in to your bb account",
+      name: "Sign in to your Omnyo account",
     });
+
     vi.useFakeTimers();
     await act(async () => fireEvent.click(signIn));
     expect(slot.getByText("K7QP-2M4X")).toBeTruthy();
     expect(account.calls[0]).toEqual({
-      pluginId: "bb-account",
+      pluginId: "omnyo-account",
       method: "login.start",
       input: { baseUrl: null },
     });
+
     const link = slot.getByRole("link", {
-      name: /Open getbb\.app/,
+      name: /Open omnyo\.link/,
     }) as HTMLAnchorElement;
-    expect(link.href).toBe("https://getbb.app/link?code=K7QP-2M4X");
+
+    expect(link.href).toBe("https://omnyo.link/link?code=K7QP-2M4X");
     expect(link.target).toBe("_blank");
 
     await act(async () => vi.advanceTimersByTimeAsync(1_999));
@@ -177,7 +191,7 @@ describe("connect settings section", () => {
     expect(slot.getByText("Connected")).toBeTruthy();
   });
 
-  it("backs off the sign-in poll while bb account can't be reached", async () => {
+  it("backs off the sign-in poll while Omnyo account can't be reached", async () => {
     const account = fakeAccountSdk({
       "login.start": () => pendingLogin(),
       "login.poll": () => {
@@ -186,8 +200,10 @@ describe("connect settings section", () => {
         });
       },
     });
+
     const polls = () =>
       account.calls.filter((call) => call.method === "login.poll").length;
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -197,9 +213,11 @@ describe("connect settings section", () => {
         rpc: { status: () => status() },
       },
     );
+
     const signIn = await slot.findByRole("button", {
-      name: "Sign in to your bb account",
+      name: "Sign in to your Omnyo account",
     });
+
     vi.useFakeTimers();
     await act(async () => fireEvent.click(signIn));
     expect(slot.getByText("K7QP-2M4X")).toBeTruthy();
@@ -213,7 +231,7 @@ describe("connect settings section", () => {
     expect(polls()).toBe(2);
   });
 
-  it("explains when the bb account plugin is off", async () => {
+  it("explains when the Omnyo account plugin is off", async () => {
     const account = fakeAccountSdk({
       "login.start": () => {
         throw Object.assign(new Error("HTTP 503: not running"), {
@@ -221,20 +239,25 @@ describe("connect settings section", () => {
         });
       },
     });
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
       { sdk: account.sdk, rpc: { status: () => status() } },
     );
+
     fireEvent.click(
-      await slot.findByRole("button", { name: "Sign in to your bb account" }),
+      await slot.findByRole("button", {
+        name: "Sign in to your Omnyo account",
+      }),
     );
-    await slot.findByText(/The bb account plugin is off/);
+    await slot.findByText(/The Omnyo account plugin is off/);
   });
 
-  it("auto-submits a normalized 4-4 pairing code through bb account and applies live paired status", async () => {
+  it("auto-submits a normalized 4-4 pairing code through Omnyo account and applies live paired status", async () => {
     const account = fakeAccountSdk({ redeemCode: () => signedInAccount });
     let currentStatus = status();
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -253,28 +276,30 @@ describe("connect settings section", () => {
 
     await waitFor(() =>
       expect(account.calls).toContainEqual({
-        pluginId: "bb-account",
+        pluginId: "omnyo-account",
         method: "redeemCode",
         input: { code: "K7QP-2M4X", baseUrl: null },
       }),
     );
-    expect(slot.queryByText("https://workstation.getbb.app")).toBeNull();
+    expect(slot.queryByText("https://workstation.omnyo.link")).toBeNull();
 
     currentStatus = connected();
     await slot.emitRealtime(CONNECT_REALTIME_CHANNEL, currentStatus);
 
     await slot.findByText("Connected");
-    slot.getByText("https://workstation.getbb.app");
+    slot.getByText("https://workstation.omnyo.link");
     slot.getByRole("button", { name: "Copy URL" });
   });
 
   it("does not auto-submit an incomplete code", async () => {
     const account = fakeAccountSdk({ redeemCode: () => signedInAccount });
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
       { sdk: account.sdk, rpc: { status: () => status() } },
     );
+
     fireEvent.click(
       await slot.findByRole("button", { name: "Have a pairing code?" }),
     );
@@ -294,6 +319,7 @@ describe("connect settings section", () => {
         throw new Error("HTTP 500: expired_code");
       },
     });
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -318,6 +344,7 @@ describe("connect settings section", () => {
         throw new Error("HTTP 500: profile_unavailable");
       },
     });
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -342,6 +369,7 @@ describe("connect settings section", () => {
       {},
       { rpc: { status: () => connected({ remoteClients: 2 }) } },
     );
+
     await slot.findByText("Connected");
     await slot.findByText(/2 viewing remotely/);
   });
@@ -355,20 +383,22 @@ describe("connect settings section", () => {
           status: () =>
             connected({
               state: "reconnecting",
-              lastError: "can't reach getbb.app — connection refused",
+              lastError: "can't reach omnyo.link — connection refused",
               nextRetryAt: null,
             }),
         },
       },
     );
+
     await slot.findByText("Reconnecting…");
-    await slot.findByText(/can't reach getbb.app — connection refused/);
+    await slot.findByText(/can't reach omnyo.link — connection refused/);
     await slot.findByText(/Local access is unaffected/);
     expect(slot.queryByRole("button", { name: "Open" })).toBeNull();
   });
 
   it("groups shares by host and degrades an unreachable host's group", async () => {
     const reason = "sawyer-air is not connected right now.";
+
     const currentStatus = connected({
       shares: [
         {
@@ -384,17 +414,18 @@ describe("connect settings section", () => {
           hostName: "Workstation",
           port: 3000,
           createdAt: 2,
-          url: "https://workstation--3000.getbb.app",
+          url: "https://workstation--3000.omnyo.link",
         },
         {
           hostId: "host-server",
           hostName: "Workstation",
           port: 8080,
           createdAt: 3,
-          url: "https://workstation--8080.getbb.app",
+          url: "https://workstation--8080.omnyo.link",
         },
       ],
     });
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -411,10 +442,10 @@ describe("connect settings section", () => {
 
     expect(
       slot
-        .getByText("workstation--3000.getbb.app")
+        .getByText("workstation--3000.omnyo.link")
         .closest("a")
         ?.getAttribute("href"),
-    ).toBe("https://workstation--3000.getbb.app");
+    ).toBe("https://workstation--3000.omnyo.link");
     slot.getByText(`Unavailable — ${reason}`);
     expect(
       slot.queryByRole("button", { name: "Copy share URL for port 5173" }),
@@ -423,10 +454,11 @@ describe("connect settings section", () => {
     const machine = slot.getByRole("button", {
       name: "Workstation, 2 shared ports",
     });
+
     fireEvent.click(machine);
     expect(machine.getAttribute("aria-expanded")).toBe("false");
     expect(
-      slot.queryByRole("link", { name: "workstation--3000.getbb.app" }),
+      slot.queryByRole("link", { name: "workstation--3000.omnyo.link" }),
     ).toBeNull();
     expect(slot.getAllByRole("button", { name: "Revoke" })).toHaveLength(1);
     fireEvent.click(machine);
@@ -458,9 +490,11 @@ describe("connect settings section", () => {
       ...currentStatus,
       shares: currentStatus.shares.filter((share) => share.port !== 8080),
     });
+
     const updatedMachine = slot.getByRole("button", {
       name: "Workstation, 1 shared ports",
     });
+
     expect(updatedMachine.getAttribute("aria-expanded")).toBe("false");
     expect(
       slot.getByRole("button", {
@@ -468,15 +502,16 @@ describe("connect settings section", () => {
       }).textContent,
     ).toBe("Revoke all (1)");
     expect(
-      slot.queryByRole("link", { name: "workstation--3000.getbb.app" }),
+      slot.queryByRole("link", { name: "workstation--3000.omnyo.link" }),
     ).toBeNull();
     fireEvent.click(updatedMachine);
-    slot.getByRole("link", { name: "workstation--3000.getbb.app" });
+    slot.getByRole("link", { name: "workstation--3000.omnyo.link" });
     expect(slot.queryByText(":8080")).toBeNull();
   });
 
   it("blocks duplicate revocations while pending and allows retry after bulk failure", async () => {
     let rejectRevoke: (error: Error) => void = () => {};
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -490,7 +525,7 @@ describe("connect settings section", () => {
                   hostName: "Workstation",
                   port: 3000,
                   createdAt: 1,
-                  url: "https://workstation--3000.getbb.app",
+                  url: "https://workstation--3000.omnyo.link",
                 },
               ],
             }),
@@ -501,9 +536,11 @@ describe("connect settings section", () => {
         },
       },
     );
+
     const revokeAll = await slot.findByRole("button", {
       name: "Revoke all (1) shared ports on Workstation",
     });
+
     fireEvent.click(revokeAll);
     await waitFor(() =>
       expect(slot.rpcCalls).toContainEqual({
@@ -540,7 +577,7 @@ describe("connect settings section", () => {
         rpc: {
           status: () => connected({ shares: [] }),
           expose: () => {
-            throw new Error("this bb is not connected to getbb.app");
+            throw new Error("this Omnyo is not connected to omnyo.link");
           },
         },
       },
@@ -561,10 +598,10 @@ describe("connect settings section", () => {
         input: { port: 8080 },
       }),
     );
-    await slot.findByText(/this bb is not connected to getbb.app/);
+    await slot.findByText(/this Omnyo is not connected to omnyo.link/);
   });
 
-  it("only offers phone pairing while bb connect is connected", async () => {
+  it("only offers phone pairing while Omnyo connect is connected", async () => {
     const slot = renderSlot(
       app.settingsSections[1]!,
       {},
@@ -572,6 +609,7 @@ describe("connect settings section", () => {
         rpc: { status: () => status() },
       },
     );
+
     await waitFor(() =>
       expect(slot.rpcCalls).toContainEqual({ method: "status", input: null }),
     );
@@ -598,6 +636,7 @@ describe("connect settings section", () => {
 
   it("add mobile device mints a machine code and shows the QR payload, the code, and a countdown", async () => {
     const expiresAt = Date.now() + 600_000;
+
     const slot = renderSlot(
       app.settingsSections[1]!,
       {},
@@ -607,7 +646,7 @@ describe("connect settings section", () => {
           createMachineCode: () => ({
             code: "K7QP-2M4X",
             expiresAt,
-            serverUrl: "https://workstation.getbb.app",
+            serverUrl: "https://workstation.omnyo.link",
           }),
         },
       },
@@ -628,14 +667,17 @@ describe("connect settings section", () => {
     await slot.findByText("K7QP-2M4X");
     slot.getByRole("button", { name: "Copy pairing code" });
     slot.getByText(/Code expires in 9:5\d/);
+
     const qr = (await slot.findByRole("img", {
-      name: "QR code to pair the bb mobile app",
+      name: "QR code to pair the Omnyo mobile app",
     })) as HTMLImageElement;
+
     expect(qr.src.startsWith("data:image/png")).toBe(true);
   });
 
   it("an expired mobile pairing code offers a fresh one", async () => {
     let minted = 0;
+
     const slot = renderSlot(
       app.settingsSections[1]!,
       {},
@@ -644,10 +686,11 @@ describe("connect settings section", () => {
           status: () => connected(),
           createMachineCode: () => {
             minted += 1;
+
             return {
               code: minted === 1 ? "AAAA-1111" : "BBBB-2222",
               expiresAt: Date.now() + (minted === 1 ? 1_200 : 600_000),
-              serverUrl: "https://workstation.getbb.app",
+              serverUrl: "https://workstation.omnyo.link",
             };
           },
         },
@@ -657,6 +700,7 @@ describe("connect settings section", () => {
     const addMobileDevice = await slot.findByRole("button", {
       name: "Add mobile device",
     });
+
     vi.useFakeTimers();
     await act(async () => fireEvent.click(addMobileDevice));
     expect(slot.getByText("AAAA-1111")).toBeTruthy();
@@ -697,16 +741,19 @@ describe("connect settings section", () => {
     );
 
     await slot.findByText(/reached its machine limit/);
+
     const link = slot.getByRole("link", {
       name: "Revoke a device you no longer use",
     }) as HTMLAnchorElement;
-    expect(link.href).toBe("https://getbb.app/dashboard");
+
+    expect(link.href).toBe("https://omnyo.link/dashboard");
     expect(slot.queryByText("machine_limit")).toBeNull();
     slot.getByRole("button", { name: "Add mobile device" });
   });
 
   it("turn off confirms, keeps the account, and shows the off card with a receipt", async () => {
     let currentStatus = connected();
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -719,6 +766,7 @@ describe("connect settings section", () => {
               enabled,
               state: enabled ? "reconnecting" : "disconnected",
             });
+
             return currentStatus;
           },
         },
@@ -729,7 +777,7 @@ describe("connect settings section", () => {
     fireEvent.click(slot.getByRole("button", { name: "Turn off" }));
 
     await slot.findByText("Turn off remote access?");
-    await slot.findByText(/stays signed in to your bb account/);
+    await slot.findByText(/stays signed in to your Omnyo account/);
     fireEvent.click(slot.getAllByRole("button", { name: "Turn off" }).at(-1)!);
 
     await waitFor(() =>
@@ -755,6 +803,7 @@ describe("connect settings section", () => {
 describe("Connect settings realtime recovery", () => {
   it("refreshes missed status changes after each realtime reconnect", async () => {
     let currentStatus = connected({ state: "reconnecting" });
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -762,6 +811,7 @@ describe("Connect settings realtime recovery", () => {
         rpc: { status: () => currentStatus },
       },
     );
+
     await slot.findByText("Reconnecting…");
     expect(
       slot.inspection.rpcCalls.filter((call) => call.method === "status"),
@@ -791,6 +841,7 @@ describe("Connect settings realtime recovery", () => {
 
   it("retries an initial failed status load when realtime connects", async () => {
     let reachable = false;
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -799,11 +850,13 @@ describe("Connect settings realtime recovery", () => {
         rpc: {
           status: () => {
             if (!reachable) throw new Error("offline");
+
             return connected();
           },
         },
       },
     );
+
     await slot.findByText("Failed to load remote-access status: offline");
 
     reachable = true;
@@ -815,10 +868,13 @@ describe("Connect settings realtime recovery", () => {
 
   it("keeps the reconnect status when the earlier load settles late", async () => {
     let failFirstLoad: (error: Error) => void = () => {};
+
     const firstLoad = new Promise<ConnectStatus>((_, reject) => {
       failFirstLoad = reject;
     });
+
     let calls = 0;
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -836,5 +892,58 @@ describe("Connect settings realtime recovery", () => {
 
     expect(slot.queryByText(/Failed to load/)).toBeNull();
     expect(slot.getByText("Connected")).toBeTruthy();
+  });
+});
+
+describe("paired device list", () => {
+  it("shows the server's devices and refreshes their current records", async () => {
+    let devices = [
+      { id: "phone-1", name: "Alex phone", lastSeenAt: 2000, createdAt: 1000 },
+    ];
+
+    const slot = renderSlot(
+      app.settingsSections[1]!,
+      {},
+      {
+        rpc: {
+          status: () => connected(),
+          listPairedDevices: () => ({ devices }),
+        },
+      },
+    );
+
+    await slot.findByText("Alex phone");
+    expect(slot.getByText("phone-1")).toBeTruthy();
+    devices = [];
+    fireEvent.click(slot.getByRole("button", { name: /^Refresh$/ }));
+    await slot.findByText("No devices are paired with this server.");
+    expect(slot.queryByText("Alex phone")).toBeNull();
+  });
+
+  it("keeps a failed device read distinct from an empty list and allows retry", async () => {
+    let failed = true;
+
+    const slot = renderSlot(
+      app.settingsSections[1]!,
+      {},
+      {
+        rpc: {
+          status: () => connected(),
+          listPairedDevices: () => {
+            if (failed) throw new Error("offline");
+
+            return { devices: [] };
+          },
+        },
+      },
+    );
+
+    await slot.findByText("Could not load paired devices. Try Refresh.");
+    expect(
+      slot.queryByText("No devices are paired with this server."),
+    ).toBeNull();
+    failed = false;
+    fireEvent.click(slot.getByRole("button", { name: /^Refresh$/ }));
+    await slot.findByText("No devices are paired with this server.");
   });
 });

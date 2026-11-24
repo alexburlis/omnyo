@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { formatBbAppConfigPath } from "@bb/config/bb-app-managed-config";
+import { formatAppConfigPath } from "@omnyo/config/managed-app-config";
 import { describe, expect, it } from "vitest";
 import { getAvailableModels } from "../../helpers/api.js";
 import { waitForHostConnected } from "../../helpers/assertions.js";
@@ -12,7 +12,7 @@ describe.sequential("custom provider models integration", () => {
       await waitForHostConnected(harness.api, DEFAULT_TIMEOUT_MS);
 
       await fs.writeFile(
-        formatBbAppConfigPath(harness.server.config.dataDir),
+        formatAppConfigPath(harness.server.config.dataDir),
         `${JSON.stringify({
           customModels: [
             {
@@ -30,9 +30,11 @@ describe.sequential("custom provider models integration", () => {
       const models = await getAvailableModels(harness.api, {
         providerId: "claude-code",
       });
+
       const customModel = models.find(
         (model) => model.model === "claude-example-preview[1m]",
       );
+
       expect(customModel).toMatchObject({
         displayName: "Example Preview (1M)",
         defaultReasoningEffort: "medium",

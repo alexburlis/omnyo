@@ -1,9 +1,9 @@
 import type { QueryKey } from "@tanstack/react-query";
-import type { Environment, Host } from "@bb/domain";
+import type { Environment, Host } from "@omnyo/domain";
 import type {
   SystemConfigResponse,
   SystemProviderCatalogEntry,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   allEnvironmentDiffFilesQueryKeyPrefix,
   allEnvironmentDiffPatchQueryKeyPrefix,
@@ -21,6 +21,7 @@ import {
   allTerminalsQueryKeyPrefix,
   allThreadConversationOutlineQueryKeyPrefix,
   allThreadDetailBootstrapQueryKeyPrefix,
+  allThreadPluginBootstrapQueryKeyPrefix,
   allThreadHostFilePreviewQueryKeyPrefix,
   allThreadPendingInteractionsQueryKeyPrefix,
   allThreadQueuedMessagesQueryKeyPrefix,
@@ -40,6 +41,7 @@ import {
   systemConfigQueryKey,
   systemProviderCatalogQueryKey,
   threadPromptHistoryQueryKeyPrefix,
+  threadOpenRuntimeIdentityQueryKey,
   threadSearchQueryKeyPrefix,
   threadsQueryKey,
 } from "../queries/query-keys";
@@ -50,6 +52,7 @@ import { bumpAllDiffPatchEvictionGenerations } from "./environment-diff-patch-ca
 import { invalidateAppUpdateStatus } from "./app-update-cache-owner";
 import { invalidatePluginList } from "./plugin-cache-owner";
 import { invalidateSystemVersion } from "./system-version-cache-owner";
+import { INBOX_SNAPSHOT_QUERY_KEY } from "./inbox-snapshot-cache-owner";
 import {
   invalidateQueryKeys,
   refetchFailedActiveQueryKeys,
@@ -68,14 +71,14 @@ export function invalidateRealtimeQueriesAfterServerReconnect({
   queryClient,
 }: ServerReconnectInvalidationArgs): void {
   for (const queryKey of getServerReconnectInvalidationQueryKeys()) {
-    void queryClient.invalidateQueries(
-      {
-        queryKey,
-        predicate: (query) => query.state.dataUpdatedAt < disconnectedAt,
-      },
-      { cancelRefetch: false },
-    );
+    void queryClient.cancelQueries({ queryKey });
+    void queryClient.invalidateQueries({
+      queryKey,
+      predicate: (query) =>
+        query.isActive() || query.state.dataUpdatedAt < disconnectedAt,
+    });
   }
+
   invalidateSystemVersion({ queryClient });
   invalidateAppUpdateStatus({ queryClient });
   bumpAllDiffPatchEvictionGenerations();
@@ -102,11 +105,13 @@ export function invalidateRealtimeQueriesFetchedBeforeInitialConnect({
   queryClient,
 }: InitialConnectInvalidationArgs): void {
   for (const queryKey of getServerReconnectInvalidationQueryKeys()) {
+    void queryClient.cancelQueries({ queryKey });
     queryClient.invalidateQueries({
       queryKey,
       predicate: (query) =>
-        query.state.dataUpdatedAt !== 0 &&
-        query.state.dataUpdatedAt < connectedAt,
+        query.isActive() ||
+        (query.state.dataUpdatedAt !== 0 &&
+          query.state.dataUpdatedAt < connectedAt),
     });
   }
 }
@@ -114,7 +119,16 @@ export function invalidateRealtimeQueriesFetchedBeforeInitialConnect({
 export function refetchActiveRealtimeQueriesOnResume({
   queryClient,
 }: QueryClientArg): void {
+  refetchFailedActiveQueryKeys({
+    queryClient,
+    queryKeys: [
+      allThreadDetailBootstrapQueryKeyPrefix(),
+      allThreadPluginBootstrapQueryKeyPrefix(),
+    ],
+  });
+
   for (const queryKey of [
+    INBOX_SNAPSHOT_QUERY_KEY,
     allThreadTimelineQueryKeyPrefix(),
     allThreadQueryKeyPrefix(),
     sidebarNavigationQueryKey(),
@@ -157,12 +171,14 @@ export async function applyProviderAvailabilityChange({
   ]);
 }
 
-export function invalidateSystemProviders({
+export async function invalidateSystemProviders({
   queryClient,
 }: QueryClientArg): Promise<void> {
-  return queryClient.invalidateQueries({
-    queryKey: allSystemProvidersQueryKeyPrefix(),
-  });
+  await Promise.all(
+    [allSystemProvidersQueryKeyPrefix(), systemProviderCatalogQueryKey()].map(
+      (queryKey) => queryClient.invalidateQueries({ queryKey }),
+    ),
+  );
 }
 
 export function invalidateMachineProviders({
@@ -180,17 +196,22 @@ export function invalidateSystemExecutionOptions({
   const primaryHostId =
     queryClient.getQueryData<SystemConfigResponse>(systemConfigQueryKey())
       ?.primaryHostId ?? null;
+
   return queryClient.invalidateQueries({
     queryKey: allSystemExecutionOptionsQueryKeyPrefix(),
     predicate: (query) => {
       const [, environmentId, routedHostId] = query.queryKey;
+
       if (typeof routedHostId === "string") return routedHostId === hostId;
+
       if (typeof environmentId === "string") {
         const environment = queryClient.getQueryData<Environment>(
           environmentQueryKey(environmentId),
         );
+
         return environment === undefined || environment.hostId === hostId;
       }
+
       return primaryHostId === null || primaryHostId === hostId;
     },
   });
@@ -214,6 +235,7 @@ export function resetModelCatalogsAfterStreamerModeChange({
   queryClient,
 }: QueryClientArg): Promise<void> {
   clearCachedModelCatalogs();
+
   return queryClient.resetQueries({
     queryKey: allSystemExecutionOptionsQueryKeyPrefix(),
   });
@@ -221,6 +243,8 @@ export function resetModelCatalogsAfterStreamerModeChange({
 
 function getServerReconnectInvalidationQueryKeys(): QueryKey[] {
   return [
+    INBOX_SNAPSHOT_QUERY_KEY,
+    threadOpenRuntimeIdentityQueryKey(),
     hostsQueryKey(),
     allHostQueryKeyPrefix(),
     projectsQueryKey(),
@@ -230,6 +254,7 @@ function getServerReconnectInvalidationQueryKeys(): QueryKey[] {
     threadSearchQueryKeyPrefix(),
     allThreadQueryKeyPrefix(),
     allThreadDetailBootstrapQueryKeyPrefix(),
+    allThreadPluginBootstrapQueryKeyPrefix(),
     allThreadTimelineQueryKeyPrefix(),
     allThreadConversationOutlineQueryKeyPrefix(),
     allThreadTimelineTurnSummaryDetailsQueryKeyPrefix(),
@@ -250,6 +275,7 @@ function getServerReconnectInvalidationQueryKeys(): QueryKey[] {
     allEnvironmentFilePreviewQueryKeyPrefix(),
     hostPathExistenceQueryKeyPrefix(),
     allSystemProvidersQueryKeyPrefix(),
+    systemProviderCatalogQueryKey(),
     allSystemExecutionOptionsQueryKeyPrefix(),
     serverMoveStatusQueryKey(),
   ];

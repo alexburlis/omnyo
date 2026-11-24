@@ -46,6 +46,7 @@ describe("PluginRowSignalView", () => {
     const statusButton = screen.getByRole("button", {
       name: "Degraded: One background service failed.",
     });
+
     expect(screen.queryByText("Degraded")).toBeNull();
 
     focusWithKeyboard(statusButton);
@@ -65,6 +66,7 @@ describe("PluginRowSignalView", () => {
         onStatusClick={vi.fn()}
       />,
     );
+
     expect(
       screen.getByRole("button", { name: "Update to 1.2.0" }),
     ).toBeTruthy();

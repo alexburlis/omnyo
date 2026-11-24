@@ -1,4 +1,4 @@
-import { createBrowserBbSdk, type BrowserBbSdk } from "@bb/sdk/browser";
+import { createBrowserOmnyoSdk, type BrowserOmnyoSdk } from "@omnyo/sdk/browser";
 import type { ServerProfile } from "../profiles/profile";
 import {
   createMobileRealtime,
@@ -9,7 +9,7 @@ import { realtimeUrlForServer } from "../realtime/realtime-url";
 import { createMobileFetch, type MobileFetchOptions } from "./mobile-fetch";
 
 export interface MobileSdk {
-  sdk: BrowserBbSdk;
+  sdk: BrowserOmnyoSdk;
   realtime: MobileRealtime;
   fetch: typeof fetch;
 }
@@ -26,17 +26,21 @@ export function createMobileSdk(
   options: CreateMobileSdkOptions = {},
 ): MobileSdk {
   const baseFetch = options.fetch ?? ((input, init) => fetch(input, init));
+
   const mobileFetch = createMobileFetch(baseFetch, {
     onAuthFailure: options.onAuthFailure,
     onServerMoved: options.onServerMoved,
   });
-  const sdk = createBrowserBbSdk({
+
+  const sdk = createBrowserOmnyoSdk({
     baseUrl: profile.serverUrl,
     fetch: mobileFetch,
   });
+
   const realtime = createMobileRealtime({
     ...options.realtime,
     url: realtimeUrlForServer(profile.serverUrl),
   });
+
   return { sdk, realtime, fetch: mobileFetch };
 }

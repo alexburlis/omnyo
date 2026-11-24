@@ -7,6 +7,7 @@ export const contextEntrySchema = z.object({
   label: z.string().min(1),
   tokens: tokenCountSchema,
 });
+
 export type ContextEntry = z.infer<typeof contextEntrySchema>;
 
 export const contextCategorySchema = z.object({
@@ -16,6 +17,7 @@ export const contextCategorySchema = z.object({
   tokens: tokenCountSchema,
   entries: z.array(contextEntrySchema),
 });
+
 export type ContextCategory = z.infer<typeof contextCategorySchema>;
 
 export const contextSnapshotSchema = z.object({
@@ -29,4 +31,5 @@ export const contextSnapshotSchema = z.object({
   estimated: z.boolean(),
   categories: z.array(contextCategorySchema),
 });
+
 export type ContextSnapshot = z.infer<typeof contextSnapshotSchema>;

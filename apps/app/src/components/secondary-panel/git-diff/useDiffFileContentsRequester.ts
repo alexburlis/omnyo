@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { WorkspaceDiffTarget } from "@bb/domain";
-import type { EnvironmentDiffFileResponse } from "@bb/server-contract";
-import type { EnvironmentDiffFileArgs } from "@bb/sdk/browser";
+import type { WorkspaceDiffTarget } from "@omnyo/domain";
+import type { EnvironmentDiffFileResponse } from "@omnyo/server-contract";
+import type { EnvironmentDiffFileArgs } from "@omnyo/sdk/browser";
 import { environmentDiffFileQueryKey } from "@/hooks/queries/query-keys";
 import { sdk } from "@/lib/sdk";
 import type {
@@ -28,6 +28,7 @@ export function useDiffFileContentsRequester({
   mergeBaseRef,
 }: UseDiffFileContentsRequesterArgs): RequestDiffFileContents | undefined {
   const queryClient = useQueryClient();
+
   const fileTarget = useMemo<DiffFileTarget | undefined>(
     () => buildDiffFileTarget(target, mergeBaseRef),
     [target, mergeBaseRef],
@@ -38,6 +39,7 @@ export function useDiffFileContentsRequester({
     const envId = environmentId;
     const resolvedTarget = fileTarget;
     const targetKey = fileTargetKey(resolvedTarget);
+
     return async (path, side) => {
       const result = await queryClient.fetchQuery({
         queryKey: environmentDiffFileQueryKey(
@@ -59,6 +61,7 @@ export function useDiffFileContentsRequester({
           ),
         staleTime: 5_000,
       });
+
       return toDiffFileContentsResult(path, result);
     };
   }, [environmentId, fileTarget, queryClient]);
@@ -107,6 +110,7 @@ function fileTargetKey(target: DiffFileTarget): string | null {
       return target.sha;
     default: {
       const _exhaustive: never = target;
+
       return _exhaustive;
     }
   }
@@ -117,6 +121,7 @@ function buildDiffFileTarget(
   mergeBaseRef: string | null,
 ): DiffFileTarget | undefined {
   if (!target) return undefined;
+
   switch (target.type) {
     case "uncommitted":
       return { type: "uncommitted" };
@@ -130,6 +135,7 @@ function buildDiffFileTarget(
       return { type: "commit", sha: target.sha };
     default: {
       const _exhaustive: never = target;
+
       return _exhaustive;
     }
   }
@@ -153,7 +159,9 @@ function toDiffFileContentsResult(
   if (response.contentEncoding === "utf8") {
     return { kind: "text", file: { name: path, contents: response.content } };
   }
+
   const mimeType = response.mimeType;
+
   if (mimeType !== undefined && PREVIEWABLE_IMAGE_MIME_TYPES.has(mimeType)) {
     return {
       kind: "image",
@@ -161,5 +169,6 @@ function toDiffFileContentsResult(
       sizeBytes: response.sizeBytes,
     };
   }
+
   return null;
 }

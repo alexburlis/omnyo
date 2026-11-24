@@ -1,18 +1,20 @@
+import { formatMachineHousekeeping } from "./machine-housekeeping.js";
 import { registerMachineEnvironmentCommands } from "./machine-environment.js";
 import {
   enrollMachine,
   type MachineEnrollmentOptions,
 } from "./machine-enrollment.js";
 import { Command } from "commander";
-import { jsonValueSchema, type Host, type JsonValue } from "@bb/domain";
+import { jsonValueSchema, type Host, type JsonValue } from "@omnyo/domain";
 import { action, CliExitError } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { columnWidths, printBorderlessTable } from "../table.js";
 import { outputJson } from "./helpers.js";
 import { confirmDestructiveAction } from "./helpers.js";
 
 function enrollmentExpiryNotice(expiresAt: number | null): string {
   if (expiresAt === null) return "This command expires once it is used.";
+
   return `This command expires at ${new Date(expiresAt).toLocaleTimeString()}.`;
 }
 
@@ -37,9 +39,11 @@ interface MachineMutationCommandOptions extends MachineListCommandOptions {
 
 interface MachineProviderInstallOptions extends MachineListCommandOptions {
   action?: "install" | "update";
+  yes?: boolean;
 }
 
 const MACHINE_LIFECYCLE_TIMEOUT_MS = 15 * 60_000;
+
 const MACHINE_LIFECYCLE_POLL_MS = 500;
 
 async function waitForMachineLifecycle(args: {
@@ -49,14 +53,17 @@ async function waitForMachineLifecycle(args: {
 }): Promise<Host> {
   let host = args.host;
   const deadline = Date.now() + MACHINE_LIFECYCLE_TIMEOUT_MS;
+
   while (host.lifecycle.phase !== args.targetPhase) {
     const message = host.lifecycle.message;
+
     if (
       message?.startsWith("Machine suspension failed:") ||
       message?.startsWith("Machine resume failed:")
     ) {
       throw new Error(message);
     }
+
     if (
       host.lifecycle.phase === "removing" ||
       host.lifecycle.phase === "destroyed"
@@ -66,28 +73,34 @@ async function waitForMachineLifecycle(args: {
           `Machine entered the ${host.lifecycle.phase} phase`,
       );
     }
+
     if (Date.now() >= deadline) {
       throw new Error(
         `Timed out after ${MACHINE_LIFECYCLE_TIMEOUT_MS / 1000} seconds waiting for machine ${host.id} to become ${args.targetPhase}`,
       );
     }
+
     await new Promise<void>((resolve) =>
       setTimeout(resolve, MACHINE_LIFECYCLE_POLL_MS),
     );
     host = await args.getHost();
   }
+
   return host;
 }
 
 function parseProviderCliKey(value: string): string {
   const providerId = value.trim();
+
   if (providerId.length === 0)
     throw new Error("provider ID must not be empty.");
+
   return providerId;
 }
 
 function describeMachines(hosts: readonly Host[]): string {
   if (hosts.length === 0) return "none";
+
   return hosts.map((host) => `${host.name} (${host.id})`).join(", ");
 }
 
@@ -108,15 +121,19 @@ export function resolveMachineId(
 ): string {
   const trimmedTarget = target.trim();
   const idMatch = hosts.find((host) => host.id === trimmedTarget);
+
   if (idMatch) return idMatch.id;
 
   const nameMatches = hosts.filter((host) => host.name === trimmedTarget);
+
   if (nameMatches.length === 1) return nameMatches[0].id;
+
   if (nameMatches.length > 1) {
     throw new Error(
       `Machine name '${trimmedTarget}' is ambiguous. Matches: ${describeMachines(nameMatches)}.`,
     );
   }
+
   throw new Error(
     `Machine '${trimmedTarget}' was not found. Available machines: ${describeMachines(hosts)}.`,
   );
@@ -129,6 +146,7 @@ export function resolveMachineTargetOption(args: {
   if (args.machine && args.host) {
     throw new Error("Cannot combine --machine with --host.");
   }
+
   return args.machine ?? args.host;
 }
 
@@ -142,19 +160,23 @@ export async function resolveMachineEnvironmentRouting(
   serverUrl: string,
 ): Promise<MachineEnvironmentRouting> {
   const machineTarget = resolveMachineTargetOption(args);
+
   if (machineTarget !== undefined && args.environment !== undefined) {
     throw new Error(
       "Cannot combine --machine or --host with --environment; the environment already selects its machine.",
     );
   }
+
   if (args.environment !== undefined) {
     return { environmentId: args.environment };
   }
+
   if (machineTarget !== undefined) {
     return {
       hostId: await resolveMachineHostId({ serverUrl, target: machineTarget }),
     };
   }
+
   return {};
 }
 
@@ -167,9 +189,13 @@ export function formatMachineLastSeen(
   const minuteMs = 60 * 1000;
   const hourMs = 60 * minuteMs;
   const dayMs = 24 * hourMs;
+
   if (elapsedMs < minuteMs) return "just now";
+
   if (elapsedMs < hourMs) return `${Math.floor(elapsedMs / minuteMs)}m ago`;
+
   if (elapsedMs < dayMs) return `${Math.floor(elapsedMs / hourMs)}h ago`;
+
   return `${Math.floor(elapsedMs / dayMs)}d ago`;
 }
 
@@ -178,16 +204,19 @@ export async function resolveMachineHostId(args: {
   serverUrl: string;
   target: string;
 }): Promise<string> {
-  const hosts = await createCliBbSdk(args.serverUrl).hosts.list({
+  const hosts = await createCliOmnyoSdk(args.serverUrl).hosts.list({
     includeCreating: true,
   });
+
   const hostId = resolveMachineId(hosts, args.target);
+
   if (
     args.requireConnected &&
     hosts.find((host) => host.id === hostId)?.status !== "connected"
   ) {
     throw new Error(`Machine '${args.target.trim()}' is disconnected.`);
   }
+
   return hostId;
 }
 
@@ -200,6 +229,46 @@ export function registerMachineCommands(
     .description("Inspect execution machines");
 
   registerMachineEnvironmentCommands(machine, getUrl);
+  machine
+    .command("housekeeping <id-or-name>")
+    .description(
+      "Show the last idle-session cleanup check and why sessions remain",
+    )
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(async (target: string, options: MachineListCommandOptions) => {
+        const sdk = createCliOmnyoSdk(getUrl());
+
+        const hostId = await resolveMachineHostId({
+          serverUrl: getUrl(),
+          target,
+          requireConnected: true,
+        });
+
+        const status = await sdk.hosts.experimental_housekeeping({ hostId });
+
+        if (!outputJson(options, status))
+          console.log(formatMachineHousekeeping(status));
+      }),
+    );
+
+  machine
+    .command("direct-access <id>")
+    .description(
+      "Convert an idle worker to direct access or confirm its pending grant retirement",
+    )
+    .option("--json", "Print JSON")
+    .action(
+      action(async (id: string) => {
+        console.log(
+          JSON.stringify(
+            await createCliOmnyoSdk(getUrl()).hosts.convertToDirect(id),
+            null,
+            2,
+          ),
+        );
+      }),
+    );
 
   machine
     .command("enroll")
@@ -213,6 +282,7 @@ export function registerMachineCommands(
     .action(
       action(async (options: MachineEnrollmentOptions & { json?: boolean }) => {
         const result = await enrollMachine(options);
+
         if (!outputJson(options, result))
           console.log(`Machine ${result.hostId} enrolled`);
       }),
@@ -224,9 +294,9 @@ export function registerMachineCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async () => {
-        throw new CliExitError("bb machine join-code has been removed.", 1, {
+        throw new CliExitError("omnyo machine join-code has been removed.", 1, {
           code: "removed_command",
-          hint: "Use `bb machine create --provider manual` and run the printed enrollment command.",
+          hint: "Use `omnyo machine create --provider manual` and run the printed enrollment command.",
         });
       }),
     );
@@ -246,8 +316,10 @@ export function registerMachineCommands(
       action(async (opts: MachineCreateCommandOptions) => {
         const machineProviderId = parseProviderCliKey(opts.provider);
         const key = opts.key?.trim();
+
         if (key === "") throw new Error("Creation key must not be empty.");
         let inputs: JsonValue = null;
+
         if (opts.inputs !== undefined) {
           try {
             inputs = jsonValueSchema.parse(JSON.parse(opts.inputs));
@@ -255,12 +327,15 @@ export function registerMachineCommands(
             throw new Error("--inputs must be valid JSON.");
           }
         }
+
         const controller = new AbortController();
         const cancel = () => controller.abort();
         process.once("SIGINT", cancel);
+
         try {
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
           controller.signal.throwIfAborted();
+
           let host = await sdk.hosts.experimental_create({
             machineProviderId,
             inputs,
@@ -268,23 +343,46 @@ export function registerMachineCommands(
             wait: false,
             signal: controller.signal,
           });
+
           if (!opts.wait) {
             if (!outputJson(opts, host)) console.log(host.id);
+
             return;
           }
+
           let enrollmentCommandShown = false;
+
           const reportEnrollmentCommand = async (current: Host) => {
             if (
               enrollmentCommandShown ||
               current.lifecycle.phase !== "creating"
             )
               return;
+
             const enrollmentCommand =
               await sdk.hosts.experimental_getEnrollmentCommand({
                 hostId: current.id,
                 signal: controller.signal,
               });
+
             if (enrollmentCommand !== null) {
+              const { shortCommand } = enrollmentCommand;
+
+              if (shortCommand !== undefined) {
+                console.error(`Setup code: ${shortCommand.code}`);
+                console.error("On macOS or Linux, run:");
+                console.error(shortCommand.command);
+                console.error("On Windows, run in PowerShell:");
+                console.error(shortCommand.windowsCommand);
+
+                if (shortCommand.pageUrl !== undefined)
+                  console.error(
+                    `Or open ${shortCommand.pageUrl} in a browser on that machine and copy the command there.`,
+                  );
+                console.error(enrollmentExpiryNotice(shortCommand.expiresAt));
+                console.error("If the short command fails, use the full one.");
+              }
+
               console.error("On macOS or Linux, run:");
               console.error(enrollmentCommand.command);
               console.error("On Windows, run in PowerShell:");
@@ -295,6 +393,7 @@ export function registerMachineCommands(
               enrollmentCommandShown = true;
             }
           };
+
           await reportEnrollmentCommand(host);
           console.error(`Following machine ${host.id}`);
           host = await waitForMachineLifecycle({
@@ -305,19 +404,23 @@ export function registerMachineCommands(
                 hostId: host.id,
                 signal: controller.signal,
               });
+
               await reportEnrollmentCommand(current);
+
               return current;
             },
           });
+
           if (!outputJson(opts, host))
             console.log(`Machine ${host.name} created`);
         } catch (error) {
           if (controller.signal.aborted) {
             throw new CliExitError(
-              "Stopped following; creation continues. Use bb machine remove <host-id> to cancel.",
+              "Stopped following; creation continues. Use omnyo machine remove <host-id> to cancel.",
               130,
             );
           }
+
           throw error;
         } finally {
           process.off("SIGINT", cancel);
@@ -332,12 +435,16 @@ export function registerMachineCommands(
     .action(
       action(async (opts: MachineListCommandOptions) => {
         const providers =
-          await createCliBbSdk(getUrl()).hosts.experimental_listProviders();
+          await createCliOmnyoSdk(getUrl()).hosts.experimental_listProviders();
+
         if (outputJson(opts, providers)) return;
+
         if (providers.length === 0) {
           console.log("No machine providers found");
+
           return;
         }
+
         console.log(
           providers
             .map((provider) => `${provider.id}  ${provider.displayName}`)
@@ -356,16 +463,21 @@ export function registerMachineCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (opts: MachineEnumerationOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const hosts = await sdk.hosts.list({
           includeCreating: true,
           ...(opts.all ? {} : { type: "persistent" }),
         });
+
         if (outputJson(opts, hosts)) return;
+
         if (hosts.length === 0) {
           console.log("No machines found");
+
           return;
         }
+
         const { primaryHostId } = await sdk.system.config();
         printMachineTable(hosts, primaryHostId);
       }),
@@ -377,12 +489,15 @@ export function registerMachineCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (target: string, opts: MachineListCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const hostId = await resolveMachineHostId({
           serverUrl: getUrl(),
           target,
         });
+
         const host = await sdk.hosts.get({ hostId });
+
         if (outputJson(opts, host)) return;
         console.log(JSON.stringify(host, null, 2));
       }),
@@ -398,12 +513,16 @@ export function registerMachineCommands(
           serverUrl: getUrl(),
           target,
         });
-        const sdk = createCliBbSdk(getUrl());
+
+        const sdk = createCliOmnyoSdk(getUrl());
         const reconnect = await sdk.hosts.experimental_reconnect({ hostId });
+
         if (opts.json) {
           outputJson(opts, reconnect);
+
           return;
         }
+
         console.log(
           `Machine ${hostId} keeps its host ID. Run this command on the machine within 15 minutes:`,
         );
@@ -411,9 +530,12 @@ export function registerMachineCommands(
         console.log(reconnect.command);
         console.error(`Waiting for machine ${hostId} to reconnect…`);
         const deadline = Date.now() + MACHINE_LIFECYCLE_TIMEOUT_MS;
+
         for (;;) {
           const host = await sdk.hosts.get({ hostId });
+
           if (host.status === "connected") break;
+
           if (Date.now() >= deadline)
             throw new Error(
               `Timed out waiting for machine ${hostId} to reconnect`,
@@ -422,6 +544,7 @@ export function registerMachineCommands(
             setTimeout(resolve, MACHINE_LIFECYCLE_POLL_MS),
           );
         }
+
         console.log(`Machine ${hostId} reconnected successfully.`);
       }),
     );
@@ -437,17 +560,53 @@ export function registerMachineCommands(
           name: string,
           opts: MachineListCommandOptions,
         ) => {
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
+
           const hostId = await resolveMachineHostId({
             serverUrl: getUrl(),
             target,
           });
+
           const host = await sdk.hosts.update({ hostId, name });
+
           if (outputJson(opts, host)) return;
           console.log(`Machine ${host.id} renamed to ${host.name}`);
         },
       ),
     );
+
+  for (const availability of ["away", "available"] as const) {
+    machine
+      .command(`${availability} <id-or-name>`)
+      .description(
+        availability === "away"
+          ? "Stop all Omnyo work on a machine and hold new turns until it is available"
+          : "Let Omnyo use a machine again and release its held turns",
+      )
+      .option("--json", "Print machine-readable JSON output")
+      .action(
+        action(async (target: string, opts: MachineListCommandOptions) => {
+          const sdk = createCliOmnyoSdk(getUrl());
+
+          const hostId = await resolveMachineHostId({
+            serverUrl: getUrl(),
+            target,
+          });
+
+          const host = await sdk.hosts.experimental_setAvailability({
+            hostId,
+            availability,
+          });
+
+          if (outputJson(opts, host)) return;
+          console.log(
+            availability === "away"
+              ? `Machine ${host.name} is Away: Omnyo stopped its work and holds new turns.`
+              : `Machine ${host.name} is Available.`,
+          );
+        }),
+      );
+  }
 
   machine
     .command("remove <id-or-name>")
@@ -456,17 +615,20 @@ export function registerMachineCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (target: string, opts: MachineMutationCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const hostId = await resolveMachineHostId({
           serverUrl: getUrl(),
           target,
         });
+
         if (
           !opts.yes &&
           !(await confirmDestructiveAction(`Remove machine ${hostId}?`))
         )
           return;
         const result = await sdk.hosts.delete({ hostId });
+
         if (outputJson(opts, result)) return;
         console.log(`Machine ${hostId} removed`);
       }),
@@ -478,12 +640,15 @@ export function registerMachineCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (target: string, opts: MachineListCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const hostId = await resolveMachineHostId({
           serverUrl: getUrl(),
           target,
         });
+
         const result = await sdk.hosts.retryUpdate({ hostId });
+
         if (outputJson(opts, result)) return;
         console.log(`Machine ${hostId} update retry requested`);
       }),
@@ -495,12 +660,15 @@ export function registerMachineCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (target: string, opts: MachineListCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const hostId = await resolveMachineHostId({
           serverUrl: getUrl(),
           target,
         });
+
         const requested = await sdk.hosts.experimental_reconcile({ hostId });
+
         const result =
           requested.lifecycle.phase === "suspending"
             ? await waitForMachineLifecycle({
@@ -509,6 +677,7 @@ export function registerMachineCommands(
                 getHost: () => sdk.hosts.get({ hostId }),
               })
             : requested;
+
         if (!outputJson(opts, result))
           console.log(`Machine ${hostId}: ${result.lifecycle.phase}`);
       }),
@@ -520,17 +689,21 @@ export function registerMachineCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (target: string, opts: MachineListCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const hostId = await resolveMachineHostId({
           serverUrl: getUrl(),
           target,
         });
+
         const requested = await sdk.hosts.experimental_suspend({ hostId });
+
         const result = await waitForMachineLifecycle({
           host: requested,
           targetPhase: "suspended",
           getHost: () => sdk.hosts.get({ hostId }),
         });
+
         if (outputJson(opts, result)) return;
         console.log(`Machine ${hostId} suspended`);
       }),
@@ -542,17 +715,21 @@ export function registerMachineCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (target: string, opts: MachineListCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const hostId = await resolveMachineHostId({
           serverUrl: getUrl(),
           target,
         });
+
         const requested = await sdk.hosts.experimental_resume({ hostId });
+
         const result = await waitForMachineLifecycle({
           host: requested,
           targetPhase: "active",
           getHost: () => sdk.hosts.get({ hostId }),
         });
+
         if (outputJson(opts, result)) return;
         console.log(`Machine ${hostId} resumed`);
       }),
@@ -564,12 +741,15 @@ export function registerMachineCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (target: string, opts: MachineListCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const hostId = await resolveMachineHostId({
           serverUrl: getUrl(),
           target,
         });
+
         const result = await sdk.hosts.experimental_retryCleanup({ hostId });
+
         if (outputJson(opts, result)) return;
         console.log(`Machine ${hostId} cleanup retried`);
       }),
@@ -578,18 +758,22 @@ export function registerMachineCommands(
   const providerCli = machine
     .command("provider-cli")
     .description("Inspect and install provider CLIs on a machine");
+
   providerCli
     .command("status <id-or-name>")
     .description("Show registered provider CLI installation/update status")
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (target: string, opts: MachineListCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const hostId = await resolveMachineHostId({
           serverUrl: getUrl(),
           target,
         });
+
         const result = await sdk.hosts.providerCliStatus({ hostId });
+
         if (outputJson(opts, result)) return;
         console.log(JSON.stringify(result, null, 2));
       }),
@@ -598,6 +782,10 @@ export function registerMachineCommands(
     .command("install <id-or-name> <provider>")
     .description("Install or update a registered provider CLI by provider ID")
     .option("--action <action>", "Action: install or update", "install")
+    .option(
+      "--yes",
+      "Install now: pause chats on this machine and resume them afterward",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(
@@ -609,18 +797,40 @@ export function registerMachineCommands(
           if (opts.action !== "install" && opts.action !== "update") {
             throw new Error("--action must be install or update.");
           }
-          const sdk = createCliBbSdk(getUrl());
+
+          const sdk = createCliOmnyoSdk(getUrl());
+
           const hostId = await resolveMachineHostId({
             serverUrl: getUrl(),
             target,
           });
+
           const events = await sdk.hosts.installProviderCli({
             hostId,
             provider: parseProviderCliKey(provider),
             actionKind: opts.action,
+            confirmInterruptingThreads: opts.yes === true,
+            onEvent: (event) => {
+              if (!opts.json) console.log(JSON.stringify(event));
+            },
           });
-          if (outputJson(opts, events)) return;
-          for (const event of events) console.log(JSON.stringify(event));
+
+          outputJson(opts, events);
+
+          if (
+            !events.some((event) => event.type === "completed" && event.success)
+          ) {
+            const error = events.find((event) => event.type === "error");
+            throw new CliExitError(
+              error?.message ??
+                "The provider CLI installation did not report success.",
+              1,
+              {
+                code: error?.code ?? "provider_installation_failed",
+                hint: null,
+              },
+            );
+          }
         },
       ),
     );
@@ -628,15 +838,17 @@ export function registerMachineCommands(
 
 function printMachineTable(hosts: Host[], serverHostId: string | null): void {
   const now = Date.now();
+
   const rows = hosts.map((host) => [
     host.name,
     host.id === serverHostId ? "server" : "",
     host.id,
     host.type,
-    host.status,
+    host.availability === "away" ? `${host.status}, away` : host.status,
     host.machineProviderId ?? "user-enrolled",
     formatMachineLastSeen(host.lastSeenAt, now),
   ]);
+
   printBorderlessTable(
     {
       head: ["Name", "Role", "ID", "Type", "Status", "Provider", "Last seen"],

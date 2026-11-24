@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import type {
   DiscoveredSkill,
   HostProviderCommand,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   createFixturePaths,
   type ExpectedNames,
@@ -20,14 +20,17 @@ export type GoldenCommand = Pick<
   HostProviderCommand,
   "name" | "source" | "origin" | "description" | "argumentHint"
 >;
+
 export type GoldenSkill = Pick<
   DiscoveredSkill,
   "name" | "description" | "filePath" | "rootKind" | "linked"
 >;
+
 export interface GoldenSection {
   commands: GoldenCommand[];
   skills: GoldenSkill[];
 }
+
 export interface GoldenFile {
   providerId: string;
   variant: string;
@@ -47,14 +50,17 @@ export function fullFixtureEnv(
 
 export const applyProcessEnv: ApplyEnv = (env) => {
   const previous = new Map<string, string | undefined>();
+
   for (const [key, value] of Object.entries(env)) {
     previous.set(key, process.env[key]);
+
     if (value === undefined) {
       delete process.env[key];
     } else {
       process.env[key] = value;
     }
   }
+
   return () => {
     for (const [key, value] of previous) {
       if (value === undefined) {
@@ -72,6 +78,7 @@ function placeholderPath(value: string, paths: FixturePaths): string {
     .join("<home>")
     .split(paths.root)
     .join("<root>");
+
   return path.sep === "\\" ? placeholder.replaceAll("\\", "/") : placeholder;
 }
 
@@ -96,6 +103,7 @@ function projectSection(
         compareStrings(left.name, right.name) ||
         compareStrings(JSON.stringify(left), JSON.stringify(right)),
     );
+
   const skills = output.skills
     .map((skill) => ({
       name: skill.name,
@@ -109,6 +117,7 @@ function projectSection(
         compareStrings(left.name, right.name) ||
         compareStrings(left.filePath, right.filePath),
     );
+
   return { commands, skills };
 }
 
@@ -123,8 +132,10 @@ function assertExpectedNames(
     ...section.commands.map((command) => command.name),
     ...section.skills.map((skill) => skill.name),
   ]);
+
   const missing = expected.present.filter((name) => !names.has(name));
   const unexpected = expected.absent.filter((name) => names.has(name));
+
   if (missing.length > 0 || unexpected.length > 0) {
     throw new FixtureExpectationError(
       `${label}: fixture expectation failed` +
@@ -144,14 +155,17 @@ export async function captureVariant(
   const paths = await createFixturePaths();
   const env = variant.env(paths);
   const restoreEnv = applyEnv(fullFixtureEnv(env));
+
   try {
     await variant.build(paths);
+
     const run = (cwd: string | null): Promise<PipelineOutput> =>
       pipeline({
         providerId: variant.providerId,
         cwd,
         homeDir: paths.home,
       });
+
     const workspace = projectSection(await run(paths.cwd), paths);
     const userOnly = projectSection(await run(null), paths);
     const label = `${variant.providerId}.${variant.variant}`;
@@ -165,6 +179,7 @@ export async function captureVariant(
       userOnly,
       variant.expected.userOnly,
     );
+
     return {
       providerId: variant.providerId,
       variant: variant.variant,
@@ -184,11 +199,13 @@ const GOLDENS_DIR = path.join(
 
 export function goldenFilePath(variant: FixtureVariant): string {
   const suffix = variant.variant === "default" ? "" : `.${variant.variant}`;
+
   return path.join(GOLDENS_DIR, `${variant.providerId}${suffix}.json`);
 }
 
 export async function readGolden(variant: FixtureVariant): Promise<GoldenFile> {
   const content = await fs.readFile(goldenFilePath(variant), "utf8");
+
   return JSON.parse(content) as GoldenFile;
 }
 

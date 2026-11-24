@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import type { RealtimeSubscriptionTarget } from "@bb/server-contract";
+import type { RealtimeSubscriptionTarget } from "@omnyo/server-contract";
 import { wsManager } from "@/lib/ws";
 
 interface RealtimeSubscriptionOptions {
@@ -9,15 +9,19 @@ interface RealtimeSubscriptionOptions {
 const THREAD_LIST_TARGET = {
   kind: "thread-list",
 } satisfies RealtimeSubscriptionTarget;
+
 const PROJECT_LIST_TARGET = {
   kind: "project-list",
 } satisfies RealtimeSubscriptionTarget;
+
 const ENVIRONMENT_LIST_TARGET = {
   kind: "environment-list",
 } satisfies RealtimeSubscriptionTarget;
+
 const HOST_LIST_TARGET = {
   kind: "host-list",
 } satisfies RealtimeSubscriptionTarget;
+
 const SYSTEM_TARGET = { kind: "system" } satisfies RealtimeSubscriptionTarget;
 
 function useRealtimeSubscription(
@@ -32,6 +36,7 @@ function useRealtimeSubscription(
     }
 
     wsManager.subscribe(target);
+
     return () => {
       wsManager.unsubscribe(target);
     };
@@ -46,6 +51,7 @@ export function useThreadDetailRealtimeSubscription(
     () => (threadId ? { kind: "thread-detail", threadId } : null),
     [threadId],
   );
+
   useRealtimeSubscription(target, options);
 }
 
@@ -58,6 +64,7 @@ export function useEnvironmentDetailRealtimeSubscription(
       environmentId ? { kind: "environment-detail", environmentId } : null,
     [environmentId],
   );
+
   useRealtimeSubscription(target, options);
 }
 
@@ -69,6 +76,7 @@ export function useProjectDetailRealtimeSubscription(
     () => (projectId ? { kind: "project-detail", projectId } : null),
     [projectId],
   );
+
   useRealtimeSubscription(target, options);
 }
 

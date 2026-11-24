@@ -18,13 +18,17 @@ import {
   experimental_probeNpmGlobalPackage as probeNpmGlobalPackage,
   experimental_resolveExecutablePath as resolveExecutablePath,
   experimental_versionFrom as versionFrom,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { resolvePiLaunch, resolvePiProcessLaunch } from "./rpc-child.js";
 
 const execFileAsync = promisify(execFile);
+
 export const PI_MINIMUM_SUPPORTED_VERSION = "0.84.0";
+
 export const PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent";
+
 const VERSION_PROBE_TIMEOUT_MS = 15_000;
+
 const INSTALL_GATE_TTL_MS = 30_000;
 
 type PiVersionProbe =
@@ -40,6 +44,7 @@ function bunGlobalInstallCommand(
 ): ProviderInstallationCommand {
   const command = bunCommand();
   const args = ["add", "-g", `${npmPackage}@latest`];
+
   return { command, args, displayCommand: formatCommand(command, args) };
 }
 
@@ -54,6 +59,7 @@ function firstOutputLine(output: string | null): string | null {
 
 function pathIsInside(child: string, parent: string): boolean {
   const relativePath = path.relative(path.resolve(parent), path.resolve(child));
+
   return (
     relativePath === "" ||
     (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
@@ -62,25 +68,35 @@ function pathIsInside(child: string, parent: string): boolean {
 
 function expandHomePath(value: string): string {
   const home = os.homedir();
+
   if (value.startsWith("$HOME/")) return path.join(home, value.slice(6));
+
   if (value.startsWith("${HOME}/")) return path.join(home, value.slice(8));
+
   if (value.startsWith("~/")) return path.join(home, value.slice(2));
+
   return value;
 }
 
 async function shellExecTarget(executablePath: string): Promise<string | null> {
   const handle = await open(executablePath, "r").catch(() => null);
+
   if (handle === null) return null;
+
   try {
     const buffer = Buffer.alloc(8_192);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     const source = buffer.subarray(0, bytesRead).toString("utf8");
+
     if (!source.startsWith("#!")) return null;
+
     for (const line of source.split(/\r?\n/u)) {
       const match = line.match(/^\s*exec\s+(?:"([^"]+)"|'([^']+)'|(\S+))/u);
       const target = match?.[1] ?? match?.[2] ?? match?.[3];
+
       if (target !== undefined) return expandHomePath(target);
     }
+
     return null;
   } finally {
     await handle.close();
@@ -89,19 +105,25 @@ async function shellExecTarget(executablePath: string): Promise<string | null> {
 
 async function isBunManagedPi(executablePath: string | null): Promise<boolean> {
   if (executablePath === null) return false;
+
   const bunBin = firstOutputLine(
     await commandOutput(bunCommand(), ["pm", "bin", "-g"]),
   );
+
   if (bunBin === null) return false;
+
   if (pathIsInside(executablePath, bunBin)) return true;
+
   const bunPi = path.join(
     bunBin,
     process.platform === "win32" ? "pi.exe" : "pi",
   );
+
   const [resolvedExecutable, resolvedBunPi] = await Promise.all([
     realpath(executablePath).catch(() => null),
     realpath(bunPi).catch(() => null),
   ]);
+
   if (
     resolvedExecutable !== null &&
     (pathIsInside(resolvedExecutable, bunBin) ||
@@ -109,12 +131,17 @@ async function isBunManagedPi(executablePath: string | null): Promise<boolean> {
   ) {
     return true;
   }
+
   const delegatedTarget = await shellExecTarget(executablePath);
+
   if (delegatedTarget === null) return false;
+
   if (path.resolve(delegatedTarget) === path.resolve(bunPi)) return true;
+
   const resolvedDelegatedTarget = await realpath(delegatedTarget).catch(
     () => null,
   );
+
   return (
     resolvedDelegatedTarget !== null &&
     resolvedDelegatedTarget === resolvedBunPi
@@ -133,6 +160,7 @@ export async function probePiVersion(): Promise<PiVersionProbe> {
   const launch = resolvePiProcessLaunch(process.env);
   const display = formatCommand(launch.command, [...launch.args, "--version"]);
   let stdout: string;
+
   try {
     ({ stdout } = await execFileAsync(
       launch.command,
@@ -147,7 +175,9 @@ export async function probePiVersion(): Promise<PiVersionProbe> {
       failure: `\`${display}\` ${describePiVersionProbeFailure(error)}`,
     };
   }
+
   const version = versionFrom(stdout);
+
   return version === null
     ? { version: null, failure: `\`${display}\` printed no version` }
     : { version, failure: null };
@@ -158,15 +188,19 @@ export function describePiVersionProbeFailure(error: unknown): string {
     error !== null && typeof error === "object"
       ? (error as { code?: unknown; killed?: unknown; signal?: unknown })
       : null;
+
   if (failed?.killed === true) {
     return `timed out after ${VERSION_PROBE_TIMEOUT_MS / 1000} s`;
   }
+
   if (typeof failed?.signal === "string") {
     return `was stopped by ${failed.signal} before it answered`;
   }
+
   if (failed?.code !== undefined && failed.code !== null) {
     return `exited with ${String(failed.code)}`;
   }
+
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -174,6 +208,7 @@ export async function getPiProviderInstallationStatus(
   checkUpdates = true,
 ): Promise<ProviderInstallationStatus> {
   const launch = resolvePiLaunch(process.env);
+
   const [resolvedExecutable, probe, latestVersion, npmGlobal] =
     await Promise.all([
       resolveExecutablePath(launch.command),
@@ -183,22 +218,27 @@ export async function getPiProviderInstallationStatus(
         ? probeNpmGlobalPackage(PI_NPM_PACKAGE)
         : { npmBin: null, npmGlobalPackageVersion: null },
     ]);
+
   const currentVersion = probe.version;
   const installed = resolvedExecutable !== null || currentVersion !== null;
+
   const needsUpdate =
     installed &&
     currentVersion !== null &&
     latestVersion !== null &&
     compareVersions(latestVersion, currentVersion) > 0;
+
   const versionUnsupported =
     installed &&
     currentVersion !== null &&
     compareVersions(currentVersion, PI_MINIMUM_SUPPORTED_VERSION) < 0;
+
   const actionKind = !installed
     ? "install"
     : needsUpdate || versionUnsupported
       ? "update"
       : null;
+
   const installAction: ProviderInstallationStatus["installAction"] =
     actionKind === null || !checkUpdates
       ? null
@@ -233,12 +273,14 @@ export async function getPiProviderInstallationRun(
   action: "install" | "update",
 ): Promise<ProviderInstallationRunResult> {
   const status = await getPiProviderInstallationStatus();
+
   if (status.installAction?.kind !== action) {
     return {
       available: false,
       message: `Pi ${action} is no longer available on this host.`,
     };
   }
+
   return {
     available: true,
     command: await piGlobalInstallCommand(status.executablePath),
@@ -287,6 +329,7 @@ const INSTALL_GUIDANCE = `Install ${PI_NPM_PACKAGE} ${PI_MINIMUM_SUPPORTED_VERSI
 
 async function probePiInstallGate(): Promise<PiInstallGate> {
   const launch = resolvePiLaunch(process.env);
+
   if ((await resolveExecutablePath(launch.command)) === null) {
     return {
       ok: false,
@@ -295,9 +338,12 @@ async function probePiInstallGate(): Promise<PiInstallGate> {
       result: piHealthResult("not_installed"),
     };
   }
+
   const probe = await probePiVersion();
+
   if (probe.version === null) {
     const statusMessage = `Could not determine the pi version: ${probe.failure}. ${INSTALL_GUIDANCE}`;
+
     return {
       ok: false,
       status: "unknown",
@@ -305,9 +351,12 @@ async function probePiInstallGate(): Promise<PiInstallGate> {
       result: piHealthResult("unknown", { statusMessage }),
     };
   }
+
   const installedVersion = probe.version;
+
   if (compareVersions(installedVersion, PI_MINIMUM_SUPPORTED_VERSION) < 0) {
     const statusMessage = `Pi ${installedVersion} is older than the supported minimum ${PI_MINIMUM_SUPPORTED_VERSION}. ${INSTALL_GUIDANCE}`;
+
     return {
       ok: false,
       status: "unsupported_version",
@@ -318,6 +367,7 @@ async function probePiInstallGate(): Promise<PiInstallGate> {
       }),
     };
   }
+
   return { ok: true, installedVersion };
 }
 
@@ -331,14 +381,17 @@ export function getPiInstallGate(): Promise<PiInstallGate> {
   const key = JSON.stringify([launch.command, launch.args]);
   const now = Date.now();
   const cached = installGateMemo.get(key);
+
   if (cached !== undefined && cached.expiresAt > now) {
     return cached.gate;
   }
+
   const gate = probePiInstallGate();
   installGateMemo.set(key, { expiresAt: now + INSTALL_GATE_TTL_MS, gate });
   gate.catch(() => {
     if (installGateMemo.get(key)?.gate === gate) installGateMemo.delete(key);
   });
+
   return gate;
 }
 

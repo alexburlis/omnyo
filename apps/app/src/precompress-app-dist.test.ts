@@ -7,8 +7,11 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
+
 const decompressBrotli = promisify(brotliDecompress);
+
 const decompressGzip = promisify(gunzip);
+
 const scriptPath = resolve(
   import.meta.dirname,
   "../../../scripts/precompress-app-dist.mjs",
@@ -17,6 +20,7 @@ const scriptPath = resolve(
 async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path);
+
     return true;
   } catch {
     return false;
@@ -25,8 +29,12 @@ async function pathExists(path: string): Promise<boolean> {
 
 describe("app asset precompression", () => {
   it("writes valid Brotli and gzip sidecars only for eligible assets", async () => {
-    const distDir = await mkdtemp(resolve(tmpdir(), "bb-precompress-test-"));
-    const compressibleBody = Buffer.from("compressible bb asset\n".repeat(400));
+    const distDir = await mkdtemp(resolve(tmpdir(), "omnyo-precompress-test-"));
+
+    const compressibleBody = Buffer.from(
+      "compressible omnyo asset\n".repeat(400),
+    );
+
     const assetPath = resolve(distDir, "app.js");
     const documentPath = resolve(distDir, "index.html");
     const smallPath = resolve(distDir, "small.js");

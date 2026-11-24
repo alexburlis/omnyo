@@ -1,5 +1,6 @@
-import { changedMessageSchema, type ThreadChangedMessage } from "@bb/domain";
-import { getThread, markThreadDeleted } from "@bb/db";
+import { changedMessageSchema, type ThreadChangedMessage } from "@omnyo/domain";
+import { getThread, markThreadDeleted, updateHost } from "@omnyo/db";
+import { threadResponseSchema } from "@omnyo/server-contract";
 import { HOST_RECONNECT_GRACE_MS } from "../../src/constants.js";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -7,6 +8,8 @@ import {
   handleHostRemoved,
 } from "../../src/internal/session-owner-side-effects.js";
 import { createMockHubSocket } from "../helpers/mock-hub-socket.js";
+import { readJson } from "../helpers/json.js";
+import { DEFAULT_ENVIRONMENT_PROVIDER_ID } from "../../src/services/environments/environment-provider-ids.js";
 import { onDaemonSocketOpen } from "../../src/ws/daemon-protocol.js";
 import {
   seedEnvironment,
@@ -33,26 +36,31 @@ function seedHostThreadsFixture(
   const { host, session } = seedHostSession(harness.deps, {
     id: `host-runtime-status-${value}`,
   });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: `/tmp/runtime-status-${value}`,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: `/tmp/runtime-status-${value}`,
     status: "ready",
   });
+
   const activeThread = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
     status: "active",
   });
+
   const idleThread = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
     status: "idle",
   });
+
   return {
     activeThreadId: activeThread.id,
     environmentId: environment.id,
@@ -87,8 +95,10 @@ function countPreparedStatements(
   work: () => void,
 ): number {
   const prepare = vi.spyOn(harness.db.$client, "prepare");
+
   try {
     work();
+
     return prepare.mock.calls.length;
   } finally {
     prepare.mockRestore();
@@ -101,6 +111,7 @@ function statusChangedMessagesFor(
 ): ThreadChangedMessage[] {
   return messages.flatMap((raw) => {
     const message = changedMessageSchema.parse(JSON.parse(raw));
+
     return message.entity === "thread" &&
       message.id === threadId &&
       message.changes.includes("status-changed")
@@ -115,6 +126,7 @@ function hostDisconnectedMessagesFor(
 ): string[] {
   return messages.filter((raw) => {
     const message = changedMessageSchema.parse(JSON.parse(raw));
+
     return (
       message.entity === "host" &&
       message.id === hostId &&
@@ -129,9 +141,11 @@ function lastStatusChange(
 ): ThreadChangedMessage {
   const statusMessages = statusChangedMessagesFor(messages, threadId);
   const last = statusMessages.at(-1);
+
   if (!last) {
     throw new Error(`no status-changed message for thread ${threadId}`);
   }
+
   return last;
 }
 
@@ -144,6 +158,7 @@ describe("host thread runtime status notifications", () => {
       harness.hub.subscribe(socket, { kind: "host-list" });
 
       vi.useFakeTimers();
+
       try {
         handleDaemonSocketClosed(harness.deps, {
           sessionId: fixture.sessionId,
@@ -156,9 +171,9 @@ describe("host thread runtime status notifications", () => {
           runtime: { displayStatus: "active" },
         });
         expect(
-          lastStatusChange(socket.messages, fixture.idleThreadId).metadata
-            ?.statusChange,
-        ).toBeUndefined();
+          statusChangedMessagesFor(socket.messages, fixture.idleThreadId),
+        ).toEqual([]);
+
         const hostChangesBeforeGraceEnd = hostDisconnectedMessagesFor(
           socket.messages,
           fixture.hostId,
@@ -195,6 +210,7 @@ describe("host thread runtime status notifications", () => {
       harness.hub.subscribe(socket, { kind: "thread-list" });
 
       vi.useFakeTimers();
+
       try {
         handleDaemonSocketClosed(harness.deps, {
           sessionId: fixture.sessionId,
@@ -203,6 +219,7 @@ describe("host thread runtime status notifications", () => {
       } finally {
         vi.useRealTimers();
       }
+
       expect(
         lastStatusChange(socket.messages, fixture.activeThreadId).metadata
           ?.statusChange?.runtime.displayStatus,
@@ -232,6 +249,7 @@ describe("host thread runtime status notifications", () => {
       harness.hub.subscribe(socket, { kind: "thread-list" });
 
       vi.useFakeTimers();
+
       try {
         handleDaemonSocketClosed(harness.deps, {
           sessionId: fixture.sessionId,
@@ -256,10 +274,11 @@ describe("host thread runtime status notifications", () => {
     });
   });
 
-  it("publishes the disconnect fan-out in a statement count that does not grow with the host's thread count", async () => {
+  it("does not notify idle or deleted history when the host disconnects", async () => {
     await withTestHarness(async (harness) => {
       const small = seedHostThreadsFixture(harness, 2);
       const large = seedHostThreadsFixture(harness, 3);
+
       const largeActiveThreadIds = [
         large.activeThreadId,
         ...seedHostThreads(harness, {
@@ -268,25 +287,36 @@ describe("host thread runtime status notifications", () => {
           status: "active",
         }),
       ];
+
+      seedHostThreads(harness, {
+        count: 2,
+        fixture: small,
+        status: "active",
+      });
+
       const largeIdleThreadIds = seedHostThreads(harness, {
         count: 300,
         fixture: large,
         status: "idle",
       });
+
       const deletedActiveThread = seedThread(harness.deps, {
         projectId: large.projectId,
         environmentId: large.environmentId,
         status: "active",
       });
+
       markThreadDeleted(harness.db, harness.hub, {
         threadId: deletedActiveThread.id,
       });
+      harness.hub.notifyThread(small.activeThreadId, ["status-changed"]);
       const socket = createMockHubSocket();
       harness.hub.subscribe(socket, { kind: "thread-list" });
 
       const largeStatements = countPreparedStatements(harness, () =>
         handleDaemonSocketClosed(harness.deps, { sessionId: large.sessionId }),
       );
+
       harness.hub.cancelPendingDaemonDisconnect(large.sessionId);
       const largeMessages = [...socket.messages];
       socket.messages.length = 0;
@@ -294,6 +324,7 @@ describe("host thread runtime status notifications", () => {
       const smallStatements = countPreparedStatements(harness, () =>
         handleDaemonSocketClosed(harness.deps, { sessionId: small.sessionId }),
       );
+
       harness.hub.cancelPendingDaemonDisconnect(small.sessionId);
 
       expect(largeStatements).toBe(smallStatements);
@@ -306,11 +337,11 @@ describe("host thread runtime status notifications", () => {
           runtime: { displayStatus: "active" },
         });
       }
+
       for (const threadId of [...largeIdleThreadIds, deletedActiveThread.id]) {
-        expect(
-          lastStatusChange(largeMessages, threadId).metadata?.statusChange,
-        ).toBeUndefined();
+        expect(statusChangedMessagesFor(largeMessages, threadId)).toEqual([]);
       }
+
       expect(
         statusChangedMessagesFor(largeMessages, small.activeThreadId),
       ).toEqual([]);
@@ -334,6 +365,7 @@ describe("host thread runtime status notifications", () => {
       ).flatMap((message) =>
         message.metadata?.statusChange ? [message.metadata.statusChange] : [],
       );
+
       expect(activeSnapshots.length).toBeGreaterThan(0);
       expect(getThread(harness.db, fixture.activeThreadId)?.status).toBe(
         "idle",
@@ -343,9 +375,68 @@ describe("host thread runtime status notifications", () => {
         runtime: { displayStatus: "idle" },
       });
       expect(
-        lastStatusChange(socket.messages, fixture.idleThreadId).metadata
-          ?.statusChange,
-      ).toBeUndefined();
+        statusChangedMessagesFor(socket.messages, fixture.idleThreadId),
+      ).toEqual([]);
+    });
+  });
+
+  it("invalidates an idle thread's restore permission when its host is removed", async () => {
+    await withTestHarness(async (harness) => {
+      const fixture = seedHostThreadsFixture(harness, 7);
+
+      const environment = seedEnvironment(harness.deps, {
+        hostId: fixture.hostId,
+        projectId: fixture.projectId,
+        status: "destroyed",
+        environmentProviderId: DEFAULT_ENVIRONMENT_PROVIDER_ID.projectCheckout,
+        environmentProviderPluginId: "environment-project-checkout",
+      });
+
+      const thread = seedThread(harness.deps, {
+        projectId: fixture.projectId,
+        environmentId: environment.id,
+        status: "idle",
+      });
+
+      const before = threadResponseSchema.parse(
+        await readJson(
+          await harness.app.request(`/api/v1/threads/${thread.id}`),
+        ),
+      );
+
+      expect(before.canRestoreEnvironment).toBe(true);
+
+      const socket = createMockHubSocket();
+      harness.hub.subscribe(socket, {
+        kind: "thread-detail",
+        threadId: thread.id,
+      });
+      updateHost(harness.db, harness.hub, fixture.hostId, {
+        phase: "removing",
+      });
+      handleHostRemoved(harness.deps, {
+        hostId: fixture.hostId,
+        sessionId: fixture.sessionId,
+      });
+
+      const after = threadResponseSchema.parse(
+        await readJson(
+          await harness.app.request(`/api/v1/threads/${thread.id}`),
+        ),
+      );
+
+      expect(after.canRestoreEnvironment).toBe(false);
+      expect(
+        socket.messages.map((raw) =>
+          changedMessageSchema.parse(JSON.parse(raw)),
+        ),
+      ).toContainEqual(
+        expect.objectContaining({
+          entity: "thread",
+          id: thread.id,
+          changes: expect.arrayContaining(["environment-changed"]),
+        }),
+      );
     });
   });
 });

@@ -25,6 +25,7 @@ export interface HeaderCreationActions {
 }
 
 const HeaderCreationContext = createContext<HeaderCreationActions>({});
+
 export const SidebarHeaderActionsProvider = HeaderCreationContext.Provider;
 
 export function SidebarHeaderControls({
@@ -49,10 +50,12 @@ export function SidebarHeaderControls({
   const creation = useContext(HeaderCreationContext);
   const compact = useIsCompactViewport();
   const [page, setPage] = useState<"organize" | "sort" | "filter" | null>(null);
+
   const changeOpen = (next: boolean) => {
     if (!next) setPage(null);
     onOpenChange?.(next);
   };
+
   return (
     <SidebarRowControls
       primaryAction={

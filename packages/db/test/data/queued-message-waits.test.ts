@@ -1,17 +1,5 @@
-/**
- * The queue's wait columns: `send_at`, the typed `waiting_on`, and the
- * `wait_holder` denormalization that exists purely so the orphan sweep can ask
- * "which rows does this plugin hold?" with an indexed lookup.
- *
- * What is worth pinning here is the set of guards a drain depends on and that
- * a refactor could quietly drop: waits only mutate LIVE rows (a claimed row is
- * already on its way to a provider, so queueing it would be a lost update), the
- * due sweep's boundary is inclusive and excludes threads the user threw away,
- * and `wait_holder` is derived from `waiting_on` rather than passed in, so the
- * two can never disagree.
- */
 import { describe, expect, it } from "vitest";
-import type { PromptInput } from "@bb/domain";
+import type { PromptInput } from "@omnyo/domain";
 import { noopNotifier } from "../../src/notifier.js";
 import {
   claimQueuedThreadMessageGroup,
@@ -38,17 +26,21 @@ function textInput(text: string): PromptInput[] {
 
 function setup() {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
   });
+
   return { db, project, thread };
 }
 
@@ -98,6 +90,7 @@ describe("queued message waits", () => {
       },
       sendAt: null,
     });
+
     expect(queued?.waitHolder).toBe("plugin:concurrency-limit");
     expect(JSON.parse(queued!.waitingOn!)).toEqual({
       kind: "plugin",
@@ -105,14 +98,13 @@ describe("queued message waits", () => {
       reason: "4 of 4 running",
     });
 
-    // Re-queueing onto a core wait must retire the previous holder, or the
-    // orphan sweep would keep finding a row that plugin no longer holds.
     const requeued = setQueuedThreadMessageWaitingOn(db, noopNotifier, {
       id: row.id,
       threadId: thread.id,
       waitingOn: { kind: "provisioning" },
       sendAt: null,
     });
+
     expect(requeued?.waitHolder).toBeNull();
     expect(JSON.parse(requeued!.waitingOn!)).toEqual({ kind: "provisioning" });
   });
@@ -127,12 +119,14 @@ describe("queued message waits", () => {
       waitingOn: { kind: "time" },
       sendAt: 9_000,
     });
+
     const requeued = setQueuedThreadMessageWaitingOn(db, noopNotifier, {
       id: row.id,
       threadId: thread.id,
       waitingOn: { kind: "thread-busy" },
       sendAt: null,
     });
+
     expect(requeued?.sendAt).toBeNull();
   });
 
@@ -167,17 +161,18 @@ describe("queued message waits", () => {
       }),
     ).toBeNull();
 
-    // The claimed row keeps the wait it was waiting on: neither call touched it.
     const after = getQueuedThreadMessage(db, row.id);
     expect(JSON.parse(after!.waitingOn!)).toEqual({ kind: "provisioning" });
   });
 
   it("refuses to write a wait on a row belonging to another thread", () => {
     const { db, project, thread } = setup();
+
     const other = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const row = queue(db, thread.id);
 
     expect(
@@ -204,6 +199,7 @@ describe("queued message waits", () => {
       id: row.id,
       threadId: thread.id,
     });
+
     expect(cleared?.waitingOn).toBeNull();
     expect(cleared?.waitHolder).toBeNull();
     expect(cleared?.sendAt).toBeNull();
@@ -273,6 +269,7 @@ describe("listDueScheduledQueuedThreadMessages", () => {
 
   it("skips rows on archived and deleted threads", () => {
     const { db, project } = setup();
+
     for (const [name, dispose] of [
       ["archived", archiveThread],
       ["deleted", deleteThread],
@@ -281,6 +278,7 @@ describe("listDueScheduledQueuedThreadMessages", () => {
         projectId: project.id,
         providerId: "codex",
       });
+
       const row = queue(db, thread.id, name);
       setQueuedThreadMessageWaitingOn(db, noopNotifier, {
         id: row.id,
@@ -339,14 +337,17 @@ describe("wait lookups", () => {
 
   it("lists a thread's rows by wait kind, in queue order, scoped to that thread", () => {
     const { db, project, thread } = setup();
+
     const otherThread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     const first = queue(db, thread.id, "first");
     const second = queue(db, thread.id, "second");
     const otherKind = queue(db, thread.id, "other kind");
     const elsewhere = queue(db, otherThread.id, "elsewhere");
+
     for (const id of [first.id, second.id]) {
       setQueuedThreadMessageWaitingOn(db, noopNotifier, {
         id,
@@ -355,6 +356,7 @@ describe("wait lookups", () => {
         sendAt: null,
       });
     }
+
     setQueuedThreadMessageWaitingOn(db, noopNotifier, {
       id: otherKind.id,
       threadId: thread.id,
@@ -389,7 +391,10 @@ describe("wait lookups", () => {
       "plugin",
     ] as const) {
       expect(
-        listQueuedThreadMessagesWaitingOnKind(db, { kind, threadId: thread.id }),
+        listQueuedThreadMessagesWaitingOnKind(db, {
+          kind,
+          threadId: thread.id,
+        }),
       ).toEqual([]);
     }
   });

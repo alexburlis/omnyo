@@ -1,19 +1,23 @@
 import { z } from "zod";
+import { pluginIdSchema } from "./plugin-id.js";
 
-/**
- * The Family-B system-message taxonomy.
- *
- * Its own module rather than part of `thread-events.ts` because two modules on
- * opposite sides of an import edge need it: thread events stamp it on a
- * `client/turn/requested`, and a queued row carries it while one of core's own
- * notices is queued. Leaving it in `thread-events.ts` made those two import
- * each other, which left whichever loaded second holding `undefined` schemas.
- */
+export const generatedThreadMessageSourceSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("script"),
+    label: z.string().trim().min(1).max(120),
+  }),
+  z.object({ kind: z.literal("plugin"), pluginId: pluginIdSchema }),
+]);
 
-// One value per Family-B system-message action, plus an explicit `unlabeled`
-// for legacy/pre-taxonomy messages (rendered generically). `unlabeled` beats a
-// nullable field: its meaning is self-documenting and avoids `null`-as-default.
+export const threadMessageSourceSchema = z.union([
+  z.object({ kind: z.literal("user") }),
+  generatedThreadMessageSourceSchema,
+]);
+
+export type ThreadMessageSource = z.infer<typeof threadMessageSourceSchema>;
+
 const systemMessageKindValues = [
+  "external-message",
   "ownership-assigned",
   "ownership-removed",
   "child-needs-attention",
@@ -24,15 +28,19 @@ const systemMessageKindValues = [
   "tool-result-delivered",
   "unlabeled",
 ] as const;
+
 export const systemMessageKindSchema = z.enum(systemMessageKindValues);
+
 export type SystemMessageKind = z.infer<typeof systemMessageKindSchema>;
 
 export const systemThreadInterruptedReasonSchema = z.enum([
   "manual-stop",
+  "app-update",
   "host-daemon-restarted",
   "host-removed",
   "provider-turn-idle",
 ]);
+
 export type SystemThreadInterruptedReason = z.infer<
   typeof systemThreadInterruptedReasonSchema
 >;
@@ -47,9 +55,14 @@ export const childThreadOutcomeSchema = z.object({
     })
     .optional(),
 });
+
 export type ChildThreadOutcome = z.infer<typeof childThreadOutcomeSchema>;
 
 export const systemMessageSubjectSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("message-source"),
+    source: generatedThreadMessageSourceSchema,
+  }),
   z.object({
     kind: z.literal("thread"),
     threadId: z.string(),
@@ -67,4 +80,5 @@ export const systemMessageSubjectSchema = z.discriminatedUnion("kind", [
     suppress: z.boolean(),
   }),
 ]);
+
 export type SystemMessageSubject = z.infer<typeof systemMessageSubjectSchema>;

@@ -12,10 +12,20 @@ import {
 } from "./permission-changes.js";
 
 const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
+
 vi.mock(
   "../../../../plugins/provider-claude-code/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
   () => ({
-    query: queryMock,
+    query: (args: {
+      options: { forkSession?: boolean; persistSession?: boolean };
+    }) =>
+      args.options.forkSession && args.options.persistSession === false
+        ? {
+            initializationResult: async () => ({}),
+            getContextUsage: async () => null,
+            close: () => {},
+          }
+        : queryMock(args),
     forkSession: vi.fn(),
     createSdkMcpServer: vi.fn(() => ({})),
     tool: vi.fn((_name, _description, _schema, handler) => handler),
@@ -25,15 +35,18 @@ vi.mock(
 const checkout = resolve(
   fileURLToPath(new URL("../../../..", import.meta.url)),
 );
+
 const bridgeModuleSchema = z.object({
   handleLine: z.function({ input: [z.string()], output: z.void() }),
 });
+
 async function loadBridge(provider: "codex" | "claude-code") {
   const module: unknown = await import(
     pathToFileURL(
       join(checkout, "plugins", `provider-${provider}`, "src/bridge/bridge.ts"),
     ).href
   );
+
   return bridgeModuleSchema.parse(module).handleLine;
 }
 
@@ -44,10 +57,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 interface UserMessage {
   message: { content: string };
 }
+
 interface ClaudeQueryCall {
   prompt: AsyncIterable<UserMessage>;
   options: { permissionMode?: string; sandbox?: { enabled?: boolean } };
 }
+
 function getLatestQueryCall(): ClaudeQueryCall {
   return z
     .object({
@@ -61,14 +76,18 @@ function getLatestQueryCall(): ClaudeQueryCall {
     })
     .parse(queryMock.mock.calls.at(-1)?.[0]);
 }
+
 function getLatestQueryOptions() {
   return getLatestQueryCall().options;
 }
+
 function createControlledClaudeQuery() {
   let resolveNext:
     | ((result: IteratorResult<Record<string, unknown>>) => void)
     | undefined;
+
   const pending: IteratorResult<Record<string, unknown>>[] = [];
+
   function emit(result: IteratorResult<Record<string, unknown>>) {
     if (resolveNext) {
       const resolve = resolveNext;
@@ -78,6 +97,7 @@ function createControlledClaudeQuery() {
       pending.push(result);
     }
   }
+
   return {
     applyFlagSettings: vi.fn().mockResolvedValue(undefined),
     close: vi.fn(() => emit({ value: undefined, done: true })),
@@ -95,6 +115,7 @@ function createControlledClaudeQuery() {
       return {
         next() {
           const result = pending.shift();
+
           return result
             ? Promise.resolve(result)
             : new Promise<IteratorResult<Record<string, unknown>>>(
@@ -113,17 +134,21 @@ function createControlledClaudeQuery() {
 
 async function readNextPrompt(call: ClaudeQueryCall): Promise<UserMessage> {
   const result = await call.prompt[Symbol.asyncIterator]().next();
+
   if (result.done) {
     throw new Error("Expected Claude prompt input");
   }
+
   return result.value;
 }
 
 async function readNextPromptText(call: ClaudeQueryCall): Promise<string> {
   const content = (await readNextPrompt(call)).message.content;
+
   if (typeof content !== "string") {
     throw new Error("Expected Claude prompt text content");
   }
+
   return content;
 }
 
@@ -175,13 +200,13 @@ describe("cross-provider permission changes: Codex", () => {
   let workspaceDir: string;
   let requestLogPath: string;
   beforeEach(async () => {
-    workspaceDir = mkdtempSync(join(tmpdir(), "bb-permission-codex-"));
+    workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-permission-codex-"));
     requestLogPath = join(workspaceDir, "requests.jsonl");
     const scriptPath = join(workspaceDir, "script.json");
     writeFileSync(scriptPath, JSON.stringify({ requestLogPath }));
-    vi.stubEnv("BB_CODEX_BRIDGE_APP_SERVER_COMMAND", process.execPath);
+    vi.stubEnv("OMNYO_CODEX_BRIDGE_APP_SERVER_COMMAND", process.execPath);
     vi.stubEnv(
-      "BB_CODEX_BRIDGE_APP_SERVER_ARGS",
+      "OMNYO_CODEX_BRIDGE_APP_SERVER_ARGS",
       JSON.stringify([
         join(
           checkout,
@@ -204,6 +229,7 @@ describe("cross-provider permission changes: Codex", () => {
     vi.unstubAllEnvs();
     rmSync(workspaceDir, { recursive: true, force: true });
   });
+
   function recordedRequests() {
     return readFileSync(requestLogPath, "utf8")
       .trim()
@@ -217,6 +243,7 @@ describe("cross-provider permission changes: Codex", () => {
           .parse(JSON.parse(line)),
       );
   }
+
   it.each(permissionChangeCases(["accept-edits", "auto", "full"]))(
     "permission contract: $before -> $after on $method",
     async (scenario) => {
@@ -254,12 +281,14 @@ describe("cross-provider permission changes: Codex", () => {
             });
             const response = await harness.waitForResponse(id);
             expect(response.error).toBeUndefined();
+
             if (!hold) {
               await harness.flushWork();
             }
           },
           async observe() {
             const requests = recordedRequests();
+
             const params = z
               .object({
                 sandboxPolicy: z.object({
@@ -273,10 +302,12 @@ describe("cross-provider permission changes: Codex", () => {
                   .filter((request) => request.method === "turn/start")
                   .at(-1)?.params,
               );
+
             const sandbox = params.sandboxPolicy.type === "workspaceWrite";
             expect(params.approvalPolicy).toBe(
               sandbox ? "on-request" : "never",
             );
+
             if (
               scenario.method === "turn/steer" &&
               requests.filter((request) => request.method === "turn/start")
@@ -291,6 +322,7 @@ describe("cross-provider permission changes: Codex", () => {
                 ),
               ).toHaveLength(1);
             }
+
             return {
               mode: !sandbox
                 ? "full"
@@ -313,16 +345,20 @@ describe("cross-provider permission changes: Claude", () => {
     "permission contract: $before -> $after on $method",
     async (scenario) => {
       const threadId = "thread-permission-contract";
+
       const bridge = createBridgeJsonRpcTestHarness(
         await loadBridge("claude-code"),
       );
+
       const queries: ReturnType<typeof createControlledClaudeQuery>[] = [];
       let id = 100;
       queryMock.mockImplementation(() => {
         const query = createControlledClaudeQuery();
         queries.push(query);
+
         return query;
       });
+
       try {
         await runPermissionChangeCase(
           {
@@ -340,6 +376,7 @@ describe("cross-provider permission changes: Claude", () => {
                 bridge.messages,
                 "claude-code",
               ).filter((event) => event.type === "turn/completed").length;
+
               bridge.sendRequest(++id, method, {
                 threadId,
                 providerThreadId: threadId,
@@ -355,6 +392,7 @@ describe("cross-provider permission changes: Claude", () => {
                 "permission probe",
               );
               expect((await bridge.waitForResponse(id)).error).toBeUndefined();
+
               if (!hold) {
                 queries.at(-1)?.emit(createSuccessfulResultMessage(threadId));
                 await vi.waitFor(() => {
@@ -362,6 +400,7 @@ describe("cross-provider permission changes: Claude", () => {
                     bridge.messages,
                     "claude-code",
                   ).filter((event) => event.type === "turn/completed");
+
                   expect(events.length).toBeGreaterThan(completed);
                   expect(events.at(-1)).toMatchObject({ status: "completed" });
                 });
@@ -370,10 +409,13 @@ describe("cross-provider permission changes: Claude", () => {
             async observe() {
               const query = queries.at(-1);
               const options = getLatestQueryOptions();
+
               const mode =
                 query?.setPermissionMode.mock.calls.at(-1)?.[0] ??
                 options.permissionMode;
+
               let sandbox = options.sandbox?.enabled === true;
+
               for (const [settings] of query?.applyFlagSettings.mock.calls ??
                 []) {
                 if (isRecord(settings) && "sandbox" in settings) {
@@ -382,9 +424,11 @@ describe("cross-provider permission changes: Claude", () => {
                     settings.sandbox.enabled === true;
                 }
               }
+
               expect(["bypassPermissions", "acceptEdits", "auto"]).toContain(
                 mode,
               );
+
               return {
                 mode:
                   mode === "bypassPermissions"

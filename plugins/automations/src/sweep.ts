@@ -1,11 +1,15 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { createWorkflowDispatch } from "./workflow-dispatch.js";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
+import type { ScriptHostRouting } from "./script-host.js";
 import {
   claimAutomationScheduledRun,
   closeAutomationRun,
+  getScheduledAutomationRetryRun,
   listDueAutomations,
   parseAutomationExecution,
   parseAutomationTrigger,
+  type AutomationEnvValues,
   type AutomationRow,
   type AutomationRunRow,
   type Db,
@@ -25,11 +29,13 @@ import {
 } from "./working-directory.js";
 
 const DUE_AUTOMATION_BATCH_SIZE = 100;
+
 export const SWEEP_INTERVAL_MS = 10_000;
 
 const hostListSchema = z.array(
   z.object({ status: z.enum(["connected", "disconnected"]) }).passthrough(),
 );
+
 type SweepApi = AgentRunApi &
   ScriptRunApi & {
     sdk: { hosts: { list(): Promise<unknown> } };
@@ -52,24 +58,27 @@ function buildScheduleFailureHandler(
 }
 
 async function processDueAutomation(
-  bb: SweepApi,
+  api: SweepApi,
   db: Db,
   args: {
     pluginDataDir: string;
+    env: AutomationEnvValues;
     automation: AutomationRow;
     now: number;
     agentHostsAvailable: boolean;
-    serverUrl: string;
     resolveWorkingDirectory: ScriptWorkingDirectoryResolver;
+    workflows?: ReturnType<typeof createWorkflowDispatch>;
+    scriptHostRouting?: ScriptHostRouting;
   },
 ): Promise<void> {
   if (args.automation.nextRunAt === null) return;
   const expectedNextRunAt = args.automation.nextRunAt;
   let newNextRunAt: number | null;
   let execution;
+
   try {
     const trigger = parseAutomationTrigger(args.automation.triggerConfig);
-    execution = parseAutomationExecution(args.automation.execution);
+    execution = parseAutomationExecution(args.automation, args.env);
     newNextRunAt =
       trigger.triggerType === "once"
         ? null
@@ -79,9 +88,10 @@ async function processDueAutomation(
             timezone: trigger.timezone,
           });
   } catch (error) {
-    bb.log.error(
+    api.log.error(
       `Skipping due automation ${args.automation.id} with invalid stored configuration: ${errorMessage(error)}`,
     );
+
     return;
   }
 
@@ -89,38 +99,63 @@ async function processDueAutomation(
     return;
   }
 
+  const retryRun =
+    execution.mode === "agent"
+      ? getScheduledAutomationRetryRun(db, args.automation)
+      : null;
+
+  const prepared =
+    execution.mode === "workflow"
+      ? await args.workflows?.prepare(args.automation)
+      : undefined;
+
+  if (execution.mode === "workflow" && !prepared)
+    throw new Error("Workflow dispatch is unavailable.");
+
   const claim = claimAutomationScheduledRun(db, {
     automationId: args.automation.id,
     expectedNextRunAt,
     newNextRunAt,
     now: args.now,
+    persistClaim: prepared?.persist,
+    skipReason: prepared?.skip(expectedNextRunAt, args.now),
   });
+
   if (!claim.advanced) return;
-  publishAutomationChange(bb, args.automation.projectId, [
+  publishAutomationChange(api, args.automation.projectId, [
     "automations-changed",
     "automation-runs-changed",
   ]);
+
+  if (claim.run.status !== "running") return;
+
   const onFailure = buildScheduleFailureHandler(db, {
     run: claim.run,
   });
+
   if (execution.mode === "agent") {
-    await executeAgentRun(bb, db, {
+    const runArgs: Parameters<typeof executeAgentRun>[2] = {
       automation: args.automation,
       run: claim.run,
       execution,
       onFailure,
-    });
+    };
+
+    if (retryRun !== null) runArgs.retryRun = retryRun;
+    await executeAgentRun(api, db, runArgs);
+  } else if (execution.mode === "workflow") {
+    void args.workflows?.reconcile(claim.run);
   } else {
-    void executeScriptRun(bb, db, {
+    void executeScriptRun(api, db, {
       pluginDataDir: args.pluginDataDir,
       automation: args.automation,
       run: claim.run,
       execution,
       onFailure,
-      serverUrl: args.serverUrl,
       resolveWorkingDirectory: args.resolveWorkingDirectory,
+      scriptHostRouting: args.scriptHostRouting,
     }).catch((error: unknown) => {
-      bb.log.error(
+      api.log.error(
         `Detached script automation ${args.automation.id} failed unexpectedly: ${errorMessage(error)}`,
       );
     });
@@ -128,53 +163,66 @@ async function processDueAutomation(
 }
 
 async function hasConnectedHost(
-  bb: Pick<BbPluginApi, "log"> & {
+  api: Pick<PluginApi, "log"> & {
     sdk: { hosts: { list(): Promise<unknown> } };
   },
 ): Promise<boolean> {
   try {
     return hostListSchema
-      .parse(await bb.sdk.hosts.list())
+      .parse(await api.sdk.hosts.list())
       .some((host) => host.status === "connected");
   } catch (error) {
-    bb.log.warn(
+    api.log.warn(
       `Failed to list hosts for automation sweep: ${errorMessage(error)}`,
     );
+
     return false;
   }
 }
 
 export async function sweepDueAutomations(
-  bb: SweepApi,
+  api: SweepApi,
   db: Db,
   args: {
     pluginDataDir: string;
-    serverUrl: string;
+    env: AutomationEnvValues;
     serverHostId: string | null;
+    scriptHostRouting?: ScriptHostRouting;
     now?: number;
+    workflows?: ReturnType<typeof createWorkflowDispatch>;
   },
 ): Promise<void> {
   const now = args.now ?? Date.now();
-  const due = listDueAutomations(db, { now, limit: DUE_AUTOMATION_BATCH_SIZE });
-  if (due.length === 0) return;
-  const agentHostsAvailable = await hasConnectedHost(bb);
-  const resolveWorkingDirectory = createScriptWorkingDirectoryResolver({
-    sdk: bb.sdk,
-    pluginDataDir: args.pluginDataDir,
-    serverHostId: args.serverHostId,
+
+  const due = listDueAutomations(db, args.env, {
+    now,
+    limit: DUE_AUTOMATION_BATCH_SIZE,
   });
+
+  if (due.length === 0) return;
+  const agentHostsAvailable = await hasConnectedHost(api);
+
+  const resolveWorkingDirectory = createScriptWorkingDirectoryResolver({
+    sdk: api.sdk,
+    pluginDataDir: args.pluginDataDir,
+    serverHostId:
+      args.scriptHostRouting?.hostId(args.serverHostId) ?? args.serverHostId,
+  });
+
   for (const automation of due) {
     try {
-      await processDueAutomation(bb, db, {
+      await processDueAutomation(api, db, {
         pluginDataDir: args.pluginDataDir,
+        env: args.env,
         automation,
         now,
         agentHostsAvailable,
-        serverUrl: args.serverUrl,
         resolveWorkingDirectory,
+        workflows: args.workflows,
+        scriptHostRouting: args.scriptHostRouting,
       });
     } catch (error) {
-      bb.log.error(
+      api.log.error(
         `Failed to process due automation ${automation.id}: ${errorMessage(error)}`,
       );
     }
@@ -185,13 +233,16 @@ export function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) {
       resolve();
+
       return;
     }
+
     const settle = () => {
       clearTimeout(timeout);
       signal.removeEventListener("abort", settle);
       resolve();
     };
+
     const timeout = setTimeout(settle, ms);
     signal.addEventListener("abort", settle, { once: true });
   });

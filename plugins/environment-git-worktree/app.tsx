@@ -11,39 +11,43 @@ import {
   BranchPickerRow,
   BranchPickerSearch,
   BranchPickerSectionHeader,
-} from "@bb/shared-ui/branch-picker-primitives";
-import { Button } from "@bb/shared-ui/button";
+} from "@omnyo/shared-ui/branch-picker-primitives";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   COARSE_POINTER_COMPACT_ICON_SIZE_CLASS,
   COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { MenuHoverProvider } from "@bb/shared-ui/menu-item-hover";
-import { LIST_HOVER_TRANSITION } from "@bb/shared-ui/motion";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { MenuHoverProvider } from "@omnyo/shared-ui/menu-item-hover";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import {
   OPTION_BASE_CLASS_NAME,
   OPTION_INTERACTIVE_CLASS_NAME,
   OPTION_MUTED_CLASS_NAME,
   OPTION_TRIGGER_CONTENT_CLASS_NAME,
-} from "@bb/shared-ui/option-display";
-import { blurActiveKeyboardInputWithin } from "@bb/shared-ui/overlay-trigger";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
+} from "@omnyo/shared-ui/option-display";
+import { blurActiveKeyboardInputWithin } from "@omnyo/shared-ui/overlay-trigger";
+import { Popover, PopoverContent, PopoverTrigger } from "@omnyo/shared-ui/popover";
 import {
   definePluginApp,
   experimental_useBranches,
   useRpc,
   type JsonValue,
   type PluginEnvironmentProviderInputsProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import type { DiscoveredWorktree } from "./contract.js";
 import { GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
 import type { WorktreeInputs, worktreeRpcContract } from "./server.js";
 
 const DEFAULT_INPUTS: WorktreeInputs = { branch: { kind: "default" } };
+
 const NEW_WORKTREE_LABEL = "New worktree";
+
 const BRANCH_FROM_PREFIX = "Branch from:";
+
 const REUSE_PREFIX = "Reuse:";
+
 const EXISTING_WORKTREE_LABEL = "Existing worktree";
 
 type WorktreeIntent = "new" | "existing";
@@ -52,10 +56,13 @@ function selectedBranchName(value: JsonValue | null): string | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
+
   const branch = value.branch;
+
   if (typeof branch !== "object" || branch === null || Array.isArray(branch)) {
     return null;
   }
+
   return branch.kind === "named" && typeof branch.name === "string"
     ? branch.name
     : null;
@@ -65,6 +72,7 @@ function selectedExistingPath(value: JsonValue | null): string | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
+
   return value.kind === "existing" && typeof value.path === "string"
     ? value.path
     : null;
@@ -76,7 +84,9 @@ function worktreePathLabel(path: string): string {
 
 function filterBranches(branches: readonly string[], query: string): string[] {
   const normalized = query.trim().toLowerCase();
+
   if (normalized.length === 0) return [...branches];
+
   return branches.filter((branch) => branch.toLowerCase().includes(normalized));
 }
 
@@ -88,6 +98,7 @@ function WorktreeInputsControl({
 }: PluginEnvironmentProviderInputsProps) {
   const hostId = target.kind === "existing-host" ? target.hostId : null;
   const rpc = useRpc<typeof worktreeRpcContract>();
+
   const [worktreeResult, setWorktreeResult] = useState<{
     projectId: string;
     hostId: string;
@@ -95,17 +106,22 @@ function WorktreeInputsControl({
     loading: boolean;
     error: boolean;
   } | null>(null);
+
   const worktreeRequest = useRef(0);
+
   const scopedWorktreeResult =
     worktreeResult?.projectId === projectId && worktreeResult?.hostId === hostId
       ? worktreeResult
       : null;
+
   const worktrees = scopedWorktreeResult?.worktrees ?? [];
+
   const [baseResult, setBaseResult] = useState<{
     projectId: string;
     hostId: string | null;
     branch: string | null;
   } | null>(null);
+
   const [baseRefresh, setBaseRefresh] = useState(0);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -115,8 +131,10 @@ function WorktreeInputsControl({
 
   const existingPath = selectedExistingPath(value);
   const branchName = selectedBranchName(value);
+
   const selectedIntent: WorktreeIntent =
     existingPath === null ? "new" : "existing";
+
   const [intent, setIntent] = useState<WorktreeIntent>(selectedIntent);
 
   const branchState = experimental_useBranches({
@@ -131,10 +149,13 @@ function WorktreeInputsControl({
 
   const refreshWorktrees = useCallback(async () => {
     const request = ++worktreeRequest.current;
+
     if (projectId === null || hostId === null) {
       setWorktreeResult(null);
+
       return;
     }
+
     setWorktreeResult({
       projectId,
       hostId,
@@ -142,11 +163,13 @@ function WorktreeInputsControl({
       loading: true,
       error: false,
     });
+
     try {
       const result = await rpc.call("listExistingWorktrees", {
         projectId,
         hostId,
       });
+
       if (request === worktreeRequest.current) {
         setWorktreeResult({
           projectId,
@@ -186,6 +209,7 @@ function WorktreeInputsControl({
       .catch(() => {
         if (active) setBaseResult({ projectId, hostId, branch: null });
       });
+
     return () => {
       active = false;
     };
@@ -218,11 +242,15 @@ function WorktreeInputsControl({
     baseResult?.projectId === projectId && baseResult?.hostId === hostId
       ? baseResult.branch
       : null;
+
   const baseBranchLabel = branchName ?? defaultBase ?? "default";
+
   const triggerPrefix =
     existingPath === null ? BRANCH_FROM_PREFIX : REUSE_PREFIX;
+
   const triggerValue =
     existingPath === null ? baseBranchLabel : worktreePathLabel(existingPath);
+
   const triggerTitle =
     existingPath ?? `Create a worktree from ${baseBranchLabel}`;
 
@@ -236,8 +264,10 @@ function WorktreeInputsControl({
         .then(() => setBaseRefresh((value) => value + 1))
         .catch(() => undefined);
     }
+
     setOpen(nextOpen);
   };
+
   const submit = (next: WorktreeInputs) => {
     onChange({ status: "ready", value: next });
     updateOpen(false);

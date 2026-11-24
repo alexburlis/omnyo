@@ -1,7 +1,7 @@
 import path from "node:path";
 import { chmodSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { systemExecutionOptionsResponseSchema } from "@bb/server-contract";
+import { systemExecutionOptionsResponseSchema } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { sendTextMessage } from "../../helpers/api.js";
 import {
@@ -25,6 +25,7 @@ const fixturePath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../fixtures/dynamic-acp-agent.mjs",
 );
+
 chmodSync(fixturePath, 0o755);
 
 async function registerDynamicAcpAgents(
@@ -36,11 +37,11 @@ async function registerDynamicAcpAgents(
     displayName: "Smoke ACP",
     command: fixturePath,
     args: [],
-    env: { BB_DYNAMIC_ACP_SMOKE: "thread" },
+    env: {},
     modelCli: {
       listArgs: ["--list-models"],
       selectFlag: "--model",
-      primaryModels: ["bb-dynamic-smoke-medium"],
+      primaryModels: ["omnyo-dynamic-smoke-medium"],
     },
   });
   await registerConfiguredAcpProvider(registry, {
@@ -80,10 +81,13 @@ describe.sequential("dynamic ACP integration smoke", () => {
         ].$get({
           query: { hostId: harness.hostId, providerId: "acp-smoke" },
         });
+
         expect(listedModelsResponse.status).toBe(200);
+
         const listedOptions = systemExecutionOptionsResponseSchema.parse(
           await listedModelsResponse.json(),
         );
+
         expect(listedOptions.modelLoadError).toBeNull();
         expect(listedOptions.providers).toEqual(
           expect.arrayContaining([
@@ -94,7 +98,7 @@ describe.sequential("dynamic ACP integration smoke", () => {
           ]),
         );
         expect(listedOptions.models.map((model) => model.model)).toContain(
-          "bb-dynamic-smoke-medium",
+          "omnyo-dynamic-smoke-medium",
         );
 
         const defaultModelsResponse = await harness.api.system[
@@ -102,23 +106,27 @@ describe.sequential("dynamic ACP integration smoke", () => {
         ].$get({
           query: { hostId: harness.hostId, providerId: "acp-nomodelcli" },
         });
+
         expect(defaultModelsResponse.status).toBe(200);
+
         const defaultOptions = systemExecutionOptionsResponseSchema.parse(
           await defaultModelsResponse.json(),
         );
+
         expect(defaultOptions.modelLoadError).toBeNull();
         expect(defaultOptions.models.map((model) => model.model)).toEqual([
-          "bb-dynamic-acp-native-default",
-          "bb-dynamic-acp-native-strong",
+          "omnyo-dynamic-acp-native-default",
+          "omnyo-dynamic-acp-native-strong",
         ]);
 
         const project = await createProjectFixture(
           harness,
           "Dynamic ACP Smoke",
         );
+
         const { thread: nativeThread } = await createReadyThread(harness, {
           execution: {
-            model: "bb-dynamic-acp-native-strong",
+            model: "omnyo-dynamic-acp-native-strong",
             reasoningLevel: "medium",
             permissionMode: "accept-edits",
           },
@@ -134,13 +142,13 @@ describe.sequential("dynamic ACP integration smoke", () => {
         await waitForThreadOutputContaining(
           harness.api,
           nativeThread.id,
-          "dynamic-acp:model=bb-dynamic-acp-native-strong:native selection",
+          "dynamic-acp:model=omnyo-dynamic-acp-native-strong:native selection",
           TURN_TIMEOUT_MS,
         );
 
         const { thread } = await createReadyThread(harness, {
           execution: {
-            model: "bb-dynamic-smoke-medium",
+            model: "omnyo-dynamic-smoke-medium",
             reasoningLevel: "medium",
             permissionMode: "accept-edits",
           },
@@ -156,13 +164,13 @@ describe.sequential("dynamic ACP integration smoke", () => {
         await waitForThreadOutputContaining(
           harness.api,
           thread.id,
-          "dynamic-acp:model=bb-dynamic-smoke-medium:start launch spec",
+          "dynamic-acp:model=omnyo-dynamic-smoke-medium:start launch spec",
           TURN_TIMEOUT_MS,
         );
 
         await sendTextMessage(harness.api, thread.id, {
           execution: {
-            model: "bb-dynamic-smoke-medium",
+            model: "omnyo-dynamic-smoke-medium",
             reasoningLevel: "medium",
             permissionMode: "accept-edits",
           },
@@ -171,7 +179,7 @@ describe.sequential("dynamic ACP integration smoke", () => {
         await waitForThreadOutputContaining(
           harness.api,
           thread.id,
-          "dynamic-acp:model=bb-dynamic-smoke-medium:submit launch spec",
+          "dynamic-acp:model=omnyo-dynamic-smoke-medium:submit launch spec",
           TURN_TIMEOUT_MS,
         );
         await waitForThreadStatus(
@@ -186,7 +194,7 @@ describe.sequential("dynamic ACP integration smoke", () => {
 
         await sendTextMessage(harness.api, thread.id, {
           execution: {
-            model: "bb-dynamic-smoke-medium",
+            model: "omnyo-dynamic-smoke-medium",
             reasoningLevel: "medium",
             permissionMode: "accept-edits",
           },
@@ -195,7 +203,7 @@ describe.sequential("dynamic ACP integration smoke", () => {
         await waitForThreadOutputContaining(
           harness.api,
           thread.id,
-          "dynamic-acp:model=bb-dynamic-smoke-medium:resume launch spec",
+          "dynamic-acp:model=omnyo-dynamic-smoke-medium:resume launch spec",
           TURN_TIMEOUT_MS,
         );
       }),

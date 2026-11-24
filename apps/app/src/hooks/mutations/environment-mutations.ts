@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Environment } from "@bb/domain";
+import type { Environment } from "@omnyo/domain";
 import type {
   EnvironmentActionResponse,
   UpdateEnvironmentRequest,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { sdk } from "@/lib/sdk";
 import type { RequestEnvironmentActionMutationRequest } from "./mutation-request-types";
 import { invalidateEnvironmentActionQueries } from "../cache-owners/environment-cache-effects";
@@ -13,6 +13,7 @@ import {
   rollbackEnvironmentNameUpdateTransaction,
   type EnvironmentNameUpdateTransaction,
 } from "../cache-owners/environment-workspace-cache-owner";
+
 type UpdateEnvironmentMutationRequest = {
   id: string;
 } & UpdateEnvironmentRequest;
@@ -70,12 +71,14 @@ export function useUpdateEnvironment() {
             : {}),
         });
       }
+
       if (request.mergeBaseBranch !== undefined) {
         return sdk.environments.update({
           environmentId: id,
           mergeBaseBranch: request.mergeBaseBranch,
         });
       }
+
       throw new Error("Environment update requires at least one field");
     },
     onMutate: ({

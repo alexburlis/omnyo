@@ -1,5 +1,5 @@
-import { getEnvironment, getHost } from "@bb/db";
-import { clampPermissionModeToCeiling, type PermissionMode } from "@bb/domain";
+import { getEnvironment, getHost } from "@omnyo/db";
+import { clampPermissionModeToCeiling, type PermissionMode } from "@omnyo/domain";
 import { ApiError } from "../../errors.js";
 import type { AppDeps } from "../../types.js";
 
@@ -24,6 +24,7 @@ export function getHostPermissionCeiling(
   hostId: string | null,
 ): PermissionMode {
   if (hostId === null) return "full";
+
   return getHost(deps.db, hostId)?.maxPermissionMode ?? "full";
 }
 
@@ -32,6 +33,7 @@ export function resolveEnvironmentHostId(
   environmentId: string | null,
 ): string | null {
   if (environmentId === null) return null;
+
   return getEnvironment(deps.db, environmentId)?.hostId ?? null;
 }
 
@@ -40,14 +42,17 @@ export function clampPermissionModeToHost(
   args: ClampPermissionModeToHostArgs,
 ): PermissionMode {
   const ceiling = getHostPermissionCeiling(deps, args.hostId);
+
   const supported = args.providerId
     ? deps.providerRegistry.getSupportedPermissionModes(args.providerId)
     : null;
+
   const clamped = clampPermissionModeToCeiling({
     ceiling,
     permissionMode: args.permissionMode,
     ...(supported ? { permissionModes: supported } : {}),
   });
+
   if (clamped === null) {
     throw new HostPermissionCeilingConflictError(
       400,
@@ -55,5 +60,6 @@ export function clampPermissionModeToHost(
       `This machine limits permission mode to ${ceiling}, and provider ${args.providerId} requires a higher mode.`,
     );
   }
+
   return clamped;
 }

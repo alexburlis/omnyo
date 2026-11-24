@@ -1,4 +1,4 @@
-import type { HostDaemonOnlineRpcRequestMessage } from "@bb/host-daemon-contract";
+import type { HostDaemonOnlineRpcRequestMessage } from "@omnyo/host-daemon-contract";
 import { describe, expect, it } from "vitest";
 import { registerHostRpcResponder } from "../helpers/host-rpc.js";
 import { readJson } from "../helpers/json.js";
@@ -46,6 +46,7 @@ describe("host file routes", () => {
         sessionId: session.id,
         handle: (request) => {
           commands.push(request.command);
+
           return { ok: true, result: { ok: true } };
         },
       });
@@ -72,6 +73,7 @@ describe("host file routes", () => {
           },
           body: JSON.stringify(payload),
         });
+
         expect(hostile.status, route).toBe(403);
 
         const simpleRequest = await harness.app.request(route, {
@@ -79,6 +81,7 @@ describe("host file routes", () => {
           headers: { "content-type": "text/plain" },
           body: JSON.stringify(payload),
         });
+
         expect(simpleRequest.status, route).toBe(415);
       }
 
@@ -91,6 +94,7 @@ describe("host file routes", () => {
       const { host, session } = seedHostSession(harness.deps);
       seedPrimaryHost(harness.deps, host.id);
       const revision = "d".repeat(64);
+
       const files = new Map([
         [
           "/notes/chart.png",
@@ -114,6 +118,7 @@ describe("host file routes", () => {
           },
         ],
       ]);
+
       const rootPaths: string[] = [];
       registerHostRpcResponder(harness, {
         hostId: host.id,
@@ -123,14 +128,17 @@ describe("host file routes", () => {
             throw new Error("Unexpected command");
           rootPaths.push(command.rootPath);
           const file = files.get(command.path);
+
           if (!file) throw new Error(`Unexpected path ${command.path}`);
+
           return {
             ok: true,
             result: {
               path: command.path,
-              content: file.bytes
-                .subarray(command.offset, command.offset + command.length)
-                .toString("base64"),
+              content: file.bytes.subarray(
+                command.offset,
+                command.offset + command.length,
+              ),
               offset: command.offset,
               mimeType: file.mimeType,
               modifiedAtMs: 1234,
@@ -144,11 +152,13 @@ describe("host file routes", () => {
       const leaseResponse = await harness.app.request(
         ...postJson("/api/v1/files/previews", { rootPath: "/notes" }),
       );
+
       expect(leaseResponse.status).toBe(200);
       const lease = await readJson(leaseResponse);
       expect(lease).toMatchObject({
         baseUrl: expect.stringMatching(/^\/api\/v1\/file-previews\//),
       });
+
       if (
         typeof lease !== "object" ||
         lease === null ||
@@ -161,6 +171,7 @@ describe("host file routes", () => {
       const image = await harness.app.request(`${lease.baseUrl}/chart.png`, {
         headers: { "if-none-match": `W/"file-${revision}"` },
       });
+
       expect(image.status).toBe(304);
       expect(image.headers.get("cache-control")).toBe("private, no-cache");
 
@@ -168,6 +179,7 @@ describe("host file routes", () => {
         `${lease.baseUrl}/report.html`,
         { headers: { "if-none-match": `W/"file-${revision}"` } },
       );
+
       expect(content.status).toBe(200);
       expect(content.headers.get("cache-control")).toBe("no-store");
       expect(content.headers.get("content-security-policy")).toBe(
@@ -180,6 +192,7 @@ describe("host file routes", () => {
         `${lease.baseUrl}/archive.zip`,
         { headers: { Range: "bytes=0-3" } },
       );
+
       expect(archive.status).toBe(206);
       expect(archive.headers.get("content-range")).toBe("bytes 0-3/8");
       expect(Buffer.from(await archive.arrayBuffer())).toEqual(
@@ -199,12 +212,15 @@ describe("host file routes", () => {
         sessionId: session.id,
         handle: (request) => {
           commands.push(request.command);
+
           if (request.command.type === "host.list_paths") {
             return { ok: true, result: { paths: [], truncated: false } };
           }
+
           if (request.command.type === "host.list_files") {
             return { ok: true, result: { files: [], truncated: false } };
           }
+
           return { ok: true, result: { ok: true } };
         },
       });
@@ -271,6 +287,7 @@ describe("host file routes", () => {
         },
         {
           type: "host.list_files",
+          followRootSymlink: false,
           path: "/notes",
           limit: 1000,
           includeHidden: false,
@@ -309,9 +326,11 @@ describe("host file routes", () => {
         sessionId: session.id,
         handle: (request) => {
           requests.push(request);
+
           if (request.command.type !== "host.write_file") {
             throw new Error(`Unexpected RPC command ${request.command.type}`);
           }
+
           return { ok: true, result: WRITTEN_RESULT };
         },
       });
@@ -345,6 +364,7 @@ describe("host file routes", () => {
         sessionId: session.id,
         handle: (request) => {
           commands.push(request.command);
+
           return {
             ok: true,
             result: { outcome: "conflict", currentSha256: null },
@@ -384,9 +404,11 @@ describe("host file routes", () => {
           if (request.command.type !== "host.read_file") {
             throw new Error(`Unexpected RPC command ${request.command.type}`);
           }
+
           if (request.command.path === "/home/me/notes/note.md") {
             return { ok: true, result: READ_RESULT };
           }
+
           return {
             ok: false,
             errorCode: "ENOENT",
@@ -402,6 +424,7 @@ describe("host file routes", () => {
           rootPath: "/home/me/notes",
         }),
       );
+
       expect(okResponse.status).toBe(200);
       expect(await readJson(okResponse)).toEqual(READ_RESULT);
 
@@ -411,6 +434,7 @@ describe("host file routes", () => {
           path: "/home/me/notes/missing.md",
         }),
       );
+
       expect(missingResponse.status).toBe(404);
     });
   });

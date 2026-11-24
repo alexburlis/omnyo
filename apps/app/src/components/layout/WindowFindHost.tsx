@@ -1,14 +1,20 @@
 import { useCallback } from "react";
 import { useAppCommandHandler } from "@/components/commands/AppCommandProvider";
-import { getBbDesktopInfo, readWindowFindTopOffset } from "@/lib/bb-desktop";
+import {
+  getOmnyoDesktopInfo,
+  readWindowFindTopOffset,
+} from "@/lib/omnyo-desktop";
 
 export function WindowFindHost() {
   const openWindowFind = useCallback((): boolean => {
-    const desktop = getBbDesktopInfo();
+    const desktop = getOmnyoDesktopInfo();
+
     if (desktop?.openWindowFind === undefined) {
       return false;
     }
+
     desktop.openWindowFind({ topOffset: readWindowFindTopOffset() });
+
     return true;
   }, []);
 

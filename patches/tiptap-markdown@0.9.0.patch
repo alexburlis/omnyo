@@ -1,0 +1,17 @@
+diff --git a/index.d.ts b/index.d.ts
+--- a/index.d.ts
++++ b/index.d.ts
+@@ -48 +48,13 @@
+ export declare const Markdown: Extension<MarkdownOptions, MarkdownStorage>;
++
++export interface MarkdownStorage {
++    parser: {
++        parse(content: string, options?: { inline?: boolean }): string,
++    },
++}
++
++declare module "@tiptap/core" {
++    interface Storage {
++        markdown: MarkdownStorage;
++    }
++}

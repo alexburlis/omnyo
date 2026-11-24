@@ -24,6 +24,7 @@ describe("AnimatedBody", () => {
         <span>expensive body</span>
       </AnimatedBody>,
     );
+
     expect(screen.queryByText("expensive body")).toBeNull();
 
     rerender(
@@ -63,8 +64,10 @@ describe("prompt-stack card bodies", () => {
     vi.useFakeTimers();
     const setInterval = vi.spyOn(globalThis, "setInterval");
     const startedAt = Date.now() - 5_000;
+
     function Card() {
       const [isExpanded, setIsExpanded] = useState(false);
+
       return (
         <ThreadBackgroundCommandsCard
           commands={[1, 2, 3].map((index) =>
@@ -84,6 +87,7 @@ describe("prompt-stack card bodies", () => {
         />
       );
     }
+
     render(<Card />);
     expect(screen.queryByText("Background agent 2")).toBeNull();
     expect(setInterval).not.toHaveBeenCalled();

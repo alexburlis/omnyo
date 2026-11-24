@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
-import { WorkspaceError, type HostWorkspace } from "@bb/host-workspace";
+import { WorkspaceError, type HostWorkspace } from "@omnyo/host-workspace";
 import { dispatchCommand } from "../../src/command-dispatch.js";
 import type { EventSinkInput } from "../../src/event-sink.js";
 import {
@@ -26,7 +26,7 @@ function streamedEntries(emitted: EventSinkInput[]) {
 describe("environment command dispatch", () => {
   it("covers environment.attach in unmanaged mode", async () => {
     const harness = createHarness({ workspacePath: "/tmp/unmanaged" });
-    const sourcePath = await makeTempDir("bb-dispatch-unmanaged-");
+    const sourcePath = await makeTempDir("omnyo-dispatch-unmanaged-");
 
     const result = await dispatchCommand(
       {
@@ -57,10 +57,10 @@ describe("environment command dispatch", () => {
 
   it("runs setup before attaching a provider-owned workspace", async () => {
     const harness = createHarness({ workspacePath: "/tmp/provider-owned" });
-    const sourcePath = await makeTempDir("bb-dispatch-provider-owned-");
+    const sourcePath = await makeTempDir("omnyo-dispatch-provider-owned-");
     const markerPath = `${sourcePath}/setup-marker`;
     await fs.writeFile(
-      `${sourcePath}/.bb-env-setup.sh`,
+      `${sourcePath}/.omnyo-env-setup.sh`,
       `printf '%s' \"$SETUP_VALUE\" > '${markerPath}'\n`,
     );
     const emittedEvents: EventSinkInput[] = [];
@@ -98,7 +98,7 @@ describe("environment command dispatch", () => {
       expect.arrayContaining([
         expect.objectContaining({
           key: "setup-started",
-          text: "Running .bb-env-setup.sh",
+          text: "Running .omnyo-env-setup.sh",
         }),
         expect.objectContaining({ key: "setup-completed" }),
         expect.objectContaining({ key: "workspace-path" }),
@@ -108,9 +108,9 @@ describe("environment command dispatch", () => {
 
   it("fails attachment when the setup script fails", async () => {
     const harness = createHarness({ workspacePath: "/tmp/setup-failure" });
-    const sourcePath = await makeTempDir("bb-dispatch-setup-failure-");
+    const sourcePath = await makeTempDir("omnyo-dispatch-setup-failure-");
     await fs.writeFile(
-      `${sourcePath}/.bb-env-setup.sh`,
+      `${sourcePath}/.omnyo-env-setup.sh`,
       "printf 'script diagnostic\\n'\nexit 7\n",
     );
 
@@ -149,9 +149,11 @@ describe("environment command dispatch", () => {
     const { runtime } = createFakeRuntime();
     let provisionSignal: AbortSignal | undefined;
     let resolveProvisionStarted: () => void = () => undefined;
+
     const provisionStarted = new Promise<void>((resolve) => {
       resolveProvisionStarted = resolve;
     });
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async (options) => {
@@ -166,10 +168,13 @@ describe("environment command dispatch", () => {
             { once: true },
           );
         });
+
         return workspace;
       },
     });
+
     const dispatchOptions = makeDispatchOptions({ runtimeManager: manager });
+
     const provision = dispatchCommand(
       {
         type: "environment.attach",
@@ -181,6 +186,7 @@ describe("environment command dispatch", () => {
       },
       dispatchOptions,
     );
+
     await provisionStarted;
 
     await expect(
@@ -205,9 +211,11 @@ describe("environment command dispatch", () => {
     let provisionSettled = false;
     let provisionSignal: AbortSignal | undefined;
     let resolveProvisionStarted: () => void = () => undefined;
+
     const provisionStarted = new Promise<void>((resolve) => {
       resolveProvisionStarted = resolve;
     });
+
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
       provisionWorkspace: async (options) => {
@@ -220,10 +228,13 @@ describe("environment command dispatch", () => {
           { once: true },
         );
         resolveProvisionStarted();
+
         return new Promise<HostWorkspace>(() => undefined);
       },
     });
+
     const dispatchOptions = makeDispatchOptions({ runtimeManager: manager });
+
     const provision = dispatchCommand(
       {
         type: "environment.attach",
@@ -237,6 +248,7 @@ describe("environment command dispatch", () => {
     ).finally(() => {
       provisionSettled = true;
     });
+
     await provisionStarted;
 
     const cancel = dispatchCommand(
@@ -256,7 +268,7 @@ describe("environment command dispatch", () => {
 
   it("streams live events and flushes when initiator is provided", async () => {
     const harness = createHarness({ workspacePath: "/tmp/live-stream" });
-    const sourcePath = await makeTempDir("bb-dispatch-stream-");
+    const sourcePath = await makeTempDir("omnyo-dispatch-stream-");
     const emittedEvents: EventSinkInput[] = [];
     let flushCount = 0;
 
@@ -313,6 +325,7 @@ describe("environment command dispatch", () => {
     const { runtime } = createFakeRuntime();
     const emittedEvents: EventSinkInput[] = [];
     const eventCountsAtFlush: number[] = [];
+
     const manager = new RuntimeManager({
       provisionWorkspace: async (options) => {
         options.onProgress?.({
@@ -336,6 +349,7 @@ describe("environment command dispatch", () => {
           status: "completed",
           startedAt: Date.now(),
         });
+
         return workspace;
       },
       createRuntime: () => runtime,
@@ -369,9 +383,11 @@ describe("environment command dispatch", () => {
     expect(emittedEvents).toHaveLength(1);
     expect(eventCountsAtFlush).toEqual([1]);
     const event = emittedEvents[0]?.event;
+
     if (!event || event.type !== "system/thread-provisioning") {
       throw new Error("Expected thread provisioning event");
     }
+
     const entryKeys = event.entries.map((entry) => entry.key);
     expect(entryKeys).toEqual([
       "setup-output-0",
@@ -385,12 +401,13 @@ describe("environment command dispatch", () => {
   it("flushes live events before surfacing provisioning failures", async () => {
     const emittedEvents: EventSinkInput[] = [];
     let flushCount = 0;
+
     const manager = new RuntimeManager({
       provisionWorkspace: async (options) => {
         options.onProgress?.({
           type: "step",
           key: "git-checkout-started",
-          text: "Switching to branch bb/failure",
+          text: "Switching to branch omnyo/failure",
           status: "started",
           startedAt: Date.now(),
         });
@@ -437,7 +454,7 @@ describe("environment command dispatch", () => {
 
   it("streams the workspace steps when a re-provision of an existing environment does no work", async () => {
     const harness = createHarness({ workspacePath: "/tmp/idempotent" });
-    const sourcePath = await makeTempDir("bb-dispatch-idempotent-");
+    const sourcePath = await makeTempDir("omnyo-dispatch-idempotent-");
     const emittedEvents: EventSinkInput[] = [];
 
     await dispatchCommand(
@@ -490,12 +507,13 @@ describe("environment command dispatch", () => {
 });
 
 it("cancels setup with contributions even when another attach is waiting", async () => {
-  const sourcePath = await makeTempDir("bb-setup-env-cancel-");
+  const sourcePath = await makeTempDir("omnyo-setup-env-cancel-");
   const harness = createHarness({ workspacePath: sourcePath });
   await fs.writeFile(
-    `${sourcePath}/.bb-env-setup.sh`,
+    `${sourcePath}/.omnyo-env-setup.sh`,
     'printf "%s" "$SETUP_VALUE" > started\nsleep 120\nprintf unsafe > after-cancel\n',
   );
+
   const command = {
     type: "environment.attach" as const,
     contributedEnv: [
@@ -511,10 +529,12 @@ it("cancels setup with contributions even when another attach is waiting", async
     path: sourcePath,
     setupScriptTimeoutMs: 5000,
   };
+
   const options = harness.dispatchOptions();
   const first = dispatchCommand(command, options);
   const second = dispatchCommand(command, options);
   const settled = Promise.allSettled([first, second]);
+
   try {
     await expect
       .poll(async () => fs.readFile(`${sourcePath}/started`, "utf8"))
@@ -528,10 +548,12 @@ it("cancels setup with contributions even when another attach is waiting", async
         options,
       ),
     ).resolves.toEqual({ aborted: true });
+
     const rejection = {
       status: "rejected",
       reason: expect.objectContaining({ code: "provision_cancelled" }),
     };
+
     expect(await settled).toEqual([rejection, rejection]);
     await expect(fs.stat(`${sourcePath}/after-cancel`)).rejects.toThrow();
     expect(harness.provisions).toHaveLength(0);

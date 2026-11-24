@@ -8,24 +8,36 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PluginThreadListProps } from "@get-bb/plugin-sdk/app";
+import type {
+  PluginSidebarScope,
+  PluginSidebarThreadsState,
+  PluginThreadListProps,
+} from "@omnyo/plugin-sdk/app";
 import {
   loadPluginApp,
   renderSlot,
   type RenderSlotOptions,
-} from "@get-bb/plugin-sdk/testing/app";
-import { makePluginProject, makeSidebarThread } from "./app/model/fixtures.js";
+} from "@omnyo/plugin-sdk/testing/app";
 import {
+  makePluginProject,
+  makeSidebarThread,
+  withDisabledWorkflowsSdk,
+} from "./app/model/fixtures.js";
+import {
+  flushPreferenceWritesForTest,
   resetPreferencesSyncForTest,
   setPreferencesMirrorStorageForTest,
 } from "./app/preferences/preferences-sync.js";
 import {
   defaultPreferences,
+  preferencesChangedSignalSchema,
   type PreferenceValues,
 } from "./shared/preferences.js";
 
 const app = await loadPluginApp(() => import("./app"));
+
 const registration = app.threadLists[0];
+
 if (!registration) throw new Error("thread-list slot not registered");
 
 const PERSONAL_PROJECT_ID = "proj_personal";
@@ -103,11 +115,12 @@ const THREADS = [
   }),
 ];
 
-function props(): PluginThreadListProps {
+function props(scope?: PluginSidebarScope): PluginThreadListProps {
   return {
     activeThreadId: null,
     activeProjectId: null,
     isCompactViewport: false,
+    ...(scope === undefined ? {} : { experimental_scope: scope }),
     onNavigate: vi.fn(),
     searchQuery: "",
   };
@@ -116,8 +129,9 @@ function props(): PluginThreadListProps {
 function renderList(
   preferences: Partial<PreferenceValues>,
   options: RenderSlotOptions = {},
+  scope?: PluginSidebarScope,
 ) {
-  return renderSlot(registration, props(), {
+  return renderSlot(registration, props(scope), {
     sidebarThreads: {
       projects: PROJECTS,
       sections: SECTIONS,
@@ -127,9 +141,14 @@ function renderList(
       listPreferences: () => ({
         preferences: { ...defaultPreferences(), ...preferences },
       }),
-      setPreference: (input: unknown) => input,
+      setPreference: (input: unknown) => {
+        const { key, value } = preferencesChangedSignalSchema.parse(input);
+
+        return { key, value };
+      },
     },
     ...options,
+    sdk: withDisabledWorkflowsSdk(options.sdk),
   });
 }
 
@@ -153,10 +172,144 @@ afterEach(() => {
   setPreferencesMirrorStorageForTest(undefined);
 });
 
+function selectedThreadIds(): string[] {
+  const selected = screen.queryAllByRole("link", { name: /, selected$/u });
+
+  return selected.map(
+    (link) => link.getAttribute("data-sidebar-thread-id") ?? "",
+  );
+}
+
+describe("sidebar chat selection", () => {
+  it("toggles individual rows, selects a displayed range, and keeps the split shortcut available", async () => {
+    setPreferencesMirrorStorageForTest(null);
+
+    const { inspection } = renderList({
+      organizationMode: "chronological",
+      collapsedSections: [],
+    });
+
+    const pinned = await screen.findByRole("link", {
+      name: "Open Pinned thread",
+    });
+
+    const later = screen.getByRole("link", { name: "Open Later thread" });
+    const personal = screen.getByRole("link", { name: "Open Personal thread" });
+
+    expect(fireEvent.click(pinned, { metaKey: true })).toBe(false);
+    expect(fireEvent.click(personal, { ctrlKey: true })).toBe(false);
+    expect(selectedThreadIds()).toEqual(["thr_pinned", "thr_personal"]);
+    expect(fireEvent.click(pinned, { metaKey: true })).toBe(false);
+    expect(selectedThreadIds()).toEqual(["thr_personal"]);
+
+    expect(fireEvent.click(later, { shiftKey: true })).toBe(false);
+    const order = threadIds();
+    expect(selectedThreadIds()).toEqual(
+      order.slice(order.indexOf("thr_pinned"), order.indexOf("thr_later") + 1),
+    );
+    expect(inspection.navigateCalls).toEqual([]);
+
+    fireEvent.keyDown(later, { key: "a", metaKey: true });
+    expect(selectedThreadIds()).toEqual(order);
+    fireEvent.keyDown(later, { key: "Escape" });
+    expect(selectedThreadIds()).toEqual([]);
+
+    expect(fireEvent.click(personal, { metaKey: true, altKey: true })).toBe(
+      false,
+    );
+    expect(inspection.navigateCalls).toEqual([
+      {
+        method: "toThread",
+        threadId: "thr_personal",
+        options: { split: true },
+      },
+    ]);
+  });
+
+  it("selects a swept range during Shift-drag and preserves it on release", async () => {
+    setPreferencesMirrorStorageForTest(null);
+    const { inspection } = renderList({ organizationMode: "chronological" });
+
+    const pinned = await screen.findByRole("link", {
+      name: "Open Pinned thread",
+    });
+
+    const later = screen.getByRole("link", { name: "Open Later thread" });
+    const personal = screen.getByRole("link", { name: "Open Personal thread" });
+
+    const pointer = {
+      pointerId: 1,
+      pointerType: "mouse",
+      buttons: 1,
+      shiftKey: true,
+    };
+
+    expect(fireEvent.pointerDown(later, pointer)).toBe(false);
+    fireEvent.pointerMove(personal, pointer);
+    expect(selectedThreadIds()).toEqual(
+      threadIds().slice(threadIds().indexOf("thr_later")),
+    );
+
+    fireEvent.pointerMove(pinned, pointer);
+    expect(selectedThreadIds()).toEqual(
+      threadIds().slice(0, threadIds().indexOf("thr_later") + 1),
+    );
+    fireEvent.pointerUp(pinned, { ...pointer, buttons: 0 });
+    expect(fireEvent.click(pinned, { detail: 1 })).toBe(false);
+    expect(selectedThreadIds()).toEqual(
+      threadIds().slice(0, threadIds().indexOf("thr_later") + 1),
+    );
+    expect(inspection.navigateCalls).toEqual([]);
+
+    expect(fireEvent.click(personal)).toBe(true);
+    expect(selectedThreadIds()).toEqual([]);
+  });
+});
+
 describe("thread-list plugin", () => {
+  it.each([
+    ["empty", true],
+    ["empty", false],
+    ["hidden", false],
+    ["pinned", false],
+  ] as const)(
+    "with only %s threads, shows the project group when showEmptyProjects is %s",
+    async (kind, showEmptyProjects) => {
+      setPreferencesMirrorStorageForTest(null);
+      renderList(
+        { organizationMode: "project", showEmptyProjects },
+        {
+          sidebarThreads: {
+            projects: PROJECTS,
+            sections: [],
+            threads: [
+              ...THREADS.filter((thread) => thread.projectId === "proj_app"),
+              ...(kind === "empty"
+                ? []
+                : [
+                    makeSidebarThread({
+                      id: "thr_web_only",
+                      projectId: "proj_web",
+                      title: "Web only",
+                      isHidden: kind === "hidden",
+                      isPinned: kind === "pinned",
+                      pinnedAt: kind === "pinned" ? 10 : null,
+                    }),
+                  ]),
+            ],
+          },
+        },
+      );
+      await screen.findByText("Parent thread");
+      expect(sectionHeaders()).toContain("App");
+      expect(sectionHeaders().includes("Web")).toBe(showEmptyProjects);
+    },
+  );
+
   it("shows the navigation skeleton until preferences load", () => {
     setPreferencesMirrorStorageForTest(null);
     renderSlot(registration, props(), {
+      sdk: withDisabledWorkflowsSdk(),
       sidebarThreads: {
         projects: PROJECTS,
         sections: SECTIONS,
@@ -183,12 +336,13 @@ describe("thread-list plugin", () => {
       "thr_personal",
     ]);
     expect(
-      screen.getByRole("button", { name: "Collapse Parent thread threads" }),
-    ).not.toBeNull();
+      screen.queryByRole("button", { name: "Collapse Parent thread threads" }),
+    ).toBeNull();
   });
 
   it("groups pinned worktree roots when environment grouping is enabled", async () => {
     setPreferencesMirrorStorageForTest(null);
+
     const environment = {
       id: "env_review",
       name: "Reviewer worktree group",
@@ -198,6 +352,7 @@ describe("thread-list plugin", () => {
       isWorktree: true,
       workspaceDisplayKind: "managed-worktree" as const,
     };
+
     const pinnedWorktreeThreads = [
       makeSidebarThread({
         id: "thr_worktree_a",
@@ -216,6 +371,7 @@ describe("thread-list plugin", () => {
         environment,
       }),
     ];
+
     renderList(
       {
         organizationMode: "chronological",
@@ -233,6 +389,7 @@ describe("thread-list plugin", () => {
     const environmentGroup = (
       await screen.findByText("Reviewer worktree group")
     ).closest("[data-sidebar-sticky-group]");
+
     expect(environmentGroup).not.toBeNull();
     expect(
       within(environmentGroup as HTMLElement).getByText("Worktree root A"),
@@ -248,16 +405,20 @@ describe("thread-list plugin", () => {
 
     await screen.findByText("Pinned thread");
     expect(sectionHeaders()).toEqual(["Pinned", "Laptop", "No machine"]);
+
     const laptop = screen
       .getByTitle("Laptop")
       .closest("[data-sidebar-sticky-group]");
+
     expect(laptop).not.toBeNull();
     expect(
       within(laptop as HTMLElement).getByText("Later thread"),
     ).not.toBeNull();
+
     const noMachine = screen
       .getByTitle("No machine")
       .closest("[data-sidebar-sticky-group]");
+
     expect(
       within(noMachine as HTMLElement).getByText("Personal thread"),
     ).not.toBeNull();
@@ -314,19 +475,130 @@ describe("thread-list plugin", () => {
 
     await screen.findByText("Pinned thread");
     expect(sectionHeaders()).toEqual(["Pinned", "App", "Web", "Threads"]);
+
     const appGroup = screen
       .getByTitle("App")
       .closest("[data-sidebar-sticky-group]") as HTMLElement;
+
     expect(within(appGroup).getByText("Parent thread")).not.toBeNull();
     expect(within(appGroup).getByText("Child thread")).not.toBeNull();
+
     const webGroup = screen
       .getByTitle("Web")
       .closest("[data-sidebar-sticky-group]") as HTMLElement;
+
     expect(within(webGroup).getByText("Later thread")).not.toBeNull();
+
     const threadsGroup = screen
       .getByTitle("Threads")
       .closest("[data-sidebar-sticky-group]") as HTMLElement;
+
     expect(within(threadsGroup).getByText("Personal thread")).not.toBeNull();
+  });
+
+  it.each(["project", "chronological", "machine"] as const)(
+    "lists only the scoped project's chats in %s mode",
+    async (organizationMode) => {
+      setPreferencesMirrorStorageForTest(null);
+      renderList(
+        { organizationMode },
+        {},
+        {
+          kind: "project",
+          projectId: "proj_app",
+        },
+      );
+
+      await screen.findByText("Pinned thread");
+      expect(threadIds()).toEqual(["thr_pinned", "thr_parent", "thr_child"]);
+      expect(screen.queryByText("Later thread")).toBeNull();
+      expect(screen.queryByText("Personal thread")).toBeNull();
+    },
+  );
+
+  it("shows only the scoped project's group in project mode", async () => {
+    setPreferencesMirrorStorageForTest(null);
+    renderList(
+      { organizationMode: "project" },
+      {},
+      {
+        kind: "project",
+        projectId: "proj_web",
+      },
+    );
+
+    await screen.findByText("Later thread");
+    expect(sectionHeaders()).toEqual(["Web"]);
+    expect(threadIds()).toEqual(["thr_later"]);
+  });
+
+  it("lists Personal chats under Threads when Personal is the scope", async () => {
+    setPreferencesMirrorStorageForTest(null);
+    renderList(
+      { organizationMode: "project" },
+      {},
+      {
+        kind: "project",
+        projectId: PERSONAL_PROJECT_ID,
+      },
+    );
+
+    await screen.findByText("Personal thread");
+    expect(sectionHeaders()).toEqual(["Threads"]);
+    expect(threadIds()).toEqual(["thr_personal"]);
+  });
+
+  it("lists every project in the inbox scope", async () => {
+    setPreferencesMirrorStorageForTest(null);
+    renderList({ organizationMode: "project" }, {}, { kind: "inbox" });
+
+    await screen.findByText("Pinned thread");
+    expect(sectionHeaders()).toEqual(["Pinned", "App", "Web", "Threads"]);
+    expect(threadIds()).toEqual([
+      "thr_pinned",
+      "thr_parent",
+      "thr_child",
+      "thr_later",
+      "thr_personal",
+    ]);
+  });
+
+  it("starts new chats from a scoped list in the scoped project", async () => {
+    setPreferencesMirrorStorageForTest(null);
+
+    const { inspection } = renderList(
+      { organizationMode: "chronological" },
+      {},
+      { kind: "project", projectId: "proj_app" },
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New thread in Threads" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "New thread in Later section",
+      }),
+    );
+
+    expect(inspection.navigateCalls).toEqual([
+      {
+        method: "toCompose",
+        options: {
+          projectId: "proj_app",
+          placement: { sectionId: null, pinned: false },
+          focusPrompt: true,
+        },
+      },
+      {
+        method: "toCompose",
+        options: {
+          projectId: "proj_app",
+          placement: { sectionId: "sec_later", pinned: false },
+          focusPrompt: true,
+        },
+      },
+    ]);
   });
 
   it("keys its slot and preferences mirror by its own plugin id", async () => {
@@ -337,7 +609,7 @@ describe("thread-list plugin", () => {
     await screen.findByText("Pinned thread");
     expect(
       JSON.parse(
-        window.localStorage.getItem("bb.thread-list.preferences.v1") ?? "{}",
+        window.localStorage.getItem("omnyo.thread-list.preferences.v1") ?? "{}",
       ).organizationMode,
     ).toBe("machine");
     window.localStorage.clear();
@@ -374,6 +646,7 @@ describe("thread-list plugin", () => {
     setPreferencesMirrorStorageForTest(null);
     const listProps = props();
     renderSlot(registration, listProps, {
+      sdk: withDisabledWorkflowsSdk(),
       sidebarThreads: {
         projects: PROJECTS,
         sections: SECTIONS,
@@ -388,10 +661,253 @@ describe("thread-list plugin", () => {
         }),
       },
     });
+
     const link = await screen.findByRole("link", {
       name: "Open Personal thread",
     });
+
     link.click();
     await waitFor(() => expect(listProps.onNavigate).toHaveBeenCalledOnce());
+  });
+});
+
+const SHELVED_THREADS = [
+  makeSidebarThread({
+    id: "thr_shelf_pinned",
+    projectId: "proj_app",
+    title: "Shelved pinned thread",
+    pinnedAt: 12,
+    pinSortKey: "b",
+    experimental_shelvedAt: 30,
+  }),
+  makeSidebarThread({
+    id: "thr_shelf_child",
+    projectId: "proj_app",
+    title: "Shelved child thread",
+    parentThreadId: "thr_shelf_pinned",
+    experimental_shelvedAt: 30,
+  }),
+  makeSidebarThread({
+    id: "thr_shelf_sectioned",
+    projectId: "proj_web",
+    title: "Shelved sectioned thread",
+    sectionId: "sec_later",
+    host: { id: "host_laptop", name: "Laptop" },
+    experimental_shelvedAt: 20,
+  }),
+  makeSidebarThread({
+    id: "thr_shelf_personal",
+    projectId: PERSONAL_PROJECT_ID,
+    title: "Shelved personal thread",
+    experimental_shelvedAt: 10,
+  }),
+];
+
+const SHELF_ORDER = [
+  "thr_shelf_pinned",
+  "thr_shelf_child",
+  "thr_shelf_sectioned",
+  "thr_shelf_personal",
+];
+
+type ShelvedPaging = NonNullable<
+  PluginSidebarThreadsState["experimental_shelved"]
+>;
+
+function shelvedPaging(overrides: Partial<ShelvedPaging> = {}): ShelvedPaging {
+  return {
+    status: "ready",
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    isFetchNextPageError: false,
+    fetchNextPage: async () => undefined,
+    ...overrides,
+  };
+}
+
+function renderShelfList(
+  preferences: Partial<PreferenceValues>,
+  experimental_shelved = shelvedPaging(),
+  scope?: PluginSidebarScope,
+) {
+  return renderList(
+    preferences,
+    {
+      sidebarThreads: {
+        projects: PROJECTS,
+        sections: SECTIONS,
+        threads: [...THREADS, ...SHELVED_THREADS],
+        experimental_shelved,
+      },
+    },
+    scope,
+  );
+}
+
+function shelfSection(): HTMLElement {
+  const section = screen
+    .getByTitle("Shelf")
+    .closest("[data-sidebar-sticky-group]");
+
+  if (!(section instanceof HTMLElement)) throw new Error("Shelf not rendered");
+
+  return section;
+}
+
+function threadIdsIn(element: HTMLElement): string[] {
+  return Array.from(
+    element.querySelectorAll("[data-sidebar-thread-id]"),
+    (row) => row.getAttribute("data-sidebar-thread-id") ?? "",
+  );
+}
+
+describe("thread-list Shelf section", () => {
+  it("starts folded at the end with its top-level count, then opens newest shelved first", async () => {
+    setPreferencesMirrorStorageForTest(null);
+    const { rpcCalls } = renderShelfList({ organizationMode: "chronological" });
+
+    await screen.findByText("Pinned thread");
+    expect(sectionHeaders()).toEqual([
+      "Pinned",
+      "Later",
+      "Review",
+      "Threads",
+      "Shelf",
+    ]);
+    expect(
+      within(
+        shelfSection().querySelector(
+          '[data-sidebar-sticky-tier="label"]',
+        ) as HTMLElement,
+      ).getByText("3"),
+    ).not.toBeNull();
+    expect(threadIdsIn(shelfSection())).toEqual([]);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand Shelf section" }),
+    );
+
+    expect(threadIdsIn(shelfSection())).toEqual(SHELF_ORDER);
+    await flushPreferenceWritesForTest();
+    expect(rpcCalls.filter((call) => call.method === "setPreference")).toEqual([
+      {
+        method: "setPreference",
+        input: {
+          key: "shelfExpanded",
+          value: true,
+          origin: expect.any(String),
+        },
+      },
+    ]);
+  });
+
+  it("leaves the Shelf out until a shelved thread loads", async () => {
+    setPreferencesMirrorStorageForTest(null);
+    renderList({ organizationMode: "chronological", shelfExpanded: true });
+
+    await screen.findByText("Pinned thread");
+    expect(sectionHeaders()).toEqual(["Pinned", "Later", "Review", "Threads"]);
+    expect(screen.queryByText("Couldn’t load shelved threads")).toBeNull();
+  });
+
+  it("says when shelved threads fail to load", async () => {
+    setPreferencesMirrorStorageForTest(null);
+    renderList(
+      { organizationMode: "chronological" },
+      {
+        sidebarThreads: {
+          projects: PROJECTS,
+          sections: SECTIONS,
+          threads: THREADS,
+          experimental_shelved: shelvedPaging({ status: "error" }),
+        },
+      },
+    );
+
+    expect(
+      await screen.findByText("Couldn’t load shelved threads"),
+    ).not.toBeNull();
+    expect(sectionHeaders()).not.toContain("Shelf");
+  });
+
+  it("pages more shelved threads only from the open Shelf", async () => {
+    setPreferencesMirrorStorageForTest(null);
+    const fetchNextPage = vi.fn(async () => undefined);
+    renderShelfList(
+      { organizationMode: "chronological" },
+      shelvedPaging({ hasNextPage: true, fetchNextPage }),
+    );
+
+    await screen.findByText("Pinned thread");
+    expect(
+      screen.queryByRole("button", { name: "Load more shelved threads" }),
+    ).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand Shelf section" }),
+    );
+    fireEvent.click(
+      within(shelfSection()).getByRole("button", {
+        name: "Load more shelved threads",
+      }),
+    );
+
+    expect(fetchNextPage).toHaveBeenCalledOnce();
+  });
+
+  it.each(["project", "chronological", "machine"] as const)(
+    "lists shelved threads only in the Shelf in %s mode",
+    async (organizationMode) => {
+      setPreferencesMirrorStorageForTest(null);
+      renderShelfList({ organizationMode, shelfExpanded: true });
+
+      await screen.findByText("Pinned thread");
+      expect(sectionHeaders().at(-1)).toBe("Shelf");
+      expect(threadIdsIn(shelfSection())).toEqual(SHELF_ORDER);
+      expect(threadIds().filter((id) => SHELF_ORDER.includes(id))).toEqual(
+        SHELF_ORDER,
+      );
+    },
+  );
+
+  it("shows a Shelf parent's child at once while grouped by read status", async () => {
+    setPreferencesMirrorStorageForTest(null);
+
+    const view = renderShelfList({
+      organizationMode: "chronological",
+      groupByReadStatus: true,
+      shelfExpanded: true,
+    });
+
+    await screen.findByText("Shelved pinned thread");
+    const shelved = threadIdsIn(shelfSection());
+
+    expect(shelved.indexOf("thr_shelf_pinned")).toBeGreaterThanOrEqual(0);
+    expect(shelved.indexOf("thr_shelf_child")).toBeGreaterThan(
+      shelved.indexOf("thr_shelf_pinned"),
+    );
+
+    view.rerender(
+      <registration.component {...props()} activeThreadId="thr_shelf_pinned" />,
+    );
+
+    await waitFor(() =>
+      expect(threadIdsIn(shelfSection())).toContain("thr_shelf_child"),
+    );
+  });
+
+  it("keeps a scoped Shelf to the scoped project's shelved threads", async () => {
+    setPreferencesMirrorStorageForTest(null);
+    renderShelfList(
+      { organizationMode: "chronological", shelfExpanded: true },
+      shelvedPaging(),
+      { kind: "project", projectId: "proj_app" },
+    );
+
+    await screen.findByText("Pinned thread");
+    expect(threadIdsIn(shelfSection())).toEqual([
+      "thr_shelf_pinned",
+      "thr_shelf_child",
+    ]);
   });
 });

@@ -2,15 +2,21 @@ import { Command } from "commander";
 import {
   jsonValueSchema,
   PERSONAL_PROJECT_ID,
+  threadOriginKindSchema,
   threadVisibilitySchema,
   type GitBranchSelection,
   type EnvironmentMachineSelection,
   type Thread,
   type JsonValue,
-} from "@bb/domain";
-import type { CreateThreadEnvironmentArgs } from "@bb/server-contract";
+} from "@omnyo/domain";
+import {
+  submissionIdSchema,
+  type CreateThreadEnvironmentArgs,
+  type MachineChoice,
+} from "@omnyo/server-contract";
+import type { ThreadSpawnArgs } from "@omnyo/sdk";
 import { action, CliUsageError } from "../../action.js";
-import { createCliBbSdk } from "../../client.js";
+import { createCliOmnyoSdk } from "../../client.js";
 import { missingProjectHint } from "../../context-hints.js";
 import { requireTextInput, TEXT_FILE_HELP_SUFFIX } from "../../text-input.js";
 import {
@@ -32,6 +38,7 @@ import {
   parsePermissionMode,
   buildPromptInputs,
   uploadClientAttachmentInputs,
+  type UploadedClientAttachment,
   PERMISSION_MODE_HELP,
   PLAN_HELP,
   parseServiceTier,
@@ -77,6 +84,7 @@ interface ThreadSpawnCommandOptions {
   sourceSeqEnd?: string;
   visibility?: string;
   sendAt?: string;
+  submissionId?: string;
 }
 
 export function looksLikePath(value: string): boolean {
@@ -93,6 +101,7 @@ export function requireHostId(hostId: string | null): string {
   if (!hostId) {
     throw new Error("Cannot reach local host daemon. Is it running?");
   }
+
   return hostId;
 }
 
@@ -100,8 +109,11 @@ export function resolveSpawnEnvironmentValue(
   flagValue?: string,
 ): string | undefined {
   const trimmedValue = flagValue?.trim();
+
   if (!trimmedValue) return undefined;
+
   if (looksLikePath(trimmedValue)) return trimmedValue;
+
   return resolveExplicitIdFlag({
     flagName: "--environment flag",
     value: trimmedValue,
@@ -116,21 +128,27 @@ function resolveSpawnParentThreadId(args: {
     flagName: "--parent-thread",
     value: args.parentThread,
   });
+
   if (explicitParentThreadId && args.parentSelf) {
     throw new Error("Cannot combine --parent-thread with --parent-self.");
   }
+
   if (args.parentSelf) {
     const selfThreadId = resolveContextThreadId();
+
     if (!selfThreadId) {
-      throw new Error("--parent-self requires BB_THREAD_ID to be set.");
+      throw new Error("--parent-self requires OMNYO_THREAD_ID to be set.");
     }
+
     return selfThreadId;
   }
+
   return explicitParentThreadId;
 }
 
 export function buildSpawnEnvironment(args: {
   defaultPersonalWorkspace: boolean;
+  machineChoice: MachineChoice;
   environmentValue?: string;
   newEnvironmentKind?: string;
   hostId: string | null;
@@ -139,6 +157,7 @@ export function buildSpawnEnvironment(args: {
   const environmentValue = args.environmentValue?.trim();
   const newEnvironmentKind = args.newEnvironmentKind?.trim();
   const trimmedBaseBranch = args.baseBranch?.trim();
+
   const baseBranch: GitBranchSelection = trimmedBaseBranch
     ? { kind: "named", name: trimmedBaseBranch }
     : { kind: "default" };
@@ -146,28 +165,35 @@ export function buildSpawnEnvironment(args: {
   if (environmentValue && newEnvironmentKind) {
     throw new Error("Cannot combine --environment with --new-environment.");
   }
+
   if (trimmedBaseBranch && newEnvironmentKind !== "worktree") {
     throw new Error("--base-branch requires --new-environment worktree.");
   }
+
   if (newEnvironmentKind) {
     if (newEnvironmentKind === "personal") {
       return {
         type: "host",
         hostId: requireHostId(args.hostId),
+        machineChoice: args.machineChoice,
         workspace: { type: "personal" },
       };
     }
+
     if (newEnvironmentKind === "worktree") {
       return {
         type: "host",
         hostId: requireHostId(args.hostId),
+        machineChoice: args.machineChoice,
         workspace: { type: "managed-worktree", baseBranch },
       };
     }
+
     throw new Error(
       `Unknown environment kind '${newEnvironmentKind}'. Supported: personal, worktree.`,
     );
   }
+
   if (!environmentValue) {
     if (args.hostId !== null) {
       return {
@@ -178,8 +204,10 @@ export function buildSpawnEnvironment(args: {
           : { type: "unmanaged", path: null },
       };
     }
+
     return { type: "project-default" };
   }
+
   if (looksLikePath(environmentValue)) {
     return {
       type: "host",
@@ -187,6 +215,7 @@ export function buildSpawnEnvironment(args: {
       workspace: { type: "unmanaged", path: environmentValue },
     };
   }
+
   return {
     type: "reuse",
     environmentId: environmentValue,
@@ -199,11 +228,13 @@ function parseJsonFlag(
 ): JsonValue | null {
   if (flagValue === undefined) return null;
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(flagValue);
   } catch {
     throw new Error(`${flagName} must be valid JSON.`);
   }
+
   return jsonValueSchema.parse(parsed);
 }
 
@@ -226,58 +257,70 @@ async function buildProviderSpawnEnvironment(args: {
       "Cannot combine --environment-provider with --environment or --new-environment.",
     );
   }
+
   if (args.baseBranch?.trim()) {
     throw new Error(
       "--base-branch requires --new-environment worktree; an --environment-provider takes its branch through --environment-inputs.",
     );
   }
+
   const requested = args.environmentProvider.trim();
-  const providers = await createCliBbSdk(
+
+  const providers = await createCliOmnyoSdk(
     args.serverUrl,
   ).environments.listProviders({ projectId: args.projectId });
+
   const match = providers.find((provider) => provider.id === requested);
+
   if (match === undefined) {
     const available = providers.map((provider) => provider.id).join(", ");
     throw new Error(
       `Unknown environment provider '${requested}'.${available ? ` Available: ${available}.` : ""}`,
     );
   }
+
   let inputs = parseJsonFlag(args.environmentInputs, "--environment-inputs");
+
   if (match.inputs !== null && inputs === null) {
     if (match.acceptsEmptyInputs) {
       inputs = {};
     } else {
       throw new Error(
-        `The '${match.id}' environment provider needs --environment-inputs <json>; \`bb environment providers --json\` shows its schema.`,
+        `The '${match.id}' environment provider needs --environment-inputs <json>; \`omnyo environment providers --json\` shows its schema.`,
       );
     }
   }
+
   if (match.inputs === null && inputs !== null) {
     throw new Error(
       `The '${match.id}' environment provider takes no --environment-inputs.`,
     );
   }
+
   if (match.machineProviderId) {
     if (args.machine !== null || args.machineHostId !== null)
       throw new Error(
         "This environment provider chooses its own new machine; omit machine selectors.",
       );
     let machineInputs = args.machineInputs;
+
     if (match.machineInputs !== undefined) {
       if (match.machineInputs !== null && machineInputs === null) {
         if (match.machineAcceptsEmptyInputs) machineInputs = {};
         else {
           throw new Error(
-            `The '${match.machineProviderId}' machine provider needs --machine-inputs <json>; \`bb environment providers --json\` shows its schema.`,
+            `The '${match.machineProviderId}' machine provider needs --machine-inputs <json>; \`omnyo environment providers --json\` shows its schema.`,
           );
         }
       }
+
       if (match.machineInputs === null && machineInputs !== null) {
         throw new Error(
           `The '${match.machineProviderId}' machine provider takes no --machine-inputs.`,
         );
       }
     }
+
     return {
       type: "provider",
       environmentProviderId: match.id,
@@ -293,21 +336,28 @@ async function buildProviderSpawnEnvironment(args: {
       inputs,
     };
   }
+
   if (args.machineInputsProvided && args.machine === null) {
     throw new Error(
       "--machine-inputs requires --new-machine <provider-id> or a composed --environment-provider.",
     );
   }
+
   const machine = args.machine ?? {
     type: "existing" as const,
     hostId: requireHostId(
       args.machineHostId ?? (await args.resolveDefaultHostId()),
     ),
   };
+
   return {
     type: "provider",
     environmentProviderId: match.id,
     machine,
+    machineChoice:
+      args.machine === null && args.machineHostId === null
+        ? "default"
+        : "explicit",
     inputs,
   };
 }
@@ -346,7 +396,7 @@ export function registerSpawnCommand(
     )
     .option(
       "--base-branch <branch>",
-      "Exact Git ref; omit for bb's project default (use origin/<branch> for a remote ref)",
+      "Base branch or ref; a named branch uses origin/<name> unless local has commits it lacks (use refs/heads/<name> to force local)",
     )
     .option(
       "--machine <id-or-name>",
@@ -362,7 +412,7 @@ export function registerSpawnCommand(
       "Persisted non-secret inputs for --new-machine or a composed --environment-provider; store credentials in plugin settings",
     )
     .option("--parent-thread <id>", "Parent thread ID for worker thread links")
-    .option("--parent-self", "Parent the new thread to BB_THREAD_ID")
+    .option("--parent-self", "Parent the new thread to OMNYO_THREAD_ID")
     .option("--provider <id>", PROVIDER_HELP)
     .option(
       "--model <model>",
@@ -376,7 +426,7 @@ export function registerSpawnCommand(
     .option("--service-tier <tier>", SERVICE_TIER_HELP)
     .option(
       "--option <option=value>",
-      "Choose a value for an option the provider's model lists (see bb provider models); use true or false for an on/off option (repeatable)",
+      "Choose a value for an option the provider's model lists (see omnyo provider models); use true or false for an on/off option (repeatable)",
       (value: string, previous: string[] = []) => [...previous, value],
     )
     .option("--permission-mode <mode>", PERMISSION_MODE_HELP)
@@ -401,15 +451,22 @@ export function registerSpawnCommand(
     )
     .option(
       "--environment-provider <id>",
-      "Run on an environment provider by id (list them with `bb environment providers`)",
+      "Run on an environment provider by id (list them with `omnyo environment providers`)",
     )
     .option(
       "--environment-inputs <json>",
-      "JSON value for an --environment-provider that declares inputs (`bb environment providers --json` shows the schema)",
+      "JSON value for an --environment-provider that declares inputs (`omnyo environment providers --json` shows the schema)",
     )
     .option("--send-at <when>", SEND_AT_HELP)
-    .option("--origin-kind <kind>", "Thread origin: fork")
-    .option("--source-thread <id>", "Source thread for a fork")
+    .option(
+      "--submission-id <id>",
+      "Retry-safe create: repeating the same ID (sub_ plus 32 hex digits) returns the chat created the first time instead of a second chat",
+    )
+    .option(
+      "--origin-kind <kind>",
+      "Thread origin: fork (copies the source history) or handoff (links a new chat that continues the source)",
+    )
+    .option("--source-thread <id>", "Source thread for a fork or handoff")
     .option(
       "--source-seq-end <seq>",
       "Fork after the source turn containing this event sequence",
@@ -422,10 +479,12 @@ export function registerSpawnCommand(
           inline: opts.prompt,
           inlineLabel: "--prompt <prompt>",
         });
+
         const projectId = resolveExplicitIdFlag({
           flagName: "--project flag",
           value: opts.project,
         });
+
         if (!projectId) {
           throw new CliUsageError({
             code: "missing_required",
@@ -433,7 +492,9 @@ export function registerSpawnCommand(
             message: "Missing required option --project <id>.",
           });
         }
+
         const environmentValue = resolveSpawnEnvironmentValue(opts.environment);
+
         if (
           opts.environmentInputs !== undefined &&
           !opts.environmentProvider &&
@@ -443,18 +504,22 @@ export function registerSpawnCommand(
             "--environment-inputs requires --environment-provider <id>.",
           );
         }
+
         const machineTarget = resolveMachineTargetOption(opts);
+
         if (machineTarget && opts.newMachine) {
           throw new Error(
             "Cannot combine --new-machine with --machine or --host.",
           );
         }
+
         if (opts.machineInputs !== undefined && !opts.newMachine) {
           if (!opts.environmentProvider)
             throw new Error(
               "--machine-inputs requires --new-machine <provider-id> or a composed --environment-provider.",
             );
         }
+
         if (
           machineTarget &&
           environmentValue &&
@@ -464,20 +529,26 @@ export function registerSpawnCommand(
             "Cannot combine --machine or --host with an existing environment ID; that environment already selects its machine.",
           );
         }
+
         const machineProvider = opts.newMachine
           ? (
-              await createCliBbSdk(getUrl()).hosts.experimental_listProviders()
+              await createCliOmnyoSdk(
+                getUrl(),
+              ).hosts.experimental_listProviders()
             ).find((provider) => provider.id === opts.newMachine?.trim())
           : undefined;
+
         if (opts.newMachine && machineProvider === undefined) {
           throw new Error(
             `Unknown machine provider '${opts.newMachine.trim()}'.`,
           );
         }
+
         let machineInputs = parseJsonFlag(
           opts.machineInputs,
           "--machine-inputs",
         );
+
         if (
           machineProvider &&
           machineProvider.inputs !== null &&
@@ -486,10 +557,11 @@ export function registerSpawnCommand(
           if (machineProvider.acceptsEmptyInputs) machineInputs = {};
           else {
             throw new Error(
-              `The '${machineProvider?.id}' machine provider needs --machine-inputs <json>; \`bb machine providers --json\` shows its schema.`,
+              `The '${machineProvider?.id}' machine provider needs --machine-inputs <json>; \`omnyo machine providers --json\` shows its schema.`,
             );
           }
         }
+
         if (
           machineProvider &&
           machineProvider.inputs === null &&
@@ -499,6 +571,7 @@ export function registerSpawnCommand(
             `The '${machineProvider.id}' machine provider takes no --machine-inputs.`,
           );
         }
+
         const newMachineSelection =
           machineProvider === undefined
             ? null
@@ -507,18 +580,22 @@ export function registerSpawnCommand(
                 machineProviderId: machineProvider.id,
                 inputs: machineInputs,
               };
+
         const selectedEnvironmentProvider = opts.environmentProvider;
+
         if (machineProvider && selectedEnvironmentProvider === undefined) {
           throw new Error(
             `The '${machineProvider.id}' machine provider requires an environment provider; combine --new-machine with --environment-provider <id>.`,
           );
         }
+
         const needsHostId =
           !opts.environmentProvider &&
           !opts.newMachine &&
           (Boolean(opts.newEnvironment) ||
             (environmentValue !== undefined &&
               looksLikePath(environmentValue)));
+
         const hostId = machineTarget
           ? await resolveMachineHostId({
               serverUrl: getUrl(),
@@ -527,6 +604,7 @@ export function registerSpawnCommand(
           : needsHostId
             ? await resolveLocalHostId()
             : null;
+
         const environment = selectedEnvironmentProvider
           ? await buildProviderSpawnEnvironment({
               serverUrl: getUrl(),
@@ -544,44 +622,67 @@ export function registerSpawnCommand(
             })
           : buildSpawnEnvironment({
               defaultPersonalWorkspace: projectId === PERSONAL_PROJECT_ID,
+              machineChoice: machineTarget ? "explicit" : "default",
               environmentValue,
               newEnvironmentKind: opts.newEnvironment,
               hostId,
               baseBranch: opts.baseBranch,
             });
+
         const reasoningLevel = parseReasoningLevel(opts.reasoningLevel);
         const serviceTier = parseServiceTier(opts.serviceTier);
         const sessionOptions = parseSpawnSessionOptions(opts.option ?? []);
         const permissionMode = parsePermissionMode(opts.permissionMode);
+
         const visibility =
           opts.visibility === undefined
             ? undefined
             : threadVisibilitySchema.parse(opts.visibility);
+
         const parentThreadId = resolveSpawnParentThreadId({
           parentSelf: opts.parentSelf,
           parentThread: opts.parentThread,
         });
-        if (opts.originKind !== undefined && opts.originKind !== "fork") {
-          throw new Error("--origin-kind must be fork.");
+
+        const originKindResult =
+          opts.originKind === undefined
+            ? null
+            : threadOriginKindSchema.safeParse(opts.originKind);
+
+        if (originKindResult !== null && !originKindResult.success) {
+          throw new Error(
+            `--origin-kind must be ${threadOriginKindSchema.options.join(" or ")}.`,
+          );
         }
+
+        const originKind = originKindResult?.data ?? null;
+
         const sourceSeqEnd =
           opts.sourceSeqEnd === undefined
             ? undefined
             : Number(opts.sourceSeqEnd);
+
         if (
           sourceSeqEnd !== undefined &&
           (!Number.isInteger(sourceSeqEnd) || sourceSeqEnd < 0)
         ) {
           throw new Error("--source-seq-end must be a non-negative integer.");
         }
+
         const sendAt =
           opts.sendAt === undefined ? undefined : parseSendAt(opts.sendAt);
+
         const providerId = opts.provider?.trim();
 
         let thread: Thread;
+
         try {
-          const sdk = createCliBbSdk(getUrl());
+          const sdk = createCliOmnyoSdk(getUrl());
+
+          const attachments: UploadedClientAttachment[] = [];
+
           const input = await uploadClientAttachmentInputs({
+            onUploaded: (attachment) => attachments.push(attachment),
             input: buildPromptInputs({
               message: prompt,
               plan: opts.plan,
@@ -591,7 +692,8 @@ export function registerSpawnCommand(
             resolveProjectId: async () => projectId,
             sdk,
           });
-          thread = await sdk.threads.spawn({
+
+          const spawnArgs: ThreadSpawnArgs = {
             origin: "cli",
             projectId,
             ...(providerId ? { providerId } : {}),
@@ -607,7 +709,7 @@ export function registerSpawnCommand(
             ...(visibility ? { visibility } : {}),
             environment,
             startedOnBehalfOf: null,
-            originKind: opts.originKind ?? null,
+            originKind,
             ...(parentThreadId ? { parentThreadId } : {}),
             ...(opts.lifecycleOwnerThread !== undefined
               ? { lifecycleOwnerThreadId: opts.lifecycleOwnerThread }
@@ -617,26 +719,49 @@ export function registerSpawnCommand(
             ...(opts.sourceThread ? { sourceThreadId: opts.sourceThread } : {}),
             ...(sourceSeqEnd !== undefined ? { sourceSeqEnd } : {}),
             ...(sendAt !== undefined ? { sendAt } : {}),
-          });
+          };
+
+          if (opts.submissionId === undefined) {
+            thread = await sdk.threads.spawn(spawnArgs);
+          } else {
+            const parsedSubmissionId = submissionIdSchema.safeParse(
+              opts.submissionId,
+            );
+
+            if (!parsedSubmissionId.success) {
+              throw new Error(
+                "--submission-id must be sub_ followed by 32 lowercase hex digits",
+              );
+            }
+
+            const receipt = await sdk.threads.submissions.spawn({
+              ...spawnArgs,
+              attachments,
+              submissionId: parsedSubmissionId.data,
+            });
+
+            thread = await sdk.threads.get({ threadId: receipt.threadId });
+          }
         } catch (err: unknown) {
           throw prependErrorContext("Failed to create thread", err);
         }
 
         if (outputJson(opts, thread)) return;
         console.log(`Thread spawned: ${thread.id}`);
+
         if (sendAt !== undefined) {
           console.log(
             `First message scheduled for ${new Date(sendAt).toLocaleString()}; the thread stays pending until then.`,
           );
         }
-        // A hidden child reports to its parent too, so the promise follows the
-        // parent link alone.
+
         if (
           thread.parentThreadId &&
           thread.parentThreadId === resolveContextThreadId()
         ) {
           console.log("You will be notified when this thread is done.");
         }
+
         printThread(thread);
       }),
     );
@@ -649,12 +774,15 @@ function printThread(thread: Thread): void {
     `  Project:  ${thread.projectId === PERSONAL_PROJECT_ID ? "-" : thread.projectId}`,
   );
   console.log(`  Status:   ${thread.status}`);
+
   if (thread.visibility === "hidden") {
     console.log("  Visibility: hidden");
   }
+
   if (thread.archivedAt !== null) {
     console.log(`  Archived: ${new Date(thread.archivedAt).toLocaleString()}`);
   }
+
   console.log(`  Created:  ${new Date(thread.createdAt).toLocaleString()}`);
   console.log(`  Updated:  ${new Date(thread.updatedAt).toLocaleString()}`);
   console.log("");

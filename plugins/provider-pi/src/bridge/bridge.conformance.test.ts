@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   experimental_formatConformanceReport as formatConformanceReport,
   experimental_runBridgeConformance as runBridgeConformance,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import { handleLine } from "./bridge.js";
 import { type FakePiBridgeHarness, startFakePiBridge } from "./test-support.js";
 
@@ -12,7 +12,7 @@ let harness: FakePiBridgeHarness;
 
 beforeEach(async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-conformance-ws-",
+    prefix: "omnyo-pi-conformance-ws-",
     initialize: false,
   });
 });
@@ -38,6 +38,7 @@ it("passes the canonical protocol suite against a scripted pi rpc child", async 
   const statusById = Object.fromEntries(
     report.results.map((result) => [result.id, result.status]),
   );
+
   expect(statusById).toMatchObject({
     "rpc/unknown-method": "pass",
     "rpc/invalid-params": "pass",

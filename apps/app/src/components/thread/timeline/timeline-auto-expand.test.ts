@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTimelineViewRows } from "@bb/thread-view";
+import { buildTimelineViewRows } from "@omnyo/thread-view";
 import {
   ECHO_RECEIPT_PRESENTATION,
   commandRow,
@@ -10,10 +10,8 @@ import {
   systemRow,
   workflowRow,
 } from "@/test/fixtures/thread-timeline-rows";
-import {
-  collectTimelineAutoExpansionRowIds,
-  isRowExpandable,
-} from "@bb/client-core";
+import { isRowExpandable } from "@omnyo/client-core";
+import { collectLiveTimelineExpansionRowIds } from "./timeline-live-expansion";
 
 interface CollectAutoExpandedIdsArgs {
   rows: ReturnType<typeof buildTimelineViewRows>;
@@ -24,12 +22,12 @@ function collectAutoExpandedIds({
   rows,
   scopeActive,
 }: CollectAutoExpandedIdsArgs): Set<string> {
-  const { liveExpandedRowIds, terminalFrontierRowIds } =
-    collectTimelineAutoExpansionRowIds({
-      rows,
-      scopeActive,
-    });
-  return new Set([...liveExpandedRowIds, ...terminalFrontierRowIds]);
+  const liveExpandedRowIds = collectLiveTimelineExpansionRowIds({
+    rows,
+    scopeActive,
+  });
+
+  return new Set(liveExpandedRowIds);
 }
 
 const extensionPresentation = {
@@ -72,7 +70,31 @@ describe("isRowExpandable", () => {
   });
 });
 
-describe("collectTimelineAutoExpansionRowIds", () => {
+describe("collectLiveTimelineExpansionRowIds", () => {
+  it("keeps only pending command details open", () => {
+    const rows = buildTimelineViewRows(
+      [1, 2, 3, 4].map((sequence) =>
+        commandRow({
+          id: `command-${sequence}`,
+          command: `echo ${sequence}`,
+          sourceSeqStart: sequence,
+          sourceSeqEnd: sequence,
+          status: sequence === 4 ? "pending" : "completed",
+        }),
+      ),
+    );
+
+    const liveExpandedRowIds = collectLiveTimelineExpansionRowIds({
+      rows,
+      scopeActive: true,
+    });
+
+    expect(liveExpandedRowIds.has("command-1")).toBe(false);
+    expect(liveExpandedRowIds.has("command-2")).toBe(false);
+    expect(liveExpandedRowIds.has("command-3")).toBe(false);
+    expect(liveExpandedRowIds.has("command-4")).toBe(true);
+  });
+
   it("returns no auto-expanded ids when the scope is inactive", () => {
     const rows = buildTimelineViewRows([
       commandRow({
@@ -92,7 +114,7 @@ describe("collectTimelineAutoExpansionRowIds", () => {
     expect(Array.from(ids)).toEqual([]);
   });
 
-  it("auto-expands a trailing bundle in an active scope without expanding its children", () => {
+  it("auto-expands a trailing bundle and its recent commands", () => {
     const rows = buildTimelineViewRows([
       commandRow({
         id: "command-pending-1",
@@ -110,6 +132,7 @@ describe("collectTimelineAutoExpansionRowIds", () => {
 
     expect(rows).toHaveLength(1);
     const bundle = rows[0];
+
     if (!bundle || bundle.kind !== "bundle-summary") {
       throw new Error("expected the trailing row to be a bundle-summary");
     }
@@ -119,9 +142,14 @@ describe("collectTimelineAutoExpansionRowIds", () => {
       scopeActive: true,
     });
 
-    expect(Array.from(ids)).toEqual([bundle.id]);
+    expect(Array.from(ids)).toEqual([
+      bundle.id,
+      "command-pending-1",
+      "command-pending-2",
+    ]);
+
     for (const child of bundle.children) {
-      expect(ids.has(child.id)).toBe(false);
+      expect(ids.has(child.id)).toBe(true);
     }
   });
 
@@ -151,14 +179,12 @@ describe("collectTimelineAutoExpansionRowIds", () => {
       }),
     ]);
 
-    const { liveExpandedRowIds, terminalFrontierRowIds } =
-      collectTimelineAutoExpansionRowIds({
-        rows,
-        scopeActive: true,
-      });
+    const liveExpandedRowIds = collectLiveTimelineExpansionRowIds({
+      rows,
+      scopeActive: true,
+    });
 
     expect(Array.from(liveExpandedRowIds)).toEqual([]);
-    expect(Array.from(terminalFrontierRowIds)).toEqual([]);
   });
 
   it("does not auto-expand a terminal system error after a follow-up makes the scope active", () => {
@@ -177,7 +203,12 @@ describe("collectTimelineAutoExpansionRowIds", () => {
         role: "user",
         text: "please keep going",
         sourceSeqStart: 2,
-        turnRequest: { isGrouped: false, kind: "message", status: "accepted" },
+        turnRequest: {
+          clientRequestId: null,
+          isGrouped: false,
+          kind: "message",
+          status: "accepted",
+        },
       }),
     ]);
 
@@ -189,7 +220,7 @@ describe("collectTimelineAutoExpansionRowIds", () => {
     expect(Array.from(ids)).toEqual([]);
   });
 
-  it("auto-expands a terminal system error when it is the tail row after the turn ends", () => {
+  it("keeps a terminal system error collapsed after the turn ends", () => {
     const rows = buildTimelineViewRows([
       systemRow({
         id: "provider-rate-limit",
@@ -206,10 +237,10 @@ describe("collectTimelineAutoExpansionRowIds", () => {
       scopeActive: false,
     });
 
-    expect(Array.from(ids)).toEqual(["provider-rate-limit"]);
+    expect(Array.from(ids)).toEqual([]);
   });
 
-  it("auto-expands a pending delegation child terminal system error as a terminal frontier", () => {
+  it("keeps nested failure diagnostics collapsed", () => {
     const rows = buildTimelineViewRows([
       delegationRow({
         id: "pending-delegation-with-terminal-error",
@@ -233,19 +264,15 @@ describe("collectTimelineAutoExpansionRowIds", () => {
       }),
     ]);
 
-    const { liveExpandedRowIds, terminalFrontierRowIds } =
-      collectTimelineAutoExpansionRowIds({
-        rows,
-        scopeActive: false,
-      });
+    const liveExpandedRowIds = collectLiveTimelineExpansionRowIds({
+      rows,
+      scopeActive: false,
+    });
 
-    expect(Array.from(terminalFrontierRowIds)).toEqual([
-      "nested-provider-error",
-    ]);
     expect(Array.from(liveExpandedRowIds)).toEqual([]);
   });
 
-  it("does not auto-expand a trailing command row in an active scope", () => {
+  it("auto-expands a recent command row in an active scope", () => {
     const rows = buildTimelineViewRows([
       commandRow({
         id: "command-1",
@@ -261,7 +288,7 @@ describe("collectTimelineAutoExpansionRowIds", () => {
       scopeActive: true,
     });
 
-    expect(Array.from(ids)).toEqual([]);
+    expect(Array.from(ids)).toEqual(["command-1"]);
   });
 
   it("auto-expands a trailing image view row in an active scope", () => {
@@ -281,7 +308,7 @@ describe("collectTimelineAutoExpansionRowIds", () => {
     expect(Array.from(ids)).toEqual(["image-view-1"]);
   });
 
-  it("auto-expands a trailing completed image view row in an active scope", () => {
+  it("folds a completed image view row in an active scope", () => {
     const rows = buildTimelineViewRows([
       imageViewRow({
         durationMs: 500,
@@ -296,10 +323,10 @@ describe("collectTimelineAutoExpansionRowIds", () => {
       scopeActive: true,
     });
 
-    expect(Array.from(ids)).toEqual(["image-view-1"]);
+    expect(Array.from(ids)).toEqual([]);
   });
 
-  it("does not auto-expand a displaced completed bundle in an active scope", () => {
+  it("folds all completed bundles in an active scope", () => {
     const rows = buildTimelineViewRows([
       commandRow({
         id: "command-1",
@@ -341,9 +368,11 @@ describe("collectTimelineAutoExpansionRowIds", () => {
 
     expect(rows).toHaveLength(2);
     const [displaced, trailing] = rows;
+
     if (!displaced || displaced.kind !== "bundle-summary") {
       throw new Error("expected the first row to be a bundle-summary");
     }
+
     if (!trailing || trailing.kind !== "bundle-summary") {
       throw new Error("expected the trailing row to be a bundle-summary");
     }
@@ -353,11 +382,11 @@ describe("collectTimelineAutoExpansionRowIds", () => {
       scopeActive: true,
     });
 
-    expect(ids.has(trailing.id)).toBe(true);
+    expect(ids.has(trailing.id)).toBe(false);
     expect(ids.has(displaced.id)).toBe(false);
   });
 
-  it("does not auto-expand anything when an assistant message is the frontier", () => {
+  it("folds earlier commands when the assistant starts a message", () => {
     const rows = buildTimelineViewRows([
       commandRow({
         id: "command-pending-1",
@@ -375,6 +404,7 @@ describe("collectTimelineAutoExpansionRowIds", () => {
         id: "assistant-final",
         role: "assistant",
         text: "All done.",
+        sourceSeqStart: 3,
       }),
     ]);
 
@@ -404,11 +434,17 @@ describe("collectTimelineAutoExpansionRowIds", () => {
         id: "pending-steer-1",
         role: "user",
         text: "Keep this in mind",
-        turnRequest: { isGrouped: false, kind: "steer", status: "pending" },
+        turnRequest: {
+          clientRequestId: null,
+          isGrouped: false,
+          kind: "steer",
+          status: "pending",
+        },
       }),
     ]);
 
     const bundle = rows.find((row) => row.kind === "bundle-summary");
+
     if (!bundle) {
       throw new Error("expected a bundle-summary row in the view");
     }
@@ -469,6 +505,6 @@ describe("collectTimelineAutoExpansionRowIds", () => {
     });
 
     expect(ids.has("active-pending-delegation")).toBe(true);
-    expect(ids.has("nested-pending-command")).toBe(false);
+    expect(ids.has("nested-pending-command")).toBe(true);
   });
 });

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type {
   WorkspaceOpenTarget,
   WorkspaceOpenTargetId,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { ThreadWorkspaceOpenButton } from "./ThreadWorkspaceOpenButton";
 import { StoryCard, StoryRow } from "../../../.ladle/story-card";
 
@@ -11,9 +11,11 @@ export default {
 };
 
 type OpenPreferredTargetHandler = () => Promise<void>;
+
 type OpenTargetHandler = (targetId: WorkspaceOpenTargetId) => Promise<void>;
 
 const openPreferredTarget: OpenPreferredTargetHandler = async () => {};
+
 const openTarget: OpenTargetHandler = async () => {};
 
 const vscodeTarget: WorkspaceOpenTarget = {
@@ -93,6 +95,7 @@ function OpenMenuThreadWorkspaceOpenButtonStory() {
       const trigger = rootRef.current?.querySelector<HTMLButtonElement>(
         'button[aria-label="Choose another app to open workspace"]',
       );
+
       trigger?.dispatchEvent(
         new PointerEvent("pointerdown", {
           bubbles: true,
@@ -100,6 +103,7 @@ function OpenMenuThreadWorkspaceOpenButtonStory() {
         }),
       );
     });
+
     return () => {
       window.cancelAnimationFrame(frameId);
     };

@@ -18,10 +18,11 @@ import {
   permissionModeSchema,
   pluginThemeMetaSchema,
   providerInfoSchema,
-} from "@bb/domain";
-import { providerHealthSchema as providerHealthSchema } from "@bb/provider-bridge-protocol/provider-maintenance";
-import { hostPlatformSchema } from "@bb/host-daemon-contract/local";
+} from "@omnyo/domain";
+import { providerHealthSchema as providerHealthSchema } from "@omnyo/provider-bridge-protocol/provider-maintenance";
+import { hostPlatformSchema } from "@omnyo/host-daemon-contract/local";
 import { machineEnvironmentSetSchema } from "./machine-environment.js";
+import { providerCommandSchema } from "./projects.js";
 
 const machineEnvironmentReplacementVariableSchema =
   machineEnvironmentSetSchema.extend({
@@ -35,6 +36,7 @@ export const machineEnvironmentReplaceSchema = z
   .strict()
   .superRefine(({ variables }, context) => {
     const names = new Set<string>();
+
     for (const [index, variable] of variables.entries()) {
       if (names.has(variable.name)) {
         context.addIssue({
@@ -43,9 +45,11 @@ export const machineEnvironmentReplaceSchema = z
           message: "Machine environment variable names must be unique",
         });
       }
+
       names.add(variable.name);
     }
   });
+
 export type MachineEnvironmentReplace = z.infer<
   typeof machineEnvironmentReplaceSchema
 >;
@@ -57,6 +61,7 @@ export const systemExecutionOptionsModelLoadErrorCodeSchema = z.enum([
   "timeout",
   "failed",
 ]);
+
 export type SystemExecutionOptionsModelLoadErrorCode = z.infer<
   typeof systemExecutionOptionsModelLoadErrorCodeSchema
 >;
@@ -66,8 +71,20 @@ export const systemExecutionOptionsModelLoadErrorSchema = z.object({
   code: systemExecutionOptionsModelLoadErrorCodeSchema,
   detail: z.string().min(1).nullable(),
 });
+
 export type SystemExecutionOptionsModelLoadError = z.infer<
   typeof systemExecutionOptionsModelLoadErrorSchema
+>;
+
+export const systemExecutionOptionsModelNoticeSchema = z.object({
+  providerId: z.string().min(1),
+  message: z.string().min(1),
+  detail: z.string().min(1).nullable(),
+  until: z.number().int().nonnegative().nullable(),
+});
+
+export type SystemExecutionOptionsModelNotice = z.infer<
+  typeof systemExecutionOptionsModelNoticeSchema
 >;
 
 export const systemExecutionOptionsResponseSchema = z.object({
@@ -76,7 +93,9 @@ export const systemExecutionOptionsResponseSchema = z.object({
   models: z.array(availableModelSchema),
   selectedOnlyModels: z.array(availableModelSchema),
   modelLoadError: systemExecutionOptionsModelLoadErrorSchema.nullable(),
+  modelNotice: systemExecutionOptionsModelNoticeSchema.nullable().default(null),
 });
+
 export type SystemExecutionOptionsResponse = z.infer<
   typeof systemExecutionOptionsResponseSchema
 >;
@@ -93,6 +112,7 @@ export const systemProvidersQuerySchema = z
   })
   .partial()
   .superRefine(rejectMultipleWorkspaceSelectors);
+
 export type SystemProvidersQuery = z.infer<typeof systemProvidersQuerySchema>;
 
 export const systemExecutionOptionsQuerySchema = z
@@ -102,6 +122,7 @@ export const systemExecutionOptionsQuerySchema = z
   })
   .partial()
   .superRefine(rejectMultipleWorkspaceSelectors);
+
 export type SystemExecutionOptionsQuery = z.infer<
   typeof systemExecutionOptionsQuerySchema
 >;
@@ -111,6 +132,7 @@ export const systemUsageLimitsQuerySchema = z.object({
   hostId: z.string().min(1).optional(),
   providerId: z.string().min(1).optional(),
 });
+
 export type SystemUsageLimitsQuery = z.infer<
   typeof systemUsageLimitsQuerySchema
 >;
@@ -119,12 +141,14 @@ export interface SystemVoiceTranscriptionForm {
   [key: string]: string | Blob;
 }
 
-export { providerInfoSchema as systemProviderInfoSchema } from "@bb/domain";
-export type { ProviderInfo as SystemProviderInfo } from "@bb/domain";
+export { providerInfoSchema as systemProviderInfoSchema } from "@omnyo/domain";
+
+export type { ProviderInfo as SystemProviderInfo } from "@omnyo/domain";
 
 export const systemVoiceTranscriptionResponseSchema = z.object({
   text: z.string(),
 });
+
 export type SystemVoiceTranscriptionResponse = z.infer<
   typeof systemVoiceTranscriptionResponseSchema
 >;
@@ -134,11 +158,13 @@ export const systemProviderStateSchema = providerHealthSchema.extend({
   displayName: z.string().min(1),
   localLoginCommand: z.string().min(1).nullable(),
 });
+
 export type SystemProviderState = z.infer<typeof systemProviderStateSchema>;
 
 export const systemProviderStatesResponseSchema = z.object({
   providers: z.array(systemProviderStateSchema),
 });
+
 export type SystemProviderStatesResponse = z.infer<
   typeof systemProviderStatesResponseSchema
 >;
@@ -151,12 +177,14 @@ export const systemAiServiceSchema = z.object({
   automaticRank: z.number().int().nonnegative().nullable(),
   status: aiServiceStatusSchema,
 });
+
 export type SystemAiService = z.infer<typeof systemAiServiceSchema>;
 
 export const systemAiServicesResponseSchema = z.object({
   selections: aiServiceSelectionsSchema,
   services: z.array(systemAiServiceSchema),
 });
+
 export type SystemAiServicesResponse = z.infer<
   typeof systemAiServicesResponseSchema
 >;
@@ -167,6 +195,7 @@ export const setAiServiceSelectionRequestSchema = z
     selection: aiServiceSelectionSchema,
   })
   .strict();
+
 export type SetAiServiceSelectionRequest = z.infer<
   typeof setAiServiceSelectionRequestSchema
 >;
@@ -174,6 +203,7 @@ export type SetAiServiceSelectionRequest = z.infer<
 export const testAiServiceRequestSchema = z
   .object({ task: aiTextTaskSchema })
   .strict();
+
 export type TestAiServiceRequest = z.infer<typeof testAiServiceRequestSchema>;
 
 export const testAiServiceResponseSchema = z.discriminatedUnion("ok", [
@@ -191,15 +221,21 @@ export const testAiServiceResponseSchema = z.discriminatedUnion("ok", [
     durationMs: z.number().int().nonnegative(),
   }),
 ]);
+
 export type TestAiServiceResponse = z.infer<typeof testAiServiceResponseSchema>;
 
 const onboardingStepTelemetrySchema = z.enum([
   "agent",
   "projects",
+  "chats",
+  "browser",
   "plugins",
+  "automations",
   "devices",
 ]);
+
 const onboardingEntryTelemetrySchema = z.enum(["first_run", "replay"]);
+
 const onboardingStepTelemetryPropertiesSchema = z
   .object({
     step: onboardingStepTelemetrySchema,
@@ -226,6 +262,9 @@ export const recordTelemetryEventRequestSchema = z.discriminatedUnion("name", [
       properties: z
         .object({
           entry: onboardingEntryTelemetrySchema,
+          failure_reason: z
+            .enum(["nonzero_exit", "start_rejected", "unknown"])
+            .optional(),
           outcome: z.enum([
             "started",
             "ready",
@@ -284,9 +323,53 @@ export const recordTelemetryEventRequestSchema = z.discriminatedUnion("name", [
     })
     .strict(),
 ]);
+
 export type RecordTelemetryEventRequest = z.infer<
   typeof recordTelemetryEventRequestSchema
 >;
+
+export const BUG_REPORT_MESSAGE_MAX_CHARS = 4_000;
+
+export const BUG_REPORT_EMAIL_MAX_CHARS = 254;
+
+export const bugReportRequestSchema = z
+  .object({
+    message: z.string().trim().min(1).max(BUG_REPORT_MESSAGE_MAX_CHARS),
+    email: z
+      .string()
+      .trim()
+      .max(BUG_REPORT_EMAIL_MAX_CHARS)
+      .pipe(z.email())
+      .optional(),
+    associatedEventId: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/)
+      .optional(),
+  })
+  .strict();
+
+export type BugReportRequest = z.infer<typeof bugReportRequestSchema>;
+
+export const bugReportUnavailableReasonSchema = z.enum([
+  "crash-reports-off",
+  "not-configured",
+]);
+
+export type BugReportUnavailableReason = z.infer<
+  typeof bugReportUnavailableReasonSchema
+>;
+
+export const bugReportResponseSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("sent"), reportId: z.string() }).strict(),
+  z
+    .object({
+      status: z.literal("unavailable"),
+      reason: bugReportUnavailableReasonSchema,
+    })
+    .strict(),
+]);
+
+export type BugReportResponse = z.infer<typeof bugReportResponseSchema>;
 
 export const serverAccessStatusSchema = z.object({
   providers: z.array(
@@ -312,11 +395,27 @@ export const serverAccessStatusSchema = z.object({
   ),
   defaultProviderId: z.string(),
   effectiveUrl: z.string().nullable(),
-  urlSource: z.enum(["setting", "BB_EXTERNAL_URL"]).nullable(),
+  urlSource: z.enum(["setting", "OMNYO_EXTERNAL_URL"]).nullable(),
 });
+
 export type ServerAccessStatus = z.infer<typeof serverAccessStatusSchema>;
 
+export const systemDiagnosticsConfigSchema = z.object({
+  sentryDsn: z.string().min(1).optional(),
+  release: z.string(),
+});
+
+export type SystemDiagnosticsConfig = z.infer<
+  typeof systemDiagnosticsConfigSchema
+>;
+
 export const systemConfigResponseSchema = z.object({
+  commandDefaultsByProvider: z.record(
+    z.string(),
+    z.array(providerCommandSchema),
+  ),
+  appVersion: z.string().optional(),
+  diagnostics: systemDiagnosticsConfigSchema.optional(),
   serverAccess: serverAccessStatusSchema,
   generalSettings: appSettingsSchema.extend({
     showUnhandledProviderEvents: z.boolean().optional(),
@@ -338,11 +437,13 @@ export const systemConfigResponseSchema = z.object({
   voiceTranscriptionEnabled: z.boolean(),
   dataDir: z.string(),
 });
+
 export type SystemConfigResponse = z.infer<typeof systemConfigResponseSchema>;
 
 export const systemAttentionResponseSchema = z.object({
   hasAttention: z.boolean(),
 });
+
 export type SystemAttentionResponse = z.infer<
   typeof systemAttentionResponseSchema
 >;
@@ -353,6 +454,7 @@ export const themeCatalogResponseSchema = z.object({
   plugins: z.array(pluginThemeMetaSchema),
   active: appThemeSchema,
 });
+
 export type ThemeCatalogResponse = z.infer<typeof themeCatalogResponseSchema>;
 
 export const systemVersionResponseSchema = z.object({
@@ -363,22 +465,25 @@ export const systemVersionResponseSchema = z.object({
   installKind: z.enum(["desktop", "npm", "source"]).nullable(),
   currentVersion: z.string(),
   latestVersion: z.string().nullable(),
-  source: z.literal("npm"),
+  source: z.enum(["npm", "private"]),
   updateAvailable: z.boolean(),
   isDevelopment: z.boolean(),
   upgradeCommand: z.string(),
 });
+
 export type SystemVersionResponse = z.infer<typeof systemVersionResponseSchema>;
 
 export const systemVersionQuerySchema = z.object({
   force: z.enum(["true", "false"]).optional(),
 });
+
 export type SystemVersionQuery = z.infer<typeof systemVersionQuerySchema>;
 
 export const systemAppUpdateRevisionSchema = z.object({
   commit: z.string().nullable(),
   version: z.string(),
 });
+
 export type SystemAppUpdateRevision = z.infer<
   typeof systemAppUpdateRevisionSchema
 >;
@@ -386,29 +491,33 @@ export type SystemAppUpdateRevision = z.infer<
 export const systemAppUpdateSupportSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("supported"),
-    mode: z.enum(["npm", "source"]),
+    mode: z.enum(["npm", "source", "private"]),
   }),
   z.object({
     kind: z.literal("unsupported"),
     reason: z.enum(["development", "desktop", "unmanaged"]),
   }),
 ]);
+
 export type SystemAppUpdateSupport = z.infer<
   typeof systemAppUpdateSupportSchema
 >;
 
 export const systemAppUpdateAvailableSchema = z.object({
-  channel: z.enum(["latest", "nightly", "main"]),
+  activation: z.literal("idle-only").optional(),
+  channel: z.enum(["latest", "nightly", "main", "private"]),
   commit: z.string().nullable(),
   commitCount: z.number().int().nonnegative().nullable(),
   subjects: z.array(z.string()),
   version: z.string(),
 });
+
 export type SystemAppUpdateAvailable = z.infer<
   typeof systemAppUpdateAvailableSchema
 >;
 
 export const systemAppUpdateBlockedSchema = z.object({
+  code: z.string().nullable().optional(),
   message: z.string(),
   reason: z.enum([
     "detached-head",
@@ -416,16 +525,24 @@ export const systemAppUpdateBlockedSchema = z.object({
     "uncommitted-changes",
     "diverged",
     "fetch-failed",
+    "update-unreadable",
   ]),
 });
 
 export const systemAppUpdateActivitySchema = z.discriminatedUnion("phase", [
   z.object({ phase: z.literal("idle") }),
   z.object({
+    code: z.string().nullable().optional(),
     output: z.array(z.string()),
     phase: z.literal("preparing"),
     startedAt: z.string(),
     step: z.string(),
+    targetVersion: z.string(),
+  }),
+  z.object({
+    phase: z.literal("draining"),
+    startedAt: z.string(),
+    stopsRunningChatsAt: z.string(),
     targetVersion: z.string(),
   }),
   z.object({
@@ -435,21 +552,24 @@ export const systemAppUpdateActivitySchema = z.discriminatedUnion("phase", [
     targetVersion: z.string(),
   }),
 ]);
+
 export type SystemAppUpdateActivity = z.infer<
   typeof systemAppUpdateActivitySchema
 >;
 
 export const systemAppUpdateResultSchema = z.object({
   acknowledged: z.boolean(),
+  errorCode: z.string().nullable().optional(),
   finishedAt: z.string(),
   from: systemAppUpdateRevisionSchema,
   id: z.string(),
   logTail: z.array(z.string()),
   message: z.string().nullable(),
-  outcome: z.enum(["updated", "failed"]),
+  outcome: z.enum(["updated", "failed", "cancelled"]),
   phase: z.enum(["prepare", "install", "startup"]).nullable(),
   to: systemAppUpdateRevisionSchema,
 });
+
 export type SystemAppUpdateResult = z.infer<typeof systemAppUpdateResultSchema>;
 
 export const systemAppUpdateStatusSchema = z.object({
@@ -457,20 +577,25 @@ export const systemAppUpdateStatusSchema = z.object({
   available: systemAppUpdateAvailableSchema.nullable(),
   blocked: systemAppUpdateBlockedSchema.nullable(),
   current: systemAppUpdateRevisionSchema,
+  installsWhenIdle: z.boolean(),
   lastResult: systemAppUpdateResultSchema.nullable(),
+  newTurnsPausedForUpdate: z.boolean(),
   runningThreadCount: z.number().int().nonnegative(),
   support: systemAppUpdateSupportSchema,
 });
+
 export type SystemAppUpdateStatus = z.infer<typeof systemAppUpdateStatusSchema>;
 
 export const systemAppUpdateQuerySchema = z.object({
   force: z.enum(["true", "false"]).optional(),
 });
+
 export type SystemAppUpdateQuery = z.infer<typeof systemAppUpdateQuerySchema>;
 
 export const systemAppUpdateApplyRequestSchema = z.object({
   confirmInterruptingThreads: z.boolean(),
 });
+
 export type SystemAppUpdateApplyRequest = z.infer<
   typeof systemAppUpdateApplyRequestSchema
 >;
@@ -478,6 +603,7 @@ export type SystemAppUpdateApplyRequest = z.infer<
 export const systemAppUpdateAcknowledgeRequestSchema = z.object({
   id: z.string().min(1),
 });
+
 export type SystemAppUpdateAcknowledgeRequest = z.infer<
   typeof systemAppUpdateAcknowledgeRequestSchema
 >;
@@ -492,11 +618,13 @@ export const cliSkillMachineStatusSchema = z.enum([
   "missing",
   "unknown",
 ]);
+
 export type CliSkillMachineStatus = z.infer<typeof cliSkillMachineStatusSchema>;
 
 export const systemCliSkillsStatusQuerySchema = z.object({
   hostIds: z.string().optional(),
 });
+
 export type SystemCliSkillsStatusQuery = z.infer<
   typeof systemCliSkillsStatusQuerySchema
 >;
@@ -510,6 +638,7 @@ export const systemCliSkillsStatusResponseSchema = z.object({
     }),
   ),
 });
+
 export type SystemCliSkillsStatusResponse = z.infer<
   typeof systemCliSkillsStatusResponseSchema
 >;
@@ -517,6 +646,7 @@ export type SystemCliSkillsStatusResponse = z.infer<
 export const systemInstallCliSkillsRequestSchema = z.object({
   hostIds: z.array(z.string().min(1)).min(1).max(64),
 });
+
 export type SystemInstallCliSkillsRequest = z.infer<
   typeof systemInstallCliSkillsRequestSchema
 >;
@@ -544,9 +674,11 @@ export const systemInstallCliSkillsResponseSchema = z.object({
     ]),
   ),
 });
+
 export type SystemInstallCliSkillsResponse = z.infer<
   typeof systemInstallCliSkillsResponseSchema
 >;
+
 export type SystemConfigReloadResponse = z.infer<
   typeof systemConfigReloadResponseSchema
 >;
@@ -592,6 +724,7 @@ export const systemEnvironmentProviderSchema = z.object({
   machineAcceptsEmptyInputs: z.boolean().optional(),
   machineProviderPluginId: z.string().min(1).optional(),
 });
+
 export type SystemEnvironmentProvider = z.infer<
   typeof systemEnvironmentProviderSchema
 >;
@@ -599,6 +732,7 @@ export type SystemEnvironmentProvider = z.infer<
 export const systemEnvironmentProvidersResponseSchema = z.object({
   providers: z.array(systemEnvironmentProviderSchema),
 });
+
 export type SystemEnvironmentProvidersResponse = z.infer<
   typeof systemEnvironmentProvidersResponseSchema
 >;
@@ -617,6 +751,7 @@ export const systemEnvironmentProvidersQuerySchema = z
       });
     }
   });
+
 export type SystemEnvironmentProvidersQuery = z.infer<
   typeof systemEnvironmentProvidersQuerySchema
 >;
@@ -632,26 +767,16 @@ export const systemMachineProviderSchema = z.object({
   acceptsEmptyInputs: z.boolean(),
   supportsSuspend: z.boolean(),
 });
+
 export type SystemMachineProvider = z.infer<typeof systemMachineProviderSchema>;
 
 export const systemMachineProvidersResponseSchema = z.object({
   providers: z.array(systemMachineProviderSchema),
 });
+
 export type SystemMachineProvidersResponse = z.infer<
   typeof systemMachineProvidersResponseSchema
 >;
-
-export const androidAppArtifactSchema = z.object({
-  version: z.string().min(1),
-  versionCode: z.number().int().positive(),
-  size: z.number().int().positive(),
-  sha256: z.string().regex(/^[a-f0-9]{64}$/),
-});
-export type AndroidAppArtifact = z.infer<typeof androidAppArtifactSchema>;
-
-export interface SystemMobileAppReleasesResponse {
-  android: (AndroidAppArtifact & { updatedAt: string }) | null;
-}
 
 export const systemProviderCatalogEntrySchema = z.object({
   id: z.string(),
@@ -664,12 +789,15 @@ export const systemProviderCatalogEntrySchema = z.object({
   logoUrl: z.string().nullable(),
   info: providerInfoSchema.nullable(),
 });
+
 export type SystemProviderCatalogEntry = z.infer<
   typeof systemProviderCatalogEntrySchema
 >;
+
 export const systemProviderEnabledRequestSchema = z
   .object({ enabled: z.boolean() })
   .strict();
+
 export type SystemProviderEnabledRequest = z.infer<
   typeof systemProviderEnabledRequestSchema
 >;

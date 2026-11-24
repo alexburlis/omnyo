@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { Host } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import type { Host } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useLocalPathPicker } from "./useLocalPathPicker";
 
@@ -64,6 +64,7 @@ afterEach(() => {
 describe("useLocalPathPicker", () => {
   it("drops a submit that carries no machine", () => {
     const submit = vi.fn();
+
     const { result } = renderHook(() =>
       useLocalPathPicker({ isPending: false, submit }),
     );
@@ -77,6 +78,7 @@ describe("useLocalPathPicker", () => {
 
   it("submits on the machine the dialog reports", () => {
     const submit = vi.fn();
+
     const { result } = renderHook(() =>
       useLocalPathPicker({ isPending: false, submit }),
     );
@@ -96,6 +98,7 @@ describe("useLocalPathPicker", () => {
 
   it("still submits on the primary host after the native folder picker", async () => {
     const submit = vi.fn();
+
     const { result } = renderHook(() =>
       useLocalPathPicker({ isPending: false, submit }),
     );
@@ -115,6 +118,7 @@ describe("useLocalPathPicker", () => {
 describe("useLocalPathPicker openPathEntry", () => {
   it("opens the dialog instead of the native picker when several machines exist", () => {
     mocks.hosts = [atum, host("host_thoth", "Thoth")];
+
     const { result } = renderHook(() =>
       useLocalPathPicker({ isPending: false, submit: vi.fn() }),
     );
@@ -127,6 +131,7 @@ describe("useLocalPathPicker openPathEntry", () => {
 
   it("keeps the native picker when the only other machine is offline", () => {
     mocks.hosts = [atum, host("host_dead", "Old laptop", "disconnected")];
+
     const { result } = renderHook(() =>
       useLocalPathPicker({ isPending: false, submit: vi.fn() }),
     );
@@ -146,6 +151,7 @@ describe("useLocalPathPicker openPathEntry", () => {
         status: "connected",
       }),
     ];
+
     const { result } = renderHook(() =>
       useLocalPathPicker({ isPending: false, submit: vi.fn() }),
     );
@@ -159,6 +165,7 @@ describe("useLocalPathPicker openPathEntry", () => {
   it("opens the dialog while the machine list is still loading", () => {
     mocks.hosts = undefined;
     mocks.isLoadingHosts = true;
+
     const { result } = renderHook(() =>
       useLocalPathPicker({ isPending: false, submit: vi.fn() }),
     );

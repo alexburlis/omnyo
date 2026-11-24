@@ -1,40 +1,81 @@
 import { describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({
+const state = vi.hoisted<{
+  tags: string;
+  channel: string;
+  compatibilityOnly: boolean;
+  executablePath: string | null;
+}>(() => ({
   tags: "",
   channel: "latest",
   compatibilityOnly: false,
+  executablePath: "/test/claude",
 }));
 
-vi.mock("@get-bb/plugin-sdk/provider-bridge", async (importOriginal) => ({
+vi.mock("@omnyo/plugin-sdk/provider-bridge", async (importOriginal) => ({
   ...(await importOriginal<
-    typeof import("@get-bb/plugin-sdk/provider-bridge")
+    typeof import("@omnyo/plugin-sdk/provider-bridge")
   >()),
-  experimental_resolveExecutablePath: async () => "/test/claude",
+  experimental_resolveExecutablePath: async () => state.executablePath,
   experimental_probeNpmGlobalPackage: async () => {
     if (state.compatibilityOnly)
       throw new Error("Update discovery ran during compatibility validation");
+
     return { npmBin: null, npmGlobalPackageVersion: null };
   },
   experimental_commandOutput: async (_command: string, args: string[]) => {
     if (state.compatibilityOnly && args[0] !== "--version")
       throw new Error("Update discovery ran during compatibility validation");
+
     if (args[0] === "view") return state.tags;
+
     if (args[0] === "--version") return "2.1.274 (Claude Code)";
+
     if (args[0] === "doctor") {
       return `Running: native\nAuto-update channel: ${state.channel}`;
     }
+
     throw new Error(`Unexpected command arguments: ${args.join(" ")}`);
   },
 }));
 
-import { getClaudeProviderInstallationStatus } from "./provider-maintenance.js";
+import {
+  getClaudeProviderInstallationRun,
+  getClaudeProviderInstallationStatus,
+} from "./provider-maintenance.js";
 
 const tags = { stable: "2.1.274", latest: "2.1.283", next: "2.1.283" };
 
 describe("Claude Code installation status", () => {
+  it.each([
+    "C:\\Users\\pc\\.local\\bin\\claude.exe",
+    "C:\\Users\\Test User\\.local\\bin\\claude.exe",
+    "/test/claude",
+    null,
+  ])("updates the detected executable at %s", async (executablePath) => {
+    state.tags = JSON.stringify(tags);
+    state.channel = "latest";
+    state.executablePath = executablePath;
+
+    try {
+      const run = await getClaudeProviderInstallationRun("update");
+
+      expect(run).toMatchObject({
+        available: true,
+        command: {
+          command: executablePath ?? "claude",
+          args: ["update"],
+          displayCommand: "claude update",
+        },
+      });
+    } finally {
+      state.executablePath = "/test/claude";
+    }
+  });
+
   it("checks the local installation without npm or doctor probes", async () => {
     state.compatibilityOnly = true;
+
     try {
       const status = await getClaudeProviderInstallationStatus(false);
       expect(status).toMatchObject({

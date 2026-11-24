@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PluginCodeThemeData } from "@get-bb/plugin-sdk/app";
+import type { PluginCodeThemeData } from "@omnyo/plugin-sdk/app";
 import {
   applyCodeTheme,
   editorBackground,
@@ -11,7 +11,7 @@ function theme(
   overrides: Partial<PluginCodeThemeData> = {},
 ): PluginCodeThemeData {
   return {
-    name: "bb:nord:light:1f4c9a2b",
+    name: "omnyo:nord:light:1f4c9a2b",
     type: "light",
     fg: "#2e3440",
     bg: "#eceff4",
@@ -24,16 +24,16 @@ function theme(
 const MONACO_THEME_NAME = /^[a-zA-Z0-9-]+$/;
 
 describe("monacoThemeName", () => {
-  it("maps BB's namespaced, fingerprinted names into what Monaco accepts", () => {
-    expect(monacoThemeName("bb:nord:light:1f4c9a2b")).toMatch(
+  it("maps Omnyo's namespaced, fingerprinted names into what Monaco accepts", () => {
+    expect(monacoThemeName("omnyo:nord:light:1f4c9a2b")).toMatch(
       MONACO_THEME_NAME,
     );
     expect(monacoThemeName("catppuccin-mocha")).toMatch(MONACO_THEME_NAME);
   });
 
   it("keeps distinct theme names distinct", () => {
-    expect(monacoThemeName("bb:nord:light")).not.toBe(
-      monacoThemeName("bb:nord:dark"),
+    expect(monacoThemeName("omnyo:nord:light")).not.toBe(
+      monacoThemeName("omnyo:nord:dark"),
     );
   });
 });
@@ -57,14 +57,39 @@ describe("toMonacoTheme", () => {
         tokenColors: [
           { scope: "comment", settings: { foreground: "#abc" } },
           { scope: "keyword", settings: { foreground: "not-a-color" } },
-          { scope: "string", settings: { foreground: "#11223344" } },
+          { scope: "string", settings: { foreground: "#112233" } },
         ],
       }),
     );
+
     expect(rules).toContainEqual({ token: "comment", foreground: "aabbcc" });
-    expect(rules).toContainEqual({ token: "string", foreground: "11223344" });
+    expect(rules).toContainEqual({ token: "string", foreground: "112233" });
     expect(rules.some((rule) => rule.token === "keyword")).toBe(false);
   });
+
+  it.each([
+    { color: "#BEB89999", bg: "#181818", expected: "7c7865" },
+    { color: "#00000080", bg: "#ffffff", expected: "7f7f7f" },
+    { color: "#fff0", bg: "#123", expected: "112233" },
+    { color: "#abcF", bg: "#181818", expected: "aabbcc" },
+  ])(
+    "flattens $color onto the editor's $bg surface for Monaco",
+    ({ color, bg, expected }) => {
+      const { rules, colors } = toMonacoTheme(
+        theme({
+          bg: "#ff0000",
+          colors: {
+            "editor.background": bg,
+            "editor.selectionBackground": "#88c0d033",
+          },
+          tokenColors: [{ scope: "comment", settings: { foreground: color } }],
+        }),
+      );
+
+      expect(rules).toContainEqual({ token: "comment", foreground: expected });
+      expect(colors["editor.selectionBackground"]).toBe("#88c0d033");
+    },
+  );
 
   it("splits both spellings of a multi-scope rule into one rule each", () => {
     const { rules } = toMonacoTheme(
@@ -81,6 +106,7 @@ describe("toMonacoTheme", () => {
         ],
       }),
     );
+
     expect(rules).toContainEqual({ token: "variable", foreground: "111111" });
     expect(rules).toContainEqual({
       token: "entity.name",
@@ -91,6 +117,91 @@ describe("toMonacoTheme", () => {
       token: "support.type",
       foreground: "222222",
     });
+  });
+
+  it("uses TextMate YAML keys and literal colors for Monarch without recoloring other languages", () => {
+    const { rules } = toMonacoTheme(
+      theme({
+        tokenColors: [
+          { scope: "keyword", settings: { foreground: "#fe5d86" } },
+          {
+            scope: ["constant.numeric", "constant.language"],
+            settings: { foreground: "#a895fe" },
+          },
+          {
+            scope: "entity.name.tag.yaml",
+            settings: { foreground: "#9ddd54", fontStyle: "bold" },
+          },
+        ],
+      }),
+    );
+
+    expect(rules).toContainEqual({
+      token: "type.yaml",
+      foreground: "9ddd54",
+      fontStyle: "bold",
+    });
+    expect(rules).toContainEqual({
+      token: "keyword.yaml",
+      foreground: "a895fe",
+    });
+    expect(rules).toContainEqual({
+      token: "number.float.yaml",
+      foreground: "a895fe",
+    });
+    expect(rules).toContainEqual({ token: "keyword", foreground: "fe5d86" });
+    expect(rules.some((rule) => rule.token === "type")).toBe(false);
+    expect(rules.some((rule) => rule.token === "number")).toBe(false);
+  });
+
+  it("colors YAML keys from a theme that only styles generic tags", () => {
+    const { rules } = toMonacoTheme(
+      theme({
+        tokenColors: [
+          { scope: "entity.name", settings: { foreground: "#111111" } },
+          { scope: "entity.name.tag", settings: { foreground: "#ff855e" } },
+          { scope: "constant.numeric", settings: { foreground: "#68cdf2" } },
+        ],
+      }),
+    );
+
+    expect(rules).toContainEqual({ token: "type.yaml", foreground: "ff855e" });
+    expect(rules).toContainEqual({
+      token: "number.yaml",
+      foreground: "68cdf2",
+    });
+  });
+
+  it("prefers the most specific TextMate scope regardless of source order", () => {
+    const { rules } = toMonacoTheme(
+      theme({
+        tokenColors: [
+          {
+            scope: "entity.name.tag.yaml",
+            settings: { foreground: "#9ddd54" },
+          },
+          { scope: "entity.name.tag", settings: { foreground: "#ff855e" } },
+          { scope: "entity.name.tagged", settings: { foreground: "#000000" } },
+        ],
+      }),
+    );
+
+    expect(rules).toContainEqual({ token: "type.yaml", foreground: "9ddd54" });
+  });
+
+  it("lets explicit Monarch rules override the TextMate aliases regardless of source order", () => {
+    const { rules } = toMonacoTheme(
+      theme({
+        tokenColors: [
+          { scope: "keyword.yaml", settings: { foreground: "#123456" } },
+          { scope: "constant.language", settings: { foreground: "#a895fe" } },
+        ],
+      }),
+    );
+
+    expect(
+      rules.filter((rule) => rule.token === "keyword.yaml").at(-1)?.foreground,
+    ).toBe("123456");
   });
 
   it("keeps only the font styles Monaco understands", () => {
@@ -108,6 +219,7 @@ describe("toMonacoTheme", () => {
         ],
       }),
     );
+
     expect(rules).toContainEqual({
       token: "comment",
       foreground: "111111",

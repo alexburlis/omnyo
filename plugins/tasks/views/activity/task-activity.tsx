@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { TasksEditor } from "../../editor/tasks-editor.js";
-import { useBbNavigate } from "@get-bb/plugin-sdk/app";
+import { Hint } from "../../components/hint.js";
+import { experimental_useAppNavigate } from "@omnyo/plugin-sdk/app";
 import {
   useMentionItems,
   useTasksQuery,
@@ -55,15 +56,18 @@ export function activityFeedEntries(
   attachments: readonly Attachment[],
 ): FeedEntry[] {
   const attachmentsByCommentId = new Map<string, Attachment[]>();
+
   for (const attachment of attachments) {
     if (attachment.commentId === null) continue;
     const entries = attachmentsByCommentId.get(attachment.commentId);
+
     if (entries === undefined) {
       attachmentsByCommentId.set(attachment.commentId, [attachment]);
     } else {
       entries.push(attachment);
     }
   }
+
   return comments.map((comment) => ({
     comment,
     attachments: attachmentsByCommentId.get(comment.id) ?? [],
@@ -77,6 +81,7 @@ function useActivityFeed(taskId: string) {
         rpc.call("listComments", { taskId }),
         rpc.call("listAttachments", { commentsOfTaskId: taskId }),
       ]);
+
       return activityFeedEntries(comments, attachments);
     },
     ["comments:changed", "tasks:changed"],
@@ -94,22 +99,28 @@ export function agentNotificationTarget(
   comments: readonly DisplayComment[],
 ): AgentNotificationTarget {
   let latest: DisplayComment | undefined;
+
   for (let index = comments.length - 1; index >= 0; index -= 1) {
     const comment = comments[index];
+
     if (comment?.kind === "agent") {
       latest = comment;
       break;
     }
   }
+
   if (!latest) return { kind: "none" };
+
   if (latest.threadId === null || latest.threadTitle === null) {
     return { kind: "unavailable" };
   }
+
   return { kind: "ready", title: latest.threadTitle };
 }
 
 function UserAvatar({ name }: { name: string }) {
   const initial = (name.trim()[0] ?? "S").toUpperCase();
+
   return (
     <span
       aria-hidden
@@ -182,6 +193,7 @@ export function AttachmentTracks({
 }) {
   const files = attachments.filter((attachment) => !attachment.isImage);
   const images = attachments.filter((attachment) => attachment.isImage);
+
   return (
     <div className="mt-1.5">
       {files.length > 0 ? (
@@ -222,14 +234,14 @@ function SystemEvent({ comment, nowMs }: { comment: Comment; nowMs: number }) {
         {splitSystemBody(comment.body, comment.authorName).map(
           (segment, index) =>
             segment.bold ? (
-              <span key={index} className="font-medium text-foreground/80">
+              <span key={index} className="font-medium text-foreground">
                 {segment.text}
               </span>
             ) : (
               <span key={index}>{segment.text}</span>
             ),
         )}
-        <span className="text-muted-foreground/70">
+        <span className="text-subtle-foreground">
           {" · "}
           {formatRelativeTime(comment.createdAt, nowMs)}
         </span>
@@ -241,8 +253,9 @@ function SystemEvent({ comment, nowMs }: { comment: Comment; nowMs: number }) {
 function CommentCard({ entry, nowMs }: { entry: FeedEntry; nowMs: number }) {
   const { comment, attachments } = entry;
   const agent = comment.kind === "agent";
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const [lightbox, setLightbox] = useState<Attachment | null>(null);
+
   return (
     <div className="relative mb-3.5 flex gap-2.5">
       {agent ? (
@@ -252,7 +265,12 @@ function CommentCard({ entry, nowMs }: { entry: FeedEntry; nowMs: number }) {
       )}
       <div className="min-w-0 flex-1">
         <div className="mb-0.5 flex items-baseline gap-1.5 text-xs">
-          <CommentAuthor comment={comment} onOpenThread={navigate.toThread} />
+          <CommentAuthor
+            comment={comment}
+            onOpenThread={(threadId) =>
+              navigate.toThread(threadId, { experimental_userInitiated: true })
+            }
+          />
           {agent && comment.presetName ? (
             <span className="rounded-sm bg-secondary px-1 py-px text-2xs font-semibold text-muted-foreground">
               {comment.presetName}
@@ -267,7 +285,9 @@ function CommentCard({ entry, nowMs }: { entry: FeedEntry; nowMs: number }) {
           onChange={() => {}}
           readOnly
           variant="comment"
-          onOpenThread={(threadId) => navigate.toThread(threadId)}
+          onOpenThread={(threadId) =>
+            navigate.toThread(threadId, { experimental_userInitiated: true })
+          }
         />
         {attachments.length > 0 ? (
           <AttachmentTracks
@@ -275,13 +295,11 @@ function CommentCard({ entry, nowMs }: { entry: FeedEntry; nowMs: number }) {
             onOpenImage={setLightbox}
           />
         ) : null}
-        {lightbox ? (
-          <Lightbox attachment={lightbox} onClose={() => setLightbox(null)} />
-        ) : null}
+        <Lightbox attachment={lightbox} onClose={() => setLightbox(null)} />
         {comment.kind === "user" && comment.notifiedCount > 0 ? (
           <div className="mt-1 flex items-center gap-1 text-2xs font-medium text-success">
             <HugeiconsIcon icon={Notification02Icon} className="size-2.5" />
-            notified the last responding agent
+            Sent to the agent that last replied
           </div>
         ) : null}
       </div>
@@ -296,7 +314,7 @@ interface ComposerProps {
 
 export function CommentComposer({ taskId, notificationTarget }: ComposerProps) {
   const rpc = useTasksRpc();
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const mentionItems = useMentionItems();
   const [body, setBody] = useState("");
   const [notify, setNotify] = useState(true);
@@ -322,6 +340,7 @@ export function CommentComposer({ taskId, notificationTarget }: ComposerProps) {
     setSending(true);
     setError(null);
     const text = body.trim();
+
     try {
       const comment: Comment = (
         await rpc.call("createComment", {
@@ -331,11 +350,15 @@ export function CommentComposer({ taskId, notificationTarget }: ComposerProps) {
           allowEmptyBody: text.length === 0,
         })
       ).comment;
+
       setBody("");
+
       const failed = await uploadStagedAttachments(staged, {
         commentId: comment.id,
       });
+
       setPendingFiles((files) => settleStagedUploads(files, staged, failed));
+
       if (failed.length > 0) {
         setError(
           `The comment posted, but ${failed.length} attachment${failed.length > 1 ? "s" : ""} failed to upload — retry below.`,
@@ -355,10 +378,12 @@ export function CommentComposer({ taskId, notificationTarget }: ComposerProps) {
         value={body}
         onChange={setBody}
         variant="comment"
-        placeholder="Leave a comment… @-mention tasks and threads to link them"
+        placeholder="Leave a comment. Type @ to link a task or chat."
         className="min-h-11"
         mentionItems={mentionItems}
-        onOpenThread={(threadId) => navigate.toThread(threadId)}
+        onOpenThread={(threadId) =>
+          navigate.toThread(threadId, { experimental_userInitiated: true })
+        }
         onSubmit={() => void send()}
       />
       {pendingFiles.length > 0 ? (
@@ -393,30 +418,34 @@ export function CommentComposer({ taskId, notificationTarget }: ComposerProps) {
           className="hidden"
           onChange={(event) => {
             const files = [...(event.target.files ?? [])];
+
             if (files.length > 0)
               setPendingFiles((current) => [...current, ...stageFiles(files)]);
             event.target.value = "";
           }}
         />
+        <Hint label="Attach files to this comment">
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Attach file"
+            className="shrink-0 text-muted-foreground"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <HugeiconsIcon icon={AttachmentIcon} className="size-3.5" />
+          </Button>
+        </Hint>
         <Button
           type="button"
-          size="icon"
-          variant="ghost"
-          aria-label="Attach file"
-          className="size-6.5 shrink-0 text-muted-foreground"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <HugeiconsIcon icon={AttachmentIcon} className="size-3.5" />
-        </Button>
-        <Button
-          type="button"
-          size="icon"
+          size="xs"
           aria-label="Comment"
           disabled={!canSend}
-          className="size-6.5 shrink-0 rounded-md bg-foreground text-background hover:bg-foreground/90"
+          className="shrink-0"
           onClick={() => void send()}
         >
           <HugeiconsIcon icon={ArrowUp02Icon} className="size-3.5" />
+          Comment
         </Button>
       </div>
     </div>
@@ -434,20 +463,31 @@ export function AgentNotificationControl({
 }) {
   const enabled = target.kind === "ready";
   const on = enabled && checked;
+
   const label =
     target.kind === "ready"
       ? `Notify ${target.title}`
       : target.kind === "none"
         ? "No prior agent reply to notify"
         : "Latest responding agent can’t be notified";
+
+  const hint =
+    target.kind === "ready"
+      ? on
+        ? `Your comment is also sent to ${target.title}. Click to keep it on the task only.`
+        : `Your comment stays on the task. Click to also send it to ${target.title}.`
+      : target.kind === "none"
+        ? "No agent has replied on this task yet, so there is no one to notify."
+        : "The agent that last replied can’t receive messages right now.";
+
   return (
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             type="button"
-            size="icon"
-            variant="ghost"
+            size={enabled ? "xs" : "icon-xs"}
+            variant={on ? "soft" : "ghost"}
             role="switch"
             aria-checked={on}
             aria-disabled={!enabled}
@@ -456,7 +496,7 @@ export function AgentNotificationControl({
               if (enabled) onCheckedChange(!checked);
             }}
             className={cn(
-              "mr-auto size-6.5 shrink-0",
+              "mr-auto min-w-0 max-w-56 shrink",
               on ? "text-foreground" : "text-muted-foreground",
               !enabled &&
                 "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-muted-foreground",
@@ -464,11 +504,18 @@ export function AgentNotificationControl({
           >
             <HugeiconsIcon
               icon={on ? Notification02Icon : NotificationOff02Icon}
-              className="size-3.5"
+              className="size-3.5 shrink-0"
             />
+            {enabled ? (
+              <span aria-hidden="true" className="truncate">
+                {on ? "Notify agent" : "Don't notify agent"}
+              </span>
+            ) : null}
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="top">{label}</TooltipContent>
+        <TooltipContent side="top" className="max-w-64">
+          {hint}
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -482,6 +529,7 @@ export function TaskActivity({ taskId }: TaskActivityProps) {
   const feed = useActivityFeed(taskId);
   const nowMs = useNowTick();
   const entries = useMemo(() => feed.data ?? [], [feed.data]);
+
   const notificationTarget = useMemo(
     () => agentNotificationTarget(entries.map((entry) => entry.comment)),
     [entries],

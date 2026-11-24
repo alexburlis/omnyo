@@ -4,11 +4,12 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type {
   SystemExecutionOptionsResponse,
   SystemProviderStatesResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
-import type { ProviderModelCatalogScope } from "@bb/domain";
+import type { ProviderModelCatalogScope } from "@omnyo/domain";
+import { defaultAppSettings } from "@omnyo/domain";
 import type { QueryClient } from "@tanstack/react-query";
 import {
   hostsQueryKey,
@@ -17,18 +18,22 @@ import {
 } from "./queries/query-keys";
 import { getProjectScopedStorageKey } from "@/lib/project-scoped-storage";
 import { useThreadCreationOptions } from "./useThreadCreationOptions";
+import { useSetAtom } from "jotai";
+import { modelPickerHiddenModelsAtom } from "@/components/pickers/modelPickerPreferences";
 import {
   providerListCacheKey,
   writeCachedProviderList,
 } from "@/lib/provider-list-cache";
-import { makeProviderInfo } from "@bb/test-helpers/domain-fixtures";
+import { makeProviderInfo } from "@omnyo/test-helpers/domain-fixtures";
 import {
   modelCatalogCacheKey,
   readCachedModelCatalog,
 } from "@/lib/model-catalog-cache";
 
 const PROJECT_ID = "proj_prompt_defaults";
+
 const GLOBAL_PROVIDER_ID = "global-provider";
+
 const PROJECT_PROVIDER_ID = "project-provider";
 
 vi.mock("@/lib/sdk", () => ({
@@ -67,9 +72,11 @@ function seedDeclaredCatalogScope(
   modelCatalogScope: ProviderModelCatalogScope,
 ): void {
   const template = executionOptionsResponse().providers[0];
+
   if (template === undefined) {
     throw new Error("fixture has no provider to clone");
   }
+
   queryClient.setQueryData(
     systemProvidersQueryKey({
       capability: null,
@@ -89,9 +96,11 @@ function seedDeclaredCatalogScope(
 function rememberedProviders() {
   const base = executionOptionsResponse().providers;
   const template = base[0];
+
   if (template === undefined) {
     throw new Error("execution-options fixture has no provider");
   }
+
   return [
     {
       ...template,
@@ -176,6 +185,7 @@ function executionOptionsResponse(): SystemExecutionOptionsResponse {
     selectedOnlyModels: [],
     permissionCeiling: "full",
     modelLoadError: null,
+    modelNotice: null,
   };
 }
 
@@ -185,6 +195,7 @@ function providerExecutionOptionsResponse(
   const base = executionOptionsResponse();
   const isProjectProvider = providerId === PROJECT_PROVIDER_ID;
   const modelPrefix = isProjectProvider ? "project" : "global";
+
   return {
     ...base,
     models: [
@@ -221,9 +232,11 @@ function daybreakExecutionOptionsResponse(
   providerId: string | undefined,
 ): SystemExecutionOptionsResponse {
   const response = providerExecutionOptionsResponse(providerId);
+
   if (providerId === PROJECT_PROVIDER_ID) {
     return response;
   }
+
   return {
     ...response,
     models: response.models.map((model) => ({
@@ -291,6 +304,7 @@ function claudeExecutionOptionsResponse(): SystemExecutionOptionsResponse {
     selectedOnlyModels: [],
     permissionCeiling: "full",
     modelLoadError: null,
+    modelNotice: null,
   };
 }
 
@@ -327,8 +341,62 @@ afterEach(() => {
 });
 
 describe("useThreadCreationOptions", () => {
+  it("shows each new model's approval default and keeps explicit choices local to that model", async () => {
+    const { wrapper, queryClient } = createQueryClientTestHarness();
+    queryClient.setQueryData(systemConfigQueryKey(), {
+      generalSettings: {
+        ...defaultAppSettings,
+        defaultPermissionMode: "accept-edits",
+        modelPermissionModes: {
+          [GLOBAL_PROVIDER_ID]: { "project-model": "full" },
+        },
+      },
+    });
+
+    const { result } = renderHook(
+      () =>
+        useThreadCreationOptions({
+          scope: "new-thread",
+          initialProviderId: GLOBAL_PROVIDER_ID,
+          initialModel: "global-model",
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() =>
+      expect(result.current.permissionMode).toBe("accept-edits"),
+    );
+    act(() => result.current.setPermissionMode("auto"));
+    expect(result.current.permissionMode).toBe("auto");
+    act(() => result.current.setSelectedModel("project-model"));
+    await waitFor(() => expect(result.current.permissionMode).toBe("full"));
+  });
+
+  it("does not apply new-chat approval defaults to an existing chat", async () => {
+    const { wrapper, queryClient } = createQueryClientTestHarness();
+    queryClient.setQueryData(systemConfigQueryKey(), {
+      generalSettings: { ...defaultAppSettings, defaultPermissionMode: "full" },
+    });
+
+    const { result } = renderHook(
+      () =>
+        useThreadCreationOptions({
+          scope: "component-local",
+          initialProviderId: GLOBAL_PROVIDER_ID,
+          initialModel: "global-model",
+          initialPermissionMode: "accept-edits",
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() =>
+      expect(result.current.permissionModeIsVerified).toBe(true),
+    );
+    expect(result.current.permissionMode).toBe("accept-edits");
+  });
+
   it("keeps the selected remembered provider branded while models load", () => {
-    window.localStorage.setItem("bb.promptbox.provider", "codex");
+    window.localStorage.setItem("omnyo.promptbox.provider", "codex");
     writeCachedProviderList(
       providerListCacheKey({ environmentId: null, hostId: null }),
       rememberedProviders(),
@@ -351,24 +419,29 @@ describe("useThreadCreationOptions", () => {
   });
 
   it("does not switch away from a provider when its failed plugin response arrives", async () => {
-    window.localStorage.setItem("bb.promptbox.provider", "codex");
+    window.localStorage.setItem("omnyo.promptbox.provider", "codex");
     writeCachedProviderList(
       providerListCacheKey({ environmentId: null, hostId: null }),
       rememberedProviders(),
     );
+
     let resolveOptions: (
       value: SystemExecutionOptionsResponse,
     ) => void = () => {};
+
     const optionsPromise = new Promise<SystemExecutionOptionsResponse>(
       (resolve) => {
         resolveOptions = resolve;
       },
     );
+
     vi.mocked(sdk.system.executionOptions).mockReturnValue(optionsPromise);
+
     const { result } = renderHook(
       () => useThreadCreationOptions({ scope: "new-thread" }),
       { wrapper: createQueryClientTestHarness().wrapper },
     );
+
     act(() => {
       result.current.setSelectedProviderId("codex");
     });
@@ -376,9 +449,11 @@ describe("useThreadCreationOptions", () => {
 
     const base = executionOptionsResponse();
     const templateProvider = base.providers[0];
+
     if (templateProvider === undefined) {
       throw new Error("execution-options fixture has no provider");
     }
+
     act(() => {
       resolveOptions({
         ...base,
@@ -418,6 +493,7 @@ describe("useThreadCreationOptions", () => {
     vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
       providerExecutionOptionsResponse(args?.providerId),
     );
+
     const { result } = renderHook(
       () => useThreadCreationOptions({ scope: "new-thread" }),
       { wrapper: createQueryClientTestHarness().wrapper },
@@ -472,6 +548,7 @@ describe("useThreadCreationOptions", () => {
         },
       ],
     });
+
     const { result } = renderHook(
       () =>
         useThreadCreationOptions({
@@ -510,10 +587,11 @@ describe("useThreadCreationOptions", () => {
   });
 
   it("applies a fork provider, model, and reasoning seed atomically", async () => {
-    window.localStorage.setItem("bb.promptbox.provider", GLOBAL_PROVIDER_ID);
+    window.localStorage.setItem("omnyo.promptbox.provider", GLOBAL_PROVIDER_ID);
     vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
       providerExecutionOptionsResponse(args?.providerId),
     );
+
     const { result } = renderHook(
       () => useThreadCreationOptions({ scope: "new-thread" }),
       { wrapper: createQueryClientTestHarness().wrapper },
@@ -557,12 +635,230 @@ describe("useThreadCreationOptions", () => {
     });
   });
 
+  it("applies a favorite's provider, model, reasoning and tier in one new-chat write", async () => {
+    window.localStorage.setItem("omnyo.promptbox.provider", GLOBAL_PROVIDER_ID);
+    vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
+      providerExecutionOptionsResponse(args?.providerId),
+    );
+
+    const { result } = renderHook(
+      () => useThreadCreationOptions({ scope: "new-thread" }),
+      { wrapper: createQueryClientTestHarness().wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.selectedModel).toBe("global-default");
+    });
+    expect(result.current.serviceTier).toBeUndefined();
+    act(() => {
+      result.current.setProviderModelReasoning({
+        providerId: PROJECT_PROVIDER_ID,
+        model: "project-remembered",
+        reasoningLevel: "high",
+        serviceTier: "fast",
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedProviderId).toBe(PROJECT_PROVIDER_ID);
+      expect(result.current.selectedModel).toBe("project-remembered");
+      expect(result.current.reasoningLevel).toBe("high");
+      expect(result.current.serviceTier).toBe("fast");
+    });
+    expect(result.current.executionInputSources.serviceTier).toBe("explicit");
+
+    act(() => {
+      result.current.setProviderModelReasoning({
+        providerId: GLOBAL_PROVIDER_ID,
+        model: "global-remembered",
+        reasoningLevel: "medium",
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedProviderId).toBe(GLOBAL_PROVIDER_ID);
+      expect(result.current.selectedModel).toBe("global-remembered");
+      expect(result.current.serviceTier).toBe("fast");
+    });
+  });
+
+  it("writes a favorite's tier only for a new provider that has tiers", async () => {
+    vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) => {
+      const response = providerExecutionOptionsResponse(args?.providerId);
+
+      return {
+        ...response,
+        providers: response.providers.map((provider) =>
+          provider.id === PROJECT_PROVIDER_ID
+            ? {
+                ...provider,
+                serviceTiers: undefined,
+                capabilities: {
+                  ...provider.capabilities,
+                  supportsServiceTier: false,
+                },
+              }
+            : provider,
+        ),
+      };
+    });
+
+    const { result } = renderHook(
+      () =>
+        useThreadCreationOptions({
+          scope: "component-local",
+          resetKey: "thr_tiers",
+          initialProviderId: GLOBAL_PROVIDER_ID,
+          initialServiceTier: "default",
+        }),
+      { wrapper: createQueryClientTestHarness().wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.selectedModel).toBe("global-default");
+      expect(result.current.serviceTier).toBe("default");
+    });
+    act(() => {
+      result.current.setProviderModelReasoning({
+        providerId: PROJECT_PROVIDER_ID,
+        model: "project-default",
+        reasoningLevel: "high",
+        serviceTier: "fast",
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedProviderId).toBe(PROJECT_PROVIDER_ID);
+      expect(result.current.selectedModel).toBe("project-default");
+      expect(result.current.serviceTier).toBeUndefined();
+    });
+
+    act(() => {
+      result.current.setProviderModelReasoning({
+        providerId: GLOBAL_PROVIDER_ID,
+        model: "global-default",
+        reasoningLevel: "low",
+        serviceTier: "fast",
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.selectedProviderId).toBe(GLOBAL_PROVIDER_ID);
+      expect(result.current.serviceTier).toBe("fast");
+    });
+    expect(result.current.executionInputSources.serviceTier).toBe("explicit");
+  });
+
+  it("folds hidden models out of the main list without changing the selection", async () => {
+    vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
+      providerExecutionOptionsResponse(args?.providerId),
+    );
+
+    const { result } = renderHook(
+      () => ({
+        options: useThreadCreationOptions({
+          scope: "component-local",
+          initialProviderId: GLOBAL_PROVIDER_ID,
+          initialModel: "global-default",
+        }),
+        setHiddenModels: useSetAtom(modelPickerHiddenModelsAtom),
+      }),
+      { wrapper: createQueryClientTestHarness().wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.options.selectedModel).toBe("global-default");
+    });
+    const sourcesBeforeHiding = result.current.options.executionInputSources;
+    act(() => {
+      result.current.setHiddenModels({
+        [GLOBAL_PROVIDER_ID]: ["global-default", "global-remembered"],
+        [PROJECT_PROVIDER_ID]: ["project-default"],
+      });
+    });
+
+    const values = (options: readonly { value: string }[]) =>
+      options.map((option) => option.value);
+
+    await waitFor(() => {
+      expect(values(result.current.options.modelOptions)).toEqual([
+        "global-default",
+      ]);
+    });
+    expect(values(result.current.options.moreModelOptions)).toEqual([
+      "global-remembered",
+    ]);
+    expect(values(result.current.options.catalogModelOptions)).toEqual([
+      "global-default",
+      "global-remembered",
+    ]);
+    expect(result.current.options.selectedModel).toBe("global-default");
+    expect(result.current.options.executionInputSources).toEqual(
+      sourcesBeforeHiding,
+    );
+
+    act(() => {
+      result.current.options.setSelectedModel("global-remembered");
+    });
+
+    await waitFor(() => {
+      expect(values(result.current.options.modelOptions)).toEqual([
+        "global-remembered",
+      ]);
+    });
+    expect(values(result.current.options.moreModelOptions)).toEqual([
+      "global-default",
+    ]);
+  });
+
+  it("reports the agent options each provider would use if selected", async () => {
+    window.localStorage.setItem(
+      `omnyo.promptbox.session-options-${PROJECT_PROVIDER_ID}-1`,
+      JSON.stringify({ daybreak: true }),
+    );
+
+    const { result } = renderHook(
+      () => useThreadCreationOptions({ scope: "new-thread" }),
+      { wrapper: createQueryClientTestHarness().wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.providerOptions).toHaveLength(2);
+    });
+    expect(
+      result.current.sessionOptionSelectionsForProvider(PROJECT_PROVIDER_ID),
+    ).toEqual({ daybreak: true });
+    expect(
+      result.current.sessionOptionSelectionsForProvider(GLOBAL_PROVIDER_ID),
+    ).toEqual({});
+
+    const overridden = renderHook(
+      () =>
+        useThreadCreationOptions({
+          scope: "component-local",
+          initialProviderId: GLOBAL_PROVIDER_ID,
+          sessionOptionSelections: { daybreak: false },
+        }),
+      { wrapper: createQueryClientTestHarness().wrapper },
+    );
+
+    await waitFor(() => {
+      expect(overridden.result.current.providerOptions).toHaveLength(2);
+    });
+    expect(
+      overridden.result.current.sessionOptionSelectionsForProvider(
+        PROJECT_PROVIDER_ID,
+      ),
+    ).toEqual({ daybreak: false });
+  });
+
   it("restores each provider's model and reasoning selection", async () => {
-    window.localStorage.setItem("bb.promptbox.provider", GLOBAL_PROVIDER_ID);
+    window.localStorage.setItem("omnyo.promptbox.provider", GLOBAL_PROVIDER_ID);
     vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
       providerExecutionOptionsResponse(args?.providerId),
     );
     const { wrapper } = createQueryClientTestHarness();
+
     const { result, unmount } = renderHook(
       () => useThreadCreationOptions({ scope: "new-thread" }),
       { wrapper },
@@ -609,10 +905,12 @@ describe("useThreadCreationOptions", () => {
     });
 
     unmount();
+
     const reloaded = renderHook(
       () => useThreadCreationOptions({ scope: "new-thread" }),
       { wrapper: createQueryClientTestHarness().wrapper },
     );
+
     await waitFor(() => {
       expect(reloaded.result.current.selectedProviderId).toBe(
         PROJECT_PROVIDER_ID,
@@ -630,11 +928,12 @@ describe("useThreadCreationOptions", () => {
   });
 
   it("remembers agent options per provider and moves off a model they rule out", async () => {
-    window.localStorage.setItem("bb.promptbox.provider", GLOBAL_PROVIDER_ID);
+    window.localStorage.setItem("omnyo.promptbox.provider", GLOBAL_PROVIDER_ID);
     vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
       daybreakExecutionOptionsResponse(args?.providerId),
     );
     const { wrapper } = createQueryClientTestHarness();
+
     const { result, unmount } = renderHook(
       () => useThreadCreationOptions({ scope: "new-thread" }),
       { wrapper },
@@ -673,10 +972,12 @@ describe("useThreadCreationOptions", () => {
     });
 
     unmount();
+
     const reloaded = renderHook(
       () => useThreadCreationOptions({ scope: "new-thread" }),
       { wrapper: createQueryClientTestHarness().wrapper },
     );
+
     act(() => {
       reloaded.result.current.setSelectedProviderId(GLOBAL_PROVIDER_ID);
     });
@@ -690,7 +991,7 @@ describe("useThreadCreationOptions", () => {
 
   it("uses the thread's own option values in a component-local composer instead of remembered ones", async () => {
     window.localStorage.setItem(
-      `bb.promptbox.session-options-${GLOBAL_PROVIDER_ID}-1`,
+      `omnyo.promptbox.session-options-${GLOBAL_PROVIDER_ID}-1`,
       JSON.stringify({ daybreak: true }),
     );
     vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
@@ -698,6 +999,7 @@ describe("useThreadCreationOptions", () => {
     );
     const threadSelections = { daybreak: false };
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadCreationOptions({
@@ -721,6 +1023,7 @@ describe("useThreadCreationOptions", () => {
 
   it("refreshes untouched Fast defaults but preserves an unsent choice until thread reset", async () => {
     const { wrapper } = createQueryClientTestHarness();
+
     const { result, rerender } = renderHook(
       ({ tier, threadId }: { tier: "fast" | "default"; threadId: string }) =>
         useThreadCreationOptions({
@@ -732,6 +1035,7 @@ describe("useThreadCreationOptions", () => {
         }),
       { wrapper, initialProps: { tier: "fast", threadId: "thr_one" } },
     );
+
     await waitFor(() => expect(result.current.serviceTier).toBe("fast"));
     rerender({ tier: "default", threadId: "thr_one" });
     expect(result.current.serviceTier).toBe("default");
@@ -746,9 +1050,11 @@ describe("useThreadCreationOptions", () => {
   it("offers each model's own tiers and keeps the chosen tier for the models that have it", async () => {
     const base = executionOptionsResponse();
     const [tiered, untiered] = base.models;
+
     if (tiered === undefined || untiered === undefined) {
       throw new Error("execution-options fixture needs two models");
     }
+
     vi.mocked(sdk.system.executionOptions).mockResolvedValue({
       ...base,
       providers: base.providers.map((provider) => ({
@@ -771,6 +1077,7 @@ describe("useThreadCreationOptions", () => {
       ],
     });
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadCreationOptions({
@@ -799,36 +1106,51 @@ describe("useThreadCreationOptions", () => {
     await waitFor(() => expect(result.current.serviceTier).toBe("ultrafast"));
   });
 
-  it("hides fast mode and resolves a saved fast choice to default while disallowed", async () => {
-    const { wrapper, queryClient } = createQueryClientTestHarness();
-    queryClient.setQueryData(systemConfigQueryKey(), {
-      generalSettings: { allowFastServiceTier: false },
-    });
-    const { result } = renderHook(
-      () =>
-        useThreadCreationOptions({
-          scope: "component-local",
-          initialProviderId: GLOBAL_PROVIDER_ID,
-          initialModel: "global-model",
-          initialServiceTier: "fast",
-        }),
-      { wrapper },
-    );
-    await waitFor(() =>
-      expect(result.current.selectedProviderId).toBe(GLOBAL_PROVIDER_ID),
-    );
-    expect(result.current.supportsServiceTier).toBe(false);
-    expect(result.current.serviceTier).toBe("default");
-    expect(
-      result.current.serviceTierSupportByProvider[GLOBAL_PROVIDER_ID],
-    ).toBe(false);
-  });
+  it.each([
+    { allowFastServiceTier: false, providerAllowFastServiceTier: {} },
+    {
+      allowFastServiceTier: true,
+      providerAllowFastServiceTier: {
+        [GLOBAL_PROVIDER_ID]: false,
+        codex: true,
+      },
+    },
+  ])(
+    "hides saved fast choices when the selected provider disallows them: %j",
+    async (generalSettings) => {
+      const { wrapper, queryClient } = createQueryClientTestHarness();
+      queryClient.setQueryData(systemConfigQueryKey(), {
+        generalSettings,
+      });
+
+      const { result } = renderHook(
+        () =>
+          useThreadCreationOptions({
+            scope: "component-local",
+            initialProviderId: GLOBAL_PROVIDER_ID,
+            initialModel: "global-model",
+            initialServiceTier: "fast",
+          }),
+        { wrapper },
+      );
+
+      await waitFor(() =>
+        expect(
+          result.current.serviceTierSupportByProvider[GLOBAL_PROVIDER_ID],
+        ).toBe(false),
+      );
+      expect(result.current.selectedProviderId).toBe(GLOBAL_PROVIDER_ID);
+      expect(result.current.supportsServiceTier).toBe(false);
+      expect(result.current.serviceTier).toBe("default");
+    },
+  );
 
   it("keeps provider selections local in component-local composers", async () => {
     vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
       providerExecutionOptionsResponse(args?.providerId),
     );
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadCreationOptions({
@@ -870,6 +1192,7 @@ describe("useThreadCreationOptions", () => {
   it("preserves a model's nested provider route for the picker", async () => {
     const response = executionOptionsResponse();
     const firstModel = response.models[0];
+
     if (!firstModel) throw new Error("Expected a model fixture");
     vi.mocked(sdk.system.executionOptions).mockResolvedValue({
       ...response,
@@ -891,7 +1214,7 @@ describe("useThreadCreationOptions", () => {
     );
 
     await waitFor(() => {
-      expect(result.current.modelOptions[0]).toEqual({
+      expect(result.current.modelOptions[0]).toMatchObject({
         value: "global-model",
         label: "Global Model",
         routeProviderId: "openai-codex",
@@ -900,32 +1223,32 @@ describe("useThreadCreationOptions", () => {
   });
 
   it("routes root-composer provider discovery through the selected project host", async () => {
-    window.localStorage.setItem("bb.promptbox.provider", GLOBAL_PROVIDER_ID);
+    window.localStorage.setItem("omnyo.promptbox.provider", GLOBAL_PROVIDER_ID);
     window.localStorage.setItem(
-      `bb.promptbox.model-${GLOBAL_PROVIDER_ID}-1`,
+      `omnyo.promptbox.model-${GLOBAL_PROVIDER_ID}-1`,
       "global-model",
     );
-    window.localStorage.setItem("bb.promptbox.service-tier", "default");
+    window.localStorage.setItem("omnyo.promptbox.service-tier", "default");
     window.localStorage.setItem(
-      `bb.promptbox.reasoning-${GLOBAL_PROVIDER_ID}-1`,
+      `omnyo.promptbox.reasoning-${GLOBAL_PROVIDER_ID}-1`,
       "high",
     );
     window.localStorage.setItem(
-      "bb.promptbox.permission-mode",
+      "omnyo.promptbox.permission-mode",
       "workspace-write",
     );
     window.localStorage.setItem(
-      "bb.promptbox.environment",
+      "omnyo.promptbox.environment",
       "host:global-host:worktree",
     );
 
-    setProjectScopedValue("bb.promptbox.provider", PROJECT_PROVIDER_ID);
-    setProjectScopedValue("bb.promptbox.model", "project-model");
-    setProjectScopedValue("bb.promptbox.service-tier", "fast");
-    setProjectScopedValue("bb.promptbox.reasoning", "low");
-    setProjectScopedValue("bb.promptbox.permission-mode", "readonly");
+    setProjectScopedValue("omnyo.promptbox.provider", PROJECT_PROVIDER_ID);
+    setProjectScopedValue("omnyo.promptbox.model", "project-model");
+    setProjectScopedValue("omnyo.promptbox.service-tier", "fast");
+    setProjectScopedValue("omnyo.promptbox.reasoning", "low");
+    setProjectScopedValue("omnyo.promptbox.permission-mode", "readonly");
     setProjectScopedValue(
-      "bb.promptbox.environment",
+      "omnyo.promptbox.environment",
       "host:project-host:local",
     );
 
@@ -1017,7 +1340,7 @@ describe("useThreadCreationOptions", () => {
         ["auto", false],
         ["full", true],
       ]);
-      expect(result.current.permissionMode).toBe("auto");
+      expect(result.current.permissionMode).toBe("full");
     });
     expect(
       result.current.permissionModeOptions.find(
@@ -1030,6 +1353,7 @@ describe("useThreadCreationOptions", () => {
     let resolveExecutionOptions: (
       value: SystemExecutionOptionsResponse,
     ) => void;
+
     vi.mocked(sdk.system.executionOptions).mockReturnValue(
       new Promise<SystemExecutionOptionsResponse>((resolve) => {
         resolveExecutionOptions = resolve;
@@ -1045,6 +1369,7 @@ describe("useThreadCreationOptions", () => {
         maxPermissionMode: "accept-edits",
         lastSeenAt: null,
         lastRejectedProtocolVersion: null,
+        runtimeVersion: null,
         createdAt: 0,
         updatedAt: 0,
       },
@@ -1088,10 +1413,12 @@ describe("useThreadCreationOptions", () => {
       result.current.setEnvironmentSelectionValue("host:project-host:worktree");
     });
 
-    expect(window.localStorage.getItem("bb.promptbox.environment")).toBeNull();
+    expect(
+      window.localStorage.getItem("omnyo.promptbox.environment"),
+    ).toBeNull();
     expect(
       window.localStorage.getItem(
-        getProjectScopedStorageKey("bb.promptbox.environment", PROJECT_ID),
+        getProjectScopedStorageKey("omnyo.promptbox.environment", PROJECT_ID),
       ),
     ).toBe("host:project-host:worktree");
   });
@@ -1099,7 +1426,7 @@ describe("useThreadCreationOptions", () => {
   it("migrates a stored legacy worktree selection to the worktree provider", () => {
     const { wrapper } = createQueryClientTestHarness();
     window.localStorage.setItem(
-      getProjectScopedStorageKey("bb.promptbox.environment", PROJECT_ID),
+      getProjectScopedStorageKey("omnyo.promptbox.environment", PROJECT_ID),
       "host:project-host:worktree",
     );
 
@@ -1153,6 +1480,7 @@ describe("useThreadCreationOptions", () => {
   it("keeps a loaded catalog visible when its first roster reveals host scope", async () => {
     const hostScoped = executionOptionsResponse();
     const [provider] = hostScoped.providers;
+
     if (provider === undefined) throw new Error("fixture has no provider");
     provider.capabilities = {
       ...provider.capabilities,
@@ -1163,6 +1491,7 @@ describe("useThreadCreationOptions", () => {
     );
 
     const { wrapper } = createQueryClientTestHarness();
+
     const { result, rerender } = renderHook(
       ({ environmentId }) =>
         useThreadCreationOptions({
@@ -1171,7 +1500,7 @@ describe("useThreadCreationOptions", () => {
           environmentHostId: "host_follow_up",
           resetKey: "thr_cold_cache",
           initialProviderId: GLOBAL_PROVIDER_ID,
-          initialModel: "model-a",
+          initialModel: "global-model",
           initialReasoningLevel: "medium",
           initialPermissionMode: "full",
         }),
@@ -1271,8 +1600,9 @@ describe("useThreadCreationOptions", () => {
     });
   });
 
-  it("marks a definitive missing component-local model fallback as explicit", async () => {
+  it("keeps a missing component-local model explicit instead of choosing a fallback", async () => {
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadCreationOptions({
@@ -1287,13 +1617,14 @@ describe("useThreadCreationOptions", () => {
     );
 
     await waitFor(() => {
-      expect(result.current.selectedModel).toBe("global-model");
+      expect(result.current.selectedModel).toBe("claude-mythos-5");
       expect(result.current.executionInputSources.model).toBe("explicit");
     });
   });
 
-  it("overrides a stale project model default when creating a new thread", async () => {
+  it("preserves a stale project model default instead of silently replacing it", async () => {
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadCreationOptions({
@@ -1308,7 +1639,7 @@ describe("useThreadCreationOptions", () => {
     );
 
     await waitFor(() => {
-      expect(result.current.selectedModel).toBe("global-model");
+      expect(result.current.selectedModel).toBe("removed-project-default");
       expect(result.current.executionInputSources.model).toBe("explicit");
     });
   });
@@ -1323,6 +1654,7 @@ describe("useThreadCreationOptions", () => {
       },
     });
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadCreationOptions({
@@ -1343,16 +1675,18 @@ describe("useThreadCreationOptions", () => {
     });
   });
 
-  it("keeps a stored model through a cold-cache probe and recovers only once it lands", async () => {
+  it("keeps a stored model when a cold-cache probe finishes without it", async () => {
     let resolveOptions: (
       value: SystemExecutionOptionsResponse,
     ) => void = () => {};
+
     vi.mocked(sdk.system.executionOptions).mockReturnValueOnce(
       new Promise<SystemExecutionOptionsResponse>((resolve) => {
         resolveOptions = resolve;
       }),
     );
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadCreationOptions({
@@ -1375,7 +1709,7 @@ describe("useThreadCreationOptions", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.selectedModel).toBe("claude-opus-4-8[1m]");
+      expect(result.current.selectedModel).toBe("claude-mythos-5");
       expect(result.current.executionInputSources.model).toBe("explicit");
     });
   });
@@ -1392,6 +1726,7 @@ describe("useThreadCreationOptions", () => {
         ),
       { wrapper: createQueryClientTestHarness().wrapper },
     );
+
     await waitFor(() => {
       expect(
         first.result.current.modelOptions.map((option) => option.value),
@@ -1402,11 +1737,13 @@ describe("useThreadCreationOptions", () => {
     let resolveOptions: (
       value: SystemExecutionOptionsResponse,
     ) => void = () => {};
+
     vi.mocked(sdk.system.executionOptions).mockReturnValueOnce(
       new Promise<SystemExecutionOptionsResponse>((resolve) => {
         resolveOptions = resolve;
       }),
     );
+
     const second = renderHook(
       () =>
         useThreadCreationOptions(
@@ -1450,7 +1787,7 @@ describe("useThreadCreationOptions", () => {
 
   it("latches the initial ready provider instead of resolving it again after a machine switch", async () => {
     window.localStorage.setItem(
-      "bb.promptbox.environment",
+      "omnyo.promptbox.environment",
       "provider:project-checkout",
     );
     vi.mocked(sdk.system.providerStates).mockImplementation(async (args) =>
@@ -1459,6 +1796,7 @@ describe("useThreadCreationOptions", () => {
         : readyProviderStates(GLOBAL_PROVIDER_ID),
     );
     const { wrapper } = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useThreadCreationOptions({
@@ -1486,6 +1824,7 @@ describe("useThreadCreationOptions", () => {
       });
       expect(result.current.executionInputSources.model).toBeUndefined();
     });
+
     const initialDiscoveryCallCount = vi.mocked(sdk.system.providerStates).mock
       .calls.length;
 
@@ -1511,7 +1850,7 @@ describe("useThreadCreationOptions", () => {
   });
 
   it("loads the fallback provider's catalog when the stored provider is no longer offered", async () => {
-    window.localStorage.setItem("bb.promptbox.provider", "removed-provider");
+    window.localStorage.setItem("omnyo.promptbox.provider", "removed-provider");
     vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
       args?.providerId === "removed-provider"
         ? {
@@ -1537,7 +1876,7 @@ describe("useThreadCreationOptions", () => {
         ["global-default", "global-remembered"],
       );
     });
-    expect(window.localStorage.getItem("bb.promptbox.provider")).toContain(
+    expect(window.localStorage.getItem("omnyo.promptbox.provider")).toContain(
       "removed-provider",
     );
     expect(
@@ -1549,6 +1888,43 @@ describe("useThreadCreationOptions", () => {
         }),
       ),
     ).toBeNull();
+  });
+
+  it("sends the fallback provider it shows when the stored provider is no longer offered", async () => {
+    window.localStorage.setItem("omnyo.promptbox.provider", "removed-provider");
+    window.localStorage.setItem(
+      `omnyo.promptbox.model-${GLOBAL_PROVIDER_ID}-1`,
+      "global-remembered",
+    );
+    vi.mocked(sdk.system.executionOptions).mockImplementation(async (args) =>
+      args?.providerId === "removed-provider"
+        ? {
+            ...executionOptionsResponse(),
+            models: [],
+            selectedOnlyModels: [],
+          }
+        : providerExecutionOptionsResponse(args?.providerId),
+    );
+    const { wrapper } = createQueryClientTestHarness();
+
+    const { result } = renderHook(
+      () =>
+        useThreadCreationOptions({
+          scope: "new-thread",
+          initialProviderId: PROJECT_PROVIDER_ID,
+          initialModel: "project-remembered",
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(result.current.selectedProviderId).toBe(GLOBAL_PROVIDER_ID);
+      expect(result.current.selectedModel).toBe("global-remembered");
+      expect(result.current.executionInputSources).toMatchObject({
+        providerId: "client-preference",
+        model: "client-preference",
+      });
+    });
   });
 
   it("routes reusable root-composer worktrees through their environment", async () => {

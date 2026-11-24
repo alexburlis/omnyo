@@ -12,6 +12,7 @@ afterEach(() => {
 describe("useDebouncedValue", () => {
   it("cancels its pending update when unmounted", () => {
     vi.useFakeTimers();
+
     const { rerender, unmount } = renderHook(
       ({ value }) => useDebouncedValue(value, 120),
       { initialProps: { value: "main" } },
@@ -27,6 +28,7 @@ describe("useDebouncedValue", () => {
 
   it("publishes only the latest value after the delay", () => {
     vi.useFakeTimers();
+
     const { result, rerender } = renderHook(
       ({ value }) => useDebouncedValue(value, 120),
       { initialProps: { value: "main" } },

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import {
   ThreadTimelineRows,
   TimelineWorkingIndicator,
@@ -20,6 +20,8 @@ const baseProps = {
 };
 
 const THREAD_ID = "thr_streaming_rows";
+
+const STORY_TIME = Date.UTC(2026, 8, 30, 16, 5);
 
 function PinnedTimelineStage({
   rows,
@@ -109,14 +111,19 @@ function useStreamingTickLoop(
   useEffect(() => {
     if (isPaused) return;
     const cycleLength = totalSteps + pauseTicks;
+
     if (cycleLength === 0) return;
+
     const id = window.setInterval(() => {
       setCounter((current) => current + 1);
     }, intervalMs);
+
     return () => window.clearInterval(id);
   }, [totalSteps, intervalMs, pauseTicks, isPaused]);
   const cycleLength = totalSteps + pauseTicks;
+
   if (cycleLength === 0) return { step: 0, cycle: 0 };
+
   return {
     step: Math.min(counter % cycleLength, totalSteps),
     cycle: Math.floor(counter / cycleLength),
@@ -134,8 +141,8 @@ function buildOptimisticUserRow(id: string): TimelineRow {
     sourceSeqStart: 1,
     sourceSeqEnd: 1,
     messageSeq: 1,
-    startedAt: 0,
-    createdAt: 0,
+    startedAt: STORY_TIME,
+    createdAt: STORY_TIME,
     kind: "conversation",
     role: "user",
     initiator: "user",
@@ -145,7 +152,12 @@ function buildOptimisticUserRow(id: string): TimelineRow {
     text: OPTIMISTIC_USER_PROMPT_TEXT,
     mentions: [],
     attachments: null,
-    turnRequest: { isGrouped: false, kind: "message", status: "accepted" },
+    turnRequest: {
+      clientRequestId: null,
+      isGrouped: false,
+      kind: "message",
+      status: "accepted",
+    },
   };
 }
 
@@ -163,12 +175,15 @@ function OptimisticUserMessageFlicker({
     restartKey,
     isPaused,
   );
+
   const rows: TimelineRow[] = [];
+
   if (step === 1) {
     rows.push(buildOptimisticUserRow("user-optimistic"));
   } else if (step === 2) {
     rows.push(buildOptimisticUserRow("user-real"));
   }
+
   return (
     <PinnedTimelineStage
       rows={rows}
@@ -242,12 +257,13 @@ function conversationRowFromStep(
     sourceSeqStart: index + 1,
     sourceSeqEnd: index + 1,
     messageSeq: index + 1,
-    startedAt: index,
-    createdAt: index,
+    startedAt: STORY_TIME + index * 1_000,
+    createdAt: STORY_TIME + index * 1_000,
     kind: "conversation" as const,
     text: step.text,
     attachments: null,
   };
+
   if (step.role === "user") {
     return {
       ...base,
@@ -257,13 +273,20 @@ function conversationRowFromStep(
       systemMessageKind: "unlabeled",
       systemMessageSubject: null,
       mentions: [],
-      turnRequest: { isGrouped: false, kind: "message", status: "accepted" },
+      turnRequest: {
+        clientRequestId: null,
+        isGrouped: false,
+        kind: "message",
+        status: "accepted",
+      },
     };
   }
+
   return {
     ...base,
     role: "assistant",
     turnRequest: null,
+    turnGit: null,
   };
 }
 
@@ -281,8 +304,10 @@ function ConversationRowsArriving({
     restartKey,
     isPaused,
   );
+
   const rows = CONVERSATION_STEPS.slice(0, step).map(conversationRowFromStep);
   const isStreaming = step < CONVERSATION_STEPS.length;
+
   return (
     <PinnedTimelineStage
       rows={rows}
@@ -358,7 +383,9 @@ function AssistantContentStreaming({
     restartKey,
     isPaused,
   );
+
   const turnId = "streaming-rows-content-turn";
+
   const userRow: TimelineRow = {
     id: "streaming-rows-content-user",
     threadId: THREAD_ID,
@@ -366,8 +393,8 @@ function AssistantContentStreaming({
     sourceSeqStart: 1,
     sourceSeqEnd: 1,
     messageSeq: 1,
-    startedAt: 0,
-    createdAt: 0,
+    startedAt: STORY_TIME,
+    createdAt: STORY_TIME,
     kind: "conversation",
     role: "user",
     initiator: "user",
@@ -377,9 +404,16 @@ function AssistantContentStreaming({
     systemMessageSubject: null,
     text: ASSISTANT_STREAMING_USER_PROMPT.text,
     attachments: null,
-    turnRequest: { isGrouped: false, kind: "message", status: "accepted" },
+    turnRequest: {
+      clientRequestId: null,
+      isGrouped: false,
+      kind: "message",
+      status: "accepted",
+    },
   };
+
   const assistantText = ASSISTANT_STREAMING_CHUNKS.slice(0, step).join("");
+
   const assistantRow: TimelineRow = {
     id: "streaming-rows-content-assistant",
     threadId: THREAD_ID,
@@ -387,19 +421,24 @@ function AssistantContentStreaming({
     sourceSeqStart: 2,
     sourceSeqEnd: 2 + step,
     messageSeq: 2 + step,
-    startedAt: 1,
-    createdAt: 1,
+    startedAt: STORY_TIME + 1_000,
+    createdAt: STORY_TIME + 1_000,
     kind: "conversation",
     role: "assistant",
     text: assistantText,
     attachments: null,
     turnRequest: null,
+    turnGit: null,
   };
+
   const rows: TimelineRow[] = [userRow];
+
   if (step > 0) {
     rows.push(assistantRow);
   }
+
   const isStreaming = step < ASSISTANT_STREAMING_CHUNKS.length;
+
   return (
     <PinnedTimelineStage
       rows={rows}
@@ -587,6 +626,7 @@ function BundleChildrenArriving({
     restartKey,
     isPaused,
   );
+
   const bundleRows = BUNDLE_EXPLORATION_STEPS.slice(0, step).map(
     (stepData, index) =>
       explorationRow(stepData, BUNDLE_LEAD_IN_ROWS.length + index + 1, {
@@ -595,8 +635,10 @@ function BundleChildrenArriving({
         turnId: "streaming-rows-bundle-turn",
       }),
   );
+
   const rows = [...BUNDLE_LEAD_IN_ROWS, ...bundleRows];
   const isStreaming = step < BUNDLE_EXPLORATION_STEPS.length;
+
   return (
     <PinnedTimelineStage
       rows={rows}
@@ -627,16 +669,19 @@ function WorkingIndicatorToggling({
   }, [restartKey]);
   useEffect(() => {
     if (isPaused) return;
+
     const id = window.setInterval(() => {
       setPhaseIndex(
         (current) => (current + 1) % INDICATOR_PHASE_SEQUENCE.length,
       );
     }, 1500);
+
     return () => window.clearInterval(id);
   }, [isPaused]);
   const phase = INDICATOR_PHASE_SEQUENCE[phaseIndex];
   const visible = phase !== "none";
   const isThinking = phase === "thinking";
+
   return (
     <PinnedTimelineStage
       rows={INDICATOR_CONTEXT_ROWS}
@@ -656,6 +701,7 @@ export function Rows() {
   const [bundleKey, setBundleKey] = useState(0);
   const [bundlePaused, setBundlePaused] = useState(true);
   const [assistantStreamingKey, setAssistantStreamingKey] = useState(0);
+
   const [assistantStreamingPaused, setAssistantStreamingPaused] =
     useState(true);
 

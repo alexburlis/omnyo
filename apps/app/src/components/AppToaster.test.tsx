@@ -10,7 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { AppToasterView } from "./AppToasterView";
 import { ArchivedThreadToastDescription } from "./thread/ArchivedThreadToastDescription";
 import { AppToastContent } from "./ui/app-toast";
@@ -35,7 +35,9 @@ async function renderToaster(isCompactViewport: boolean) {
     const toaster = document.querySelector<HTMLElement>(
       "[data-sonner-toaster]",
     );
+
     expect(toaster).not.toBeNull();
+
     return toaster;
   });
 }
@@ -73,20 +75,26 @@ function swipeToast(
     pointerId,
     pointerType: "touch",
   });
+
   const terminalEventInit = {
     clientX: endX,
     clientY: endY,
     pointerId,
     pointerType: "touch",
   };
+
   if (terminalEvent === "pointerCancel") {
     fireEvent.pointerCancel(pointerTarget, terminalEventInit);
+
     return;
   }
+
   if (terminalEvent === "lostPointerCapture") {
     fireEvent.lostPointerCapture(pointerTarget, terminalEventInit);
+
     return;
   }
+
   fireEvent.pointerUp(pointerTarget, terminalEventInit);
 }
 
@@ -96,17 +104,29 @@ describe("AppToaster", () => {
     expect(toaster?.getAttribute("data-x-position")).toBe("center");
     expect(toaster?.getAttribute("data-y-position")).toBe("top");
     expect(toaster?.style.getPropertyValue("--offset-top")).toBe(
-      "calc(env(safe-area-inset-top) + var(--bb-app-chrome-row-height) + 16px)",
+      "calc(env(safe-area-inset-top) + var(--omnyo-app-chrome-row-height) + 16px)",
     );
     expect(toaster?.style.getPropertyValue("--mobile-offset-top")).toBe(
-      "calc(env(safe-area-inset-top) + var(--bb-app-chrome-row-height) + 16px)",
+      "calc(env(safe-area-inset-top) + var(--omnyo-app-chrome-row-height) + 16px)",
+    );
+    expect(toaster?.style.getPropertyValue("--mobile-offset-left")).toBe(
+      "calc(env(safe-area-inset-left) + 16px)",
+    );
+    expect(toaster?.style.getPropertyValue("--mobile-offset-right")).toBe(
+      "calc(env(safe-area-inset-right) + 16px)",
     );
   });
 
-  it("preserves the configured desktop toast position", async () => {
+  it("places desktop toasts at the bottom right above the status bar and the safe area", async () => {
     const toaster = await renderToaster(false);
     expect(toaster?.getAttribute("data-x-position")).toBe("right");
     expect(toaster?.getAttribute("data-y-position")).toBe("bottom");
+    expect(toaster?.style.getPropertyValue("--offset-bottom")).toBe(
+      "calc(var(--omnyo-app-footer-height, 0px) + env(safe-area-inset-bottom) + 1rem)",
+    );
+    expect(toaster?.style.getPropertyValue("--offset-right")).toBe(
+      "calc(env(safe-area-inset-right) + 1rem)",
+    );
   });
 
   it.each([
@@ -116,10 +136,13 @@ describe("AppToaster", () => {
     "dismisses a compact toast to the %s",
     async (_name, startX, endX) => {
       await renderToaster(true);
+
       const toastElement = document.querySelector<HTMLElement>(
         "[data-sonner-toast]",
       );
+
       expect(toastElement).not.toBeNull();
+
       if (toastElement === null) {
         return;
       }
@@ -134,10 +157,13 @@ describe("AppToaster", () => {
 
   it("keeps a downward drag onscreen", async () => {
     await renderToaster(true);
+
     const toastElement = document.querySelector<HTMLElement>(
       "[data-sonner-toast]",
     );
+
     expect(toastElement).not.toBeNull();
+
     if (toastElement === null) {
       return;
     }
@@ -152,10 +178,13 @@ describe("AppToaster", () => {
     ["pointer capture loss", "lostPointerCapture"],
   ] as const)("resets an interrupted swipe after %s", async (_, eventName) => {
     await renderToaster(true);
+
     const toastElement = document.querySelector<HTMLElement>(
       "[data-sonner-toast]",
     );
+
     expect(toastElement).not.toBeNull();
+
     if (toastElement === null) {
       return;
     }
@@ -186,6 +215,7 @@ describe("AppToaster", () => {
       ).find(
         (element) => element.textContent === "Short-lived after interruption",
       );
+
     await waitFor(() => {
       expect(findShortToast()).toBeDefined();
     });
@@ -199,13 +229,17 @@ describe("AppToaster", () => {
 
   it("keeps movement continuous while Sonner's axis update is batched", async () => {
     await renderToaster(true);
+
     const toastElement = document.querySelector<HTMLElement>(
       "[data-sonner-toast]",
     );
+
     expect(toastElement).not.toBeNull();
+
     if (toastElement === null) {
       return;
     }
+
     Object.defineProperty(toastElement, "setPointerCapture", {
       configurable: true,
       value: () => undefined,
@@ -216,12 +250,14 @@ describe("AppToaster", () => {
       pointerId: 1,
       pointerType: "touch",
     });
+
     const firstMove = createEvent.pointerMove(toastElement, {
       clientX: 129,
       clientY: 100,
       pointerId: 1,
       pointerType: "touch",
     });
+
     const secondMove = createEvent.pointerMove(toastElement, {
       clientX: 142,
       clientY: 100,
@@ -267,7 +303,7 @@ describe("AppToaster", () => {
           />
         ),
         {
-          className: "bb-app-toast",
+          className: "omnyo-app-toast",
           duration: Number.POSITIVE_INFINITY,
           id: "archive-swipe-test",
           onDismiss,
@@ -277,14 +313,18 @@ describe("AppToaster", () => {
     await waitFor(() => {
       expect(document.querySelectorAll("[data-sonner-toast]")).toHaveLength(1);
     });
+
     const toastElement = document.querySelector<HTMLElement>(
       "[data-sonner-toast]",
     );
+
     const threadTitle = document.querySelector<HTMLButtonElement>(
       'button[title="Archive swipe target"]',
     );
+
     expect(toastElement).not.toBeNull();
     expect(threadTitle).not.toBeNull();
+
     if (toastElement === null || threadTitle === null) {
       return;
     }
@@ -333,17 +373,22 @@ describe("AppToaster", () => {
     await waitFor(() => {
       expect(document.querySelectorAll("[data-sonner-toast]")).toHaveLength(3);
     });
+
     const toastElements = Array.from(
       document.querySelectorAll<HTMLElement>("[data-sonner-toast]"),
     );
+
     const toastB = toastElements.find(
       (toastElement) => toastElement.textContent === "Stack B",
     );
+
     const toastC = toastElements.find(
       (toastElement) => toastElement.textContent === "Stack C",
     );
+
     expect(toastB).toBeDefined();
     expect(toastC).toBeDefined();
+
     if (toastB === undefined || toastC === undefined) {
       return;
     }

@@ -4,7 +4,7 @@ import {
   type QueryCacheNotifyEvent,
   type QueryClient,
 } from "@tanstack/react-query";
-import type { ThreadListEntry, ThreadWithRuntime } from "@bb/domain";
+import type { ThreadListEntry, ThreadWithRuntime } from "@omnyo/domain";
 import {
   sidebarNavigationQueryKey,
   threadQueryKey,
@@ -15,7 +15,14 @@ import { applyToCachedThreadListsAndSidebarNavigation } from "./query-cache";
 export type ThreadMetadataPatch = Partial<
   Pick<
     ThreadListEntry,
-    "parentThreadId" | "pinnedAt" | "pinSortKey" | "sectionId" | "title"
+    | "groupId"
+    | "parentThreadId"
+    | "pinnedAt"
+    | "pinSortKey"
+    | "sectionId"
+    | "shelfSortKey"
+    | "shelvedAt"
+    | "title"
   >
 >;
 
@@ -48,13 +55,16 @@ function patchThreadList(
   if (
     list.every((thread) => {
       const patch = patches.get(thread.id);
+
       return !patch || isPatchApplied(thread, patch);
     })
   ) {
     return list;
   }
+
   return list.map((thread) => {
     const patch = patches.get(thread.id);
+
     return patch ? { ...thread, ...patch } : thread;
   });
 }
@@ -63,7 +73,10 @@ export function applyThreadPatches(
   queryClient: QueryClient,
   patches: ThreadPatches,
 ): void {
-  for (const [threadId, { pinSortKey: _pinSortKey, ...patch }] of patches) {
+  for (const [
+    threadId,
+    { pinSortKey: _pinSortKey, shelfSortKey: _shelfSortKey, ...patch },
+  ] of patches) {
     queryClient.setQueryData<ThreadWithRuntime>(
       threadQueryKey(threadId),
       (thread) =>
@@ -72,6 +85,7 @@ export function applyThreadPatches(
           : thread,
     );
   }
+
   applyToCachedThreadListsAndSidebarNavigation(queryClient, (list) =>
     patchThreadList(list, patches),
   );
@@ -81,11 +95,13 @@ function mergeHeldPatches(
   holds: ReadonlySet<PendingThreadPatchHold>,
 ): Map<string, ThreadMetadataPatch> {
   const merged = new Map<string, ThreadMetadataPatch>();
+
   for (const { patches } of holds) {
     for (const [threadId, patch] of patches) {
       merged.set(threadId, { ...merged.get(threadId), ...patch });
     }
   }
+
   return merged;
 }
 
@@ -99,10 +115,7 @@ function isFetchedQueryData(
   );
 }
 
-function holdsThreadData(
-  query: Query,
-  patches: ThreadPatches,
-): boolean {
+function holdsThreadData(query: Query, patches: ThreadPatches): boolean {
   return (
     matchQuery({ queryKey: threadsQueryKey() }, query) ||
     matchQuery({ queryKey: sidebarNavigationQueryKey(), exact: true }, query) ||
@@ -117,23 +130,30 @@ export function holdPendingThreadPatches(
   patches: ThreadPatches,
 ): () => void {
   let registry = registries.get(queryClient);
+
   if (!registry) {
     const holds = new Set<PendingThreadPatchHold>();
+
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
       if (!isFetchedQueryData(event)) return;
       const merged = mergeHeldPatches(holds);
+
       if (holdsThreadData(event.query, merged)) {
         applyThreadPatches(queryClient, merged);
       }
     });
+
     registry = { holds, unsubscribe };
     registries.set(queryClient, registry);
   }
+
   const activeRegistry = registry;
   const hold: PendingThreadPatchHold = { patches };
   activeRegistry.holds.add(hold);
+
   return () => {
     if (!activeRegistry.holds.delete(hold)) return;
+
     if (activeRegistry.holds.size === 0) {
       activeRegistry.unsubscribe();
       registries.delete(queryClient);

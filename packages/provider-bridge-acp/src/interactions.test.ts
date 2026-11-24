@@ -79,6 +79,7 @@ describe("buildAcpPermissionInteractionPayload", () => {
         },
       },
     });
+
     const fromStarted = buildAcpPermissionInteractionPayload({
       toolCall: {
         toolCallId: "call-sub-2",
@@ -94,6 +95,7 @@ describe("buildAcpPermissionInteractionPayload", () => {
       options: allowDenyOptions,
       classifyToolCall: CURSOR_ACP_DIALECT.classifyToolCall,
     });
+
     expect(fromStarted).toMatchObject({
       subject: {
         kind: "tool_use",
@@ -125,7 +127,7 @@ describe("buildAcpPermissionInteractionPayload", () => {
     });
   });
 
-  it("asks as the bound bb tool with its definition's presentation", () => {
+  it("asks as the bound Omnyo tool with its definition's presentation", () => {
     const payload = buildAcpPermissionInteractionPayload({
       toolCall: {
         toolCallId: "call-mcp",
@@ -160,6 +162,7 @@ describe("buildAcpPermissionInteractionPayload", () => {
     if (payload.kind !== "approval") {
       throw new Error("Expected an approval payload");
     }
+
     expect(payload.subject).toEqual({
       kind: "tool_use",
       itemId: "call-4",
@@ -205,6 +208,7 @@ describe("buildAcpPermissionInteractionPayload", () => {
     if (payload.kind !== "approval") {
       throw new Error("Expected an approval payload");
     }
+
     expect(payload.subject).toEqual({
       kind: "tool_use",
       itemId: "acp-permission",

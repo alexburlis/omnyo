@@ -4,11 +4,16 @@ import { cleanup, renderHook } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { InstalledPlugin } from "@bb/server-contract";
+import type { InstalledPlugin } from "@omnyo/server-contract";
 import { resetPluginSlotStoreForTest } from "@/lib/plugin-slots";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { pluginListQueryKey } from "@/hooks/queries/query-keys";
 import { useSettingsNavState } from "./settings-nav";
+import { resolveSettingsRoute } from "./settings-route";
+import {
+  getSettingsSectionRoutePath,
+  SETTINGS_NAV_SECTIONS,
+} from "./settings-sections";
 import { makeInstalledPlugin } from "@/test/fixtures/plugins";
 
 const mocks = vi.hoisted(() => ({
@@ -23,6 +28,7 @@ vi.mock("@/hooks/useHostDaemon", () => ({
 function wrapperFor(path: string, plugins: readonly InstalledPlugin[] = []) {
   const { queryClient, wrapper: QueryWrapper } = createQueryClientTestHarness();
   queryClient.setQueryData(pluginListQueryKey(true), plugins);
+
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryWrapper>
@@ -51,14 +57,53 @@ afterEach(() => {
   mocks.accessState = "unavailable";
 });
 
+describe("settings routes", () => {
+  it.each(SETTINGS_NAV_SECTIONS)("resolves the $label link", ({ id }) => {
+    expect(
+      resolveSettingsRoute({ pathname: getSettingsSectionRoutePath(id) }),
+    ).toEqual(
+      id === "plugins" ? { kind: "installed" } : { kind: "core", section: id },
+    );
+  });
+
+  it.each([
+    ["/settings/plugins/example", "", { kind: "plugin", pluginId: "example" }],
+    [
+      "/settings/plugins/example%20plugin",
+      "?view=installed",
+      { kind: "installed-detail", pluginId: "example plugin" },
+    ],
+    ["/settings/projects/example", "", { kind: "project" }],
+    ["/settings/machines/example", "", { kind: "machine" }],
+    ["/settings/unknown/nested", "", null],
+  ] as const)("resolves %s %s", (pathname, search, route) => {
+    expect(resolveSettingsRoute({ pathname, search })).toEqual(route);
+  });
+});
+
 describe("useSettingsNavState", () => {
+  it.each(["ai-services", "website"])(
+    "treats retired %s as an unknown settings route",
+    (section) => {
+      const { result } = renderHook(() => useSettingsNavState(), {
+        wrapper: wrapperFor(`/settings/${section}`),
+      });
+
+      expect(
+        resolveSettingsRoute({ pathname: `/settings/${section}` }),
+      ).toEqual({ kind: "unknown" });
+      expect(
+        result.current.sections.map((section) => section.id),
+      ).not.toContain(section);
+    },
+  );
+
   it("resolves the Providers bucket from its section route", () => {
     const { result } = renderHook(() => useSettingsNavState(), {
       wrapper: wrapperFor("/settings/providers"),
     });
 
     expect(result.current.activeSection).toBe("providers");
-    expect(result.current.hasUnknownSection).toBe(false);
   });
 
   it("shows the Machines section", () => {
@@ -73,6 +118,7 @@ describe("useSettingsNavState", () => {
 
   it("shows Files when local helper access can be enabled", () => {
     mocks.accessState = "permission-required";
+
     const { result } = renderHook(() => useSettingsNavState(), {
       wrapper: wrapperFor("/settings/files"),
     });
@@ -98,7 +144,6 @@ describe("useSettingsNavState", () => {
       wrapper: wrapperFor("/settings/plugins"),
     });
 
-    expect(result.current.hasUnknownSection).toBe(false);
     expect(result.current.sections.map((section) => section.id)).toContain(
       "plugins",
     );

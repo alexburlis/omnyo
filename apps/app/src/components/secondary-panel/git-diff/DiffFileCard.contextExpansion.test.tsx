@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import {
-  act,
   cleanup,
   fireEvent,
   render,
@@ -8,8 +7,8 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DiffFileEntry } from "@bb/server-contract";
-import { POINTER_COARSE_QUERY } from "@bb/shared-ui/hooks/use-pointer-coarse";
+import type { DiffFileEntry } from "@omnyo/server-contract";
+import { POINTER_COARSE_QUERY } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import type {
   DiffFileContentsResult,
   RequestDiffFileContents,
@@ -24,6 +23,7 @@ const diffViewMock = vi.hoisted(() => ({
 vi.mock("@pierre/diffs/react", () => ({
   FileDiff: ({ fileDiff }: { fileDiff: unknown }) => {
     diffViewMock.renderedFileDiffs.push(fileDiff);
+
     return <div data-testid="diff-view" />;
   },
 }));
@@ -59,6 +59,7 @@ const OLD_FILE_CONTENTS = [
   "// footer",
   "",
 ].join("\n");
+
 const NEW_FILE_CONTENTS = OLD_FILE_CONTENTS.replace(
   "const b = 2;",
   "const b = 3;",
@@ -86,24 +87,6 @@ function buildEntry(overrides: Partial<DiffFileEntry> = {}): DiffFileEntry {
 
 function textResult(contents: string, name: string): DiffFileContentsResult {
   return { kind: "text", file: { name, contents } };
-}
-
-const intersectionCallbacks = new Set<IntersectionObserverCallback>();
-
-function revealCardBodies() {
-  act(() => {
-    for (const callback of intersectionCallbacks) {
-      callback(
-        [
-          {
-            isIntersecting: true,
-            intersectionRatio: 1,
-          } as IntersectionObserverEntry,
-        ],
-        { thresholds: [0] } as unknown as IntersectionObserver,
-      );
-    }
-  });
 }
 
 function stubPointer(kind: "coarse" | "fine") {
@@ -141,19 +124,13 @@ function renderModifiedCard(onRequestFileContents: RequestDiffFileContents) {
 describe("DiffFileCard context expansion", () => {
   beforeEach(() => {
     diffViewMock.renderedFileDiffs.length = 0;
-    intersectionCallbacks.clear();
     vi.stubGlobal(
       "IntersectionObserver",
       class IntersectionObserverMock {
         readonly thresholds = [0];
-        constructor(private readonly callback: IntersectionObserverCallback) {
-          intersectionCallbacks.add(this.callback);
-        }
         observe() {}
         unobserve() {}
-        disconnect() {
-          intersectionCallbacks.delete(this.callback);
-        }
+        disconnect() {}
       },
     );
   });
@@ -166,6 +143,7 @@ describe("DiffFileCard context expansion", () => {
 
   it("renders a modified text diff from the patch alone on coarse pointers and fetches contents only on demand", async () => {
     stubPointer("coarse");
+
     const onRequestFileContents = vi.fn<RequestDiffFileContents>(
       async (path, side) =>
         textResult(
@@ -175,12 +153,13 @@ describe("DiffFileCard context expansion", () => {
     );
 
     renderModifiedCard(onRequestFileContents);
-    revealCardBodies();
 
     await findDiffView();
+
     const expandButton = await screen.findByRole("button", {
       name: "Expand context",
     });
+
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(onRequestFileContents).not.toHaveBeenCalled();
     const patchOnlyRenderCount = diffViewMock.renderedFileDiffs.length;
@@ -204,6 +183,7 @@ describe("DiffFileCard context expansion", () => {
 
   it("requests the contents during idle time on fine pointers without an explicit action", async () => {
     stubPointer("fine");
+
     const onRequestFileContents = vi.fn<RequestDiffFileContents>(
       async (path, side) =>
         textResult(
@@ -213,7 +193,6 @@ describe("DiffFileCard context expansion", () => {
     );
 
     renderModifiedCard(onRequestFileContents);
-    revealCardBodies();
 
     await waitFor(() => {
       expect(onRequestFileContents).toHaveBeenCalledTimes(2);
@@ -224,11 +203,13 @@ describe("DiffFileCard context expansion", () => {
   it("offers a retry when the context fetch fails", async () => {
     stubPointer("coarse");
     let shouldFail = true;
+
     const onRequestFileContents = vi.fn<RequestDiffFileContents>(
       async (path, side) => {
         if (shouldFail) {
           throw new Error("offline");
         }
+
         return textResult(
           side === "old" ? OLD_FILE_CONTENTS : NEW_FILE_CONTENTS,
           path,
@@ -237,7 +218,6 @@ describe("DiffFileCard context expansion", () => {
     );
 
     renderModifiedCard(onRequestFileContents);
-    revealCardBodies();
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Expand context" }),
@@ -258,6 +238,7 @@ describe("DiffFileCard context expansion", () => {
 
   it("never fetches contents for an added file, whose patch already carries every line", async () => {
     stubPointer("fine");
+
     const onRequestFileContents = vi.fn<RequestDiffFileContents>(async (path) =>
       textResult("const a = 1;\nconst b = 2;\n", path),
     );
@@ -283,7 +264,6 @@ describe("DiffFileCard context expansion", () => {
         onRequestFileContents={onRequestFileContents}
       />,
     );
-    revealCardBodies();
 
     await findDiffView();
     await new Promise((resolve) => setTimeout(resolve, 300));

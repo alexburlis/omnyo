@@ -9,6 +9,7 @@ export interface SeparatorProps {
 
 export function Separator({ inset }: SeparatorProps) {
   const { tokens } = useTheme();
+
   return (
     <View
       accessibilityElementsHidden

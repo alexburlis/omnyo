@@ -7,23 +7,27 @@ import {
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import { parseStoredEvent } from "../../src/services/threads/thread-data.js";
 
 function setup() {
   const db = createConnection(":memory:");
   migrate(db);
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "codex",
   });
+
   return { db, thread };
 }
 
@@ -60,6 +64,7 @@ describe("thread data stored event parsing", () => {
       db.$client.pragma("ignore_check_constraints = OFF");
 
       const [row] = listStoredEventRows(db, { threadId: thread.id });
+
       if (!row) {
         throw new Error("Expected stored event row");
       }

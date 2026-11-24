@@ -1,8 +1,16 @@
-export { provisionWorkspace } from "./provision.js";
-export type { HostWorkspace, ProvisionWorkspaceArgs } from "./provision.js";
+export { createProvisionedWorkspace, provisionWorkspace } from "./provision.js";
+
+export { readWorkspaceGitActivity } from "./git-activity.js";
+
+export type {
+  HostWorkspace,
+  ProvisionWorkspaceArgs,
+  ProvisionedWorkspaceSnapshot,
+} from "./provision.js";
 
 export type { PullRequestActionOptions } from "./workspace.js";
-export { withGitRefMutationLock } from "bb-environment-provider-host/process-local-lock";
+
+export { withGitRefMutationLock } from "omnyo-environment-provider-host/process-local-lock";
 
 export {
   WorkspaceError,
@@ -19,4 +27,5 @@ export {
   readGitBlob,
   runGit,
 } from "./git.js";
+
 export type { GitProcessOptions } from "./git.js";

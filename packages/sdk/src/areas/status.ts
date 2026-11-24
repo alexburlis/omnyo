@@ -1,11 +1,11 @@
-import type { ThreadStatus, ThreadTimelinePendingTodos } from "@bb/domain";
+import type { ThreadStatus, ThreadTimelinePendingTodos } from "@omnyo/domain";
 import type {
   ProjectResponse,
   ThreadListResponse,
   ThreadResponse,
   ThreadTimelineResponse,
   ThreadWithIncludesResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 export interface StatusGetArgs {
@@ -20,13 +20,17 @@ export interface StatusThreadSummary {
   parentThreadId: string | null;
   pinnedAt: number | null;
   projectId: string;
+  shelvedAt: number | null;
   status: ThreadStatus;
   title: string | null;
 }
 
 export type StatusProject = ProjectResponse;
+
 export type StatusSourceThread = ThreadResponse | ThreadWithIncludesResponse;
+
 export type StatusChildThreads = ThreadListResponse;
+
 export type StatusTimeline = ThreadTimelineResponse;
 
 export interface StatusResult {
@@ -57,6 +61,7 @@ function summarizeThread(thread: StatusSourceThread): StatusThreadSummary {
     parentThreadId: thread.parentThreadId ?? null,
     pinnedAt: thread.pinnedAt,
     projectId: thread.projectId,
+    shelvedAt: thread.shelvedAt,
     status: thread.status,
     title: thread.title ?? null,
   };
@@ -64,11 +69,13 @@ function summarizeThread(thread: StatusSourceThread): StatusThreadSummary {
 
 export function createStatusArea(args: CreateSdkAreaArgs): StatusArea {
   const { transport } = args;
+
   return {
     async get(input = {}) {
       const projectId = input.projectId;
       const signal = input.signal;
       const threadId = input.threadId;
+
       const [project, thread] = await Promise.all([
         projectId
           ? fetchSilent(() =>
@@ -95,10 +102,11 @@ export function createStatusArea(args: CreateSdkAreaArgs): StatusArea {
             )
           : Promise.resolve(null),
       ]);
-      const pendingTodos =
+
+      const [pendingTodos, childThreads] = await Promise.all([
         thread === null
           ? null
-          : await fetchSilent(async () => {
+          : fetchSilent(async () => {
               const timeline: StatusTimeline = await transport.readJson(
                 transport.api.v1.threads[":id"].timeline.$get(
                   {
@@ -108,12 +116,12 @@ export function createStatusArea(args: CreateSdkAreaArgs): StatusArea {
                   ...signalRequestArgs(signal),
                 ),
               );
+
               return timeline.pendingTodos;
-            });
-      const childThreads =
+            }),
         thread === null
           ? null
-          : await fetchSilent(() =>
+          : fetchSilent(() =>
               transport.readJson(
                 transport.api.v1.threads.$get(
                   {
@@ -122,7 +130,8 @@ export function createStatusArea(args: CreateSdkAreaArgs): StatusArea {
                   ...signalRequestArgs(signal),
                 ),
               ),
-            );
+            ),
+      ]);
 
       return {
         childThreads,

@@ -32,6 +32,7 @@ vi.mock("@/components/plugin/PluginNewThreadComposer", () => ({
 
 function SwitchViewButton({ view }: { view: "browse" | "installed" }) {
   const navigate = useNavigate();
+
   return (
     <button
       type="button"
@@ -67,8 +68,9 @@ const AUTOMATIONS_PLUGIN = {
   logoDarkUrl: null,
   hasSettings: false,
   provenance: "builtin",
-  publisherKey: "bb-official",
-  publisherLabel: "BB Official",
+  publisherKey: "omnyo-official",
+  publisherLabel: "Omnyo Official",
+  official: true,
   isOrphanedBuiltin: false,
   sourceDisplay: "builtin · automations",
   updateState: {},
@@ -83,16 +85,16 @@ const GITHUB_CATALOG_ENTRY = {
   entryId: "github",
   pluginId: "github",
   displayName: "GitHub",
-  description: "Browse GitHub issues and pull requests in BB.",
+  description: "Browse GitHub issues and pull requests in Omnyo.",
   icon: "Github",
   iconUrl: null,
   categoryId: "code-and-reviews",
   category: "Developer tools",
   source: "builtin:github",
-  marketplace: "bb-official",
-  marketplaceDisplayName: "BB Official",
-  publisherKey: "bb-official",
-  publisherLabel: "BB Official",
+  marketplace: "omnyo-official",
+  marketplaceDisplayName: "Omnyo Official",
+  publisherKey: "omnyo-official",
+  publisherLabel: "Omnyo Official",
   official: true,
   author: null,
   installed: false,
@@ -138,16 +140,21 @@ function installFetch(plugins: readonly unknown[] = [AUTOMATIONS_PLUGIN]) {
           : input instanceof URL
             ? input.href
             : input.url;
+
       const url = new URL(rawUrl, "http://localhost");
+
       if (url.pathname === "/api/v1/system/config") {
         return responseJson(makeSystemConfig());
       }
+
       if (url.pathname === "/api/v1/plugins") {
         return responseJson({ plugins });
       }
+
       if (url.pathname === "/api/v1/plugins/updates/check") {
         return responseJson({ results: [] });
       }
+
       if (url.pathname === "/api/v1/plugin-catalog") {
         return responseJson({
           catalog: {
@@ -157,6 +164,7 @@ function installFetch(plugins: readonly unknown[] = [AUTOMATIONS_PLUGIN]) {
           },
         });
       }
+
       if (url.pathname === "/api/v1/plugin-catalog/search") {
         return responseJson({
           results: [
@@ -167,6 +175,7 @@ function installFetch(plugins: readonly unknown[] = [AUTOMATIONS_PLUGIN]) {
           collections: [],
         });
       }
+
       if (url.pathname === "/api/v1/plugin-catalog/install") {
         return responseJson(
           {
@@ -185,6 +194,7 @@ function installFetch(plugins: readonly unknown[] = [AUTOMATIONS_PLUGIN]) {
           202,
         );
       }
+
       return responseJson({ error: "not found" }, 404);
     }),
   );
@@ -203,6 +213,37 @@ afterEach(() => {
 });
 
 describe("PluginsOverview", () => {
+  it.each(["path:/plugins/ours", "builtin:ours"])(
+    "shows the declared author for an installed %s plugin",
+    async (source) => {
+      installFetch([
+        {
+          ...AUTOMATIONS_PLUGIN,
+          id: "ours",
+          name: "Our plugin",
+          source,
+          provenance: source.startsWith("path:") ? "direct" : "builtin",
+          author: {
+            name: "alexburlis",
+            github: "alexburlis",
+            url: "https://github.com/alexburlis",
+          },
+        },
+      ]);
+      const { wrapper } = createQueryClientTestHarness();
+      render(
+        <MemoryRouter initialEntries={["/plugins?view=installed"]}>
+          <PluginsOverview />
+        </MemoryRouter>,
+        { wrapper },
+      );
+      const row = await screen.findByTestId("plugin-row-ours");
+      expect(within(row).getByText("alexburlis")).toBeTruthy();
+      expect(within(row).queryByText("Local")).toBeNull();
+      expect(within(row).queryByText("Omnyo Official")).toBeNull();
+    },
+  );
+
   it("explains a failed plugin even when search hides its card and opens its recovery details", async () => {
     installFetch([
       {
@@ -220,11 +261,13 @@ describe("PluginsOverview", () => {
       </MemoryRouter>,
       { wrapper },
     );
+
     const banner = await screen.findByRole("region", {
       name: "1 plugin isn’t running",
     });
+
     expect(
-      within(banner).getByText("This version is incompatible with bb."),
+      within(banner).getByText("This version is incompatible with Omnyo."),
     ).toBeTruthy();
 
     expect(banner.textContent).not.toContain(
@@ -249,10 +292,12 @@ describe("PluginsOverview", () => {
 
   it("checks updates on entering Installed, without rechecking on filters or focus", async () => {
     installFetch();
+
     const requestCount = (path: string) =>
       vi
         .mocked(fetch)
         .mock.calls.filter(([input]) => String(input).endsWith(path)).length;
+
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
     render(
       <MemoryRouter initialEntries={["/plugins"]}>
@@ -291,14 +336,16 @@ describe("PluginsOverview", () => {
 
   it("clears only Source while retaining search, category, and sort", async () => {
     installFetch();
+
     function LocationSearch() {
       return <span data-testid="location-search">{useLocation().search}</span>;
     }
+
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
     render(
       <MemoryRouter
         initialEntries={[
-          "/plugins?view=installed&source=publisher%3ABB%20Official&query=Automations&category=tasks-and-workflows&sort=name&direction=desc",
+          "/plugins?view=installed&source=publisher%3AOmnyo%20Official&query=Automations&category=tasks-and-workflows&sort=name&direction=desc",
         ]}
       >
         <QueryClientWrapper>
@@ -311,9 +358,11 @@ describe("PluginsOverview", () => {
       await screen.findByRole("button", { name: "Source: 1 selected" }),
     );
     fireEvent.click(screen.getByRole("menuitem", { name: "Clear filter" }));
+
     const params = new URLSearchParams(
       screen.getByTestId("location-search").textContent ?? "",
     );
+
     expect([...params]).toEqual([
       ["view", "installed"],
       ["query", "Automations"],
@@ -343,9 +392,11 @@ describe("PluginsOverview", () => {
     expect(screen.queryByRole("tab", { name: "Browse" })).toBeNull();
     expect(screen.queryByRole("tab", { name: /Installed/ })).toBeNull();
     expect(screen.getByRole("button", { name: "New plugin" })).toBeTruthy();
+
     const comboTrigger = screen.getByRole("button", {
       name: "New plugin options",
     });
+
     fireEvent.pointerDown(comboTrigger);
     expect(
       screen.getByRole("menuitem", { name: "Install from source" }),
@@ -360,11 +411,13 @@ describe("PluginsOverview", () => {
             : input instanceof URL
               ? input.href
               : input.url;
+
         return (
           new URL(rawUrl, "http://localhost").pathname ===
           "/api/v1/plugin-catalog/search"
         );
       });
+
     expect(catalogRequests()).toHaveLength(1);
 
     act(() => focusManager.setFocused(false));
@@ -385,6 +438,7 @@ describe("PluginsOverview", () => {
     );
 
     await screen.findByText("GitHub");
+
     const createPlugin = screen.getByRole("button", {
       name: "New plugin",
     });
@@ -420,8 +474,8 @@ describe("PluginsOverview", () => {
         description: DOCS_CATALOG_ENTRY.description,
         icon: DOCS_CATALOG_ENTRY.icon,
         provenance: "catalog",
-        publisherKey: "bb-official",
-        publisherLabel: "BB Official",
+        publisherKey: "omnyo-official",
+        publisherLabel: "Omnyo Official",
         catalogEntryId: "docs",
       },
     ]);
@@ -435,9 +489,11 @@ describe("PluginsOverview", () => {
     );
 
     expect(await screen.findByText("GitHub")).toBeTruthy();
+
     const categoryTrigger = screen.getByRole("button", {
       name: "Filter plugins by category: All categories",
     });
+
     expect(screen.queryByRole("button", { name: "Type" })).toBeNull();
     fireEvent.click(categoryTrigger);
     fireEvent.click(
@@ -508,6 +564,7 @@ describe("PluginsOverview", () => {
   it("keeps Browse filters in the toolbar rather than a separate pill band", async () => {
     installFetch();
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
+
     const { container } = render(
       <MemoryRouter initialEntries={["/plugins?view=browse"]}>
         <QueryClientWrapper>
@@ -529,17 +586,22 @@ describe("PluginsOverview", () => {
     ).toBeNull();
     const search = screen.getByRole("textbox", { name: "Search plugins" });
     const toolbar = search.closest("[data-resource-toolbar]");
+
     if (!toolbar) throw new Error("Missing collection toolbar");
+
     const category = screen.getByRole("button", {
       name: "Filter plugins by category: All categories",
     });
+
     const sort = screen.getByRole("button", { name: /^Sort:/ });
     expect(toolbar.contains(category)).toBe(true);
     expect(toolbar.contains(sort)).toBe(true);
+
     const heroHeading = screen.getByRole("heading", {
       level: 2,
-      name: /^Turn bb into/,
+      name: /^Turn Omnyo into/,
     });
+
     expect(
       heroHeading.compareDocumentPosition(toolbar) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -612,6 +674,7 @@ describe("PluginsOverview", () => {
   it("loads more installed plugins as the scroll sentinel is reached", async () => {
     const plugins = Array.from({ length: 14 }, (_, index) => {
       const ordinal = String(index + 1).padStart(2, "0");
+
       return {
         ...AUTOMATIONS_PLUGIN,
         id: `plugin-${ordinal}`,
@@ -619,6 +682,7 @@ describe("PluginsOverview", () => {
         name: `Plugin ${ordinal}`,
       };
     });
+
     const intersectionCallbacks = new Set<IntersectionObserverCallback>();
     vi.stubGlobal(
       "IntersectionObserver",
@@ -633,6 +697,7 @@ describe("PluginsOverview", () => {
         }
       },
     );
+
     const reachSentinel = () =>
       act(() => {
         for (const callback of intersectionCallbacks) {
@@ -642,6 +707,7 @@ describe("PluginsOverview", () => {
           );
         }
       });
+
     installFetch(plugins);
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
     render(
@@ -683,8 +749,10 @@ describe("PluginsOverview", () => {
       enabled: index < 36,
       status: index < 36 ? "running" : "disabled",
     }));
+
     let atBottom = false;
     const observers = new Set<IntersectionObserverMock>();
+
     class IntersectionObserverMock {
       constructor(private readonly callback: IntersectionObserverCallback) {}
       observe() {
@@ -711,6 +779,7 @@ describe("PluginsOverview", () => {
         observers.delete(this);
       }
     }
+
     vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
     installFetch(plugins);
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
@@ -726,6 +795,7 @@ describe("PluginsOverview", () => {
     expect(screen.queryByText("Plugin 36")).toBeNull();
     await act(async () => {
       atBottom = true;
+
       for (const observer of observers) observer.check();
     });
     expect(
@@ -745,8 +815,9 @@ describe("PluginsOverview", () => {
         enabled: false,
         status: "disabled",
         provenance: "catalog",
-        publisherKey: "bb-community",
-        publisherLabel: "BB Community",
+        publisherKey: "acme-plugins",
+        publisherLabel: "Acme Plugins",
+        official: false,
         catalogEntryId: "inactive-official",
       },
       {
@@ -796,9 +867,9 @@ describe("PluginsOverview", () => {
       "plugin-row-enabled-local-alpha",
       "plugin-row-inactive-local",
     ]);
-    const officialPills = screen.getAllByText("BB Official");
-    expect(officialPills).toHaveLength(2);
-    expect(screen.getAllByText("BB Community")).toHaveLength(1);
+    expect(screen.getAllByText("Omnyo")).toHaveLength(2);
+    expect(screen.getAllByText("Official")).toHaveLength(2);
+    expect(screen.getAllByText("Acme Plugins")).toHaveLength(1);
 
     const sortTrigger = screen.getByRole("button", { name: "Sort: Default" });
     fireEvent.pointerDown(sortTrigger);
@@ -806,14 +877,14 @@ describe("PluginsOverview", () => {
       screen.getByRole("menuitemradio", { name: "Published" }),
     ).toBeTruthy();
     expect(
-      screen
-        .getByRole("menuitemradio", { name: "Installs" })
-        .getAttribute("aria-disabled"),
-    ).toBe("true");
+      screen.queryByRole("menuitemradio", { name: "Installs" }),
+    ).toBeNull();
+
     const rowIds = () =>
       [...document.querySelectorAll('[data-testid^="plugin-row-"]')].map(
         (row) => row.getAttribute("data-testid"),
       );
+
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Name" }));
     expect(rowIds()).toEqual([
       "plugin-row-enabled-local-alpha",
@@ -927,8 +998,8 @@ describe("PluginsOverview", () => {
         enabled: false,
         status: "disabled",
         provenance: "catalog",
-        publisherKey: "bb-community",
-        publisherLabel: "BB Community",
+        publisherKey: "acme-plugins",
+        publisherLabel: "Acme Plugins",
         catalogEntryId: "inactive-catalog",
       },
       {
@@ -970,11 +1041,12 @@ describe("PluginsOverview", () => {
         name: "GitHub",
         source: GITHUB_CATALOG_ENTRY.source,
         provenance: "catalog",
-        publisherKey: "bb-community",
-        publisherLabel: "BB Community",
+        publisherKey: "acme-plugins",
+        publisherLabel: "Acme Plugins",
+        official: false,
         catalogEntryId: GITHUB_CATALOG_ENTRY.entryId,
-        catalogMarketplaceName: "bb-community",
-        sourceDisplay: "BB Official · GitHub",
+        catalogMarketplaceName: "acme-plugins",
+        sourceDisplay: "Omnyo Official · GitHub",
       },
     ]);
     const { wrapper: QueryClientWrapper } = createQueryClientTestHarness();
@@ -988,9 +1060,10 @@ describe("PluginsOverview", () => {
       </MemoryRouter>,
     );
 
-    const official = await screen.findAllByText("BB Official");
+    const official = await screen.findAllByText("Omnyo");
     expect(official).toHaveLength(1);
-    const community = screen.getAllByText("BB Community");
+    expect(screen.getAllByText("Official")).toHaveLength(1);
+    const community = screen.getAllByText("Acme Plugins");
     expect(community).toHaveLength(1);
     expect(official[0]?.parentElement?.className).toBe(
       community[0]?.parentElement?.className,

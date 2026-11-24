@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createConnection, migrate } from "@bb/db";
-import { parseStoredThreadEvent } from "@bb/domain";
+import { createConnection, migrate } from "@omnyo/db";
+import { parseStoredThreadEvent } from "@omnyo/domain";
 import { seedPerfFixture } from "../src/lib/seed-perf-fixture.js";
 
 interface SeededEventRow {
@@ -38,6 +38,7 @@ describe("seedPerfFixture", () => {
          WHERE (scope_kind = 'turn') != (turn_id IS NOT NULL)`,
       )
       .get();
+
     expect(scopeViolations).toEqual({ violations: 0 });
 
     const duplicateSequences = db.$client
@@ -48,6 +49,7 @@ describe("seedPerfFixture", () => {
          )`,
       )
       .get();
+
     expect(duplicateSequences).toEqual({ duplicates: 0 });
 
     const eventRows = db.$client
@@ -57,10 +59,13 @@ describe("seedPerfFixture", () => {
          FROM events`,
       )
       .all() as SeededEventRow[];
+
     expect(eventRows.length).toBeGreaterThan(0);
     const parseFailuresByType = new Map<string, string>();
+
     for (const row of eventRows) {
       const parsedData: unknown = JSON.parse(row.data);
+
       try {
         parseStoredThreadEvent({
           data: parsedData as Record<string, unknown>,
@@ -81,6 +86,7 @@ describe("seedPerfFixture", () => {
         }
       }
     }
+
     expect(Object.fromEntries(parseFailuresByType)).toEqual({});
 
     const ftsRow = db.$client
@@ -89,10 +95,12 @@ describe("seedPerfFixture", () => {
          WHERE thread_search_segments_fts MATCH 'test'`,
       )
       .get();
+
     expect(ftsRow).toBeDefined();
 
     const secondDb = createConnection(":memory:");
     migrate(secondDb);
+
     const secondResult = seedPerfFixture(secondDb, {
       hostId: "host_seedtest01",
       workspacesRootPath: "/tmp/seed-workspaces",
@@ -101,6 +109,7 @@ describe("seedPerfFixture", () => {
       eventCount: 600,
       randomSeed: 7,
     });
+
     expect(secondResult.threadIds).toEqual(result.threadIds);
     expect(secondResult.eventRowCount).toBe(result.eventRowCount);
     secondDb.$client.close();

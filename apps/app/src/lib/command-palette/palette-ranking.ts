@@ -1,4 +1,4 @@
-import { fuzzyMatchText } from "@bb/fuzzy-match";
+import { fuzzyMatchText } from "@omnyo/fuzzy-match";
 import type { PaletteAction } from "./palette-action";
 
 export const PALETTE_RESULT_LIMIT = 50;
@@ -19,13 +19,16 @@ function titleMatchPositions(title: string, query: string): number[] {
   const haystack = title.toLowerCase();
   const needle = query.toLowerCase();
   let cursor = 0;
+
   for (const character of needle) {
     if (character === " ") continue;
     const found = haystack.indexOf(character, cursor);
+
     if (found === -1) return [];
     positions.push(found);
     cursor = found + 1;
   }
+
   return positions;
 }
 
@@ -39,11 +42,14 @@ export function rankPaletteActions(
   const buildOrder = new Map(
     args.actions.map((action, index) => [action.id, index]),
   );
+
   const recentRank = new Map(
     args.recentIds.map((id, index) => [id, index] as const),
   );
+
   const rankOf = (action: PaletteAction) =>
     recentRank.get(action.id) ?? Number.MAX_SAFE_INTEGER;
+
   const orderOf = (action: PaletteAction) => buildOrder.get(action.id) ?? 0;
 
   const matches = fuzzyMatchText({

@@ -18,13 +18,16 @@ function applyReplacements(content, rangeStart, rangeEnd, replacements) {
 
   const chunks = [];
   let cursor = rangeStart;
+
   for (const replacement of [...replacements].sort(
     (a, b) => a.start - b.start,
   )) {
     chunks.push(content.slice(cursor, replacement.start), replacement.text);
     cursor = replacement.end;
   }
+
   chunks.push(content.slice(cursor, rangeEnd));
+
   return chunks.join("");
 }
 
@@ -36,10 +39,12 @@ function normalizeZodTypeLiterals(content) {
     true,
     ts.ScriptKind.TS,
   );
+
   const roots = [];
 
   function visit(node, parentTarget) {
     let target = parentTarget;
+
     if (
       ts.isTypeLiteralNode(node) &&
       ts.isTypeReferenceNode(node.parent) &&
@@ -51,9 +56,11 @@ function normalizeZodTypeLiterals(content) {
       node.members.every(ts.isPropertySignature)
     ) {
       target = { node, children: [] };
+
       if (parentTarget) parentTarget.children.push(target);
       else roots.push(target);
     }
+
     ts.forEachChild(node, (child) => visit(child, target));
   }
 
@@ -63,6 +70,7 @@ function normalizeZodTypeLiterals(content) {
     const members = target.node.members.map((member) => {
       const start = member.getStart(sourceFile);
       const end = member.getEnd();
+
       const nestedReplacements = target.children
         .filter(
           (child) =>
@@ -74,6 +82,7 @@ function normalizeZodTypeLiterals(content) {
           end: child.node.getEnd(),
           text: renderTarget(child),
         }));
+
       return {
         start,
         end,
@@ -81,18 +90,25 @@ function normalizeZodTypeLiterals(content) {
         text: applyReplacements(content, start, end, nestedReplacements),
       };
     });
+
     const sorted = [...members].sort((a, b) => {
       if (a.sortKey < b.sortKey) return -1;
+
       if (a.sortKey > b.sortKey) return 1;
+
       if (a.text < b.text) return -1;
+
       if (a.text > b.text) return 1;
+
       return 0;
     });
+
     const replacements = members.map((member, index) => ({
       start: member.start,
       end: member.end,
       text: sorted[index].text,
     }));
+
     return applyReplacements(
       content,
       target.node.getStart(sourceFile),
@@ -113,10 +129,6 @@ function normalizeZodTypeLiterals(content) {
   );
 }
 
-/**
- * Normalize declaration syntax whose order is semantically irrelevant but is
- * emitted inconsistently by TypeScript/rollup-plugin-dts.
- */
 export function normalizeBundledDts(content) {
   return normalizeZodTypeLiterals(normalizeQuotedLiteralUnions(content));
 }

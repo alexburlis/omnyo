@@ -16,6 +16,7 @@ import {
   incrementRepairAttempts,
   listCallsForRunPage,
   listExpiredTerminalRuns,
+  listActiveWorkflowThreadCounts,
   migrations,
   queueCallProviderRetry,
   recoverInterruptedRuns,
@@ -78,6 +79,35 @@ describe("workflow durable data", () => {
     permissionMode: "full",
   } as const;
 
+  it("counts active durable workflows across origins and projects without inspecting their source", () => {
+    for (const [index, status] of [
+      "queued",
+      "running",
+      "succeeded",
+      "queued",
+      "failed",
+      "cancelled",
+      "running",
+    ].entries()) {
+      const run = newRun();
+      db.prepare(
+        "UPDATE workflow_runs SET status = ?, origin_thread_id = ?, project_id = ? WHERE id = ?",
+      ).run(
+        status,
+        index < 3 ? "thread-1" : "thread-2",
+        index < 3 ? "project-1" : "project-2",
+        run.id,
+      );
+    }
+
+    expect(listActiveWorkflowThreadCounts(db)).toEqual([
+      { threadId: "thread-1", count: 2 },
+      { threadId: "thread-2", count: 2 },
+    ]);
+    db.prepare("UPDATE workflow_runs SET status = 'succeeded'").run();
+    expect(listActiveWorkflowThreadCounts(db)).toEqual([]);
+  });
+
   it("persists failed cleanup deadlines and caps retry delays", () => {
     ownWorker(db, "worker", "missing-run", "missing-call", "origin");
     const clock = vi.spyOn(Date, "now").mockReturnValue(10_000);
@@ -90,6 +120,7 @@ describe("workflow durable data", () => {
     recordWorkerCleanup(db, "worker", false);
     expect(retiredWorkers(db, 12_999)).toEqual([]);
     expect(retiredWorkers(db, 13_000)).toHaveLength(1);
+
     for (let attempt = 0; attempt < 20; attempt++)
       recordWorkerCleanup(db, "worker", false);
     expect(retiredWorkers(db, 70_999)).toEqual([]);
@@ -107,31 +138,66 @@ describe("workflow durable data", () => {
     expect(workerOrigins(db, 1_000)).toEqual([]);
   });
 
+  it("keeps legacy calls at their origin without inventing a historical machine or path", () => {
+    db.close();
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    db.exec(migrations.slice(0, -1).join("\n"));
+    const run = newRun();
+    db.prepare(`INSERT INTO workflow_calls(id, run_id, call_index, cache_key, prompt,
+      options_json, resolved_provider, resolved_model, resolved_reasoning_level,
+      resolved_permission_mode, status, created_at)
+      VALUES ('legacy-placement', ?, 0, 'preserved-key', 'work', '{}', 'codex', 'gpt-test', 'medium', 'full', 'succeeded', 0)`).run(
+      run.id,
+    );
+    db.exec(migrations.at(-1)!);
+    expect(getCall(db, run.id, 0)).toMatchObject({
+      cacheKey: "preserved-key",
+      requestedEnvironmentId: null,
+      resolvedEnvironmentId: run.environmentId,
+      resolvedHostId: null,
+      resolvedWorkspacePath: null,
+    });
+  });
+
   it("backfills worker ownership from the pre-upgrade call pointers", () => {
     db.close();
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
-    db.exec(migrations.slice(0, -3).join("\n"));
+    db.exec(
+      migrations
+        .slice(
+          0,
+          migrations.findIndex((migration) =>
+            migration.includes("CREATE TABLE workflow_workers"),
+          ),
+        )
+        .join("\n"),
+    );
     const run = newRun();
     markRunning(run.id);
-    const call = startCall(db, {
-      runId: run.id,
-      callIndex: 0,
-      cacheKey: "migration",
-      prompt: "work",
-      options: {
-        title: null,
-        phase: null,
-        outputSchema: null,
-        selection: null,
-      },
-      selection: resolvedSelection,
-      replay: null,
-    });
+
+    const call = { id: "legacy-call" };
+    db.prepare(`INSERT INTO workflow_calls(id, run_id, call_index, cache_key, prompt,
+      options_json, resolved_provider, resolved_model, resolved_reasoning_level,
+      resolved_permission_mode, status, created_at)
+      VALUES (?, ?, 0, 'migration', 'work', '{}', 'codex', 'gpt-test', 'medium', 'full', 'queued', 0)`).run(
+      call.id,
+      run.id,
+    );
+
     db.prepare(
       `UPDATE workflow_calls SET child_thread_id = 'legacy-worker', status = 'failed' WHERE id = ?`,
     ).run(call.id);
-    db.exec(migrations.slice(-3).join("\n"));
+    db.exec(
+      migrations
+        .slice(
+          migrations.findIndex((migration) =>
+            migration.includes("CREATE TABLE workflow_workers"),
+          ),
+        )
+        .join("\n"),
+    );
     expect(retiredWorkers(db, Date.now())).toEqual([
       { threadId: "legacy-worker", callId: call.id },
     ]);
@@ -144,8 +210,18 @@ describe("workflow durable data", () => {
     db.close();
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
-    db.exec(migrations.slice(0, -3).join("\n"));
+    db.exec(
+      migrations
+        .slice(
+          0,
+          migrations.findIndex((migration) =>
+            migration.includes("CREATE TABLE workflow_workers"),
+          ),
+        )
+        .join("\n"),
+    );
     const run = newRun();
+
     const insertCall = db.prepare(
       `INSERT INTO workflow_calls(id, run_id, call_index, cache_key, prompt,
          options_json, resolved_provider, resolved_model, resolved_reasoning_level,
@@ -153,6 +229,7 @@ describe("workflow durable data", () => {
        VALUES (?, ?, ?, 'key', 'work', '{}', 'codex', 'gpt-test', 'medium', 'full',
          'failed', ?, 0)`,
     );
+
     for (let index = 0; index < 250; index++)
       insertCall.run(
         `call-${String(index).padStart(3, "0")}`,
@@ -161,7 +238,15 @@ describe("workflow durable data", () => {
         `worker-${String(index).padStart(3, "0")}`,
       );
     const migratedAt = Date.now();
-    db.exec(migrations.slice(-3).join("\n"));
+    db.exec(
+      migrations
+        .slice(
+          migrations.findIndex((migration) =>
+            migration.includes("CREATE TABLE workflow_workers"),
+          ),
+        )
+        .join("\n"),
+    );
 
     const buckets = db
       .prepare(
@@ -169,6 +254,7 @@ describe("workflow durable data", () => {
          GROUP BY next_cleanup_at ORDER BY at`,
       )
       .all() as Array<{ at: number; size: number }>;
+
     expect(buckets.map((bucket) => bucket.size)).toEqual([100, 100, 50]);
     expect(buckets.map((bucket) => bucket.at - buckets[0].at)).toEqual([
       0, 1_000, 2_000,
@@ -187,6 +273,7 @@ describe("workflow durable data", () => {
   it("retains unattached workers when attachment loses a cancellation race", () => {
     const run = newRun();
     markRunning(run.id);
+
     const call = startCall(db, {
       runId: run.id,
       callIndex: 0,
@@ -197,10 +284,17 @@ describe("workflow durable data", () => {
         phase: null,
         outputSchema: null,
         selection: null,
+        environmentId: null,
       },
       selection: resolvedSelection,
+      placement: {
+        environmentId: "environment-1",
+        hostId: "host-1",
+        workspacePath: "/workspace",
+      },
       replay: null,
     });
+
     cancelRun(db, run.id);
     expect(attachCallThread(db, call.id, "unattached-worker")).toBe(false);
     expect(retiredWorkers(db, Date.now())).toEqual([
@@ -217,8 +311,10 @@ describe("workflow durable data", () => {
         ),
       ).toBe(retired);
     };
+
     const run = newRun();
     markRunning(run.id);
+
     const startWork = (cacheKey: string, callIndex: number) =>
       startCall(db, {
         runId: run.id,
@@ -230,8 +326,14 @@ describe("workflow durable data", () => {
           phase: null,
           outputSchema: null,
           selection: null,
+          environmentId: null,
         },
         selection: resolvedSelection,
+        placement: {
+          environmentId: "environment-1",
+          hostId: "host-1",
+          workspacePath: "/workspace",
+        },
         replay: null,
       });
 
@@ -286,6 +388,7 @@ describe("workflow durable data", () => {
   it("stores successful calls for deterministic replay", () => {
     const run = newRun();
     markRunning(run.id);
+
     const call = startCall(db, {
       runId: run.id,
       callIndex: 0,
@@ -293,13 +396,20 @@ describe("workflow durable data", () => {
       prompt: "inspect",
       options: {
         selection: null,
+        environmentId: null,
         outputSchema: null,
         title: null,
         phase: null,
       },
       selection: resolvedSelection,
+      placement: {
+        environmentId: "environment-1",
+        hostId: "host-1",
+        workspacePath: "/workspace",
+      },
       replay: null,
     });
+
     settleCall(db, {
       id: call.id,
       status: "succeeded",
@@ -310,7 +420,11 @@ describe("workflow durable data", () => {
     expect(getCall(db, run.id, 0)).toMatchObject({
       cacheKey: "cache",
       optionsJson:
-        '{"selection":null,"outputSchema":null,"title":null,"phase":null}',
+        '{"selection":null,"environmentId":null,"outputSchema":null,"title":null,"phase":null}',
+      requestedEnvironmentId: null,
+      resolvedEnvironmentId: "environment-1",
+      resolvedHostId: "host-1",
+      resolvedWorkspacePath: "/workspace",
       resolvedProvider: "codex",
       resolvedModel: "gpt-test",
       resolvedReasoningLevel: "medium",
@@ -324,6 +438,7 @@ describe("workflow durable data", () => {
   it("persists provider retry attempts across worker replacements", () => {
     const run = newRun();
     markRunning(run.id);
+
     const call = startCall(db, {
       runId: run.id,
       callIndex: 0,
@@ -331,13 +446,20 @@ describe("workflow durable data", () => {
       prompt: "inspect",
       options: {
         selection: null,
+        environmentId: null,
         outputSchema: null,
         title: null,
         phase: null,
       },
       selection: resolvedSelection,
+      placement: {
+        environmentId: "environment-1",
+        hostId: "host-1",
+        workspacePath: "/workspace",
+      },
       replay: null,
     });
+
     expect(attachCallThread(db, call.id, "child-1")).toBe(true);
     settleCall(db, {
       id: call.id,
@@ -366,6 +488,7 @@ describe("workflow durable data", () => {
   it("pages calls by stable index and counts statuses without loading history", () => {
     const run = newRun();
     markRunning(run.id);
+
     const calls = [0, 1, 2].map((callIndex) =>
       startCall(db, {
         runId: run.id,
@@ -374,14 +497,21 @@ describe("workflow durable data", () => {
         prompt: `inspect ${callIndex}`,
         options: {
           selection: null,
+          environmentId: null,
           outputSchema: null,
           title: null,
           phase: null,
         },
         selection: resolvedSelection,
+        placement: {
+          environmentId: "environment-1",
+          hostId: "host-1",
+          workspacePath: "/workspace",
+        },
         replay: null,
       }),
     );
+
     settleCall(db, {
       id: calls[0]!.id,
       status: "succeeded",
@@ -423,6 +553,7 @@ describe("workflow durable data", () => {
   it("requeues interrupted runs and records orphan workers", () => {
     const run = newRun();
     markRunning(run.id);
+
     const call = startCall(db, {
       runId: run.id,
       callIndex: 0,
@@ -430,13 +561,20 @@ describe("workflow durable data", () => {
       prompt: "inspect",
       options: {
         selection: null,
+        environmentId: null,
         outputSchema: null,
         title: null,
         phase: null,
       },
       selection: resolvedSelection,
+      placement: {
+        environmentId: "environment-1",
+        hostId: "host-1",
+        workspacePath: "/workspace",
+      },
       replay: null,
     });
+
     db.prepare(
       `UPDATE workflow_calls SET status = 'running', child_thread_id = 'child-1' WHERE id = ?`,
     ).run(call.id);
@@ -452,6 +590,7 @@ describe("workflow durable data", () => {
   it("persists a successful call's JSON null result", () => {
     const first = newRun();
     markRunning(first.id);
+
     const original = startCall(db, {
       runId: first.id,
       callIndex: 0,
@@ -459,13 +598,20 @@ describe("workflow durable data", () => {
       prompt: "return null",
       options: {
         selection: null,
+        environmentId: null,
         outputSchema: null,
         title: null,
         phase: null,
       },
       selection: resolvedSelection,
+      placement: {
+        environmentId: "environment-1",
+        hostId: "host-1",
+        workspacePath: "/workspace",
+      },
       replay: null,
     });
+
     settleCall(db, {
       id: original.id,
       status: "succeeded",
@@ -478,6 +624,7 @@ describe("workflow durable data", () => {
   it("atomically preserves the first structured value", () => {
     const run = newRun();
     markRunning(run.id);
+
     const call = startCall(db, {
       runId: run.id,
       callIndex: 0,
@@ -485,13 +632,20 @@ describe("workflow durable data", () => {
       prompt: "answer",
       options: {
         selection: null,
+        environmentId: null,
         outputSchema: { type: "object" },
         title: null,
         phase: null,
       },
       selection: resolvedSelection,
+      placement: {
+        environmentId: "environment-1",
+        hostId: "host-1",
+        workspacePath: "/workspace",
+      },
       replay: null,
     });
+
     expect(attachCallThread(db, call.id, "child-structured")).toBe(true);
 
     expect(storeStructuredResult(db, call.id, { a: 1, b: 2 })).toBe("accepted");
@@ -516,6 +670,7 @@ describe("workflow durable data", () => {
   it("uses one guarded repair counter and preserves accepted results on restart", () => {
     const run = newRun();
     markRunning(run.id);
+
     const call = startCall(db, {
       runId: run.id,
       callIndex: 0,
@@ -523,13 +678,20 @@ describe("workflow durable data", () => {
       prompt: "answer",
       options: {
         selection: null,
+        environmentId: null,
         outputSchema: { type: "number" },
         title: null,
         phase: null,
       },
       selection: resolvedSelection,
+      placement: {
+        environmentId: "environment-1",
+        hostId: "host-1",
+        workspacePath: "/workspace",
+      },
       replay: null,
     });
+
     attachCallThread(db, call.id, "child-repair");
 
     expect(incrementRepairAttempts(db, call.id)).toBe(1);
@@ -581,6 +743,7 @@ describe("workflow durable data", () => {
   it("atomically cancels outstanding calls when a parent settles", () => {
     const run = newRun();
     markRunning(run.id);
+
     const call = startCall(db, {
       runId: run.id,
       callIndex: 0,
@@ -588,13 +751,20 @@ describe("workflow durable data", () => {
       prompt: "slow",
       options: {
         selection: null,
+        environmentId: null,
         outputSchema: null,
         title: null,
         phase: null,
       },
       selection: resolvedSelection,
+      placement: {
+        environmentId: "environment-1",
+        hostId: "host-1",
+        workspacePath: "/workspace",
+      },
       replay: null,
     });
+
     db.prepare(
       `UPDATE workflow_calls SET status = 'running', child_thread_id = 'orphan' WHERE id = ?`,
     ).run(call.id);
@@ -629,6 +799,7 @@ describe("workflow durable data", () => {
         status,
         creationRun.id,
       );
+
       const create = () =>
         startCall(db, {
           runId: creationRun.id,
@@ -637,13 +808,20 @@ describe("workflow durable data", () => {
           prompt: "state matrix",
           options: {
             selection: null,
+            environmentId: null,
             outputSchema: null,
             title: null,
             phase: null,
           },
           selection: resolvedSelection,
+          placement: {
+            environmentId: "environment-1",
+            hostId: "host-1",
+            workspacePath: "/workspace",
+          },
           replay: null,
         });
+
       if (status === "running") {
         expect(create).not.toThrow();
         expect(getCall(db, creationRun.id, 0)).toMatchObject({
@@ -656,6 +834,7 @@ describe("workflow durable data", () => {
 
       const attachmentRun = newRun();
       markRunning(attachmentRun.id);
+
       const call = startCall(db, {
         runId: attachmentRun.id,
         callIndex: 0,
@@ -663,13 +842,20 @@ describe("workflow durable data", () => {
         prompt: "state matrix",
         options: {
           selection: null,
+          environmentId: null,
           outputSchema: null,
           title: null,
           phase: null,
         },
         selection: resolvedSelection,
+        placement: {
+          environmentId: "environment-1",
+          hostId: "host-1",
+          workspacePath: "/workspace",
+        },
         replay: null,
       });
+
       db.prepare(`UPDATE workflow_runs SET status = ? WHERE id = ?`).run(
         status,
         attachmentRun.id,
@@ -709,6 +895,7 @@ describe("workflow durable data", () => {
        finished_at = ?, settings_json = json_set(settings_json, '$.retentionDays', 1)
        WHERE id = ?`,
     ).run(Date.now() - 3 * 86_400_000, parent.id);
+
     const retainedChild = createRun(db, {
       projectId: "project-1",
       originThreadId: "thread-1",
@@ -725,6 +912,7 @@ describe("workflow durable data", () => {
         '{"maxActiveRuns":4,"maxConcurrentAgents":8,"maxAgentCalls":100,"totalRunTimeoutMs":86400000,"retentionDays":1,"maxNotificationBytes":16384}',
       resumedFromRunId: parent.id,
     });
+
     const expired = newRun();
     db.prepare(
       `UPDATE workflow_runs SET status = 'failed', notification_sent = 1,
@@ -742,6 +930,7 @@ describe("workflow durable data", () => {
 
   it("deletes an entirely expired resume chain in one bounded sweep", () => {
     const parent = newRun();
+
     const child = createRun(db, {
       projectId: "project-1",
       originThreadId: "thread-1",
@@ -758,6 +947,7 @@ describe("workflow durable data", () => {
         '{"maxActiveRuns":4,"maxConcurrentAgents":8,"maxAgentCalls":100,"totalRunTimeoutMs":86400000,"retentionDays":1,"maxNotificationBytes":16384}',
       resumedFromRunId: parent.id,
     });
+
     db.prepare(
       `UPDATE workflow_runs SET status = 'succeeded', notification_sent = 1,
        finished_at = ?, settings_json = json_set(settings_json, '$.retentionDays', 1)

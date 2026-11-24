@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { UrlLink, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
+import { UrlLink, useRpc } from "@omnyo/plugin-sdk/app";
 import type { DelegationRpcContract } from "../../delegate/contract.js";
 import type {
   Preset,
@@ -7,6 +7,7 @@ import type {
   TaskThread,
 } from "../../shared/contract.js";
 import { errorMessage } from "../../shared/errors.js";
+import { importLegacyTasksBrowserKeyV1 } from "../../shared/legacy-browser-key-v1.js";
 import {
   PR_STATE_META,
   THREAD_STATUS_META,
@@ -27,8 +28,16 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
 import { Icon } from "@/components/ui/icon";
+import {
+  StatusList,
+  StatusRow,
+  type StatusTone,
+} from "@/components/ui/status-row";
 import { cn } from "@/lib/utils";
+import { DetailSectionHeading } from "./sections.js";
+import { Hint } from "../../components/hint.js";
 
 function ThreadPullRequestPill({
   pullRequest,
@@ -39,6 +48,7 @@ function ThreadPullRequestPill({
 }) {
   if (pullRequest) {
     const meta = PR_STATE_META[pullRequest.state];
+
     return (
       <UrlLink
         href={pullRequest.url}
@@ -46,90 +56,109 @@ function ThreadPullRequestPill({
         rel="noopener noreferrer"
         title={`${pullRequest.title} (${meta.label})`}
         aria-label={`Pull request #${pullRequest.number}: ${pullRequest.title} (${meta.label})`}
-        className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-xs font-medium shadow-2xs hover:border-input"
+        className={cn(
+          "inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-state-hover px-2 text-xs font-medium text-foreground hover:bg-state-active",
+          FOCUS_RING_CLASS,
+        )}
       >
-        <Icon name={meta.icon} className={cn("size-3", meta.textClassName)} />#
-        {pullRequest.number}
+        <Icon name={meta.icon} className={cn("size-3.5", meta.textClassName)} />
+        PR #{pullRequest.number}
+        <span className="text-muted-foreground">{meta.label}</span>
       </UrlLink>
     );
   }
+
   if (unavailable) {
     return (
       <span
-        title="Couldn't check this thread's pull request"
+        title="Couldn't check this chat's pull request"
         className="shrink-0 text-xs text-muted-foreground"
       >
-        PR unavailable
+        PR status unknown
       </span>
     );
   }
+
   return null;
 }
 
-function ThreadCard({
+const THREAD_TONE: Record<TaskThread["liveStatus"], StatusTone> = {
+  starting: "pending",
+  working: "active",
+  idle: "neutral",
+  completed: "success",
+  failed: "error",
+};
+
+export function ThreadRow({
   thread,
   pullRequest,
   pullRequestUnavailable,
   busy,
+  onOpen,
   onDetach,
 }: {
   thread: TaskThread;
   pullRequest: TaskPullRequest | undefined;
   pullRequestUnavailable: boolean;
   busy: boolean;
+  onOpen: () => void;
   onDetach: () => void;
 }) {
-  const navigate = useBbNavigate();
   const meta = THREAD_STATUS_META[thread.liveStatus];
+
   return (
-    <div className="mb-2 flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2 shadow-2xs">
-      <span
-        className={cn(
-          "flex shrink-0 items-center gap-1.5 text-xs font-medium",
-          meta.textClassName,
-        )}
-      >
-        <span
-          aria-hidden
-          className={cn("size-1.5 rounded-full", meta.dotClassName)}
-        />
-        {meta.label}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{thread.title}</div>
-        <div className="text-xs text-muted-foreground">
-          {thread.presetName} · attached {formatRelativeTime(thread.attachedAt)}
-        </div>
-      </div>
-      <ThreadPullRequestPill
-        pullRequest={pullRequest}
-        unavailable={pullRequestUnavailable}
-      />
-      <button
-        type="button"
-        className="flex shrink-0 items-center gap-1 text-xs font-medium underline decoration-input underline-offset-2 hover:decoration-current"
-        onClick={() => navigate.toThread(thread.threadId)}
-      >
-        Open thread
-        <Icon name="ArrowUpRight" className="size-3" />
-      </button>
-      <button
-        type="button"
-        aria-label={`Detach ${thread.title}`}
-        title="Detach from task"
-        disabled={busy}
-        className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-state-hover hover:text-foreground disabled:opacity-70"
-        onClick={onDetach}
-      >
-        <Icon name="X" className="size-3" />
-      </button>
-    </div>
+    <StatusRow
+      tone={THREAD_TONE[thread.liveStatus]}
+      title={thread.title}
+      status={meta.label}
+      meta={[
+        thread.presetName,
+        `added ${formatRelativeTime(thread.attachedAt)}`,
+      ]}
+      actions={
+        <>
+          <ThreadPullRequestPill
+            pullRequest={pullRequest}
+            unavailable={pullRequestUnavailable}
+          />
+          <Button
+            size="xs"
+            variant="soft"
+            aria-label="Open chat"
+            onClick={onOpen}
+          >
+            Open chat
+            <Icon name="ArrowUpRight" />
+          </Button>
+          <Hint label="Remove from this task. The chat itself is kept.">
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label={`Detach ${thread.title}`}
+              disabled={busy}
+              className="text-muted-foreground"
+              onClick={onDetach}
+            >
+              <Icon name="X" />
+            </Button>
+          </Hint>
+        </>
+      }
+    />
   );
 }
 
-const LAST_PRESET_STORAGE_KEY = "bb-tasks:last-dispatch-preset";
+const LAST_PRESET_STORAGE_KEY = "tasks:last-dispatch-preset";
+
+const LEGACY_LAST_PRESET_STORAGE_KEY_V1 = "bb-tasks:last-dispatch-preset";
 
 function loadLastPresetId(): string | null {
+  importLegacyTasksBrowserKeyV1(
+    LEGACY_LAST_PRESET_STORAGE_KEY_V1,
+    LAST_PRESET_STORAGE_KEY,
+  );
+
   try {
     return window.localStorage.getItem(LAST_PRESET_STORAGE_KEY);
   } catch {
@@ -166,6 +195,7 @@ export function DispatchControl({
 
   const dispatch = async (presetId: string) => {
     setDispatching(true);
+
     try {
       await rpc.call("delegate", { taskId, presetId });
     } catch (error) {
@@ -181,20 +211,19 @@ export function DispatchControl({
     void dispatch(preset.id);
   };
 
-  const primarySegment =
-    "bg-primary text-primary-foreground hover:bg-primary/90";
-
   if (presets !== undefined && presets.length === 0) {
     return (
       <>
-        <Button
-          size="sm"
-          className={cn("h-7 gap-1.5", primarySegment, className)}
-          onClick={() => setCreateDialogKey(Date.now())}
-        >
-          <Icon name="Plus" className="size-3.5 shrink-0" />
-          Add a preset…
-        </Button>
+        <Hint label="A preset picks the model and permissions an agent uses for this task">
+          <Button
+            size="sm"
+            className={cn("h-7 gap-1.5", className)}
+            onClick={() => setCreateDialogKey(Date.now())}
+          >
+            <Icon name="Plus" className="size-3.5 shrink-0" />
+            Add an agent preset
+          </Button>
+        </Hint>
         {createDialogKey !== null ? (
           <PresetDialog
             key={createDialogKey}
@@ -219,36 +248,46 @@ export function DispatchControl({
   return (
     <>
       <div className={cn("flex min-w-0", className)}>
-        <Button
-          size="sm"
-          disabled={dispatching || !current}
-          className={cn(
-            "h-7 min-w-0 flex-1 gap-1.5 rounded-r-none",
-            primarySegment,
-          )}
-          onClick={() => {
-            if (current) pickPreset(current);
-          }}
+        <Hint
+          label={
+            current
+              ? `Start a new agent chat on this task with the ${current.name} preset`
+              : "Start a new agent chat on this task"
+          }
         >
-          <span className="truncate">
-            {dispatching ? "Dispatching…" : (current?.name ?? "Dispatch")}
-          </span>
-        </Button>
+          <Button
+            size="sm"
+            disabled={dispatching || !current}
+            className="h-7 min-w-0 flex-1 gap-1.5 rounded-r-none"
+            onClick={() => {
+              if (current) pickPreset(current);
+            }}
+          >
+            <Icon
+              name={dispatching ? "Loading" : "Play"}
+              className={cn("size-3.5 shrink-0", dispatching && "animate-spin")}
+            />
+            <span className="truncate">
+              {dispatching
+                ? "Starting agent…"
+                : current
+                  ? `Start ${current.name}`
+                  : "Start agent"}
+            </span>
+          </Button>
+        </Hint>
         <DropdownMenu>
           <DropdownMenuTrigger asChild disabled={dispatching || !current}>
             <Button
               size="sm"
-              aria-label="Choose dispatch preset"
-              className={cn(
-                "h-7 shrink-0 rounded-l-none border-l border-primary-foreground/25 px-1",
-                primarySegment,
-              )}
+              aria-label="Choose which preset starts the agent"
+              className="h-7 shrink-0 rounded-l-none border-l border-control-primary-foreground/25 px-1.5"
             >
               <Icon name="ChevronDown" className="size-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align={align}>
-            <DropdownMenuLabel>Dispatch with preset</DropdownMenuLabel>
+            <DropdownMenuLabel>Start an agent with</DropdownMenuLabel>
             {(presets ?? []).map((preset) => (
               <DropdownMenuItem
                 key={preset.id}
@@ -275,6 +314,7 @@ interface ThreadsSectionProps {
   pullRequests: TaskPullRequest[] | undefined;
   unavailableThreadIds: string[];
   onDetach: (thread: TaskThread) => Promise<void>;
+  onOpenThread: (threadId: string) => void;
   onError: (message: string) => void;
 }
 
@@ -283,6 +323,7 @@ export function ThreadsSection({
   pullRequests,
   unavailableThreadIds,
   onDetach,
+  onOpenThread,
   onError,
 }: ThreadsSectionProps) {
   const [confirm, setConfirm] = useState<TaskThread | null>(null);
@@ -290,6 +331,7 @@ export function ThreadsSection({
 
   const performDetach = async (thread: TaskThread) => {
     setPending((current) => new Set(current).add(thread.id));
+
     try {
       await onDetach(thread);
     } catch (error) {
@@ -298,6 +340,7 @@ export function ThreadsSection({
       setPending((current) => {
         const next = new Set(current);
         next.delete(thread.id);
+
         return next;
       });
     }
@@ -305,31 +348,40 @@ export function ThreadsSection({
 
   const activeCount = threads.filter(isActiveThread).length;
   const pullRequestByThread = new Map<string, TaskPullRequest>();
+
   for (const pullRequest of pullRequests ?? []) {
     for (const threadId of pullRequest.threadIds) {
       pullRequestByThread.set(threadId, pullRequest);
     }
   }
+
   const unavailable = new Set(unavailableThreadIds);
 
   return (
-    <section>
-      <div className="mb-2 flex items-center gap-2 pt-1.5 text-xs font-semibold text-muted-foreground">
-        Agent threads
-        {activeCount > 0 ? (
-          <span className="font-normal">{activeCount} working now</span>
-        ) : null}
-      </div>
-      {threads.map((thread) => (
-        <ThreadCard
-          key={thread.id}
-          thread={thread}
-          pullRequest={pullRequestByThread.get(thread.threadId)}
-          pullRequestUnavailable={unavailable.has(thread.threadId)}
-          busy={pending.has(thread.id)}
-          onDetach={() => setConfirm(thread)}
-        />
-      ))}
+    <section aria-label="Agent chats">
+      <DetailSectionHeading
+        title="Agent chats"
+        count={threads.length}
+        countLabel={`${threads.length} ${threads.length === 1 ? "chat" : "chats"}`}
+        description={
+          activeCount > 0
+            ? `${activeCount} working now`
+            : "None working right now"
+        }
+      />
+      <StatusList label="Agent chats">
+        {threads.map((thread) => (
+          <ThreadRow
+            key={thread.id}
+            thread={thread}
+            pullRequest={pullRequestByThread.get(thread.threadId)}
+            pullRequestUnavailable={unavailable.has(thread.threadId)}
+            busy={pending.has(thread.id)}
+            onOpen={() => onOpenThread(thread.threadId)}
+            onDetach={() => setConfirm(thread)}
+          />
+        ))}
+      </StatusList>
       <ConfirmDeleteDialog
         className="max-w-sm"
         open={confirm !== null}
@@ -339,8 +391,8 @@ export function ThreadsSection({
       >
         {confirm ? (
           <ConfirmDeleteDialogContent
-            title="Detach thread?"
-            description={`"${confirm.title}" will no longer be listed on this task. The thread itself is not deleted; re-attach it with bb tasks attach.`}
+            title="Detach this chat?"
+            description={`"${confirm.title}" will no longer be listed on this task. The chat itself is kept; re-attach it with omnyo tasks attach.`}
             confirmLabel="Detach"
             pending={false}
             size="sm"

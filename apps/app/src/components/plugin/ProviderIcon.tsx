@@ -5,10 +5,10 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { ExperimentalProviderIconProps } from "@get-bb/plugin-sdk/app";
-import { isPresentationTintColor } from "@bb/domain";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import type { ExperimentalProviderIconProps } from "@omnyo/plugin-sdk/app";
+import { isPresentationTintColor } from "@omnyo/domain";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   getPluginSlotSnapshot,
   subscribePluginSlots,
@@ -45,10 +45,12 @@ export function ProviderIcon({
   const tint = provider.strings?.iconTint;
   const providerKey = `${providerKind}:${providerId}`;
   const ancestors = useContext(ProviderIconAncestors);
+
   const slot = useSyncExternalStore(
     subscribePluginSlots,
     () => {
       const icons = getPluginSlotSnapshot().providerIcons;
+
       return (
         icons.find(
           (entry) =>
@@ -63,10 +65,12 @@ export function ProviderIcon({
     },
     () => undefined,
   );
+
   const image =
     logoUrl == null
       ? undefined
       : `url("${logoUrl.replace(/["\\]/gu, "\\$&")}")`;
+
   const declared =
     image === undefined ? (
       <Icon
@@ -91,7 +95,9 @@ export function ProviderIcon({
         }}
       />
     );
+
   const CustomIcon = slot?.icon;
+
   return (
     <span
       className={cn(

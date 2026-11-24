@@ -1,13 +1,13 @@
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   DiscoveredSkill,
   HostProviderCommand,
   HostDaemonOnlineRpcRequestMessage,
-} from "@bb/host-daemon-contract";
-import { commandListResponseSchema } from "@bb/server-contract";
-import type { ExperimentalNativeRootsResolveAnswer } from "@get-bb/plugin-sdk/host";
+} from "@omnyo/host-daemon-contract";
+import { commandListResponseSchema } from "@omnyo/server-contract";
+import type { ExperimentalNativeRootsResolveAnswer } from "@omnyo/plugin-sdk/host";
 import { describe, expect, it, vi } from "vitest";
 import { COMMAND_TIMEOUT_MS } from "../../src/constants.js";
 import { registerHostRpcResponder } from "../helpers/host-rpc.js";
@@ -25,7 +25,7 @@ import {
   seedProjectWithSource,
 } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
-import type { PluginProviderDeclaration } from "@get-bb/plugin-sdk";
+import type { PluginProviderDeclaration } from "@omnyo/plugin-sdk";
 
 const NO_RESOLVED_ROOTS = { skills: [], commands: [] };
 
@@ -85,12 +85,14 @@ function registerCommandRpc(
     skillRequests: [],
     resolveRequests: [],
   };
+
   registerHostRpcResponder(harness, {
     hostId: args.hostId,
     sessionId: args.sessionId,
     handle: (request) => {
       if (request.command.type === "host.read_workspace_agent_context") {
         stub.skillRequests.push(request);
+
         return {
           ok: true,
           result: {
@@ -101,35 +103,54 @@ function registerCommandRpc(
           },
         };
       }
+
       if (request.command.type === "plugin.host.call") {
         if (request.command.method !== "resolveNativeRoots") {
           throw new Error(
             `Unexpected plugin host call ${request.command.method} in command typeahead test`,
           );
         }
+
         stub.resolveRequests.push(request);
+
         const answer = {
           ok: true as const,
           result: { output: args.resolved ?? NO_RESOLVED_ROOTS },
         };
+
         if (args.resolveDelayMs === undefined) return answer;
+
         return new Promise((settle) =>
           setTimeout(() => settle(answer), args.resolveDelayMs),
         );
       }
-      if (request.command.type === "host.list_commands") {
+
+      if (request.command.type === "host.list_command_metadata") {
         stub.requests.push(request);
-        return { ok: true, result: { commands: stub.commands } };
+        stub.skillRequests.push(request);
+
+        return {
+          ok: true,
+          result: {
+            commands: stub.commands,
+            projectSkills: [],
+            sharedSkills: args.skills ?? [],
+          },
+        };
       }
+
       if (request.command.type === "host.list_skills") {
         stub.skillRequests.push(request);
+
         return { ok: true, result: { skills: args.skills ?? [] } };
       }
+
       throw new Error(
         `Unexpected RPC command ${request.command.type} in command typeahead test`,
       );
     },
   });
+
   return stub;
 }
 
@@ -174,11 +195,14 @@ describe("public project command typeahead route", () => {
         const { host, session } = seedHostSession(harness.deps, {
           id: "host-shared-skills",
         });
+
         seedPrimaryHost(harness.deps, host.id);
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
           path: "/tmp/shared-skills",
         });
+
         const stub = registerCommandRpc(harness, {
           hostId: host.id,
           sessionId: session.id,
@@ -199,6 +223,7 @@ describe("public project command typeahead route", () => {
         const response = await harness.app.request(
           `/api/v1/projects/${project.id}/commands?provider=pi`,
         );
+
         const body = commandListResponseSchema.parse(await readJson(response));
 
         expect(body.commands).toContainEqual({
@@ -209,9 +234,12 @@ describe("public project command typeahead route", () => {
           argumentHint: null,
         });
         expect(stub.skillRequests[0]?.command).toMatchObject({
-          includeAgentInstructions: false,
-          type: "host.read_workspace_agent_context",
-          rootPath: "/tmp/shared-skills",
+          type: "host.list_command_metadata",
+          projectSkillRead: expect.objectContaining({
+            limit: 1000,
+            maxFileBytes: 10 * 1024 * 1024,
+          }),
+          cwd: "/tmp/shared-skills",
           sharedSkillRoots: {
             user: [root(".agents/skills")],
             project: [root(".agents/skills")],
@@ -240,11 +268,14 @@ describe("public project command typeahead route", () => {
         const { host, session } = seedHostSession(harness.deps, {
           id: "host-custom-acp-skills",
         });
+
         seedPrimaryHost(harness.deps, host.id);
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
           path: "/tmp/custom-acp-skills",
         });
+
         const stub = registerCommandRpc(harness, {
           hostId: host.id,
           sessionId: session.id,
@@ -257,7 +288,12 @@ describe("public project command typeahead route", () => {
 
         expect(response.status).toBe(200);
         expect(stub.requests[0]?.command).toEqual({
-          type: "host.list_commands",
+          type: "host.list_command_metadata",
+          projectSkillRead: expect.objectContaining({
+            limit: 1000,
+            maxFileBytes: 10 * 1024 * 1024,
+          }),
+          sharedSkillRoots: { user: [], project: [] },
           providerId: "acp-amp",
           cwd: "/tmp/custom-acp-skills",
           nativeRoots: {
@@ -280,19 +316,24 @@ describe("public project command typeahead route", () => {
         provider.pluginId,
         stubHostArtifact(provider.pluginId),
       );
+
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-commands-resolving",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/resolving-project",
       });
+
       const stub = registerCommandRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
         commands: [skill("vendor:review", "user")],
         resolved: {
+          watchPaths: ["/home/me/.vendor/settings.json"],
           skills: [
             { path: "/home/me/.vendor/skills", origin: "user" },
             {
@@ -325,6 +366,7 @@ describe("public project command typeahead route", () => {
       expect(stub.resolveRequests.map((request) => request.command)).toEqual([
         expect.objectContaining({
           type: "plugin.host.call",
+          replacementKey: null,
           contributedEnv: [],
           pluginId: provider.pluginId,
           method: "resolveNativeRoots",
@@ -332,13 +374,19 @@ describe("public project command typeahead route", () => {
         }),
       ]);
       expect(stub.requests[0]?.command).toEqual({
-        type: "host.list_commands",
+        type: "host.list_command_metadata",
+        projectSkillRead: expect.objectContaining({
+          limit: 1000,
+          maxFileBytes: 10 * 1024 * 1024,
+        }),
+        sharedSkillRoots: { user: [], project: [] },
         providerId: "resolving",
         cwd: "/tmp/resolving-project",
         nativeRoots: {
           skills: { user: [], project: [] },
           commands: { user: [], project: [] },
           resolved: {
+            watchPaths: ["/home/me/.vendor/settings.json"],
             skills: [
               {
                 path: "/home/me/.vendor/skills",
@@ -381,14 +429,18 @@ describe("public project command typeahead route", () => {
         provider.pluginId,
         stubHostArtifact(provider.pluginId),
       );
+
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-commands-slow-resolver",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/slow-resolver-project",
       });
+
       const stub = registerCommandRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -398,6 +450,7 @@ describe("public project command typeahead route", () => {
         },
         resolveDelayMs,
       });
+
       const hubRpc = vi.spyOn(harness.hub, "requestHostOnlineRpc");
 
       const response = await harness.app.request(
@@ -411,16 +464,22 @@ describe("public project command typeahead route", () => {
         "after-the-wait",
       ]);
       const resolverCommand = stub.resolveRequests[0]?.command;
+
       if (resolverCommand?.type !== "plugin.host.call") {
         throw new Error("expected the resolver call");
       }
+
       expect(resolverCommand.timeoutMs).toBeLessThanOrEqual(COMMAND_TIMEOUT_MS);
       expect(resolverCommand.timeoutMs).toBeGreaterThan(
         COMMAND_TIMEOUT_MS - 1_000,
       );
+
       const scan = hubRpc.mock.calls
         .map(([args]) => args)
-        .find((args) => args.message.command.type === "host.list_commands");
+        .find(
+          (args) => args.message.command.type === "host.list_command_metadata",
+        );
+
       expect(scan).toBeDefined();
       expect(scan?.timeoutMs).toBeGreaterThan(0);
       expect(scan?.timeoutMs).toBeLessThanOrEqual(
@@ -429,7 +488,7 @@ describe("public project command typeahead route", () => {
     });
   });
 
-  it("skips the daemon roundtrip for a provider with no native roots and no resolver", async () => {
+  it("loads metadata without invoking a native-root resolver for a rootless provider", async () => {
     await withTestHarness(
       {
         extraProviders: [
@@ -444,15 +503,18 @@ describe("public project command typeahead route", () => {
         const { host, session } = seedHostSession(harness.deps, {
           id: "host-commands-rootless",
         });
+
         seedPrimaryHost(harness.deps, host.id);
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
           path: "/tmp/rootless-project",
         });
+
         const stub = registerCommandRpc(harness, {
           hostId: host.id,
           sessionId: session.id,
-          commands: [skill("never-asked", "user")],
+          commands: [],
         });
 
         const response = await harness.app.request(
@@ -461,10 +523,18 @@ describe("public project command typeahead route", () => {
 
         expect(response.status).toBe(200);
         const body = commandListResponseSchema.parse(await readJson(response));
-        expect(body.commands.map((command) => command.name)).not.toContain(
-          "never-asked",
+        expect(body.commands.map((command) => command.name)).toEqual(["clear"]);
+        expect(stub.requests).toHaveLength(1);
+        expect(stub.requests[0]?.command).toEqual(
+          expect.objectContaining({
+            type: "host.list_command_metadata",
+            nativeRoots: {
+              skills: { user: [], project: [] },
+              commands: { user: [], project: [] },
+              resolved: NO_RESOLVED_ROOTS,
+            },
+          }),
         );
-        expect(stub.requests).toEqual([]);
         expect(stub.resolveRequests).toEqual([]);
       },
     );
@@ -475,30 +545,37 @@ describe("public project command typeahead route", () => {
       const primaryHost = seedHost(harness.deps, {
         id: "host-commands-primary",
       });
+
       seedPrimaryHost(harness.deps, primaryHost.id);
+
       const { host: remoteHost, session } = seedHostSession(harness.deps, {
         id: "host-commands-remote",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: primaryHost.id,
         path: "/tmp/remote-commands-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: remoteHost.id,
         projectId: project.id,
         path: "/tmp/remote-commands-env",
       });
+
       const skillRoot = path.join(
         harness.deps.config.dataDir,
         "skills",
         "synced-remote",
       );
+
       await mkdir(skillRoot, { recursive: true });
       await writeFile(
         path.join(skillRoot, "SKILL.md"),
         "---\nname: synced-remote\ndescription: Synced remote skill\n---\n",
         "utf8",
       );
+
       const stub = registerCommandRpc(harness, {
         hostId: remoteHost.id,
         sessionId: session.id,
@@ -519,7 +596,12 @@ describe("public project command typeahead route", () => {
         argumentHint: null,
       });
       expect(stub.requests[0]?.command).toEqual({
-        type: "host.list_commands",
+        type: "host.list_command_metadata",
+        projectSkillRead: expect.objectContaining({
+          limit: 1000,
+          maxFileBytes: 10 * 1024 * 1024,
+        }),
+        sharedSkillRoots: { user: [], project: [] },
         providerId: "codex",
         cwd: "/tmp/remote-commands-env",
         nativeRoots: declaredNativeRootSet(
@@ -535,15 +617,18 @@ describe("public project command typeahead route", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-commands-claude",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/claude-commands-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/claude-commands-env",
       });
+
       const stub = registerCommandRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -614,7 +699,12 @@ describe("public project command typeahead route", () => {
 
       expect(stub.requests.map((request) => request.command)).toEqual([
         {
-          type: "host.list_commands",
+          type: "host.list_command_metadata",
+          projectSkillRead: expect.objectContaining({
+            limit: 1000,
+            maxFileBytes: 10 * 1024 * 1024,
+          }),
+          sharedSkillRoots: { user: [], project: [] },
           providerId: "claude-code",
           cwd: "/tmp/claude-commands-env",
           nativeRoots: declaredNativeRootSet(
@@ -626,20 +716,23 @@ describe("public project command typeahead route", () => {
     });
   });
 
-  it("keeps inherited bb skill roots out of provider-native discovery", async () => {
+  it("keeps inherited Omnyo skill roots out of provider-native discovery", async () => {
     await withTestHarness(
       {
-        inheritedSkillsRootPaths: ["/tmp/bb-parent-skills"],
+        inheritedSkillsRootPaths: ["/tmp/omnyo-parent-skills"],
       },
       async (harness) => {
         const { host, session } = seedHostSession(harness.deps, {
           id: "host-commands-inherited-skills",
         });
+
         seedPrimaryHost(harness.deps, host.id);
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
           path: "/tmp/inherited-skills-project",
         });
+
         const stub = registerCommandRpc(harness, {
           hostId: host.id,
           sessionId: session.id,
@@ -662,7 +755,12 @@ describe("public project command typeahead route", () => {
           "stories",
         ]);
         expect(stub.requests[0]?.command).toEqual({
-          type: "host.list_commands",
+          type: "host.list_command_metadata",
+          projectSkillRead: expect.objectContaining({
+            limit: 1000,
+            maxFileBytes: 10 * 1024 * 1024,
+          }),
+          sharedSkillRoots: { user: [], project: [] },
           providerId: "codex",
           cwd: "/tmp/inherited-skills-project",
           nativeRoots: declaredNativeRootSet(
@@ -679,13 +777,16 @@ describe("public project command typeahead route", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-commands-unknown",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const stub = registerCommandRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -708,17 +809,21 @@ describe("public project command typeahead route", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-commands-provisioning",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/provisioning-project",
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/provisioning-env",
         status: "provisioning",
       });
+
       const stub = registerCommandRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -737,7 +842,12 @@ describe("public project command typeahead route", () => {
         "user-only",
       ]);
       expect(stub.requests[0]?.command).toEqual({
-        type: "host.list_commands",
+        type: "host.list_command_metadata",
+        projectSkillRead: expect.objectContaining({
+          limit: 1000,
+          maxFileBytes: 10 * 1024 * 1024,
+        }),
+        sharedSkillRoots: { user: [], project: [] },
         providerId: "claude-code",
         cwd: "/tmp/provisioning-project",
         nativeRoots: declaredNativeRootSet(
@@ -753,12 +863,15 @@ describe("public project command typeahead route", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-commands-no-source",
       });
+
       seedPrimaryHost(harness.deps, host.id);
       const otherHost = seedHost(harness.deps, { id: "host-commands-other" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: otherHost.id,
         path: "/tmp/other-host-project",
       });
+
       const stub = registerCommandRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -777,7 +890,12 @@ describe("public project command typeahead route", () => {
         "user-only",
       ]);
       expect(stub.requests[0]?.command).toEqual({
-        type: "host.list_commands",
+        type: "host.list_command_metadata",
+        projectSkillRead: expect.objectContaining({
+          limit: 1000,
+          maxFileBytes: 10 * 1024 * 1024,
+        }),
+        sharedSkillRoots: { user: [], project: [] },
         providerId: "claude-code",
         cwd: null,
         nativeRoots: declaredNativeRootSet(
@@ -793,7 +911,9 @@ describe("public project command typeahead route", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-commands-personal",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const stub = registerCommandRpc(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -812,7 +932,12 @@ describe("public project command typeahead route", () => {
         "home-skill",
       ]);
       expect(stub.requests[0]?.command).toEqual({
-        type: "host.list_commands",
+        type: "host.list_command_metadata",
+        projectSkillRead: expect.objectContaining({
+          limit: 1000,
+          maxFileBytes: 10 * 1024 * 1024,
+        }),
+        sharedSkillRoots: { user: [], project: [] },
         providerId: "codex",
         cwd: null,
         nativeRoots: declaredNativeRootSet(
@@ -826,9 +951,11 @@ describe("public project command typeahead route", () => {
   it("returns an error response when the host is offline", async () => {
     await withTestHarness(async (harness) => {
       const host = seedHost(harness.deps, { id: "host-commands-offline" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,

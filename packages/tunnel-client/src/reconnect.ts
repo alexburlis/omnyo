@@ -1,5 +1,7 @@
 export const DEFAULT_RECONNECT_BASE_DELAY_MS = 1_000;
+
 export const DEFAULT_MAX_RECONNECT_DELAY_MS = 30_000;
+
 const DEFAULT_STABLE_CONNECTION_MS = 10_000;
 
 export interface ReconnectBackoffOptions {
@@ -30,10 +32,12 @@ export class ReconnectBackoff {
 
   nextDelayAfterClose(stableMs: number): number {
     this.attempt = stableMs > this.stableConnectionMs ? 0 : this.attempt + 1;
+
     const ceiling = Math.min(
       this.baseDelayMs * 2 ** this.attempt,
       this.maxDelayMs,
     );
+
     return Math.round(ceiling * (0.5 + this.random() / 2));
   }
 }

@@ -1,5 +1,6 @@
-import { Skeleton } from "@bb/shared-ui/skeleton";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { DelayedLoading } from "@omnyo/shared-ui/delayed-loading";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 const PICKER_LOADING_ROW_WIDTHS = ["w-20", "w-28", "w-24", "w-32"] as const;
 
@@ -24,9 +25,15 @@ export function PickerLoadingRows({
           aria-hidden
           className="flex items-center rounded-sm px-2 py-[0.3125rem] max-md:pointer-coarse:py-2"
         >
-          <Skeleton
-            className={cn("h-3 max-w-[75%] rounded-sm", widthClassName)}
-          />
+          <span className="flex h-3 w-full items-center">
+            <DelayedLoading>
+              <span className="flex w-full">
+                <Skeleton
+                  className={cn("h-3 max-w-[75%] rounded-sm", widthClassName)}
+                />
+              </span>
+            </DelayedLoading>
+          </span>
         </div>
       ))}
     </div>

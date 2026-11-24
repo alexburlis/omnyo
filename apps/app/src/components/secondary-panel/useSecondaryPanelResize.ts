@@ -15,6 +15,7 @@ export type SecondaryPanelWidthChangeHandler = (
 type SecondaryPanelResizeHandler = (size: number) => void;
 
 interface UseSecondaryPanelResizeArgs {
+  isConversationCollapsed: boolean;
   isSecondaryPanelOpen: boolean;
   onPanelWidthChange: SecondaryPanelWidthChangeHandler;
   panelId: string;
@@ -22,6 +23,7 @@ interface UseSecondaryPanelResizeArgs {
 }
 
 export function useSecondaryPanelResize({
+  isConversationCollapsed,
   isSecondaryPanelOpen,
   onPanelWidthChange,
   panelId,
@@ -33,21 +35,25 @@ export function useSecondaryPanelResize({
   const secondaryPanelRef = useRef<HTMLElement>(null!);
   const secondaryResizablePanelRef = useRef<ImperativePanelHandle | null>(null);
   const lastSecondaryPanelSizeRef = useRef(persistedWidthPercent);
+
   const handleSecondaryPanelPointerResize = useCallback(
     (leadingFraction: number) => {
       secondaryResizablePanelRef.current?.resize((1 - leadingFraction) * 100);
     },
     [],
   );
+
   const handleSecondaryPanelDragging = useCallback(
     (isDragging: boolean) => {
       setIsResizing(isDragging);
+
       if (!isDragging && lastSecondaryPanelSizeRef.current > 0) {
         setPersistedWidthPercent(lastSecondaryPanelSizeRef.current);
       }
     },
     [setIsResizing, setPersistedWidthPercent],
   );
+
   const resizeHitTargetRef = usePanelResizeSnap({
     onResize: handleSecondaryPanelPointerResize,
     onDragging: handleSecondaryPanelDragging,
@@ -58,9 +64,11 @@ export function useSecondaryPanelResize({
     if (prevOpenRef.current === isSecondaryPanelOpen) {
       return;
     }
+
     prevOpenRef.current = isSecondaryPanelOpen;
 
     const panel = secondaryResizablePanelRef.current;
+
     if (!panel) {
       return;
     }
@@ -74,6 +82,25 @@ export function useSecondaryPanelResize({
       panel.collapse();
     }
   }, [isSecondaryPanelOpen, onPanelWidthChange]);
+
+  const appliedWidthPercentRef = useRef(persistedWidthPercent);
+  useEffect(() => {
+    if (appliedWidthPercentRef.current === persistedWidthPercent) {
+      return;
+    }
+
+    appliedWidthPercentRef.current = persistedWidthPercent;
+    lastSecondaryPanelSizeRef.current = persistedWidthPercent;
+
+    if (isSecondaryPanelOpen && !renderAsDrawer && !isConversationCollapsed) {
+      secondaryResizablePanelRef.current?.resize(persistedWidthPercent);
+    }
+  }, [
+    isConversationCollapsed,
+    isSecondaryPanelOpen,
+    persistedWidthPercent,
+    renderAsDrawer,
+  ]);
 
   useResizeObserver({
     ref: secondaryPanelRef,
@@ -102,9 +129,16 @@ export function useSecondaryPanelResize({
   useLayoutEffect(() => {
     const panel =
       secondaryPanelRef.current?.closest<HTMLElement>("[data-panel]");
+
     const size = Number.parseFloat(panel?.style.flexGrow ?? "");
+
     if (Number.isFinite(size)) handleSecondaryPanelResize(size);
-  }, [handleSecondaryPanelResize, isSecondaryPanelOpen, panelId, renderAsDrawer]);
+  }, [
+    handleSecondaryPanelResize,
+    isSecondaryPanelOpen,
+    panelId,
+    renderAsDrawer,
+  ]);
 
   return {
     handleSecondaryPanelResize,

@@ -5,13 +5,13 @@ import { WebSocket as NodeWebSocket, WebSocketServer } from "ws";
 import {
   createFakePluginHost,
   type FakePluginHost,
-} from "@get-bb/plugin-sdk/testing";
-import { decodeFrame, encodeFrame, type Frame } from "@bb/tunnel-contract";
+} from "@omnyo/plugin-sdk/testing";
+import { decodeFrame, encodeFrame, type Frame } from "@omnyo/tunnel-contract";
 import {
   headersForLoopbackRequest,
-  isBareBbRealtimeWs,
+  isBareOmnyoRealtimeWs,
   TunnelSession,
-} from "@bb/tunnel-client";
+} from "@omnyo/tunnel-client";
 import {
   parseSharePort,
   machineSharePublicUrl,
@@ -35,10 +35,14 @@ import {
   credentialMarker,
 } from "./credential-copy.js";
 import { FakeAccount, TEST_ACCOUNT } from "./testing/fake-account.js";
+import { storedCopy } from "./testing/stored-copy.js";
 
 const SERVER_HOST_ID = "host-server";
+
 const SERVER_HOST_NAME = "Server";
+
 const REMOTE_HOST_ID = "host-air";
+
 const REMOTE_HOST_NAME = "Sawyer Air";
 
 function createConnectFakeHost(options?: {
@@ -46,6 +50,7 @@ function createConnectFakeHost(options?: {
   account?: FakeAccount;
 }): FakePluginHost {
   const account = options?.account ?? new FakeAccount();
+
   return createFakePluginHost({
     pluginId: "connect",
     sdk: {
@@ -66,11 +71,13 @@ function createConnectFakeHost(options?: {
               : hostId === REMOTE_HOST_ID
                 ? { id: REMOTE_HOST_ID, name: REMOTE_HOST_NAME }
                 : null;
+
           if (!host) {
             throw Object.assign(new Error(`host ${hostId} not found`), {
               status: 404,
             });
           }
+
           return host as never;
         },
         list: async () =>
@@ -95,13 +102,13 @@ describe("resolveDefaultConnectBaseUrl", () => {
     expect(
       resolveDefaultConnectBaseUrl({
         NODE_ENV: "development",
-        BB_DEV_CONNECT_BASE_URL: "http://bb.localhost:42745/",
+        OMNYO_DEV_CONNECT_BASE_URL: "http://omnyo.localhost:42745/",
       }),
-    ).toBe("http://bb.localhost:42745");
+    ).toBe("http://omnyo.localhost:42745");
     expect(
       resolveDefaultConnectBaseUrl({
         NODE_ENV: "production",
-        BB_DEV_CONNECT_BASE_URL: "http://bb.localhost:42745",
+        OMNYO_DEV_CONNECT_BASE_URL: "http://omnyo.localhost:42745",
       }),
     ).toBe(DEFAULT_CONNECT_BASE_URL);
     expect(resolveDefaultConnectBaseUrl({ NODE_ENV: "development" })).toBe(
@@ -110,28 +117,29 @@ describe("resolveDefaultConnectBaseUrl", () => {
     expect(
       resolveDefaultConnectBaseUrl({
         NODE_ENV: "development",
-        BB_DEV_CONNECT_BASE_URL: "https://vibecodethis.site/",
+        OMNYO_DEV_CONNECT_BASE_URL: "https://stg.omnyo.link/",
       }),
-    ).toBe("https://vibecodethis.site");
+    ).toBe("https://stg.omnyo.link");
   });
 
   it("rejects non-local or non-origin development values", () => {
     for (const value of [
-      "https://bb.localhost:42745",
-      "http://getbb.app:42745",
-      "http://bb.localhost:42745/dashboard",
-      "http://vibecodethis.site",
-      "https://sawyer.vibecodethis.site",
-      "https://vibecodethis.site/dashboard",
+      "https://omnyo.localhost:42745",
+      "http://omnyo.link:42745",
+      "http://other.localhost:42745",
+      "http://omnyo.localhost:42745/dashboard",
+      "http://stg.omnyo.link",
+      "https://sawyer.stg.omnyo.link",
+      "https://stg.omnyo.link/dashboard",
       "not a url",
     ]) {
       expect(() =>
         resolveDefaultConnectBaseUrl({
           NODE_ENV: "development",
-          BB_DEV_CONNECT_BASE_URL: value,
+          OMNYO_DEV_CONNECT_BASE_URL: value,
         }),
       ).toThrow(
-        "BB_DEV_CONNECT_BASE_URL must be an http://bb.localhost:<port> origin or https://vibecodethis.site",
+        "OMNYO_DEV_CONNECT_BASE_URL must be an http://omnyo.localhost:<port> origin or https://stg.omnyo.link",
       );
     }
   });
@@ -142,12 +150,12 @@ describe("headersForLoopbackRequest", () => {
     expect(
       headersForLoopbackRequest(
         [
-          ["Origin", "https://sawyer.getbb.app"],
+          ["Origin", "https://sawyer.omnyo.link"],
           ["Content-Type", "application/json"],
-          ["Host", "sawyer.getbb.app"],
+          ["Host", "sawyer.omnyo.link"],
         ],
         {
-          publicOrigin: "https://sawyer.getbb.app",
+          publicOrigin: "https://sawyer.omnyo.link",
           loopbackOrigin: "http://127.0.0.1:38886",
         },
       ),
@@ -158,7 +166,7 @@ describe("headersForLoopbackRequest", () => {
 
     expect(
       headersForLoopbackRequest([["Origin", "https://evil.example"]], {
-        publicOrigin: "https://sawyer.getbb.app",
+        publicOrigin: "https://sawyer.omnyo.link",
         loopbackOrigin: "http://127.0.0.1:38886",
       }),
     ).toEqual({ Origin: "https://evil.example" });
@@ -168,12 +176,12 @@ describe("headersForLoopbackRequest", () => {
     expect(
       headersForLoopbackRequest(
         [
-          ["Origin", "https://sawyer--8000.getbb.app"],
+          ["Origin", "https://sawyer--8000.omnyo.link"],
           ["Content-Type", "text/plain"],
-          ["Host", "sawyer--8000.getbb.app"],
+          ["Host", "sawyer--8000.omnyo.link"],
         ],
         {
-          publicOrigin: "https://sawyer--8000.getbb.app",
+          publicOrigin: "https://sawyer--8000.omnyo.link",
           loopbackOrigin: "http://127.0.0.1:8000",
           host: "127.0.0.1:8000",
         },
@@ -190,10 +198,10 @@ describe("machineSharePublicUrl", () => {
   it("uses HTTP and the local port for machine shares in local Cloud", () => {
     expect(
       machineSharePublicUrl(
-        { label: "sawyer-air", baseDomain: "bb.localhost:42745" },
+        { label: "sawyer-air", baseDomain: "omnyo.localhost:42745" },
         8000,
       ),
-    ).toBe("http://sawyer-air--8000.bb.localhost:42745");
+    ).toBe("http://sawyer-air--8000.omnyo.localhost:42745");
   });
 });
 
@@ -207,7 +215,7 @@ describe("parseSharePort / serverOwnPort", () => {
     expect(() => parseSharePort("nope")).toThrow(SharePortError);
   });
 
-  it("reads the bb server port from the loopback base URL", () => {
+  it("reads the Omnyo server port from the loopback base URL", () => {
     expect(serverOwnPort("http://127.0.0.1:38886")).toBe(38886);
     expect(serverOwnPort("http://127.0.0.1")).toBe(80);
   });
@@ -216,6 +224,7 @@ describe("parseSharePort / serverOwnPort", () => {
 describe("ShareRegistry", () => {
   it("persists shares in kv and refuses the server's own port", async () => {
     const kv = new Map<string, unknown>();
+
     const store = {
       async get<T>(key: string) {
         return kv.get(key) as T | undefined;
@@ -227,11 +236,13 @@ describe("ShareRegistry", () => {
         kv.delete(key);
       },
     };
+
     const credential = {
-      serverUrl: "https://sawyer.getbb.app",
+      serverUrl: "https://sawyer.omnyo.link",
       handle: "sawyer",
       credential: "bbcred_x",
     };
+
     const fakeHost = createFakePluginHost({
       sdk: {
         system: {
@@ -242,27 +253,31 @@ describe("ShareRegistry", () => {
         },
       },
     });
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
-    const hostResolver = new ShareHostResolver(() => pluginBb.sdk);
+
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
+    const hostResolver = new ShareHostResolver(() => pluginOmnyo.sdk);
+
     const serverHost = {
       id: "host-server",
       name: "Server",
       isServer: true,
     };
+
     const registry = new ShareRegistry({
       kv: store,
-      hosts: pluginBb.hosts,
+      hosts: pluginOmnyo.hosts,
       hostResolver,
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => credential,
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
+
     await registry.load();
 
     await expect(registry.add(38886, serverHost)).rejects.toThrow(/own port/);
 
     const added = await registry.add(8000, serverHost);
-    expect(added.url).toBe("https://sawyer--8000.getbb.app");
+    expect(added.url).toBe("https://sawyer--8000.omnyo.link");
     expect(registry.hasServerPort(8000)).toBe(true);
     expect(kv.get(SHARES_KV_KEY)).toMatchObject({
       "host-server:8000": { hostId: "host-server", port: 8000 },
@@ -270,19 +285,20 @@ describe("ShareRegistry", () => {
 
     const reloaded = new ShareRegistry({
       kv: store,
-      hosts: pluginBb.hosts,
+      hosts: pluginOmnyo.hosts,
       hostResolver,
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => credential,
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
+
     await reloaded.load();
     expect(await reloaded.list()).toEqual([
       {
         hostId: "host-server",
         hostName: "Server",
         port: 8000,
-        url: "https://sawyer--8000.getbb.app",
+        url: "https://sawyer--8000.omnyo.link",
         createdAt: expect.any(Number),
       },
     ]);
@@ -303,8 +319,10 @@ describe("ShareRegistry", () => {
     const kv = new Map<string, unknown>([
       [SHARES_KV_KEY, { "3000": { port: 3000, createdAt: 123 } }],
     ]);
+
     const fakeHost = createConnectFakeHost();
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
+
     const registry = new ShareRegistry({
       kv: {
         async get<T>(key: string) {
@@ -317,15 +335,15 @@ describe("ShareRegistry", () => {
           kv.delete(key);
         },
       },
-      hosts: pluginBb.hosts,
-      hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+      hosts: pluginOmnyo.hosts,
+      hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => ({
-        serverUrl: "https://sawyer.getbb.app",
+        serverUrl: "https://sawyer.omnyo.link",
         handle: "sawyer",
         credential: "bbcred_x",
       }),
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
 
     await registry.load();
@@ -335,7 +353,7 @@ describe("ShareRegistry", () => {
         hostName: SERVER_HOST_NAME,
         port: 3000,
         createdAt: 123,
-        url: "https://sawyer--3000.getbb.app",
+        url: "https://sawyer--3000.omnyo.link",
       },
     ]);
     expect(kv.get(SHARES_KV_KEY)).toEqual({
@@ -358,8 +376,10 @@ describe("ShareRegistry", () => {
         },
       ],
     ]);
+
     const fakeHost = createConnectFakeHost();
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
+
     const registry = new ShareRegistry({
       kv: {
         async get<T>(key: string) {
@@ -372,11 +392,11 @@ describe("ShareRegistry", () => {
           kv.delete(key);
         },
       },
-      hosts: pluginBb.hosts,
-      hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+      hosts: pluginOmnyo.hosts,
+      hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => null,
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
 
     await registry.load();
@@ -405,8 +425,10 @@ describe("ShareRegistry", () => {
     const kv = new Map<string, unknown>([
       [SHARES_KV_KEY, { "3000": { port: 3000, createdAt: 123 } }],
     ]);
+
     const fakeHost = createConnectFakeHost();
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
+
     const registry = new ShareRegistry({
       kv: {
         async get<T>(key: string) {
@@ -419,15 +441,15 @@ describe("ShareRegistry", () => {
           kv.delete(key);
         },
       },
-      hosts: pluginBb.hosts,
-      hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+      hosts: pluginOmnyo.hosts,
+      hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => ({
-        serverUrl: "https://sawyer.getbb.app",
+        serverUrl: "https://sawyer.omnyo.link",
         handle: "sawyer",
         credential: "bbcred_x",
       }),
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
 
     await registry.load();
@@ -445,7 +467,7 @@ describe("ShareRegistry", () => {
         hostName: SERVER_HOST_NAME,
         port: 3000,
         createdAt: 123,
-        url: "https://sawyer--3000.getbb.app",
+        url: "https://sawyer--3000.omnyo.link",
       },
     ]);
     await fakeHost.harness.dispose();
@@ -455,8 +477,10 @@ describe("ShareRegistry", () => {
     const kv = new Map<string, unknown>([
       [SHARES_KV_KEY, { "3000": { port: 3000, createdAt: 123 } }],
     ]);
+
     const fakeHost = createConnectFakeHost();
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
+
     const registry = new ShareRegistry({
       kv: {
         async get<T>(key: string) {
@@ -469,15 +493,15 @@ describe("ShareRegistry", () => {
           kv.delete(key);
         },
       },
-      hosts: pluginBb.hosts,
-      hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+      hosts: pluginOmnyo.hosts,
+      hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => ({
-        serverUrl: "https://sawyer.getbb.app",
+        serverUrl: "https://sawyer.omnyo.link",
         handle: "sawyer",
         credential: "bbcred_x",
       }),
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
 
     await registry.load();
@@ -516,10 +540,12 @@ describe("ShareRegistry", () => {
         },
       ],
     ]);
+
     const fakeHost = createConnectFakeHost();
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
     const declared: Array<{ hostId: string; ports: readonly number[] }> = [];
     let remoteFailure: Error | null = null;
+
     const registry = new ShareRegistry({
       kv: {
         async get<T>(key: string) {
@@ -539,19 +565,20 @@ describe("ShareRegistry", () => {
               `cannot declare shared ports for unknown host ${hostId}`,
             );
           }
+
           if (remoteFailure !== null) throw remoteFailure;
           declared.push({ hostId, ports });
         },
-        ensureSharedPortTunnel: pluginBb.hosts.ensureSharedPortTunnel,
+        ensureSharedPortTunnel: pluginOmnyo.hosts.ensureSharedPortTunnel,
       },
-      hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+      hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => ({
-        serverUrl: "https://sawyer.getbb.app",
+        serverUrl: "https://sawyer.omnyo.link",
         handle: "sawyer",
         credential: "bbcred_x",
       }),
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
 
     await registry.load();
@@ -597,10 +624,12 @@ describe("ShareRegistry", () => {
         createdAt: 2,
       },
     };
+
     const kv = new Map<string, unknown>([[SHARES_KV_KEY, savedShares]]);
     const fakeHost = createConnectFakeHost();
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
     let failWrite = true;
+
     const registry = new ShareRegistry({
       kv: {
         async get<T>(key: string) {
@@ -622,16 +651,16 @@ describe("ShareRegistry", () => {
             );
           }
         },
-        ensureSharedPortTunnel: pluginBb.hosts.ensureSharedPortTunnel,
+        ensureSharedPortTunnel: pluginOmnyo.hosts.ensureSharedPortTunnel,
       },
-      hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+      hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => ({
-        serverUrl: "https://sawyer.getbb.app",
+        serverUrl: "https://sawyer.omnyo.link",
         handle: "sawyer",
         credential: "bbcred_x",
       }),
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
 
     await registry.load();
@@ -674,8 +703,10 @@ describe("ShareRegistry", () => {
         },
       ],
     ]);
+
     const fakeHost = createConnectFakeHost();
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
+
     const registry = new ShareRegistry({
       kv: {
         async get<T>(key: string) {
@@ -688,15 +719,15 @@ describe("ShareRegistry", () => {
           kv.delete(key);
         },
       },
-      hosts: pluginBb.hosts,
-      hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+      hosts: pluginOmnyo.hosts,
+      hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => ({
-        serverUrl: "https://sawyer.getbb.app",
+        serverUrl: "https://sawyer.omnyo.link",
         handle: "sawyer",
         credential: "bbcred_x",
       }),
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
 
     await registry.load();
@@ -708,7 +739,7 @@ describe("ShareRegistry", () => {
         hostName: SERVER_HOST_NAME,
         port: 8000,
         createdAt: 1,
-        url: "https://sawyer--8000.getbb.app",
+        url: "https://sawyer--8000.omnyo.link",
       },
     ]);
     expect(fakeHost.harness.logEntries).toEqual(
@@ -742,13 +773,16 @@ describe("ShareRegistry", () => {
         },
       ],
     ]);
+
     const fakeHost = createConnectFakeHost();
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
+
     const ensureIdentity = vi.fn(async () => {
       throw Object.assign(new Error("host is offline"), {
         body: { code: "connect_host_offline" },
       });
     });
+
     const registry = new ShareRegistry({
       kv: {
         async get<T>(key: string) {
@@ -763,16 +797,16 @@ describe("ShareRegistry", () => {
       },
       hosts: {
         ensureSharedPortTunnel: ensureIdentity,
-        declareSharedPorts: pluginBb.hosts.declareSharedPorts,
+        declareSharedPorts: pluginOmnyo.hosts.declareSharedPorts,
       },
-      hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+      hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => ({
-        serverUrl: "https://sawyer.getbb.app",
+        serverUrl: "https://sawyer.omnyo.link",
         handle: "sawyer",
         credential: "bbcred_x",
       }),
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
 
     await registry.load();
@@ -794,7 +828,7 @@ describe("ShareRegistry", () => {
         hostName: SERVER_HOST_NAME,
         port: 8000,
         createdAt: 1,
-        url: "https://sawyer--8000.getbb.app",
+        url: "https://sawyer--8000.omnyo.link",
       },
     ]);
     expect(ensureIdentity).toHaveBeenCalledTimes(1);
@@ -805,19 +839,24 @@ describe("ShareRegistry", () => {
 describe("ConnectTunnel share activation", () => {
   it("does not declare non-empty ports when serverHostId resolves after stop", async () => {
     let resolveServerHostId!: (hostId: string) => void;
+
     const serverHostId = new Promise<string>((resolve) => {
       resolveServerHostId = resolve;
     });
+
     let markLookupStarted!: () => void;
+
     const lookupStarted = new Promise<void>((resolve) => {
       markLookupStarted = resolve;
     });
+
     const fakeHost = createFakePluginHost({
       pluginId: "connect",
       sdk: {
         system: {
           config: async () => {
             markLookupStarted();
+
             return { primaryHostId: await serverHostId } as never;
           },
         },
@@ -827,12 +866,15 @@ describe("ConnectTunnel share activation", () => {
         },
       },
     });
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
+
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
+
     const credential = {
       serverUrl: "http://127.0.0.1:1",
       handle: "sawyer",
       credential: "bbcred_x",
     };
+
     const kv = new Map<string, unknown>([
       [
         SHARES_KV_KEY,
@@ -845,6 +887,7 @@ describe("ConnectTunnel share activation", () => {
         },
       ],
     ]);
+
     const shares = new ShareRegistry({
       kv: {
         async get<T>(key: string) {
@@ -857,12 +900,13 @@ describe("ConnectTunnel share activation", () => {
           kv.delete(key);
         },
       },
-      hosts: pluginBb.hosts,
-      hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+      hosts: pluginOmnyo.hosts,
+      hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => credential,
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
+
     const tunnel = new ConnectTunnel({
       shares,
       readCredential: async () => null,
@@ -870,8 +914,9 @@ describe("ConnectTunnel share activation", () => {
       defaultBaseUrl: DEFAULT_CONNECT_BASE_URL,
       enabled: true,
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
+
     tunnel.setAccount({
       ...TEST_ACCOUNT,
       serverUrl: credential.serverUrl,
@@ -894,7 +939,8 @@ describe("ConnectTunnel share activation", () => {
 
   it("keeps persisted shares visible in status after an unpaired restart", async () => {
     const fakeHost = createConnectFakeHost();
-    const pluginBb = fakeHost.bb as unknown as Parameters<typeof plugin>[0];
+    const pluginOmnyo = fakeHost.api as unknown as Parameters<typeof plugin>[0];
+
     const kv = new Map<string, unknown>([
       [
         SHARES_KV_KEY,
@@ -908,6 +954,7 @@ describe("ConnectTunnel share activation", () => {
         },
       ],
     ]);
+
     const shares = new ShareRegistry({
       kv: {
         async get<T>(key: string) {
@@ -920,12 +967,13 @@ describe("ConnectTunnel share activation", () => {
           kv.delete(key);
         },
       },
-      hosts: pluginBb.hosts,
-      hostResolver: new ShareHostResolver(() => pluginBb.sdk),
+      hosts: pluginOmnyo.hosts,
+      hostResolver: new ShareHostResolver(() => pluginOmnyo.sdk),
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
       getIdentity: () => null,
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
+
     const tunnel = new ConnectTunnel({
       shares,
       readCredential: async () => null,
@@ -933,7 +981,7 @@ describe("ConnectTunnel share activation", () => {
       defaultBaseUrl: DEFAULT_CONNECT_BASE_URL,
       enabled: true,
       getLoopbackBaseUrl: () => "http://127.0.0.1:38886",
-      log: pluginBb.log,
+      log: pluginOmnyo.log,
     });
 
     await tunnel.start();
@@ -957,13 +1005,13 @@ describe("ConnectTunnel share activation", () => {
   });
 });
 
-describe("isBareBbRealtimeWs", () => {
+describe("isBareOmnyoRealtimeWs", () => {
   it("matches bare-handle /ws paths only", () => {
-    expect(isBareBbRealtimeWs("/ws", undefined)).toBe(true);
-    expect(isBareBbRealtimeWs("/ws?x=1", undefined)).toBe(true);
-    expect(isBareBbRealtimeWs("/ws/nested", undefined)).toBe(true);
-    expect(isBareBbRealtimeWs("/ws", "8000")).toBe(false);
-    expect(isBareBbRealtimeWs("/api", undefined)).toBe(false);
+    expect(isBareOmnyoRealtimeWs("/ws", undefined)).toBe(true);
+    expect(isBareOmnyoRealtimeWs("/ws?x=1", undefined)).toBe(true);
+    expect(isBareOmnyoRealtimeWs("/ws/nested", undefined)).toBe(true);
+    expect(isBareOmnyoRealtimeWs("/ws", "8000")).toBe(false);
+    expect(isBareOmnyoRealtimeWs("/api", undefined)).toBe(false);
   });
 });
 
@@ -976,9 +1024,11 @@ async function listen(
   const server = createServer(handler);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const addr = server.address();
+
   if (addr === null || typeof addr === "string") {
     throw new Error("expected TCP address");
   }
+
   return {
     server,
     origin: `http://127.0.0.1:${addr.port}`,
@@ -999,15 +1049,18 @@ function collectFrames(ws: NodeWebSocket): Frame[] {
   ws.on("message", (data: Buffer, isBinary: boolean) => {
     if (isBinary) frames.push(decodeFrame(data));
   });
+
   return frames;
 }
 
 async function waitFor(pred: () => boolean, timeoutMs = 2000): Promise<void> {
   const start = Date.now();
+
   while (!pred()) {
     if (Date.now() - start > timeoutMs) {
       throw new Error("waitFor timed out");
     }
+
     await new Promise((r) => setTimeout(r, 10));
   }
 }
@@ -1023,11 +1076,13 @@ describe("TunnelSession routing", () => {
   it("routes no-target to primary origin, target to a shared port, unregistered → 404", async () => {
     const primaryHits: string[] = [];
     const shareHits: string[] = [];
+
     const primary = await listen((req, res) => {
       primaryHits.push(`${req.method} ${req.url}`);
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("primary");
     });
+
     const share = await listen((req, res) => {
       shareHits.push(
         `${req.method} ${req.url} host=${req.headers.host} origin=${req.headers.origin ?? ""}`,
@@ -1035,6 +1090,7 @@ describe("TunnelSession routing", () => {
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("shared");
     });
+
     cleanups.push(
       () =>
         new Promise<void>((resolve) => primary.server.close(() => resolve())),
@@ -1046,12 +1102,15 @@ describe("TunnelSession routing", () => {
       wss.once("listening", () => resolve()),
     );
     const wssAddr = wss.address();
+
     if (wssAddr === null || typeof wssAddr === "string") {
       throw new Error("expected TCP address");
     }
+
     const relayReady = new Promise<NodeWebSocket>((resolve) => {
       wss.on("connection", (socket) => resolve(socket));
     });
+
     const client = new NodeWebSocket(`ws://127.0.0.1:${wssAddr.port}`);
     cleanups.push(async () => {
       client.terminate();
@@ -1062,6 +1121,7 @@ describe("TunnelSession routing", () => {
     const frames = collectFrames(relay);
 
     const sharedPorts = new Set([share.port]);
+
     const session = new TunnelSession({
       tunnel: client,
       log: {
@@ -1074,22 +1134,26 @@ describe("TunnelSession routing", () => {
             kind: "ok",
             resolved: {
               origin: primary.origin,
-              publicOrigin: "https://sawyer.getbb.app",
+              publicOrigin: "https://sawyer.omnyo.link",
             },
           };
         }
+
         const port = Number(target);
+
         if (!sharedPorts.has(port)) return { kind: "unregistered" };
+
         return {
           kind: "ok",
           resolved: {
             origin: `http://127.0.0.1:${port}`,
-            publicOrigin: `https://sawyer--${port}.getbb.app`,
+            publicOrigin: `https://sawyer--${port}.omnyo.link`,
             host: `127.0.0.1:${port}`,
           },
         };
       },
     });
+
     session.start();
     cleanups.push(() => session.dispose());
 
@@ -1102,7 +1166,7 @@ describe("TunnelSession routing", () => {
       streamId: 1,
       method: "GET",
       path: "/hello",
-      headers: [["Origin", "https://sawyer.getbb.app"]],
+      headers: [["Origin", "https://sawyer.omnyo.link"]],
       hasBody: false,
     });
     await waitFor(() =>
@@ -1118,8 +1182,8 @@ describe("TunnelSession routing", () => {
       method: "GET",
       path: "/app",
       headers: [
-        ["Origin", `https://sawyer--${share.port}.getbb.app`],
-        ["Host", `sawyer--${share.port}.getbb.app`],
+        ["Origin", `https://sawyer--${share.port}.omnyo.link`],
+        ["Host", `sawyer--${share.port}.omnyo.link`],
       ],
       hasBody: false,
       target: String(share.port),
@@ -1148,14 +1212,17 @@ describe("TunnelSession routing", () => {
     );
     const head = frames.find((f) => f.type === "resp-head" && f.streamId === 3);
     expect(head).toMatchObject({ type: "resp-head", status: 404 });
+
     const bodyChunks = frames.filter(
       (f) => f.type === "body-chunk" && f.streamId === 3,
     );
+
     const body = Buffer.concat(
       bodyChunks.map((f) =>
         f.type === "body-chunk" ? Buffer.from(f.data) : Buffer.alloc(0),
       ),
     ).toString();
+
     expect(body).toBe("this port is not shared");
     expect(frames.some((f) => f.type === "body-end" && f.streamId === 3)).toBe(
       true,
@@ -1165,6 +1232,7 @@ describe("TunnelSession routing", () => {
   it("aborts the origin request when the relay closes an HTTP stream", async () => {
     let originStarted = false;
     let originClosed = false;
+
     const origin = await listen((request, response) => {
       originStarted = true;
       request.once("aborted", () => {
@@ -1174,6 +1242,7 @@ describe("TunnelSession routing", () => {
         originClosed = true;
       });
     });
+
     cleanups.push(
       () =>
         new Promise<void>((resolve) => origin.server.close(() => resolve())),
@@ -1184,12 +1253,15 @@ describe("TunnelSession routing", () => {
       wss.once("listening", () => resolve()),
     );
     const wssAddr = wss.address();
+
     if (wssAddr === null || typeof wssAddr === "string") {
       throw new Error("expected TCP address");
     }
+
     const relayReady = new Promise<NodeWebSocket>((resolve) => {
       wss.on("connection", (socket) => resolve(socket));
     });
+
     const client = new NodeWebSocket(`ws://127.0.0.1:${wssAddr.port}`);
     cleanups.push(async () => {
       client.terminate();
@@ -1208,10 +1280,11 @@ describe("TunnelSession routing", () => {
         kind: "ok",
         resolved: {
           origin: origin.origin,
-          publicOrigin: "https://sawyer.getbb.app",
+          publicOrigin: "https://sawyer.omnyo.link",
         },
       }),
     });
+
     session.start();
     cleanups.push(() => session.dispose());
 
@@ -1246,13 +1319,17 @@ describe("TunnelSession routing", () => {
     const plainBody = "hello ".repeat(200);
     const gzippedBody = gzipSync(Buffer.from(plainBody));
     const acceptEncodings: Array<string | undefined> = [];
+
     const origin = await listen((req, res) => {
       acceptEncodings.push(req.headers["accept-encoding"]);
+
       if (req.headers["if-none-match"] === 'W/"v1"') {
         res.writeHead(304, { etag: 'W/"v1"' });
         res.end();
+
         return;
       }
+
       res.writeHead(200, {
         "content-type": "text/plain",
         "content-encoding": "gzip",
@@ -1261,6 +1338,7 @@ describe("TunnelSession routing", () => {
       });
       res.end(gzippedBody);
     });
+
     cleanups.push(
       () =>
         new Promise<void>((resolve) => origin.server.close(() => resolve())),
@@ -1271,12 +1349,15 @@ describe("TunnelSession routing", () => {
       wss.once("listening", () => resolve()),
     );
     const wssAddr = wss.address();
+
     if (wssAddr === null || typeof wssAddr === "string") {
       throw new Error("expected TCP address");
     }
+
     const relayReady = new Promise<NodeWebSocket>((resolve) => {
       wss.on("connection", (socket) => resolve(socket));
     });
+
     const client = new NodeWebSocket(`ws://127.0.0.1:${wssAddr.port}`);
     cleanups.push(async () => {
       client.terminate();
@@ -1297,10 +1378,11 @@ describe("TunnelSession routing", () => {
         kind: "ok",
         resolved: {
           origin: origin.origin,
-          publicOrigin: "https://sawyer.getbb.app",
+          publicOrigin: "https://sawyer.omnyo.link",
         },
       }),
     });
+
     session.start();
     cleanups.push(() => session.dispose());
 
@@ -1319,9 +1401,11 @@ describe("TunnelSession routing", () => {
     await waitFor(() =>
       frames.some((f) => f.type === "body-end" && f.streamId === 21),
     );
+
     const head = frames.find(
       (f) => f.type === "resp-head" && f.streamId === 21,
     );
+
     if (head?.type !== "resp-head") throw new Error("missing resp-head");
     expect(head.status).toBe(200);
     const headerNames = head.headers.map(([name]) => name.toLowerCase());
@@ -1330,8 +1414,9 @@ describe("TunnelSession routing", () => {
     expect(headerNames).toContain("etag");
     expect(head.headers).toContainEqual([
       "server-timing",
-      expect.stringMatching(/^bb_connect_origin;dur=\d+(?:\.\d+)?$/),
+      expect.stringMatching(/^omnyo_connect_origin;dur=\d+(?:\.\d+)?$/),
     ]);
+
     const relayedBody = Buffer.concat(
       frames
         .filter((f) => f.type === "body-chunk" && f.streamId === 21)
@@ -1339,6 +1424,7 @@ describe("TunnelSession routing", () => {
           f.type === "body-chunk" ? Buffer.from(f.data) : Buffer.alloc(0),
         ),
     );
+
     expect(relayedBody).toEqual(gzippedBody);
     expect(acceptEncodings).toEqual(["gzip"]);
     expect(infoMessages).toEqual([
@@ -1359,9 +1445,11 @@ describe("TunnelSession routing", () => {
     await waitFor(() =>
       frames.some((f) => f.type === "body-end" && f.streamId === 22),
     );
+
     const revalidated = frames.find(
       (f) => f.type === "resp-head" && f.streamId === 22,
     );
+
     expect(revalidated).toMatchObject({ type: "resp-head", status: 304 });
     expect(
       frames.some((f) => f.type === "body-chunk" && f.streamId === 22),
@@ -1373,6 +1461,7 @@ describe("TunnelSession routing", () => {
       res.writeHead(404);
       res.end();
     });
+
     const originWss = new WebSocketServer({ server: origin.server });
     cleanups.push(
       () =>
@@ -1386,12 +1475,15 @@ describe("TunnelSession routing", () => {
       wss.once("listening", () => resolve()),
     );
     const wssAddr = wss.address();
+
     if (wssAddr === null || typeof wssAddr === "string") {
       throw new Error("expected TCP address");
     }
+
     const relayReady = new Promise<NodeWebSocket>((resolve) => {
       wss.on("connection", (socket) => resolve(socket));
     });
+
     const client = new NodeWebSocket(`ws://127.0.0.1:${wssAddr.port}`);
     cleanups.push(async () => {
       client.terminate();
@@ -1402,6 +1494,7 @@ describe("TunnelSession routing", () => {
     const frames = collectFrames(relay);
 
     const remoteClientsSeen: number[] = [];
+
     const session = new TunnelSession({
       tunnel: client,
       log: {
@@ -1412,13 +1505,14 @@ describe("TunnelSession routing", () => {
         kind: "ok",
         resolved: {
           origin: origin.origin,
-          publicOrigin: "https://sawyer.getbb.app",
+          publicOrigin: "https://sawyer.omnyo.link",
         },
       }),
       onRemoteClientsChange: (n) => {
         remoteClientsSeen.push(n);
       },
     });
+
     session.start();
     cleanups.push(() => session.dispose());
 
@@ -1455,6 +1549,7 @@ describe("TunnelSession routing", () => {
 describe("connect plugin", () => {
   let host: FakePluginHost | undefined;
   let account: FakeAccount;
+
   let tunnelService:
     | { controller: AbortController; done: Promise<void> }
     | undefined;
@@ -1467,8 +1562,9 @@ describe("connect plugin", () => {
     host = createConnectFakeHost({ ...options, account });
     await options?.beforeLoad?.(host);
     await createConnectPlugin({ accountRetryMinMs: 20 })(
-      host.bb as unknown as Parameters<typeof plugin>[0],
+      host.api as unknown as Parameters<typeof plugin>[0],
     );
+
     return host;
   }
 
@@ -1497,10 +1593,12 @@ describe("connect plugin", () => {
       await tunnelService.done;
       tunnelService = undefined;
     }
+
     if (host) {
       await host.harness.dispose();
       host = undefined;
     }
+
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
@@ -1519,17 +1617,17 @@ describe("connect plugin", () => {
       lastRemoteActivityAt: null,
       shares: [],
     });
-    expect(initial.dashboardUrl).toBe("https://getbb.app/dashboard");
+    expect(initial.dashboardUrl).toBe("https://omnyo.link/dashboard");
     expect(initial.nextRetryAt).toBeNull();
     expect(harness.needsConfigurationMessages).toEqual([]);
   });
 
   it("uses the worktree-local Cloud dashboard while signed out in development", async () => {
     vi.stubEnv("NODE_ENV", "development");
-    vi.stubEnv("BB_DEV_CONNECT_BASE_URL", "http://bb.localhost:59329");
+    vi.stubEnv("OMNYO_DEV_CONNECT_BASE_URL", "http://omnyo.localhost:59329");
     await loadPlugin();
     expect((await status(host!)).dashboardUrl).toBe(
-      "http://bb.localhost:59329/dashboard",
+      "http://omnyo.localhost:59329/dashboard",
     );
   });
 
@@ -1539,8 +1637,8 @@ describe("connect plugin", () => {
       paired: true,
       enabled: true,
       handle: "test",
-      url: "https://test.getbb.app",
-      dashboardUrl: "https://getbb.app",
+      url: "https://test.omnyo.link",
+      dashboardUrl: "https://omnyo.link",
       lastError: null,
       nextRetryAt: null,
       since: Date.now(),
@@ -1548,21 +1646,26 @@ describe("connect plugin", () => {
       lastRemoteActivityAt: null,
       shares: [],
     };
+
     const statusSpy = vi
       .spyOn(ConnectTunnel.prototype, "status")
       .mockReturnValue(connected);
+
     try {
       const { harness } = await loadPlugin();
+
       const instructions = () =>
         harness.registrations.instructionProvider?.({
           threadId: "thr_test",
           projectId: "proj_test",
         });
-      expect(instructions()).toContain("bb connect expose");
+
+      expect(instructions()).toContain("original loopback URL");
+      expect(instructions()).not.toContain("omnyo connect expose");
       await harness.behavior.setSettings({ sendRemoteInstructions: false });
       expect(instructions()).toBeNull();
       await harness.behavior.setSettings({ sendRemoteInstructions: true });
-      expect(instructions()).toContain("https://test.getbb.app");
+      expect(instructions()).toContain("original loopback URL");
       statusSpy.mockReturnValue({ ...connected, remoteClients: 0 });
       expect(instructions()).toBeNull();
       statusSpy.mockReturnValue({
@@ -1570,7 +1673,7 @@ describe("connect plugin", () => {
         remoteClients: 0,
         lastRemoteActivityAt: Date.now(),
       });
-      expect(instructions()).toContain("bb connect expose");
+      expect(instructions()).toContain("original loopback URL");
       statusSpy.mockReturnValue({ ...connected, enabled: false });
       expect(instructions()).toBeNull();
     } finally {
@@ -1578,7 +1681,7 @@ describe("connect plugin", () => {
     }
   });
 
-  it("follows the bb account: signs in, reports the gate URL, and tears down on sign-out", async () => {
+  it("follows the Omnyo account: signs in, reports the gate URL, and tears down on sign-out", async () => {
     const current = await loadPlugin();
     await signIn(current, {
       serverUrl: "http://sawyer-desktop.localhost:59332",
@@ -1592,9 +1695,11 @@ describe("connect plugin", () => {
       url: "http://sawyer-desktop.localhost:59332",
       dashboardUrl: "http://localhost:59332/dashboard",
     });
+
     const exposed = (await current.harness.callRpc("expose", {
       port: 8000,
     })) as { url: string };
+
     expect(exposed.url).toBe("http://sawyer-desktop--8000.localhost:59332");
 
     account.signOut();
@@ -1608,7 +1713,7 @@ describe("connect plugin", () => {
     });
   });
 
-  it("waits while bb account isn't running, then follows it once it is", async () => {
+  it("waits while Omnyo account isn't running, then follows it once it is", async () => {
     const current = await loadPlugin();
     account.available = false;
     startTunnel(current);
@@ -1622,16 +1727,18 @@ describe("connect plugin", () => {
     });
   });
 
-  it("copies a legacy connect credential into bb account on start and keeps connect's copy for older builds", async () => {
+  it("copies a legacy connect credential into Omnyo account on start and keeps connect's copy for older builds", async () => {
     const legacy = {
-      serverUrl: "https://sawyer.getbb.app",
+      serverUrl: "https://sawyer.omnyo.link",
       handle: "sawyer",
       credential: "bbcred_legacy",
     };
+
     const current = await loadPlugin({
       beforeLoad: (loading) =>
-        loading.bb.storage.kv.set(CREDENTIAL_COPY_KV_KEY, legacy),
+        loading.api.storage.kv.set(CREDENTIAL_COPY_KV_KEY, legacy),
     });
+
     account.adopt = () => "adopted";
     startTunnel(current);
 
@@ -1641,33 +1748,32 @@ describe("connect plugin", () => {
     expect(account.adoptions).toEqual([
       {
         credential: "bbcred_legacy",
-        baseUrl: "https://getbb.app",
+        baseUrl: "https://omnyo.link",
         replaces: null,
       },
     ]);
-    expect(await current.bb.storage.kv.get(CREDENTIAL_COPY_KV_KEY)).toEqual(
-      legacy,
-    );
+    expect(await storedCopy(current)).toEqual(legacy);
     await vi.waitFor(async () => {
-      expect(await current.bb.storage.kv.get(COPY_MARKER_KV_KEY)).toBe(
+      expect(await current.api.storage.kv.get(COPY_MARKER_KV_KEY)).toBe(
         credentialMarker("bbcred_legacy"),
       );
     });
   });
 
-  it("keeps connect's copy while bb account isn't running, then offers it to the signed-in account without revoking anything", async () => {
+  it("keeps connect's copy while Omnyo account isn't running, then offers it to the signed-in account without revoking anything", async () => {
     const current = await loadPlugin({
       beforeLoad: (loading) =>
-        loading.bb.storage.kv.set(CREDENTIAL_COPY_KV_KEY, {
-          serverUrl: "https://sawyer.getbb.app",
+        loading.api.storage.kv.set(CREDENTIAL_COPY_KV_KEY, {
+          serverUrl: "https://sawyer.omnyo.link",
           handle: "sawyer",
           credential: "bbcred_legacy",
         }),
     });
+
     account.available = false;
     startTunnel(current);
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(await current.bb.storage.kv.get(CREDENTIAL_COPY_KV_KEY)).toEqual(
+    expect(await storedCopy(current)).toEqual(
       expect.objectContaining({ credential: "bbcred_legacy" }),
     );
 
@@ -1681,28 +1787,30 @@ describe("connect plugin", () => {
     expect(account.adoptions).toEqual([
       {
         credential: "bbcred_legacy",
-        baseUrl: "https://getbb.app",
+        baseUrl: "https://omnyo.link",
         replaces: "bbcred_stale_account",
       },
     ]);
     expect(account.serverCredential).toBe("bbcred_legacy");
-    expect(await current.bb.storage.kv.get(CREDENTIAL_COPY_KV_KEY)).toEqual(
+    expect(await storedCopy(current)).toEqual(
       expect.objectContaining({ credential: "bbcred_legacy" }),
     );
   });
 
-  it("backs off while getbb.app can't answer the adoption", async () => {
+  it("backs off while omnyo.link can't answer the adoption", async () => {
     const current = await loadPlugin({
       beforeLoad: (loading) =>
-        loading.bb.storage.kv.set(CREDENTIAL_COPY_KV_KEY, {
-          serverUrl: "https://sawyer.getbb.app",
+        loading.api.storage.kv.set(CREDENTIAL_COPY_KV_KEY, {
+          serverUrl: "https://sawyer.omnyo.link",
           handle: "sawyer",
           credential: "bbcred_legacy",
         }),
     });
+
     account.adopt = () => {
-      throw new Error("getbb.app is unreachable");
+      throw new Error("omnyo.link is unreachable");
     };
+
     startTunnel(current);
 
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1710,16 +1818,18 @@ describe("connect plugin", () => {
     expect(account.adoptions.length).toBeLessThanOrEqual(6);
   });
 
-  it("keeps a legacy credential getbb.app rejects and offers it only once", async () => {
+  it("keeps a legacy credential omnyo.link rejects and offers it only once", async () => {
     const legacy = {
-      serverUrl: "https://sawyer.getbb.app",
+      serverUrl: "https://sawyer.omnyo.link",
       handle: "sawyer",
       credential: "bbcred_revoked",
     };
+
     const current = await loadPlugin({
       beforeLoad: (loading) =>
-        loading.bb.storage.kv.set(CREDENTIAL_COPY_KV_KEY, legacy),
+        loading.api.storage.kv.set(CREDENTIAL_COPY_KV_KEY, legacy),
     });
+
     account.adopt = () => "rejected";
     startTunnel(current);
 
@@ -1727,53 +1837,52 @@ describe("connect plugin", () => {
     account.signOut();
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(account.adoptions).toHaveLength(1);
-    expect(await current.bb.storage.kv.get(CREDENTIAL_COPY_KV_KEY)).toEqual(
-      legacy,
-    );
+    expect(await storedCopy(current)).toEqual(legacy);
     expect((await status(current)).paired).toBe(false);
   });
 
-  it("saves bb account's pairing where older builds read it, and removes it after sign-out", async () => {
+  it("saves Omnyo account's pairing where older builds read it, and removes it after sign-out", async () => {
     const current = await loadPlugin();
     startTunnel(current);
     account.serverCredential = "bbcred_signed_in";
     account.signIn();
 
     await vi.waitFor(async () => {
-      expect(await current.bb.storage.kv.get(CREDENTIAL_COPY_KV_KEY)).toEqual({
-        serverUrl: "https://sawyer.getbb.app",
+      expect(await storedCopy(current)).toEqual({
+        serverUrl: "https://sawyer.omnyo.link",
         handle: "sawyer",
         credential: "bbcred_signed_in",
       });
     });
-    expect(await current.bb.storage.kv.get(COPY_MARKER_KV_KEY)).toBe(
+    expect(await current.api.storage.kv.get(COPY_MARKER_KV_KEY)).toBe(
       credentialMarker("bbcred_signed_in"),
     );
     expect(account.adoptions).toEqual([]);
 
     account.signOut();
     await vi.waitFor(async () => {
-      expect(
-        await current.bb.storage.kv.get(CREDENTIAL_COPY_KV_KEY),
-      ).toBeUndefined();
+      expect(await storedCopy(current)).toBeUndefined();
     });
-    expect(await current.bb.storage.kv.get(COPY_MARKER_KV_KEY)).toBeUndefined();
+    expect(
+      await current.api.storage.kv.get(COPY_MARKER_KV_KEY),
+    ).toBeUndefined();
   });
 
-  it("hands bb account a pairing an older build made after a downgrade", async () => {
+  it("hands Omnyo account a pairing an older build made after a downgrade", async () => {
     const current = await loadPlugin({
       beforeLoad: async (loading) => {
-        await loading.bb.storage.kv.set(CREDENTIAL_COPY_KV_KEY, {
-          serverUrl: "https://sawyer.getbb.app",
+        await loading.api.storage.kv.set(CREDENTIAL_COPY_KV_KEY, {
+          serverUrl: "https://sawyer.omnyo.link",
           handle: "sawyer",
           credential: "bbcred_repaired_on_old_build",
         });
-        await loading.bb.storage.kv.set(
+        await loading.api.storage.kv.set(
           COPY_MARKER_KV_KEY,
           credentialMarker("bbcred_before_downgrade"),
         );
       },
     });
+
     account.serverCredential = "bbcred_before_downgrade";
     account.signIn();
     account.adopt = () => "adopted";
@@ -1783,13 +1892,13 @@ describe("connect plugin", () => {
       expect(account.adoptions).toEqual([
         {
           credential: "bbcred_repaired_on_old_build",
-          baseUrl: "https://getbb.app",
+          baseUrl: "https://omnyo.link",
           replaces: "bbcred_before_downgrade",
         },
       ]),
     );
     await vi.waitFor(async () => {
-      expect(await current.bb.storage.kv.get(COPY_MARKER_KV_KEY)).toBe(
+      expect(await current.api.storage.kv.get(COPY_MARKER_KV_KEY)).toBe(
         credentialMarker("bbcred_repaired_on_old_build"),
       );
     });
@@ -1803,6 +1912,7 @@ describe("connect plugin", () => {
     const off = (await current.harness.callRpc("setRemoteAccess", {
       enabled: false,
     })) as ConnectStatus;
+
     expect(off).toMatchObject({
       paired: true,
       enabled: false,
@@ -1814,6 +1924,7 @@ describe("connect plugin", () => {
     const on = (await current.harness.callRpc("setRemoteAccess", {
       enabled: true,
     })) as ConnectStatus;
+
     expect(on).toMatchObject({ paired: true, enabled: true });
     await vi.waitFor(() => expect(account.credentialReads).toBe(3));
   });
@@ -1827,10 +1938,12 @@ describe("connect plugin", () => {
     const { harness } = current;
 
     const shareUrl = "http://sawyer--8000.localhost:59330";
+
     const exposed = (await harness.callRpc("expose", { port: 8000 })) as {
       port: number;
       url: string;
     };
+
     expect(exposed).toEqual({
       hostId: SERVER_HOST_ID,
       hostName: SERVER_HOST_NAME,
@@ -1843,6 +1956,7 @@ describe("connect plugin", () => {
       port: number;
       url: string;
     }>;
+
     expect(listed).toEqual([
       {
         hostId: SERVER_HOST_ID,
@@ -1867,6 +1981,7 @@ describe("connect plugin", () => {
       removed: boolean;
       port: number;
     };
+
     expect(removed).toEqual({
       removed: true,
       hostId: SERVER_HOST_ID,
@@ -1879,12 +1994,13 @@ describe("connect plugin", () => {
   it("refuses to expose while signed out", async () => {
     const { harness } = await loadPlugin();
     await expect(harness.callRpc("expose", { port: 8000 })).rejects.toThrow(
-      "isn't signed in to a bb account",
+      "isn't signed in to an Omnyo account",
     );
   });
 
   it("rejects tunnel identity fields on expose and unexpose rpc inputs", async () => {
     const { harness } = await loadPlugin();
+
     const redirected = {
       port: 3000,
       hostId: REMOTE_HOST_ID,
@@ -1907,8 +2023,8 @@ describe("connect plugin", () => {
   it.each(["rpc", "cli"])(
     "revokes only the selected machine’s persisted shares through %s",
     async (surface) => {
-      const { bb, harness } = await loadPlugin();
-      await bb.storage.kv.set(SHARES_KV_KEY, {
+      const { api, harness } = await loadPlugin();
+      await api.storage.kv.set(SHARES_KV_KEY, {
         [`${SERVER_HOST_ID}:8000`]: {
           hostId: SERVER_HOST_ID,
           port: 8000,
@@ -1925,6 +2041,7 @@ describe("connect plugin", () => {
           createdAt: 3,
         },
       });
+
       if (surface === "rpc") {
         await expect(
           harness.callRpc("unexposeAll", { hostId: "host-deleted" }),
@@ -1938,10 +2055,12 @@ describe("connect plugin", () => {
           "host-deleted",
           "--json",
         ]);
+
         expect(result.exitCode).toBe(0);
         expect(JSON.parse(result.stdout ?? "")).toEqual({ removed: 2 });
       }
-      expect(await bb.storage.kv.get(SHARES_KV_KEY)).toEqual({
+
+      expect(await api.storage.kv.get(SHARES_KV_KEY)).toEqual({
         [`${SERVER_HOST_ID}:8000`]: {
           hostId: SERVER_HOST_ID,
           port: 8000,
@@ -1960,8 +2079,8 @@ describe("connect plugin", () => {
   );
 
   it("keeps valid shares loaded when a host was removed and prunes orphaned shares without a host lookup", async () => {
-    const { bb, harness } = await loadPlugin();
-    await bb.storage.kv.set(SHARES_KV_KEY, {
+    const { api, harness } = await loadPlugin();
+    await api.storage.kv.set(SHARES_KV_KEY, {
       [`${SERVER_HOST_ID}:8000`]: {
         hostId: SERVER_HOST_ID,
         port: 8000,
@@ -2005,17 +2124,19 @@ describe("connect plugin", () => {
         }),
       ]),
     );
+
     const cliRemoval = await harness.runCli([
       "unexpose",
       "4000",
       "--host",
       "host-deleted",
     ]);
+
     expect(cliRemoval).toMatchObject({
       exitCode: 0,
       stdout: "Stopped sharing port 4000 on removed host (host-deleted)\n",
     });
-    expect(await bb.storage.kv.get(SHARES_KV_KEY)).toEqual({
+    expect(await api.storage.kv.get(SHARES_KV_KEY)).toEqual({
       [`${SERVER_HOST_ID}:8000`]: {
         hostId: SERVER_HOST_ID,
         port: 8000,
@@ -2028,8 +2149,8 @@ describe("connect plugin", () => {
   });
 
   it("prunes every share of a machine when it is deleted", async () => {
-    const { bb, harness } = await loadPlugin();
-    await bb.storage.kv.set(SHARES_KV_KEY, {
+    const { api, harness } = await loadPlugin();
+    await api.storage.kv.set(SHARES_KV_KEY, {
       [`${SERVER_HOST_ID}:8000`]: {
         hostId: SERVER_HOST_ID,
         port: 8000,
@@ -2062,6 +2183,7 @@ describe("connect plugin", () => {
           teardown: { status: "removed", attempt: 0 },
         },
         maxPermissionMode: "full",
+        availability: "available",
         lastSeenAt: null,
         lastRejectedProtocolVersion: null,
         createdAt: 1,
@@ -2069,7 +2191,7 @@ describe("connect plugin", () => {
       },
     });
 
-    expect(await bb.storage.kv.get(SHARES_KV_KEY)).toEqual({
+    expect(await api.storage.kv.get(SHARES_KV_KEY)).toEqual({
       [`${SERVER_HOST_ID}:8000`]: {
         hostId: SERVER_HOST_ID,
         port: 8000,
@@ -2085,14 +2207,16 @@ describe("connect plugin", () => {
     const declarations = vi.fn((_hostId: string, _ports: readonly number[]) => {
       throw new Error("temporary declaration failure");
     });
+
     const current = await loadPlugin({
       beforeLoad: (loading) => {
-        Object.defineProperty(loading.bb.hosts, "declareSharedPorts", {
+        Object.defineProperty(loading.api.hosts, "declareSharedPorts", {
           value: declarations,
         });
       },
     });
-    await current.bb.storage.kv.set(SHARES_KV_KEY, {
+
+    await current.api.storage.kv.set(SHARES_KV_KEY, {
       [`${REMOTE_HOST_ID}:3000`]: {
         hostId: REMOTE_HOST_ID,
         port: 3000,
@@ -2112,7 +2236,7 @@ describe("connect plugin", () => {
       port: 3000,
     });
     expect(declarations).toHaveBeenCalledWith(REMOTE_HOST_ID, []);
-    expect(await current.bb.storage.kv.get(SHARES_KV_KEY)).toBeUndefined();
+    expect(await current.api.storage.kv.get(SHARES_KV_KEY)).toBeUndefined();
     expect(await current.harness.callRpc("listShares")).toEqual([]);
     expect(current.harness.sdk.callsTo("hosts.get")).toEqual(
       expect.arrayContaining([
@@ -2133,8 +2257,9 @@ describe("connect plugin", () => {
 
   it("uses machine tunnel identity and declares per-host port sets", async () => {
     const current = await loadPlugin({
-      remoteIdentity: { label: "sawyer-air", baseDomain: "getbb.app" },
+      remoteIdentity: { label: "sawyer-air", baseDomain: "omnyo.link" },
     });
+
     await signIn(current, {
       serverUrl: "http://sawyer.localhost:59333",
       serverLabel: "sawyer",
@@ -2146,7 +2271,7 @@ describe("connect plugin", () => {
       hostId: REMOTE_HOST_ID,
       hostName: REMOTE_HOST_NAME,
       port: 3000,
-      url: "https://sawyer-air--3000.getbb.app",
+      url: "https://sawyer-air--3000.omnyo.link",
       createdAt: expect.any(Number),
     });
     expect(current.harness.sharedPortDeclarations).toEqual([
@@ -2191,7 +2316,7 @@ describe("connect plugin", () => {
   it("tells users to enroll a genuinely credentialless machine", async () => {
     const current = await loadPlugin({
       beforeLoad: (loading) => {
-        Object.defineProperty(loading.bb.hosts, "ensureSharedPortTunnel", {
+        Object.defineProperty(loading.api.hosts, "ensureSharedPortTunnel", {
           value: async () => {
             throw Object.assign(new Error("machine credential missing"), {
               body: { code: "connect_host_unenrolled" },
@@ -2200,6 +2325,7 @@ describe("connect plugin", () => {
         });
       },
     });
+
     await signIn(current, {
       serverUrl: "http://sawyer.localhost:59334",
       serverLabel: "sawyer",
@@ -2220,7 +2346,7 @@ describe("connect plugin", () => {
   it("tells users to bring an enrolled but offline machine online", async () => {
     const current = await loadPlugin({
       beforeLoad: (loading) => {
-        Object.defineProperty(loading.bb.hosts, "ensureSharedPortTunnel", {
+        Object.defineProperty(loading.api.hosts, "ensureSharedPortTunnel", {
           value: async () => {
             throw Object.assign(new Error("host is offline"), {
               body: { code: "connect_host_offline" },
@@ -2229,12 +2355,14 @@ describe("connect plugin", () => {
         });
       },
     });
+
     await signIn(current, {
       serverUrl: "http://sawyer.localhost:59335",
       serverLabel: "sawyer",
     });
 
     let message = "";
+
     try {
       await current.harness.callRpc("expose", {
         hostId: REMOTE_HOST_ID,
@@ -2243,6 +2371,7 @@ describe("connect plugin", () => {
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);
     }
+
     expect(message).toMatch(
       /Sawyer Air.*host-air.*not connected right now.*Bring the host online/,
     );
@@ -2251,8 +2380,9 @@ describe("connect plugin", () => {
 
   it("empties machine declarations when remote access turns off or the account signs out", async () => {
     const current = await loadPlugin({
-      remoteIdentity: { label: "sawyer-air", baseDomain: "getbb.app" },
+      remoteIdentity: { label: "sawyer-air", baseDomain: "omnyo.link" },
     });
+
     await signIn(current, {
       serverUrl: "http://sawyer.localhost:59335",
       serverLabel: "sawyer",
@@ -2284,7 +2414,66 @@ describe("connect plugin", () => {
     );
   });
 
-  it("listAccountServers reads the gate through bb account and returns selfHandle", async () => {
+  it("lists paired devices through the authenticated account API and CLI", async () => {
+    const current = await loadPlugin();
+
+    const devices = [
+      { id: "phone-1", name: "Phone", lastSeenAt: 2000, createdAt: 1000 },
+    ];
+
+    account.route("api", "GET", "/api/connect/devices", () => ({
+      status: 200,
+      body: { devices },
+    }));
+    await signIn(current);
+    expect(await current.harness.callRpc("listPairedDevices")).toEqual({
+      devices,
+    });
+    expect(account.fetches).toContainEqual({
+      target: "api",
+      method: "GET",
+      path: "/api/connect/devices",
+      body: null,
+    });
+    const result = await current.harness.runCli(["devices", "--json"]);
+    expect(JSON.parse(result.stdout)).toEqual({ devices });
+  });
+
+  it("does not turn a failed paired-device read into an empty list", async () => {
+    const current = await loadPlugin();
+    account.route("api", "GET", "/api/connect/devices", () => ({
+      status: 503,
+      body: null,
+    }));
+    await signIn(current);
+    await expect(current.harness.callRpc("listPairedDevices")).rejects.toThrow(
+      "network",
+    );
+  });
+
+  it.each([
+    [401, null, "unauthorized"],
+    [200, { devices: [{ id: "bad" }] }, "invalid_response"],
+  ])("rejects unusable device responses (%s)", async (status, body, error) => {
+    const current = await loadPlugin();
+    account.route("api", "GET", "/api/connect/devices", () => ({
+      status,
+      body,
+    }));
+    await signIn(current);
+    await expect(current.harness.callRpc("listPairedDevices")).rejects.toThrow(
+      error,
+    );
+  });
+
+  it("requires sign-in before listing paired devices", async () => {
+    const current = await loadPlugin();
+    await expect(current.harness.callRpc("listPairedDevices")).rejects.toThrow(
+      "not_paired",
+    );
+  });
+
+  it("listAccountServers reads the gate through Omnyo account and returns selfHandle", async () => {
     const current = await loadPlugin();
     account.route("gate", "GET", "/api/connect/servers", () => ({
       status: 200,
@@ -2345,13 +2534,13 @@ describe("connect plugin", () => {
     );
   });
 
-  it("createDesktopSession asks the gate through bb account", async () => {
+  it("createDesktopSession asks the gate through Omnyo account", async () => {
     const current = await loadPlugin();
     account.route("gate", "POST", "/api/connect/desktop-session", () => ({
       status: 200,
       body: {
         cookie: {
-          domain: ".getbb.app",
+          domain: ".omnyo.link",
           expiresAt: 2_000_000,
           name: "__Secure-bb-connect.desktop_session",
           value: "short-lived-signed-cookie",
@@ -2363,7 +2552,7 @@ describe("connect plugin", () => {
       current.harness.callRpc("createDesktopSession"),
     ).resolves.toEqual({
       cookie: {
-        domain: ".getbb.app",
+        domain: ".omnyo.link",
         expiresAt: 2_000_000,
         name: "__Secure-bb-connect.desktop_session",
         value: "short-lived-signed-cookie",
@@ -2371,26 +2560,28 @@ describe("connect plugin", () => {
     });
   });
 
-  it("createMachineCode mints through the apex via bb account", async () => {
+  it("createMachineCode mints through the apex via Omnyo account", async () => {
     const current = await loadPlugin();
     account.route("api", "POST", "/api/connect/machine-code", () => ({
       status: 200,
       body: {
         code: "ABCD-EFGH",
         expiresInMs: 600_000,
-        serverUrl: "https://sawyer.getbb.app",
+        serverUrl: "https://sawyer.omnyo.link",
       },
     }));
     await signIn(current);
     const before = Date.now();
+
     const minted = (await current.harness.callRpc("createMachineCode")) as {
       code: string;
       serverUrl: string;
       expiresAt: number;
     };
+
     expect(minted).toMatchObject({
       code: "ABCD-EFGH",
-      serverUrl: "https://sawyer.getbb.app",
+      serverUrl: "https://sawyer.omnyo.link",
     });
     expect(minted.expiresAt).toBeGreaterThanOrEqual(before + 600_000);
   });
@@ -2415,11 +2606,12 @@ describe("connect plugin", () => {
     );
   });
 
-  it("revokeMachine posts through bb account", async () => {
+  it("revokeMachine posts through Omnyo account", async () => {
     const current = await loadPlugin();
     const revoked: unknown[] = [];
     account.route("api", "POST", "/api/connect/revoke-machine", (request) => {
       revoked.push(request.body);
+
       return { status: 200, body: { ok: true } };
     });
     await signIn(current);
@@ -2434,6 +2626,7 @@ describe("connect plugin", () => {
 describe("connect CLI", () => {
   let host: FakePluginHost | undefined;
   let account: FakeAccount;
+
   let tunnelService:
     | { controller: AbortController; done: Promise<void> }
     | undefined;
@@ -2444,10 +2637,12 @@ describe("connect CLI", () => {
       await tunnelService.done;
       tunnelService = undefined;
     }
+
     if (host) {
       await host.harness.dispose();
       host = undefined;
     }
+
     vi.unstubAllGlobals();
   });
 
@@ -2457,8 +2652,9 @@ describe("connect CLI", () => {
     account = new FakeAccount();
     host = createConnectFakeHost({ ...options, account });
     await createConnectPlugin({ accountRetryMinMs: 20 })(
-      host.bb as unknown as Parameters<typeof plugin>[0],
+      host.api as unknown as Parameters<typeof plugin>[0],
     );
+
     return host;
   }
 
@@ -2475,50 +2671,52 @@ describe("connect CLI", () => {
     });
   }
 
-  it("bare `bb connect` prints a how-to, not an argument error", async () => {
+  it("bare `omnyo connect` prints a how-to, not an argument error", async () => {
     const { harness } = await loadCli();
     const result = await harness.runCli([]);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("getbb.app");
-    expect(result.stdout).toContain("bb account login");
-    expect(result.stdout).toContain("bb connect status");
-    expect(result.stdout).toContain("bb connect expose");
+    expect(result.stdout).toContain("omnyo.link");
+    expect(result.stdout).toContain("omnyo account login");
+    expect(result.stdout).toContain("omnyo connect status");
+    expect(result.stdout).toContain("omnyo connect expose");
   });
 
-  it("`bb connect --code --server` signs in through bb account (the dashboard command)", async () => {
+  it("`omnyo connect --code --server` signs in through Omnyo account (the dashboard command)", async () => {
     const { harness } = await loadCli();
     account.redeem = () => ({
       ...TEST_ACCOUNT,
       serverUrl: "http://sawyer.localhost:59324",
       serverLabel: "sawyer",
     });
+
     const result = await harness.runCli([
       "--code",
       "ABCD",
       "--server",
-      "https://sawyer.getbb.app",
+      "https://sawyer.omnyo.link",
     ]);
+
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain(
       "Paired as sawyer — reachable at http://sawyer.localhost:59324",
     );
     expect(account.redemptions).toEqual([
-      { code: "ABCD", baseUrl: "https://getbb.app" },
+      { code: "ABCD", baseUrl: "https://omnyo.link" },
     ]);
 
     await harness.runCli([
       "--code",
       "WXYZ",
       "--base-url",
-      "http://bb.localhost:1",
+      "http://omnyo.localhost:1",
     ]);
     expect(account.redemptions.at(-1)).toEqual({
       code: "WXYZ",
-      baseUrl: "http://bb.localhost:1",
+      baseUrl: "http://omnyo.localhost:1",
     });
   });
 
-  it("`bb connect --code` turns remote access back on", async () => {
+  it("`omnyo connect --code` turns remote access back on", async () => {
     const { harness } = await loadCli();
     await harness.runCli(["off"]);
     account.redeem = () => TEST_ACCOUNT;
@@ -2531,7 +2729,7 @@ describe("connect CLI", () => {
 
   it("`--server` without `--code` is a usage error", async () => {
     const { harness } = await loadCli();
-    const result = await harness.runCli(["--server", "https://x.getbb.app"]);
+    const result = await harness.runCli(["--server", "https://x.omnyo.link"]);
     expect(result.exitCode).toBe(1);
     expect(account.redemptions).toEqual([]);
   });
@@ -2541,12 +2739,14 @@ describe("connect CLI", () => {
     account.redeem = () => {
       throw new Error("expired_code");
     };
+
     const result = await harness.runCli([
       "--code",
       "OLD",
       "--server",
-      "https://sawyer.getbb.app",
+      "https://sawyer.omnyo.link",
     ]);
+
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("that code has expired");
   });
@@ -2557,44 +2757,47 @@ describe("connect CLI", () => {
     account.redeem = () => {
       throw new Error("HTTP 500: profile_unavailable");
     };
+
     const result = await harness.runCli(["--code", "ABCD"]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      "saved the pairing, but getbb.app didn't return your account yet",
+      "saved the pairing, but omnyo.link didn't return your account yet",
     );
     expect(result.stderr).not.toContain("profile_unavailable\n");
     const status = await harness.runCli(["status", "--json"]);
     expect(JSON.parse(status.stdout ?? "")).toMatchObject({ enabled: true });
   });
 
-  it("says so when the bb account plugin isn't running", async () => {
+  it("says so when the Omnyo account plugin isn't running", async () => {
     const { harness } = await loadCli();
     account.available = false;
     const result = await harness.runCli(["--code", "ABCD"]);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("bb account plugin isn't running");
+    expect(result.stderr).toContain("Omnyo account plugin isn't running");
   });
 
-  it("`bb connect off` keeps the account signed in and `on` restores remote access", async () => {
+  it("`omnyo connect off` keeps the account signed in and `on` restores remote access", async () => {
     const current = await loadCli();
     const { harness } = current;
     const before = await harness.runCli(["status"]);
     expect(before.exitCode).toBe(0);
-    expect(before.stdout).toContain("Not signed in to a bb account");
+    expect(before.stdout).toContain("Not signed in to an Omnyo account");
 
     await signIn(current);
     const off = await harness.runCli(["off"]);
     expect(off.exitCode).toBe(0);
     expect(off.stdout).toContain("Remote access is off");
-    expect(off.stdout).toContain("bb account logout");
+    expect(off.stdout).toContain("omnyo account logout");
     expect(account.status.state).toBe("signed-in");
     const offStatus = await harness.runCli(["status"]);
-    expect(offStatus.stdout).toContain("sawyer  https://sawyer.getbb.app  off");
+    expect(offStatus.stdout).toContain(
+      "sawyer  https://sawyer.omnyo.link  off",
+    );
 
     const on = await harness.runCli(["on"]);
     expect(on.exitCode).toBe(0);
     expect(on.stdout).toContain(
-      "Remote access is on — reachable at https://sawyer.getbb.app",
+      "Remote access is on — reachable at https://sawyer.omnyo.link",
     );
     const json = await harness.runCli(["status", "--json"]);
     expect(JSON.parse(json.stdout ?? "")).toMatchObject({ enabled: true });
@@ -2607,7 +2810,7 @@ describe("connect CLI", () => {
     );
   });
 
-  it("`bb connect list` points at shares", async () => {
+  it("`omnyo connect list` points at shares", async () => {
     const { harness } = await loadCli();
     const result = await harness.runCli(["list"]);
     expect(result.exitCode).toBe(1);
@@ -2616,11 +2819,13 @@ describe("connect CLI", () => {
 
   it("expose, servers, and machine-code explain how to sign in when signed out", async () => {
     const { harness } = await loadCli();
+
     for (const argv of [["expose", "8000"], ["servers"], ["machine-code"]]) {
       const result = await harness.runCli(argv);
       expect(result.exitCode, argv.join(" ")).toBe(1);
-      expect(result.stderr).toContain("isn't signed in to a bb account");
+      expect(result.stderr).toContain("isn't signed in to an Omnyo account");
     }
+
     expect(account.fetches).toEqual([]);
   });
 
@@ -2652,10 +2857,12 @@ describe("connect CLI", () => {
 
     const json = await current.harness.runCli(["servers", "--json"]);
     expect(json.exitCode).toBe(0);
+
     const parsed = JSON.parse(json.stdout ?? "") as {
       servers: Array<{ handle: string; url: string }>;
       selfHandle: string;
     };
+
     expect(parsed.selfHandle).toBe("sawyer");
     expect(parsed.servers).toHaveLength(2);
     expect(parsed.servers[1]?.url).toBe(
@@ -2670,7 +2877,7 @@ describe("connect CLI", () => {
       body: {
         code: "K7QP-2M4X",
         expiresInMs: 600_000,
-        serverUrl: "https://sawyer.getbb.app",
+        serverUrl: "https://sawyer.omnyo.link",
       },
     }));
     await signIn(current);
@@ -2679,8 +2886,8 @@ describe("connect CLI", () => {
     const text = await current.harness.runCli(["machine-code"]);
     expect(text.exitCode).toBe(0);
     expect(text.stdout).toContain("Code:       K7QP-2M4X");
-    expect(text.stdout).toContain("Server:     https://sawyer.getbb.app");
-    expect(text.stdout).toContain("Apex:       https://getbb.app");
+    expect(text.stdout).toContain("Server:     https://sawyer.omnyo.link");
+    expect(text.stdout).toContain("Apex:       https://omnyo.link");
     expect(text.stdout).toContain("in about 10 min");
     expect(text.stdout).toContain("Settings → Mobile → Add mobile device");
 
@@ -2689,8 +2896,8 @@ describe("connect CLI", () => {
     const parsed = JSON.parse(json.stdout ?? "") as Record<string, unknown>;
     expect(parsed).toEqual({
       code: "K7QP-2M4X",
-      serverUrl: "https://sawyer.getbb.app",
-      apex: "https://getbb.app",
+      serverUrl: "https://sawyer.omnyo.link",
+      apex: "https://omnyo.link",
       expiresAt: expect.any(Number),
     });
     expect(parsed.expiresAt as number).toBeGreaterThanOrEqual(before + 600_000);
@@ -2706,7 +2913,7 @@ describe("connect CLI", () => {
     const result = await current.harness.runCli(["machine-code"]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("machine limit");
-    expect(result.stderr).toContain("https://getbb.app/dashboard");
+    expect(result.stderr).toContain("https://omnyo.link/dashboard");
     expect(result.stderr).not.toContain("machine_limit");
   });
 
@@ -2746,8 +2953,9 @@ describe("connect CLI", () => {
 
   it("resolves the thread host, honors --host, and defaults no-context calls to the server host", async () => {
     const current = await loadCli({
-      remoteIdentity: { label: "sawyer-air", baseDomain: "getbb.app" },
+      remoteIdentity: { label: "sawyer-air", baseDomain: "omnyo.link" },
     });
+
     current.harness.sdk.stub(
       "threads.get",
       async () => ({ environment: { hostId: REMOTE_HOST_ID } }) as never,
@@ -2760,15 +2968,17 @@ describe("connect CLI", () => {
     const fromThread = await current.harness.runCli(["expose", "3000"], {
       threadId: "thread-air",
     });
+
     expect(fromThread).toMatchObject({
       exitCode: 0,
-      stdout: "https://sawyer-air--3000.getbb.app\n",
+      stdout: "https://sawyer-air--3000.omnyo.link\n",
     });
 
     const overridden = await current.harness.runCli(
       ["expose", "3000", "--host", SERVER_HOST_NAME],
       { threadId: "thread-air" },
     );
+
     expect(overridden).toMatchObject({
       exitCode: 0,
       stdout: "http://sawyer--3000.localhost:59336\n",
@@ -2783,6 +2993,7 @@ describe("connect CLI", () => {
     const threadShares = await current.harness.runCli(["shares", "--json"], {
       threadId: "thread-air",
     });
+
     expect(JSON.parse(threadShares.stdout ?? "")).toEqual({
       host: {
         id: REMOTE_HOST_ID,
@@ -2794,7 +3005,7 @@ describe("connect CLI", () => {
           hostId: REMOTE_HOST_ID,
           hostName: REMOTE_HOST_NAME,
           port: 3000,
-          url: "https://sawyer-air--3000.getbb.app",
+          url: "https://sawyer-air--3000.omnyo.link",
           createdAt: expect.any(Number),
         },
       ],
@@ -2808,12 +3019,13 @@ describe("connect CLI", () => {
     );
     const status = await current.harness.runCli(["status"]);
     expect(status.stdout).toContain(
-      `${REMOTE_HOST_NAME} (${REMOTE_HOST_ID})  3000  https://sawyer-air--3000.getbb.app`,
+      `${REMOTE_HOST_NAME} (${REMOTE_HOST_ID})  3000  https://sawyer-air--3000.omnyo.link`,
     );
 
     const removed = await current.harness.runCli(["unexpose", "3000"], {
       threadId: "thread-air",
     });
+
     expect(removed.stdout).toContain(
       `Stopped sharing port 3000 on ${REMOTE_HOST_NAME} (${REMOTE_HOST_ID})`,
     );

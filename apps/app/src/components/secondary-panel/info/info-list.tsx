@@ -1,22 +1,35 @@
 import { Fragment, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { Collapsible, CollapsibleContent } from "@omnyo/shared-ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@bb/shared-ui/dropdown-menu";
-import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@bb/shared-ui/hover-reveal";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
+} from "@omnyo/shared-ui/dropdown-menu";
+import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@omnyo/shared-ui/hover-reveal";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  CONTROL_HOVER_TRANSITION,
+  DISCLOSURE_CHEVRON_TRANSITION,
+  LIST_HOVER_TRANSITION,
+} from "@omnyo/shared-ui/motion";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@omnyo/shared-ui/tooltip";
 import { TruncateStart } from "@/components/ui/truncate-start";
 import { formatCompactRelativeTime } from "@/lib/relative-time";
 
 const INFO_LIST_LEADING_CLASS =
   "flex size-3 shrink-0 items-center justify-center";
 
-export const INFO_LIST_CARET_CLASS = "size-3 shrink-0 transition-transform";
+export const INFO_LIST_CARET_CLASS = cn(
+  "size-3 shrink-0",
+  DISCLOSURE_CHEVRON_TRANSITION,
+);
 
 const INFO_LIST_DEFAULT_LIMIT = 5;
 
@@ -27,14 +40,18 @@ export function infoListCollapses(
   return count > limit + 1;
 }
 
-const INFO_LIST_ROW_CLASS =
-  "group relative -mx-1 flex h-6 min-w-0 items-center gap-1.5 rounded px-1 transition-colors has-[:focus-visible]:bg-state-hover";
+const INFO_LIST_ROW_CLASS = cn(
+  "group relative -mx-1 flex h-6 min-w-0 items-center gap-1.5 rounded px-1 has-[:focus-visible]:bg-state-hover",
+  LIST_HOVER_TRANSITION,
+);
 
 const INFO_LIST_PRIMARY_CLASS =
   "min-w-0 cursor-pointer truncate text-left text-xs leading-5 text-foreground no-underline after:absolute after:inset-0 after:rounded after:content-[''] focus-visible:outline-none";
 
-const INFO_LIST_QUIET_CONTROL_CLASS =
-  "rounded text-2xs text-subtle-foreground transition-colors hover:text-foreground focus-visible:bg-state-hover focus-visible:text-foreground focus-visible:outline-none";
+const INFO_LIST_QUIET_CONTROL_CLASS = cn(
+  "rounded text-2xs text-subtle-foreground hover:text-foreground focus-visible:bg-state-hover focus-visible:text-foreground focus-visible:outline-none",
+  CONTROL_HOVER_TRANSITION,
+);
 
 function InfoCountPill({ count }: { count: number }) {
   return (
@@ -70,7 +87,9 @@ function InfoSectionHeading({
 }: InfoSectionHeadingProps & { bodyId: string }) {
   const countPill =
     count === undefined ? null : <InfoCountPill count={count} />;
+
   const collapsed = collapse?.collapsed ?? false;
+
   return (
     <div className="mb-1 flex min-h-5 min-w-0 items-center justify-between gap-3">
       <div className="flex min-w-0 items-center">
@@ -81,10 +100,23 @@ function InfoSectionHeading({
               aria-expanded={!collapse.collapsed}
               aria-controls={bodyId}
               onClick={() => collapse.setCollapsed(!collapse.collapsed)}
-              className="-mx-1.5 -my-0.5 flex min-w-0 items-center rounded-md px-1.5 py-0.5 transition-colors hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:pointer-coarse:min-h-8"
+              className={cn(
+                "group/heading -mx-1.5 -my-0.5 flex min-w-0 items-center rounded-md px-1.5 py-0.5 hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:pointer-coarse:min-h-8",
+                CONTROL_HOVER_TRANSITION,
+              )}
             >
               <span className="truncate">{label}</span>
               {countPill}
+              <Icon
+                name="ChevronRight"
+                className={cn(
+                  INFO_LIST_CARET_CLASS,
+                  "ml-1 text-subtle-foreground",
+                  !collapsed &&
+                    "rotate-90 opacity-0 group-hover/heading:opacity-100 group-focus-visible/heading:opacity-100 [@media(hover:none)]:opacity-100",
+                )}
+                aria-hidden
+              />
             </button>
           </h3>
         ) : (
@@ -128,10 +160,15 @@ export interface InfoSectionProps extends InfoSectionHeadingProps {
 export function InfoSection({ children, ...heading }: InfoSectionProps) {
   const bodyId = useId();
   const collapsed = heading.collapse?.collapsed ?? false;
+
   return (
     <section className="min-w-0">
       <InfoSectionHeading {...heading} bodyId={bodyId} />
-      {collapsed ? null : <div id={bodyId}>{children}</div>}
+      <Collapsible open={!collapsed}>
+        <CollapsibleContent id={bodyId} className="-mx-1 px-1">
+          {children}
+        </CollapsibleContent>
+      </Collapsible>
     </section>
   );
 }
@@ -211,6 +248,7 @@ export function InfoListRow({
         {name}
       </button>
     );
+
   return (
     <li
       className={cn(INFO_LIST_ROW_CLASS, selected && "bg-state-active")}
@@ -259,7 +297,8 @@ export interface InfoRowActionItem {
 }
 
 const INFO_ROW_ACTION_CLASS = cn(
-  "relative z-10 flex size-5 shrink-0 items-center justify-center rounded text-subtle-foreground opacity-0 transition-[opacity,background-color,color] hover:bg-state-active hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100",
+  CONTROL_HOVER_TRANSITION,
+  "relative z-10 flex size-5 shrink-0 items-center justify-center rounded text-subtle-foreground opacity-0 hover:bg-state-active hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100",
   HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS,
 );
 
@@ -293,6 +332,7 @@ function InfoRowInlineActions({
   actions: readonly InfoRowActionItem[];
 }) {
   const collapsesOnTouch = actions.length > 1;
+
   return actions.map((action) => (
     <InfoRowAction
       key={action.label}
@@ -310,13 +350,17 @@ function InfoRowTouchActionsMenu({
   menuTitle: string;
 }) {
   if (actions.length < 2) return null;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
           aria-label="More actions"
-          className={cn(INFO_ROW_ACTION_CLASS, "hidden [@media(hover:none)]:flex")}
+          className={cn(
+            INFO_ROW_ACTION_CLASS,
+            "hidden [@media(hover:none)]:flex",
+          )}
         >
           <Icon name="MoreHorizontal" className="size-3" aria-hidden />
         </button>
@@ -348,6 +392,7 @@ export function InfoRowTime({
 }) {
   const date = new Date(timestamp);
   const fullDate = date.toLocaleString();
+
   return (
     <time
       dateTime={date.toISOString()}
@@ -415,12 +460,17 @@ export function InfoList<T>({
 }: InfoListProps<T>) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [revealedIndex, setRevealedIndex] = useState<number | null>(null);
+
   if (revealIndex !== revealedIndex) {
     setRevealedIndex(revealIndex);
+
     if (revealIndex !== null && revealIndex >= limit) setIsExpanded(true);
   }
+
   const canToggle = infoListCollapses(items.length, limit);
-  const visibleItems = canToggle && !isExpanded ? items.slice(0, limit) : items;
+  const leadingItems = canToggle ? items.slice(0, limit) : items;
+  const overflowItems = canToggle ? items.slice(limit) : [];
+
   return (
     <ul className="relative m-0 list-none p-0 max-md:pointer-coarse:[--text-xs--line-height:1.125rem] max-md:pointer-coarse:[--text-xs:0.8125rem]">
       {rail ? (
@@ -432,9 +482,22 @@ export function InfoList<T>({
           aria-hidden
         />
       ) : null}
-      {visibleItems.map((item) => (
+      {leadingItems.map((item) => (
         <Fragment key={getKey(item)}>{renderItem(item)}</Fragment>
       ))}
+      {canToggle ? (
+        <li role="none" className="list-none">
+          <Collapsible open={isExpanded}>
+            <CollapsibleContent className="-mx-1 px-1">
+              <ul role="none" className="m-0 list-none p-0">
+                {overflowItems.map((item) => (
+                  <Fragment key={getKey(item)}>{renderItem(item)}</Fragment>
+                ))}
+              </ul>
+            </CollapsibleContent>
+          </Collapsible>
+        </li>
+      ) : null}
       {canToggle ? (
         <InfoListMoreRow
           label={isExpanded ? "Show less" : `${items.length - limit} more`}

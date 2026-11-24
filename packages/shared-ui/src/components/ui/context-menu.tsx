@@ -9,12 +9,13 @@ import {
   MenuHoverProvider,
   useMenuItemHover,
 } from "./menu-item-hover.js";
-import { LIST_HOVER_TRANSITION } from "./motion.js";
+import { FLOATING_FADE_MOTION, LIST_HOVER_TRANSITION } from "./motion.js";
 import { Icon } from "../../components/ui/icon.js";
 
 type ContextMenuSubTriggerElement = React.ComponentRef<
   typeof ContextMenuPrimitive.SubTrigger
 >;
+
 type ContextMenuSubTriggerProps = React.ComponentPropsWithoutRef<
   typeof ContextMenuPrimitive.SubTrigger
 > & {
@@ -24,6 +25,7 @@ type ContextMenuSubTriggerProps = React.ComponentPropsWithoutRef<
 type ContextMenuSubContentElement = React.ComponentRef<
   typeof ContextMenuPrimitive.SubContent
 >;
+
 type ContextMenuSubContentProps = React.ComponentPropsWithoutRef<
   typeof ContextMenuPrimitive.SubContent
 >;
@@ -31,6 +33,7 @@ type ContextMenuSubContentProps = React.ComponentPropsWithoutRef<
 type ContextMenuContentElement = React.ComponentRef<
   typeof ContextMenuPrimitive.Content
 >;
+
 type ContextMenuContentProps = React.ComponentPropsWithoutRef<
   typeof ContextMenuPrimitive.Content
 >;
@@ -38,6 +41,7 @@ type ContextMenuContentProps = React.ComponentPropsWithoutRef<
 type ContextMenuItemElement = React.ComponentRef<
   typeof ContextMenuPrimitive.Item
 >;
+
 type ContextMenuItemProps = React.ComponentPropsWithoutRef<
   typeof ContextMenuPrimitive.Item
 > & {
@@ -47,6 +51,7 @@ type ContextMenuItemProps = React.ComponentPropsWithoutRef<
 type ContextMenuCheckboxItemElement = React.ComponentRef<
   typeof ContextMenuPrimitive.CheckboxItem
 >;
+
 type ContextMenuCheckboxItemProps = React.ComponentPropsWithoutRef<
   typeof ContextMenuPrimitive.CheckboxItem
 >;
@@ -54,6 +59,7 @@ type ContextMenuCheckboxItemProps = React.ComponentPropsWithoutRef<
 type ContextMenuRadioItemElement = React.ComponentRef<
   typeof ContextMenuPrimitive.RadioItem
 >;
+
 type ContextMenuRadioItemProps = React.ComponentPropsWithoutRef<
   typeof ContextMenuPrimitive.RadioItem
 >;
@@ -61,6 +67,7 @@ type ContextMenuRadioItemProps = React.ComponentPropsWithoutRef<
 type ContextMenuLabelElement = React.ComponentRef<
   typeof ContextMenuPrimitive.Label
 >;
+
 type ContextMenuLabelProps = React.ComponentPropsWithoutRef<
   typeof ContextMenuPrimitive.Label
 > & {
@@ -70,6 +77,7 @@ type ContextMenuLabelProps = React.ComponentPropsWithoutRef<
 type ContextMenuSeparatorElement = React.ComponentRef<
   typeof ContextMenuPrimitive.Separator
 >;
+
 type ContextMenuSeparatorProps = React.ComponentPropsWithoutRef<
   typeof ContextMenuPrimitive.Separator
 >;
@@ -79,10 +87,15 @@ type ContextMenuShortcutProps = React.HTMLAttributes<HTMLSpanElement>;
 const CONTEXT_MENU_LAYER_CLASS = "z-[70]";
 
 const ContextMenu = ContextMenuPrimitive.Root;
+
 const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
+
 const ContextMenuGroup = ContextMenuPrimitive.Group;
+
 const ContextMenuPortal = ContextMenuPrimitive.Portal;
+
 const ContextMenuSub = ContextMenuPrimitive.Sub;
+
 const ContextMenuRadioGroup = ContextMenuPrimitive.RadioGroup;
 
 const ContextMenuSubTrigger = React.forwardRef<
@@ -124,6 +137,7 @@ const ContextMenuSubTrigger = React.forwardRef<
     );
   },
 );
+
 ContextMenuSubTrigger.displayName = ContextMenuPrimitive.SubTrigger.displayName;
 
 const ContextMenuSubContent = React.forwardRef<
@@ -135,12 +149,14 @@ const ContextMenuSubContent = React.forwardRef<
     {...usePortalScopeProps()}
     className={cn(
       CONTEXT_MENU_LAYER_CLASS,
-      "min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+      "min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md origin-(--radix-context-menu-content-transform-origin)",
+      FLOATING_FADE_MOTION,
       className,
     )}
     {...props}
   />
 ));
+
 ContextMenuSubContent.displayName = ContextMenuPrimitive.SubContent.displayName;
 
 const ContextMenuContent = React.forwardRef<
@@ -153,12 +169,14 @@ const ContextMenuContent = React.forwardRef<
       {...usePortalScopeProps()}
       className={cn(
         CONTEXT_MENU_LAYER_CLASS,
-        "min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        "min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md origin-(--radix-context-menu-content-transform-origin)",
+        FLOATING_FADE_MOTION,
         className,
       )}
       {...props}
       onPointerUpCapture={(event) => {
         onPointerUpCapture?.(event);
+
         if (event.button !== 0) event.preventDefault();
       }}
     >
@@ -166,6 +184,7 @@ const ContextMenuContent = React.forwardRef<
     </ContextMenuPrimitive.Content>
   </ContextMenuPrimitive.Portal>
 ));
+
 ContextMenuContent.displayName = ContextMenuPrimitive.Content.displayName;
 
 const ContextMenuItem = React.forwardRef<
@@ -203,6 +222,7 @@ const ContextMenuItem = React.forwardRef<
     );
   },
 );
+
 ContextMenuItem.displayName = ContextMenuPrimitive.Item.displayName;
 
 const ContextMenuCheckboxItem = React.forwardRef<
@@ -253,6 +273,7 @@ const ContextMenuCheckboxItem = React.forwardRef<
     );
   },
 );
+
 ContextMenuCheckboxItem.displayName =
   ContextMenuPrimitive.CheckboxItem.displayName;
 
@@ -297,6 +318,7 @@ const ContextMenuRadioItem = React.forwardRef<
     );
   },
 );
+
 ContextMenuRadioItem.displayName = ContextMenuPrimitive.RadioItem.displayName;
 
 const ContextMenuLabel = React.forwardRef<
@@ -313,6 +335,7 @@ const ContextMenuLabel = React.forwardRef<
     {...props}
   />
 ));
+
 ContextMenuLabel.displayName = ContextMenuPrimitive.Label.displayName;
 
 const ContextMenuSeparator = React.forwardRef<
@@ -325,6 +348,7 @@ const ContextMenuSeparator = React.forwardRef<
     {...props}
   />
 ));
+
 ContextMenuSeparator.displayName = ContextMenuPrimitive.Separator.displayName;
 
 function ContextMenuShortcut({
@@ -338,6 +362,7 @@ function ContextMenuShortcut({
     />
   );
 }
+
 ContextMenuShortcut.displayName = "ContextMenuShortcut";
 
 export {

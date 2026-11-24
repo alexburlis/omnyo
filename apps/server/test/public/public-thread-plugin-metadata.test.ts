@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
-import { markThreadDeleted, threadPluginMetadata, threads } from "@bb/db";
-import { jsonObjectSchema, PLUGIN_METADATA_MAX_BYTES } from "@bb/domain";
-import { pluginThreadMetadataListResponseSchema } from "@bb/server-contract";
+import { markThreadDeleted, threadPluginMetadata, threads } from "@omnyo/db";
+import { jsonObjectSchema, PLUGIN_METADATA_MAX_BYTES } from "@omnyo/domain";
+import { pluginThreadMetadataListResponseSchema } from "@omnyo/server-contract";
 import { describe, expect, it, vi } from "vitest";
 import { readJson } from "../helpers/json.js";
 import {
@@ -13,14 +13,17 @@ import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
 const PLUGIN_ID_MESSAGE =
   "Invalid string: must match pattern /^[a-z0-9][a-z0-9-]*$/u";
+
 const TOO_LARGE_MESSAGE = "pluginMetadata exceeds 256 KiB";
 
 function seedMetadataThread(harness: TestAppHarness) {
   const { host } = seedHostSession(harness.deps);
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: "/tmp/public-thread-plugin-metadata",
   });
+
   return seedThread(harness.deps, { projectId: project.id });
 }
 
@@ -32,6 +35,7 @@ async function getMetadata(
   const response = await harness.app.request(
     `/api/v1/threads/${threadId}/plugin-metadata?pluginId=${encodeURIComponent(pluginId)}`,
   );
+
   return { status: response.status, body: await readJson(response) };
 }
 
@@ -48,6 +52,7 @@ async function patchMetadata(
       body: JSON.stringify(body),
     },
   );
+
   return { status: response.status, body: await readJson(response) };
 }
 
@@ -60,6 +65,7 @@ async function listMetadata(harness: TestAppHarness, body: unknown) {
       body: JSON.stringify(body),
     },
   );
+
   return { status: response.status, body: await readJson(response) };
 }
 
@@ -82,6 +88,7 @@ function readStoredMetadataJson(
 
 function namespaceShape(metadataJson: string | undefined) {
   if (metadataJson === undefined) return undefined;
+
   return {
     bytes: Buffer.byteLength(metadataJson, "utf8"),
     keys: Object.keys(jsonObjectSchema.parse(JSON.parse(metadataJson))),
@@ -99,6 +106,7 @@ describe("public thread plugin metadata routes", () => {
         pluginId: "linear",
         set: nearLimit,
       });
+
       expect(seeded.status).toBe(200);
       expect(namespaceShape(JSON.stringify(seeded.body))).toEqual(
         nearLimitShape,
@@ -147,6 +155,7 @@ describe("public thread plugin metadata routes", () => {
   it("returns 400 for a malformed pluginId in the patch body and the get query", async () => {
     await withTestHarness(async (harness) => {
       const thread = seedMetadataThread(harness);
+
       const invalidRequest = {
         status: 400,
         body: { code: "invalid_request", message: PLUGIN_ID_MESSAGE },
@@ -160,6 +169,7 @@ describe("public thread plugin metadata routes", () => {
           invalidRequest,
         );
       }
+
       expect(
         harness.db
           .select()
@@ -208,6 +218,7 @@ describe("public thread plugin metadata routes", () => {
       const warn = vi.fn();
       const previousLogger = harness.deps.logger;
       harness.deps.logger = { ...previousLogger, warn };
+
       try {
         expect(await getMetadata(harness, thread.id, "linear")).toEqual({
           status: 200,
@@ -253,19 +264,23 @@ describe("public thread plugin metadata routes", () => {
   it("lists one plugin's metadata for the requested threads", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/public-thread-plugin-metadata-list",
       });
+
       const [live, archived, deleted, corrupt, unrequested, otherPlugin] = [
         1, 2, 3, 4, 5, 6,
       ].map(() => seedThread(harness.deps, { projectId: project.id }));
+
       for (const thread of [live, archived, deleted, corrupt, unrequested]) {
         await patchMetadata(harness, thread!.id, {
           pluginId: "linear",
           set: { thread: thread!.id },
         });
       }
+
       await patchMetadata(harness, otherPlugin!.id, {
         pluginId: "other",
         set: { a: 1 },
@@ -284,18 +299,23 @@ describe("public thread plugin metadata routes", () => {
       const warn = vi.fn();
       const previousLogger = harness.deps.logger;
       harness.deps.logger = { ...previousLogger, warn };
+
       try {
         const requested = [live, archived, deleted, corrupt, otherPlugin].map(
           (thread) => thread!.id,
         );
+
         const listed = await listMetadata(harness, {
           pluginId: "linear",
           threadIds: [...requested, "thr_missing"],
         });
+
         expect(listed.status).toBe(200);
+
         const { threads: rows } = pluginThreadMetadataListResponseSchema.parse(
           listed.body,
         );
+
         expect(
           rows.sort((left, right) =>
             left.threadId.localeCompare(right.threadId),
@@ -316,6 +336,7 @@ describe("public thread plugin metadata routes", () => {
       } finally {
         harness.deps.logger = previousLogger;
       }
+
       for (const body of [
         { pluginId: "Bad", threadIds: [live!.id] },
         { pluginId: "linear", threadIds: [] },
@@ -335,6 +356,7 @@ describe("public thread plugin metadata routes", () => {
       expect(
         markThreadDeleted(harness.db, harness.hub, { threadId: thread.id }),
       ).not.toBeNull();
+
       const notFound = {
         status: 404,
         body: { code: "thread_not_found", message: "Thread not found" },

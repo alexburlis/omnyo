@@ -1,7 +1,8 @@
 import { setPluginAgentContributions } from "../../src/services/plugins/plugin-agent-contributions.js";
 import type { PluginAgentToolRecord } from "../../src/services/plugins/plugin-api.js";
 import { eq } from "drizzle-orm";
-import { events } from "@bb/db";
+import { events, appendStoredThreadEvent, noopNotifier } from "@omnyo/db";
+import { turnScope } from "@omnyo/domain";
 import { describe, expect, it, vi } from "vitest";
 import { internalAuthHeaders } from "../helpers/commands.js";
 import { readJson } from "../helpers/json.js";
@@ -24,13 +25,16 @@ describe("internal tool-call regressions", () => {
     await withTestHarness(async (harness) => {
       const hostA = seedHostSession(harness.deps, { id: "host-tool-a" });
       const hostB = seedHostSession(harness.deps, { id: "host-tool-b" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: hostB.host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: hostB.host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -74,26 +78,31 @@ function seedIdleProviderThread(harness: TestAppHarness, value: number) {
   const { host, session } = seedHostSession(harness.deps, {
     id: `host-detached-tool-${value}`,
   });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: `/tmp/detached-tool-${value}`,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: `/tmp/detached-tool-${value}`,
     status: "ready",
   });
+
   const thread = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
     status: "idle",
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     providerThreadId: `provider-detached-tool-${value}`,
     threadId: thread.id,
   });
+
   return { session, thread };
 }
 
@@ -111,6 +120,7 @@ function installWaitingTool(
     resolveMention: async () => ({ ok: false, error: "unused" }),
     invokeAgentTool: async ({ ctx }) => {
       observe(ctx.signal);
+
       const pending = harness.deps.pendingInteractions.requestPluginInteraction(
         {
           pluginId: "fixture",
@@ -125,10 +135,13 @@ function installWaitingTool(
           describeSubmission: null,
           timeoutMs: 10_000,
           signal: ctx.signal,
+          owner: { pluginId: "fixture" },
         },
       );
+
       detachActivePluginToolCallForUserInput();
       const result = await pending;
+
       return result.outcome === "submitted"
         ? {
             success: true,
@@ -160,6 +173,7 @@ describe("plugin tool calls that outlive their round trip", () => {
   it("aborts an ordinary tool when the response stream is cancelled", async () => {
     await withTestHarness(async (harness) => {
       const { session, thread } = seedIdleProviderThread(harness, 3);
+
       const record: PluginAgentToolRecord = {
         name: "ordinary_tool",
         description: "Work without a form",
@@ -169,11 +183,14 @@ describe("plugin tool calls that outlive their round trip", () => {
         parse: (input) => ({ ok: true, value: input }),
         execute: () => "unused",
       };
+
       let toolSignal: AbortSignal | undefined;
       let finish!: () => void;
+
       const finished = new Promise<void>((resolve) => {
         finish = resolve;
       });
+
       const initialRequests = turnRequestedEvents(harness, thread.id);
       setPluginAgentContributions({
         listSkillRootContributions: () => [],
@@ -185,12 +202,14 @@ describe("plugin tool calls that outlive their round trip", () => {
         invokeAgentTool: async ({ ctx }) => {
           toolSignal = ctx.signal;
           await finished;
+
           return {
             success: true,
             contentItems: [{ type: "inputText", text: "done" }],
           };
         },
       });
+
       try {
         const response = await harness.app.request(
           "/internal/session/tool-call",
@@ -207,6 +226,7 @@ describe("plugin tool calls that outlive their round trip", () => {
             }),
           },
         );
+
         expect(toolSignal?.aborted).toBe(false);
         await response.body!.cancel();
         expect(toolSignal?.aborted).toBe(true);
@@ -228,6 +248,7 @@ describe("plugin tool calls that outlive their round trip", () => {
   it("answers the round trip with a waiting notice, keeps the card open, and delivers the answer as a system message", async () => {
     await withTestHarness(async (harness) => {
       const { session, thread } = seedIdleProviderThread(harness, 1);
+
       const record: PluginAgentToolRecord = {
         name: "wait_for_user",
         description: "Wait",
@@ -237,10 +258,12 @@ describe("plugin tool calls that outlive their round trip", () => {
         parse: (input) => ({ ok: true, value: input }),
         execute: () => "unused",
       };
+
       let toolSignal: AbortSignal | undefined;
       installWaitingTool(harness, record, (signal) => {
         toolSignal = signal;
       });
+
       try {
         const response = await harness.app.request(
           "/internal/session/tool-call",
@@ -257,6 +280,7 @@ describe("plugin tool calls that outlive their round trip", () => {
             }),
           },
         );
+
         await expect(response.json()).resolves.toEqual({
           success: true,
           contentItems: [
@@ -266,10 +290,12 @@ describe("plugin tool calls that outlive their round trip", () => {
             },
           ],
         });
+
         const [interaction] =
           harness.deps.pendingInteractions.listPendingThreadInteractions(
             thread.id,
           );
+
         expect(interaction).toBeDefined();
 
         expect(toolSignal?.aborted).toBe(false);
@@ -288,6 +314,7 @@ describe("plugin tool calls that outlive their round trip", () => {
             body: JSON.stringify({ value: "late answer" }),
           },
         );
+
         expect(late.status).toBe(200);
 
         await vi.waitFor(() => {
@@ -295,11 +322,13 @@ describe("plugin tool calls that outlive their round trip", () => {
             listQueuedThreadCommands(harness, "turn.submit", thread.id),
           ).toHaveLength(1);
         });
+
         const [command] = listQueuedThreadCommands(
           harness,
           "turn.submit",
           thread.id,
         );
+
         expect(command).toMatchObject({
           input: [
             expect.objectContaining({
@@ -329,6 +358,7 @@ describe("plugin tool calls that outlive their round trip", () => {
   it("does not wake an idle thread for a failed detached result", async () => {
     await withTestHarness(async (harness) => {
       const { session, thread } = seedIdleProviderThread(harness, 2);
+
       const record: PluginAgentToolRecord = {
         name: "wait_for_user",
         description: "Wait",
@@ -338,7 +368,9 @@ describe("plugin tool calls that outlive their round trip", () => {
         parse: (input) => ({ ok: true, value: input }),
         execute: () => "unused",
       };
+
       installWaitingTool(harness, record, () => undefined);
+
       try {
         const response = await harness.app.request(
           "/internal/session/tool-call",
@@ -355,7 +387,9 @@ describe("plugin tool calls that outlive their round trip", () => {
             }),
           },
         );
+
         await response.json();
+
         const [interaction] =
           harness.deps.pendingInteractions.listPendingThreadInteractions(
             thread.id,
@@ -376,5 +410,105 @@ describe("plugin tool calls that outlive their round trip", () => {
         setPluginAgentContributions(undefined);
       }
     });
+  });
+});
+
+it("does not grant dispatch authority to a legacy tool name or a pending historical row", async () => {
+  await withTestHarness(async (harness) => {
+    const { session, thread } = seedIdleProviderThread(harness, 71);
+
+    const record: PluginAgentToolRecord = {
+      name: "omnyo_workflow_run",
+      description: "Current registered tool",
+      presentation: null,
+      instructions: null,
+      inputSchema: {},
+      parse: (input) => ({ ok: true, value: input }),
+      execute: () => "unused",
+    };
+
+    let executions = 0;
+    setPluginAgentContributions({
+      listSkillRootContributions: () => [],
+      listAgentTools: () => [],
+      listInstructionContributions: () => [],
+      findAgentTool: (name) =>
+        name === record.name ? { pluginId: "fixture", record } : undefined,
+      resolveMention: async () => ({ ok: false, error: "unused" }),
+      invokeAgentTool: async () => {
+        executions++;
+
+        return {
+          success: true,
+          contentItems: [{ type: "inputText", text: "executed current tool" }],
+        };
+      },
+    });
+
+    try {
+      appendStoredThreadEvent(harness.db, noopNotifier, {
+        type: "item/started",
+        threadId: thread.id,
+        providerThreadId: "provider-detached-tool-71",
+        scope: turnScope("historical-turn"),
+        data: {
+          providerThreadId: "provider-detached-tool-71",
+          item: {
+            type: "toolCall",
+            id: "historical-call",
+            tool: "bb_workflow_run",
+            server: "bb",
+            status: "pending",
+            arguments: { value: "original user text" },
+          },
+        },
+      });
+
+      const before = harness.db
+        .select({ data: events.data })
+        .from(events)
+        .where(eq(events.itemId, "historical-call"))
+        .all();
+
+      const request = async (tool: string, callId: string) =>
+        harness.app.request("/internal/session/tool-call", {
+          method: "POST",
+          headers: internalAuthHeaders(harness),
+          body: JSON.stringify({
+            sessionId: session.id,
+            eventsThrough: 0,
+            threadId: thread.id,
+            providerThreadId: "provider-detached-tool-71",
+            turnId: "historical-turn",
+            callId,
+            tool,
+            arguments: {},
+          }),
+        });
+
+      const denied = await request("bb_workflow_run", "historical-call");
+
+      expect(denied.status).toBe(200);
+      await expect(readJson(denied)).resolves.toMatchObject({
+        success: false,
+        contentItems: [
+          { type: "inputText", text: "Unsupported tool: bb_workflow_run" },
+        ],
+      });
+      expect(executions).toBe(0);
+      expect(
+        harness.db
+          .select({ data: events.data })
+          .from(events)
+          .where(eq(events.itemId, "historical-call"))
+          .all(),
+      ).toEqual(before);
+      const current = await request("omnyo_workflow_run", "fresh-current-call");
+
+      await expect(readJson(current)).resolves.toMatchObject({ success: true });
+      expect(executions).toBe(1);
+    } finally {
+      setPluginAgentContributions(undefined);
+    }
   });
 });

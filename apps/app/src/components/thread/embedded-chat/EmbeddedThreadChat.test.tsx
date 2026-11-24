@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { ActionHistoryProvider } from "@/components/layout/ActionHistoryProvider";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useEffect, useLayoutEffect, type ReactNode } from "react";
 import {
@@ -19,6 +20,8 @@ import { EmbeddedThreadChat } from "./EmbeddedThreadChat";
 
 const mocks = vi.hoisted(() => ({
   createQueuedMessageMutateAsync: vi.fn(),
+  composerMutationPending: false,
+  executionDefaultsLoading: false,
   onOpenLink: vi.fn(),
   onOpenLocalFileLink: vi.fn(),
   pendingInteractions: [] as
@@ -51,6 +54,7 @@ const hostDraftMocks = vi.hoisted(() => ({
 vi.mock("@/components/promptbox/FollowUpPromptBox", async () => {
   const { usePluginComposerHostDraft } =
     await import("@/components/plugin/plugin-composer-host");
+
   function BottomHostDraftProbe({ host }: { host: PluginComposerHost | null }) {
     useLayoutEffect(() => {
       hostDraftMocks.latestHost = host;
@@ -65,25 +69,34 @@ vi.mock("@/components/promptbox/FollowUpPromptBox", async () => {
       });
     }, [host]);
     const draft = usePluginComposerHostDraft(host);
+
     return <div data-testid="embedded-host-draft">{draft?.text ?? ""}</div>;
   }
+
   return {
     FollowUpPromptBox: ({
       composer,
       pendingInteraction,
       stack,
+      queue = null,
       pluginComposerHost,
     }: {
       composer: Pick<
         FollowUpComposerProps,
-        "message" | "onChangeMessage" | "onSubmit" | "submitMode"
+        | "message"
+        | "onChangeMessage"
+        | "onSubmit"
+        | "onModifierSubmit"
+        | "submitMode"
       >;
       pendingInteraction?: ReactNode;
       stack: ReactNode;
+      queue?: ReactNode;
       pluginComposerHost?: PluginComposerHost | null;
     }) => (
       <div>
         {stack}
+        {queue}
         {pendingInteraction}
         <input
           data-testid="embedded-chat-composer"
@@ -99,8 +112,20 @@ vi.mock("@/components/promptbox/FollowUpPromptBox", async () => {
           value={composer.message}
           onChange={(event) => composer.onChangeMessage(event.target.value, [])}
         />
-        <button type="button" onClick={composer.onSubmit}>
+        <button type="button" onClick={() => composer.onSubmit()}>
           Send
+        </button>
+        <button
+          type="button"
+          onClick={() => composer.onSubmit({ sendNow: true })}
+        >
+          Force primary
+        </button>
+        <button
+          type="button"
+          onClick={() => composer.onModifierSubmit({ sendNow: true })}
+        >
+          Force modifier
         </button>
         <BottomHostDraftProbe host={pluginComposerHost ?? null} />
       </div>
@@ -168,6 +193,7 @@ vi.mock("@/components/thread/timeline", () => ({
     mocks.timelinePanelProps.push(props);
     mocks.injectedTimelineProps.push(props.timeline);
     mocks.timelineProjectIds.push(props.projectId as string | undefined);
+
     return (
       <div>
         {mocks.timelineRows.map((row, index) => (
@@ -187,6 +213,7 @@ vi.mock("@/components/ui/app-toast", () => ({
 
 vi.mock("@/hooks/useThreadCreationOptions", () => ({
   useThreadCreationOptions: () => ({
+    executionInputSources: {},
     executionOptionsRouting: undefined,
     selectedProviderId: "provider-1",
     providerOptions: [],
@@ -273,13 +300,15 @@ vi.mock(
 
 vi.mock("@/hooks/queries/thread-default-execution-options-query", () => ({
   useThreadDefaultExecutionOptions: () => ({
-    data: {
-      model: "gpt-5",
-      permissionMode: "auto",
-      reasoningLevel: "medium",
-      serviceTier: undefined,
-    },
-    isLoading: false,
+    data: mocks.executionDefaultsLoading
+      ? undefined
+      : {
+          model: "gpt-5",
+          permissionMode: "auto",
+          reasoningLevel: "medium",
+          serviceTier: undefined,
+        },
+    isLoading: mocks.executionDefaultsLoading,
   }),
 }));
 
@@ -297,11 +326,15 @@ vi.mock("@/hooks/mutations/thread-runtime-mutations", () => ({
   useCreateThreadQueuedMessage: () => ({
     mutateAsync: mocks.createQueuedMessageMutateAsync,
     mutate: vi.fn(),
-    isPending: false,
+    isPending: mocks.composerMutationPending,
   }),
   useSendThreadMessage: () => ({
+    reserve: () => ({
+      run: (send: () => Promise<unknown>) => send(),
+      cancel: () => {},
+    }),
     mutateAsync: mocks.sendThreadMessageMutateAsync,
-    isPending: false,
+    isPending: mocks.composerMutationPending,
   }),
   useStopThread: () => ({
     mutate: vi.fn(),
@@ -309,6 +342,10 @@ vi.mock("@/hooks/mutations/thread-runtime-mutations", () => ({
     variables: undefined,
   }),
   useDeleteThreadQueuedMessage: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useRestoreThreadQueuedMessage: () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
@@ -332,6 +369,7 @@ vi.mock("@/hooks/mutations/thread-runtime-mutations", () => ({
 
 vi.mock("@/hooks/mutations/thread-state-mutations", () => {
   const mutate = vi.fn();
+
   return { useMarkThreadRead: () => ({ mutate }) };
 });
 
@@ -356,30 +394,31 @@ function buildEmbeddedChat({
   pluginComposerBottomScope?: PluginComposerHost["scope"];
 } = {}) {
   return (
-    <EmbeddedThreadChat
-      variant="compact"
-      surfaceTone={surfaceTone}
-      threadId={threadId}
-      projectId="proj-1"
-      providerId="provider-1"
-      promptContextEnvironmentId={null}
-      onOpenLink={mocks.onOpenLink}
-      onOpenLocalFileLink={mocks.onOpenLocalFileLink}
-      resolveMentionLink={mocks.resolveMentionLink}
-      workspaceRootPath="/workspace"
-      composer={{
-        draftScope: {
-          kind: "thread",
-          projectId: "proj-1",
-          threadId,
-        },
-        executionDefaultsThreadId: threadId,
-        executionResetKey: "thr_parent",
-        permissionPolicy: "snapshot",
-        environmentSummary: null,
-        ...(pluginComposerBottomScope ? { pluginComposerBottomScope } : {}),
-      }}
-    />
+    <ActionHistoryProvider>
+      <EmbeddedThreadChat
+        variant="compact"
+        surfaceTone={surfaceTone}
+        threadId={threadId}
+        projectId="proj-1"
+        providerId="provider-1"
+        promptContextEnvironmentId={null}
+        onOpenLink={mocks.onOpenLink}
+        onOpenLocalFileLink={mocks.onOpenLocalFileLink}
+        resolveMentionLink={mocks.resolveMentionLink}
+        workspaceRootPath="/workspace"
+        composer={{
+          draftScope: {
+            kind: "thread",
+            projectId: "proj-1",
+            threadId,
+          },
+          executionDefaultsThreadId: threadId,
+          executionResetKey: "thr_parent",
+          permissionPolicy: "snapshot",
+          ...(pluginComposerBottomScope ? { pluginComposerBottomScope } : {}),
+        }}
+      />
+    </ActionHistoryProvider>
   );
 }
 
@@ -395,6 +434,7 @@ describe("EmbeddedThreadChat", () => {
   beforeEach(() => {
     window.localStorage.clear();
     mocks.createQueuedMessageMutateAsync.mockReset().mockResolvedValue({});
+    mocks.executionDefaultsLoading = false;
     mocks.sendThreadMessageMutateAsync.mockReset().mockResolvedValue({});
     mocks.onOpenLink.mockReset();
     mocks.onOpenLocalFileLink.mockReset();
@@ -489,6 +529,46 @@ describe("EmbeddedThreadChat", () => {
     expect(mocks.injectedTimelineProps.at(-1)).toBeUndefined();
   });
 
+  it.each(["idle", "active"])(
+    "accepts a second %s draft before the first request settles",
+    async (status) => {
+      mocks.threadRuntimeDisplayStatus = status;
+      mocks.composerMutationPending = true;
+
+      let finish: (value: { delivery: "queued" }) => void = () => {};
+
+      const pending = new Promise<{ delivery: "queued" }>((resolve) => {
+        finish = resolve;
+      });
+
+      const mutation =
+        status === "active"
+          ? mocks.createQueuedMessageMutateAsync
+          : mocks.sendThreadMessageMutateAsync;
+
+      mutation.mockReturnValue(pending);
+
+      try {
+        renderEmbeddedChat();
+
+        for (const text of ["First draft", "Second draft"]) {
+          fireEvent.change(screen.getByTestId("embedded-chat-composer"), {
+            target: { value: text },
+          });
+          fireEvent.click(screen.getByText("Send"));
+        }
+
+        await vi.waitFor(() => expect(mutation).toHaveBeenCalledTimes(2));
+        expect(
+          mutation.mock.calls.map(([request]) => request.input[0].text),
+        ).toEqual(["First draft", "Second draft"]);
+      } finally {
+        mocks.composerMutationPending = false;
+        finish({ delivery: "queued" });
+      }
+    },
+  );
+
   it("queues the submitted draft itself while the thread runtime is active", async () => {
     mocks.threadRuntimeDisplayStatus = "active";
     renderEmbeddedChat();
@@ -513,7 +593,8 @@ describe("EmbeddedThreadChat", () => {
     ).toBe("");
   });
 
-  it("sends directly when the thread runtime is idle", async () => {
+  it("sends immediately with inherited defaults while thread options are loading", async () => {
+    mocks.executionDefaultsLoading = true;
     mocks.threadRuntimeDisplayStatus = "idle";
     renderEmbeddedChat();
     fireEvent.change(screen.getByTestId("embedded-chat-composer"), {
@@ -527,8 +608,71 @@ describe("EmbeddedThreadChat", () => {
       expect.objectContaining({
         id: "thr_child",
         mode: "queue-if-active",
+        executionInputSources: {},
         input: [{ type: "text", text: "Send me", mentions: [] }],
       }),
+    );
+    expect(
+      mocks.sendThreadMessageMutateAsync.mock.calls[0]?.[0],
+    ).not.toHaveProperty("sendNow");
+  });
+
+  it.each(["Force primary", "Force modifier"])(
+    "forwards explicit immediate-send intent from %s for an idle draft",
+    async (action) => {
+      mocks.threadRuntimeDisplayStatus = "idle";
+      renderEmbeddedChat();
+      fireEvent.change(screen.getByTestId("embedded-chat-composer"), {
+        target: { value: "Run now" },
+      });
+      fireEvent.click(screen.getByText(action));
+      await vi.waitFor(() => {
+        expect(mocks.sendThreadMessageMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: "thr_child",
+            sendNow: true,
+            input: [{ type: "text", text: "Run now", mentions: [] }],
+          }),
+        );
+      });
+      expect(mocks.createQueuedMessageMutateAsync).not.toHaveBeenCalled();
+    },
+  );
+
+  it("accepts another draft before the previous send finishes and recovers a failure after leaving", async () => {
+    let rejectFirst: (error: Error) => void = () => {};
+
+    mocks.sendThreadMessageMutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFirst = reject;
+        }),
+    );
+    const view = renderEmbeddedChat();
+    fireEvent.change(screen.getByTestId("embedded-chat-composer"), {
+      target: { value: "First message" },
+    });
+    fireEvent.click(screen.getByText("Send"));
+    fireEvent.change(screen.getByTestId("embedded-chat-composer"), {
+      target: { value: "Second message" },
+    });
+    fireEvent.click(screen.getByText("Send"));
+
+    expect(mocks.sendThreadMessageMutateAsync).toHaveBeenCalledTimes(2);
+    fireEvent.change(screen.getByTestId("embedded-chat-composer"), {
+      target: { value: "Newer draft" },
+    });
+    view.unmount();
+    rejectFirst(new Error("offline"));
+
+    await vi.waitFor(() =>
+      expect(
+        getPromptDraftAccessor({
+          kind: "thread",
+          projectId: "proj-1",
+          threadId: "thr_child",
+        }).getCurrent().text,
+      ).toBe("Newer draft\n\nFirst message"),
     );
   });
 
@@ -678,17 +822,20 @@ describe("EmbeddedThreadChat", () => {
 
   it("keeps the composer key across a remount and writes after unmount to the thread draft", () => {
     const scope = { kind: "thread", threadId: "thr_key" } as const;
+
     const draftKey = getPromptDraftAccessor({
       kind: "thread",
       projectId: "proj-1",
       threadId: "thr_key",
     }).storageKey;
+
     const first = render(
       buildEmbeddedChat({
         threadId: "thr_key",
         pluginComposerBottomScope: scope,
       }),
     );
+
     const firstHost = hostDraftMocks.latestHost!;
     expect(firstHost.textEffectKey).toBe(draftKey);
     expect(firstHost.getSelection?.()).toEqual({
@@ -728,12 +875,14 @@ describe("EmbeddedThreadChat", () => {
 
     const scopeFor = (threadId: string) =>
       ({ kind: "thread", threadId }) as const;
+
     const view = render(
       buildEmbeddedChat({
         threadId: "thr_switch_a",
         pluginComposerBottomScope: scopeFor("thr_switch_a"),
       }),
     );
+
     expect(screen.getByTestId("embedded-host-draft").textContent).toBe(
       "alpha draft",
     );

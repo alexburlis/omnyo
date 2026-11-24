@@ -68,21 +68,25 @@ export interface AcpSessionModel {
 }
 
 const DEFAULT_PLAN_ID = "default";
+
 const TERMINAL_TOOL_CALL_STATUSES = new Set([
   "completed",
   "failed",
   "cancelled",
 ]);
+
 const MESSAGE_CHUNK_ROLES: Readonly<Record<string, AcpMessageRole>> = {
   user_message_chunk: "user",
   agent_message_chunk: "agent",
   agent_thought_chunk: "thought",
 };
+
 const MESSAGE_UPSERT_ROLES: Readonly<Record<string, AcpMessageRole>> = {
   user_message: "user",
   agent_message: "agent",
   agent_thought: "thought",
 };
+
 const TOOL_CALL_STRING_FIELDS = ["title", "name", "kind", "status"] as const;
 
 export function isTerminalToolCallStatus(status: string): boolean {
@@ -101,6 +105,7 @@ export function createAcpSessionModel(
     stopReason: null,
     error: null,
   };
+
   let promptsInFlight = 0;
   let agentWorking = false;
   const pendingActions = new Set<string>();
@@ -123,6 +128,7 @@ export function createAcpSessionModel(
 
   function noteLegacyModeOverlap(): void {
     const mode = legacyMode;
+
     if (
       legacyModeRepeatsThoughtLevels ||
       mode === null ||
@@ -131,6 +137,7 @@ export function createAcpSessionModel(
     ) {
       return;
     }
+
     legacyModeRepeatsThoughtLevels = agentConfigOptions.some(
       (option) =>
         option.category === "thought_level" &&
@@ -144,6 +151,7 @@ export function createAcpSessionModel(
   function effectiveConfigOptions(): AcpConfigOption[] {
     const hasCategory = (category: string) =>
       agentConfigOptions.some((option) => option.category === category);
+
     return [
       ...agentConfigOptions,
       ...(legacyModel && !hasCategory("model") ? [legacyModel] : []),
@@ -170,11 +178,14 @@ export function createAcpSessionModel(
     ) {
       return [];
     }
+
     const previous = work;
     work = next;
+
     if (next.state === "idle") {
       currentMessage = null;
     }
+
     return [{ type: "work", replay: replaying, previous, work: next }];
   }
 
@@ -189,6 +200,7 @@ export function createAcpSessionModel(
         error: settlement ? settlement.error : work.error,
       });
     }
+
     return setWork({
       state: pendingActions.size > 0 ? "requires_action" : "running",
       initiator: promptsInFlight > 0 ? "client" : "agent",
@@ -201,10 +213,13 @@ export function createAcpSessionModel(
     if (agentReportsState || replaying) {
       return [];
     }
+
     if (promptsInFlight > 0 || agentWorking) {
       return [];
     }
+
     agentWorking = true;
+
     return deriveWork(null);
   }
 
@@ -242,18 +257,23 @@ export function createAcpSessionModel(
   ): AcpMessageEntity {
     if (messageId !== undefined) {
       const existing = messages.get(messageId);
+
       if (existing) {
         return existing;
       }
+
       const created: AcpMessageEntity = {
         messageId,
         role,
         content: [],
         idSource: "agent",
       };
+
       messages.set(messageId, created);
+
       return created;
     }
+
     if (
       currentMessage &&
       currentMessage.role === role &&
@@ -261,14 +281,18 @@ export function createAcpSessionModel(
     ) {
       return currentMessage;
     }
+
     synthesizedMessageCount += 1;
+
     const created: AcpMessageEntity = {
-      messageId: `bb-message-${synthesizedMessageCount}`,
+      messageId: `omnyo-message-${synthesizedMessageCount}`,
       role,
       content: [],
       idSource: "synthesized",
     };
+
     messages.set(created.messageId, created);
+
     return created;
   }
 
@@ -278,13 +302,16 @@ export function createAcpSessionModel(
     update: AcpJsonObject,
   ): AcpSessionEvent[] {
     const block = decodeContentBlock(update["content"]);
+
     if (!block) {
       return unhandled("malformed", sessionUpdate, update);
     }
+
     const activity = noteAgentActivity();
     const message = resolveMessage(role, readString(update, "messageId"));
     message.content.push(block);
     currentMessage = message;
+
     return [
       ...activity,
       {
@@ -305,18 +332,23 @@ export function createAcpSessionModel(
     update: AcpJsonObject,
   ): AcpSessionEvent[] {
     const messageId = readString(update, "messageId");
+
     if (messageId === undefined) {
       return unhandled("malformed", sessionUpdate, update);
     }
+
     const activity = noteAgentActivity();
     const message = resolveMessage(role, messageId);
+
     if ("content" in update) {
       message.content =
         update["content"] === null
           ? []
           : (decodeContentBlocks(update["content"]) ?? message.content);
     }
+
     currentMessage = message;
+
     return [
       ...activity,
       {
@@ -336,10 +368,13 @@ export function createAcpSessionModel(
     update: AcpJsonObject,
   ): AcpSessionEvent[] {
     const toolCallId = readString(update, "toolCallId");
+
     if (toolCallId === undefined) {
       return unhandled("malformed", sessionUpdate, update);
     }
+
     const existing = toolCalls.get(toolCallId);
+
     const toolCall: AcpToolCallEntity = existing ?? {
       toolCallId,
       title: "",
@@ -347,18 +382,22 @@ export function createAcpSessionModel(
       content: [],
       locations: [],
     };
+
     const updated: AcpToolCallField[] = [];
 
     for (const field of TOOL_CALL_STRING_FIELDS) {
       if (!(field in update)) {
         continue;
       }
+
       const value = update[field];
+
       if (typeof value === "string") {
         toolCall[field] = value;
         updated.push(field);
         continue;
       }
+
       if (value === null && nullClears) {
         if (field === "title") {
           toolCall.title = "";
@@ -367,12 +406,14 @@ export function createAcpSessionModel(
         } else {
           delete toolCall[field];
         }
+
         updated.push(field);
       }
     }
 
     if ("content" in update) {
       const content = decodeToolCallContent(update["content"]);
+
       if (content) {
         toolCall.content = content;
         updated.push("content");
@@ -381,8 +422,10 @@ export function createAcpSessionModel(
         updated.push("content");
       }
     }
+
     if ("locations" in update) {
       const locations = decodeToolCallLocations(update["locations"]);
+
       if (locations) {
         toolCall.locations = locations;
         updated.push("locations");
@@ -391,36 +434,46 @@ export function createAcpSessionModel(
         updated.push("locations");
       }
     }
+
     for (const field of ["rawInput", "rawOutput"] as const) {
       if (!(field in update)) {
         continue;
       }
+
       const value = update[field];
+
       if (value === null || value === undefined) {
         if (nullClears && value === null && field in toolCall) {
           delete toolCall[field];
           updated.push(field);
         }
+
         continue;
       }
+
       toolCall[field] = value;
       updated.push(field);
     }
+
     const meta = readMeta(update);
+
     if (meta) {
       toolCall.meta = { ...toolCall.meta, ...meta };
       updated.push("meta");
     }
 
     const created = existing === undefined;
+
     if (created) {
       toolCalls.set(toolCallId, toolCall);
       currentMessage = null;
     }
+
     const activity =
       created || !isTerminalToolCallStatus(toolCall.status)
         ? noteAgentActivity()
         : [];
+
     return [...activity, toolCallEvent(toolCall, created, updated)];
   }
 
@@ -430,10 +483,13 @@ export function createAcpSessionModel(
   ): AcpSessionEvent[] {
     const toolCallId = readString(update, "toolCallId");
     const item = decodeToolCallContentItem(update["content"]);
+
     if (toolCallId === undefined || !item) {
       return unhandled("malformed", sessionUpdate, update);
     }
+
     const existing = toolCalls.get(toolCallId);
+
     const toolCall: AcpToolCallEntity = existing ?? {
       toolCallId,
       title: "",
@@ -441,12 +497,15 @@ export function createAcpSessionModel(
       content: [],
       locations: [],
     };
+
     toolCall.content.push(item);
     const created = existing === undefined;
+
     if (created) {
       toolCalls.set(toolCallId, toolCall);
       currentMessage = null;
     }
+
     return [
       ...noteAgentActivity(),
       toolCallEvent(toolCall, created, ["content"]),
@@ -460,11 +519,14 @@ export function createAcpSessionModel(
     raw: AcpJsonObject,
   ): AcpSessionEvent[] {
     const entries = decodePlanEntries(rawEntries);
+
     if (!entries) {
       return unhandled("malformed", sessionUpdate, raw);
     }
+
     const plan: AcpPlanEntity = { planId, entries };
     plans.set(planId, plan);
+
     return [{ type: "plan", replay: replaying, plan }];
   }
 
@@ -473,6 +535,7 @@ export function createAcpSessionModel(
     update: AcpJsonObject,
   ): AcpSessionEvent[] {
     const state = readString(update, "state");
+
     if (state === "running" || state === "requires_action") {
       return setWork({
         state,
@@ -481,6 +544,7 @@ export function createAcpSessionModel(
         error: null,
       });
     }
+
     if (state === "idle") {
       return setWork({
         state: "idle",
@@ -489,6 +553,7 @@ export function createAcpSessionModel(
         error: decodeWorkError(update["error"]),
       });
     }
+
     return unhandled("malformed", sessionUpdate, update);
   }
 
@@ -496,16 +561,21 @@ export function createAcpSessionModel(
     if (!isJsonObject(update)) {
       return unhandled("malformed", null, update);
     }
+
     const sessionUpdate = readString(update, "sessionUpdate");
+
     if (sessionUpdate === undefined) {
       return unhandled("malformed", null, update);
     }
 
     const chunkRole = MESSAGE_CHUNK_ROLES[sessionUpdate];
+
     if (chunkRole !== undefined) {
       return applyMessageChunk(chunkRole, sessionUpdate, update);
     }
+
     const upsertRole = MESSAGE_UPSERT_ROLES[sessionUpdate];
+
     if (upsertRole !== undefined) {
       return applyMessageUpsert(upsertRole, sessionUpdate, update);
     }
@@ -525,9 +595,11 @@ export function createAcpSessionModel(
         );
       case "plan_update": {
         const plan = update["plan"];
+
         if (!isJsonObject(plan) || readString(plan, "type") !== "items") {
           return unhandled("unknown-variant", sessionUpdate, update);
         }
+
         return applyPlan(
           sessionUpdate,
           readString(plan, "planId") ?? DEFAULT_PLAN_ID,
@@ -535,52 +607,72 @@ export function createAcpSessionModel(
           update,
         );
       }
+
       case "available_commands_update": {
         const decoded = decodeAvailableCommands(update["availableCommands"]);
+
         if (!decoded) {
           return unhandled("malformed", sessionUpdate, update);
         }
+
         commands = decoded;
+
         return [{ type: "commands", replay: replaying, commands }];
       }
+
       case "config_option_update":
         return applyConfigOptions(update["configOptions"]);
       case "current_mode_update": {
         const currentModeId = readString(update, "currentModeId");
+
         if (currentModeId === undefined) {
           return unhandled("malformed", sessionUpdate, update);
         }
+
         if (!legacyMode || legacyMode.type !== "select") {
           return [];
         }
+
         legacyMode = { ...legacyMode, currentValue: currentModeId };
+
         return [configOptionsEvent()];
       }
+
       case "session_info_update": {
         const next = { ...info };
+
         for (const field of ["title", "updatedAt"] as const) {
           if (!(field in update)) {
             continue;
           }
+
           const value = update[field];
+
           if (typeof value === "string" || value === null) {
             next[field] = value;
           }
         }
+
         info = next;
+
         return [{ type: "info", replay: replaying, info }];
       }
+
       case "usage_update": {
         const counts = decodeUsageCounts(update);
+
         if (!counts) {
           return unhandled("malformed", sessionUpdate, update);
         }
+
         usage = {
           ...counts,
           cost: decodeUsageCost(update["cost"]) ?? usage?.cost ?? null,
         };
+
         return [{ type: "usage", replay: replaying, usage }];
       }
+
       case "state_update":
         return agentReportsState
           ? applyStateUpdate(sessionUpdate, update)
@@ -592,11 +684,14 @@ export function createAcpSessionModel(
 
   function applyConfigOptions(configOptions: unknown): AcpSessionEvent[] {
     const decoded = decodeConfigOptions(configOptions);
+
     if (!decoded) {
       return [];
     }
+
     agentConfigOptions = decoded;
     noteLegacyModeOverlap();
+
     return [configOptionsEvent()];
   }
 
@@ -606,6 +701,7 @@ export function createAcpSessionModel(
         toolCalls.delete(toolCallId);
       }
     }
+
     messages.clear();
     currentMessage = null;
   }
@@ -639,6 +735,7 @@ export function createAcpSessionModel(
       legacyModel = decodeLegacyModels(setup.models);
       legacyModeRepeatsThoughtLevels = false;
       noteLegacyModeOverlap();
+
       return [configOptionsEvent()];
     },
 
@@ -649,34 +746,47 @@ export function createAcpSessionModel(
         if (option.id !== optionId) {
           return null;
         }
+
         if (option.type === "select" && typeof value === "string") {
           return { ...option, currentValue: value };
         }
+
         if (option.type === "boolean" && typeof value === "boolean") {
           return { ...option, currentValue: value };
         }
+
         return null;
       };
+
       const agentIndex = agentConfigOptions.findIndex(
         (option) => withValue(option) !== null,
       );
+
       if (agentIndex !== -1) {
         agentConfigOptions = agentConfigOptions.map(
           (option, index) =>
             (index === agentIndex ? withValue(option) : null) ?? option,
         );
+
         return [configOptionsEvent()];
       }
+
       const nextLegacyMode = legacyMode ? withValue(legacyMode) : null;
+
       if (nextLegacyMode) {
         legacyMode = nextLegacyMode;
+
         return [configOptionsEvent()];
       }
+
       const nextLegacyModel = legacyModel ? withValue(legacyModel) : null;
+
       if (nextLegacyModel) {
         legacyModel = nextLegacyModel;
+
         return [configOptionsEvent()];
       }
+
       return [];
     },
 
@@ -693,18 +803,22 @@ export function createAcpSessionModel(
     promptSubmitted() {
       pruneSettledEntities();
       promptsInFlight += 1;
+
       return agentReportsState ? [] : deriveWork(null);
     },
 
     promptSettled(outcome) {
       promptsInFlight = Math.max(0, promptsInFlight - 1);
+
       if (agentReportsState) {
         return [];
       }
+
       if (promptsInFlight === 0) {
         agentWorking = false;
         pendingActions.clear();
       }
+
       return deriveWork(
         "error" in outcome
           ? { stopReason: "error", error: outcome.error }
@@ -714,17 +828,21 @@ export function createAcpSessionModel(
 
     actionRequested(key) {
       pendingActions.add(key);
+
       if (agentReportsState) {
         return [];
       }
+
       if (promptsInFlight === 0) {
         agentWorking = true;
       }
+
       return deriveWork(null);
     },
 
     actionResolved(key) {
       pendingActions.delete(key);
+
       return agentReportsState ? [] : deriveWork(null);
     },
 
@@ -732,10 +850,13 @@ export function createAcpSessionModel(
       if (agentReportsState || !agentWorking) {
         return [];
       }
+
       agentWorking = false;
+
       if (promptsInFlight === 0) {
         pendingActions.clear();
       }
+
       return deriveWork({ stopReason, error: null });
     },
 
@@ -745,18 +866,22 @@ export function createAcpSessionModel(
           return true;
         }
       }
+
       return false;
     },
 
     closeUnfinishedToolCalls(status) {
       const events: AcpSessionEvent[] = [];
+
       for (const toolCall of toolCalls.values()) {
         if (isTerminalToolCallStatus(toolCall.status)) {
           continue;
         }
+
         toolCall.status = status;
         events.push(toolCallEvent(toolCall, false, ["status"]));
       }
+
       return events;
     },
   };

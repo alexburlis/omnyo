@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   PluginDiffRendererProps,
   PluginSourceCodeRendererProps,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import { parseGitDiffFiles } from "@/components/git-diff/git-diff-parsing";
 import {
   resetPluginSlotStoreForTest,
@@ -25,13 +25,15 @@ import { SourceCodeHost } from "./SourceCodeHost";
 
 const loaded = vi.hoisted(() => ({ diff: false, source: false }));
 
-vi.mock("./BbDiff", () => {
+vi.mock("./OmnyoDiff", () => {
   loaded.diff = true;
+
   return { default: () => <div data-testid="built-in-diff" /> };
 });
 
-vi.mock("./BbSourceCode", () => {
+vi.mock("./OmnyoSourceCode", () => {
   loaded.source = true;
+
   return { default: () => <div data-testid="built-in-source" /> };
 });
 
@@ -39,6 +41,7 @@ function Replacement({
   Original,
 }: Pick<PluginDiffRendererProps | PluginSourceCodeRendererProps, "Original">) {
   const [delegates, setDelegates] = useState(false);
+
   return (
     <div>
       <button type="button" onClick={() => setDelegates(true)}>
@@ -69,9 +72,11 @@ describe("replacement renderer lazy loading", () => {
           ],
         }),
       );
+
       const file = parseGitDiffFiles(
         "diff --git a/app.ts b/app.ts\n--- a/app.ts\n+++ b/app.ts\n@@ -1 +1 @@\n-old\n+new\n",
       )[0];
+
       if (file === undefined) throw new Error("Fixture did not parse");
       render(
         <Provider>

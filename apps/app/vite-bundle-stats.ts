@@ -1,9 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
-
-const appDir = dirname(fileURLToPath(import.meta.url));
 
 interface BundleBootChunk {
   fileName: string;
@@ -30,6 +27,7 @@ export interface BundleStats {
 }
 
 const MEASURED_ROUTE_CLOSURES: Record<string, readonly string[]> = {
+  AppShell: ["/src/app-entry.tsx"],
   PluginFrontend: ["/src/lib/plugin-frontend.ts"],
   ThreadPage: [
     "/src/views/SplitWorkspaceRoute.tsx",
@@ -54,9 +52,18 @@ export function computeBundleStats(
   chunks: readonly BundleStatsChunkInput[],
   measuredRouteClosures: Record<string, readonly string[]>,
   warn: (message: string) => void,
+  appDir: string,
+  entryFileNames?: readonly string[],
 ): BundleStats | null {
   const byFileName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]));
-  const entry = chunks.find((chunk) => chunk.isEntry);
+
+  const entries =
+    entryFileNames === undefined
+      ? chunks.filter((chunk) => chunk.isEntry)
+      : chunks.filter((chunk) => entryFileNames.includes(chunk.fileName));
+
+  const entry = entries[0];
+
   if (entry === undefined) return null;
 
   const staticClosure = (
@@ -64,23 +71,31 @@ export function computeBundleStats(
     skip: ReadonlySet<string>,
   ): Set<string> => {
     const closure = new Set<string>();
+
     const walk = (fileName: string): void => {
       if (closure.has(fileName) || skip.has(fileName)) return;
       closure.add(fileName);
       const chunk = byFileName.get(fileName);
+
       if (chunk === undefined) return;
+
       for (const imported of chunk.imports) walk(imported);
     };
+
     walk(startFileName);
+
     return closure;
   };
 
   const describeChunk = (chunk: BundleStatsChunkInput): BundleBootChunk => {
     const packages = new Set<string>();
+
     for (const moduleId of chunk.moduleIds) {
       const name = packageNameOf(moduleId);
+
       if (name !== null) packages.add(name);
     }
+
     return {
       fileName: chunk.fileName,
       bytes: Buffer.byteLength(chunk.code),
@@ -92,18 +107,25 @@ export function computeBundleStats(
     fileNames: ReadonlySet<string>,
   ): BundleBootChunk[] => {
     const described: BundleBootChunk[] = [];
+
     for (const fileName of [...fileNames].sort()) {
       const chunk = byFileName.get(fileName);
+
       if (chunk === undefined) continue;
       described.push(describeChunk(chunk));
     }
+
     return described;
   };
 
-  const bootFileNames = staticClosure(entry.fileName, new Set());
+  const bootFileNames = new Set(
+    entries.flatMap((chunk) => [...staticClosure(chunk.fileName, new Set())]),
+  );
+
   const bootChunks = describeChunks(bootFileNames);
 
   const allChunks: BundleChunk[] = [];
+
   for (const chunk of [...chunks].sort((a, b) =>
     a.fileName < b.fileName ? -1 : a.fileName > b.fileName ? 1 : 0,
   )) {
@@ -122,35 +144,43 @@ export function computeBundleStats(
   }
 
   const routeClosures: Record<string, BundleRouteClosure> = {};
+
   for (const [name, sourceSuffixes] of Object.entries(measuredRouteClosures)) {
     const entries: string[] = [];
+
     for (const sourceSuffix of sourceSuffixes) {
       const routeChunk = chunks.find(
         (chunk) =>
           chunk.facadeModuleId?.endsWith(sourceSuffix) ||
           chunk.moduleIds.some((id) => id.endsWith(sourceSuffix)),
       );
+
       if (routeChunk === undefined) {
         warn(
           `no chunk contains ${sourceSuffix}; the ${name} route closure is not recorded`,
         );
         break;
       }
+
       if (bootFileNames.has(routeChunk.fileName)) {
         warn(
           `${sourceSuffix} is in the boot payload (${routeChunk.fileName}); the ${name} route closure is not recorded`,
         );
         break;
       }
+
       entries.push(routeChunk.fileName);
     }
+
     if (entries.length !== sourceSuffixes.length) continue;
     const closure = new Set<string>();
+
     for (const fileName of entries) {
       for (const member of staticClosure(fileName, bootFileNames)) {
         closure.add(member);
       }
     }
+
     routeClosures[name] = { entries, chunks: describeChunks(closure) };
   }
 
@@ -163,11 +193,17 @@ export function computeBundleStats(
 }
 
 export function bundleStats(): Plugin {
+  let appDir = "";
+
   return {
-    name: "bb:bundle-stats",
+    name: "omnyo:bundle-stats",
     apply: "build",
+    configResolved(config) {
+      appDir = config.root;
+    },
     async writeBundle(_options, bundle) {
       const chunks: BundleStatsChunkInput[] = [];
+
       for (const output of Object.values(bundle)) {
         if (output.type !== "chunk") continue;
         chunks.push({
@@ -179,11 +215,35 @@ export function bundleStats(): Plugin {
           code: output.code,
         });
       }
+
+      const html = bundle["index.html"];
+
+      const entryFileNames =
+        html?.type === "asset" && typeof html.source === "string"
+          ? [...html.source.matchAll(/<script\b([^>]*)>/g)]
+              .filter(([, attrs]) => /\btype=["']module["']/.test(attrs ?? ""))
+              .flatMap(([, attrs]) => {
+                const src = attrs?.match(/\bsrc=["']([^"']+)["']/)?.[1];
+
+                if (src === undefined) return [];
+
+                const pathname = new URL(src, "https://omnyo.invalid/")
+                  .pathname;
+
+                return chunks
+                  .filter((chunk) => pathname.endsWith(`/${chunk.fileName}`))
+                  .map((chunk) => chunk.fileName);
+              })
+          : undefined;
+
       const stats = computeBundleStats(
         chunks,
         MEASURED_ROUTE_CLOSURES,
         (message) => this.warn(message),
+        appDir,
+        entryFileNames,
       );
+
       if (stats === null) return;
       const target = resolve(appDir, "bundle-stats.json");
       await mkdir(dirname(target), { recursive: true });
@@ -194,11 +254,15 @@ export function bundleStats(): Plugin {
 
 function packageNameOf(moduleId: string): string | null {
   const marker = moduleId.lastIndexOf("node_modules/");
+
   if (marker < 0) return null;
   const segments = moduleId.slice(marker + "node_modules/".length).split("/");
   const [first, second] = segments;
+
   if (first === undefined) return null;
+
   if (first.startsWith("@"))
     return second === undefined ? null : `${first}/${second}`;
+
   return first;
 }

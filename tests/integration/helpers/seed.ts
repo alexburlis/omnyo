@@ -41,6 +41,7 @@ export async function createTestFile(
 ): Promise<string> {
   await fs.mkdir(path.dirname(options.filePath), { recursive: true });
   await fs.writeFile(options.filePath, options.content, "utf8");
+
   return options.filePath;
 }
 
@@ -48,6 +49,7 @@ export async function runGit(options: RunGitOptions): Promise<string> {
   const result = await execFile("git", options.args, {
     cwd: options.cwd,
   });
+
   return result.stdout ?? "";
 }
 
@@ -65,7 +67,7 @@ export async function createTestGitRepo(
   });
   await runGit({
     cwd: options.repoDir,
-    args: ["config", "user.name", "BB Integration Tests"],
+    args: ["config", "user.name", "Omnyo Integration Tests"],
   });
 
   for (const file of options.files ?? DEFAULT_REPO_FILES) {
@@ -83,5 +85,6 @@ export async function createTestGitRepo(
     cwd: options.repoDir,
     args: ["commit", "-m", "Initial commit"],
   });
+
   return options.repoDir;
 }

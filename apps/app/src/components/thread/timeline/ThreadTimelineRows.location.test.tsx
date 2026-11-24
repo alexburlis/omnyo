@@ -17,19 +17,24 @@ import { ThreadTimelineRows } from "./ThreadTimelineRows";
 
 const compactViewport = vi.hoisted(() => ({ calls: 0 }));
 
-vi.mock("@bb/shared-ui/hooks/use-compact-viewport", async (importOriginal) => {
-  const actual =
-    await importOriginal<
-      typeof import("@bb/shared-ui/hooks/use-compact-viewport")
-    >();
-  return {
-    ...actual,
-    useIsCompactViewport: () => {
-      compactViewport.calls += 1;
-      return false;
-    },
-  };
-});
+vi.mock(
+  "@omnyo/shared-ui/hooks/use-compact-viewport",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@omnyo/shared-ui/hooks/use-compact-viewport")
+      >();
+
+    return {
+      ...actual,
+      useIsCompactViewport: () => {
+        compactViewport.calls += 1;
+
+        return false;
+      },
+    };
+  },
+);
 
 function NavigationProbe({
   navigateRef,
@@ -41,6 +46,7 @@ function NavigationProbe({
   useEffect(() => {
     navigateRef.current = navigate;
   }, [navigate, navigateRef]);
+
   return <div data-testid="location">{location.pathname}</div>;
 }
 
@@ -63,6 +69,7 @@ function PaneTimeline({ threadId }: { threadId: string }) {
       threadId,
     }),
   ]);
+
   return (
     <ThreadTimelineRows
       threadId={threadId}
@@ -75,6 +82,7 @@ function PaneTimeline({ threadId }: { threadId: string }) {
 
 function renderTwoPaneTimelines(nativeHistory = false) {
   const navigateRef: { current: NavigateFunction | null } = { current: null };
+
   const content = (
     <QueryClientProvider client={new QueryClient()}>
       <NavigationProbe navigateRef={navigateRef} />
@@ -82,6 +90,7 @@ function renderTwoPaneTimelines(nativeHistory = false) {
       <PaneTimeline threadId="thr_b" />
     </QueryClientProvider>
   );
+
   const view = render(
     nativeHistory ? (
       <BrowserRouter>{content}</BrowserRouter>
@@ -89,12 +98,15 @@ function renderTwoPaneTimelines(nativeHistory = false) {
       <MemoryRouter initialEntries={["/threads/thr_a"]}>{content}</MemoryRouter>
     ),
   );
+
   const navigate = (path: string, options?: NavigateOptions) => {
     if (navigateRef.current === null) {
       throw new Error("Expected router navigate");
     }
+
     void navigateRef.current(path, options);
   };
+
   return { ...view, navigate };
 }
 
@@ -102,6 +114,7 @@ beforeEach(() => {
   compactViewport.calls = 0;
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
     callback(performance.now());
+
     return 1;
   });
   vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
@@ -151,13 +164,14 @@ describe("ThreadTimelineRows location subscription", () => {
     const matchingRow = container.querySelector(
       '[data-timeline-row-id="thr_a-message"]',
     );
+
     await waitFor(() =>
-      expect(matchingRow?.classList.contains("bb-search-flash")).toBe(true),
+      expect(matchingRow?.classList.contains("omnyo-search-flash")).toBe(true),
     );
     expect(
       container
         .querySelector('[data-timeline-row-id="thr_b-message"]')
-        ?.classList.contains("bb-search-flash"),
+        ?.classList.contains("omnyo-search-flash"),
     ).toBe(false);
   });
 
@@ -173,8 +187,10 @@ describe("ThreadTimelineRows location subscription", () => {
       "/threads/thr_a",
     );
     const { container, unmount } = renderTwoPaneTimelines(true);
+
     try {
       await screen.findByText("Next message in thr_a");
+
       for (const [seq, rowId] of [
         [12, "thr_a-message"],
         [13, "thr_a-next-message"],
@@ -186,14 +202,15 @@ describe("ThreadTimelineRows location subscription", () => {
           expect(
             container
               .querySelector(`[data-timeline-row-id="${rowId}"]`)
-              ?.classList.contains("bb-search-flash"),
+              ?.classList.contains("omnyo-search-flash"),
           ).toBe(true),
         );
       }
+
       expect(
         container
           .querySelector("[data-timeline-row-id='thr_b-next-message']")
-          ?.classList.contains("bb-search-flash"),
+          ?.classList.contains("omnyo-search-flash"),
       ).toBe(false);
     } finally {
       unmount();

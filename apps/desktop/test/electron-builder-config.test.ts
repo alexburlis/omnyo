@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   access,
   chmod,
@@ -15,13 +16,110 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
-import {
-  createDesktopReleaseInfo,
-  DESKTOP_AUTO_UPDATE_FEED_CONFIG,
-} from "../src/desktop-update-provider.js";
+import { macBundleVersion } from "@omnyo/config/release-version";
+import { desktopNativeVersion } from "../scripts/desktop-release-channel.mjs";
+import { createDesktopReleaseInfo } from "../src/desktop-update-provider.js";
+
+describe("desktop native version identity", () => {
+  it.each([
+    [
+      "0.46.378+private.1",
+      {
+        shortVersion: "0.46.378",
+        bundleVersion: "1",
+        buildNumber: "1",
+        buildVersion: "0.46.378.1",
+      },
+    ],
+    [
+      "1.0.0+private.1",
+      {
+        shortVersion: "1.0.0",
+        bundleVersion: "1",
+        buildNumber: "1",
+        buildVersion: "1.0.0.1",
+      },
+    ],
+    [
+      "1.0.1",
+      {
+        shortVersion: "1.0.1",
+        bundleVersion: "1.0.1",
+        buildNumber: "0",
+        buildVersion: "1.0.1.0",
+      },
+    ],
+  ])("derives the native identity of %s", (version, expected) => {
+    expect(desktopNativeVersion(version)).toEqual(expected);
+  });
+
+  it.each(["1.0", "1.0.1-beta", "1.0.1+build.1", "01.0.0"])(
+    "refuses the non-release version %s",
+    (version) => {
+      expect(() => desktopNativeVersion(version)).toThrow(
+        "X.Y.Z or X.Y.Z+private.N",
+      );
+    },
+  );
+});
 
 const desktopPackageRoot = process.cwd();
+
 const require = createRequire(resolve(desktopPackageRoot, "package.json"));
+
+describe("desktop release channel module", () => {
+  it("loads from a source copy that has no installed dependencies", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "desktop-release-channel-"));
+
+    try {
+      const scriptsDirectory = resolve(root, "apps/desktop/scripts");
+      const configDirectory = resolve(root, "packages/config/src");
+      await mkdir(scriptsDirectory, { recursive: true });
+      await mkdir(configDirectory, { recursive: true });
+      await cp(
+        resolve(desktopPackageRoot, "scripts/desktop-release-channel.mjs"),
+        resolve(scriptsDirectory, "desktop-release-channel.mjs"),
+      );
+      await cp(
+        resolve(
+          desktopPackageRoot,
+          "../../packages/config/src/release-version.mjs",
+        ),
+        resolve(configDirectory, "release-version.mjs"),
+      );
+
+      const result = await new Promise<{ code: number | null; output: string }>(
+        (resolvePromise, reject) => {
+          const child = spawn(
+            process.execPath,
+            [
+              "--input-type=module",
+              "--eval",
+              'const { desktopNativeVersion } = await import(process.argv[1]); process.stdout.write(desktopNativeVersion("1.0.0+private.1").buildVersion);',
+              resolve(scriptsDirectory, "desktop-release-channel.mjs"),
+            ],
+            { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
+          );
+
+          let output = "";
+          child.stdout.on("data", (chunk: Buffer) => {
+            output += chunk.toString();
+          });
+          child.stderr.on("data", (chunk: Buffer) => {
+            output += chunk.toString();
+          });
+          child.once("error", reject);
+          child.once("close", (code) => resolvePromise({ code, output }));
+        },
+      );
+
+      expect(result).toEqual({ code: 0, output: "1.0.0.1" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 const nativeModulesScript: {
   parseStandaloneArguments(argv: string[]): {
     appOutDir: string | undefined;
@@ -36,6 +134,11 @@ const nativeModulesScript: {
     electronVersion: string;
     platform: string;
   }): string[];
+  restorePackagedRuntimeDependencyManifests(
+    runtimeRoot: string,
+    sourceRoot: string,
+    runtimeIdentity: { files: Array<{ path: string; sha256: string }> },
+  ): Promise<void>;
 } = require("./scripts/prepare-native-modules.cjs");
 
 const macConfigSchema = z
@@ -47,13 +150,8 @@ const macConfigSchema = z
     icon: z.string().min(1),
     identity: z.string().nullable().optional(),
     notarize: z.boolean(),
+    signIgnore: z.array(z.string().min(1)),
     target: z.tuple([
-      z
-        .object({
-          arch: z.tuple([z.literal("arm64")]),
-          target: z.literal("dmg"),
-        })
-        .passthrough(),
       z
         .object({
           arch: z.tuple([z.literal("arm64")]),
@@ -67,7 +165,7 @@ const macConfigSchema = z
 const linuxConfigSchema = z
   .object({
     category: z.literal("Development"),
-    executableName: z.enum(["bb", "bb-nightly"]),
+    executableName: z.enum(["omnyo-private", "omnyo-private-nightly"]),
     icon: z.string().min(1),
     target: z.tuple([
       z
@@ -109,7 +207,7 @@ const electronBuilderConfigSchema = z
     appId: z.string().min(1),
     artifactName: z.string().min(1),
     productName: z.string().min(1),
-    publish: z.tuple([
+    publish: z.array(
       z
         .object({
           channel: z.enum(["latest", "nightly"]),
@@ -117,7 +215,7 @@ const electronBuilderConfigSchema = z
           url: z.string().min(1),
         })
         .passthrough(),
-    ]),
+    ),
     toolsets: z.object({
       appimage: z.literal("1.0.3"),
     }),
@@ -152,28 +250,37 @@ const signingEnvironmentKeys = [
   "CSC_LINK",
   "CSC_NAME",
 ];
+
 const audioInputEntitlementPattern =
   /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\s*\/>/u;
 
 type ElectronBuilderConfig = z.infer<typeof electronBuilderConfigSchema>;
+
 type EnvironmentOverrides = Record<string, string | undefined>;
+
 type ScriptRunResult = {
   exitCode: number | null;
   stderr: string;
   stdout: string;
 };
+
 type ReadResolvedConfigResult = {
   config: ElectronBuilderConfig;
 };
+
 type CreateScriptEnvironment = (
   overrides: EnvironmentOverrides,
 ) => NodeJS.ProcessEnv;
+
 type RunConfigScript = (
   overrides: EnvironmentOverrides,
+  args?: string[],
 ) => Promise<ScriptRunResult>;
+
 type ReadResolvedConfig = (
   overrides: EnvironmentOverrides,
 ) => Promise<ReadResolvedConfigResult>;
+
 type RunNativePrepScript = (
   appOutDir: string,
   args?: string[],
@@ -197,15 +304,16 @@ const createScriptEnvironment: CreateScriptEnvironment = (overrides) => {
   return env;
 };
 
-const runConfigScript: RunConfigScript = async (overrides) => {
+const runConfigScript: RunConfigScript = async (overrides, args = []) => {
   const child = spawn(
     process.execPath,
-    ["scripts/run-electron-builder.mjs", "--print-config"],
+    ["scripts/run-electron-builder.mjs", "--print-config", ...args],
     {
       cwd: desktopPackageRoot,
       env: createScriptEnvironment(overrides),
     },
   );
+
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
 
@@ -238,6 +346,7 @@ const runNativePrepScript: RunNativePrepScript = async (
       cwd: desktopPackageRoot,
     },
   );
+
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
 
@@ -264,6 +373,7 @@ async function readStaticConfig(): Promise<ElectronBuilderConfig> {
     resolve(desktopPackageRoot, "electron-builder.config.json"),
     "utf8",
   );
+
   return electronBuilderConfigSchema.parse(JSON.parse(configText));
 }
 
@@ -271,6 +381,7 @@ const readResolvedConfig: ReadResolvedConfig = async (overrides) => {
   const result = await runConfigScript(overrides);
 
   expect(result.exitCode).toBe(0);
+
   return {
     config: electronBuilderConfigSchema.parse(JSON.parse(result.stdout)),
   };
@@ -282,6 +393,7 @@ describe("electron-builder signing config", () => {
       resolve(desktopPackageRoot, "package.json"),
       "utf8",
     );
+
     const packageJson = desktopPackageJsonSchema.parse(
       JSON.parse(packageJsonText),
     );
@@ -295,6 +407,7 @@ describe("electron-builder signing config", () => {
       resolve(desktopPackageRoot, "package.json"),
       "utf8",
     );
+
     const packageJson = desktopPackageJsonSchema.parse(
       JSON.parse(packageJsonText),
     );
@@ -304,11 +417,11 @@ describe("electron-builder signing config", () => {
     );
   });
 
-  it("unpacks the ESM bb-app bridge with an explicit module extension", async () => {
+  it("unpacks the ESM omnyo-app bridge with an explicit module extension", async () => {
     const config = await readStaticConfig();
 
-    expect(config.asarUnpack).toContain("dist/bb-app-bridge.mjs");
-    expect(config.asarUnpack).not.toContain("dist/bb-app-bridge.js");
+    expect(config.asarUnpack).toContain("dist/omnyo-app-bridge.mjs");
+    expect(config.asarUnpack).not.toContain("dist/omnyo-app-bridge.js");
   });
 
   it("runs a native module preparation hook after packaging", async () => {
@@ -328,7 +441,9 @@ describe("electron-builder signing config", () => {
       "--arch=x64",
       "--platform=linux",
     ]);
+
     const electronVersion = options.electronVersion;
+
     if (electronVersion === undefined) {
       throw new Error("Expected the standalone Electron version argument");
     }
@@ -367,6 +482,7 @@ describe("electron-builder signing config", () => {
       resolve(desktopPackageRoot, "..", "..", "package.json"),
       "utf8",
     );
+
     const packageJson = workspacePackageJsonSchema.parse(
       JSON.parse(packageJsonText),
     );
@@ -394,36 +510,104 @@ describe("electron-builder signing config", () => {
 
     expect(config.files).toContainEqual({
       filter: ["**/*"],
-      from: "node_modules/bb-app/server/dist/app-scaffold-template",
-      to: "node_modules/bb-app/server/dist/app-scaffold-template",
+      from: "node_modules/omnyo-app/server/dist/app-scaffold-template",
+      to: "node_modules/omnyo-app/server/dist/app-scaffold-template",
     });
+  });
+
+  it("copies bundled plugins' nested dependencies as a dedicated file set", async () => {
+    const config = await readStaticConfig();
+
+    expect(config.files).toContainEqual({
+      filter: ["**/node_modules/**", "!**/*.map"],
+      from: "node_modules/omnyo-app/server/dist/builtin-plugins",
+      to: "node_modules/omnyo-app/server/dist/builtin-plugins",
+    });
+  });
+
+  it("restores nested runtime dependency manifests that packaging rewrote", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "omnyo-runtime-manifests-"));
+
+    try {
+      const source = resolve(root, "source");
+      const packaged = resolve(root, "packaged");
+      const nested = "server/dist/plugin/node_modules/codec/package.json";
+      const original = '{\n  "name": "codec",\n  "scripts": { "x": "y" }\n}\n';
+      const ownManifest = '{ "name": "omnyo-app" }\n';
+
+      for (const directory of [source, packaged])
+        await mkdir(resolve(directory, dirname(nested)), { recursive: true });
+      await writeFile(resolve(source, nested), original);
+      await writeFile(resolve(packaged, nested), '{\n  "name": "codec"\n}');
+      await writeFile(resolve(source, "package.json"), ownManifest);
+      await writeFile(resolve(packaged, "package.json"), "packaged\n");
+
+      const sha256 = (text: string) =>
+        createHash("sha256").update(text).digest("hex");
+
+      const identity = {
+        files: [
+          { path: "package.json", sha256: sha256(ownManifest) },
+          { path: nested, sha256: sha256(original) },
+        ],
+      };
+
+      await nativeModulesScript.restorePackagedRuntimeDependencyManifests(
+        packaged,
+        source,
+        identity,
+      );
+
+      expect(await readFile(resolve(packaged, nested), "utf8")).toBe(original);
+      expect(await readFile(resolve(packaged, "package.json"), "utf8")).toBe(
+        "packaged\n",
+      );
+
+      await writeFile(resolve(source, nested), '{ "name": "other" }\n');
+      await expect(
+        nativeModulesScript.restorePackagedRuntimeDependencyManifests(
+          packaged,
+          source,
+          identity,
+        ),
+      ).rejects.toThrow(
+        "Runtime dependency manifest differs from its identity",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("patches packaged node-pty helper path handling", async () => {
     const appOutDir = await mkdtemp(
-      resolve(tmpdir(), "bb-desktop-native-modules-"),
+      resolve(tmpdir(), "omnyo-desktop-native-modules-"),
     );
+
     const nodePtyPackageDir = resolve(
       appOutDir,
-      "bb.app",
+      "Omnyo.app",
       "Contents",
       "Resources",
       "app.asar.unpacked",
       "node_modules",
       "node-pty",
     );
+
     const rebuiltNativeDir = resolve(nodePtyPackageDir, "build", "Release");
+
     const unixTerminalPath = resolve(
       nodePtyPackageDir,
       "lib",
       "unixTerminal.js",
     );
+
     const helperPath = resolve(
       nodePtyPackageDir,
       "prebuilds",
       "darwin-arm64",
       "spawn-helper",
     );
+
     const rebuiltHelperPath = resolve(rebuiltNativeDir, "spawn-helper");
 
     try {
@@ -448,6 +632,7 @@ describe("electron-builder signing config", () => {
       await expect(readFile(unixTerminalPath, "utf8")).resolves.toContain(
         "helperPath.replace(/app\\.asar(?!\\.unpacked)/g, 'app.asar.unpacked')",
       );
+
       if (process.platform !== "win32") {
         expect((await stat(helperPath)).mode & 0o777).toBe(0o755);
         expect((await stat(rebuiltHelperPath)).mode & 0o777).toBe(0o755);
@@ -458,11 +643,17 @@ describe("electron-builder signing config", () => {
   });
 
   it("validates bundled N-API SQLite without using the legacy prebuild installer", async () => {
-    const appOutDir = await mkdtemp(resolve(tmpdir(), "bb-desktop-napi-"));
+    const appOutDir = await mkdtemp(resolve(tmpdir(), "omnyo-desktop-napi-"));
     const nodeModules = resolve(appOutDir, "node_modules");
+
+    const electronVersion = z
+      .object({ version: z.string().min(1) })
+      .parse(require("electron/package.json")).version;
+
     const requireFromRuntime = createRequire(
-      resolve(desktopPackageRoot, "../../packages/bb-app/package.json"),
+      resolve(desktopPackageRoot, "../../packages/omnyo-app/package.json"),
     );
+
     try {
       const ptyLib = resolve(nodeModules, "node-pty/lib");
       await mkdir(ptyLib, { recursive: true });
@@ -476,20 +667,26 @@ describe("electron-builder signing config", () => {
         { recursive: true },
       );
       await mkdir(resolve(nodeModules, "@parcel/watcher"), { recursive: true });
+
       const result = await runNativePrepScript(appOutDir, [
-        "--electron-version=44.3.0",
+        `--electron-version=${electronVersion}`,
       ]);
+
       expect(result.stderr).toBe("");
       expect(result.exitCode).toBe(0);
+
       const binaryPath = resolve(
         nodeModules,
         "better-sqlite3/prebuilds",
         `${process.platform}-${process.arch}.node`,
       );
+
       await writeFile(binaryPath, "invalid native binary");
+
       const invalidResult = await runNativePrepScript(appOutDir, [
-        "--electron-version=44.3.0",
+        `--electron-version=${electronVersion}`,
       ]);
+
       expect(invalidResult.exitCode).not.toBe(0);
       expect(invalidResult.stderr).toContain(binaryPath);
       expect(invalidResult.stderr).not.toContain("prebuild-install");
@@ -517,10 +714,52 @@ describe("electron-builder signing config", () => {
   it("packages macOS artifacts for arm64 only", async () => {
     const config = await readStaticConfig();
 
-    expect(config.mac.target).toEqual([
-      { arch: ["arm64"], target: "dmg" },
-      { arch: ["arm64"], target: "zip" },
-    ]);
+    expect(config.mac.target).toEqual([{ arch: ["arm64"], target: "zip" }]);
+  });
+
+  it("codesigns only Mach-O code and Apple-platform prebuilds", async () => {
+    const config = await readStaticConfig();
+    const patterns = config.mac.signIgnore.map((entry) => new RegExp(entry));
+    const app = "/release/mac-arm64/Omnyo.app/Contents";
+    const unpacked = `${app}/Resources/app.asar.unpacked/node_modules`;
+    const framework = `${app}/Frameworks/Electron Framework.framework/Versions/A`;
+
+    const ignored = (path: string) =>
+      patterns.some((pattern) => pattern.test(path));
+
+    for (const path of [
+      `${unpacked}/omnyo-app/app/dist/assets/AddMachineDialog.js.br`,
+      `${unpacked}/omnyo-app/app/dist/assets/AddMachineDialog.js.gz`,
+      `${framework}/Resources/en.lproj/locale.pak`,
+      `${framework}/Resources/v8_context_snapshot.arm64.bin`,
+      `${framework}/Resources/icudtl.dat`,
+      `${app}/Resources/app.asar`,
+      `${unpacked}/node-pty/prebuilds/win32-x64/conpty.node`,
+      `${unpacked}/node-pty/prebuilds/linux-x64/pty.node`,
+      `${unpacked}/fs-native-extensions/prebuilds/android-arm64/fs-native-extensions.bare`,
+      `${unpacked}/omnyo-app/server/dist/builtin-plugins/local-voice/dist/local-voice-native/OmnyoLocalVoice`,
+      `${unpacked}/omnyo-app/server/dist/builtin-plugins/canvas/dist/media-codec/node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.5.node`,
+    ])
+      expect(ignored(path), path).toBe(true);
+
+    for (const path of [
+      `${unpacked}/omnyo-app/node_modules/npm/node_modules/example/addon.node`,
+      `${unpacked}/node-pty/prebuilds/darwin-arm64/pty.node`,
+      `${unpacked}/node-pty/prebuilds/darwin-arm64/spawn-helper`,
+      `${unpacked}/better-sqlite3/prebuilds/darwin-arm64.node`,
+      `${unpacked}/@parcel/watcher-darwin-arm64/watcher.node`,
+      `${unpacked}/fs-native-extensions/prebuilds/darwin-arm64/fs-native-extensions.bare`,
+      `${unpacked}/fs-native-extensions/prebuilds/darwin-arm64/fs-native-extensions.node`,
+      `${framework}/Electron Framework`,
+      `${framework}/Libraries/libffmpeg.dylib`,
+      `${framework}/Helpers/chrome_crashpad_handler`,
+      `${app}/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt`,
+      `${app}/Frameworks/Omnyo Helper (Renderer).app/Contents/MacOS/Omnyo Helper (Renderer)`,
+      `${app}/Frameworks/Omnyo Helper (Renderer).app`,
+      `${app}/Frameworks/Electron Framework.framework`,
+      `${app}/MacOS/Omnyo`,
+    ])
+      expect(ignored(path), path).toBe(false);
   });
 
   it("packages a Linux AppImage for x64", async () => {
@@ -528,7 +767,7 @@ describe("electron-builder signing config", () => {
 
     expect(config.linux).toMatchObject({
       category: "Development",
-      executableName: "bb",
+      executableName: "omnyo-private",
       target: [{ arch: ["x64"], target: "AppImage" }],
     });
     expect(config.toolsets.appimage).toBe("1.0.3");
@@ -539,6 +778,7 @@ describe("electron-builder signing config", () => {
 
   it("grants audio input to the signed app and helper processes", async () => {
     const config = await readStaticConfig();
+
     const entitlementPaths = [
       config.mac.entitlements,
       config.mac.entitlementsInherit,
@@ -554,26 +794,64 @@ describe("electron-builder signing config", () => {
     }
   });
 
-  it("keeps the updater provider pointed at desktop-latest release assets", async () => {
+  it("prints numeric native version/build and feed-safe private artifact names", async () => {
+    const { config } = await readResolvedConfig({});
+
+    const logical = z
+      .object({ version: z.string() })
+      .parse(
+        JSON.parse(
+          await readFile(resolve(desktopPackageRoot, "package.json"), "utf8"),
+        ),
+      ).version;
+
+    const native = logical.split("+")[0];
+    expect(config.appId).toBe("dev.omnyo.private");
+    expect(config.productName).toBe("Omnyo");
+    expect(config.mac.bundleShortVersion).toBe(native);
+    const buildNumber = logical.split("+private.")[1] ?? "0";
+    expect(config.mac.bundleVersion).toBe(macBundleVersion(logical));
+    expect(config).toMatchObject({
+      buildNumber,
+      buildVersion: native + "." + buildNumber,
+    });
+    expect(config.artifactName).toBe(
+      "omnyo-private-" + native + "-${arch}.${ext}",
+    );
+  });
+
+  it("keeps private binary publication disabled", async () => {
     const config = await readStaticConfig();
 
-    expect(config.publish[0]).toMatchObject(DESKTOP_AUTO_UPDATE_FEED_CONFIG);
-    expect(DESKTOP_AUTO_UPDATE_FEED_CONFIG.url).toBe(
-      "https://github.com/get-bb/bb/releases/download/desktop-latest/",
-    );
+    expect(config.publish).toEqual([]);
   });
 
   it("creates a separate nightly app identity and update feed", async () => {
     const { config } = await readResolvedConfig({
-      BB_DESKTOP_RELEASE_CHANNEL: "nightly",
+      OMNYO_DESKTOP_RELEASE_CHANNEL: "nightly",
     });
+
     const nightlyRelease = createDesktopReleaseInfo("nightly");
 
-    expect(config.appId).toBe("dev.bb.desktop.nightly");
-    expect(config.productName).toBe("bb Nightly");
-    expect(config.artifactName).toBe("bb-nightly-${version}-${arch}.${ext}");
+    const logicalVersion = z
+      .string()
+      .parse(
+        desktopPackageJsonSchema.parse(
+          JSON.parse(
+            await readFile(resolve(desktopPackageRoot, "package.json"), "utf8"),
+          ),
+        ).version,
+      );
+
+    const nativeVersion = logicalVersion.split("+")[0];
+
+    expect(config.appId).toBe("dev.omnyo.private.nightly");
+    expect(config.productName).toBe("Omnyo Nightly");
+    expect(config.artifactName).toBe(
+      "omnyo-private-nightly-" + nativeVersion + "-${arch}.${ext}",
+    );
     expect(config.linux.icon).toBe("assets/icon-nightly.png");
-    expect(config.linux.executableName).toBe("bb-nightly");
+    expect(config.linux.executableName).toBe("omnyo-private-nightly");
     expect(config.mac.icon).toBe("assets/icon-nightly.icns");
     await expect(
       access(resolve(desktopPackageRoot, config.mac.icon)),
@@ -581,21 +859,18 @@ describe("electron-builder signing config", () => {
     await expect(
       access(resolve(desktopPackageRoot, "assets/icon-nightly.png")),
     ).resolves.toBeUndefined();
-    expect(config.publish[0]).toEqual({
-      channel: "nightly",
-      provider: "generic",
-      url: nightlyRelease.updateReleaseBaseUrl,
-    });
+    expect(config.publish).toEqual([]);
+    expect(nightlyRelease.channel).toBe("nightly");
   });
 
   it("rejects unknown desktop release channels", async () => {
     const result = await runConfigScript({
-      BB_DESKTOP_RELEASE_CHANNEL: "canary",
+      OMNYO_DESKTOP_RELEASE_CHANNEL: "canary",
     });
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      "BB_DESKTOP_RELEASE_CHANNEL must be latest or nightly",
+      "OMNYO_DESKTOP_RELEASE_CHANNEL must be latest, nightly or public-beta",
     );
   });
 
@@ -652,3 +927,36 @@ describe("electron-builder signing config", () => {
     expect(completeAppleCredentials.config.dmg.sign).toBe(false);
   });
 });
+
+for (const scenario of [
+  {
+    name: "missing-digest",
+    args: [
+      "--protected-store-build-job",
+      "/unselected/desktop-protected-store-build-v1.json",
+    ],
+    message: "Protected-store build job requires its exact digest",
+  },
+  {
+    name: "unselected-windows",
+    args: [
+      "--win",
+      "--protected-store-build-job",
+      "/unselected/desktop-protected-store-build-v1.json",
+      "--protected-store-build-job-sha256",
+      "a".repeat(64),
+    ],
+    message: "Protected-store build job requires the selected Mac surface",
+  },
+]) {
+  it(
+    "refuses protected-store build arguments before any signing: " +
+      scenario.name,
+    async () => {
+      const result = await runConfigScript({}, scenario.args);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(scenario.message);
+      expect(result.stdout).toBe("");
+    },
+  );
+}

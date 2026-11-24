@@ -8,8 +8,8 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
-import type { PluginComposerScope } from "@get-bb/plugin-sdk/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
+import type { PluginComposerScope } from "@omnyo/plugin-sdk/app";
 import type {
   promptLibraryRpcContract,
   RecentPromptRow,
@@ -18,6 +18,7 @@ import type {
 } from "./contract.js";
 
 let pickerWidth = 728;
+
 const originalScroll = Object.getOwnPropertyDescriptor(
   Element.prototype,
   "scrollIntoView",
@@ -54,6 +55,7 @@ beforeEach(() => {
 });
 
 const app = await loadPluginApp(() => import("./app"));
+
 const popup = app.composerCustomizations[0]!.experimental_popups![0]!;
 
 function draft(value: string) {
@@ -103,9 +105,11 @@ function render(
       ...(options.recent ?? [recentRow("h1", "recent prompt")]),
     ],
   }));
+
   const star = vi.fn(() => ({ id: "prompt_new" }));
   const unstar = vi.fn(() => ({ unstarred: true }));
   const markUsed = vi.fn(() => null);
+
   const slot = renderSlot<object, typeof promptLibraryRpcContract>(
     popup,
     {},
@@ -119,6 +123,7 @@ function render(
       rpc: { search, star, unstar, markUsed },
     },
   );
+
   return { slot, search, star, unstar, markUsed };
 }
 
@@ -128,6 +133,7 @@ function searchBox(slot: ReturnType<typeof renderSlot>) {
 
 afterEach(() => {
   cleanup();
+
   if (originalScroll)
     Object.defineProperty(Element.prototype, "scrollIntoView", originalScroll);
   else Reflect.deleteProperty(Element.prototype, "scrollIntoView");
@@ -156,6 +162,7 @@ describe("prompt library popup", () => {
     async (existing) => {
       const row = recentRow("rich", "Review @project:proj_b");
       row.projectId = "proj_b";
+
       const mention = {
         from: 7,
         to: 22,
@@ -163,21 +170,25 @@ describe("prompt library popup", () => {
         projectId: "proj_b",
         label: "Beta",
       };
+
       const attachment = {
         type: "localFile" as const,
-        path: ".bb/attachments/notes.txt",
+        path: ".omnyo/attachments/notes.txt",
         name: "notes.txt",
         sizeBytes: 42,
       };
+
       row.prompt = {
         text: row.prompt.text,
         mentions: [mention],
         attachments: [attachment],
       };
       const { slot } = render({ draft: existing, starred: [], recent: [row] });
+
       const choice = await slot.findByRole("button", {
         name: /Review @project:proj_b/,
       });
+
       fireEvent.click(choice);
       fireEvent.click(slot.getByRole("button", { name: "Insert" }));
       expect(slot.composer.draft.text).toBe(
@@ -238,6 +249,7 @@ describe("prompt library popup", () => {
     const newThread = render({
       scope: { kind: "new-thread", projectId: "proj_a" },
     });
+
     await newThread.slot.findByRole("option", { name: /starred prompt/ });
     expect(newThread.search).toHaveBeenLastCalledWith({
       query: "",
@@ -257,9 +269,11 @@ describe("prompt library popup", () => {
     vi.useFakeTimers();
     const { slot, search } = render();
     let resolveStale!: (value: Awaited<ReturnType<typeof search>>) => void;
+
     const stale = new Promise<Awaited<ReturnType<typeof search>>>((resolve) => {
       resolveStale = resolve;
     });
+
     search.mockImplementationOnce(() => stale);
 
     await act(async () => {
@@ -332,6 +346,31 @@ describe("prompt library popup", () => {
     );
   });
 
+  it("keeps saved stars visible when keyboard selection moves to another prompt", async () => {
+    const { slot } = render({
+      recent: [
+        recentRow("h1", "saved history prompt", "prompt_2"),
+        recentRow("h2", "ordinary history prompt"),
+      ],
+    });
+
+    const saved = await slot.findByRole("option", { name: /starred prompt/ });
+    const history = slot.getByRole("option", { name: /saved history prompt/ });
+    const savedStar = within(saved).getByRole("button", { name: "Unstar" });
+    const historyStar = within(history).getByRole("button", { name: "Unstar" });
+
+    fireEvent.keyDown(searchBox(slot), { key: "ArrowDown" });
+    fireEvent.keyDown(searchBox(slot), { key: "ArrowDown" });
+
+    expect(saved.getAttribute("aria-selected")).toBe("false");
+    expect(history.getAttribute("aria-selected")).toBe("false");
+
+    for (const button of [savedStar, historyStar]) {
+      expect(button.getAttribute("aria-pressed")).toBe("true");
+      expect(button.classList.contains("opacity-0")).toBe(false);
+    }
+  });
+
   it("stars and unstars prompts with Mod+S", async () => {
     const { slot, star, unstar } = render({
       recent: [
@@ -339,6 +378,7 @@ describe("prompt library popup", () => {
         recentRow("h2", "already starred", "prompt_2"),
       ],
     });
+
     await slot.findByText("recent prompt");
 
     fireEvent.keyDown(searchBox(slot), { key: "ArrowDown" });
@@ -407,6 +447,7 @@ describe("prompt library popup", () => {
         recentRow("h2", "other prompt"),
       ],
     });
+
     await slot.findByText("recent prompt");
     fireEvent.keyDown(searchBox(slot), { key: "ArrowDown" });
     fireEvent.mouseEnter(slot.getByRole("option", { name: /other prompt/ }));

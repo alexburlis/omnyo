@@ -12,7 +12,9 @@ export const modalMachineResourceSchema = z.object({
   memoryMiB: z.number().positive(),
   snapshotSandboxId: z.string().min(1).nullable(),
 });
+
 export type ModalMachineResource = z.infer<typeof modalMachineResourceSchema>;
+
 export function readModalMachineResource(value: unknown): ModalMachineResource {
   return modalMachineResourceSchema.parse(value);
 }

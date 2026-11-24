@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import type { InteractionPayload, InteractionResponse } from "./src/contracts";
 
 const app = await loadPluginApp(() => import("./app"));
@@ -75,9 +75,11 @@ function getButtonByText(
   text: string,
 ): HTMLButtonElement {
   const button = slot.getByText(text).closest("button");
+
   if (!(button instanceof HTMLButtonElement)) {
     throw new Error(`${text} is not rendered inside a button`);
   }
+
   return button;
 }
 
@@ -104,6 +106,7 @@ describe("question interaction adapter", () => {
   });
   it("offers a cancel escape rather than blocking the composer", () => {
     const cancel = vi.fn(async () => undefined);
+
     const slot = renderSlot(app.pendingInteractions[0]!, {
       interaction: {
         id: "pint_test",

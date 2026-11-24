@@ -1,157 +1,161 @@
 {
-  "name": "@get-bb/plugin-sdk",
-  "version": "0.6.42",
-  "homepage": "https://github.com/get-bb/bb#readme",
+  "name": "@omnyo/plugin-sdk",
+  "private": true,
+  "version": "0.6.56",
+  "homepage": "https://github.com/example/omnyo",
   "bugs": {
-    "url": "https://github.com/get-bb/bb/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/get-bb/bb.git",
-    "directory": "packages/plugin-sdk"
+    "url": "https://github.com/example/omnyo/issues"
   },
   "type": "module",
-  "publishConfig": {
-    "access": "public"
-  },
   "files": [
-    "bundled-types",
+    "bundled-types/omnyo-plugin-sdk*.d.ts",
     "dist",
     "README.md"
   ],
   "exports": {
     ".": {
       "source": "./src/index.ts",
-      "types": "./bundled-types/bb-plugin-sdk.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./provider-usage": {
+      "source": "./src/provider-usage.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-provider-usage.d.ts",
+      "import": "./dist/provider-usage.js",
+      "default": "./dist/provider-usage.js"
+    },
     "./provider-bridge": {
       "source": "./src/provider-bridge.ts",
-      "types": "./bundled-types/bb-plugin-sdk-provider-bridge.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-provider-bridge.d.ts",
       "import": "./dist/provider-bridge.js",
       "default": "./dist/provider-bridge.js"
     },
     "./provider-bridge/testing": {
       "source": "./src/provider-bridge-testing.ts",
-      "types": "./bundled-types/bb-plugin-sdk-provider-bridge-testing.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-provider-bridge-testing.d.ts",
       "import": "./dist/provider-bridge-testing.js",
       "default": "./dist/provider-bridge-testing.js"
     },
     "./provider-bridge/acp": {
       "source": "./src/provider-bridge-acp.ts",
-      "types": "./bundled-types/bb-plugin-sdk-provider-bridge-acp.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-provider-bridge-acp.d.ts",
       "import": "./dist/provider-bridge-acp.js",
       "default": "./dist/provider-bridge-acp.js"
     },
     "./provider-bridge/acp-next": {
       "source": "./src/provider-bridge-acp-next.ts",
-      "types": "./bundled-types/bb-plugin-sdk-provider-bridge-acp-next.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-provider-bridge-acp-next.d.ts",
       "import": "./dist/provider-bridge-acp-next.js",
       "default": "./dist/provider-bridge-acp-next.js"
     },
     "./environment-provider": {
       "source": "./src/environment-provider.ts",
-      "types": "./bundled-types/bb-plugin-sdk-environment-provider.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-environment-provider.d.ts",
       "import": "./dist/environment-provider.js",
       "default": "./dist/environment-provider.js"
     },
     "./machine-provider": {
       "source": "./src/machine-provider.ts",
-      "types": "./bundled-types/bb-plugin-sdk-machine-provider.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-machine-provider.d.ts",
       "import": "./dist/machine-provider.js",
       "default": "./dist/machine-provider.js"
     },
     "./app": {
       "source": "./src/app.ts",
-      "types": "./bundled-types/bb-plugin-sdk-app.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-app.d.ts",
       "import": "./dist/app.js",
       "default": "./dist/app.js"
     },
     "./host": {
       "source": "./src/host.ts",
-      "types": "./bundled-types/bb-plugin-sdk-host.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-host.d.ts",
       "import": "./dist/host.js",
       "default": "./dist/host.js"
     },
     "./internal/composer-customization-validation": {
       "source": "./src/internal/composer-customization-validation.ts",
-      "types": "./bundled-types/bb-plugin-sdk-internal-composer-customization-validation.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-internal-composer-customization-validation.d.ts",
       "import": "./dist/internal/composer-customization-validation.js",
       "default": "./dist/internal/composer-customization-validation.js"
     },
     "./internal/composer-handle": {
       "source": "./src/internal/composer-handle.ts",
-      "types": "./bundled-types/bb-plugin-sdk-internal-composer-handle.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-internal-composer-handle.d.ts",
       "import": "./dist/internal/composer-handle.js",
       "default": "./dist/internal/composer-handle.js"
     },
     "./internal/composer-view": {
       "source": "./src/internal/composer-view.ts",
-      "types": "./bundled-types/bb-plugin-sdk-internal-composer-view.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-internal-composer-view.d.ts",
       "import": "./dist/internal/composer-view.js",
       "default": "./dist/internal/composer-view.js"
     },
     "./internal/file-navigation-validation": {
       "source": "./src/internal/file-navigation-validation.ts",
-      "types": "./bundled-types/bb-plugin-sdk-internal-file-navigation-validation.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-internal-file-navigation-validation.d.ts",
       "import": "./dist/internal/file-navigation-validation.js",
       "default": "./dist/internal/file-navigation-validation.js"
     },
     "./internal/host-policy": {
       "source": "./src/internal/host-policy.ts",
-      "types": "./bundled-types/bb-plugin-sdk-internal-host-policy.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-internal-host-policy.d.ts",
       "import": "./dist/internal/host-policy.js",
       "default": "./dist/internal/host-policy.js"
     },
     "./internal/plugin-app-collector": {
       "source": "./src/internal/plugin-app-collector.ts",
-      "types": "./bundled-types/bb-plugin-sdk-internal-plugin-app-collector.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-internal-plugin-app-collector.d.ts",
       "import": "./dist/internal/plugin-app-collector.js",
       "default": "./dist/internal/plugin-app-collector.js"
     },
     "./testing": {
       "source": "./src/testing/index.ts",
-      "types": "./bundled-types/bb-plugin-sdk-testing.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-testing.d.ts",
       "import": "./dist/testing/index.js",
       "default": "./dist/testing/index.js"
     },
     "./testing/app": {
       "source": "./src/testing/app.tsx",
-      "types": "./bundled-types/bb-plugin-sdk-testing-app.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-testing-app.d.ts",
       "import": "./dist/testing/app.js",
       "default": "./dist/testing/app.js"
     },
     "./testing/host": {
       "source": "./src/testing/host.ts",
-      "types": "./bundled-types/bb-plugin-sdk-testing-host.d.ts",
+      "types": "./bundled-types/omnyo-plugin-sdk-testing-host.d.ts",
       "import": "./dist/testing/host.js",
       "default": "./dist/testing/host.js"
     }
   },
-  "types": "./bundled-types/bb-plugin-sdk.d.ts",
+  "types": "./bundled-types/omnyo-plugin-sdk.d.ts",
   "scripts": {
     "build": "node scripts/build-runtime.mjs",
     "build:runtime": "node scripts/build-runtime.mjs",
-    "build:types": "node scripts/build-bundled-dts.mjs",
+    "build:types": "node --max-semi-space-size=64 scripts/build-bundled-dts.mjs --group testing",
     "clean": "rimraf bundled-types dist tsconfig.tsbuildinfo",
-    "prepack": "node scripts/build-bundled-dts.mjs && node scripts/build-runtime.mjs",
+    "prepack": "pnpm --workspace-root exec turbo run build:types build --filter=@omnyo/plugin-sdk --concurrency=1",
     "test": "vitest run --config vitest.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:types:backend": "node --max-semi-space-size=64 scripts/build-bundled-dts.mjs --group backend",
+    "build:types:providers": "node --max-semi-space-size=64 scripts/build-bundled-dts.mjs --group providers",
+    "build:types:app": "node --max-semi-space-size=64 scripts/build-bundled-dts.mjs --group app",
+    "build:types:internal": "node --max-semi-space-size=64 scripts/build-bundled-dts.mjs --group internal",
+    "pack:private": "node scripts/pack-private.mjs"
   },
   "dependencies": {
     "cross-spawn": "^7.0.6",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@bb/domain": "workspace:*",
-    "@bb/process-utils": "workspace:*",
-    "@bb/provider-bridge-acp": "workspace:*",
-    "@bb/provider-bridge-acp-next": "workspace:*",
-    "@bb/provider-bridge-protocol": "workspace:*",
-    "@bb/sdk": "workspace:*",
-    "@bb/server-contract": "workspace:*",
-    "@bb/tsconfig": "workspace:*",
+    "@omnyo/domain": "workspace:*",
+    "@omnyo/process-utils": "workspace:*",
+    "@omnyo/provider-bridge-acp": "workspace:*",
+    "@omnyo/provider-bridge-acp-next": "workspace:*",
+    "@omnyo/provider-bridge-protocol": "workspace:*",
+    "@omnyo/sdk": "workspace:*",
+    "@omnyo/server-contract": "workspace:*",
+    "@omnyo/tsconfig": "workspace:*",
     "@testing-library/react": "^16.3.2",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.0.0",
@@ -159,7 +163,7 @@
     "better-sqlite3": "12.10.0",
     "cron-parser": "^5.5.0",
     "esbuild": "^0.28.0",
-    "hono": "4.11.9",
+    "hono": "4.13.18",
     "jsdom": "^29.0.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -167,7 +171,7 @@
     "rollup-plugin-dts": "^6.4.1",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-7": "npm:typescript@^7.0.2",
-    "vitest": "^4.1.1"
+    "vitest": "4.1.11"
   },
   "peerDependencies": {
     "@testing-library/react": "^16.3.2",

@@ -1,4 +1,4 @@
-import type { TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@omnyo/server-contract";
 import {
   ThreadTimelineRows,
   type ThreadTimelineRowsProps,
@@ -15,6 +15,7 @@ interface TimelineStageProps {
 }
 
 type TimelineQuestionRow = Extract<TimelineRow, { workKind: "question" }>;
+
 type TimelineRowsBaseProps = Omit<ThreadTimelineRowsProps, "timelineRows">;
 
 function TimelineStage({ children }: TimelineStageProps) {

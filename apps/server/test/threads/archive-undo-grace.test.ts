@@ -3,7 +3,7 @@ import {
   getTerminalSession,
   getThread,
   threads,
-} from "@bb/db";
+} from "@omnyo/db";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { runThreadLifecycleSweep } from "../../src/services/system/periodic-sweeps.js";
@@ -46,6 +46,7 @@ async function archiveThread(
     `/api/v1/threads/${threadId}/archive-all`,
     { method: "POST" },
   );
+
   expect(response.status).toBe(200);
 }
 
@@ -86,6 +87,7 @@ describe("archive undo grace", () => {
         ({ command }) =>
           command.type === "thread.stop" && command.threadId === thread.id,
       );
+
       expect(stopCommand.command).toMatchObject({
         type: "thread.stop",
         environmentId: environment.id,
@@ -100,10 +102,12 @@ describe("archive undo grace", () => {
       const { thread } = seedArchivableActiveThread(harness);
 
       await archiveThread(harness, thread.id);
+
       const unarchiveResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/unarchive`,
         { method: "POST" },
       );
+
       expect(unarchiveResponse.status).toBe(200);
       await runThreadLifecycleSweep(harness.deps);
 
@@ -139,6 +143,7 @@ describe("archive undo grace", () => {
   it("keeps the terminals of a running thread open for the grace, then closes them", async () => {
     await withTestHarness(async (harness) => {
       const { environment, host, thread } = seedArchivableActiveThread(harness);
+
       const terminal = seedRunningTerminal(harness, {
         environmentId: environment.id,
         hostId: host.id,
@@ -176,6 +181,7 @@ describe("archive undo grace", () => {
   it("keeps the terminals of an archived thread for the grace after its turn ends", async () => {
     await withTestHarness(async (harness) => {
       const { environment, host, thread } = seedArchivableActiveThread(harness);
+
       const terminal = seedRunningTerminal(harness, {
         environmentId: environment.id,
         hostId: host.id,

@@ -5,10 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   MenuHoverProvider,
   useMenuItemHover,
-} from "@bb/shared-ui/menu-item-hover";
+} from "@omnyo/shared-ui/menu-item-hover";
 
 function HoverItem({ label }: { label: string }) {
   const { hoverProps } = useMenuItemHover();
+
   return (
     <button type="button" {...hoverProps}>
       {label}

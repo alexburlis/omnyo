@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { UPDATE_ACTION_ICON } from "@bb/domain/update-state";
-import { Button } from "@bb/shared-ui/button";
+import { UPDATE_ACTION_ICON } from "@omnyo/domain/update-state";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
@@ -8,8 +8,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/shared-ui/dialog";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { usePluginNotificationAction } from "@/components/plugin/PluginNotificationDescription";
 import { appToast } from "@/components/ui/app-toast";
 import { pluginAdminErrorMessage } from "@/lib/plugin-admin-error";
@@ -61,6 +61,7 @@ function UpdatePluginDialogContent({
   const notificationAction = usePluginNotificationAction();
   const name = plugin.name ?? plugin.id;
   const state = plugin.updateState;
+
   const update = useMutation({
     meta: { showErrorToast: false },
     mutationFn: () => startPluginUpdate(plugin.id),
@@ -81,6 +82,7 @@ function UpdatePluginDialogContent({
 
   if (failure !== null) {
     const retryVersion = state.availableVersion;
+
     return (
       <>
         <DialogHeader>
@@ -99,8 +101,9 @@ function UpdatePluginDialogContent({
               aria-hidden
             />
             <span>
-              bb couldn&rsquo;t activate {displayPluginVersion(failure.version)}
-              . It restored {displayPluginVersion(plugin.version)} and its data.
+              Omnyo couldn&rsquo;t activate{" "}
+              {displayPluginVersion(failure.version)}. It restored{" "}
+              {displayPluginVersion(plugin.version)} and its data.
             </span>
           </div>
           {failure.detail.length > 0 ? (
@@ -149,6 +152,7 @@ function UpdatePluginDialogContent({
 
   if (state.availableVersion !== null) {
     const candidate = state.availableVersion;
+
     return (
       <>
         <DialogHeader>
@@ -159,10 +163,13 @@ function UpdatePluginDialogContent({
         </DialogHeader>
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-sm">
-            <span className="font-medium" style={SUCCESS_TEXT_STYLE}>
-              ✓
-            </span>
-            <span>Compatible with your bb and plugin SDK</span>
+            <Icon
+              name="CircleCheck"
+              className="size-4 shrink-0"
+              style={SUCCESS_TEXT_STYLE}
+              aria-hidden
+            />
+            <span>Compatible with your Omnyo and plugin SDK</span>
           </div>
           <DetailsDisclosure summary="Details — source, versions">
             <KeyValueGrid
@@ -207,6 +214,7 @@ function UpdatePluginDialogContent({
 
   if (state.blockedVersion !== null) {
     const blocked = state.blockedVersion;
+
     return (
       <>
         <DialogHeader>
@@ -224,7 +232,7 @@ function UpdatePluginDialogContent({
             />
             <span>
               {displayPluginVersion(blocked)} isn&rsquo;t compatible with this
-              bb
+              Omnyo
             </span>
           </div>
           <DetailsDisclosure summary="Details" defaultExpanded>

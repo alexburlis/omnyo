@@ -30,6 +30,7 @@ function isAllowedChatGptHost(host: string): boolean {
 function isAllowedChatGptUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
+
     return parsed.protocol === "https:" && isAllowedChatGptHost(parsed.host);
   } catch {
     return false;
@@ -51,14 +52,18 @@ function splitSetCookieHeader(header: string): string[] {
 
 function parseCookieNameValue(setCookie: string): string | null {
   const [nameValue] = setCookie.split(";", 1);
+
   if (!nameValue) {
     return null;
   }
+
   const [name] = nameValue.split("=", 1);
   const trimmedName = name?.trim();
+
   if (!trimmedName || !isAllowedCloudflareCookieName(trimmedName)) {
     return null;
   }
+
   return nameValue.trim();
 }
 
@@ -68,16 +73,20 @@ function storeChatGptCloudflareCookies(url: string, headers: Headers): void {
   }
 
   const setCookie = headers.get("set-cookie");
+
   if (!setCookie) {
     return;
   }
 
   for (const cookie of splitSetCookieHeader(setCookie)) {
     const nameValue = parseCookieNameValue(cookie);
+
     if (!nameValue) {
       continue;
     }
+
     const [name] = nameValue.split("=", 1);
+
     if (name) {
       cloudflareCookiesByName.set(name, nameValue);
     }
@@ -88,6 +97,7 @@ function getChatGptCloudflareCookieHeader(url: string): string | null {
   if (!isAllowedChatGptUrl(url) || cloudflareCookiesByName.size === 0) {
     return null;
   }
+
   return [...cloudflareCookiesByName.values()].join("; ");
 }
 
@@ -102,19 +112,24 @@ export async function fetchChatGpt(args: ChatGptFetchArgs): Promise<Response> {
   const fetchOnce = async (): Promise<Response> => {
     const headers = new Headers();
     const cookie = getChatGptCloudflareCookieHeader(args.url);
+
     if (cookie) {
       headers.set("Cookie", cookie);
     }
+
     const init = args.init(headers);
     const response = await fetch(args.url, init);
     storeChatGptCloudflareCookies(args.url, response.headers);
+
     return response;
   };
 
   const response = await fetchOnce();
+
   if (!isCloudflareChallenge(response)) {
     return response;
   }
+
   return fetchOnce();
 }
 

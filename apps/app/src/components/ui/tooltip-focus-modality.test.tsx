@@ -11,7 +11,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@bb/shared-ui/tooltip";
+} from "@omnyo/shared-ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 function renderTooltip(onFocus?: () => void) {
@@ -27,13 +27,29 @@ function renderTooltip(onFocus?: () => void) {
 
 function tooltipLabels(): string[] {
   return screen
-    .queryAllByRole("tooltip")
+    .queryAllByRole("tooltip", { hidden: true })
     .map((node) => node.textContent?.trim() ?? "");
 }
 
 afterEach(cleanup);
 
 describe("tooltip focus modality", () => {
+  it("hides the portaled tooltip when its trigger has no visible layout", async () => {
+    renderTooltip();
+    const trigger = screen.getByRole("button", { name: "Open usage" });
+
+    fireEvent.keyDown(document.body, { key: "Tab" });
+    fireEvent.focus(trigger);
+
+    await waitFor(() => {
+      const tooltip = screen.getByRole("tooltip", { hidden: true });
+      expect(
+        tooltip.closest<HTMLElement>("[data-radix-popper-content-wrapper]")
+          ?.style.visibility,
+      ).toBe("hidden");
+    });
+  });
+
   it("stays closed when focus arrives after pointer input", () => {
     renderTooltip();
     const trigger = screen.getByRole("button", { name: "Open usage" });

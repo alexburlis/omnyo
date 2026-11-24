@@ -17,13 +17,17 @@ async function bundle(input: string): Promise<string> {
       },
     },
   });
+
   const outputs = Array.isArray(result) ? result : [result];
+
   for (const output of outputs) {
     if (!("output" in output)) continue;
+
     for (const chunk of output.output) {
       if (chunk.type === "chunk" && chunk.isEntry) return chunk.code;
     }
   }
+
   throw new Error("vite build produced no entry chunk");
 }
 
@@ -35,6 +39,7 @@ function evaluateOnSafariSixteen(
 ): Record<string, unknown> {
   const context = vm.createContext({ ...globals });
   const IntrinsicRegExp: RegExpConstructor = vm.runInContext("RegExp", context);
+
   function SafariSixteenRegExp(
     this: unknown,
     pattern: string | RegExp,
@@ -43,21 +48,25 @@ function evaluateOnSafariSixteen(
     if (flags?.includes("v")) {
       throw new SyntaxError("Invalid flags supplied to RegExp constructor.");
     }
+
     if (typeof pattern === "string" && PATTERN_MODIFIER.test(pattern)) {
       throw new SyntaxError(
         "Invalid regular expression: invalid group specifier name",
       );
     }
+
     return flags === undefined
       ? new IntrinsicRegExp(pattern)
       : new IntrinsicRegExp(pattern, flags);
   }
+
   SafariSixteenRegExp.prototype = IntrinsicRegExp.prototype;
   context.RegExp = SafariSixteenRegExp;
   const module: { exports: Record<string, unknown> } = { exports: {} };
   context.module = module;
   context.exports = module.exports;
   vm.runInContext(code, context, { filename: "bundle.cjs" });
+
   return module.exports;
 }
 
@@ -79,10 +88,13 @@ describe("regex engine feature probes survive the app bundler", () => {
     const code = await bundle("oniguruma-to-es");
 
     const { toRegExp } = evaluateOnSafariSixteen(code, {});
+
     if (typeof toRegExp !== "function") {
       throw new Error("bundle did not export toRegExp");
     }
+
     const compiled: unknown = toRegExp("[a-c]+");
+
     if (!isRegExpLike(compiled)) {
       throw new Error("toRegExp did not return a RegExp");
     }
@@ -95,11 +107,13 @@ describe("regex engine feature probes survive the app bundler", () => {
     const code = await bundle("@pierre/diffs/worker/worker-portable.js");
 
     const listeners: string[] = [];
+
     const self = {
       addEventListener: (type: string) => {
         listeners.push(type);
       },
     };
+
     evaluateOnSafariSixteen(code, { self, postMessage: () => {} });
 
     expect(listeners).toContain("message");

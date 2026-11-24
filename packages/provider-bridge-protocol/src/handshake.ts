@@ -1,4 +1,4 @@
-import { providerForkSchema } from "@bb/domain";
+import { providerForkSchema } from "@omnyo/domain";
 import { z } from "zod";
 import { PROVIDER_BRIDGE_PROTOCOL_VERSION } from "./version.js";
 
@@ -7,6 +7,7 @@ export const bridgeGrammarVersionsSchema = z
   .refine(([min, max]) => min <= max, {
     message: "grammarVersions must be an ascending [min, max] range",
   });
+
 export type BridgeGrammarVersions = z.infer<typeof bridgeGrammarVersionsSchema>;
 
 export function negotiateGrammarVersion(
@@ -15,10 +16,12 @@ export function negotiateGrammarVersion(
 ): number | null {
   const min = Math.max(runtime[0], bridge[0]);
   const max = Math.min(runtime[1], bridge[1]);
+
   return min <= max ? max : null;
 }
 
 export const bridgeSteerModeSchema = z.enum(["inject", "queue"]);
+
 export type BridgeSteerMode = z.infer<typeof bridgeSteerModeSchema>;
 
 export const bridgeCapabilitiesSchema = z

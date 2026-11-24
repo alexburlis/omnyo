@@ -9,7 +9,7 @@ import {
   defaultAppSettings,
   type AppCommandId,
   type AppDefaultKeybinding,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   AppCommandProvider,
   useAppCommandRunner,
@@ -32,11 +32,13 @@ const SAFE_MODE_BINDINGS = [
 ];
 
 const testState = vi.hoisted(() => ({ safeMode: false }));
+
 const setPluginSafeMode = vi.hoisted(() =>
   vi.fn((_fetch: unknown, enabled: boolean) =>
     Promise.resolve({ enabled, problems: [] as string[] }),
   ),
 );
+
 const toast = vi.hoisted(() => ({
   success: vi.fn(),
   warning: vi.fn(),
@@ -68,6 +70,7 @@ function Harness() {
   useEffect(() => {
     runner = value;
   }, [value]);
+
   return null;
 }
 
@@ -83,6 +86,7 @@ function renderHarness(safeMode: boolean): QueryClient {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+
   return queryClient;
 }
 

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { WorkspaceError } from "bb-environment-provider-host/git";
+import { WorkspaceError } from "omnyo-environment-provider-host/git";
 import { describe, expect, it } from "vitest";
 import {
   deriveRepoDirName,
@@ -84,13 +84,13 @@ describe("managed worktree paths", () => {
   it("keeps derived targets inside their validated attempt root", () => {
     expect(
       resolveWorktreeTargetPath({
-        dataDir: "/Users/me/.bb/plugin-data",
+        dataDir: "/Users/me/.omnyo/plugin-data",
         pathKey: "thr_123-2",
         sourcePath: "/Users/me/code/Repo With Space",
       }),
     ).toBe(
       join(
-        "/Users/me/.bb/plugin-data",
+        "/Users/me/.omnyo/plugin-data",
         "worktrees",
         "thr_123-2",
         "Repo-With-Space-7373994537587106",
@@ -115,6 +115,7 @@ describe("managed worktree paths", () => {
         childName: "repo-0123456789abcdef",
       }),
     ).toBe(join("/tmp/data", "worktrees", "thr_123", "repo-0123456789abcdef"));
+
     for (const childName of [
       ".",
       "..",

@@ -8,13 +8,14 @@ import {
 } from "./test-support.js";
 
 const LINE_SEPARATOR = " ";
+
 const PARAGRAPH_SEPARATOR = " ";
 
 let harness: FakePiBridgeHarness;
 
 beforeEach(async () => {
   harness = await startFakePiBridge({
-    prefix: "bb-pi-framing-",
+    prefix: "omnyo-pi-framing-",
     sessionDir: (workspaceDir) =>
       join(workspaceDir, `sessions${LINE_SEPARATOR}dir`),
     initialize: true,
@@ -27,6 +28,7 @@ afterEach(async () => {
 
 it("carries U+2028/U+2029 through stdout events, RPC responses, and both channel directions", async () => {
   const threadId = "thr_framing";
+
   const start = await harness.request(1, "thread/start", {
     threadId,
     cwd: harness.workspaceDir,
@@ -34,8 +36,8 @@ it("carries U+2028/U+2029 through stdout events, RPC responses, and both channel
     options: FULL_PERMISSION_OPTIONS,
     dynamicTools: [
       {
-        name: "bb_probe",
-        description: "A bb tool.",
+        name: "omnyo_probe",
+        description: "An Omnyo tool.",
         inputSchema: {
           type: "object",
           properties: { value: { type: "string" } },
@@ -43,9 +45,11 @@ it("carries U+2028/U+2029 through stdout events, RPC responses, and both channel
       },
     ],
   });
+
   const providerThreadId = String(
     (start.result as { providerThreadId?: unknown }).providerThreadId,
   );
+
   expect(providerThreadId).toMatch(/^pi_/u);
 
   const text = `alpha${LINE_SEPARATOR}beta${PARAGRAPH_SEPARATOR}gamma`;
@@ -87,7 +91,7 @@ it("carries U+2028/U+2029 through stdout events, RPC responses, and both channel
         input: [
           {
             type: "text",
-            text: `/tool bb_probe ${JSON.stringify({ value: argValue })}`,
+            text: `/tool omnyo_probe ${JSON.stringify({ value: argValue })}`,
             mentions: [],
           },
         ],
@@ -95,10 +99,12 @@ it("carries U+2028/U+2029 through stdout events, RPC responses, and both channel
       },
     }),
   );
+
   const toolCall = await harness.waitForMessage(
     (m) => m.method === "item/tool/call",
     "tool call",
   );
+
   expect((toolCall.params as { arguments: unknown }).arguments).toEqual({
     value: argValue,
   });

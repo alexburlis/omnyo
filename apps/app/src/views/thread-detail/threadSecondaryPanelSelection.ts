@@ -12,6 +12,7 @@ import type {
 import type { ThreadSecondaryPanel } from "@/lib/thread-secondary-panel";
 
 type ThreadSecondaryPanelThreadId = string | null | undefined;
+
 type ActiveFixedSecondaryTab = SecondaryFixedPanelTab | null;
 
 type NullableSecondaryPanelSetter = (
@@ -26,12 +27,15 @@ export function getActiveFixedSecondaryTab({
   fixedPanelTabsState,
 }: GetActiveFixedSecondaryTabArgs): ActiveFixedSecondaryTab {
   const activeTabId = fixedPanelTabsState.secondary.activeTabId;
+
   if (activeTabId === null) {
     return null;
   }
+
   const activeTab =
     fixedPanelTabsState.secondary.tabs.find((tab) => tab.id === activeTabId) ??
     null;
+
   return activeTab;
 }
 
@@ -43,6 +47,7 @@ export function useSetThreadSecondaryPanelSelection(
     panelStateId,
     syncThreadId,
   );
+
   const setFixedSecondaryPanelTab = useSetFixedSecondaryPanelTab(
     panelStateId,
     syncThreadId,
@@ -52,8 +57,10 @@ export function useSetThreadSecondaryPanelSelection(
     (panel) => {
       if (panel === null) {
         closeFixedSecondaryPanel();
+
         return;
       }
+
       setFixedSecondaryPanelTab(panel);
     },
     [closeFixedSecondaryPanel, setFixedSecondaryPanelTab],
@@ -68,21 +75,26 @@ export function useToggleThreadSecondaryPanelSelection(
     panelStateId,
     syncThreadId,
   );
+
   const openFixedSecondaryPanel = useOpenFixedSecondaryPanel(
     panelStateId,
     syncThreadId,
   );
+
   const fixedPanelTabsState = useFixedPanelTabsState(
     panelStateId,
     syncThreadId,
   );
+
   const isSecondaryPanelOpen = fixedPanelTabsState.secondary.isOpen;
 
   return useCallback(() => {
     if (isSecondaryPanelOpen) {
       closeFixedSecondaryPanel();
+
       return;
     }
+
     openFixedSecondaryPanel();
   }, [closeFixedSecondaryPanel, isSecondaryPanelOpen, openFixedSecondaryPanel]);
 }

@@ -1,14 +1,14 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { getStoredFaviconColor, getStoredThemeId } from "@bb/db";
+import { getStoredFaviconColor, getStoredThemeId } from "@omnyo/db";
 import {
   appThemeSchema,
   builtInPaletteCodeThemes,
   defaultAppTheme,
   formatPluginThemeId,
   resolveCodeTheme,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 function appearanceForPalette(
   themeId: keyof typeof builtInPaletteCodeThemes,
@@ -21,10 +21,11 @@ function appearanceForPalette(
     ...extras,
   };
 }
+
 import {
   themeCatalogResponseSchema,
   systemConfigResponseSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { readJson } from "../helpers/json.js";
 import { withTestHarness } from "../helpers/test-app.js";
 
@@ -57,6 +58,7 @@ describe("appearance settings", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ themeId: "nord", faviconColor: "default" }),
       });
+
       expect(put.status).toBe(200);
       expect(appThemeSchema.parse(await readJson(put))).toEqual(
         appearanceForPalette("nord"),
@@ -80,6 +82,7 @@ describe("appearance settings", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ themeId: "midnight", faviconColor: "teal" }),
       });
+
       expect(put.status).toBe(200);
       expect(appThemeSchema.parse(await readJson(put))).toEqual({
         ...defaultAppTheme,
@@ -92,6 +95,7 @@ describe("appearance settings", () => {
       const config = systemConfigResponseSchema.parse(
         await readJson(await harness.app.request("/api/v1/system/config")),
       );
+
       expect(config.appearance).toEqual({
         ...defaultAppTheme,
         themeId: "midnight",
@@ -109,12 +113,14 @@ describe("appearance settings", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ themeId: "default", faviconColor: "teal" }),
       });
+
       expect(put.status).toBe(200);
       expect(getStoredFaviconColor(harness.db)).toBe("teal");
 
       const config = systemConfigResponseSchema.parse(
         await readJson(await harness.app.request("/api/v1/system/config")),
       );
+
       expect(config.appearance).toEqual({
         ...defaultAppTheme,
         faviconColor: "teal",
@@ -135,6 +141,7 @@ describe("appearance settings", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ themeId: "nord", faviconColor: "purple" }),
       });
+
       expect(appThemeSchema.parse(await readJson(put))).toEqual(
         appearanceForPalette("nord", { faviconColor: "purple" }),
       );
@@ -155,6 +162,7 @@ describe("appearance settings", () => {
           }),
         },
       );
+
       expect(response.status).toBe(400);
     });
   });
@@ -169,6 +177,7 @@ describe("appearance settings", () => {
           body: JSON.stringify({ themeId: "nord" }),
         },
       );
+
       expect(response.status).toBe(400);
     });
   });
@@ -183,9 +192,11 @@ describe("appearance settings", () => {
 
       const response = await harness.app.request("/api/v1/settings/themes");
       expect(response.status).toBe(200);
+
       const catalog = themeCatalogResponseSchema.parse(
         await readJson(response),
       );
+
       expect(catalog.dir).toBe(join(harness.config.dataDir, "theme"));
       expect(catalog.custom).toEqual(["amber", "zephyr"]);
       expect(catalog.plugins).toEqual([]);
@@ -198,15 +209,16 @@ describe("appearance settings", () => {
       const root = join(
         harness.config.dataDir,
         "fixtures",
-        "bb-plugin-palette",
+        "omnyo-plugin-palette",
       );
+
       await mkdir(join(root, "themes"), { recursive: true });
       await writeFile(
         join(root, "package.json"),
         JSON.stringify({
-          name: "bb-plugin-palette",
+          name: "omnyo-plugin-palette",
           version: "0.1.0",
-          bb: {
+          omnyo: {
             name: "Palette fixture",
             description: "Plugin palette fixture.",
             branding: { icon: "Zap" },
@@ -233,12 +245,15 @@ describe("appearance settings", () => {
       await harness.pluginService.installPath(root);
 
       const themeId = formatPluginThemeId("palette", "ocean");
+
       const catalogResponse = await harness.app.request(
         "/api/v1/settings/themes",
       );
+
       const catalog = themeCatalogResponseSchema.parse(
         await readJson(catalogResponse),
       );
+
       expect(catalog.plugins).toEqual([
         {
           id: themeId,
@@ -256,6 +271,7 @@ describe("appearance settings", () => {
           body: JSON.stringify({ themeId, faviconColor: "default" }),
         },
       );
+
       expect(response.status).toBe(200);
       expect(appThemeSchema.parse(await readJson(response))).toEqual({
         ...defaultAppTheme,
@@ -282,6 +298,7 @@ describe("appearance settings", () => {
       const config = systemConfigResponseSchema.parse(
         await readJson(await harness.app.request("/api/v1/system/config")),
       );
+
       expect(getStoredThemeId(harness.db)).toBe("ghost");
       expect(config.appearance).toEqual(defaultAppTheme);
       expect(config.customThemes).toEqual([]);
@@ -301,6 +318,7 @@ describe("appearance settings", () => {
           }),
         },
       );
+
       expect(response.status).toBe(404);
     });
   });
@@ -315,6 +333,7 @@ describe("appearance settings", () => {
           body: JSON.stringify({ themeId: "../evil", faviconColor: "default" }),
         },
       );
+
       expect(response.status).toBe(400);
     });
   });
@@ -322,12 +341,14 @@ describe("appearance settings", () => {
   it("lets a custom UI theme ship Pierre code-theme JSON", async () => {
     await withTestHarness(async (harness) => {
       await writeCustomTheme(harness.config.dataDir, "ocean", ":root {}");
+
       const darkTheme = {
         name: "Ocean Dark",
         type: "dark",
         colors: { "editor.background": "#001" },
         tokenColors: [],
       };
+
       await writeFile(
         join(harness.config.dataDir, "theme", "ocean", "pierre-dark.json"),
         JSON.stringify(darkTheme),
@@ -339,14 +360,17 @@ describe("appearance settings", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ themeId: "ocean", faviconColor: "default" }),
       });
+
       expect(appThemeSchema.parse(await readJson(put))).toEqual({
         ...defaultAppTheme,
         themeId: "ocean",
         customCss: ":root {}",
         resolvedCodeTheme: {
-          dark: "bb:ocean:dark",
+          dark: "omnyo:ocean:dark",
           light: "pierre-light",
-          files: { "bb:ocean:dark": { ...darkTheme, name: "bb:ocean:dark" } },
+          files: {
+            "omnyo:ocean:dark": { ...darkTheme, name: "omnyo:ocean:dark" },
+          },
         },
       });
     });

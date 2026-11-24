@@ -1,4 +1,4 @@
-import type { AvailableModel } from "@get-bb/plugin-sdk/provider-bridge";
+import type { AvailableModel } from "@omnyo/plugin-sdk/provider-bridge";
 import { resolve } from "node:path";
 import {
   createPiModelContextWindowResolverFrom,
@@ -40,14 +40,18 @@ export function getSupportedThinkingLevels(
   if (!model.reasoning) {
     return ["off"];
   }
+
   return EXTENDED_THINKING_LEVELS.filter((level) => {
     const mapped = model.thinkingLevelMap?.[level];
+
     if (mapped === null) {
       return false;
     }
+
     if (level === "xhigh" || level === "max") {
       return mapped !== undefined;
     }
+
     return true;
   });
 }
@@ -61,6 +65,7 @@ function toCatalogModel(model: PiRpcModel): PiCatalogModel | undefined {
   ) {
     return undefined;
   }
+
   return {
     id: model.id,
     input: Array.isArray(model.input)
@@ -104,23 +109,29 @@ async function spawnCatalog(
   }
 
   let generation: CatalogChildGeneration | null = null;
+
   const spawnGeneration = (): CatalogChildGeneration => {
     let modelScope:
       | { scopedModelIds: string[]; defaultModelId?: string }
       | undefined;
+
     let settleModelScopeRequest: (() => void) | undefined;
+
     const pendingReplies = new Map<
       string,
       { resolve: (result: unknown) => void; reject: (error: Error) => void }
     >();
+
     let nextReplyId = 0;
     let exitInfo: PiRpcChildExitInfo | null = null;
+
     const acceptModelScope = (value: Record<string, unknown>): void => {
       const scopedModelIds = Array.isArray(value.scopedModelIds)
         ? value.scopedModelIds.filter(
             (id): id is string => typeof id === "string",
           )
         : [];
+
       modelScope = {
         scopedModelIds,
         defaultModelId:
@@ -129,6 +140,7 @@ async function spawnCatalog(
             : undefined,
       };
     };
+
     const child = new PiRpcChild({
       cwd,
       env: buildPiChildEnv({}),
@@ -137,8 +149,10 @@ async function spawnCatalog(
       onChannelMessage: (message) => {
         if (message.kind === "model-scope") {
           acceptModelScope(message);
+
           return;
         }
+
         if (
           message.kind === "reply" &&
           message.id === "catalog-model-scope" &&
@@ -149,14 +163,19 @@ async function spawnCatalog(
           settleModelScopeRequest?.();
           settleModelScopeRequest = undefined;
         }
+
         if (message.kind !== "reply" || typeof message.id !== "string") {
           return;
         }
+
         const pending = pendingReplies.get(message.id);
+
         if (pending === undefined) {
           return;
         }
+
         pendingReplies.delete(message.id);
+
         if (typeof message.error === "string") {
           pending.reject(new Error(message.error));
         } else {
@@ -165,13 +184,16 @@ async function spawnCatalog(
       },
       onExit: (info) => {
         exitInfo = info;
+
         for (const [, pending] of pendingReplies) {
           pending.reject(new PiRpcChildExitedError(info));
         }
+
         pendingReplies.clear();
       },
       recordThreadId: null,
     });
+
     const channelRequest = (
       method: string,
       timeoutMs: number,
@@ -179,13 +201,16 @@ async function spawnCatalog(
       if (exitInfo !== null) {
         return Promise.reject(new PiRpcChildExitedError(exitInfo));
       }
+
       nextReplyId += 1;
       const id = `catalog-${nextReplyId}`;
+
       return new Promise((resolveReply, rejectReply) => {
         const timeout = setTimeout(() => {
           pendingReplies.delete(id);
           rejectReply(new Error(`pi did not answer ${method} in time`));
         }, timeoutMs);
+
         timeout.unref?.();
         pendingReplies.set(id, {
           resolve: (result) => {
@@ -200,6 +225,7 @@ async function spawnCatalog(
         child.sendChannel({ kind: "request", id, method });
       });
     };
+
     const ready = (async (): Promise<Record<string, unknown>> => {
       const data = await child.requestOk({ type: "get_state" });
       await new Promise<void>((resolveScope) => {
@@ -209,16 +235,19 @@ async function spawnCatalog(
           clearTimeout(timeout);
           resolveScope();
         };
+
         child.sendChannel({
           kind: "request",
           id: "catalog-model-scope",
           method: "model-scope",
         });
       });
+
       return typeof data === "object" && data !== null
         ? (data as Record<string, unknown>)
         : {};
     })();
+
     return {
       child,
       ready,
@@ -228,85 +257,109 @@ async function spawnCatalog(
       getModelScope: () => modelScope,
     };
   };
+
   const activeGeneration = (): CatalogChildGeneration => {
     if (generation === null || generation.child.exited) {
       generation = spawnGeneration();
     }
+
     return generation;
   };
+
   const refreshModels = async (
     active: CatalogChildGeneration,
   ): Promise<void> => {
     let reason: string;
+
     try {
       const reply = (await active.channelRequest(
         "refresh-models",
         REFRESH_MODELS_TIMEOUT_MS,
       )) as { refreshed?: unknown; reason?: unknown } | null | undefined;
+
       if (reply?.refreshed === true) {
         return;
       }
+
       reason =
         typeof reply?.reason === "string" ? reply.reason : "not refreshed";
     } catch (error) {
       reason = error instanceof Error ? error.message : String(error);
     }
+
     process.stderr.write(
       `pi bridge: restarting the model catalog child: ${reason}\n`,
     );
     active.child.kill();
     throw new PiRpcChildExitedError(await active.child.waitForExit());
   };
+
   const ensureFreshModels = (active: CatalogChildGeneration): Promise<void> => {
     if (!active.served) {
       return Promise.resolve();
     }
+
     active.refreshing ??= refreshModels(active).finally(() => {
       active.refreshing = null;
     });
+
     return active.refreshing;
   };
+
   const fetchRawFrom = async (
     active: CatalogChildGeneration,
   ): Promise<PiRpcModel[]> => {
     await active.ready;
     await ensureFreshModels(active);
+
     const data = (await active.child.requestOk({
       type: "get_available_models",
     })) as { models?: unknown[] } | undefined;
+
     active.served = true;
     touch();
+
     return (data?.models ?? []).filter(
       (entry): entry is PiRpcModel =>
         typeof entry === "object" && entry !== null,
     );
   };
+
   const fetchGeneration = async (): Promise<{
     active: CatalogChildGeneration;
     raw: PiRpcModel[];
   }> => {
     const first = activeGeneration();
+
     try {
       return { active: first, raw: await fetchRawFrom(first) };
     } catch (error) {
       if (!(error instanceof PiRpcChildExitedError)) {
         throw error;
       }
+
       const active = activeGeneration();
+
       return { active, raw: await fetchRawFrom(active) };
     }
   };
+
   const fetchRaw = async (): Promise<PiRpcModel[]> =>
     (await fetchGeneration()).raw;
+
   const probe = async (): Promise<Record<string, unknown>> =>
     activeGeneration().ready;
+
   await probe();
+
   return {
     async listModels() {
       const { active, raw } = await fetchGeneration();
       const models: PiCatalogModel[] = [];
+
       for (const model of raw) {
         const catalogModel = toCatalogModel(model);
+
         if (catalogModel) {
           models.push(catalogModel);
         } else {
@@ -315,7 +368,9 @@ async function spawnCatalog(
           );
         }
       }
+
       const modelScope = active.getModelScope();
+
       return buildPiAvailableModels({
         models,
         scopedModelIds: modelScope?.scopedModelIds,
@@ -326,6 +381,7 @@ async function spawnCatalog(
     probe,
     async close() {
       const activeChild = generation?.child;
+
       if (activeChild === undefined) return;
       activeChild.kill();
       await activeChild.waitForExit();
@@ -334,24 +390,29 @@ async function spawnCatalog(
 }
 
 function catalogIdleMs(): number {
-  const configured = Number(process.env.BB_PI_CATALOG_IDLE_MS);
+  const configured = Number(process.env.OMNYO_PI_CATALOG_IDLE_MS);
+
   return Number.isFinite(configured) && configured > 0
     ? configured
     : 5 * 60_000;
 }
+
 const catalogIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function touchCatalog(key: string): void {
   const existing = catalogIdleTimers.get(key);
+
   if (existing) {
     clearTimeout(existing);
   }
+
   const timer = setTimeout(() => {
     catalogIdleTimers.delete(key);
     const catalog = catalogsByCwd.get(key);
     catalogsByCwd.delete(key);
     void catalog?.then((entry) => entry.close()).catch(() => undefined);
   }, catalogIdleMs());
+
   timer.unref?.();
   catalogIdleTimers.set(key, timer);
 }
@@ -366,16 +427,20 @@ export function getPiCatalog(
 ): Promise<PiCatalog> {
   const key = resolve(cwd);
   const existing = catalogsByCwd.get(key);
+
   if (existing) {
     return existing;
   }
+
   const created = spawnCatalog(key, extensionPath, () =>
     touchCatalog(key),
   ).catch((error: unknown) => {
     catalogsByCwd.delete(key);
     throw error;
   });
+
   catalogsByCwd.set(key, created);
+
   return created;
 }
 
@@ -383,6 +448,7 @@ export async function closeAllPiCatalogs(): Promise<void> {
   for (const [, timer] of catalogIdleTimers) {
     clearTimeout(timer);
   }
+
   catalogIdleTimers.clear();
   const catalogs = [...catalogsByCwd.values()];
   catalogsByCwd.clear();
@@ -399,20 +465,25 @@ export function createLiveContextWindowResolver(): {
 } {
   const known = new Map<string, PiRpcModel>();
   let resolver = createPiModelContextWindowResolverFrom([]);
+
   return {
     resolve: (lastAssistant) => resolver(lastAssistant),
     learn(models) {
       let changed = false;
+
       for (const model of models) {
         if (typeof model.contextWindow !== "number") {
           continue;
         }
+
         const key = `${model.provider}\0${model.id}`;
+
         if (!known.has(key)) {
           known.set(key, model);
           changed = true;
         }
       }
+
       if (changed) {
         resolver = createPiModelContextWindowResolverFrom(
           [...known.values()].map((model) => ({

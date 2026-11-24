@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CURSOR_ACP_MAINTENANCE, __testing } from "./provider-maintenance.js";
+import {
+  CURSOR_ACP_MAINTENANCE,
+  __testing,
+} from "@omnyo/provider-bridge-protocol/acp/provider-maintenance";
 
 function cursorMissingInstallationStatus() {
   return {

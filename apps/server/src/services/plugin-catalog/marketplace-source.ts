@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { PluginMarketplaceSourceKind } from "@bb/db";
+import type { PluginMarketplaceSourceKind } from "@omnyo/db";
 import {
   normalizePluginSubdirectory,
   parsePluginSource,
@@ -46,27 +46,36 @@ export function parseMarketplaceSource(
   subdirectory: string | null,
 ): MarketplaceSource {
   const source = raw.trim();
+
   if (source.length === 0) {
     throw new Error(`invalid marketplace source: ${SOURCE_FORMS}`);
   }
+
   if (source.startsWith("path:")) {
     const directory = source.slice("path:".length);
+
     if (directory.length === 0) {
       throw new Error("marketplace source has an empty path");
     }
+
     assertNoSubdirectory(source, subdirectory);
+
     return { kind: "path", directory: resolve(directory) };
   }
+
   if (source.startsWith("git:")) {
     const parsed = parsePluginSource(source);
+
     if (parsed.kind !== "git") {
       throw new Error(`invalid marketplace git source "${source}"`);
     }
+
     if (parsed.selector.kind !== "ref") {
       throw new Error(
         `invalid marketplace git source "${source}": a marketplace ref names one branch, tag, or commit`,
       );
     }
+
     return {
       kind: "git",
       url: parsed.url,
@@ -80,21 +89,27 @@ export function parseMarketplaceSource(
             ),
     };
   }
+
   if (/^https:\/\//iu.test(source)) {
     assertNoSubdirectory(source, subdirectory);
+
     return { kind: "https", manifestUrl: source };
   }
+
   if (/^http:\/\//iu.test(source)) {
     throw new Error(
       `invalid marketplace source "${source}": plain http is refused, use https`,
     );
   }
+
   throw new Error(`invalid marketplace source "${source}": ${SOURCE_FORMS}`);
 }
 
 export function marketplaceSourceDisplay(source: MarketplaceSource): string {
   if (source.kind === "https") return source.manifestUrl;
+
   if (source.kind === "path") return `path:${source.directory}`;
+
   return `git:${source.url}@${source.ref}`;
 }
 
@@ -107,12 +122,15 @@ export function marketplaceSourceFromRow(row: {
   if (row.sourceKind === "https") {
     return { kind: "https", manifestUrl: row.manifestUrl };
   }
+
   if (row.sourceKind === "path") {
     return { kind: "path", directory: row.manifestUrl };
   }
+
   if (row.sourceGitRef === null) {
     throw new Error("git marketplace row has no ref");
   }
+
   return {
     kind: "git",
     url: row.manifestUrl,
@@ -135,6 +153,7 @@ export function marketplaceSourceColumns(source: MarketplaceSource): {
       sourceGitSubdirectory: null,
     };
   }
+
   if (source.kind === "path") {
     return {
       sourceKind: "path",
@@ -143,6 +162,7 @@ export function marketplaceSourceColumns(source: MarketplaceSource): {
       sourceGitSubdirectory: null,
     };
   }
+
   return {
     sourceKind: "git",
     manifestUrl: source.url,
@@ -171,7 +191,6 @@ export async function materializeMarketplace(args: {
   } | null;
   stagingDir: string;
   fetch: MarketplaceFetch;
-  fallbackManifestUrl?: string;
   warn?: (message: string) => void;
 }): Promise<MaterializedMarketplace> {
   if (args.source.kind === "https") {
@@ -179,10 +198,10 @@ export async function materializeMarketplace(args: {
       args.source,
       args.cached,
       args.fetch,
-      args.fallbackManifestUrl,
       args.warn,
     );
   }
+
   if (args.source.kind === "path") {
     return materializeLocal(
       args.source.directory,
@@ -191,6 +210,7 @@ export async function materializeMarketplace(args: {
       args.warn,
     );
   }
+
   return materializeGit(args.source, args.stagingDir, args.warn);
 }
 
@@ -202,7 +222,6 @@ async function materializeHttps(
     lastModified: string | null;
   } | null,
   fetchMarketplace: MarketplaceFetch,
-  fallbackManifestUrl: string | undefined,
   warn: ((message: string) => void) | undefined,
 ): Promise<MaterializedMarketplace> {
   const cachedCatalog =
@@ -214,72 +233,31 @@ async function materializeHttps(
           warn,
         );
 
-  async function requestManifest(
-    manifestUrl: string,
-    useCache: boolean,
-    preferJson: boolean,
-  ): Promise<Response> {
-    const headers = new Headers(
-      preferJson ? { accept: "application/json" } : undefined,
-    );
-    if (useCache && cached?.etag != null) {
-      headers.set("if-none-match", cached.etag);
-    }
-    if (useCache && cached?.lastModified != null) {
-      headers.set("if-modified-since", cached.lastModified);
-    }
-    return fetchMarketplace(manifestUrl, {
-      method: "GET",
-      headers,
-      redirect: "error",
-    });
+  const manifestUrl = source.manifestUrl;
+  const headers = new Headers({ accept: "application/json" });
+
+  if (cached?.etag != null) headers.set("if-none-match", cached.etag);
+
+  if (cached?.lastModified != null) {
+    headers.set("if-modified-since", cached.lastModified);
   }
 
-  let manifestUrl = source.manifestUrl;
-  let response = await requestManifest(
-    manifestUrl,
-    fallbackManifestUrl === undefined || cachedCatalog?.schemaVersion === 2,
-    fallbackManifestUrl === undefined,
-  );
-  if (response.status === 404 && fallbackManifestUrl !== undefined) {
-    if (cachedCatalog?.schemaVersion === 2 && cached !== null) {
-      await response.body?.cancel();
-      warn?.(
-        "the marketplace v2 manifest returned HTTP 404; BB kept the stored v2 catalog and did not request v1",
-      );
-      const iconBase = {
-        kind: "url",
-        manifestUrl: source.manifestUrl,
-      } as const;
-      for (const entry of cachedCatalog.plugins) {
-        entryScreenshotUrls(entry, iconBase, warn);
-      }
-      return {
-        catalog: cachedCatalog,
-        manifestJson: cached.manifestJson,
-        unchanged: true,
-        etag: cached.etag,
-        lastModified: cached.lastModified,
-        commit: null,
-        iconBase,
-        dispose: async () => {},
-      };
-    }
-    await response.body?.cancel();
-    manifestUrl = fallbackManifestUrl;
-    response = await requestManifest(
-      manifestUrl,
-      cachedCatalog?.schemaVersion === 1,
-      true,
-    );
-  }
+  const response = await fetchMarketplace(manifestUrl, {
+    method: "GET",
+    headers,
+    redirect: "error",
+  });
+
   const unchanged = response.status === 304 && cached !== null;
+
   if (!unchanged && !response.ok) {
     await response.body?.cancel();
     throw new Error(`request failed with HTTP ${response.status}`);
   }
+
   let manifestJson: string;
   let catalog: MarketplaceManifest;
+
   if (unchanged) {
     await response.body?.cancel();
     manifestJson = cached.manifestJson;
@@ -295,10 +273,13 @@ async function materializeHttps(
     catalog = parseMarketplaceManifestJson(raw, "marketplace manifest", warn);
     manifestJson = JSON.stringify(catalog);
   }
+
   const iconBase = { kind: "url", manifestUrl } as const;
+
   for (const entry of catalog.plugins) {
     entryScreenshotUrls(entry, iconBase, warn);
   }
+
   return {
     catalog,
     manifestJson,
@@ -323,24 +304,31 @@ async function materializeLocal(
     const isDirectory = await stat(root)
       .then((entry) => entry.isDirectory())
       .catch(() => false);
+
     if (!isDirectory) {
       throw new Error(`marketplace directory does not exist: ${root}`);
     }
+
     const manifestPath = await realPathInside(
       root,
       join(root, MARKETPLACE_MANIFEST_FILENAME),
       "marketplace manifest",
     );
+
     const raw = await readFile(manifestPath, "utf8");
+
     const catalog = parseMarketplaceManifest(
       JSON.parse(raw) as unknown,
       "marketplace manifest",
       warn,
     );
+
     const iconBase = { kind: "dir", root } as const;
+
     for (const entry of catalog.plugins) {
       entryScreenshotUrls(entry, iconBase, warn);
     }
+
     return {
       catalog,
       manifestJson: JSON.stringify(catalog),
@@ -363,14 +351,17 @@ async function gitMarketplaceRoot(
 ): Promise<string> {
   if (subdirectory === null) return checkout;
   const directory = pluginRootDir(checkout, subdirectory);
+
   const isDirectory = await stat(directory)
     .then((entry) => entry.isDirectory())
     .catch(() => false);
+
   if (!isDirectory) {
     throw new Error(
       `marketplace subdirectory "${subdirectory}" is not a directory in the repository`,
     );
   }
+
   return realPathInside(checkout, directory, "marketplace subdirectory");
 }
 
@@ -382,6 +373,7 @@ async function materializeGit(
   await mkdir(stagingDir, { recursive: true });
   const checkout = join(stagingDir, randomUUID());
   const dispose = () => rm(checkout, { recursive: true, force: true });
+
   try {
     await runInstallCommand("git", [
       ...GIT_CLONE_ARGS,
@@ -391,6 +383,7 @@ async function materializeGit(
       source.url,
       checkout,
     ]);
+
     const commit = await runInstallCommand("git", [
       "-C",
       checkout,
@@ -408,6 +401,7 @@ async function materializeGit(
         `refs/remotes/origin/${source.ref}^{commit}`,
       ]),
     );
+
     await runInstallCommand("git", [
       ...GIT_CLONE_ARGS,
       "-C",
@@ -418,6 +412,7 @@ async function materializeGit(
       commit,
     ]);
     await rm(join(checkout, ".git"), { recursive: true, force: true });
+
     return await materializeLocal(
       await gitMarketplaceRoot(checkout, source.subdirectory),
       commit,

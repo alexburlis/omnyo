@@ -7,7 +7,7 @@ import {
   useSettings,
   type PluginThreadActionDataInput,
   type PluginThreadActionRegistration,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import {
   THREAD_NOTIFICATIONS_CHANNEL,
   THREAD_NOTIFICATIONS_LIST_MAX_IDS,
@@ -38,12 +38,15 @@ function parseDefaults(
 ): NotificationDefaults | null {
   const defaultLevel = notificationLevelSchema.safeParse(values?.defaultLevel);
   const childLevel = ownNotificationLevelSchema.safeParse(values?.childLevel);
+
   if (!defaultLevel.success || !childLevel.success) return null;
+
   return { defaultLevel: defaultLevel.data, childLevel: childLevel.data };
 }
 
 function chunk(ids: readonly string[]): string[][] {
   const chunks: string[][] = [];
+
   for (
     let start = 0;
     start < ids.length;
@@ -51,6 +54,7 @@ function chunk(ids: readonly string[]): string[][] {
   ) {
     chunks.push(ids.slice(start, start + THREAD_NOTIFICATIONS_LIST_MAX_IDS));
   }
+
   return chunks;
 }
 
@@ -73,9 +77,12 @@ function withLevels(
   const changed = rows.filter(
     ([threadId, stored]) => !sameInputs(levels.get(threadId), stored),
   );
+
   if (changed.length === 0) return levels;
   const next = new Map(levels);
+
   for (const [threadId, stored] of changed) next.set(threadId, stored);
+
   return next;
 }
 
@@ -93,6 +100,7 @@ function useThreadNotificationsData({
   const latestThreadIds = useRef(threadIds);
   const requested = useRef(new Set<string>());
   const changes = useRef(new Map<string, number>());
+
   const [levels, setLevels] = useState<
     ReadonlyMap<string, ThreadNotificationInputs>
   >(() => new Map());
@@ -100,18 +108,22 @@ function useThreadNotificationsData({
   const fetchLevels = useCallback(
     (ids: readonly string[]) => {
       for (const id of ids) requested.current.add(id);
+
       for (const batch of chunk(ids)) {
         const started = batch.map((id) => changes.current.get(id) ?? 0);
+
         const unchanged = () =>
           batch.filter(
             (id, index) => (changes.current.get(id) ?? 0) === started[index],
           );
+
         void rpc
           .call("threadNotifications.list", { threadIds: batch })
           .then(({ threads }) => {
             const rows = unchanged().map(
               (id) => [id, threads[id] ?? UNSET_THREAD_NOTIFICATIONS] as const,
             );
+
             setLevels((current) => withLevels(current, rows));
           })
           .catch(() => {
@@ -128,8 +140,10 @@ function useThreadNotificationsData({
     const shown = new Set(latestThreadIds.current);
     setLevels((current) => {
       const next = new Map([...current].filter(([id]) => shown.has(id)));
+
       return next.size === current.size ? current : next;
     });
+
     if (latestThreadIds.current.length > 0) {
       fetchLevels(latestThreadIds.current);
     }
@@ -138,22 +152,27 @@ function useThreadNotificationsData({
   useEffect(() => {
     latestThreadIds.current = threadIds;
     const missing = threadIds.filter((id) => !requested.current.has(id));
+
     if (missing.length > 0) fetchLevels(missing);
   }, [fetchLevels, threadIds]);
 
   useEffect(() => {
     const previous = previousConnection.current;
     previousConnection.current = connection;
+
     if (previous !== "reconnecting" || connection !== "connected") return;
     rereadShown();
   }, [connection, rereadShown]);
 
   useRealtime(THREAD_NOTIFICATIONS_CHANNEL, (payload) => {
     const update = threadNotificationsUpdateSchema.safeParse(payload);
+
     if (!update.success) return;
+
     const rows = Object.entries(update.data.threads).filter(([threadId]) =>
       requested.current.has(threadId),
     );
+
     if (rows.length === 0) return;
     bump(
       changes.current,
@@ -168,6 +187,7 @@ function useThreadNotificationsData({
         threadId,
         level,
       });
+
       bump(changes.current, [threadId]);
       setLevels((current) => withLevels(current, [[threadId, stored]]));
     },
@@ -175,6 +195,7 @@ function useThreadNotificationsData({
   );
 
   const defaultsKey = JSON.stringify(parseDefaults(values));
+
   const defaults = useMemo(
     () => JSON.parse(defaultsKey) as NotificationDefaults | null,
     [defaultsKey],
@@ -194,7 +215,9 @@ const LEVEL_ICONS: Record<NotificationLevel, string> = {
 
 function capHint(row: ThreadNotifications): string | undefined {
   if (row.source === "parent") return "Limited by a parent thread";
+
   if (row.source === "ancestor") return "Limited by an ancestor thread";
+
   return undefined;
 }
 
@@ -208,6 +231,7 @@ export const notificationsThreadAction: PluginThreadActionRegistration<ThreadNot
     item: ({ thread, data }) => {
       if (thread.archivedAt !== null) return null;
       const stored = data.levels.get(thread.id) ?? UNSET_THREAD_NOTIFICATIONS;
+
       const resolved =
         data.defaults === null
           ? null
@@ -223,7 +247,9 @@ export const notificationsThreadAction: PluginThreadActionRegistration<ThreadNot
                 data.defaults,
               ).effective,
             };
+
       const hint = resolved === null ? undefined : capHint(resolved.row);
+
       return {
         label: "Notifications",
         ...(resolved === null
@@ -244,6 +270,7 @@ export const notificationsThreadAction: PluginThreadActionRegistration<ThreadNot
         },
         run: async ({ value }) => {
           const level = ownNotificationLevelSchema.safeParse(value);
+
           if (!level.success) return;
           await data.setLevel(thread.id, level.data);
         },

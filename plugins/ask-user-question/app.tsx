@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import {
   definePluginApp,
   type PluginPendingInteractionProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { QuestionForm } from "@/components/ui/question-form";
 import {
@@ -19,10 +19,13 @@ function AskUserQuestionInteraction({
     () => interactionPayloadSchema.safeParse(interaction.payload),
     [interaction.payload],
   );
+
   const [busy, setBusy] = useState(false);
+
   const handleCancel = () => {
     void cancel().catch(() => {});
   };
+
   if (!parsed.success) {
     return (
       <div className="space-y-3">
@@ -35,6 +38,7 @@ function AskUserQuestionInteraction({
       </div>
     );
   }
+
   return (
     <QuestionForm
       key={interaction.id}
@@ -44,6 +48,7 @@ function AskUserQuestionInteraction({
       cancelDisabled={busy}
       onSubmit={(answers) => {
         setBusy(true);
+
         return submit({ answers }).finally(() => setBusy(false));
       }}
       onCancel={cancel}

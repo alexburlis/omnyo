@@ -24,8 +24,11 @@ import { useDeferredRealization } from "./useDeferredRealization";
 const IS_IOS = process.env.EXPO_OS === "ios";
 
 export const SHEET_CORNER_RADIUS = IS_IOS ? 38 : 28;
+
 const GRABBER_WIDTH = 36;
+
 const GRABBER_HEIGHT = 5;
+
 const GRABBER_ALPHA = 0.3;
 
 export interface SheetHandle {
@@ -40,6 +43,7 @@ export interface SheetController extends SheetHandle {
 
 function createSheetController(): SheetController {
   let handle: SheetHandle | null = null;
+
   return {
     attach: (next) => {
       handle = next;
@@ -51,6 +55,7 @@ function createSheetController(): SheetController {
 
 export function useSheet(): SheetController {
   const [controller] = useState(createSheetController);
+
   return controller;
 }
 
@@ -78,18 +83,22 @@ export function Sheet({ controller, children, onDismiss }: SheetProps) {
       },
       dismiss: () => modalRef.current?.dismiss(),
     });
+
     return () => controller.attach(null);
   }, [controller]);
 
   useEffect(() => {
     if (IS_IOS || !presented) return;
+
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
       () => {
         modalRef.current?.dismiss();
+
         return true;
       },
     );
+
     return () => subscription.remove();
   }, [presented]);
 
@@ -118,6 +127,7 @@ export function Sheet({ controller, children, onDismiss }: SheetProps) {
     }),
     [tokens.surfaceGrouped, tokens.surfaceGroupedCell],
   );
+
   const handleIndicatorStyle = useMemo(
     () => ({
       backgroundColor: withAlpha(tokens.foreground, GRABBER_ALPHA),
@@ -129,7 +139,12 @@ export function Sheet({ controller, children, onDismiss }: SheetProps) {
   );
 
   const body = realized ? children : <View className="h-24" />;
-  const bottomPad = { paddingBottom: Math.max(insets.bottom, 12) };
+
+  const bottomPad = {
+    paddingBottom: Math.max(insets.bottom, 12),
+    paddingLeft: insets.left,
+    paddingRight: insets.right,
+  };
 
   return (
     <BottomSheetModal

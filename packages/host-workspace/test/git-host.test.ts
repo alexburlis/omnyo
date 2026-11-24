@@ -8,11 +8,11 @@ import {
 
 const execFileMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@bb/process-utils", async () => {
-  const actual =
-    await vi.importActual<typeof import("@bb/process-utils")>(
-      "@bb/process-utils",
-    );
+vi.mock("@omnyo/process-utils", async () => {
+  const actual = await vi.importActual<typeof import("@omnyo/process-utils")>(
+    "@omnyo/process-utils",
+  );
+
   return {
     ...actual,
     execPortableFile: (file: string, args: string[], options: object) =>
@@ -39,10 +39,10 @@ function ghJson(overrides: Record<string, unknown> = {}): string {
     number: 42,
     title: "Add pull request section",
     state: "OPEN",
-    url: "https://github.com/acme/bb/pull/42",
+    url: "https://github.com/acme/omnyo/pull/42",
     isDraft: false,
     baseRefName: "main",
-    headRefName: "bb/add-pr-section",
+    headRefName: "omnyo/add-pr-section",
     updatedAt: "2026-06-16T12:30:00Z",
     statusCheckRollup: [],
     reviewDecision: null,
@@ -59,10 +59,10 @@ describe("parseGitHostPullRequest", () => {
       number: 42,
       title: "Add pull request section",
       state: "OPEN",
-      url: "https://github.com/acme/bb/pull/42",
+      url: "https://github.com/acme/omnyo/pull/42",
       isDraft: false,
       baseRefName: "main",
-      headRefName: "bb/add-pr-section",
+      headRefName: "omnyo/add-pr-section",
       updatedAt: "2026-06-16T12:30:00Z",
       autoMerge: false,
       inMergeQueue: null,
@@ -100,7 +100,7 @@ describe("parseGitHostPullRequest", () => {
               name: "typecheck",
               status: "COMPLETED",
               conclusion: "SUCCESS",
-              detailsUrl: "https://github.com/acme/bb/actions/runs/1",
+              detailsUrl: "https://github.com/acme/omnyo/actions/runs/1",
               startedAt: "2026-06-16T12:20:00Z",
             },
             {
@@ -133,7 +133,7 @@ describe("parseGitHostPullRequest", () => {
           name: "typecheck",
           status: "completed",
           conclusion: "success",
-          url: "https://github.com/acme/bb/actions/runs/1",
+          url: "https://github.com/acme/omnyo/actions/runs/1",
           startedAt: "2026-06-16T12:20:00Z",
         },
         {
@@ -184,7 +184,7 @@ describe("parseGitHostPullRequest", () => {
 describe("runPullRequestActionForCurrentBranch", () => {
   const actionArgs = {
     cwd: "/tmp/workspace",
-    localBranch: "bb/pr-action",
+    localBranch: "omnyo/pr-action",
     shellPath: "/Users/test/.local/bin:/usr/bin",
   };
 
@@ -198,8 +198,10 @@ describe("runPullRequestActionForCurrentBranch", () => {
       ) => {
         if (file === "git") {
           callback(null, "", "");
+
           return;
         }
+
         callback(null, "", "");
       },
     );
@@ -253,6 +255,7 @@ describe("runPullRequestActionForCurrentBranch", () => {
     const error = Object.assign(new Error("spawn gh ENOENT"), {
       code: "ENOENT",
     });
+
     execFileMock.mockImplementation(
       (
         file: string,
@@ -266,8 +269,10 @@ describe("runPullRequestActionForCurrentBranch", () => {
       ) => {
         if (file === "git") {
           callback(null, "", "");
+
           return;
         }
+
         callback(error);
       },
     );
@@ -287,7 +292,7 @@ describe("runPullRequestActionForCurrentBranch", () => {
 describe("getPullRequestForCurrentBranch", () => {
   const lookupArgs = {
     cwd: "/tmp/workspace",
-    localBranch: "bb/pr-lookup",
+    localBranch: "omnyo/pr-lookup",
     shellPath: "/Users/test/.local/bin:/usr/bin",
   };
 
@@ -301,8 +306,10 @@ describe("getPullRequestForCurrentBranch", () => {
       ) => {
         if (file === "git") {
           callback(null, "", "");
+
           return;
         }
+
         callback(null, stdout, "");
       },
     );
@@ -322,8 +329,10 @@ describe("getPullRequestForCurrentBranch", () => {
       ) => {
         if (file === "git") {
           callback(null, "", "");
+
           return;
         }
+
         callback(error);
       },
     );
@@ -363,12 +372,14 @@ describe("getPullRequestForCurrentBranch", () => {
           ) => void,
         ) => {
           if (file === "git") return callback(null, "", "");
+
           if (args[0] === "pr")
             return callback(
               null,
               ghJson({ autoMergeRequest: { mergeMethod: "SQUASH" } }),
               "",
             );
+
           if (queueOutput instanceof Error) return callback(queueOutput);
           callback(null, String(queueOutput), "");
         },

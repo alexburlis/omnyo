@@ -9,16 +9,16 @@ import {
   createAgentRuntime,
   type AgentRuntime,
   type AgentRuntimeSkillRoot,
-} from "@bb/agent-runtime";
-import { events } from "@bb/db";
+} from "@omnyo/agent-runtime";
+import { events } from "@omnyo/db";
 import {
   encodeClientTurnRequestIdNumber,
   toolCallResponseSchema,
   type ThreadEvent,
   type ToolCallRequest,
   type ToolCallResponse,
-} from "@bb/domain";
-import { groupHostDaemonEvents } from "@bb/host-daemon-contract";
+} from "@omnyo/domain";
+import { groupHostDaemonEvents } from "@omnyo/host-daemon-contract";
 import { resolveBuiltinPluginRootPath } from "../../src/services/plugins/builtin-registry.js";
 import {
   buildExecutionOptions,
@@ -41,12 +41,19 @@ const ECHO_PLUGIN_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../../../examples/plugins/echo-provider",
 );
+
 const PLUGIN_ID = "echo-provider";
+
 const PROVIDER_ID = "echo-agent";
+
 const RECEIPT_KIND = `${PLUGIN_ID}/receipt`;
+
 const MOOD_KIND = `${PLUGIN_ID}/mood`;
+
 const RECEIPT_ICON_GLYPH = `${PLUGIN_ID}/receipt`;
-const GREETING_ENV = "BB_ECHO_PROVIDER_GREETING";
+
+const GREETING_ENV = "OMNYO_ECHO_PROVIDER_GREETING";
+
 const STAMP_PRESENTATION = {
   label: { pending: "Stamping receipt", completed: "Stamped receipt" },
   icon: { glyph: "Check" },
@@ -93,10 +100,12 @@ function itemOf(rows: StoredRow[], itemKind: string, tool?: string): StoredRow {
       candidate.itemKind === itemKind &&
       (tool === undefined || candidate.data.item?.tool === tool),
   );
+
   expect(
     row,
     `a completed ${itemKind}${tool ? ` ${tool}` : ""} row`,
   ).toBeDefined();
+
   return row as StoredRow;
 }
 
@@ -106,24 +115,32 @@ function waitFor(
   timeoutMs = 30_000,
 ): Promise<void> {
   const startedAt = Date.now();
+
   return new Promise((resolvePromise, rejectPromise) => {
     const tick = () => {
       if (predicate()) {
         resolvePromise();
+
         return;
       }
+
       if (Date.now() - startedAt > timeoutMs) {
         rejectPromise(new Error(`Timed out waiting for ${label}`));
+
         return;
       }
+
       setTimeout(tick, 25);
     };
+
     tick();
   });
 }
 
 const RUNTIME_TO_BRIDGE_LANE = "runtime→bridge.ndjson";
+
 const recordingEntrySchema = z.object({ seq: z.number(), line: z.string() });
+
 const recordedRequestSchema = z.object({
   id: z.union([z.string(), z.number()]),
   method: z.string(),
@@ -132,18 +149,23 @@ const recordedRequestSchema = z.object({
 async function bridgeRequestMethods(recordDir: string): Promise<string[]> {
   const providerDir = join(recordDir, PROVIDER_ID);
   const requests: { seq: number; method: string }[] = [];
+
   for (const scope of await readdir(providerDir)) {
     const scopeDir = join(providerDir, scope);
+
     if (!(await readdir(scopeDir)).includes(RUNTIME_TO_BRIDGE_LANE)) continue;
     const raw = await readFile(join(scopeDir, RUNTIME_TO_BRIDGE_LANE), "utf8");
+
     for (const line of raw.split("\n").filter((entry) => entry.length > 0)) {
       const entry = recordingEntrySchema.parse(JSON.parse(line));
       const request = recordedRequestSchema.safeParse(JSON.parse(entry.line));
+
       if (request.success) {
         requests.push({ seq: entry.seq, method: request.data.method });
       }
     }
   }
+
   return requests
     .sort((left, right) => left.seq - right.seq)
     .map((request) => request.method);
@@ -159,9 +181,9 @@ describe("echo-provider canary: plugin install → server command → runtime �
 
   beforeEach(async () => {
     harness = await createTestAppHarness();
-    workspaceDir = await mkdtemp(join(tmpdir(), "bb-echo-canary-ws-"));
-    bridgeDataDir = await mkdtemp(join(tmpdir(), "bb-echo-canary-bridge-"));
-    recordDir = await mkdtemp(join(tmpdir(), "bb-echo-canary-record-"));
+    workspaceDir = await mkdtemp(join(tmpdir(), "omnyo-echo-canary-ws-"));
+    bridgeDataDir = await mkdtemp(join(tmpdir(), "omnyo-echo-canary-bridge-"));
+    recordDir = await mkdtemp(join(tmpdir(), "omnyo-echo-canary-record-"));
     savedGreeting = process.env[GREETING_ENV];
     process.env[GREETING_ENV] = "hello from the daemon";
   });
@@ -169,11 +191,13 @@ describe("echo-provider canary: plugin install → server command → runtime �
   afterEach(async () => {
     await runtime?.shutdown();
     runtime = null;
+
     if (savedGreeting === undefined) {
       delete process.env[GREETING_ENV];
     } else {
       process.env[GREETING_ENV] = savedGreeting;
     }
+
     await harness.cleanup();
     await rm(workspaceDir, { recursive: true, force: true });
     await rm(bridgeDataDir, { recursive: true, force: true });
@@ -185,7 +209,11 @@ describe("echo-provider canary: plugin install → server command → runtime �
     expect(entry.status, entry.statusDetail ?? "").toBe("running");
     expect(entry.id).toBe(PLUGIN_ID);
     const artifact = harness.deps.pluginHostArtifacts.get(PLUGIN_ID);
-    expect(artifact, "the plugin's bb.host artifact was built").toBeDefined();
+    expect(
+      artifact,
+      "the plugin's omnyo.host artifact was built",
+    ).toBeDefined();
+
     if (artifact === undefined) throw new Error("unreachable");
 
     await harness.pluginService.updateSettings(PLUGIN_ID, { shout: true });
@@ -206,25 +234,30 @@ describe("echo-provider canary: plugin install → server command → runtime �
     const { host, session } = seedHostSession(harness.deps, {
       id: "host-echo-canary",
     });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const environment = seedEnvironment(harness.deps, {
       hostId: host.id,
       projectId: project.id,
       path: workspaceDir,
     });
+
     const thread = seedThread(harness.deps, {
       projectId: project.id,
       environmentId: environment.id,
       providerId: PROVIDER_ID,
       status: "active",
     });
+
     const execution = await buildExecutionOptions(
       harness.deps,
       { model: "echo-1" },
       { threadId: thread.id },
     );
+
     const command = await buildThreadStartCommand(harness.deps, {
       environment,
       execution,
@@ -249,16 +282,20 @@ describe("echo-provider canary: plugin install → server command → runtime �
       envPassthrough: [GREETING_ENV],
       capabilities: { supportsServiceTier: true, fork: "none" },
     });
+
     const stampTool = command.dynamicTools.find(
       (tool) => tool.name === "echo_stamp",
     );
+
     expect(stampTool).toMatchObject({ presentation: STAMP_PRESENTATION });
+
     if (command.bridgeLaunch.source.kind !== "artifact") {
       throw new Error("expected an artifact launch");
     }
 
     const runtimeEvents: ThreadEvent[] = [];
     let ingest: Promise<void> = Promise.resolve();
+
     const ingestEvent = (event: ThreadEvent): void => {
       ingest = ingest.then(async () => {
         const response = await harness.app.request("/internal/session/events", {
@@ -271,10 +308,13 @@ describe("echo-provider canary: plugin install → server command → runtime �
             ]),
           }),
         });
+
         expect(response.status, `ingest ${event.type}`).toBe(200);
       });
     };
+
     const toolCalls: ToolCallRequest[] = [];
+
     const runtimeInstance = createAgentRuntime({
       workspacePath: workspaceDir,
       onEvent: (event) => {
@@ -283,6 +323,7 @@ describe("echo-provider canary: plugin install → server command → runtime �
       },
       onToolCall: async (request): Promise<ToolCallResponse> => {
         toolCalls.push(request);
+
         const response = await harness.app.request(
           "/internal/session/tool-call",
           {
@@ -299,11 +340,15 @@ describe("echo-provider canary: plugin install → server command → runtime �
             }),
           },
         );
+
         expect(response.status).toBe(200);
+
         return toolCallResponseSchema.parse(await response.json());
       },
     });
+
     runtime = runtimeInstance;
+
     const bridgeLaunch = {
       pluginId: command.bridgeLaunch.pluginId,
       dataDir: bridgeDataDir,
@@ -316,6 +361,7 @@ describe("echo-provider canary: plugin install → server command → runtime �
       providerOptions: command.bridgeLaunch.providerOptions,
       envPassthrough: command.bridgeLaunch.envPassthrough,
     };
+
     await runtimeInstance.startThread({
       bridgeLaunch,
       environmentId: environment.id,
@@ -329,8 +375,10 @@ describe("echo-provider canary: plugin install → server command → runtime �
       dynamicTools: command.dynamicTools,
       instructionMode: command.instructionMode,
     });
+
     const turnCompletedCount = () =>
       runtimeEvents.filter((event) => event.type === "turn/completed").length;
+
     await waitFor(() => turnCompletedCount() >= 2, "the first echo turn");
     await ingest;
 
@@ -355,10 +403,13 @@ describe("echo-provider canary: plugin install → server command → runtime �
       "extension",
       "agentMessage",
     ]);
+
     const itemRows = rows.filter(
       (row) => row.type === "item/started" || row.type === "item/completed",
     );
+
     expect(itemRows.length).toBeGreaterThanOrEqual(20);
+
     for (const row of itemRows) {
       expect(
         row.data.item?.presentation,
@@ -382,9 +433,11 @@ describe("echo-provider canary: plugin install → server command → runtime �
     expect(entry.icons.receipt).toMatch(
       /^\/api\/v1\/plugins\/echo-provider\/assets\/icons\/receipt\.svg\?h=[0-9a-f]{16}$/,
     );
+
     const receiptIcon = await harness.app.request(
       `http://127.0.0.1:3334${entry.icons.receipt}`,
     );
+
     expect(receiptIcon.status).toBe(200);
     expect(receiptIcon.headers.get("content-type")).toBe("image/svg+xml");
     expect(
@@ -401,16 +454,20 @@ describe("echo-provider canary: plugin install → server command → runtime �
       summary: "child echo: hello canary",
       presentation: { icon: { glyph: "UserRound" } },
     });
+
     const childTurn = rows.find(
       (row) =>
         row.type === "turn/started" && row.data.parentToolCallId !== undefined,
     );
+
     expect(childTurn?.data.parentToolCallId).toBe(delegation.data.item?.id);
+
     const childMessage = completed.find(
       (row) =>
         row.itemKind === "agentMessage" &&
         row.data.item?.parentToolCallId !== undefined,
     );
+
     expect(childMessage?.data.item).toMatchObject({
       text: "child echo: hello canary",
       parentToolCallId: delegation.data.item?.id,
@@ -447,7 +504,7 @@ describe("echo-provider canary: plugin install → server command → runtime �
       presentation: { suppress: true },
     });
     expect(itemOf(rows, "toolCall", "echo_stamp").data.item).toMatchObject({
-      server: "bb",
+      server: "omnyo",
       status: "completed",
       result: "stamped: hello canary",
       presentation: STAMP_PRESENTATION,
@@ -460,6 +517,7 @@ describe("echo-provider canary: plugin install → server command → runtime �
           row.data.item?.parentToolCallId === undefined,
       )
       .at(-1);
+
     expect(message?.data.item?.text).toBe(
       [
         "echo: HELLO CANARY",
@@ -482,9 +540,11 @@ describe("echo-provider canary: plugin install → server command → runtime �
     expect(
       secondTurnRows.filter((row) => row.itemKind === "extension"),
     ).toEqual([]);
+
     const unhandled = secondTurnRows.filter(
       (row) => row.type === "provider/unhandled",
     );
+
     expect(unhandled).toHaveLength(2);
     expect(unhandled[0]?.data).toMatchObject({
       providerId: PROVIDER_ID,
@@ -503,13 +563,17 @@ describe("echo-provider canary: plugin install → server command → runtime �
     ).toMatchObject({ kind: MOOD_KIND, payload: { turnsEchoed: 2 } });
 
     const rejectedBefore = storedRows(harness, thread.id).length;
+
     const secondTurn = secondTurnRows.find(
       (row) => row.type === "turn/started" && row.turnId !== null,
     );
+
     const providerThreadId = secondTurn?.data.providerThreadId;
+
     if (secondTurn?.turnId == null || typeof providerThreadId !== "string") {
       throw new Error("expected the second turn's turn/started row");
     }
+
     const undeclared = await harness.app.request("/internal/session/events", {
       method: "POST",
       headers: internalAuthHeaders(harness),
@@ -539,6 +603,7 @@ describe("echo-provider canary: plugin install → server command → runtime �
         ]),
       }),
     });
+
     expect(undeclared.status).toBe(200);
     const rejected = storedRows(harness, thread.id).slice(rejectedBefore);
     expect(rejected.map((row) => row.type)).toEqual(["provider/unhandled"]);
@@ -555,41 +620,49 @@ describe("echo-provider canary: plugin install → server command → runtime �
     });
   }, 120_000);
 
-  it("runs a turn with the BB guide skills staged and sends the bridge only the requests it handles", async () => {
-    const guideRoot = resolveBuiltinPluginRootPath("bb-guide");
-    const guide = await harness.pluginService.install("builtin:bb-guide", {
+  it("runs a turn with the Omnyo guide skills staged and sends the bridge only the requests it handles", async () => {
+    const guideRoot = resolveBuiltinPluginRootPath("omnyo-guide");
+
+    const guide = await harness.pluginService.install("builtin:omnyo-guide", {
       kind: "root",
     });
+
     expect(guide.status, guide.statusDetail ?? "").toBe("running");
     const entry = await harness.pluginService.installPath(ECHO_PLUGIN_ROOT);
     expect(entry.status, entry.statusDetail ?? "").toBe("running");
     const artifact = harness.deps.pluginHostArtifacts.get(PLUGIN_ID);
+
     if (artifact === undefined) {
-      throw new Error("the plugin's bb.host artifact was not built");
+      throw new Error("the plugin's omnyo.host artifact was not built");
     }
 
     const { host, session } = seedHostSession(harness.deps, {
       id: "host-echo-canary-skills",
     });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const environment = seedEnvironment(harness.deps, {
       hostId: host.id,
       projectId: project.id,
       path: workspaceDir,
     });
+
     const thread = seedThread(harness.deps, {
       projectId: project.id,
       environmentId: environment.id,
       providerId: PROVIDER_ID,
       status: "active",
     });
+
     const execution = await buildExecutionOptions(
       harness.deps,
       { model: "echo-1" },
       { threadId: thread.id },
     );
+
     const command = await buildThreadStartCommand(harness.deps, {
       environment,
       execution,
@@ -602,20 +675,22 @@ describe("echo-provider canary: plugin install → server command → runtime �
       syncGeneratedTitle: false,
       thread,
     });
+
     if (command.bridgeLaunch.source.kind !== "artifact") {
       throw new Error("expected an artifact launch");
     }
+
     expect(
       command.injectedSkillSources.map((source) => source.name).sort(),
     ).toEqual([
-      "bb-cli",
-      "bb-plugin-authoring",
+      "omnyo-cli",
+      "omnyo-plugin-authoring",
       "skill-creator",
-      "submit-a-plugin",
     ]);
-    expect(command.instructions).toContain("bb status");
+    expect(command.instructions).toContain("omnyo status");
 
     const skillDirectoryRootPath = join(guideRoot, "skills");
+
     const skillRoots: AgentRuntimeSkillRoot[] = [
       {
         id: "global-skills:canary",
@@ -629,15 +704,17 @@ describe("echo-provider canary: plugin install → server command → runtime �
 
     const runtimeEvents: ThreadEvent[] = [];
     const toolCalls: ToolCallRequest[] = [];
+
     const runtimeInstance = createAgentRuntime({
       workspacePath: workspaceDir,
-      env: { BB_PROVIDER_BRIDGE_RECORD_DIR: recordDir },
+      env: { OMNYO_PROVIDER_BRIDGE_RECORD_DIR: recordDir },
       skillRoots,
       onEvent: (event) => {
         runtimeEvents.push(event);
       },
       onToolCall: async (request): Promise<ToolCallResponse> => {
         toolCalls.push(request);
+
         const response = await harness.app.request(
           "/internal/session/tool-call",
           {
@@ -654,10 +731,13 @@ describe("echo-provider canary: plugin install → server command → runtime �
             }),
           },
         );
+
         expect(response.status).toBe(200);
+
         return toolCallResponseSchema.parse(await response.json());
       },
     });
+
     runtime = runtimeInstance;
     await runtimeInstance.startThread({
       bridgeLaunch: {
@@ -687,7 +767,7 @@ describe("echo-provider canary: plugin install → server command → runtime �
       () =>
         runtimeEvents.filter((event) => event.type === "turn/completed")
           .length >= 2,
-      "the echo turn with the BB guide skills staged",
+      "the echo turn with the Omnyo guide skills staged",
     );
     expect(toolCalls.map((call) => call.tool)).toEqual(["echo_stamp"]);
 

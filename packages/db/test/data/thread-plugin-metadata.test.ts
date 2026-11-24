@@ -23,25 +23,30 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup(name: string) {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: `${name}-host`,
     type: "persistent",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: `${name}-project`,
     source: { type: "local_path", hostId: host.id, path: `/tmp/${name}` },
   });
+
   return { db, project };
 }
 
 describe("thread plugin metadata persistence", () => {
   it("seeds one namespace and returns {} when absent", () => {
     const { db, project } = setup("seed");
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
       pluginMetadata: { pluginId: "alpha", metadata: { a: 1, nullable: null } },
     });
+
     expect(getThreadPluginMetadata(db, thread.id, "alpha")).toEqual({
       metadata: { a: 1, nullable: null },
       corrupt: false,
@@ -71,20 +76,24 @@ describe("thread plugin metadata persistence", () => {
 
   it("stores no row for an empty seed", () => {
     const { db, project } = setup("empty-seed");
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
       pluginMetadata: { pluginId: "alpha", metadata: {} },
     });
+
     expect(listThreadPluginMetadataRows(db, thread.id, ["alpha"])).toEqual([]);
   });
 
   it("shallow sets then removes atomically, including null and empty deletion", () => {
     const { db, project } = setup("patch");
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     insertThreadPluginMetadata(db, {
       threadId: thread.id,
       pluginId: "p",
@@ -127,10 +136,12 @@ describe("thread plugin metadata persistence", () => {
 
   it("reports an oversized merge without changing the stored namespace", () => {
     const { db, project } = setup("oversized");
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     insertThreadPluginMetadata(db, {
       threadId: thread.id,
       pluginId: "p",
@@ -152,10 +163,12 @@ describe("thread plugin metadata persistence", () => {
 
   it("reports a corrupt row as {} and lets a patch replace it", () => {
     const { db, project } = setup("corrupt");
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
     });
+
     for (const metadataJson of ["not-json", "[1,2]", "null"]) {
       db.delete(threadPluginMetadata).run();
       db.insert(threadPluginMetadata)
@@ -185,10 +198,11 @@ describe("thread plugin metadata persistence", () => {
   });
 
   it("rejects a competing file-backed write after the first read while immediate holds the lock", () => {
-    const directory = mkdtempSync(join(tmpdir(), "bb-thread-plugin-metadata-"));
+    const directory = mkdtempSync(join(tmpdir(), "omnyo-thread-metadata-"));
     const path = join(directory, "db.sqlite");
     const first = createConnection(path);
     const second = createConnection(path);
+
     try {
       migrate(first);
       const threadId = "thread-concurrency";
@@ -203,6 +217,7 @@ describe("thread plugin metadata persistence", () => {
         .run();
       second.$client.pragma("busy_timeout = 0");
       let secondWrites = 0;
+
       const secondPatch = () => {
         secondWrites += 1;
         expect(() =>
@@ -214,12 +229,15 @@ describe("thread plugin metadata persistence", () => {
           }),
         ).toThrow(/locked|busy/u);
       };
+
       const transactionProxy = new Proxy(first, {
         get(target, property, receiver) {
           const value = Reflect.get(target, property, receiver);
+
           if (property !== "transaction" || typeof value !== "function") {
             return value;
           }
+
           return (callback: (tx: unknown) => unknown, options?: unknown) =>
             Reflect.apply(value, target, [
               (tx: unknown) =>
@@ -228,6 +246,7 @@ describe("thread plugin metadata persistence", () => {
             ]);
         },
       });
+
       expect(
         patchThreadPluginMetadata(transactionProxy, {
           threadId,
@@ -288,6 +307,7 @@ describe("thread plugin metadata persistence", () => {
 
   it("keeps metadata out of thread search while retaining title discovery", () => {
     const { db, project } = setup("search");
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
@@ -297,27 +317,32 @@ describe("thread plugin metadata persistence", () => {
         metadata: { marker: "metadata-only-search-marker" },
       },
     });
+
     expect(
       searchThreadsWithPendingInteractionState(db, {
         query: "discoverable-metadata-title",
         limitPerGroup: 20,
       }).active.results.map((result) => result.thread.id),
     ).toEqual([thread.id]);
+
     const privateResults = searchThreadsWithPendingInteractionState(db, {
       query: "metadata-only-search-marker",
       limitPerGroup: 20,
     });
+
     expect(privateResults.active.total).toBe(0);
     expect(privateResults.archived.total).toBe(0);
   });
 
   it("cascades metadata when its thread is deleted", () => {
     const { db, project } = setup("cascade");
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       providerId: "codex",
       pluginMetadata: { pluginId: "p", metadata: { seeded: true } },
     });
+
     expect(listThreadPluginMetadataRows(db, thread.id, ["p"])).toHaveLength(1);
     expect(deleteThread(db, noopNotifier, thread.id)).toBe(true);
     expect(listThreadPluginMetadataRows(db, thread.id, ["p"])).toEqual([]);

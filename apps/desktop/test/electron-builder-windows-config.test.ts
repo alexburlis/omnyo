@@ -4,12 +4,19 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 const execFileAsync = promisify(execFile);
+
 const desktopPackageRoot = process.cwd();
 
 const printedConfigSchema = z
   .object({
+    appId: z.string(),
+    artifactName: z.string(),
     extraMetadata: z.object({ name: z.string() }).optional(),
-    nsis: z.object({ oneClick: z.boolean(), perMachine: z.boolean() }),
+    nsis: z.object({
+      guid: z.string().optional(),
+      oneClick: z.boolean(),
+      perMachine: z.boolean(),
+    }),
     win: z.object({
       icon: z.string(),
       target: z.array(
@@ -26,11 +33,12 @@ async function printConfig(args: string[], channel: string) {
     {
       cwd: desktopPackageRoot,
       env: {
-        BB_DESKTOP_RELEASE_CHANNEL: channel,
+        OMNYO_DESKTOP_RELEASE_CHANNEL: channel,
         PATH: process.env.PATH,
       },
     },
   );
+
   return printedConfigSchema.parse(JSON.parse(stdout));
 }
 
@@ -40,20 +48,31 @@ describe("electron-builder Windows config", () => {
 
     expect(config.win.target).toEqual([{ arch: ["x64"], target: "nsis" }]);
     expect(config.win.icon).toBe("assets/icon.png");
-    expect(config.nsis).toEqual({ oneClick: true, perMachine: false });
-    expect(config.extraMetadata).toEqual({ name: "bb" });
+    expect(config.nsis).toEqual({
+      guid: "11c43a4e-5f09-59c3-a447-6f25f5982512",
+      oneClick: true,
+      perMachine: false,
+    });
+    expect(config.appId).toBe("dev.omnyo.private");
+    expect(config.artifactName).toMatch(/^omnyo-private-/);
+    expect(config.extraMetadata).toEqual({ name: "omnyo-private" });
   });
 
   it("keeps the nightly install apart from the stable one", async () => {
     const config = await printConfig(["--win", "--x64"], "nightly");
 
     expect(config.win.icon).toBe("assets/icon-nightly.png");
-    expect(config.extraMetadata).toEqual({ name: "bb-nightly" });
+    expect(config.appId).toBe("dev.omnyo.private.nightly");
+    expect(config.artifactName).toMatch(/^omnyo-private-nightly-/);
+    expect(config.extraMetadata).toEqual({ name: "omnyo-private-nightly" });
+    expect(config.nsis).not.toHaveProperty("guid");
   });
 
   it("leaves the package name alone for other platforms", async () => {
     const config = await printConfig(["--linux", "--x64"], "latest");
 
+    expect(config.appId).toBe("dev.omnyo.private");
+    expect(config.artifactName).toMatch(/^omnyo-private-/);
     expect(config.extraMetadata).toBeUndefined();
   });
 });

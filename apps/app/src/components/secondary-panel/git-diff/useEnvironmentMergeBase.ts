@@ -4,7 +4,7 @@ import {
   type Environment,
   type Thread,
   type WorkspaceStatus,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { appToast } from "@/components/ui/app-toast";
 import {
   describeLifecycleError,
@@ -108,6 +108,7 @@ export function resolvePersistedMergeBaseBranch({
   workspaceStatus,
 }: ResolvePersistedMergeBaseBranchParams): string | null {
   const normalizedBranch = branch.trim();
+
   if (normalizedBranch.length === 0) {
     return null;
   }
@@ -122,10 +123,13 @@ function showMergeBaseLifecycleToast(
   description: LifecycleErrorDescription,
 ): void {
   const options = { description: description.body };
+
   if (description.severity === "error") {
     appToast.error(description.title, options);
+
     return;
   }
+
   appToast.warning(description.title, options);
 }
 
@@ -139,6 +143,7 @@ export function useEnvironmentMergeBase({
 }: UseEnvironmentMergeBaseParams) {
   const mergeBaseStateKeyRef = useRef<string | undefined>(undefined);
   const mergeBaseStateKey = environment?.id ?? thread?.id;
+
   const isCurrentEnvironmentUpdatePending =
     updateEnvironment.isPending &&
     updateEnvironment.variables?.id === environment?.id;
@@ -173,13 +178,16 @@ export function useEnvironmentMergeBase({
     selectedMergeBaseBranch,
     workspaceStatus,
   });
+
   const showBranchComparisonUi = Boolean(
     effectiveMergeBaseBranch || workspaceStatus?.branch.defaultBranch,
   );
+
   const isOnDefaultBranch =
     workspaceStatus?.branch.currentBranch != null &&
     workspaceStatus.branch.currentBranch ===
       workspaceStatus.branch.defaultBranch;
+
   const showMergeBase =
     showBranchComparisonUi &&
     Boolean(effectiveMergeBaseBranch) &&
@@ -192,14 +200,17 @@ export function useEnvironmentMergeBase({
       }
 
       const normalizedBranch = branch.trim();
+
       const nextPersistedMergeBaseBranch = resolvePersistedMergeBaseBranch({
         branch: normalizedBranch,
         environment,
         workspaceStatus,
       });
+
       const currentPersistedMergeBaseBranch = environment.mergeBaseBranch;
 
       setSelectedMergeBaseBranch(normalizedBranch);
+
       if (nextPersistedMergeBaseBranch === currentPersistedMergeBaseBranch) {
         return;
       }
@@ -215,6 +226,7 @@ export function useEnvironmentMergeBase({
               environment.mergeBaseBranch ?? undefined,
             );
             const lifecycleError = parseLifecycleError(error);
+
             if (
               lifecycleError?.code === "environment_not_ready" &&
               lifecycleError.details.environmentStatus === "provisioning"
@@ -226,8 +238,10 @@ export function useEnvironmentMergeBase({
               error,
               operation: "update_merge_base",
             });
+
             if (lifecycleErrorDescription) {
               showMergeBaseLifecycleToast(lifecycleErrorDescription);
+
               return;
             }
 

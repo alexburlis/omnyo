@@ -1,0 +1,45 @@
+{
+  "name": "omnyo-plugin-omnyo--wait-sources",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Wake waiting chats when a URL answers, a file appears or a command succeeds.",
+  "author": {
+    "name": "alexburlis",
+    "url": "https://github.com/alexburlis"
+  },
+  "engines": {
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.6.42"
+  },
+  "keywords": [
+    "omnyo-plugin"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
+    "test": "vitest run --config vitest.config.ts",
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "better-sqlite3": "12.10.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "4.1.11",
+    "@omnyo/plugin-build": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*"
+  },
+  "omnyo": {
+    "name": "Wait Sources",
+    "description": "Wake waiting chats when a URL answers, a file appears or a command succeeds.",
+    "branding": {
+      "icon": "Eye"
+    },
+    "server": "./server.ts",
+    "host": "./host.ts"
+  }
+}

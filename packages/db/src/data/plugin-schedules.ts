@@ -33,15 +33,20 @@ export function prunePluginSchedules(
   keepNames: string[],
 ): void {
   const conditions = [eq(pluginSchedules.pluginId, pluginId)];
+
   if (keepNames.length > 0) {
     conditions.push(notInArray(pluginSchedules.name, keepNames));
   }
+
   db.delete(pluginSchedules)
     .where(and(...conditions))
     .run();
 }
 
-export function deletePluginSchedules(db: DbConnection, pluginId: string): void {
+export function deletePluginSchedules(
+  db: DbConnection,
+  pluginId: string,
+): void {
   db.delete(pluginSchedules)
     .where(eq(pluginSchedules.pluginId, pluginId))
     .run();
@@ -52,6 +57,7 @@ export function listPluginSchedules(
   pluginId?: string,
 ): PluginScheduleRow[] {
   const query = db.select().from(pluginSchedules);
+
   return (
     pluginId === undefined
       ? query
@@ -101,6 +107,7 @@ export function claimPluginScheduledRun(
       ),
     )
     .run();
+
   return result.changes > 0;
 }
 
@@ -115,7 +122,11 @@ export function recordPluginScheduleResult(
   },
 ): void {
   db.update(pluginSchedules)
-    .set({ lastStatus: args.status, lastError: args.error, updatedAt: args.now })
+    .set({
+      lastStatus: args.status,
+      lastError: args.error,
+      updatedAt: args.now,
+    })
     .where(
       and(
         eq(pluginSchedules.pluginId, args.pluginId),

@@ -1,5 +1,5 @@
 import * as Notifications from "expo-notifications";
-import { getThreadRoutePath } from "@bb/client-core";
+import { getThreadRoutePath } from "@omnyo/client-core";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
@@ -13,6 +13,7 @@ import {
   resolvePushTargetProfile,
   isPushRegistrationAllowed,
   shouldOfferPushPrompt,
+  shouldShowPushPrompt,
   type PushNotificationTarget,
 } from "@/data/notifications";
 import type { ServerProfile } from "@/lib/profiles";
@@ -22,7 +23,7 @@ import { AppBadgeSync } from "./AppBadgeSync";
 import { getPushNotificationsModule } from "./expo-push-module";
 import { getPushRegistrationController } from "./push-controller";
 import { getPushStore } from "./push-storage";
-import { hasThreadOnServer } from "./thread-probe";
+import { probeThreadOnServer } from "./thread-probe";
 import { usePushStoreSnapshot } from "./use-push-store";
 
 export function PushNotificationsHost() {
@@ -53,6 +54,7 @@ export function PushNotificationsHost() {
         shouldSetBadge: false,
       }),
     });
+
     return () => Notifications.setNotificationHandler(null);
   }, []);
 
@@ -61,14 +63,17 @@ export function PushNotificationsHost() {
       const profile = await resolvePushTargetProfile(target, {
         profiles: profilesRef.current,
         activeProfileId: activeProfileIdRef.current,
-        hasThread: hasThreadOnServer,
+        probeThread: probeThreadOnServer,
       });
+
       if (!profile) {
         toast.error("Could not open the thread", {
           description: "None of your saved servers has it.",
         });
+
         return;
       }
+
       router.push(
         webViewShellHref({
           profileId: profile.id,
@@ -90,15 +95,20 @@ export function PushNotificationsHost() {
       const target = parsePushNotificationData(
         response.notification.request.content.data,
       );
+
       if (target) void openTarget(target);
     };
+
     const subscription =
       Notifications.addNotificationResponseReceivedListener(handle);
+
     const last = Notifications.getLastNotificationResponse();
+
     if (last) {
       Notifications.clearLastNotificationResponse();
       handle(last);
     }
+
     return () => subscription.remove();
   }, [openTarget]);
 
@@ -114,7 +124,9 @@ export function PushNotificationsHost() {
         if (activeProfile) void controller.sync(activeProfile);
       });
     };
+
     const subscription = AppState.addEventListener("change", onChange);
+
     return () => subscription.remove();
   }, [controller, activeProfile]);
 
@@ -141,6 +153,8 @@ export function PushNotificationsHost() {
       <FirstRunPrompt
         profile={activeProfile}
         connected={connected}
+        serversLoaded={status === "ready"}
+        hasServers={profiles.length > 0}
         available={
           notifications.projectId !== null &&
           (activeProfile === null || isPushRegistrationAllowed(activeProfile))
@@ -155,12 +169,16 @@ export function PushNotificationsHost() {
 function FirstRunPrompt({
   profile,
   connected,
+  serversLoaded,
+  hasServers,
   available,
   prompted,
   enabled,
 }: {
   profile: ServerProfile | null;
   connected: boolean;
+  serversLoaded: boolean;
+  hasServers: boolean;
   available: boolean;
   prompted: boolean;
   enabled: boolean;
@@ -169,30 +187,35 @@ function FirstRunPrompt({
   const controller = getPushRegistrationController();
   const store = getPushStore();
   const notifications = getPushNotificationsModule();
-  const [presentedFor, setPresentedFor] = useState<string | null>(null);
+  const [presented, setPresented] = useState(false);
   const revealed = useAppRevealed();
-  const shouldAsk =
-    revealed &&
-    available &&
-    !prompted &&
-    connected &&
-    profile !== null &&
-    presentedFor === null;
+
+  const shouldAsk = shouldShowPushPrompt({
+    revealed,
+    available,
+    prompted,
+    presented,
+    serversLoaded,
+    hasServers,
+    serverConnected: profile !== null && connected,
+  });
 
   useEffect(() => {
-    if (!shouldAsk || !profile) return;
+    if (!shouldAsk) return;
     let cancelled = false;
     void notifications.getPermission().then((permission) => {
       if (cancelled || !shouldOfferPushPrompt({ permission, enabled })) {
         return;
       }
-      setPresentedFor(profile.id);
+
+      setPresented(true);
       sheet.present();
     });
+
     return () => {
       cancelled = true;
     };
-  }, [shouldAsk, profile, enabled, notifications, sheet]);
+  }, [shouldAsk, enabled, notifications, sheet]);
 
   return (
     <ActionSheet
@@ -200,14 +223,19 @@ function FirstRunPrompt({
       controller={sheet}
       title="Get notified when a thread needs you?"
       cancelLabel={process.env.EXPO_OS === "ios" ? "Cancel" : null}
-      message="bb can send a push notification when a thread finishes, hits an error, or is waiting for your input. You can change this per server in Settings."
+      message="Omnyo can send a push notification when a thread finishes, hits an error, or is waiting for your input. You can change this per server in Settings."
       actions={[
         {
           key: "enable",
           label: "Turn on notifications",
           icon: "Bell",
           onPress: () => {
-            if (!profile) return;
+            if (!profile) {
+              void controller.enableForFirstServer();
+
+              return;
+            }
+
             void controller.setEnabled(profile, true).then((outcome) => {
               if (outcome.action === "failed") {
                 toast.error("Could not turn on notifications", {

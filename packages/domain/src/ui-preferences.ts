@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { DEFAULT_SERVICE_TIER } from "./shared-types.js";
 
 const UI_PREFERENCE_STRING_MAX_LENGTH = 1_024;
+
 const UI_PREFERENCE_LIST_MAX_LENGTH = 10_000;
 
 const sidebarOrganizationModeSchema = z.enum([
@@ -8,6 +10,7 @@ const sidebarOrganizationModeSchema = z.enum([
   "chronological",
   "machine",
 ]);
+
 export type SidebarOrganizationMode = z.infer<
   typeof sidebarOrganizationModeSchema
 >;
@@ -25,13 +28,65 @@ const uiPreferenceStringSchema = z
   .string()
   .min(1)
   .max(UI_PREFERENCE_STRING_MAX_LENGTH);
+
 const uiPreferenceStringListSchema = z
   .array(uiPreferenceStringSchema)
   .max(UI_PREFERENCE_LIST_MAX_LENGTH);
+
 const sidebarHiddenGroupsSchema = z
   .array(uiPreferenceStringSchema.regex(/^(project|section|machine):\S+$/))
   .max(UI_PREFERENCE_LIST_MAX_LENGTH)
   .transform((value) => [...new Set(value)]);
+
+export const MODEL_PICKER_FAVORITES_MAX = 24;
+
+const modelPickerFavoriteSchema = z
+  .object({
+    providerId: uiPreferenceStringSchema,
+    model: uiPreferenceStringSchema,
+    reasoningLevel: uiPreferenceStringSchema,
+    serviceTier: uiPreferenceStringSchema.default(DEFAULT_SERVICE_TIER),
+  })
+  .strict();
+
+export type ModelPickerFavorite = z.output<typeof modelPickerFavoriteSchema>;
+
+export function modelPickerFavoriteKey(favorite: ModelPickerFavorite): string {
+  return [
+    favorite.providerId,
+    favorite.model,
+    favorite.reasoningLevel,
+    favorite.serviceTier,
+  ].join("\0");
+}
+
+const modelPickerFavoritesSchema = z
+  .array(modelPickerFavoriteSchema)
+  .max(MODEL_PICKER_FAVORITES_MAX)
+  .transform((favorites) => {
+    const seen = new Set<string>();
+
+    return favorites.filter((favorite) => {
+      const key = modelPickerFavoriteKey(favorite);
+
+      if (seen.has(key)) return false;
+      seen.add(key);
+
+      return true;
+    });
+  });
+
+const modelPickerHiddenModelsSchema = z
+  .record(uiPreferenceStringSchema, uiPreferenceStringListSchema)
+  .transform((hiddenModels) => {
+    const normalized: Record<string, string[]> = {};
+
+    for (const [providerId, models] of Object.entries(hiddenModels)) {
+      if (models.length > 0) normalized[providerId] = [...new Set(models)];
+    }
+
+    return normalized;
+  });
 
 export const UI_PREFERENCE_KEYS = [
   "sidebar.organizationMode",
@@ -48,8 +103,13 @@ export const UI_PREFERENCE_KEYS = [
   "sidebar.visiblePluginPanels",
   "sidebar.threadListProvider",
   "infoPanel.collapsedSections",
+  "modelPicker.favorites",
+  "modelPicker.hiddenModels",
+  "modelPicker.footerFavorites",
 ] as const;
+
 export type UiPreferenceKey = (typeof UI_PREFERENCE_KEYS)[number];
+
 const uiPreferenceKeySchema = z.enum(UI_PREFERENCE_KEYS);
 
 export function isUiPreferenceKey(value: string): value is UiPreferenceKey {
@@ -119,7 +179,7 @@ export const uiPreferenceDefinitions = {
   "sidebar.hiddenFooterItems": defineUiPreference(
     uiPreferenceStringListSchema,
     [],
-    "Sidebar footer actions moved into the More menu.",
+    "Footer action IDs moved into the More menu, plus pinned:<key> entries for gear-menu actions added to the footer. Setting this list replaces it, so keep any pinned entries; reset clears both.",
   ),
   "sidebar.pluginPanelOrder": defineUiPreference(
     uiPreferenceStringListSchema,
@@ -143,11 +203,27 @@ export const uiPreferenceDefinitions = {
     [],
     "Thread Info panel section ids that are collapsed, such as commits, uncommittedChanges, forks, or threadStorage.",
   ),
+  "modelPicker.favorites": defineUiPreference(
+    modelPickerFavoritesSchema,
+    [],
+    "Favorite provider, model, reasoning and speed combinations, in order, that the model picker offers as one-click choices.",
+  ),
+  "modelPicker.hiddenModels": defineUiPreference(
+    modelPickerHiddenModelsSchema,
+    {},
+    "Models per provider that the model picker folds under More; search still finds them.",
+  ),
+  "modelPicker.footerFavorites": defineUiPreference(
+    z.boolean(),
+    true,
+    "Whether desktop composers show model favorites as a one-click switcher; false keeps only the model button.",
+  ),
 } as const satisfies Record<UiPreferenceKey, UiPreferenceDefinition>;
 
 export type UiPreferenceValue<Key extends UiPreferenceKey> = z.infer<
   (typeof uiPreferenceDefinitions)[Key]["schema"]
 >;
+
 export type UiPreferenceValues = {
   [Key in UiPreferenceKey]: UiPreferenceValue<Key>;
 };
@@ -172,9 +248,11 @@ export function parseUiPreferenceValue<Key extends UiPreferenceKey>(
 ): UiPreferenceParseResult<Key> {
   const schema: z.ZodTypeAny = uiPreferenceDefinitions[key].schema;
   const parsed = schema.safeParse(value);
+
   if (parsed.success) {
     return { success: true, value: parsed.data as UiPreferenceValue<Key> };
   }
+
   return {
     success: false,
     message: parsed.error.issues.map((issue) => issue.message).join("; "),

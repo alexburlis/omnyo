@@ -1,5 +1,5 @@
-import { archiveThread, markThreadDeleted } from "@bb/db";
-import { threadDescendantsListResponseSchema } from "@bb/server-contract";
+import { archiveThread, markThreadDeleted } from "@omnyo/db";
+import { threadDescendantsListResponseSchema } from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { archiveThreadAndReleaseChildren } from "../../src/services/threads/thread-ownership.js";
 import { readJson } from "../helpers/json.js";
@@ -16,6 +16,7 @@ async function listDescendants(harness: TestAppHarness, body: unknown) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+
   return { status: response.status, body: await readJson(response) };
 }
 
@@ -28,7 +29,9 @@ async function descendantsOf(
     threadIds,
     ...flags,
   });
+
   expect(status).toBe(200);
+
   return Object.fromEntries(
     threadDescendantsListResponseSchema
       .parse(body)
@@ -38,17 +41,21 @@ async function descendantsOf(
 
 function seedTree(harness: TestAppHarness) {
   const { host } = seedHostSession(harness.deps);
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: "/tmp/public-thread-descendants",
   });
+
   const seed = (parentThreadId: string | null = null) =>
     seedThread(harness.deps, { projectId: project.id, parentThreadId });
+
   const root = seed();
   const child = seed(root.id);
   const grandchild = seed(child.id);
   const sibling = seed(root.id);
   const other = seed();
+
   return { root, child, grandchild, sibling, other };
 }
 
@@ -56,10 +63,12 @@ describe("POST /threads/descendants", () => {
   it("returns each live thread's descendants children first, once per id", async () => {
     await withTestHarness(async (harness) => {
       const { root, child, grandchild, sibling, other } = seedTree(harness);
+
       const deletedChild = seedThread(harness.deps, {
         projectId: root.projectId,
         parentThreadId: other.id,
       });
+
       markThreadDeleted(harness.db, harness.hub, {
         threadId: deletedChild.id,
       });
@@ -67,6 +76,7 @@ describe("POST /threads/descendants", () => {
       const { body } = await listDescendants(harness, {
         threadIds: [root.id, other.id, deletedChild.id, "thr_missing", root.id],
       });
+
       const { threads } = threadDescendantsListResponseSchema.parse(body);
       expect(threads).toHaveLength(2);
       expect(threads[0]?.threadId).toBe(root.id);
@@ -87,13 +97,14 @@ describe("POST /threads/descendants", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ parentThreadId: other.id }),
       });
+
       expect(nest.status).toBe(200);
-      await expect(descendantsOf(harness, [root.id, other.id])).resolves.toEqual(
-        {
-          [root.id]: [sibling.id],
-          [other.id]: [child.id, grandchild.id],
-        },
-      );
+      await expect(
+        descendantsOf(harness, [root.id, other.id]),
+      ).resolves.toEqual({
+        [root.id]: [sibling.id],
+        [other.id]: [child.id, grandchild.id],
+      });
 
       archiveThreadAndReleaseChildren(harness.deps, { threadId: other.id });
       await expect(
@@ -108,12 +119,15 @@ describe("POST /threads/descendants", () => {
   it("omits archived and hidden descendants unless asked, still walking through them", async () => {
     await withTestHarness(async (harness) => {
       const { root, child, grandchild, sibling } = seedTree(harness);
+
       const hidden = seedThread(harness.deps, {
         projectId: root.projectId,
         parentThreadId: root.id,
         visibility: "hidden",
       });
+
       archiveThread(harness.db, harness.hub, child.id);
+
       const sorted = async (flags: {
         includeArchived?: boolean;
         includeHidden?: boolean;

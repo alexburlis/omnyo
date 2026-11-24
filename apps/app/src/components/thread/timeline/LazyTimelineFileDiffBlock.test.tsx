@@ -10,6 +10,13 @@ import {
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { ThreadTimelineRows } from "./ThreadTimelineRows";
 
+vi.mock("@/components/code/OmnyoDiffSplit", () => ({
+  OmnyoDiffSplit: {
+    isLoaded: () => true,
+    preload: async () => undefined,
+  },
+}));
+
 vi.mock("./TimelineFileDiffBlock.js", () => {
   throw new Error("chunk download failed");
 });
@@ -22,12 +29,14 @@ afterEach(() => {
 it("keeps a failed diff download inside its file-change row", async () => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   const { wrapper: Wrapper } = createQueryClientTestHarness();
+
   const change = fileChangeRow({
     id: "file_1",
     stderr: "patch rejected",
     sourceSeqStart: 1,
     sourceSeqEnd: 2,
   });
+
   const next = commandRow({
     id: "cmd_1",
     command: "pnpm test",

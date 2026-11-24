@@ -1,8 +1,12 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const MACOS_LOGIN_SHELL = "/bin/zsh";
+
 const SHELL_PATH_COMMAND = 'printf "%s" "$PATH"';
+
 const SHELL_PATH_TIMEOUT_MS = 2_000;
+
+const SHELL_PATH_MAX_BUFFER_BYTES = 1024 * 1024;
 
 export interface DesktopShellPathLogger {
   warn(message: string): void;
@@ -24,7 +28,7 @@ export interface ShellPathSpawnResult {
 
 export type SpawnLoginShellPath = (
   args: SpawnLoginShellPathArgs,
-) => ShellPathSpawnResult;
+) => Promise<ShellPathSpawnResult>;
 
 type EnsurePackagedUserShellPathResult =
   | ShellPathSkippedResult
@@ -56,20 +60,57 @@ interface ShellPathUpdatedResult {
 
 function defaultSpawnLoginShellPath(
   args: SpawnLoginShellPathArgs,
-): ShellPathSpawnResult {
-  const result = spawnSync(args.command, args.args, {
-    encoding: "utf8",
-    timeout: args.timeoutMs,
-    killSignal: "SIGKILL",
-  });
+): Promise<ShellPathSpawnResult> {
+  return new Promise((resolveResult) => {
+    const child = spawn(args.command, args.args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
-  return {
-    ...(result.error === undefined ? {} : { error: result.error }),
-    signal: result.signal,
-    status: result.status,
-    stderr: result.stderr,
-    stdout: result.stdout,
-  };
+    let stdout = "";
+    let stderr = "";
+    let outputBytes = 0;
+    let error: Error | undefined;
+
+    const timeout = setTimeout(() => {
+      error = new Error(`spawn ${args.command} ETIMEDOUT`);
+      child.kill("SIGKILL");
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, args.timeoutMs);
+
+    const append = (chunk: string, stream: "stdout" | "stderr") => {
+      outputBytes += Buffer.byteLength(chunk);
+
+      if (outputBytes > SHELL_PATH_MAX_BUFFER_BYTES) {
+        error = new Error(`spawn ${args.command} ENOBUFS`);
+        child.kill("SIGKILL");
+        child.stdout.destroy();
+        child.stderr.destroy();
+
+        return;
+      }
+
+      if (stream === "stdout") stdout += chunk;
+      else stderr += chunk;
+    };
+
+    child.stdout
+      .setEncoding("utf8")
+      .on("data", (chunk: string) => append(chunk, "stdout"));
+    child.stderr
+      .setEncoding("utf8")
+      .on("data", (chunk: string) => append(chunk, "stderr"));
+    child.once("error", (spawnError) => {
+      error = spawnError;
+    });
+    child.once("close", (status, signal) => {
+      clearTimeout(timeout);
+      const result: ShellPathSpawnResult = { status, signal, stdout, stderr };
+
+      if (error !== undefined) result.error = error;
+      resolveResult(result);
+    });
+  });
 }
 
 function warnShellPathFallback(
@@ -81,34 +122,49 @@ function warnShellPathFallback(
   );
 }
 
-export function ensurePackagedUserShellPath(
+export async function ensurePackagedUserShellPath(
   args: EnsurePackagedUserShellPathArgs,
-): EnsurePackagedUserShellPathResult {
+): Promise<EnsurePackagedUserShellPathResult> {
   if (args.platform !== "darwin" && args.platform !== "linux") {
     return { kind: "skipped", reason: "unsupported-platform" };
   }
+
   if (!args.isPackaged) {
     return { kind: "skipped", reason: "not-packaged" };
   }
 
   const spawnLoginShellPath =
     args.spawnLoginShellPath ?? defaultSpawnLoginShellPath;
-  const result = spawnLoginShellPath({
-    args: ["-ilc", SHELL_PATH_COMMAND],
-    command:
-      args.platform === "darwin"
-        ? MACOS_LOGIN_SHELL
-        : (args.env.SHELL ?? "/bin/bash"),
-    timeoutMs: SHELL_PATH_TIMEOUT_MS,
-  });
+
+  let result: ShellPathSpawnResult;
+
+  try {
+    result = await spawnLoginShellPath({
+      args: ["-ilc", SHELL_PATH_COMMAND],
+      command:
+        args.platform === "darwin"
+          ? MACOS_LOGIN_SHELL
+          : (args.env.SHELL ?? "/bin/bash"),
+      timeoutMs: SHELL_PATH_TIMEOUT_MS,
+    });
+  } catch (error) {
+    warnShellPathFallback(
+      args,
+      error instanceof Error ? error.message : "shell failed",
+    );
+
+    return { kind: "unchanged", reason: "shell-error" };
+  }
 
   if (result.error !== undefined) {
     warnShellPathFallback(args, result.error.message);
+
     return { kind: "unchanged", reason: "shell-error" };
   }
 
   if (result.signal !== null) {
     warnShellPathFallback(args, `shell exited from signal ${result.signal}`);
+
     return { kind: "unchanged", reason: "signal" };
   }
 
@@ -120,15 +176,19 @@ export function ensurePackagedUserShellPath(
         ? `shell exited with status ${result.status}: ${stderr}`
         : `shell exited with status ${result.status}`,
     );
+
     return { kind: "unchanged", reason: "non-zero-status" };
   }
 
   const shellPath = result.stdout.trim();
+
   if (shellPath.length === 0) {
     warnShellPathFallback(args, "shell returned an empty PATH");
+
     return { kind: "unchanged", reason: "empty-output" };
   }
 
   args.env.PATH = shellPath;
+
   return { kind: "updated", path: shellPath };
 }

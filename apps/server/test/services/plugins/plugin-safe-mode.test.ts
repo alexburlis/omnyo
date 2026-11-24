@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createConnection, migrate, type DbConnection } from "@bb/db";
-import type { Logger } from "@bb/logger";
+import { createConnection, migrate, type DbConnection } from "@omnyo/db";
+import type { Logger } from "@omnyo/logger";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
 import {
   createPluginService,
@@ -12,27 +12,30 @@ import {
 } from "../../../src/services/plugins/plugin-service.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
 import { testLogger } from "../../helpers/test-app.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
+
 const fixtureRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
   "fixtures",
   "plugins",
-  "bb-plugin-builtin-fixture",
+  "omnyo-plugin-builtin-fixture",
 );
+
 const globals = globalThis as Record<string, unknown>;
 
 async function writePathPlugin(dir: string, name: string): Promise<string> {
-  const rootDir = join(dir, `bb-plugin-${name}`);
+  const rootDir = join(dir, `omnyo-plugin-${name}`);
   await mkdir(rootDir, { recursive: true });
   await writeFile(
     join(rootDir, "package.json"),
     JSON.stringify({
-      name: `bb-plugin-${name}`,
+      name: `omnyo-plugin-${name}`,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Safe mode fixture",
         description: "Safe mode fixture.",
         branding: { icon: "Zap" },
@@ -42,15 +45,16 @@ async function writePathPlugin(dir: string, name: string): Promise<string> {
   );
   await writeFile(
     join(rootDir, "server.ts"),
-    `export default function plugin(bb: any) {
+    `export default function plugin(api: any) {
       const g = globalThis as any;
       if (g.__safeModeFailing === ${JSON.stringify(name)}) throw new Error("boom");
       g.__safeModeLoads = { ...g.__safeModeLoads, ${JSON.stringify(name)}: (g.__safeModeLoads?.[${JSON.stringify(name)}] ?? 0) + 1 };
-      bb.onDispose(() => {
+      api.onDispose(() => {
         g.__safeModeDisposed = [...(g.__safeModeDisposed ?? []), ${JSON.stringify(name)}];
       });
     }`,
   );
+
   return rootDir;
 }
 
@@ -59,7 +63,7 @@ describe("plugin safe mode", () => {
   let workDir: string;
   let service: PluginService;
 
-  function createService(autoInstall = true): PluginService {
+  async function createService(autoInstall = true): Promise<PluginService> {
     return createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -71,6 +75,7 @@ describe("plugin safe mode", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "0.9.0",
       bundledPlugins: [
         {
@@ -92,8 +97,8 @@ describe("plugin safe mode", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-safe-mode-"));
-    service = createService();
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-safe-mode-"));
+    service = await createService();
     await service.start();
   });
 
@@ -182,13 +187,13 @@ describe("plugin safe mode", () => {
     await expect(
       service.installPath(await writePathPlugin(workDir, "beta")),
     ).rejects.toThrow(
-      'plugin safe mode is on; turn it off with `bb plugin safe-mode off` before you install "beta"',
+      'plugin safe mode is on; turn it off with `omnyo plugin safe-mode off` before you install "beta"',
     );
     expect(entry("beta")).toBeUndefined();
     await expect(service.applyUpdate("alpha")).resolves.toEqual({
       ok: false,
       error:
-        'plugin safe mode is on; turn it off with `bb plugin safe-mode off` before you update "alpha"',
+        'plugin safe mode is on; turn it off with `omnyo plugin safe-mode off` before you update "alpha"',
     });
 
     await service.setSafeMode(false);
@@ -202,11 +207,11 @@ describe("plugin safe mode", () => {
     db.$client.close();
     db = createConnection(":memory:");
     migrate(db);
-    service = createService(false);
+    service = await createService(false);
     await service.start();
     await service.installOfficialPlugin("fixture");
     await service.stop();
-    service = createService();
+    service = await createService();
     await service.start();
     expect(entry("builtin-fixture")).toMatchObject({ provenance: "catalog" });
 
@@ -222,7 +227,7 @@ describe("plugin safe mode", () => {
     globals.__safeModeLoads = {};
     globals.__builtinFixtureLoads = 0;
 
-    service = createService();
+    service = await createService();
     await service.start();
 
     expect(service.getSafeMode()).toBe(true);

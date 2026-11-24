@@ -1,6 +1,7 @@
 import type { SidebarSectionId } from "./sidebarSectionId.js";
 
 type SidebarEntitySectionKind = "project" | "section" | "machine";
+
 export type LegacySidebarEntityAnchor = "projects" | "sections" | "machines";
 
 export function buildSidebarEntitySectionId(
@@ -40,6 +41,7 @@ export function normalizeSidebarSectionOrder({
     ...entitySectionIds,
     ...(hasThreadsSection ? (["threads"] as const) : []),
   ]);
+
   const entitySet = new Set(entitySectionIds);
   const seen = new Set<SidebarSectionId>();
   const normalized: SidebarSectionId[] = [];
@@ -49,6 +51,7 @@ export function normalizeSidebarSectionOrder({
     if (!available.has(sectionId) || seen.has(sectionId)) {
       return;
     }
+
     seen.add(sectionId);
     normalized.push(sectionId);
   };
@@ -56,11 +59,14 @@ export function normalizeSidebarSectionOrder({
   for (const storedId of storedOrder) {
     if (storedId === legacyEntityAnchor) {
       expandedLegacyAnchor = true;
+
       for (const entityId of entitySectionIds) {
         append(entityId);
       }
+
       continue;
     }
+
     if (isSidebarSectionId(storedId)) {
       append(storedId);
     }
@@ -74,20 +80,25 @@ export function normalizeSidebarSectionOrder({
   const missingEntities = entitySectionIds.filter(
     (sectionId) => !seen.has(sectionId),
   );
+
   if (missingEntities.length > 0) {
     const lastEntityIndex = normalized.reduce(
       (lastIndex, sectionId, index) =>
         entitySet.has(sectionId) ? index : lastIndex,
       -1,
     );
+
     const threadsIndex = normalized.indexOf("threads");
+
     const insertionIndex =
       lastEntityIndex >= 0
         ? lastEntityIndex + 1
         : threadsIndex >= 0 || expandedLegacyAnchor
           ? Math.max(threadsIndex, 0)
           : normalized.length;
+
     normalized.splice(insertionIndex, 0, ...missingEntities);
+
     for (const sectionId of missingEntities) {
       seen.add(sectionId);
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ThreadPullRequest, WorkspaceStatus } from "@bb/domain";
+import type { ThreadPullRequest, WorkspaceStatus } from "@omnyo/domain";
 import {
   setupCommandOutputTestEnvironment,
   collectLogLines,
@@ -11,7 +11,7 @@ import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import * as fixtures from "../helpers/command-output-fixtures.js";
 import { registerEnvironmentCommands } from "../../commands/environment.js";
 
-describe("bb environment command output", () => {
+describe("omnyo environment command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -32,14 +32,15 @@ describe("bb environment command output", () => {
       insertions: 3,
       deletions: 1,
       lineStatsComplete: true,
+      fileCount: 1,
     },
     checkout: {
       kind: "branch",
-      branchName: "bb/environment-cli",
+      branchName: "omnyo/environment-cli",
       headSha: "abc123",
     },
     branch: {
-      currentBranch: "bb/environment-cli",
+      currentBranch: "omnyo/environment-cli",
       defaultBranch: "main",
     },
     mergeBase: {
@@ -47,12 +48,14 @@ describe("bb environment command output", () => {
       baseRef: "def456",
       aheadCount: 2,
       behindCount: 0,
+      squashMergeCheckComplete: true,
       hasCommittedUnmergedChanges: true,
       commits: [],
       files: [],
       insertions: 0,
       deletions: 0,
       lineStatsComplete: true,
+      fileCount: 0,
     },
   };
 
@@ -60,9 +63,9 @@ describe("bb environment command output", () => {
     number: 701,
     title: "Environment inspection parity",
     state: "open",
-    url: "https://github.com/example/bb/pull/701",
+    url: "https://github.com/example/omnyo/pull/701",
     baseRefName: "main",
-    headRefName: "bb/environment-cli",
+    headRefName: "omnyo/environment-cli",
     updatedAt: "2026-07-14T12:00:00.000Z",
     autoMerge: false,
     inMergeQueue: false,
@@ -91,7 +94,7 @@ describe("bb environment command output", () => {
     expect(help).not.toContain("squash-merge");
   });
 
-  it("bb environment providers lists selectable ids and required inputs", async () => {
+  it("omnyo environment providers lists selectable ids and required inputs", async () => {
     stubServerApi({
       "v1.system.environment-providers.$get": vi.fn(async () => ({
         providers: [
@@ -148,7 +151,7 @@ describe("bb environment command output", () => {
     ]);
   });
 
-  it("bb environment providers requests eligibility for a project and machine", async () => {
+  it("omnyo environment providers requests eligibility for a project and machine", async () => {
     const getProviders = vi.fn(async () => ({ providers: [] }));
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [
@@ -182,7 +185,7 @@ describe("bb environment command output", () => {
     });
   });
 
-  it("bb environment providers prints each provider's availability on the chosen machine", async () => {
+  it("omnyo environment providers prints each provider's availability on the chosen machine", async () => {
     const provider = {
       displayName: "Provider",
       description: "Prepare a workspace for this thread.",
@@ -197,6 +200,7 @@ describe("bb environment command output", () => {
         projectless: false,
       },
     };
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [
         {
@@ -253,7 +257,7 @@ describe("bb environment command output", () => {
     ]);
   });
 
-  it("bb environment list names the provider that produced each row", async () => {
+  it("omnyo environment list names the provider that produced each row", async () => {
     const list = vi.fn(async () => [
       fixtures.makeEnvironment({
         id: "env-worktree",
@@ -269,6 +273,7 @@ describe("bb environment command output", () => {
         environmentProviderId: null,
       }),
     ]);
+
     stubServerApi({ "v1.environments.$get": list });
 
     await runCommand(["environment", "list"], register);
@@ -280,7 +285,7 @@ describe("bb environment command output", () => {
   });
 
   it.each(["--limit", "--offset"])(
-    "bb environment list names invalid %s as a non-negative integer",
+    "omnyo environment list names invalid %s as a non-negative integer",
     async (flag) => {
       const list = vi.fn(async () => []);
       stubServerApi({ "v1.environments.$get": list });
@@ -296,8 +301,9 @@ describe("bb environment command output", () => {
     },
   );
 
-  it("bb environment delete reports requested cleanup and its lifecycle", async () => {
+  it("omnyo environment delete reports requested cleanup and its lifecycle", async () => {
     const remove = vi.fn(async () => ({ ok: true as const }));
+
     const get = vi.fn(async () =>
       fixtures.makeEnvironment({
         id: "env-delete",
@@ -310,6 +316,7 @@ describe("bb environment command output", () => {
         },
       }),
     );
+
     stubServerApi({
       "v1.environments.:id.$delete": remove,
       "v1.environments.:id.$get": get,
@@ -323,11 +330,12 @@ describe("bb environment command output", () => {
     ]);
   });
 
-  it("bb environment status inspects an arbitrary environment id", async () => {
+  it("omnyo environment status inspects an arbitrary environment id", async () => {
     const get = vi.fn(async () => ({
       outcome: "available",
       workspace: workspaceStatus,
     }));
+
     stubServerApi({ "v1.environments.:id.status.$get": get });
 
     await runCommand(
@@ -348,7 +356,7 @@ describe("bb environment command output", () => {
     expect(collectLogLines(vi.mocked(console.log))).toEqual(
       expect.arrayContaining([
         "State: dirty_uncommitted",
-        "Branch: bb/environment-cli",
+        "Branch: omnyo/environment-cli",
         "Changed files: 1",
         "Merge base: main",
         "Ahead: 2",
@@ -356,11 +364,32 @@ describe("bb environment command output", () => {
     );
   });
 
-  it("bb environment status --json preserves the canonical response", async () => {
+  it("qualifies status counts when squash detection is incomplete", async () => {
+    const workspace = structuredClone(workspaceStatus);
+
+    if (!workspace.mergeBase) throw new Error("Missing comparison fixture");
+    workspace.mergeBase.squashMergeCheckComplete = false;
+    stubServerApi({
+      "v1.environments.:id.status.$get": vi.fn(async () => ({
+        outcome: "available",
+        workspace,
+      })),
+    });
+    await runCommand(["environment", "status", "env-incomplete"], register);
+    expect(collectLogLines(vi.mocked(console.log))).toEqual(
+      expect.arrayContaining([
+        "Ahead: 2",
+        "Squash-merge check incomplete; counts may include already-merged commits.",
+      ]),
+    );
+  });
+
+  it("omnyo environment status --json preserves the canonical response", async () => {
     const response = {
       outcome: "available",
       workspace: workspaceStatus,
     };
+
     stubServerApi({
       "v1.environments.:id.status.$get": vi.fn(async () => response),
     });
@@ -397,7 +426,7 @@ describe("bb environment command output", () => {
     expect(lines.some((line) => line.startsWith("Deletions:"))).toBe(false);
   });
 
-  it("bb environment status explains non-git environments", async () => {
+  it("omnyo environment status explains non-git environments", async () => {
     stubServerApi({
       "v1.environments.:id.status.$get": vi.fn(async () => ({
         outcome: "not_applicable",
@@ -413,11 +442,12 @@ describe("bb environment command output", () => {
     );
   });
 
-  it("bb environment pull-request show reports absence and presence", async () => {
+  it("omnyo environment pull-request show reports absence and presence", async () => {
     const get = vi
       .fn()
       .mockResolvedValueOnce({ outcome: "absent" })
       .mockResolvedValueOnce({ outcome: "available", pullRequest });
+
     stubServerApi({ "v1.environments.:id.pull-request.$get": get });
 
     await runCommand(
@@ -443,7 +473,7 @@ describe("bb environment command output", () => {
     expect(collectLogLines(vi.mocked(console.log))).toEqual(
       expect.arrayContaining([
         "Pull request: #701 open - Environment inspection parity",
-        "Branch: bb/environment-cli -> main",
+        "Branch: omnyo/environment-cli -> main",
         "Checks: passing (2 passed, 0 failed, 0 pending, 2 total)",
         "Auto-merge: off",
         "Merge queue: not queued",
@@ -451,7 +481,7 @@ describe("bb environment command output", () => {
     );
   });
 
-  it("bb environment pull-request show --json preserves the outcome", async () => {
+  it("omnyo environment pull-request show --json preserves the outcome", async () => {
     stubServerApi({
       "v1.environments.:id.pull-request.$get": vi.fn(async () => ({
         outcome: "absent",
@@ -468,7 +498,7 @@ describe("bb environment command output", () => {
     ).toEqual({ outcome: "absent" });
   });
 
-  it("bb environment pull-request show reports a failed lookup", async () => {
+  it("omnyo environment pull-request show reports a failed lookup", async () => {
     stubServerApi({
       "v1.environments.:id.pull-request.$get": vi.fn(async () => ({
         outcome: "unavailable",
@@ -486,7 +516,7 @@ describe("bb environment command output", () => {
     ]);
   });
 
-  it("bb environment branches returns local and remote results", async () => {
+  it("omnyo environment branches returns local and remote results", async () => {
     const get = vi.fn(async () => ({
       branches: ["main", "release"],
       branchesTruncated: false,
@@ -494,6 +524,7 @@ describe("bb environment command output", () => {
       remoteBranchesTruncated: true,
       selectedBranch: null,
     }));
+
     stubServerApi({ "v1.environments.:id.diff.branches.$get": get });
 
     await runCommand(
@@ -523,7 +554,7 @@ describe("bb environment command output", () => {
     ]);
   });
 
-  it("bb environment paths targets the environment and path kinds", async () => {
+  it("omnyo environment paths targets the environment and path kinds", async () => {
     const response = {
       paths: [
         {
@@ -536,6 +567,7 @@ describe("bb environment command output", () => {
       ],
       truncated: true,
     };
+
     const get = vi.fn(async () => response);
     stubServerApi({ "v1.environments.:id.paths.$get": get });
 
@@ -568,7 +600,7 @@ describe("bb environment command output", () => {
     ]);
   });
 
-  it("bb environment diff prints summary, full diff, and truncation", async () => {
+  it("omnyo environment diff prints summary, full diff, and truncation", async () => {
     const get = vi.fn(async () => ({
       outcome: "available",
       diff: {
@@ -579,6 +611,7 @@ describe("bb environment command output", () => {
         mergeBaseRef: "abc123",
       },
     }));
+
     stubServerApi({ "v1.environments.:id.diff.$get": get });
 
     await runCommand(
@@ -606,7 +639,7 @@ describe("bb environment command output", () => {
     ]);
   });
 
-  it("bb environment diff-files --json preserves binary and initial patch metadata", async () => {
+  it("omnyo environment diff-files --json preserves binary and initial patch metadata", async () => {
     const response = {
       outcome: "available",
       files: [
@@ -632,6 +665,7 @@ describe("bb environment command output", () => {
         },
       ],
     };
+
     const get = vi.fn(async () => response);
     stubServerApi({ "v1.environments.:id.diff.files.$get": get });
 
@@ -656,7 +690,7 @@ describe("bb environment command output", () => {
     ).toEqual(response);
   });
 
-  it("bb environment diff-files reports a truncated file list", async () => {
+  it("omnyo environment diff-files reports a truncated file list", async () => {
     stubServerApi({
       "v1.environments.:id.diff.files.$get": vi.fn(async () => ({
         outcome: "available",
@@ -697,7 +731,7 @@ describe("bb environment command output", () => {
     ]);
   });
 
-  it("bb environment diff-file distinguishes text and binary content", async () => {
+  it("omnyo environment diff-file distinguishes text and binary content", async () => {
     const get = vi
       .fn()
       .mockResolvedValueOnce({
@@ -714,6 +748,7 @@ describe("bb environment command output", () => {
         mimeType: "image/png",
         sizeBytes: 8,
       });
+
     stubServerApi({ "v1.environments.:id.diff.file.$get": get });
 
     await runCommand(
@@ -772,7 +807,7 @@ describe("bb environment command output", () => {
     ]);
   });
 
-  it("bb environment diff-patch preserves patch paths and truncation", async () => {
+  it("omnyo environment diff-patch preserves patch paths and truncation", async () => {
     const post = vi.fn(async () => ({
       outcome: "available",
       patches: [
@@ -788,6 +823,7 @@ describe("bb environment command output", () => {
         },
       ],
     }));
+
     stubServerApi({ "v1.environments.:id.diff.patch.$post": post });
 
     await runCommand(
@@ -823,7 +859,7 @@ describe("bb environment command output", () => {
     ]);
   });
 
-  it("bb environment diff explains non-git results", async () => {
+  it("omnyo environment diff explains non-git results", async () => {
     stubServerApi({
       "v1.environments.:id.diff.$get": vi.fn(async () => ({
         outcome: "not_applicable",
@@ -896,10 +932,11 @@ describe("bb environment command output", () => {
     );
   });
 
-  it("bb environment commit prefixes failures with environment context", async () => {
+  it("omnyo environment commit prefixes failures with environment context", async () => {
     const post = vi.fn(async () => {
       throw new Error("HTTP 500: boom");
     });
+
     stubServerApi({ "v1.environments.:id.actions.$post": post });
 
     await expect(
@@ -911,14 +948,15 @@ describe("bb environment command output", () => {
     );
   });
 
-  it("bb environment commit posts the action without a thread id", async () => {
+  it("omnyo environment commit posts the action without a thread id", async () => {
     const post = vi.fn(async () => ({
       ok: true,
       action: "commit",
       message: "Created commit abc123",
       commitSha: "abc123",
-      commitSubject: "bb: automated commit",
+      commitSubject: "omnyo: automated commit",
     }));
+
     stubServerApi({ "v1.environments.:id.actions.$post": post });
 
     await runCommand(["environment", "commit", "env-commit-1"], register);
@@ -929,7 +967,7 @@ describe("bb environment command output", () => {
     });
   });
 
-  it("bb environment update sets the merge base branch", async () => {
+  it("omnyo environment update sets the merge base branch", async () => {
     const environment = fixtures.makeEnvironment({
       id: "env-update-1",
       projectId: "proj-1",
@@ -938,6 +976,7 @@ describe("bb environment command output", () => {
       createdAt: 1,
       updatedAt: 2,
     });
+
     const patch = vi.fn(async () => environment);
     stubServerApi({ "v1.environments.:id.$patch": patch });
 
@@ -964,7 +1003,7 @@ describe("bb environment command output", () => {
     );
   });
 
-  it("bb environment update clears the merge base branch", async () => {
+  it("omnyo environment update clears the merge base branch", async () => {
     const environment = fixtures.makeEnvironment({
       id: "env-update-2",
       projectId: "proj-1",
@@ -973,6 +1012,7 @@ describe("bb environment command output", () => {
       createdAt: 1,
       updatedAt: 2,
     });
+
     const patch = vi.fn(async () => environment);
     stubServerApi({ "v1.environments.:id.$patch": patch });
 
@@ -990,7 +1030,7 @@ describe("bb environment command output", () => {
     );
   });
 
-  it("bb environment update renames the environment", async () => {
+  it("omnyo environment update renames the environment", async () => {
     const environment = fixtures.makeEnvironment({
       id: "env-update-name",
       projectId: "proj-1",
@@ -999,6 +1039,7 @@ describe("bb environment command output", () => {
       createdAt: 1,
       updatedAt: 2,
     });
+
     const patch = vi.fn(async () => environment);
     stubServerApi({ "v1.environments.:id.$patch": patch });
 
@@ -1025,7 +1066,7 @@ describe("bb environment command output", () => {
     );
   });
 
-  it("bb environment update clears the environment name", async () => {
+  it("omnyo environment update clears the environment name", async () => {
     const environment = fixtures.makeEnvironment({
       id: "env-clear-name",
       projectId: "proj-1",
@@ -1034,6 +1075,7 @@ describe("bb environment command output", () => {
       createdAt: 1,
       updatedAt: 2,
     });
+
     const patch = vi.fn(async () => environment);
     stubServerApi({ "v1.environments.:id.$patch": patch });
 
@@ -1049,7 +1091,7 @@ describe("bb environment command output", () => {
     expect(collectLogLines(vi.mocked(console.log))).toContain("Name cleared");
   });
 
-  it("bb environment update sets name and merge base together", async () => {
+  it("omnyo environment update sets name and merge base together", async () => {
     const environment = fixtures.makeEnvironment({
       id: "env-update-combined",
       projectId: "proj-1",
@@ -1059,6 +1101,7 @@ describe("bb environment command output", () => {
       createdAt: 1,
       updatedAt: 2,
     });
+
     const patch = vi.fn(async () => environment);
     stubServerApi({ "v1.environments.:id.$patch": patch });
 
@@ -1087,7 +1130,7 @@ describe("bb environment command output", () => {
     );
   });
 
-  it("bb environment update rejects name and clear-name together", async () => {
+  it("omnyo environment update rejects name and clear-name together", async () => {
     const patch = vi.fn();
     stubServerApi({ "v1.environments.:id.$patch": patch });
 
@@ -1111,7 +1154,7 @@ describe("bb environment command output", () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
-  it("bb environment update rejects an empty name", async () => {
+  it("omnyo environment update rejects an empty name", async () => {
     const patch = vi.fn();
     stubServerApi({ "v1.environments.:id.$patch": patch });
 
@@ -1128,7 +1171,7 @@ describe("bb environment command output", () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
-  it("bb environment update --json prints the updated environment", async () => {
+  it("omnyo environment update --json prints the updated environment", async () => {
     const environment = fixtures.makeEnvironment({
       id: "env-json-update",
       projectId: "proj-1",
@@ -1137,6 +1180,7 @@ describe("bb environment command output", () => {
       createdAt: 1,
       updatedAt: 2,
     });
+
     const patch = vi.fn(async () => environment);
     stubServerApi({ "v1.environments.:id.$patch": patch });
 

@@ -1,4 +1,5 @@
-import type { ConnectCredential } from "@bb/connect-client";
+import { iosHaptic } from "@/lib/haptics";
+import type { ConnectCredential } from "@omnyo/connect-client";
 import { useState } from "react";
 import { View } from "react-native";
 import { useProfiles } from "@/app-shell";
@@ -26,12 +27,16 @@ export function AccountServersList({
 
   const add = async (server: { handle: string; name: string; url: string }) => {
     setAdding(server.handle);
+
     try {
       const profile = await addProfile(
         accountServerProfile(credential, server),
       );
+
+      iosHaptic("success");
       toast.success(`Added ${profile.label}`);
     } catch (error) {
+      iosHaptic("error");
       toast.error("Could not add server", {
         description: describeError(error),
       });
@@ -77,6 +82,7 @@ export function AccountServersList({
         state.servers.map((server) => {
           const isSelf = server.handle === state.selfHandle;
           const saved = savedHandles.has(`${server.handle} ${server.url}`);
+
           return (
             <GroupedRow
               key={server.handle}

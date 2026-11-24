@@ -9,6 +9,7 @@ export const environmentMachineSelectionSchema = z.discriminatedUnion("type", [
     inputs: jsonValueSchema.nullable(),
   }),
 ]);
+
 export type EnvironmentMachineSelection = z.infer<
   typeof environmentMachineSelectionSchema
 >;
@@ -17,9 +18,11 @@ export const environmentProviderSelectionSchema = z.object({
   machine: environmentMachineSelectionSchema,
   inputs: jsonValueSchema.nullable(),
 });
+
 export type EnvironmentProviderSelection = z.infer<
   typeof environmentProviderSelectionSchema
 >;
+
 export const environmentStatusValues = [
   "creating",
   "provisioning",
@@ -27,7 +30,9 @@ export const environmentStatusValues = [
   "error",
   "destroyed",
 ] as const;
+
 export const environmentStatusSchema = z.enum(environmentStatusValues);
+
 export type EnvironmentStatus = z.infer<typeof environmentStatusSchema>;
 
 export const environmentHostLifecycleValues = [
@@ -36,9 +41,11 @@ export const environmentHostLifecycleValues = [
   "cleanup-failed",
   "removed",
 ] as const;
+
 export const environmentHostLifecycleSchema = z.enum(
   environmentHostLifecycleValues,
 );
+
 export type EnvironmentHostLifecycle = z.infer<
   typeof environmentHostLifecycleSchema
 >;
@@ -57,7 +64,9 @@ export function resolveEnvironmentHostLifecycle(
   ) {
     return "removed";
   }
+
   if (host.phase !== "removing") return "active";
+
   return host.teardownStatus === "failed" ? "cleanup-failed" : "removing";
 }
 
@@ -66,7 +75,9 @@ const WORKSPACE_PROVISION_TYPES = [
   "managed-worktree",
   "personal",
 ] as const;
+
 export const workspaceProvisionTypeSchema = z.enum(WORKSPACE_PROVISION_TYPES);
+
 export type WorkspaceProvisionType = z.infer<
   typeof workspaceProvisionTypeSchema
 >;
@@ -76,9 +87,11 @@ const environmentWorkspaceDisplayKindValues = [
   "unmanaged-worktree",
   "other",
 ] as const;
+
 export const environmentWorkspaceDisplayKindSchema = z.enum(
   environmentWorkspaceDisplayKindValues,
 );
+
 export type EnvironmentWorkspaceDisplayKind = z.infer<
   typeof environmentWorkspaceDisplayKindSchema
 >;
@@ -90,6 +103,7 @@ export const discoveredWorkspacePropertiesSchema = z.object({
   branchName: z.string().nullable(),
   defaultBranch: z.string().nullable(),
 });
+
 export type DiscoveredWorkspaceProperties = z.infer<
   typeof discoveredWorkspacePropertiesSchema
 >;
@@ -129,6 +143,7 @@ export const environmentSchema = z.object({
   createdAt: z.number(),
   updatedAt: z.number(),
 });
+
 export type Environment = z.infer<typeof environmentSchema>;
 
 type EnvironmentMergeBaseBranchSource = Pick<

@@ -1,9 +1,13 @@
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type {
+  ComponentProps,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@bb/shared-ui/button";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { COARSE_POINTER_ICON_SIZE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { COARSE_POINTER_ICON_SIZE_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   SidebarContent,
   useCloseMobileSidebar,
@@ -12,9 +16,9 @@ import {
   SidebarResizeHandle,
   SidebarTopReserveRow,
 } from "@/components/sidebar/SidebarChrome";
-import { PROJECT_LIST_ACTION_BUTTON_CLASS } from "@bb/shared-ui/sidebar-row-classes";
-import { SIDEBAR_STANDARD_ROW_PADDING_CLASS } from "@bb/shared-ui/sidebar-row-classes";
-import { CHROME_SECTION_LABEL_CLASS } from "@bb/shared-ui/chrome-style-tokens";
+import { PROJECT_LIST_ACTION_BUTTON_CLASS } from "@omnyo/shared-ui/sidebar-row-classes";
+import { SIDEBAR_STANDARD_ROW_PADDING_CLASS } from "@omnyo/shared-ui/sidebar-row-classes";
+import { CHROME_SECTION_LABEL_CLASS } from "@omnyo/shared-ui/chrome-style-tokens";
 
 export function SectionSidebarIcon({ name }: { name: IconName }) {
   return <Icon name={name} className={COARSE_POINTER_ICON_SIZE_CLASS} />;
@@ -24,14 +28,20 @@ export function SectionSidebarRow({
   active,
   children,
   label,
+  intent,
   to,
 }: {
   active: boolean;
   children?: ReactNode;
   label: string;
+  intent?: Pick<
+    ComponentProps<typeof Link>,
+    "onPointerEnter" | "onFocus" | "onPointerDown"
+  >;
   to: string;
 }) {
   const closeOnMobile = useCloseMobileSidebar();
+
   return (
     <Button
       asChild
@@ -45,6 +55,7 @@ export function SectionSidebarRow({
     >
       <Link
         to={to}
+        {...intent}
         onClick={closeOnMobile}
         aria-current={active ? "page" : undefined}
       >
@@ -67,6 +78,7 @@ export function SectionSidebarActionRow({
   testId?: string;
 }) {
   const closeOnMobile = useCloseMobileSidebar();
+
   return (
     <Button
       size="sm"

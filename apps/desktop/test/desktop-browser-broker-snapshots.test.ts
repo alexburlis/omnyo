@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Session } from "electron";
-import type { DesktopBrowserChanged } from "@bb/host-daemon-contract";
+import type { DesktopBrowserChanged } from "@omnyo/host-daemon-contract";
+import type { DesktopRendererProfile } from "@omnyo/host-daemon-contract";
 
 vi.mock("electron", () => ({
   BrowserWindow: class {},
@@ -16,6 +17,7 @@ import type {
 } from "../src/desktop-browser-view.js";
 
 const THREAD_ID = "thr_23456789ab";
+
 const PLUGIN_PANEL_ID = "plugin-panel:cloud-sandbox:cloud-machines:pane-1";
 
 function nativeTab(tabId: string, threadId: string): DesktopBrowserNativeTab {
@@ -56,9 +58,70 @@ function createFakeWindow() {
 }
 
 describe("desktop browser broker snapshots", () => {
+  it("profiles the exact registered shell and rejects a changed window after capture", async () => {
+    const manager: Pick<
+      DesktopBrowserViewManager,
+      "listTabs" | "subscribeAutomationTabs"
+    > = {
+      listTabs: () => [],
+      subscribeAutomationTabs: () => () => undefined,
+    };
+
+    const profile: DesktopRendererProfile = {
+      requestedDurationMs: 2000,
+      actualDurationMs: 2001,
+      sampleIntervalUs: 1000,
+      totalSamples: 0,
+      omittedSamples: 0,
+      hotspots: [],
+      builtinSamples: { idle: 0, program: 0, garbageCollection: 0 },
+      truncated: false,
+    };
+
+    let finish: (value: DesktopRendererProfile) => void = () => {
+      throw new Error("Capture not started");
+    };
+
+    const capture = vi.fn(
+      () =>
+        new Promise<DesktopRendererProfile>((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    const broker = createDesktopBrowserBroker({
+      manager: manager as DesktopBrowserViewManager,
+      product: "Chrome/1",
+      profileRenderer: capture,
+    });
+
+    const window = createFakeWindow();
+    broker.registerWindow(window);
+    const [instance] = broker.listInstances();
+
+    if (instance === undefined) throw new Error("Missing fixture instance");
+    expect(instance.rendererProfiling).toBe(true);
+
+    const pending = broker.execute({
+      type: "desktop.browser.profile_renderer",
+      instanceId: instance.instanceId,
+      generation: instance.generation,
+      durationMs: 2000,
+    });
+
+    expect(capture).toHaveBeenCalledWith({
+      webContentsId: 7,
+      durationMs: 2000,
+    });
+    broker.releaseWindow(7);
+    finish(profile);
+    await expect(pending).rejects.toThrow("Desktop instance is unavailable");
+    broker.dispose();
+  });
   it("publishes live tab closure but preserves saved tabs during window teardown", () => {
     let tabs = [nativeTab("thread-tab", THREAD_ID)];
     let notifyTabsChanged: () => void = () => undefined;
+
     const manager: Pick<
       DesktopBrowserViewManager,
       "listTabs" | "subscribeAutomationTabs"
@@ -66,13 +129,16 @@ describe("desktop browser broker snapshots", () => {
       listTabs: () => tabs,
       subscribeAutomationTabs: (listener: () => void) => {
         notifyTabsChanged = listener;
+
         return () => undefined;
       },
     };
+
     const broker = createDesktopBrowserBroker({
       manager: manager as DesktopBrowserViewManager,
       product: "Chrome/1",
     });
+
     const events: DesktopBrowserChanged[] = [];
     broker.subscribe((event) => events.push(event));
     const window = createFakeWindow();
@@ -100,7 +166,9 @@ describe("desktop browser broker snapshots", () => {
       nativeTab("thread-tab", THREAD_ID),
       nativeTab("panel-tab", PLUGIN_PANEL_ID),
     ];
+
     let notifyTabsChanged: () => void = () => undefined;
+
     const manager: Pick<
       DesktopBrowserViewManager,
       "listTabs" | "subscribeAutomationTabs" | "session" | "destroyAll"
@@ -109,15 +177,18 @@ describe("desktop browser broker snapshots", () => {
         tabs.filter((tab) => threadId === null || tab.threadId === threadId),
       subscribeAutomationTabs: (listener) => {
         notifyTabsChanged = listener;
+
         return () => undefined;
       },
       session: () => ({}) as Session,
       destroyAll: () => undefined,
     };
+
     const broker = createDesktopBrowserBroker({
       manager: manager as DesktopBrowserViewManager,
       product: "Chrome/1",
     });
+
     const events: DesktopBrowserChanged[] = [];
     broker.subscribe((event) => events.push(event));
     const window = createFakeWindow();
@@ -145,6 +216,7 @@ describe("desktop browser broker window cleanup", () => {
     "releases a destroyed window with active lease: %s",
     async (withLease) => {
       const tab = nativeTab("thread-tab", THREAD_ID);
+
       const manager: Pick<
         DesktopBrowserViewManager,
         "listTabs" | "subscribeAutomationTabs"
@@ -152,10 +224,12 @@ describe("desktop browser broker window cleanup", () => {
         listTabs: () => [tab],
         subscribeAutomationTabs: () => () => undefined,
       };
+
       const broker = createDesktopBrowserBroker({
         manager: manager as DesktopBrowserViewManager,
         product: "Chrome/1",
       });
+
       const window = createFakeWindow();
       const webContents = window.webContents;
       let destroyed = false;
@@ -163,12 +237,14 @@ describe("desktop browser broker window cleanup", () => {
       Object.defineProperty(window, "webContents", {
         get() {
           if (destroyed) throw new TypeError("Object has been destroyed");
+
           return webContents;
         },
       });
       broker.registerWindow(window);
       broker.setHostId("host_local");
       const target = broker.getTarget(webContents.id)!;
+
       if (withLease) {
         await broker.execute({
           type: "desktop.browser.acquire_control",
@@ -180,6 +256,7 @@ describe("desktop browser broker window cleanup", () => {
           expiresAt: Date.now() + 60_000,
         });
       }
+
       const registryChanged = vi.fn();
       broker.subscribeInstances(registryChanged);
       destroyed = true;

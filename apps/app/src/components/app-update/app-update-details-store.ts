@@ -1,8 +1,9 @@
-import type { SystemAppUpdateResult } from "@bb/server-contract";
+import type { SystemAppUpdateResult } from "@omnyo/server-contract";
 
 type Listener = () => void;
 
 let openResult: SystemAppUpdateResult | null = null;
+
 const listeners = new Set<Listener>();
 
 function emit(): void {
@@ -25,6 +26,7 @@ export function subscribeAppUpdateResultDetails(
   listener: Listener,
 ): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };

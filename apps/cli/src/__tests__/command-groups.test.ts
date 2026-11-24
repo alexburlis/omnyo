@@ -36,14 +36,17 @@ describe("selectCommandGroups", () => {
 describe("CORE_COMMAND_GROUPS", () => {
   it("registers exactly the top-level commands it names, in order, with no aliases", async () => {
     const program = new Command();
+
     const deps: CommandGroupDeps = {
       getUrl: () => "http://localhost",
       getContext: () => ({ serverUrl: "http://localhost" }),
     };
+
     for (const group of CORE_COMMAND_GROUPS) {
       const register = await group.load();
       register(program, deps);
     }
+
     expect(program.commands.map((command) => command.name())).toEqual(
       ALL_GROUP_NAMES,
     );

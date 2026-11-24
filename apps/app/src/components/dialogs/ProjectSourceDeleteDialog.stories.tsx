@@ -35,6 +35,7 @@ export function Overview() {
             target={localHostTarget}
             pending={false}
             onDelete={noop}
+            onCancel={noop}
           />
         </DialogStage>
       </StoryRow>
@@ -47,6 +48,7 @@ export function Overview() {
             target={longTarget}
             pending={false}
             onDelete={noop}
+            onCancel={noop}
           />
         </DialogStage>
       </StoryRow>
@@ -56,6 +58,7 @@ export function Overview() {
             target={localHostTarget}
             pending
             onDelete={noop}
+            onCancel={noop}
           />
         </DialogStage>
       </StoryRow>

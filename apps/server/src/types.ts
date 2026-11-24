@@ -1,12 +1,15 @@
-import type { CustomProviderModel } from "@bb/config/bb-app-managed-config";
-import type { DbConnection } from "@bb/db";
-import type { FeatureFlags, ProviderNativeSkillRoots } from "@bb/domain";
-import type { Logger } from "@bb/logger";
+import type { ServerCommandMetadata } from "./services/skills/command-metadata.js";
+import type { ProjectCommandCatalogs } from "./services/threads/project-command-catalogs.js";
+import type { CustomProviderModel } from "@omnyo/config/managed-app-config";
+import type { DbConnection } from "@omnyo/db";
+import type { SecretVault } from "@omnyo/secret-storage";
+import type { FeatureFlags, ProviderNativeSkillRoots } from "@omnyo/domain";
+import type { Logger } from "@omnyo/logger";
 import type { PendingInteractionLifecycle } from "./services/interactions/pending-interactions.js";
 import type { MachineAuthService } from "./services/machine-auth.js";
 import type { AppUpdateService } from "./services/system/app-update.js";
 import type { AppVersionService } from "./services/system/app-version.js";
-import type { BbAppManagedConfigReloader } from "./services/system/bb-app-managed-config.js";
+import type { OmnyoAppManagedConfigReloader } from "./services/system/managed-app-config.js";
 import type { TelemetryService } from "./services/system/telemetry.js";
 import type { TerminalSessionLifecycle } from "./services/terminals/terminal-session-lifecycle.js";
 import type { LifecycleDedupers } from "./lifecycle-dedupers.js";
@@ -23,6 +26,7 @@ import type { ProviderNativeRootsCache } from "./services/providers/native-roots
 export type ServerLogger = Pick<Logger, "debug" | "error" | "info" | "warn">;
 
 export interface ServerRuntimeConfig {
+  appAliasOrigins: string[];
   appVersion: string;
   builtinSkillsRootPath: string;
   customModels: CustomProviderModel[];
@@ -32,15 +36,17 @@ export interface ServerRuntimeConfig {
   inheritedSkillsRootPaths: string[];
   isDevelopment: boolean;
   performanceDiagnosticsAvailable: boolean;
-  marketplaceUrl: string;
   serverPort: number;
   sharedSkillRoots: ProviderNativeSkillRoots;
   appUrl?: string;
   devAppPort?: number;
+  errorReportingDsn?: string;
   launchId?: string;
 }
 
 export interface AppDeps {
+  commandCatalogs: ProjectCommandCatalogs;
+  commandMetadata: ServerCommandMetadata;
   config: ServerRuntimeConfig;
   db: DbConnection;
   hub: NotificationHub;
@@ -55,6 +61,7 @@ export interface AppDeps {
   skillTreeRegistry: SkillTreeRegistry;
   telemetry: TelemetryService;
   terminalSessions: TerminalSessionLifecycle;
+  vault: SecretVault;
   watchInterests: WatchInterestCoordinator;
   sharedPorts: HostSharedPortCoordinator;
   workspaceReadCaches: WorkspaceReadCaches;
@@ -63,7 +70,7 @@ export interface AppDeps {
 export interface ServerAppDeps extends AppDeps {
   appUpdate: AppUpdateService;
   appVersion: AppVersionService;
-  bbAppManagedConfig: BbAppManagedConfigReloader;
+  managedAppConfig: OmnyoAppManagedConfigReloader;
 }
 
 export type WorkSessionDeps = Pick<
@@ -79,6 +86,7 @@ export type WorkSessionDeps = Pick<
   | "aiServices"
   | "skillTreeRegistry"
   | "telemetry"
+  | "vault"
 >;
 
 export type LoggedWorkSessionDeps = WorkSessionDeps & Pick<AppDeps, "logger">;

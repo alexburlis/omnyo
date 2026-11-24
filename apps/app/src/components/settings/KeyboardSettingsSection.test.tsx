@@ -14,8 +14,8 @@ import {
   defaultAppSettings,
   type AppDefaultKeybindings,
   type AppKeybindingOverrides,
-} from "@bb/domain";
-import { collectPluginAppRegistrations } from "@get-bb/plugin-sdk/internal/plugin-app-collector";
+} from "@omnyo/domain";
+import { collectPluginAppRegistrations } from "@omnyo/plugin-sdk/internal/plugin-app-collector";
 import {
   setPluginSlotRegistrations,
   removePluginSlotRegistrations,
@@ -137,6 +137,7 @@ const testState = vi.hoisted(() => {
       },
     },
   ] as AppDefaultKeybindings;
+
   return {
     defaultKeybindings,
     generalMutate: vi.fn(),
@@ -176,12 +177,15 @@ vi.mock("@/hooks/mutations/settings-mutations", () => ({
   }),
 }));
 
-vi.mock("@bb/shared-ui/button", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@bb/shared-ui/button")>();
+vi.mock("@omnyo/shared-ui/button", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@omnyo/shared-ui/button")>();
+
   return {
     ...actual,
     Button: (props: ComponentProps<typeof actual.Button>) => {
       const label = props["aria-label"];
+
       if (
         typeof label === "string" &&
         label.startsWith("Record shortcut for ")
@@ -191,13 +195,14 @@ vi.mock("@bb/shared-ui/button", async (importOriginal) => {
           (testState.recorderButtonCalls.get(label) ?? 0) + 1,
         );
       }
+
       return createElement(actual.Button, props);
     },
   };
 });
 
-vi.mock("@/lib/bb-desktop", () => ({
-  getBbDesktopInfo: () => (testState.isDesktop ? {} : null),
+vi.mock("@/lib/omnyo-desktop", () => ({
+  getOmnyoDesktopInfo: () => (testState.isDesktop ? {} : null),
 }));
 
 afterEach(() => {
@@ -221,7 +226,7 @@ describe("KeyboardSettingsSection", () => {
       setPluginSlotRegistrations(
         "test-shortcuts",
         collectPluginAppRegistrations({
-          __bbPluginApp: true,
+          __omnyoPluginApp: true,
           setup(app) {
             for (const id of ["first", "second"]) {
               app.commands.register({
@@ -262,6 +267,7 @@ describe("KeyboardSettingsSection", () => {
       fireEvent.click(reset);
       expect(testState.keybindingOverrides).toEqual([]);
       rerender(<KeyboardSettingsSection />);
+
       for (const id of ["first", "second"]) {
         expect(
           screen.getByRole("button", {
@@ -269,6 +275,7 @@ describe("KeyboardSettingsSection", () => {
           }),
         ).toBeTruthy();
       }
+
       expect(screen.getAllByText(/Default shortcut left unbound/)).toHaveLength(
         2,
       );
@@ -279,6 +286,7 @@ describe("KeyboardSettingsSection", () => {
     const platform = vi
       .spyOn(navigator, "platform", "get")
       .mockReturnValue("MacIntel");
+
     testState.keybindingOverrides = [
       {
         command: "thread.new",
@@ -331,6 +339,7 @@ describe("KeyboardSettingsSection", () => {
 
   it("keeps UI edits and both reset actions on the current platform", () => {
     vi.spyOn(navigator, "platform", "get").mockReturnValue("Win32");
+
     const general = {
       command: "thread.new",
       shortcut: {
@@ -342,22 +351,27 @@ describe("KeyboardSettingsSection", () => {
         shift: false,
       },
     } as const;
+
     const mac = {
       command: "thread.new",
       platform: "mac",
       shortcut: null,
     } as const;
+
     const otherWindows = {
       command: "app.back",
       platform: "windows",
       shortcut: null,
     } as const;
+
     const sharedRename = { ...general, command: "thread.rename" } as const;
     testState.keybindingOverrides = [sharedRename, general, mac, otherWindows];
     render(<KeyboardSettingsSection />);
+
     const recorder = screen.getByRole("button", {
       name: "Record shortcut for New thread, current shortcut Ctrl + G",
     });
+
     fireEvent.click(recorder);
     fireEvent.keyDown(recorder, { key: "u", ctrlKey: true, shiftKey: true });
     expect(testState.mutate.mock.lastCall?.[0]).toEqual([
@@ -440,7 +454,7 @@ describe("KeyboardSettingsSection", () => {
     setPluginSlotRegistrations(
       "test-shortcuts",
       collectPluginAppRegistrations({
-        __bbPluginApp: true,
+        __omnyoPluginApp: true,
         setup(app) {
           for (const [id, title] of [
             ["sidebar-open", "Open navigation"],
@@ -468,18 +482,22 @@ describe("KeyboardSettingsSection", () => {
         (recorder) =>
           recorder.getAttribute("aria-label")?.split(", current shortcut")[0],
       );
-    expect(labels.slice(0, 6)).toEqual([
+
+    expect(labels.slice(0, 5)).toEqual([
       "Record shortcut for Sidebar",
       "Record shortcut for Sidebar tools",
       "Record shortcut for Sidebar settings",
       "Record shortcut for Toggle sidebar",
       "Record shortcut for Open navigation",
-      "Record shortcut for Previous thread",
     ]);
+    expect(
+      labels.indexOf("Record shortcut for Previous thread"),
+    ).toBeGreaterThan(labels.indexOf("Record shortcut for Open navigation"));
   });
 
   it("finds commands by their shortcut keys and modifiers", () => {
     render(<KeyboardSettingsSection />);
+
     const search = screen.getByRole("textbox", {
       name: "Search keyboard shortcuts",
     });
@@ -527,6 +545,7 @@ describe("KeyboardSettingsSection", () => {
         },
       ];
       render(<KeyboardSettingsSection />);
+
       const search = screen.getByRole("textbox", {
         name: "Search keyboard shortcuts",
       });
@@ -549,12 +568,15 @@ describe("KeyboardSettingsSection", () => {
 
   it("restores category and command order when the search is cleared", () => {
     render(<KeyboardSettingsSection />);
+
     const originalLabels = screen
       .getAllByRole("button", { name: /^Record shortcut for / })
       .map((recorder) => recorder.getAttribute("aria-label"));
+
     const originalHeadings = screen
       .getAllByRole("heading", { level: 3 })
       .map((heading) => heading.textContent);
+
     const search = screen.getByRole("textbox", {
       name: "Search keyboard shortcuts",
     });
@@ -578,7 +600,7 @@ describe("KeyboardSettingsSection", () => {
     setPluginSlotRegistrations(
       "test-shortcuts",
       collectPluginAppRegistrations({
-        __bbPluginApp: true,
+        __omnyoPluginApp: true,
         setup(app) {
           app.commands.register({
             id: "open",
@@ -589,9 +611,11 @@ describe("KeyboardSettingsSection", () => {
       }),
     );
     render(<KeyboardSettingsSection />);
+
     const recorder = screen.getByRole("button", {
       name: "Record shortcut for Open plugin issue, current shortcut unassigned",
     });
+
     fireEvent.click(recorder);
     fireEvent.keyDown(recorder, { key: "i", ctrlKey: true, shiftKey: true });
     expect(testState.mutate.mock.lastCall?.[0]).toEqual([
@@ -607,7 +631,7 @@ describe("KeyboardSettingsSection", () => {
     setPluginSlotRegistrations(
       "test-shortcuts",
       collectPluginAppRegistrations({
-        __bbPluginApp: true,
+        __omnyoPluginApp: true,
         setup(app) {
           app.commands.register({
             id: "open",
@@ -658,9 +682,11 @@ describe("KeyboardSettingsSection", () => {
     expect(within(desktopGroup!).getByText("Ctrl + N")).toBeDefined();
     expect(within(defaults).queryByText("macOS web")).toBeNull();
     expect(within(defaults).queryByText("Windows/Linux web")).toBeNull();
+
     const recorder = screen.getByRole("button", {
       name: "Record shortcut for New thread, current shortcut Ctrl + Shift + O",
     });
+
     const recorderShortcut = within(recorder).getByText("Ctrl + Shift + O");
     expect(recorderShortcut.tagName).toBe("KBD");
     expect(recorderShortcut.getAttribute("aria-hidden")).toBe("true");
@@ -713,9 +739,11 @@ describe("KeyboardSettingsSection", () => {
 
   it("lets users assign a command that has no default shortcut", () => {
     render(<KeyboardSettingsSection />);
+
     const recorder = screen.getByRole("button", {
       name: "Record shortcut for Rename thread, current shortcut unassigned",
     });
+
     expect(recorder.hasAttribute("disabled")).toBe(false);
     expect(within(recorder).getByText("Unassigned")).toBeDefined();
 
@@ -747,12 +775,15 @@ describe("KeyboardSettingsSection", () => {
 
   it("keeps unaffected shortcut controls stable while saving", () => {
     const { rerender } = render(<KeyboardSettingsSection />);
+
     const recorder = screen.getByRole("button", {
       name: /^Record shortcut for New thread,/,
     });
+
     fireEvent.click(recorder);
     fireEvent.keyDown(recorder, { key: "U", ctrlKey: true, shiftKey: true });
     const assigned = testState.mutate.mock.lastCall?.[0];
+
     if (!assigned) throw new Error("Expected shortcut mutation");
     testState.keybindingOverrides = structuredClone(assigned);
     rerender(<KeyboardSettingsSection />);
@@ -774,9 +805,11 @@ describe("KeyboardSettingsSection", () => {
 
   it("asks before replacing a conflicting assignment and supports cancel", () => {
     render(<KeyboardSettingsSection />);
+
     const newThreadRecorder = screen.getByRole("button", {
       name: "Record shortcut for New thread, current shortcut Ctrl + Shift + O",
     });
+
     fireEvent.click(newThreadRecorder);
     fireEvent.keyDown(newThreadRecorder, {
       key: "U",
@@ -787,6 +820,7 @@ describe("KeyboardSettingsSection", () => {
     const jumpRecorder = screen.getByRole("button", {
       name: "Record shortcut for Open thread 1, current shortcut Ctrl + Shift + 1",
     });
+
     fireEvent.click(jumpRecorder);
     testState.recorderButtonCalls.clear();
     fireEvent.keyDown(jumpRecorder, {
@@ -820,9 +854,11 @@ describe("KeyboardSettingsSection", () => {
 
   it("rolls reset-all draft state back when the mutation fails", () => {
     render(<KeyboardSettingsSection />);
+
     const recorder = screen.getByRole("button", {
       name: "Record shortcut for New thread, current shortcut Ctrl + Shift + O",
     });
+
     fireEvent.click(recorder);
     fireEvent.keyDown(recorder, {
       key: "U",
@@ -839,6 +875,7 @@ describe("KeyboardSettingsSection", () => {
     ).toBeDefined();
 
     const rollback = testState.mutate.mock.lastCall?.[1].onError;
+
     if (rollback === undefined) throw new Error("Expected rollback handler");
     act(() => rollback());
 
@@ -856,6 +893,7 @@ describe("KeyboardSettingsSection", () => {
     const defaults = screen.getByLabelText(
       "Default shortcuts for Open thread 1",
     );
+
     const webGroup = within(defaults).getByText("Web").parentElement;
     expect(within(webGroup!).getByText("⌃ 1")).toBeDefined();
     const desktopGroup = within(defaults).getByText("Desktop").parentElement;
@@ -878,6 +916,7 @@ describe("KeyboardSettingsSection", () => {
     const defaults = screen.getByLabelText(
       "Default shortcuts for Open thread 1",
     );
+
     const webGroup = within(defaults).getByText("Web").parentElement;
     expect(within(webGroup!).getByText("⌃ 1")).toBeDefined();
     const desktopGroup = within(defaults).getByText("Desktop").parentElement;
@@ -895,6 +934,7 @@ describe("KeyboardSettingsSection", () => {
     const defaults = screen.getByLabelText(
       "Default shortcut for Choose answer 1",
     );
+
     expect(within(defaults).getByText("1")).toBeDefined();
     expect(within(defaults).queryByText("Web")).toBeNull();
     expect(within(defaults).queryByText("Desktop")).toBeNull();

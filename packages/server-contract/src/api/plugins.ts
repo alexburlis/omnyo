@@ -4,7 +4,7 @@ import {
   pluginMarketplaceCategorySchema,
   pluginMarketplaceCollectionIdSchema,
   pluginMarketplaceCollectionPluginIdSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { z } from "zod";
 
 export const pluginRuntimeStatusSchema = z.enum([
@@ -17,6 +17,7 @@ export const pluginRuntimeStatusSchema = z.enum([
   "degraded",
   "needs-configuration",
 ]);
+
 export type PluginRuntimeStatus = z.infer<typeof pluginRuntimeStatusSchema>;
 
 export const pluginUpdateOutcomeSchema = z.enum([
@@ -43,6 +44,7 @@ export const pluginUpdateCheckEntrySchema = z.object({
     .optional(),
   detail: z.string().optional(),
 });
+
 export type PluginUpdateCheckEntry = z.infer<
   typeof pluginUpdateCheckEntrySchema
 >;
@@ -55,7 +57,41 @@ export const pluginUpdateCheckResponseSchema = z.object({
   results: z.array(pluginUpdateCheckEntrySchema),
 });
 
-export const pluginApplyUpdateRequestSchema = z.object({}).strict();
+export const MAX_BUNDLED_PLUGIN_BYTES = 32 * 1024 * 1024;
+
+export const MAX_BUNDLED_PLUGIN_FILES = 4096;
+
+export const MAX_BUNDLED_PLUGIN_REQUEST_BYTES = 48 * 1024 * 1024;
+
+export const pluginApplyUpdateRequestSchema = z
+  .object({
+    bundledCandidate: z
+      .object({
+        expectedVersion: z.string().min(1),
+        expectedArtifactId: z.string().min(1).nullable(),
+        files: z
+          .array(
+            z
+              .object({
+                path: z.string().min(1).max(1024),
+                base64: z
+                  .string()
+                  .max(Math.ceil(MAX_BUNDLED_PLUGIN_BYTES / 3) * 4),
+                sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+              })
+              .strict(),
+          )
+          .min(1)
+          .max(MAX_BUNDLED_PLUGIN_FILES),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export type PluginApplyUpdateRequest = z.infer<
+  typeof pluginApplyUpdateRequestSchema
+>;
 
 export const pluginApplyUpdateResultSchema = z.object({
   applied: z.boolean(),
@@ -64,6 +100,7 @@ export const pluginApplyUpdateResultSchema = z.object({
   outcome: z.enum(["current", "updated", "rolled-back"]),
   detail: z.string().optional(),
 });
+
 export type PluginApplyUpdateResult = z.infer<
   typeof pluginApplyUpdateResultSchema
 >;
@@ -74,6 +111,7 @@ export const pluginUpdatePhaseSchema = z.enum([
   "checking",
   "rolling-back",
 ]);
+
 export type PluginUpdatePhase = z.infer<typeof pluginUpdatePhaseSchema>;
 
 const pluginUpdateJobFields = {
@@ -100,10 +138,13 @@ export const pluginUpdateJobSchema = z.discriminatedUnion("state", [
     error: z.string(),
   }),
 ]);
+
 export type PluginUpdateJob = z.infer<typeof pluginUpdateJobSchema>;
+
 export const pluginUpdateJobResponseSchema = z.object({
   job: pluginUpdateJobSchema,
 });
+
 export const pluginUpdateJobListResponseSchema = z.object({
   jobs: z.array(pluginUpdateJobSchema),
 });
@@ -114,6 +155,7 @@ export const pluginSourceHistoryEntrySchema = z.object({
 });
 
 export const pluginSourceDetailSchema = z.object({
+  activeArtifactId: z.string().nullable().default(null),
   requested: z.string(),
   resolved: z.string(),
   subdirectory: z.string().optional(),
@@ -122,13 +164,16 @@ export const pluginSourceDetailSchema = z.object({
   resolvedTag: z.string().optional(),
   integrity: z.string().optional(),
   registry: z.string().optional(),
-  engines: z.object({
-    bb: z.string().optional(),
-    bbPluginSdk: z.string().optional(),
-  }),
+  engines: z
+    .object({
+      omnyo: z.string().optional(),
+      omnyoPluginSdk: z.string().optional(),
+    })
+    .strict(),
   installedAt: z.number().optional(),
   history: z.array(pluginSourceHistoryEntrySchema),
 });
+
 export type PluginSourceDetail = z.infer<typeof pluginSourceDetailSchema>;
 
 export const pluginUpdateStateSchema = z.object({
@@ -149,12 +194,14 @@ export const pluginHandlerStatsSchema = z.object({
   maxMs: z.number(),
   errorCount: z.number(),
 });
+
 export type PluginHandlerStats = z.infer<typeof pluginHandlerStatsSchema>;
 
 export const pluginServiceEntrySchema = z.object({
   name: z.string(),
   state: z.enum(["running", "backoff", "stopped"]),
 });
+
 export const pluginScheduleEntrySchema = z.object({
   name: z.string(),
   cron: z.string(),
@@ -185,9 +232,11 @@ export const pluginCapabilitySchema = z.object({
   label: z.string(),
   detail: z.string().nullable(),
 });
+
 export type PluginCapability = z.infer<typeof pluginCapabilitySchema>;
 
 export const pluginCapabilitySummarySchema = z.array(pluginCapabilitySchema);
+
 export type PluginCapabilitySummary = z.infer<
   typeof pluginCapabilitySummarySchema
 >;
@@ -199,14 +248,22 @@ export const installedPluginSchema = z.object({
   version: z.string(),
   provenance: z.enum(["builtin", "direct", "catalog"]),
   isOrphanedBuiltin: z.boolean(),
+  removable: z.boolean().default(false),
   catalogEntryId: z.string().optional(),
   catalogMarketplaceName: z.string().optional(),
   publisherLabel: z.string().nullable().default(null),
+  official: z.boolean().default(false),
+  author: z
+    .lazy(() => pluginCatalogAuthorSchema)
+    .nullable()
+    .optional(),
+  repositoryUrl: z.string().nullable().default(null),
   sourceDisplay: z.string(),
   updateState: pluginUpdateStateSchema,
   enabled: z.boolean(),
   description: z.string().nullable(),
   name: z.string().nullable(),
+  shortName: z.string().nullable().default(null),
   categoryId: pluginCatalogCategoryIdSchema.optional(),
   category: z.string().optional(),
   screenshots: z.array(z.string()),
@@ -232,23 +289,16 @@ export const installedPluginSchema = z.object({
   logoUrl: z.string().nullable(),
   logoDarkUrl: z.string().nullable(),
   providerIds: z.array(z.string()),
-  /**
-   * The plugin's declared icons (`bb.branding.experimental_icons`): declared
-   * name → hashed asset URL (`/api/v1/plugins/<id>/assets/icons/<name>.svg?h=…`).
-   * A timeline row or provider whose glyph is `"<pluginId>/<name>"` resolves
-   * here; a name that is absent (the plugin changed its map, or is gone)
-   * renders the per-kind fallback glyph. Identity-backed like `iconUrl`, so a
-   * disabled plugin's icons still resolve. Empty for a plugin that declares
-   * none; the server fills it for every plugin, with the same response-side
-   * tolerance as `providerIds` in @bb/sdk for servers older than the field.
-   */
+
   icons: z.record(z.string(), z.string()),
 });
+
 export type InstalledPlugin = z.infer<typeof installedPluginSchema>;
 
 export const pluginListResponseSchema = z.object({
   plugins: z.array(installedPluginSchema),
 });
+
 export type PluginListResponse = z.infer<typeof pluginListResponseSchema>;
 
 export const pluginSourceSelectionSchema = z.discriminatedUnion("kind", [
@@ -258,6 +308,7 @@ export const pluginSourceSelectionSchema = z.discriminatedUnion("kind", [
     .strict(),
   z.object({ kind: z.literal("entry"), name: z.string().min(1) }).strict(),
 ]);
+
 export type PluginSourceSelection = z.infer<typeof pluginSourceSelectionSchema>;
 
 export const ROOT_PLUGIN_SOURCE_SELECTION: PluginSourceSelection = {
@@ -274,8 +325,6 @@ export const pluginInstallRequestSchema = z
   .strict();
 
 export const PLUGIN_MARKETPLACE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/u;
-
-export const CURATED_PLUGIN_MARKETPLACE_NAME = "bb-community";
 
 export const pluginMarketplaceNameSchema = z
   .string()
@@ -307,6 +356,7 @@ export const pluginInstallJobTargetSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
 export type PluginInstallJobTarget = z.infer<
   typeof pluginInstallJobTargetSchema
 >;
@@ -333,7 +383,9 @@ export const pluginInstallJobSchema = z.discriminatedUnion("state", [
   }),
   z.object({ ...pluginInstallJobFields, state: z.literal("cancelled") }),
 ]);
+
 export type PluginInstallJob = z.infer<typeof pluginInstallJobSchema>;
+
 export type PluginInstallJobState = PluginInstallJob["state"];
 
 export const pluginInstallJobStartResponseSchema = z.object({
@@ -353,14 +405,23 @@ export const pluginReloadResponseSchema = z.object({
   ok: z.literal(true),
   plugins: z.array(installedPluginSchema),
 });
+
 export type PluginReloadResponse = z.infer<typeof pluginReloadResponseSchema>;
 
 export const pluginRemoveResponseSchema = z.object({ ok: z.literal(true) });
+
 export type PluginRemoveResponse = z.infer<typeof pluginRemoveResponseSchema>;
 
 const pluginSettingBaseSchema = {
   label: z.string().min(1),
   description: z.string().min(1).optional(),
+  experimental_section: z
+    .object({
+      title: z.string().min(1),
+      description: z.string().min(1).optional(),
+    })
+    .strict()
+    .optional(),
 };
 
 export const pluginSettingDescriptorSchema = z.discriminatedUnion("type", [
@@ -370,6 +431,7 @@ export const pluginSettingDescriptorSchema = z.discriminatedUnion("type", [
       type: z.literal("string"),
       secret: z.literal(true).optional(),
       experimental_multiline: z.boolean().optional(),
+      experimental_placeholder: z.string().min(1).optional(),
       default: z.string().optional(),
     })
     .strict(),
@@ -384,6 +446,7 @@ export const pluginSettingDescriptorSchema = z.discriminatedUnion("type", [
     .object({
       ...pluginSettingBaseSchema,
       type: z.literal("number"),
+      experimental_placeholder: z.string().min(1).optional(),
       default: z.number().finite().optional(),
     })
     .strict(),
@@ -406,6 +469,7 @@ export const pluginSettingDescriptorSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
+
 export type PluginSettingDescriptor = z.infer<
   typeof pluginSettingDescriptorSchema
 >;
@@ -415,6 +479,7 @@ export const pluginSettingsResponseSchema = z.object({
   schema: z.record(z.string(), pluginSettingDescriptorSchema),
   values: z.record(z.string(), jsonValueSchema),
 });
+
 export type PluginSettingsResponse = z.infer<
   typeof pluginSettingsResponseSchema
 >;
@@ -430,6 +495,7 @@ export const pluginSafeModeRequestSchema = z
 export const pluginSafeModeResponseSchema = z.object({
   enabled: z.boolean(),
 });
+
 export type PluginSafeModeResponse = z.infer<
   typeof pluginSafeModeResponseSchema
 >;
@@ -438,13 +504,27 @@ export const pluginSafeModeUpdateResponseSchema = z.object({
   enabled: z.boolean(),
   problems: z.array(z.string()),
 });
+
 export type PluginSafeModeUpdateResponse = z.infer<
   typeof pluginSafeModeUpdateResponseSchema
 >;
 
 export const pluginCachePruneRequestSchema = z
-  .object({ dryRun: z.boolean().optional().default(false) })
+  .object({
+    dryRun: z.boolean().optional().default(false),
+    maxItems: z.number().int().min(1).max(1000).optional(),
+    maxBytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(100 * 1024 ** 3)
+      .optional(),
+  })
   .strict();
+
+export type PluginCachePruneRequest = z.infer<
+  typeof pluginCachePruneRequestSchema
+>;
 
 export const pluginCachePruneEntrySchema = z.object({
   pluginId: z.string().nullable(),
@@ -452,15 +532,52 @@ export const pluginCachePruneEntrySchema = z.object({
   path: z.string(),
   bytes: z.number().int().nonnegative(),
 });
+
 export type PluginCachePruneEntry = z.infer<typeof pluginCachePruneEntrySchema>;
 
 export const pluginCachePruneResponseSchema = z.object({
   dryRun: z.boolean(),
   removed: z.array(pluginCachePruneEntrySchema),
   bytes: z.number().int().nonnegative(),
+  budget: z
+    .object({
+      maxItems: z.number().int().positive().nullable(),
+      maxBytes: z.number().int().positive().nullable(),
+    })
+    .optional(),
 });
+
 export type PluginCachePruneResponse = z.infer<
   typeof pluginCachePruneResponseSchema
+>;
+
+export const pluginPathRelocationRequestSchema = z
+  .object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    dryRun: z.boolean().optional().default(false),
+  })
+  .strict();
+
+export const pluginPathRelocationEntrySchema = z.object({
+  pluginId: z.string(),
+  from: z.string(),
+  to: z.string(),
+  mode: z.enum(["snapshot", "checkout"]),
+  reloaded: z.boolean(),
+});
+
+export type PluginPathRelocationEntry = z.infer<
+  typeof pluginPathRelocationEntrySchema
+>;
+
+export const pluginPathRelocationResponseSchema = z.object({
+  dryRun: z.boolean(),
+  relocated: z.array(pluginPathRelocationEntrySchema),
+});
+
+export type PluginPathRelocationResponse = z.infer<
+  typeof pluginPathRelocationResponseSchema
 >;
 
 export const pluginTokenRequestSchema = z
@@ -471,6 +588,7 @@ export const pluginTokenResponseSchema = z.object({
   ok: z.literal(true),
   token: z.string(),
 });
+
 export type PluginTokenResponse = z.infer<typeof pluginTokenResponseSchema>;
 
 export const pluginCatalogStatusSchema = z.object({
@@ -478,6 +596,7 @@ export const pluginCatalogStatusSchema = z.object({
   includedPluginCount: z.number(),
   optionalPluginCount: z.number(),
 });
+
 export type PluginCatalogStatus = z.infer<typeof pluginCatalogStatusSchema>;
 
 export const pluginCatalogStatusResponseSchema = z.object({
@@ -489,12 +608,14 @@ export const pluginCatalogAuthorSchema = z.object({
   github: z.string().nullable().default(null),
   url: z.string().nullable(),
 });
+
 export type PluginCatalogAuthor = z.infer<typeof pluginCatalogAuthorSchema>;
 
 export const pluginCatalogCollectionMembershipSchema = z.object({
   id: pluginMarketplaceCollectionIdSchema,
   rank: z.number().int().nonnegative(),
 });
+
 export type PluginCatalogCollectionMembership = z.infer<
   typeof pluginCatalogCollectionMembershipSchema
 >;
@@ -504,6 +625,7 @@ export const pluginCatalogCollectionSchema = z.object({
   displayName: z.string(),
   pluginIds: z.array(pluginMarketplaceCollectionPluginIdSchema),
 });
+
 export type PluginCatalogCollection = z.infer<
   typeof pluginCatalogCollectionSchema
 >;
@@ -534,10 +656,10 @@ export const pluginCatalogSearchResultSchema = z.object({
   installed: z.boolean(),
   installedByDefault: z.boolean().default(false),
   conflictingInstallSource: z.string().nullable(),
-  installs: z.number().int().nonnegative().nullable().default(null),
   compatible: z.boolean(),
   incompatibleReason: z.string().nullable(),
 });
+
 export type PluginCatalogSearchResult = z.infer<
   typeof pluginCatalogSearchResultSchema
 >;
@@ -547,6 +669,7 @@ export const pluginCatalogSearchResponseSchema = z.object({
   collections: z.array(pluginCatalogCollectionSchema),
   categories: z.array(pluginMarketplaceCategorySchema).default([]),
 });
+
 export type PluginCatalogSearchResponse = z.infer<
   typeof pluginCatalogSearchResponseSchema
 >;
@@ -578,6 +701,7 @@ export const pluginCatalogResolvedSourceSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
 export type PluginCatalogResolvedSource = z.infer<
   typeof pluginCatalogResolvedSourceSchema
 >;
@@ -607,6 +731,7 @@ export const pluginCatalogInstallPlanSchema = z.discriminatedUnion("kind", [
     incompatibleReason: z.string().nullable(),
   }),
 ]);
+
 export type PluginCatalogInstallPlan = z.infer<
   typeof pluginCatalogInstallPlanSchema
 >;
@@ -635,6 +760,7 @@ export const pluginMarketplaceSchema = z.object({
   lastAttemptAt: z.number().nullable(),
   lastError: z.string().nullable(),
 });
+
 export type PluginMarketplace = z.infer<typeof pluginMarketplaceSchema>;
 
 export const pluginMarketplaceListResponseSchema = z.object({
@@ -670,6 +796,7 @@ export const pluginMarketplaceRefreshResultSchema = z.object({
   error: z.string().nullable(),
   marketplace: pluginMarketplaceSchema,
 });
+
 export type PluginMarketplaceRefreshResult = z.infer<
   typeof pluginMarketplaceRefreshResultSchema
 >;
@@ -682,6 +809,7 @@ export const pluginRpcDiscoveryQuerySchema = z.object({
   pluginId: z.string().min(1).optional(),
   method: z.string().min(1).optional(),
 });
+
 export type PluginRpcDiscoveryQuery = z.infer<
   typeof pluginRpcDiscoveryQuerySchema
 >;
@@ -695,9 +823,11 @@ export const publishedPluginRpcMethodSchema = z.object({
   inputSchema: z.record(z.string(), jsonValueSchema),
   outputSchema: z.record(z.string(), jsonValueSchema),
 });
+
 export type PublishedPluginRpcMethod = z.infer<
   typeof publishedPluginRpcMethodSchema
 >;
+
 export const pluginRpcDiscoveryResponseSchema = z.array(
   publishedPluginRpcMethodSchema,
 );

@@ -13,11 +13,12 @@ import {
   experimental_useSidebarThreads,
   experimental_usePluginId,
   type ExperimentalSidebarFooterDisclosureProps,
-  useBbContext,
-} from "@get-bb/plugin-sdk/app";
+  experimental_useAppContext,
+} from "@omnyo/plugin-sdk/app";
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DelayedLoading } from "@/components/ui/delayed-loading";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,7 +31,12 @@ import {
   formatUsdCents,
   usageBarColorClass,
 } from "./usage-format.js";
-import { LIST_HOVER_TRANSITION } from "@/components/ui/motion";
+import {
+  CONTROL_PRESS_FEEDBACK,
+  CONTROL_PRESS_TRANSITION,
+  getDisclosureRevealClass,
+  LIST_HOVER_TRANSITION,
+} from "@/components/ui/motion";
 import {
   OPTION_BASE_CLASS_NAME,
   OPTION_INTERACTIVE_CLASS_NAME,
@@ -60,38 +66,62 @@ export interface UsageStoreSnapshot {
 }
 
 const ALL_PROVIDERS_TAB_ID = "all";
+
 const CARD_MAX_AGE_MS = 2 * 60_000;
+
 const FOCUS_MAX_AGE_MS = 5 * 60_000;
+
 const SAFETY_REFRESH_INTERVAL_MS = 30 * 60_000;
+
 const storeListeners = new Set<() => void>();
+
 let storeSnapshot: UsageStoreSnapshot = {
   data: null,
   error: null,
   isRefreshing: false,
 };
+
 let activeRefreshCount = 0;
+
 let queuedRefresh: Promise<void> = Promise.resolve();
+
 let lastMachineId: string | null = null;
+
 let lastProviderIdByMachine = new Map<string, string>();
 
 function readSelectedMachine(storageKey: string | null): string | null {
   if (lastMachineId !== null) return lastMachineId;
+
   if (storageKey !== null) {
     try {
       const stored = window.localStorage.getItem(storageKey);
+
       if (stored !== null && stored.length > 0) return stored;
+
+      const legacyKey = storageKey.replace(/^omnyo\./u, "bb.");
+      const legacy = window.localStorage.getItem(legacyKey);
+
+      if (legacy !== null && legacy.length > 0) {
+        window.localStorage.setItem(storageKey, legacy);
+        window.localStorage.removeItem(legacyKey);
+
+        return legacy;
+      }
     } catch {}
   }
+
   return lastMachineId;
 }
 
 function updateStore(next: UsageStoreSnapshot): void {
   storeSnapshot = next;
+
   for (const listener of storeListeners) listener();
 }
 
 function subscribeStore(listener: () => void): () => void {
   storeListeners.add(listener);
+
   return () => storeListeners.delete(listener);
 }
 
@@ -102,9 +132,12 @@ function getStoreSnapshot(): UsageStoreSnapshot {
 function rpcErrorMessage(body: unknown): string | null {
   if (typeof body !== "object" || body === null) return null;
   const error = Reflect.get(body, "error");
+
   if (typeof error === "string") return error;
+
   if (typeof error !== "object" || error === null) return null;
   const message = Reflect.get(error, "message");
+
   return typeof message === "string" ? message : null;
 }
 
@@ -139,15 +172,18 @@ function refreshUsage({
               : AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
         },
       );
+
       if (!response.ok)
         throw new Error(`Usage request returned HTTP ${response.status}.`);
       const body: unknown = await response.json();
       const parsed = usageRpcSuccessSchema.safeParse(body);
+
       if (!parsed.success) {
         throw new Error(
           rpcErrorMessage(body) ?? "Provider usage could not be loaded.",
         );
       }
+
       updateStore({
         data: parsed.data.result,
         error: null,
@@ -157,6 +193,7 @@ function refreshUsage({
       if (signal?.aborted === true) {
         return;
       }
+
       console.warn("Provider usage refresh failed", cause);
       updateStore({
         ...storeSnapshot,
@@ -164,27 +201,35 @@ function refreshUsage({
       });
     } finally {
       activeRefreshCount -= 1;
+
       if (activeRefreshCount === 0 && storeSnapshot.isRefreshing) {
         updateStore({ ...storeSnapshot, isRefreshing: false });
       }
     }
   });
+
   return queuedRefresh;
 }
 
 function formatResetCountdown(resetsAt: string | null): string | null {
   if (resetsAt === null) return null;
   const remaining = new Date(resetsAt).getTime() - Date.now();
+
   if (!Number.isFinite(remaining)) return null;
+
   if (remaining <= 0) return "now";
   const minutes = Math.ceil(remaining / 60_000);
+
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
+
   if (hours < 24)
     return minutes % 60 === 0 ? `${hours}h` : `${hours}h ${minutes % 60}m`;
   const days = Math.floor(hours / 24);
+
   return hours % 24 === 0 ? `${days}d` : `${days}d ${hours % 24}h`;
 }
+
 function shortWindowLabel(label: string): string {
   return label
     .replace(/^Five-hour limit$|^5 hours$/u, "5h")
@@ -194,7 +239,9 @@ function shortWindowLabel(label: string): string {
 
 function usageToneTextClass(usedPercent: number): string {
   if (usedPercent >= 95) return "text-destructive";
+
   if (usedPercent >= 80) return "text-warning";
+
   return "text-sidebar-foreground";
 }
 
@@ -238,7 +285,7 @@ function UsageNotice({
     <div
       role="status"
       className={cn(
-        "flex min-w-0 items-start gap-1.5 text-2xs text-subtle-foreground",
+        "flex min-w-0 items-start gap-1.5 text-2xs text-muted-foreground",
         className,
       )}
     >
@@ -250,15 +297,17 @@ function UsageNotice({
           notice.icon === "AlertTriangle" && "text-warning",
         )}
       />
-      <span className="min-w-0 flex-1">{notice.message}</span>
+      <span className="min-w-0 flex-1 leading-4">{notice.message}</span>
       {notice.retry ? (
-        <button
+        <Button
           type="button"
-          className="shrink-0 rounded-sm text-sidebar-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          size="xs"
+          variant="soft"
+          className="-my-0.5 h-5 shrink-0 px-1.5 text-2xs"
           onClick={onRetry}
         >
           Retry
-        </button>
+        </Button>
       ) : null}
     </div>
   );
@@ -267,16 +316,33 @@ function UsageNotice({
 const USAGE_GRID_CLASS_NAME =
   "grid grid-cols-[max-content_minmax(0,1fr)_max-content_max-content] gap-x-3";
 
+function UsageColumnHeader() {
+  return (
+    <p
+      aria-hidden="true"
+      data-provider-usage-columns=""
+      className="col-span-full -mb-1 grid grid-cols-subgrid text-2xs leading-4 text-subtle-foreground"
+    >
+      <span>Limit</span>
+      <span />
+      <span className="text-right">Used</span>
+      <span className="min-w-9 text-right">Resets</span>
+    </p>
+  );
+}
+
 function UsageWindow({ window }: { window: UsageWindowValue }) {
   const [showReset, setShowReset] = useState(false);
   const reset = formatUsageReset(window.resetsAt);
   const countdown = formatResetCountdown(window.resetsAt);
+
   const value =
     window.cost === null
       ? Math.round(window.usedPercent) + "% used"
       : formatUsdCents(window.cost.usedUsdCents, true) +
         " / " +
         formatUsdCents(window.cost.limitUsdCents, false);
+
   return (
     <button
       type="button"
@@ -316,35 +382,60 @@ function UsageWindow({ window }: { window: UsageWindowValue }) {
           {countdown ?? "—"}
         </span>
       </span>
-      {showReset ? (
-        <span className="col-span-full pb-1 text-2xs text-subtle-foreground">
-          {reset ?? "Reset time not reported."}
-          {window.cost === null ? "" : ` · ${value}`}
+      <span
+        aria-hidden={!showReset}
+        className={cn("col-span-full", getDisclosureRevealClass(showReset))}
+      >
+        <span className="min-h-0 overflow-hidden">
+          <span className="block pb-1 text-2xs text-subtle-foreground">
+            {reset ?? "Reset time not reported."}
+            {window.cost === null ? "" : ` · ${value}`}
+          </span>
         </span>
-      ) : null}
+      </span>
     </button>
   );
 }
 
-function accountStatusMessage(account: UsageProvider): string | null {
+type AccountMessage = {
+  text: string;
+  tone: "loading" | "quiet" | "warning" | "error";
+};
+
+function accountStatusMessage(account: UsageProvider): AccountMessage | null {
   const usage = account.usage;
+
   switch (usage?.status) {
     case undefined:
-      return "Usage not reported.";
+      return { text: "Usage not reported.", tone: "quiet" };
     case "ok":
       return usage.windows.length === 0
-        ? "No usage limits reported for this plan."
+        ? { text: "No usage limits reported for this plan.", tone: "quiet" }
         : null;
     case "not_installed":
-      return "Not installed on this machine.";
+      return { text: "Not installed on this machine.", tone: "quiet" };
     case "unauthenticated":
-      return account.signInHint;
+      return { text: account.signInHint, tone: "warning" };
     case "expired":
-      return account.expiredHint;
+      return { text: account.expiredHint, tone: "warning" };
     case "error":
-      return usage.message;
+      return { text: usage.message, tone: "error" };
   }
 }
+
+const ACCOUNT_MESSAGE_CLASS: Record<AccountMessage["tone"], string> = {
+  loading: "text-subtle-foreground",
+  quiet: "text-subtle-foreground",
+  warning: "text-warning-text",
+  error: "text-destructive-text",
+};
+
+const ACCOUNT_MESSAGE_ICON = {
+  loading: "Spinner",
+  quiet: "Info",
+  warning: "Lock",
+  error: "AlertCircle",
+} as const;
 
 function AccountUsage({
   account,
@@ -361,12 +452,14 @@ function AccountUsage({
   const email = usage?.status === "ok" ? usage.accountEmail : null;
   const title = account.accountLabel ?? email ?? account.displayName;
   const plan = usage?.status === "ok" ? usage.planLabel : null;
-  const message =
+
+  const message: AccountMessage | null =
     usage === null && loading
-      ? usageFeedbackMessages.loading
+      ? { text: usageFeedbackMessages.loading, tone: "loading" }
       : usage === null && unavailable
-        ? usageFeedbackMessages.unavailable
+        ? { text: usageFeedbackMessages.unavailable, tone: "error" }
         : accountStatusMessage(account);
+
   return (
     <section
       aria-label={showProvider ? `${account.displayName} ${title}` : title}
@@ -388,7 +481,7 @@ function AccountUsage({
           {title}
         </h3>
         {plan === null ? null : (
-          <span className="shrink-0 rounded-sm bg-sidebar-border/60 px-1 py-0.5 text-2xs leading-none text-subtle-foreground">
+          <span className="inline-flex h-4 shrink-0 items-center rounded-full bg-state-hover px-1.5 text-2xs font-medium leading-none text-muted-foreground">
             {plan}
           </span>
         )}
@@ -402,8 +495,21 @@ function AccountUsage({
         </p>
       ) : null}
       {message !== null ? (
-        <p className="col-span-full text-2xs text-subtle-foreground">
-          {message}
+        <p
+          className={cn(
+            "col-span-full flex min-w-0 items-start gap-1 text-2xs leading-4",
+            ACCOUNT_MESSAGE_CLASS[message.tone],
+          )}
+        >
+          <Icon
+            name={ACCOUNT_MESSAGE_ICON[message.tone]}
+            aria-hidden="true"
+            className={cn(
+              "mt-0.5 size-3 shrink-0",
+              message.tone === "loading" && "animate-spin",
+            )}
+          />
+          <span className="min-w-0 break-words">{message.text}</span>
         </p>
       ) : usage?.status === "ok" ? (
         usage.windows.map((window) => (
@@ -462,12 +568,22 @@ function MachineSelector({
             OPTION_BASE_CLASS_NAME,
             OPTION_INTERACTIVE_CLASS_NAME,
             LIST_HOVER_TRANSITION,
-            "h-6 shrink overflow-hidden px-1.5 text-2xs text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
+            "h-6 shrink gap-1 overflow-hidden px-1.5 text-2xs text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
           )}
         >
+          <Icon
+            name={activeMachine?.id.startsWith("source:") ? "Layers" : "Laptop"}
+            aria-hidden="true"
+            className="size-3 shrink-0"
+          />
           <span className="block min-w-0 flex-1 truncate">
             {activeMachine?.displayName ?? "Usage"}
           </span>
+          <Icon
+            name="ChevronDown"
+            aria-hidden="true"
+            className="size-3 shrink-0 opacity-70"
+          />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -477,6 +593,7 @@ function MachineSelector({
       >
         {machines.map((machine) => {
           const isActive = machine.id === activeMachine?.id;
+
           return (
             <DropdownMenuItem
               key={machine.id}
@@ -529,28 +646,35 @@ export function ProviderUsageStatusContent({
       () => refreshCountdowns((tick) => tick + 1),
       60_000,
     );
+
     return () => window.clearInterval(timer);
   }, []);
   const machines = snapshot.data?.machines ?? [];
+
   const [requestedMachineId, setRequestedMachineId] = useState<string | null>(
     () => readSelectedMachine(machineSelectionStorageKey),
   );
+
   const [requestedProviderIds, setRequestedProviderIds] = useState(
     lastProviderIdByMachine,
   );
+
   const activeMachine = selectUsageMachine(
     machines,
     requestedMachineId,
     threadMachineId,
   );
+
   const providers = useMemo(() => {
     const groups = new Map<
       string,
       UsageProvider & { accounts: UsageProvider[] }
     >();
+
     for (const account of activeMachine?.providers ?? []) {
       if (account.usage?.status === "not_installed") continue;
       const group = groups.get(account.providerId);
+
       if (group) group.accounts.push(account);
       else
         groups.set(account.providerId, {
@@ -559,13 +683,17 @@ export function ProviderUsageStatusContent({
           accounts: [account],
         });
     }
+
     return [...groups.values()];
   }, [activeMachine]);
+
   const requestedProviderId =
     activeMachine === null
       ? null
       : (requestedProviderIds.get(activeMachine.id) ?? null);
+
   const showAllTab = providers.length > 1;
+
   const tabIds = useMemo(
     () => [
       ...(showAllTab ? [ALL_PROVIDERS_TAB_ID] : []),
@@ -573,18 +701,30 @@ export function ProviderUsageStatusContent({
     ],
     [providers, showAllTab],
   );
+
   const activeTabId = tabIds.includes(requestedProviderId ?? "")
     ? requestedProviderId
     : (tabIds[0] ?? null);
+
   const isAllTab = activeTabId === ALL_PROVIDERS_TAB_ID;
+
   const activeProvider = isAllTab
     ? null
     : (providers.find((provider) => provider.id === activeTabId) ?? null);
+
   const activeAccounts = isAllTab
     ? providers.flatMap((provider) => provider.accounts)
     : (activeProvider?.accounts ?? []);
+
   const hasActiveUsage = hasReportedUsage(activeAccounts);
+
+  const showsWindows = activeAccounts.some(
+    (account) =>
+      account.usage?.status === "ok" && account.usage.windows.length > 0,
+  );
+
   const unavailable = activeMachine?.error != null || snapshot.error !== null;
+
   const notice: CardNotice | null =
     activeMachine === null
       ? snapshot.error !== null
@@ -631,19 +771,24 @@ export function ProviderUsageStatusContent({
                 retry: false,
               }
             : null;
+
   const panelId = useId();
   const activeMachineId = activeMachine?.id ?? null;
   const activeProviderId = activeProvider?.id ?? null;
+
   const refreshProviderIds = isAllTab
     ? providers.map((provider) => provider.id)
     : activeProviderId === null
       ? []
       : [activeProviderId];
+
   const refreshProviderKey = refreshProviderIds.join("\n");
 
   useEffect(() => {
     if (!refreshEnabled) return;
+
     if (activeMachineId === null || refreshProviderKey === "") return;
+
     const refresh = () => {
       if (document.visibilityState === "hidden") return;
       void refreshUsage({
@@ -654,9 +799,11 @@ export function ProviderUsageStatusContent({
         maxAgeMs: CARD_MAX_AGE_MS,
       });
     };
+
     refresh();
     const timer = window.setInterval(refresh, CARD_MAX_AGE_MS);
     window.addEventListener("focus", refresh);
+
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("focus", refresh);
@@ -667,6 +814,7 @@ export function ProviderUsageStatusContent({
     (machineId: string) => {
       lastMachineId = machineId;
       setRequestedMachineId(machineId);
+
       if (machineSelectionStorageKey !== null) {
         try {
           window.localStorage.setItem(machineSelectionStorageKey, machineId);
@@ -683,6 +831,7 @@ export function ProviderUsageStatusContent({
         const next = new Map(current);
         next.set(activeMachine.id, providerId);
         lastProviderIdByMachine = next;
+
         return next;
       });
     },
@@ -704,6 +853,7 @@ export function ProviderUsageStatusContent({
     currentIndex: number,
   ) => {
     let nextIndex: number;
+
     if (event.key === "ArrowRight") {
       nextIndex = (currentIndex + 1) % tabIds.length;
     } else if (event.key === "ArrowLeft") {
@@ -715,7 +865,9 @@ export function ProviderUsageStatusContent({
     } else {
       return;
     }
+
     const nextTabId = tabIds[nextIndex];
+
     if (nextTabId === undefined) return;
     event.preventDefault();
     selectProvider(nextTabId);
@@ -752,6 +904,8 @@ export function ProviderUsageStatusContent({
                 tabIndex={isAllTab ? 0 : -1}
                 className={cn(
                   "relative flex h-6 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring px-2",
+                  CONTROL_PRESS_TRANSITION,
+                  CONTROL_PRESS_FEEDBACK,
                   isAllTab
                     ? "bg-sidebar-accent text-sidebar-foreground"
                     : "text-muted-foreground hover:text-sidebar-foreground",
@@ -768,11 +922,13 @@ export function ProviderUsageStatusContent({
               const index = providerIndex + (showAllTab ? 1 : 0);
               const isActive = provider.id === activeProvider?.id;
               const tones = provider.accounts.map(providerUsageTone);
+
               const tone = tones.includes("critical")
                 ? "critical"
                 : tones.includes("warning")
                   ? "warning"
                   : null;
+
               return (
                 <button
                   key={provider.id}
@@ -789,6 +945,8 @@ export function ProviderUsageStatusContent({
                   tabIndex={isActive ? 0 : -1}
                   className={cn(
                     "relative flex h-6 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring w-7",
+                    CONTROL_PRESS_TRANSITION,
+                    CONTROL_PRESS_FEEDBACK,
                     isActive
                       ? "bg-sidebar-accent text-sidebar-foreground"
                       : "group/tab text-muted-foreground hover:text-sidebar-foreground",
@@ -805,7 +963,7 @@ export function ProviderUsageStatusContent({
                     }
                     fallback="Bot"
                     className={cn(
-                      "size-3.5",
+                      "size-3.5 transition-opacity",
                       !isActive && "opacity-60 group-hover/tab:opacity-100",
                     )}
                   />
@@ -837,7 +995,11 @@ export function ProviderUsageStatusContent({
           type="button"
           aria-label="Reload provider usage"
           disabled={snapshot.isRefreshing}
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50"
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50",
+            CONTROL_PRESS_TRANSITION,
+            CONTROL_PRESS_FEEDBACK,
+          )}
           onClick={reload}
         >
           <Icon
@@ -851,7 +1013,11 @@ export function ProviderUsageStatusContent({
         <button
           type="button"
           aria-label="Collapse provider usage"
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+            CONTROL_PRESS_TRANSITION,
+            CONTROL_PRESS_FEEDBACK,
+          )}
           onClick={dismiss}
         >
           <Icon name="ChevronDown" aria-hidden="true" className="size-4" />
@@ -882,13 +1048,16 @@ export function ProviderUsageStatusContent({
           />
         ) : null}
         {notice?.kind === "empty" ? null : notice?.kind === "loading" ? (
-          <UsageSkeleton rows={3} />
+          <DelayedLoading>
+            <UsageSkeleton rows={3} />
+          </DelayedLoading>
         ) : isAllTab ? (
           <div className={cn(USAGE_GRID_CLASS_NAME, "gap-y-2.5")}>
+            {showsWindows ? <UsageColumnHeader /> : null}
             {providers.map((provider) => (
               <div
                 key={provider.id}
-                className="col-span-full grid grid-cols-subgrid gap-y-2 border-t border-sidebar-border pt-2.5 first:border-t-0 first:pt-0"
+                className="col-span-full grid grid-cols-subgrid gap-y-2 border-t border-sidebar-border pt-2.5 first-of-type:border-t-0 first-of-type:pt-0"
               >
                 <ProviderAccounts
                   accounts={provider.accounts}
@@ -901,6 +1070,7 @@ export function ProviderUsageStatusContent({
           </div>
         ) : activeProvider === null ? null : (
           <div className={cn(USAGE_GRID_CLASS_NAME, "gap-y-2")}>
+            {showsWindows ? <UsageColumnHeader /> : null}
             <ProviderAccounts
               accounts={activeProvider.accounts}
               loading={snapshot.isRefreshing}
@@ -916,26 +1086,30 @@ export function ProviderUsageStatusContent({
 
 function ProviderUsageStatus(props: ExperimentalSidebarFooterDisclosureProps) {
   const pluginId = experimental_usePluginId();
+
   const snapshot = useSyncExternalStore(
     subscribeStore,
     getStoreSnapshot,
     getStoreSnapshot,
   );
-  const { threadId } = useBbContext();
+
+  const { threadId } = experimental_useAppContext();
   const sidebarThreads = experimental_useSidebarThreads();
+
   const threadMachineId = useMemo(
     () =>
       sidebarThreads.threads.find((thread) => thread.id === threadId)?.host
         ?.id ?? null,
     [sidebarThreads.threads, threadId],
   );
+
   return (
     <ProviderUsageStatusContent
       {...props}
       pluginId={pluginId}
       snapshot={snapshot}
       threadMachineId={threadMachineId}
-      machineSelectionStorageKey={`bb.${pluginId}.selected-machine.v1`}
+      machineSelectionStorageKey={`omnyo.${pluginId}.selected-machine.v1`}
     />
   );
 }
@@ -955,12 +1129,15 @@ export default definePluginApp((app) => {
       let timer: number | null = null;
       let hiddenAt = document.visibilityState === "hidden" ? Date.now() : null;
       let blurredAt: number | null = null;
+
       const scheduleSafetyRefresh = () => {
         if (timer !== null) window.clearTimeout(timer);
         timer = null;
+
         if (signal.aborted || document.visibilityState !== "visible") return;
         timer = window.setTimeout(runSafetyRefresh, SAFETY_REFRESH_INTERVAL_MS);
       };
+
       const reconcile = (maxAgeMs: number, machineIds: string[] | null) => {
         void refreshUsage({
           pluginId,
@@ -971,12 +1148,15 @@ export default definePluginApp((app) => {
           signal,
         });
       };
+
       const runSafetyRefresh = () => {
         if (document.visibilityState === "visible") {
           reconcile(SAFETY_REFRESH_INTERVAL_MS, null);
         }
+
         scheduleSafetyRefresh();
       };
+
       const onActive = () => {
         const inactiveAt =
           hiddenAt === null
@@ -984,33 +1164,43 @@ export default definePluginApp((app) => {
             : blurredAt === null
               ? hiddenAt
               : Math.min(hiddenAt, blurredAt);
+
         hiddenAt = null;
         blurredAt = null;
+
         if (
           inactiveAt !== null &&
           Date.now() - inactiveAt >= FOCUS_MAX_AGE_MS
         ) {
           reconcile(FOCUS_MAX_AGE_MS, null);
         }
+
         scheduleSafetyRefresh();
       };
+
       const onVisibilityChange = () => {
         if (document.visibilityState === "hidden") {
           hiddenAt ??= Date.now();
+
           if (timer !== null) window.clearTimeout(timer);
           timer = null;
+
           return;
         }
+
         onActive();
       };
+
       const onBlur = () => {
         blurredAt ??= Date.now();
       };
+
       document.addEventListener("visibilitychange", onVisibilityChange);
       window.addEventListener("blur", onBlur);
       window.addEventListener("focus", onActive);
       reconcile(SAFETY_REFRESH_INTERVAL_MS, null);
       scheduleSafetyRefresh();
+
       return () => {
         if (timer !== null) window.clearTimeout(timer);
         document.removeEventListener("visibilitychange", onVisibilityChange);

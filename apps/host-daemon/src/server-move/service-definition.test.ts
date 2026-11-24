@@ -24,8 +24,9 @@ import {
 const roots: string[] = [];
 
 async function createRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "bb-service-definition-test-"));
+  const root = await mkdtemp(join(tmpdir(), "omnyo-service-definition-test-"));
   roots.push(root);
+
   return root;
 }
 
@@ -35,16 +36,20 @@ afterEach(async () => {
   );
 });
 
-function systemdUnit(args: { dataDir: string; serverUrl: string }): string {
+function systemdUnit(args: {
+  dataDir: string;
+  dataDirEnvName?: string;
+  serverUrl: string;
+}): string {
   return `[Unit]
-Description=bb host daemon for old-server.local
+Description=Omnyo host daemon for old-server.local
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart="/opt/node 22/bin/node" "/home/me/.bb-machines/npm/bin/bb-app" host-daemon --auto-update --host-daemon-port "38887" --server-url "${args.serverUrl}"
-Environment="BB_APP_NPM_PREFIX=/home/me/.bb-machines/npm"
-Environment="BB_DATA_DIR=${args.dataDir.replaceAll("\\", "\\\\")}"
+ExecStart="/opt/node 22/bin/node" "/home/me/.omnyo-machines/npm/bin/omnyo-app" host-daemon --auto-update --host-daemon-port "38887" --server-url "${args.serverUrl}"
+Environment="OMNYO_APP_NPM_PREFIX=/home/me/.omnyo-machines/npm"
+Environment="${args.dataDirEnvName ?? "OMNYO_DATA_DIR"}=${args.dataDir.replaceAll("\\", "\\\\")}"
 Restart=always
 RestartSec=2
 
@@ -53,16 +58,21 @@ WantedBy=default.target
 `;
 }
 
-function launchdPlist(args: { dataDir: string; serverUrl: string }): string {
+function launchdPlist(args: {
+  dataDir: string;
+  dataDirEnvName?: string;
+  label?: string;
+  serverUrl: string;
+}): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>app.getbb.host-daemon.old-server-me</string>
+  <key>Label</key><string>${args.label ?? "app.omnyo.host-daemon.old-server-me"}</string>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/local/bin/node</string>
-    <string>/Users/me/.bb-machines/npm/bin/bb-app</string>
+    <string>/Users/me/.omnyo-machines/npm/bin/omnyo-app</string>
     <string>host-daemon</string>
     <string>--auto-update</string>
     <string>--host-daemon-port</string>
@@ -72,8 +82,8 @@ function launchdPlist(args: { dataDir: string; serverUrl: string }): string {
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>BB_APP_NPM_PREFIX</key><string>/Users/me/.bb-machines/npm</string>
-    <key>BB_DATA_DIR</key><string>${args.dataDir}</string>
+    <key>OMNYO_APP_NPM_PREFIX</key><string>/Users/me/.omnyo-machines/npm</string>
+    <key>${args.dataDirEnvName ?? "OMNYO_DATA_DIR"}</key><string>${args.dataDir}</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -85,20 +95,20 @@ function launchdPlist(args: { dataDir: string; serverUrl: string }): string {
 }
 
 describe("findServiceDefinition", () => {
-  it("finds the systemd user unit whose BB_DATA_DIR is this daemon's data dir", async () => {
+  it("finds the systemd user unit whose OMNYO_DATA_DIR is this daemon's data dir", async () => {
     const homeDir = await createRoot();
-    const dataDir = join(homeDir, ".bb-machines", "old-server");
-    const otherDataDir = join(homeDir, ".bb-machines", "other-server");
+    const dataDir = join(homeDir, ".omnyo-machines", "old-server");
+    const otherDataDir = join(homeDir, ".omnyo-machines", "other-server");
     await mkdir(dataDir, { recursive: true });
     await mkdir(otherDataDir, { recursive: true });
     const unitDir = join(homeDir, ".config", "systemd", "user");
     await mkdir(unitDir, { recursive: true });
     await writeFile(
-      join(unitDir, "bb-host-daemon-another-me.service"),
+      join(unitDir, "omnyo-host-daemon-another-me.service"),
       systemdUnit({ dataDir: otherDataDir, serverUrl: "http://other:38886" }),
     );
     await writeFile(
-      join(unitDir, "bb-host-daemon-old-server-me.service"),
+      join(unitDir, "omnyo-host-daemon-old-server-me.service"),
       systemdUnit({ dataDir, serverUrl: "http://old-server.local:38886" }),
     );
     await writeFile(
@@ -115,11 +125,11 @@ describe("findServiceDefinition", () => {
 
     expect(definition).toMatchObject({
       manager: "systemd-user",
-      path: join(unitDir, "bb-host-daemon-old-server-me.service"),
-      unitName: "bb-host-daemon-old-server-me.service",
+      path: join(unitDir, "omnyo-host-daemon-old-server-me.service"),
+      unitName: "omnyo-host-daemon-old-server-me.service",
       programArguments: [
         "/opt/node 22/bin/node",
-        "/home/me/.bb-machines/npm/bin/bb-app",
+        "/home/me/.omnyo-machines/npm/bin/omnyo-app",
         "host-daemon",
         "--auto-update",
         "--host-daemon-port",
@@ -128,8 +138,8 @@ describe("findServiceDefinition", () => {
         "http://old-server.local:38886",
       ],
       environment: {
-        BB_APP_NPM_PREFIX: "/home/me/.bb-machines/npm",
-        BB_DATA_DIR: dataDir,
+        OMNYO_APP_NPM_PREFIX: "/home/me/.omnyo-machines/npm",
+        OMNYO_DATA_DIR: dataDir,
       },
     });
   });
@@ -139,7 +149,7 @@ describe("findServiceDefinition", () => {
     const dataDir = join(homeDir, "data");
     await mkdir(join(dataDir, "systemd"), { recursive: true });
     await writeFile(
-      join(dataDir, "systemd", "bb-host-daemon-root.service"),
+      join(dataDir, "systemd", "omnyo-host-daemon-root.service"),
       systemdUnit({ dataDir, serverUrl: "http://old:38886" }),
     );
 
@@ -151,17 +161,17 @@ describe("findServiceDefinition", () => {
     });
 
     expect(definition?.manager).toBe("systemd-system");
-    expect(definition?.unitName).toBe("bb-host-daemon-root.service");
+    expect(definition?.unitName).toBe("omnyo-host-daemon-root.service");
   });
 
   it("finds the launch agent on macOS and decodes XML escapes", async () => {
     const homeDir = await createRoot();
-    const dataDir = join(homeDir, "bb & data");
+    const dataDir = join(homeDir, "omnyo & data");
     await mkdir(dataDir, { recursive: true });
     const agentsDir = join(homeDir, "Library", "LaunchAgents");
     await mkdir(agentsDir, { recursive: true });
     await writeFile(
-      join(agentsDir, "app.getbb.host-daemon.old-server-me.plist"),
+      join(agentsDir, "app.omnyo.host-daemon.old-server-me.plist"),
       launchdPlist({
         dataDir: dataDir.replace("&", "&amp;"),
         serverUrl: "https://old.example.test/?a=1&amp;b=2",
@@ -177,22 +187,22 @@ describe("findServiceDefinition", () => {
 
     expect(definition).toMatchObject({
       manager: "launchd",
-      unitName: "app.getbb.host-daemon.old-server-me",
-      environment: { BB_DATA_DIR: dataDir },
+      unitName: "app.omnyo.host-daemon.old-server-me",
+      environment: { OMNYO_DATA_DIR: dataDir },
     });
     expect(definition?.programArguments.at(-1)).toBe(
       "https://old.example.test/?a=1&b=2",
     );
   });
 
-  it("reports no definition when BB_SERVER_MOVE_SERVICE_MANAGER=none", async () => {
+  it("reports no definition when OMNYO_SERVER_MOVE_SERVICE_MANAGER=none", async () => {
     const homeDir = await createRoot();
     const dataDir = join(homeDir, "data");
     const unitDir = join(homeDir, ".config", "systemd", "user");
     await mkdir(unitDir, { recursive: true });
     await mkdir(dataDir, { recursive: true });
     await writeFile(
-      join(unitDir, "bb-host-daemon-x.service"),
+      join(unitDir, "omnyo-host-daemon-x.service"),
       systemdUnit({ dataDir, serverUrl: "http://old:38886" }),
     );
 
@@ -201,10 +211,63 @@ describe("findServiceDefinition", () => {
         dataDir,
         homeDir,
         platform: "linux",
-        env: { BB_SERVER_MOVE_SERVICE_MANAGER: "none" },
+        env: { OMNYO_SERVER_MOVE_SERVICE_MANAGER: "none" },
       }),
     ).resolves.toBeNull();
   });
+});
+
+describe("findServiceDefinition across installer generations", () => {
+  it.each([
+    {
+      dataDirEnvName: "OMNYO_DATA_DIR",
+      installer: "the current installer",
+      launchdPrefix: "app.omnyo.host-daemon.",
+      systemdPrefix: "omnyo-host-daemon-",
+    },
+  ])(
+    "finds the launch agent and user unit that $installer writes",
+    async (generation) => {
+      const homeDir = await createRoot();
+      const dataDir = join(homeDir, "machine-data");
+      await mkdir(dataDir, { recursive: true });
+      const agentsDir = join(homeDir, "Library", "LaunchAgents");
+      const unitDir = join(homeDir, ".config", "systemd", "user");
+      await mkdir(agentsDir, { recursive: true });
+      await mkdir(unitDir, { recursive: true });
+      const label = `${generation.launchdPrefix}old-server-me`;
+      const unitName = `${generation.systemdPrefix}old-server-me.service`;
+      await writeFile(
+        join(agentsDir, `${label}.plist`),
+        launchdPlist({
+          dataDir,
+          dataDirEnvName: generation.dataDirEnvName,
+          label,
+          serverUrl: "http://old:38886",
+        }),
+      );
+      await writeFile(
+        join(unitDir, unitName),
+        systemdUnit({
+          dataDir,
+          dataDirEnvName: generation.dataDirEnvName,
+          serverUrl: "http://old:38886",
+        }),
+      );
+
+      await expect(
+        findServiceDefinition({
+          dataDir,
+          homeDir,
+          platform: "darwin",
+          env: {},
+        }),
+      ).resolves.toMatchObject({ manager: "launchd", unitName: label });
+      await expect(
+        findServiceDefinition({ dataDir, homeDir, platform: "linux", env: {} }),
+      ).resolves.toMatchObject({ manager: "systemd-user", unitName });
+    },
+  );
 });
 
 describe("service definition rewrites", () => {
@@ -214,7 +277,7 @@ describe("service definition rewrites", () => {
     await mkdir(dataDir, { recursive: true });
     const unitDir = join(homeDir, ".config", "systemd", "user");
     await mkdir(unitDir, { recursive: true });
-    const unitPath = join(unitDir, "bb-host-daemon-x.service");
+    const unitPath = join(unitDir, "omnyo-host-daemon-x.service");
     await writeFile(
       unitPath,
       systemdUnit({
@@ -223,12 +286,14 @@ describe("service definition rewrites", () => {
       }),
       { mode: 0o644 },
     );
+
     const definition = await findServiceDefinition({
       dataDir,
       homeDir,
       platform: "linux",
       env: {},
     });
+
     if (definition === null) {
       throw new Error("Expected a service definition");
     }
@@ -243,44 +308,51 @@ describe("service definition rewrites", () => {
 
     const content = await readFile(unitPath, "utf8");
     expect(content).toContain(
-      'ExecStart="/opt/node 22/bin/node" "/home/me/.bb-machines/npm/bin/bb-app" "host-daemon" "--auto-update" "--host-daemon-port" "38887" "--server-url" "https://new.example.test"',
+      'ExecStart="/opt/node 22/bin/node" "/home/me/.omnyo-machines/npm/bin/omnyo-app" "host-daemon" "--auto-update" "--host-daemon-port" "38887" "--server-url" "https://new.example.test"',
     );
     expect(content).toContain(
-      `Environment="BB_DATA_DIR=${dataDir.replace("%", "%%").replaceAll("\\", "\\\\")}"`,
+      `Environment="OMNYO_DATA_DIR=${dataDir.replace("%", "%%").replaceAll("\\", "\\\\")}"`,
     );
     expect(content).toContain("Restart=always");
     expect(content).toContain("WantedBy=default.target");
+
     if (process.platform !== "win32") {
       expect((await stat(unitPath)).mode & 0o777).toBe(0o644);
     }
-    const reparsed = parseSystemdUnit(content, "bb-host-daemon-x.service");
+
+    const reparsed = parseSystemdUnit(content, "omnyo-host-daemon-x.service");
     expect(reparsed?.programArguments.at(-1)).toBe("https://new.example.test");
-    expect(reparsed?.environment.BB_DATA_DIR).toBe(dataDir);
+    expect(reparsed?.environment.OMNYO_DATA_DIR).toBe(dataDir);
   });
 
-  it("swaps a launch agent to bb-app start with the same label and environment", async () => {
+  it("swaps a launch agent to omnyo-app start with the same label and environment", async () => {
     const homeDir = await createRoot();
     const dataDir = join(homeDir, "data");
     await mkdir(dataDir, { recursive: true });
     const agentsDir = join(homeDir, "Library", "LaunchAgents");
     await mkdir(agentsDir, { recursive: true });
+
     const plistPath = join(
       agentsDir,
-      "app.getbb.host-daemon.old-server-me.plist",
+      "app.omnyo.host-daemon.old-server-me.plist",
     );
+
     await writeFile(
       plistPath,
       launchdPlist({ dataDir, serverUrl: "http://old:38886" }),
     );
+
     const definition = await findServiceDefinition({
       dataDir,
       homeDir,
       platform: "darwin",
       env: {},
     });
+
     if (definition === null) {
       throw new Error("Expected a service definition");
     }
+
     expect(readHostDaemonPortArgument(definition.programArguments)).toBe(
       38_887,
     );
@@ -297,10 +369,10 @@ describe("service definition rewrites", () => {
 
     const reparsed = parseLaunchdPlist(await readFile(plistPath, "utf8"));
     expect(reparsed).toEqual({
-      unitName: "app.getbb.host-daemon.old-server-me",
+      unitName: "app.omnyo.host-daemon.old-server-me",
       programArguments: [
         "/usr/local/bin/node",
-        "/Users/me/.bb-machines/npm/bin/bb-app",
+        "/Users/me/.omnyo-machines/npm/bin/omnyo-app",
         "start",
         "--data-dir",
         dataDir,
@@ -312,8 +384,8 @@ describe("service definition rewrites", () => {
         "0.0.0.0",
       ],
       environment: {
-        BB_APP_NPM_PREFIX: "/Users/me/.bb-machines/npm",
-        BB_DATA_DIR: dataDir,
+        OMNYO_APP_NPM_PREFIX: "/Users/me/.omnyo-machines/npm",
+        OMNYO_DATA_DIR: dataDir,
       },
     });
     expect(isServerStartDefinition(updated)).toBe(true);
@@ -328,20 +400,24 @@ describe("service definition rewrites", () => {
     await mkdir(dataDir, { recursive: true });
     const agentsDir = join(homeDir, "Library", "LaunchAgents");
     await mkdir(agentsDir, { recursive: true });
+
     const plistPath = join(
       agentsDir,
-      "app.getbb.host-daemon.old-server-me.plist",
+      "app.omnyo.host-daemon.old-server-me.plist",
     );
+
     await writeFile(
       plistPath,
       launchdPlist({ dataDir, serverUrl: "http://old:38886" }),
     );
+
     const definition = await findServiceDefinition({
       dataDir,
       homeDir,
       platform: "darwin",
       env: {},
     });
+
     if (definition === null) {
       throw new Error("Expected a service definition");
     }
@@ -360,7 +436,7 @@ describe("service definition rewrites", () => {
     );
     expect(parseLaunchdPlist(content)?.programArguments).toEqual([
       "/usr/local/bin/node",
-      "/Users/me/.bb-machines/npm/bin/bb-app",
+      "/Users/me/.omnyo-machines/npm/bin/omnyo-app",
       "host-daemon",
       "--auto-update",
       "--host-daemon-port",
@@ -369,16 +445,16 @@ describe("service definition rewrites", () => {
       "https://new.example.test/?a=1&b=2",
     ]);
     expect(content).toContain(
-      `<key>BB_DATA_DIR</key><string>${dataDir}</string>`,
+      `<key>OMNYO_DATA_DIR</key><string>${dataDir}</string>`,
     );
   });
 
-  it("builds bb-app start arguments without a bind host", () => {
+  it("builds omnyo-app start arguments without a bind host", () => {
     expect(
       buildServerStartArguments(
         [
           "node",
-          "/prefix/bin/bb-app",
+          "/prefix/bin/omnyo-app",
           "host-daemon",
           "--server-url",
           "http://old",
@@ -392,7 +468,7 @@ describe("service definition rewrites", () => {
       ),
     ).toEqual([
       "node",
-      "/prefix/bin/bb-app",
+      "/prefix/bin/omnyo-app",
       "start",
       "--data-dir",
       "/data",
@@ -407,7 +483,7 @@ describe("service definition rewrites", () => {
     expect(
       replaceServerUrlArgument(
         [
-          "bb-app",
+          "omnyo-app",
           "host-daemon",
           "--server=http://old",
           "--server-url",
@@ -416,7 +492,7 @@ describe("service definition rewrites", () => {
         "http://new",
       ),
     ).toEqual([
-      "bb-app",
+      "omnyo-app",
       "host-daemon",
       "--server=http://new",
       "--server-url",
@@ -427,12 +503,13 @@ describe("service definition rewrites", () => {
   it("escapes $ for systemd and refuses arguments with line breaks", () => {
     const unit = [
       "[Service]",
-      'ExecStart="/usr/bin/node" "/opt/npm/bin/bb-app" host-daemon',
+      'ExecStart="/usr/bin/node" "/opt/npm/bin/omnyo-app" host-daemon',
       "",
     ].join("\n");
+
     const formatted = formatSystemdUnit(unit, [
       "/usr/bin/node",
-      "/opt/npm/bin/bb-app",
+      "/opt/npm/bin/omnyo-app",
       "host-daemon",
       "--server-url",
       "https://gate.example.test/$HOME%",

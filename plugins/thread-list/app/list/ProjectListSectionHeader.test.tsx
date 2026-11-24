@@ -4,24 +4,29 @@ import { cleanup, fireEvent, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NO_COLLAPSED_CHILD_ACTIVITY } from "../model/thread-activity.js";
+import {
+  getCollapsedChildActivity,
+  NO_COLLAPSED_CHILD_ACTIVITY,
+} from "../model/thread-activity.js";
 import type {
   PluginSidebarSplitLayout,
   PluginSidebarThreadRowStatus,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import {
   installTestPluginRuntime,
   renderSlot,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 import type { SectionThreadDndState } from "../dnd/useSectionThreadDnd.js";
-import { makeSidebarThread } from "../model/fixtures.js";
+import { makeSidebarThread, makeSidebarWork } from "../model/fixtures.js";
 
 installTestPluginRuntime();
+
 const { TopLevelSidebarSection } = await import("./TopLevelSidebarSection.js");
+
 const { SidebarControlButton } = await import("../rows/SidebarRowControls.js");
-const { SectionThreadDndProvider } = await import(
-  "../dnd/SectionThreadDndContext.js"
-);
+
+const { SectionThreadDndProvider } =
+  await import("../dnd/SectionThreadDndContext.js");
 
 function Slot({ children }: { children: ReactNode }) {
   return <TooltipProvider>{children}</TooltipProvider>;
@@ -74,10 +79,13 @@ function renderSectionWithDrag(state: SectionThreadDndState): string | null {
       </TopLevelSidebarSection>
     </SectionThreadDndProvider>,
   );
+
   const dropState = container
     .querySelector("[data-sidebar-drop-target]")
     ?.getAttribute("data-sidebar-drop-target");
+
   cleanup();
+
   return dropState ?? null;
 }
 
@@ -140,9 +148,11 @@ describe("TopLevelSidebarSection", () => {
         </TopLevelSidebarSection>
       </div>,
     );
+
     const disclosure = screen.getByRole("button", {
       name: "Collapse Pinned section",
     });
+
     disclosure.focus();
     fireEvent.click(disclosure);
     expect(onToggleCollapsed).toHaveBeenCalledOnce();
@@ -248,6 +258,7 @@ describe("TopLevelSidebarSection", () => {
     const disclosure = screen.getByRole("button", {
       name: "Collapse Pinned section",
     });
+
     const icon = result.container.querySelector('[data-icon="Pin"]');
     const label = screen.getByTitle("Pinned");
 
@@ -271,11 +282,9 @@ describe("TopLevelSidebarSection", () => {
         }
         actionsAlwaysVisible
         actionsMobileAlways
-        collapsedActivity={{
-          ...NO_COLLAPSED_CHILD_ACTIVITY,
-          working: true,
-          runtimeWorking: true,
-        }}
+        collapsedActivity={getCollapsedChildActivity([
+          makeSidebarThread({ experimental_work: makeSidebarWork("working") }),
+        ])}
         collapseControl={{ isCollapsed: true, onToggleCollapsed: vi.fn() }}
       >
         <div>Active thread</div>
@@ -285,9 +294,11 @@ describe("TopLevelSidebarSection", () => {
     const indicator = document.querySelector(
       '[data-thread-status-glyph="runtime"]',
     );
+
     const activitySlot = indicator?.closest(
       "[data-sidebar-collapsed-activity-edge]",
     );
+
     const trailingControls = activitySlot?.parentElement;
 
     expect(
@@ -302,7 +313,19 @@ describe("TopLevelSidebarSection", () => {
     renderTree(
       <TopLevelSidebarSection
         label="Pinned"
-        collapsedActivity={NO_COLLAPSED_CHILD_ACTIVITY}
+        collapsedActivity={getCollapsedChildActivity([
+          makeSidebarThread({
+            id: "thread-input",
+            experimental_work: {
+              ...makeSidebarWork("needs-you"),
+              activity: [],
+            },
+          }),
+          makeSidebarThread({
+            id: "thread-one",
+            experimental_work: makeSidebarWork("working"),
+          }),
+        ])}
         collapsedThreads={[{ id: "thread-one" }]}
         collapseControl={{ isCollapsed: true, onToggleCollapsed: vi.fn() }}
       >
@@ -328,11 +351,11 @@ describe("TopLevelSidebarSection", () => {
       },
     );
 
-    expect(
-      screen.getByRole("img", {
-        name: "Pinned — contains a thread open in split",
-      }),
-    ).not.toBeNull();
+    const splitMap = screen.getByRole("img", {
+      name: "Pinned — contains a thread open in split",
+    });
+
+    expect(splitMap.classList.contains("animate-shine-icon")).toBe(true);
     expect(screen.queryByText("Pinned thread")).toBeNull();
   });
 
@@ -347,6 +370,7 @@ describe("TopLevelSidebarSection", () => {
         <div>Draft thread</div>
       </TopLevelSidebarSection>
     );
+
     const result = renderTree(renderSection(true), {
       rowStatuses: {
         "thread-one": {
@@ -368,5 +392,53 @@ describe("TopLevelSidebarSection", () => {
 
     expect(document.querySelector("[data-thread-status-glyph]")).toBeNull();
     expect(screen.getByText("Draft thread")).not.toBeNull();
+  });
+
+  it("counts the threads a collapsed section hides and folds from its name", () => {
+    const onToggleCollapsed = vi.fn();
+
+    const result = renderTree(
+      <TopLevelSidebarSection
+        label="Threads"
+        collapsedThreads={[{ id: "thread-one" }, { id: "thread-two" }]}
+        collapseControl={{ isCollapsed: true, onToggleCollapsed }}
+      >
+        <div>Hidden thread</div>
+      </TopLevelSidebarSection>,
+    );
+
+    expect(screen.getByText("2 threads hidden")).not.toBeNull();
+    fireEvent.click(screen.getByTitle("Threads"));
+    expect(onToggleCollapsed).toHaveBeenCalledOnce();
+
+    result.rerender(
+      <Slot>
+        <TopLevelSidebarSection
+          label="Threads"
+          collapsedThreads={[{ id: "thread-one" }, { id: "thread-two" }]}
+          collapseControl={{ isCollapsed: false, onToggleCollapsed }}
+        >
+          <div>Visible thread</div>
+        </TopLevelSidebarSection>
+      </Slot>,
+    );
+
+    expect(screen.queryByText("2 threads hidden")).toBeNull();
+  });
+
+  it("leaves a renamable section's name for renaming instead of folding", () => {
+    const onToggleCollapsed = vi.fn();
+    renderTree(
+      <TopLevelSidebarSection
+        label="Design"
+        onRename={vi.fn()}
+        collapseControl={{ isCollapsed: false, onToggleCollapsed }}
+      >
+        <div>Design thread</div>
+      </TopLevelSidebarSection>,
+    );
+
+    fireEvent.click(screen.getByTitle("Design"));
+    expect(onToggleCollapsed).not.toHaveBeenCalled();
   });
 });

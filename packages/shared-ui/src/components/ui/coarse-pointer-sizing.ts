@@ -26,7 +26,7 @@ export const COARSE_POINTER_CHECK_SLOT_CLASS =
   "h-3.5 w-3.5 max-md:pointer-coarse:h-5 max-md:pointer-coarse:w-5";
 
 const HEADER_ICON_BUTTON_BOX_CLASS =
-  "h-[28px] w-[28px] rounded-md p-0 max-md:pointer-coarse:h-[36px] max-md:pointer-coarse:w-[36px]";
+  "h-[28px] w-[28px] rounded-md p-0 pointer-coarse:h-[36px] pointer-coarse:w-[36px]";
 
 export const COARSE_POINTER_HEADER_ICON_BUTTON_CLASS = `${HEADER_ICON_BUTTON_BOX_CLASS} [&_[data-icon-root]]:size-[16px] max-md:pointer-coarse:[&_[data-icon-root]]:size-[20px]`;
 
@@ -42,13 +42,13 @@ export const COARSE_POINTER_TOOLBAR_ACTION_BUTTON_CLASS =
   "h-7 rounded-md border-border bg-transparent px-2 text-xs font-medium text-foreground shadow-none hover:bg-state-hover hover:text-foreground max-md:pointer-coarse:h-9";
 
 export const COARSE_POINTER_PROMPT_ACTION_BUTTON_CLASS =
-  "h-8 px-2 transition-all max-md:pointer-coarse:h-10 max-md:pointer-coarse:px-3";
+  "h-8 px-2 transition-[color,background-color,border-color,opacity,box-shadow] max-md:pointer-coarse:h-10 max-md:pointer-coarse:px-3";
 
 export const COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS =
-  "size-auto h-8 px-2 transition-all max-md:pointer-coarse:h-10 max-md:pointer-coarse:px-3";
+  "size-auto h-8 px-2 transition-[color,background-color,border-color,opacity,box-shadow] max-md:pointer-coarse:h-10 max-md:pointer-coarse:px-3";
 
 export const COARSE_POINTER_PROMPT_COMBO_BUTTON_CLASS =
-  "h-8 w-8 rounded-l-none border-l border-l-primary-foreground/20 px-0 transition-all hover:border-l-primary-foreground/30 max-md:pointer-coarse:h-10 max-md:pointer-coarse:w-10";
+  "h-8 w-8 rounded-l-none border-l border-l-primary-foreground/20 px-0 transition-[color,background-color,border-color,opacity,box-shadow] hover:border-l-primary-foreground/30 max-md:pointer-coarse:h-10 max-md:pointer-coarse:w-10";
 
 export const COARSE_POINTER_INPUT_HEIGHT_CLASS =
   "h-9 max-md:pointer-coarse:h-10";
@@ -57,7 +57,7 @@ export const COARSE_POINTER_COMPACT_ROW_HEIGHT_CLASS =
   "h-7 max-md:pointer-coarse:h-9";
 
 export const COARSE_POINTER_ROW_HEIGHT_CLASS =
-  "h-[var(--bb-sidebar-row-height)] max-md:pointer-coarse:h-[var(--bb-sidebar-row-height-coarse)]";
+  "h-[var(--omnyo-sidebar-row-height)] max-md:pointer-coarse:h-[var(--omnyo-sidebar-row-height-coarse)]";
 
 export const COARSE_POINTER_PROVIDER_TAB_SIZE_CLASS =
   "h-7 w-6 max-md:pointer-coarse:h-9 max-md:pointer-coarse:w-9";

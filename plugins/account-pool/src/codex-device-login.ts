@@ -6,9 +6,11 @@ import {
   CHATGPT_PROFILE_CLAIM,
   codexAccessTokenExpiresAt,
 } from "./credentials.js";
-import type { AccountSummary } from "./contracts.js";
+import type { AccountSummary, LoginTarget } from "./contracts.js";
+import { LoginTargetError } from "./operations.js";
 
 const LOGIN_SESSION_TTL_MS = 10 * 60 * 1_000;
+
 const DEVICE_CALLBACK_PATH = "/deviceauth/callback";
 
 const intervalSchema = z.union([
@@ -79,6 +81,7 @@ interface DeviceLoginSession {
   expiresAt: number;
   nextPollAt: number;
   polling: boolean;
+  target: LoginTarget;
 }
 
 export interface CodexDeviceAccount {
@@ -95,7 +98,11 @@ export interface CodexDeviceLoginOptions {
   fetch?: typeof fetch;
   now?: () => number;
   authBaseUrl?: string;
-  addAccount: (authenticated: CodexDeviceAccount) => Promise<AccountSummary>;
+  validateTarget: (target: LoginTarget) => Promise<void>;
+  saveLogin: (
+    authenticated: CodexDeviceAccount,
+    target: LoginTarget,
+  ) => Promise<AccountSummary>;
 }
 
 export interface CodexDeviceLoginStart {
@@ -121,9 +128,11 @@ function expiresAt(
         ? now + LOGIN_SESSION_TTL_MS
         : now + payload.expires_in * 1_000
       : Date.parse(payload.expires_at);
+
   if (!Number.isFinite(serviceExpiry)) {
     throw new Error("Codex device login returned an invalid expiry.");
   }
+
   return Math.min(now + LOGIN_SESSION_TTL_MS, serviceExpiry);
 }
 
@@ -132,10 +141,13 @@ function idTokenClaims(idToken: string): {
   email: string | null;
 } {
   const payloadSegment = idToken.split(".")[1];
+
   if (payloadSegment === undefined) {
     throw new Error("Codex token exchange returned an invalid ID token.");
   }
+
   let payload: z.infer<typeof idTokenPayloadSchema>;
+
   try {
     payload = idTokenPayloadSchema.parse(
       JSON.parse(Buffer.from(payloadSegment, "base64url").toString("utf8")),
@@ -143,12 +155,15 @@ function idTokenClaims(idToken: string): {
   } catch {
     throw new Error("Codex token exchange returned an invalid ID token.");
   }
+
   const accountId =
     payload[CHATGPT_AUTH_CLAIM]?.chatgpt_account_id ??
     payload.chatgpt_account_id;
+
   if (accountId === undefined) {
     throw new Error("Codex ID token does not include a ChatGPT account id.");
   }
+
   return {
     accountId,
     email: payload.email ?? payload[CHATGPT_PROFILE_CLAIM]?.email ?? null,
@@ -174,11 +189,14 @@ export class CodexDeviceLogin {
     );
   }
 
-  async start(): Promise<CodexDeviceLoginStart> {
+  async start(target: LoginTarget): Promise<CodexDeviceLoginStart> {
+    await this.options.validateTarget(target);
     const pruneBefore = this.now();
+
     for (const [sessionId, session] of this.sessions) {
       if (pruneBefore >= session.expiresAt) this.deleteSession(sessionId);
     }
+
     const response = await this.fetch(
       `${this.authBaseUrl}/api/accounts/deviceauth/usercode`,
       {
@@ -190,19 +208,24 @@ export class CodexDeviceLogin {
         body: JSON.stringify({ client_id: CODEX_OAUTH_CLIENT_ID }),
       },
     );
+
     if (!response.ok) {
       await response.body?.cancel();
       throw new Error(
         `Codex device login could not start (HTTP ${response.status}). Try again.`,
       );
     }
+
     const payload = await response.json().catch(() => null);
     const parsed = userCodeResponseSchema.safeParse(payload);
+
     if (!parsed.success) {
       throw new Error("Codex device login returned an invalid response.");
     }
+
     const now = this.now();
     const intervalMs = parsed.data.interval * 1_000;
+
     const session: DeviceLoginSession = {
       sessionId: randomUUID(),
       deviceAuthId: parsed.data.device_auth_id,
@@ -211,9 +234,12 @@ export class CodexDeviceLogin {
       expiresAt: expiresAt(parsed.data, now),
       nextPollAt: now + intervalMs,
       polling: false,
+      target,
     };
+
     this.sessions.set(session.sessionId, session);
     this.scheduleExpiry(session);
+
     return {
       sessionId: session.sessionId,
       verificationUri: `${this.authBaseUrl}/codex/device`,
@@ -225,22 +251,29 @@ export class CodexDeviceLogin {
 
   async poll(input: { sessionId: string }): Promise<CodexDeviceLoginPoll> {
     const session = this.sessions.get(input.sessionId);
+
     if (session === undefined) {
       return {
         status: "error",
         message: "Login session was not found. Start again.",
       };
     }
+
     const now = this.now();
+
     if (now >= session.expiresAt) {
       this.deleteSession(session.sessionId);
+
       return { status: "error", message: "Code expired, start again." };
     }
+
     if (session.polling || now < session.nextPollAt) {
       return { status: "pending" };
     }
+
     session.polling = true;
     session.nextPollAt = now + session.intervalMs;
+
     try {
       const response = await this.fetch(
         `${this.authBaseUrl}/api/accounts/deviceauth/token`,
@@ -256,41 +289,54 @@ export class CodexDeviceLogin {
           }),
         },
       );
+
       if (this.sessions.get(session.sessionId) !== session) {
         return {
           status: "error",
           message: "Login session was not found. Start again.",
         };
       }
+
       if (this.now() >= session.expiresAt) {
         this.deleteSession(session.sessionId);
+
         return { status: "error", message: "Code expired, start again." };
       }
+
       const payload = await response.json().catch(() => null);
       const parsedError = deviceErrorResponseSchema.safeParse(payload);
+
       const errorCode = parsedError.success
         ? parsedError.data.error?.code
         : null;
+
       const normalizedCode = errorCode?.toLowerCase() ?? "";
+
       if (normalizedCode.includes("slow_down")) {
         session.intervalMs += 5_000;
         session.nextPollAt = this.now() + session.intervalMs;
+
         return { status: "pending" };
       }
+
       if (normalizedCode.includes("expired")) {
         this.deleteSession(session.sessionId);
+
         return { status: "error", message: "Code expired, start again." };
       }
+
       if (
         normalizedCode.includes("denied") ||
         normalizedCode.includes("declined")
       ) {
         this.deleteSession(session.sessionId);
+
         return {
           status: "error",
           message: "Codex authorization was declined. Start again.",
         };
       }
+
       if (!response.ok) {
         if (
           response.status === 403 ||
@@ -299,12 +345,15 @@ export class CodexDeviceLogin {
         ) {
           return { status: "pending" };
         }
+
         return {
           status: "error",
           message: `Codex authorization failed (HTTP ${response.status}). Start again.`,
         };
       }
+
       const parsed = deviceTokenResponseSchema.safeParse(payload);
+
       if (!parsed.success) {
         return {
           status: "error",
@@ -312,11 +361,14 @@ export class CodexDeviceLogin {
             "Codex authorization returned an invalid response. Start again.",
         };
       }
+
       this.deleteSession(session.sessionId);
-      return await this.exchange(parsed.data);
+
+      return await this.exchange(parsed.data, session.target);
     } catch {
       if (this.now() < session.expiresAt) return { status: "pending" };
       this.deleteSession(session.sessionId);
+
       return { status: "error", message: "Code expired, start again." };
     } finally {
       session.polling = false;
@@ -325,7 +377,9 @@ export class CodexDeviceLogin {
 
   nextPollDelayMs(sessionId: string): number {
     const session = this.sessions.get(sessionId);
+
     if (session === undefined) return 0;
+
     return Math.max(0, session.nextPollAt - this.now());
   }
 
@@ -344,19 +398,23 @@ export class CodexDeviceLogin {
       () => this.deleteSession(session.sessionId),
       Math.max(0, session.expiresAt - this.now()),
     );
+
     timer.unref();
     this.expiryTimers.set(session.sessionId, timer);
   }
 
   private deleteSession(sessionId: string): boolean {
     const timer = this.expiryTimers.get(sessionId);
+
     if (timer !== undefined) clearTimeout(timer);
     this.expiryTimers.delete(sessionId);
+
     return this.sessions.delete(sessionId);
   }
 
   private async exchange(
     authorized: z.infer<typeof deviceTokenResponseSchema>,
+    target: LoginTarget,
   ): Promise<CodexDeviceLoginPoll> {
     const response = await this.fetch(`${this.authBaseUrl}/oauth/token`, {
       method: "POST",
@@ -372,15 +430,19 @@ export class CodexDeviceLogin {
         code_verifier: authorized.code_verifier,
       }).toString(),
     });
+
     if (!response.ok) {
       await response.body?.cancel();
+
       return {
         status: "error",
         message: `Codex token exchange failed (HTTP ${response.status}). Start again.`,
       };
     }
+
     const payload = await response.json().catch(() => null);
     const parsed = tokenResponseSchema.safeParse(payload);
+
     if (!parsed.success) {
       return {
         status: "error",
@@ -388,25 +450,33 @@ export class CodexDeviceLogin {
           "Codex token exchange returned an invalid response. Start again.",
       };
     }
+
     try {
       const claims = idTokenClaims(parsed.data.id_token);
-      const account = await this.options.addAccount({
-        label: claims.email ?? "Codex account",
-        email: claims.email,
-        accountId: claims.accountId,
-        accessToken: parsed.data.access_token,
-        refreshToken: parsed.data.refresh_token,
-        idToken: parsed.data.id_token,
-        expiresAt: codexAccessTokenExpiresAt(parsed.data.access_token),
-      });
+
+      const account = await this.options.saveLogin(
+        {
+          label: claims.email ?? "Codex account",
+          email: claims.email,
+          accountId: claims.accountId,
+          accessToken: parsed.data.access_token,
+          refreshToken: parsed.data.refresh_token,
+          idToken: parsed.data.id_token,
+          expiresAt: codexAccessTokenExpiresAt(parsed.data.access_token),
+        },
+        target,
+      );
+
       return { status: "complete", account };
     } catch (error) {
       return {
         status: "error",
         message:
-          error instanceof Error && error.message.startsWith("Codex ")
-            ? `${error.message} Start again.`
-            : "Codex account could not be saved. Start again.",
+          error instanceof LoginTargetError
+            ? error.message
+            : error instanceof Error && error.message.startsWith("Codex ")
+              ? `${error.message} Start again.`
+              : "Codex account could not be saved. Start again.",
       };
     }
   }

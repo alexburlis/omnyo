@@ -6,6 +6,7 @@ import { resetChatGptCloudflareCookiesForTests } from "../ai/chatgpt-fetch.js";
 import {
   __testing,
   getCodexProviderHealth,
+  getCodexProviderInstallationRun,
   getCodexProviderInstallationStatus,
   getCodexProviderUsage,
 } from "./provider-maintenance.js";
@@ -24,14 +25,18 @@ async function writeFakeCli(args: {
         : [`type nul > "${args.touchPath}"`]),
       `echo ${args.output}`,
     ];
+
     await fs.writeFile(
       path.join(args.binDir, `${args.name}.cmd`),
       `${lines.join("\r\n")}\r\n`,
     );
+
     return;
   }
+
   const touch =
     args.touchPath === undefined ? "" : `touch '${args.touchPath}'\n`;
+
   await fs.writeFile(
     path.join(args.binDir, args.name),
     `#!/bin/sh\n${touch}echo "${args.output}"\n`,
@@ -39,25 +44,26 @@ async function writeFakeCli(args: {
   );
 }
 
-function installationStatus() {
-  return {
-    executableName: "codex",
-    executablePath: "/usr/local/bin/codex",
-    installed: true,
-    installSource: "npmGlobal" as const,
-    currentVersion: "1.0.0",
-    latestVersion: "1.1.0",
-    minimumSupportedVersion: "0.136.0",
-    npmPackageName: "@openai/codex",
-    npmGlobalPackageVersion: "1.0.0",
-    installAction: {
-      kind: "update" as const,
-      label: "Update" as const,
-      command: "codex update",
-    },
-    needsUpdate: true,
-    versionUnsupported: false,
-  };
+async function stubNpm(
+  binDir: string,
+  replies: Record<string, string>,
+): Promise<void> {
+  const scriptPath = path.join(binDir, "npm-fixture.cjs");
+  await fs.writeFile(
+    scriptPath,
+    `const replies = ${JSON.stringify(replies)};
+const result = replies[JSON.stringify(process.argv.slice(2))];
+if (result === undefined) process.exit(2);
+console.log(result);
+`,
+  );
+  await fs.writeFile(
+    path.join(binDir, process.platform === "win32" ? "npm.cmd" : "npm"),
+    process.platform === "win32"
+      ? `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`
+      : `#!/bin/sh\nexec '${process.execPath}' '${scriptPath}' "$@"\n`,
+    { mode: 0o755 },
+  );
 }
 
 describe("Codex provider maintenance", () => {
@@ -109,26 +115,6 @@ describe("Codex provider maintenance", () => {
       __testing.minimumSupportedVersionForRequirement("thread_rewind"),
     ).toBe("0.143.0");
   });
-
-  it("resolves a fresh typed update plan and rejects a stale action", () => {
-    expect(
-      __testing.buildProviderInstallationRun(installationStatus(), "update"),
-    ).toEqual({
-      available: true,
-      command: {
-        command: "codex",
-        args: ["update"],
-        displayCommand: "codex update",
-      },
-      verification: { kind: "version_at_least", version: "1.1.0" },
-    });
-    expect(
-      __testing.buildProviderInstallationRun(installationStatus(), "install"),
-    ).toEqual({
-      available: false,
-      message: "Codex install is no longer available on this host.",
-    });
-  });
 });
 
 describe("Codex credential health and usage", () => {
@@ -149,6 +135,7 @@ describe("Codex credential health and usage", () => {
       email: args.email,
       "https://api.openai.com/auth": { chatgpt_account_id: args.accountId },
     };
+
     return `${base64UrlJson({ alg: "none", typ: "JWT" })}.${base64UrlJson(payload)}.sig`;
   }
 
@@ -168,7 +155,7 @@ describe("Codex credential health and usage", () => {
   }
 
   beforeEach(async () => {
-    homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-codex-maint-"));
+    homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-codex-maint-"));
     tempDirs.push(homeDir);
     const binDir = path.join(homeDir, "bin");
     await fs.mkdir(binDir);
@@ -189,6 +176,109 @@ describe("Codex credential health and usage", () => {
         .map((dir) => fs.rm(dir, { force: true, recursive: true })),
     );
   });
+
+  it.each(["npmGlobal", "external"] as const)(
+    "updates the detected %s installation through its owner and rejects a stale action",
+    async (installSource) => {
+      const binDir = path.join(homeDir, "bin");
+
+      const prefix =
+        installSource === "npmGlobal"
+          ? process.platform === "win32"
+            ? binDir
+            : homeDir
+          : path.join(homeDir, "other-npm");
+
+      const replies = {
+        '["prefix","-g"]': prefix,
+        '["view","@openai/codex","version"]': "0.163.0",
+        [JSON.stringify([
+          "view",
+          `@openai/codex@0.163.0-win32-${process.arch}`,
+          "version",
+        ])]: `0.163.0-win32-${process.arch}`,
+        '["list","-g","@openai/codex","--depth=0","--json"]': JSON.stringify({
+          dependencies: { "@openai/codex": { version: "0.150.0" } },
+        }),
+      };
+
+      await stubNpm(binDir, replies);
+      const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+
+      const windows = process.platform === "win32";
+
+      const npmSpec = windows
+        ? "@openai/codex@0.163.0"
+        : "@openai/codex@latest";
+
+      const npmOptions = windows ? ["--include", "optional"] : [];
+
+      const command =
+        installSource === "npmGlobal"
+          ? {
+              command: npm,
+              args: ["install", "-g", ...npmOptions, npmSpec],
+              displayCommand: [
+                npm,
+                "install",
+                "-g",
+                ...npmOptions,
+                npmSpec,
+              ].join(" "),
+            }
+          : {
+              command: "codex",
+              args: ["update"],
+              displayCommand: "codex update",
+            };
+
+      await expect(getCodexProviderInstallationStatus()).resolves.toMatchObject(
+        {
+          installSource,
+          installAction: {
+            kind: "update",
+            command: command.displayCommand,
+          },
+        },
+      );
+      await expect(getCodexProviderInstallationRun("update")).resolves.toEqual({
+        available: true,
+        command,
+        verification: { kind: "version_at_least", version: "0.163.0" },
+      });
+      await expect(getCodexProviderInstallationRun("install")).resolves.toEqual(
+        {
+          available: false,
+          message: "Codex install is no longer available on this host.",
+        },
+      );
+    },
+  );
+
+  it.each([true, false])(
+    "only advertises a Windows update when its matching binary was published [%s]",
+    async (published) => {
+      await stubNpm(path.join(homeDir, "bin"), {
+        '["view","@openai/codex","version"]': "0.169.1",
+        ...(published
+          ? {
+              '["view","@openai/codex@0.169.1-win32-x64","version"]':
+                "0.169.1-win32-x64",
+            }
+          : {}),
+      });
+
+      await expect(
+        __testing.latestCodexPackageVersion({ platform: "win32", arch: "x64" }),
+      ).resolves.toBe(published ? "0.169.1" : null);
+      await expect(
+        __testing.latestCodexPackageVersion({
+          platform: "darwin",
+          arch: "arm64",
+        }),
+      ).resolves.toBe("0.169.1");
+    },
+  );
 
   it.each([
     ["0.135.0", undefined, true],
@@ -308,6 +398,7 @@ describe("Codex credential health and usage", () => {
       email: "codex@example.com",
       expSeconds: Math.floor(Date.now() / 1000) + 3600,
     });
+
     await writeChatGptAuth(accessToken);
     const fetchMock = vi.fn<typeof fetch>();
     fetchMock

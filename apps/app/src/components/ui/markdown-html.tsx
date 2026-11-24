@@ -15,9 +15,9 @@ const MARKDOWN_HTML_REHYPE_PLUGINS: MarkdownRehypePlugins = [
       tagNames: [
         ...(defaultSchema.tagNames ?? []),
         "video",
-        "bb-thread-mention",
-        "bb-prompt-mention",
-        "bb-message-directive",
+        "omnyo-thread-mention",
+        "omnyo-prompt-mention",
+        "omnyo-message-directive",
       ],
       protocols: {
         ...defaultSchema.protocols,
@@ -51,13 +51,13 @@ const MARKDOWN_HTML_REHYPE_PLUGINS: MarkdownRehypePlugins = [
           "dataCodeFenceOffset",
           "dataCodeFenceClosed",
         ],
-        "bb-thread-mention": [
+        "omnyo-thread-mention": [
           "dataThreadId",
           "dataRawThreadId",
           "dataRawThreadInlineCode",
         ],
-        "bb-prompt-mention": ["dataMentionIndex"],
-        "bb-message-directive": ["dataDirectiveIndex"],
+        "omnyo-prompt-mention": ["dataMentionIndex"],
+        "omnyo-message-directive": ["dataDirectiveIndex"],
       },
     },
   ],
@@ -68,5 +68,6 @@ export function MarkdownHtml({ rehypePlugins, ...props }: Options) {
     () => [...MARKDOWN_HTML_REHYPE_PLUGINS, ...(rehypePlugins ?? [])],
     [rehypePlugins],
   );
+
   return <ReactMarkdown {...props} rehypePlugins={plugins} />;
 }

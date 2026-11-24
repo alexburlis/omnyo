@@ -29,7 +29,9 @@ describe("plugin metadata", () => {
     expect(() => validatePluginMetadata(Object.create(null))).toThrow(
       /plain JSON/,
     );
+
     class CustomArray extends Array<unknown> {}
+
     expect(() => validatePluginMetadata({ values: new CustomArray() })).toThrow(
       /plain JSON/,
     );
@@ -50,6 +52,7 @@ describe("plugin metadata", () => {
       enumerable: true,
       get: () => {
         reads += 1;
+
         return reads === 1 ? "first" : () => "hook";
       },
     });
@@ -60,6 +63,7 @@ describe("plugin metadata", () => {
     const overhead = new TextEncoder().encode(
       JSON.stringify({ value: "" }),
     ).byteLength;
+
     const prefix = "a".repeat(PLUGIN_METADATA_MAX_BYTES - overhead - 4);
     const exact = { value: `${prefix}😀` };
     expect(pluginMetadataSchema.safeParse(exact).success).toBe(true);
@@ -79,6 +83,7 @@ describe("plugin metadata", () => {
     const metadata = deepFreezePluginMetadata({
       level1: { level2: { items: [{ level4: true }] } },
     });
+
     const level2 = (metadata.level1 as { level2: { items: object[] } }).level2;
     expect(Object.isFrozen(metadata)).toBe(true);
     expect(Object.isFrozen(metadata.level1)).toBe(true);

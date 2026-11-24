@@ -8,6 +8,8 @@ import { assertServerArchiveFormat } from "./archive-format.js";
 import { hasErrorCode, ServerArchiveError } from "./errors.js";
 import {
   parseServerArchiveManifest,
+  isLegacyServerArchiveV2,
+  normalizeLegacyServerArchiveV2Path,
   SERVER_ARCHIVE_FILES_DIR_NAME,
   SERVER_ARCHIVE_MANIFEST_PATH,
   type ServerArchiveManifest,
@@ -25,6 +27,7 @@ export interface ExtractServerArchiveArgs {
 
 async function assertEmptyDestination(destinationDir: string): Promise<void> {
   await mkdir(destinationDir, { recursive: true });
+
   if ((await readdir(destinationDir)).length > 0) {
     throw new Error(
       `Archive extraction destination ${destinationDir} is not empty`,
@@ -38,15 +41,18 @@ function extractedFileMode(mode: number | null): number {
 
 function manifestPathForEntry(entryPath: string): string {
   const prefix = `${SERVER_ARCHIVE_FILES_DIR_NAME}/`;
+
   const relativePath = entryPath.startsWith(prefix)
     ? entryPath.slice(prefix.length)
     : null;
+
   if (relativePath === null || !isSafeRelativePath(relativePath)) {
     throw new ServerArchiveError(
       "unsafe_entry",
       `Archive entry ${JSON.stringify(entryPath)} is not a safe path under ${prefix}`,
     );
   }
+
   return relativePath;
 }
 
@@ -68,6 +74,7 @@ async function extractEntryFile(
 ): Promise<void> {
   await mkdir(dirname(destinationPath), { recursive: true, mode: 0o700 });
   const hash = createHash("sha256");
+
   try {
     await pipeline(
       reader.readBody(),
@@ -87,8 +94,10 @@ async function extractEntryFile(
         { cause: error },
       );
     }
+
     throw error;
   }
+
   if (hash.digest("hex") !== expected.sha256) {
     throw new ServerArchiveError(
       "digest_mismatch",
@@ -103,6 +112,7 @@ async function extractTarEntries(
 ): Promise<ServerArchiveManifest> {
   const reader = new TarReader(source);
   const first = await reader.nextEntry();
+
   if (
     first === null ||
     first.type !== "File" ||
@@ -113,42 +123,59 @@ async function extractTarEntries(
       `Archive does not start with ${SERVER_ARCHIVE_MANIFEST_PATH}`,
     );
   }
+
   if (first.size > MAX_MANIFEST_BYTES) {
     throw new ServerArchiveError("corrupt", "Archive manifest is too large");
   }
-  const manifest = parseServerArchiveManifest(
-    parseManifestJson(await reader.readBodyBuffer()),
-  );
+
+  const rawManifest = parseManifestJson(await reader.readBodyBuffer());
+  const legacy = isLegacyServerArchiveV2(rawManifest);
+  const manifest = parseServerArchiveManifest(rawManifest);
+
   const pendingEntries = new Map(
     manifest.entries.map((entry) => [entry.path, entry]),
   );
+
   const filesDir = join(destinationDir, SERVER_ARCHIVE_FILES_DIR_NAME);
+
   for (;;) {
     const entry = await reader.nextEntry();
+
     if (entry === null) {
       break;
     }
+
     if (entry.type !== "File") {
       throw new ServerArchiveError(
         "unsafe_entry",
         `Archive entry ${JSON.stringify(entry.path)} has unsupported type ${entry.type}`,
       );
     }
-    const relativePath = manifestPathForEntry(entry.path);
+
+    const sourceRelativePath = manifestPathForEntry(entry.path);
+
+    const relativePath = legacy
+      ? normalizeLegacyServerArchiveV2Path(sourceRelativePath)
+      : sourceRelativePath;
+
     const expected = pendingEntries.get(relativePath);
+
     if (expected === undefined) {
       throw new ServerArchiveError(
         "unsafe_entry",
         `Archive entry ${relativePath} is not listed in the manifest`,
       );
     }
+
     pendingEntries.delete(relativePath);
+
     if (entry.size !== expected.size) {
       throw new ServerArchiveError(
         "digest_mismatch",
         `Archive entry ${relativePath} is ${String(entry.size)} bytes but the manifest lists ${String(expected.size)}`,
       );
     }
+
     await extractEntryFile(
       reader,
       resolveRelativePath(filesDir, relativePath),
@@ -156,12 +183,14 @@ async function extractTarEntries(
       expected,
     );
   }
+
   if (pendingEntries.size > 0) {
     throw new ServerArchiveError(
       "corrupt",
       `Archive is missing ${String(pendingEntries.size)} file(s) listed in its manifest`,
     );
   }
+
   return manifest;
 }
 
@@ -169,6 +198,7 @@ function normalizeExtractionError(error: unknown): unknown {
   if (error instanceof ServerArchiveError) {
     return error;
   }
+
   if (
     error instanceof Error &&
     "code" in error &&
@@ -181,6 +211,7 @@ function normalizeExtractionError(error: unknown): unknown {
       { cause: error },
     );
   }
+
   return error;
 }
 
@@ -189,12 +220,15 @@ export async function extractServerArchive(
 ): Promise<ServerArchiveManifest> {
   await assertServerArchiveFormat(args.archivePath);
   await assertEmptyDestination(args.destinationDir);
+
   const extracted: { manifest: ServerArchiveManifest | null } = {
     manifest: null,
   };
+
   const consume = async (source: AsyncIterable<Buffer>): Promise<void> => {
     extracted.manifest = await extractTarEntries(source, args.destinationDir);
   };
+
   try {
     await pipeline(createReadStream(args.archivePath), createGunzip(), consume);
   } catch (error) {
@@ -204,8 +238,10 @@ export async function extractServerArchive(
     });
     throw normalizeExtractionError(error);
   }
+
   if (extracted.manifest === null) {
     throw new ServerArchiveError("corrupt", "Archive has no manifest");
   }
+
   return extracted.manifest;
 }

@@ -45,6 +45,7 @@ export function drainPendingThreadPruningWork(
     .orderBy(threadPruningWork.threadId)
     .limit(32)
     .all();
+
   for (const { threadId } of pending) {
     db.run(sql`INSERT INTO thread_pruning_work (policy, thread_id)
       VALUES ('rate-limits', ${threadId}), ('usage', ${threadId}),

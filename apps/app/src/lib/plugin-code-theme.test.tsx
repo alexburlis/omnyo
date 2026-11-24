@@ -1,18 +1,22 @@
 // @vitest-environment jsdom
 import { act, render, waitFor } from "@testing-library/react";
-import { defaultResolvedCodeTheme } from "@bb/domain";
-import type { PluginCodeThemeState } from "@get-bb/plugin-sdk";
+import { defaultResolvedCodeTheme } from "@omnyo/domain";
+import type { PluginCodeThemeState } from "@omnyo/plugin-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyResolvedCodeTheme } from "./code-theme";
 import { useCodeTheme } from "./plugin-code-theme";
 
 function renderProbe() {
   const states: PluginCodeThemeState[] = [];
+
   function Probe() {
     states.push(useCodeTheme());
+
     return null;
   }
+
   const view = render(<Probe />);
+
   return {
     latest: () => states[states.length - 1]!,
     unmount: () => view.unmount(),
@@ -24,7 +28,7 @@ afterEach(() => {
 });
 
 describe("useCodeTheme", () => {
-  it("serves the document behind the name BB is rendering with", async () => {
+  it("serves the document behind the name Omnyo is rendering with", async () => {
     applyResolvedCodeTheme({
       dark: "nord",
       light: "gruvbox-light-medium",

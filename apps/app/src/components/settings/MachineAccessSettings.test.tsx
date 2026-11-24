@@ -9,9 +9,11 @@ import { MachineAccessSettings } from "./MachineAccessSettings";
 const state = vi.hoisted(() => ({
   config: undefined as ReturnType<typeof makeSystemConfig> | undefined,
 }));
+
 vi.mock("@/hooks/queries/system-queries", () => ({
   useSystemConfig: () => ({ data: state.config }),
 }));
+
 vi.mock("@/hooks/mutations/settings-mutations", () => ({
   useUpdateGeneralSettings: () => ({ isPending: false }),
 }));
@@ -35,11 +37,13 @@ it("follows access availability through setup, readiness, revocation, and recove
       ],
     },
   });
+
   const view = () => (
     <MemoryRouter>
       <MachineAccessSettings />
     </MemoryRouter>
   );
+
   const rendered = render(view());
   expect(
     screen.getByRole("link", { name: "Set up Relay" }).getAttribute("href"),

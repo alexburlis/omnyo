@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { JsonValue } from "@get-bb/plugin-sdk";
-import type { JsonObject } from "@get-bb/plugin-sdk/provider-bridge";
+import type { JsonValue } from "@omnyo/plugin-sdk";
+import type { JsonObject } from "@omnyo/plugin-sdk/provider-bridge";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   completeCodexInference,
@@ -33,10 +33,11 @@ interface CreateAccessTokenArgs {
 }
 
 async function makeTempHome(): Promise<string> {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-codex-auth-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-codex-auth-"));
   tempDirs.push(tempDir);
   vi.stubEnv("HOME", tempDir);
   vi.stubEnv("USERPROFILE", tempDir);
+
   return tempDir;
 }
 
@@ -69,6 +70,7 @@ async function writeCodexAuth(args: WriteCodexAuthArgs): Promise<string> {
     )}\n`,
     { mode: 0o600 },
   );
+
   return authPath;
 }
 
@@ -91,6 +93,7 @@ async function writeCodexApiKeyAuth(
     )}\n`,
     { mode: 0o600 },
   );
+
   return authPath;
 }
 
@@ -106,6 +109,7 @@ function createAccessToken(args: CreateAccessTokenArgs): string {
 function setupFetchMock(): FetchMock {
   const fetchMock = vi.fn<typeof fetch>();
   vi.stubGlobal("fetch", fetchMock);
+
   return fetchMock;
 }
 
@@ -135,9 +139,11 @@ function openSseResponse(events: JsonValue[]): {
   wasCanceled: () => boolean;
 } {
   let canceled = false;
+
   const bytes = new TextEncoder().encode(
     `${events.map((event) => `data: ${event === "[DONE]" ? event : JSON.stringify(event)}`).join("\n\n")}\n\n`,
   );
+
   return {
     response: new Response(
       new ReadableStream<Uint8Array>({
@@ -163,6 +169,7 @@ function delayedSseResponse(delayMs: number, events: JsonValue[]): Response {
   const bytes = new TextEncoder().encode(
     `${events.map((event) => `data: ${JSON.stringify(event)}`).join("\n\n")}\n\ndata: [DONE]\n\n`,
   );
+
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
@@ -185,33 +192,41 @@ function delayedSseResponse(delayMs: number, events: JsonValue[]): Response {
 
 function requiredFetchCall(fetchMock: FetchMock, index: number) {
   const call = fetchMock.mock.calls[index];
+
   if (!call) {
     throw new Error(`Missing fetch call at index ${index}`);
   }
+
   return call;
 }
 
 function headersFromInit(init: RequestInit | undefined): Headers {
   const headers = init?.headers;
+
   if (!(headers instanceof Headers)) {
     throw new Error("Expected request headers to be a Headers instance");
   }
+
   return headers;
 }
 
 function textBodyFromInit(init: RequestInit | undefined): string {
   const body = init?.body;
+
   if (typeof body !== "string") {
     throw new Error("Expected request body to be a string");
   }
+
   return body;
 }
 
 function formDataBodyFromInit(init: RequestInit | undefined): FormData {
   const body = init?.body;
+
   if (!(body instanceof FormData)) {
     throw new Error("Expected request body to be FormData");
   }
+
   return body;
 }
 
@@ -230,10 +245,12 @@ describe("Codex ChatGPT client", () => {
 
   it("runs plain-text inference with Codex auth from ~/.codex/auth.json", async () => {
     const homeDir = await makeTempHome();
+
     const accessToken = createAccessToken({
       accountId: "account-123",
       expSeconds: Math.floor(Date.now() / 1000) + 3600,
     });
+
     await writeCodexAuth({
       homeDir,
       accessToken,
@@ -328,6 +345,7 @@ describe("Codex ChatGPT client", () => {
       const homeDir = await makeTempHome();
       await writeCodexApiKeyAuth({ homeDir, apiKey: "sk-codex-api-key" });
       const fetchMock = setupFetchMock();
+
       const completedResponse = openSseResponse([
         { type: "response.output_text.delta", delta: "Partial result" },
         terminalType === "[DONE]"
@@ -345,6 +363,7 @@ describe("Codex ChatGPT client", () => {
             },
         "[DONE]",
       ]);
+
       fetchMock.mockResolvedValueOnce(completedResponse.response);
 
       await expect(
@@ -367,11 +386,13 @@ describe("Codex ChatGPT client", () => {
       const homeDir = await makeTempHome();
       await writeCodexApiKeyAuth({ homeDir, apiKey: "sk-codex-api-key" });
       const fetchMock = setupFetchMock();
+
       const completedResponse = openSseResponse([
         terminalType === "[DONE]"
           ? "[DONE]"
           : { type: terminalType, response: { output: [] } },
       ]);
+
       fetchMock.mockResolvedValueOnce(completedResponse.response);
 
       await expect(
@@ -430,6 +451,7 @@ describe("Codex ChatGPT client", () => {
       apiKey: "sk-codex-api-key",
     });
     const fetchMock = setupFetchMock();
+
     const failedResponse = openSseResponse([
       {
         type: "response.failed",
@@ -441,6 +463,7 @@ describe("Codex ChatGPT client", () => {
         },
       },
     ]);
+
     fetchMock.mockResolvedValueOnce(failedResponse.response);
 
     await expect(
@@ -461,15 +484,18 @@ describe("Codex ChatGPT client", () => {
 
   it("uses Codex auth read-only without refreshing expired-looking access tokens", async () => {
     const homeDir = await makeTempHome();
+
     const oldAccessToken = createAccessToken({
       accountId: "account-old",
       expSeconds: Math.floor(Date.now() / 1000) - 60,
     });
+
     const authPath = await writeCodexAuth({
       homeDir,
       accessToken: oldAccessToken,
       refreshToken: "old-refresh-token",
     });
+
     const originalAuthJson = await fs.readFile(authPath, "utf8");
     const fetchMock = setupFetchMock();
     fetchMock.mockResolvedValueOnce(
@@ -552,7 +578,7 @@ describe("Codex ChatGPT client", () => {
     });
   });
 
-  it("stops reading the stream when bb cancels the host call", async () => {
+  it("stops reading the stream when Omnyo cancels the host call", async () => {
     const homeDir = await makeTempHome();
     await writeCodexApiKeyAuth({
       homeDir,
@@ -570,6 +596,7 @@ describe("Codex ChatGPT client", () => {
       },
       controller.signal,
     );
+
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     controller.abort();
 
@@ -578,7 +605,7 @@ describe("Codex ChatGPT client", () => {
     });
   });
 
-  it("aborts the fetch when bb cancels before the response arrives", async () => {
+  it("aborts the fetch when Omnyo cancels before the response arrives", async () => {
     const homeDir = await makeTempHome();
     await writeCodexApiKeyAuth({
       homeDir,
@@ -605,6 +632,7 @@ describe("Codex ChatGPT client", () => {
       },
       controller.signal,
     );
+
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     controller.abort();
 
@@ -623,6 +651,7 @@ describe("Codex ChatGPT client", () => {
     const fetchMock = setupFetchMock();
     fetchMock.mockImplementationOnce(async () => {
       await new Promise((resolve) => setTimeout(resolve, 40));
+
       return delayedSseResponse(40, [
         {
           type: "response.output_text.delta",
@@ -659,6 +688,7 @@ describe("Codex ChatGPT client", () => {
     );
 
     let thrown: Error | null = null;
+
     try {
       await completeCodexInference(
         {
@@ -672,6 +702,7 @@ describe("Codex ChatGPT client", () => {
       if (!(error instanceof Error)) {
         throw new Error("Expected Error from oversized Codex error response");
       }
+
       thrown = error;
     }
 
@@ -683,10 +714,12 @@ describe("Codex ChatGPT client", () => {
 
   it("retries ChatGPT transcription once with allowed Cloudflare cookies", async () => {
     const homeDir = await makeTempHome();
+
     const accessToken = createAccessToken({
       accountId: "account-123",
       expSeconds: Math.floor(Date.now() / 1000) + 3600,
     });
+
     await writeCodexAuth({
       homeDir,
       accessToken,
@@ -730,10 +763,12 @@ describe("Codex ChatGPT client", () => {
 
   it("classifies a persistent Cloudflare challenge as transient without leaking the challenge page", async () => {
     const homeDir = await makeTempHome();
+
     const accessToken = createAccessToken({
       accountId: "account-123",
       expSeconds: Math.floor(Date.now() / 1000) + 3600,
     });
+
     await writeCodexAuth({
       homeDir,
       accessToken,
@@ -758,6 +793,7 @@ describe("Codex ChatGPT client", () => {
     );
 
     let thrown: Error | null = null;
+
     try {
       await transcribeCodexVoice(
         {
@@ -774,6 +810,7 @@ describe("Codex ChatGPT client", () => {
       if (!(error instanceof Error)) {
         throw new Error("Expected Error from challenged transcription");
       }
+
       thrown = error;
     }
 
@@ -781,16 +818,18 @@ describe("Codex ChatGPT client", () => {
     expect(thrown).toMatchObject({
       detailCode: "codex_service_unavailable",
       message:
-        "Codex transcription request failed with HTTP 403: chatgpt.com answered with a Cloudflare challenge that bb cannot solve. Retry, or choose another service in Settings → AI services.",
+        "Codex transcription request failed with HTTP 403: chatgpt.com answered with a Cloudflare challenge that Omnyo cannot solve. Retry or list other services with omnyo settings ai-services show.",
     });
   });
 
   it("omits HTML error pages from Codex error messages", async () => {
     const homeDir = await makeTempHome();
+
     const accessToken = createAccessToken({
       accountId: "account-123",
       expSeconds: Math.floor(Date.now() / 1000) + 3600,
     });
+
     await writeCodexAuth({
       homeDir,
       accessToken,
@@ -861,10 +900,12 @@ describe("Codex ChatGPT client", () => {
 
   it("reports ChatGPT transcription rate limits with the nested provider message", async () => {
     const homeDir = await makeTempHome();
+
     const accessToken = createAccessToken({
       accountId: "account-123",
       expSeconds: Math.floor(Date.now() / 1000) + 3600,
     });
+
     await writeCodexAuth({
       homeDir,
       accessToken,

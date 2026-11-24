@@ -1,12 +1,14 @@
 import { pluginSdkAppImplementation } from "../src/lib/plugin-sdk-app-impl";
 
-export type * from "@get-bb/plugin-sdk";
+export type * from "@omnyo/plugin-sdk";
 
 export const {
+  experimental_useInitialLoadPending,
   experimental_Icon,
   experimental_ProviderIcon,
   definePluginApp,
   ThreadChat,
+  experimental_ResponsiveDrawerShell,
   Markdown,
   experimental_FileLink,
   UrlLink,
@@ -22,8 +24,8 @@ export const {
   useRealtime,
   useRealtimeConnectionState,
   useSettings,
-  useBbContext,
-  useBbNavigate,
+  experimental_useAppContext,
+  experimental_useAppNavigate,
   experimental_useAppPanel,
   experimental_useFixedTabTarget,
   useComposer,
@@ -35,6 +37,7 @@ export const {
   experimental_useArchiveEnvironmentThreads,
   experimental_ThreadActionsMenu,
   experimental_ThreadActionsContextMenu,
+  experimental_ThreadStatusGlyph,
   experimental_THREAD_ACTION_GROUPS,
   experimental_useSidebarThreadPullRequest,
   experimental_useSidebarThreadSplit,
@@ -51,4 +54,9 @@ export const {
   experimental_useCodeTheme,
   experimental_copyToClipboard,
   experimental_usePluginId,
+  experimental_threadIndicators,
+  experimental_useProjectSidebarItems,
+  experimental_useThreadGroupActions,
+  experimental_useChatSelection,
+  experimental_setChatSelection,
 } = pluginSdkAppImplementation;

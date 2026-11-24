@@ -1,4 +1,4 @@
-import { BbHttpError, createBrowserBbSdk } from "@bb/sdk/browser";
+import { OmnyoHttpError, createBrowserOmnyoSdk } from "@omnyo/sdk/browser";
 import { z } from "zod";
 import {
   pushSubscriptionsAddOutputSchema,
@@ -39,6 +39,7 @@ const rpcFailureSchema = z
   .passthrough();
 
 type RpcErrorCode = z.infer<typeof rpcErrorCodeSchema>;
+
 type PushRpcInput =
   | PushSubscriptionInput
   | { id: string }
@@ -63,21 +64,23 @@ function isDisabledPluginMessage(message: string): boolean {
 }
 
 function mapRpcError(error: unknown): Error {
-  if (!(error instanceof BbHttpError)) {
+  if (!(error instanceof OmnyoHttpError)) {
     return error instanceof Error ? error : new Error(String(error));
   }
+
   const failure = rpcFailureSchema.safeParse(error.body);
+
   if (!failure.success) return error;
+
   if (typeof failure.data.error === "string") {
     if (isDisabledPluginMessage(failure.data.error)) {
       return new Error(PUSH_NOTIFICATIONS_PLUGIN_DISABLED_STATUS);
     }
+
     return new Error(failure.data.error);
   }
-  return new PushRpcError(
-    failure.data.error.code,
-    failure.data.error.message,
-  );
+
+  return new PushRpcError(failure.data.error.code, failure.data.error.message);
 }
 
 function isMissingSubscriptionError(error: Error): boolean {
@@ -100,15 +103,17 @@ export interface PushSubscriptionsApi {
 export function createPushSubscriptionsApi(
   fetchImpl: typeof fetch,
 ): PushSubscriptionsApi {
-  const clients = new Map<string, ReturnType<typeof createBrowserBbSdk>>();
+  const clients = new Map<string, ReturnType<typeof createBrowserOmnyoSdk>>();
 
   function sdkFor(serverUrl: string) {
     const key = serverUrl.replace(/\/+$/u, "");
     let sdk = clients.get(key);
+
     if (!sdk) {
-      sdk = createBrowserBbSdk({ baseUrl: key, fetch: fetchImpl });
+      sdk = createBrowserOmnyoSdk({ baseUrl: key, fetch: fetchImpl });
       clients.set(key, sdk);
     }
+
     return sdk;
   }
 
@@ -151,6 +156,7 @@ export function createPushSubscriptionsApi(
       {},
       pushSubscriptionsListOutputSchema,
     );
+
     return result.subscriptions;
   }
 
@@ -162,15 +168,19 @@ export function createPushSubscriptionsApi(
         input,
         pushSubscriptionsAddOutputSchema,
       );
+
       return { subscriptionId: result.id };
     },
     async unregister(serverUrl, ref) {
       if (ref.subscriptionId !== null) {
         await remove(serverUrl, ref.subscriptionId);
+
         return;
       }
+
       const rows = await list(serverUrl);
       const matches = rows.filter((row) => row.tokenSuffix === ref.tokenSuffix);
+
       if (matches.length === 1 && matches[0]) {
         await remove(serverUrl, matches[0].id);
       }

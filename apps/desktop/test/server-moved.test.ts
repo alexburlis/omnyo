@@ -2,19 +2,19 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeBbAppRuntimeFile } from "@bb/config/app-runtime-file";
+import { writeAppRuntimeFile } from "@omnyo/config/app-runtime-file";
 import {
   SERVER_MOVED_FILE_NAME,
   writeServerMovedFile,
   type ServerMovedFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyServerMove,
   createServerMovedWatcher,
   createServerMoveNoticeStore,
   ensureServerMovedRuntime,
-  hasLiveBbAppLauncher,
+  hasLiveOmnyoAppLauncher,
   probeLocalServerMove,
   readServerMovedConnectCredential,
   readServerMovedLock,
@@ -38,8 +38,9 @@ afterEach(async () => {
 });
 
 async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "bb-desktop-server-moved-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-desktop-server-moved-"));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -50,8 +51,8 @@ function movedFile(overrides: Partial<ServerMovedFile> = {}): ServerMovedFile {
     mode: "connect",
     moveId: "move-1",
     movedAt: 1_750_000_000_000,
-    oldCopyEntries: ["bb.db", "attachments"],
-    serverUrl: "https://laptop.getbb.app/",
+    oldCopyEntries: ["app.db", "attachments"],
+    serverUrl: "https://laptop.example.test/",
     toHostId: "host-desktop",
     toHostName: "Studio desktop",
     version: 1,
@@ -61,6 +62,7 @@ function movedFile(overrides: Partial<ServerMovedFile> = {}): ServerMovedFile {
 
 function createMemoryFs(): { files: Map<string, string>; fs: ServerTargetFs } {
   const files = new Map<string, string>();
+
   return {
     files,
     fs: {
@@ -69,9 +71,11 @@ function createMemoryFs(): { files: Map<string, string>; fs: ServerTargetFs } {
       },
       async readFile(path) {
         const content = files.get(path);
+
         if (content === undefined) {
           throw new Error(`ENOENT: ${path}`);
         }
+
         return content;
       },
       async writeFile(path, data) {
@@ -83,16 +87,21 @@ function createMemoryFs(): { files: Map<string, string>; fs: ServerTargetFs } {
 
 async function createStores() {
   const { files, fs } = createMemoryFs();
+
   const targetStore = createServerTargetStore({
     fs,
     storagePath: "/user-data/server-target.json",
   });
+
   await targetStore.load();
+
   const noticeStore = createServerMoveNoticeStore({
     fs,
     storagePath: "/user-data/server-move-notice.json",
   });
+
   const notices: ServerMovedNotice[] = [];
+
   return {
     files,
     fs,
@@ -113,7 +122,7 @@ const CONNECT_MOVE: DesktopServerMove = {
     server: {
       handle: "laptop",
       name: "Studio desktop",
-      url: "https://laptop.getbb.app",
+      url: "https://laptop.example.test",
     },
   },
   toHostName: "Studio desktop",
@@ -137,7 +146,7 @@ describe("readServerMovedLock", () => {
     expect(logWarning).not.toHaveBeenCalled();
   });
 
-  it("selects the bb Connect handle for a connect move", async () => {
+  it("selects the Omnyo Connect handle for a connect move", async () => {
     const dataDir = await createTempDir();
     await writeServerMovedFile(dataDir, movedFile());
 
@@ -151,7 +160,7 @@ describe("readServerMovedLock", () => {
         server: {
           handle: "laptop",
           name: "Studio desktop",
-          url: "https://laptop.getbb.app",
+          url: "https://laptop.example.test",
         },
       },
       toHostName: "Studio desktop",
@@ -181,6 +190,7 @@ describe("readServerMovedLock", () => {
       name: "a contract mismatch",
       contents: () => {
         const { toHostName: _toHostName, ...incomplete } = movedFile();
+
         return JSON.stringify(incomplete);
       },
     },
@@ -240,13 +250,13 @@ describe("applyServerMove", () => {
       server: {
         handle: "laptop",
         name: "Studio desktop",
-        url: "https://laptop.getbb.app",
+        url: "https://laptop.example.test",
       },
     });
     expect(stores.notices).toEqual([
       {
-        detail: "bb now opens there. This computer stays connected.",
-        message: "Your bb server moved to Studio desktop",
+        detail: "Omnyo now opens there. This computer stays connected.",
+        message: "Your Omnyo server moved to Studio desktop",
       },
     ]);
 
@@ -277,6 +287,7 @@ describe("applyServerMove", () => {
       fs: stores.fs,
       storagePath: "/user-data/server-target.json",
     });
+
     await restartedTargetStore.load();
     const restartedNotices: ServerMovedNotice[] = [];
     await applyServerMove({
@@ -341,15 +352,20 @@ describe("ensureServerMovedRuntime", () => {
   function runtimeArgs(overrides: {
     hasLocalRuntime?: boolean;
     isLocalAddressFree?: boolean;
+    machineServiceConnected?: boolean;
   }) {
     const startLocalRuntime = vi.fn(async () => undefined);
+
     const isLocalAddressFree = vi.fn(
       async () => overrides.isLocalAddressFree ?? true,
     );
+
     const logInfo = vi.fn();
+
     return {
       args: {
         hasLocalRuntime: () => overrides.hasLocalRuntime ?? false,
+        machineServiceConnected: overrides.machineServiceConnected ?? false,
         isLocalAddressFree,
         localServerUrl: "http://127.0.0.1:38886",
         logInfo,
@@ -371,6 +387,7 @@ describe("ensureServerMovedRuntime", () => {
   it("keeps the runtime the app already owns or attached to", async () => {
     const { args, isLocalAddressFree, startLocalRuntime } = runtimeArgs({
       hasLocalRuntime: true,
+      machineServiceConnected: true,
     });
 
     await expect(ensureServerMovedRuntime(args)).resolves.toBe("kept");
@@ -378,7 +395,17 @@ describe("ensureServerMovedRuntime", () => {
     expect(startLocalRuntime).not.toHaveBeenCalled();
   });
 
-  it("does not start a second launcher when another bb answers the address", async () => {
+  it("leaves a remote connection with its independent service without spawning a local responder", async () => {
+    const { args, isLocalAddressFree, startLocalRuntime } = runtimeArgs({
+      machineServiceConnected: true,
+    });
+
+    await expect(ensureServerMovedRuntime(args)).resolves.toBe("service");
+    expect(isLocalAddressFree).not.toHaveBeenCalled();
+    expect(startLocalRuntime).not.toHaveBeenCalled();
+  });
+
+  it("does not start a second launcher when another Omnyo server answers the address", async () => {
     const { args, logInfo, startLocalRuntime } = runtimeArgs({
       isLocalAddressFree: false,
     });
@@ -394,14 +421,17 @@ describe("createServerMovedWatcher", () => {
     const listeners: Array<
       (eventType: string, filename: string | null) => void
     > = [];
+
     const errorListeners: Array<(error: Error) => void> = [];
     const close = vi.fn();
+
     const watch = vi.fn(
       (
         _dataDir: string,
         listener: (eventType: string, filename: string | null) => void,
       ) => {
         listeners.push(listener);
+
         return {
           close,
           on(_event: "error", errorListener: (error: Error) => void) {
@@ -410,6 +440,7 @@ describe("createServerMovedWatcher", () => {
         };
       },
     );
+
     return {
       close,
       emit(filename: string | null) {
@@ -428,10 +459,12 @@ describe("createServerMovedWatcher", () => {
 
   function createManualSchedule() {
     const pending = new Set<() => void>();
+
     return {
       flush() {
         const callbacks = [...pending];
         pending.clear();
+
         for (const callback of callbacks) {
           callback();
         }
@@ -441,7 +474,9 @@ describe("createServerMovedWatcher", () => {
         const entry = () => {
           callback();
         };
+
         pending.add(entry);
+
         return () => {
           pending.delete(entry);
         };
@@ -451,9 +486,11 @@ describe("createServerMovedWatcher", () => {
 
   function createDeferred<T>() {
     let resolveDeferred: (value: T) => void = () => undefined;
+
     const promise = new Promise<T>((resolvePromise) => {
       resolveDeferred = resolvePromise;
     });
+
     return { promise, resolve: resolveDeferred };
   }
 
@@ -473,9 +510,11 @@ describe("createServerMovedWatcher", () => {
     const timers = createManualSchedule();
     const onMove = vi.fn();
     const logWarning = vi.fn();
+
     const confirmMove = vi.fn<ConfirmMove>(
       overrides.confirmMove ?? (async () => true),
     );
+
     const watcher = createServerMovedWatcher({
       confirmMove,
       dataDir,
@@ -486,6 +525,7 @@ describe("createServerMovedWatcher", () => {
       schedule: timers.schedule,
       watch: overrides.watch ?? fakeWatch.watch,
     });
+
     return {
       confirmMove,
       dataDir,
@@ -516,11 +556,12 @@ describe("createServerMovedWatcher", () => {
 
   it("debounces lock events into one committed move", async () => {
     const harness = await createHarness();
+
     try {
       harness.watcher.start();
       harness.timers.flush();
 
-      harness.fakeWatch.emit("bb.db-wal");
+      harness.fakeWatch.emit("app.db-wal");
       expect(harness.timers.pendingCount()).toBe(0);
       await writeServerMovedFile(harness.dataDir, movedFile());
       harness.fakeWatch.emit(`${SERVER_MOVED_FILE_NAME}.abc123.tmp`);
@@ -555,6 +596,7 @@ describe("createServerMovedWatcher", () => {
     const harness = await createHarness({ confirmMove: async () => false });
     await writeServerMovedFile(harness.dataDir, movedFile());
     harness.watcher.start();
+
     try {
       harness.timers.flush();
       await vi.waitFor(() => {
@@ -577,6 +619,7 @@ describe("createServerMovedWatcher", () => {
     const first = createDeferred<boolean>();
     const harness = await createHarness({ confirmMove: () => first.promise });
     await writeServerMovedFile(harness.dataDir, movedFile());
+
     try {
       harness.watcher.start();
       harness.timers.flush();
@@ -653,12 +696,15 @@ describe("createServerMovedWatcher", () => {
   it("cancels a confirmation that is still running when stopped", async () => {
     const confirmation = createDeferred<boolean>();
     const cancellationChecks: Array<() => boolean> = [];
+
     const harness = await createHarness({
       confirmMove: (_move, isCancelled) => {
         cancellationChecks.push(isCancelled);
+
         return confirmation.promise;
       },
     });
+
     await writeServerMovedFile(harness.dataDir, movedFile());
     harness.watcher.start();
     harness.timers.flush();
@@ -703,11 +749,13 @@ describe("createServerMovedWatcher", () => {
     } finally {
       harness.watcher.stop();
     }
+
     expect(harness.timers.pendingCount()).toBe(0);
   });
 
   it("closes the watcher and polls after a watch error", async () => {
     const harness = await createHarness();
+
     try {
       harness.watcher.start();
       harness.timers.flush();
@@ -729,6 +777,7 @@ describe("createServerMovedWatcher", () => {
   it("notices a lock written atomically into a real data dir", async () => {
     const dataDir = await createTempDir();
     const onMove = vi.fn();
+
     const watcher = createServerMovedWatcher({
       confirmMove: async () => true,
       dataDir,
@@ -737,9 +786,10 @@ describe("createServerMovedWatcher", () => {
       onMove,
       pollIntervalMs: 100,
     });
+
     watcher.start();
 
-    await writeFile(join(dataDir, "bb.db-wal"), "noise");
+    await writeFile(join(dataDir, "app.db-wal"), "noise");
     await writeServerMovedFile(
       dataDir,
       movedFile({
@@ -769,15 +819,19 @@ describe("waitForCommittedServerMove", () => {
     await writeServerMovedFile(dataDir, movedFile());
     let nowMs = 0;
     const probes = [...args.probes];
+
     const probeLocalServer = vi.fn(async (): Promise<LocalServerMoveProbe> =>
       probes.length > 1
         ? (probes.shift() ?? "answered")
         : (probes[0] ?? "answered"),
     );
+
     const hasLiveLocalLauncher = vi.fn(async () => args.live ?? false);
+
     const sleep = vi.fn(async (delayMs: number) => {
       nowMs += delayMs;
     });
+
     return {
       args: {
         dataDir,
@@ -837,8 +891,10 @@ describe("waitForCommittedServerMove", () => {
     const harness = await createCommitHarness({
       probes: ["answered", "refused"],
     });
+
     harness.probeLocalServer.mockImplementationOnce(async () => {
       await rm(join(harness.dataDir, SERVER_MOVED_FILE_NAME));
+
       return "answered";
     });
 
@@ -920,6 +976,7 @@ describe("probeLocalServerMove", () => {
     const server = createServer((_request, response) => {
       handler(response);
     });
+
     servers.push(server);
     await new Promise<void>((resolvePromise) => {
       server.listen(0, "127.0.0.1", () => {
@@ -927,9 +984,11 @@ describe("probeLocalServerMove", () => {
       });
     });
     const address = server.address();
+
     if (address === null || typeof address === "string") {
       throw new Error("server has no TCP address");
     }
+
     return `http://127.0.0.1:${address.port}`;
   }
 
@@ -944,10 +1003,10 @@ describe("probeLocalServerMove", () => {
         code: "server_moved",
         details: {
           movedAt: 1,
-          serverUrl: "https://laptop.getbb.app",
+          serverUrl: "https://laptop.example.test",
           toHostName: "Studio desktop",
         },
-        message: "This bb server moved",
+        message: "This Omnyo server moved",
       });
     });
 
@@ -973,6 +1032,7 @@ describe("probeLocalServerMove", () => {
     const serverUrl = await listen((response) => {
       sendJson(response, 200, { ok: true });
     });
+
     const server = servers.pop();
     await new Promise<void>((resolvePromise) => {
       server?.close(() => {
@@ -1014,11 +1074,11 @@ describe("probeLocalServerMove", () => {
   });
 });
 
-describe("hasLiveBbAppLauncher", () => {
+describe("hasLiveOmnyoAppLauncher", () => {
   async function writeRuntimeFile(dataDir: string, pid: number) {
-    await writeBbAppRuntimeFile({
+    await writeAppRuntimeFile({
       dataDir,
-      entryPath: "/opt/bb/bb-app.js",
+      entryPath: "/opt/omnyo/omnyo-app.js",
       pid,
       serverUrl: "http://127.0.0.1:38886",
       startedAt: new Date().toISOString(),
@@ -1029,7 +1089,7 @@ describe("hasLiveBbAppLauncher", () => {
 
   it("is false without a runtime file", async () => {
     await expect(
-      hasLiveBbAppLauncher({ dataDir: await createTempDir() }),
+      hasLiveOmnyoAppLauncher({ dataDir: await createTempDir() }),
     ).resolves.toBe(false);
   });
 
@@ -1037,9 +1097,9 @@ describe("hasLiveBbAppLauncher", () => {
     const dataDir = await createTempDir();
     await writeRuntimeFile(dataDir, process.pid);
 
-    await expect(hasLiveBbAppLauncher({ dataDir })).resolves.toBe(true);
+    await expect(hasLiveOmnyoAppLauncher({ dataDir })).resolves.toBe(true);
     await expect(
-      hasLiveBbAppLauncher({ dataDir, isRunning: () => false }),
+      hasLiveOmnyoAppLauncher({ dataDir, isRunning: () => false }),
     ).resolves.toBe(false);
   });
 });
@@ -1052,8 +1112,8 @@ describe("readServerMovedConnectCredential", () => {
   it("reads the machine credential the move wrote for this computer", async () => {
     const dataDir = await createTempDir();
     await writeConfig(dataDir, {
-      serverHeaders: { "x-bb-connect-machine": "bbcm_laptop" },
-      serverUrl: "https://laptop.getbb.app/",
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_laptop" },
+      serverUrl: "https://laptop.example.test/",
     });
 
     await expect(
@@ -1061,20 +1121,20 @@ describe("readServerMovedConnectCredential", () => {
         dataDir,
         logWarning: vi.fn(),
         move: CONNECT_MOVE,
-        remoteServerUrl: "https://laptop.getbb.app",
+        remoteServerUrl: "https://laptop.example.test",
       }),
     ).resolves.toEqual({
       credential: "bbcm_laptop",
       handle: "laptop",
-      serverUrl: "https://laptop.getbb.app",
+      serverUrl: "https://laptop.example.test",
     });
   });
 
   it("does not use the credential for a different server", async () => {
     const dataDir = await createTempDir();
     await writeConfig(dataDir, {
-      serverHeaders: { "x-bb-connect-machine": "bbcm_laptop" },
-      serverUrl: "https://laptop.getbb.app",
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_laptop" },
+      serverUrl: "https://laptop.example.test",
     });
 
     await expect(
@@ -1082,7 +1142,7 @@ describe("readServerMovedConnectCredential", () => {
         dataDir,
         logWarning: vi.fn(),
         move: CONNECT_MOVE,
-        remoteServerUrl: "https://work.getbb.app",
+        remoteServerUrl: "https://work.example.test",
       }),
     ).resolves.toBeNull();
   });
@@ -1090,7 +1150,7 @@ describe("readServerMovedConnectCredential", () => {
   it("does not use a credential that config.json pins to another address", async () => {
     const dataDir = await createTempDir();
     await writeConfig(dataDir, {
-      serverHeaders: { "x-bb-connect-machine": "bbcm_old" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_old" },
       serverUrl: "http://127.0.0.1:38886",
     });
 
@@ -1099,21 +1159,21 @@ describe("readServerMovedConnectCredential", () => {
         dataDir,
         logWarning: vi.fn(),
         move: CONNECT_MOVE,
-        remoteServerUrl: "https://laptop.getbb.app",
+        remoteServerUrl: "https://laptop.example.test",
       }),
     ).resolves.toBeNull();
   });
 
   it("returns null for direct moves and missing headers", async () => {
     const dataDir = await createTempDir();
-    await writeConfig(dataDir, { serverUrl: "https://laptop.getbb.app" });
+    await writeConfig(dataDir, { serverUrl: "https://laptop.example.test" });
 
     await expect(
       readServerMovedConnectCredential({
         dataDir,
         logWarning: vi.fn(),
         move: CONNECT_MOVE,
-        remoteServerUrl: "https://laptop.getbb.app",
+        remoteServerUrl: "https://laptop.example.test",
       }),
     ).resolves.toBeNull();
     await expect(
@@ -1129,11 +1189,12 @@ describe("readServerMovedConnectCredential", () => {
   it("logs and returns null for a missing or invalid config.json", async () => {
     const dataDir = await createTempDir();
     const logWarning = vi.fn();
+
     const args = {
       dataDir,
       logWarning,
       move: CONNECT_MOVE,
-      remoteServerUrl: "https://laptop.getbb.app",
+      remoteServerUrl: "https://laptop.example.test",
     };
 
     await expect(readServerMovedConnectCredential(args)).resolves.toBeNull();
@@ -1146,6 +1207,7 @@ describe("readServerMovedConnectCredential", () => {
 describe("waitForServerMoveDestination", () => {
   function createClock() {
     let nowMs = 0;
+
     return {
       now: () => nowMs,
       async sleep(delayMs: number) {
@@ -1163,6 +1225,7 @@ describe("waitForServerMoveDestination", () => {
 
   it("waits until the new server answers outside pending mode", async () => {
     const clock = createClock();
+
     const fetchImpl = vi
       .fn<(input: string) => Promise<Response>>()
       .mockRejectedValueOnce(new Error("ECONNREFUSED"))
@@ -1194,6 +1257,7 @@ describe("waitForServerMoveDestination", () => {
 
   it("gives up after the timeout", async () => {
     const clock = createClock();
+
     const fetchImpl = vi.fn(async () => {
       throw new Error("ECONNREFUSED");
     });
@@ -1215,6 +1279,7 @@ describe("waitForServerMoveDestination", () => {
   it("stops polling once cancelled", async () => {
     const clock = createClock();
     let cancelled = false;
+
     const fetchImpl = vi.fn(async () => {
       cancelled = true;
       throw new Error("ECONNREFUSED");

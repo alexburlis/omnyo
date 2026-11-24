@@ -1,5 +1,9 @@
-import { and, eq, isNull } from "drizzle-orm";
-import type { DbConnection, DbQueryConnection } from "../connection.js";
+import { and, eq, isNull, placeholder } from "drizzle-orm";
+import {
+  prepareCachedQuery,
+  type DbConnection,
+  type DbQueryConnection,
+} from "../connection.js";
 import { installedPlugins, pluginArtifacts } from "../schema.js";
 
 export type PluginProvenance =
@@ -166,6 +170,7 @@ function normalizedColumns(
       `plugin source intent and exact resolution kinds differ for ${plugin.id}`,
     );
   }
+
   return {
     provenance: plugin.provenance.kind,
     catalogEntryId:
@@ -192,9 +197,7 @@ function normalizedColumns(
         ? plugin.sourceIntent.requestedSpec
         : null,
     sourceNpmSpecKind:
-      plugin.sourceIntent.kind === "npm"
-        ? plugin.sourceIntent.specKind
-        : null,
+      plugin.sourceIntent.kind === "npm" ? plugin.sourceIntent.specKind : null,
     sourceGitUrl:
       plugin.sourceIntent.kind === "git" ? plugin.sourceIntent.url : null,
     sourceGitSubdirectory:
@@ -247,20 +250,30 @@ export function listInstalledPlugins(db: DbConnection): InstalledPluginRow[] {
     }));
 }
 
-export function getInstalledPlugin(
-  db: DbConnection,
-  id: string,
-): InstalledPluginRow | undefined {
-  const result = db
+const prepareGetInstalledPlugin = (db: DbQueryConnection) =>
+  db
     .select({ plugin: installedPlugins, artifactPath: pluginArtifacts.path })
     .from(installedPlugins)
     .leftJoin(
       pluginArtifacts,
       eq(installedPlugins.activeArtifactId, pluginArtifacts.id),
     )
-    .where(and(eq(installedPlugins.id, id), isNull(installedPlugins.removedAt)))
-    .get();
+    .where(
+      and(
+        eq(installedPlugins.id, placeholder("id")),
+        isNull(installedPlugins.removedAt),
+      ),
+    )
+    .prepare();
+
+export function getInstalledPlugin(
+  db: DbConnection,
+  id: string,
+): InstalledPluginRow | undefined {
+  const result = prepareCachedQuery(db, prepareGetInstalledPlugin).get({ id });
+
   if (result === undefined) return undefined;
+
   return {
     ...result.plugin,
     rootDir:
@@ -274,7 +287,11 @@ export function getInstalledPluginRegistration(
   db: DbConnection,
   id: string,
 ): InstalledPluginRow | undefined {
-  return db.select().from(installedPlugins).where(eq(installedPlugins.id, id)).get();
+  return db
+    .select()
+    .from(installedPlugins)
+    .where(eq(installedPlugins.id, id))
+    .get();
 }
 
 export function listUnnormalizedPluginRegistrations(
@@ -307,6 +324,7 @@ export function normalizeInstalledPluginRegistration(
       ),
     )
     .run();
+
   return result.changes > 0;
 }
 
@@ -344,7 +362,9 @@ export function upsertInstalledPlugin(
     })
     .run();
   const row = getInstalledPlugin(db, plugin.id);
+
   if (!row) throw new Error(`plugin row missing after upsert: ${plugin.id}`);
+
   return row;
 }
 
@@ -379,6 +399,7 @@ export function setInstalledPluginDirectProvenance(
     })
     .where(and(eq(installedPlugins.id, id), isNull(installedPlugins.removedAt)))
     .run();
+
   return result.changes > 0;
 }
 
@@ -392,6 +413,7 @@ export function setInstalledPluginEnabled(
     .set({ enabled, enabledFollowsDefault: false, updatedAt: Date.now() })
     .where(eq(installedPlugins.id, id))
     .run();
+
   return result.changes > 0;
 }
 
@@ -411,6 +433,7 @@ export function setInstalledPluginUpdateState(
     })
     .where(and(eq(installedPlugins.id, id), isNull(installedPlugins.removedAt)))
     .run();
+
   return result.changes > 0;
 }
 
@@ -433,6 +456,7 @@ export function setInstalledPluginLastFailure(
     })
     .where(and(eq(installedPlugins.id, id), isNull(installedPlugins.removedAt)))
     .run();
+
   return result.changes > 0;
 }
 
@@ -447,6 +471,7 @@ export function setInstalledPluginSourceClassification(
     classification.kind === "npm"
       ? { sourceNpmSpecKind: classification.specKind }
       : { sourceGitRefKind: classification.refKind };
+
   const result = db
     .update(installedPlugins)
     .set({ ...values, updatedAt: Date.now() })
@@ -458,6 +483,7 @@ export function setInstalledPluginSourceClassification(
       ),
     )
     .run();
+
   return result.changes > 0;
 }
 
@@ -466,6 +492,7 @@ export function deleteInstalledPlugin(db: DbConnection, id: string): boolean {
     .delete(installedPlugins)
     .where(eq(installedPlugins.id, id))
     .run();
+
   return result.changes > 0;
 }
 
@@ -474,10 +501,12 @@ export function markInstalledPluginRemoved(
   id: string,
 ): boolean {
   const now = Date.now();
+
   const result = db
     .update(installedPlugins)
     .set({ enabled: false, removedAt: now, updatedAt: now })
     .where(eq(installedPlugins.id, id))
     .run();
+
   return result.changes > 0;
 }

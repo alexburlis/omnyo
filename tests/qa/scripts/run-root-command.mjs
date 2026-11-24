@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 
 const [, , command, ...args] = process.argv;
 
-const STANDALONE_PARENT_PID_ENV = "BB_STANDALONE_PARENT_PID";
+const STANDALONE_PARENT_PID_ENV = "OMNYO_STANDALONE_PARENT_PID";
 
 const commandConfig = {
   "standalone:start": {
@@ -11,20 +11,20 @@ const commandConfig = {
     turboChecks: [
       [
         "build",
-        "--filter=@bb/server",
-        "--filter=@bb/host-daemon",
-        "--filter=@bb/cli",
+        "--filter=@omnyo/server",
+        "--filter=@omnyo/host-daemon",
+        "--filter=@omnyo/cli",
       ],
-      ["typecheck", "--filter=@bb/qa"],
+      ["typecheck", "--filter=@omnyo/qa"],
     ],
   },
   "standalone:stop": {
     packageScript: "standalone:stop",
-    turboChecks: [["typecheck", "--filter=@bb/qa"]],
+    turboChecks: [["typecheck", "--filter=@omnyo/qa"]],
   },
   "standalone:cleanup": {
     packageScript: "standalone:cleanup",
-    turboChecks: [["typecheck", "--filter=@bb/qa"]],
+    turboChecks: [["typecheck", "--filter=@omnyo/qa"]],
   },
 };
 
@@ -34,10 +34,13 @@ function readParentPid(pid) {
     shell: false,
     stdio: ["ignore", "pipe", "ignore"],
   });
+
   if (result.status !== 0 || !result.stdout) {
     return null;
   }
+
   const parentPid = Number.parseInt(result.stdout.trim(), 10);
+
   return Number.isInteger(parentPid) && parentPid > 0 ? parentPid : null;
 }
 
@@ -51,9 +54,11 @@ function run(commandName, commandArgs, stdio, env = process.env) {
     shell: false,
     stdio,
   });
+
   if (result.error) {
     throw result.error;
   }
+
   return result.status ?? 1;
 }
 
@@ -75,15 +80,18 @@ function runTurboCheck(checkArgs) {
 
 function main() {
   const config = commandConfig[command];
+
   if (!config) {
     console.error(
       `Usage: node tests/qa/scripts/run-root-command.mjs <${Object.keys(commandConfig).join("|")}> [args...]`,
     );
+
     return 1;
   }
 
   for (const checkArgs of config.turboChecks) {
     const status = runTurboCheck(checkArgs);
+
     if (status !== 0) {
       return status;
     }
@@ -99,7 +107,7 @@ function main() {
 
   return run(
     "pnpm",
-    ["--silent", "--filter", "@bb/qa", config.packageScript, ...args],
+    ["--silent", "--filter", "@omnyo/qa", config.packageScript, ...args],
     "inherit",
     packageEnv,
   );

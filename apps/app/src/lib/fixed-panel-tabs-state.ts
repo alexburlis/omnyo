@@ -4,7 +4,7 @@ import {
   isFixedPanelTabsStateStorageKey,
   shouldPruneStoredFixedPanelTabsState,
   type BrowserFixedPanelTab,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import { getLocalStorage } from "./browser-storage";
 
 export {
@@ -29,7 +29,8 @@ export {
   parseFixedPanelTabsState,
   serializeFixedPanelTabsState,
   areFixedPanelTabsEquivalent,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
+
 export type {
   PluginPageFixedPanelTab,
   FixedPanelViewTab,
@@ -45,7 +46,7 @@ export type {
   SecondaryFileFixedPanelTab,
   FixedPanelTab,
   FixedPanelTabsState,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 
 interface CreateBrowserFixedPanelTabArgs {
   environmentId: string | null;
@@ -61,6 +62,7 @@ export function createBrowserFixedPanelTab({
   url,
 }: CreateBrowserFixedPanelTabArgs): BrowserFixedPanelTab {
   const browserInstanceId = nanoid();
+
   return {
     environmentId,
     id: buildFixedPanelTabId({
@@ -78,13 +80,16 @@ export function pruneFixedPanelTabsStorage({
   now,
 }: PruneFixedPanelTabsStorageArgs): void {
   const localStorage = getLocalStorage();
+
   if (!localStorage) {
     return;
   }
 
   const keys: string[] = [];
+
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
+
     if (key && isFixedPanelTabsStateStorageKey(key)) {
       keys.push(key);
     }

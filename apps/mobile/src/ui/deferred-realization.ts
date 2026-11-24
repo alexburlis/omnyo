@@ -9,6 +9,7 @@ export interface FrameScheduler {
 }
 
 const DEFERRED_REALIZATION_FRAMES = 2;
+
 const DEFERRED_REALIZATION_TIMEOUT_MS = 120;
 
 export function scheduleDeferredRealization(
@@ -22,6 +23,7 @@ export function scheduleDeferredRealization(
   const finish = () => {
     if (done) return;
     done = true;
+
     if (frameHandle !== null) scheduler.cancelAnimationFrame(frameHandle);
     scheduler.clearTimeout(timeoutHandle);
     realize();
@@ -30,10 +32,13 @@ export function scheduleDeferredRealization(
   const tick = () => {
     frameHandle = null;
     remaining -= 1;
+
     if (remaining <= 0) {
       finish();
+
       return;
     }
+
     frameHandle = scheduler.requestAnimationFrame(tick);
   };
 
@@ -41,11 +46,13 @@ export function scheduleDeferredRealization(
     finish,
     DEFERRED_REALIZATION_TIMEOUT_MS,
   );
+
   frameHandle = scheduler.requestAnimationFrame(tick);
 
   return () => {
     if (done) return;
     done = true;
+
     if (frameHandle !== null) scheduler.cancelAnimationFrame(frameHandle);
     scheduler.clearTimeout(timeoutHandle);
   };

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { appSettingsUpdateSchema } from "@bb/domain";
-import { getDisabledProviderIds } from "@bb/db";
-import { systemProviderCatalogEntrySchema } from "@bb/server-contract";
+import { appSettingsUpdateSchema } from "@omnyo/domain";
+import { getDisabledProviderIds } from "@omnyo/db";
+import { systemProviderCatalogEntrySchema } from "@omnyo/server-contract";
 import { requireBridgeLaunchForProviderId } from "../../src/services/system/provider-bridge-launch.js";
 import { listSystemProviderInfos } from "../../src/services/system/execution-options.js";
 import { resolveCreateThreadExecutionDefaults } from "../../src/services/threads/thread-default-policy.js";
@@ -11,6 +11,7 @@ import { readJson } from "../helpers/json.js";
 
 async function readCatalog(response: Response) {
   expect(response.status).toBe(200);
+
   return systemProviderCatalogEntrySchema
     .array()
     .parse(await readJson(response));
@@ -42,9 +43,11 @@ describe("provider management", () => {
         await harness.pluginService.install("builtin:provider-acp", {
           kind: "root",
         });
+
         const disabled = await readCatalog(
           await setProviderEnabled(harness, "acp-cursor", false),
         );
+
         expect(
           disabled.find((provider) => provider.id === "acp-cursor")?.enabled,
         ).toBe(false);
@@ -64,15 +67,19 @@ describe("provider management", () => {
           await setProviderEnabled(harness, "acp-opencode", false),
         );
         await harness.pluginService.setEnabled("provider-acp", false);
+
         const catalog = await readCatalog(
           await harness.app.request("/api/v1/system/providers/catalog"),
         );
+
         expect(
           catalog.find((provider) => provider.id === "acp-opencode"),
         ).toMatchObject({ enabled: false, pluginEnabled: false });
+
         const enabled = await readCatalog(
           await setProviderEnabled(harness, "acp-cursor", true),
         );
+
         expect(
           enabled.find((provider) => provider.id === "acp-cursor"),
         ).toMatchObject({ enabled: true, pluginEnabled: true });
@@ -113,6 +120,7 @@ describe("provider management", () => {
         await readCatalog(
           await setProviderEnabled(harness, "acp-opencode", false),
         );
+
         const resolved = resolveCreateThreadExecutionDefaults(
           harness.deps.providerRegistry,
           {
@@ -126,6 +134,7 @@ describe("provider management", () => {
             },
           },
         );
+
         expect(resolved.providerId).not.toBe("acp-opencode");
         expect(resolved.executionDefaults).toBeNull();
       },
@@ -157,25 +166,31 @@ describe("provider management", () => {
           kind: "root",
         });
         const config = await harness.app.request("/api/v1/system/config");
+
         const staleSettings = z
           .object({ generalSettings: appSettingsUpdateSchema })
           .parse(await readJson(config)).generalSettings;
+
         await harness.pluginService.setEnabled("provider-claude-code", false);
+
         const catalog = await readCatalog(
           await harness.app.request("/api/v1/system/providers/catalog"),
         );
+
         expect(
           catalog.find((provider) => provider.id === "claude-code"),
         ).toMatchObject({ displayName: "Claude Code", pluginEnabled: false });
         await readCatalog(
           await setProviderEnabled(harness, "claude-code", false),
         );
+
         const putGeneralSettings = (body: object) =>
           harness.app.request("/api/v1/settings/general", {
             method: "PUT",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(body),
           });
+
         expect((await putGeneralSettings(staleSettings)).status).toBe(200);
         expect(
           (

@@ -2,9 +2,9 @@
 
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BbDesktopCloseWindowRequestHandler } from "@bb/desktop-contract";
+import type { OmnyoDesktopCloseWindowRequestHandler } from "@omnyo/desktop-contract";
 import { AppCommandProvider } from "@/components/commands/AppCommandProvider";
-import { createBbDesktopApi } from "@/test/bb-desktop-test-utils";
+import { createOmnyoDesktopApi } from "@/test/omnyo-desktop-test-utils";
 import { RootComposePanelCommandHandlers } from "./RootComposePanelCommandHandlers";
 
 const commandFixture = vi.hoisted(() => ({
@@ -66,13 +66,15 @@ function dispatchControlShortcut(key: string): KeyboardEvent {
     ctrlKey: true,
     key,
   });
+
   fireEvent(window, event);
+
   return event;
 }
 
 afterEach(() => {
   cleanup();
-  delete window.bbDesktop;
+  delete window.omnyoDesktop;
 });
 
 describe("RootComposePanelCommandHandlers", () => {
@@ -81,11 +83,15 @@ describe("RootComposePanelCommandHandlers", () => {
     const firstClose = vi.fn(() => true);
     const secondToggle = vi.fn();
     const secondClose = vi.fn(() => true);
-    const desktopCloseHandlers = new Set<BbDesktopCloseWindowRequestHandler>();
-    window.bbDesktop = {
-      ...createBbDesktopApi(desktopInfo),
+
+    const desktopCloseHandlers =
+      new Set<OmnyoDesktopCloseWindowRequestHandler>();
+
+    window.omnyoDesktop = {
+      ...createOmnyoDesktopApi(desktopInfo),
       onCloseWindowRequest(listener) {
         desktopCloseHandlers.add(listener);
+
         return () => desktopCloseHandlers.delete(listener);
       },
     };
@@ -115,9 +121,11 @@ describe("RootComposePanelCommandHandlers", () => {
     expect(dispatchControlShortcut("w").defaultPrevented).toBe(true);
     expect(firstClose).toHaveBeenCalledTimes(1);
     expect(secondClose).not.toHaveBeenCalled();
+
     for (const handler of desktopCloseHandlers) {
       expect(handler()).toBe(true);
     }
+
     expect(firstClose).toHaveBeenCalledTimes(2);
 
     view.rerender(
@@ -145,6 +153,7 @@ describe("RootComposePanelCommandHandlers", () => {
     expect(firstClose).toHaveBeenCalledTimes(2);
     expect(secondToggle).toHaveBeenCalledTimes(1);
     expect(secondClose).toHaveBeenCalledTimes(1);
+
     for (const handler of desktopCloseHandlers) handler();
     expect(secondClose).toHaveBeenCalledTimes(2);
   });

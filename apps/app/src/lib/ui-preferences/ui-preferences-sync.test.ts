@@ -3,13 +3,13 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createStore } from "jotai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BbHttpError } from "@bb/sdk/browser";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 import {
   defaultUiPreferences,
   type UiPreferenceKey,
   type UiPreferenceValue,
-} from "@bb/domain";
-import type { UiPreferencesResponse } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { UiPreferencesResponse } from "@omnyo/server-contract";
 import {
   getCachedUiPreferences,
   setCachedUiPreferences,
@@ -30,9 +30,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/sdk", async () => {
-  const actual = await import("@bb/sdk/browser");
+  const actual = await import("@omnyo/sdk/browser");
+
   return {
-    BbHttpError: actual.BbHttpError,
+    OmnyoHttpError: actual.OmnyoHttpError,
     sdk: {
       system: {
         uiPreferences: {
@@ -62,11 +63,12 @@ function serverResponse(
       { revision: 0, value },
     ]),
   ) as UiPreferencesResponse["preferences"];
+
   return { preferences: { ...preferences, ...overrides } };
 }
 
-function conflict(currentRevision: number): BbHttpError {
-  return new BbHttpError({
+function conflict(currentRevision: number): OmnyoHttpError {
+  return new OmnyoHttpError({
     body: { code: "ui_preference_conflict", details: { currentRevision } },
     code: "ui_preference_conflict",
     message: "UI preference changed on another client",
@@ -79,7 +81,11 @@ function createHarness() {
   const store = createStore();
   const modeAtom = createSyncedPreferenceAtom("sidebar.organizationMode");
   const orderAtom = createSyncedPreferenceAtom("sidebar.sectionOrder");
-  const hiddenFooterAtom = createSyncedPreferenceAtom("sidebar.hiddenFooterItems");
+
+  const hiddenFooterAtom = createSyncedPreferenceAtom(
+    "sidebar.hiddenFooterItems",
+  );
+
   return { hiddenFooterAtom, modeAtom, orderAtom, queryClient, store };
 }
 
@@ -173,6 +179,7 @@ describe("ui preferences sync", () => {
     ) as UiPreferencesResponse["preferences"];
     mocks.set.mockImplementationOnce(async (input) => {
       setCachedUiPreferences(queryClient, response);
+
       return { key: input.key, revision: 1, value: input.value };
     });
 
@@ -449,9 +456,11 @@ describe("ui preferences sync", () => {
     );
     store.set(modeAtom, "machine");
     await vi.waitFor(() => expect(mocks.set).toHaveBeenCalledTimes(1));
+
     const newer = serverResponse({
       "sidebar.organizationMode": { revision: 3, value: "chronological" },
     });
+
     setCachedUiPreferences(queryClient, newer);
     reconcileUiPreferences(newer);
     expect(store.get(modeAtom)).toBe("machine");
@@ -606,9 +615,11 @@ describe("ui preferences sync", () => {
     );
     store.set(hiddenFooterAtom, (current) => [...current, "deleted"]);
     await vi.waitFor(() => expect(mocks.set).toHaveBeenCalledTimes(1));
+
     const broadcast = serverResponse({
       "sidebar.hiddenFooterItems": { revision: 2, value: [] },
     });
+
     setCachedUiPreferences(queryClient, broadcast);
     reconcileUiPreferences(broadcast);
     expect(store.get(hiddenFooterAtom)).toEqual(["deleted"]);

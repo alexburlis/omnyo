@@ -8,8 +8,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { ProjectSource } from "@bb/domain";
-import { BbHttpError } from "@bb/sdk/browser";
+import type { ProjectSource } from "@omnyo/domain";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import {
@@ -28,12 +28,12 @@ vi.mock("@/lib/sdk", () => ({
   },
 }));
 
-const DEFAULT_CLONE_PATH = "/Users/me/bb/checkouts/bb";
+const DEFAULT_CLONE_PATH = "/Users/me/omnyo/checkouts/omnyo";
 
 const gitTarget: ProjectMachineSetupDialogTarget = {
   projectId: "proj_test",
-  projectName: "bb",
-  gitRemoteUrl: "git@github.com:sawyerhood/bb.git",
+  projectName: "Omnyo",
+  gitRemoteUrl: "git@github.com:example/omnyo.git",
   hostId: "host_studio",
   hostName: "Mac Studio",
 };
@@ -65,6 +65,7 @@ function renderDialog(target: ProjectMachineSetupDialogTarget) {
       />
     </QueryClientProvider>,
   );
+
   return { onComplete, onOpenChange };
 }
 
@@ -81,7 +82,7 @@ describe("ProjectMachineSetupDialog", () => {
     vi.mocked(sdk.projects.sources.add).mockResolvedValue(createdSource);
     const { onComplete } = renderDialog(gitTarget);
 
-    expect(screen.getByText("Set up bb on Mac Studio")).toBeTruthy();
+    expect(screen.getByText("Set up Omnyo on Mac Studio")).toBeTruthy();
     expect(screen.getByText(gitTarget.gitRemoteUrl!)).toBeTruthy();
     expect(
       screen.getByText("Use an existing folder on Mac Studio"),
@@ -114,7 +115,7 @@ describe("ProjectMachineSetupDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "change" }));
     fireEvent.change(screen.getByLabelText("Clone destination"), {
-      target: { value: "/Users/me/elsewhere/bb" },
+      target: { value: "/Users/me/elsewhere/omnyo" },
     });
     fireEvent.keyDown(screen.getByLabelText("Clone destination"), {
       key: "Enter",
@@ -126,7 +127,7 @@ describe("ProjectMachineSetupDialog", () => {
       projectId: "proj_test",
       type: "clone",
       hostId: "host_studio",
-      targetPath: "/Users/me/elsewhere/bb",
+      targetPath: "/Users/me/elsewhere/omnyo",
     });
   });
 
@@ -134,10 +135,12 @@ describe("ProjectMachineSetupDialog", () => {
     vi.mocked(sdk.hosts.cloneDefaultPath).mockResolvedValue({
       path: DEFAULT_CLONE_PATH,
     });
+
     const gitStderr =
       "git clone failed: fatal: could not read Username for 'https://github.com'";
+
     vi.mocked(sdk.projects.sources.add).mockRejectedValue(
-      new BbHttpError({
+      new OmnyoHttpError({
         status: 502,
         code: "git_command_failed",
         message: gitStderr,
@@ -159,7 +162,7 @@ describe("ProjectMachineSetupDialog", () => {
       path: DEFAULT_CLONE_PATH,
     });
     vi.mocked(sdk.projects.sources.add).mockRejectedValue(
-      new BbHttpError({
+      new OmnyoHttpError({
         status: 409,
         code: "target_not_empty",
         message: "Target directory is not empty",
@@ -185,24 +188,26 @@ describe("ProjectMachineSetupDialog", () => {
       path: DEFAULT_CLONE_PATH,
     });
     vi.mocked(sdk.hosts.directory).mockResolvedValue({
-      directory: "/Users/me/code/bb",
+      directory: "/Users/me/code/omnyo",
       parent: "/Users/me/code",
       entries: [],
     });
     vi.mocked(sdk.hosts.pathsExist).mockResolvedValue({
-      existence: { "/Users/me/code/bb": true },
+      existence: { "/Users/me/code/omnyo": true },
     });
     vi.mocked(sdk.projects.sources.add).mockResolvedValue({
       ...createdSource,
-      path: "/Users/me/code/bb",
+      path: "/Users/me/code/omnyo",
     });
     const { onComplete } = renderDialog(gitTarget);
 
     fireEvent.click(screen.getByText("Use an existing folder on Mac Studio"));
     await screen.findByText("This folder is empty.");
+
     const submit = await screen.findByRole("button", {
       name: "Use folder & continue",
     });
+
     await waitFor(() => expect(submit.hasAttribute("disabled")).toBe(false));
 
     fireEvent.click(submit);
@@ -212,7 +217,7 @@ describe("ProjectMachineSetupDialog", () => {
       projectId: "proj_test",
       type: "local_path",
       hostId: "host_studio",
-      path: "/Users/me/code/bb",
+      path: "/Users/me/code/omnyo",
     });
   });
 

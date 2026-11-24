@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { writeServerMovedFile } from "@bb/server-archive";
+import { writeServerMovedFile } from "@omnyo/server-archive";
 import { describe, expect, it } from "vitest";
 import type { ServerMovedNotice } from "../server-connection-support.js";
 import {
@@ -15,7 +15,7 @@ import {
 registerServerMoveFixtureCleanup();
 
 const DAEMON_ONLY_EXEC_START =
-  '"/usr/bin/node" "/opt/npm/bin/bb-app" host-daemon --auto-update --host-daemon-port "38887" --server-url "http://old-server:38886"';
+  '"/usr/bin/node" "/opt/npm/bin/omnyo-app" host-daemon --auto-update --host-daemon-port "38887" --server-url "http://old-server:38886"';
 
 describe("ServerMoveService.handleServerMoved", () => {
   it("rewrites config.json and the unit's normalized --server-url, then restarts the unit once", async () => {
@@ -23,6 +23,7 @@ describe("ServerMoveService.handleServerMoved", () => {
       env: {},
       serverUrl: "http://old-server:38886",
     });
+
     await writeFile(
       join(fixture.dataDir, "config.json"),
       JSON.stringify({
@@ -31,15 +32,17 @@ describe("ServerMoveService.handleServerMoved", () => {
         connectMachineId: "machine-1",
       }),
     );
+
     const unitPath = await writeSystemdUnit({
       homeDir: fixture.homeDir,
       dataDir: fixture.dataDir,
       execStart: DAEMON_ONLY_EXEC_START,
     });
+
     const notice = {
       source: "message" as const,
       serverUrl: "https://studio.example.test/",
-      headers: { "x-bb-connect-machine": "bbcm_new" },
+      headers: { "x-omnyo-connect-machine": "bbcm_new" },
     };
 
     await fixture.service.handleServerMoved(notice);
@@ -47,7 +50,7 @@ describe("ServerMoveService.handleServerMoved", () => {
 
     expect(await readJson(join(fixture.dataDir, "config.json"))).toEqual({
       serverUrl: "https://studio.example.test",
-      serverHeaders: { "x-bb-connect-machine": "bbcm_new" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_new" },
     });
     expect(await readFile(unitPath, "utf8")).toContain(
       '"--server-url" "https://studio.example.test"',
@@ -59,7 +62,7 @@ describe("ServerMoveService.handleServerMoved", () => {
         "--user",
         "restart",
         "--no-block",
-        "bb-host-daemon-old-server-studio.service",
+        "omnyo-host-daemon-old-server-studio.service",
       ],
     ]);
     expect(fixture.shutdownRequests).toEqual([]);
@@ -69,11 +72,13 @@ describe("ServerMoveService.handleServerMoved", () => {
     const fixture = await createFixture({
       serverUrl: "http://127.0.0.1:38886",
     });
+
     const machineConfig = {
-      serverHeaders: { "x-bb-connect-machine": "bbcm_machine" },
+      serverHeaders: { "x-omnyo-connect-machine": "bbcm_machine" },
       machineCredential: "bbcm_machine",
       connectMachineId: "machine-1",
     };
+
     await writeFile(
       join(fixture.dataDir, "config.json"),
       JSON.stringify({ serverUrl: "http://127.0.0.1:38886", ...machineConfig }),
@@ -96,6 +101,7 @@ describe("ServerMoveService.handleServerMoved", () => {
     const explicit = await createFixture({
       serverUrl: "http://127.0.0.1:38886",
     });
+
     await writeFile(
       join(explicit.dataDir, "config.json"),
       JSON.stringify({ serverUrl: "http://127.0.0.1:38886", ...machineConfig }),
@@ -125,7 +131,7 @@ describe("ServerMoveService.handleServerMoved", () => {
       notice: {
         source: "message" as const,
         serverUrl: "https://studio.example.test",
-        headers: { "x-bb\r\nExecStart": "value" },
+        headers: { "x-omnyo\r\nExecStart": "value" },
       },
     },
   ])(
@@ -135,13 +141,16 @@ describe("ServerMoveService.handleServerMoved", () => {
         env: {},
         serverUrl: "http://old-server:38886",
       });
+
       const config = JSON.stringify({ serverUrl: "http://old-server:38886" });
       await writeFile(join(fixture.dataDir, "config.json"), config);
+
       const unitPath = await writeSystemdUnit({
         homeDir: fixture.homeDir,
         dataDir: fixture.dataDir,
         execStart: DAEMON_ONLY_EXEC_START,
       });
+
       const unit = await readFile(unitPath, "utf8");
 
       await expect(
@@ -157,16 +166,18 @@ describe("ServerMoveService.handleServerMoved", () => {
     },
   );
 
-  it("leaves a bb-app start unit alone and exits so the launcher switches", async () => {
+  it("leaves an omnyo-app start unit alone and exits so the launcher switches", async () => {
     const fixture = await createFixture({
       env: {},
       serverUrl: "http://127.0.0.1:38886",
     });
+
     const unitPath = await writeSystemdUnit({
       homeDir: fixture.homeDir,
       dataDir: fixture.dataDir,
-      execStart: `"/usr/bin/node" "/opt/npm/bin/bb-app" "start" "--data-dir" "${fixture.dataDir}" "--server-port" "38886" "--host-daemon-port" "38887"`,
+      execStart: `"/usr/bin/node" "/opt/npm/bin/omnyo-app" "start" "--data-dir" "${fixture.dataDir}" "--server-port" "38886" "--host-daemon-port" "38887"`,
     });
+
     const unit = await readFile(unitPath, "utf8");
 
     await fixture.service.handleServerMoved({
@@ -186,13 +197,15 @@ describe("ServerMoveService.handleServerMoved", () => {
       autoUpdate: true,
       supervised: true,
     });
+
     const service = fixture.createService({
       env: {
-        BB_SERVER_MOVE_SERVICE_MANAGER: "none",
-        BB_APP_NPM_PREFIX: fixture.npmPrefix,
+        OMNYO_SERVER_MOVE_SERVICE_MANAGER: "none",
+        OMNYO_APP_NPM_PREFIX: fixture.npmPrefix,
         INVOCATION_ID: "inherited-from-a-terminal",
       },
     });
+
     await writeFile(
       join(fixture.dataDir, "install-daemon.pid"),
       `${PARENT_PID}\n`,
@@ -210,7 +223,7 @@ describe("ServerMoveService.handleServerMoved", () => {
       {
         command: process.execPath,
         args: [
-          join(fixture.npmPrefix, "bin", "bb-app"),
+          join(fixture.npmPrefix, "bin", "omnyo-app"),
           "host-daemon",
           "--auto-update",
           "--supervise",
@@ -220,8 +233,8 @@ describe("ServerMoveService.handleServerMoved", () => {
           "http://studio.example.test:38886",
         ],
         env: expect.objectContaining({
-          BB_DATA_DIR: fixture.dataDir,
-          BB_APP_NPM_PREFIX: fixture.npmPrefix,
+          OMNYO_DATA_DIR: fixture.dataDir,
+          OMNYO_APP_NPM_PREFIX: fixture.npmPrefix,
         }),
         logPath: join(fixture.dataDir, "logs", "server-move.log"),
       },
@@ -236,13 +249,13 @@ describe("ServerMoveService.handleServerMoved", () => {
     { name: "systemd", env: { INVOCATION_ID: "0123456789abcdef" } },
     {
       name: "launchd",
-      env: { XPC_SERVICE_NAME: "com.example.custom-bb-daemon" },
+      env: { XPC_SERVICE_NAME: "com.example.custom-omnyo-daemon" },
     },
   ])(
     "only rewrites config.json and exits under an unrecognized $name supervisor",
     async ({ env }) => {
       const fixture = await createFixture({
-        env: { BB_SERVER_MOVE_SERVICE_MANAGER: "none", ...env },
+        env: { OMNYO_SERVER_MOVE_SERVICE_MANAGER: "none", ...env },
         serverUrl: "http://old-server.example.test:38886",
       });
 
@@ -264,6 +277,7 @@ describe("ServerMoveService.handleServerMoved", () => {
     const fixture = await createFixture({
       serverUrl: "http://studio.example.test:38886",
     });
+
     await writeServerMovedFile(fixture.dataDir, {
       version: 1,
       moveId: MOVE_ID,
@@ -274,7 +288,7 @@ describe("ServerMoveService.handleServerMoved", () => {
       serverUrl: "http://studio.example.test:38886",
       mode: "direct",
       connectHandle: null,
-      oldCopyEntries: ["bb.db"],
+      oldCopyEntries: ["app.db"],
     });
 
     await fixture.service.handleServerMoved({

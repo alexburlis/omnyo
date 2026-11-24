@@ -1,10 +1,11 @@
 import { useMemo, type ComponentProps, type ReactNode } from "react";
-import { Skeleton } from "@bb/shared-ui/skeleton";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   PluginComposerHostScopeProvider,
   usePluginComposerHost,
 } from "@/components/plugin/plugin-composer-host";
+import { PluginThreadView } from "@/components/plugin/PluginThreadView";
 import { SecondaryPanelLayout } from "@/components/secondary-panel/SecondaryPanelLayout";
 import { LazyThreadSecondaryPanel } from "@/components/secondary-panel/lazySecondaryPanelComponents";
 import {
@@ -14,6 +15,10 @@ import {
   type ThreadMetadataContentProps,
 } from "@/components/secondary-panel/ThreadMetadataContent";
 import { DETAIL_GRID_CLASS } from "@/components/ui/detail-card.js";
+import {
+  PageShellFooter,
+  threadPageFrameClassName,
+} from "@/components/ui/page-shell.js";
 import { useThreads } from "@/hooks/queries/thread-queries";
 import { ThreadTimelinePane } from "./ThreadTimelinePane";
 
@@ -21,6 +26,7 @@ type ThreadTimelinePaneProps = Omit<
   ComponentProps<typeof ThreadTimelinePane>,
   "footer"
 >;
+
 type ThreadSecondaryPanelProps = Omit<
   ComponentProps<typeof LazyThreadSecondaryPanel>,
   | "metadataContent"
@@ -89,7 +95,9 @@ function ThreadDetailSecondaryContentBody({
     },
     { enabled: isSecondaryPanelOpen },
   );
+
   const hasForks = (forksQuery.data?.length ?? 0) > 0;
+
   const metadataContent = useMemo(
     () =>
       hasAnyThreadMetadata(metadata, hasForks) ? (
@@ -107,12 +115,7 @@ function ThreadDetailSecondaryContentBody({
   );
 
   return (
-    <div
-      className={cn(
-        "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-clip",
-        !isBoundedPane && "-mx-4 -mb-4 -mt-4 md:-mx-5 md:-mb-5 md:-mt-5",
-      )}
-    >
+    <div className={threadPageFrameClassName(isBoundedPane)}>
       <SecondaryPanelLayout
         open={isSecondaryPanelOpen}
         onToggle={onToggleSecondaryPanel}
@@ -124,7 +127,19 @@ function ThreadDetailSecondaryContentBody({
         drawerFallback={<ThreadMetadataLoadingSkeleton />}
         mainPanelId="thread-detail-timeline-panel"
         mainHeader={header}
-        main={<ThreadTimelinePane {...timeline} footer={footer} />}
+        main={
+          <PluginThreadView
+            threadId={timeline.threadId}
+            projectId={metadata.thread.projectId}
+            defaultView={<ThreadTimelinePane {...timeline} footer={footer} />}
+            transcript={<ThreadTimelinePane {...timeline} footer={null} />}
+            composer={
+              <PageShellFooter footerClassName="chat-prompt-box">
+                {footer}
+              </PageShellFooter>
+            }
+          />
+        }
         collapse={{
           active: isConversationCollapsed,
           onToggle: onToggleConversationCollapse,

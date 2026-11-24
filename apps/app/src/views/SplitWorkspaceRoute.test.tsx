@@ -13,10 +13,12 @@ vi.mock("./thread-detail/SplitThreadArea", () => ({
   SplitThreadArea: ({ routeContent }: { routeContent: PaneContent }) => {
     useEffect(() => {
       workspaceLifecycle.mounts += 1;
+
       return () => {
         workspaceLifecycle.unmounts += 1;
       };
     }, []);
+
     return <output data-testid="route-content">{routeContent.kind}</output>;
   },
 }));
@@ -33,6 +35,7 @@ vi.mock("./ToolsView", () => ({
 
 function NavigationControls() {
   const navigate = useNavigate();
+
   return (
     <>
       <button onClick={() => navigate("/")}>compose</button>

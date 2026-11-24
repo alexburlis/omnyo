@@ -1,4 +1,4 @@
-import { threadEventSchema, type ThreadEvent } from "@bb/domain";
+import { threadEventSchema, type ThreadEvent } from "@omnyo/domain";
 import { ThreadEventGrammar } from "../thread-event-grammar.js";
 import type { ConformanceCheckResult } from "./types.js";
 
@@ -40,10 +40,13 @@ export function countTurns(events: readonly ThreadEvent[]): {
 } {
   let started = 0;
   let completed = 0;
+
   for (const event of events) {
     if (event.type === "turn/started") started += 1;
+
     if (event.type === "turn/completed") completed += 1;
   }
+
   return { started, completed };
 }
 
@@ -71,10 +74,12 @@ export function checkRecordedCellReplay(
       (() => {
         for (const [index, event] of replay.events.entries()) {
           const parsed = threadEventSchema.safeParse(event);
+
           if (!parsed.success) {
             return `event ${index} (${event.type}) failed: ${parsed.error.issues[0]?.message ?? "invalid"}`;
           }
         }
+
         return null;
       })(),
     ),
@@ -86,12 +91,15 @@ export function checkRecordedCellReplay(
       "the event stream breaks no thread-event grammar rule",
       (() => {
         const grammar = new ThreadEventGrammar();
+
         for (const event of replay.events) {
           const verdict = grammar.observe(event);
+
           if (verdict.kind === "violation") {
             return `${verdict.rule} on ${event.type}: ${verdict.reason}`;
           }
         }
+
         return null;
       })(),
     ),

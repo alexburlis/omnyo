@@ -1,17 +1,20 @@
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import { describe, expect, it } from "vitest";
 import echoPlugin from "./server.js";
 import { ECHO_PROJECT_SKILL_ROOT, ECHO_PROVIDER_ID } from "./src/vocabulary.js";
 
 function registeredDeclaration() {
   const host = createFakePluginHost({ pluginId: "echo-provider" });
-  echoPlugin(host.bb);
+  echoPlugin(host.api);
+
   const declaration = host.harness.registrations.providerRegistrations.find(
     (entry) => entry.id === ECHO_PROVIDER_ID,
   );
+
   if (declaration === undefined) {
     throw new Error(`provider "${ECHO_PROVIDER_ID}" was not registered`);
   }
+
   return declaration;
 }
 

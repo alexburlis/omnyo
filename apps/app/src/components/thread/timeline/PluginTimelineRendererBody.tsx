@@ -1,10 +1,10 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
-import type { JsonValue } from "@bb/domain";
+import type { JsonValue } from "@omnyo/domain";
 import type {
   PluginTimelineRendererProps,
   PluginTimelineRendererRow,
-} from "@get-bb/plugin-sdk";
-import type { TimelineViewWorkRow } from "@bb/thread-view";
+} from "@omnyo/plugin-sdk";
+import type { TimelineViewWorkRow } from "@omnyo/thread-view";
 import { PluginSlotMount } from "../../plugin/PluginSlotMount.js";
 import {
   EMPTY_PLUGIN_SLOT_SNAPSHOT,
@@ -43,10 +43,12 @@ export function usePluginTimelineRenderer(
 ): PluginTimelineRendererSlot | null {
   const slots = useTimelineRendererSlots();
   const { pluginId: providerPluginId } = useThreadProvider();
+
   return useMemo(() => {
     if (row === null || slots.length === 0 || !isPluginRenderableWorkRow(row)) {
       return null;
     }
+
     return resolveTimelineRenderer(
       slots,
       row.workKind === "extension"
@@ -84,6 +86,7 @@ function rendererPayload(row: PluginRenderableWorkRow): JsonValue {
   if (row.workKind === "extension" || row.workKind === "form") {
     return row.payload;
   }
+
   return { arguments: row.toolArgs, output: row.output };
 }
 
@@ -100,6 +103,7 @@ export function PluginTimelineRendererBody({
 }: PluginTimelineRendererBodyProps) {
   const { providerId } = useThreadProvider();
   const Original = useCallback(() => original(), [original]);
+
   const props: PluginTimelineRendererProps = {
     row: rendererRow(row),
     payload: rendererPayload(row),
@@ -107,6 +111,7 @@ export function PluginTimelineRendererBody({
     thread: { id: row.threadId, providerId },
     Original,
   };
+
   return (
     <PluginSlotMount
       pluginId={slot.pluginId}

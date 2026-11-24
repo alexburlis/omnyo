@@ -6,7 +6,7 @@ import {
   providerInfoSchema,
   runtimeThreadExecutionOptionsSchema,
   threadEventItemSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -67,9 +67,11 @@ function loadAllowlist(): Set<string> {
     ),
     "utf8",
   );
+
   const parsed = allowlistSchema.parse(JSON.parse(raw));
   const paths = parsed.entries.map((entry) => entry.path);
   expect(new Set(paths).size, "duplicate allowlist entries").toBe(paths.length);
+
   return new Set(paths);
 }
 
@@ -92,12 +94,15 @@ describe("guardrail G2: the provider contract names no provider", () => {
   it("flags every provider-named key and keeps the allowlist honest", () => {
     const allowlist = loadAllowlist();
     const offenders: string[] = [];
+
     for (const [name, schema] of SCANNED_SCHEMAS) {
       for (const path of collectZodKeyPaths(schema, name)) {
         const key = path.slice(path.lastIndexOf(".") + 1);
+
         if (keyNamesProvider(key)) offenders.push(path);
       }
     }
+
     const unexpected = offenders.filter((path) => !allowlist.has(path));
     const unused = [...allowlist].filter((path) => !offenders.includes(path));
 

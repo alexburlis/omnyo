@@ -1,5 +1,5 @@
-import { threadScope, turnScope } from "@bb/domain";
-import type { ThreadEventScope } from "@bb/domain";
+import { threadScope, turnScope } from "@omnyo/domain";
+import type { ThreadEventScope } from "@omnyo/domain";
 import type { EventProjectionMessageBase } from "./event-projection-types.js";
 
 export function areThreadEventScopesEqual(
@@ -9,9 +9,11 @@ export function areThreadEventScopesEqual(
   if (left.kind !== right.kind) {
     return false;
   }
+
   if (left.kind === "thread") {
     return true;
   }
+
   return right.kind === "turn" && left.turnId === right.turnId;
 }
 

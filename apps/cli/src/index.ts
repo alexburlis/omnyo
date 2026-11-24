@@ -1,30 +1,30 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from "commander";
-import { maybeReexecViaBbCli } from "./bb-cli-reexec.js";
+import { maybeReexecViaOmnyoCli } from "./cli-reexec.js";
 import {
   CORE_COMMAND_GROUPS,
   type CommandGroupDeps,
   pluginProxyCandidate,
   selectCommandGroups,
 } from "./command-groups.js";
-import { resolveBbCliVersion } from "./version.js";
+import { resolveOmnyoCliVersion } from "./version.js";
 import type { CliRuntimeContext } from "./context-env.js";
 
 if (process.env.FORCE_COLOR !== undefined) {
   delete process.env.NO_COLOR;
 }
 
-maybeReexecViaBbCli();
+maybeReexecViaOmnyoCli();
 
 const program = new Command();
 
 program
-  .name("bb")
-  .description("BB CLI - manage your AI coding agents")
+  .name("omnyo")
+  .description("Omnyo CLI - manage your AI coding agents")
   .enablePositionalOptions()
   .exitOverride()
   .showSuggestionAfterError(false)
-  .version(resolveBbCliVersion());
+  .version(resolveOmnyoCliVersion());
 
 const KNOWN_COMMAND_NAMES: ReadonlySet<string> = new Set([
   ...CORE_COMMAND_GROUPS.map((group) => group.name),
@@ -37,8 +37,10 @@ function createCommandGroupDeps(
   contextEnv: ContextEnvModule,
 ): CommandGroupDeps {
   let cliRuntimeContext: CliRuntimeContext | undefined;
+
   const getCliRuntimeContext = (): CliRuntimeContext =>
     (cliRuntimeContext ??= contextEnv.createCliRuntimeContext());
+
   return {
     getUrl: () => contextEnv.resolveServerUrl(getCliRuntimeContext()),
     getContext: () => contextEnv.resolveContextSnapshot(getCliRuntimeContext()),
@@ -52,41 +54,52 @@ async function tryPluginCommandProxy(
 ): Promise<void> {
   const proxy = await import("./plugin-cli-proxy.js");
   const result = await proxy.fetchPluginCliContributions(getUrl());
+
   if (result.outcome === "unreachable") {
     if (isSoftAlias) return;
+
     const message = proxy.describeUnreachableServer(
       getUrl(),
       result.cause,
       result.lastTimeoutMs,
       result.attempts,
     );
+
     console.error(message);
+
     const { isJsonInvocation, writeCliErrorEnvelope } =
       await import("./cli-error-output.js");
+
     writeCliErrorEnvelope(
       { code: "server_unreachable", hint: null, message },
       isJsonInvocation(process.argv),
     );
     process.exit(1);
   }
+
   if (result.outcome === "invalid") return;
   const match = proxy.findPluginCliCommand(result.contributions, candidate);
+
   if (match === undefined) {
     const disabledId = await proxy.findDisabledPluginForCommand(
       getUrl(),
       candidate,
     );
+
     if (disabledId !== null) {
       console.error(
-        `bb ${candidate} is provided by the "${disabledId}" plugin, which is disabled — ` +
-          `run \`bb plugin enable ${disabledId}\` or enable it in Plugins.`,
+        `omnyo ${candidate} is provided by the "${disabledId}" plugin, which is disabled — ` +
+          `run \`omnyo plugin enable ${disabledId}\` or enable it in Plugins.`,
       );
       process.exit(1);
     }
+
     return;
   }
+
   const argv = process.argv.slice(3);
   const command = match.commands.find((entry) => entry.name === argv[0]);
+
   if (
     command !== undefined &&
     match.rendersHelp !== true &&
@@ -95,11 +108,13 @@ async function tryPluginCommandProxy(
     console.log(command.usage);
     process.exit(0);
   }
+
   const exitCode = await proxy.runPluginCliCommand(
     getUrl(),
     match.pluginId,
     argv,
   );
+
   if (exitCode !== 0) {
     await logCliError({
       code: "plugin_command_failed",
@@ -108,6 +123,7 @@ async function tryPluginCommandProxy(
       token: null,
     });
   }
+
   process.exit(exitCode);
 }
 
@@ -121,13 +137,14 @@ async function logCliError(args: {
     import("./cli-error-log.js"),
     import("./commander-errors.js"),
   ]);
+
   appendCliErrorLogEntry({
     at: new Date().toISOString(),
-    cliVersion: resolveBbCliVersion(),
+    cliVersion: resolveOmnyoCliVersion(),
     code: args.code,
     command: args.command ?? commandPathLabel(program, process.argv),
     exitCode: args.exitCode,
-    threadId: process.env.BB_THREAD_ID ?? null,
+    threadId: process.env.OMNYO_THREAD_ID ?? null,
     token: args.token,
   });
 }
@@ -137,10 +154,12 @@ async function exitForCommanderError(
   getUrl: (() => string) | null,
 ): Promise<never> {
   if (error.exitCode === 0) process.exit(0);
+
   const [errors, hints] = await Promise.all([
     import("./commander-errors.js"),
     import("./context-hints.js"),
   ]);
+
   const summary = await errors.summarizeCommanderError({
     argv: process.argv,
     error,
@@ -150,6 +169,7 @@ async function exitForCommanderError(
         ? async () => null
         : hints.createContextHostIdResolver(getUrl),
   });
+
   errors.writeCommanderErrorSummary(summary, process.argv);
   await logCliError({
     code: summary.code,
@@ -167,6 +187,7 @@ async function parseProgram(getUrl: (() => string) | null): Promise<void> {
     if (error instanceof CommanderError) {
       await exitForCommanderError(error, getUrl);
     }
+
     throw error;
   }
 }
@@ -175,8 +196,10 @@ async function rejectHelpForUnknownSubcommand(
   getUrl: () => string,
 ): Promise<void> {
   const resolution = await import("./command-resolution.js");
+
   if (!resolution.hasHelpFlag(process.argv)) return;
   const invocation = resolution.resolveInvocation(program, process.argv);
+
   if (invocation.unknownSubcommand === null) return;
   const message = `error: unknown command '${invocation.unknownSubcommand}'`;
   console.error(message);
@@ -192,13 +215,16 @@ async function addJsonShapeHelp(): Promise<void> {
       import("./json-shapes.js"),
       import("./command-resolution.js"),
     ]);
+
   for (const commandPath of Object.keys(JSON_SHAPE_BY_COMMAND_PATH)) {
     const invocation = resolution.resolveInvocation(program, [
       "node",
-      "bb",
+      "omnyo",
       ...commandPath.split(" "),
     ]);
+
     const help = jsonShapeHelp(commandPath);
+
     if (help === null || invocation.path.join(" ") !== commandPath) continue;
     invocation.command.addHelpText("after", help);
   }
@@ -207,15 +233,26 @@ async function addJsonShapeHelp(): Promise<void> {
 async function main(): Promise<void> {
   const firstArg = process.argv[2];
   const groups = selectCommandGroups(firstArg);
+
   if (groups.length === 0) {
     await parseProgram(null);
+
     return;
   }
+
+  const [{ admitConfiguredOmnyoStateWrites }, { resolveCliDataDir }] =
+    await Promise.all([
+      import("@omnyo/config/omnyo-state-startup"),
+      import("./data-dir.js"),
+    ]);
+
+  await admitConfiguredOmnyoStateWrites(resolveCliDataDir());
 
   const [contextEnv, ...registrars] = await Promise.all([
     import("./context-env.js"),
     ...groups.map((group) => group.load()),
   ]);
+
   const deps = createCommandGroupDeps(contextEnv);
 
   program.addHelpText("after", () => {
@@ -226,24 +263,26 @@ async function main(): Promise<void> {
     return `
 
 Current context:
-  BB_PROJECT_ID: ${project}
-  BB_THREAD_ID: ${thread}
-  BB_SERVER_URL: ${context.serverUrl}
+  OMNYO_PROJECT_ID: ${project}
+  OMNYO_THREAD_ID: ${thread}
+  OMNYO_SERVER_URL: ${context.serverUrl}
 
 Quick start:
-  bb status
-  bb project list
-  bb thread show <id>
-  bb thread spawn --project <id> --provider codex --prompt "..."
+  omnyo status
+  omnyo project list
+  omnyo thread show <id>
+  omnyo thread spawn --project <id> --provider codex --prompt "..."
 `;
   });
 
   for (const register of registrars) {
     register(program, deps);
   }
+
   await addJsonShapeHelp();
 
   const candidate = pluginProxyCandidate(firstArg, KNOWN_COMMAND_NAMES);
+
   if (candidate !== null) {
     const { TOP_LEVEL_SOFT_ALIASES } = await import("./command-resolution.js");
     const aliasTarget = TOP_LEVEL_SOFT_ALIASES[candidate];
@@ -252,8 +291,10 @@ Quick start:
       deps.getUrl,
       aliasTarget !== undefined,
     );
+
     if (aliasTarget !== undefined) process.argv[2] = aliasTarget;
   }
+
   await rejectHelpForUnknownSubcommand(deps.getUrl);
   await parseProgram(deps.getUrl);
 }

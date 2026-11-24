@@ -1,4 +1,4 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 export const codexAiFailureCodeSchema = z.enum([
@@ -9,6 +9,7 @@ export const codexAiFailureCodeSchema = z.enum([
   "request_failed",
   "invalid_response",
 ]);
+
 export type CodexAiFailureCode = z.infer<typeof codexAiFailureCodeSchema>;
 
 const failureSchema = z
@@ -23,6 +24,7 @@ const textResultSchema = z.union([
   z.object({ ok: z.literal(true), text: z.string() }).strict(),
   failureSchema,
 ]);
+
 export type CodexAiTextResult = z.infer<typeof textResultSchema>;
 
 export const codexAiCompleteInputSchema = z
@@ -32,6 +34,7 @@ export const codexAiCompleteInputSchema = z
     timeoutMs: z.number().int().positive(),
   })
   .strict();
+
 export type CodexAiCompleteInput = z.infer<typeof codexAiCompleteInputSchema>;
 
 export const codexAiTranscribeInputSchema = z
@@ -44,6 +47,7 @@ export const codexAiTranscribeInputSchema = z
     timeoutMs: z.number().int().positive(),
   })
   .strict();
+
 export type CodexAiTranscribeInput = z.infer<
   typeof codexAiTranscribeInputSchema
 >;
@@ -52,6 +56,7 @@ export const codexAiStatusSchema = z.discriminatedUnion("ready", [
   z.object({ ready: z.literal(true) }).strict(),
   z.object({ ready: z.literal(false), message: z.string().min(1) }).strict(),
 ]);
+
 export type CodexAiStatus = z.infer<typeof codexAiStatusSchema>;
 
 export const codexAiHostContract = defineRpcContract({

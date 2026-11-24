@@ -31,6 +31,7 @@ interface SonnerCustomToast {
 
 const mutationToastState = vi.hoisted(() => {
   const invocations: SonnerCustomToast[] = [];
+
   return {
     custom: vi.fn(
       (
@@ -38,15 +39,19 @@ const mutationToastState = vi.hoisted(() => {
         options?: SonnerCustomOptions,
       ) => {
         const fallbackId = `toast-${invocations.length + 1}`;
+
         const id =
           typeof options?.id === "string" || typeof options?.id === "number"
             ? String(options.id)
             : fallbackId;
+
         const toast = {
           options: { id },
           renderToast,
         };
+
         invocations.push(toast);
+
         return id;
       },
     ),
@@ -59,18 +64,23 @@ vi.mock("sonner", () => ({
   toast: {
     custom: mutationToastState.custom,
     dismiss: mutationToastState.dismiss,
+    getToasts: () => [],
   },
 }));
 
 function readLatestToastProps(): CapturedToastProps {
   const invocation = mutationToastState.invocations.at(-1);
+
   if (!invocation) {
     throw new Error("Expected mutation error toast invocation.");
   }
+
   const element = invocation.renderToast(invocation.options.id);
+
   if (!isValidElement<CapturedToastProps>(element)) {
     throw new Error("Expected app toast content element.");
   }
+
   return element.props;
 }
 

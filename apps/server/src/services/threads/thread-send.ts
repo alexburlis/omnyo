@@ -2,22 +2,29 @@ import {
   getEnvironment,
   getThread,
   requireThreadLifecycleEventApplied,
-} from "@bb/db";
-import type { DbConnection, DbTransaction, EnvironmentRow } from "@bb/db";
+} from "@omnyo/db";
+import type {
+  DbConnection,
+  DbNotifier,
+  DbTransaction,
+  EnvironmentRow,
+} from "@omnyo/db";
 import type {
   ClientTurnRequestId,
   PromptInput,
+  QueuedMessageSystemNotice,
   ResolvedThreadExecutionOptions,
   Thread,
+  ThreadMaintenanceKind,
   ThreadTurnInitiator,
   TurnRequestTarget,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   flattenPromptInputGroups,
   isStandaloneBuiltinClearCommand,
-} from "@bb/domain";
-import type { SendMessageRequest } from "@bb/server-contract";
-import { renderTemplate } from "@bb/templates";
+} from "@omnyo/domain";
+import type { SendMessageRequest } from "@omnyo/server-contract";
+import { renderTemplate } from "@omnyo/templates";
 import type {
   AppDeps,
   LoggedPendingInteractionWorkSessionDeps,
@@ -65,11 +72,19 @@ import {
   throwSenderThreadInvalid,
   throwThreadNotWritable,
 } from "../lib/lifecycle-api-errors.js";
+import {
+  NotificationBuffer,
+  type BufferedTransaction,
+} from "../lib/notification-buffer.js";
 import { resolvePromptAttachmentReferences } from "../projects/attachments.js";
 import { threadTargetHostId } from "./dispatch-attempt.js";
 import { resolvePluginMentionContextInputs } from "../plugins/plugin-mentions.js";
 import { clearThreadContext } from "./thread-context-clear.js";
 import { withThreadSendGuard } from "./thread-context-mutation-guard.js";
+import {
+  settleInFlightTurnRequest,
+  trackInFlightTurnRequest,
+} from "../../internal/turn-completed-events.js";
 import {
   prependDeferredFirstTurnContext,
   requireDeferredFirstTurnContextCurrent,
@@ -78,10 +93,17 @@ import {
   type PromptWithGroups,
 } from "./deferred-first-turn-context.js";
 import type { TelemetryEvent } from "../system/telemetry.js";
+import { messageSourceNotice } from "./message-source.js";
 import { assertThreadHostAcceptsWork } from "./thread-host-admission.js";
+import {
+  readAutoCompactionBasis,
+  recordAutoCompactionBasisSnapshot,
+} from "./maintenance-run.js";
 
 type SendThreadMessageMode = SendMessageRequest["mode"];
+
 type TextPromptInput = Extract<PromptInput, { type: "text" }>;
+
 type SendThreadMessageTrigger = "auto-dispatch" | "user";
 
 type SendThreadMessagePayload = SendMessageRequest & {
@@ -89,12 +111,14 @@ type SendThreadMessagePayload = SendMessageRequest & {
 };
 
 interface SendThreadMessageArgs {
+  preparation?: {
+    execution: ResolvedThreadExecutionOptions;
+    attachmentInputs: ReadonlySet<PromptInput>;
+  };
   beforeAppendInTransaction?: SendThreadMessageTransactionPreflight;
-  /**
-   * Present only when this send re-submits a failed turn. Marks the turn event
-   * as attempt N of an earlier request, which is what makes the next failure's
-   * attempt number correct without a separate tally.
-   */
+  systemContinuation?: boolean;
+  maintenance?: ThreadMaintenanceKind;
+
   retryOf?: TurnRequestRetryMarker;
   environment: EnvironmentRow;
   historyReplacement?: {
@@ -102,6 +126,7 @@ interface SendThreadMessageArgs {
     onCommandSettled?: () => void | Promise<void>;
   };
   payload: SendThreadMessagePayload;
+  systemNotice?: QueuedMessageSystemNotice;
   thread: Thread;
   trigger: SendThreadMessageTrigger;
 }
@@ -121,11 +146,14 @@ interface BuildAgentThreadMessageTextArgs {
   senderThreadId: string;
 }
 
-interface SendThreadMessageTransactionPreflightArgs {
-  tx: DbTransaction;
-}
+type SendThreadMessageTransactionPreflightArgs = BufferedTransaction &
+  (
+    | { kind: "turn"; requestId: ClientTurnRequestId }
+    | { kind: "context-clear" }
+  );
 
 interface SendThreadMessageQueueRequestArgs {
+  hub: DbNotifier;
   requestEventSequence: number;
   tx: DbTransaction;
 }
@@ -145,18 +173,21 @@ interface SendThreadMessageQueueRequest {
 }
 
 interface AppendAndQueueSendThreadMessageArgs {
-  /** Retry provenance; absent for an original dispatch. */
   retryOf?: TurnRequestRetryMarker;
   beforeAppendInTransaction?: SendThreadMessageTransactionPreflight;
   db: DbConnection;
+  hub: DbNotifier;
   environmentId: string | null;
   execution: ResolvedThreadExecutionOptions;
   initiator: ThreadTurnInitiator;
+  maintenance: ThreadMaintenanceKind | undefined;
+  messageNotice: QueuedMessageSystemNotice | null;
   input: PromptInput[];
   inputGroups?: PromptInput[][];
   queueInTransaction: SendThreadMessageQueueRequest;
   requestId: ClientTurnRequestId;
   senderThreadId: string | null;
+  systemNotice: QueuedMessageSystemNotice | undefined;
   target: TurnRequestTarget;
   thread: Thread;
 }
@@ -190,24 +221,16 @@ export function ensureThreadIsWritable(
   if (thread.archivedAt) {
     throwThreadNotWritable(thread, "archived", "Thread is archived");
   }
+
   if (thread.status === "stopping" && !allowStopping) {
     throwThreadNotWritable(thread, "stopping", "Thread is stopping");
   }
+
   if (thread.deletedAt !== null) {
     throwThreadNotWritable(thread, "deleted", "Thread is deleted");
   }
 }
 
-/**
- * The queue's own writability, which a requested stop does not revoke.
- *
- * Everything else a stopping thread rejects is work against the run that is
- * being torn down. The queue is the opposite: it holds what the user wants to
- * happen NEXT, and the seconds a stop takes to land are exactly when they
- * reach for it. Rows still cannot dispatch mid-stop — the dispatch checkpoint
- * queues them on a `stopping` wait — but composing, editing, reordering and
- * asking for one to go first all stay available.
- */
 export function ensureThreadQueueIsWritable(thread: Thread): void {
   ensureThreadIsWritable(thread, true);
 }
@@ -224,24 +247,29 @@ function resolveSendMode(
         "Thread is already active",
       );
     }
+
     return "start";
   }
+
   if (requestedMode === "steer" || requestedMode === "steer-if-active") {
     if (thread.status === "active") {
       return "steer";
     }
+
     if (
       thread.status === "idle" ||
       (requestedMode === "steer-if-active" && thread.status === "error")
     ) {
       return "start";
     }
+
     throwThreadNotWritable(
       thread,
       threadNotWritableReasonForStatus(thread.status),
       "Thread is not active",
     );
   }
+
   if (requestedMode === "queue-if-active") {
     if (thread.status === "active") {
       throwThreadNotWritable(
@@ -250,11 +278,14 @@ function resolveSendMode(
         "Thread is already active",
       );
     }
+
     return "start";
   }
+
   if (thread.status === "active") {
     return "auto";
   }
+
   return "start";
 }
 
@@ -270,6 +301,7 @@ function ensureRuntimeCanAcceptActiveSend(
     environmentHostId: args.environment.hostId,
     status: args.thread.status,
   });
+
   if (runtime.displayStatus === "active") {
     return;
   }
@@ -290,9 +322,11 @@ export function resolveMessageSenderThreadId(
   }
 
   const senderThread = getThread(deps.db, args.senderThreadId);
+
   if (!senderThread) {
     throwSenderThreadInvalid("not_found");
   }
+
   if (senderThread.deletedAt !== null) {
     throwSenderThreadInvalid("deleted");
   }
@@ -313,6 +347,7 @@ export function formatAgentThreadInput(
   args: FormatAgentThreadInputArgs,
 ): PromptInput[] {
   const firstTextIndex = args.input.findIndex((item) => item.type === "text");
+
   if (firstTextIndex === -1) {
     const textItem: TextPromptInput = {
       type: "text",
@@ -322,6 +357,7 @@ export function formatAgentThreadInput(
       }),
       mentions: [],
     };
+
     return [textItem, ...args.input];
   }
 
@@ -329,6 +365,7 @@ export function formatAgentThreadInput(
     if (index !== firstTextIndex || item.type !== "text") {
       return item;
     }
+
     return {
       ...item,
       text: buildAgentThreadMessageText({
@@ -351,10 +388,13 @@ export async function appendPluginMentionContext(
   const pluginMentionContext = await resolvePluginMentionContextInputs(
     prompt.input,
   );
+
   if (pluginMentionContext.length === 0) {
     return prompt;
   }
+
   const inputGroups = prompt.inputGroups;
+
   return {
     input: [...prompt.input, ...pluginMentionContext],
     ...(inputGroups !== undefined
@@ -384,7 +424,6 @@ export function captureUserMessageSentTelemetry(
   args: {
     isChildThread: boolean;
     messageSource: UserMessageSentProperties["message_source"];
-    providerId: string;
   },
 ): void {
   deps.telemetry.capture({
@@ -392,7 +431,6 @@ export function captureUserMessageSentTelemetry(
     properties: {
       is_child_thread: args.isChildThread,
       message_source: args.messageSource,
-      provider: args.providerId,
     },
   });
 }
@@ -401,25 +439,42 @@ function appendAndQueueSendThreadMessageInTransaction({
   retryOf,
   beforeAppendInTransaction,
   db,
+  hub,
   environmentId,
   execution,
   initiator,
+  maintenance,
+  messageNotice,
   input,
   inputGroups,
   queueInTransaction,
   requestId,
   senderThreadId,
+  systemNotice,
   target,
   thread,
 }: AppendAndQueueSendThreadMessageArgs): AppendAndQueueSendThreadMessageResult {
   let activeThread: Thread | null = null;
+  const notifications = new NotificationBuffer();
+
   const request = db.transaction(
     (tx) => {
       assertThreadHostAcceptsWork(tx, thread);
-      beforeAppendInTransaction?.({ tx });
+      beforeAppendInTransaction?.({
+        kind: "turn",
+        requestId,
+        tx,
+        notifications,
+      });
+
+      const maintenanceBasis =
+        maintenance === undefined
+          ? null
+          : readAutoCompactionBasis(tx, thread.id);
+
       const appended =
         appendPreparedClientTurnRequestedEventWithNotificationInTransaction(
-          tx,
+          { db: tx, hub: notifications },
           {
             threadId: thread.id,
             environmentId,
@@ -429,13 +484,31 @@ function appendAndQueueSendThreadMessageInTransaction({
             ...(inputGroups !== undefined ? { inputGroups } : {}),
             execution,
             initiator,
+            systemMessageKind: messageNotice?.kind,
+            systemMessageSubject: messageNotice?.subject,
             senderThreadId,
+            ...(systemNotice !== undefined
+              ? {
+                  systemMessageKind: systemNotice.kind,
+                  systemMessageSubject: systemNotice.subject,
+                }
+              : {}),
+            ...(maintenance !== undefined ? { maintenance } : {}),
             requestMethod: "turn/start",
             source: "tell",
             target,
             requestId,
           },
         );
+
+      if (maintenanceBasis !== null) {
+        recordAutoCompactionBasisSnapshot(tx, {
+          threadId: thread.id,
+          requestSequence: appended.sequence,
+          conversation: maintenanceBasis,
+        });
+      }
+
       recordAcceptedPromptHistoryEntry(
         { db: tx },
         {
@@ -446,15 +519,22 @@ function appendAndQueueSendThreadMessageInTransaction({
           requestSequence: appended.sequence,
         },
       );
+
       const queueResult = queueInTransaction({
+        hub: notifications,
         requestEventSequence: appended.sequence,
         tx,
       });
+
       activeThread = queueResult.activeThread;
+
       return appended;
     },
     { behavior: "immediate" },
   );
+
+  notifications.flushInto(hub);
+
   return {
     activeThread,
     request,
@@ -466,12 +546,24 @@ export async function sendThreadMessage(
   args: SendThreadMessageArgs,
 ): Promise<void> {
   if (isStandaloneBuiltinClearCommand(args.payload.input)) {
+    const beforeAppendInTransaction = args.beforeAppendInTransaction;
     await clearThreadContext(deps, {
+      ...(beforeAppendInTransaction !== undefined
+        ? {
+            beforeCommitInTransaction: (transaction) =>
+              beforeAppendInTransaction({
+                ...transaction,
+                kind: "context-clear",
+              }),
+          }
+        : {}),
       environment: args.environment,
       thread: args.thread,
     });
+
     return;
   }
+
   return withThreadSendGuard(args.thread.id, () =>
     sendThreadMessageWithoutContextClear(deps, args),
   );
@@ -483,18 +575,23 @@ async function sendThreadMessageWithoutContextClear(
 ): Promise<void> {
   const { environment, payload, thread } = args;
   ensureThreadIsWritable(thread);
+
   if (args.trigger === "user") {
     ensureThreadIsNotAwaitingUserInteraction(deps, thread.id);
   }
+
   const mode = resolveSendMode(thread, payload.mode);
   ensureRuntimeCanAcceptActiveSend(deps, args);
+
   if (mode === "start") {
     ensureThreadCanStartRequest(thread);
   }
+
   const senderThreadId = resolveMessageSenderThreadId(deps, {
     senderThreadId: payload.senderThreadId,
     targetThread: thread,
   });
+
   let inputGroups = payload.inputGroups
     ? payload.inputGroups.map((inputGroup) =>
         senderThreadId
@@ -505,6 +602,7 @@ async function sendThreadMessageWithoutContextClear(
           : inputGroup,
       )
     : undefined;
+
   let input =
     inputGroups !== undefined
       ? flattenPromptInputGroups(inputGroups)
@@ -514,22 +612,28 @@ async function sendThreadMessageWithoutContextClear(
             senderThreadId,
           })
         : payload.input;
+
   ({ input, inputGroups } = await appendPluginMentionContext({
     input,
     ...(inputGroups !== undefined ? { inputGroups } : {}),
   }));
-  const deferredFirstTurnContext = resolveDeferredFirstTurnContext(
-    deps.db,
-    thread.id,
-  );
+
+  const deferredFirstTurnContext =
+    args.retryOf === undefined
+      ? resolveDeferredFirstTurnContext(deps.db, thread.id)
+      : null;
+
   ({ input, inputGroups } = prependDeferredFirstTurnContext(
     { input, ...(inputGroups !== undefined ? { inputGroups } : {}) },
     deferredFirstTurnContext,
   ));
-  const beforeAppendInTransaction: SendThreadMessageTransactionPreflight = ({
-    tx,
-  }) => {
-    args.beforeAppendInTransaction?.({ tx });
+
+  const beforeAppendInTransaction: SendThreadMessageTransactionPreflight = (
+    acceptance,
+  ) => {
+    const { tx } = acceptance;
+    args.beforeAppendInTransaction?.(acceptance);
+
     if (deferredFirstTurnContext) {
       requireDeferredFirstTurnContextCurrent(tx, {
         requestSequence: deferredFirstTurnContext.requestSequence,
@@ -537,40 +641,69 @@ async function sendThreadMessageWithoutContextClear(
       });
     }
   };
-  const resolvedInput = await resolvePromptAttachmentReferences({
+
+  const preparedAttachmentInputs = args.preparation?.attachmentInputs;
+
+  const unpreparedInput =
+    preparedAttachmentInputs === undefined
+      ? input
+      : input.filter((item) => !preparedAttachmentInputs.has(item));
+
+  const resolvedUnpreparedInput = await resolvePromptAttachmentReferences({
     db: deps.db,
     dataDir: deps.config.dataDir,
-    input,
+    input: unpreparedInput,
     projectId: thread.projectId,
     hostId: threadTargetHostId(deps, thread),
   });
+
   const resolvedByInput = new Map(
-    input.map((item, index) => [item, resolvedInput[index]!]),
+    unpreparedInput.map((item, index) => [
+      item,
+      resolvedUnpreparedInput[index]!,
+    ]),
   );
-  input = resolvedInput;
+
+  input = input.map((item) => resolvedByInput.get(item) ?? item);
   inputGroups = inputGroups?.map((group) =>
     group.map((item) => resolvedByInput.get(item) ?? item),
   );
-  // Agent-originated CLI sends still appear as normal turn requests in the
-  // timeline, while initiator lets policy distinguish the source. A retry is
-  // `system` whatever the original was: nobody asked for it a second time, and
-  // counting it as a user message would inflate every "messages sent" figure by
-  // however many times the provider happened to be rate limited.
+
   const { initiator } = resolveDispatchAuthor({
-    retrying: args.retryOf !== undefined,
+    ...(args.maintenance !== undefined
+      ? { maintenance: args.maintenance }
+      : {}),
+    retrying: args.retryOf !== undefined || args.systemContinuation === true,
+    systemNotice: args.systemNotice !== undefined,
     senderThreadId,
     startedOnBehalfOf: null,
   });
+
+  const messageNotice = messageSourceNotice(
+    payload.messageSource,
+    senderThreadId,
+  );
+
   const shouldCaptureUserMessageSent =
-    args.trigger === "user" && initiator === "user" && input.length > 0;
+    args.trigger === "user" &&
+    initiator === "user" &&
+    input.length > 0 &&
+    args.retryOf === undefined &&
+    args.systemNotice === undefined &&
+    args.systemContinuation !== true;
+
   const expectedSteerTurnId =
     mode === "auto" || mode === "steer"
       ? getActiveTurnId(deps, thread.id)
       : null;
-  // A retry's model is provenance — the failed attempt's tuple, replayed —
-  // not a fresh model choice, so it must not rewrite the thread's sticky
-  // override the way an explicit user send's model does.
-  if (senderThreadId === null && args.retryOf === undefined) {
+
+  if (
+    senderThreadId === null &&
+    args.retryOf === undefined &&
+    args.systemContinuation !== true &&
+    args.systemNotice === undefined &&
+    args.maintenance === undefined
+  ) {
     await recoverThreadModelOverride(deps, {
       model: payload.model,
       modelSource:
@@ -585,44 +718,54 @@ async function sendThreadMessageWithoutContextClear(
       thread,
     });
   }
-  const execution = await buildExecutionOptions(deps, payload, {
-    threadId: thread.id,
-  });
-  // No hook pass here. User messages are decided ONCE, at the dispatch
-  // checkpoint in `attemptDispatch`, before they reach this function. The two
-  // other callers bypass the checkpoint deliberately: a manual compaction turn
-  // and an edited message's re-send are operations on the thread's existing
-  // conversation, not new work a limiter admits.
+
+  const execution =
+    args.preparation?.execution ??
+    (await buildExecutionOptions(deps, payload, {
+      threadId: thread.id,
+    }));
+
   const permissionEscalation = resolvePermissionEscalation({
     initiator,
   });
 
+  const requestId = payload.requestId ?? createClientTurnRequestId();
+
   if (
-    await dispatchTurnDuringReprovision({
-      beforeRequestAppendInTransaction: beforeAppendInTransaction,
+    args.maintenance === undefined &&
+    (await dispatchTurnDuringReprovision({
+      beforeRequestAppendInTransaction: (transaction) =>
+        beforeAppendInTransaction({ ...transaction, kind: "turn", requestId }),
       deps,
       environment,
       execution,
       initiator,
       input,
       inputGroups,
+      requestId,
+      ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
       senderThreadId,
+      systemMessageKind: (args.systemNotice ?? messageNotice)?.kind,
+      systemMessageSubject: (args.systemNotice ?? messageNotice)?.subject,
       thread,
-    })
+    }))
   ) {
     if (shouldCaptureUserMessageSent) {
       captureUserMessageSentTelemetry(deps, {
         isChildThread: thread.parentThreadId !== null,
         messageSource: "thread_send",
-        providerId: thread.providerId,
       });
     }
+
     return;
   }
+
   const readyEnvironment = requireReadyThreadEnvironment(
     getEnvironment(deps.db, environment.id) ?? environment,
   );
+
   let target: TurnRequestTarget;
+
   if (mode === "start") {
     target = {
       kind:
@@ -637,8 +780,6 @@ async function sendThreadMessageWithoutContextClear(
       expectedTurnId: expectedSteerTurnId,
     };
   }
-
-  const requestId = createClientTurnRequestId();
 
   if (mode === "start") {
     const commandArgs = {
@@ -659,6 +800,7 @@ async function sendThreadMessageWithoutContextClear(
       providerId: thread.providerId,
       syncGeneratedTitle: false,
     };
+
     const command = args.historyReplacement
       ? {
           command: await buildThreadStartCommand(deps, {
@@ -669,26 +811,32 @@ async function sendThreadMessageWithoutContextClear(
                 : {
                     sourceProviderThreadId:
                       args.historyReplacement.forkSourceProviderThreadId,
+                    restoreArchivedSource: true,
                   },
           }),
           mode: "thread.start" as const,
         }
       : await prepareReadyThreadTurnCommand(deps, commandArgs);
+
     const queuedRequest = appendAndQueueSendThreadMessageInTransaction({
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
-      beforeAppendInTransaction: ({ tx }) => {
-        beforeAppendInTransaction({ tx });
+      beforeAppendInTransaction: (acceptance) => {
+        beforeAppendInTransaction(acceptance);
         ensureThreadCanStartRequest(thread);
       },
       db: deps.db,
+      hub: deps.hub,
       environmentId: thread.environmentId,
       execution,
       initiator,
+      maintenance: args.maintenance,
+      messageNotice,
       input,
       inputGroups,
-      queueInTransaction: ({ tx }) => {
+      queueInTransaction: ({ hub, tx }) => {
         const dispatchKind = command.mode;
         const currentThread = getThread(tx, thread.id);
+
         if (
           dispatchKind === "turn.submit" ||
           currentThread?.status === "error" ||
@@ -697,31 +845,43 @@ async function sendThreadMessageWithoutContextClear(
           return {
             activeThread: requireThreadLifecycleEventApplied(
               applyLoggedThreadLifecycleEventInTransaction(
-                { db: tx, logger: deps.logger },
+                { db: tx, hub, logger: deps.logger },
                 { event: { type: "run.started" }, threadId: thread.id },
               ),
             ),
           };
         }
+
         return { activeThread: null };
       },
       requestId,
       senderThreadId,
+      systemNotice: args.systemNotice,
       target,
       thread,
     });
+
     deps.hub.notifyThread(
       thread.id,
       queuedRequest.request.notificationChanges,
       queuedRequest.request.notificationMetadata,
     );
+
+    const onHistoryReplacementSettled =
+      args.historyReplacement?.onCommandSettled;
+
+    trackInFlightTurnRequest(thread.id);
     startLiveHostCommand(deps, {
       command: command.command,
       hostId: readyEnvironment.hostId,
       timeoutMs: LIVE_DAEMON_COMMAND_TIMEOUT_MS,
-      ...(args.historyReplacement?.onCommandSettled !== undefined
-        ? { onSettled: args.historyReplacement.onCommandSettled }
-        : {}),
+      onSettled: async () => {
+        try {
+          await onHistoryReplacementSettled?.();
+        } finally {
+          await settleInFlightTurnRequest(deps, thread.id);
+        }
+      },
       onError: ({ error }) => {
         deps.logger.warn(
           { err: error, threadId: thread.id },
@@ -729,6 +889,7 @@ async function sendThreadMessageWithoutContextClear(
         );
       },
     });
+
     if (queuedRequest.activeThread) {
       deps.hub.notifyThread(
         thread.id,
@@ -736,19 +897,21 @@ async function sendThreadMessageWithoutContextClear(
         buildThreadStatusChangeMetadata(deps, queuedRequest.activeThread),
       );
     }
+
     if (shouldCaptureUserMessageSent) {
       captureUserMessageSentTelemetry(deps, {
         isChildThread: thread.parentThreadId !== null,
         messageSource: "thread_send",
-        providerId: thread.providerId,
       });
     }
+
     return;
   }
 
   await ensureHostSessionReadyForWork(deps, {
     hostId: readyEnvironment.hostId,
   });
+
   const preparedCommand = await prepareTurnSubmitCommandPayload(deps, {
     thread,
     input,
@@ -766,17 +929,22 @@ async function sendThreadMessageWithoutContextClear(
       status: readyEnvironment.status,
     },
   });
+
   const command = addRequestIdToTurnSubmitCommandPayload({
     preparedCommand,
     requestId,
   });
+
   const queuedRequest = appendAndQueueSendThreadMessageInTransaction({
     ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
     beforeAppendInTransaction,
     db: deps.db,
+    hub: deps.hub,
     environmentId: thread.environmentId,
     execution,
     initiator,
+    maintenance: args.maintenance,
+    messageNotice,
     input,
     inputGroups,
     queueInTransaction: () => {
@@ -784,14 +952,17 @@ async function sendThreadMessageWithoutContextClear(
     },
     requestId,
     senderThreadId,
+    systemNotice: args.systemNotice,
     target,
     thread,
   });
+
   deps.hub.notifyThread(
     thread.id,
     queuedRequest.request.notificationChanges,
     queuedRequest.request.notificationMetadata,
   );
+  trackInFlightTurnRequest(thread.id);
   startLiveHostCommand(deps, {
     command,
     hostId: readyEnvironment.hostId,
@@ -802,12 +973,13 @@ async function sendThreadMessageWithoutContextClear(
         "Live turn submit command failed",
       );
     },
+    onSettled: () => settleInFlightTurnRequest(deps, thread.id),
   });
+
   if (shouldCaptureUserMessageSent) {
     captureUserMessageSentTelemetry(deps, {
       isChildThread: thread.parentThreadId !== null,
       messageSource: "thread_send",
-      providerId: thread.providerId,
     });
   }
 }

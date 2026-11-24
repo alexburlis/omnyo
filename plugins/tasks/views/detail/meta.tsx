@@ -24,6 +24,7 @@ export function StatusIcon({
   className?: string;
 }) {
   const color = STATUS_COLORS[status];
+
   return (
     <svg
       viewBox="0 0 14 14"
@@ -116,6 +117,7 @@ export function PriorityIcon({
       </span>
     );
   }
+
   const lit =
     priority === "high"
       ? 3
@@ -124,7 +126,9 @@ export function PriorityIcon({
         : priority === "low"
           ? 1
           : 0;
+
   const heights = [5, 8, 11];
+
   return (
     <svg
       viewBox="0 0 14 14"
@@ -156,12 +160,12 @@ export const THREAD_STATUS_META: Record<
 > = {
   starting: {
     label: "Starting",
-    dotClassName: "bg-attention animate-pulse",
+    dotClassName: "bg-attention animate-pulse motion-reduce:animate-none",
     textClassName: "text-attention",
   },
   working: {
     label: "Working",
-    dotClassName: "bg-success animate-pulse",
+    dotClassName: "bg-success animate-pulse motion-reduce:animate-none",
     textClassName: "text-success",
   },
   idle: {
@@ -213,22 +217,30 @@ export function isActiveThread(thread: TaskThread): boolean {
 
 export function formatRelativeTime(iso: string): string {
   const then = new Date(iso).valueOf();
+
   if (Number.isNaN(then)) return "";
   const seconds = Math.round((Date.now() - then) / 1000);
+
   if (seconds < 60) return "just now";
   const minutes = Math.round(seconds / 60);
+
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.round(minutes / 60);
+
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
+
   if (days < 30) return `${days}d ago`;
+
   return new Date(iso).toLocaleDateString();
 }
 
 export function formatDueDate(dueDate: string): string {
   const parsed = new Date(`${dueDate}T00:00:00`);
+
   if (Number.isNaN(parsed.valueOf())) return dueDate;
   const sameYear = parsed.getFullYear() === new Date().getFullYear();
+
   return parsed.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",

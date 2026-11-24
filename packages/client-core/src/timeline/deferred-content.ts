@@ -1,5 +1,5 @@
-import type { TimelineRow } from "@bb/server-contract";
-import type { ThreadTimelineViewRow } from "@bb/thread-view";
+import type { TimelineRow } from "@omnyo/server-contract";
+import type { ThreadTimelineViewRow } from "@omnyo/thread-view";
 
 export function deferredTimelineContentItemId(
   row: ThreadTimelineViewRow,
@@ -7,6 +7,7 @@ export function deferredTimelineContentItemId(
   if (row.kind === "work" && "contentDeferred" in row && row.contentDeferred) {
     return "callId" in row ? row.callId : null;
   }
+
   if (
     row.kind === "system" &&
     row.systemKind === "operation" &&
@@ -15,6 +16,7 @@ export function deferredTimelineContentItemId(
   ) {
     return row.reasoningId ?? null;
   }
+
   return null;
 }
 
@@ -24,9 +26,11 @@ function findLoadedRow(
   loaded: readonly TimelineRow[],
 ): TimelineRow | null {
   const byId = loaded.find((candidate) => candidate.id === row.id);
+
   if (byId !== undefined) {
     return byId;
   }
+
   return (
     loaded.find((candidate) => {
       if (row.kind === "system") {
@@ -36,6 +40,7 @@ function findLoadedRow(
           candidate.reasoningId === itemId
         );
       }
+
       if (
         row.kind !== "work" ||
         candidate.kind !== "work" ||
@@ -45,6 +50,7 @@ function findLoadedRow(
       ) {
         return false;
       }
+
       return (
         row.workKind !== "file-change" ||
         (candidate.workKind === "file-change" &&
@@ -59,13 +65,17 @@ export function resolveDeferredTimelineContent(
   loaded: readonly TimelineRow[],
 ): ThreadTimelineViewRow | null {
   const itemId = deferredTimelineContentItemId(row);
+
   if (itemId === null) {
     return row;
   }
+
   const match = findLoadedRow(row, itemId, loaded);
+
   if (match === null) {
     return null;
   }
+
   if (
     row.kind === "system" &&
     row.systemKind === "operation" &&
@@ -73,13 +83,17 @@ export function resolveDeferredTimelineContent(
     match.kind === "system"
   ) {
     const { contentDeferred: _contentDeferred, ...rest } = row;
+
     return { ...rest, detail: match.detail };
   }
+
   if (row.kind !== "work" || match.kind !== "work") {
     return null;
   }
+
   if (row.workKind === "command" && match.workKind === "command") {
     const { contentDeferred: _contentDeferred, ...rest } = row;
+
     return {
       ...rest,
       command: match.command,
@@ -89,8 +103,10 @@ export function resolveDeferredTimelineContent(
         : { outputPreview: match.outputPreview }),
     };
   }
+
   if (row.workKind === "tool" && match.workKind === "tool") {
     const { contentDeferred: _contentDeferred, ...rest } = row;
+
     return {
       ...rest,
       output: match.output,
@@ -99,8 +115,10 @@ export function resolveDeferredTimelineContent(
         : { outputPreview: match.outputPreview }),
     };
   }
+
   if (row.workKind === "file-change" && match.workKind === "file-change") {
     const { contentDeferred: _contentDeferred, ...rest } = row;
+
     return {
       ...rest,
       change: match.change,
@@ -108,5 +126,6 @@ export function resolveDeferredTimelineContent(
       stdout: match.stdout,
     };
   }
+
   return null;
 }

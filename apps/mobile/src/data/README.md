@@ -5,10 +5,11 @@ about threads, projects, plugins and settings runs in the web page inside
 the WebView, which has its own query client; the native `QueryClient` only
 caches the system config the palette sync reads.
 
-- `connect/` backs bb connect enrollment: `parseConnectPairingPayload` (QR
-  JSON, `bb://connect?code=…` link, or a bare code),
-  `resolveEnrollmentTarget` (server handle or URL, optional self-hosted
-  apex), `redeemEnrollment` + `describeEnrollmentError` (redeem the pairing
+- `connect/` backs Omnyo connect enrollment: `parseConnectPairingPayload` (QR
+  JSON, `omnyo://connect?code=…` link, or a bare code),
+  `resolveEnrollmentTarget` (server handle or URL, optional apex; it refuses
+  any apex other than omnyo.link, stg.omnyo.link or the local stub),
+  `redeemEnrollment` + `describeEnrollmentError` (redeem the pairing
   code, map wire errors to copy), `accountServerProfile`, and
   `useAccountServers` (the other servers the credential's account owns).
   Pure modules are vitest-tested.
@@ -17,13 +18,17 @@ caches the system config the palette sync reads.
   `push-registration.ts`: `decidePushSync` (toggle × EAS project id × OS
   permission × existing record → skip / unregister / fetch-token),
   `shouldReregister` (token / platform / server change, daily refresh),
-  `syncPushRegistration` (never throws; removes the stale row before a
-  re-register), `unregisterPushRegistration` (by profile id: the record keeps
+  `syncPushRegistration` (never throws; checks that the server still has an
+  up-to-date row and registers again when it does not; removes the stale row
+  before a re-register), `unregisterPushRegistration` (by profile id: the record keeps
   the server URL, so a removed profile can still be cleaned up),
-  `enablePushForProfile` (asks the OS once), `describePushStatus`.
+  `enablePushForProfile` (asks the OS once), `enablePushForFirstServer` and
+  `adoptFirstServer` (a yes given before any server is saved applies to the
+  first eligible server that syncs), `shouldShowPushPrompt` (first launch with
+  no server, or the active server's first connection), `describePushStatus`.
   `push-registration-controller.ts` coalesces concurrent syncs per profile
   and reconciles removed profiles / token rolls. `push-store.ts` is the
-  injected-storage store (MMKV `bb.preferences` in the app, a Map in tests).
+  injected-storage store (MMKV `omnyo.preferences` in the app, a Map in tests).
   `push-subscriptions-api.ts` calls the `push-notifications` plugin RPC
   through `sdk.plugins.callRpc`. It keys clients by server URL, not by a
   profile client that the app can dispose. Its list reads local validated

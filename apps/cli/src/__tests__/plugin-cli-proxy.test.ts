@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Agent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
-import { RESERVED_BB_CLI_COMMANDS } from "@bb/domain/plugin-cli";
+import { RESERVED_CORE_CLI_COMMANDS } from "@omnyo/domain/plugin-cli";
 
 import {
   CORE_COMMAND_GROUPS,
@@ -20,9 +20,9 @@ import {
   type PluginCliContributionEntry,
 } from "../plugin-cli-proxy.js";
 
-describe("reserved bb CLI command names", () => {
+describe("reserved omnyo CLI command names", () => {
   it("matches the complete core command-group registry plus help", () => {
-    expect([...RESERVED_BB_CLI_COMMANDS].sort()).toEqual(
+    expect([...RESERVED_CORE_CLI_COMMANDS].sort()).toEqual(
       [...CORE_COMMAND_GROUPS.map((group) => group.name), "help"].sort(),
     );
   });
@@ -34,8 +34,8 @@ describe("pluginCommandLabel", () => {
     name: "pool",
     summary: "Pool",
     commands: [
-      { name: "account-add", summary: "Add", usage: "bb pool account add" },
-      { name: "status", summary: "Status", usage: "bb pool status" },
+      { name: "account-add", summary: "Add", usage: "omnyo pool account add" },
+      { name: "status", summary: "Status", usage: "omnyo pool status" },
     ],
   };
 
@@ -62,8 +62,9 @@ describe("pluginProxyCandidate", () => {
   it("proxies the builtin plugin commands the kernel no longer owns", () => {
     const names = new Set(CORE_COMMAND_GROUPS.map((group) => group.name));
     names.add("help");
+
     for (const moved of ["automation", "connect"]) {
-      expect(RESERVED_BB_CLI_COMMANDS).not.toContain(moved);
+      expect(RESERVED_CORE_CLI_COMMANDS).not.toContain(moved);
       expect(pluginProxyCandidate(moved, names)).toBe(moved);
     }
   });
@@ -169,6 +170,7 @@ describe("fetchPluginCliContributions retries", () => {
 
   function recordingSleep() {
     const slept: number[] = [];
+
     return {
       slept,
       sleep: async (ms: number) => {
@@ -182,6 +184,7 @@ describe("fetchPluginCliContributions retries", () => {
       .fn()
       .mockRejectedValueOnce(timeoutError())
       .mockResolvedValueOnce(okResponse());
+
     vi.stubGlobal("fetch", fetchMock);
     const { slept, sleep } = recordingSleep();
 
@@ -197,10 +200,12 @@ describe("fetchPluginCliContributions retries", () => {
     vi.spyOn(bodyFailedResponse, "json").mockRejectedValue(
       connectError("UND_ERR_SOCKET"),
     );
+
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(bodyFailedResponse)
       .mockResolvedValueOnce(okResponse());
+
     vi.stubGlobal("fetch", fetchMock);
     const { slept, sleep } = recordingSleep();
 
@@ -218,6 +223,7 @@ describe("fetchPluginCliContributions retries", () => {
         headers: { "content-type": "application/json" },
       }),
     );
+
     vi.stubGlobal("fetch", fetchMock);
     const { slept, sleep } = recordingSleep();
 
@@ -236,6 +242,7 @@ describe("fetchPluginCliContributions retries", () => {
     const result = await fetchPluginCliContributions("http://localhost", 2000, {
       sleep,
     });
+
     expect(result).toMatchObject({
       outcome: "unreachable",
       attempts: 3,
@@ -253,6 +260,7 @@ describe("fetchPluginCliContributions retries", () => {
     const result = await fetchPluginCliContributions("http://localhost", 2000, {
       sleep,
     });
+
     expect(result).toMatchObject({ outcome: "unreachable", attempts: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(slept).toEqual([]);
@@ -269,6 +277,7 @@ describe("fetchPluginCliContributions retries", () => {
         2000,
         { sleep },
       );
+
       expect(result).toMatchObject({ outcome: "unreachable", attempts: 1 });
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(slept).toEqual([]);
@@ -280,6 +289,7 @@ describe("fetchPluginCliContributions retries", () => {
       .fn()
       .mockRejectedValueOnce(connectError("ECONNRESET"))
       .mockResolvedValueOnce(okResponse());
+
     vi.stubGlobal("fetch", fetchMock);
     const { sleep } = recordingSleep();
 
@@ -307,6 +317,7 @@ describe("describeUnreachableServer", () => {
         code,
       }),
     );
+
     return new TypeError("fetch failed", {
       cause: Object.assign(new AggregateError(errors), {
         code: errors[0]?.code,
@@ -314,9 +325,9 @@ describe("describeUnreachableServer", () => {
     });
   }
 
-  it("says bb is not running only on ECONNREFUSED", () => {
+  it("says Omnyo is not running only on ECONNREFUSED", () => {
     expect(describeUnreachableServer(url, fetchFailed("ECONNREFUSED"))).toBe(
-      `bb is not running at ${url} — open the bb app, then re-run this command.`,
+      `Omnyo is not running at ${url} — open the Omnyo app, then re-run this command.`,
     );
   });
 
@@ -327,23 +338,24 @@ describe("describeUnreachableServer", () => {
         aggregateFetchFailed(["ECONNREFUSED", "ECONNREFUSED"]),
       ),
     ).toBe(
-      `bb is not running at ${url} — open the bb app, then re-run this command.`,
+      `Omnyo is not running at ${url} — open the Omnyo app, then re-run this command.`,
     );
 
     const mixedMessage = describeUnreachableServer(
       url,
       aggregateFetchFailed(["ECONNREFUSED", "EPERM"]),
     );
-    expect(mixedMessage).toContain(`Cannot reach bb at ${url}: EPERM`);
-    expect(mixedMessage).toContain("bb may still be running");
+
+    expect(mixedMessage).toContain(`Cannot reach Omnyo at ${url}: EPERM`);
+    expect(mixedMessage).toContain("Omnyo may still be running");
     expect(mixedMessage).not.toContain("not running at");
   });
 
-  it("reports a blocked connection without declaring bb down", () => {
+  it("reports a blocked connection without declaring Omnyo down", () => {
     for (const code of ["EPERM", "EACCES"]) {
       const message = describeUnreachableServer(url, fetchFailed(code));
-      expect(message).toContain(`Cannot reach bb at ${url}: ${code}`);
-      expect(message).toContain("bb may still be running");
+      expect(message).toContain(`Cannot reach Omnyo at ${url}: ${code}`);
+      expect(message).toContain("Omnyo may still be running");
       expect(message).not.toContain("not running at");
     }
   });
@@ -352,11 +364,12 @@ describe("describeUnreachableServer", () => {
     const timeout = Object.assign(new Error("The operation timed out"), {
       name: "TimeoutError",
     });
+
     const message = describeUnreachableServer(url, timeout, 2000);
-    expect(message).toContain(`bb did not respond at ${url} within 2000ms`);
+    expect(message).toContain(`Omnyo did not respond at ${url} within 2000ms`);
     expect(message).toContain("it may be busy or temporarily unreachable");
     expect(message).not.toContain("not running at");
-    expect(message).not.toContain("bb is running");
+    expect(message).not.toContain("Omnyo is running");
     expect(message).toContain("re-run it");
   });
 
@@ -364,6 +377,7 @@ describe("describeUnreachableServer", () => {
     const timeout = Object.assign(new Error("The operation timed out"), {
       name: "TimeoutError",
     });
+
     const message = describeUnreachableServer(url, timeout, 4000, 3);
     expect(message).toContain("after 3 attempts (last window 4000ms)");
     expect(message).not.toContain("not running at");
@@ -373,8 +387,9 @@ describe("describeUnreachableServer", () => {
     const err = new TypeError("fetch failed", {
       cause: new Error("getaddrinfo ENOTFOUND example.invalid"),
     });
+
     expect(describeUnreachableServer(url, err)).toBe(
-      `Cannot reach bb at ${url}: fetch failed: getaddrinfo ENOTFOUND example.invalid`,
+      `Cannot reach Omnyo at ${url}: fetch failed: getaddrinfo ENOTFOUND example.invalid`,
     );
   });
 });
@@ -485,6 +500,7 @@ describe("runPluginCliCommand", () => {
     );
     const writes: Array<{ channel: "stdout" | "stderr"; value: string }> = [];
     let pendingWrites = 0;
+
     const outputStream = (channel: "stdout" | "stderr") =>
       new Writable({
         write(chunk, _encoding, callback) {
@@ -520,6 +536,7 @@ describe("runPluginCliCommand", () => {
         const error = Object.assign(new Error(`write ${code ?? "failed"}`), {
           code,
         });
+
         vi.stubGlobal(
           "fetch",
           vi.fn(
@@ -530,6 +547,7 @@ describe("runPluginCliCommand", () => {
           ),
         );
         let callbackCompleted = false;
+
         const stream = new Writable({
           write(_chunk, _encoding, callback) {
             setImmediate(() => {
@@ -538,15 +556,20 @@ describe("runPluginCliCommand", () => {
             });
           },
         });
+
         const observed: Error[] = [];
+
         const observer = (error: Error) => {
           observed.push(error);
         };
+
         stream.on("error", observer);
+
         const result = runPluginCliCommand("http://localhost", "fixture", [], {
           stdout: stream,
           stderr: stream,
         });
+
         if (code === "EPIPE") await expect(result).resolves.toBe(7);
         else await expect(result).rejects.toBe(error);
         await new Promise<void>((resolve) => setImmediate(resolve));
@@ -566,11 +589,13 @@ describe("runPluginCliCommand", () => {
           new Response(JSON.stringify({ exitCode: 0, stdout: "output" })),
       ),
     );
+
     const stream = new Writable({
       write(_chunk, _encoding, callback) {
         callback(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
       },
     });
+
     await expect(
       runPluginCliCommand("http://localhost", "fixture", [], {
         stdout: stream,
@@ -593,6 +618,7 @@ describe("runPluginCliCommand", () => {
     );
     let finishDestroy: ((error: Error | null) => void) | undefined;
     const error = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+
     const stream = new Writable({
       write(_chunk, _encoding, callback) {
         callback(error);
@@ -601,13 +627,16 @@ describe("runPluginCliCommand", () => {
         finishDestroy = callback;
       },
     });
+
     let settled = false;
+
     const result = runPluginCliCommand("http://localhost", "fixture", [], {
       stdout: stream,
       stderr: stream,
     }).finally(() => {
       settled = true;
     });
+
     await vi.waitFor(() => expect(finishDestroy).toBeDefined());
     expect(settled).toBe(false);
     expect(stream.listenerCount("error")).toBe(1);
@@ -632,17 +661,20 @@ describe("runPluginCliCommand", () => {
       ),
     );
     const writes: string[] = [];
+
     const healthy = new Writable({
       write(chunk, _encoding, callback) {
         writes.push(chunk.toString());
         callback();
       },
     });
+
     const broken = new Writable({
       write(_chunk, _encoding, callback) {
         callback(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
       },
     });
+
     for (let i = 0; i < 12; i += 1) {
       await expect(
         runPluginCliCommand("http://localhost", "fixture", [], {
@@ -653,6 +685,7 @@ describe("runPluginCliCommand", () => {
       expect(healthy.listenerCount("error")).toBe(0);
       expect(healthy.listenerCount("close")).toBe(0);
     }
+
     expect(writes).toEqual([
       "warning\n",
       ...Array.from({ length: 11 }, () => ["output\n", "warning\n"]).flat(),
@@ -668,11 +701,13 @@ describe("runPluginCliCommand", () => {
       ),
     );
     const error = new Error("synchronous write failed");
+
     const stream = new Writable({
       write() {
         throw error;
       },
     });
+
     await expect(
       runPluginCliCommand("http://localhost", "fixture", [], {
         stdout: stream,
@@ -692,12 +727,14 @@ describe("runPluginCliCommand", () => {
           new Response(JSON.stringify({ exitCode: 0, stdout: "output" })),
       ),
     );
+
     const stream = new Writable({
       write(_chunk, _encoding, callback) {
         this.destroy();
         callback(new Error("write interrupted"));
       },
     });
+
     await expect(
       runPluginCliCommand("http://localhost", "fixture", [], {
         stdout: stream,
@@ -715,22 +752,26 @@ describe("runPluginCliCommand", () => {
       vi.fn(async (_url, init: RequestInit | undefined) => {
         const parsed = JSON.parse(String(init?.body)) as { argv: string[] };
         requests.push(parsed.argv);
+
         return new Response(JSON.stringify({ exitCode: 0 }), { status: 200 });
       }),
     );
     const writes: string[] = [];
+
     const output = new Writable({
       write(chunk, _encoding, callback) {
         writes.push(chunk.toString());
         callback();
       },
     });
+
     const input = {
       isTTY: false,
       async *[Symbol.asyncIterator]() {
         yield Buffer.from("opaque-credential\n");
       },
     };
+
     const argv = ["deploy", "--credential-stdin", "--format", "json"];
 
     await expect(
@@ -756,15 +797,19 @@ describe("runPluginCliCommand", () => {
       vi.fn(async (_url, init: RequestInit | undefined) => {
         const parsed = JSON.parse(String(init?.body)) as { argv: string[] };
         requests.push(parsed.argv);
+
         return new Response(JSON.stringify({ exitCode: 0 }), { status: 200 });
       }),
     );
+
     const output = new Writable({
       write(_chunk, _encoding, callback) {
         callback();
       },
     });
+
     let stdinRead = false;
+
     const input = {
       isTTY: false,
       async *[Symbol.asyncIterator]() {
@@ -772,6 +817,7 @@ describe("runPluginCliCommand", () => {
         yield Buffer.from("should-not-be-read\n");
       },
     };
+
     const argv = [
       "sandbox",
       "exec",
@@ -797,6 +843,7 @@ describe("runPluginCliCommand", () => {
 
   it("outlives the global fetch headers timeout while a plugin command waits on a human", async () => {
     const RESPONSE_DELAY_MS = 1500;
+
     const server: Server = createServer((request, response) => {
       setTimeout(() => {
         response.setHeader("content-type", "application/json");
@@ -808,12 +855,14 @@ describe("runPluginCliCommand", () => {
         );
       }, RESPONSE_DELAY_MS);
     });
+
     await new Promise<void>((resolve) =>
       server.listen(0, "127.0.0.1", resolve),
     );
     const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const previousDispatcher = getGlobalDispatcher();
     setGlobalDispatcher(new Agent({ headersTimeout: 200 }));
+
     try {
       await expect(
         fetch(`${baseUrl}/api/v1/plugins/secrets/cli`, { method: "POST" }),
@@ -823,12 +872,14 @@ describe("runPluginCliCommand", () => {
       });
 
       const writes: string[] = [];
+
       const stream = new Writable({
         write(chunk, _encoding, callback) {
           writes.push(chunk.toString());
           callback();
         },
       });
+
       const exitCode = await runPluginCliCommand(
         baseUrl,
         "secrets",

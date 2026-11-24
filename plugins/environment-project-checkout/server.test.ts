@@ -2,30 +2,33 @@ import type {
   PluginEnvironmentProviderCreateContext,
   PluginEnvironmentProviderRestoreContext,
   PluginEnvironmentProviderValidateContext,
-} from "@get-bb/plugin-sdk/environment-provider";
+} from "@omnyo/plugin-sdk/environment-provider";
 import {
   createFakePluginHost,
   makeHostResponse,
   makeThreadResponse,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import { describe, expect, it, vi } from "vitest";
 import { PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
 import plugin from "./server.js";
 
 type Environment =
   PluginEnvironmentProviderRestoreContext["previous"]["environment"];
+
 type ThreadRow = { id: string; environmentId: string | null; status: string };
 
 const HOST = makeHostResponse({ id: "host-a", name: "Fake machine" });
+
 const PROJECT: PluginEnvironmentProviderCreateContext["project"] = {
   id: "project-1",
   kind: "standard",
-  name: "bb",
+  name: "omnyo",
   gitRemoteUrl: null,
   createdAt: 1,
   updatedAt: 1,
 };
-const CHECKOUT_PATH = "/checkouts/bb";
+
+const CHECKOUT_PATH = "/checkouts/omnyo";
 
 function environmentAt(path: string): Environment {
   return {
@@ -53,12 +56,13 @@ async function validateWith(args: {
   inputs: PluginEnvironmentProviderValidateContext["inputs"];
   inspectCheckout?: () => unknown;
 }) {
-  const { bb, harness } = createFakePluginHost({
+  const { api, harness } = createFakePluginHost({
     pluginId: "environment-project-checkout",
     experimental_callHostRpc: (call) => {
       if (call.method === "inspectCheckout" && args.inspectCheckout) {
         return args.inspectCheckout();
       }
+
       throw new Error(`unexpected host call ${call.method}`);
     },
     sdk: {
@@ -81,13 +85,17 @@ async function validateWith(args: {
       },
     },
   });
-  await plugin(bb);
+
+  await plugin(api);
+
   const provider = harness.registrations.environmentProviders.get(
     PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID,
   );
+
   if (provider === undefined || provider.validate === null) {
     throw new Error("the checkout provider registered no validate");
   }
+
   return provider.validate({
     project: PROJECT,
     host: HOST,
@@ -99,10 +107,11 @@ async function validateWith(args: {
 
 describe("checkout provider validate", () => {
   it("registers as Project checkout", async () => {
-    const { bb, harness } = createFakePluginHost({
+    const { api, harness } = createFakePluginHost({
       pluginId: "environment-project-checkout",
     });
-    await plugin(bb);
+
+    await plugin(api);
 
     expect(
       harness.registrations.environmentProviders.get(
@@ -117,6 +126,7 @@ describe("checkout provider validate", () => {
       threads: [{ id: "thr_other", environmentId: "env_1", status: "active" }],
       inputs: { branch: { kind: "existing", name: "release" } },
     });
+
     expect(decision).toEqual({
       action: "refuse",
       message:
@@ -130,6 +140,7 @@ describe("checkout provider validate", () => {
       threads: [{ id: "thr_other", environmentId: "env_1", status: "active" }],
       inputs: {},
     });
+
     expect(decision).toEqual({ action: "accept" });
   });
 
@@ -139,6 +150,7 @@ describe("checkout provider validate", () => {
       threads: [{ id: "thr_done", environmentId: "env_1", status: "idle" }],
       inputs: { branch: { kind: "new", baseBranch: "main" } },
     });
+
     expect(decision).toEqual({
       action: "refuse",
       message:
@@ -152,6 +164,7 @@ describe("checkout provider validate", () => {
       id: "env_worktree_42",
       environmentProviderId: "git-worktree",
     };
+
     const decision = await validateWith({
       environments: [environment],
       threads: [],
@@ -177,6 +190,7 @@ describe("checkout provider validate", () => {
         operation: { kind: "none" },
       }),
     });
+
     expect(decision).toEqual({
       action: "refuse",
       message: "Checkout blocked by uncommitted changes",
@@ -195,6 +209,7 @@ describe("checkout provider validate", () => {
         operation: { kind: "none" },
       }),
     });
+
     expect(decision).toEqual({
       action: "refuse",
       message: "Checkout blocked while HEAD is detached",
@@ -213,6 +228,7 @@ describe("checkout provider validate", () => {
         operation: { kind: "rebase", hasConflicts: false },
       }),
     });
+
     expect(decision).toEqual({
       action: "refuse",
       message: "Checkout blocked by an in-progress rebase",
@@ -231,6 +247,7 @@ describe("checkout provider validate", () => {
         operation: { kind: "merge", hasConflicts: true },
       }),
     });
+
     expect(decision).toEqual({
       action: "refuse",
       message: "Checkout blocked by unresolved conflicts",
@@ -249,6 +266,7 @@ describe("checkout provider validate", () => {
         operation: { kind: "none" },
       }),
     });
+
     expect(decision).toEqual({ action: "accept" });
   });
 
@@ -261,20 +279,22 @@ describe("checkout provider validate", () => {
         throw new Error("machine is offline");
       },
     });
+
     expect(decision).toEqual({ action: "accept" });
   });
 
   it("checks the directory the inputs name rather than the project checkout", async () => {
     const decision = await validateWith({
-      environments: [environmentAt("/elsewhere/bb")],
+      environments: [environmentAt("/elsewhere/omnyo")],
       threads: [
         { id: "thr_other", environmentId: "env_1", status: "starting" },
       ],
       inputs: {
-        path: "/elsewhere/bb",
+        path: "/elsewhere/omnyo",
         branch: { kind: "existing", name: "release" },
       },
     });
+
     expect(decision.action).toBe("refuse");
   });
 });
@@ -282,20 +302,30 @@ describe("checkout provider validate", () => {
 it.each([false, true])(
   "reports source ownership %s to core's hook policy",
   async (owned) => {
-    const { bb, harness } = createFakePluginHost({
+    const { api, harness } = createFakePluginHost({
       pluginId: "environment-project-checkout",
       experimental_callHostRpc: (call) => {
         if (call.method !== "attach") throw new Error("Unexpected host method");
-        return { status: "attached", path: CHECKOUT_PATH, branchName: "main" };
+
+        return {
+          status: "attached",
+          path: CHECKOUT_PATH,
+          branchName: "main",
+          mergeBaseBranch: null,
+        };
       },
       sdk: { environments: { list: () => [] }, threads: { list: () => [] } },
     });
+
     try {
-      await plugin(bb);
+      await plugin(api);
+
       const provider = harness.registrations.environmentProviders.get(
         PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID,
       );
+
       if (!provider) throw new Error("Missing provider");
+
       const result = await provider.create({
         project: PROJECT,
         host: HOST,
@@ -303,13 +333,14 @@ it.each([false, true])(
         gitRemote: null,
         inputs: {},
         thread: makeThreadResponse(),
-        suggestedBranchName: "bb/test",
+        suggestedBranchName: "omnyo/test",
         attempt: 1,
         pathKey: "fixture",
         experimental_claimPath: async () => true,
         report: { step() {}, log() {} },
         signal: new AbortController().signal,
       });
+
       expect(result).toMatchObject({
         status: "created",
         path: CHECKOUT_PATH,
@@ -327,19 +358,25 @@ it.each(["branch", "timeout", "abort"] as const)(
     const hostCall = vi.fn(() => {
       throw new Error("Unexpected host call");
     });
-    const { bb, harness } = createFakePluginHost({
+
+    const { api, harness } = createFakePluginHost({
       pluginId: "environment-project-checkout",
       experimental_callHostRpc: hostCall,
     });
+
     const controller = new AbortController();
     const claim = vi.fn(async () => false);
+
     try {
-      await plugin(bb);
+      await plugin(api);
+
       const provider = harness.registrations.environmentProviders.get(
         PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID,
       );
+
       if (!provider) throw new Error("Missing provider");
       vi.useFakeTimers();
+
       const result = provider.create({
         project: PROJECT,
         host: HOST,
@@ -350,13 +387,14 @@ it.each(["branch", "timeout", "abort"] as const)(
             ? { branch: { kind: "existing", name: "release" } }
             : {},
         thread: makeThreadResponse(),
-        suggestedBranchName: "bb/test",
+        suggestedBranchName: "omnyo/test",
         attempt: 1,
         pathKey: "blocked",
         experimental_claimPath: claim,
         report: { step() {}, log() {} },
         signal: controller.signal,
       });
+
       if (mode === "abort") {
         const assertion = expect(result).rejects.toThrow();
         controller.abort();
@@ -366,12 +404,15 @@ it.each(["branch", "timeout", "abort"] as const)(
           vi.setSystemTime(Date.now() + 15 * 60 * 1000);
           await vi.advanceTimersByTimeAsync(50);
         }
+
         await expect(result).resolves.toMatchObject({
           status: "failed",
           message: "Workspace is being prepared by another thread",
         });
       }
+
       expect(hostCall).not.toHaveBeenCalled();
+
       if (mode === "branch") expect(claim).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
@@ -392,14 +433,90 @@ describe("checkout provider existing path", () => {
   ] as const)(
     "reuses the recorded environment for %j: %s",
     async (inputs, expected) => {
-      const { bb, harness } = createFakePluginHost({
+      const { api, harness } = createFakePluginHost({
         pluginId: "environment-project-checkout",
       });
-      await plugin(bb);
+
+      await plugin(api);
+
       const provider = harness.registrations.environmentProviders.get(
         PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID,
       );
+
       expect(provider?.experimental_existingPath?.(inputs)).toBe(expected);
+    },
+  );
+});
+
+describe("checkout provider merge base", () => {
+  it.each([
+    [
+      { branch: { kind: "existing", name: "release" } },
+      { mergeBaseBranch: null },
+      null,
+    ],
+    [{}, {}, null],
+    [
+      { branch: { kind: "new", baseBranch: "dev" } },
+      { mergeBaseBranch: "origin/dev" },
+      "origin/dev",
+    ],
+  ] as const)(
+    "reports %j as %j so a reused environment drops or keeps its base",
+    async (inputs, expected, resolvedBase) => {
+      const { api, harness } = createFakePluginHost({
+        pluginId: "environment-project-checkout",
+        experimental_callHostRpc: (call) => {
+          if (call.method !== "attach") {
+            throw new Error("Unexpected host method");
+          }
+
+          return {
+            status: "attached",
+            path: CHECKOUT_PATH,
+            branchName: null,
+            mergeBaseBranch: resolvedBase,
+          };
+        },
+        sdk: { environments: { list: () => [] }, threads: { list: () => [] } },
+      });
+
+      try {
+        await plugin(api);
+
+        const provider = harness.registrations.environmentProviders.get(
+          PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID,
+        );
+
+        if (!provider) throw new Error("Missing provider");
+
+        const result = await provider.create({
+          project: PROJECT,
+          host: HOST,
+          projectCheckout: {
+            path: CHECKOUT_PATH,
+            experimental_ownsPath: false,
+          },
+          gitRemote: null,
+          inputs,
+          thread: makeThreadResponse(),
+          suggestedBranchName: "omnyo/thread-branch",
+          attempt: 1,
+          pathKey: "merge-base",
+          experimental_claimPath: async () => true,
+          report: { step() {}, log() {} },
+          signal: new AbortController().signal,
+        });
+
+        expect(result).toEqual({
+          status: "created",
+          path: CHECKOUT_PATH,
+          ownsPath: false,
+          ...expected,
+        });
+      } finally {
+        await harness.lifecycle.dispose();
+      }
     },
   );
 });
@@ -408,24 +525,37 @@ describe("restoring a destroyed checkout environment", () => {
   async function restoreWith(args: {
     inputs: PluginEnvironmentProviderRestoreContext["inputs"];
     branchName: string | null;
+    mergeBaseBranch?: string | null;
   }) {
     const attachCalls: unknown[] = [];
-    const { bb, harness } = createFakePluginHost({
+
+    const { api, harness } = createFakePluginHost({
       pluginId: "environment-project-checkout",
       experimental_callHostRpc: (call) => {
         if (call.method !== "attach") throw new Error("Unexpected host method");
         attachCalls.push(call.input);
-        return { status: "attached", path: CHECKOUT_PATH, branchName: null };
+
+        return {
+          status: "attached",
+          path: CHECKOUT_PATH,
+          branchName: null,
+          mergeBaseBranch: null,
+        };
       },
       sdk: { environments: { list: () => [] }, threads: { list: () => [] } },
     });
+
     try {
-      await plugin(bb);
+      await plugin(api);
+
       const provider = harness.registrations.environmentProviders.get(
         PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID,
       );
+
       const restore = provider?.restore;
+
       if (!restore) throw new Error("Missing restore");
+
       const result = await restore({
         project: PROJECT,
         host: HOST,
@@ -441,12 +571,14 @@ describe("restoring a destroyed checkout environment", () => {
             ...environmentAt(CHECKOUT_PATH),
             status: "destroyed",
             branchName: args.branchName,
+            mergeBaseBranch: args.mergeBaseBranch ?? null,
           },
           resource: null,
         },
         report: { step() {}, log() {} },
         signal: new AbortController().signal,
       });
+
       return { attachCalls, result };
     } finally {
       await harness.lifecycle.dispose();
@@ -455,14 +587,20 @@ describe("restoring a destroyed checkout environment", () => {
 
   it("switches back to the thread's own branch instead of recreating it from its base", async () => {
     const { attachCalls, result } = await restoreWith({
-      inputs: { branch: { kind: "new", baseBranch: "main" } },
-      branchName: "bb/thread-branch",
+      inputs: { branch: { kind: "new", baseBranch: "origin/dev" } },
+      branchName: "omnyo/thread-branch",
+      mergeBaseBranch: "origin/dev",
     });
-    expect(result).toMatchObject({ status: "created", path: CHECKOUT_PATH });
+
+    expect(result).toMatchObject({
+      status: "created",
+      path: CHECKOUT_PATH,
+      mergeBaseBranch: "origin/dev",
+    });
     expect(attachCalls).toEqual([
       expect.objectContaining({
         path: CHECKOUT_PATH,
-        branch: { kind: "existing", name: "bb/thread-branch" },
+        branch: { kind: "existing", name: "omnyo/thread-branch" },
       }),
     ]);
   });
@@ -472,6 +610,7 @@ describe("restoring a destroyed checkout environment", () => {
       inputs: {},
       branchName: "feature",
     });
+
     expect(attachCalls).toEqual([expect.objectContaining({ branch: null })]);
   });
 
@@ -480,6 +619,7 @@ describe("restoring a destroyed checkout environment", () => {
       inputs: { branch: { kind: "new", baseBranch: "main" } },
       branchName: null,
     });
+
     expect(result).toMatchObject({
       status: "failed",
       message: expect.stringContaining("no branch"),

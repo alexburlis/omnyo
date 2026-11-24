@@ -1,17 +1,18 @@
-# @bb/mobile
+# @omnyo/mobile
 
-Native iOS/Android client for bb (Expo SDK 57, React Native 0.86, Expo
+Native iOS/Android client for Omnyo (Expo SDK 57, React Native 0.86, Expo
 Router, NativeWind v5).
 
 Status: a native shell around the web interface (#2515). `app/webview.tsx`
 loads the active server's web app in `react-native-webview` and talks to it
-over `@bb/mobile-bridge` (handshake, haptics, app-icon badge, share, open
+over `@omnyo/mobile-bridge` (handshake, haptics, app-icon badge, share, open
 external links, open native screens). Threads, projects, plugins and server
 settings run in the page. The native screens cover what the page cannot
-own: first-run pairing (Direct URL and bb connect QR / code enrollment),
-saved servers, This device settings (appearance, haptics, notifications,
-reload the page, clear website data), push registration and notification
-taps, deep links, quick actions, share intents and the connection banner.
+own: first-run pairing (Direct URL and Omnyo connect QR / code enrollment),
+the Servers hub (current server with reload the page and clear website data,
+other saved servers, add server, and this phone's haptics, appearance and
+notifications), push registration and notification taps, deep links, quick
+actions, share intents and the connection banner.
 External links use the web app's `shellOpenExternal` helper and the native
 bridge to open through the OS URL handler. The `Mobile E2E` GitHub workflow
 drives the shell flows.
@@ -28,15 +29,15 @@ app/                     Expo Router routes (thin: each file re-exports a screen
                          PushNotificationsHost, Toaster
   index.tsx              redirects to Add server (no profiles) or the shell
   webview.tsx            the WebView shell (`?profileId=&path=`)
-  connect/index.tsx      bb connect enrollment (QR / code) — also the re-pair
-                         target (`?profileId=`) and the `bb://connect?code=…` link
-  settings/              device (This device), appearance, notifications,
-                         servers/index (saved servers), servers/add (bb connect
-                         entry + Direct URL form)
-  dev/webview-spike.tsx  Phase 0 WebView diagnostics (dev / EXPO_PUBLIC_BB_E2E=1
+  connect/index.tsx      Omnyo connect enrollment (QR / code) — also the re-pair
+                         target (`?profileId=`) and the `omnyo://connect?code=…` link
+  settings/              device (the Servers hub), appearance, notifications,
+                         servers/index (redirects to the hub), servers/add
+                         (Omnyo connect entry + Direct URL form)
+  dev/webview-spike.tsx  Phase 0 WebView diagnostics (dev / EXPO_PUBLIC_OMNYO_E2E=1
                          only: release bundles redirect home)
-  e2e/reset.tsx          bb://e2e/reset — wipes local state (dev / EXPO_PUBLIC_BB_E2E=1)
-  +native-intent.tsx     redirectSystemPath: every incoming URL (bb:// scheme,
+  e2e/reset.tsx          omnyo://e2e/reset — wipes local state (dev / EXPO_PUBLIC_OMNYO_E2E=1)
+  +native-intent.tsx     redirectSystemPath: every incoming URL (omnyo:// scheme,
                          universal links, dev-client URLs) → src/lib/shell link
                          resolution → profile switch + shell route / add-server prompt
   +not-found.tsx         unknown native route fallback
@@ -68,9 +69,9 @@ src/
     query/               per-profile QueryClient, AppState focus, realtime →
                          system config invalidation, session refetch
     realtime/            WebSocketManager-shaped realtime on RN WebSocket
-    sdk/                 createMobileSdk (@bb/sdk/browser + app-surface header),
+    sdk/                 createMobileSdk (@omnyo/sdk/browser + app-surface header),
                          per-profile client registry
-    session/             bb connect desktop-session cookie scheduler
+    session/             Omnyo connect desktop-session cookie scheduler
     share/               inbound share intent → shell composer seed
     shell/               shell URL and navigation rules, screen state, last-path
                          preferences, share payloads, link resolution, shell
@@ -83,8 +84,9 @@ src/
                          and usePushRegistration (Settings)
   screens/               connect/ (ConnectEnrollScreen, ConnectScanner —
                          expo-camera QR, AccountServersList), dev/
-                         (WebViewSpikeScreen + probes), settings/ (This device,
-                         Appearance, Notifications, Servers, Add server, the
+                         (WebViewSpikeScreen + probes), settings/ (the Servers
+                         hub in DeviceSettingsScreen with useServerActions,
+                         Appearance, Notifications, Add server, the
                          grouped-list rows), shell/ (RootNavigator, connection
                          banner, header glass, route error boundary, hrefs.ts —
                          typed-route boundary), webview/ (ProfileWebViewScreen,
@@ -97,15 +99,15 @@ e2e/flows/               Maestro shell flows: shell-launch, shell-deep-link,
                          shell-send, shell-unreachable-server, shell-connect
 e2e/subflows/            shared steps (launch-app.yaml: cold start through the
                          dev client + Metro, or `launchApp` of the embedded
-                         Release bundle with `-e BB_E2E_EMBEDDED_BUNDLE=1`;
+                         Release bundle with `-e OMNYO_E2E_EMBEDDED_BUNDLE=1`;
                          pair-direct-server.yaml: add the harness server and
-                         wait for the shell; open-bb-link.yaml /
+                         wait for the shell; open-omnyo-link.yaml /
                          clear-open-confirmation.yaml: accept or cancel the
-                         native `bb://` confirmation), called with
+                         native `omnyo://` confirmation), called with
                          `runFlow: ../subflows/<name>.yaml`
 e2e/scripts/             ci-run-flows.sh (the CI flow set against a Release
                          build; see "CI"), connect-stub-control.js (drives the
-                         bb connect stub), pick-simulator.mjs (newest iPhone
+                         Omnyo connect stub), pick-simulator.mjs (newest iPhone
                          17 Pro/17/16 Pro runtime)
 eas.json                 EAS Build profiles (development / development-device /
                          preview / production); see "Release"
@@ -113,7 +115,7 @@ scripts/                 generate-native-theme.ts (theme tokens),
                          testflight-distribute.mjs (TestFlight distribution)
 ```
 
-Rules: import `@bb/sdk/browser` (never `@bb/sdk`); no `@bb/shared-ui`; no DOM
+Rules: import `@omnyo/sdk/browser` (never `@omnyo/sdk`); no `@omnyo/shared-ui`; no DOM
 APIs; keep RN-dependent code out of `src/lib/**` except `src/lib/native`.
 
 ## Prerequisites (macOS)
@@ -126,15 +128,15 @@ debugging enabled.
 
 ### Android local APK and verification
 
-For development threads, build the standalone **bb dev** app from the repo root:
+For development threads, build the standalone **Omnyo dev** app from the repo root:
 
 ```bash
 pnpm mobile:apk:dev
-adb install -r apps/mobile/build-output/bb-dev.apk
+adb install -r apps/mobile/build-output/omnyo-dev.apk
 ```
 
-The APK is `apps/mobile/build-output/bb-dev.apk`. It has an orange bb launcher
-icon, favicon, and splash logo, the name **bb dev**, and package `app.getbb.mobile.dev`, so it
+The APK is `apps/mobile/build-output/omnyo-dev.apk`. It has an orange Omnyo launcher
+icon, favicon, and splash logo, the name **Omnyo dev**, and package `app.getbb.mobile.dev`, so it
 installs alongside the regular app with separate saved servers and data. It
 embeds the Release JS bundle and runs without Metro, EAS, Firebase, or production
 signing credentials. Pair it with the development server through Add server or
@@ -161,15 +163,14 @@ is running, then retry.
 When a thread is asked to build a dev APK, use this command, wait for successful
 completion, and provide a clickable link to the resulting APK. Record the
 source commit and any uncommitted changes. For a durable per-thread copy, copy
-the APK into `$BB_THREAD_STORAGE` and link that absolute path. Do not publish it
-to the public `android-testing` release. Builds use the generated debug signing
+the APK into `$OMNYO_THREAD_STORAGE` and link that absolute path. Builds use the generated debug signing
 key; Android updates require the same key as the installed dev app.
 
 The existing local build retains the regular app identity for smoke tests:
 
 ```bash
-pnpm exec turbo run build:android:local --filter=@bb/mobile
-adb install -r apps/mobile/build-output/bb-android-local.apk
+pnpm exec turbo run build:android:local --filter=@omnyo/mobile
+adb install -r apps/mobile/build-output/omnyo-android-local.apk
 ```
 
 This builds an ARM64 APK with an embedded Release JS bundle and the generated
@@ -182,11 +183,11 @@ Run the mobile backend described below, then `adb reverse tcp:41999 tcp:41999`
 so the Android app can reach it at `http://127.0.0.1:41999`. Keep the reverse
 mapping active during tests. Android does not share the Mac loopback directly.
 
-Run `pnpm exec turbo run e2e:android --filter=@bb/mobile` with only the intended
+Run `pnpm exec turbo run e2e:android --filter=@omnyo/mobile` with only the intended
 Android emulator/device connected. The smoke flow clears this app's local data,
 pairs the fixture, sends a message, checks Android back navigation, relaunches,
-and opens native device settings. Use a normal embedded build, not
-`EXPO_PUBLIC_BB_E2E=1`, so the relaunch step can verify saved profiles.
+and opens the native Servers screen. Use a normal embedded build, not
+`EXPO_PUBLIC_OMNYO_E2E=1`, so the relaunch step can verify saved profiles.
 
 `e2e/android/keyboard.yaml` uses the same backend and checks repeated keyboard
 opening, Back dismissal, draft retention, and sending after dismissal. Run it
@@ -209,7 +210,7 @@ unchanged. Recheck this patch when upgrading WebView or changing keyboard
 ownership; see [Android's inset handling guidance](https://developer.android.com/develop/ui/views/layout/webapps/understand-window-insets).
 
 `e2e/android/connect.yaml` additionally needs the local TLS connect stub started
-with `BB_MOBILE_E2E_COOKIE_DOMAIN=stub.localhost`, a
+with `OMNYO_MOBILE_E2E_COOKIE_DOMAIN=stub.localhost`, a
 trusted fixture CA and DNS for `stub.localhost`/`other.localhost` on the test
 emulator, and `adb reverse tcp:42998 tcp:42998`. It resets the stub and checks
 invalid codes, pairing, WebView cookie authentication, relaunch and session
@@ -251,7 +252,7 @@ Local EAS Submit reads the gitignored `google-play-service-account.json` in
 `apps/mobile`. Register the **Play app-signing certificate**, not only the
 upload certificate, in `ASSETLINKS_SHA256_FINGERPRINTS` on the apex and connect
 gate. Verify real HTTPS app links after installing the Play-signed build.
-The native `bb://` scheme works without those certificates.
+The native `omnyo://` scheme works without those certificates.
 
 Pending credentials do not establish push delivery or verified HTTPS app-link
 coverage. Test those separately once Firebase/signing are configured.
@@ -270,22 +271,24 @@ coverage. Test those separately once Firebase/signing are configured.
 pnpm install                                   # applies patches/expo-modules-jsi@57.0.4.patch
 cd apps/mobile
 pnpm ios                                       # prebuild + build the dev-client, opens the simulator
-EXPO_PUBLIC_BB_SERVER_URL=http://127.0.0.1:<port> pnpm dev   # Metro (dev-client)
+pnpm dev                                       # Metro (dev-client)
 ```
 
 The iOS Simulator shares the Mac loopback, so `pnpm dev` (repo root) or
 `pnpm dev` gives a server URL that works as-is. Physical
-phones need a Tailscale Serve URL, bb connect, or a temporary
-`BB_SERVER_BIND_HOST=0.0.0.0`.
+phones need a Tailscale Serve URL, Omnyo connect, or a temporary
+`OMNYO_SERVER_BIND_HOST=0.0.0.0`.
 
 ## E2E (Maestro)
 
+The shared `e2e/subflows` helpers target the upstream `app.getbb.mobile` variant. Their dev-client link and `Open in Omnyo` confirmation are upstream selectors; they do not select the private Omnyo app. The private publisher owns `e2e/flows/private-release-launch.yaml` and supplies `com.omnyohq.app`. It resets the simulator Keychain once, only to establish a new device, then reinstalls twice without a reset (`first-install`, `reinstall-empty`, `reinstall-saved-server`). Each stage needs two cold launches to reach Add server or the WebView with no fresh-start gate. Never reset existing work to make a launch smoke pass.
+
 ```bash
 # terminal 1: deterministic backend (fake provider, fixed port 41999) serving the built web app
-pnpm exec turbo run build --filter=@bb/app
-BB_MOBILE_E2E_SERVE_APP=1 pnpm --filter @bb/integration-tests e2e:mobile-backend
-# terminal 2: Metro (EXPO_PUBLIC_BB_E2E=1 wipes profiles/preferences on every launch)
-cd apps/mobile && EXPO_PUBLIC_BB_SERVER_URL=http://127.0.0.1:41999 EXPO_PUBLIC_BB_E2E=1 pnpm dev --port 8082
+pnpm exec turbo run build --filter=@omnyo/app
+OMNYO_MOBILE_E2E_SERVE_APP=1 pnpm --filter @omnyo/integration-tests e2e:mobile-backend
+# terminal 2: Metro (EXPO_PUBLIC_OMNYO_E2E=1 wipes profiles/preferences on every launch)
+cd apps/mobile && EXPO_PUBLIC_OMNYO_E2E=1 pnpm dev --port 8082
 # terminal 3: flows
 cd apps/mobile && pnpm e2e:ios
 ```
@@ -295,43 +298,42 @@ WKWebView accessibility tree, so assertions on page content target its text,
 not native test ids.
 `shell-launch.yaml` pairs a Direct server from first run and lands in the
 shell with the page rendered; the other shell flows assume it works.
-`shell-deep-link.yaml` opens a `bb://` scheme link and a web link for the
+`shell-deep-link.yaml` opens an `omnyo://` scheme link and a web link for the
 saved server: both resolve to the shell route carrying a page path, and
-`bb://settings/notifications` still opens the native screen.
+`omnyo://settings/notifications` still opens the native screen.
 `shell-send.yaml` sends a message through the page and reaches the native
-device settings from it.
+Servers screen from its "Servers and phone settings" row.
 `shell-unreachable-server.yaml` checks that the add-server probe refuses a
 server the phone cannot reach, so the shell never loads a dead origin; it
 does not use the harness backend.
-`shell-connect.yaml` drives bb connect end to end against the stub apex +
-gate (`pnpm --filter @bb/integration-tests e2e:mobile-connect-stub`, see
-"bb connect" below): manual code entry with the handle and the self-hosted
+`shell-connect.yaml` drives Omnyo connect end to end against the stub apex +
+gate (`pnpm --filter @omnyo/integration-tests e2e:mobile-connect-stub`, see
+"Omnyo connect" below): manual code entry with the handle and the self-hosted
 apex → enrolled screen (session signed in, account servers listed) → Done →
 the shell through the gate (cookie on fetch and on `/ws`) → the stub expires
 the session (the app re-mints and reconnects by itself) → the stub revokes
 the machine ("needs to be paired again" banner) → "Sign in again" re-pairs
 the same profile with a new code. The flow needs the stub started with
-`BB_MOBILE_E2E_SIMULATOR=<udid>` once (it installs its root certificate in
+`OMNYO_MOBILE_E2E_SIMULATOR=<udid>` once (it installs its root certificate in
 that simulator) and drives the stub through `e2e/scripts/connect-stub-control.js`
 (plain-HTTP control port 42997).
-Flows open `bb://` links through `subflows/open-bb-link.yaml` and pair through
+Flows open `omnyo://` links through `subflows/open-omnyo-link.yaml` and pair through
 `subflows/pair-direct-server.yaml`; `src/lib/e2e/mobile-e2e-flows.test.ts`
 enforces both.
 Flows dismiss the keyboard by tapping a static label ("Server URL",
 "Pairing code"): Maestro's `hideKeyboard` looks for a Return/Done key and the
 Add server and connect fields use "next".
 Flows cold-start the dev client (`stopApp`) because a warm reload keeps the
-last deep link as the initial URL. Without `EXPO_PUBLIC_BB_E2E=1`, open `bb://e2e/reset`
+last deep link as the initial URL. Without `EXPO_PUBLIC_OMNYO_E2E=1`, open `omnyo://e2e/reset`
 (dev builds) to return the simulator to first run.
 
 ### Flows against a Release build (no Metro)
 
 A Release build (`npx expo run:ios --configuration Release --no-bundler
 --device <udid>`) embeds the JS bundle and never starts the dev launcher, so
-the same flows run without Metro: build it with `EXPO_PUBLIC_BB_E2E=1` (and
-`EXPO_PUBLIC_BB_SERVER_URL=http://127.0.0.1:41999`) in the environment — the
+the same flows run without Metro: build it with `EXPO_PUBLIC_OMNYO_E2E=1` in the environment — the
 Xcode "Bundle React Native code and images" phase inlines `EXPO_PUBLIC_*` at
-bundle time — and pass `-e BB_E2E_EMBEDDED_BUNDLE=1` to Maestro.
+bundle time — and pass `-e OMNYO_E2E_EMBEDDED_BUNDLE=1` to Maestro.
 `e2e/subflows/launch-app.yaml` switches on that variable between the
 dev-client deep link and a plain `launchApp`; it is a `-e` variable on
 purpose because values in a flow's `env:` block beat `-e`, and `METRO_URL`
@@ -339,7 +341,7 @@ lives in every flow's header.
 `e2e/scripts/ci-run-flows.sh <udid> <artifacts dir> [flow…]` is what CI runs:
 `shell-launch`, `shell-deep-link`, `shell-send`, `shell-unreachable-server`,
 one `maestro test` at a time with `--test-output-dir` per flow (screenshots,
-logs, JUnit); after a failure it clears the native `bb://` confirmation
+logs, JUnit); after a failure it clears the native `omnyo://` confirmation
 before the next flow, and it exits non-zero if any flow failed.
 `shell-connect` needs the connect stub, so it runs on its own. `--dev-client`
 as the first argument drives a dev client through Metro instead.
@@ -353,7 +355,7 @@ as the first argument drives a dev client through Metro instead.
   after relaunch, and native settings. It uses the isolated backend and needs
   no Firebase, EAS, or Play credentials. The `mobile-e2e-android` artifact
   contains screenshots, JUnit results, Maestro output, logcat, and backend logs.
-  Keyboard animation, push delivery, and bb connect are outside this basic job.
+  Keyboard animation, push delivery, and Omnyo connect are outside this basic job.
 
 - Typecheck, lint, and unit tests run on Linux in the regular `CI` workflow
   (`pnpm exec turbo run build typecheck lint` in `Checks`, the `packages`
@@ -373,18 +375,18 @@ as the first argument drives a dev client through Metro instead.
   waits for `/health`), runs `ci-run-flows.sh`, and uploads
   `e2e-artifacts/` (per-flow Maestro output, backend log, simulator log).
 
-## bb connect
+## Omnyo connect
 
-- Pair through Settings → Mobile → Add mobile device or `bb connect machine-code`. No experiment is required.
+- Pair through Settings → Mobile → Add mobile device or `omnyo connect machine-code`. No experiment is required.
 - Enrollment (`src/screens/connect`, `src/data/connect`, route `/connect`):
-  "Add server" offers "Connect with bb connect" above the Direct URL form.
+  "Add server" offers "Connect with Omnyo connect" above the Direct URL form.
   The screen scans the pairing QR (`expo-camera`; payload = the connect
   plugin's `MobilePairingPayload` JSON `{code, serverUrl, apex, expiresAt}`, a
-  `bb://connect?code=…&serverUrl=…` link, or a bare code —
+  `omnyo://connect?code=…&serverUrl=…` link, or a bare code —
   `parseConnectPairingPayload`) or takes the code by hand with an optional
-  server (handle like `bee` or `https://bee.getbb.app`) and an optional
+  server (handle like `bee` or `https://bee.example.com`) and an optional
   self-hosted apex; the apex defaults to `deriveConnectBaseUrl(serverUrl)`
-  or `https://getbb.app` (`resolveEnrollmentTarget`). `redeemEnrollment`
+  or `https://omnyo.link` (`resolveEnrollmentTarget`). `redeemEnrollment`
   calls `redeemMachineCredential` (`POST <apex>/api/connect/redeem-machine`)
   with the phone’s device name (for example, `Pixel 9 Pro`). The account
   service stores it on the machine so the dashboard shows a recognizable name.
@@ -392,33 +394,35 @@ as the first argument drives a dev client through Metro instead.
   128 characters; older clients may omit it. Existing unnamed devices are not
   renamed automatically. Both the account service update and a new mobile build
   are needed for names to appear on new pairings.
-  Enrollment saves `{mode:"connect", serverUrl, handle, credential(bbcm_…), label}`
+  Enrollment saves `{mode:"connect", serverUrl, handle, credential(omnyocm_…, or bbcm_… when paired before the rename), label}`
   in SecureStore, then activates it: the connector mints the desktop-session
   cookie and opens realtime (the enrolled screen shows that status live).
   Errors map to copy per wire code (`describeEnrollmentError`: invalid /
   expired / already used, the 409 `machine_limit` with the "revoke a device
   in the dashboard" way out, network, unauthorized).
-- Account servers: the machine credential is account-scoped (the apex stores
-  it against the user, `apps/web/src/server/api.ts` `redeemMachineCode`; the
-  gate checks it against the label's owner), and the desktop-session cookie
-  is a `.getbb.app` cookie carrying the user id and the minting credential, so
-  one enrollment covers every server the account owns — the same as the desktop app's
-  Server menu. After pairing, "Servers on this account"
-  (`GET <serverUrl>/api/connect/servers` with the credential,
-  `listAccountServers`) adds any other server as a profile in one tap with
-  the same credential; no second code is needed.
+- Account servers: the apex stores the machine credential against the user
+  and records the server whose code paired it (`apps/relay/src/account/api.ts`
+  `redeemMachineCode`, table `relay_machine_server`). The gate accepts the
+  credential, and the desktop-session cookie minted from it, only at that
+  server's address and at the device's own address. A device paired before
+  the relay recorded this keeps working at every server the account owns.
+  "Servers on this account" (`GET <serverUrl>/api/connect/servers` with the
+  credential, `listAccountServers`) still lists every server of the account.
+  At a server that did not pair the device, the gate answers that profile's
+  credential with 401 and its pages with the GitHub sign-in.
 - Session: `src/lib/session` mints `POST <serverUrl>/api/connect/desktop-session`
   with the credential, installs the cookie in both native jars (`Secure`
   follows the server URL's scheme so a plain-http stub gate works), renews
   five minutes before expiry and on AppState active. Each minted session
   (server URL, pairing credential and the full cookie, value included) is kept
-  per profile in SecureStore (`bb.connectSession.<profileId>`); a cold start
+  per profile in SecureStore (`omnyo.connectSession.<profileId>`); a cold start
   whose record matches the profile's server URL and credential and is more
   than five minutes from expiry reinstalls that cookie into both jars instead
   of minting, so the page loads
   without a round trip to the gate. Re-pairing with a new credential mints a
   fresh session. Older cache records without a credential are ignored.
-  A refused mint and Clear website data clear the record. The cookie lasts seven
+  A refused mint, Clear website data and removing the server clear the
+  record. The cookie lasts seven
   days; the gate re-issues it once a day on ordinary responses and rejects it
   within about 20 seconds of the machine being revoked. The connector
   (`src/lib/connection`) re-checks the session on any 401/403 (an API call
@@ -436,15 +440,22 @@ as the first argument drives a dev client through Metro instead.
   only triggers that refetch, not another mint.
 - Re-auth UX: the `auth-required` banner ("<label> needs to be paired again.")
   is a button that opens `/connect?profileId=<id>`, which re-pairs the same
-  profile (new credential, same label and place in the list); Settings →
-  Servers offers "Sign in again" from the long-press menu for connect
-  profiles and shows a mode pill (`bb connect` / `direct`) plus `@handle`.
-  "Remove" only forgets the profile locally: the phone stays listed under
-  Machines in the getbb.app dashboard until revoked there (the copy says so).
+  profile (new credential, same label and place in the list). Re-pairing a
+  profile saved on a retired relay leaves the server field empty and
+  editable, so a typed code resolves through omnyo.link. The Servers hub
+  (`/settings/device`) lists the current server with its mode, host and
+  connection state, then the other servers; tapping another server switches
+  to it and returns to the page. Each row's (i) button and touch and hold
+  open Use this server, Rename (iOS), Sign in again (connect profiles) and
+  Remove; VoiceOver offers the same Rename, Sign in again and Remove as row
+  actions. "Remove" only forgets the profile and its
+  cached session locally: other servers on the same account stay signed in,
+  and the phone stays listed under Machines in the Omnyo connect dashboard
+  until revoked there (the copy says so and offers Open dashboard).
 - Stub for e2e (`tests/integration/mobile-e2e/connect-stub.ts`,
-  `pnpm --filter @bb/integration-tests e2e:mobile-connect-stub`): plays the
+  `pnpm --filter @omnyo/integration-tests e2e:mobile-connect-stub`): plays the
   apex and the gate on one TLS port (`https://localhost:42998` /
-  `https://stub.localhost:42998`, so `@bb/connect-client`'s "server lives
+  `https://stub.localhost:42998`, so `@omnyo/connect-client`'s "server lives
   under the apex" rule and the `Secure` cookie hold; iOS ATS refuses plain
   http to a qualified name). It redeems `STUB-PAIR` (sentinels
   `EXPIRED-CODE` / `USED-CODE` / `LIMIT-CODE` reproduce the apex errors),
@@ -452,21 +463,21 @@ as the first argument drives a dev client through Metro instead.
   proxies everything else (HTTP + WebSocket upgrade) to the harness backend
   — only with a valid session cookie, otherwise the gate's HTML 401 —
   rewriting `Origin: https://<gate host>` to the loopback origin like the
-  tunnel client does so the bb server's origin guard accepts RN's
+  tunnel client does so the Omnyo server's origin guard accepts RN's
   WebSocket. Control: `POST /__stub/{expire-session,revoke-machine,reset}`,
   `GET /__stub/state`, also on plain `http://127.0.0.1:42997`. It generates a
-  local CA under `~/.bb-mobile-e2e/connect-stub-certs` and installs it in
-  the simulator named by `BB_MOBILE_E2E_SIMULATOR` (`xcrun simctl keychain …
-add-root-cert`). Env: `BB_MOBILE_E2E_GATE_PORT` (42998),
-  `BB_MOBILE_E2E_STUB_CONTROL_PORT` (42997), `BB_MOBILE_E2E_UPSTREAM_URL`
-  (`http://127.0.0.1:${BB_MOBILE_E2E_PORT ?? 41999}`),
-  `BB_MOBILE_E2E_CONNECT_CODE`, `BB_MOBILE_E2E_STUB_HANDLE`,
-  `BB_MOBILE_E2E_SESSION_TTL_MS`, `BB_MOBILE_E2E_STUB_LOG=1` (one line per
+  local CA under `~/.omnyo-mobile-e2e/connect-stub-certs` and installs it in
+  the simulator named by `OMNYO_MOBILE_E2E_SIMULATOR` (`xcrun simctl keychain …
+add-root-cert`). Env: `OMNYO_MOBILE_E2E_GATE_PORT` (42998),
+  `OMNYO_MOBILE_E2E_STUB_CONTROL_PORT` (42997), `OMNYO_MOBILE_E2E_UPSTREAM_URL`
+  (`http://127.0.0.1:${OMNYO_MOBILE_E2E_PORT ?? 41999}`),
+  `OMNYO_MOBILE_E2E_CONNECT_CODE`, `OMNYO_MOBILE_E2E_STUB_HANDLE`,
+  `OMNYO_MOBILE_E2E_SESSION_TTL_MS`, `OMNYO_MOBILE_E2E_STUB_LOG=1` (one line per
   gate request).
 
 ## Server moves
 
-- After `bb server move`, the old computer answers its old address with
+- After `omnyo server move`, the old computer answers its old address with
   `410 {code:"server_moved", details:{serverUrl, toHostName}}`.
   `createMobileFetch` reads that body from `response.clone()` and validates
   `details.serverUrl` with the Direct URL rules. The registry passes the
@@ -492,24 +503,32 @@ iOS keeps its existing APNs registration behavior.
 
 - Registration: `PushNotificationsHost` (mounted once in `app/_layout.tsx`)
   registers the phone's Expo push token with each enabled server through
-  Settings → This device → Notifications. It calls the `push-notifications`
+  Servers → This phone → Notifications. It calls the `push-notifications`
   plugin RPC methods `pushSubscriptions.add`, `pushSubscriptions.list`, and
   `pushSubscriptions.remove` through `sdk.plugins.callRpc`. It syncs on
   connect, on
   AppState active, when the OS rolls the token (re-register), and when the
-  toggle flips; profiles removed from the app get their server row deleted
-  by the stored server URL. A direct profile must use HTTPS, unless it uses
-  `127.0.0.1`, `localhost`, or `::1`. Tailscale Serve and bb connect profiles
-  work normally. Other HTTP profiles show "Push needs HTTPS or bb connect"
+  toggle flips. Each sync of an up-to-date registration lists the server's
+  rows and registers again when its row is gone. Profiles removed from the app
+  get their server row deleted by the stored server URL. A direct profile must use HTTPS, unless it uses
+  `127.0.0.1`, `localhost`, or `::1`. Tailscale Serve and Omnyo connect profiles
+  work normally. Other HTTP profiles show "Push needs HTTPS or Omnyo connect"
   and do not register. The server also needs outbound access to `exp.host`.
   The server must enable the `push-notifications` plugin.
-  The one-time "Get notified…" sheet appears only after the first successful
-  connection. The sheet never appears on launch. The OS prompt starts only
-  after the user selects "Turn on notifications".
+  The one-time "Get notified…" sheet appears on first launch when no server
+  is saved yet; otherwise it waits for the active server's first successful
+  connection. The OS prompt starts only after the user selects "Turn on
+  notifications". Turning it on before any server exists turns notifications
+  on for the first HTTPS or connect server that syncs.
 - Privacy: the registration request contains the full Expo token. The list
-  RPC method and `bb push-notifications list` return only the last six token
+  RPC method and `omnyo push-notifications list` return only the last six token
   characters in `tokenSuffix`. A token can receive pushes but cannot read
   server data.
+- Private Omnyo iOS: the private build binds the Expo project
+  `@burlismanagement/omnyo-private` (`easProjectId` in
+  `plugins/ios-identity-handoff/identity-binding-v1.js`). Its iOS credentials
+  hold the team APNs key for `com.omnyohq.app`. `with-private-ios` signs
+  `aps-environment` `production` with the `Omnyo AppStore Push` profile.
 - Handling: a foreground arrival becomes a toast with "Open" (no system
   banner); a tap on a background / cold-start notification opens the thread
   in the shell on the profile that owns it. The phone first matches
@@ -522,45 +541,50 @@ payload.apns` with `{"aps":{"alert":{…}},"body":{"kind":"turn-finished",
 "threadId":"…","projectId":"…","serverUrl":"https://…"}}`
   (expo-notifications reads remote `data` from the `body` key) after the user
   grants permission.
-- Deep links: `bb://<path>` (`bb://threads/<id>`, `bb://settings/servers`,
-  `bb://projects/<p>/threads/<t>`, …) and universal / app links
-  `https://<handle>.getbb.app/{threads,projects,settings}/*` (iOS
-  `associatedDomains: applinks:getbb.app, applinks:*.getbb.app`; Android
+- Deep links: `omnyo://<path>` (`omnyo://threads/<id>`, `omnyo://settings/servers`,
+  `omnyo://projects/<p>/threads/<t>`, …; `OMNYO_URL_SCHEMES` accepts only
+  `omnyo`)
+  and universal / app links
+  `https://<handle>.omnyo.link/{threads,projects,settings}/*` (iOS
+  `associatedDomains: applinks:omnyo.link, applinks:*.omnyo.link`; Android
   `intentFilters` with `autoVerify`). `app/+native-intent.tsx` resolves every
   URL with `src/lib/shell` (`resolveShellIncomingLink` over `src/lib/links`):
   a web link whose origin matches a saved profile switches to that profile
   (waiting for its connection) and opens the shell route carrying the page
   path; native-only paths (connect, servers, device and notification
-  settings) stay native; an unknown server opens Add server prefilled with
+  settings; `omnyo://settings/servers` opens the Servers hub) stay native;
+  an unknown server opens Add server prefilled with
   the origin and the follow-up path. Universal links only resolve once
-  `https://<handle>.getbb.app/.well-known/apple-app-site-association` /
-  `assetlinks.json` are served (the connect gate and the apex do, before the
-  session gate — `packages/connect-db/src/app-links.ts`) and the app is
-  signed with the team id in that file; until then only the `bb://` scheme
+  `https://<handle>.omnyo.link/.well-known/apple-app-site-association` /
+  `assetlinks.json` are served (`packages/connect-db/src/app-links.ts` builds
+  them; the self-hosted relay does not serve them yet) and the app is
+  signed with the team id in that file; until then only the `omnyo://` scheme
   works, and wildcard associated-domain behavior still needs a physical
   device check. The realtime `thread-open` signal (`POST /threads/:id/open`,
-  `bb thread open`) navigates to the thread while the app is foregrounded.
+  `omnyo thread open`) navigates to the thread while the app is foregrounded.
 
 ## Share sheet and haptics
 
-- Inbound "Send to bb" is wired for `expo-share-intent` but the native module
+- Inbound "Send to Omnyo" is wired for `expo-share-intent` but the native module
   is **not** in the current dev client: `src/lib/share/share-intent.ts` loads
   it optionally and `src/app-shell/ShareIntentHandler.tsx` renders nothing
   when it is absent. To enable it: `npx expo install expo-share-intent`, add
   `["expo-share-intent", { "iosActivationRules": { "NSExtensionActivationSupportsText": true, "NSExtensionActivationSupportsWebURLWithMaxCount": 1 } }]`
   to `app.json` plugins, rebuild the dev client (`pnpm ios`, ~10 min, also
   reinstall it on every simulator the flows use). Shared text / URLs open
-  the shell at `/?initialPrompt=`; media / file shares are declined with a
-  toast.
+  the shell at `/?initialPrompt=`, where the app shows the text in a "Use this
+  prompt?" card; the owner taps Use to add it to the composer or Dismiss to
+  drop it. Media / file shares are declined with a toast.
 - Outbound: the shell handles the bridge `share` request (`useShellBridge` →
   RN `Share.share`); the web app does not send it yet.
 - Haptics: `src/lib/haptics/` — `haptic(kind)` maps semantic kinds
   (`selection`, `impact-light|medium|heavy`, `success`, `warning`, `error`)
-  onto expo-haptics and honors the Settings → This device → Haptics toggle
-  (MMKV `bb.haptics.enabled`, default on). Call sites: bridge `haptic`
-  messages handled in `useShellBridge` (the web app sends none yet), the
-  segmented appearance picker (selection), destructive ActionSheet rows and
-  confirmations (warning), the servers long-press menu (heavy), and the
+  onto expo-haptics and honors the Servers → This phone → Haptics toggle
+  (MMKV `omnyo.haptics.enabled`, default on). Call sites: bridge `haptic`
+  messages handled in `useShellBridge` (the web terminal's mobile key bar
+  sends `selection`), the segmented appearance picker (selection),
+  destructive ActionSheet rows and confirmations (warning), touch and hold
+  on a server row (heavy), and the
   auth-required banner (warning). Screens never import expo-haptics directly.
 
 ## Release (EAS)
@@ -581,8 +605,8 @@ push key); nobody needs a local Xcode signing setup to ship.
   number on EAS, `version` in `app.json` is the marketing version).
 - **Push release check**: confirm the APNs key with `pnpm exec eas credentials
 -p ios`. Use `development-device` for a physical iPhone. Keep the server
-  `push-notifications` plugin enabled, and use an HTTPS or bb connect profile.
-  Run `bb push-notifications list`. Confirm that it shows a token suffix, not
+  `push-notifications` plugin enabled, and use an HTTPS or Omnyo connect profile.
+  Run `omnyo push-notifications list`. Confirm that it shows a token suffix, not
   a full token.
 - **TestFlight by hand**: `pnpm exec eas build -p ios --profile production`,
   then `pnpm exec eas submit -p ios --latest`. The submit profile reads the
@@ -617,9 +641,9 @@ push key); nobody needs a local Xcode signing setup to ship.
 - The `expo-modules-jsi` pnpm patch and the `lightningcss` override ship
   with the repo and apply on EAS; the default build image provides
   Xcode 26.x.
-- Universal links need the signed app's team id in the AASA the connect gate
-  serves (`packages/connect-db/src/app-links.ts`) and a physical-device
-  check against `https://<handle>.getbb.app/threads/…`. Android signing
+- Universal links need the relay to serve the AASA built by
+  `packages/connect-db/src/app-links.ts`, the signed app's team id in that
+  file, and a physical-device check against `https://<handle>.omnyo.link/threads/…`. Android signing
   (`eas credentials -p android`, FCM V1, `ASSETLINKS_SHA256_FINGERPRINTS`)
   is still open.
 - `eas update` (JS-only fixes over the air) is deferred: `expo-updates` is
@@ -644,45 +668,15 @@ group, App Store Connect needs all of this:
   build, a "What to test" note.
 - **Beta App Review Details** (`betaAppReviewDetail`): contact first name, last
   name, phone, and email. Apple uses these, testers never see them.
-- **A way for the reviewer to use the app.** This is the part that fails. bb
-  opens on "Add server", and a reviewer has no bb server, so without help they
+- **A way for the reviewer to use the app.** This is the part that fails. Omnyo
+  opens on "Add server", and a reviewer has no Omnyo server, so without help they
   cannot get past the first screen and will reject the build. Neither real
-  path works for a reviewer: a bb server's API is unauthenticated and runs
+  path works for a reviewer: an Omnyo server's API is unauthenticated and runs
   commands, so it cannot be on the internet, and connect pairing codes are
-  single-use and expire in ten minutes. Give them the **demo server** instead:
-  `apps/demo-server` is a Cloudflare Worker that serves the web app shell, sidebar plugin frontends, and API
-  from fixed data, runs nothing, and isolates each client address. Build it
-  with `pnpm exec turbo run build --filter=@bb/demo-server`, then deploy it
-  with `pnpm --filter @bb/demo-server exec wrangler deploy`, and rehearse the review notes
-  below before every submission. Disclose it in the notes: a disclosed demo
-  mode is sanctioned by guideline 2.1.
-
-Review notes template — keep it literal, and assume the reviewer knows nothing
-about coding agents:
-
-```text
-bb is a client for a bb server that a developer runs on their own computer.
-The app has no accounts of its own, so we have prepared a demo server for
-you. It serves sample conversations and scripted replies; it does not run a
-real coding agent.
-
-1. Open the app. It shows "Connect to a bb server".
-2. In "Server URL", enter: https://bb-demo-server.sawyer-7bb.workers.dev
-3. Tap "Connect".
-4. The app shows a list of conversations. Open any of them to read it.
-5. Browse the sample conversations. No credentials or pairing code are needed.
-
-Write to <EMAIL> if the server does not respond.
-```
-
-The same demo URL and connection steps apply to Google Play app access
-instructions. No sign-in or pairing code is needed. See
-[the demo server README](../demo-server/README.md) for build, local verification,
-and deployment steps. Verify the deployed shell with the actual store build
-before submitting either platform.
-
-Rehearse it before submitting: hand a colleague a phone that has never run bb,
-give them only these notes, and check that they reach a thread.
+  single-use and expire in ten minutes. Omnyo has no reviewer demo server:
+  upstream's Cloudflare demo worker (`apps/demo-server`) was removed. Owner-only
+  internal TestFlight testing needs no Beta App Review. An external group or a
+  store submission needs a reviewer path before it is submitted.
 
 The nightly keeps the marketing version in `app.json` and lets the EAS build
 number tell nightlies apart, because a new version string triggers a fresh
@@ -691,17 +685,23 @@ Beta App Review and another build of the same version usually does not.
 ## Local state
 
 - Server profiles: `expo-secure-store`, one key per profile
-  (`bb.profile.<id>`) plus `bb.profiles.index`.
+  (`omnyo.profile.<id>`) plus `omnyo.profiles.index`. A fresh install has no
+  profile and opens on "Connect to an Omnyo server". No variant seeds a default
+  server, including the private iOS build. Saved profiles stay as they are,
+  including an "Omnyo" profile that an earlier private build seeded.
 - Connect sessions: `expo-secure-store`, one key per profile
-  (`bb.connectSession.<profileId>`) holding the last minted desktop-session
+  (`omnyo.connectSession.<profileId>`) holding the last minted desktop-session
   cookie and its server URL.
-- Preferences (theme mode `bb.theme`, haptics `bb.haptics.enabled`): MMKV
-  store `bb.preferences`, one shared instance from
+- Preferences (theme mode `omnyo.theme`, haptics `omnyo.haptics.enabled`): MMKV
+  store `omnyo.preferences`, one shared instance from
   `src/lib/native/preferences-storage.ts`. Push state shares it:
-  `bb.push.enabled.<profileId>` (+ `bb.push.enabledProfiles` index),
-  `bb.push.registration.<profileId>` (+ `bb.push.registrations` index: the
+  `omnyo.push.enabled.<profileId>` (+ `omnyo.push.enabledProfiles` index),
+  `omnyo.push.registration.<profileId>` (+ `omnyo.push.registrations` index: the
   token / server row the phone registered, so a removed profile can still be
-  unregistered), `bb.push.prompted`.
+  unregistered), `omnyo.push.prompted`.
+- Reinstall (private iOS): iOS keeps Keychain items when the app is deleted,
+  so a reinstall opens the saved servers, relay pairing and sessions directly,
+  with no start or import screen.
 - Each profile owns one SDK client, one realtime socket, and one TanStack
   QueryClient (`src/lib/sdk/client-registry.ts`, instantiated once by
   `src/app-shell/client-registry.ts`); the active profile's socket/session
@@ -714,14 +714,14 @@ Beta App Review and another build of the same version usually does not.
 `apps/app/src/lib/themes/*.ts`: every color token per palette × light/dark as a
 plain RN color string, with `nativeRadii` and the touch (`pointer: coarse`)
 `nativeTypography` scale. Do not edit it by hand. After changing theme.css or a
-palette, run `pnpm --filter @bb/mobile theme:generate` and commit the result;
+palette, run `pnpm --filter @omnyo/mobile theme:generate` and commit the result;
 `src/theme/generate-native-theme.test.ts` fails when the file is stale.
 
 ## Notes
 
 - Workspace packages resolve from TypeScript source through `metro.config.js`
-  (`source` export condition for `@bb/*` only, `./x.js` → `./x.ts`).
-- Import `@bb/sdk/browser`, never `@bb/sdk` (lint-enforced).
+  (`source` export condition for `@omnyo/*` only, `./x.js` → `./x.ts`).
+- Import `@omnyo/sdk/browser`, never `@omnyo/sdk` (lint-enforced).
 - Never spread a `Headers` instance into a fetch init on React Native.
 - `lightningcss` is pinned to 1.30.1 for `@expo/metro-config` (NativeWind v5).
 - Type-scale line heights in `global.css` are unitless ratios
@@ -735,54 +735,12 @@ palette, run `pnpm --filter @bb/mobile theme:generate` and commit the result;
   client's floating gear can sit over the header's right icons on larger
   simulators.
 
-Mobile app downloads are always available in Settings → Mobile (`/settings/mobile`).
-**Join iOS TestFlight** opens https://testflight.apple.com/join/T9MayTMb.
-**Download Android APK** downloads directly from the public `get-bb/bb` GitHub
-`android-testing` release's `bb-android.apk` asset. The APK does not pass through
-the bb server or bb connect. No experiment or Android developer tools are needed.
-Pair either app through Settings → Mobile → **Add mobile device**.
-
-Use `bb settings mobile-app --json` or SDK `system.mobileAppDownloads()` to get
-both public links. Add `--details --json` or call `system.mobileAppReleases()`
-(GET `/api/v1/system/mobile-app-releases`) for Android version/build, size, and
-upload date. The server fetches only public metadata, caches it for five minutes,
-and returns `android: null` if unavailable or inconsistent. Download links remain
-usable during metadata failures. iOS version and release date are shown in TestFlight.
-Inside the Android app, Settings → Mobile also shows the installed version and
-compares its native build number with the published APK: up to date, update
-available, or newer than the published release. Older apps without build-number
-reporting and unavailable release metadata show that update status cannot be
-determined. The download button remains available in every state.
-The nightly release pipeline builds and publishes an Android preview APK after
-a successful npm nightly publication, alongside the iOS build. This runs on the
-daily 3 AM America/Los_Angeles schedule, a manual nightly publish, and the
-nightly publication following a stable release. Successful builds replace the
-APK and version metadata used by Settings → Mobile. These builds do not submit
-to Google Play.
-
-The Android version name matches the published bb-app nightly version, including
-its full `-nightly.RUN.ATTEMPT` suffix. EAS continues to increment the integer
-Android build number independently. The APK's version name and build number
-are also used in the Settings → Mobile download metadata.
-
-For an immediate update, run **Mobile Android (EAS)**, profile `preview`,
-**publish** on, or
-`gh workflow run mobile-android-eas.yml --ref main -f profile=preview -f publish=true -f submit=false`.
-Add `-f version=X.Y.Z-nightly.RUN.ATTEMPT` to assign a specific nightly version,
-or `-f version=X.Y.Z` for a stable version. Leaving it empty uses the committed
-mobile version.
-The preview Gradle command builds `arm64-v8a` and `armeabi-v7a`, supporting
-both 64-bit and 32-bit ARM phones. It omits Intel x86/x86_64 libraries to reduce
-the direct download; Intel devices and x86 emulators cannot install this APK.
-Production AABs retain all architectures so Google Play can deliver
-device-specific packages. Keep EAS signing credentials unchanged so existing
-sideload installations can update. The smaller APK still undergoes browser
-security scanning; reduced size does not guarantee a fix for scanning hangs.
+Pair a phone through Settings → Mobile (`/settings/mobile`) → **Add mobile device**.
 
 ## Android keyboard image paste
 
 The `react-native-webview` patch receives keyboard image content through
-AndroidX `InputConnectionCompat`. It is enabled only for WebViews with BB's
+AndroidX `InputConnectionCompat`. It is enabled only for WebViews with Omnyo's
 injected mobile bridge. The bridge captures the focused prompt editor, then
 replays the image as a clipboard file through the existing web paste handler.
 The WebView serves a temporary, single-use URL from the keyboard's content
@@ -811,14 +769,14 @@ For a device smoke test:
 7. Remove the test attachments and text without sending a message.
 
 Bridge regression tests run with
-`pnpm exec turbo run test typecheck --filter=@bb/mobile-bridge`.
+`pnpm exec turbo run test typecheck --filter=@omnyo/mobile-bridge`.
 
 ## Android message copy
 
 For messages containing text and an image, Android Copy uses the shell's
 `copyRichText` method to publish `text/plain` plus `text/html`. The HTML carries
-hidden, versioned BB metadata with the exact message text and an image URL.
-BB's regular Paste handler validates that metadata, inserts the text and
+hidden, versioned Omnyo metadata with the exact message text and an image URL.
+Omnyo's regular Paste handler validates that metadata, inserts the text and
 fetches the image from the same server with the current session. Downloads
 reject redirects and non-image responses, enforce the 35 MB attachment limit,
 and time out after 30 seconds. A failed download preserves the pasted text and
@@ -827,7 +785,7 @@ pages that navigated away are discarded.
 
 Android WebView's long-press Paste delivers the HTML. Gboard's text suggestion
 and clipboard-history text entries insert plain text without a rich paste
-event, so those paths paste text only. BB does not compare inserted text with
+event, so those paths paste text only. Omnyo does not compare inserted text with
 previous messages or retain a copied-message cache. HTML-aware destinations
 can also render the text and image reference; plain text destinations receive
 only the text. The image reference requires access to the original server and
@@ -838,7 +796,7 @@ cache and expose its URI through the WebView FileProvider. Downloads are
 limited to 35 MB, reject redirects, and expire after 25 seconds with 10-second
 network timeouts. Old cache files are removed on the next copy after 24 hours.
 
-Both the APK and served BB web app need this change. Older APKs retain the
+Both the APK and served Omnyo web app need this change. Older APKs retain the
 previous combined image/text item behavior. Verify mixed-message Copy followed
 by long-press Paste, Gboard text insertion, image-only Copy/Paste, ordinary text,
 and a missing image. Remove test drafts without sending them.

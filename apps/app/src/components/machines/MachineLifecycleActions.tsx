@@ -1,7 +1,7 @@
-import type { Host } from "@bb/domain";
-import type { SystemMachineProvider } from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
+import type { Host } from "@omnyo/domain";
+import type { SystemMachineProvider } from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
 
 export interface MachineLifecycleAction {
   icon: IconName;
@@ -15,13 +15,16 @@ export function machineLifecycleAction(
 ): MachineLifecycleAction | null {
   if (machineProvider?.supportsSuspend && host.lifecycle.phase === "active")
     return { icon: "Pause", label: "Suspend", kind: "suspend" };
+
   if (machineProvider?.supportsSuspend && host.lifecycle.phase === "suspended")
     return { icon: "Play", label: "Resume", kind: "resume" };
+
   if (
     host.lifecycle.phase === "removing" &&
     host.lifecycle.teardown?.status === "failed"
   )
     return { icon: "RotateCcw", label: "Retry cleanup", kind: "retry-cleanup" };
+
   return null;
 }
 
@@ -43,7 +46,9 @@ export function MachineLifecycleActions({
   onRetryCleanup,
 }: MachineLifecycleActionsProps) {
   const action = machineLifecycleAction(host, machineProvider);
+
   if (action === null) return null;
+
   const onSelect =
     action.kind === "suspend"
       ? onSuspend

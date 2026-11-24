@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { serverMoveStatusSchema } from "@bb/server-contract";
+import { serverMoveStatusSchema } from "@omnyo/server-contract";
 import { z } from "zod";
 import { readOptionalText, writeTextAtomically } from "./managed-files.js";
 
@@ -35,9 +35,11 @@ export const serverMoveRunFileSchema = z
       .nullable(),
     movedAt: timestampSchema.nullable(),
     activationRequestedAt: timestampSchema.nullable(),
+    prepareDispatchedAt: timestampSchema.nullable().optional().default(null),
     activationConfirmedAt: timestampSchema.nullable(),
   })
   .strict();
+
 export type ServerMoveRunFile = z.infer<typeof serverMoveRunFileSchema>;
 
 function runFilePath(dataDir: string): string {
@@ -49,9 +51,11 @@ export async function readServerMoveRunFile(
 ): Promise<ServerMoveRunFile | null> {
   const path = runFilePath(dataDir);
   const text = await readOptionalText(path);
+
   if (text === null) {
     return null;
   }
+
   return serverMoveRunFileSchema.parse(JSON.parse(text));
 }
 

@@ -1,5 +1,5 @@
-import type { PullRequestState, ThreadPullRequest } from "@bb/domain";
-import type { IconName } from "@bb/shared-ui/icon";
+import type { PullRequestState, ThreadPullRequest } from "@omnyo/domain";
+import type { IconName } from "@omnyo/shared-ui/icon";
 
 interface PullRequestDisplay {
   label: string;
@@ -155,6 +155,7 @@ export function describePullRequestStatus(
   pullRequest: ThreadPullRequest,
 ): string {
   const nextStep = getPullRequestNextStep(pullRequest);
+
   return [
     PULL_REQUEST_STATE_DISPLAY[pullRequest.state].label,
     nextStep?.label,
@@ -176,6 +177,7 @@ export function getPullRequestGithubCheckStatus(
   if (pullRequest.state !== "open" && pullRequest.state !== "draft") {
     return null;
   }
+
   switch (pullRequest.checks.state) {
     case "passing":
       return "success";

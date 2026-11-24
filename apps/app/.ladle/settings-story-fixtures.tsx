@@ -1,11 +1,22 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { PERSONAL_PROJECT_ID, type Host, type ProviderInfo } from "@bb/domain";
+import {
+  defaultUiPreferences,
+  PERSONAL_PROJECT_ID,
+  UI_PREFERENCE_KEYS,
+  type AvailableModel,
+  type Host,
+  type ProviderInfo,
+  type ReasoningLevel,
+  type UiPreferenceValue,
+  type UiPreferenceValues,
+} from "@omnyo/domain";
 import type {
   SidebarBootstrapResponse,
+  SystemExecutionOptionsResponse,
   SystemVersionResponse,
-} from "@bb/server-contract";
-import type { ProviderCliStatusResponse } from "@bb/host-daemon-contract";
+} from "@omnyo/server-contract";
+import type { ProviderCliStatusResponse } from "@omnyo/host-daemon-contract";
 import {
   hostProviderCliStatusQueryKey,
   hostsQueryKey,
@@ -15,8 +26,11 @@ import {
   serverMoveStatusQueryKey,
   sidebarNavigationQueryKey,
   systemConfigQueryKey,
+  systemExecutionOptionsQueryKey,
+  systemProviderCatalogQueryKey,
   systemProvidersQueryKey,
   systemVersionQueryKey,
+  uiPreferencesQueryKey,
 } from "../src/hooks/queries/query-keys";
 import {
   buildUpdateInventoryProviderIssues,
@@ -29,10 +43,10 @@ import {
   MANUAL_MACHINE_PROVIDER,
   MODAL_MACHINE_PROVIDER,
 } from "./machine-story-fixtures";
-import { makeProviderInfo } from "@bb/test-helpers/domain-fixtures";
+import { makeProviderInfo } from "@omnyo/test-helpers/domain-fixtures";
 import {
-  BbAppUpdateRows,
-  BbUpdatesCard,
+  OmnyoAppUpdateRows,
+  OmnyoUpdatesCard,
   ProviderCliUpdatesSection,
 } from "../src/components/settings/UpdatesSettingsSection";
 import {
@@ -130,10 +144,11 @@ const remoteProviderStatus = {
 } satisfies ProviderCliStatusResponse;
 
 const project = makeProject({
-  id: PROJECT_IDS.bb,
+  id: PROJECT_IDS.omnyo,
   gitRemoteUrl: "git@github.com:get-bb/bb.git",
   sources: [...STORY_PROJECT_SOURCES],
 });
+
 const pierreProject = makeProject({
   id: PROJECT_IDS.pierre,
   name: PROJECT_NAMES.pierre,
@@ -151,12 +166,14 @@ const pierreProject = makeProject({
     },
   ],
 });
+
 const ingestProject = makeProject({
   id: PROJECT_IDS.ingest,
   name: PROJECT_NAMES.ingest,
   gitRemoteUrl: null,
   sources: [],
 });
+
 const personalProject = makeProject({
   id: PERSONAL_PROJECT_ID,
   kind: "personal",
@@ -166,14 +183,24 @@ const personalProject = makeProject({
 
 const sidebarNavigation = {
   sections: [],
+  groups: [],
   projects: [
     {
       ...project,
       defaultExecutionOptions: null,
       threads: [
-        makeThreadListEntry({ id: "thr_bb_1", projectId: PROJECT_IDS.bb }),
-        makeThreadListEntry({ id: "thr_bb_2", projectId: PROJECT_IDS.bb }),
-        makeThreadListEntry({ id: "thr_bb_3", projectId: PROJECT_IDS.bb }),
+        makeThreadListEntry({
+          id: "thr_omnyo_1",
+          projectId: PROJECT_IDS.omnyo,
+        }),
+        makeThreadListEntry({
+          id: "thr_omnyo_2",
+          projectId: PROJECT_IDS.omnyo,
+        }),
+        makeThreadListEntry({
+          id: "thr_omnyo_3",
+          projectId: PROJECT_IDS.omnyo,
+        }),
       ],
     },
     {
@@ -193,13 +220,19 @@ const sidebarNavigation = {
     defaultExecutionOptions: null,
     threads: [],
   },
+  orderedProjectIds: [
+    project.id,
+    pierreProject.id,
+    ingestProject.id,
+    personalProject.id,
+  ],
 } satisfies SidebarBootstrapResponse;
 
 const systemConfig = makeSystemConfig({
   primaryHostId: HOST_IDS.local,
   primaryHostPlatform: "darwin",
   voiceTranscriptionEnabled: true,
-  dataDir: "/Users/michael/.bb",
+  dataDir: "/Users/michael/.omnyo",
 });
 
 const systemVersion = {
@@ -210,7 +243,7 @@ const systemVersion = {
   source: "npm",
   updateAvailable: false,
   isDevelopment: false,
-  upgradeCommand: "npx bb-app@latest",
+  upgradeCommand: "npx omnyo-app@latest",
 } satisfies SystemVersionResponse;
 
 const systemProviders = [
@@ -231,9 +264,124 @@ const systemProviders = [
   }),
 ] satisfies ProviderInfo[];
 
+export const SETTINGS_STORY_MODEL_PICKER_FAVORITES: UiPreferenceValue<"modelPicker.favorites"> =
+  [
+    {
+      providerId: "claude-code",
+      model: "claude-opus-5-5",
+      reasoningLevel: "ultracode",
+      serviceTier: "default",
+    },
+    {
+      providerId: "codex",
+      model: "gpt-6.1-sol",
+      reasoningLevel: "xhigh",
+      serviceTier: "default",
+    },
+    {
+      providerId: "claude-code",
+      model: "claude-sonnet-5-5",
+      reasoningLevel: "high",
+      serviceTier: "default",
+    },
+    {
+      providerId: "codex",
+      model: "gpt-6-astra",
+      reasoningLevel: "medium",
+      serviceTier: "default",
+    },
+  ];
+
+export const SETTINGS_STORY_HIDDEN_MODELS: UiPreferenceValue<"modelPicker.hiddenModels"> =
+  {
+    codex: ["gpt-5.6-sol"],
+    "claude-code": ["claude-sonnet-4-6"],
+  };
+
+const settingsStoryUiPreferenceValues: UiPreferenceValues = {
+  ...defaultUiPreferences,
+  "modelPicker.favorites": SETTINGS_STORY_MODEL_PICKER_FAVORITES,
+  "modelPicker.hiddenModels": SETTINGS_STORY_HIDDEN_MODELS,
+};
+
+const settingsStoryUiPreferences = {
+  preferences: Object.fromEntries(
+    UI_PREFERENCE_KEYS.map((key) => [
+      key,
+      { revision: 0, value: settingsStoryUiPreferenceValues[key] },
+    ]),
+  ),
+};
+
+function settingsStoryModel(
+  model: string,
+  displayName: string,
+  levels: readonly ReasoningLevel[],
+  isDefault = false,
+): AvailableModel {
+  return {
+    id: model,
+    model,
+    displayName,
+    description: "",
+    supportedReasoningEfforts: levels.map((reasoningEffort) => ({
+      reasoningEffort,
+      description: "",
+    })),
+    defaultReasoningEffort: "high",
+    isDefault,
+  };
+}
+
+const settingsStoryCodexModels = [
+  settingsStoryModel(
+    "gpt-6.1-sol",
+    "GPT-6.1-Sol",
+    ["low", "medium", "high", "xhigh"],
+    true,
+  ),
+  settingsStoryModel("gpt-6-astra", "GPT-6-Astra", ["low", "medium", "high"]),
+  settingsStoryModel("gpt-5.6-sol", "GPT-5.6-Sol", ["low", "medium", "high"]),
+];
+
+const settingsStoryModelsByProvider: Record<string, AvailableModel[]> = {
+  codex: settingsStoryCodexModels,
+  "claude-code": [
+    settingsStoryModel(
+      "claude-opus-5-5",
+      "Opus 5.5",
+      ["low", "medium", "high", "xhigh", "ultracode"],
+      true,
+    ),
+    settingsStoryModel("claude-sonnet-5-5", "Sonnet 5.5", [
+      "low",
+      "medium",
+      "high",
+    ]),
+    settingsStoryModel("claude-sonnet-4-6", "Sonnet 4.6", [
+      "low",
+      "medium",
+      "high",
+    ]),
+  ],
+  "acp-cursor": [settingsStoryModel("auto", "Auto", ["high"], true)],
+};
+
+function settingsStoryExecutionOptions(
+  models: AvailableModel[],
+): SystemExecutionOptionsResponse {
+  return {
+    providers: systemProviders,
+    models,
+    selectedOnlyModels: [],
+    permissionCeiling: "full",
+    modelLoadError: null,
+    modelNotice: null,
+  };
+}
+
 const settingsUpdateMachine = {
   host: SETTINGS_STORY_PRIMARY_HOST,
-  isPrimary: true,
   providerStatus: localProviderStatus,
   statusPending: false,
   statusError: false,
@@ -243,21 +391,23 @@ const settingsUpdateMachine = {
 } satisfies UpdateInventoryMachine;
 
 const noJobs: ReadonlySet<string> = new Set();
+
 const noFailures = new Map<string, never>();
+
 const noop = () => {};
 
 export function SettingsUpdatesStory() {
   return (
     <div className="space-y-6">
-      <BbUpdatesCard>
-        <BbAppUpdateRows
+      <OmnyoUpdatesCard>
+        <OmnyoAppUpdateRows
           systemVersion={systemVersion}
           desktopInfo={null}
           isDesktop={false}
           onRelaunchDesktop={null}
           onRetryDesktop={null}
         />
-      </BbUpdatesCard>
+      </OmnyoUpdatesCard>
       <ProviderCliUpdatesSection
         machines={[settingsUpdateMachine]}
         now={0}
@@ -288,6 +438,7 @@ function createSettingsStoryQueryClient(hosts: Host[] = SETTINGS_STORY_HOSTS) {
       },
     },
   });
+
   queryClient.setQueryData(hostsQueryKey(), hosts);
   queryClient.setQueryData(hostsQueryKey(true), hosts);
   queryClient.setQueryData(systemConfigQueryKey(), systemConfig);
@@ -300,14 +451,14 @@ function createSettingsStoryQueryClient(hosts: Host[] = SETTINGS_STORY_HOSTS) {
     variables: STORY_GLOBAL_VARIABLES,
     inheritedVariables: [],
   });
-  queryClient.setQueryData(machineEnvironmentQueryKey(PROJECT_IDS.bb), {
+  queryClient.setQueryData(machineEnvironmentQueryKey(PROJECT_IDS.omnyo), {
     builtInGit: STORY_GIT_HEALTH,
     variables: [
       {
         name: "DATABASE_URL",
         value: null,
         secret: true,
-        note: "Points at the bb sandbox.",
+        note: "Points at the Omnyo sandbox.",
       },
     ],
     inheritedVariables: STORY_GLOBAL_VARIABLES,
@@ -329,6 +480,30 @@ function createSettingsStoryQueryClient(hosts: Host[] = SETTINGS_STORY_HOSTS) {
     MANUAL_MACHINE_PROVIDER,
     MODAL_MACHINE_PROVIDER,
   ]);
+  queryClient.setQueryData(uiPreferencesQueryKey(), settingsStoryUiPreferences);
+  queryClient.setQueryData(systemProviderCatalogQueryKey(), []);
+  queryClient.setQueryData(
+    systemExecutionOptionsQueryKey({
+      environmentId: null,
+      hostId: null,
+      providerId: null,
+    }),
+    settingsStoryExecutionOptions(settingsStoryCodexModels),
+  );
+
+  for (const [providerId, models] of Object.entries(
+    settingsStoryModelsByProvider,
+  )) {
+    queryClient.setQueryData(
+      systemExecutionOptionsQueryKey({
+        environmentId: null,
+        hostId: null,
+        providerId,
+      }),
+      settingsStoryExecutionOptions(models),
+    );
+  }
+
   return queryClient;
 }
 
@@ -344,6 +519,7 @@ export function SettingsStoryFixtures({
     queryClient.setQueryData(hostsQueryKey(), hosts);
     queryClient.setQueryData(hostsQueryKey(true), hosts);
   }, [hosts, queryClient]);
+
   return (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );

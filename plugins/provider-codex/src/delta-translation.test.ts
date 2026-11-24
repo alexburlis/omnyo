@@ -1,10 +1,11 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { experimental_REASONING_PRESENTATION as REASONING_PRESENTATION } from "@get-bb/plugin-sdk/provider-bridge";
-import { experimental_createDeltaAssembler as createDeltaAssembler } from "@get-bb/plugin-sdk/provider-bridge/testing";
+import { experimental_REASONING_PRESENTATION as REASONING_PRESENTATION } from "@omnyo/plugin-sdk/provider-bridge";
+import { experimental_createDeltaAssembler as createDeltaAssembler } from "@omnyo/plugin-sdk/provider-bridge/testing";
 import type {
   DeltaAssembler,
   ThreadEvent,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import type { ServerNotification as CodexServerNotification } from "./generated/codex-app-server/schema/ServerNotification.js";
 import type { RateLimitSnapshot } from "./generated/codex-app-server/schema/v2/RateLimitSnapshot.js";
 import type { Turn } from "./generated/codex-app-server/schema/v2/Turn.js";
@@ -20,11 +21,16 @@ import {
   createCodexEventTranslator,
   type CodexEventTranslator,
 } from "./translator.js";
-import { codexRateLimitReadResponseSchema } from "./schemas.js";
+import {
+  codexRateLimitReadResponseSchema,
+  codexTurnSchema,
+} from "./schemas.js";
 import { threadScope, turnScope } from "./event-scope.test-support.js";
 
 const THREAD_ID = "t-codex-translation";
+
 const ENTROPY = "cx-test";
+
 const ITEM_ID_PATTERN = /^cx-test-i\d+$/;
 
 const IMAGE_PRESENTATION = {
@@ -110,11 +116,13 @@ function createHarness(): CodexEquivalenceHarness {
   const translator = createCodexEventTranslator({
     additionalWorkspaceWriteRoots: [],
   });
+
   const assembler = createDeltaAssembler({
     providerId: "codex",
     entropyPrefix: ENTROPY,
     textDeltaFlushMs: 0,
   });
+
   return {
     assembler,
     translator,
@@ -125,10 +133,10 @@ function createHarness(): CodexEquivalenceHarness {
       });
     },
     turnId(codexTurnId) {
-      return assembler.getBbTurnId(THREAD_ID, codexTurnId) ?? "";
+      return assembler.getAppTurnId(THREAD_ID, codexTurnId) ?? "";
     },
     itemId(codexItemId) {
-      return assembler.getBbItemId(THREAD_ID, codexItemId) ?? "";
+      return assembler.getAppItemId(THREAD_ID, codexItemId) ?? "";
     },
   };
 }
@@ -136,6 +144,7 @@ function createHarness(): CodexEquivalenceHarness {
 describe("codex turn lifecycle translation", () => {
   it("accepts legacy Codex bridge envelopes without jsonrpc", () => {
     const harness = createHarness();
+
     const events = harness.translate({
       method: "turn/started",
       params: {
@@ -154,6 +163,7 @@ describe("codex turn lifecycle translation", () => {
 
   it("surfaces malformed handled Codex events as provider/unhandled", () => {
     const harness = createHarness();
+
     const events = harness.translate({
       jsonrpc: "2.0",
       method: "turn/started",
@@ -201,6 +211,7 @@ describe("codex turn lifecycle translation", () => {
         message: "rate limited",
         codexErrorInfo: null,
         additionalDetails: "try again",
+        misalignment: null,
       },
       expectedError: { error: { message: "rate limited" } },
     },
@@ -208,12 +219,14 @@ describe("codex turn lifecycle translation", () => {
     "stamps the codex turn id as providerCheckpointId on a $status turn",
     ({ status, error, expectedError }) => {
       const harness = createHarness();
+
       const events = harness.translate(
         codexEvent("turn/completed", {
           threadId: "t1",
           turn: codexTurn({ id: "turn-1", status, error }),
         }),
       );
+
       expect(events).toEqual([
         expect.objectContaining({
           type: "turn/completed",
@@ -230,12 +243,14 @@ describe("codex turn lifecycle translation", () => {
 describe("codex thread lifecycle translation", () => {
   it("translates thread/name/updated", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("thread/name/updated", {
         threadId: "t1",
         threadName: "Updated title",
       }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "thread/name/updated",
@@ -246,9 +261,11 @@ describe("codex thread lifecycle translation", () => {
 
   it("ignores thread/name/updated with an empty name", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("thread/name/updated", { threadId: "t1" }),
     );
+
     expect(events).toHaveLength(0);
   });
 
@@ -315,9 +332,11 @@ describe("codex thread lifecycle translation", () => {
 
   it("translates thread/compacted scoped to its vouched turn", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("thread/compacted", { threadId: "t1", turnId: "turn-1" }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "thread/compacted",
@@ -330,6 +349,7 @@ describe("codex thread lifecycle translation", () => {
 describe("codex item translation", () => {
   it("translates item/started with agentMessage", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/started", {
         threadId: "t1",
@@ -346,6 +366,7 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "item/started",
@@ -362,6 +383,7 @@ describe("codex item translation", () => {
 
   it("records an async question as Codex extension state", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -381,6 +403,7 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -408,6 +431,7 @@ describe("codex item translation", () => {
 
   it("records no async question for a synchronous agentMessage", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -424,6 +448,7 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(events.map((event) => event.type)).not.toContain(
       "thread/extensionState/updated",
     );
@@ -431,6 +456,7 @@ describe("codex item translation", () => {
 
   it("suppresses item/started with userMessage as a provider echo", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/started", {
         threadId: "t1",
@@ -449,11 +475,13 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(events).toMatchObject([]);
   });
 
   it("maps imageView items on start and completion", () => {
     const harness = createHarness();
+
     const started = harness.translate(
       codexEvent("item/started", {
         threadId: "t1",
@@ -462,6 +490,7 @@ describe("codex item translation", () => {
         item: { type: "imageView", id: "image-1", path: "/tmp/image.png" },
       }),
     );
+
     expect(started).toContainEqual(
       expect.objectContaining({
         type: "item/started",
@@ -483,6 +512,7 @@ describe("codex item translation", () => {
         item: { type: "imageView", id: "image-1", path: "/tmp/image.png" },
       }),
     );
+
     expect(completed).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -499,6 +529,7 @@ describe("codex item translation", () => {
 
   it("maps imageGeneration items without a provider-unhandled fallback", () => {
     const harness = createHarness();
+
     const started = harness.translate(
       codexEvent("item/started", {
         threadId: "t1",
@@ -516,6 +547,7 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(started).toContainEqual(
       expect.objectContaining({
         type: "item/started",
@@ -549,6 +581,7 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(completed).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -572,6 +605,7 @@ describe("codex item translation", () => {
 
   it("accepts native image generation status and nullable background", () => {
     const harness = createHarness();
+
     for (const [method, status, expectedStatus] of [
       ["item/started", "in_progress", "pending"],
       ["item/completed", "completed", "completed"],
@@ -594,6 +628,7 @@ describe("codex item translation", () => {
           },
         },
       });
+
       expect(events).toContainEqual(
         expect.objectContaining({
           type: method,
@@ -613,6 +648,7 @@ describe("codex item translation", () => {
 
   it("falls back to thread-scoped provider/unhandled for unknown notifications", () => {
     const harness = createHarness();
+
     const events = harness.translate({
       jsonrpc: "2.0",
       method: "item/tool/requestUserInput",
@@ -634,6 +670,7 @@ describe("codex item translation", () => {
 
   it("ignores Codex turn moderation metadata", () => {
     const harness = createHarness();
+
     const events = harness.translate({
       jsonrpc: "2.0",
       method: "turn/moderationMetadata",
@@ -654,6 +691,7 @@ describe("codex item translation", () => {
 
   it("ignores Codex raw response completions", () => {
     const harness = createHarness();
+
     const events = harness.translate({
       jsonrpc: "2.0",
       method: "rawResponse/completed",
@@ -677,6 +715,7 @@ describe("codex item translation", () => {
 
   it("maps item/mcpToolCall/progress to shared tool progress", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/mcpToolCall/progress", {
         threadId: "t1",
@@ -697,6 +736,7 @@ describe("codex item translation", () => {
 
   it("maps a declined commandExecution to an approval denial", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -734,6 +774,7 @@ describe("codex item translation", () => {
 
   it("normalizes started commandExecutions to pending with no approval verdict", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/started", {
         threadId: "t1",
@@ -772,6 +813,7 @@ describe("codex item translation", () => {
 
   it("maps fileChange kinds and diffs", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -792,8 +834,10 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     const itemEvent = events.find((event) => event.type === "item/completed");
     expect(itemEvent).toBeDefined();
+
     if (
       itemEvent?.type === "item/completed" &&
       itemEvent.item.type === "fileChange"
@@ -808,6 +852,7 @@ describe("codex item translation", () => {
 
   it("maps a declined fileChange to an approval denial", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -836,6 +881,7 @@ describe("codex item translation", () => {
 
   it("maps mcpToolCall to toolCall with server and duration", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -857,6 +903,7 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -876,6 +923,7 @@ describe("codex item translation", () => {
 
   it("maps dynamicToolCall to toolCall with textual results", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -885,7 +933,7 @@ describe("codex item translation", () => {
           type: "dynamicToolCall",
           id: "dyn-1",
           namespace: null,
-          tool: "bb_test_ping",
+          tool: "omnyo_test_ping",
           arguments: {},
           status: "completed",
           contentItems: [{ type: "inputText", text: "PONG_FROM_TOOL" }],
@@ -894,12 +942,13 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
         item: expect.objectContaining({
           type: "toolCall",
-          tool: "bb_test_ping",
+          tool: "omnyo_test_ping",
           status: "completed",
           result: "PONG_FROM_TOOL",
           durationMs: 3,
@@ -908,11 +957,11 @@ describe("codex item translation", () => {
     );
   });
 
-  it("stamps bb-injected tool calls with server bb and the definition's presentation", () => {
+  it("stamps Omnyo-injected tool calls with server omnyo and the definition's presentation", () => {
     const harness = createHarness();
     harness.translator.configureInjectedTools([
       {
-        name: "bb_workflow_run",
+        name: "omnyo_workflow_run",
         presentation: {
           label: {
             pending: "Starting workflow",
@@ -922,6 +971,7 @@ describe("codex item translation", () => {
         },
       },
     ]);
+
     const injected = harness.translate(
       codexEvent("item/started", {
         threadId: "t1",
@@ -929,9 +979,9 @@ describe("codex item translation", () => {
         startedAtMs: 0,
         item: {
           type: "dynamicToolCall",
-          id: "dyn-bb-1",
+          id: "dyn-omnyo-1",
           namespace: null,
-          tool: "bb_workflow_run",
+          tool: "omnyo_workflow_run",
           arguments: { name: "review" },
           status: "inProgress",
           contentItems: null,
@@ -940,14 +990,15 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(injected).toContainEqual(
       expect.objectContaining({
         type: "item/started",
         item: {
           type: "toolCall",
-          id: harness.itemId("dyn-bb-1"),
-          server: "bb",
-          tool: "bb_workflow_run",
+          id: harness.itemId("dyn-omnyo-1"),
+          server: "omnyo",
+          tool: "omnyo_workflow_run",
           arguments: { name: "review" },
           status: "pending",
           presentation: {
@@ -979,6 +1030,7 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(native).toContainEqual(
       expect.objectContaining({
         type: "item/started",
@@ -1007,6 +1059,7 @@ describe("codex item translation", () => {
 
   it("preserves textual errors on failed dynamicToolCalls", () => {
     const harness = createHarness();
+
     const events = harness.translate({
       jsonrpc: "2.0",
       method: "item/completed",
@@ -1017,7 +1070,7 @@ describe("codex item translation", () => {
           type: "dynamicToolCall",
           id: "dyn-err-1",
           namespace: null,
-          tool: "bb_test_ping",
+          tool: "omnyo_test_ping",
           arguments: {},
           status: "failed",
           contentItems: [{ type: "inputText", text: "permission denied" }],
@@ -1042,6 +1095,7 @@ describe("codex item translation", () => {
 
   it("keeps readable output for image-only dynamicToolCalls", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -1051,7 +1105,7 @@ describe("codex item translation", () => {
           type: "dynamicToolCall",
           id: "dyn-img-1",
           namespace: null,
-          tool: "bb_test_image",
+          tool: "omnyo_test_image",
           arguments: {},
           status: "failed",
           contentItems: [
@@ -1081,6 +1135,7 @@ describe("codex item translation", () => {
 
   it("maps a collabAgentToolCall that names its child to a delegation", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -1102,6 +1157,7 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -1125,6 +1181,7 @@ describe("codex item translation", () => {
 
   it("maps a declined collabAgentToolCall to interrupted", () => {
     const harness = createHarness();
+
     const events = harness.translate({
       jsonrpc: "2.0",
       method: "item/completed",
@@ -1161,6 +1218,7 @@ describe("codex item translation", () => {
 
   it("maps completed reasoning items", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -1174,6 +1232,7 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -1190,6 +1249,7 @@ describe("codex item translation", () => {
 
   it("maps completed plan items", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -1202,6 +1262,7 @@ describe("codex item translation", () => {
         },
       }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -1219,6 +1280,7 @@ describe("codex item translation", () => {
 describe("codex web item translation", () => {
   it("merges query fields on started search actions", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/started", {
         threadId: "t1",
@@ -1258,6 +1320,7 @@ describe("codex web item translation", () => {
 
   it("maps openPage actions to webFetch on start and completion", () => {
     const harness = createHarness();
+
     const started = harness.translate(
       codexEvent("item/started", {
         threadId: "t1",
@@ -1272,6 +1335,7 @@ describe("codex web item translation", () => {
         },
       }),
     );
+
     expect(started).toContainEqual(
       expect.objectContaining({
         type: "item/started",
@@ -1301,6 +1365,7 @@ describe("codex web item translation", () => {
         },
       }),
     );
+
     expect(completed).toContainEqual(
       expect.objectContaining({
         type: "item/completed",
@@ -1318,6 +1383,7 @@ describe("codex web item translation", () => {
 
   it("maps findInPage actions to webFetch with the pattern", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -1394,6 +1460,7 @@ describe("codex web item translation", () => {
 
   it("falls back to provider/unhandled for openPage actions without a url", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/completed", {
         threadId: "t1",
@@ -1429,6 +1496,7 @@ describe("codex web item translation", () => {
 describe("codex delta and usage translation", () => {
   it("synthesizes item/started for a delta-first agent message and keeps the id", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/agentMessage/delta", {
         threadId: "t1",
@@ -1437,6 +1505,7 @@ describe("codex delta and usage translation", () => {
         delta: "hello ",
       }),
     );
+
     const itemId = harness.itemId("item-1");
     expect(itemId).toMatch(ITEM_ID_PATTERN);
     expect(events).toEqual([
@@ -1473,6 +1542,7 @@ describe("codex delta and usage translation", () => {
 
   it("never synthesizes an opening item for command output deltas", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("item/commandExecution/outputDelta", {
         threadId: "t1",
@@ -1481,6 +1551,7 @@ describe("codex delta and usage translation", () => {
         delta: "output line\n",
       }),
     );
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "item/commandExecution/outputDelta",
@@ -1495,6 +1566,7 @@ describe("codex delta and usage translation", () => {
     "preserves older Codex usage and reported writes %s",
     (writes) => {
       const harness = createHarness();
+
       const usage = {
         totalTokens: 100,
         inputTokens: 80,
@@ -1503,6 +1575,7 @@ describe("codex delta and usage translation", () => {
         reasoningOutputTokens: 5,
         ...(writes === undefined ? {} : { cacheWriteInputTokens: writes }),
       };
+
       const events = harness.translate({
         method: "thread/tokenUsage/updated",
         params: {
@@ -1511,9 +1584,11 @@ describe("codex delta and usage translation", () => {
           tokenUsage: { total: usage, last: usage, modelContextWindow: null },
         },
       });
+
       const event = events.find(
         (event) => event.type === "thread/tokenUsage/updated",
       );
+
       expect(event?.tokenUsage.last).toEqual({
         ...usage,
         cacheReadInputTokens: 31,
@@ -1529,6 +1604,7 @@ describe("codex delta and usage translation", () => {
 describe("codex plan translation", () => {
   it("maps turn/plan/updated to a settled planSteps snapshot", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("turn/plan/updated", {
         threadId: "t1",
@@ -1541,6 +1617,7 @@ describe("codex plan translation", () => {
         ],
       }),
     );
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "item/completed",
@@ -1567,6 +1644,7 @@ describe("codex plan translation", () => {
 
   it("mints one planSteps item per snapshot and tolerates null explanations", () => {
     const harness = createHarness();
+
     const first = harness.translate({
       method: "turn/plan/updated",
       params: {
@@ -1579,6 +1657,7 @@ describe("codex plan translation", () => {
         ],
       },
     });
+
     const second = harness.translate({
       method: "turn/plan/updated",
       params: {
@@ -1609,10 +1688,13 @@ describe("codex plan translation", () => {
       first[0]?.type === "item/completed" ? first[0].item : null,
     ).not.toHaveProperty("explanation");
     expect(second).toHaveLength(1);
+
     const firstItem =
       first[0]?.type === "item/completed" ? first[0].item : null;
+
     const secondItem =
       second[0]?.type === "item/completed" ? second[0].item : null;
+
     expect(secondItem?.id).not.toBe(firstItem?.id);
     expect(second.some((event) => event.type === "turn/plan/updated")).toBe(
       false,
@@ -1621,6 +1703,80 @@ describe("codex plan translation", () => {
 });
 
 describe("codex error and warning translation", () => {
+  it.each([
+    {
+      body: { detail: "Bad Request" },
+      summary:
+        "Codex request rejected. The model provider did not return a reason.",
+    },
+    {
+      body: {
+        error: {
+          type: "invalid_request_error",
+          code: "invalid_value",
+          param: "reasoning.effort",
+          message: "synthetic private request content",
+        },
+      },
+      summary: "Codex request rejected. Invalid value for reasoning effort.",
+    },
+    {
+      body: {
+        error: {
+          type: "invalid_request_error",
+          code: "synthetic private code",
+          param: "synthetic private parameter",
+        },
+      },
+      summary:
+        "Codex request rejected. The model provider did not return a recognized reason.",
+    },
+  ])(
+    "shows safe rejection details in the error and failed turn",
+    ({ body, summary }) => {
+      const harness = createHarness();
+
+      const error = {
+        message: JSON.stringify(body),
+        codexErrorInfo: "other" as const,
+        additionalDetails: null,
+        misalignment: null,
+      };
+
+      expect(
+        harness.translate(
+          codexEvent("error", {
+            threadId: "t1",
+            turnId: "turn-1",
+            error,
+            willRetry: false,
+          }),
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          type: "provider/error",
+          scope: turnScope(harness.turnId("turn-1")),
+          detail: summary,
+          willRetry: false,
+        }),
+      ]);
+      expect(
+        harness.translate(
+          codexEvent("turn/completed", {
+            threadId: "t1",
+            turn: codexTurn({ id: "turn-1", status: "failed", error }),
+          }),
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          type: "turn/completed",
+          status: "failed",
+          error: { message: summary },
+        }),
+      ]);
+    },
+  );
+
   it("keeps a turnless error thread-scoped even while a turn is open", () => {
     const harness = createHarness();
     harness.translate(
@@ -1629,6 +1785,7 @@ describe("codex error and warning translation", () => {
         turn: codexTurn({ id: "turn-1", status: "inProgress", error: null }),
       }),
     );
+
     const events = harness.translate({
       jsonrpc: "2.0",
       method: "error",
@@ -1641,6 +1798,7 @@ describe("codex error and warning translation", () => {
         },
       },
     });
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "provider/error",
@@ -1667,6 +1825,7 @@ describe("codex error and warning translation", () => {
               message: "terminal failure",
               codexErrorInfo,
               additionalDetails: null,
+              misalignment: null,
             },
             willRetry: false,
           }),
@@ -1694,6 +1853,7 @@ describe("codex error and warning translation", () => {
                 message: "terminal failure",
                 codexErrorInfo,
                 additionalDetails: null,
+                misalignment: null,
               },
             }),
           }),
@@ -1709,14 +1869,395 @@ describe("codex error and warning translation", () => {
     },
   );
 
+  it("closes a turn whose remote compaction failed with modelNotFound on Codex 0.167.0", () => {
+    const harness = createHarness();
+    const codexThreadId = "01a19175-9ed4-7312-b5e8-52b92e236f4b";
+    const codexTurnId = "01a1bb75-66dd-7e80-8134-ce1bfc323c56";
+
+    const message =
+      "Error running remote compact task: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.";
+
+    harness.translate({
+      jsonrpc: "2.0",
+      method: "turn/started",
+      params: {
+        threadId: codexThreadId,
+        turn: {
+          id: codexTurnId,
+          rootTurnId: codexTurnId,
+          items: [],
+          itemsView: "notLoaded",
+          status: "inProgress",
+          error: null,
+          startedAt: 1794146395,
+          completedAt: null,
+          durationMs: null,
+        },
+      },
+    });
+    harness.translate({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: {
+        threadId: codexThreadId,
+        turnId: codexTurnId,
+        startedAtMs: 1794146395000,
+        item: { type: "contextCompaction", id: "compaction-1" },
+      },
+    });
+
+    const errorEvents = harness.translate(
+      JSON.parse(
+        `{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"Error running remote compact task: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.","codexErrorInfo":"modelNotFound","additionalDetails":null,"misalignment":null},"willRetry":false,"threadId":"01a19175-9ed4-7312-b5e8-52b92e236f4b","turnId":"01a1bb75-66dd-7e80-8134-ce1bfc323c56"}}`,
+      ),
+    );
+
+    expect(errorEvents).toEqual([
+      expect.objectContaining({
+        type: "provider/error",
+        scope: turnScope(harness.turnId(codexTurnId)),
+        detail: message,
+        willRetry: false,
+        errorInfo: {
+          category: "bad-request",
+          providerCode: "modelNotFound",
+          httpStatusCode: null,
+        },
+      }),
+    ]);
+
+    const completedEvents = harness.translate(
+      JSON.parse(
+        `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"01a19175-9ed4-7312-b5e8-52b92e236f4b","turn":{"id":"01a1bb75-66dd-7e80-8134-ce1bfc323c56","rootTurnId":"01a1bb75-66dd-7e80-8134-ce1bfc323c56","items":[],"itemsView":"notLoaded","status":"failed","error":{"message":"Error running remote compact task: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.","codexErrorInfo":"modelNotFound","additionalDetails":null,"misalignment":null},"startedAt":1794146395,"completedAt":1794146397,"durationMs":1895}}}`,
+      ),
+    );
+
+    expect(
+      completedEvents.filter((event) => event.type === "provider/unhandled"),
+    ).toEqual([]);
+    expect(completedEvents).toContainEqual(
+      expect.objectContaining({
+        type: "turn/completed",
+        scope: turnScope(harness.turnId(codexTurnId)),
+        status: "failed",
+        error: { message },
+        providerCheckpointId: codexTurnId,
+      }),
+    );
+  });
+
+  it.each([
+    ["rateLimitExceeded", "rate-limit"],
+    ["flexUnavailable", "overloaded"],
+    ["modelNotFound", "bad-request"],
+    ["policyCapacityUnavailable", "overloaded"],
+    ["tooManyDenials", "policy"],
+  ] as const)(
+    "categorizes the Codex 0.167.0 %s error",
+    (codexErrorInfo, category) => {
+      const harness = createHarness();
+
+      expect(
+        harness.translate(
+          codexEvent("error", {
+            threadId: "t1",
+            turnId: "turn-1",
+            error: {
+              message: "terminal failure",
+              codexErrorInfo,
+              additionalDetails: null,
+              misalignment: null,
+            },
+            willRetry: false,
+          }),
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          type: "provider/error",
+          errorInfo: {
+            category,
+            providerCode: codexErrorInfo,
+            httpStatusCode: null,
+          },
+        }),
+      ]);
+    },
+  );
+
+  it.each([
+    ["a string", "futureFailure", "futureFailure"],
+    ["an object", { futureFailure: { httpStatusCode: 503 } }, "futureFailure"],
+  ] as const)(
+    "keeps the event and the turn boundary when codexErrorInfo is %s Omnyo does not know",
+    (_label, codexErrorInfo, providerCode) => {
+      const harness = createHarness();
+
+      const error = {
+        message: "future failure",
+        codexErrorInfo,
+        additionalDetails: null,
+        misalignment: null,
+      };
+
+      expect(
+        harness.translate({
+          jsonrpc: "2.0",
+          method: "error",
+          params: { threadId: "t1", turnId: "turn-1", error, willRetry: false },
+        }),
+      ).toEqual([
+        expect.objectContaining({
+          type: "provider/error",
+          scope: turnScope(harness.turnId("turn-1")),
+          detail: "future failure",
+          errorInfo: {
+            category: "unknown",
+            providerCode,
+            httpStatusCode: null,
+          },
+        }),
+      ]);
+
+      expect(
+        harness.translate({
+          jsonrpc: "2.0",
+          method: "turn/completed",
+          params: {
+            threadId: "t1",
+            turn: { id: "turn-1", status: "failed", error },
+          },
+        }),
+      ).toEqual([
+        expect.objectContaining({
+          type: "turn/completed",
+          scope: turnScope(harness.turnId("turn-1")),
+          status: "failed",
+          error: { message: "future failure" },
+        }),
+      ]);
+    },
+  );
+
+  it("records a malformed codexErrorInfo and still closes the turn with its message", () => {
+    const harness = createHarness();
+
+    const error = {
+      message: "malformed failure",
+      codexErrorInfo: 42,
+      additionalDetails: null,
+      misalignment: null,
+    };
+
+    expect(
+      harness.translate({
+        jsonrpc: "2.0",
+        method: "error",
+        params: { threadId: "t1", turnId: "turn-1", error, willRetry: false },
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        type: "provider/unhandled",
+        rawType: "error",
+      }),
+    ]);
+
+    const events = harness.translate({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: {
+        threadId: "t1",
+        turn: { id: "turn-1", status: "failed", error },
+      },
+    });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "provider/unhandled",
+        rawType: "turn/completed",
+      }),
+      expect.objectContaining({
+        type: "turn/completed",
+        scope: turnScope(harness.turnId("turn-1")),
+        status: "failed",
+        error: { message: "malformed failure" },
+      }),
+    ]);
+  });
+
+  it("keeps the reported status when only the error of a completed turn is malformed", () => {
+    const harness = createHarness();
+    harness.translate(
+      codexEvent("turn/started", {
+        threadId: "t1",
+        turn: codexTurn({ id: "turn-1", status: "inProgress", error: null }),
+      }),
+    );
+
+    const completed = harness
+      .translate({
+        jsonrpc: "2.0",
+        method: "turn/completed",
+        params: {
+          threadId: "t1",
+          turn: {
+            id: "turn-1",
+            status: "interrupted",
+            error: { message: "stopped", codexErrorInfo: 42 },
+          },
+        },
+      })
+      .find((event) => event.type === "turn/completed");
+
+    expect(completed).toEqual(
+      expect.objectContaining({
+        scope: turnScope(harness.turnId("turn-1")),
+        status: "interrupted",
+        error: { message: "stopped" },
+      }),
+    );
+  });
+
+  it.each([
+    [
+      "an unknown status",
+      {
+        status: "futureStatus",
+        error: {
+          message: "stopped by a future rule",
+          codexErrorInfo: null,
+          additionalDetails: null,
+        },
+      },
+      "stopped by a future rule",
+    ],
+    ["an unknown status and no error", { status: "futureStatus" }, undefined],
+    [
+      "an error without a message",
+      { status: "failed", error: { codexErrorInfo: "modelNotFound" } },
+      undefined,
+    ],
+  ] as const)(
+    "closes an open Codex turn whose completion has %s",
+    (_label, turn, message) => {
+      const harness = createHarness();
+      harness.translate(
+        codexEvent("turn/started", {
+          threadId: "t1",
+          turn: codexTurn({ id: "turn-1", status: "inProgress", error: null }),
+        }),
+      );
+
+      const events = harness.translate({
+        jsonrpc: "2.0",
+        method: "turn/completed",
+        params: { threadId: "t1", turn: { id: "turn-1", ...turn } },
+      });
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "provider/unhandled",
+          rawType: "turn/completed",
+          scope: turnScope(harness.turnId("turn-1")),
+        }),
+      );
+
+      const completed = events.find((event) => event.type === "turn/completed");
+
+      expect(completed).toEqual(
+        expect.objectContaining({
+          scope: turnScope(harness.turnId("turn-1")),
+          status: "failed",
+          providerCheckpointId: "turn-1",
+        }),
+      );
+      expect(
+        completed?.type === "turn/completed" ? completed.error : undefined,
+      ).toEqual(message === undefined ? undefined : { message });
+    },
+  );
+
+  it("keeps an unknown codexErrorInfo code when a parsed turn is parsed again", () => {
+    const turn = codexTurnSchema.parse({
+      id: "turn-1",
+      status: "failed",
+      error: {
+        message: "future failure",
+        codexErrorInfo: "futureFailure",
+        additionalDetails: null,
+      },
+    });
+
+    expect(turn.error?.codexErrorInfo).toEqual({
+      unrecognized: "futureFailure",
+    });
+    expect(codexTurnSchema.parse(turn)).toEqual(turn);
+  });
+
+  it("categorizes every CodexErrorInfo variant in the generated Codex types", () => {
+    const generated = readFileSync(
+      new URL(
+        "./generated/codex-app-server/schema/v2/CodexErrorInfo.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    const declaration = generated.slice(
+      generated.indexOf("export type CodexErrorInfo"),
+    );
+
+    const variants = [...declaration.matchAll(/(\{ )?"(\w+)"/g)].map(
+      (match) => ({ code: match[2] ?? "", isObject: match[1] !== undefined }),
+    );
+
+    expect(variants.length).toBeGreaterThan(20);
+
+    for (const { code, isObject } of variants) {
+      const harness = createHarness();
+
+      const codexErrorInfo = isObject
+        ? { [code]: { httpStatusCode: null, turnKind: "review" } }
+        : code;
+
+      const [event] = harness.translate({
+        jsonrpc: "2.0",
+        method: "error",
+        params: {
+          threadId: "t1",
+          turnId: "turn-1",
+          error: {
+            message: "failure",
+            codexErrorInfo,
+            additionalDetails: null,
+          },
+          willRetry: false,
+        },
+      });
+
+      const errorInfo =
+        event?.type === "provider/error" ? event.errorInfo : undefined;
+
+      expect({ code, providerCode: errorInfo?.providerCode }).toEqual({
+        code,
+        providerCode: code,
+      });
+      expect({
+        code,
+        categorized: code === "other" || errorInfo?.category !== "unknown",
+      }).toEqual({ code, categorized: true });
+    }
+  });
+
   it("maps deprecationNotice to a thread-scoped warning", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("deprecationNotice", {
         summary: "Model deprecated",
         details: "Use newer model",
       }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "provider/warning",
@@ -1732,12 +2273,14 @@ describe("codex error and warning translation", () => {
 
   it("maps configWarning to a thread-scoped warning", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("configWarning", {
         summary: "Bad config",
         details: null,
       }),
     );
+
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "provider/warning",
@@ -1751,6 +2294,7 @@ describe("codex error and warning translation", () => {
 
   it("ignores MCP startup status updates", () => {
     const harness = createHarness();
+
     const failedEvents = harness.translate({
       jsonrpc: "2.0",
       method: "mcpServer/startupStatus/updated",
@@ -1760,6 +2304,7 @@ describe("codex error and warning translation", () => {
         error: "MCP client failed to start",
       },
     });
+
     const readyEvents = harness.translate({
       jsonrpc: "2.0",
       method: "mcpServer/startupStatus/updated",
@@ -1792,6 +2337,7 @@ describe("codex account rate-limit translation", () => {
     const response = codexRateLimitReadResponseSchema.parse({
       rateLimits: blockedSpendControlSnapshot,
     });
+
     const snapshot = applyCodexRateLimitUpdate(
       createCodexEventTranslationState(),
       response.rateLimits,
@@ -1805,11 +2351,13 @@ describe("codex account rate-limit translation", () => {
     ["absence", {}],
   ])("does not resurrect blocked spend control after %s", (_, clearUpdate) => {
     const harness = createHarness();
+
     const [blockedEvent] = harness.translate(
       codexEvent("account/rateLimits/updated", {
         rateLimits: blockedSpendControlSnapshot,
       }),
     );
+
     expect(blockedEvent).toMatchObject({
       type: "provider/rateLimits/updated",
       rateLimits: {
@@ -1825,6 +2373,7 @@ describe("codex account rate-limit translation", () => {
       method: "account/rateLimits/updated",
       params: { rateLimits: clearUpdate },
     });
+
     expect(clearedEvent).toMatchObject({
       type: "provider/rateLimits/updated",
       rateLimits: {
@@ -1837,6 +2386,7 @@ describe("codex account rate-limit translation", () => {
 
   it("preserves Codex subscription rate limits", () => {
     const harness = createHarness();
+
     const events = harness.translate(
       codexEvent("account/rateLimits/updated", {
         rateLimits: {
@@ -1856,6 +2406,7 @@ describe("codex account rate-limit translation", () => {
         },
       }),
     );
+
     expect(events).toEqual([
       expect.objectContaining({
         type: "provider/rateLimits/updated",
@@ -1880,6 +2431,7 @@ describe("codex account rate-limit translation", () => {
 
   it("classifies an exhausted weekly window independently from extra credits", () => {
     const harness = createHarness();
+
     const [event] = harness.translate(
       codexEvent("account/rateLimits/updated", {
         rateLimits: codexRateLimitSnapshot({
@@ -2208,6 +2760,7 @@ describe("codex account rate-limit translation", () => {
 
   it("keeps an exhausted individual limit ahead of an allowed subscription window", () => {
     const harness = createHarness();
+
     const [event] = harness.translate(
       codexEvent("account/rateLimits/updated", {
         rateLimits: codexRateLimitSnapshot({
@@ -2251,6 +2804,7 @@ describe("codex account rate-limit translation", () => {
 
   it("uses Codex's reached reason before credit and spend metadata", () => {
     const harness = createHarness();
+
     const [event] = harness.translate(
       codexEvent("account/rateLimits/updated", {
         rateLimits: {
@@ -2324,6 +2878,7 @@ describe("codex account rate-limit translation", () => {
         },
       },
     });
+
     expect(sparseEvent).toMatchObject({
       type: "provider/rateLimits/updated",
       rateLimits: {
@@ -2353,6 +2908,7 @@ describe("codex account rate-limit translation", () => {
         },
       },
     });
+
     expect(resetEvent).toMatchObject({
       type: "provider/rateLimits/updated",
       rateLimits: {

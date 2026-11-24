@@ -27,6 +27,7 @@ describe("ask-user-question contracts", () => {
         },
       ],
     });
+
     expect(parsed.success).toBe(true);
   });
 
@@ -35,6 +36,7 @@ describe("ask-user-question contracts", () => {
       value: `v${index}`,
       label: `Option ${index}`,
     }));
+
     expect(
       interactionPayloadSchema.safeParse({
         questions: [

@@ -2,13 +2,13 @@ import { useMemo } from "react";
 import type {
   PromptTextMention,
   ThreadTimelineActivePromptMode,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   isPlanModePrompt,
   permissionDisplayForActivePromptMode,
   permissionDisplayForPromptMode,
   shouldDisablePermissionPickerForActivePromptMode,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import type { ExecutionControlsProps } from "@/components/promptbox/ExecutionControls";
 
 interface UsePromptModePermissionDisplayArgs {
@@ -27,6 +27,7 @@ export function usePromptModePermissionDisplay({
   const selectedProviderPlanModeCopy = execution.provider.options?.find(
     (option) => option.value === execution.provider.selectedId,
   )?.planModeCopy;
+
   const promptModeInput = useMemo(
     () => ({
       planModeCopy: selectedProviderPlanModeCopy,
@@ -35,6 +36,7 @@ export function usePromptModePermissionDisplay({
     }),
     [mentionRanges, selectedProviderPlanModeCopy, value],
   );
+
   const permissionDisplayOverride = useMemo(
     () =>
       permissionDisplayForActivePromptMode(
@@ -43,8 +45,10 @@ export function usePromptModePermissionDisplay({
       ) ?? permissionDisplayForPromptMode(promptModeInput),
     [activePromptMode, promptModeInput, selectedProviderPlanModeCopy],
   );
+
   const permissionPickerDisabledByPlanMode =
     shouldDisablePermissionPickerForActivePromptMode(activePromptMode) ||
     isPlanModePrompt(promptModeInput);
+
   return { permissionDisplayOverride, permissionPickerDisabledByPlanMode };
 }

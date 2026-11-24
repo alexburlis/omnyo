@@ -1,4 +1,4 @@
-import type { AvailableModel } from "@bb/domain";
+import type { AvailableModel } from "@omnyo/domain";
 
 const PREFERRED_TEST_MODELS_BY_PROVIDER: Record<string, readonly string[]> = {
   codex: ["gpt-5.4"],
@@ -27,10 +27,12 @@ export function resolvePreferredTestModel(
   args: ResolvePreferredTestModelArgs,
 ): string | null {
   const preferredModels = listPreferredTestModels(args.providerId);
+
   for (const preferredModel of preferredModels) {
     const matchingModel = args.models.find(
       (availableModel) => availableModel.model === preferredModel,
     );
+
     if (matchingModel) {
       return matchingModel.model;
     }

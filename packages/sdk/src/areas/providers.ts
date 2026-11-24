@@ -3,7 +3,7 @@ import type {
   SystemProviderInfo,
   SystemProviderCatalogEntry,
   SystemProvidersQuery,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   readExecutionOptions,
   signalRequestArgs,
@@ -19,12 +19,14 @@ export type ProviderListArgs = ProviderHostRoutingArgs & {
   capability?: SystemProvidersQuery["capability"];
   signal?: AbortSignal;
 };
+
 export type ProviderModelsArgs = ProviderHostRoutingArgs & {
   providerId?: string;
   signal?: AbortSignal;
 };
 
 export type ProviderListResult = SystemProviderInfo[];
+
 export type ProviderModelsResult = SystemExecutionOptionsResponse;
 
 export interface ProvidersArea {
@@ -39,6 +41,7 @@ export interface ProvidersArea {
 
 export function createProvidersArea(args: CreateSdkAreaArgs): ProvidersArea {
   const { transport } = args;
+
   return {
     async catalog() {
       return transport.readJson(

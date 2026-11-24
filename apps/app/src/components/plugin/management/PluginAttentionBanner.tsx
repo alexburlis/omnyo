@@ -1,4 +1,4 @@
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import { AttentionBanner } from "@/components/ui/attention-banner";
 import type { PluginListItem } from "@/hooks/queries/plugin-settings-queries";
 import { pluginsNeedingAttention } from "@/hooks/usePluginAttention";
@@ -12,7 +12,9 @@ export function PluginAttentionBanner({
   onOpenPlugin: (pluginId: string, trigger: HTMLButtonElement) => void;
 }) {
   const affected = pluginsNeedingAttention(plugins);
+
   if (affected.length === 0) return null;
+
   return (
     <AttentionBanner
       title={
@@ -24,6 +26,7 @@ export function PluginAttentionBanner({
       <ul className="space-y-2">
         {affected.map((plugin) => {
           const status = pluginRuntimeStatusPresentation(plugin);
+
           return (
             <li key={plugin.id} className="flex items-center gap-3">
               <div className="min-w-0 flex-1">

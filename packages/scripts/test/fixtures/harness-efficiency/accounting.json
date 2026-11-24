@@ -1,0 +1,208 @@
+{
+  "manifest": {
+    "id": "synthetic-accounting-v1",
+    "evidence": "synthetic",
+    "sourceSha": "0000000000000000000000000000000000000000",
+    "provider": {
+      "id": "fixture",
+      "adapter": "synthetic",
+      "model": "arithmetic-only",
+      "runtimeVersion": "1",
+      "optionsHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "usageSemanticsId": "four-disjoint-buckets-v1"
+    },
+    "cacheClass": "cold",
+    "timeoutMs": 600000,
+    "taskRetryBudget": 0,
+    "arms": {
+      "baseline": {
+        "configurationHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "injectionHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "candidate": {
+        "configurationHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "injectionHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "requirements": {
+      "summaryUsage": true,
+      "resendCounts": true
+    },
+    "samples": [
+      {
+        "id": "sample-1",
+        "taskId": "arithmetic",
+        "taskClass": "deterministic-code",
+        "trial": 1,
+        "taskHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "startingFilesHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "verifierHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "firstArm": "baseline"
+      },
+      {
+        "id": "sample-2",
+        "taskId": "arithmetic",
+        "taskClass": "deterministic-code",
+        "trial": 2,
+        "taskHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "startingFilesHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "verifierHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "firstArm": "candidate"
+      }
+    ]
+  },
+  "checks": {
+    "guardsPreserved": "passed",
+    "capabilityPreserved": "passed",
+    "experimentValid": "passed"
+  },
+  "modelRates": null,
+  "outcomes": [
+    {
+      "sampleId": "sample-1",
+      "arm": "baseline",
+      "manifestId": "synthetic-accounting-v1",
+      "result": "verified-pass",
+      "evidenceId": "verifier-baseline-1"
+    },
+    {
+      "sampleId": "sample-2",
+      "arm": "baseline",
+      "manifestId": "synthetic-accounting-v1",
+      "result": "verified-fail",
+      "evidenceId": "verifier-baseline-2"
+    },
+    {
+      "sampleId": "sample-1",
+      "arm": "candidate",
+      "manifestId": "synthetic-accounting-v1",
+      "result": "verified-pass",
+      "evidenceId": "verifier-candidate-1"
+    },
+    {
+      "sampleId": "sample-2",
+      "arm": "candidate",
+      "manifestId": "synthetic-accounting-v1",
+      "result": "verified-fail",
+      "evidenceId": "verifier-candidate-2"
+    }
+  ],
+  "attempts": [
+    {
+      "id": "baseline-1",
+      "sampleId": "sample-1",
+      "arm": "baseline",
+      "manifestId": "synthetic-accounting-v1",
+      "attempt": 1,
+      "termination": "completed",
+      "observerWallMs": 1000,
+      "usage": {
+        "sourceId": "aggregate-baseline-1",
+        "coverage": "complete",
+        "uncachedInput": 80,
+        "cacheRead": 10,
+        "cacheWrite": 5,
+        "output": 20,
+        "nativeRetries": 0,
+        "summary": {
+          "count": 0,
+          "uncachedInput": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "output": 0
+        },
+        "resends": {
+          "full": 0,
+          "delta": 1
+        }
+      }
+    },
+    {
+      "id": "baseline-2",
+      "sampleId": "sample-2",
+      "arm": "baseline",
+      "manifestId": "synthetic-accounting-v1",
+      "attempt": 1,
+      "termination": "completed",
+      "observerWallMs": 1000,
+      "usage": {
+        "sourceId": "aggregate-baseline-2",
+        "coverage": "complete",
+        "uncachedInput": 50,
+        "cacheRead": 10,
+        "cacheWrite": 5,
+        "output": 20,
+        "nativeRetries": 0,
+        "summary": {
+          "count": 0,
+          "uncachedInput": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "output": 0
+        },
+        "resends": {
+          "full": 0,
+          "delta": 1
+        }
+      }
+    },
+    {
+      "id": "candidate-1",
+      "sampleId": "sample-1",
+      "arm": "candidate",
+      "manifestId": "synthetic-accounting-v1",
+      "attempt": 1,
+      "termination": "completed",
+      "observerWallMs": 1000,
+      "usage": {
+        "sourceId": "aggregate-candidate-1",
+        "coverage": "complete",
+        "uncachedInput": 60,
+        "cacheRead": 10,
+        "cacheWrite": 5,
+        "output": 20,
+        "nativeRetries": 0,
+        "summary": {
+          "count": 0,
+          "uncachedInput": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "output": 0
+        },
+        "resends": {
+          "full": 0,
+          "delta": 1
+        }
+      }
+    },
+    {
+      "id": "candidate-2",
+      "sampleId": "sample-2",
+      "arm": "candidate",
+      "manifestId": "synthetic-accounting-v1",
+      "attempt": 1,
+      "termination": "completed",
+      "observerWallMs": 1000,
+      "usage": {
+        "sourceId": "aggregate-candidate-2",
+        "coverage": "complete",
+        "uncachedInput": 40,
+        "cacheRead": 10,
+        "cacheWrite": 5,
+        "output": 20,
+        "nativeRetries": 0,
+        "summary": {
+          "count": 0,
+          "uncachedInput": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "output": 0
+        },
+        "resends": {
+          "full": 0,
+          "delta": 1
+        }
+      }
+    }
+  ]
+}

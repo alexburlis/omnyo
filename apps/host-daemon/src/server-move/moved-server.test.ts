@@ -9,6 +9,7 @@ import {
 } from "./moved-server.js";
 
 const roots: string[] = [];
+
 const NUL = String.fromCharCode(0);
 
 afterEach(async () => {
@@ -42,14 +43,14 @@ describe("normalizeMovedServerUrl", () => {
 describe("validateServerHeaders", () => {
   it("accepts token names and printable values", () => {
     expect(
-      validateServerHeaders({ "x-bb-connect-machine": "bbcm_abc 123" }),
-    ).toEqual({ "x-bb-connect-machine": "bbcm_abc 123" });
+      validateServerHeaders({ "x-omnyo-connect-machine": "bbcm_abc 123" }),
+    ).toEqual({ "x-omnyo-connect-machine": "bbcm_abc 123" });
   });
 
   it.each<Record<string, string>>([
     { "bad header": "value" },
-    { "x-bb": "line\nbreak" },
-    { "x-bb": "carriage\rreturn" },
+    { "x-omnyo": "line\nbreak" },
+    { "x-omnyo": "carriage\rreturn" },
   ])("rejects %j", (headers) => {
     expect(() => validateServerHeaders(headers)).toThrow(
       expect.objectContaining({ code: "server_move_invalid_address" }),
@@ -59,8 +60,9 @@ describe("validateServerHeaders", () => {
 
 describe("detectUnrecognizedSupervisor", () => {
   it("detects systemd and launchd jobs but not terminal shells or installer-owned daemons", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "bb-supervisor-test-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "omnyo-supervisor-test-"));
     roots.push(dataDir);
+
     const detect = (env: NodeJS.ProcessEnv) =>
       detectUnrecognizedSupervisor({ env, dataDir, parentPid: 4242 });
 

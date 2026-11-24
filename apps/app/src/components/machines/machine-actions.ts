@@ -1,7 +1,7 @@
-import type { Host } from "@bb/domain";
-import type { SystemMachineProvider } from "@bb/server-contract";
-import { RETRY_ACTION_ICON } from "@bb/domain/update-state";
-import type { ResourceOverflowMenuItem } from "@bb/shared-ui/resource-list";
+import type { Host } from "@omnyo/domain";
+import type { SystemMachineProvider } from "@omnyo/server-contract";
+import { RETRY_ACTION_ICON } from "@omnyo/domain/update-state";
+import type { ResourceOverflowMenuItem } from "@omnyo/shared-ui/resource-list";
 import { serverMachineRemoveDisabledReason } from "@/components/machines/MachineRemoveDialog";
 import { machineLifecycleAction } from "@/components/machines/MachineLifecycleActions";
 import { canReconnectMachine } from "@/components/machines/machine-status";
@@ -52,6 +52,7 @@ export function machineActions(args: MachineActionsArgs): MachineAction[] {
     });
 
   const onRetryUpdate = args.onRetryUpdate;
+
   if (onRetryUpdate !== undefined && hostCanRetryUpdate(args.host))
     actions.push({
       id: "retry-update",
@@ -65,6 +66,7 @@ export function machineActions(args: MachineActionsArgs): MachineAction[] {
     });
 
   const lifecycle = machineLifecycleAction(args.host, args.machineProvider);
+
   const onLifecycle =
     lifecycle === null
       ? undefined
@@ -73,6 +75,7 @@ export function machineActions(args: MachineActionsArgs): MachineAction[] {
         : lifecycle.kind === "resume"
           ? args.onResume
           : args.onRetryCleanup;
+
   if (lifecycle !== null && onLifecycle !== undefined)
     actions.push({
       id: "lifecycle",
@@ -91,6 +94,7 @@ export function machineActions(args: MachineActionsArgs): MachineAction[] {
     });
 
   const onRemove = args.onRemove;
+
   if (onRemove !== undefined)
     actions.push({
       id: "remove",

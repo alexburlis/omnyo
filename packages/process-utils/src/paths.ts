@@ -29,6 +29,7 @@ export function isPathWithinDirectory(
   candidatePath: string,
 ): boolean {
   const relativePath = relative(directoryPath, candidatePath);
+
   return (
     relativePath === "" ||
     (relativePath !== ".." &&
@@ -40,6 +41,7 @@ export function isPathWithinDirectory(
 export async function pathExists(targetPath: string): Promise<boolean> {
   try {
     await access(targetPath);
+
     return true;
   } catch {
     return false;

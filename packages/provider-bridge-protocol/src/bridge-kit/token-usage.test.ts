@@ -12,6 +12,7 @@ describe("reported cache aggregation", () => {
       cacheReadInputTokens: 31,
       cacheWriteInputTokens: 9,
     };
+
     expect(addTokenUsage(addTokenUsage(ZERO_TOKEN_USAGE, last), last)).toEqual({
       ...last,
       totalTokens: 280,
@@ -26,6 +27,7 @@ describe("reported cache aggregation", () => {
     expect(addTokenUsage(ZERO_TOKEN_USAGE, ZERO_TOKEN_USAGE)).toEqual(
       ZERO_TOKEN_USAGE,
     );
+
     for (const counts of [
       { cacheReadInputTokens: 0 },
       { cacheWriteInputTokens: 0 },

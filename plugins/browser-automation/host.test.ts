@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { experimental_createHostEntryHarness } from "@get-bb/plugin-sdk/testing/host";
+import { experimental_createHostEntryHarness } from "@omnyo/plugin-sdk/testing/host";
 import { describe, expect, it, vi } from "vitest";
 import { createHostEntry } from "./host.js";
 import type { ResolvedRuntime } from "./runtime-pin.js";
@@ -10,6 +10,7 @@ const runtime: ResolvedRuntime = {
   version: "1.0.0-test",
   source: "release",
 };
+
 const resolver = async () => runtime;
 
 const open = (sessionId: string) => ({
@@ -17,10 +18,12 @@ const open = (sessionId: string) => ({
   expiresAt: Date.now() + 60_000,
   idleTimeoutMs: 30_000,
 });
+
 describe("host runtime preparation", () => {
   it("long-polls one shared install, then opens with it", async () => {
     let resolveInstall!: (runtime: ResolvedRuntime) => void;
     let detail = "";
+
     const resolver = vi.fn(
       (args: { onProgress: (detail: string) => void }) =>
         new Promise<ResolvedRuntime>((resolve) => {
@@ -29,6 +32,7 @@ describe("host runtime preparation", () => {
           detail = "downloading";
         }),
     );
+
     const factory = vi.fn(async (): Promise<RuntimeSession> => ({
       close: async () => {},
       preview: null,
@@ -36,12 +40,14 @@ describe("host runtime preparation", () => {
         throw new Error("unused");
       },
     }));
+
     const harness = experimental_createHostEntryHarness(
       createHostEntry(factory, resolver, {
         preparePollMs: 50,
         abandonedInstallGraceMs: 50,
       }),
     );
+
     const first = await harness.experimental_call("prepare", {});
     expect(first).toEqual({ status: "installing", detail });
     const second = harness.experimental_call("prepare", {});
@@ -62,6 +68,7 @@ describe("host runtime preparation", () => {
   });
   it("aborts an install nobody is waiting for and retries after failure", async () => {
     const signals: AbortSignal[] = [];
+
     const resolver = vi
       .fn()
       .mockImplementationOnce(
@@ -75,13 +82,16 @@ describe("host runtime preparation", () => {
       )
       .mockRejectedValueOnce(new Error("npm is not available"))
       .mockResolvedValueOnce(runtime);
+
     const harness = experimental_createHostEntryHarness(
       createHostEntry(vi.fn(), resolver, {
         preparePollMs: 5_000,
         abandonedInstallGraceMs: 30,
       }),
     );
+
     const controller = new AbortController();
+
     const poll = harness.experimental_call(
       "prepare",
       {},
@@ -89,6 +99,7 @@ describe("host runtime preparation", () => {
         signal: controller.signal,
       },
     );
+
     await vi.waitFor(() => expect(signals).toHaveLength(1));
     controller.abort();
     await expect(poll).rejects.toThrow();
@@ -106,9 +117,11 @@ describe("host runtime preparation", () => {
     await harness.experimental_dispose();
   });
 });
+
 describe("host long-poll abandonment", () => {
   it("releases the poll waiter when prepare returns installing, so an unpolled install is aborted", async () => {
     const signals: AbortSignal[] = [];
+
     const resolver = vi.fn(
       (args: { signal: AbortSignal }) =>
         new Promise<ResolvedRuntime>((_resolve, reject) => {
@@ -118,12 +131,14 @@ describe("host long-poll abandonment", () => {
           );
         }),
     );
+
     const harness = experimental_createHostEntryHarness(
       createHostEntry(vi.fn(), resolver, {
         preparePollMs: 20,
         abandonedInstallGraceMs: 40,
       }),
     );
+
     expect(await harness.experimental_call("prepare", {})).toMatchObject({
       status: "installing",
     });
@@ -135,19 +150,172 @@ describe("host long-poll abandonment", () => {
     await harness.experimental_dispose();
   });
 });
+
 describe("host session lifetime", () => {
+  it("renews activity at run start and completion while preserving the absolute deadline", async () => {
+    vi.useFakeTimers();
+    const close = vi.fn(async () => {});
+    const output = { text: "done", images: [], exitCode: 0 };
+
+    const harness = experimental_createHostEntryHarness(
+      createHostEntry(
+        async () => ({
+          close,
+          preview: null,
+          run: async () => {
+            await vi.advanceTimersByTimeAsync(2 * 60_000);
+
+            return output;
+          },
+        }),
+        resolver,
+      ),
+    );
+
+    try {
+      const id = randomUUID();
+
+      await harness.experimental_call("open", {
+        sessionId: id,
+        expiresAt: Date.now() + 8 * 60 * 60_000,
+        idleTimeoutMs: 30 * 60_000,
+      });
+      await vi.advanceTimersByTimeAsync(29 * 60_000);
+      expect(
+        await harness.experimental_call("run", {
+          sessionId: id,
+          script: "1",
+          timeoutMs: 120_000,
+        }),
+      ).toEqual(output);
+      await vi.advanceTimersByTimeAsync(29 * 60_000);
+      expect(close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      await harness.experimental_dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["run", "preview"] as const)(
+    "rejects idle %s before the cleanup timer runs",
+    async (method) => {
+      vi.useFakeTimers();
+      const close = vi.fn(async () => {});
+      const run = vi.fn();
+      const next = vi.fn();
+
+      const harness = experimental_createHostEntryHarness(
+        createHostEntry(
+          async () => ({ close, run, preview: { next, close() {} } }),
+          resolver,
+        ),
+      );
+
+      try {
+        const id = randomUUID();
+
+        await harness.experimental_call("open", {
+          sessionId: id,
+          expiresAt: Date.now() + 8 * 60 * 60_000,
+          idleTimeoutMs: 30 * 60_000,
+        });
+        vi.setSystemTime(Date.now() + 30 * 60_000);
+
+        const operation =
+          method === "run"
+            ? harness.experimental_call("run", {
+                sessionId: id,
+                script: "1",
+                timeoutMs: 1000,
+              })
+            : harness.experimental_call("preview", {
+                sessionId: id,
+                afterSequence: 0,
+                waitMs: 0,
+                size: "full",
+              });
+
+        await expect(operation).rejects.toThrow("expired");
+        expect(run).not.toHaveBeenCalled();
+        expect(next).not.toHaveBeenCalled();
+        expect(close).toHaveBeenCalledOnce();
+      } finally {
+        await harness.experimental_dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("aborts active work at the hard cap even without the server cleanup timer", async () => {
+    vi.useFakeTimers();
+    const close = vi.fn(async () => {});
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => (started = resolve));
+
+    const harness = experimental_createHostEntryHarness(
+      createHostEntry(
+        async () => ({
+          close,
+          preview: null,
+          run: async (_script, _timeout, signal) =>
+            new Promise((_resolve, reject) => {
+              started();
+              signal.addEventListener(
+                "abort",
+                () => reject(new Error("expired")),
+                { once: true },
+              );
+            }),
+        }),
+        resolver,
+      ),
+    );
+
+    try {
+      const id = randomUUID();
+
+      await harness.experimental_call("open", {
+        sessionId: id,
+        expiresAt: Date.now() + 60_000,
+        idleTimeoutMs: 30 * 60_000,
+      });
+
+      const result = harness.experimental_call("run", {
+        sessionId: id,
+        script: "1",
+        timeoutMs: 120_000,
+      });
+
+      const rejected = expect(result).rejects.toThrow("expired");
+      await running;
+      await vi.advanceTimersByTimeAsync(60_000);
+      await rejected;
+      expect(close).toHaveBeenCalledOnce();
+      expect(harness.experimental_getRetainedWorkerLeaseCount()).toBe(0);
+    } finally {
+      await harness.experimental_dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("close disposes only the selected runtime and reload disposes the rest", async () => {
     const firstClose = vi.fn(async () => {});
     const secondClose = vi.fn(async () => {});
+
     const factory = vi
       .fn()
       .mockResolvedValueOnce({ close: firstClose })
       .mockResolvedValueOnce({ close: secondClose });
+
     const harness = experimental_createHostEntryHarness(
       createHostEntry(factory, resolver),
     );
+
     const a = randomUUID(),
       b = randomUUID();
+
     await harness.experimental_call("open", open(a));
     await harness.experimental_call("open", open(b));
     expect(harness.experimental_getRetainedWorkerLeaseCount()).toBe(2);
@@ -161,6 +329,7 @@ describe("host session lifetime", () => {
   });
   it("cancellation closes a running session and rejects further use", async () => {
     const close = vi.fn(async () => {});
+
     const harness = experimental_createHostEntryHarness(
       createHostEntry(
         async () => ({
@@ -178,14 +347,17 @@ describe("host session lifetime", () => {
         resolver,
       ),
     );
+
     const id = randomUUID();
     await harness.experimental_call("open", open(id));
     const controller = new AbortController();
+
     const run = harness.experimental_call(
       "run",
       { sessionId: id, script: "1", timeoutMs: 1000 },
       { signal: controller.signal },
     );
+
     const rejected = expect(run).rejects.toThrow();
     await vi.waitFor(() =>
       expect(harness.experimental_getRetainedWorkerLeaseCount()).toBe(1),
@@ -203,12 +375,85 @@ describe("host session lifetime", () => {
     ).rejects.toThrow("stopped");
     await harness.experimental_dispose();
   });
+  it("close shares a cleanup failure between concurrent callers and retries it on the next close", async () => {
+    const close = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("profile directory busy"))
+      .mockResolvedValueOnce(undefined);
+
+    const harness = experimental_createHostEntryHarness(
+      createHostEntry(
+        async () => ({ close, preview: null, run: vi.fn() }),
+        resolver,
+      ),
+    );
+
+    const id = randomUUID();
+    await harness.experimental_call("open", open(id));
+
+    const outcomes = await Promise.allSettled([
+      harness.experimental_call("close", { sessionId: id }),
+      harness.experimental_call("close", { sessionId: id }),
+    ]);
+
+    expect(outcomes.map((outcome) => outcome.status)).toEqual([
+      "rejected",
+      "rejected",
+    ]);
+    expect(close).toHaveBeenCalledOnce();
+    await harness.experimental_call("close", { sessionId: id });
+    await harness.experimental_call("close", { sessionId: id });
+    expect(close).toHaveBeenCalledTimes(2);
+    await expect(harness.experimental_call("open", open(id))).rejects.toThrow(
+      "already closed",
+    );
+    expect(harness.experimental_getRetainedWorkerLeaseCount()).toBe(0);
+    await harness.experimental_dispose();
+  });
+  it("close during startup disposes the late runtime and refuses to reopen", async () => {
+    let finishStartup!: (session: RuntimeSession) => void;
+
+    const factory = vi.fn(
+      (_args: { signal: AbortSignal }) =>
+        new Promise<RuntimeSession>((resolve) => (finishStartup = resolve)),
+    );
+
+    const harness = experimental_createHostEntryHarness(
+      createHostEntry(factory, resolver),
+    );
+
+    const id = randomUUID();
+    const opening = harness.experimental_call("open", open(id));
+    const rejected = expect(opening).rejects.toThrow();
+    await vi.waitFor(() => expect(factory).toHaveBeenCalledOnce());
+    const closing = harness.experimental_call("close", { sessionId: id });
+    await vi.waitFor(() =>
+      expect(factory.mock.calls[0]![0].signal.aborted).toBe(true),
+    );
+    const close = vi.fn(async () => {});
+    finishStartup({ close, preview: null, run: vi.fn() });
+    await closing;
+    await rejected;
+    expect(close).toHaveBeenCalledOnce();
+    await expect(harness.experimental_call("open", open(id))).rejects.toThrow(
+      "already closed",
+    );
+    const neverOpened = randomUUID();
+    await harness.experimental_call("close", { sessionId: neverOpened });
+    await expect(
+      harness.experimental_call("open", open(neverOpened)),
+    ).rejects.toThrow("already closed");
+    expect(factory).toHaveBeenCalledOnce();
+    expect(harness.experimental_getRetainedWorkerLeaseCount()).toBe(0);
+    await harness.experimental_dispose();
+  });
   it("failed startup releases worker retention", async () => {
     const harness = experimental_createHostEntryHarness(
       createHostEntry(async () => {
         throw new Error("launch failed");
       }, resolver),
     );
+
     await expect(
       harness.experimental_call("open", open(randomUUID())),
     ).rejects.toThrow("launch failed");
@@ -216,9 +461,11 @@ describe("host session lifetime", () => {
     await harness.experimental_dispose();
   });
 });
+
 describe("host live preview", () => {
   const frame = {
     sequence: 3,
+    targetId: "preview-target",
     mimeType: "image/jpeg" as const,
     data: "abc",
     width: 1280,
@@ -226,9 +473,11 @@ describe("host live preview", () => {
     url: "https://example.test/",
     title: "Example",
   };
+
   it("long-polls the session preview without counting as session activity", async () => {
     const next = vi.fn(async () => frame);
     const close = vi.fn(async () => {});
+
     const harness = experimental_createHostEntryHarness(
       createHostEntry(
         async () => ({
@@ -239,6 +488,7 @@ describe("host live preview", () => {
         resolver,
       ),
     );
+
     const id = randomUUID();
     await harness.experimental_call("open", {
       sessionId: id,
@@ -246,6 +496,7 @@ describe("host live preview", () => {
       idleTimeoutMs: 1_200,
     });
     const started = Date.now();
+
     while (Date.now() - started < 1_000) {
       expect(
         await harness.experimental_call("preview", {
@@ -257,6 +508,7 @@ describe("host live preview", () => {
       ).toEqual({ frame });
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
+
     expect(next).toHaveBeenCalledWith(
       2,
       5_000,
@@ -285,6 +537,7 @@ describe("host live preview", () => {
           });
         }),
     );
+
     const factory = vi
       .fn()
       .mockResolvedValueOnce({ close: async () => {}, preview: null })
@@ -292,11 +545,14 @@ describe("host live preview", () => {
         close: async () => {},
         preview: { next: waiting, close() {} },
       });
+
     const harness = experimental_createHostEntryHarness(
       createHostEntry(factory, resolver),
     );
+
     const desktop = randomUUID(),
       local = randomUUID();
+
     await harness.experimental_call("open", {
       ...open(desktop),
       connectionUrl: "ws://127.0.0.1:9/devtools/browser/x",
@@ -310,12 +566,14 @@ describe("host live preview", () => {
         size: "thumbnail",
       }),
     ).rejects.toThrow("local headless");
+
     const pending = harness.experimental_call("preview", {
       sessionId: local,
       afterSequence: 0,
       waitMs: 5_000,
       size: "thumbnail",
     });
+
     const rejected = expect(pending).rejects.toThrow();
     await vi.waitFor(() => expect(waiting).toHaveBeenCalledOnce());
     await harness.experimental_call("close", { sessionId: local });

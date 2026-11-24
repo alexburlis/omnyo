@@ -1,8 +1,8 @@
 import { describe, expectTypeOf, it } from "vitest";
 import type {
-  BbRealtime as RootBbRealtime,
-  BbSdk as RootBbSdk,
-  BbRealtimeConnectionEvent as RootRealtimeConnection,
+  OmnyoRealtime as RootOmnyoRealtime,
+  OmnyoSdk as RootOmnyoSdk,
+  OmnyoRealtimeConnectionEvent as RootRealtimeConnection,
   EnvironmentStatusResult as RootEnvironmentStatus,
   FileReadResult as RootFileRead,
   GuideRenderResult as RootGuideRender,
@@ -27,11 +27,11 @@ import type {
   ThemeSetInput as RootThemeSetInput,
   ThreadSectionListResult as RootThreadSectionList,
   ThreadSpawnResult as RootThreadSpawn,
-} from "@bb/sdk";
+} from "@omnyo/sdk";
 import type {
-  BbSdk as BrowserBbSdk,
-  BrowserBbSdk as BrowserRuntimeBbSdk,
-  BbRealtimeConnectionEvent as BrowserRealtimeConnection,
+  OmnyoSdk as BrowserOmnyoSdk,
+  BrowserOmnyoSdk as BrowserRuntimeOmnyoSdk,
+  OmnyoRealtimeConnectionEvent as BrowserRealtimeConnection,
   EnvironmentStatusResult as BrowserEnvironmentStatus,
   FileReadResult as BrowserFileRead,
   GuideRenderResult as BrowserGuideRender,
@@ -55,10 +55,10 @@ import type {
   ThemeSetInput as BrowserThemeSetInput,
   ThreadSectionListResult as BrowserThreadSectionList,
   ThreadSpawnResult as BrowserThreadSpawn,
-} from "@bb/sdk/browser";
+} from "@omnyo/sdk/browser";
 import type {
-  BbSdk as CoreBbSdk,
-  BbRealtimeConnectionEvent as CoreRealtimeConnection,
+  OmnyoSdk as CoreOmnyoSdk,
+  OmnyoRealtimeConnectionEvent as CoreRealtimeConnection,
   EnvironmentStatusResult as CoreEnvironmentStatus,
   FileReadResult as CoreFileRead,
   GuideRenderResult as CoreGuideRender,
@@ -82,10 +82,10 @@ import type {
   ThemeSetInput as CoreThemeSetInput,
   ThreadSectionListResult as CoreThreadSectionList,
   ThreadSpawnResult as CoreThreadSpawn,
-} from "@bb/sdk/core";
+} from "@omnyo/sdk/core";
 import type {
-  BbSdk as NodeBbSdk,
-  BbRealtimeConnectionEvent as NodeRealtimeConnection,
+  OmnyoSdk as NodeOmnyoSdk,
+  OmnyoRealtimeConnectionEvent as NodeRealtimeConnection,
   EnvironmentStatusResult as NodeEnvironmentStatus,
   FileReadResult as NodeFileRead,
   GuideRenderResult as NodeGuideRender,
@@ -109,8 +109,8 @@ import type {
   ThemeSetInput as NodeThemeSetInput,
   ThreadSectionListResult as NodeThreadSectionList,
   ThreadSpawnResult as NodeThreadSpawn,
-} from "@bb/sdk/node";
-import type { createBrowserBbSdk } from "@bb/sdk/browser";
+} from "@omnyo/sdk/node";
+import type { createBrowserOmnyoSdk } from "@omnyo/sdk/browser";
 
 interface RootSurface {
   environmentStatus: RootEnvironmentStatus;
@@ -220,7 +220,10 @@ interface NodeSurface {
   threadSpawn: NodeThreadSpawn;
 }
 
-type ExpectedBbSdkKey =
+type ExpectedOmnyoSdkKey =
+  | "experimental_attention"
+  | "experimental_inbox"
+  | "server"
   | "experimental_desktopBrowsers"
   | "experimental_promptHistory"
   | "experimental_server"
@@ -230,6 +233,7 @@ type ExpectedBbSdkKey =
   | "hosts"
   | "plugins"
   | "projects"
+  | "previews"
   | "providers"
   | "skills"
   | "status"
@@ -237,8 +241,17 @@ type ExpectedBbSdkKey =
   | "system"
   | "terminals"
   | "theme"
+  | "threadGroups"
   | "threadSections"
   | "threads";
+
+type ExpectedPreviewsKey =
+  | "register"
+  | "list"
+  | "get"
+  | "status"
+  | "restart"
+  | "experimental_remove";
 
 type ExpectedRealtimeKey = "subscribe";
 
@@ -276,6 +289,8 @@ type ExpectedFilesKey =
 type ExpectedGuideKey = "render";
 
 type ExpectedHostsKey =
+  | "experimental_housekeeping"
+  | "convertToDirect"
   | "cloneDefaultPath"
   | "experimental_create"
   | "experimental_getEnrollmentCommand"
@@ -295,6 +310,7 @@ type ExpectedHostsKey =
   | "experimental_resume"
   | "experimental_retryCleanup"
   | "retryUpdate"
+  | "experimental_setAvailability"
   | "experimental_suspend"
   | "experimental_reconcile"
   | "update";
@@ -304,6 +320,7 @@ type ExpectedPluginsKey =
   | "experimental_getSafeMode"
   | "experimental_setSafeMode"
   | "experimental_pruneCache"
+  | "experimental_relocatePathSources"
   | "applyUpdate"
   | "experimental_startUpdate"
   | "experimental_updateJobs"
@@ -345,6 +362,7 @@ type ExpectedProjectsKey =
   | "deleteMachineEnvironmentVariable"
   | "attachments"
   | "branches"
+  | "commandCatalog"
   | "commands"
   | "create"
   | "defaultExecutionOptions"
@@ -361,16 +379,26 @@ type ExpectedProjectsKey =
   | "update";
 
 type ExpectedProjectSourcesKey = "add" | "delete" | "update";
-type ExpectedProjectAttachmentsKey = "copy" | "read" | "upload";
+
+type ExpectedProjectAttachmentsKey =
+  | "copy"
+  | "experimental_retain"
+  | "read"
+  | "upload";
 
 type ExpectedProvidersKey = "catalog" | "list" | "models" | "setEnabled";
 
 type ExpectedStatusKey = "get";
 
 type ExpectedSystemKey =
+  | "webUpdateStatus"
+  | "webUpdateBegin"
+  | "webUpdateUpload"
+  | "webUpdateApply"
+  | "webUpdateAbort"
+  | "webUpdateRollback"
   | "acknowledgeAppUpdate"
-  | "mobileAppDownloads"
-  | "mobileAppReleases"
+  | "cancelAppUpdate"
   | "appUpdate"
   | "applyAppUpdate"
   | "setMachineEnvironmentVariable"
@@ -379,11 +407,21 @@ type ExpectedSystemKey =
   | "replaceMachineEnvironment"
   | "aiServices"
   | "attention"
+  | "experimental_boot"
+  | "experimental_webAssets"
   | "cliSkillsStatus"
   | "config"
   | "executionOptions"
   | "installCliSkills"
   | "experimental_recordTelemetryEvent"
+  | "experimental_usageStatus"
+  | "experimental_usageConsent"
+  | "experimental_usagePreview"
+  | "experimental_eraseUsageAnalytics"
+  | "experimental_reportBug"
+  | "experimental_prepareVoiceInput"
+  | "experimental_recordAttachmentDiagnostic"
+  | "experimental_recordVoiceDiagnostic"
   | "reloadConfig"
   | "setAiServiceSelection"
   | "testAiService"
@@ -403,12 +441,23 @@ type ExpectedThemeKey = "catalog" | "get" | "resolve" | "set";
 type ExpectedThreadSectionsKey = "create" | "delete" | "list" | "update";
 
 type ExpectedThreadsKey =
+  | "experimental_importNative"
+  | "experimental_nativeSessionClaims"
+  | "experimental_continue"
+  | "experimental_continueAll"
+  | "experimental_continuationState"
+  | "experimental_continuations"
+  | "experimental_listStartMachines"
+  | "experimental_moveStart"
+  | "experimental_reorderShelved"
   | "experimental_listAncestors"
   | "experimental_listDescendants"
   | "experimental_listPluginMetadata"
+  | "experimental_lookupCommandProofs"
   | "getPluginMetadata"
   | "updatePluginMetadata"
   | "context"
+  | "experimental_setAutoCompaction"
   | "archive"
   | "archiveAll"
   | "cancelPlan"
@@ -416,6 +465,7 @@ type ExpectedThreadsKey =
   | "clearContext"
   | "clearGoal"
   | "compact"
+  | "conversation"
   | "conversationOutline"
   | "count"
   | "defaultExecutionOptions"
@@ -437,12 +487,14 @@ type ExpectedThreadsKey =
   | "promptHistory"
   | "queue"
   | "queuedMessages"
+  | "submissions"
   | "reorderPinned"
   | "resolveMentions"
   | "restoreEnvironment"
   | "retry"
   | "search"
   | "send"
+  | "shelve"
   | "spawn"
   | "stop"
   | "storageFiles"
@@ -453,36 +505,42 @@ type ExpectedThreadsKey =
   | "timelineTurnSummaryDetails"
   | "unarchive"
   | "unpin"
+  | "unshelve"
   | "update"
-  | "wait";
+  | "wait"
+  | "experimental_work"
+  | "experimental_publishWork"
+  | "experimental_archiveReady";
 
 type ExpectedThreadEventsKey = "list" | "wait";
-/**
- * The cross-thread queue area answers exactly one question — what is queued
- * right now — so it has exactly one method. A row's own operations (send-now,
- * edit, reorder, delete) live on `queuedMessages`.
- */
+
 type ExpectedThreadQueueKey = "list";
+
 type ExpectedThreadInteractionsKey =
   | "cancel"
   | "get"
   | "list"
   | "resolve"
   | "respond";
+
 type ExpectedThreadQueuedMessagesKey =
   | "create"
   | "delete"
   | "experimental_holdForEdit"
   | "experimental_releaseEditHold"
+  | "experimental_restore"
   | "list"
   | "reorder"
   | "send"
   | "setGroupBoundary"
   | "update";
+
 type ExpectedThreadTabsKey = "get" | "update";
+
 type ExpectedTerminalsKey =
   | "close"
   | "create"
+  | "foreground"
   | "get"
   | "input"
   | "list"
@@ -499,19 +557,19 @@ describe("SDK public type entrypoints", () => {
   });
 
   it("preserves the complete SDK surface at every entrypoint", () => {
-    expectTypeOf<keyof RootBbSdk>().toEqualTypeOf<ExpectedBbSdkKey>();
-    expectTypeOf<BrowserBbSdk>().toEqualTypeOf<RootBbSdk>();
-    expectTypeOf<CoreBbSdk>().toEqualTypeOf<RootBbSdk>();
-    expectTypeOf<NodeBbSdk>().toEqualTypeOf<RootBbSdk>();
+    expectTypeOf<keyof RootOmnyoSdk>().toEqualTypeOf<ExpectedOmnyoSdkKey>();
+    expectTypeOf<BrowserOmnyoSdk>().toEqualTypeOf<RootOmnyoSdk>();
+    expectTypeOf<CoreOmnyoSdk>().toEqualTypeOf<RootOmnyoSdk>();
+    expectTypeOf<NodeOmnyoSdk>().toEqualTypeOf<RootOmnyoSdk>();
   });
 
   it("keeps the local guide area off the browser SDK instance", () => {
-    expectTypeOf<keyof BrowserRuntimeBbSdk>().toEqualTypeOf<
-      Exclude<ExpectedBbSdkKey, "guide">
+    expectTypeOf<keyof BrowserRuntimeOmnyoSdk>().toEqualTypeOf<
+      Exclude<ExpectedOmnyoSdkKey, "guide">
     >();
     expectTypeOf<
-      ReturnType<typeof createBrowserBbSdk>
-    >().toEqualTypeOf<BrowserRuntimeBbSdk>();
+      ReturnType<typeof createBrowserOmnyoSdk>
+    >().toEqualTypeOf<BrowserRuntimeOmnyoSdk>();
   });
 
   it("exports only the public permission presets", () => {
@@ -567,73 +625,86 @@ describe("SDK public type entrypoints", () => {
   });
 
   it("snapshots every SDK area and nested method group", () => {
-    expectTypeOf<keyof RootBbRealtime>().toEqualTypeOf<ExpectedRealtimeKey>();
     expectTypeOf<
-      keyof RootBbSdk["environments"]
+      keyof RootOmnyoRealtime
+    >().toEqualTypeOf<ExpectedRealtimeKey>();
+    expectTypeOf<
+      keyof RootOmnyoSdk["environments"]
     >().toEqualTypeOf<ExpectedEnvironmentsKey>();
-    expectTypeOf<keyof RootBbSdk["files"]>().toEqualTypeOf<ExpectedFilesKey>();
-    expectTypeOf<keyof RootBbSdk["guide"]>().toEqualTypeOf<ExpectedGuideKey>();
-    expectTypeOf<keyof RootBbSdk["hosts"]>().toEqualTypeOf<ExpectedHostsKey>();
     expectTypeOf<
-      keyof RootBbSdk["plugins"]
+      keyof RootOmnyoSdk["files"]
+    >().toEqualTypeOf<ExpectedFilesKey>();
+    expectTypeOf<
+      keyof RootOmnyoSdk["guide"]
+    >().toEqualTypeOf<ExpectedGuideKey>();
+    expectTypeOf<
+      keyof RootOmnyoSdk["hosts"]
+    >().toEqualTypeOf<ExpectedHostsKey>();
+    expectTypeOf<
+      keyof RootOmnyoSdk["plugins"]
     >().toEqualTypeOf<ExpectedPluginsKey>();
     expectTypeOf<
-      keyof RootBbSdk["plugins"]["catalog"]
+      keyof RootOmnyoSdk["plugins"]["catalog"]
     >().toEqualTypeOf<ExpectedPluginCatalogKey>();
     expectTypeOf<
-      keyof RootBbSdk["plugins"]["marketplaces"]
+      keyof RootOmnyoSdk["plugins"]["marketplaces"]
     >().toEqualTypeOf<ExpectedPluginMarketplacesKey>();
     expectTypeOf<
-      keyof RootBbSdk["plugins"]["installJobs"]
+      keyof RootOmnyoSdk["plugins"]["installJobs"]
     >().toEqualTypeOf<ExpectedPluginInstallJobsKey>();
     expectTypeOf<
-      keyof RootBbSdk["projects"]
+      keyof RootOmnyoSdk["projects"]
     >().toEqualTypeOf<ExpectedProjectsKey>();
     expectTypeOf<
-      keyof RootBbSdk["projects"]["attachments"]
+      keyof RootOmnyoSdk["projects"]["attachments"]
     >().toEqualTypeOf<ExpectedProjectAttachmentsKey>();
     expectTypeOf<
-      keyof RootBbSdk["projects"]["sources"]
+      keyof RootOmnyoSdk["projects"]["sources"]
     >().toEqualTypeOf<ExpectedProjectSourcesKey>();
     expectTypeOf<
-      keyof RootBbSdk["experimental_promptHistory"]
+      keyof RootOmnyoSdk["experimental_promptHistory"]
     >().toEqualTypeOf<ExpectedExperimentalPromptHistoryKey>();
     expectTypeOf<
-      keyof RootBbSdk["providers"]
+      keyof RootOmnyoSdk["providers"]
     >().toEqualTypeOf<ExpectedProvidersKey>();
     expectTypeOf<
-      keyof RootBbSdk["status"]
+      keyof RootOmnyoSdk["status"]
     >().toEqualTypeOf<ExpectedStatusKey>();
     expectTypeOf<
-      keyof RootBbSdk["system"]
+      keyof RootOmnyoSdk["system"]
     >().toEqualTypeOf<ExpectedSystemKey>();
     expectTypeOf<
-      keyof RootBbSdk["system"]["uiPreferences"]
+      keyof RootOmnyoSdk["system"]["uiPreferences"]
     >().toEqualTypeOf<ExpectedSystemUiPreferencesKey>();
     expectTypeOf<
-      keyof RootBbSdk["terminals"]
+      keyof RootOmnyoSdk["terminals"]
     >().toEqualTypeOf<ExpectedTerminalsKey>();
-    expectTypeOf<keyof RootBbSdk["theme"]>().toEqualTypeOf<ExpectedThemeKey>();
     expectTypeOf<
-      keyof RootBbSdk["threadSections"]
+      keyof RootOmnyoSdk["previews"]
+    >().toEqualTypeOf<ExpectedPreviewsKey>();
+    expectTypeOf<
+      keyof RootOmnyoSdk["theme"]
+    >().toEqualTypeOf<ExpectedThemeKey>();
+    expectTypeOf<
+      keyof RootOmnyoSdk["threadSections"]
     >().toEqualTypeOf<ExpectedThreadSectionsKey>();
     expectTypeOf<
-      keyof RootBbSdk["threads"]
+      keyof RootOmnyoSdk["threads"]
     >().toEqualTypeOf<ExpectedThreadsKey>();
     expectTypeOf<
-      keyof RootBbSdk["threads"]["events"]
+      keyof RootOmnyoSdk["threads"]["events"]
     >().toEqualTypeOf<ExpectedThreadEventsKey>();
     expectTypeOf<
-      keyof RootBbSdk["threads"]["queue"]
+      keyof RootOmnyoSdk["threads"]["queue"]
     >().toEqualTypeOf<ExpectedThreadQueueKey>();
     expectTypeOf<
-      keyof RootBbSdk["threads"]["interactions"]
+      keyof RootOmnyoSdk["threads"]["interactions"]
     >().toEqualTypeOf<ExpectedThreadInteractionsKey>();
     expectTypeOf<
-      keyof RootBbSdk["threads"]["queuedMessages"]
+      keyof RootOmnyoSdk["threads"]["queuedMessages"]
     >().toEqualTypeOf<ExpectedThreadQueuedMessagesKey>();
     expectTypeOf<
-      keyof RootBbSdk["threads"]["tabs"]
+      keyof RootOmnyoSdk["threads"]["tabs"]
     >().toEqualTypeOf<ExpectedThreadTabsKey>();
   });
 });

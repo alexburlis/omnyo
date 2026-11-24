@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import { makeTask, rpcInput } from "../../test-fixtures.js";
 
 if (!window.matchMedia) {
@@ -22,8 +22,11 @@ const app = await loadPluginApp(() => import("../../app"));
 afterEach(cleanup);
 
 const PROJECT_ID = "01HZZZZZZZZZZZZZZZZZZZZZP1";
+
 const TASK_ID = "01HZZZZZZZZZZZZZZZZZZZZZT5";
+
 const THREAD_ROW_ID = "01HZZZZZZZZZZZZZZZZZZZZZR1";
+
 const OFFLINE_ROW_ID = "01HZZZZZZZZZZZZZZZZZZZZZR2";
 
 const task = makeTask({
@@ -59,7 +62,7 @@ function detailRpc(overrides: Record<string, unknown> = {}) {
           nextTaskNumber: 6,
           color: "blue",
           folderId: null,
-          linkedBbProjectId: null,
+          linkedAppProjectId: null,
           createdAt: "2026-07-15T00:00:00.000Z",
         },
       ],
@@ -82,7 +85,7 @@ function detailRpc(overrides: Record<string, unknown> = {}) {
       unavailableThreadIds: [],
     }),
     listComments: () => ({ comments: [] }),
-    listBbProjects: () => ({ bbProjects: [] }),
+    listAppProjects: () => ({ appProjects: [] }),
     ...overrides,
   };
 }
@@ -98,7 +101,7 @@ describe("task detail pull request pills", () => {
           listTaskPullRequests: () => ({
             pullRequests: [
               {
-                url: "https://github.com/acme/bb/pull/12",
+                url: "https://github.com/acme/omnyo/pull/12",
                 number: 12,
                 title: "Ship the PR pill",
                 state: "merged",
@@ -115,12 +118,22 @@ describe("task detail pull request pills", () => {
     const link = (await slot.findByRole("link", {
       name: "Pull request #12: Ship the PR pill (Merged)",
     })) as HTMLAnchorElement;
-    expect(link.href).toBe("https://github.com/acme/bb/pull/12");
+
+    expect(link.href).toBe("https://github.com/acme/omnyo/pull/12");
     expect(link.target).toBe("_blank");
     expect(link.rel).toContain("noopener");
     expect(link.textContent).toContain("#12");
     fireEvent.click(link);
     expect(slot.navigateCalls).toEqual([]);
+
+    fireEvent.click(slot.getByRole("button", { name: "Open chat" }));
+    expect(slot.navigateCalls).toEqual([
+      {
+        method: "toThread",
+        threadId: "thr_worker000",
+        options: { experimental_userInitiated: true },
+      },
+    ]);
   });
 
   it("marks threads whose PR lookup failed and stays quiet otherwise", async () => {
@@ -144,12 +157,13 @@ describe("task detail pull request pills", () => {
     );
 
     await slot.findByText("Offline worker");
-    expect(slot.getAllByText("PR unavailable")).toHaveLength(1);
+    expect(slot.getAllByText("PR status unknown")).toHaveLength(1);
     expect(slot.queryByRole("link")).toBeNull();
   });
 
   it("detaches a thread from its card after confirmation and refetches the list", async () => {
     let detached = false;
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "task/TSK-5" },
@@ -162,6 +176,7 @@ describe("task detail pull request pills", () => {
           }),
           taskThreadsDetach: (input: unknown) => {
             detached = true;
+
             return { threadId: rpcInput(input).threadId };
           },
         }),
@@ -182,13 +197,15 @@ describe("task detail pull request pills", () => {
 
   it("revalidates PR state on window focus without a task-thread mutation", async () => {
     const basePullRequest = {
-      url: "https://github.com/acme/bb/pull/12",
+      url: "https://github.com/acme/omnyo/pull/12",
       number: 12,
       title: "Ship the PR pill",
       updatedAt: "2026-07-16T10:00:00.000Z",
       threadIds: ["thr_worker000"],
     };
+
     let lookupCount = 0;
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "task/TSK-5" },
@@ -196,6 +213,7 @@ describe("task detail pull request pills", () => {
         rpc: detailRpc({
           listTaskPullRequests: () => {
             lookupCount += 1;
+
             return {
               pullRequests: [
                 {

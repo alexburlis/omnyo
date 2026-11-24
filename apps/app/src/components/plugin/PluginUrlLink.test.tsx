@@ -143,9 +143,11 @@ describe("PluginUrlLink", () => {
         </RouteNavigationProvider>
       </MemoryRouter>,
     );
+
     const link = screen.getByRole("link", {
       name: "Settings in new context",
     });
+
     expect(link.getAttribute("target")).toBe("_blank");
     expect(fireEvent.click(link)).toBe(true);
     expect(screen.queryByText("Settings route")).toBeNull();

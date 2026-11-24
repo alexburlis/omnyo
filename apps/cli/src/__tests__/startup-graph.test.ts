@@ -7,10 +7,12 @@ import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { CORE_COMMAND_GROUPS } from "../command-groups.js";
-import { readBbAppVersion } from "./bb-app-version.js";
+import { readOmnyoAppVersion } from "./omnyo-app-version.js";
 
 const execFileAsync = promisify(execFile);
+
 const cliRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
 const workspaceRoot = resolve(cliRoot, "..", "..");
 
 const RESOLVE_HOOKS_SOURCE = `
@@ -29,11 +31,11 @@ export async function resolve(specifier, context, nextResolve) {
 const REGISTER_HOOKS_SOURCE = `
 import { register } from "node:module";
 register(new URL("./resolve-hooks.mjs", import.meta.url), {
-  data: { logPath: process.env.BB_STARTUP_GRAPH_LOG },
+  data: { logPath: process.env.OMNYO_STARTUP_GRAPH_LOG },
 });
 `;
 
-const STRIPPED_ENV_KEYS = new Set(["BB_CLI", "BB_APP_VERSION"]);
+const STRIPPED_ENV_KEYS = new Set(["OMNYO_CLI", "OMNYO_APP_VERSION"]);
 
 const cliPackageJsonSchema = z.object({
   scripts: z.object({ build: z.string() }),
@@ -46,7 +48,7 @@ interface CliRun {
   urls: string[];
 }
 
-describe("bb startup module graph", () => {
+describe("omnyo startup module graph", () => {
   let tempDir: string;
   let registerHooksPath: string;
   let distEntry: string;
@@ -74,15 +76,20 @@ describe("bb startup module graph", () => {
       tempDir,
       `${entry}_${args.join("_").replace(/\W/g, "_")}.log`,
     );
+
     await writeFile(logPath, "");
+
     const env: NodeJS.ProcessEnv = Object.fromEntries(
       Object.entries(process.env).filter(
         ([key]) => !STRIPPED_ENV_KEYS.has(key),
       ),
     );
-    env.BB_CLI_REEXEC = "1";
-    env.BB_STARTUP_GRAPH_LOG = logPath;
-    if (serverUrl !== undefined) env.BB_SERVER_URL = serverUrl;
+
+    env.OMNYO_CLI_REEXEC = "1";
+    env.OMNYO_STARTUP_GRAPH_LOG = logPath;
+
+    if (serverUrl !== undefined) env.OMNYO_SERVER_URL = serverUrl;
+
     const entryArgs =
       entry === "source"
         ? [
@@ -94,14 +101,17 @@ describe("bb startup module graph", () => {
             "src/index.ts",
           ]
         : ["--import", pathToFileURL(registerHooksPath).href, distEntry];
+
     const { stdout } = await execFileAsync(
       process.execPath,
       [...entryArgs, ...args],
       { cwd: cliRoot, env },
     );
+
     const urls = (await readFile(logPath, "utf8"))
       .split("\n")
       .filter((line) => line.length > 0);
+
     return { stdout, urls };
   }
 
@@ -112,17 +122,17 @@ describe("bb startup module graph", () => {
   it("answers --version from commander and node builtins alone", async () => {
     const run = await runCli("source", ["--version"]);
 
-    expect(run.stdout.trim()).toBe(await readBbAppVersion());
+    expect(run.stdout.trim()).toBe(await readOmnyoAppVersion());
 
     expect(loaded(run, "/apps/cli/src/index.ts")).toHaveLength(1);
     expect(loaded(run, "/commander/")).not.toHaveLength(0);
+    expect(loaded(run, "/packages/config/")).toEqual([]);
 
     for (const fragment of [
       "/zod/",
       "/undici/",
       "/mime-types/",
       "/node_modules/ws/",
-      "/packages/config/",
       "/packages/domain/",
       "/packages/sdk/",
       "/packages/server-contract/",
@@ -136,10 +146,10 @@ describe("bb startup module graph", () => {
     }
   }, 30_000);
 
-  it("loads only the named command group for `bb thread`", async () => {
+  it("loads only the named command group for `omnyo thread`", async () => {
     const run = await runCli("source", ["thread", "--help"]);
 
-    expect(run.stdout).toContain("Usage: bb thread");
+    expect(run.stdout).toContain("Usage: omnyo thread");
     expect(loaded(run, "/apps/cli/src/commands/thread/index.ts")).toHaveLength(
       1,
     );
@@ -161,6 +171,7 @@ describe("bb startup module graph", () => {
       ["thread", "search", "--help"],
       "http://127.0.0.1:1",
     );
+
     expect(help.stdout).toContain("Maximum results per group (1-50)");
 
     await expect(
@@ -191,21 +202,23 @@ describe("bb startup module graph", () => {
       );
     }, 60_000);
 
-    it("is how @bb/cli#build builds the shipped CLI", async () => {
+    it("is how @omnyo/cli#build builds the shipped CLI", async () => {
       const packageJson = cliPackageJsonSchema.parse(
         JSON.parse(await readFile(join(cliRoot, "package.json"), "utf8")),
       );
+
       expect(packageJson.scripts.build.split(" ")).toContain("--split");
     });
 
     it("answers --version from the entry and its shared chunks alone", async () => {
       const run = await runCli("dist", ["--version"]);
 
-      expect(run.stdout.trim()).toBe(await readBbAppVersion());
+      expect(run.stdout.trim()).toBe(await readOmnyoAppVersion());
       expect(loaded(run, pathToFileURL(distEntry).href)).toHaveLength(1);
 
       const chunks = loaded(run, chunkDirUrl);
       expect(chunks).not.toHaveLength(0);
+
       for (const url of chunks) {
         expect(url).toMatch(/\/index-chunks\/chunk-[A-Z0-9]+\.js$/);
       }
@@ -214,13 +227,15 @@ describe("bb startup module graph", () => {
     it("does not print Node's NO_COLOR warning when a harness also sets FORCE_COLOR", async () => {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
-        BB_CLI_REEXEC: "1",
-        BB_SERVER_URL: "http://127.0.0.1:1",
+        OMNYO_CLI_REEXEC: "1",
+        OMNYO_SERVER_URL: "http://127.0.0.1:1",
         FORCE_COLOR: "1",
         NO_COLOR: "1",
       };
-      delete env.BB_PROJECT_ID;
-      delete env.BB_THREAD_ID;
+
+      delete env.OMNYO_PROJECT_ID;
+      delete env.OMNYO_THREAD_ID;
+
       const { stdout, stderr } = await execFileAsync(
         process.execPath,
         [distEntry, "status"],
@@ -231,15 +246,16 @@ describe("bb startup module graph", () => {
       expect(stderr).toBe("");
     }, 30_000);
 
-    it("loads only the thread chunk for `bb thread`", async () => {
+    it("loads only the thread chunk for `omnyo thread`", async () => {
       const run = await runCli("dist", ["thread", "--help"]);
 
-      expect(run.stdout).toContain("Usage: bb thread");
+      expect(run.stdout).toContain("Usage: omnyo thread");
       expect(loaded(run, `${chunkDirUrl}thread-`)).toHaveLength(1);
 
       const otherGroups = CORE_COMMAND_GROUPS.map((group) => group.name).filter(
         (name) => name !== "thread",
       );
+
       for (const name of [...otherGroups, "plugin-cli-proxy", "mime-types"]) {
         expect(loaded(run, `${chunkDirUrl}${name}-`), name).toEqual([]);
       }
@@ -247,8 +263,10 @@ describe("bb startup module graph", () => {
 
     it("uses registered plugin help from the split artifact", async () => {
       let pluginCalls = 0;
+
       const server = createServer(async (request, response) => {
         response.setHeader("content-type", "application/json");
+
         if (request.url === "/api/v1/plugins/contributions") {
           response.end(
             JSON.stringify({
@@ -261,26 +279,33 @@ describe("bb startup module graph", () => {
                     {
                       name: "inspect",
                       summary: "Inspect a fixture",
-                      usage: "bb fixture inspect <id>",
+                      usage: "omnyo fixture inspect <id>",
                     },
                   ],
                 },
               ],
             }),
           );
+
           return;
         }
+
         if (request.url !== "/api/v1/plugins/fixture-plugin/cli") {
           response.statusCode = 404;
           response.end();
+
           return;
         }
+
         pluginCalls += 1;
         let body = "";
+
         for await (const chunk of request) body += chunk;
+
         const { argv } = z
           .object({ argv: z.array(z.string()) })
           .parse(JSON.parse(body));
+
         response.end(
           JSON.stringify({
             exitCode: 0,
@@ -289,13 +314,16 @@ describe("bb startup module graph", () => {
           }),
         );
       });
+
       await new Promise<void>((resolvePromise) =>
         server.listen(0, "127.0.0.1", resolvePromise),
       );
       const address = server.address();
+
       if (address === null || typeof address === "string") {
         throw new Error("Fixture server did not bind to a TCP port");
       }
+
       const serverUrl = `http://127.0.0.1:${address.port}`;
 
       try {
@@ -305,8 +333,10 @@ describe("bb startup module graph", () => {
             ["fixture", "inspect", helpFlag],
             serverUrl,
           );
-          expect(run.stdout).toBe("bb fixture inspect <id>\n");
+
+          expect(run.stdout).toBe("omnyo fixture inspect <id>\n");
         }
+
         expect(pluginCalls).toBe(0);
 
         const direct = await runCli(
@@ -314,6 +344,7 @@ describe("bb startup module graph", () => {
           ["fixture", "inspect", "fixture-1"],
           serverUrl,
         );
+
         expect(direct.stdout).toBe("fixture ran: inspect fixture-1\n");
 
         const raw = await runCli(
@@ -321,6 +352,7 @@ describe("bb startup module graph", () => {
           ["plugin", "run", "fixture-plugin", "--help"],
           serverUrl,
         );
+
         expect(raw.stdout).toBe("fixture ran: --help\n");
         expect(pluginCalls).toBe(2);
       } finally {

@@ -7,7 +7,7 @@ import {
   type ThreadEventItemStatus,
   type ThreadEventPlanStep,
   type ThreadEventSearchMode,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { getEventParentToolCallId } from "./event-decode.js";
 
 interface ItemActivityLifecycleBase {
@@ -88,18 +88,24 @@ export function parseWebActivityLifecycleEvent(
   parentToolCallIdOverride?: string,
 ): WebActivityLifecycleEvent | null {
   const legacyImageGeneration = parseLegacyImageGeneration(decoded);
+
   if (legacyImageGeneration !== null) {
     return legacyImageGeneration;
   }
+
   if (decoded.type !== "item/started" && decoded.type !== "item/completed") {
     return null;
   }
+
   const parentToolCallId =
     parentToolCallIdOverride ?? getEventParentToolCallId(decoded);
+
   const item = decoded.item;
   const callId = item.id;
+
   if (!callId) return null;
   const kind = decoded.type === "item/started" ? "begin" : "end";
+
   const base = {
     kind,
     callId,
@@ -190,10 +196,13 @@ function parseLegacyImageGeneration(
   if (decoded.type !== "provider/unhandled") {
     return null;
   }
+
   const imageGeneration = parseLegacyImageGenerationCompletion(decoded);
+
   if (imageGeneration === null) {
     return null;
   }
+
   return {
     kind: "end",
     callId: imageGeneration.callId,

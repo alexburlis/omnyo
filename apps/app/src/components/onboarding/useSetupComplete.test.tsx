@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/queries/system-queries", () => ({
   useSystemConfig: mocks.useSystemConfig,
 }));
+
 vi.mock("@/hooks/queries/sidebar-navigation-query", () => ({
   useSidebarNavigation: mocks.useSidebarNavigation,
 }));

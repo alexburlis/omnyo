@@ -1,4 +1,4 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import type { ImageDefinition } from "./image-definition.js";
 import { dockerfileSchema } from "./image-definition.js";
@@ -39,10 +39,13 @@ export const modalLaunchOptionsSchema = z
   .strict();
 
 export type SandboxPreset = z.infer<typeof sandboxPresetSchema>;
+
 export type ModalImage = z.infer<typeof modalImageSchema>;
+
 export type ModalLaunchOptions = z.infer<typeof modalLaunchOptionsSchema>;
 
 const PRESETS_KEY = "sandbox-size-presets";
+
 const EXTRA_IMAGES_KEY = "named-images";
 
 function requireUniqueNames(
@@ -50,33 +53,39 @@ function requireUniqueNames(
   entries: readonly { name: string }[],
 ): void {
   const names = new Set<string>();
+
   for (const entry of entries) {
     const normalized = entry.name.toLocaleLowerCase();
+
     if (names.has(normalized)) {
       throw new Error(`${kind} names must be unique.`);
     }
+
     names.add(normalized);
   }
 }
 
 export function modalLaunchOptions(
-  bb: Pick<BbPluginApi, "storage">,
+  api: Pick<PluginApi, "storage">,
   image: ImageDefinition,
 ) {
   async function get(): Promise<ModalLaunchOptions> {
     const [storedPresets, storedImages, standard] = await Promise.all([
-      bb.storage.kv.get<unknown>(PRESETS_KEY),
-      bb.storage.kv.get<unknown>(EXTRA_IMAGES_KEY),
+      api.storage.kv.get<unknown>(PRESETS_KEY),
+      api.storage.kv.get<unknown>(EXTRA_IMAGES_KEY),
       image.get(),
     ]);
+
     const presets =
       storedPresets === undefined
         ? []
         : z.array(sandboxPresetSchema).max(20).parse(storedPresets);
+
     const extraImages =
       storedImages === undefined
         ? []
         : z.array(modalImageSchema).max(19).parse(storedImages);
+
     const options = {
       presets,
       images: [
@@ -88,19 +97,23 @@ export function modalLaunchOptions(
         ...extraImages,
       ],
     };
+
     requireUniqueNames("Preset", options.presets);
     requireUniqueNames("Image", options.images);
+
     return options;
   }
 
   async function set(value: ModalLaunchOptions): Promise<ModalLaunchOptions> {
     const parsed = modalLaunchOptionsSchema.parse(value);
     const [standard, ...extraImages] = parsed.images;
+
     if (standard?.name !== "Default" || standard.source !== "dockerfile") {
       throw new Error(
         'The first image must be the bundled "Default" Dockerfile.',
       );
     }
+
     requireUniqueNames("Preset", parsed.presets);
     requireUniqueNames("Image", parsed.images);
     await Promise.all(
@@ -112,9 +125,10 @@ export function modalLaunchOptions(
     );
     await image.set(standard.dockerfile);
     await Promise.all([
-      bb.storage.kv.set(PRESETS_KEY, parsed.presets),
-      bb.storage.kv.set(EXTRA_IMAGES_KEY, extraImages),
+      api.storage.kv.set(PRESETS_KEY, parsed.presets),
+      api.storage.kv.set(EXTRA_IMAGES_KEY, extraImages),
     ]);
+
     return get();
   }
 

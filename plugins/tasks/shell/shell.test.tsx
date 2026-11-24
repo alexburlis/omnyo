@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import { makeTask } from "../test-fixtures.js";
 import type { Task } from "../shared/contract.js";
 
@@ -19,27 +19,36 @@ if (!window.matchMedia) {
 }
 
 const app = await loadPluginApp(() => import("../app"));
+
 const { parseTasksRoute, tasksRouteToSubPath } = await import("./routes.js");
+
 const { pagerPosition } = await import("./topbar.js");
+
 const { loadViewMode } = await import("./view-preference.js");
+
 const { querySnapshotStorageKey, resetQuerySnapshotStateForTest } =
   await import("./query-snapshot.js");
 
 const tasksRegistration = app.navPanels[0]!;
+
 const navigationView = tasksRegistration.fixedTabs?.[0]!;
+
 const navigationRegistration = {
   ...tasksRegistration,
   component: navigationView.component,
 };
 
 beforeEach(() => window.localStorage.clear());
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
 const PROJECT_ID = "01HZZZZZZZZZZZZZZZZZZZZZP1";
+
 const OTHER_PROJECT_ID = "01HZZZZZZZZZZZZZZZZZZZZZP2";
+
 const FOLDER_ID = "01HZZZZZZZZZZZZZZZZZZZZZF1";
 
 const project = {
@@ -49,13 +58,13 @@ const project = {
   nextTaskNumber: 5,
   color: "blue",
   folderId: FOLDER_ID,
-  linkedBbProjectId: null,
+  linkedAppProjectId: null,
   createdAt: "2026-07-15T00:00:00.000Z",
 };
 
 const folder = {
   id: FOLDER_ID,
-  name: "bb",
+  name: "omnyo",
   parentFolderId: null,
   createdAt: "2026-07-15T00:00:00.000Z",
 };
@@ -91,9 +100,11 @@ describe("tasks route grammar", () => {
       { kind: "project", projectId: PROJECT_ID, view: "board" },
       { kind: "project", projectId: PROJECT_ID, view: null },
     ] as const;
+
     for (const route of routes) {
       expect(parseTasksRoute(tasksRouteToSubPath(route))).toEqual(route);
     }
+
     expect(parseTasksRoute(`${PROJECT_ID}%3Fview%3Dboard`)).toEqual({
       kind: "project",
       projectId: PROJECT_ID,
@@ -118,7 +129,7 @@ describe("project view preference", () => {
 
   it("restores the remembered view when the URL names none", async () => {
     const listed = openProject(`${PROJECT_ID}?view=list`);
-    fireEvent.click(await listed.findByRole("button", { name: "Board" }));
+    fireEvent.click(await listed.findByRole("radio", { name: "Board" }));
     expect(listed.navigateCalls).toContainEqual({
       method: "toPluginPanel",
       path: "tasks",
@@ -127,14 +138,14 @@ describe("project view preference", () => {
     listed.lifecycle.unmount();
 
     const reopened = openProject(PROJECT_ID);
-    const boardSegment = await reopened.findByRole("button", { name: "Board" });
-    expect(boardSegment.getAttribute("aria-pressed")).toBe("true");
+    const boardSegment = await reopened.findByRole("radio", { name: "Board" });
+    expect(boardSegment.getAttribute("aria-checked")).toBe("true");
     await reopened.findByText("In Review");
   });
 
   it("keeps per-project choices apart and defaults unseen projects to the last one used", async () => {
     const slot = openProject(`${PROJECT_ID}?view=list`);
-    fireEvent.click(await slot.findByRole("button", { name: "Board" }));
+    fireEvent.click(await slot.findByRole("radio", { name: "Board" }));
     slot.lifecycle.unmount();
 
     expect(loadViewMode(PROJECT_ID)).toBe("board");
@@ -145,7 +156,8 @@ describe("project view preference", () => {
       { subPath: `${OTHER_PROJECT_ID}?view=list` },
       { rpc: seededRpc() },
     );
-    fireEvent.click(await other.findByRole("button", { name: "List" }));
+
+    fireEvent.click(await other.findByRole("radio", { name: "List" }));
     expect(loadViewMode(OTHER_PROJECT_ID)).toBe("list");
     expect(loadViewMode(PROJECT_ID)).toBe("board");
   });
@@ -156,6 +168,7 @@ describe("project view preference", () => {
       { subPath: "all" },
       { rpc: seededRpc({ listLabels: () => ({ labels: [] }) }) },
     );
+
     fireEvent.click(await slot.findByText("Tasks Plugin"));
     expect(slot.navigateCalls).toContainEqual({
       method: "toPluginPanel",
@@ -169,7 +182,7 @@ describe("project view preference", () => {
       throw new DOMException("Storage is disabled", "SecurityError");
     });
     const slot = openProject(`${PROJECT_ID}?view=list`);
-    fireEvent.click(await slot.findByRole("button", { name: "Board" }));
+    fireEvent.click(await slot.findByRole("radio", { name: "Board" }));
     expect(slot.navigateCalls).toContainEqual({
       method: "toPluginPanel",
       path: "tasks",
@@ -234,6 +247,7 @@ describe("task pager", () => {
         }),
       },
     );
+
     await slot.findByText("2 / 4");
     fireEvent.click(slot.getByRole("button", { name: "Next task" }));
     expect(slot.navigateCalls).toContainEqual({
@@ -245,7 +259,7 @@ describe("task pager", () => {
 });
 
 describe("tasks app shell", () => {
-  it("registers navigation as a BB-owned fixed panel tab", () => {
+  it("registers navigation as an Omnyo-owned fixed panel tab", () => {
     expect(tasksRegistration.fixedTabs).toMatchObject([
       {
         id: "navigation",
@@ -259,11 +273,13 @@ describe("tasks app shell", () => {
   it("does not treat the first connection as a reconnect", async () => {
     let requests = 0;
     let title = "Initial connection title";
+
     const task = {
       ...pagerTask("TSK-4", "todo", 1),
       description: "",
       labelIds: [],
     };
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "all" },
@@ -272,6 +288,7 @@ describe("tasks app shell", () => {
         rpc: seededRpc({
           listTasks: () => {
             requests += 1;
+
             return { tasks: [{ ...task, title }] };
           },
           listLabels: () => ({ labels: [] }),
@@ -281,6 +298,7 @@ describe("tasks app shell", () => {
         }),
       },
     );
+
     await slot.findByText("Initial connection title");
     const initialRequests = requests;
     expect(initialRequests).toBeGreaterThan(0);
@@ -297,12 +315,14 @@ describe("tasks app shell", () => {
 
   it("recovers when the shell mounts during an existing outage", async () => {
     let serverAvailable = false;
+
     const task = {
       ...pagerTask("TSK-4", "todo", 1),
       title: "Loaded after existing outage",
       description: "",
       labelIds: [],
     };
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "all" },
@@ -311,6 +331,7 @@ describe("tasks app shell", () => {
         rpc: seededRpc({
           listTasks: async () => {
             if (!serverAvailable) throw new Error("server unavailable");
+
             return { tasks: [task] };
           },
           listLabels: () => ({ labels: [] }),
@@ -320,6 +341,7 @@ describe("tasks app shell", () => {
         }),
       },
     );
+
     await waitFor(() =>
       expect(
         slot.inspection.rpcCalls.some((call) => call.method === "listTasks"),
@@ -334,12 +356,14 @@ describe("tasks app shell", () => {
 
   it("resyncs the task list after reconnect and supports manual refresh", async () => {
     let title = "Stale list title";
+
     const task = {
       ...pagerTask("TSK-4", "todo", 1),
       title,
       description: "",
       labelIds: [],
     };
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "all" },
@@ -353,6 +377,7 @@ describe("tasks app shell", () => {
         }),
       },
     );
+
     await slot.findByText("Stale list title");
 
     title = "Recovered list title";
@@ -371,6 +396,7 @@ describe("tasks app shell", () => {
     let listProjectCalls = 0;
     let holdProjects = false;
     let releaseProjects: (() => void) | undefined;
+
     const page = renderSlot(
       app.navPanels[0]!,
       { subPath: "all" },
@@ -378,11 +404,13 @@ describe("tasks app shell", () => {
         rpc: seededRpc({
           listTasks: () => {
             listTaskCalls += 1;
+
             return { tasks: [] };
           },
         }),
       },
     );
+
     const panel = renderSlot(
       navigationRegistration,
       { subPath: "all" },
@@ -390,25 +418,30 @@ describe("tasks app shell", () => {
         rpc: seededRpc({
           listProjects: async () => {
             listProjectCalls += 1;
+
             if (holdProjects) {
               await new Promise<void>((resolve) => {
                 releaseProjects = resolve;
               });
             }
+
             return { projects: [project] };
           },
         }),
       },
     );
+
     await page.findByRole("button", { name: "Refresh tasks" });
     await panel.findByText("Tasks Plugin");
     const initialTaskCalls = listTaskCalls;
     const initialProjectCalls = listProjectCalls;
 
     holdProjects = true;
+
     const refresh = page.getByRole("button", {
       name: "Refresh tasks",
     }) as HTMLButtonElement;
+
     fireEvent.click(refresh);
 
     await waitFor(() =>
@@ -450,6 +483,7 @@ describe("tasks app shell", () => {
         }),
       },
     );
+
     await slot.findByText("Order probe");
 
     const refresh = slot.getByRole("button", { name: "Refresh tasks" });
@@ -470,16 +504,20 @@ describe("tasks app shell", () => {
     let title = "Flight title A";
     let holdListTasks = false;
     const pendingResolvers: Array<() => void> = [];
+
     const releaseAllPending = () => {
       const resolvers = pendingResolvers.splice(0, pendingResolvers.length);
+
       for (const resolve of resolvers) resolve();
     };
+
     const task = {
       ...pagerTask("TSK-4", "todo", 1),
       title,
       description: "",
       labelIds: [],
     };
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "all" },
@@ -487,9 +525,11 @@ describe("tasks app shell", () => {
         rpc: seededRpc({
           listTasks: () => {
             listTasksCalls += 1;
+
             if (!holdListTasks) {
               return { tasks: [{ ...task, title }] };
             }
+
             return new Promise((resolve) => {
               pendingResolvers.push(() =>
                 resolve({ tasks: [{ ...task, title }] }),
@@ -503,6 +543,7 @@ describe("tasks app shell", () => {
         }),
       },
     );
+
     await slot.findByText("Flight title A");
     const baselineCalls = listTasksCalls;
     expect(baselineCalls).toBeGreaterThan(0);
@@ -510,6 +551,7 @@ describe("tasks app shell", () => {
     const refresh = slot.getByRole("button", {
       name: "Refresh tasks",
     }) as HTMLButtonElement;
+
     const idleClassName = refresh.className;
     expect(idleClassName).toMatch(/size-7/);
     expect(refresh.getAttribute("aria-busy")).not.toBe("true");
@@ -559,6 +601,7 @@ describe("tasks app shell", () => {
       const button = slot.getByRole("button", {
         name: "Refresh tasks",
       }) as HTMLButtonElement;
+
       expect(button.disabled).toBe(false);
       expect(button.getAttribute("aria-busy")).not.toBe("true");
     });
@@ -567,12 +610,14 @@ describe("tasks app shell", () => {
   it("retains stale list data when a manual refresh fails, then recovers", async () => {
     let shouldFail = false;
     let title = "Stable title";
+
     const task = {
       ...pagerTask("TSK-4", "todo", 1),
       title,
       description: "",
       labelIds: [],
     };
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "all" },
@@ -580,6 +625,7 @@ describe("tasks app shell", () => {
         rpc: seededRpc({
           listTasks: () => {
             if (shouldFail) throw new Error("refresh failed");
+
             return { tasks: [{ ...task, title }] };
           },
           listLabels: () => ({ labels: [] }),
@@ -589,6 +635,7 @@ describe("tasks app shell", () => {
         }),
       },
     );
+
     await slot.findByText("Stable title");
 
     shouldFail = true;
@@ -613,12 +660,14 @@ describe("tasks app shell", () => {
 
   it("resyncs an open task detail after reconnect", async () => {
     let title = "Stale detail title";
+
     const task = {
       ...pagerTask("TSK-4", "todo", 1),
       title,
       description: "",
       labelIds: [],
     };
+
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "task/TSK-4" },
@@ -633,6 +682,7 @@ describe("tasks app shell", () => {
         }),
       },
     );
+
     await slot.findByRole("textbox", { name: "Task title" });
     expect(slot.getByRole("textbox", { name: "Task title" }).textContent).toBe(
       "Stale detail title",
@@ -655,21 +705,26 @@ describe("tasks app shell", () => {
     const projectsKey = querySnapshotStorageKey("projects");
     const foldersKey = querySnapshotStorageKey("folders");
     const summaryKey = querySnapshotStorageKey("sidebar-summary");
+
     const summary = {
       projectId: PROJECT_ID,
       taskCount: 3,
       activeAgentCount: 1,
     };
+
     function deferred<T>() {
       let resolve!: (value: T) => void;
+
       const promise = new Promise<T>((r) => {
         resolve = r;
       });
+
       return { promise, resolve };
     }
 
     it("never paints the empty state while projects are unknown", async () => {
       const projects = deferred<{ projects: never[] }>();
+
       const slot = renderSlot(
         app.navPanels[0]!,
         { subPath: "" },
@@ -680,6 +735,7 @@ describe("tasks app shell", () => {
           }),
         },
       );
+
       expect(slot.queryByText("No projects yet")).toBeNull();
       projects.resolve({ projects: [] });
       await slot.findByText("No projects yet");
@@ -690,6 +746,7 @@ describe("tasks app shell", () => {
       window.localStorage.setItem(foldersKey, JSON.stringify([]));
       window.localStorage.setItem(summaryKey, JSON.stringify([]));
       const projects = deferred<{ projects: never[] }>();
+
       const slot = renderSlot(
         app.navPanels[0]!,
         { subPath: "" },
@@ -700,6 +757,7 @@ describe("tasks app shell", () => {
           }),
         },
       );
+
       expect(slot.getByText("No projects yet")).toBeTruthy();
     });
 
@@ -709,11 +767,13 @@ describe("tasks app shell", () => {
       window.localStorage.setItem(summaryKey, JSON.stringify([summary]));
       const projects = deferred<{ projects: (typeof project)[] }>();
       const rpc = seededRpc({ listProjects: () => projects.promise });
+
       const panel = renderSlot(
         navigationRegistration,
         { subPath: "" },
         { rpc },
       );
+
       const page = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
       expect(panel.getByText(project.name)).toBeTruthy();
       expect(page.queryByText("No projects yet")).toBeNull();
@@ -728,11 +788,13 @@ describe("tasks app shell", () => {
         summaryKey,
         JSON.stringify([{ projectId: 1 }]),
       );
+
       const slot = renderSlot(
         app.navPanels[0]!,
         { subPath: "" },
         { rpc: emptyRpc },
       );
+
       expect(slot.queryByText("No projects yet")).toBeNull();
       await slot.findByText("No projects yet");
     });
@@ -740,17 +802,19 @@ describe("tasks app shell", () => {
     it("prunes snapshots written under an older storage version", async () => {
       resetQuerySnapshotStateForTest();
       window.localStorage.setItem(
-        "bb-tasks:query-snapshot:v0:projects",
+        "tasks:query-snapshot:v0:projects",
         JSON.stringify([]),
       );
+
       const slot = renderSlot(
         navigationRegistration,
         { subPath: "" },
         { rpc: seededRpc() },
       );
+
       await slot.findByText(project.name);
       expect(
-        window.localStorage.getItem("bb-tasks:query-snapshot:v0:projects"),
+        window.localStorage.getItem("tasks:query-snapshot:v0:projects"),
       ).toBeNull();
       expect(window.localStorage.getItem(projectsKey)).not.toBeNull();
     });
@@ -761,6 +825,7 @@ describe("tasks app shell", () => {
         { subPath: "" },
         { rpc: seededRpc() },
       );
+
       await slot.findByText(project.name);
       await waitFor(() => {
         expect(
@@ -780,18 +845,23 @@ describe("tasks app shell", () => {
       const newerProject = { ...project, name: "Newer truth" };
       const older = deferred<{ projects: (typeof project)[] }>();
       let calls = 0;
+
       const rpc = seededRpc({
         listProjects: () => {
           calls += 1;
+
           return calls === 1 ? older.promise : { projects: [newerProject] };
         },
       });
+
       renderSlot(navigationRegistration, { subPath: "" }, { rpc });
+
       const second = renderSlot(
         navigationRegistration,
         { subPath: "" },
         { rpc },
       );
+
       await second.findByText("Newer truth");
       await waitFor(() =>
         expect(
@@ -819,6 +889,7 @@ describe("tasks app shell", () => {
             }),
           },
         );
+
         fireEvent.click(await slot.findByText(project.name));
         expect(slot.navigateCalls).toContainEqual({
           method: "toPluginPanel",
@@ -838,6 +909,7 @@ describe("tasks app shell", () => {
         labelIds: [],
       },
     ];
+
     const rpc = seededRpc({
       listLabels: () => ({ labels: [] }),
       listTasks: (input: { activeOnly?: boolean }) =>
@@ -845,6 +917,7 @@ describe("tasks app shell", () => {
           ? Promise.reject(new Error("active fetch failed"))
           : { tasks },
     });
+
     const Panel = app.navPanels[0]!.component;
     const slot = renderSlot(app.navPanels[0]!, { subPath: "all" }, { rpc });
     await slot.findByText("Scope truth");
@@ -863,6 +936,7 @@ describe("tasks app shell", () => {
         rpc: emptyRpc,
       },
     );
+
     await slot.findByText("No projects yet");
     fireEvent.click(slot.getByRole("button", { name: /New project/ }));
     await slot.findByText("Projects group tasks under a shared key prefix.");
@@ -877,23 +951,29 @@ describe("tasks app shell", () => {
         labelIds: [],
       },
     ];
+
     let deferAll = false;
     const pendingAll: Array<() => void> = [];
+
     const rpc = seededRpc({
       listLabels: () => ({ labels: [] }),
       listTasks: (input: { activeOnly?: boolean; statuses?: string[] }) => {
         if (input.activeOnly === true) return { tasks: [] };
+
         const matching = tasks.filter(
           (task) =>
             input.statuses === undefined ||
             input.statuses.includes(task.status),
         );
+
         if (!deferAll) return { tasks: matching };
+
         return new Promise((resolve) => {
           pendingAll.push(() => resolve({ tasks: matching }));
         });
       },
     });
+
     const Panel = app.navPanels[0]!.component;
     const slot = renderSlot(app.navPanels[0]!, { subPath: "all" }, { rpc });
     await slot.findByText("Scope truth");
@@ -918,6 +998,7 @@ describe("tasks app shell", () => {
       { subPath: `${PROJECT_ID}?view=board` },
       { rpc: seededRpc() },
     );
+
     await boardSlot.findByText("Backlog");
     await boardSlot.findByText("In Review");
     expect(boardSlot.getByText("Tasks Plugin")).toBeDefined();
@@ -929,6 +1010,7 @@ describe("tasks app shell", () => {
       { subPath: "task/TSK-4" },
       { rpc: seededRpc() },
     );
+
     await taskSlot.findByText(/Task TSK-4 was not found/);
     fireEvent.keyDown(window, { key: "Escape" });
     expect(taskSlot.navigateCalls).toContainEqual({
@@ -952,6 +1034,7 @@ describe("tasks app shell", () => {
         }),
       },
     );
+
     await slot.findByRole("textbox", { name: "Task title" });
     expect(slot.navigateCalls).toContainEqual({
       method: "toPluginPanel",
@@ -968,6 +1051,7 @@ describe("tasks app shell", () => {
         rpc: seededRpc(),
       },
     );
+
     await slot.findByText("Tasks Plugin");
     expect(slot.getByRole("button", { name: /^All tasks/ })).toBeDefined();
     expect(slot.getByRole("button", { name: "Manage" })).toBeDefined();
@@ -981,26 +1065,29 @@ describe("tasks app shell", () => {
   });
 
   it("does not mount New project queries until the dialog opens", async () => {
-    let bbProjectCalls = 0;
+    let omnyoProjectCalls = 0;
+
     const slot = renderSlot(
       navigationRegistration,
       { subPath: "all" },
       {
         rpc: seededRpc({
-          listBbProjects: () => {
-            bbProjectCalls += 1;
-            return { bbProjects: [] };
+          listAppProjects: () => {
+            omnyoProjectCalls += 1;
+
+            return { appProjects: [] };
           },
         }),
       },
     );
+
     await slot.findByRole("button", { name: "New project" });
-    expect(bbProjectCalls).toBe(0);
+    expect(omnyoProjectCalls).toBe(0);
 
     fireEvent.click(slot.getByRole("button", { name: "New project" }));
 
     await slot.findByText("Projects group tasks under a shared key prefix.");
-    expect(bbProjectCalls).toBeGreaterThan(0);
+    expect(omnyoProjectCalls).toBeGreaterThan(0);
   });
 
   it("routes 'manage' to the manage panel from right-panel navigation", async () => {
@@ -1011,6 +1098,7 @@ describe("tasks app shell", () => {
         rpc: seededRpc(),
       },
     );
+
     await panel.findByRole("button", { name: "Manage" });
     fireEvent.click(panel.getByRole("button", { name: "Manage" }));
     expect(panel.navigateCalls).toContainEqual({
@@ -1027,7 +1115,8 @@ describe("tasks app shell", () => {
         rpc: seededRpc({ listLabels: () => ({ labels: [] }) }),
       },
     );
-    await slot.findByText("Labels, agent presets, and folders.");
+
+    await slot.findByRole("tab", { name: "Labels" });
   });
 
   it("opens quick-create on bare 'c' but not from editable targets or dialogs", async () => {
@@ -1038,6 +1127,7 @@ describe("tasks app shell", () => {
         rpc: seededRpc(),
       },
     );
+
     await slot.findByText("All tasks");
     fireEvent.keyDown(window, { key: "c" });
     await slot.findByRole("dialog");
@@ -1061,6 +1151,7 @@ describe("tasks app shell", () => {
       builtin: false,
       createdAt: "2026-07-15T00:00:00.000Z",
     };
+
     const slot = renderSlot(
       navigationRegistration,
       { subPath: "all" },
@@ -1081,13 +1172,17 @@ describe("tasks app shell", () => {
         }),
       },
     );
+
     await slot.findByText("Worktree env");
     expect(slot.getByText("Default env")).toBeDefined();
-    expect(slot.getAllByLabelText("Spawns a new worktree")).toHaveLength(1);
+    expect(
+      slot.getAllByLabelText("Starts each agent in a new worktree"),
+    ).toHaveLength(1);
   });
 
   it("refetches sidebar data when invalidation channels fire", async () => {
     let projectCalls = 0;
+
     const slot = renderSlot(
       navigationRegistration,
       { subPath: "all" },
@@ -1095,11 +1190,13 @@ describe("tasks app shell", () => {
         rpc: seededRpc({
           listProjects: () => {
             projectCalls += 1;
+
             return { projects: [project] };
           },
         }),
       },
     );
+
     await slot.findByText("Tasks Plugin");
     const before = projectCalls;
     await slot.emitRealtime("projects:changed", { projectId: null });

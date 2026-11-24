@@ -6,7 +6,7 @@ import {
   threadScope,
   turnScope,
   type PromptInput,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { createConnection } from "../../src/connection.js";
 import { noopNotifier } from "../../src/notifier.js";
 import {
@@ -19,6 +19,7 @@ import {
   archiveThread,
   createThread,
   deleteThread,
+  purgeThreadHistoryChunk,
   searchThreadsWithPendingInteractionState,
   updateThread,
   upsertThreadSearchSegments,
@@ -32,13 +33,16 @@ interface SetupResult {
 
 function setup(): SetupResult {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   return { db, project };
 }
 
@@ -52,12 +56,16 @@ function runThreadSearchMigrationFiles(
   for (const migrationFile of [
     "0039_thread_search.sql",
     "0040_thread_search_rowid_fts.sql",
+    "0092_windy_doctor_faustus.sql",
     "0101_thread_search_prefix_fts.sql",
+    "0145_contentless_thread_search.sql",
+    "0154_thread_major_search_keys.sql",
   ]) {
     const migrationSql = readFileSync(
       resolve(__dirname, "../../drizzle", migrationFile),
       "utf-8",
     );
+
     for (const statement of migrationSql
       .split("--> statement-breakpoint")
       .map((entry) => entry.trim())
@@ -110,8 +118,43 @@ function turnRequestData(input: PromptInput[]) {
 }
 
 describe("thread search data", () => {
+  it("does not duplicate searchable text inside the full-text index", () => {
+    const { db, project } = setup();
+
+    try {
+      const thread = createThread(db, noopNotifier, {
+        projectId: project.id,
+        providerId: "codex",
+        title: "contentlessneedle searchable title",
+      });
+
+      const rows = db.$client
+        .prepare<[], { text: string | null }>(
+          "SELECT text FROM thread_search_segments_fts WHERE thread_search_segments_fts MATCH 'contentlessneedle'",
+        )
+        .all();
+
+      expect(rows).toEqual([{ text: null }]);
+
+      const results = searchThreadsWithPendingInteractionState(db, {
+        query: "contentlessneedle",
+        limitPerGroup: 10,
+      });
+
+      expect(results.active.results).toMatchObject([
+        {
+          thread: { id: thread.id },
+          matches: [{ text: "contentlessneedle searchable title" }],
+        },
+      ]);
+    } finally {
+      closeConnection(db);
+    }
+  });
+
   it("backfills existing title and conversation segments from the migration", () => {
     const { db, project } = setup();
+
     try {
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
@@ -119,6 +162,7 @@ describe("thread search data", () => {
         title: "titlebackfill",
         titleFallback: "fallbackbackfill",
       });
+
       dropThreadSearchSchema(db);
       insertEvents(db, noopNotifier, [
         {
@@ -177,25 +221,29 @@ describe("thread search data", () => {
           query,
           limitPerGroup: 20,
         });
-        expect(results.active.results.map((result) => result.thread.id)).toEqual(
-          [thread.id],
-        );
+
+        expect(
+          results.active.results.map((result) => result.thread.id),
+        ).toEqual([thread.id]);
       }
 
       const secretResults = searchThreadsWithPendingInteractionState(db, {
         query: "secretbackfill",
         limitPerGroup: 20,
       });
+
       expect(secretResults.active.total).toBe(0);
       expect(secretResults.archived.total).toBe(0);
 
       updateThread(db, noopNotifier, thread.id, {
         title: "titleupdatebackfill",
       });
+
       const titleUpdateResults = searchThreadsWithPendingInteractionState(db, {
         query: "titleupdatebackfill",
         limitPerGroup: 20,
       });
+
       expect(
         titleUpdateResults.active.results.map((result) => result.thread.id),
       ).toEqual([thread.id]);
@@ -206,12 +254,14 @@ describe("thread search data", () => {
 
   it("indexes live writes, groups archived matches, and excludes deleted threads", () => {
     const { db, project } = setup();
+
     try {
       const activeThread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Active thread",
       });
+
       appendStoredThreadEvent(db, noopNotifier, {
         threadId: activeThread.id,
         type: "client/turn/requested",
@@ -244,6 +294,7 @@ describe("thread search data", () => {
         providerId: "codex",
         title: "archivewriterneedle",
       });
+
       archiveThread(db, noopNotifier, archivedThread.id);
 
       const deletedThread = createThread(db, noopNotifier, {
@@ -251,6 +302,7 @@ describe("thread search data", () => {
         providerId: "codex",
         title: "deletedwriterneedle",
       });
+
       deleteThread(db, noopNotifier, deletedThread.id);
 
       createThread(db, noopNotifier, {
@@ -259,27 +311,31 @@ describe("thread search data", () => {
         title: "hiddenwriterneedle",
         visibility: "hidden",
       });
+
       const hiddenArchivedThread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "hiddenarchivedwriterneedle",
         visibility: "hidden",
       });
+
       archiveThread(db, noopNotifier, hiddenArchivedThread.id);
 
       const activeResults = searchThreadsWithPendingInteractionState(db, {
         query: "livewriterneedle",
         limitPerGroup: 20,
       });
-      expect(activeResults.active.results.map((result) => result.thread.id)).toEqual(
-        [activeThread.id],
-      );
+
+      expect(
+        activeResults.active.results.map((result) => result.thread.id),
+      ).toEqual([activeThread.id]);
       expect(activeResults.archived.total).toBe(0);
 
       const assistantResults = searchThreadsWithPendingInteractionState(db, {
         query: "assistantwriterneedle",
         limitPerGroup: 20,
       });
+
       expect(assistantResults.active.results[0]?.matches[0]).toMatchObject({
         sourceKind: "assistant_message",
         text: "assistantwriterneedle",
@@ -290,6 +346,7 @@ describe("thread search data", () => {
         query: "archivewriterneedle",
         limitPerGroup: 20,
       });
+
       expect(archivedResults.active.total).toBe(0);
       expect(
         archivedResults.archived.results.map((result) => result.thread.id),
@@ -299,6 +356,7 @@ describe("thread search data", () => {
         query: "hiddenwriterneedle",
         limitPerGroup: 20,
       });
+
       expect(hiddenResults.active.total).toBe(0);
       expect(hiddenResults.archived.total).toBe(0);
 
@@ -309,6 +367,7 @@ describe("thread search data", () => {
           limitPerGroup: 20,
         },
       );
+
       expect(hiddenArchivedResults.active.total).toBe(0);
       expect(hiddenArchivedResults.archived.total).toBe(0);
 
@@ -317,6 +376,7 @@ describe("thread search data", () => {
           query,
           limitPerGroup: 20,
         });
+
         expect(results.active.total).toBe(0);
         expect(results.archived.total).toBe(0);
       }
@@ -327,14 +387,17 @@ describe("thread search data", () => {
 
   it("keeps one message match per thread for broad matches across limited threads", () => {
     const { db, project } = setup();
+
     try {
       const threadIndexesById = new Map<string, number>();
+
       for (let threadIndex = 0; threadIndex < 5; threadIndex += 1) {
         const thread = createThread(db, noopNotifier, {
           projectId: project.id,
           providerId: "codex",
           title: `Broad match thread ${threadIndex}`,
         });
+
         threadIndexesById.set(thread.id, threadIndex);
         upsertThreadSearchSegments(db, {
           segments: Array.from({ length: 100 }, (_, segmentIndex) => ({
@@ -354,6 +417,7 @@ describe("thread search data", () => {
 
       expect(results.active.total).toBe(5);
       expect(results.active.results).toHaveLength(3);
+
       for (const result of results.active.results) {
         const threadIndex = threadIndexesById.get(result.thread.id);
         expect(threadIndex).toBeDefined();
@@ -366,24 +430,149 @@ describe("thread search data", () => {
     }
   });
 
+  it("purges a deleted thread's history in bounded chunks without touching other threads", () => {
+    const { db, project } = setup();
+
+    try {
+      const [doomed, kept] = ["Doomed chunkpurge", "Kept chunkpurge"].map(
+        (title) =>
+          createThread(db, noopNotifier, {
+            projectId: project.id,
+            providerId: "codex",
+            title,
+          }),
+      );
+
+      for (const thread of [doomed!, kept!]) {
+        insertEvents(
+          db,
+          noopNotifier,
+          Array.from({ length: 5 }, (_, index) => ({
+            threadId: thread.id,
+            sequence: index + 1,
+            type: "system/manager/user_message" as const,
+            scope: threadScope(),
+            itemId: null,
+            itemKind: null,
+            parentToolCallId: null,
+            data: JSON.stringify({ text: `chunkpurge message ${index}` }),
+          })),
+        );
+      }
+
+      const historyRows = (threadId: string) =>
+        Number(
+          db.$client
+            .prepare(
+              "SELECT (SELECT count(*) FROM events WHERE thread_id = ?) + (SELECT count(*) FROM thread_search_segments WHERE thread_id = ?)",
+            )
+            .pluck()
+            .get(threadId, threadId),
+        );
+
+      const keptRows = historyRows(kept!.id);
+      let passes = 0;
+      let complete = false;
+
+      while (!complete) {
+        const before = historyRows(doomed!.id);
+        complete = purgeThreadHistoryChunk(db, {
+          threadId: doomed!.id,
+          limit: 2,
+        });
+        passes += 1;
+        expect(before - historyRows(doomed!.id)).toBeLessThanOrEqual(4);
+        expect(passes).toBeLessThan(10);
+      }
+
+      expect(passes).toBeGreaterThan(1);
+      expect(historyRows(doomed!.id)).toBe(0);
+      expect(historyRows(kept!.id)).toBe(keptRows);
+      expect(deleteThread(db, noopNotifier, doomed!.id)).toBe(true);
+    } finally {
+      closeConnection(db);
+    }
+  });
+
+  it("ranks broad matches the same way when they exceed the segment lookup limit", () => {
+    const { db, project } = setup();
+
+    try {
+      const threadIndexesById = new Map<string, number>();
+
+      for (let threadIndex = 0; threadIndex < 32; threadIndex += 1) {
+        const thread = createThread(db, noopNotifier, {
+          projectId: project.id,
+          providerId: "codex",
+          title:
+            threadIndex === 7
+              ? "Widespreadneedle headline"
+              : `Wide match thread ${threadIndex}`,
+        });
+
+        threadIndexesById.set(thread.id, threadIndex);
+        upsertThreadSearchSegments(db, {
+          segments: Array.from({ length: 100 }, (_, segmentIndex) => ({
+            threadId: thread.id,
+            sourceKind: "assistant_message",
+            sourceKey: `event:${segmentIndex}`,
+            sourceSeq: segmentIndex,
+            text: `widespreadneedle thread ${threadIndex} segment ${segmentIndex}`,
+          })),
+        });
+      }
+
+      const results = searchThreadsWithPendingInteractionState(db, {
+        query: "widespreadneedle",
+        limitPerGroup: 3,
+      });
+
+      expect(results.active.total).toBe(32);
+      expect(results.active.results).toHaveLength(3);
+
+      const [first, ...rest] = results.active.results;
+
+      expect(threadIndexesById.get(first!.thread.id)).toBe(7);
+      expect(
+        first!.matches.map((match) => [match.sourceKind, match.text]),
+      ).toEqual([
+        ["title", "Widespreadneedle headline"],
+        ["assistant_message", "widespreadneedle thread 7 segment 0"],
+      ]);
+
+      for (const result of rest) {
+        const threadIndex = threadIndexesById.get(result.thread.id);
+        expect(result.matches.map((match) => match.text)).toEqual([
+          `widespreadneedle thread ${threadIndex} segment 0`,
+        ]);
+      }
+    } finally {
+      closeConnection(db);
+    }
+  });
+
   it("ranks title matches first, then the rest by most recent activity", () => {
     const { db, project } = setup();
+
     try {
       const titled = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Moss plugins",
       });
+
       const older = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Weekly planning",
       });
+
       const newer = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Release notes",
       });
+
       upsertThreadSearchSegments(db, {
         segments: [older, newer].map((thread) => ({
           threadId: thread.id,
@@ -393,9 +582,11 @@ describe("thread search data", () => {
           text: "moss plugins moss plugins moss plugins",
         })),
       });
+
       const setUpdatedAt = db.$client.prepare(
         "UPDATE threads SET updated_at = ? WHERE id = ?",
       );
+
       setUpdatedAt.run(1, titled.id);
       setUpdatedAt.run(2, older.id);
       setUpdatedAt.run(3, newer.id);
@@ -417,6 +608,7 @@ describe("thread search data", () => {
 
   it("does not rank a titled thread's fallback text as a title match", () => {
     const { db, project } = setup();
+
     try {
       const titledWithFallback = createThread(db, noopNotifier, {
         projectId: project.id,
@@ -424,11 +616,13 @@ describe("thread search data", () => {
         title: "Weekly planning",
         titleFallback: "fallbackneedle in the first prompt",
       });
+
       const newerMessage = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Release notes",
       });
+
       upsertThreadSearchSegments(db, {
         segments: [
           {
@@ -440,9 +634,11 @@ describe("thread search data", () => {
           },
         ],
       });
+
       const setUpdatedAt = db.$client.prepare(
         "UPDATE threads SET updated_at = ? WHERE id = ?",
       );
+
       setUpdatedAt.run(1, titledWithFallback.id);
       setUpdatedAt.run(2, newerMessage.id);
 
@@ -462,17 +658,20 @@ describe("thread search data", () => {
 
   it("ranks a title as a title match only when it has every word", () => {
     const { db, project } = setup();
+
     try {
       const fullTitle = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Moss plugins",
       });
+
       const partialTitle = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Moss editor",
       });
+
       upsertThreadSearchSegments(db, {
         segments: [
           {
@@ -484,9 +683,11 @@ describe("thread search data", () => {
           },
         ],
       });
+
       const setUpdatedAt = db.$client.prepare(
         "UPDATE threads SET updated_at = ? WHERE id = ?",
       );
+
       setUpdatedAt.run(1, fullTitle.id);
       setUpdatedAt.run(2, partialTitle.id);
 
@@ -506,17 +707,20 @@ describe("thread search data", () => {
 
   it("splits an underscored query into words like other punctuation", () => {
     const { db, project } = setup();
+
     try {
       const titled = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Search the thread list",
       });
+
       const newerMessage = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Weekly planning",
       });
+
       upsertThreadSearchSegments(db, {
         segments: [
           {
@@ -528,9 +732,11 @@ describe("thread search data", () => {
           },
         ],
       });
+
       const setUpdatedAt = db.$client.prepare(
         "UPDATE threads SET updated_at = ? WHERE id = ?",
       );
+
       setUpdatedAt.run(1, titled.id);
       setUpdatedAt.run(2, newerMessage.id);
 
@@ -543,9 +749,7 @@ describe("thread search data", () => {
         titled.id,
         newerMessage.id,
       ]);
-      expect(
-        results.active.results[1]?.matches[0]?.highlightRanges,
-      ).toEqual([
+      expect(results.active.results[1]?.matches[0]?.highlightRanges).toEqual([
         { start: 7, end: 13 },
         { start: 14, end: 20 },
       ]);
@@ -556,12 +760,14 @@ describe("thread search data", () => {
 
   it("shows the message that has every word over an earlier partial match", () => {
     const { db, project } = setup();
+
     try {
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Weekly planning",
       });
+
       upsertThreadSearchSegments(db, {
         segments: [
           {
@@ -599,6 +805,7 @@ describe("thread search data", () => {
 
   it("returns title matches alongside the single best message match", () => {
     const { db, project } = setup();
+
     try {
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
@@ -606,6 +813,7 @@ describe("thread search data", () => {
         title: "pairedneedle title",
         titleFallback: "pairedneedle fallback",
       });
+
       upsertThreadSearchSegments(db, {
         segments: [
           {
@@ -638,7 +846,9 @@ describe("thread search data", () => {
           .map((match) => match.sourceKind)
           .sort(),
       ).toEqual(["title", "title_fallback"]);
-      expect(matches.filter((match) => match.sourceSeq !== null)).toHaveLength(1);
+      expect(matches.filter((match) => match.sourceSeq !== null)).toHaveLength(
+        1,
+      );
     } finally {
       closeConnection(db);
     }
@@ -646,21 +856,26 @@ describe("thread search data", () => {
 
   it("limits and counts each group from one partitioned scan", () => {
     const { db, project } = setup();
+
     try {
       const activeIds: string[] = [];
       const archivedIds: string[] = [];
+
       for (let index = 0; index < 4; index += 1) {
         const activeThread = createThread(db, noopNotifier, {
           projectId: project.id,
           providerId: "codex",
           title: `partitionneedle active ${index}`,
         });
+
         activeIds.push(activeThread.id);
+
         const archivedThread = createThread(db, noopNotifier, {
           projectId: project.id,
           providerId: "codex",
           title: `partitionneedle archived ${index}`,
         });
+
         archiveThread(db, noopNotifier, archivedThread.id);
         archivedIds.push(archivedThread.id);
       }
@@ -674,10 +889,12 @@ describe("thread search data", () => {
       expect(results.archived.total).toBe(4);
       expect(results.active.results).toHaveLength(2);
       expect(results.archived.results).toHaveLength(2);
+
       for (const result of results.active.results) {
         expect(activeIds).toContain(result.thread.id);
         expect(result.thread.archivedAt).toBeNull();
       }
+
       for (const result of results.archived.results) {
         expect(archivedIds).toContain(result.thread.id);
         expect(result.thread.archivedAt).not.toBeNull();
@@ -689,16 +906,19 @@ describe("thread search data", () => {
 
   it("bounds message snippets around the first highlight with rebased ranges", () => {
     const { db, project } = setup();
+
     try {
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Long message thread",
       });
+
       const filler = Array.from(
         { length: 80 },
         (_, index) => `word${index}`,
       ).join(" ");
+
       const text = `${filler} snippetneedle here ${filler} snippetneedle again ${filler}`;
       upsertThreadSearchSegments(db, {
         segments: [
@@ -720,18 +940,23 @@ describe("thread search data", () => {
       const match = results.active.results[0]?.matches.find(
         (candidate) => candidate.sourceKind === "assistant_message",
       );
+
       expect(match).toBeDefined();
+
       if (match === undefined) {
         return;
       }
+
       expect(match.text.length).toBeLessThanOrEqual(162);
       expect(match.text.startsWith("…")).toBe(true);
       expect(match.text.endsWith("…")).toBe(true);
       expect(match.text).toContain("snippetneedle here");
       expect(match.highlightRanges.length).toBeGreaterThan(0);
+
       for (const range of match.highlightRanges) {
         expect(match.text.slice(range.start, range.end)).toBe("snippetneedle");
       }
+
       expect(match.text.slice(1)).toMatch(/^word\d+ /u);
     } finally {
       closeConnection(db);
@@ -740,12 +965,14 @@ describe("thread search data", () => {
 
   it("returns short messages whole and cuts unmatched long text from the start", () => {
     const { db, project } = setup();
+
     try {
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Snippet edge thread",
       });
+
       const longTail = "x".repeat(400);
       upsertThreadSearchSegments(db, {
         segments: [
@@ -770,6 +997,7 @@ describe("thread search data", () => {
         query: "wholeneedle",
         limitPerGroup: 20,
       });
+
       expect(wholeResults.active.results[0]?.matches[0]).toMatchObject({
         text: "wholeneedle stays intact",
         highlightRanges: [{ start: 0, end: 11 }],
@@ -779,6 +1007,7 @@ describe("thread search data", () => {
         query: "leadneedle",
         limitPerGroup: 20,
       });
+
       const leadMatch = leadResults.active.results[0]?.matches[0];
       expect(leadMatch?.text.startsWith("leadneedle then ")).toBe(true);
       expect(leadMatch?.text.endsWith("…")).toBe(true);
@@ -791,12 +1020,14 @@ describe("thread search data", () => {
 
   it("never splits a surrogate pair when cutting a snippet", () => {
     const { db, project } = setup();
+
     try {
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "Emoji thread",
       });
+
       const emoji = "\u{1F600}".repeat(100);
       upsertThreadSearchSegments(db, {
         segments: [
@@ -817,9 +1048,11 @@ describe("thread search data", () => {
 
       const match = results.active.results[0]?.matches[0];
       expect(match).toBeDefined();
+
       if (match === undefined) {
         return;
       }
+
       expect(match.text).not.toMatch(/[\uD800-\uDFFF]/u);
       expect(match.text.startsWith("…")).toBe(true);
       expect(match.text.endsWith("…")).toBe(true);
@@ -835,12 +1068,14 @@ describe("thread search data", () => {
 
   it("creates the FTS index with a prefix index for typeahead queries", () => {
     const { db } = setup();
+
     try {
       const row = db.$client
         .prepare<[], { sql: string }>(
           "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'thread_search_segments_fts'",
         )
         .get();
+
       expect(row?.sql).toContain("prefix = '2 3'");
     } finally {
       closeConnection(db);
@@ -849,12 +1084,14 @@ describe("thread search data", () => {
 
   it("finds multi-token queries split across thread segments", () => {
     const { db, project } = setup();
+
     try {
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,
         providerId: "codex",
         title: "alpha split title",
       });
+
       appendStoredThreadEvent(db, noopNotifier, {
         threadId: thread.id,
         type: "client/turn/requested",
@@ -870,10 +1107,9 @@ describe("thread search data", () => {
       expect(results.active.results.map((result) => result.thread.id)).toEqual([
         thread.id,
       ]);
-      expect(results.active.results[0]?.matches.map((match) => match.text)).toEqual([
-        "alpha split title",
-        "beta split message",
-      ]);
+      expect(
+        results.active.results[0]?.matches.map((match) => match.text),
+      ).toEqual(["alpha split title", "beta split message"]);
     } finally {
       closeConnection(db);
     }
@@ -881,6 +1117,7 @@ describe("thread search data", () => {
 
   it("highlights unicode61 accent-folded matches", () => {
     const { db, project } = setup();
+
     try {
       const thread = createThread(db, noopNotifier, {
         projectId: project.id,

@@ -34,25 +34,31 @@ async function fixture(
   layout: "global" | "local" = "global",
 ) {
   const root = await realpath(
-    await mkdtemp(path.join(os.tmpdir(), "bb pi launch-")),
+    await mkdtemp(path.join(os.tmpdir(), "omnyo pi launch-")),
   );
+
   directories.push(root);
   const nodeModules = path.join(root, "node_modules");
   const pkg = path.join(nodeModules, "@earendil-works", "pi-coding-agent");
+
   const shimDirectory =
     layout === "local" ? path.join(nodeModules, ".bin") : root;
+
   await mkdir(path.join(pkg, "dist"), { recursive: true });
   await mkdir(shimDirectory, { recursive: true });
   const cli = path.join(pkg, "dist", "cli.cjs");
   await writeFile(cli, "");
   await writeFile(path.join(pkg, "package.json"), JSON.stringify({ bin }));
   const shim = path.join(shimDirectory, "pi.cmd");
+
   const cliPath =
     layout === "local"
       ? "..\\@earendil-works\\pi-coding-agent\\dist\\cli.cjs"
       : "node_modules\\@earendil-works\\pi-coding-agent\\dist\\cli.cjs";
+
   await writeFile(shim, npmNodeShim(cliPath));
   await writeFile(path.join(shimDirectory, "pi"), "#!/bin/sh\nexit 1\n");
+
   return { root, pkg, cli, shim, shimDirectory };
 }
 
@@ -93,10 +99,12 @@ describe("Windows Pi npm launch", () => {
     "accepts the %s npm template and LF line endings",
     async (template) => {
       const { shim, cli, shimDirectory } = await fixture();
+
       const target = path
         .relative(shimDirectory, cli)
         .split(path.sep)
         .join("\\");
+
       await writeFile(
         shim,
         npmNodeShim(target, template).replace(/\r\n/g, "\n"),
@@ -120,6 +128,7 @@ describe("Windows Pi npm launch", () => {
 
   it("preserves native executables and non-cmd wrappers", async () => {
     const { root } = await fixture();
+
     for (const name of ["pi.exe", "pi.bat", "pi", "unrelated.cmd"]) {
       expect(
         resolvePiNpmShim(path.join(root, name), process.execPath),
@@ -145,6 +154,7 @@ describe("Windows Pi npm launch", () => {
     async (kind) => {
       const { pkg, shim } = await fixture();
       const manifest = path.join(pkg, "package.json");
+
       if (kind === "missing") await rm(manifest);
       else await writeFile(manifest, "{");
       expect(resolvePiNpmShim(shim, process.execPath)).toBeNull();
@@ -154,28 +164,31 @@ describe("Windows Pi npm launch", () => {
   it("preserves explicit commands, arguments, and argument validation", () => {
     expect(
       resolvePiLaunch({
-        BB_PI_BRIDGE_COMMAND: "pi",
-        BB_PI_BRIDGE_ARGS: '["--flag","value with spaces"]',
+        OMNYO_PI_BRIDGE_COMMAND: "pi",
+        OMNYO_PI_BRIDGE_ARGS: '["--flag","value with spaces"]',
       }),
     ).toEqual({ command: "pi", args: ["--flag", "value with spaces"] });
-    expect(resolvePiLaunch({ BB_PI_BRIDGE_COMMAND: "custom-pi" })).toEqual({
+    expect(resolvePiLaunch({ OMNYO_PI_BRIDGE_COMMAND: "custom-pi" })).toEqual({
       command: "custom-pi",
       args: [],
     });
     expect(() =>
-      resolvePiLaunch({ BB_PI_BRIDGE_COMMAND: "pi", BB_PI_BRIDGE_ARGS: "[1]" }),
+      resolvePiLaunch({
+        OMNYO_PI_BRIDGE_COMMAND: "pi",
+        OMNYO_PI_BRIDGE_ARGS: "[1]",
+      }),
     ).toThrow("must be a JSON array of strings");
   });
 
   it("keeps default configuration independent from process resolution", () => {
-    expect(resolvePiLaunch({ BB_PI_BRIDGE_ARGS: "invalid" })).toEqual({
+    expect(resolvePiLaunch({ OMNYO_PI_BRIDGE_ARGS: "invalid" })).toEqual({
       command: "pi",
       args: [],
     });
     expect(() =>
       resolvePiLaunch({
-        BB_PI_BRIDGE_COMMAND: "pi",
-        BB_PI_BRIDGE_ARGS: "invalid",
+        OMNYO_PI_BRIDGE_COMMAND: "pi",
+        OMNYO_PI_BRIDGE_ARGS: "invalid",
       }),
     ).toThrow();
   });
@@ -214,14 +227,16 @@ describe("Windows Pi npm launch", () => {
       expect(
         resolvePiProcessLaunch({ Path: first.root }, childEnv, first.pkg),
       ).toEqual({ command: node, args: [second.cli] });
+
       const explicit = resolvePiProcessLaunch(
         {
-          BB_PI_BRIDGE_COMMAND: first.shim,
-          BB_PI_BRIDGE_ARGS: '["--flag","value with spaces"]',
+          OMNYO_PI_BRIDGE_COMMAND: first.shim,
+          OMNYO_PI_BRIDGE_ARGS: '["--flag","value with spaces"]',
         },
         childEnv,
         first.pkg,
       );
+
       expect(await realpath(explicit.command)).toBe(await realpath(node));
       expect(explicit.args).toEqual([first.cli, "--flag", "value with spaces"]);
       expect(resolvePiProcessLaunch({}, {}, first.pkg)).toEqual({
@@ -231,7 +246,7 @@ describe("Windows Pi npm launch", () => {
       await writeFile(path.join(second.root, "unrelated.cmd"), "");
       expect(
         resolvePiProcessLaunch(
-          { BB_PI_BRIDGE_COMMAND: "unrelated.cmd" },
+          { OMNYO_PI_BRIDGE_COMMAND: "unrelated.cmd" },
           childEnv,
           first.pkg,
         ),
@@ -243,8 +258,8 @@ describe("Windows Pi npm launch", () => {
       expect(
         resolvePiProcessLaunch(
           {
-            BB_PI_BRIDGE_COMMAND: "pi",
-            BB_PI_BRIDGE_ARGS: '["--flag","value with spaces"]',
+            OMNYO_PI_BRIDGE_COMMAND: "pi",
+            OMNYO_PI_BRIDGE_ARGS: '["--flag","value with spaces"]',
           },
           { Path: first.root, PATHEXT: ".CMD" },
           first.pkg,
@@ -266,6 +281,7 @@ describe("Windows Pi npm launch", () => {
       await mkdir(workspace);
       await writeFile(path.join(nodeDirectory, "node.exe"), "");
       await writeFile(path.join(workspace, "node.js"), "");
+
       const launch = resolvePiProcessLaunch(
         {},
         {
@@ -274,6 +290,7 @@ describe("Windows Pi npm launch", () => {
         },
         workspace,
       );
+
       expect(launch.command.toLowerCase()).toBe(
         path.join(nodeDirectory, "node.exe").toLowerCase(),
       );
@@ -288,6 +305,7 @@ describe("Windows Pi npm launch", () => {
         { pi: "dist/cli.cjs" },
         layout,
       );
+
       await writeFile(
         cli,
         `
@@ -303,15 +321,18 @@ createInterface({ input: new Socket({ fd: 4, readable: true, writable: false }) 
 });
 `,
       );
-      vi.stubEnv("BB_PI_BRIDGE_COMMAND", undefined);
-      vi.stubEnv("BB_PI_BRIDGE_ARGS", undefined);
+      vi.stubEnv("OMNYO_PI_BRIDGE_COMMAND", undefined);
+      vi.stubEnv("OMNYO_PI_BRIDGE_ARGS", undefined);
       const env = { ...process.env };
+
       for (const key of Object.keys(env)) {
         if (["PATH", "PATHEXT"].includes(key.toUpperCase())) delete env[key];
       }
+
       env.Path = `${shimDirectory}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ""}`;
       env.PATHEXT = ".COM;.EXE;.BAT;.CMD";
       const messages: Record<string, unknown>[] = [];
+
       const child = new PiRpcChild({
         cwd: pkg,
         env,
@@ -321,6 +342,7 @@ createInterface({ input: new Socket({ fd: 4, readable: true, writable: false }) 
         onChannelMessage: (message) => messages.push(message),
         onExit: () => undefined,
       });
+
       try {
         expect(
           await child.requestOk(

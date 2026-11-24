@@ -7,8 +7,11 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const DEFAULT_DIST_DIR = "apps/app/dist";
+
 const DEFAULT_COMPRESSION_CONCURRENCY = 8;
+
 const MIN_COMPRESS_BYTES = 1024;
+
 const COMPRESSIBLE_EXTENSIONS = new Set([
   ".css",
   ".html",
@@ -23,6 +26,7 @@ const COMPRESSIBLE_EXTENSIONS = new Set([
 ]);
 
 const compressBrotli = promisify(brotliCompress);
+
 const compressGzip = promisify(gzip);
 
 function usage() {
@@ -31,12 +35,15 @@ function usage() {
 
 async function walkFiles(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
+
   const nestedFiles = await Promise.all(
     entries.map((entry) => {
       const filePath = join(dir, entry.name);
+
       return entry.isDirectory() ? walkFiles(filePath) : [filePath];
     }),
   );
+
   return nestedFiles.flat();
 }
 
@@ -44,6 +51,7 @@ function shouldPrecompress(filePath) {
   if (filePath.endsWith(".br") || filePath.endsWith(".gz")) {
     return false;
   }
+
   return COMPRESSIBLE_EXTENSIONS.has(extname(filePath));
 }
 
@@ -51,12 +59,15 @@ async function writeIfSmaller(args) {
   if (args.compressed.length >= args.rawLength) {
     return false;
   }
+
   await writeFile(args.outputPath, args.compressed);
+
   return true;
 }
 
 async function compressFile(filePath) {
   const body = await readFile(filePath);
+
   const [brotli, gzipped] = await Promise.all([
     compressBrotli(body, {
       params: {
@@ -65,6 +76,7 @@ async function compressFile(filePath) {
     }),
     compressGzip(body, { level: 9 }),
   ]);
+
   const [wroteBrotli, wroteGzip] = await Promise.all([
     writeIfSmaller({
       compressed: brotli,
@@ -77,6 +89,7 @@ async function compressFile(filePath) {
       rawLength: body.length,
     }),
   ]);
+
   return {
     brotliFiles: wroteBrotli ? 1 : 0,
     gzipFiles: wroteGzip ? 1 : 0,
@@ -85,11 +98,14 @@ async function compressFile(filePath) {
 
 async function precompressDirectory(args) {
   const candidateFiles = [];
+
   for (const filePath of await walkFiles(args.distDir)) {
     if (!shouldPrecompress(filePath)) {
       continue;
     }
+
     const fileStat = await stat(filePath);
+
     if (fileStat.isFile() && fileStat.size >= MIN_COMPRESS_BYTES) {
       candidateFiles.push(filePath);
     }
@@ -98,10 +114,12 @@ async function precompressDirectory(args) {
   let nextFileIndex = 0;
   let brotliFiles = 0;
   let gzipFiles = 0;
+
   const workerCount = Math.min(
     args.concurrency ?? DEFAULT_COMPRESSION_CONCURRENCY,
     candidateFiles.length,
   );
+
   const workers = Array.from({ length: workerCount }, async () => {
     while (nextFileIndex < candidateFiles.length) {
       const filePath = candidateFiles[nextFileIndex];
@@ -111,6 +129,7 @@ async function precompressDirectory(args) {
       gzipFiles += result.gzipFiles;
     }
   });
+
   await Promise.all(workers);
 
   return {
@@ -122,22 +141,28 @@ async function precompressDirectory(args) {
 
 async function main() {
   const args = process.argv.slice(2);
+
   if (args.includes("-h") || args.includes("--help")) {
     usage();
+
     return;
   }
+
   if (args.length > 1) {
     usage();
     process.exitCode = 1;
+
     return;
   }
 
   const distDir = resolve(args[0] ?? DEFAULT_DIST_DIR);
+
   if (!existsSync(distDir)) {
     console.error(
-      `Missing ${distDir}. Run: pnpm exec turbo run build --filter=@bb/app`,
+      `Missing ${distDir}. Run: pnpm exec turbo run build --filter=@omnyo/app`,
     );
     process.exitCode = 1;
+
     return;
   }
 

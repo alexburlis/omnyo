@@ -20,13 +20,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
+import {
+  DISCLOSURE_CHEVRON_TRANSITION,
+  getDisclosureRevealClass,
+} from "@/components/ui/motion";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   definePluginApp,
   useRpc,
   type PluginMessageDirectiveProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import type { PreviewFrame, PreviewSize, rpcContract } from "./contracts.js";
 import {
   closeLightbox,
@@ -34,15 +38,21 @@ import {
   useLightboxTarget,
   type LightboxTarget,
 } from "./lightbox-store.js";
+import { VisualControls } from "./visual-controls.js";
 import { PREVIEW_DIRECTIVE_ID } from "./preview-directive.js";
 
 const MIN_POLL_INTERVAL_MS = 400;
+
 const MAX_RETRY_INTERVAL_MS = 15_000;
+
 const MAX_CONSECUTIVE_FAILURES = 5;
+
 const SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const HEADER_BUTTON_CLASS =
   "flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-none bg-transparent px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-background/80";
+
 const EXPAND_BUTTON_CLASS =
   "flex min-h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-none border-l border-border/35 bg-transparent text-muted-foreground transition-colors hover:text-foreground";
 
@@ -57,6 +67,7 @@ const STATUS_LABEL: Record<PreviewStatus, string> = {
 
 function subscribeDocumentVisibility(onChange: () => void): () => void {
   document.addEventListener("visibilitychange", onChange);
+
   return () => document.removeEventListener("visibilitychange", onChange);
 }
 
@@ -78,10 +89,13 @@ function useInViewport(): [(element: Element | null) => void, boolean] {
 
   useEffect(() => {
     if (!element || typeof IntersectionObserver === "undefined") return;
+
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) setInViewport(entry.isIntersecting);
     });
+
     observer.observe(element);
+
     return () => observer.disconnect();
   }, [element]);
 
@@ -91,10 +105,14 @@ function useInViewport(): [(element: Element | null) => void, boolean] {
 function pageLocation(url: string): string {
   try {
     const parsed = new URL(url);
+
     if (parsed.protocol === "http:" || parsed.protocol === "https:")
       return `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}`;
+
     if (parsed.protocol === "about:") return url;
+
     if (parsed.protocol === "file:") return decodeURIComponent(parsed.pathname);
+
     return parsed.protocol;
   } catch {
     return url.slice(0, 80);
@@ -103,6 +121,7 @@ function pageLocation(url: string): string {
 
 function pageTitle(frame: PreviewFrame | null): string {
   const title = frame?.title.trim() ?? "";
+
   return title === "" || title === frame?.url ? "Headless browser" : title;
 }
 
@@ -116,9 +135,11 @@ function useLivePreview(args: {
   const { threadId, sessionId, enabled, size, initialFrame } = args;
   const rpc = useRpc<typeof rpcContract>();
   const [frame, setFrame] = useState<PreviewFrame | null>(initialFrame);
+
   const [status, setStatus] = useState<PreviewStatus>(
     initialFrame ? "live" : "connecting",
   );
+
   const settled = status === "ended" || status === "unavailable";
 
   useEffect(() => {
@@ -127,9 +148,11 @@ function useLivePreview(args: {
     let timeout: number | null = null;
     let afterSequence = 0;
     let failures = 0;
+
     const poll = async () => {
       const startedAt = Date.now();
       let delayMs: number;
+
       try {
         const result = await rpc.call("preview", {
           threadId,
@@ -137,7 +160,9 @@ function useLivePreview(args: {
           afterSequence,
           size,
         });
+
         if (cancelled) return;
+
         if (
           result.session.state !== "ready" ||
           result.session.backend !== "local"
@@ -145,29 +170,40 @@ function useLivePreview(args: {
           setStatus(
             result.session.backend === "local" ? "ended" : "unavailable",
           );
+
           return;
         }
+
         failures = 0;
+
         if (result.frame) {
           afterSequence = result.frame.sequence;
           setFrame(result.frame);
           setStatus("live");
         }
+
         delayMs = Math.max(0, MIN_POLL_INTERVAL_MS - (Date.now() - startedAt));
       } catch {
         if (cancelled) return;
         failures += 1;
+
         if (failures >= MAX_CONSECUTIVE_FAILURES) {
           setStatus("unavailable");
+
           return;
         }
+
         delayMs = Math.min(1_000 * 2 ** failures, MAX_RETRY_INTERVAL_MS);
       }
+
       timeout = window.setTimeout(() => void poll(), delayMs);
     };
+
     void poll();
+
     return () => {
       cancelled = true;
+
       if (timeout !== null) window.clearTimeout(timeout);
     };
   }, [enabled, rpc, sessionId, settled, size, threadId]);
@@ -189,7 +225,9 @@ function PreviewImage({
   maxHeight?: string;
 }) {
   const aspect = frame ?? { width: 16, height: 9 };
+
   if (!frame && status !== "connecting") return null;
+
   return (
     <div
       className={cn(
@@ -247,6 +285,7 @@ function BrowserPreviewDirective({
   message,
 }: PluginMessageDirectiveProps) {
   const sessionId = attributes.session?.trim() ?? "";
+
   if (!SESSION_ID_PATTERN.test(sessionId)) {
     return (
       <Notice>
@@ -255,6 +294,7 @@ function BrowserPreviewDirective({
       </Notice>
     );
   }
+
   return (
     <BrowserPreviewCard
       threadId={message.threadId}
@@ -279,6 +319,7 @@ function BrowserPreviewCard({
   const enlarged = useLightboxTarget()?.sessionId === sessionId;
   const bodyId = useId();
   const toggleId = useId();
+
   const { frame, status } = useLivePreview({
     threadId,
     sessionId,
@@ -286,6 +327,7 @@ function BrowserPreviewCard({
     size: "thumbnail",
     initialFrame: null,
   });
+
   const activity: ActivityRowState = status === "live" ? "active" : "pending";
   const title = pageTitle(frame);
   const location = frame ? pageLocation(frame.url) : "";
@@ -345,7 +387,8 @@ function BrowserPreviewCard({
             name="ChevronDown"
             className={cn(
               activityIconClass("pending"),
-              "size-3.5 shrink-0 transition-transform duration-200",
+              "size-3.5 shrink-0",
+              DISCLOSURE_CHEVRON_TRANSITION,
               expanded && "rotate-180",
             )}
             aria-hidden
@@ -364,19 +407,25 @@ function BrowserPreviewCard({
           </button>
         ) : null}
       </div>
-      {expanded && (frame || status === "connecting") ? (
-        <div
-          id={bodyId}
-          role="region"
-          aria-labelledby={toggleId}
-          className="border-t border-border bg-popover p-2"
-        >
-          <PreviewImage
-            frame={frame}
-            status={status}
-            title={title}
-            className="mx-auto w-full max-w-md"
-          />
+      {frame || status === "connecting" ? (
+        <div className={getDisclosureRevealClass(expanded)}>
+          <div
+            id={bodyId}
+            role="region"
+            aria-labelledby={toggleId}
+            aria-hidden={!expanded}
+            inert={!expanded}
+            className="min-h-0 overflow-hidden"
+          >
+            <div className="border-t border-border bg-popover p-2">
+              <PreviewImage
+                frame={frame}
+                status={status}
+                title={title}
+                className="mx-auto w-full max-w-md"
+              />
+            </div>
+          </div>
         </div>
       ) : null}
     </section>
@@ -391,13 +440,16 @@ function LightboxBody({
   open: boolean;
 }) {
   const visible = useDocumentVisible();
+  const [frozen, setFrozen] = useState(false);
+
   const { frame, status } = useLivePreview({
     threadId: target.threadId,
     sessionId: target.sessionId,
-    enabled: visible && open,
+    enabled: visible && open && !frozen,
     size: "full",
     initialFrame: target.frame,
   });
+
   const title = pageTitle(frame);
   const location = frame ? pageLocation(frame.url) : "";
 
@@ -409,12 +461,20 @@ function LightboxBody({
           {[location, STATUS_LABEL[status]].filter(Boolean).join(" · ")}
         </DialogDescription>
       </DialogHeader>
-      <PreviewImage
-        frame={frame}
-        status={status}
-        title={title}
-        className="mx-auto"
-        maxHeight="78dvh"
+      {!frozen ? (
+        <PreviewImage
+          frame={frame}
+          status={status}
+          title={title}
+          className="mx-auto"
+          maxHeight="65dvh"
+        />
+      ) : null}
+      <VisualControls
+        threadId={target.threadId}
+        sessionId={target.sessionId}
+        frame={status === "live" || frozen ? frame : null}
+        onFrozenChange={setFrozen}
       />
     </>
   );
@@ -423,6 +483,7 @@ function LightboxBody({
 function BrowserPreviewLightbox() {
   const target = useLightboxTarget();
   const [shown, setShown] = useState(target);
+
   if (target !== null && target !== shown) setShown(target);
 
   return (

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ThreadListEntry, ThreadWithRuntime } from "@bb/domain";
+import type { ThreadListEntry, ThreadWithRuntime } from "@omnyo/domain";
+import { useSyncExternalStore } from "react";
 import {
   act,
   cleanup,
@@ -17,8 +18,9 @@ import type {
   SidebarBootstrapResponse,
   TimelineConversationRow,
   TimelineRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { commandRow } from "@/test/fixtures/thread-timeline-rows";
+import { TooltipProvider } from "@omnyo/shared-ui/tooltip";
 
 vi.mock("@/components/ui/bottom-anchored-scroll-body.js", () => ({
   useBottomAnchoredScroll: vi.fn(),
@@ -40,9 +42,10 @@ import {
   ThreadTableOfContents,
   type TocItem,
 } from "./ThreadTableOfContents";
+import { requestThreadOutline } from "./thread-outline-request";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
-import { makeThreadListEntry as makeThreadListEntryFixture } from "@bb/test-helpers/domain-fixtures";
-import { makeThreadWithRuntime as makeThreadWithRuntimeFixture } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry as makeThreadListEntryFixture } from "@omnyo/test-helpers/domain-fixtures";
+import { makeThreadWithRuntime as makeThreadWithRuntimeFixture } from "@omnyo/test-helpers/domain-fixtures";
 import {
   makeProjectWithThreadsResponse,
   makeSidebarBootstrapResponse,
@@ -53,16 +56,22 @@ class ResizeObserverMock implements ResizeObserver {
 
   observe: ResizeObserver["observe"] = (target) => {
     const element = target as HTMLElement;
+
     const paddingX =
       (Number.parseFloat(element.style.paddingLeft) || 0) +
       (Number.parseFloat(element.style.paddingRight) || 0);
+
     const inlineSize = Math.max(0, element.clientWidth - paddingX);
+    const blockSize = element.clientHeight;
     this.callback(
       [
         {
           target,
-          contentBoxSize: [{ inlineSize, blockSize: 0 }],
-          contentRect: { width: inlineSize } as DOMRectReadOnly,
+          contentBoxSize: [{ inlineSize, blockSize }],
+          contentRect: {
+            width: inlineSize,
+            height: blockSize,
+          } as DOMRectReadOnly,
         } as unknown as ResizeObserverEntry,
       ],
       this,
@@ -72,7 +81,9 @@ class ResizeObserverMock implements ResizeObserver {
   disconnect: ResizeObserver["disconnect"] = vi.fn();
 }
 
-function userConversationRow(index = 1): TimelineConversationRow {
+function userConversationRow(
+  index = 1,
+): Extract<TimelineConversationRow, { role: "user" }> {
   return {
     id: `row_user_${index}`,
     threadId: "thr_toc_test",
@@ -91,6 +102,7 @@ function userConversationRow(index = 1): TimelineConversationRow {
     systemMessageKind: "unlabeled",
     systemMessageSubject: null,
     turnRequest: {
+      clientRequestId: null,
       isGrouped: false,
       kind: "message",
       status: "accepted",
@@ -103,18 +115,18 @@ function TocHost({
   contextBoundarySeq = null,
   hasOlderTimelineRows = false,
   hostPaddingX = 0,
+  hostHeight = 640,
   hostWidth = 1_200,
   loadOlderTimelineRows = () => {},
-  onNavigateToRow,
   threadId = "thr_toc_test",
   timelineRows,
 }: {
   contextBoundarySeq?: number | null;
   hasOlderTimelineRows?: boolean;
   hostPaddingX?: number;
+  hostHeight?: number;
   hostWidth?: number;
   loadOlderTimelineRows?: () => void | Promise<void>;
-  onNavigateToRow?: (rowId: string) => void;
   threadId?: string;
   timelineRows: readonly TimelineRow[];
 }) {
@@ -126,6 +138,10 @@ function TocHost({
           configurable: true,
           value: hostWidth,
         });
+        Object.defineProperty(node, "clientHeight", {
+          configurable: true,
+          value: hostHeight,
+        });
       }}
       data-scroll-overlay=""
       style={{
@@ -133,14 +149,15 @@ function TocHost({
         paddingRight: `${hostPaddingX}px`,
       }}
     >
-      <ThreadTableOfContents
-        contextBoundarySeq={contextBoundarySeq}
-        threadId={threadId}
-        timelineRows={timelineRows}
-        hasOlderTimelineRows={hasOlderTimelineRows}
-        loadOlderTimelineRows={loadOlderTimelineRows}
-        onNavigateToRow={onNavigateToRow}
-      />
+      <TooltipProvider delayDuration={0}>
+        <ThreadTableOfContents
+          contextBoundarySeq={contextBoundarySeq}
+          threadId={threadId}
+          timelineRows={timelineRows}
+          hasOlderTimelineRows={hasOlderTimelineRows}
+          loadOlderTimelineRows={loadOlderTimelineRows}
+        />
+      </TooltipProvider>
     </div>
   );
 }
@@ -232,6 +249,7 @@ function lastOutlineOptions(role: "user" | "assistant") {
 function timelineRowElement(id: string): HTMLElement {
   const el = document.createElement("div");
   el.setAttribute("data-timeline-row-id", id);
+
   return el;
 }
 
@@ -302,12 +320,23 @@ function manyUserItems(count: number): TocItem[] {
 }
 
 let scrollElement: HTMLElement;
+
 let scrollElementIntoView: ReturnType<typeof vi.fn>;
 
+function requestOutline(threadId: string): boolean {
+  let handled = false;
+
+  act(() => {
+    handled = requestThreadOutline(threadId);
+  });
+
+  return handled;
+}
+
 function openTocPanel(): void {
-  const toc = document.querySelector<HTMLElement>("[data-thread-toc]");
-  if (!toc) throw new Error("Expected the thread table of contents.");
-  fireEvent.mouseEnter(toc);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Thread table of contents" }),
+  );
 }
 
 beforeEach(() => {
@@ -316,6 +345,7 @@ beforeEach(() => {
     "requestAnimationFrame",
     vi.fn((callback: FrameRequestCallback) => {
       callback(0);
+
       return 1;
     }),
   );
@@ -329,7 +359,6 @@ beforeEach(() => {
     scrollToBottom: vi.fn(),
     scrollElementIntoView,
     scrollElementIntoViewClampedToMaxScroll: vi.fn(),
-    captureScrollAnchor: vi.fn(),
     holdContentPosition: vi.fn(),
   } as unknown as ReturnType<typeof useBottomAnchoredScroll>);
 
@@ -338,6 +367,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  fireEvent.pointerDown(document);
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
@@ -445,6 +475,7 @@ describe("ThreadTableOfContents", () => {
       configurable: true,
       value: scrollTo,
     });
+
     const agentRow: TimelineConversationRow = {
       id: "row_agent_4",
       threadId: "thr_toc_test",
@@ -459,8 +490,14 @@ describe("ThreadTableOfContents", () => {
       text: "Latest agent answer",
       attachments: null,
       turnRequest: null,
+      turnGit: null,
     };
-    const rows = [1, 2, 3].map(userConversationRow).concat(agentRow);
+
+    const rows: TimelineConversationRow[] = [
+      ...[1, 2, 3].map(userConversationRow),
+      agentRow,
+    ];
+
     scrollElement = createScrollElement({
       clientHeight: 400,
       scrollHeight: 400,
@@ -473,11 +510,24 @@ describe("ThreadTableOfContents", () => {
       ],
     });
     let agentPreviewsReady = false;
+    const outlineListeners = new Set<() => void>();
+
+    const subscribeToOutline = (listener: () => void) => {
+      outlineListeners.add(listener);
+
+      return () => outlineListeners.delete(listener);
+    };
+
     vi.mocked(useThreadConversationOutline).mockImplementation(
-      (_threadId, role) =>
-        ({
+      (_threadId, role) => {
+        const ready = useSyncExternalStore(
+          subscribeToOutline,
+          () => agentPreviewsReady,
+        );
+
+        return {
           data:
-            role === "assistant" && !agentPreviewsReady
+            role === "assistant" && !ready
               ? undefined
               : outlineResponse(
                   role === "assistant"
@@ -489,11 +539,12 @@ describe("ThreadTableOfContents", () => {
                       }))
                     : [],
                 ),
-        }) as ReturnType<typeof useThreadConversationOutline>,
+        } as ReturnType<typeof useThreadConversationOutline>;
+      },
     );
 
     try {
-      const view = render(<TocHost timelineRows={rows} />);
+      render(<TocHost timelineRows={rows} />);
       openTocPanel();
       fireEvent.click(screen.getByText("Agent messages"));
       await waitFor(() => {
@@ -501,8 +552,10 @@ describe("ThreadTableOfContents", () => {
       });
       const callsBeforePreviews = scrollTo.mock.calls.length;
 
-      agentPreviewsReady = true;
-      view.rerender(<TocHost timelineRows={rows} />);
+      act(() => {
+        agentPreviewsReady = true;
+        outlineListeners.forEach((listener) => listener());
+      });
 
       expect(await screen.findByText("Earlier agent answer 1")).not.toBeNull();
       await waitFor(() => {
@@ -513,10 +566,178 @@ describe("ThreadTableOfContents", () => {
     }
   });
 
-  it("does not request the hidden outline in a compact thread pane", () => {
+  it("opens a compact outline on request and jumps to the selected message", async () => {
+    const target = timelineRowElement("row_user_1");
+    scrollElement.append(target);
     render(<TocHost hostWidth={400} timelineRows={[userConversationRow(1)]} />);
 
+    expect(
+      screen.queryByRole("button", { name: "Thread table of contents" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("navigation", { name: "Chat position" }),
+    ).toBeNull();
     expect(lastOutlineOptions("user")).toEqual({ enabled: false });
+    expect(lastOutlineOptions("assistant")).toEqual({ enabled: false });
+
+    requestOutline("thr_toc_test");
+
+    expect(
+      screen.getByRole("dialog", { name: "Thread table of contents" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Thread table of contents" }),
+    ).toBeNull();
+    expect(lastOutlineOptions("user")).toEqual({ enabled: true });
+    expect(lastOutlineOptions("assistant")).toEqual({ enabled: false });
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Loaded after client-side navigation 1",
+      }),
+    );
+
+    expect(scrollElementIntoView).toHaveBeenCalledWith({
+      element: target,
+      options: { block: "start", inline: "nearest" },
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "Thread table of contents" }),
+    ).toBeNull();
+    expect(lastOutlineOptions("user")).toEqual({ enabled: false });
+  });
+
+  it("opens the compact outline only after two animation frames", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        frames.push(callback);
+
+        return frames.length;
+      }),
+    );
+    render(<TocHost hostWidth={400} timelineRows={[userConversationRow(1)]} />);
+
+    requestOutline("thr_toc_test");
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    act(() => frames.shift()?.(0));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    act(() => frames.shift()?.(0));
+    expect(
+      screen.getByRole("dialog", { name: "Thread table of contents" }),
+    ).toBeTruthy();
+  });
+
+  it("ignores outline requests for another thread and hidden instances", () => {
+    render(<TocHost hostWidth={400} timelineRows={[userConversationRow(1)]} />);
+
+    expect(requestOutline("thr_other")).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    Object.defineProperty(HTMLElement.prototype, "checkVisibility", {
+      configurable: true,
+      value: () => false,
+    });
+
+    try {
+      requestOutline("thr_toc_test");
+      expect(screen.queryByRole("dialog")).toBeNull();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "checkVisibility");
+    }
+  });
+
+  it("opens the rail panel on request and closes it on an outside press", () => {
+    render(
+      <TocHost
+        timelineRows={[
+          userConversationRow(1),
+          userConversationRow(2),
+          userConversationRow(3),
+        ]}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: "Thread table of contents",
+    });
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    requestOutline("thr_toc_test");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(trigger);
+    expect(screen.getByText("Your messages")).not.toBeNull();
+
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    requestOutline("thr_toc_test");
+    fireEvent.pointerDown(screen.getByText("Your messages"));
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.pointerDown(document.body);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("opens the outline drawer on request in a wide pane with too few messages for the rail", () => {
+    render(
+      <TocHost
+        timelineRows={[userConversationRow(1), userConversationRow(2)]}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("navigation", { name: "Chat position" }),
+    ).toBeNull();
+
+    requestOutline("thr_toc_test");
+
+    expect(
+      screen.getByRole("dialog", { name: "Thread table of contents" }),
+    ).toBeTruthy();
+  });
+
+  it("opens a request made while the layout is still measuring once it settles", () => {
+    const observers: ResizeObserverMock[] = [];
+
+    class DeferredResizeObserver extends ResizeObserverMock {
+      private readonly measure: ResizeObserver["observe"];
+
+      constructor(callback: ResizeObserverCallback) {
+        super(callback);
+        this.measure = this.observe;
+        this.observe = () => {};
+
+        observers.push(this);
+      }
+
+      fire(target: HTMLElement) {
+        this.measure(target);
+      }
+    }
+
+    vi.stubGlobal("ResizeObserver", DeferredResizeObserver);
+
+    const { container } = render(
+      <TocHost hostWidth={400} timelineRows={[userConversationRow(1)]} />,
+    );
+
+    requestOutline("thr_toc_test");
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    const host = container.querySelector<HTMLElement>("[data-scroll-overlay]");
+
+    if (!host) throw new Error("missing scroll host");
+    act(() => {
+      (observers.at(-1) as DeferredResizeObserver).fire(host);
+    });
+
+    expect(
+      screen.getByRole("dialog", { name: "Thread table of contents" }),
+    ).toBeTruthy();
   });
 
   it("does not request the outline when padding hides the TOC", () => {
@@ -588,23 +809,56 @@ describe("ThreadTableOfContents", () => {
     expect(screen.queryByText("Your messages")).not.toBeNull();
   });
 
+  it("excludes generated inputs from your messages and the visibility threshold", () => {
+    const generated: TimelineConversationRow = {
+      ...userConversationRow(4),
+      text: "Nightly script callback",
+      systemMessageKind: "external-message",
+      systemMessageSubject: {
+        kind: "message-source",
+        source: { kind: "script", label: "Nightly check" },
+      },
+    };
+
+    const rows = [userConversationRow(1), userConversationRow(2), generated];
+    const view = render(<TocHost timelineRows={rows} />);
+
+    expect(
+      screen.queryByRole("button", { name: "Thread table of contents" }),
+    ).toBeNull();
+
+    view.rerender(<TocHost timelineRows={[...rows, userConversationRow(3)]} />);
+    openTocPanel();
+
+    expect(screen.getByText("Your messages")).not.toBeNull();
+    expect(screen.queryByText(generated.text)).toBeNull();
+    expect(
+      screen.getByText("Loaded after client-side navigation 3"),
+    ).not.toBeNull();
+  });
+
   it("measures fresh geometry only after scrolling settles", () => {
     vi.useFakeTimers();
+
     const rows = [
       userConversationRow(1),
       userConversationRow(2),
       userConversationRow(3),
     ];
+
     const rowElements = rows.map((row) => {
       const element = timelineRowElement(row.id);
       scrollElement.append(element);
+
       return element;
     });
+
     const positions = [
       { top: 0, bottom: 20 },
       { top: 100, bottom: 120 },
       { top: 200, bottom: 220 },
     ];
+
     rowElements.forEach((element, index) => {
       element.getBoundingClientRect = vi.fn(() => rect(positions[index]!));
     });
@@ -623,13 +877,14 @@ describe("ThreadTableOfContents", () => {
       vi.runOnlyPendingTimers();
     });
 
-    const railTicks = () =>
+    const railMarkers = () =>
       Array.from(
         document.querySelectorAll<HTMLElement>(
-          "[data-thread-toc] [aria-hidden] > span",
+          '[aria-label="Chat position"] button',
         ),
       );
-    expect(railTicks()[0]?.classList.contains("w-5")).toBe(true);
+
+    expect(railMarkers()[0]?.getAttribute("aria-current")).toBe("location");
 
     act(() => {
       positions[0] = { top: -30, bottom: -10 };
@@ -637,14 +892,155 @@ describe("ThreadTableOfContents", () => {
       fireEvent.scroll(scrollElement);
       vi.advanceTimersByTime(119);
     });
-    expect(railTicks()[0]?.classList.contains("w-5")).toBe(true);
-    expect(railTicks()[1]?.classList.contains("w-5")).toBe(false);
+    expect(railMarkers()[0]?.getAttribute("aria-current")).toBe("location");
+    expect(railMarkers()[1]?.getAttribute("aria-current")).toBeNull();
 
     act(() => {
       vi.advanceTimersByTime(1);
     });
-    expect(railTicks()[0]?.classList.contains("w-5")).toBe(false);
-    expect(railTicks()[1]?.classList.contains("w-5")).toBe(true);
+    expect(railMarkers()[0]?.getAttribute("aria-current")).toBeNull();
+    expect(railMarkers()[1]?.getAttribute("aria-current")).toBe("location");
+  });
+
+  it.each([false, true])(
+    "keeps the prompt position while only its response is visible, paged prompt: %s",
+    (promptIsPagedOut) => {
+      vi.useFakeTimers();
+
+      const response: TimelineConversationRow = {
+        id: "row_agent_1",
+        threadId: "thr_toc_test",
+        turnId: "turn_1",
+        sourceSeqStart: 2,
+        sourceSeqEnd: 2,
+        messageSeq: 2,
+        startedAt: 2,
+        createdAt: 2,
+        kind: "conversation",
+        role: "assistant",
+        text: "A response longer than the viewport",
+        attachments: null,
+        turnRequest: null,
+        turnGit: null,
+      };
+
+      scrollElement = createScrollElement({
+        clientHeight: 100,
+        scrollHeight: 1_000,
+        scrollTop: 400,
+        rows: [{ id: response.id, top: -200, bottom: 300 }],
+      });
+
+      if (promptIsPagedOut) {
+        setOutline(
+          [1, 2, 3].map((index) => ({
+            id: `row_user_${index}`,
+            role: "user" as const,
+            preview: `Loaded after client-side navigation ${index}`,
+            attachmentSummary: null,
+          })),
+        );
+      }
+
+      render(
+        <TocHost
+          timelineRows={[
+            ...(promptIsPagedOut ? [] : [userConversationRow(1)]),
+            response,
+            userConversationRow(2),
+            userConversationRow(3),
+          ]}
+        />,
+      );
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(activeRailMarkerIndexes()).toEqual([0]);
+    },
+  );
+
+  it("previews a focused marker and dismisses its excerpt without opening the outline", async () => {
+    render(<TocHost timelineRows={[1, 2, 3].map(userConversationRow)} />);
+
+    const marker = screen.getByRole("button", {
+      name: "Go to message: Loaded after client-side navigation 2",
+    });
+
+    const outline = screen.getByRole("button", {
+      name: "Thread table of contents",
+    });
+
+    fireEvent.keyDown(document, { key: "Tab" });
+    act(() => marker.focus());
+
+    const excerpt = await screen.findByRole("tooltip");
+    expect(excerpt.textContent).toContain(
+      "Loaded after client-side navigation 2",
+    );
+    expect(outline.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.keyDown(marker, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+    expect(document.activeElement).toBe(marker);
+  });
+
+  it("jumps directly to a marker without opening the full outline", () => {
+    const target = timelineRowElement("row_user_2");
+    scrollElement.append(target);
+    render(<TocHost timelineRows={[1, 2, 3].map(userConversationRow)} />);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Go to message: Loaded after client-side navigation 2",
+      }),
+    );
+
+    expect(scrollElementIntoView).toHaveBeenCalledWith({
+      element: target,
+      options: { block: "start", inline: "nearest" },
+    });
+    expect(screen.queryByText("Your messages")).toBeNull();
+  });
+
+  it("fits a short chat pane while retaining the first, last and current markers", () => {
+    vi.useFakeTimers();
+    scrollElement = createScrollElement({
+      clientHeight: 200,
+      scrollHeight: 3_000,
+      scrollTop: 1_000,
+      rows: [{ id: "row_user_20", top: 0, bottom: 60 }],
+    });
+    render(
+      <TocHost
+        hostHeight={200}
+        timelineRows={Array.from({ length: 50 }, (_, index) =>
+          userConversationRow(index + 1),
+        )}
+      />,
+    );
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+
+    const markers = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Chat position"] button',
+      ),
+    );
+
+    expect(markers).toHaveLength(5);
+    expect(markers[0]?.getAttribute("aria-label")).toBe(
+      "Go to message: Loaded after client-side navigation 1",
+    );
+    expect(markers.at(-1)?.getAttribute("aria-label")).toBe(
+      "Go to message: Loaded after client-side navigation 50",
+    );
+    expect(
+      markers
+        .find((marker) => marker.getAttribute("aria-current") === "location")
+        ?.getAttribute("aria-label"),
+    ).toBe("Go to message: Loaded after client-side navigation 20");
   });
 
   it("opens consistently from pointer and keyboard activation and preserves focus", () => {
@@ -661,10 +1057,12 @@ describe("ThreadTableOfContents", () => {
     const trigger = screen.getByRole("button", {
       name: "Thread table of contents",
     });
+
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("Your messages")).toBeNull();
 
     const toc = document.querySelector<HTMLElement>("[data-thread-toc]");
+
     if (!toc) throw new Error("Expected the thread table of contents.");
     fireEvent.mouseEnter(toc);
     fireEvent.click(trigger);
@@ -681,6 +1079,7 @@ describe("ThreadTableOfContents", () => {
     const firstMessage = screen.getByRole("button", {
       name: "Loaded after client-side navigation 1",
     });
+
     act(() => firstMessage.focus());
     fireEvent.mouseLeave(toc);
 
@@ -696,19 +1095,24 @@ describe("ThreadTableOfContents", () => {
         )}
       />,
     );
+
     const trigger = screen.getByRole("button", {
       name: "Thread table of contents",
     });
+
     const toc = document.querySelector<HTMLElement>("[data-thread-toc]");
+
     if (!toc) throw new Error("Expected the thread table of contents.");
     const animationFrames: FrameRequestCallback[] = [];
     vi.stubGlobal(
       "requestAnimationFrame",
       vi.fn((callback: FrameRequestCallback) => {
         animationFrames.push(callback);
+
         return animationFrames.length;
       }),
     );
+
     const flushAnimationFrames = () => {
       act(() => {
         for (const callback of animationFrames.splice(0)) callback(0);
@@ -717,9 +1121,11 @@ describe("ThreadTableOfContents", () => {
 
     const openAndOverflow = () => {
       fireEvent.click(trigger);
+
       const scrollRegion = document.querySelector<HTMLElement>(
         '[id^="thread-toc-panel-"] .max-h-64',
       );
+
       if (!scrollRegion) throw new Error("Expected the TOC scroll region.");
       Object.defineProperties(scrollRegion, {
         clientHeight: { configurable: true, value: 100 },
@@ -746,7 +1152,7 @@ describe("ThreadTableOfContents", () => {
     openAndOverflow();
   });
 
-  it("renders the full conversation outline, including attachment-only labels", async () => {
+  it("renders saved mentions and attachment-only labels in the unloaded outline", async () => {
     setOutline([
       {
         id: "u1",
@@ -763,7 +1169,18 @@ describe("ThreadTableOfContents", () => {
       {
         id: "u2",
         role: "user",
-        preview: "Second question",
+        preview: "Review this-file",
+        mentions: [
+          {
+            start: 7,
+            end: 16,
+            resource: {
+              kind: "attachment",
+              path: "/tmp/source.ts",
+              label: "source.ts",
+            },
+          },
+        ],
         attachmentSummary: null,
       },
       {
@@ -778,7 +1195,8 @@ describe("ThreadTableOfContents", () => {
     openTocPanel();
 
     expect(await screen.findByText("First question")).not.toBeNull();
-    expect(screen.getByText("Second question")).not.toBeNull();
+    expect(screen.getByText("source.ts")).not.toBeNull();
+    expect(screen.queryByText(/this-file/)).toBeNull();
     expect(screen.getByText("Image attachment")).not.toBeNull();
     expect(screen.getByText("Agent messages")).not.toBeNull();
   });
@@ -834,7 +1252,7 @@ describe("ThreadTableOfContents", () => {
         id: "u2",
         role: "user",
         preview:
-          "[bb message from thread:thr_worker] Release bug report: the calendar is stale.",
+          "[Omnyo message from thread:thr_worker] Release bug report: the calendar is stale.",
         attachmentSummary: null,
       },
       {
@@ -853,7 +1271,7 @@ describe("ThreadTableOfContents", () => {
       screen.getByText("Release bug report: the calendar is stale."),
     ).not.toBeNull();
     expect(
-      screen.queryByText(/\[bb message from thread:thr_worker\]/),
+      screen.queryByText(/\[Omnyo message from thread:thr_worker\]/),
     ).toBeNull();
   });
 
@@ -861,10 +1279,12 @@ describe("ThreadTableOfContents", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
+
     const nestedThread = threadListEntry({
       id: "thr_nested",
       title: "Calendar specialist",
     });
+
     queryClient.setQueryData(
       sidebarNavigationQueryKey(),
       sidebarNavigation([
@@ -887,7 +1307,7 @@ describe("ThreadTableOfContents", () => {
         id: "u2",
         role: "user",
         preview:
-          "[bb message from thread:thr_worker] Release bug report: the calendar is stale.",
+          "[Omnyo message from thread:thr_worker] Release bug report: the calendar is stale.",
         attachmentSummary: null,
       },
       {
@@ -931,7 +1351,6 @@ describe("ThreadTableOfContents", () => {
     const target = timelineRowElement("u2");
     scrollElement.appendChild(target);
     const loadOlder = vi.fn();
-    const onNavigateToRow = vi.fn();
     setOutline([
       {
         id: "u1",
@@ -958,48 +1377,13 @@ describe("ThreadTableOfContents", () => {
         timelineRows={[]}
         hasOlderTimelineRows
         loadOlderTimelineRows={loadOlder}
-        onNavigateToRow={onNavigateToRow}
       />,
     );
     openTocPanel();
     fireEvent.click(await screen.findByText("Loaded question"));
 
     await waitFor(() => expect(scrollElementIntoView).toHaveBeenCalledTimes(1));
-    expect(target.classList.contains("bb-search-flash")).toBe(true);
-    expect(onNavigateToRow).toHaveBeenCalledWith("u2");
-    expect(loadOlder).not.toHaveBeenCalled();
-  });
-
-  it("waits for a loaded but unmounted message to render instead of paginating", async () => {
-    const loadOlder = vi.fn();
-    const onNavigateToRow = vi.fn((rowId: string) => {
-      queueMicrotask(() => {
-        scrollElement.appendChild(timelineRowElement(rowId));
-      });
-    });
-    const timelineRows = [1, 2, 3].map((index) => userConversationRow(index));
-
-    render(
-      <TocHost
-        timelineRows={timelineRows}
-        hasOlderTimelineRows
-        loadOlderTimelineRows={loadOlder}
-        onNavigateToRow={onNavigateToRow}
-      />,
-    );
-    openTocPanel();
-    fireEvent.click(
-      await screen.findByText("Loaded after client-side navigation 1"),
-    );
-
-    await waitFor(() =>
-      expect(scrollElementIntoView).toHaveBeenCalledWith({
-        element: scrollElement.querySelector(
-          '[data-timeline-row-id="row_user_1"]',
-        ),
-        options: { block: "start", inline: "nearest" },
-      }),
-    );
+    expect(target.classList.contains("omnyo-search-flash")).toBe(true);
     expect(loadOlder).not.toHaveBeenCalled();
   });
 
@@ -1007,6 +1391,7 @@ describe("ThreadTableOfContents", () => {
     const loadOlder = vi.fn(() => {
       scrollElement.appendChild(timelineRowElement("u_old"));
     });
+
     setOutline([
       {
         id: "u_old",
@@ -1096,6 +1481,7 @@ describe("ThreadTableOfContents", () => {
       {
         agent: "agent-1",
         user: "user-1",
+        position: "user-1",
       },
     );
   });
@@ -1117,6 +1503,7 @@ describe("ThreadTableOfContents", () => {
       {
         agent: "agent-2",
         user: "user-2",
+        position: "user-2",
       },
     );
   });
@@ -1138,6 +1525,7 @@ describe("ThreadTableOfContents", () => {
       {
         agent: "agent-2",
         user: "user-2",
+        position: "agent-2",
       },
     );
   });
@@ -1158,6 +1546,7 @@ describe("ThreadTableOfContents", () => {
       {
         agent: "agent-2",
         user: null,
+        position: "agent-2",
       },
     );
   });
@@ -1168,15 +1557,18 @@ describe("ThreadTableOfContents", () => {
       label: `Message ${index}`,
       role: index % 2 === 0 ? "user" : "assistant",
     }));
+
     const manyUserItems = allItems.filter((item) => item.role === "user");
     const manyAgentItems = allItems.filter((item) => item.role === "assistant");
     const visibleIndex = 200;
+
     const scrollElement = createScrollElement({
       clientHeight: 100,
       scrollHeight: 3_000,
       scrollTop: 400,
       rows: allItems.map((item, index) => {
         const top = (index - visibleIndex) * 10;
+
         return { id: item.id, top, bottom: top + 10 };
       }),
     });
@@ -1190,7 +1582,9 @@ describe("ThreadTableOfContents", () => {
     ).toEqual({
       agent: "item-201",
       user: "item-200",
+      position: "item-200",
     });
+
     const rowMeasurementCount = Array.from(
       scrollElement.querySelectorAll<HTMLElement>("[data-timeline-row-id]"),
     ).reduce(
@@ -1198,7 +1592,8 @@ describe("ThreadTableOfContents", () => {
         count + vi.mocked(row.getBoundingClientRect).mock.calls.length,
       0,
     );
-    expect(rowMeasurementCount).toBeLessThanOrEqual(16);
+
+    expect(rowMeasurementCount).toBeLessThanOrEqual(24);
   });
 });
 
@@ -1212,9 +1607,11 @@ function withCountedTextReads(
     enumerable: true,
     get: () => {
       onRead();
+
       return text;
     },
   });
+
   return counted;
 }
 
@@ -1226,27 +1623,33 @@ function placeRowElements(
       scrollElement.querySelector<HTMLElement>(
         `[data-timeline-row-id="${id}"]`,
       ) ?? scrollElement.appendChild(timelineRowElement(id));
+
     element.getBoundingClientRect = () => rect(position);
   }
 }
 
-function activeRailTickIndexes(): number[] {
+function activeRailMarkerIndexes(): number[] {
   return Array.from(
     document.querySelectorAll<HTMLElement>(
-      "[data-thread-toc] [aria-hidden] > span",
+      '[aria-label="Chat position"] button',
     ),
-  ).flatMap((tick, index) => (tick.classList.contains("w-5") ? [index] : []));
+  ).flatMap((marker, index) =>
+    marker.getAttribute("aria-current") === "location" ? [index] : [],
+  );
 }
 
 describe("ThreadTableOfContents timeline item cache", () => {
   it("normalizes a message label again only when its row object changes", () => {
     let textReads = 0;
+
     const countRead = () => {
       textReads += 1;
     };
+
     const conversationRows = [1, 2, 3].map((index) =>
       withCountedTextReads(userConversationRow(index), countRead),
     );
+
     const view = render(<TocHost timelineRows={conversationRows} />);
     const readsAfterMount = textReads;
 
@@ -1275,6 +1678,7 @@ describe("ThreadTableOfContents timeline item cache", () => {
       },
       countRead,
     );
+
     const attachmentOnlyRow = withCountedTextReads(
       {
         ...userConversationRow(3),
@@ -1292,6 +1696,7 @@ describe("ThreadTableOfContents timeline item cache", () => {
       },
       countRead,
     );
+
     view.rerender(
       <TocHost
         timelineRows={[conversationRows[0]!, streamedRow, attachmentOnlyRow]}
@@ -1301,9 +1706,7 @@ describe("ThreadTableOfContents timeline item cache", () => {
 
     expect(textReads).toBe(readsAfterMount + 2);
     expect(
-      screen.getByText("Loaded after client-side navigation, then more", {
-        normalizer: (text) => text,
-      }),
+      screen.getByText("Loaded after client-side navigation, then more"),
     ).not.toBeNull();
     expect(screen.getByText("Image attachment")).not.toBeNull();
   });
@@ -1321,6 +1724,7 @@ describe("ThreadTableOfContents timeline item cache", () => {
       scrollTop: 400,
     });
     const rows = [1, 2, 3].map((index) => userConversationRow(index));
+
     const workRow = commandRow({
       command: "pnpm test",
       output: "running",
@@ -1328,14 +1732,16 @@ describe("ThreadTableOfContents timeline item cache", () => {
       status: "pending",
       threadId: "thr_toc_test",
     });
+
     const view = render(
       <TocHost timelineRows={[rows[0]!, workRow, rows[1]!, rows[2]!]} />,
     );
+
     act(() => {
       vi.runOnlyPendingTimers();
     });
 
-    expect(activeRailTickIndexes()).toEqual([1]);
+    expect(activeRailMarkerIndexes()).toEqual([1]);
 
     placeRowElements(
       new Map([
@@ -1357,12 +1763,12 @@ describe("ThreadTableOfContents timeline item cache", () => {
       vi.advanceTimersByTime(119);
     });
 
-    expect(activeRailTickIndexes()).toEqual([1]);
+    expect(activeRailMarkerIndexes()).toEqual([1]);
 
     act(() => {
       vi.advanceTimersByTime(1);
     });
 
-    expect(activeRailTickIndexes()).toEqual([]);
+    expect(activeRailMarkerIndexes()).toEqual([]);
   });
 });

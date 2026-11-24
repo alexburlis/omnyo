@@ -46,6 +46,7 @@ export function createPendingToolCallTracker(options: {
         requestIdCounter += 1;
         const requestId = requestIdCounter;
         pendingToolCalls.set(requestId, { resolve, scope: args.scope });
+
         try {
           options.sendToolCall({
             jsonrpc: "2.0",
@@ -71,10 +72,13 @@ export function createPendingToolCallTracker(options: {
     },
     handleToolCallResponse: (response) => {
       const pending = pendingToolCalls.get(response.id);
+
       if (!pending) {
         return false;
       }
+
       pendingToolCalls.delete(response.id);
+
       if ("error" in response) {
         pending.resolve({
           content: response.error.message ?? "Tool call failed",
@@ -83,6 +87,7 @@ export function createPendingToolCallTracker(options: {
       } else {
         pending.resolve(decodeToolCallResponsePayload(response.result));
       }
+
       return true;
     },
     resolvePendingToolCalls: (scope, message) => {
@@ -90,6 +95,7 @@ export function createPendingToolCallTracker(options: {
         if (pending.scope !== scope) {
           continue;
         }
+
         pendingToolCalls.delete(requestId);
         pending.resolve({ content: message, isError: true });
       }

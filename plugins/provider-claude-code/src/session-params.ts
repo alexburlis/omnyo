@@ -8,7 +8,7 @@ import {
   type ServiceTier,
   type RuntimePermissionPolicy,
   buildShellEnvOverrides,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { z } from "zod";
 import {
   toClaudePermissionMode,
@@ -62,7 +62,9 @@ function buildClaudeCodeConfig(
   if (!envVars) {
     return undefined;
   }
+
   const overrides = buildShellEnvOverrides(envVars);
+
   return Object.keys(overrides).length > 0 ? { envVars: overrides } : undefined;
 }
 
@@ -76,7 +78,9 @@ export type ClaudeSessionExecutionOptions = RuntimePermissionPolicy & {
   workflowsEnabled: boolean;
   chromeEnabled: boolean;
   disable1MContext: boolean;
+  allowModelFallback: boolean;
   sandboxEnabled: boolean;
+  fullAccessApprovalsEnabled: boolean;
   memoryEnabled?: boolean | undefined;
   providerSubagentsEnabled?: boolean | undefined;
   skillRoots?: readonly ClaudeCodeSkillRoot[] | undefined;
@@ -102,19 +106,24 @@ function buildInternalSessionParams(
 ): Record<string, unknown> {
   const baseInstructions = args.options.instructions ?? "";
   const config = buildClaudeCodeConfig(args.options.envVars);
+
   const dynamicTools = args.dynamicTools?.map((t) => ({
     name: t.name,
     description: t.description,
     inputSchema: jsonValueSchema.parse(t.inputSchema),
   }));
+
   const permissionPolicy = args.options;
+
   const additionalWorkspaceWriteRootsParams =
     permissionPolicy.permissionScope === "workspace"
       ? buildAdditionalWorkspaceWriteRootsParams(
           args.additionalWorkspaceWriteRoots,
         )
       : undefined;
+
   const skillConfig = buildClaudeSkillConfigParams(args.options.skillRoots);
+
   return {
     baseInstructions,
     threadId: args.threadId,
@@ -137,7 +146,9 @@ function buildInternalSessionParams(
     workflowsEnabled: args.options.workflowsEnabled,
     chromeEnabled: args.options.chromeEnabled,
     disable1MContext: args.options.disable1MContext,
+    allowModelFallback: args.options.allowModelFallback,
     sandboxEnabled: args.options.sandboxEnabled,
+    fullAccessApprovalsEnabled: args.options.fullAccessApprovalsEnabled,
     memoryEnabled: args.options.memoryEnabled,
     providerSubagentsEnabled: args.options.providerSubagentsEnabled,
     ...(dynamicTools && dynamicTools.length > 0 ? { dynamicTools } : {}),
@@ -150,7 +161,9 @@ const claudeProviderOptionsSchema = z
     workflowsEnabled: z.boolean().optional(),
     chromeEnabled: z.boolean().optional(),
     disable1MContext: z.boolean().optional(),
+    allowModelFallback: z.boolean().default(false),
     sandboxEnabled: z.boolean().optional(),
+    fullAccessApprovalsEnabled: z.boolean().optional(),
     memoryEnabled: z.boolean().optional(),
     providerSubagentsEnabled: z.boolean().optional(),
     additionalWorkspaceWriteRoots: z.array(z.string()).optional(),
@@ -181,7 +194,9 @@ export function buildClaudeSessionParams(
   const providerOptions = claudeProviderOptionsSchema.parse(
     args.options.providerOptions ?? {},
   );
+
   const config = buildClaudeCodeConfig(args.options.envVars);
+
   return buildInternalSessionParams({
     additionalWorkspaceWriteRoots:
       providerOptions.additionalWorkspaceWriteRoots ?? [],
@@ -196,7 +211,10 @@ export function buildClaudeSessionParams(
       workflowsEnabled: providerOptions.workflowsEnabled ?? false,
       chromeEnabled: providerOptions.chromeEnabled ?? false,
       disable1MContext: providerOptions.disable1MContext ?? false,
+      allowModelFallback: providerOptions.allowModelFallback,
       sandboxEnabled: providerOptions.sandboxEnabled ?? true,
+      fullAccessApprovalsEnabled:
+        providerOptions.fullAccessApprovalsEnabled ?? false,
       memoryEnabled: providerOptions.memoryEnabled,
       providerSubagentsEnabled: providerOptions.providerSubagentsEnabled,
     },
@@ -210,6 +228,7 @@ function stripClaudePlanCommandMentions(args: {
   if (args.claudeCodePermissionMode !== "plan") {
     return [...args.input];
   }
+
   return removeCommandMentionsFromPromptInput(args.input, {
     trigger: "/",
     name: "plan",
@@ -230,7 +249,9 @@ export function buildClaudeTurnParams(
   const providerOptions = claudeProviderOptionsSchema.parse(
     args.options.providerOptions ?? {},
   );
+
   const config = buildClaudeCodeConfig(args.options.envVars);
+
   return {
     threadId: args.threadId,
     providerThreadId: args.providerThreadId,
@@ -251,13 +272,16 @@ export function buildClaudeTurnParams(
     workflowsEnabled: providerOptions.workflowsEnabled,
     chromeEnabled: providerOptions.chromeEnabled,
     disable1MContext: providerOptions.disable1MContext,
+    allowModelFallback: providerOptions.allowModelFallback,
     sandboxEnabled: providerOptions.sandboxEnabled,
+    fullAccessApprovalsEnabled: providerOptions.fullAccessApprovalsEnabled,
     memoryEnabled: providerOptions.memoryEnabled,
     providerSubagentsEnabled: providerOptions.providerSubagentsEnabled,
     ...(config ? { config } : {}),
     permissionMode: toClaudePermissionMode(args.options),
     permissionScope: args.options.permissionScope,
-    additionalWorkspaceWriteRoots: providerOptions.additionalWorkspaceWriteRoots ?? [],
+    additionalWorkspaceWriteRoots:
+      providerOptions.additionalWorkspaceWriteRoots ?? [],
     permissionEscalation: args.options.permissionEscalation,
     ...(providerOptions.claudeCodePermissionMode !== undefined
       ? { claudeCodePermissionMode: providerOptions.claudeCodePermissionMode }

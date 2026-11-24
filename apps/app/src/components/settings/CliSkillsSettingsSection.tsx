@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import type { Host } from "@bb/domain";
+import type { Host } from "@omnyo/domain";
 import type {
   CliSkillMachineStatus,
   SystemCliSkillsStatusResponse,
   SystemInstallCliSkillsResponse,
-} from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
+} from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   SettingsSection,
   SettingsWithControl,
@@ -16,7 +16,7 @@ import { useInstallCliSkills } from "@/hooks/mutations/settings-mutations";
 import { selectHosts, useHosts } from "@/hooks/queries/host-queries";
 import { useCliSkillsStatus } from "@/hooks/queries/system-queries";
 
-const CLI_SKILLS_SETTING_LABEL = "bb CLI skills";
+const CLI_SKILLS_SETTING_LABEL = "Omnyo CLI skills";
 
 interface CliSkillsSettingsSectionContentProps {
   hasConnectedMachine: boolean;
@@ -27,7 +27,7 @@ interface CliSkillsSettingsSectionContentProps {
 
 function installDescription(hasConnectedMachine: boolean): string {
   return hasConnectedMachine
-    ? "Install them into ~/.agents/skills and ~/.claude/skills so agents outside bb can use the bb CLI."
+    ? "Install them into ~/.agents/skills and ~/.claude/skills so agents outside Omnyo can use the Omnyo CLI."
     : "Connect a machine to install them into ~/.agents/skills and ~/.claude/skills.";
 }
 
@@ -35,16 +35,20 @@ export function summarizeMachineStatuses(
   statuses: readonly CliSkillMachineStatus[],
 ): string | null {
   const known = statuses.filter((status) => status !== "unknown");
+
   if (known.length === 0) return null;
   const installed = known.filter((status) => status === "installed").length;
+
   if (installed === known.length) {
     return known.length > 1
       ? `Installed on ${known.length} machines`
       : "Installed";
   }
+
   if (installed > 0) {
     return `Installed on ${installed} of ${known.length} machines`;
   }
+
   return known.some((status) => status === "outdated")
     ? "Out of date"
     : "Not installed";
@@ -82,13 +86,15 @@ export function CliSkillsSettingsSectionContent({
 function reportInstallResults(result: SystemInstallCliSkillsResponse): void {
   const installed = result.results.filter((entry) => entry.ok);
   const failed = result.results.filter((entry) => !entry.ok);
+
   if (installed.length > 0) {
     appToast.success(
-      `Installed the bb CLI skills on ${installed
+      `Installed the ${CLI_SKILLS_SETTING_LABEL} on ${installed
         .map((entry) => entry.hostName)
         .join(", ")}`,
     );
   }
+
   for (const entry of failed) {
     appToast.error(`${entry.hostName}: ${entry.errorMessage}`);
   }
@@ -107,10 +113,12 @@ export function CliSkillsSettingsSection() {
   const statusQuery = useCliSkillsStatus();
   const installCliSkills = useInstallCliSkills();
   const [pickerOpen, setPickerOpen] = useState(false);
+
   const hosts: readonly Host[] = useMemo(
     () => selectHosts(hostsQuery.data, "persistent"),
     [hostsQuery.data],
   );
+
   const statuses = statusByHostId(statusQuery.data);
 
   return (

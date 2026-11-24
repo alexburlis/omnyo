@@ -9,7 +9,7 @@ import { withHarness } from "../../helpers/harness.js";
 import {
   applyThreadLifecycleEvent,
   requireThreadLifecycleEventApplied,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   createRecoveryThread,
   RECOVERY_TEST_TIMEOUT_MS,
@@ -46,13 +46,13 @@ describe.sequential("fake provider idle-error reconciliation integration", () =>
         );
 
         requireThreadLifecycleEventApplied(
-          applyThreadLifecycleEvent(harness.db, {
+          applyThreadLifecycleEvent(harness.db, harness.hub, {
             event: { type: "run.started" },
             threadId: thread.id,
           }),
         );
         requireThreadLifecycleEventApplied(
-          applyThreadLifecycleEvent(harness.db, {
+          applyThreadLifecycleEvent(harness.db, harness.hub, {
             event: { type: "run.failed" },
             threadId: thread.id,
           }),

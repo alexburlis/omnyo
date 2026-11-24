@@ -1,4 +1,4 @@
-import type { BbPluginApi, PluginMentionItem } from "@get-bb/plugin-sdk";
+import type { PluginApi, PluginMentionItem } from "@omnyo/plugin-sdk";
 
 import type { TasksApiStore } from "../api";
 import {
@@ -11,9 +11,10 @@ import {
 import { displayName } from "../shared/display-name";
 
 const SEARCH_LIMIT = 10;
+
 const RECENT_COMMENT_LIMIT = 5;
 
-type PluginDatabase = ReturnType<BbPluginApi["storage"]["database"]>;
+type PluginDatabase = ReturnType<PluginApi["storage"]["database"]>;
 
 interface MentionTaskRow {
   id: string;
@@ -31,12 +32,13 @@ interface AttachmentManifestRow {
 function searchTasks(
   database: PluginDatabase,
   query: string,
-  bbProjectId: string | null,
+  omnyoProjectId: string | null,
 ): PluginMentionItem[] {
   const normalizedQuery = query.trim();
   const search = `%${escapeLike(normalizedQuery)}%`;
+
   const rows = database
-    .prepare<{ bbProjectId: string | null; search: string }, MentionTaskRow>(
+    .prepare<{ appProjectId: string | null; search: string }, MentionTaskRow>(
       `
         SELECT
           t.id,
@@ -52,8 +54,8 @@ function searchTasks(
           OR t.title LIKE @search ESCAPE '\\'
         ORDER BY
           CASE
-            WHEN @bbProjectId IS NOT NULL
-              AND p.linked_bb_project_id = @bbProjectId THEN 0
+            WHEN @appProjectId IS NOT NULL
+              AND p.linked_app_project_id = @appProjectId THEN 0
             ELSE 1
           END,
           t.updated_at DESC,
@@ -61,7 +63,7 @@ function searchTasks(
         LIMIT ${SEARCH_LIMIT}
       `,
     )
-    .all({ bbProjectId, search });
+    .all({ appProjectId: omnyoProjectId, search });
 
   return rows.map((row) => ({
     id: row.id,
@@ -89,6 +91,7 @@ function attachmentManifest(
 
 function formatSubtasks(subtasks: readonly Task[]): string {
   if (subtasks.length === 0) return "None.";
+
   return subtasks
     .map(
       (subtask) =>
@@ -101,17 +104,19 @@ function formatAttachments(
   attachments: readonly Pick<Attachment, "id" | "fileName">[],
 ): string {
   if (attachments.length === 0) return "None.";
+
   return attachments
     .map(
       (attachment) =>
         `- ${attachment.id} · ${attachment.fileName}\n` +
-        `  Fetch with: bb tasks attachment get ${attachment.id} --out <path>`,
+        `  Fetch with: omnyo tasks attachment get ${attachment.id} --out <path>`,
     )
     .join("\n");
 }
 
 function formatComments(comments: readonly Comment[]): string {
   if (comments.length === 0) return "None.";
+
   return comments
     .map(
       (comment) =>
@@ -122,6 +127,7 @@ function formatComments(comments: readonly Comment[]): string {
 
 function formatThreads(threads: readonly TaskThread[]): string {
   if (threads.length === 0) return "None.";
+
   return threads
     .map(
       (thread) =>
@@ -136,15 +142,19 @@ function buildTaskContext(
   taskId: string,
 ): string {
   const task = store.tasks.getTask(taskId);
+
   if (!task) throw new Error(`Task not found: ${taskId}`);
 
   const project = store.tasks.getProject(task.projectId);
+
   if (!project) throw new Error(`Project not found: ${task.projectId}`);
 
   const labels = store.tasks.listLabelsForTask(task.id);
+
   const comments = store.tasks
     .listComments(task.id)
     .slice(-RECENT_COMMENT_LIMIT);
+
   const attachments = attachmentManifest(database, task.id).map(
     (attachment) => ({
       id: attachment.id,
@@ -184,14 +194,14 @@ ${formatThreads(store.tasks.listTaskThreads(task.id))}
 
 ## Action contract
 
-You can act on this task with the bb tasks CLI. If you begin working on it, first run: bb tasks attach ${task.key} (attaches THIS thread so the task shows you as working). Comment substantive updates via bb tasks comment ${task.key} --body ... and set status via bb tasks update ${task.key} --status ...
+You can act on this task with the omnyo tasks CLI. If you begin working on it, first run: omnyo tasks attach ${task.key} (attaches THIS thread so the task shows you as working). Comment substantive updates via omnyo tasks comment ${task.key} --body ... and set status via omnyo tasks update ${task.key} --status ...
 `;
 }
 
-export function registerMentions(bb: BbPluginApi, store: TasksApiStore): void {
-  const database = bb.storage.database();
+export function registerMentions(api: PluginApi, store: TasksApiStore): void {
+  const database = api.storage.database();
 
-  bb.ui.registerMentionProvider({
+  api.ui.registerMentionProvider({
     id: "task",
     label: "Tasks",
     search({ query, projectId }) {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import type { HistoryEntry } from "./history-prompt.js";
 import plugin from "./server.js";
 
@@ -37,9 +37,11 @@ function historyList(history: HistoryEntry[]) {
       (left, right) =>
         right.createdAt - left.createdAt || right.id.localeCompare(left.id),
     );
+
     const start = args.cursor === undefined ? 0 : Number(args.cursor);
     const limit = Number(args.limit ?? "100");
     const end = start + limit;
+
     return {
       entries: newestFirst.slice(start, end),
       nextCursor: end < newestFirst.length ? String(end) : null,
@@ -50,6 +52,7 @@ function historyList(history: HistoryEntry[]) {
 async function setup(entries: readonly HistoryEntry[]) {
   const history = [...entries];
   const list = historyList(history);
+
   const fake = createFakePluginHost({
     pluginId: "prompt-library",
     sdk: {
@@ -62,9 +65,12 @@ async function setup(entries: readonly HistoryEntry[]) {
       },
     },
   });
-  await plugin(fake.bb);
+
+  await plugin(fake.api);
+
   const call = (method: string, input: unknown) =>
     fake.harness.behavior.callRpc(method, input);
+
   return { ...fake, history, list, call };
 }
 
@@ -85,7 +91,9 @@ describe("prompt library server", () => {
       "Please verify the changes on this branch and explain the results. ".repeat(
         8,
       );
+
     const query = `${prefix}zebra`;
+
     const { call } = await setup([
       entry("match", 1, query),
       entry("other", 2, `${prefix}yak`),
@@ -102,6 +110,7 @@ describe("prompt library server", () => {
       entry("h2", 2, "fix the timeline cache", { projectId: "proj_b" }),
       entry("h3", 3, "write the release notes"),
     ]);
+
     const starred = await call("star", {
       prompt: draft("fix the timeline cache"),
     });
@@ -164,7 +173,7 @@ describe("prompt library server", () => {
               },
             ],
           },
-          { type: "localImage", path: ".bb/attachments/shot.png" },
+          { type: "localImage", path: ".omnyo/attachments/shot.png" },
         ],
       },
     ]);
@@ -202,7 +211,7 @@ describe("prompt library server", () => {
       attachments: [
         {
           type: "localImage",
-          path: ".bb/attachments/shot.png",
+          path: ".omnyo/attachments/shot.png",
           name: "shot.png",
           sizeBytes: 0,
         },
@@ -221,14 +230,16 @@ describe("prompt library server", () => {
       const foreign = entry("foreign", 1, "@project:proj_b review", {
         projectId: "proj_b",
       });
+
       const attachment = {
         type,
-        path: ".bb/attachments/private.txt",
+        path: ".omnyo/attachments/private.txt",
         name: "private.txt",
         sizeBytes: 42,
         ...ownership,
         futureOwnership: { project: "proj_b", token: "portable" },
       };
+
       foreign.input = [
         {
           type: "text",
@@ -244,11 +255,13 @@ describe("prompt library server", () => {
         attachment,
       ];
       const { call } = await setup([foreign]);
+
       const result = await call("search", {
         ...GLOBAL,
         projectId: "proj_a",
         query: "",
       });
+
       expect(result).toMatchObject({
         prompts: [
           {
@@ -274,6 +287,7 @@ describe("prompt library server", () => {
 
   it("rejects malformed mentions before saving a starred prompt", async () => {
     const { call } = await setup([]);
+
     for (const mention of [
       { from: 0, to: 4, kind: "project", label: "Project" },
       {
@@ -288,6 +302,7 @@ describe("prompt library server", () => {
         call("star", { prompt: { text: "test", mentions: [mention] } }),
       ).rejects.toThrow();
     }
+
     await expect(call("search", { ...GLOBAL, query: "" })).resolves.toEqual({
       prompts: [],
     });
@@ -344,6 +359,7 @@ describe("prompt library server", () => {
       entry("h5", 5, "now deploy staging"),
       entry("h6", 6, "redeploy the api"),
     ]);
+
     await call("star", { prompt: draft("please deploy the docs") });
     await call("star", { prompt: draft("deploy staging") });
 
@@ -430,6 +446,7 @@ describe("prompt library server", () => {
       }),
       entry("follow", 2, "the login test is still flaky"),
     ]);
+
     const search = async (composer: "new-thread" | "follow-up") =>
       (
         (await call("search", { ...GLOBAL, composer, query: "flaky" })) as {
@@ -446,6 +463,7 @@ describe("prompt library server", () => {
     const now = Date.UTC(2026, 9, 8);
     vi.setSystemTime(now);
     const day = 86_400_000;
+
     const { call } = await setup([
       entry("old", now - 30 * day, "we should ship ship ship it"),
       entry("new", now, "can you ship it"),
@@ -463,6 +481,7 @@ describe("prompt library server", () => {
     const { call, history, list } = await setup([
       entry("h1", 1, "first prompt"),
     ]);
+
     await call("search", { ...GLOBAL, query: "" });
     history.push(entry("h2", 2, "second prompt"));
     history.splice(0, 1);
@@ -489,9 +508,11 @@ describe("prompt library server", () => {
       threadId: "thr_b",
       composer: "follow-up",
     })) as { prompts: { id: string }[] };
+
     expect(thread.prompts.map((row) => row.id)).toEqual(["h2"]);
 
     list.mockClear();
+
     const missing = (await call("search", {
       query: "",
       scope: "project",
@@ -499,6 +520,7 @@ describe("prompt library server", () => {
       threadId: null,
       composer: "new-thread",
     })) as { prompts: unknown[] };
+
     expect(missing.prompts).toEqual([]);
     expect(list).not.toHaveBeenCalled();
   });
@@ -507,23 +529,30 @@ describe("prompt library server", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(1_000);
     const { call } = await setup([]);
+
     const first = (await call("star", {
       prompt: draft("first prompt"),
     })) as { id: string };
+
     vi.setSystemTime(2_000);
+
     const second = (await call("star", { prompt: draft("second prompt") })) as {
       id: string;
     };
+
     const duplicate = (await call("star", {
       prompt: draft("first prompt"),
     })) as { id: string };
+
     expect(duplicate.id).toBe(first.id);
 
     vi.setSystemTime(3_000);
     await call("markUsed", { id: first.id });
+
     const listed = (await call("search", { ...GLOBAL, query: "" })) as {
       prompts: { id: string; prompt: unknown }[];
     };
+
     expect(listed.prompts.map((row) => row.id)).toEqual([first.id, second.id]);
     expect(listed.prompts[0]?.prompt).toEqual(draft("first prompt"));
 
@@ -552,6 +581,7 @@ describe("prompt library server", () => {
       "diff",
       "--json",
     ]);
+
     expect(starred.exitCode).toBe(0);
     const { id } = JSON.parse(starred.stdout ?? "") as { id: string };
 
@@ -563,6 +593,7 @@ describe("prompt library server", () => {
       "deploy",
       "--json",
     ]);
+
     expect(JSON.parse(search.stdout ?? "")).toEqual({
       prompts: [expect.objectContaining({ kind: "recent", id: "h1" })],
     });

@@ -33,8 +33,10 @@ export function encodeMobilePairingPayload(
 
 function isHttpUrl(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0) return false;
+
   try {
     const url = new URL(value);
+
     return url.protocol === "http:" || url.protocol === "https:";
   } catch {
     return false;
@@ -45,20 +47,24 @@ export function parseMobilePairingPayload(
   text: string,
 ): MobilePairingPayload | null {
   let raw: unknown;
+
   try {
     raw = JSON.parse(text);
   } catch {
     return null;
   }
+
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
   }
+
   const record = raw as {
     code?: unknown;
     serverUrl?: unknown;
     apex?: unknown;
     expiresAt?: unknown;
   };
+
   if (
     typeof record.code !== "string" ||
     record.code.length === 0 ||
@@ -69,6 +75,7 @@ export function parseMobilePairingPayload(
   ) {
     return null;
   }
+
   return {
     code: record.code,
     serverUrl: record.serverUrl,

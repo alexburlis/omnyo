@@ -1,4 +1,4 @@
-import type { ThreadTimelineResponse, TimelineRow } from "@bb/server-contract";
+import type { ThreadTimelineResponse, TimelineRow } from "@omnyo/server-contract";
 
 export const DEFAULT_MAX_INLINE_OUTPUT_CHARS = 32_000;
 
@@ -12,6 +12,7 @@ function truncateString(value: string, max: number): string {
   if (value.length <= max || value.endsWith(TRUNCATION_SUFFIX_TAIL)) {
     return value;
   }
+
   return `${value.slice(0, max)}${truncationSuffix(value.length - max)}`;
 }
 
@@ -20,7 +21,9 @@ function truncateRow(row: TimelineRow, max: number): TimelineRow {
     if (!row.children) {
       return row;
     }
+
     const children = truncateRows(row.children, max);
+
     return children === row.children ? row : { ...row, children };
   }
 
@@ -32,15 +35,20 @@ function truncateRow(row: TimelineRow, max: number): TimelineRow {
     case "command":
     case "tool": {
       const output = truncateString(row.output, max);
+
       return output === row.output ? row : { ...row, output };
     }
+
     case "file-change": {
       const diff =
         row.change.diff === null ? null : truncateString(row.change.diff, max);
+
       const stdout =
         row.stdout === null ? null : truncateString(row.stdout, max);
+
       const stderr =
         row.stderr === null ? null : truncateString(row.stderr, max);
+
       if (
         diff === row.change.diff &&
         stdout === row.stdout &&
@@ -48,6 +56,7 @@ function truncateRow(row: TimelineRow, max: number): TimelineRow {
       ) {
         return row;
       }
+
       return {
         ...row,
         change: diff === row.change.diff ? row.change : { ...row.change, diff },
@@ -55,15 +64,20 @@ function truncateRow(row: TimelineRow, max: number): TimelineRow {
         stderr,
       };
     }
+
     case "delegation": {
       const output = truncateString(row.output, max);
+
       const childRows =
         row.childRows === null ? null : truncateRows(row.childRows, max);
+
       if (output === row.output && childRows === row.childRows) {
         return row;
       }
+
       return { ...row, output, childRows };
     }
+
     default:
       return row;
   }
@@ -71,13 +85,17 @@ function truncateRow(row: TimelineRow, max: number): TimelineRow {
 
 function truncateRows(rows: TimelineRow[], max: number): TimelineRow[] {
   let changed = false;
+
   const next = rows.map((row) => {
     const truncated = truncateRow(row, max);
+
     if (truncated !== row) {
       changed = true;
     }
+
     return truncated;
   });
+
   return changed ? next : rows;
 }
 
@@ -95,9 +113,11 @@ export function mapTimelineResponseRows(
   const rows = map(response.rows);
   const updates = response.timelinePage.olderRowUpdates;
   const olderRowUpdates = updates && map(updates);
+
   if (rows === response.rows && olderRowUpdates === updates) {
     return response;
   }
+
   return {
     ...response,
     rows,

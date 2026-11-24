@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { runInSerialLane } from "./serial-lane.js";
 
 describe("runInSerialLane", () => {
@@ -14,10 +14,13 @@ describe("runInSerialLane", () => {
       order.push("first-end");
       throw new Error("first failed");
     });
+
     const second = runInSerialLane(lanes, "key", () => {
       order.push("second");
+
       return "second-result";
     });
+
     const otherKey = runInSerialLane(lanes, "other", () => {
       order.push("other");
     });

@@ -12,6 +12,7 @@ export function decodeNormalizedProviderToolCallRequest(
   }
 
   const parsed = toolCallRequestParamsSchema.safeParse(params);
+
   if (!parsed.success) {
     return null;
   }
@@ -32,4 +33,5 @@ export function decodeNormalizedProviderToolCallRequest(
 export const providerToolCallCancellationSchema = z.object({
   requestId: z.union([z.string(), z.number().int()]),
 });
+
 export const PROVIDER_TOOL_CALL_CANCELLED_METHOD = "notifications/cancelled";

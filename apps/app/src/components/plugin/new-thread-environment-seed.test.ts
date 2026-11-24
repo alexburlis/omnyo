@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type {
   CreateThreadEnvironmentArgs,
+  ProviderEnvironmentArgs,
   SystemEnvironmentProvider,
-} from "@bb/server-contract";
+  WorkspaceArgs,
+} from "@omnyo/server-contract";
 import { resolveRootComposeThreadEnvironment } from "@/views/root-compose-thread-environment";
-import { newThreadEnvironmentArgsToSeed } from "./new-thread-environment-seed";
+import {
+  newThreadEnvironmentArgsToSeed,
+  providerArgsAsWorkspace,
+} from "./new-thread-environment-seed";
 
 const PROJECT_ID = "proj_1";
 
@@ -124,7 +129,9 @@ function roundTrip(
 ): CreateThreadEnvironmentArgs | null {
   const seed = newThreadEnvironmentArgsToSeed(environment);
   expect(seed).not.toBeNull();
+
   if (seed === null) return null;
+
   return resolveRootComposeThreadEnvironment({
     environmentValue: seed.selectionValue,
     projectId: PROJECT_ID,
@@ -141,6 +148,7 @@ describe("newThreadEnvironmentArgsToSeed round trip", () => {
       type: "reuse",
       environmentId: "env_1",
     };
+
     expect(roundTrip(environment)).toEqual(environment);
   });
 
@@ -236,6 +244,7 @@ describe("newThreadEnvironmentArgsToSeed round trip", () => {
       machine: { type: "existing", hostId: "host_1" },
       inputs: { branch: { kind: "named", name: "release" } },
     };
+
     expect(roundTrip(environment)).toEqual(environment);
   });
 
@@ -250,6 +259,7 @@ describe("newThreadEnvironmentArgsToSeed round trip", () => {
       },
       inputs: { image: "custom:latest" },
     };
+
     expect(roundTrip(environment)).toEqual(environment);
   });
 
@@ -260,6 +270,7 @@ describe("newThreadEnvironmentArgsToSeed round trip", () => {
       machine: { type: "existing", hostId: "host_1" },
       inputs: null,
     });
+
     expect(seed).not.toBeNull();
     expect(
       resolveRootComposeThreadEnvironment({
@@ -282,5 +293,118 @@ describe("newThreadEnvironmentArgsToSeed round trip", () => {
         workspace: { type: "personal" },
       }),
     ).toBeNull();
+  });
+});
+
+describe("providerArgsAsWorkspace", () => {
+  const workspaces: readonly { name: string; workspace: WorkspaceArgs }[] = [
+    {
+      name: "the project checkout",
+      workspace: { type: "unmanaged", path: null },
+    },
+    {
+      name: "an existing worktree",
+      workspace: { type: "unmanaged", path: "/Users/developer/projects/omnyo-wt" },
+    },
+    {
+      name: "the checkout switched to a branch",
+      workspace: {
+        type: "unmanaged",
+        path: null,
+        branch: { kind: "existing", name: "release" },
+      },
+    },
+    {
+      name: "a worktree on a new branch",
+      workspace: {
+        type: "unmanaged",
+        path: "/Users/developer/projects/omnyo-wt",
+        branch: { kind: "new", baseBranch: "main" },
+      },
+    },
+    {
+      name: "a new worktree from the default branch",
+      workspace: { type: "managed-worktree", baseBranch: { kind: "default" } },
+    },
+    {
+      name: "a new worktree from a named branch",
+      workspace: {
+        type: "managed-worktree",
+        baseBranch: { kind: "named", name: "release" },
+      },
+    },
+    { name: "a personal workspace", workspace: { type: "personal" } },
+  ];
+
+  it.each(workspaces)(
+    "reads $name back from what the composer submits for it",
+    ({ workspace }) => {
+      const submitted = roundTrip({
+        type: "host",
+        hostId: "host_1",
+        workspace,
+      });
+
+      expect(submitted?.type).toBe("provider");
+
+      if (submitted?.type !== "provider") return;
+
+      expect(providerArgsAsWorkspace(submitted)).toEqual(workspace);
+    },
+  );
+
+  const notWorkspaces: readonly {
+    name: string;
+    args: ProviderEnvironmentArgs;
+  }[] = [
+    {
+      name: "a plugin provider",
+      args: {
+        type: "provider",
+        environmentProviderId: "container",
+        machine: { type: "existing", hostId: "host_1" },
+        inputs: { image: "node:22" },
+      },
+    },
+    {
+      name: "an adopted worktree from the plugin's own control",
+      args: {
+        type: "provider",
+        environmentProviderId: "git-worktree",
+        machine: { type: "existing", hostId: "host_1" },
+        inputs: { kind: "existing", path: "/Users/developer/projects/omnyo-wt" },
+      },
+    },
+    {
+      name: "checkout inputs with a field the sugar never writes",
+      args: {
+        type: "provider",
+        environmentProviderId: "project-checkout",
+        machine: { type: "existing", hostId: "host_1" },
+        inputs: { path: "/Users/developer/projects/omnyo-wt", image: "node:22" },
+      },
+    },
+    {
+      name: "an invalid branch name",
+      args: {
+        type: "provider",
+        environmentProviderId: "project-checkout",
+        machine: { type: "existing", hostId: "host_1" },
+        inputs: { branch: { kind: "existing", name: "two words" } },
+      },
+    },
+    {
+      name: "personal workspace inputs",
+      args: {
+        type: "provider",
+        environmentProviderId: "personal-workspace",
+        machine: { type: "existing", hostId: "host_1" },
+        inputs: {},
+      },
+    },
+  ];
+
+  it.each(notWorkspaces)("reads $name as no workspace", ({ args }) => {
+    expect(providerArgsAsWorkspace(args)).toBeNull();
   });
 });

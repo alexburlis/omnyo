@@ -1,11 +1,14 @@
 export function createMicrophoneRecordingStream(input: MediaStream) {
   const context = new AudioContext();
+
   try {
     const destination = context.createMediaStreamDestination();
     let source = context.createMediaStreamSource(input);
     source.connect(destination);
+
     return {
       stream: destination.stream,
+      state: () => context.state,
       resume: () => context.resume(),
       replace(next: MediaStream) {
         const nextSource = context.createMediaStreamSource(next);

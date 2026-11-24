@@ -1,8 +1,11 @@
 import { BrowserWindow, screen } from "electron";
 
 const DIALOG_FALLBACK_CONTENT_HEIGHT = 320;
+
 const DIALOG_MIN_CONTENT_HEIGHT = 120;
+
 const DIALOG_WORK_AREA_MARGIN = 80;
+
 const DIALOG_MEASURE_TIMEOUT_MS = 1_000;
 
 interface CreateDesktopDialogWindowArgs {
@@ -76,6 +79,7 @@ export function clampDialogContentHeight(args: {
 }): number {
   const available = args.workAreaHeight - DIALOG_WORK_AREA_MARGIN;
   const maxHeight = Math.max(DIALOG_MIN_CONTENT_HEIGHT, available);
+
   return Math.min(
     Math.max(DIALOG_MIN_CONTENT_HEIGHT, Math.ceil(args.contentHeight)),
     maxHeight,
@@ -93,11 +97,13 @@ async function measureDialogContentHeight(
         : null,
     )
     .catch(() => null);
+
   const timeout = new Promise<null>((resolve) => {
     setTimeout(() => {
       resolve(null);
     }, DIALOG_MEASURE_TIMEOUT_MS);
   });
+
   return Promise.race([measurement, timeout]);
 }
 
@@ -106,9 +112,10 @@ function fitDialogToContent(
   contentHeight: number,
 ): void {
   const [width] = dialogWindow.getContentSize();
-  const workAreaHeight = screen.getDisplayMatching(
-    dialogWindow.getBounds(),
-  ).workAreaSize.height;
+
+  const workAreaHeight = screen.getDisplayMatching(dialogWindow.getBounds())
+    .workAreaSize.height;
+
   const height = clampDialogContentHeight({ contentHeight, workAreaHeight });
   const wasResizable = dialogWindow.isResizable();
   dialogWindow.setResizable(true);
@@ -121,10 +128,12 @@ export function showDesktopDialogHtml(
   html: string,
 ): void {
   let shown = false;
+
   function showOnce(): void {
     if (shown || dialogWindow.isDestroyed()) {
       return;
     }
+
     shown = true;
     dialogWindow.show();
   }
@@ -132,9 +141,11 @@ export function showDesktopDialogHtml(
   dialogWindow.webContents.once("did-finish-load", () => {
     void (async () => {
       const contentHeight = await measureDialogContentHeight(dialogWindow);
+
       if (contentHeight !== null && !dialogWindow.isDestroyed()) {
         fitDialogToContent(dialogWindow, contentHeight);
       }
+
       showOnce();
     })();
   });

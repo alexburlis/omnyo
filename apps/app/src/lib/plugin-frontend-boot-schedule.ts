@@ -14,6 +14,7 @@ export function scheduleDeferredPluginFrontendBoot(
 ): () => void {
   let settled = false;
   let cancelIdle: (() => void) | null = null;
+
   const fire = () => {
     if (settled) return;
     settled = true;
@@ -22,11 +23,13 @@ export function scheduleDeferredPluginFrontendBoot(
     cancelIdle = null;
     boot();
   };
+
   const timeoutId = deps.setTimeout(fire, deps.timeoutMs);
   void deps.whenRoutePainted().then(() => {
     if (settled) return;
     cancelIdle = deps.requestIdle(fire);
   });
+
   return () => {
     if (settled) return;
     settled = true;
@@ -42,10 +45,13 @@ export function requestBrowserIdle(callback: () => void): () => void {
     typeof window.cancelIdleCallback === "function"
   ) {
     const id = window.requestIdleCallback(callback, { timeout: 1_000 });
+
     return () => window.cancelIdleCallback(id);
   }
+
   let frame = window.requestAnimationFrame(() => {
     frame = window.requestAnimationFrame(callback);
   });
+
   return () => window.cancelAnimationFrame(frame);
 }

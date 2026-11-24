@@ -21,7 +21,7 @@ import { RUNTIME_EXPORT_MANIFEST } from "./generated/runtime-export-manifest.gen
 import { resolvePluginBuildToolchain } from "./toolchain.js";
 
 function testToolchain() {
-  return resolvePluginBuildToolchain(join(tmpdir(), "bb-toolchain-unused"));
+  return resolvePluginBuildToolchain(join(tmpdir(), "omnyo-toolchain-unused"));
 }
 
 describe("plugin app runtime shim", () => {
@@ -35,8 +35,8 @@ describe("plugin app runtime shim", () => {
     );
   });
 
-  it("re-derives @get-bb/plugin-sdk/app exports for every rebuild", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-shim-"));
+  it("re-derives @omnyo/plugin-sdk/app exports for every rebuild", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-shim-"));
     tempDirs.push(dir);
     const facadePath = join(dir, "app-facade.mjs");
     const facadeUrl = pathToFileURL(facadePath).href;
@@ -44,7 +44,7 @@ describe("plugin app runtime shim", () => {
     async function bundle(importName: string): Promise<string> {
       const result = await build({
         stdin: {
-          contents: `import { ${importName} } from "@get-bb/plugin-sdk/app"; export { ${importName} };`,
+          contents: `import { ${importName} } from "@omnyo/plugin-sdk/app"; export { ${importName} };`,
           loader: "js",
           resolveDir: dir,
         },
@@ -55,6 +55,7 @@ describe("plugin app runtime shim", () => {
         logLevel: "silent",
         plugins: [runtimeShimPlugin(facadeUrl)],
       });
+
       return result.outputFiles[0]?.text ?? "";
     }
 
@@ -68,6 +69,83 @@ describe("plugin app runtime shim", () => {
     await expect(bundle("addedLater")).resolves.toContain("addedLater");
   });
 
+  it("uses the host drawer and React in an independently bundled SDK consumer", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-drawer-"));
+    tempDirs.push(dir);
+    const entryPath = join(dir, "app.js");
+    await writeFile(
+      entryPath,
+      [
+        'import { createElement } from "react";',
+        'import { experimental_ResponsiveDrawerShell } from "@omnyo/plugin-sdk/app";',
+        "export { experimental_ResponsiveDrawerShell };",
+        "export const renderDrawer = (props) => createElement(experimental_ResponsiveDrawerShell, props);",
+      ].join("\n"),
+    );
+
+    const result = await build({
+      absWorkingDir: dir,
+      entryPoints: [entryPath],
+      bundle: true,
+      format: "esm",
+      platform: "browser",
+      metafile: true,
+      write: false,
+      logLevel: "silent",
+      plugins: [runtimeShimPlugin()],
+    });
+
+    expect(Object.keys(result.metafile.inputs).sort()).toEqual(
+      [
+        "app.js",
+        "omnyo-plugin-runtime-shim:@omnyo/plugin-sdk/app",
+        "omnyo-plugin-runtime-shim:react",
+      ].sort(),
+    );
+
+    const HostDrawer = () => null;
+    const runtimeHost = globalThis as { __omnyoPluginRuntime?: unknown };
+    const previousRuntime = runtimeHost.__omnyoPluginRuntime;
+    runtimeHost.__omnyoPluginRuntime = {
+      react: {
+        createElement: (type: unknown, props: unknown) => ({ type, props }),
+      },
+      pluginSdkApp: { experimental_ResponsiveDrawerShell: HostDrawer },
+    };
+
+    try {
+      const bundlePath = join(dir, "bundle.mjs");
+      await writeFile(bundlePath, result.outputFiles[0]?.text ?? "");
+
+      const loaded = (await import(pathToFileURL(bundlePath).href)) as Record<
+        string,
+        unknown
+      >;
+
+      expect(loaded.experimental_ResponsiveDrawerShell).toBe(HostDrawer);
+      const renderDrawer = loaded.renderDrawer;
+
+      if (typeof renderDrawer !== "function") {
+        throw new Error("independent plugin did not export renderDrawer");
+      }
+
+      const props = {
+        open: true,
+        onOpenChange: () => {},
+        srLabel: "Independent drawer",
+        children: "Plugin-owned content",
+      };
+
+      expect(renderDrawer(props)).toEqual({ type: HostDrawer, props });
+    } finally {
+      if (previousRuntime === undefined) {
+        delete runtimeHost.__omnyoPluginRuntime;
+      } else {
+        runtimeHost.__omnyoPluginRuntime = previousRuntime;
+      }
+    }
+  });
+
   it("has an export-manifest entry for every non-SDK slot", () => {
     for (const specifier of Object.keys(RUNTIME_SLOT_BY_SPECIFIER)) {
       if (specifier.endsWith("/plugin-sdk/app")) continue;
@@ -76,16 +154,17 @@ describe("plugin app runtime shim", () => {
   });
 
   it("routes host-resident libraries to runtime slots and forwards real default exports", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-libs-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-libs-"));
     tempDirs.push(dir);
+
     const result = await build({
       stdin: {
         contents: [
           `import clsx from "clsx";`,
           `import { twMerge } from "tailwind-merge";`,
           `import { cva } from "class-variance-authority";`,
-          `import { Icon } from "@bb/shared-ui/icon";`,
-          `import { useQuestionFormHost } from "@bb/shared-ui/question-form-host";`,
+          `import { Icon } from "@omnyo/shared-ui/icon";`,
+          `import { useQuestionFormHost } from "@omnyo/shared-ui/question-form-host";`,
           `export { clsx, twMerge, cva, Icon, useQuestionFormHost };`,
         ].join("\n"),
         loader: "js",
@@ -98,7 +177,9 @@ describe("plugin app runtime shim", () => {
       logLevel: "silent",
       plugins: [runtimeShimPlugin()],
     });
+
     const js = result.outputFiles[0]?.text ?? "";
+
     for (const slot of [
       "clsx",
       "tailwindMerge",
@@ -114,37 +195,42 @@ describe("plugin app runtime shim", () => {
     const cvaFn = () => "cva";
     const IconComponent = () => null;
     const useQuestionFormHost = () => null;
-    (globalThis as { __bbPluginRuntime?: unknown }).__bbPluginRuntime = {
+    (globalThis as { __omnyoPluginRuntime?: unknown }).__omnyoPluginRuntime = {
       clsx: { default: clsxFn, clsx: clsxFn },
       tailwindMerge: { twMerge: twMergeFn },
       classVarianceAuthority: { cva: cvaFn },
       sharedUiIcon: { Icon: IconComponent, ICON_NAMES: [] },
       questionFormHost: { useQuestionFormHost },
     };
+
     try {
       const bundlePath = join(dir, "bundle.mjs");
       await writeFile(bundlePath, js);
+
       const loaded = (await import(pathToFileURL(bundlePath).href)) as Record<
         string,
         unknown
       >;
+
       expect(loaded.clsx).toBe(clsxFn);
       expect(loaded.twMerge).toBe(twMergeFn);
       expect(loaded.cva).toBe(cvaFn);
       expect(loaded.Icon).toBe(IconComponent);
       expect(loaded.useQuestionFormHost).toBe(useQuestionFormHost);
     } finally {
-      delete (globalThis as { __bbPluginRuntime?: unknown }).__bbPluginRuntime;
+      delete (globalThis as { __omnyoPluginRuntime?: unknown })
+        .__omnyoPluginRuntime;
     }
   });
 
   it("shims shared-ui's relative ./icon import but bundles a plugin's own icon module", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-icon-rel-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-icon-rel-"));
     tempDirs.push(dir);
-    const sharedUiDir = join(dir, "node_modules", "@bb", "shared-ui");
+    const sharedUiDir = join(dir, "node_modules", "@omnyo", "shared-ui");
+
     const files: Record<string, string> = {
       [join(sharedUiDir, "package.json")]: JSON.stringify({
-        name: "@bb/shared-ui",
+        name: "@omnyo/shared-ui",
         type: "module",
         exports: {
           "./empty-state": "./src/components/ui/empty-state.tsx",
@@ -160,12 +246,14 @@ describe("plugin app runtime shim", () => {
       [join(dir, "components", "ui", "button.tsx")]:
         `import { Icon } from "./icon";\nexport function Button() { return Icon; }\n`,
       [join(dir, "app.tsx")]:
-        `import { EmptyState } from "@bb/shared-ui/empty-state";\nimport { Button } from "./components/ui/button";\nexport { EmptyState, Button };\n`,
+        `import { EmptyState } from "@omnyo/shared-ui/empty-state";\nimport { Button } from "./components/ui/button";\nexport { EmptyState, Button };\n`,
     };
+
     for (const [filePath, contents] of Object.entries(files)) {
       await mkdir(dirname(filePath), { recursive: true });
       await writeFile(filePath, contents);
     }
+
     const result = await build({
       entryPoints: [join(dir, "app.tsx")],
       bundle: true,
@@ -176,6 +264,7 @@ describe("plugin app runtime shim", () => {
       logLevel: "silent",
       plugins: [runtimeShimPlugin()],
     });
+
     const js = result.outputFiles[0]?.text ?? "";
     expect(js).not.toContain("shared-ui-hugeicons-map");
     expect(js).toMatch(/runtime\d*\.sharedUiIcon\b/);
@@ -183,12 +272,16 @@ describe("plugin app runtime shim", () => {
   });
 
   it("shims shared-ui's relative ./question-form-host import to the host's context", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-question-host-rel-"));
+    const dir = await mkdtemp(
+      join(tmpdir(), "omnyo-plugin-question-host-rel-"),
+    );
+
     tempDirs.push(dir);
-    const sharedUiDir = join(dir, "node_modules", "@bb", "shared-ui");
+    const sharedUiDir = join(dir, "node_modules", "@omnyo", "shared-ui");
+
     const files: Record<string, string> = {
       [join(sharedUiDir, "package.json")]: JSON.stringify({
-        name: "@bb/shared-ui",
+        name: "@omnyo/shared-ui",
         type: "module",
         exports: {
           "./question-form": "./src/components/ui/question-form.tsx",
@@ -199,12 +292,14 @@ describe("plugin app runtime shim", () => {
       [join(sharedUiDir, "src", "components", "ui", "question-form.tsx")]:
         `import { useQuestionFormHost } from "./question-form-host";\nexport function QuestionForm() { return useQuestionFormHost(); }\n`,
       [join(dir, "app.tsx")]:
-        `import { QuestionForm } from "@bb/shared-ui/question-form";\nexport { QuestionForm };\n`,
+        `import { QuestionForm } from "@omnyo/shared-ui/question-form";\nexport { QuestionForm };\n`,
     };
+
     for (const [filePath, contents] of Object.entries(files)) {
       await mkdir(dirname(filePath), { recursive: true });
       await writeFile(filePath, contents);
     }
+
     const result = await build({
       entryPoints: [join(dir, "app.tsx")],
       bundle: true,
@@ -215,6 +310,7 @@ describe("plugin app runtime shim", () => {
       logLevel: "silent",
       plugins: [runtimeShimPlugin()],
     });
+
     const js = result.outputFiles[0]?.text ?? "";
     expect(js).not.toContain("bundled-default-context");
     expect(js).toMatch(/runtime\d*\.questionFormHost\b/);
@@ -223,30 +319,31 @@ describe("plugin app runtime shim", () => {
   it("recognizes only shared-ui's own host-backed modules as relative imports", () => {
     const sharedUiComponent =
       "/repo/packages/shared-ui/src/components/ui/empty-state.tsx";
+
     expect(sharedUiRuntimeModuleFor("./icon", sharedUiComponent)).toBe(
-      "@bb/shared-ui/icon",
+      "@omnyo/shared-ui/icon",
     );
     expect(sharedUiRuntimeModuleFor("./icon.js", sharedUiComponent)).toBe(
-      "@bb/shared-ui/icon",
+      "@omnyo/shared-ui/icon",
     );
     expect(
       sharedUiRuntimeModuleFor(
         "../components/ui/icon",
         "/repo/packages/shared-ui/src/hooks/use-thing.ts",
       ),
-    ).toBe("@bb/shared-ui/icon");
+    ).toBe("@omnyo/shared-ui/icon");
     expect(
       sharedUiRuntimeModuleFor(
         "./question-form-host",
         "/repo/packages/shared-ui/src/components/ui/question-form.tsx",
       ),
-    ).toBe("@bb/shared-ui/question-form-host");
+    ).toBe("@omnyo/shared-ui/question-form-host");
     expect(
       sharedUiRuntimeModuleFor(
         "./voice-input-textarea",
         "/repo/packages/shared-ui/src/components/ui/question-form.tsx",
       ),
-    ).toBe("@bb/shared-ui/voice-input-textarea");
+    ).toBe("@omnyo/shared-ui/voice-input-textarea");
     expect(sharedUiRuntimeModuleFor("./button", sharedUiComponent)).toBe(null);
     expect(
       sharedUiRuntimeModuleFor(
@@ -263,14 +360,14 @@ describe("plugin app runtime shim", () => {
   });
 
   it("scopes Tailwind utilities while preserving imported CSS unscoped", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-css-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-css-"));
     tempDirs.push(dir);
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-css-fixture",
+        name: "omnyo-plugin-css-fixture",
         version: "0.0.0",
-        bb: {
+        omnyo: {
           name: "CSS fixture",
           description: "Verifies plugin CSS emission.",
           branding: { icon: "Paintbrush" },
@@ -286,7 +383,7 @@ describe("plugin app runtime shim", () => {
     await writeFile(
       join(dir, "app.ts"),
       'import "./app.css";\n' +
-        'export const utilityClass = "flex-col";\n' +
+        'export const utilityClass = "flex-col hover:underline has-[:focus]:opacity-50 group-has-[input:checked]/host:opacity-50 hover:group-has-[input:checked]/host:opacity-50 group-has-[input:checked]/host:[&>svg]:hidden space-y-3 [[data-scope-host]_&]:opacity-50 [[data-scope-host]~&]:opacity-50";\n' +
         'export const siblingClass = "[&~*]:hidden";\n',
     );
     await writeFile(
@@ -300,16 +397,36 @@ describe("plugin app runtime shim", () => {
       "0.9.0-test",
       await testToolchain(),
     );
+
     const css = await readFile(result.cssPath, "utf8");
 
     const scope =
-      ":where([data-bb-plugin=css-fixture],[data-bb-plugin-root]:not([data-bb-plugin]))";
+      ":where([data-omnyo-plugin=css-fixture],[data-omnyo-plugin-root]:not([data-omnyo-plugin]))";
+
     expect(css).toContain(`${scope} .flex-col`);
     expect(css).toContain(`${scope}.flex-col`);
     const sibling = String.raw`.\[\&\~\*\]\:hidden`;
     expect(css).toContain(`${scope} ${sibling}`);
     expect(css).not.toContain(`${scope}${sibling}`);
     expect(css).not.toContain("@scope");
+    expect(css).not.toContain(String.raw`:is(${scope} .hover\:underline`);
+    expect(css).toContain(`${scope}.space-y-3`);
+    expect(css).not.toContain(String.raw`:is(${scope} .group-has`);
+    expect(css).toContain(
+      String.raw`${scope}.group-has-\[input\:checked\]\/host\:opacity-50:is(:where(.group\/host):has(:is(input:checked)) *)`,
+    );
+    expect(css).toContain(
+      String.raw`.hover\:group-has-\[input\:checked\]\/host\:opacity-50:hover`,
+    );
+    expect(css).toContain(
+      String.raw`${scope}.group-has-\[input\:checked\]\/host\:\[\&\>svg\]\:hidden:is(:where(.group\/host):has(:is(input:checked)) *)>svg`,
+    );
+    expect(css).toContain(`[data-scope-host] ${scope}`);
+    expect(css).toContain(`[data-scope-host]~${scope}`);
+    expect(css).toContain(String.raw`${scope} .hover\:underline:hover`);
+    expect(css).toContain(
+      String.raw`${scope}.has-\[\:focus\]\:opacity-50:has(:focus)`,
+    );
     expect(css).not.toContain(`${scope} .bb71-authored-decoration`);
     expect(css).not.toContain(`${scope}.bb71-authored-decoration`);
     expect(css.indexOf(".bb71-authored-decoration{")).toBeGreaterThan(
@@ -319,14 +436,14 @@ describe("plugin app runtime shim", () => {
   });
 
   it("minifies app.js and app.css unless the caller asks for readable output", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-minify-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-minify-"));
     tempDirs.push(dir);
     await writeFile(
       join(dir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-minify-fixture",
+        name: "omnyo-plugin-minify-fixture",
         version: "0.0.0",
-        bb: {
+        omnyo: {
           name: "Minify fixture",
           description: "Verifies artifact minification.",
           branding: { icon: "Zap" },
@@ -348,7 +465,7 @@ describe("plugin app runtime shim", () => {
         '  const fixtureLocalResult = [fixtureInputValue, "flex-col"].join(" ");',
         "  return fixtureLocalResult;",
         "}",
-        'export default computeFixtureLabel("bb-minify");',
+        'export default computeFixtureLabel("omnyo-minify");',
         "",
       ].join("\n"),
     );
@@ -363,7 +480,7 @@ describe("plugin app runtime shim", () => {
     const minifiedCss = await readFile(minified.cssPath, "utf8");
     expect(minifiedJs).not.toContain("fixtureLocalResult");
     expect(minifiedJs).not.toContain("fixture-legal-comment");
-    expect(minifiedJs).toContain("bb-minify");
+    expect(minifiedJs).toContain("omnyo-minify");
     expect(minifiedCss).toContain(".flex-col{flex-direction:column}");
     expect(minifiedCss).toContain(".bb71-authored{color:#ff69b4;margin:0}");
     expect(minifiedCss).not.toContain("\n  ");
@@ -371,6 +488,7 @@ describe("plugin app runtime shim", () => {
     const readable = await buildPluginApp(dir, "0.9.0-test", toolchain, {
       minify: false,
     });
+
     const readableJs = await readFile(readable.jsPath, "utf8");
     const readableCss = await readFile(readable.cssPath, "utf8");
     expect(readableJs).toContain("fixtureLocalResult");
@@ -381,7 +499,7 @@ describe("plugin app runtime shim", () => {
   });
 
   it("scans bundled Tailwind content from a symlinked workspace dependency by filesystem identity", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-plugin-scan-"));
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-scan-"));
     tempDirs.push(dir);
     const uiPackageDir = join(dir, "packages", "fixture-ui");
     await mkdir(join(uiPackageDir, "src", "excluded"), { recursive: true });
@@ -392,7 +510,7 @@ describe("plugin app runtime shim", () => {
         name: "fixture-ui",
         version: "0.0.0",
         type: "module",
-        bb: { pluginTailwindContent: ["src/**/*", "!src/excluded/**/*"] },
+        omnyo: { pluginTailwindContent: ["src/**/*", "!src/excluded/**/*"] },
       }),
     );
     await writeFile(
@@ -417,10 +535,10 @@ describe("plugin app runtime shim", () => {
     await writeFile(
       join(pluginDir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-scan-fixture",
+        name: "omnyo-plugin-scan-fixture",
         version: "0.0.0",
         type: "module",
-        bb: {
+        omnyo: {
           name: "Scan fixture",
           description: "Verifies dependency content scanning.",
           branding: { icon: "Zap" },
@@ -449,8 +567,9 @@ describe("plugin app runtime shim", () => {
     );
 
     const aliasContainer = await mkdtemp(
-      join(tmpdir(), "bb-plugin-scan-alias-"),
+      join(tmpdir(), "omnyo-plugin-scan-alias-"),
     );
+
     tempDirs.push(aliasContainer);
     const aliasedRoot = join(aliasContainer, "fixture");
     await symlink(dir, aliasedRoot);
@@ -460,6 +579,7 @@ describe("plugin app runtime shim", () => {
       "0.9.0-test",
       await testToolchain(),
     );
+
     const css = await readFile(result.cssPath, "utf8");
 
     expect(css).toContain(".tracking-widest{");
@@ -480,14 +600,14 @@ describe("plugin app runtime shim", () => {
   ])(
     "rejects %s in a path-shaped branding.icon before building",
     async (_case, icon, expectedError) => {
-      const dir = await mkdtemp(join(tmpdir(), "bb-plugin-icon-"));
+      const dir = await mkdtemp(join(tmpdir(), "omnyo-plugin-icon-"));
       tempDirs.push(dir);
       await writeFile(
         join(dir, "package.json"),
         JSON.stringify({
-          name: "bb-plugin-icon-fixture",
+          name: "omnyo-plugin-icon-fixture",
           version: "0.0.0",
-          bb: {
+          omnyo: {
             name: "Icon fixture",
             description: "Verifies compact icon validation.",
             branding: { icon: "./icon.svg" },

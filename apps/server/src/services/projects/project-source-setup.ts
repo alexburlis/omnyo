@@ -1,5 +1,5 @@
 import { createCloneProgressReporter } from "./clone-progress.js";
-import type { PluginEnvironmentProviderProgress } from "@get-bb/plugin-sdk/environment-provider";
+import type { PluginEnvironmentProviderProgress } from "@omnyo/plugin-sdk/environment-provider";
 import { registerEnvironmentProgressReport } from "../environments/environment-hooks.js";
 import { resolveHostEnvironment } from "../hosts/host-environment.js";
 import {
@@ -7,7 +7,7 @@ import {
   getProjectSourceByHost,
   isSqliteUniqueConstraintOnColumns,
   setProjectGitRemoteUrlIfMissing,
-} from "@bb/db";
+} from "@omnyo/db";
 import type { CommandResultSideEffectsDeps } from "../../internal/command-result-side-effects.js";
 import { ApiError } from "../../errors.js";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
@@ -34,6 +34,7 @@ export function registerProjectSourceOnHost(
   },
 ) {
   let source;
+
   try {
     source = createProjectSource(deps.db, deps.hub, {
       projectId: args.projectId,
@@ -53,8 +54,10 @@ export function registerProjectSourceOnHost(
     ) {
       throw projectSourceHostConflict();
     }
+
     throw error;
   }
+
   if (args.gitRemoteUrl !== null) {
     setProjectGitRemoteUrlIfMissing(
       deps.db,
@@ -63,6 +66,7 @@ export function registerProjectSourceOnHost(
       args.gitRemoteUrl,
     );
   }
+
   return source;
 }
 
@@ -84,13 +88,17 @@ export async function cloneProjectSourceOnHost(
       "A remoteUrl is required because this project has no git remote anchor",
     );
   }
+
   const contributedEnv = await resolveHostEnvironment(deps, {
     hostId: args.hostId,
     projectId: args.projectId,
   });
+
   const progress =
     args.report === undefined ? null : createCloneProgressReporter(args.report);
+
   const operationId = `project-clone-${randomUUID()}`;
+
   const unregister =
     progress === null
       ? undefined
@@ -99,6 +107,7 @@ export async function cloneProjectSourceOnHost(
           operationId,
           report: progress.report,
         });
+
   try {
     const resolved = await runLiveHostCommand(deps, {
       hostId: args.hostId,
@@ -114,6 +123,7 @@ export async function cloneProjectSourceOnHost(
           : {}),
       },
     });
+
     return registerProjectSourceOnHost(deps, {
       projectId: args.projectId,
       hostId: args.hostId,
@@ -150,6 +160,7 @@ export function hasPendingProjectSourceSetupOnHost(
   hostId: string,
 ): boolean {
   const pending = pendingSetups.get(db);
+
   return (
     pending !== undefined &&
     [...pending.values()].some((setup) => setup.hostId === hostId)
@@ -161,15 +172,19 @@ export async function ensureProjectSourceOnHost(
   args: EnsureProjectSourceArgs,
 ) {
   let pending = pendingSetups.get(deps.db);
+
   if (pending === undefined) {
     pending = new Map();
     pendingSetups.set(deps.db, pending);
   }
+
   const key = JSON.stringify([args.projectId, args.hostId]);
   const active = pending.get(key);
+
   if (active !== undefined) return active.promise;
   const setup = recoverOrCloneProjectSource(deps, args);
   pending.set(key, { hostId: args.hostId, promise: setup });
+
   try {
     return await setup;
   } finally {
@@ -182,7 +197,9 @@ async function recoverOrCloneProjectSource(
   args: EnsureProjectSourceArgs,
 ) {
   const source = getProjectSourceByHost(deps.db, args.projectId, args.hostId);
+
   if (source !== null) return source;
+
   if (args.remoteUrl === null) {
     throw new ApiError(
       400,
@@ -190,6 +207,7 @@ async function recoverOrCloneProjectSource(
       "This project needs a Git remote to set up its checkout on a new machine",
     );
   }
+
   const { path } = await callHostRetryableOnlineRpcForWork(deps, {
     hostId: args.hostId,
     timeoutMs: COMMAND_TIMEOUT_MS,
@@ -198,17 +216,20 @@ async function recoverOrCloneProjectSource(
       projectSlug: `project-${args.projectId}`,
     },
   });
+
   const { existence } = await callHostRetryableOnlineRpcForWork(deps, {
     hostId: args.hostId,
     timeoutMs: COMMAND_TIMEOUT_MS,
     command: { type: "host.paths_exist", paths: [path] },
   });
+
   if (existence[path] === true) {
     const inspected = await callHostRetryableOnlineRpcForWork(deps, {
       hostId: args.hostId,
       timeoutMs: COMMAND_TIMEOUT_MS,
       command: { type: "project.inspect", path },
     });
+
     if (inspected.path !== path || inspected.gitRemoteUrl !== args.remoteUrl) {
       throw new ApiError(
         409,
@@ -216,12 +237,14 @@ async function recoverOrCloneProjectSource(
         "The project setup target does not match this project's Git remote",
       );
     }
+
     return registerProjectSourceOnHost(deps, {
       projectId: args.projectId,
       hostId: args.hostId,
       ...inspected,
     });
   }
+
   if (existence[path] !== false) {
     throw new ApiError(
       502,
@@ -229,5 +252,6 @@ async function recoverOrCloneProjectSource(
       "The machine did not report whether the project setup target exists",
     );
   }
+
   return cloneProjectSourceOnHost(deps, { ...args, targetPath: path });
 }

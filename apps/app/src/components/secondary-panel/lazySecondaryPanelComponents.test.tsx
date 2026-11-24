@@ -10,6 +10,7 @@ import {
 } from "./lazySecondaryPanelComponents";
 
 vi.mock("./ThreadSecondaryPanel", () => new Promise(() => {}));
+
 vi.mock("./BrowserTabDeck", () => {
   throw new Error("chunk request failed");
 });
@@ -55,6 +56,7 @@ describe("LazyThreadSecondaryPanel", () => {
     const placeholder = screen.getByTestId(
       "thread-secondary-panel-placeholder",
     );
+
     expect(placeholder.className).toContain("border-l");
     expect(placeholder.className).toContain("border-border-seam");
   });
@@ -101,7 +103,7 @@ describe("LazyBrowserTabDeck", () => {
     const view = render(renderDeck(browserTab.id));
 
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "Could not load.",
+      "This part of Omnyo didn’t load",
     );
 
     view.rerender(renderDeck(null));

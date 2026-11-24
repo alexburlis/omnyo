@@ -1,7 +1,8 @@
 import { HEADER_SEAM_CLASS } from "@/components/layout/AppPageHeader";
-import { CHROME_ROW_CLASS } from "@/lib/bb-desktop";
-import { Skeleton } from "@bb/shared-ui/skeleton";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { CHROME_ROW_CLASS } from "@/lib/omnyo-desktop";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { useEffect, type ReactNode } from "react";
 
 interface RouteLoadingSkeletonProps {
@@ -16,18 +17,24 @@ export function isRouteLoadingSkeletonMounted(): boolean {
 }
 
 const SHELL_CLASS = "flex h-full min-h-0 flex-1 flex-col overflow-hidden";
+
 const STANDALONE_SHELL_BLEED_CLASS = "-mx-4 -mt-4 md:-mx-5 md:-mt-5";
 
 export function RouteLoadingSkeleton({
   children,
   isBoundedPane,
 }: RouteLoadingSkeletonProps) {
+  const isCompactViewport = useIsCompactViewport();
+  const hasHeaderRow = isBoundedPane || isCompactViewport;
+
   useEffect(() => {
     mountedRouteLoadingSkeletons += 1;
+
     return () => {
       mountedRouteLoadingSkeletons -= 1;
     };
   }, []);
+
   return (
     <div
       className={cn(
@@ -39,16 +46,18 @@ export function RouteLoadingSkeleton({
       aria-label="Loading"
       data-testid="route-loading-skeleton"
     >
-      <div
-        className={cn(
-          CHROME_ROW_CLASS,
-          HEADER_SEAM_CLASS,
-          "shrink-0 gap-2",
-          isBoundedPane ? "px-4" : "px-3 pl-12",
-        )}
-      >
-        <Skeleton className="h-4 w-40 max-w-[50%]" />
-      </div>
+      {hasHeaderRow ? (
+        <div
+          className={cn(
+            CHROME_ROW_CLASS,
+            HEADER_SEAM_CLASS,
+            "shrink-0 gap-2",
+            isBoundedPane ? "px-4" : "px-3 pl-12",
+          )}
+        >
+          <Skeleton className="h-4 w-40 max-w-[50%]" />
+        </div>
+      ) : null}
       <div className="mx-auto min-h-0 w-full max-w-[760px] flex-1 overflow-hidden px-4">
         {children}
       </div>

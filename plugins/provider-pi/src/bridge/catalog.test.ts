@@ -8,17 +8,19 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BB_PI_EXTENSION_SOURCE } from "./bb-pi-extension.js";
+import { OMNYO_PI_EXTENSION_SOURCE } from "./omnyo-pi-extension.js";
 import { closeAllPiCatalogs, getPiCatalog } from "./catalog.js";
 import { PI_BRIDGE_ARGS_ENV, PI_BRIDGE_COMMAND_ENV } from "./rpc-child.js";
 import { fakePiPath } from "./test-support.js";
 
 const originalEnv = { ...process.env };
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
   await closeAllPiCatalogs();
   process.env = { ...originalEnv };
+
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -26,12 +28,12 @@ afterEach(async () => {
 
 describe("pi catalog child generations", () => {
   it("re-reads model scope after the catalog child restarts", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "bb-pi-catalog-"));
+    const workspace = mkdtempSync(join(tmpdir(), "omnyo-pi-catalog-"));
     tempDirs.push(workspace);
-    const extensionPath = join(workspace, "bb-extension.mjs");
+    const extensionPath = join(workspace, "omnyo-extension.mjs");
     const spawnCounterPath = join(workspace, "spawns.txt");
     const processLogPath = join(workspace, "processes.txt");
-    writeFileSync(extensionPath, BB_PI_EXTENSION_SOURCE);
+    writeFileSync(extensionPath, OMNYO_PI_EXTENSION_SOURCE);
 
     process.env[PI_BRIDGE_COMMAND_ENV] = process.execPath;
     process.env[PI_BRIDGE_ARGS_ENV] = JSON.stringify([fakePiPath]);
@@ -67,6 +69,7 @@ const FAKE_MODEL = {
   reasoning: true,
   contextWindow: 200_000,
 };
+
 const ADDED_MODEL = {
   id: "added-model",
   name: "Added Model",
@@ -86,17 +89,19 @@ interface FakeCatalogPaths {
 }
 
 function setUpFakeCatalog(env: Record<string, string>): FakeCatalogPaths {
-  const workspace = mkdtempSync(join(tmpdir(), "bb-pi-catalog-"));
+  const workspace = mkdtempSync(join(tmpdir(), "omnyo-pi-catalog-"));
   tempDirs.push(workspace);
+
   const paths: FakeCatalogPaths = {
     workspace,
-    extensionPath: join(workspace, "bb-extension.mjs"),
+    extensionPath: join(workspace, "omnyo-extension.mjs"),
     modelsPath: join(workspace, "models.json"),
     refreshLogPath: join(workspace, "refreshes.txt"),
     spawnCounterPath: join(workspace, "spawns.txt"),
     processLogPath: join(workspace, "processes.txt"),
   };
-  writeFileSync(paths.extensionPath, BB_PI_EXTENSION_SOURCE);
+
+  writeFileSync(paths.extensionPath, OMNYO_PI_EXTENSION_SOURCE);
   writeFileSync(paths.modelsPath, JSON.stringify([FAKE_MODEL]));
   process.env[PI_BRIDGE_COMMAND_ENV] = process.execPath;
   process.env[PI_BRIDGE_ARGS_ENV] = JSON.stringify([fakePiPath]);
@@ -105,6 +110,7 @@ function setUpFakeCatalog(env: Record<string, string>): FakeCatalogPaths {
   process.env.FAKE_PI_SPAWN_COUNTER_FILE = paths.spawnCounterPath;
   process.env.FAKE_PI_PROCESS_LOG = paths.processLogPath;
   Object.assign(process.env, env);
+
   return paths;
 }
 

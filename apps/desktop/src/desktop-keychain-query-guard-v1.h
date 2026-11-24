@@ -1,0 +1,42 @@
+#ifndef OMNYO_KEYCHAIN_QUERY_GUARD_V1_H
+#define OMNYO_KEYCHAIN_QUERY_GUARD_V1_H
+#include <stdbool.h>
+#include <stdint.h>
+typedef struct {
+  uint32_t version;
+  int32_t processId;
+  uint64_t observed;
+  uint64_t matched;
+  uint64_t denied;
+  uint64_t forwarded;
+  int32_t lastStatus;
+  uint32_t lastOperation;
+  uint32_t lastDeniedOperation;
+  uint32_t lastForwardedOperation;
+  int32_t lastForwardedStatus;
+  uint64_t forwardedReads;
+  uint64_t forwardedMutations;
+  bool interactionNotAllowed;
+  bool defaultDeny;
+  bool writesAllowed;
+  uint64_t mutationsDenied;
+  bool serviceIsString;
+  bool accountIsString;
+  bool serviceMatches;
+  bool accountMatches;
+  bool legacyAccountMatches;
+  bool genericPassword;
+  bool defaultBackend;
+  bool backendAttributePresent;
+  bool backendAttributeIsBoolean;
+  bool backendAttributeIsFalse;
+  bool backendAttributeIsTrue;
+  uint64_t serviceUtf8Length;
+  uint64_t accountUtf8Length;
+  char serviceSha256[65];
+  char accountSha256[65];
+  char namespaceSha256[65];
+  char unexpectedNamespaceSha256[65];
+} OmnyoKeychainQueryGuardReportV1;
+int omnyo_keychain_query_guard_report_v1(OmnyoKeychainQueryGuardReportV1 *result);
+#endif

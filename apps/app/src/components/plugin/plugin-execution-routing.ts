@@ -1,5 +1,5 @@
-import type { SystemProvidersQuery } from "@bb/server-contract";
-import type { ExperimentalProviderModelPickerRouting } from "@get-bb/plugin-sdk";
+import type { SystemProvidersQuery } from "@omnyo/server-contract";
+import type { ExperimentalProviderModelPickerRouting } from "@omnyo/plugin-sdk";
 
 export interface ResolvedPluginExecutionRouting {
   key: string;
@@ -15,11 +15,13 @@ export function resolvePluginExecutionRouting(
       query: { hostId: routing.hostId },
     };
   }
+
   if (routing?.kind === "environment") {
     return {
       key: `environment:${routing.environmentId}`,
       query: { environmentId: routing.environmentId },
     };
   }
+
   return { key: "primary", query: {} };
 }

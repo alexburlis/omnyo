@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { isPathWithinDirectory } from "@bb/process-utils";
+import { isPathWithinDirectory } from "@omnyo/process-utils";
 import type {
   ParcelWatcherEventBatch,
   ParcelWatcherSubscribeOptions,
@@ -33,23 +33,43 @@ function trimOutput(value: string): string {
 
 async function resolveGitDirectory(cwd: string): Promise<string | undefined> {
   const dotGitPath = path.join(cwd, ".git");
+
   try {
-    const dotGitStat = await fs.lstat(dotGitPath);
+    const dotGitStat = await fs.stat(dotGitPath);
+
     if (dotGitStat.isDirectory()) {
+      const commonDirPath = await resolveGitCommonDirectory(dotGitPath);
+
+      const [head, objects, refs] = await Promise.all([
+        fs.stat(path.join(dotGitPath, "HEAD")),
+        fs.stat(path.join(commonDirPath, "objects")),
+        fs.stat(path.join(commonDirPath, "refs")),
+      ]);
+
+      if (!head.isFile() || !objects.isDirectory() || !refs.isDirectory()) {
+        return undefined;
+      }
+
       return canonicalizePath(dotGitPath);
     }
+
     if (!dotGitStat.isFile()) {
       return undefined;
     }
+
     const dotGitContents = await fs.readFile(dotGitPath, "utf8");
     const firstLine = dotGitContents.split("\n")[0]?.trim() ?? "";
+
     if (!firstLine.startsWith("gitdir:")) {
       return undefined;
     }
+
     const relativeGitDir = firstLine.slice("gitdir:".length).trim();
+
     if (relativeGitDir.length === 0) {
       return undefined;
     }
+
     return canonicalizePath(path.resolve(cwd, relativeGitDir));
   } catch {
     return undefined;
@@ -61,9 +81,11 @@ async function resolveGitCommonDirectory(gitDirPath: string): Promise<string> {
     const relativeCommonDirPath = trimOutput(
       await fs.readFile(path.join(gitDirPath, "commondir"), "utf8"),
     );
+
     if (relativeCommonDirPath.length === 0) {
       return gitDirPath;
     }
+
     return canonicalizePath(path.resolve(gitDirPath, relativeCommonDirPath));
   } catch {
     return gitDirPath;
@@ -74,9 +96,11 @@ async function resolveGitMetadataLayout(
   cwd: string,
 ): Promise<GitMetadataLayout | null> {
   const gitDirPath = await resolveGitDirectory(cwd);
+
   if (!gitDirPath) {
     return null;
   }
+
   return {
     commonDirPath: await resolveGitCommonDirectory(gitDirPath),
     gitDirPath,
@@ -106,9 +130,11 @@ function isSharedGitRefPath(relativePath: string): boolean {
   if (relativePath.length === 0 || relativePath.endsWith(".lock")) {
     return false;
   }
+
   if (relativePath === "packed-refs") {
     return true;
   }
+
   return (
     relativePath.startsWith("refs/heads/") ||
     relativePath.startsWith("refs/remotes/")
@@ -126,6 +152,7 @@ function classifyGitDirPath(
   ) {
     return null;
   }
+
   return "workspace-git-changed";
 }
 
@@ -140,12 +167,14 @@ export function collectWorkspaceStatusChanges(args: {
   spec: WatchSubscriptionSpec;
 }): WorkspaceStatusChangeEvent | null {
   const changedPaths = new Set<string>();
+
   const changeKinds = new Set<
     WorkspaceStatusChangeEvent["changeKinds"][number]
   >();
 
   for (const event of args.events) {
     const candidatePath = resolveEventPath(args.spec.rootPath, event.path);
+
     if (!isPathWithinDirectory(args.spec.rootPath, candidatePath)) {
       continue;
     }
@@ -154,15 +183,19 @@ export function collectWorkspaceStatusChanges(args: {
       args.spec.rootPath,
       candidatePath,
     );
+
     const eventChangeKinds: WorkspaceStatusChangeEvent["changeKinds"][number][] =
       [];
+
     if (args.spec.kind === "workspace-root") {
       eventChangeKinds.push("workspace-content-changed");
     } else if (args.spec.kind === "git-dir") {
       const gitDirChangeKind = classifyGitDirPath(relativePath);
+
       if (gitDirChangeKind) {
         eventChangeKinds.push(gitDirChangeKind);
       }
+
       if (
         args.spec.includeSharedGitRefs === true &&
         isSharedGitRefPath(relativePath)
@@ -171,14 +204,18 @@ export function collectWorkspaceStatusChanges(args: {
       }
     } else {
       const commonDirChangeKind = classifyCommonDirPath(relativePath);
+
       if (commonDirChangeKind) {
         eventChangeKinds.push(commonDirChangeKind);
       }
     }
+
     if (eventChangeKinds.length === 0) {
       continue;
     }
+
     changedPaths.add(candidatePath);
+
     for (const changeKind of eventChangeKinds) {
       changeKinds.add(changeKind);
     }
@@ -198,18 +235,22 @@ export async function resolveMetadataWatchSpecs(
   cwd: string,
 ): Promise<WatchSubscriptionSpec[] | null> {
   const layout = await resolveGitMetadataLayout(cwd);
+
   if (!layout) {
     return null;
   }
+
   const commonDirSpec: WatchSubscriptionSpec = {
     includeSharedGitRefs: true,
     kind: layout.gitDirPath === layout.commonDirPath ? "git-dir" : "common-dir",
     options: createCommonDirWatchOptions(),
     rootPath: layout.commonDirPath,
   };
+
   if (layout.gitDirPath === layout.commonDirPath) {
     return [commonDirSpec];
   }
+
   return [
     {
       kind: "git-dir",

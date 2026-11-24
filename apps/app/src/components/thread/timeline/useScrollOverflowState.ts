@@ -35,6 +35,7 @@ export function useScrollOverflowState<TElement extends HTMLElement>(
   const scrollRef = useRef<TElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
+
   const [flags, setFlags] = useState<OverflowFlags>({
     above: false,
     below: false,
@@ -51,18 +52,22 @@ export function useScrollOverflowState<TElement extends HTMLElement>(
   useEffect(() => {
     if (options.enabled === false) {
       applyFlags({ above: false, below: false });
+
       return;
     }
+
     if (!options.measureOverflow || typeof window === "undefined") {
       return;
     }
 
     const scroll = scrollRef.current;
+
     if (!scroll) {
       return;
     }
 
     let frame: number | null = null;
+
     const measure = () => {
       frame = null;
       applyFlags({
@@ -70,6 +75,7 @@ export function useScrollOverflowState<TElement extends HTMLElement>(
         below: scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight > 1,
       });
     };
+
     const scheduleMeasure = () => {
       if (frame !== null) return;
       frame =
@@ -85,12 +91,14 @@ export function useScrollOverflowState<TElement extends HTMLElement>(
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(scheduleMeasure);
+
     resizeObserver?.observe(scroll);
 
     const mutationObserver =
       typeof MutationObserver === "undefined"
         ? null
         : new MutationObserver(scheduleMeasure);
+
     mutationObserver?.observe(scroll, {
       childList: true,
       characterData: true,
@@ -105,6 +113,7 @@ export function useScrollOverflowState<TElement extends HTMLElement>(
           window.clearTimeout(frame);
         }
       }
+
       scroll.removeEventListener("scroll", scheduleMeasure);
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
@@ -116,6 +125,7 @@ export function useScrollOverflowState<TElement extends HTMLElement>(
     const scroll = scrollRef.current;
     const topSentinel = topSentinelRef.current;
     const bottomSentinel = bottomSentinelRef.current;
+
     if (
       !scroll ||
       !topSentinel ||
@@ -137,6 +147,7 @@ export function useScrollOverflowState<TElement extends HTMLElement>(
             belowVisible = entry.isIntersecting;
           }
         }
+
         const hasOverflow = scroll.scrollHeight - scroll.clientHeight > 1;
         applyFlags({
           above: hasOverflow && !aboveVisible,
@@ -148,6 +159,7 @@ export function useScrollOverflowState<TElement extends HTMLElement>(
 
     observer.observe(topSentinel);
     observer.observe(bottomSentinel);
+
     return () => {
       observer.disconnect();
     };

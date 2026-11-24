@@ -15,16 +15,20 @@ export function NativeShellReporter() {
   useEffect(() => {
     if (shell === null || !shell.has("safe-area")) return;
     const style = document.documentElement.style;
+
     const applyBottomInset = (bottom: number) => {
-      style.setProperty("--bb-safe-area-bottom", `${bottom}px`);
+      style.setProperty("--omnyo-safe-area-bottom", `${bottom}px`);
     };
+
     applyBottomInset(shell.safeArea().bottom);
+
     const unsubscribe = shell.subscribe((event) => {
       if (event.type === "safe-area") applyBottomInset(event.safeArea.bottom);
     });
+
     return () => {
       unsubscribe();
-      style.removeProperty("--bb-safe-area-bottom");
+      style.removeProperty("--omnyo-safe-area-bottom");
     };
   }, [shell]);
 

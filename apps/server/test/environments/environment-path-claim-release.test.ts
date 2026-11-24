@@ -4,14 +4,14 @@ import {
   getEnvironment,
   getPreparingEnvironment,
   getThread,
-} from "@bb/db";
-import { validatePluginEnvironmentProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/db";
+import { validatePluginEnvironmentProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
 import type {
   PluginEnvironmentProviderCreateContext,
   PluginEnvironmentProviderCreateResult,
   PluginEnvironmentProviderRemoveResult,
-} from "@get-bb/plugin-sdk/environment-provider";
-import { createDeferredPromise } from "@bb/test-helpers";
+} from "@omnyo/plugin-sdk/environment-provider";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../src/errors.js";
@@ -36,7 +36,9 @@ import {
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
 const PLUGIN_ID = "claim-release";
+
 const PROVIDER_ID = "shared-checkout";
+
 const SHARED_PATH = "/tmp/environment-path-claim-release";
 
 function installClaimingProvider(
@@ -66,6 +68,7 @@ function installClaimingProvider(
       }),
     },
   ];
+
   setPluginEnvironmentProviderBridge({
     listEnvironmentCompositions: () => [],
     listEnvironmentProviders: () => records,
@@ -122,6 +125,7 @@ function pathAvailableTo(
       path: SHARED_PATH,
       threadId: args.threadId,
     });
+
     return true;
   } catch (error) {
     if (error instanceof ApiError) return false;
@@ -133,6 +137,7 @@ describe("environment path claim release", () => {
   it("hands the claimed path to a racing thread once the first claimer fails", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, { id: "host-claim-race" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: SHARED_PATH,
@@ -145,19 +150,24 @@ describe("environment path claim release", () => {
 
       installClaimingProvider(async (context) => {
         let held = await context.experimental_claimPath(SHARED_PATH);
+
         for (let attempt = 0; !held && attempt < 600; attempt += 1) {
           blockedAttempts += 1;
           await delay(10);
           held = await context.experimental_claimPath(SHARED_PATH);
         }
+
         if (!held)
           return { status: "failed", message: "workspace stayed claimed" };
+
         if (firstClaimer === null) {
           firstClaimer = context.thread.id;
           claimed.resolve(context.thread.id);
           await gate.promise;
+
           return { status: "failed", message: "attach failed" };
         }
+
         return { status: "created", path: SHARED_PATH, ownsPath: false };
       });
 
@@ -166,6 +176,7 @@ describe("environment path claim release", () => {
         hostId: host.id,
         prompt: "claim the workspace",
       });
+
       await claimed.promise;
       const failing = getPreparingEnvironment(harness.db, first.id);
       expect(failing).toMatchObject({ claimPath: SHARED_PATH });
@@ -175,6 +186,7 @@ describe("environment path claim release", () => {
         hostId: host.id,
         prompt: "wait for the workspace",
       });
+
       await vi.waitFor(() => {
         expect(blockedAttempts).toBeGreaterThan(0);
       });
@@ -204,14 +216,17 @@ describe("environment path claim release", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-claim-shared",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: SHARED_PATH,
       });
+
       installClaimingProvider(async () => ({
         status: "failed",
         message: "unused",
       }));
+
       const shared = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -220,15 +235,18 @@ describe("environment path claim release", () => {
         environmentProviderId: PROVIDER_ID,
         environmentProviderPluginId: PLUGIN_ID,
       });
+
       const sender = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: shared.id,
         status: "idle",
       });
+
       const adopter = seedThread(harness.deps, {
         projectId: project.id,
         status: "starting",
       });
+
       holdPath(harness, {
         environmentId: shared.id,
         ownerThreadId: adopter.id,
@@ -265,10 +283,12 @@ describe("environment path claim release", () => {
         const { host } = seedHostSession(harness.deps, {
           id: `host-reuse-${status}`,
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
           path: SHARED_PATH,
         });
+
         const shared = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
@@ -277,10 +297,12 @@ describe("environment path claim release", () => {
           environmentProviderId: PROVIDER_ID,
           environmentProviderPluginId: PLUGIN_ID,
         });
+
         const owner = seedThread(harness.deps, {
           projectId: project.id,
           status,
         });
+
         holdPath(harness, {
           environmentId: shared.id,
           ownerThreadId: owner.id,
@@ -289,6 +311,7 @@ describe("environment path claim release", () => {
           status: "failed",
           message: "unused",
         }));
+
         const request = createThreadFromRequest(harness.deps, {
           environment: { type: "reuse", environmentId: shared.id },
           input: textInput("reuse the workspace"),
@@ -298,6 +321,7 @@ describe("environment path claim release", () => {
           model: "requested-model",
           startedOnBehalfOf: null,
         });
+
         if (status === "error") {
           const thread = await request;
           expect(thread.environmentId).toBe(shared.id);
@@ -327,10 +351,12 @@ describe("environment path claim release", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-claim-provider",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: SHARED_PATH,
       });
+
       const shared = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -339,21 +365,26 @@ describe("environment path claim release", () => {
         environmentProviderId: PROVIDER_ID,
         environmentProviderPluginId: PLUGIN_ID,
       });
+
       const owner = seedThread(harness.deps, {
         projectId: project.id,
         status: "error",
       });
+
       holdPath(harness, { environmentId: shared.id, ownerThreadId: owner.id });
       const claimed = createDeferredPromise<boolean>();
       installClaimingProvider(async (context) => {
         claimed.resolve(await context.experimental_claimPath(SHARED_PATH));
+
         return { status: "created", path: SHARED_PATH, ownsPath: false };
       });
+
       const thread = await startThread(harness, {
         projectId: project.id,
         hostId: host.id,
         prompt: "reuse abandoned checkout",
       });
+
       expect(await claimed.promise).toBe(true);
       await vi.waitFor(() =>
         expect(getThread(harness.db, thread.id)?.environmentId).toBe(shared.id),
@@ -364,6 +395,7 @@ describe("environment path claim release", () => {
   it("keeps a claim held by a thread whose provisioning is still running", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, { id: "host-claim-live" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: SHARED_PATH,
@@ -373,9 +405,11 @@ describe("environment path claim release", () => {
       const claimed = createDeferredPromise<string>();
       installClaimingProvider(async (context) => {
         const held = await context.experimental_claimPath(SHARED_PATH);
+
         if (!held) return { status: "failed", message: "claim refused" };
         claimed.resolve(context.thread.id);
         await gate.promise;
+
         return { status: "created", path: SHARED_PATH, ownsPath: false };
       });
 
@@ -384,6 +418,7 @@ describe("environment path claim release", () => {
         hostId: host.id,
         prompt: "hold the workspace",
       });
+
       await claimed.promise;
       const preparing = getPreparingEnvironment(harness.db, thread.id);
 
@@ -411,10 +446,12 @@ describe("environment path claim release", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-claim-startup",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: SHARED_PATH,
       });
+
       const stuck = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -424,6 +461,7 @@ describe("environment path claim release", () => {
         environmentProviderPluginId: PLUGIN_ID,
         isGitRepo: false,
       });
+
       holdPath(harness, {
         environmentId: stuck.id,
         ownerThreadId: seedThread(harness.deps, {
@@ -444,10 +482,13 @@ describe("environment path claim release", () => {
       });
 
       const gate = createDeferredPromise<void>();
+
       const remove = vi.fn(async () => {
         await gate.promise;
+
         return { status: "removed" as const };
       });
+
       installClaimingProvider(
         async () => ({ status: "failed", message: "unused" }),
         remove,

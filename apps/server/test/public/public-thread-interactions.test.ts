@@ -1,14 +1,14 @@
-import { createQueuedThreadMessage, listQueuedThreadMessages } from "@bb/db";
+import { createQueuedThreadMessage, listQueuedThreadMessages } from "@omnyo/db";
 import {
   turnScope,
   USER_QUESTION_MAX_FREE_TEXT_LENGTH,
   USER_QUESTION_MAX_SELECTED,
-} from "@bb/domain";
-import type { PendingInteractionCreate } from "@bb/domain";
+} from "@omnyo/domain";
+import type { PendingInteractionCreate } from "@omnyo/domain";
 import type {
   PendingInteractionResolution,
   UserQuestionPendingInteractionPayload,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppDeps } from "../../src/types.js";
 import type { PendingInteractionLifecycle } from "../../src/services/interactions/pending-interactions.js";
@@ -51,6 +51,7 @@ function registerPendingInteraction(
     turnId: interaction.turnId,
     providerThreadId: interaction.providerThreadId,
   });
+
   return lifecycle.registerPendingInteraction({
     interaction,
   });
@@ -263,6 +264,7 @@ describe("public thread interaction routes", () => {
           },
         },
       );
+
       const otherThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -285,6 +287,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (registered.outcome === "rejected") {
         throw new Error(
           `Expected interaction registration to succeed: ${registered.reason}`,
@@ -294,6 +297,7 @@ describe("public thread interaction routes", () => {
       const listResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/interactions`,
       );
+
       expect(listResponse.status).toBe(200);
       await expect(readJson(listResponse)).resolves.toMatchObject([
         {
@@ -313,6 +317,7 @@ describe("public thread interaction routes", () => {
       const getResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/interactions/${registered.interaction.id}`,
       );
+
       expect(getResponse.status).toBe(200);
       await expect(readJson(getResponse)).resolves.toMatchObject({
         id: registered.interaction.id,
@@ -323,6 +328,7 @@ describe("public thread interaction routes", () => {
       const invalidInteractionIdResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/interactions/not-an-interaction-id`,
       );
+
       expect(invalidInteractionIdResponse.status).toBe(400);
       await expect(readJson(invalidInteractionIdResponse)).resolves.toEqual({
         code: "invalid_request",
@@ -332,6 +338,7 @@ describe("public thread interaction routes", () => {
       const wrongThreadResponse = await harness.app.request(
         `/api/v1/threads/${otherThread.id}/interactions/${registered.interaction.id}`,
       );
+
       expect(wrongThreadResponse.status).toBe(404);
       await expect(readJson(wrongThreadResponse)).resolves.toEqual({
         code: "invalid_request",
@@ -348,6 +355,7 @@ describe("public thread interaction routes", () => {
           body: JSON.stringify(createAllowOnceResolution()),
         },
       );
+
       expect(resolveResponse.status).toBe(200);
       await expect(readJson(resolveResponse)).resolves.toMatchObject({
         id: registered.interaction.id,
@@ -365,6 +373,7 @@ describe("public thread interaction routes", () => {
           body: JSON.stringify(createAllowOnceResolution()),
         },
       );
+
       expect(duplicateResolveResponse.status).toBe(200);
       await expect(readJson(duplicateResolveResponse)).resolves.toMatchObject({
         id: registered.interaction.id,
@@ -382,6 +391,7 @@ describe("public thread interaction routes", () => {
           body: JSON.stringify(createDenyResolution()),
         },
       );
+
       expect(conflictingResolveResponse.status).toBe(409);
       await expect(readJson(conflictingResolveResponse)).resolves.toEqual({
         code: "invalid_request",
@@ -394,17 +404,21 @@ describe("public thread interaction routes", () => {
           command.type === "interactive.resolve" &&
           command.interactionId === registered.interaction.id,
       );
+
       expect(queuedResolve.row.sessionId).toBe(session.id);
+
       const commandResultResponse = await reportQueuedCommandSuccess(
         harness,
         queuedResolve,
         {},
       );
+
       expect(commandResultResponse.status).toBe(200);
 
       const postResolveListResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/interactions`,
       );
+
       expect(postResolveListResponse.status).toBe(200);
       await expect(readJson(postResolveListResponse)).resolves.toEqual([]);
     });
@@ -436,6 +450,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (commandApproval.outcome === "rejected") {
         throw new Error(
           `Expected command interaction registration to succeed: ${commandApproval.reason}`,
@@ -452,6 +467,7 @@ describe("public thread interaction routes", () => {
           body: JSON.stringify(createAllowForSessionResolution()),
         },
       );
+
       expect(invalidCommandResolution.status).toBe(400);
       await expect(readJson(invalidCommandResolution)).resolves.toEqual({
         code: "invalid_request",
@@ -471,6 +487,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       expect(malformedBodyResponse.status).toBe(400);
       await expect(readJson(malformedBodyResponse)).resolves.toEqual({
         code: "invalid_request",
@@ -501,6 +518,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       expect(interruptedResolution.status).toBe(409);
       await expect(readJson(interruptedResolution)).resolves.toEqual({
         code: "invalid_request",
@@ -540,6 +558,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (permissionRequest.outcome === "rejected") {
         throw new Error(
           `Expected permission interaction registration to succeed: ${permissionRequest.reason}`,
@@ -564,6 +583,7 @@ describe("public thread interaction routes", () => {
           ),
         },
       );
+
       expect(grantResponse.status).toBe(200);
       await expect(readJson(grantResponse)).resolves.toMatchObject({
         id: permissionRequest.interaction.id,
@@ -576,17 +596,20 @@ describe("public thread interaction routes", () => {
           },
         }),
       });
+
       const grantCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "interactive.resolve" &&
           command.interactionId === permissionRequest.interaction.id,
       );
+
       const grantCommandResponse = await reportQueuedCommandSuccess(
         harness,
         grantCommand,
         {},
       );
+
       expect(grantCommandResponse.status).toBe(200);
 
       const deniedPermissionRequest = registerPendingInteraction(
@@ -609,6 +632,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (deniedPermissionRequest.outcome === "rejected") {
         throw new Error(
           `Expected permission interaction registration to succeed: ${deniedPermissionRequest.reason}`,
@@ -625,23 +649,27 @@ describe("public thread interaction routes", () => {
           body: JSON.stringify(createDenyResolution()),
         },
       );
+
       expect(denyResponse.status).toBe(200);
       await expect(readJson(denyResponse)).resolves.toMatchObject({
         id: deniedPermissionRequest.interaction.id,
         status: "resolving",
         resolution: createDenyResolution(),
       });
+
       const denyCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "interactive.resolve" &&
           command.interactionId === deniedPermissionRequest.interaction.id,
       );
+
       const denyCommandResponse = await reportQueuedCommandSuccess(
         harness,
         denyCommand,
         {},
       );
+
       expect(denyCommandResponse.status).toBe(200);
 
       const invalidPermissionRequest = registerPendingInteraction(
@@ -667,6 +695,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (invalidPermissionRequest.outcome === "rejected") {
         throw new Error(
           `Expected permission interaction registration to succeed: ${invalidPermissionRequest.reason}`,
@@ -692,6 +721,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       expect(invalidGrantResponse.status).toBe(400);
       await expect(readJson(invalidGrantResponse)).resolves.toEqual({
         code: "invalid_request",
@@ -727,6 +757,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (commandApproval.outcome === "rejected") {
         throw new Error(
           `Expected command interaction registration to succeed: ${commandApproval.reason}`,
@@ -749,6 +780,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       expect(resolveResponse.status).toBe(400);
       await expect(readJson(resolveResponse)).resolves.toEqual({
         code: "invalid_request",
@@ -765,13 +797,16 @@ describe("public thread interaction routes", () => {
         const { host } = seedHostSession(harness.deps, {
           id: `host-public-thread-question-${testCase.id}`,
         });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
         });
+
         const environment = seedEnvironment(harness.deps, {
           hostId: host.id,
           projectId: project.id,
         });
+
         const thread = seedThread(harness.deps, {
           projectId: project.id,
           environmentId: environment.id,
@@ -790,6 +825,7 @@ describe("public thread interaction routes", () => {
             payload: testCase.createPayload(),
           },
         );
+
         if (userQuestion.outcome === "rejected") {
           throw new Error(
             `Expected user-question interaction registration to succeed: ${userQuestion.reason}`,
@@ -806,6 +842,7 @@ describe("public thread interaction routes", () => {
             body: JSON.stringify(testCase.resolution),
           },
         );
+
         expect(resolveResponse.status).toBe(400);
         await expect(readJson(resolveResponse)).resolves.toEqual({
           code: "invalid_request",
@@ -815,6 +852,7 @@ describe("public thread interaction routes", () => {
         const getResponse = await harness.app.request(
           `/api/v1/threads/${thread.id}/interactions/${userQuestion.interaction.id}`,
         );
+
         expect(getResponse.status).toBe(200);
         await expect(readJson(getResponse)).resolves.toMatchObject({
           id: userQuestion.interaction.id,
@@ -830,27 +868,29 @@ describe("public thread interaction routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-public-thread-blocked-send",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/blocked-send-project",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         status: "idle",
       });
-      // An `idle` thread has always run a turn, and the checkpoint resolves the
-      // execution tuple it would freeze on a queued row before it decides to
-      // queue — so the fixture needs the prior turn a real thread would have.
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: environment.id,
         providerThreadId: "provider-thread-blocked",
         threadId: thread.id,
       });
+
       const queuedMessage = createQueuedThreadMessage(harness.db, harness.hub, {
         threadId: thread.id,
         content: textInput("Queued message"),
@@ -863,6 +903,7 @@ describe("public thread interaction routes", () => {
         payload: { kind: "inline" },
         systemNotice: null,
       });
+
       const pending = registerPendingInteraction(
         harness.deps,
         harness.deps.pendingInteractions,
@@ -880,6 +921,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (pending.outcome === "rejected") {
         throw new Error(
           `Expected interaction registration to succeed: ${pending.reason}`,
@@ -899,8 +941,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
-      // A prompt cannot interrupt the interaction, but the message is not lost:
-      // it joins the queue and delivers once the interaction settles (#1650).
+
       expect(sendResponse.status).toBe(200);
       await expect(readJson(sendResponse)).resolves.toMatchObject({
         ok: true,
@@ -911,8 +952,7 @@ describe("public thread interaction routes", () => {
           sendAt: null,
         },
       });
-      // The queued row sits alongside the message that was already queued, and
-      // it is the only one carrying the interaction wait.
+
       expect(
         listQueuedThreadMessages(harness.db, thread.id).filter(
           (row) => row.waitingOn !== null,
@@ -932,6 +972,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       expect(startResponse.status).toBe(409);
       await expect(readJson(startResponse)).resolves.toEqual({
         code: "awaiting_user_interaction",
@@ -949,6 +990,7 @@ describe("public thread interaction routes", () => {
           body: JSON.stringify({ mode: "auto" }),
         },
       );
+
       expect(queuedMessageSendResponse.status).toBe(409);
       await expect(readJson(queuedMessageSendResponse)).resolves.toEqual({
         code: "awaiting_user_interaction",
@@ -961,11 +1003,13 @@ describe("public thread interaction routes", () => {
         environmentId: environment.id,
         status: "active",
       });
+
       seedThreadRuntimeState(harness.deps, {
         threadId: activeThread.id,
         environmentId: environment.id,
         providerThreadId: "provider-thread-active-blocked",
       });
+
       const activeThreadPending = registerPendingInteraction(
         harness.deps,
         harness.deps.pendingInteractions,
@@ -983,6 +1027,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (activeThreadPending.outcome === "rejected") {
         throw new Error(
           `Expected active interaction registration to succeed: ${activeThreadPending.reason}`,
@@ -1002,9 +1047,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
-      // The queue drains when the thread is next idle, which an open
-      // interaction does not change, so an explicit queue request queues behind
-      // the running turn rather than behind the interaction.
+
       expect(activeSendResponse.status).toBe(200);
       await expect(readJson(activeSendResponse)).resolves.toMatchObject({
         ok: true,
@@ -1026,20 +1069,24 @@ describe("public thread interaction routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-public-thread-permission-mode",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/permission-mode-project",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
         providerId: "codex",
         status: "idle",
       });
+
       seedThreadRuntimeState(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -1059,6 +1106,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       expect(response.status).toBe(200);
 
       const queued = await waitForQueuedCommand(
@@ -1066,9 +1114,11 @@ describe("public thread interaction routes", () => {
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === thread.id,
       );
+
       if (queued.command.type !== "turn.submit") {
         throw new Error("Expected turn.submit command");
       }
+
       expect(queued.command.options).toMatchObject({
         permissionMode: "full",
         permissionEscalation: null,
@@ -1081,19 +1131,23 @@ describe("public thread interaction routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-public-queued-permission-compatibility",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
         providerId: "codex",
         status: "active",
       });
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: environment.id,
         providerThreadId: "provider-public-queued-permission-compatibility",
@@ -1112,6 +1166,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       expect(compatibleResponse.status).toBe(200);
       expect(listQueuedThreadMessages(harness.db, thread.id)).toMatchObject([
         { permissionMode: "accept-edits" },
@@ -1129,6 +1184,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       expect(readonlyResponse.status).toBe(400);
       expect(listQueuedThreadMessages(harness.db, thread.id)).toHaveLength(1);
     });
@@ -1139,14 +1195,17 @@ describe("public thread interaction routes", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-public-thread-unsupported-permission-mode",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/unsupported-permission-mode-project",
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
@@ -1184,6 +1243,7 @@ describe("public thread interaction routes", () => {
         session: { id: "host-public-thread-interaction-disconnect" },
         thread: { status: "active" },
       });
+
       const registered = registerPendingInteraction(
         harness.deps,
         harness.deps.pendingInteractions,
@@ -1199,10 +1259,13 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (registered.outcome === "rejected") {
         throw new Error(registered.reason);
       }
+
       const interactionUrl = `/api/v1/threads/${thread.id}/interactions/${registered.interaction.id}`;
+
       const resolve = () =>
         harness.app.request(`${interactionUrl}/resolve`, {
           method: "POST",
@@ -1242,6 +1305,7 @@ describe("public thread interaction routes", () => {
         },
         thread: { status: "active" },
       });
+
       appendThreadEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -1270,6 +1334,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (registered.outcome === "rejected") {
         throw new Error(
           `Expected interaction registration to succeed: ${registered.reason}`,
@@ -1281,22 +1346,26 @@ describe("public thread interaction routes", () => {
         interactionId: registered.interaction.id,
         resolution: createAllowOnceResolution(),
       });
+
       const queuedResolve = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "interactive.resolve" &&
           command.interactionId === registered.interaction.id,
       );
+
       const commandResultResponse = await reportQueuedCommandSuccess(
         harness,
         queuedResolve,
         {},
       );
+
       expect(commandResultResponse.status).toBe(200);
 
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
       await expect(readJson(timelineResponse)).resolves.toEqual(
         expect.objectContaining({
@@ -1324,6 +1393,7 @@ describe("public thread interaction routes", () => {
         },
         thread: { status: "active" },
       });
+
       appendThreadEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -1352,6 +1422,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (registered.outcome === "rejected") {
         throw new Error(
           `Expected interaction registration to succeed: ${registered.reason}`,
@@ -1363,22 +1434,26 @@ describe("public thread interaction routes", () => {
         interactionId: registered.interaction.id,
         resolution: createDenyResolution(),
       });
+
       const queuedResolve = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "interactive.resolve" &&
           command.interactionId === registered.interaction.id,
       );
+
       const commandResultResponse = await reportQueuedCommandSuccess(
         harness,
         queuedResolve,
         {},
       );
+
       expect(commandResultResponse.status).toBe(200);
 
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
       await expect(readJson(timelineResponse)).resolves.toEqual(
         expect.objectContaining({
@@ -1406,6 +1481,7 @@ describe("public thread interaction routes", () => {
         },
         thread: { status: "active" },
       });
+
       appendThreadEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -1433,6 +1509,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (registered.outcome === "rejected") {
         throw new Error(
           `Expected interaction registration to succeed: ${registered.reason}`,
@@ -1442,6 +1519,7 @@ describe("public thread interaction routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
       await expect(readJson(timelineResponse)).resolves.toEqual(
         expect.objectContaining({
@@ -1468,6 +1546,7 @@ describe("public thread interaction routes", () => {
         },
         thread: { status: "active" },
       });
+
       appendThreadEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -1499,6 +1578,7 @@ describe("public thread interaction routes", () => {
           }),
         },
       );
+
       if (registered.outcome === "rejected") {
         throw new Error(
           `Expected interaction registration to succeed: ${registered.reason}`,
@@ -1508,6 +1588,7 @@ describe("public thread interaction routes", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline`,
       );
+
       expect(timelineResponse.status).toBe(200);
       await expect(readJson(timelineResponse)).resolves.toEqual(
         expect.objectContaining({

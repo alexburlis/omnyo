@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { BUILTIN_THEME_IDS } from "@bb/domain";
+import { BUILTIN_THEME_IDS } from "@omnyo/domain";
 import { converter, parse } from "culori";
 import { describe, expect, it } from "vitest";
 import {
@@ -17,28 +17,35 @@ import {
 } from "./theme.native";
 
 const MODES = ["light", "dark"] as const;
+
 const toOklch = converter("oklch");
 
 const MINIMAL_MOBILE_CSS = `
   @theme { --radius-2xl: 16px; --radius-full: 9999px; }
 `;
+
 const MINIMAL_THEME_CSS = `
   :root, .light { --canvas: #fff; --ink: #000; --radius: 8px; }
   .dark { --canvas: #000; --ink: #fff; }
   @theme inline { --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px; --radius-xl: 12px; }
 `;
+
 const emptyPalettes = (): Map<(typeof BUILTIN_THEME_IDS)[number], string> =>
   new Map(BUILTIN_THEME_IDS.map((id) => [id, ""]));
 
 function lightness(color: string): number {
   const parsed = parse(color);
+
   if (!parsed) throw new Error(`not a color: ${color}`);
+
   return toOklch(parsed).l;
 }
 
 function alpha(color: string): number {
   const match = color.match(/^rgba\(\d+, \d+, \d+, ([\d.]+)\)$/);
+
   if (!match) throw new Error(`expected rgba(): ${color}`);
+
   return Number(match[1]);
 }
 
@@ -68,6 +75,7 @@ describe("generate-native-theme", () => {
       ),
       paletteCss: emptyPalettes(),
     });
+
     for (const mode of MODES) {
       expect(androidThemes.default[mode]).toEqual(
         model.themes.get("default")?.[mode],
@@ -83,12 +91,14 @@ describe("generate-native-theme", () => {
     expect(defaultKeys.length).toBeGreaterThan(50);
     expect(defaultKeys).toContain("ansi0");
     expect(defaultKeys).toContain("ansiBgFg15");
+
     for (const id of BUILTIN_THEME_IDS) {
       for (const mode of MODES) {
         expect(
           Object.keys(nativeThemes[id][mode]).sort(),
           `${id}/${mode}`,
         ).toEqual(defaultKeys);
+
         for (const [key, value] of Object.entries(nativeThemes[id][mode])) {
           expect(value, `${id}/${mode}/${key}`).toMatch(
             /^(#[0-9a-f]{6}|rgba\(\d+, \d+, \d+, 0\.\d{1,3}\))$/,
@@ -137,10 +147,12 @@ describe("generate-native-theme", () => {
         it("orders the ink ramp: sidebar < fills < border <= input", () => {
           const sidebar = contrastFromCanvas(tokens, "sidebar");
           const border = contrastFromCanvas(tokens, "border");
+
           for (const fill of ["secondary", "accent", "muted"] as const) {
             expect(sidebar).toBeLessThan(contrastFromCanvas(tokens, fill));
             expect(contrastFromCanvas(tokens, fill)).toBeLessThan(border);
           }
+
           expect(border).toBeLessThanOrEqual(
             contrastFromCanvas(tokens, "input"),
           );
@@ -150,9 +162,11 @@ describe("generate-native-theme", () => {
           expect(alpha(tokens.stateActive)).toBeGreaterThan(
             alpha(tokens.stateHover),
           );
+
           const inkRgb = tokens.ink
             .match(/[0-9a-f]{2}/g)
             ?.map((part) => parseInt(part, 16));
+
           expect(
             tokens.stateHover.startsWith(`rgba(${inkRgb?.join(", ")}, `),
           ).toBe(true);
@@ -163,12 +177,15 @@ describe("generate-native-theme", () => {
             mode === "light"
               ? [tokens.surfaceGroupedCell, tokens.surfaceGrouped]
               : [tokens.surfaceGrouped, tokens.surfaceGroupedCell];
+
           expect(flat).toBe(tokens.canvas);
           expect(lifted).not.toBe(tokens.canvas);
+
           const [low, high] = [
             lightness(tokens.canvas),
             lightness(tokens.ink),
           ].sort((a, b) => a - b);
+
           expect(lightness(lifted)).toBeGreaterThan(low);
           expect(lightness(lifted)).toBeLessThan(high);
         });
@@ -202,6 +219,7 @@ describe("generate-native-theme", () => {
         ]),
       ),
     });
+
     const base = model.themes.get("default");
     const nord = model.themes.get("nord");
     expect(base?.light.ink).toBe("#000000");
@@ -223,11 +241,13 @@ describe("generate-native-theme", () => {
         paletteCss: emptyPalettes(),
       }),
     ).toThrow(/sets --primary under `:root`/);
+
     const model = buildNativeThemeModel({
       themeCss: MINIMAL_THEME_CSS,
       mobileCss: `.dark { --ink: #cccccc; } ${MINIMAL_MOBILE_CSS}`,
       paletteCss: emptyPalettes(),
     });
+
     expect(model.themes.get("default")?.light.ink).toBe("#000000");
     expect(model.themes.get("default")?.dark.ink).toBe("#cccccc");
     expect(() =>
@@ -282,6 +302,7 @@ describe("generate-native-theme", () => {
       mobileCss: MINIMAL_MOBILE_CSS,
       paletteCss: emptyPalettes(),
     });
+
     const light = model.themes.get("default")?.light;
     const dark = model.themes.get("default")?.dark;
     expect(light?.hover).toBe("rgba(51, 51, 51, 0.059)");
@@ -325,6 +346,7 @@ describe("generate-native-theme", () => {
       `,
       paletteCss: emptyPalettes(),
     });
+
     expect(model.typography).toEqual([
       ["sm", { fontSize: 15, lineHeight: 20 }],
       ["3xl", { fontSize: 34, lineHeight: 41 }],
@@ -362,13 +384,15 @@ describe("generate-native-theme", () => {
 
   it("emits Oxfmt-stable, sorted output", () => {
     const source = renderNativeThemeSource(buildNativeThemeModel());
+
     const keys = [...source.matchAll(/^  ([A-Za-z0-9]+): string;$/gm)].map(
       (match) => match[1],
     );
+
     expect(keys).toEqual([...keys].sort());
     expect(
       source.startsWith(
-        "/**\n * GENERATED FILE — run pnpm --filter @bb/mobile theme:generate",
+        "/**\n * GENERATED FILE — run pnpm --filter @omnyo/mobile theme:generate",
       ),
     ).toBe(true);
     expect(source.endsWith("\n")).toBe(true);

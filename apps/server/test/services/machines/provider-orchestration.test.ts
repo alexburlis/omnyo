@@ -11,11 +11,11 @@ import {
   replaceStoredProviderModelCatalog,
   setThreadStartupContext,
   updateHost,
-} from "@bb/db";
-import { createDeferredPromise } from "@bb/test-helpers";
+} from "@omnyo/db";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { eq } from "drizzle-orm";
-import type { JsonValue } from "@bb/domain";
-import type { PluginMachineProviderDeclaration } from "@get-bb/plugin-sdk";
+import type { JsonValue } from "@omnyo/domain";
+import type { PluginMachineProviderDeclaration } from "@omnyo/plugin-sdk";
 import {
   askMachineLaunch,
   requestAutomaticMachineRemoval,
@@ -60,6 +60,7 @@ describe("machine creation hosts", () => {
           calls.push({ attempt, key });
           started.resolve();
           await release.promise;
+
           return {
             status: "created",
             name: "Recovered machine",
@@ -73,6 +74,7 @@ describe("machine creation hosts", () => {
         machineProviderId: "test-machine",
         inputs: null,
       });
+
       await started.promise;
       expect(submitted).toMatchObject({
         id: expect.stringMatching(/^host_/u),
@@ -145,11 +147,13 @@ describe("machine creation hosts", () => {
               .find((row) => row.launchKey === "stable-key")?.phase,
         )
         .toBe("active");
+
       const firstHost = harness.db
         .select()
         .from(hosts)
         .all()
         .find((row) => row.launchKey === "stable-key")!;
+
       expect(requestMachineRemoval(harness.deps, firstHost.id)).toBe(true);
       await sweepProviderMachine(harness.deps, firstHost.id);
       expect(getHost(harness.db, firstHost.id)?.phase).toBe("destroyed");
@@ -160,11 +164,13 @@ describe("machine creation hosts", () => {
         record,
         inputs: null,
       });
+
       const rows = harness.db
         .select()
         .from(hosts)
         .all()
         .filter((row) => row.launchKey === "stable-key");
+
       expect(rows).toHaveLength(2);
       expect(rows.find((row) => row.destroyedAt === null)).toMatchObject({
         attempt: 2,
@@ -178,18 +184,22 @@ describe("machine creation hosts", () => {
       vi.setSystemTime(20_000);
       const cleanupStarted = createDeferredPromise<void>();
       const finishCleanup = createDeferredPromise<void>();
+
       const message =
         "Machine bootstrap command failed:\nbb-machine-install: 9: node: not found\nbb-machine-install: 9: curl: not found";
+
       const record = installMachineProvider({
         create: async ({ report }) => {
           report.step("Bootstrapping machine");
-          report.log("bb-machine-install: 9: node: not found\n");
-          report.log("bb-machine-install: 9: curl: not found\n");
+          report.log("omnyo-machine-install: 9: node: not found\n");
+          report.log("omnyo-machine-install: 9: curl: not found\n");
+
           return { status: "failed", message };
         },
         reconcileCleanup: async () => {
           cleanupStarted.resolve();
           await finishCleanup.promise;
+
           return { status: "removed" };
         },
       });
@@ -219,17 +229,20 @@ describe("machine creation hosts", () => {
         record,
         inputs: null,
       });
+
       expect(rejected).toEqual({
         action: "reject",
         message,
         log: expect.stringContaining("curl: not found"),
       });
       await cleanupStarted.promise;
+
       const host = harness.db
         .select()
         .from(hosts)
         .all()
         .find((row) => row.launchKey === "failed-bootstrap");
+
       expect(host).toMatchObject({
         phase: "removing",
         statusMessage: message,
@@ -246,9 +259,11 @@ describe("machine creation hosts", () => {
   it("cancels by removing and reconciles without a checkpoint", async () =>
     withTestHarness(async (harness) => {
       const started = createDeferredPromise<void>();
+
       const reconcileCleanup = vi.fn(async () => ({
         status: "removed" as const,
       }));
+
       installMachineProvider({
         create: async ({ signal }) => {
           started.resolve();
@@ -260,16 +275,19 @@ describe("machine creation hosts", () => {
         },
         reconcileCleanup,
       });
+
       const host = await submitMachine(harness.deps, {
         key: "cancel-key",
         machineProviderId: "test-machine",
         inputs: null,
       });
+
       await started.promise;
 
       const response = await harness.app.request(`/api/v1/hosts/${host.id}`, {
         method: "DELETE",
       });
+
       expect(response.status).toBe(200);
       expect(reconcileCleanup).toHaveBeenCalledOnce();
       expect(getHost(harness.db, host.id)).toMatchObject({
@@ -282,9 +300,11 @@ describe("machine creation hosts", () => {
     withTestHarness(async (harness) => {
       const checkpointed = createDeferredPromise<void>();
       const release = createDeferredPromise<void>();
+
       let lateCheckpoint:
         | ((value: Exclude<JsonValue, null>) => Promise<void>)
         | undefined;
+
       const remove = vi.fn(async () => ({ status: "removed" as const }));
       installMachineProvider({
         create: async ({ checkpoint, signal }) => {
@@ -293,6 +313,7 @@ describe("machine creation hosts", () => {
           checkpointed.resolve();
           await release.promise;
           signal.throwIfAborted();
+
           return {
             status: "created",
             name: "Checkpointed machine",
@@ -301,11 +322,13 @@ describe("machine creation hosts", () => {
         },
         remove,
       });
+
       const host = await submitMachine(harness.deps, {
         key: "checkpoint-key",
         machineProviderId: "test-machine",
         inputs: null,
       });
+
       await checkpointed.promise;
       const operationId = getHost(harness.db, host.id)!.machineOperationId;
       updateHost(harness.db, harness.hub, host.id, {
@@ -336,6 +359,7 @@ describe("machine retirement", () => {
       withTestHarness(async (harness) => {
         const remove = vi.fn(async () => ({ status: "removed" as const }));
         installMachineProvider({ ephemeral: true, remove });
+
         const machineIds = Array.from({ length: machineCount }, () => {
           const id = createHostId();
           const now = Date.now();
@@ -352,8 +376,10 @@ describe("machine retirement", () => {
               updatedAt: now,
             })
             .run();
+
           return id;
         });
+
         const projects = ["alpha", "beta"].map(
           (name) =>
             seedProjectWithSource(harness.deps, {
@@ -361,6 +387,7 @@ describe("machine retirement", () => {
               path: `/tmp/${name}`,
             }).project,
         );
+
         const allocations = machineIds.map((hostId) => ({
           hostId,
           environments: projects.flatMap((project) =>
@@ -373,6 +400,7 @@ describe("machine retirement", () => {
                 status: "ready",
                 environmentProvider: null,
               });
+
               return {
                 environment,
                 threads: Array.from({ length: 2 }, () =>
@@ -386,13 +414,16 @@ describe("machine retirement", () => {
             }),
           ),
         }));
+
         for (const allocation of allocations) {
           updateHost(harness.db, harness.hub, allocation.hostId, {
             launchKey: allocation.environments[0].threads[0].id,
           });
+
           const owners = allocation.environments.flatMap(
             (entry) => entry.threads,
           );
+
           for (const [index, thread] of owners.entries()) {
             expect(
               requestAutomaticMachineRemoval(harness.deps, allocation.hostId),
@@ -402,6 +433,7 @@ describe("machine retirement", () => {
               requestAutomaticMachineRemoval(harness.deps, allocation.hostId),
             ).toBe(index === owners.length - 1);
           }
+
           await sweepProviderMachine(harness.deps, allocation.hostId);
           expect(getHost(harness.db, allocation.hostId)).toMatchObject({
             phase: "destroyed",
@@ -409,15 +441,18 @@ describe("machine retirement", () => {
             teardownStatus: "removed",
             resource: null,
           });
+
           for (const entry of allocation.environments) {
             expect(
               getEnvironment(harness.db, entry.environment.id)?.status,
             ).toBe("destroyed");
           }
+
           for (const other of allocations.slice(
             allocations.indexOf(allocation) + 1,
           )) {
             expect(getHost(harness.db, other.hostId)?.phase).toBe("active");
+
             for (const entry of other.environments) {
               expect(
                 getEnvironment(harness.db, entry.environment.id)?.status,
@@ -425,6 +460,7 @@ describe("machine retirement", () => {
             }
           }
         }
+
         expect(remove).toHaveBeenCalledTimes(machineCount);
       }),
   );
@@ -434,13 +470,16 @@ describe("machine retirement", () => {
       const remove = vi.fn(async () => ({ status: "removed" as const }));
       installMachineProvider({ ephemeral: true, remove });
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         status: "pending",
       });
+
       setThreadStartupContext(harness.db, {
         threadId: thread.id,
         startupContext: JSON.stringify({
@@ -481,11 +520,14 @@ describe("machine retirement", () => {
     withTestHarness(async (harness) => {
       const started = createDeferredPromise<void>();
       const release = createDeferredPromise<void>();
+
       const remove = vi.fn(async () => {
         started.resolve();
         await release.promise;
+
         return { status: "removed" as const };
       });
+
       installMachineProvider({ remove });
       const { host } = seedHostSession(harness.deps);
       updateHost(harness.db, harness.hub, host.id, {
@@ -497,9 +539,11 @@ describe("machine retirement", () => {
       const first = sweepProviderMachine(harness.deps, host.id);
       await started.promise;
       let settled = false;
+
       const second = sweepProviderMachine(harness.deps, host.id).then(() => {
         settled = true;
       });
+
       try {
         await new Promise<void>((resolve) => setImmediate(resolve));
         expect(settled).toBe(false);
@@ -507,6 +551,7 @@ describe("machine retirement", () => {
         release.resolve();
         await Promise.all([first, second]);
       }
+
       expect(getHost(harness.db, host.id)?.phase).toBe("destroyed");
       expect(remove).toHaveBeenCalledOnce();
     }));
@@ -548,6 +593,7 @@ describe("machine retirement", () => {
         resource: { allocation: "cancelled" },
         phase: "active",
       });
+
       const announced = vi.spyOn(
         harness.pluginService.events,
         "emitHostDeleted",
@@ -569,10 +615,12 @@ describe("machine retirement", () => {
     withTestHarness(async (harness) => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(20_000);
+
       const remove = vi
         .fn()
         .mockResolvedValueOnce({ status: "failed" as const, message: "busy" })
         .mockResolvedValueOnce({ status: "removed" as const });
+
       installMachineProvider({ remove });
       const id = createHostId();
       harness.db
@@ -615,13 +663,16 @@ describe("machine suspension", () => {
         resume: async () => {
           started.resolve();
           await release.promise;
+
           return { resource: { id: "owned" } };
         },
       });
       const target = seedHostSession(harness.deps, { id: "sweeping-resume" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: target.host.id,
       });
+
       const environment = createEnvironment(harness.db, harness.hub, {
         projectId: project.id,
         hostId: target.host.id,
@@ -630,10 +681,12 @@ describe("machine suspension", () => {
         status: "ready",
         environmentProvider: null,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       updateHost(harness.db, harness.hub, target.host.id, {
         machineProviderId: "test-machine",
         type: "ephemeral",
@@ -644,6 +697,7 @@ describe("machine suspension", () => {
       harness.hub.unregisterDaemon(target.session.id);
       const first = sweepMachineLifecycles(harness.deps);
       await started.promise;
+
       try {
         archiveThread(harness.db, harness.hub, thread.id);
         await sweepMachineLifecycles(harness.deps, { background: true });
@@ -652,6 +706,7 @@ describe("machine suspension", () => {
         release.resolve();
         await first;
       }
+
       await sweepMachineLifecycles(harness.deps);
       expect(getHost(harness.db, target.host.id)?.phase).toBe("destroyed");
     }));
@@ -666,6 +721,7 @@ describe("machine suspension", () => {
         resume: async () => {
           started.resolve();
           await release.promise;
+
           return { resource: { id: "owned" } };
         },
       });
@@ -682,7 +738,9 @@ describe("machine suspension", () => {
         `/api/v1/hosts/${target.host.id}/resume`,
         { method: "POST" },
       );
+
       await started.promise;
+
       try {
         expect(response.status).toBe(202);
         expect(await readJson(response)).toMatchObject({
@@ -705,18 +763,22 @@ describe("machine suspension", () => {
     withTestHarness(async (harness) => {
       const source = seedHostSession(harness.deps, { id: "setup-source" });
       const target = seedHostSession(harness.deps, { id: "setup-target" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: source.host.id,
       });
+
       const suspend = vi.fn(async () => ({ resource: { id: "owned" } }));
       installMachineProvider({
         suspend,
         resume: async () => ({ resource: { id: "owned" } }),
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         status: "starting",
       });
+
       updateHost(harness.db, harness.hub, target.host.id, {
         machineProviderId: "test-machine",
         launchKey: thread.id,
@@ -728,6 +790,7 @@ describe("machine suspension", () => {
           `/api/v1/hosts/${target.host.id}/suspend`,
           { method: "POST" },
         );
+
         expect(response.status).toBe(409);
         expect(await readJson(response)).toMatchObject({
           code: "machine_busy",
@@ -749,6 +812,7 @@ describe("machine suspension", () => {
         status: "provisioning",
         environmentProvider: null,
       });
+
       await expectBusy();
       harness.db
         .update(environments)
@@ -765,10 +829,12 @@ describe("machine suspension", () => {
         () => null,
         (error: unknown) => error,
       );
+
       const path = await waitForQueuedCommand(
         harness,
         ({ command }) => command.type === "project.clone_default_path",
       );
+
       expect(
         hasPendingProjectSourceSetupOnHost(harness.db, target.host.id),
       ).toBe(true);
@@ -796,6 +862,7 @@ it.each(["null result", "null checkpoint", "missing name"])(
       const reconcileCleanup = vi.fn(async () => ({
         status: "removed" as const,
       }));
+
       const record = installMachineProvider({ reconcileCleanup });
       Reflect.set(
         record.provider,
@@ -805,16 +872,20 @@ it.each(["null result", "null checkpoint", "missing name"])(
         ) => {
           if (invalid === "null checkpoint")
             await Reflect.apply(context.checkpoint, undefined, [null]);
+
           if (invalid === "missing name")
             return { status: "created", resource: {} };
+
           return { status: "created", name: "Invalid machine", resource: null };
         },
       );
+
       const host = await submitMachine(harness.deps, {
         key: "invalid-resource",
         machineProviderId: record.provider.id,
         inputs: null,
       });
+
       await expect
         .poll(() => getHost(harness.db, host.id)?.phase)
         .toBe("removing");

@@ -1,30 +1,32 @@
 import { useMemo } from "react";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@bb/shared-ui/dropdown-menu";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/shared-ui/dropdown-menu";
+import { Icon } from "@omnyo/shared-ui/icon";
 import {
   SettingsSection,
   SettingsWithControl,
 } from "@/components/ui/settings-section";
-import { COARSE_POINTER_ICON_SIZE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
+import { COARSE_POINTER_ICON_SIZE_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
 import {
   BUILT_IN_FILE_OPENER_PREFERENCE,
   buildFileOpenerRef,
   useFileOpenerPreference,
 } from "@/lib/file-opener-preference";
 import { usePluginSlots, type PluginFileOpenerSlot } from "@/lib/plugin-slots";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   SETTINGS_DROPDOWN_CONTENT_CLASS,
   SETTINGS_DROPDOWN_TRIGGER_CLASS,
 } from "./settings-dropdown";
+import { SETTINGS_ROW_STACK_CLASS } from "@/components/settings/settings-row-stack";
 
 const AUTOMATIC_FILE_OPENER_PREFERENCE = "__automatic__";
+
 const BUILTIN_LABEL = "Built-in preview";
 
 export function FileOpenersSettingsSection() {
@@ -44,7 +46,7 @@ export function FileOpenersSettingsSection() {
       title="File openers"
       description="Automatically use matching plugins, or choose a viewer for each file type. Right-click a file link for a one-off choice."
     >
-      <div className="space-y-5">
+      <div className={SETTINGS_ROW_STACK_CLASS}>
         {extensions.map((extension) => (
           <ExtensionOpenerControl
             key={extension}
@@ -58,11 +60,13 @@ export function FileOpenersSettingsSection() {
             onSelect={(selection) =>
               setPreference((previous) => {
                 const next = { ...previous };
+
                 if (selection === AUTOMATIC_FILE_OPENER_PREFERENCE) {
                   delete next[extension];
                 } else {
                   next[extension] = selection;
                 }
+
                 return next;
               })
             }
@@ -85,6 +89,7 @@ function ExtensionOpenerControl({
   preference: string;
 }) {
   const automaticOpener = openers[0];
+
   if (automaticOpener === undefined) return null;
 
   const options = [
@@ -98,8 +103,10 @@ function ExtensionOpenerControl({
       label: `${opener.title} (${opener.pluginId})`,
     })),
   ];
+
   const selected =
     options.find((option) => option.key === preference) ?? options[1];
+
   if (selected === undefined) return null;
 
   return (

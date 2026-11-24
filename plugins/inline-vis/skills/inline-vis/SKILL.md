@@ -1,18 +1,28 @@
 ---
 name: inline-vis
-description: "Show an HTML chart, table, diagram, mockup, demo, or report inline in BB chat: write a small page directly in the reply as an inline-vis fenced block, or show a workspace or thread-storage HTML or Markdown file with the inline-vis directive."
+description: "Show an HTML chart, table, diagram, mockup, demo, or report inline in Omnyo chat: write a small page directly in the reply as an inline-vis fenced block, or show a workspace or thread-storage HTML or Markdown file with the inline-vis directive."
 ---
 
 # Inline previews
 
 Use this when the user should see an HTML page or a Markdown document
-**inline in the assistant message**. There are two forms. Pick by where the
-page should live.
+**inline in the assistant message**. Build dashboards and reports for the
+conversation inline without creating or opening a separate HTML file by
+default. Prefer Canvas (`omnyo canvas on`) with `html` nodes for an evolving
+interactive dashboard or visual workspace. Use a fenced `inline-vis` block
+for a small, self-contained visual.
 
-| Form                               | Use it for                                                                                                                            |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| ` ```inline-vis ` fenced block     | A small, self-contained HTML page written directly in the reply. Nothing is written to disk.                                          |
-| `::inline-vis{file="…"}` directive | A page or Markdown document that lives in the workspace or thread storage: bigger pages, pages with sibling assets, anything to keep. |
+Honor explicit HTML-only, file, download and standalone-website requests with
+the requested output. Existing file previews remain supported. The two inline
+forms are:
+
+| Form                               | Use it for                                                                                                                      |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| ` ```inline-vis ` fenced block     | A small, self-contained HTML page written directly in the reply. Nothing is written to disk.                                    |
+| `::inline-vis{file="…"}` directive | An existing or requested HTML or Markdown file in the workspace or thread storage, including pages that require sibling assets. |
+
+Open a separate page with `omnyo thread open <file.html>` when that presentation
+is requested.
 
 The reader sees an HTML page as part of your reply: no card, no title bar, on
 the thread's own background, as tall as its content. Put the block or the
@@ -34,16 +44,16 @@ block is the HTML page itself, either a fragment or a full document:
 - The page appears once the closing fence arrives. While you are still
   writing it, the reader sees a short "Writing visualization…" line, so close
   the fence.
-- It needs no file and no tool call. Nothing is saved, so use the directive
-  for anything the user should keep or open later.
+- It needs no file and no tool call. Nothing is written to disk. Use the
+  directive to preview an existing file or a requested file deliverable.
 - The page cannot reference sibling files by relative path. Inline its CSS,
   JavaScript, and data, or load them from absolute `https://` URLs.
 - If the page itself contains three backticks, open and close the block with
   four backticks.
 - The frame fits the page, up to 2000 pixels, and a taller page scrolls
   inside it. The block takes no attributes.
-- Keep it small. Every character of the page is part of your reply. For a
-  large page, write a file and use the directive.
+- Keep each visual small. Every character of the page is part of your reply.
+  For a larger evolving dashboard, update Canvas `html` nodes in place.
 - The reader can reveal the HTML source from a button that appears over the
   page. If the reply ends before the closing fence, or the block is empty,
   the reader sees an ordinary code block instead.
@@ -60,7 +70,7 @@ directive** as its own block. It must be outside any code fence:
 
 Omitting `source` defaults to the workspace. Explicit `source="workspace"` is
 equivalent. For a read-only thread-storage artifact, write the document to
-`$BB_THREAD_STORAGE/reports/result.html`, then emit its storage-relative path:
+`$OMNYO_THREAD_STORAGE/reports/result.html`, then emit its storage-relative path:
 
 ```text
 ::inline-vis{source="thread-storage" file="reports/result.html"}
@@ -71,7 +81,7 @@ Rules:
 - `source` is optional and must be `workspace` or `thread-storage`.
 - `file` is relative to the selected source (e.g. `demo.html`,
   `charts/out.html`, `notes.md`). Workspace paths are relative to the current
-  workspace; thread-storage paths are relative to `$BB_THREAD_STORAGE`. Never
+  workspace; thread-storage paths are relative to `$OMNYO_THREAD_STORAGE`. Never
   put an absolute path in the directive.
 - `.html`, `.htm`, `.md`, and `.markdown` files are accepted.
 - `height` is optional, a whole number of pixels from 80 through 2000.
@@ -114,7 +124,7 @@ lines up with your reply text.
 
 ## Theme
 
-bb injects its active theme as CSS custom properties on `:root`. They follow
+Omnyo injects its active theme as CSS custom properties on `:root`. They follow
 the user's theme and light/dark mode live, so style with them instead of
 fixed colours:
 
@@ -145,10 +155,10 @@ scrollbar. Your own CSS overrides it.
 - Relative assets next to a file shown with the directive load from the same
   source. A fenced block has no sibling files.
 - Scripts run in a sandboxed frame with an opaque origin and cannot access the
-  bb page, cookies, or storage. Forms work; pop-ups and downloads do not.
+  Omnyo page, cookies, or storage. Forms work; pop-ups and downloads do not.
 - A link to another site opens in a new browser tab when the reader clicks
   it. A link to an anchor (`#section`) moves within the page.
-- Markdown uses BB's renderer with sanitized HTML support.
+- Markdown uses Omnyo's renderer with sanitized HTML support.
 
 If the plugin is disabled, users see the original directive source or an
 ordinary code block. If a directive's path is invalid, they see an inline

@@ -4,8 +4,8 @@ import {
   type DbConnection,
   type PluginMarketplaceIconRow,
   type UpsertPluginMarketplaceIconInput,
-} from "@bb/db";
-import { assertValidPluginCompactIconSvg } from "@bb/plugin-build";
+} from "@omnyo/db";
+import { assertValidPluginCompactIconSvg } from "@omnyo/plugin-build";
 import {
   assertPublicMarketplaceUrl,
   boundedResponseBytes,
@@ -27,11 +27,14 @@ export async function readBoundedMarketplaceIconFile(
   path: string,
 ): Promise<Uint8Array> {
   const handle = await open(path, "r");
+
   try {
     const metadata = await handle.stat();
+
     if (!metadata.isFile()) throw new Error("icon is not a regular file");
     const buffer = Buffer.allocUnsafe(MARKETPLACE_ICON_MAX_BYTES + 1);
     let offset = 0;
+
     while (offset < buffer.byteLength) {
       const result = await handle.read(
         buffer,
@@ -39,12 +42,15 @@ export async function readBoundedMarketplaceIconFile(
         buffer.byteLength - offset,
         offset,
       );
+
       if (result.bytesRead === 0) break;
       offset += result.bytesRead;
     }
+
     if (offset > MARKETPLACE_ICON_MAX_BYTES) {
       throw new Error(`icon exceeds ${MARKETPLACE_ICON_MAX_BYTES} bytes`);
     }
+
     return buffer.subarray(0, offset);
   } finally {
     await handle.close();
@@ -68,6 +74,7 @@ function isWebp(bytes: Uint8Array): boolean {
     text
       .split("")
       .every((char, index) => bytes[offset + index] === char.charCodeAt(0));
+
   return ascii(0, "RIFF") && ascii(8, "WEBP");
 }
 
@@ -83,23 +90,31 @@ function marketplaceIconContentTypeForPath(
   bytes: Uint8Array,
 ): string {
   const pathname = filePath.toLowerCase();
+
   if (bytes.byteLength > MARKETPLACE_ICON_MAX_BYTES) {
     throw new Error(`icon exceeds ${MARKETPLACE_ICON_MAX_BYTES} bytes`);
   }
+
   if (pathname.endsWith(".svg")) {
     assertValidPluginCompactIconSvg(bytes, "icon");
+
     return "image/svg+xml";
   }
+
   if (pathname.endsWith(".png")) {
     if (!startsWithBytes(bytes, PNG_MAGIC)) {
       throw new Error("icon is not a PNG file");
     }
+
     return "image/png";
   }
+
   if (pathname.endsWith(".webp")) {
     if (!isWebp(bytes)) throw new Error("icon is not a WebP file");
+
     return "image/webp";
   }
+
   throw new Error("icon must be a .svg, .png, or .webp file");
 }
 
@@ -113,8 +128,10 @@ export async function fetchMarketplaceIcons(args: {
   warn?: (message: string) => void;
 }): Promise<UpsertPluginMarketplaceIconInput[]> {
   const wanted = new Map<string, MarketplaceIconLocation>();
+
   for (const entry of args.entries) {
     let icon: MarketplaceIconLocation | null;
+
     try {
       icon = resolveEntryIcon(entry, args.base);
     } catch (error) {
@@ -123,6 +140,7 @@ export async function fetchMarketplaceIcons(args: {
       );
       continue;
     }
+
     if (icon !== null) wanted.set(entry.id, icon);
   }
 
@@ -132,6 +150,7 @@ export async function fetchMarketplaceIcons(args: {
       icon,
     ]),
   );
+
   const resolved = new Map<string, UpsertPluginMarketplaceIconInput>();
   const pending = [...wanted.entries()];
 
@@ -142,6 +161,7 @@ export async function fetchMarketplaceIcons(args: {
     const sourceUrl = iconSourceUrl(icon);
     const cached = cachedByEntryId.get(entryId);
     const unchangedUrl = cached?.sourceUrl === sourceUrl;
+
     if (
       args.onlyMissing &&
       icon.kind === "remote" &&
@@ -149,8 +169,10 @@ export async function fetchMarketplaceIcons(args: {
       unchangedUrl
     ) {
       resolved.set(entryId, iconInputFromRow(cached));
+
       return;
     }
+
     try {
       const refreshed =
         icon.kind === "local"
@@ -167,6 +189,7 @@ export async function fetchMarketplaceIcons(args: {
               cached,
               fetch: args.fetch,
             });
+
       if (refreshed !== null) {
         resolved.set(entryId, refreshed);
       } else if (cached !== undefined && unchangedUrl) {
@@ -176,6 +199,7 @@ export async function fetchMarketplaceIcons(args: {
       args.warn?.(
         `marketplace ${args.marketplaceName} entry "${entryId}" icon ${sourceUrl} was rejected: ${marketplaceErrorMessage(error)}`,
       );
+
       if (cached !== undefined && unchangedUrl) {
         resolved.set(entryId, iconInputFromRow(cached));
       }
@@ -185,10 +209,12 @@ export async function fetchMarketplaceIcons(args: {
   const worker = async (): Promise<void> => {
     for (;;) {
       const next = pending.shift();
+
       if (next === undefined) return;
       await runOne(next[0], next[1]);
     }
   };
+
   await Promise.all(
     Array.from(
       { length: Math.min(MARKETPLACE_ICON_CONCURRENCY, pending.length) },
@@ -216,12 +242,15 @@ async function readOneLocalIcon(args: {
   if (args.base.kind !== "dir") {
     throw new Error("local icons require a directory base");
   }
+
   const path = await realPathInside(
     args.base.root,
     args.icon.path,
     `entry "${args.entryId}" icon`,
   );
+
   const bytes = await readBoundedMarketplaceIconFile(path);
+
   return {
     marketplaceName: args.marketplaceName,
     entryId: args.entryId,
@@ -240,6 +269,7 @@ function iconInputFromRow(
   row: PluginMarketplaceIconRow,
 ): UpsertPluginMarketplaceIconInput {
   const { updatedAt: _updatedAt, ...input } = row;
+
   return input;
 }
 
@@ -252,31 +282,41 @@ async function fetchOneIcon(args: {
 }): Promise<UpsertPluginMarketplaceIconInput | null> {
   assertPublicMarketplaceUrl(args.iconUrl);
   const cached = args.cached;
+
   const unchangedUrl =
     cached !== undefined && cached.sourceUrl === args.iconUrl;
+
   const headers = new Headers({ accept: "image/*" });
+
   if (unchangedUrl && cached.etag !== null) {
     headers.set("if-none-match", cached.etag);
   }
+
   const response = await args.fetch(args.iconUrl, {
     method: "GET",
     headers,
     redirect: "error",
   });
+
   if (response.status === 304 && unchangedUrl) {
     await response.body?.cancel();
+
     return null;
   }
+
   if (!response.ok) {
     await response.body?.cancel();
     throw new Error(`request failed with HTTP ${response.status}`);
   }
+
   const bytes = await boundedResponseBytes(
     response,
     MARKETPLACE_ICON_MAX_BYTES,
     "icon",
   );
+
   const contentType = marketplaceIconContentType(args.iconUrl, bytes);
+
   return {
     marketplaceName: args.marketplaceName,
     entryId: args.entryId,

@@ -1,4 +1,4 @@
-import { assertNever } from "@bb/core-ui";
+import { assertNever } from "@omnyo/core-ui";
 import type {
   ApprovalPendingInteraction,
   PendingInteraction,
@@ -6,20 +6,20 @@ import type {
   ThreadEventItemApprovalStatus,
   ThreadEventItem,
   ThreadEventScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   isApprovalPendingInteraction,
   toInteractionLifecycle,
   turnScope,
   threadScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   getLatestThreadSequence,
   getThread,
   type AppendStoredThreadEventArgs,
   type DbNotifier,
   type DbTransaction,
-} from "@bb/db";
+} from "@omnyo/db";
 import type { AppDeps } from "../../types.js";
 import {
   appendThreadEvent,
@@ -34,14 +34,20 @@ interface PendingInteractionTimelineTransactionDeps {
 const INTERACTION_LIFECYCLE_EVENT_TYPE =
   "system/interaction/lifecycle" as const;
 
+type PendingInteractionTimelineWrite = AppendStoredThreadEventArgs<
+  typeof INTERACTION_LIFECYCLE_EVENT_TYPE | "item/started" | "item/completed"
+>;
+
 type ApprovalTimelineItem = Extract<
   ThreadEventItem,
   { type: "commandExecution" | "fileChange" }
 >;
+
 type ApprovalTimelineItemSubject = Extract<
   PendingInteractionApprovalSubject,
   { kind: "command" | "file_change" }
 >;
+
 type ApprovalTimelineItemStatus = Extract<
   ApprovalTimelineItem["status"],
   "pending" | "interrupted"
@@ -108,6 +114,7 @@ function approvalItemSubject(
   interaction: ApprovalPendingInteraction,
 ): ApprovalTimelineItemSubject | null {
   const subject = interaction.payload.subject;
+
   switch (subject.kind) {
     case "command":
     case "file_change":
@@ -128,21 +135,26 @@ function approvalItemWriteFor(interaction: PendingInteraction): {
   if (!isApprovalPendingInteraction(interaction)) {
     return null;
   }
+
   const subject = approvalItemSubject(interaction);
+
   if (subject === null) {
     return null;
   }
+
   const item = approvalItemWrite(interaction, subject);
+
   return item === null ? null : { interaction, item };
 }
 
 function buildPendingInteractionTimelineWrites(
   db: Pick<AppDeps, "db">["db"] | DbTransaction,
   interaction: PendingInteraction,
-): AppendStoredThreadEventArgs[] {
+): PendingInteractionTimelineWrite[] {
   const environmentId =
     getThread(db, interaction.threadId)?.environmentId ?? null;
-  const writes: AppendStoredThreadEventArgs[] = [
+
+  const writes: PendingInteractionTimelineWrite[] = [
     {
       threadId: interaction.threadId,
       environmentId,
@@ -151,7 +163,9 @@ function buildPendingInteractionTimelineWrites(
       data: { interaction: toInteractionLifecycle(interaction) },
     },
   ];
+
   const write = approvalItemWriteFor(interaction);
+
   if (write !== null) {
     const { providerThreadId, turnId } = write.interaction;
     writes.push({
@@ -163,6 +177,7 @@ function buildPendingInteractionTimelineWrites(
       data: { providerThreadId, item: write.item },
     });
   }
+
   return writes;
 }
 
@@ -183,9 +198,11 @@ export function appendPendingInteractionTimelineEventInTransaction(
   interaction: PendingInteraction,
 ): void {
   const writes = buildPendingInteractionTimelineWrites(deps.db, interaction);
+
   for (const write of writes) {
     appendThreadEventInTransaction(deps.db, write);
   }
+
   deps.hub.notifyThread(interaction.threadId, ["events-appended"], {
     timelineSequence: getLatestThreadSequence(deps.db, {
       threadId: interaction.threadId,

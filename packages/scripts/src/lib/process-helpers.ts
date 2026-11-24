@@ -1,5 +1,5 @@
 import type { ChildProcess, StdioOptions } from "node:child_process";
-import { spawnPortableProcess } from "@bb/process-utils";
+import { spawnPortableProcess } from "@omnyo/process-utils";
 
 export type ForwardedSignal = "SIGINT" | "SIGTERM";
 
@@ -31,6 +31,7 @@ export function installTerminationSignalForwarding(
   const handleSigint = () => {
     handler("SIGINT");
   };
+
   const handleSigterm = () => {
     handler("SIGTERM");
   };
@@ -73,6 +74,7 @@ export async function runScriptProcess(
   request: ScriptProcessRequest,
 ): Promise<number> {
   const child = spawnPortableProcess(request);
+
   const removeSignalForwarding = installTerminationSignalForwarding(
     (signal) => {
       killProcessIfRunning(child, signal);
@@ -81,6 +83,7 @@ export async function runScriptProcess(
 
   try {
     const result = await waitForProcessExit(child);
+
     return toExitCode(result);
   } finally {
     removeSignalForwarding();

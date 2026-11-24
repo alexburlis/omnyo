@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 describe("bundled plugin SDK declarations", () => {
   it("use portable named SDK results without workspace imports", async () => {
     const declarations = await readFile(
-      new URL("../../bundled-types/bb-plugin-sdk.d.ts", import.meta.url),
+      new URL("../../bundled-types/omnyo-plugin-sdk.d.ts", import.meta.url),
       "utf8",
     );
 
@@ -29,7 +29,7 @@ describe("bundled plugin SDK declarations", () => {
     expect(declarations).toContain("catalog: PluginCatalogArea;");
     expect(declarations).toContain("getSource(args: PluginGetSourceArgs)");
     expect(declarations).toContain("checkUpdates(");
-    expect(declarations).toContain("applyUpdate(args: PluginIdArgs)");
+    expect(declarations).toContain("applyUpdate(args: PluginApplyUpdateArgs)");
     expect(declarations).toContain(
       "type PluginProviderNativeRootEntry = ProviderNativeRootInput;",
     );
@@ -44,11 +44,12 @@ describe("bundled plugin SDK declarations", () => {
     );
 
     const appDeclarations = await readFile(
-      new URL("../../bundled-types/bb-plugin-sdk-app.d.ts", import.meta.url),
+      new URL("../../bundled-types/omnyo-plugin-sdk-app.d.ts", import.meta.url),
       "utf8",
     );
+
     expect(appDeclarations).not.toMatch(/from ['"]@bb\//u);
-    expect(appDeclarations).toContain("useSdk(): PluginBrowserBbSdk;");
+    expect(appDeclarations).toContain("useSdk(): experimental_PluginBrowserSdk;");
     expect(appDeclarations).toContain("interface ThreadSectionsArea");
     expect(appDeclarations).toContain("threadSections: ThreadSectionsArea;");
     expect(appDeclarations).toContain("interface PluginCatalogArea");
@@ -72,14 +73,15 @@ describe("bundled plugin SDK declarations", () => {
 
   it("ships portable declarations for every exported subpath", async () => {
     const fileNames = [
-      "bb-plugin-sdk.d.ts",
-      "bb-plugin-sdk-app.d.ts",
-      "bb-plugin-sdk-host.d.ts",
-      "bb-plugin-sdk-testing.d.ts",
-      "bb-plugin-sdk-testing-app.d.ts",
-      "bb-plugin-sdk-testing-host.d.ts",
-      "bb-plugin-sdk-environment-provider.d.ts",
+      "omnyo-plugin-sdk.d.ts",
+      "omnyo-plugin-sdk-app.d.ts",
+      "omnyo-plugin-sdk-host.d.ts",
+      "omnyo-plugin-sdk-testing.d.ts",
+      "omnyo-plugin-sdk-testing-app.d.ts",
+      "omnyo-plugin-sdk-testing-host.d.ts",
+      "omnyo-plugin-sdk-environment-provider.d.ts",
     ];
+
     const declarations = await Promise.all(
       fileNames.map((fileName) =>
         readFile(
@@ -88,18 +90,22 @@ describe("bundled plugin SDK declarations", () => {
         ),
       ),
     );
+
     for (const content of declarations.slice(0, 3)) {
       expect(content).not.toMatch(/from ['"]@bb\//u);
       expect(content).not.toMatch(/import\(['"]@bb\//u);
     }
+
     for (const content of declarations.slice(3)) {
-      const bbImports = [
-        ...content.matchAll(/from ['"](@(?:get-)?bb\/[^'"]+)['"]/gu),
+      const omnyoImports = [
+        ...content.matchAll(/from ['"](@(?:omnyo|(?:get-)?bb)\/[^'"]+)['"]/gu),
       ].map((match) => match[1]);
-      expect(new Set(bbImports)).toEqual(new Set(["@get-bb/plugin-sdk"]));
+
+      expect(new Set(omnyoImports)).toEqual(new Set(["@omnyo/plugin-sdk"]));
       expect(content).not.toContain("@bb/sdk");
       expect(content).not.toContain("@bb/server-contract");
     }
+
     expect(declarations[2]).toContain("interface ExperimentalHostEntry");
     expect(declarations[3]).toContain("interface FakePluginBehaviorDrivers");
     expect(declarations[4]).toContain(
@@ -114,13 +120,15 @@ describe("bundled plugin SDK declarations", () => {
   it("names the canonical event vocabulary in the provider-bridge testing kit", async () => {
     const testing = await readFile(
       new URL(
-        "../../bundled-types/bb-plugin-sdk-provider-bridge-testing.d.ts",
+        "../../bundled-types/omnyo-plugin-sdk-provider-bridge-testing.d.ts",
         import.meta.url,
       ),
       "utf8",
     );
+
     expect(testing).not.toMatch(/from ['"]@bb\//u);
     expect(testing).not.toMatch(/import\(['"]@bb\//u);
+
     for (const name of [
       "ThreadEvent",
       "ThreadEventItem",

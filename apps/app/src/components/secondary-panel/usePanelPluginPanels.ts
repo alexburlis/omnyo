@@ -35,17 +35,23 @@ export function usePanelPluginPanels({
         (candidate) =>
           candidate.pluginId === pluginId && candidate.id === actionId,
       );
+
       if (action === undefined) return false;
+
       const accepted = createPanelActionOpenPanel({
         action,
         slot,
         openPluginPanel,
       })({ title, params });
+
       if (accepted) reveal();
+
       return accepted;
     },
     [actions, openPluginPanel, reveal, slot],
   );
+
   usePublishThreadPanelOpener(openThreadPanel, isFocused);
+
   return openThreadPanel;
 }

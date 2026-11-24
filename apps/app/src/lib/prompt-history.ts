@@ -2,13 +2,13 @@ import {
   PROMPT_HISTORY_ENTRY_LIMIT,
   takeVisiblePromptHistoryEntries,
   type PromptHistoryEntry,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   arePromptDraftStatesEqual,
   isPromptDraftEmpty,
   promptInputToDraft,
   type PromptDraftState,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 
 export function promptHistoryEntriesToDrafts(
   entries: readonly PromptHistoryEntry[],
@@ -17,11 +17,13 @@ export function promptHistoryEntriesToDrafts(
 
   for (const entry of entries) {
     const draft = promptInputToDraft(entry.input);
+
     if (isPromptDraftEmpty(draft)) {
       continue;
     }
 
     const previousDraft = drafts[drafts.length - 1];
+
     if (previousDraft && arePromptDraftStatesEqual(previousDraft, draft)) {
       continue;
     }

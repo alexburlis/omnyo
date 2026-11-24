@@ -7,13 +7,13 @@ import {
   type PendingInteractionApprovalDecision,
   type ProviderPendingInteraction,
   type Thread,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   ThreadTimelineResponse,
   TimelineRow,
   TimelineRowBase,
   TimelineUserConversationRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 
 interface TimelineBaseArgs {
   id: string;
@@ -104,7 +104,12 @@ export function makePendingSteerTimelineRow(): TimelineUserConversationRow {
     senderThreadId: null,
     systemMessageKind: "unlabeled",
     systemMessageSubject: null,
-    turnRequest: { isGrouped: false, kind: "steer", status: "pending" },
+    turnRequest: {
+      clientRequestId: null,
+      isGrouped: false,
+      kind: "steer",
+      status: "pending",
+    },
   };
 }
 
@@ -114,6 +119,7 @@ export function makeThread(overrides: MakeThreadArgs): Thread {
     title: null,
     titleFallback: null,
     sectionId: null,
+    groupId: null,
     environmentId: null,
     parentThreadId: null,
     lifecycleOwnerThreadId: null,
@@ -121,11 +127,15 @@ export function makeThread(overrides: MakeThreadArgs): Thread {
     originKind: null,
     originPluginId: null,
     visibility: "visible",
+    pluginHome: false,
+    quiet: false,
     archivedAt: null,
     pinnedAt: null,
+    shelvedAt: null,
     deletedAt: null,
     lastReadAt: null,
     latestAttentionAt: Date.now(),
+    lastMessageAt: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     ...overrides,
@@ -138,7 +148,7 @@ export function makeEnvironment(overrides: MakeEnvironmentArgs): Environment {
     path: "/tmp/environment",
     isGitRepo: true,
     isWorktree: false,
-    branchName: "bb/thread",
+    branchName: "omnyo/thread",
     defaultBranch: "main",
     baseBranch: null,
     mergeBaseBranch: null,
@@ -162,7 +172,9 @@ export function makePendingInteraction(
   const suffix = overrides.id.startsWith("int-")
     ? overrides.id.slice("int-".length)
     : overrides.id;
+
   const { payload, resolution = null, ...rest } = overrides;
+
   const base = {
     createdAt: Date.now(),
     providerRequestId: `request-${suffix}`,
@@ -173,6 +185,7 @@ export function makePendingInteraction(
     statusReason: null,
     ...rest,
   };
+
   if (payload === undefined || payload.kind === "approval") {
     if (
       resolution !== null &&
@@ -180,6 +193,7 @@ export function makePendingInteraction(
     ) {
       throw new Error("An approval fixture takes an approval resolution");
     }
+
     return {
       ...base,
       payload: payload ?? {
@@ -198,6 +212,7 @@ export function makePendingInteraction(
       resolution,
     };
   }
+
   if (payload.kind === "user_question") {
     if (
       resolution !== null &&
@@ -205,14 +220,17 @@ export function makePendingInteraction(
     ) {
       throw new Error("A user-question fixture takes a user answer");
     }
+
     return { ...base, payload, resolution };
   }
+
   if (
     resolution !== null &&
     !isPluginExtensionInteractionResolution(resolution)
   ) {
     throw new Error("A plugin request fixture takes a request answer");
   }
+
   return { ...base, payload, resolution };
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PluginMessageDirectiveProps } from "@get-bb/plugin-sdk";
+import type { PluginMessageDirectiveProps } from "@omnyo/plugin-sdk";
 import {
   buildMessageDirectiveRegistry,
   normalizeDirectiveAttributes,
@@ -31,6 +31,7 @@ describe("buildMessageDirectiveRegistry", () => {
     const registry = buildMessageDirectiveRegistry([
       slot({ id: "inline-vis", pluginId: "demo" }),
     ]);
+
     expect(registry.get("inline-vis")).toEqual({
       status: "ok",
       slot: expect.objectContaining({
@@ -42,6 +43,7 @@ describe("buildMessageDirectiveRegistry", () => {
 
   it("records cross-plugin collisions with no winner and warns once", () => {
     const warn = vi.fn();
+
     const registry = buildMessageDirectiveRegistry(
       [
         slot({ id: "inline-vis", pluginId: "zeta" }),

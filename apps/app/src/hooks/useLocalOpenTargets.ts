@@ -3,7 +3,7 @@ import type {
   OpenInTargetContext,
   WorkspaceOpenTarget,
   WorkspaceOpenTargetId,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { appToast } from "@/components/ui/app-toast";
 import {
   resolvePreferredWorkspaceOpenFileTarget,
@@ -18,9 +18,12 @@ import { useHostDaemon } from "./useHostDaemon";
 import { useWorkspaceOpenTargets } from "./useWorkspaceOpenTargets";
 
 const LOCAL_OPEN_FAILURE_TITLE = "Failed to open file locally";
+
 const LOCAL_DAEMON_UNAVAILABLE_OPEN_DESCRIPTION =
   "Local host daemon is unavailable.";
+
 const LOCAL_NO_FILE_OPEN_TARGETS_DESCRIPTION = "No local app can open files.";
+
 const LOCAL_NO_DIRECTORY_OPEN_TARGETS_DESCRIPTION =
   "No local app can open directories.";
 
@@ -138,6 +141,7 @@ function getSupportedLocation(
   })
     ? args.lineNumber
     : null;
+
   const columnNumber =
     lineNumber !== null &&
     supportsWorkspaceOpenTargetCapability({
@@ -147,6 +151,7 @@ function getSupportedLocation(
     })
       ? args.columnNumber
       : null;
+
   return { columnNumber, lineNumber };
 }
 
@@ -164,6 +169,7 @@ function useOpenTargetResolution(
       ),
     [args.contextKind, args.workspaceOpenTargets],
   );
+
   const fileOpenTargets = useMemo(
     () =>
       args.workspaceOpenTargets.filter((target) =>
@@ -175,6 +181,7 @@ function useOpenTargetResolution(
       ),
     [args.contextKind, args.workspaceOpenTargets],
   );
+
   const preferredDirectoryTarget = useMemo(
     () =>
       resolvePreferredWorkspaceOpenTarget({
@@ -185,6 +192,7 @@ function useOpenTargetResolution(
       }),
     [args.contextKind, args.preferredDirectoryTargetId, directoryOpenTargets],
   );
+
   const preferredFileTarget = useMemo(
     () =>
       resolvePreferredWorkspaceOpenTarget({
@@ -208,12 +216,15 @@ export function useLocalOpenTargets(
   args: UseLocalOpenTargetsArgs,
 ): UseLocalOpenTargetsResult {
   const openContextKind = args.openContext?.kind ?? "local";
+
   const openContextHostId =
     args.openContext?.kind === "remote-ssh" ? args.openContext.hostId : null;
+
   const openContextServerOrigin =
     args.openContext?.kind === "remote-ssh"
       ? args.openContext.serverOrigin
       : null;
+
   const openContext = useMemo<OpenInTargetContext>(
     () =>
       openContextKind === "remote-ssh" &&
@@ -227,18 +238,23 @@ export function useLocalOpenTargets(
         : { kind: "local" },
     [openContextHostId, openContextKind, openContextServerOrigin],
   );
+
   const contextKind = openContext.kind;
   const { hasDaemon } = useHostDaemon();
+
   const {
     fetchWorkspaceOpenTargetsForPath,
     isLoading,
     openWorkspace,
     workspaceOpenTargets,
   } = useWorkspaceOpenTargets(args);
+
   const [preferredDirectoryTargetId, setPreferredDirectoryTargetId] =
     useWorkspaceOpenTargetPreference(workspaceOpenTargets);
+
   const [preferredFileTargetId, setPreferredFileTargetId] =
     useFileOpenTargetPreference(workspaceOpenTargets);
+
   const {
     directoryOpenTargets,
     fileOpenTargets,
@@ -250,6 +266,7 @@ export function useLocalOpenTargets(
     preferredFileTargetId,
     workspaceOpenTargets,
   });
+
   const rememberPreferredOpenTarget = useCallback(
     (target: WorkspaceOpenTarget) => {
       if (
@@ -261,6 +278,7 @@ export function useLocalOpenTargets(
       ) {
         setPreferredDirectoryTargetId(target.id);
       }
+
       if (
         supportsWorkspaceOpenTargetCapability({
           capability: "openFile",
@@ -283,6 +301,7 @@ export function useLocalOpenTargets(
             targetKind: request.targetKind,
           }),
         });
+
         return false;
       }
 
@@ -297,6 +316,7 @@ export function useLocalOpenTargets(
           lineNumber: request.lineNumber,
           target: request.target,
         });
+
         await openWorkspace({
           columnNumber: location.columnNumber,
           context: openContext,
@@ -304,10 +324,12 @@ export function useLocalOpenTargets(
           path: request.path,
           targetId: request.target.id,
         });
+
         return true;
       } catch (error) {
         const description = error instanceof Error ? error.message : undefined;
         dispatchOpenFailureToast({ ...(description ? { description } : {}) });
+
         return false;
       }
     },
@@ -325,6 +347,7 @@ export function useLocalOpenTargets(
       const target = directoryOpenTargets.find(
         (candidate) => candidate.id === request.targetId,
       );
+
       if (!target) {
         dispatchOpenFailureToast({
           description: getOpenUnavailableDescription({
@@ -332,6 +355,7 @@ export function useLocalOpenTargets(
             targetKind: "directory-open-target",
           }),
         });
+
         return false;
       }
 
@@ -346,11 +370,13 @@ export function useLocalOpenTargets(
     },
     [directoryOpenTargets, hasDaemon, openPathInAvailableTarget],
   );
+
   const openPathInFileTarget = useCallback(
     async (request: OpenPathInFileTargetArgs) => {
       const target = fileOpenTargets.find(
         (candidate) => candidate.id === request.targetId,
       );
+
       if (!target) {
         dispatchOpenFailureToast({
           description: getOpenUnavailableDescription({
@@ -358,6 +384,7 @@ export function useLocalOpenTargets(
             targetKind: "file-open-target",
           }),
         });
+
         return false;
       }
 
@@ -382,6 +409,7 @@ export function useLocalOpenTargets(
             targetKind: "directory-open-target",
           }),
         });
+
         return false;
       }
 
@@ -396,6 +424,7 @@ export function useLocalOpenTargets(
     },
     [hasDaemon, openPathInAvailableTarget, preferredDirectoryTarget],
   );
+
   const openPathInPreferredFileTarget = useCallback(
     async (request: OpenLocalPathRequest) => {
       const fileTargets =
@@ -404,6 +433,7 @@ export function useLocalOpenTargets(
               () => workspaceOpenTargets,
             )
           : workspaceOpenTargets;
+
       const target = resolvePreferredWorkspaceOpenFileTarget({
         contextKind,
         lineNumber: request.lineNumber,
@@ -419,6 +449,7 @@ export function useLocalOpenTargets(
             targetKind: "file-open-target",
           }),
         });
+
         return false;
       }
 

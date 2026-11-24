@@ -5,6 +5,7 @@ import {
   clientTurnRequestIdSchema,
   extensionKindSchema,
   jsonValueSchema,
+  promptCacheTtlMsSchema,
   providerErrorCategorySchema,
   providerErrorInfoSchema,
   providerRateLimitStateSchema,
@@ -18,12 +19,13 @@ import {
   threadEventWarningCategorySchema,
   threadUsageCostSchema,
   workflowProgressSnapshotSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { z } from "zod";
 
 export const THREAD_DELTA_NOTIFICATION_METHOD = "thread/delta";
 
 export const deltaPresentationSchema = threadEventItemPresentationSchema;
+
 export type DeltaPresentation = z.infer<typeof deltaPresentationSchema>;
 
 export const THREAD_DELTA_KEY_SEPARATOR = "\u001f";
@@ -41,6 +43,7 @@ export const deltaItemKeySchema = z.object({
   channel: deltaKeyPartSchema.optional(),
   parentRef: deltaKeyPartSchema.optional(),
 });
+
 export type DeltaItemKey = z.infer<typeof deltaItemKeySchema>;
 
 const providerTurnIdSchema = deltaKeyPartSchema;
@@ -53,6 +56,7 @@ export const deltaFileChangeSchema = z.object({
   oldText: z.string().optional(),
   newText: z.string().optional(),
 });
+
 export type DeltaFileChange = z.infer<typeof deltaFileChangeSchema>;
 
 export const deltaBackgroundTaskShapeSchema = z.object({
@@ -70,6 +74,7 @@ export const deltaBackgroundTaskShapeSchema = z.object({
   error: z.string().optional(),
   outputFile: z.string().optional(),
 });
+
 export type DeltaBackgroundTaskShape = z.infer<
   typeof deltaBackgroundTaskShapeSchema
 >;
@@ -79,6 +84,7 @@ export const deltaFileReadShapeSchema = z.object({
   path: z.string(),
   cmd: z.string().optional(),
 });
+
 export type DeltaFileReadShape = z.infer<typeof deltaFileReadShapeSchema>;
 
 export const deltaSearchShapeSchema = z.object({
@@ -88,6 +94,7 @@ export const deltaSearchShapeSchema = z.object({
   path: z.string().optional(),
   cmd: z.string().optional(),
 });
+
 export type DeltaSearchShape = z.infer<typeof deltaSearchShapeSchema>;
 
 export const deltaDelegationShapeSchema = z.object({
@@ -97,6 +104,7 @@ export const deltaDelegationShapeSchema = z.object({
   background: z.boolean(),
   summary: z.string().optional(),
 });
+
 export type DeltaDelegationShape = z.infer<typeof deltaDelegationShapeSchema>;
 
 export const deltaPlanStepsShapeSchema = z.object({
@@ -104,6 +112,7 @@ export const deltaPlanStepsShapeSchema = z.object({
   steps: z.array(threadEventPlanStepSchema),
   explanation: z.string().optional(),
 });
+
 export type DeltaPlanStepsShape = z.infer<typeof deltaPlanStepsShapeSchema>;
 
 export const deltaExtensionShapeSchema = z.object({
@@ -111,6 +120,7 @@ export const deltaExtensionShapeSchema = z.object({
   kind: extensionKindSchema,
   payload: jsonValueSchema,
 });
+
 export type DeltaExtensionShape = z.infer<typeof deltaExtensionShapeSchema>;
 
 export const deltaItemShapeSchema = z.discriminatedUnion("type", [
@@ -169,13 +179,16 @@ export const deltaItemShapeSchema = z.discriminatedUnion("type", [
   deltaPlanStepsShapeSchema,
   deltaExtensionShapeSchema,
 ]);
+
 export type DeltaItemShape = z.infer<typeof deltaItemShapeSchema>;
+
 export type DeltaItemShapeType = DeltaItemShape["type"];
 
 export const deltaProgressSnapshotSchema = z.discriminatedUnion("type", [
   deltaBackgroundTaskShapeSchema,
   deltaDelegationShapeSchema,
 ]);
+
 export type DeltaProgressSnapshot = z.infer<typeof deltaProgressSnapshotSchema>;
 
 export const deltaTextChannelSchema = z.enum([
@@ -184,9 +197,11 @@ export const deltaTextChannelSchema = z.enum([
   "reasoningText",
   "plan",
 ]);
+
 export type DeltaTextChannel = z.infer<typeof deltaTextChannelSchema>;
 
 export const deltaOutputChannelSchema = z.enum(["command", "fileChange"]);
+
 export type DeltaOutputChannel = z.infer<typeof deltaOutputChannelSchema>;
 
 const deltaErrorSchema = z.object({ message: z.string() });
@@ -197,6 +212,7 @@ export const deltaNoTurnFallbackSchema = z.object({
   raw: providerRawEventSchema,
   rawType: z.string(),
 });
+
 export type DeltaNoTurnFallback = z.infer<typeof deltaNoTurnFallbackSchema>;
 
 function requireExtensionPresentation(
@@ -229,6 +245,11 @@ export const threadDeltaSchema = z.discriminatedUnion("kind", [
     kind: z.literal("turn.open"),
     providerTurnId: providerTurnIdSchema.optional(),
     parentRef: deltaKeyPartSchema.optional(),
+  }),
+
+  z.object({
+    kind: z.literal("turn.mainRun"),
+    state: z.enum(["idle", "running"]),
   }),
 
   z.object({
@@ -317,6 +338,7 @@ export const threadDeltaSchema = z.discriminatedUnion("kind", [
     total: threadEventTokenUsageBreakdownSchema,
     last: threadEventTokenUsageBreakdownSchema,
     modelContextWindow: z.number().nullable(),
+    promptCacheTtlMs: promptCacheTtlMsSchema.optional(),
     providerTurnId: providerTurnIdSchema.optional(),
   }),
 
@@ -408,7 +430,9 @@ export const threadDeltaSchema = z.discriminatedUnion("kind", [
 
   z.object({ kind: z.literal("session.reset") }),
 ]);
+
 export type ThreadDelta = z.infer<typeof threadDeltaSchema>;
+
 export type ThreadDeltaKind = ThreadDelta["kind"];
 
 export const threadDeltaNotificationParamsSchema = z
@@ -417,6 +441,7 @@ export const threadDeltaNotificationParamsSchema = z
     deltas: z.array(threadDeltaSchema),
   })
   .passthrough();
+
 export type ThreadDeltaNotificationParams = z.infer<
   typeof threadDeltaNotificationParamsSchema
 >;

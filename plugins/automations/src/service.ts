@@ -1,24 +1,28 @@
+import type { createWorkflowDispatch } from "./workflow-dispatch.js";
 import { isAbsolute, join } from "node:path";
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
+import type { ScriptHostRouting } from "./script-host.js";
 import {
   createAutomation,
   createManualRun,
   decodeAutomationRow,
   deleteAutomation,
   getAutomationForProject,
-  isAutomationSpawnedThread,
   listAllAutomations,
   listAutomationRuns,
   listAutomationsForProject,
+  listRunningAutomationRunsByThread,
   setAutomationEnabled,
   toAutomationResponse,
   toAutomationRunResponse,
   updateAutomation,
   closeAutomationRun,
+  type AutomationEnvValues,
   type AutomationRow,
   type Db,
 } from "./data.js";
+import type { AutomationEnvStore } from "./env-secrets.js";
 import { createAutomationId } from "./ids.js";
 import {
   providerRoutingForEnvironment,
@@ -35,6 +39,7 @@ import {
   type AutomationExecution,
   type AutomationExecutionRequest,
   type AutomationDetailReadResult,
+  type AutomationOverview,
   type AutomationDetailResponse,
   type AutomationReadProblem,
   type AutomationReadResult,
@@ -46,6 +51,7 @@ import {
   type ResolvedCreateAutomationInput,
   type ResolvedAutomationRunsInput,
   type RunAutomationInput,
+  type ScriptExecutionUpdate,
   type UpdateAutomationInput,
 } from "./rpc-types.js";
 import {
@@ -67,12 +73,20 @@ import {
   projectPathForHost,
 } from "./working-directory.js";
 
-type ServiceApi = Pick<BbPluginApi, "realtime" | "log"> & {
+type ServiceApi = Pick<PluginApi, "realtime" | "log"> & {
+  server: Pick<PluginApi["server"], "loopbackBaseUrl">;
   sdk: {
     system: { config(): Promise<{ primaryHostId: string | null }> };
-    projects: Pick<BbPluginApi["sdk"]["projects"], "get" | "list">;
-    providers: Pick<BbPluginApi["sdk"]["providers"], "list">;
-    threads: Pick<BbPluginApi["sdk"]["threads"], "get" | "send" | "spawn">;
+    projects: Pick<PluginApi["sdk"]["projects"], "get" | "list">;
+    providers: Pick<PluginApi["sdk"]["providers"], "list">;
+    threads: Pick<
+      PluginApi["sdk"]["threads"],
+      "get" | "send" | "spawn" | "events" | "retry"
+    >;
+    experimental_inbox: Pick<
+      PluginApi["sdk"]["experimental_inbox"],
+      "waits" | "cancelWait" | "registerWait"
+    >;
   };
 };
 
@@ -105,7 +119,9 @@ function requireProjectAutomation(
   args: { projectId: string; automationId: string },
 ): AutomationRow {
   const automation = getAutomationForProject(db, args);
+
   if (!automation) throw new Error("Automation not found");
+
   return automation;
 }
 
@@ -130,6 +146,7 @@ function computeNextRunAt(
   if (trigger.triggerType === "once") {
     return trigger.runAt;
   }
+
   return computeNextScheduledTime({
     cron: trigger.cron,
     timezone: trigger.timezone,
@@ -137,12 +154,22 @@ function computeNextRunAt(
   });
 }
 
-function assertNotRecursiveCreation(
+async function assertNotRecursiveCreation(
+  api: Pick<ServiceApi, "sdk">,
   db: Db,
   createdByThreadId: string | undefined,
-): void {
+): Promise<void> {
   if (createdByThreadId === undefined) return;
-  if (isAutomationSpawnedThread(db, createdByThreadId)) {
+
+  if (listRunningAutomationRunsByThread(db, createdByThreadId).length > 0) {
+    throw new Error(
+      "Threads executing an automation run cannot create automations",
+    );
+  }
+
+  const thread = await api.sdk.threads.get({ threadId: createdByThreadId });
+
+  if (thread.originPluginId === "automations") {
     throw new Error("Automation-spawned threads cannot create automations");
   }
 }
@@ -153,6 +180,7 @@ type ResolvedStoredExecution = {
 };
 
 const PROJECT_WORKING_DIRECTORY = { type: "project" } as const;
+
 const AUTOMATION_STORAGE_WORKING_DIRECTORY = {
   type: "automation-storage",
 } as const;
@@ -161,11 +189,13 @@ function validateScriptWorkingDirectory(
   workingDirectory: AutomationScriptWorkingDirectory,
 ): void {
   if (workingDirectory.type !== "path") return;
+
   if (!isAbsolute(workingDirectory.path)) {
     throw new Error(
-      "A script working directory must be automation-storage, project, or an absolute path on the bb server host",
+      "A script working directory must be automation-storage, project, or an absolute path on the Omnyo server host",
     );
   }
+
   if (!isPrintableWorkingDirectoryPath(workingDirectory.path)) {
     throw new Error(WORKING_DIRECTORY_CONTROL_CHARACTER_MESSAGE);
   }
@@ -180,12 +210,15 @@ async function resolveStoredExecution(args: {
   if (args.execution.mode !== "script") {
     return { execution: args.execution };
   }
+
   const execution = {
     ...args.execution,
     workingDirectory:
       args.execution.workingDirectory ?? args.defaultWorkingDirectory,
   };
+
   validateScriptWorkingDirectory(execution.workingDirectory);
+
   if (execution.script !== undefined) {
     const scriptFile = await writeInlineAutomationScript({
       dataDir: args.pluginDataDir,
@@ -193,22 +226,70 @@ async function resolveStoredExecution(args: {
       content: execution.script,
       scriptFile: execution.scriptFile,
     });
+
     const { script: _script, ...rest } = execution;
+
     return {
       execution: { ...rest, scriptFile },
       writtenScriptFile: scriptFile,
     };
   }
+
   return { execution };
 }
 
+async function applyScriptExecutionUpdate(args: {
+  pluginDataDir: string;
+  automationId: string;
+  current: Extract<AutomationExecution, { mode: "script" }>;
+  update: ScriptExecutionUpdate;
+}): Promise<ResolvedStoredExecution> {
+  const { current, update } = args;
+
+  if (update.workingDirectory !== undefined) {
+    validateScriptWorkingDirectory(update.workingDirectory);
+  }
+
+  const { env: currentEnv, ...settings } = current;
+  const env = update.env ?? currentEnv;
+
+  const next = {
+    ...settings,
+    ...(update.interpreter !== undefined
+      ? { interpreter: update.interpreter }
+      : {}),
+    ...(update.timeoutMs !== undefined ? { timeoutMs: update.timeoutMs } : {}),
+    ...(update.workingDirectory !== undefined
+      ? { workingDirectory: update.workingDirectory }
+      : {}),
+    ...(env !== undefined && Object.keys(env).length > 0 ? { env } : {}),
+  };
+
+  if (update.script === undefined) return { execution: next };
+
+  const scriptFile = await writeInlineAutomationScript({
+    dataDir: args.pluginDataDir,
+    automationId: args.automationId,
+    content: update.script,
+    scriptFile: update.scriptFile ?? current.scriptFile,
+  });
+
+  const { script: _script, ...rest } = next;
+
+  return {
+    execution: { ...rest, scriptFile },
+    writtenScriptFile: scriptFile,
+  };
+}
+
 async function discardUncommittedScript(args: {
-  bb: Pick<ServiceApi, "log">;
+  api: Pick<ServiceApi, "log">;
   pluginDataDir: string;
   automationId: string;
   scriptFile: string | undefined;
 }): Promise<void> {
   if (args.scriptFile === undefined) return;
+
   try {
     await deleteAutomationScriptFile({
       dataDir: args.pluginDataDir,
@@ -216,7 +297,7 @@ async function discardUncommittedScript(args: {
       scriptFile: args.scriptFile,
     });
   } catch (error) {
-    args.bb.log.warn(
+    args.api.log.warn(
       `Failed to discard uncommitted script for automation ${args.automationId}: ${errorMessage(error)}`,
     );
   }
@@ -232,6 +313,7 @@ function withStoredScriptPath(
   ) {
     return automation;
   }
+
   return {
     ...automation,
     execution: {
@@ -244,11 +326,18 @@ function withStoredScriptPath(
   };
 }
 
+function scriptEnv(
+  execution: AutomationExecution,
+): Readonly<Record<string, string>> | undefined {
+  return execution.mode === "script" ? execution.env : undefined;
+}
+
 function toStoredAutomationResponse(
   pluginDataDir: string,
+  env: AutomationEnvValues,
   row: AutomationRow,
 ): AutomationResponse {
-  return withStoredScriptPath(pluginDataDir, toAutomationResponse(row));
+  return withStoredScriptPath(pluginDataDir, toAutomationResponse(row, env));
 }
 
 type AutomationWriteOperation = "run" | "pause" | "resume" | "update";
@@ -283,69 +372,92 @@ function automationWriteError(
 
 function requireCanonicalAutomationForWrite(
   pluginDataDir: string,
+  env: AutomationEnvValues,
   row: AutomationRow,
   operation: AutomationWriteOperation,
 ): AutomationResponse {
-  const decoded = decodeAutomationRow(row);
+  const decoded = decodeAutomationRow(row, env);
+
   if ("error" in decoded) {
     throw automationWriteError(row, operation, decoded.automation.problem);
   }
+
   return withStoredScriptPath(pluginDataDir, decoded.automation);
 }
 
 function toStoredAutomationReadResult(
-  bb: Pick<ServiceApi, "log">,
+  api: Pick<ServiceApi, "log">,
   pluginDataDir: string,
+  env: AutomationEnvValues,
   row: AutomationRow,
 ): AutomationReadResult {
-  const decoded = decodeAutomationRow(row);
+  const decoded = decodeAutomationRow(row, env);
+
   if (!("error" in decoded)) {
     return withStoredScriptPath(pluginDataDir, decoded.automation);
   }
+
   if (decoded.automation.problem === "invalid-stored-data") {
-    bb.log.warn(
+    api.log.warn(
       `Malformed stored automation ${row.id}: ${decoded.error.message}`,
     );
   }
+
   return decoded.automation;
 }
 
 async function resolveWorkingDirectoryForDisplay(args: {
-  bb: Pick<ServiceApi, "log" | "sdk">;
+  api: Pick<ServiceApi, "log" | "sdk">;
   pluginDataDir: string;
+  scriptHostRouting?: ScriptHostRouting;
   automation: AutomationResponse;
   workingDirectory: AutomationScriptWorkingDirectory;
 }): Promise<string | null> {
   try {
+    const serverHostId = (await args.api.sdk.system.config()).primaryHostId;
+    const hostId = args.scriptHostRouting?.hostId(serverHostId) ?? serverHostId;
+
+    if (
+      args.workingDirectory.type === "automation-storage" &&
+      hostId !== serverHostId
+    )
+      return null;
+
     const resolve = createScriptWorkingDirectoryResolver({
-      sdk: args.bb.sdk,
+      sdk: args.api.sdk,
       pluginDataDir: args.pluginDataDir,
-      serverHostId: (await args.bb.sdk.system.config()).primaryHostId,
+      serverHostId: hostId,
     });
+
     return await resolve(args.automation.projectId, args.workingDirectory);
   } catch (error) {
-    args.bb.log.warn(
+    args.api.log.warn(
       `Failed to resolve working directory for automation ${args.automation.id}: ${errorMessage(error)}`,
     );
+
     return null;
   }
 }
 
 async function withResolvedWorkingDirectory(args: {
-  bb: Pick<ServiceApi, "log" | "sdk">;
+  api: Pick<ServiceApi, "log" | "sdk">;
   pluginDataDir: string;
+  scriptHostRouting?: ScriptHostRouting;
   automation: AutomationResponse;
 }): Promise<AutomationDetailResponse> {
   const { automation } = args;
   const { execution } = automation;
+
   if (execution.mode !== "script") return { ...automation, execution };
+
   return {
     ...automation,
     execution: {
       ...execution,
       resolvedWorkingDirectory: await resolveWorkingDirectoryForDisplay({
-        bb: args.bb,
+        api: args.api,
         pluginDataDir: args.pluginDataDir,
+        scriptHostRouting: args.scriptHostRouting,
         automation,
         workingDirectory: execution.workingDirectory,
       }),
@@ -354,16 +466,20 @@ async function withResolvedWorkingDirectory(args: {
 }
 
 async function toEditableAutomationResponse(args: {
-  bb: Pick<ServiceApi, "log" | "sdk">;
+  api: Pick<ServiceApi, "log" | "sdk">;
   pluginDataDir: string;
+  scriptHostRouting?: ScriptHostRouting;
   automation: AutomationResponse;
 }): Promise<AutomationDetailResponse> {
   const detail = await withResolvedWorkingDirectory(args);
   const { execution } = detail;
+
   if (execution.mode !== "script" || execution.scriptFile === undefined) {
     return detail;
   }
+
   const { scriptFile, ...rest } = execution;
+
   return {
     ...detail,
     execution: {
@@ -378,39 +494,48 @@ async function toEditableAutomationResponse(args: {
 }
 
 async function toEditableAutomationReadResult(args: {
-  bb: Pick<ServiceApi, "log" | "sdk">;
+  api: Pick<ServiceApi, "log" | "sdk">;
   pluginDataDir: string;
+  env: AutomationEnvValues;
+  scriptHostRouting?: ScriptHostRouting;
   row: AutomationRow;
 }): Promise<AutomationDetailReadResult> {
   const automation = toStoredAutomationReadResult(
-    args.bb,
+    args.api,
     args.pluginDataDir,
+    args.env,
     args.row,
   );
+
   if ("problem" in automation) return automation;
+
   return toEditableAutomationResponse({
-    bb: args.bb,
+    api: args.api,
     pluginDataDir: args.pluginDataDir,
+    scriptHostRouting: args.scriptHostRouting,
     automation,
   });
 }
 
 async function cleanupSupersededScript(args: {
-  bb: Pick<ServiceApi, "log">;
+  api: Pick<ServiceApi, "log">;
   pluginDataDir: string;
   automationId: string;
   previous: AutomationExecution;
   next: AutomationExecution;
 }): Promise<void> {
   if (args.previous.mode !== "script") return;
+
   try {
     if (args.next.mode !== "script") {
       await deleteAutomationScriptDir({
         dataDir: args.pluginDataDir,
         automationId: args.automationId,
       });
+
       return;
     }
+
     if (
       args.previous.scriptFile !== undefined &&
       args.next.scriptFile !== undefined &&
@@ -423,7 +548,7 @@ async function cleanupSupersededScript(args: {
       });
     }
   } catch (error) {
-    args.bb.log.warn(
+    args.api.log.warn(
       `Failed to remove superseded script for automation ${args.automationId}: ${errorMessage(error)}`,
     );
   }
@@ -457,16 +582,21 @@ function applyAgentExecutionUpdate(
       ? { permissionMode: update.permissionMode }
       : {}),
   };
+
   if (update.serviceTier === null) {
     delete next.serviceTier;
   } else if (update.serviceTier !== undefined) {
     next.serviceTier = update.serviceTier;
   }
+
   if (update.target === undefined) return next;
+
   if (update.target.type === "target-thread") {
     return { ...next, targetThreadId: update.target.threadId };
   }
+
   const { targetThreadId: _targetThreadId, ...withoutTargetThread } = next;
+
   return {
     ...withoutTargetThread,
     environment: update.target.environment,
@@ -479,22 +609,38 @@ function parseRunCursor(
   if (cursor === undefined) return null;
   const decoded = Buffer.from(cursor, "base64url").toString("utf8");
   const separator = decoded.indexOf(":");
+
   if (separator <= 0) throw new Error("Invalid runs cursor");
   const startedAt = Number(decoded.slice(0, separator));
   const id = decoded.slice(separator + 1);
+
   if (!Number.isFinite(startedAt) || id.length === 0) {
     throw new Error("Invalid runs cursor");
   }
+
   return { startedAt, id };
 }
 
+function toAutomationOverview(
+  automation: AutomationReadResult,
+): AutomationOverview | AutomationReadProblem {
+  if ("problem" in automation || automation.execution.mode !== "agent") {
+    return automation;
+  }
+
+  const { prompt: _prompt, ...execution } = automation.execution;
+
+  return { ...automation, execution };
+}
+
 async function projectNameById(
-  bb: Pick<ServiceApi, "sdk" | "log">,
+  api: Pick<ServiceApi, "sdk" | "log">,
 ): Promise<Map<string, string>> {
   try {
     const projects = projectSummaryListSchema.parse(
-      await bb.sdk.projects.list({ includePersonal: true }),
+      await api.sdk.projects.list({ includePersonal: true }),
     );
+
     return new Map(
       projects
         .filter(
@@ -504,9 +650,10 @@ async function projectNameById(
         .map((project) => [project.id, project.name ?? project.id]),
     );
   } catch (error) {
-    bb.log.warn(
+    api.log.warn(
       `Failed to list projects for automations overview: ${errorMessage(error)}`,
     );
+
     return new Map();
   }
 }
@@ -518,6 +665,7 @@ const projectAvailableSchema = z
     sources: z.array(z.unknown()),
   })
   .passthrough();
+
 const projectSummarySchema = z
   .object({
     id: z.string(),
@@ -525,15 +673,16 @@ const projectSummarySchema = z
     deletedAt: z.number().nullable().optional(),
   })
   .passthrough();
+
 const projectSummaryListSchema = z.array(projectSummarySchema);
 
 async function requireProjectAvailable(
-  bb: Pick<ServiceApi, "sdk">,
+  api: Pick<ServiceApi, "sdk">,
   projectId: string,
 ): Promise<z.infer<typeof projectAvailableSchema>> {
   try {
     return projectAvailableSchema.parse(
-      await bb.sdk.projects.get({ projectId }),
+      await api.sdk.projects.get({ projectId }),
     );
   } catch (error) {
     throw new Error(
@@ -553,63 +702,81 @@ function defaultScriptWorkingDirectory(
   ) {
     return AUTOMATION_STORAGE_WORKING_DIRECTORY;
   }
+
   return PROJECT_WORKING_DIRECTORY;
 }
 
 export function createAutomationService(args: {
-  bb: ServiceApi;
+  api: ServiceApi;
   db: Db;
+  env: AutomationEnvStore;
   pluginDataDir: string;
-  serverUrl: string;
+  scriptHostRouting?: ScriptHostRouting;
+  workflows?: ReturnType<typeof createWorkflowDispatch>;
 }): AutomationService {
-  const { bb, db, pluginDataDir, serverUrl } = args;
+  const { api, db, env, pluginDataDir, scriptHostRouting } = args;
+
+  const executionHostId = async () => {
+    const primaryHostId = (await api.sdk.system.config()).primaryHostId;
+
+    return scriptHostRouting?.hostId(primaryHostId) ?? primaryHostId;
+  };
 
   return {
     async overview() {
-      const projects = await projectNameById(bb);
+      const projects = await projectNameById(api);
       const automations: AutomationsOverviewResponse["automations"] = [];
+
       for (const row of listAllAutomations(db)) {
         const projectName = projects.get(row.projectId);
-        if (projects.size > 0 && projectName === undefined) continue;
+
         automations.push({
-          automation: toStoredAutomationReadResult(bb, pluginDataDir, row),
+          automation: toAutomationOverview(
+            toStoredAutomationReadResult(api, pluginDataDir, env, row),
+          ),
           project: {
             id: row.projectId,
             name: projectName ?? row.projectId,
           },
         });
       }
+
       return automationsOverviewResponseSchema.parse({ automations });
     },
 
     list(input) {
       return listAutomationsForProject(db, input.projectId).map((row) =>
-        toStoredAutomationReadResult(bb, pluginDataDir, row),
+        toStoredAutomationReadResult(api, pluginDataDir, env, row),
       );
     },
 
     get(input) {
       return toEditableAutomationReadResult({
-        bb,
+        api,
         pluginDataDir,
+        env,
+        scriptHostRouting,
         row: requireProjectAutomation(db, input),
       });
     },
 
     async create(payload) {
-      const project = await requireProjectAvailable(bb, payload.projectId);
+      const project = await requireProjectAvailable(api, payload.projectId);
       const now = Date.now();
       validateTrigger(payload.trigger, now);
-      assertNotRecursiveCreation(db, payload.createdByThreadId);
+      await assertNotRecursiveCreation(api, db, payload.createdByThreadId);
+
       if (payload.execution.mode === "agent") {
         await resolvePermissionMode(
-          bb,
+          api,
           payload.execution.providerId,
           payload.execution.permissionMode,
           providerRoutingForEnvironment(payload.execution.environment),
         );
       }
+
       const automationId = createAutomationId();
+
       const stored = await resolveStoredExecution({
         pluginDataDir,
         automationId,
@@ -617,14 +784,14 @@ export function createAutomationService(args: {
         defaultWorkingDirectory:
           payload.execution.mode === "script" &&
           payload.execution.workingDirectory === undefined
-            ? defaultScriptWorkingDirectory(
-                project,
-                (await bb.sdk.system.config()).primaryHostId,
-              )
+            ? defaultScriptWorkingDirectory(project, await executionHostId())
             : AUTOMATION_STORAGE_WORKING_DIRECTORY,
       });
+
       let created: AutomationRow;
+
       try {
+        await env.write(automationId, scriptEnv(stored.execution));
         created = createAutomation(db, {
           id: automationId,
           projectId: payload.projectId,
@@ -643,25 +810,30 @@ export function createAutomationService(args: {
         });
       } catch (error) {
         await discardUncommittedScript({
-          bb,
+          api,
           pluginDataDir,
           automationId,
           scriptFile: stored.writtenScriptFile,
         });
+        await env.write(automationId, undefined);
         throw error;
       }
-      publishAutomationChange(bb, payload.projectId, "automations-changed");
+
+      publishAutomationChange(api, payload.projectId, "automations-changed");
+
       return withResolvedWorkingDirectory({
-        bb,
+        api,
         pluginDataDir,
-        automation: toStoredAutomationResponse(pluginDataDir, created),
+        scriptHostRouting,
+        automation: toStoredAutomationResponse(pluginDataDir, env, created),
       });
     },
 
     async update(input) {
-      const project = await requireProjectAvailable(bb, input.projectId);
+      const project = await requireProjectAvailable(api, input.projectId);
       const current = requireProjectAutomation(db, input);
-      const currentAutomation = decodeAutomationRow(current).automation;
+      const currentAutomation = decodeAutomationRow(current, env).automation;
+
       if (
         "problem" in currentAutomation &&
         currentAutomation.problem === "invalid-stored-data"
@@ -672,6 +844,7 @@ export function createAutomationService(args: {
           currentAutomation.problem,
         );
       }
+
       if (
         [input.execution, input.agent, input.script].filter(
           (entry) => entry !== undefined,
@@ -681,11 +854,17 @@ export function createAutomationService(args: {
           "execution, agent, and script updates cannot be combined",
         );
       }
+
       const now = Date.now();
       const currentExecution = currentAutomation.execution;
+
+      if (currentExecution.mode === "workflow")
+        throw new Error("Edit an imported workflow through its setup.");
       let stagedScriptFile: string | undefined;
-      const patch: Parameters<typeof updateAutomation>[1]["patch"] = {};
+      const patch: Parameters<typeof updateAutomation>[2]["patch"] = {};
+
       if (input.name !== undefined) patch.name = input.name;
+
       if (input.trigger !== undefined) {
         validateTrigger(input.trigger, now);
         patch.trigger = input.trigger;
@@ -693,15 +872,17 @@ export function createAutomationService(args: {
           ? computeNextRunAt(input.trigger, now)
           : null;
       }
+
       if (input.execution !== undefined) {
         if (input.execution.mode === "agent") {
           await resolvePermissionMode(
-            bb,
+            api,
             input.execution.providerId,
             input.execution.permissionMode,
             providerRoutingForEnvironment(input.execution.environment),
           );
         }
+
         const stored = await resolveStoredExecution({
           pluginDataDir,
           automationId: current.id,
@@ -713,44 +894,55 @@ export function createAutomationService(args: {
                   input.execution.workingDirectory === undefined
                 ? defaultScriptWorkingDirectory(
                     project,
-                    (await bb.sdk.system.config()).primaryHostId,
+                    await executionHostId(),
                   )
                 : AUTOMATION_STORAGE_WORKING_DIRECTORY,
         });
+
         patch.execution = stored.execution;
         stagedScriptFile = stored.writtenScriptFile;
       }
+
       if (input.agent !== undefined) {
         const updatedExecution = applyAgentExecutionUpdate(
           currentExecution,
           input.agent,
         );
+
         if (
           input.agent.providerId !== undefined ||
           input.agent.permissionMode !== undefined ||
           input.agent.target?.type === "environment"
         ) {
           await resolvePermissionMode(
-            bb,
+            api,
             updatedExecution.providerId,
             updatedExecution.permissionMode,
             providerRoutingForEnvironment(updatedExecution.environment),
           );
         }
+
         patch.execution = updatedExecution;
       }
+
       if (input.script !== undefined) {
         if (currentExecution.mode !== "script") {
           throw new Error(
             "Script execution options can only update script automations",
           );
         }
-        validateScriptWorkingDirectory(input.script.workingDirectory);
-        patch.execution = {
-          ...currentExecution,
-          workingDirectory: input.script.workingDirectory,
-        };
+
+        const stored = await applyScriptExecutionUpdate({
+          pluginDataDir,
+          automationId: current.id,
+          current: currentExecution,
+          update: input.script,
+        });
+
+        patch.execution = stored.execution;
+        stagedScriptFile = stored.writtenScriptFile;
       }
+
       if (
         "problem" in currentAutomation &&
         currentAutomation.problem === "missing-agent-prompt" &&
@@ -763,86 +955,117 @@ export function createAutomationService(args: {
           currentAutomation.problem,
         );
       }
+
+      const previousEnv = env.values(current.id);
+
+      const nextEnv =
+        patch.execution === undefined
+          ? previousEnv
+          : scriptEnv(patch.execution);
+
       let updated: AutomationRow | null;
+
       try {
-        updated = updateAutomation(db, {
+        await env.write(current.id, { ...previousEnv, ...nextEnv });
+        updated = updateAutomation(db, env, {
           projectId: input.projectId,
           automationId: input.automationId,
           patch,
         });
       } catch (error) {
         await discardUncommittedScript({
-          bb,
+          api,
           pluginDataDir,
           automationId: current.id,
           scriptFile: stagedScriptFile,
         });
+        await env.write(current.id, previousEnv);
         throw error;
       }
+
       if (!updated) {
         await discardUncommittedScript({
-          bb,
+          api,
           pluginDataDir,
           automationId: current.id,
           scriptFile: stagedScriptFile,
         });
+        await env.write(current.id, previousEnv);
         throw new Error("Automation not found");
       }
+
+      await env.write(current.id, nextEnv);
+
       if (patch.execution !== undefined) {
         await cleanupSupersededScript({
-          bb,
+          api,
           pluginDataDir,
           automationId: current.id,
           previous: currentExecution,
           next: patch.execution,
         });
       }
-      publishAutomationChange(bb, input.projectId, "automations-changed");
+
+      publishAutomationChange(api, input.projectId, "automations-changed");
+
       return withResolvedWorkingDirectory({
-        bb,
+        api,
         pluginDataDir,
-        automation: toStoredAutomationResponse(pluginDataDir, updated),
+        scriptHostRouting,
+        automation: toStoredAutomationResponse(pluginDataDir, env, updated),
       });
     },
 
     async delete(input) {
       const automation = requireProjectAutomation(db, input);
       deleteAutomation(db, input);
+      await env.write(automation.id, undefined);
       await deleteAutomationScriptDir({
         dataDir: pluginDataDir,
         automationId: automation.id,
       });
-      publishAutomationChange(bb, input.projectId, [
+      publishAutomationChange(api, input.projectId, [
         "automations-changed",
         "automation-runs-changed",
       ]);
+
       return { ok: true };
     },
 
     pause(input) {
       const current = requireProjectAutomation(db, input);
-      requireCanonicalAutomationForWrite(pluginDataDir, current, "pause");
+      requireCanonicalAutomationForWrite(pluginDataDir, env, current, "pause");
+
       const updated = setAutomationEnabled(db, {
         projectId: input.projectId,
         automationId: current.id,
         enabled: false,
         nextRunAt: null,
       });
+
       if (!updated) throw new Error("Automation not found");
-      publishAutomationChange(bb, input.projectId, "automations-changed");
-      return toStoredAutomationResponse(pluginDataDir, updated);
+      publishAutomationChange(api, input.projectId, "automations-changed");
+
+      return toStoredAutomationResponse(pluginDataDir, env, updated);
     },
 
     resume(input) {
       const current = requireProjectAutomation(db, input);
+
       const canonical = requireCanonicalAutomationForWrite(
         pluginDataDir,
+        env,
         current,
         "resume",
       );
+
       const { trigger } = canonical;
+
+      if (canonical.execution.mode === "workflow")
+        throw new Error("Enable the schedule from the workflow setup.");
       const now = Date.now();
       validateTrigger(trigger, now);
+
       const updated = setAutomationEnabled(db, {
         projectId: input.projectId,
         automationId: current.id,
@@ -851,27 +1074,50 @@ export function createAutomationService(args: {
         lastError: null,
         resetConsecutiveFailures: true,
       });
+
       if (!updated) throw new Error("Automation not found");
-      publishAutomationChange(bb, input.projectId, "automations-changed");
-      return toStoredAutomationResponse(pluginDataDir, updated);
+      publishAutomationChange(api, input.projectId, "automations-changed");
+
+      return toStoredAutomationResponse(pluginDataDir, env, updated);
     },
 
     async run(input) {
       const automation = requireProjectAutomation(db, input);
+
       const { execution } = requireCanonicalAutomationForWrite(
         pluginDataDir,
+        env,
         automation,
         "run",
       );
+
       const now = Date.now();
+
+      const workflows = args.workflows;
+
+      const prepared =
+        execution.mode === "workflow"
+          ? await workflows?.prepare(automation)
+          : undefined;
+
+      if (execution.mode === "workflow" && !prepared)
+        throw new Error("Workflow dispatch is unavailable.");
+
       const { run, deduped } = createManualRun(db, {
         automationId: automation.id,
         runMode: automation.runMode,
         idempotencyKey: input.idempotencyKey ?? null,
         now,
+        persistClaim: prepared?.persist,
       });
+
       if (!deduped) {
-        publishAutomationChange(bb, input.projectId, "automation-runs-changed");
+        publishAutomationChange(
+          api,
+          input.projectId,
+          "automation-runs-changed",
+        );
+
         const closeFailedRun = (error: unknown): void => {
           closeAutomationRun(db, {
             runId: run.id,
@@ -880,56 +1126,63 @@ export function createAutomationService(args: {
             now: Date.now(),
           });
         };
+
         void (async () => {
           try {
             if (execution.mode === "agent") {
-              await executeAgentRun(bb, db, {
+              await executeAgentRun(api, db, {
                 automation,
                 run,
                 execution,
                 onFailure: closeFailedRun,
               });
+            } else if (execution.mode === "workflow") {
+              await workflows?.reconcile(run);
             } else {
-              await executeScriptRun(bb, db, {
+              await executeScriptRun(api, db, {
                 pluginDataDir,
                 automation,
                 run,
                 execution,
                 onFailure: closeFailedRun,
-                serverUrl,
+                scriptHostRouting,
                 resolveWorkingDirectory: createScriptWorkingDirectoryResolver({
-                  sdk: bb.sdk,
+                  sdk: api.sdk,
                   pluginDataDir,
-                  serverHostId: (await bb.sdk.system.config()).primaryHostId,
+                  serverHostId: await executionHostId(),
                 }),
               });
             }
           } catch (error) {
             closeFailedRun(error);
-            bb.log.error(
+            api.log.error(
               `Manual automation run ${run.id} failed unexpectedly: ${errorMessage(error)}`,
             );
-            publishAutomationChange(bb, input.projectId, [
+            publishAutomationChange(api, input.projectId, [
               "automations-changed",
               "automation-runs-changed",
             ]);
           }
         })();
       }
+
       return { run: toAutomationRunResponse(run) };
     },
 
     runs(input) {
       requireProjectAutomation(db, input);
       const limit = Math.min(input.limit, AUTOMATION_RUNS_LIMIT_MAX);
+
       const runs = listAutomationRuns(db, {
         automationId: input.automationId,
         limit: limit + 1,
         cursor: parseRunCursor(input.cursor),
       });
+
       const hasMore = runs.length > limit;
       const page = hasMore ? runs.slice(0, limit) : runs;
       const last = page[page.length - 1];
+
       return automationRunListResponseSchema.parse({
         runs: page.map(toAutomationRunResponse),
         nextCursor:

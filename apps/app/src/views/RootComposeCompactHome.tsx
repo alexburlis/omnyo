@@ -1,34 +1,10 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { OverflowFade } from "@/components/ui/overflow-fade";
 import { COMPOSER_EDITOR_AVAILABLE_HEIGHT_PROPERTY } from "@/components/promptbox/ComposerEditorSlot";
-import {
-  MOBILE_RECENT_LABEL_HEIGHT_PX,
-  MOBILE_RECENT_ROW_HEIGHT_PX,
-} from "./RootComposeMobileRecents";
 
 const COMPACT_HOME_CHROME_OFFSET_PX = 56;
-const COMPACT_HOME_COLUMN_CLASS = "mx-auto w-full max-w-[760px] px-4";
-const COMPACT_HOME_REST_VISIBLE_ROWS = 4.5;
-const COMPACT_HOME_SCROLLED_VISIBLE_ROWS = 5.5;
-const COMPACT_HOME_SCROLLED_BAND_PX =
-  COMPACT_HOME_SCROLLED_VISIBLE_ROWS * MOBILE_RECENT_ROW_HEIGHT_PX +
-  MOBILE_RECENT_LABEL_HEIGHT_PX;
-const COMPACT_HOME_REST_OFFSET_PX =
-  (COMPACT_HOME_SCROLLED_VISIBLE_ROWS - COMPACT_HOME_REST_VISIBLE_ROWS) *
-  MOBILE_RECENT_ROW_HEIGHT_PX;
 
-export function getCompactHomeScrollViewportTop({
-  regionHeight,
-  composerHeight,
-}: {
-  regionHeight: number;
-  composerHeight: number;
-}): number {
-  return Math.max(
-    COMPACT_HOME_CHROME_OFFSET_PX,
-    regionHeight - composerHeight - COMPACT_HOME_SCROLLED_BAND_PX,
-  );
-}
+const COMPACT_HOME_COLUMN_CLASS = "mx-auto w-full max-w-[760px] px-4";
 
 interface RootComposeCompactHomeProps {
   children: ReactNode;
@@ -50,6 +26,7 @@ function useCompactHomeMetrics() {
     const scrollContent = scrollContentRef.current;
     const bottomSpacer = bottomSpacerRef.current;
     const composerFade = composerFadeRef.current;
+
     if (
       !region ||
       !composer ||
@@ -60,10 +37,12 @@ function useCompactHomeMetrics() {
     ) {
       return;
     }
+
     const measure = () => {
       const editor = composer.querySelector<HTMLElement>(
         "[data-promptbox-editor-scroll]",
       );
+
       if (editor) {
         const editorChromeHeight = composer.offsetHeight - editor.offsetHeight;
         composer.style.setProperty(
@@ -71,21 +50,20 @@ function useCompactHomeMetrics() {
           `${region.offsetHeight - COMPACT_HOME_CHROME_OFFSET_PX - editorChromeHeight}px`,
         );
       }
-      const composerHeight = composer.offsetHeight;
-      scrollViewport.style.top = `${getCompactHomeScrollViewportTop({
-        regionHeight: region.offsetHeight,
-        composerHeight,
-      })}px`;
-      bottomSpacer.style.height = `${composerHeight}px`;
+
+      bottomSpacer.style.height = `${composer.offsetHeight}px`;
       composerFade.hidden =
         scrollViewport.scrollHeight <= scrollViewport.clientHeight;
     };
+
     measure();
+
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(region);
     observer.observe(composer);
     observer.observe(scrollContent);
+
     return () => observer.disconnect();
   }, []);
 
@@ -130,11 +108,6 @@ export function RootComposeCompactHome({
           data-testid="root-compose-compact-scroll-content"
           className="flex min-h-full flex-col justify-end"
         >
-          <div
-            aria-hidden
-            data-testid="root-compose-compact-recents-offset"
-            style={{ height: COMPACT_HOME_REST_OFFSET_PX }}
-          />
           <div className={COMPACT_HOME_COLUMN_CLASS}>{children}</div>
           <div
             ref={bottomSpacerRef}

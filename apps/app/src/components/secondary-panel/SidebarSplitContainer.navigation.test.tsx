@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AppKeybindings } from "@bb/domain";
+import type { AppKeybindings } from "@omnyo/domain";
 import {
   AppCommandProvider,
   useAppCommandHandler,
@@ -21,6 +21,7 @@ vi.mock("@/hooks/queries/system-queries", () => ({
     data: { generalSettings: { showKeyboardHints: false } },
   }),
 }));
+
 vi.mock("@/hooks/usePluginCommandBindings", () => ({
   usePluginCommandBindings: () => {
     const keybindings: AppKeybindings = (
@@ -36,6 +37,7 @@ vi.mock("@/hooks/usePluginCommandBindings", () => ({
       shortcut: { key, mod: true, meta: false, control, alt: false, shift },
       when: { all: ["mainSurface"], none: ["modalOpen"] },
     }));
+
     return { keybindings, defaults: keybindings };
   },
 }));
@@ -43,13 +45,16 @@ vi.mock("@/hooks/usePluginCommandBindings", () => ({
 function NextPaneHandler({ onNextPane }: { onNextPane: () => void }) {
   useAppCommandHandler("pane.focus.right", () => {
     onNextPane();
+
     return true;
   });
+
   return null;
 }
 
 function ChatPanel({ name, enabled }: { name: string; enabled: boolean }) {
   const [activeTabId, setActiveTabId] = useState("a");
+
   return (
     <SidebarSplitContainer
       activeTabId={activeTabId}
@@ -118,6 +123,7 @@ describe("panel tab commands", () => {
         <ChatPanel name="second" enabled={active === "second"} />
       </AppCommandProvider>
     );
+
     const { rerender } = render(view("first"));
     const editor = screen.getByRole("textbox", { name: "first draft" });
     fireEvent.change(editor, { target: { value: "unsaved content" } });

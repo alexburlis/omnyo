@@ -1,4 +1,4 @@
-import { getThread } from "@bb/db";
+import { getThread } from "@omnyo/db";
 import { describe, expect, it } from "vitest";
 import { sendThreadMessage } from "../../src/services/threads/thread-send.js";
 import { waitForQueuedCommand } from "../helpers/commands.js";
@@ -18,26 +18,31 @@ function seedErroredThread(harness: TestHarness) {
   const { host } = seedHostSession(harness.deps, {
     id: "host-error-recovery",
   });
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: "/tmp/error-recovery-project",
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: "/tmp/error-recovery-environment",
     status: "ready",
   });
+
   const thread = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
     status: "error",
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     providerThreadId: "provider-error-recovery",
     threadId: thread.id,
   });
+
   return { environment, thread };
 }
 
@@ -63,12 +68,14 @@ describe("errored thread correction", () => {
       expect(getThread(harness.db, thread.id)).toMatchObject({
         status: "active",
       });
+
       const queued = await waitForQueuedCommand(
         harness,
         (candidate) =>
           candidate.command.type === "turn.submit" &&
           candidate.command.threadId === thread.id,
       );
+
       expect(queued.command).toMatchObject({
         target: { mode: "start" },
         threadId: thread.id,

@@ -3,7 +3,7 @@ import {
   exceedsPluginMetadataLimit,
   parsePersistedPluginMetadata,
   type JsonObject,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   DbConnection,
   DbQueryConnection,
@@ -44,8 +44,10 @@ export function getThreadPluginMetadata(
     .from(threadPluginMetadata)
     .where(namespaceWhere(threadId, pluginId))
     .get();
+
   if (row === undefined) return { metadata: {}, corrupt: false };
   const metadata = parsePersistedPluginMetadata(row.metadataJson);
+
   return metadata === undefined
     ? { metadata: {}, corrupt: true }
     : { metadata, corrupt: false };
@@ -57,6 +59,7 @@ export function listThreadPluginMetadataRows(
   pluginIds: readonly string[],
 ): Array<{ pluginId: string; metadataJson: string }> {
   if (pluginIds.length === 0) return [];
+
   return db
     .select({
       pluginId: threadPluginMetadata.pluginId,
@@ -81,6 +84,7 @@ export function listPluginThreadMetadata(
   corruptThreadIds: string[];
 } {
   if (threadIds.length === 0) return { threads: [], corruptThreadIds: [] };
+
   const rows = db
     .select({
       threadId: threadPluginMetadata.threadId,
@@ -94,16 +98,20 @@ export function listPluginThreadMetadata(
       ),
     )
     .all();
+
   const result: Array<{ threadId: string; metadata: JsonObject }> = [];
   const corruptThreadIds: string[] = [];
+
   for (const row of rows) {
     const metadata = parsePersistedPluginMetadata(row.metadataJson);
+
     if (metadata === undefined) {
       corruptThreadIds.push(row.threadId);
     } else {
       result.push({ threadId: row.threadId, metadata });
     }
   }
+
   return { threads: result, corruptThreadIds };
 }
 
@@ -131,18 +139,25 @@ export function patchThreadPluginMetadata(
         input.threadId,
         input.pluginId,
       );
+
       const metadata: JsonObject = { ...existing.metadata, ...input.set };
+
       for (const key of input.remove) delete metadata[key];
+
       if (Object.keys(metadata).length === 0) {
         tx.delete(threadPluginMetadata)
           .where(namespaceWhere(input.threadId, input.pluginId))
           .run();
+
         return { ok: true, metadata, replacedCorrupt: existing.corrupt };
       }
+
       const metadataJson = JSON.stringify(metadata);
+
       if (exceedsPluginMetadataLimit(metadataJson)) {
         return { ok: false, reason: "too_large" };
       }
+
       tx.insert(threadPluginMetadata)
         .values({
           threadId: input.threadId,
@@ -157,6 +172,7 @@ export function patchThreadPluginMetadata(
           set: { metadataJson },
         })
         .run();
+
       return { ok: true, metadata, replacedCorrupt: existing.corrupt };
     },
     { behavior: "immediate" },

@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { MACOS_WINDOW_NO_DRAG_CLASS } from "@/lib/bb-desktop";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { MACOS_WINDOW_NO_DRAG_CLASS } from "@/lib/omnyo-desktop";
 
 interface AppBreadcrumbSegment {
   label: string;
@@ -20,6 +20,7 @@ export function AppBreadcrumbs({
       <ol className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
         {breadcrumbs.map((segment, index) => {
           const isLast = index === breadcrumbs.length - 1;
+
           return (
             <li
               key={`${segment.label}-${index}`}

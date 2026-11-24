@@ -9,10 +9,11 @@ import type {
   TimelineRowStatus,
   TimelineToolWorkRow,
   TimelineSystemRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   buildTimelineWorkSummaryLabel,
   buildTimelineViewRows,
+  createTimelineViewRowsCache,
   type ThreadTimelineViewRow,
   type TimelineBundleSummaryRow,
   type TimelineStepSummaryRow,
@@ -57,6 +58,7 @@ function assistantRow({
     text,
     attachments: null,
     turnRequest: null,
+    turnGit: null,
   };
 }
 
@@ -139,6 +141,7 @@ function explorationIntents(
   row: ThreadTimelineViewRow,
 ): TimelineActivityIntent[] {
   if (row.kind !== "work" || row.workKind !== "command") return [];
+
   return [...row.activityIntents];
 }
 
@@ -244,6 +247,7 @@ function expectStepSummaryRow(
   if (!row || row.kind !== "step-summary") {
     throw new Error("Expected step summary row");
   }
+
   return row;
 }
 
@@ -253,6 +257,7 @@ function expectBundleSummaryRow(
   if (!row || row.kind !== "bundle-summary") {
     throw new Error("Expected bundle summary row");
   }
+
   return row;
 }
 
@@ -262,6 +267,7 @@ function expectDelegationWorkRow(
   if (!row || row.kind !== "work" || row.workKind !== "delegation") {
     throw new Error("Expected delegation work row");
   }
+
   return row;
 }
 
@@ -321,6 +327,7 @@ describe("buildTimelineViewRows", () => {
         sourceSeqEnd: 1,
       }),
     ]);
+
     const nextRows = buildTimelineViewRows([
       commandRow({
         id: "command-1",
@@ -333,6 +340,7 @@ describe("buildTimelineViewRows", () => {
         sourceSeqEnd: 2,
       }),
     ]);
+
     const nextSummary = expectBundleSummaryRow(nextRows[0]);
 
     expect(firstRows[0]).toMatchObject({
@@ -364,6 +372,7 @@ describe("buildTimelineViewRows", () => {
         status: "pending",
       }),
     ]);
+
     const completedRows = buildTimelineViewRows([
       commandRow({
         id: "command-1",
@@ -394,6 +403,7 @@ describe("buildTimelineViewRows", () => {
     const pendingRows = buildTimelineViewRows([
       commandRow({ id: "command-pending", status: "pending" }),
     ]);
+
     const waitingRows = buildTimelineViewRows([
       {
         ...commandRow({ id: "command-waiting" }),
@@ -450,6 +460,7 @@ describe("buildTimelineViewRows", () => {
         }),
       ])[0],
     );
+
     const delegationSummary = expectBundleSummaryRow(
       buildTimelineViewRows([
         delegationRow({
@@ -464,6 +475,7 @@ describe("buildTimelineViewRows", () => {
         }),
       ])[0],
     );
+
     const fileEditSummary = expectBundleSummaryRow(
       buildTimelineViewRows([
         fileChangeRow({
@@ -538,6 +550,7 @@ describe("buildTimelineViewRows", () => {
         status: "pending",
       }),
     ]);
+
     const summary = expectBundleSummaryRow(rows[0]);
 
     expect(buildTimelineWorkSummaryLabel(summary, { active: true })).toBe(
@@ -620,9 +633,11 @@ describe("bundle activity intent dedupe", () => {
     ]);
 
     const bundle = expectBundleSummaryRow(rows[0]);
+
     const flatPaths = bundle.children
       .flatMap(explorationIntents)
       .map((intent) => (intent.type === "read" ? intent.path : null));
+
     expect(flatPaths).toEqual(["a/b/c", "a/b/d", "a/b/c"]);
   });
 
@@ -659,9 +674,11 @@ describe("bundle activity intent dedupe", () => {
     ]);
 
     const bundle = expectBundleSummaryRow(rows[0]);
+
     const flatTypes = bundle.children
       .flatMap(explorationIntents)
       .map((intent) => intent.type);
+
     expect(flatTypes).toEqual(["list_files", "search"]);
   });
 
@@ -683,9 +700,11 @@ describe("bundle activity intent dedupe", () => {
     ]);
 
     const bundle = expectBundleSummaryRow(rows[0]);
+
     const flatPaths = bundle.children
       .flatMap(explorationIntents)
       .map((intent) => (intent.type === "read" ? intent.path : null));
+
     expect(flatPaths).toEqual(["a", "b", "a", "c"]);
   });
 
@@ -698,9 +717,11 @@ describe("bundle activity intent dedupe", () => {
     ]);
 
     const step = expectStepSummaryRow(rows[0]);
+
     const flatPaths = step.children
       .flatMap(explorationIntents)
       .map((intent) => (intent.type === "read" ? intent.path : null));
+
     expect(flatPaths).toEqual(["a", "a"]);
   });
 
@@ -717,9 +738,11 @@ describe("bundle activity intent dedupe", () => {
 
     expect(rows).toHaveLength(1);
     const [row] = rows;
+
     if (!row || row.kind !== "work" || row.workKind !== "command") {
       throw new Error("expected standalone command row");
     }
+
     expect(
       row.activityIntents.map((intent) =>
         intent.type === "read" ? intent.path : null,
@@ -760,6 +783,7 @@ describe("reasoning within activity groups", () => {
       fileChangeRow({ id: "edit", sourceSeqStart: 4 }),
       thought("after", 5),
     ];
+
     const liveRows = buildTimelineViewRows(input);
     expect(liveRows.map((row) => row.kind)).toEqual([
       "bundle-summary",
@@ -771,10 +795,12 @@ describe("reasoning within activity groups", () => {
     expect(
       buildTimelineWorkSummaryLabel(expectBundleSummaryRow(liveRows[1])),
     ).toBe("Edited 1 file");
+
     const rows = buildTimelineViewRows([
       ...input,
       assistantRow({ id: "response", sourceSeqStart: 6 }),
     ]);
+
     const summary = expectStepSummaryRow(rows[0]);
     expect(summary.children.map((row) => row.id)).toEqual(
       input.map((row) => row.id),
@@ -793,6 +819,7 @@ describe("reasoning within activity groups", () => {
       commandRowReadingPaths(["b.ts"], 4),
       thought("after", 5),
     ];
+
     const rows = buildTimelineViewRows(input);
     expect(rows).toHaveLength(1);
     const summary = expectBundleSummaryRow(rows[0]);
@@ -809,12 +836,14 @@ describe("reasoning within activity groups", () => {
       buildTimelineViewRows([first, second], { closedScope: true }),
     ).toEqual([first, second]);
     expect(buildTimelineViewRows([first, second])).toEqual([first, second]);
+
     const warning: TimelineSystemRow = {
       ...first,
       id: "warning",
       systemKind: "operation",
       operationKind: "warning",
     };
+
     const rows = buildTimelineViewRows([
       commandRowReadingPaths(["a.ts"], 0),
       first,
@@ -824,6 +853,7 @@ describe("reasoning within activity groups", () => {
       assistantRow({ id: "response", sourceSeqStart: 4 }),
       commandRowReadingPaths(["c.ts"], 5),
     ]);
+
     expect(rows.map((row) => row.kind)).toEqual([
       "bundle-summary",
       "system",
@@ -832,5 +862,59 @@ describe("reasoning within activity groups", () => {
       "work",
     ]);
     expect(rows[1]?.id).toBe("warning");
+  });
+});
+
+describe("cached grouping scope and structural updates", () => {
+  it.each([false, true])(
+    "keeps open and closed grouping distinct (closedFirst=%s)",
+    (closedFirst) => {
+      const input = [
+        commandRowReadingPaths(["src/one.ts"], 1),
+        commandRowReadingPaths(["src/two.ts"], 2),
+      ];
+
+      const cache = createTimelineViewRowsCache();
+      const expectedOpen = buildTimelineViewRows(input, { closedScope: false });
+
+      const expectedClosed = buildTimelineViewRows(input, {
+        closedScope: true,
+      });
+
+      expect(expectedOpen).not.toEqual(expectedClosed);
+      buildTimelineViewRows(input, { cache, closedScope: closedFirst });
+      expect(
+        buildTimelineViewRows(input, { cache, closedScope: !closedFirst }),
+      ).toEqual(closedFirst ? expectedOpen : expectedClosed);
+    },
+  );
+
+  it("matches the uncached grouping oracle across appends, corrections, removal and reorder", () => {
+    const cache = createTimelineViewRowsCache();
+    const first = commandRowReadingPaths(["src/one.ts"], 1);
+    const second = commandRowReadingPaths(["src/two.ts"], 2);
+
+    const message = assistantRow({
+      id: "answer",
+      text: "First",
+      sourceSeqEnd: 3,
+    });
+
+    const corrected = { ...message, text: "Corrected", sourceSeqEnd: 4 };
+
+    for (const input of [
+      [first],
+      [first, second],
+      [first, second, message],
+      [first, second, corrected],
+      [second, corrected],
+      [corrected, second],
+    ]) {
+      for (const closedScope of [false, true]) {
+        expect(buildTimelineViewRows(input, { cache, closedScope })).toEqual(
+          buildTimelineViewRows(input, { closedScope }),
+        );
+      }
+    }
   });
 });

@@ -41,10 +41,12 @@ describe("estimateCardHeight", () => {
       entry: buildEntry({ additions: 5, deletions: 5 }),
       collapsed: false,
     });
+
     const heightWithoutChanges = estimateCardHeight({
       entry: buildEntry(),
       collapsed: false,
     });
+
     expect(heightWithoutChanges).toBeLessThan(heightWithChanges);
   });
 
@@ -53,23 +55,45 @@ describe("estimateCardHeight", () => {
       entry: buildEntry({ additions: 2 }),
       collapsed: false,
     });
+
     const larger = estimateCardHeight({
       entry: buildEntry({ additions: 40 }),
       collapsed: false,
     });
+
     expect(larger).toBeGreaterThan(small);
   });
 
-  it("caps the estimate for very large files", () => {
-    const big = estimateCardHeight({
-      entry: buildEntry({ additions: 200 }),
+  it("scales with every changed line of an auto-loaded file", () => {
+    const estimate = (additions: number, deletions = 0) =>
+      estimateCardHeight({
+        entry: buildEntry({ additions, deletions }),
+        collapsed: false,
+      });
+
+    expect(estimate(300, 100) - estimate(100)).toBe(
+      3 * (estimate(200) - estimate(100)),
+    );
+  });
+
+  it("estimates the notice height for files that do not load automatically", () => {
+    const onDemand = estimateCardHeight({
+      entry: buildEntry({ additions: 600, loadMode: "on_demand" }),
       collapsed: false,
     });
-    const huge = estimateCardHeight({
-      entry: buildEntry({ additions: 20_000 }),
+
+    const tooLarge = estimateCardHeight({
+      entry: buildEntry({ additions: 30_000, loadMode: "too_large" }),
       collapsed: false,
     });
-    expect(huge).toBe(big);
+
+    const small = estimateCardHeight({
+      entry: buildEntry({ additions: 5 }),
+      collapsed: false,
+    });
+
+    expect(tooLarge).toBe(onDemand);
+    expect(onDemand).toBeLessThan(small);
   });
 
   it("estimates the header floor for a collapsed card regardless of change count", () => {

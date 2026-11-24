@@ -8,16 +8,16 @@ import {
   getThread,
   listQueuedThreadMessages,
   setProjectGitRemoteUrlIfMissing,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   systemThreadProvisioningEventDataSchema,
   threadScope,
   turnScope,
   type ThreadEvent,
-} from "@bb/domain";
-import { groupHostDaemonEvents } from "@bb/host-daemon-contract";
-import { validatePluginMachineProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
-import { createDeferredPromise } from "@bb/test-helpers";
+} from "@omnyo/domain";
+import { groupHostDaemonEvents } from "@omnyo/host-daemon-contract";
+import { validatePluginMachineProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sweepMachineLifecycles } from "../../src/services/machines/provider-orchestration.js";
 import { setPluginEnvironmentProviderBridge } from "../../src/services/plugins/plugin-environment-provider-registry.js";
@@ -54,9 +54,11 @@ describe("composed machine thread lifecycle", () => {
     async ({ firstTurn, archiveFrom }) => {
       await withTestHarness(async (harness) => {
         const source = seedHostSession(harness.deps, { id: "source-machine" });
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: source.host.id,
         });
+
         const remoteUrl = "https://example.test/project.git";
         const path = "/tmp/machine-lifecycle-checkout";
         setProjectGitRemoteUrlIfMissing(
@@ -65,19 +67,26 @@ describe("composed machine thread lifecycle", () => {
           project.id,
           remoteUrl,
         );
+
         const suspend = vi.fn(async ({ hostId }: { hostId: string }) => {
           expect(harness.hub.hasDaemonForHost(hostId)).toBe(false);
+
           return { resource: { snapshot: "saved" } };
         });
+
         const resumeStarted = createDeferredPromise<void>();
         const finishResume = createDeferredPromise<void>();
+
         const resume = vi.fn(async ({ hostId }: { hostId: string }) => {
           seedSession(harness.deps, hostId);
           resumeStarted.resolve();
           await finishResume.promise;
+
           return { resource: { snapshot: "saved" } };
         });
+
         const remove = vi.fn(async () => ({ status: "removed" as const }));
+
         const machine = {
           pluginId: "test-cloud",
           provider: validatePluginMachineProviderDeclaration({
@@ -88,8 +97,10 @@ describe("composed machine thread lifecycle", () => {
             ephemeral: true,
             async create({ key }) {
               const host = getNonDestroyedHostByLaunchKey(harness.db, key);
+
               if (host === null) throw new Error("Missing creating machine");
               seedSession(harness.deps, host.id);
+
               return {
                 status: "created",
                 name: "Test machine",
@@ -102,6 +113,7 @@ describe("composed machine thread lifecycle", () => {
             remove,
           }),
         };
+
         setPluginMachineProviderBridge({
           listMachineProviders: () => [machine],
           getMachineProvider: (id) =>
@@ -150,35 +162,43 @@ describe("composed machine thread lifecycle", () => {
           origin: "app",
           startedOnBehalfOf: null,
         });
+
         const defaultPath = await waitForQueuedCommand(
           harness,
           ({ command }) => command.type === "project.clone_default_path",
           5_000,
         );
+
         const hostId = defaultPath.row.hostId;
         expect(getHost(harness.db, hostId)).toMatchObject({
           launchKey: thread.id,
           type: "ephemeral",
           phase: "active",
         });
+
         const busy = await harness.app.request(
           `/api/v1/hosts/${hostId}/suspend`,
           { method: "POST" },
         );
+
         expect(busy.status).toBe(409);
         expect(await busy.json()).toMatchObject({ code: "machine_busy" });
         await reportQueuedCommandSuccess(harness, defaultPath, { path });
+
         const exists = await waitForQueuedCommand(
           harness,
           ({ command }) => command.type === "host.paths_exist",
         );
+
         await reportQueuedCommandSuccess(harness, exists, {
           existence: { [path]: false },
         });
+
         const clone = await waitForQueuedCommand(
           harness,
           ({ command }) => command.type === "project.clone",
         );
+
         if (clone.command.type !== "project.clone")
           throw new Error("Expected clone");
         reportEnvironmentHookProgress(harness.deps, hostId, {
@@ -207,10 +227,12 @@ describe("composed machine thread lifecycle", () => {
           path,
           gitRemoteUrl: remoteUrl,
         });
+
         const attach = await waitForQueuedCommand(
           harness,
           ({ command }) => command.type === "environment.attach",
         );
+
         if (attach.command.type !== "environment.attach")
           throw new Error("Missing environment attach");
         const environmentId = attach.command.environmentId;
@@ -221,16 +243,20 @@ describe("composed machine thread lifecycle", () => {
           isGitRepo: true,
           isWorktree: false,
         });
+
         const start = await waitForQueuedCommand(
           harness,
           ({ command }) => command.type === "thread.start",
         );
+
         const providerThreadId = "provider-machine-lifecycle";
         await reportQueuedCommandSuccess(harness, start, { providerThreadId });
 
         async function reportEvents(events: ThreadEvent[]) {
           const session = getLatestSessionForHost(harness.db, { hostId });
+
           if (session === null) throw new Error("Missing daemon session");
+
           const response = await harness.app.request(
             "/internal/session/events",
             {
@@ -246,6 +272,7 @@ describe("composed machine thread lifecycle", () => {
               }),
             },
           );
+
           expect(response.status).toBe(200);
         }
 
@@ -264,15 +291,18 @@ describe("composed machine thread lifecycle", () => {
           },
         ]);
         expect(getThread(harness.db, thread.id)?.status).toBe("active");
+
         if (firstTurn === "stopped") {
           const stopping = harness.app.request(
             `/api/v1/threads/${thread.id}/stop`,
             { method: "POST" },
           );
+
           const stop = await waitForQueuedCommand(
             harness,
             ({ command }) => command.type === "thread.stop",
           );
+
           await reportQueuedCommandSuccess(harness, stop, {
             providerCheckpointId: null,
           });
@@ -288,6 +318,7 @@ describe("composed machine thread lifecycle", () => {
             },
           ]);
         }
+
         expect(getThread(harness.db, thread.id)).toMatchObject({
           status: "idle",
           archivedAt: null,
@@ -300,6 +331,7 @@ describe("composed machine thread lifecycle", () => {
             `/api/v1/hosts/${hostId}/suspend`,
             { method: "POST" },
           );
+
           expect(response.status).toBe(202);
           await expect
             .poll(() => getHost(harness.db, hostId)?.phase)
@@ -311,6 +343,7 @@ describe("composed machine thread lifecycle", () => {
         await sweepMachineLifecycles(harness.deps);
         expect(getHost(harness.db, hostId)?.phase).toBe("suspended");
         expect(remove).not.toHaveBeenCalled();
+
         const send = await harness.app.request(
           `/api/v1/threads/${thread.id}/send`,
           {
@@ -322,8 +355,10 @@ describe("composed machine thread lifecycle", () => {
             }),
           },
         );
+
         expect(send.status).toBe(200);
         await resumeStarted.promise;
+
         try {
           expect(getHost(harness.db, hostId)?.phase).toBe("resuming");
           const resuming = await harness.app.request(`/api/v1/hosts/${hostId}`);
@@ -335,10 +370,12 @@ describe("composed machine thread lifecycle", () => {
         } finally {
           finishResume.resolve();
         }
+
         const followup = await waitForQueuedCommand(
           harness,
           ({ command }) => command.type === "turn.submit",
         );
+
         expect(followup.row.hostId).toBe(hostId);
         await reportQueuedCommandSuccess(harness, followup, {
           trace: { spans: [] },
@@ -365,11 +402,14 @@ describe("composed machine thread lifecycle", () => {
         ]);
         expect(getThread(harness.db, thread.id)?.status).toBe("idle");
         expect(listQueuedThreadMessages(harness.db, thread.id)).toEqual([]);
+
         if (archiveFrom === "suspended") await pause();
+
         const archive = await harness.app.request(
           `/api/v1/threads/${thread.id}/archive-all`,
           { method: "POST" },
         );
+
         expect(archive.status).toBe(200);
         await expect
           .poll(() => getHost(harness.db, hostId)?.phase)

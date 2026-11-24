@@ -40,6 +40,7 @@ export interface CommanderErrorSummary {
 }
 
 const LOGGABLE_COMMAND_PATTERN = /^[a-z][a-z-]{0,30}$/;
+
 const LOGGABLE_FLAG_PATTERN = /^--?[a-z][a-z-]{0,40}$/;
 
 export function loggableToken(
@@ -47,24 +48,30 @@ export function loggableToken(
   token: string | null,
 ): string | null {
   if (token === null) return null;
+
   if (commanderCode === "commander.unknownCommand") {
     return LOGGABLE_COMMAND_PATTERN.test(token) ? token : null;
   }
+
   if (commanderCode === "commander.unknownOption") {
     const name = token.split("=")[0];
+
     return LOGGABLE_FLAG_PATTERN.test(name) ? name : null;
   }
+
   return null;
 }
 
 function quotedToken(message: string): string | null {
   const match = /'([^']+)'/.exec(message);
+
   return match === null ? null : match[1];
 }
 
 function flagName(token: string | null): string | null {
   if (token === null) return null;
   const match = /^(--[a-z][\w-]*)/.exec(token);
+
   return match === null ? null : match[1];
 }
 
@@ -86,7 +93,7 @@ async function missingOptionHint(
       return "Pass --prompt <text>, or --prompt-file <path> (use - to read stdin).";
     case "--instance":
     case "--generation":
-      return "List desktop browser instances with `bb browser instances --host <id> --json`.";
+      return "List desktop browser instances with `omnyo browser instances --host <id> --json`.";
     default:
       return null;
   }
@@ -97,24 +104,31 @@ function missingArgumentHint(
   invocation: ResolvedInvocation,
 ): string | null {
   const group = invocation.path[0];
+
   if (argumentName === "id" && group === "project") {
     const projectId = contextProjectId();
+
     return projectId === null
-      ? "List project IDs with `bb project list`."
+      ? "List project IDs with `omnyo project list`."
       : `This thread's project is ${projectId}.`;
   }
+
   if (argumentName === "id" && group === "thread") {
     const threadId = contextThreadId();
+
     return threadId === null
-      ? "List thread IDs with `bb thread list`."
+      ? "List thread IDs with `omnyo thread list`."
       : `The current thread is ${threadId}.`;
   }
+
   if (argumentName === "terminalId") {
     const threadId = contextThreadId();
+
     return threadId === null
-      ? "List terminal IDs with `bb terminal list --thread <id>`."
-      : `List this thread's terminal IDs with \`bb terminal list --thread ${threadId}\`.`;
+      ? "List terminal IDs with `omnyo terminal list --thread <id>`."
+      : `List this thread's terminal IDs with \`omnyo terminal list --thread ${threadId}\`.`;
   }
+
   return null;
 }
 
@@ -128,51 +142,66 @@ export async function summarizeCommanderError(args: {
   const message = args.error.message.replace(/^error: /u, "");
   const token = quotedToken(message);
   const hintLines: string[] = [];
+
   switch (args.error.code) {
     case "commander.unknownCommand": {
       const suggestion = suggestCommand(invocation);
+
       if (suggestion !== null) hintLines.push(`Did you mean: ${suggestion}?`);
       hintLines.push(`Commands: ${formatCommandList(invocation.command)}`);
+
       if (invocation.path.length === 0 && token !== null) {
         hintLines.push(
-          `Plugins add commands only while they are installed and enabled. If '${token}' is a plugin command, check \`bb plugin list\`.`,
+          `Plugins add commands only while they are installed and enabled. If '${token}' is a plugin command, check \`omnyo plugin list\`.`,
         );
       }
+
       break;
     }
+
     case "commander.missingMandatoryOptionValue": {
       const hint = await missingOptionHint(flagName(token), args.resolveHostId);
+
       if (hint !== null) hintLines.push(hint);
       hintLines.push(formatUsageLine(invocation));
       break;
     }
+
     case "commander.missingArgument": {
       const hint = missingArgumentHint(token, invocation);
+
       if (hint !== null) hintLines.push(hint);
       hintLines.push(formatUsageLine(invocation));
       break;
     }
+
     case "commander.unknownOption": {
       const suggestion =
         token === null ? null : suggestOption(invocation.command, token);
+
       if (suggestion !== null) hintLines.push(`Did you mean ${suggestion}?`);
       hintLines.push(formatUsageLine(invocation));
       const options = formatOptionList(invocation.command);
+
       if (options.length > 0) hintLines.push(`Options: ${options}`);
       break;
     }
+
     case "commander.optionMissingArgument":
     case "commander.invalidArgument":
     case "commander.conflictingOption":
     case "commander.excessArguments": {
       hintLines.push(formatUsageLine(invocation));
       const options = formatOptionList(invocation.command);
+
       if (options.length > 0) hintLines.push(`Options: ${options}`);
       break;
     }
+
     default:
       break;
   }
+
   return {
     code: ERROR_CODE_BY_COMMANDER_CODE[args.error.code] ?? "usage_error",
     hintLines,

@@ -14,6 +14,7 @@ import {
 } from "../src/server-moved.js";
 
 const tempDirs: string[] = [];
+
 const posixDescribe = process.platform === "win32" ? describe.skip : describe;
 
 const MOVE: DesktopServerMove = {
@@ -24,7 +25,7 @@ const MOVE: DesktopServerMove = {
     server: {
       handle: "desk",
       name: "Studio desktop",
-      url: "https://desk.getbb.app",
+      url: "https://desk.example.test",
     },
   },
   toHostName: "Studio desktop",
@@ -33,10 +34,10 @@ const MOVE: DesktopServerMove = {
 const FAKE_INSTALLER = `#!/bin/sh
 printf 'args %s\\n' "$*"
 if [ "\${FAKE_INSTALLER_FAIL:-}" = 1 ]; then
-  printf '  %s  %s\\n' '✗' 'Node.js 20.18.1 is too old; bb-app requires Node.js 22.19 or newer.' >&2
+  printf '  %s  %s\\n' '✗' 'Node.js 20.18.1 is too old; omnyo-app requires Node.js 22.19 or newer.' >&2
   exit 1
 fi
-printf '  %s  %s\\n' '●' 'bb machine is ready'
+printf '  %s  %s\\n' '●' 'Omnyo machine is ready'
 `;
 
 afterEach(async () => {
@@ -46,14 +47,16 @@ afterEach(async () => {
 });
 
 async function createTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "bb-desktop-machine-service-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-desktop-machine-service-"));
   tempDirs.push(dir);
+
   return dir;
 }
 
 async function writeFakeInstaller(dir: string): Promise<string> {
   const installerPath = join(dir, "install-machine.sh");
   await writeFile(installerPath, FAKE_INSTALLER);
+
   return installerPath;
 }
 
@@ -64,6 +67,7 @@ function createHarness(args: {
 }) {
   const events: string[] = [];
   const notices: ServerMovedNotice[] = [];
+
   return {
     events,
     notices,
@@ -72,6 +76,7 @@ function createHarness(args: {
         findService: async () => args.service,
         install: async () => {
           events.push("install");
+
           return args.install();
         },
         logInfo: () => undefined,
@@ -105,7 +110,7 @@ posixDescribe("runMachineInstaller", () => {
     ).resolves.toEqual({ ok: true });
 
     expect(await readFile(logPath, "utf8")).toBe(
-      `args --adopt --data-dir ${join(dir, "data")}\n  ●  bb machine is ready\n`,
+      `args --adopt --data-dir ${join(dir, "data")}\n  ●  Omnyo machine is ready\n`,
     );
   });
 
@@ -124,7 +129,7 @@ posixDescribe("runMachineInstaller", () => {
     ).resolves.toEqual({
       ok: false,
       reason:
-        "Node.js 20.18.1 is too old; bb-app requires Node.js 22.19 or newer.",
+        "Node.js 20.18.1 is too old; omnyo-app requires Node.js 22.19 or newer.",
     });
   });
 
@@ -153,10 +158,11 @@ posixDescribe("runMachineInstaller", () => {
 describe("keepMovedMachineConnected", () => {
   it("leaves an installed service alone", async () => {
     const dir = await createTempDir();
+
     const harness = createHarness({
       dir,
       install: async () => ({ ok: true }),
-      service: "/Users/me/Library/LaunchAgents/app.getbb.host-daemon.me.plist",
+      service: "/Users/me/Library/LaunchAgents/app.omnyo.host-daemon.me.plist",
     });
 
     await expect(harness.keep()).resolves.toBe("existing-service");
@@ -165,6 +171,7 @@ describe("keepMovedMachineConnected", () => {
 
   it("stops the app's own runtime before installing the service", async () => {
     const dir = await createTempDir();
+
     const harness = createHarness({
       dir,
       install: async () => ({ ok: true }),
@@ -178,6 +185,7 @@ describe("keepMovedMachineConnected", () => {
 
   it("explains a failed install once per move", async () => {
     const dir = await createTempDir();
+
     const harness = createHarness({
       dir,
       install: async () => ({
@@ -193,9 +201,9 @@ describe("keepMovedMachineConnected", () => {
     expect(harness.events).toEqual(["stop", "install", "stop", "install"]);
     expect(harness.notices).toEqual([
       {
-        detail: `bb couldn't install the background service that keeps this computer connected and up to date: Node.js 20.18.1 is too old. bb tries again the next time it opens. The installer log is ${join(dir, "install-machine-service.log")}.`,
+        detail: `Omnyo couldn't install the background service that keeps this computer connected and up to date: Node.js 20.18.1 is too old. Omnyo tries again the next time it opens. The installer log is ${join(dir, "install-machine-service.log")}.`,
         message:
-          "This computer stays connected to Studio desktop only while bb is open",
+          "This computer stays connected to Studio desktop only while Omnyo is open",
       },
     ]);
   });

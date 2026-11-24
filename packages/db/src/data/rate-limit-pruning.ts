@@ -17,6 +17,7 @@ export function pruneRateLimitSnapshotWindow(
       AND sequence > ${args.afterSequence} AND sequence <= ${args.throughSequence}
     ORDER BY sequence LIMIT ${args.limit}
   `);
+
   const removed =
     rows.length === 0
       ? 0
@@ -30,6 +31,7 @@ export function pruneRateLimitSnapshotWindow(
         OR sequence < (SELECT sequence FROM events WHERE thread_id = ${args.threadId}
           AND type = 'provider/rateLimits/updated' ORDER BY sequence DESC LIMIT 1))
   `).changes;
+
   return {
     removed,
     scanned: rows.length,

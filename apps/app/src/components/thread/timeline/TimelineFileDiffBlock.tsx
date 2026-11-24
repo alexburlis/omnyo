@@ -1,11 +1,11 @@
 import { memo, useMemo } from "react";
 import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
-import type { TimelineFileChange } from "@bb/server-contract";
+import type { TimelineFileChange } from "@omnyo/server-contract";
 import {
   getPlainDiffFallback,
   getRenderablePatchText,
   type RenderablePatchText,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import { GitDiffCard } from "../../git-diff/GitDiffCard.js";
 import { EventCodeBlock } from "../../ui/event-code-block.js";
 import type { DiffPresentation } from "@/components/code/code-rendering";
@@ -37,17 +37,23 @@ function parseRenderablePatch(
 ): RenderablePatch | null {
   try {
     const parsedPatches = parsePatchFiles(patchText.patch);
+
     if (parsedPatches.length !== 1) {
       return null;
     }
+
     const parsedPatch = parsedPatches[0];
+
     if (!parsedPatch || parsedPatch.files.length !== 1) {
       return null;
     }
+
     const fileDiff = parsedPatch.files[0];
+
     if (!fileDiff) {
       return null;
     }
+
     return {
       disableLineNumbers: patchText.disableLineNumbers,
       fileDiff,
@@ -62,20 +68,25 @@ function buildRenderedFileChange(
   change: TimelineFileChange,
 ): RenderedFileChange {
   const cached = renderedFileChangeCache.get(change);
+
   if (cached) {
     return cached;
   }
 
   const renderablePatchText = getRenderablePatchText(change);
+
   const renderablePatch =
     renderablePatchText === null
       ? null
       : parseRenderablePatch(renderablePatchText);
+
   const renderedChange: RenderedFileChange = {
     renderablePatch,
     plainDiff: getPlainDiffFallback(change, renderablePatch !== null),
   };
+
   renderedFileChangeCache.set(change, renderedChange);
+
   return renderedChange;
 }
 
@@ -87,7 +98,9 @@ export const TimelineFileDiffBlock = memo(function TimelineFileDiffBlock({
     () => buildRenderedFileChange(change),
     [change],
   );
+
   const renderablePatch = renderedChange.renderablePatch;
+
   const cardPresentation = useMemo<DiffPresentation | null>(
     () =>
       renderablePatch
@@ -115,8 +128,7 @@ export const TimelineFileDiffBlock = memo(function TimelineFileDiffBlock({
       <TimelineDetailScroll
         size="base"
         contentKey={diffContentKey}
-        className="mt-1"
-        scrollClassName="rounded-lg border border-border bg-background"
+        className="mt-1 overflow-hidden rounded-lg border border-border bg-background"
         showAboveFade={false}
       >
         <div data-timeline-file-diff="">

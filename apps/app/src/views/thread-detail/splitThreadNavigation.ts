@@ -1,5 +1,5 @@
 import type { ThreadRoutePathArgs } from "@/lib/route-paths";
-import type { ThreadOpenSplit, ThreadPaneAction } from "@bb/server-contract";
+import type { ThreadOpenSplit, ThreadPaneAction } from "@omnyo/server-contract";
 import {
   countPanes,
   findPane,
@@ -14,7 +14,7 @@ import {
 import { decideThreadDrop, type SplitZone } from "@/lib/split-drag";
 import type { PaneContent, SplitLayout } from "@/lib/split-layout";
 import { matchPath } from "react-router-dom";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import {
   APP_ROOT_ROUTE_PATH,
   getPluginDetailRoutePath,
@@ -26,7 +26,9 @@ import {
 } from "@/lib/route-paths";
 
 const FIRST_PANE_ID = "pane-1";
+
 const SPLITTABLE_THREAD_ROUTE_PATH = "/projects/:projectId/threads/:threadId";
+
 const SPLITTABLE_PERSONAL_THREAD_ROUTE_PATH = "/threads/:threadId";
 
 export function threadPaneContent(thread: ThreadRoutePathArgs): PaneContent {
@@ -61,12 +63,15 @@ export function paneContentRoute(content: PaneContent): string {
   if (content.kind === "thread") {
     return getThreadRoutePath(content);
   }
+
   if (content.kind === "new-thread") {
     return getRootComposeRoutePath();
   }
+
   if (content.kind === "plugin-detail") {
     return getPluginDetailRoutePath({ pluginId: content.pluginId });
   }
+
   return getPluginPanelRoutePath({
     pluginId: content.pluginId,
     path: content.panelPath,
@@ -78,10 +83,12 @@ export function paneContentForPathname(pathname: string): PaneContent | null {
   if (pathname === APP_ROOT_ROUTE_PATH) {
     return { kind: "new-thread" };
   }
+
   const thread = matchPath(
     { path: SPLITTABLE_THREAD_ROUTE_PATH, end: false },
     pathname,
   );
+
   if (thread?.params.projectId && thread.params.threadId) {
     return {
       kind: "thread",
@@ -89,10 +96,12 @@ export function paneContentForPathname(pathname: string): PaneContent | null {
       threadId: thread.params.threadId,
     };
   }
+
   const personalThread = matchPath(
     { path: SPLITTABLE_PERSONAL_THREAD_ROUTE_PATH, end: false },
     pathname,
   );
+
   if (personalThread?.params.threadId) {
     return {
       kind: "thread",
@@ -100,11 +109,15 @@ export function paneContentForPathname(pathname: string): PaneContent | null {
       threadId: personalThread.params.threadId,
     };
   }
+
   const detail = matchPath(PLUGIN_DETAIL_ROUTE_PATH, pathname);
+
   if (detail?.params.pluginId) {
     return { kind: "plugin-detail", pluginId: detail.params.pluginId };
   }
+
   const panel = matchPath(PLUGIN_PANEL_ROUTE_PATH, pathname);
+
   if (panel?.params.pluginId && panel.params.panelPath) {
     return {
       kind: "plugin-panel",
@@ -113,6 +126,7 @@ export function paneContentForPathname(pathname: string): PaneContent | null {
       subPath: panel.params["*"] ?? "",
     };
   }
+
   return null;
 }
 
@@ -123,7 +137,9 @@ export function reconcileLayoutForContent(
   if (layout === null) {
     return createSinglePaneContentLayout(content);
   }
+
   const existing = findPaneByContent(layout.root, content);
+
   if (existing !== null) {
     const withRouteState =
       existing.content.kind === "plugin-panel" &&
@@ -131,10 +147,12 @@ export function reconcileLayoutForContent(
       existing.content.subPath !== content.subPath
         ? replacePaneContent(layout, existing.paneId, content)
         : layout;
+
     return withRouteState.focusedPaneId === existing.paneId
       ? withRouteState
       : setFocus(withRouteState, existing.paneId);
   }
+
   return replacePaneContent(layout, layout.focusedPaneId, content);
 }
 
@@ -145,9 +163,11 @@ export function replaceOriginPaneContent(
   content: PaneContent,
 ): SplitLayout | null {
   const pane = findPane(layout.root, paneId);
+
   if (pane === null || !isSamePaneContent(pane.content, originContent)) {
     return null;
   }
+
   return {
     ...replacePaneContent(layout, paneId, content),
     focusedPaneId: layout.focusedPaneId,
@@ -156,6 +176,7 @@ export function replaceOriginPaneContent(
 
 export function focusedPaneRoute(layout: SplitLayout): string | null {
   const focused = findPane(layout.root, layout.focusedPaneId);
+
   return focused === null ? null : paneContentRoute(focused.content);
 }
 
@@ -171,22 +192,27 @@ export function applyThreadOpenToLayout(
   if (layout === null) {
     return createSinglePaneLayout(thread);
   }
+
   const existing = findPaneByThread(
     layout.root,
     thread.projectId,
     thread.threadId,
   );
+
   const decision = decideThreadDrop({
     zone: threadOpenSplitZone(split),
     threadAlreadyOpen: existing !== null,
     atMaxPanes: countPanes(layout.root) >= MAX_PANES,
   });
+
   if (existing !== null) {
     return layout.focusedPaneId === existing.paneId
       ? layout
       : setFocus(layout, existing.paneId);
   }
+
   const content = threadPaneContent(thread);
+
   return decision.zone === "center"
     ? replacePaneContent(layout, layout.focusedPaneId, content)
     : splitPane(layout, layout.focusedPaneId, decision.zone, content);
@@ -205,9 +231,11 @@ export function applyThreadPaneActionToLayout(
   action: ThreadPaneAction,
 ): ThreadPaneActionLayoutResult {
   const pane = findPaneByThread(layout.root, thread.projectId, thread.threadId);
+
   if (pane === null || countPanes(layout.root) < 2) {
     return { layout, maximizedPaneId, dimInactiveSplits: null };
   }
+
   if (action === "spotlight" || action === "clear-spotlight") {
     return {
       layout:
@@ -218,6 +246,7 @@ export function applyThreadPaneActionToLayout(
       dimInactiveSplits: action === "spotlight",
     };
   }
+
   if (action === "restore") {
     return {
       layout,
@@ -225,9 +254,11 @@ export function applyThreadPaneActionToLayout(
       dimInactiveSplits: null,
     };
   }
+
   if (action === "toggle" && maximizedPaneId === pane.paneId) {
     return { layout, maximizedPaneId: null, dimInactiveSplits: null };
   }
+
   return {
     layout:
       layout.focusedPaneId === pane.paneId

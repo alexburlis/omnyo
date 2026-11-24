@@ -8,8 +8,8 @@ import {
   type ClientTurnRequestId,
   type ThreadEventRow,
   type ThreadExecutionOptions,
-} from "@bb/domain";
-import { resolvePreferredTestModel } from "@bb/test-helpers";
+} from "@omnyo/domain";
+import { resolvePreferredTestModel } from "@omnyo/test-helpers";
 import {
   getAvailableModels,
   getThread,
@@ -40,6 +40,7 @@ export const REAL_PROVIDER_IDS: ReadonlyArray<RealProviderId> = [
   "claude-code",
   "pi",
 ];
+
 const REAL_PROVIDER_BOOTSTRAP_TEXT =
   "Reply with exactly READY and nothing else.";
 
@@ -47,6 +48,7 @@ type RealProviderExecutionOptions = Pick<
   ThreadExecutionOptions,
   "model" | "reasoningLevel" | "serviceTier"
 >;
+
 type RealProviderExecutionTemplate = Omit<
   RealProviderExecutionOptions,
   "model"
@@ -110,14 +112,19 @@ interface ResolveExecutionOptionsArgs {
 }
 
 export const ACTIVE_TIMEOUT_MS = scaleTimeoutMs(15_000);
+
 export const REAL_POLL_INTERVAL_MS = 200;
+
 export const TURN_TIMEOUT_MS = scaleTimeoutMs(60_000);
+
 export const STOP_TIMEOUT_MS = scaleTimeoutMs(30_000);
+
 export const TEST_TIMEOUT_MS = scaleTimeoutMs(120_000);
 
 process.setMaxListeners(Math.max(process.getMaxListeners(), 64));
 
 const providerPrerequisitePromises = new Map<RealProviderId, Promise<void>>();
+
 const resolvedExecutionOptionsPromises = new Map<
   string,
   Promise<RealProviderExecutionOptions>
@@ -153,10 +160,13 @@ function findLatestClientTurnRequestAfter(
     .find(
       (event) => event.seq > sequence && event.type === "client/turn/requested",
     );
+
   if (!request) {
     return null;
   }
+
   const data = turnRequestEventDataSchema.parse(request.data);
+
   return { requestId: data.requestId, sequence: request.seq };
 }
 
@@ -185,6 +195,7 @@ function findTurnStartedAfter(
       };
     }
   }
+
   return null;
 }
 
@@ -193,6 +204,7 @@ function findInputAcceptedAfter(
   sequence: number,
 ): WaitForInputAcceptedResult | null {
   const request = findLatestClientTurnRequestAfter(events, sequence);
+
   if (request === null) {
     return null;
   }
@@ -248,8 +260,10 @@ async function buildThreadDiagnostics(
     getThreadEvents(args.harness.api, args.threadId),
     getThreadOutput(args.harness.api, args.threadId).catch(() => null),
   ]);
+
   const { lastError, lastTurnCompleted, lastTurnStarted, recentEvents } =
     summarizeThreadEventTail(events, 12);
+
   return `status=${thread.status}; events=${events.length}; recentEvents=[${recentEvents || "none"}]; lastError=${JSON.stringify(lastError?.data ?? null)}; lastTurnStarted=${JSON.stringify(lastTurnStarted?.data ?? null)}; lastTurnCompleted=${JSON.stringify(lastTurnCompleted?.data ?? null)}; outputPreview=${JSON.stringify(previewThreadText(output))}`;
 }
 
@@ -261,28 +275,36 @@ async function pollForEventAfter<T>(
   },
 ): Promise<T> {
   const startedAt = Date.now();
+
   while (Date.now() - startedAt <= ACTIVE_TIMEOUT_MS) {
     const [thread, events] = await Promise.all([
       getThread(args.harness.api, args.threadId),
       getThreadEvents(args.harness.api, args.threadId),
     ]);
+
     const found = options.find(events, args.baselineSequence);
+
     if (found) {
       return found;
     }
+
     const errorEvent = findErrorAfter(events, args.baselineSequence);
+
     if (thread.status === "error" || errorEvent) {
       throw new Error(
         `Thread failed before ${options.label}. Diagnostics: ${await buildThreadDiagnostics(args)}`,
       );
     }
+
     if (hasTurnCompletedAfter(events, args.baselineSequence)) {
       throw new Error(
         `Turn completed before ${options.label} was observed. Diagnostics: ${await buildThreadDiagnostics(args)}`,
       );
     }
+
     await new Promise((resolve) => setTimeout(resolve, REAL_POLL_INTERVAL_MS));
   }
+
   throw new Error(
     `Timed out waiting for ${options.label}. Diagnostics: ${await buildThreadDiagnostics(args)}`,
   );
@@ -312,6 +334,7 @@ export async function sendLongRunningTurnAndWaitStarted(
   const baselineSequence = latestEventSequence(
     await getThreadEvents(args.harness.api, args.threadId),
   );
+
   await sendTextMessage(args.harness.api, args.threadId, {
     execution: await resolveExecutionOptions({
       harness: args.harness,
@@ -319,6 +342,7 @@ export async function sendLongRunningTurnAndWaitStarted(
     }),
     text: "Write a detailed 20 section essay about the history of computing with four sentences per section.",
   });
+
   return waitForTurnStartedAfter({
     baselineSequence,
     harness: args.harness,
@@ -329,6 +353,7 @@ export async function sendLongRunningTurnAndWaitStarted(
 export async function pathExists(targetPath: string): Promise<boolean> {
   try {
     await fs.access(targetPath);
+
     return true;
   } catch {
     return false;
@@ -339,6 +364,7 @@ export async function assertProviderPrerequisites(
   providerId: RealProviderId,
 ): Promise<void> {
   const cached = providerPrerequisitePromises.get(providerId);
+
   if (cached) {
     return cached;
   }
@@ -352,6 +378,7 @@ export async function assertProviderPrerequisites(
     if (providerPrerequisitePromises.get(providerId) === promise) {
       providerPrerequisitePromises.delete(providerId);
     }
+
     throw error;
   }
 }
@@ -361,6 +388,7 @@ export async function resolveExecutionOptions(
 ): Promise<RealProviderExecutionOptions> {
   const cacheKey = `${args.harness.hostId}:${args.providerId}`;
   const cached = resolvedExecutionOptionsPromises.get(cacheKey);
+
   if (cached) {
     return cached;
   }
@@ -374,6 +402,7 @@ export async function resolveExecutionOptions(
     if (resolvedExecutionOptionsPromises.get(cacheKey) === promise) {
       resolvedExecutionOptionsPromises.delete(cacheKey);
     }
+
     throw error;
   }
 }
@@ -385,15 +414,18 @@ async function resolveExecutionOptionsUncached(
     hostId: args.harness.hostId,
     providerId: args.providerId,
   });
+
   const model = resolvePreferredTestModel({
     models,
     providerId: args.providerId,
   });
+
   if (!model) {
     throw new Error(
       `Provider "${args.providerId}" returned no available models for host ${args.harness.hostId}`,
     );
   }
+
   return {
     ...FAST_EXECUTION_BY_PROVIDER[args.providerId],
     model,
@@ -434,14 +466,17 @@ export function expectNonEmptyOutput(
 
 export async function createRealThread(args: CreateRealThreadArgs) {
   await assertProviderPrerequisites(args.providerId);
+
   const harness = await createIntegrationHarness(
     args.workspace.type === "managed-worktree"
       ? { builtinPlugins: ["environment-git-worktree"] }
       : {},
   );
+
   const project = await createProjectFixture(harness, {
     name: `Real Provider ${args.providerId}`,
   });
+
   const readyThread = await createReadyHostThread(harness, {
     execution: await resolveExecutionOptions({
       harness,
@@ -464,6 +499,7 @@ export async function sendAndWaitForIdle(args: SendAndWaitForIdleArgs) {
   const baselineSequence = latestEventSequence(
     await getThreadEvents(args.harness.api, args.threadId),
   );
+
   await sendTextMessage(args.harness.api, args.threadId, {
     execution: await resolveExecutionOptions({
       harness: args.harness,
@@ -471,11 +507,13 @@ export async function sendAndWaitForIdle(args: SendAndWaitForIdleArgs) {
     }),
     text: args.text,
   });
+
   try {
     const request = findLatestClientTurnRequestAfter(
       await getThreadEvents(args.harness.api, args.threadId),
       baselineSequence,
     );
+
     if (request === null) {
       throw new Error(
         `Thread ${args.threadId} did not record a client turn request`,
@@ -484,31 +522,37 @@ export async function sendAndWaitForIdle(args: SendAndWaitForIdleArgs) {
 
     const startedAt = Date.now();
     let reachedIdle = false;
+
     while (Date.now() - startedAt <= TURN_TIMEOUT_MS) {
       const [thread, events] = await Promise.all([
         getThread(args.harness.api, args.threadId),
         getThreadEvents(args.harness.api, args.threadId),
       ]);
+
       if (thread.status === "idle") {
         if (hasCompletedAgentMessageAfter(events, request.sequence)) {
           reachedIdle = true;
           break;
         }
+
         if (hasTurnCompletedAfter(events, request.sequence)) {
           throw new Error(
             `Thread ${args.threadId} returned to idle without a completed agent message`,
           );
         }
       }
+
       if (thread.status === "error") {
         throw new Error(
           `Thread ${args.threadId} entered error before reaching idle`,
         );
       }
+
       await new Promise((resolve) =>
         setTimeout(resolve, REAL_POLL_INTERVAL_MS),
       );
     }
+
     if (!reachedIdle) {
       throw new Error(
         `Timed out waiting for thread ${args.threadId} to return to idle`,
@@ -521,11 +565,14 @@ export async function sendAndWaitForIdle(args: SendAndWaitForIdleArgs) {
       getThreadOutput(args.harness.api, args.threadId),
       getThreadTimeline(args.harness.api, args.threadId).catch(() => null),
     ]);
+
     const { lastError, lastTurnCompleted, recentEvents } =
       summarizeThreadEventTail(events, 10);
+
     const timelineKinds = timeline
       ? formatTimelineRowKindsForDiagnostics(timeline)
       : "unavailable";
+
     const outputPreview = output?.trim().slice(0, 160) ?? "";
     const message = error instanceof Error ? error.message : String(error);
 

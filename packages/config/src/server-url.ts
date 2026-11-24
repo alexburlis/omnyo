@@ -4,7 +4,7 @@ import {
   resolveEnvLoader,
   type EnvLoaderArgs,
 } from "./env.js";
-import { BB_SERVER_URL_ENV } from "./env-vars.js";
+import { OMNYO_SERVER_URL_ENV } from "./env-vars.js";
 import { validateRequiredUrl } from "./public-url.js";
 import { resolveDevInstanceConfig } from "./runtime.js";
 
@@ -15,15 +15,17 @@ interface LoadServerUrlValueArgs extends EnvLoaderArgs {
 
 export function loadServerUrlValue(args: LoadServerUrlValueArgs = {}): string {
   if (args.serverUrl !== undefined) {
-    return validateRequiredUrl(BB_SERVER_URL_ENV.name, args.serverUrl);
+    return validateRequiredUrl(OMNYO_SERVER_URL_ENV.name, args.serverUrl);
   }
 
   const loader = resolveEnvLoader(args);
+
   const configuredServerUrl = readOptionalEnvVar({
     context: loader.context,
-    definition: BB_SERVER_URL_ENV,
+    definition: OMNYO_SERVER_URL_ENV,
     env: loader.env,
   });
+
   if (configuredServerUrl !== undefined) {
     return configuredServerUrl;
   }
@@ -37,7 +39,7 @@ export function loadServerUrlValue(args: LoadServerUrlValueArgs = {}): string {
 
   return readRequiredEnvVar({
     context: loader.context,
-    definition: BB_SERVER_URL_ENV,
+    definition: OMNYO_SERVER_URL_ENV,
     env: loader.env,
   });
 }

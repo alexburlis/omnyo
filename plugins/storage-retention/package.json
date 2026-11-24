@@ -1,15 +1,24 @@
 {
-  "name": "bb-plugin-bb--storage-retention",
+  "name": "omnyo-plugin-omnyo--storage-retention",
   "version": "0.1.0",
   "description": "Inspect machine storage and automatically archive or delete old threads.",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/storage-retention"
+  },
   "private": true,
   "type": "module",
   "engines": {
-    "bb": ">=0.0",
-    "bbPluginSdk": ">=0.6.27"
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.6.51"
   },
-  "bb": {
-    "name": "Storage & retention [Experimental]",
+  "omnyo": {
+    "name": "Storage & Retention [Experimental]",
     "description": "Inspect machine storage and automatically archive or delete old threads.",
     "branding": {
       "icon": "./icons/database-restore.svg"
@@ -22,22 +31,23 @@
     "host": "./src/host.ts"
   },
   "keywords": [
-    "bb-plugin"
+    "omnyo-plugin"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
     "test": "vitest run --config vitest.config.ts",
-    "prepare:bundled": "bb-plugin-build prepare-bundled"
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
   },
   "dependencies": {
-    "@bb/domain": "workspace:^",
-    "@bb/shared-ui": "workspace:*",
+    "@omnyo/domain": "workspace:^",
+    "@omnyo/shared-ui": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@bb/plugin-build": "workspace:*",
-    "@get-bb/plugin-sdk": "workspace:*",
+    "@omnyo/plugin-build": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
+    "@omnyo/process-utils": "workspace:*",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
@@ -47,6 +57,6 @@
     "react-dom": "^19.0.0",
     "sonner": "^1.7.4",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "^4.1.1"
+    "vitest": "4.1.11"
   }
 }

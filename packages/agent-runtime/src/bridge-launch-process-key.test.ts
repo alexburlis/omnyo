@@ -46,6 +46,7 @@ describe("bridgeLaunchProcessKey", () => {
         supportsThreadRename: true,
       },
     };
+
     const rewound: AgentRuntimeBridgeLaunch = {
       ...renamed,
       capabilities: { ...renamed.capabilities, fork: "tip" },

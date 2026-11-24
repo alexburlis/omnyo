@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 
 let app: Awaited<ReturnType<typeof loadPluginApp>>;
 
@@ -28,6 +28,7 @@ function directiveProps(attributes: Record<string, string>) {
   const source = `::inline-vis{${Object.entries(attributes)
     .map(([name, value]) => `${name}="${value}"`)
     .join(" ")}}`;
+
   return { attributes, source, message, openWorkspaceFile: null };
 }
 
@@ -54,18 +55,22 @@ async function findFrame(slot: {
 }): Promise<HTMLIFrameElement> {
   return waitFor(() => {
     const el = slot.container.querySelector("iframe");
+
     if (!(el instanceof HTMLIFrameElement)) {
       throw new Error("Expected the inline visualization iframe to render");
     }
+
     return el;
   });
 }
 
 function frameBox(iframe: HTMLIFrameElement): HTMLElement {
   const box = iframe.closest("[data-inline-vis-frame]");
+
   if (!(box instanceof HTMLElement)) {
     throw new Error("Expected the iframe to sit in an inline-vis frame");
   }
+
   return box;
 }
 
@@ -109,6 +114,7 @@ function observeDocumentHeights() {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     () => new DOMRect(0, 0, 700, height),
   );
+
   return {
     report(next: number) {
       height = next;
@@ -121,9 +127,11 @@ function observeDocumentHeights() {
 
 function documentBody(slot: { container: HTMLElement }): HTMLElement {
   const body = slot.container.querySelector("[data-inline-vis-document]");
+
   if (!(body instanceof HTMLElement)) {
     throw new Error("Expected the Markdown document body to render");
   }
+
   return body;
 }
 
@@ -152,6 +160,7 @@ describe("InlineVisDirective", () => {
         message,
         openWorkspaceFile: null,
       };
+
       const first = renderSlot(app.messageDirectives[0]!, props, {
         rpc: {
           preparePreview: () => ({
@@ -168,17 +177,22 @@ describe("InlineVisDirective", () => {
           }),
         },
       });
+
       await first.findByText("Previously loaded notes");
       first.unmount();
+
       const options = {
         rpc: {
           preparePreview: () => {
             if (failure === "disconnected") throw new Error("Connection lost");
+
             return { kind: "not-found", file: "notes.md" };
           },
         },
       };
+
       const second = renderSlot(app.messageDirectives[0]!, props, options);
+
       if (failure === "not-found") {
         expect((await second.findByRole("alert")).textContent).toContain(
           "Preview file not found: notes.md",
@@ -266,6 +280,7 @@ describe("InlineVisDirective", () => {
               threadId: "thr_1",
               file: "charts/demo file.html",
             });
+
             return htmlPreview("charts/demo file.html", {
               content: "<h1>Quarterly chart</h1>",
             });
@@ -279,12 +294,14 @@ describe("InlineVisDirective", () => {
     });
     const iframe = await findFrame(slot);
 
-    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
+    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts");
     expect(iframe.getAttribute("src")).toBeNull();
     expect(iframe.title).toBe("inline-vis: charts/demo file.html");
     const srcDoc = iframe.getAttribute("srcdoc") ?? "";
     expect(srcDoc).toContain("<h1>Quarterly chart</h1>");
-    expect(srcDoc).toContain('<style id="bb-theme">:root{color-scheme:light;');
+    expect(srcDoc).toContain(
+      '<style id="omnyo-theme">:root{color-scheme:light;',
+    );
     expect(srcDoc).toContain(
       `<base href="${window.location.origin}/api/v1/environments/env_1/files/charts/demo%20file.html">`,
     );
@@ -296,6 +313,7 @@ describe("InlineVisDirective", () => {
     const open = slot.getByRole("link", {
       name: "Open charts/demo file.html in sidebar",
     });
+
     expect(frameBox(iframe).contains(open)).toBe(true);
     expect(frameBox(iframe).classList.contains("group/inline-vis")).toBe(true);
     expect(open.parentElement?.className).toContain("opacity-0");
@@ -346,6 +364,7 @@ describe("InlineVisDirective", () => {
               file: "reports/result file.html",
               source: "thread-storage",
             });
+
             return {
               kind: "html",
               file: "reports/result file.html",
@@ -398,6 +417,7 @@ describe("InlineVisDirective", () => {
     const open = await slot.findByRole("link", {
       name: "Open demo.html in sidebar",
     });
+
     expect(open.getAttribute("href")).toBe(
       "/api/v1/environments/env_1/files/demo.html",
     );
@@ -430,11 +450,13 @@ describe("InlineVisDirective", () => {
         preparePreview: () => htmlPreview("fit.html", { sha256: "sha-fit" }),
       },
     };
+
     const first = renderSlot(
       app.messageDirectives[0]!,
       directiveProps({ file: "fit.html" }),
       options,
     );
+
     const iframe = await findFrame(first);
     expect(frameBox(iframe).style.height).toBe("224px");
 
@@ -455,6 +477,7 @@ describe("InlineVisDirective", () => {
       directiveProps({ file: "fit.html" }),
       options,
     );
+
     expect(frameBox(await findFrame(second)).style.height).toBe("640px");
     second.unmount();
 
@@ -463,23 +486,66 @@ describe("InlineVisDirective", () => {
       directiveProps({ file: "fit.html", height: "300" }),
       options,
     );
+
     const cappedFrame = await findFrame(capped);
     expect(frameBox(cappedFrame).style.height).toBe("300px");
     postMessageFrom(cappedFrame.contentWindow, sizeChanged(120));
     expect(frameBox(cappedFrame).style.height).toBe("120px");
   });
 
+  it("hands wheel and touch input inside the page to the chat scroller", async () => {
+    const slot = renderSlot(
+      app.messageDirectives[0]!,
+      directiveProps({ file: "scroll.html" }),
+      { rpc: { preparePreview: () => htmlPreview("scroll.html") } },
+    );
+
+    const iframe = await findFrame(slot);
+    const received: Array<{ type: string; deltaY: number | null }> = [];
+
+    const record = (event: Event) =>
+      received.push({
+        type: event.type,
+        deltaY: event instanceof WheelEvent ? event.deltaY : null,
+      });
+
+    slot.container.addEventListener("wheel", record);
+    slot.container.addEventListener("touchmove", record);
+
+    const scrollInput = (params: unknown) => ({
+      jsonrpc: "2.0",
+      method: "omnyo/notifications/scroll-input",
+      params,
+    });
+
+    postMessageFrom(window, scrollInput({ kind: "wheel", deltaY: -40 }));
+    expect(received).toEqual([]);
+
+    postMessageFrom(
+      iframe.contentWindow,
+      scrollInput({ kind: "wheel", deltaY: -40 }),
+    );
+    postMessageFrom(iframe.contentWindow, scrollInput({ kind: "touch" }));
+    expect(received).toEqual([
+      { type: "wheel", deltaY: -40 },
+      { type: "touchmove", deltaY: null },
+    ]);
+  });
+
   it("opens a link the page requests only while the frame has focus", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
+
     const slot = renderSlot(
       app.messageDirectives[0]!,
       directiveProps({ file: "links.html" }),
       { rpc: { preparePreview: () => htmlPreview("links.html") } },
     );
+
     const iframe = await findFrame(slot);
+
     const request = {
       jsonrpc: "2.0",
-      id: "bb-link-1",
+      id: "omnyo-link-1",
       method: "ui/open-link",
       params: { url: "https://example.com/docs" },
     };
@@ -511,6 +577,7 @@ describe("InlineVisDirective", () => {
       directiveProps({ file: "themed.html" }),
       { rpc: { preparePreview: () => htmlPreview("themed.html") } },
     );
+
     const iframe = await findFrame(slot);
     const post = vi.spyOn(iframe.contentWindow!, "postMessage");
 
@@ -529,80 +596,87 @@ describe("InlineVisDirective", () => {
 
   it("clamps a tall Markdown document to a preview, expands it in place, and keeps the choice across a remount", async () => {
     const heights = observeDocumentHeights();
+
     const options = {
       rpc: { preparePreview: () => markdownPreview("plan.md", "# Plan") },
     };
+
     const props = directiveProps({ file: "plan.md" });
     const first = renderSlot(app.messageDirectives[0]!, props, options);
-    await first.findByTestId("bb-markdown");
+    await first.findByTestId("omnyo-markdown");
     heights.report(900);
 
-    expect(documentBody(first).style.maxHeight).toBe("256px");
+    expect(documentBody(first).style.maxHeight).toBe("min(256px, 70svh)");
     const more = first.getByRole("button", { name: "Show more" });
     expect(more.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(more);
 
-    expect(documentBody(first).style.maxHeight).toBe("");
+    expect(documentBody(first).style.maxHeight).toBe("70svh");
     expect(
       first
         .getByRole("button", { name: "Show less" })
         .getAttribute("aria-expanded"),
     ).toBe("true");
-    expect(first.getByTestId("bb-markdown")).toBeTruthy();
+    expect(first.getByTestId("omnyo-markdown")).toBeTruthy();
     first.unmount();
 
     const second = renderSlot(app.messageDirectives[0]!, props, options);
-    await second.findByTestId("bb-markdown");
+    await second.findByTestId("omnyo-markdown");
     heights.report(900);
-    expect(documentBody(second).style.maxHeight).toBe("");
+    expect(documentBody(second).style.maxHeight).toBe("70svh");
 
     fireEvent.click(second.getByRole("button", { name: "Show less" }));
-    expect(documentBody(second).style.maxHeight).toBe("256px");
+    expect(documentBody(second).style.maxHeight).toBe("min(256px, 70svh)");
     second.unmount();
 
     const third = renderSlot(app.messageDirectives[0]!, props, options);
-    await third.findByTestId("bb-markdown");
+    await third.findByTestId("omnyo-markdown");
     heights.report(900);
-    expect(documentBody(third).style.maxHeight).toBe("256px");
+    expect(documentBody(third).style.maxHeight).toBe("min(256px, 70svh)");
   });
 
   it("shows a Markdown document whole, with no expand control, when it barely exceeds the preview", async () => {
     const heights = observeDocumentHeights();
+
     const slot = renderSlot(
       app.messageDirectives[0]!,
       directiveProps({ file: "short.md" }),
       { rpc: { preparePreview: () => markdownPreview("short.md", "# Short") } },
     );
-    await slot.findByTestId("bb-markdown");
-    expect(documentBody(slot).style.maxHeight).toBe("256px");
+
+    await slot.findByTestId("omnyo-markdown");
+    expect(documentBody(slot).style.maxHeight).toBe("min(256px, 70svh)");
 
     heights.report(300);
 
-    expect(documentBody(slot).style.maxHeight).toBe("");
+    expect(documentBody(slot).style.maxHeight).toBe("70svh");
     expect(slot.queryByRole("button", { name: "Show more" })).toBeNull();
 
     heights.report(321);
-    expect(documentBody(slot).style.maxHeight).toBe("256px");
+    expect(documentBody(slot).style.maxHeight).toBe("min(256px, 70svh)");
     expect(slot.getByRole("button", { name: "Show more" })).toBeTruthy();
   });
 
   it("uses the height attribute as the Markdown preview height", async () => {
     const heights = observeDocumentHeights();
+
     const slot = renderSlot(
       app.messageDirectives[0]!,
       directiveProps({ file: "tall.md", height: "480" }),
       { rpc: { preparePreview: () => markdownPreview("tall.md", "# Tall") } },
     );
-    await slot.findByTestId("bb-markdown");
+
+    await slot.findByTestId("omnyo-markdown");
     heights.report(900);
-    expect(documentBody(slot).style.maxHeight).toBe("480px");
+    expect(documentBody(slot).style.maxHeight).toBe("min(480px, 70svh)");
     heights.report(500);
-    expect(documentBody(slot).style.maxHeight).toBe("");
+    expect(documentBody(slot).style.maxHeight).toBe("70svh");
   });
 
   it("copies the Markdown source from the card header", async () => {
     const writeText = vi.fn(async (_text: string) => undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+
     const slot = renderSlot(
       app.messageDirectives[0]!,
       directiveProps({ file: "copy.md" }),
@@ -612,7 +686,8 @@ describe("InlineVisDirective", () => {
         },
       },
     );
-    await slot.findByTestId("bb-markdown");
+
+    await slot.findByTestId("omnyo-markdown");
     const copy = slot.getByRole("button", { name: "Copy copy.md" });
     fireEvent.click(copy);
 
@@ -622,11 +697,13 @@ describe("InlineVisDirective", () => {
 
   it("reserves blank space with no card while an HTML page loads", async () => {
     type HtmlPreview = ReturnType<typeof htmlPreview>;
+
     let resolvePreview = (_result: HtmlPreview) => {};
+
     const pendingPreview = new Promise<HtmlPreview>((resolve) => {
       resolvePreview = resolve;
     });
-    window.localStorage.setItem("bb.inline-vis.collapsed", "true");
+
     const slot = renderSlot(
       app.messageDirectives[0]!,
       directiveProps({ file: "pending.html", height: "480" }),
@@ -636,6 +713,7 @@ describe("InlineVisDirective", () => {
     const loading = await slot.findByRole("status", {
       name: "Loading visualization pending.html",
     });
+
     expect(loading.getAttribute("aria-busy")).toBe("true");
     expect(loading.style.height).toBe("480px");
     expect(loading.childElementCount).toBe(0);
@@ -665,6 +743,7 @@ describe("InlineVisDirective", () => {
               threadId: "thr_1",
               file: "reports/notes.md",
             });
+
             return {
               kind: "markdown",
               file: "reports/notes.md",
@@ -682,7 +761,7 @@ describe("InlineVisDirective", () => {
       },
     );
 
-    const markdown = await slot.findByTestId("bb-markdown");
+    const markdown = await slot.findByTestId("omnyo-markdown");
     expect(markdown.textContent).toBe("# Notes\n\nReady for review.");
     expect(slot.container.querySelector("iframe")).toBeNull();
     const card = slot.getByRole("region", { name: "reports/notes.md" });
@@ -737,7 +816,7 @@ describe("InlineVisDirective", () => {
       },
     );
 
-    const markdown = await slot.findByTestId("bb-markdown");
+    const markdown = await slot.findByTestId("omnyo-markdown");
     expect(markdown.textContent).toBe("# Notes");
     expect(slot.container.querySelector("iframe")).toBeNull();
     fireEvent.click(
@@ -762,10 +841,13 @@ describe("InlineVisDirective", () => {
 
   it("shows a loading card for a Markdown document, then the document in the same card", async () => {
     type MarkdownPreview = ReturnType<typeof markdownPreview>;
+
     let resolvePreview = (_result: MarkdownPreview) => {};
+
     const pendingPreview = new Promise<MarkdownPreview>((resolve) => {
       resolvePreview = resolve;
     });
+
     const slot = renderSlot(
       app.messageDirectives[0]!,
       directiveProps({ file: "notes.md" }),
@@ -782,7 +864,7 @@ describe("InlineVisDirective", () => {
 
     resolvePreview(markdownPreview("notes.md", "# Notes"));
 
-    const markdown = await slot.findByTestId("bb-markdown");
+    const markdown = await slot.findByTestId("omnyo-markdown");
     expect(slot.queryByRole("status")).toBeNull();
     const card = slot.getByRole("region", { name: "notes.md" });
     expect(card.contains(markdown)).toBe(true);
@@ -841,6 +923,7 @@ describe("InlineVisFence", () => {
 
   it("shows a quiet status line while the page streams, then frames the finished page", async () => {
     const Fence = app.codeFenceRenderers[0]!.component;
+
     const slot = renderSlot(
       app.codeFenceRenderers[0]!,
       fenceProps({ status: "streaming", code: "<p>Fenced" }),
@@ -855,10 +938,12 @@ describe("InlineVisFence", () => {
     const iframe = await findFrame(slot);
     expect(slot.queryByRole("status")).toBeNull();
     expect(iframe.title).toBe("inline-vis");
-    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
+    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts");
     const srcDoc = iframe.getAttribute("srcdoc") ?? "";
     expect(srcDoc).toContain("<p>Fenced chart</p>");
-    expect(srcDoc).toContain('<style id="bb-theme">:root{color-scheme:light;');
+    expect(srcDoc).toContain(
+      '<style id="omnyo-theme">:root{color-scheme:light;',
+    );
     expect(srcDoc).toContain(`<base href="${window.location.origin}/">`);
     expect(slot.queryByTestId("original")).toBeNull();
     expect(slot.rpcCalls).toEqual([]);
@@ -867,7 +952,7 @@ describe("InlineVisFence", () => {
   it.each([
     ["an unclosed fence", { status: "unclosed" as const }],
     ["a closed fence with no page", { code: " \n " }],
-  ])("falls back to bb's code block for %s", (_label, overrides) => {
+  ])("falls back to Omnyo's code block for %s", (_label, overrides) => {
     const slot = renderSlot(app.codeFenceRenderers[0]!, fenceProps(overrides));
 
     expect(slot.getByTestId("original")).toBeTruthy();
@@ -916,6 +1001,7 @@ describe("InlineVisFence", () => {
       app.codeFenceRenderers[0]!,
       fenceProps({ messageId: "msg_fence_resize", index: 2 }),
     );
+
     expect(frameBox(await findFrame(sibling)).style.height).toBe("224px");
   });
 });

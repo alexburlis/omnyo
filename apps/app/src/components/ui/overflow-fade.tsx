@@ -1,7 +1,9 @@
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 
 type OverflowFadePlacement = "above" | "below" | "left" | "right";
+
 export type OverflowFadeTone = "background" | "sidebar" | "surface-raised";
+
 type OverflowFadeSize = "default" | "sm" | "lg";
 
 interface OverflowFadeProps {
@@ -113,6 +115,7 @@ function getOverflowFadeGradientClass(
   if (inset && !isHorizontalPlacement(placement)) {
     return OVERFLOW_FADE_INSET_VERTICAL_GRADIENT_CLASSES[placement][tone];
   }
+
   return OVERFLOW_FADE_GRADIENT_CLASSES[placement][tone];
 }
 
@@ -124,10 +127,12 @@ function getOverflowFadeLayoutClasses(
   if (isHorizontalPlacement(placement)) {
     const widthClass = OVERFLOW_FADE_HORIZONTAL_WIDTH_CLASS[size];
     const sideClass = placement === "left" ? "left-0" : "right-0";
+
     return cn("inset-y-0", sideClass, widthClass);
   }
 
   const sizeClasses = OVERFLOW_FADE_VERTICAL_SIZE_CLASSES[size];
+
   const offsetClass = inset
     ? placement === "above"
       ? "top-0"
@@ -135,6 +140,7 @@ function getOverflowFadeLayoutClasses(
     : placement === "above"
       ? sizeClasses.aboveOffset
       : sizeClasses.belowOffset;
+
   return cn("inset-x-0", sizeClasses.height, offsetClass);
 }
 

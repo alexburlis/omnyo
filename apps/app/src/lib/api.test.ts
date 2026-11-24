@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FILE_PREVIEW_TEXT_MAX_BYTES } from "@bb/client-core";
+import { FILE_PREVIEW_TEXT_MAX_BYTES } from "@omnyo/client-core";
 import { loadFilePreview } from "./api";
 
 const target = {
@@ -7,6 +7,7 @@ const target = {
   path: "qa/report.bin",
   url: "/api/v1/raw/qa/report.bin",
 };
+
 const fetchMock = vi.fn();
 
 function partialResponse(
@@ -16,6 +17,7 @@ function partialResponse(
 ): Response {
   const bytes =
     typeof body === "string" ? new TextEncoder().encode(body) : body;
+
   return new Response(bytes, {
     status: 206,
     headers: {
@@ -27,6 +29,7 @@ function partialResponse(
 
 function requestedRange(callIndex: number): string | null {
   const init = fetchMock.mock.calls[callIndex]?.[1] as RequestInit | undefined;
+
   return new Headers(init?.headers).get("range");
 }
 

@@ -15,25 +15,25 @@ import {
 const CREDENTIAL = {
   credential: "bbcm_desktop",
   handle: "laptop",
-  serverUrl: "https://laptop.getbb.app",
+  serverUrl: "https://laptop.example.test",
 };
 
 describe("connect URL helpers", () => {
   it("drops and re-adds the routing label", () => {
-    expect(deriveConnectBaseUrl("https://laptop.getbb.app")).toBe(
-      "https://getbb.app",
+    expect(deriveConnectBaseUrl("https://laptop.example.test")).toBe(
+      "https://example.test",
     );
-    expect(serverUrlForHandle("https://getbb.app", "phone")).toBe(
-      "https://phone.getbb.app",
+    expect(serverUrlForHandle("https://example.test", "phone")).toBe(
+      "https://phone.example.test",
     );
-    expect(deriveConnectBaseUrl("https://laptop.bb.example:8443")).toBe(
-      "https://bb.example:8443",
+    expect(deriveConnectBaseUrl("https://laptop.omnyo.example:8443")).toBe(
+      "https://omnyo.example:8443",
     );
     expect(deriveConnectBaseUrl("https://my-box.vibecodethis.site/")).toBe(
       "https://vibecodethis.site",
     );
-    expect(connectPublicProtocol("bb.localhost:42745")).toBe("http:");
-    expect(connectPublicProtocol("getbb.app")).toBe("https:");
+    expect(connectPublicProtocol("omnyo.localhost:42745")).toBe("http:");
+    expect(connectPublicProtocol("example.test")).toBe("https:");
   });
 });
 
@@ -58,13 +58,13 @@ describe("listAccountServers", () => {
           handle: "laptop",
           name: "Laptop",
           live: true,
-          url: "https://laptop.getbb.app",
+          url: "https://laptop.example.test",
         },
         {
           handle: "phone",
           name: "Phone",
           live: false,
-          url: "https://phone.getbb.app",
+          url: "https://phone.example.test",
         },
       ],
     });
@@ -94,19 +94,19 @@ describe("redeemMachineCredential", () => {
             credential: "bbcm_desktop",
             machineId: "machine-1",
             handle: "sawyer",
-            serverUrl: "https://laptop.getbb.app",
+            serverUrl: "https://laptop.example.test",
           }),
         ),
     );
 
     await expect(
       redeemMachineCredential(
-        { apexUrl: "https://getbb.app", code: "ABCD-1234" },
+        { apexUrl: "https://example.test", code: "ABCD-1234" },
         fetchImpl,
       ),
     ).resolves.toEqual(CREDENTIAL);
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://getbb.app/api/connect/redeem-machine",
+      "https://example.test/api/connect/redeem-machine",
       expect.objectContaining({
         body: JSON.stringify({ code: "ABCD-1234" }),
         method: "POST",
@@ -122,10 +122,11 @@ describe("redeemMachineCredential", () => {
       [404, "invalid-code", "invalid_code"],
       [500, "boom", "network"],
     ];
+
     for (const [status, wireError, expected] of cases) {
       await expect(
         redeemMachineCredential(
-          { apexUrl: "https://getbb.app", code: "ABCD-1234" },
+          { apexUrl: "https://example.test", code: "ABCD-1234" },
           async () =>
             new Response(JSON.stringify({ error: wireError }), { status }),
         ),
@@ -136,7 +137,7 @@ describe("redeemMachineCredential", () => {
   it("rejects a response with no server to point at", async () => {
     await expect(
       redeemMachineCredential(
-        { apexUrl: "https://getbb.app", code: "ABCD-1234" },
+        { apexUrl: "https://example.test", code: "ABCD-1234" },
         async () =>
           new Response(
             JSON.stringify({
@@ -152,14 +153,18 @@ describe("redeemMachineCredential", () => {
   it("rejects a server URL the asked-for apex does not own", async () => {
     const outsiders = [
       "https://laptop.evil.app",
-      "https://laptop.getbb.app.evil.app",
-      "http://laptop.getbb.app",
-      "https://getbb.app",
+      "https://laptop.example.test.evil.app",
+      "http://laptop.example.test",
+      "https://example.test",
+      "https://user@laptop.example.test",
+      "https://laptop.example.test/elsewhere",
+      "https://laptop.example.test?target=elsewhere",
     ];
+
     for (const serverUrl of outsiders) {
       await expect(
         redeemMachineCredential(
-          { apexUrl: "https://getbb.app", code: "ABCD-1234" },
+          { apexUrl: "https://example.test", code: "ABCD-1234" },
           async () =>
             new Response(
               JSON.stringify({
@@ -176,13 +181,13 @@ describe("redeemMachineCredential", () => {
   it("accepts a self-hosted apex", async () => {
     await expect(
       redeemMachineCredential(
-        { apexUrl: "https://bb.example", code: "ABCD-1234" },
+        { apexUrl: "https://omnyo.example", code: "ABCD-1234" },
         async () =>
           new Response(
             JSON.stringify({
               credential: "bbcm_desktop",
               machineId: "machine-1",
-              serverUrl: "https://laptop.bb.example",
+              serverUrl: "https://laptop.omnyo.example",
             }),
           ),
       ),
@@ -194,13 +199,14 @@ describe("mobile pairing payload", () => {
   it("derives the apex from the server URL and round-trips through QR text", () => {
     const payload = mobilePairingPayload({
       code: "K7QP-2M4X",
-      serverUrl: "https://laptop.getbb.app",
+      serverUrl: "https://laptop.example.test",
       expiresAt: 1_700_000_600_000,
     });
+
     expect(payload).toEqual({
       code: "K7QP-2M4X",
-      serverUrl: "https://laptop.getbb.app",
-      apex: "https://getbb.app",
+      serverUrl: "https://laptop.example.test",
+      apex: "https://example.test",
       expiresAt: 1_700_000_600_000,
     });
     const text = encodeMobilePairingPayload(payload);
@@ -212,22 +218,22 @@ describe("mobile pairing payload", () => {
     expect(
       mobilePairingPayload({
         code: "AAAA-BBBB",
-        serverUrl: "http://laptop.bb.localhost:42745",
+        serverUrl: "http://laptop.omnyo.localhost:42745",
         expiresAt: 1,
       }).apex,
-    ).toBe("http://bb.localhost:42745");
+    ).toBe("http://omnyo.localhost:42745");
   });
 
   it("rejects text that is not a pairing payload", () => {
-    expect(parseMobilePairingPayload("https://laptop.getbb.app")).toBeNull();
+    expect(parseMobilePairingPayload("https://laptop.example.test")).toBeNull();
     expect(parseMobilePairingPayload("{not json")).toBeNull();
     expect(parseMobilePairingPayload('{"code":"K7QP-2M4X"}')).toBeNull();
     expect(
       parseMobilePairingPayload(
         JSON.stringify({
           code: "K7QP-2M4X",
-          serverUrl: "laptop.getbb.app",
-          apex: "https://getbb.app",
+          serverUrl: "laptop.example.test",
+          apex: "https://example.test",
           expiresAt: 1,
         }),
       ),
@@ -236,8 +242,8 @@ describe("mobile pairing payload", () => {
       parseMobilePairingPayload(
         JSON.stringify({
           code: "K7QP-2M4X",
-          serverUrl: "https://laptop.getbb.app",
-          apex: "https://getbb.app",
+          serverUrl: "https://laptop.example.test",
+          apex: "https://example.test",
           expiresAt: "soon",
         }),
       ),
@@ -249,16 +255,16 @@ describe("mobile pairing payload", () => {
       parseMobilePairingPayload(
         JSON.stringify({
           code: "K7QP-2M4X",
-          serverUrl: "https://laptop.getbb.app",
-          apex: "https://getbb.app",
+          serverUrl: "https://laptop.example.test",
+          apex: "https://example.test",
           expiresAt: 1,
           label: "Sawyer's Mac",
         }),
       ),
     ).toEqual({
       code: "K7QP-2M4X",
-      serverUrl: "https://laptop.getbb.app",
-      apex: "https://getbb.app",
+      serverUrl: "https://laptop.example.test",
+      apex: "https://example.test",
       expiresAt: 1,
     });
   });

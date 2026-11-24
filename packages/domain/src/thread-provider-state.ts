@@ -7,20 +7,23 @@ import {
 } from "./shared-types.js";
 
 export const THREAD_PROVIDER_COMMANDS_STATE_KIND =
-  "bb/provider-commands" satisfies ExtensionKind;
+  "core/provider-commands" satisfies ExtensionKind;
+
 export const THREAD_SESSION_OPTIONS_STATE_KIND =
-  "bb/session-options" satisfies ExtensionKind;
+  "core/session-options" satisfies ExtensionKind;
 
 export const threadProviderCommandSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
   inputHint: z.string().min(1).optional(),
 });
+
 export type ThreadProviderCommand = z.infer<typeof threadProviderCommandSchema>;
 
 export const threadProviderCommandsStateSchema = z.object({
   commands: z.array(threadProviderCommandSchema).max(500),
 });
+
 export type ThreadProviderCommandsState = z.infer<
   typeof threadProviderCommandsStateSchema
 >;
@@ -31,6 +34,7 @@ export const threadSessionOptionValueSchema = z.object({
   description: z.string().min(1).optional(),
   group: z.string().min(1).optional(),
 });
+
 export type ThreadSessionOptionValue = z.infer<
   typeof threadSessionOptionValueSchema
 >;
@@ -56,21 +60,49 @@ export const threadSessionOptionSchema = z.discriminatedUnion("type", [
     fixed: z.boolean().optional(),
   }),
 ]);
+
 export type ThreadSessionOption = z.infer<typeof threadSessionOptionSchema>;
 
 export const threadSessionOptionsStateSchema = z.object({
   options: z.array(threadSessionOptionSchema).max(64),
 });
+
 export type ThreadSessionOptionsState = z.infer<
   typeof threadSessionOptionsStateSchema
 >;
 
 export const THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND =
-  "bb/session-option-selections" satisfies ExtensionKind;
+  "core/session-option-selections" satisfies ExtensionKind;
+
+const legacyCoreThreadStateKindsV1 = [
+  ["bb/provider-commands", THREAD_PROVIDER_COMMANDS_STATE_KIND],
+  ["bb/session-options", THREAD_SESSION_OPTIONS_STATE_KIND],
+  ["bb/session-option-selections", THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND],
+] as const;
+
+export function importLegacyCoreThreadStateKindV1(
+  kind: ExtensionKind,
+): ExtensionKind {
+  return (
+    legacyCoreThreadStateKindsV1.find(([oldKind]) => oldKind === kind)?.[1] ??
+    kind
+  );
+}
+
+export function legacyCoreThreadStateInputKindsV1(
+  kind: string,
+): readonly string[] {
+  const pair = legacyCoreThreadStateKindsV1.find(
+    ([, currentKind]) => currentKind === kind,
+  );
+
+  return pair ? [kind, pair[0]] : [kind];
+}
 
 export const threadSessionOptionSelectionsStateSchema = z.object({
   selections: sessionOptionSelectionsSchema,
 });
+
 export type ThreadSessionOptionSelectionsState = z.infer<
   typeof threadSessionOptionSelectionsStateSchema
 >;
@@ -99,11 +131,14 @@ export function pendingSessionOptionSelections(
   selections: SessionOptionSelections,
 ): SessionOptionSelections {
   const pending: SessionOptionSelections = {};
+
   for (const option of options) {
     if (!Object.hasOwn(selections, option.id)) {
       continue;
     }
+
     const selected = selections[option.id];
+
     if (
       selected !== option.value &&
       sessionOptionAcceptsValue(option, selected)
@@ -111,6 +146,7 @@ export function pendingSessionOptionSelections(
       pending[option.id] = selected;
     }
   }
+
   return pending;
 }
 
@@ -134,15 +170,19 @@ function mergeDeclaredOption(
     if (existing.fixed !== true) {
       return existing;
     }
+
     if (declared.fixed !== true) {
       return declared;
     }
+
     return existing.value === declared.value
       ? existing
       : { ...existing, value: false, fixed: false };
   }
+
   if (existing.type === "select" && declared.type === "select") {
     const known = new Set(existing.values.map((value) => value.id));
+
     return {
       ...existing,
       values: [
@@ -151,6 +191,7 @@ function mergeDeclaredOption(
       ],
     };
   }
+
   return existing;
 }
 
@@ -158,6 +199,7 @@ export function collectDeclaredSessionOptions(
   models: readonly SessionOptionModelSource[],
 ): ThreadSessionOption[] {
   const byId = new Map<string, ThreadSessionOption>();
+
   for (const model of models) {
     for (const option of model.sessionOptions ?? []) {
       const existing = byId.get(option.id);
@@ -167,6 +209,7 @@ export function collectDeclaredSessionOptions(
       );
     }
   }
+
   return [...byId.values()].map((option) =>
     option.type === "boolean" && option.fixed !== undefined
       ? { ...option, fixed: false }
@@ -182,7 +225,9 @@ export function modelSessionOptionConflict(
     if (!Object.hasOwn(selections, option.id)) {
       continue;
     }
+
     const selected = selections[option.id];
+
     if (option.type === "boolean") {
       if (
         typeof selected === "boolean" &&
@@ -197,8 +242,10 @@ export function modelSessionOptionConflict(
           kind: "boolean",
         };
       }
+
       continue;
     }
+
     if (
       typeof selected === "string" &&
       !option.values.some((value) => value.id === selected)
@@ -212,6 +259,7 @@ export function modelSessionOptionConflict(
       };
     }
   }
+
   return null;
 }
 
@@ -228,15 +276,19 @@ export function effectiveSessionOptionSelections(
   selections: SessionOptionSelections,
 ): SessionOptionSelections {
   const effective: SessionOptionSelections = {};
+
   for (const option of declared) {
     if (!Object.hasOwn(selections, option.id)) {
       continue;
     }
+
     const selected = selections[option.id];
+
     if (sessionOptionAcceptsValue(option, selected)) {
       effective[option.id] = selected;
     }
   }
+
   return effective;
 }
 
@@ -246,12 +298,15 @@ export function applySessionOptionSelectionPatch(args: {
   patch: SessionOptionSelectionPatch;
 }): SessionOptionSelectionPatchResult {
   const next: SessionOptionSelections = { ...args.selections };
+
   for (const [optionId, value] of Object.entries(args.patch)) {
     if (value === null) {
       delete next[optionId];
       continue;
     }
+
     const option = args.options.find((candidate) => candidate.id === optionId);
+
     if (option === undefined) {
       return {
         ok: false,
@@ -261,6 +316,7 @@ export function applySessionOptionSelectionPatch(args: {
             : `This thread's agent has no session option "${optionId}". Available options: ${args.options.map((candidate) => candidate.id).join(", ")}.`,
       };
     }
+
     if (!sessionOptionAcceptsValue(option, value)) {
       return {
         ok: false,
@@ -270,8 +326,10 @@ export function applySessionOptionSelectionPatch(args: {
             : `Session option "${optionId}" has no value ${JSON.stringify(value)}. Available values: ${option.values.map((candidate) => candidate.id).join(", ")}.`,
       };
     }
+
     next[optionId] = value;
   }
+
   return {
     ok: true,
     selections: pendingSessionOptionSelections(args.options, next),
@@ -283,7 +341,7 @@ const CORE_THREAD_STATE_SCHEMAS = {
   [THREAD_SESSION_OPTIONS_STATE_KIND]: threadSessionOptionsStateSchema,
 } as const;
 
-export const CORE_THREAD_STATE_PLUGIN_ID = "bb";
+export const CORE_THREAD_STATE_PLUGIN_ID = "core";
 
 export function coreThreadStateSchema(kind: string): z.ZodType | null {
   return Object.hasOwn(CORE_THREAD_STATE_SCHEMAS, kind)

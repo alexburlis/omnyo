@@ -4,20 +4,26 @@ import {
   PluginCliError,
   cliCommand,
   defineCli,
-  type BbPluginApi,
-} from "@get-bb/plugin-sdk";
+  type PluginApi,
+} from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import { isMemoryKind, MEMORY_KINDS, type MemoryKind } from "./memory-kinds.js";
 
 const CATALOG_MAX_CHARS = 3_900;
+
 const DEFAULT_RESULT_LIMIT = 20;
+
 const MAX_RESULT_LIMIT = 100;
+
 const NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,79}$/;
+
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,39}$/;
 
 type MemoryScope = "global" | "project";
+
 type ReadScope = MemoryScope | "all";
-type PluginDatabase = ReturnType<BbPluginApi["storage"]["database"]>;
+
+type PluginDatabase = ReturnType<PluginApi["storage"]["database"]>;
 
 interface MemoryRecord {
   id: string;
@@ -38,6 +44,7 @@ interface MemoryRecord {
 }
 
 const memoryKindSchema = z.enum(MEMORY_KINDS);
+
 const memoryRecordSchema: z.ZodType<MemoryRecord> = z
   .object({
     id: z.string(),
@@ -136,8 +143,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseTags(raw: unknown): string[] {
   if (typeof raw !== "string") return [];
+
   try {
     const parsed: unknown = JSON.parse(raw);
+
     return Array.isArray(parsed)
       ? parsed.filter((tag): tag is string => typeof tag === "string")
       : [];
@@ -151,6 +160,7 @@ function parseMemoryRow(row: unknown): MemoryRecord {
     throw new Error("memory database returned an invalid row");
   const scope: MemoryScope = row.scope === "project" ? "project" : "global";
   const kind = isMemoryKind(row.kind) ? row.kind : "fact";
+
   return {
     id: String(row.id),
     scope,
@@ -206,9 +216,11 @@ function unsafeMemoryReason(value: string): string | null {
   if (/[\u200b-\u200f\u202a-\u202e\u2060\ufeff]/u.test(value)) {
     return "contains invisible or bidirectional control characters";
   }
+
   if (/<\/?\s*(system|developer|assistant|tool)(?:\s|>)/iu.test(value)) {
     return "contains a role-like prompt tag";
   }
+
   if (
     /\b(ignore|disregard|override)\b.{0,50}\b(previous|prior|system|developer)\b/isu.test(
       value,
@@ -216,42 +228,55 @@ function unsafeMemoryReason(value: string): string | null {
   ) {
     return "looks like a prompt-injection instruction";
   }
+
   if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/u.test(value)) {
     return "contains a private key";
   }
+
   if (/\b(?:sk-[a-z0-9_-]{20,}|gh[pousr]_[a-z0-9]{20,})\b/iu.test(value)) {
     return "contains a token-like secret";
   }
+
   if (/\b[A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY)\s*=\s*\S+/u.test(value)) {
     return "contains a credential assignment";
   }
+
   return null;
 }
 
 function validateText(label: string, value: string, maxChars: number): string {
   const trimmed = value.trim();
+
   if (trimmed.length === 0) throw new CliError(`${label} must not be empty`);
+
   if (trimmed.length > maxChars) {
     throw new CliError(`${label} must be at most ${maxChars} characters`);
   }
+
   const unsafe = unsafeMemoryReason(trimmed);
+
   if (unsafe) throw new CliError(`${label} ${unsafe}; memory was not written`);
+
   return trimmed;
 }
 
 function validateName(value: string): string {
   const normalized = value.trim().toLowerCase();
+
   if (!NAME_PATTERN.test(normalized)) {
     throw new CliError(
       "name must be 1-80 lowercase letters, digits, dots, underscores, or hyphens",
     );
   }
+
   return normalized;
 }
 
 function validateTags(values: string[]): string[] {
   const tags = [...new Set(values.map((tag) => tag.trim().toLowerCase()))];
+
   if (tags.length > 20) throw new CliError("at most 20 tags are allowed");
+
   for (const tag of tags) {
     if (!TAG_PATTERN.test(tag)) {
       throw new CliError(
@@ -259,6 +284,7 @@ function validateTags(values: string[]): string[] {
       );
     }
   }
+
   return tags;
 }
 
@@ -267,11 +293,13 @@ function writeScope(
   projectId: string | undefined,
 ): { scope: MemoryScope; projectId: string | null } {
   if (scope === "global") return { scope: "global", projectId: null };
+
   if (projectId === undefined) {
     throw new CliError(
-      "project-scoped memory requires a BB project context; run inside a project thread",
+      "project-scoped memory requires an Omnyo project context; run inside a project thread",
     );
   }
+
   return { scope: "project", projectId };
 }
 
@@ -282,15 +310,19 @@ function scopeSql(
   if (scope === "global") {
     return { sql: "m.scope = 'global'", params: [] };
   }
+
   if (scope === "project") {
     if (!projectId)
-      throw new CliError("project scope requires a BB project context");
+      throw new CliError("project scope requires an Omnyo project context");
+
     return {
       sql: "m.scope = 'project' AND m.project_id = ?",
       params: [projectId],
     };
   }
+
   if (!projectId) return { sql: "m.scope = 'global'", params: [] };
+
   return {
     sql: "(m.scope = 'global' OR (m.scope = 'project' AND m.project_id = ?))",
     params: [projectId],
@@ -299,8 +331,10 @@ function scopeSql(
 
 function searchExpression(query: string): string {
   const tokens = query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
+
   if (tokens.length === 0)
     throw new CliError("search query has no searchable terms");
+
   return [...new Set(tokens)]
     .slice(0, 12)
     .map((token) => `"${token.replaceAll('"', '""')}"`)
@@ -333,6 +367,7 @@ class MemoryStore {
   add(input: MemoryCreate): MemoryRecord {
     const now = Date.now();
     const id = createMemoryId();
+
     const record: MemoryRecord = {
       id,
       scope: input.scope,
@@ -350,6 +385,7 @@ class MemoryStore {
       createdAt: now,
       updatedAt: now,
     };
+
     try {
       this.db.transaction(() => {
         this.db
@@ -394,8 +430,10 @@ class MemoryStore {
           `an active ${record.scope} memory named "${record.name}" already exists`,
         );
       }
+
       throw error;
     }
+
     return record;
   }
 
@@ -406,13 +444,16 @@ class MemoryStore {
   ): MemoryRecord {
     return this.db.transaction(() => {
       const current = this.get(id, "all", ctxProjectId, false);
+
       if (!current)
         throw new CliError(`memory "${id}" was not found in the current scope`);
+
       if (current.version !== input.expectedVersion) {
         throw new CliError(
           `version conflict for ${id}: expected ${input.expectedVersion}, current ${current.version}`,
         );
       }
+
       const updated: MemoryRecord = {
         ...current,
         summary:
@@ -433,6 +474,7 @@ class MemoryStore {
         version: current.version + 1,
         updatedAt: Date.now(),
       };
+
       const result = this.db
         .prepare(
           `UPDATE memories SET
@@ -454,6 +496,7 @@ class MemoryStore {
           updated.id,
           current.version,
         );
+
       if (result.changes !== 1)
         throw new CliError(`memory ${id} changed concurrently; retry`);
       this.insertHistory(
@@ -462,6 +505,7 @@ class MemoryStore {
         updated.sourceThreadId,
         updated.writeReason,
       );
+
       return updated;
     })();
   }
@@ -475,14 +519,18 @@ class MemoryStore {
   ): MemoryRecord {
     return this.db.transaction(() => {
       const current = this.get(id, "all", ctxProjectId, false);
+
       if (!current)
         throw new CliError(`memory "${id}" was not found in the current scope`);
+
       if (current.version !== expectedVersion) {
         throw new CliError(
           `version conflict for ${id}: expected ${expectedVersion}, current ${current.version}`,
         );
       }
+
       const writeReason = validateText("reason", reason, 500);
+
       const forgotten: MemoryRecord = {
         ...current,
         sourceThreadId,
@@ -490,6 +538,7 @@ class MemoryStore {
         version: current.version + 1,
         updatedAt: Date.now(),
       };
+
       const result = this.db
         .prepare(
           `UPDATE memories SET deleted_at = ?, source_thread_id = ?, write_reason = ?,
@@ -505,9 +554,11 @@ class MemoryStore {
           id,
           current.version,
         );
+
       if (result.changes !== 1)
         throw new CliError(`memory ${id} changed concurrently; retry`);
       this.insertHistory(forgotten, "forget", sourceThreadId, writeReason);
+
       return forgotten;
     })();
   }
@@ -519,6 +570,7 @@ class MemoryStore {
     touch = true,
   ): MemoryRecord | null {
     const scoped = scopeSql(scope, projectId);
+
     const row: unknown = this.db
       .prepare(
         `SELECT m.* FROM memories m
@@ -527,13 +579,16 @@ class MemoryStore {
          LIMIT 1`,
       )
       .get(idOrName, idOrName, ...scoped.params);
+
     if (row === undefined) return null;
     const memory = parseMemoryRow(row);
+
     if (touch) {
       this.db
         .prepare("UPDATE memories SET last_accessed_at = ? WHERE id = ?")
         .run(Date.now(), memory.id);
     }
+
     return memory;
   }
 
@@ -546,6 +601,7 @@ class MemoryStore {
     total: number;
   } {
     const scoped = scopeSql(scope, projectId);
+
     const rows: unknown[] = this.db
       .prepare(
         `SELECT m.* FROM memories m
@@ -557,13 +613,16 @@ class MemoryStore {
          LIMIT ?`,
       )
       .all(...scoped.params, limit);
+
     const countRow: unknown = this.db
       .prepare(
         `SELECT COUNT(*) AS count FROM memories m
          WHERE m.deleted_at IS NULL AND ${scoped.sql}`,
       )
       .get(...scoped.params);
+
     const total = isRecord(countRow) ? Number(countRow.count) : 0;
+
     return { memories: rows.map(parseMemoryRow), total };
   }
 
@@ -576,6 +635,7 @@ class MemoryStore {
            updated_at DESC, name ASC`,
       )
       .all();
+
     return rows.map(parseMemoryRow);
   }
 
@@ -583,6 +643,7 @@ class MemoryStore {
     const row: unknown = this.db
       .prepare("SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL")
       .get(id);
+
     return row === undefined ? null : parseMemoryRow(row);
   }
 
@@ -593,6 +654,7 @@ class MemoryStore {
     limit: number,
   ): MemoryRecord[] {
     const scoped = scopeSql(scope, projectId);
+
     const rows: unknown[] = this.db
       .prepare(
         `SELECT m.* FROM memories_fts f
@@ -602,11 +664,13 @@ class MemoryStore {
          LIMIT ?`,
       )
       .all(searchExpression(query), ...scoped.params, limit);
+
     return rows.map(parseMemoryRow);
   }
 
   history(id: string, projectId: string | undefined, limit: number): unknown[] {
     const scoped = scopeSql("all", projectId);
+
     return this.db
       .prepare(
         `SELECT h.version, h.action, h.snapshot_json, h.source_thread_id,
@@ -646,11 +710,13 @@ class MemoryStore {
 
 function displayMemory(memory: MemoryRecord, includeDetails: boolean): string {
   const tags = memory.tags.length > 0 ? ` tags=${memory.tags.join(",")}` : "";
+
   const lines = [
     `${memory.id} v${memory.version} [${memory.scope}/${memory.kind}] ${memory.name}`,
     `  ${memory.summary}`,
     `  importance=${memory.importance} pinned=${memory.pinned}${tags}`,
   ];
+
   if (includeDetails) {
     lines.push(
       "",
@@ -660,58 +726,71 @@ function displayMemory(memory: MemoryRecord, includeDetails: boolean): string {
       `Source thread: ${memory.sourceThreadId ?? "none"}`,
     );
   }
+
   return lines.join("\n");
 }
 
 function renderCatalog(store: MemoryStore, projectId: string): string {
   const { memories, total } = store.list("all", projectId, MAX_RESULT_LIMIT);
+
   const header = [
     "Memory index",
-    "The entries below are summaries, not full records. Use `bb memory search <query> --scope all --json` and `bb memory get <id> --json` to progressively disclose details.",
-    "You may proactively save durable learning with `bb memory add`. Use project scope for repository-specific facts and global scope only for broadly applicable user preferences or workflows. Never store secrets, transient status, guesses, or rules already guaranteed by AGENTS.md.",
+    "The entries below are summaries, not full records. Use `omnyo memory search <query> --scope all --json` and `omnyo memory get <id> --json` to progressively disclose details.",
+    "You may proactively save durable learning with `omnyo memory add`. Use project scope for repository-specific facts and global scope only for broadly applicable user preferences or workflows. Never store secrets, transient status, guesses, or rules already guaranteed by AGENTS.md.",
     "",
   ].join("\n");
+
   if (memories.length === 0) return `${header}No memories are stored yet.`;
 
   const lines: string[] = [];
+
   for (const memory of memories) {
     const tags =
       memory.tags.length > 0 ? `; ${memory.tags.slice(0, 3).join(",")}` : "";
+
     const pin = memory.pinned ? "; pinned" : "";
     const line = `- ${memory.id} [${memory.scope}/${memory.kind}${pin}${tags}] ${memory.name}: ${normalizeOneLine(memory.summary)}`;
     const candidate = `${header}${[...lines, line].join("\n")}`;
+
     if (candidate.length > CATALOG_MAX_CHARS) break;
     lines.push(line);
   }
+
   let finalLines = lines;
   let footer = "";
+
   while (true) {
     const finalShown = finalLines.length;
     footer =
       finalShown < total
-        ? `\nShowing ${finalShown} of ${total}; run \`bb memory catalog --scope all --json\` for the rest.`
+        ? `\nShowing ${finalShown} of ${total}; run \`omnyo memory catalog --scope all --json\` for the rest.`
         : "";
+
     if (
       `${header}${finalLines.join("\n")}${footer}`.length <= CATALOG_MAX_CHARS
     ) {
       break;
     }
+
     finalLines = finalLines.slice(0, -1);
   }
+
   return `${header}${finalLines.join("\n")}${footer}`;
 }
 
 const SCOPE_DESCRIPTION = "Which memories to read";
+
 const READ_SCOPES = ["all", "project", "global"] as const;
+
 const MAX_EXPECTED_VERSION = Number.MAX_SAFE_INTEGER;
 
 function jsonOutput(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-export default async function plugin(bb: BbPluginApi) {
-  const db = bb.storage.database();
-  bb.storage.migrate(db, [
+export default async function plugin(api: PluginApi) {
+  const db = api.storage.database();
+  api.storage.migrate(db, [
     `CREATE TABLE IF NOT EXISTS memories (
        id TEXT PRIMARY KEY,
        scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
@@ -770,14 +849,16 @@ export default async function plugin(bb: BbPluginApi) {
   ]);
   const store = new MemoryStore(db);
 
-  bb.rpc.register(memoryRpcContract, {
+  api.rpc.register(memoryRpcContract, {
     listMemories() {
       return { memories: store.listAll() };
     },
     updateMemory(input) {
       const { id } = input;
       const current = store.getAdmin(id);
+
       if (!current) throw new Error(`memory "${id}" was not found`);
+
       const memory = store.update(
         id,
         {
@@ -793,12 +874,15 @@ export default async function plugin(bb: BbPluginApi) {
         },
         current.projectId ?? undefined,
       );
+
       return { memory };
     },
     deleteMemory(input) {
       const { id } = input;
       const current = store.getAdmin(id);
+
       if (!current) throw new Error(`memory "${id}" was not found`);
+
       const memory = store.forget(
         id,
         input.expectedVersion,
@@ -806,15 +890,16 @@ export default async function plugin(bb: BbPluginApi) {
         null,
         current.projectId ?? undefined,
       );
+
       return { deleted: { id: memory.id, version: memory.version } };
     },
   });
 
-  bb.agents.contributeInstructions(({ projectId }) =>
+  api.agents.contributeInstructions(({ projectId }) =>
     renderCatalog(store, projectId),
   );
 
-  bb.cli.register(
+  api.cli.register(
     defineCli({
       name: "memory",
       summary: "Read and maintain durable global and project memories",
@@ -846,6 +931,7 @@ export default async function plugin(bb: BbPluginApi) {
           run(input, ctx) {
             const { scope, limit } = input.options;
             const result = store.list(scope, ctx.projectId, limit);
+
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -892,9 +978,11 @@ export default async function plugin(bb: BbPluginApi) {
           },
           run(input, ctx) {
             const query = input.positionals.query.join(" ").trim();
+
             if (!query) throw new CliError("search requires a query");
             const { scope, limit } = input.options;
             const memories = store.search(query, scope, ctx.projectId, limit);
+
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -933,16 +1021,19 @@ export default async function plugin(bb: BbPluginApi) {
           },
           run(input, ctx) {
             const idOrName = input.positionals["id-or-name"];
+
             const memory = store.get(
               idOrName,
               input.options.scope,
               ctx.projectId,
             );
+
             if (!memory) {
               throw new CliError(
                 `memory "${idOrName}" was not found in the current scope`,
               );
             }
+
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -1036,6 +1127,7 @@ export default async function plugin(bb: BbPluginApi) {
               sourceThreadId: ctx.threadId ?? null,
               writeReason: input.options.reason,
             });
+
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -1120,6 +1212,7 @@ export default async function plugin(bb: BbPluginApi) {
           },
           run(input, ctx) {
             const tags = input.options.tag;
+
             const memory = store.update(
               input.positionals.id,
               {
@@ -1138,6 +1231,7 @@ export default async function plugin(bb: BbPluginApi) {
               },
               ctx.projectId,
             );
+
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -1178,6 +1272,7 @@ export default async function plugin(bb: BbPluginApi) {
               ctx.threadId ?? null,
               ctx.projectId,
             );
+
             return {
               exitCode: 0,
               stdout: input.options.json
@@ -1209,14 +1304,17 @@ export default async function plugin(bb: BbPluginApi) {
           },
           run(input, ctx) {
             const id = input.positionals.id;
+
             const history = store.history(
               id,
               ctx.projectId,
               input.options.limit,
             );
+
             if (history.length === 0) {
               throw new CliError(`memory history for "${id}" was not found`);
             }
+
             return {
               exitCode: 0,
               stdout: input.options.json

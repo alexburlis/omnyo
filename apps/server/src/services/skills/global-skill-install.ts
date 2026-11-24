@@ -1,13 +1,13 @@
-import { listHosts, listNonDestroyedHostsByIds } from "@bb/db";
+import { listHosts, listNonDestroyedHostsByIds } from "@omnyo/db";
 import type {
   CliSkillMachineStatus,
   SystemCliSkillsStatusResponse,
   SystemInstallCliSkillsResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type {
   HostGlobalSkillsStatusResult,
   HostInstallGlobalSkill,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
 import { ApiError } from "../../errors.js";
 import type { AppDeps } from "../../types.js";
@@ -17,7 +17,7 @@ import {
 } from "../hosts/online-rpc.js";
 import { resolveServerOwnedSkillCatalogEntries } from "./injected-skills.js";
 
-const GLOBAL_CLI_SKILL_NAMES: readonly string[] = ["bb-cli"];
+const GLOBAL_CLI_SKILL_NAMES: readonly string[] = ["omnyo-cli"];
 
 const STATUS_TIMEOUT_MS = 5_000;
 
@@ -44,6 +44,7 @@ type GlobalSkillInstallDeps = Pick<
   | "pluginHostArtifacts"
   | "skillTreeRegistry"
   | "telemetry"
+  | "vault"
 >;
 
 interface InstallGlobalCliSkillsArgs {
@@ -80,12 +81,15 @@ function resolveMachineSkillStatus(args: {
   const expectedByName = new Map(
     args.skills.map((skill) => [skill.name, skill.treeHash]),
   );
+
   const relevant = args.entries.filter((entry) =>
     expectedByName.has(entry.name),
   );
+
   if (relevant.length === 0 || relevant.every((e) => e.treeHash === null)) {
     return "missing";
   }
+
   return relevant.every(
     (entry) => entry.treeHash === expectedByName.get(entry.name),
   )
@@ -99,12 +103,15 @@ export async function readGlobalCliSkillStatus(
 ): Promise<SystemCliSkillsStatusResponse> {
   const hosts = listNonDestroyedHostsByIds(deps.db, args.hostIds);
   const skills = resolveGlobalCliSkills(deps);
+
   const machines = await Promise.all(
     hosts.map(async (host) => {
       const base = { hostId: host.id, hostName: host.name };
+
       if (skills.length === 0 || !deps.hub.hasDaemonForHost(host.id)) {
         return { ...base, status: "unknown" as const };
       }
+
       try {
         const result = await callHostOnlineRpc(deps, {
           hostId: host.id,
@@ -114,6 +121,7 @@ export async function readGlobalCliSkillStatus(
             names: skills.map((skill) => skill.name),
           },
         });
+
         return {
           ...base,
           status: resolveMachineSkillStatus({
@@ -124,18 +132,21 @@ export async function readGlobalCliSkillStatus(
       } catch (error) {
         deps.logger.debug(
           { hostId: host.id, err: error },
-          "Could not read the bb CLI skill status from a machine",
+          "Could not read the Omnyo CLI skill status from a machine",
         );
+
         return { ...base, status: "unknown" as const };
       }
     }),
   );
+
   return { machines };
 }
 
 function installFailureMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   const message = error instanceof Error ? error.message : String(error);
+
   return message.trim().length > 0 ? message : "The install failed";
 }
 
@@ -144,9 +155,11 @@ export async function installGlobalCliSkills(
   args: InstallGlobalCliSkillsArgs,
 ): Promise<InstallGlobalCliSkillsResult> {
   const hosts = listNonDestroyedHostsByIds(deps.db, args.hostIds);
+
   const missingHostId = args.hostIds.find(
     (hostId) => !hosts.some((host) => host.id === hostId),
   );
+
   if (missingHostId !== undefined) {
     throw new ApiError(
       404,
@@ -154,12 +167,14 @@ export async function installGlobalCliSkills(
       `Machine ${missingHostId} was not found`,
     );
   }
+
   const skills = resolveGlobalCliSkills(deps);
+
   if (skills.length === 0) {
     throw new ApiError(
       500,
       "cli_skill_unavailable",
-      "The built-in bb CLI skill is unavailable on this server",
+      "The built-in Omnyo CLI skill is unavailable on this server",
     );
   }
 
@@ -171,6 +186,7 @@ export async function installGlobalCliSkills(
           timeoutMs: COMMAND_TIMEOUT_MS,
           command: { type: "host.install_global_skills", skills },
         });
+
         return {
           ok: true as const,
           hostId: host.id,
@@ -180,8 +196,9 @@ export async function installGlobalCliSkills(
       } catch (error) {
         deps.logger.warn(
           { hostId: host.id, err: error },
-          "Failed to install the bb CLI skills on a machine",
+          "Failed to install the Omnyo CLI skills on a machine",
         );
+
         return {
           ok: false as const,
           hostId: host.id,
@@ -191,5 +208,6 @@ export async function installGlobalCliSkills(
       }
     }),
   );
+
   return { results };
 }

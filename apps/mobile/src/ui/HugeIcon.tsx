@@ -6,6 +6,7 @@ import { ICON_MAP, type IconName } from "./icon-map";
 import type { SFSymbol, SFSymbolWeight } from "./sf-symbol-map";
 
 export const ICON_STROKE_WIDTH = 1.75;
+
 export const ICON_SIZE_DEFAULT = 20;
 
 export type IconStyle = ViewStyle & ImageStyle;
@@ -31,6 +32,7 @@ export function HugeIcon({
   accessibilityLabel,
 }: IconProps) {
   const { tokens } = useTheme();
+
   return (
     <HugeiconsIcon
       icon={ICON_MAP[name]}

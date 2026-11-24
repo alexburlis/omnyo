@@ -1,14 +1,19 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import type {
   AccountPoolConfig,
   AccountSummary,
   PoolStatus,
 } from "./src/contracts.js";
 
-const app = await loadPluginApp(() => import("./app"));
+let app: Awaited<ReturnType<typeof loadPluginApp>>;
+
+beforeAll(async () => {
+  app = await loadPluginApp(() => import("./app"));
+});
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -21,10 +26,12 @@ const STATUS_CACHE_KEY = "account-pool:status";
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
+
   const promise = new Promise<T>((next, fail) => {
     resolve = next;
     reject = fail;
   });
+
   return { promise, resolve, reject };
 }
 
@@ -34,7 +41,9 @@ function measureAccountRows() {
       const handle = this.querySelector(
         'button[aria-roledescription="sortable"]',
       );
+
       const rows = Array.from(this.parentElement?.children ?? []);
+
       return new DOMRect(0, handle ? rows.indexOf(this) * 60 : 0, 600, 60);
     },
   );
@@ -52,7 +61,7 @@ function account(overrides: Partial<AccountSummary> = {}): AccountSummary {
   return {
     id: "11111111-1111-4111-8111-111111111111",
     provider: "claude",
-    kind: "oauth",
+    kind: overrides.provider === "codex" ? "oauth" : "api-key",
     label: "person@example.com",
     email: "person@example.com",
     accountUuid: null,
@@ -84,6 +93,9 @@ function account(overrides: Partial<AccountSummary> = {}): AccountSummary {
     observedAt: 1,
     heldUntil: null,
     error: null,
+    incompatibleModels: [],
+    modelCatalog: null,
+    composerPredictionsDisabled: null,
     inFlight: 0,
     status: "ready",
     ...overrides,
@@ -111,6 +123,7 @@ function config(overrides: Partial<AccountPoolConfig> = {}): AccountPoolConfig {
     codexUpstreamBaseUrl: "https://chatgpt.com/backend-api/codex",
     switchThreshold: 0.98,
     parentMode: "proxy",
+    composerPredictionAllowance: "included-only",
     ...overrides,
   };
 }
@@ -164,6 +177,7 @@ describe("Account Pool parent banner", () => {
       mode: "isolate",
       availability: { claude: true, codex: true },
     });
+
     expect(
       await slot.findByText("Parent Account Pooler available"),
     ).toBeTruthy();
@@ -179,6 +193,7 @@ describe("Account Pool parent banner", () => {
       mode: "proxy",
       availability: { claude: true, codex: true },
     });
+
     expect(
       await slot.findByText("Using the parent Account Pooler"),
     ).toBeTruthy();
@@ -195,6 +210,7 @@ describe("Account Pool parent banner", () => {
       mode: "proxy",
       availability: { claude: true, codex: false },
     });
+
     expect(
       await slot.findByText(
         /Claude requests are sent to the pool on .*Codex has no accounts there, so those requests fall back/,
@@ -208,6 +224,7 @@ describe("Account Pool parent banner", () => {
       mode: "proxy",
       availability: { claude: false, codex: false },
     });
+
     expect(
       await slot.findByText(/has no accounts available right now/),
     ).toBeTruthy();
@@ -215,6 +232,29 @@ describe("Account Pool parent banner", () => {
 });
 
 describe("Account Pool settings", () => {
+  it("opts into prepaid prediction credits through the shared config route", async () => {
+    const slot = render([], {
+      "config.set": () =>
+        config({ composerPredictionAllowance: "included-or-prepaid-credits" }),
+    });
+
+    fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
+
+    const toggle = await slot.findByRole("switch", {
+      name: "Use prepaid credits for predictions",
+    });
+
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(slot.rpcCalls).toContainEqual({
+        method: "config.set",
+        input: { composerPredictionAllowance: "included-or-prepaid-credits" },
+      });
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+    });
+  });
+
   it("renders cached accounts as refreshing until live status arrives, then caches it", async () => {
     window.localStorage.setItem(
       STATUS_CACHE_KEY,
@@ -232,9 +272,11 @@ describe("Account Pool settings", () => {
     expect(await slot.findByText("60%")).toBeTruthy();
     expect(slot.queryByText("refreshing usage…")).toBeNull();
     expect(slot.queryByText(/· refreshing…$/)).toBeNull();
+
     const cached = JSON.parse(
       window.localStorage.getItem(STATUS_CACHE_KEY) ?? "null",
     ) as PoolStatus;
+
     expect(cached.accounts[0]?.fiveHourUtilization).toBe(0.6);
   });
 
@@ -249,9 +291,11 @@ describe("Account Pool settings", () => {
 
   it("marks a row as refreshing while its usage refresh is in flight", async () => {
     const refresh = deferred<{ account: null }>();
+
     const slot = render([account()], {
       "account.refreshUsage": () => refresh.promise,
     });
+
     fireEvent.pointerDown(
       await slot.findByRole("button", { name: "person@example.com actions" }),
     );
@@ -284,6 +328,7 @@ describe("Account Pool settings", () => {
 
   it("renders only the windows a Codex account reports and no Fable slot", async () => {
     const blockingResetAt = Date.now() + 6 * 24 * 60 * 60 * 1_000;
+
     const slot = render([
       account({
         id: "22222222-2222-4222-8222-222222222222",
@@ -306,6 +351,7 @@ describe("Account Pool settings", () => {
         ],
       }),
     ]);
+
     expect(await slot.findByText("pro@example.com")).toBeTruthy();
     expect(slot.getByText("7D")).toBeTruthy();
     expect(slot.getByText("100%")).toBeTruthy();
@@ -341,6 +387,7 @@ describe("Account Pool settings", () => {
       const slot = render([account()], {
         [method]: () => ({ account: null }),
       });
+
       fireEvent.pointerDown(
         await slot.findByRole("button", { name: "person@example.com actions" }),
       );
@@ -353,6 +400,7 @@ describe("Account Pool settings", () => {
     const slot = render([account()], {
       "account.remove": () => ({ removed: true }),
     });
+
     fireEvent.pointerDown(
       await slot.findByRole("button", { name: "person@example.com actions" }),
     );
@@ -368,44 +416,76 @@ describe("Account Pool settings", () => {
     });
   });
 
-  it("opens the correct provider sign-in flow from each Add account menu", async () => {
-    const slot = render([], {
-      "login.start": () => ({
-        sessionId: "22222222-2222-4222-8222-222222222222",
-        authorizeUrl: "https://claude.ai/oauth/authorize",
-      }),
-      "codexLogin.start": () => ({
-        sessionId: "33333333-3333-4333-8333-333333333333",
-        verificationUri: "https://auth.openai.com/codex/device",
-        userCode: "ABCD-1234",
-        expiresAt: Date.now() + 600_000,
-        intervalMs: 60_000,
-      }),
+  it("offers an Anthropic API key for Claude and preserves Codex sign-in", async () => {
+    const slot = render([account()], {
+      "codexLogin.start": codexLoginStart,
     });
-    const addButtons = await slot.findAllByRole("button", {
-      name: "Add account",
-    });
-    fireEvent.pointerDown(addButtons[0]!);
-    fireEvent.click(
-      await slot.findByText("Sign in to Claude", { selector: "span.block" }),
-    );
+
+    fireEvent.click(await slot.findByRole("button", { name: "Add API key" }));
     expect(
-      await slot.findByLabelText("Claude authorization code"),
+      await slot.findByRole("dialog", { name: "Add an Anthropic API key" }),
     ).toBeTruthy();
+    expect(slot.queryByText("Sign in to Claude")).toBeNull();
     fireEvent.click(slot.getByRole("button", { name: "Close" }));
-    fireEvent.pointerDown(addButtons[1]!);
-    fireEvent.click(
-      await slot.findByText("Sign in to Codex", { selector: "span.block" }),
+    fireEvent.pointerDown(
+      await slot.findByRole("button", { name: "Add account" }),
     );
+    fireEvent.click(await slot.findByText("Sign in to Codex"));
     expect(
       (await slot.findByLabelText("Codex user code")).textContent,
     ).toContain("ABCD-1234");
+  });
+
+  it("keeps the retired Claude account visible with recovery and removal", async () => {
+    const slot = render([
+      account({ kind: "oauth", enabled: false, status: "disabled" }),
+    ]);
+
+    fireEvent.click(
+      await slot.findByRole("button", {
+        name: "Open person@example.com details",
+      }),
+    );
+
+    const dialog = await slot.findByRole("dialog", {
+      name: "person@example.com",
+    });
+
+    expect(dialog.textContent).toContain("Sign in directly in Claude Code");
+    expect(slot.queryByRole("button", { name: "Sign in again" })).toBeNull();
+    expect(
+      slot.getByRole("button", { name: "Enable" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(slot.getByRole("button", { name: "Remove" })).toBeTruthy();
+  });
+
+  it("shows a Codex re-login start failure before an authorization URL exists", async () => {
+    const message = "Account no longer exists.";
+
+    const slot = render([account({ provider: "codex", label: "Existing" })], {
+      "codexLogin.start": () => {
+        throw new Error(message);
+      },
+    });
+
+    fireEvent.pointerDown(
+      await slot.findByRole("button", { name: "Existing actions" }),
+    );
+    fireEvent.click(await slot.findByText("Sign in again…"));
+
+    const dialog = await slot.findByRole("dialog", {
+      name: "Sign in again to Existing",
+    });
+
+    await waitFor(() => expect(dialog.textContent).toContain(message));
+    expect(slot.getByRole("button", { name: "Start again" })).toBeTruthy();
   });
 
   it("persists provider routing from the section switch", async () => {
     const slot = render([account()], {
       "routing.set": () => ({ provider: "claude", enabled: false }),
     });
+
     fireEvent.click(
       await slot.findByRole("switch", { name: "Route Claude threads" }),
     );
@@ -421,14 +501,18 @@ describe("Account Pool settings", () => {
     const nextConfig = config({
       anthropicUpstreamBaseUrl: "https://proxy.example.com",
     });
+
     const slot = render([account()], {
       "config.set": () => nextConfig,
     });
+
     fireEvent.click(await slot.findByRole("button", { name: "Advanced" }));
     const anthropic = await slot.findByLabelText("Anthropic upstream base URL");
+
     if (!(anthropic instanceof HTMLInputElement)) {
       throw new Error("Expected the Anthropic config field to be an input.");
     }
+
     await waitFor(() =>
       expect(anthropic.value).toBe("https://api.anthropic.com"),
     );
@@ -462,6 +546,7 @@ describe("Account Pool settings", () => {
       observedAt: 1,
       source: "usage" as const,
     };
+
     const slot = render([
       account({
         familyWeekly: {
@@ -473,6 +558,7 @@ describe("Account Pool settings", () => {
         },
       }),
     ]);
+
     fireEvent.click(
       await slot.findByRole("button", {
         name: "Open person@example.com details",
@@ -491,6 +577,7 @@ describe("Account Pool settings", () => {
         email: null,
       }),
     ]);
+
     expect(await slot.findByText("Person Example")).toBeTruthy();
     expect(slot.getAllByText("person@example.com")).toHaveLength(1);
     fireEvent.click(
@@ -528,9 +615,11 @@ describe("Account Pool settings", () => {
     fireEvent.click(
       await slot.findByRole("button", { name: "Sign in to Codex" }),
     );
+
     const dialog = await slot.findByRole("dialog", {
       name: "Sign in to Codex",
     });
+
     expect(
       slot.getAllByRole("heading", { name: "Sign in to Codex" }),
     ).toHaveLength(1);
@@ -547,11 +636,13 @@ describe("Account Pool settings", () => {
     "cancels the pending sign-in from the header close with compact viewport %s",
     async (compact) => {
       mockCompactViewport(compact);
+
       const slot = render([], {
         "codexLogin.start": codexLoginStart,
         "codexLogin.poll": () => ({ status: "pending" }),
         "codexLogin.cancel": () => ({ cancelled: true }),
       });
+
       fireEvent.click(
         await slot.findByRole("button", { name: "Sign in to Codex" }),
       );
@@ -568,9 +659,11 @@ describe("Account Pool settings", () => {
           null,
         ),
       );
+
       const polls = () =>
         slot.rpcCalls.filter((call) => call.method === "codexLogin.poll")
           .length;
+
       const settled = polls();
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(polls()).toBe(settled);
@@ -579,17 +672,21 @@ describe("Account Pool settings", () => {
 
   it("does not claim success when copying the device code fails", async () => {
     const copy = deferred<boolean>();
+
     const slot = render(
       [],
       { "codexLogin.start": codexLoginStart },
       () => copy.promise,
     );
+
     fireEvent.click(
       await slot.findByRole("button", { name: "Sign in to Codex" }),
     );
+
     const button = await slot.findByRole("button", {
       name: "Copy Codex sign-in code",
     });
+
     fireEvent.click(button);
     expect(slot.inspection.experimental_clipboardWrites).toEqual([
       { text: "ABCD-1234" },
@@ -602,25 +699,31 @@ describe("Account Pool settings", () => {
 
   it("does not claim success when copying the authorization URL fails", async () => {
     const copy = deferred<boolean>();
+
     const slot = render(
       [],
       { "codexLogin.start": codexLoginStart },
       () => copy.promise,
     );
+
     fireEvent.click(
       await slot.findByRole("button", { name: "Sign in to Codex" }),
     );
+
     const button = await slot.findByRole("button", {
       name: "Copy Codex authorization URL",
     });
+
     fireEvent.click(button);
     expect(slot.inspection.experimental_clipboardWrites).toEqual([
       { text: "https://auth.openai.com/codex/device" },
     ]);
     await act(async () => copy.resolve(false));
+
     const input = slot.getByRole("textbox", {
       name: "Codex authorization URL",
     }) as HTMLInputElement;
+
     expect(input.selectionStart).toBe(0);
     expect(input.selectionEnd).toBe(input.value.length);
     expect(button.textContent).not.toContain("Copied");
@@ -629,6 +732,7 @@ describe("Account Pool settings", () => {
 
   it("keeps polling and the close action working after copying the code", async () => {
     const copy = deferred<boolean>();
+
     const slot = render(
       [],
       {
@@ -638,6 +742,7 @@ describe("Account Pool settings", () => {
       },
       () => copy.promise,
     );
+
     fireEvent.click(
       await slot.findByRole("button", { name: "Sign in to Codex" }),
     );
@@ -663,9 +768,11 @@ describe("Account Pool settings", () => {
 
   it("offers a fresh Codex login after device-code polling fails", async () => {
     let starts = 0;
+
     const slot = render([], {
       "codexLogin.start": () => {
         starts += 1;
+
         return {
           sessionId: "33333333-3333-4333-8333-333333333333",
           verificationUri: "https://auth.openai.com/codex/device",
@@ -676,10 +783,11 @@ describe("Account Pool settings", () => {
       },
       "codexLogin.poll": () => ({ status: "error", message: "Code expired." }),
     });
+
     fireEvent.click(
       await slot.findByRole("button", { name: "Sign in to Codex" }),
     );
-    fireEvent.click(await slot.findByRole("button", { name: "Try again" }));
+    fireEvent.click(await slot.findByRole("button", { name: "Start again" }));
     await waitFor(() => expect(starts).toBe(2));
   });
   it.each(["claude", "codex"] as const)(
@@ -687,18 +795,22 @@ describe("Account Pool settings", () => {
     async (provider) => {
       measureAccountRows();
       const first = account({ label: "First", provider });
+
       const second = account({
         id: "22222222-2222-4222-8222-222222222222",
         label: "Second",
         provider,
       });
+
       const other = account({
         id: "33333333-3333-4333-8333-333333333333",
         provider: provider === "claude" ? "codex" : "claude",
         label: "Other",
       });
+
       const accounts = [first, second, other];
       let finishSave = () => {};
+
       const slot = render(accounts, {
         "account.reorder": () =>
           new Promise<null>((resolve) => {
@@ -708,6 +820,7 @@ describe("Account Pool settings", () => {
             };
           }),
       });
+
       const handle = await slot.findByRole("button", { name: "Reorder First" });
       await keyboardMove(handle);
       fireEvent.keyDown(document, { code: "Space" });
@@ -717,10 +830,12 @@ describe("Account Pool settings", () => {
           input: { provider, accountIds: [second.id, first.id] },
         }),
       );
+
       const providerOrder = () =>
         slot
           .getAllByRole("button", { name: /Reorder (First|Second)/ })
           .map((button) => button.getAttribute("aria-label"));
+
       expect(providerOrder()).toEqual(["Reorder Second", "Reorder First"]);
       expect(handle.hasAttribute("disabled")).toBe(true);
       finishSave();
@@ -736,6 +851,7 @@ describe("Account Pool settings", () => {
 
   it("restores the displayed order and reports a rejected reorder", async () => {
     measureAccountRows();
+
     const slot = render(
       [
         account({ label: "First" }),
@@ -750,6 +866,7 @@ describe("Account Pool settings", () => {
         },
       },
     );
+
     const handle = await slot.findByRole("button", { name: "Reorder First" });
     await keyboardMove(handle);
     fireEvent.keyDown(document, { code: "Space" });
@@ -768,6 +885,7 @@ describe("Account Pool settings", () => {
     "does not save a %s drag",
     async (action) => {
       measureAccountRows();
+
       const slot = render([
         account({ label: "First" }),
         account({
@@ -775,6 +893,7 @@ describe("Account Pool settings", () => {
           label: "Second",
         }),
       ]);
+
       const handle = await slot.findByRole("button", { name: "Reorder First" });
       await keyboardMove(handle, action === "cancel" ? "ArrowDown" : "ArrowUp");
       fireEvent.keyDown(document, {

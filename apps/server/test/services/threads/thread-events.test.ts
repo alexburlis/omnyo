@@ -1,14 +1,16 @@
 import { eq } from "drizzle-orm";
-import { events, getThread, threads } from "@bb/db";
-import type { AppendStoredThreadEventArgs } from "@bb/db";
+import { events, getThread, threads } from "@omnyo/db";
+import type { AppendStoredThreadEventArgs } from "@omnyo/db";
 import {
   createStandaloneBuiltinCompactCommandInput,
   threadScope,
   turnScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   appendClientTurnEvent,
+  appendClientTurnEventInTransaction,
+  appendPreparedClientTurnRequestedEventWithNotificationInTransaction,
   appendThreadEvent,
   appendThreadEventInTransaction,
   appendThreadEventsInTransaction,
@@ -26,13 +28,16 @@ import { createTestAppHarness } from "../../helpers/test-app.js";
 async function createThreadEventTestContext() {
   const harness = await createTestAppHarness();
   const { host } = seedHostSession(harness.deps);
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
   });
+
   const thread = seedThread(harness.deps, {
     projectId: project.id,
     environmentId: environment.id,
@@ -46,9 +51,79 @@ afterEach(() => {
 });
 
 describe("thread event appends", () => {
+  it.each(["prepared", "ordinary"] as const)(
+    "rejects a reused request identity before a %s append changes stored state",
+    async (mode) => {
+      const { environment, harness, thread } =
+        await createThreadEventTestContext();
+
+      try {
+        const request = {
+          threadId: thread.id,
+          environmentId: environment.id,
+          type: "client/turn/requested" as const,
+          requestId: "creq_2222222222",
+          input: textInput("Keep working"),
+          target: { kind: "steer" as const, expectedTurnId: null },
+          execution: {
+            model: "gpt-5",
+            reasoningLevel: "medium" as const,
+            permissionMode: "full" as const,
+            serviceTier: "default" as const,
+            source: "client/turn/requested" as const,
+          },
+          initiator: "user" as const,
+          senderThreadId: null,
+          requestMethod: "turn/start" as const,
+          source: "tell" as const,
+        };
+
+        harness.db.transaction((tx) =>
+          appendPreparedClientTurnRequestedEventWithNotificationInTransaction(
+            { db: tx, hub: harness.deps.hub },
+            request,
+          ),
+        );
+
+        const beforeEvents = harness.db
+          .select()
+          .from(events)
+          .where(eq(events.threadId, thread.id))
+          .all();
+
+        const beforeThread = getThread(harness.db, thread.id);
+
+        expect(() =>
+          harness.db.transaction((tx) =>
+            mode === "prepared"
+              ? appendPreparedClientTurnRequestedEventWithNotificationInTransaction(
+                  { db: tx, hub: harness.deps.hub },
+                  request,
+                )
+              : appendClientTurnEventInTransaction(
+                  { db: tx, hub: harness.deps.hub },
+                  request,
+                ),
+          ),
+        ).toThrow("This message request has already been submitted.");
+        expect(
+          harness.db
+            .select()
+            .from(events)
+            .where(eq(events.threadId, thread.id))
+            .all(),
+        ).toEqual(beforeEvents);
+        expect(getThread(harness.db, thread.id)).toEqual(beforeThread);
+      } finally {
+        await harness.cleanup();
+      }
+    },
+  );
+
   it("does not classify an accepted compact steer as manual compaction", async () => {
     const { environment, harness, thread } =
       await createThreadEventTestContext();
+
     try {
       harness.db
         .update(threads)
@@ -57,6 +132,7 @@ describe("thread event appends", () => {
         .run();
       const turnId = "turn-active";
       const providerThreadId = "provider-thread-active";
+
       const initialRequest = appendClientTurnEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -75,6 +151,7 @@ describe("thread event appends", () => {
         requestMethod: "turn/start",
         source: "tell",
       });
+
       appendThreadEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -92,6 +169,7 @@ describe("thread event appends", () => {
           clientRequestId: initialRequest.requestId,
         },
       });
+
       const compactSteer = appendClientTurnEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -110,6 +188,7 @@ describe("thread event appends", () => {
         requestMethod: "turn/start",
         source: "tell",
       });
+
       appendThreadEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -122,9 +201,11 @@ describe("thread event appends", () => {
       });
 
       const activeThread = getThread(harness.db, thread.id);
+
       if (!activeThread) {
         throw new Error("Expected active thread");
       }
+
       expect(isManualCompactionActive(harness.deps, activeThread)).toBe(false);
     } finally {
       await harness.cleanup();
@@ -136,6 +217,7 @@ describe("thread event appends", () => {
     async (wrapper) => {
       const { environment, harness, thread } =
         await createThreadEventTestContext();
+
       try {
         const args: AppendStoredThreadEventArgs<"system/error"> = {
           threadId: thread.id,
@@ -144,6 +226,7 @@ describe("thread event appends", () => {
           scope: turnScope("turn-missing"),
           data: { message: "Late failure" },
         };
+
         expect(() => {
           if (wrapper === "direct") {
             appendThreadEvent(harness.deps, args);
@@ -173,6 +256,7 @@ describe("thread event appends", () => {
   it("accepts thread-scoped appends before turn/started is stored", async () => {
     const { environment, harness, thread } =
       await createThreadEventTestContext();
+
     try {
       const sequence = appendThreadEvent(harness.deps, {
         threadId: thread.id,
@@ -198,6 +282,7 @@ describe("thread event appends", () => {
   it("gates distinct turns in the same thread independently", async () => {
     const { environment, harness, thread } =
       await createThreadEventTestContext();
+
     try {
       appendThreadEvent(harness.deps, {
         threadId: thread.id,
@@ -232,6 +317,7 @@ describe("thread event appends", () => {
   it("rejects batched turn-scoped appends before turn/started in the same batch", async () => {
     const { environment, harness, thread } =
       await createThreadEventTestContext();
+
     try {
       expect(() =>
         harness.db.transaction((tx) =>
@@ -269,6 +355,7 @@ describe("thread event appends", () => {
   it("accepts turn-scoped appends after an earlier turn/started in the same transaction", async () => {
     const { environment, harness, thread } =
       await createThreadEventTestContext();
+
     try {
       const sequences = harness.db.transaction((tx) =>
         appendThreadEventsInTransaction(tx, [
@@ -307,6 +394,7 @@ describe("thread event appends", () => {
   it("advances lastReadAt and notifies read-state-changed for a user-initiated turn request", async () => {
     const { environment, harness, thread } =
       await createThreadEventTestContext();
+
     try {
       harness.db
         .update(threads)
@@ -346,6 +434,7 @@ describe("thread event appends", () => {
         {
           eventTypes: ["client/turn/requested"],
           timelineSequence: 1,
+          eventSequenceRange: { from: 1, to: 1 },
           projectId: thread.projectId,
         },
       );
@@ -354,49 +443,68 @@ describe("thread event appends", () => {
     }
   });
 
-  it("does not advance lastReadAt for an agent-initiated turn request", async () => {
-    const { environment, harness, thread } =
-      await createThreadEventTestContext();
-    try {
-      harness.db
-        .update(threads)
-        .set({
-          lastReadAt: 1_000,
-          latestAttentionAt: 1_000,
-          updatedAt: 1_000,
-        })
-        .where(eq(threads.id, thread.id))
-        .run();
-      vi.spyOn(Date, "now").mockReturnValue(2_000);
-      const notifyThreadSpy = vi.spyOn(harness.deps.hub, "notifyThread");
+  it.each([
+    { initiator: "agent", systemMessageKind: "unlabeled" },
+    { initiator: "user", systemMessageKind: "external-message" },
+  ] as const)(
+    "does not advance lastReadAt for a $initiator $systemMessageKind request",
+    async ({ initiator, systemMessageKind }) => {
+      const { environment, harness, thread } =
+        await createThreadEventTestContext();
 
-      appendClientTurnEvent(harness.deps, {
-        threadId: thread.id,
-        environmentId: environment.id,
-        type: "client/turn/requested",
-        input: textInput("agent handoff"),
-        target: { kind: "new-turn" },
-        execution: {
-          model: "gpt-5",
-          reasoningLevel: "medium",
-          permissionMode: "full",
-          serviceTier: "default",
-          source: "client/turn/requested",
-        },
-        initiator: "agent",
-        senderThreadId: "thr_sender",
-        requestMethod: "turn/start",
-        source: "tell",
-      });
+      try {
+        harness.db
+          .update(threads)
+          .set({
+            lastReadAt: 1_000,
+            latestAttentionAt: 1_000,
+            updatedAt: 1_000,
+          })
+          .where(eq(threads.id, thread.id))
+          .run();
+        vi.spyOn(Date, "now").mockReturnValue(2_000);
+        const notifyThreadSpy = vi.spyOn(harness.deps.hub, "notifyThread");
 
-      expect(getThread(harness.db, thread.id)?.lastReadAt).toBe(1_000);
-      expect(notifyThreadSpy).toHaveBeenCalledWith(
-        thread.id,
-        ["events-appended"],
-        { eventTypes: ["client/turn/requested"], timelineSequence: 1 },
-      );
-    } finally {
-      await harness.cleanup();
-    }
-  });
+        appendClientTurnEvent(harness.deps, {
+          threadId: thread.id,
+          environmentId: environment.id,
+          type: "client/turn/requested",
+          input: textInput("agent handoff"),
+          target: { kind: "new-turn" },
+          execution: {
+            model: "gpt-5",
+            reasoningLevel: "medium",
+            permissionMode: "full",
+            serviceTier: "default",
+            source: "client/turn/requested",
+          },
+          initiator,
+          senderThreadId: initiator === "agent" ? "thr_sender" : null,
+          systemMessageKind,
+          systemMessageSubject:
+            systemMessageKind === "external-message"
+              ? {
+                  kind: "message-source",
+                  source: { kind: "script", label: "Nightly check" },
+                }
+              : null,
+          requestMethod: "turn/start",
+          source: "tell",
+        });
+
+        expect(getThread(harness.db, thread.id)?.lastReadAt).toBe(1_000);
+        expect(notifyThreadSpy).toHaveBeenCalledWith(
+          thread.id,
+          ["events-appended"],
+          {
+            eventTypes: ["client/turn/requested"],
+            timelineSequence: 1,
+            eventSequenceRange: { from: 1, to: 1 },
+          },
+        );
+      } finally {
+        await harness.cleanup();
+      }
+    },
+  );
 });

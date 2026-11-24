@@ -31,6 +31,7 @@ const STREAMING_STEPS = [
 
 export function Streaming() {
   const [step, setStep] = useState(0);
+
   return (
     <StoryCard>
       <StoryRow label="streaming" hint="Advance through incomplete node labels">

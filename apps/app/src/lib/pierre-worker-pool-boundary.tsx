@@ -8,7 +8,9 @@ export function PierreWorkerPoolBoundary({
   children: ReactNode;
 }) {
   const gate = useContext(PierreWorkerPoolGateContext);
+
   if (gate === null) return children;
+
   return (
     <WorkerPoolContext.Provider value={gate.pool}>
       {children}

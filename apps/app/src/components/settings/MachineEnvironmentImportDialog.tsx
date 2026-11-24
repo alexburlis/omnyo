@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
@@ -7,8 +7,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Textarea } from "@bb/shared-ui/textarea";
+} from "@omnyo/shared-ui/dialog";
+import { Textarea } from "@omnyo/shared-ui/textarea";
 import { parseEnvFile, type ParsedEnvEntry } from "@/lib/parse-env-file";
 
 export function MachineEnvironmentImportDialog({
@@ -22,10 +22,12 @@ export function MachineEnvironmentImportDialog({
 }) {
   const [text, setText] = useState("");
   const parsed = parseEnvFile(text);
+
   const close = () => {
     setText("");
     onOpenChange(false);
   };
+
   return (
     <Dialog
       open={open}

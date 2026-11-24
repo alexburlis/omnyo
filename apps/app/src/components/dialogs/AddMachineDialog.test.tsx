@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { createDeferredPromise } from "@bb/test-helpers";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
-import type { ServerAccessStatus } from "@bb/server-contract";
+import { createDeferredPromise } from "@omnyo/test-helpers";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
+import type { ServerAccessStatus } from "@omnyo/server-contract";
 import {
   cleanup,
   fireEvent,
@@ -16,7 +16,7 @@ import { MemoryRouter } from "react-router-dom";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { makeSystemConfig } from "@/test/fixtures/system-config";
-import { Dialog, DialogContent } from "@bb/shared-ui/dialog";
+import { Dialog, DialogContent } from "@omnyo/shared-ui/dialog";
 import { AddMachineContent, ManualMachineSetup } from "./AddMachineDialog";
 
 vi.mock("@/lib/sdk", () => ({
@@ -47,7 +47,7 @@ const READY_SERVER_ACCESS: ServerAccessStatus = {
     },
   ],
   defaultProviderId: "direct",
-  effectiveUrl: "https://bb.example.com",
+  effectiveUrl: "https://omnyo.example.com",
   urlSource: "setting",
 };
 
@@ -79,8 +79,10 @@ const reservedHost: Awaited<ReturnType<typeof sdk.hosts.experimental_create>> =
       teardown: null,
     },
     maxPermissionMode: "full",
+    availability: "available",
     lastSeenAt: null,
     lastRejectedProtocolVersion: null,
+    runtimeVersion: null,
     createdAt: 1,
     updatedAt: 1,
   };
@@ -88,7 +90,7 @@ const reservedHost: Awaited<ReturnType<typeof sdk.hosts.experimental_create>> =
 function stubManualLaunch(configure?: () => void) {
   vi.mocked(sdk.hosts.experimental_create).mockResolvedValue(reservedHost);
   vi.mocked(sdk.hosts.experimental_getEnrollmentCommand).mockResolvedValue({
-    command: "bb machine enroll test",
+    command: "omnyo machine enroll test",
     windowsCommand: "irm windows-command | iex",
     expiresAt: Date.now() + 60_000,
   });
@@ -99,6 +101,7 @@ function stubManualLaunch(configure?: () => void) {
 
 function renderInDialog(content: ReactNode) {
   const { wrapper } = createQueryClientTestHarness();
+
   return render(
     <MemoryRouter>
       <Dialog open modal={false}>
@@ -111,6 +114,7 @@ function renderInDialog(content: ReactNode) {
 
 function setup(configure?: () => void) {
   stubManualLaunch(configure);
+
   return renderInDialog(
     <ManualMachineSetup serverMachineName={null} onOpenChange={() => {}} />,
   );
@@ -126,6 +130,7 @@ function renderAddMachineContent(primaryHostId: string | null) {
       makeHost({ id: "host_server", name: "Mac mini" }),
     ]);
   });
+
   return renderInDialog(<AddMachineContent onOpenChange={() => {}} />);
 }
 
@@ -133,7 +138,7 @@ it("names the server machine a new machine depends on", async () => {
   const rendered = renderAddMachineContent("host_server");
   expect(
     await screen.findByText(
-      "The new machine will connect to the bb server on Mac mini. Keep that computer on so the new machine can keep working.",
+      "The new machine will connect to the Omnyo server on Mac mini. Keep that computer on so the new machine can keep working.",
     ),
   ).toBeDefined();
   rendered.unmount();
@@ -142,10 +147,10 @@ it("names the server machine a new machine depends on", async () => {
 it("does not name a fallback machine when the server has no primary host", async () => {
   const rendered = renderAddMachineContent(null);
   await waitFor(() => expect(sdk.hosts.list).toHaveBeenCalled());
-  await screen.findByText("bb machine enroll test");
+  await screen.findByText("omnyo machine enroll test");
   expect(
     screen.getByText(
-      "The new machine will connect to your bb server. Keep the server machine on so the new machine can keep working.",
+      "The new machine will connect to your Omnyo server. Keep the server machine on so the new machine can keep working.",
     ),
   ).toBeDefined();
   expect(screen.queryByText(/Mac mini|MacBook Pro/u)).toBeNull();
@@ -154,7 +159,7 @@ it("does not name a fallback machine when the server has no primary host", async
 
 it("cancels a creating manual launch when the dialog content closes", async () => {
   const rendered = setup();
-  await screen.findByText("bb machine enroll test");
+  await screen.findByText("omnyo machine enroll test");
   rendered.unmount();
 
   await waitFor(() => {
@@ -177,8 +182,14 @@ it("retrieves the enrollment command after asynchronous access preparation", asy
       ...reservedHost,
       connectMachineId: null,
       threadStorageRootPath: null,
+      directAccess: {
+        status: "unavailable",
+        code: "not-connected",
+        message: "Machine is not connected.",
+      },
     });
   });
+
   await screen.findByText("delayed enrollment command", {}, { timeout: 3_000 });
   expect(sdk.hosts.experimental_getEnrollmentCommand).toHaveBeenCalledTimes(2);
   rendered.unmount();
@@ -197,8 +208,14 @@ it("marks a previously available command as used when the server withdraws it", 
       ...reservedHost,
       connectMachineId: null,
       threadStorageRootPath: null,
+      directAccess: {
+        status: "unavailable",
+        code: "not-connected",
+        message: "Machine is not connected.",
+      },
     });
   });
+
   await screen.findByText("single-use enrollment command");
   await screen.findByText("Command used", {}, { timeout: 3_000 });
   expect(
@@ -216,10 +233,16 @@ it("accepts a connection before an enrollment command is returned", async () => 
       ...reservedHost,
       connectMachineId: null,
       threadStorageRootPath: null,
+      directAccess: {
+        status: "unavailable",
+        code: "not-connected",
+        message: "Machine is not connected.",
+      },
       status: "connected",
       lifecycle: { ...reservedHost.lifecycle, phase: "active" },
     });
   });
+
   await screen.findByText("Manual machine connected", {}, { timeout: 3_000 });
   rendered.unmount();
   expect(sdk.hosts.delete).not.toHaveBeenCalled();
@@ -227,16 +250,20 @@ it("accepts a connection before an enrollment command is returned", async () => 
 
 it("cancels the reserved host while enrollment command preparation is pending", async () => {
   const pending = createDeferredPromise<null>();
+
   const rendered = setup(() => {
     vi.mocked(sdk.hosts.experimental_getEnrollmentCommand).mockReturnValue(
       pending.promise,
     );
   });
+
   await waitFor(() =>
     expect(sdk.hosts.experimental_getEnrollmentCommand).toHaveBeenCalledOnce(),
   );
+
   const request = vi.mocked(sdk.hosts.experimental_getEnrollmentCommand).mock
     .calls[0]![0];
+
   rendered.unmount();
   expect(request.signal?.aborted).toBe(true);
   await waitFor(() =>
@@ -257,6 +284,7 @@ it("reuses the launch key on retry and replaces it on regeneration without rando
       expiresAt: Date.now() - 1_000,
     });
   });
+
   fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
   await screen.findByText("expired enrollment command");
   const requests = vi.mocked(sdk.hosts.experimental_create).mock.calls;
@@ -274,5 +302,35 @@ it("reuses the launch key on retry and replaces it on regeneration without rando
   expect(requests[2]![0].key).not.toBe(firstKey);
   expect(sdk.hosts.delete).toHaveBeenCalledWith({ hostId: reservedHost.id });
   await screen.findByText("expired enrollment command");
+  rendered.unmount();
+});
+
+it("leads with the short setup command the server offers", async () => {
+  const rendered = setup(() => {
+    vi.mocked(sdk.hosts.experimental_getEnrollmentCommand).mockResolvedValue({
+      command: "omnyo machine enroll test",
+      windowsCommand: "irm windows-command | iex",
+      expiresAt: Date.now() + 15 * 60_000,
+      shortCommand: {
+        code: "AB12-CD34",
+        command: "curl -fsSL https://omnyo.example.com/m/AB12-CD34 | sh",
+        windowsCommand: "irm https://omnyo.example.com/m/AB12-CD34.ps1 | iex",
+        pageUrl: "https://omnyo.example.com/m/AB12-CD34",
+        expiresAt: Date.now() + 10 * 60_000,
+      },
+    });
+  });
+
+  await screen.findByText(
+    "curl -fsSL https://omnyo.example.com/m/AB12-CD34 | sh",
+  );
+  expect(screen.getByLabelText("Setup code").textContent).toBe("AB12-CD34");
+  expect(screen.getByLabelText("Setup page").textContent).toBe(
+    "omnyo.example.com/m/AB12-CD34",
+  );
+  expect(screen.queryByText("omnyo machine enroll test")).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Copy full command" }),
+  ).toBeDefined();
   rendered.unmount();
 });

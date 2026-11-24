@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import plugin from "./server.js";
+import { AutomationEnvStore } from "./env-secrets.js";
 import { createAutomationService } from "./service.js";
 
 const PROJECT_ID = "proj_test";
+
 const THREAD_ID = "thr_target";
 
 async function createHost(
-  threadReadError = new Error("temporary thread read failure"),
+  readThread: () => Promise<unknown> = async () => {
+    throw new Error("temporary thread read failure");
+  },
 ) {
   const host = createFakePluginHost({
     pluginId: "automations",
@@ -55,7 +59,7 @@ async function createHost(
       },
       threads: {
         async get() {
-          throw threadReadError;
+          return readThread();
         },
         async send() {
           return { ok: true };
@@ -66,16 +70,18 @@ async function createHost(
       },
     },
   });
-  await plugin(host.bb as unknown as Parameters<typeof plugin>[0]);
+
+  await plugin(host.api as unknown as Parameters<typeof plugin>[0]);
+
   return host;
 }
 
 function createService(host: Awaited<ReturnType<typeof createHost>>) {
   return createAutomationService({
-    bb: host.bb as never,
-    db: host.bb.storage.database(),
-    pluginDataDir: "/tmp/bb-automations-read-failure-test",
-    serverUrl: "http://127.0.0.1:38886",
+    api: host.api as never,
+    db: host.api.storage.database(),
+    env: new AutomationEnvStore(host.api.experimental_secrets),
+    pluginDataDir: "/tmp/omnyo-automations-read-failure-test",
   });
 }
 
@@ -133,10 +139,12 @@ describe("target thread read failures", () => {
     });
 
     await waitForFailedRun(service, first.id);
+
     const states = await Promise.all([
       service.get({ projectId: PROJECT_ID, automationId: first.id }),
       service.get({ projectId: PROJECT_ID, automationId: second.id }),
     ]);
+
     expect(states).toMatchObject([
       {
         enabled: true,
@@ -151,10 +159,70 @@ describe("target thread read failures", () => {
     await host.harness.dispose();
   });
 
-  it("disables target automations after a verified missing-thread error", async () => {
-    const host = await createHost(
-      Object.assign(new Error("thread not found"), { status: 404 }),
-    );
+  it.each([
+    {
+      cause: "a verified missing thread",
+      readThread: async () => {
+        throw Object.assign(new Error("thread not found"), { status: 404 });
+      },
+      error: "Target thread thr_target no longer exists",
+    },
+    {
+      cause: "an archived thread",
+      readThread: async () => ({
+        id: THREAD_ID,
+        status: "idle",
+        archivedAt: 1,
+        deletedAt: null,
+      }),
+      error: "Target thread thr_target was archived",
+    },
+  ])(
+    "disables target automations with the reason for $cause",
+    async ({ readThread, error }) => {
+      const host = await createHost(readThread);
+      const service = createService(host);
+      const first = await createTargetAutomation(service, "First target");
+      const second = await createTargetAutomation(service, "Second target");
+
+      await service.run({
+        projectId: PROJECT_ID,
+        automationId: first.id,
+      });
+
+      await waitForFailedRun(service, first.id);
+      expect(
+        service.runs({
+          projectId: PROJECT_ID,
+          automationId: first.id,
+          limit: 1,
+        }).runs[0],
+      ).toMatchObject({ status: "failed", threadId: null, error });
+
+      const states = await Promise.all([
+        service.get({ projectId: PROJECT_ID, automationId: first.id }),
+        service.get({ projectId: PROJECT_ID, automationId: second.id }),
+      ]);
+
+      expect(states).toMatchObject([
+        { enabled: false, lastError: error },
+        { enabled: false, lastError: error },
+      ]);
+
+      await host.harness.dispose();
+    },
+  );
+});
+
+describe("target threads whose last turn failed", () => {
+  it("starts a new run in the thread and keeps target automations enabled", async () => {
+    const host = await createHost(async () => ({
+      id: THREAD_ID,
+      status: "error",
+      archivedAt: null,
+      deletedAt: null,
+    }));
+
     const service = createService(host);
     const first = await createTargetAutomation(service, "First target");
     const second = await createTargetAutomation(service, "Second target");
@@ -164,20 +232,35 @@ describe("target thread read failures", () => {
       automationId: first.id,
     });
 
-    await waitForFailedRun(service, first.id);
+    await vi.waitFor(() =>
+      expect(host.harness.sdk.callsTo("threads.send")).toHaveLength(1),
+    );
+    expect(host.harness.sdk.callsTo("threads.send")[0]?.[0]).toMatchObject({
+      threadId: THREAD_ID,
+      mode: "steer-if-active",
+      input: [
+        {
+          type: "text",
+          text: `[omnyo automation due:${first.id}]\n\nrun the check`,
+        },
+      ],
+    });
+    expect(
+      service.runs({
+        projectId: PROJECT_ID,
+        automationId: first.id,
+        limit: 1,
+      }).runs[0],
+    ).toMatchObject({ status: "running", threadId: THREAD_ID, error: null });
+
     const states = await Promise.all([
       service.get({ projectId: PROJECT_ID, automationId: first.id }),
       service.get({ projectId: PROJECT_ID, automationId: second.id }),
     ]);
+
     expect(states).toMatchObject([
-      {
-        enabled: false,
-        lastError: "Target thread thr_target is unavailable: thread not found",
-      },
-      {
-        enabled: false,
-        lastError: "target thread deleted",
-      },
+      { enabled: true, lastError: null },
+      { enabled: true, lastError: null },
     ]);
 
     await host.harness.dispose();

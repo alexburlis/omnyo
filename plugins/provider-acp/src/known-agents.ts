@@ -15,12 +15,15 @@ const CLAUDE_SKILLS_ROOT = {
   path: ".claude/skills",
   skipIfManifest: ".claude-plugin/plugin.json",
 } as const;
+
 type RootEntry =
   | string
   | { readonly path: string; readonly skipIfManifest?: string };
+
 function entryOf(entry: RootEntry) {
   return typeof entry === "string" ? { path: entry } : entry;
 }
+
 function plainRoots(entries: readonly RootEntry[]) {
   return entries.map(entryOf);
 }

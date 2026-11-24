@@ -114,22 +114,28 @@ export function reconcileFixedPanelViewTabsInState({
 }: ReconcileFixedPanelViewTabsInStateArgs): FixedPanelTabsState {
   const contentTabs = state.secondary.tabs.filter(isSecondaryFileTab);
   const tabs: readonly FixedPanelTab[] = [...fixedTabs, ...contentTabs];
+
   const tabsAreEquivalent =
     tabs.length === state.secondary.tabs.length &&
     tabs.every((tab, index) => {
       const current = state.secondary.tabs[index];
+
       return current !== undefined && areFixedPanelTabsEquivalent(tab, current);
     });
+
   const activeTabStillExists = tabs.some(
     (tab) => tab.id === state.secondary.activeTabId,
   );
+
   const activeTabId = activeTabStillExists
     ? state.secondary.activeTabId
     : (fixedTabs[0]?.id ?? contentTabs[0]?.id ?? null);
+
   const isFirstInitialization =
     state.secondary.tabs.length === 0 &&
     state.secondary.activeTabId === null &&
     !state.secondary.isOpen;
+
   const isOpen =
     activeTabId !== null &&
     (state.secondary.isOpen ||
@@ -144,6 +150,7 @@ export function reconcileFixedPanelViewTabsInState({
   ) {
     return state;
   }
+
   return setSecondaryPanelTabsInState({
     activeTabId,
     isOpen,
@@ -156,9 +163,11 @@ export function getActiveSecondaryPanelTab(
   state: FixedPanelTabsState,
 ): SecondaryFixedPanelTab | null {
   const activeTabId = state.secondary.activeTabId;
+
   if (activeTabId === null) {
     return null;
   }
+
   return (
     state.secondary.tabs.find(
       (tab): tab is SecondaryFixedPanelTab => tab.id === activeTabId,
@@ -216,21 +225,25 @@ function getPreviousActiveTabIdAfterActivation({
   replacedTabId: string | undefined;
 }): string | undefined {
   const currentActiveTabId = state.secondary.activeTabId;
+
   if (
     activeTabId === currentActiveTabId ||
     currentActiveTabId === replacedTabId
   ) {
     const previousActiveTabId = state.secondary.previousActiveTabId;
+
     return tabs.some((tab) => tab.id === previousActiveTabId)
       ? previousActiveTabId
       : undefined;
   }
+
   if (
     currentActiveTabId !== null &&
     tabs.some((tab) => tab.id === currentActiveTabId)
   ) {
     return currentActiveTabId;
   }
+
   return undefined;
 }
 
@@ -242,11 +255,13 @@ function upsertSecondaryPanelTab(
   const existingTabIndex = tabs.findIndex(
     (currentTab) => currentTab.id === tab.id,
   );
+
   if (existingTabIndex === -1) {
     return [...tabs, tab];
   }
 
   const existingTab = tabs[existingTabIndex];
+
   if (
     !refreshTarget &&
     existingTab &&
@@ -265,6 +280,7 @@ function removeSecondaryPanelTab(
   tabId: string,
 ): readonly FixedPanelTab[] {
   const nextTabs = tabs.filter((tab) => tab.id !== tabId);
+
   return nextTabs.length === tabs.length ? tabs : nextTabs;
 }
 
@@ -274,11 +290,13 @@ export function openSecondaryPanelTabInState({
 }: OpenSecondaryPanelTabInStateArgs): FixedPanelTabsState {
   const refreshTarget =
     tab.kind === "plugin-panel" && tab.fileOpenerOwner?.tab.lineRange != null;
+
   const tabs = upsertSecondaryPanelTab(
     state.secondary.tabs,
     tab,
     refreshTarget,
   );
+
   if (
     tabs === state.secondary.tabs &&
     state.secondary.activeTabId === tab.id &&
@@ -286,6 +304,7 @@ export function openSecondaryPanelTabInState({
   ) {
     return state;
   }
+
   return setSecondaryPanelTabsInState({
     activeTabId: tab.id,
     isOpen: true,
@@ -299,10 +318,12 @@ export function replaceNewTabWithSecondaryPanelTabInState({
   tab,
 }: ReplaceNewTabWithSecondaryPanelTabInStateArgs): FixedPanelTabsState {
   const newTab = state.secondary.tabs.find(isNewTab) ?? null;
+
   const tabsWithoutNewTab =
     newTab === null
       ? state.secondary.tabs
       : removeSecondaryPanelTab(state.secondary.tabs, newTab.id);
+
   const existingPreviewTab = tabsWithoutNewTab.find(
     (currentTab) => currentTab.id === tab.id,
   );
@@ -338,9 +359,11 @@ export function updateSecondaryPanelTabInState({
   tab,
 }: UpdateSecondaryPanelTabInStateArgs): FixedPanelTabsState {
   const tabs = upsertSecondaryPanelTab(state.secondary.tabs, tab, false);
+
   if (tabs === state.secondary.tabs) {
     return state;
   }
+
   return setSecondaryPanelTabsInState({
     activeTabId: state.secondary.activeTabId,
     isOpen: state.secondary.isOpen,
@@ -354,12 +377,15 @@ export function activateSecondaryPanelTabInState(
   tabId: string,
 ): FixedPanelTabsState {
   const tab = findSecondaryPanelTab(state.secondary.tabs, tabId);
+
   if (!tab) {
     return state;
   }
+
   if (state.secondary.activeTabId === tab.id && state.secondary.isOpen) {
     return state;
   }
+
   return setSecondaryPanelTabsInState({
     activeTabId: tab.id,
     isOpen: true,
@@ -388,18 +414,22 @@ function getActiveTabIdAfterClose({
   }
 
   const fileTabsBeforeClose = tabsBeforeClose.filter(isSecondaryFileTab);
+
   const closedFileTabIndex = fileTabsBeforeClose.findIndex(
     (tab) => tab.id === closedTabId,
   );
+
   if (closedFileTabIndex === -1) {
     return null;
   }
 
   const fileTabsAfterClose = tabsAfterClose.filter(isSecondaryFileTab);
+
   const nextActiveTab =
     fileTabsAfterClose[closedFileTabIndex] ??
     fileTabsAfterClose[closedFileTabIndex - 1] ??
     null;
+
   return nextActiveTab?.id ?? null;
 }
 
@@ -408,12 +438,15 @@ export function closeSecondaryPanelTabInState(
   tabId: string,
 ): FixedPanelTabsState {
   const tab = findSecondaryPanelTab(state.secondary.tabs, tabId);
+
   if (tab === null) {
     return state;
   }
+
   const isClosingActiveTab = state.secondary.activeTabId === tabId;
 
   const tabs = removeSecondaryPanelTab(state.secondary.tabs, tabId);
+
   if (tabs === state.secondary.tabs) {
     return state;
   }
@@ -425,6 +458,7 @@ export function closeSecondaryPanelTabInState(
     !tabs.some((tab) => tab.id === state.secondary.previousActiveTabId)
   ) {
     const fallbackTab = tabs[0] ?? null;
+
     return setSecondaryPanelTabsInState({
       activeTabId: fallbackTab?.id ?? null,
       isOpen: fallbackTab !== null,
@@ -455,15 +489,19 @@ export function reorderSecondaryPanelFileTabInState({
   if (activeTabId === overTabId) {
     return state;
   }
+
   const activeIndex = state.secondary.tabs.findIndex(
     (tab) => tab.id === activeTabId && isSecondaryFileTab(tab),
   );
+
   const overIndex = state.secondary.tabs.findIndex(
     (tab) => tab.id === overTabId && isSecondaryFileTab(tab),
   );
+
   if (activeIndex === -1 || overIndex === -1) {
     return state;
   }
+
   return setSecondaryPanelTabsInState({
     activeTabId: state.secondary.activeTabId,
     isOpen: state.secondary.isOpen,
@@ -476,9 +514,11 @@ export function clearActiveSecondaryFileTabInState(
   state: FixedPanelTabsState,
 ): FixedPanelTabsState {
   const activeTab = getActiveSecondaryPanelTab(state);
+
   if (!activeTab || !isSecondaryFileTab(activeTab)) {
     return state;
   }
+
   return setSecondaryPanelTabsInState({
     activeTabId: null,
     isOpen: state.secondary.isOpen,
@@ -495,6 +535,7 @@ export function removeWorkspaceTabsForOtherEnvironments(
     (tab) =>
       !isWorkspaceFilePreviewTab(tab) || tab.environmentId === environmentId,
   );
+
   return nextTabs.length === tabs.length ? tabs : nextTabs;
 }
 
@@ -509,6 +550,7 @@ export function pruneStorageTabs({
       (tab.threadId !== null && tab.threadId !== threadId) ||
       knownPaths.has(tab.path),
   );
+
   return nextTabs.length === tabs.length ? tabs : nextTabs;
 }
 
@@ -527,6 +569,7 @@ export function buildOrderedSecondaryPanelFileTabs({
   resolvedEnvironmentId,
 }: BuildOrderedSecondaryPanelFileTabsArgs): readonly SecondaryFileFixedPanelTab[] {
   const displayable: SecondaryFileFixedPanelTab[] = [];
+
   for (const tab of tabs) {
     switch (tab.kind) {
       case "workspace-file-preview":
@@ -537,6 +580,7 @@ export function buildOrderedSecondaryPanelFileTabs({
         ) {
           displayable.push(tab);
         }
+
         break;
       case "host-file-preview":
       case "browser":
@@ -553,5 +597,6 @@ export function buildOrderedSecondaryPanelFileTabs({
         break;
     }
   }
+
   return displayable;
 }

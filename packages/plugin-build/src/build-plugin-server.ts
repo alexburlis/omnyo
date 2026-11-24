@@ -14,7 +14,6 @@ import { createPluginArtifactMeta } from "./plugin-artifact-meta.js";
 import { zodLocaleStubPlugin } from "./zod-locale-stub.mjs";
 import { zodResolutionPlugin } from "./zod-resolution.js";
 import {
-  isRecord,
   readPluginPackageJsonFile,
   resolveManifestEntryFile,
   validatePluginBuildManifest,
@@ -28,21 +27,25 @@ import {
   type PluginBuildToolchain,
 } from "./toolchain.js";
 
-const LEGACY_PLUGIN_SDK_SPECIFIER = "@bb/plugin-sdk";
-
 export const PLUGIN_SERVER_EXTERNALS: readonly string[] = [
   PLUGIN_SDK_PACKAGE_NAME,
-  LEGACY_PLUGIN_SDK_SPECIFIER,
   "better-sqlite3",
 ];
 
-const PLUGIN_SDK_ROOT_FILTER = /^@get-bb\/plugin-sdk$|^@bb\/plugin-sdk$/;
-const PLUGIN_SDK_SUBPATH_FILTER = /^@get-bb\/plugin-sdk\//;
-const PLUGIN_SDK_SUBPATH_RESOLVE_MARK = "bb-server-sdk-subpath";
-const PLUGIN_RUNTIME_FALLBACK_RESOLVE_MARK = "bb-server-runtime-fallback";
-const PLUGIN_SOURCE_BOUNDARY_RESOLVE_MARK = "bb-server-source-boundary";
-const PLUGIN_BUNDLED_DEPENDENCY_MARK = "bb-server-bundled-dependency";
+const PLUGIN_SDK_ROOT_FILTER = /^@omnyo\/plugin-sdk$/;
+
+const PLUGIN_SDK_SUBPATH_FILTER = /^@omnyo\/plugin-sdk\//;
+
+const PLUGIN_SDK_SUBPATH_RESOLVE_MARK = "omnyo-server-sdk-subpath";
+
+const PLUGIN_RUNTIME_FALLBACK_RESOLVE_MARK = "omnyo-server-runtime-fallback";
+
+const PLUGIN_SOURCE_BOUNDARY_RESOLVE_MARK = "omnyo-server-source-boundary";
+
+const PLUGIN_BUNDLED_DEPENDENCY_MARK = "omnyo-server-bundled-dependency";
+
 const BARE_PACKAGE_FILTER = /^[^./]|^@[^/]+\/[^/]+/;
+
 const FILE_IMPORT_FILTER = /^(?:\.{1,2}\/|\/)/;
 
 interface PluginServerConfig {
@@ -56,21 +59,19 @@ async function readPluginServerConfig(
 ): Promise<PluginServerConfig> {
   const packageJsonPath = join(rootDir, "package.json");
   const json = await readPluginPackageJsonFile(packageJsonPath);
-  if (!isRecord(json) || !isRecord(json.bb) || json.bb.server === undefined) {
-    throw new Error(
-      `no server entry: ${packageJsonPath} has no "bb": { "server": "./server.ts" } field`,
-    );
-  }
+
   const manifest = await validatePluginBuildManifest(
     json,
     rootDir,
     packageJsonPath,
   );
+
   const serverEntry = await resolveManifestEntryFile(
     rootDir,
-    manifest.bb.server,
-    "bb.server",
+    manifest.omnyo.server,
+    "omnyo.server",
   );
+
   return {
     serverEntry,
     packageName: manifest.name,
@@ -101,6 +102,7 @@ async function transformSourceModuleLocation(
   path: string,
 ): Promise<string> {
   const sourceUrl = pathToFileURL(path).href;
+
   const transformed = await esbuild.transform(await readFile(path, "utf8"), {
     loader: loaderForSourcePath(path),
     target: "node22",
@@ -113,36 +115,44 @@ async function transformSourceModuleLocation(
       __filename: JSON.stringify(path),
     },
   });
+
   await initModuleLexer;
   const [imports] = parseModule(transformed.code);
   let code = transformed.code;
+
   for (const entry of [...imports].reverse()) {
     if (entry.d < 0 || entry.n !== undefined) continue;
     const expression = code.slice(entry.s, entry.e);
     const resolved = `((specifier) => typeof specifier === "string" && (specifier.startsWith("./") || specifier.startsWith("../")) ? new URL(specifier, ${JSON.stringify(sourceUrl)}).href : specifier)(${expression})`;
     code = `${code.slice(0, entry.s)}${resolved}${code.slice(entry.e)}`;
   }
+
   return code;
 }
 
 function loaderForSourcePath(path: string): "js" | "jsx" | "ts" | "tsx" {
   const extension = extname(path);
+
   if (extension === ".ts" || extension === ".mts" || extension === ".cts") {
     return "ts";
   }
+
   if (extension === ".tsx") return "tsx";
+
   if (extension === ".jsx") return "jsx";
+
   return "js";
 }
 
 export async function buildPluginServer(
   rootDir: string,
-  bbVersion: string,
+  coreVersion: string,
   toolchain: PluginBuildToolchain,
   options: PluginServerBuildOptions = {},
 ): Promise<PluginServerBuildResult> {
   const { serverEntry, packageName, pluginVersion } =
     options.validatedConfig ?? (await readPluginServerConfig(rootDir));
+
   const format = options.format ?? "esm";
   const sourceRoot = await realpath(rootDir);
   const distDir = options.outDir ?? join(rootDir, "dist");
@@ -153,6 +163,7 @@ export async function buildPluginServer(
   const metaPath = join(distDir, "server.meta.json");
 
   const stageDir = await mkdtemp(join(distDir, ".stage-"));
+
   try {
     const stagedJsPath = join(stageDir, fileName);
     const stagedMetaPath = join(stageDir, "server.meta.json");
@@ -160,6 +171,7 @@ export async function buildPluginServer(
     const esbuild = (await import(
       toolchain.esbuild
     )) as typeof import("esbuild");
+
     const runtimeImports = options.runtimeImports ?? {};
     await esbuild.build({
       entryPoints: [serverEntry],
@@ -191,7 +203,7 @@ export async function buildPluginServer(
         ...(options.preserveSourceModuleLocation === true
           ? [
               {
-                name: "bb-plugin-source-url",
+                name: "omnyo-plugin-source-url",
                 setup(build: import("esbuild").PluginBuild) {
                   build.onLoad(
                     { filter: /\.(?:[cm]?[jt]s|[jt]sx)$/ },
@@ -209,8 +221,19 @@ export async function buildPluginServer(
             ]
           : []),
         {
-          name: "bb-plugin-sdk-resolution",
+          name: "omnyo-plugin-sdk-resolution",
           setup(build) {
+            build.onResolve(
+              { filter: /^@(?:get-bb|bb)\/plugin-sdk(?:\/|$)/ },
+              () => ({
+                errors: [
+                  {
+                    text: "Retired plugin SDK runtime import; use @omnyo/plugin-sdk and rebuild",
+                  },
+                ],
+              }),
+            );
+
             for (const [specifier, entry] of Object.entries(runtimeImports)) {
               const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
               build.onResolve({ filter: new RegExp(`^${escaped}$`) }, () => ({
@@ -219,6 +242,7 @@ export async function buildPluginServer(
                 pluginData: PLUGIN_BUNDLED_DEPENDENCY_MARK,
               }));
             }
+
             build.onResolve({ filter: PLUGIN_SDK_ROOT_FILTER }, (args) => ({
               path: args.path,
               external: true,
@@ -229,25 +253,28 @@ export async function buildPluginServer(
                 if (args.pluginData === PLUGIN_SDK_SUBPATH_RESOLVE_MARK) {
                   return undefined;
                 }
+
                 const installed = await build.resolve(args.path, {
                   resolveDir: args.resolveDir,
                   kind: args.kind,
                   importer: args.importer,
                   pluginData: PLUGIN_SDK_SUBPATH_RESOLVE_MARK,
                 });
+
                 if (installed.errors.length === 0 && installed.path !== "") {
                   return {
                     path: installed.path,
                     pluginData: PLUGIN_BUNDLED_DEPENDENCY_MARK,
                   };
                 }
+
                 return {
                   errors: [
                     {
                       text: await describeUnresolvedSdkImport({
                         specifier: args.path,
                         resolveDir: args.resolveDir,
-                        need: `a server entry's "${args.path}" import is bundled from the plugin's own SDK install (bb serves only the bare "${PLUGIN_SDK_PACKAGE_NAME}" at load time), so the plugin needs`,
+                        need: `a server entry's "${args.path}" import is bundled from the plugin's own SDK install (Omnyo serves only the bare "${PLUGIN_SDK_PACKAGE_NAME}" at load time), so the plugin needs`,
                         esbuildErrors: installed.errors,
                       }),
                     },
@@ -265,12 +292,14 @@ export async function buildPluginServer(
               ) {
                 return undefined;
               }
+
               const installed = await build.resolve(args.path, {
                 resolveDir: args.resolveDir,
                 kind: args.kind,
                 importer: args.importer,
                 pluginData: PLUGIN_RUNTIME_FALLBACK_RESOLVE_MARK,
               });
+
               if (installed.errors.length === 0 && installed.path !== "") {
                 return {
                   path: installed.path,
@@ -281,7 +310,9 @@ export async function buildPluginServer(
                   pluginData: PLUGIN_BUNDLED_DEPENDENCY_MARK,
                 };
               }
+
               const fallback = options.fallbackResolve(args.path);
+
               return fallback === undefined || fallback.startsWith("node:")
                 ? undefined
                 : {
@@ -290,6 +321,7 @@ export async function buildPluginServer(
                     pluginData: PLUGIN_BUNDLED_DEPENDENCY_MARK,
                   };
             });
+
             if (options.externalizeSourceOutsideRoot === true) {
               build.onResolve({ filter: FILE_IMPORT_FILTER }, async (args) => {
                 if (
@@ -300,7 +332,9 @@ export async function buildPluginServer(
                 ) {
                   return undefined;
                 }
+
                 const importerFromRoot = relative(sourceRoot, args.importer);
+
                 if (
                   importerFromRoot === ".." ||
                   importerFromRoot.startsWith(`..${sep}`) ||
@@ -308,19 +342,24 @@ export async function buildPluginServer(
                 ) {
                   return undefined;
                 }
+
                 const resolved = await build.resolve(args.path, {
                   resolveDir: args.resolveDir,
                   kind: args.kind,
                   importer: args.importer,
                   pluginData: PLUGIN_SOURCE_BOUNDARY_RESOLVE_MARK,
                 });
+
                 if (resolved.errors.length > 0 || resolved.path === "") {
                   return undefined;
                 }
+
                 const fromRoot = relative(sourceRoot, resolved.path);
+
                 if (fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`)) {
                   return { path: resolved.path };
                 }
+
                 if (args.kind === "dynamic-import") {
                   return {
                     path:
@@ -330,6 +369,7 @@ export async function buildPluginServer(
                     external: true,
                   };
                 }
+
                 return {
                   errors: [
                     {
@@ -347,7 +387,11 @@ export async function buildPluginServer(
     await writeFile(
       stagedMetaPath,
       JSON.stringify(
-        createPluginArtifactMeta({ packageName, pluginVersion, bbVersion }),
+        createPluginArtifactMeta({
+          packageName,
+          pluginVersion,
+          coreVersion: coreVersion,
+        }),
         null,
         2,
       ) + "\n",
@@ -360,6 +404,7 @@ export async function buildPluginServer(
     await renameIntoPlace(stagedJsPath, jsPath);
     await renameIntoPlace(join(stageDir, `${fileName}.map`), mapPath);
     await renameIntoPlace(stagedMetaPath, metaPath);
+
     if (format === "esm") {
       await renameIntoPlace(
         join(stageDir, "package.json"),
@@ -369,5 +414,6 @@ export async function buildPluginServer(
   } finally {
     await rm(stageDir, { recursive: true, force: true });
   }
+
   return { jsPath, mapPath, metaPath };
 }

@@ -3,14 +3,18 @@ import { PluginSlotMount } from "../src/components/plugin/PluginSlotMount";
 import {
   installTestPluginRuntime,
   loadPluginApp,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 import type { WorkflowRunView } from "../../../plugins/workflows/src/ui-contract.js";
 
 installTestPluginRuntime();
+
 const workflowAppModule = await import("../../../plugins/workflows/src/app.js");
+
 const { EmptyOrError, LoadingPreview, WorkflowRunPanelState } =
   workflowAppModule;
+
 const workflowApp = await loadPluginApp(async () => workflowAppModule);
+
 const workflowPanel = workflowApp.threadPanelActions.find(
   (registration) => registration.id === "workflow-run",
 )!;
@@ -20,7 +24,7 @@ export default { title: "plugins/Workflows/Workflow panel" };
 const STATES = [
   ["Loading", null],
   ["Initial RPC error", "Could not load this workflow run."],
-  ["No run", "No workflow runs were found for this thread."],
+  ["No run", "Workflows started in this chat show their progress here."],
   ["Invalid parameters", "This workflow panel has invalid run parameters."],
 ] as const;
 
@@ -75,22 +79,27 @@ function LoadedPanel() {
           : input instanceof URL
             ? input.href
             : input.url;
+
       if (url === "/api/v1/plugins/workflows/rpc/workflowRunView") {
         return new Response(
           JSON.stringify({ ok: true, result: { run: LOADED_RUN } }),
           { headers: { "content-type": "application/json" } },
         );
       }
+
       return originalFetch(input, init);
     };
+
     setReady(true);
+
     return () => {
       globalThis.fetch = originalFetch;
     };
   }, []);
   const Panel = workflowPanel.component;
+
   return (
-    <div className="h-72 w-full max-w-sm overflow-hidden border border-border-seam">
+    <div className="h-112 w-full max-w-sm overflow-hidden border border-border-seam">
       {ready ? (
         <PluginSlotMount
           pluginId="workflows"
@@ -122,7 +131,17 @@ export function PanelStates() {
                 {message === null ? (
                   <LoadingPreview />
                 ) : (
-                  <EmptyOrError>{message}</EmptyOrError>
+                  <EmptyOrError
+                    variant="panel"
+                    tone={label === "No run" ? "neutral" : "error"}
+                    title={
+                      label === "Invalid parameters"
+                        ? "Can’t open this workflow run"
+                        : undefined
+                    }
+                  >
+                    {message}
+                  </EmptyOrError>
                 )}
               </WorkflowRunPanelState>
             </div>

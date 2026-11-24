@@ -7,10 +7,13 @@ import { createIntegrationHarness, withHarness } from "../helpers/harness.js";
 describe("integration harness", () => {
   it("closes live WebSockets and cleans up the temp repo", async () => {
     const harness = await createIntegrationHarness();
+
     const socket = new WebSocket(
       `${harness.serverUrl.replace("http:", "ws:")}/ws`,
     );
+
     let cleanup: Promise<void> | null = null;
+
     try {
       await new Promise<void>((resolve, reject) => {
         socket.addEventListener("open", () => resolve(), { once: true });
@@ -36,6 +39,21 @@ describe("integration harness", () => {
     }
   });
 
+  it("leaves the machine's real provider CLIs out of the startup update check", async () => {
+    await withHarness(async (harness) => {
+      await waitForHostConnected(harness.api);
+
+      const registered = harness.server.providerRegistry.list();
+
+      expect(registered.some((entry) => entry.info.id === "codex")).toBe(true);
+      expect(
+        registered
+          .filter((entry) => entry.info.maintenance.installation)
+          .map((entry) => entry.info.id),
+      ).toEqual([]);
+    });
+  });
+
   it("keeps the same host identity across daemon restarts", async () => {
     await withHarness(async (harness) => {
       const initialHostId = harness.hostId;
@@ -48,11 +66,11 @@ describe("integration harness", () => {
     });
   });
 
-  it("reloads bb-app managed config through the integration server", async () => {
+  it("reloads omnyo-app managed config through the integration server", async () => {
     await withHarness(async (harness) => {
       await fs.writeFile(
         path.join(harness.server.config.dataDir, "config.json"),
-        `${JSON.stringify({ config: { BB_APP_URL: "https://stored.example.test" } })}\n`,
+        `${JSON.stringify({ config: { OMNYO_APP_URL: "https://stored.example.test" } })}\n`,
         "utf8",
       );
 

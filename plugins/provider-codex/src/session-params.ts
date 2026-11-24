@@ -1,3 +1,4 @@
+import { selectedSkillMentions } from "./selected-skill-mentions.js";
 import {
   jsonValueSchema,
   type PermissionEscalation,
@@ -6,7 +7,9 @@ import {
   type RuntimePermissionPolicy,
   type ServiceTier,
   buildShellEnvOverrides,
-} from "@get-bb/plugin-sdk/provider-bridge";
+  experimental_compareVersions as compareVersions,
+  experimental_versionFrom as versionFrom,
+} from "@omnyo/plugin-sdk/provider-bridge";
 import fs from "node:fs";
 import path from "node:path";
 import type { ReasoningEffort as CodexReasoningEffort } from "./generated/codex-app-server/schema/ReasoningEffort.js";
@@ -18,7 +21,7 @@ import type { ThreadStartParams } from "./generated/codex-app-server/schema/v2/T
 import type { UserInput as CodexUserInput } from "./generated/codex-app-server/schema/v2/UserInput.js";
 import type { AskForApproval } from "./generated/codex-app-server/schema/v2/AskForApproval.js";
 import type { ApprovalsReviewer } from "./generated/codex-app-server/schema/v2/ApprovalsReviewer.js";
-import { mapBbReasoningLevelToCodex } from "./models.js";
+import { mapOmnyoReasoningLevelToCodex } from "./models.js";
 
 export type CodexSessionOptions = {
   model?: string;
@@ -43,13 +46,13 @@ export interface CodexThreadPermissionSettings {
   sandbox: CodexSandboxMode;
 }
 
-export type BbThreadStartParams = ThreadStartParams & {
+export type OmnyoThreadStartParams = ThreadStartParams & {
   experimentalRawEvents?: boolean;
   dynamicTools?: DynamicToolSpec[];
   daybreakEnabled?: boolean;
 };
 
-export type BbThreadForkParams = {
+export type OmnyoThreadForkParams = {
   threadId: string;
   lastTurnId?: string | null;
   model?: string | null;
@@ -71,6 +74,7 @@ interface ToCodexPermissionSettingsArgs {
 }
 
 interface BuildCodexConfigArgs {
+  supportsAgentsEnabled: boolean;
   additionalWorkspaceWriteRoots: readonly string[];
   gitWritableRoots: readonly string[];
   options?: CodexSessionOptions;
@@ -145,12 +149,15 @@ export function resolveCodexInstructionOverrides(
   command: CodexInstructionSource,
 ): CodexInstructionOverrides {
   const instructions = command.options.instructions?.trim();
+
   if (!instructions) {
     return {};
   }
+
   if (command.instructionMode === "replace") {
     return { baseInstructions: instructions };
   }
+
   return { developerInstructions: instructions };
 }
 
@@ -179,6 +186,7 @@ function toWorkspaceApprovalPolicy(options: {
   if (options.approvalReviewer === "automatic") {
     return "on-request";
   }
+
   return toEscalationApprovalPolicy(options.permissionEscalation);
 }
 
@@ -195,6 +203,7 @@ function realpathDirectoryIfPresent(directoryPath: string): string | null {
     if (!fs.statSync(directoryPath).isDirectory()) {
       return null;
     }
+
     return fs.realpathSync.native(directoryPath);
   } catch {
     return null;
@@ -206,12 +215,14 @@ function regularFilePathInsideDirectoryIfPresent(
 ): string | null {
   try {
     const filePath = path.normalize(args.filePath);
+
     if (
       !fs.lstatSync(filePath).isFile() ||
       !isPathInsideOrEqual(args.trustedParentPath, filePath)
     ) {
       return null;
     }
+
     return filePath;
   } catch {
     return null;
@@ -226,24 +237,31 @@ function resolveGitPath(cwd: string, rawPath: string): string {
 
 function parseGitDirPointer(content: string): string | null {
   const firstLine = content.split(/\r?\n/u)[0]?.trim();
+
   if (!firstLine?.startsWith("gitdir:")) {
     return null;
   }
+
   const rawGitDir = firstLine.slice("gitdir:".length).trim();
+
   return rawGitDir.length > 0 ? rawGitDir : null;
 }
 
 function parseGitHeadState(content: string | null): GitHeadState {
   const firstLine = content?.split(/\r?\n/u)[0]?.trim();
+
   if (!firstLine) {
     return { type: "unsafe" };
   }
+
   if (!firstLine.startsWith("ref:")) {
     return /^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$/u.test(firstLine)
       ? { type: "detached" }
       : { type: "unsafe" };
   }
+
   const ref = firstLine.slice("ref:".length).trim();
+
   return ref.length > 0 ? { type: "ref", ref } : { type: "unsafe" };
 }
 
@@ -251,10 +269,13 @@ function resolveCommonGitDir(gitDir: string): string | null {
   const commonDirContent = readTextFileIfPresent(
     path.join(gitDir, "commondir"),
   );
+
   const commonDir = commonDirContent?.split(/\r?\n/u)[0]?.trim();
+
   if (!commonDir) {
     return null;
   }
+
   return path.isAbsolute(commonDir)
     ? path.normalize(commonDir)
     : path.normalize(path.resolve(gitDir, commonDir));
@@ -266,6 +287,7 @@ function linkedWorktreeGitDirBelongsToWorkspace(
   const rawBacklink = readTextFileIfPresent(path.join(args.gitDir, "gitdir"))
     ?.split(/\r?\n/u)[0]
     ?.trim();
+
   if (!rawBacklink) {
     return false;
   }
@@ -274,6 +296,7 @@ function linkedWorktreeGitDirBelongsToWorkspace(
     filePath: resolveGitPath(args.gitDir, rawBacklink),
     trustedParentPath: args.workspacePath,
   });
+
   return linkedGitFile === args.workspaceGitFile;
 }
 
@@ -282,6 +305,7 @@ function isPathInsideOrEqual(
   candidatePath: string,
 ): boolean {
   const relative = path.relative(parentPath, candidatePath);
+
   return (
     relative === "" ||
     (relative.length > 0 &&
@@ -294,12 +318,15 @@ function realpathContainedDirectory(
   args: RealpathContainedDirectoryArgs,
 ): RealpathContainedDirectoryResult {
   const realCandidatePath = realpathDirectoryIfPresent(args.candidatePath);
+
   if (!realCandidatePath) {
     return { status: "missing" };
   }
+
   if (!isPathInsideOrEqual(args.trustedParentPath, realCandidatePath)) {
     return { status: "escaped" };
   }
+
   return { status: "contained", path: realCandidatePath };
 }
 
@@ -319,9 +346,11 @@ function addOptionalContainedDirectory(
     trustedParentPath: args.trustedParentPath,
     candidatePath: args.candidatePath,
   });
+
   switch (result.status) {
     case "contained":
       args.writableRoots.push(result.path);
+
       return true;
     case "missing":
       return true;
@@ -339,9 +368,11 @@ function addRefWritableRoots(args: AddRefWritableRootsArgs): boolean {
     trustedParentPath: args.commonDir,
     candidatePath: path.join(args.commonDir, "refs"),
   });
+
   if (refsRoot.status === "escaped") {
     return false;
   }
+
   if (
     refsRoot.status === "contained" &&
     !addOptionalContainedDirectory({
@@ -357,9 +388,11 @@ function addRefWritableRoots(args: AddRefWritableRootsArgs): boolean {
     trustedParentPath: args.commonDir,
     candidatePath: path.join(args.commonDir, "logs", "refs"),
   });
+
   if (logsRefsRoot.status === "escaped") {
     return false;
   }
+
   if (
     logsRefsRoot.status === "contained" &&
     !addOptionalContainedDirectory({
@@ -372,6 +405,7 @@ function addRefWritableRoots(args: AddRefWritableRootsArgs): boolean {
   ) {
     return false;
   }
+
   return true;
 }
 
@@ -396,32 +430,42 @@ export function gitWritableRootsForWorkspace(
   cwd: string | undefined,
 ): string[] {
   const workspacePath = cwd ? realpathDirectoryIfPresent(cwd) : null;
+
   if (!workspacePath) {
     return [];
   }
 
   const dotGitPath = path.join(workspacePath, ".git");
+
   const workspaceGitFile = regularFilePathInsideDirectoryIfPresent({
     filePath: dotGitPath,
     trustedParentPath: workspacePath,
   });
+
   if (!workspaceGitFile) {
     return [];
   }
+
   const dotGitContent = readTextFileIfPresent(workspaceGitFile);
+
   if (!dotGitContent) {
     return [];
   }
+
   const rawGitDir = parseGitDirPointer(dotGitContent);
+
   if (!rawGitDir) {
     return [];
   }
+
   const gitDir = realpathDirectoryIfPresent(
     resolveGitPath(workspacePath, rawGitDir),
   );
+
   if (!gitDir) {
     return [];
   }
+
   if (
     !linkedWorktreeGitDirBelongsToWorkspace({
       gitDir,
@@ -433,9 +477,11 @@ export function gitWritableRootsForWorkspace(
   }
 
   const commonDirCandidate = resolveCommonGitDir(gitDir);
+
   const commonDir = commonDirCandidate
     ? realpathDirectoryIfPresent(commonDirCandidate)
     : null;
+
   if (!commonDir) {
     return [];
   }
@@ -444,6 +490,7 @@ export function gitWritableRootsForWorkspace(
     trustedParentPath: commonDir,
     candidatePath: path.join(commonDir, "worktrees"),
   });
+
   if (
     worktreesRoot.status !== "contained" ||
     !isPathInsideOrEqual(worktreesRoot.path, gitDir)
@@ -455,19 +502,23 @@ export function gitWritableRootsForWorkspace(
     trustedParentPath: commonDir,
     candidatePath: path.join(commonDir, "objects"),
   });
+
   if (objectsRoot.status !== "contained") {
     return [];
   }
 
   const writableRoots = [gitDir, objectsRoot.path];
+
   const headState = parseGitHeadState(
     readTextFileIfPresent(path.join(gitDir, "HEAD")),
   );
+
   switch (headState.type) {
     case "detached":
       if (!addDetachedHeadWritableRoots({ commonDir, writableRoots })) {
         return [];
       }
+
       break;
     case "ref":
       if (
@@ -479,6 +530,7 @@ export function gitWritableRootsForWorkspace(
       ) {
         return [];
       }
+
       break;
     case "unsafe":
       break;
@@ -510,6 +562,7 @@ export function toCodexThreadPermissionSettings(
   options: CodexSessionOptions,
 ): CodexThreadPermissionSettings {
   const permissionPolicy = options;
+
   switch (permissionPolicy.permissionScope) {
     case "workspace":
       return {
@@ -552,17 +605,57 @@ export function toCodexServiceTier(
 function toCodexReasoningEffort(
   reasoningLevel: ReasoningLevel,
 ): CodexReasoningEffort {
-  const codexEffort = mapBbReasoningLevelToCodex(reasoningLevel);
+  const codexEffort = mapOmnyoReasoningLevelToCodex(reasoningLevel);
+
   if (codexEffort == null) {
     throw new Error(
       `Codex does not support the ${reasoningLevel} reasoning level.`,
     );
   }
+
   return codexEffort;
 }
 
-export function toCodexUserInput(input: PromptInput[]): CodexUserInput[] {
-  return input.map((chunk): CodexUserInput => {
+interface CodexCatalogSkill {
+  name: string;
+  path: string;
+}
+
+function codexSkillDirectoryName(skill: CodexCatalogSkill): string {
+  const directory = path.basename(path.dirname(skill.path));
+  const separator = skill.name.lastIndexOf(":");
+
+  return separator === -1
+    ? directory
+    : `${skill.name.slice(0, separator + 1)}${directory}`;
+}
+
+export function toCodexUserInput(
+  input: PromptInput[],
+  skills: readonly CodexCatalogSkill[] = [],
+): CodexUserInput[] {
+  const selected = new Map<string, CodexUserInput>();
+
+  for (const chunk of input) {
+    if (chunk.type !== "text") continue;
+
+    for (const mention of selectedSkillMentions(chunk)) {
+      const name = mention.resource.name;
+
+      const skill =
+        skills.find((entry) => entry.name === name) ??
+        skills.find((entry) => codexSkillDirectoryName(entry) === name);
+
+      if (skill === undefined) continue;
+      selected.set(skill.path, {
+        type: "skill",
+        name: skill.name,
+        path: skill.path,
+      });
+    }
+  }
+
+  const chunks = input.map((chunk): CodexUserInput => {
     switch (chunk.type) {
       case "text":
         return { type: "text", text: chunk.text, text_elements: [] };
@@ -580,6 +673,8 @@ export function toCodexUserInput(input: PromptInput[]): CodexUserInput[] {
         };
     }
   });
+
+  return [...chunks, ...selected.values()];
 }
 
 function buildShellEnvironmentPolicyConfig(
@@ -588,46 +683,78 @@ function buildShellEnvironmentPolicyConfig(
   if (!envVars) {
     return undefined;
   }
+
   const config: Record<string, string> = {};
+
   for (const [key, value] of Object.entries(buildShellEnvOverrides(envVars))) {
     config[`shell_environment_policy.set.${key}`] = value;
   }
+
   return Object.keys(config).length > 0 ? config : undefined;
+}
+
+const CODEX_AGENTS_ENABLED_MINIMUM_VERSION = "0.145.0";
+
+export function codexSupportsAgentsEnabled(
+  userAgent: string | undefined,
+): boolean {
+  const version = versionFrom(
+    userAgent?.match(/^[^/\s]+\/(\S+)/u)?.[1] ?? null,
+  );
+
+  return (
+    version !== null &&
+    compareVersions(version, CODEX_AGENTS_ENABLED_MINIMUM_VERSION) >= 0
+  );
 }
 
 export function buildCodexConfig(
   args: BuildCodexConfigArgs,
 ): { [key in string]?: JsonValue } | undefined {
   const config: { [key in string]?: JsonValue } = {};
+
   if (args.threadId) {
-    config["shell_environment_policy.set.BB_THREAD_ID"] = args.threadId;
+    config["shell_environment_policy.set.OMNYO_THREAD_ID"] = args.threadId;
   }
+
   const shellEnvironmentConfig = buildShellEnvironmentPolicyConfig(
     args.options?.envVars,
   );
+
   if (shellEnvironmentConfig) {
     Object.assign(config, shellEnvironmentConfig);
   }
+
   if (args.options?.reasoningLevel) {
     config["model_reasoning_effort"] = toCodexReasoningEffort(
       args.options.reasoningLevel,
     );
   }
+
   if (args.options?.providerSubagentsEnabled === false) {
-    config["features.multi_agent"] = false;
-    config["features.multi_agent_v2.max_concurrent_threads_per_session"] = 1;
+    if (args.supportsAgentsEnabled) {
+      config["agents.enabled"] = false;
+      config["features.multi_agent_v2"] = false;
+    } else {
+      config["features.multi_agent"] = false;
+      config["features.multi_agent_v2.max_concurrent_threads_per_session"] = 1;
+    }
   }
+
   config["memories.use_memories"] = args.options?.memoryEnabled ?? true;
   config["memories.generate_memories"] = args.options?.memoryEnabled ?? true;
+
   if (args.options?.permissionScope === "workspace") {
     const writableRoots = combineWorkspaceWriteRoots(
       args.gitWritableRoots,
       args.additionalWorkspaceWriteRoots,
     );
+
     if (writableRoots.length > 0) {
       config["sandbox_workspace_write.writable_roots"] = [...writableRoots];
     }
   }
+
   return Object.keys(config).length > 0 ? config : undefined;
 }
 

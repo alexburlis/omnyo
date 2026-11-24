@@ -194,7 +194,7 @@ index 0000000..973f675
 +        try {
 +            if (!sameOrigin(new URI(webView.getUrl()), new URI(sourceUrl))) throw new IOException("Copy must be on the current server");
 +            ClipboardManager clipboard = (ClipboardManager) webView.getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-+            clipboard.setPrimaryClip(ClipData.newHtmlText("BB message", text, html));
++            clipboard.setPrimaryClip(ClipData.newHtmlText("Omnyo message", text, html));
 +            respond(id, true, "");
 +        } catch (Exception error) {
 +            respond(id, false, error.getMessage());
@@ -249,7 +249,7 @@ index 0000000..973f675
 +            if (http.getContentLengthLong() > MAX_BYTES) throw new IOException("Image exceeds 35 MB");
 +            String extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(type);
 +            if (extension == null) throw new IOException("Unsupported image type");
-+            File directory = new File(webView.getContext().getCacheDir(), "bb-clipboard");
++            File directory = new File(webView.getContext().getCacheDir(), "omnyo-clipboard");
 +            if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("Image cache unavailable");
 +            File[] oldFiles = directory.listFiles();
 +            if (oldFiles != null) {
@@ -289,7 +289,7 @@ index 0000000..973f675
 +                            ? new String[]{mimeType}
 +                            : new String[]{mimeType, "text/plain"};
 +                    ClipData.Item item = new ClipData.Item(text.isEmpty() ? null : text, null, uri);
-+                    ClipData clip = new ClipData("BB message", mimeTypes, item);
++                    ClipData clip = new ClipData("Omnyo message", mimeTypes, item);
 +                    ClipboardManager clipboard = (ClipboardManager) webView.getContext().getSystemService(Context.CLIPBOARD_SERVICE);
 +                    clipboard.setPrimaryClip(clip);
 +                    respond(id, true, "");
@@ -327,7 +327,7 @@ index 0000000..973f675
 +            if (destroyed) return;
 +            String response = copied ? "{ok:true,result:{copied:true}}"
 +                    : "{ok:false,error:" + JSONObject.quote(error == null ? "Image copy failed" : error) + "}";
-+            webView.evaluateJavascript("(function(){var n=window.bb&&window.bb.native;if(n&&n.__receive)n.__receive({type:'response',id:"
++            webView.evaluateJavascript("(function(){var n=window.omnyo&&window.omnyo.native;if(n&&n.__receive)n.__receive({type:'response',id:"
 +                    + JSONObject.quote(id) + ",response:" + response + "});})()", null);
 +        });
 +    }
@@ -366,7 +366,7 @@ index 919b3ad..dfaa44a 100644
 -  // This class intentionally left blank.
 +  @Override
 +  public String[] getStreamTypes(Uri uri, String filter) {
-+    if (uri.getPath() != null && uri.getPath().startsWith("/bb_clipboard/")
++    if (uri.getPath() != null && uri.getPath().startsWith("/omnyo_clipboard/")
 +        && filter.startsWith("text/") && ClipDescription.compareMimeTypes("text/plain", filter)) {
 +      try (ParcelFileDescriptor descriptor = super.openFile(textUri(uri), "r")) {
 +        return new String[]{"text/plain"};
@@ -380,7 +380,7 @@ index 919b3ad..dfaa44a 100644
 +  @Override
 +  public AssetFileDescriptor openTypedAssetFile(Uri uri, String filter, Bundle options)
 +      throws FileNotFoundException {
-+    if (uri.getPath() != null && uri.getPath().startsWith("/bb_clipboard/")
++    if (uri.getPath() != null && uri.getPath().startsWith("/omnyo_clipboard/")
 +        && filter.startsWith("text/") && ClipDescription.compareMimeTypes("text/plain", filter)) {
 +      return new AssetFileDescriptor(super.openFile(textUri(uri), "r"), 0,
 +          AssetFileDescriptor.UNKNOWN_LENGTH);
@@ -438,7 +438,7 @@ index 0000000..19400bf
 +
 +final class RNCWebViewImagePaste {
 +    private static final int MAX_BYTES = 35 * 1024 * 1024;
-+    private static final String PATH = "/__bb_keyboard_image/";
++    private static final String PATH = "/__omnyo_keyboard_image/";
 +    private final RNCWebView webView;
 +    private volatile boolean destroyed;
 +    private final Map<String, Transfer> transfers = new ConcurrentHashMap<>();
@@ -488,7 +488,7 @@ index 0000000..19400bf
 +        Transfer transfer = new Transfer(id, url, content, granted);
 +        transfers.put(url, transfer);
 +        webView.postDelayed(transfer.expire, 30000);
-+        String begin = "(function(){var n=window.bb&&window.bb.native;return !!(n&&n.__beginImagePaste&&n.__beginImagePaste("
++        String begin = "(function(){var n=window.omnyo&&window.omnyo.native;return !!(n&&n.__beginImagePaste&&n.__beginImagePaste("
 +                + JSONObject.quote(id) + "," + JSONObject.quote(url) + "));})()";
 +        webView.evaluateJavascript(begin, accepted -> {
 +            if (!"true".equals(accepted)) transfer.complete(null);
@@ -642,7 +642,7 @@ index 0000000..19400bf
 +            String payload = image == null ? "null" : image.toString();
 +            webView.post(() -> {
 +                if (!destroyed) webView.evaluateJavascript(
-+                        "(function(){var n=window.bb&&window.bb.native;if(n&&n.__finishImagePaste)n.__finishImagePaste("
++                        "(function(){var n=window.omnyo&&window.omnyo.native;if(n&&n.__finishImagePaste)n.__finishImagePaste("
 +                                + JSONObject.quote(id) + "," + payload + ");})()", null);
 +            });
 +        }
@@ -655,7 +655,7 @@ index aba5f56..7ee0a5e 100644
 @@ -1,5 +1,6 @@
  <?xml version="1.0" encoding="utf-8"?>
  <paths>
-+  <cache-path name="bb_clipboard" path="bb-clipboard/" />
++  <cache-path name="omnyo_clipboard" path="omnyo-clipboard/" />
    <external-path
      name="shared"
      path="." />

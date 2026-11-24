@@ -1,6 +1,14 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { shellHaptic } from "@/lib/native-shell/native-shell";
+import { PickerEmptyState, pickerNoMatchMessage } from "./PickerEmptyState";
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react";
 import { useComposedRefs } from "@radix-ui/react-compose-refs";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Command,
   CommandGroup,
@@ -8,22 +16,29 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
-} from "@bb/shared-ui/command";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/command";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   OPTION_BASE_CLASS_NAME,
   OPTION_INTERACTIVE_CLASS_NAME,
   OPTION_MUTED_CLASS_NAME,
   OPTION_TRIGGER_CONTENT_CLASS_NAME,
-} from "@bb/shared-ui/option-display";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
+} from "@omnyo/shared-ui/option-display";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@omnyo/shared-ui/popover";
 import { useScrollOverflowState } from "../thread/timeline/useScrollOverflowState";
 import { searchPickerOptions } from "./picker-search";
 import { useResetPickerScroll } from "./useResetPickerScroll";
+import { usePickerModal } from "./use-picker-modal";
 
 const PROJECT_SEARCH_MIN_OPTIONS = 5;
+
 const NO_HIGHLIGHT_VALUE = "__project-picker-idle__";
+
 const PROJECT_PICKER_ITEM_CLASS_NAME =
   "py-[0.3125rem] text-xs max-md:pointer-coarse:py-2";
 
@@ -52,7 +67,10 @@ interface ProjectSelectorProps {
   className?: string;
   defaultOpen?: boolean;
   modal?: boolean;
+  trigger?: "label" | "search" | { kind: "custom"; element: ReactElement };
 }
+
+export const PROJECT_SEARCH_TRIGGER_LABEL = "Search projects";
 
 export function ProjectSelector({
   projects,
@@ -67,8 +85,10 @@ export function ProjectSelector({
   showChevronWhenDisabled = false,
   className,
   defaultOpen,
-  modal = true,
+  modal: modalProp,
+  trigger = "label",
 }: ProjectSelectorProps) {
+  const { modal, modalHostRef } = usePickerModal(modalProp);
   const [open, setOpen] = useState(defaultOpen ?? false);
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightedValue, setHighlightedValue] = useState(NO_HIGHLIGHT_VALUE);
@@ -77,22 +97,28 @@ export function ProjectSelector({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRef = useResetPickerScroll<HTMLDivElement>(searchQuery);
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+
   const { scrollRef, belowOverflow } = useScrollOverflowState<HTMLDivElement>({
     enabled: listElement !== null,
     measureOverflow: true,
   });
+
   const composedListRef = useComposedRefs(listRef, scrollRef, setListElement);
   useLayoutEffect(() => {
     if (!keyboardNavigationRef.current) return;
+
     const items =
       commandRef.current?.querySelectorAll<HTMLElement>("[cmdk-item]");
+
     const highlightedItem = Array.from(items ?? []).find(
       (item) => item.dataset.value === highlightedValue,
     );
+
     highlightedItem?.scrollIntoView({ block: "nearest" });
   }, [highlightedValue]);
   const disabled = disabledProp || isLoading;
   const showSearch = projects.length > PROJECT_SEARCH_MIN_OPTIONS;
+
   const filteredProjects = useMemo(
     () =>
       showSearch
@@ -104,90 +130,123 @@ export function ProjectSelector({
         : projects,
     [projects, searchQuery, showSearch],
   );
+
   const selected = value !== null ? projects.find((p) => p.id === value) : null;
+
   const allProjectsSelected =
     allProjectsValue !== undefined && value === allProjectsValue;
+
   const fallback =
     !allowNoProject && !allProjectsSelected && !selected ? projects[0] : null;
+
   const noProjectSelected = allowNoProject && value === null;
+
   const triggerLabel = isLoading
     ? "Loading projects…"
     : (selected?.name ??
       fallback?.name ??
       (allProjectsSelected ? "All projects" : undefined) ??
       (noProjectSelected ? "No project" : "Work in a project"));
+
   const compactTriggerLabel = isLoading
     ? "Loading…"
     : (selected?.name ??
       fallback?.name ??
       (allProjectsSelected ? "All projects" : "No project"));
+
   const triggerIcon =
     isLoading || selected || fallback || allProjectsSelected
       ? "Folder"
       : noProjectSelected
         ? "FolderMinus"
         : "FolderPlus";
+
   const createProjectAction = createProject;
+
   const createProjectLabel = createProjectAction?.isCreating
-    ? "Creating..."
+    ? "Creating…"
     : "New project";
+
   const showActionSeparator =
     projects.length > 0 &&
     (Boolean(createProjectAction) ||
       allowNoProject ||
       allProjectsValue !== undefined);
+
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     setHighlightedValue(NO_HIGHLIGHT_VALUE);
+
     if (!nextOpen) {
       setSearchQuery("");
     }
   };
+
   const selectProject = (projectId: string | null) => {
+    if (projectId !== value) shellHaptic("selection");
     onChange(projectId);
     handleOpenChange(false);
   };
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange} modal={modal}>
-      <PopoverTrigger asChild disabled={disabled}>
-        <Button
-          type="button"
-          variant={variant}
-          size="sm"
-          aria-label={`Project: ${triggerLabel}`}
-          aria-busy={isLoading || undefined}
-          disabled={disabled}
-          data-promptbox-project-control=""
-          className={cn(
-            OPTION_BASE_CLASS_NAME,
-            variant === "ghost" && !disabled && OPTION_INTERACTIVE_CLASS_NAME,
-            disabled && "cursor-default disabled:opacity-100",
-            variant === "ghost" && OPTION_MUTED_CLASS_NAME,
-            className,
-          )}
-        >
-          <span className={OPTION_TRIGGER_CONTENT_CLASS_NAME}>
-            <Icon
-              name={triggerIcon}
-              className="size-3.5 shrink-0"
-              aria-hidden
-            />
-            <span className="min-w-0 truncate" data-promptbox-full-label="">
-              {triggerLabel}
+      <PopoverTrigger ref={modalHostRef} asChild disabled={disabled}>
+        {typeof trigger === "object" ? (
+          trigger.element
+        ) : trigger === "search" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={PROJECT_SEARCH_TRIGGER_LABEL}
+            aria-busy={isLoading || undefined}
+            disabled={disabled}
+            className={className}
+          >
+            <Icon name="Search" className="size-3.5 shrink-0" aria-hidden />
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant={variant}
+            size="sm"
+            aria-label={`Project: ${triggerLabel}`}
+            aria-busy={isLoading || undefined}
+            disabled={disabled}
+            data-promptbox-project-control=""
+            className={cn(
+              OPTION_BASE_CLASS_NAME,
+              variant === "ghost" && !disabled && OPTION_INTERACTIVE_CLASS_NAME,
+              disabled && "cursor-default disabled:opacity-100",
+              variant === "ghost" && OPTION_MUTED_CLASS_NAME,
+              className,
+            )}
+          >
+            <span className={OPTION_TRIGGER_CONTENT_CLASS_NAME}>
+              <Icon
+                name={triggerIcon}
+                className="size-3.5 shrink-0"
+                aria-hidden
+              />
+              <span className="min-w-0 truncate" data-promptbox-full-label="">
+                {triggerLabel}
+              </span>
+              <span
+                className="min-w-0 truncate"
+                data-promptbox-compact-label=""
+              >
+                {compactTriggerLabel}
+              </span>
             </span>
-            <span className="min-w-0 truncate" data-promptbox-compact-label="">
-              {compactTriggerLabel}
-            </span>
-          </span>
-          {disabled && !showChevronWhenDisabled ? null : (
-            <Icon
-              name="ChevronDown"
-              className="size-3.5 shrink-0 text-muted-foreground"
-              aria-hidden
-            />
-          )}
-        </Button>
+            {disabled && !showChevronWhenDisabled ? null : (
+              <Icon
+                name="ChevronDown"
+                className="size-3.5 shrink-0 text-muted-foreground"
+                aria-hidden
+              />
+            )}
+          </Button>
+        )}
       </PopoverTrigger>
       <PopoverContent
         align="start"
@@ -195,6 +254,7 @@ export function ProjectSelector({
         mobileTitle="Project"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
+
           if (showSearch) {
             searchInputRef.current?.focus();
           } else {
@@ -269,9 +329,11 @@ export function ProjectSelector({
                     </CommandItem>
                   ))}
                   {showSearch && filteredProjects.length === 0 ? (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground max-md:pointer-coarse:py-2">
-                      No projects found
-                    </div>
+                    <PickerEmptyState
+                      icon="Search"
+                      message={pickerNoMatchMessage("projects", searchQuery)}
+                      className="py-3"
+                    />
                   ) : null}
                 </div>
               </CommandGroup>

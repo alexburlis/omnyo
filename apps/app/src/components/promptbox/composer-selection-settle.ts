@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { PermissionMode, ReasoningLevel, ServiceTier } from "@bb/domain";
-import type { ExperimentalComposerSelection } from "@get-bb/plugin-sdk";
+import type { PermissionMode, ReasoningLevel, ServiceTier } from "@omnyo/domain";
+import type { ExperimentalComposerSelection } from "@omnyo/plugin-sdk";
+import type { ModelPickerSelection } from "@/components/pickers/model-picker-selection";
 
 const COMPOSER_SELECTION_SETTLE_TIMEOUT_MS = 15_000;
 
@@ -38,14 +39,17 @@ export interface CommittedStateObserver<T> {
 export function createCommittedStateObserver<T>(): CommittedStateObserver<T> {
   let current: T | null = null;
   const waiters = new Set<Waiter<T>>();
+
   const settle = (waiter: Waiter<T>, state: T) => {
     clearTimeout(waiter.timer);
     waiters.delete(waiter);
     waiter.resolve(state);
   };
+
   return {
     publish(state) {
       current = state;
+
       for (const waiter of [...waiters]) {
         if (waiter.predicate(state)) settle(waiter, state);
       }
@@ -55,23 +59,29 @@ export function createCommittedStateObserver<T>(): CommittedStateObserver<T> {
       return new Promise<T>((resolve, reject) => {
         if (current !== null && predicate(current)) {
           resolve(current);
+
           return;
         }
+
         const waiter: Waiter<T> = {
           predicate,
           resolve,
           timer: setTimeout(
             () => {
               waiters.delete(waiter);
+
               if (current === null) {
                 reject(new Error("This composer is not ready yet."));
+
                 return;
               }
+
               resolve(current);
             },
             Math.max(0, deadline - Date.now()),
           ),
         };
+
         waiters.add(waiter);
       });
     },
@@ -92,20 +102,24 @@ export function useCommittedComposerState<T extends CommittedComposerState>(
   const [version, setVersion] = useState(0);
   const versionRef = useRef(0);
   const [observer] = useState(() => createCommittedStateObserver<T>());
+
   const [controller] = useState<CommittedComposerStateController<T>>(() => ({
     observer,
     version: 0,
     commit: () => {
       versionRef.current += 1;
       setVersion(versionRef.current);
+
       return versionRef.current;
     },
   }));
+
   controller.version = version;
   const state = buildState(version);
   useEffect(() => {
     observer.publish(state);
   });
+
   return controller;
 }
 
@@ -115,6 +129,7 @@ export function waitForSettledComposerState<T extends CommittedComposerState>(
   requireSettled: boolean,
 ): Promise<T> {
   const version = controller.commit();
+
   return controller.observer.waitUntil(
     (state) => state.version >= version && (!requireSettled || state.isSettled),
     deadline,
@@ -150,5 +165,28 @@ export function readExecutionSelection(
       ? { serviceTier: state.serviceTier }
       : {}),
     permissionMode: state.permissionMode,
+  };
+}
+
+export function readExecutionTuple(
+  selection: ExperimentalComposerSelection,
+  providerIds: readonly string[],
+): ModelPickerSelection | null {
+  const { providerId, model, reasoningLevel, serviceTier } = selection;
+
+  if (
+    providerId === undefined ||
+    model === undefined ||
+    reasoningLevel === undefined ||
+    !providerIds.includes(providerId)
+  ) {
+    return null;
+  }
+
+  return {
+    providerId,
+    model,
+    reasoningLevel,
+    ...(serviceTier === undefined ? {} : { serviceTier }),
   };
 }

@@ -12,21 +12,27 @@ import {
 import { rules } from "../../../scripts/oxlint-plugin.mjs";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+
 const forkablePlugins = JSON.parse(
   readFileSync(join(ROOT, "scripts", "forkable-plugins.json"), "utf8"),
 ).plugins;
+
 const registryDir = join(ROOT, "packages", "plugin-registry", "r");
+
 const registryItems = readdirSync(registryDir)
   .filter((name) => name.endsWith(".json") && name !== "index.json")
   .map((name) => JSON.parse(readFileSync(join(registryDir, name), "utf8")));
 
 function lint(filename, visit) {
   const reports = [];
+
   const visitors = rules["forkable-plugin-imports"].create({
     filename,
     report: (report) => reports.push(report.message),
   });
+
   visit(visitors);
+
   return reports;
 }
 
@@ -127,50 +133,51 @@ describe("registry components at fork time", () => {
 
 describe("forkPluginPackageJson", () => {
   const workspaceBinsByPackage = new Map([
-    ["@bb/plugin-build", ["bb-plugin-build"]],
+    ["@omnyo/plugin-build", ["omnyo-plugin-build"]],
   ]);
+
   const noRegistryPackages = { dependencies: {}, devDependencies: {} };
 
   it("installs the SDK from the given source and drops workspace build tooling with its scripts", () => {
     const manifest = {
-      name: "bb-plugin-thread-list",
+      name: "omnyo-plugin-thread-list",
       scripts: {
         test: "vitest run",
-        "prepare:bundled": "bb-plugin-build prepare-bundled",
+        "prepare:bundled": "omnyo-plugin-build prepare-bundled",
       },
       dependencies: { jotai: "^2.19.0" },
       devDependencies: {
-        "@bb/plugin-build": "workspace:*",
-        "@get-bb/plugin-sdk": "workspace:*",
+        "@omnyo/plugin-build": "workspace:*",
+        "@omnyo/plugin-sdk": "workspace:*",
         vitest: "^4.1.1",
       },
     };
 
     const forked = forkPluginPackageJson(manifest, {
-      sdkSpecifier: "file:/tmp/get-bb-plugin-sdk.tgz",
+      sdkSpecifier: "file:/tmp/omnyo-plugin-sdk.tgz",
       workspaceBinsByPackage,
       registryDependencies: noRegistryPackages,
     });
 
     expect(forked.manifest).toEqual({
-      name: "bb-plugin-thread-list",
+      name: "omnyo-plugin-thread-list",
       scripts: { test: "vitest run" },
       dependencies: { jotai: "^2.19.0" },
       devDependencies: {
-        "@get-bb/plugin-sdk": "file:/tmp/get-bb-plugin-sdk.tgz",
+        "@omnyo/plugin-sdk": "file:/tmp/omnyo-plugin-sdk.tgz",
         vitest: "^4.1.1",
       },
     });
-    expect(forked.droppedDevDependencies).toEqual(["@bb/plugin-build"]);
+    expect(forked.droppedDevDependencies).toEqual(["@omnyo/plugin-build"]);
     expect(forked.droppedScripts).toEqual(["prepare:bundled"]);
-    expect(manifest.devDependencies["@bb/plugin-build"]).toBe("workspace:*");
+    expect(manifest.devDependencies["@omnyo/plugin-build"]).toBe("workspace:*");
   });
 
-  it("replaces @bb/shared-ui with the vendored items' packages without overriding the plugin's own", () => {
+  it("replaces @omnyo/shared-ui with the vendored items' packages without overriding the plugin's own", () => {
     const forked = forkPluginPackageJson(
       {
         dependencies: {
-          "@bb/shared-ui": "workspace:*",
+          "@omnyo/shared-ui": "workspace:*",
           "@radix-ui/react-slot": "^1.3.0",
         },
         devDependencies: { react: "^19.0.0" },
@@ -200,18 +207,18 @@ describe("forkPluginPackageJson", () => {
   it("refuses a plugin that needs another workspace package at runtime", () => {
     expect(() =>
       forkPluginPackageJson(
-        { dependencies: { "@bb/client-core": "workspace:*" } },
+        { dependencies: { "@omnyo/client-core": "workspace:*" } },
         {
           sdkSpecifier: "0.5.16",
           workspaceBinsByPackage,
           registryDependencies: noRegistryPackages,
         },
       ),
-    ).toThrow("dependencies.@bb/client-core is a workspace package");
+    ).toThrow("dependencies.@omnyo/client-core is a workspace package");
   });
 });
 
-describe("bb/forkable-plugin-imports", () => {
+describe("omnyo/forkable-plugin-imports", () => {
   const pluginFile = join(
     ROOT,
     "plugins",
@@ -221,61 +228,65 @@ describe("bb/forkable-plugin-imports", () => {
     "x.ts",
   );
 
-  it("rejects bb workspace packages in every module position", () => {
+  it("rejects Omnyo workspace packages in every module position", () => {
     const reports = lint(pluginFile, (visitors) => {
-      visitors.ImportDeclaration({ source: literal("@bb/shared-ui/button") });
-      visitors.ExportAllDeclaration({ source: literal("@bb/client-core") });
-      visitors.ImportExpression({ source: literal("@bb/shared-ui/icon") });
-      visitors.TSImportType({ source: literal("@bb/domain") });
+      visitors.ImportDeclaration({
+        source: literal("@omnyo/shared-ui/button"),
+      });
+      visitors.ExportAllDeclaration({ source: literal("@omnyo/client-core") });
+      visitors.ImportExpression({ source: literal("@omnyo/shared-ui/icon") });
+      visitors.TSImportType({ source: literal("@omnyo/domain") });
       visitors.CallExpression({
         callee: {
           type: "MemberExpression",
           object: { type: "Identifier", name: "vi" },
           property: { type: "Identifier", name: "mock" },
         },
-        arguments: [literal("@bb/client-core")],
+        arguments: [literal("@omnyo/client-core")],
       });
     });
 
     expect(reports).toHaveLength(5);
     expect(reports[0]).toContain(
-      "@bb/shared-ui/button is a bb workspace package",
+      "@omnyo/shared-ui/button is an Omnyo workspace package",
     );
   });
 
   it("rejects workspace packages published under other names", () => {
     const reports = lint(pluginFile, (visitors) => {
       visitors.ImportDeclaration({
-        source: literal("bb-environment-provider-host/git"),
+        source: literal("omnyo-environment-provider-host/git"),
       });
-      visitors.ImportDeclaration({ source: literal("bb-plugin-tasks") });
+      visitors.ImportDeclaration({ source: literal("omnyo-plugin-tasks") });
       visitors.ImportDeclaration({
-        source: literal("@get-bb/plugin-sdk/host"),
+        source: literal("@omnyo/plugin-sdk/host"),
       });
       visitors.ImportDeclaration({ source: literal("cross-spawn") });
     });
 
     expect(reports).toEqual([
       expect.stringContaining(
-        "bb-environment-provider-host/git is a bb workspace package",
+        "omnyo-environment-provider-host/git is an Omnyo workspace package",
       ),
-      expect.stringContaining("bb-plugin-tasks is a bb workspace package"),
+      expect.stringContaining(
+        "omnyo-plugin-tasks is an Omnyo workspace package",
+      ),
     ]);
   });
 
   it("rejects internal SDK modules and allows its public entry points", () => {
     const reports = lint(pluginFile, (visitors) => {
       visitors.ImportDeclaration({
-        source: literal("@get-bb/plugin-sdk/internal/plugin-app-collector"),
+        source: literal("@omnyo/plugin-sdk/internal/plugin-app-collector"),
       });
       visitors.ImportDeclaration({
-        source: literal("@get-bb/plugin-sdk/testing/app"),
+        source: literal("@omnyo/plugin-sdk/testing/app"),
       });
     });
 
     expect(reports).toEqual([
       expect.stringContaining(
-        "@get-bb/plugin-sdk/internal/plugin-app-collector is an internal SDK module",
+        "@omnyo/plugin-sdk/internal/plugin-app-collector is an internal SDK module",
       ),
     ]);
   });
@@ -303,7 +314,7 @@ describe("bb/forkable-plugin-imports", () => {
         source: literal("../../../../packages/domain/src/index.js"),
       });
       visitors.ImportDeclaration({ source: literal("../model/fixtures.js") });
-      visitors.ImportDeclaration({ source: literal("@get-bb/plugin-sdk/app") });
+      visitors.ImportDeclaration({ source: literal("@omnyo/plugin-sdk/app") });
       visitors.ImportDeclaration({ source: literal("@dnd-kit/core") });
       visitors.ExportNamedDeclaration({ source: null });
     });
@@ -332,6 +343,7 @@ describe("scripts/forkable-plugins.json", () => {
       const manifest = JSON.parse(
         readFileSync(join(ROOT, pluginDir, "package.json"), "utf8"),
       );
+
       expect(manifest.scripts?.lint).toMatch(/^oxlint\b/);
     },
   );

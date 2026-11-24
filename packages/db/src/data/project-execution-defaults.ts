@@ -4,7 +4,7 @@ import type {
   PermissionMode,
   ReasoningLevel,
   ServiceTier,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { DbConnection } from "../connection.js";
 import { projectExecutionDefaults } from "../schema.js";
 
@@ -48,6 +48,7 @@ export function listProjectExecutionDefaultsByProjectIds(
   args: ListProjectExecutionDefaultsByProjectIdsArgs,
 ): Map<string, ProjectExecutionDefaults> {
   const byProjectId = new Map<string, ProjectExecutionDefaults>();
+
   if (args.projectIds.length === 0) {
     return byProjectId;
   }
@@ -69,6 +70,7 @@ export function listProjectExecutionDefaultsByProjectIds(
     const { projectId, ...defaults } = row;
     byProjectId.set(projectId, defaults);
   }
+
   return byProjectId;
 }
 
@@ -77,6 +79,7 @@ export function upsertProjectExecutionDefaults(
   args: UpsertProjectExecutionDefaultsArgs,
 ): ProjectExecutionDefaults {
   const updatedAt = Date.now();
+
   const row = db
     .insert(projectExecutionDefaults)
     .values({

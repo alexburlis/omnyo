@@ -24,8 +24,12 @@ import {
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "bb-server-markers-"));
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "omnyo-server-markers-"),
+  );
+
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 
@@ -44,10 +48,10 @@ const MOVED_FILE: ServerMovedFile = {
   fromHostId: "host-old",
   toHostId: "host-new",
   toHostName: "desktop",
-  serverUrl: "https://bb.example",
+  serverUrl: "https://omnyo.example",
   mode: "connect",
   connectHandle: "sawyer",
-  oldCopyEntries: ["bb.db", "attachments", "plugins/docs/data.db"],
+  oldCopyEntries: ["app.db", "attachments", "plugins/docs/data.db"],
 };
 
 const IMPORT_FILE: ServerImportFile = {
@@ -55,11 +59,11 @@ const IMPORT_FILE: ServerImportFile = {
   kind: "move",
   moveId: "move-1",
   activationToken: "activation-token-0123456789",
-  sourceDataDir: "/home/old/.bb",
+  sourceDataDir: "/home/old/.omnyo",
   sourceServerHostId: "host-old",
   targetHostId: "host-new",
   serverUrl: null,
-  importedEntries: ["bb.db", "config.json"],
+  importedEntries: ["app.db", "config.json"],
   createdAt: 1_757_000_000_000,
   fixupsAppliedAt: null,
 };
@@ -81,6 +85,7 @@ describe("server move marker files", () => {
       completedAt: 1_757_000_000_000,
       oldCopyDeletedAt: null,
     };
+
     await writeServerMovedFile(dataDir, MOVED_FILE);
     await writeServerImportFile(dataDir, IMPORT_FILE);
     await writeLastServerMoveFile(dataDir, lastMove);
@@ -95,6 +100,7 @@ describe("server move marker files", () => {
         SERVER_MOVED_FILE_NAME,
       ].sort(),
     );
+
     for (const fileName of await readdir(dataDir)) {
       if (process.platform !== "win32") {
         expect((await stat(path.join(dataDir, fileName))).mode & 0o777).toBe(
@@ -104,7 +110,7 @@ describe("server move marker files", () => {
     }
   });
 
-  it("round trips the bb connect hold with mode 0600 and removes it once", async () => {
+  it("round trips the Omnyo Connect hold with mode 0600 and removes it once", async () => {
     const dataDir = await makeTempDir();
     expect(SERVER_CONNECT_HOLD_FILE_NAME).toBe("server-connect-hold.json");
     expect(await readServerConnectHoldFile(dataDir)).toBeNull();
@@ -115,9 +121,11 @@ describe("server move marker files", () => {
       reason: "manual-import",
       createdAt: 1_757_000_000_000,
     };
+
     await writeServerConnectHoldFile(dataDir, hold);
 
     expect(await readServerConnectHoldFile(dataDir)).toEqual(hold);
+
     if (process.platform !== "win32") {
       expect(
         (await stat(path.join(dataDir, SERVER_CONNECT_HOLD_FILE_NAME))).mode &
@@ -152,6 +160,7 @@ describe("server move marker files", () => {
 
   it("refuses to write markers that could target paths outside the data directory", async () => {
     const dataDir = await makeTempDir();
+
     for (const oldCopyEntry of ["../.ssh", "auth.json", "plugins/docs"]) {
       await expect(
         writeServerMovedFile(dataDir, {
@@ -160,6 +169,7 @@ describe("server move marker files", () => {
         }),
       ).rejects.toThrow(/server-owned/u);
     }
+
     for (const importedEntry of ["/etc/passwd", "host-id", "npm/lib/x"]) {
       await expect(
         writeServerImportFile(dataDir, {
@@ -168,6 +178,7 @@ describe("server move marker files", () => {
         }),
       ).rejects.toThrow(/server-owned/u);
     }
+
     await expect(
       writeServerImportFile(dataDir, {
         ...IMPORT_FILE,

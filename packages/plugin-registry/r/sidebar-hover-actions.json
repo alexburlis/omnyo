@@ -3,11 +3,11 @@
   "name": "sidebar-hover-actions",
   "type": "registry:ui",
   "title": "sidebar-hover-actions",
-  "description": "BB ui \"sidebar-hover-actions\" — vendored from the BB app's own source (version-matched to this BB release).",
+  "description": "Omnyo ui \"sidebar-hover-actions\" — vendored from the Omnyo app's own source (version-matched to this Omnyo release).",
   "files": [
     {
       "path": "registry/components/ui/sidebar-hover-actions.ts",
-      "content": "export const SIDEBAR_HOVER_ACTIONS_ROW_CLASS = \"bb-sidebar-hover-actions-row\";\n\nexport const SIDEBAR_HOVER_ACTIONS_CLASS = \"bb-sidebar-hover-actions\";\n\nexport const SIDEBAR_HOVER_ACTIONS_GAP_CLASS = \"gap-0.5\";\n\nexport const SIDEBAR_HOVER_ACTIONS_INSET_CLASS =\n  \"bb-sidebar-hover-actions-inset\";\n\nexport const SIDEBAR_HOVER_ACTIONS_FADE_CLASS = \"bb-sidebar-hover-actions-fade\";\n\nexport const SIDEBAR_HOVER_ACTIONS_MOBILE_ALWAYS_VALUE = \"always\";\n",
+      "content": "export const SIDEBAR_HOVER_ACTIONS_ROW_CLASS =\n  \"omnyo-sidebar-hover-actions-row\";\n\nexport const SIDEBAR_HOVER_ACTIONS_CLASS = \"omnyo-sidebar-hover-actions\";\n\nexport const SIDEBAR_HOVER_ACTIONS_GAP_CLASS = \"gap-0.5\";\n\nexport const SIDEBAR_HOVER_ACTIONS_INSET_CLASS =\n  \"omnyo-sidebar-hover-actions-inset\";\n\nexport const SIDEBAR_HOVER_ACTIONS_FADE_CLASS =\n  \"omnyo-sidebar-hover-actions-fade\";\n\nexport const SIDEBAR_HOVER_ACTIONS_MOBILE_ALWAYS_VALUE = \"always\";\n",
       "type": "registry:ui",
       "target": "components/ui/sidebar-hover-actions.ts"
     }

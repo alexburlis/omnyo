@@ -34,8 +34,11 @@ type ExecFileCallback = (
 ) => void;
 
 type ExecFileOptions = ExecFileOptionsWithStringEncoding;
+
 type ExecFileSecondArg = readonly string[] | ExecFileOptions | null;
+
 type ExecFileThirdArg = ExecFileOptions | ExecFileCallback | null;
+
 type ProcessScanErrorCode = string | number;
 
 interface ExecFilePromiseResult {
@@ -100,6 +103,7 @@ function useIsolatedStandaloneTmpDir(): string {
   vi.stubEnv("TMPDIR", tempDir);
   vi.stubEnv("TEMP", tempDir);
   vi.stubEnv("TMP", tempDir);
+
   return tempDir;
 }
 
@@ -111,6 +115,7 @@ function createStandaloneRoot(args: CreateStandaloneRootArgs): string {
     JSON.stringify(args.state),
     "utf8",
   );
+
   return tmpRoot;
 }
 
@@ -134,9 +139,11 @@ vi.mock("node:child_process", async (importOriginal) => {
     const child = actual.spawn(process.execPath, ["-e", ""], {
       stdio: "ignore",
     });
+
     spawnMockState.children.push(child);
 
     const processScanErrorCode = spawnMockState.processScanErrorCode;
+
     if (command === "ps" && processScanErrorCode) {
       const error = Object.assign(
         new Error(`spawn ${String(processScanErrorCode)}`),
@@ -144,12 +151,15 @@ vi.mock("node:child_process", async (importOriginal) => {
           code: processScanErrorCode,
         },
       );
+
       queueMicrotask(() => callbackArg?.(error, "", ""));
+
       return child;
     }
 
     const stdout = command === "lsof" ? spawnMockState.openFilePidsStdout : "";
     queueMicrotask(() => callbackArg?.(null, stdout, ""));
+
     return child;
   }
 
@@ -162,8 +172,10 @@ vi.mock("node:child_process", async (importOriginal) => {
       execFileMock(command, args, options, (error, stdout, stderr) => {
         if (error) {
           reject(error);
+
           return;
         }
+
         resolve({ stderr, stdout });
       });
     });
@@ -193,7 +205,9 @@ vi.mock("node:child_process", async (importOriginal) => {
           stdio: "ignore",
         },
       );
+
       spawnMockState.children.push(child);
+
       return child;
     },
     execFile: execFileMock,
@@ -214,6 +228,7 @@ afterEach(() => {
   for (const child of spawnMockState.children) {
     child.kill();
   }
+
   spawnMockState.children.length = 0;
   spawnMockState.execFileInvocations.length = 0;
   spawnMockState.openFilePidsStdout = "";
@@ -225,6 +240,7 @@ afterEach(() => {
   for (const tempDir of spawnMockState.tempDirs) {
     rmSync(tempDir, { force: true, recursive: true });
   }
+
   spawnMockState.tempDirs.length = 0;
 });
 
@@ -254,10 +270,10 @@ describe("spawnLoggedProcess", () => {
     expect(spawnMockState.invocations[0]?.options.detached).toBe(true);
   });
 
-  it("keeps standalone server runtime env isolated from inherited bb and ambient OpenAI env", async () => {
-    vi.stubEnv("BB_APP_URL", "https://inherited-app.example.test");
-    vi.stubEnv("BB_DATA_DIR", "/Users/example/.bb-dev");
-    vi.stubEnv("BB_SERVER_PORT", "3334");
+  it("keeps standalone server runtime env isolated from inherited Omnyo and ambient OpenAI env", async () => {
+    vi.stubEnv("OMNYO_APP_URL", "https://inherited-app.example.test");
+    vi.stubEnv("OMNYO_DATA_DIR", "/Users/example/.omnyo-dev");
+    vi.stubEnv("OMNYO_SERVER_PORT", "3334");
     vi.stubEnv("OPENAI_API_KEY", "ambient-openai-key");
     vi.stubGlobal(
       "fetch",
@@ -271,8 +287,8 @@ describe("spawnLoggedProcess", () => {
       env: buildStandaloneRuntimeEnv({
         baseEnv: process.env,
         overrides: {
-          BB_DATA_DIR: "/tmp/leaked-data-dir",
-          BB_SERVER_PORT: "9999",
+          OMNYO_DATA_DIR: "/tmp/leaked-data-dir",
+          OMNYO_SERVER_PORT: "9999",
         },
       }),
       logPath: path.join(tempDir, "standalone-server.log"),
@@ -280,17 +296,17 @@ describe("spawnLoggedProcess", () => {
     });
 
     expect(spawnMockState.invocations[0]?.options.env).toMatchObject({
-      BB_DATA_DIR: "/tmp/standalone-server-data",
-      BB_SERVER_PORT: "4567",
+      OMNYO_DATA_DIR: "/tmp/standalone-server-data",
+      OMNYO_SERVER_PORT: "4567",
     });
     expect(
       spawnMockState.invocations[0]?.options.env?.OPENAI_API_KEY,
     ).toBeUndefined();
     expect(
-      spawnMockState.invocations[0]?.options.env?.BB_APP_URL,
+      spawnMockState.invocations[0]?.options.env?.OMNYO_APP_URL,
     ).toBeUndefined();
     expect(
-      spawnMockState.invocations[0]?.options.env?.BB_EXTERNAL_URL,
+      spawnMockState.invocations[0]?.options.env?.OMNYO_EXTERNAL_URL,
     ).toBeUndefined();
   });
 
@@ -300,6 +316,7 @@ describe("spawnLoggedProcess", () => {
       "fetch",
       vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
         capturedBody = typeof init?.body === "string" ? init.body : null;
+
         return new Response(
           JSON.stringify({
             enrollKey: "bbde_standalone",
@@ -337,9 +354,11 @@ describe("cleanupStandaloneOrphans", () => {
     "warns and continues when process enumeration is blocked with %s",
     async (errorCode) => {
       useIsolatedStandaloneTmpDir();
+
       const warn = vi
         .spyOn(console, "warn")
         .mockImplementation(() => undefined);
+
       spawnMockState.processScanErrorCode = errorCode;
 
       await expect(cleanupStandaloneOrphans()).resolves.toMatchObject({
@@ -360,8 +379,9 @@ describe("cleanupStandaloneOrphans", () => {
 
   it("skips a standalone root whose parent process exists but is not signalable", async () => {
     const tmpDir = useIsolatedStandaloneTmpDir();
+
     const tmpRoot = createStandaloneRoot({
-      name: "bb-standalone-unowned",
+      name: "omnyo-standalone-unowned",
       state: {
         daemon: { pid: 1111 },
         parentPid: 1,
@@ -369,13 +389,16 @@ describe("cleanupStandaloneOrphans", () => {
       },
       tmpDir,
     });
+
     const killedSignals: string[] = [];
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
       if (pid === 1 && signal === 0) {
         throw createProcessKillError("EPERM");
       }
+
       killedSignals.push(`${String(pid)}:${String(signal)}`);
+
       return true;
     });
 
@@ -392,8 +415,9 @@ describe("cleanupStandaloneOrphans", () => {
 
   it("removes stale standalone roots whose parent process is gone", async () => {
     const tmpDir = useIsolatedStandaloneTmpDir();
+
     const tmpRoot = createStandaloneRoot({
-      name: "bb-standalone-owned-stale",
+      name: "omnyo-standalone-owned-stale",
       state: {
         daemon: { pid: 1111 },
         parentPid: 4242,
@@ -401,18 +425,23 @@ describe("cleanupStandaloneOrphans", () => {
       },
       tmpDir,
     });
+
     const runningPids = new Set([1111, 2222]);
     vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
       if (pid === 4242 && signal === 0) {
         throw createProcessKillError("ESRCH");
       }
+
       if (signal === 0) {
         if (runningPids.has(pid)) {
           return true;
         }
+
         throw createProcessKillError("ESRCH");
       }
+
       runningPids.delete(pid);
+
       return true;
     });
 
@@ -427,8 +456,9 @@ describe("cleanupStandaloneOrphans", () => {
     const tmpDir = useIsolatedStandaloneTmpDir();
     const restartPidPath = path.join(tmpDir, "daemon-restart.pid");
     writeFileSync(restartPidPath, "3333\n", "utf8");
+
     const tmpRoot = createStandaloneRoot({
-      name: "bb-standalone-restarted-stale",
+      name: "omnyo-standalone-restarted-stale",
       state: {
         daemon: { pid: 1111 },
         parentPid: 4242,
@@ -437,19 +467,24 @@ describe("cleanupStandaloneOrphans", () => {
       },
       tmpDir,
     });
+
     spawnMockState.openFilePidsStdout = "4444\nnot-a-pid\n0\n";
     const runningPids = new Set([1111, 2222, 3333, 4444]);
     vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
       if (pid === 4242 && signal === 0) {
         throw createProcessKillError("ESRCH");
       }
+
       if (signal === 0) {
         if (runningPids.has(pid)) {
           return true;
         }
+
         throw createProcessKillError("ESRCH");
       }
+
       runningPids.delete(pid);
+
       return true;
     });
 

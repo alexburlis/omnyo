@@ -1,12 +1,12 @@
 import { and, desc, eq } from "drizzle-orm";
-import { type DbConnection, events, promptHistoryEntries } from "@bb/db";
+import { type DbConnection, events, promptHistoryEntries } from "@omnyo/db";
 import {
   arePromptHistoryInputsEqual,
   promptInputSchema,
   turnRequestEventDataSchema,
   type PromptHistoryScope,
   type PromptInput,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { z } from "zod";
 import { expect } from "vitest";
 
@@ -40,12 +40,16 @@ export function assertPromptHistoryForTurnRequest(
 
   const turnRequestRow = turnRequestRows.find((row) => {
     const event = turnRequestEventDataSchema.parse(JSON.parse(row.data));
+
     return arePromptHistoryInputsEqual(event.input, args.input);
   });
+
   expect(turnRequestRow).toBeDefined();
+
   if (!turnRequestRow) {
     return;
   }
+
   expect(turnRequestRow.threadId).toBe(args.threadId);
 
   const historyRow = args.db
@@ -66,9 +70,11 @@ export function assertPromptHistoryForTurnRequest(
     .get();
 
   expect(historyRow).toBeDefined();
+
   if (!historyRow) {
     return;
   }
+
   expect(historyRow.threadId).toBe(args.threadId);
   expect(historyRow.scope).toBe(args.scope);
   expect(historyRow.requestSequence).toBe(turnRequestRow.sequence);

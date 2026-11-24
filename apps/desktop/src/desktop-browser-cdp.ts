@@ -4,7 +4,9 @@ import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 
 const objectSchema = z.record(z.string(), z.json());
+
 type CdpObject = z.infer<typeof objectSchema>;
+
 const commandSchema = z
   .object({
     id: z.number().int().nonnegative(),
@@ -13,6 +15,7 @@ const commandSchema = z
     sessionId: z.string().min(1).max(256).optional(),
   })
   .strict();
+
 type CdpCommand = z.infer<typeof commandSchema>;
 
 export interface DesktopBrowserCdpScope {
@@ -74,6 +77,7 @@ const filterSchema = z.array(
     exclude: z.boolean().default(false),
   }),
 );
+
 type TargetFilter = z.infer<typeof filterSchema>;
 
 function matchesFilter(type: string, filter: TargetFilter): boolean {
@@ -105,6 +109,84 @@ const forwardedDomains = new Set([
   "Runtime",
 ]);
 
+const cookieReadMethods = new Set([
+  "Network.getCookies",
+  "Network.getAllCookies",
+  "Page.getCookies",
+  "Storage.getCookies",
+]);
+
+const cookieRedactedDomains = new Set(["Network", "Fetch"]);
+
+const cookieMaterialKeys = new Set([
+  "associatedCookies",
+  "blockedCookies",
+  "exemptedCookies",
+  "headersText",
+  "requestHeadersText",
+]);
+
+const headerKeys = new Set(["headers", "requestHeaders", "responseHeaders"]);
+
+function isCookieHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+
+  return lower === "cookie" || lower === "set-cookie";
+}
+
+function redactHeaders(value: CdpObject[string]): CdpObject[string] {
+  if (Array.isArray(value)) {
+    return value
+      .filter(
+        (entry) =>
+          !(
+            entry !== null &&
+            typeof entry === "object" &&
+            !Array.isArray(entry) &&
+            typeof entry.name === "string" &&
+            isCookieHeader(entry.name)
+          ),
+      )
+      .map(redactCdpValue);
+  }
+
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([name]) => !isCookieHeader(name))
+        .map(([name, entry]) => [name, redactCdpValue(entry)]),
+    );
+  }
+
+  return value;
+}
+
+function redactCdpValue(value: CdpObject[string]): CdpObject[string] {
+  if (Array.isArray(value)) return value.map(redactCdpValue);
+
+  if (value !== null && typeof value === "object")
+    return redactCdpCookieMaterial(value);
+
+  return value;
+}
+
+export function redactCdpCookieMaterial(message: CdpObject): CdpObject {
+  return Object.fromEntries(
+    Object.entries(message)
+      .filter(([key]) => !cookieMaterialKeys.has(key))
+      .map(([key, value]) => [
+        key,
+        headerKeys.has(key) ? redactHeaders(value) : redactCdpValue(value),
+      ]),
+  );
+}
+
+function redactForDomain(method: string, message: CdpObject): CdpObject {
+  return cookieRedactedDomains.has(method.split(".")[0])
+    ? redactCdpCookieMaterial(message)
+    : message;
+}
+
 export function desktopBrowserCdpTargetId(
   scope: DesktopBrowserCdpScope,
   tabId: string,
@@ -122,6 +204,7 @@ function buildTargetInfo(
   type: "page" | "tab",
 ): CdpObject {
   const targetId = desktopBrowserCdpTargetId(scope, page.tabId);
+
   return {
     targetId: type === "tab" ? `tab:${targetId}` : targetId,
     type,
@@ -154,10 +237,11 @@ function createConnection(
   const autoAttachments = new Map<string | undefined, TargetFilter>();
   let disposed = false;
   const browserTargetId = randomUUID();
+
   const browserInfo: CdpObject = {
     targetId: browserTargetId,
     type: "browser",
-    title: "BB",
+    title: "Omnyo",
     url: "",
     attached: true,
     canAccessOpener: false,
@@ -181,15 +265,21 @@ function createConnection(
 
   function send(message: CdpObject) {
     if (disposed || socket.readyState !== WebSocket.OPEN) return;
+
     if (socket.bufferedAmount > 8 * 1024 * 1024) {
       socket.terminate();
+
       return;
     }
+
     const serialized = JSON.stringify(message);
+
     if (Buffer.byteLength(serialized) > 8 * 1024 * 1024) {
       socket.terminate();
+
       return;
     }
+
     socket.send(serialized);
   }
 
@@ -201,7 +291,9 @@ function createConnection(
     const page = adapter
       .listTabs(scope)
       .find((candidate) => candidate.tabId === tabId);
+
     if (!page) throw new Error("Target is not available to this connection");
+
     return page;
   }
 
@@ -209,7 +301,9 @@ function createConnection(
     const page = adapter
       .listTabs(scope)
       .find((candidate) => targetIdFor(candidate.tabId) === targetId);
+
     if (!page) throw new Error("Target is not available to this connection");
+
     return page;
   }
 
@@ -228,6 +322,7 @@ function createConnection(
         session.parentSessionId,
       );
     }
+
     const attachment = attached.get(tabId);
     attached.delete(tabId);
     attachment?.dispose();
@@ -235,10 +330,13 @@ function createConnection(
 
   function forgetSession(sessionId: string) {
     const session = sessions.get(sessionId);
+
     if (!session) return;
+
     for (const [childId, child] of sessions) {
       if (child.parentSessionId === sessionId) forgetSession(childId);
     }
+
     session.controller.abort();
     sessions.delete(sessionId);
     autoAttachments.delete(sessionId);
@@ -247,6 +345,7 @@ function createConnection(
       { sessionId, targetId: session.targetId },
       session.parentSessionId,
     );
+
     if (
       session.kind === "page" &&
       ![...sessions.values()].some(
@@ -262,12 +361,15 @@ function createConnection(
 
   async function detachSession(sessionId: string) {
     const session = sessions.get(sessionId);
+
     if (!session)
       throw new Error("Session is not available to this connection");
     session.controller.abort();
+
     for (const [childId, child] of [...sessions]) {
       if (child.parentSessionId === sessionId) await detachSession(childId);
     }
+
     if (
       session.nativeSessionId !== "" &&
       ![...sessions].some(
@@ -281,12 +383,14 @@ function createConnection(
         session.parentSessionId === undefined
           ? undefined
           : sessions.get(session.parentSessionId);
+
       await getPage(session.tabId).send(
         "Target.detachFromTarget",
         { sessionId: session.nativeSessionId },
         parent?.nativeSessionId || undefined,
       );
     }
+
     forgetSession(sessionId);
   }
 
@@ -297,21 +401,26 @@ function createConnection(
   ): string {
     if (!attached.has(page.tabId)) {
       page.attach();
+
       const offMessage = page.onMessage((method, params, nativeSessionId) => {
         if (!adapter.listTabs(scope).some((tab) => tab.tabId === page.tabId))
           return;
+
         const recipients = [...sessions].filter(
           ([, session]) =>
             session.kind === "page" &&
             session.tabId === page.tabId &&
             session.nativeSessionId === nativeSessionId,
         );
+
         for (const [sessionId] of recipients) {
           if (method === "Target.attachedToTarget") {
             const childNativeId = z.string().safeParse(params.sessionId);
+
             const childInfo = z
               .object({ targetId: z.string().min(1) })
               .safeParse(params.targetInfo);
+
             if (!childNativeId.success || !childInfo.success) continue;
             const childId = randomUUID();
             sessions.set(childId, {
@@ -335,10 +444,11 @@ function createConnection(
               }
             }
           } else {
-            event(method, params, sessionId);
+            event(method, redactForDomain(method, params), sessionId);
           }
         }
       });
+
       const offDetach = page.onDetach(() => removePage(page.tabId));
       attached.set(page.tabId, {
         page,
@@ -349,6 +459,7 @@ function createConnection(
         },
       });
     }
+
     const sessionId = randomUUID();
     sessions.set(sessionId, {
       controller: new AbortController(),
@@ -359,6 +470,7 @@ function createConnection(
       nativeSessionId: "",
       parentSessionId,
     });
+
     return sessionId;
   }
 
@@ -369,6 +481,7 @@ function createConnection(
   ) {
     let info: CdpObject;
     let sessionId: string;
+
     if (targetId === browserTargetId) {
       sessionId = randomUUID();
       sessions.set(sessionId, {
@@ -399,22 +512,27 @@ function createConnection(
       sessionId = attachPage(page, parentSessionId, autoAttached);
       info = targetInfo(page);
     }
+
     event(
       "Target.attachedToTarget",
       { sessionId, targetInfo: info, waitingForDebugger: false },
       parentSessionId,
     );
+
     return sessionId;
   }
 
   function announceTargets() {
     if (disposed) return;
     const pages = adapter.listTabs(scope);
+
     const infos = [
       browserInfo,
       ...pages.flatMap((page) => [targetInfo(page, "tab"), targetInfo(page)]),
     ];
+
     const liveIds = new Set(infos.map((info) => readString(info, "targetId")));
+
     for (const session of [...sessions.values()]) {
       if (
         session.kind !== "browser" &&
@@ -422,20 +540,25 @@ function createConnection(
       )
         removePage(session.tabId);
     }
+
     for (const tabId of knownTargets.keys()) {
       if (liveIds.has(tabId)) continue;
       knownTargets.delete(tabId);
+
       for (const attachedId of attached.keys()) {
         if (targetIdFor(attachedId) === tabId) removePage(attachedId);
       }
+
       if (discover) event("Target.targetDestroyed", { targetId: tabId });
     }
+
     for (const info of infos) {
       if (!matchesFilter(readString(info, "type"), discoveryFilter)) continue;
       const id = readString(info, "targetId");
       const previous = knownTargets.get(id);
       const serialized = JSON.stringify(info);
       knownTargets.set(id, serialized);
+
       if (
         discover &&
         matchesFilter(readString(info, "type"), discoveryFilter) &&
@@ -449,15 +572,20 @@ function createConnection(
         );
       }
     }
+
     for (const [parentId, filter] of autoAttachments) {
       const parent =
         parentId === undefined ? undefined : sessions.get(parentId);
+
       for (const page of pages) {
         if (parent?.kind === "tab" && parent.tabId !== page.tabId) continue;
+
         const kinds: Array<"tab" | "page"> =
           parent?.kind === "tab" ? ["page"] : ["tab", "page"];
+
         for (const kind of kinds) {
           if (!matchesFilter(kind, filter)) continue;
+
           if (
             [...sessions.values()].some(
               (session) =>
@@ -482,23 +610,30 @@ function createConnection(
   async function dispatch(command: CdpCommand): Promise<CdpObject> {
     controller.signal.throwIfAborted();
     const { method, params } = command;
+
     const session =
       command.sessionId === undefined
         ? undefined
         : sessions.get(command.sessionId);
+
     if (command.sessionId !== undefined) {
       if (!session)
         throw new Error("Session is not available to this connection");
     }
+
     if (session?.kind === "page") {
       const page = getPage(session.tabId);
+
       if (method === "Target.detachFromTarget") {
         const childId = readString(params, "sessionId");
+
         if (sessions.get(childId)?.parentSessionId !== command.sessionId)
           throw new Error("Child session is not attached to this parent");
         await detachSession(childId);
+
         return {};
       }
+
       if (method === "Target.setAutoAttach") {
         return page.send(
           method,
@@ -507,24 +642,40 @@ function createConnection(
           session.controller.signal,
         );
       }
+
       if (method === "Page.bringToFront") {
         await adapter.activateTab(scope, page.tabId, controller.signal);
         controller.signal.throwIfAborted();
+
         return {};
       }
+
+      if (cookieReadMethods.has(method)) {
+        throw new Error(
+          "Reading browser cookies is not available to automation sessions",
+        );
+      }
+
       if (!forwardedDomains.has(method.split(".")[0])) {
         throw new Error("CDP method is not supported for scoped page sessions");
       }
-      return page.send(
+
+      return redactForDomain(
         method,
-        params,
-        session.nativeSessionId || undefined,
-        session.controller.signal,
+        await page.send(
+          method,
+          params,
+          session.nativeSessionId || undefined,
+          session.controller.signal,
+        ),
       );
     }
+
     if (session?.kind === "tab") {
       getPage(session.tabId);
+
       if (method === "Runtime.runIfWaitingForDebugger") return {};
+
       if (
         method !== "Target.setAutoAttach" &&
         method !== "Target.detachFromTarget"
@@ -532,6 +683,7 @@ function createConnection(
         throw new Error("CDP method is not supported for virtual tab sessions");
       }
     }
+
     switch (method) {
       case "Browser.getVersion":
         return {
@@ -570,12 +722,14 @@ function createConnection(
         )
           return { targetInfo: browserInfo };
         const targetId = readString(params, "targetId");
+
         return {
           targetInfo: targetId.startsWith("tab:")
             ? targetInfo(getTarget(targetId.slice(4)), "tab")
             : targetInfo(getTarget(targetId)),
         };
       }
+
       case "Target.setDiscoverTargets":
         discover = z.boolean().parse(params.discover);
         discoveryFilter =
@@ -584,10 +738,12 @@ function createConnection(
             : filterSchema.parse(params.filter);
         knownTargets.clear();
         announceTargets();
+
         return {};
       case "Target.setAutoAttach":
         if (params.flatten !== true)
           throw new Error("Flattened CDP sessions are required");
+
         if (z.boolean().parse(params.autoAttach)) {
           autoAttachments.set(
             command.sessionId,
@@ -597,6 +753,7 @@ function createConnection(
           );
         } else {
           autoAttachments.delete(command.sessionId);
+
           for (const [id, child] of [...sessions]) {
             if (
               child.autoAttached &&
@@ -606,23 +763,30 @@ function createConnection(
               await detachSession(id);
           }
         }
+
         announceTargets();
+
         return {};
       case "Target.attachToTarget": {
         if (params.flatten !== true)
           throw new Error("Flattened CDP sessions are required");
+
         const sessionId = attachTarget(
           readString(params, "targetId"),
           command.sessionId,
           false,
         );
+
         return { sessionId };
       }
+
       case "Target.detachFromTarget": {
         const sessionId = readString(params, "sessionId");
         await detachSession(sessionId);
+
         return {};
       }
+
       case "Target.createTarget": {
         if (
           params.browserContextId !== undefined &&
@@ -632,7 +796,9 @@ function createConnection(
             "Browser contexts cannot be selected through this connection",
           );
         }
+
         const url = z.string().max(4096).parse(params.url);
+
         if (
           url !== "about:blank" &&
           !["http:", "https:"].includes(new URL(url).protocol)
@@ -641,25 +807,33 @@ function createConnection(
             "Only HTTP, HTTPS, and about:blank targets are supported",
           );
         }
+
         const tabId = await adapter.createTab(scope, url, controller.signal);
+
         if (disposed) throw new Error("Connection closed");
         getPage(tabId);
         announceTargets();
+
         return { targetId: targetIdFor(tabId) };
       }
+
       case "Target.closeTarget": {
         const page = getTarget(readString(params, "targetId"));
         await adapter.closeTab(scope, page.tabId, controller.signal);
         controller.signal.throwIfAborted();
         announceTargets();
+
         return { success: true };
       }
+
       case "Target.activateTarget": {
         const page = getTarget(readString(params, "targetId"));
         await adapter.activateTab(scope, page.tabId, controller.signal);
         controller.signal.throwIfAborted();
+
         return {};
       }
+
       default:
         throw new Error(
           "CDP method is not supported by the scoped browser bridge",
@@ -674,28 +848,37 @@ function createConnection(
       socket.terminate();
     }
   });
+
   socket.on("message", async (data, binary) => {
     let command: CdpCommand;
+
     try {
       if (binary) throw new Error("Text CDP messages required");
       command = commandSchema.parse(JSON.parse(data.toString()));
     } catch {
       socket.close(1008, "Invalid CDP command");
+
       return;
     }
+
     if (pending.has(command.id) || pending.size >= 64) {
       socket.close(1008, "CDP request limit exceeded");
+
       return;
     }
+
     pending.add(command.id);
+
     const envelope = {
       id: command.id,
       ...(command.sessionId === undefined
         ? {}
         : { sessionId: command.sessionId }),
     };
+
     const timeout = setTimeout(() => socket.terminate(), 30_000);
     deadlines.add(timeout);
+
     try {
       send({ ...envelope, result: await dispatch(command) });
     } catch (error) {
@@ -719,15 +902,19 @@ function createConnection(
     disposed = true;
     controller.abort();
     unsubscribe();
+
     for (const timeout of deadlines) clearTimeout(timeout);
     deadlines.clear();
+
     for (const tabId of attached.keys()) removePage(tabId);
+
     for (const session of sessions.values()) session.controller.abort();
     sessions.clear();
   }
 
   socket.on("close", dispose);
   socket.on("error", dispose);
+
   return () => {
     dispose();
     socket.terminate();
@@ -747,18 +934,22 @@ export async function createDesktopBrowserCdpBridge(args: {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+
   const server = createServer((_request, response) => {
     response.writeHead(404).end();
   });
+
   const websocketServer = new WebSocketServer({
     noServer: true,
     maxPayload: 1024 * 1024,
     perMessageDeflate: false,
   });
+
   let closed = false;
 
   function revoke(token: string) {
     const grant = grants.get(token);
+
     if (!grant) return;
     grants.delete(token);
     clearTimeout(grant.timer);
@@ -768,6 +959,7 @@ export async function createDesktopBrowserCdpBridge(args: {
   server.on("upgrade", (request, socket, head) => {
     const token = request.url?.match(/^\/cdp\/([a-f0-9]{64})$/)?.[1];
     const grant = token === undefined ? undefined : grants.get(token);
+
     if (
       closed ||
       request.headers.origin !== undefined ||
@@ -776,8 +968,10 @@ export async function createDesktopBrowserCdpBridge(args: {
       grant.disconnect !== null
     ) {
       socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+
       return;
     }
+
     websocketServer.handleUpgrade(request, socket, head, (websocket) => {
       grant.disconnect = createConnection(
         websocket,
@@ -799,6 +993,7 @@ export async function createDesktopBrowserCdpBridge(args: {
     });
   });
   const address = server.address();
+
   if (address === null || typeof address === "string")
     throw new Error("CDP listener did not bind");
   const port = address.port;
@@ -806,6 +1001,7 @@ export async function createDesktopBrowserCdpBridge(args: {
   return {
     grant(scope: DesktopBrowserCdpScope, expiresAt: number) {
       if (closed) throw new Error("CDP bridge is closed");
+
       if (
         !Number.isSafeInteger(expiresAt) ||
         expiresAt <= Date.now() ||
@@ -813,6 +1009,7 @@ export async function createDesktopBrowserCdpBridge(args: {
       ) {
         throw new Error("CDP grant must expire within one hour");
       }
+
       if (
         [...grants.values()].some(
           (grant) =>
@@ -822,6 +1019,7 @@ export async function createDesktopBrowserCdpBridge(args: {
       ) {
         throw new Error("Thread already has a browser controller");
       }
+
       const token = randomBytes(32).toString("hex");
       const timer = setTimeout(() => revoke(token), expiresAt - Date.now());
       timer.unref();
@@ -831,6 +1029,7 @@ export async function createDesktopBrowserCdpBridge(args: {
         disconnect: null,
         timer,
       });
+
       return {
         endpoint: `ws://127.0.0.1:${port}/cdp/${token}`,
         expiresAt,
@@ -840,6 +1039,7 @@ export async function createDesktopBrowserCdpBridge(args: {
     async close() {
       if (closed) return;
       closed = true;
+
       for (const token of grants.keys()) revoke(token);
       websocketServer.close();
       await new Promise<void>((resolve, reject) =>

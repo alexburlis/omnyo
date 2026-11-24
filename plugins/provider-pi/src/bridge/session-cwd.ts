@@ -17,7 +17,9 @@ export function piSessionNeedsRelocation(
       `Cannot resume: working directory "${cwd}" is not a directory.`,
     );
   }
+
   let contents: string;
+
   try {
     contents = readFileSync(sessionFile, "utf8");
   } catch (error) {
@@ -25,10 +27,13 @@ export function piSessionNeedsRelocation(
       return false;
     throw error;
   }
+
   const newline = contents.indexOf("\n");
+
   const header = sessionHeaderSchema.parse(
     JSON.parse(newline < 0 ? contents : contents.slice(0, newline)),
   );
+
   return (
     header.cwd !== cwd &&
     !(existsSync(header.cwd) && realpathSync(header.cwd) === realpathSync(cwd))

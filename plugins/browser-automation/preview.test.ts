@@ -47,8 +47,10 @@ function createFakeBrowser(initial: FakePage[]) {
         };
         sessionId?: string;
       };
+
       queueMicrotask(() => {
         let result: unknown = {};
+
         if (message.method === "Target.setDiscoverTargets") {
           for (const page of pages.values())
             this.event("Target.targetCreated", { targetInfo: page });
@@ -63,8 +65,10 @@ function createFakeBrowser(initial: FakePage[]) {
         } else if (message.method === "Page.screencastFrameAck") {
           acks.push(Number(message.params.sessionId));
         }
+
         if (this.readyState !== 1) return;
         this.emit("message", JSON.stringify({ id: message.id, result }));
+
         if (message.method === "Page.startScreencast") {
           casts.push({
             targetId: sessions.get(message.sessionId!)!,
@@ -93,6 +97,7 @@ function createFakeBrowser(initial: FakePage[]) {
         socket.readyState = 1;
         socket.emit("open");
       });
+
       return socket;
     },
     live: () => connections.filter((socket) => socket.readyState === 1),
@@ -113,18 +118,23 @@ function createFakeBrowser(initial: FakePage[]) {
     },
     update(page: FakePage, method: string | null = "Target.targetInfoChanged") {
       pages.set(page.targetId, page);
+
       if (method === null) return;
+
       for (const socket of browser.live())
         socket.event(method, { targetInfo: page });
     },
     destroy(targetId: string) {
       pages.delete(targetId);
+
       for (const [sessionId, target] of sessions)
         if (target === targetId) sessions.delete(sessionId);
+
       for (const socket of browser.live())
         socket.event("Target.targetDestroyed", { targetId });
     },
   };
+
   return browser;
 }
 
@@ -134,12 +144,14 @@ const blank: FakePage = {
   url: "about:blank",
   title: "",
 };
+
 const shop: FakePage = {
   targetId: "shop",
   type: "page",
   url: "https://shop.test/cart",
   title: "Cart",
 };
+
 const timing = {
   frameIntervalMs: 5,
   idleMs: 60,
@@ -147,6 +159,7 @@ const timing = {
   fullSizeHoldMs: 40,
   settleMs: 40,
 };
+
 const never = new AbortController().signal;
 
 describe("live preview", () => {
@@ -156,10 +169,12 @@ describe("live preview", () => {
       shop,
       { ...shop, targetId: "worker", type: "service_worker" },
     ]);
+
     const preview = createPreview("ws://127.0.0.1:1/x", timing, browser.open);
     const first = await preview.next(0, 1_000, never, "thumbnail");
     expect(first).toMatchObject({
       sequence: 1,
+      targetId: "shop",
       mimeType: "image/jpeg",
       data: "frame-1",
       width: 1280,
@@ -191,73 +206,87 @@ describe("live preview", () => {
       "Target.targetCreated",
     );
     browser.update({ ...shop, title: "" });
+
     const navigated = await preview.next(
       initial!.sequence,
       1_000,
       never,
       "thumbnail",
     );
+
     expect(navigated).toMatchObject({ url: shop.url, title: "" });
     expect(browser.castTargets()).toEqual(["shop"]);
     browser.update(shop);
+
     const titled = await preview.next(
       navigated!.sequence,
       1_000,
       never,
       "thumbnail",
     );
+
     expect(titled).toMatchObject({ title: "Cart", data: navigated!.data });
     browser.update({ ...shop, title: "Checkout" }, null);
     browser.frame("shop");
+
     let silent = await preview.next(
       titled!.sequence,
       1_000,
       never,
       "thumbnail",
     );
+
     if (silent!.title !== "Checkout")
       silent = await preview.next(silent!.sequence, 1_000, never, "thumbnail");
     expect(silent).toMatchObject({ url: shop.url, title: "Checkout" });
     browser.destroy("shop");
     await vi.waitFor(() => expect(browser.castTargets()).toEqual(["blank"]));
+
     const fallback = await preview.next(
       silent!.sequence,
       1_000,
       never,
       "thumbnail",
     );
+
     expect(fallback).toMatchObject({ url: "about:blank" });
     preview.close();
   });
 
   it("picks up a title that settles after the last frame of a static page", async () => {
     const browser = createFakeBrowser([{ ...shop, title: "shop.test/cart" }]);
+
     const preview = createPreview(
       "ws://127.0.0.1:1/x",
       { ...timing, idleMs: 5_000 },
       browser.open,
     );
+
     const loading = await preview.next(0, 1_000, never, "thumbnail");
     expect(loading).toMatchObject({ title: "shop.test/cart" });
     await new Promise((resolve) => setTimeout(resolve, 10));
     browser.update(shop, null);
+
     const settled = await preview.next(
       loading!.sequence,
       1_000,
       never,
       "thumbnail",
     );
+
     expect(settled).toMatchObject({ title: "Cart", data: loading!.data });
     preview.close();
   });
 
   it("recasts the same page at full size on request, then returns to thumbnails", async () => {
     const browser = createFakeBrowser([shop]);
+
     const preview = createPreview(
       "ws://127.0.0.1:1/x",
       { ...timing, idleMs: 5_000 },
       browser.open,
     );
+
     const thumbnail = await preview.next(0, 1_000, never, "thumbnail");
     const full = await preview.next(thumbnail!.sequence, 1_000, never, "full");
     expect(full!.sequence).toBeGreaterThan(thumbnail!.sequence);
@@ -277,12 +306,14 @@ describe("live preview", () => {
     const preview = createPreview("ws://127.0.0.1:1/x", timing, browser.open);
     const first = await preview.next(0, 1_000, never, "thumbnail");
     await vi.waitFor(() => expect(browser.live()).toHaveLength(0));
+
     const resumed = await preview.next(
       first!.sequence,
       1_000,
       never,
       "thumbnail",
     );
+
     expect(resumed!.sequence).toBeGreaterThan(first!.sequence);
     expect(browser.connections).toHaveLength(2);
     preview.close();

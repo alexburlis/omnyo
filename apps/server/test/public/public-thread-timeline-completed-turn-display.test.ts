@@ -4,7 +4,7 @@ import {
   mergeLoadedTimelineWithLatest,
   prependOlderTimelineRows,
   resolveLoadedTimelineSurfaceKey,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import {
   defaultAppSettings,
   defaultFeatureFlags,
@@ -12,14 +12,14 @@ import {
   threadScope,
   turnScope,
   type AppSettings,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   threadConversationOutlineResponseSchema,
   threadTimelineResponseSchema,
   timelineTurnSummaryDetailsResponseSchema,
   type TimelinePaginationCursor,
   type TimelineRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { readJson } from "../helpers/json.js";
 import { seedEvent, seedThreadFixture } from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
@@ -32,12 +32,14 @@ function seedFinishedTurnThread(
   const { environment, thread } = seedThreadFixture(harness, {
     thread: { providerId },
   });
+
   const scope = {
     threadId: thread.id,
     environmentId: environment.id,
     providerThreadId: "p1",
     scope: turnScope("turn-1"),
   } as const;
+
   const events: [
     "turn/started" | "item/completed" | "turn/completed",
     Record<string, unknown>,
@@ -77,15 +79,19 @@ function seedFinishedTurnThread(
     ],
     ["turn/completed", { status: "completed" }],
   ];
+
   events.forEach(([type, data], index) => {
     seedEvent(harness.deps, { ...scope, sequence: index + 1, type, data });
   });
+
   return thread.id;
 }
 
 function rowSignature(row: TimelineRow): string {
   if (row.kind === "conversation") return `conversation:${row.role}`;
+
   if (row.kind === "work") return `work:${row.workKind}`;
+
   return row.kind;
 }
 
@@ -93,7 +99,9 @@ async function getTimeline(harness: TestAppHarness, threadId: string) {
   const response = await harness.app.request(
     `/api/v1/threads/${threadId}/timeline`,
   );
+
   expect(response.status).toBe(200);
+
   return threadTimelineResponseSchema.parse(await readJson(response));
 }
 
@@ -101,7 +109,9 @@ async function getOutlinePreviews(harness: TestAppHarness, threadId: string) {
   const response = await harness.app.request(
     `/api/v1/threads/${threadId}/conversation-outline`,
   );
+
   expect(response.status).toBe(200);
+
   return threadConversationOutlineResponseSchema
     .parse(await readJson(response))
     .items.map((item) => item.preview);
@@ -116,6 +126,7 @@ async function putGeneralSettings(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(settings),
   });
+
   expect(response.status).toBe(200);
 }
 
@@ -163,14 +174,19 @@ describe("finished turn display per provider", () => {
         "conversation:assistant",
       ]);
       const turnRow = collapsed.rows.find((row) => row.kind === "turn");
+
       if (turnRow?.kind !== "turn") throw new Error("turn row missing");
+
       const detailsResponse = await harness.app.request(
         `/api/v1/threads/${threadId}/timeline/turn-summary-details?turnId=${turnRow.turnId}&sourceSeqStart=${turnRow.sourceSeqStart}&sourceSeqEnd=${turnRow.sourceSeqEnd}`,
       );
+
       expect(detailsResponse.status).toBe(200);
+
       const details = timelineTurnSummaryDetailsResponseSchema.parse(
         await readJson(detailsResponse),
       );
+
       expect(details.rows.map(rowSignature)).toEqual([
         "conversation:assistant",
         "work:tool",
@@ -196,7 +212,9 @@ function seedPagedFinishedTurns(
   const { environment, thread } = seedThreadFixture(harness, {
     thread: { providerId: "claude-code" },
   });
+
   let sequence = 0;
+
   const seed = (
     type: Parameters<typeof seedEvent>[1]["type"],
     scope: ReturnType<typeof turnScope> | ReturnType<typeof threadScope>,
@@ -213,6 +231,7 @@ function seedPagedFinishedTurns(
       data,
     });
   };
+
   for (let turn = 1; turn <= turnCount; turn += 1) {
     const turnId = `turn-${turn}`;
     const clientRequestId = encodeClientTurnRequestIdNumber({ value: turn });
@@ -260,6 +279,7 @@ function seedPagedFinishedTurns(
     });
     seed("turn/completed", turnScope(turnId), { status: "completed" });
   }
+
   return thread.id;
 }
 
@@ -275,10 +295,13 @@ async function readTimelinePage(
           beforeAnchorSeq: String(cursor.anchorSeq),
           beforeAnchorId: cursor.anchorId,
         }).toString();
+
   const response = await harness.app.request(
     `/api/v1/threads/${threadId}/timeline?segmentLimit=1&${query}`,
   );
+
   expect(response.status).toBe(200);
+
   return threadTimelineResponseSchema.parse(await readJson(response));
 }
 
@@ -291,6 +314,7 @@ async function loadOlderPages(
   let rows = loadedRows;
   let next = cursor;
   let pages = 0;
+
   while (next !== null) {
     const older = await readTimelinePage(harness, threadId, next);
     rows = prependOlderTimelineRows({
@@ -301,6 +325,7 @@ async function loadOlderPages(
     pages += 1;
     expect(pages).toBeLessThan(50);
   }
+
   return { pages, rows };
 }
 
@@ -313,14 +338,17 @@ describe("finished turn display across loaded pages", () => {
       async (harness) => {
         const threadId = seedPagedFinishedTurns(harness, 4);
         const flatLatest = await readTimelinePage(harness, threadId, null);
+
         const flat = await loadOlderPages(
           harness,
           threadId,
           flatLatest.rows,
           flatLatest.timelinePage.olderCursor,
         );
+
         expect(flat.pages).toBeGreaterThan(0);
         expect(flat.rows.some((row) => row.kind === "turn")).toBe(false);
+
         const loaded = buildLoadedTimelineState({
           historySnapshot: flatLatest.timelinePage.historySnapshot,
           latestRows: flat.rows,
@@ -344,6 +372,7 @@ describe("finished turn display across loaded pages", () => {
             collapsedLatest,
           ),
         });
+
         expect(merged.rows.map((row) => row.id)).toEqual(
           collapsedLatest.rows.map((row) => row.id),
         );
@@ -357,12 +386,14 @@ describe("finished turn display across loaded pages", () => {
           merged.rows,
           merged.olderCursor,
         );
+
         const canonical = await loadOlderPages(
           harness,
           threadId,
           collapsedLatest.rows,
           collapsedLatest.timelinePage.olderCursor,
         );
+
         expect(reloaded.rows.map((row) => row.id)).toEqual(
           canonical.rows.map((row) => row.id),
         );

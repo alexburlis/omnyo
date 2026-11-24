@@ -1,10 +1,10 @@
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { TypeaheadConfig } from "@/components/promptbox/PromptBoxInternal";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import type { PromptBoxAction } from "@/components/promptbox/PromptBoxActionsMenu";
-import type { ProviderComposerAction } from "@bb/domain";
-import type { ProviderCommand } from "@bb/server-contract";
-import { buildProviderPromptActionProps } from "@bb/client-core";
+import type { ProviderComposerAction } from "@omnyo/domain";
+import type { ProviderCommand } from "@omnyo/server-contract";
+import { buildProviderPromptActionProps } from "@omnyo/client-core";
 import { useCommandSuggestions } from "@/hooks/useCommandSuggestions";
 import { usePromptMentions } from "@/hooks/usePromptMentions";
 
@@ -43,19 +43,19 @@ export function useComposerTypeahead({
     environmentId,
     threadStorageThreadId: currentThreadId,
   });
+
   const [commandState, setCommandState] = useState<{
     query: string | null;
-    trigger: import("@bb/domain").PromptMentionCommandTrigger | null;
+    trigger: import("@omnyo/domain").PromptMentionCommandTrigger | null;
   }>({ query: null, trigger: null });
-  const [hasComposerFocused, setHasComposerFocused] = useState(false);
-  const handleEditorFocus = useCallback(() => {
-    setHasComposerFocused(true);
-  }, []);
+
   const providerPromptActions = useMemo(
     () => buildProviderPromptActionProps(selectedProviderComposerActions ?? []),
     [selectedProviderComposerActions],
   );
+
   const { promptActions } = providerPromptActions;
+
   const commandSuggestions = useCommandSuggestions({
     projectId,
     providerId,
@@ -66,7 +66,6 @@ export function useComposerTypeahead({
     threadProviderCommands: threadProviderCommands ?? null,
     environmentId,
     query: commandState.query,
-    composerFocused: hasComposerFocused,
   });
 
   const typeaheadConfig = useMemo<TypeaheadConfig>(
@@ -75,6 +74,7 @@ export function useComposerTypeahead({
         triggers: promptMentions.triggers,
         results: promptMentions.results,
         isLoading: promptMentions.isLoading,
+        isRefreshing: promptMentions.isRefreshing,
         isError: promptMentions.isError,
         onQueryChange: promptMentions.setQuery,
         resolveLink: resolveMentionLink,
@@ -83,25 +83,28 @@ export function useComposerTypeahead({
         triggers: commandSuggestions.triggers,
         suggestions: commandSuggestions.suggestions,
         isLoading: commandSuggestions.isLoading,
+        isUpdating: commandSuggestions.isUpdating,
         isError: commandSuggestions.isError,
+        errorMessage: commandSuggestions.errorMessage,
         hasMore: commandSuggestions.hasMore,
         isLoadingMore: commandSuggestions.isLoadingMore,
         loadMore: commandSuggestions.loadMore,
         onQueryChange: (query, trigger) => setCommandState({ query, trigger }),
-        onEditorFocus: handleEditorFocus,
       },
     }),
     [
       commandSuggestions.hasMore,
       commandSuggestions.isError,
+      commandSuggestions.errorMessage,
       commandSuggestions.isLoading,
+      commandSuggestions.isUpdating,
       commandSuggestions.isLoadingMore,
       commandSuggestions.loadMore,
       commandSuggestions.suggestions,
       commandSuggestions.triggers,
-      handleEditorFocus,
       promptMentions.isError,
       promptMentions.isLoading,
+      promptMentions.isRefreshing,
       promptMentions.setQuery,
       promptMentions.results,
       promptMentions.triggers,

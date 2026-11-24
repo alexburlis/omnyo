@@ -1,8 +1,8 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Thread } from "@bb/domain";
+import type { Thread } from "@omnyo/domain";
 import { sdk } from "@/lib/sdk";
-import { isThreadForkable, type AppCreateThreadRequest } from "@bb/client-core";
+import { isThreadForkable, type AppCreateThreadRequest } from "@omnyo/client-core";
 import type { ThreadRoutePathArgs } from "@/lib/route-paths";
 import { threadDefaultExecutionOptionsQueryKey } from "@/hooks/queries/query-keys";
 import { findCachedProviderInfo } from "@/hooks/queries/system-queries";
@@ -27,6 +27,7 @@ export function useForkThreadFromMessage({
   target: ForkThreadFromMessageTarget,
 ) => Promise<void> {
   const queryClient = useQueryClient();
+
   const forkThread = useMutation({
     meta: {
       errorMessage: "Failed to fork thread.",
@@ -44,6 +45,7 @@ export function useForkThreadFromMessage({
       applyCreateThreadResult({ queryClient, request, thread });
     },
   });
+
   const forkThreadRef = useRef(forkThread.mutateAsync);
   const forkInFlightRef = useRef(false);
   const sourceThreadRef = useRef(sourceThread);
@@ -57,6 +59,7 @@ export function useForkThreadFromMessage({
   return useCallback(
     async (target: ForkThreadFromMessageTarget) => {
       const source = sourceThreadRef.current;
+
       if (
         source === null ||
         !isThreadForkable(
@@ -70,6 +73,7 @@ export function useForkThreadFromMessage({
       }
 
       forkInFlightRef.current = true;
+
       try {
         const executionOptions = await queryClient.fetchQuery({
           queryKey: threadDefaultExecutionOptionsQueryKey(source.id),
@@ -79,6 +83,7 @@ export function useForkThreadFromMessage({
               threadId: source.id,
             }),
         });
+
         if (executionOptions === null || source.environmentId === null) {
           return;
         }
@@ -101,6 +106,7 @@ export function useForkThreadFromMessage({
           sourceThreadId: source.id,
           startedOnBehalfOf: null,
         });
+
         navigateInPaneRef.current({
           projectId: fork.projectId,
           threadId: fork.id,

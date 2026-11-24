@@ -6,9 +6,9 @@ import {
   getPersonalProject,
   getProjectExecutionDefaults,
   type DbConnection,
-} from "@bb/db";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
-import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
+} from "@omnyo/db";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
+import { HOST_DAEMON_PROTOCOL_VERSION } from "@omnyo/host-daemon-contract";
 import { initDb } from "../../src/db.js";
 import { createApp } from "../../src/server.js";
 import { readJson } from "../helpers/json.js";
@@ -34,10 +34,13 @@ function readLatestAppliedMigrationCreatedAt(db: DbConnection): number {
       `,
     )
     .get();
+
   const createdAt = row?.createdAt;
+
   if (typeof createdAt !== "number") {
     throw new Error("Expected at least one applied migration timestamp");
   }
+
   return createdAt;
 }
 
@@ -47,6 +50,7 @@ describe("server skeleton", () => {
       const expected = readFileSync(
         new URL("../../src/assets/install-machine.sh", import.meta.url),
       );
+
       const response = await harness.app.request("/install.sh");
 
       expect(response.status).toBe(200);
@@ -59,8 +63,9 @@ describe("server skeleton", () => {
 
   it("serves install version metadata without auth", async () => {
     const harness = await createTestAppHarness();
+
     const { app } = createApp(harness.deps, {
-      bbAppArtifactService: {
+      appArtifactService: {
         getArtifact: async () => ({
           digest: "a".repeat(64),
           path: "/unused",
@@ -69,41 +74,143 @@ describe("server skeleton", () => {
         getVersion: async () => "3.2.1-test",
       },
     });
+
     try {
       const response = await app.request("/install/version");
       expect(response.status).toBe(200);
       await expect(readJson(response)).resolves.toEqual({
         version: "3.2.1-test",
         protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
+        artifactDigest: "a".repeat(64),
+        artifactSignature: null,
+        artifactSignatureKeyId: null,
       });
     } finally {
       await harness.cleanup();
     }
   });
 
-  it("serves the cached server bb-app tarball without auth", async () => {
+  it("answers unregistered install paths with a JSON 410 instead of the web shell", async () => {
+    const harness = await createTestAppHarness();
+    const staticDir = mkdtempSync(join(tmpdir(), "omnyo-install-shell-"));
+    writeFileSync(join(staticDir, "index.html"), "web shell");
+
+    const { app } = createApp(harness.deps, {
+      appArtifactService: {
+        getArtifact: async () => ({
+          digest: "a".repeat(64),
+          path: "/unused",
+          size: 0,
+        }),
+        getVersion: async () => "test",
+      },
+      staticDir,
+    });
+
+    try {
+      for (const path of [
+        "/install/bb-app.tgz",
+        "/install/unknown.tgz",
+        "/install/",
+      ]) {
+        const response = await app.request(path);
+        expect(response.status).toBe(410);
+        expect(response.headers.get("content-type")).toMatch(
+          /^application\/json/u,
+        );
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        await expect(readJson(response)).resolves.toMatchObject({
+          code: "install_route_not_served",
+        });
+      }
+
+      const head = await app.request("/install/bb-app.tgz", {
+        method: "HEAD",
+      });
+
+      expect(head.status).toBe(410);
+    } finally {
+      rmSync(staticDir, { force: true, recursive: true });
+      await harness.cleanup();
+    }
+  });
+
+  it("keeps registered install routes and the web shell beside the install catch-all", async () => {
+    const harness = await createTestAppHarness();
+    const staticDir = mkdtempSync(join(tmpdir(), "omnyo-install-shell-"));
+    writeFileSync(join(staticDir, "index.html"), "web shell");
+    const tarballPath = join(harness.config.dataDir, "fixture.tgz");
+    writeFileSync(tarballPath, "tarball-bytes");
+
+    const { app } = createApp(harness.deps, {
+      appArtifactService: {
+        getArtifact: async () => ({
+          digest: "b".repeat(64),
+          path: tarballPath,
+          size: 13,
+        }),
+        getVersion: async () => "test",
+      },
+      staticDir,
+    });
+
+    try {
+      const version = await app.request("/install/version");
+      expect(version.status).toBe(200);
+      await expect(readJson(version)).resolves.toMatchObject({
+        artifactDigest: "b".repeat(64),
+      });
+
+      const tarball = await app.request("/install/omnyo-app.tgz");
+      expect(tarball.status).toBe(200);
+      expect(tarball.headers.get("x-omnyo-artifact-sha256")).toBe(
+        "b".repeat(64),
+      );
+      expect(await tarball.text()).toBe("tarball-bytes");
+
+      const script = await app.request("/install.sh");
+      expect(script.status).toBe(200);
+      expect(script.headers.get("content-type")).toBe(
+        "text/x-shellscript; charset=utf-8",
+      );
+
+      const shell = await app.request("/settings");
+      expect(shell.status).toBe(200);
+      expect(await shell.text()).toBe("web shell");
+    } finally {
+      rmSync(staticDir, { force: true, recursive: true });
+      await harness.cleanup();
+    }
+  });
+
+  it("serves the cached server omnyo-app tarball without auth", async () => {
     const harness = await createTestAppHarness();
     const tarballPath = join(harness.config.dataDir, "fixture.tgz");
     writeFileSync(tarballPath, "tarball-bytes");
     const digest = "b".repeat(64);
+
     const getArtifact = vi.fn(async () => ({
       digest,
       path: tarballPath,
       size: 13,
     }));
+
     const { app } = createApp(harness.deps, {
-      bbAppArtifactService: { getArtifact, getVersion: async () => "test" },
+      appArtifactService: { getArtifact, getVersion: async () => "test" },
     });
+
     try {
-      const response = await app.request("/install/bb-app.tgz");
+      const response = await app.request("/install/omnyo-app.tgz");
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe("application/gzip");
       expect(response.headers.get("etag")).toBe(`"sha256-${digest}"`);
-      expect(response.headers.get("x-bb-artifact-sha256")).toBe(digest);
+      expect(response.headers.get("x-omnyo-artifact-sha256")).toBe(digest);
       expect(await response.text()).toBe("tarball-bytes");
-      const unchanged = await app.request("/install/bb-app.tgz", {
+
+      const unchanged = await app.request("/install/omnyo-app.tgz", {
         headers: { "if-none-match": `"sha256-${digest}"` },
       });
+
       expect(unchanged.status).toBe(304);
       expect(await unchanged.text()).toBe("");
       expect(getArtifact).toHaveBeenCalledTimes(2);
@@ -119,21 +226,25 @@ describe("server skeleton", () => {
     ["OTHER", "could not build or read"],
   ])("reports safe host package diagnostics for %s", async (code, message) => {
     const harness = await createTestAppHarness();
+
     const error = Object.assign(
       new Error("private server path and credentials"),
       { code },
     );
+
     const log = vi.spyOn(harness.deps.logger, "error");
+
     const { app } = createApp(harness.deps, {
-      bbAppArtifactService: {
+      appArtifactService: {
         getArtifact: async () => {
           throw error;
         },
         getVersion: async () => "test",
       },
     });
+
     try {
-      const response = await app.request("/install/bb-app.tgz");
+      const response = await app.request("/install/omnyo-app.tgz");
       expect(response.status).toBe(500);
       expect(response.headers.get("cache-control")).toBe("no-store");
       const body = await readJson(response);
@@ -142,6 +253,7 @@ describe("server skeleton", () => {
         message: expect.stringContaining(message),
         diagnosticId: expect.any(String),
       });
+
       if (
         body === null ||
         typeof body !== "object" ||
@@ -149,6 +261,7 @@ describe("server skeleton", () => {
       ) {
         throw new Error("Missing diagnostic ID");
       }
+
       expect(JSON.stringify(body)).not.toContain("private server path");
       expect(log).toHaveBeenCalledWith(
         { err: error, diagnosticId: body.diagnosticId },
@@ -222,12 +335,14 @@ describe("server skeleton", () => {
 
   it("logs public API requests that exceed the slow request threshold", async () => {
     const harness = await createTestAppHarness();
+
     const logger = {
       debug: vi.fn(),
       error: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
     };
+
     const serverApp = createApp(
       {
         ...harness.deps,
@@ -237,6 +352,7 @@ describe("server skeleton", () => {
         slowApiRequestLogThresholdMs: 0,
       },
     );
+
     try {
       const response = await serverApp.app.request("/api/v1/hosts");
       expect(response.status).toBe(200);
@@ -257,12 +373,14 @@ describe("server skeleton", () => {
 
   it("does not log slow API requests for thread event long-poll waits", async () => {
     const harness = await createTestAppHarness();
+
     const logger = {
       debug: vi.fn(),
       error: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
     };
+
     const serverApp = createApp(
       {
         ...harness.deps,
@@ -272,13 +390,16 @@ describe("server skeleton", () => {
         slowApiRequestLogThresholdMs: 0,
       },
     );
+
     try {
       const { host } = seedHostSession(harness.deps, {
         id: "host-slow-api-events-wait",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const thread = seedThread(harness.deps, { projectId: project.id });
 
       const response = await serverApp.app.request(
@@ -295,6 +416,7 @@ describe("server skeleton", () => {
 
   it("ensures the personal project without pinning execution defaults", () => {
     const db = initDb(":memory:");
+
     try {
       expect(getPersonalProject(db)).toMatchObject({
         id: PERSONAL_PROJECT_ID,
@@ -313,14 +435,17 @@ describe("server skeleton", () => {
   });
 
   it("warns when startup finds future-dated applied migrations", () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "bb-server-db-startup-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "omnyo-server-db-startup-"));
+
     try {
-      const dbPath = join(dataDir, "bb.db");
+      const dbPath = join(dataDir, "app.db");
       const seedDb = initDb(dbPath);
       let futureCreatedAt: number;
+
       try {
         const latestMigrationCreatedAt =
           readLatestAppliedMigrationCreatedAt(seedDb);
+
         vi.useFakeTimers();
         vi.setSystemTime(latestMigrationCreatedAt + 10_000);
         futureCreatedAt = Date.now() + 60_000;
@@ -342,7 +467,9 @@ describe("server skeleton", () => {
         info: vi.fn(),
         warn: vi.fn(),
       };
+
       const db = initDb(dbPath, { logger });
+
       try {
         expect(logger.warn).toHaveBeenCalledWith(
           {

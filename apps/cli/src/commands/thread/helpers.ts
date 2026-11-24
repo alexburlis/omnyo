@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, isAbsolute, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,24 +9,29 @@ import {
   type PromptInput,
   serviceTierSchema,
   type ServiceTier,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   DEFAULT_THREAD_WAIT_POLL_INTERVAL_MS,
   DEFAULT_THREAD_WAIT_TIMEOUT_MS,
-} from "@bb/sdk";
-import type { BbSdk } from "@bb/sdk/node";
+} from "@omnyo/sdk";
+import type { OmnyoSdk } from "@omnyo/sdk/node";
 import { parseDurationMs } from "../../duration.js";
 
 export const THREAD_WAIT_EXIT_CODE_TIMEOUT = 2;
+
 export const THREAD_WAIT_EXIT_CODE_INVALID_REQUEST = 3;
+
 export const THREAD_WAIT_EXIT_CODE_UNREACHABLE = 4;
+
 export const DEFAULT_THREAD_WAIT_TIMEOUT_SECONDS =
   DEFAULT_THREAD_WAIT_TIMEOUT_MS / 1000;
 
 export const SERVICE_TIER_HELP =
-  "Service tier id the provider lists for the model, such as default or fast (see `bb provider models`)";
+  "Service tier id the provider lists for the model, such as default or fast (see `omnyo provider models`)";
+
 export const PERMISSION_MODE_HELP =
   "Permission mode: accept-edits, auto, or full";
+
 export const PLAN_HELP =
   "Send the message as the provider's /plan action so the agent proposes a plan for approval before executing";
 
@@ -54,9 +60,11 @@ function resolveClientAttachmentPath(pathOrToken: string): string | null {
   if (isAbsolute(pathOrToken) || win32.isAbsolute(pathOrToken)) {
     return pathOrToken;
   }
+
   if (!pathOrToken.toLowerCase().startsWith("file:")) {
     return null;
   }
+
   try {
     return fileURLToPath(pathOrToken);
   } catch {
@@ -68,9 +76,11 @@ function clientAttachmentFilename(clientPath: string): string {
   const filename = win32.isAbsolute(clientPath)
     ? win32.basename(clientPath)
     : basename(clientPath);
+
   if (filename.length === 0) {
     throw new Error(`Attachment path '${clientPath}' has no filename.`);
   }
+
   return filename;
 }
 
@@ -94,48 +104,71 @@ async function clientAttachmentMimeType(
 ): Promise<string> {
   const { default: mimeTypes } = await import("mime-types");
   const inferred = mimeTypes.lookup(clientPath);
+
   return typeof inferred === "string"
     ? inferred
     : (inferPngMimeType(bytes) ?? "application/octet-stream");
 }
 
+export interface UploadedClientAttachment {
+  path: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
 export async function uploadClientAttachmentInputs(args: {
   input: PromptInput[];
+  onUploaded?: (attachment: UploadedClientAttachment) => void;
   resolveProjectId: () => Promise<string>;
-  sdk: BbSdk;
+  sdk: OmnyoSdk;
 }): Promise<PromptInput[]> {
   const clientPaths = args.input.map((item) =>
     item.type === "localImage" || item.type === "localFile"
       ? resolveClientAttachmentPath(item.path)
       : null,
   );
+
   if (clientPaths.every((path) => path === null)) {
     return args.input;
   }
 
   const projectId = await args.resolveProjectId();
   const uploadedPathByClientPath = new Map<string, Promise<string>>();
+
   const upload = (clientPath: string): Promise<string> => {
     const existing = uploadedPathByClientPath.get(clientPath);
+
     if (existing) return existing;
+
     const pending = (async () => {
       const bytes = await readFile(clientPath);
       const filename = clientAttachmentFilename(clientPath);
+
       const uploaded = await args.sdk.projects.attachments.upload({
         clientFile: bytes,
         filename,
         mimeType: await clientAttachmentMimeType(clientPath, bytes),
         projectId,
       });
+
+      args.onUploaded?.({
+        path: uploaded.path,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        sizeBytes: bytes.byteLength,
+      });
+
       return uploaded.path;
     })();
+
     uploadedPathByClientPath.set(clientPath, pending);
+
     return pending;
   };
 
   return Promise.all(
     args.input.map(async (item, index) => {
       const clientPath = clientPaths[index];
+
       return (item.type === "localImage" || item.type === "localFile") &&
         clientPath
         ? { ...item, path: await upload(clientPath) }
@@ -146,6 +179,7 @@ export async function uploadClientAttachmentInputs(args: {
 
 export function parseThreadWaitTimeoutMs(value: string | undefined): number {
   if (value === undefined) return DEFAULT_THREAD_WAIT_TIMEOUT_MS;
+
   return parseDurationMs({
     allowZero: true,
     defaultUnit: "s",
@@ -158,6 +192,7 @@ export function parseThreadWaitPollIntervalMs(
   value: string | undefined,
 ): number {
   if (value === undefined) return DEFAULT_THREAD_WAIT_POLL_INTERVAL_MS;
+
   return parseDurationMs({
     allowZero: false,
     defaultUnit: "ms",
@@ -171,9 +206,11 @@ export function parseServiceTier(
 ): ServiceTier | undefined {
   if (value === undefined) return undefined;
   const parsed = serviceTierSchema.safeParse(value);
+
   if (parsed.success) {
     return parsed.data;
   }
+
   throw new Error(
     `Invalid service tier '${value}'. Expected a tier id the provider lists, such as default or fast.`,
   );
@@ -184,9 +221,11 @@ export function parsePermissionMode(
 ): PermissionMode | undefined {
   if (value === undefined) return undefined;
   const parsed = permissionModeInputSchema.safeParse(value);
+
   if (parsed.success) {
     return parsed.data;
   }
+
   throw new Error(
     `Invalid permission mode '${value}'. Expected accept-edits, auto, or full.`,
   );

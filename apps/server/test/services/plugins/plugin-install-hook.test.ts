@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createConnection, migrate, type DbConnection } from "@bb/db";
-import type { Logger } from "@bb/logger";
+import { createConnection, migrate, type DbConnection } from "@omnyo/db";
+import type { Logger } from "@omnyo/logger";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
 import {
   createPluginService,
@@ -11,6 +11,7 @@ import {
 } from "../../../src/services/plugins/plugin-service.js";
 import { testLogger } from "../../helpers/test-app.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
 
@@ -24,7 +25,7 @@ async function writeHookPlugin(
     JSON.stringify({
       name: options.name,
       version: options.version ?? "0.1.0",
-      bb: {
+      omnyo: {
         name: "Install hook fixture",
         description: "Records install handler runs.",
         branding: { icon: "Zap" },
@@ -35,8 +36,8 @@ async function writeHookPlugin(
   await writeFile(
     join(rootDir, "server.ts"),
     `import { appendFileSync } from "node:fs";
-export default function plugin(bb: any) {
-  bb.onInstall(async () => {
+export default function plugin(api: any) {
+  api.onInstall(async () => {
     ${options.handlerBody}
   });
 }
@@ -52,7 +53,7 @@ async function readRuns(markerPath: string): Promise<string[]> {
   }
 }
 
-describe("bb.onInstall", () => {
+describe("api.onInstall", () => {
   let db: DbConnection;
   let workDir: string;
   let service: PluginService;
@@ -60,7 +61,7 @@ describe("bb.onInstall", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-install-hook-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-install-hook-"));
     service = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -72,6 +73,7 @@ describe("bb.onInstall", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "0.9.0",
       loadTimeoutMs: 5000,
       installHandlerTimeoutMs: 200,
@@ -87,7 +89,7 @@ describe("bb.onInstall", () => {
     const rootDir = join(workDir, "hooked");
     const markerPath = join(workDir, "runs.txt");
     await writeHookPlugin(rootDir, {
-      name: "bb-plugin-hooked",
+      name: "omnyo-plugin-hooked",
       handlerBody: `appendFileSync(${JSON.stringify(markerPath)}, "install\\n");`,
     });
 
@@ -108,7 +110,7 @@ describe("bb.onInstall", () => {
   it("keeps the install when a handler throws", async () => {
     const rootDir = join(workDir, "throwing");
     await writeHookPlugin(rootDir, {
-      name: "bb-plugin-throwing",
+      name: "omnyo-plugin-throwing",
       handlerBody: `throw new Error("install hook exploded");`,
     });
 
@@ -120,7 +122,7 @@ describe("bb.onInstall", () => {
   it("stops waiting for a handler that never settles", async () => {
     const rootDir = join(workDir, "hanging");
     await writeHookPlugin(rootDir, {
-      name: "bb-plugin-hanging",
+      name: "omnyo-plugin-hanging",
       handlerBody: `await new Promise(() => {});`,
     });
 

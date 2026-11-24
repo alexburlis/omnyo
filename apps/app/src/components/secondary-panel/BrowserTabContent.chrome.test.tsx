@@ -9,14 +9,14 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type {
-  BbDesktopBrowserApi,
-  BbDesktopBrowserState,
-} from "@bb/desktop-contract";
+  OmnyoDesktopBrowserApi,
+  OmnyoDesktopBrowserState,
+} from "@omnyo/desktop-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  createBbDesktopApi,
+  createOmnyoDesktopApi,
   createNoopDesktopBrowserApi,
-} from "@/test/bb-desktop-test-utils";
+} from "@/test/omnyo-desktop-test-utils";
 import { BrowserTabContent } from "./BrowserTabContent";
 
 const desktopInfo = {
@@ -30,8 +30,8 @@ const desktopInfo = {
 };
 
 interface BrowserChromeHarness {
-  api: BbDesktopBrowserApi;
-  emitState: (state: BbDesktopBrowserState) => void;
+  api: OmnyoDesktopBrowserApi;
+  emitState: (state: OmnyoDesktopBrowserState) => void;
   emitNativeFocus: (tabId: string) => void;
   focus: ReturnType<typeof vi.fn>;
   goBack: ReturnType<typeof vi.fn>;
@@ -39,25 +39,29 @@ interface BrowserChromeHarness {
 }
 
 function createBrowserChromeHarness(): BrowserChromeHarness {
-  const stateListeners = new Set<(state: BbDesktopBrowserState) => void>();
+  const stateListeners = new Set<(state: OmnyoDesktopBrowserState) => void>();
   const focusListeners = new Set<(tabId: string) => void>();
   const focus = vi.fn();
   const goBack = vi.fn();
   const stop = vi.fn();
-  const api: BbDesktopBrowserApi = {
+
+  const api: OmnyoDesktopBrowserApi = {
     ...createNoopDesktopBrowserApi(),
     goBack,
     focus,
     stop,
     onState(listener) {
       stateListeners.add(listener);
+
       return () => stateListeners.delete(listener);
     },
     onFocus(listener) {
       focusListeners.add(listener);
+
       return () => focusListeners.delete(listener);
     },
   };
+
   return {
     api,
     emitState(state) {
@@ -73,8 +77,8 @@ function createBrowserChromeHarness(): BrowserChromeHarness {
 }
 
 function browserState(
-  overrides: Partial<BbDesktopBrowserState> = {},
-): BbDesktopBrowserState {
+  overrides: Partial<OmnyoDesktopBrowserState> = {},
+): OmnyoDesktopBrowserState {
   return {
     tabId: "browser:test",
     url: "https://example.com/docs",
@@ -96,7 +100,8 @@ function renderBrowserChrome(
     onNativeFocus?: () => void;
   } = {},
 ) {
-  window.bbDesktop = createBbDesktopApi(desktopInfo, harness.api);
+  window.omnyoDesktop = createOmnyoDesktopApi(desktopInfo, harness.api);
+
   return render(
     <BrowserTabContent
       tabId="browser:test"
@@ -118,7 +123,7 @@ describe("BrowserTabContent persistent navigation", () => {
     cleanup();
     vi.restoreAllMocks();
     window.localStorage.clear();
-    delete window.bbDesktop;
+    delete window.omnyoDesktop;
   });
 
   it("keeps navigation visible while loading and preserves the stop action", () => {
@@ -130,6 +135,38 @@ describe("BrowserTabContent persistent navigation", () => {
     const stopButton = screen.getByRole("button", { name: "Stop loading" });
     fireEvent.click(stopButton);
     expect(harness.stop).toHaveBeenCalledWith("browser:test");
+  });
+
+  it("reports host focus inside the browser so the desktop reloads the tab", () => {
+    const harness = createBrowserChromeHarness();
+    const setHostFocus = vi.fn();
+    harness.api.setHostFocus = setHostFocus;
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    const view = renderBrowserChrome(harness, "https://example.com/docs");
+
+    const address = screen.getByRole("textbox", {
+      name: /Address and search bar/,
+    });
+
+    const reload = screen.getByRole("button", { name: /Reload/ });
+
+    act(() => address.focus());
+    act(() => reload.focus());
+    expect(document.activeElement).toBe(reload);
+    expect(setHostFocus.mock.calls).toEqual([
+      ["browser:test"],
+      ["browser:test"],
+    ]);
+
+    act(() => outside.focus());
+    expect(setHostFocus).toHaveBeenLastCalledWith(null);
+
+    act(() => address.focus());
+    setHostFocus.mockClear();
+    view.unmount();
+    expect(setHostFocus).toHaveBeenCalledWith(null);
+    outside.remove();
   });
 
   it("preserves browser navigation actions", () => {
@@ -150,9 +187,11 @@ describe("BrowserTabContent persistent navigation", () => {
         canHandleBrowserCommands: true,
         canShowNativeBrowserView: true,
       });
+
       const address = screen.getByRole("textbox", {
         name: /Address and search bar/,
       });
+
       act(() => address.focus());
       fireEvent.change(address, { target: { value: "google.com" } });
       fireEvent.submit(address.closest("form")!);
@@ -168,7 +207,7 @@ describe("BrowserTabContent persistent navigation", () => {
     },
   );
 
-  it.each(["Stop", "Take over"])(
+  it.each(["End control", "Take over"])(
     "releases native control with %s",
     async (action) => {
       const harness = createBrowserChromeHarness();
@@ -184,12 +223,15 @@ describe("BrowserTabContent persistent navigation", () => {
         },
       });
       renderBrowserChrome(harness, "https://example.com/docs");
+
       const button = await screen.findByRole("button", {
         name: action,
       });
+
       harness.focus.mockClear();
       fireEvent.click(button);
       expect(releaseControl).toHaveBeenCalledWith("browser:test");
+
       if (action === "Take over")
         expect(harness.focus).toHaveBeenCalledWith("browser:test");
       else expect(harness.focus).not.toHaveBeenCalled();

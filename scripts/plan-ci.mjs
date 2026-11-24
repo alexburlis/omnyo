@@ -9,7 +9,9 @@ const { values } = parseArgs({
     affected: { type: "string" },
   },
 });
+
 const shards = JSON.parse(readFileSync("scripts/ci-test-shards.json", "utf8"));
+
 const full = {
   tests: { include: shards.tests },
   "windows-tests": { include: shards["windows-tests"] },
@@ -29,8 +31,10 @@ const full = {
 function matchesFilter(name, filter) {
   const patterns = filter.split(/\s+/u).map((part) => {
     if (!part.startsWith("--filter=")) throw new Error("Unsupported CI filter");
+
     return part.slice(9).replaceAll("'", "");
   });
+
   const match = (pattern) =>
     new RegExp(
       `^${pattern
@@ -39,7 +43,9 @@ function matchesFilter(name, filter) {
         .join(".*")}$`,
       "u",
     ).test(name);
+
   const positive = patterns.filter((pattern) => !pattern.startsWith("!"));
+
   return (
     (positive.length === 0 || positive.some(match)) &&
     !patterns.some(
@@ -50,8 +56,10 @@ function matchesFilter(name, filter) {
 
 function select() {
   if (values.full) return full;
+
   if (!values.base || !values.affected)
     throw new Error("Missing change evidence");
+
   const paths = execFileSync(
     "git",
     ["diff", "--name-only", "--no-renames", "-z", values.base, "HEAD", "--"],
@@ -59,6 +67,7 @@ function select() {
   )
     .split("\0")
     .filter(Boolean);
+
   if (
     paths.length > 0 &&
     paths.every((path) =>
@@ -82,12 +91,16 @@ function select() {
       reason: "CI and contributor documentation only",
     };
   }
+
   const known = /^(?:apps|packages|plugins|examples\/plugins|tests)\//u;
+
   if (paths.some((path) => !known.test(path))) return full;
   const result = JSON.parse(readFileSync(values.affected, "utf8"));
   const items = result?.data?.affectedTasks?.items;
+
   if (!Array.isArray(items) || result.errors?.length)
     throw new Error("Invalid Turbo change query");
+
   const tasks = items.map((item) => {
     if (
       typeof item?.name !== "string" ||
@@ -96,13 +109,17 @@ function select() {
         item.package.name !== "//")
     )
       throw new Error("Invalid affected task");
+
     return { name: item.name, package: item.package.name };
   });
+
   if (paths.length > 0 && tasks.length === 0)
     throw new Error("Changed files without affected tasks");
+
   const tests = new Set(
     tasks.filter((task) => task.name === "test").map((task) => task.package),
   );
+
   const packagesFor = (names) =>
     [
       ...new Set(
@@ -111,31 +128,38 @@ function select() {
           .map((task) => task.package),
       ),
     ].filter((name) => name !== "//");
+
   const buildPackages = packagesFor(["build"]);
   const staticPackages = packagesFor(["lint", "typecheck"]);
+
   const filtersFor = (packages) =>
     packages
       .sort()
       .map((name) => `--filter=${name}`)
       .join(" ");
+
   const uiOnly = paths.every((path) =>
     /^(?:apps\/(?:app|web)\/(?:src|public)\/|packages\/(?:core-ui|shared-ui|thread-view|client-core|mobile-bridge)\/(?:src|test|tests)\/)/u.test(
       path,
     ),
   );
+
   const appOnly = paths.every((path) =>
     /^apps\/(?:app|web)\/(?:src|public)\//u.test(path),
   );
+
   const packaging = paths.some((path) =>
-    /^(?:apps\/(?:desktop\/|app\/(?:vite\.config|scripts\/|package\.json))|packages\/(?:bb-app|server-archive|plugin-build|bundled-plugins|plugin-sdk|sdk|templates)\/)/u.test(
+    /^(?:apps\/(?:desktop\/|app\/(?:vite\.config|scripts\/|package\.json))|packages\/(?:omnyo-app|server-archive|plugin-build|bundled-plugins|plugin-sdk|sdk|templates)\/)/u.test(
       path,
     ),
   );
+
   const matrix = (entries) => ({
     include: entries.flatMap((entry) => {
       const selected = [...tests].filter((name) =>
         matchesFilter(name, entry.filter),
       );
+
       return selected.length === 0
         ? []
         : [
@@ -149,6 +173,7 @@ function select() {
           ];
     }),
   });
+
   return {
     tests: matrix(shards.tests),
     "windows-tests": uiOnly ? { include: [] } : matrix(shards["windows-tests"]),
@@ -164,14 +189,15 @@ function select() {
       ),
     ),
     forks:
-      !appOnly && tasks.some((task) => task.package.startsWith("bb-plugin-")),
+      !appOnly &&
+      tasks.some((task) => task.package.startsWith("omnyo-plugin-")),
     buildNeeded: buildPackages.length > 0,
     staticNeeded: staticPackages.length > 0,
     appBuild: tasks.some(
-      (task) => task.package === "@bb/app" && task.name === "build",
+      (task) => task.package === "@omnyo/app" && task.name === "build",
     ),
     sdkBuild: tasks.some(
-      (task) => task.package === "@get-bb/plugin-sdk" && task.name === "build",
+      (task) => task.package === "@omnyo/plugin-sdk" && task.name === "build",
     ),
     buildFilters: filtersFor(buildPackages),
     staticFilters: filtersFor(staticPackages),

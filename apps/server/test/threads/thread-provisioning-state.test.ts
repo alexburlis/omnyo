@@ -7,7 +7,7 @@ import {
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
+} from "@omnyo/db";
 import { getThreadProvisionContext } from "../../src/services/threads/thread-startup-store.js";
 import { requestThreadProvision } from "../../src/services/threads/thread-provisioning.js";
 import { NotificationHub } from "../../src/ws/hub.js";
@@ -17,26 +17,32 @@ import { textInput } from "../helpers/prompt-input.js";
 function setup() {
   const db = createConnection(":memory:");
   migrate(db);
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/source" },
   });
+
   const environment = createEnvironment(db, noopNotifier, {
     providerOwnsPath: false,
     hostId: host.id,
     projectId: project.id,
     status: "ready",
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     environmentId: environment.id,
     providerId: "codex",
     status: "starting",
   });
+
   const hub = new NotificationHub();
+
   return { db, environment, host, thread, hub };
 }
 
@@ -48,6 +54,7 @@ describe("thread provisioning state", () => {
     const context = requestThreadProvision(
       { db, hub },
       {
+        author: { initiator: "user", senderThreadId: null },
         thread,
         environmentIntent: {
           type: "provider",

@@ -12,28 +12,29 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createStandaloneBuiltinCompactCommandInput } from "@bb/domain";
-import type { DynamicTool, ReasoningLevel } from "@bb/domain";
+import { createStandaloneBuiltinCompactCommandInput } from "@omnyo/domain";
+import type { DynamicTool, ReasoningLevel } from "@omnyo/domain";
 import {
   BRIDGE_JSON_RPC_ERRORS,
   PROVIDER_BRIDGE_PROTOCOL_VERSION,
   THREAD_DELTA_NOTIFICATION_METHOD,
-} from "@bb/provider-bridge-protocol";
+} from "@omnyo/provider-bridge-protocol";
 import {
   assembleCapturedThreadEvents,
   captureBridgeJsonRpcOutput,
+  createBridgeDeltaEventCollector,
   permissionChangeCases,
   runPermissionChangeCase,
-} from "@bb/provider-bridge-protocol/testing";
+} from "@omnyo/provider-bridge-protocol/testing";
 import type {
   BridgeJsonRpcOutputMessage,
   CapturedBridgeJsonRpcOutput,
-} from "@bb/provider-bridge-protocol/testing";
+} from "@omnyo/provider-bridge-protocol/testing";
 
 import { z } from "zod";
 
 import { handleLine } from "./bridge.js";
-import { ACP_BRIDGE_MCP_SERVER_NAME } from "./tool-proxy-mcp.js";
+import { ACP_BRIDGE_MCP_SERVER_NAME } from "@omnyo/provider-bridge-protocol/acp/tool-proxy-mcp";
 
 const FAKE_AGENT_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -41,20 +42,27 @@ const FAKE_AGENT_PATH = resolve(
 );
 
 let output: CapturedBridgeJsonRpcOutput;
+
 let workspaceDir: string;
+
 let nextThreadSerial = 0;
+
 const startedProviderThreadIds: string[] = [];
+
 let nextRequestId = 1;
+
 const realSetTimeout = setTimeout;
 
 function requestId(): number {
   nextRequestId += 1;
+
   return nextRequestId;
 }
 
 function sendRequest(method: string, params: object): number {
   const id = requestId();
   handleLine(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+
   return id;
 }
 
@@ -64,14 +72,18 @@ async function waitFor<T>(
   timeoutMs = 15_000,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
+
   for (;;) {
     const value = resolveValue();
+
     if (value !== undefined) {
       return value;
     }
+
     if (Date.now() > deadline) {
       throw new Error(`Timed out waiting for ${description}`);
     }
+
     await new Promise((resolveTick) => realSetTimeout(resolveTick, 20));
   }
 }
@@ -81,8 +93,10 @@ async function waitForFileWithRealTimer(path: string): Promise<void> {
     if (existsSync(path)) {
       return;
     }
+
     await new Promise((resolveTick) => realSetTimeout(resolveTick, 20));
   }
+
   throw new Error(`Timed out waiting for ${path}`);
 }
 
@@ -112,6 +126,7 @@ function emittedDeltaKinds(): string[] {
     const params = message.params as
       | { deltas?: { kind?: string }[] }
       | undefined;
+
     return (params?.deltas ?? []).map((delta) => delta.kind ?? "");
   });
 }
@@ -120,15 +135,18 @@ function threadEventsOfType(type: string): Record<string, unknown>[] {
   return threadEvents().filter((event) => event.type === type);
 }
 
-const bbThreadIdByProviderThreadId = new Map<string, string>();
+const omnyoThreadIdByProviderThreadId = new Map<string, string>();
 
-function bbThreadIdFor(providerThreadId: string): string {
-  const recorded = bbThreadIdByProviderThreadId.get(providerThreadId);
+function omnyoThreadIdFor(providerThreadId: string): string {
+  const recorded = omnyoThreadIdByProviderThreadId.get(providerThreadId);
+
   if (recorded !== undefined) {
     return recorded;
   }
+
   for (const message of notifications("thread/identity")) {
     const params = message.params;
+
     if (
       typeof params === "object" &&
       params !== null &&
@@ -139,7 +157,8 @@ function bbThreadIdFor(providerThreadId: string): string {
       return params.threadId;
     }
   }
-  throw new Error(`No bb thread id recorded for ${providerThreadId}`);
+
+  throw new Error(`No Omnyo thread id recorded for ${providerThreadId}`);
 }
 
 const CLIENT_REQUEST_ID = "creq_abcdefghjk";
@@ -155,6 +174,7 @@ function executionOptions(args: {
   providerOptions?: Record<string, unknown>;
 }): Record<string, unknown> {
   const permissionMode = args.permissionMode ?? "full";
+
   return {
     ...(permissionMode === "full"
       ? {
@@ -213,6 +233,7 @@ function acpLaunchSpec(args: AgentLaunchArgs): Record<string, unknown> {
     command: process.execPath,
     args: [FAKE_AGENT_PATH],
   };
+
   return {
     displayName: "Fake ACP",
     command: agent.command,
@@ -261,13 +282,14 @@ interface StartThreadArgs extends AgentLaunchArgs {
 }
 
 async function startThread(args?: StartThreadArgs): Promise<{
-  bbThreadId: string;
+  appThreadId: string;
   providerThreadId: string;
 }> {
   nextThreadSerial += 1;
-  const bbThreadId = `thread-${nextThreadSerial}`;
+  const appThreadId = `thread-${nextThreadSerial}`;
+
   const id = sendRequest("thread/start", {
-    threadId: bbThreadId,
+    threadId: appThreadId,
     cwd: workspaceDir,
     instructionMode: "append",
     options: executionOptions({
@@ -283,11 +305,15 @@ async function startThread(args?: StartThreadArgs): Promise<{
     }),
     ...(args?.dynamicTools ? { dynamicTools: args.dynamicTools } : {}),
   });
+
   const response = await waitForResponse(id);
+
   if (response.error) {
     throw new Error(`thread/start failed: ${response.error.message}`);
   }
+
   const result = response.result;
+
   if (
     typeof result !== "object" ||
     result === null ||
@@ -296,18 +322,24 @@ async function startThread(args?: StartThreadArgs): Promise<{
   ) {
     throw new Error("thread/start did not return a providerThreadId");
   }
+
   startedProviderThreadIds.push(result.providerThreadId);
-  bbThreadIdByProviderThreadId.set(result.providerThreadId, bbThreadId);
-  return { bbThreadId, providerThreadId: result.providerThreadId };
+  omnyoThreadIdByProviderThreadId.set(result.providerThreadId, appThreadId);
+
+  return {
+    appThreadId: appThreadId,
+    providerThreadId: result.providerThreadId,
+  };
 }
 
 async function stopThread(providerThreadId: string): Promise<void> {
   const id = sendRequest("thread/stop", {
-    threadId: bbThreadIdFor(providerThreadId),
+    threadId: omnyoThreadIdFor(providerThreadId),
     providerThreadId,
     intent: "interrupt",
     activeTurnId: null,
   });
+
   await waitForResponse(id);
 }
 
@@ -315,6 +347,7 @@ async function startThreadResponse(
   envVars: Record<string, string>,
 ): Promise<BridgeJsonRpcOutputMessage> {
   nextThreadSerial += 1;
+
   const id = sendRequest("thread/start", {
     threadId: `thread-${nextThreadSerial}`,
     cwd: workspaceDir,
@@ -323,11 +356,13 @@ async function startThreadResponse(
       providerOptions: { acpLaunchSpec: acpLaunchSpec({ envVars }) },
     }),
   });
+
   return waitForResponse(id);
 }
 
 function providerThreadIdOf(response: BridgeJsonRpcOutputMessage): string {
   const result = response.result;
+
   if (
     typeof result !== "object" ||
     result === null ||
@@ -338,12 +373,14 @@ function providerThreadIdOf(response: BridgeJsonRpcOutputMessage): string {
       `construction response carries no providerThreadId: ${JSON.stringify(response)}`,
     );
   }
+
   return result.providerThreadId;
 }
 
 function messagesForThread(threadId: string): BridgeJsonRpcOutputMessage[] {
   return output.messages.filter((message) => {
     const params = message.params;
+
     return (
       typeof params === "object" &&
       params !== null &&
@@ -357,7 +394,9 @@ function deltaKindsOf(message: BridgeJsonRpcOutputMessage): string[] {
   if (message.method !== THREAD_DELTA_NOTIFICATION_METHOD) {
     return [];
   }
+
   const params = message.params as { deltas?: { kind?: string }[] } | undefined;
+
   return (params?.deltas ?? []).map((delta) => delta.kind ?? "");
 }
 
@@ -368,9 +407,11 @@ function contextWindowDeltasFor(
     if (message.method !== THREAD_DELTA_NOTIFICATION_METHOD) {
       return [];
     }
+
     const params = message.params as
       | { deltas?: { kind?: string; used?: unknown; size?: unknown }[] }
       | undefined;
+
     return (params?.deltas ?? [])
       .filter((delta) => delta.kind === "contextWindow")
       .map((delta) => ({ used: delta.used, size: delta.size }));
@@ -381,6 +422,7 @@ function sendModelList(
   args: AgentLaunchArgs & { modelLines?: string } = {},
 ): number {
   const { modelLines, ...launch } = args;
+
   return sendRequest("model/list", {
     providerOptions: {
       ...(launch.dialectId ? { acpDialect: launch.dialectId } : {}),
@@ -418,7 +460,7 @@ function sendTurnRequest(
   params: Record<string, unknown>,
 ): number {
   return sendRequest(method, {
-    threadId: bbThreadIdFor(providerThreadId),
+    threadId: omnyoThreadIdFor(providerThreadId),
     providerThreadId,
     clientRequestId: CLIENT_REQUEST_ID,
     options: executionOptions({}),
@@ -436,6 +478,7 @@ function loggedPrompts(path: string): string[] {
   if (!existsSync(path)) {
     return [];
   }
+
   return readFileSync(path, "utf8")
     .split("\n")
     .filter(Boolean)
@@ -451,6 +494,7 @@ function loggedAcpRequests(path: string): LoggedAcpRequest[] {
   if (!existsSync(path)) {
     return [];
   }
+
   return readFileSync(path, "utf8")
     .split("\n")
     .filter(Boolean)
@@ -470,10 +514,12 @@ async function completeTurnWith(
   options: Record<string, unknown>,
 ): Promise<string | undefined> {
   const completedBefore = threadEventsOfType("turn/completed").length;
+
   const turnId = sendTurnRequest("turn/start", providerThreadId, {
     input: [{ type: "text", text, mentions: [] }],
     options,
   });
+
   expect((await waitForResponse(turnId)).error).toBeUndefined();
   await waitFor(
     () =>
@@ -482,18 +528,21 @@ async function completeTurnWith(
         : undefined,
     "next turn/completed thread event",
   );
+
   return agentMessageTexts().at(-1);
 }
 
 function agentMessageTexts(): string[] {
   const textsByItemId = new Map<string, string>();
   const order: string[] = [];
+
   const track = (itemId: string): void => {
     if (!textsByItemId.has(itemId)) {
       order.push(itemId);
       textsByItemId.set(itemId, "");
     }
   };
+
   for (const event of threadEvents()) {
     if (event.type === "item/agentMessage/delta") {
       const itemId = String(event.itemId);
@@ -504,7 +553,9 @@ function agentMessageTexts(): string[] {
       );
       continue;
     }
+
     const item = event.item;
+
     if (
       event.type !== "item/completed" ||
       typeof item !== "object" ||
@@ -513,13 +564,17 @@ function agentMessageTexts(): string[] {
     ) {
       continue;
     }
+
     const typedItem = item as { id: string; type: string; text?: string };
+
     if (typedItem.type !== "agentMessage") {
       continue;
     }
+
     track(typedItem.id);
     textsByItemId.set(typedItem.id, typedItem.text ?? "");
   }
+
   return order.map((id) => textsByItemId.get(id) ?? "");
 }
 
@@ -537,17 +592,21 @@ function callDynamicToolBridge(args: {
     const socket = createConnection({ host: args.host, port: args.port });
     let buffer = "";
     let settled = false;
+
     const rejectOnce = (error: Error) => {
       if (settled) {
         return;
       }
+
       settled = true;
       rejectCall(error);
     };
+
     const abort = () => {
       socket.destroy();
       rejectOnce(new Error("Cancelled by fixture"));
     };
+
     args.signal?.addEventListener("abort", abort, { once: true });
     socket.once("close", () =>
       args.signal?.removeEventListener("abort", abort),
@@ -568,15 +627,20 @@ function callDynamicToolBridge(args: {
     socket.on("data", (chunk) => {
       buffer += chunk;
       const newlineIndex = buffer.indexOf("\n");
+
       if (newlineIndex === -1) {
         return;
       }
+
       const line = buffer.slice(0, newlineIndex);
       socket.end();
+
       if (settled) {
         return;
       }
+
       settled = true;
+
       try {
         resolveCall(JSON.parse(line));
       } catch (error) {
@@ -601,6 +665,7 @@ async function waitForAgentExit(readyFile: string): Promise<void> {
     () => {
       try {
         process.kill(pid, 0);
+
         return undefined;
       } catch {
         return true;
@@ -612,8 +677,8 @@ async function waitForAgentExit(readyFile: string): Promise<void> {
 }
 
 beforeEach(() => {
-  bbThreadIdByProviderThreadId.clear();
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-acp-bridge-test-"));
+  omnyoThreadIdByProviderThreadId.clear();
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-acp-bridge-test-"));
   output = captureBridgeJsonRpcOutput();
 });
 
@@ -621,6 +686,7 @@ afterEach(async () => {
   for (const providerThreadId of startedProviderThreadIds.splice(0)) {
     await stopThread(providerThreadId);
   }
+
   vi.unstubAllEnvs();
   output.restore();
   rmSync(workspaceDir, { recursive: true, force: true });
@@ -630,8 +696,9 @@ describe("acp bridge", () => {
   it("answers initialize and lists grouped models without spawning an agent", async () => {
     const initializeId = sendRequest("initialize", {
       protocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
-      client: { name: "bb", version: "1.0.0" },
+      client: { name: "omnyo", version: "1.0.0" },
     });
+
     expect((await waitForResponse(initializeId)).result).toMatchObject({
       protocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
       capabilities: { fork: "tip", approvalEnforcedBy: "runtime" },
@@ -642,6 +709,7 @@ describe("acp bridge", () => {
         "Available models\n\nauto - Auto\ngrouped-1-low - Grouped One Low\ngrouped-1 - Grouped One\ngrouped-1-high - Grouped One High",
       primaryModels: ["auto"],
     });
+
     const response = await waitForResponse(modelListId);
     expect(response.result).toMatchObject({
       models: [{ id: "auto", displayName: "Auto", isDefault: true }],
@@ -654,6 +722,7 @@ describe("acp bridge", () => {
         },
       ],
     });
+
     const selectedOnly = (
       response.result as {
         selectedOnlyModels: {
@@ -661,6 +730,7 @@ describe("acp bridge", () => {
         }[];
       }
     ).selectedOnlyModels;
+
     expect(
       selectedOnly[0]?.supportedReasoningEfforts.map((e) => e.reasoningEffort),
     ).toEqual(["low", "medium", "high"]);
@@ -705,6 +775,7 @@ describe("acp bridge", () => {
         supportedReasoningEfforts: { reasoningEffort: string }[];
       }[];
     };
+
     expect(result.models.map((model) => model.id)).toEqual([
       "default",
       "gemini-3.8-flash",
@@ -794,6 +865,7 @@ describe("acp bridge", () => {
 
   it("advertises Cursor's parameterized model picker during discovery", async () => {
     const requestLog = join(workspaceDir, "cursor-discovery-requests.jsonl");
+
     const modelListId = sendModelList({
       dialectId: "cursor",
       parameterizedModelPicker: true,
@@ -812,9 +884,11 @@ describe("acp bridge", () => {
       }[];
       selectedOnlyModels: { id: string }[];
     };
+
     const initialize = loggedAcpRequests(requestLog).find(
       (request) => request.method === "initialize",
     );
+
     expect.soft(initialize?.params).toMatchObject({
       clientCapabilities: {
         _meta: { parameterizedModelPicker: true },
@@ -861,6 +935,7 @@ describe("acp bridge", () => {
         workspaceDir,
         `cursor-${serviceTier}-session-requests.jsonl`,
       );
+
       const { providerThreadId } = await startThread({
         dialectId: "cursor",
         parameterizedModelPicker: true,
@@ -875,9 +950,11 @@ describe("acp bridge", () => {
       });
 
       const requests = loggedAcpRequests(requestLog);
+
       const initialize = requests.find(
         (request) => request.method === "initialize",
       );
+
       expect(initialize?.params).toMatchObject({
         clientCapabilities: {
           _meta: { parameterizedModelPicker: true },
@@ -913,6 +990,7 @@ describe("acp bridge", () => {
     async (method, legacyModel, selectedModel) => {
       const threadId = `legacy-cursor-${method.slice("thread/".length)}`;
       const requestLog = join(workspaceDir, `${threadId}.jsonl`);
+
       const id = sendRequest(method, {
         threadId,
         cwd: workspaceDir,
@@ -945,6 +1023,7 @@ describe("acp bridge", () => {
           ? { sourceProviderThreadId: "legacy-source-session" }
           : {}),
       });
+
       const response = await waitForResponse(id);
       expect(response.error).toBeUndefined();
       expect(
@@ -956,7 +1035,7 @@ describe("acp bridge", () => {
       );
       const providerThreadId = providerThreadIdOf(response);
       startedProviderThreadIds.push(providerThreadId);
-      bbThreadIdByProviderThreadId.set(providerThreadId, threadId);
+      omnyoThreadIdByProviderThreadId.set(providerThreadId, threadId);
     },
   );
 
@@ -990,6 +1069,7 @@ describe("acp bridge", () => {
     const configIds = loggedAcpRequests(requestLog)
       .filter((request) => request.method === "session/set_config_option")
       .map((request) => request.params?.["configId"]);
+
     expect(configIds).toEqual(["model"]);
   });
 
@@ -1096,10 +1176,13 @@ describe("acp bridge", () => {
         supportedReasoningEfforts: { reasoningEffort: string }[];
       }[];
     };
+
     expect(result.models).toHaveLength(60);
+
     const lastGenerated = result.models.find(
       (model) => model.id === "fake/gen-59",
     );
+
     expect(lastGenerated?.supportedReasoningEfforts).toEqual([
       { reasoningEffort: "low", description: "low" },
       { reasoningEffort: "medium", description: "medium" },
@@ -1112,6 +1195,7 @@ describe("acp bridge", () => {
     let modelListId: number;
 
     vi.useFakeTimers();
+
     try {
       modelListId = sendModelList({
         envVars: {
@@ -1134,19 +1218,23 @@ describe("acp bridge", () => {
 
   it("serves ACP-native discovered models from cache within the TTL and re-discovers after it", async () => {
     const launchLog = join(workspaceDir, "discovery-launches.txt");
+
     const discoveryEnv = {
       FAKE_ACP_MODEL_CONFIG: "1",
       FAKE_ACP_LAUNCH_LOG: launchLog,
     };
+
     const launchCount = () =>
       existsSync(launchLog)
         ? readFileSync(launchLog, "utf8").trim().split("\n").filter(Boolean)
             .length
         : 0;
+
     const listModels = async () =>
       (await waitForResponse(sendModelList({ envVars: discoveryEnv }))).result;
 
     vi.useFakeTimers({ toFake: ["Date"] });
+
     try {
       vi.setSystemTime(1_000_000);
       await listModels();
@@ -1184,6 +1272,7 @@ describe("acp bridge", () => {
       agent: { command: "/nonexistent/acp-model-lister", args: [] },
       modelLines: "",
     });
+
     const failingResponse = await waitForResponse(failingId);
     expect(failingResponse.error?.message).toMatch(
       /spawn \/nonexistent\/acp-model-lister ENOENT/,
@@ -1210,15 +1299,58 @@ describe("acp bridge", () => {
     });
   });
 
-  it("falls back to the synthetic model when the list command prints no models", async () => {
-    const emptyId = sendModelList({ modelLines: "no model lines here" });
-    expect((await waitForResponse(emptyId)).result).toMatchObject({
-      models: [{ id: "acp-default", isDefault: true }],
+  it.each([
+    ["exits unsuccessfully", "process.exit(2)"],
+    ["prints no models", "process.stdout.write('no model lines here')"],
+    ["times out", "setInterval(() => {}, 1000)"],
+  ])(
+    "fails model/list when the configured command %s without a cached catalog",
+    async (_failure, script) => {
+      const failingId = sendModelList({
+        agent: { command: process.execPath, args: ["-e", script] },
+        modelListArgs: ["--"],
+      });
+
+      const response = await waitFor(
+        () => findResponse(failingId),
+        `response ${failingId}`,
+        40_000,
+      );
+
+      expect(response.error?.message).toBe(
+        "ACP model list command failed to provide a model catalog.",
+      );
+      expect(response.result).toBeUndefined();
+    },
+    45_000,
+  );
+
+  it("keeps the last good CLI catalog when the same command later fails", async () => {
+    const scriptPath = join(workspaceDir, "model-list.cjs");
+    writeFileSync(
+      scriptPath,
+      "process.stdout.write('cached-model - Cached Model\\n')",
+    );
+
+    const launch = {
+      agent: { command: process.execPath, args: [scriptPath] },
+      modelListArgs: ["--"],
+    };
+
+    const first = await waitForResponse(sendModelList(launch));
+    expect(first.result).toMatchObject({
+      models: [{ id: "cached-model", displayName: "Cached Model" }],
     });
+
+    writeFileSync(scriptPath, "process.exit(2)");
+    const second = await waitForResponse(sendModelList(launch));
+    expect(second.error).toBeUndefined();
+    expect(second.result).toEqual(first.result);
   });
 
   it("keeps CLI reasoning on the resolved model variant instead of ACP config", async () => {
     chmodSync(FAKE_AGENT_PATH, 0o755);
+
     const cliModelLaunch = {
       agent: { command: FAKE_AGENT_PATH, args: [] },
       modelListArgs: ["--list-models"],
@@ -1228,6 +1360,7 @@ describe("acp bridge", () => {
           "pinme-low - Pin Me Low\npinme - Pin Me\npinme-extra-high - Pin Me Extra High",
       },
     };
+
     await waitForResponse(sendModelList(cliModelLaunch));
 
     const { providerThreadId } = await startThread({
@@ -1235,6 +1368,7 @@ describe("acp bridge", () => {
       model: "pinme",
       reasoningLevel: "xhigh",
     });
+
     sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "echo-argv", mentions: [] }],
     });
@@ -1259,6 +1393,7 @@ describe("acp bridge", () => {
           OPENCODE_ENABLE_QUESTION_TOOL: "true",
         },
       });
+
       sendTurnRequest("turn/start", providerThreadId, {
         input: [{ type: "text", text: "echo-question-env", mentions: [] }],
       });
@@ -1268,6 +1403,57 @@ describe("acp bridge", () => {
       );
     },
   );
+
+  it("launches OpenCode with a permission policy that follows the thread's permission mode", async () => {
+    const policy = (shell: "allow" | "ask") =>
+      `permission:${JSON.stringify({
+        edit: "allow",
+        bash: shell,
+        webfetch: shell,
+        external_directory: shell,
+      })}`;
+
+    const { providerThreadId } = await startThread({
+      dialectId: "opencode",
+      envVars: { FAKE_ACP_LOAD_SESSION: "1" },
+    });
+
+    expect(
+      await completeTurnWith(
+        providerThreadId,
+        "echo-permission-env",
+        executionOptions({
+          permissionMode: "full",
+          envVars: { FAKE_ACP_LOAD_SESSION: "1" },
+        }),
+      ),
+    ).toBe(policy("allow"));
+    expect(
+      await completeTurnWith(
+        providerThreadId,
+        "echo-permission-env",
+        executionOptions({
+          permissionMode: "accept-edits",
+          envVars: { FAKE_ACP_LOAD_SESSION: "1" },
+        }),
+      ),
+    ).toBe(policy("ask"));
+    expect(notifications("session/replaced").at(-1)?.params).toMatchObject({
+      providerThreadId,
+      contextLost: false,
+    });
+  });
+
+  it("gives agents other than OpenCode no OpenCode permission policy", async () => {
+    const { providerThreadId } = await startThread();
+    expect(
+      await completeTurnWith(
+        providerThreadId,
+        "echo-permission-env",
+        executionOptions({ permissionMode: "accept-edits" }),
+      ),
+    ).toBe("permission:unset");
+  });
 
   it("launches ACP agents with a configured reasoning CLI flag", async () => {
     chmodSync(FAKE_AGENT_PATH, 0o755);
@@ -1282,6 +1468,7 @@ describe("acp bridge", () => {
         defaultLevel: "high",
       },
     });
+
     sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "echo-argv", mentions: [] }],
     });
@@ -1305,6 +1492,7 @@ describe("acp bridge", () => {
         insertAfterArgs: 1,
       },
     });
+
     sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "echo-argv", mentions: [] }],
     });
@@ -1327,6 +1515,7 @@ describe("acp bridge", () => {
         full: ["--always-approve"],
       },
     });
+
     sendTurnRequest("turn/start", providerThreadId, {
       options: executionOptions({ permissionMode: "accept-edits" }),
       input: [{ type: "text", text: "echo-argv", mentions: [] }],
@@ -1338,6 +1527,7 @@ describe("acp bridge", () => {
 
   it("uses modelCli only for model selection when reasoningCli owns effort", async () => {
     chmodSync(FAKE_AGENT_PATH, 0o755);
+
     const cliModelLaunch: AgentLaunchArgs = {
       agent: { command: FAKE_AGENT_PATH, args: [] },
       modelListArgs: ["--list-models"],
@@ -1349,6 +1539,7 @@ describe("acp bridge", () => {
         levelValues: { max: "high" },
       },
     };
+
     await waitForResponse(sendModelList(cliModelLaunch));
 
     const { providerThreadId } = await startThread({
@@ -1356,6 +1547,7 @@ describe("acp bridge", () => {
       model: "pinme",
       reasoningLevel: "max",
     });
+
     sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "echo-argv", mentions: [] }],
     });
@@ -1377,6 +1569,7 @@ describe("acp bridge", () => {
       const launch: AgentLaunchArgs = {
         envVars: { ...env, FAKE_ACP_EMPTY_MODEL_RESULT: "1" },
       };
+
       const { providerThreadId } = await startThread({
         ...launch,
         model: "fake/strong",
@@ -1401,13 +1594,16 @@ describe("acp bridge", () => {
     const launch: AgentLaunchArgs = {
       envVars: { FAKE_ACP_MODEL_CONFIG: "1" },
     };
+
     const { providerThreadId } = await startThread({
       ...launch,
       model: "fake/default",
     });
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hang", mentions: [] }],
     });
+
     await waitForResponse(turnId);
 
     const steer = sendTurnRequest("turn/steer", providerThreadId, {
@@ -1418,6 +1614,7 @@ describe("acp bridge", () => {
       }),
       input: [{ type: "text", text: "echo-selected-model", mentions: [] }],
     });
+
     expect((await waitForResponse(steer)).error).toBeUndefined();
     await waitForTurnCompleted();
 
@@ -1429,10 +1626,12 @@ describe("acp bridge", () => {
     const launch: AgentLaunchArgs = {
       envVars: { FAKE_ACP_MODEL_CONFIG: "1" },
     };
+
     const { providerThreadId } = await startThread({
       ...launch,
       model: "fake/default",
     });
+
     const turnOptions = executionOptions({
       model: "fake/default",
       providerOptions: launchProviderOptions(launch),
@@ -1463,10 +1662,12 @@ describe("acp bridge", () => {
         FAKE_ACP_SET_CONFIG_FAST_ERROR: "1",
       },
     };
+
     const { providerThreadId } = await startThread({
       ...launch,
       model: "composer-2.5",
     });
+
     const rejected = sendTurnRequest("turn/start", providerThreadId, {
       options: executionOptions({
         model: "grok-4.6",
@@ -1475,6 +1676,7 @@ describe("acp bridge", () => {
       }),
       input: [{ type: "text", text: "echo-selected-model", mentions: [] }],
     });
+
     expect((await waitForResponse(rejected)).error?.message).toContain(
       "fast config update failed",
     );
@@ -1543,13 +1745,16 @@ describe("acp bridge", () => {
     "applies a changed ACP-native model before a follow-up prompt ($label)",
     async ({ env }) => {
       const requestLog = join(workspaceDir, "native-model-switch.jsonl");
+
       const launch: AgentLaunchArgs = {
         envVars: { ...env, FAKE_ACP_REQUEST_LOG: requestLog },
       };
+
       const { providerThreadId } = await startThread({
         ...launch,
         model: "fake/strong",
       });
+
       const turnOptions = (model: string) =>
         executionOptions({
           model,
@@ -1565,9 +1770,11 @@ describe("acp bridge", () => {
           ),
         ).toBe(`selected-model:${model}`);
       }
+
       const methods = loggedAcpRequests(requestLog).map(
         (request) => request.method,
       );
+
       expect(methods.filter((method) => method === "session/new")).toHaveLength(
         1,
       );
@@ -1581,12 +1788,14 @@ describe("acp bridge", () => {
       parameterizedModelPicker: true,
       envVars: { FAKE_ACP_CURSOR_PARAMETERIZED_MODELS: "1" },
     };
+
     const { providerThreadId } = await startThread({
       ...launch,
       model: "grok-4.6",
       reasoningLevel: "low",
       serviceTier: "default",
     });
+
     const turnOptions = executionOptions({
       model: "grok-4.6",
       reasoningLevel: "high",
@@ -1612,9 +1821,11 @@ describe("acp bridge", () => {
 
   it("rejects a follow-up turn whose ACP-native model the agent refuses", async () => {
     const promptLog = join(workspaceDir, "rejected-model-prompts.jsonl");
+
     const launch: AgentLaunchArgs = {
       envVars: { FAKE_ACP_MODEL_CONFIG: "1", FAKE_ACP_PROMPT_LOG: promptLog },
     };
+
     const { providerThreadId } = await startThread({
       ...launch,
       model: "fake/strong",
@@ -1636,6 +1847,7 @@ describe("acp bridge", () => {
 
   it("rebuilds the agent with the current turn's model selection", async () => {
     const envVars = { FAKE_ACP_LOAD_SESSION: "1", FAKE_ACP_MODEL_CONFIG: "1" };
+
     const { providerThreadId } = await startThread({
       envVars,
       model: "fake/default",
@@ -1657,6 +1869,7 @@ describe("acp bridge", () => {
 
   it("relaunches a CLI-selected ACP agent when a follow-up changes its model", async () => {
     chmodSync(FAKE_AGENT_PATH, 0o755);
+
     const launch: AgentLaunchArgs = {
       agent: { command: FAKE_AGENT_PATH, args: [] },
       modelListArgs: ["--list-models"],
@@ -1666,6 +1879,7 @@ describe("acp bridge", () => {
         FAKE_ACP_MODEL_LINES: "pinme - Pin Me\nother - Other",
       },
     };
+
     const { providerThreadId } = await startThread({
       ...launch,
       model: "pinme",
@@ -1731,6 +1945,7 @@ describe("acp bridge", () => {
     });
 
     const response = await waitForResponse(modelListId);
+
     const models = (
       response.result as {
         models: {
@@ -1739,6 +1954,7 @@ describe("acp bridge", () => {
         }[];
       }
     ).models;
+
     expect(
       models.find((model) => model.id === "fake/strong")
         ?.supportedReasoningEfforts,
@@ -1754,6 +1970,7 @@ describe("acp bridge", () => {
     });
 
     const response = await waitForResponse(modelListId);
+
     const models = (
       response.result as {
         models: {
@@ -1762,6 +1979,7 @@ describe("acp bridge", () => {
         }[];
       }
     ).models;
+
     expect(
       models.find((model) => model.id === "fake/strong")
         ?.supportedReasoningEfforts,
@@ -1779,6 +1997,7 @@ describe("acp bridge", () => {
     });
 
     const response = await waitForResponse(modelListId);
+
     const models = (
       response.result as {
         models: {
@@ -1788,6 +2007,7 @@ describe("acp bridge", () => {
         }[];
       }
     ).models;
+
     const strong = models.find((model) => model.id === "fake/strong");
     expect(strong?.defaultReasoningEffort).toBe("medium");
     expect(strong?.supportedReasoningEfforts).toEqual([
@@ -1802,6 +2022,7 @@ describe("acp bridge", () => {
 
   it("preserves Electron Node mode for the dynamic-tool MCP process only", async () => {
     vi.stubEnv("ELECTRON_RUN_AS_NODE", "1");
+
     const { providerThreadId } = await startThread({
       dynamicTools: [
         {
@@ -1822,15 +2043,19 @@ describe("acp bridge", () => {
     await waitForTurnCompleted();
 
     const configPrefix = "mcp-server-config:";
+
     const configText = agentMessageTexts().find((text) =>
       text.startsWith(configPrefix),
     );
+
     if (!configText) {
       throw new Error("Fake ACP agent did not report MCP server config");
     }
+
     const [mcpServerConfig] = JSON.parse(
       configText.slice(configPrefix.length),
     ) as { env: { name: string; value: string }[] }[];
+
     expect(
       mcpServerConfig?.env.find(({ name }) => name === "ELECTRON_RUN_AS_NODE")
         ?.value,
@@ -1854,12 +2079,14 @@ describe("acp bridge", () => {
 
   it("warns and launches the family id when a reasoning variant is missing", async () => {
     chmodSync(FAKE_AGENT_PATH, 0o755);
+
     const cliModelLaunch = {
       agent: { command: FAKE_AGENT_PATH, args: [] },
       modelListArgs: ["--list-models"],
       selectFlag: "--model",
       envVars: { FAKE_ACP_MODEL_LINES: "solo-2 - Solo Two" },
     };
+
     await waitForResponse(sendModelList(cliModelLaunch));
 
     const { providerThreadId } = await startThread({
@@ -1867,6 +2094,7 @@ describe("acp bridge", () => {
       model: "solo-2",
       reasoningLevel: "max",
     });
+
     sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "echo-argv", mentions: [] }],
     });
@@ -1880,12 +2108,12 @@ describe("acp bridge", () => {
   });
 
   it("starts a session and runs a prompt turn end to end", async () => {
-    const { bbThreadId, providerThreadId } = await startThread();
+    const { appThreadId: appThreadId, providerThreadId } = await startThread();
     expect(providerThreadId).toMatch(/^fake-sess-\d+$/);
 
     const identity = notifications("thread/identity").at(-1);
     expect(identity?.params).toEqual({
-      threadId: bbThreadId,
+      threadId: appThreadId,
       providerThreadId,
       sessionRestorable: false,
     });
@@ -1893,6 +2121,7 @@ describe("acp bridge", () => {
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hello there", mentions: [] }],
     });
+
     await waitForResponse(turnId);
 
     const completed = await waitForTurnCompleted();
@@ -1904,6 +2133,7 @@ describe("acp bridge", () => {
   it("rebuilds the agent with environment from a later turn", async () => {
     const envVars = { FAKE_ACP_LOAD_SESSION: "1", FAKE_ACP_PROMPT_ERROR: "1" };
     const { providerThreadId } = await startThread({ envVars });
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "fresh environment", mentions: [] }],
       options: executionOptions({
@@ -1918,6 +2148,94 @@ describe("acp bridge", () => {
     expect(notifications("session/replaced")).toHaveLength(1);
   });
 
+  it("sends no prompt after thread/stop answers during a session rebuild", async () => {
+    const promptLog = join(workspaceDir, "rebuild-stop-prompts.log");
+    const envVars = { FAKE_ACP_LOAD_SESSION: "1" };
+    const { appThreadId, providerThreadId } = await startThread({ envVars });
+
+    const turnId = sendTurnRequest("turn/start", providerThreadId, {
+      input: [{ type: "text", text: "after stop", mentions: [] }],
+      options: executionOptions({
+        envVars: { FAKE_ACP_PROMPT_LOG: promptLog },
+        providerOptions: { acpLaunchSpec: acpLaunchSpec({ envVars }) },
+      }),
+    });
+
+    const stopId = sendRequest("thread/stop", {
+      threadId: appThreadId,
+      providerThreadId,
+      intent: "interrupt",
+      activeTurnId: null,
+    });
+
+    const stopResponse = await waitForResponse(stopId);
+    expect(stopResponse.result).toEqual({ ok: true });
+    const stopIndex = output.messages.indexOf(stopResponse);
+    await waitForResponse(turnId);
+    await new Promise((resolveTick) => realSetTimeout(resolveTick, 500));
+
+    const acceptedIndex = output.messages.findIndex((message) =>
+      deltaKindsOf(message).includes("input.accepted"),
+    );
+
+    expect({
+      inputAcceptedAfterStopAnswer: acceptedIndex > stopIndex,
+      promptsAfterStop: loggedPrompts(promptLog),
+      turnCompleted: threadEventsOfType("turn/completed").map((e) => e.status),
+    }).toEqual({
+      inputAcceptedAfterStopAnswer: false,
+      promptsAfterStop: [],
+      turnCompleted: expect.not.arrayContaining(["completed"]),
+    });
+  });
+
+  it("fails a thread/start that thread/stop answered before the session was registered", async () => {
+    chmodSync(FAKE_AGENT_PATH, 0o755);
+    const launchLog = join(workspaceDir, "fresh-start-stop-launches.log");
+
+    const launch = {
+      agent: { command: FAKE_AGENT_PATH, args: [] },
+      modelListArgs: ["--list-models", "--fresh-start-stop"],
+      selectFlag: "--model",
+      envVars: {
+        FAKE_ACP_LAUNCH_LOG: launchLog,
+        FAKE_ACP_MODEL_LINES:
+          "pinme - Pin Me\npinme-extra-high - Pin Me Extra High",
+      },
+    };
+
+    nextThreadSerial += 1;
+    const appThreadId = `thread-${nextThreadSerial}`;
+
+    const startId = sendRequest("thread/start", {
+      threadId: appThreadId,
+      cwd: workspaceDir,
+      instructionMode: "append",
+      options: executionOptions({
+        model: "pinme",
+        reasoningLevel: "xhigh",
+        providerOptions: launchProviderOptions(launch),
+      }),
+    });
+
+    const stopId = sendRequest("thread/stop", {
+      threadId: appThreadId,
+      providerThreadId: appThreadId,
+      intent: "interrupt",
+      activeTurnId: null,
+    });
+
+    expect((await waitForResponse(stopId)).result).toEqual({ ok: true });
+    const startResponse = await waitForResponse(startId);
+    expect({
+      startError: startResponse.error?.message,
+      agentLaunched: existsSync(launchLog),
+    }).toEqual({
+      startError: `ACP session for thread "${appThreadId}" was released during construction`,
+      agentLaunched: false,
+    });
+  }, 20_000);
+
   it("authenticates ACP sessions with cached tokens when advertised", async () => {
     const { providerThreadId } = await startThread({
       envVars: { FAKE_ACP_AUTH_METHODS: "cached_token" },
@@ -1926,6 +2244,7 @@ describe("acp bridge", () => {
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "echo-auth-method", mentions: [] }],
     });
+
     await waitForResponse(turnId);
     await waitForTurnCompleted();
 
@@ -1943,6 +2262,7 @@ describe("acp bridge", () => {
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "echo-auth-method", mentions: [] }],
     });
+
     await waitForResponse(turnId);
     await waitForTurnCompleted();
 
@@ -1951,6 +2271,7 @@ describe("acp bridge", () => {
 
   it("lets agents surface their own error for unsupported advertised auth methods", async () => {
     nextThreadSerial += 1;
+
     const id = sendRequest("thread/start", {
       threadId: `thread-${nextThreadSerial}`,
       cwd: workspaceDir,
@@ -1963,6 +2284,7 @@ describe("acp bridge", () => {
         },
       }),
     });
+
     const response = await waitForResponse(id);
 
     expect(response.error?.message).toContain("Authentication required");
@@ -1972,7 +2294,7 @@ describe("acp bridge", () => {
     });
   });
 
-  it("keeps a non-auth session failure untyped when the agent advertises a login bb cannot perform", async () => {
+  it("keeps a non-auth session failure untyped when the agent advertises a login Omnyo cannot perform", async () => {
     const response = await startThreadResponse({
       FAKE_ACP_AUTH_METHODS: "agent.login",
       FAKE_ACP_AUTH_OPTIONAL: "1",
@@ -1986,7 +2308,7 @@ describe("acp bridge", () => {
     expect(response.error?.data).toBeUndefined();
   });
 
-  it("keeps an agent exit during session/new untyped when the agent advertises a login bb cannot perform", async () => {
+  it("keeps an agent exit during session/new untyped when the agent advertises a login Omnyo cannot perform", async () => {
     const response = await startThreadResponse({
       FAKE_ACP_AUTH_METHODS: "agent.login",
       FAKE_ACP_AUTH_OPTIONAL: "1",
@@ -2002,8 +2324,10 @@ describe("acp bridge", () => {
       workspaceDir,
       process.platform === "win32" ? "cursor-agent.exe" : "cursor-agent",
     );
+
     const cursorDataDir = join(workspaceDir, "cursor-data");
     symlinkSync(process.execPath, cursorAgent);
+
     const { providerThreadId } = await startThread({
       agent: { command: cursorAgent, args: [FAKE_AGENT_PATH] },
       envVars: { CURSOR_DATA_DIR: cursorDataDir },
@@ -2015,16 +2339,19 @@ describe("acp bridge", () => {
         },
       ],
     });
+
     const projectSlug = workspaceDir
       .replace(/[^a-zA-Z0-9]/gu, "-")
       .replace(/-+/gu, "-")
       .replace(/^-+|-+$/gu, "");
+
     const approvalPath = join(
       cursorDataDir,
       "projects",
       projectSlug,
       "mcp-approvals.json",
     );
+
     const approvals = JSON.parse(readFileSync(approvalPath, "utf8")) as unknown;
     expect(approvals).toEqual([
       expect.stringMatching(`^${ACP_BRIDGE_MCP_SERVER_NAME}-[a-f0-9]{16}$`),
@@ -2037,7 +2364,7 @@ describe("acp bridge", () => {
   });
 
   it("forwards ACP dynamic tool calls through the runtime tool-call contract", async () => {
-    const { bbThreadId, providerThreadId } = await startThread({
+    const { appThreadId: appThreadId, providerThreadId } = await startThread({
       dynamicTools: [
         {
           name: "update_environment_directory",
@@ -2054,32 +2381,42 @@ describe("acp bridge", () => {
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "echo-mcp-server-config", mentions: [] }],
     });
+
     await waitForResponse(turnId);
     await waitForTurnCompleted();
 
     const configPrefix = "mcp-server-config:";
+
     const configText = agentMessageTexts().find((text) =>
       text.startsWith(configPrefix),
     );
+
     if (!configText) {
       throw new Error("Fake ACP agent did not report MCP server config");
     }
+
     const mcpServerConfigs = JSON.parse(
       configText.slice(configPrefix.length),
     ) as { env: { name: string; value: string }[]; name: string }[];
+
     expect(mcpServerConfigs).toHaveLength(1);
     const [mcpServerConfig] = mcpServerConfigs;
+
     if (!mcpServerConfig) {
       throw new Error("Fake ACP agent reported no MCP server config");
     }
+
     expect(mcpServerConfig?.name).toBe(ACP_BRIDGE_MCP_SERVER_NAME);
+
     const env = new Map(
       mcpServerConfig.env.map(({ name, value }) => [name, value]),
     );
-    const host = env.get("BB_ACP_DYNAMIC_TOOL_HOST");
-    const port = Number(env.get("BB_ACP_DYNAMIC_TOOL_PORT"));
-    const threadId = env.get("BB_ACP_DYNAMIC_TOOL_THREAD_ID");
-    const token = env.get("BB_ACP_DYNAMIC_TOOL_TOKEN");
+
+    const host = env.get("OMNYO_ACP_DYNAMIC_TOOL_HOST");
+    const port = Number(env.get("OMNYO_ACP_DYNAMIC_TOOL_PORT"));
+    const threadId = env.get("OMNYO_ACP_DYNAMIC_TOOL_THREAD_ID");
+    const token = env.get("OMNYO_ACP_DYNAMIC_TOOL_TOKEN");
+
     if (!host || !Number.isInteger(port) || !threadId || !token) {
       throw new Error("MCP server config is missing dynamic tool bridge env");
     }
@@ -2093,6 +2430,7 @@ describe("acp bridge", () => {
       tool: "update_environment_directory",
       toolArguments: { path: "/tmp/next-worktree" },
     });
+
     const forwarded = await waitFor(
       () =>
         output.messages.find(
@@ -2101,10 +2439,11 @@ describe("acp bridge", () => {
         ),
       "forwarded dynamic tool call",
     );
+
     expect(forwarded.params).toMatchObject({
       arguments: { path: "/tmp/next-worktree" },
       providerThreadId,
-      threadId: bbThreadId,
+      threadId: appThreadId,
       tool: "update_environment_directory",
       turnId: null,
     });
@@ -2151,35 +2490,45 @@ describe("acp bridge", () => {
       const turnId = sendTurnRequest("turn/start", providerThreadId, {
         input: [{ type: "text", text: "echo-mcp-server-config", mentions: [] }],
       });
+
       await waitForResponse(turnId);
       await waitForTurnCompleted();
 
       const configPrefix = "mcp-server-config:";
+
       const configText = agentMessageTexts().find((text) =>
         text.startsWith(configPrefix),
       );
+
       if (!configText) {
         throw new Error("Fake ACP agent did not report MCP server config");
       }
+
       const [mcpServerConfig] = JSON.parse(
         configText.slice(configPrefix.length),
       ) as { env: { name: string; value: string }[]; name: string }[];
+
       if (!mcpServerConfig) {
         throw new Error("Fake ACP agent reported no MCP server config");
       }
+
       expect(mcpServerConfig?.name).toBe(ACP_BRIDGE_MCP_SERVER_NAME);
+
       const env = new Map(
         mcpServerConfig.env.map(({ name, value }) => [name, value]),
       );
-      const host = env.get("BB_ACP_DYNAMIC_TOOL_HOST");
-      const port = Number(env.get("BB_ACP_DYNAMIC_TOOL_PORT"));
-      const threadId = env.get("BB_ACP_DYNAMIC_TOOL_THREAD_ID");
-      const token = env.get("BB_ACP_DYNAMIC_TOOL_TOKEN");
+
+      const host = env.get("OMNYO_ACP_DYNAMIC_TOOL_HOST");
+      const port = Number(env.get("OMNYO_ACP_DYNAMIC_TOOL_PORT"));
+      const threadId = env.get("OMNYO_ACP_DYNAMIC_TOOL_THREAD_ID");
+      const token = env.get("OMNYO_ACP_DYNAMIC_TOOL_TOKEN");
+
       if (!host || !Number.isInteger(port) || !threadId || !token) {
         throw new Error("MCP server config is missing dynamic tool bridge env");
       }
 
       const controller = new AbortController();
+
       const bridgeCall = callDynamicToolBridge({
         callId: "cancelled-tool-call",
         host,
@@ -2190,6 +2539,7 @@ describe("acp bridge", () => {
         toolArguments: {},
         signal: controller.signal,
       }).catch((error) => error);
+
       const forwarded = await waitFor(
         () =>
           output.messages.find(
@@ -2198,6 +2548,7 @@ describe("acp bridge", () => {
           ),
         "forwarded request",
       );
+
       if (kind === "socket-close") {
         controller.abort();
         expect(await bridgeCall).toBeInstanceOf(Error);
@@ -2216,6 +2567,7 @@ describe("acp bridge", () => {
           error: "ACP dynamic tool call cancelled",
         });
       }
+
       const cancellation = await waitFor(
         () =>
           output.messages.find(
@@ -2223,6 +2575,7 @@ describe("acp bridge", () => {
           ),
         "runtime cancellation",
       );
+
       expect(cancellation.params).toEqual({ requestId: forwarded.id });
       handleLine(
         JSON.stringify({
@@ -2240,7 +2593,7 @@ describe("acp bridge", () => {
   );
 
   it("keeps the dynamic-tool TCP server alive after a client reset on initialize", async () => {
-    const { bbThreadId, providerThreadId } = await startThread({
+    const { appThreadId: appThreadId, providerThreadId } = await startThread({
       dynamicTools: [
         {
           name: "update_environment_directory",
@@ -2257,38 +2610,49 @@ describe("acp bridge", () => {
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "echo-mcp-server-config", mentions: [] }],
     });
+
     await waitForResponse(turnId);
     await waitForTurnCompleted();
 
     const configPrefix = "mcp-server-config:";
+
     const configText = agentMessageTexts().find((text) =>
       text.startsWith(configPrefix),
     );
+
     if (!configText) {
       throw new Error("Fake ACP agent did not report MCP server config");
     }
+
     const [mcpServerConfig] = JSON.parse(
       configText.slice(configPrefix.length),
     ) as { env: { name: string; value: string }[]; name: string }[];
+
     if (!mcpServerConfig) {
       throw new Error("Fake ACP agent reported no MCP server config");
     }
+
     const env = new Map(
       mcpServerConfig.env.map(({ name, value }) => [name, value]),
     );
-    const host = env.get("BB_ACP_DYNAMIC_TOOL_HOST");
-    const port = Number(env.get("BB_ACP_DYNAMIC_TOOL_PORT"));
-    const threadId = env.get("BB_ACP_DYNAMIC_TOOL_THREAD_ID");
-    const token = env.get("BB_ACP_DYNAMIC_TOOL_TOKEN");
+
+    const host = env.get("OMNYO_ACP_DYNAMIC_TOOL_HOST");
+    const port = Number(env.get("OMNYO_ACP_DYNAMIC_TOOL_PORT"));
+    const threadId = env.get("OMNYO_ACP_DYNAMIC_TOOL_THREAD_ID");
+    const token = env.get("OMNYO_ACP_DYNAMIC_TOOL_TOKEN");
+
     if (!host || !Number.isInteger(port) || !threadId || !token) {
       throw new Error("MCP server config is missing dynamic tool bridge env");
     }
 
     const uncaught: Error[] = [];
+
     const recordUncaught = (error: Error) => {
       uncaught.push(error);
     };
+
     process.on("uncaughtException", recordUncaught);
+
     try {
       await new Promise<void>((resolve) => {
         const socket = createConnection({ host, port });
@@ -2314,6 +2678,7 @@ describe("acp bridge", () => {
     } finally {
       process.off("uncaughtException", recordUncaught);
     }
+
     expect(uncaught).toEqual([]);
 
     const bridgeCall = callDynamicToolBridge({
@@ -2325,6 +2690,7 @@ describe("acp bridge", () => {
       tool: "update_environment_directory",
       toolArguments: { path: "/tmp/next-worktree" },
     });
+
     const forwarded = await waitFor(
       () =>
         output.messages.find(
@@ -2336,11 +2702,12 @@ describe("acp bridge", () => {
         ),
       "forwarded dynamic tool call after reset",
     );
+
     expect(forwarded.params).toMatchObject({
       arguments: { path: "/tmp/next-worktree" },
       callId: "test-dynamic-tool-call-after-reset",
       providerThreadId,
-      threadId: bbThreadId,
+      threadId: appThreadId,
       tool: "update_environment_directory",
       turnId: null,
     });
@@ -2377,10 +2744,12 @@ describe("acp bridge", () => {
         },
       ],
     });
+
     expect((await waitForResponse(configureId)).error).toBeUndefined();
 
     const promptLog = join(workspaceDir, "canonical-skills-prompt-log.jsonl");
     const threadId = "thread-canonical-skills";
+
     const startId = sendRequest("thread/start", {
       threadId,
       cwd: workspaceDir,
@@ -2402,8 +2771,10 @@ describe("acp bridge", () => {
         },
       },
     });
+
     const startResponse = await waitForResponse(startId);
     expect(startResponse.error).toBeUndefined();
+
     const providerThreadId =
       typeof startResponse.result === "object" &&
       startResponse.result !== null &&
@@ -2411,6 +2782,7 @@ describe("acp bridge", () => {
       typeof startResponse.result.providerThreadId === "string"
         ? startResponse.result.providerThreadId
         : "";
+
     startedProviderThreadIds.push(providerThreadId);
 
     const turnId = sendRequest("turn/start", {
@@ -2425,13 +2797,15 @@ describe("acp bridge", () => {
         permissionEscalation: null,
       },
     });
+
     await waitForResponse(turnId);
     await waitForFileWithRealTimer(promptLog);
 
     const prompt: unknown = JSON.parse(
       readFileSync(promptLog, "utf8").trim().split("\n")[0] ?? "null",
     );
-    expect(prompt).toContain("Available bb skills:");
+
+    expect(prompt).toContain("Available Omnyo skills:");
     expect(prompt).toContain(
       `- deploy: Ship the app. (SKILL.md: ${join("/staged/acp-skills", "deploy", "SKILL.md")})`,
     );
@@ -2442,9 +2816,11 @@ describe("acp bridge", () => {
     const { providerThreadId } = await startThread({
       instructions: "Be terse.",
     });
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hi", mentions: [] }],
     });
+
     await waitForResponse(turnId);
     await waitForTurnCompleted();
 
@@ -2456,9 +2832,11 @@ describe("acp bridge", () => {
 
   it("auto-allows permission requests in full mode", async () => {
     const { providerThreadId } = await startThread({ permissionMode: "full" });
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "request-permission", mentions: [] }],
     });
+
     await waitForResponse(turnId);
     await waitForTurnCompleted();
 
@@ -2471,14 +2849,16 @@ describe("acp bridge", () => {
   });
 
   it("forwards permission requests to the runtime in ask mode", async () => {
-    const { bbThreadId, providerThreadId } = await startThread({
+    const { appThreadId: appThreadId, providerThreadId } = await startThread({
       permissionMode: "accept-edits",
       permissionEscalation: "ask",
     });
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       options: executionOptions({ permissionMode: "accept-edits" }),
       input: [{ type: "text", text: "request-permission", mentions: [] }],
     });
+
     await waitForResponse(turnId);
 
     const forwarded = await waitFor(
@@ -2490,8 +2870,9 @@ describe("acp bridge", () => {
         ),
       "forwarded permission request",
     );
+
     expect(forwarded.params).toMatchObject({
-      threadId: bbThreadId,
+      threadId: appThreadId,
       providerThreadId,
       turnId: null,
       payload: {
@@ -2513,10 +2894,11 @@ describe("acp bridge", () => {
   });
 
   it("presents an external-directory write permission as a file-change approval", async () => {
-    const { providerThreadId } = await startThread({
+    const { appThreadId, providerThreadId } = await startThread({
       permissionMode: "accept-edits",
       permissionEscalation: "ask",
     });
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       options: executionOptions({ permissionMode: "accept-edits" }),
       input: [
@@ -2527,7 +2909,9 @@ describe("acp bridge", () => {
         },
       ],
     });
+
     await waitForResponse(turnId);
+
     const forwarded = await waitFor(
       () =>
         output.messages.find(
@@ -2537,6 +2921,7 @@ describe("acp bridge", () => {
         ),
       "forwarded permission request",
     );
+
     expect(forwarded.params).toMatchObject({
       payload: {
         kind: "approval",
@@ -2547,6 +2932,23 @@ describe("acp bridge", () => {
         },
       },
     });
+
+    const collector = createBridgeDeltaEventCollector("acp");
+
+    const fileChangeItemIds = output.messages
+      .flatMap((message) => collector.assembleMessage(message))
+      .flatMap((event) =>
+        event.type === "item/started" && event.item.type === "fileChange"
+          ? [event.item.id]
+          : [],
+      );
+
+    expect(fileChangeItemIds).toHaveLength(1);
+
+    expect(collector.assembler.getAppItemId(appThreadId, "write-tool-1")).toBe(
+      fileChangeItemIds[0],
+    );
+
     handleLine(
       JSON.stringify({
         jsonrpc: "2.0",
@@ -2563,11 +2965,14 @@ describe("acp bridge", () => {
       permissionMode: "accept-edits",
       permissionEscalation: "ask",
     });
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       options: executionOptions({ permissionMode: "accept-edits" }),
       input: [{ type: "text", text: "request-permission", mentions: [] }],
     });
+
     await waitForResponse(turnId);
+
     const forwarded = await waitFor(
       () =>
         output.messages.find(
@@ -2577,6 +2982,7 @@ describe("acp bridge", () => {
         ),
       "forwarded permission request",
     );
+
     handleLine(
       JSON.stringify({
         jsonrpc: "2.0",
@@ -2590,17 +2996,21 @@ describe("acp bridge", () => {
 
   it.each(["add", "update"])("acknowledges fs %s writes", async (kind) => {
     const targetPath = join(workspaceDir, "agent-output.txt");
+
     if (kind === "update") {
       writeFileSync(targetPath, "original content\n");
     }
+
     const { providerThreadId } = await startThread({
       permissionMode: "accept-edits",
       permissionEscalation: "ask",
       envVars: { FAKE_ACP_WRITE_PATH: targetPath },
     });
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "write-file", mentions: [] }],
     });
+
     await waitForResponse(turnId);
     await waitForTurnCompleted();
 
@@ -2626,12 +3036,14 @@ describe("acp bridge", () => {
     "reconciles $before -> $after on $method (CLI: $cli, load: $load)",
     async (scenario) => {
       const outsideDir = mkdtempSync(
-        join(tmpdir(), "bb-acp-permission-probe-"),
+        join(tmpdir(), "omnyo-acp-permission-probe-"),
       );
+
       const targetPath = join(outsideDir, "probe.txt");
       let providerThreadId = "";
       let messageCount = 0;
       let completionCount = 0;
+
       const probes = () =>
         notifications(THREAD_DELTA_NOTIFICATION_METHOD).flatMap((message) => {
           const parsed = z
@@ -2644,6 +3056,7 @@ describe("acp bridge", () => {
               ),
             })
             .parse(message.params);
+
           return parsed.deltas.flatMap((delta) =>
             delta.kind === "item.textDelta" &&
             delta.text?.startsWith('{"wrote":')
@@ -2655,6 +3068,7 @@ describe("acp bridge", () => {
               : [],
           );
         });
+
       try {
         await runPermissionChangeCase(
           {
@@ -2682,6 +3096,7 @@ describe("acp bridge", () => {
               rmSync(targetPath, { force: true });
               messageCount = probes().length;
               completionCount = threadEventsOfType("turn/completed").length;
+
               const id = sendTurnRequest(method, providerThreadId, {
                 input: [
                   {
@@ -2695,11 +3110,13 @@ describe("acp bridge", () => {
                   ? { expectedTurnId: "turn-probe" }
                   : {}),
               });
+
               expect((await waitForResponse(id)).error).toBeUndefined();
               await waitFor(
                 () => (probes().length > messageCount ? true : undefined),
                 "permission probe",
               );
+
               if (!hold) {
                 await waitFor(
                   () =>
@@ -2713,8 +3130,10 @@ describe("acp bridge", () => {
             },
             async observe() {
               const probe = probes().at(-1);
+
               if (!probe) throw new Error("No permission probe received");
               expect(existsSync(targetPath)).toBe(probe.wrote);
+
               if (scenario.cli) {
                 expect(probe.args).toContain(
                   probe.wrote ? "--full" : "--workspace",
@@ -2723,6 +3142,7 @@ describe("acp bridge", () => {
                   probe.wrote ? "--workspace" : "--full",
                 );
               }
+
               return {
                 mode: probe.wrote ? "full" : "accept-edits",
                 sandbox: !probe.wrote,
@@ -2734,6 +3154,7 @@ describe("acp bridge", () => {
         expect(notifications("session/replaced")).toHaveLength(
           scenario.cli ? 1 : 0,
         );
+
         if (scenario.cli) {
           expect(notifications("session/replaced")[0]?.params).toMatchObject({
             contextLost: !scenario.load,
@@ -2748,12 +3169,15 @@ describe("acp bridge", () => {
 
   it("rejects simultaneous starts while reconciling unchanged permissions", async () => {
     const { providerThreadId } = await startThread();
+
     const first = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hang", mentions: [] }],
     });
+
     const second = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "second", mentions: [] }],
     });
+
     expect((await waitForResponse(first)).error).toBeUndefined();
     expect((await waitForResponse(second)).error).toMatchObject({
       message: "A turn is already active",
@@ -2764,6 +3188,7 @@ describe("acp bridge", () => {
 
   it("preserves stacked steers across permission CLI rebuilds", async () => {
     const promptLog = join(workspaceDir, "permission-prompts.jsonl");
+
     const { providerThreadId } = await startThread({
       envVars: { FAKE_ACP_LOAD_SESSION: "1", FAKE_ACP_PROMPT_LOG: promptLog },
       permissionCli: {
@@ -2772,23 +3197,27 @@ describe("acp bridge", () => {
         insertAfterArgs: 1,
       },
     });
+
     await waitForResponse(
       sendTurnRequest("turn/start", providerThreadId, {
         input: [{ type: "text", text: "hang", mentions: [] }],
       }),
     );
+
     const first = sendTurnRequest("turn/steer", providerThreadId, {
       expectedTurnId: "turn-1",
       clientRequestId: "creq_abcdefghjm",
       input: [{ type: "text", text: "echo-argv first", mentions: [] }],
       options: executionOptions({ permissionMode: "accept-edits" }),
     });
+
     const second = sendTurnRequest("turn/steer", providerThreadId, {
       expectedTurnId: "turn-1",
       clientRequestId: "creq_abcdefghjn",
       input: [{ type: "text", text: "echo-argv second", mentions: [] }],
       options: executionOptions({ permissionMode: "full" }),
     });
+
     expect((await waitForResponse(first)).error).toBeUndefined();
     expect((await waitForResponse(second)).error).toBeUndefined();
     await waitFor(
@@ -2819,11 +3248,13 @@ describe("acp bridge", () => {
         insertAfterArgs: 1,
       },
     });
+
     await waitForResponse(
       sendTurnRequest("turn/start", providerThreadId, {
         input: [{ type: "text", text: "hang", mentions: [] }],
       }),
     );
+
     const steer = sendTurnRequest("turn/steer", providerThreadId, {
       expectedTurnId: "turn-1",
       input: [{ type: "text", text: "echo-argv", mentions: [] }],
@@ -2832,6 +3263,7 @@ describe("acp bridge", () => {
         envVars: { FAKE_ACP_SESSION_NEW_ERROR: "permission restart failed" },
       }),
     });
+
     expect((await waitForResponse(steer)).error).toBeUndefined();
     await waitFor(
       () =>
@@ -2848,18 +3280,21 @@ describe("acp bridge", () => {
   });
 
   it("denies client fs writes outside the workspace in accept-edits mode", async () => {
-    const outsideDir = mkdtempSync(join(tmpdir(), "bb-acp-outside-"));
+    const outsideDir = mkdtempSync(join(tmpdir(), "omnyo-acp-outside-"));
     const targetPath = join(outsideDir, "outside.txt");
+
     try {
       const { providerThreadId } = await startThread({
         permissionMode: "accept-edits",
         permissionEscalation: "ask",
         envVars: { FAKE_ACP_WRITE_PATH: targetPath },
       });
+
       const turnId = sendTurnRequest("turn/start", providerThreadId, {
         input: [{ type: "text", text: "write-file", mentions: [] }],
         options: executionOptions({ permissionMode: "accept-edits" }),
       });
+
       await waitForResponse(turnId);
       await waitForTurnCompleted();
 
@@ -2871,10 +3306,12 @@ describe("acp bridge", () => {
   });
 
   it("allows canonical accept-edits writes into a configured extra write root", async () => {
-    const outsideDir = mkdtempSync(join(tmpdir(), "bb-acp-extra-root-"));
+    const outsideDir = mkdtempSync(join(tmpdir(), "omnyo-acp-extra-root-"));
     const targetPath = join(outsideDir, "outside.txt");
+
     try {
       const threadId = "thread-canonical-extra-root";
+
       const startId = sendRequest("thread/start", {
         threadId,
         cwd: workspaceDir,
@@ -2896,8 +3333,10 @@ describe("acp bridge", () => {
           },
         },
       });
+
       const startResponse = await waitForResponse(startId);
       expect(startResponse.error).toBeUndefined();
+
       const providerThreadId =
         typeof startResponse.result === "object" &&
         startResponse.result !== null &&
@@ -2905,6 +3344,7 @@ describe("acp bridge", () => {
         typeof startResponse.result.providerThreadId === "string"
           ? startResponse.result.providerThreadId
           : "";
+
       startedProviderThreadIds.push(providerThreadId);
 
       const turnId = sendRequest("turn/start", {
@@ -2919,6 +3359,7 @@ describe("acp bridge", () => {
           permissionEscalation: "ask",
         },
       });
+
       await waitForResponse(turnId);
       const completed = await waitForTurnCompleted();
 
@@ -2932,9 +3373,11 @@ describe("acp bridge", () => {
 
   it("keeps partial output from the cancelled prompt then continues", async () => {
     const { providerThreadId } = await startThread();
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "slow first", mentions: [] }],
     });
+
     await waitForResponse(turnId);
     await waitFor(
       () =>
@@ -2946,6 +3389,7 @@ describe("acp bridge", () => {
       expectedTurnId: "turn-1",
       input: [{ type: "text", text: "steered", mentions: [] }],
     });
+
     await waitForResponse(steerId);
 
     const completed = await waitForTurnCompleted();
@@ -2961,6 +3405,7 @@ describe("acp bridge", () => {
     "rebuilds a stuck agent after a steer cancellation error (session/load=%s)",
     async (loadSession) => {
       const promptLog = join(workspaceDir, "prompts.jsonl");
+
       const { providerThreadId } = await startThread({
         envVars: {
           FAKE_ACP_LOAD_SESSION: loadSession,
@@ -2968,6 +3413,7 @@ describe("acp bridge", () => {
           FAKE_ACP_PROMPT_LOG: promptLog,
         },
       });
+
       await waitForResponse(
         sendTurnRequest("turn/start", providerThreadId, {
           input: [{ type: "text", text: "hang", mentions: [] }],
@@ -3020,19 +3466,23 @@ describe("acp bridge", () => {
 
   it("delivers stacked steers on the same turn", async () => {
     const { providerThreadId } = await startThread();
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hang", mentions: [] }],
     });
+
     await waitForResponse(turnId);
 
     const firstSteerId = sendTurnRequest("turn/steer", providerThreadId, {
       expectedTurnId: "turn-1",
       input: [{ type: "text", text: "first-steer", mentions: [] }],
     });
+
     const secondSteerId = sendTurnRequest("turn/steer", providerThreadId, {
       expectedTurnId: "turn-1",
       input: [{ type: "text", text: "second-steer", mentions: [] }],
     });
+
     await waitForResponse(firstSteerId);
     await waitForResponse(secondSteerId);
 
@@ -3046,19 +3496,23 @@ describe("acp bridge", () => {
 
   it("cancels a stacked steer prompt that also hangs", async () => {
     const { providerThreadId } = await startThread();
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hang", mentions: [] }],
     });
+
     await waitForResponse(turnId);
 
     const firstSteerId = sendTurnRequest("turn/steer", providerThreadId, {
       expectedTurnId: "turn-1",
       input: [{ type: "text", text: "hang again", mentions: [] }],
     });
+
     const secondSteerId = sendTurnRequest("turn/steer", providerThreadId, {
       expectedTurnId: "turn-1",
       input: [{ type: "text", text: "second-steer", mentions: [] }],
     });
+
     await waitForResponse(firstSteerId);
     await waitForResponse(secondSteerId);
 
@@ -3071,6 +3525,7 @@ describe("acp bridge", () => {
 
   it("runs the builtin /compact command as compaction, not as a prompt", async () => {
     const promptLog = join(workspaceDir, "compact-prompt-log.jsonl");
+
     const { providerThreadId } = await startThread({
       envVars: { FAKE_ACP_PROMPT_LOG: promptLog },
     });
@@ -3078,6 +3533,7 @@ describe("acp bridge", () => {
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: compactCommandInput(),
     });
+
     expect((await waitForResponse(turnId)).error).toBeUndefined();
 
     const completed = await waitForTurnCompleted();
@@ -3103,6 +3559,7 @@ describe("acp bridge", () => {
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: compactCommandInput(),
     });
+
     expect((await waitForResponse(turnId)).error).toBeUndefined();
 
     const completed = await waitForTurnCompleted();
@@ -3121,6 +3578,7 @@ describe("acp bridge", () => {
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: compactCommandInput(),
     });
+
     expect((await waitForResponse(turnId)).error).toBeUndefined();
 
     const completed = await waitForTurnCompleted();
@@ -3148,6 +3606,7 @@ describe("acp bridge", () => {
       const turnId = sendTurnRequest("turn/start", providerThreadId, {
         input: compactCommandInput(),
       });
+
       expect((await waitForResponse(turnId)).error).toBeUndefined();
 
       const completed = await waitForTurnCompleted();
@@ -3186,17 +3645,21 @@ describe("acp bridge", () => {
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: compactCommandInput(),
     });
+
     expect((await waitForResponse(turnId)).error).toBeUndefined();
 
     const completed = await waitForTurnCompleted();
     expect(threadEventsOfType("thread/compacted")).toEqual([]);
+
     if (outcome === "failed") {
       expect(completed).toMatchObject({
         status: "failed",
         error: { message },
       });
+
       return;
     }
+
     expect(completed).toMatchObject({ status: "completed" });
     expect(threadEventsOfType("provider/warning").at(-1)).toMatchObject({
       category: "compaction-skipped",
@@ -3207,9 +3670,11 @@ describe("acp bridge", () => {
 
   it("accepts turn input only after the prompt carrying it goes out", async () => {
     const { providerThreadId } = await startThread();
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hello there", mentions: [] }],
     });
+
     await waitForResponse(turnId);
     await waitForTurnCompleted();
 
@@ -3221,22 +3686,27 @@ describe("acp bridge", () => {
 
   it("never accepts a queued steer the stopped turn did not send", async () => {
     const { providerThreadId } = await startThread();
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hang", mentions: [] }],
     });
+
     await waitForResponse(turnId);
 
     const steerId = sendTurnRequest("turn/steer", providerThreadId, {
       expectedTurnId: "turn-1",
       input: [{ type: "text", text: "never sent", mentions: [] }],
     });
+
     await waitForResponse(steerId);
+
     const stopId = sendRequest("thread/stop", {
-      threadId: bbThreadIdFor(providerThreadId),
+      threadId: omnyoThreadIdFor(providerThreadId),
       providerThreadId,
       intent: "interrupt",
       activeTurnId: null,
     });
+
     await waitForResponse(stopId);
     await waitForTurnCompleted();
 
@@ -3246,10 +3716,12 @@ describe("acp bridge", () => {
 
   it("rejects steers when no turn is active", async () => {
     const { providerThreadId } = await startThread();
+
     const steerId = sendTurnRequest("turn/steer", providerThreadId, {
       expectedTurnId: "turn-1",
       input: [{ type: "text", text: "late", mentions: [] }],
     });
+
     const response = await waitForResponse(steerId);
     expect(response.error?.code).toBe(BRIDGE_JSON_RPC_ERRORS.NO_ACTIVE_TURN);
     expect(response.error?.message).toMatch(/No active turn/);
@@ -3257,17 +3729,20 @@ describe("acp bridge", () => {
 
   it("cancels the active turn on thread/stop", async () => {
     const { providerThreadId } = await startThread();
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hang", mentions: [] }],
     });
+
     await waitForResponse(turnId);
 
     const stopId = sendRequest("thread/stop", {
-      threadId: bbThreadIdFor(providerThreadId),
+      threadId: omnyoThreadIdFor(providerThreadId),
       providerThreadId,
       intent: "interrupt",
       activeTurnId: null,
     });
+
     const stopResponse = await waitForResponse(stopId);
     expect(stopResponse.result).toEqual({ ok: true });
 
@@ -3277,27 +3752,32 @@ describe("acp bridge", () => {
   });
 
   it("settles the interrupted turn itself when the agent ignores session/cancel", async () => {
-    const { bbThreadId, providerThreadId } = await startThread({
+    const { appThreadId: appThreadId, providerThreadId } = await startThread({
       envVars: { FAKE_ACP_IGNORE_CANCEL: "1" },
     });
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hang", mentions: [] }],
     });
+
     await waitForResponse(turnId);
 
     const stopId = sendRequest("thread/stop", {
-      threadId: bbThreadId,
+      threadId: appThreadId,
       providerThreadId,
       intent: "interrupt",
       activeTurnId: null,
     });
+
     const stopResponse = await waitForResponse(stopId);
     expect(stopResponse.result).toEqual({ ok: true });
 
     const stopIndex = output.messages.indexOf(stopResponse);
+
     const boundaryIndex = output.messages.findIndex((message) =>
       deltaKindsOf(message).includes("turn.boundary"),
     );
+
     expect(boundaryIndex).toBeGreaterThan(-1);
     expect(boundaryIndex).toBeLessThan(stopIndex);
     const completed = threadEventsOfType("turn/completed");
@@ -3312,6 +3792,7 @@ describe("acp bridge", () => {
 
   it("forks an advertised ACP session with the target cwd and MCP servers", async () => {
     const forkLog = join(workspaceDir, "fork-params.json");
+
     const forkId = sendRequest("thread/fork", {
       threadId: "thread-fork",
       cwd: workspaceDir,
@@ -3337,8 +3818,10 @@ describe("acp bridge", () => {
       ],
       sourceProviderThreadId: "source-session",
     });
+
     const response = await waitForResponse(forkId);
     const result = response.result;
+
     if (
       typeof result !== "object" ||
       result === null ||
@@ -3347,6 +3830,7 @@ describe("acp bridge", () => {
     ) {
       throw new Error("thread/fork did not return a providerThreadId");
     }
+
     startedProviderThreadIds.push(result.providerThreadId);
     expect(result.providerThreadId).toMatch(/^fake-fork-/u);
 
@@ -3386,6 +3870,7 @@ describe("acp bridge", () => {
 
   it("rejects a checkpoint fork before session/fork", async () => {
     const forkLog = join(workspaceDir, "checkpoint-fork-params.json");
+
     const forkId = sendRequest("thread/fork", {
       threadId: "thread-checkpoint-fork",
       cwd: workspaceDir,
@@ -3434,6 +3919,7 @@ describe("acp bridge", () => {
 
   it("rejects fork before session/fork when the agent omits the capability", async () => {
     const forkLog = join(workspaceDir, "unsupported-fork-params.json");
+
     const forkId = sendRequest("thread/fork", {
       threadId: "thread-unsupported-fork",
       cwd: workspaceDir,
@@ -3467,10 +3953,12 @@ describe("acp bridge", () => {
         if (message.method !== "thread/delta") {
           return [];
         }
+
         const params = message.params as {
           threadId?: unknown;
           deltas?: unknown;
         };
+
         return params.threadId === threadId &&
           Array.isArray(params.deltas) &&
           params.deltas.some(
@@ -3479,6 +3967,7 @@ describe("acp bridge", () => {
           ? [index]
           : [];
       });
+
     const identityIndexesFor = (threadId: string): number[] =>
       output.messages.flatMap((message, index) =>
         message.method === "thread/identity" &&
@@ -3490,12 +3979,14 @@ describe("acp bridge", () => {
     const first = await startThread({
       envVars: { FAKE_ACP_LOAD_SESSION: "1" },
     });
-    expect(resetIndexesFor(first.bbThreadId)).toHaveLength(1);
+
+    expect(resetIndexesFor(first.appThreadId)).toHaveLength(1);
 
     await stopThread(first.providerThreadId);
     startedProviderThreadIds.pop();
+
     const resumeId = sendRequest("thread/resume", {
-      threadId: first.bbThreadId,
+      threadId: first.appThreadId,
       cwd: workspaceDir,
       instructionMode: "append",
       options: executionOptions({
@@ -3507,11 +3998,12 @@ describe("acp bridge", () => {
       }),
       providerThreadId: first.providerThreadId,
     });
+
     const resumeResponse = await waitForResponse(resumeId);
     expect(resumeResponse.error).toBeUndefined();
     startedProviderThreadIds.push(first.providerThreadId);
-    const resets = resetIndexesFor(first.bbThreadId);
-    const identities = identityIndexesFor(first.bbThreadId);
+    const resets = resetIndexesFor(first.appThreadId);
+    const identities = identityIndexesFor(first.appThreadId);
     expect(resets).toHaveLength(2);
     expect(identities).toHaveLength(2);
     expect(resets[0]).toBeGreaterThan(identities[0] ?? Infinity);
@@ -3530,8 +4022,10 @@ describe("acp bridge", () => {
       }),
       sourceProviderThreadId: "source-session",
     });
+
     const forkResponse = await waitForResponse(forkId);
     const forkResult = forkResponse.result;
+
     if (
       typeof forkResult !== "object" ||
       forkResult === null ||
@@ -3540,8 +4034,9 @@ describe("acp bridge", () => {
     ) {
       throw new Error("thread/fork did not return a providerThreadId");
     }
+
     startedProviderThreadIds.push(forkResult.providerThreadId);
-    bbThreadIdByProviderThreadId.set(
+    omnyoThreadIdByProviderThreadId.set(
       forkResult.providerThreadId,
       "thread-fork-reset",
     );
@@ -3552,12 +4047,12 @@ describe("acp bridge", () => {
   });
 
   it("surfaces Grok context window size and prompt usage from session _meta", async () => {
-    const { bbThreadId, providerThreadId } = await startThread({
+    const { appThreadId: appThreadId, providerThreadId } = await startThread({
       dialectId: "grok",
       envVars: { FAKE_ACP_GROK_CONTEXT: "1" },
     });
 
-    expect(contextWindowDeltasFor(bbThreadId)).toEqual([
+    expect(contextWindowDeltasFor(appThreadId)).toEqual([
       { used: 0, size: 500_000 },
     ]);
 
@@ -3566,45 +4061,48 @@ describe("acp bridge", () => {
     });
     await waitForTurnCompleted();
 
-    expect(contextWindowDeltasFor(bbThreadId)).toEqual([
+    expect(contextWindowDeltasFor(appThreadId)).toEqual([
       { used: 0, size: 500_000 },
       { used: 17_504, size: 500_000 },
     ]);
   });
 
   it("ignores Grok-shaped session _meta on other ACP dialects", async () => {
-    const { bbThreadId, providerThreadId } = await startThread({
+    const { appThreadId: appThreadId, providerThreadId } = await startThread({
       envVars: { FAKE_ACP_GROK_CONTEXT: "1" },
     });
 
-    expect(contextWindowDeltasFor(bbThreadId)).toEqual([]);
+    expect(contextWindowDeltasFor(appThreadId)).toEqual([]);
 
     sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "hello", mentions: [] }],
     });
     await waitForTurnCompleted();
 
-    expect(contextWindowDeltasFor(bbThreadId)).toEqual([]);
+    expect(contextWindowDeltasFor(appThreadId)).toEqual([]);
   });
 
   it("holds an agent update written with the session/new response until thread/identity is out", async () => {
-    const { bbThreadId } = await startThread({
+    const { appThreadId: appThreadId } = await startThread({
       envVars: { FAKE_ACP_UPDATES_WITH_SESSION_RESPONSE: "1" },
     });
 
-    const wire = messagesForThread(bbThreadId);
+    const wire = messagesForThread(appThreadId);
+
     const identityIndex = wire.findIndex(
       (message) => message.method === "thread/identity",
     );
+
     const firstDeltaIndex = wire.findIndex(
       (message) => message.method === THREAD_DELTA_NOTIFICATION_METHOD,
     );
+
     expect(identityIndex).toBeGreaterThan(-1);
     expect(firstDeltaIndex).toBeGreaterThan(identityIndex);
     const kinds = wire.flatMap(deltaKindsOf);
     expect(kinds[0]).toBe("session.reset");
     expect(kinds).toContain("item.textDelta");
-    expect(contextWindowDeltasFor(bbThreadId)).toEqual([
+    expect(contextWindowDeltasFor(appThreadId)).toEqual([
       { used: 12_345, size: 200_000 },
     ]);
   });
@@ -3613,7 +4111,9 @@ describe("acp bridge", () => {
     const source = await startThread({
       envVars: { FAKE_ACP_FORK_SESSION: "1" },
     });
+
     const forkThreadId = "thread-fork-with-updates";
+
     const forkId = sendRequest("thread/fork", {
       threadId: forkThreadId,
       cwd: workspaceDir,
@@ -3630,19 +4130,24 @@ describe("acp bridge", () => {
       }),
       sourceProviderThreadId: source.providerThreadId,
     });
+
     const forkedProviderThreadId = providerThreadIdOf(
       await waitForResponse(forkId),
     );
+
     startedProviderThreadIds.push(forkedProviderThreadId);
-    bbThreadIdByProviderThreadId.set(forkedProviderThreadId, forkThreadId);
+    omnyoThreadIdByProviderThreadId.set(forkedProviderThreadId, forkThreadId);
 
     const wire = messagesForThread(forkThreadId);
+
     const identityIndex = wire.findIndex(
       (message) => message.method === "thread/identity",
     );
+
     const firstDeltaIndex = wire.findIndex(
       (message) => message.method === THREAD_DELTA_NOTIFICATION_METHOD,
     );
+
     expect(identityIndex).toBeGreaterThan(-1);
     expect(firstDeltaIndex).toBeGreaterThan(identityIndex);
     expect(contextWindowDeltasFor(forkThreadId)).toEqual([
@@ -3654,11 +4159,12 @@ describe("acp bridge", () => {
     const first = await startThread({
       envVars: { FAKE_ACP_LOAD_SESSION: "1" },
     });
+
     await stopThread(first.providerThreadId);
     startedProviderThreadIds.pop();
 
     const resumeId = sendRequest("thread/resume", {
-      threadId: first.bbThreadId,
+      threadId: first.appThreadId,
       cwd: workspaceDir,
       instructionMode: "append",
       options: executionOptions({
@@ -3673,6 +4179,7 @@ describe("acp bridge", () => {
       }),
       providerThreadId: first.providerThreadId,
     });
+
     const response = await waitForResponse(resumeId);
     expect(response.result).toEqual({
       providerThreadId: first.providerThreadId,
@@ -3695,11 +4202,12 @@ describe("acp bridge", () => {
     const first = await startThread({
       envVars: { FAKE_ACP_LOAD_SESSION: "1" },
     });
+
     await stopThread(first.providerThreadId);
     startedProviderThreadIds.pop();
 
     const resumeId = sendRequest("thread/resume", {
-      threadId: first.bbThreadId,
+      threadId: first.appThreadId,
       cwd: workspaceDir,
       instructionMode: "append",
       options: executionOptions({
@@ -3715,6 +4223,7 @@ describe("acp bridge", () => {
       }),
       providerThreadId: first.providerThreadId,
     });
+
     const response = await waitForResponse(resumeId);
     expect(response.result).toEqual({
       providerThreadId: first.providerThreadId,
@@ -3728,11 +4237,12 @@ describe("acp bridge", () => {
     const first = await startThread({
       envVars: { FAKE_ACP_LOAD_SESSION: "1" },
     });
+
     await stopThread(first.providerThreadId);
     startedProviderThreadIds.pop();
 
     const resumeId = sendRequest("thread/resume", {
-      threadId: first.bbThreadId,
+      threadId: first.appThreadId,
       cwd: workspaceDir,
       instructionMode: "append",
       options: executionOptions({
@@ -3747,8 +4257,10 @@ describe("acp bridge", () => {
       }),
       providerThreadId: first.providerThreadId,
     });
+
     const response = await waitForResponse(resumeId);
     const result = response.result;
+
     if (
       typeof result !== "object" ||
       result === null ||
@@ -3757,6 +4269,7 @@ describe("acp bridge", () => {
     ) {
       throw new Error("thread/resume did not return a providerThreadId");
     }
+
     expect(result.providerThreadId).not.toBe(first.providerThreadId);
     expect(threadEventsOfType("thread/contextWindowUsage/updated")).toEqual([]);
     expect(threadEventsOfType("provider/warning")).not.toHaveLength(0);
@@ -3771,11 +4284,12 @@ describe("acp bridge", () => {
         FAKE_ACP_THOUGHT_LEVEL_CONFIG: "1",
       },
     });
+
     await stopThread(first.providerThreadId);
     startedProviderThreadIds.pop();
 
     const resumeId = sendRequest("thread/resume", {
-      threadId: first.bbThreadId,
+      threadId: first.appThreadId,
       cwd: workspaceDir,
       instructionMode: "append",
       options: executionOptions({
@@ -3793,6 +4307,7 @@ describe("acp bridge", () => {
       }),
       providerThreadId: first.providerThreadId,
     });
+
     const response = await waitForResponse(resumeId);
     expect(response.result).toEqual({
       providerThreadId: first.providerThreadId,
@@ -3820,8 +4335,10 @@ describe("acp bridge", () => {
       }),
       providerThreadId: "fake-sess-stale",
     });
+
     const response = await waitForResponse(resumeId);
     const result = response.result;
+
     if (
       typeof result !== "object" ||
       result === null ||
@@ -3830,6 +4347,7 @@ describe("acp bridge", () => {
     ) {
       throw new Error("thread/resume did not return a providerThreadId");
     }
+
     expect(result.providerThreadId).not.toBe("fake-sess-stale");
     startedProviderThreadIds.push(result.providerThreadId);
 
@@ -3837,26 +4355,32 @@ describe("acp bridge", () => {
   });
 
   it("reports unexpected agent exits as a single provider error", async () => {
-    const { bbThreadId, providerThreadId } = await startThread();
+    const { appThreadId: appThreadId, providerThreadId } = await startThread();
+
     const turnId = sendTurnRequest("turn/start", providerThreadId, {
       input: [{ type: "text", text: "die", mentions: [] }],
     });
+
     await waitForResponse(turnId);
 
     const errors = await waitFor(() => {
       const errorNotifications = notifications("error");
+
       return errorNotifications.length > 0 ? errorNotifications : undefined;
     }, "agent exit error notification");
+
     expect(errors).toHaveLength(1);
-    expect(errors[0]?.params).toMatchObject({ threadId: bbThreadId });
+    expect(errors[0]?.params).toMatchObject({ threadId: appThreadId });
     expect(threadEventsOfType("turn/completed").at(-1)).toMatchObject({
       status: "failed",
     });
+
     const response = await waitForResponse(
       sendTurnRequest("turn/start", providerThreadId, {
         input: [{ type: "text", text: "after", mentions: [] }],
       }),
     );
+
     expect(response.error).toBeUndefined();
     await waitFor(
       () => threadEventsOfType("turn/completed")[1],
@@ -3881,7 +4405,8 @@ describe("acp bridge", () => {
       const readyFile = join(workspaceDir, "agent-ready");
       const promptLog = join(workspaceDir, "prompts.jsonl");
       const requestLog = join(workspaceDir, "requests.jsonl");
-      const { bbThreadId, providerThreadId } = await startThread({
+
+      const { appThreadId: appThreadId, providerThreadId } = await startThread({
         envVars: {
           FAKE_ACP_LOAD_SESSION: loadSession,
           FAKE_ACP_FAIL_LOAD: failLoad,
@@ -3890,6 +4415,7 @@ describe("acp bridge", () => {
           FAKE_ACP_REQUEST_LOG: requestLog,
         },
       });
+
       await waitForResponse(
         sendTurnRequest("turn/start", providerThreadId, {
           input: [
@@ -3901,6 +4427,7 @@ describe("acp bridge", () => {
           ],
         }),
       );
+
       if (activeTurn) {
         await waitFor(
           () => loggedPrompts(promptLog).includes("hang") || undefined,
@@ -3911,38 +4438,47 @@ describe("acp bridge", () => {
           status: "completed",
         });
       }
+
       process.kill(Number(readFileSync(readyFile, "utf8")), "SIGTERM");
       await waitForAgentExit(readyFile);
+
       const error = await waitFor(
         () => notifications("error").at(-1),
         "external agent exit notification",
       );
+
       expect(error.params).toMatchObject({
-        threadId: bbThreadId,
+        threadId: appThreadId,
         message: expect.stringContaining("exited unexpectedly"),
       });
       expect(notifications("error")).toHaveLength(1);
+
       if (activeTurn) {
         expect(threadEventsOfType("turn/completed").at(-1)).toMatchObject({
           status: "failed",
         });
       }
+
       const completionCount = threadEventsOfType("turn/completed").length;
+
       const response = await waitForResponse(
         sendTurnRequest("turn/start", providerThreadId, {
           input: [{ type: "text", text: "after", mentions: [] }],
         }),
       );
+
       expect(response.error).toBeUndefined();
+
       const completed = await waitFor(
         () => threadEventsOfType("turn/completed")[completionCount],
         "recovered turn completion",
       );
+
       expect(completed).toMatchObject({ status: "completed" });
       expect(agentMessageTexts()).toContain("echo:after");
       const contextLost = loadSession === "0" || failLoad === "1";
       expect(notifications("session/replaced").at(-1)?.params).toMatchObject({
-        threadId: bbThreadId,
+        threadId: appThreadId,
         contextLost,
       });
       expect(
@@ -3950,9 +4486,10 @@ describe("acp bridge", () => {
           (request) => request.method === "session/load",
         ),
       ).toHaveLength(loadSession === "1" ? 1 : 0);
+
       if (!contextLost) {
         expect(notifications("thread/identity").at(-1)?.params).toMatchObject({
-          threadId: bbThreadId,
+          threadId: appThreadId,
           providerThreadId,
         });
       }
@@ -3965,6 +4502,7 @@ describe("acp bridge", () => {
       const readyFile = join(workspaceDir, "agent-ready");
       const descendantPidFile = join(workspaceDir, "descendant-pid");
       const promptLog = join(workspaceDir, "prompts.jsonl");
+
       const { providerThreadId } = await startThread({
         envVars: {
           FAKE_ACP_LINGERING_DESCENDANT_PID_FILE: descendantPidFile,
@@ -3972,6 +4510,7 @@ describe("acp bridge", () => {
           FAKE_ACP_PROMPT_LOG: promptLog,
         },
       });
+
       await waitForResponse(
         sendTurnRequest("turn/start", providerThreadId, {
           input: [{ type: "text", text: "hang", mentions: [] }],
@@ -3986,6 +4525,7 @@ describe("acp bridge", () => {
       vi.useFakeTimers({
         toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
       });
+
       try {
         process.kill(Number(readFileSync(readyFile, "utf8")), "SIGTERM");
         expect(await waitForTurnCompleted()).toMatchObject({
@@ -3999,10 +4539,13 @@ describe("acp bridge", () => {
             input: [{ type: "text", text: "late steer", mentions: [] }],
           }),
         );
+
         expect(steer.error?.code).toBe(BRIDGE_JSON_RPC_ERRORS.NO_ACTIVE_TURN);
+
         const nextTurnId = sendTurnRequest("turn/start", providerThreadId, {
           input: [{ type: "text", text: "after", mentions: [] }],
         });
+
         await vi.advanceTimersByTimeAsync(2_000);
         const response = await waitForResponse(nextTurnId);
         expect(response.error).toBeUndefined();
@@ -4024,6 +4567,7 @@ describe("acp bridge", () => {
   it("releases a session still under construction: the agent is reaped and the pending thread/start fails", async () => {
     const readyFile = join(workspaceDir, "agent-ready");
     const threadId = "thread-release-during-construction";
+
     const options = executionOptions({
       providerOptions: {
         acpLaunchSpec: acpLaunchSpec({
@@ -4034,12 +4578,14 @@ describe("acp bridge", () => {
         }),
       },
     });
+
     const startId = sendRequest("thread/start", {
       threadId,
       cwd: workspaceDir,
       instructionMode: "append",
       options,
     });
+
     await waitForFileWithRealTimer(readyFile);
     expect(findResponse(startId)).toBeUndefined();
 
@@ -4049,6 +4595,7 @@ describe("acp bridge", () => {
       intent: "release",
       activeTurnId: null,
     });
+
     expect((await waitForResponse(stopId)).result).toEqual({ ok: true });
 
     const start = await waitForResponse(startId);
@@ -4068,6 +4615,7 @@ describe("acp bridge", () => {
       input: [{ type: "text", text: "ping", mentions: [] }],
       options,
     });
+
     expect((await waitForResponse(turnId)).error?.message).toBe(
       "No active ACP session",
     );
@@ -4076,6 +4624,7 @@ describe("acp bridge", () => {
   it("lets a retried thread/start supersede a construction still in flight for the same thread", async () => {
     const threadId = "thread-retried-construction";
     const slowReadyFile = join(workspaceDir, "slow-agent-ready");
+
     const firstStartId = sendRequest("thread/start", {
       threadId,
       cwd: workspaceDir,
@@ -4091,6 +4640,7 @@ describe("acp bridge", () => {
         },
       }),
     });
+
     await waitForFileWithRealTimer(slowReadyFile);
 
     const stopId = sendRequest("thread/stop", {
@@ -4099,7 +4649,9 @@ describe("acp bridge", () => {
       intent: "release",
       activeTurnId: null,
     });
+
     await waitForResponse(stopId);
+
     const secondStartId = sendRequest("thread/start", {
       threadId,
       cwd: workspaceDir,
@@ -4108,11 +4660,13 @@ describe("acp bridge", () => {
         providerOptions: { acpLaunchSpec: acpLaunchSpec({}) },
       }),
     });
+
     const liveProviderThreadId = providerThreadIdOf(
       await waitForResponse(secondStartId),
     );
+
     startedProviderThreadIds.push(liveProviderThreadId);
-    bbThreadIdByProviderThreadId.set(liveProviderThreadId, threadId);
+    omnyoThreadIdByProviderThreadId.set(liveProviderThreadId, threadId);
 
     const first = await waitForResponse(firstStartId);
     expect(first.result).toBeUndefined();
@@ -4130,6 +4684,7 @@ describe("acp bridge", () => {
     const turnId = sendTurnRequest("turn/start", liveProviderThreadId, {
       input: [{ type: "text", text: "echo-selected-model", mentions: [] }],
     });
+
     await waitForResponse(turnId);
     await waitForTurnCompleted();
     expect(agentMessageTexts()).toContain("selected-model:fake/default");
@@ -4143,13 +4698,16 @@ describe("acp bridge", () => {
       options: executionOptions({
         providerOptions: {
           acpLaunchSpec: acpLaunchSpec({
-            agent: { command: "definitely-not-a-real-binary-bb", args: [] },
+            agent: { command: "definitely-not-a-real-binary-omnyo", args: [] },
           }),
         },
       }),
     });
+
     const response = await waitForResponse(id);
-    expect(response.error?.message).toMatch(/definitely-not-a-real-binary-bb/);
+    expect(response.error?.message).toMatch(
+      /definitely-not-a-real-binary-omnyo/,
+    );
   });
 
   it("rejects thread/start without an ACP launch spec", async () => {
@@ -4159,6 +4717,7 @@ describe("acp bridge", () => {
       instructionMode: "append",
       options: executionOptions({}),
     });
+
     expect((await waitForResponse(id)).error).toMatchObject({
       code: -32602,
       message: expect.stringContaining("acpLaunchSpec"),

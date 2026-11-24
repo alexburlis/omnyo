@@ -2,13 +2,16 @@ import { z } from "zod";
 import type { ThreadEventType } from "./provider-event.js";
 
 const threadEventScopeKindValues = ["thread", "turn"] as const;
+
 const threadEventScopeKindSchema = z.enum(threadEventScopeKindValues);
+
 export type ThreadEventScopeKind = z.infer<typeof threadEventScopeKindSchema>;
 
 export const threadEventScopeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("thread") }),
   z.object({ kind: z.literal("turn"), turnId: z.string().min(1) }),
 ]);
+
 export type ThreadEventScope = z.infer<typeof threadEventScopeSchema>;
 
 const threadEventScopePolicyValues = [
@@ -16,7 +19,9 @@ const threadEventScopePolicyValues = [
   "turn",
   "thread-or-turn",
 ] as const;
+
 const threadEventScopePolicySchema = z.enum(threadEventScopePolicyValues);
+
 type ThreadEventScopePolicy = z.infer<typeof threadEventScopePolicySchema>;
 
 interface ValidateThreadEventScopeArgs {
@@ -131,6 +136,7 @@ const threadEventScopeDefinitionByType = {
   },
   "turn/plan/updated": { policy: "turn" },
   "turn/diff/updated": { policy: "turn" },
+  "turn/mainRun/updated": { policy: "turn" },
   "provider/error": {
     policy: "thread-or-turn",
     rationale:
@@ -204,7 +210,7 @@ const threadEventScopeDefinitionByType = {
   "system/operation": {
     policy: "thread-or-turn",
     rationale:
-      "Thread-management operations use thread scope outside provider turns; tool-owned operations use turn scope so the operation stays with the tool call that caused it.",
+      "Thread-management operations use thread scope outside provider turns; tool-owned operations use turn scope so the operation stays with the tool call that caused it. Activities such as a started preview use turn scope while the thread has an active turn and thread scope otherwise.",
   },
   "system/interaction/lifecycle": {
     policy: "thread-or-turn",
@@ -217,6 +223,11 @@ const threadEventScopeDefinitionByType = {
     policy: "thread",
     rationale:
       "Workspace provisioning lifecycle event; environment setup belongs to the thread, not a turn.",
+  },
+  "system/git-activity": {
+    policy: "turn",
+    rationale:
+      "Git commits and pushes are read from the host after a turn ends and belong to the turn whose commands made them.",
   },
   "system/provider-turn-watchdog": {
     policy: "thread",
@@ -236,9 +247,11 @@ function getThreadEventScopePolicyDefinitionEntries(): ThreadEventScopePolicyDef
 
 function buildThreadEventScopePolicyByType(): ThreadEventScopePolicyByType {
   const policies: Partial<ThreadEventScopePolicyByType> = {};
+
   for (const entry of getThreadEventScopePolicyDefinitionEntries()) {
     policies[entry.type] = entry.definition.policy;
   }
+
   return policies as ThreadEventScopePolicyByType;
 }
 
@@ -266,6 +279,7 @@ export function requireThreadEventScopeTurnId(
       `${args.type} requires turn scope but received ${args.scope.kind} scope`,
     );
   }
+
   return args.scope.turnId;
 }
 

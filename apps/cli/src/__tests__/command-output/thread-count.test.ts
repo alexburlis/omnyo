@@ -8,15 +8,13 @@ import {
 import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import { registerThreadCommands } from "../../commands/thread/index.js";
 
-describe("bb thread count command output", () => {
+describe("omnyo thread count command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
     registerThreadCommands(program, () => "http://server");
 
-  // The ungrouped count is one number, so it prints as one number and stays
-  // pipeable without --json.
-  it("bb thread count prints the bare total and sends only the filters given", async () => {
+  it("omnyo thread count prints the bare total and sends only the filters given", async () => {
     const get = vi.fn(async () => ({ total: 3 }));
     stubServerApi({ "v1.threads.count.$get": get });
 
@@ -31,9 +29,7 @@ describe("bb thread count command output", () => {
     expect(vi.mocked(console.log).mock.calls[0]?.[0]).toBe("3");
   });
 
-  // "none" is the root-parent sentinel, not a thread id: it must reach the
-  // route verbatim so the count excludes every child thread.
-  it("bb thread count --parent none passes the root sentinel through", async () => {
+  it("omnyo thread count --parent none passes the root sentinel through", async () => {
     const get = vi.fn(async () => ({ total: 0 }));
     stubServerApi({ "v1.threads.count.$get": get });
 
@@ -43,7 +39,7 @@ describe("bb thread count command output", () => {
     expect(vi.mocked(console.log).mock.calls[0]?.[0]).toBe("0");
   });
 
-  it("bb thread count --by renders one row per group, largest first, with a total", async () => {
+  it("omnyo thread count --by renders one row per group, largest first, with a total", async () => {
     const get = vi.fn(async () => ({
       total: 6,
       groups: [
@@ -52,26 +48,29 @@ describe("bb thread count command output", () => {
         { key: "host_b", count: 3 },
       ],
     }));
+
     stubServerApi({ "v1.threads.count.$get": get });
 
     await runCommand(["thread", "count", "--by", "host"], register);
 
     expect(get).toHaveBeenCalledWith({ query: { groupBy: "host" } });
+
     const lines = collectLogLines(vi.mocked(console.log))
       .join("\n")
       .split("\n")
-      // Drop blank spacers and the table's head rule.
+
       .filter((line) => /[a-zA-Z0-9]/.test(line));
+
     expect(lines[0]).toContain("Machine");
     expect(lines[0]).toContain("Count");
     expect(lines[1]).toContain("host_b");
     expect(lines[2]).toContain("host_a");
-    // A thread with no host still counts, under a "-" key sorted last.
+
     expect(lines[3].trim().startsWith("-")).toBe(true);
     expect(lines.at(-1)).toBe("Total: 6");
   });
 
-  it("bb thread count --by reports an empty grouped result instead of an empty table", async () => {
+  it("omnyo thread count --by reports an empty grouped result instead of an empty table", async () => {
     const get = vi.fn(async () => ({ total: 0, groups: [] }));
     stubServerApi({ "v1.threads.count.$get": get });
 
@@ -80,7 +79,7 @@ describe("bb thread count command output", () => {
     expect(vi.mocked(console.log).mock.calls[0]?.[0]).toBe("No threads found");
   });
 
-  it("bb thread count rejects an unknown --by dimension before requesting", async () => {
+  it("omnyo thread count rejects an unknown --by dimension before requesting", async () => {
     const get = vi.fn(async () => ({ total: 0 }));
     stubServerApi({ "v1.threads.count.$get": get });
 
@@ -94,7 +93,7 @@ describe("bb thread count command output", () => {
     );
   });
 
-  it("bb thread count rejects an unknown --status before requesting", async () => {
+  it("omnyo thread count rejects an unknown --status before requesting", async () => {
     const get = vi.fn(async () => ({ total: 0 }));
     stubServerApi({ "v1.threads.count.$get": get });
 
@@ -108,11 +107,12 @@ describe("bb thread count command output", () => {
     );
   });
 
-  it("bb thread count --json prints the raw grouped response", async () => {
+  it("omnyo thread count --json prints the raw grouped response", async () => {
     const get = vi.fn(async () => ({
       total: 2,
       groups: [{ key: "codex", count: 2 }],
     }));
+
     stubServerApi({ "v1.threads.count.$get": get });
 
     await runCommand(

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AppCommandId } from "@bb/domain";
+import type { AppCommandId } from "@omnyo/domain";
 import type { AppShortcutPresentation } from "@/lib/app-keybindings";
 import {
   buildAppCommandActions,
@@ -16,12 +16,14 @@ function build(
   shortcuts: ReadonlyMap<AppCommandId, AppShortcutPresentation> = new Map(),
 ) {
   const dispatch = vi.fn();
+
   const actions = buildAppCommandActions({
     target: null,
     isCommandAvailable: (command) => available.includes(command),
     dispatch,
     shortcuts,
   });
+
   return { actions, dispatch };
 }
 
@@ -37,6 +39,7 @@ describe("PALETTE_COMMAND_IDS", () => {
   it("omits the relative cycle commands but keeps the discrete composer ones", () => {
     expect(PALETTE_COMMAND_IDS).toContain("composer.focus");
     expect(PALETTE_COMMAND_IDS).toContain("modelPicker.toggle");
+
     for (const cycled of [
       "modelPicker.cycleModel",
       "modelPicker.cycleModelBackward",
@@ -69,6 +72,7 @@ describe("buildAppCommandActions", () => {
       ["thread.new"],
       new Map([["thread.new" as AppCommandId, SHORTCUT]]),
     );
+
     expect(actions[0]).toMatchObject({
       id: "app:thread.new",
       bucket: "Threads",
@@ -94,12 +98,14 @@ describe("buildAppCommandActions", () => {
   it("dispatches with the element that was focused before the palette opened", () => {
     const target = { id: "composer" } as unknown as EventTarget;
     const dispatch = vi.fn();
+
     const actions = buildAppCommandActions({
       target,
       isCommandAvailable: () => true,
       dispatch,
       shortcuts: new Map(),
     });
+
     actions.find((action) => action.id === "app:thread.new")?.run();
     expect(dispatch).toHaveBeenCalledWith("thread.new", target);
   });

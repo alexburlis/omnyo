@@ -9,5 +9,4 @@ export const LazyTerminalOutputBlock = defineSplit<TerminalOutputBlockProps>({
       (module) => module.TerminalOutputBlock,
     ),
   loading: () => <TimelineRowBodyPlaceholder />,
-  tier: "intent",
 });

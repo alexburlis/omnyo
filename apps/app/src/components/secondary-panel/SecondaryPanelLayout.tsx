@@ -16,9 +16,9 @@ import {
   PanelGroup,
   type ImperativePanelGroupHandle,
 } from "react-resizable-panels";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { useResponsiveDrawerRealization } from "@bb/shared-ui/responsive-overlay";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import { useResponsiveDrawerRealization } from "@omnyo/shared-ui/responsive-overlay";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { CompactSecondaryPanelShelf } from "./CompactSecondaryPanelShelf";
 import type { PluginComposerHost } from "@/components/plugin/plugin-composer-host";
 import { dispatchBrowserViewBoundsSync } from "@/lib/browser-view-bounds-sync";
@@ -96,6 +96,7 @@ export function SecondaryPanelLayout({
   const { ref: sizingRef, minimum: minimumSize } = useSecondaryPanelSizing();
   const paneContext = useOptionalPaneContext();
   const pluginDetails = useContext(PluginDetailPanelContext);
+
   const renderPanel = useCallback(
     (args: SecondaryPanelRenderArgs) => (
       <PluginDetailPanelContext.Provider value={pluginDetails}>
@@ -104,33 +105,42 @@ export function SecondaryPanelLayout({
     ),
     [pluginDetails, renderWorkspacePanel],
   );
+
   const secondaryPanelHost = paneContext?.secondaryPanelHost ?? null;
   const renderAsDrawer = useIsCompactViewport();
+
   const sidebarDrawerShowing = useSyncExternalStore(
     subscribeCompactSidebarDrawerShowing,
     isCompactSidebarDrawerShowing,
     () => false,
   );
+
   const previousSidebarDrawerShowing = useRef(sidebarDrawerShowing);
   useEffect(() => {
     const sidebarOpened =
       sidebarDrawerShowing && !previousSidebarDrawerShowing.current;
+
     previousSidebarDrawerShowing.current = sidebarDrawerShowing;
+
     if (!renderAsDrawer || !open || !sidebarOpened) return;
     onClose();
   }, [onClose, open, renderAsDrawer, sidebarDrawerShowing]);
+
   const transitionsReady = usePanelCollapseTransitionsReady(
     resetKey,
     !renderAsDrawer,
   );
+
   const persistedSecondaryWidthPercent = useAtomValue(
     secondaryPanelWidthPercentAtom,
   );
+
   const isMainCollapsed = open && !renderAsDrawer && collapse?.active === true;
 
   const horizontalPanelGroupRef = useRef<ImperativePanelGroupHandle | null>(
     null,
   );
+
   const persistedSecondaryWidthRef = useRef(persistedSecondaryWidthPercent);
   useEffect(() => {
     persistedSecondaryWidthRef.current = persistedSecondaryWidthPercent;
@@ -138,19 +148,24 @@ export function SecondaryPanelLayout({
 
   useLayoutEffect(() => {
     const group = horizontalPanelGroupRef.current;
+
     if (group === null || renderAsDrawer) {
       return;
     }
+
     if (group.getLayout().length !== 2) {
       return;
     }
 
     if (!open) {
       group.setLayout([FULL_PANEL_SIZE_PERCENT, 0]);
+
       return;
     }
+
     if (isMainCollapsed) {
       group.setLayout([0, FULL_PANEL_SIZE_PERCENT]);
+
       return;
     }
 
@@ -160,13 +175,16 @@ export function SecondaryPanelLayout({
 
   const [isCompactDrawerContentSettled, setIsCompactDrawerContentSettled] =
     useState(false);
+
   const { isContentRealized: isPanelRealized, realizeContent: realizePanel } =
     useResponsiveDrawerRealization({
       open,
       enabled: renderAsDrawer,
     });
+
   const compactDrawerContentSettleFrameRef = useRef<number | null>(null);
   const compactDrawerContentSettleGenerationRef = useRef(0);
+
   const compactDrawerContentSettleStateRef = useRef({
     open,
     renderAsDrawer,
@@ -183,9 +201,11 @@ export function SecondaryPanelLayout({
 
   const cancelCompactDrawerContentSettleFrame = useCallback(() => {
     compactDrawerContentSettleGenerationRef.current += 1;
+
     if (compactDrawerContentSettleFrameRef.current === null) {
       return;
     }
+
     window.cancelAnimationFrame(compactDrawerContentSettleFrameRef.current);
     compactDrawerContentSettleFrameRef.current = null;
   }, []);
@@ -208,7 +228,9 @@ export function SecondaryPanelLayout({
       if (!animationEndedOpen) {
         return;
       }
+
       const currentState = compactDrawerContentSettleStateRef.current;
+
       if (!currentState.open || !currentState.renderAsDrawer) {
         return;
       }
@@ -220,6 +242,7 @@ export function SecondaryPanelLayout({
         () => {
           compactDrawerContentSettleFrameRef.current = null;
           const latestState = compactDrawerContentSettleStateRef.current;
+
           if (
             compactDrawerContentSettleGenerationRef.current !==
               requestGeneration ||
@@ -233,6 +256,7 @@ export function SecondaryPanelLayout({
           dispatchBrowserViewBoundsSync();
 
           const stateAfterSync = compactDrawerContentSettleStateRef.current;
+
           if (
             compactDrawerContentSettleGenerationRef.current ===
               requestGeneration &&
@@ -252,6 +276,7 @@ export function SecondaryPanelLayout({
   const canShowNativeBrowserView = renderAsDrawer
     ? open && isCompactDrawerContentSettled
     : open && (secondaryPanelHost === null || paneContext?.isFocused === true);
+
   const resizablePanelId =
     secondaryPanelHost === null || paneContext === null
       ? undefined
@@ -277,6 +302,7 @@ export function SecondaryPanelLayout({
       resizablePanelId,
     ],
   );
+
   const drawerPanel = useMemo(
     () =>
       renderAsDrawer
@@ -289,6 +315,7 @@ export function SecondaryPanelLayout({
         : null,
     [canShowNativeBrowserView, collapse?.onToggle, renderAsDrawer, renderPanel],
   );
+
   const hostedPanelModel = useMemo<PaneSecondaryPanelViewModel>(
     () => ({
       composerHost,
@@ -310,6 +337,7 @@ export function SecondaryPanelLayout({
       transitionsReady,
     ],
   );
+
   usePaneSecondaryPanelRegistration(secondaryPanelHost, hostedPanelModel);
 
   const mainContent = (
@@ -367,10 +395,7 @@ export function SecondaryPanelLayout({
             }
             minSize={minimumSize.min * 100}
             order={1}
-            className={cn(
-              "min-w-0 overflow-clip transition-[flex-grow,flex-basis]",
-              PANEL_COLLAPSE_TRANSITION_CLASS,
-            )}
+            className="isolate min-w-0 overflow-clip"
           >
             {mainContent}
           </Panel>

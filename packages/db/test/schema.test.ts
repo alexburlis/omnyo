@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createEnvironmentId,
   createHostDaemonSessionId,
@@ -213,7 +213,7 @@ describe("db rebuild schema", () => {
         id: environmentId,
         projectId,
         hostId,
-        path: "/tmp/rebuild/.bb/env",
+        path: "/tmp/rebuild/.omnyo/env",
         isGitRepo: true,
         status: "ready",
         createdAt: now,
@@ -333,9 +333,9 @@ describe("db rebuild schema", () => {
         id: environmentId,
         projectId,
         hostId,
-        path: "/tmp/rebuild/.bb/env",
+        path: "/tmp/rebuild/.omnyo/env",
         isGitRepo: true,
-        branchName: "bb/env-1",
+        branchName: "omnyo/env-1",
         status: "ready",
         createdAt: now,
         updatedAt: now,
@@ -398,9 +398,9 @@ describe("db rebuild schema", () => {
         id: environmentId,
         projectId,
         hostId,
-        path: "/tmp/rebuild/.bb/env",
+        path: "/tmp/rebuild/.omnyo/env",
         isGitRepo: true,
-        branchName: "bb/env-1",
+        branchName: "omnyo/env-1",
         status: "ready",
         createdAt: now,
         updatedAt: now,
@@ -579,6 +579,29 @@ describe("db rebuild schema", () => {
     expect(createPromptHistoryEntryId()).toMatch(/^phist_/u);
     expect(createQueuedThreadMessageId()).toMatch(/^qmsg_/u);
     expect(createHostDaemonSessionId()).toMatch(/^hses_/u);
+  });
+
+  it("creates unique event ids in creation order, even when the clock stalls or moves back", () => {
+    vi.useFakeTimers();
+
+    try {
+      const ids: string[] = [];
+      vi.setSystemTime(1_793_000_000_000);
+
+      for (let index = 0; index < 40_000; index += 1) ids.push(createEventId());
+
+      vi.setSystemTime(1_793_000_000_005);
+      ids.push(createEventId());
+      vi.setSystemTime(1_792_999_000_000);
+      ids.push(createEventId(), createEventId());
+
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(
+        ids.every((id, index) => index === 0 || ids[index - 1]! < id),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("requires a non-null data_dir on host_daemon_sessions", () => {

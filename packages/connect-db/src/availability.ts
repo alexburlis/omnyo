@@ -27,6 +27,7 @@ export async function checkLabelAvailability(
   const label = rawLabel.trim().toLowerCase();
 
   const invalid = validateLabel(label);
+
   if (invalid) return { available: false, reason: "invalid", error: invalid };
 
   const claim = await db
@@ -34,6 +35,7 @@ export async function checkLabelAvailability(
     .from(labelClaim)
     .where(eq(labelClaim.label, label))
     .get();
+
   if (claim) {
     return {
       available: false,

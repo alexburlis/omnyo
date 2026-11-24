@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadTimelineResponse, TimelineRow } from "@bb/server-contract";
+import type { ThreadTimelineResponse, TimelineRow } from "@omnyo/server-contract";
 import {
   formatTimelineRowKindsForDiagnostics,
   timelineHasAssistantConversation,
@@ -19,6 +19,7 @@ const ASSISTANT_ROW = {
   text: "Done",
   attachments: null,
   turnRequest: null,
+  turnGit: null,
 } satisfies TimelineRow;
 
 const USER_ROW = {
@@ -39,7 +40,12 @@ const USER_ROW = {
   senderThreadId: null,
   systemMessageKind: "unlabeled",
   systemMessageSubject: null,
-  turnRequest: { isGrouped: false, kind: "message", status: "accepted" },
+  turnRequest: {
+    clientRequestId: null,
+    isGrouped: false,
+    kind: "message",
+    status: "accepted",
+  },
 } satisfies TimelineRow;
 
 function makeTimelineResponse(

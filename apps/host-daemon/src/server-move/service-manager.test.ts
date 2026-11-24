@@ -13,6 +13,7 @@ import {
 } from "./service-manager.js";
 
 const execFileAsync = promisify(execFile);
+
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -29,8 +30,8 @@ function definition(
     manager,
     path: `/services/${unitName}`,
     unitName,
-    programArguments: ["node", "bb-app", "start"],
-    environment: { BB_DATA_DIR: "/data" },
+    programArguments: ["node", "omnyo-app", "start"],
+    environment: { OMNYO_DATA_DIR: "/data" },
     content: "",
   };
 }
@@ -43,13 +44,15 @@ describe("restartService", () => {
     "reloads and restarts a %s unit without blocking on its own stop",
     async (manager, scope) => {
       const commands: string[][] = [];
+
       const runCommand: ServerMoveCommandRunner = async (command, args) => {
         commands.push([command, ...args]);
       };
+
       const spawnDetached = vi.fn(async () => 1);
 
       await restartService({
-        definition: definition(manager, "bb-host-daemon-old-me.service"),
+        definition: definition(manager, "omnyo-host-daemon-old-me.service"),
         runCommand,
         spawnDetached,
         uid: 1000,
@@ -64,7 +67,7 @@ describe("restartService", () => {
           scope,
           "restart",
           "--no-block",
-          "bb-host-daemon-old-me.service",
+          "omnyo-host-daemon-old-me.service",
         ],
       ]);
       expect(spawnDetached).not.toHaveBeenCalled();
@@ -73,6 +76,7 @@ describe("restartService", () => {
 
   it("does not restart when daemon-reload fails", async () => {
     const commands: string[][] = [];
+
     const runCommand: ServerMoveCommandRunner = async (command, args) => {
       commands.push([command, ...args]);
       throw new Error("Failed to connect to bus");
@@ -80,7 +84,7 @@ describe("restartService", () => {
 
     await expect(
       restartService({
-        definition: definition("systemd-user", "bb-host-daemon-x.service"),
+        definition: definition("systemd-user", "omnyo-host-daemon-x.service"),
         runCommand,
         spawnDetached: vi.fn(async () => 1),
         uid: 1000,
@@ -97,12 +101,13 @@ describe("restartService", () => {
 
     await restartService({
       definition: {
-        ...definition("launchd", "app.getbb.host-daemon.old-me"),
-        path: "/Users/me/Library/LaunchAgents/app.getbb.host-daemon.old-me.plist",
+        ...definition("launchd", "app.omnyo.host-daemon.old-me"),
+        path: "/Users/me/Library/LaunchAgents/app.omnyo.host-daemon.old-me.plist",
       },
       runCommand,
       spawnDetached: async (request) => {
         requests.push(request);
+
         return 4242;
       },
       uid: 501,
@@ -117,9 +122,9 @@ describe("restartService", () => {
         args: [
           "-c",
           LAUNCHD_RESTART_SCRIPT,
-          "bb-server-move-restart",
+          "omnyo-server-move-restart",
           "gui/501",
-          "/Users/me/Library/LaunchAgents/app.getbb.host-daemon.old-me.plist",
+          "/Users/me/Library/LaunchAgents/app.omnyo.host-daemon.old-me.plist",
         ],
         env: { HOME: "/Users/me" },
         logPath: "/data/logs/server-move.log",
@@ -130,7 +135,7 @@ describe("restartService", () => {
   it.skipIf(process.platform === "win32")(
     "runs launchctl bootout before bootstrap in the helper script",
     async () => {
-      const root = await mkdtemp(join(tmpdir(), "bb-launchd-helper-test-"));
+      const root = await mkdtemp(join(tmpdir(), "omnyo-launchd-helper-test-"));
       roots.push(root);
       const callsPath = join(root, "calls.log");
       const launchctlPath = join(root, "launchctl");
@@ -145,7 +150,7 @@ describe("restartService", () => {
         [
           "-c",
           LAUNCHD_RESTART_SCRIPT,
-          "bb-server-move-restart",
+          "omnyo-server-move-restart",
           "gui/501",
           "/Users/me/Library/LaunchAgents/app.plist",
         ],

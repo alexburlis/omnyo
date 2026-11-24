@@ -1,5 +1,5 @@
-import { isActiveTerminalSessionStatus } from "@bb/domain";
-import type { TerminalSession } from "@bb/server-contract";
+import { isActiveTerminalSessionStatus } from "@omnyo/domain";
+import type { TerminalSession } from "@omnyo/server-contract";
 
 export function isVisibleTerminalSession(session: TerminalSession): boolean {
   return (

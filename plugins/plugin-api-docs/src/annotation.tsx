@@ -20,6 +20,7 @@ export const MAX_CHIP_COUNTER_SCALE = 3;
 
 export function annotationChipCounterScale(fixtureScale: number): number {
   if (!Number.isFinite(fixtureScale) || fixtureScale <= 0) return 1;
+
   return Math.min(MAX_CHIP_COUNTER_SCALE, Math.max(1, 1 / fixtureScale));
 }
 
@@ -43,7 +44,7 @@ export function ExperimentalBadge() {
   return (
     <span
       className="inline-flex items-center rounded border border-warning/40 bg-warning/10 px-1.5 py-px font-mono text-xs text-warning-text"
-      title="Experimental: audited before stabilizing — see docs/api_to_audit.md in the bb repository."
+      title="Experimental: audited before stabilizing — see docs/api_to_audit.md in the Omnyo repository."
     >
       experimental
     </span>
@@ -61,9 +62,11 @@ export function renderSurfaceCopy(
   resolve?: (id: string) => SurfaceReference | null,
 ): ReactNode {
   const parts = text.split(COPY_TOKEN).filter((part) => part !== undefined);
+
   if (parts.length < 2) {
     return text;
   }
+
   return parts.map((part, index) => {
     if (part.startsWith("`") && part.endsWith("`")) {
       return (
@@ -75,6 +78,7 @@ export function renderSurfaceCopy(
         </code>
       );
     }
+
     if (part === "{experimental}") {
       return (
         <Fragment key={index}>
@@ -83,15 +87,20 @@ export function renderSurfaceCopy(
         </Fragment>
       );
     }
+
     const reference = /^\[([^\]]+)\]\(([a-z0-9-]+)\)$/.exec(part);
+
     if (!reference) {
       return <Fragment key={index}>{part}</Fragment>;
     }
+
     const [, label, id] = reference;
     const target = resolve?.(id) ?? null;
+
     if (!target) {
       return <Fragment key={index}>{label}</Fragment>;
     }
+
     return (
       <button
         key={index}

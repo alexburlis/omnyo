@@ -5,12 +5,13 @@ import {
   DARK_COLOR_SCHEME_QUERY,
   getMediaQuerySnapshot,
   subscribeMediaQuery,
-} from "@bb/shared-ui/hooks/use-media-query";
+} from "@omnyo/shared-ui/hooks/use-media-query";
 import { createLocalStorageEnumStorage } from "@/lib/browser-storage";
 
-export const THEME_STORAGE_KEY = "bb.theme";
+export const THEME_STORAGE_KEY = "omnyo.theme";
 
 export type Theme = "light" | "dark";
+
 export type ThemePreference = Theme | "system";
 
 type ThemeListener = () => void;
@@ -19,6 +20,7 @@ const themePreferenceStorage = createLocalStorageEnumStorage<ThemePreference>(
   (value): value is ThemePreference =>
     value === "light" || value === "dark" || value === "system",
 );
+
 const themePreferenceAtom = atomWithStorage<ThemePreference>(
   THEME_STORAGE_KEY,
   "system",
@@ -40,8 +42,10 @@ function syncThemeColorMeta(): void {
   const meta = document.querySelector<HTMLMetaElement>(
     'meta[name="theme-color"]',
   );
+
   if (!meta || !document.body) return;
   const background = window.getComputedStyle(document.body).backgroundColor;
+
   if (!background || background === "rgba(0, 0, 0, 0)") return;
   meta.content = background;
 }
@@ -56,6 +60,7 @@ function getSystemTheme(): Theme {
 
 function getPreferredTheme(): Theme {
   const themePreference = getThemePreference();
+
   return themePreference === "system" ? getSystemTheme() : themePreference;
 }
 
@@ -66,9 +71,13 @@ export function setPreferredTheme(themePreference: ThemePreference): void {
 }
 
 let currentTheme: Theme = "light";
+
 let currentThemePreference: ThemePreference = "system";
+
 const themeSubscribers = new Set<ThemeListener>();
+
 const themePreferenceSubscribers = new Set<ThemeListener>();
+
 let initialized = false;
 
 function emitTheme() {
@@ -85,6 +94,7 @@ function emitTheme() {
   if (themePreferenceChanged) {
     themePreferenceSubscribers.forEach((listener) => listener());
   }
+
   if (themeChanged) {
     themeSubscribers.forEach((listener) => listener());
   }
@@ -108,26 +118,37 @@ export function initializePreferredTheme(): void {
 function subscribePreferredTheme(listener: ThemeListener): () => void {
   ensureThemeObserver();
   themeSubscribers.add(listener);
+
   return () => {
     themeSubscribers.delete(listener);
   };
 }
 
+const PreferredThemeOverrideContext = React.createContext<Theme | null>(null);
+
+export const PreferredThemeOverride = PreferredThemeOverrideContext.Provider;
+
 export function usePreferredTheme(): Theme {
-  return React.useSyncExternalStore(
+  const override = React.useContext(PreferredThemeOverrideContext);
+
+  const documentTheme = React.useSyncExternalStore<Theme>(
     subscribePreferredTheme,
     () => {
       if (typeof window === "undefined") return "light";
       currentTheme = getPreferredTheme();
+
       return currentTheme;
     },
     () => "light",
   );
+
+  return override ?? documentTheme;
 }
 
 function subscribeThemePreference(listener: ThemeListener): () => void {
   ensureThemeObserver();
   themePreferenceSubscribers.add(listener);
+
   return () => {
     themePreferenceSubscribers.delete(listener);
   };

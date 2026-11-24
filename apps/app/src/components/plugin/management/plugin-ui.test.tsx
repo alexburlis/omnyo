@@ -2,7 +2,7 @@
 
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
-import { PLUGIN_CATALOG_CATEGORIES } from "@bb/domain";
+import { PLUGIN_CATALOG_CATEGORIES } from "@omnyo/domain";
 import {
   CatalogEntryIcon,
   CatalogEntryIconChip,
@@ -13,7 +13,8 @@ import {
 afterEach(cleanup);
 
 it("masks a tinted icon instead of embedding it as an image", () => {
-  const iconUrl = "/api/v1/plugin-catalog/icons/bb-community/agent-proxy?h=ab";
+  const iconUrl = "/api/v1/plugin-catalog/icons/acme-plugins/agent-proxy?h=ab";
+
   const view = render(
     <CatalogEntryIcon
       entry={{
@@ -44,6 +45,7 @@ it("masks a tinted icon instead of embedding it as an image", () => {
 
 it("embeds a marketplace listing's logo as an image", () => {
   const iconUrl = "/api/v1/plugin-catalog/icons/acme/widgets?h=cd";
+
   const view = render(
     <CatalogEntryIcon
       entry={{ displayName: "Widgets", icon: null, iconUrl, iconTinted: false }}
@@ -84,7 +86,9 @@ it("uses one glyph box for host and marketplace catalog icons", () => {
   const glyphs = view.container.querySelectorAll(
     "[data-catalog-entry-icon-glyph]",
   );
+
   expect(glyphs).toHaveLength(2);
+
   for (const glyph of glyphs) {
     expect(glyph.classList.contains("size-6")).toBe(true);
     expect(glyph.parentElement?.classList.contains("size-10")).toBe(true);
@@ -96,27 +100,34 @@ it("gives every built-in category its own icon and unknowns none", () => {
   const icons = PLUGIN_CATALOG_CATEGORIES.map((category) =>
     pluginCatalogCategoryIconName(category.id),
   );
+
   expect(icons).not.toContain(undefined);
   expect(new Set(icons).size).toBe(icons.length);
   expect(pluginCatalogCategoryIconName("future-category")).toBeUndefined();
 });
 
-it("labels built-in, new, and counted plugins", () => {
+it("labels built-in and new plugins", () => {
   const now = Date.parse("2026-10-02T00:00:00Z");
+
   const label = (entry: Parameters<typeof pluginInstallCountPresentation>[0]) =>
     pluginInstallCountPresentation(entry, now);
-  expect(label({ installedByDefault: true, installs: 2 })?.display).toBe(
+
+  expect(label({ installed: true, installedByDefault: true })?.display).toBe(
     "Built in",
   );
+  expect(label({ installed: false, installedByDefault: true })).toBeUndefined();
   expect(
     label({
+      installed: false,
       installedByDefault: false,
-      installs: 3,
       publishedAt: "2026-09-20T00:00:00Z",
     })?.display,
   ).toBe("New");
   expect(
-    label({ installedByDefault: false, installs: 1 })?.accessibleLabel,
-  ).toBe("1 install");
-  expect(label({ installedByDefault: false, installs: null })).toBeUndefined();
+    label({
+      installed: false,
+      installedByDefault: false,
+      publishedAt: "2026-08-01T00:00:00Z",
+    }),
+  ).toBeUndefined();
 });

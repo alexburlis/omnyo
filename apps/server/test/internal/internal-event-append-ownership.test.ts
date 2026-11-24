@@ -6,15 +6,21 @@ import {
   getLastStoredProviderThreadId,
   listEvents,
   listQueuedThreadMessages,
-} from "@bb/db";
-import { threadScope, turnScope } from "@bb/domain";
+  threads,
+} from "@omnyo/db";
+import {
+  encodeClientTurnRequestIdNumber,
+  threadScope,
+  turnScope,
+} from "@omnyo/domain";
 import {
   groupHostDaemonEvents,
   hostDaemonEventBatchResponseSchema,
   type HostDaemonEventEnvelope,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { describe, expect, it } from "vitest";
 import { buildThreadTimelineWithProfile } from "../../src/services/threads/timeline.js";
+import type { ServerChangedMessage } from "../../src/ws/hub.js";
 import {
   internalAuthHeaders,
   waitForQueuedCommand,
@@ -41,6 +47,8 @@ interface PostEventBatchArgs {
   harness: TestAppHarness;
   sessionId: string;
   events: HostDaemonEventEnvelope[];
+  firstEventIndex?: number;
+  sourceInstanceId?: string;
 }
 
 async function postEventBatch(args: PostEventBatchArgs): Promise<Response> {
@@ -50,6 +58,12 @@ async function postEventBatch(args: PostEventBatchArgs): Promise<Response> {
     body: JSON.stringify({
       sessionId: args.sessionId,
       eventGroups: groupHostDaemonEvents(args.events),
+      ...(args.firstEventIndex === undefined
+        ? {}
+        : { firstEventIndex: args.firstEventIndex }),
+      ...(args.sourceInstanceId === undefined
+        ? {}
+        : { sourceInstanceId: args.sourceInstanceId }),
     }),
   });
 }
@@ -57,18 +71,22 @@ async function postEventBatch(args: PostEventBatchArgs): Promise<Response> {
 function setupEventRoute() {
   return createTestAppHarness().then((harness) => {
     const { host, session } = seedHostSession(harness.deps);
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
     });
+
     const environment = seedEnvironment(harness.deps, {
       hostId: host.id,
       projectId: project.id,
     });
+
     const thread = seedThread(harness.deps, {
       projectId: project.id,
       environmentId: environment.id,
       status: "active",
     });
+
     return {
       environment,
       harness,
@@ -80,9 +98,26 @@ function setupEventRoute() {
   });
 }
 
+function captureAppendedNotifications(harness: TestAppHarness) {
+  const notifications: Extract<ServerChangedMessage, { entity: "thread" }>[] =
+    [];
+
+  harness.hub.onChangedMessage((message) => {
+    if (
+      message.entity === "thread" &&
+      message.changes.includes("events-appended")
+    ) {
+      notifications.push(message);
+    }
+  });
+
+  return notifications;
+}
+
 describe("internal event append ownership", () => {
   it("skips diffs using the existing batch response while retaining edits and provider identity", async () => {
     const { harness, session, thread } = await setupEventRoute();
+
     try {
       seedTurnStarted(harness.deps, {
         threadId: thread.id,
@@ -90,6 +125,7 @@ describe("internal event append ownership", () => {
         sequence: 1,
       });
       const providerThreadId = "provider-diff";
+
       const response = await postEventBatch({
         harness,
         sessionId: session.id,
@@ -156,16 +192,20 @@ describe("internal event append ownership", () => {
           },
         ],
       });
+
       expect(response.status).toBe(200);
+
       const accepted = hostDaemonEventBatchResponseSchema.parse(
         await response.json(),
       );
+
       expect(accepted.acceptedEvents.map((event) => event.sequence)).toEqual([
         2, 3, 4,
       ]);
       expect(accepted.acceptedEvents.map((event) => event.eventIndex)).toEqual([
         0, 2, 3,
       ]);
+
       const skipped = await postEventBatch({
         harness,
         sessionId: session.id,
@@ -182,6 +222,7 @@ describe("internal event append ownership", () => {
           },
         ],
       });
+
       expect(skipped.status).toBe(200);
       expect(
         hostDaemonEventBatchResponseSchema.parse(await skipped.json())
@@ -205,6 +246,7 @@ describe("internal event append ownership", () => {
 
   it("keeps late provisioning output terminal after setup has failed", async () => {
     const { environment, harness, session, thread } = await setupEventRoute();
+
     try {
       seedEvent(harness.deps, {
         threadId: thread.id,
@@ -264,6 +306,7 @@ describe("internal event append ownership", () => {
 
   it("stores thread-scoped ACP context usage for the timeline display", async () => {
     const { harness, session, thread } = await setupEventRoute();
+
     try {
       const response = await postEventBatch({
         harness,
@@ -293,6 +336,7 @@ describe("internal event append ownership", () => {
           eventBudget: 1_000_000,
           includeClearedContextHistory: false,
           includeDiagnosticOperations: true,
+          compactionOfferEnabled: false,
           maxInlineOutputChars: null,
           maxSeq: 1,
           page: {
@@ -310,9 +354,17 @@ describe("internal event append ownership", () => {
     }
   });
 
-  it("assigns server-owned sequences and returns accepted event indexes", async () => {
-    const { environment, harness, session, thread } = await setupEventRoute();
+  it("announces committed sequences and event types across interleaved batches and indexed retries", async () => {
+    const { environment, harness, project, session, thread } =
+      await setupEventRoute();
+
     try {
+      const secondThread = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+        status: "active",
+      });
+
       seedEvent(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -321,30 +373,70 @@ describe("internal event append ownership", () => {
         scope: threadScope(),
         data: { message: "existing" },
       });
+      seedEvent(harness.deps, {
+        threadId: secondThread.id,
+        environmentId: environment.id,
+        sequence: 7,
+        type: "system/error",
+        scope: threadScope(),
+        data: { message: "existing on second thread" },
+      });
+
+      const notifications = captureAppendedNotifications(harness);
+
+      const batch: HostDaemonEventEnvelope[] = [
+        {
+          threadId: thread.id,
+          event: {
+            type: "system/error",
+            threadId: thread.id,
+            scope: threadScope(),
+            message: "first daemon",
+          },
+        },
+        {
+          threadId: secondThread.id,
+          event: {
+            type: "thread/identity",
+            threadId: secondThread.id,
+            providerThreadId: "provider-second",
+            scope: threadScope(),
+          },
+        },
+        {
+          threadId: thread.id,
+          event: {
+            type: "thread/identity",
+            threadId: thread.id,
+            providerThreadId: "provider-first",
+            scope: threadScope(),
+          },
+        },
+        {
+          threadId: secondThread.id,
+          event: {
+            type: "system/error",
+            threadId: secondThread.id,
+            scope: threadScope(),
+            message: "second thread daemon",
+          },
+        },
+        {
+          threadId: thread.id,
+          event: {
+            type: "system/error",
+            threadId: thread.id,
+            scope: threadScope(),
+            message: "second daemon",
+          },
+        },
+      ];
 
       const response = await postEventBatch({
         harness,
         sessionId: session.id,
-        events: [
-          {
-            threadId: thread.id,
-            event: {
-              type: "system/error",
-              threadId: thread.id,
-              scope: threadScope(),
-              message: "first daemon",
-            },
-          },
-          {
-            threadId: thread.id,
-            event: {
-              type: "system/error",
-              threadId: thread.id,
-              scope: threadScope(),
-              message: "second daemon",
-            },
-          },
-        ],
+        firstEventIndex: 1,
+        events: batch,
       });
 
       expect(response.status).toBe(200);
@@ -357,12 +449,44 @@ describe("internal event append ownership", () => {
           },
           {
             eventIndex: 1,
+            threadId: secondThread.id,
+            sequence: 8,
+          },
+          {
+            eventIndex: 2,
             threadId: thread.id,
             sequence: 5,
           },
+          {
+            eventIndex: 3,
+            threadId: secondThread.id,
+            sequence: 9,
+          },
+          {
+            eventIndex: 4,
+            threadId: thread.id,
+            sequence: 6,
+          },
         ],
         rejectedEvents: [],
+        duplicateEvents: 0,
       });
+      expect(notifications).toMatchObject([
+        {
+          id: thread.id,
+          metadata: {
+            timelineSequence: 6,
+            eventTypes: ["system/error", "thread/identity"],
+          },
+        },
+        {
+          id: secondThread.id,
+          metadata: {
+            timelineSequence: 9,
+            eventTypes: ["thread/identity", "system/error"],
+          },
+        },
+      ]);
       expect(
         harness.db
           .select()
@@ -377,7 +501,61 @@ describe("internal event append ownership", () => {
         {
           sequence: 5,
         },
+        {
+          sequence: 6,
+        },
       ]);
+
+      notifications.length = 0;
+      batch.push({
+        threadId: thread.id,
+        event: {
+          type: "system/error",
+          threadId: thread.id,
+          scope: threadScope(),
+          message: "new after retry",
+        },
+      });
+
+      const overlap = await postEventBatch({
+        harness,
+        sessionId: session.id,
+        firstEventIndex: 1,
+        events: batch,
+      });
+
+      expect(overlap.status).toBe(200);
+      await expect(readJson(overlap)).resolves.toEqual({
+        acceptedEvents: [{ eventIndex: 5, threadId: thread.id, sequence: 7 }],
+        rejectedEvents: [],
+        duplicateEvents: 5,
+      });
+      expect(notifications).toMatchObject([
+        {
+          id: thread.id,
+          metadata: {
+            timelineSequence: 7,
+            eventTypes: ["system/error"],
+          },
+        },
+      ]);
+
+      notifications.length = 0;
+
+      const duplicate = await postEventBatch({
+        harness,
+        sessionId: session.id,
+        firstEventIndex: 1,
+        events: batch,
+      });
+
+      expect(duplicate.status).toBe(200);
+      await expect(readJson(duplicate)).resolves.toEqual({
+        acceptedEvents: [],
+        rejectedEvents: [],
+        duplicateEvents: 6,
+      });
+      expect(notifications).toEqual([]);
     } finally {
       await harness.cleanup();
     }
@@ -385,7 +563,10 @@ describe("internal event append ownership", () => {
 
   it("returns original event indexes after dropping orphan turn snapshots", async () => {
     const { harness, session, thread } = await setupEventRoute();
+
     try {
+      const notifications = captureAppendedNotifications(harness);
+
       const response = await postEventBatch({
         harness,
         sessionId: session.id,
@@ -439,6 +620,15 @@ describe("internal event append ownership", () => {
         ],
         rejectedEvents: [],
       });
+      expect(notifications).toMatchObject([
+        {
+          id: thread.id,
+          metadata: {
+            timelineSequence: 1,
+            eventTypes: ["system/error"],
+          },
+        },
+      ]);
       expect(
         harness.db
           .select()
@@ -458,6 +648,7 @@ describe("internal event append ownership", () => {
 
   it("assigns distinct sequences for simultaneous requests on the same thread", async () => {
     const { harness, session, thread } = await setupEventRoute();
+
     try {
       const [firstResponse, secondResponse] = await Promise.all([
         postEventBatch({
@@ -494,12 +685,15 @@ describe("internal event append ownership", () => {
 
       expect(firstResponse.status).toBe(200);
       expect(secondResponse.status).toBe(200);
+
       const firstBody = hostDaemonEventBatchResponseSchema.parse(
         await readJson(firstResponse),
       );
+
       const secondBody = hostDaemonEventBatchResponseSchema.parse(
         await readJson(secondResponse),
       );
+
       expect(
         [...firstBody.acceptedEvents, ...secondBody.acceptedEvents]
           .map((event) => event.sequence)
@@ -527,6 +721,7 @@ describe("internal event append ownership", () => {
 
   it("auto-sends a queued message after a zero-work turn completes", async () => {
     const { environment, harness, session, thread } = await setupEventRoute();
+
     try {
       seedThreadRuntimeState(harness.deps, {
         environmentId: environment.id,
@@ -572,11 +767,13 @@ describe("internal event append ownership", () => {
       });
 
       expect(response.status).toBe(200);
+
       const queuedTurn = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === thread.id,
       );
+
       expect(queuedTurn.command).toMatchObject({
         type: "turn.submit",
         input: [
@@ -597,12 +794,14 @@ describe("internal event append ownership", () => {
   it("keeps owned event indexes aligned around an unowned middle row", async () => {
     const { environment, harness, project, session, thread } =
       await setupEventRoute();
+
     const secondThread = seedThread(harness.deps, {
       environmentId: environment.id,
       projectId: project.id,
       status: "active",
       title: "Second Thread",
     });
+
     try {
       const response = await postEventBatch({
         harness,
@@ -683,18 +882,21 @@ describe("internal event append ownership", () => {
 
   it("notifies a parent when a child provider process exits", async () => {
     const { environment, harness, project, session } = await setupEventRoute();
+
     const parentThread = seedThread(harness.deps, {
       environmentId: environment.id,
       projectId: project.id,
       status: "idle",
       title: "Project coordinator",
     });
+
     seedThreadRuntimeState(harness.deps, {
       environmentId: environment.id,
       inputText: "Coordinate child work",
       providerThreadId: "provider-parent-provider-exit",
       threadId: parentThread.id,
     });
+
     const childThread = seedThread(harness.deps, {
       environmentId: environment.id,
       parentThreadId: parentThread.id,
@@ -702,6 +904,7 @@ describe("internal event append ownership", () => {
       status: "active",
       title: "Child provider exit worker",
     });
+
     try {
       const response = await postEventBatch({
         harness,
@@ -740,15 +943,19 @@ describe("internal event append ownership", () => {
           command.threadId === parentThread.id,
         3_000,
       );
+
       if (parentTurnCommand.command.type !== "turn.submit") {
         throw new Error(
           `Expected parent turn command, got ${parentTurnCommand.command.type}`,
         );
       }
+
       const [input] = parentTurnCommand.command.input;
+
       if (!input || input.type !== "text") {
         throw new Error("Expected parent notification text input");
       }
+
       const threadMention = `@thread:${childThread.id}`;
       expect(input.text).toContain(
         [
@@ -777,17 +984,20 @@ describe("internal event append ownership", () => {
 
   it("does not notify a parent when a side-chat child provider process exits", async () => {
     const { environment, harness, project, session } = await setupEventRoute();
+
     const parentThread = seedThread(harness.deps, {
       environmentId: environment.id,
       projectId: project.id,
       status: "idle",
     });
+
     seedThreadRuntimeState(harness.deps, {
       environmentId: environment.id,
       inputText: "Coordinate side chat child work",
       providerThreadId: "provider-side-chat-parent-provider-exit",
       threadId: parentThread.id,
     });
+
     const childThread = seedThread(harness.deps, {
       environmentId: environment.id,
       originKind: "fork",
@@ -797,6 +1007,7 @@ describe("internal event append ownership", () => {
       status: "active",
       visibility: "hidden",
     });
+
     try {
       const response = await postEventBatch({
         harness,
@@ -889,6 +1100,7 @@ describe("interaction lifecycle records from the daemon", () => {
 
   it("drops a lifecycle record that names no interaction on the thread", async () => {
     const { harness, session, thread } = await setupEventRoute();
+
     try {
       const response = await postLifecycle({
         harness,
@@ -896,10 +1108,13 @@ describe("interaction lifecycle records from the daemon", () => {
         threadId: thread.id,
         interactionId: "pi_forged",
       });
+
       expect(response.status).toBe(200);
+
       const body = hostDaemonEventBatchResponseSchema.parse(
         await readJson(response),
       );
+
       expect(body.acceptedEvents).toEqual([]);
       expect(body.rejectedEvents).toEqual([]);
       expect(storedLifecycleRows(harness, thread.id)).toHaveLength(0);
@@ -910,12 +1125,14 @@ describe("interaction lifecycle records from the daemon", () => {
 
   it("drops a lifecycle record even for an interaction the server registered on that thread", async () => {
     const { harness, session, thread } = await setupEventRoute();
+
     try {
       seedTurnStarted(harness.deps, {
         threadId: thread.id,
         turnId: "turn-lifecycle-1",
         providerThreadId: "provider-thread-lifecycle",
       });
+
       const registered =
         harness.deps.pendingInteractions.registerPendingInteraction({
           interaction: {
@@ -932,29 +1149,37 @@ describe("interaction lifecycle records from the daemon", () => {
             }),
           },
         });
+
       if (registered.outcome === "rejected") {
         throw new Error(`Expected registration: ${registered.reason}`);
       }
+
       const before = storedLifecycleRows(harness, thread.id).length;
+
       const response = await postLifecycle({
         harness,
         sessionId: session.id,
         threadId: thread.id,
         interactionId: registered.interaction.id,
       });
+
       expect(response.status).toBe(200);
+
       const body = hostDaemonEventBatchResponseSchema.parse(
         await readJson(response),
       );
+
       expect(body.acceptedEvents).toEqual([]);
       expect(body.rejectedEvents).toEqual([]);
       expect(storedLifecycleRows(harness, thread.id)).toHaveLength(before);
+
       const interaction = harness.deps.pendingInteractions.getThreadInteraction(
         {
           threadId: thread.id,
           interactionId: registered.interaction.id,
         },
       );
+
       expect(interaction.status).toBe("pending");
       expect(interaction.resolution).toBeNull();
     } finally {
@@ -964,12 +1189,14 @@ describe("interaction lifecycle records from the daemon", () => {
 
   it("rejects a forged answer for a real pending user question in every lifecycle event shape and leaves it pending and unanswered", async () => {
     const { harness, session, thread } = await setupEventRoute();
+
     try {
       seedTurnStarted(harness.deps, {
         threadId: thread.id,
         turnId: "turn-lifecycle-2",
         providerThreadId: "provider-thread-question",
       });
+
       const registered =
         harness.deps.pendingInteractions.registerPendingInteraction({
           interaction: {
@@ -983,10 +1210,13 @@ describe("interaction lifecycle records from the daemon", () => {
             }),
           },
         });
+
       if (registered.outcome === "rejected") {
         throw new Error(`Expected registration: ${registered.reason}`);
       }
+
       const interactionId = registered.interaction.id;
+
       const storedRows = () =>
         harness.deps.db
           .select({ type: events.type })
@@ -994,16 +1224,20 @@ describe("interaction lifecycle records from the daemon", () => {
           .where(eq(events.threadId, thread.id))
           .all()
           .map((row) => row.type);
+
       const before = storedRows();
+
       const forgedAnswers = {
         "question-1": {
           selected: ["production"],
           freeText: "ship it straight to production",
         },
       };
+
       const forgedQuestion = createUserQuestionPayload({
         prompt: "Forged prompt the user never saw",
       });
+
       const response = await postEventBatch({
         harness,
         sessionId: session.id,
@@ -1068,10 +1302,13 @@ describe("interaction lifecycle records from the daemon", () => {
           },
         ],
       });
+
       expect(response.status).toBe(200);
+
       const body = hostDaemonEventBatchResponseSchema.parse(
         await readJson(response),
       );
+
       expect(body.acceptedEvents).toEqual([]);
       expect(body.rejectedEvents).toEqual([]);
       expect(storedRows()).toEqual(before);
@@ -1082,6 +1319,7 @@ describe("interaction lifecycle records from the daemon", () => {
           interactionId,
         },
       );
+
       expect(interaction.status).toBe("pending");
       expect(interaction.resolution).toBeNull();
       expect(
@@ -1098,17 +1336,20 @@ describe("interaction lifecycle records from the daemon", () => {
           .all()
           .map((row) => row.sequence),
       );
+
       const questionRows = buildThreadTimelineWithProfile(harness.db, thread, {
         completedTurnDisplay: "collapse",
         eventBudget: 1_000_000,
         includeClearedContextHistory: false,
         includeDiagnosticOperations: true,
+        compactionOfferEnabled: false,
         maxInlineOutputChars: null,
         maxSeq,
         page: { kind: "latest", segmentLimit: Number.MAX_SAFE_INTEGER },
       }).response.rows.flatMap((row) =>
         row.kind === "work" && row.workKind === "question" ? [row] : [],
       );
+
       expect(questionRows).toHaveLength(1);
       expect(questionRows[0]).toMatchObject({
         interactionId,
@@ -1118,6 +1359,140 @@ describe("interaction lifecycle records from the daemon", () => {
       expect(questionRows[0]?.questions[0]?.prompt).toBe(
         "Which deployment target should I use?",
       );
+    } finally {
+      await harness.cleanup();
+    }
+  });
+});
+
+describe("retained event delivery", () => {
+  it.each([
+    { identity: "stale", priorRoot: false, expected: "starting" },
+    { identity: "current", priorRoot: false, expected: "error" },
+    { identity: "stale", priorRoot: true, expected: "starting" },
+    { identity: "current", priorRoot: true, expected: "error" },
+    { identity: "missing", priorRoot: false, expected: "starting" },
+  ] as const)(
+    "matches retained pending-start exit identity $identity with prior root $priorRoot",
+    async ({ identity, priorRoot, expected }) => {
+      const { harness, session, thread, environment } = await setupEventRoute();
+
+      try {
+        if (priorRoot) {
+          seedTurnStarted(harness.deps, {
+            threadId: thread.id,
+            turnId: "turn-retained-completed",
+            sequence: 1,
+          });
+          seedEvent(harness.deps, {
+            threadId: thread.id,
+            sequence: 2,
+            type: "turn/completed",
+            scope: turnScope("turn-retained-completed"),
+            data: {
+              providerThreadId: "provider-completed",
+              status: "completed",
+            },
+          });
+        }
+
+        seedThreadRuntimeState(harness.deps, {
+          threadId: thread.id,
+          environmentId: environment.id,
+          providerThreadId: "provider-pending-current",
+          sequenceStart: 10,
+        });
+        harness.db
+          .update(threads)
+          .set({ status: "starting" })
+          .where(eq(threads.id, thread.id))
+          .run();
+
+        const requestId =
+          identity === "current"
+            ? encodeClientTurnRequestIdNumber({ value: 10 })
+            : encodeClientTurnRequestIdNumber({ value: 9 });
+
+        const exitEvent = {
+          type: "system/error",
+          threadId: thread.id,
+          scope: threadScope(),
+          code: "provider_process_exited",
+          message: "provider exited before turn/started",
+          ...(identity === "missing" ? {} : { requestId }),
+        } as const;
+
+        const response = await postEventBatch({
+          harness,
+          sessionId: session.id,
+          firstEventIndex: 1,
+          sourceInstanceId: "instance-retained-exited",
+          events: [
+            {
+              threadId: thread.id,
+              event: exitEvent,
+            },
+          ],
+        });
+
+        expect(response.status).toBe(200);
+        expect(getThread(harness.db, thread.id)?.status).toBe(expected);
+      } finally {
+        await harness.cleanup();
+      }
+    },
+  );
+
+  it("does not apply delayed terminal events to a newer turn", async () => {
+    const { harness, session, thread } = await setupEventRoute();
+
+    try {
+      seedTurnStarted(harness.deps, {
+        threadId: thread.id,
+        turnId: "turn-retained-old",
+        providerThreadId: "provider-old",
+        sequence: 1,
+      });
+      seedTurnStarted(harness.deps, {
+        threadId: thread.id,
+        turnId: "turn-retained-new",
+        providerThreadId: "provider-new",
+        sequence: 2,
+      });
+
+      const response = await postEventBatch({
+        harness,
+        sessionId: session.id,
+        firstEventIndex: 1,
+        sourceInstanceId: "instance-retained-exited",
+        events: [
+          {
+            threadId: thread.id,
+            event: {
+              type: "turn/completed",
+              threadId: thread.id,
+              providerThreadId: "provider-old",
+              scope: turnScope("turn-retained-old"),
+              status: "failed",
+              error: { message: "old provider exited" },
+            },
+          },
+          {
+            threadId: thread.id,
+            event: {
+              type: "system/error",
+              threadId: thread.id,
+              scope: turnScope("turn-retained-old"),
+              code: "provider_process_exited",
+              message: "old provider exited",
+            },
+          },
+        ],
+      });
+
+      expect(response.status).toBe(200);
+      expect(getThread(harness.db, thread.id)?.status).toBe("active");
+      expect(listEvents(harness.db, { threadId: thread.id })).toHaveLength(4);
     } finally {
       await harness.cleanup();
     }

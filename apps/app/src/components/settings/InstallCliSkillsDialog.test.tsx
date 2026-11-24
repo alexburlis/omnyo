@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { Host } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
-import type { CliSkillMachineStatus } from "@bb/server-contract";
+import type { Host } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
+import type { CliSkillMachineStatus } from "@omnyo/server-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InstallCliSkillsDialog } from "./InstallCliSkillsDialog";
 
@@ -33,9 +33,11 @@ const statuses = new Map<string, CliSkillMachineStatus>([
 
 function checkbox(name: string): HTMLInputElement {
   const control = screen.getByRole("checkbox", { name });
+
   if (!(control instanceof HTMLElement)) {
     throw new Error(`Checkbox ${name} is missing`);
   }
+
   return control as HTMLInputElement;
 }
 

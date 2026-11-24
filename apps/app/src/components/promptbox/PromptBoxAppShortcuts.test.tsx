@@ -3,8 +3,8 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultAppSettings, type AppShortcut } from "@bb/domain";
-import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@bb/client-core";
+import { defaultAppSettings, type AppShortcut } from "@omnyo/domain";
+import { EMPTY_ORDERED_MENTION_SUGGESTIONS } from "@omnyo/client-core";
 import {
   AppCommandProvider,
   useAppCommandHandler,
@@ -29,7 +29,8 @@ const testState = vi.hoisted(() => ({
   } as AppShortcut,
 }));
 
-vi.mock("@/hooks/queries/system-queries", () => ({
+vi.mock("@/hooks/queries/system-queries", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/system-queries")>()),
   useSystemConfig: () => ({
     data: {
       generalSettings: { ...defaultAppSettings },
@@ -71,8 +72,8 @@ vi.mock("@/hooks/queries/system-queries", () => ({
   }),
 }));
 
-vi.mock("@/lib/bb-desktop", () => ({
-  getBbDesktopInfo: () => null,
+vi.mock("@/lib/omnyo-desktop", () => ({
+  getOmnyoDesktopInfo: () => null,
 }));
 
 vi.mock("@/lib/plugin-sdk-hooks", async (importOriginal) => ({
@@ -83,20 +84,25 @@ vi.mock("@/lib/plugin-sdk-hooks", async (importOriginal) => ({
 function SidebarToggleHandler() {
   useAppCommandHandler("sidebar.toggle", () => {
     testState.calls.push("sidebar.toggle");
+
     return testState.sidebarHandlerResult;
   });
+
   return null;
 }
 
 function ThreadNavigationHandlers() {
   useAppCommandHandler("thread.previous", () => {
     testState.calls.push("thread.previous");
+
     return true;
   });
   useAppCommandHandler("thread.next", () => {
     testState.calls.push("thread.next");
+
     return true;
   });
+
   return null;
 }
 
@@ -122,6 +128,7 @@ function renderComposer(extra: React.ReactNode = null) {
             mention: {
               results: EMPTY_ORDERED_MENTION_SUGGESTIONS,
               isLoading: false,
+              isRefreshing: false,
               isError: false,
               onQueryChange: vi.fn(),
             },
@@ -131,11 +138,14 @@ function renderComposer(extra: React.ReactNode = null) {
       </AppCommandProvider>
     </MemoryRouter>,
   );
+
   const editor = document.querySelector<HTMLElement>(
     "[data-promptbox-editor-content] [contenteditable]",
   );
+
   if (editor === null) throw new Error("prompt editor did not render");
   editor.focus();
+
   return editor;
 }
 
@@ -148,7 +158,9 @@ function pressInEditor(
     cancelable: true,
     ...init,
   });
+
   editor.dispatchEvent(event);
+
   return event;
 }
 
@@ -229,6 +241,7 @@ describe("prompt editor app shortcuts", () => {
 
   it("keeps the keyboard hint until modifier release when the composer runs a shortcut", () => {
     vi.useFakeTimers();
+
     try {
       const editor = renderComposer(<ShortcutHintState />);
       window.dispatchEvent(

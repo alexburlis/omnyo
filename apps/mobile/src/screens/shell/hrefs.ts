@@ -10,12 +10,14 @@ function untypedHref(pathname: string, params?: HrefParams): Href {
         ),
       )
     : undefined;
+
   const href: { pathname: string; params?: Record<string, string> } = {
     pathname,
     ...(definedParams && Object.keys(definedParams).length > 0
       ? { params: definedParams }
       : {}),
   };
+
   return href as Href;
 }
 

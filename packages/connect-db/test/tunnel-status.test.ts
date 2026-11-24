@@ -11,17 +11,20 @@ import {
 function namespaceAnswering(answer: (url: string) => Promise<Response>) {
   const names: string[] = [];
   const urls: string[] = [];
+
   return {
     names,
     urls,
     namespace: {
       idFromName: (name: string) => {
         names.push(name);
+
         return name;
       },
       get: () => ({
         fetch: (url: string) => {
           urls.push(url);
+
           return answer(url);
         },
       }),
@@ -41,6 +44,7 @@ describe("readTunnelConnected", () => {
     const online = namespaceAnswering(async () =>
       statusResponse({ connected: true }),
     );
+
     await expect(readTunnelConnected(online.namespace, "sawyer")).resolves.toBe(
       true,
     );
@@ -50,6 +54,7 @@ describe("readTunnelConnected", () => {
     const offline = namespaceAnswering(async () =>
       statusResponse({ connected: false }),
     );
+
     await expect(
       readTunnelConnected(offline.namespace, "sawyer"),
     ).resolves.toBe(false);
@@ -59,18 +64,23 @@ describe("readTunnelConnected", () => {
     const unmarked = namespaceAnswering(async () =>
       Response.json({ connected: true }),
     );
+
     const proxiedPage = namespaceAnswering(
       async () => new Response("<html>", { status: 200 }),
     );
+
     const malformed = namespaceAnswering(async () =>
       statusResponse({ connected: "yes" }),
     );
+
     const failed = namespaceAnswering(async () =>
       statusResponse({ connected: true }, { status: 500 }),
     );
+
     const thrown = namespaceAnswering(async () => {
       throw new Error("Network connection lost.");
     });
+
     for (const probe of [unmarked, proxiedPage, malformed, failed, thrown]) {
       await expect(
         readTunnelConnected(probe.namespace, "sawyer"),
@@ -92,11 +102,14 @@ describe("presence mode", () => {
     const probe = namespaceAnswering(async () =>
       statusResponse({ connected: true }),
     );
+
     expect(tunnelConnectedLookup({}, probe.namespace)).toBeNull();
+
     const lookup = tunnelConnectedLookup(
       { PRESENCE_WRITES: "on-change" },
       probe.namespace,
     );
+
     await expect(lookup?.("sawyer")).resolves.toBe(true);
   });
 });

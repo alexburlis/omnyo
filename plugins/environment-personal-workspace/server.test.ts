@@ -1,22 +1,29 @@
 import type {
   PluginEnvironmentProviderCreateContext,
   PluginEnvironmentProviderProgress,
-} from "@get-bb/plugin-sdk/environment-provider";
+} from "@omnyo/plugin-sdk/environment-provider";
 import {
   createFakePluginHost,
   makeHostResponse,
   makeThreadResponse,
   type FakePluginHarness,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import { describe, expect, it } from "vitest";
 import plugin from "./server.js";
+
 type Project = PluginEnvironmentProviderCreateContext["project"];
+
 type HostRpcCall = FakePluginHarness["experimental_hostRpcCalls"][number];
+
 import { personalWorkspaceHostContract } from "./contract.js";
 import { PERSONAL_WORKSPACE_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
+
 const HOST_ID = "host_a";
+
 const PROJECT_ID = "personal";
+
 const THREAD_ID = "thr_1";
+
 const DATA_DIR = "/data/plugins/environment-personal-workspace/host-data";
 
 function workspacePathFor(pathKey: string): string {
@@ -38,6 +45,7 @@ const PERSONAL_PROJECT: Project = {
 
 function createFakeWorkspaceHost() {
   const directories = new Set<string>();
+
   return {
     directories,
     async call(request: HostRpcCall): Promise<unknown> {
@@ -47,21 +55,26 @@ function createFakeWorkspaceHost() {
             personalWorkspaceHostContract.createWorkspace.input.parse(
               request.input,
             );
+
           const path = workspacePathFor(input.pathKey);
           directories.add(path);
+
           return { path };
         }
+
         case "removeWorkspace": {
           const input =
             personalWorkspaceHostContract.removeWorkspace.input.parse(
               request.input,
             );
+
           return {
             removed: directories.delete(
               input.path ?? workspacePathFor(input.pathKey),
             ),
           };
         }
+
         default:
           throw new Error(`unexpected host method ${request.method}`);
       }
@@ -71,20 +84,26 @@ function createFakeWorkspaceHost() {
 
 async function setup() {
   const host = createFakeWorkspaceHost();
-  const { bb, harness } = createFakePluginHost({
+
+  const { api, harness } = createFakePluginHost({
     experimental_callHostRpc: (call) => host.call(call),
   });
-  await plugin(bb);
+
+  await plugin(api);
+
   const provider = harness.registrations.environmentProviders.get(
     PERSONAL_WORKSPACE_ENVIRONMENT_PROVIDER_ID,
   );
+
   if (provider === undefined) throw new Error("Provider not registered");
   const steps: string[] = [];
   const logs: string[] = [];
+
   const report: PluginEnvironmentProviderProgress = {
     step: (text) => steps.push(text),
     log: (text) => logs.push(text),
   };
+
   const context: PluginEnvironmentProviderCreateContext = {
     thread: makeThreadResponse({ id: THREAD_ID, projectId: PROJECT_ID }),
     project: PERSONAL_PROJECT,
@@ -92,13 +111,14 @@ async function setup() {
     projectCheckout: null,
     gitRemote: null,
     inputs: null,
-    suggestedBranchName: "bb/test",
+    suggestedBranchName: "omnyo/test",
     attempt: 1,
     pathKey: THREAD_ID,
     experimental_claimPath: async () => true,
     report,
     signal: new AbortController().signal,
   };
+
   return { host, harness, provider, context, steps, logs };
 }
 

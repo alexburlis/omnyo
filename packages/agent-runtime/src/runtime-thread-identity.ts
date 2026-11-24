@@ -1,4 +1,4 @@
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import type { AgentRuntimeProviderSession } from "./types.js";
 
 export interface RuntimeProviderIdentityState {
@@ -22,7 +22,7 @@ interface RecordProviderThreadIdentityArgs {
   threadId: string;
 }
 
-interface ResolveBbThreadIdForProviderThreadArgs {
+interface ResolveOmnyoThreadIdForProviderThreadArgs {
   providerState: RuntimeProviderIdentityState;
   providerThreadId: string | undefined;
 }
@@ -64,9 +64,11 @@ export class RuntimeThreadIdentityRegistry {
 
   resolveProviderForThread(threadId: string): string {
     const providerId = this.threadToProvider.get(threadId);
+
     if (!providerId) {
       throw new Error(`No provider associated with thread "${threadId}"`);
     }
+
     return providerId;
   }
 
@@ -77,9 +79,11 @@ export class RuntimeThreadIdentityRegistry {
   getProviderSession(threadId: string): AgentRuntimeProviderSession | null {
     const providerId = this.threadToProvider.get(threadId);
     const providerThreadId = this.threadToProviderThread.get(threadId);
+
     if (!providerId || !providerThreadId) {
       return null;
     }
+
     return { providerId, providerThreadId };
   }
 
@@ -87,23 +91,24 @@ export class RuntimeThreadIdentityRegistry {
     if (!args.providerState.threadIds.has(args.threadId)) {
       throw new Error(`No provider associated with thread "${args.threadId}"`);
     }
+
     this.threadToProviderThread.set(args.threadId, args.providerThreadId);
   }
 
-  resolveBbThreadIdForProviderThread(
-    args: ResolveBbThreadIdForProviderThreadArgs,
+  resolveAppThreadIdForProviderThread(
+    args: ResolveOmnyoThreadIdForProviderThreadArgs,
   ): string | undefined {
     if (!args.providerThreadId) {
       return undefined;
     }
 
-    for (const [bbThreadId, mappedProviderThreadId] of this
+    for (const [appThreadId, mappedProviderThreadId] of this
       .threadToProviderThread) {
       if (
         mappedProviderThreadId === args.providerThreadId &&
-        args.providerState.threadIds.has(bbThreadId)
+        args.providerState.threadIds.has(appThreadId)
       ) {
-        return bbThreadId;
+        return appThreadId;
       }
     }
 
@@ -128,14 +133,15 @@ export class RuntimeThreadIdentityRegistry {
     }
 
     const lookupId = args.sourceThreadId || args.eventThreadId;
+
     if (lookupId) {
-      for (const [bbThreadId, providerThreadId] of this
+      for (const [appThreadId, providerThreadId] of this
         .threadToProviderThread) {
         if (
           providerThreadId === lookupId &&
-          args.providerState.threadIds.has(bbThreadId)
+          args.providerState.threadIds.has(appThreadId)
         ) {
-          return bbThreadId;
+          return appThreadId;
         }
       }
     }
@@ -147,6 +153,7 @@ export class RuntimeThreadIdentityRegistry {
     args: ResolveProviderEventThreadIdArgs,
   ): string | undefined {
     const explicitThreadId = this.resolveProviderIdentityThreadId(args);
+
     if (explicitThreadId !== undefined) {
       return explicitThreadId;
     }
@@ -169,6 +176,7 @@ export class RuntimeThreadIdentityRegistry {
     if (threadId === undefined) {
       return false;
     }
+
     return (
       this.threadToProvider.has(threadId) &&
       !providerState.threadIds.has(threadId)

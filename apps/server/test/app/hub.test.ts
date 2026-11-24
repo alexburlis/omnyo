@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   ENVIRONMENT_CHANGE_KINDS,
   HOST_CHANGE_KINDS,
@@ -6,9 +7,13 @@ import {
   SYSTEM_CHANGE_KINDS,
   THREAD_CHANGE_KINDS,
   type ThreadChangeKind,
-} from "@bb/domain";
+} from "@omnyo/domain";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NotificationHub } from "../../src/ws/hub.js";
+import {
+  NotificationHub,
+  OUTSTANDING_HOST_RPC_GRACE_MS,
+} from "../../src/ws/hub.js";
 import { createMockHubSocket } from "../helpers/mock-hub-socket.js";
 import { TRANSPORT_TEST_BRIDGE_LAUNCH } from "../helpers/provider-registry.js";
 
@@ -38,6 +43,54 @@ describe("NotificationHub", () => {
       metadata: { projectId: "project-1" },
       changes: ["archived-changed"],
     });
+  });
+
+  it("attaches authoritative thread list entries to list changes including status changes", () => {
+    const hub = new NotificationHub();
+    const socket = createMockHubSocket();
+    const listEntry = makeThreadListEntry({ id: "thread-1", title: "Renamed" });
+    const resolver = vi.fn(() => listEntry);
+
+    hub.setThreadListEntryResolver(resolver);
+    hub.subscribe(socket, { kind: "thread-detail", threadId: "thread-1" });
+
+    for (const changes of [
+      ["title-changed"],
+      ["queue-changed"],
+      ["interactions-changed"],
+      ["environment-changed"],
+      ["read-state-changed"],
+    ] as const)
+      hub.notifyThread("thread-1", [...changes]);
+
+    hub.notifyThread("thread-1", ["events-appended"], {
+      backgroundActivityChanged: true,
+    });
+
+    expect(
+      socket.messages.map((message) => JSON.parse(message).metadata.listEntry),
+    ).toEqual(Array.from({ length: 6 }, () => listEntry));
+
+    resolver.mockClear();
+    socket.messages.length = 0;
+    hub.notifyThread("thread-1", ["status-changed"], {
+      statusChange: {
+        status: "idle",
+        runtime: listEntry.runtime,
+        activity: listEntry.activity,
+        latestAttentionAt: 1,
+        lastMessageAt: null,
+        updatedAt: 1,
+      },
+    });
+    hub.notifyThread("thread-1", ["status-changed"]);
+    hub.notifyThread("thread-1", ["events-appended"]);
+    hub.notifyThread("thread-1", ["archived-changed"]);
+
+    expect(resolver).toHaveBeenCalledTimes(2);
+    expect(
+      socket.messages.map((message) => JSON.parse(message).metadata?.listEntry),
+    ).toEqual([listEntry, listEntry, undefined, undefined]);
   });
 
   it("subscribes clients and delivers environment notifications", () => {
@@ -124,10 +177,12 @@ describe("NotificationHub", () => {
   it("queues terminal output while a browser socket is above high water", () => {
     vi.useFakeTimers();
     const hub = new NotificationHub();
+
     const socket = {
       ...createMockHubSocket(),
       raw: { bufferedAmount: 2 * 1024 * 1024 },
     };
+
     hub.registerTerminalClient("term-1", socket);
 
     hub.sendTerminalClientMessage("term-1", {
@@ -158,6 +213,7 @@ describe("NotificationHub", () => {
     const hub = new NotificationHub();
     const healthy = createMockHubSocket();
     const closed: Array<{ code?: number; reason?: string }> = [];
+
     const failing = {
       close(code?: number, reason?: string) {
         closed.push({ code, reason });
@@ -166,6 +222,7 @@ describe("NotificationHub", () => {
         throw new Error("socket send failed");
       },
     };
+
     hub.registerTerminalClient("term-1", failing);
     hub.registerTerminalClient("term-1", healthy);
 
@@ -196,10 +253,12 @@ describe("NotificationHub", () => {
   it("closes a terminal browser whose bounded output queue overflows", () => {
     vi.useFakeTimers();
     const hub = new NotificationHub();
+
     const socket = {
       ...createMockHubSocket(),
       raw: { bufferedAmount: 2 * 1024 * 1024 },
     };
+
     hub.registerTerminalClient("term-1", socket);
     const dataBase64 = Buffer.alloc(64 * 1024).toString("base64");
 
@@ -235,6 +294,7 @@ describe("NotificationHub", () => {
 
   it("cancels the replaced daemon session's pending disconnect timer", async () => {
     vi.useFakeTimers();
+
     try {
       const hub = new NotificationHub();
       const socket1 = createMockHubSocket();
@@ -269,6 +329,7 @@ describe("NotificationHub", () => {
           type: "provider.list_models",
           providerId: "codex",
           bridgeLaunch: TRANSPORT_TEST_BRIDGE_LAUNCH,
+          contributedEnv: [],
         },
       },
     });
@@ -281,9 +342,11 @@ describe("NotificationHub", () => {
           type: "provider.list_models",
           providerId: "codex",
           bridgeLaunch: TRANSPORT_TEST_BRIDGE_LAUNCH,
+          contributedEnv: [],
         },
       },
     ]);
+
     const disposition = hub.recordHostOnlineRpcResponse({
       message: {
         type: "host-rpc.response",
@@ -294,6 +357,7 @@ describe("NotificationHub", () => {
       },
       sessionId: "session-1",
     });
+
     expect(disposition).toEqual({ handled: true });
 
     await expect(wait).resolves.toEqual({
@@ -320,18 +384,335 @@ describe("NotificationHub", () => {
           type: "provider.list_models",
           providerId: "codex",
           bridgeLaunch: TRANSPORT_TEST_BRIDGE_LAUNCH,
+          contributedEnv: [],
         },
       },
     });
+
     hub.unregisterDaemon("session-1");
 
     await expect(wait).rejects.toThrow("Host daemon is not connected");
+  });
+
+  it.each([true, false])(
+    "acknowledges a completed old-session RPC from the same host after its waiter expired: ok=%s",
+    async (ok) => {
+      vi.useFakeTimers();
+      const hub = new NotificationHub();
+      hub.registerDaemon("old", "host-1", createMockHubSocket());
+
+      const pending = hub.requestHostOnlineRpc({
+        hostId: "host-1",
+        timeoutMs: 10,
+        message: {
+          type: "host-rpc.request",
+          requestId: "completed-rpc",
+          command: {
+            type: "environment.hook.cancel",
+            operationId: "operation-1",
+          },
+        },
+      });
+
+      const expired = expect(pending).rejects.toThrow(
+        "Timed out waiting for host RPC response",
+      );
+
+      await vi.advanceTimersByTimeAsync(10);
+      await expired;
+      expect(hub.countPendingHostRpcs()).toBe(1);
+      hub.unregisterDaemon("old");
+      hub.registerDaemon("replacement", "host-1", createMockHubSocket());
+      expect(hub.countPendingHostRpcs()).toBe(1);
+
+      const response = ok
+        ? {
+            type: "host-rpc.response" as const,
+            requestId: "completed-rpc",
+            commandType: "environment.hook.cancel" as const,
+            ok: true as const,
+            result: { status: "terminated" as const },
+          }
+        : {
+            type: "host-rpc.response" as const,
+            requestId: "completed-rpc",
+            commandType: "environment.hook.cancel" as const,
+            ok: false as const,
+            errorCode: "fixture_failure",
+            errorMessage: "The operation failed",
+          };
+
+      expect(
+        hub.recordHostOnlineRpcResponse({
+          sessionId: "replacement",
+          message: response,
+        }),
+      ).toEqual({ handled: true });
+      expect(hub.countPendingHostRpcs()).toBe(0);
+      expect(
+        hub.recordHostOnlineRpcResponse({
+          sessionId: "replacement",
+          message: response,
+        }),
+      ).toEqual({ handled: false, reason: "stale" });
+    },
+  );
+
+  describe("outstanding host RPC accounting", () => {
+    function requestHookCancel(
+      hub: NotificationHub,
+      requestId: string,
+      hostId = "host-1",
+    ) {
+      return hub.requestHostOnlineRpc({
+        hostId,
+        timeoutMs: 10,
+        message: {
+          type: "host-rpc.request",
+          requestId,
+          command: {
+            type: "environment.hook.cancel",
+            operationId: requestId,
+          },
+        },
+      });
+    }
+
+    it("stops counting a request whose send failed", async () => {
+      const hub = new NotificationHub();
+      const socket = createMockHubSocket();
+      socket.send = () => {
+        throw new Error("socket already closed");
+      };
+
+      hub.registerDaemon("session-1", "host-1", socket);
+
+      await expect(requestHookCancel(hub, "unsent")).rejects.toThrow(
+        "socket already closed",
+      );
+      expect(hub.countPendingHostRpcs()).toBe(0);
+    });
+
+    it("forgets a replaced daemon instance's requests and keeps other hosts' requests", async () => {
+      vi.useFakeTimers();
+      const hub = new NotificationHub();
+      hub.registerDaemon("old", "host-1", createMockHubSocket());
+      hub.registerDaemon("other", "host-2", createMockHubSocket());
+
+      const lost = expect(requestHookCancel(hub, "lost")).rejects.toThrow(
+        "Timed out waiting for host RPC response",
+      );
+
+      const kept = expect(
+        requestHookCancel(hub, "kept", "host-2"),
+      ).rejects.toThrow("Timed out waiting for host RPC response");
+
+      await vi.advanceTimersByTimeAsync(10);
+      await Promise.all([lost, kept]);
+
+      hub.forgetOutstandingHostRpcs("host-1");
+
+      expect(hub.countPendingHostRpcs("host-1")).toBe(0);
+      expect(hub.countPendingHostRpcs("host-2")).toBe(1);
+      hub.unregisterDaemon("old");
+      hub.registerDaemon("replacement", "host-1", createMockHubSocket());
+      expect(
+        hub.recordHostOnlineRpcResponse({
+          sessionId: "replacement",
+          message: {
+            type: "host-rpc.response",
+            requestId: "lost",
+            commandType: "environment.hook.cancel",
+            ok: true,
+            result: { status: "terminated" },
+          },
+        }),
+      ).toEqual({ handled: false, reason: "stale" });
+    });
+
+    it("keeps an unanswered request through the reconnect grace and then stops counting it", async () => {
+      vi.useFakeTimers();
+      const hub = new NotificationHub();
+      hub.registerDaemon("session-1", "host-1", createMockHubSocket());
+
+      const expired = expect(requestHookCancel(hub, "silent")).rejects.toThrow(
+        "Timed out waiting for host RPC response",
+      );
+
+      await vi.advanceTimersByTimeAsync(10);
+      await expired;
+      expect(hub.countPendingHostRpcs()).toBe(1);
+      await vi.advanceTimersByTimeAsync(OUTSTANDING_HOST_RPC_GRACE_MS - 1);
+      expect(hub.countPendingHostRpcs()).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(hub.countPendingHostRpcs()).toBe(0);
+    });
+  });
+
+  it.each(["other-host", "wrong-type"])(
+    "retains an old-session RPC when a completed response has %s",
+    async (mismatch) => {
+      const hub = new NotificationHub();
+      hub.registerDaemon("old", "host-1", createMockHubSocket());
+
+      const pending = hub.requestHostOnlineRpc({
+        hostId: "host-1",
+        timeoutMs: 1_000,
+        message: {
+          type: "host-rpc.request",
+          requestId: "completed-rpc",
+          command: {
+            type: "environment.hook.cancel",
+            operationId: "operation-1",
+          },
+        },
+      });
+
+      const disconnected = expect(pending).rejects.toThrow(
+        "Host daemon is not connected",
+      );
+
+      hub.unregisterDaemon("old");
+      await disconnected;
+      hub.registerDaemon(
+        "replacement",
+        mismatch === "other-host" ? "host-2" : "host-1",
+        createMockHubSocket(),
+      );
+
+      const response = {
+        type: "host-rpc.response" as const,
+        requestId: "completed-rpc",
+        commandType:
+          mismatch === "wrong-type"
+            ? ("environment.hook.run" as const)
+            : ("environment.hook.cancel" as const),
+        ok: false as const,
+        errorCode: "fixture_failure",
+        errorMessage: "The operation failed",
+      };
+
+      expect(
+        hub.recordHostOnlineRpcResponse({
+          sessionId: "replacement",
+          message: response,
+        }).handled,
+      ).toBe(false);
+      expect(hub.countPendingHostRpcs()).toBe(1);
+    },
+  );
+
+  it("protects the live original session and its waiter from another session's response", async () => {
+    const hub = new NotificationHub();
+    hub.registerDaemon("original", "host-1", createMockHubSocket());
+    hub.registerDaemon("other", "host-2", createMockHubSocket());
+
+    const pending = hub.requestHostOnlineRpc({
+      hostId: "host-1",
+      timeoutMs: 1_000,
+      message: {
+        type: "host-rpc.request",
+        requestId: "live-rpc",
+        command: {
+          type: "environment.hook.cancel",
+          operationId: "operation-1",
+        },
+      },
+    });
+
+    const response = {
+      type: "host-rpc.response" as const,
+      requestId: "live-rpc",
+      commandType: "environment.hook.cancel" as const,
+      ok: true as const,
+      result: { status: "terminated" as const },
+    };
+
+    expect(
+      hub.recordHostOnlineRpcResponse({
+        sessionId: "other",
+        message: response,
+      }),
+    ).toEqual({
+      handled: false,
+      reason: "session_mismatch",
+      expectedSessionId: "original",
+    });
+    expect(hub.countPendingHostRpcs()).toBe(1);
+    expect(
+      hub.recordHostOnlineRpcResponse({
+        sessionId: "original",
+        message: response,
+      }),
+    ).toEqual({ handled: true });
+    await expect(pending).resolves.toEqual(response);
+    expect(hub.countPendingHostRpcs()).toBe(0);
+  });
+
+  it("claims a held response at once and delivers it after its daemon disconnects", async () => {
+    const hub = new NotificationHub();
+    hub.registerDaemon("session-1", "host-1", createMockHubSocket());
+
+    const pending = hub.requestHostOnlineRpc({
+      hostId: "host-1",
+      timeoutMs: 1_000,
+      message: {
+        type: "host-rpc.request",
+        requestId: "held-rpc",
+        command: {
+          type: "environment.hook.cancel",
+          operationId: "operation-1",
+        },
+      },
+    });
+
+    let settled = false;
+    void pending.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    let applyEvents = () => {};
+
+    const eventsApplied = new Promise<void>((resolve) => {
+      applyEvents = resolve;
+    });
+
+    const response = {
+      type: "host-rpc.response" as const,
+      requestId: "held-rpc",
+      commandType: "environment.hook.cancel" as const,
+      ok: true as const,
+      result: { status: "terminated" as const },
+    };
+
+    expect(
+      hub.recordHostOnlineRpcResponse({
+        sessionId: "session-1",
+        message: response,
+        deliverAfter: () => eventsApplied,
+      }),
+    ).toEqual({ handled: true });
+    expect(hub.countPendingHostRpcs()).toBe(0);
+
+    hub.unregisterDaemon("session-1");
+    await sleep(0);
+    expect(settled).toBe(false);
+
+    applyEvents();
+    await expect(pending).resolves.toEqual(response);
+    expect(hub.countPendingHostRpcs()).toBe(0);
   });
 
   it("skips and logs broadcasts that fail outgoing schema validation", () => {
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});
+
     try {
       const hub = new NotificationHub();
       const socket = createMockHubSocket();
@@ -384,6 +765,7 @@ describe("NotificationHub", () => {
       id: "host-1",
       changes: ["host-connected"],
     };
+
     expect(
       entityWideSocket.messages.map((message) => JSON.parse(message)),
     ).toEqual([expected]);
@@ -496,6 +878,7 @@ describe("NotificationHub events-appended thread-list coalescing", () => {
     });
 
     let timelineSequence = 0;
+
     for (const eventType of [
       "item/agentMessage/delta",
       "item/agentMessage/delta",

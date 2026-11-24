@@ -6,6 +6,7 @@ export async function installGitDependencies(rootDir: string): Promise<void> {
   for (const name of [".npmrc", ".yarnrc", ".yarnrc.yml"]) {
     await rm(join(rootDir, name), { force: true });
   }
+
   await runInstallCommand("npm", [
     "install",
     "--prefix",

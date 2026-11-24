@@ -25,7 +25,7 @@ import {
   experimental_Icon as RegisteredIcon,
   experimental_useThreadActionRegistrations,
   type PluginThreadActionRegistrationInfo,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import { THREAD_ROW_ACTION_LIMIT } from "../../shared/preferences.js";
 import { arrayMove } from "../model/array-move.js";
 import { threadRowActionsAtom } from "../preferences/atoms.js";
@@ -54,13 +54,17 @@ export function assignRowActionSlot(
   const slots = getRowActionSlots(enabled);
   const previous = slots[slotIndex] ?? null;
   const existingIndex = value === null ? -1 : slots.indexOf(value);
+
   if (existingIndex !== -1) slots[existingIndex] = previous;
   slots[slotIndex] = value;
+
   return slots.filter((slot): slot is string => slot !== null);
 }
 
 const CUSTOMIZE_ATTRIBUTE = "data-row-actions-customize";
+
 const CUSTOMIZE_SELECTOR = `[${CUSTOMIZE_ATTRIBUTE}]`;
+
 const SLOT_SELECTOR = "[data-sidebar-customize-launch]";
 
 export function focusFirstRowActionSlot(root: Element | null | undefined) {
@@ -96,8 +100,10 @@ export function ThreadRowActionsEditor({
   const focusSlot = useRef<number | null>(null);
   useEffect(() => {
     const index = focusSlot.current;
+
     if (index === null) return;
     focusSlot.current = null;
+
     const frame = requestAnimationFrame(() => {
       groupRef.current
         ?.querySelector<HTMLElement>(
@@ -105,22 +111,28 @@ export function ThreadRowActionsEditor({
         )
         ?.focus();
     });
+
     return () => cancelAnimationFrame(frame);
   }, [enabled]);
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const activeId = event.active.id;
       const overId = event.over?.id;
+
       if (typeof activeId !== "string" || typeof overId !== "string") return;
       setEnabled((current) => {
         const from = current.indexOf(activeId);
         const to = current.indexOf(overId);
+
         if (from === -1 || to === -1 || from === to) return current;
+
         return arrayMove(current, from, to);
       });
     },
     [setEnabled],
   );
+
   const { dndContextProps, onClickCapture } = useSidebarReorderDnd({
     onDragEnd: handleDragEnd,
     collisionDetection: closestCenter,
@@ -159,6 +171,7 @@ export function ThreadRowActionsEditor({
                     ? index
                     : getRowActionSlots(next).indexOf(value);
                 setEnabled(next);
+
                 return true;
               }}
             />
@@ -195,13 +208,17 @@ export function useFinishRowActionsOnOutsideClick(
   useEffect(() => {
     if (onDone === null) return;
     let pickerWasOpen = false;
+
     const handlePointerDown = () => {
       pickerWasOpen = isSlotPickerOpen();
     };
+
     const handleClick = (event: MouseEvent) => {
       const pickerClick = pickerWasOpen || isSlotPickerOpen();
       pickerWasOpen = false;
+
       if (pickerClick) return;
+
       if (
         event.target instanceof Element &&
         event.target.closest(CUSTOMIZE_SELECTOR)
@@ -209,8 +226,10 @@ export function useFinishRowActionsOnOutsideClick(
         return;
       onDone(false);
     };
+
     document.addEventListener("pointerdown", handlePointerDown, true);
     document.addEventListener("click", handleClick, true);
+
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown, true);
       document.removeEventListener("click", handleClick, true);
@@ -234,15 +253,19 @@ function RowActionSlotPicker({
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const focusHandedOff = useRef(false);
+
   const { dragBindings, setNodeRef, style } = useSidebarSortable({
     id: value ?? `empty-${index}`,
     disabled: reorderDisabled,
   });
+
   const registration =
     value === null
       ? undefined
       : registrations.find((candidate) => candidate.key === value);
+
   const label = `Row action ${index + 1}: ${value === null ? "Empty" : (registration?.title ?? value)}`;
+
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
@@ -287,10 +310,13 @@ function RowActionSlotPicker({
         className="min-w-44"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
+
           if (focusHandedOff.current) {
             focusHandedOff.current = false;
+
             return;
           }
+
           buttonRef.current?.focus();
         }}
       >

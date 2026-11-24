@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { QueryObserver } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vitest";
+import type { Environment } from "@omnyo/domain";
 import { createAppQueryClient } from "@/lib/query-client";
+import { sdk } from "@/lib/sdk";
+import { environmentQueryOptions } from "../queries/environment-queries";
 import {
   makeEnvironment,
   makeThreadListEntry,
-} from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/test-helpers/domain-fixtures";
 import {
   makeProjectWithThreadsResponse,
   makeSidebarBootstrapResponse,
@@ -19,6 +23,10 @@ import {
   completeEnvironmentNameUpdateTransaction,
   rollbackEnvironmentNameUpdateTransaction,
 } from "./environment-workspace-cache-owner";
+
+vi.mock("@/lib/sdk", () => ({
+  sdk: { environments: { get: vi.fn() } },
+}));
 
 function makeQueryClient() {
   return createAppQueryClient({
@@ -79,9 +87,11 @@ function readEnvironmentNames(queryClient: ReturnType<typeof makeQueryClient>) {
   const environment = queryClient.getQueryData<
     ReturnType<typeof makeTestEnvironment>
   >(environmentQueryKey("env_1"));
+
   const sidebar = queryClient.getQueryData<
     ReturnType<typeof makeSidebarBootstrapResponse>
   >(sidebarNavigationQueryKey());
+
   return {
     environment: environment?.name,
     sidebar: sidebar?.projects[0]?.threads[0]?.environmentName,
@@ -118,11 +128,13 @@ describe("environment name update transaction", () => {
   it("does not overwrite a newer authoritative value during rollback", async () => {
     const queryClient = makeQueryClient();
     seedEnvironmentName(queryClient, "Original environment");
+
     const transaction = await beginEnvironmentNameUpdateTransaction({
       environmentId: "env_1",
       name: "Optimistic environment",
       queryClient,
     });
+
     applyEnvironmentUpdateResult({
       environment: makeTestEnvironment("Newer environment"),
       queryClient,
@@ -139,11 +151,13 @@ describe("environment name update transaction", () => {
   it("does not let an older success overwrite a newer optimistic rename", async () => {
     const queryClient = makeQueryClient();
     seedEnvironmentName(queryClient, "Original environment");
+
     const older = await beginEnvironmentNameUpdateTransaction({
       environmentId: "env_1",
       name: "Older rename",
       queryClient,
     });
+
     const newer = await beginEnvironmentNameUpdateTransaction({
       environmentId: "env_1",
       name: "Newer rename",
@@ -176,10 +190,12 @@ describe("environment name update transaction", () => {
 describe("applyEnvironmentUpdateResult", () => {
   it("invalidates cached thread search rows that render environment metadata", () => {
     const queryClient = makeQueryClient();
+
     const threadSearchKey = threadSearchQueryKey({
       limitPerGroup: 20,
       query: "renamed",
     });
+
     queryClient.setQueryData(threadSearchKey, {
       active: { results: [], total: 0 },
       archived: { results: [], total: 0 },
@@ -192,6 +208,59 @@ describe("applyEnvironmentUpdateResult", () => {
 
     expect(queryClient.getQueryState(threadSearchKey)?.isInvalidated).toBe(
       true,
+    );
+  });
+
+  it("keeps a rename result when an older environment fetch lands later", async () => {
+    const queryClient = makeQueryClient();
+    const original = makeTestEnvironment("Original environment");
+    let resolveStaleFetch: (environment: Environment) => void = () => {};
+
+    vi.mocked(sdk.environments.get).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveStaleFetch = resolve;
+      }),
+    );
+
+    const observer = new QueryObserver(
+      queryClient,
+      environmentQueryOptions("env_1"),
+    );
+
+    const unsubscribe = observer.subscribe(() => {});
+
+    try {
+      const renamed = {
+        ...makeTestEnvironment("Renamed environment"),
+        updatedAt: original.updatedAt + 1,
+      };
+
+      applyEnvironmentUpdateResult({ environment: renamed, queryClient });
+      resolveStaleFetch(original);
+      await vi.waitFor(() => expect(queryClient.isFetching()).toBe(0));
+      expect(queryClient.getQueryData(environmentQueryKey("env_1"))).toEqual(
+        renamed,
+      );
+    } finally {
+      unsubscribe();
+      queryClient.clear();
+    }
+  });
+
+  it("keeps a newer cached environment over an older rename result", () => {
+    const queryClient = makeQueryClient();
+    const renamed = makeTestEnvironment("Renamed environment");
+
+    const newer = {
+      ...makeTestEnvironment("Renamed environment"),
+      status: "error" as const,
+      updatedAt: renamed.updatedAt + 1,
+    };
+
+    queryClient.setQueryData(environmentQueryKey("env_1"), newer);
+    applyEnvironmentUpdateResult({ environment: renamed, queryClient });
+    expect(queryClient.getQueryData(environmentQueryKey("env_1"))).toEqual(
+      newer,
     );
   });
 });

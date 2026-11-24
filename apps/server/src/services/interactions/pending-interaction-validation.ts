@@ -15,7 +15,7 @@ import {
   isUserQuestionPendingInteraction,
   isUserQuestionPendingInteractionResolution,
   isPluginPendingInteractionResolution,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { ApiError } from "../../errors.js";
 
 type GrantedPendingInteractionResolution = Extract<
@@ -29,6 +29,7 @@ function stringSetEquals(
 ): boolean {
   const leftSet = new Set(left);
   const rightSet = new Set(right);
+
   if (leftSet.size !== rightSet.size) {
     return false;
   }
@@ -61,6 +62,7 @@ function grantedResolutionEquals(
   if (left.grantedPermissions === null || right.grantedPermissions === null) {
     return left.grantedPermissions === right.grantedPermissions;
   }
+
   return permissionProfileEquals(
     left.grantedPermissions,
     right.grantedPermissions,
@@ -94,6 +96,7 @@ function validatePluginExtensionResolution(
       "Only a request answer can resolve a plugin request",
     );
   }
+
   if (
     Buffer.byteLength(JSON.stringify(resolution.value), "utf8") >
     PLUGIN_INTERACTION_MAX_PAYLOAD_BYTES
@@ -113,6 +116,7 @@ export function pendingInteractionResolutionEquals(
   if (left === null || right === null) {
     return left === right;
   }
+
   if (
     isPluginPendingInteractionResolution(left) ||
     isPluginPendingInteractionResolution(right)
@@ -122,6 +126,7 @@ export function pendingInteractionResolutionEquals(
       isPluginPendingInteractionResolution(right)
     );
   }
+
   if (
     isPluginExtensionInteractionResolution(left) ||
     isPluginExtensionInteractionResolution(right)
@@ -132,6 +137,7 @@ export function pendingInteractionResolutionEquals(
       isDeepStrictEqual(left.value, right.value)
     );
   }
+
   if (
     isUserQuestionPendingInteractionResolution(left) ||
     isUserQuestionPendingInteractionResolution(right)
@@ -142,14 +148,18 @@ export function pendingInteractionResolutionEquals(
     ) {
       return false;
     }
+
     const leftKeys = Object.keys(left.answers);
     const rightKeys = Object.keys(right.answers);
+
     if (!stringSetEquals(leftKeys, rightKeys)) {
       return false;
     }
+
     return leftKeys.every((questionId) => {
       const leftAnswer = left.answers[questionId];
       const rightAnswer = right.answers[questionId];
+
       return (
         leftAnswer !== undefined &&
         rightAnswer !== undefined &&
@@ -196,15 +206,18 @@ function getRequestedPermissions(
   if (interaction.payload.subject.kind === "permission_grant") {
     return interaction.payload.subject.permissions;
   }
+
   if (decision !== "allow_for_session") {
     return null;
   }
+
   if (
     interaction.payload.subject.kind === "command" ||
     interaction.payload.subject.kind === "file_change"
   ) {
     return interaction.payload.subject.sessionGrant;
   }
+
   return null;
 }
 
@@ -214,6 +227,7 @@ function validateGrantedPermissions(
   permissions: PendingInteractionGrantedPermissionProfile,
 ): void {
   const requestedPermissions = getRequestedPermissions(interaction, decision);
+
   if (requestedPermissions === null) {
     throw new ApiError(
       400,
@@ -248,6 +262,7 @@ function validateGrantedPermissions(
 
   if (permissions.fileSystem !== null) {
     const requestedFileSystem = requestedPermissions.fileSystem;
+
     if (requestedFileSystem === null) {
       throw new ApiError(
         400,
@@ -259,9 +274,11 @@ function validateGrantedPermissions(
     const unknownReadPaths = permissions.fileSystem.read.filter(
       (path) => !requestedFileSystem.read.includes(path),
     );
+
     const unknownWritePaths = permissions.fileSystem.write.filter(
       (path) => !requestedFileSystem.write.includes(path),
     );
+
     if (unknownReadPaths.length > 0 || unknownWritePaths.length > 0) {
       throw new ApiError(
         400,
@@ -284,6 +301,7 @@ function validateCommandOrFileChangeSessionGrant(
   }
 
   const sessionGrant = interaction.payload.subject.sessionGrant;
+
   if (sessionGrant === null) {
     return;
   }
@@ -308,14 +326,19 @@ export function validatePendingInteractionResolution(
       "Plugin interactions must be submitted through the respond endpoint",
     );
   }
+
   if (isUserQuestionPendingInteraction(interaction)) {
     validateUserQuestionResolution(interaction, resolution);
+
     return;
   }
+
   if (isPluginExtensionPendingInteraction(interaction)) {
     validatePluginExtensionResolution(resolution);
+
     return;
   }
+
   if (!isApprovalPendingInteraction(interaction)) {
     throw new ApiError(
       400,
@@ -323,6 +346,7 @@ export function validatePendingInteractionResolution(
       `Unsupported pending interaction payload for interaction ${interaction.id}`,
     );
   }
+
   if (!isApprovalPendingInteractionResolution(resolution)) {
     throw new ApiError(
       400,
@@ -330,7 +354,9 @@ export function validatePendingInteractionResolution(
       "Only an approval decision can resolve an approval interaction",
     );
   }
+
   validateAvailableDecision(interaction, resolution.decision);
+
   if (resolution.decision !== "deny") {
     if (resolution.grantedPermissions !== null) {
       validateGrantedPermissions(
@@ -338,6 +364,7 @@ export function validatePendingInteractionResolution(
         resolution.decision,
         resolution.grantedPermissions,
       );
+
       if (resolution.decision === "allow_for_session") {
         validateCommandOrFileChangeSessionGrant(
           interaction,
@@ -380,6 +407,7 @@ function validateUserQuestionResolution(
   const questionById = new Map(
     interaction.payload.questions.map((question) => [question.id, question]),
   );
+
   for (const answerQuestionId of Object.keys(resolution.answers)) {
     if (!questionById.has(answerQuestionId)) {
       throw new ApiError(
@@ -392,6 +420,7 @@ function validateUserQuestionResolution(
 
   for (const question of interaction.payload.questions) {
     const answer = resolution.answers[question.id];
+
     if (!answer) {
       throw new ApiError(
         400,
@@ -401,6 +430,7 @@ function validateUserQuestionResolution(
     }
 
     const selectedValues = new Set(answer.selected);
+
     if (selectedValues.size !== answer.selected.length) {
       throw new ApiError(
         400,
@@ -410,6 +440,7 @@ function validateUserQuestionResolution(
     }
 
     const optionCount = question.options?.length ?? 0;
+
     if (answer.selected.length > optionCount) {
       throw new ApiError(
         400,
@@ -429,6 +460,7 @@ function validateUserQuestionResolution(
     const optionValues = new Set(
       (question.options ?? []).map((option) => option.value),
     );
+
     for (const selectedValue of answer.selected) {
       if (!optionValues.has(selectedValue)) {
         throw new ApiError(

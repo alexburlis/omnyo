@@ -1,13 +1,14 @@
 import {
   spawnManagedProcess,
   isClosedProcessStdinError,
-} from "@bb/process-utils";
+} from "@omnyo/process-utils";
 import { createInterface } from "node:readline";
-import { experimental_recordProviderChildIo } from "@bb/provider-bridge-protocol/bridge-kit";
+import { experimental_recordProviderChildIo } from "@omnyo/provider-bridge-protocol/bridge-kit";
 import type { z } from "zod";
 import { ACP_PROTOCOL_VERSION, acpInitializeResultSchema } from "../wire.js";
 
 const STDERR_TAIL_MAX_CHUNKS = 40;
+
 export interface AcpAgentRequestResponder {
   result(value: unknown): void;
   error(code: number, message: string): void;
@@ -86,7 +87,9 @@ interface AgentErrorObject {
 export function formatAgentError(error: AgentErrorObject): string {
   const message =
     error.message ?? `ACP agent returned error code ${error.code ?? "unknown"}`;
+
   const details = formatAgentErrorData(error.data);
+
   return details === undefined ? message : `${message}: ${details}`;
 }
 
@@ -94,9 +97,11 @@ function formatAgentErrorData(data: unknown): string | undefined {
   if (data === undefined || data === null) {
     return undefined;
   }
+
   if (typeof data === "string") {
     return data.trim() === "" ? undefined : data;
   }
+
   if (
     typeof data === "object" &&
     "details" in data &&
@@ -105,6 +110,7 @@ function formatAgentErrorData(data: unknown): string | undefined {
   ) {
     return data.details;
   }
+
   try {
     return JSON.stringify(data);
   } catch {
@@ -114,18 +120,23 @@ function formatAgentErrorData(data: unknown): string | undefined {
 
 function parseAgentLine(line: string): ParsedAgentMessage | null {
   const trimmed = line.trim();
+
   if (!trimmed) {
     return null;
   }
+
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(trimmed);
   } catch {
     return null;
   }
+
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return null;
   }
+
   return parsed as ParsedAgentMessage;
 }
 
@@ -138,6 +149,7 @@ export function createAcpAgentConnection(
     cwd: options.cwd,
     env: options.env,
   });
+
   const { child } = managed;
   experimental_recordProviderChildIo(child, {
     threadId: options.recordThreadId,
@@ -158,6 +170,7 @@ export function createAcpAgentConnection(
         );
       }
     });
+
     return stopPromise;
   }
 
@@ -165,6 +178,7 @@ export function createAcpAgentConnection(
     for (const [, request] of pending) {
       request.reject(error);
     }
+
     pending.clear();
   }
 
@@ -172,26 +186,32 @@ export function createAcpAgentConnection(
     if (exited) {
       return;
     }
+
     exited = true;
+
     const code =
       "code" in error && typeof error.code === "string"
         ? ` (${error.code})`
         : "";
+
     const detail = `stdin closed${code}: ${error.message}`;
     rejectAllPending(
       new AcpAgentExitedError(`ACP agent "${options.command}" ${detail}`),
     );
+
     const reportExit = (cleanupError: unknown): void => {
       const cleanupDetail =
         cleanupError === null
           ? []
           : [`Agent cleanup failed: ${String(cleanupError)}`];
+
       options.onExit({
         code: null,
         signal: null,
         stderrTail: [...stderrChunks, detail, ...cleanupDetail].join("\n"),
       });
     };
+
     void stopAgent(0).then(() => reportExit(null), reportExit);
   }
 
@@ -199,11 +219,15 @@ export function createAcpAgentConnection(
     if (stopping) {
       return;
     }
+
     const stdin = child.stdin;
+
     if (!stdin || stdin.destroyed || !stdin.writable) {
       closeForAgentStdin(new Error("stdin is not writable"));
+
       return;
     }
+
     stdin.write(JSON.stringify(message) + "\n");
   }
 
@@ -211,9 +235,11 @@ export function createAcpAgentConnection(
     if (!isClosedProcessStdinError(error)) {
       throw error;
     }
+
     if (stopping) {
       return;
     }
+
     closeForAgentStdin(error);
   });
 
@@ -222,26 +248,33 @@ export function createAcpAgentConnection(
       input: child.stdout,
       terminal: false,
     });
+
     stdoutLines.on("line", (line) => {
       if (stopping) {
         return;
       }
+
       const message = parseAgentLine(line);
+
       if (!message) {
         return;
       }
 
       const id = message.id;
+
       if (
         (typeof id === "string" || typeof id === "number") &&
         message.method === undefined
       ) {
         const numericId = typeof id === "number" ? id : Number(id);
         const request = pending.get(numericId);
+
         if (!request) {
           return;
         }
+
         pending.delete(numericId);
+
         if (message.error) {
           request.reject(
             new AcpAgentResponseError(
@@ -252,6 +285,7 @@ export function createAcpAgentConnection(
         } else {
           request.resolve(message.result);
         }
+
         return;
       }
 
@@ -277,6 +311,7 @@ export function createAcpAgentConnection(
             });
           },
         });
+
         return;
       }
 
@@ -289,8 +324,10 @@ export function createAcpAgentConnection(
       input: child.stderr,
       terminal: false,
     });
+
     stderrLines.on("line", (line) => {
       stderrChunks.push(line);
+
       if (stderrChunks.length > STDERR_TAIL_MAX_CHUNKS) {
         stderrChunks.shift();
       }
@@ -301,6 +338,7 @@ export function createAcpAgentConnection(
     if (exited) {
       return;
     }
+
     exited = true;
     rejectAllPending(
       new AcpAgentExitedError(
@@ -314,6 +352,7 @@ export function createAcpAgentConnection(
     if (exited) {
       return;
     }
+
     exited = true;
     const stderrTail = stderrChunks.join("\n");
     rejectAllPending(
@@ -323,17 +362,20 @@ export function createAcpAgentConnection(
         }`,
       ),
     );
+
     const reportExit = (cleanupError: unknown): void => {
       const cleanupDetail =
         cleanupError === null
           ? []
           : [`Agent cleanup failed: ${String(cleanupError)}`];
+
       options.onExit({
         code,
         signal,
         stderrTail: [...stderrChunks, ...cleanupDetail].join("\n"),
       });
     };
+
     void stopAgent().then(() => reportExit(null), reportExit);
   });
 
@@ -350,12 +392,15 @@ export function createAcpAgentConnection(
           ),
         );
       }
+
       const id = nextRequestId;
       nextRequestId += 1;
+
       return new Promise((resolve, reject) => {
         pending.set(id, {
           resolve: (value) => {
             const parsed = resultSchema.safeParse(value);
+
             if (parsed.success) {
               resolve(parsed.data);
             } else {
@@ -376,6 +421,7 @@ export function createAcpAgentConnection(
       if (stopping || exited) {
         return;
       }
+
       writeLine({ jsonrpc: "2.0", method, params });
     },
 
@@ -387,6 +433,7 @@ export function createAcpAgentConnection(
           `ACP agent "${options.command}" is not running`,
         ),
       );
+
       return stopAgent();
     },
   };
@@ -416,7 +463,7 @@ export function requestAcpInitialize(
     method: "initialize",
     params: {
       protocolVersion: ACP_PROTOCOL_VERSION,
-      clientInfo: { name: "bb", version: "1.0.0" },
+      clientInfo: { name: "omnyo", version: "1.0.0" },
       clientCapabilities: acpClientCapabilities(
         parameterizedModelPicker,
         fsAccess,

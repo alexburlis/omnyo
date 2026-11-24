@@ -32,6 +32,7 @@ import {
 
 export const reorderCollisionDetection: CollisionDetection = (args) => {
   const pointerCollisions = pointerWithin(args);
+
   return pointerCollisions.length > 0 ? pointerCollisions : closestCenter(args);
 };
 
@@ -73,6 +74,16 @@ export interface UseReorderDndResult {
   onClickCapture: MouseEventHandler<HTMLElement>;
 }
 
+const MOUSE_SENSOR_OPTIONS = { activationConstraint: { distance: 8 } };
+
+const TOUCH_SENSOR_OPTIONS = {
+  activationConstraint: { delay: 200, tolerance: 6 },
+};
+
+const KEYBOARD_SENSOR_OPTIONS = {
+  coordinateGetter: sortableKeyboardCoordinates,
+};
+
 export function useReorderDnd({
   onDragEnd,
   onDragStart,
@@ -89,16 +100,15 @@ export function useReorderDnd({
     clearDragClickSuppressionSoon,
     consumeDragClickSuppression,
   } = useDragClickSuppression();
+
   const isDraggingRef = useRef(false);
+
   const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(touchSensor, {
-      activationConstraint: { delay: 200, tolerance: 6 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
+    useSensor(MouseSensor, MOUSE_SENSOR_OPTIONS),
+    useSensor(touchSensor, TOUCH_SENSOR_OPTIONS),
+    useSensor(KeyboardSensor, KEYBOARD_SENSOR_OPTIONS),
   );
+
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
       isDraggingRef.current = true;
@@ -107,14 +117,17 @@ export function useReorderDnd({
     },
     [beginDragClickSuppression, onDragStart],
   );
+
   const handleDragCancel = useCallback(() => {
     if (!isDraggingRef.current) {
       return;
     }
+
     isDraggingRef.current = false;
     clearDragClickSuppressionSoon();
     onDragCancel?.();
   }, [clearDragClickSuppressionSoon, onDragCancel]);
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       isDraggingRef.current = false;
@@ -130,22 +143,27 @@ export function useReorderDnd({
         handleDragCancel();
       }
     };
+
     document.addEventListener("keydown", handleKeyDown);
+
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       isDraggingRef.current = false;
     };
   }, [handleDragCancel]);
+
   const onClickCapture = useCallback<MouseEventHandler<HTMLElement>>(
     (event) => {
       if (!consumeDragClickSuppression()) {
         return;
       }
+
       event.preventDefault();
       event.stopPropagation();
     },
     [consumeDragClickSuppression],
   );
+
   const dndContextProps = useMemo<ReorderDndContextProps>(
     () => ({
       sensors,

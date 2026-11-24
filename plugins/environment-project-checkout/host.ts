@@ -1,5 +1,5 @@
-import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
-import { createHostProgress } from "bb-environment-provider-host/progress";
+import { experimental_defineHostEntry } from "@omnyo/plugin-sdk/host";
+import { createHostProgress } from "omnyo-environment-provider-host/progress";
 import { checkoutHostContract, checkoutHostSignals } from "./contract.js";
 import { attachCheckout, inspectCheckout } from "./host/checkout.js";
 
@@ -20,9 +20,11 @@ export function createCheckoutHostEntry() {
             }),
             signal: context.signal,
           });
+
           return { status: "attached", ...attached } as const;
         } catch (error) {
           if (context.signal.aborted) throw error;
+
           return {
             status: "failed",
             message: error instanceof Error ? error.message : String(error),

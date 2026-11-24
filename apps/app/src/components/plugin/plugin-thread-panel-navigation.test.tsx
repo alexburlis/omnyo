@@ -17,6 +17,7 @@ function Pane({
   isFocused: boolean;
 }) {
   usePublishThreadPanelOpener(opener, isFocused);
+
   return null;
 }
 
@@ -28,6 +29,7 @@ afterEach(() => {
 it("publishes only the focused pane's opener", () => {
   const left = vi.fn(() => true);
   const right = vi.fn(() => true);
+
   const { rerender } = render(
     <>
       <Pane opener={left} isFocused={true} />

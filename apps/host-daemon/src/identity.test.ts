@@ -9,6 +9,7 @@ const tempDirs: string[] = [];
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -18,9 +19,11 @@ async function readFileOrNull(filePath: string): Promise<string | null> {
   } catch (error) {
     const code =
       error instanceof Error && "code" in error ? error.code : undefined;
+
     if (code === "ENOENT") {
       return null;
     }
+
     throw error;
   }
 }
@@ -35,13 +38,14 @@ afterEach(async () => {
 
 describe("identity", () => {
   it("resolves a host ID once persisted and reuses it on subsequent runs", async () => {
-    const dataDir = await makeTempDir("bb-host-daemon-identity-");
+    const dataDir = await makeTempDir("omnyo-host-daemon-identity-");
 
     const first = await loadHostIdentity({
       dataDir,
       createId: () => "host-first",
       fallbackHostName: () => "test-host",
     });
+
     await persistHostId({ dataDir, hostId: first.hostId });
 
     const second = await loadHostIdentity({
@@ -55,6 +59,7 @@ describe("identity", () => {
     await expect(
       fs.readFile(path.join(dataDir, "host-id"), "utf8"),
     ).resolves.toContain("host-first");
+
     if (process.platform !== "win32") {
       const stats = await fs.stat(path.join(dataDir, "host-id"));
       expect(stats.mode & 0o777).toBe(0o600);
@@ -67,8 +72,8 @@ describe("identity", () => {
     );
   });
 
-  it("does not persist BB_HOST_ID until persistHostId is called", async () => {
-    const dataDir = await makeTempDir("bb-host-daemon-identity-env-");
+  it("does not persist OMNYO_HOST_ID until persistHostId is called", async () => {
+    const dataDir = await makeTempDir("omnyo-host-daemon-identity-env-");
 
     const identity = await loadHostIdentity({
       dataDir,
@@ -89,8 +94,8 @@ describe("identity", () => {
     ).resolves.toContain("host-provided");
   });
 
-  it("rejects a BB_HOST_ID that conflicts with a persisted host ID", async () => {
-    const dataDir = await makeTempDir("bb-host-daemon-identity-conflict-");
+  it("rejects a OMNYO_HOST_ID that conflicts with a persisted host ID", async () => {
+    const dataDir = await makeTempDir("omnyo-host-daemon-identity-conflict-");
 
     await persistHostId({ dataDir, hostId: "host-persisted" });
 

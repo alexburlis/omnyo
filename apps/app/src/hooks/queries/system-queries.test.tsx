@@ -1,25 +1,28 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { AvailableModel } from "@bb/domain";
+import type { AvailableModel } from "@omnyo/domain";
 import type {
   SystemExecutionOptionsResponse,
+  SystemProviderCatalogEntry,
   SystemProviderStatesResponse,
-} from "@bb/server-contract";
-import type { ProviderInfo } from "@bb/domain";
-import { makeProviderInfo } from "@bb/test-helpers/domain-fixtures";
-import type { ProviderCliStatusResponse } from "@bb/host-daemon-contract";
+} from "@omnyo/server-contract";
+import type { ProviderInfo } from "@omnyo/domain";
+import { makeProviderInfo } from "@omnyo/test-helpers/domain-fixtures";
+import type { ProviderCliStatusResponse } from "@omnyo/host-daemon-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import {
   hostProviderCliStatusQueryKey,
   systemExecutionOptionsQueryKey,
+  systemProviderCatalogQueryKey,
   systemProviderStatesQueryKey,
   systemProvidersQueryKey,
 } from "./query-keys";
 import {
   prefetchSystemExecutionOptions,
+  useKnownProviderModelCatalogScope,
   useHostProviderCliStatus,
   useSystemExecutionOptions,
   useSystemProviderInfo,
@@ -28,7 +31,7 @@ import {
 } from "./system-queries";
 
 vi.mock("@/lib/sdk", () => ({
-  BbHttpError: class BbHttpError extends Error {},
+  OmnyoHttpError: class OmnyoHttpError extends Error {},
   sdk: {
     hosts: { providerCliStatus: vi.fn() },
     providers: { list: vi.fn() },
@@ -45,9 +48,11 @@ const EXECUTION_OPTIONS_RESPONSE: SystemExecutionOptionsResponse = {
   selectedOnlyModels: [],
   permissionCeiling: "full",
   modelLoadError: null,
+  modelNotice: null,
 };
 
 const PROVIDER_CLI_STATUS_RESPONSE = {} as ProviderCliStatusResponse;
+
 const PROVIDERS: ProviderInfo[] = [];
 
 function providerStates(providerId: string): SystemProviderStatesResponse {
@@ -77,6 +82,73 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+describe("useKnownProviderModelCatalogScope", () => {
+  it.each([false, true])(
+    "keeps the management catalog out of capability lookup with a loaded roster: %s",
+    (loadedRoster) => {
+      const provider = makeProviderInfo({
+        id: "codex",
+        capabilities: { modelCatalogScope: "host" },
+      });
+
+      const catalog: SystemProviderCatalogEntry[] = [
+        {
+          id: provider.id,
+          displayName: provider.displayName,
+          pluginId: provider.pluginId,
+          pluginName: "Codex",
+          pluginEnabled: true,
+          enabled: true,
+          available: true,
+          logoUrl: null,
+          info: provider,
+        },
+      ];
+
+      const { queryClient, wrapper } = createQueryClientTestHarness();
+      queryClient.setQueryData(systemProviderCatalogQueryKey(), catalog);
+
+      if (loadedRoster)
+        queryClient.setQueryData(systemProvidersQueryKey(), [provider]);
+
+      const { result } = renderHook(
+        () => useKnownProviderModelCatalogScope(provider.id),
+        { wrapper },
+      );
+
+      expect(result.current).toBe(loadedRoster ? "host" : undefined);
+    },
+  );
+
+  it("reports a scope that the cache learns after the first render", async () => {
+    const provider = makeProviderInfo({
+      id: "codex",
+      capabilities: { modelCatalogScope: "host" },
+    });
+
+    const { queryClient, wrapper } = createQueryClientTestHarness();
+
+    const { result } = renderHook(
+      () => useKnownProviderModelCatalogScope(provider.id),
+      { wrapper },
+    );
+
+    expect(result.current).toBeUndefined();
+
+    queryClient.setQueryData(systemProvidersQueryKey(), [provider]);
+
+    await waitFor(() => {
+      expect(result.current).toBe("host");
+    });
+
+    queryClient.removeQueries({ queryKey: systemProvidersQueryKey() });
+
+    await waitFor(() => {
+      expect(result.current).toBeUndefined();
+    });
+  });
+});
+
 describe("useSystemProviderInfo", () => {
   it("uses capabilities already loaded by the composer while the provider roster loads", async () => {
     const provider = makeProviderInfo({
@@ -94,6 +166,7 @@ describe("useSystemProviderInfo", () => {
         permissionModes: ["accept-edits", "auto", "full"],
       },
     });
+
     vi.mocked(sdk.providers.list).mockImplementation(
       () => new Promise(() => undefined),
     );
@@ -134,6 +207,7 @@ describe("useSystemProviderInfo", () => {
         },
       }),
     ];
+
     vi.mocked(sdk.providers.list).mockResolvedValue(providers);
     vi.mocked(sdk.system.executionOptions).mockImplementation(
       () => new Promise(() => undefined),
@@ -188,6 +262,7 @@ describe("useSystemProviders", () => {
         maintenance: { health: true, usage, installation: false },
         capabilities: { permissionModes: ["full"] },
       });
+
     const usageProvider = provider("usage-provider", true);
     const unsupportedProvider = provider("unsupported-provider", false);
     vi.mocked(sdk.providers.list).mockResolvedValueOnce([
@@ -195,9 +270,11 @@ describe("useSystemProviders", () => {
       unsupportedProvider,
     ]);
     const warm = createQueryClientTestHarness();
+
     const initial = renderHook(() => useSystemProviders({ hostId: "host-a" }), {
       wrapper: warm.wrapper,
     });
+
     await waitFor(() => {
       expect(initial.result.current.data).toEqual([
         usageProvider,
@@ -210,6 +287,7 @@ describe("useSystemProviders", () => {
       () => new Promise(() => undefined),
     );
     const reload = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => useSystemProviders({ capability: "usage", hostId: "host-a" }),
       { wrapper: reload.wrapper },
@@ -221,6 +299,48 @@ describe("useSystemProviders", () => {
 });
 
 describe("useSystemExecutionOptions", () => {
+  it("reopens a validated catalog immediately while its refresh is still pending", async () => {
+    vi.mocked(sdk.system.executionOptions).mockResolvedValue(
+      EXECUTION_OPTIONS_RESPONSE,
+    );
+
+    const { queryClient, wrapper } = createQueryClientTestHarness({
+      queries: { gcTime: 0 },
+    });
+
+    const initial = renderHook(
+      () =>
+        useSystemExecutionOptions({ hostId: "host-a", providerId: "codex" }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(initial.result.current.isSuccess).toBe(true));
+    initial.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    queryClient.invalidateQueries({
+      queryKey: systemExecutionOptionsQueryKey({
+        environmentId: null,
+        hostId: "host-a",
+        providerId: "codex",
+      }),
+      refetchType: "none",
+    });
+    vi.mocked(sdk.system.executionOptions).mockImplementation(
+      () => new Promise(() => undefined),
+    );
+
+    const reopened = renderHook(
+      () =>
+        useSystemExecutionOptions({ hostId: "host-a", providerId: "codex" }),
+      { wrapper },
+    );
+
+    expect(reopened.result.current.data).toEqual(EXECUTION_OPTIONS_RESPONSE);
+    expect(reopened.result.current.isPlaceholderData).toBe(false);
+    expect(reopened.result.current.isLoading).toBe(false);
+    queryClient.clear();
+  });
+
   it("keeps dynamic providers visible while another provider's models load", async () => {
     const providers: ProviderInfo[] = [
       makeProviderInfo({
@@ -246,20 +366,24 @@ describe("useSystemExecutionOptions", () => {
         },
       }),
     ];
+
     let resolveDynamicModels: (
       response: SystemExecutionOptionsResponse,
     ) => void = () => {};
+
     const dynamicModels = new Promise<SystemExecutionOptionsResponse>(
       (resolve) => {
         resolveDynamicModels = resolve;
       },
     );
+
     vi.mocked(sdk.system.executionOptions).mockImplementation((args) =>
       args?.providerId === "acp-opencode"
         ? dynamicModels
         : Promise.resolve({ ...EXECUTION_OPTIONS_RESPONSE, providers }),
     );
     const { wrapper } = createQueryClientTestHarness();
+
     const { result, rerender } = renderHook(
       ({ providerId }) => useSystemExecutionOptions({ providerId }),
       { initialProps: { providerId: "codex" }, wrapper },
@@ -314,11 +438,13 @@ describe("useSystemExecutionOptions", () => {
       hostId: "host-a",
       providerId: "codex",
     });
+
     const hostBKey = systemExecutionOptionsQueryKey({
       environmentId: null,
       hostId: "host-b",
       providerId: "codex",
     });
+
     expect(hostAKey).not.toEqual(hostBKey);
     expect(queryClient.getQueryState(hostAKey)).toBeDefined();
     expect(queryClient.getQueryState(hostBKey)).toBeDefined();
@@ -344,6 +470,7 @@ describe("useSystemExecutionOptions", () => {
       },
     }),
   );
+
   const CODEX_MODEL: AvailableModel = {
     id: "gpt-5.6-sol",
     model: "gpt-5.6-sol",
@@ -353,21 +480,25 @@ describe("useSystemExecutionOptions", () => {
     defaultReasoningEffort: "medium",
     isDefault: true,
   };
+
   const CODEX_CATALOG: SystemExecutionOptionsResponse = {
     ...EXECUTION_OPTIONS_RESPONSE,
     providers: BUILT_IN_PROVIDERS,
     models: [CODEX_MODEL],
   };
+
   const pendingForever = () => new Promise<never>(() => {});
 
   it("preloads a provider's last verified catalog until the probe lands", async () => {
     vi.mocked(sdk.system.executionOptions).mockResolvedValue(CODEX_CATALOG);
     const first = createQueryClientTestHarness();
+
     const warm = renderHook(
       () =>
         useSystemExecutionOptions({ hostId: "host-a", providerId: "codex" }),
       { wrapper: first.wrapper },
     );
+
     await waitFor(() =>
       expect(warm.result.current.data).toEqual(CODEX_CATALOG),
     );
@@ -375,11 +506,13 @@ describe("useSystemExecutionOptions", () => {
 
     vi.mocked(sdk.system.executionOptions).mockImplementation(pendingForever);
     const reload = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useSystemExecutionOptions({ hostId: "host-a", providerId: "codex" }),
       { wrapper: reload.wrapper },
     );
+
     expect(result.current.isPlaceholderData).toBe(true);
     expect(result.current.data?.models).toEqual([CODEX_MODEL]);
     expect(result.current.data?.modelLoadError).toBeNull();
@@ -399,12 +532,15 @@ describe("useSystemExecutionOptions", () => {
       maintenance: { health: true, usage: true, installation: false },
       capabilities: CODEX_CATALOG.providers[0]!.capabilities,
     });
+
     const customCatalog: SystemExecutionOptionsResponse = {
       ...CODEX_CATALOG,
       providers: [...CODEX_CATALOG.providers, customProvider],
     };
+
     vi.mocked(sdk.system.executionOptions).mockResolvedValue(customCatalog);
     const first = createQueryClientTestHarness();
+
     const warm = renderHook(
       () =>
         useSystemExecutionOptions({
@@ -413,6 +549,7 @@ describe("useSystemExecutionOptions", () => {
         }),
       { wrapper: first.wrapper },
     );
+
     await waitFor(() =>
       expect(warm.result.current.data).toEqual(customCatalog),
     );
@@ -420,6 +557,7 @@ describe("useSystemExecutionOptions", () => {
 
     vi.mocked(sdk.system.executionOptions).mockImplementation(pendingForever);
     const reload = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useSystemExecutionOptions({
@@ -428,6 +566,7 @@ describe("useSystemExecutionOptions", () => {
         }),
       { wrapper: reload.wrapper },
     );
+
     expect(result.current.isPlaceholderData).toBe(true);
     expect(result.current.data?.providers).toEqual(customCatalog.providers);
     expect(result.current.data?.models).toEqual([CODEX_MODEL]);
@@ -439,6 +578,7 @@ describe("useSystemExecutionOptions", () => {
       providers: [],
     });
     const first = createQueryClientTestHarness();
+
     const warm = renderHook(
       () =>
         useSystemExecutionOptions({
@@ -447,11 +587,13 @@ describe("useSystemExecutionOptions", () => {
         }),
       { wrapper: first.wrapper },
     );
+
     await waitFor(() => expect(warm.result.current.data).toBeDefined());
     warm.unmount();
 
     vi.mocked(sdk.system.executionOptions).mockImplementation(pendingForever);
     const reload = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useSystemExecutionOptions({
@@ -460,6 +602,7 @@ describe("useSystemExecutionOptions", () => {
         }),
       { wrapper: reload.wrapper },
     );
+
     expect(result.current.isPlaceholderData).toBe(false);
     expect(result.current.data).toBeUndefined();
   });
@@ -470,11 +613,13 @@ describe("useSystemExecutionOptions", () => {
       modelLoadError: { providerId: "codex", code: "failed", detail: null },
     });
     const first = createQueryClientTestHarness();
+
     const warm = renderHook(
       () =>
         useSystemExecutionOptions({ hostId: "host-a", providerId: "codex" }),
       { wrapper: first.wrapper },
     );
+
     await waitFor(() =>
       expect(warm.result.current.data?.modelLoadError).not.toBeNull(),
     );
@@ -482,11 +627,13 @@ describe("useSystemExecutionOptions", () => {
 
     vi.mocked(sdk.system.executionOptions).mockImplementation(pendingForever);
     const reload = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () =>
         useSystemExecutionOptions({ hostId: "host-a", providerId: "codex" }),
       { wrapper: reload.wrapper },
     );
+
     expect(result.current.isPlaceholderData).toBe(true);
     expect(result.current.data?.models).toEqual([]);
   });
@@ -504,19 +651,28 @@ describe("useSystemExecutionOptions", () => {
     "handles reconnect refresh: %s (retain catalog: %s)",
     async (code, retainCatalog, hasCatalog, providerId, refreshProviderId) => {
       const { queryClient, wrapper } = createQueryClientTestHarness();
+
       const initialCatalog = {
         ...CODEX_CATALOG,
         models: hasCatalog ? [CODEX_MODEL] : [],
       };
+
       vi.mocked(sdk.system.executionOptions).mockResolvedValue(initialCatalog);
+
       const { result } = renderHook(
-        () =>
-          useSystemExecutionOptions({ hostId: "host-a", providerId }),
+        () => useSystemExecutionOptions({ hostId: "host-a", providerId }),
         { wrapper },
       );
+
       await waitFor(() => expect(result.current.data).toEqual(initialCatalog));
       const loadedAt = result.current.dataUpdatedAt;
-      const modelLoadError = { providerId: refreshProviderId, code, detail: null };
+
+      const modelLoadError = {
+        providerId: refreshProviderId,
+        code,
+        detail: null,
+      };
+
       vi.mocked(sdk.system.executionOptions).mockResolvedValue({
         ...CODEX_CATALOG,
         providers: [makeProviderInfo({ id: refreshProviderId })],
@@ -552,6 +708,7 @@ describe("useSystemExecutionOptions", () => {
   it("does not replay a catalog across environments", async () => {
     vi.mocked(sdk.system.executionOptions).mockResolvedValue(CODEX_CATALOG);
     const first = createQueryClientTestHarness();
+
     const warm = renderHook(
       () =>
         useSystemExecutionOptions({
@@ -560,6 +717,7 @@ describe("useSystemExecutionOptions", () => {
         }),
       { wrapper: first.wrapper },
     );
+
     await waitFor(() =>
       expect(warm.result.current.data).toEqual(CODEX_CATALOG),
     );
@@ -567,6 +725,7 @@ describe("useSystemExecutionOptions", () => {
 
     vi.mocked(sdk.system.executionOptions).mockImplementation(pendingForever);
     const reload = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => [
         useSystemExecutionOptions({ providerId: "codex" }),
@@ -581,6 +740,7 @@ describe("useSystemExecutionOptions", () => {
       ],
       { wrapper: reload.wrapper },
     );
+
     expect(result.current[0]!.isPlaceholderData).toBe(false);
     expect(result.current[0]!.data).toBeUndefined();
     expect(result.current[1]!.isPlaceholderData).toBe(false);
@@ -592,11 +752,13 @@ describe("useSystemExecutionOptions", () => {
   it("never preloads a catalog for another provider or another host", async () => {
     vi.mocked(sdk.system.executionOptions).mockResolvedValue(CODEX_CATALOG);
     const first = createQueryClientTestHarness();
+
     const warm = renderHook(
       () =>
         useSystemExecutionOptions({ hostId: "host-a", providerId: "codex" }),
       { wrapper: first.wrapper },
     );
+
     await waitFor(() =>
       expect(warm.result.current.data).toEqual(CODEX_CATALOG),
     );
@@ -604,6 +766,7 @@ describe("useSystemExecutionOptions", () => {
 
     vi.mocked(sdk.system.executionOptions).mockImplementation(pendingForever);
     const reload = createQueryClientTestHarness();
+
     const { result } = renderHook(
       () => [
         useSystemExecutionOptions({ hostId: "host-a", providerId: "pi" }),
@@ -611,6 +774,7 @@ describe("useSystemExecutionOptions", () => {
       ],
       { wrapper: reload.wrapper },
     );
+
     expect(result.current[0]!.isPlaceholderData).toBe(true);
     expect(result.current[0]!.data?.models).toEqual([]);
     expect(result.current[1]!.isPlaceholderData).toBe(false);
@@ -739,10 +903,12 @@ describe("useSystemProviderStates", () => {
       environmentId: null,
       hostId: "host-a",
     });
+
     const hostBKey = systemProviderStatesQueryKey({
       environmentId: null,
       hostId: "host-b",
     });
+
     expect(hostAKey).not.toEqual(hostBKey);
     expect(queryClient.getQueryState(hostAKey)).toBeDefined();
     expect(queryClient.getQueryState(hostBKey)).toBeDefined();

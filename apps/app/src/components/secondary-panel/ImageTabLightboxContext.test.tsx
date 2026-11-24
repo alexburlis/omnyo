@@ -26,6 +26,7 @@ function ImageTabGalleryHarness({
   deferSecondSelection?: boolean;
 }) {
   const [activeTabId, setActiveTabId] = useState("one");
+
   const tabs: SecondaryPanelRenderableTab[] = IMAGE_TABS.map((imageTab) => ({
     label: imageTab.path,
     leadingVisual: null,
@@ -47,6 +48,7 @@ function ImageTabGalleryHarness({
       statusLabel: null,
     },
   }));
+
   const activeImage = IMAGE_TABS.find(
     (imageTab) => imageTab.id === activeTabId,
   );

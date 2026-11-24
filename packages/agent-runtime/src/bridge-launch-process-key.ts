@@ -18,9 +18,11 @@ function toStableJsonValue(value: unknown): StableJsonValue {
   ) {
     return value;
   }
+
   if (Array.isArray(value)) {
     return value.map((item) => toStableJsonValue(item));
   }
+
   if (typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
@@ -29,6 +31,7 @@ function toStableJsonValue(value: unknown): StableJsonValue {
         .map(([key, entryValue]) => [key, toStableJsonValue(entryValue)]),
     );
   }
+
   throw new Error(`Cannot fingerprint value of type ${typeof value}.`);
 }
 

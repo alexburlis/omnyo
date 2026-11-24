@@ -2,7 +2,7 @@ import type {
   ComposerCustomization,
   ComposerPlusMenuItem,
   PluginComposerScope,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import type {
   PluginCodeFenceRendererSlot,
   PluginComposerCustomizationSlot,
@@ -13,10 +13,13 @@ import type {
 } from "./plugin-slots";
 
 type ComposerAction = NonNullable<ComposerCustomization["actions"]>[number];
+
 type ComposerBanner = NonNullable<ComposerCustomization["banners"]>[number];
+
 type ComposerEditorEffect = NonNullable<
   NonNullable<ComposerCustomization["richText"]>["effects"]
 >[number];
+
 type ComposerDraftObserver = NonNullable<
   NonNullable<ComposerCustomization["richText"]>["onDraftChange"]
 >;
@@ -87,8 +90,10 @@ export function resolveComposerActions(
   scopeKind: PluginComposerScope["kind"],
 ): readonly ResolvedComposerAction[] {
   const resolved: ResolvedComposerAction[] = [];
+
   for (const customization of customizations) {
     if (!composerCustomizationApplies(customization, scopeKind)) continue;
+
     for (const action of customization.actions ?? []) {
       resolved.push({
         ...resolvedComposerContribution(customization, action.id),
@@ -96,6 +101,7 @@ export function resolveComposerActions(
       });
     }
   }
+
   return resolved;
 }
 
@@ -104,8 +110,10 @@ export function resolveComposerBanners(
   scopeKind: PluginComposerScope["kind"],
 ): readonly ResolvedComposerBanner[] {
   const resolved: ResolvedComposerBanner[] = [];
+
   for (const customization of customizations) {
     if (!composerCustomizationApplies(customization, scopeKind)) continue;
+
     for (const banner of customization.banners ?? []) {
       resolved.push({
         ...resolvedComposerContribution(customization, banner.id),
@@ -113,6 +121,7 @@ export function resolveComposerBanners(
       });
     }
   }
+
   return resolved;
 }
 
@@ -121,8 +130,10 @@ export function resolveComposerPlusMenuItems(
   scopeKind: PluginComposerScope["kind"],
 ): readonly ResolvedComposerPlusMenuItem[] {
   const resolved: ResolvedComposerPlusMenuItem[] = [];
+
   for (const customization of customizations) {
     if (!composerCustomizationApplies(customization, scopeKind)) continue;
+
     for (const item of customization.plusMenu ?? []) {
       resolved.push({
         ...resolvedComposerContribution(customization, item.id),
@@ -130,6 +141,7 @@ export function resolveComposerPlusMenuItems(
       });
     }
   }
+
   return resolved;
 }
 
@@ -138,8 +150,10 @@ export function resolveComposerSendMenuItems(
   scopeKind: PluginComposerScope["kind"],
 ): readonly ResolvedComposerPlusMenuItem[] {
   const resolved: ResolvedComposerPlusMenuItem[] = [];
+
   for (const customization of customizations) {
     if (!composerCustomizationApplies(customization, scopeKind)) continue;
+
     for (const item of customization.sendMenu ?? []) {
       resolved.push({
         ...resolvedComposerContribution(customization, item.id),
@@ -147,6 +161,7 @@ export function resolveComposerSendMenuItems(
       });
     }
   }
+
   return resolved;
 }
 
@@ -155,15 +170,18 @@ export function resolveComposerEditorEffects(
   scopeKind: PluginComposerScope["kind"],
 ): readonly ResolvedComposerEditorEffects[] {
   const resolved: ResolvedComposerEditorEffects[] = [];
+
   for (const customization of customizations) {
     if (!composerCustomizationApplies(customization, scopeKind)) continue;
     const effects = customization.richText?.effects;
+
     if (effects === undefined || effects.length === 0) continue;
     resolved.push({
       ...resolvedComposerContribution(customization, "editor-effects"),
       effects,
     });
   }
+
   return resolved;
 }
 
@@ -172,15 +190,18 @@ export function resolveComposerDraftObservers(
   scopeKind: PluginComposerScope["kind"],
 ): readonly ResolvedComposerDraftObserver[] {
   const resolved: ResolvedComposerDraftObserver[] = [];
+
   for (const customization of customizations) {
     if (!composerCustomizationApplies(customization, scopeKind)) continue;
     const onDraftChange = customization.richText?.onDraftChange;
+
     if (onDraftChange === undefined) continue;
     resolved.push({
       ...resolvedComposerContribution(customization, "draft-observer"),
       onDraftChange,
     });
   }
+
   return resolved;
 }
 
@@ -211,8 +232,10 @@ export function resolveTimelineRenderer(
       ) ?? null
     );
   }
+
   if (target.kind === "form") {
     const kind = `${target.pluginId}/${target.rendererId}`;
+
     return (
       registrations.find(
         (registration) =>
@@ -221,9 +244,11 @@ export function resolveTimelineRenderer(
       ) ?? null
     );
   }
+
   if (target.providerPluginId === null) {
     return null;
   }
+
   return (
     registrations.find(
       (registration) =>
@@ -242,9 +267,11 @@ function resolveMessageDirectiveClaimants(
 ): ResolvedMessageDirective | null {
   if (claimants.length === 0) return null;
   const only = claimants[0];
+
   if (claimants.length === 1 && only !== undefined) {
     return { status: "ok", slot: only };
   }
+
   return {
     status: "collision",
     pluginIds: [
@@ -257,8 +284,10 @@ export function resolveMessageDirectiveRegistry(
   registrations: readonly PluginMessageDirectiveSlot[],
 ): ReadonlyMap<string, ResolvedMessageDirective> {
   const claimantsById = new Map<string, PluginMessageDirectiveSlot[]>();
+
   for (const registration of registrations) {
     const claimants = claimantsById.get(registration.id);
+
     if (claimants === undefined) {
       claimantsById.set(registration.id, [registration]);
     } else {
@@ -267,10 +296,13 @@ export function resolveMessageDirectiveRegistry(
   }
 
   const resolved = new Map<string, ResolvedMessageDirective>();
+
   for (const [id, claimants] of claimantsById) {
     const directive = resolveMessageDirectiveClaimants(claimants);
+
     if (directive !== null) resolved.set(id, directive);
   }
+
   return resolved;
 }
 
@@ -282,9 +314,11 @@ export function resolveCodeFenceRendererRegistry(
   registrations: readonly PluginCodeFenceRendererSlot[],
 ): ReadonlyMap<string, ResolvedCodeFenceRenderer> {
   const claimantsByLanguage = new Map<string, PluginCodeFenceRendererSlot[]>();
+
   for (const registration of registrations) {
     for (const language of registration.languages) {
       const claimants = claimantsByLanguage.get(language);
+
       if (claimants === undefined) {
         claimantsByLanguage.set(language, [registration]);
       } else {
@@ -292,9 +326,12 @@ export function resolveCodeFenceRendererRegistry(
       }
     }
   }
+
   const resolved = new Map<string, ResolvedCodeFenceRenderer>();
+
   for (const [language, claimants] of claimantsByLanguage) {
     const [first] = claimants;
+
     if (first === undefined) continue;
     resolved.set(
       language,
@@ -308,6 +345,7 @@ export function resolveCodeFenceRendererRegistry(
           },
     );
   }
+
   return resolved;
 }
 
@@ -325,6 +363,7 @@ export function resolveReplacement<Registration>(
     applies === undefined
       ? registrations[0]
       : registrations.find((candidate) => applies(candidate));
+
   return registration === undefined
     ? OWNER_REPLACEMENT
     : { kind: "plugin", registration };
@@ -341,7 +380,9 @@ export const BUILT_IN_FILE_OPENER_PREFERENCE = "__builtin__";
 export function getFileExtension(path: string): string | null {
   const name = path.split("/").at(-1) ?? path;
   const dotIndex = name.lastIndexOf(".");
+
   if (dotIndex <= 0 || dotIndex === name.length - 1) return null;
+
   return name.slice(dotIndex + 1).toLowerCase();
 }
 
@@ -359,7 +400,9 @@ export function resolveFileOpenerReplacement(args: {
   override?: FileOpenerOverride;
 }): ResolvedReplacement<PluginFileOpenerSlot> {
   const override = args.override;
+
   if (override === "builtin") return OWNER_REPLACEMENT;
+
   if (override !== undefined) {
     return resolveReplacement(
       args.registrations,
@@ -370,11 +413,14 @@ export function resolveFileOpenerReplacement(args: {
   }
 
   const extension = getFileExtension(args.path);
+
   if (extension === null) return OWNER_REPLACEMENT;
   const preference = args.preference?.[extension];
+
   if (preference === BUILT_IN_FILE_OPENER_PREFERENCE) {
     return OWNER_REPLACEMENT;
   }
+
   return resolveReplacement(
     args.registrations,
     (candidate) =>

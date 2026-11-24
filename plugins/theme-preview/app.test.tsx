@@ -14,7 +14,7 @@ import {
   loadPluginApp,
   renderSlot,
   type PluginRpcTestHandlers,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 
 import type { rpcContract } from "./server";
 import {
@@ -41,6 +41,7 @@ const COMPONENT_SPECIMEN_IDS = [
   "switch",
   "checkbox",
 ] as const;
+
 const OVERLAY_LABELS = [
   "Menu",
   "Dialog",
@@ -49,6 +50,7 @@ const OVERLAY_LABELS = [
   "Hover card",
   "Toast",
 ] as const;
+
 const STYLESHEET_SPECIMEN_IDS = [
   ...COLOR_GROUPS.flatMap((group) =>
     group.tokens.map((token) => `color:${token}`),
@@ -85,6 +87,7 @@ const ENDLESS_CATALOG: Catalog = {
 
 const LONG_THEME_NAME =
   "Endless Color copy with a deliberately descriptive name";
+
 const LONG_NAME_CATALOG: Catalog = {
   activeThemeId: "long-theme",
   revision: 0,
@@ -101,9 +104,11 @@ interface Deferred<T> {
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
   });
+
   return { promise, resolve };
 }
 
@@ -125,6 +130,7 @@ beforeAll(async () => {
     releasePointerCapture: () => {},
   });
   const root = document.documentElement.style;
+
   const tokens: Record<string, string> = {
     canvas: "#ffffff",
     ink: "#222222",
@@ -164,8 +170,8 @@ beforeAll(async () => {
     "text-sm--line-height": "20px",
     spacing: "4px",
     "tracking-normal": "0em",
-    "bb-sidebar-row-height": "28px",
-    "icon-stroke-width": "1.75",
+    "omnyo-sidebar-row-height": "28px",
+    "icon-stroke-width": "1.3",
     radius: "8px",
     "shadow-x": "0px",
     "shadow-y": "2px",
@@ -174,10 +180,12 @@ beforeAll(async () => {
     "shadow-color": "#333333",
     "shadow-opacity": "0.15",
   };
+
   for (const [name, value] of Object.entries(tokens))
     root.setProperty(`--${name}`, value);
   const app = await loadPluginApp(() => import("./app"));
   const registered = app.navPanels.find(({ id }) => id === "preview");
+
   if (!registered) throw new Error("Theme Preview panel was not registered");
   panel = registered;
 });
@@ -187,7 +195,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
   document.documentElement.classList.remove("dark");
-  localStorage.removeItem("bb.theme");
+  localStorage.removeItem("omnyo.theme");
 });
 
 function renderPreview(
@@ -201,7 +209,9 @@ function themeControl(): HTMLButtonElement {
   const control = document.querySelector<HTMLButtonElement>(
     "[data-tp-theme-control]",
   );
+
   if (!control) throw new Error("Theme picker control was not rendered");
+
   return control;
 }
 
@@ -218,20 +228,23 @@ async function chooseEndlessDark(): Promise<void> {
   await waitFor(() => expect(control.textContent).toContain("Default"));
   openThemeMenu();
   const options = await screen.findAllByRole("option");
+
   const endless = options.find((option) =>
     option.textContent?.includes("Endless Color"),
   );
+
   if (!endless) throw new Error("Endless Color option was not rendered");
   pickOption(endless);
 }
 
 describe("Theme Preview", () => {
   it.each([390, 700, 807, 808, 1280])(
-    "offers supported views in bb's tabs and themes in bb's select at %ipx",
+    "offers supported views in Omnyo's tabs and themes in Omnyo's select at %ipx",
     async (panelWidth) => {
       const width = vi
         .spyOn(HTMLElement.prototype, "clientWidth", "get")
         .mockReturnValue(panelWidth);
+
       try {
         renderPreview({
           themeCatalog: () => DEFAULT_CATALOG,
@@ -241,6 +254,7 @@ describe("Theme Preview", () => {
         const tabs = within(
           screen.getByRole("tablist", { name: "Preview view" }),
         ).getAllByRole("tab");
+
         expect(tabs.map((tab) => tab.textContent)).toEqual(
           panelWidth < 808
             ? ["Thread", "New thread", "Settings"]
@@ -253,8 +267,8 @@ describe("Theme Preview", () => {
 
         const control = themeControl();
         expect(control.getAttribute("role")).toBe("combobox");
-        expect(control.className).toContain("focus:outline-none");
-        expect(control.className).toContain("focus:ring-1");
+        expect(control.className).toContain("outline-none");
+        expect(control.className).toContain("focus-visible:outline-3");
       } finally {
         width.mockRestore();
       }
@@ -265,6 +279,7 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(700);
+
     try {
       renderPreview(
         {
@@ -303,6 +318,7 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(1280);
+
     try {
       renderPreview({
         themeCatalog: () => DEFAULT_CATALOG,
@@ -313,9 +329,12 @@ describe("Theme Preview", () => {
         const found = document.querySelector<HTMLElement>(
           "[data-tp-thread-toc]",
         );
+
         expect(found).not.toBeNull();
+
         return found as HTMLElement;
       });
+
       const tabs = within(toc).getAllByRole("tab");
       expect(tabs.map((tab) => tab.textContent)).toEqual(["Agent", "You"]);
       expect(
@@ -330,9 +349,11 @@ describe("Theme Preview", () => {
       ).toBe("true");
 
       fireEvent.mouseDown(within(toc).getByRole("tab", { name: "Agent" }));
+
       const second = await within(toc).findByRole("button", {
         name: /Selection now reads/i,
       });
+
       fireEvent.click(second);
       expect(second.getAttribute("aria-current")).toBe("true");
     } finally {
@@ -340,36 +361,46 @@ describe("Theme Preview", () => {
     }
   });
 
-  it("projects every mock view from its current BB screen anatomy", async () => {
+  it("projects every mock view from its current Omnyo screen anatomy", async () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(1280);
+
     const rpc = {
       themeCatalog: () => DEFAULT_CATALOG,
       setTheme: () => DEFAULT_CATALOG,
     };
+
     try {
       renderPreview(rpc, "thread");
+
       const info = await waitFor(() => {
         const found = document.querySelector<HTMLElement>(
           "[data-tp-thread-info]",
         );
+
         expect(found).not.toBeNull();
+
         return found as HTMLElement;
       });
+
       expect(within(info).getByText("Info")).toBeDefined();
       expect(within(info).getByText("Diff")).toBeDefined();
       expect(within(info).queryByText("Changes")).toBeNull();
 
       cleanup();
       renderPreview(rpc, "new");
+
       const newThread = await waitFor(() => {
         const found = document.querySelector<HTMLElement>(
           "[data-tp-new-thread]",
         );
+
         expect(found).not.toBeNull();
+
         return found as HTMLElement;
       });
+
       expect(within(newThread).getByText("Ask anything…")).toBeDefined();
       expect(within(newThread).queryByRole("button")).toBeNull();
 
@@ -380,9 +411,11 @@ describe("Theme Preview", () => {
           2,
         ),
       );
+
       const splitPanes = [
         ...document.querySelectorAll<HTMLElement>("[data-tp-split-pane]"),
       ];
+
       expect(splitPanes.map((pane) => pane.dataset.focused)).toEqual([
         "true",
         "false",
@@ -394,13 +427,17 @@ describe("Theme Preview", () => {
 
       cleanup();
       renderPreview(rpc, "settings");
+
       const settings = await waitFor(() => {
         const found = document.querySelector<HTMLElement>(
           "[data-tp-settings-content=appearance]",
         );
+
         expect(found).not.toBeNull();
+
         return found as HTMLElement;
       });
+
       expect(
         screen
           .getByRole("button", { name: "Appearance" })
@@ -455,9 +492,11 @@ describe("Theme Preview", () => {
       "Endless Color",
     ]);
     expect(listbox.textContent).not.toMatch(/light|dark/i);
+
     const active = options.find(
       (option) => option.getAttribute("aria-selected") === "true",
     );
+
     expect(active?.textContent).toContain("Default");
   });
 
@@ -465,6 +504,7 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(1280);
+
     try {
       const short = renderPreview({
         themeCatalog: () => DEFAULT_CATALOG,
@@ -494,12 +534,15 @@ describe("Theme Preview", () => {
       await waitFor(() =>
         expect(document.querySelector("[data-tp-band=mobile]")).not.toBeNull(),
       );
+
       const longControl = await screen.findByRole("combobox", {
         name: new RegExp(LONG_THEME_NAME),
       });
+
       const longName = document.querySelector<HTMLElement>(
         "[data-tp-theme-name]",
       );
+
       expect(longName?.textContent).toBe(LONG_THEME_NAME);
       expect(longName?.style.textOverflow).toBe("ellipsis");
       expect(longName?.style.minWidth).toBe("0px");
@@ -519,6 +562,7 @@ describe("Theme Preview", () => {
       themeCatalog: () => DEFAULT_CATALOG,
       setTheme: (selection) => {
         selections.push(selection);
+
         return DEFAULT_CATALOG;
       },
     });
@@ -538,7 +582,7 @@ describe("Theme Preview", () => {
     expect(dark.getAttribute("aria-pressed")).toBe("true");
     expect(light.getAttribute("aria-pressed")).toBe("false");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    expect(localStorage.getItem("bb.theme")).toBe("dark");
+    expect(localStorage.getItem("omnyo.theme")).toBe("dark");
     expect(document.documentElement.style.colorScheme).toBe("");
 
     light.focus();
@@ -559,6 +603,7 @@ describe("Theme Preview", () => {
       const width = vi
         .spyOn(HTMLElement.prototype, "clientWidth", "get")
         .mockReturnValue(panelWidth);
+
       try {
         renderPreview({
           themeCatalog: () => DEFAULT_CATALOG,
@@ -576,9 +621,11 @@ describe("Theme Preview", () => {
           screen.queryByRole("button", { name: /full style guide/i }),
         ).toBeNull();
         expect(document.querySelector("[data-tp-section=rail]")).toBeNull();
+
         const areas = [...document.querySelectorAll("[data-tp-area]")].map(
           (el) => el.getAttribute("data-tp-area"),
         );
+
         expect(areas).toEqual(["mock", "overlays", "components", "stylesheet"]);
         expect(
           document.querySelector("[data-tp-style-readonly]"),
@@ -596,6 +643,7 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(1280);
+
     try {
       renderPreview({
         themeCatalog: () => DEFAULT_CATALOG,
@@ -608,6 +656,7 @@ describe("Theme Preview", () => {
       for (const view of MOCK_VIEWS) {
         expect(screen.getByRole("tab", { name: view.label })).toBeDefined();
       }
+
       expect(screen.queryByRole("button", { name: "Advanced" })).toBeNull();
       expect(
         document.querySelector("[data-tp-editor-tier=advanced]"),
@@ -615,10 +664,12 @@ describe("Theme Preview", () => {
       expect(
         document.querySelector("[data-tp-area=stylesheet] input"),
       ).toBeNull();
+
       for (const specimenId of STYLESHEET_SPECIMEN_IDS) {
         const specimens = document.querySelectorAll(
           `[data-tp-specimen="${specimenId}"]`,
         );
+
         expect(specimens, specimenId).toHaveLength(1);
         expect(
           specimens[0]?.hasAttribute("data-tp-style-segment"),
@@ -641,6 +692,7 @@ describe("Theme Preview", () => {
           specimenId,
         ).not.toBeNull();
       }
+
       for (const block of document.querySelectorAll<HTMLElement>(
         "[data-tp-area=stylesheet] [data-tp-grid]",
       )) {
@@ -650,30 +702,37 @@ describe("Theme Preview", () => {
         expect(block.style.alignContent).toBe("start");
         expect(block.style.border).toContain("1px solid");
         expect(block.style.overflow).toBe("hidden");
+
         const category = block.querySelector<HTMLElement>(
           "[data-tp-role=category]",
         );
+
         expect(category?.style.background).toContain(
           "var(--surface-recessed-soft-solid",
         );
         expect(category?.style.minHeight).toBe("32px");
         expect(category?.style.padding).toBe("6px 10px");
       }
+
       const colorGrid = document.querySelector<HTMLElement>(
         "[data-tp-style-colors]",
       );
+
       const systemGrid = document.querySelector<HTMLElement>(
         "[data-tp-style-systems]",
       );
+
       expect(colorGrid?.style.gap).toBe("16px");
       expect(colorGrid?.style.alignItems).toBe("start");
       expect(systemGrid?.style.marginTop).toBe("20px");
       expect(systemGrid?.style.alignItems).toBe("start");
       expect(colorGrid?.querySelector("[data-tp-block=lines]")).toBeNull();
       expect(systemGrid?.querySelector("[data-tp-block=lines]")).not.toBeNull();
+
       const canvasSegment = document.querySelector<HTMLElement>(
         '[data-tp-specimen="color:canvas"]',
       );
+
       expect(canvasSegment?.style.minHeight).toBe("32px");
       expect(canvasSegment?.style.padding).toBe("6px 10px");
       expect(canvasSegment?.style.borderTop).toContain("1px solid");
@@ -686,16 +745,20 @@ describe("Theme Preview", () => {
       expect(
         canvasSegment?.querySelector("[data-tp-role=value]")?.textContent,
       ).toMatch(/^#|—$/);
+
       const inkMeta = document.querySelector<HTMLElement>(
         '[data-tp-specimen="color:ink"] [data-tp-role=meta]',
       );
+
       expect(inkMeta?.style.overflow).toBe("hidden");
       expect(inkMeta?.style.textOverflow).toBe("ellipsis");
+
       const contrastLabels = [
         ...document.querySelectorAll<HTMLElement>(
           '[data-tp-column="contrast"]',
         ),
       ];
+
       expect(contrastLabels).toHaveLength(2);
       expect(
         contrastLabels.map(
@@ -703,25 +766,32 @@ describe("Theme Preview", () => {
             label.closest<HTMLElement>("[data-tp-block]")?.dataset.tpBlock,
         ),
       ).toEqual(["ink", "status"]);
+
       for (const label of contrastLabels) {
         expect(label.textContent).toBe("Contrast");
         const header = label.parentElement as HTMLElement;
+
         const firstSegment = header
           .closest<HTMLElement>("[data-tp-block]")
           ?.querySelector<HTMLElement>("[data-tp-style-segment]");
+
         expect(header.style.gridTemplateColumns).toBe(
           firstSegment?.style.gridTemplateColumns,
         );
       }
+
       expect(document.querySelector('[data-tp-column="token"]')).toBeNull();
       expect(document.querySelector('[data-tp-column="value"]')).toBeNull();
+
       for (const specimenId of COMPONENT_SPECIMEN_IDS) {
         expect(
           document.querySelector(`[data-tp-block="${specimenId}"]`),
           specimenId,
         ).not.toBeNull();
       }
+
       expect(document.querySelector("[data-tp-thread-list]")).toBeNull();
+
       for (const overlayLabel of OVERLAY_LABELS) {
         expect(
           screen.getByRole("button", { name: overlayLabel }),
@@ -736,6 +806,7 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(480);
+
     try {
       renderPreview({
         themeCatalog: () => DEFAULT_CATALOG,
@@ -745,8 +816,10 @@ describe("Theme Preview", () => {
       const frame = await waitFor(() => {
         const found = document.querySelector<HTMLElement>("[data-tp-frame]");
         expect(found).not.toBeNull();
+
         return found as HTMLElement;
       });
+
       expect(frame.style.zoom ?? "").toBe("");
       expect(frame.style.transform).toBe("");
       expect(frame.style.width).toBe("100%");
@@ -755,7 +828,7 @@ describe("Theme Preview", () => {
       expect(container?.style.maxWidth).toBe("100%");
       expect(container?.style.boxSizing).toBe("border-box");
       expect(container?.style.padding).toBe("16px");
-      expect(screen.queryByText("bb-plugins")).toBeNull();
+      expect(screen.queryByText("omnyo-plugins")).toBeNull();
       expect(screen.queryByText("Pull request")).toBeNull();
     } finally {
       width.mockRestore();
@@ -766,11 +839,13 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(390);
+
     try {
       const mounted = renderPreview({
         themeCatalog: () => DEFAULT_CATALOG,
         setTheme: () => DEFAULT_CATALOG,
       });
+
       await screen.findByRole("button", { name: "Show navigation preview" });
       fireEvent.click(
         screen.getByRole("button", { name: "Show navigation preview" }),
@@ -826,6 +901,7 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(1280);
+
     try {
       renderPreview({
         themeCatalog: () => DEFAULT_CATALOG,
@@ -833,7 +909,7 @@ describe("Theme Preview", () => {
       });
 
       await waitFor(() =>
-        expect(screen.queryByText("bb-plugins")).not.toBeNull(),
+        expect(screen.queryByText("omnyo-plugins")).not.toBeNull(),
       );
       expect(screen.getByText("Pull request")).toBeDefined();
       expect(
@@ -852,7 +928,7 @@ describe("Theme Preview", () => {
     }
   });
 
-  it("keeps the transient bb surfaces deliberately inspectable in the overlays block", async () => {
+  it("keeps the transient Omnyo surfaces deliberately inspectable in the overlays block", async () => {
     renderPreview({
       themeCatalog: () => DEFAULT_CATALOG,
       setTheme: () => DEFAULT_CATALOG,
@@ -860,6 +936,7 @@ describe("Theme Preview", () => {
 
     expect(screen.getByText("Overlays")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Overlays" }));
+
     for (const name of [
       "Menu",
       "Dialog",
@@ -899,6 +976,7 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(1280);
+
     try {
       renderPreview({
         themeCatalog: () => DEFAULT_CATALOG,
@@ -909,9 +987,11 @@ describe("Theme Preview", () => {
       );
 
       const rail = document.querySelector("[data-tp-section=rail]");
+
       const areas = [...(rail?.children ?? [])].filter((element) =>
         element.hasAttribute("data-tp-area"),
       );
+
       expect(areas.map((area) => area.getAttribute("data-tp-area"))).toEqual([
         "overlays",
         "components",
@@ -933,6 +1013,7 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(1280);
+
     try {
       renderPreview({
         themeCatalog: () => DEFAULT_CATALOG,
@@ -949,6 +1030,7 @@ describe("Theme Preview", () => {
       const components = document.querySelector<HTMLElement>(
         "[data-tp-components]",
       );
+
       expect(components?.style.gridTemplateColumns).toBe(
         "repeat(2, minmax(0, 1fr))",
       );
@@ -958,6 +1040,7 @@ describe("Theme Preview", () => {
         document.querySelector<HTMLElement>("[data-tp-button-grid]")?.style
           .gridTemplateColumns,
       ).toBe("repeat(3, minmax(0, 1fr))");
+
       for (const block of document.querySelectorAll<HTMLElement>(
         "[data-tp-block=switch], [data-tp-block=checkbox]",
       )) {
@@ -979,6 +1062,7 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(1280);
+
     try {
       renderSlot(
         panel,
@@ -1012,19 +1096,24 @@ describe("Theme Preview", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Overlays" }));
+
     const trigger = document.querySelector<HTMLButtonElement>(
       "[data-tp-hovercard-trigger]",
     );
+
     if (!trigger) throw new Error("Hover card trigger was not rendered");
 
     expect(trigger.getAttribute("data-state")).toBe("closed");
 
     fireEvent.click(trigger);
+
     const card = await waitFor(() => {
       const found = document.querySelector<HTMLElement>(
         "[data-tp-hovercard-content]",
       );
+
       expect(found).not.toBeNull();
+
       return found as HTMLElement;
     });
 
@@ -1054,6 +1143,7 @@ describe("Theme Preview", () => {
         screen.getByRole("button", { name }).getAttribute("aria-expanded"),
       ).toBe("false");
     }
+
     expect(
       screen.queryByRole("textbox", { name: "Search threads" }),
     ).toBeNull();
@@ -1063,6 +1153,7 @@ describe("Theme Preview", () => {
     const search = await screen.findByRole("textbox", {
       name: "Search threads",
     });
+
     fireEvent.change(search, { target: { value: "endless color" } });
     expect((search as HTMLInputElement).value).toBe("endless color");
     expect(screen.queryByRole("textbox", { name: "Filter" })).toBeNull();
@@ -1109,13 +1200,17 @@ describe("Theme Preview", () => {
       setTheme: () => DEFAULT_CATALOG,
     });
     fireEvent.click(screen.getByRole("button", { name: "Overlays" }));
+
     const trigger = await waitFor(() => {
       const found = document.querySelector<HTMLButtonElement>(
         "[data-tp-tooltip-trigger]",
       );
+
       expect(found).not.toBeNull();
+
       return found as HTMLButtonElement;
     });
+
     fireEvent.focus(trigger);
     await waitFor(() =>
       expect(
@@ -1140,19 +1235,23 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(1280);
+
     try {
       const slot = renderPreview({
         themeCatalog: () => DEFAULT_CATALOG,
         setTheme: () => DEFAULT_CATALOG,
       });
+
       await waitFor(() =>
         expect(document.querySelector("[data-tp-band=desktop]")).not.toBeNull(),
       );
 
       const sheet = document.querySelector("[data-tp-area=stylesheet]");
+
       const blocks = [
         ...(sheet?.querySelectorAll("[data-tp-block]") ?? []),
       ].map((el) => el.getAttribute("data-tp-block"));
+
       expect(blocks).toEqual([
         "surfaces",
         "ink",
@@ -1171,6 +1270,7 @@ describe("Theme Preview", () => {
           .getByRole("button", { name: "Style sheet" })
           .getAttribute("aria-expanded"),
       ).toBe("true");
+
       const ratios = await waitFor(() => {
         const found = document.querySelectorAll("[data-tp-contrast-ratio]");
         expect(found).toHaveLength(13);
@@ -1184,8 +1284,10 @@ describe("Theme Preview", () => {
             "[data-tp-specimen='color:readback-foreground'] [data-tp-contrast-ratio]",
           )?.textContent,
         ).toMatch(/^\d+\.\d{2}:1$/);
+
         return found;
       });
+
       expect(
         [...ratios].some(
           (ratio) =>
@@ -1202,11 +1304,56 @@ describe("Theme Preview", () => {
     }
   });
 
+  it("reads the sidebar row height from the app's row-height token", async () => {
+    const width = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockReturnValue(1280);
+
+    try {
+      renderPreview({
+        themeCatalog: () => DEFAULT_CATALOG,
+        setTheme: () => DEFAULT_CATALOG,
+      });
+
+      await waitFor(() =>
+        expect(
+          document.querySelector("[data-tp-specimen='rhythm:row-height']")
+            ?.textContent,
+        ).toContain("28px"),
+      );
+    } finally {
+      width.mockRestore();
+    }
+  });
+
+  it("reads the icon stroke as a non-scaling pixel width", async () => {
+    const width = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockReturnValue(1280);
+
+    try {
+      renderPreview({
+        themeCatalog: () => DEFAULT_CATALOG,
+        setTheme: () => DEFAULT_CATALOG,
+      });
+
+      await waitFor(() =>
+        expect(
+          document.querySelector("[data-tp-specimen='rhythm:icon-stroke']")
+            ?.textContent,
+        ).toContain("1.3px"),
+      );
+    } finally {
+      width.mockRestore();
+    }
+  });
+
   it("keeps the last resolved catalog across route remounts instead of flashing an empty picker", async () => {
     const first = renderPreview({
       themeCatalog: () => DEFAULT_CATALOG,
       setTheme: () => DEFAULT_CATALOG,
     });
+
     await screen.findByRole("combobox", { name: /Default/i });
     first.lifecycle.unmount();
 
@@ -1227,6 +1374,7 @@ describe("Theme Preview", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(3120);
+
     try {
       renderPreview({
         themeCatalog: () => DEFAULT_CATALOG,
@@ -1236,9 +1384,11 @@ describe("Theme Preview", () => {
       await waitFor(() =>
         expect(document.querySelector("[data-tp-band=desktop]")).not.toBeNull(),
       );
+
       const header = document.querySelector<HTMLElement>(
         "[data-tp-header-inner]",
       );
+
       expect(header?.style.maxWidth).toBe("1600px");
       expect(header?.style.padding).toContain("20px");
       expect(
@@ -1255,9 +1405,11 @@ describe("Theme Preview", () => {
           ?.closest("[data-tp-layout=desktop]")
           ?.getAttribute("data-tp-layout"),
       ).toBe("desktop");
+
       const stylesheet = document.querySelector<HTMLElement>(
         "[data-tp-area=stylesheet]",
       );
+
       expect(stylesheet?.style.maxWidth).toBe("1600px");
       expect(stylesheet?.style.padding).toContain("20px");
     } finally {
@@ -1268,9 +1420,11 @@ describe("Theme Preview", () => {
   it("queues one immediate refresh when change signals arrive during a stale catalog request", async () => {
     const stale = deferred<Catalog>();
     let catalogCalls = 0;
+
     const slot = renderPreview({
       themeCatalog: () => {
         catalogCalls += 1;
+
         return catalogCalls === 1 ? stale.promise : ENDLESS_CATALOG;
       },
       setTheme: () => ENDLESS_CATALOG,
@@ -1296,6 +1450,7 @@ describe("Theme Preview", () => {
     renderPreview({
       themeCatalog: () => {
         catalogCalls += 1;
+
         return catalogCalls === 1 ? stuck.promise : ENDLESS_CATALOG;
       },
       setTheme: () => ENDLESS_CATALOG,
@@ -1323,6 +1478,7 @@ describe("Theme Preview", () => {
       themeCatalog: () => DEFAULT_CATALOG,
       setTheme: () => {
         selectionCalls += 1;
+
         return pending.promise;
       },
     });
@@ -1332,6 +1488,7 @@ describe("Theme Preview", () => {
     const control = await screen.findByRole("combobox", {
       name: /Applying Endless Color/i,
     });
+
     expect((control as HTMLButtonElement).disabled).toBe(true);
     expect(control.getAttribute("aria-busy")).toBe("true");
     fireEvent.click(control);
@@ -1356,7 +1513,9 @@ describe("Theme Preview", () => {
       themeCatalog: () => DEFAULT_CATALOG,
       setTheme: () => {
         selectionCalls += 1;
+
         if (selectionCalls === 1) throw new Error("rpc disconnected");
+
         return ENDLESS_CATALOG;
       },
     });
@@ -1392,9 +1551,11 @@ describe("Theme Preview", () => {
     vi.useFakeTimers();
     openThemeMenu();
     const options = screen.getAllByRole("option");
+
     const endless = options.find((option) =>
       option.textContent?.includes("Endless Color"),
     );
+
     if (!endless) throw new Error("Endless Color option was not rendered");
     pickOption(endless);
 

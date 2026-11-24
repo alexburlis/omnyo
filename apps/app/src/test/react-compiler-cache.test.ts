@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import * as cacache from "cacache";
-import { build } from "vite";
+import { build, createServer } from "vite";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   compilerCacheNamespace,
@@ -26,8 +26,10 @@ it("reuses exact compiler output and maps, invalidates inputs, and repairs corru
   const input = resolve(root, "component.tsx");
   const configFile = resolve(root, "vite.config.mjs");
   const configDependency = resolve(root, "compiler-config.mjs");
+
   const source =
     "export function Component({ name }: { name: string }) { return <div>Hello {name}</div>; }";
+
   try {
     await writeFile(input, source);
     await writeFile(configDependency, 'export default "first";');
@@ -35,8 +37,10 @@ it("reuses exact compiler output and maps, invalidates inputs, and repairs corru
       configFile,
       'import label from "./compiler-config.mjs"; export default { define: { BUILD_LABEL: JSON.stringify(label) } };',
     );
+
     async function compile() {
       const compiler = await cachedReactCompiler(directory);
+
       const result = await build({
         configFile,
         root,
@@ -53,8 +57,10 @@ it("reuses exact compiler output and maps, invalidates inputs, and repairs corru
           },
         },
       });
+
       if (Array.isArray(result) || !("output" in result))
         throw new Error("Expected one build output");
+
       return {
         output: result.output.map((item) =>
           item.type === "chunk"
@@ -64,6 +70,7 @@ it("reuses exact compiler output and maps, invalidates inputs, and repairs corru
         stats: compiler.api.compilerCache,
       };
     }
+
     const cold = await compile();
     expect(cold.stats.misses).toBeGreaterThan(0);
     expect(cold.stats.hits).toBe(0);
@@ -89,10 +96,12 @@ it("reuses exact compiler output and maps, invalidates inputs, and repairs corru
     expect(repaired.output).toEqual(edited.output);
     expect((await compile()).stats.misses).toBe(0);
     await writeFile(configDependency, 'export default "changed";');
+
     const [concurrentA, concurrentB] = await Promise.all([
       compile(),
       compile(),
     ]);
+
     expect(concurrentA.stats.misses + concurrentB.stats.misses).toBeGreaterThan(
       0,
     );
@@ -107,6 +116,182 @@ it("reuses exact compiler output and maps, invalidates inputs, and repairs corru
   }
 }, 30_000);
 
+it("reuses compiler output across Vitest servers but not other dev servers", async () => {
+  vi.stubEnv("ENABLE_REACT_COMPILER_TIMINGS", undefined);
+  const temporary = resolve(workspace, ".tmp");
+  await mkdir(temporary, { recursive: true });
+  const root = await mkdtemp(resolve(temporary, "react-compiler-test-"));
+  const directory = resolve(root, "cache");
+
+  await writeFile(
+    resolve(root, "component.tsx"),
+    "export function Component({ name }: { name: string }) { return <div>Hello {name}</div>; }",
+  );
+
+  async function transform() {
+    const compiler = await cachedReactCompiler(directory);
+
+    const server = await createServer({
+      configFile: false,
+      root,
+      cacheDir: resolve(root, ".vite"),
+      logLevel: "silent",
+      appType: "custom",
+      server: { middlewareMode: true, ws: false },
+      optimizeDeps: { noDiscovery: true },
+      plugins: [
+        react(),
+        compiler,
+        {
+          name: "react-compiler-test-external-react",
+          enforce: "pre",
+          resolveId(id) {
+            return /^react(?:\/|$)/.test(id)
+              ? { id, external: true }
+              : undefined;
+          },
+        },
+      ],
+    });
+
+    try {
+      const result =
+        await server.environments.client.transformRequest("/component.tsx");
+
+      return { code: result?.code, stats: compiler.api.compilerCache };
+    } finally {
+      await server.close();
+    }
+  }
+
+  try {
+    const cold = await transform();
+    expect(cold.stats).toEqual({ hits: 0, misses: 1 });
+    expect(cold.code).toContain("$[0] !== name");
+    const warm = await transform();
+    expect(warm.stats).toEqual({ hits: 1, misses: 0 });
+    expect(warm.code).toBe(cold.code);
+    vi.stubEnv("VITEST", undefined);
+    expect((await transform()).stats).toEqual({ hits: 0, misses: 0 });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
+it("compiles ordinary hooks while calling experimental SDK hooks on every render", async () => {
+  vi.stubEnv("ENABLE_REACT_COMPILER_TIMINGS", undefined);
+  const temporary = resolve(workspace, ".tmp");
+  await mkdir(temporary, { recursive: true });
+  const root = await mkdtemp(resolve(temporary, "react-compiler-test-"));
+
+  await writeFile(
+    resolve(root, "sdk.ts"),
+    "export function experimental_useNav() { return 'nav'; }",
+  );
+  await writeFile(
+    resolve(root, "component.tsx"),
+    `import { useState } from "react";
+import { experimental_useNav } from "./sdk";
+export function useThing(value: string) { const [count] = useState(0); return { count, value, read: () => value }; }
+export function Component() { const nav = experimental_useNav(); return <div>{nav}</div>; }`,
+  );
+
+  const compiler = await cachedReactCompiler(resolve(root, "cache"));
+
+  const server = await createServer({
+    configFile: false,
+    root,
+    cacheDir: resolve(root, ".vite"),
+    logLevel: "silent",
+    appType: "custom",
+    server: { middlewareMode: true, ws: false },
+    optimizeDeps: { noDiscovery: true },
+    plugins: [
+      react(),
+      compiler,
+      {
+        name: "react-compiler-test-external-react",
+        enforce: "pre",
+        resolveId(id) {
+          return /^react(?:\/|$)/.test(id) ? { id, external: true } : undefined;
+        },
+      },
+    ],
+  });
+
+  try {
+    const result =
+      await server.environments.client.transformRequest("/component.tsx");
+
+    const code = result?.code ?? "";
+    const thing = code.slice(code.indexOf("function useThing"));
+    const component = code.slice(code.indexOf("function Component"));
+
+    expect(thing.slice(0, thing.indexOf("function Component"))).toContain(
+      "_c(",
+    );
+    expect(component).toContain("experimental_useNav()");
+    expect(
+      component.slice(0, component.indexOf("experimental_useNav()")),
+    ).not.toContain("memo_cache_sentinel");
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
+it("leaves components that use TanStack Virtual uncompiled", async () => {
+  vi.stubEnv("ENABLE_REACT_COMPILER_TIMINGS", undefined);
+  const temporary = resolve(workspace, ".tmp");
+  await mkdir(temporary, { recursive: true });
+  const root = await mkdtemp(resolve(temporary, "react-compiler-test-"));
+
+  await writeFile(
+    resolve(root, "component.tsx"),
+    `import { useVirtualizer } from "@tanstack/react-virtual";
+export function Component({ count }: { count: number }) {
+  const virtualizer = useVirtualizer({ count, estimateSize: () => 20, getScrollElement: () => null });
+  return <div>{virtualizer.getVirtualItems().length}</div>;
+}`,
+  );
+
+  const compiler = await cachedReactCompiler(resolve(root, "cache"));
+
+  const server = await createServer({
+    configFile: false,
+    root,
+    cacheDir: resolve(root, ".vite"),
+    logLevel: "silent",
+    appType: "custom",
+    server: { middlewareMode: true, ws: false },
+    optimizeDeps: { noDiscovery: true },
+    plugins: [
+      react(),
+      compiler,
+      {
+        name: "react-compiler-test-external-react",
+        enforce: "pre",
+        resolveId(id) {
+          return /^(?:react(?:\/|$)|@tanstack\/react-virtual$)/.test(id)
+            ? { id, external: true }
+            : undefined;
+        },
+      },
+    ],
+  });
+
+  try {
+    const result =
+      await server.environments.client.transformRequest("/component.tsx");
+
+    expect(result?.code).toContain("useVirtualizer(");
+    expect(result?.code).not.toContain("_c(");
+  } finally {
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
 it("shares relative identities while separating transform inputs", () => {
   const key = compilerTransformKey(
     "compiler-v1",
@@ -116,6 +301,7 @@ it("shares relative identities while separating transform inputs", () => {
     "tsx",
     "client",
   );
+
   expect(
     compilerTransformKey(
       "compiler-v1",
@@ -220,7 +406,9 @@ it("invalidates dependency, configuration, toolchain, and environment identity",
     production: true,
     env: [["NODE_ENV", "production"]],
   };
+
   const key = compilerCacheNamespace(identity);
+
   const changes: Array<Partial<typeof identity>> = [
     { dependencies: [["vite.config.ts", "changed"]] },
     { node: "v24.0.0" },
@@ -232,6 +420,7 @@ it("invalidates dependency, configuration, toolchain, and environment identity",
     { production: false },
     { env: [["BABEL_ENV", "test"]] },
   ];
+
   for (const changed of changes) {
     expect(compilerCacheNamespace({ ...identity, ...changed })).not.toBe(key);
   }

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   normalizePluginMentionTriggers,
   type PluginMentionTrigger,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import { pluginContributionsQueryKey } from "./query-keys";
 
 interface PluginMentionProviderContribution {
@@ -26,7 +26,9 @@ function toMentionProviderContribution(
   if (typeof value !== "object" || value === null) return null;
   const provider = value as Record<string, unknown>;
   const triggers = normalizePluginMentionTriggers(provider.triggers);
+
   if (triggers === null) return null;
+
   if (
     typeof provider.pluginId !== "string" ||
     typeof provider.id !== "string" ||
@@ -34,6 +36,7 @@ function toMentionProviderContribution(
   ) {
     return null;
   }
+
   return {
     pluginId: provider.pluginId,
     id: provider.id,
@@ -46,10 +49,13 @@ async function fetchPluginContributions(
   signal: AbortSignal,
 ): Promise<PluginContributions> {
   const response = await fetch("/api/v1/plugins/contributions", { signal });
+
   if (!response.ok) return EMPTY_CONTRIBUTIONS;
+
   const body = (await response.json()) as {
     mentionProviders?: unknown;
   };
+
   return {
     mentionProviders: Array.isArray(body.mentionProviders)
       ? body.mentionProviders
@@ -69,6 +75,7 @@ export function usePluginContributions() {
     staleTime: 30_000,
   });
 }
+
 interface PluginMentionSearchItem {
   itemId: string;
   title: string;
@@ -86,6 +93,7 @@ export interface PluginMentionSearchGroup {
 function isMentionSearchItem(value: unknown): value is PluginMentionSearchItem {
   if (typeof value !== "object" || value === null) return false;
   const item = value as Record<string, unknown>;
+
   return (
     typeof item.itemId === "string" &&
     typeof item.title === "string" &&
@@ -99,6 +107,7 @@ function isMentionSearchGroup(
 ): value is PluginMentionSearchGroup {
   if (typeof value !== "object" || value === null) return false;
   const group = value as Record<string, unknown>;
+
   return (
     typeof group.pluginId === "string" &&
     typeof group.providerId === "string" &&
@@ -123,14 +132,19 @@ async function fetchPluginMentionSearch(
     q: args.query,
     trigger: args.trigger,
   });
+
   if (args.projectId !== null) params.set("projectId", args.projectId);
+
   if (args.threadId !== null) params.set("threadId", args.threadId);
+
   const response = await fetch(
     `/api/v1/plugins/mentions/search?${params.toString()}`,
     { signal },
   );
+
   if (!response.ok) return [];
   const body = (await response.json()) as { groups?: unknown };
+
   return Array.isArray(body.groups)
     ? body.groups.filter(isMentionSearchGroup)
     : [];

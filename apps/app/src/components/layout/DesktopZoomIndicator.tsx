@@ -1,22 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  BB_DESKTOP_MAX_ZOOM_PERCENT,
-  BB_DESKTOP_MIN_ZOOM_PERCENT,
-} from "@bb/desktop-contract";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+  OMNYO_DESKTOP_MAX_ZOOM_PERCENT,
+  OMNYO_DESKTOP_MIN_ZOOM_PERCENT,
+} from "@omnyo/desktop-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { MOTION_DURATION_MS } from "@omnyo/shared-ui/motion";
 import { APP_OVERLAY_LAYER } from "@/components/ui/app-overlay-layers";
 import {
-  getBbDesktopInfo,
+  getOmnyoDesktopInfo,
   MACOS_APP_REGION_NO_DRAG_CLASS,
-} from "@/lib/bb-desktop";
+} from "@/lib/omnyo-desktop";
 
 const HIDE_DELAY_MS = 2000;
-const FADE_OUT_MS = 150;
+
+const FADE_OUT_MS = MOTION_DURATION_MS.fast;
 
 export function DesktopZoomIndicator() {
-  const desktop = getBbDesktopInfo();
+  const desktop = getOmnyoDesktopInfo();
   const onZoomChange = desktop?.onZoomChange;
   const zoom = desktop?.zoom;
   const [zoomFactor, setZoomFactor] = useState<number | null>(null);
@@ -27,6 +29,7 @@ export function DesktopZoomIndicator() {
   const restartHideTimer = useCallback(() => {
     clearTimeout(hideTimer.current);
     setFading(false);
+
     if (!hovered.current) {
       hideTimer.current = setTimeout(() => {
         setFading(true);
@@ -40,6 +43,7 @@ export function DesktopZoomIndicator() {
       setZoomFactor(factor);
       restartHideTimer();
     });
+
     return () => {
       unsubscribe?.();
       clearTimeout(hideTimer.current);
@@ -49,20 +53,20 @@ export function DesktopZoomIndicator() {
   if (zoomFactor === null) {
     return null;
   }
+
   const zoomPercent = Math.round(zoomFactor * 100);
 
   return (
     <div
-      className={`fixed right-0 top-(--bb-app-chrome-row-height) ${MACOS_APP_REGION_NO_DRAG_CLASS}`}
+      className={`fixed right-0 top-(--omnyo-app-chrome-row-height) ${MACOS_APP_REGION_NO_DRAG_CLASS}`}
       style={{ zIndex: APP_OVERLAY_LAYER.sharedPortaledOverlay }}
     >
       <div
         role="toolbar"
         aria-label="Zoom"
         className={cn(
-          "mt-2 mr-3 flex items-center gap-1 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md",
-          fading &&
-            "opacity-0 motion-safe:transition-opacity motion-safe:duration-150",
+          "mt-2 mr-3 flex items-center gap-1 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast)",
+          fading && "opacity-0",
         )}
         style={{ zoom: 1 / zoomFactor }}
         onPointerEnter={() => {
@@ -86,7 +90,7 @@ export function DesktopZoomIndicator() {
           size="icon"
           className="size-7"
           aria-label="Zoom out"
-          disabled={zoomPercent <= BB_DESKTOP_MIN_ZOOM_PERCENT}
+          disabled={zoomPercent <= OMNYO_DESKTOP_MIN_ZOOM_PERCENT}
           onClick={() => zoom?.("out")}
         >
           <Icon name="Minus" />
@@ -97,7 +101,7 @@ export function DesktopZoomIndicator() {
           size="icon"
           className="size-7"
           aria-label="Zoom in"
-          disabled={zoomPercent >= BB_DESKTOP_MAX_ZOOM_PERCENT}
+          disabled={zoomPercent >= OMNYO_DESKTOP_MAX_ZOOM_PERCENT}
           onClick={() => zoom?.("in")}
         >
           <Icon name="Plus" />

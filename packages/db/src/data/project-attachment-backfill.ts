@@ -1,5 +1,5 @@
 import { and, asc, eq, gt, gte, isNull, lt, ne, or, sql } from "drizzle-orm";
-import { storedAttachmentPaths } from "@bb/domain";
+import { storedAttachmentPaths } from "@omnyo/domain";
 import type { DbConnection, DbQueryConnection } from "../connection.js";
 import {
   events,
@@ -11,12 +11,14 @@ import {
 } from "../schema.js";
 
 export type AttachmentBackfill = typeof projectAttachmentBackfills.$inferSelect;
+
 const emptyCursor = {
   threadCursor: "",
   inputCursor: 0,
   inputId: "",
   inputSequence: 0,
 };
+
 export function startAttachmentBackfillPhase(
   state: AttachmentBackfill,
   phase: AttachmentBackfill["phase"],
@@ -39,6 +41,7 @@ export function ensureProjectAttachmentBackfill(
     })
     .onConflictDoNothing()
     .run();
+
   return db
     .select()
     .from(projectAttachmentBackfills)
@@ -61,7 +64,9 @@ export function nextProjectAttachmentBackfill(
     .orderBy(asc(projects.id))
     .limit(1)
     .get();
+
   if (missing) return missing.id;
+
   return (
     db
       .select({ id: projectAttachmentBackfills.projectId })
@@ -112,14 +117,17 @@ export function readAttachmentBackfillInput(
     .orderBy(asc(threads.id))
     .limit(1)
     .get();
+
   if (!thread)
     return {
       paths: [],
       threadId: null,
       next: startAttachmentBackfillPhase(state, "done", ""),
     };
+
   if (thread.id !== state.threadCursor)
     state = startAttachmentBackfillPhase(state, "events", thread.id);
+
   if (state.phase === "events") {
     const row = db
       .select({ data: events.data, sequence: events.sequence })
@@ -134,18 +142,21 @@ export function readAttachmentBackfillInput(
       .orderBy(asc(events.sequence))
       .limit(1)
       .get();
+
     if (row)
       return {
         paths: storedAttachmentPaths(row.data),
         threadId: thread.id,
         next: { ...state, inputCursor: row.sequence },
       };
+
     return {
       paths: [],
       threadId: thread.id,
       next: startAttachmentBackfillPhase(state, "queue"),
     };
   }
+
   if (state.phase === "queue") {
     const row = db
       .select({
@@ -166,19 +177,23 @@ export function readAttachmentBackfillInput(
       )
       .limit(1)
       .get();
+
     if (row)
       return {
         paths: storedAttachmentPaths(row.data),
         threadId: thread.id,
         next: { ...state, inputCursor: row.createdAt, inputId: row.id },
       };
+
     return {
       paths: [],
       threadId: thread.id,
       next: startAttachmentBackfillPhase(state, "history-thread"),
     };
   }
+
   const scope = state.phase === "history-thread" ? "thread" : "project";
+
   const row = db
     .select({
       data: promptHistoryEntries.input,
@@ -201,6 +216,7 @@ export function readAttachmentBackfillInput(
     )
     .limit(1)
     .get();
+
   if (row)
     return {
       paths: storedAttachmentPaths(row.data),
@@ -212,12 +228,14 @@ export function readAttachmentBackfillInput(
         inputId: row.id,
       },
     };
+
   if (scope === "thread")
     return {
       paths: [],
       threadId: thread.id,
       next: startAttachmentBackfillPhase(state, "history-project"),
     };
+
   const nextThread = db
     .select({ id: threads.id })
     .from(threads)
@@ -227,6 +245,7 @@ export function readAttachmentBackfillInput(
     .orderBy(asc(threads.id))
     .limit(1)
     .get();
+
   return {
     paths: [],
     threadId: null,

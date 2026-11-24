@@ -6,7 +6,10 @@ import {
   parseAgentModelLines,
 } from "./bridge/model-catalog.js";
 import { SAMPLE_LIST } from "./bridge/model-catalog.fixture.js";
-import { acpLaunchSpecSchema, type AcpLaunchSpec } from "./launch-spec.js";
+import {
+  acpLaunchSpecSchema,
+  type AcpLaunchSpec,
+} from "@omnyo/provider-bridge-protocol/acp/launch-spec";
 import {
   buildAcpModelListParams,
   buildAcpSessionParams,
@@ -152,7 +155,7 @@ describe("buildAcpSessionParams", () => {
         options: {
           ...BASE_OPTIONS,
           envVars: {
-            BB_THREAD_ID: "thread-1",
+            OMNYO_THREAD_ID: "thread-1",
             CUSTOM_AGENT_TOKEN: "contributed-token",
           },
         },
@@ -177,7 +180,7 @@ describe("buildAcpSessionParams", () => {
       agent: { command: "custom-agent", args: ["serve"] },
       envVars: {
         CUSTOM_AGENT_TOKEN: "contributed-token",
-        BB_THREAD_ID: "thread-1",
+        OMNYO_THREAD_ID: "thread-1",
       },
       workspaceWriteRoots: ["/agent-home", "/extra-root"],
     });
@@ -212,6 +215,7 @@ describe("buildAcpSessionParams", () => {
       levelValues: { max: "high" },
       defaultLevel: "high",
     };
+
     const args = {
       additionalWorkspaceWriteRoots: [],
       cwd: "/workspace",
@@ -259,6 +263,7 @@ gemini-3.5-flash claude-sonnet-4 gpt-5-mini gemini-2.5-flash kimi-k3 kimi-k2.7-c
       /\s+/u,
     ),
   );
+
   const cursorSpec: AcpLaunchSpec = {
     displayName: "Cursor",
     command: "cursor-agent",
@@ -284,6 +289,7 @@ gemini-3.5-flash claude-sonnet-4 gpt-5-mini gemini-2.5-flash kimi-k3 kimi-k2.7-c
   it("omits the reasoning level when the session has none", () => {
     const selection = cursorSessionParams({ model: "grok-4.6" })
       .modelSelection as Record<string, unknown>;
+
     expect(selection).toMatchObject({ modelId: "grok-4.6" });
     expect("reasoningLevel" in selection).toBe(false);
   });
@@ -312,10 +318,12 @@ gemini-3.5-flash claude-sonnet-4 gpt-5-mini gemini-2.5-flash kimi-k3 kimi-k2.7-c
           ) ?? [],
       ),
     );
+
     expect(persistedFamilyIds.size).toBe(35);
     expect(
       [...persistedFamilyIds].filter((id) => {
         const selection = cursorSessionParams({ model: id }).modelSelection;
+
         return (
           !selection ||
           !("modelId" in selection) ||
@@ -378,7 +386,7 @@ gemini-3.5-flash claude-sonnet-4 gpt-5-mini gemini-2.5-flash kimi-k3 kimi-k2.7-c
 
 describe("buildAcpSessionParams skill instructions", () => {
   const SKILLS_PREAMBLE =
-    "bb skills are reusable instruction folders. When the current task matches a listed skill description, read that skill's SKILL.md at the absolute path before proceeding; you may read supporting files in the same skill directory that SKILL.md references. If a listed path does not exist, the list is stale and should be ignored.";
+    "Omnyo skills are reusable instruction folders. When the current task matches a listed skill description, read that skill's SKILL.md at the absolute path before proceeding; you may read supporting files in the same skill directory that SKILL.md references. If a listed path does not exist, the list is stale and should be ignored.";
 
   function paramsWithOptions(
     options: Partial<AcpSessionExecutionOptions>,
@@ -407,7 +415,7 @@ describe("buildAcpSessionParams skill instructions", () => {
           {
             id: "global-skills:abc123:acp",
             skillDirectoryRootPath:
-              "/tmp/bb/runtime/global-skills/abc123/skills",
+              "/tmp/omnyo/runtime/global-skills/abc123/skills",
             skills: [
               {
                 name: "release-notes",
@@ -428,9 +436,9 @@ describe("buildAcpSessionParams skill instructions", () => {
         "",
         SKILLS_PREAMBLE,
         "",
-        "Available bb skills:",
-        `- release-notes: Use release-notes when /system_instructions tests run. (SKILL.md: ${path.normalize("/tmp/bb/runtime/global-skills/abc123/skills/release-notes/SKILL.md")})`,
-        `- copywriting: Use when writing customer copy. (SKILL.md: ${path.normalize("/tmp/bb/runtime/global-skills/abc123/skills/copywriting/SKILL.md")})`,
+        "Available Omnyo skills:",
+        `- release-notes: Use release-notes when /system_instructions tests run. (SKILL.md: ${path.normalize("/tmp/omnyo/runtime/global-skills/abc123/skills/release-notes/SKILL.md")})`,
+        `- copywriting: Use when writing customer copy. (SKILL.md: ${path.normalize("/tmp/omnyo/runtime/global-skills/abc123/skills/copywriting/SKILL.md")})`,
       ].join("\n"),
     });
   });
@@ -442,7 +450,7 @@ describe("buildAcpSessionParams skill instructions", () => {
           {
             id: "global-skills:def456:acp",
             skillDirectoryRootPath:
-              "/tmp/bb/runtime/global-skills/def456/skills",
+              "/tmp/omnyo/runtime/global-skills/def456/skills",
             skills: [
               {
                 name: "debugging",
@@ -456,8 +464,8 @@ describe("buildAcpSessionParams skill instructions", () => {
       instructions: [
         SKILLS_PREAMBLE,
         "",
-        "Available bb skills:",
-        `- debugging: Use when debugging runtime state. (SKILL.md: ${path.normalize("/tmp/bb/runtime/global-skills/def456/skills/debugging/SKILL.md")})`,
+        "Available Omnyo skills:",
+        `- debugging: Use when debugging runtime state. (SKILL.md: ${path.normalize("/tmp/omnyo/runtime/global-skills/def456/skills/debugging/SKILL.md")})`,
       ].join("\n"),
     });
   });

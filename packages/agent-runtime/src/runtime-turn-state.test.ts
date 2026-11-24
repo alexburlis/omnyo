@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ThreadEvent } from "@bb/domain";
-import { turnScope } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
+import { turnScope } from "@omnyo/domain";
 import { RuntimeTurnState } from "./runtime-turn-state.js";
 
 function turnStarted(
@@ -67,6 +67,7 @@ describe("RuntimeTurnState", () => {
       threadId: "t1",
       timeoutMs: 100,
     });
+
     state.observe(turnStarted("child-turn", { parentToolCallId: "tool-1" }));
     vi.advanceTimersByTime(100);
 
@@ -97,10 +98,12 @@ describe("RuntimeTurnState", () => {
       threadId: "t1",
       timeoutMs: 5_000,
     });
+
     const secondWaiter = state.waitForActiveTurn({
       threadId: "t1",
       timeoutMs: 5_000,
     });
+
     state.observe(turnStarted("turn-1"));
 
     await expect(firstWaiter).resolves.toBe("turn-1");
@@ -127,6 +130,7 @@ describe("RuntimeTurnState", () => {
       threadId: "t1",
       timeoutMs: 5_000,
     });
+
     state.clearThread("t1");
 
     await expect(waiter).resolves.toBeNull();
@@ -141,10 +145,12 @@ describe("RuntimeTurnState", () => {
       threadId: "t1",
       timeoutMs: 5_000,
     });
+
     const secondWaiter = state.waitForActiveTurn({
       threadId: "t2",
       timeoutMs: 5_000,
     });
+
     state.clear();
 
     await expect(firstWaiter).resolves.toBeNull();
@@ -160,6 +166,7 @@ describe("RuntimeTurnState", () => {
       threadId: "t2",
       timeoutMs: 100,
     });
+
     state.observe(turnStarted("turn-1"));
     vi.advanceTimersByTime(100);
 

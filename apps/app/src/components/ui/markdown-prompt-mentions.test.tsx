@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import type { PromptMentionResource, PromptTextMention } from "@bb/domain";
+import type { PromptMentionResource, PromptTextMention } from "@omnyo/domain";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import { MarkdownPreview } from "@/components/ui/markdown-preview";
 import { setPreferredTheme } from "@/hooks/useTheme";
@@ -52,9 +52,11 @@ function mentionAt(
   resource: PromptMentionResource,
 ): PromptTextMention {
   const start = text.indexOf(token);
+
   if (start < 0) {
     throw new Error(`token ${token} not found in ${text}`);
   }
+
   return { start, end: start + token.length, resource };
 }
 

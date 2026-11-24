@@ -9,6 +9,7 @@ export function CommentAuthor({
   onOpenThread: (threadId: string) => void;
 }) {
   const byline = commentByline(comment);
+
   if (byline.kind === "thread-link") {
     return (
       <button
@@ -21,5 +22,6 @@ export function CommentAuthor({
       </button>
     );
   }
+
   return <span className="font-semibold">{byline.name}</span>;
 }

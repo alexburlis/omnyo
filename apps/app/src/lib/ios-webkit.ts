@@ -9,8 +9,10 @@ export function isIOSWebKit({
   userAgent,
 }: BrowserPlatform): boolean {
   const isAppleWebKit = /\bAppleWebKit\//u.test(userAgent);
+
   const isIOSDevice =
     /\b(?:iPad|iPhone|iPod)\b/u.test(userAgent) ||
     (platform === "MacIntel" && maxTouchPoints > 1);
+
   return isAppleWebKit && isIOSDevice;
 }

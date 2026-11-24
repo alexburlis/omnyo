@@ -1,4 +1,5 @@
 import { ListLoadingPlaceholder } from "@/components/ui/ListLoadingPlaceholder";
+import { PickerEmptyState, pickerNoMatchMessage } from "./PickerEmptyState";
 import { PICKER_MOBILE_CLASS_NAME } from "./picker-layout";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -7,14 +8,22 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@bb/shared-ui/command";
+} from "@omnyo/shared-ui/command";
 import {
   COARSE_POINTER_ICON_SIZE_CLASS,
   COARSE_POINTER_TEXT_SM_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  CONTROL_PRESS_FEEDBACK,
+  CONTROL_PRESS_TRANSITION,
+} from "@omnyo/shared-ui/motion";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@omnyo/shared-ui/popover";
 import {
   ThreadTitle,
   useResolveThreadTitle,
@@ -54,6 +63,7 @@ export function ParentThreadPicker({
   const [searchQuery, setSearchQuery] = useState("");
   const listRef = useResetPickerScroll<HTMLDivElement>(searchQuery);
   const resolveTitle = useResolveThreadTitle();
+
   const filteredOptions = useMemo(
     () =>
       searchPickerOptions({
@@ -64,14 +74,18 @@ export function ParentThreadPicker({
       }),
     [options, resolveTitle, searchQuery],
   );
+
   const selectedLabel =
     options.find((option) => option.value === value)?.label ?? "None";
+
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
       setOpen(nextOpen);
+
       if (!nextOpen) {
         setSearchQuery("");
       }
+
       onOpenChange(nextOpen);
     },
     [onOpenChange],
@@ -84,7 +98,9 @@ export function ParentThreadPicker({
           type="button"
           disabled={disabled}
           className={cn(
-            "-mx-1 inline-flex h-5 w-fit max-w-full min-w-0 items-center gap-1 rounded-sm px-1 leading-tight text-foreground outline-none ring-sidebar-ring transition-colors hover:bg-state-hover data-[state=open]:bg-state-hover focus-visible:ring-2 disabled:cursor-default",
+            "-mx-1 inline-flex h-5 w-fit max-w-full min-w-0 items-center gap-1 rounded-sm px-1 leading-tight text-foreground outline-none ring-sidebar-ring hover:bg-state-hover data-[state=open]:bg-state-hover focus-visible:ring-2 disabled:cursor-default",
+            CONTROL_PRESS_TRANSITION,
+            CONTROL_PRESS_FEEDBACK,
             COARSE_POINTER_TEXT_SM_CLASS,
           )}
         >
@@ -137,9 +153,17 @@ export function ParentThreadPicker({
             ) : (
               <>
                 {filteredOptions.length === 0 ? (
-                  <div className="py-6 text-center text-sm">
-                    No matching threads.
-                  </div>
+                  <PickerEmptyState
+                    icon={
+                      searchQuery.trim() === "" ? "MessageSquare" : "Search"
+                    }
+                    message={
+                      searchQuery.trim() === ""
+                        ? "No other threads to choose."
+                        : pickerNoMatchMessage("threads", searchQuery)
+                    }
+                    className="py-6"
+                  />
                 ) : (
                   <CommandGroup>
                     {filteredOptions.map((option) => (

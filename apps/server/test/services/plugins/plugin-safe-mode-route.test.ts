@@ -13,14 +13,20 @@ describe("/plugins/safe-mode", () => {
 
   beforeEach(async () => {
     harness = await createTestAppHarness();
-    const rootDir = join(harness.config.dataDir, "fixtures", "bb-plugin-extra");
+
+    const rootDir = join(
+      harness.config.dataDir,
+      "fixtures",
+      "omnyo-plugin-extra",
+    );
+
     await mkdir(rootDir, { recursive: true });
     await writeFile(
       join(rootDir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-extra",
+        name: "omnyo-plugin-extra",
         version: "0.1.0",
-        bb: {
+        omnyo: {
           name: "Extra",
           description: "Safe mode route fixture.",
           branding: { icon: "Zap" },

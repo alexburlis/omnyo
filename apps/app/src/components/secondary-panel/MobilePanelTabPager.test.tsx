@@ -40,6 +40,7 @@ function createFixedTabs() {
 describe("MobilePanelTabPager", () => {
   it("shows the fixed buttons and one content tab while navigating a narrow header", () => {
     const tabs = createTabs();
+
     const { rerender } = render(
       <MobilePanelTabPager
         activeTabId="package.json"
@@ -48,6 +49,7 @@ describe("MobilePanelTabPager", () => {
         newTabControl={<button>Add tab</button>}
       />,
     );
+
     expect(screen.getByRole("button", { name: "Info" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Diff" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "README.md" })).toBeNull();
@@ -85,6 +87,7 @@ describe("MobilePanelTabPager", () => {
   it("uses wider headers for neighboring tabs and keeps selection visible through resize and removal", () => {
     let width = 460;
     let measure = () => {};
+
     const disconnect = vi.fn();
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
       () => width + 108,
@@ -94,6 +97,7 @@ describe("MobilePanelTabPager", () => {
         const label = this.querySelector("button[aria-pressed]")?.getAttribute(
           "aria-label",
         );
+
         const widths: Record<string, number> = {
           "README.md": 109,
           "package.json": 114,
@@ -101,6 +105,7 @@ describe("MobilePanelTabPager", () => {
           "MobilePanelTabPager.tsx": 144,
           "ThreadSecondaryPanel.tsx": 144,
         };
+
         return DOMRect.fromRect({
           width: this.hasAttribute("data-panel-tab-measure")
             ? widths[label ?? ""]
@@ -119,6 +124,7 @@ describe("MobilePanelTabPager", () => {
         disconnect = disconnect;
       },
     );
+
     const tabs = createTabs([
       "README.md",
       "package.json",
@@ -126,6 +132,7 @@ describe("MobilePanelTabPager", () => {
       "MobilePanelTabPager.tsx",
       "ThreadSecondaryPanel.tsx",
     ]);
+
     const panel = (activeTabId: string, currentTabs = tabs) => (
       <MobilePanelTabPager
         activeTabId={activeTabId}
@@ -134,10 +141,13 @@ describe("MobilePanelTabPager", () => {
         newTabControl={<button>Add tab</button>}
       />
     );
+
     const { rerender, unmount } = render(panel("package.json"));
+
     for (const tab of tabs.slice(1, 4)) {
       expect(screen.getByRole("button", { name: tab.label })).toBeDefined();
     }
+
     expect(screen.queryByRole("button", { name: "README.md" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Next tab" }));
     expect(tabs[2].onSelect).toHaveBeenCalledOnce();
@@ -177,6 +187,7 @@ describe("MobilePanelTabPager", () => {
   it("keeps the last content tab available while Info or Diff is selected", () => {
     const tabs = createTabs();
     const fixedTabs = createFixedTabs();
+
     const { rerender } = render(
       <MobilePanelTabPager
         activeTabId="package.json"
@@ -185,6 +196,7 @@ describe("MobilePanelTabPager", () => {
         newTabControl={null}
       />,
     );
+
     for (const fixedTab of fixedTabs) {
       fireEvent.click(screen.getByRole("button", { name: fixedTab.label }));
       expect(fixedTab.onSelect).toHaveBeenCalledOnce();
@@ -206,6 +218,7 @@ describe("MobilePanelTabPager", () => {
       expect(contentTab.getAttribute("aria-pressed")).toBe("false");
       fireEvent.click(contentTab);
     }
+
     expect(tabs[1].onSelect).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole("button", { name: "Next tab" }));
     expect(tabs[2].onSelect).toHaveBeenCalledOnce();
@@ -233,6 +246,7 @@ describe("MobilePanelTabPager", () => {
     expect(screen.getByRole("button", { name: "Info" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Diff" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Add tab" })).toBeDefined();
+
     for (const name of ["Previous tab", "Next tab"]) {
       expect(
         screen.getByRole("button", { name }).hasAttribute("disabled"),
@@ -286,6 +300,7 @@ describe("MobilePanelTabPager", () => {
       />,
     );
     const tab = screen.getByRole("button", { name: "package.json" });
+
     for (const end of [
       { clientX: 140, clientY: 22 },
       { clientX: 120, clientY: 120 },
@@ -293,6 +308,7 @@ describe("MobilePanelTabPager", () => {
       fireEvent.touchStart(tab, { touches: [{ clientX: 160, clientY: 20 }] });
       fireEvent.touchEnd(tab, { changedTouches: [end] });
     }
+
     expect(tabs[0].onSelect).not.toHaveBeenCalled();
     expect(tabs[2].onSelect).not.toHaveBeenCalled();
   });

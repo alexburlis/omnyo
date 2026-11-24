@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { defaultResolvedCodeTheme } from "@bb/domain";
+import { defaultResolvedCodeTheme } from "@omnyo/domain";
 import { resolveTheme } from "@pierre/diffs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyResolvedCodeTheme } from "./code-theme";
@@ -11,6 +11,7 @@ const worker = vi.hoisted(() => ({
 
 vi.mock("@pierre/diffs/worker", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@pierre/diffs/worker")>();
+
   return {
     ...actual,
     getOrCreateWorkerPoolSingleton: worker.getOrCreate,
@@ -28,7 +29,7 @@ afterEach(() => {
 
 describe("acquirePierreWorkerPool", () => {
   it("registers the selected plugin theme before constructing the pool", async () => {
-    const sourceName = "bb:plugin:worker-pool-test:dark";
+    const sourceName = "omnyo:plugin:worker-pool-test:dark";
     applyResolvedCodeTheme({
       dark: sourceName,
       light: defaultResolvedCodeTheme.light,
@@ -43,14 +44,17 @@ describe("acquirePierreWorkerPool", () => {
         },
       },
     });
+
     const theme = {
-      dark: document.documentElement.dataset.bbCodeThemeDark!,
+      dark: document.documentElement.dataset.omnyoCodeThemeDark!,
       light: defaultResolvedCodeTheme.light,
     };
+
     let resolution: Promise<unknown> | undefined;
     const pool = {};
     worker.getOrCreate.mockImplementation(({ highlighterOptions }) => {
       resolution = resolveTheme(highlighterOptions.theme.dark);
+
       return pool;
     });
 

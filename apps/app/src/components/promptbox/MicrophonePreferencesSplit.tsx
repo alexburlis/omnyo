@@ -16,5 +16,4 @@ export const MicrophonePreferencesSplit = defineSplit<{
       rowDataAttribute="data-microphone-loading-row"
     />
   ),
-  tier: "intent",
 });

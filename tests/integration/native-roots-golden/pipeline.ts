@@ -4,11 +4,11 @@ import {
   normalizeProviderNativeRoots,
   providerNativeRootSetSchema,
   type ProviderNativeRootSet,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   DiscoveredSkill,
   HostProviderCommand,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { PluginProviderDeclaration } from "../../../packages/plugin-sdk/src/backend-contract.js";
 import {
   discoverProviderCommands,
@@ -68,6 +68,7 @@ interface ProviderNativeRootSource {
 
 function providerSource(providerId: string): ProviderNativeRootSource {
   const env = process.env;
+
   if (providerId === "claude-code") {
     return {
       declaration: CLAUDE_NATIVE_ROOTS_DECLARATION,
@@ -75,24 +76,29 @@ function providerSource(providerId: string): ProviderNativeRootSource {
         resolveClaudeNativeRoots({ cwd, homeDir, env }),
     };
   }
+
   if (providerId === "codex") {
     return {
       declaration: CODEX_NATIVE_ROOTS_DECLARATION,
       resolve: (_cwd, homeDir) => resolveCodexNativeRoots({ homeDir, env }),
     };
   }
+
   if (providerId === "pi") {
     return {
       declaration: PI_NATIVE_ROOTS_DECLARATION,
       resolve: (_cwd, homeDir) => resolvePiNativeRoots({ homeDir, env }),
     };
   }
+
   const agent = KNOWN_ACP_AGENTS.find(
     (candidate) => candidate.id === providerId,
   );
+
   if (agent === undefined) {
     throw new Error(`no native-root source for provider "${providerId}"`);
   }
+
   return {
     declaration: acpProviderDeclaration(agent),
     resolve: (cwd, homeDir) =>
@@ -105,12 +111,14 @@ async function nativeRootSet(
 ): Promise<ProviderNativeRootSet> {
   const source = providerSource(input.providerId);
   const { declaration } = source;
+
   const resolved =
     declaration.experimental_resolvesNativeRoots === true
       ? experimental_nativeRootsResolveOutputSchema.parse(
           await source.resolve(input.cwd, input.homeDir),
         )
       : EMPTY_PROVIDER_RESOLVED_NATIVE_ROOTS;
+
   return providerNativeRootSetSchema.parse({
     skills:
       declaration.experimental_nativeSkillRoots === undefined
@@ -135,11 +143,14 @@ export const pipeline: Pipeline = async (input) => {
     homeDir: input.homeDir,
     nativeRoots: await nativeRootSet(input),
   };
+
   const commands = await discoverProviderCommands({
     roots: await resolveDeclaredScanRoots(resolution),
   });
+
   const skills = await discoverSkills({
     roots: await resolveSkillScanRoots(resolution),
   });
+
   return { commands, skills };
 };

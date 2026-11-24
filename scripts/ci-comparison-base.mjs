@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 
 const [eventBase = "", pullRequestHead = ""] = process.argv.slice(2);
+
 let base = eventBase;
+
 if (pullRequestHead) {
   try {
     const [commit, firstParent, secondParent, ...rest] = execFileSync(
@@ -11,6 +13,7 @@ if (pullRequestHead) {
     )
       .trim()
       .split(/\s+/u);
+
     if (
       commit &&
       firstParent &&
@@ -20,4 +23,5 @@ if (pullRequestHead) {
       base = firstParent;
   } catch {}
 }
+
 process.stdout.write(`${base}\n`);

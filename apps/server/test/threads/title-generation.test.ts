@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PromptInput } from "@bb/domain";
+import type { PromptInput } from "@omnyo/domain";
 import {
   collectInvokedPromptCommands,
   deriveForkTitle,
@@ -18,6 +18,7 @@ function textInput(text: string): PromptInput {
 
 function skillInput(name: string, rest = ""): PromptInput {
   const command = `/${name}`;
+
   return {
     type: "text",
     text: `${command}${rest}`,

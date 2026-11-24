@@ -5,7 +5,7 @@ import {
   resolveCurrentDevInstanceConfig,
   toDevProcessEnv,
   type DevInstanceConfig,
-} from "@bb/config/runtime";
+} from "@omnyo/config/runtime";
 import { runScriptProcess } from "../lib/process-helpers.js";
 import { repoRoot, runMainIfEntrypoint } from "../lib/script-entry.js";
 
@@ -26,7 +26,9 @@ const LOOPBACK_HOST = "127.0.0.1";
 
 export function resolveDesktopPackageTask(platform: NodeJS.Platform): string {
   if (platform === "darwin") return "package";
+
   if (platform === "linux") return "package:linux";
+
   if (platform === "win32") return "package:win";
   throw new Error(
     `[desktop] Packaging is supported on macOS, Linux, and Windows, not ${platform}.`,
@@ -42,7 +44,7 @@ export function createDesktopPackageCommand(
       "turbo",
       "run",
       resolveDesktopPackageTask(platform),
-      "--filter=@bb/desktop",
+      "--filter=@omnyo/desktop",
       "--output-logs=new-only",
     ],
     command: "pnpm",
@@ -64,9 +66,11 @@ export function resolveDesktopLaunchMode(args: string[]): DesktopLaunchMode {
   if (args.length === 0) {
     return "prod";
   }
+
   if (args.length === 1 && args[0] === "--worktree") {
     return "worktree";
   }
+
   throw new Error(
     `[desktop] Unknown arguments: ${args.join(" ")}. Expected no arguments or --worktree.`,
   );
@@ -76,10 +80,12 @@ export function resolveDesktopUserDataDir(
   baseEnv: NodeJS.ProcessEnv,
   config: DevInstanceConfig,
 ): string {
-  const rawUserDataDir = baseEnv.BB_DESKTOP_USER_DATA_DIR?.trim();
+  const rawUserDataDir = baseEnv.OMNYO_DESKTOP_USER_DATA_DIR?.trim();
+
   if (rawUserDataDir === undefined || rawUserDataDir.length === 0) {
     return join(config.dataDir, "desktop");
   }
+
   return resolve(rawUserDataDir);
 }
 
@@ -88,26 +94,31 @@ export function toDesktopLaunchProcessEnv(args: {
   config: DevInstanceConfig;
   mode: DesktopLaunchMode;
 }): NodeJS.ProcessEnv {
+  const { baseEnv } = args;
+
   if (args.mode === "prod") {
     return {
-      ...args.baseEnv,
-      BB_DESKTOP_OPEN_DEVTOOLS: args.baseEnv.BB_DESKTOP_OPEN_DEVTOOLS ?? "0",
+      ...baseEnv,
+      OMNYO_DESKTOP_OPEN_DEVTOOLS: baseEnv.OMNYO_DESKTOP_OPEN_DEVTOOLS ?? "0",
       NODE_ENV: "production",
     };
   }
 
   const env = toDevProcessEnv({
-    baseEnv: args.baseEnv,
+    baseEnv,
     config: args.config,
   });
-  delete env.BB_DEV_APP_PORT;
-  env.BB_DESKTOP_OPEN_DEVTOOLS = args.baseEnv.BB_DESKTOP_OPEN_DEVTOOLS ?? "0";
-  env.BB_DESKTOP_USER_DATA_DIR = resolveDesktopUserDataDir(
-    args.baseEnv,
+
+  delete env.OMNYO_DEV_APP_PORT;
+  env.OMNYO_DESKTOP_OPEN_DEVTOOLS = baseEnv.OMNYO_DESKTOP_OPEN_DEVTOOLS ?? "0";
+  env.OMNYO_DESKTOP_USER_DATA_DIR = resolveDesktopUserDataDir(
+    baseEnv,
     args.config,
   );
-  env.BB_TELEMETRY = "false";
+  env.OMNYO_SENTRY_DSN = "";
+  env.OMNYO_TELEMETRY = "false";
   env.NODE_ENV = "production";
+
   return env;
 }
 
@@ -117,14 +128,17 @@ function formatConfig(
   desktopUserDataDir: string | undefined,
 ): string {
   const prefix = mode === "worktree" ? "[desktop:worktree]" : "[desktop]";
+
   if (mode === "prod") {
     return `${prefix} Packaged desktop app with its installed data directory and ports`;
   }
+
   if (desktopUserDataDir === undefined) {
     throw new Error(
       "[desktop:worktree] Electron user data directory is missing",
     );
   }
+
   return [
     `${prefix} Instance ${config.instanceId}`,
     `${prefix} Data dir ${config.dataDir}`,
@@ -137,6 +151,7 @@ function formatConfig(
 function checkPortAvailable(check: PortAvailabilityCheck): Promise<void> {
   return new Promise<void>((resolvePromise, rejectPromise) => {
     const server = createServer();
+
     const rejectWithPortError = (error: Error) => {
       rejectPromise(
         new Error(
@@ -144,14 +159,17 @@ function checkPortAvailable(check: PortAvailabilityCheck): Promise<void> {
         ),
       );
     };
+
     server.once("error", rejectWithPortError);
     server.listen(check.port, LOOPBACK_HOST, () => {
       server.removeListener("error", rejectWithPortError);
       server.close((error) => {
         if (error) {
           rejectPromise(error);
+
           return;
         }
+
         resolvePromise();
       });
     });
@@ -171,6 +189,7 @@ async function assertWorktreePortsAvailable(
 
 async function resolveExistingRepoRoot(): Promise<string> {
   await access(repoRoot);
+
   return repoRoot;
 }
 
@@ -178,6 +197,7 @@ async function main(): Promise<void> {
   const mode = resolveDesktopLaunchMode(process.argv.slice(2));
   const resolvedRepoRoot = await resolveExistingRepoRoot();
   const config = resolveCurrentDevInstanceConfig(resolvedRepoRoot);
+
   if (mode === "worktree") {
     await assertWorktreePortsAvailable(config);
   }
@@ -187,10 +207,12 @@ async function main(): Promise<void> {
     config,
     mode,
   });
+
   process.stdout.write(
-    `${formatConfig(config, mode, env.BB_DESKTOP_USER_DATA_DIR)}\n`,
+    `${formatConfig(config, mode, env.OMNYO_DESKTOP_USER_DATA_DIR)}\n`,
   );
   const packageCommand = createDesktopPackageCommand(process.platform);
+
   const packageExitCode = await runScriptProcess({
     args: packageCommand.args,
     command: packageCommand.command,
@@ -198,8 +220,10 @@ async function main(): Promise<void> {
     env,
     stdio: "inherit",
   });
+
   if (packageExitCode !== 0) {
     process.exitCode = packageExitCode;
+
     return;
   }
 

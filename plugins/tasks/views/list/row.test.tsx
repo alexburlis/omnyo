@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { Toaster } from "sonner";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 import { COMPACT_VIEWPORT_QUERY } from "@/components/ui/hooks/use-compact-viewport";
 import type {
   Project,
@@ -20,11 +21,13 @@ window.matchMedia = (query: string) => ({
   removeEventListener: () => {},
   dispatchEvent: () => false,
 });
+
 window.ResizeObserver ??= class {
   observe() {}
   unobserve() {}
   disconnect() {}
 };
+
 Element.prototype.scrollIntoView ??= () => {};
 
 const app = await loadPluginApp(() => import("../../app"));
@@ -40,7 +43,7 @@ const project = {
   nextTaskNumber: 5,
   color: "blue",
   folderId: null,
-  linkedBbProjectId: null,
+  linkedAppProjectId: null,
   createdAt: "2026-07-15T00:00:00.000Z",
 };
 
@@ -68,8 +71,17 @@ interface Options {
 }
 
 function renderList(tasks: Task[], options: Options = {}) {
-  return renderSlot(
-    app.navPanels[0]!,
+  const Component = app.navPanels[0]!.component;
+
+  return renderSlot<{ subPath: string }>(
+    {
+      component: (props) => (
+        <>
+          <Component {...props} />
+          <Toaster />
+        </>
+      ),
+    },
     { subPath: PROJECT_ID },
     {
       rpc: {
@@ -84,12 +96,15 @@ function renderList(tasks: Task[], options: Options = {}) {
         listAttachments: () => ({ attachments: [] }),
         moveTaskToProject: (raw) => {
           if (!options.moveTaskToProject) throw new Error("Unexpected move");
+
           return options.moveTaskToProject(rpcInput(raw));
         },
         updateTask: (raw) => {
           const input = rpcInput(raw);
+
           if (options.updateTask) return options.updateTask(input);
           const current = tasks.find((entry) => entry.id === input.taskId)!;
+
           return { ok: true, task: { ...current, ...input } };
         },
       },
@@ -100,7 +115,9 @@ function renderList(tasks: Task[], options: Options = {}) {
 async function rowFor(slot: ReturnType<typeof renderList>, key: string) {
   await slot.findByText(key);
   const row = slot.container.querySelector(`[data-task-key="${key}"]`);
+
   if (row === null) throw new Error(`row ${key} not found`);
+
   return row as HTMLElement;
 }
 
@@ -120,12 +137,14 @@ describe("inline row editing", () => {
 
   it("moves a windowed row through its project context menu", async () => {
     const current = task({ id: "01HZT1", number: 1 });
+
     const target = {
       ...project,
       id: "01HZZZZZZZZZZZZZZZZZZZZZP2",
       name: "Personal",
       prefix: "HOME",
     };
+
     const slot = renderList([current], {
       projects: [project, target],
       moveTaskToProject: () => ({
@@ -133,6 +152,7 @@ describe("inline row editing", () => {
         task: { ...current, projectId: target.id, key: "HOME-5", number: 5 },
       }),
     });
+
     const row = await rowFor(slot, "TSK-1");
     fireEvent.contextMenu(row);
     fireEvent.click(
@@ -218,6 +238,7 @@ describe("inline row editing", () => {
         error: { code: "task_parent_invalid", message: "Server rejected it" },
       }),
     });
+
     const row = await rowFor(slot, "TSK-1");
 
     fireEvent.click(
@@ -230,7 +251,11 @@ describe("inline row editing", () => {
       await within(drawer).findByRole("menuitem", { name: /Done/ }),
     );
 
-    await slot.findByText("Server rejected it");
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-sonner-toast]")?.textContent,
+      ).toContain("Server rejected it"),
+    );
     await waitFor(() =>
       expect(
         within(
@@ -244,6 +269,7 @@ describe("inline row editing", () => {
     const slot = renderList([
       task({ id: "01HZT1", number: 1, status: "todo" }),
     ]);
+
     const row = await rowFor(slot, "TSK-1");
 
     fireEvent.click(

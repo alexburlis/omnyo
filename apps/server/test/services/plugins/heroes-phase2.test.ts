@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { encodeClientTurnRequestIdNumber } from "@bb/domain";
-import type { PromptInput } from "@bb/domain";
+import { encodeClientTurnRequestIdNumber } from "@omnyo/domain";
+import type { PromptInput } from "@omnyo/domain";
 import {
   buildExecutionOptions,
   buildThreadStartCommand,
@@ -38,9 +38,11 @@ describe("hero plugin: agent-enrichment (Phase 2 surfaces)", () => {
 
   beforeEach(async () => {
     harness = await createTestAppHarness({ appVersion: APP_VERSION });
+
     const entry = await harness.pluginService.installPath(
       join(EXAMPLES_DIR, "agent-enrichment"),
     );
+
     expect(entry.id).toBe("agent-enrichment");
     expect(entry.statusDetail).toBeNull();
     expect(entry.status).toBe("running");
@@ -55,31 +57,37 @@ describe("hero plugin: agent-enrichment (Phase 2 surfaces)", () => {
     const { host, session } = seedHostSession(harness.deps, {
       id: `host-enrichment-${value}`,
     });
+
     const { project } = seedProjectWithSource(harness.deps, {
       hostId: host.id,
       path: `/tmp/enrichment-${value}`,
     });
+
     const environment = seedEnvironment(harness.deps, {
       hostId: host.id,
       projectId: project.id,
       path: `/tmp/enrichment-${value}`,
       status: "ready",
     });
+
     const thread = seedThread(harness.deps, {
       projectId: project.id,
       environmentId: environment.id,
       status: "idle",
     });
+
     return { environment, project, session, thread };
   }
 
   it("docs_search and the repo-conventions skill ride thread.start", async () => {
     const { environment, project, thread } = seedThreadFixture(1);
+
     const execution = await buildExecutionOptions(
       harness.deps,
       { model: "gpt-5" },
       { threadId: thread.id },
     );
+
     const command = await buildThreadStartCommand(harness.deps, {
       environment,
       execution,
@@ -97,16 +105,18 @@ describe("hero plugin: agent-enrichment (Phase 2 surfaces)", () => {
       UPDATE_ENVIRONMENT_DIRECTORY_TOOL_NAME,
       "docs_search",
     ]);
+
     const docsSearch = command.dynamicTools.find(
       (tool) => tool.name === "docs_search",
     );
+
     expect(docsSearch?.inputSchema).toMatchObject({
       type: "object",
       properties: { query: { type: "string" } },
       required: ["query"],
     });
     expect(command.instructions).toContain(
-      'The following instructions come from the BB plugin "agent-enrichment" for its tool "docs_search":',
+      'The following instructions come from the Omnyo plugin "agent-enrichment" for its tool "docs_search":',
     );
     expect(command.instructions).toContain(
       "Use the docs_search tool to look up repo conventions",
@@ -123,6 +133,7 @@ describe("hero plugin: agent-enrichment (Phase 2 surfaces)", () => {
 
   it("the internal tool-call route dispatches docs_search; the CLI command shares its kv cache", async () => {
     const { session, thread } = seedThreadFixture(2);
+
     const postToolCall = (args: unknown) =>
       harness.app.request("/internal/session/tool-call", {
         method: "POST",
@@ -140,19 +151,23 @@ describe("hero plugin: agent-enrichment (Phase 2 surfaces)", () => {
 
     const response = await postToolCall({ query: "conventional commits" });
     expect(response.status).toBe(200);
+
     const result = (await readJson(response)) as {
       success: boolean;
       contentItems: Array<{ text: string }>;
     };
+
     expect(result.success).toBe(true);
     expect(result.contentItems[0].text).toContain("conventions.md");
     expect(result.contentItems[0].text).toContain("conventional commits");
 
     const invalid = await postToolCall({});
+
     const invalidResult = (await readJson(invalid)) as {
       success: boolean;
       contentItems: Array<{ text: string }>;
     };
+
     expect(invalidResult.success).toBe(false);
     expect(invalidResult.contentItems[0].text).toContain(
       'Invalid arguments for tool "docs_search"',
@@ -172,11 +187,14 @@ describe("hero plugin: agent-enrichment (Phase 2 surfaces)", () => {
         body: JSON.stringify({ argv: ["last"] }),
       },
     );
+
     expect(last.status).toBe(200);
+
     const lastBody = (await last.json()) as {
       exitCode: number;
       stdout: string;
     };
+
     expect(lastBody.exitCode).toBe(0);
     expect(lastBody.stdout).toContain('"conventional commits"');
   });
@@ -185,11 +203,14 @@ describe("hero plugin: agent-enrichment (Phase 2 surfaces)", () => {
     const search = await harness.app.request(
       "http://127.0.0.1:3334/api/v1/plugins/mentions/search?q=test",
     );
+
     expect(search.status).toBe(200);
+
     const searchBody = (await search.json()) as {
       ok: boolean;
       groups: unknown;
     };
+
     expect(searchBody.ok).toBe(true);
     expect(searchBody.groups).toEqual([
       {
@@ -208,6 +229,7 @@ describe("hero plugin: agent-enrichment (Phase 2 surfaces)", () => {
     ]);
 
     const { environment, thread } = seedThreadFixture(3);
+
     const input: PromptInput[] = [
       {
         type: "text",
@@ -226,6 +248,7 @@ describe("hero plugin: agent-enrichment (Phase 2 surfaces)", () => {
         ],
       },
     ];
+
     await sendThreadMessage(harness.deps, {
       environment,
       payload: {
@@ -239,18 +262,22 @@ describe("hero plugin: agent-enrichment (Phase 2 surfaces)", () => {
       thread,
       trigger: "user",
     });
+
     const queued = await waitForQueuedCommand(
       harness,
       (candidate) =>
         candidate.command.type === "thread.start" &&
         candidate.command.threadId === thread.id,
     );
+
     if (queued.command.type !== "thread.start") {
       throw new Error("Expected a thread.start command");
     }
+
     const agentOnly = queued.command.input.filter(
       (item) => item.type === "text" && item.visibility === "agent-only",
     );
+
     expect(agentOnly).toHaveLength(1);
     expect(agentOnly[0]).toMatchObject({
       text: expect.stringContaining("conventional commits"),

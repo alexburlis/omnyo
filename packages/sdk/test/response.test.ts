@@ -1,24 +1,28 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
-  BbHttpError,
+  OmnyoHttpError,
   createRequestTimeoutFetch,
-  DEFAULT_BB_REQUEST_TIMEOUT_MS,
+  DEFAULT_CORE_REQUEST_TIMEOUT_MS,
   readJsonResponse,
   readVoidResponse,
 } from "../src/response.js";
 import { createNodeTransport } from "../src/node.js";
 
-const REQUEST_TIMEOUT_ERROR_NAME = "BbRequestTimeoutError";
+const REQUEST_TIMEOUT_ERROR_NAME = "OmnyoRequestTimeoutError";
+
 const REQUEST_TIMEOUT_VALIDATION_MESSAGE =
-  "BB request timeout must be a non-negative finite number.";
+  "Omnyo request timeout must be a non-negative finite number.";
 
 function requestTimeoutMessage(duration: string): string {
-  return `BB request timed out after ${duration}.`;
+  return `Omnyo request timed out after ${duration}.`;
 }
 
 const IMMEDIATE_TIMEOUT_MS = 0;
+
 const IMMEDIATE_TIMEOUT_MESSAGE = requestTimeoutMessage("0 seconds");
+
 const SHORT_TIMEOUT_MS = 20;
+
 const SHORT_TIMEOUT_MESSAGE = requestTimeoutMessage("20 ms");
 
 afterEach(() => {
@@ -30,8 +34,10 @@ function mockPendingFetchUntilAbort(): void {
     return new Promise<Response>((_resolve, reject) => {
       if (init?.signal?.aborted) {
         reject(init.signal.reason);
+
         return;
       }
+
       init?.signal?.addEventListener(
         "abort",
         () => {
@@ -56,9 +62,11 @@ async function expectPendingFetchTimeout(
   const timeoutFetch = createRequestTimeoutFetch({
     timeoutMs: args.timeoutMs,
   });
+
   const responsePromise = timeoutFetch(
     "http://server/api/v1/threads/thread-1/output",
   );
+
   const expectation = expect(responsePromise).rejects.toMatchObject({
     message: args.expectedMessage,
     name: REQUEST_TIMEOUT_ERROR_NAME,
@@ -77,8 +85,10 @@ function createStalledResponse(args: StalledResponseArgs): Response {
     start(controller) {
       if (args.signal?.aborted) {
         controller.error(args.signal.reason);
+
         return;
       }
+
       args.signal?.addEventListener(
         "abort",
         () => {
@@ -91,6 +101,7 @@ function createStalledResponse(args: StalledResponseArgs): Response {
       );
     },
   });
+
   return new Response(body, args.responseInit);
 }
 
@@ -100,6 +111,7 @@ function createErroredResponse(error: Error): Response {
       controller.error(error);
     },
   });
+
   return new Response(body);
 }
 
@@ -113,14 +125,17 @@ function createCancelableResponse(args: CancelableResponseArgs): Response {
       args.onCancel(reason);
     },
   });
+
   return new Response(body);
 }
 
 function getBytesReader(response: Response): () => Promise<Uint8Array> {
   const read = Reflect.get(response, "bytes");
+
   if (typeof read !== "function") {
     throw new Error("Expected Response.bytes to be available");
   }
+
   return () => read();
 }
 
@@ -129,6 +144,7 @@ function createAbortedTimeoutSignal(): AbortSignal {
   controller.abort(
     new DOMException("The operation timed out.", "TimeoutError"),
   );
+
   return controller.signal;
 }
 
@@ -141,6 +157,7 @@ function useImmediateTimeoutSignalFor(args: ImmediateTimeoutSignalArgs): void {
     if (timeoutMs === args.timeoutMs) {
       return createAbortedTimeoutSignal();
     }
+
     return new AbortController().signal;
   });
 }
@@ -152,6 +169,7 @@ function readJson<TBody>(response: Response): Promise<TBody> {
 describe("readJsonResponse()", () => {
   it("parses successful JSON response", async () => {
     const data = { id: "thread-1", title: "Hello" };
+
     const response = new Response(JSON.stringify(data), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -197,7 +215,7 @@ describe("readJsonResponse()", () => {
     );
   });
 
-  it("throws BbHttpError carrying status and server code for non-ok response", async () => {
+  it("throws OmnyoHttpError carrying status and server code for non-ok response", async () => {
     const response = new Response(
       JSON.stringify({
         code: "thread_not_found",
@@ -218,10 +236,12 @@ describe("readJsonResponse()", () => {
       (caught: unknown) => caught,
     );
 
-    expect(error).toBeInstanceOf(BbHttpError);
-    if (!(error instanceof BbHttpError)) {
-      throw new Error("Expected a BbHttpError");
+    expect(error).toBeInstanceOf(OmnyoHttpError);
+
+    if (!(error instanceof OmnyoHttpError)) {
+      throw new Error("Expected an OmnyoHttpError");
     }
+
     expect(error.message).toBe("HTTP 404: Thread thread-1 not found");
     expect(error.status).toBe(404);
     expect(error.code).toBe("thread_not_found");
@@ -236,7 +256,7 @@ describe("readJsonResponse()", () => {
     await expect(readJson(response)).rejects.toMatchObject({
       code: null,
       message: "HTTP 502: plain failure",
-      name: "BbHttpError",
+      name: "OmnyoHttpError",
       status: 502,
     });
   });
@@ -274,7 +294,7 @@ describe("readJsonResponse()", () => {
         details: { reason: "provisioning" },
       },
       code: "environment_not_ready",
-      name: "BbHttpError",
+      name: "OmnyoHttpError",
     });
   });
 
@@ -291,7 +311,7 @@ describe("readJsonResponse()", () => {
     await expect(readJson(response)).rejects.toMatchObject({
       body: null,
       message: "HTTP 502: Bad Gateway",
-      name: "BbHttpError",
+      name: "OmnyoHttpError",
       status: 502,
     });
   });
@@ -302,7 +322,7 @@ describe("readJsonResponse()", () => {
     });
 
     await expect(readJsonResponse(Promise.reject(connError))).rejects.toThrow(
-      "Cannot connect to BB server. Ensure it is running and BB_SERVER_URL is correct.",
+      "Cannot connect to Omnyo server. Ensure it is running and OMNYO_SERVER_URL is correct.",
     );
   });
 
@@ -328,7 +348,7 @@ describe("createRequestTimeoutFetch()", () => {
 
   it("uses the default timeout when creating the node transport", async () => {
     useImmediateTimeoutSignalFor({
-      timeoutMs: DEFAULT_BB_REQUEST_TIMEOUT_MS,
+      timeoutMs: DEFAULT_CORE_REQUEST_TIMEOUT_MS,
     });
     mockPendingFetchUntilAbort();
     const transport = createNodeTransport({ baseUrl: "http://server" });
@@ -374,7 +394,7 @@ describe("createRequestTimeoutFetch()", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() => {
       return Promise.resolve(
         new Response("ok", {
-          headers: { "x-bb-test": "wrapped" },
+          headers: { "x-omnyo-test": "wrapped" },
           status: 202,
         }),
       );
@@ -385,7 +405,7 @@ describe("createRequestTimeoutFetch()", () => {
 
     expect(response.status).toBe(202);
     expect(response.ok).toBe(true);
-    expect(response.headers.get("x-bb-test")).toBe("wrapped");
+    expect(response.headers.get("x-omnyo-test")).toBe("wrapped");
   });
 
   it("passes request init values through while adding the timeout signal", async () => {
@@ -394,15 +414,17 @@ describe("createRequestTimeoutFetch()", () => {
       expect(input).toBe("http://server/api/v1/hosts");
       expect(init?.method).toBe("POST");
       expect(init?.body).toBe(requestBody);
-      expect(new Headers(init?.headers).get("x-bb-test")).toBe("yes");
+      expect(new Headers(init?.headers).get("x-omnyo-test")).toBe("yes");
       expect(init?.signal?.aborted).toBe(false);
+
       return Promise.resolve(new Response("ok"));
     });
 
     const timeoutFetch = createRequestTimeoutFetch({ timeoutMs: 1_000 });
+
     const response = await timeoutFetch("http://server/api/v1/hosts", {
       body: requestBody,
-      headers: { "x-bb-test": "yes" },
+      headers: { "x-omnyo-test": "yes" },
       method: "POST",
     });
 
@@ -431,6 +453,7 @@ describe("createRequestTimeoutFetch()", () => {
     const timeoutFetch = createRequestTimeoutFetch({
       timeoutMs: IMMEDIATE_TIMEOUT_MS,
     });
+
     const response = await timeoutFetch("http://server/api/v1/threads/output");
     await expect(response.text()).rejects.toThrow(IMMEDIATE_TIMEOUT_MESSAGE);
   });
@@ -454,6 +477,7 @@ describe("createRequestTimeoutFetch()", () => {
     const arrayBufferResponse = await timeoutFetch(
       "http://server/api/v1/array-buffer",
     );
+
     await expect(arrayBufferResponse.arrayBuffer()).rejects.toThrow(
       IMMEDIATE_TIMEOUT_MESSAGE,
     );
@@ -466,6 +490,7 @@ describe("createRequestTimeoutFetch()", () => {
     const formDataResponse = await timeoutFetch(
       "http://server/api/v1/form-data",
     );
+
     await expect(formDataResponse.formData()).rejects.toThrow(
       IMMEDIATE_TIMEOUT_MESSAGE,
     );
@@ -492,6 +517,7 @@ describe("createRequestTimeoutFetch()", () => {
     const timeoutFetch = createRequestTimeoutFetch({
       timeoutMs: IMMEDIATE_TIMEOUT_MS,
     });
+
     await expect(
       readJsonResponse(timeoutFetch("http://server/api/v1/threads")),
     ).rejects.toThrow(IMMEDIATE_TIMEOUT_MESSAGE);
@@ -525,9 +551,11 @@ describe("createRequestTimeoutFetch()", () => {
     });
 
     const timeoutFetch = createRequestTimeoutFetch({ timeoutMs: 1_000 });
+
     const responsePromise = timeoutFetch("http://server/api/v1/hosts", {
       signal: upstreamController.signal,
     });
+
     upstreamController.abort(upstreamError);
 
     await expect(responsePromise).rejects.toBe(upstreamError);
@@ -558,8 +586,10 @@ describe("createRequestTimeoutFetch()", () => {
       return new Promise<Response>((_resolve, reject) => {
         if (init?.signal?.aborted) {
           reject(new DOMException("The operation was aborted.", "AbortError"));
+
           return;
         }
+
         init?.signal?.addEventListener(
           "abort",
           () => {
@@ -594,9 +624,11 @@ describe("createRequestTimeoutFetch()", () => {
     });
 
     const timeoutFetch = createRequestTimeoutFetch({ timeoutMs: 60_000 });
+
     const response = await timeoutFetch("http://server/api/v1/hosts", {
       signal: upstreamController.signal,
     });
+
     const bodyPromise = response.text();
     upstreamController.abort(upstreamError);
 
@@ -623,6 +655,7 @@ describe("createRequestTimeoutFetch()", () => {
     const timeoutFetch = createRequestTimeoutFetch({
       timeoutMs: IMMEDIATE_TIMEOUT_MS,
     });
+
     const response = await timeoutFetch("http://server/api/v1/hosts");
     await expect(response.json()).rejects.toThrow(IMMEDIATE_TIMEOUT_MESSAGE);
   });
@@ -635,11 +668,14 @@ describe("createRequestTimeoutFetch()", () => {
     const timeoutFetch = createRequestTimeoutFetch({
       timeoutMs: IMMEDIATE_TIMEOUT_MS,
     });
+
     const response = await timeoutFetch("http://server/api/v1/hosts");
     const body = response.body;
+
     if (body === null) {
       throw new Error("Expected response body");
     }
+
     const reader = body.getReader();
 
     await expect(reader.read()).rejects.toThrow(IMMEDIATE_TIMEOUT_MESSAGE);
@@ -661,6 +697,7 @@ describe("createRequestTimeoutFetch()", () => {
     const timeoutFetch = createRequestTimeoutFetch({ timeoutMs: 1_000 });
     const response = await timeoutFetch("http://server/api/v1/hosts");
     const body = response.body;
+
     if (body === null) {
       throw new Error("Expected response body");
     }
@@ -678,6 +715,7 @@ describe("createRequestTimeoutFetch()", () => {
     const timeoutFetch = createRequestTimeoutFetch({
       timeoutMs: IMMEDIATE_TIMEOUT_MS,
     });
+
     const response = await timeoutFetch("http://server/api/v1/hosts");
     const cloned = response.clone();
 

@@ -1,5 +1,5 @@
-import { compareReasoningLevels } from "@bb/domain";
-import type { AvailableModel, ReasoningLevel } from "@bb/domain";
+import { compareReasoningLevels } from "@omnyo/domain";
+import type { AvailableModel, ReasoningLevel } from "@omnyo/domain";
 import { agentModelFamilyId } from "./bridge/model-catalog.js";
 
 interface CursorParameterizedSelection {
@@ -24,6 +24,7 @@ const CURSOR_LEGACY_FAMILY_SELECTIONS: Readonly<
 
 function bareCursorFamilyId(model: string): string {
   const familyId = model === "auto" ? "default" : agentModelFamilyId(model);
+
   return familyId.startsWith("cursor-")
     ? familyId.slice("cursor-".length)
     : familyId;
@@ -34,9 +35,11 @@ export function cursorParameterizedSelection(
   reasoningLevel: ReasoningLevel | undefined,
 ): CursorParameterizedSelection {
   const familyId = bareCursorFamilyId(model);
+
   const selection = CURSOR_LEGACY_FAMILY_SELECTIONS[familyId] ?? {
     modelId: familyId,
   };
+
   return selection.reasoningLevel !== undefined || reasoningLevel === undefined
     ? selection
     : { ...selection, reasoningLevel };
@@ -50,18 +53,22 @@ function cursorCatalogModel(model: AvailableModel): {
     model.id,
     model.defaultReasoningEffort,
   );
+
   const efforts = new Map<
     ReasoningLevel,
     AvailableModel["supportedReasoningEfforts"][number]
   >();
+
   for (const effort of model.supportedReasoningEfforts) {
     const level =
       cursorParameterizedSelection(model.id, effort.reasoningEffort)
         .reasoningLevel ?? effort.reasoningEffort;
+
     if (!efforts.has(level)) {
       efforts.set(level, { ...effort, reasoningEffort: level });
     }
   }
+
   return {
     model: {
       ...model,
@@ -87,11 +94,13 @@ function mergeSupportedServiceTiers(
   ) {
     return undefined;
   }
+
   const tiers = new Map(
     [...current.supportedServiceTiers, ...candidate.supportedServiceTiers].map(
       (tier) => [tier.id, tier],
     ),
   );
+
   return [...tiers.values()];
 }
 
@@ -102,21 +111,26 @@ export function buildCursorParameterizedModelCatalog(
     string,
     { model: AvailableModel; directFamily: boolean }
   >();
+
   for (const model of models) {
     const candidate = cursorCatalogModel(model);
     const current = normalized.get(candidate.model.id);
+
     if (current === undefined) {
       normalized.set(candidate.model.id, candidate);
       continue;
     }
+
     const preferred =
       candidate.directFamily && !current.directFamily ? candidate : current;
+
     const efforts = new Map(
       preferred.model.supportedReasoningEfforts.map((effort) => [
         effort.reasoningEffort,
         effort,
       ]),
     );
+
     for (const effort of [
       ...current.model.supportedReasoningEfforts,
       ...candidate.model.supportedReasoningEfforts,
@@ -125,10 +139,12 @@ export function buildCursorParameterizedModelCatalog(
         efforts.set(effort.reasoningEffort, effort);
       }
     }
+
     const serviceTiers = mergeSupportedServiceTiers(
       current.model,
       candidate.model,
     );
+
     normalized.set(candidate.model.id, {
       model: {
         ...preferred.model,
@@ -143,5 +159,6 @@ export function buildCursorParameterizedModelCatalog(
       directFamily: preferred.directFamily,
     });
   }
+
   return [...normalized.values()].map((entry) => entry.model);
 }

@@ -1,13 +1,13 @@
-import { getAppSettings, updateHost } from "@bb/db";
-import { defaultAppSettings } from "@bb/domain";
+import { getAppSettings, updateHost } from "@omnyo/db";
+import { defaultAppSettings } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import type { HostDaemonOnlineRpcRequestMessage } from "@bb/host-daemon-contract";
+import type { HostDaemonOnlineRpcRequestMessage } from "@omnyo/host-daemon-contract";
 import {
   systemConfigResponseSchema,
   systemExecutionOptionsResponseSchema,
   systemProviderInfoSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { availableModelFixture } from "../helpers/available-models.js";
 import { readJson } from "../helpers/json.js";
 import { registerHostRpcResponder } from "../helpers/host-rpc.js";
@@ -40,6 +40,7 @@ function providerHostResponse(
       },
     };
   }
+
   if (request.command.type === "provider.health") {
     return {
       ok: true as const,
@@ -62,11 +63,13 @@ function providerHostResponse(
       },
     };
   }
+
   throw new Error(`Unexpected RPC command ${request.command.type}`);
 }
 
 async function providerIds(response: Response): Promise<string[]> {
   const body = systemProviderInfoSchema.array().parse(await readJson(response));
+
   return body.map((provider) => provider.id);
 }
 
@@ -76,13 +79,16 @@ describe("system provider host routing", () => {
       const primary = seedHostSession(harness.deps, {
         id: "host-provider-primary",
       });
+
       const remote = seedHostSession(harness.deps, {
         id: "host-provider-remote",
       });
+
       const remoteModelCommands: Extract<
         HostDaemonOnlineRpcRequestMessage["command"],
         { type: "provider.list_models" }
       >[] = [];
+
       seedPrimaryHost(harness.deps, primary.host.id);
 
       registerHostRpcResponder(harness, {
@@ -98,6 +104,7 @@ describe("system provider host routing", () => {
           if (request.command.type === "provider.list_models") {
             remoteModelCommands.push(request.command);
           }
+
           return providerHostResponse(request, "acp-omp", "remote-model");
         },
       });
@@ -105,6 +112,7 @@ describe("system provider host routing", () => {
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: remote.host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: remote.host.id,
         projectId: project.id,
@@ -113,6 +121,7 @@ describe("system provider host routing", () => {
       const primaryIds = await providerIds(
         await harness.app.request("/api/v1/system/providers"),
       );
+
       expect(primaryIds).toContain("acp-opencode");
       expect(primaryIds).not.toContain("acp-omp");
 
@@ -121,6 +130,7 @@ describe("system provider host routing", () => {
           `/api/v1/system/providers?hostId=${remote.host.id}`,
         ),
       );
+
       expect(explicitRemoteIds).toContain("acp-omp");
       expect(explicitRemoteIds).not.toContain("acp-opencode");
 
@@ -129,6 +139,7 @@ describe("system provider host routing", () => {
           `/api/v1/system/providers?environmentId=${environment.id}`,
         ),
       );
+
       expect(environmentIds).toContain("acp-omp");
       expect(environmentIds).not.toContain("acp-opencode");
 
@@ -139,6 +150,7 @@ describe("system provider host routing", () => {
           ),
         ),
       );
+
       expect(primaryModels.models.map((model) => model.model)).toEqual([
         "primary-model",
       ]);
@@ -150,6 +162,7 @@ describe("system provider host routing", () => {
           ),
         ),
       );
+
       expect(explicitModels.models.map((model) => model.model)).toEqual([
         "remote-model",
       ]);
@@ -161,12 +174,19 @@ describe("system provider host routing", () => {
           ),
         ),
       );
+
       expect(environmentModels.models.map((model) => model.model)).toEqual([
         "remote-model",
       ]);
       expect(
         remoteModelCommands.map(({ bridgeLaunch: _ignored, ...rest }) => rest),
-      ).toEqual([{ type: "provider.list_models", providerId: "codex" }]);
+      ).toEqual([
+        {
+          type: "provider.list_models",
+          providerId: "codex",
+          contributedEnv: [],
+        },
+      ]);
     });
   });
 
@@ -175,13 +195,16 @@ describe("system provider host routing", () => {
       const primary = seedHostSession(harness.deps, {
         id: "host-ceiling-primary",
       });
+
       const capped = seedHostSession(harness.deps, {
         id: "host-ceiling-capped",
       });
+
       seedPrimaryHost(harness.deps, primary.host.id);
       updateHost(harness.db, harness.hub, capped.host.id, {
         maxPermissionMode: "accept-edits",
       });
+
       for (const target of [primary, capped]) {
         registerHostRpcResponder(harness, {
           hostId: target.host.id,
@@ -198,6 +221,7 @@ describe("system provider host routing", () => {
           ),
         ),
       );
+
       expect(uncapped.permissionCeiling).toBe("full");
 
       const cappedOptions = systemExecutionOptionsResponseSchema.parse(
@@ -207,6 +231,7 @@ describe("system provider host routing", () => {
           ),
         ),
       );
+
       expect(cappedOptions.permissionCeiling).toBe("accept-edits");
     });
   });
@@ -218,6 +243,7 @@ describe("system provider host routing", () => {
         const response = await harness.app.request(
           `/api/v1/system/${route}?hostId=host-one&environmentId=env-one`,
         );
+
         expect(response.status).toBe(400);
         expect(await readJson(response)).toMatchObject({
           code: "invalid_request",
@@ -236,6 +262,7 @@ describe("GET /api/v1/system/providers", () => {
       const primary = seedHostSession(harness.deps, {
         id: "host-provider-shape-primary",
       });
+
       seedPrimaryHost(harness.deps, primary.host.id);
       registerHostRpcResponder(harness, {
         hostId: primary.host.id,
@@ -250,6 +277,7 @@ describe("GET /api/v1/system/providers", () => {
 
       const rows = z.array(z.record(z.string(), z.unknown())).parse(raw);
       expect(rows.length).toBeGreaterThan(0);
+
       for (const row of rows) {
         expect(
           Object.keys(row).filter((key) =>
@@ -257,6 +285,7 @@ describe("GET /api/v1/system/providers", () => {
           ),
         ).toEqual([]);
       }
+
       for (const provider of systemProviderInfoSchema.array().parse(raw)) {
         expect(provider.maintenance).toEqual({
           health: expect.any(Boolean),
@@ -274,11 +303,14 @@ async function saveProviderOrder(harness: TestAppHarness, order: string[]) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...defaultAppSettings, providerOrder: order }),
   });
+
   expect(response.status).toBe(200);
   expect(getAppSettings(harness.db).providerOrder).toEqual(order);
+
   const config = systemConfigResponseSchema.parse(
     await readJson(await harness.app.request("/api/v1/system/config")),
   );
+
   expect(config.generalSettings.providerOrder).toEqual(order);
 }
 
@@ -297,6 +329,7 @@ describe("persisted provider ordering", () => {
       const { host, session } = seedHostSession(harness.deps);
       seedPrimaryHost(harness.deps, host.id);
       const installed = new Set(["acp-omp", "acp-opencode"]);
+
       const responder = registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
@@ -310,8 +343,10 @@ describe("persisted provider ordering", () => {
             "model",
           ),
       });
+
       const read = async () =>
         providerIds(await harness.app.request("/api/v1/system/providers"));
+
       await read();
       const probeCount = responder.requests.length;
       expect(probeCount).toBeGreaterThan(0);
@@ -326,6 +361,7 @@ describe("persisted provider ordering", () => {
       harness.deps.providerRegistry.forgetAllInstalled();
       expect(await read()).toEqual(reversed.filter((id) => id !== "acp-omp"));
       expect(responder.requests).toHaveLength(probeCount * 2);
+
       const options = systemExecutionOptionsResponseSchema.parse(
         await readJson(
           await harness.app.request(
@@ -333,6 +369,7 @@ describe("persisted provider ordering", () => {
           ),
         ),
       );
+
       expect(options.providers.map((provider) => provider.id)).toEqual(
         reversed.filter((id) => id !== "acp-omp"),
       );
@@ -367,17 +404,22 @@ describe("persisted provider ordering", () => {
                   errorCode: "host_unavailable",
                   errorMessage: "Fixture probe failed",
                 };
+
               if (status === "unsupported")
                 return { ok: true, result: { supported: false } };
+
               return providerHostResponse(request, "acp-omp", "model", status);
             }
+
             return providerHostResponse(request, "acp-opencode", "model");
           },
         });
         await saveProviderOrder(harness, interleavedProviderOrder);
+
         const hidden = ["not_installed", "unsupported", "failed"].includes(
           status,
         );
+
         expect(
           await providerIds(
             await harness.app.request("/api/v1/system/providers"),
@@ -406,9 +448,11 @@ describe("persisted provider ordering", () => {
       await withTestHarness({}, async (harness) => {
         const { host, session } = seedHostSession(harness.deps);
         seedPrimaryHost(harness.deps, host.id);
+
         const registry = createProviderRegistryService({
           readUserProviderPreferences: () => getAppSettings(harness.db),
         });
+
         for (const registration of harness.deps.providerRegistry.list()) {
           registry.register({
             ...registration,
@@ -425,26 +469,33 @@ describe("persisted provider ordering", () => {
                 : registration.info,
           });
         }
+
         registry.markRegistrationsSettled();
         harness.deps.providerRegistry = registry;
+
         const responder = registerHostRpcResponder(harness, {
           hostId: host.id,
           sessionId: session.id,
           handle: (request) =>
             providerHostResponse(request, "acp-opencode", "model"),
         });
+
         await saveProviderOrder(harness, interleavedProviderOrder);
         const registrations = harness.deps.providerRegistry.list();
+
         const expected = registrations.filter(
           (entry) =>
             entry.info.maintenance[capability] &&
             (entry.visibility === "always" || entry.info.id === "acp-opencode"),
         );
+
         const result = await listSystemProviderInfos(harness.deps, {
           capability,
         });
+
         expect(result).toEqual(expected.map((entry) => entry.info));
         expect(result.map((provider) => provider.id)).toContain("acp-opencode");
+
         if (capability === "usage") {
           expect(
             await providerIds(
@@ -454,10 +505,12 @@ describe("persisted provider ordering", () => {
             ),
           ).toEqual(result.map((provider) => provider.id));
         }
+
         expect(
           responder.requests
             .map((request) => {
               expect(request.command.type).toBe("provider.health");
+
               return "providerId" in request.command
                 ? request.command.providerId
                 : null;
@@ -483,12 +536,15 @@ describe("persisted provider ordering", () => {
       await withTestHarness({}, async (harness) => {
         const { host, session } = seedHostSession(harness.deps);
         seedPrimaryHost(harness.deps, host.id);
+
         const registrations = harness.deps.providerRegistry
           .list()
           .filter((entry) => entry.visibility === visibility);
+
         const registry = createProviderRegistryService({
           readUserProviderPreferences: () => getAppSettings(harness.db),
         });
+
         for (const registration of registrations)
           registry.register(registration);
         registry.markRegistrationsSettled();

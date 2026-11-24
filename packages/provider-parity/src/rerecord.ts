@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -7,7 +8,7 @@ import {
   firstPartyReplayBridge,
   readBridgeRecording,
   rerecordCurrentBridgeLane,
-} from "@bb/provider-bridge-protocol/testing";
+} from "@omnyo/provider-bridge-protocol/testing";
 import {
   RECORDINGS_ROOT,
   cellKey,
@@ -23,15 +24,24 @@ const REDACT_SCRIPT = resolve(
     .pathname,
 );
 
-function redactInPlace(file: string): void {
-  const inDir = mkdtempSync(join(tmpdir(), "bb-rerecord-redact-in-"));
-  const outDir = mkdtempSync(join(tmpdir(), "bb-rerecord-redact-out-"));
+async function redactInPlace(file: string): Promise<void> {
+  const inDir = mkdtempSync(join(tmpdir(), "omnyo-rerecord-redact-in-"));
+  const outDir = mkdtempSync(join(tmpdir(), "omnyo-rerecord-redact-out-"));
+
   try {
     const staged = join(inDir, basename(file));
     writeFileSync(staged, readFileSync(file));
-    execFileSync(process.execPath, [REDACT_SCRIPT, inDir, outDir], {
+
+    const child = spawn(process.execPath, [REDACT_SCRIPT, inDir, outDir], {
       stdio: ["ignore", "ignore", "inherit"],
     });
+
+    const [exitCode, signal] = await once(child, "close");
+
+    if (exitCode !== 0) {
+      throw new Error(`Recording redaction failed: ${signal ?? exitCode}`);
+    }
+
     writeFileSync(file, readFileSync(join(outDir, basename(file))));
   } finally {
     rmSync(inDir, { recursive: true, force: true });
@@ -56,6 +66,7 @@ function usage(): never {
 }
 
 const callerCwd = process.env.INIT_CWD ?? process.cwd();
+
 const checkoutRoot = resolve(new URL("../../..", import.meta.url).pathname);
 
 function parseArgs(argv: string[]): CliArgs {
@@ -67,9 +78,11 @@ function parseArgs(argv: string[]): CliArgs {
     timeoutMs: undefined,
     verbose: false,
   };
+
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
+
     switch (flag) {
       case "--plan-with":
         args.planRoot = resolve(callerCwd, value ?? usage());
@@ -98,6 +111,7 @@ function parseArgs(argv: string[]): CliArgs {
         usage();
     }
   }
+
   return args;
 }
 
@@ -107,6 +121,7 @@ async function rerecordCell(
   planLeg: ParityLeg | null,
 ): Promise<string> {
   const bridge = firstPartyReplayBridge(cell.provider, checkoutRoot);
+
   const result = await rerecordCurrentBridgeLane({
     recordingDir: cell.dir,
     providerId: cell.provider,
@@ -121,17 +136,22 @@ async function rerecordCell(
       ? { onStderr: (text: string) => process.stderr.write(text) }
       : {}),
   });
+
   if (result.file === null) {
     return `STALL ${cellKey(cell)}: ${result.stalls.join("; ")} (current lane left untouched)`;
   }
-  redactInPlace(result.file);
+
+  await redactInPlace(result.file);
+
   return `OK ${cellKey(cell)}: ${result.lines} bridge→runtime lines (${result.events} events)`;
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+
   const planLeg =
     args.planRoot === null ? null : await loadParityLeg(args.planRoot);
+
   process.stdout.write(
     `record: ${checkoutRoot}\nplan: ${
       planLeg === null
@@ -139,12 +159,15 @@ async function main(): Promise<void> {
         : `${planLeg.checkoutRoot} (${planLeg.source})`
     }\n\n`,
   );
+
   const cells = listRecordedCells(args.recordings).filter(
     (cell: RecordedCell) =>
       (args.provider === null || cell.provider === args.provider) &&
       (args.cell === null || cell.cell === args.cell),
   );
+
   let failed = 0;
+
   for (const cell of cells) {
     if (!isReplayable(cell.provider)) {
       process.stdout.write(
@@ -152,14 +175,18 @@ async function main(): Promise<void> {
       );
       continue;
     }
+
     if (readBridgeRecording(cell.dir).manifest?.scope === "process") {
       process.stdout.write(`SKIP ${cellKey(cell)}: process-scoped recording\n`);
       continue;
     }
+
     const line = await rerecordCell(cell, args, planLeg);
+
     if (line.startsWith("STALL")) failed += 1;
     process.stdout.write(`${line}\n`);
   }
+
   process.exit(failed === 0 ? 0 : 1);
 }
 

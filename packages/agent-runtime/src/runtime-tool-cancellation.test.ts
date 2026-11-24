@@ -30,16 +30,19 @@ describe("runtime tool cancellation ownership", () => {
   it("cancels only the finishing turn and cancels all requests on thread detach", () => {
     const calls = new RuntimeToolCalls();
     const old = calls.start("process", request)!;
+
     const next = calls.start("process", {
       ...request,
       requestId: 2,
       turnId: "turn-b",
     })!;
+
     const sibling = calls.start("process", {
       ...request,
       requestId: 3,
       threadId: "thread-b",
     })!;
+
     calls.cancelThread("thread-a", "turn-a");
     expect(old.signal.aborted).toBe(true);
     expect(next.signal.aborted).toBe(false);

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { requireThreadEventScopeTurnId } from "@bb/domain";
+import { requireThreadEventScopeTurnId } from "@omnyo/domain";
 import {
   cleanup,
   createTestRuntime,
@@ -33,15 +33,18 @@ for (const providerId of providers) {
   describe.concurrent(`${providerId} provider`, () => {
     it("lists models", async () => {
       const ctx = createTestRuntime(providerId);
+
       try {
         const { models } = await ctx.runtime.listModels({ providerId });
         expect(models.length).toBeGreaterThan(0);
+
         for (const model of models) {
           expect(model.id).toBeTruthy();
           expect(model.model).toBeTruthy();
           expect(model.displayName).toBeTruthy();
           expect(model.supportedReasoningEfforts.length).toBeGreaterThan(0);
         }
+
         expect(models.some((m) => m.isDefault)).toBe(true);
       } finally {
         await ctx.runtime.shutdown();
@@ -51,13 +54,16 @@ for (const providerId of providers) {
 
     it("starts a thread and runs a single turn", async () => {
       const ctx = createTestRuntime(providerId);
+
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId,
           preset: "full",
         });
+
         await ctx.runtime.startThread({
           environmentId: "env-1",
           threadId,
@@ -94,13 +100,16 @@ for (const providerId of providers) {
 
     it("handles a follow-up turn in the same session", async () => {
       const ctx = createTestRuntime(providerId);
+
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId,
           preset: "full",
         });
+
         await ctx.runtime.startThread({
           environmentId: "env-1",
           threadId,
@@ -152,13 +161,16 @@ for (const providerId of providers) {
 
     it("steers an active turn", async () => {
       const ctx = createTestRuntime(providerId);
+
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId,
           preset: "full",
         });
+
         await ctx.runtime.startThread({
           environmentId: "env-1",
           threadId,
@@ -188,13 +200,16 @@ for (const providerId of providers) {
         });
 
         const activeTurn = findLatestTurnStartedForThread(ctx.events, threadId);
+
         if (!activeTurn) {
           throw new Error("Expected active turn before steering");
         }
+
         const activeTurnId = requireThreadEventScopeTurnId({
           type: activeTurn.type,
           scope: activeTurn.scope,
         });
+
         const steerText = `STEER_${providerId}_${randomUUID()}`;
         await ctx.runtime.steerTurn({
           threadId,
@@ -218,10 +233,13 @@ for (const providerId of providers) {
           threadId,
           "creq_23456789ac",
         );
+
         expect(steerInputAccepted?.type).toBe("turn/input/accepted");
+
         if (steerInputAccepted?.type !== "turn/input/accepted") {
           throw new Error("Expected steer input accepted event");
         }
+
         expect(
           requireThreadEventScopeTurnId({
             type: steerInputAccepted.type,
@@ -238,13 +256,16 @@ for (const providerId of providers) {
 
     it("stops an active turn and recovers with a follow-up", async () => {
       const ctx = createTestRuntime(providerId);
+
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId,
           preset: "full",
         });
+
         const startResult = await ctx.runtime.startThread({
           environmentId: "env-1",
           threadId,
@@ -277,6 +298,7 @@ for (const providerId of providers) {
           ctx.events,
           threadId,
         );
+
         expect(completedBeforeStop).toBe(0);
 
         await ctx.runtime.stopThread({ threadId });
@@ -286,6 +308,7 @@ for (const providerId of providers) {
           fallbackProviderThreadId: startResult.providerThreadId,
           threadId,
         });
+
         await ctx.runtime.resumeThread({
           environmentId: "env-1",
           threadId,
@@ -296,10 +319,12 @@ for (const providerId of providers) {
         });
 
         const recoveryStartIndex = ctx.events.length;
+
         const completedBeforeRecovery = turnCompletedCountForThread(
           ctx.events,
           threadId,
         );
+
         await ctx.runtime.runTurn({
           threadId,
           clientRequestId: "creq_23456789ac",
@@ -330,9 +355,11 @@ for (const providerId of providers) {
           getAgentTextAfterIndex(ctx.events, recoveryStartIndex, threadId)
             .length,
         ).toBeGreaterThan(0);
+
         const inputAcceptedCount = getInputAcceptedEvents(
           getEventsForThread(ctx.events, threadId),
         ).length;
+
         expect(inputAcceptedCount).toBe(2);
       } finally {
         await ctx.runtime.shutdown();
@@ -342,13 +369,16 @@ for (const providerId of providers) {
 
     it("respects developer instructions", async () => {
       const ctx = createTestRuntime(providerId);
+
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId,
           preset: "full",
         });
+
         await ctx.runtime.startThread({
           environmentId: "env-1",
           threadId,
@@ -383,13 +413,16 @@ for (const providerId of providers) {
 
     it("recovers from a bad request", async () => {
       const ctx = createTestRuntime(providerId);
+
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId,
           preset: "full",
         });
+
         await ctx.runtime.startThread({
           environmentId: "env-1",
           threadId,
@@ -414,6 +447,7 @@ for (const providerId of providers) {
 
         const badThreadId = `nonexistent_${Date.now()}`;
         let badRequestFailed = false;
+
         try {
           await ctx.runtime.runTurn({
             clientRequestId: "creq_222222224f",
@@ -424,6 +458,7 @@ for (const providerId of providers) {
         } catch {
           badRequestFailed = true;
         }
+
         expect(badRequestFailed).toBe(true);
 
         await ctx.runtime.runTurn({
@@ -450,10 +485,12 @@ for (const providerId of providers) {
 
     it("handles dynamic tool calls", async () => {
       let toolCalled = false;
+
       const ctx = createTestRuntime(providerId, {
         onToolCall: async (req) => {
-          if (req.tool === "bb_test_ping") {
+          if (req.tool === "omnyo_test_ping") {
             toolCalled = true;
+
             return {
               contentItems: [
                 { type: "inputText" as const, text: "PONG_FROM_TOOL" },
@@ -461,6 +498,7 @@ for (const providerId of providers) {
               success: true,
             };
           }
+
           return {
             contentItems: [
               { type: "inputText" as const, text: "unknown tool" },
@@ -472,11 +510,13 @@ for (const providerId of providers) {
 
       try {
         const threadId = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId,
           preset: "full",
         });
+
         await ctx.runtime.startThread({
           environmentId: "env-1",
           threadId,
@@ -485,7 +525,7 @@ for (const providerId of providers) {
           options,
           dynamicTools: [
             {
-              name: "bb_test_ping",
+              name: "omnyo_test_ping",
               description:
                 "Returns a test ping response. Always call this tool when asked to use it.",
               inputSchema: {
@@ -501,7 +541,7 @@ for (const providerId of providers) {
           threadId,
           input: [
             promptTextInput({
-              text: "Call the bb_test_ping tool right now and report what it returns.",
+              text: "Call the omnyo_test_ping tool right now and report what it returns.",
             }),
           ],
           options,
@@ -510,7 +550,7 @@ for (const providerId of providers) {
         await waitForToolCallBeforeTurnCompletion({
           ctx,
           threadId,
-          toolName: "bb_test_ping",
+          toolName: "omnyo_test_ping",
           timeoutMs: 30_000,
           label: "tool call",
         });

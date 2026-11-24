@@ -1,4 +1,5 @@
 import { ListLoadingPlaceholder } from "@/components/ui/ListLoadingPlaceholder";
+import { PickerEmptyState, pickerNoMatchMessage } from "./PickerEmptyState";
 import { PICKER_MOBILE_CLASS_NAME } from "./picker-layout";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -6,27 +7,31 @@ import {
   BranchPickerRow,
   BranchPickerSearch,
   BranchPickerSectionHeader,
-} from "@bb/shared-ui/branch-picker-primitives";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { LIST_HOVER_TRANSITION } from "@bb/shared-ui/motion";
-import { MenuHoverProvider } from "@bb/shared-ui/menu-item-hover";
+} from "@omnyo/shared-ui/branch-picker-primitives";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { MenuHoverProvider } from "@omnyo/shared-ui/menu-item-hover";
 import {
   COARSE_POINTER_COMPACT_ICON_SIZE_CLASS,
   COARSE_POINTER_COMPACT_ICON_SIZE_SHRINK_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { blurActiveKeyboardInputWithin } from "@bb/shared-ui/overlay-trigger";
-import { Popover, PopoverContent, PopoverTrigger } from "@bb/shared-ui/popover";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { blurActiveKeyboardInputWithin } from "@omnyo/shared-ui/overlay-trigger";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@omnyo/shared-ui/popover";
 import {
   OPTION_BASE_CLASS_NAME,
   OPTION_INTERACTIVE_CLASS_NAME,
   OPTION_MUTED_CLASS_NAME,
   OPTION_TRIGGER_CONTENT_CLASS_NAME,
-} from "@bb/shared-ui/option-display";
-import { cn } from "@bb/shared-ui/lib/utils";
-import type { GitBranchRefClassification } from "@bb/domain";
+} from "@omnyo/shared-ui/option-display";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import type { GitBranchRefClassification } from "@omnyo/domain";
 import { searchPickerOptions } from "./picker-search";
 import { useResetPickerScroll } from "./useResetPickerScroll";
+import { usePickerModal } from "./use-picker-modal";
 
 interface GetMergeBaseBranchCandidatesArgs {
   mergeBaseBranch?: string;
@@ -48,12 +53,15 @@ export function getMergeBaseBranchCandidateGroups({
 }: GetMergeBaseBranchCandidatesArgs): MergeBaseBranchCandidateGroups {
   const fromProps = mergeBaseBranchOptions ?? [];
   const fromRemoteProps = remoteMergeBaseBranchOptions ?? [];
+
   const selectedRef =
     mergeBaseBranchRef?.name === mergeBaseBranch ? mergeBaseBranchRef : null;
+
   const selectedOptionKind =
     selectedRef && selectedRef.kind !== "missing"
       ? selectedRef.kind
       : undefined;
+
   if (
     !mergeBaseBranch ||
     fromProps.includes(mergeBaseBranch) ||
@@ -64,22 +72,26 @@ export function getMergeBaseBranchCandidateGroups({
       remoteOptions: fromRemoteProps,
     };
   }
+
   if (selectedOptionKind === "remote") {
     return {
       options: fromProps,
       remoteOptions: [mergeBaseBranch, ...fromRemoteProps],
     };
   }
+
   if (selectedOptionKind === "local" || selectedRef?.kind !== "missing") {
     return {
       options: [mergeBaseBranch, ...fromProps],
       remoteOptions: fromRemoteProps,
     };
   }
+
   return { options: fromProps, remoteOptions: fromRemoteProps };
 }
 
 const EMPTY_BRANCH_OPTIONS: readonly string[] = [];
+
 const BRANCH_LABEL_PREFIXES = ["Branch from:"] as const;
 
 interface BranchPlainLabelParts {
@@ -111,6 +123,7 @@ interface OrderBranchPickerOptionsArgs {
 function splitBranchLabel(label: string): BranchLabelParts {
   for (const prefix of BRANCH_LABEL_PREFIXES) {
     const prefixWithSpace = `${prefix} `;
+
     if (label.startsWith(prefixWithSpace)) {
       return {
         kind: "prefixed",
@@ -136,10 +149,13 @@ function BranchPickerText({
   const valueClassName = wrap
     ? "min-w-0 whitespace-normal break-words"
     : "min-w-0 truncate";
+
   const compactAffixProps = compactAffixesInPromptbox
     ? { "data-promptbox-hide-compact": "" }
     : {};
+
   const parts = splitBranchLabel(label);
+
   if (parts.kind === "plain") {
     return (
       <span
@@ -181,9 +197,11 @@ export function buildBranchPickerOptionGroups({
 }): { local: string[]; remote: string[] } {
   const local = [...options];
   const localBranchNames = new Set(local);
+
   const remote = remoteOptions.filter(
     (branch) => !localBranchNames.has(branch),
   );
+
   return { local, remote };
 }
 
@@ -199,11 +217,13 @@ export function orderBranchPickerOptions({
     if (!branch || !availableOptions.has(branch) || seenOptions.has(branch)) {
       return;
     }
+
     ordered.push(branch);
     seenOptions.add(branch);
   };
 
   append(selectedValue);
+
   for (const branch of options) {
     append(branch);
   }
@@ -230,7 +250,7 @@ export interface BranchPickerProps {
   muted?: boolean;
   defaultOpen?: boolean;
   modal?: boolean;
-  popoverAlign?: "start" | "end";
+  popoverAlign?: "start" | "center" | "end";
 }
 
 export function BranchPicker({
@@ -251,9 +271,10 @@ export function BranchPicker({
   variant = "default",
   muted,
   defaultOpen = false,
-  modal = true,
+  modal: modalProp,
   popoverAlign = "start",
 }: BranchPickerProps) {
+  const { modal, modalHostRef } = usePickerModal(modalProp);
   const [open, setOpen] = useState(defaultOpen);
   const [query, setQuery] = useState("");
   const optionsScrollRef = useResetPickerScroll<HTMLDivElement>(query);
@@ -261,6 +282,7 @@ export function BranchPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const normalizedQuery = deferredQuery.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
+
   const branchOptionGroups = useMemo(
     () =>
       buildBranchPickerOptionGroups({
@@ -269,10 +291,12 @@ export function BranchPicker({
       }),
     [options, remoteOptions],
   );
+
   const combinedBranchOptions = useMemo(
     () => [...branchOptionGroups.local, ...branchOptionGroups.remote],
     [branchOptionGroups.local, branchOptionGroups.remote],
   );
+
   const filteredCombinedBranchOptions = useMemo(
     () =>
       searchPickerOptions({
@@ -282,6 +306,7 @@ export function BranchPicker({
       }),
     [combinedBranchOptions, deferredQuery],
   );
+
   const filteredBranchOptions = useMemo(
     () =>
       orderBranchPickerOptions({
@@ -290,29 +315,51 @@ export function BranchPicker({
       }),
     [filteredCombinedBranchOptions, isSearching, value],
   );
-  const firstFilteredOption = filteredBranchOptions[0];
+
+  const remoteBranchNames = useMemo(
+    () => new Set(branchOptionGroups.remote),
+    [branchOptionGroups.remote],
+  );
+
+  const localResults = filteredBranchOptions.filter(
+    (branch) => !remoteBranchNames.has(branch),
+  );
+
+  const remoteResults = filteredBranchOptions.filter((branch) =>
+    remoteBranchNames.has(branch),
+  );
+
+  const firstFilteredOption = localResults[0] ?? remoteResults[0];
+
   const enterSelection = value
     ? (filteredBranchOptions.find((branch) => branch === value) ??
       firstFilteredOption)
     : firstFilteredOption;
+
   const unresolvedTriggerLabel = loading
-    ? "Loading branches..."
+    ? "Loading branches…"
     : (placeholder ?? "Select branch");
+
   const triggerLabel = triggerLabelOverride ?? value ?? unresolvedTriggerLabel;
+
   const triggerHasPlainBranchValue =
     emphasizeTriggerValue &&
     triggerLabelOverride === undefined &&
     value !== null;
+
   const updateOpen = (nextOpen: boolean) => {
     if (!nextOpen) {
       blurActiveKeyboardInputWithin(inputRef.current);
     }
+
     setOpen(nextOpen);
     onOpenChange?.(nextOpen);
   };
+
   const closePicker = () => {
     updateOpen(false);
   };
+
   const selectBranchAndClose = (branch: string) => {
     onChange(branch);
     closePicker();
@@ -322,6 +369,7 @@ export function BranchPicker({
     if (!open) {
       setQuery("");
       onSearchQueryChange?.("");
+
       return;
     }
 
@@ -330,7 +378,7 @@ export function BranchPicker({
 
   return (
     <Popover modal={modal} open={open} onOpenChange={updateOpen}>
-      <PopoverTrigger asChild disabled={disabled}>
+      <PopoverTrigger ref={modalHostRef} asChild disabled={disabled}>
         <Button
           type="button"
           variant={variant === "default" ? "outline" : "ghost"}
@@ -338,7 +386,6 @@ export function BranchPicker({
           disabled={disabled}
           aria-label="Branch"
           className={cn(
-            LIST_HOVER_TRANSITION,
             variant === "default" &&
               "h-8 w-full min-w-0 justify-between rounded-md border-border bg-background px-2.5 text-sm font-normal shadow-none hover:bg-state-hover",
             variant === "minimal" &&
@@ -421,8 +468,10 @@ export function BranchPicker({
               event.stopPropagation();
             }}
           >
-            <BranchPickerSectionHeader label={menuLabel || "Branches"} />
-            {filteredBranchOptions.map((branch) => (
+            {localResults.length > 0 || remoteResults.length === 0 ? (
+              <BranchPickerSectionHeader label={menuLabel || "Branches"} />
+            ) : null}
+            {localResults.map((branch) => (
               <BranchPickerRow
                 key={branch}
                 icon="GitMerge"
@@ -433,13 +482,33 @@ export function BranchPicker({
                 <BranchPickerText label={branch} className="flex-1" wrap />
               </BranchPickerRow>
             ))}
+            {remoteResults.length > 0 ? (
+              <BranchPickerSectionHeader label="Remote branches" />
+            ) : null}
+            {remoteResults.map((branch) => (
+              <BranchPickerRow
+                key={branch}
+                icon="Cloud"
+                selected={branch === value}
+                title={`${branch} (remote branch)`}
+                onSelect={() => selectBranchAndClose(branch)}
+              >
+                <BranchPickerText label={branch} className="flex-1" wrap />
+              </BranchPickerRow>
+            ))}
             {filteredBranchOptions.length === 0 ? (
               loading ? (
                 <ListLoadingPlaceholder label="Loading branches…" />
               ) : (
-                <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-                  No branches found.
-                </p>
+                <PickerEmptyState
+                  icon={isSearching ? "Search" : "GitBranch"}
+                  message={
+                    isSearching
+                      ? pickerNoMatchMessage("branches", deferredQuery)
+                      : "No branches found."
+                  }
+                  className="py-3"
+                />
               )
             ) : null}
           </div>

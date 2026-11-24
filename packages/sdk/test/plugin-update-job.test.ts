@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createBbSdk } from "../src/core.js";
+import { createOmnyoSdk } from "../src/core.js";
 import { createHttpTransport } from "../src/transport-http.js";
 
 const base = { id: "update-1", pluginId: "notes", displayName: "Notes" };
+
 const result = {
   applied: true,
   from: { version: "1.0.0", display: "1.0.0" },
@@ -12,14 +13,16 @@ const result = {
 
 function server(final: object) {
   const requests: Request[] = [];
-  const sdk = createBbSdk({
+
+  const sdk = createOmnyoSdk({
     transport: createHttpTransport({
-      baseUrl: "http://bb.test",
+      baseUrl: "http://omnyo.test",
       runtime: "node",
       fetch: async (input, init) => {
         const request = new Request(input, init);
         requests.push(request);
         const start = request.method === "POST";
+
         return new Response(
           JSON.stringify({
             job: {
@@ -32,6 +35,7 @@ function server(final: object) {
       },
     }),
   });
+
   return { sdk, requests };
 }
 
@@ -51,6 +55,7 @@ describe("background plugin updates", () => {
         state: "completed",
         result: expected,
       });
+
       await expect(
         sdk.plugins.applyUpdate({ pluginId: "notes" }),
       ).resolves.toEqual(expected);
@@ -72,6 +77,7 @@ describe("background plugin updates", () => {
       state: "failed",
       error: "source unavailable",
     });
+
     await expect(
       sdk.plugins.experimental_startUpdate({ pluginId: "notes" }),
     ).resolves.toMatchObject({ state: "running", phase: "checking" });
@@ -86,13 +92,20 @@ describe("background plugin updates", () => {
   });
 
   it("retains compatibility with servers returning the completed result", async () => {
-    const sdk = createBbSdk({
+    const sdk = createOmnyoSdk({
       transport: createHttpTransport({
-        baseUrl: "http://bb.test",
+        baseUrl: "http://omnyo.test",
         runtime: "node",
         fetch: async () => new Response(JSON.stringify(result)),
       }),
     });
+
+    await expect(
+      sdk.plugins.experimental_startUpdate({ pluginId: "notes" }),
+    ).rejects.toThrow(
+      "Update completed without a job; this Omnyo server predates background updates",
+    );
+
     await expect(
       sdk.plugins.applyUpdate({ pluginId: "notes" }),
     ).resolves.toEqual(result);

@@ -9,7 +9,7 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { MachineEnvironmentList } from "@bb/server-contract";
+import type { MachineEnvironmentList } from "@omnyo/server-contract";
 import {
   MachineEnvironmentSettings,
   ScopedMachineEnvironmentSettings,
@@ -27,14 +27,17 @@ const mocks = vi.hoisted(() => ({
   projectList: vi.fn(),
   projectReplace: vi.fn(),
 }));
+
 vi.mock("@/hooks/queries/system-queries", () => ({
   useSystemConfig: () => ({
     data: { generalSettings: { machineGitCredentialsEnabled: true } },
   }),
 }));
+
 vi.mock("@/hooks/mutations/settings-mutations", () => ({
   useUpdateGeneralSettings: () => ({ isPending: false, mutate: vi.fn() }),
 }));
+
 vi.mock("@/lib/sdk", () => ({
   sdk: {
     projects: {
@@ -47,10 +50,12 @@ vi.mock("@/lib/sdk", () => ({
     },
   },
 }));
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal("crypto", {
@@ -121,11 +126,13 @@ it("retains a secret replacement when saving fails", async () => {
 
 it("saves an empty project override without copying inherited secrets and removes it to restore inheritance", async () => {
   const inherited = { name: "REGION", value: null, secret: true, note: null };
+
   const view = {
     builtInGit: { status: "disabled", statusMessage: "Disabled" },
     variables: [],
     inheritedVariables: [inherited],
   };
+
   mocks.projectList.mockResolvedValue(view);
   render(
     <QueryClientProvider

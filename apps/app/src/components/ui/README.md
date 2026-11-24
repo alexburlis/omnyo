@@ -11,9 +11,9 @@ or adding a component here, answer the relevant checks below.
 Use `components/ui` for generic UI building blocks. A primitive must satisfy all
 of these:
 
-- No product data dependencies: no queries, atoms, routing, server calls, or BB
+- No product data dependencies: no queries, atoms, routing, server calls, or Omnyo
   lifecycle concepts.
-- No `@bb/domain` types in its public API.
+- No `@omnyo/domain` types in its public API.
 - Generic local interaction state is okay. Browser persistence, app preferences,
   and product policy belong in app wrappers.
 - Replacing it would feel like a design-system change, not a feature change.
@@ -23,7 +23,7 @@ Examples: `Button`, `Dialog`, `DropdownMenu`, `Pill`, `DetailCard`,
 
 ## Domain Presentation
 
-Use named feature folders for canonical rendering of BB domain concepts. These
+Use named feature folders for canonical rendering of Omnyo domain concepts. These
 components are still pure presentation:
 
 - Props in, JSX out.
@@ -51,7 +51,7 @@ injects the preferred theme.
 Before adding code to `components/ui`, ask:
 
 1. Is it a generic design-system primitive?
-2. If not, is it a pure BB domain renderer used by multiple consumers?
+2. If not, is it a pure Omnyo domain renderer used by multiple consumers?
 
 If both answers are no, keep it in the app.
 
@@ -76,6 +76,13 @@ connections, or real timers.
 The Ladle providers decorator seeds app state at the boundary. WebSocket state is
 seeded through the Jotai atoms that components already read rather than by
 monkey-patching the `useWebSocket` hook.
+
+## Motion
+
+[`DESIGN.md`](../../../../../DESIGN.md#motion) owns the motion system: tokens,
+roles, where nothing animates, the shared helpers in
+`@omnyo/shared-ui/motion` and the guard tests. Read it before adding or
+changing any transition or animation.
 
 ## Story Coverage
 

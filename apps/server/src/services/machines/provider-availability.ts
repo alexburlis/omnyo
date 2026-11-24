@@ -1,4 +1,4 @@
-import { decideWithinBox } from "../threads/dispatch-hooks.js";
+import { decideWithinBox } from "../lib/decision-timeout.js";
 import {
   acceptsEmptyInputs,
   parseProviderAvailabilityInvocation,
@@ -25,7 +25,9 @@ export async function machineProviderUnavailableReason(
   record: PluginMachineProviderRecord,
 ): Promise<string | null> {
   const availability = record.provider.availability;
+
   if (availability === null) return null;
+
   const invocation = await invokeMachineProvider(
     record,
     `"${record.provider.id}" machine provider availability`,
@@ -35,11 +37,14 @@ export async function machineProviderUnavailableReason(
         machineProviderDecisionTimeoutMs(),
       ),
   );
+
   const resolution = parseProviderAvailabilityInvocation(
     record.pluginId,
     invocation,
   );
+
   if (!resolution.ok) return resolution.message;
+
   return resolution.availability.status === "available"
     ? null
     : resolution.availability.message;

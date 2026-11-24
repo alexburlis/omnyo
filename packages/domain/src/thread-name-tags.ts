@@ -1,16 +1,18 @@
 import type { ThreadEvent } from "./provider-event.js";
 
-const BB_THREAD_NAME_PREFIX = "[bb] ";
+const THREAD_NAME_PREFIX = "[omnyo] ";
+
+const LEGACY_THREAD_NAME_PREFIX_V1 = "[bb] ";
 
 export function toProviderExternalThreadName(title: string): string {
-  return `${BB_THREAD_NAME_PREFIX}${title}`;
+  return `${THREAD_NAME_PREFIX}${title}`;
 }
 
 export function fromProviderExternalThreadName(name: string): string {
-  if (!name.startsWith(BB_THREAD_NAME_PREFIX)) {
-    return name;
-  }
-  return name.slice(BB_THREAD_NAME_PREFIX.length);
+  for (const prefix of [THREAD_NAME_PREFIX, LEGACY_THREAD_NAME_PREFIX_V1])
+    if (name.startsWith(prefix)) return name.slice(prefix.length);
+
+  return name;
 }
 
 export function normalizeProviderThreadNameEvent(
@@ -19,6 +21,7 @@ export function normalizeProviderThreadNameEvent(
   if (event.type !== "thread/name/updated") {
     return event;
   }
+
   return {
     ...event,
     threadName: fromProviderExternalThreadName(event.threadName),

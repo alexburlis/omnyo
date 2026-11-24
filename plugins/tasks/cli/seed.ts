@@ -10,7 +10,7 @@ interface SeedDemoResult {
   labelsCreated: number;
   tasksCreated: number;
   commentsCreated: number;
-  linkedBbProjectId: string | null;
+  linkedAppProjectId: string | null;
   projects: Array<{ id: string; keyPrefix: string; name: string }>;
 }
 
@@ -28,29 +28,36 @@ async function createTask(
   },
 ): Promise<Task> {
   const parsed = tasksRpcContract.createTask.input.parse(input);
+
   const result = tasksRpcContract.createTask.output.parse(
     await domain.createTask(parsed),
   );
+
   if (!result.ok) throw new Error(result.error.message);
+
   return result.task;
 }
 
 function nextPrefix(base: string, used: Set<string>): string {
   const prefix = allocatePrefix(base, used);
+
   if (prefix === null) {
     throw new Error(`Could not allocate a demo prefix from ${base}`);
   }
+
   used.add(prefix);
+
   return prefix;
 }
 
 export async function seedDemo(
   domain: TasksDomain,
-  linkedBbProjectId: string | undefined,
+  linkedAppProjectId: string | undefined,
 ): Promise<SeedDemoResult> {
   const existing = tasksRpcContract.listProjects.output.parse(
     await domain.listProjects(tasksRpcContract.listProjects.input.parse({})),
   ).projects;
+
   const prefixes = new Set(existing.map((project) => project.prefix));
 
   const productFolder = tasksRpcContract.createFolder.output.parse(
@@ -58,6 +65,7 @@ export async function seedDemo(
       tasksRpcContract.createFolder.input.parse({ name: "Product" }),
     ),
   ).folder;
+
   const lifeFolder = tasksRpcContract.createFolder.output.parse(
     await domain.createFolder(
       tasksRpcContract.createFolder.input.parse({ name: "Life" }),
@@ -65,27 +73,28 @@ export async function seedDemo(
   ).folder;
 
   const projects = [];
+
   for (const input of [
     {
       name: "Tasks Plugin",
       prefix: nextPrefix("TASKS", prefixes),
       color: "blue",
       folderId: productFolder.id,
-      linkedBbProjectId: linkedBbProjectId ?? null,
+      linkedAppProjectId: linkedAppProjectId ?? null,
     },
     {
       name: "Operations",
       prefix: nextPrefix("OPS", prefixes),
       color: "orange",
       folderId: productFolder.id,
-      linkedBbProjectId: null,
+      linkedAppProjectId: null,
     },
     {
       name: "Personal",
       prefix: nextPrefix("HOME", prefixes),
       color: "violet",
       folderId: lifeFolder.id,
-      linkedBbProjectId: null,
+      linkedAppProjectId: null,
     },
   ]) {
     projects.push(
@@ -105,7 +114,9 @@ export async function seedDemo(
     [projects[2]!, "Home", "green"],
     [projects[2]!, "Errand", "yellow"],
   ] as const;
+
   const labels = [];
+
   for (const [project, name, color] of labelSpecs) {
     labels.push(
       tasksRpcContract.createLabel.output.parse(
@@ -121,6 +132,7 @@ export async function seedDemo(
   }
 
   const tasks: Task[] = [];
+
   const taskOne = await createTask(domain, {
     projectId: projects[0]!.id,
     title: "Polish the task detail panel",
@@ -130,6 +142,7 @@ export async function seedDemo(
     dueDate: "2026-07-18",
     labelIds: [labels[1]!.id],
   });
+
   tasks.push(taskOne);
   tasks.push(
     await createTask(domain, {
@@ -169,6 +182,7 @@ export async function seedDemo(
     dueDate: "2026-07-19",
     labelIds: [labels[2]!.id],
   });
+
   tasks.push(opsParent);
   tasks.push(
     await createTask(domain, {
@@ -207,6 +221,7 @@ export async function seedDemo(
     priority: "medium",
     labelIds: [labels[4]!.id],
   });
+
   tasks.push(homeParent);
   tasks.push(
     await createTask(domain, {
@@ -244,6 +259,7 @@ export async function seedDemo(
     [opsParent.id, "Release window is tentatively Friday afternoon."],
     [homeParent.id, "Start with the kitchen and entryway."],
   ] as const;
+
   for (const [taskId, body] of comments) {
     await domain.createComment(
       tasksRpcContract.createComment.input.parse({
@@ -260,7 +276,7 @@ export async function seedDemo(
     labelsCreated: labels.length,
     tasksCreated: tasks.length,
     commentsCreated: comments.length,
-    linkedBbProjectId: linkedBbProjectId ?? null,
+    linkedAppProjectId: linkedAppProjectId ?? null,
     projects: projects.map((project) => ({
       id: project.id,
       keyPrefix: project.prefix,

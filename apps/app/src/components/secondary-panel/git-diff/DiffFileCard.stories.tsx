@@ -1,12 +1,16 @@
 import { useCallback, useState } from "react";
-import type { DiffFileEntry } from "@bb/server-contract";
+import type { DiffFileEntry } from "@omnyo/server-contract";
 import type { DiffPresentation } from "@/components/code/code-rendering";
 import type { RequestDiffFileContents } from "@/components/git-diff/GitDiffCardBody";
-import { DEFAULT_CODE_OVERFLOW_MODE } from "@/lib/code-overflow-mode";
+import {
+  DEFAULT_CODE_OVERFLOW_MODE,
+  type CodeOverflowMode,
+} from "@/lib/code-overflow-mode";
 import type { DiffPatchState } from "@/hooks/queries/use-environment-diff-patches";
 import { appToast } from "@/components/ui/app-toast";
 import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
 import { DiffFileCard } from "./DiffFileCard";
+import { GitDiffToolbar, type GitDiffDisplayMode } from "../GitDiffToolbar";
 import { makeDiffFileEntry } from "@/test/fixtures/diff-files";
 
 export default {
@@ -41,8 +45,9 @@ const TALL_PATCH = [
   "",
 ].join("\n");
 
-const IMAGE_DATA_URL =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/Qo3AAAAAElFTkSuQmCC";
+const IMAGE_DATA_URL = `data:image/svg+xml;utf8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" viewBox="0 0 240 120"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c3aed"/><stop offset="1" stop-color="#2563eb"/></linearGradient></defs><rect width="240" height="120" rx="16" fill="url(#g)"/><circle cx="60" cy="60" r="28" fill="#f5e6c8"/><rect x="104" y="44" width="104" height="12" rx="6" fill="#ffffff" fill-opacity="0.85"/><rect x="104" y="66" width="72" height="10" rx="5" fill="#ffffff" fill-opacity="0.55"/></svg>',
+)}`;
 
 const imageContentsRequester: RequestDiffFileContents = async () => ({
   kind: "image",
@@ -54,11 +59,14 @@ const CONTEXT_FILE_LINES = Array.from(
   { length: 24 },
   (_, index) => `export const line${index + 1} = ${index + 1};`,
 );
+
 const CONTEXT_OLD_FILE = `${CONTEXT_FILE_LINES.join("\n")}\n`;
+
 const CONTEXT_NEW_FILE = CONTEXT_OLD_FILE.replace(
   "export const line12 = 12;",
   "export const line12 = 1200;",
 );
+
 const CONTEXT_PATCH = [
   "diff --git a/src/context.ts b/src/context.ts",
   "index 1111111..2222222 100644",
@@ -77,6 +85,7 @@ const contextContentsRequester: RequestDiffFileContents = async (
   side,
 ) => {
   await new Promise((resolve) => setTimeout(resolve, 600));
+
   return {
     kind: "text",
     file: {
@@ -114,11 +123,13 @@ function CardStage({
   onRequestFileContents,
 }: CardStageProps) {
   const [isCollapsed, setIsCollapsed] = useState(collapsed);
+
   const toast = useCallback(
     (label: string) => (path: string) =>
       appToast.message(label, { description: path }),
     [],
   );
+
   return (
     <div className="w-full max-w-[640px] min-w-0">
       <DiffFileCard
@@ -277,6 +288,70 @@ export function StickyHeader() {
             }}
           />
         </div>
+      </StoryRow>
+    </StoryCard>
+  );
+}
+
+const TOOLBAR_SELECTION_OPTIONS = [
+  { value: "working-tree", label: "All changes" },
+  { value: "uncommitted", label: "Uncommitted" },
+];
+
+function ToolbarStage({
+  isStatsLoading = false,
+}: {
+  isStatsLoading?: boolean;
+}) {
+  const [displayMode, setDisplayMode] = useState<GitDiffDisplayMode>("unified");
+
+  const [lineOverflowMode, setLineOverflowMode] = useState<CodeOverflowMode>(
+    DEFAULT_CODE_OVERFLOW_MODE,
+  );
+
+  const [fileFilter, setFileFilter] = useState<string | null>(null);
+  const [allCollapsed, setAllCollapsed] = useState(false);
+  const [selection, setSelection] = useState("working-tree");
+
+  return (
+    <div className="w-full max-w-[640px] min-w-0 rounded-md border border-border bg-sidebar">
+      <GitDiffToolbar
+        selectionValue={selection}
+        selectionOptions={TOOLBAR_SELECTION_OPTIONS}
+        onSelectionChange={setSelection}
+        isSelectorDisabled={isStatsLoading}
+        stats={{ filesCount: 12, insertions: 248, deletions: 61 }}
+        isStatsLoading={isStatsLoading}
+        totalFilesCount={12}
+        isTruncated={false}
+        fileFilter={fileFilter}
+        onFileFilterChange={setFileFilter}
+        areAllFilesCollapsed={allCollapsed}
+        isCollapseAllDisabled={isStatsLoading}
+        onToggleAllCollapsed={() => setAllCollapsed((value) => !value)}
+        displayMode={displayMode}
+        onDisplayModeChange={setDisplayMode}
+        lineOverflowMode={lineOverflowMode}
+        onLineOverflowModeChange={setLineOverflowMode}
+      />
+    </div>
+  );
+}
+
+export function Toolbar() {
+  return (
+    <StoryCard>
+      <StoryRow
+        label="diff toolbar"
+        hint="click Stacked and Split: the selected-segment fill slides between them"
+      >
+        <ToolbarStage />
+      </StoryRow>
+      <StoryRow
+        label="loading stats"
+        hint="change summary is still loading; the selector is disabled"
+      >
+        <ToolbarStage isStatsLoading />
       </StoryRow>
     </StoryCard>
   );

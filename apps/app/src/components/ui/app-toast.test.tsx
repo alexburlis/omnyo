@@ -36,10 +36,11 @@ describe("AppToastContent", () => {
         .parentElement?.classList.contains("flex-wrap"),
     ).toBe(true);
     expect(
-      screen
-        .getByRole("button", { name: "View log" })
-        .classList.contains("underline"),
-    ).toBe(true);
+      screen.getByRole("button", { name: "View log" }).className,
+    ).toContain("bg-state-hover");
+    expect(
+      screen.getByRole("button", { name: "Dismiss" }).className,
+    ).not.toContain("underline");
     expect(
       screen.getByRole("button", { name: "Dismiss notification" }),
     ).toBeDefined();

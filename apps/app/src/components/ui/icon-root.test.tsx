@@ -5,21 +5,25 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, relative, sep } from "node:path";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { Icon } from "@bb/shared-ui/icon";
-import { setAppIcons } from "@bb/shared-ui/icon-registry";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { setAppIcons } from "@omnyo/shared-ui/icon-registry";
 import { PluginCompactIconMask } from "@/components/plugin/PluginIcon";
 
 function repoRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
+
   while (!readdirSync(dir).includes("pnpm-workspace.yaml")) {
     const parent = dirname(dir);
+
     if (parent === dir) throw new Error("repo root not found");
     dir = parent;
   }
+
   return dir;
 }
 
 const ROOT = repoRoot();
+
 const SCANNED_TREES = [
   "apps/app/src",
   "apps/web/src",
@@ -37,18 +41,23 @@ const ALLOWED_STRUCTURAL_SVG_FILES = new Set([
 
 function sourceFiles(tree: string): string[] {
   const out: string[] = [];
+
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
       if (entry === "node_modules" || entry === "dist") continue;
       const full = join(dir, entry);
+
       if (statSync(full).isDirectory()) {
         walk(full);
         continue;
       }
+
       if (/\.tsx?$/.test(entry)) out.push(full);
     }
   };
+
   walk(join(ROOT, tree));
+
   return out;
 }
 
@@ -62,6 +71,7 @@ describe("icon root marker", () => {
     function DuckGlyph({ className }: { className?: string }) {
       return <svg className={className} viewBox="0 0 24 24" />;
     }
+
     setAppIcons(
       new Map([["plugin/duck", { component: DuckGlyph, key: "duck-1" }]]),
     );
@@ -89,6 +99,7 @@ describe("icon root marker", () => {
     function DuckGlyph({ className }: { className?: string }) {
       return <svg className={className} viewBox="0 0 24 24" />;
     }
+
     setAppIcons(
       new Map([["plugin/duck", { component: DuckGlyph, key: "duck-1" }]]),
     );
@@ -103,6 +114,7 @@ describe("icon root marker", () => {
       const { container } = render(<div className="host">{element}</div>);
       const host = container.querySelector(".host");
       expect(host, shape).not.toBeNull();
+
       for (const selector of [
         ".host > [data-icon-root]",
         ".host [data-icon-root]",
@@ -112,6 +124,7 @@ describe("icon root marker", () => {
           `${shape} ${selector}`,
         ).toBe(1);
       }
+
       cleanup();
     }
   });
@@ -120,14 +133,17 @@ describe("icon root marker", () => {
     function DuckGlyph({ className }: { className?: string }) {
       return <svg className={className} viewBox="0 0 24 24" />;
     }
+
     setAppIcons(
       new Map([["plugin/duck", { component: DuckGlyph, key: "duck-1" }]]),
     );
+
     const { container } = render(
       <div className="host">
         <Icon name="plugin/duck" />
       </div>,
     );
+
     expect(
       container.querySelectorAll(".host :is(svg,[data-icon-root])").length,
     ).toBe(2);
@@ -138,17 +154,23 @@ describe("icon root marker", () => {
 describe("structural svg selectors", () => {
   it("are not used to style icons outside the allowlist", () => {
     const offenders: string[] = [];
+
     for (const tree of SCANNED_TREES) {
       for (const file of sourceFiles(tree)) {
         const rel = relative(ROOT, file).split(sep).join("/");
+
         if (ALLOWED_STRUCTURAL_SVG_FILES.has(rel)) continue;
+
         if (/\.test\.tsx?$/.test(rel)) continue;
+
         const matches = readFileSync(file, "utf8").match(
           STRUCTURAL_SVG_SELECTOR,
         );
+
         if (matches !== null) offenders.push(`${rel}: ${matches.join(" ")}`);
       }
     }
+
     expect(offenders).toEqual([]);
   });
 

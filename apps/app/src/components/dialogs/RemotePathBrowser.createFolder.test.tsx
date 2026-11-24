@@ -7,7 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { HostDirectoryListing } from "@bb/server-contract";
+import type { HostDirectoryListing } from "@omnyo/server-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -18,7 +18,7 @@ import {
 } from "./RemotePathBrowser";
 
 vi.mock("@/lib/sdk", () => ({
-  BbHttpError: class BbHttpError extends Error {},
+  OmnyoHttpError: class OmnyoHttpError extends Error {},
   sdk: {
     files: { mkdir: vi.fn() },
     hosts: { directory: vi.fn() },
@@ -26,6 +26,7 @@ vi.mock("@/lib/sdk", () => ({
 }));
 
 const directory = vi.mocked(sdk.hosts.directory);
+
 const mkdir = vi.mocked(sdk.files.mkdir);
 
 function listing(path: string, entries: string[]): HostDirectoryListing {
@@ -41,6 +42,7 @@ function listing(path: string, entries: string[]): HostDirectoryListing {
 }
 
 const ENTRY_TEST_ROW_HEIGHT_PX = 28;
+
 beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
     function (this: HTMLElement) {
@@ -96,9 +98,11 @@ describe("RemotePathBrowser new folder", () => {
 
   it("does not create in the previous folder while navigation is loading", async () => {
     let resolveNextDirectory: (value: HostDirectoryListing) => void = () => {};
+
     const nextDirectory = new Promise<HostDirectoryListing>((resolve) => {
       resolveNextDirectory = resolve;
     });
+
     directory.mockImplementation(({ path }) =>
       path === "/home/me/next"
         ? nextDirectory
@@ -175,9 +179,11 @@ describe("RemotePathBrowser new folder", () => {
 
   it("locks navigation while folder creation is pending", async () => {
     let resolveMkdir: (value: { ok: true }) => void = () => {};
+
     const pendingMkdir = new Promise<{ ok: true }>((resolve) => {
       resolveMkdir = resolve;
     });
+
     directory.mockImplementation(async ({ path }) =>
       path === "/home/me/repo"
         ? listing("/home/me/repo", [])
@@ -253,6 +259,7 @@ describe("RemotePathBrowser entry list", () => {
       { length: 4999 },
       (_, i) => `file_${String(i).padStart(5, "0")}`,
     );
+
     const rootEntries = [...names, "next"];
     directory.mockImplementation(({ path }) =>
       Promise.resolve(
@@ -279,6 +286,7 @@ describe("RemotePathBrowser entry list", () => {
     await screen.findByText("file_00000");
     const list = container.querySelector("ul");
     const scrollBox = list?.parentElement;
+
     if (!(scrollBox instanceof HTMLElement)) throw new Error("no scroll box");
     Object.defineProperty(scrollBox, "scrollTo", {
       configurable: true,
@@ -300,6 +308,7 @@ describe("RemotePathBrowser entry list", () => {
       { length: 5000 },
       (_, i) => `file_${String(i).padStart(5, "0")}`,
     );
+
     directory.mockResolvedValue(listing("/home/me/manyfiles", names));
     const { wrapper: Wrapper } = createQueryClientTestHarness();
 
@@ -321,6 +330,7 @@ describe("RemotePathBrowser entry list", () => {
 
     const list = container.querySelector("ul");
     const scrollBox = list?.parentElement;
+
     if (!(scrollBox instanceof HTMLElement)) throw new Error("no scroll box");
     scrollBox.scrollTop = 4_999 * ENTRY_TEST_ROW_HEIGHT_PX;
     fireEvent.scroll(scrollBox);

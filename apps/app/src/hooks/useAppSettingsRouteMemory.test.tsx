@@ -7,6 +7,7 @@ import { useAppSettingsRouteMemory } from "./useAppSettingsRouteMemory";
 
 function RouteMemoryTestSurface() {
   const location = useLocation();
+
   const { appRoutePath, settingsRoutePath, toolsBackRoutePath } =
     useAppSettingsRouteMemory();
 

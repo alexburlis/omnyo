@@ -1,11 +1,12 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   deleteThread,
+  createPendingInteraction,
   listPendingInteractionsByThread,
   markHostEnvironmentsDestroyed,
-} from "@bb/db";
-import type { HostDaemonInteractiveRequest } from "@bb/host-daemon-contract";
-import { renderTemplate } from "@bb/templates";
+} from "@omnyo/db";
+import type { HostDaemonInteractiveRequest } from "@omnyo/host-daemon-contract";
+import { renderTemplate } from "@omnyo/templates";
 import { describe, expect, it } from "vitest";
 import { toPendingInteraction } from "../../src/services/interactions/pending-interaction-serialization.js";
 import {
@@ -59,12 +60,15 @@ async function waitForPendingInteractionId(
     const interactions = listPendingInteractionsByThread(args.harness.db, {
       threadId: args.threadId,
     }).map(toPendingInteraction);
+
     const pending = interactions.find(
       (interaction) => interaction.status === "pending",
     );
+
     if (pending) {
       return pending.id;
     }
+
     await sleep(10);
   }
 
@@ -113,6 +117,7 @@ function registerInteractiveRequest(
     turnId: args.body.interaction.turnId,
     providerThreadId: args.body.interaction.providerThreadId,
   });
+
   return postInteractiveRequest(args);
 }
 
@@ -124,6 +129,7 @@ describe("internal interactive request lifecycle", () => {
           id: "host-interaction-resolve",
         },
       });
+
       seedTurnStarted(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -154,6 +160,7 @@ describe("internal interactive request lifecycle", () => {
           }),
         },
       );
+
       expect(response.status).toBe(200);
       await expect(readJson(response)).resolves.toMatchObject({
         outcome: "created",
@@ -164,6 +171,7 @@ describe("internal interactive request lifecycle", () => {
         harness,
         threadId: thread.id,
       });
+
       const resolved =
         harness.deps.pendingInteractions.resolvePendingInteraction({
           threadId: thread.id,
@@ -182,6 +190,7 @@ describe("internal interactive request lifecycle", () => {
           command.type === "interactive.resolve" &&
           command.interactionId === interactionId,
       );
+
       expect(queuedResolve.command).toMatchObject({
         type: "interactive.resolve",
         providerId: "codex",
@@ -189,11 +198,13 @@ describe("internal interactive request lifecycle", () => {
         providerRequestId: "request-1",
         resolution: createAllowOnceResolution(),
       });
+
       const commandResultResponse = await reportQueuedCommandSuccess(
         harness,
         queuedResolve,
         {},
       );
+
       expect(commandResultResponse.status).toBe(200);
 
       expect(
@@ -212,6 +223,7 @@ describe("internal interactive request lifecycle", () => {
         queuedResolve,
         {},
       );
+
       expect(retriedCommandResultResponse.status).toBe(200);
       expect(
         harness.deps.pendingInteractions.getThreadInteraction({
@@ -259,9 +271,11 @@ describe("internal interactive request lifecycle", () => {
       const [interaction] = listPendingInteractionsByThread(harness.db, {
         threadId: thread.id,
       }).map(toPendingInteraction);
+
       if (!interaction) {
         throw new Error("Expected user-question interaction to be persisted");
       }
+
       expect(interaction).toMatchObject({
         payload: {
           kind: "user_question",
@@ -271,6 +285,140 @@ describe("internal interactive request lifecycle", () => {
     });
   });
 
+  it.each([
+    {
+      kind: "child",
+      link: "parent",
+      originKind: null,
+      outcome: "rejected",
+      parentRuns: true,
+      reason: "The question went to that chat, not the owner",
+    },
+    {
+      kind: "launched",
+      link: "launcher",
+      originKind: null,
+      outcome: "rejected",
+      parentRuns: true,
+      reason: "The question went to that chat, not the owner",
+    },
+    {
+      kind: "undeliverable-child",
+      link: "parent",
+      originKind: null,
+      outcome: "rejected",
+      parentRuns: false,
+      reason: "Delivering the question to that chat failed",
+    },
+    {
+      kind: "fork",
+      link: "parent",
+      originKind: "fork",
+      outcome: "created",
+      parentRuns: true,
+      reason: null,
+    },
+  ] as const)(
+    "routes a $kind chat's provider user question by its $link link",
+    async ({ kind, link, originKind, outcome, parentRuns, reason }) => {
+      await withTestHarness(async (harness) => {
+        const { host, session } = seedHostSession(harness.deps, {
+          id: `host-user-question-${kind}`,
+        });
+
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+        });
+
+        const environment = seedEnvironment(harness.deps, {
+          hostId: host.id,
+          path: `/tmp/user-question-${kind}`,
+          projectId: project.id,
+        });
+
+        const parentThread = seedThread(harness.deps, {
+          environmentId: environment.id,
+          projectId: project.id,
+          providerId: "claude-code",
+        });
+
+        if (parentRuns)
+          seedThreadRuntimeState(harness.deps, {
+            environmentId: environment.id,
+            inputText: "Coordinate the deployment",
+            providerThreadId: `provider-parent-user-question-${kind}`,
+            threadId: parentThread.id,
+          });
+
+        const childThread = seedThread(harness.deps, {
+          environmentId: environment.id,
+          originKind,
+          ...(link === "parent"
+            ? { parentThreadId: parentThread.id }
+            : { launchedByThreadId: parentThread.id }),
+          projectId: project.id,
+          providerId: "claude-code",
+        });
+
+        const response = await registerInteractiveRequest({
+          harness,
+          body: {
+            sessionId: session.id,
+            interaction: {
+              threadId: childThread.id,
+              turnId: `turn-user-question-${kind}`,
+              providerId: "claude-code",
+              providerThreadId: `provider-thread-user-question-${kind}`,
+              providerRequestId: `request-user-question-${kind}`,
+              payload: createUserQuestionPayload(),
+            },
+          },
+        });
+
+        expect(response.status).toBe(200);
+        const body = await readJson(response);
+        expect(body).toMatchObject({ outcome });
+
+        if (reason !== null)
+          expect(body).toMatchObject({
+            reason: expect.stringContaining(
+              `This chat reports to ${parentThread.id}. ${reason}`,
+            ),
+          });
+
+        expect(
+          listPendingInteractionsByThread(harness.db, {
+            threadId: childThread.id,
+          }),
+        ).toHaveLength(outcome === "rejected" ? 0 : 1);
+
+        if (kind !== "child") return;
+
+        const parentTurn = await waitForQueuedCommand(
+          harness,
+          ({ command, row }) =>
+            row.state === "pending" &&
+            command.type === "turn.submit" &&
+            command.threadId === parentThread.id,
+        );
+
+        if (parentTurn.command.type !== "turn.submit")
+          throw new Error("Parent turn missing");
+
+        const text = parentTurn.command.input
+          .flatMap((part) => (part.type === "text" ? [part.text] : []))
+          .join("\n");
+
+        expect(text).toContain(
+          "Required: Which deployment target should I use?\n- Staging\n- Production",
+        );
+        expect(text).toContain(
+          `omnyo thread tell ${childThread.id} --mode auto`,
+        );
+      });
+    },
+  );
+
   it("persists a session-scoped command approval resolution", async () => {
     await withTestHarness(async (harness) => {
       const { session, environment, thread } = seedThreadFixture(harness, {
@@ -279,16 +427,19 @@ describe("internal interactive request lifecycle", () => {
         },
         thread: { providerId: "claude-code" },
       });
+
       seedTurnStarted(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
         turnId: "turn-session-1",
         providerThreadId: "provider-thread-session-1",
       });
+
       const sessionGrant = {
         network: { enabled: true },
         fileSystem: null,
       };
+
       const sessionResolution = createAllowForSessionResolution(sessionGrant);
 
       const response = await harness.app.request(
@@ -315,6 +466,7 @@ describe("internal interactive request lifecycle", () => {
           }),
         },
       );
+
       expect(response.status).toBe(200);
       await expect(readJson(response)).resolves.toMatchObject({
         outcome: "created",
@@ -325,6 +477,7 @@ describe("internal interactive request lifecycle", () => {
         harness,
         threadId: thread.id,
       });
+
       const resolved =
         harness.deps.pendingInteractions.resolvePendingInteraction({
           threadId: thread.id,
@@ -344,6 +497,7 @@ describe("internal interactive request lifecycle", () => {
           command.type === "interactive.resolve" &&
           command.interactionId === interactionId,
       );
+
       expect(queuedResolve.command).toMatchObject({
         type: "interactive.resolve",
         providerId: "claude-code",
@@ -351,11 +505,13 @@ describe("internal interactive request lifecycle", () => {
         providerRequestId: "request-session-1",
         resolution: sessionResolution,
       });
+
       const commandResultResponse = await reportQueuedCommandSuccess(
         harness,
         queuedResolve,
         {},
       );
+
       expect(commandResultResponse.status).toBe(200);
       expect(
         harness.deps.pendingInteractions.getThreadInteraction({
@@ -373,6 +529,7 @@ describe("internal interactive request lifecycle", () => {
         queuedResolve,
         {},
       );
+
       expect(retriedCommandResultResponse.status).toBe(200);
     });
   });
@@ -384,6 +541,7 @@ describe("internal interactive request lifecycle", () => {
           id: "host-interaction-registration-retry",
         },
       });
+
       const body = buildCommandApprovalInteractiveRequest({
         sessionId: session.id,
         suffix: "registration-retry",
@@ -396,6 +554,7 @@ describe("internal interactive request lifecycle", () => {
         outcome: "created",
         status: "pending",
       });
+
       const interactionId = await waitForPendingInteractionId({
         harness,
         threadId: thread.id,
@@ -422,36 +581,43 @@ describe("internal interactive request lifecycle", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-child-needs-attention",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const parentEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/child-needs-attention-parent",
         projectId: project.id,
       });
+
       const childEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/child-needs-attention-child",
         projectId: project.id,
       });
+
       const parentThread = seedThread(harness.deps, {
         environmentId: parentEnvironment.id,
         projectId: project.id,
         title: "Project coordinator",
       });
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: parentEnvironment.id,
         inputText: "Initial parent task",
         providerThreadId: "provider-parent-needs-attention",
         threadId: parentThread.id,
       });
+
       const childThread = seedThread(harness.deps, {
         environmentId: childEnvironment.id,
         parentThreadId: parentThread.id,
         projectId: project.id,
         title: "Backend port validation cleanup",
       });
+
       const body = buildCommandApprovalInteractiveRequest({
         sessionId: session.id,
         suffix: "child-needs-attention",
@@ -472,12 +638,15 @@ describe("internal interactive request lifecycle", () => {
           command.type === "turn.submit" &&
           command.threadId === parentThread.id,
       );
+
       if (parentTurnCommand.command.type !== "turn.submit") {
         throw new Error(
           `Expected parent turn command, got ${parentTurnCommand.command.type}`,
         );
       }
+
       const threadMention = `@thread:${childThread.id}`;
+
       const expectedText = renderTemplate(
         "systemMessageChildThreadNeedsAttention",
         {
@@ -489,6 +658,7 @@ describe("internal interactive request lifecycle", () => {
           threadMention,
         },
       );
+
       const mentionStart = expectedText.indexOf(threadMention);
       expect(parentTurnCommand.command.input).toEqual(
         expect.arrayContaining([
@@ -515,6 +685,7 @@ describe("internal interactive request lifecycle", () => {
         body,
         harness,
       });
+
       expect(retryResponse.status).toBe(200);
       await expect(readJson(retryResponse)).resolves.toMatchObject({
         outcome: "existing",
@@ -538,30 +709,36 @@ describe("internal interactive request lifecycle", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-hidden-delegated-needs-attention",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const parentEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/hidden-delegated-needs-attention-parent",
         projectId: project.id,
       });
+
       const childEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/hidden-delegated-needs-attention-child",
         projectId: project.id,
       });
+
       const parentThread = seedThread(harness.deps, {
         environmentId: parentEnvironment.id,
         projectId: project.id,
         visibility: "hidden",
       });
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: parentEnvironment.id,
         inputText: "Coordinate hidden delegated work",
         providerThreadId: "provider-hidden-delegated-needs-attention-parent",
         threadId: parentThread.id,
       });
+
       const childThread = seedThread(harness.deps, {
         environmentId: childEnvironment.id,
         parentThreadId: parentThread.id,
@@ -579,6 +756,7 @@ describe("internal interactive request lifecycle", () => {
       });
 
       expect(response.status).toBe(200);
+
       const parentTurnCommand = await waitForQueuedCommand(
         harness,
         ({ command, row }) =>
@@ -586,6 +764,7 @@ describe("internal interactive request lifecycle", () => {
           command.type === "turn.submit" &&
           command.threadId === parentThread.id,
       );
+
       expect(parentTurnCommand.command.type).toBe("turn.submit");
     });
   });
@@ -595,29 +774,35 @@ describe("internal interactive request lifecycle", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-hidden-child-needs-attention",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const parentEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/hidden-child-needs-attention-parent",
         projectId: project.id,
       });
+
       const childEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/hidden-child-needs-attention-child",
         projectId: project.id,
       });
+
       const parentThread = seedThread(harness.deps, {
         environmentId: parentEnvironment.id,
         projectId: project.id,
       });
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: parentEnvironment.id,
         inputText: "Coordinate hidden child work",
         providerThreadId: "provider-hidden-child-needs-attention-parent",
         threadId: parentThread.id,
       });
+
       const childThread = seedThread(harness.deps, {
         environmentId: childEnvironment.id,
         originKind: "fork",
@@ -659,6 +844,7 @@ describe("internal interactive request lifecycle", () => {
           id: "host-interaction-turn-start-timeout",
         },
       });
+
       const body = buildCommandApprovalInteractiveRequest({
         sessionId: session.id,
         suffix: "turn-start-timeout",
@@ -689,6 +875,7 @@ describe("internal interactive request lifecycle", () => {
           id: "host-interaction-registration-retry-resolving",
         },
       });
+
       const body = buildCommandApprovalInteractiveRequest({
         sessionId: session.id,
         suffix: "registration-retry-resolving",
@@ -701,10 +888,12 @@ describe("internal interactive request lifecycle", () => {
         outcome: "created",
         status: "pending",
       });
+
       const interactionId = await waitForPendingInteractionId({
         harness,
         threadId: thread.id,
       });
+
       harness.deps.pendingInteractions.resolvePendingInteraction({
         threadId: thread.id,
         interactionId,
@@ -737,21 +926,26 @@ describe("internal interactive request lifecycle", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-interaction-interrupt-deleted-skip",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const liveThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       const deletedThread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       deleteThread(harness.db, harness.hub, deletedThread.id);
       seedTurnStarted(harness.deps, {
         threadId: liveThread.id,
@@ -783,6 +977,7 @@ describe("internal interactive request lifecycle", () => {
           }),
         },
       );
+
       expect(response.status).toBe(200);
       await expect(readJson(response)).resolves.toMatchObject({
         outcome: "created",
@@ -833,20 +1028,25 @@ describe("internal interactive request lifecycle", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-interaction-interrupt-destroyed-env",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const thread = seedThread(harness.deps, {
         projectId: project.id,
         environmentId: environment.id,
       });
+
       const neverAttachedThread = seedThread(harness.deps, {
         projectId: project.id,
       });
+
       seedTurnStarted(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -877,7 +1077,9 @@ describe("internal interactive request lifecycle", () => {
           }),
         },
       );
+
       expect(response.status).toBe(200);
+
       const interactionId = await waitForPendingInteractionId({
         harness,
         threadId: thread.id,
@@ -925,6 +1127,7 @@ describe("internal interactive request lifecycle", () => {
           id: "host-interaction-delete-thread",
         },
       });
+
       seedTurnStarted(harness.deps, {
         threadId: thread.id,
         environmentId: environment.id,
@@ -955,6 +1158,7 @@ describe("internal interactive request lifecycle", () => {
           }),
         },
       );
+
       expect(response.status).toBe(200);
       await expect(readJson(response)).resolves.toMatchObject({
         outcome: "created",
@@ -981,6 +1185,7 @@ describe("internal interactive request lifecycle", () => {
           body: JSON.stringify({ childThreadsConfirmed: false }),
         },
       );
+
       expect(deleteResponse.status).toBe(200);
 
       expect(await threadEventWaiter.promise).toBe(true);
@@ -995,6 +1200,109 @@ describe("internal interactive request lifecycle", () => {
           statusReason: "thread-deleted",
         }),
       ]);
+    });
+  });
+});
+
+describe("retained interruption delivery", () => {
+  it("settles the exact exited request without interrupting its replacement", async () => {
+    await withTestHarness(async (harness) => {
+      const { session, environment, thread } = seedThreadFixture(harness, {
+        session: { id: "host-retained-interruption" },
+      });
+
+      for (const [index, turnId] of [
+        "turn-retained-old",
+        "turn-retained-new",
+      ].entries()) {
+        seedTurnStarted(harness.deps, {
+          threadId: thread.id,
+          environmentId: environment.id,
+          turnId,
+          providerThreadId: "provider-retained",
+          sequence: index + 1,
+        });
+      }
+
+      const payload = JSON.stringify(
+        createCommandApprovalPayload({
+          itemId: "item-retained",
+          reason: "Needs approval",
+          command: "git status",
+          cwd: "/tmp/project",
+        }),
+      );
+
+      const old = createPendingInteraction(harness.db, {
+        threadId: thread.id,
+        turnId: "turn-retained-old",
+        providerId: "codex",
+        providerThreadId: "provider-retained",
+        providerRequestId: "request-retained-old",
+        payload,
+      });
+
+      const replacement = createPendingInteraction(harness.db, {
+        threadId: thread.id,
+        turnId: "turn-retained-new",
+        providerId: "codex",
+        providerThreadId: "provider-retained",
+        providerRequestId: "request-retained-new",
+        payload,
+      });
+
+      const body = {
+        sessionId: session.id,
+        providerId: "codex",
+        threadIds: [thread.id],
+        reason: "Old provider exited",
+        requests: [
+          {
+            interactionId: old.id,
+            threadId: thread.id,
+            turnId: old.turnId,
+            providerThreadId: "provider-retained",
+            providerRequestId: "request-retained-old",
+          },
+        ],
+      };
+
+      const first = await harness.app.request(
+        "/internal/session/interactive-request/interrupt",
+        {
+          method: "POST",
+          headers: internalAuthHeaders(harness),
+          body: JSON.stringify(body),
+        },
+      );
+
+      expect({ status: first.status, body: await first.json() }).toEqual({
+        status: 200,
+        body: { ok: true, interactionIds: [old.id] },
+      });
+
+      for (const requests of [body.requests, []]) {
+        const replay = await harness.app.request(
+          "/internal/session/interactive-request/interrupt",
+          {
+            method: "POST",
+            headers: internalAuthHeaders(harness),
+            body: JSON.stringify({ ...body, requests }),
+          },
+        );
+
+        expect(replay.status).toBe(200);
+        expect(await replay.json()).toEqual({ ok: true, interactionIds: [] });
+      }
+
+      expect(
+        listPendingInteractionsByThread(harness.db, { threadId: thread.id }),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: old.id, status: "interrupted" }),
+          expect.objectContaining({ id: replacement.id, status: "pending" }),
+        ]),
+      );
     });
   });
 });

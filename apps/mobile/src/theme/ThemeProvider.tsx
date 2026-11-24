@@ -1,4 +1,4 @@
-import type { BuiltInThemeId } from "@bb/domain";
+import type { BuiltInThemeId } from "@omnyo/domain";
 import { VariableContextProvider } from "nativewind";
 import {
   createContext,
@@ -48,9 +48,11 @@ export function ThemeProvider({
   palette = "default",
 }: ThemeProviderProps) {
   const [store] = useState<ThemePreferenceStorage>(getPreferencesStorage);
+
   const [preference, setPreference] = useState<ThemeModePreference>(() =>
     readThemePreference(store),
   );
+
   const systemScheme = useColorScheme();
   const mode = resolveThemeMode(preference, systemScheme);
 
@@ -71,7 +73,9 @@ export function ThemeProvider({
   const tokens = (process.env.EXPO_OS === "ios" ? nativeThemes : androidThemes)[
     palette
   ][mode];
+
   const vars = useMemo(() => buildThemeVars(tokens), [tokens]);
+
   const theme = useMemo<Theme>(
     () => ({
       palette,
@@ -93,8 +97,10 @@ export function ThemeProvider({
 
 export function useTheme(): Theme {
   const theme = useContext(ThemeContext);
+
   if (!theme) {
     throw new Error("useTheme must be used inside <ThemeProvider>");
   }
+
   return theme;
 }

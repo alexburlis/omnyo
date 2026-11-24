@@ -25,6 +25,7 @@ describe("windowPaletteThreadSearchText", () => {
   it("marks both real cuts and preserves the first match", () => {
     const text = `${"left".repeat(12)} needle ${"right".repeat(12)}`;
     const matchStart = text.indexOf("needle");
+
     const result = windowPaletteThreadSearchText({
       text,
       highlightRanges: [{ start: matchStart, end: matchStart + 6 }],
@@ -38,7 +39,9 @@ describe("windowPaletteThreadSearchText", () => {
   it("moves hard targets inward to whitespace word boundaries", () => {
     const text =
       "prefix alpha beta gamma delta MATCH one two three four five six seven trailing";
+
     const matchStart = text.indexOf("MATCH");
+
     const result = windowPaletteThreadSearchText({
       text,
       highlightRanges: [{ start: matchStart, end: matchStart + 5 }],
@@ -53,6 +56,7 @@ describe("windowPaletteThreadSearchText", () => {
     const text = `${"x".repeat(24)} first middle second ${"y".repeat(50)}`;
     const firstStart = text.indexOf("first");
     const secondStart = text.indexOf("second");
+
     const result = windowPaletteThreadSearchText({
       text,
       highlightRanges: [
@@ -64,9 +68,7 @@ describe("windowPaletteThreadSearchText", () => {
     });
 
     expect(highlightedText(result)).toEqual(["first", "second"]);
-    expect(result.highlightRanges[0]?.start).toBe(
-      result.text.indexOf("first"),
-    );
+    expect(result.highlightRanges[0]?.start).toBe(result.text.indexOf("first"));
     expect(result.highlightRanges[1]?.start).toBe(
       result.text.indexOf("second"),
     );
@@ -91,29 +93,36 @@ describe("windowPaletteThreadSearchText", () => {
 
   it("adds an ellipsis only on the side actually cut near either edge", () => {
     const nearStartText = `match ${"tail".repeat(20)}`;
+
     const nearStart = windowPaletteThreadSearchText({
       text: nearStartText,
       highlightRanges: [{ start: 0, end: 5 }],
     });
+
     expect(nearStart.text.startsWith("…")).toBe(false);
     expect(nearStart.text.endsWith("…")).toBe(true);
 
     const nearEndText = `${"lead".repeat(20)} match`;
     const matchStart = nearEndText.indexOf("match");
+
     const nearEnd = windowPaletteThreadSearchText({
       text: nearEndText,
       highlightRanges: [{ start: matchStart, end: nearEndText.length }],
     });
+
     expect(nearEnd.text.startsWith("…")).toBe(true);
     expect(nearEnd.text.endsWith("…")).toBe(false);
   });
 
   it("never leaves either hard cut inside an emoji surrogate pair", () => {
     const emoji = "\u{1f600}";
+
     const text = `${"a".repeat(15)}${emoji}${"b".repeat(15)}MATCH${"c".repeat(
       39,
     )}${emoji}${"d".repeat(20)}`;
+
     const matchStart = text.indexOf("MATCH");
+
     const result = windowPaletteThreadSearchText({
       text,
       highlightRanges: [{ start: matchStart, end: matchStart + 5 }],
@@ -127,11 +136,10 @@ describe("windowPaletteThreadSearchText", () => {
     const match = "m".repeat(60);
     const text = `${"lead".repeat(10)}${match}${"tail".repeat(20)}`;
     const matchStart = text.indexOf(match);
+
     const result = windowPaletteThreadSearchText({
       text,
-      highlightRanges: [
-        { start: matchStart, end: matchStart + match.length },
-      ],
+      highlightRanges: [{ start: matchStart, end: matchStart + match.length }],
     });
 
     expect(highlightedText(result)).toEqual([match]);

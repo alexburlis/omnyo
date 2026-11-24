@@ -9,7 +9,7 @@ import {
   rm,
 } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { Readable } from "node:stream";
+import { Readable, type Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { hasErrorCode, ServerArchiveError } from "./errors.js";
@@ -33,9 +33,12 @@ import {
 
 const READ_CHUNK_BYTES = 256 * 1024;
 
+const IN_MEMORY_FILE_MODE = 0o600;
+
 export interface ServerArchiveSourceFile {
   sourcePath: string;
   archivePath: string;
+  contents?: Buffer;
 }
 
 export interface WriteServerArchiveArgs {
@@ -44,16 +47,44 @@ export interface WriteServerArchiveArgs {
   manifest: ServerArchiveManifestInput;
 }
 
-export interface WriteServerArchiveResult {
+export interface StreamServerArchiveArgs {
+  files: readonly ServerArchiveSourceFile[];
+  manifest: ServerArchiveManifestInput;
+  output: Writable;
+  signal: AbortSignal;
+}
+
+export interface ServerArchiveDigest {
   sha256: string;
   sizeBytes: number;
+}
+
+export interface WriteServerArchiveResult extends ServerArchiveDigest {
   manifest: ServerArchiveManifest;
 }
 
 interface PlannedArchiveFile {
   sourcePath: string;
+  contents: Buffer | null;
   mode: number;
   entry: ServerArchiveManifestEntry;
+}
+
+export interface ServerArchivePlan {
+  readonly manifest: ServerArchiveManifest;
+  readonly files: readonly PlannedArchiveFile[];
+}
+
+export interface PlanServerArchiveArgs {
+  files: readonly ServerArchiveSourceFile[];
+  manifest: ServerArchiveManifestInput;
+  signal: AbortSignal | null;
+}
+
+export interface PipeServerArchiveArgs {
+  plan: ServerArchivePlan;
+  output: Writable;
+  signal: AbortSignal | null;
 }
 
 async function openSourceFile(sourcePath: string): Promise<FileHandle> {
@@ -61,12 +92,14 @@ async function openSourceFile(sourcePath: string): Promise<FileHandle> {
     process.platform === "win32"
       ? await lstat(sourcePath, { bigint: true })
       : null;
+
   if (pathStats?.isSymbolicLink()) {
     throw new ServerArchiveError(
       "unsafe_entry",
       `${sourcePath} is a symbolic link`,
     );
   }
+
   const handle = await open(
     sourcePath,
     constants.O_RDONLY | constants.O_NOFOLLOW,
@@ -77,9 +110,12 @@ async function openSourceFile(sourcePath: string): Promise<FileHandle> {
         `${sourcePath} is a symbolic link`,
       );
     }
+
     throw error;
   });
+
   const stats = await handle.stat({ bigint: true });
+
   if (!stats.isFile()) {
     await handle.close();
     throw new ServerArchiveError(
@@ -87,6 +123,7 @@ async function openSourceFile(sourcePath: string): Promise<FileHandle> {
       `${sourcePath} is not a regular file`,
     );
   }
+
   if (
     pathStats !== null &&
     (stats.ino !== pathStats.ino || stats.dev !== pathStats.dev)
@@ -97,6 +134,7 @@ async function openSourceFile(sourcePath: string): Promise<FileHandle> {
       `${sourcePath} changed while it was being opened`,
     );
   }
+
   return handle;
 }
 
@@ -105,19 +143,24 @@ async function* readFileChunks(
   limit: number | null,
 ): AsyncGenerator<Buffer> {
   let position = 0;
+
   for (;;) {
     const length =
       limit === null
         ? READ_CHUNK_BYTES
         : Math.min(READ_CHUNK_BYTES, limit - position);
+
     if (length === 0) {
       return;
     }
+
     const buffer = Buffer.allocUnsafe(length);
     const { bytesRead } = await handle.read(buffer, 0, length, position);
+
     if (bytesRead === 0) {
       return;
     }
+
     position += bytesRead;
     yield bytesRead === length ? buffer : buffer.subarray(0, bytesRead);
   }
@@ -125,18 +168,37 @@ async function* readFileChunks(
 
 async function planArchiveFile(
   file: ServerArchiveSourceFile,
+  signal: AbortSignal | null,
 ): Promise<PlannedArchiveFile> {
+  if (file.contents !== undefined) {
+    return {
+      sourcePath: file.sourcePath,
+      contents: file.contents,
+      mode: IN_MEMORY_FILE_MODE,
+      entry: {
+        path: file.archivePath,
+        size: file.contents.length,
+        sha256: createHash("sha256").update(file.contents).digest("hex"),
+      },
+    };
+  }
+
   const handle = await openSourceFile(file.sourcePath);
+
   try {
     const stats = await handle.stat();
     const hash = createHash("sha256");
     let size = 0;
+
     for await (const chunk of readFileChunks(handle, null)) {
+      signal?.throwIfAborted();
       hash.update(chunk);
       size += chunk.length;
     }
+
     return {
       sourcePath: file.sourcePath,
+      contents: null,
       mode: stats.mode & 0o777,
       entry: { path: file.archivePath, size, sha256: hash.digest("hex") },
     };
@@ -159,6 +221,7 @@ async function* generateTarChunks(
   });
   yield manifestBytes;
   yield tarPadding(manifestBytes.length);
+
   for (const file of plannedFiles) {
     yield encodeTarFileHeader({
       path: `${SERVER_ARCHIVE_FILES_DIR_NAME}/${file.entry.path}`,
@@ -166,15 +229,25 @@ async function* generateTarChunks(
       mode: file.mode,
       mtime,
     });
+
+    if (file.contents !== null) {
+      yield file.contents;
+      yield tarPadding(file.entry.size);
+      continue;
+    }
+
     const handle = await openSourceFile(file.sourcePath);
+
     try {
       const hash = createHash("sha256");
       let size = 0;
+
       for await (const chunk of readFileChunks(handle, file.entry.size)) {
         hash.update(chunk);
         size += chunk.length;
         yield chunk;
       }
+
       if (
         size !== file.entry.size ||
         hash.digest("hex") !== file.entry.sha256
@@ -187,8 +260,10 @@ async function* generateTarChunks(
     } finally {
       await handle.close();
     }
+
     yield tarPadding(file.entry.size);
   }
+
   yield TAR_END_OF_ARCHIVE;
 }
 
@@ -201,9 +276,11 @@ function assertArchivePaths(files: readonly ServerArchiveSourceFile[]): void {
       );
     }
   }
+
   const conflict = findRelativePathConflict(
     files.map((file) => file.archivePath),
   );
+
   if (conflict !== null) {
     throw new ServerArchiveError(
       "unsafe_entry",
@@ -212,14 +289,18 @@ function assertArchivePaths(files: readonly ServerArchiveSourceFile[]): void {
   }
 }
 
-export async function writeServerArchive(
-  args: WriteServerArchiveArgs,
-): Promise<WriteServerArchiveResult> {
+export async function planServerArchive(
+  args: PlanServerArchiveArgs,
+): Promise<ServerArchivePlan> {
+  args.signal?.throwIfAborted();
   assertArchivePaths(args.files);
   const plannedFiles: PlannedArchiveFile[] = [];
+
   for (const file of args.files) {
-    plannedFiles.push(await planArchiveFile(file));
+    args.signal?.throwIfAborted();
+    plannedFiles.push(await planArchiveFile(file, args.signal));
   }
+
   const manifest = serverArchiveManifestSchema.parse({
     ...args.manifest,
     format: SERVER_ARCHIVE_FORMAT,
@@ -227,30 +308,77 @@ export async function writeServerArchive(
     entries: plannedFiles.map((file) => file.entry),
   });
 
+  return { manifest, files: plannedFiles };
+}
+
+export async function pipeServerArchive(
+  args: PipeServerArchiveArgs,
+): Promise<ServerArchiveDigest> {
+  const archiveHash = createHash("sha256");
+  let sizeBytes = 0;
+  await pipeline(
+    Readable.from(generateTarChunks(args.plan.manifest, args.plan.files)),
+    createGzip(),
+    async function* (source: AsyncIterable<Buffer>) {
+      for await (const chunk of source) {
+        archiveHash.update(chunk);
+        sizeBytes += chunk.length;
+        yield chunk;
+      }
+    },
+    args.output,
+    args.signal === null ? {} : { signal: args.signal },
+  );
+
+  return { sha256: archiveHash.digest("hex"), sizeBytes };
+}
+
+export async function streamServerArchive(
+  args: StreamServerArchiveArgs,
+): Promise<WriteServerArchiveResult> {
+  const plan = await planServerArchive({
+    files: args.files,
+    manifest: args.manifest,
+    signal: args.signal,
+  });
+
+  const digest = await pipeServerArchive({
+    plan,
+    output: args.output,
+    signal: args.signal,
+  });
+
+  return { ...digest, manifest: plan.manifest };
+}
+
+export async function writeServerArchive(
+  args: WriteServerArchiveArgs,
+): Promise<WriteServerArchiveResult> {
+  const plan = await planServerArchive({
+    files: args.files,
+    manifest: args.manifest,
+    signal: null,
+  });
+
   await mkdir(dirname(args.outPath), { recursive: true });
+
   const tempPath = join(
     dirname(args.outPath),
     `.${basename(args.outPath)}.${randomBytes(6).toString("hex")}.tmp`,
   );
-  const archiveHash = createHash("sha256");
-  let sizeBytes = 0;
+
   try {
-    await pipeline(
-      Readable.from(generateTarChunks(manifest, plannedFiles)),
-      createGzip(),
-      async function* (source: AsyncIterable<Buffer>) {
-        for await (const chunk of source) {
-          archiveHash.update(chunk);
-          sizeBytes += chunk.length;
-          yield chunk;
-        }
-      },
-      createWriteStream(tempPath, { flags: "wx", mode: 0o600 }),
-    );
+    const digest = await pipeServerArchive({
+      plan,
+      output: createWriteStream(tempPath, { flags: "wx", mode: 0o600 }),
+      signal: null,
+    });
+
     await rename(tempPath, args.outPath);
+
+    return { ...digest, manifest: plan.manifest };
   } catch (error) {
     await rm(tempPath, { force: true });
     throw error;
   }
-  return { sha256: archiveHash.digest("hex"), sizeBytes, manifest };
 }

@@ -1,5 +1,6 @@
 import {
   chmod,
+  rename,
   mkdir,
   mkdtemp,
   readdir,
@@ -16,11 +17,14 @@ import type {
   ProviderNativeRoots,
   ProviderResolvedNativeRoot,
   ProviderResolvedNativeRoots,
-} from "@bb/domain";
-import type { HostProviderCommand } from "@bb/host-daemon-contract";
+} from "@omnyo/domain";
+import type { HostProviderCommand } from "@omnyo/host-daemon-contract";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import {
   type CommandScanRoot,
   discoverProviderCommands,
+  discoverSkills,
+  type SkillScanRoot,
 } from "./command-discovery.js";
 import { resolveDeclaredScanRoots } from "./command-handlers/list-commands.js";
 
@@ -46,6 +50,7 @@ async function makeWorkspaceFixture(): Promise<WorkspaceFixture> {
   const homeDir = path.join(tempRoot, "home");
   await mkdir(cwd, { recursive: true });
   await mkdir(homeDir, { recursive: true });
+
   return { cwd, homeDir };
 }
 
@@ -145,7 +150,7 @@ function skillFile(name: string, description = name): string {
 }
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), "bb-command-discovery-"));
+  tempRoot = await mkdtemp(path.join(tmpdir(), "omnyo-command-discovery-"));
 });
 
 afterEach(async () => {
@@ -153,6 +158,58 @@ afterEach(async () => {
 });
 
 describe("discoverProviderCommands over declared roots", () => {
+  it("discovers independent skills without waiting for another skill's watcher", async () => {
+    const rootPath = path.join(tempRoot, "skills");
+    const firstPath = path.join(rootPath, "a-first");
+    const secondPath = path.join(rootPath, "b-second");
+    await Promise.all([
+      writeFileEnsuringDir(
+        path.join(firstPath, "SKILL.md"),
+        skillFile("a-first"),
+      ),
+      writeFileEnsuringDir(
+        path.join(secondPath, "SKILL.md"),
+        skillFile("b-second"),
+      ),
+    ]);
+    const firstStarted = createDeferredPromise<void>();
+    const releaseFirst = createDeferredPromise<void>();
+    const observed = new Set<string>();
+
+    const discovery = discoverProviderCommands({
+      roots: [
+        {
+          rootPath,
+          shape: "skill",
+          namePrefix: "",
+          source: "skill",
+          origin: "user",
+          observePath: async (target) => {
+            observed.add(target);
+
+            if (target === firstPath) {
+              firstStarted.resolve();
+              await releaseFirst.promise;
+            }
+          },
+        },
+      ],
+    });
+
+    try {
+      await firstStarted.promise;
+      expect(observed).toContain(secondPath);
+    } finally {
+      releaseFirst.resolve();
+      await discovery;
+    }
+
+    expect((await discovery).map((command) => command.name)).toEqual([
+      "a-first",
+      "b-second",
+    ]);
+  });
+
   it("parses project skills, namespaced commands, and frontmatter", async () => {
     const fixture = await makeWorkspaceFixture();
     await writeFileEnsuringDir(
@@ -277,12 +334,14 @@ describe("discoverProviderCommands over declared roots", () => {
 
   it("skips a skill-shaped directory that holds the root's declared manifest marker", async () => {
     const fixture = await makeWorkspaceFixture();
+
     for (const name of ["plain-skill", "vendor-plugin"]) {
       await writeFileEnsuringDir(
         path.join(fixture.homeDir, ".agent", "skills", name, "SKILL.md"),
         skillFile(name),
       );
     }
+
     await writeFileEnsuringDir(
       path.join(
         fixture.homeDir,
@@ -308,6 +367,7 @@ describe("discoverProviderCommands over declared roots", () => {
         },
       }),
     );
+
     expect(marked.map((command) => command.name)).toEqual(["plain-skill"]);
 
     const unmarked = await discover(
@@ -315,6 +375,7 @@ describe("discoverProviderCommands over declared roots", () => {
       null,
       nativeRoots({ skills: { user: [declared(".agent/skills")] } }),
     );
+
     expect(unmarked.map((command) => command.name).sort()).toEqual([
       "plain-skill",
       "vendor-plugin",
@@ -502,6 +563,7 @@ describe("discoverProviderCommands over declared roots", () => {
       tempRoot,
       "outside-skill-directory",
     );
+
     await writeFileEnsuringDir(
       path.join(outsideSkillDirectory, "SKILL.md"),
       skillFile("leaked"),
@@ -529,6 +591,7 @@ describe("discoverProviderCommands over declared roots", () => {
       tempRoot,
       "linked-directory-target",
     );
+
     await writeFileEnsuringDir(
       path.join(linkedDirectoryTarget, "SKILL.md"),
       skillFile("symlinked-directory", "linked directory"),
@@ -580,13 +643,16 @@ describe("discoverProviderCommands over declared roots", () => {
       "---\ndescription: secret\n---\n",
     );
     await chmod(blockedDir, 0o000);
+
     try {
       let unreadable = false;
+
       try {
         await readdir(blockedDir);
       } catch {
         unreadable = true;
       }
+
       if (!unreadable) return;
 
       const commands = await discover(fixture, fixture.cwd);
@@ -678,6 +744,7 @@ describe("resolveDeclaredScanRoots", () => {
     const cwd = path.join(serviceRoot, "api");
     await mkdir(path.join(fixture.cwd, ".git"), { recursive: true });
     await mkdir(cwd, { recursive: true });
+
     for (const [directory, name] of [
       [fixture.cwd, "repository-skill"],
       [serviceRoot, "service-skill"],
@@ -877,11 +944,13 @@ describe("resolveDeclaredScanRoots", () => {
     const fixture = await makeWorkspaceFixture();
     const pluginRoot = path.join(fixture.homeDir, "plugins", "local-plugin");
     const systemSkills = path.join(fixture.homeDir, "system", "skills");
+
     const missingSkills = path.join(
       fixture.homeDir,
       "system",
       "no-such-skills",
     );
+
     const teamSkills = path.join(fixture.cwd, "team-skills");
     await writeFileEnsuringDir(
       path.join(systemSkills, "docs", "SKILL.md"),
@@ -1187,5 +1256,128 @@ describe("resolveDeclaredScanRoots", () => {
     ]);
     const commands = await discoverProviderCommands({ roots });
     expect(commands.map((command) => command.name)).toEqual(["shared"]);
+  });
+});
+
+describe("owned source skill identity v1", () => {
+  const marker =
+    "omnyo-source-skill-v1: example/bb-private/core-verification";
+
+  function root(directory: string, provider = false): SkillScanRoot {
+    return {
+      rootPath: directory,
+      shape: "skill",
+      namePrefix: "",
+      source: "skill",
+      origin: "project",
+      identitySeed: provider ? "provider:fixture" : "bb-project",
+      rootKind: provider ? "provider-project" : "omnyo-project",
+    };
+  }
+
+  async function file(directory: string, name: string, identity = "") {
+    const target = path.join(directory, name, "SKILL.md");
+    await writeFileEnsuringDir(
+      target,
+      `---\nname: canonical-verification\ndescription: Existing verification behavior\n${identity}\n---\n# Source recipe\n`,
+    );
+
+    return target;
+  }
+
+  it("keeps the existing managed handle across the explicitly marked owned source folder move", async () => {
+    const directory = path.join(tempRoot, "owned-skills");
+    const original = await file(directory, "verify-bb");
+    const before = await discoverSkills({ roots: [root(directory)] });
+    await file(directory, "verify-bb", marker);
+    const marked = await discoverSkills({ roots: [root(directory)] });
+    expect(marked[0]?.id).toBe(before[0]?.id);
+    await rename(path.dirname(original), path.join(directory, "verify-omnyo"));
+    const after = await discoverSkills({ roots: [root(directory)] });
+    expect(after).toHaveLength(1);
+    expect(after[0]?.id).toBe(before[0]?.id);
+    expect(after[0]?.name).toBe("verify-omnyo");
+    expect(after[0]?.filePath).toBe(
+      path.join(directory, "verify-omnyo", "SKILL.md"),
+    );
+  });
+
+  it("keeps the managed handle for the canonical marker so mixed daemons agree", async () => {
+    const directory = path.join(tempRoot, "dual-marker-skills");
+    await file(directory, "verify-omnyo", marker);
+    const legacyMarked = await discoverSkills({ roots: [root(directory)] });
+    await file(
+      directory,
+      "verify-omnyo",
+      "omnyo-source-skill-v1: example/omnyo/core-verification",
+    );
+    const canonicalMarked = await discoverSkills({ roots: [root(directory)] });
+    expect(canonicalMarked).toHaveLength(1);
+    expect(canonicalMarked[0]?.id).toBe(legacyMarked[0]?.id);
+  });
+
+  it("preserves unmarked same-name projects and provider identities instead of inferring ownership from a folder name", async () => {
+    const directory = path.join(tempRoot, "foreign-skills");
+    await file(directory, "verify-omnyo");
+    const foreign = await discoverSkills({ roots: [root(directory)] });
+
+    const providerBefore = await discoverSkills({
+      roots: [root(directory, true)],
+    });
+
+    await file(directory, "verify-omnyo", marker);
+    const owned = await discoverSkills({ roots: [root(directory)] });
+
+    const providerAfter = await discoverSkills({
+      roots: [root(directory, true)],
+    });
+
+    expect(owned[0]?.id).not.toBe(foreign[0]?.id);
+    expect(providerAfter).toEqual(providerBefore);
+  });
+
+  it("refuses unsupported or malformed explicit owned markers and claims at another entry path", async () => {
+    for (const [name, value] of [
+      ["verify-omnyo", "omnyo-source-skill-v1: other-owner"],
+      ["verify-omnyo", "omnyo-source-skill-v1: [unfinished"],
+      ["verify-omnyo", "omnyo-source-skill-v1: {owner: unsupported}"],
+      ["another-skill", marker],
+    ] as const) {
+      const directory = path.join(
+        tempRoot,
+        "invalid-" + name + "-" + value.length,
+      );
+
+      await file(directory, name, value);
+      await expect(
+        discoverSkills({ roots: [root(directory)] }),
+      ).rejects.toThrow(/owned source skill identity/u);
+    }
+  });
+
+  it("refuses distinct files claiming the marked managed identity while deduplicating the same physical file", async () => {
+    const directory = path.join(tempRoot, "collision-skills");
+    await file(directory, "verify-omnyo", marker);
+    expect(
+      await discoverSkills({ roots: [root(directory), root(directory)] }),
+    ).toHaveLength(1);
+    await file(directory, "verify-bb");
+    await expect(discoverSkills({ roots: [root(directory)] })).rejects.toThrow(
+      /duplicate owned source skill identity/iu,
+    );
+  });
+
+  it("preserves existing unmarked provider-root behavior for separate physical files", async () => {
+    const first = path.join(tempRoot, "provider-first");
+    const second = path.join(tempRoot, "provider-second");
+    await file(first, "verify-omnyo");
+    await file(second, "verify-omnyo");
+
+    const skills = await discoverSkills({
+      roots: [root(first, true), root(second, true)],
+    });
+
+    expect(skills).toHaveLength(2);
+    expect(skills[0]?.id).toBe(skills[1]?.id);
   });
 });

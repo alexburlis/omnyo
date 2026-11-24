@@ -8,11 +8,13 @@ import {
 } from "../../helpers/test-app.js";
 
 const BASE = "http://127.0.0.1:3334";
+
 const EVIL_ORIGIN = "https://evil.example";
+
 const PLUGIN_ID = "review-fixes";
 
 const FIXTURE_SOURCE = `
-  import { defineRpcContract } from "@get-bb/plugin-sdk";
+  import { defineRpcContract } from "@omnyo/plugin-sdk";
   import { z } from "zod";
   const rpcContract = defineRpcContract({
     slowKv: {
@@ -20,20 +22,20 @@ const FIXTURE_SOURCE = `
       output: z.literal("done"),
     },
   });
-  export default function plugin(bb: any) {
+  export default function plugin(api: any) {
     const g = globalThis as any;
     g.__rfLoads = (g.__rfLoads ?? 0) + 1;
-    bb.onDispose(() => { g.__rfDisposals = (g.__rfDisposals ?? 0) + 1; });
-    bb.cli.register({
+    api.onDispose(() => { g.__rfDisposals = (g.__rfDisposals ?? 0) + 1; });
+    api.cli.register({
       name: "rf",
       summary: "review fixes fixture",
       commands: [],
       run: async () => ({ exitCode: 0, stdout: "rf ok" }),
     });
-    bb.rpc.register(rpcContract, {
+    api.rpc.register(rpcContract, {
       slowKv: async (input: any) => {
         await new Promise((resolve) => setTimeout(resolve, 150));
-        await bb.storage.kv.set("drained", input);
+        await api.storage.kv.set("drained", input);
         return "done";
       },
     });
@@ -47,17 +49,17 @@ describe("review fixes: idempotent enable, cli auth, dispose drain", () => {
 
   beforeEach(async () => {
     harness = await createTestAppHarness();
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-review-fixes-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-review-fixes-"));
     delete globals.__rfLoads;
     delete globals.__rfDisposals;
-    const rootDir = join(workDir, "bb-plugin-review-fixes");
+    const rootDir = join(workDir, "omnyo-plugin-review-fixes");
     await mkdir(rootDir, { recursive: true });
     await writeFile(
       join(rootDir, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-review-fixes",
+        name: "omnyo-plugin-review-fixes",
         version: "0.1.0",
-        bb: {
+        omnyo: {
           name: "Review fixes fixture",
           description: "Plugin review regression fixture.",
           branding: { icon: "Zap" },
@@ -92,6 +94,7 @@ describe("review fixes: idempotent enable, cli auth, dispose drain", () => {
         body: JSON.stringify({ argv: [] }),
       },
     );
+
     expect(foreign.status).toBe(403);
 
     const local = await harness.app.request(
@@ -102,6 +105,7 @@ describe("review fixes: idempotent enable, cli auth, dispose drain", () => {
         body: JSON.stringify({ argv: [] }),
       },
     );
+
     expect(local.status).toBe(200);
     expect(await local.json()).toMatchObject({ exitCode: 0, stdout: "rf ok" });
   });
@@ -115,6 +119,7 @@ describe("review fixes: idempotent enable, cli auth, dispose drain", () => {
         body: JSON.stringify({ value: 42 }),
       },
     );
+
     await new Promise((resolve) => setTimeout(resolve, 30));
     await harness.pluginService.reload(PLUGIN_ID);
     const response = await inFlight;

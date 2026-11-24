@@ -34,6 +34,7 @@ describe("provider logos", () => {
         const response = await harness.app.request(
           "/api/v1/system/providers/acp-example-agent/logo",
         );
+
         expect(response.status).toBe(404);
         expect(await readJson(response)).toMatchObject({
           code: "provider_logo_not_found",
@@ -47,6 +48,7 @@ describe("provider logos", () => {
       const response = await harness.app.request(
         "/api/v1/system/providers/acp-not-a-provider/logo",
       );
+
       expect(response.status).toBe(404);
     });
   });

@@ -24,6 +24,7 @@ describe("useCreateThreadInEnvironment", () => {
     "opens the composer in the source environment and section %s",
     (sectionId) => {
       navigate.mockClear();
+
       const { result } = renderHook(() =>
         useCreateThreadInEnvironment({
           projectId: "proj_personal",

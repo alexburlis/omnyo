@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { shellSingleQuote } from "@bb/test-helpers";
+import { shellSingleQuote } from "@omnyo/test-helpers";
 import {
   buildStandaloneShellExports,
   buildDaemonRestartCommand,
@@ -28,38 +28,43 @@ function parseArgs() {
 
   for (let index = 2; index < process.argv.length; index += 1) {
     const arg = process.argv[index];
+
     if (arg === "--format") {
       const nextArg = process.argv[index + 1];
+
       if (nextArg !== "env" && nextArg !== "json") {
         throw new Error(
-          "Usage: pnpm --filter @bb/qa standalone:start --format json|env",
+          "Usage: pnpm --filter @omnyo/qa standalone:start --format json|env",
         );
       }
+
       format = nextArg;
       index += 1;
       continue;
     }
 
     throw new Error(
-      "Usage: pnpm --filter @bb/qa standalone:start --format json|env",
+      "Usage: pnpm --filter @omnyo/qa standalone:start --format json|env",
     );
   }
 
   return { format };
 }
+
 async function main() {
   const { format } = parseArgs();
   await cleanupStandaloneOrphans();
   const envFile = await loadDotEnv();
   const instanceId = randomUUID();
+
   const parentPid = resolveStandaloneParentPid({
     env: process.env,
     fallbackPid: process.ppid,
   });
 
-  const tmpRoot = await fs.mkdtemp(path.join(tmpdir(), "bb-standalone-"));
+  const tmpRoot = await fs.mkdtemp(path.join(tmpdir(), "omnyo-standalone-"));
   const logsDir = path.join(tmpRoot, "logs");
-  const bbRoot = path.join(tmpRoot, "bb-root");
+  const omnyoRoot = path.join(tmpRoot, "omnyo-root");
   const serverDataDir = path.join(tmpRoot, "server-data");
   const projectRoot = path.join(tmpRoot, "repos", "test-project");
   const statePath = path.join(tmpRoot, "standalone-state.json");
@@ -85,12 +90,14 @@ async function main() {
         [STANDALONE_PARENT_PID_ENV]: String(parentPid),
       },
     });
+
     const qaServer = await startQaServer({
       dataDir: serverDataDir,
       env: standaloneBaseEnv,
       logPath: serverLogPath,
       port: serverPort,
     });
+
     serverProcess = qaServer.process;
 
     const enrollKey = await createHostEnrollKey(serverUrl);
@@ -102,11 +109,11 @@ async function main() {
       env: buildStandaloneRuntimeEnv({
         baseEnv: standaloneBaseEnv,
         overrides: {
-          BB_DATA_DIR: bbRoot,
-          BB_HOST_DAEMON_PORT: String(daemonPort),
-          BB_HOST_ENROLL_KEY: enrollKey.enrollKey,
-          BB_HOST_ID: enrollKey.hostId,
-          BB_SERVER_URL: serverUrl,
+          OMNYO_DATA_DIR: omnyoRoot,
+          OMNYO_HOST_DAEMON_PORT: String(daemonPort),
+          OMNYO_HOST_ENROLL_KEY: enrollKey.enrollKey,
+          OMNYO_HOST_ID: enrollKey.hostId,
+          OMNYO_SERVER_URL: serverUrl,
           [STANDALONE_INSTANCE_ENV]: instanceId,
           [STANDALONE_PARENT_PID_ENV]: String(parentPid),
         },
@@ -115,20 +122,22 @@ async function main() {
     });
 
     const host = await waitForConnectedHost(serverUrl);
+
     const project = await createProject(serverUrl, {
       name: "Standalone QA Project",
       source: { type: "local_path", hostId: host.id, path: projectRoot },
     });
 
     const cleanupCommand =
-      `pnpm --silent --dir ${shellSingleQuote(repoRoot)} --filter @bb/qa standalone:stop ` +
+      `pnpm --silent --dir ${shellSingleQuote(repoRoot)} --filter @omnyo/qa standalone:stop ` +
       `--state ${shellSingleQuote(statePath)} && ` +
-      `pnpm --silent --dir ${shellSingleQuote(repoRoot)} --filter @bb/qa standalone:cleanup`;
+      `pnpm --silent --dir ${shellSingleQuote(repoRoot)} --filter @omnyo/qa standalone:cleanup`;
+
     const restartDaemonCommand = buildDaemonRestartCommand({
       cwd: repoRoot,
       daemonPid: daemonProcess.pid,
       daemonPort,
-      dataDir: bbRoot,
+      dataDir: omnyoRoot,
       entrypoint: path.join(repoRoot, "apps/host-daemon/dist/index.js"),
       envFilePath: envFile.path,
       hostId: host.id,
@@ -140,9 +149,9 @@ async function main() {
     });
 
     const cliEnv = {
-      BB_HOST_DAEMON_PORT: String(daemonPort),
-      BB_PROJECT_ID: project.id,
-      BB_SERVER_URL: serverUrl,
+      OMNYO_HOST_DAEMON_PORT: String(daemonPort),
+      OMNYO_PROJECT_ID: project.id,
+      OMNYO_SERVER_URL: serverUrl,
     };
 
     const setupEnv = {
@@ -164,7 +173,7 @@ async function main() {
         restartDaemon: restartDaemonCommand,
       },
       daemon: {
-        dataDir: bbRoot,
+        dataDir: omnyoRoot,
         logPath: daemonLogPath,
         pid: daemonProcess.pid,
         port: daemonPort,
@@ -173,7 +182,7 @@ async function main() {
       instanceId,
       parentPid,
       paths: {
-        bbRoot,
+        omnyoRoot: omnyoRoot,
         daemonRestartPidPath,
         envFilePath: envFile.path,
         logsDir,
@@ -196,10 +205,12 @@ async function main() {
     };
 
     await fs.writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
+
     const output =
       format === "env"
         ? buildStandaloneShellExports(setupEnv)
         : JSON.stringify(state, null, 2);
+
     process.stdout.write(`${output}\n`);
   } catch (error) {
     await killProcess(daemonProcess?.pid).catch(() => undefined);
@@ -212,6 +223,7 @@ async function main() {
 void main().catch((error) => {
   const message =
     error instanceof Error ? (error.stack ?? error.message) : String(error);
+
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

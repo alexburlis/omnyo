@@ -13,6 +13,7 @@ const mockQueryInstance = {
   setPermissionMode: vi.fn(),
   [Symbol.asyncIterator]: vi.fn(),
 };
+
 const { queryMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
 }));
@@ -47,9 +48,11 @@ function isClaudeQueryPromptCall(
 
 function getLatestQueryCall(): ClaudeQueryPromptCall {
   const latestCall = queryMock.mock.calls.at(-1)?.[0];
+
   if (!isClaudeQueryPromptCall(latestCall)) {
     throw new Error("Expected Claude SDK query call");
   }
+
   return latestCall;
 }
 
@@ -106,12 +109,14 @@ describe("SdkSession", () => {
     let finishStream:
       | ((result: IteratorResult<SDKMessage>) => void)
       | undefined;
+
     const next = vi.fn(
       () =>
         new Promise<IteratorResult<SDKMessage>>((resolve) => {
           finishStream = resolve;
         }),
     );
+
     mockQueryInstance[Symbol.asyncIterator].mockReturnValue({
       next,
       return: vi.fn().mockResolvedValue({ value: undefined, done: true }),
@@ -135,17 +140,21 @@ describe("SdkSession", () => {
 
     expect(mockQueryInstance.interrupt).toHaveBeenCalledOnce();
     expect(inputResolved).toBe(false);
+
     if (!finishInterrupt) {
       throw new Error("Expected Claude SDK interrupt to be pending");
     }
+
     finishInterrupt();
     await expect(pendingInput).resolves.toEqual({
       value: undefined,
       done: true,
     });
+
     if (!finishStream) {
       throw new Error("Expected Claude SDK stream to be pending");
     }
+
     finishStream({ value: undefined, done: true });
     await closePromise;
     expect(mockQueryInstance.close).not.toHaveBeenCalled();
@@ -166,6 +175,7 @@ describe("SdkSession", () => {
   it("forwards an explicit Claude Code executable path to the SDK", () => {
     const onMessage = vi.fn();
     const onDone = vi.fn();
+
     const session = new SdkSession(
       {
         ...defaultOptions,
@@ -189,6 +199,7 @@ describe("SdkSession", () => {
   it("passes non-bypass permission modes through without the dangerous skip flag", () => {
     const onMessage = vi.fn();
     const onDone = vi.fn();
+
     const session = new SdkSession(
       {
         ...defaultOptions,
@@ -220,6 +231,7 @@ describe("SdkSession", () => {
     if (process.platform !== "win32") mockProcessUid(1000);
     const onMessage = vi.fn();
     const onDone = vi.fn();
+
     const session = new SdkSession(
       {
         ...defaultOptions,
@@ -244,6 +256,7 @@ describe("SdkSession", () => {
 
   it("launches full access sessions that start in plan mode able to switch to bypass mode", () => {
     if (process.platform !== "win32") mockProcessUid(1000);
+
     const session = new SdkSession(
       {
         ...defaultOptions,
@@ -273,6 +286,7 @@ describe("SdkSession", () => {
     mockProcessUid(0);
     const onMessage = vi.fn();
     const onDone = vi.fn();
+
     const session = new SdkSession(
       {
         ...defaultOptions,

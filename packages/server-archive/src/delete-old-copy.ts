@@ -27,9 +27,11 @@ export async function deleteOldServerCopy(
 ): Promise<{ dataDir: string; deleted: boolean; deletedEntries: string[] }> {
   const root = resolve(dataDir);
   const deletedEntries: string[] = [];
+
   for (const entry of lock.oldCopyEntries) {
     const target = resolve(root, ...entry.split("/"));
     const topLevel = entry.split("/")[0] ?? entry;
+
     if (
       !target.startsWith(`${root}${sep}`) ||
       OLD_COPY_PROTECTED_ENTRIES.has(topLevel)
@@ -37,7 +39,9 @@ export async function deleteOldServerCopy(
       onSkippedEntry(entry);
       continue;
     }
+
     await rm(target, { recursive: true, force: true });
+
     if (entry.endsWith(".db")) {
       await Promise.all(
         ["-wal", "-shm", "-journal"].map((suffix) =>
@@ -45,8 +49,11 @@ export async function deleteOldServerCopy(
         ),
       );
     }
+
     deletedEntries.push(entry);
   }
+
   await writeServerMovedFile(dataDir, { ...lock, oldCopyEntries: [] });
+
   return { dataDir, deleted: true, deletedEntries };
 }

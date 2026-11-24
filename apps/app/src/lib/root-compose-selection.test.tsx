@@ -11,13 +11,16 @@ import {
 describe("root compose targets across layout remounts", () => {
   it("persists placement into a fresh store, then clears it", () => {
     const store = createStore();
+
     const wrapper = ({ children }: { children: ReactNode }) => (
       <Provider store={store}>{children}</Provider>
     );
+
     const useTargets = () => ({
       placement: useRootComposePlacement(),
       environment: useRootComposeReuseEnvironment(),
     });
+
     const first = renderHook(useTargets, { wrapper });
     act(() => {
       first.result.current.placement[1]({
@@ -27,9 +30,11 @@ describe("root compose targets across layout remounts", () => {
       first.result.current.environment[1]("reuse:env_test");
     });
     first.unmount();
+
     const reloadedWrapper = ({ children }: { children: ReactNode }) => (
       <Provider store={createStore()}>{children}</Provider>
     );
+
     const remounted = renderHook(useTargets, { wrapper: reloadedWrapper });
     expect(remounted.result.current.placement[0]).toEqual({
       sectionId: "sec_research",

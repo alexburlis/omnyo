@@ -1,5 +1,5 @@
-import { compareReasoningLevels } from "@bb/domain";
-import type { AvailableModel, ReasoningLevel, ServiceTier } from "@bb/domain";
+import { compareReasoningLevels } from "@omnyo/domain";
+import type { AvailableModel, ReasoningLevel, ServiceTier } from "@omnyo/domain";
 import type { AcpConfigOption, AcpSessionModels } from "../wire.js";
 
 interface RawAgentModel {
@@ -28,7 +28,9 @@ interface AgentModelVariant extends RawAgentModel {
 }
 
 const MODEL_LINE_PATTERN = /^(\S+) - (.+)$/;
+
 const BARE_PROVIDER_MODEL_LINE_PATTERN = /^\S+\/\S+$/;
+
 const BULLETED_MODEL_LINE_PATTERN = /^[*-]\s+(\S+)(?:\s+\([^)]*\))?$/u;
 
 const EFFORT_TOKENS: ReadonlyArray<readonly [string, ReasoningLevel]> = [
@@ -42,7 +44,9 @@ const EFFORT_TOKENS: ReadonlyArray<readonly [string, ReasoningLevel]> = [
 ];
 
 const FAST_TAIL = "-fast";
+
 const FAST_SERVICE_TIER = "fast";
+
 const THINKING_TOKEN = "thinking";
 
 export interface AgentModelCatalog {
@@ -56,24 +60,31 @@ export interface AgentModelCatalog {
 
 export function parseAgentModelLines(stdout: string): RawAgentModel[] {
   const models: RawAgentModel[] = [];
+
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     const match = MODEL_LINE_PATTERN.exec(trimmed);
+
     if (!match) {
       const bulletMatch = BULLETED_MODEL_LINE_PATTERN.exec(trimmed);
+
       if (bulletMatch) {
         const [, id] = bulletMatch;
         models.push({ id, displayName: id });
         continue;
       }
+
       if (BARE_PROVIDER_MODEL_LINE_PATTERN.test(trimmed)) {
         models.push({ id: trimmed, displayName: trimmed });
       }
+
       continue;
     }
+
     const [, id, displayName] = match;
     models.push({ id, displayName });
   }
+
   return models;
 }
 
@@ -81,6 +92,7 @@ export function findAcpModelConfigOption(
   configOptions: readonly AcpConfigOption[] | undefined,
 ): AcpConfigOption | undefined {
   const options = configOptions ?? [];
+
   return (
     options.find((option) => option.category === "model") ??
     options.find((option) => option.id === "model")
@@ -111,9 +123,11 @@ export function acpNativeReasoningLevelToValue(
   const values = new Set(
     (thoughtLevelOption.options ?? []).map((o) => o.value),
   );
+
   if (values.has(level)) {
     return level;
   }
+
   return (ACP_NATIVE_REASONING_VALUE_ALIASES_BY_LEVEL[level] ?? []).find(
     (value) => values.has(value),
   );
@@ -121,6 +135,7 @@ export function acpNativeReasoningLevelToValue(
 
 function readOptionDescription(option: object): string | undefined {
   const description: unknown = Reflect.get(option, "description");
+
   return typeof description === "string" && description.trim() !== ""
     ? description
     : undefined;
@@ -130,23 +145,29 @@ export function buildAcpNativeReasoningSupport(
   thoughtLevelOption: AcpConfigOption | undefined,
 ): AcpNativeReasoningSupport {
   const seen = new Set<ReasoningLevel>();
+
   const supportedReasoningEfforts: AvailableModel["supportedReasoningEfforts"] =
     [];
+
   for (const option of thoughtLevelOption?.options ?? []) {
     if (option.value === "" || seen.has(option.value)) {
       continue;
     }
+
     seen.add(option.value);
+
     const name =
       option.name !== undefined && option.name.trim() !== ""
         ? option.name
         : undefined;
+
     supportedReasoningEfforts.push({
       reasoningEffort: option.value,
       ...(name !== undefined && name !== option.value ? { label: name } : {}),
       description: readOptionDescription(option) ?? name ?? option.value,
     });
   }
+
   if (supportedReasoningEfforts.length === 0) {
     return {
       supportedReasoningEfforts:
@@ -154,7 +175,9 @@ export function buildAcpNativeReasoningSupport(
       defaultReasoningEffort: "medium",
     };
   }
+
   const currentValue = thoughtLevelOption?.currentValue;
+
   return {
     supportedReasoningEfforts,
     defaultReasoningEffort:
@@ -169,17 +192,22 @@ export function buildModelCatalogFromConfigOptions(
   reasoningByModel?: ReadonlyMap<string, AcpNativeReasoningSupport>,
 ): AvailableModel[] {
   const options = modelOption?.options ?? [];
+
   if (options.length === 0) {
     return [];
   }
+
   const currentValue = modelOption?.currentValue;
+
   const models = options.map((option, index): AvailableModel => {
     const isDefault =
       currentValue !== undefined ? option.value === currentValue : index === 0;
+
     const reasoning = reasoningByModel?.get(option.value) ?? {
       supportedReasoningEfforts: ACP_NATIVE_REASONING_EFFORTS,
       defaultReasoningEffort: "medium" as ReasoningLevel,
     };
+
     return {
       id: option.value,
       model: option.value,
@@ -190,6 +218,7 @@ export function buildModelCatalogFromConfigOptions(
       isDefault,
     };
   });
+
   return models.some((model) => model.isDefault)
     ? models
     : models.map((model, index) =>
@@ -201,15 +230,19 @@ export function buildModelCatalogFromSessionModels(
   sessionModels: AcpSessionModels | undefined,
 ): AvailableModel[] {
   const availableModels = sessionModels?.availableModels ?? [];
+
   if (availableModels.length === 0) {
     return [];
   }
+
   const currentModelId = sessionModels?.currentModelId;
+
   const models = availableModels.map((model, index): AvailableModel => {
     const isDefault =
       currentModelId !== undefined
         ? model.modelId === currentModelId
         : index === 0;
+
     return {
       id: model.modelId,
       model: model.modelId,
@@ -220,6 +253,7 @@ export function buildModelCatalogFromSessionModels(
       isDefault,
     };
   });
+
   return models.some((model) => model.isDefault)
     ? models
     : models.map((model, index) =>
@@ -236,11 +270,14 @@ function splitVariant(id: string): {
 } {
   let rest = id;
   let fast = false;
+
   if (rest.endsWith(FAST_TAIL)) {
     fast = true;
     rest = rest.slice(0, -FAST_TAIL.length);
   }
+
   let thinking = false;
+
   if (rest.endsWith(`-${THINKING_TOKEN}`)) {
     thinking = true;
     rest = rest.slice(0, -(THINKING_TOKEN.length + 1));
@@ -248,6 +285,7 @@ function splitVariant(id: string): {
     thinking = true;
     rest = rest.replace(`-${THINKING_TOKEN}-`, "-");
   }
+
   for (const [token, effort] of EFFORT_TOKENS) {
     if (rest.endsWith(`-${token}`)) {
       return {
@@ -259,6 +297,7 @@ function splitVariant(id: string): {
       };
     }
   }
+
   return {
     familyKey: rest,
     effort: "medium",
@@ -288,9 +327,11 @@ function familyDisplayName(
   effortToken: string | undefined,
 ): string {
   const word = effortToken ? EFFORT_DISPLAY_WORDS[effortToken] : undefined;
+
   if (!word) {
     return cleanDisplayName(displayName);
   }
+
   return cleanDisplayName(
     displayName.replace(new RegExp(`(^|\\s)${word}(?=\\s|$)`), "$1"),
   );
@@ -313,26 +354,33 @@ export function buildAgentModelCatalog(
   rawModels: readonly RawAgentModel[],
 ): AgentModelCatalog | null {
   const families = new Map<string, AgentModelVariant[]>();
+
   for (const raw of rawModels) {
     const { familyKey, effort, effortToken, fast, thinking } = splitVariant(
       raw.id,
     );
+
     const members = families.get(familyKey) ?? [];
     members.push({ ...raw, effort, effortToken, fast, thinking });
     families.set(familyKey, members);
   }
+
   if (families.size === 0) {
     return null;
   }
 
   const models: AvailableModel[] = [];
+
   const variantsByFamilyId = new Map<
     string,
     Map<ReasoningLevel, VariantTier>
   >();
+
   const defaultEffortByFamilyId = new Map<string, ReasoningLevel>();
+
   for (const members of families.values()) {
     const hasThinking = members.some((m) => m.thinking);
+
     const leveled = members.map((member) => ({
       member,
       level: member.thinking
@@ -344,14 +392,17 @@ export function buildAgentModelCatalog(
 
     const byLevel = new Map<ReasoningLevel, VariantTier>();
     const repEffortByCell = new Map<string, ReasoningLevel>();
+
     for (const { member, level } of leveled) {
       const slot: keyof VariantTier = member.fast ? "fast" : "normal";
       const tier = byLevel.get(level) ?? {};
       const cellKey = `${level}:${slot}`;
+
       const upgradesNoneRep =
         level === "none" &&
         member.effort === "medium" &&
         repEffortByCell.get(cellKey) !== "medium";
+
       if (tier[slot] === undefined || upgradesNoneRep) {
         tier[slot] = member.id;
         repEffortByCell.set(cellKey, member.effort);
@@ -361,16 +412,20 @@ export function buildAgentModelCatalog(
 
     const nonFast = leveled.filter((entry) => !entry.member.fast);
     const pool = nonFast.length > 0 ? nonFast : leveled;
+
     const defaultEntry =
       pool.find((entry) => entry.level === "medium") ??
       pool.find((entry) => entry.level !== "none") ??
       pool[0];
+
     const defaultVariant = defaultEntry.member;
 
     const levelsInLadderOrder = [...byLevel.keys()].sort(
       compareReasoningLevels,
     );
+
     const nameByLevel = new Map<ReasoningLevel, string>();
+
     for (const { member, level } of leveled) {
       if (!nameByLevel.has(level)) {
         nameByLevel.set(level, member.displayName);
@@ -405,17 +460,22 @@ export function buildAgentModelCatalog(
     models,
     resolveVariant({ model, reasoningLevel, serviceTier }) {
       const byLevel = variantsByFamilyId.get(model);
+
       if (!byLevel) {
         return undefined;
       }
+
       const level = reasoningLevel ?? defaultEffortByFamilyId.get(model);
       const tier = level === undefined ? undefined : byLevel.get(level);
+
       if (!tier) {
         return undefined;
       }
+
       if (serviceTier === "fast" && tier.fast !== undefined) {
         return tier.fast;
       }
+
       return tier.normal ?? tier.fast;
     },
   };
@@ -432,16 +492,21 @@ export function splitPrimaryModels(
 ): SplitPrimaryModelsResult {
   const primaryIds = new Set(primaryModels);
   const modelsById = new Map(catalogModels.map((model) => [model.id, model]));
+
   const models = primaryModels.flatMap((id) => {
     const model = modelsById.get(id);
+
     return model ? [model] : [];
   });
+
   if (models.length === 0) {
     return { models: [...catalogModels], selectedOnlyModels: [] };
   }
+
   const selectedOnlyModels = catalogModels.filter(
     (model) => !primaryIds.has(model.id),
   );
+
   if (models.some((model) => model.isDefault)) {
     return {
       models,
@@ -450,6 +515,7 @@ export function splitPrimaryModels(
       ),
     };
   }
+
   return {
     models: models.map((model, index) =>
       index === 0 ? { ...model, isDefault: true } : model,

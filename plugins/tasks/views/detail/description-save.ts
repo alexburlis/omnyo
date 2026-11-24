@@ -22,6 +22,7 @@ export function createDescriptionSaver(
 ): DescriptionSaver {
   const schedule = (run: () => void, delayMs: number) => {
     const timer = setTimeout(run, delayMs);
+
     return () => clearTimeout(timer);
   };
 
@@ -31,7 +32,9 @@ export function createDescriptionSaver(
   const runSave = async (attempt: { taskId: string; markdown: string }) => {
     try {
       const result = await options.save(attempt.taskId, attempt.markdown);
+
       if (pending === attempt) pending = undefined;
+
       if (!result.ok && result.errorMessage !== undefined) {
         options.onError(result.errorMessage);
       }
@@ -52,6 +55,7 @@ export function createDescriptionSaver(
     flush(taskId) {
       cancelTimer?.();
       cancelTimer = undefined;
+
       if (pending === undefined || pending.taskId !== taskId) return;
       const attempt = pending;
       pending = undefined;

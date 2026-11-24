@@ -1,16 +1,25 @@
 {
-  "name": "bb-plugin-environment-modal-sandbox",
+  "name": "omnyo-plugin-environment-modal-sandbox",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Run bb threads in on-demand, isolated sandboxes",
-  "engines": {
-    "bb": ">=0.0",
-    "bbPluginSdk": ">=0.4.102"
+  "description": "Run omnyo threads in on-demand, isolated sandboxes",
+  "author": {
+    "name": "bb",
+    "url": "https://github.com/get-bb"
   },
-  "bb": {
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/get-bb/bb.git",
+    "directory": "plugins/environment-modal-sandbox"
+  },
+  "engines": {
+    "omnyo": ">=0.0",
+    "omnyoPluginSdk": ">=0.4.102 >=0.6.44"
+  },
+  "omnyo": {
     "name": "Modal Sandbox [Experimental]",
-    "description": "Run bb threads in on-demand, isolated sandboxes",
+    "description": "Run omnyo threads in on-demand, isolated sandboxes",
     "branding": {
       "icon": "./modal-logo.svg"
     },
@@ -21,32 +30,33 @@
     "app": "./app.tsx"
   },
   "keywords": [
-    "bb-plugin"
+    "omnyo-plugin"
   ],
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --ignore-pattern node_modules --ignore-pattern dist .",
-    "prepare:bundled": "bb-plugin-build prepare-bundled"
+    "prepare:bundled": "omnyo-plugin-build prepare-bundled"
   },
   "dependencies": {
-    "@bb/shared-ui": "workspace:*",
+    "@omnyo/shared-ui": "workspace:*",
     "modal": "0.10.0",
+    "nice-grpc-common": "^2.0.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@bb/plugin-build": "workspace:*",
-    "@get-bb/plugin-sdk": "workspace:*",
+    "@omnyo/plugin-build": "workspace:*",
+    "@omnyo/plugin-sdk": "workspace:*",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "better-sqlite3": "12.10.0",
     "cron-parser": "^5.5.0",
-    "hono": "4.11.9",
+    "hono": "4.13.18",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "^4.1.1"
+    "vitest": "4.1.11"
   }
 }

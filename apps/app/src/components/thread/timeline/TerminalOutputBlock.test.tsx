@@ -40,8 +40,9 @@ it("reveals the complete command with the outer timeline row", () => {
 
   const renderedCommand = screen.getByText(
     (_, element) =>
-      element?.childNodes.length === 1 && element.textContent === commandLine,
+      element?.tagName === "CODE" && element.textContent === commandLine,
   );
+
   expect(renderedCommand.closest("button")).toBeNull();
   expect(renderedCommand.className).not.toContain("max-h-[2lh]");
   expect(renderedCommand.style.webkitLineClamp).toBe("");

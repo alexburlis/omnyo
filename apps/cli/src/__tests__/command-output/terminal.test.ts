@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import { TERMINAL_DATA_MAX_BYTES } from "@bb/domain";
+import { TERMINAL_DATA_MAX_BYTES } from "@omnyo/domain";
 import {
   collectLogLines,
   collectLogPayloads,
@@ -48,7 +48,7 @@ function makeHost(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("bb terminal command output", () => {
+describe("omnyo terminal command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -155,6 +155,7 @@ describe("bb terminal command output", () => {
 
   it("creates a machine terminal at host home with an explicit host ID", async () => {
     const hosts = vi.fn(async () => [makeHost()]);
+
     const create = vi.fn(async () =>
       makeTerminalSession({
         threadId: null,
@@ -162,6 +163,7 @@ describe("bb terminal command output", () => {
         initialCwd: "/Users/test",
       }),
     );
+
     stubServerApi({
       "v1.hosts.$get": hosts,
       "v1.terminals.$post": create,
@@ -241,6 +243,7 @@ describe("bb terminal command output", () => {
 
   it("surfaces an offline selected machine without retrying another host", async () => {
     const hosts = vi.fn(async () => [makeHost()]);
+
     const create = vi.fn(
       async () =>
         new Response(
@@ -254,6 +257,7 @@ describe("bb terminal command output", () => {
           },
         ),
     );
+
     stubServerApi({
       "v1.hosts.$get": hosts,
       "v1.terminals.$post": create,
@@ -271,16 +275,21 @@ describe("bb terminal command output", () => {
 
   it("routes inspection and mutations by terminal ID only", async () => {
     const get = vi.fn(async () => makeTerminalSession());
+
     const rename = vi.fn(async () =>
       makeTerminalSession({ title: "Dev server" }),
     );
+
     const send = vi.fn(async () => makeTerminalSession({ lastUserInputAt: 2 }));
+
     const resize = vi.fn(async () =>
       makeTerminalSession({ cols: 120, rows: 40 }),
     );
+
     const close = vi.fn(async () =>
       makeTerminalSession({ status: "exited", closeReason: "user" }),
     );
+
     stubServerApi({
       "v1.terminals.:terminalId.$get": get,
       "v1.terminals.:terminalId.$patch": rename,
@@ -340,6 +349,7 @@ describe("bb terminal command output", () => {
         param: { terminalId: string };
       }) => makeTerminalSession(),
     );
+
     stubServerApi({ "v1.terminals.:terminalId.input.$post": send });
     const text = `${"a".repeat(TERMINAL_DATA_MAX_BYTES - 1)}🙂tail`;
 
@@ -353,6 +363,7 @@ describe("bb terminal command output", () => {
         Buffer.from(request.json.dataBase64, "base64"),
       ),
     );
+
     expect(send).toHaveBeenCalledTimes(2);
     expect(
       send.mock.calls.every(
@@ -396,9 +407,11 @@ describe("bb terminal command output", () => {
       exitCode: null,
       closeReason: null,
     }));
+
     const write = vi
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
+
     stubServerApi({ "v1.terminals.:terminalId.output.$get": output });
 
     await runCommand(["terminal", "output", "term-1"], register);
@@ -438,6 +451,7 @@ describe("bb terminal command output", () => {
     const write = vi
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
+
     stubServerApi({
       "v1.terminals.:terminalId.output.$get": vi.fn(async () =>
         outputResponse({
@@ -491,6 +505,7 @@ describe("bb terminal command output", () => {
       .mockResolvedValueOnce(
         outputResponse({ nextSeq: 6, text: "alhost:5173\n" }),
       );
+
     stubServerApi({ "v1.terminals.:terminalId.output.$get": output });
 
     await runCommand(
@@ -518,6 +533,45 @@ describe("bb terminal command output", () => {
     expect(output.mock.calls[1]?.[0]).toMatchObject({ query: { sinceSeq: 4 } });
   });
 
+  it.each(["--contains", "--regex"])(
+    "matches styled text with %s across output polls",
+    async (flag) => {
+      const output = vi
+        .fn()
+        .mockResolvedValueOnce(
+          outputResponse({ nextSeq: 1, text: "\u001b[1mLocal\u001b[2" }),
+        )
+        .mockResolvedValue(
+          outputResponse({
+            nextSeq: 2,
+            text: "2m: http://localhost:5173/\r\n",
+          }),
+        );
+
+      stubServerApi({ "v1.terminals.:terminalId.output.$get": output });
+
+      await runCommand(
+        [
+          "terminal",
+          "wait",
+          "term-1",
+          "--from-start",
+          flag,
+          "Local:",
+          "--poll-interval",
+          "1ms",
+          "--timeout",
+          "100ms",
+        ],
+        register,
+      );
+
+      expect(collectLogLines(vi.mocked(console.log))).toEqual([
+        "Terminal term-1 matched Local:",
+      ]);
+    },
+  );
+
   it("finds a marker that is followed by more output than the retained window", async () => {
     const output = vi.fn().mockResolvedValueOnce(
       outputResponse({
@@ -525,6 +579,7 @@ describe("bb terminal command output", () => {
         text: `READY\n${"x".repeat(300_000)}`,
       }),
     );
+
     stubServerApi({ "v1.terminals.:terminalId.output.$get": output });
 
     await runCommand(
@@ -549,6 +604,7 @@ describe("bb terminal command output", () => {
           text: "Error: port 5173 is already in use\n",
         }),
       );
+
     stubServerApi({ "v1.terminals.:terminalId.output.$get": output });
 
     await expect(
@@ -588,7 +644,7 @@ describe("bb terminal command output", () => {
 
     expect(collectLogLines(vi.mocked(console.error))).toEqual([
       "Error: Terminal term-1 exited with code 0 before this wait started, so no new output will arrive.",
-      "Match its existing output with --from-start, or read it with `bb terminal output term-1`.",
+      "Match its existing output with --from-start, or read it with `omnyo terminal output term-1`.",
     ]);
   });
 
@@ -620,7 +676,7 @@ describe("bb terminal command output", () => {
   });
 
   it("fills in this thread when terminal list has no scope", async () => {
-    vi.stubEnv("BB_THREAD_ID", "thr_current");
+    vi.stubEnv("OMNYO_THREAD_ID", "thr_current");
 
     await expect(
       runCommand(["terminal", "list", "--json"], register),

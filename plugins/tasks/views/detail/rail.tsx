@@ -19,14 +19,17 @@ import {
 } from "./meta.js";
 import {
   DUE_DATE_PRESETS,
+  dueUrgency,
   localIsoDate,
   PRIORITY_LABELS,
   STATUS_LABELS,
 } from "../list/lib.js";
 import { DispatchControl } from "./threads.js";
+import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
+import { StatusDot } from "@/components/ui/status-row";
 import { DEFAULT_COLOR } from "../manage/shared.js";
-import { BbProjectLinkPicker } from "../manage/bb-project-link.js";
-import type { BbProjectOption } from "../../shared/contract.js";
+import { OmnyoProjectLinkPicker } from "../manage/omnyo-project-link.js";
+import type { OmnyoProjectOption } from "../../shared/contract.js";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -157,16 +160,37 @@ function DueDateMenu({
   triggerClassName: string;
 }) {
   const [open, setOpen] = useState(false);
+
+  const urgency =
+    task.dueDate === null ? null : dueUrgency(task.dueDate, task.status);
+
   const pick = (dueDate: string | null) => {
     onUpdate({ dueDate });
     setOpen(false);
   };
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" className={triggerClassName}>
-          <Icon name="Clock" className="size-3.5 shrink-0" />
-          {task.dueDate ? formatDueDate(task.dueDate) : "Set due date"}
+        <button
+          type="button"
+          className={cn(
+            triggerClassName,
+            urgency === "overdue" && "text-destructive-text",
+            task.dueDate === null && "text-muted-foreground",
+          )}
+        >
+          <Icon
+            name={urgency === "overdue" ? "AlertCircle" : "Clock"}
+            className="size-3.5 shrink-0"
+          />
+          {task.dueDate === null
+            ? "Set due date"
+            : urgency === "overdue"
+              ? `Overdue · ${formatDueDate(task.dueDate)}`
+              : urgency === "today"
+                ? "Today"
+                : formatDueDate(task.dueDate)}
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-52 p-2">
@@ -228,18 +252,21 @@ function LabelsMenu({
     const next = task.labelIds.includes(labelId)
       ? task.labelIds.filter((id) => id !== labelId)
       : [...task.labelIds, labelId];
+
     onUpdate({ labelIds: next });
   };
 
   const createLabel = async (name: string) => {
     if (!name || creating) return;
     setCreating(true);
+
     try {
       const { label } = await rpc.call("createLabel", {
         projectId: task.projectId,
         name,
         color: DEFAULT_COLOR,
       });
+
       onUpdate({ labelIds: [...task.labelIds, label.id] });
       setQuery("");
     } finally {
@@ -248,6 +275,7 @@ function LabelsMenu({
   };
 
   const labelList = labels ?? [];
+
   return (
     <Popover onOpenChange={(open) => open || setQuery("")}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
@@ -282,6 +310,7 @@ function LabelsMenu({
                   disabled={creating}
                   onSelect={() => {
                     const name = query.trim();
+
                     if (name) void createLabel(name);
                   }}
                 >
@@ -342,6 +371,7 @@ function ProjectMenu({
   triggerClassName: string;
 }) {
   const [open, setOpen] = useState(false);
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -366,6 +396,7 @@ function ProjectMenu({
                   value={`${candidate.name} ${candidate.prefix}`}
                   onSelect={() => {
                     setOpen(false);
+
                     if (candidate.id !== task.projectId) {
                       onMoveToProject(candidate.id);
                     }
@@ -392,12 +423,12 @@ function ProjectMenu({
 
 function DispatchTargetMenu({
   project,
-  bbProjects,
+  omnyoProjects,
   onError,
   triggerClassName,
 }: {
   project: Project;
-  bbProjects: readonly BbProjectOption[];
+  omnyoProjects: readonly OmnyoProjectOption[];
   onError: (message: string) => void;
   triggerClassName: string;
 }) {
@@ -405,18 +436,20 @@ function DispatchTargetMenu({
   const [open, setOpen] = useState(false);
   const [selection, setSelection] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const linkedBbProjectId = project.linkedBbProjectId;
-  const linkedName = bbProjects.find(
-    (candidate) => candidate.id === linkedBbProjectId,
+  const linkedAppProjectId = project.linkedAppProjectId;
+
+  const linkedName = omnyoProjects.find(
+    (candidate) => candidate.id === linkedAppProjectId,
   )?.name;
 
   const save = async (linkedId: string | null) => {
     if (saving) return;
     setSaving(true);
+
     try {
       await rpc.call("updateProject", {
         projectId: project.id,
-        linkedBbProjectId: linkedId,
+        linkedAppProjectId: linkedId,
       });
       setOpen(false);
     } catch (saveError) {
@@ -430,37 +463,39 @@ function DispatchTargetMenu({
     <Popover
       open={open}
       onOpenChange={(next) => {
-        if (next) setSelection(linkedBbProjectId);
+        if (next) setSelection(linkedAppProjectId);
         setOpen(next);
       }}
     >
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label="Edit dispatch target"
+          aria-label="Change where agents start"
+          title="The Omnyo project where new agent chats for this task start"
           className={triggerClassName}
         >
-          <Icon name="ArrowUpRight" className="size-3.5 shrink-0" />
-          {linkedBbProjectId !== null ? (
-            <span className="truncate" title={linkedBbProjectId}>
-              {linkedName ?? linkedBbProjectId}
-            </span>
+          <Icon
+            name="Folder"
+            className="size-3.5 shrink-0 text-muted-foreground"
+          />
+          {linkedAppProjectId !== null ? (
+            <span className="truncate">{linkedName ?? linkedAppProjectId}</span>
           ) : (
             <span className="truncate text-muted-foreground">
-              Link a bb project…
+              Choose a project…
             </span>
           )}
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-3">
-        <BbProjectLinkPicker
+        <OmnyoProjectLinkPicker
           value={selection}
           onChange={setSelection}
-          bbProjects={bbProjects}
-          noneLabel={linkedBbProjectId !== null ? "Unlink" : "Not linked"}
+          omnyoProjects={omnyoProjects}
+          noneLabel={linkedAppProjectId !== null ? "Unlink" : "Not linked"}
         />
         <div className="mt-2.5 flex items-center justify-between gap-2">
-          {linkedBbProjectId !== null ? (
+          {linkedAppProjectId !== null ? (
             <Button
               variant="ghost"
               size="sm"
@@ -488,8 +523,10 @@ function DispatchTargetMenu({
   );
 }
 
-const RAIL_ROW_CLASS =
-  "-mx-1.5 flex w-[calc(100%+0.75rem)] items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-state-hover";
+const RAIL_ROW_CLASS = cn(
+  "flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-1.5 text-left text-sm hover:bg-state-hover",
+  FOCUS_RING_CLASS,
+);
 
 export function PropertiesRail({
   task,
@@ -510,110 +547,154 @@ export function PropertiesRail({
   const taskLabels = (labels ?? []).filter((label) =>
     task.labelIds.includes(label.id),
   );
+
   const active = threads.filter(isActiveThread);
-  const bbProjects = useTasksQuery(
-    async (query) => (await query.call("listBbProjects")).bbProjects,
+
+  const omnyoProjects = useTasksQuery(
+    async (query) => (await query.call("listAppProjects")).appProjects,
     ["projects:changed"],
   );
+
   return (
-    <aside className={cn("w-56 shrink-0 py-10 pl-2 pr-6", className)}>
-      <h2 className="mb-1.5 text-xs font-semibold text-muted-foreground">
+    <aside
+      aria-label="Task properties"
+      className={cn("w-64 shrink-0 py-10 pl-2 pr-6", className)}
+    >
+      <h2 className="mb-2 text-xs font-semibold text-muted-foreground">
         Properties
       </h2>
-      <StatusMenu
-        task={task}
-        onUpdate={onUpdate}
-        triggerClassName={RAIL_ROW_CLASS}
-      />
-      <PriorityMenu
-        task={task}
-        onUpdate={onUpdate}
-        triggerClassName={RAIL_ROW_CLASS}
-      />
-      <DueDateMenu
-        task={task}
-        onUpdate={onUpdate}
-        triggerClassName={RAIL_ROW_CLASS}
-      />
+      <dl className="grid grid-cols-[4.75rem_minmax(0,1fr)] items-center gap-x-1 gap-y-0.5">
+        <RailField label="Status">
+          <StatusMenu
+            task={task}
+            onUpdate={onUpdate}
+            triggerClassName={RAIL_ROW_CLASS}
+          />
+        </RailField>
+        <RailField label="Priority">
+          <PriorityMenu
+            task={task}
+            onUpdate={onUpdate}
+            triggerClassName={RAIL_ROW_CLASS}
+          />
+        </RailField>
+        <RailField label="Due date">
+          <DueDateMenu
+            task={task}
+            onUpdate={onUpdate}
+            triggerClassName={RAIL_ROW_CLASS}
+          />
+        </RailField>
+        <RailField label="Project">
+          <ProjectMenu
+            task={task}
+            project={project}
+            projects={projects}
+            onMoveToProject={onMoveToProject}
+            triggerClassName={RAIL_ROW_CLASS}
+          />
+        </RailField>
+        <RailField label="Labels" alignTop>
+          <div className="flex min-h-7 flex-wrap items-center gap-1 px-1.5 py-1">
+            {taskLabels.map((label) => (
+              <LabelChip key={label.id} label={label} />
+            ))}
+            <LabelsMenu task={task} labels={labels} onUpdate={onUpdate}>
+              <button
+                type="button"
+                aria-label="Edit labels"
+                title="Add or remove labels"
+                className={cn(
+                  "inline-flex h-5 items-center gap-1 rounded-md border border-dashed border-border px-1.5 text-2xs text-muted-foreground hover:border-input hover:text-foreground",
+                  FOCUS_RING_CLASS,
+                )}
+              >
+                <Icon name="Plus" className="size-3" />
+                {taskLabels.length === 0 ? "Add" : null}
+              </button>
+            </LabelsMenu>
+          </div>
+        </RailField>
+      </dl>
 
-      <div className="mb-1 mt-3 text-2xs font-semibold text-muted-foreground">
-        Labels
-      </div>
-      <div className="flex flex-wrap items-center gap-1 py-0.5">
-        {taskLabels.map((label) => (
-          <LabelChip key={label.id} label={label} />
-        ))}
-        <LabelsMenu task={task} labels={labels} onUpdate={onUpdate}>
-          <button
-            type="button"
-            aria-label="Edit labels"
-            className="inline-flex items-center rounded-md border border-dashed border-border px-1.5 py-0.5 text-muted-foreground hover:border-input hover:text-foreground"
-          >
-            <Icon name="Plus" className="size-3" />
-          </button>
-        </LabelsMenu>
-      </div>
-
-      <div className="mb-1 mt-3 text-2xs font-semibold text-muted-foreground">
-        Project
-      </div>
-      <ProjectMenu
-        task={task}
-        project={project}
-        projects={projects}
-        onMoveToProject={onMoveToProject}
-        triggerClassName={RAIL_ROW_CLASS}
-      />
-
-      <div className="mb-1 mt-3 text-2xs font-semibold text-muted-foreground">
-        Dispatch target
-      </div>
-      {project !== undefined ? (
-        <DispatchTargetMenu
-          project={project}
-          bbProjects={bbProjects.data ?? []}
-          onError={onError}
-          triggerClassName={RAIL_ROW_CLASS}
-        />
-      ) : (
-        <div className="py-0.5 text-sm text-muted-foreground">…</div>
-      )}
-
-      <div className="mt-2.5 py-0.5">
-        <DispatchControl
-          taskId={task.id}
-          presets={presets}
-          onError={onError}
-          align="start"
-          className="w-full"
-        />
-      </div>
-
-      <div className="mb-1 mt-3 text-2xs font-semibold text-muted-foreground">
-        Agents
-      </div>
-      <div className="flex flex-col gap-1 py-0.5 text-xs">
-        {active.length > 0 ? (
-          active.map((thread) => (
-            <span
-              key={thread.id}
-              className="flex items-center gap-1.5 font-medium text-success"
-            >
-              <span
-                aria-hidden
-                className="size-1.5 shrink-0 animate-pulse rounded-full bg-success"
+      <div className="mt-5 border-t border-border-hairline pt-4">
+        <h2 className="text-xs font-semibold text-muted-foreground">Agents</h2>
+        <p className="mb-2 mt-0.5 text-xs text-subtle-foreground">
+          Start an agent chat that works on this task.
+        </p>
+        <dl className="grid grid-cols-[4.75rem_minmax(0,1fr)] items-center gap-x-1">
+          <RailField label="Starts in">
+            {project !== undefined ? (
+              <DispatchTargetMenu
+                project={project}
+                omnyoProjects={omnyoProjects.data ?? []}
+                onError={onError}
+                triggerClassName={RAIL_ROW_CLASS}
               />
-              <span className="truncate">
-                {thread.presetName}{" "}
-                {thread.liveStatus === "starting" ? "starting" : "working"}
+            ) : (
+              <span className="px-1.5 text-sm text-muted-foreground">…</span>
+            )}
+          </RailField>
+        </dl>
+        <div className="mt-2">
+          <DispatchControl
+            taskId={task.id}
+            presets={presets}
+            onError={onError}
+            align="start"
+            className="w-full"
+          />
+        </div>
+        <div className="mt-3 flex flex-col gap-1.5 text-xs">
+          {active.length > 0 ? (
+            active.map((thread) => (
+              <span
+                key={thread.id}
+                className="flex min-w-0 items-center gap-2 text-foreground"
+              >
+                <StatusDot
+                  tone={thread.liveStatus === "starting" ? "pending" : "active"}
+                />
+                <span className="min-w-0 truncate font-medium">
+                  {thread.presetName}
+                </span>
+                <span className="shrink-0 text-muted-foreground">
+                  {thread.liveStatus === "starting" ? "starting" : "working"}
+                </span>
               </span>
+            ))
+          ) : (
+            <span className="text-muted-foreground">
+              No agent is working on this task.
             </span>
-          ))
-        ) : (
-          <span className="text-muted-foreground">none active</span>
-        )}
+          )}
+        </div>
       </div>
     </aside>
+  );
+}
+
+function RailField({
+  label,
+  alignTop = false,
+  children,
+}: {
+  label: string;
+  alignTop?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      <dt
+        className={cn(
+          "text-xs text-muted-foreground",
+          alignTop && "self-start pt-1.5",
+        )}
+      >
+        {label}
+      </dt>
+      <dd className="min-w-0">{children}</dd>
+    </>
   );
 }
 
@@ -638,6 +719,7 @@ export function InlineProperties({
   const taskLabels = (labels ?? []).filter((label) =>
     task.labelIds.includes(label.id),
   );
+
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
       <ProjectMenu

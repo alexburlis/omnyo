@@ -8,6 +8,7 @@ const originalDescriptor = Object.getOwnPropertyDescriptor(
   Socket.prototype,
   "setTypeOfService",
 );
+
 const runtimeSetsTypeOfService = originalDescriptor !== undefined;
 
 const RESETTING_SERVER_SOURCE = `
@@ -19,8 +20,10 @@ server.listen(0, "127.0.0.1", () => process.stdout.write(server.address().port +
 function restoreSetTypeOfService(): void {
   if (originalDescriptor === undefined) {
     Reflect.deleteProperty(Socket.prototype, "setTypeOfService");
+
     return;
   }
+
   Object.defineProperty(
     Socket.prototype,
     "setTypeOfService",
@@ -44,6 +47,7 @@ function setTypeOfService(socket: Socket): unknown {
 
 function blockEventLoop(durationMs: number): void {
   const until = Date.now() + durationMs;
+
   while (Date.now() < until) {}
 }
 
@@ -67,9 +71,11 @@ describe("installSocketTypeOfServiceGuard", () => {
     "rejects fetch when the peer resets the connection before the request is written",
     async () => {
       installSocketTypeOfServiceGuard();
+
       const server = spawn(process.execPath, ["-e", RESETTING_SERVER_SOURCE], {
         stdio: ["ignore", "pipe", "inherit"],
       });
+
       try {
         const [portChunk] = await once(server.stdout, "data");
         const request = fetch(`http://127.0.0.1:${String(portChunk).trim()}/`);

@@ -1,4 +1,5 @@
-import type { EnvironmentRemoval } from "@bb/domain";
+import type { PluginErrorDiagnostic } from "./error-report-diagnostic.js";
+import type { EnvironmentRemoval, ThreadMaintenanceKind } from "@omnyo/domain";
 import type { MachineBootstrapApi } from "./machine-bootstrap.js";
 import type Database from "better-sqlite3";
 import type { Context } from "hono";
@@ -17,24 +18,25 @@ import type {
   ReasoningLevel,
   ServiceTier,
   ThreadCreateOrigin,
+  ThreadEventType,
   ThreadQueuedMessage,
   ThreadTurnInitiator,
   WorkspaceProvisionType,
-} from "@bb/domain";
-import type { ProviderFork } from "@bb/domain/provider-fork";
+} from "@omnyo/domain";
+import type { ProviderFork } from "@omnyo/domain/provider-fork";
 import type {
-  BbSdk,
+  OmnyoSdk,
   PluginThreadMetadataListArgs,
   PluginThreadMetadataListResult,
   ThreadPluginMetadataArgs,
   ThreadPluginMetadataUpdateArgs,
   ThreadPluginMetadataResult,
-} from "@bb/sdk";
+} from "@omnyo/sdk";
 import type {
   ExecutionInputFieldSource,
   ThreadResponse,
   TerminalSession,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { JsonValue, ReadonlyJsonValue } from "./json-value.js";
 import type {
   ExperimentalPluginRpcHandlersWithContext,
@@ -47,14 +49,14 @@ import type {
 } from "./host-contract.js";
 
 /**
- * The backend plugin API contract — the `bb` object handed to a plugin's
- * `server.ts` factory (`export default function plugin(bb: BbPluginApi)`).
+ * The backend plugin API contract — the `omnyo` object handed to a plugin's
+ * `server.ts` factory (`export default function plugin(api: PluginApi)`).
  *
- * Types only: the implementation lives in the BB server
+ * Types only: the implementation lives in the Omnyo server
  * (apps/server/src/services/plugins/plugin-api.ts), which imports these
  * shapes so the contract and the implementation cannot drift. Plugin authors
- * import them type-only (`import type { BbPluginApi } from
- * "@get-bb/plugin-sdk"`); the import is erased when BB loads the file.
+ * import them type-only (`import type { PluginApi } from
+ * "@omnyo/plugin-sdk"`); the import is erased when Omnyo loads the file.
  *
  * Runtime classes stay host-side. NeedsConfigurationError in particular is
  * matched by NAME, so plugin code needs no runtime import:
@@ -68,15 +70,42 @@ export interface PluginLogger {
   error(message: string): void;
 }
 
+/**
+ * Fixed identifiers for one failure sent to the server's error reporting.
+ * Each value matches `/^[A-Za-z0-9_.:-]{1,64}$/`; never put user content,
+ * tokens or free text here.
+ */
+export interface ExperimentalPluginErrorReport {
+  experimental_diagnostic?: PluginErrorDiagnostic;
+  /** The failed operation, such as `"expo.receipt"`. */
+  operation: string;
+  /** A fixed failure code, such as a provider error code. */
+  code: string;
+}
+
 // ---------------------------------------------------------------------------
 // Settings (design §4.2).
 // ---------------------------------------------------------------------------
+
+/**
+ * A titled group on the settings page. Fields naming the same `title` render
+ * together, after the ungrouped fields, in the order each group's first field
+ * was defined. Every field naming a title must repeat the same description.
+ */
+export interface ExperimentalPluginSettingSection {
+  title: string;
+  /** One line saying what the group's fields make possible. */
+  description?: string;
+}
 
 export type PluginSettingDescriptor =
   | {
       type: "string";
       label: string;
       description?: string;
+      experimental_section?: ExperimentalPluginSettingSection;
+      /** Example input shown while the field is empty; never stored. */
+      experimental_placeholder?: string;
       /** Stored in a 0600 file under <dataDir>/plugins/<id>/secrets/, never in the db or sent to the frontend. */
       secret?: true;
       /**
@@ -92,6 +121,7 @@ export type PluginSettingDescriptor =
       type: "boolean";
       label: string;
       description?: string;
+      experimental_section?: ExperimentalPluginSettingSection;
       /** Synchronously validate without transforming a proposed value. */
       experimental_schema?: StandardSchemaV1<boolean, boolean>;
       default?: boolean;
@@ -100,6 +130,9 @@ export type PluginSettingDescriptor =
       type: "number";
       label: string;
       description?: string;
+      experimental_section?: ExperimentalPluginSettingSection;
+      /** Example input shown while the field is empty; never stored. */
+      experimental_placeholder?: string;
       experimental_schema?: StandardSchemaV1<number, number>;
       default?: number;
     }
@@ -107,6 +140,7 @@ export type PluginSettingDescriptor =
       type: "select";
       label: string;
       description?: string;
+      experimental_section?: ExperimentalPluginSettingSection;
       options: string[];
       /** Display labels keyed by option value; options without one show the value itself. */
       experimental_optionLabels?: Record<string, string>;
@@ -118,6 +152,7 @@ export type PluginSettingDescriptor =
       type: "project";
       label: string;
       description?: string;
+      experimental_section?: ExperimentalPluginSettingSection;
       /** Synchronously validate without transforming a proposed value. */
       experimental_schema?: StandardSchemaV1<string, string>;
       default?: string;
@@ -181,21 +216,39 @@ export interface PluginKvStorage {
   list(prefix?: string): Promise<string[]>;
 }
 
+/**
+ * Secret values sealed under this server's vault key, which the operating
+ * system holds (macOS Keychain, Windows DPAPI). Names are `/`-separated
+ * segments of letters, digits, `.`, `_` and `-`; no segment starts with `.`;
+ * at most four segments and 200 characters. A secret setting `key` declared
+ * with `secret: true` is the secret named `key`. Reading a value that was
+ * stored as plaintext by an earlier plugin version seals it in place.
+ * Experimental: see docs/api_to_audit.md.
+ */
+export interface PluginSecrets {
+  get(name: string): Promise<string | undefined>;
+  set(name: string, value: string): Promise<void>;
+  delete(name: string): Promise<void>;
+  list(prefix?: string): Promise<string[]>;
+}
+
 export interface PluginStorage {
-  /** Namespaced JSON key-value rows in bb.db; values ≤256KB each. */
+  /** Namespaced JSON key-value rows in app.db; values ≤256KB each. */
   kv: PluginKvStorage;
   /**
    * The plugin's own SQLite database at <dataDir>/plugins/<id>/data.db — the
-   * server's better-sqlite3, WAL mode, busy_timeout 5000. Returns the same
-   * open handle for the whole plugin load, so calling it per request is
-   * cheap; a new handle is opened only on the first call or after the
-   * plugin closed the previous one. The host closes handles on
+   * server's better-sqlite3, WAL mode, busy_timeout 5000. A file the host
+   * creates uses incremental auto_vacuum, so the plugin can return freed
+   * pages with `PRAGMA incremental_vacuum`; Omnyo never runs a full VACUUM on
+   * it. Returns the same open handle for the whole plugin load, so calling it
+   * per request is cheap; a new handle is opened only on the first call or
+   * after the plugin closed the previous one. The host closes handles on
    * dispose/reload; a closed handle throws on use.
    */
   database(): Database.Database;
   /**
    * Ordered-statement migration helper: statement index = migration id in a
-   * `_bb_migrations` table; unapplied statements run in one transaction. The
+   * `_plugin_migrations` table; unapplied statements run in one transaction. The
    * host records each statement hash and rejects changed or reused indexes.
    * Append-only — never reorder or edit shipped statements.
    */
@@ -212,8 +265,8 @@ export interface PluginStorage {
  *
  * Ids and failure facts only. There is no thread DTO and no copy of the
  * message that failed: a retry re-submits the turn BY REFERENCE
- * (`bb.sdk.threads.retry`), so the id is the whole of what a policy needs, and
- * anything else about the thread is one `bb.sdk.threads.get` away and fresher
+ * (`api.sdk.threads.retry`), so the id is the whole of what a policy needs, and
+ * anything else about the thread is one `api.sdk.threads.get` away and fresher
  * for being read when it is used.
  */
 export interface PluginTurnFailedEvent {
@@ -221,7 +274,7 @@ export interface PluginTurnFailedEvent {
   threadId: string;
   /**
    * The failed turn's `client/turn/requested` id — what
-   * `bb.sdk.threads.retry` takes as `turnRequestId`. On a retry's failure this
+   * `api.sdk.threads.retry` takes as `turnRequestId`. On a retry's failure this
    * is the RETRY's id; core walks back to the request the chain started from
    * when it queues the next attempt.
    */
@@ -257,23 +310,59 @@ export interface PluginTurnFailedEvent {
 }
 
 /**
- * Lifecycle events a plugin can observe with `bb.events.on` (design §4.5).
+ * Lifecycle events a plugin can observe with `api.events.on` (design §4.5).
  *
  * **Events are announcements core makes.** Something already happened; a
  * handler is told about it and whatever it returns is IGNORED. Handlers run
  * fire-and-forget after the change is applied and can never block or veto it.
- * The surface that *can* is `bb.experimental_hooks`, where core asks a
+ * The surface that *can* is `api.experimental_hooks`, where core asks a
  * question and acts on the answer — the same split git draws between its
  * post-commit and pre-commit hooks.
  *
- * `thread` is the same public DTO GET /threads/:id serves and `entry` is the
- * queued row GET /threads/:id/queued-messages serves.
+ * `thread` is the same public DTO GET /threads/:id serves, plus
+ * `experimental_maintenance`, and `entry` is the queued row
+ * GET /threads/:id/queued-messages serves.
  */
+type PluginEventThread = ThreadResponse & {
+  /**
+   * The core maintenance run the thread is executing right now, or null when
+   * it is running an ordinary turn or is not running. `"auto-compaction"` is
+   * core compacting an idle chat before its prompt cache expires: the run is
+   * not the owner's turn, so core suppresses `thread.active`, `thread.idle`,
+   * `thread.failed` and `turn.failed` for it and reports it through
+   * `experimental_thread.maintenance` instead. Core sets it on every thread
+   * it delivers in an event payload; it is absent on a thread a plugin read
+   * through `api.sdk.threads`, so a plugin can pass either one where this type
+   * is expected. Experimental: see docs/api_to_audit.md.
+   */
+  experimental_maintenance?: ThreadMaintenanceKind | null;
+};
+
 export interface PluginThreadEventPayloads {
   "experimental_environment.removed": { removal: EnvironmentRemoval };
 
   /** Debounced per thread (at most once per second), with the latest sequence and current thread DTO. Reading history does not emit this event. */
-  "experimental_thread.events": { thread: ThreadResponse; sequence: number };
+  "experimental_thread.events": {
+    thread: PluginEventThread;
+    sequence: number;
+    /** Captured appended types, absent when batch coverage is unknown or the host predates filters. */
+    experimental_eventTypes?: readonly ThreadEventType[];
+    /** The exact contiguous appended range represented by experimental_eventTypes, independent of the newer snapshot sequence. */
+    experimental_coveredSequence?: { from: number; to: number };
+  };
+  /**
+   * Fired when a core maintenance run (today only `"auto-compaction"`) starts
+   * and when it ends, in place of `thread.active` and `thread.idle`,
+   * `thread.failed` or `turn.failed`. `outcome` is null on `started`; on
+   * `ended` it is `completed`, `failed` or `stopped`. A maintenance run always
+   * ends with the thread idle and never counts as the owner's turn.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  "experimental_thread.maintenance": {
+    thread: PluginEventThread;
+    phase: "started" | "ended";
+    outcome: "completed" | "failed" | "stopped" | null;
+  };
   /**
    * Fired after a thread moves to a new parent or loses its parent: a
    * `threads.update` that changes `parentThreadId`, or core releasing a
@@ -282,7 +371,7 @@ export interface PluginThreadEventPayloads {
    * event of its own. Experimental: see docs/api_to_audit.md.
    */
   "experimental_thread.parentChanged": {
-    thread: ThreadResponse;
+    thread: PluginEventThread;
     previousParentThreadId: string | null;
   };
   /** Real accepted terminal input; excludes output, keepalives and input contents. */
@@ -290,22 +379,25 @@ export interface PluginThreadEventPayloads {
   /**
    * Fired once after a machine is removed, whether a user removed it or its
    * machine provider finished tearing it down. `host` is the record as it was
-   * when it was removed; `bb.sdk.hosts.get` answers 404 for it from now on, so
+   * when it was removed; `api.sdk.hosts.get` answers 404 for it from now on, so
    * this is the moment to drop anything the plugin keeps per host.
    */
   "experimental_host.deleted": { host: Host };
   /** Fired after a thread row is created. */
-  "thread.created": { thread: ThreadResponse };
+  "thread.created": { thread: PluginEventThread };
   /** Fired when a thread transitions into `active`. */
-  "thread.active": { thread: ThreadResponse };
+  "thread.active": { thread: PluginEventThread };
   /** Fired when a thread transitions into `idle`. `lastAssistantText` is
    * assembled the same way GET /threads/:id/output is. */
-  "thread.idle": { thread: ThreadResponse; lastAssistantText: string | null };
+  "thread.idle": {
+    thread: PluginEventThread;
+    lastAssistantText: string | null;
+  };
   /** Fired when a thread transitions into `error`. `error` is the latest
    * system/error event message, when one exists. */
-  "thread.failed": { thread: ThreadResponse; error: string | null };
+  "thread.failed": { thread: PluginEventThread; error: string | null };
   /** Fired after a thread is archived (including cascade archives). */
-  "thread.archived": { thread: ThreadResponse };
+  "thread.archived": { thread: PluginEventThread };
   /**
    * Fired after a thread comes back from the archive. Nothing is provisioned
    * here: a provider that tore its environment down on archive is asked to
@@ -313,12 +405,12 @@ export interface PluginThreadEventPayloads {
    * environment in the ask's context. This is the moment to start warming
    * one up ahead of that ask.
    */
-  "thread.unarchived": { thread: ThreadResponse };
+  "thread.unarchived": { thread: PluginEventThread };
   /** Fired after a thread is soft-deleted. */
-  "thread.deleted": { thread: ThreadResponse };
+  "thread.deleted": { thread: PluginEventThread };
   /** Fired after a pending interaction row is committed. */
   "interaction.pending": {
-    thread: ThreadResponse;
+    thread: PluginEventThread;
     interaction: PendingInteraction;
   };
   /**
@@ -329,7 +421,7 @@ export interface PluginThreadEventPayloads {
    *
    * Every listener sees every queued row, not just the ones it is holding: an
    * observer that only wants its own filters on
-   * `entry.waitingOn?.kind === "plugin" && entry.waitingOn.pluginId === bb.pluginId`.
+   * `entry.waitingOn?.kind === "plugin" && entry.waitingOn.pluginId === api.pluginId`.
    *
    * A re-queue fires this again with the new wait, because a row that moved
    * from one wait to another is news to whoever was waiting on the old one.
@@ -345,7 +437,7 @@ export interface PluginThreadEventPayloads {
    *
    * An announcement, not a question: the failure stands exactly as core
    * applied it, and a listener that wants another attempt asks for one with
-   * `bb.sdk.threads.retry({ threadId, turnRequestId, sendAt })`. That retry is
+   * `api.sdk.threads.retry({ threadId, turnRequestId, sendAt })`. That retry is
    * an ordinary dispatch attempt, so it still passes the `message.dispatch`
    * hook — a retry coming back after a rate-limit window respects a limiter
    * that is at capacity instead of jumping the queue.
@@ -353,7 +445,7 @@ export interface PluginThreadEventPayloads {
   "turn.failed": PluginTurnFailedEvent;
   /**
    * Fired after a queued row is removed before it ever dispatched — the user
-   * deleted it from the queued card or `bb thread queue`. This is the only
+   * deleted it from the queued card or `omnyo thread queue`. This is the only
    * signal for that removal: a plugin holding external resources for a
    * waiting message (a sandbox mid-provision, a reserved slot) releases them
    * here. Rows that dispatch fire `message.dispatched` instead, and rows that
@@ -507,6 +599,75 @@ export interface PluginServerAccess {
   recheck(): void;
 }
 
+/** Passed to an event source's `check` and `proof`; aborts when Omnyo stops waiting for the call. */
+export interface PluginEventSourceContext {
+  readonly signal: AbortSignal;
+}
+
+/** One target whose event happened, with the text the waiting chat receives as its result. */
+export interface PluginEventSourceFiring {
+  readonly target: string;
+  readonly result: string;
+}
+
+/** One target the source cannot check, such as an item that does not exist; after three in a row Omnyo tells its waiting chats. */
+export interface PluginEventSourceProblem {
+  readonly target: string;
+  readonly problem: string;
+}
+
+/**
+ * Omnyo polls a source only while some wait is pending on one of its keys, and
+ * batches every pending target of the family into one `check` call. Return a
+ * firing for each target whose event happened and a problem for each target
+ * that cannot be checked; omit targets that are still waiting. Throw only when
+ * the whole source cannot check, such as when it is signed out or offline.
+ */
+export interface PluginEventSourcePoll {
+  /** Milliseconds between checks while a wait is pending: at least 60 000. Omnyo backs off after failures. */
+  readonly everyMs: number;
+  check(
+    targets: readonly string[],
+    context: PluginEventSourceContext,
+  ): Promise<readonly (PluginEventSourceFiring | PluginEventSourceProblem)[]>;
+}
+
+/**
+ * A family of wait event keys, `<family>:<target>`, that agents and owners
+ * can wait on with `omnyo wait --event`. The source only observes: it validates
+ * and describes targets and reports which ones fired. Omnyo owns scheduling,
+ * health, the Waiting rows, docs (`omnyo wait sources`) and dry runs
+ * (`omnyo wait check <key>`).
+ */
+export interface PluginEventSourceDeclaration {
+  /** Lowercase letters, digits and dashes, 2 to 32 characters; unique across plugins and core. */
+  readonly family: string;
+  /** What fires, at most 80 characters: "A GitHub pull request merges or closes". */
+  readonly label: string;
+  /** The key shape, starting with the family: "github-pr:<owner>/<repo>#<number>". */
+  readonly keyFormat: string;
+  /** One to five complete example keys; each must pass `validate`. */
+  readonly examples: readonly string[];
+  /** "owner": waits that an agent, automation or plugin registers on these keys become proposals the owner accepts. */
+  readonly approval: "none" | "owner";
+  /** Returns why a target is malformed, or null. Synchronous and cheap: it runs inside `omnyo wait`. */
+  validate(target: string): string | null;
+  /** The text on the Waiting row, at most 60 characters. */
+  describe(target: string): string;
+  /** Null for a push source, which reports through `api.sdk.experimental_inbox.reportEvent`. */
+  readonly poll: PluginEventSourcePoll | null;
+  /** A read-only access check Omnyo runs before polling; return what it proved. Null when the source needs no access. */
+  readonly proof:
+    | ((context: PluginEventSourceContext) => Promise<string>)
+    | null;
+}
+
+/** `api.experimental_eventSources`: adds wait event families that `omnyo wait --event` can name. */
+export interface PluginEventSources {
+  /** Registers one family; throws when the declaration is invalid or another plugin or Omnyo owns the family. */
+  register(source: PluginEventSourceDeclaration): void;
+}
+
 export interface PluginMachines extends MachineBootstrapApi {
   /** Read core’s current persisted provider resource, or null when the host or resource is absent. Available across plugins; resources must not contain credentials. */
   getResource(hostId: string): Promise<JsonValue | null>;
@@ -623,9 +784,11 @@ export type PluginDispatchAttemptKind = "start-turn" | "join-turn";
  *
  * It runs identically whether the attempt is inline (someone just sent) or
  * from a drain (a queued row became eligible again), and whether the message
- * is a thread's first, a follow-up, a steer, or a retry of a failed turn. A
- * handler must therefore be idempotent for one logical dispatch: passes re-run
- * on every drain, on restart, and on retry.
+ * is a thread's first, a follow-up, a steer, a retry of a failed turn, or one
+ * of core's own notices to a thread (a child finished, needs attention, or
+ * changed owner), which arrives with `initiator: "system"`.
+ * A handler must therefore be idempotent for one logical
+ * dispatch: passes re-run on every drain, on restart, and on retry.
  */
 export interface MessageDispatchHookContext {
   /**
@@ -669,7 +832,7 @@ export interface MessageDispatchHookContext {
    * when none of them has a sender, or the literal `"mixed"` when the rows
    * disagree. A thread-start names its requesting thread; a message a human
    * typed and a core-driven retry have no sender. Null therefore still means
-   * "nobody sent this" rather than "bb could not tell", so a handler may key
+   * "nobody sent this" rather than "Omnyo could not tell", so a handler may key
    * a human-versus-agent policy on it; `queuedMessages` names each row's own
    * sender. Thread ids are prefixed, so no id collides with `"mixed"`.
    */
@@ -742,7 +905,7 @@ export interface PluginHooks {
    *
    * **Hooks are questions core asks.** Core stops at a checkpoint, hands the
    * handler a context, and ACTS ON what it returns — the opposite of
-   * `bb.events`, whose handlers are told what already happened and whose
+   * `api.events`, whose handlers are told what already happened and whose
    * return value is ignored. It is the same split git draws between its
    * pre-commit and post-commit hooks, and the reason the two live in separate
    * namespaces rather than behind one `on`.
@@ -845,10 +1008,10 @@ export interface PluginHttp {
   /**
    * Register an HTTP route, mounted at
    * `/api/v1/plugins/<id>/http/<path>`. Auth modes (default "local"):
-   * - "local": Origin/Host must be a local BB app origin; non-GET requires
+   * - "local": Origin/Host must be a local Omnyo app origin; non-GET requires
    *   content-type application/json (forces a CORS preflight).
-   * - "token": requires the per-plugin token (`bb plugin token <id>`) via
-   *   the x-bb-plugin-token header or ?token=.
+   * - "token": requires the per-plugin token (`omnyo plugin token <id>`) via
+   *   the x-omnyo-plugin-token header or ?token=.
    * - "none": no checks — only for signature-verified webhooks.
    */
   route(
@@ -879,7 +1042,9 @@ export interface PluginRpc {
    * serialization. The response is `{ ok: true, result }` or
    * `{ ok: false, error: { code, message, issues? } }`. Each handler gets
    * the call's context as its second argument; `experimental_caller` names
-   * the plugin that called through `bb.sdk.plugins.callRpc`, or `client`.
+   * the plugin that called through `api.sdk.plugins.callRpc`, or `client`,
+   * and `experimental_signal` aborts when the caller stops waiting or this
+   * plugin instance is reloaded, disabled or removed.
    */
   register<Contract extends PluginRpcContract>(
     contract: Contract,
@@ -918,14 +1083,18 @@ export interface PluginBackground {
    */
   service(
     name: string,
-    service: { start(signal: AbortSignal): void | Promise<void> },
+    service: {
+      start(signal: AbortSignal): void | Promise<void>;
+      /** Bounded shutdown allowance, in milliseconds (1–300000). Omit for the host default. */
+      experimental_stopTimeoutMs?: number;
+    },
   ): void;
   /**
    * Register a cron schedule (5-field expression, server-local time). The
    * durable row keyed (pluginId, name) is upserted at load; the periodic
    * sweep claims due rows with a CAS on next_run_at, but only while this
    * plugin is loaded. Failures land in last_status/last_error, visible in
-   * `bb plugin list`.
+   * `omnyo plugin list`.
    */
   schedule(name: string, cron: string, fn: () => void | Promise<void>): void;
 }
@@ -945,7 +1114,10 @@ export interface PluginCliContext {
   cwd?: string;
   threadId?: string;
   projectId?: string;
-  /** Aborted when the invoking CLI HTTP request disconnects. */
+  /**
+   * Aborted when the invoking CLI HTTP request disconnects or this plugin
+   * instance is reloaded, disabled or removed.
+   */
   signal?: AbortSignal;
 }
 
@@ -964,7 +1136,7 @@ export type PluginInteractionResult =
 
 /**
  * What a submitted form leaves in the thread timeline, chosen by the plugin.
- * bb never stores the form's payload or the submitted value; it stores only
+ * Omnyo never stores the form's payload or the submitted value; it stores only
  * this description, so a plugin decides what the transcript keeps.
  */
 export interface PluginInteractionDescription {
@@ -989,13 +1161,13 @@ export interface PluginInteractionRequest {
   timeoutMs?: number;
   /**
    * How the form reads as a timeline row while it waits and once it settles,
-   * in the same shape as a native tool's presentation. bb fills what is left
+   * in the same shape as a native tool's presentation. Omnyo fills what is left
    * out: "Waiting for <title>" / "Submitted <title>" and the plugin's glyph.
    */
   presentation?: PluginRowPresentation;
   /**
    * Called once with the submitted value, before the waiting `requestInput`
-   * promise resolves; never for a cancellation, which bb titles itself. Its
+   * promise resolves; never for a cancellation, which Omnyo titles itself. Its
    * return is persisted on the row. A throw or a slow return leaves the row
    * with its completed label and nothing more.
    */
@@ -1034,9 +1206,9 @@ export interface PluginCliExecutionResult {
 }
 
 export interface PluginCliRegistration {
-  /** Preferred top-level command name (`bb <name> …`): lowercase [a-z0-9-]+.
+  /** Preferred top-level command name (`Omnyo <name> …`): lowercase [a-z0-9-]+.
    * A core collision logs an activation warning and remains available through
-   * `bb plugin run <plugin-id>`. */
+   * `omnyo plugin run <plugin-id>`. */
   name: string;
   summary: string;
   /** Subcommand metadata rendered in help and the plugin-commands skill
@@ -1044,7 +1216,7 @@ export interface PluginCliRegistration {
   commands?: PluginCliCommandInfo[];
   /**
    * Set when `run` answers `--help` / `-h` itself, at every level, without
-   * executing a command. The `bb` CLI then forwards help requests to the
+   * executing a command. The `omnyo` CLI then forwards help requests to the
    * plugin instead of printing the one-line `usage` from `commands`.
    * `defineCli` sets it. Leave it unset for a hand-written `run`:
    * the host cannot know that such a parser will not act on the other
@@ -1059,8 +1231,8 @@ export interface PluginCliRegistration {
 
 export interface PluginCli {
   /**
-   * Register this plugin's `bb` subcommand. One registration per factory
-   * execution; a repeated call is rejected. Core bb commands always win
+   * Register this plugin's `omnyo` subcommand. One registration per factory
+   * execution; a repeated call is rejected. Core Omnyo commands always win
    * name collisions; the plugin is warned and remains explicitly callable by id.
    */
   register(registration: PluginCliRegistration): void;
@@ -1070,7 +1242,7 @@ export interface PluginCli {
 // Agent surfaces: per-turn context and native tools (design §4.4).
 // ---------------------------------------------------------------------------
 
-/** Per-turn context handed to bb.agents context providers (design §4.4). */
+/** Per-turn context handed to api.agents context providers (design §4.4). */
 /** MCP-style content parts a native tool may return (design §4.4). */
 export type PluginAgentToolContentPart =
   | { type: "text"; text: string }
@@ -1086,7 +1258,7 @@ export interface PluginAgentToolContext {
   projectId: string;
   /**
    * Aborts when the tool-call request is cancelled, the thread is stopped or
-   * deleted, or this plugin is disposed. Opening a form with `bb.ui.requestInput`
+   * deleted, or this plugin is disposed. Opening a form with `api.ui.requestInput`
    * detaches the call from its request: the agent receives a waiting notice,
    * and request cancellation no longer aborts this signal. The tool's eventual
    * result is delivered as a system message (success steers a running turn or
@@ -1109,7 +1281,7 @@ export interface PluginRowLabels {
 
 /**
  * How something a plugin owns reads as a timeline row (grammar v3): a native
- * tool's calls, or the row a `bb.ui.requestInput` form leaves behind. Every
+ * tool's calls, or the row a `api.ui.requestInput` form leaves behind. Every
  * field is optional: the server fills what the plugin leaves out (a generic
  * label; the plugin's branding glyph, then `Toolbox`) and hands one complete
  * presentation to whatever renders the row.
@@ -1120,7 +1292,7 @@ export interface PluginRowPresentation {
   /**
    * A named host glyph (`{ glyph: "Workflow" }`), or one of this plugin's
    * own declared icons by its namespaced glyph (`{ glyph: "<pluginId>/<name>" }`,
-   * an entry of the manifest's `bb.branding.experimental_icons` map). A
+   * an entry of the manifest's `omnyo.branding.experimental_icons` map). A
    * namespaced glyph that names another plugin or an undeclared name rejects
    * the tool registration.
    */
@@ -1146,9 +1318,9 @@ export interface PluginAgentToolRegistrationBase {
   instructions?: string;
   /**
    * How calls to this tool read as a timeline row (grammar v3). When omitted,
-   * BB shows the standard tool name (`Running <name>` / `Ran <name>`) and the
+   * Omnyo shows the standard tool name (`Running <name>` / `Ran <name>`) and the
    * plugin's branding glyph. Approval, error, and interruption states keep
-   * BB's standard rendering. See docs/api_to_audit.md.
+   * Omnyo's standard rendering. See docs/api_to_audit.md.
    */
   presentation?: PluginRowPresentation;
 }
@@ -1167,6 +1339,9 @@ export interface PluginAgentConfigurationContext {
     title: string | null;
     parentThreadId: string | null;
     sourceThreadId: string | null;
+    /** `"hidden"` for plugin background threads such as side chats and
+     * workflow workers. They cannot hold native Omnyo questions or callbacks. */
+    experimental_visibility: "visible" | "hidden";
   };
   project: {
     id: string;
@@ -1196,17 +1371,20 @@ export interface PluginAgentConfigurationContext {
      */
     capabilities: {
       /**
-       * The provider ships its own user-question affordance and bb routes it
-       * into the pending-interaction path. A plugin offering the same thing
-       * should withhold it here, or the model gets two ways to ask once.
+       * The provider relies on its own blocking user-question affordance and
+       * Omnyo routes it into the pending-interaction path. A plugin offering the
+       * same thing should withhold it here, or the model gets two ways to ask
+       * once. When false, a provider that also ships its own tool redirects
+       * it to the durable AskUserQuestion tool whenever Omnyo supplies one.
        */
       supportsNativeUserQuestion: boolean;
     };
   };
   /** How the thread was spawned. A side chat is the builtin side-chat
-   * plugin's fork: `{ kind: "fork", pluginId: "side-chat" }`. */
+   * plugin's fork: `{ kind: "fork", pluginId: "side-chat" }`. A chat handed
+   * off from another chat has `kind: "handoff"`. */
   origin: {
-    kind: "fork" | null;
+    kind: "fork" | "handoff" | null;
     pluginId: string | null;
   };
 }
@@ -1235,7 +1413,7 @@ export interface PluginAgentConfiguration {
   /** Skill frontmatter names from this plugin's manifest skill roots.
    * Duplicate or unknown names reject this plugin's complete selection. */
   skills: string[];
-  /** Optional dynamic instructions. Output is truncated to 4096 characters. */
+  /** Optional dynamic instructions. Output is truncated to 32768 characters. */
   instructions?: string;
 }
 
@@ -1244,7 +1422,7 @@ export interface PluginAgentConfiguration {
 // ---------------------------------------------------------------------------
 
 /**
- * Permission modes a provider can run a session in — BB's own permission
+ * Permission modes a provider can run a session in — Omnyo's own permission
  * vocabulary, ordered least ("accept-edits") to most ("full") privileged.
  */
 export type PluginProviderPermissionMode = "accept-edits" | "auto" | "full";
@@ -1266,7 +1444,7 @@ export type PluginProviderReasoningLevel =
 
 /**
  * Composer actions a provider supports, by name only. The skills
- * slash-command typeahead is universal — BB injects skills into every
+ * slash-command typeahead is universal — Omnyo injects skills into every
  * provider — so it is implicit and never declared, and the composer owns the
  * trigger syntax (`/plan `, `/goal `) rather than each declaration repeating
  * it.
@@ -1289,8 +1467,8 @@ export interface PluginProviderCapabilities {
   /** The provider accepts a fast/priority service-tier choice — shows the
    * service-tier toggle in the picker. */
   supportsServiceTier: boolean;
-  /** The provider ships its own native ask-user-question tool — the
-   * ask-user-question plugin skips registering its duplicate. */
+  /** The provider relies on its own blocking ask-user-question tool, so the
+   * ask-user-question plugin skips registering its durable duplicate. */
   supportsNativeUserQuestion: boolean;
   /**
    * How completely the provider can clone a session: `"none"` (not at all),
@@ -1304,10 +1482,10 @@ export interface PluginProviderCapabilities {
   /** The provider accepts an explicit context-compaction request — gates the
    * compact affordance. */
   supportsManualCompaction: boolean;
-  /** The provider keeps its own thread archive, so BB mirrors archive and
-   * unarchive onto it instead of tracking the state only in bb's own rows. */
+  /** The provider keeps its own thread archive, so Omnyo mirrors archive and
+   * unarchive onto it instead of tracking the state only in Omnyo's own rows. */
   supportsThreadArchive: boolean;
-  /** The provider stores a thread name of its own, so BB forwards renames to
+  /** The provider stores a thread name of its own, so Omnyo forwards renames to
    * it. */
   supportsThreadRename: boolean;
   /** Permission modes the provider can actually run in. Non-empty, no
@@ -1322,7 +1500,7 @@ export interface PluginProviderCapabilities {
  * Provider copy core surfaces render from per-provider tables today (usage
  * banners, sign-in hints, the mobile picker, the agent guide). Declared once
  * here so no core surface keys copy on a provider id. Mirrors
- * `providerStringsSchema` in `@bb/domain`, which is the client projection.
+ * `providerStringsSchema` in `@omnyo/domain`, which is the client projection.
  */
 export interface PluginProviderStrings {
   /** How to sign in on the host ("Run `claude` on the machine to sign in."). */
@@ -1375,17 +1553,17 @@ export interface PluginProviderOptionsContext {
   projectId: string;
   /** The resolved model id for this command. */
   model: string;
-  /** BB's permission mode for this command (already clamped to the host). */
+  /** Omnyo's permission mode for this command (already clamped to the host). */
   permissionMode: PluginProviderPermissionMode;
   /**
    * `"plan"` when the prompt entered plan mode through this provider's
    * declared `plan` composer action. Absent for an ordinary prompt — plan
-   * mode is a BB prompt mode, so the bridge maps it onto whatever the agent
+   * mode is an Omnyo prompt mode, so the bridge maps it onto whatever the agent
    * calls it natively.
    */
   promptMode?: "plan";
   /**
-   * This plugin's own settings values (`bb.settings.define`), read at call
+   * This plugin's own settings values (`api.settings.define`), read at call
    * time. Secret settings are omitted — provider options ride the daemon
    * wire and are persisted with the session, so a secret must never be
    * derived into them.
@@ -1449,7 +1627,7 @@ export type PluginProviderNativeRootEntry = ProviderNativeRootInput;
 export type PluginProviderNativeRoots = ProviderNativeRootsInputLike;
 
 /**
- * One provider this plugin contributes to BB's provider registry.
+ * One provider this plugin contributes to Omnyo's provider registry.
  *
  * Ids are stable public identifiers — thread rows and routes reference them —
  * and are collision-rejected: a declaration whose id matches another plugin's
@@ -1459,11 +1637,11 @@ export type PluginProviderNativeRoots = ProviderNativeRootsInputLike;
  *
  * A declaration owns the provider's static metadata and bridge options. The
  * executable implementation is the plugin's own provider bridge: the
- * `experimental_providerBridge` export of the `bb.host` artifact the manifest
+ * `experimental_providerBridge` export of the `omnyo.host` artifact the manifest
  * names (`PROVIDER_BRIDGE_EXPORT_NAME` in the bridge kit), built into the
- * artifact BB ships to hosts. Declaring a provider in a plugin with no
- * `bb.host` entry is refused, because the picker entry would exist and no
- * turn on it could ever run; a `bb.host` entry whose artifact failed to
+ * artifact Omnyo ships to hosts. Declaring a provider in a plugin with no
+ * `omnyo.host` entry is refused, because the picker entry would exist and no
+ * turn on it could ever run; a `omnyo.host` entry whose artifact failed to
  * build still stages the declaration so the provider is listed as
  * unavailable.
  */
@@ -1483,9 +1661,9 @@ export interface PluginProviderDeclaration {
   /**
    * Optional picker icon: a named host glyph (`"Zap"`) or a plugin-relative
    * path starting with `"./"` (`"./icons/agent.svg"`) — the two forms
-   * `bb.branding.icon` takes — or, unlike `bb.branding.icon`, one of this
+   * `omnyo.branding.icon` takes — or, unlike `omnyo.branding.icon`, one of this
    * plugin's declared icons by its namespaced glyph (`"<pluginId>/<name>"`,
-   * an entry of the manifest's `bb.branding.experimental_icons` map; the
+   * an entry of the manifest's `omnyo.branding.experimental_icons` map; the
    * plugin id must be this plugin's and the name must be declared, else the
    * plugin fails to load). Paths follow the manifest entry-path escape rules
    * — no leading "/", no ".." segments, no backslashes.
@@ -1518,11 +1696,11 @@ export interface PluginProviderDeclaration {
   /**
    * How the thread timeline shows this provider's turns once they finish.
    * `"collapse"` (the default) folds a finished turn's work into one
-   * "Worked for" row and leaves the final answer visible. `"flat"` keeps
+   * activity row and leaves the final answer visible. `"flat"` keeps
    * every row of a finished turn visible, as it was while the turn ran. This
    * is only the provider's default: the user can choose either display for
    * each provider in Settings → Providers or with
-   * `bb settings completed-turns`, and that choice wins.
+   * `omnyo settings completed-turns`, and that choice wins.
    */
   completedTurnDisplay?: PluginProviderCompletedTurnDisplay;
   // -------------------------------------------------------------------------
@@ -1564,9 +1742,9 @@ export interface PluginProviderDeclaration {
     /**
      * How far one `model/list` answer travels. `"host"` means the catalog is
      * the same everywhere on a machine — the bridge answers from account or
-     * agent state and ignores the workspace path — so bb probes once per host
+     * agent state and ignores the workspace path — so Omnyo probes once per host
      * and reuses the answer for every environment on it. `"workspace"` (the
-     * default) means project configuration can change the answer, so bb
+     * default) means project configuration can change the answer, so Omnyo
      * probes per workspace and sends the path.
      *
      * Declaring `"host"` wrongly is a stale catalog in a workspace that
@@ -1577,7 +1755,7 @@ export interface PluginProviderDeclaration {
   };
   /**
    * Daemon environment variables this provider's bridge may read. Provider
-   * processes are spawned with every inherited `BB_*` variable stripped, so a
+   * processes are spawned with every inherited `OMNYO_*` variable stripped, so a
    * bridge that honors an operator override (a CLI path, say) names it here
    * and the daemon forwards exactly those variables. Names are
    * `[A-Z_][A-Z0-9_]*`, at most 32.
@@ -1589,7 +1767,7 @@ export interface PluginProviderDeclaration {
    * Directories this provider's agent reads its own skills from, relative to
    * the target host's home directory (`user`) or to the workspace
    * (`project`). An agent with skills of its own — an ACP agent pointed at
-   * `.cursor/skills`, say — names them here so bb can list them beside its
+   * `.cursor/skills`, say — names them here so Omnyo can list them beside its
    * own; core never guesses a provider's skill layout. Paths are relative
    * and may not contain dot segments; each side holds at most 32 roots. One
    * declaration is global, so a directory only one host can name (an agent's
@@ -1600,13 +1778,13 @@ export interface PluginProviderDeclaration {
   /**
    * Directories this provider's agent reads its own slash commands from —
    * flat directories of `*.md` prompt files (`.claude/commands`, say) — in
-   * the same two-sided shape as `experimental_nativeSkillRoots`. bb offers
+   * the same two-sided shape as `experimental_nativeSkillRoots`. Omnyo offers
    * them in the composer beside the agent's skills.
    */
   experimental_nativeCommandRoots?: PluginProviderNativeRoots;
   /**
-   * This plugin's `bb.host` entry implements
-   * `experimental_nativeRootsHostContract` (`@get-bb/plugin-sdk/host`): core
+   * This plugin's `omnyo.host` entry implements
+   * `experimental_nativeRootsHostContract` (`@omnyo/plugin-sdk/host`): core
    * calls `resolveNativeRoots({ cwd })` on the workspace host when it lists
    * commands or skills, and scans what comes back beside the declared roots.
    * This is where a provider's host-only knowledge goes — a config-moved
@@ -1644,7 +1822,7 @@ export interface PluginAgents {
    * an already-running session is not hot-mutated. Instructions follow the
    * same boundary: a live provider session keeps the instructions it was
    * constructed with, and a changed selection applies when the session is
-   * next constructed. Skill changes follow BB's environment runtime policy:
+   * next constructed. Skill changes follow Omnyo's environment runtime policy:
    * a busy runtime keeps its current catalog until a safe relaunch. Side chats
    * are ordinary plugin-owned forks here — read `origin` to detect them — and
    * their returned tool, skill, and dynamic-instruction selections apply at the
@@ -1695,7 +1873,7 @@ export interface PluginAgents {
    * provider session is next constructed (thread start or resume after a
    * daemon restart, environment switch, or provider restart), never
    * mid-session. Must be synchronous and fast — it sits on the
-   * thread-start path. Output longer than 4096 characters is truncated; a
+   * thread-start path. Output longer than 32768 characters is truncated; a
    * throwing provider is logged against the plugin and contributes nothing.
    * A repeated registration within one factory execution is rejected.
    */
@@ -1706,7 +1884,7 @@ export interface PluginAgents {
 
 /**
  * Provider registration (docs/provider-plugin-api.md §1). Owns only
- * registration; `bb.agents` keeps `configure`, `registerTool`, and
+ * registration; `api.agents` keeps `configure`, `registerTool`, and
  * `contributeInstructions`.
  */
 export interface PluginProviders {
@@ -1743,13 +1921,53 @@ export interface PluginProviders {
       | null
       | Promise<ExperimentalPluginProviderEnvHealth | null>,
   ): void;
+  /**
+   * Contributes one line shown with a provider's model list on a host, such
+   * as which account the models belong to and when a used-up account is
+   * back. Return null when nothing needs saying. The first non-null notice
+   * from any plugin wins; clients hide a notice once `until` has passed.
+   */
+  experimental_contributeModelNotice(
+    providerId: string,
+    resolve: (
+      context: ExperimentalPluginProviderModelNoticeContext,
+    ) =>
+      | ExperimentalPluginProviderModelNotice
+      | null
+      | Promise<ExperimentalPluginProviderModelNotice | null>,
+  ): void;
 }
 
-export interface ExperimentalPluginProviderEnvContext {
-  threadId: string;
-  projectId: string;
+export interface ExperimentalPluginProviderModelNoticeContext {
   hostId: string;
 }
+
+export interface ExperimentalPluginProviderModelNotice {
+  /** Short statement, e.g. "OpenAI used up". */
+  message: string;
+  /** Optional second clause, e.g. "Using openai2@". */
+  detail: string | null;
+  /** Epoch milliseconds when the notice stops applying, or null. */
+  until: number | null;
+}
+
+/**
+ * Why Omnyo needs the provider environment: `thread` (the default when
+ * `purpose` is absent) when it starts or resumes a thread, `model-list` when
+ * it lists the provider's models on a host, so the list matches the account
+ * the host's threads would use.
+ */
+export type ExperimentalPluginProviderEnvContext =
+  | {
+      purpose?: "thread";
+      threadId: string;
+      projectId: string;
+      hostId: string;
+    }
+  | {
+      purpose: "model-list";
+      hostId: string;
+    };
 
 export interface ExperimentalPluginProviderEnvEntry {
   name: string;
@@ -1788,7 +2006,7 @@ export interface PluginMentionItem {
   title: string;
   subtitle?: string;
   /**
-   * BB icon name: a built-in name, or a name the plugin's app bundle
+   * Omnyo icon name: a built-in name, or a name the plugin's app bundle
    * registered with `app.experimental_icons.register()`. Resolved names take
    * precedence over plugin branding in menu rows, composer pills, and sent
    * messages. Omitted or unknown names fall back to plugin branding, then
@@ -1842,7 +2060,11 @@ export interface PluginMentionProviderRegistration {
 export interface PluginUi {
   /**
    * Block until the user submits or cancels this plugin's form in the
-   * thread composer. Inside a native tool's `execute`, calling this answers
+   * thread composer. The form belongs to no turn, so it is pinned above the
+   * composer and leaves the composer and its queue usable; on phones it shows
+   * as a chip that opens the form when tapped. A provider's request during a
+   * turn instead replaces the composer until it is answered. Inside a native
+   * tool's `execute`, calling this answers
    * the tool call at once with a waiting notice and the eventual return value
    * reaches the agent as a message; see {@link PluginAgentToolContext.signal}.
    * The form leaves a timeline row described by `presentation` and
@@ -1871,6 +2093,12 @@ export interface PluginEvents {
   on<E extends PluginThreadEventName>(
     event: E,
     handler: PluginThreadEventHandler<E>,
+    options?: E extends "experimental_thread.events"
+      ? {
+          /** Deliver matching append batches. The first batch per subscription/thread and batches with unknown or discontinuous coverage always deliver for catch-up. Older hosts ignore this option and retain rich delivery. */
+          experimental_eventTypes: readonly ThreadEventType[];
+        }
+      : never,
   ): void;
 }
 
@@ -1880,28 +2108,28 @@ export interface PluginEvents {
 
 export interface PluginServerApi {
   /**
-   * The operator-configured public app URL from `BB_APP_URL`, or `null` when
+   * The operator-configured public app URL from `OMNYO_APP_URL`, or `null` when
    * the operator has not configured one. This value is not bind-gated.
    */
   readonly experimental_appUrl: string | null;
 
   /**
-   * This BB server's own loopback base URL (e.g. "http://127.0.0.1:38886"),
+   * This Omnyo server's own loopback base URL (e.g. "http://127.0.0.1:38886"),
    * which serves the SPA + /api + /ws. For plugins that proxy or relay
    * traffic back to the server itself (e.g. a tunnel). Bind-gated like
-   * `bb.sdk`: reading it before the server is listening throws, so prefer
+   * `api.sdk`: reading it before the server is listening throws, so prefer
    * reading it from handlers, services, and timers.
    */
   readonly loopbackBaseUrl: string;
 
   /**
-   * This server's data directory — the one holding `config.json`, `bb.db` and
+   * This server's data directory — the one holding `config.json`, `app.db` and
    * `plugins/<id>/`. A plugin cannot compute it: a dev server derives it from
-   * its repo root and instance id, so a plugin that guesses `~/.bb` reads the
+   * its repo root and instance id, so a plugin that guesses `~/.omnyo` reads the
    * production file while the dev server reads another one.
    *
-   * For reading bb-managed files a plugin is migrating away from. A plugin's
-   * OWN storage is `bb.storage`, which is scoped for it; this is deliberately
+   * For reading Omnyo-managed files a plugin is migrating away from. A plugin's
+   * OWN storage is `api.storage`, which is scoped for it; this is deliberately
    * not a place to write.
    */
   readonly experimental_dataDir: string;
@@ -1914,7 +2142,7 @@ export interface PluginServerApi {
 /** Options for one `complete` call. */
 export interface PluginAiCompleteOptions {
   /**
-   * Aborted when bb stops waiting: the task timed out (5 seconds for titles
+   * Aborted when Omnyo stops waiting: the task timed out (8 seconds for titles
    * and commit messages) or the request was cancelled. Pass it to `fetch`.
    */
   readonly signal: AbortSignal;
@@ -1922,7 +2150,7 @@ export interface PluginAiCompleteOptions {
 
 /** Options for one `transcribe` call. */
 export interface PluginAiTranscribeOptions {
-  /** Aborted when bb stops waiting (10 seconds) or the request was cancelled. */
+  /** Aborted when Omnyo stops waiting (70 seconds) or the request was cancelled. */
   readonly signal: AbortSignal;
   /**
    * Vocabulary the speaker is likely to use (names, identifiers), for
@@ -1931,9 +2159,18 @@ export interface PluginAiTranscribeOptions {
   readonly hint: string | null;
 }
 
+/** Options for one `experimental_prepare` call. */
+export interface PluginAiPrepareOptions {
+  /**
+   * Aborted when Omnyo stops waiting: after 70 seconds, or when the server
+   * stops while a prepare it started because the Mac connected is running.
+   */
+  readonly signal: AbortSignal;
+}
+
 /**
  * Whether a service can answer right now. `message` is shown to the user
- * beside the service ("Sign in to your bb account") and should say how to
+ * beside the service ("Sign in to your Omnyo account") and should say how to
  * make it ready.
  */
 export type PluginAiServiceStatus =
@@ -1941,21 +2178,20 @@ export type PluginAiServiceStatus =
   | { readonly ready: false; readonly message: string };
 
 /**
- * An AI service bb can use for its helper tasks: thread titles and commit
+ * An AI service Omnyo can use for its helper tasks: thread titles and commit
  * messages (`complete`) and voice input (`transcribe`). The user picks a
- * service per task in Settings → AI services or with
- * `bb settings ai-services set`. The functions run in the plugin's server
+ * service per task with `omnyo settings ai-services set`. The functions run in the plugin's server
  * process; a plugin that needs host-local state (a login file, a local model)
- * reaches its own `bb.host` entry through `bb.hosts.experimental_client`.
+ * reaches its own `omnyo.host` entry through `api.hosts.experimental_client`.
  *
- * bb owns the prompts and cleans up replies (think blocks, quotes, labels,
+ * Omnyo owns the prompts and cleans up replies (think blocks, quotes, labels,
  * extra lines), so a service returns the model's text as-is. The plugin owns
  * everything behind the function: which model, which API, any retries.
  * Failure is a rejected promise.
  */
 export interface PluginAiServiceDeclaration {
   /**
-   * Stable, lowercase id, unique within this plugin. bb identifies a service
+   * Stable, lowercase id, unique within this plugin. Omnyo identifies a service
    * by plugin id and service id, so another plugin may use the same id.
    * `automatic` and `off` are reserved.
    */
@@ -1976,12 +2212,24 @@ export interface PluginAiServiceDeclaration {
     options: PluginAiTranscribeOptions,
   ) => Promise<string>;
   /**
-   * Report whether the service can answer. bb calls it for the picker's
+   * Report whether the service can answer. Omnyo calls it for the picker's
    * status line and to decide whether Automatic skips the service and
    * whether the microphone shows; results are cached for a few seconds.
    * Omit it when the service is always ready.
    */
   readonly status?: () => Promise<PluginAiServiceStatus>;
+  /**
+   * Get ready to transcribe soon, for example by loading a local model.
+   * Omnyo calls it for the service the next transcription would use, when the
+   * user starts recording and when the Mac running the Omnyo server connects,
+   * at most one call at a time per service. It must be idempotent and cheap
+   * when the service is already ready. Failure is logged, never shown; the
+   * following `transcribe` reports any real problem. Omit it when there is
+   * nothing to prepare.
+   */
+  readonly experimental_prepare?: (
+    options: PluginAiPrepareOptions,
+  ) => Promise<void>;
 }
 
 export interface PluginAiServices {
@@ -2000,12 +2248,12 @@ export interface PluginAiServices {
 export interface PluginSharedPortTunnelIdentity {
   /** Gate routing label assigned to this machine. */
   label: string;
-  /** Gate apex without a scheme, e.g. "getbb.app". */
+  /** Gate apex without a scheme, e.g. "omnyo.link". */
   baseDomain: string;
 }
 
 export interface PluginHosts {
-  /** Create the owning plugin's typed client for its singular `bb.host` entry. */
+  /** Create the owning plugin's typed client for its singular `omnyo.host` entry. */
   experimental_client<
     Contract extends PluginRpcContract,
     Signals extends ExperimentalHostSignals = {},
@@ -2042,16 +2290,16 @@ export interface PluginHosts {
 export interface PluginStatusApi {
   /**
    * Mark this plugin `needs-configuration` (with a message shown in
-   * `bb plugin list` and the UI) instead of failing — e.g. a factory or
+   * `omnyo plugin list` and the UI) instead of failing — e.g. a factory or
    * service that finds no API key configured. Cleared on the next load;
    * saving settings does not auto-reload in V1, so ask the user to
-   * `bb plugin reload <id>` after configuring.
+   * `omnyo plugin reload <id>` after configuring.
    */
   needsConfiguration(message: string): void;
 }
 
 /**
- * The BB SDK bound to one plugin (`bb.sdk`). `threads.getPluginMetadata`,
+ * The Omnyo SDK bound to one plugin (`api.sdk`). `threads.getPluginMetadata`,
  * `threads.experimental_listPluginMetadata` and `threads.updatePluginMetadata`
  * default `pluginId` to that plugin's id. An
  * explicit `pluginId` must be a plugin id (lowercase letters, digits, and
@@ -2060,10 +2308,12 @@ export interface PluginStatusApi {
  * patch whose merged namespace would exceed 256 KiB fails with HTTP 413 and
  * leaves the namespace unchanged.
  */
-export type PluginBbSdk = Omit<BbSdk, "threads"> & {
+export type PluginSdk = Omit<OmnyoSdk, "threads"> & {
   threads: Omit<
-    BbSdk["threads"],
-    "getPluginMetadata" | "updatePluginMetadata" | "experimental_listPluginMetadata"
+    OmnyoSdk["threads"],
+    | "getPluginMetadata"
+    | "updatePluginMetadata"
+    | "experimental_listPluginMetadata"
   > & {
     getPluginMetadata(
       args: Omit<ThreadPluginMetadataArgs, "pluginId"> & { pluginId?: string },
@@ -2083,14 +2333,26 @@ export type PluginBbSdk = Omit<BbSdk, "threads"> & {
 
 /**
  * The API object handed to a plugin's factory (design §4). Implemented by
- * the BB server; this contract is what plugin `server.ts` files compile
+ * the Omnyo server; this contract is what plugin `server.ts` files compile
  * against.
  */
-export interface BbPluginApi {
+export interface PluginApi {
   /** The plugin's own id (namespaces storage, routes, commands). */
   readonly pluginId: string;
   /** Leveled, plugin-scoped logger. */
   readonly log: PluginLogger;
+  /**
+   * Report one unexpected failure to the server's error reporting (Sentry),
+   * when the owner allows crash reports. Events carry the error's message and
+   * stack plus `plugin`, `operation` and `code` tags, and group by those
+   * three values. Keep the message free of user content; logging stays
+   * separate. Throws on an invalid report. Experimental: see
+   * docs/api_to_audit.md.
+   */
+  experimental_reportError(
+    error: Error,
+    report: ExperimentalPluginErrorReport,
+  ): void;
   /** Declarative settings (design §4.2). */
   readonly settings: PluginSettings;
   /** Namespaced KV + per-plugin database (design §4.3). */
@@ -2103,7 +2365,7 @@ export interface BbPluginApi {
   readonly realtime: PluginRealtime;
   /** Long-lived services + cron schedules (design §4.8). */
   readonly background: PluginBackground;
-  /** Agent-facing `bb` CLI subcommand (design §4.4). */
+  /** Agent-facing `omnyo` CLI subcommand (design §4.4). */
   readonly cli: PluginCli;
   /** Per-turn agent context contributions (design §4.4). */
   readonly agents: PluginAgents;
@@ -2132,6 +2394,13 @@ export interface BbPluginApi {
   /** Machine providers provision execution machines. Experimental: see docs/api_to_audit.md. */
   readonly experimental_machines: PluginMachines;
   readonly experimental_serverAccess: PluginServerAccess;
+  /**
+   * Wait event sources: key families agents can wait on with
+   * `omnyo wait --event`. Experimental: see docs/api_to_audit.md.
+   */
+  readonly experimental_eventSources: PluginEventSources;
+  /** Vault-sealed secret values owned by this plugin. */
+  readonly experimental_secrets: PluginSecrets;
   /** Plugin-reported status (needs-configuration). */
   readonly status: PluginStatusApi;
   /** Read-only facts about the running server (loopback base URL). */
@@ -2139,12 +2408,12 @@ export interface BbPluginApi {
   /** Server-to-daemon host control-plane declarations. */
   readonly hosts: PluginHosts;
   /**
-   * AI services this plugin offers for bb's helper tasks: thread titles,
+   * AI services this plugin offers for Omnyo's helper tasks: thread titles,
    * commit messages, and voice input.
    */
   readonly experimental_aiServices: PluginAiServices;
   /**
-   * The full BB SDK, bound to this server over loopback (design §4.1).
+   * The full Omnyo SDK, bound to this server over loopback (design §4.1).
    * Bind-gated: reading this before the host binds the SDK throws. The real
    * server binds it before loading plugins, so it is available from the
    * moment factories run there — but isolated harnesses may not, so prefer
@@ -2154,7 +2423,7 @@ export interface BbPluginApi {
    * Seeding `pluginMetadata` always attributes the new thread to this plugin,
    * overriding an explicit `origin` or `originPluginId`.
    */
-  readonly sdk: PluginBbSdk;
+  readonly sdk: PluginSdk;
   /**
    * Register cleanup to run on reload/disable/shutdown. Hooks run LIFO.
    * The sanctioned place to clear timers and close connections.
@@ -2163,8 +2432,8 @@ export interface BbPluginApi {
   /**
    * Run a handler once, right after this plugin is installed and its server
    * entry has loaded: for example to pick its own sidebar slots with
-   * `bb.sdk.system.uiPreferences`. It does not run on update, reload,
-   * enable, or server restart, nor for bb's bundled plugins; reinstalling
+   * `api.sdk.system.uiPreferences`. It does not run on update, reload,
+   * enable, or server restart, nor for Omnyo's bundled plugins; reinstalling
    * after removal runs it again. Register it while the entry loads. A
    * handler that throws is logged and the install still succeeds; the
    * install waits at most 30 seconds for handlers to finish.

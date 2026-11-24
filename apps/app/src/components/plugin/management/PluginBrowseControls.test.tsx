@@ -18,7 +18,8 @@ import {
 import type { PluginBrowseCategoryOption } from "./plugin-browse-discovery";
 
 const viewport = vi.hoisted(() => ({ compact: false }));
-vi.mock("@bb/shared-ui/hooks/use-compact-viewport", () => ({
+
+vi.mock("@omnyo/shared-ui/hooks/use-compact-viewport", () => ({
   useIsCompactViewport: () => viewport.compact,
 }));
 
@@ -73,6 +74,7 @@ describe("PluginBrowseCategoryFilter", () => {
   it("keeps the menu open for multiple selections", () => {
     function Harness() {
       const [value, setValue] = useState<string[]>([]);
+
       return (
         <PluginBrowseCategoryFilter
           options={OPTIONS}
@@ -81,6 +83,7 @@ describe("PluginBrowseCategoryFilter", () => {
         />
       );
     }
+
     render(<Harness />);
     openMenu("All categories");
     expect(
@@ -124,9 +127,11 @@ describe("PluginBrowseCategoryFilter", () => {
       />,
     );
     openMenu("Tasks & Workflows");
+
     const firstOption = screen.getByRole("option", {
       name: /Memory & Context/u,
     });
+
     await waitFor(() => expect(document.activeElement).toBe(firstOption));
     fireEvent.keyDown(firstOption, { key: "ArrowDown" });
     expect(document.activeElement).toBe(
@@ -153,25 +158,32 @@ describe("PluginBrowseCategoryFilter", () => {
         />
       </>,
     );
+
     const triggers = screen.getAllByRole("button", {
       name: "Filter plugins by category: All categories",
     });
+
     fireEvent.click(triggers[0] as HTMLButtonElement);
+
     const firstList = screen.getByRole("listbox", {
       name: "Plugin categories",
     });
+
     await waitFor(() =>
       expect(firstList.contains(document.activeElement)).toBe(true),
     );
     fireEvent.click(triggers[0] as HTMLButtonElement);
     await waitFor(() => expect(document.activeElement).toBe(triggers[0]));
     fireEvent.click(triggers[1] as HTMLButtonElement);
+
     const secondList = screen.getByRole("listbox", {
       name: "Plugin categories",
     });
+
     const firstOption = screen.getByRole("option", {
       name: /Memory & Context/u,
     });
+
     await waitFor(() => expect(document.activeElement).toBe(firstOption));
     fireEvent.keyDown(firstOption, { key: "ArrowDown" });
     expect(secondList.contains(document.activeElement)).toBe(true);
@@ -183,13 +195,11 @@ function ToolbarHarness({
   installed = false,
   categoryShelf = false,
   createAction = false,
-  installsKnown = false,
   urlDelayMs = 0,
 }: {
   installed?: boolean;
   categoryShelf?: boolean;
   createAction?: boolean;
-  installsKnown?: boolean;
   urlDelayMs?: number;
 }) {
   const [params, setParams] = useState(
@@ -197,17 +207,22 @@ function ToolbarHarness({
       "query=Memory&category=security&source=user&sort=name&direction=desc",
     ),
   );
+
   const sort = params.get("sort");
+
   const changeSearchParams = (change: (next: URLSearchParams) => void) => {
     const apply = () =>
       setParams((previous) => {
         const next = new URLSearchParams(previous);
         change(next);
+
         return next;
       });
+
     if (urlDelayMs === 0) apply();
     else window.setTimeout(apply, urlDelayMs);
   };
+
   return (
     <>
       <PluginCollectionToolbar
@@ -218,22 +233,15 @@ function ToolbarHarness({
         selectedCategories={params.getAll("category")}
         categoryOptions={OPTIONS}
         showCategoryFilter={!categoryShelf}
-        sort={
-          sort === "name" ||
-          sort === "recently-added" ||
-          sort === "most-installed"
-            ? sort
-            : null
-        }
+        sort={sort === "name" || sort === "recently-added" ? sort : null}
         sortDirection={params.get("direction") === "desc" ? "desc" : "asc"}
-        installsKnown={installsKnown}
         changeSearchParams={changeSearchParams}
         sourceFilter={
           installed
             ? {
                 options: [
                   { id: "user", label: "Local" },
-                  { id: "official", label: "BB Official" },
+                  { id: "official", label: "Omnyo Official" },
                 ],
                 selectedValues: params.getAll("source"),
                 onChange: (values) =>
@@ -258,6 +266,7 @@ function mockToolbarWidth(initial: number, publishedWidth = 96) {
     function (this: HTMLElement) {
       if (this.hasAttribute("data-resource-toolbar"))
         return new DOMRect(0, 0, width, 32);
+
       if (this.hasAttribute("data-resource-individual-controls"))
         return new DOMRect(
           0,
@@ -270,10 +279,13 @@ function mockToolbarWidth(initial: number, publishedWidth = 96) {
           ),
           32,
         );
+
       if (this.hasAttribute("data-resource-combined-controls"))
         return new DOMRect(0, 0, 32, 32);
+
       if (this.hasAttribute("data-resource-toolbar-action"))
         return new DOMRect(0, 0, 120, 32);
+
       return original.call(this);
     },
   );
@@ -301,6 +313,7 @@ function mockToolbarWidth(initial: number, publishedWidth = 96) {
       }
     },
   );
+
   return (next: number) =>
     act(() => {
       width = next;
@@ -397,12 +410,11 @@ describe("PluginCollectionToolbar", () => {
   it.each([
     { label: "Name", value: "name", direction: "asc" },
     { label: "Published", value: "recently-added", direction: "desc" },
-    { label: "Installs", value: "most-installed", direction: "desc" },
   ])(
     "updates the selected $label label and direction without clearing filters",
     ({ label, value, direction }) => {
       mockToolbarWidth(800);
-      render(<ToolbarHarness installed installsKnown />);
+      render(<ToolbarHarness installed />);
       const trigger = screen.getByRole("button", { name: /^Sort:/u });
       fireEvent.keyDown(trigger, {
         key: "Enter",
@@ -449,9 +461,11 @@ describe("PluginCollectionToolbar", () => {
       screen.queryByRole("textbox", { name: "Search plugins" }),
     ).toBeNull();
     fireEvent.click(trigger);
+
     const search = screen.getByRole<HTMLInputElement>("textbox", {
       name: "Search plugins",
     });
+
     expect(document.activeElement).toBe(search);
     expect(search.selectionStart).toBe(0);
     expect(search.selectionEnd).toBe("Memory".length);
@@ -578,9 +592,11 @@ describe("PluginCollectionToolbar", () => {
   it("keeps typed text while the URL query lags behind", () => {
     vi.useFakeTimers();
     render(<ToolbarHarness urlDelayMs={500} />);
+
     const search = screen.getByRole<HTMLInputElement>("textbox", {
       name: "Search plugins",
     });
+
     fireEvent.change(search, { target: { value: "Notes" } });
     act(() => vi.advanceTimersByTime(250));
     expect(search.value).toBe("Notes");
@@ -601,9 +617,11 @@ describe("PluginCollectionToolbar", () => {
     viewport.compact = true;
     mockToolbarWidth(400);
     render(<ToolbarHarness categoryShelf />);
+
     const search = screen.getByRole<HTMLInputElement>("textbox", {
       name: "Search plugins",
     });
+
     act(() => search.focus());
     fireEvent.change(search, { target: { value: "Notes" } });
     fireEvent.keyDown(search, { key: "Enter" });
@@ -686,11 +704,7 @@ describe("PluginCollectionToolbar", () => {
     expect(screen.getByLabelText("Parameters").textContent).toContain(
       "direction=asc",
     );
-    expect(
-      screen
-        .getByRole("menuitemradio", { name: "Installs" })
-        .getAttribute("aria-disabled"),
-    ).toBe("true");
+    expect(screen.queryByRole("menuitemradio", { name: "Installs" })).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: "Clear sort" }));
     expect(screen.getByLabelText("Parameters").textContent).toBe(
       "query=Memory&category=security&source=user",
@@ -703,9 +717,11 @@ describe("PluginCollectionToolbar", () => {
     );
     fireEvent.click(screen.getByRole("menuitem", { name: /^Category/u }));
     expect(screen.queryByRole("combobox")).toBeNull();
+
     const firstOption = screen.getByRole("option", {
       name: /Memory & Context/u,
     });
+
     await waitFor(() => expect(document.activeElement).toBe(firstOption));
     fireEvent.keyDown(firstOption, { key: "ArrowDown" });
     expect(document.activeElement).toBe(

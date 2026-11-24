@@ -19,6 +19,7 @@ export function installedPluginCatalogEntry<
   { allowSourceFallback = true }: { allowSourceFallback?: boolean } = {},
 ): Entry | undefined {
   if (plugin.source.startsWith("path:")) return undefined;
+
   if (
     plugin.source.startsWith("builtin:") &&
     plugin.catalogMarketplaceName === null
@@ -26,12 +27,13 @@ export function installedPluginCatalogEntry<
     return entries.find(
       (entry) =>
         entry.pluginId === plugin.id &&
-        entry.marketplace === "bb-official" &&
+        entry.marketplace === "omnyo-official" &&
         entry.source === plugin.source &&
         (plugin.catalogEntryId === null ||
           entry.entryId === plugin.catalogEntryId),
     );
   }
+
   if (
     plugin.catalogEntryId === null &&
     plugin.catalogMarketplaceName === null
@@ -39,14 +41,17 @@ export function installedPluginCatalogEntry<
     const listings = entries.filter(
       (entry) => entry.pluginId === plugin.id && entry.installed,
     );
+
     if (listings.length === 1) return listings[0];
   }
+
   if (
     !allowSourceFallback &&
     (plugin.catalogEntryId === null || plugin.catalogMarketplaceName === null)
   ) {
     return undefined;
   }
+
   return entries.find(
     (entry) =>
       entry.pluginId === plugin.id &&
@@ -66,8 +71,7 @@ export function catalogEntryDetailKey(
 ): string {
   return pluginDetailKey({
     pluginId: entry.pluginId,
-    listing:
-      entry.conflictingInstallSource === null ? null : entry.marketplace,
+    listing: entry.conflictingInstallSource === null ? null : entry.marketplace,
   });
 }
 
@@ -87,25 +91,32 @@ export function resolvePluginDetailKey<
   options?: { allowSourceFallback?: boolean },
 ): { plugin: Plugin | null; entry: Entry | null } {
   const { pluginId, listing } = parsePluginDetailKey(detailKey);
+
   if (listing === null) {
     const plugin = plugins.find((candidate) => candidate.id === pluginId);
+
     const entry =
       plugin === undefined
         ? entries.find((candidate) => candidate.pluginId === pluginId)
         : installedPluginCatalogEntry(plugin, entries, options);
+
     return { plugin: plugin ?? null, entry: entry ?? null };
   }
+
   const entry = entries.find(
     (candidate) =>
       candidate.marketplace === listing && candidate.pluginId === pluginId,
   );
+
   if (entry === undefined) return { plugin: null, entry: null };
+
   const plugin = entry.installed
     ? (plugins.find(
         (candidate) =>
           installedPluginCatalogEntry(candidate, [entry]) !== undefined,
       ) ?? plugins.find((candidate) => candidate.id === entry.pluginId))
     : undefined;
+
   return { plugin: plugin ?? null, entry };
 }
 
@@ -116,10 +127,19 @@ export function catalogEntryInstallBlocker(
   >,
 ): string | null {
   if (entry.incompatibleReason !== null) return entry.incompatibleReason;
+
   if (entry.conflictingInstallSource === null) return null;
+
   return `Another plugin with the ID “${entry.pluginId}” is installed from ${conflictingInstallLocation(entry.conflictingInstallSource)}. Remove it to install this one.`;
 }
 
 function conflictingInstallLocation(source: string): string {
   return source.startsWith("path:") ? source.slice("path:".length) : source;
+}
+
+export function pluginIsOfficial(
+  plugin: Pick<PluginListItem, "official">,
+  catalogEntry: Pick<PluginCatalogSearchEntry, "official"> | undefined,
+): boolean {
+  return plugin.official || catalogEntry?.official === true;
 }

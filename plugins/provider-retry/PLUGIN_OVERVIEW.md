@@ -3,9 +3,10 @@ Keep threads moving when a provider is overloaded or your subscription window is
 ## What you get
 
 - Automatic retry after a provider overload, with a short delay that doubles on each attempt.
+- A retry every 15 minutes while the model stays at capacity, until the maximum automatic wait runs out.
 - Automatic retry after a subscription limit, timed to the reset the provider reports.
 - A queued message card on the thread that you can send now or cancel.
-- A cap of four retries per turn.
+- Four quick retries for transient connections, followed by slow availability checks for exhausted accounts and models at capacity.
 
 ## How it works
 
@@ -13,14 +14,14 @@ The plugin reacts to each failed turn. It retries overload errors, subscription-
 
 ## Settings
 
-- `Maximum automatic wait`: skip a retry when the reset is farther away than 6 hours, 24 hours, or no limit.
+- `Maximum automatic wait` (6 hours, 24 hours, or no limit; default no limit): skip a retry when the reset is farther away than this, and stop the 15-minute capacity retries after about this long.
 
 ## CLI
 
-- `bb provider-retry status [thread-id] [--json]`: show pending retries.
-- `bb provider-retry retry <thread-id>`: send a pending retry now.
-- `bb provider-retry cancel <thread-id>`: cancel a pending retry.
+- `omnyo provider-retry status [thread-id] [--json]`: show pending retries.
+- `omnyo provider-retry retry <thread-id>`: send a pending retry now.
+- `omnyo provider-retry cancel <thread-id>`: cancel a pending retry.
 
-For pooled threads, the pool’s availability overrides provider-local quota snapshots, which can be missing or refer to an account the pool has already replaced. Recovery uses the earliest usable account after all its blocking windows and temporary holds clear, including limits for the failed request’s model. Parent pools use the same authenticated availability lookup. Unknown resets, authentication failures, and unavailable sources are explained without scheduling a speculative retry.
+For pooled threads, the pool’s availability overrides provider-local quota snapshots, which can be missing or refer to an account the pool has already replaced. Recovery uses the earliest usable account after all its blocking windows and temporary holds clear, including limits for the failed request’s model. Parent pools use the same authenticated availability lookup. Unknown reset times and unavailable sources schedule a slow availability recheck, without claiming an account will be ready. Authentication failures remain paused. When the availability lookup itself fails, for example by timing out, the turn retries with the same bounded backoff as an overload, and the next failure checks availability again.
 
-Run `bb provider-retry explain [thread-id] [--json]` to inspect the last automatic decision, including skipped retries. This is a historical decision, not the current queue state; use `status` for pending retries. Decisions are recorded after this version is loaded and survive restart. The same diagnostic is available through `bb.sdk.plugins.callRpc` using plugin `provider-retry`, method `decision.get`, and input `{ threadId }`.
+Run `omnyo provider-retry explain [thread-id] [--json]` to inspect the last automatic decision, including skipped retries. This is a historical decision, not the current queue state; use `status` for pending retries. Decisions are recorded after this version is loaded and survive restart. The same diagnostic is available through `api.sdk.plugins.callRpc` using plugin `provider-retry`, method `decision.get`, and input `{ threadId }`.

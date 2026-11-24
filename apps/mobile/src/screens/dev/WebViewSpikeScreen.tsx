@@ -1,7 +1,7 @@
 import {
   fetchDesktopSession,
   redeemMachineCredential,
-} from "@bb/connect-client";
+} from "@omnyo/connect-client";
 import CookieManager from "@react-native-cookies/cookies";
 import { File, Directory, Paths } from "expo-file-system";
 import { useLocalSearchParams } from "expo-router";
@@ -46,12 +46,16 @@ interface SpikeEvent {
 function appendSessionLine(event: SpikeEvent): void {
   const line = JSON.stringify(event);
   console.log(`SPIKE ${line}`);
+
   try {
     const directory = new Directory(Paths.document, "webview-spike");
+
     if (!directory.exists) directory.create({ intermediates: true });
     const file = new File(directory, "session.jsonl");
+
     if (!file.exists) file.create();
     const handle = file.open();
+
     try {
       handle.offset = file.size;
       handle.writeBytes(new TextEncoder().encode(`${line}\n`));
@@ -61,10 +65,12 @@ function appendSessionLine(event: SpikeEvent): void {
   } catch {}
 }
 
-const APEX_URL = process.env.EXPO_PUBLIC_BB_CONNECT_APEX ?? "https://getbb.app";
+const APEX_URL =
+  process.env.EXPO_PUBLIC_OMNYO_CONNECT_APEX ?? "https://omnyo.link";
 
 export function WebViewSpikeScreen() {
   const insets = useSafeAreaInsets();
+
   const params = useLocalSearchParams<{
     url?: string;
     grant?: string;
@@ -83,22 +89,28 @@ export function WebViewSpikeScreen() {
   const [urlDraft, setUrlDraft] = useState(initialUrl);
   const [loadedUrl, setLoadedUrl] = useState(initialUrl);
   const [reloadKey, setReloadKey] = useState(0);
+
   const [grantType, setGrantType] = useState<MediaCapturePermissionGrantType>(
     (GRANT_TYPES.find((value) => value === firstParam(params.grant)) ??
       "grant") as MediaCapturePermissionGrantType,
   );
+
   const [showChrome, setShowChrome] = useState(
     firstParam(params.chrome) !== "0",
   );
+
   const [incognito, setIncognito] = useState(
     firstParam(params.incognito) === "1",
   );
+
   const [cacheEnabled, setCacheEnabled] = useState(
     firstParam(params.cache) !== "0",
   );
+
   const [hideAccessoryBar, setHideAccessoryBar] = useState(
     firstParam(params.accessory) === "0",
   );
+
   const appBound = firstParam(params.appbound) === "1";
   const [log, setLog] = useState<string[]>([]);
   const webViewRef = useRef<WebView>(null);
@@ -110,9 +122,12 @@ export function WebViewSpikeScreen() {
       source,
       payload,
     };
+
     appendSessionLine(event);
+
     const text =
       typeof payload === "string" ? payload : JSON.stringify(payload);
+
     setLog((previous) =>
       [`${event.atIso.slice(11, 23)} ${source[0]} ${text}`, ...previous].slice(
         0,
@@ -139,6 +154,7 @@ export function WebViewSpikeScreen() {
           apexUrl: APEX_URL,
           code: machineCode.trim(),
         });
+
         record("native", {
           kind: "enroll",
           step: "redeem",
@@ -146,6 +162,7 @@ export function WebViewSpikeScreen() {
           serverUrl: credential.serverUrl,
         });
         const { cookie } = await fetchDesktopSession(credential);
+
         const cookieSpec = {
           name: cookie.name,
           value: cookie.value,
@@ -155,6 +172,7 @@ export function WebViewSpikeScreen() {
           httpOnly: true,
           expires: new Date(cookie.expiresAt).toISOString(),
         };
+
         await CookieManager.set(credential.serverUrl, cookieSpec, false);
         await CookieManager.set(credential.serverUrl, cookieSpec, true);
         record("native", {
@@ -191,7 +209,9 @@ export function WebViewSpikeScreen() {
       setUrlDraft(urlParam);
       setLoadedUrl((previous) => (previous === urlParam ? previous : urlParam));
     }
+
     if (cacheParam !== undefined) setCacheEnabled(cacheParam !== "0");
+
     if (accessoryParam !== undefined)
       setHideAccessoryBar(accessoryParam === "0");
   }, [accessoryParam, cacheParam, urlParam]);
@@ -199,6 +219,7 @@ export function WebViewSpikeScreen() {
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
       const raw = event.nativeEvent.data;
+
       try {
         record("page", JSON.parse(raw));
       } catch {
@@ -228,10 +249,13 @@ export function WebViewSpikeScreen() {
       const probe = SPIKE_PROBES.find(
         (entry) => entry.id === (id as SpikeProbeId),
       );
+
       if (probe === undefined) {
         record("native", { kind: "probe", id, error: "unknown probe" });
+
         return;
       }
+
       timers.push(
         setTimeout(
           () => {
@@ -241,6 +265,7 @@ export function WebViewSpikeScreen() {
         ),
       );
     });
+
     return () => {
       cancelled = true;
       timers.forEach((timer) => clearTimeout(timer));
@@ -428,6 +453,7 @@ function SpikeButton({
     paddingVertical: 5,
     borderRadius: 6,
   });
+
   return (
     <Pressable onPress={onPress} style={style} testID={testID}>
       <Text style={{ color: "white", fontWeight: "600", fontSize: 11 }}>

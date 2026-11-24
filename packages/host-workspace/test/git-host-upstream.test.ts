@@ -8,12 +8,17 @@ import { runGit } from "../src/git.js";
 import { Workspace } from "../src/workspace.js";
 
 const execFileAsync = promisify(execFile);
+
 const tempDirs: string[] = [];
 
-const localBranch = "bb/review-github-issue-1235-thr_test";
+const localBranch = "omnyo/review-github-issue-1235-thr_test";
+
 const forkRemote = "review-fork";
+
 const upstreamBranch = "per-turn-permission-escalation";
-const forkRemoteUrl = "git@github.com:fork-owner/bb.git";
+
+const forkRemoteUrl = "git@github.com:fork-owner/omnyo.git";
+
 const qualifiedUpstream = `fork-owner:${upstreamBranch}`;
 
 function pullRequestJson(): string {
@@ -21,7 +26,7 @@ function pullRequestJson(): string {
     number: 1236,
     title: "Apply execution settings without replacing sessions",
     state: "OPEN",
-    url: "https://github.com/acme/bb/pull/1236",
+    url: "https://github.com/acme/omnyo/pull/1236",
     isDraft: false,
     baseRefName: "main",
     headRefName: upstreamBranch,
@@ -37,22 +42,23 @@ function pullRequestJson(): string {
 async function makeTempDir(prefix: string): Promise<string> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   tempDirs.push(directory);
+
   return directory;
 }
 
 async function createTrackedForkWorkspace(
   remoteUrl = forkRemoteUrl,
 ): Promise<string> {
-  const workspacePath = await makeTempDir("bb-pr-upstream-workspace-");
+  const workspacePath = await makeTempDir("omnyo-pr-upstream-workspace-");
   await runGit(["init", "-b", localBranch], { cwd: workspacePath });
-  await runGit(["config", "user.name", "BB Tests"], { cwd: workspacePath });
-  await runGit(["config", "user.email", "bb@example.com"], {
+  await runGit(["config", "user.name", "Omnyo Tests"], { cwd: workspacePath });
+  await runGit(["config", "user.email", "omnyo@example.com"], {
     cwd: workspacePath,
   });
   await fs.writeFile(path.join(workspacePath, "README.md"), "test\n", "utf8");
   await runGit(["add", "README.md"], { cwd: workspacePath });
   await runGit(["commit", "-m", "Initial commit"], { cwd: workspacePath });
-  await runGit(["remote", "add", "origin", "git@github.com:acme/bb.git"], {
+  await runGit(["remote", "add", "origin", "git@github.com:acme/omnyo.git"], {
     cwd: workspacePath,
   });
   await runGit(["remote", "add", forkRemote, remoteUrl], {
@@ -71,20 +77,21 @@ async function createTrackedForkWorkspace(
     ],
     { cwd: workspacePath },
   );
+
   return workspacePath;
 }
 
 async function createManagedBaseTrackedWorkspace(): Promise<string> {
-  const workspacePath = await makeTempDir("bb-pr-base-upstream-workspace-");
+  const workspacePath = await makeTempDir("omnyo-pr-base-upstream-workspace-");
   await runGit(["init", "-b", localBranch], { cwd: workspacePath });
-  await runGit(["config", "user.name", "BB Tests"], { cwd: workspacePath });
-  await runGit(["config", "user.email", "bb@example.com"], {
+  await runGit(["config", "user.name", "Omnyo Tests"], { cwd: workspacePath });
+  await runGit(["config", "user.email", "omnyo@example.com"], {
     cwd: workspacePath,
   });
   await fs.writeFile(path.join(workspacePath, "README.md"), "test\n", "utf8");
   await runGit(["add", "README.md"], { cwd: workspacePath });
   await runGit(["commit", "-m", "Initial commit"], { cwd: workspacePath });
-  await runGit(["remote", "add", "origin", "git@github.com:acme/bb.git"], {
+  await runGit(["remote", "add", "origin", "git@github.com:acme/omnyo.git"], {
     cwd: workspacePath,
   });
   await runGit(["update-ref", "refs/remotes/origin/main", "HEAD"], {
@@ -93,13 +100,14 @@ async function createManagedBaseTrackedWorkspace(): Promise<string> {
   await runGit(["branch", "--set-upstream-to", "origin/main", localBranch], {
     cwd: workspacePath,
   });
+
   return workspacePath;
 }
 
 async function installFakeGh(mode: "found" | "none" | "auth"): Promise<{
   logPath: string;
 }> {
-  const binPath = await makeTempDir("bb-pr-upstream-bin-");
+  const binPath = await makeTempDir("omnyo-pr-upstream-bin-");
   const logPath = path.join(binPath, "gh.log");
   const scriptPath = path.join(binPath, "gh.cjs");
   await fs.writeFile(
@@ -124,10 +132,12 @@ if (args[0] === "pr" && args[1] === "view") {
 }
 `,
   );
+
   const ghPath = path.join(
     binPath,
     process.platform === "win32" ? "gh.cmd" : "gh",
   );
+
   await fs.writeFile(
     ghPath,
     process.platform === "win32"
@@ -140,6 +150,7 @@ if (args[0] === "pr" && args[1] === "view") {
   vi.stubEnv("TEST_GH_MODE", mode);
   vi.stubEnv("TEST_GH_PR_JSON", pullRequestJson());
   vi.stubEnv("PATH", `${binPath}${path.delimiter}${process.env.PATH ?? ""}`);
+
   return { logPath };
 }
 
@@ -154,6 +165,7 @@ async function readGhCalls(logPath: string): Promise<string[][]> {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return [];
     }
+
     throw error;
   }
 }
@@ -168,29 +180,39 @@ afterEach(async () => {
 });
 
 describe("pull request lookup for differently named upstream branches", () => {
-  it("uses the managed local branch when it tracks the origin base branch", async () => {
-    const workspacePath = await createManagedBaseTrackedWorkspace();
-    const { logPath } = await installFakeGh("found");
-    const workspace = new Workspace(workspacePath);
+  it.each(["origin-base", "none"])(
+    "uses the managed local branch with %s upstream",
+    async (upstream) => {
+      const workspacePath = await createManagedBaseTrackedWorkspace();
 
-    await expect(workspace.getPullRequest()).resolves.toMatchObject({
-      outcome: "found",
-      pullRequest: { number: 1236 },
-    });
-    await workspace.runPullRequestAction({ operation: "ready" });
+      if (upstream === "none") {
+        await runGit(["branch", "--unset-upstream"], { cwd: workspacePath });
+      }
 
-    const calls = (await readGhCalls(logPath)).filter(
-      (call) => call[0] === "pr",
-    );
-    expect(calls).toHaveLength(2);
-    expect(calls[0]?.slice(0, 3)).toEqual(["pr", "view", "--json"]);
-    expect(calls[1]).toEqual(["pr", "ready"]);
-  });
+      const { logPath } = await installFakeGh("found");
+      const workspace = new Workspace(workspacePath);
+
+      await expect(workspace.getPullRequest()).resolves.toMatchObject({
+        outcome: "found",
+        pullRequest: { number: 1236 },
+      });
+      await workspace.runPullRequestAction({ operation: "ready" });
+
+      const calls = (await readGhCalls(logPath)).filter(
+        (call) => call[0] === "pr",
+      );
+
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.slice(0, 3)).toEqual(["pr", "view", "--json"]);
+      expect(calls[1]).toEqual(["pr", "ready"]);
+    },
+  );
 
   it("uses the local branch when a differently named remote aliases origin", async () => {
     const workspacePath = await createTrackedForkWorkspace(
-      "git@github.com:acme/bb.git",
+      "git@github.com:acme/omnyo.git",
     );
+
     const { logPath } = await installFakeGh("found");
 
     await expect(
@@ -200,6 +222,7 @@ describe("pull request lookup for differently named upstream branches", () => {
     const calls = (await readGhCalls(logPath)).filter(
       (call) => call[0] === "pr",
     );
+
     expect(calls).toHaveLength(1);
     expect(calls[0]?.slice(0, 3)).toEqual(["pr", "view", "--json"]);
   });
@@ -221,6 +244,7 @@ describe("pull request lookup for differently named upstream branches", () => {
     const calls = (await readGhCalls(logPath)).filter(
       (call) => call[0] === "pr",
     );
+
     expect(calls).toHaveLength(1);
     expect(calls[0]?.slice(0, 4)).toEqual([
       "pr",
@@ -232,8 +256,9 @@ describe("pull request lookup for differently named upstream branches", () => {
 
   it("never passes an untrusted upstream URL to gh", async () => {
     const workspacePath = await createTrackedForkWorkspace(
-      "https://httpbin.org/fork-owner/bb.git",
+      "https://httpbin.org/fork-owner/omnyo.git",
     );
+
     const { logPath } = await installFakeGh("found");
     vi.stubEnv("GH_ENTERPRISE_TOKEN", "dummy-enterprise-token");
 
@@ -256,7 +281,7 @@ describe("pull request lookup for differently named upstream branches", () => {
       outcome: "found",
     });
     await runGit(
-      ["remote", "set-url", forkRemote, "git@github.com:other-owner/bb.git"],
+      ["remote", "set-url", forkRemote, "git@github.com:other-owner/omnyo.git"],
       { cwd: workspacePath },
     );
     await expect(workspace.getPullRequest()).resolves.toMatchObject({
@@ -266,6 +291,7 @@ describe("pull request lookup for differently named upstream branches", () => {
     const calls = (await readGhCalls(logPath)).filter(
       (call) => call[0] === "pr",
     );
+
     expect(calls.map((call) => call[2])).toEqual([
       qualifiedUpstream,
       `other-owner:${upstreamBranch}`,
@@ -314,7 +340,8 @@ describe("pull request lookup for differently named upstream branches", () => {
 
   it("returns unavailable when gh is not installed", async () => {
     const workspacePath = await createTrackedForkWorkspace();
-    const binPath = await makeTempDir("bb-pr-upstream-no-gh-");
+    const binPath = await makeTempDir("omnyo-pr-upstream-no-gh-");
+
     const { stdout } = await execFileAsync(
       process.platform === "win32" ? "where.exe" : "which",
       ["git"],
@@ -322,6 +349,7 @@ describe("pull request lookup for differently named upstream branches", () => {
         encoding: "utf8",
       },
     );
+
     if (process.platform === "win32") {
       vi.stubEnv("PATH", path.dirname(stdout.trim().split(/\r?\n/)[0]!));
     } else {

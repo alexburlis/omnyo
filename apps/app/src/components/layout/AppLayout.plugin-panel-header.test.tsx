@@ -4,7 +4,7 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
+  render as renderWithoutClient,
   screen,
   waitFor,
 } from "@testing-library/react";
@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppLayout } from "./AppLayout";
+import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { useWindowRightPanel } from "./WindowRightPanelToggle";
 import { APP_OVERLAY_LAYER } from "@/components/ui/app-overlay-layers";
 import {
@@ -19,12 +20,18 @@ import {
   setCompactSecondaryPanelPresentation,
 } from "@/components/ui/secondary-panel-shelf-visibility";
 
+function render(ui: ReactNode) {
+  const { wrapper } = createQueryClientTestHarness();
+
+  return renderWithoutClient(ui, { wrapper });
+}
+
 const viewportState = vi.hoisted(() => ({
   compact: false,
   macosChrome: false,
 }));
 
-vi.mock("@bb/shared-ui/hooks/use-compact-viewport", () => ({
+vi.mock("@omnyo/shared-ui/hooks/use-compact-viewport", () => ({
   useIsCompactViewport: () => viewportState.compact,
   CompactViewportOverrideProvider: ({ children }: { children: ReactNode }) => (
     <>{children}</>
@@ -35,12 +42,15 @@ vi.mock("@/components/sidebar/AppSidebar", () => ({
   AppSidebar: () => <aside data-testid="app-sidebar" />,
 }));
 
+vi.mock("./AppFooter", () => ({
+  AppFooter: () => <footer data-testid="app-footer" />,
+}));
+
 vi.mock("@/hooks/queries/system-queries", () => ({
   useUiPreferences: () => ({ data: undefined, isError: false }),
   useSystemConfig: () => ({
     data: {
       experiments: {
-        changelogPreview: false,
         serverMove: false,
         performanceDiagnostics: false,
       },
@@ -71,14 +81,10 @@ vi.mock("@/lib/plugin-slots", () => ({
       },
     ],
     settingsSections: [],
+    sidebarFooterItems: [],
+    threadCompanions: [],
+    titleBarCenters: [],
   }),
-}));
-
-vi.mock("@/components/plugin/PluginPanelHeader", () => ({
-  PluginPanelHeaderCenter: ({ chrome }: { chrome: { title: string } }) => (
-    <span data-testid="plugin-panel-header-center">{chrome.title}</span>
-  ),
-  PluginPanelHeaderActions: () => null,
 }));
 
 vi.mock("@/components/project/ProjectActionsProvider", () => ({
@@ -123,17 +129,18 @@ vi.mock("@/lib/iframe-drag-guard", () => ({
   IframeDragGuardOverlay: () => null,
 }));
 
-vi.mock("@/lib/bb-desktop", () => ({
+vi.mock("@/lib/omnyo-desktop", () => ({
   BROWSER_SIDEBAR_TRIGGER_INSET_CLASS: "",
   CHROME_ROW_CLASS: "",
   DEFAULT_DESKTOP_WINDOW_STATE: { isFullScreen: false },
+  MACOS_APP_REGION_NO_DRAG_CLASS: "",
   MACOS_CHROME_CONTROL_AXIS_CLASS: "",
   MACOS_CHROME_CONTROL_NO_DRAG_CLASS: "",
   MACOS_TRAFFIC_LIGHT_RESERVE_OFFSET_CLASS: "",
   MACOS_TRAFFIC_LIGHT_RESERVE_PADDING_CLASS: "",
   MACOS_WINDOW_DRAG_CLASS: "",
   MACOS_WINDOW_NO_DRAG_CLASS: "",
-  getBbDesktopInfo: () => null,
+  getOmnyoDesktopInfo: () => null,
   shouldReserveMacosTrafficLights: () => false,
   shouldUseMacosDesktopChrome: () => viewportState.macosChrome,
 }));
@@ -160,6 +167,7 @@ vi.mock("@/hooks/queries/sidebar-navigation-query", () => ({
   useSidebarNavigation: () => ({
     data: {
       sections: [],
+      orderedProjectIds: [],
       personalProject: {
         id: "proj_personal",
         kind: "personal",
@@ -178,6 +186,8 @@ vi.mock("@/hooks/queries/sidebar-navigation-query", () => ({
 }));
 
 vi.mock("@/hooks/queries/thread-queries", () => ({
+  useArchivedThreads: () => ({ data: undefined }),
+  useShelvedThreads: () => ({ data: undefined }),
   didThreadDetailBootstrapRefreshAfterMount: () => true,
   useThread: () => ({ data: undefined }),
   useThreadDetailBootstrap: () => ({ isError: false, isSuccess: true }),
@@ -258,26 +268,22 @@ describe("AppLayout plugin panel header", () => {
     expect(isHiddenByCompactShelf(trigger)).toBe(false);
   });
 
-  it("keeps the fixed left trigger visible while the compact sidebar drawer is open", async () => {
+  it("removes the fixed left trigger while the compact sidebar drawer is open", async () => {
     viewportState.compact = true;
     renderPluginPanelRoute();
 
-    const trigger = screen.getByTestId("app-sidebar-trigger-overlay");
-    act(() => setCompactSecondaryPanelPresentation("full"));
-    expect(trigger.dataset.panelShelf).toBe("full");
-
     fireEvent.click(screen.getByRole("button", { name: /^Toggle sidebar/ }));
 
-    await waitFor(() => expect(trigger.dataset.panelShelf).toBeUndefined());
+    await waitFor(() =>
+      expect(screen.queryByTestId("app-sidebar-trigger-overlay")).toBeNull(),
+    );
   });
 
-  it("keeps the fixed left trigger visible on wide viewports while a compact panel is showing", () => {
+  it("leaves collapsing to the rail on wide viewports without a floating trigger", () => {
     renderPluginPanelRoute();
 
     act(() => setCompactSecondaryPanelPresentation("full"));
-    expect(
-      screen.getByTestId("app-sidebar-trigger-overlay").dataset.panelShelf,
-    ).toBeUndefined();
+    expect(screen.queryByTestId("app-sidebar-trigger-overlay")).toBeNull();
   });
 
   it("moves the trigger and history controls into a window title bar beside the macOS rail", () => {
@@ -297,12 +303,81 @@ describe("AppLayout plugin panel header", () => {
     expect(screen.queryByTestId("app-desktop-sidebar-trigger")).toBeNull();
   });
 
+  it("orders the title bar controls as sidebar toggle, back, then forward", () => {
+    renderPluginPanelRoute();
+
+    const titleBar = screen.getByTestId("app-window-title-bar");
+
+    const [sidebar, back, forward] = [
+      screen.getByRole("button", { name: /^Toggle sidebar/ }),
+      screen.getByRole("button", { name: "Go back" }),
+      screen.getByRole("button", { name: "Go forward" }),
+    ];
+
+    expect(titleBar.contains(sidebar)).toBe(true);
+    expect(
+      sidebar.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      back.compareDocumentPosition(forward) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("hosts the page chrome instead of the breadcrumbs on thread routes", () => {
+    render(
+      <MemoryRouter initialEntries={["/projects/proj_1/threads/thr_1"]}>
+        <AppLayout>
+          <div>Thread body</div>
+        </AppLayout>
+      </MemoryRouter>,
+    );
+
+    const titleBar = screen.getByTestId("app-window-title-bar");
+    expect(
+      titleBar.contains(screen.getByTestId("app-title-bar-page-chrome")),
+    ).toBe(true);
+    expect(
+      titleBar.contains(screen.getByTestId("app-title-bar-page-actions")),
+    ).toBe(true);
+    expect(screen.queryByTestId("app-top-rail-breadcrumbs")).toBeNull();
+  });
+
+  it("hosts the page chrome slots on plugin panel routes", () => {
+    renderPluginPanelRoute();
+
+    const titleBar = screen.getByTestId("app-window-title-bar");
+    expect(
+      titleBar.contains(screen.getByTestId("app-title-bar-page-chrome")),
+    ).toBe(true);
+    expect(
+      titleBar.contains(screen.getByTestId("app-title-bar-page-actions")),
+    ).toBe(true);
+    expect(screen.queryByTestId("app-top-rail-breadcrumbs")).toBeNull();
+  });
+
+  it("keeps the breadcrumbs on routes without page chrome", () => {
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <AppLayout>
+          <div>Compose body</div>
+        </AppLayout>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("app-top-rail-breadcrumbs")).toBeTruthy();
+    expect(screen.queryByTestId("app-title-bar-page-chrome")).toBeNull();
+    expect(screen.queryByTestId("app-title-bar-page-actions")).toBeNull();
+  });
+
   it("adds the right panel toggle to the macOS title bar row only while a page has a right panel", () => {
     viewportState.macosChrome = true;
+
     function RightPanelPage({ isOpen }: { isOpen: boolean }) {
       useWindowRightPanel({ isOpen, enabled: true });
+
       return null;
     }
+
     function renderRoute(page: ReactNode) {
       return (
         <MemoryRouter initialEntries={["/plugins/helm-wiki/wiki"]}>
@@ -310,6 +385,7 @@ describe("AppLayout plugin panel header", () => {
         </MemoryRouter>
       );
     }
+
     const view = render(renderRoute(null));
     expect(screen.queryByTestId("window-right-panel-toggle")).toBeNull();
 
@@ -332,11 +408,13 @@ describe("AppLayout plugin panel header", () => {
     expect(screen.queryByTestId("window-right-panel-toggle")).toBeNull();
   });
 
-  it("keeps the sidebar toggle in the rail column and no title bar on wide web, Windows, and Linux windows", () => {
+  it("keeps the title bar and panel toggle on wide web, Windows, and Linux windows", () => {
     function RightPanelPage() {
       useWindowRightPanel({ isOpen: false, enabled: true });
+
       return null;
     }
+
     render(
       <MemoryRouter initialEntries={["/plugins/helm-wiki/wiki"]}>
         <AppLayout>
@@ -345,12 +423,13 @@ describe("AppLayout plugin panel header", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.queryByTestId("app-window-title-bar")).toBeNull();
-    expect(screen.queryByTestId("window-right-panel-toggle")).toBeNull();
-    expect(screen.getByTestId("app-sidebar-trigger-overlay")).toBeTruthy();
     expect(
-      screen.getByTestId("app-layout-root").dataset.framed,
-    ).toBeUndefined();
+      screen
+        .getByTestId("app-window-title-bar")
+        .contains(screen.getByTestId("window-right-panel-toggle")),
+    ).toBe(true);
+    expect(screen.queryByTestId("app-sidebar-trigger-overlay")).toBeNull();
+    expect(screen.getByTestId("app-layout-root").dataset.framed).toBe("");
   });
 
   it("keeps the floating macOS trigger on compact windows", () => {

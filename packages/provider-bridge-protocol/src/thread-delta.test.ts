@@ -77,6 +77,7 @@ describe("thread delta schemas", () => {
       },
       { kind: "session.ended" },
     ];
+
     for (const delta of deltas) {
       const parsed = threadDeltaSchema.safeParse(delta);
       expect(parsed.success, `expected ${delta.kind} to parse`).toBe(true);

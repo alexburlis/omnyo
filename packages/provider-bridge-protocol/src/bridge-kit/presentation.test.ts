@@ -1,4 +1,4 @@
-import { THREAD_EVENT_ITEM_PRESENTATION_DETAIL_MAX_LENGTH } from "@bb/domain";
+import { THREAD_EVENT_ITEM_PRESENTATION_DETAIL_MAX_LENGTH } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import {
   PRESENTATION_TITLE_MAX_LENGTH,
@@ -30,6 +30,7 @@ describe("bridge-kit presentation", () => {
     const title = presentationTitle(
       `${"x".repeat(PRESENTATION_TITLE_MAX_LENGTH - 2)}𠮷tail`,
     );
+
     expect(title).toBe(`${"x".repeat(PRESENTATION_TITLE_MAX_LENGTH - 2)}…`);
   });
 
@@ -37,6 +38,7 @@ describe("bridge-kit presentation", () => {
     const detail = presentationDetail(
       "d".repeat(THREAD_EVENT_ITEM_PRESENTATION_DETAIL_MAX_LENGTH + 50),
     );
+
     expect(detail).toHaveLength(
       THREAD_EVENT_ITEM_PRESENTATION_DETAIL_MAX_LENGTH,
     );
@@ -48,6 +50,7 @@ describe("bridge-kit presentation", () => {
     const prefix = "x".repeat(
       THREAD_EVENT_ITEM_PRESENTATION_DETAIL_MAX_LENGTH - 2,
     );
+
     expect(presentationDetail(`${prefix}𠮷tail`)).toBe(`${prefix}…`);
   });
 

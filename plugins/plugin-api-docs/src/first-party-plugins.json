@@ -1,7 +1,7 @@
 [
   {
     "id": "account-pool",
-    "name": "Account Pooler [Experimental]",
+    "name": "Account Pooler",
     "icon": "Layers"
   },
   {
@@ -15,23 +15,18 @@
     "icon": "Repeat"
   },
   {
-    "id": "bb-ai",
-    "name": "bb cloud AI",
-    "icon": "AiBrain01"
-  },
-  {
     "id": "browser-automation",
     "name": "Browser Automation",
     "icon": "Globe"
   },
   {
     "id": "concurrency-limit",
-    "name": "Concurrency limit",
+    "name": "Concurrency Limit",
     "icon": "Limitation"
   },
   {
     "id": "custom-instructions",
-    "name": "Custom instructions",
+    "name": "Custom Instructions",
     "icon": "EditFile"
   },
   {
@@ -55,8 +50,18 @@
     "icon": "Github"
   },
   {
+    "id": "omnyo--git",
+    "name": "Git",
+    "icon": "GitBranch"
+  },
+  {
+    "id": "omnyo--wait-sources",
+    "name": "Wait Sources",
+    "icon": "Eye"
+  },
+  {
     "id": "inline-vis",
-    "name": "Inline visualizations",
+    "name": "Inline Visualizations",
     "icon": "AppWindow"
   },
   {
@@ -76,32 +81,37 @@
   },
   {
     "id": "environment-personal-workspace",
-    "name": "Personal workspace",
+    "name": "Personal Workspace",
     "icon": "Folder"
   },
   {
+    "id": "environment-temporary-copy",
+    "name": "Temporary Copy",
+    "icon": "Copy"
+  },
+  {
     "id": "environment-project-checkout",
-    "name": "Project checkout",
+    "name": "Project Checkout",
     "icon": "Laptop"
   },
   {
-    "id": "bb--provider-usage",
-    "name": "Provider usage",
+    "id": "omnyo--provider-usage",
+    "name": "Provider Usage",
     "icon": "ChartColumn"
   },
   {
     "id": "provider-retry",
-    "name": "Provider retry",
+    "name": "Provider Retry",
     "icon": "ArrowReloadHorizontal"
   },
   {
     "id": "push-notifications",
-    "name": "Push notifications",
+    "name": "Push Notifications",
     "icon": "BellDot"
   },
   {
     "id": "connect",
-    "name": "bb connect",
+    "name": "Omnyo Connect",
     "icon": "ComputerCloud"
   },
   {
@@ -111,17 +121,17 @@
   },
   {
     "id": "scheduled-send",
-    "name": "Send later",
+    "name": "Send Later",
     "icon": "Calendar"
   },
   {
     "id": "side-chat",
-    "name": "Side chat",
+    "name": "Side Chat",
     "icon": "SideChat"
   },
   {
-    "id": "bb--storage-retention",
-    "name": "Storage & retention [Experimental]",
+    "id": "omnyo--storage-retention",
+    "name": "Storage & Retention [Experimental]",
     "icon": null
   },
   {
@@ -141,27 +151,27 @@
   },
   {
     "id": "provider-acp",
-    "name": "ACP providers",
+    "name": "ACP Providers",
     "icon": null
   },
   {
-    "id": "bb--provider-acp-next",
-    "name": "ACP providers (new adapter)",
+    "id": "omnyo--provider-acp-next",
+    "name": "ACP Providers (New Adapter)",
     "icon": null
   },
   {
     "id": "provider-claude-code",
-    "name": "Claude Code provider",
+    "name": "Claude Code Provider",
     "icon": null
   },
   {
     "id": "provider-codex",
-    "name": "Codex provider",
+    "name": "Codex Provider",
     "icon": null
   },
   {
     "id": "provider-pi",
-    "name": "Pi provider",
+    "name": "Pi Provider",
     "icon": null
   },
   {
@@ -170,18 +180,18 @@
     "icon": "MessageSquarePlus"
   },
   {
-    "id": "bb-account",
-    "name": "bb account",
+    "id": "omnyo-account",
+    "name": "Omnyo Account",
     "icon": "UserRound"
   },
   {
-    "id": "bb-guide",
-    "name": "BB guide",
+    "id": "omnyo-guide",
+    "name": "Omnyo Guide",
     "icon": "Explore"
   },
   {
     "id": "pdf-preview",
-    "name": "PDF preview",
+    "name": "PDF Preview",
     "icon": "FileText"
   },
   {
@@ -191,7 +201,7 @@
   },
   {
     "id": "thread-list",
-    "name": "Thread list",
+    "name": "Thread List",
     "icon": "ListView"
   }
 ]

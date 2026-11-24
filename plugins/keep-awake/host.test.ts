@@ -1,13 +1,15 @@
-import { experimental_createHostEntryHarness } from "@get-bb/plugin-sdk/testing/host";
+import { experimental_createHostEntryHarness } from "@omnyo/plugin-sdk/testing/host";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createKeepAwakeHostEntry } from "./host.js";
 
 function createChild() {
   const listeners = new Map<"error" | "exit", () => void>();
+
   return {
     kill: vi.fn(() => true),
     once(event: "error" | "exit", listener: () => void) {
       listeners.set(event, listener);
+
       return this;
     },
     emit(event: "error" | "exit") {
@@ -25,10 +27,12 @@ describe("builtin Keep Awake host entry", () => {
     vi.useFakeTimers();
     const firstChild = createChild();
     const secondChild = createChild();
+
     const spawn = vi
       .fn()
       .mockReturnValueOnce(firstChild)
       .mockReturnValueOnce(secondChild);
+
     const harness = experimental_createHostEntryHarness(
       createKeepAwakeHostEntry({ platform: "darwin", pid: 1234, spawn }),
     );
@@ -57,12 +61,14 @@ describe("builtin Keep Awake host entry", () => {
   it("retries when spawning caffeinate fails synchronously", async () => {
     vi.useFakeTimers();
     const child = createChild();
+
     const spawn = vi
       .fn()
       .mockImplementationOnce(() => {
         throw new Error("spawn failed");
       })
       .mockReturnValueOnce(child);
+
     const harness = experimental_createHostEntryHarness(
       createKeepAwakeHostEntry({ platform: "darwin", pid: 1234, spawn }),
     );
@@ -82,6 +88,7 @@ describe("builtin Keep Awake host entry", () => {
 
   it("holds a Windows execution state for the worker's lifetime", async () => {
     const spawn = vi.fn(() => createChild());
+
     const harness = experimental_createHostEntryHarness(
       createKeepAwakeHostEntry({ platform: "win32", pid: 4321, spawn }),
     );
@@ -107,11 +114,13 @@ describe("builtin Keep Awake host entry", () => {
   it("waits longer between restarts while the child keeps exiting at once", async () => {
     vi.useFakeTimers();
     const children = [createChild(), createChild(), createChild()];
+
     const spawn = vi
       .fn()
       .mockReturnValueOnce(children[0])
       .mockReturnValueOnce(children[1])
       .mockReturnValueOnce(children[2]);
+
     const harness = experimental_createHostEntryHarness(
       createKeepAwakeHostEntry({ platform: "win32", pid: 4321, spawn }),
     );
@@ -130,6 +139,7 @@ describe("builtin Keep Awake host entry", () => {
 
   it("never spawns on unsupported hosts", async () => {
     const spawn = vi.fn(() => createChild());
+
     const harness = experimental_createHostEntryHarness(
       createKeepAwakeHostEntry({ platform: "linux", pid: 1234, spawn }),
     );
@@ -143,10 +153,12 @@ describe("builtin Keep Awake host entry", () => {
   it("stops its child on disable and generation disposal", async () => {
     const firstChild = createChild();
     const secondChild = createChild();
+
     const spawn = vi
       .fn()
       .mockReturnValueOnce(firstChild)
       .mockReturnValueOnce(secondChild);
+
     const harness = experimental_createHostEntryHarness(
       createKeepAwakeHostEntry({ platform: "darwin", pid: 1234, spawn }),
     );

@@ -41,6 +41,7 @@ export function useInputFieldProps({
 }: InputFieldOptions): InputFieldProps {
   const { tokens, mode } = useTheme();
   const font = resolveFont({ className, mono });
+
   if (IS_IOS) {
     return {
       className: cn(
@@ -66,6 +67,7 @@ export function useInputFieldProps({
       clearButtonMode: "while-editing",
     };
   }
+
   return {
     className: cn(
       "w-full rounded-2xl border border-input bg-background px-4 text-sm text-foreground focus:border-ring",
@@ -95,6 +97,7 @@ export const Input = forwardRef<TextInput, InputProps>(function Input(
     editable,
     className: cn(IS_IOS ? "h-11" : "h-14", className),
   });
+
   return (
     <TextInput
       ref={ref}

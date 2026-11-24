@@ -26,12 +26,15 @@ interface FakeModuleOptions {
 function fakeModule(options: FakeModuleOptions = {}) {
   let permission: PushPermissionState = options.permission ?? "granted";
   const listeners = new Set<(deviceToken: string) => void>();
+
   const requestPermissionMock = vi.fn(
     async (): Promise<PushPermissionState> => {
       permission = "granted";
+
       return permission;
     },
   );
+
   const module: PushNotificationsModule & {
     requestPermissionMock: typeof requestPermissionMock;
     rollToken(deviceToken: string): void;
@@ -45,10 +48,12 @@ function fakeModule(options: FakeModuleOptions = {}) {
     unregisterDevicePushToken: async () => undefined,
     getExpoPushToken: vi.fn(async () => {
       const token = options.token ?? "ExponentPushToken[abc]";
+
       return typeof token === "function" ? token() : token;
     }),
     addTokenListener: (listener) => {
       listeners.add(listener);
+
       return () => listeners.delete(listener);
     },
     setBadgeCount: async () => undefined,
@@ -56,6 +61,7 @@ function fakeModule(options: FakeModuleOptions = {}) {
       for (const listener of listeners) listener(deviceToken);
     },
   };
+
   return module;
 }
 
@@ -67,14 +73,24 @@ function fakeApi() {
     unregister: vi.fn<PushSubscriptionsApi["unregister"]>(
       async () => undefined,
     ),
-    list: vi.fn<PushSubscriptionsApi["list"]>(async () => []),
+    list: vi.fn<PushSubscriptionsApi["list"]>(async () => [
+      {
+        id: "sub_1",
+        platform: "ios",
+        deviceLabel: "Sawyer's iPhone",
+        createdAt: 1_000,
+        lastSeenAt: 1_000,
+        tokenSuffix: "suffix",
+      },
+    ]),
   };
+
   return api;
 }
 
 const profile = {
   id: "p1",
-  serverUrl: "https://sawyer.getbb.app",
+  serverUrl: "https://sawyer.example.test",
   mode: "direct",
 } as const;
 
@@ -83,6 +99,7 @@ function setup(moduleOptions?: FakeModuleOptions) {
   const notifications = fakeModule(moduleOptions);
   const api = fakeApi();
   let clock = 1_000;
+
   const deps = {
     notifications,
     api,
@@ -91,6 +108,7 @@ function setup(moduleOptions?: FakeModuleOptions) {
     now: () => clock,
     refreshAfterMs: 1_000_000,
   };
+
   return {
     store,
     notifications,
@@ -192,6 +210,7 @@ describe("shouldReregister", () => {
     now: 10_000,
     refreshAfterMs: 5_000,
   };
+
   const existing = {
     subscriptionId: "sub_0",
     expoPushToken: "t1",
@@ -220,11 +239,13 @@ describe("shouldReregister", () => {
 describe("syncPushRegistration", () => {
   it("refuses plain HTTP outside loopback without asking for a token", async () => {
     const { store, deps, notifications, api } = setup();
+
     const insecure = {
       id: "p1",
       serverUrl: "http://192.168.1.20:3000",
       mode: "direct",
     } as const;
+
     store.setEnabled(insecure.id, true);
     expect(await syncPushRegistration(deps, insecure)).toEqual({
       action: "skipped",
@@ -241,7 +262,7 @@ describe("syncPushRegistration", () => {
         registration: null,
         lastOutcome: null,
       }),
-    ).toBe("Push needs HTTPS or bb connect");
+    ).toBe("Push needs HTTPS or Omnyo connect");
   });
 
   it("removes an existing registration after a profile changes to plain HTTP", async () => {
@@ -258,8 +279,9 @@ describe("syncPushRegistration", () => {
     expect(store.getRegistration(profile.id)).toBeNull();
   });
 
-  it("allows HTTPS, exact loopback HTTP hosts, and bb connect", () => {
+  it("allows HTTPS, exact loopback HTTP hosts, and Omnyo connect", () => {
     expect(isPushRegistrationAllowed(profile)).toBe(true);
+
     for (const serverUrl of [
       "http://127.0.0.1:3000",
       "http://localhost:3000",
@@ -269,6 +291,7 @@ describe("syncPushRegistration", () => {
         isPushRegistrationAllowed({ id: "p", serverUrl, mode: "direct" }),
       ).toBe(true);
     }
+
     expect(
       isPushRegistrationAllowed({
         id: "p",
@@ -376,6 +399,7 @@ describe("syncPushRegistration", () => {
         throw new Error("offline");
       },
     });
+
     store.setEnabled(profile.id, true);
     expect(await syncPushRegistration(deps, profile)).toEqual({
       action: "failed",
@@ -453,6 +477,7 @@ describe("enablePushForProfile", () => {
     const { store, deps, notifications } = setup({
       permission: "undetermined",
     });
+
     expect(await enablePushForProfile(deps, profile.id)).toBe("granted");
     expect(notifications.requestPermissionMock).toHaveBeenCalledTimes(1);
     expect(store.isEnabled(profile.id)).toBe(true);
@@ -465,6 +490,7 @@ describe("enablePushForProfile", () => {
     const { store, deps, notifications } = setup({
       permission: "undetermined",
     });
+
     notifications.requestPermissionMock.mockResolvedValueOnce("denied");
     expect(await enablePushForProfile(deps, profile.id)).toBe("denied");
     expect(store.isEnabled(profile.id)).toBe(false);

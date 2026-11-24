@@ -25,10 +25,12 @@ export function parseWorktreeListPorcelain(stdout: string): GitWorktreeEntry[] {
       flush();
       continue;
     }
+
     if (entries.length >= MAX_ENTRIES) break;
     const separator = field.indexOf(" ");
     const key = separator === -1 ? field : field.slice(0, separator);
     const value = separator === -1 ? "" : field.slice(separator + 1);
+
     if (key === "worktree") {
       flush();
       current = {
@@ -41,7 +43,9 @@ export function parseWorktreeListPorcelain(stdout: string): GitWorktreeEntry[] {
       };
       continue;
     }
+
     if (current === null) continue;
+
     if (key === "branch") {
       current.branch = value.startsWith("refs/heads/")
         ? value.slice("refs/heads/".length)
@@ -54,7 +58,9 @@ export function parseWorktreeListPorcelain(stdout: string): GitWorktreeEntry[] {
       current.prunable = true;
     }
   }
+
   flush();
+
   return entries.slice(0, MAX_ENTRIES);
 }
 
@@ -64,13 +70,16 @@ export function selectAdoptableWorktrees(args: {
 }): GitWorktreeEntry[] {
   return args.entries.filter((entry) => {
     if (entry.isMain || entry.isBare) return false;
+
     if (entry.path === "") return false;
+
     return !isInside(args.managedRoot, entry.path);
   });
 }
 
 function isInside(root: string, candidate: string): boolean {
   const relativePath = path.relative(root, candidate);
+
   return (
     relativePath === "" ||
     (relativePath !== ".." &&

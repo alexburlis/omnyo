@@ -5,7 +5,7 @@ import {
   type PluginCliContext,
   type PluginCliRegistration,
   type PluginCliResult,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import type { z } from "zod";
 import type { rpcContract } from "./contracts.js";
 
@@ -16,6 +16,9 @@ export type BrowserCliMethod =
   | "pages"
   | "screenshot"
   | "preview"
+  | "observe"
+  | "inspect"
+  | "viewport"
   | "stop"
   | "close";
 
@@ -27,6 +30,10 @@ export interface BrowserCliInput {
   timeoutMs?: number;
   page?: string;
   afterSequence?: number;
+  targetId?: string;
+  observationId?: string;
+  elementId?: string;
+  preset?: "phone" | "tablet" | "desktop" | "original";
 }
 
 export interface BrowserCliRequest {
@@ -38,7 +45,7 @@ export interface BrowserCliRequest {
 
 const SESSION_POSITIONAL = {
   name: "session-id",
-  description: "Session id returned by `bb browser-automation open`",
+  description: "Session id returned by `omnyo browser-automation open`",
   required: true,
 } as const;
 
@@ -55,24 +62,27 @@ const JSON_OPTION = {
 } as const;
 
 const REOPEN_HINT =
-  "Open a new session with `bb browser-automation open --backend <desktop|local> --machine <host-id>`.";
+  "Open a new session with `omnyo browser-automation open --backend <desktop|local> --machine <host-id>`.";
 
 function resolveThreadId(
   option: string | undefined,
   ctx: PluginCliContext,
 ): string {
   const threadId = option ?? ctx.threadId;
+
   if (threadId === undefined || threadId === "") {
-    throw new PluginCliError("Run from a BB thread or pass --thread <id>", {
+    throw new PluginCliError("Run from an Omnyo thread or pass --thread <id>", {
       code: "thread_required",
     });
   }
+
   if (ctx.threadId !== undefined && threadId !== ctx.threadId) {
     throw new PluginCliError(
       "CLI calls from a thread cannot access another thread's browser session",
       { code: "cross_thread" },
     );
   }
+
   return threadId;
 }
 
@@ -86,7 +96,7 @@ export function createBrowserAutomationCli(deps: {
     name: "browser-automation",
     summary: "Persistent DevBrowser desktop and headless sessions",
     description:
-      "Sessions belong to the thread that opened them and expire after 30 minutes idle.\nA stopped or expired session cannot be resumed; open a new one.",
+      "Sessions belong to the thread that opened them. run, pages, and screenshot renew expiry to 30 minutes after use, capped at 8 hours from creation.\nDesktop sessions also expire at their non-renewable control lease/connection deadline (at most 30 minutes).\nlist and live preview do not renew expiry. A stopped or expired session cannot be resumed; open a new one.",
     commands: {
       open: cliCommand({
         summary:
@@ -127,6 +137,7 @@ export function createBrowserAutomationCli(deps: {
         run(input, ctx) {
           const threadId = resolveThreadId(input.options.thread, ctx);
           const hostId = input.options.machine;
+
           if (input.options.backend === "local") {
             if (
               !input.options.headless ||
@@ -138,6 +149,7 @@ export function createBrowserAutomationCli(deps: {
                 { code: "invalid_selection" },
               );
             }
+
             return deps.execute(
               {
                 method: "open",
@@ -146,13 +158,16 @@ export function createBrowserAutomationCli(deps: {
               ctx,
             );
           }
+
           const instanceId = input.options.desktop;
+
           if (instanceId === undefined || input.options.headless) {
             throw new PluginCliError(
               "Desktop sessions require --desktop <instance-id> and cannot use --headless",
               { code: "invalid_selection" },
             );
           }
+
           return deps.execute(
             {
               method: "open",
@@ -187,7 +202,7 @@ export function createBrowserAutomationCli(deps: {
       run: cliCommand({
         summary: "Run a trusted DevBrowser script; runs serialize per session",
         description:
-          "Scripts may return at most 4 screenshots per run, JPEG only, 500 KB combined;\nanything larger or in another format fails the run.",
+          "Scripts may return at most 4 screenshots per run, JPEG only, 500 KB combined;\nanything larger or in another format fails the run. Output over 512 KB stops\nthe run with exit code 1 and keeps the session open.",
         positionals: [SESSION_POSITIONAL],
         constraints: [
           { kind: "exactly-one", options: ["script", "script-file"] },
@@ -234,6 +249,7 @@ export function createBrowserAutomationCli(deps: {
           const threadId = resolveThreadId(input.options.thread, ctx);
           const scriptFile = input.options["script-file"];
           const scriptHost = input.options["script-host"];
+
           return deps.execute(
             {
               method: "run",
@@ -270,7 +286,7 @@ export function createBrowserAutomationCli(deps: {
       }),
       screenshot: cliCommand({
         summary:
-          "Save a bounded JPEG in session tmp; return its path and host ID",
+          "Save a bounded JPEG in this chat’s storage; return its path and host ID",
         positionals: [SESSION_POSITIONAL],
         options: {
           page: {
@@ -323,6 +339,105 @@ export function createBrowserAutomationCli(deps: {
             ctx,
           ),
       }),
+      observe: cliCommand({
+        summary:
+          "Freeze the exact displayed headless target for visual annotations",
+        positionals: [SESSION_POSITIONAL],
+        options: {
+          target: {
+            type: "string",
+            required: true,
+            description: "Exact target ID from pages or preview",
+          },
+          thread: THREAD_OPTION,
+          json: JSON_OPTION,
+        },
+        run: (input, ctx) =>
+          deps.execute(
+            {
+              method: "observe",
+              input: {
+                threadId: resolveThreadId(input.options.thread, ctx),
+                sessionId: input.positionals["session-id"],
+                targetId: input.options.target,
+              },
+            },
+            ctx,
+          ),
+      }),
+      inspect: cliCommand({
+        summary: "Validate a frozen element and capture its visible crop",
+        description:
+          "Returns one bounded JPEG path and its host; copy/upload it before closing the session. Stale documents, layouts or viewports fail visibly.",
+        positionals: [SESSION_POSITIONAL],
+        options: {
+          target: {
+            type: "string",
+            required: true,
+            description: "Exact target ID from observe",
+          },
+          observation: {
+            type: "string",
+            required: true,
+            description: "Observation ID from observe",
+          },
+          element: {
+            type: "string",
+            required: true,
+            description: "Frozen element ID from observe",
+          },
+          thread: THREAD_OPTION,
+          json: JSON_OPTION,
+        },
+        run: (input, ctx) =>
+          deps.execute(
+            {
+              method: "inspect",
+              input: {
+                threadId: resolveThreadId(input.options.thread, ctx),
+                sessionId: input.positionals["session-id"],
+                targetId: input.options.target,
+                observationId: input.options.observation,
+                elementId: input.options.element,
+              },
+            },
+            ctx,
+          ),
+      }),
+      viewport: cliCommand({
+        summary:
+          "Apply real phone/tablet/desktop metrics and touch on a headless target",
+        positionals: [SESSION_POSITIONAL],
+        options: {
+          target: {
+            type: "string",
+            required: true,
+            description: "Exact target ID from pages or preview",
+          },
+          preset: {
+            type: "enum",
+            values: ["phone", "tablet", "desktop", "original"],
+            required: true,
+            description:
+              "Original restores only this preview's unchanged owned emulation",
+          },
+          thread: THREAD_OPTION,
+          json: JSON_OPTION,
+        },
+        run: (input, ctx) =>
+          deps.execute(
+            {
+              method: "viewport",
+              input: {
+                threadId: resolveThreadId(input.options.thread, ctx),
+                sessionId: input.positionals["session-id"],
+                targetId: input.options.target,
+                preset: input.options.preset,
+              },
+            },
+            ctx,
+          ),
+      }),
       stop: cliCommand({
         summary:
           "Cancel queued and running work and release control; open a new session to resume",
@@ -362,19 +477,30 @@ export function createBrowserAutomationCli(deps: {
 
 export function browserCliFailure(error: unknown): PluginCliError {
   if (error instanceof PluginCliError) return error;
+
   const message =
     error instanceof Error ? error.message : "Browser command failed";
-  if (/stopped or expired|does not belong to this thread/u.test(message)) {
+
+  if (message.includes("Browser work cancelled or timed out")) {
+    return new PluginCliError(message, {
+      code: "session_unavailable",
+      hint: `${REOPEN_HINT} For longer scripts, increase --timeout up to 120 seconds.`,
+    });
+  }
+
+  if (/open a new session|does not belong to this thread/u.test(message)) {
     return new PluginCliError(message, {
       code: "session_unavailable",
       hint: REOPEN_HINT,
     });
   }
+
   if (/screenshot|JPEG/iu.test(message)) {
     return new PluginCliError(message, {
       code: "screenshot_limit",
       hint: "Return at most 4 JPEG screenshots per run, 500 KB combined.",
     });
   }
+
   return new PluginCliError(message, { code: "command_failed" });
 }

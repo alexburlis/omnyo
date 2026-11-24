@@ -4,7 +4,7 @@ import type {
   TimelineOutputPreview,
   TimelineRow,
   TimelineToolWorkRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { useThreadTimelineTurnSummaryDetails } from "@/hooks/queries/thread-queries";
 
 export type TimelinePreviewableWorkRow =
@@ -32,6 +32,7 @@ function loadedOutputState(
   if (outputPreview === undefined) {
     return "loaded";
   }
+
   switch (outputPreview.experimental_fullOutputAvailability) {
     case "available":
       return "error";
@@ -56,6 +57,7 @@ function findPreviewableWorkRow(
       return candidate;
     }
   }
+
   return null;
 }
 
@@ -77,6 +79,7 @@ export function useTimelineWorkRowFullOutput(
   const outputPreview = row.outputPreview;
   const isPreview = outputPreview !== undefined;
   const shouldLoad = shouldLoadTimelineWorkRowFullOutput(row);
+
   const { data, isError, refetch } = useThreadTimelineTurnSummaryDetails(
     {
       itemId: row.callId,
@@ -87,9 +90,11 @@ export function useTimelineWorkRowFullOutput(
     },
     { enabled: shouldLoad, refetchOnMount: false },
   );
+
   const retry = useCallback((): void => {
     void refetch();
   }, [refetch]);
+
   const loadedOutput = useMemo((): {
     output: string;
     outputPreview: TimelineOutputPreview | undefined;
@@ -97,10 +102,13 @@ export function useTimelineWorkRowFullOutput(
     if (!shouldLoad || data === undefined) {
       return null;
     }
+
     const match = findPreviewableWorkRow(data, row.workKind, row.callId);
+
     if (match === null) {
       return null;
     }
+
     return {
       output: match.output,
       outputPreview: match.outputPreview,
@@ -110,11 +118,13 @@ export function useTimelineWorkRowFullOutput(
   if (!isPreview) {
     return { output: row.output, state: "complete", retry };
   }
+
   if (
     outputPreview.experimental_fullOutputAvailability === "retention-expired"
   ) {
     return { output: row.output, state: "expired-preview", retry };
   }
+
   if (loadedOutput !== null) {
     return {
       output: loadedOutput.output,
@@ -122,11 +132,14 @@ export function useTimelineWorkRowFullOutput(
       retry,
     };
   }
+
   if (!shouldLoad) {
     return { output: row.output, state: "streaming-preview", retry };
   }
+
   if (isError || data !== undefined) {
     return { output: row.output, state: "error", retry };
   }
+
   return { output: row.output, state: "loading", retry };
 }

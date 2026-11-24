@@ -6,17 +6,18 @@ import {
   experimental_captureBridgeJsonRpcOutput as captureBridgeJsonRpcOutput,
   experimental_formatConformanceReport as formatConformanceReport,
   experimental_runBridgeConformance as runBridgeConformance,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
-import type { CapturedBridgeJsonRpcOutput } from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
+import type { CapturedBridgeJsonRpcOutput } from "@omnyo/plugin-sdk/provider-bridge/testing";
 
 import { handleLine } from "./bridge.js";
 import { stubFakeCodexAppServer } from "./fake-codex-app-server-harness.js";
 
 let output: CapturedBridgeJsonRpcOutput;
+
 let workspaceDir: string;
 
 beforeEach(() => {
-  workspaceDir = mkdtempSync(join(tmpdir(), "bb-codex-conformance-ws-"));
+  workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-codex-conformance-ws-"));
   const fakeScriptPath = join(workspaceDir, "fake-codex-script.json");
   writeFileSync(
     fakeScriptPath,

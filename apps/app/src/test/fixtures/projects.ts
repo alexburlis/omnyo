@@ -2,7 +2,7 @@ import type {
   ProjectResponse,
   ProjectWithThreadsResponse,
   SidebarBootstrapResponse,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 
 export function makeProjectResponse(
   overrides: Partial<ProjectResponse> = {},
@@ -33,14 +33,24 @@ export function makeProjectWithThreadsResponse(
 export function makeSidebarBootstrapResponse(
   overrides: Partial<SidebarBootstrapResponse> = {},
 ): SidebarBootstrapResponse {
-  return {
-    sections: [],
-    projects: [makeProjectWithThreadsResponse()],
-    personalProject: makeProjectWithThreadsResponse({
+  const projects = overrides.projects ?? [makeProjectWithThreadsResponse()];
+
+  const personalProject =
+    overrides.personalProject ??
+    makeProjectWithThreadsResponse({
       id: "proj_personal",
       kind: "personal",
       name: "Personal",
-    }),
+    });
+
+  return {
+    sections: [],
+    groups: [],
+    projects,
+    personalProject,
+    orderedProjectIds: [...projects, personalProject].map(
+      (project) => project.id,
+    ),
     ...overrides,
   };
 }

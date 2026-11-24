@@ -1,12 +1,14 @@
-import type { BbPluginApi, ComposerMention } from "@get-bb/plugin-sdk";
+import type { PluginApi, ComposerMention } from "@omnyo/plugin-sdk";
 
 import { z } from "zod";
 import { attachmentSchema, promptSchema } from "./contract.js";
 
 export type HistoryEntry = Awaited<
-  ReturnType<BbPluginApi["sdk"]["experimental_promptHistory"]["list"]>
+  ReturnType<PluginApi["sdk"]["experimental_promptHistory"]["list"]>
 >["entries"][number];
+
 type HistoryInput = HistoryEntry["input"][number];
+
 type HistoryMention = Extract<
   HistoryInput,
   { type: "text" }
@@ -20,6 +22,7 @@ function composerMention({
   if (resource.kind !== "plugin") return { from: start, to: end, ...resource };
   const { itemId, ...plugin } = resource;
   const separator = itemId.indexOf(":");
+
   return {
     from: start,
     to: end,
@@ -40,10 +43,13 @@ export function promptFromHistory(
   const mentions: ComposerMention[] = [];
   const attachments: z.infer<typeof attachmentSchema>[] = [];
   let offset = 0;
+
   for (const chunk of input) {
     if (chunk.type === "text") {
       if (chunk.text.trim().length === 0) continue;
+
       if (segments.length > 0) offset += 2;
+
       for (const mention of chunk.mentions) {
         const converted = composerMention(mention);
         mentions.push({
@@ -52,6 +58,7 @@ export function promptFromHistory(
           to: converted.to + offset,
         });
       }
+
       segments.push(chunk.text);
       offset += chunk.text.length;
     } else if (chunk.type === "localImage") {
@@ -72,5 +79,6 @@ export function promptFromHistory(
       );
     }
   }
+
   return { text: segments.join("\n\n"), mentions, attachments };
 }

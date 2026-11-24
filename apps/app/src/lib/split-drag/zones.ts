@@ -15,7 +15,9 @@ export interface ZoneDecision {
 }
 
 const EDGE_X_FRACTION = 0.28;
+
 const EDGE_Y_FRACTION = 0.3;
+
 const ZONE_MARGIN_PX = 5;
 
 export function pickZone(
@@ -25,23 +27,29 @@ export function pickZone(
 ): SplitZone {
   const px = rect.width > 0 ? (clientX - rect.left) / rect.width : 0.5;
   const py = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
+
   if (px < EDGE_X_FRACTION) {
     return "left";
   }
+
   if (px > 1 - EDGE_X_FRACTION) {
     return "right";
   }
+
   if (py < EDGE_Y_FRACTION) {
     return "top";
   }
+
   if (py > 1 - EDGE_Y_FRACTION) {
     return "bottom";
   }
+
   return "center";
 }
 
 export function zoneBox(rect: Rect, zone: SplitZone): Rect {
   const m = ZONE_MARGIN_PX;
+
   switch (zone) {
     case "left":
       return {
@@ -95,9 +103,11 @@ export function decideThreadDrop({
   if (threadAlreadyOpen) {
     return { zone: "center", label: "Already open — focus pane" };
   }
+
   if (atMaxPanes) {
     return { zone: "center", label: "Replace this chat" };
   }
+
   return {
     zone,
     label: zone === "center" ? "Replace this chat" : `Split ${zone}`,
@@ -116,6 +126,7 @@ export function decidePaneDrop({
   if (isSelf) {
     return null;
   }
+
   return zone === "center"
     ? { zone, label: "Swap chats" }
     : { zone, label: `Move ${zone}` };
@@ -143,10 +154,13 @@ export function shouldEngageSidebarSplitDrag({
   if (x <= sidebarRightEdge) {
     return false;
   }
+
   const dx = x - startX;
   const dy = y - startY;
+
   if (Math.abs(dx) <= Math.abs(dy)) {
     return false;
   }
+
   return Math.hypot(dx, dy) > distance;
 }

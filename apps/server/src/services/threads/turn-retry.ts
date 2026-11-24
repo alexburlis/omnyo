@@ -1,19 +1,34 @@
-import { hasQueuedRetryOfTurnRequest } from "@bb/db";
-import { permissionModeSchema } from "@bb/domain";
+import {
+  hasQueuedRetryOfTurnRequest,
+  getQueuedThreadContinuation,
+} from "@omnyo/db";
+import { permissionModeSchema } from "@omnyo/domain";
 import type {
   ClientTurnRequestId,
   PermissionMode,
   PromptInput,
   Thread,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   RetryTurnRequest,
   RetryTurnResponse,
   SendMessageRequest,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { ApiError } from "../../errors.js";
+import type { InboxActor } from "../inbox/actor.js";
+import {
+  failureSupersededByOwner,
+  openFailureState,
+  recordRetryDecision,
+} from "../inbox/engine.js";
+import { updateFailure } from "../inbox/store.js";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { attemptDispatch } from "./dispatch-attempt.js";
+import { getLatestMaintenanceRequest } from "./maintenance-run.js";
+import {
+  acquireThreadContinuationAdmission,
+  isThreadContinuationInFlight,
+} from "./thread-continuation-admission.js";
 import {
   loadFailedTurn,
   retryChain,
@@ -23,13 +38,6 @@ import {
 
 type TurnRetryDeps = LoggedPendingInteractionWorkSessionDeps;
 
-/**
- * True when this original request already has a retry row, waiting or claimed.
- *
- * One failure earns at most one live retry: a second row would re-submit the
- * same turn twice, which the user would see as two identical retry cards and
- * the provider as two identical turns.
- */
 function hasQueuedRetryFor(
   deps: Pick<TurnRetryDeps, "db">,
   args: { threadId: string; originalRequestId: string },
@@ -40,21 +48,21 @@ function hasQueuedRetryFor(
   });
 }
 
-/**
- * The failed turn a retry re-submits.
- *
- * A thread has exactly one retryable turn: its most recent one, whose failure
- * is what put it in `error`. Anything earlier has already been answered by the
- * turns after it, so re-submitting it would ask the provider to redo work the
- * conversation has moved past. `turnRequestId` therefore ASSERTS which turn the
- * caller means rather than selecting among several — it is how a retry policy
- * that decided on one failure refuses to act on a different one it never saw.
- */
 function requireFailedTurn(
   deps: Pick<TurnRetryDeps, "db">,
   args: { thread: Thread; turnRequestId: ClientTurnRequestId | null },
 ) {
   const { thread } = args;
+  const maintenance = getLatestMaintenanceRequest(deps.db, thread.id);
+
+  if (maintenance !== null) {
+    throw new ApiError(
+      409,
+      "maintenance_not_retryable",
+      `Thread ${thread.id} last ran an automatic compaction, which is never retried.`,
+    );
+  }
+
   if (thread.status !== "error") {
     throw new ApiError(
       409,
@@ -62,7 +70,9 @@ function requireFailedTurn(
       `Thread ${thread.id} has no failed turn to retry: it is ${thread.status}.`,
     );
   }
+
   const failed = loadFailedTurn(deps.db, thread.id);
+
   if (failed === null) {
     throw new ApiError(
       409,
@@ -70,6 +80,7 @@ function requireFailedTurn(
       `Thread ${thread.id} failed before it dispatched a turn, so there is nothing to retry.`,
     );
   }
+
   if (
     args.turnRequestId !== null &&
     args.turnRequestId !== failed.request.requestId
@@ -80,35 +91,34 @@ function requireFailedTurn(
       `Turn ${args.turnRequestId} is not the failed turn on thread ${thread.id}; its most recent turn is ${failed.request.requestId}.`,
     );
   }
+
   return failed;
 }
 
 export interface RetryFailedTurnArgs {
   thread: Thread;
   request: RetryTurnRequest;
+  actor: InboxActor;
 }
 
 const CONTINUE_ACCEPTED_TURN_TEXT = "Please continue.";
 
-/**
- * What the re-attempt sends, decided by the provider's own acceptance record.
- *
- * An input the provider never accepted must be re-sent verbatim: the request
- * died at the door, the provider has no record of it, and the retry asks the
- * original question for the first time the provider will hear it. An input
- * the provider DID accept is already in its conversation — the failed attempt
- * left the message (and possibly partial output) in the provider session,
- * which no provider rolls back — so re-sending it would ask the same question
- * twice in a row; a continuation nudge is the honest re-attempt there.
- *
- * Either way the blocks are `agent-only`: the user's message stays where it
- * was, on the attempt that failed, using the same projection rule that has
- * always hidden system continuations.
- */
-function retryInput(
+export interface FailedTurnRetryPrompt {
+  input: PromptInput[];
+  inputGroups?: PromptInput[][];
+}
+
+interface FailedTurnRetryExecution {
+  model: string;
+  reasoningLevel: SendMessageRequest["reasoningLevel"];
+  serviceTier: SendMessageRequest["serviceTier"];
+  permissionMode?: PermissionMode;
+}
+
+export function failedTurnRetryInput(
   deps: Pick<TurnRetryDeps, "db">,
   args: { threadId: string; failed: FailedTurnRecord },
-): { input: PromptInput[]; inputGroups?: PromptInput[][] } {
+): FailedTurnRetryPrompt {
   if (wasFailedTurnInputAccepted(deps.db, args)) {
     return {
       input: [
@@ -121,81 +131,84 @@ function retryInput(
       ],
     };
   }
+
   const agentOnly = (block: PromptInput): PromptInput => ({
     ...block,
     visibility: "agent-only",
   });
+
   const groups = args.failed.request.inputGroups;
-  return {
+
+  const prompt: FailedTurnRetryPrompt = {
     input: args.failed.request.input.map(agentOnly),
-    ...(groups === undefined
-      ? {}
-      : { inputGroups: groups.map((group) => group.map(agentOnly)) }),
   };
+
+  if (groups !== undefined)
+    prompt.inputGroups = groups.map((group) => group.map(agentOnly));
+
+  return prompt;
 }
 
-/**
- * The failed attempt's own execution tuple, replayed explicitly.
- *
- * A retry re-runs a turn the user already sent, so it runs the way that turn
- * ran — not the way the thread would resolve a NEW message today. Without
- * this, a thread-level model override changed between the failure and the
- * retry would silently swap the model under a turn nobody re-composed. A
- * legacy-recorded permission mode that the request schema no longer accepts
- * is the one field left to re-resolution.
- */
-function retryExecution(failed: FailedTurnRecord): {
-  model: string;
-  reasoningLevel: SendMessageRequest["reasoningLevel"];
-  serviceTier: SendMessageRequest["serviceTier"];
-  permissionMode?: PermissionMode;
-} {
+export function failedTurnRetryExecution(
+  failed: FailedTurnRecord,
+): FailedTurnRetryExecution {
   const { execution } = failed.request;
+
   const permissionMode = permissionModeSchema.safeParse(
     execution.permissionMode,
   ).data;
-  return {
+
+  const result: FailedTurnRetryExecution = {
     model: execution.model,
     reasoningLevel: execution.reasoningLevel,
     serviceTier: execution.serviceTier,
-    ...(permissionMode === undefined ? {} : { permissionMode }),
   };
+
+  if (permissionMode !== undefined) result.permissionMode = permissionMode;
+
+  return result;
 }
 
-/**
- * Originals with a retry currently being decided in this process.
- *
- * The queued-row check below cannot see a concurrent call that has passed it
- * but not yet written anything — two clients clicking Retry together would
- * both dispatch. One failure earns one retry, so the second caller gets the
- * same 409 a queued duplicate gets.
- */
-const retriesInFlight = new Set<string>();
-
-/**
- * Re-submits a failed turn.
- *
- * The retry is an ordinary dispatch attempt carrying a `retry` payload, which
- * is what makes it behave like everything else: a `sendAt` in the future queues
- * it on the clock, a busy thread queues it behind the running turn, and the
- * `message.dispatch` hook still gets to hold it — so a retry coming back after
- * a rate-limit window respects a limiter that is at capacity instead of jumping
- * the queue. What the attempt carries is `retryInput` and `retryExecution` decide.
- */
 export async function retryFailedTurn(
   deps: TurnRetryDeps,
   args: RetryFailedTurnArgs,
 ): Promise<RetryTurnResponse> {
   const { request, thread } = args;
+
   const failed = requireFailedTurn(deps, {
     thread,
     turnRequestId: request.turnRequestId,
   });
+
   const chain = retryChain(failed.request);
   const originalRequestId = chain.originalRequestId;
-  const inFlightKey = `${thread.id}:${originalRequestId}`;
+  const failure = openFailureState(deps.db, thread.id);
+
   if (
-    retriesInFlight.has(inFlightKey) ||
+    failure === null &&
+    args.actor.kind !== "owner" &&
+    failureSupersededByOwner(deps.db, thread.id)
+  )
+    throw new ApiError(
+      409,
+      "retry_refused",
+      "The owner already continued this chat after the failure.",
+    );
+
+  if (failure?.state === "actionable") {
+    if (args.actor.kind !== "owner")
+      throw new ApiError(
+        409,
+        "retry_refused",
+        "This failure is waiting for the owner; only Resume or a reply restarts it.",
+      );
+
+    updateFailure(deps.db, failure.id, { state: "held" }, Date.now());
+  }
+
+  if (
+    isThreadContinuationInFlight(thread.id) ||
+    getQueuedThreadContinuation(deps.db, thread.id) !== null ||
     hasQueuedRetryFor(deps, { threadId: thread.id, originalRequestId })
   ) {
     throw new ApiError(
@@ -204,17 +217,26 @@ export async function retryFailedTurn(
       `Turn ${originalRequestId} already has a retry waiting on thread ${thread.id}.`,
     );
   }
-  retriesInFlight.add(inFlightKey);
+
+  const release = acquireThreadContinuationAdmission(thread.id);
+
+  if (release === null)
+    throw new ApiError(
+      409,
+      "retry_already_queued",
+      "Thread recovery is already running.",
+    );
+
   try {
     const attempt = chain.attemptNumber + 1;
+
     const outcome = await attemptDispatch(deps, {
       thread,
       payload: {
-        // A retry never steers: it re-runs a turn, so a thread that is busy
-        // again is something to wait behind rather than to interrupt.
         mode: "queue-if-active",
-        ...retryInput(deps, { threadId: thread.id, failed }),
-        ...retryExecution(failed),
+        ...failedTurnRetryInput(deps, { threadId: thread.id, failed }),
+        ...failedTurnRetryExecution(failed),
+        ...(request.model === undefined ? {} : { model: request.model }),
         ...(request.sendAt === null ? {} : { sendAt: request.sendAt }),
       },
       source: { kind: "inline" },
@@ -225,12 +247,14 @@ export async function retryFailedTurn(
         reason: request.reason,
       },
       pluginSubmission: null,
+      systemNotice: null,
       retryOf: { requestId: originalRequestId, attempt },
       origin: null,
       originPluginId: null,
       startedOnBehalfOf: null,
       trigger: "user",
     });
+
     if (outcome.kind === "dispatched") {
       return {
         ok: true,
@@ -239,19 +263,24 @@ export async function retryFailedTurn(
         attempt,
       };
     }
+
+    recordRetryDecision(deps.db, {
+      threadId: thread.id,
+      retryQueuedMessageId: outcome.entry.id,
+      now: Date.now(),
+    });
+
     return {
       ok: true,
       delivery: "queued",
       turnRequestId: originalRequestId,
       attempt,
       queuedMessageId: outcome.entry.id,
-      // A queued row's `waitingOn` is null only when a drain cleared its wait
-      // and is about to re-attempt it — a state this row, just written by the
-      // attempt above, cannot be in. The fallback narrows the type honestly.
+
       waitingOn: outcome.entry.waitingOn ?? { kind: "thread-busy" },
       sendAt: outcome.entry.sendAt,
     };
   } finally {
-    retriesInFlight.delete(inFlightKey);
+    release();
   }
 }

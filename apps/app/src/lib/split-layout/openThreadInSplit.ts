@@ -39,34 +39,46 @@ export function openThreadInSplit({
 }: OpenThreadInSplitArgs): void {
   const route = getThreadRoutePath({ projectId, threadId });
   const layout = store.get(splitLayoutAtom);
+
   if (isCompact || layout === null) {
     navigate(route, state === undefined ? undefined : { state });
+
     return;
   }
+
   const existing = findPaneByThread(layout.root, projectId, threadId);
+
   if (existing !== null) {
     const next = setFocus(layout, existing.paneId);
+
     if (next !== layout) {
       store.set(splitLayoutAtom, next);
     }
+
     navigate(route, {
       replace: true,
       ...(state === undefined ? {} : { state }),
     });
+
     return;
   }
+
   const decision = decideThreadDrop({
     zone: "right",
     threadAlreadyOpen: false,
     atMaxPanes: countPanes(layout.root) >= MAX_PANES,
   });
+
   const content: PaneContent = { kind: "thread", projectId, threadId };
+
   const next =
     decision.zone === "center"
       ? replacePaneContent(layout, layout.focusedPaneId, content)
       : splitPane(layout, layout.focusedPaneId, "right", content);
+
   if (next !== layout) {
     store.set(splitLayoutAtom, next);
   }
+
   navigate(route, state === undefined ? undefined : { state });
 }

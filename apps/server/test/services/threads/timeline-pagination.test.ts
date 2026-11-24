@@ -3,7 +3,7 @@ import type {
   TimelineRow,
   TimelineTurnRow,
   TimelineUserConversationRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { paginateTimelineRows } from "../../../src/services/threads/timeline-pagination.js";
 
 function userRow(args: {
@@ -29,7 +29,12 @@ function userRow(args: {
     senderThreadId: null,
     systemMessageKind: "unlabeled",
     systemMessageSubject: null,
-    turnRequest: { isGrouped: false, kind: "message", status: "accepted" },
+    turnRequest: {
+      clientRequestId: null,
+      isGrouped: false,
+      kind: "message",
+      status: "accepted",
+    },
   };
 }
 
@@ -40,7 +45,12 @@ function steerRow(args: {
 }): TimelineUserConversationRow {
   return {
     ...userRow(args),
-    turnRequest: { isGrouped: false, kind: "steer", status: "accepted" },
+    turnRequest: {
+      clientRequestId: null,
+      isGrouped: false,
+      kind: "steer",
+      status: "accepted",
+    },
   };
 }
 
@@ -61,6 +71,7 @@ function assistantRow(
     text: `assistant ${seq}`,
     attachments: null,
     turnRequest: null,
+    turnGit: null,
   };
 }
 
@@ -68,6 +79,7 @@ describe("paginateTimelineRows", () => {
   it("returns each row identity once when projection repeats a row", () => {
     const user = userRow({ id: "user", seq: 1, text: "Request" });
     const assistant = assistantRow(2);
+
     const page = paginateTimelineRows({
       knownHasOlderSegments: false,
       maxLeaves: 1_000,
@@ -77,6 +89,7 @@ describe("paginateTimelineRows", () => {
       page: { kind: "latest", segmentLimit: 20 },
       rows: [user, assistant, { ...assistant }],
     });
+
     expect(page.rows).toEqual([user, assistant]);
     expect(page.olderCursor).toBeNull();
     expect(page.hasOlderRows).toBe(false);
@@ -128,6 +141,7 @@ describe("paginateTimelineRows", () => {
       status: "completed",
       completedAt: 15,
     };
+
     const rows: TimelineRow[] = [
       providerEnvironment,
       userRow({ id: "thread-1:user-seed:13", seq: 13, text: "follow-up" }),
@@ -159,11 +173,18 @@ describe("paginateTimelineRows", () => {
       seq: 1,
       text: "older",
     });
+
     const lateOlderRow: TimelineRow = {
       ...userRow({ id: "thread-1:late-older-row", seq: 2, text: "late" }),
       sourceSeqEnd: 31,
-      turnRequest: { isGrouped: false, kind: "steer", status: "accepted" },
+      turnRequest: {
+        clientRequestId: null,
+        isGrouped: false,
+        kind: "steer",
+        status: "accepted",
+      },
     };
+
     const latestUser = userRow({
       id: "thread-1:user-seed:20",
       seq: 20,
@@ -193,7 +214,9 @@ describe("paginateTimelineRows", () => {
         sourceSeqEnd: 21,
         text: "a".repeat(500),
       };
+
       const latest = userRow({ id: "latest", seq: 20, text: "b".repeat(500) });
+
       const page = paginateTimelineRows({
         knownHasOlderSegments: true,
         maxLeaves: 1_000,
@@ -209,6 +232,7 @@ describe("paginateTimelineRows", () => {
         Buffer.byteLength(JSON.stringify(page.rows)) +
           Buffer.byteLength(JSON.stringify(page.olderRowUpdates ?? [])),
       ).toBeLessThanOrEqual(maxBytes);
+
       if (maxBytes === 1_000) {
         expect(page.olderRowUpdates).toBeUndefined();
         expect(page.olderRowsSourceSeqEnd).toBe(21);
@@ -224,6 +248,7 @@ describe("paginateTimelineRows", () => {
       ...assistantRow(seq),
       sourceSeqEnd,
     });
+
     const nested: TimelineTurnRow = {
       id: "thread-1:turn:nested",
       kind: "turn",
@@ -238,12 +263,15 @@ describe("paginateTimelineRows", () => {
       completedAt: 5,
       children: [child(5)],
     };
+
     const changedChild = child(4, 25);
+
     const newChild = userRow({
       id: "thread-1:new-child",
       seq: 26,
       text: "new",
     });
+
     const running: TimelineTurnRow = {
       ...nested,
       id: "thread-1:turn:running",
@@ -253,10 +281,16 @@ describe("paginateTimelineRows", () => {
       completedAt: null,
       children: [child(3), changedChild, nested, newChild],
     };
+
     const settled: TimelineRow = {
       ...userRow({ id: "thread-1:settled", seq: 6, text: "settled" }),
       sourceSeqEnd: 10,
-      turnRequest: { isGrouped: false, kind: "steer", status: "accepted" },
+      turnRequest: {
+        clientRequestId: null,
+        isGrouped: false,
+        kind: "steer",
+        status: "accepted",
+      },
     };
 
     const page = paginateTimelineRows({
@@ -380,7 +414,9 @@ describe("paginateTimelineRows", () => {
           { ...assistantRow(4), sourceSeqEnd: 31 },
         ],
       };
+
       const tail = assistantRow(5);
+
       const page = paginateTimelineRows({
         knownHasOlderSegments: false,
         maxLeaves,
@@ -392,6 +428,7 @@ describe("paginateTimelineRows", () => {
       });
 
       expect(page.olderRowsSourceSeqEnd).toBe(omittedEnd);
+
       if (maxLeaves === 2) {
         expect(page.rows).toEqual([
           { ...nested, children: [nested.children![1]] },
@@ -482,6 +519,7 @@ describe("paginateTimelineRows", () => {
         userRow({ id: "thread-1:user-seed:3", seq: 3, text: "first" }),
       ],
     });
+
     expect(older.rows.map((row) => row.id)).toEqual([
       "thread-1:op:thread-provisioning:1",
     ]);
@@ -518,6 +556,7 @@ describe("paginateTimelineRows", () => {
 
   it("keeps an in-window row that displays before an accepted steer projected at its acceptance", () => {
     const notice = assistantRow(13093);
+
     const page = paginateTimelineRows({
       knownHasOlderSegments: true,
       maxLeaves: 1_000,
@@ -607,6 +646,7 @@ describe("paginateTimelineRows", () => {
       page: { kind: "older", beforeCursor: page.olderCursor!, segmentLimit: 8 },
       rows: [],
     });
+
     expect(last.hasOlderRows).toBe(false);
     expect(last.olderCursor).toBeNull();
   });

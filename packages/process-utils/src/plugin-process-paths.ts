@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 export type PluginProcessDataKind = "host-data" | "bridge-data";
@@ -24,15 +23,8 @@ export async function ensurePluginProcessDataDir(args: {
     safePluginSegment(args.pluginId),
     args.kind,
   );
-  await mkdir(directory, { recursive: true });
-  return directory;
-}
 
-export async function createPluginProcessTempDir(args: {
-  pluginId: string;
-  prefix: string;
-}): Promise<string> {
-  return mkdtemp(
-    join(tmpdir(), `${args.prefix}-${safePluginSegment(args.pluginId)}-`),
-  );
+  await mkdir(directory, { recursive: true });
+
+  return directory;
 }

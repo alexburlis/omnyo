@@ -10,6 +10,7 @@ function isSamePathOrNestedUnder(
   parentPath: string,
 ): boolean {
   const relativePath = path.relative(parentPath, childPath);
+
   return (
     relativePath === "" ||
     (relativePath.length > 0 &&
@@ -21,14 +22,18 @@ function isSamePathOrNestedUnder(
 function dedupeResolvedPaths(paths: readonly string[]): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
+
   for (const value of paths) {
     const resolved = path.resolve(value);
+
     if (seen.has(resolved)) {
       continue;
     }
+
     seen.add(resolved);
     result.push(resolved);
   }
+
   return result;
 }
 
@@ -45,10 +50,12 @@ export async function resolveAdditionalWorkspaceWriteRoots(
   options: GitProcessOptions = {},
 ): Promise<string[]> {
   const resolvedWorkspacePath = path.resolve(workspacePath);
+
   const [gitDir, commonGitDir] = await Promise.all([
     getAbsoluteGitDir(resolvedWorkspacePath, options),
     getGitCommonDir(resolvedWorkspacePath, options),
   ]);
+
   const candidateRoots = dedupeResolvedPaths([
     gitDir,
     ...buildCommonGitWriteRoots(commonGitDir),

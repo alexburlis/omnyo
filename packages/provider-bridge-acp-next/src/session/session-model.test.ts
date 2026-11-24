@@ -45,9 +45,11 @@ describe("work state on a v1 connection", () => {
   it("reports a failed prompt as an idle state with the error stop reason", () => {
     const session = model();
     session.promptSubmitted();
+
     const settled = session.promptSettled({
       error: { code: -32000, message: "Authentication required" },
     });
+
     expect(settled).toMatchObject([
       {
         work: {
@@ -75,6 +77,7 @@ describe("work state on a v1 connection", () => {
 
   it("does not start agent work for bookkeeping updates while idle", () => {
     const session = model();
+
     const updates = [
       { sessionUpdate: "available_commands_update", availableCommands: [] },
       { sessionUpdate: "session_info_update", title: "Renamed" },
@@ -86,6 +89,7 @@ describe("work state on a v1 connection", () => {
         status: "completed",
       },
     ];
+
     session.applySessionUpdate({
       sessionUpdate: "tool_call",
       toolCallId: "late",
@@ -93,10 +97,12 @@ describe("work state on a v1 connection", () => {
       status: "in_progress",
     });
     session.agentWorkSettled("end_turn");
+
     for (const update of updates) {
       const events = session.applySessionUpdate(update);
       expect(eventTypes(events)).not.toContain("work");
     }
+
     expect(session.snapshot().work.state).toBe("idle");
   });
 
@@ -137,10 +143,12 @@ describe("work state on a v1 connection", () => {
   it("keeps replayed history out of the work state and flags its events", () => {
     const session = model();
     session.beginReplay();
+
     const events = session.applySessionUpdate({
       sessionUpdate: "user_message_chunk",
       content: { type: "text", text: "earlier question" },
     });
+
     expect(events).toMatchObject([{ type: "message", replay: true }]);
     session.endReplay();
     expect(session.snapshot().work.state).toBe("idle");
@@ -151,6 +159,7 @@ describe("work state on a v1 connection", () => {
       sessionUpdate: "state_update",
       state: "running",
     });
+
     expect(events).toMatchObject([
       { type: "unhandled", reason: "unknown-variant" },
     ]);
@@ -192,6 +201,7 @@ describe("messages", () => {
   it("groups chunks without ids into one message per run of a role", () => {
     const session = model();
     session.promptSubmitted();
+
     const ids = [
       session.applySessionUpdate({
         sessionUpdate: "agent_thought_chunk",
@@ -208,6 +218,7 @@ describe("messages", () => {
     ]
       .flat()
       .flatMap((event) => (event.type === "message" ? [event.messageId] : []));
+
     expect(ids[0]).not.toBe(ids[1]);
     expect(ids[1]).toBe(ids[2]);
     expect(ids[3]).not.toBe(ids[2]);
@@ -233,10 +244,12 @@ describe("messages", () => {
   it("keeps content blocks it does not understand instead of dropping them", () => {
     const session = model();
     session.promptSubmitted();
+
     const events = session.applySessionUpdate({
       sessionUpdate: "agent_message_chunk",
       content: { type: "hologram", url: "x", extra: 1 },
     });
+
     expect(events).toMatchObject([
       { appended: [{ type: "hologram", url: "x", extra: 1 }] },
     ]);
@@ -245,24 +258,30 @@ describe("messages", () => {
   it("applies v2 whole-message upserts: replace, keep, then clear", () => {
     const session = model(2);
     session.applySessionUpdate(agentChunk("draft", "m1"));
+
     const replaced = session.applySessionUpdate({
       sessionUpdate: "agent_message",
       messageId: "m1",
       content: [{ type: "text", text: "final" }],
     });
+
     expect(replaced).toMatchObject([
       { change: "replaced", content: [{ type: "text", text: "final" }] },
     ]);
+
     const kept = session.applySessionUpdate({
       sessionUpdate: "agent_message",
       messageId: "m1",
     });
+
     expect(kept).toMatchObject([{ content: [{ text: "final" }] }]);
+
     const cleared = session.applySessionUpdate({
       sessionUpdate: "agent_message",
       messageId: "m1",
       content: null,
     });
+
     expect(cleared).toMatchObject([{ content: [] }]);
   });
 
@@ -284,6 +303,7 @@ describe("tool calls", () => {
   it("merges updates into the call and reports which fields changed", () => {
     const session = model();
     session.promptSubmitted();
+
     const created = session.applySessionUpdate({
       sessionUpdate: "tool_call",
       toolCallId: "t1",
@@ -291,6 +311,7 @@ describe("tool calls", () => {
       rawInput: { command: "echo hi" },
       _meta: { "x.ai/tool": { kind: "execute" } },
     });
+
     expect(created).toMatchObject([
       {
         type: "toolCall",
@@ -298,6 +319,7 @@ describe("tool calls", () => {
         toolCall: { status: "pending", title: "run_terminal_command" },
       },
     ]);
+
     const updated = session.applySessionUpdate({
       sessionUpdate: "tool_call_update",
       toolCallId: "t1",
@@ -307,6 +329,7 @@ describe("tool calls", () => {
       locations: [{ path: "notes.txt" }, { line: 3 }],
       rawOutput: null,
     });
+
     expect(updated).toMatchObject([
       {
         created: false,
@@ -326,6 +349,7 @@ describe("tool calls", () => {
   it("keeps kinds and statuses outside the v1 enums", () => {
     const session = model();
     session.promptSubmitted();
+
     const events = session.applySessionUpdate({
       sessionUpdate: "tool_call",
       toolCallId: "t1",
@@ -333,6 +357,7 @@ describe("tool calls", () => {
       kind: "browse",
       status: "cancelled",
     });
+
     expect(events).toMatchObject([
       { toolCall: { kind: "browse", status: "cancelled" } },
     ]);
@@ -344,6 +369,7 @@ describe("tool calls", () => {
       toolCallId: "orphan",
       status: "in_progress",
     });
+
     expect(events).toMatchObject([
       { type: "work" },
       { type: "toolCall", created: true, toolCall: { title: "" } },
@@ -357,6 +383,7 @@ describe("tool calls", () => {
       kind: null,
       content: null,
     };
+
     const create = {
       sessionUpdate: "tool_call_update",
       toolCallId: "t1",
@@ -364,6 +391,7 @@ describe("tool calls", () => {
       kind: "edit",
       content: [{ type: "diff", path: "/a", newText: "b" }],
     };
+
     const v1 = model(1);
     v1.applySessionUpdate(create);
     expect(v1.applySessionUpdate(patch).at(-1)).toMatchObject({
@@ -392,11 +420,13 @@ describe("tool calls", () => {
       toolCallId: "t1",
       content: { type: "content", content: { type: "text", text: "one" } },
     });
+
     const events = session.applySessionUpdate({
       sessionUpdate: "tool_call_content_chunk",
       toolCallId: "t1",
       content: { type: "content", content: { type: "text", text: "two" } },
     });
+
     expect(events.at(-1)).toMatchObject({
       toolCall: { content: [{ type: "content" }, { type: "content" }] },
     });
@@ -405,6 +435,7 @@ describe("tool calls", () => {
   it("marks unfinished calls when asked and leaves finished ones alone", () => {
     const session = model();
     session.promptSubmitted();
+
     for (const [toolCallId, status] of [
       ["open", "in_progress"],
       ["done", "completed"],
@@ -416,6 +447,7 @@ describe("tool calls", () => {
         status,
       });
     }
+
     expect(session.closeUnfinishedToolCalls("cancelled")).toMatchObject([
       { toolCall: { toolCallId: "open", status: "cancelled" } },
     ]);
@@ -454,6 +486,7 @@ describe("plans", () => {
       sessionUpdate: "plan",
       entries: [{ content: "a", priority: "high", status: "pending" }],
     });
+
     const events = session.applySessionUpdate({
       sessionUpdate: "plan",
       entries: [
@@ -462,6 +495,7 @@ describe("plans", () => {
         { content: "b" },
       ],
     });
+
     expect(events).toEqual([
       {
         type: "plan",
@@ -512,6 +546,7 @@ describe("configuration", () => {
 
   it("keeps the agent's own values, descriptions and groups", () => {
     const session = model();
+
     const [event] = session.applySessionSetup({
       configOptions: [
         modelOption,
@@ -530,6 +565,7 @@ describe("configuration", () => {
         { id: "slider", name: "Slider", type: "slider", currentValue: 3 },
       ],
     });
+
     expect(event).toMatchObject({
       type: "configOptions",
       configOptions: [
@@ -553,6 +589,7 @@ describe("configuration", () => {
 
   it("turns legacy modes and models into options set through their own methods", () => {
     const session = model();
+
     const [event] = session.applySessionSetup({
       modes: {
         currentModeId: "agent",
@@ -566,6 +603,7 @@ describe("configuration", () => {
         availableModels: [{ modelId: "default[]", name: "Auto" }],
       },
     });
+
     expect(event).toMatchObject({
       configOptions: [
         {
@@ -607,6 +645,7 @@ describe("configuration", () => {
 
   it("prefers the agent's config options over the legacy blocks for the same category", () => {
     const session = model();
+
     const [event] = session.applySessionSetup({
       configOptions: [modelOption],
       models: {
@@ -615,6 +654,7 @@ describe("configuration", () => {
       },
       modes: { currentModeId: "ask", availableModes: [{ id: "ask" }] },
     });
+
     expect(
       event?.type === "configOptions"
         ? event.configOptions.map((option) => option.id)
@@ -635,11 +675,13 @@ describe("configuration", () => {
         { value: "high", name: "High" },
       ],
     };
+
     const optionIds = (modes: unknown) => {
       const [event] = model().applySessionSetup({
         configOptions: [thinking],
         modes,
       });
+
       return event?.type === "configOptions"
         ? event.configOptions.map((option) => option.id)
         : [];
@@ -675,6 +717,7 @@ describe("configuration", () => {
       currentValue: levels[0],
       options: levels.map((value) => ({ value, name: value })),
     });
+
     const session = model();
     session.applySessionSetup({
       configOptions: [thinking(["off", "low", "high"])],
@@ -700,10 +743,12 @@ describe("configuration", () => {
   it("replaces the whole option list when the agent pushes a change", () => {
     const session = model();
     session.applySessionSetup({ configOptions: [modelOption] });
+
     const events = session.applySessionUpdate({
       sessionUpdate: "config_option_update",
       configOptions: [{ ...modelOption, currentValue: "b" }],
     });
+
     expect(events).toMatchObject([
       { type: "configOptions", configOptions: [{ currentValue: "b" }] },
     ]);
@@ -720,6 +765,7 @@ describe("commands, session info and usage", () => {
         { description: "nameless" },
       ],
     });
+
     expect(events).toEqual([
       {
         type: "commands",

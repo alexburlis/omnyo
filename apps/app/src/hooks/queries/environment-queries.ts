@@ -1,25 +1,35 @@
-import { useQuery } from "@tanstack/react-query";
-import type {
-  Environment,
-  ThreadPullRequest,
-  WorkspaceDiffTarget,
-} from "@bb/domain";
+import {
+  queryOptions,
+  useQuery,
+  type QueryClient,
+} from "@tanstack/react-query";
+import {
+  environmentSchema,
+  resolveEnvironmentMergeBaseBranch,
+  type Environment,
+  type ThreadPullRequest,
+  type WorkspaceDiffTarget,
+} from "@omnyo/domain";
 import type {
   EnvironmentDiffBranchesResponse,
   EnvironmentDiffFilesResponse,
   EnvironmentPullRequestResponse,
   EnvironmentStatusResponse,
   WorkspacePathListResponse,
-} from "@bb/server-contract";
-import type { EnvironmentDiffArgs } from "@bb/sdk/browser";
+} from "@omnyo/server-contract";
+import type { EnvironmentDiffArgs } from "@omnyo/sdk/browser";
 import type {
   EnvironmentFilePreviewSource,
   FilePreview,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import { loadFilePreview } from "@/lib/api";
 import { buildEnvironmentFileContentUrl } from "@/lib/file-content-urls";
 import { sdk } from "@/lib/sdk";
 import { useEnvironmentDetailRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
+import {
+  readEnvironmentWorkStatusDisplay,
+  rememberEnvironmentWorkStatusDisplay,
+} from "@/hooks/cache-owners/environment-work-status-display-cache";
 import {
   environmentDiffFilesQueryKey,
   environmentDiffTargetKey,
@@ -45,6 +55,8 @@ import {
   TYPEAHEAD_QUERY_POLICY,
 } from "./query-policies";
 
+import { keepNewerByUpdatedAt } from "../cache-owners/cache-effect-utils";
+
 interface EnvironmentQueryOptions extends QueryOptions {
   staleTime?: number;
 }
@@ -60,10 +72,15 @@ interface UseEnvironmentDiffFilesOptions extends QueryOptions {
 }
 
 const ENVIRONMENT_PULL_REQUEST_STALE_MS = 30_000;
+
 const ENVIRONMENT_SETTLED_PULL_REQUEST_STALE_MS = 60 * 60_000;
+
 const ENVIRONMENT_ACTIVE_PULL_REQUEST_REFETCH_MS = 30_000;
+
 const MERGE_BASE_BRANCHES_STALE_MS = 30_000;
+
 const MERGE_BASE_BRANCHES_LIMIT = 50;
+
 const ENVIRONMENT_DIFF_STALE_MS = 5_000;
 
 function requireEnvironmentId(
@@ -77,6 +94,28 @@ function requireEnvironmentId(
   });
 }
 
+export function environmentQueryOptions(
+  environmentId: string | null | undefined,
+) {
+  return queryOptions<Environment>({
+    queryKey: environmentQueryKey(environmentId),
+    queryFn: ({ signal }) =>
+      sdk.environments.get({
+        environmentId: requireEnvironmentId(environmentId, "useEnvironment"),
+        signal,
+      }),
+    structuralSharing(cached, response) {
+      const incoming = environmentSchema.parse(response);
+      const previous = environmentSchema.safeParse(cached);
+
+      return keepNewerByUpdatedAt(
+        previous.success ? previous.data : undefined,
+        incoming,
+      );
+    },
+  });
+}
+
 export function useEnvironment(
   environmentId: string | null | undefined,
   options?: EnvironmentQueryOptions,
@@ -84,16 +123,35 @@ export function useEnvironment(
   const enabled = (options?.enabled ?? true) && Boolean(environmentId);
   useEnvironmentDetailRealtimeSubscription(environmentId, { enabled });
 
-  return useQuery<Environment>({
-    queryKey: environmentQueryKey(environmentId),
-    queryFn: ({ signal }) =>
-      sdk.environments.get({
-        environmentId: requireEnvironmentId(environmentId, "useEnvironment"),
-        signal,
-      }),
+  return useQuery({
+    ...environmentQueryOptions(environmentId),
     enabled,
     staleTime: options?.staleTime,
   });
+}
+
+async function fetchEnvironmentWorkStatus({
+  environmentId,
+  mergeBaseBranch,
+  signal,
+}: {
+  environmentId: string;
+  mergeBaseBranch: string | undefined;
+  signal: AbortSignal;
+}): Promise<EnvironmentStatusResponse> {
+  const response = await sdk.environments.status({
+    environmentId,
+    mergeBaseBranch,
+    signal,
+  });
+
+  rememberEnvironmentWorkStatusDisplay(
+    environmentId,
+    mergeBaseBranch ?? null,
+    response,
+  );
+
+  return response;
 }
 
 export function useEnvironmentWorkStatus(
@@ -105,13 +163,21 @@ export function useEnvironmentWorkStatus(
   const enabled = (options?.enabled ?? true) && Boolean(environmentId);
   useEnvironmentDetailRealtimeSubscription(environmentId, { enabled });
 
+  const readDisplay = () =>
+    environmentId
+      ? readEnvironmentWorkStatusDisplay(
+          environmentId,
+          normalizedMergeBaseBranch,
+        )
+      : null;
+
   return useQuery<EnvironmentStatusResponse>({
     queryKey: environmentWorkStatusQueryKey(
       environmentId,
       normalizedMergeBaseBranch,
     ),
     queryFn: ({ signal }) =>
-      sdk.environments.status({
+      fetchEnvironmentWorkStatus({
         environmentId: requireEnvironmentId(
           environmentId,
           "useEnvironmentWorkStatus",
@@ -122,6 +188,8 @@ export function useEnvironmentWorkStatus(
     enabled,
     ...REALTIME_OWNED_MOUNT_BASELINE_QUERY_POLICY,
     staleTime: 0,
+    initialData: () => readDisplay()?.response,
+    initialDataUpdatedAt: () => readDisplay()?.savedAt,
     placeholderData: (previousData, previousQuery) =>
       environmentId
         ? resolveEnvironmentWorkStatusPlaceholder(
@@ -130,6 +198,42 @@ export function useEnvironmentWorkStatus(
             environmentId,
           )
         : undefined,
+  });
+}
+
+const WORK_STATUS_PREFETCH_STALE_MS = 30_000;
+
+export function prefetchEnvironmentWorkStatus(
+  queryClient: QueryClient,
+  environment: Environment | null | undefined,
+): Promise<void> {
+  if (
+    !environment ||
+    !environment.isGitRepo ||
+    environment.hostLifecycle !== "active" ||
+    environment.status === "destroyed"
+  )
+    return Promise.resolve();
+
+  const mergeBaseBranch = resolveEnvironmentMergeBaseBranch(environment);
+
+  const readDisplay = () =>
+    readEnvironmentWorkStatusDisplay(environment.id, mergeBaseBranch ?? null);
+
+  return queryClient.prefetchQuery<EnvironmentStatusResponse>({
+    queryKey: environmentWorkStatusQueryKey(
+      environment.id,
+      mergeBaseBranch ?? null,
+    ),
+    queryFn: ({ signal }) =>
+      fetchEnvironmentWorkStatus({
+        environmentId: environment.id,
+        mergeBaseBranch,
+        signal,
+      }),
+    staleTime: WORK_STATUS_PREFETCH_STALE_MS,
+    initialData: () => readDisplay()?.response,
+    initialDataUpdatedAt: () => readDisplay()?.savedAt,
   });
 }
 
@@ -153,6 +257,7 @@ export function getEnvironmentPullRequestRefetchInterval(
   if (!pullRequest || pullRequest.state !== "open") {
     return false;
   }
+
   if (
     pullRequest.autoMerge ||
     pullRequest.inMergeQueue === true ||
@@ -161,6 +266,7 @@ export function getEnvironmentPullRequestRefetchInterval(
   ) {
     return ENVIRONMENT_ACTIVE_PULL_REQUEST_REFETCH_MS;
   }
+
   return false;
 }
 
@@ -204,6 +310,7 @@ export function useEnvironmentMergeBaseBranches(
   const limit = options?.limit ?? MERGE_BASE_BRANCHES_LIMIT;
   const enabled = (options?.enabled ?? true) && Boolean(environmentId);
   useEnvironmentDetailRealtimeSubscription(environmentId, { enabled });
+
   return useQuery<EnvironmentDiffBranchesResponse>({
     queryKey: environmentMergeBaseBranchesQueryKey(
       environmentId,
@@ -246,6 +353,7 @@ export function useEnvironmentFilePreview(
     Boolean(environmentId) &&
     Boolean(path) &&
     source !== null;
+
   useEnvironmentDetailRealtimeSubscription(environmentId, { enabled });
 
   return useQuery<FilePreview>({
@@ -256,15 +364,18 @@ export function useEnvironmentFilePreview(
         hookName: "useEnvironmentFilePreview",
         argName: "path",
       });
+
       const resolvedSource = requireEnabledQueryArg({
         value: source,
         hookName: "useEnvironmentFilePreview",
         argName: "source",
       });
+
       const resolvedEnvironmentId = requireEnvironmentId(
         environmentId,
         "useEnvironmentFilePreview",
       );
+
       return loadFilePreview(
         {
           name: resolvedPath.split("/").at(-1),
@@ -302,6 +413,7 @@ export function useEnvironmentPathSuggestions(
     includeFiles,
     includeDirectories,
   } = args;
+
   const trimmedQuery = query?.trim() ?? "";
   const enabled = Boolean(environmentId) && trimmedQuery.length > 0;
   useEnvironmentDetailRealtimeSubscription(environmentId, { enabled });
@@ -337,8 +449,10 @@ export function useEnvironmentDiffFiles(
   options: UseEnvironmentDiffFilesOptions,
 ) {
   const target = options.target;
+
   const enabled =
     (options.enabled ?? true) && Boolean(environmentId) && target !== undefined;
+
   useEnvironmentDetailRealtimeSubscription(environmentId, { enabled });
 
   return useQuery<EnvironmentDiffFilesResponse>({

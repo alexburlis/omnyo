@@ -13,15 +13,15 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createConnection,
   getPluginSettingsValues,
   migrate,
   setPluginSettingsValues,
   type DbConnection,
-} from "@bb/db";
-import type { Logger } from "@bb/logger";
+} from "@omnyo/db";
+import type { Logger } from "@omnyo/logger";
 import { registerPluginRoutes } from "../../../src/routes/plugins.js";
 import { createPluginInstallJobs } from "../../../src/services/plugins/plugin-install-jobs.js";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
@@ -32,16 +32,19 @@ import {
 import { PluginSettingsValidationError } from "../../../src/services/plugins/plugin-settings.js";
 import { testLogger } from "../../helpers/test-app.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
+import { isSealed, openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
 
 async function countOpenFdsFor(file: string): Promise<number> {
   let count = 0;
+
   for (const fd of await readdir("/proc/self/fd")) {
     try {
       if ((await readlink(join("/proc/self/fd", fd))) === file) count += 1;
     } catch {}
   }
+
   return count;
 }
 
@@ -61,7 +64,7 @@ async function writePlugin(
       name: options.name,
       version: "0.1.0",
       dependencies: options.dependencies,
-      bb: {
+      omnyo: {
         name: "Settings storage fixture",
         description: "Settings and storage plugin fixture.",
         branding: { icon: "Zap" },
@@ -70,6 +73,7 @@ async function writePlugin(
     }),
   );
   await writeFile(join(rootDir, "server.ts"), options.serverSource);
+
   return rootDir;
 }
 
@@ -83,7 +87,7 @@ describe("plugin settings + storage", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-storage-test-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-storage-test-"));
     dataDir = join(workDir, "data");
     systemBroadcasts = [];
     service = createPluginService({
@@ -99,6 +103,7 @@ describe("plugin settings + storage", () => {
       },
       logger,
       dataDir,
+      vault: await openSecretVault(dataDir),
       appVersion: "0.9.0",
       loadTimeoutMs: 2000,
     });
@@ -112,10 +117,10 @@ describe("plugin settings + storage", () => {
   describe("settings", () => {
     async function installConfigurable(): Promise<void> {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-configurable",
+        name: "omnyo-plugin-configurable",
         serverSource: `
-          export default async function plugin(bb: any) {
-            const settings = bb.settings.define({
+          export default async function plugin(api: any) {
+            const settings = api.settings.define({
               apiKey: { type: "string", label: "API key", secret: true },
               teamKey: { type: "string", label: "Team key", default: "ENG" },
               mode: { type: "select", label: "Mode", options: ["fast", "slow"], default: "fast" },
@@ -131,6 +136,7 @@ describe("plugin settings + storage", () => {
           }
         `,
       });
+
       const entry = await service.installPath(rootDir);
       expect(entry.status).toBe("running");
     }
@@ -169,8 +175,9 @@ describe("plugin settings + storage", () => {
       });
     });
 
-    it("round-trips secrets through 0600 files and fires onChange with next/prev", async () => {
+    it("round-trips secrets through sealed 0600 files and fires onChange with next/prev", async () => {
       await installConfigurable();
+
       const view = await service.updateSettings("configurable", {
         apiKey: "sk-secret-123",
         autoSync: false,
@@ -185,7 +192,11 @@ describe("plugin settings + storage", () => {
         "secrets",
         "apiKey",
       );
-      expect(await readFile(secretPath, "utf8")).toBe("sk-secret-123");
+
+      const stored = await readFile(secretPath, "utf8");
+      expect(isSealed(stored)).toBe(true);
+      expect(stored).not.toContain("sk-secret-123");
+
       if (process.platform !== "win32") {
         expect((await stat(secretPath)).mode & 0o777).toBe(0o600);
       }
@@ -218,6 +229,7 @@ describe("plugin settings + storage", () => {
       const cleared = await service.updateSettings("configurable", {
         apiKey: null,
       });
+
       await expect(stat(secretPath)).rejects.toThrow();
       expect(cleared?.values.apiKey).toEqual({ set: false });
       expect((await state().settings.get()).apiKey).toBeUndefined();
@@ -242,13 +254,13 @@ describe("plugin settings + storage", () => {
 
     it("lets plugin server code validate and persist its own settings", async () => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-self-configuring",
+        name: "omnyo-plugin-self-configuring",
         dependencies: { zod: "^4.3.6" },
         serverSource: `
           import { z } from "zod";
 
-          export default async function plugin(bb: any) {
-            const settings = bb.settings.define({
+          export default async function plugin(api: any) {
+            const settings = api.settings.define({
               notes: {
                 type: "string",
                 label: "Notes",
@@ -262,8 +274,10 @@ describe("plugin settings + storage", () => {
           }
         `,
       });
+
       const entry = await service.installPath(rootDir);
       expect(entry.status).toBe("running");
+
       const state = (globalThis as Record<string, unknown>)
         .__selfConfiguring as {
         changes: Array<{ notes: string }>;
@@ -274,6 +288,7 @@ describe("plugin settings + storage", () => {
           get(): Promise<{ notes: string }>;
         };
       };
+
       systemBroadcasts.length = 0;
 
       await expect(
@@ -294,15 +309,17 @@ describe("plugin settings + storage", () => {
       const app = new Hono();
       registerPluginRoutes(
         app,
-        { config: { serverPort: 3334 }, db },
+        { config: { serverPort: 3334 }, db, hub: { notifyThread: () => {} } },
         service,
         createPluginInstallJobs({ notifyChanged: () => {} }),
         createPluginUpdateJobs({ notifyChanged: () => {} }),
       );
       const got = await app.request("/plugins/self-configuring/settings");
+
       const body = (await got.json()) as {
         schema: Record<string, Record<string, unknown>>;
       };
+
       expect(body.schema.notes).not.toHaveProperty("experimental_schema");
 
       const invalid = await app.request("/plugins/self-configuring/settings", {
@@ -310,6 +327,7 @@ describe("plugin settings + storage", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ values: { notes: "1234" } }),
       });
+
       expect(invalid.status).toBe(400);
       expect(((await invalid.json()) as { error: string }).error).toContain(
         "lowercase letters only",
@@ -336,6 +354,42 @@ describe("plugin settings + storage", () => {
       ).toBeUndefined();
     });
 
+    it("treats inherited object keys as unknown settings and stores nothing for them", async () => {
+      await installConfigurable();
+
+      for (const name of ["constructor", "toString", "hasOwnProperty"]) {
+        await expect(
+          service.updateSettings("configurable", { [name]: "x" }),
+        ).rejects.toThrow(`unknown setting "${name}"`);
+      }
+
+      await expect(
+        service.updateSettings("configurable", { ["__proto__"]: "x" }),
+      ).rejects.toThrow('unknown setting "__proto__"');
+      expect(getPluginSettingsValues(db, "configurable")).toEqual({});
+
+      const app = new Hono();
+      registerPluginRoutes(
+        app,
+        { config: { serverPort: 3334 }, db, hub: { notifyThread: () => {} } },
+        service,
+        createPluginInstallJobs({ notifyChanged: () => {} }),
+        createPluginUpdateJobs({ notifyChanged: () => {} }),
+      );
+
+      const put = await app.request("/plugins/configurable/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ values: { constructor: "x", note: "kept?" } }),
+      });
+
+      expect(put.status).toBe(400);
+      await expect(put.json()).resolves.toMatchObject({
+        error: expect.stringContaining('unknown setting "constructor"'),
+      });
+      expect(getPluginSettingsValues(db, "configurable")).toEqual({});
+    });
+
     it("remove clears settings rows and secret files", async () => {
       await installConfigurable();
       await service.updateSettings("configurable", {
@@ -359,7 +413,7 @@ describe("plugin settings + storage", () => {
       const app = new Hono();
       registerPluginRoutes(
         app,
-        { config: { serverPort: 3334 }, db },
+        { config: { serverPort: 3334 }, db, hub: { notifyThread: () => {} } },
         service,
         createPluginInstallJobs({ notifyChanged: () => {} }),
         createPluginUpdateJobs({ notifyChanged: () => {} }),
@@ -367,11 +421,13 @@ describe("plugin settings + storage", () => {
 
       const got = await app.request("/plugins/configurable/settings");
       expect(got.status).toBe(200);
+
       const body = (await got.json()) as {
         ok: boolean;
         schema: Record<string, { type: string; secret?: true }>;
         values: Record<string, unknown>;
       };
+
       expect(body.ok).toBe(true);
       expect(body.schema.apiKey).toEqual({
         type: "string",
@@ -388,6 +444,7 @@ describe("plugin settings + storage", () => {
           values: { apiKey: "wire-secret", autoSync: false },
         }),
       });
+
       expect(put.status).toBe(200);
       const putBody = (await put.json()) as { values: Record<string, unknown> };
       expect(putBody.values.apiKey).toEqual({ set: true });
@@ -398,6 +455,7 @@ describe("plugin settings + storage", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ values: { bogus: 1 } }),
       });
+
       expect(badKey.status).toBe(400);
       expect(((await badKey.json()) as { error: string }).error).toContain(
         "bogus",
@@ -408,6 +466,7 @@ describe("plugin settings + storage", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ values: "nope" }),
       });
+
       expect(badBody.status).toBe(400);
 
       const unknown = await app.request("/plugins/nowhere/settings");
@@ -416,13 +475,14 @@ describe("plugin settings + storage", () => {
 
     it("marks a plugin error when it defines an invalid descriptor", async () => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-bad-schema",
+        name: "omnyo-plugin-bad-schema",
         serverSource: `
-          export default function plugin(bb: any) {
-            bb.settings.define({ broken: { type: "select", label: "Broken", options: [] } });
+          export default function plugin(api: any) {
+            api.settings.define({ broken: { type: "select", label: "Broken", options: [] } });
           }
         `,
       });
+
       await service.installPath(rootDir);
       const entry = service.list().find((p) => p.id === "bad-schema");
       expect(entry?.status).toBe("error");
@@ -433,9 +493,10 @@ describe("plugin settings + storage", () => {
   describe("kv storage", () => {
     it("round-trips JSON values, lists by prefix, and caps value size", async () => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-kver",
+        name: "omnyo-plugin-kver",
         serverSource: `export default function plugin() {}`,
       });
+
       await service.installPath(rootDir);
       const api = service.getApi("kver");
       expect(api).toBeDefined();
@@ -464,20 +525,137 @@ describe("plugin settings + storage", () => {
     });
   });
 
+  describe("secret storage", () => {
+    async function writeLegacySecret(
+      pluginId: string,
+      name: string,
+      value: string,
+    ): Promise<string> {
+      const path = join(dataDir, "plugins", pluginId, "secrets", name);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(path, value, { mode: 0o600 });
+
+      return path;
+    }
+
+    it("seals the plugin's legacy files on first use and round-trips sealed secrets", async () => {
+      const accountPath = await writeLegacySecret(
+        "keeper",
+        "accounts/acct_1.json",
+        '{"token":"legacy-account-token"}\n',
+      );
+
+      const tokenPath = await writeLegacySecret(
+        "keeper",
+        ".http-token",
+        `${"e".repeat(64)}\n`,
+      );
+
+      const rootDir = await writePlugin(workDir, {
+        name: "omnyo-plugin-keeper",
+        serverSource: `export default function plugin() {}`,
+      });
+
+      await service.installPath(rootDir);
+      const secrets = service.getApi("keeper")!.experimental_secrets;
+      expect(isSealed(await readFile(accountPath, "utf8"))).toBe(false);
+
+      expect(await secrets.list("accounts/")).toEqual(["accounts/acct_1.json"]);
+
+      for (const path of [accountPath, tokenPath])
+        expect(isSealed(await readFile(path, "utf8"))).toBe(true);
+
+      expect(await secrets.get("accounts/acct_1.json")).toBe(
+        '{"token":"legacy-account-token"}\n',
+      );
+      expect(await service.httpToken("keeper")).toBe("e".repeat(64));
+
+      await secrets.set("env/AUTOMATION_TOKEN", "auto-secret-88");
+
+      const envPath = join(
+        dataDir,
+        "plugins",
+        "keeper",
+        "secrets",
+        "env",
+        "AUTOMATION_TOKEN",
+      );
+
+      expect(await readFile(envPath, "utf8")).not.toContain("auto-secret-88");
+      expect(await secrets.get("env/AUTOMATION_TOKEN")).toBe("auto-secret-88");
+      expect(await secrets.list()).toEqual([
+        "accounts/acct_1.json",
+        "env/AUTOMATION_TOKEN",
+      ]);
+
+      await secrets.delete("env/AUTOMATION_TOKEN");
+      expect(await secrets.get("env/AUTOMATION_TOKEN")).toBeUndefined();
+      await expect(secrets.get(".http-token")).rejects.toThrow(
+        "invalid secret name",
+      );
+      await expect(secrets.set("a/b/c/d/e", "x")).rejects.toThrow(
+        "invalid secret name",
+      );
+    });
+
+    it("seals declared secret settings at registration and leaves other files alone", async () => {
+      const declaredPath = await writeLegacySecret(
+        "registrar",
+        "token",
+        "legacy-setting-token",
+      );
+
+      const undeclaredPath = await writeLegacySecret(
+        "registrar",
+        "undeclared",
+        "not-a-setting",
+      );
+
+      const rootDir = await writePlugin(workDir, {
+        name: "omnyo-plugin-registrar",
+        serverSource: `
+          export default function plugin(api: any) {
+            api.settings.define({
+              token: { type: "string", label: "Token", secret: true },
+            });
+          }
+        `,
+      });
+
+      await service.installPath(rootDir);
+
+      await vi.waitFor(async () => {
+        expect(isSealed(await readFile(declaredPath, "utf8"))).toBe(true);
+      });
+      expect(await readFile(undeclaredPath, "utf8")).toBe("not-a-setting");
+      expect(await service.getSettings("registrar")).toMatchObject({
+        values: { token: { set: true } },
+      });
+      expect(
+        await service.getApi("registrar")!.experimental_secrets.get("token"),
+      ).toBe("legacy-setting-token");
+    });
+  });
+
   describe("database + migrate", () => {
     const sqlerSource = `
-      export default function plugin(bb: any) {
-        const db = bb.storage.database();
-        bb.storage.migrate(db, [
+      export default function plugin(api: any) {
+        const db = api.storage.database();
+        api.storage.migrate(db, [
           "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
           "INSERT INTO items (name) VALUES ('seed')",
         ]);
         const g = globalThis as any;
-        g.__sqler = { db, journalMode: db.pragma("journal_mode", { simple: true }) };
+        g.__sqler = {
+          autoVacuum: db.pragma("auto_vacuum", { simple: true }),
+          db,
+          journalMode: db.pragma("journal_mode", { simple: true }),
+        };
       }
     `;
 
     function sqler(): {
+      autoVacuum: number;
       db: {
         prepare(sql: string): { get(): { count: number } };
       };
@@ -486,17 +664,21 @@ describe("plugin settings + storage", () => {
       return (globalThis as Record<string, unknown>).__sqler as never;
     }
 
-    it("vends a WAL handle, applies migrations once, and closes handles on reload", async () => {
+    it("vends an incremental WAL handle, applies migrations once, and closes handles on reload", async () => {
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-sqler",
+        name: "omnyo-plugin-sqler",
         serverSource: sqlerSource,
       });
+
       await service.installPath(rootDir);
 
       expect(sqler().journalMode).toBe("wal");
+      expect(sqler().autoVacuum).toBe(2);
+
       const countRow = sqler()
         .db.prepare("SELECT COUNT(*) AS count FROM items")
         .get();
+
       expect(countRow.count).toBe(1);
       expect(
         await stat(join(dataDir, "plugins", "sqler", "data.db")),
@@ -512,6 +694,7 @@ describe("plugin settings + storage", () => {
       const rerunRow = sqler()
         .db.prepare("SELECT COUNT(*) AS count FROM items")
         .get();
+
       expect(rerunRow.count).toBe(1);
     });
 
@@ -519,18 +702,20 @@ describe("plugin settings + storage", () => {
       const rootDir = await writePlugin(workDir, {
         name: "bb-plugin-migration-collision",
         serverSource: `
-          export default function plugin(bb: any) {
-            const db = bb.storage.database();
-            bb.storage.migrate(db, [
+          export default function plugin(api: any) {
+            const db = api.storage.database();
+            api.storage.migrate(db, [
               "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
             ]);
           }
         `,
       });
+
       await service.installPath(rootDir);
 
       const api = service.getApi("migration-collision");
       expect(api).toBeDefined();
+
       if (!api) throw new Error("migration-collision plugin did not load");
       const database = api.storage.database();
       expect(() =>
@@ -545,10 +730,12 @@ describe("plugin settings + storage", () => {
         name: "bb-plugin-legacy-migrations",
         serverSource: `export default function plugin() {}`,
       });
+
       await service.installPath(rootDir);
 
       const api = service.getApi("legacy-migrations");
       expect(api).toBeDefined();
+
       if (!api) throw new Error("legacy-migrations plugin did not load");
       const database = api.storage.database();
       database.exec(
@@ -559,8 +746,11 @@ describe("plugin settings + storage", () => {
       ]);
 
       const rows = database
-        .prepare("SELECT id, statement_hash FROM _bb_migrations ORDER BY id")
+        .prepare(
+          "SELECT id, statement_hash FROM _plugin_migrations ORDER BY id",
+        )
         .all();
+
       expect(rows).toEqual([
         { id: 0, statement_hash: expect.stringMatching(/^[a-f0-9]{64}$/) },
         { id: 2, statement_hash: "legacy-unknown" },
@@ -576,27 +766,29 @@ describe("plugin settings + storage", () => {
 
     it("returns one reused handle per plugin load instead of a connection per call", async () => {
       const CALLS = 200;
+
       const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-chatty",
+        name: "omnyo-plugin-chatty",
         serverSource: `
-          export default function plugin(bb: any) {
+          export default function plugin(api: any) {
             const g = globalThis as any;
             g.__chatty = { handles: [] as unknown[], reopened: [] as unknown[] };
             for (let i = 0; i < ${CALLS}; i++) {
-              const db = bb.storage.database();
+              const db = api.storage.database();
               db.prepare("SELECT 1").get();
               g.__chatty.handles.push(db);
             }
             // A plugin that closes the handle itself gets a fresh one next.
             for (let i = 0; i < 3; i++) {
-              const db = bb.storage.database();
+              const db = api.storage.database();
               db.close();
               g.__chatty.reopened.push(db);
             }
-            g.__chatty.final = bb.storage.database();
+            g.__chatty.final = api.storage.database();
           }
         `,
       });
+
       const entry = await service.installPath(rootDir);
       expect(entry.status).toBe("running");
 
@@ -605,6 +797,7 @@ describe("plugin settings + storage", () => {
         reopened: unknown[];
         final: { open: boolean; prepare(sql: string): { get(): unknown } };
       };
+
       expect(state.handles).toHaveLength(CALLS);
       expect(new Set(state.handles).size).toBe(1);
       expect(
@@ -622,21 +815,22 @@ describe("plugin settings + storage", () => {
 
   it("saving settings auto-reloads a needs-configuration plugin (regression: pasting the key in Settings must take effect)", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-needs-key",
+      name: "omnyo-plugin-needs-key",
       serverSource: `
-        export default async function plugin(bb: any) {
+        export default async function plugin(api: any) {
           const g = globalThis as any;
           g.__needsKeyLoads = (g.__needsKeyLoads ?? 0) + 1;
-          const settings = bb.settings.define({
+          const settings = api.settings.define({
             apiKey: { type: "string", label: "API key", secret: true },
           });
           const values = await settings.get();
           if (!values.apiKey) {
-            bb.status.needsConfiguration("set apiKey first");
+            api.status.needsConfiguration("set apiKey first");
           }
         }
       `,
     });
+
     const globals = globalThis as Record<string, unknown>;
     delete globals.__needsKeyLoads;
     await service.installPath(rootDir);
@@ -654,17 +848,18 @@ describe("plugin settings + storage", () => {
 
   it("saving settings does NOT reload a healthy running plugin", async () => {
     const rootDir = await writePlugin(workDir, {
-      name: "bb-plugin-healthy",
+      name: "omnyo-plugin-healthy",
       serverSource: `
-        export default function plugin(bb: any) {
+        export default function plugin(api: any) {
           const g = globalThis as any;
           g.__healthyLoads = (g.__healthyLoads ?? 0) + 1;
-          bb.settings.define({
+          api.settings.define({
             note: { type: "string", label: "Note" },
           });
         }
       `,
     });
+
     const globals = globalThis as Record<string, unknown>;
     delete globals.__healthyLoads;
     await service.installPath(rootDir);

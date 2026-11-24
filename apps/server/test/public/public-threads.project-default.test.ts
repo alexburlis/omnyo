@@ -1,6 +1,6 @@
-import { getEnvironment } from "@bb/db";
-import { getThread } from "@bb/db";
-import { threadSchema, type GitSourceInspection } from "@bb/domain";
+import { getEnvironment } from "@omnyo/db";
+import { getThread } from "@omnyo/db";
+import { threadSchema, type GitSourceInspection } from "@omnyo/domain";
 import { describe, expect, it, vi } from "vitest";
 import { getThreadProvisionContext } from "../../src/services/threads/thread-startup-store.js";
 import type { ThreadProvisionEnvironmentIntent } from "../../src/services/threads/thread-startup-store.js";
@@ -50,13 +50,17 @@ async function createAndCaptureIntent(
   const response = await postCreateThread(harness, args.projectId, {
     environment: args.environment,
   });
+
   expect(response.status).toBe(201);
   const thread = threadSchema.parse(await readJson(response));
+
   const intent = getThreadProvisionContext(harness.db, thread.id)?.request
     .environmentIntent;
+
   if (intent === undefined) {
     throw new Error("Expected an active provisioning context");
   }
+
   return { intent, threadId: thread.id };
 }
 
@@ -64,18 +68,23 @@ describe("project-default thread environment", () => {
   it("resolves project-default to the worktree provider on the source's default branch", async () => {
     await withTestHarness(async (harness) => {
       installFakeGitWorktreeProvider();
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-project-default",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/project-default-source",
       });
+
       const { intent, threadId } = await createAndCaptureIntent(harness, {
         projectId: project.id,
         environment: { type: "project-default" },
       });
+
       expect(intent).toEqual({
         type: "provider",
         environmentProviderId: "git-worktree",
@@ -90,14 +99,18 @@ describe("project-default thread environment", () => {
   it("passes an explicit managed-worktree default through to the worktree provider unresolved", async () => {
     await withTestHarness(async (harness) => {
       installFakeGitWorktreeProvider();
+
       const { host } = seedHostSession(harness.deps, {
         id: "host-project-default-explicit",
       });
+
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/project-default-source",
       });
+
       const { intent } = await createAndCaptureIntent(harness, {
         projectId: project.id,
         environment: {
@@ -109,6 +122,7 @@ describe("project-default thread environment", () => {
           },
         },
       });
+
       expect(intent).toEqual({
         type: "provider",
         environmentProviderId: "git-worktree",
@@ -154,10 +168,12 @@ describe("project-default thread environment", () => {
         const { host, session } = seedHostSession(harness.deps);
         seedPrimaryHost(harness.deps, host.id);
         const sourcePath = "/tmp/project-default-unmanaged-source";
+
         const { project } = seedProjectWithSource(harness.deps, {
           hostId: host.id,
           path: sourcePath,
         });
+
         const responder = registerHostRpcResponder(harness, {
           hostId: host.id,
           sessionId: session.id,
@@ -168,6 +184,7 @@ describe("project-default thread environment", () => {
               path: sourcePath,
               remoteRefresh: "background",
             });
+
             return { ok: true, result: checkout };
           },
         });
@@ -209,6 +226,7 @@ describe("project-default thread environment", () => {
     await withTestHarness(async (harness) => {
       const host = seedHost(harness.deps);
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
@@ -216,11 +234,14 @@ describe("project-default thread environment", () => {
       const response = await postCreateThread(harness, project.id, {
         environment: { type: "project-default" },
       });
+
       expect(response.status).toBe(502);
+
       const body = (await readJson(response)) as {
         code: string;
         message: string;
       };
+
       expect(body.code).toBe("host_unavailable");
       expect(body.message).toBe("Host is not connected");
     });
@@ -232,10 +253,12 @@ describe("plugin thread attribution", () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/plugin-attribution",
       });
+
       seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -251,6 +274,7 @@ describe("plugin thread attribution", () => {
           workspace: { type: "unmanaged", path: null },
         },
       });
+
       expect(response.status).toBe(201);
       const created = threadSchema.parse(await readJson(response));
       expect(created.originPluginId).toBe("linear");
@@ -259,6 +283,7 @@ describe("plugin thread attribution", () => {
       const getResponse = await harness.app.request(
         `/api/v1/threads/${created.id}`,
       );
+
       expect(getResponse.status).toBe(200);
       const fetched = threadSchema.parse(await readJson(getResponse));
       expect(fetched.originPluginId).toBe("linear");
@@ -269,9 +294,11 @@ describe("plugin thread attribution", () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps);
       seedPrimaryHost(harness.deps, host.id);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = {
         type: "host",
         hostId: host.id,
@@ -282,6 +309,7 @@ describe("plugin thread attribution", () => {
         origin: "plugin",
         environment,
       });
+
       expect(missingPluginId.status).toBe(400);
 
       const strayPluginId = await postCreateThread(harness, project.id, {
@@ -289,6 +317,7 @@ describe("plugin thread attribution", () => {
         originPluginId: "linear",
         environment,
       });
+
       expect(strayPluginId.status).toBe(400);
     });
   });

@@ -3,26 +3,32 @@ import type {
   HostFileTabState,
   ThreadStorageFileTabState,
   WorkspaceFileTabState,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import type { ThreadSecondaryPanel } from "@/lib/thread-secondary-panel";
 import type { FileOpenerOverride } from "@/lib/plugin-slot-resolvers";
 
 type ThreadSecondaryPanelThreadId = string | undefined;
 
 type ThreadSecondaryPanelOpenHandler = (panel: ThreadSecondaryPanel) => void;
+
 type ThreadSecondaryPanelDiffFileOpenHandler = (path: string) => void;
+
 type ThreadSecondaryPanelCommitDiffOpenHandler = (sha: string) => void;
+
 export interface ThreadSecondaryPanelFileOpenOptions {
   viewer?: FileOpenerOverride;
 }
+
 export type ThreadSecondaryPanelWorkspaceFileOpenHandler = (
   file: WorkspaceFileTabState,
   options?: ThreadSecondaryPanelFileOpenOptions,
 ) => void;
+
 export type ThreadSecondaryPanelStorageFileOpenHandler = (
   file: ThreadStorageFileTabState,
   options?: ThreadSecondaryPanelFileOpenOptions,
 ) => void;
+
 export type ThreadSecondaryPanelHostFileOpenHandler = (
   file: HostFileTabState,
   options?: ThreadSecondaryPanelFileOpenOptions,
@@ -97,6 +103,7 @@ export function useThreadSecondaryPanelDrawerVisibility({
     if (!hasThreadId(threadId)) {
       return;
     }
+
     setOpenDrawerThreadId(threadId);
   }, [threadId]);
 
@@ -110,6 +117,7 @@ export function useThreadSecondaryPanelDrawerVisibility({
     if (!isCompactViewport) {
       return;
     }
+
     openDrawerForCurrentThread();
   }, [isCompactViewport, openDrawerForCurrentThread]);
 
@@ -122,10 +130,13 @@ export function useThreadSecondaryPanelDrawerVisibility({
     if (!isCompactViewport) {
       return;
     }
+
     if (isDrawerVisible) {
       closeDrawerForCurrentThread();
+
       return;
     }
+
     openDrawerForCurrentThread();
   }, [
     closeDrawerForCurrentThread,
@@ -165,6 +176,7 @@ export function useThreadSecondaryPanelVisibility({
     openDrawer: openCompactDrawer,
     toggleDrawer,
   } = drawerVisibility;
+
   const isOpen = isCompactViewport ? isDrawerVisible : isPersistedOpen;
 
   const openPanel = useCallback<ThreadSecondaryPanelOpenHandler>(
@@ -228,16 +240,20 @@ export function useThreadSecondaryPanelVisibility({
   const closePanel = useCallback(() => {
     if (isCompactViewport) {
       closeDrawer();
+
       return;
     }
+
     closePersistedPanel();
   }, [closeDrawer, closePersistedPanel, isCompactViewport]);
 
   const togglePanel = useCallback(() => {
     if (!isCompactViewport) {
       togglePersistedPanel();
+
       return;
     }
+
     toggleDrawer();
   }, [isCompactViewport, toggleDrawer, togglePersistedPanel]);
 

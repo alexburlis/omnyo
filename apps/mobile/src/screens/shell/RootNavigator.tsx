@@ -12,16 +12,21 @@ import { HeaderGlass } from "./HeaderGlass";
 import { LIST_SCREEN_OPTIONS, MODAL_SCREEN_OPTIONS } from "./screen-options";
 
 const IS_IOS = process.env.EXPO_OS === "ios";
+
 const IOS_MAJOR = IS_IOS ? Number.parseInt(String(Platform.Version), 10) : 0;
+
 const IOS_SYSTEM_BAR = IOS_MAJOR >= 26;
+
 const GLASS_HEADER = IS_IOS && IOS_SYSTEM_BAR;
 
 const renderHeaderGlass = () => <HeaderGlass />;
 
 export function RootNavigator() {
   const { tokens, mode } = useTheme();
+
   const navigationTheme = useMemo(() => {
     const base = mode === "dark" ? DarkTheme : DefaultTheme;
+
     return {
       ...base,
       colors: {
@@ -35,6 +40,7 @@ export function RootNavigator() {
       },
     };
   }, [mode, tokens]);
+
   const headerSurface: NativeStackNavigationOptions = IS_IOS
     ? GLASS_HEADER
       ? {
@@ -46,6 +52,7 @@ export function RootNavigator() {
         }
       : { headerTransparent: true, headerBlurEffect: "systemChromeMaterial" }
     : { headerStyle: { backgroundColor: tokens.background } };
+
   const listScreen: NativeStackNavigationOptions = GLASS_HEADER
     ? {
         ...LIST_SCREEN_OPTIONS,
@@ -53,10 +60,12 @@ export function RootNavigator() {
         headerBlurEffect: "regular",
       }
     : LIST_SCREEN_OPTIONS;
+
   const hiddenHeader: NativeStackNavigationOptions = {
     headerShown: false,
     headerBackground: undefined,
   };
+
   return (
     <NavigationThemeProvider value={navigationTheme}>
       <Stack
@@ -83,7 +92,7 @@ export function RootNavigator() {
         />
         <Stack.Screen
           name="settings/device"
-          options={{ title: "This device", ...listScreen }}
+          options={{ title: "Servers", ...listScreen }}
         />
         <Stack.Screen
           name="settings/appearance"
@@ -103,7 +112,7 @@ export function RootNavigator() {
         />
         <Stack.Screen
           name="connect/index"
-          options={{ title: "bb connect", ...MODAL_SCREEN_OPTIONS }}
+          options={{ title: "Omnyo connect", ...MODAL_SCREEN_OPTIONS }}
         />
         <Stack.Screen name="dev/webview-spike" options={hiddenHeader} />
         <Stack.Screen name="e2e/reset" options={hiddenHeader} />

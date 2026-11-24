@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getEnvironment } from "@bb/db";
-import type { GitHostPullRequest } from "@bb/domain";
+import { getEnvironment } from "@omnyo/db";
+import type { GitHostPullRequest } from "@omnyo/domain";
 import { readJson } from "../helpers/json.js";
 import {
   reportQueuedCommandSuccess,
@@ -20,10 +20,10 @@ function rawPullRequest(
     number: 42,
     title: "Add pull request actions",
     state: "OPEN",
-    url: "https://github.com/acme/bb/pull/42",
+    url: "https://github.com/acme/omnyo/pull/42",
     isDraft: false,
     baseRefName: "main",
-    headRefName: "bb/pr-actions",
+    headRefName: "omnyo/pr-actions",
     updatedAt: "2026-06-16T12:30:00Z",
     autoMerge: false,
     inMergeQueue: false,
@@ -50,6 +50,7 @@ describe("public environment action regressions", () => {
           }),
         },
       );
+
       expect(squashMergeResponse.status).toBe(400);
       await expect(readJson(squashMergeResponse)).resolves.toMatchObject({
         code: "invalid_request",
@@ -62,9 +63,11 @@ describe("public environment action regressions", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-thread-target",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -83,6 +86,7 @@ describe("public environment action regressions", () => {
           }),
         },
       );
+
       expect(mismatchedResponse.status).toBe(400);
       await expect(readJson(mismatchedResponse)).resolves.toMatchObject({
         code: "invalid_request",
@@ -95,13 +99,15 @@ describe("public environment action regressions", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-commit-observed-branch",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
-        branchName: "bb/stale",
+        branchName: "omnyo/stale",
         defaultBranch: "main",
         path: "/tmp/commit-observed-branch-env",
       });
@@ -121,6 +127,7 @@ describe("public environment action regressions", () => {
           command.type === "workspace.status" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, statusCommand, {
         outcome: "available",
         workspaceStatus: {
@@ -128,6 +135,7 @@ describe("public environment action regressions", () => {
             insertions: 0,
             deletions: 0,
             lineStatsComplete: true,
+            fileCount: 0,
             files: [],
             hasUncommittedChanges: false,
             state: "clean",
@@ -151,6 +159,7 @@ describe("public environment action regressions", () => {
           command.type === "workspace.diff" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, diffCommand, {
         outcome: "available",
         diff: {
@@ -179,9 +188,11 @@ describe("public environment action regressions", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-pr-ready",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -206,6 +217,7 @@ describe("public environment action regressions", () => {
           command.type === "workspace.pull_request" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, pullRequestCommand, {
         outcome: "available",
         pullRequest: rawPullRequest({ isDraft: true }),
@@ -217,6 +229,7 @@ describe("public environment action regressions", () => {
           command.type === "workspace.pull_request_action" &&
           command.environmentId === environment.id,
       );
+
       expect(readyCommand.command).toMatchObject({
         operation: "ready",
       });
@@ -236,9 +249,11 @@ describe("public environment action regressions", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-pr-draft",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -263,6 +278,7 @@ describe("public environment action regressions", () => {
           command.type === "workspace.pull_request" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, pullRequestCommand, {
         outcome: "available",
         pullRequest: rawPullRequest(),
@@ -274,6 +290,7 @@ describe("public environment action regressions", () => {
           command.type === "workspace.pull_request_action" &&
           command.environmentId === environment.id,
       );
+
       expect(draftCommand.command).toMatchObject({
         operation: "draft",
       });
@@ -293,9 +310,11 @@ describe("public environment action regressions", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-pr-blocked",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -321,6 +340,7 @@ describe("public environment action regressions", () => {
           command.type === "workspace.pull_request" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, pullRequestCommand, {
         outcome: "available",
         pullRequest: rawPullRequest({
@@ -342,9 +362,11 @@ describe("public environment action regressions", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-pr-merge",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -370,6 +392,7 @@ describe("public environment action regressions", () => {
           command.type === "workspace.pull_request" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, pullRequestCommand, {
         outcome: "available",
         pullRequest: rawPullRequest(),
@@ -381,6 +404,7 @@ describe("public environment action regressions", () => {
           command.type === "workspace.pull_request_action" &&
           command.environmentId === environment.id,
       );
+
       expect(mergeCommand.command).toMatchObject({
         operation: "merge",
         method: "rebase",

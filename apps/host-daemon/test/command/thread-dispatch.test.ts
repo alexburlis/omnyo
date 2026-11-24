@@ -1,16 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { AgentRuntimeOptions } from "@bb/agent-runtime";
+import type { AgentRuntimeOptions } from "@omnyo/agent-runtime";
 import type {
   HostDaemonBridgeLaunch,
   HostDaemonCommand,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   encodeClientTurnRequestIdNumber,
   PROMPT_ATTACHMENT_MAX_BYTES,
   type ClientTurnRequestId,
   type PromptInput,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchCommand } from "../../src/command-dispatch.js";
 import { CommandDispatchError } from "../../src/command-dispatch-support.js";
@@ -49,7 +49,9 @@ function nextClientRequestId(): ClientTurnRequestId {
   const requestId = encodeClientTurnRequestIdNumber({
     value: nextClientRequestIdValue,
   });
+
   nextClientRequestIdValue += 1;
+
   return requestId;
 }
 
@@ -166,11 +168,13 @@ describe("thread command dispatch", () => {
 
   it("stages uploaded thread.start attachments before runtime input", async () => {
     const threadStorageRootPath = await makeTempDir(
-      "bb-thread-start-attachments-",
+      "omnyo-thread-start-attachments-",
     );
+
     const harness = createHarness();
     const requestId = nextClientRequestId();
     const uploadedNotesContent = "content:notes-uploaded.txt";
+
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(
       async (args) => ({
         bytes: Buffer.from(`content:${args.path}`),
@@ -247,20 +251,25 @@ describe("thread command dispatch", () => {
     const stagedFile = runtimeInput[1];
     const stagedImage = runtimeInput[2];
     const existingFile = runtimeInput[3];
+
     if (stagedFile?.type !== "localFile") {
       throw new Error("Expected staged local file input");
     }
+
     if (stagedImage?.type !== "localImage") {
       throw new Error("Expected staged local image input");
     }
+
     if (existingFile?.type !== "localFile") {
       throw new Error("Expected existing local file input");
     }
+
     const stagingDir = path.join(
       threadStorageRootPath,
       "thread-attachments",
       "Attachments",
     );
+
     expect(stagedFile.path.startsWith(`${stagingDir}${path.sep}`)).toBe(true);
     expect(stagedImage.path.startsWith(`${stagingDir}${path.sep}`)).toBe(true);
     expect(path.basename(stagedFile.path)).toBe("notes.txt");
@@ -272,6 +281,7 @@ describe("thread command dispatch", () => {
     await expect(fs.readFile(stagedImage.path, "utf8")).resolves.toBe(
       "content:screenshot-uploaded.png",
     );
+
     if (process.platform !== "win32") {
       expect((await fs.stat(stagedFile.path)).mode & 0o777).toBe(0o600);
     }
@@ -287,10 +297,12 @@ describe("thread command dispatch", () => {
 
   it("stages uploaded turn.submit attachments before runtime input", async () => {
     const threadStorageRootPath = await makeTempDir(
-      "bb-turn-submit-attachments-",
+      "omnyo-turn-submit-attachments-",
     );
+
     const harness = createHarness();
     const requestId = nextClientRequestId();
+
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(
       async (args) => ({
         bytes: Buffer.from(`content:${args.path}`),
@@ -347,14 +359,17 @@ describe("thread command dispatch", () => {
     );
     const runtimeInput = harness.runtimeState.ranTurnInput ?? [];
     const stagedFile = runtimeInput[0];
+
     if (stagedFile?.type !== "localFile") {
       throw new Error("Expected staged local file input");
     }
+
     const stagingDir = path.join(
       threadStorageRootPath,
       "thread-submit-attachments",
       "Attachments",
     );
+
     expect(stagedFile.path.startsWith(`${stagingDir}${path.sep}`)).toBe(true);
     expect(path.basename(stagedFile.path)).toBe("follow-up-uploaded.har");
     await expect(fs.readFile(stagedFile.path, "utf8")).resolves.toBe(
@@ -364,10 +379,11 @@ describe("thread command dispatch", () => {
 
   it("caches a bridge artifact for thread.start and hands the runtime the verified path", async () => {
     const { createHash } = await import("node:crypto");
-    const dataDir = await makeTempDir("bb-bridge-launch-start-");
+    const dataDir = await makeTempDir("omnyo-bridge-launch-start-");
     const bridgeBytes = Buffer.from("export const bridge = true;\n");
     const sha256 = createHash("sha256").update(bridgeBytes).digest("hex");
     const harness = createHarness({ workspacePath: "/tmp/env-bridge-start" });
+
     const fetchPluginHostArtifact = vi.fn(
       async () => new Uint8Array(bridgeBytes),
     );
@@ -431,6 +447,7 @@ describe("thread command dispatch", () => {
       sha256,
       "host.mjs",
     );
+
     expect(harness.runtimeState.startedBridgeLaunch).toEqual({
       pluginId: "provider-echo",
       dataDir: path.join(dataDir, "plugins", "provider-echo", "bridge-data"),
@@ -451,13 +468,15 @@ describe("thread command dispatch", () => {
 
   it("hands archive and unarchive their bridge launch so a graduated provider can spawn", async () => {
     const { createHash } = await import("node:crypto");
-    const dataDir = await makeTempDir("bb-bridge-launch-archive-");
+    const dataDir = await makeTempDir("omnyo-bridge-launch-archive-");
     const bridgeBytes = Buffer.from("export const archiveBridge = true;\n");
     const sha256 = createHash("sha256").update(bridgeBytes).digest("hex");
     const harness = createHarness({ workspacePath: "/tmp/env-bridge-archive" });
+
     const fetchPluginHostArtifact = vi.fn(
       async () => new Uint8Array(bridgeBytes),
     );
+
     const bridgeLaunch: HostDaemonBridgeLaunch = {
       pluginId: "provider-echo",
       providerOptions: {},
@@ -476,6 +495,7 @@ describe("thread command dispatch", () => {
         fork: "none",
       },
     };
+
     const expectedRuntimeLaunch = {
       pluginId: "provider-echo",
       dataDir: path.join(dataDir, "plugins", "provider-echo", "bridge-data"),
@@ -538,10 +558,11 @@ describe("thread command dispatch", () => {
 
   it("resolves resume-context bridge launches for turn.submit resumes", async () => {
     const { createHash } = await import("node:crypto");
-    const dataDir = await makeTempDir("bb-bridge-launch-resume-");
+    const dataDir = await makeTempDir("omnyo-bridge-launch-resume-");
     const bridgeBytes = Buffer.from("export const resumeBridge = true;\n");
     const sha256 = createHash("sha256").update(bridgeBytes).digest("hex");
     const harness = createHarness({ workspacePath: "/tmp/env-bridge-resume" });
+
     const fetchPluginHostArtifact = vi.fn(
       async () => new Uint8Array(bridgeBytes),
     );
@@ -633,11 +654,13 @@ describe("thread command dispatch", () => {
 
   it("resumes turn.submit again when attachment staging loses the hosted thread", async () => {
     const threadStorageRootPath = await makeTempDir(
-      "bb-turn-submit-reaped-during-staging-",
+      "omnyo-turn-submit-reaped-during-staging-",
     );
+
     const harness = createHarness({
       workspacePath: "/tmp/env-reaped-during-staging",
     });
+
     const threadId = "thread-reaped-during-staging";
     const providerThreadId = "provider-reaped-during-staging";
     harness.threadControls.setProviderSession(threadId, {
@@ -647,14 +670,17 @@ describe("thread command dispatch", () => {
     const originalRunTurn = harness.runtime.runTurn;
     harness.runtime.runTurn = async (args) => {
       expect(harness.runtime.hasThread(args.threadId)).toBe(true);
-      await originalRunTurn(args);
+
+      return originalRunTurn(args);
     };
+
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(
       async (args) => {
         expect(args.path).toBe("follow-up-uploaded.txt");
         expect(harness.runtime.hasThread(threadId)).toBe(true);
         expect(harness.runtimeState.resumedThreadId).toBeUndefined();
         harness.threadControls.clearProviderSession(threadId);
+
         return {
           bytes: Buffer.from("content:follow-up-uploaded.txt"),
         };
@@ -710,7 +736,10 @@ describe("thread command dispatch", () => {
   });
 
   it("leaves runtime-readable attachment paths unstaged", async () => {
-    const threadStorageRootPath = await makeTempDir("bb-no-stage-attachments-");
+    const threadStorageRootPath = await makeTempDir(
+      "omnyo-no-stage-attachments-",
+    );
+
     const harness = createHarness();
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>();
 
@@ -763,17 +792,23 @@ describe("thread command dispatch", () => {
   });
 
   it("stages beside an earlier turn's differing attachment instead of overwriting it", async () => {
-    const threadStorageRootPath = await makeTempDir("bb-restage-attachments-");
+    const threadStorageRootPath = await makeTempDir(
+      "omnyo-restage-attachments-",
+    );
+
     const harness = createHarness();
     const requestId = nextClientRequestId();
+
     const stagingDir = path.join(
       threadStorageRootPath,
       "thread-restage-attachments",
       "Attachments",
     );
+
     const restagedPath = path.join(stagingDir, "fresh-uploaded.txt");
     await fs.mkdir(stagingDir, { recursive: true });
     await fs.writeFile(restagedPath, "stale");
+
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(async () => ({
       bytes: Buffer.from("fresh"),
     }));
@@ -830,19 +865,22 @@ describe("thread command dispatch", () => {
   });
 
   it("reuses an identical earlier attachment and keeps it when the runtime fails", async () => {
-    const threadStorageRootPath = await makeTempDir("bb-reuse-attachments-");
+    const threadStorageRootPath = await makeTempDir("omnyo-reuse-attachments-");
     const harness = createHarness();
     harness.runtime.startThread = async () => {
       throw new Error("runtime start failed");
     };
+
     const stagingDir = path.join(
       threadStorageRootPath,
       "thread-reuse-attachments",
       "Attachments",
     );
+
     const earlierPath = path.join(stagingDir, "same-uploaded.txt");
     await fs.mkdir(stagingDir, { recursive: true });
     await fs.writeFile(earlierPath, "same");
+
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(async () => ({
       bytes: Buffer.from("same"),
     }));
@@ -891,10 +929,12 @@ describe("thread command dispatch", () => {
 
   it("stages grouped prompt attachments with shared filename uniqueness", async () => {
     const threadStorageRootPath = await makeTempDir(
-      "bb-grouped-stage-attachments-",
+      "omnyo-grouped-stage-attachments-",
     );
+
     const harness = createHarness();
     const requestId = nextClientRequestId();
+
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(
       async (args) => ({
         bytes: Buffer.from(`content:${args.path}`),
@@ -946,9 +986,11 @@ describe("thread command dispatch", () => {
 
     const firstInput = harness.runtimeState.startedInput?.[0];
     const secondInput = harness.runtimeState.startedInput?.[2];
+
     if (firstInput?.type !== "localFile" || secondInput?.type !== "localFile") {
       throw new Error("Expected staged local file inputs");
     }
+
     const firstPath = firstInput.path;
     const secondPath = secondInput.path;
     expect(firstPath).toMatch(/uploaded\.txt$/u);
@@ -967,15 +1009,18 @@ describe("thread command dispatch", () => {
 
   it("cleans up staged attachments when fetching a later attachment fails", async () => {
     const threadStorageRootPath = await makeTempDir(
-      "bb-failed-stage-attachments-",
+      "omnyo-failed-stage-attachments-",
     );
+
     const harness = createHarness();
     const requestId = nextClientRequestId();
+
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(
       async (args) => {
         if (args.path === "second-uploaded.txt") {
           throw new Error("server unavailable");
         }
+
         return {
           bytes: Buffer.from(`content:${args.path}`),
         };
@@ -983,6 +1028,7 @@ describe("thread command dispatch", () => {
     );
 
     let thrown: unknown;
+
     try {
       await dispatchCommand(
         {
@@ -1044,10 +1090,12 @@ describe("thread command dispatch", () => {
 
   it("rejects attachment responses that do not match declared size", async () => {
     const threadStorageRootPath = await makeTempDir(
-      "bb-oversized-stage-attachments-",
+      "omnyo-oversized-stage-attachments-",
     );
+
     const harness = createHarness();
     const requestId = nextClientRequestId();
+
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(async () => ({
       bytes: Buffer.from("too-large"),
     }));
@@ -1109,13 +1157,15 @@ describe("thread command dispatch", () => {
 
   it("cleans up staged thread.start attachments when runtime start fails", async () => {
     const threadStorageRootPath = await makeTempDir(
-      "bb-runtime-failed-start-attachments-",
+      "omnyo-runtime-failed-start-attachments-",
     );
+
     const harness = createHarness();
     const requestId = nextClientRequestId();
     harness.runtime.startThread = async () => {
       throw new Error("runtime start failed");
     };
+
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(async () => ({
       bytes: Buffer.from("content"),
     }));
@@ -1170,13 +1220,15 @@ describe("thread command dispatch", () => {
 
   it("cleans up staged turn.submit attachments when runtime turn fails", async () => {
     const threadStorageRootPath = await makeTempDir(
-      "bb-runtime-failed-turn-attachments-",
+      "omnyo-runtime-failed-turn-attachments-",
     );
+
     const harness = createHarness();
     const requestId = nextClientRequestId();
     harness.runtime.runTurn = async () => {
       throw new Error("runtime turn failed");
     };
+
     const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(async () => ({
       bytes: Buffer.from("content"),
     }));
@@ -1234,6 +1286,71 @@ describe("thread command dispatch", () => {
     ).rejects.toThrow();
   });
 
+  it("reports an unanswered turn start as unconfirmed and keeps its staged attachments", async () => {
+    const threadStorageRootPath = await makeTempDir(
+      "omnyo-unconfirmed-turn-attachments-",
+    );
+
+    const harness = createHarness();
+    harness.runtime.runTurn = async () => ({ status: "unconfirmed" });
+
+    const fetchProjectAttachment = vi.fn<FetchProjectAttachment>(async () => ({
+      bytes: Buffer.from("content"),
+    }));
+
+    await expect(
+      dispatchCommand(
+        {
+          bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+          type: "turn.submit",
+          environmentId: "env-unconfirmed-turn",
+          threadId: "thread-unconfirmed-turn",
+          requestId: nextClientRequestId(),
+          input: [{ type: "localFile", path: "unconfirmed-uploaded.txt" }],
+          options: {
+            model: "gpt-5",
+            serviceTier: "default",
+            reasoningLevel: "medium",
+            providerOptions: {},
+            permissionMode: "full",
+            permissionScope: "full",
+            approvalReviewer: null,
+            permissionEscalation: null,
+          },
+          resumeContext: {
+            bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+            workspaceContext: {
+              workspacePath: "/tmp/env-unconfirmed-turn",
+            },
+            projectId: "project-unconfirmed-turn",
+            providerId: "fake",
+            providerThreadId: "provider-unconfirmed-turn",
+            instructions: "Be a helpful coding agent.",
+            dynamicTools: [],
+            contributedEnv: [],
+            injectedSkillSources: [],
+            instructionMode: "append",
+          },
+          target: { mode: "start" },
+        },
+        {
+          ...harness.dispatchOptions({ threadStorageRootPath }),
+          fetchProjectAttachment,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "turn_start_unconfirmed" });
+    await expect(
+      fs.stat(
+        path.join(
+          threadStorageRootPath,
+          "thread-unconfirmed-turn",
+          "Attachments",
+          "unconfirmed-uploaded.txt",
+        ),
+      ),
+    ).resolves.toBeDefined();
+  });
+
   it("covers thread lifecycle commands", async () => {
     const harness = createHarness();
 
@@ -1268,6 +1385,7 @@ describe("thread command dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     const renameResult = await dispatchCommand(
       {
         type: "thread.rename",
@@ -1277,6 +1395,7 @@ describe("thread command dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     const archiveResult = await dispatchCommand(
       {
         bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
@@ -1291,6 +1410,7 @@ describe("thread command dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     const unarchiveResult = await dispatchCommand(
       {
         bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
@@ -1302,6 +1422,7 @@ describe("thread command dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     const stopResult = await dispatchCommand(
       {
         type: "thread.stop",
@@ -1404,8 +1525,9 @@ describe("thread command dispatch", () => {
 
   it("stops the runtime and deletes only the requested thread storage", async () => {
     const threadStorageRootPath = await makeTempDir(
-      "bb-thread-storage-delete-",
+      "omnyo-thread-storage-delete-",
     );
+
     const storagePath = path.join(threadStorageRootPath, "thread-delete");
     const siblingPath = path.join(threadStorageRootPath, "thread-sibling");
     await fs.mkdir(storagePath);
@@ -1607,7 +1729,7 @@ describe("thread command dispatch", () => {
   });
 
   it("unarchives through provider maintenance runtime after managed workspace cleanup", async () => {
-    const dataDir = await makeTempDir("bb-daemon-data-");
+    const dataDir = await makeTempDir("omnyo-daemon-data-");
     const oldManagedWorkspacePath = path.join(dataDir, "destroyed-worktree");
     const harness = createHarness({ workspacePath: oldManagedWorkspacePath });
 
@@ -1625,9 +1747,11 @@ describe("thread command dispatch", () => {
 
     expect(result).toEqual({});
     expect(harness.provisions).toEqual([]);
+
     const maintenanceWorkspace = await fs.stat(
       path.join(dataDir, "provider-maintenance-workspace"),
     );
+
     expect(maintenanceWorkspace.isDirectory()).toBe(true);
     expect(harness.runtimeState.unarchivedThreadId).toBe(
       "thread-unarchive-cleaned",
@@ -1687,6 +1811,7 @@ describe("thread command dispatch", () => {
       },
       harness.dispatchOptions(),
     );
+
     const steerResult = await dispatchCommand(
       {
         bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
@@ -1897,10 +2022,13 @@ describe("thread command dispatch", () => {
     harness.threadControls.setActiveTurn("thread-1", "turn-old");
     harness.runtime.steerTurn = async (args) => {
       steeredTurnIds.push(args.expectedTurnId);
+
       if (args.expectedTurnId === "turn-new") {
         return { status: "steered" };
       }
+
       harness.threadControls.setActiveTurn("thread-1", "turn-new");
+
       return {
         status: "stale",
         activeTurnId: "turn-new",
@@ -1949,6 +2077,62 @@ describe("thread command dispatch", () => {
     expect(harness.runtimeState.ranTurnClientRequestId).toBeUndefined();
   });
 
+  it("reports a steer the provider never answered as unconfirmed, without retrying it as a new turn", async () => {
+    const harness = createHarness();
+    await harness.manager.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath: "/tmp/env-1",
+    });
+    harness.threadControls.setActiveTurn("thread-1", "turn-1");
+    let steerAttempts = 0;
+    harness.runtime.steerTurn = async () => {
+      steerAttempts += 1;
+
+      return { status: "unconfirmed" };
+    };
+
+    await expect(
+      dispatchCommand(
+        {
+          bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+          type: "turn.submit",
+          environmentId: "env-1",
+          threadId: "thread-1",
+          requestId: nextClientRequestId(),
+          input: [textPromptInput("steer a frozen provider")],
+          options: {
+            model: "gpt-5",
+            serviceTier: "default",
+            reasoningLevel: "medium",
+            providerOptions: {},
+            permissionMode: "full",
+            permissionScope: "full",
+            approvalReviewer: null,
+            permissionEscalation: null,
+          },
+          resumeContext: {
+            bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+            workspaceContext: {
+              workspacePath: "/tmp/env-1",
+            },
+            projectId: "project-1",
+            providerId: "fake",
+            providerThreadId: "provider-1",
+            instructions: "Be a helpful coding agent.",
+            dynamicTools: [],
+            contributedEnv: [],
+            injectedSkillSources: [],
+            instructionMode: "append",
+          },
+          target: { mode: "steer", expectedTurnId: "turn-1" },
+        },
+        harness.dispatchOptions(),
+      ),
+    ).rejects.toMatchObject({ code: "steer_unconfirmed" });
+    expect(steerAttempts).toBe(1);
+    expect(harness.runtimeState.ranTurnClientRequestId).toBeUndefined();
+  });
+
   it("waits for a newer starting turn and re-steers it after a stale target", async () => {
     const harness = createHarness();
     const requestId = nextClientRequestId();
@@ -1971,15 +2155,20 @@ describe("thread command dispatch", () => {
       waitCalls += 1;
       pendingTurnStart = false;
       activeTurnId = "turn-new";
+
       return activeTurnId;
     };
+
     harness.runtime.steerTurn = async (args) => {
       steeredTurnIds.push(args.expectedTurnId);
+
       if (args.expectedTurnId === "turn-new") {
         return { status: "steered" };
       }
+
       activeTurnId = null;
       pendingTurnStart = true;
+
       return { status: "stale", activeTurnId: null };
     };
 
@@ -2141,6 +2330,7 @@ describe("thread command dispatch", () => {
 
   it("lazily resumes a missing thread runtime before turn.submit", async () => {
     const harness = createHarness({ workspacePath: "/tmp/env-lazy" });
+
     const resumeLaunch = {
       ...DISPATCH_TEST_BRIDGE_LAUNCH,
       providerOptions: { acpLaunchSpec: customAcpLaunchSpec() },
@@ -2204,18 +2394,23 @@ describe("thread command dispatch", () => {
     const fakes = [exitedFake, replacementFake];
     const { workspace } = createFakeWorkspace("/tmp/env-exit");
     let createRuntimeCalls = 0;
+
     let onProcessExit:
       | NonNullable<AgentRuntimeOptions["onProcessExit"]>
       | undefined;
+
     const manager = new RuntimeManager({
       provisionWorkspace: async () => workspace,
       createRuntime: (options) => {
         const fake = fakes[createRuntimeCalls];
         createRuntimeCalls += 1;
+
         if (!fake) {
           throw new Error("Unexpected extra runtime creation");
         }
+
         onProcessExit = options.onProcessExit;
+
         return fake.runtime;
       },
     });
@@ -2288,14 +2483,16 @@ describe("thread command dispatch", () => {
   });
 
   it("uses the server-provided thread runtime config", async () => {
-    const threadStorage = await makeTempDir("bb-thread-runtime-");
+    const threadStorage = await makeTempDir("omnyo-thread-runtime-");
     const harness = createHarness({ workspacePath: threadStorage });
+
     const startLaunch = {
       ...DISPATCH_TEST_BRIDGE_LAUNCH,
       providerOptions: { acpLaunchSpec: customAcpLaunchSpec() },
     };
+
     const threadInstructions = [
-      "You are a thread in a project inside bb.",
+      "You are a thread in a project inside Omnyo.",
       "Prefer concise user updates.",
       "Delegate implementation quickly.",
       "Parent Project",
@@ -2360,7 +2557,7 @@ describe("thread command dispatch", () => {
   });
 
   it("creates threadStoragePath directory before starting the thread", async () => {
-    const tempDir = await makeTempDir("bb-thread-storage-start-");
+    const tempDir = await makeTempDir("omnyo-thread-storage-start-");
     const storagePath = path.join(tempDir, "thr_abc123");
     const harness = createHarness();
 
@@ -2402,7 +2599,7 @@ describe("thread command dispatch", () => {
   });
 
   it("rejects thread.start when threadStoragePath escapes storage root", async () => {
-    const tempDir = await makeTempDir("bb-thread-storage-start-traversal-");
+    const tempDir = await makeTempDir("omnyo-thread-storage-start-traversal-");
     const harness = createHarness();
 
     await expect(

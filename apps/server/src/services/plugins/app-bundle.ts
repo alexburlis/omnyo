@@ -2,20 +2,27 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import semver from "semver";
-import { PLUGIN_SDK_MAJOR } from "@bb/domain";
+import {
+  importLegacyOwnedPluginIdV1,
+  PLUGIN_SDK_MAJOR,
+  PLUGIN_SDK_PACKAGE_NAME,
+  PLUGIN_RUNTIME_ABI,
+} from "@omnyo/domain";
 import {
   assertValidPluginCompactIconSvg,
   assertValidPluginIconSvg,
-} from "@bb/plugin-build";
+} from "@omnyo/plugin-build";
 
 interface PluginArtifactMeta {
   sdkMajor: number;
   sdkVersion: string;
-  artifactFormatVersion?: 1;
+  artifactFormatVersion?: 1 | 2;
+  sdkPackage?: string;
+  runtimeAbi?: number;
   pluginId?: string;
   pluginVersion?: string;
   builtWith?: {
-    bbVersion: string;
+    coreVersion: string;
     pluginSdkVersion: string;
   };
 }
@@ -84,15 +91,20 @@ async function loadPluginBrandingAsset(
 ): Promise<PluginBrandingAssetSnapshot | null> {
   if (manifestPath === undefined) return null;
   const bytes = await readFile(manifestPath);
+
   if (variant === "icon") {
     assertValidPluginCompactIconSvg(bytes);
   }
+
   const extension = manifestPath
     .slice(manifestPath.lastIndexOf(".") + 1)
     .toLowerCase();
+
   const contentType = BRANDING_ASSET_CONTENT_TYPES[extension];
+
   if (contentType === undefined) return null;
   const hash = brandingAssetHash(bytes);
+
   return {
     url: `/api/v1/plugins/${encodeURIComponent(pluginId)}/assets/${variant}?h=${hash}`,
     bytes,
@@ -107,8 +119,12 @@ async function loadPluginIconAsset(
   path: string,
 ): Promise<PluginBrandingAssetSnapshot> {
   const bytes = await readFile(path);
-  assertValidPluginIconSvg(bytes, `bb.branding.experimental_icons["${name}"]`);
+  assertValidPluginIconSvg(
+    bytes,
+    `omnyo.branding.experimental_icons["${name}"]`,
+  );
   const hash = brandingAssetHash(bytes);
+
   return {
     url: `/api/v1/plugins/${encodeURIComponent(pluginId)}/assets/icons/${encodeURIComponent(name)}.svg?h=${hash}`,
     bytes,
@@ -128,9 +144,11 @@ export async function loadPluginBrandingAssets(
   },
 ): Promise<PluginBrandingAssetSet> {
   const icons = new Map<string, PluginBrandingAssetSnapshot>();
+
   for (const [name, path] of manifest.branding.icons) {
     icons.set(name, await loadPluginIconAsset(pluginId, name, path));
   }
+
   return {
     compactIcon: await loadPluginBrandingAsset(
       pluginId,
@@ -151,17 +169,38 @@ export async function loadPluginBrandingAssets(
   };
 }
 
+function importLegacyArtifactCoreVersionV1(
+  builtWith: Record<string, unknown>,
+): string | null {
+  const legacy = builtWith.bbVersion;
+  const canonical = builtWith.coreVersion;
+
+  if (
+    typeof legacy !== "string" ||
+    (canonical !== undefined && typeof canonical !== "string")
+  )
+    return null;
+
+  if (canonical !== undefined && canonical !== legacy) return null;
+
+  return legacy;
+}
+
 function parsePluginArtifactMeta(raw: string): PluginArtifactMetaParseResult {
   let json: unknown;
+
   try {
     json = JSON.parse(raw);
   } catch {
     return { meta: null, error: "metadata is not valid JSON" };
   }
+
   if (typeof json !== "object" || json === null || Array.isArray(json)) {
     return { meta: null, error: "metadata must be a JSON object" };
   }
+
   const meta = Object.fromEntries(Object.entries(json));
+
   if (
     typeof meta.sdkMajor !== "number" ||
     !Number.isSafeInteger(meta.sdkMajor) ||
@@ -176,34 +215,54 @@ function parsePluginArtifactMeta(raw: string): PluginArtifactMetaParseResult {
         "sdkMajor must be a non-negative integer and must match the valid semver sdkVersion",
     };
   }
+
+  if (
+    (meta.sdkPackage !== undefined && typeof meta.sdkPackage !== "string") ||
+    (meta.runtimeAbi !== undefined &&
+      (typeof meta.runtimeAbi !== "number" ||
+        !Number.isSafeInteger(meta.runtimeAbi)))
+  )
+    return {
+      meta: null,
+      error: "sdkPackage must be a string and runtimeAbi must be an integer",
+    };
+
   const authoritativeKeys = [
+    "sdkPackage",
+    "runtimeAbi",
     "artifactFormatVersion",
     "pluginId",
     "pluginVersion",
     "builtWith",
   ];
+
   const hasAuthoritativeField = authoritativeKeys.some((key) => key in meta);
+
   if (!hasAuthoritativeField) {
     return {
       meta: { sdkMajor: meta.sdkMajor, sdkVersion: meta.sdkVersion },
       error: null,
     };
   }
-  if (meta.artifactFormatVersion !== 1) {
+
+  if (meta.artifactFormatVersion !== 1 && meta.artifactFormatVersion !== 2) {
     return {
       meta: null,
-      error: `unknown artifactFormatVersion ${JSON.stringify(meta.artifactFormatVersion)}; supported value is 1`,
+      error: `unknown artifactFormatVersion ${JSON.stringify(meta.artifactFormatVersion)}; supported values are 1 and 2`,
     };
   }
+
   if (typeof meta.pluginId !== "string" || meta.pluginId.length === 0) {
     return { meta: null, error: "pluginId must be a non-empty string" };
   }
+
   if (
     typeof meta.pluginVersion !== "string" ||
     meta.pluginVersion.length === 0
   ) {
     return { meta: null, error: "pluginVersion must be a non-empty string" };
   }
+
   if (
     typeof meta.builtWith !== "object" ||
     meta.builtWith === null ||
@@ -211,34 +270,51 @@ function parsePluginArtifactMeta(raw: string): PluginArtifactMetaParseResult {
   ) {
     return { meta: null, error: "builtWith must be an object" };
   }
+
   const builtWith = Object.fromEntries(Object.entries(meta.builtWith));
+
+  const coreVersion =
+    meta.artifactFormatVersion === 1
+      ? importLegacyArtifactCoreVersionV1(builtWith)
+      : typeof builtWith.coreVersion === "string" && !("bbVersion" in builtWith)
+        ? builtWith.coreVersion
+        : null;
+
   if (
-    typeof builtWith.bbVersion !== "string" ||
-    builtWith.bbVersion.length === 0 ||
+    coreVersion === null ||
+    coreVersion.length === 0 ||
     typeof builtWith.pluginSdkVersion !== "string" ||
     semver.valid(builtWith.pluginSdkVersion) === null
   ) {
     return {
       meta: null,
       error:
-        "builtWith.bbVersion must be non-empty and builtWith.pluginSdkVersion must be a valid semver",
+        "builtWith.coreVersion must be non-empty and builtWith.pluginSdkVersion must be a valid semver",
     };
   }
+
   if (builtWith.pluginSdkVersion !== meta.sdkVersion) {
     return {
       meta: null,
       error: `builtWith.pluginSdkVersion ${builtWith.pluginSdkVersion} does not match sdkVersion ${meta.sdkVersion}`,
     };
   }
+
   return {
     meta: {
       sdkMajor: meta.sdkMajor,
       sdkVersion: meta.sdkVersion,
-      artifactFormatVersion: 1,
+      artifactFormatVersion: meta.artifactFormatVersion,
+      ...(typeof meta.sdkPackage === "string"
+        ? { sdkPackage: meta.sdkPackage }
+        : {}),
+      ...(typeof meta.runtimeAbi === "number"
+        ? { runtimeAbi: meta.runtimeAbi }
+        : {}),
       pluginId: meta.pluginId,
       pluginVersion: meta.pluginVersion,
       builtWith: {
-        bbVersion: builtWith.bbVersion,
+        coreVersion,
         pluginSdkVersion: builtWith.pluginSdkVersion,
       },
     },
@@ -252,6 +328,18 @@ export function parsePluginAppBundleMeta(
   return parsePluginArtifactMeta(raw).meta;
 }
 
+export function isPluginArtifactRuntimeCompatible(
+  meta: PluginArtifactMeta | null,
+): boolean {
+  return (
+    meta !== null &&
+    meta.sdkMajor === PLUGIN_SDK_MAJOR &&
+    meta.artifactFormatVersion === 2 &&
+    meta.sdkPackage === PLUGIN_SDK_PACKAGE_NAME &&
+    meta.runtimeAbi === PLUGIN_RUNTIME_ABI
+  );
+}
+
 export function validatePluginArtifactMeta(args: {
   artifact: "server" | "app" | "host";
   raw: string;
@@ -259,32 +347,48 @@ export function validatePluginArtifactMeta(args: {
   pluginVersion: string;
 }): string | null {
   const parsed = parsePluginArtifactMeta(args.raw);
+
   if (parsed.meta === null) {
     return `${args.artifact} artifact for plugin "${args.pluginId}" has invalid metadata: ${parsed.error ?? "unknown error"}`;
   }
+
   const meta = parsed.meta;
+
   if (meta.sdkMajor !== PLUGIN_SDK_MAJOR) {
-    return `${args.artifact} artifact for plugin "${args.pluginId}" was built for SDK major ${meta.sdkMajor}, running SDK major is ${PLUGIN_SDK_MAJOR}; rebuild the ${args.artifact} artifact with this bb version`;
+    return `${args.artifact} artifact for plugin "${args.pluginId}" was built for SDK major ${meta.sdkMajor}, running SDK major is ${PLUGIN_SDK_MAJOR}; rebuild the ${args.artifact} artifact with this Omnyo version`;
   }
-  if (meta.artifactFormatVersion !== 1) return null;
-  if (meta.pluginId !== args.pluginId) {
+
+  const runtimeProblem = `${args.artifact} artifact for plugin "${args.pluginId}" does not match the Omnyo plugin runtime ABI ${PLUGIN_RUNTIME_ABI}; rebuild the ${args.artifact} artifact with ${PLUGIN_SDK_PACKAGE_NAME}`;
+
+  if (meta.artifactFormatVersion === undefined) return runtimeProblem;
+
+  const artifactPluginId =
+    meta.artifactFormatVersion === 1 && meta.pluginId !== undefined
+      ? importLegacyOwnedPluginIdV1(meta.pluginId)
+      : meta.pluginId;
+
+  if (artifactPluginId !== args.pluginId) {
     return `${args.artifact} artifact pluginId "${meta.pluginId}" does not match manifest pluginId "${args.pluginId}"`;
   }
+
   if (meta.pluginVersion !== args.pluginVersion) {
     return `${args.artifact} artifact pluginVersion "${meta.pluginVersion}" does not match manifest version "${args.pluginVersion}"`;
   }
-  return null;
+
+  return isPluginArtifactRuntimeCompatible(meta) ? null : runtimeProblem;
 }
 
 export async function readPluginAppBundleMeta(
   rootDir: string,
 ): Promise<PluginArtifactMeta | null> {
   let raw: string;
+
   try {
     raw = await readFile(join(rootDir, "dist", "app.meta.json"), "utf8");
   } catch {
     return null;
   }
+
   return parsePluginAppBundleMeta(raw);
 }
 
@@ -296,34 +400,44 @@ export async function loadPluginAppBundle(
   const jsPath = join(distDir, "app.js");
   const cssPath = join(distDir, "app.css");
   let metaRaw: string;
+
   try {
     metaRaw = await readFile(join(distDir, "app.meta.json"), "utf8");
   } catch {
     return { state: { hasApp: true, bundle: null }, assets: null };
   }
+
   const meta = parsePluginAppBundleMeta(metaRaw);
   let js: Buffer;
+
   try {
     js = await readFile(jsPath);
   } catch {
     return { state: { hasApp: true, bundle: null }, assets: null };
   }
+
   if (meta === null) {
     return { state: { hasApp: true, bundle: null }, assets: null };
   }
+
   let css: Buffer | null;
+
   try {
     css = await readFile(cssPath);
   } catch {
     css = null;
   }
+
   const hasher = createHash("sha256").update(js);
+
   if (css !== null) hasher.update(css);
   hasher.update(metaRaw);
   hasher.update(pluginId);
   const hash = hasher.digest("hex").slice(0, 16);
+
   const assetUrl = (file: string) =>
     `/api/v1/plugin-app-assets/${hash}/${file}`;
+
   return {
     state: {
       hasApp: true,
@@ -334,9 +448,11 @@ export async function loadPluginAppBundle(
         hash,
         sdkMajor: meta.sdkMajor,
         sdkVersion: meta.sdkVersion,
-        compatible: meta.sdkMajor === PLUGIN_SDK_MAJOR,
+        compatible: isPluginArtifactRuntimeCompatible(meta),
       },
     },
-    assets: { jsPath, cssPath: css !== null ? cssPath : null, hash },
+    assets: isPluginArtifactRuntimeCompatible(meta)
+      ? { jsPath, cssPath: css !== null ? cssPath : null, hash }
+      : null,
   };
 }

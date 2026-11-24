@@ -7,12 +7,14 @@ import {
   workRowsOfKind,
 } from "./timeline-test-harness.js";
 import { formatThreadTimelineText } from "../src/format-timeline-text.js";
-import type { TimelineRow } from "@bb/server-contract";
+import { buildTimelineRowTitle } from "../src/index.js";
+import type { TimelineRow } from "@omnyo/server-contract";
 import type { TimelineEventFactory } from "./timeline-test-harness.js";
 
 type TimelineFixtureEvent = ReturnType<
   TimelineEventFactory[keyof TimelineEventFactory]
 >;
+
 type TimelineWebWorkRow = Extract<
   TimelineRow,
   { kind: "work"; workKind: "web-fetch" | "web-search" }
@@ -47,6 +49,7 @@ function renderPrefixSnapshots(events: TimelineFixtureEvent[]) {
         turnMessageDetail: "summary",
       },
     });
+
     return {
       prefixLength,
       messageKinds: messageKinds(timeline.messages),
@@ -68,15 +71,67 @@ function getOnlyTimelineWebWorkRow(
   const webRows = rows.filter(isTimelineWebWorkRow);
   expect(webRows).toHaveLength(1);
   const row = webRows[0];
+
   if (!row) {
     throw new Error("Expected one timeline web work row");
   }
+
   return row;
 }
 
 describe("timeline CLI rendering snapshots", () => {
+  it.each([
+    {
+      label: "Script Nightly check",
+      source: {
+        systemMessageKind: "external-message",
+        systemMessageSubject: {
+          kind: "message-source",
+          source: { kind: "script", label: "Nightly check" },
+        },
+      },
+    },
+    {
+      label: "Plugin workflows",
+      source: {
+        systemMessageKind: "external-message",
+        systemMessageSubject: {
+          kind: "message-source",
+          source: { kind: "plugin", pluginId: "workflows" },
+        },
+      },
+    },
+    {
+      label: "Thread thr_source",
+      source: { initiator: "agent", senderThreadId: "thr_source" },
+    },
+  ] as const)(
+    "labels generated conversation input as $label",
+    ({ label, source }) => {
+      const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+      const timeline = renderIdleTimeline([
+        event.clientTurnRequested({ ...source, text: "Result ready" }),
+      ]);
+
+      const row = timeline.rows.find(
+        (candidate) => candidate.kind === "conversation",
+      );
+
+      if (!row) throw new Error("Expected a conversation row");
+      expect(timeline.text.split("\n")[0]).toContain(`── ${label} `);
+      expect(
+        buildTimelineRowTitle(row, {
+          summaryStyle: "bundle",
+          workStyle: "default",
+        }).plain,
+      ).toBe(label);
+    },
+  );
+
   it("keeps accepted steer rows outside summaries while preserving summary segments", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const events: TimelineFixtureEvent[] = [
       event.turnStarted({ createdAt: 0 }),
       event.commandStarted({
@@ -90,6 +145,7 @@ describe("timeline CLI rendering snapshots", () => {
         createdAt: 6_000,
       }),
     ];
+
     const steerRequest = event.clientTurnRequested({
       seq: 4,
       createdAt: 7_000,
@@ -99,6 +155,7 @@ describe("timeline CLI rendering snapshots", () => {
         expectedTurnId: "turn-1",
       },
     });
+
     events.push(
       steerRequest,
       event.inputAccepted({
@@ -147,6 +204,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("shows provider-injected input as a system-initiated steer of its turn", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const events: TimelineFixtureEvent[] = [
       event.clientTurnRequested({
         target: { kind: "new-turn" },
@@ -171,6 +229,7 @@ describe("timeline CLI rendering snapshots", () => {
       }),
       event.turnCompleted({ turnId: "turn-2" }),
     ];
+
     const timeline = renderIdleTimeline(events);
 
     expect(
@@ -207,6 +266,7 @@ describe("timeline CLI rendering snapshots", () => {
             role: "user",
             initiator: "system",
             turnRequest: {
+              clientRequestId: null,
               isGrouped: false,
               kind: "steer",
               status: "accepted",
@@ -224,7 +284,7 @@ describe("timeline CLI rendering snapshots", () => {
       ok
 
       ── Worked for (3ms) ────────────────────────────────────────
-        ── User
+        ── System
         <process_event kind="success">Process completed successfully</process_event>
         steer
 
@@ -235,6 +295,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("snapshots streaming CLI prefixes before the final idle state", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const events = [
       event.clientTurnRequested({
         target: { kind: "new-turn" },
@@ -376,6 +437,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("renders command output deltas before command completion", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.clientTurnRequested({
         target: { kind: "new-turn" },
@@ -391,6 +453,7 @@ describe("timeline CLI rendering snapshots", () => {
         delta: "collecting tests\n",
       }),
     ]);
+
     const commandMessage = timeline.messages.find(
       (message) => message.kind === "command",
     );
@@ -413,6 +476,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("shows active bundle leaves in minimal output without verbose bodies", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.commandStarted({
@@ -447,6 +511,7 @@ describe("timeline CLI rendering snapshots", () => {
   it("pads top-level separators by display width", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const command = "调".repeat(10);
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.commandStarted({ itemId: "cmd-wide", command }),
@@ -486,21 +551,135 @@ describe("timeline CLI rendering snapshots", () => {
     );
   });
 
+  it("prints each completed turn's git activity under its final assistant message", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+    const sha = (prefix: string) => prefix.padEnd(40, "0");
+
+    const remotes = [
+      { name: "origin", url: "git@github.com:example/omnyo.git" },
+    ];
+
+    const timeline = renderIdleTimeline([
+      event.turnStarted({ createdAt: 0 }),
+      event.assistantCompleted({
+        itemId: "assistant-1",
+        text: "Committed and pushed.",
+        createdAt: 1_000,
+      }),
+      event.turnCompleted({ createdAt: 1_000 }),
+      event.turnStarted({ turnId: "turn-2", createdAt: 2_000 }),
+      event.gitActivity({
+        createdAt: 2_000,
+        activity: {
+          commits: [
+            {
+              sha: sha("abc1234"),
+              subject: "Fix the flaky checkout test",
+              kind: "commit",
+              branch: "main",
+              replacedSha: null,
+              committedAt: 500,
+              remoteRefs: ["origin/main"],
+            },
+            {
+              sha: sha("def5678"),
+              subject: "Add a regression test",
+              kind: "commit",
+              branch: "main",
+              replacedSha: null,
+              committedAt: 600,
+              remoteRefs: ["origin/main"],
+            },
+          ],
+          pushes: [
+            {
+              remote: "origin",
+              branch: "main",
+              oldSha: null,
+              newSha: sha("def5678"),
+              forced: true,
+              pushedAt: 700,
+              commitCount: 2,
+            },
+          ],
+          remotes,
+        },
+      }),
+      event.assistantCompleted({
+        itemId: "assistant-2",
+        text: "Committed locally.",
+        turnId: "turn-2",
+        createdAt: 3_000,
+      }),
+      event.turnCompleted({ turnId: "turn-2", createdAt: 3_000 }),
+      event.gitActivity({
+        turnId: "turn-2",
+        createdAt: 3_500,
+        activity: {
+          commits: [
+            {
+              sha: sha("aaa1111"),
+              subject: "WIP",
+              kind: "commit",
+              branch: "feat",
+              replacedSha: null,
+              committedAt: 2_500,
+              remoteRefs: [],
+            },
+          ],
+          pushes: [],
+          remotes,
+        },
+      }),
+    ]);
+
+    expect(timeline.text).toMatchInlineSnapshot(`
+      "── Assistant ───────────────────────────────────────────────
+      Committed and pushed.
+      Git: 2 commits on main, pushed to main (example/omnyo)
+        abc1234 Fix the flaky checkout test [main]
+        def5678 Add a regression test [main]
+        main -> origin (example/omnyo), 2 commits, forced, new branch
+
+      ── Assistant ───────────────────────────────────────────────
+      Committed locally.
+      Git: 1 commit on feat, not pushed
+        aaa1111 WIP [feat]"
+    `);
+    expect(
+      formatThreadTimelineText(timeline.rows, { color: false, verbose: false }),
+    ).toMatchInlineSnapshot(`
+      "── Assistant ───────────────────────────────────────────────
+      Committed and pushed.
+      Git: 2 commits on main, pushed to main (example/omnyo)
+
+      ── Assistant ───────────────────────────────────────────────
+      Committed locally.
+      Git: 1 commit on feat, not pushed"
+    `);
+  });
+
   it("shows an unacknowledged active-turn steer from the client request", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+    const turnStarted = event.turnStarted();
+
+    const commandBeforeSteer = event.commandCompleted({
+      itemId: "tool-before-steer",
+      command: "pnpm test",
+    });
+
+    const steerRequest = event.clientTurnRequested({
+      target: { kind: "auto", expectedTurnId: "turn-1" },
+      text: "Please account for the restart",
+    });
+
     const timeline = renderActiveTimeline([
-      event.turnStarted(),
-      event.commandCompleted({
-        itemId: "tool-before-steer",
-        command: "pnpm test",
-      }),
-      event.clientTurnRequested({
-        target: { kind: "auto", expectedTurnId: "turn-1" },
-        text: "Please account for the restart",
-      }),
+      turnStarted,
+      commandBeforeSteer,
+      steerRequest,
       event.commandCompleted({
         itemId: "tool-after-steer",
-        command: "sqlite3 ~/.bb-dev/bb.db '.tables'",
+        command: "sqlite3 ~/.omnyo-dev/app.db '.tables'",
       }),
       event.assistantCompleted({ itemId: "assistant-1", text: "Done." }),
       event.turnCompleted(),
@@ -521,6 +700,7 @@ describe("timeline CLI rendering snapshots", () => {
         (row) => row.kind === "conversation" && row.role === "user",
       ),
     ).toBe(true);
+
     const pendingSteerRow = timeline.rows.find(
       (
         row,
@@ -529,8 +709,10 @@ describe("timeline CLI rendering snapshots", () => {
         row.role === "user" &&
         row.turnRequest.status === "pending",
     );
+
     expect(pendingSteerRow?.sourceSeqStart).toBe(3);
     expect(pendingSteerRow?.turnRequest).toEqual({
+      clientRequestId: steerRequest.data.requestId,
       isGrouped: false,
       kind: "steer",
       status: "pending",
@@ -540,8 +722,8 @@ describe("timeline CLI rendering snapshots", () => {
         ── Ran 2 commands
           ── Ran pnpm test
             $ pnpm test
-          ── Ran sqlite3 ~/.bb-dev/bb.db '.tables'
-            $ sqlite3 ~/.bb-dev/bb.db '.tables'
+          ── Ran sqlite3 ~/.omnyo-dev/app.db '.tables'
+            $ sqlite3 ~/.omnyo-dev/app.db '.tables'
 
       ── Assistant ───────────────────────────────────────────────
       Done.
@@ -554,10 +736,12 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("shows a rejected steer as failed instead of pending", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const request = event.clientTurnRequested({
       target: { kind: "auto", expectedTurnId: "turn-1" },
       text: "Please account for the restart",
     });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       request,
@@ -571,7 +755,9 @@ describe("timeline CLI rendering snapshots", () => {
       ): row is Extract<TimelineRow, { kind: "conversation"; role: "user" }> =>
         row.kind === "conversation" && row.role === "user",
     );
+
     expect(rejectedSteerRow?.turnRequest).toEqual({
+      clientRequestId: request.data.requestId,
       isGrouped: false,
       kind: "steer",
       status: "rejected",
@@ -582,6 +768,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("closes a legacy unmatched steer after its command failure", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.clientTurnRequested({
@@ -601,6 +788,7 @@ describe("timeline CLI rendering snapshots", () => {
       ): row is Extract<TimelineRow, { kind: "conversation"; role: "user" }> =>
         row.kind === "conversation" && row.role === "user",
     );
+
     expect(legacySteerRow?.turnRequest.status).toBe("rejected");
     expect(timeline.text).toContain("steer failed");
     expect(timeline.text).not.toContain("steer pending");
@@ -609,14 +797,17 @@ describe("timeline CLI rendering snapshots", () => {
   it("does not apply an explicit rejection error to the next steer", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const turnStarted = event.turnStarted();
+
     const firstRequest = event.clientTurnRequested({
       target: { kind: "steer", expectedTurnId: "turn-1" },
       text: "First steer",
     });
+
     const secondRequest = event.clientTurnRequested({
       target: { kind: "steer", expectedTurnId: "turn-1" },
       text: "Second steer",
     });
+
     const timeline = renderActiveTimeline([
       turnStarted,
       firstRequest,
@@ -634,6 +825,7 @@ describe("timeline CLI rendering snapshots", () => {
       ): row is Extract<TimelineRow, { kind: "conversation"; role: "user" }> =>
         row.kind === "conversation" && row.role === "user",
     );
+
     expect(userRows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -650,10 +842,12 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("places accepted active-turn steers at the acceptance position", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const steerRequest = event.clientTurnRequested({
       target: { kind: "auto", expectedTurnId: "turn-1" },
       text: "Please account for the restart",
     });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.commandCompleted({
@@ -666,7 +860,7 @@ describe("timeline CLI rendering snapshots", () => {
       }),
       event.commandCompleted({
         itemId: "tool-after-steer",
-        command: "sqlite3 ~/.bb-dev/bb.db '.tables'",
+        command: "sqlite3 ~/.omnyo-dev/app.db '.tables'",
       }),
       event.assistantCompleted({ itemId: "assistant-1", text: "Done." }),
       event.turnCompleted(),
@@ -678,11 +872,14 @@ describe("timeline CLI rendering snapshots", () => {
       "command",
       "assistant-text",
     ]);
+
     const steerMessage = timeline.messages.find(
       (message) => message.kind === "user",
     );
+
     expect(steerMessage?.sourceSeqStart).toBe(4);
     expect(steerMessage?.turnRequest).toEqual({
+      clientRequestId: steerRequest.data.requestId,
       isGrouped: false,
       kind: "steer",
       status: "accepted",
@@ -695,11 +892,14 @@ describe("timeline CLI rendering snapshots", () => {
           row.turnRequest.status === "pending",
       ),
     ).toHaveLength(0);
+
     const steerRow = timeline.rows.find(
       (row) => row.kind === "conversation" && row.role === "user",
     );
+
     expect(steerRow?.sourceSeqStart).toBe(4);
     expect(steerRow?.turnRequest).toEqual({
+      clientRequestId: steerRequest.data.requestId,
       isGrouped: false,
       kind: "steer",
       status: "accepted",
@@ -715,8 +915,8 @@ describe("timeline CLI rendering snapshots", () => {
       steer
 
       ── Worked for (0ms) ────────────────────────────────────────
-        ── Ran sqlite3 ~/.bb-dev/bb.db '.tables'
-          $ sqlite3 ~/.bb-dev/bb.db '.tables'
+        ── Ran sqlite3 ~/.omnyo-dev/app.db '.tables'
+          $ sqlite3 ~/.omnyo-dev/app.db '.tables'
 
       ── Assistant ───────────────────────────────────────────────
       Done."
@@ -725,10 +925,12 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("keeps accepted regular follow-up messages as normal user rows", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const firstRequest = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "First task",
     });
+
     const events: TimelineFixtureEvent[] = [
       firstRequest,
       event.turnStarted({ turnId: "turn-1" }),
@@ -743,10 +945,12 @@ describe("timeline CLI rendering snapshots", () => {
       }),
       event.turnCompleted({ turnId: "turn-1" }),
     ];
+
     const followUpRequest = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "Follow-up task",
     });
+
     events.push(
       followUpRequest,
       event.turnStarted({ turnId: "turn-2" }),
@@ -771,18 +975,31 @@ describe("timeline CLI rendering snapshots", () => {
     const userMessages = timeline.messages.filter(
       (message) => message.kind === "user",
     );
+
     expect(userMessages).toHaveLength(2);
     expect(userMessages.map((message) => message.text)).toEqual([
       "First task",
       "Follow-up task",
     ]);
     expect(userMessages.map((message) => message.turnRequest)).toEqual([
-      { isGrouped: false, kind: "message", status: "accepted" },
-      { isGrouped: false, kind: "message", status: "accepted" },
+      {
+        clientRequestId: firstRequest.data.requestId,
+        isGrouped: false,
+        kind: "message",
+        status: "accepted",
+      },
+      {
+        clientRequestId: followUpRequest.data.requestId,
+        isGrouped: false,
+        kind: "message",
+        status: "accepted",
+      },
     ]);
+
     const topLevelUserRows = timeline.rows.filter(
       (row) => row.kind === "conversation" && row.role === "user",
     );
+
     expect(topLevelUserRows.map((row) => row.text)).toEqual([
       "First task",
       "Follow-up task",
@@ -809,12 +1026,14 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("keeps completed thread provisioning after the initial user request", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const initialRequest = event.clientTurnRequested({
       requestMethod: "thread/start",
       source: "spawn",
       target: { kind: "thread-start" },
       text: "Start the workspace",
     });
+
     const timeline = renderActiveTimeline([
       initialRequest,
       event.threadProvisioning({
@@ -847,9 +1066,11 @@ describe("timeline CLI rendering snapshots", () => {
         if (row.kind === "conversation") {
           return `${row.role}:${row.text}`;
         }
+
         if (row.kind === "system") {
           return row.title;
         }
+
         return row.kind;
       }),
     ).toEqual([
@@ -861,6 +1082,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("shows provisioning failure once with its transcript and error detail", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderTimelineFixture({
       events: [
         event.clientTurnRequested({
@@ -916,6 +1138,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("shows compacted tool work before terminal assistant output", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.commandCompleted({
@@ -954,6 +1177,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("shows pending context compaction with active wording", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.contextCompactionStarted(),
@@ -967,6 +1191,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("unwraps completed context compaction from a singleton turn summary", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderTimelineFixture({
       events: [
         event.turnStarted(),
@@ -993,6 +1218,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("shows a context clear as its own completed timeline row", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderTimelineFixture({
       events: [
         event.turnStarted(),
@@ -1016,6 +1242,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("unwraps failed context compaction from a singleton turn summary", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderTimelineFixture({
       events: [
         event.turnStarted(),
@@ -1040,6 +1267,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("keeps context compaction grouped when the turn contains other work", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderTimelineFixture({
       events: [
         event.turnStarted(),
@@ -1066,6 +1294,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("keeps a finished-turn summary when work follows an assistant step", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.commandCompleted({
@@ -1096,20 +1325,20 @@ describe("timeline CLI rendering snapshots", () => {
     });
     expect(timeline.text).toMatchInlineSnapshot(`
       "── Worked for (4ms) ────────────────────────────────────────
-        ── Ran pnpm test
-          $ pnpm test
-          Tests passed
+        ── Ran 1 command, explored 1 search
+          ── Ran pnpm test
+            $ pnpm test
+            Tests passed
+          ── Searched for setState in packages/excalidraw/tests/helpers/ui.ts
 
       ── Assistant ───────────────────────────────────────────────
-      I found the test path.
-
-      ── Searched for setState in packages/excalidraw/tests/helpers/ui.ts
-        $ rg setState packages/excalidraw/tests/helpers/ui.ts"
+      I found the test path."
     `);
   });
 
   it("keeps summary projections compact with a finished-turn summary", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderTimelineFixture({
       events: [
         event.turnStarted(),
@@ -1158,6 +1387,7 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.delegationCompleted({
@@ -1188,6 +1418,7 @@ describe("timeline CLI rendering snapshots", () => {
       (row): row is Extract<TimelineRow, { kind: "turn" }> =>
         row.kind === "turn",
     );
+
     const delegation = workRowsOfKind(timeline.rows, "delegation").at(0);
 
     expect(rootTurn).toBeDefined();
@@ -1196,6 +1427,7 @@ describe("timeline CLI rendering snapshots", () => {
       false,
     );
     expect(delegation?.childRows?.length ?? 0).toBeGreaterThan(0);
+
     for (const childRow of delegation?.childRows ?? []) {
       expect(childRow.id.startsWith(`${delegation?.id}:child:`)).toBe(true);
     }
@@ -1207,6 +1439,7 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.delegationStarted({
@@ -1257,9 +1490,11 @@ describe("timeline CLI rendering snapshots", () => {
     ]);
 
     const delegations = workRowsOfKind(timeline.rows, "delegation");
+
     const topLevelChildTurns = timeline.rows.filter(
       (row) => row.kind === "turn" && row.turnId.startsWith("child-turn-"),
     );
+
     const topLevelChildMessages = timeline.rows.filter(
       (row) =>
         row.kind === "conversation" &&
@@ -1302,6 +1537,7 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "root-turn",
     });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.toolCallStarted({
@@ -1347,6 +1583,7 @@ describe("timeline CLI rendering snapshots", () => {
         row.role === "assistant" &&
         row.turnId === "root-turn",
     );
+
     expect(rootAssistantRows).toEqual([
       expect.objectContaining({
         text: "I recommend applying the focused fix.",
@@ -1359,27 +1596,33 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const prefix = [
       event.turnStarted(),
       event.reasoningStarted({ itemId: "thinking" }),
       event.reasoningDelta({ itemId: "thinking", delta: "First thought" }),
     ];
+
     const active = renderActiveTimeline(prefix).projection.state.activeThinking;
     expect(active).not.toBeNull();
+
     const completed = renderActiveTimeline([
       ...prefix,
       event.reasoningCompleted({ itemId: "thinking", text: "First thought" }),
     ]);
+
     expect(
       completed.messages.find(
         (message) =>
           message.kind === "operation" && message.opType === "reasoning",
       )?.id,
     ).toBe(active?.id);
+
     const next = renderActiveTimeline([
       event.turnStarted({ turnId: "turn-2" }),
       event.reasoningStarted({ itemId: "thinking", turnId: "turn-2" }),
     ]).projection.state.activeThinking;
+
     expect(next).not.toBeNull();
     expect(next?.id).not.toBe(active?.id);
   });
@@ -1390,6 +1633,7 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "root-turn",
     });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.toolCallStarted({
@@ -1440,6 +1684,7 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.delegationStarted({
@@ -1461,6 +1706,7 @@ describe("timeline CLI rendering snapshots", () => {
     ]);
 
     const delegation = workRowsOfKind(timeline.rows, "delegation").at(0);
+
     const rootFollowUp = timeline.rows.find(
       (row) =>
         row.kind === "conversation" &&
@@ -1495,10 +1741,12 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const startRequest = event.clientTurnRequested({
       target: { kind: "thread-start" },
       text: "Run a Claude Code subagent.",
     });
+
     const timeline = renderActiveTimeline([
       startRequest,
       event.turnStarted(),
@@ -1534,6 +1782,7 @@ describe("timeline CLI rendering snapshots", () => {
     ]);
 
     const delegation = workRowsOfKind(timeline.rows, "delegation").at(0);
+
     const topLevelSubagentOutput = timeline.rows.find(
       (row) =>
         row.kind === "conversation" &&
@@ -1571,10 +1820,12 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const startRequest = event.clientTurnRequested({
       target: { kind: "thread-start" },
       text: "Start an echo subagent.",
     });
+
     const events: TimelineFixtureEvent[] = [
       startRequest,
       event.turnStarted(),
@@ -1605,10 +1856,12 @@ describe("timeline CLI rendering snapshots", () => {
       }),
       event.turnCompleted(),
     ];
+
     const sendRequest = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "Send HELLO to the echo subagent.",
     });
+
     events.push(
       sendRequest,
       event.turnStarted({ turnId: "turn-2" }),
@@ -1650,6 +1903,7 @@ describe("timeline CLI rendering snapshots", () => {
     const timeline = renderActiveTimeline(events);
 
     const delegation = workRowsOfKind(timeline.rows, "delegation").at(0);
+
     const sendTurn = timeline.rows.find(
       (row): row is Extract<TimelineRow, { kind: "turn" }> =>
         row.kind === "turn" && row.turnId === "turn-2",
@@ -1688,7 +1942,9 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "parent-turn",
     });
+
     const parentToolCallId = "call_MV1jTrxEd9bsYdEXQo1PhVOs";
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.toolCallStarted({
@@ -1725,6 +1981,7 @@ describe("timeline CLI rendering snapshots", () => {
     ]);
 
     const delegation = workRowsOfKind(timeline.rows, "delegation").at(0);
+
     const rootFollowUp = timeline.rows.find(
       (row) =>
         row.kind === "conversation" &&
@@ -1759,11 +2016,14 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "parent-turn",
     });
+
     const parentToolCallId = "call_XLYYu5d3CKM9X51TRxrIJauc";
+
     const followUpRequest = event.clientTurnRequested({
       target: { kind: "new-turn" },
       text: "Queued follow-up during delegated child work.",
     });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.toolCallStarted({
@@ -1826,6 +2086,7 @@ describe("timeline CLI rendering snapshots", () => {
     ]);
 
     const delegation = workRowsOfKind(timeline.rows, "delegation").at(0);
+
     const rootFollowUp = timeline.rows.find(
       (row) =>
         row.kind === "conversation" &&
@@ -1860,6 +2121,7 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.delegationStarted({
@@ -1885,6 +2147,7 @@ describe("timeline CLI rendering snapshots", () => {
     ]);
 
     const delegation = workRowsOfKind(timeline.rows, "delegation").at(0);
+
     const topLevelChildRows = timeline.rows.filter(
       (row) => row.turnId?.startsWith("child-turn-") === true,
     );
@@ -1911,6 +2174,7 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.toolCallStarted({
@@ -1935,6 +2199,7 @@ describe("timeline CLI rendering snapshots", () => {
     ]);
 
     const delegation = workRowsOfKind(timeline.rows, "delegation").at(0);
+
     const topLevelChildRows = timeline.rows.filter(
       (row) => row.turnId === "child-turn-1",
     );
@@ -1958,6 +2223,7 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.toolCallStarted({
@@ -1988,6 +2254,7 @@ describe("timeline CLI rendering snapshots", () => {
     ]);
 
     const delegation = workRowsOfKind(timeline.rows, "delegation").at(0);
+
     const rootFollowUp = timeline.rows.find(
       (row) =>
         row.kind === "conversation" &&
@@ -2022,6 +2289,7 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "thread-1",
       turnId: "turn-1",
     });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.delegationStarted({
@@ -2063,6 +2331,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("counts lists separately while de-duping explored files", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.commandCompleted({
@@ -2107,6 +2376,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("summarizes file changes by action while preserving repeated change rows", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.fileChangeCompleted({
@@ -2179,8 +2449,48 @@ describe("timeline CLI rendering snapshots", () => {
     `);
   });
 
+  it("shows a failed file change's error before its proposed diff", () => {
+    const event = createTimelineEventFactory({ threadId: "thread-1" });
+
+    const timeline = renderIdleTimeline([
+      event.turnStarted(),
+      event.fileChangeCompleted({
+        itemId: "edit-1",
+        status: "failed",
+        error: "Could not find the exact text in src/a.ts.",
+        changes: [
+          {
+            path: "/repo/src/a.ts",
+            kind: "update",
+            diff: "@@ -1 +1 @@\n-missing\n+replacement",
+          },
+        ],
+      }),
+      event.fileChangeCompleted({
+        itemId: "edit-2",
+        status: "failed",
+        error: "No changes made to src/b.ts.",
+        changes: [{ path: "/repo/src/b.ts", kind: "update" }],
+      }),
+      event.turnCompleted(),
+    ]);
+
+    expect(timeline.text).toMatchInlineSnapshot(`
+      "── Worked for (3ms) ────────────────────────────────────────
+        ── Edited 2 files
+          ── Failed to edit /repo/src/a.ts (error)
+            Could not find the exact text in src/a.ts.
+            @@ -1 +1 @@
+            -missing
+            +replacement
+          ── Failed to edit /repo/src/b.ts (error)
+            No changes made to src/b.ts."
+    `);
+  });
+
   it("computes file-change stats from raw created and deleted file bodies", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.fileChangeCompleted({
@@ -2215,6 +2525,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("retains completed reasoning through the generic system operation row", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const events = [
       event.turnStarted({ createdAt: 0 }),
       event.reasoningStarted({
@@ -2243,6 +2554,7 @@ describe("timeline CLI rendering snapshots", () => {
       }),
       event.turnCompleted({ createdAt: 7_000 }),
     ];
+
     const timeline = renderIdleTimeline(events);
     const reloadedTimeline = renderIdleTimeline(events);
 
@@ -2284,6 +2596,7 @@ describe("timeline CLI rendering snapshots", () => {
   it("preserves interleaved reasoning order across live and restored timelines", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const itemId = "reasoning-1";
+
     const streamingEvents = [
       event.turnStarted(),
       event.reasoningStarted({ itemId }),
@@ -2291,6 +2604,7 @@ describe("timeline CLI rendering snapshots", () => {
       event.reasoningDelta({ delta: "Body.\n", itemId }),
       event.reasoningSummaryDelta({ delta: "Summary 2.\n", itemId }),
     ];
+
     const completedEvents = [
       ...streamingEvents,
       event.reasoningCompleted({
@@ -2300,15 +2614,18 @@ describe("timeline CLI rendering snapshots", () => {
       }),
       event.turnCompleted(),
     ];
+
     const expectedText = "Summary 1.\nBody.\nSummary 2.";
 
     expect(
       renderActiveTimeline(streamingEvents).projection.state.activeThinking
         ?.text,
     ).toBe(expectedText);
+
     const completedMessages = renderActiveTimeline(
       completedEvents.slice(0, -1),
     ).messages;
+
     expect(
       completedMessages.filter((message) => message.kind === "operation"),
     ).toEqual([
@@ -2322,12 +2639,14 @@ describe("timeline CLI rendering snapshots", () => {
   it("drops provider paragraph padding around reasoning text", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
     const itemId = "reasoning-1";
+
     const streamingEvents = [
       event.turnStarted(),
       event.reasoningStarted({ itemId }),
       event.reasoningDelta({ delta: "First paragraph.\n\n", itemId }),
       event.reasoningDelta({ delta: "Second paragraph.\n\n", itemId }),
     ];
+
     const expectedText = "First paragraph.\n\nSecond paragraph.";
 
     expect(
@@ -2348,10 +2667,12 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("keeps completed reasoning at root when provider parent scope is suppressed", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const startRequest = event.clientTurnRequested({
       target: { kind: "thread-start" },
       text: "Inspect the projection.",
     });
+
     const timeline = renderIdleTimeline([
       startRequest,
       event.turnStarted({
@@ -2386,6 +2707,7 @@ describe("timeline CLI rendering snapshots", () => {
       (message) =>
         message.kind === "operation" && message.title === "Thought for 2s",
     );
+
     expect(reasoningMessages).toEqual([
       expect.objectContaining({
         detail: "Checked effective scope.",
@@ -2399,6 +2721,7 @@ describe("timeline CLI rendering snapshots", () => {
     "finalizes streamed reasoning as interrupted when its turn ends %s",
     (status) => {
       const event = createTimelineEventFactory({ threadId: "thread-1" });
+
       const timeline = renderIdleTimeline([
         event.turnStarted({ createdAt: 0 }),
         event.reasoningDelta({
@@ -2427,6 +2750,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("truncates very long completed reasoning detail", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted({ createdAt: 0 }),
       event.reasoningStarted({
@@ -2444,6 +2768,7 @@ describe("timeline CLI rendering snapshots", () => {
     const rows = timeline.messages.filter(
       (message) => message.kind === "operation",
     );
+
     expect(rows).toHaveLength(1);
     const detail = (rows[0] as { detail: string }).detail;
     expect(detail).toContain("more characters truncated");
@@ -2453,6 +2778,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("ignores reasoning deltas after explicit completion", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.turnStarted({ createdAt: 0 }),
       event.reasoningDelta({
@@ -2487,6 +2813,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("accepts the final text after fallback completion without reopening thinking", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.turnStarted({ createdAt: 0 }),
       event.reasoningDelta({
@@ -2530,6 +2857,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("omits active reasoning from timeline rows", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.reasoningDelta({
@@ -2544,6 +2872,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("projects a persisted codex plan notification as a plan-steps row beside the work", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.turnPlanUpdated({
@@ -2580,9 +2909,11 @@ describe("timeline CLI rendering snapshots", () => {
       "file-edit",
       "assistant-text",
     ]);
+
     const planRow = flattenTimelineRows(timeline.rows).find(
       (row) => row.kind === "work" && row.workKind === "plan-steps",
     );
+
     expect(planRow).toMatchObject({
       kind: "work",
       workKind: "plan-steps",
@@ -2608,6 +2939,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("summarizes completed web search and fetch rows without expanding result text", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderIdleTimeline([
       event.turnStarted(),
       event.webSearchCompleted({
@@ -2637,13 +2969,17 @@ describe("timeline CLI rendering snapshots", () => {
 
     expect(timeline.text).not.toContain("Large search result payload");
     expect(timeline.text).not.toContain("Large MDN page payload");
+
     const webRows = flattenTimelineRows(timeline.rows).filter(
       isTimelineWebWorkRow,
     );
+
     expect(webRows).toHaveLength(3);
+
     for (const row of webRows) {
       expect(row).not.toHaveProperty("resultText");
     }
+
     expect(timeline.text).toMatchInlineSnapshot(`
       "── Worked for (5ms) ────────────────────────────────────────
         ── Researched 1 search query, 2 web pages
@@ -2658,6 +2994,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("summarizes active web search and fetch rows without expanding result text", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.webSearchStarted({
@@ -2685,6 +3022,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("omits direct active web result text even in verbose output", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const searchTimeline = renderActiveTimeline([
       event.turnStarted(),
       event.webSearchStarted({
@@ -2694,6 +3032,7 @@ describe("timeline CLI rendering snapshots", () => {
           "Direct search payload that should not be exposed in verbose output.",
       }),
     ]);
+
     const fetchTimeline = renderActiveTimeline([
       event.turnStarted(),
       event.webFetchStarted({
@@ -2716,6 +3055,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("shows pending approval and denied command states", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.permissionGrantLifecycle(),
       event.turnStarted(),
@@ -2740,6 +3080,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("keeps failed command titles in the normal command title style", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.turnStarted({ createdAt: 1 }),
       event.commandStarted({
@@ -2768,24 +3109,26 @@ describe("timeline CLI rendering snapshots", () => {
       color: true,
       verbose: true,
     });
+
     expect(coloredText).toContain("exit 1");
     expect(coloredText).not.toContain("\u001B[31m");
   });
 
   it("keeps zero exit code visible when a completed command has no output", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.turnStarted({ createdAt: 1 }),
       event.commandStarted({
         itemId: "call-empty-success",
         command:
-          "pnpm exec turbo run typecheck --filter=@bb/app > /tmp/typecheck.txt 2>&1",
+          "pnpm exec turbo run typecheck --filter=@omnyo/app > /tmp/typecheck.txt 2>&1",
         createdAt: 1,
       }),
       event.commandCompleted({
         itemId: "call-empty-success",
         command:
-          "pnpm exec turbo run typecheck --filter=@bb/app > /tmp/typecheck.txt 2>&1",
+          "pnpm exec turbo run typecheck --filter=@omnyo/app > /tmp/typecheck.txt 2>&1",
         aggregatedOutput: "",
         exitCode: 0,
         createdAt: 4001,
@@ -2793,8 +3136,8 @@ describe("timeline CLI rendering snapshots", () => {
     ]);
 
     expect(timeline.text).toMatchInlineSnapshot(`
-      "── Ran pnpm exec turbo run typecheck --filter=@bb/app > /tmp/typecheck.txt 2>&1 (4s)
-        $ pnpm exec turbo run typecheck --filter=@bb/app > /tmp/typecheck.txt 2>&1
+      "── Ran pnpm exec turbo run typecheck --filter=@omnyo/app > /tmp/typecheck.txt 2>&1 (4s)
+        $ pnpm exec turbo run typecheck --filter=@omnyo/app > /tmp/typecheck.txt 2>&1
         exit code 0"
     `);
   });
@@ -2804,6 +3147,7 @@ describe("timeline CLI rendering snapshots", () => {
       threadId: "legacy-thread-1",
       turnId: "turn-1",
     });
+
     const timeline = renderTimelineFixture({
       events: [
         event.turnStarted(),
@@ -2834,6 +3178,7 @@ describe("timeline CLI rendering snapshots", () => {
 
   it("shows reconnect errors compactly", () => {
     const event = createTimelineEventFactory({ threadId: "thread-1" });
+
     const timeline = renderActiveTimeline([
       event.turnStarted(),
       event.providerError({

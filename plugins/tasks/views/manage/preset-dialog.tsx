@@ -3,7 +3,7 @@ import {
   experimental_PermissionModePicker as PermissionModePicker,
   experimental_ProviderModelPicker as ProviderModelPicker,
   type ExperimentalProviderModelPickerValue,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import type { Preset, PresetPermissionMode } from "../../shared/contract.js";
 import { PRESET_ENVIRONMENT_KINDS } from "../../shared/contract.js";
 import { errorMessage } from "../../shared/errors.js";
@@ -30,6 +30,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field } from "./shared.js";
 
 type ReasoningLevel = ExperimentalProviderModelPickerValue["reasoningLevel"];
+
 type EnvironmentKind = (typeof PRESET_ENVIRONMENT_KINDS)[number];
 
 export const PERMISSION_LABELS: Record<PresetPermissionMode, string> = {
@@ -52,14 +53,19 @@ export function describePresetEnvironment(
   preset: Pick<Preset, "environmentKind" | "baseBranch" | "machineId">,
   machines: readonly MachineOption[],
 ): string {
-  if (preset.environmentKind !== "new-worktree") return "Project default";
-  const branch = preset.baseBranch ?? "default";
+  if (preset.environmentKind !== "new-worktree") {
+    return "Project's default workspace";
+  }
+
+  const branch = preset.baseBranch ?? "the default branch";
+
+  if (preset.machineId === null) return `New worktree from ${branch}`;
+
   const machine =
-    preset.machineId === null
-      ? "default"
-      : (machines.find((entry) => entry.id === preset.machineId)?.name ??
-        preset.machineId);
-  return `Worktree · ${branch} · ${machine}`;
+    machines.find((entry) => entry.id === preset.machineId)?.name ??
+    preset.machineId;
+
+  return `New worktree from ${branch} on ${machine}`;
 }
 
 const DEFAULT_MACHINE_VALUE = "__default-machine__";
@@ -113,6 +119,7 @@ export async function savePresetDraft(
   const worktree = draft.environmentKind === "new-worktree";
   const baseBranch = draft.baseBranch.trim();
   const machineId = draft.machineId.trim();
+
   const fields = {
     name: draft.name.trim(),
     providerId: draft.providerId.trim(),
@@ -125,6 +132,7 @@ export async function savePresetDraft(
     machineId: worktree && machineId !== "" ? machineId : null,
     instructions: draft.instructions,
   };
+
   if (editing) {
     await rpc.call("updatePreset", { presetId: editing.id, ...fields });
   } else {
@@ -146,8 +154,10 @@ export function PresetDialog({
   const [draft, setDraft] = useState<PresetDraft>(
     editing ? presetDraft(editing) : EMPTY_PRESET_DRAFT,
   );
+
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
   const set = <K extends keyof PresetDraft>(key: K, value: PresetDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
 
@@ -155,6 +165,7 @@ export function PresetDialog({
     async (rpc) => (await rpc.call("listMachines", {})).machines,
     [],
   );
+
   const machines = machinesQuery.data;
 
   const canSubmit =
@@ -162,6 +173,7 @@ export function PresetDialog({
     draft.providerId.trim() !== "" &&
     draft.modelId.trim() !== "" &&
     !submitting;
+
   const pickerValue: ExperimentalProviderModelPickerValue = {
     providerId: draft.providerId,
     model: draft.modelId,
@@ -170,6 +182,7 @@ export function PresetDialog({
       ? {}
       : { serviceTier: draft.serviceTier }),
   };
+
   const pickerRouting =
     draft.environmentKind === "new-worktree" && draft.machineId.trim() !== ""
       ? ({ kind: "host", hostId: draft.machineId.trim() } as const)

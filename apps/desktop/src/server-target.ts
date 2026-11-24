@@ -1,8 +1,14 @@
+import {
+  migrateLegacyPrivateServerUrl,
+  migrateLegacyRelayServerUrl,
+} from "@omnyo/connect-client";
+import { writeJsonFileAtomically } from "@omnyo/server-archive";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 
 export const SERVER_TARGET_FILE_NAME = "server-target.json";
+
 export function builtinServerName(platform: NodeJS.Platform): string {
   return platform === "darwin" ? "This Mac" : "This Computer";
 }
@@ -32,9 +38,11 @@ export interface ServerTargetFs {
 interface CreateServerTargetStoreArgs {
   fs?: ServerTargetFs;
   storagePath: string;
+  defaultCustomServerUrl?: string;
 }
 
 export interface ServerTargetStore {
+  adoptOriginV1(value: unknown): Promise<boolean>;
   getConnectServer(): ConnectServerRef | null;
   getCustomServerUrl(): string | null;
   getCustomServerUrls(): string[];
@@ -46,18 +54,39 @@ export interface ServerTargetStore {
   setTarget(kind: "builtin" | "connect" | "custom"): Promise<boolean>;
 }
 
-const persistedConnectServerSchema = z.object({
-  handle: z.string().min(1),
-  name: z.string().min(1),
-  url: z.string().min(1),
-});
+const persistedConnectServerSchema = z
+  .object({
+    handle: z.string().min(1),
+    name: z.string().min(1),
+    url: z.string().min(1),
+  })
+  .passthrough();
 
-const persistedServerTargetSchema = z.object({
-  connectServer: persistedConnectServerSchema.nullable().optional(),
-  customServerUrl: z.string().min(1).nullable(),
-  customServerUrls: z.array(z.string().min(1)).default([]),
-  target: z.enum(["builtin", "connect", "custom"]),
-});
+const persistedServerTargetSchema = z
+  .object({
+    connectServer: persistedConnectServerSchema.nullable().optional(),
+    customServerUrl: z.string().min(1).nullable(),
+    customServerUrls: z.array(z.string().min(1)).default([]),
+    target: z.enum(["builtin", "connect", "custom"]),
+  })
+  .passthrough();
+
+const admittedOriginSchema = z
+  .object({
+    version: z.literal(1),
+    adoptionId: z.string().min(1).max(200),
+    fromOrigin: z.literal("https://bb.alexburlis.com"),
+    toOrigin: z.literal("https://app.example.invalid"),
+    serverHostId: z.string().min(1).max(200),
+    runtimeId: z.string().min(1).max(200),
+    selectedIds: z
+      .array(z.string().regex(/^[a-f0-9]{64}$/u))
+      .min(1)
+      .max(32),
+    mappingSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    adoptionAccepted: z.literal(true),
+  })
+  .strict();
 
 type PersistedServerTarget = z.infer<typeof persistedServerTargetSchema>;
 
@@ -69,19 +98,25 @@ const defaultFs: ServerTargetFs = {
 
 export function normalizeCustomServerUrl(rawUrl: string): string | null {
   const trimmed = rawUrl.trim();
+
   if (trimmed.length === 0) {
     return null;
   }
+
   let parsed: URL;
+
   try {
     parsed = new URL(trimmed);
   } catch {
     return null;
   }
+
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return null;
   }
+
   parsed.hash = "";
+
   return parsed.toString().replace(/\/$/u, "");
 }
 
@@ -89,6 +124,7 @@ function parsePersistedServerTarget(raw: string): PersistedServerTarget | null {
   try {
     const parsedJson: unknown = JSON.parse(raw);
     const parsed = persistedServerTargetSchema.safeParse(parsedJson);
+
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
@@ -104,24 +140,114 @@ export function createServerTargetStore(
   let customServerUrls: string[] = [];
   let target: "builtin" | "connect" | "custom" = "builtin";
   let pendingPersist: Promise<void> = Promise.resolve();
+  let originAdoptionHeld = false;
+  let persistedMetadata: Record<string, unknown> = {};
+
+  function assertMutable() {
+    if (originAdoptionHeld)
+      throw new Error(
+        "Desktop server choices are held for verified origin adoption",
+      );
+  }
 
   function persist(): Promise<void> {
     const payload: PersistedServerTarget = {
-      connectServer,
+      ...persistedMetadata,
+      connectServer: connectServer === null ? null : { ...connectServer },
       customServerUrl,
       customServerUrls,
       target,
     };
+
     const data = `${JSON.stringify(payload, null, 2)}\n`;
+
     const write = pendingPersist.then(async () => {
       await fsImpl.mkdir(dirname(args.storagePath), { recursive: true });
       await fsImpl.writeFile(args.storagePath, data, "utf8");
     });
+
     pendingPersist = write.catch(() => undefined);
+
     return write;
   }
 
   return {
+    async adoptOriginV1(value) {
+      const mapping = admittedOriginSchema.parse(value);
+      assertMutable();
+      originAdoptionHeld = true;
+
+      try {
+        await pendingPersist;
+        const raw = await fsImpl.readFile(args.storagePath, "utf8");
+        const document = persistedServerTargetSchema.parse(JSON.parse(raw));
+        const previous = document.omnyoOriginAdoptionV1;
+
+        if (previous !== undefined) {
+          const receipt = admittedOriginSchema.parse(previous);
+
+          if (JSON.stringify(receipt) !== JSON.stringify(mapping))
+            throw new Error(
+              "Desktop server origin belongs to another admitted mapping",
+            );
+
+          return false;
+        }
+
+        const old = (url: string | null) =>
+          url === mapping.fromOrigin || url === mapping.fromOrigin + "/";
+
+        const urls = [document.customServerUrl, ...document.customServerUrls];
+
+        if (!urls.some(old)) return false;
+
+        const currentDestination =
+          migrateLegacyPrivateServerUrl(mapping.toOrigin) ?? mapping.toOrigin;
+
+        if (
+          urls.some(
+            (url) =>
+              url === mapping.toOrigin ||
+              url === mapping.toOrigin + "/" ||
+              url === currentDestination ||
+              url === currentDestination + "/",
+          )
+        )
+          throw new Error(
+            "Desktop server origin conflicts with an existing destination",
+          );
+        const rewrite = (url: string) => (old(url) ? mapping.toOrigin : url);
+
+        const migrated = {
+          ...document,
+          customServerUrl:
+            document.customServerUrl === null
+              ? null
+              : rewrite(document.customServerUrl),
+          customServerUrls: document.customServerUrls.map(rewrite),
+          omnyoOriginAdoptionV1: mapping,
+        };
+
+        if (args.fs === undefined)
+          await writeJsonFileAtomically(args.storagePath, migrated);
+        else
+          await fsImpl.writeFile(
+            args.storagePath,
+            JSON.stringify(migrated, null, 2) + "\n",
+            "utf8",
+          );
+        persistedMetadata = migrated;
+        customServerUrl =
+          customServerUrl !== null && old(customServerUrl)
+            ? mapping.toOrigin
+            : customServerUrl;
+        customServerUrls = customServerUrls.map(rewrite);
+
+        return true;
+      } finally {
+        originAdoptionHeld = false;
+      }
+    },
     getConnectServer() {
       return connectServer === null ? null : { ...connectServer };
     },
@@ -135,27 +261,90 @@ export function createServerTargetStore(
       if (target === "custom" && customServerUrl !== null) {
         return { kind: "custom", url: customServerUrl };
       }
+
       if (target === "connect" && connectServer !== null) {
         return { kind: "connect", server: { ...connectServer } };
       }
+
       return { kind: "builtin" };
     },
     async load() {
+      assertMutable();
       let persisted: PersistedServerTarget | null = null;
+
       try {
         persisted = parsePersistedServerTarget(
           await fsImpl.readFile(args.storagePath, "utf8"),
         );
-      } catch {
+      } catch (error) {
+        if (
+          args.defaultCustomServerUrl !== undefined &&
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "ENOENT"
+        ) {
+          const url = normalizeCustomServerUrl(args.defaultCustomServerUrl);
+
+          if (url === null)
+            throw new Error("Default desktop server URL is invalid");
+          connectServer = null;
+          customServerUrl = url;
+          customServerUrls = [url];
+          target = "custom";
+
+          return;
+        }
+
+        if (args.defaultCustomServerUrl !== undefined) throw error;
         persisted = null;
       }
+
+      assertMutable();
+
       if (persisted === null) {
+        if (args.defaultCustomServerUrl !== undefined)
+          throw new Error("Desktop server target settings are invalid");
         connectServer = null;
         customServerUrl = null;
         customServerUrls = [];
         target = "builtin";
+
         return;
       }
+
+      const migrateUrl = (value: string) =>
+        migrateLegacyPrivateServerUrl(value) ??
+        migrateLegacyRelayServerUrl(value) ??
+        value;
+
+      const migrated = {
+        ...persisted,
+        connectServer: persisted.connectServer
+          ? {
+              ...persisted.connectServer,
+              url: migrateUrl(persisted.connectServer.url),
+            }
+          : persisted.connectServer,
+        customServerUrl:
+          persisted.customServerUrl === null
+            ? null
+            : migrateUrl(persisted.customServerUrl),
+        customServerUrls: persisted.customServerUrls.map(migrateUrl),
+      };
+
+      if (JSON.stringify(migrated) !== JSON.stringify(persisted)) {
+        if (args.fs === undefined)
+          await writeJsonFileAtomically(args.storagePath, migrated);
+        else
+          await fsImpl.writeFile(
+            args.storagePath,
+            JSON.stringify(migrated, null, 2) + "\n",
+            "utf8",
+          );
+        persisted = migrated;
+      }
+
+      persistedMetadata = persisted;
       connectServer = persisted.connectServer ?? null;
       customServerUrl =
         persisted.customServerUrl === null
@@ -171,6 +360,7 @@ export function createServerTargetStore(
             .filter((url): url is string => url !== null),
         ),
       ];
+
       if (persisted.target === "custom" && customServerUrl !== null) {
         target = "custom";
       } else if (persisted.target === "connect" && connectServer !== null) {
@@ -180,6 +370,8 @@ export function createServerTargetStore(
       }
     },
     async refreshConnectServer(server) {
+      assertMutable();
+
       if (
         connectServer === null ||
         connectServer.handle !== server.handle ||
@@ -187,50 +379,67 @@ export function createServerTargetStore(
       ) {
         return false;
       }
+
       connectServer = { ...server };
       await persist();
+
       return true;
     },
     async setConnectServer(server) {
+      assertMutable();
       connectServer = { ...server };
       target = "connect";
       await persist();
     },
     async setCustomServerUrl(url, replacedUrl) {
+      assertMutable();
       const normalized = url === null ? null : normalizeCustomServerUrl(url);
+
       if (url !== null && normalized === null) {
         throw new Error("Enter a valid http(s) URL.");
       }
+
       const removedUrl = replacedUrl ?? (url === null ? customServerUrl : null);
       customServerUrls = customServerUrls.filter(
         (saved) => saved !== removedUrl,
       );
+
       if (normalized === null) {
         customServerUrl = customServerUrls[0] ?? null;
+
         if (target === "custom") {
           target = "builtin";
         }
       } else {
         customServerUrl = normalized;
+
         if (!customServerUrls.includes(normalized)) {
           customServerUrls.push(normalized);
         }
+
         target = "custom";
       }
+
       await persist();
     },
     async setTarget(kind) {
+      assertMutable();
+
       if (kind === "custom" && customServerUrl === null) {
         return false;
       }
+
       if (kind === "connect" && connectServer === null) {
         return false;
       }
+
       if (target === kind) {
         return true;
       }
+
       target = kind;
       await persist();
+
       return true;
     },
   };

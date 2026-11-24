@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 
 const app = await loadPluginApp(() => import("./app"));
 
@@ -65,6 +65,7 @@ describe("ACP agent registry settings", () => {
         },
       },
     );
+
     await waitFor(() => expect(slot.getByText("Claude Agent")).toBeTruthy());
 
     expect(slot.getByRole("button", { name: "Add Claude Agent" })).toBeTruthy();
@@ -78,7 +79,7 @@ describe("ACP agent registry settings", () => {
     expect(slot.queryByRole("button", { name: /Native Only/ })).toBeNull();
     expect(slot.getByText("Runs npx -y claude-acp@1.0.0")).toBeTruthy();
     expect(
-      slot.getByText("bb already ships this agent as a provider."),
+      slot.getByText("Omnyo already ships this agent as a provider."),
     ).toBeTruthy();
 
     fireEvent.change(slot.getByLabelText("Search agents"), {
@@ -98,11 +99,13 @@ describe("ACP agent registry settings", () => {
       if (JSON.stringify(input) === JSON.stringify({ id: "goose" })) {
         throw new Error("The custom agents setting is not valid JSON.");
       }
+
       return registry([
         agent("claude-acp", "Claude Agent", "added"),
         agent("goose", "Goose", "available"),
       ]);
     });
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -117,6 +120,7 @@ describe("ACP agent registry settings", () => {
         },
       },
     );
+
     await waitFor(() => expect(slot.getByText("Claude Agent")).toBeTruthy());
 
     fireEvent.click(slot.getByRole("button", { name: "Add Claude Agent" }));
@@ -150,6 +154,7 @@ describe("ACP agent registry settings", () => {
         },
       },
     );
+
     await waitFor(() =>
       expect(slot.getByRole("status").textContent).toBe(
         "Showing a saved copy. The registry could not be reached: The ACP registry answered 503.",

@@ -3,15 +3,15 @@ import {
   threadStatusSchema,
   threadStatusValues,
   type ThreadStatus,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   threadCountGroupBySchema,
   THREAD_COUNT_ROOT_PARENT,
   type ThreadCountGroupBy,
-} from "@bb/server-contract";
-import type { ThreadCountResult } from "@bb/sdk";
+} from "@omnyo/server-contract";
+import type { ThreadCountResult } from "@omnyo/sdk";
 import { action } from "../../action.js";
-import { createCliBbSdk } from "../../client.js";
+import { createCliOmnyoSdk } from "../../client.js";
 import { columnWidths, printBorderlessTable } from "../../table.js";
 import { joinValues, outputJson } from "../helpers.js";
 
@@ -56,7 +56,8 @@ export function registerCountCommand(
     .action(
       action(async (opts: ThreadCountCommandOptions) => {
         const groupBy = parseGroupBy(opts.by);
-        const result = await createCliBbSdk(getUrl()).threads.count({
+
+        const result = await createCliOmnyoSdk(getUrl()).threads.count({
           ...(opts.status ? { status: parseStatus(opts.status) } : {}),
           ...(opts.host ? { hostId: opts.host } : {}),
           ...(opts.provider ? { providerId: opts.provider } : {}),
@@ -64,28 +65,29 @@ export function registerCountCommand(
           ...(opts.parent ? { parentThreadId: opts.parent } : {}),
           ...(groupBy ? { groupBy } : {}),
         });
+
         if (outputJson(opts, result)) return;
         printThreadCount(result, groupBy);
       }),
     );
 }
 
-/**
- * An ungrouped count is one number, so it prints as one number: the common
- * `bb thread count --status active` call stays pipeable without --json.
- */
 function printThreadCount(
   result: ThreadCountResult,
   groupBy: ThreadCountGroupBy | undefined,
 ): void {
   if (result.groups === undefined || groupBy === undefined) {
     console.log(String(result.total));
+
     return;
   }
+
   if (result.groups.length === 0) {
     console.log("No threads found");
+
     return;
   }
+
   printGroupTable(result, groupBy);
 }
 
@@ -93,11 +95,11 @@ function printGroupTable(
   result: ThreadCountResult,
   groupBy: ThreadCountGroupBy,
 ): void {
-  // Biggest group first: the reason to group is to find where the threads are.
   const groups = [...(result.groups ?? [])].sort(
     (left, right) =>
       right.count - left.count || compareGroupKeys(left.key, right.key),
   );
+
   const rows = groups.map((group) => [group.key ?? "-", String(group.count)]);
   const head = [GROUP_COLUMN_HEADS[groupBy], "Count"];
   printBorderlessTable(
@@ -110,16 +112,19 @@ function printGroupTable(
   console.log(`Total: ${result.total}`);
 }
 
-/** Threads without a host/provider/project sort last under a "-" key. */
 function compareGroupKeys(left: string | null, right: string | null): number {
   if (left === right) return 0;
+
   if (left === null) return 1;
+
   if (right === null) return -1;
+
   return left.localeCompare(right);
 }
 
 function parseStatus(value: string): ThreadStatus {
   const parsed = threadStatusSchema.safeParse(value.trim());
+
   if (parsed.success) return parsed.data;
   throw new Error(
     `Invalid --status value '${value}'. Expected ${joinValues(threadStatusValues)}.`,
@@ -131,6 +136,7 @@ function parseGroupBy(
 ): ThreadCountGroupBy | undefined {
   if (value === undefined) return undefined;
   const parsed = threadCountGroupBySchema.safeParse(value.trim());
+
   if (parsed.success) return parsed.data;
   throw new Error(
     `Invalid --by value '${value}'. Expected 'host', 'provider', or 'project'.`,

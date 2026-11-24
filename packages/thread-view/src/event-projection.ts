@@ -1,4 +1,4 @@
-import type { ActiveThinking } from "@bb/domain";
+import type { ActiveThinking, GitActivity } from "@omnyo/domain";
 import type { AcceptedClientRequestContext } from "./accepted-client-request-context.js";
 import type {
   BuildEventProjectionMessagesOptions,
@@ -49,6 +49,7 @@ export interface EventProjectionTurn {
   completedAt: number | null;
   status: EventProjectionTurnStatus;
   summaryCount: number;
+  gitActivity: GitActivity | null;
   externalUserBoundarySeqs?: number[];
   terminalMessage?: EventProjectionMessage;
   messages?: EventProjectionMessage[];

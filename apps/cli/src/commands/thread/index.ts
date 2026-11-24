@@ -1,3 +1,5 @@
+import { registerProofCommand } from "./proof.js";
+import { registerAutoCompactionCommand } from "./auto-compaction.js";
 import { registerContextCommand } from "./context.js";
 import { registerSessionStateCommands } from "./session-state.js";
 import { Command } from "commander";
@@ -12,6 +14,7 @@ import { registerShowCommand } from "./show.js";
 import { registerSpawnCommand } from "./spawn.js";
 import { registerForkCommand } from "./fork.js";
 import { registerWaitCommand } from "./wait.js";
+import { registerWorkCommands } from "./work.js";
 
 export function registerThreadCommands(
   program: Command,
@@ -24,6 +27,8 @@ export function registerThreadCommands(
   registerListCommand(thread, getUrl);
   registerCountCommand(thread, getUrl);
   registerContextCommand(thread, getUrl);
+  registerAutoCompactionCommand(thread, getUrl);
+  registerProofCommand(thread, getUrl);
   registerSessionStateCommands(thread, getUrl);
   registerShowCommand(thread, getUrl);
   registerOpenCommand(thread, getUrl);
@@ -31,4 +36,5 @@ export function registerThreadCommands(
   registerOrganizationCommands(thread, getUrl);
   registerActionsCommands(thread, getUrl);
   registerInteractionCommands(thread, getUrl);
+  registerWorkCommands(thread, getUrl);
 }

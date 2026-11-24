@@ -48,10 +48,13 @@ export function createProfileClientRegistry(
     const authFailureListeners = new Set<
       (failure: ProfileAuthFailure) => void
     >();
+
     const emitAuthFailure = (failure: ProfileAuthFailure): void => {
       for (const listener of authFailureListeners) listener(failure);
     };
+
     const onServerMoved = options.onServerMoved;
+
     const { sdk, realtime, fetch } = createMobileSdk(profile, {
       ...options.sdk,
       onAuthFailure: (status) => {
@@ -63,14 +66,18 @@ export function createProfileClientRegistry(
           }
         : undefined,
     });
+
     const unsubscribeConnectFailed = realtime.onConnectFailed((event) => {
       if (event.authRejected) {
         emitAuthFailure({ source: "realtime", message: event.message });
       }
     });
+
     const queryClient = createProfileQueryClient();
+
     const invalidation: RealtimeInvalidationHandle =
       installRealtimeInvalidation(queryClient, realtime);
+
     return {
       profileId: profile.id,
       serverUrl: profile.serverUrl,
@@ -80,6 +87,7 @@ export function createProfileClientRegistry(
       queryClient,
       onAuthFailure(listener) {
         authFailureListeners.add(listener);
+
         return () => {
           authFailureListeners.delete(listener);
         };
@@ -96,6 +104,7 @@ export function createProfileClientRegistry(
 
   function disposeClient(profileId: string): void {
     const existing = clients.get(profileId);
+
     if (!existing) return;
     clients.delete(profileId);
     existing.dispose();
@@ -104,10 +113,13 @@ export function createProfileClientRegistry(
   return {
     getClientForProfile(profile) {
       const existing = clients.get(profile.id);
+
       if (existing && existing.serverUrl === profile.serverUrl) return existing;
+
       if (existing) disposeClient(profile.id);
       const client = build(profile);
       clients.set(profile.id, client);
+
       return client;
     },
     disposeClient,

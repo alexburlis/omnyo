@@ -1,6 +1,6 @@
-import { defineRpcContract } from "@get-bb/plugin-sdk";
-import { experimental_nativeRootsHostContract } from "@get-bb/plugin-sdk/host";
-import { experimental_acpAgentProbeSchema } from "@get-bb/plugin-sdk/provider-bridge/acp-next";
+import { defineRpcContract } from "@omnyo/plugin-sdk";
+import { experimental_nativeRootsHostContract } from "@omnyo/plugin-sdk/host";
+import { experimental_acpAgentProbeSchema } from "@omnyo/plugin-sdk/provider-bridge/acp-next";
 import { z } from "zod";
 
 export const acpHostContract = defineRpcContract({

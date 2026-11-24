@@ -1,3 +1,3 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 
-export default function scheduledSendPlugin(_bb: BbPluginApi): void {}
+export default function scheduledSendPlugin(_api: PluginApi): void {}

@@ -20,7 +20,7 @@ import type {
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { makeInstalledPlugin } from "@/test/fixtures/plugins";
 import { BrowsePluginsTab } from "./BrowsePluginsTab";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { PLUGINS_BROWSE_DESCRIPTION } from "../plugins-collection-copy";
 
 vi.mock("@/components/plugin/PluginNewThreadComposer", () => ({
@@ -44,20 +44,19 @@ const MEMORY_ENTRY: PluginCatalogSearchEntry = {
   publishedAt: "2026-08-20T00:00:00Z",
   source: "builtin:memory",
   repositoryUrl: null,
-  marketplace: "bb-official",
-  marketplaceDisplayName: "BB Official",
-  publisherKey: "bb-official",
-  publisherLabel: "BB Official",
+  marketplace: "omnyo-official",
+  marketplaceDisplayName: "Omnyo Official",
+  publisherKey: "omnyo-official",
+  publisherLabel: "Omnyo Official",
   official: true,
   author: {
-    name: "BB",
+    name: "bb",
     github: "get-bb",
     url: "https://github.com/get-bb",
   },
   installed: false,
   conflictingInstallSource: null,
   installedByDefault: false,
-  installs: 4_210,
   compatible: true,
   incompatibleReason: null,
 };
@@ -71,7 +70,6 @@ const SECURITY_ENTRY: PluginCatalogSearchEntry = {
   categoryId: "security",
   category: "Security",
   publishedAt: undefined,
-  installs: 900,
 };
 
 const TASKS_ENTRY: PluginCatalogSearchEntry = {
@@ -83,7 +81,6 @@ const TASKS_ENTRY: PluginCatalogSearchEntry = {
   categoryId: "tasks-and-workflows",
   category: "Tasks & Workflows",
   publishedAt: "2026-08-25T00:00:00Z",
-  installs: null,
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -101,6 +98,7 @@ function stubCatalog(data: CatalogFixture) {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+
       if (url.startsWith("/api/v1/plugin-catalog/search")) {
         return jsonResponse({
           results: data.entries,
@@ -108,6 +106,7 @@ function stubCatalog(data: CatalogFixture) {
           categories: data.categories ?? [],
         });
       }
+
       return jsonResponse({ error: "not found" }, 404);
     }),
   );
@@ -115,6 +114,7 @@ function stubCatalog(data: CatalogFixture) {
 
 function LocationProbe() {
   const location = useLocation();
+
   return <output data-testid="location-search">{location.search}</output>;
 }
 
@@ -137,6 +137,7 @@ function renderBrowse(
     </MemoryRouter>,
     { wrapper },
   );
+
   return { onInstall, onOpenPlugin };
 }
 
@@ -152,6 +153,7 @@ function cardOrder(): string[] {
 
 function visibleShelves(): HTMLElement | null {
   const shelves = screen.queryByTestId("plugin-browse-shelves");
+
   return shelves?.hidden === false ? shelves : null;
 }
 
@@ -219,9 +221,11 @@ describe("BrowsePluginsTab", () => {
     });
 
     await screen.findByRole("heading", { name: "New & notable" });
+
     const labels = [
       ...document.querySelectorAll("[data-testid='plugin-browse-shelves'] h2"),
     ].map((heading) => heading.textContent);
+
     expect(labels).toEqual([
       "New & notable",
       "Memory & Context",
@@ -229,7 +233,7 @@ describe("BrowsePluginsTab", () => {
       "Tasks & Workflows",
     ]);
     expect(screen.getAllByText("Memory")).toHaveLength(2);
-    expect(screen.queryByText("BB Official plugins")).toBeNull();
+    expect(screen.queryByText("Omnyo Official plugins")).toBeNull();
   });
 
   it("keeps the shelves mounted while a search is active", async () => {
@@ -247,13 +251,16 @@ describe("BrowsePluginsTab", () => {
 
   it("keeps every keystroke while the URL query catches up", async () => {
     renderBrowse({ entries: [MEMORY_ENTRY], collections: [] });
+
     const search = await screen.findByRole<HTMLInputElement>("textbox", {
       name: "Search plugins",
     });
+
     const setNativeValue = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
       "value",
     )?.set;
+
     if (setNativeValue === undefined) throw new Error("No value setter");
 
     for (const value of ["M", "Me", "Mem", "Memo"]) {
@@ -261,6 +268,7 @@ describe("BrowsePluginsTab", () => {
       search.dispatchEvent(new Event("input", { bubbles: true }));
       expect(search.value).toBe(value);
     }
+
     await waitFor(() =>
       expect(
         new URLSearchParams(
@@ -278,6 +286,7 @@ describe("BrowsePluginsTab", () => {
       pluginId: `memory-${index}`,
       displayName: `Memory ${index}`,
     }));
+
     renderBrowse({ entries, collections: [] }, "/plugins?query=Memory");
 
     await waitFor(() => expect(cardOrder()).toHaveLength(12));
@@ -295,11 +304,15 @@ describe("BrowsePluginsTab", () => {
       onOpenPlugin,
     );
 
-    fireEvent.click(await screen.findByRole("link", { name: "BB Official" }));
+    const authorLink = await screen.findByRole("link", { name: "bb" });
+    expect(screen.getByText("Official")).toBeTruthy();
+    fireEvent.click(authorLink);
+
     const params = new URLSearchParams(
       screen.getByTestId("location-search").textContent ?? "",
     );
-    expect(params.get("author")).toBe("11:bb-official:github:get-bb");
+
+    expect(params.get("author")).toBe("14:omnyo-official:github:get-bb");
     expect(params.getAll("category")).toEqual(["memory-and-context"]);
     expect(params.get("sort")).toBe("recently-added");
     expect(onOpenPlugin).not.toHaveBeenCalled();
@@ -314,6 +327,7 @@ describe("BrowsePluginsTab", () => {
     const trigger = await screen.findByRole("button", {
       name: "Filter plugins by category: Memory & Context, Security",
     });
+
     expect(screen.queryByTestId("plugin-browse-shelves")).toBeNull();
     fireEvent.click(trigger);
     fireEvent.click(
@@ -323,15 +337,18 @@ describe("BrowsePluginsTab", () => {
     const params = new URLSearchParams(
       screen.getByTestId("location-search").textContent ?? "",
     );
+
     expect(params.getAll("category")).toEqual([
       "memory-and-context",
       "security",
       "tasks-and-workflows",
     ]);
     fireEvent.click(screen.getByRole("option", { name: /Security/u }));
+
     const nextParams = new URLSearchParams(
       screen.getByTestId("location-search").textContent ?? "",
     );
+
     expect(nextParams.getAll("category")).toEqual([
       "memory-and-context",
       "tasks-and-workflows",
@@ -383,49 +400,21 @@ describe("BrowsePluginsTab", () => {
     ]);
   });
 
-  it("disables the install sort when no listing publishes a count", async () => {
-    renderBrowse({
-      entries: [
-        { ...MEMORY_ENTRY, installs: null },
-        { ...SECURITY_ENTRY, installs: null },
-      ],
-      collections: [],
-    });
+  it("offers only name and published sorts and ignores an old install sort link", async () => {
+    renderBrowse(
+      { entries: [MEMORY_ENTRY, SECURITY_ENTRY], collections: [] },
+      "/plugins?sort=most-installed",
+    );
 
     const sortTrigger = await screen.findByRole("button", {
       name: "Sort: Default",
     });
+
+    expect(await screen.findByTestId("plugin-browse-shelves")).toBeTruthy();
     fireEvent.pointerDown(sortTrigger);
     expect(
-      screen
-        .getByRole("menuitemradio", { name: "Installs" })
-        .getAttribute("aria-disabled"),
-    ).toBe("true");
-  });
-
-  it("sorts by install count and sinks uncounted entries in both directions", async () => {
-    renderBrowse(
-      { entries: [MEMORY_ENTRY, SECURITY_ENTRY, TASKS_ENTRY], collections: [] },
-      "/plugins?sort=most-installed",
-    );
-
-    await screen.findByText("Memory");
-    expect(cardOrder()).toEqual([
-      "Open Memory details",
-      "Open Security details",
-      "Open Tasks details",
-    ]);
-    const trigger = screen.getByRole("button", {
-      name: "Sort: Installs, descending",
-    });
-    fireEvent.pointerDown(trigger);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Installs" }));
-    expect(cardOrder()).toEqual([
-      "Open Security details",
-      "Open Memory details",
-      "Open Tasks details",
-    ]);
-    expect(screen.queryByText("Memory & Context")).toBeNull();
+      screen.getAllByRole("menuitemradio").map((item) => item.textContent),
+    ).toEqual(["Name", "Published"]);
   });
 
   it("puts entries without a published date last in both directions", async () => {
@@ -440,9 +429,11 @@ describe("BrowsePluginsTab", () => {
       "Open Memory details",
       "Open Security details",
     ]);
+
     const trigger = screen.getByRole("button", {
       name: "Sort: Published, descending",
     });
+
     fireEvent.pointerDown(trigger);
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Published" }));
     expect(cardOrder()).toEqual([
@@ -455,19 +446,22 @@ describe("BrowsePluginsTab", () => {
   it("clears a flat sort and restores the shelves", async () => {
     renderBrowse(
       { entries: [MEMORY_ENTRY, SECURITY_ENTRY], collections: [] },
-      "/plugins?sort=most-installed",
+      "/plugins?sort=recently-added",
     );
 
     const trigger = await screen.findByRole("button", {
-      name: "Sort: Installs, descending",
+      name: "Sort: Published, descending",
     });
+
     expect(screen.queryByTestId("plugin-browse-shelves")).toBeNull();
     fireEvent.pointerDown(trigger);
     fireEvent.click(screen.getByRole("menuitem", { name: "Clear sort" }));
     expect(await screen.findByTestId("plugin-browse-shelves")).toBeTruthy();
+
     const params = new URLSearchParams(
       screen.getByTestId("location-search").textContent ?? "",
     );
+
     expect(params.has("sort")).toBe(false);
     expect(params.has("direction")).toBe(false);
   });
@@ -479,6 +473,7 @@ describe("BrowsePluginsTab", () => {
       pluginId: `memory-${index}`,
       displayName: `Memory ${index}`,
     }));
+
     renderBrowse({ entries, collections: [] });
 
     await screen.findByTestId("plugin-browse-shelves");
@@ -508,6 +503,31 @@ describe("BrowsePluginsTab", () => {
     expect(screen.getByTestId("location-search").textContent).toBe("");
   });
 
+  it("leads the Omnyo Official shelf with the Omnyo mark", async () => {
+    renderBrowse({
+      entries: [
+        { ...MEMORY_ENTRY, collections: [{ id: "omnyo-official", rank: 0 }] },
+      ],
+      collections: [
+        {
+          id: "omnyo-official",
+          displayName: "Omnyo Official",
+          pluginIds: [MEMORY_ENTRY.entryId],
+        },
+      ],
+    });
+
+    const title = await screen.findByRole("heading", {
+      name: "Omnyo Official",
+      level: 2,
+    });
+
+    const mark = title.previousElementSibling;
+
+    expect(mark?.tagName).toBe("SPAN");
+    expect(mark?.getAttribute("aria-hidden")).toBe("true");
+  });
+
   it("loads a curated shelf directly and preserves its order", async () => {
     const entries = Array.from({ length: 5 }, (_, index) => ({
       ...MEMORY_ENTRY,
@@ -516,6 +536,7 @@ describe("BrowsePluginsTab", () => {
       displayName: `Memory ${index}`,
       collections: [{ id: "new-and-notable", rank: 4 - index }],
     }));
+
     renderBrowse(
       {
         entries: [...entries, SECURITY_ENTRY],
@@ -568,16 +589,19 @@ describe("BrowsePluginsTab", () => {
     const warning = vi
       .spyOn(appToast, "warning")
       .mockReturnValue("catalog-error");
+
     let searchAttempts = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         if (String(input).startsWith("/api/v1/plugin-catalog/search")) {
           searchAttempts += 1;
+
           return searchAttempts === 1
             ? jsonResponse({ error: "unavailable" }, 503)
             : jsonResponse({ results: [MEMORY_ENTRY], collections: [] });
         }
+
         return jsonResponse({ error: "not found" }, 404);
       }),
     );
@@ -606,6 +630,7 @@ describe("BrowsePluginsTab", () => {
     const warning = vi
       .spyOn(appToast, "warning")
       .mockReturnValue("catalog-error");
+
     let unavailable = false;
     let description = MEMORY_ENTRY.description;
     vi.stubGlobal(
@@ -619,6 +644,7 @@ describe("BrowsePluginsTab", () => {
                 collections: [],
               });
         }
+
         return jsonResponse({ error: "not found" }, 404);
       }),
     );
@@ -636,6 +662,7 @@ describe("BrowsePluginsTab", () => {
       { wrapper },
     );
     await screen.findByRole("button", { name: "Open Memory details" });
+
     const refresh = async () => {
       await act(async () => {
         await queryClient.refetchQueries({
@@ -644,6 +671,7 @@ describe("BrowsePluginsTab", () => {
         });
       });
     };
+
     unavailable = true;
     await refresh();
     await waitFor(() => expect(warning).toHaveBeenCalledTimes(1));
@@ -670,10 +698,10 @@ describe("BrowsePluginsTab", () => {
     });
 
     const installed = await screen.findByRole("button", {
-      name: "Memory installed — 4,210 installs",
+      name: "Memory installed",
     });
+
     expect(installed.querySelector('[data-icon="Check"]')).toBeTruthy();
-    expect(installed.textContent).toContain("4.2K");
     expect(installed.getAttribute("aria-disabled")).toBe("true");
     expect(
       screen.queryByRole("button", { name: /Install Memory/u }),
@@ -702,7 +730,7 @@ describe("BrowsePluginsTab", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "New plugin" }));
     expect((await screen.findByTestId("inline-composer")).textContent).toBe(
-      "Create a new bb plugin that ",
+      "Create a new Omnyo plugin that ",
     );
     fireEvent.click(
       screen.getByText(
@@ -718,27 +746,27 @@ describe("BrowsePluginsTab", () => {
     ).toContain("deploys the current branch to staging");
   });
 
-  it("shows compact install data and reports the card trigger", async () => {
+  it("installs from the card and reports the card trigger", async () => {
     const onInstall = vi.fn();
     const onOpenPlugin = vi.fn();
     renderBrowse(
       { entries: [MEMORY_ENTRY], collections: [] },
-      "/plugins?sort=most-installed",
+      "/plugins?sort=name",
       onInstall,
       onOpenPlugin,
     );
 
     const install = await screen.findByRole("button", {
-      name: "Install Memory — 4,210 installs",
+      name: "Install Memory",
     });
-    expect(install.textContent).toContain("4.2K");
+
     fireEvent.click(install);
     expect(onInstall).toHaveBeenCalledWith(
       expect.objectContaining({
         entryId: "memory",
         pluginId: "memory",
-        marketplace: "bb-official",
-        publisherLabel: "BB Official",
+        marketplace: "omnyo-official",
+        publisherLabel: "Omnyo Official",
         displayName: "Memory",
         icon: "Brain",
         iconUrl: null,
@@ -746,11 +774,51 @@ describe("BrowsePluginsTab", () => {
         source: "builtin:memory",
       }),
     );
+
     const open = screen.getByRole("button", {
       name: "Open Memory details",
     });
+
     fireEvent.click(open);
     expect(onOpenPlugin).toHaveBeenCalledWith("memory", open);
+  });
+
+  it("offers Install for a removed bundled plugin instead of a Built in label", async () => {
+    const onInstall = vi.fn();
+
+    const removedBundle: PluginCatalogSearchEntry = {
+      ...MEMORY_ENTRY,
+      entryId: "chime",
+      pluginId: "chime-local",
+      displayName: "Chime",
+      source: "builtin:chime",
+      installed: false,
+      installedByDefault: true,
+    };
+
+    renderBrowse(
+      { entries: [removedBundle], collections: [] },
+      "/plugins?sort=name",
+      onInstall,
+    );
+
+    const install = await screen.findByRole("button", {
+      name: "Install Chime",
+    });
+
+    expect(install.querySelector('[data-icon="Download"]')).not.toBeNull();
+    expect(install.textContent).not.toContain("Built in");
+    expect(screen.queryByText("Built in")).toBeNull();
+
+    fireEvent.click(install);
+    expect(onInstall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entryId: "chime",
+        pluginId: "chime-local",
+        marketplace: "omnyo-official",
+        source: "builtin:chime",
+      }),
+    );
   });
 });
 
@@ -761,9 +829,11 @@ describe("BrowsePluginsTab installed plugin switch", () => {
       installed: true,
       installedByDefault: true,
     };
+
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+
         if (url.startsWith("/api/v1/plugin-catalog/search")) {
           return jsonResponse({
             results: [installedEntry, TASKS_ENTRY],
@@ -771,6 +841,7 @@ describe("BrowsePluginsTab installed plugin switch", () => {
             categories: [],
           });
         }
+
         if (url === "/api/v1/plugins" && init?.method !== "POST") {
           return jsonResponse({
             plugins: [
@@ -782,6 +853,7 @@ describe("BrowsePluginsTab installed plugin switch", () => {
             ],
           });
         }
+
         if (url === "/api/v1/plugins/memory/enable") {
           return jsonResponse({
             ok: true,
@@ -792,9 +864,11 @@ describe("BrowsePluginsTab installed plugin switch", () => {
             }),
           });
         }
+
         return jsonResponse({ error: "not found" }, 404);
       },
     );
+
     vi.stubGlobal("fetch", fetchMock);
     const { wrapper } = createQueryClientTestHarness();
     render(

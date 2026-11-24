@@ -8,21 +8,21 @@ describe("resolveLocalCloudLoopbackUrl", () => {
     ).toBe("http://127.0.0.1:11001");
     expect(
       resolveLocalCloudLoopbackUrl(
-        "https://sawyer-chinamax.vibecodethis.site",
+        "https://sawyer-chinamax.stg.omnyo.link",
         "11001",
       ),
     ).toBe("http://127.0.0.1:11001");
     expect(
-      resolveLocalCloudLoopbackUrl("http://sawyer.vibecodethis.site", "11001"),
+      resolveLocalCloudLoopbackUrl("http://sawyer.stg.omnyo.link", "11001"),
     ).toBeNull();
     expect(
-      resolveLocalCloudLoopbackUrl(
-        "https://sawyer.vibecodethis.site",
-        undefined,
-      ),
+      resolveLocalCloudLoopbackUrl("https://sawyer.stg.omnyo.link", undefined),
     ).toBeNull();
     expect(
-      resolveLocalCloudLoopbackUrl("https://sawyer.getbb.app", "11001"),
+      resolveLocalCloudLoopbackUrl("https://sawyer.omnyo.link", "11001"),
+    ).toBeNull();
+    expect(
+      resolveLocalCloudLoopbackUrl("https://sawyer.omnyo.link", "11001"),
     ).toBeNull();
     expect(
       resolveLocalCloudLoopbackUrl("http://sawyer.localhost:8787", undefined),

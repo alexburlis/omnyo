@@ -1,4 +1,4 @@
-import type { AppCommandId } from "@bb/domain";
+import type { AppCommandId } from "@omnyo/domain";
 import { APP_COMMAND_GROUPS } from "@/lib/app-command-metadata";
 import type { AppShortcutPresentation } from "@/lib/app-keybindings";
 import type { PaletteAction } from "./palette-action";
@@ -28,10 +28,12 @@ export function buildAppCommandActions(
   args: BuildAppCommandActionsArgs,
 ): PaletteAction[] {
   const actions: PaletteAction[] = [];
+
   for (const group of APP_COMMAND_GROUPS) {
     for (const metadata of group.commands) {
       if (!metadata.paletteVisible) continue;
       const command = metadata.command;
+
       if (!args.isCommandAvailable(command, args.target)) continue;
       actions.push({
         id: paletteActionIdForCommand(command),
@@ -43,5 +45,6 @@ export function buildAppCommandActions(
       });
     }
   }
+
   return actions;
 }

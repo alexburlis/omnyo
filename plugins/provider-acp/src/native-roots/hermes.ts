@@ -41,14 +41,18 @@ export const resolveHermesNativeRoots: AcpNativeRootsResolver = async (
   args,
 ) => {
   const hermesDir = resolveHermesDir(args.homeDir, args.env);
+
   const config = await readParsedFile(
     path.join(hermesDir, "config.yaml"),
     parseYaml,
     hermesSkillConfigSchema,
   );
+
   const configured = config?.skills?.external_dirs;
+
   const externalDirectories =
     typeof configured === "string" ? [configured] : (configured ?? []);
+
   return {
     skills: [
       skillsRoot({

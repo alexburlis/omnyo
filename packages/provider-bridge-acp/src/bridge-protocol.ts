@@ -2,7 +2,7 @@ import {
   acpNativeReasoningSchema as acpBridgeNativeReasoningSchema,
   acpPermissionCliSchema as acpBridgePermissionCliSchema,
   acpReasoningCliSchema as acpBridgeReasoningCliSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   initializeParamsSchema,
   providerInstallationRunParamsSchema,
@@ -17,7 +17,7 @@ import {
   threadStopParamsSchema as canonicalThreadStopParamsSchema,
   turnStartParamsSchema as canonicalTurnStartParamsSchema,
   turnSteerParamsSchema as canonicalTurnSteerParamsSchema,
-} from "@bb/provider-bridge-protocol";
+} from "@omnyo/provider-bridge-protocol";
 import { z } from "zod";
 import { acpSessionUpdateSchema, acpStopReasonSchema } from "./wire.js";
 
@@ -99,14 +99,21 @@ export const acpBridgeCommandSchema = z.discriminatedUnion("method", [
 export const acpBridgeCommandMethodValues = acpBridgeCommandSchema.options.map(
   (option) => option.shape.method.value,
 );
+
 export type AcpBridgeCommand = z.infer<typeof acpBridgeCommandSchema>;
 
 export const ACP_TURN_STARTED_METHOD = "acp/turn/started";
+
 export const ACP_TURN_COMPLETED_METHOD = "acp/turn/completed";
+
 export const ACP_COMPACTION_STARTED_METHOD = "acp/compaction/started";
+
 export const ACP_COMPACTION_COMPLETED_METHOD = "acp/compaction/completed";
+
 export const ACP_UPDATE_METHOD = "acp/update";
+
 export const ACP_FS_WRITE_METHOD = "acp/fs/write";
+
 export const ACP_WARNING_METHOD = "acp/warning";
 
 export const acpTurnStartedNotificationParamsSchema = z

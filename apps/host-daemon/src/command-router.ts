@@ -1,3 +1,9 @@
+import {
+  providerFailureMetadataSchema,
+  type ProviderFailureMetadata,
+} from "@omnyo/domain";
+import path from "node:path";
+import { IsolatedFilesystemMutator } from "./workspace-read-client.js";
 import type {
   HostDaemonCommand,
   HostDaemonOnlineRpcRequestMessage,
@@ -8,7 +14,7 @@ import type {
   HostDaemonRpcCommand,
   HostDaemonRpcResultForCommand,
   HostDaemonCommandEnvironmentLane,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { performance } from "node:perf_hooks";
 import {
   hostDaemonEnvironmentLaneForCommand,
@@ -17,7 +23,7 @@ import {
   parseHostDaemonCommandResultForCommand,
   parseHostDaemonOnlineRpcResultForCommand,
   shouldFlushEventsBeforeReportingCommandResult,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   dispatchCommand,
   dispatchOnlineRpcCommand,
@@ -25,8 +31,9 @@ import {
   type CommandDispatchOptions,
 } from "./command-dispatch.js";
 import { isExpectedOnlineRpcFailureError } from "./command-dispatch-support.js";
-import { roundDurationMs } from "@bb/process-utils";
+import { roundDurationMs } from "@omnyo/process-utils";
 import type { HostDaemonLogger } from "./logger.js";
+import type { EventSink } from "./event-sink.js";
 import { RuntimeManager } from "./runtime-manager.js";
 import type { PluginHostManager } from "./plugin-host-manager.js";
 import { runInSerialLane } from "./serial-lane.js";
@@ -61,6 +68,11 @@ interface ReadWriteLaneIdleArgs {
 type CommandRouterTask = Promise<HostDaemonCommandResultForCommand>;
 
 export interface CommandRouterOptions {
+  managedPreviews?: CommandDispatchOptions["managedPreviews"];
+  terminals?: CommandDispatchOptions["terminals"];
+  previewTransport?: CommandDispatchOptions["previewTransport"];
+  agentProcessContainment?: CommandDispatchOptions["agentProcessContainment"];
+  commandMetadata?: CommandDispatchOptions["commandMetadata"];
   emitEnvironmentHookProgress?: CommandDispatchOptions["emitEnvironmentHookProgress"];
   desktopBrowserBroker?: CommandDispatchOptions["desktopBrowserBroker"];
   dataDir: CommandDispatchOptions["dataDir"];
@@ -68,7 +80,9 @@ export interface CommandRouterOptions {
   fetchSkillTree?: CommandDispatchOptions["fetchSkillTree"];
   fetchPluginHostArtifact?: CommandDispatchOptions["fetchPluginHostArtifact"];
   runtimeManager: RuntimeManager;
-  eventSink: CommandDispatchOptions["eventSink"];
+  workspaceReads: CommandDispatchOptions["workspaceReads"];
+  eventSink: CommandDispatchOptions["eventSink"] &
+    Pick<EventSink, "markThrough">;
   listModels: CommandDispatchOptions["listModels"];
   providerHealth: CommandDispatchOptions["providerHealth"];
   providerUsage: CommandDispatchOptions["providerUsage"];
@@ -89,8 +103,27 @@ function elapsedMs(startedAtMs: number): number {
   return performance.now() - startedAtMs;
 }
 
+function providerFailureMetadata(error: unknown): ProviderFailureMetadata {
+  let cause = error;
+
+  for (let depth = 0; depth < 6 && cause instanceof Error; depth++) {
+    const parsed = providerFailureMetadataSchema.safeParse(cause).data;
+
+    if (parsed?.errorInfo !== undefined || parsed?.rateLimits !== undefined)
+      return parsed;
+    cause = cause.cause;
+  }
+
+  return {};
+}
+
 export class CommandRouter {
   private readonly logger;
+  private readonly filesystemMutator: IsolatedFilesystemMutator;
+  private activeCommands = 0;
+  getDirectAccessActivityCount(): number {
+    return this.activeCommands;
+  }
   private readonly environmentLanes = new Map<string, ReadWriteLaneState>();
   private readonly threadUnarchiveBarriers = new Map<string, Promise<void>>();
   private readonly threadLaneTails = new Map<string, Promise<void>>();
@@ -98,31 +131,54 @@ export class CommandRouter {
 
   constructor(private readonly options: CommandRouterOptions) {
     this.logger = options.logger;
+    this.filesystemMutator = new IsolatedFilesystemMutator({
+      dataDir: options.dataDir,
+    });
+  }
+
+  shutdownFilesystemMutations(): Promise<void> {
+    return this.filesystemMutator.dispose();
   }
 
   async handleOnlineRpcRequest(
     message: HostDaemonOnlineRpcRequestMessage,
   ): Promise<HostDaemonOnlineRpcResponseMessage> {
     const handlerStartedAtMs = performance.now();
+
+    const tracked =
+      !message.command.type.startsWith("server_access.") ||
+      message.command.type === "server_access.prove_current_primary";
+
+    if (tracked) this.activeCommands++;
+
     try {
       const result = await runWithTurnSubmitTrace(message.command, () =>
         this.executeHostRpcCommand(message.command),
       );
+
       this.logOnlineRpc({
         commandType: message.command.type,
         handlerMs: elapsedMs(handlerStartedAtMs),
         ok: true,
       });
+
       return hostDaemonOnlineRpcResponseMessageSchema.parse({
         type: "host-rpc.response",
         requestId: message.requestId,
         commandType: message.command.type,
         ok: true,
         result,
+        ...this.eventsThroughStamp(message.command),
       });
     } catch (error) {
       const errorCode = getErrorCode(error);
-      if (!isExpectedOnlineRpcFailureError(error)) {
+      const failure = providerFailureMetadata(error);
+
+      const expectedFailure =
+        isExpectedOnlineRpcFailureError(error) ||
+        failure.errorInfo?.category === "rate-limit";
+
+      if (!expectedFailure) {
         this.logger.warn(
           {
             type: message.command.type,
@@ -131,12 +187,14 @@ export class CommandRouter {
           "online host RPC failed",
         );
       }
+
       this.logOnlineRpc({
         commandType: message.command.type,
         errorCode,
         handlerMs: elapsedMs(handlerStartedAtMs),
         ok: false,
       });
+
       return {
         type: "host-rpc.response",
         requestId: message.requestId,
@@ -144,51 +202,131 @@ export class CommandRouter {
         ok: false,
         errorCode,
         errorMessage: error instanceof Error ? error.message : String(error),
+        ...failure,
+        expectedFailure,
+        ...this.eventsThroughStamp(message.command),
       };
+    } finally {
+      if (tracked) this.activeCommands--;
     }
+  }
+
+  private eventsThroughStamp(command: HostDaemonRpcCommand): {
+    eventsThrough?: number;
+  } {
+    if (
+      !isHostDaemonCommand(command) ||
+      !shouldFlushEventsBeforeReportingCommandResult(command)
+    ) {
+      return {};
+    }
+
+    return { eventsThrough: this.options.eventSink.markThrough() };
   }
 
   private executeHostRpcCommand(
     command: HostDaemonRpcCommand,
   ): Promise<HostDaemonRpcResultForCommand> {
-    if (isHostDaemonCommand(command)) {
-      return this.executeLiveDaemonCommand(command);
+    this.options.serverMove?.assertDirectAccessAdmission(command.type);
+
+    const execute = (): Promise<HostDaemonRpcResultForCommand> =>
+      isHostDaemonCommand(command)
+        ? this.executeLiveDaemonCommand(command)
+        : this.executeOnlineRpcCommand(command);
+
+    if (command.type === "host.prepare_workspace_identity_v1") return execute();
+    const paths: string[] = [];
+
+    if ("workspaceContext" in command && command.workspaceContext !== undefined)
+      paths.push(command.workspaceContext.workspacePath);
+
+    if (
+      "environmentId" in command &&
+      typeof command.environmentId === "string"
+    ) {
+      const entry = this.options.runtimeManager.get(command.environmentId);
+
+      if (entry) paths.push(entry.path);
     }
-    return this.executeOnlineRpcCommand(command);
+
+    for (const key of [
+      "cwd",
+      "rootPath",
+      "path",
+      "filePath",
+      "sourcePath",
+      "destinationPath",
+      "targetPath",
+      "workingDirectory",
+      "workspacePath",
+    ]) {
+      const value: unknown = Reflect.get(command, key);
+
+      if (typeof value === "string" && path.isAbsolute(value))
+        paths.push(value);
+    }
+
+    return this.options.runtimeManager.runWorkspaceCommand(
+      {
+        paths,
+        unscopedWriter:
+          command.type === "plugin.host.call" && paths.length === 0,
+      },
+      execute,
+    );
   }
 
   private executeOnlineRpcCommand(
     command: HostDaemonOnlineRpcCommand,
   ): Promise<HostDaemonOnlineRpcResultForCommand> {
+    this.options.serverMove?.assertDirectAccessAdmission(command.type);
+
     if (command.type === "plugin.host.call") {
       if (!this.options.pluginHostManager) {
         return Promise.reject(new Error("host plugin runtime is unavailable"));
       }
+
       return this.options.pluginHostManager.call(command);
     }
+
     if (command.type === "plugin.host.cancel") {
       if (!this.options.pluginHostManager) {
         return Promise.reject(new Error("host plugin runtime is unavailable"));
       }
+
       const result = this.options.pluginHostManager.cancel(command);
+
       return Promise.resolve(result);
     }
+
     if (command.type === "plugin.host.dispose") {
       if (!this.options.pluginHostManager) {
         return Promise.reject(new Error("host plugin runtime is unavailable"));
       }
+
       return this.options.pluginHostManager.dispose(command);
     }
+
     const environmentLaneMode = hostDaemonEnvironmentLaneForCommand(command);
+
     const result =
       environmentLaneMode && "environmentId" in command
         ? this.runInEnvironmentLane(
             command.environmentId,
             environmentLaneMode,
-            () =>
-              dispatchOnlineRpcCommand(command, this.createDispatchOptions()),
+            () => {
+              this.options.serverMove?.assertDirectAccessAdmission(
+                command.type,
+              );
+
+              return dispatchOnlineRpcCommand(
+                command,
+                this.createDispatchOptions(),
+              );
+            },
           )
         : dispatchOnlineRpcCommand(command, this.createDispatchOptions());
+
     return result.then((value) =>
       parseHostDaemonOnlineRpcResultForCommand(command, value),
     );
@@ -199,6 +337,7 @@ export class CommandRouter {
   ): Promise<HostDaemonCommandResultForCommand> {
     const environmentLaneMode = hostDaemonEnvironmentLaneForCommand(command);
     const threadLaneKey = this.resolveThreadLaneKey(command);
+
     const task = this.runAfterThreadUnarchiveBarrier(command, () =>
       this.runInThreadTurnLane(command, () =>
         this.runInExecutionLanes(
@@ -209,19 +348,19 @@ export class CommandRouter {
         ),
       ),
     );
+
     this.registerThreadUnarchiveBarrier(command, task);
+
     return task;
   }
 
   private async executeLiveDaemonCommandBody(
     command: HostDaemonCommand,
   ): Promise<HostDaemonCommandResultForCommand> {
+    this.options.serverMove?.assertDirectAccessAdmission(command.type);
     markTurnSubmitTraceSpan("lanes.entered");
     const result = await dispatchCommand(command, this.createDispatchOptions());
-    if (shouldFlushEventsBeforeReportingCommandResult(command)) {
-      await this.options.eventSink.flush();
-      markTurnSubmitTraceSpan("events.flushed");
-    }
+
     return parseHostDaemonCommandResultForCommand(command, result);
   }
 
@@ -248,12 +387,15 @@ export class CommandRouter {
       threadLaneKey === null
         ? work
         : () => runInSerialLane(this.threadLaneTails, threadLaneKey, work);
+
     if (!environmentLaneMode) {
       return threadWork();
     }
+
     if (!("environmentId" in command) || !command.environmentId) {
       throw new Error(`Command ${command.type} is missing environmentId`);
     }
+
     return this.runInEnvironmentLane(
       command.environmentId,
       environmentLaneMode,
@@ -268,15 +410,20 @@ export class CommandRouter {
     if (command.type !== "thread.start" && command.type !== "turn.submit") {
       return work();
     }
+
     return runInSerialLane(this.threadTurnLaneTails, command.threadId, work);
   }
 
   private createDispatchOptions(): CommandDispatchOptions {
     return {
+      managedPreviews: this.options.managedPreviews,
+      terminals: this.options.terminals,
+      previewTransport: this.options.previewTransport,
       fetchProjectAttachment: this.options.fetchProjectAttachment,
       fetchSkillTree: this.options.fetchSkillTree,
       fetchPluginHostArtifact: this.options.fetchPluginHostArtifact,
       runtimeManager: this.options.runtimeManager,
+      workspaceReads: this.options.workspaceReads,
       desktopBrowserBroker: this.options.desktopBrowserBroker,
       dataDir: this.options.dataDir,
       eventSink: this.options.eventSink,
@@ -290,7 +437,18 @@ export class CommandRouter {
       resolveInteractiveRequest: this.options.resolveInteractiveRequest,
       ensureConnectTunnelIdentity: this.options.ensureConnectTunnelIdentity,
       serverMove: this.options.serverMove,
+      runtimeUpdateOwnCommands: 1,
+      runtimeUpdatePluginBlockers: () =>
+        (this.options.pluginHostManager?.getRuntimeUpdateBlockers() ?? []).map(
+          (blocker) => blocker.pluginId,
+        ),
+      closeRuntimeUpdatePluginLeases: async (pluginIds) =>
+        (await this.options.pluginHostManager?.closeLeasedWorkers(pluginIds)) ??
+        [],
       threadStorageRootPath: this.options.threadStorageRootPath,
+      agentProcessContainment: this.options.agentProcessContainment,
+      commandMetadata: this.options.commandMetadata,
+      filesystemMutator: this.filesystemMutator,
       logger: this.options.logger,
     };
   }
@@ -303,6 +461,7 @@ export class CommandRouter {
   }): void {
     const shouldLog =
       args.handlerMs >= HOST_COMMAND_LIFECYCLE_LOG_THRESHOLD_MS || !args.ok;
+
     if (!shouldLog) {
       return;
     }
@@ -323,15 +482,20 @@ export class CommandRouter {
     lanes: Map<string, ReadWriteLaneState>,
   ): ReadWriteLaneState {
     const existing = lanes.get(key);
+
     if (existing) {
       return existing;
     }
+
     const resolved = Promise.resolve();
+
     const state: ReadWriteLaneState = {
       tail: resolved,
       writeTail: resolved,
     };
+
     lanes.set(key, state);
+
     return state;
   }
 
@@ -341,10 +505,12 @@ export class CommandRouter {
   ): Promise<T> {
     if (command.type === "turn.submit" || command.type === "thread.start") {
       const barrier = this.threadUnarchiveBarriers.get(command.threadId);
+
       if (barrier) {
         await barrier;
       }
     }
+
     return work();
   }
 
@@ -355,11 +521,14 @@ export class CommandRouter {
     if (command.type !== "thread.unarchive") {
       return;
     }
+
     const { threadId } = command;
+
     const barrier = task.then(
       () => undefined,
       () => undefined,
     );
+
     this.threadUnarchiveBarriers.set(threadId, barrier);
     void barrier.then(() => {
       if (this.threadUnarchiveBarriers.get(threadId) === barrier) {
@@ -375,31 +544,40 @@ export class CommandRouter {
     work,
   }: ReadWriteLaneArgs<T>): Promise<T> {
     const state = this.getOrCreateReadWriteLane(key, lanes);
+
     if (mode === "read") {
       const previousWrite = state.writeTail;
       const next = previousWrite.catch(() => undefined).then(work);
+
       const done = next.then(
         () => undefined,
         () => undefined,
       );
+
       const previousTail = state.tail;
+
       const tail = Promise.all([
         previousTail.catch(() => undefined),
         done,
       ]).then(() => undefined);
+
       state.tail = tail;
       this.deleteReadWriteLaneWhenIdle({ key, lanes, state, tail });
+
       return next;
     }
 
     const next = state.tail.catch(() => undefined).then(work);
+
     const done = next.then(
       () => undefined,
       () => undefined,
     );
+
     state.tail = done;
     state.writeTail = done;
     this.deleteReadWriteLaneWhenIdle({ key, lanes, state, tail: done });
+
     return next;
   }
 
@@ -425,6 +603,7 @@ export class CommandRouter {
       case "thread.stop":
       case "thread.storage.delete":
       case "thread.plan.cancel":
+      case "thread.speed.set":
       case "thread.goal.clear":
         return `${command.environmentId}\0thread:${command.threadId}`;
       default:

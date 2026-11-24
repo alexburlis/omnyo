@@ -12,6 +12,7 @@ describe("getCreateExamples", () => {
     expect(examples.map((example) => example.label)).toEqual(
       BROWSE_ARCHETYPES.map((archetype) => archetype.title),
     );
+
     for (const [index, example] of examples.entries()) {
       expect(example.prompt).toBe(briefPrompt(BROWSE_ARCHETYPES[index]!));
     }

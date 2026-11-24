@@ -1,7 +1,7 @@
 import {
   serverHealthResponseSchema,
   type ServerMoveHealth,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 
 export async function fetchServerMoveDestinationHealth(
   url: string,
@@ -13,10 +13,13 @@ export async function fetchServerMoveDestinationHealth(
       credentials: "omit",
       signal,
     });
+
     if (!response.ok) {
       return null;
     }
+
     const parsed = serverHealthResponseSchema.safeParse(await response.json());
+
     return parsed.success ? (parsed.data.serverMove ?? null) : null;
   } catch {
     return null;

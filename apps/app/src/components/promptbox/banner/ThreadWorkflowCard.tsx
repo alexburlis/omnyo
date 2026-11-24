@@ -1,6 +1,5 @@
 import { useId } from "react";
-import { isSettledWorkflowAgentState } from "@bb/domain";
-import type { TimelineWorkflowWorkRow } from "@bb/server-contract";
+import type { TimelineWorkflowWorkRow } from "@omnyo/server-contract";
 import { AnimatedDisclosureBody } from "@/components/promptbox/banner/AnimatedBody";
 import {
   PROMPT_STACK_CARD_HEADER_BUTTON_CLASS,
@@ -9,26 +8,15 @@ import {
 } from "@/components/promptbox/banner/PromptStackCard";
 import { LiveDurationText } from "@/components/thread/timeline/LiveDurationText";
 import { WorkflowWorkRowBody } from "@/components/thread/timeline/WorkflowWorkRowBody";
-import { activityIconClass } from "@bb/shared-ui/activity-row-styles";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { activityIconClass } from "@omnyo/shared-ui/activity-row-styles";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   PROMPT_STACK_DISCLOSURE_TRIGGER_CLASS,
   PromptStackChevron,
   useDisclosureFocusHandoff,
-} from "@bb/shared-ui/prompt-stack-disclosure";
-import { WorkflowPhaseStrip } from "@bb/shared-ui/workflow-progress";
-
-function agentProgressLabel(workflow: TimelineWorkflowWorkRow): string | null {
-  const agents = workflow.workflow?.agents ?? [];
-  if (agents.length === 0) {
-    return null;
-  }
-  const settled = agents.filter((agent) =>
-    isSettledWorkflowAgentState(agent.state),
-  ).length;
-  return `${settled}/${agents.length} agents`;
-}
+} from "@omnyo/shared-ui/prompt-stack-disclosure";
+import { WorkflowRunSummary } from "@omnyo/shared-ui/workflow-progress";
 
 interface ThreadWorkflowCardProps {
   workflow: TimelineWorkflowWorkRow;
@@ -41,39 +29,19 @@ export function ThreadWorkflowSummary({
 }: {
   workflow: TimelineWorkflowWorkRow;
 }) {
-  const name = workflow.workflowName ?? workflow.description;
-  const progress = agentProgressLabel(workflow);
   return (
-    <>
-      <Icon
-        name="Workflow"
-        className={activityIconClass("active", "size-3.5 shrink-0")}
-        aria-hidden="true"
-      />
-      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-        <span
-          className="min-w-0 truncate font-medium text-foreground"
-          title={name}
-        >
-          {name}
-        </span>
-        {progress ? (
-          <span className="shrink-0 text-2xs tabular-nums text-subtle-foreground">
-            {progress}
-          </span>
-        ) : null}
-        <span className="shrink-0 text-2xs tabular-nums text-subtle-foreground">
-          <LiveDurationText startedAt={workflow.startedAt} />
-        </span>
-      </span>
-      {workflow.workflow ? (
-        <WorkflowPhaseStrip
-          progress={workflow.workflow}
-          settled={false}
-          className="w-16 shrink-0"
+    <WorkflowRunSummary
+      name={workflow.workflowName ?? workflow.description}
+      progress={workflow.workflow ?? null}
+      elapsed={<LiveDurationText startedAt={workflow.startedAt} />}
+      icon={
+        <Icon
+          name="Workflow"
+          className={activityIconClass("active", "size-3.5 shrink-0")}
+          aria-hidden="true"
         />
-      ) : null}
-    </>
+      }
+    />
   );
 }
 
@@ -85,10 +53,13 @@ export function ThreadWorkflowCard({
   const bodyId = useId();
   const toggleId = useId();
   const focus = useDisclosureFocusHandoff(isExpanded, onToggle);
+
   if (workflow.status !== "pending") {
     return null;
   }
+
   const name = workflow.workflowName ?? workflow.description;
+
   return (
     <PromptStackCard
       ariaLabel="Workflow"

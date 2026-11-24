@@ -1,7 +1,7 @@
 import {
   createDebouncedCallbackScheduler,
   type EnvironmentChangeKind,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 interface BufferedEnvironmentInvalidatorOptions {
   debounceMs: number;
@@ -34,6 +34,7 @@ export function createBufferedEnvironmentInvalidator(
     if (changedEnvironmentKindsById.size === 0) {
       return;
     }
+
     options.flushChangedEnvironmentIds(
       Array.from(changedEnvironmentKindsById.entries()).map(
         ([environmentId, changeKinds]) => ({
@@ -61,13 +62,16 @@ export function createBufferedEnvironmentInvalidator(
       changeKinds: readonly EnvironmentChangeKind[],
     ) => {
       let entry = changedEnvironmentKindsById.get(environmentId);
+
       if (!entry) {
         entry = new Set<EnvironmentChangeKind>();
         changedEnvironmentKindsById.set(environmentId, entry);
       }
+
       for (const changeKind of changeKinds) {
         entry.add(changeKind);
       }
+
       scheduler.schedule();
     },
   };

@@ -4,16 +4,22 @@ import {
   turnScope,
   type PromptInput,
   type TurnRequestTarget,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   threadMessageResponseSchema,
   threadTimelineResponseSchema,
   type TimelineRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import type { AppDeps } from "../../src/types.js";
 import { readJson } from "../helpers/json.js";
-import { seedEvent, seedThreadFixture } from "../helpers/seed.js";
+import {
+  seedEvent,
+  seedQueuedMessage,
+  seedThreadFixture,
+  seedThreadRuntimeState,
+  seedTurnStarted,
+} from "../helpers/seed.js";
 import { withTestHarness } from "../helpers/test-app.js";
 
 interface SeedRequestArgs {
@@ -83,10 +89,12 @@ function collectConversationRows(
     if (row.kind === "conversation") {
       return [row];
     }
+
     const nested =
       ("childRows" in row ? row.childRows : undefined) ??
       ("children" in row ? row.children : undefined) ??
       [];
+
     return collectConversationRows(nested);
   });
 }
@@ -172,6 +180,127 @@ function seedSteeredThread(
 }
 
 describe("thread messages", () => {
+  it.each(["direct", "queued"] as const)(
+    "preserves a %s send identity from HTTP admission into the timeline",
+    async (source) => {
+      await withTestHarness(async (harness) => {
+        const { environment, thread } = seedThreadFixture(harness, {
+          thread: { status: "active" },
+        });
+
+        seedThreadRuntimeState(harness.deps, {
+          threadId: thread.id,
+          environmentId: environment.id,
+          providerThreadId: "provider-thread-1",
+        });
+        seedTurnStarted(harness.deps, {
+          threadId: thread.id,
+          environmentId: environment.id,
+          providerThreadId: "provider-thread-1",
+          turnId: "turn-1",
+        });
+        const requestId = "creq_6666666666";
+        const text = "Keep this exact send";
+        const input = [{ type: "text" as const, text, mentions: [] }];
+
+        const queued =
+          source === "queued"
+            ? seedQueuedMessage(harness.deps, {
+                threadId: thread.id,
+                content: input,
+              })
+            : null;
+
+        const path =
+          queued === null
+            ? `/api/v1/threads/${thread.id}/send`
+            : `/api/v1/threads/${thread.id}/queued-messages/${queued.id}/send`;
+
+        const sent = await harness.app.request(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...(queued === null ? { input } : {}),
+            mode: "steer",
+            requestId,
+          }),
+        });
+
+        expect(sent.status).toBe(200);
+        expect(await readJson(sent)).toMatchObject({
+          ok: true,
+          delivery: "sent",
+        });
+
+        const response = await harness.app.request(
+          `/api/v1/threads/${thread.id}/timeline?includeNestedRows=true`,
+        );
+
+        expect(response.status).toBe(200);
+
+        const timeline = threadTimelineResponseSchema.parse(
+          await readJson(response),
+        );
+
+        expect(
+          collectConversationRows(timeline.rows).filter(
+            (row) => row.text === text,
+          ),
+        ).toMatchObject([
+          { role: "user", turnRequest: { clientRequestId: requestId } },
+        ]);
+      });
+    },
+  );
+
+  it("answers a repeated queued send with already-sent and an unknown one with 404", async () => {
+    await withTestHarness(async (harness) => {
+      const { environment, thread } = seedThreadFixture(harness, {
+        thread: { status: "active" },
+      });
+
+      seedThreadRuntimeState(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "provider-thread-1",
+      });
+      seedTurnStarted(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "provider-thread-1",
+        turnId: "turn-1",
+      });
+
+      const queued = seedQueuedMessage(harness.deps, {
+        threadId: thread.id,
+        content: [{ type: "text", text: "Send me once", mentions: [] }],
+      });
+
+      const send = (queuedMessageId: string) =>
+        harness.app.request(
+          `/api/v1/threads/${thread.id}/queued-messages/${queuedMessageId}/send`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ mode: "steer" }),
+          },
+        );
+
+      const first = await send(queued.id);
+      expect(await readJson(first)).toMatchObject({ delivery: "sent" });
+
+      const repeated = await send(queued.id);
+      expect(repeated.status).toBe(200);
+      expect(await readJson(repeated)).toEqual({
+        ok: true,
+        delivery: "already-sent",
+      });
+
+      const unknown = await send("qmsg_missing");
+      expect(unknown.status).toBe(404);
+    });
+  });
+
   it("resolves every timeline conversation row by its message seq", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedThreadFixture(harness);
@@ -183,10 +312,13 @@ describe("thread messages", () => {
       const timelineResponse = await harness.app.request(
         `/api/v1/threads/${thread.id}/timeline?includeNestedRows=true`,
       );
+
       expect(timelineResponse.status).toBe(200);
+
       const timeline = threadTimelineResponseSchema.parse(
         await readJson(timelineResponse),
       );
+
       const conversationRows = collectConversationRows(timeline.rows);
       expect(
         conversationRows.map((row) => [
@@ -206,10 +338,13 @@ describe("thread messages", () => {
         const response = await harness.app.request(
           `/api/v1/threads/${thread.id}/messages/${row.messageSeq}`,
         );
+
         expect(response.status).toBe(200);
+
         const { message } = threadMessageResponseSchema.parse(
           await readJson(response),
         );
+
         expect(message).toMatchObject({
           id: row.id,
           messageSeq: row.messageSeq,
@@ -231,6 +366,7 @@ describe("thread messages", () => {
       const response = await harness.app.request(
         `/api/v1/threads/${thread.id}/messages/5?before=5&after=5`,
       );
+
       expect(response.status).toBe(200);
       const body = threadMessageResponseSchema.parse(await readJson(response));
       expect(body.before.map((message) => message.messageSeq)).toEqual([1, 4]);
@@ -244,6 +380,7 @@ describe("thread messages", () => {
           ),
         ),
       );
+
       expect(narrow.before.map((message) => message.messageSeq)).toEqual([5]);
       expect(narrow.after).toEqual([]);
     });
@@ -261,6 +398,7 @@ describe("thread messages", () => {
         const response = await harness.app.request(
           `/api/v1/threads/${thread.id}/messages/${seq}`,
         );
+
         expect(response.status).toBe(404);
         await expect(readJson(response)).resolves.toMatchObject({
           code: "message_not_found",
@@ -270,6 +408,7 @@ describe("thread messages", () => {
       const invalid = await harness.app.request(
         `/api/v1/threads/${thread.id}/messages/7abc`,
       );
+
       expect(invalid.status).toBe(400);
     });
   });

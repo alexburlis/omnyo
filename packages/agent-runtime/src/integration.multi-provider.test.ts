@@ -17,9 +17,11 @@ describe.concurrent("cross-provider and multi-thread scenarios", () => {
   describe.concurrent("multi-thread scenarios", () => {
     it("runs multiple threads on the same codex runtime", async () => {
       const ctx = createTestRuntime("codex");
+
       try {
         const threadA = newThreadId();
         const threadB = newThreadId();
+
         const options = await resolveRuntimeOptions({
           ctx,
           providerId: "codex",
@@ -89,14 +91,17 @@ describe.concurrent("cross-provider and multi-thread scenarios", () => {
   describe.concurrent("multi-provider scenarios", () => {
     it("uses multiple providers in a single runtime", async () => {
       const ctx = createTestRuntime("codex");
+
       try {
         const codexThread = newThreadId();
         const claudeThread = newThreadId();
+
         const codexOptions = await resolveRuntimeOptions({
           ctx,
           providerId: "codex",
           preset: "full",
         });
+
         const claudeOptions = await resolveRuntimeOptions({
           ctx,
           providerId: "claude-code",
@@ -144,9 +149,11 @@ describe.concurrent("cross-provider and multi-thread scenarios", () => {
         const codexEvents = ctx.events.filter(
           (e) => "threadId" in e && e.threadId === codexThread,
         );
+
         const claudeEvents = ctx.events.filter(
           (e) => "threadId" in e && e.threadId === claudeThread,
         );
+
         expect(codexEvents.length).toBeGreaterThan(0);
         expect(claudeEvents.length).toBeGreaterThan(0);
       } finally {
@@ -172,11 +179,13 @@ describe.concurrent("multi-provider resume scenarios", () => {
         providerId: "codex",
         preset: "full",
       });
+
       const claudeOptions = await resolveRuntimeOptions({
         ctx: ctx1,
         providerId: "claude-code",
         preset: "full",
       });
+
       const [codexStart, claudeStart] = await Promise.all([
         ctx1.runtime.startThread({
           environmentId: "env-1",
@@ -234,10 +243,12 @@ describe.concurrent("multi-provider resume scenarios", () => {
             "threadId" in e &&
             e.threadId === codexThreadId1,
         );
+
         if (identityEvent && identityEvent.type === "thread/identity") {
           codexProviderThreadId = identityEvent.providerThreadId;
         }
       }
+
       if (!claudeProviderThreadId) {
         const identityEvent = ctx1.events.find(
           (e) =>
@@ -245,6 +256,7 @@ describe.concurrent("multi-provider resume scenarios", () => {
             "threadId" in e &&
             e.threadId === claudeThreadId1,
         );
+
         if (identityEvent && identityEvent.type === "thread/identity") {
           claudeProviderThreadId = identityEvent.providerThreadId;
         }
@@ -309,10 +321,12 @@ describe.concurrent("multi-provider resume scenarios", () => {
           ctx2.events,
           codexThreadId2,
         ).toUpperCase();
+
         const claudeText = getThreadText(
           ctx2.events,
           claudeThreadId2,
         ).toUpperCase();
+
         expect(codexText).toContain("APPLE");
         expect(claudeText).toContain("ORANGE");
       } finally {
@@ -323,6 +337,7 @@ describe.concurrent("multi-provider resume scenarios", () => {
       if (!ctx1Shutdown) {
         await ctx1.runtime.shutdown();
       }
+
       cleanup(ctx1);
     }
   }, 90_000);

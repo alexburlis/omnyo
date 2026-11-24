@@ -49,12 +49,14 @@ function scriptedPeer(
     pendingText += chunk.toString("utf8");
     const lines = pendingText.split("\n");
     pendingText = lines.pop() ?? "";
+
     for (const line of lines) {
       if (line.trim() !== "") {
         written.push(JSON.parse(line));
       }
     }
   });
+
   const client = connectAcpClient({
     input,
     output,
@@ -66,6 +68,7 @@ function scriptedPeer(
       ...overrides,
     },
   });
+
   return {
     client,
     updates,
@@ -97,6 +100,7 @@ describe("message handling", () => {
   it("delivers session updates the SDK would reject, untouched", async () => {
     const peer = scriptedPeer();
     const future = { sessionUpdate: "future_variant", payload: { a: 1 } };
+
     const vendorKind = {
       sessionUpdate: "tool_call",
       toolCallId: "t1",
@@ -105,6 +109,7 @@ describe("message handling", () => {
       status: "cancelled",
       vendorField: 7,
     };
+
     peer.feed({
       jsonrpc: "2.0",
       method: "session/update",
@@ -160,6 +165,7 @@ describe("message handling", () => {
 
   it("routes extension requests and notifications to their handlers", async () => {
     const wakes: unknown[] = [];
+
     const peer = scriptedPeer({
       requests: {
         "cursor/task": (params) => ({ accepted: params }),
@@ -168,6 +174,7 @@ describe("message handling", () => {
         "_x.ai/sessions/changed": (params) => wakes.push(params),
       },
     });
+
     peer.feed({
       jsonrpc: "2.0",
       method: "_x.ai/sessions/changed",
@@ -188,14 +195,17 @@ describe("message handling", () => {
 
   it("passes permission options with kinds outside the v1 enum to the handler", async () => {
     const requests: AcpPermissionRequest[] = [];
+
     const peer = scriptedPeer({
       requests: {
         "session/request_permission": (params) => {
           requests.push(decodeAcpPermissionRequest(params));
+
           return { outcome: { outcome: "selected", optionId: "o1" } };
         },
       },
     });
+
     peer.feed({
       jsonrpc: "2.0",
       id: 5,
@@ -223,6 +233,7 @@ describe("message handling", () => {
     const peer = scriptedPeer({
       requests: { "session/request_permission": decodeAcpPermissionRequest },
     });
+
     peer.feed({
       jsonrpc: "2.0",
       id: 6,
@@ -237,10 +248,12 @@ describe("message handling", () => {
 describe("requests", () => {
   it("keeps response fields outside the schema and exposes agent error codes", async () => {
     const peer = scriptedPeer();
+
     const created = peer.client.request("session/new", {
       cwd: "/work",
       mcpServers: [],
     });
+
     await peer.nextWritten(1);
     peer.feed({
       jsonrpc: "2.0",
@@ -259,27 +272,32 @@ describe("requests", () => {
       cwd: "/work",
       mcpServers: [],
     });
+
     await peer.nextWritten(2);
     peer.feed({
       jsonrpc: "2.0",
       id: peer.written[1]?.["id"],
       error: { code: -32000, message: "Authentication required" },
     });
+
     const error = await denied.then(
       () => null,
       (reason: unknown) => reason,
     );
+
     expect(acpErrorCode(error)).toBe(ACP_AUTH_REQUIRED_CODE);
   });
 
   it("times out a request the agent never answers and tells the agent to cancel it", async () => {
     const peer = scriptedPeer({}, 40);
+
     const error = await peer.client
       .request("session/new", { cwd: "/work", mcpServers: [] })
       .then(
         () => null,
         (reason: unknown) => reason,
       );
+
     expect(error).toBeInstanceOf(AcpRequestTimeoutError);
     await peer.nextWritten(2);
     expect(peer.written[1]).toEqual({
@@ -291,11 +309,13 @@ describe("requests", () => {
 
   it("lets a prompt run without a deadline when asked", async () => {
     const peer = scriptedPeer({}, 20);
+
     const prompt = peer.client.request(
       "session/prompt",
       { sessionId: "s1", prompt: [{ type: "text", text: "hi" }] },
       { timeoutMs: null },
     );
+
     await new Promise((resolve) => setTimeout(resolve, 60));
     peer.feed({
       jsonrpc: "2.0",
@@ -307,11 +327,13 @@ describe("requests", () => {
 
   it("rejects everything in flight when the agent's output ends", async () => {
     const peer = scriptedPeer();
+
     const pending = peer.client.request(
       "session/prompt",
       { sessionId: "s1", prompt: [] },
       { timeoutMs: null },
     );
+
     await peer.nextWritten(1);
     peer.endInput();
     await expect(pending).rejects.toBeDefined();
@@ -320,10 +342,12 @@ describe("requests", () => {
 
   it("matches a response whose numeric id the agent echoed as a string", async () => {
     const peer = scriptedPeer();
+
     const created = peer.client.request("session/new", {
       cwd: "/work",
       mcpServers: [],
     });
+
     await peer.nextWritten(1);
     peer.feed({
       jsonrpc: "2.0",
@@ -368,6 +392,7 @@ describe("agent capabilities", () => {
         { name: "no id" },
       ],
     });
+
     expect(capabilities).toEqual({
       protocolVersion: 1,
       agentInfo: { name: "grok", version: "1.0.41" },
@@ -421,6 +446,7 @@ describe("agent capabilities", () => {
       protocolVersion: 2,
       agentCapabilities: { loadSession: true },
     });
+
     expect(capabilities.protocolVersion).toBe(2);
     expect(capabilities.session.load).toBe(true);
   });
@@ -432,9 +458,11 @@ describe("against the fake agent process", () => {
       env: { ...process.env, ...env },
       stdio: ["pipe", "pipe", "pipe"],
     });
+
     children.push(child);
     const events: AcpSessionEvent[] = [];
     const model = createAcpSessionModel({ generation: 1 });
+
     const client = connectAcpClient({
       input: child.stdout,
       output: child.stdin,
@@ -448,10 +476,13 @@ describe("against the fake agent process", () => {
           "session/request_permission": (params) => {
             const request = decodeAcpPermissionRequest(params);
             events.push(...model.actionRequested("permission"));
+
             const option = request.options.find(
               (candidate) => candidate.kind === "allow_once",
             );
+
             events.push(...model.actionResolved("permission"));
+
             return option
               ? { outcome: { outcome: "selected", optionId: option.optionId } }
               : { outcome: { outcome: "cancelled" } };
@@ -459,6 +490,7 @@ describe("against the fake agent process", () => {
         },
       },
     });
+
     return { client, model, events };
   }
 
@@ -466,27 +498,33 @@ describe("against the fake agent process", () => {
     const { client, model, events } = startFakeAgent({
       FAKE_ACP_MODEL_CONFIG: "1",
     });
+
     const initialized = await client.request("initialize", {
       protocolVersion: ACP_CLIENT_PROTOCOL_VERSION,
-      clientInfo: { name: "bb", version: "test" },
+      clientInfo: { name: "omnyo", version: "test" },
       clientCapabilities: {},
     });
+
     expect(readAcpAgentCapabilities(initialized).protocolVersion).toBe(1);
 
     const session = await client.request("session/new", {
       cwd: process.cwd(),
       mcpServers: [],
     });
+
     events.push(...model.applySessionSetup(session));
+
     const modelOption = model
       .snapshot()
       .configOptions.find((option) => option.category === "model");
+
     expect(modelOption).toMatchObject({
       type: "select",
       setMethod: "session/set_config_option",
     });
 
     events.push(...model.promptSubmitted());
+
     const result = await client.request(
       "session/prompt",
       {
@@ -495,11 +533,13 @@ describe("against the fake agent process", () => {
       },
       { timeoutMs: null },
     );
+
     events.push(...model.promptSettled({ stopReason: result.stopReason }));
 
     const workStates = events.flatMap((event) =>
       event.type === "work" ? [event.work.state] : [],
     );
+
     expect(workStates).toEqual(["running", "idle"]);
     expect(events.some((event) => event.type === "message")).toBe(true);
     expect(events.filter((event) => event.type === "unhandled")).toEqual([]);
@@ -516,11 +556,14 @@ describe("against the fake agent process", () => {
       protocolVersion: ACP_CLIENT_PROTOCOL_VERSION,
       clientCapabilities: {},
     });
+
     const session = await client.request("session/new", {
       cwd: process.cwd(),
       mcpServers: [],
     });
+
     events.push(...model.promptSubmitted());
+
     const result = await client.request(
       "session/prompt",
       {
@@ -531,10 +574,13 @@ describe("against the fake agent process", () => {
       },
       { timeoutMs: null },
     );
+
     events.push(...model.promptSettled({ stopReason: result.stopReason }));
+
     const workStates = events.flatMap((event) =>
       event.type === "work" ? [event.work.state] : [],
     );
+
     expect(workStates).toEqual([
       "running",
       "requires_action",
@@ -555,19 +601,23 @@ describe("against the fake agent process", () => {
     const { client } = startFakeAgent({
       FAKE_ACP_AUTH_METHODS: "cached_token",
     });
+
     const initialized = await client.request("initialize", {
       protocolVersion: ACP_CLIENT_PROTOCOL_VERSION,
       clientCapabilities: {},
     });
+
     expect(
       readAcpAgentCapabilities(initialized).authMethods.map((m) => m.id),
     ).toEqual(["cached_token"]);
+
     const error = await client
       .request("session/new", { cwd: process.cwd(), mcpServers: [] })
       .then(
         () => null,
         (reason: unknown) => reason,
       );
+
     expect(acpErrorCode(error)).toBe(ACP_AUTH_REQUIRED_CODE);
     await client.request("authenticate", { methodId: "cached_token" });
     await expect(

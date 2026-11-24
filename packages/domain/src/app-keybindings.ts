@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+export const RAIL_JUMP_APP_COMMAND_IDS = [
+  "rail.jump.1",
+  "rail.jump.2",
+  "rail.jump.3",
+  "rail.jump.4",
+  "rail.jump.5",
+  "rail.jump.6",
+  "rail.jump.7",
+  "rail.jump.8",
+  "rail.jump.9",
+] as const;
+
 export const THREAD_JUMP_APP_COMMAND_IDS = [
   "thread.jump.1",
   "thread.jump.2",
@@ -48,10 +60,18 @@ export const APP_COMMAND_IDS = [
   "thread.search",
   "thread.rename",
   "thread.archive",
+  "thread.shelve",
+  "thread.copyLink",
+  "thread.group",
   "thread.previous",
   "thread.next",
+  "thread.unreadAbove",
+  "thread.unreadBelow",
   "history.back",
   "history.forward",
+  "edit.undo",
+  "edit.redo",
+  ...RAIL_JUMP_APP_COMMAND_IDS,
   ...THREAD_JUMP_APP_COMMAND_IDS,
   ...PANE_DIRECTION_APP_COMMAND_IDS,
   "pane.focus.previous",
@@ -79,6 +99,7 @@ export const APP_COMMAND_IDS = [
   "diff.toggle",
   "terminal.open",
   "composer.focus",
+  "composer.terminal.toggle",
   "modelPicker.toggle",
   "modelPicker.cycleModel",
   "modelPicker.cycleModelBackward",
@@ -100,6 +121,7 @@ export const APP_COMMAND_IDS = [
 ] as const;
 
 export const appCommandIdSchema = z.enum(APP_COMMAND_IDS);
+
 export type AppCommandId = z.infer<typeof appCommandIdSchema>;
 
 export const pluginCommandIdSchema = z
@@ -110,11 +132,14 @@ export const pluginCommandIdSchema = z
       id.length <= 256,
     "Invalid plugin command ID",
   );
+
 export type PluginCommandId = z.infer<typeof pluginCommandIdSchema>;
+
 export const keyboardCommandIdSchema = z.union([
   appCommandIdSchema,
   pluginCommandIdSchema,
 ]);
+
 export type KeyboardCommandId = z.infer<typeof keyboardCommandIdSchema>;
 
 export function pluginCommandId(
@@ -134,6 +159,7 @@ const APP_COMMAND_CONTEXT_KEYS = [
   "questionOpen",
   "promptAvailable",
   "splitActive",
+  "chatSelection",
   "webSurface",
   "macPlatform",
   "windowsPlatform",
@@ -141,7 +167,9 @@ const APP_COMMAND_CONTEXT_KEYS = [
 ] as const;
 
 const appCommandContextKeySchema = z.enum(APP_COMMAND_CONTEXT_KEYS);
+
 export type AppCommandContextKey = z.infer<typeof appCommandContextKeySchema>;
+
 export type AppCommandContext = Record<AppCommandContextKey, boolean>;
 
 export const appShortcutSchema = z
@@ -154,6 +182,7 @@ export const appShortcutSchema = z
     shift: z.boolean(),
   })
   .strict();
+
 export type AppShortcut = z.infer<typeof appShortcutSchema>;
 
 export interface AppShortcutInput {
@@ -191,7 +220,9 @@ const SHIFTED_KEY_BASES: Readonly<Record<string, string>> = {
 
 function baseKeyFromCode(code: string): string | null {
   if (/^Key[A-Z]$/u.test(code)) return code.slice(3).toLowerCase();
+
   if (/^Digit[0-9]$/u.test(code)) return code.slice(5);
+
   return null;
 }
 
@@ -203,16 +234,20 @@ export function normalizeAppShortcutInputKey(input: AppShortcutInput): string {
   if (input.key === " " || input.key === "Spacebar") {
     return "Space";
   }
+
   if (input.altKey && !isAsciiAlphanumeric(input.key)) {
     const fromCode = baseKeyFromCode(input.code);
+
     if (fromCode !== null) return fromCode;
   }
+
   return input.shiftKey
     ? (SHIFTED_KEY_BASES[input.key] ?? input.key)
     : input.key;
 }
 
 export const keyboardPlatformSchema = z.enum(["mac", "windows", "linux"]);
+
 export type KeyboardPlatform = z.infer<typeof keyboardPlatformSchema>;
 
 export function keyboardPlatform(platform: string): KeyboardPlatform {
@@ -222,6 +257,7 @@ export function keyboardPlatform(platform: string): KeyboardPlatform {
     platform === "mac"
   )
     return "mac";
+
   return /Win|windows|win32/u.test(platform) ? "windows" : "linux";
 }
 
@@ -253,6 +289,7 @@ export function matchesAppShortcut(
 ): boolean {
   const expectedMeta = shortcut.meta || (shortcut.mod && useMetaForMod);
   const expectedControl = shortcut.control || (shortcut.mod && !useMetaForMod);
+
   return (
     normalizeAppShortcutInputKey(input).toLowerCase() ===
       shortcut.key.toLowerCase() &&
@@ -278,11 +315,13 @@ export const appKeybindingSchema = z
     when: appCommandWhenSchema,
   })
   .strict();
+
 export type AppKeybinding = z.infer<typeof appKeybindingSchema>;
 
 const appDefaultKeybindingSchema = appKeybindingSchema.extend({
   shortcut: appShortcutSchema.nullable(),
 });
+
 export type AppDefaultKeybinding = z.infer<typeof appDefaultKeybindingSchema>;
 
 export function isAppKeybindingAvailableForClient(
@@ -290,26 +329,35 @@ export function isAppKeybindingAvailableForClient(
   client: { isDesktop: boolean; platform: string },
 ): boolean {
   const platform = keyboardPlatform(client.platform);
+
   if (binding.desktopOnly && !client.isDesktop) return false;
+
   if (binding.when.all.includes("webSurface") && client.isDesktop) return false;
+
   if (binding.when.none.includes("webSurface") && !client.isDesktop)
     return false;
+
   for (const candidate of keyboardPlatformSchema.options) {
     const context = `${candidate}Platform` as const;
+
     if (binding.when.all.includes(context) && platform !== candidate)
       return false;
+
     if (binding.when.none.includes(context) && platform === candidate)
       return false;
   }
+
   return true;
 }
 
 export const appKeybindingsSchema = z.array(appKeybindingSchema).max(1024);
+
 export type AppKeybindings = z.infer<typeof appKeybindingsSchema>;
 
 export const appDefaultKeybindingsSchema = z
   .array(appDefaultKeybindingSchema)
   .max(256);
+
 export type AppDefaultKeybindings = z.infer<typeof appDefaultKeybindingsSchema>;
 
 const appKeybindingOverrideSchema = z
@@ -325,8 +373,10 @@ export const appKeybindingOverridesSchema = z
   .max(1024)
   .superRefine((overrides, context) => {
     const seen = new Set<string>();
+
     for (const [index, override] of overrides.entries()) {
       const key = `${override.command}:${override.platform ?? "all"}`;
+
       if (seen.has(key)) {
         context.addIssue({
           code: "custom",
@@ -334,9 +384,11 @@ export const appKeybindingOverridesSchema = z
           path: [index, "command"],
         });
       }
+
       seen.add(key);
     }
   });
+
 export type AppKeybindingOverrides = z.infer<
   typeof appKeybindingOverridesSchema
 >;
@@ -356,12 +408,16 @@ export function applyAppKeybindingOverrides(
       const override = overrides.find(
         (override) => override.command === binding.command,
       );
+
       const shortcut =
         override === undefined ? binding.shortcut : override.shortcut;
+
       return shortcut === null ? [] : [{ ...binding, shortcut }];
     }
+
     return keyboardPlatformSchema.options.flatMap((platform) => {
       const context = `${platform}Platform` as const;
+
       if (
         binding.when.none.includes(context) ||
         keyboardPlatformSchema.options.some(
@@ -370,13 +426,16 @@ export function applyAppKeybindingOverrides(
         )
       )
         return [];
+
       const override = findAppKeybindingOverride(
         overrides,
         binding.command,
         platform,
       );
+
       const shortcut =
         override === undefined ? binding.shortcut : override.shortcut;
+
       return shortcut === null
         ? []
         : [

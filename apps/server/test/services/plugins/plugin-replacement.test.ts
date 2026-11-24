@@ -8,8 +8,8 @@ import {
   migrate,
   setPluginSettingsValues,
   type DbConnection,
-} from "@bb/db";
-import type { Logger } from "@bb/logger";
+} from "@omnyo/db";
+import type { Logger } from "@omnyo/logger";
 import { createAiServiceRegistry } from "../../../src/services/ai/ai-service-registry.js";
 import {
   createPluginService,
@@ -17,18 +17,19 @@ import {
 } from "../../../src/services/plugins/plugin-service.js";
 import { createNoopTelemetryService } from "../../../src/services/system/telemetry.js";
 import { testLogger } from "../../helpers/test-app.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
 
 async function writePathPlugin(dir: string, name: string): Promise<string> {
-  const rootDir = join(dir, `bb-plugin-${name}`);
+  const rootDir = join(dir, `omnyo-plugin-${name}`);
   await mkdir(rootDir, { recursive: true });
   await writeFile(
     join(rootDir, "package.json"),
     JSON.stringify({
-      name: `bb-plugin-${name}`,
+      name: `omnyo-plugin-${name}`,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: `Replacement fixture ${name}`,
         description: "Replacement fixture.",
         branding: { icon: "Zap" },
@@ -40,6 +41,7 @@ async function writePathPlugin(dir: string, name: string): Promise<string> {
     join(rootDir, "server.ts"),
     "export default function plugin() {}",
   );
+
   return rootDir;
 }
 
@@ -50,6 +52,7 @@ describe("replacement plugins", () => {
 
   function state(id: string) {
     const plugin = service.list().find((candidate) => candidate.id === id);
+
     return plugin === undefined
       ? null
       : { enabled: plugin.enabled, status: plugin.status };
@@ -58,7 +61,7 @@ describe("replacement plugins", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-replacement-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-replacement-"));
     service = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -70,6 +73,7 @@ describe("replacement plugins", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "0.9.0",
       bundledPlugins: [],
       bundledPluginReplacements: [

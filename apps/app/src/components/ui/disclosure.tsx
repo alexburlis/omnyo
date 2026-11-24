@@ -9,21 +9,25 @@ import {
   type HTMLAttributes,
   type ReactNode,
 } from "react";
-import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@bb/shared-ui/hover-reveal";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { HOVER_REVEAL_NO_HOVER_VISIBLE_CLASS } from "@omnyo/shared-ui/hover-reveal";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   observedBorderBoxBlockSize,
   observeSharedResize,
 } from "@/lib/shared-resize-observer";
 import { layoutAnimationInFlightCountAtom } from "./layoutAnimationAtoms.js";
-import { CONTROL_HOVER_TRANSITION } from "@bb/shared-ui/motion";
-
-const EXPANDABLE_PANEL_TRANSITION_MS = 200;
+import {
+  CONTROL_HOVER_TRANSITION,
+  getDisclosureDurationClass,
+  getDisclosureDurationMs,
+  getDisclosureRevealClass,
+} from "@omnyo/shared-ui/motion";
 
 interface PanelHeightSync {
   isToggleAnimating: boolean;
   heightPx: number;
 }
+
 const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
 
@@ -32,10 +36,14 @@ interface ChevronProps {
 }
 
 export const COLLAPSIBLE_HEADER_COLLAPSED_TONE_CLASS = `text-muted-foreground ${CONTROL_HOVER_TRANSITION} hover:text-foreground focus-visible:text-foreground`;
+
 const COLLAPSIBLE_HEADER_EXPANDED_TONE_CLASS = "text-foreground";
+
 export const COLLAPSIBLE_HEADER_STATIC_TONE_CLASS = "text-muted-foreground";
+
 export const COLLAPSIBLE_HEADER_BUTTON_BASE_CLASS =
   "inline-flex max-w-full items-center gap-1 overflow-hidden py-0.5 text-left text-sm";
+
 const COLLAPSIBLE_HEADER_TEXT_CLASS = "min-w-0 truncate";
 
 function Chevron({ className }: ChevronProps) {
@@ -46,7 +54,7 @@ function Chevron({ className }: ChevronProps) {
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn("bb-icon-stroke", className)}
+      className={cn("omnyo-icon-stroke", className)}
       aria-hidden="true"
       data-icon-root=""
     >
@@ -69,6 +77,7 @@ interface CollapsibleHeaderProps {
   forceChevronVisible?: boolean;
   isExpanded?: boolean;
   onToggle?: () => void;
+  trailingContent?: ReactNode;
 }
 
 export function CollapsibleHeader({
@@ -79,6 +88,7 @@ export function CollapsibleHeader({
   forceChevronVisible = false,
   isExpanded = false,
   onToggle,
+  trailingContent,
 }: CollapsibleHeaderProps) {
   const rootClassName = cn(
     COLLAPSIBLE_HEADER_BUTTON_BASE_CLASS,
@@ -86,12 +96,14 @@ export function CollapsibleHeader({
     onToggle ? "group/toggle cursor-pointer" : null,
     className,
   );
+
   const summaryClass = summaryClassName ?? COLLAPSIBLE_HEADER_TEXT_CLASS;
 
   if (!onToggle) {
     return (
       <div className={rootClassName}>
         <span className={summaryClass}>{summaryContent}</span>
+        {trailingContent}
       </div>
     );
   }
@@ -106,7 +118,7 @@ export function CollapsibleHeader({
       <span className={summaryClass}>{summaryContent}</span>
       <Chevron
         className={cn(
-          "pointer-events-none size-3 shrink-0 origin-center text-subtle-foreground/60 transition-[opacity,rotate] duration-200 ease-out",
+          "pointer-events-none size-3 shrink-0 origin-center text-subtle-foreground/60 [transition:opacity_var(--motion-duration-fast)_var(--motion-ease-standard),rotate_var(--motion-duration-base)_var(--motion-ease-smooth)] motion-reduce:[transition:opacity_var(--motion-duration-fast)_var(--motion-ease-standard)]",
           isExpanded
             ? "rotate-90"
             : forceChevronVisible
@@ -117,6 +129,7 @@ export function CollapsibleHeader({
                 ),
         )}
       />
+      {trailingContent}
     </button>
   );
 }
@@ -139,6 +152,7 @@ interface ExpandablePanelProps {
   renderBody?: () => ReactNode;
   className?: string;
   headerClassName?: string;
+  headerTrailingContent?: ReactNode;
   contentClassName?: string;
 }
 
@@ -162,11 +176,13 @@ function AnimatedExpandablePanelContent({
   useBrowserLayoutEffect(() => {
     if (previousBodyExpandedRef.current === isBodyExpanded) return;
     previousBodyExpandedRef.current = isBodyExpanded;
+
     if (typeof ResizeObserver === "undefined") return;
     toggleAnimationDeadlineRef.current =
-      performance.now() + EXPANDABLE_PANEL_TRANSITION_MS;
+      performance.now() + getDisclosureDurationMs(isBodyExpanded);
     const region = regionRef.current;
     const target = contentRef.current;
+
     if (region && target) {
       const height = target.offsetHeight;
       region.style.transitionDuration = "";
@@ -177,6 +193,7 @@ function AnimatedExpandablePanelContent({
   useBrowserLayoutEffect(() => {
     const region = regionRef.current;
     const target = contentRef.current;
+
     if (!region || !target) {
       return;
     }
@@ -186,12 +203,14 @@ function AnimatedExpandablePanelContent({
     ): PanelHeightSync => {
       const observedHeight =
         entry === undefined ? undefined : observedBorderBoxBlockSize(entry);
+
       return {
         isToggleAnimating:
           performance.now() < toggleAnimationDeadlineRef.current,
         heightPx: observedHeight ?? target.offsetHeight,
       };
     };
+
     const writeHeightSync = ({
       heightPx,
       isToggleAnimating,
@@ -201,6 +220,7 @@ function AnimatedExpandablePanelContent({
     };
 
     region.style.transitionDuration = "0s";
+
     if (typeof ResizeObserver === "undefined") {
       return;
     }
@@ -214,7 +234,10 @@ function AnimatedExpandablePanelContent({
   return (
     <div
       ref={regionRef}
-      className="relative transition-[height] duration-200 ease-out"
+      className={cn(
+        "relative transition-[height] ease-(--motion-ease-smooth) motion-reduce:transition-none",
+        getDisclosureDurationClass(isBodyExpanded),
+      )}
       style={{
         overflowX: "visible",
         overflowY: "clip",
@@ -246,39 +269,53 @@ export function ExpandablePanel({
   renderBody,
   className,
   headerClassName,
+  headerTrailingContent,
   contentClassName,
 }: ExpandablePanelProps) {
   const hasCollapsedContent =
     collapsedContent !== undefined && collapsedContent !== null;
+
   const headerRootClassName = cn("px-2 py-1", headerClassName);
   const [isClosing, setIsClosing] = useState(false);
   const renderedBodyRef = useRef<ReactNode>(null);
   const deferredIsExpanded = useDeferredValue(isExpanded);
+
   const expandedBody = useMemo(() => {
     if (!deferredIsExpanded) {
       return null;
     }
+
     return renderBody ? renderBody() : children;
   }, [children, deferredIsExpanded, renderBody]);
+
   const isBodyExpanded = isExpanded && (deferredIsExpanded || isClosing);
 
   const setLayoutAnimationInFlightCount = useSetAtom(
     layoutAnimationInFlightCountAtom,
   );
+
   const isFirstAnimationEffectRef = useRef(true);
   useBrowserLayoutEffect(() => {
     if (isFirstAnimationEffectRef.current) {
       isFirstAnimationEffectRef.current = false;
+
       return;
     }
+
     setLayoutAnimationInFlightCount((c) => c + 1);
     let released = false;
+
     const release = () => {
       if (released) return;
       released = true;
       setLayoutAnimationInFlightCount((c) => Math.max(0, c - 1));
     };
-    const timer = window.setTimeout(release, EXPANDABLE_PANEL_TRANSITION_MS);
+
+    const timer = window.setTimeout(
+      release,
+      getDisclosureDurationMs(isBodyExpanded),
+    );
+
     return () => {
       window.clearTimeout(timer);
       release();
@@ -289,6 +326,7 @@ export function ExpandablePanel({
     if (!deferredIsExpanded) {
       return;
     }
+
     renderedBodyRef.current = expandedBody;
   }, [deferredIsExpanded, expandedBody]);
 
@@ -296,21 +334,28 @@ export function ExpandablePanel({
     if (isExpanded) {
       return;
     }
+
     if (hasCollapsedContent) {
       renderedBodyRef.current = null;
       setIsClosing(false);
+
       return;
     }
+
     if (renderedBodyRef.current === null) {
       return;
     }
+
     setIsClosing(true);
+
     const timeout = setTimeout(() => {
       renderedBodyRef.current = null;
       setIsClosing(false);
-    }, EXPANDABLE_PANEL_TRANSITION_MS);
+    }, getDisclosureDurationMs(false));
+
     return () => clearTimeout(timeout);
   }, [hasCollapsedContent, isExpanded]);
+
   const renderedBody = deferredIsExpanded
     ? expandedBody
     : isClosing
@@ -334,6 +379,7 @@ export function ExpandablePanel({
             summaryContentClassName ?? COLLAPSIBLE_HEADER_TEXT_CLASS
           }
           summaryContent={summaryContent}
+          trailingContent={headerTrailingContent}
         />
       </div>
       {hasCollapsedContent ? (
@@ -346,17 +392,13 @@ export function ExpandablePanel({
       ) : (
         <div
           aria-hidden={!isBodyExpanded}
-          className={cn(
-            "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
-            isBodyExpanded
-              ? "pointer-events-auto grid-rows-[1fr] opacity-100"
-              : "pointer-events-none grid-rows-[0fr] opacity-0",
-          )}
+          className={getDisclosureRevealClass(isBodyExpanded)}
         >
           <div className="overflow-hidden">
             <div
               className={cn(
-                "px-2 pb-1 pt-0 transition-[transform,opacity] duration-200 ease-out",
+                "px-2 pb-1 pt-0 transition-[translate,opacity] ease-(--motion-ease-smooth) motion-reduce:translate-y-0",
+                getDisclosureDurationClass(isBodyExpanded),
                 isBodyExpanded
                   ? "translate-y-0 opacity-100"
                   : "-translate-y-1 opacity-0",

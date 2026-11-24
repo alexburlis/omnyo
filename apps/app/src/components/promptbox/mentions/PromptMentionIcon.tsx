@@ -1,5 +1,5 @@
-import type { PromptMentionResource } from "@bb/domain";
-import { Icon } from "@bb/shared-ui/icon";
+import type { PromptMentionResource } from "@omnyo/domain";
+import { Icon } from "@omnyo/shared-ui/icon";
 import { PluginItemIcon } from "@/components/plugin/PluginIcon";
 import { promptMentionIconName } from "./prompt-mention-display";
 
@@ -19,6 +19,7 @@ export function PromptMentionIcon({
       />
     );
   }
+
   return (
     <Icon
       name={promptMentionIconName(resource)}

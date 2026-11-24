@@ -1,5 +1,5 @@
-import { jsonValueSchema } from "@bb/domain";
-import type { StandardSchemaV1 } from "@get-bb/plugin-sdk";
+import { jsonValueSchema } from "@omnyo/domain";
+import type { StandardSchemaV1 } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 import type { PluginHookInvocation } from "../plugins/plugin-hook-registry.js";
 
@@ -36,25 +36,30 @@ export function parseProviderAvailabilityInvocation(
     : invocation.value.ok
       ? null
       : invocation.value.error;
+
   if (failure !== null) {
     return {
       ok: false,
       message: `Plugin "${pluginId}" could not determine availability: ${failure}`,
     };
   }
+
   if (!invocation.ok || !invocation.value.ok) {
     return {
       ok: false,
       message: `Plugin "${pluginId}" could not determine availability.`,
     };
   }
+
   const parsed = providerAvailabilitySchema.safeParse(invocation.value.value);
+
   if (!parsed.success) {
     return {
       ok: false,
       message: `Plugin "${pluginId}" returned an invalid availability result.`,
     };
   }
+
   return { ok: true, availability: parsed.data };
 }
 
@@ -65,9 +70,11 @@ export function acceptsEmptyInputs(
   invoke: ProviderInvoke,
 ): Promise<boolean> {
   const cached = emptyInputsCache.get(provider);
+
   if (cached !== undefined) return cached;
   const resolved = resolveEmptyInputs(provider, invoke);
   emptyInputsCache.set(provider, resolved);
+
   return resolved;
 }
 
@@ -76,8 +83,11 @@ async function resolveEmptyInputs(
   invoke: ProviderInvoke,
 ): Promise<boolean> {
   const schema = provider.inputs;
+
   if (schema === null) return true;
   const invocation = await invoke(async () => schema["~standard"].validate({}));
+
   if (!invocation.ok || invocation.value.issues !== undefined) return false;
+
   return jsonValueSchema.safeParse(invocation.value.value).success;
 }

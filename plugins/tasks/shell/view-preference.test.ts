@@ -38,6 +38,7 @@ describe("view preference storage", () => {
       projects: { [PROJECT_A]: "board" },
       timeline: "view a future build added",
     });
+
     window.localStorage.setItem(VIEW_PREFERENCE_STORAGE_KEY, future);
 
     expect(loadViewMode(PROJECT_A)).toBe("board");

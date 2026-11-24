@@ -7,7 +7,7 @@ import {
 } from "./agents.js";
 import { acpProviderDeclaration } from "./declaration.js";
 import { KNOWN_ACP_AGENTS, RESERVED_ACP_PROVIDER_IDS } from "./known-agents.js";
-import { experimental_acpLaunchSpecSchema } from "@get-bb/plugin-sdk/provider-bridge/acp";
+import { experimental_acpLaunchSpecSchema } from "@omnyo/plugin-sdk/provider-bridge/acp";
 
 const reserved = RESERVED_ACP_PROVIDER_IDS;
 
@@ -97,6 +97,7 @@ describe("parseCustomAcpAgents", () => {
 
     expect(parsed.problems).toEqual([]);
     const [agent] = parsed.agents;
+
     if (agent === undefined) throw new Error("expected the agent to parse");
     const launch = customAcpAgentDefinition(agent).launch;
     expect(experimental_acpLaunchSpecSchema.safeParse(launch).success).toBe(
@@ -153,6 +154,7 @@ describe("customAcpAgentDefinition", () => {
       ],
       reservedProviderIds: reserved,
     }).agents;
+
     if (agent === undefined) throw new Error("expected the agent to parse");
     const definition = customAcpAgentDefinition(agent);
 
@@ -175,7 +177,9 @@ describe("custom agents that report usage", () => {
       entries: [entry],
       reservedProviderIds: reserved,
     }).agents;
+
     if (agent === undefined) throw new Error("expected the agent to parse");
+
     return agent;
   };
 
@@ -298,6 +302,7 @@ describe("acpProviderDeclaration", () => {
     const grok = acpProviderDeclaration(
       KNOWN_ACP_AGENTS.find((agent) => agent.id === "acp-grok")!,
     );
+
     expect(grok.capabilities.reasoningLevels).toEqual([
       "low",
       "medium",
@@ -310,6 +315,7 @@ describe("acpProviderDeclaration", () => {
     const cursor = acpProviderDeclaration(
       KNOWN_ACP_AGENTS.find((agent) => agent.id === "acp-cursor")!,
     );
+
     expect(cursor.capabilities.reasoningLevels).toEqual([
       "low",
       "medium",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SystemEnvironmentProvider } from "@bb/server-contract";
+import type { SystemEnvironmentProvider } from "@omnyo/server-contract";
 import { resolveRootComposeThreadEnvironment } from "./root-compose-thread-environment";
 
 const projectId = "proj_123";
@@ -56,6 +56,7 @@ describe("resolveRootComposeThreadEnvironment", () => {
       id: "modal-sandbox",
       machineProviderId: "modal-sandbox",
     };
+
     expect(
       resolveRootComposeThreadEnvironment({
         projectId,
@@ -85,6 +86,41 @@ describe("resolveRootComposeThreadEnvironment", () => {
       environmentProviderId: "branchy",
       machine: { type: "existing", hostId: "host_123" },
       inputs: { branch: { kind: "named", name: "release" } },
+    });
+  });
+
+  it("marks an automatically chosen machine so the chat may start elsewhere", () => {
+    expect(
+      resolveRootComposeThreadEnvironment({
+        environmentValue: "provider:hosted",
+        projectId,
+        environmentProviders,
+        providerHostId: "host_123",
+        providerMachineChoice: "default",
+      }),
+    ).toEqual({
+      type: "provider",
+      environmentProviderId: "hosted",
+      machine: { type: "existing", hostId: "host_123" },
+      inputs: null,
+      machineChoice: "default",
+    });
+  });
+
+  it("sends a picked machine without a default mark, so the chat stays pinned", () => {
+    expect(
+      resolveRootComposeThreadEnvironment({
+        environmentValue: "provider:hosted",
+        projectId,
+        environmentProviders,
+        providerHostId: "host_123",
+        providerMachineChoice: "explicit",
+      }),
+    ).toEqual({
+      type: "provider",
+      environmentProviderId: "hosted",
+      machine: { type: "existing", hostId: "host_123" },
+      inputs: null,
     });
   });
 

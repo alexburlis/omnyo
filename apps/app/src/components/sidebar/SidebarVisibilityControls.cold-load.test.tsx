@@ -2,16 +2,18 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { act } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { SidebarVisibilityCustomize } from "./SidebarVisibilityControls";
 
 const download = await vi.hoisted(async () => {
-  const { createDeferredPromise } = await import("@bb/test-helpers");
+  const { createDeferredPromise } = await import("@omnyo/test-helpers");
+
   return createDeferredPromise<void>();
 });
 
 vi.mock("./SidebarVisibilityCustomize", async (importOriginal) => {
   await download.promise;
+
   return importOriginal();
 });
 
@@ -23,6 +25,7 @@ afterEach(() => {
 it("keeps Done, Escape and compact Back usable through a held import, failure and retry", async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   const onDone = vi.fn();
+
   const props = {
     items: [{ id: "section:review", title: "Review" }],
     visibleIds: [],
@@ -34,6 +37,7 @@ it("keeps Done, Escape and compact Back usable through a held import, failure an
     onExit: vi.fn(),
     onDone,
   };
+
   const view = render(<SidebarVisibilityCustomize {...props} variant="card" />);
   const done = screen.getByRole("button", { name: "Done" });
   expect(document.activeElement).toBe(done);

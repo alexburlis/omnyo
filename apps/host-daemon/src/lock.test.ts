@@ -10,10 +10,12 @@ async function waitFor(
   timeoutMs: number,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+
   while (!predicate()) {
     if (Date.now() > deadline) {
       throw new Error("Timed out waiting for condition");
     }
+
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
@@ -21,6 +23,7 @@ async function waitFor(
 function createRecordingLogger() {
   const warnings: string[] = [];
   const errors: string[] = [];
+
   return {
     logger: {
       warn: (_fields: Record<string, unknown>, message: string) => {
@@ -39,7 +42,7 @@ describe("acquireDaemonLock compromise handling", () => {
   let dataDir: string;
 
   beforeEach(async () => {
-    dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "bb-daemon-lock-"));
+    dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "omnyo-daemon-lock-"));
   });
 
   afterEach(async () => {
@@ -49,6 +52,7 @@ describe("acquireDaemonLock compromise handling", () => {
   it("re-acquires a compromised lock instead of crashing the daemon", async () => {
     const { logger, warnings } = createRecordingLogger();
     const onLockLost = vi.fn();
+
     const release = await acquireDaemonLock(dataDir, {
       staleMs: 2_000,
       retryIntervalMs: 100,
@@ -56,6 +60,7 @@ describe("acquireDaemonLock compromise handling", () => {
       logger,
       onLockLost,
     });
+
     const lockDirPath = path.join(dataDir, `${DAEMON_LOCK_FILE_NAME}.lock`);
 
     await fs.rm(lockDirPath, { recursive: true, force: true });
@@ -79,6 +84,7 @@ describe("acquireDaemonLock compromise handling", () => {
   it("re-acquires when the lock dir survives the compromise and must age past stale", async () => {
     const { logger, warnings } = createRecordingLogger();
     const onLockLost = vi.fn();
+
     const release = await acquireDaemonLock(dataDir, {
       staleMs: 2_000,
       retryIntervalMs: 100,
@@ -86,6 +92,7 @@ describe("acquireDaemonLock compromise handling", () => {
       logger,
       onLockLost,
     });
+
     const lockDirPath = path.join(dataDir, `${DAEMON_LOCK_FILE_NAME}.lock`);
 
     const foreignMtime = new Date(Date.now() + 500);
@@ -103,9 +110,78 @@ describe("acquireDaemonLock compromise handling", () => {
     });
   }, 30_000);
 
+  it("reclaims an orphaned lock whose heartbeat is ahead of a clock that was set back", async () => {
+    const lockDirPath = path.join(dataDir, `${DAEMON_LOCK_FILE_NAME}.lock`);
+    await fs.mkdir(lockDirPath);
+
+    const heartbeatFromBeforeClockReset = new Date(
+      Date.now() + 19 * 24 * 60 * 60 * 1_000,
+    );
+
+    fsSync.utimesSync(
+      lockDirPath,
+      heartbeatFromBeforeClockReset,
+      heartbeatFromBeforeClockReset,
+    );
+    const { logger, warnings } = createRecordingLogger();
+
+    const release = await acquireDaemonLock(dataDir, {
+      staleMs: 2_000,
+      retryIntervalMs: 100,
+      retries: 40,
+      logger,
+      onLockLost: vi.fn(),
+    });
+
+    expect(warnings).toContain(
+      "Daemon lock heartbeat stopped; reclaiming the orphaned lock",
+    );
+    const reclaimed = await fs.stat(lockDirPath);
+    expect(reclaimed.mtimeMs).toBeLessThan(
+      heartbeatFromBeforeClockReset.getTime(),
+    );
+    await release();
+  }, 20_000);
+
+  it.skipIf(process.platform === "win32")(
+    "keeps retrying when creating the lock dir fails transiently",
+    async () => {
+      await fs.writeFile(path.join(dataDir, DAEMON_LOCK_FILE_NAME), "");
+      await fs.chmod(dataDir, 0o555);
+
+      const restoreWriteAccess = setTimeout(() => {
+        fsSync.chmodSync(dataDir, 0o755);
+      }, 300);
+
+      try {
+        await expect(
+          fs.mkdir(path.join(dataDir, "write-probe")),
+        ).rejects.toMatchObject({ code: "EACCES" });
+
+        const release = await acquireDaemonLock(dataDir, {
+          staleMs: 2_000,
+          retryIntervalMs: 100,
+          retries: 40,
+          logger: createRecordingLogger().logger,
+          onLockLost: vi.fn(),
+        });
+
+        await expect(
+          fs.stat(path.join(dataDir, `${DAEMON_LOCK_FILE_NAME}.lock`)),
+        ).resolves.toBeDefined();
+        await release();
+      } finally {
+        clearTimeout(restoreWriteAccess);
+        await fs.chmod(dataDir, 0o755);
+      }
+    },
+    20_000,
+  );
+
   it("yields the data dir when another live process holds the lock", async () => {
     const { logger } = createRecordingLogger();
     const lockLostErrors: unknown[] = [];
+
     const release = await acquireDaemonLock(dataDir, {
       staleMs: 2_000,
       retryIntervalMs: 100,
@@ -115,13 +191,16 @@ describe("acquireDaemonLock compromise handling", () => {
         lockLostErrors.push(error);
       },
     });
+
     const lockPath = path.join(dataDir, DAEMON_LOCK_FILE_NAME);
     const lockDirPath = `${lockPath}.lock`;
 
     await fs.rm(lockDirPath, { recursive: true, force: true });
     await fs.mkdir(lockDirPath);
+
     const keepContenderFresh = setInterval(() => {
       const now = new Date();
+
       try {
         fsSync.utimesSync(lockDirPath, now, now);
       } catch {}

@@ -2,26 +2,36 @@ import { usePluginEnabledMutation } from "@/components/plugin/usePluginEnabledMu
 import { useEffect, useId, useState, type FocusEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PluginSettingsSections } from "@/components/plugin/PluginSettingsSections";
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@omnyo/shared-ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@bb/shared-ui/dropdown-menu";
-import { Icon } from "@bb/shared-ui/icon";
-import { Input } from "@bb/shared-ui/input";
-import { Textarea } from "@bb/shared-ui/textarea";
+} from "@omnyo/shared-ui/dropdown-menu";
+import { Icon } from "@omnyo/shared-ui/icon";
+import {
+  CONTROL_HOVER_TRANSITION,
+  DISCLOSURE_CHEVRON_TRANSITION,
+} from "@omnyo/shared-ui/motion";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Input } from "@omnyo/shared-ui/input";
+import { Textarea } from "@omnyo/shared-ui/textarea";
 import { Link } from "react-router-dom";
 import { SettingsWithControl } from "@/components/ui/settings-section.js";
 import { getPluginDetailRoutePath } from "@/lib/route-paths";
-import { Skeleton } from "@bb/shared-ui/skeleton";
-import { Switch } from "@bb/shared-ui/switch";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
+import { Switch } from "@omnyo/shared-ui/switch";
 import {
   ResourceDetailConfigurationSection,
   ResourceDetailPanel,
   ResourceDetailStack,
-} from "@bb/shared-ui/resource-list";
+} from "@omnyo/shared-ui/resource-list";
 import { PluginIcon } from "@/components/plugin/PluginIcon";
 import { applyPluginSettingsView } from "@/hooks/cache-owners/plugin-cache-owner";
 import {
@@ -42,13 +52,40 @@ import {
 } from "@/components/settings/settings-dropdown";
 
 const MULTILINE_MIN_ROWS = 6;
+
 const MULTILINE_MAX_ROWS = 24;
+
 const INVALID_NUMBER_DRAFT = Symbol();
+
 const MULTILINE_TEXTAREA_CLASS =
   "max-h-96 min-h-32 w-full resize-y overflow-y-auto font-mono text-xs field-sizing-content";
+
 function multilineRows(value: string): number {
   const lines = value.split("\n").length;
+
   return Math.min(MULTILINE_MAX_ROWS, Math.max(MULTILINE_MIN_ROWS, lines + 1));
+}
+
+function isSecretSet(storedValue: unknown): boolean {
+  return (
+    typeof storedValue === "object" &&
+    storedValue !== null &&
+    "set" in storedValue &&
+    storedValue.set === true
+  );
+}
+
+function isSettingConfigured(
+  descriptor: PluginSettingFieldDescriptor,
+  storedValue: unknown,
+): boolean {
+  if (descriptor.type === "string" && descriptor.secret === true) {
+    return isSecretSet(storedValue);
+  }
+
+  if (storedValue === undefined || storedValue === "") return false;
+
+  return storedValue !== descriptor.default;
 }
 
 function isMultilineSetting(descriptor: PluginSettingFieldDescriptor): boolean {
@@ -138,6 +175,7 @@ function PluginSettingField({
         : typeof storedValue === "boolean"
           ? storedValue
           : false;
+
     return (
       <Switch
         checked={checked}
@@ -156,6 +194,7 @@ function PluginSettingField({
         : typeof storedValue === "string"
           ? storedValue
           : "";
+
     return (
       <SettingOptionPicker
         ariaDescribedBy={ariaDescribedBy}
@@ -182,7 +221,9 @@ function PluginSettingField({
         : typeof storedValue === "string"
           ? storedValue
           : "";
+
     const navigation = projects.data;
+
     const options = navigation
       ? [
           {
@@ -195,9 +236,11 @@ function PluginSettingField({
           })),
         ]
       : [];
+
     const valueLabel =
       options.find((option) => option.value === value)?.label ??
       (value.length > 0 ? value : "Select a project…");
+
     return (
       <SettingOptionPicker
         ariaDescribedBy={ariaDescribedBy}
@@ -217,12 +260,14 @@ function PluginSettingField({
         : typeof storedValue === "number"
           ? String(storedValue)
           : "";
+
     return (
       <Input
         type="number"
         inputMode="decimal"
         step="any"
         value={value}
+        placeholder={descriptor.experimental_placeholder}
         aria-label={descriptor.label}
         aria-describedby={ariaDescribedBy}
         aria-invalid={ariaInvalid}
@@ -234,18 +279,16 @@ function PluginSettingField({
   }
 
   const isSecret = descriptor.secret === true;
-  const secretIsSet =
-    isSecret &&
-    typeof storedValue === "object" &&
-    storedValue !== null &&
-    "set" in storedValue &&
-    storedValue.set === true;
+
+  const secretIsSet = isSecret && isSecretSet(storedValue);
+
   const value =
     typeof draft === "string"
       ? draft
       : !isSecret && typeof storedValue === "string"
         ? storedValue
         : "";
+
   if (isMultilineSetting(descriptor)) {
     return (
       <Textarea
@@ -254,6 +297,7 @@ function PluginSettingField({
         aria-describedby={ariaDescribedBy}
         aria-invalid={ariaInvalid}
         rows={multilineRows(value)}
+        placeholder={descriptor.experimental_placeholder}
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
@@ -263,6 +307,7 @@ function PluginSettingField({
       />
     );
   }
+
   return (
     <Input
       type={isSecret ? "password" : "text"}
@@ -270,7 +315,12 @@ function PluginSettingField({
       aria-label={descriptor.label}
       aria-describedby={ariaDescribedBy}
       aria-invalid={ariaInvalid}
-      placeholder={isSecret ? (secretIsSet ? "[set]" : "[not set]") : undefined}
+      placeholder={
+        secretIsSet
+          ? "Saved · type to replace"
+          : (descriptor.experimental_placeholder ??
+            (isSecret ? "Not set" : undefined))
+      }
       onChange={(event) => onChange(event.target.value)}
       onBlur={onBlur}
       className="h-7 w-full text-xs @min-[36rem]/settings:w-64"
@@ -285,10 +335,13 @@ function initialSettingDraft(
   if (descriptor.type === "boolean") {
     return typeof storedValue === "boolean" ? storedValue : false;
   }
+
   if (descriptor.type === "number") {
     return typeof storedValue === "number" ? String(storedValue) : "";
   }
+
   if (descriptor.type === "string" && descriptor.secret === true) return "";
+
   return typeof storedValue === "string" ? storedValue : "";
 }
 
@@ -308,25 +361,32 @@ function AutosavingPluginSetting({
   const queryClient = useQueryClient();
   const messageId = useId();
   const initialDraft = initialSettingDraft(descriptor, storedValue);
+
   const [draftState, setDraftState] = useState({
     value: initialDraft,
     hasNewerDraft: false,
   });
+
   const draft = draftState.value;
+
   const save = useMutation({
     scope: { id: `plugin-setting:${pluginId}:${settingKey}` },
     mutationFn: (value: string | boolean | typeof INVALID_NUMBER_DRAFT) => {
       if (value === INVALID_NUMBER_DRAFT)
         throw new Error("Enter a finite number");
       let settingValue: string | number | boolean | null = value;
+
       if (descriptor.type === "number") {
         const trimmed = typeof value === "string" ? value.trim() : "";
         const parsed = Number(trimmed);
+
         if (trimmed.length > 0 && !Number.isFinite(parsed)) {
           throw new Error("Enter a finite number");
         }
+
         settingValue = trimmed.length === 0 ? null : parsed;
       }
+
       return updatePluginSettings(fetch, pluginId, {
         [settingKey]: settingValue,
       });
@@ -349,7 +409,9 @@ function AutosavingPluginSetting({
       hasNewerDraft:
         descriptor.type === "string" || descriptor.type === "number",
     });
+
     if (!save.isPending) save.reset();
+
     if (descriptor.type !== "string" && descriptor.type !== "number") {
       save.mutate(value);
     }
@@ -359,22 +421,28 @@ function AutosavingPluginSetting({
     event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>,
   ): void {
     if (descriptor.type !== "string" && descriptor.type !== "number") return;
+
     if (descriptor.type === "number" && event.currentTarget.validity.badInput) {
       setDraftState({ value: initialDraft, hasNewerDraft: false });
       save.mutate(INVALID_NUMBER_DRAFT);
+
       return;
     }
+
     if (descriptor.type === "number") {
       const trimmed = typeof draft === "string" ? draft.trim() : "";
       const parsed = Number(trimmed);
+
       if (
         (trimmed.length === 0 && storedValue === undefined) ||
         (trimmed.length > 0 && parsed === storedValue && !save.isPending)
       ) {
         setDraftState({ value: draft, hasNewerDraft: false });
+
         return;
       }
     }
+
     if (
       (draft === storedValue && !save.isPending) ||
       (descriptor.type === "string" &&
@@ -382,8 +450,10 @@ function AutosavingPluginSetting({
         draft === "")
     ) {
       setDraftState({ value: draft, hasNewerDraft: false });
+
       return;
     }
+
     setDraftState({ value: draft, hasNewerDraft: false });
     save.mutate(draft);
   }
@@ -394,6 +464,7 @@ function AutosavingPluginSetting({
         fallbackMessage: "Could not save this setting",
       })
     : null;
+
   return (
     <SettingsWithControl
       label={descriptor.label}
@@ -433,14 +504,127 @@ function AutosavingPluginSetting({
   );
 }
 
+interface PluginSettingEntry {
+  key: string;
+  descriptor: PluginSettingFieldDescriptor;
+}
+
+interface PluginSettingGroup {
+  title: string;
+  description: string | undefined;
+  entries: PluginSettingEntry[];
+}
+
+function groupPluginSettings(
+  schema: Record<string, PluginSettingFieldDescriptor>,
+): { ungrouped: PluginSettingEntry[]; groups: PluginSettingGroup[] } {
+  const ungrouped: PluginSettingEntry[] = [];
+  const groups = new Map<string, PluginSettingGroup>();
+
+  for (const [key, descriptor] of Object.entries(schema)) {
+    const section = descriptor.experimental_section;
+
+    if (section === undefined) {
+      ungrouped.push({ key, descriptor });
+      continue;
+    }
+
+    const group = groups.get(section.title) ?? {
+      title: section.title,
+      description: section.description,
+      entries: [],
+    };
+
+    group.entries.push({ key, descriptor });
+    groups.set(section.title, group);
+  }
+
+  return { ungrouped, groups: [...groups.values()] };
+}
+
+function PluginSettingGroupDisclosure({
+  group,
+  pluginId,
+  values,
+}: {
+  group: PluginSettingGroup;
+  pluginId: string;
+  values: Record<string, unknown>;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const configured = group.entries.some(({ key, descriptor }) =>
+    isSettingConfigured(descriptor, values[key]),
+  );
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="py-1 first:pt-0 last:pb-0"
+    >
+      <CollapsibleTrigger
+        className={cn(
+          "-mx-1.5 flex w-[calc(100%+0.75rem)] cursor-pointer items-center gap-3 rounded-md px-1.5 py-2 text-left outline-none hover:bg-muted/50 focus-visible:ring-1 focus-visible:ring-ring",
+          CONTROL_HOVER_TRANSITION,
+        )}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm text-foreground">{group.title}</span>
+          {group.description !== undefined ? (
+            <span className="mt-0.5 block text-xs leading-snug text-subtle-foreground">
+              {group.description}
+            </span>
+          ) : null}
+        </span>
+        {configured ? (
+          <span className="flex shrink-0 items-center gap-1 text-xs text-foreground">
+            <Icon name="Check" aria-hidden className="size-3.5" />
+            Set up
+          </span>
+        ) : (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            Not set up
+          </span>
+        )}
+        <Icon
+          name="ChevronRight"
+          aria-hidden
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground",
+            DISCLOSURE_CHEVRON_TRANSITION,
+            open && "rotate-90",
+          )}
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="space-y-4 pb-2 pt-3">
+          {group.entries.map(({ key, descriptor }) => (
+            <AutosavingPluginSetting
+              key={key}
+              descriptor={descriptor}
+              pluginId={pluginId}
+              settingKey={key}
+              storedValue={values[key]}
+            />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 export function PluginSettingsForm({ pluginId }: { pluginId: string }) {
   const viewQuery = usePluginSettingsView(pluginId, { enabled: true });
   const view = viewQuery.data ?? null;
+
   if (view === null || Object.keys(view.schema).length === 0) return null;
+
+  const { ungrouped, groups } = groupPluginSettings(view.schema);
 
   return (
     <div className="space-y-4">
-      {Object.entries(view.schema).map(([key, descriptor]) => (
+      {ungrouped.map(({ key, descriptor }) => (
         <AutosavingPluginSetting
           key={key}
           descriptor={descriptor}
@@ -449,6 +633,23 @@ export function PluginSettingsForm({ pluginId }: { pluginId: string }) {
           storedValue={view.values[key]}
         />
       ))}
+      {groups.length > 0 ? (
+        <div
+          className={cn(
+            "divide-y divide-border",
+            ungrouped.length > 0 && "border-t border-border pt-3",
+          )}
+        >
+          {groups.map((group) => (
+            <PluginSettingGroupDisclosure
+              key={group.title}
+              group={group}
+              pluginId={pluginId}
+              values={view.values}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -521,13 +722,16 @@ export function PluginSettingsPage({
   onBackToDetails?: () => void;
 }) {
   const listQuery = usePluginList({ enabled: true });
+
   const plugin =
     listQuery.data?.plugins.find(
       (entry: PluginListItem) => entry.id === pluginId,
     ) ?? null;
+
   if (listQuery.data === undefined && !listQuery.isError) {
     return <PluginSettingsPageSkeleton />;
   }
+
   if (listQuery.data === undefined && listQuery.isError) {
     return (
       <p className="text-sm text-muted-foreground" role="status">
@@ -535,6 +739,7 @@ export function PluginSettingsPage({
       </p>
     );
   }
+
   if (plugin === null) {
     return (
       <p className="text-sm text-muted-foreground" role="status">
@@ -542,6 +747,7 @@ export function PluginSettingsPage({
       </p>
     );
   }
+
   return (
     <PluginSettingsContent
       key={plugin.id}
@@ -564,8 +770,10 @@ function PluginSettingsDetailsLink({
       Plugin details
     </>
   );
+
   const className =
     "-ml-2 mb-3 h-7 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground";
+
   return onBackToDetails ? (
     <Button
       variant="ghost"
@@ -593,12 +801,15 @@ function PluginSettingsContent({
 }) {
   const queryClient = useQueryClient();
   const { settingsSections } = usePluginSlots();
+
   const { toggle, enabled } = usePluginEnabledMutation(plugin, () =>
     invalidateMachineProviders({ queryClient }),
   );
+
   const hasAvailableSettings =
     plugin.hasSettings ||
     settingsSections.some((section) => section.pluginId === plugin.id);
+
   return (
     <div className="mx-auto w-full max-w-5xl">
       <PluginSettingsDetailsLink
@@ -649,11 +860,14 @@ function PluginSettingsContent({
 
 export function PluginSettingsDetail({ plugin }: { plugin: PluginListItem }) {
   const { settingsSections } = usePluginSlots();
+
   const hasSettingsSections = settingsSections.some(
     (section) => section.pluginId === plugin.id,
   );
+
   const settingsAvailable =
     plugin.enabled && PLUGIN_STATUSES_WITH_SETTINGS.includes(plugin.status);
+
   if (!plugin.hasSettings && !hasSettingsSections) return null;
 
   return (

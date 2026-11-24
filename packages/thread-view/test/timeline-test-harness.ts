@@ -5,11 +5,12 @@ import {
   encodeClientTurnRequestIdNumber,
   threadScope,
   turnScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   ApprovalPendingInteractionResolution,
   ClientTurnRequestId,
   CompletedTurnDisplay,
+  GitActivity,
   PromptInput,
   ProviderRawEvent,
   ProvisioningTranscriptEntry,
@@ -26,8 +27,8 @@ import type {
   TurnRequestTarget,
   SystemMessageKind,
   SystemMessageSubject,
-} from "@bb/domain";
-import type { TimelineRow } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { TimelineRow } from "@omnyo/server-contract";
 import type {
   BuildEventProjectionOptions,
   EventProjection,
@@ -51,6 +52,7 @@ export interface RenderTimelineFixtureArgs {
     threadName?: string;
   };
   verbose?: boolean;
+  workspaceRoot?: string | null;
 }
 
 export interface RenderedTimelineFixture {
@@ -246,6 +248,7 @@ interface FileChangeCompletedArgs extends ProviderTurnEventOptions {
     kind: "add" | "delete" | "update";
     path: string;
   }>;
+  error?: string;
   itemId?: string;
   status?: "pending" | "completed" | "failed" | "interrupted";
 }
@@ -254,6 +257,10 @@ type FileChangeStartedArgs = FileChangeCompletedArgs;
 
 interface ContextCompactionArgs extends ProviderTurnEventOptions {
   itemId?: string;
+}
+
+interface TurnMainRunUpdatedArgs extends ProviderTurnEventOptions {
+  state: "idle" | "running";
 }
 
 interface TurnPlanUpdatedArgs extends ProviderTurnEventOptions {
@@ -318,6 +325,11 @@ interface LegacyUserMessageArgs extends EventFactoryRowOptions {
   turnId?: string;
 }
 
+interface GitActivityEventArgs extends DefaultTurnEventOptions {
+  activity: GitActivity;
+  workspacePath?: string;
+}
+
 interface ProviderUnhandledArgs extends ProviderTurnEventOptions {
   providerId?: string;
   rawEvent?: ProviderRawEvent;
@@ -358,6 +370,9 @@ export interface TimelineEventFactory {
   fileChangeStarted(
     args: FileChangeStartedArgs,
   ): ThreadEventRowOfType<"item/started">;
+  gitActivity(
+    args: GitActivityEventArgs,
+  ): ThreadEventRowOfType<"system/git-activity">;
   inputAccepted(
     args: InputAcceptedArgs,
   ): ThreadEventRowOfType<"turn/input/accepted">;
@@ -443,6 +458,9 @@ export interface TimelineEventFactory {
       status?: "completed" | "failed" | "interrupted";
     },
   ): ThreadEventRowOfType<"turn/completed">;
+  turnMainRunUpdated(
+    args: TurnMainRunUpdatedArgs,
+  ): ThreadEventRowOfType<"turn/mainRun/updated">;
   turnPlanUpdated(
     args: TurnPlanUpdatedArgs,
   ): ThreadEventRowOfType<"turn/plan/updated">;
@@ -478,9 +496,11 @@ function flattenEventProjectionMessages(
   projection: EventProjection,
 ): EventProjectionMessage[] {
   const messages: EventProjectionMessage[] = [];
+
   for (const entry of projection.entries) {
     messages.push(...getProjectionEntryMessages(entry));
   }
+
   return messages;
 }
 
@@ -488,8 +508,10 @@ function flattenEventProjectionMessageListDeep(
   rootMessages: readonly EventProjectionMessage[],
 ): EventProjectionMessage[] {
   const messages: EventProjectionMessage[] = [];
+
   for (const message of rootMessages) {
     messages.push(message);
+
     if (message.kind === "delegation") {
       messages.push(
         ...flattenEventProjectionMessageListDeep(
@@ -498,6 +520,7 @@ function flattenEventProjectionMessageListDeep(
       );
     }
   }
+
   return messages;
 }
 
@@ -521,9 +544,11 @@ function withExplicitApprovalStatus(row: ThreadEventRow): ThreadEventRow {
   }
 
   const item = row.data.item;
+
   if (item.type !== "commandExecution" && item.type !== "fileChange") {
     return row;
   }
+
   if (item.approvalStatus !== undefined) {
     return row;
   }
@@ -563,6 +588,7 @@ export function createTimelineEventFactory(
   ) {
     const seq = options?.seq ?? nextSeq;
     nextSeq = Math.max(nextSeq, seq + 1);
+
     return {
       id: options?.id ?? `evt-${typePrefix}-${seq}`,
       threadId: options?.threadId ?? defaults.threadId,
@@ -622,6 +648,7 @@ export function createTimelineEventFactory(
   return {
     assistantDelta(args) {
       const base = nextProviderTurnScopedRowBase("assistant-delta", args);
+
       return {
         ...base,
         type: "item/agentMessage/delta",
@@ -637,6 +664,7 @@ export function createTimelineEventFactory(
     },
     assistantCompleted(args) {
       const base = nextProviderTurnScopedRowBase("assistant-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -655,6 +683,7 @@ export function createTimelineEventFactory(
     },
     providerUserMessage(args) {
       const base = nextProviderTurnScopedRowBase("provider-user-message", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -674,12 +703,14 @@ export function createTimelineEventFactory(
     clientTurnRequested(args) {
       const base = nextThreadScopedRowBase("client-turn-requested", args);
       const initiator = args.initiator ?? "user";
+
       const senderThreadId =
         args.senderThreadId !== undefined
           ? args.senderThreadId
           : initiator === "agent"
             ? "thr_sender"
             : null;
+
       return {
         ...base,
         type: "client/turn/requested",
@@ -712,6 +743,7 @@ export function createTimelineEventFactory(
     },
     clientTurnRejected(args) {
       const base = nextThreadScopedRowBase("client-turn-rejected", args);
+
       return {
         ...base,
         type: "client/turn/rejected",
@@ -724,6 +756,7 @@ export function createTimelineEventFactory(
     },
     commandCompleted(args) {
       const base = nextProviderTurnScopedRowBase("command-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -745,6 +778,7 @@ export function createTimelineEventFactory(
     },
     commandOutputDelta(args) {
       const base = nextProviderTurnScopedRowBase("command-output-delta", args);
+
       return {
         ...base,
         type: "item/commandExecution/outputDelta",
@@ -758,6 +792,7 @@ export function createTimelineEventFactory(
     },
     commandStarted(args) {
       const base = nextProviderTurnScopedRowBase("command-started", args);
+
       return {
         ...base,
         type: "item/started",
@@ -782,6 +817,7 @@ export function createTimelineEventFactory(
         "context-compaction-completed",
         args,
       );
+
       return {
         ...base,
         type: "item/completed",
@@ -802,6 +838,7 @@ export function createTimelineEventFactory(
         "context-compaction-started",
         args,
       );
+
       return {
         ...base,
         type: "item/started",
@@ -819,6 +856,7 @@ export function createTimelineEventFactory(
     },
     fileChangeCompleted(args) {
       const base = nextProviderTurnScopedRowBase("file-change-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -830,12 +868,14 @@ export function createTimelineEventFactory(
             changes: args.changes,
             status: args.status ?? "completed",
             approvalStatus: args.approvalStatus ?? null,
+            ...(args.error === undefined ? {} : { error: args.error }),
           },
         },
       };
     },
     fileChangeStarted(args) {
       const base = nextProviderTurnScopedRowBase("file-change-started", args);
+
       return {
         ...base,
         type: "item/started",
@@ -851,8 +891,21 @@ export function createTimelineEventFactory(
         },
       };
     },
+    gitActivity(args) {
+      const base = nextDefaultTurnScopedRowBase("git-activity", args);
+
+      return {
+        ...base,
+        type: "system/git-activity",
+        data: {
+          workspacePath: args.workspacePath ?? "/repo",
+          activity: args.activity,
+        },
+      };
+    },
     inputAccepted(args) {
       const base = nextProviderTurnScopedRowBase("input-accepted", args);
+
       return {
         ...base,
         type: "turn/input/accepted",
@@ -867,6 +920,7 @@ export function createTimelineEventFactory(
         ...nextRowBase("legacy-user-message", args),
         scope: turnScope(args.turnId ?? defaultTurnId()),
       };
+
       return {
         ...base,
         type: "system/manager/user_message",
@@ -881,6 +935,7 @@ export function createTimelineEventFactory(
         "permission-grant-lifecycle",
         args,
       );
+
       return {
         ...base,
         type: "system/interaction/lifecycle",
@@ -917,6 +972,7 @@ export function createTimelineEventFactory(
     },
     providerError(args) {
       const base = nextProviderTurnScopedRowBase("provider-error", args);
+
       return {
         ...base,
         type: "provider/error",
@@ -930,6 +986,7 @@ export function createTimelineEventFactory(
     },
     providerWarning(args = {}) {
       const base = nextProviderTurnScopedRowBase("provider-warning", args);
+
       return {
         ...base,
         type: "provider/warning",
@@ -943,6 +1000,7 @@ export function createTimelineEventFactory(
     },
     providerUnhandled(args = {}) {
       const base = nextProviderTurnScopedRowBase("provider-unhandled", args);
+
       return {
         ...base,
         type: "provider/unhandled",
@@ -959,6 +1017,7 @@ export function createTimelineEventFactory(
     },
     systemError(args) {
       const base = nextThreadScopedRowBase("system-error", args);
+
       return {
         ...base,
         type: "system/error",
@@ -977,6 +1036,7 @@ export function createTimelineEventFactory(
               scope: turnScope(args.turnId),
             }
           : nextThreadScopedRowBase("system-operation", args);
+
       return {
         ...base,
         type: "system/operation",
@@ -991,6 +1051,7 @@ export function createTimelineEventFactory(
     },
     systemThreadInterrupted(args = {}) {
       const base = nextThreadScopedRowBase("system-thread-interrupted", args);
+
       return {
         ...base,
         type: "system/thread/interrupted",
@@ -1002,6 +1063,7 @@ export function createTimelineEventFactory(
     },
     threadProvisioning(args) {
       const base = nextThreadScopedRowBase("thread-provisioning", args);
+
       return {
         ...base,
         type: "system/thread-provisioning",
@@ -1015,6 +1077,7 @@ export function createTimelineEventFactory(
     },
     toolCallCompleted(args) {
       const base = nextProviderTurnScopedRowBase("tool-call-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -1037,6 +1100,7 @@ export function createTimelineEventFactory(
     },
     delegationStarted(args) {
       const base = nextProviderTurnScopedRowBase("delegation-started", args);
+
       return {
         ...base,
         type: "item/started",
@@ -1059,6 +1123,7 @@ export function createTimelineEventFactory(
     },
     delegationCompleted(args) {
       const base = nextProviderTurnScopedRowBase("delegation-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -1081,6 +1146,7 @@ export function createTimelineEventFactory(
     },
     toolCallStarted(args) {
       const base = nextProviderTurnScopedRowBase("tool-call-started", args);
+
       return {
         ...base,
         type: "item/started",
@@ -1103,6 +1169,7 @@ export function createTimelineEventFactory(
     },
     fileReadStarted(args) {
       const base = nextProviderTurnScopedRowBase("file-read-started", args);
+
       return {
         ...base,
         type: "item/started",
@@ -1123,6 +1190,7 @@ export function createTimelineEventFactory(
     },
     fileReadCompleted(args) {
       const base = nextProviderTurnScopedRowBase("file-read-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -1143,6 +1211,7 @@ export function createTimelineEventFactory(
     },
     searchStarted(args) {
       const base = nextProviderTurnScopedRowBase("search-started", args);
+
       return {
         ...base,
         type: "item/started",
@@ -1165,6 +1234,7 @@ export function createTimelineEventFactory(
     },
     searchCompleted(args) {
       const base = nextProviderTurnScopedRowBase("search-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -1187,6 +1257,7 @@ export function createTimelineEventFactory(
     },
     planStepsCompleted(args) {
       const base = nextProviderTurnScopedRowBase("plan-steps-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -1209,6 +1280,7 @@ export function createTimelineEventFactory(
     },
     extensionStarted(args) {
       const base = nextProviderTurnScopedRowBase("extension-started", args);
+
       return {
         ...base,
         type: "item/started",
@@ -1227,6 +1299,7 @@ export function createTimelineEventFactory(
     },
     extensionCompleted(args) {
       const base = nextProviderTurnScopedRowBase("extension-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -1245,6 +1318,7 @@ export function createTimelineEventFactory(
     },
     threadCompacted(args = {}) {
       const base = nextProviderTurnScopedRowBase("thread-compacted", args);
+
       return {
         ...base,
         type: "thread/compacted",
@@ -1259,6 +1333,7 @@ export function createTimelineEventFactory(
         "thread-context-cleared",
         args,
       );
+
       return {
         ...base,
         type: "thread/context/cleared",
@@ -1270,6 +1345,7 @@ export function createTimelineEventFactory(
     },
     turnCompleted(args) {
       const base = nextProviderTurnScopedRowBase("turn-completed", args);
+
       return {
         ...base,
         type: "turn/completed",
@@ -1279,8 +1355,21 @@ export function createTimelineEventFactory(
         },
       };
     },
+    turnMainRunUpdated(args) {
+      const base = nextProviderTurnScopedRowBase("turn-main-run-updated", args);
+
+      return {
+        ...base,
+        type: "turn/mainRun/updated",
+        data: {
+          ...providerFields(args),
+          state: args.state,
+        },
+      };
+    },
     turnPlanUpdated(args) {
       const base = nextProviderTurnScopedRowBase("turn-plan-updated", args);
+
       return {
         ...base,
         type: "turn/plan/updated",
@@ -1292,6 +1381,7 @@ export function createTimelineEventFactory(
     },
     turnStarted(args) {
       const base = nextProviderTurnScopedRowBase("turn-started", args);
+
       return {
         ...base,
         type: "turn/started",
@@ -1305,6 +1395,7 @@ export function createTimelineEventFactory(
     },
     reasoningCompleted(args) {
       const base = nextProviderTurnScopedRowBase("reasoning-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -1324,6 +1415,7 @@ export function createTimelineEventFactory(
     },
     reasoningDelta(args) {
       const base = nextProviderTurnScopedRowBase("reasoning-delta", args);
+
       return {
         ...base,
         type: "item/reasoning/textDelta",
@@ -1345,6 +1437,7 @@ export function createTimelineEventFactory(
     },
     reasoningStarted(args = {}) {
       const base = nextProviderTurnScopedRowBase("reasoning-started", args);
+
       return {
         ...base,
         type: "item/started",
@@ -1364,6 +1457,7 @@ export function createTimelineEventFactory(
     },
     webSearchStarted(args) {
       const base = nextProviderTurnScopedRowBase("web-search-started", args);
+
       return {
         ...base,
         type: "item/started",
@@ -1380,6 +1474,7 @@ export function createTimelineEventFactory(
     },
     webSearchCompleted(args) {
       const base = nextProviderTurnScopedRowBase("web-search-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -1396,6 +1491,7 @@ export function createTimelineEventFactory(
     },
     webFetchStarted(args) {
       const base = nextProviderTurnScopedRowBase("web-fetch-started", args);
+
       return {
         ...base,
         type: "item/started",
@@ -1414,6 +1510,7 @@ export function createTimelineEventFactory(
     },
     webFetchCompleted(args) {
       const base = nextProviderTurnScopedRowBase("web-fetch-completed", args);
+
       return {
         ...base,
         type: "item/completed",
@@ -1440,9 +1537,11 @@ export function flattenTimelineRows(
     if (row.kind === "turn") {
       return [row, ...flattenTimelineRows(row.children ?? [])];
     }
+
     if (row.kind === "work" && row.workKind === "delegation") {
       return [row, ...flattenTimelineRows(row.childRows ?? [])];
     }
+
     return [row];
   });
 }
@@ -1473,6 +1572,7 @@ export function renderTimelineFixture(
 ): RenderedTimelineFixture {
   const decodedEvents = args.events.map((row) => decodeThreadEventRow(row));
   const includeNestedRows = args.includeNestedRows ?? true;
+
   const projection = buildEventProjection(decodedEvents, {
     ...args.projectionOptions,
     threadName: args.projectionOptions.threadName ?? "",
@@ -1480,6 +1580,7 @@ export function renderTimelineFixture(
       ? "full"
       : args.projectionOptions.turnMessageDetail,
   });
+
   const commonProjectionOptions = {
     completedTurnDisplay: args.completedTurnDisplay ?? "collapse",
     includeDiagnosticOperations:
@@ -1487,8 +1588,9 @@ export function renderTimelineFixture(
     isLatestPage: true,
     threadStatus: args.projectionOptions.threadStatus ?? "idle",
     threadName: args.projectionOptions.threadName ?? "",
-    workspaceRoot: null,
+    workspaceRoot: args.workspaceRoot ?? null,
   };
+
   const timeline = buildThreadTimelineFromEvents({
     acceptedClientRequestContext: EMPTY_ACCEPTED_CLIENT_REQUEST_CONTEXT,
     contextWindowEvents: [],
@@ -1498,7 +1600,9 @@ export function renderTimelineFixture(
       includeNestedRows,
     },
   });
+
   const rows = timeline.rows;
+
   const ownershipProjection =
     includeNestedRows || args.projectionOptions.turnMessageDetail === "full"
       ? projection
@@ -1507,13 +1611,16 @@ export function renderTimelineFixture(
           threadName: args.projectionOptions.threadName ?? "",
           turnMessageDetail: "full",
         });
+
   const pendingMessages = buildPendingSteerMessagesFromEvents(
     EMPTY_ACCEPTED_CLIENT_REQUEST_CONTEXT,
     decodedEvents,
     commonProjectionOptions,
   );
+
   const lazyRows = rows.map((row) => {
     if (row.kind !== "turn") return row;
+
     const details = buildThreadTimelineTurnDetailsFromEvents({
       events: decodedEvents,
       options: {
@@ -1522,11 +1629,14 @@ export function renderTimelineFixture(
         turnId: row.turnId,
       },
     });
+
     if (details.kind !== "matched") {
       throw new Error(`Missing lazy details for timeline summary ${row.id}`);
     }
+
     return { ...row, children: details.rows };
   });
+
   for (const candidateRows of [rows, lazyRows]) {
     assertTimelineSourceOwnership(
       decodedEvents,
@@ -1537,10 +1647,12 @@ export function renderTimelineFixture(
   }
 
   const messages = flattenEventProjectionMessagesDeep(projection);
+
   const text = formatThreadTimelineText(rows, {
     color: false,
     verbose: args.verbose ?? true,
   });
+
   const turnRows = rows.filter(
     (row): row is Extract<TimelineRow, { kind: "turn" }> => row.kind === "turn",
   );

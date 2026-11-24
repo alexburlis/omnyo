@@ -21,6 +21,7 @@ export function registerThreadMentionDropTarget(
   },
 ): () => void {
   targets.set(element, target);
+
   return () => {
     targets.delete(element);
   };
@@ -34,6 +35,7 @@ export function resolveThreadMentionDropTarget(
   for (const hit of document.elementsFromPoint(x, y)) {
     for (const [element, target] of targets) {
       if (!element.contains(hit) || !target.accepts()) continue;
+
       return {
         element,
         label: "Mention thread",
@@ -44,5 +46,6 @@ export function resolveThreadMentionDropTarget(
       };
     }
   }
+
   return null;
 }

@@ -1,18 +1,23 @@
-import { listLatestThreadStateEventRowsByThreadIds } from "@bb/db";
-import type { DbConnection } from "@bb/db";
+import {
+  getLastStoredTurnRequestEvent,
+  listLatestThreadStateEventRowsByThreadIds,
+} from "@omnyo/db";
+import type { DbConnection } from "@omnyo/db";
 import {
   THREAD_SESSION_OPTIONS_STATE_KIND,
   THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND,
   applySessionOptionSelectionPatch,
   pendingSessionOptionSelections,
   threadScope,
+  serviceTierSchema,
+  type ServiceTier,
   threadSessionOptionSelectionsStateSchema,
   threadSessionOptionsStateSchema,
   type SessionOptionSelectionPatch,
   type SessionOptionSelections,
   type Thread,
   type ThreadSessionOption,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { ApiError } from "../../errors.js";
 import type { AppDeps } from "../../types.js";
 import { decodeStoredEventRowCached } from "./stored-event-decode-cache.js";
@@ -42,6 +47,7 @@ function readLatestThreadState(
     kind,
   })) {
     const event = decodeStoredEventRowCached(db, row);
+
     if (event.type === "thread/extensionState/updated" && event.kind === kind) {
       return {
         payload: event.payload,
@@ -49,6 +55,7 @@ function readLatestThreadState(
       };
     }
   }
+
   return null;
 }
 
@@ -61,9 +68,11 @@ function readThreadSessionOptionState(
     threadId,
     THREAD_SESSION_OPTIONS_STATE_KIND,
   );
+
   const options = threadSessionOptionsStateSchema.safeParse(
     optionsSnapshot?.payload,
   );
+
   const selections = threadSessionOptionSelectionsStateSchema.safeParse(
     readLatestThreadState(
       db,
@@ -71,6 +80,7 @@ function readThreadSessionOptionState(
       THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND,
     )?.payload,
   );
+
   return {
     options: options.success ? options.data.options : [],
     optionsReported: optionsSnapshot !== null,
@@ -84,6 +94,7 @@ function sameSelections(
   right: SessionOptionSelections,
 ): boolean {
   const leftKeys = Object.keys(left);
+
   return (
     leftKeys.length === Object.keys(right).length &&
     leftKeys.every(
@@ -99,6 +110,7 @@ export function seedThreadSessionOptionSelections(
   if (Object.keys(args.selections).length === 0) {
     return;
   }
+
   writeThreadSessionOptionSelections(deps, {
     threadId: args.thread.id,
     environmentId: args.thread.environmentId,
@@ -134,6 +146,7 @@ export function resolvePendingThreadSessionOptions(
   threadId: string,
 ): SessionOptionSelections {
   const state = readThreadSessionOptionState(db, threadId);
+
   return state.optionsReported
     ? pendingSessionOptionSelections(state.options, state.selections)
     : state.selections;
@@ -144,20 +157,24 @@ export function applyThreadSessionOptionPatch(
   args: { thread: Thread; patch: SessionOptionSelectionPatch },
 ): void {
   const state = readThreadSessionOptionState(deps.db, args.thread.id);
+
   const result = applySessionOptionSelectionPatch({
     options: state.options,
     selections: state.selections,
     patch: args.patch,
   });
+
   if (!result.ok) {
     throw new ApiError(400, "invalid_request", result.message);
   }
+
   if (
     state.providerThreadId === null ||
     sameSelections(state.selections, result.selections)
   ) {
     return;
   }
+
   writeThreadSessionOptionSelections(deps, {
     threadId: args.thread.id,
     environmentId: args.thread.environmentId,
@@ -171,20 +188,71 @@ export function dropSettledThreadSessionOptionSelections(
   args: { threadId: string; environmentId: string | null },
 ): void {
   const state = readThreadSessionOptionState(deps.db, args.threadId);
+
   if (state.providerThreadId === null) {
     return;
   }
+
   const pending = pendingSessionOptionSelections(
     state.options,
     state.selections,
   );
+
   if (sameSelections(state.selections, pending)) {
     return;
   }
+
   writeThreadSessionOptionSelections(deps, {
     threadId: args.threadId,
     environmentId: args.environmentId,
     providerThreadId: state.providerThreadId,
     selections: pending,
   });
+}
+
+const SPEED_STATE_KIND = "omnyo/session-speed";
+
+export function readThreadServiceTier(
+  db: DbConnection,
+  threadId: string,
+): ServiceTier | undefined {
+  const rows = listLatestThreadStateEventRowsByThreadIds(db, {
+    threadIds: [threadId],
+    kind: SPEED_STATE_KIND,
+  });
+
+  const lastRequest = getLastStoredTurnRequestEvent(db, threadId);
+
+  for (const row of rows) {
+    if (lastRequest && lastRequest.sequence > row.sequence) return undefined;
+    const event = decodeStoredEventRowCached(db, row);
+
+    if (event.type === "thread/extensionState/updated") {
+      const parsed = serviceTierSchema.safeParse(event.payload);
+
+      if (parsed.success) return parsed.data;
+    }
+  }
+
+  return undefined;
+}
+
+export function writeThreadServiceTier(
+  deps: Pick<AppDeps, "db" | "hub">,
+  thread: Thread,
+  serviceTier: ServiceTier,
+): void {
+  appendThreadEvent(deps, {
+    threadId: thread.id,
+    environmentId: thread.environmentId,
+    type: "thread/extensionState/updated",
+    scope: threadScope(),
+    data: {
+      providerThreadId: "",
+      kind: SPEED_STATE_KIND,
+      payload: serviceTier,
+    },
+  });
+
+  deps.hub.notifyThread(thread.id, ["execution-changed"]);
 }

@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type {
   PluginInstallJob,
   PluginInstallJobState,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { appToast } from "@/components/ui/app-toast";
 import { usePluginNotificationAction } from "@/components/plugin/PluginNotificationDescription";
 import {
@@ -42,11 +42,14 @@ export function PluginInstallJobsHost() {
 
   useEffect(() => {
     if (jobs === undefined) return;
+
     for (const job of jobs) {
       const previous = seenStates.current.get(job.id);
       seenStates.current.set(job.id, job.state);
+
       if (previous === job.state) continue;
       const id = toastId(job);
+
       if (isActivePluginInstallJob(job)) {
         appToast.loading(progressTitle(job), {
           id,
@@ -65,7 +68,9 @@ export function PluginInstallJobsHost() {
         });
         continue;
       }
+
       if (previous === undefined) continue;
+
       if (job.state === "succeeded") {
         applyInstalledPlugin({ queryClient, plugin: job.plugin });
         void invalidatePluginList({ queryClient });

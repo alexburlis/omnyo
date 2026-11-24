@@ -52,9 +52,11 @@ function formatZedRemoteSshUri(args: BuildMacRemoteSshOpenArgs): string {
   const absolutePath = args.path.startsWith("/") ? args.path : `/${args.path}`;
   const encodedPath = absolutePath.split("/").map(encodeURIComponent).join("/");
   const uri = `ssh://${args.sshAuthority}${encodedPath}`;
+
   if (args.lineNumber === null) {
     return uri;
   }
+
   return args.columnNumber === null
     ? `${uri}:${args.lineNumber}`
     : `${uri}:${args.lineNumber}:${args.columnNumber}`;
@@ -64,9 +66,11 @@ function formatTextMateOpenUri(args: BuildMacLineOpenArgs): string {
   const uri = new URL("txmt://open/");
   uri.searchParams.set("url", pathToFileURL(args.path).toString());
   uri.searchParams.set("line", String(args.lineNumber));
+
   if (args.columnNumber !== null) {
     uri.searchParams.set("column", String(args.columnNumber));
   }
+
   return uri.toString();
 }
 
@@ -80,6 +84,7 @@ function buildCursorCliEnv(
   delete cursorEnv.NODE_OPTIONS;
   delete cursorEnv.NODE_REPL_EXTERNAL_MODULE;
   cursorEnv.ELECTRON_RUN_AS_NODE = "1";
+
   return cursorEnv;
 }
 
@@ -152,6 +157,7 @@ function vsCodeFamilyCommands(
       ? { fallbackExecutables: args.fallbackExecutables }
       : {}),
   };
+
   return {
     lineOpenCommand: {
       ...command,
@@ -187,6 +193,7 @@ function jetBrainsEditorAdapter(
     bundledExecutable: bundledExecutable("Contents", "MacOS", args.executable),
     executable: args.executable,
   };
+
   return {
     capabilities: FULL_FILE_OPEN_CAPABILITIES,
     icon: args.icon,

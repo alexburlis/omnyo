@@ -22,7 +22,7 @@ import {
   describeParityValue,
   normalizeParityEvents,
   normalizeParityRows,
-} from "@bb/provider-bridge-protocol/testing";
+} from "@omnyo/provider-bridge-protocol/testing";
 
 interface CliArgs {
   oldRoot: string;
@@ -57,9 +57,11 @@ function parseArgs(argv: string[]): CliArgs {
     verbose: false,
     dumpDir: null,
   };
+
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
+
     switch (flag) {
       case "--old":
         args.oldRoot = resolve(callerCwd, value ?? usage());
@@ -100,14 +102,17 @@ function parseArgs(argv: string[]): CliArgs {
         usage();
     }
   }
+
   if (args.oldRoot === "" || args.newRoot === "") {
     usage();
   }
+
   return args;
 }
 
 function formatComparison(comparison: ParityComparison): string[] {
   const lines: string[] = [];
+
   for (const [layer, diff] of [
     ["events", comparison.events],
     ["rows", comparison.rows],
@@ -115,32 +120,39 @@ function formatComparison(comparison: ParityComparison): string[] {
     for (const value of diff.onlyInOld) {
       lines.push(`  ${layer} only in old: ${describeParityValue(value)}`);
     }
+
     for (const value of diff.onlyInNew) {
       lines.push(`  ${layer} only in new: ${describeParityValue(value)}`);
     }
   }
+
   for (const value of comparison.grammar.onlyInOld) {
     lines.push(`  grammar drop only in old: ${String(value)}`);
   }
+
   for (const value of comparison.grammar.onlyInNew) {
     lines.push(`  grammar drop only in new: ${String(value)}`);
   }
+
   for (const entry of comparison.staleAllowlist) {
     lines.push(
       `  stale allowlist entry (${entry.pr}): ${entry.layer} ${entry.path} — ${entry.reason}`,
     );
   }
+
   return lines;
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const allowlist = readAllowlist(args.allowlist);
+
   const cells = listRecordedCells(args.recordings).filter(
     (cell: RecordedCell) =>
       (args.provider === null || cell.provider === args.provider) &&
       (args.cell === null || cell.cell === args.cell),
   );
+
   if (cells.length === 0) {
     process.stderr.write(`no recordings matched under ${args.recordings}\n`);
     process.exit(2);
@@ -150,18 +162,22 @@ async function main(): Promise<void> {
     loadParityLeg(args.oldRoot),
     loadParityLeg(args.newRoot),
   ]);
+
   process.stdout.write(`old: ${oldLeg.checkoutRoot} (${oldLeg.source})\n`);
   process.stdout.write(`new: ${newLeg.checkoutRoot} (${newLeg.source})\n\n`);
 
   let failed = 0;
   let skipped = 0;
+
   for (const cell of cells) {
     const key = cellKey(cell);
+
     if (!isReplayable(cell.provider)) {
       skipped += 1;
       process.stdout.write(`SKIP ${key}: provider has no replay profile\n`);
       continue;
     }
+
     if (readBridgeRecording(cell.dir).manifest?.scope === "process") {
       skipped += 1;
       process.stdout.write(
@@ -169,7 +185,9 @@ async function main(): Promise<void> {
       );
       continue;
     }
+
     const missingOld = missingBridgeModule(oldLeg.checkoutRoot, cell.provider);
+
     if (missingOld !== null) {
       skipped += 1;
       process.stdout.write(
@@ -177,9 +195,11 @@ async function main(): Promise<void> {
       );
       continue;
     }
+
     const onStderr = args.verbose
       ? (text: string) => process.stderr.write(text)
       : undefined;
+
     const [oldInputs, newInputs] = await Promise.all([
       replayCell(cell, { ...oldLeg, timeoutMs: args.timeoutMs, onStderr }),
       replayCell(cell, {
@@ -189,6 +209,7 @@ async function main(): Promise<void> {
         planFromCurrentLane: true,
       }),
     ]);
+
     if (args.dumpDir !== null) {
       mkdirSync(args.dumpDir, { recursive: true });
       const prefix = join(args.dumpDir, `${cell.provider}-${cell.cell}`);
@@ -209,15 +230,19 @@ async function main(): Promise<void> {
         JSON.stringify(normalizeParityRows(newInputs.rows), null, 2),
       );
     }
+
     const comparison = compareCell(cell, oldInputs, newInputs, allowlist);
     const oldCounts = countCellInputs(oldInputs);
     const newCounts = countCellInputs(newInputs);
     const stalls = [...oldInputs.run.stalls, ...newInputs.run.stalls];
     const recorded = countCellInputs(recordedCellInputs(cell));
+
     const empty =
       recorded.events > 0 && (oldCounts.events === 0 || newCounts.events === 0);
+
     const status =
       comparison.passed && stalls.length === 0 && !empty ? "PASS" : "FAIL";
+
     if (status === "FAIL") failed += 1;
     process.stdout.write(
       `${status} ${key}: old ${oldCounts.events} events/${oldCounts.rows} rows, new ${newCounts.events} events/${newCounts.rows} rows` +
@@ -226,18 +251,22 @@ async function main(): Promise<void> {
         (stalls.length > 0 ? `, ${stalls.length} stall(s)` : "") +
         "\n",
     );
+
     for (const line of formatComparison(comparison)) {
       process.stdout.write(`${line}\n`);
     }
+
     for (const stall of stalls) {
       process.stdout.write(`  stall: ${stall}\n`);
     }
+
     if (empty) {
       process.stdout.write(
         `  empty replay: the recording assembles ${recorded.events} events\n`,
       );
     }
   }
+
   process.stdout.write(
     `\n${cells.length - skipped - failed} passed, ${failed} failed, ${skipped} skipped (${cells.length} cells)\n`,
   );

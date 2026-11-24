@@ -1,5 +1,5 @@
-import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
-import { statusResponseSchema } from "@bb/host-daemon-contract/local";
+import { HOST_DAEMON_PROTOCOL_VERSION } from "@omnyo/host-daemon-contract";
+import { statusResponseSchema } from "@omnyo/host-daemon-contract/local";
 import {
   createTurboBuildCommand,
   resolveDevHostDaemonPort,
@@ -10,6 +10,7 @@ import { runScriptProcess } from "../lib/process-helpers.js";
 import { runMainIfEntrypoint } from "../lib/script-entry.js";
 
 type RestartTarget = "both" | "host-daemon" | "server";
+
 type HostDaemonProtocolCompatibility = "compatible" | "mismatch" | "unknown";
 
 interface RestartTargetConfig {
@@ -40,17 +41,17 @@ interface ReadRunningSupervisorPidArgs {
 
 const restartTargets: Record<RestartTarget, RestartTargetConfig> = {
   both: {
-    filters: ["@bb/server", "@bb/host-daemon"],
+    filters: ["@omnyo/server", "@omnyo/host-daemon"],
     label: "server and host-daemon",
     services: ["server", "host-daemon"],
   },
   "host-daemon": {
-    filters: ["@bb/host-daemon"],
+    filters: ["@omnyo/host-daemon"],
     label: "host-daemon",
     services: ["host-daemon"],
   },
   server: {
-    filters: ["@bb/server"],
+    filters: ["@omnyo/server"],
     label: "server",
     services: ["server"],
   },
@@ -72,11 +73,13 @@ async function resolveHostDaemonProtocolCompatibility({
     const response = await fetchFn(
       `http://127.0.0.1:${hostDaemonLocalPort}/status`,
     );
+
     if (!response.ok) {
       return "unknown";
     }
 
     const status = statusResponseSchema.safeParse(await response.json());
+
     if (!status.success) {
       return "mismatch";
     }
@@ -102,6 +105,7 @@ export async function resolveEffectiveRestartTarget(
     hostDaemonLocalPort:
       options.hostDaemonLocalPort ?? resolveDevHostDaemonPort(),
   });
+
   if (compatibility !== "mismatch") {
     return target;
   }
@@ -109,6 +113,7 @@ export async function resolveEffectiveRestartTarget(
   (options.output ?? process.stdout).write(
     `[dev] Host-daemon protocol differs from the rebuilt server; restarting host-daemon too.\n`,
   );
+
   return "both";
 }
 
@@ -116,6 +121,7 @@ export async function readRunningSupervisorPid(
   args: ReadRunningSupervisorPidArgs,
 ): Promise<number> {
   const pidPath = args.pidPath ?? resolveSupervisorPidPath(args.serviceName);
+
   return readRunningPid({
     pidPath,
     serviceName: args.serviceName,
@@ -124,6 +130,7 @@ export async function readRunningSupervisorPid(
 
 async function runBuild(filters: string[]): Promise<boolean> {
   const buildCommand = createTurboBuildCommand(filters);
+
   const exitCode = await runScriptProcess({
     args: buildCommand.args,
     command: buildCommand.command,
@@ -131,6 +138,7 @@ async function runBuild(filters: string[]): Promise<boolean> {
     env: process.env,
     stdio: "inherit",
   });
+
   return exitCode === 0;
 }
 
@@ -138,6 +146,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   const target = await resolveEffectiveRestartTarget(
     parseTarget(argv[0] ?? "both"),
   );
+
   const targetConfig = restartTargets[target];
   const supervisorPids = new Map<string, number>();
 
@@ -152,8 +161,10 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
     `[dev] Building ${targetConfig.label} before restart.\n`,
   );
   const buildSucceeded = await runBuild(targetConfig.filters);
+
   if (!buildSucceeded) {
     process.exitCode = 1;
+
     return;
   }
 

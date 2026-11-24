@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { DiffPatchEntry } from "@bb/server-contract";
+import type { DiffPatchEntry } from "@omnyo/server-contract";
 import { HEAVY_PAYLOAD_GC_TIME_MS } from "../queries/query-policies";
 import {
   environmentDiffPatchQueryKey,
@@ -13,6 +13,7 @@ export interface PatchQueryIdentity {
 }
 
 const diffPatchEvictionGenerations = new Map<string, number>();
+
 const diffPatchFreshnessGenerations = new Map<string, number>();
 
 let allEnvironmentsEvictionGeneration = 0;
@@ -63,15 +64,19 @@ function getDiffPatchFreshnessEntries(
   environmentId: string,
 ): Map<string, number> {
   let entriesByEnvironment = diffPatchFreshnessByClient.get(queryClient);
+
   if (entriesByEnvironment === undefined) {
     entriesByEnvironment = new Map();
     diffPatchFreshnessByClient.set(queryClient, entriesByEnvironment);
   }
+
   let entries = entriesByEnvironment.get(environmentId);
+
   if (entries === undefined) {
     entries = new Map();
     entriesByEnvironment.set(environmentId, entries);
   }
+
   return entries;
 }
 
@@ -90,10 +95,12 @@ export function isDiffPatchEntryFresh({
   const freshnessGeneration = getDiffPatchFreshnessGeneration(
     identity.environmentId,
   );
+
   const entryGeneration = getDiffPatchFreshnessEntries(
     queryClient,
     identity.environmentId,
   ).get(diffPatchEntryFreshnessKey(identity, path));
+
   return entryGeneration === undefined
     ? freshnessGeneration === 0
     : entryGeneration === freshnessGeneration;
@@ -133,6 +140,7 @@ export function writeDiffPatchEntry({
     identity.targetKey,
     entry.path,
   );
+
   queryClient
     .getQueryCache()
     .build(queryClient, { queryKey, gcTime: Infinity });
@@ -153,16 +161,19 @@ export function pruneDiffPatchEntries({
   paths: readonly string[];
 }): void {
   const retainedPaths = new Set(paths);
+
   const entries = getDiffPatchFreshnessEntries(
     queryClient,
     identity.environmentId,
   );
+
   for (const key of Array.from(entries.keys())) {
     const [targetType, targetKey, path] = JSON.parse(key) as [
       string | null,
       string | null,
       string,
     ];
+
     if (
       targetType !== identity.targetType ||
       targetKey !== identity.targetKey ||
@@ -170,6 +181,7 @@ export function pruneDiffPatchEntries({
     ) {
       continue;
     }
+
     entries.delete(key);
     queryClient.removeQueries({
       exact: true,
@@ -197,10 +209,12 @@ function getDiffPatchRetentionLeases(
   queryClient: QueryClient,
 ): Map<string, DiffPatchRetentionLease> {
   let leases = diffPatchRetentionLeases.get(queryClient);
+
   if (leases === undefined) {
     leases = new Map();
     diffPatchRetentionLeases.set(queryClient, leases);
   }
+
   return leases;
 }
 
@@ -213,30 +227,39 @@ export function retainDiffPatchQueries({
 }): () => void {
   const leases = getDiffPatchRetentionLeases(queryClient);
   let lease = leases.get(environmentId);
+
   if (lease === undefined) {
     lease = { readers: 0, evictionTimer: null };
     leases.set(environmentId, lease);
   }
+
   if (lease.evictionTimer !== null) {
     clearTimeout(lease.evictionTimer);
     lease.evictionTimer = null;
   }
+
   lease.readers += 1;
   let released = false;
+
   return () => {
     if (released) {
       return;
     }
+
     released = true;
     lease.readers -= 1;
+
     if (lease.readers > 0) {
       return;
     }
+
     lease.evictionTimer = setTimeout(() => {
       lease.evictionTimer = null;
+
       if (lease.readers > 0) {
         return;
       }
+
       leases.delete(environmentId);
       bumpDiffPatchEvictionGeneration(environmentId);
       diffPatchFreshnessByClient.get(queryClient)?.delete(environmentId);

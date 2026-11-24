@@ -1,10 +1,13 @@
-import { createThreadRequestSchema } from "@bb/server-contract";
+import {
+  createThreadRequestSchema,
+  submitRequestSchema,
+} from "@omnyo/server-contract";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import * as domain from "@bb/domain";
+import * as domain from "@omnyo/domain";
 import {
   setupCommandOutputTestEnvironment,
   collectLogLines,
@@ -17,7 +20,7 @@ import type { CommandRegistrar } from "../helpers/command-output-harness.js";
 import * as fixtures from "../helpers/command-output-fixtures.js";
 import { registerThreadCommands } from "../../commands/thread/index.js";
 
-describe("bb thread spawn command output", () => {
+describe("omnyo thread spawn command output", () => {
   setupCommandOutputTestEnvironment();
 
   const register: CommandRegistrar = (program) =>
@@ -30,12 +33,14 @@ describe("bb thread spawn command output", () => {
   it("rejects explicitly empty lifecycle ownership instead of creating an independent thread", async () => {
     const post = vi.fn(async ({ json }: { json: unknown }) => {
       createThreadRequestSchema.parse(json);
+
       return fixtures.makeThread({
         id: "unexpected-independent-thread",
         projectId: "proj-1",
         providerId: "codex",
       });
     });
+
     stubServerApi({ "v1.threads.$post": post });
     await expect(
       runCommand(
@@ -57,19 +62,22 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn --prompt-file sends shell-active text untouched", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "bb-spawn-prompt-"));
+  it("omnyo thread spawn --prompt-file sends shell-active text untouched", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omnyo-spawn-prompt-"));
     const path = join(dir, "prompt.md");
     const prompt = 'Fix `apps/cli` and run $(pnpm test) before "done"';
     await writeFile(path, `${prompt}\n`);
+
     const post = vi.fn(async ({ json }: { json: unknown }) => {
       createThreadRequestSchema.parse(json);
+
       return fixtures.makeThread({
         id: "thread-from-file",
         projectId: "proj-1",
         providerId: "codex",
       });
     });
+
     stubServerApi({ "v1.threads.$post": post });
 
     try {
@@ -88,7 +96,78 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn refuses a prompt given both inline and as a file", async () => {
+  it("creates a chat through the receipt route when given a submission ID and never through the create route", async () => {
+    const create = vi.fn(async () =>
+      fixtures.makeThread({
+        id: "unused",
+        projectId: "proj-1",
+        providerId: "codex",
+      }),
+    );
+
+    const submit = vi.fn(async ({ json }: { json: unknown }) => {
+      submitRequestSchema.parse(json);
+
+      return {
+        version: 1,
+        submissionId: "sub_0123456789abcdef0123456789abcdef",
+        storeId: "store-cli",
+        action: "new-thread",
+        threadId: "thread-from-submission",
+        queuedMessageId: "qtm_1",
+        acceptedAt: 1,
+        replayed: false,
+      };
+    });
+
+    stubServerApi({
+      "v1.submissions.$post": submit,
+      "v1.submissions.contract.$get": async () => ({
+        version: 1,
+        storeId: "store-cli",
+      }),
+      "v1.threads.$post": create,
+      "v1.threads.:id.$get": async () =>
+        fixtures.makeThread({
+          id: "thread-from-submission",
+          projectId: "proj-1",
+          providerId: "codex",
+        }),
+    });
+
+    await runCommand(
+      [
+        "thread",
+        "spawn",
+        "--project",
+        "proj-1",
+        "--prompt",
+        "Start once",
+        "--submission-id",
+        "sub_0123456789abcdef0123456789abcdef",
+      ],
+      register,
+    );
+
+    expect(create).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledWith({
+      json: expect.objectContaining({
+        submissionId: "sub_0123456789abcdef0123456789abcdef",
+        storeId: "store-cli",
+        action: {
+          kind: "new-thread",
+          thread: expect.objectContaining({
+            input: [{ type: "text", text: "Start once", mentions: [] }],
+            origin: "cli",
+            projectId: "proj-1",
+          }),
+        },
+        attachments: [],
+      }),
+    });
+  });
+
+  it("omnyo thread spawn refuses a prompt given both inline and as a file", async () => {
     const post = vi.fn();
     stubServerApi({ "v1.threads.$post": post });
 
@@ -114,8 +193,9 @@ describe("bb thread spawn command output", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it("bb thread spawn passes explicit lifecycle ownership independently of parent selection", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
+  it("omnyo thread spawn passes explicit lifecycle ownership independently of parent selection", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-1",
       projectId: "proj-1",
@@ -124,6 +204,7 @@ describe("bb thread spawn command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -155,24 +236,91 @@ describe("bb thread spawn command output", () => {
     expect(resolveLocalHostIdMock).not.toHaveBeenCalled();
   });
 
+  it("omnyo thread spawn links a handoff to its source thread", async () => {
+    const thread: domain.Thread = fixtures.makeThread({
+      id: "thread-handoff",
+      projectId: "proj-1",
+      providerId: "codex",
+      status: "starting",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const post = vi.fn(async () => thread);
+    stubServerApi({ "v1.threads.$post": post });
+
+    await runCommand(
+      [
+        "thread",
+        "spawn",
+        "--project",
+        "proj-1",
+        "--prompt",
+        "Continue from @thread:thread-source",
+        "--origin-kind",
+        "handoff",
+        "--source-thread",
+        "thread-source",
+      ],
+      register,
+    );
+
+    expect(post).toHaveBeenCalledWith({
+      json: expect.objectContaining({
+        originKind: "handoff",
+        sourceThreadId: "thread-source",
+      }),
+    });
+  });
+
+  it("omnyo thread spawn rejects an unknown origin kind", async () => {
+    const post = vi.fn();
+    stubServerApi({ "v1.threads.$post": post });
+
+    await expect(
+      runCommand(
+        [
+          "thread",
+          "spawn",
+          "--project",
+          "proj-1",
+          "--prompt",
+          "hello",
+          "--origin-kind",
+          "clone",
+        ],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+    expect(vi.mocked(console.error).mock.calls[0]?.[0]).toBe(
+      "Error: --origin-kind must be fork or handoff.",
+    );
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["image", "localImage", "screenshot.png", "image/png", false],
     ["file", "localFile", "report.pdf", "application/pdf", false],
     ["file", "localFile", "report with spaces.pdf", "application/pdf", true],
   ] as const)(
-    "bb thread spawn uploads client %s paths before creating the thread",
+    "omnyo thread spawn uploads client %s paths before creating the thread",
     async (flag, type, filename, mimeType, fileUrl) => {
-      const clientDir = await mkdtemp(join(tmpdir(), "bb-cli-thread-image-"));
+      const clientDir = await mkdtemp(
+        join(tmpdir(), "omnyo-cli-thread-image-"),
+      );
+
       try {
         const attachmentPath = join(clientDir, filename);
         const uploadedPath = "uploaded-" + filename;
         const bytes = new Uint8Array([137, 80, 78, 71]);
         await writeFile(attachmentPath, bytes);
+
         const thread: domain.Thread = fixtures.makeThread({
           id: "thread-attachments",
           projectId: "proj-1",
           providerId: "codex",
         });
+
         const post = vi.fn(async () => thread);
         stubServerApi({ "v1.threads.$post": post });
         vi.mocked(globalThis.fetch).mockResolvedValue(
@@ -213,10 +361,12 @@ describe("bb thread spawn command output", () => {
         );
         const uploadBody = vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.body;
         expect(uploadBody).toBeInstanceOf(FormData);
+
         if (!(uploadBody instanceof FormData))
           throw new Error("Missing upload body");
         const uploadedFile = uploadBody.get("file");
         expect(uploadedFile).toBeInstanceOf(File);
+
         if (!(uploadedFile instanceof File))
           throw new Error("Missing uploaded file");
         expect(uploadedFile.name).toBe(filename);
@@ -240,10 +390,12 @@ describe("bb thread spawn command output", () => {
   it.each(["missing", "directory", "upload"] as const)(
     "does not create a thread when its local file fails: %s",
     async (failure) => {
-      const clientDir = await mkdtemp(join(tmpdir(), "bb-cli-thread-file-"));
+      const clientDir = await mkdtemp(join(tmpdir(), "omnyo-cli-thread-file-"));
+
       try {
         const filePath =
           failure === "directory" ? clientDir : join(clientDir, "report.pdf");
+
         if (failure === "upload") await writeFile(filePath, "report");
         const post = vi.fn(async () => ({ ok: true }));
         stubServerApi({ "v1.threads.$post": post });
@@ -271,6 +423,7 @@ describe("bb thread spawn command output", () => {
         ).rejects.toThrow("process.exit:1");
 
         expect(post).not.toHaveBeenCalled();
+
         if (failure !== "upload")
           expect(globalThis.fetch).not.toHaveBeenCalled();
         expect(console.error).toHaveBeenCalled();
@@ -280,12 +433,13 @@ describe("bb thread spawn command output", () => {
     },
   );
 
-  it("bb thread spawn --plan opens the thread with the composer's /plan command mention", async () => {
+  it("omnyo thread spawn --plan opens the thread with the composer's /plan command mention", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-plan",
       projectId: "proj-1",
       providerId: "claude-code",
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -325,8 +479,8 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn ignores BB_PROJECT_ID when --project is omitted", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-env");
+  it("omnyo thread spawn ignores OMNYO_PROJECT_ID when --project is omitted", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-env");
     const post = vi.fn();
     const stderrWrite = captureCommanderErrors();
     stubServerApi({ "v1.threads.$post": post });
@@ -344,7 +498,7 @@ describe("bb thread spawn command output", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it("bb thread spawn lets the server resolve defaults for the personal project", async () => {
+  it("omnyo thread spawn lets the server resolve defaults for the personal project", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-personal",
       projectId: domain.PERSONAL_PROJECT_ID,
@@ -353,6 +507,7 @@ describe("bb thread spawn command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -382,8 +537,9 @@ describe("bb thread spawn command output", () => {
     expect(collectLogLines(vi.mocked(console.log))).toContain("  Project:  -");
   });
 
-  it("bb thread spawn forwards explicit execution overrides", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
+  it("omnyo thread spawn forwards explicit execution overrides", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-overrides",
       projectId: "proj-1",
@@ -392,6 +548,7 @@ describe("bb thread spawn command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -434,13 +591,14 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn forwards hidden visibility", async () => {
+  it("omnyo thread spawn forwards hidden visibility", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-hidden",
       projectId: "proj-1",
       providerId: "codex",
       visibility: "hidden",
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -466,7 +624,7 @@ describe("bb thread spawn command output", () => {
     );
   });
 
-  it("bb thread spawn combines sections and pinning for hidden workers", async () => {
+  it("omnyo thread spawn combines sections and pinning for hidden workers", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       sectionId: "sec_work",
       id: "thread-hidden-section",
@@ -474,6 +632,7 @@ describe("bb thread spawn command output", () => {
       providerId: "codex",
       visibility: "hidden",
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -503,13 +662,13 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn help does not point at bb curl", async () => {
+  it("omnyo thread spawn help does not point at omnyo curl", async () => {
     const helpOutput = await getHelpOutput(["thread", "spawn"], register);
-    expect(helpOutput).not.toContain("bb curl");
+    expect(helpOutput).not.toContain("omnyo curl");
   });
 
-  it("bb thread spawn reports invalid permission mode choices", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
+  it("omnyo thread spawn reports invalid permission mode choices", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
 
     await expect(
       runCommand(
@@ -532,12 +691,13 @@ describe("bb thread spawn command output", () => {
     );
   });
 
-  it("bb thread spawn normalizes deprecated workspace-write to accept-edits", async () => {
+  it("omnyo thread spawn normalizes deprecated workspace-write to accept-edits", async () => {
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-legacy-permission",
       projectId: "proj-1",
       providerId: "codex",
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -560,8 +720,9 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn --json prints the raw thread", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
+  it("omnyo thread spawn --json prints the raw thread", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-json-spawn",
       projectId: "proj-1",
@@ -570,6 +731,7 @@ describe("bb thread spawn command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -595,13 +757,15 @@ describe("bb thread spawn command output", () => {
     ).toEqual(thread);
   });
 
-  it("bb thread spawn prefixes model-catalog failures with context", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
+  it("omnyo thread spawn prefixes model-catalog failures with context", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+
     const post = vi.fn(async () => {
       throw new Error(
         "HTTP 503: Unable to load codex models to resolve the default",
       );
     });
+
     stubServerApi({ "v1.threads.$post": post });
 
     await expect(
@@ -616,8 +780,9 @@ describe("bb thread spawn command output", () => {
     );
   });
 
-  it("bb thread spawn with --parent-thread forwards parent thread id", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
+  it("omnyo thread spawn with --parent-thread forwards parent thread id", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-2",
       projectId: "proj-1",
@@ -627,6 +792,7 @@ describe("bb thread spawn command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -663,9 +829,10 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn does not default parent thread id from BB_THREAD_ID", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
-    vi.stubEnv("BB_THREAD_ID", "thread-context-parent");
+  it("omnyo thread spawn does not default parent thread id from OMNYO_THREAD_ID", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-context-parent");
+
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-2",
       projectId: "proj-1",
@@ -675,6 +842,7 @@ describe("bb thread spawn command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -708,9 +876,10 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn with --parent-self forwards BB_THREAD_ID as parent thread id", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
-    vi.stubEnv("BB_THREAD_ID", "thread-context-parent");
+  it("omnyo thread spawn with --parent-self forwards OMNYO_THREAD_ID as parent thread id", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-context-parent");
+
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-2",
       projectId: "proj-1",
@@ -720,6 +889,7 @@ describe("bb thread spawn command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -750,7 +920,7 @@ describe("bb thread spawn command output", () => {
     );
   });
 
-  it("bb thread spawn rejects --parent-self without BB_THREAD_ID", async () => {
+  it("omnyo thread spawn rejects --parent-self without OMNYO_THREAD_ID", async () => {
     const post = vi.fn(async () =>
       fixtures.makeThread({
         id: "thread-parent-self-missing-context",
@@ -758,6 +928,7 @@ describe("bb thread spawn command output", () => {
         providerId: "codex",
       }),
     );
+
     stubServerApi({ "v1.threads.$post": post });
 
     await expect(
@@ -780,13 +951,14 @@ describe("bb thread spawn command output", () => {
     ).rejects.toThrow("process.exit:1");
 
     expect(console.error).toHaveBeenCalledWith(
-      "Error: --parent-self requires BB_THREAD_ID to be set.",
+      "Error: --parent-self requires OMNYO_THREAD_ID to be set.",
     );
     expect(post).not.toHaveBeenCalled();
   });
 
-  it("bb thread spawn rejects combining --parent-thread and --parent-self", async () => {
-    vi.stubEnv("BB_THREAD_ID", "thread-context-parent");
+  it("omnyo thread spawn rejects combining --parent-thread and --parent-self", async () => {
+    vi.stubEnv("OMNYO_THREAD_ID", "thread-context-parent");
+
     const post = vi.fn(async () =>
       fixtures.makeThread({
         id: "thread-conflicting-parent",
@@ -794,6 +966,7 @@ describe("bb thread spawn command output", () => {
         providerId: "codex",
       }),
     );
+
     stubServerApi({ "v1.threads.$post": post });
 
     await expect(
@@ -823,7 +996,7 @@ describe("bb thread spawn command output", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it("bb thread spawn rejects invalid parent-thread values", async () => {
+  it("omnyo thread spawn rejects invalid parent-thread values", async () => {
     const post = vi.fn(async () =>
       fixtures.makeThread({
         id: "thread-invalid-parent",
@@ -831,6 +1004,7 @@ describe("bb thread spawn command output", () => {
         providerId: "codex",
       }),
     );
+
     stubServerApi({ "v1.threads.$post": post });
 
     await expect(
@@ -859,8 +1033,9 @@ describe("bb thread spawn command output", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it("bb thread spawn forwards a valid --environment ID", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
+  it("omnyo thread spawn forwards a valid --environment ID", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-env-1",
       projectId: "proj-1",
@@ -870,6 +1045,7 @@ describe("bb thread spawn command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -905,9 +1081,10 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn forwards an absolute --environment path as an unmanaged workspace", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
-    const workspacePath = "/Users/michael/Projects/bb";
+  it("omnyo thread spawn forwards an absolute --environment path as an unmanaged workspace", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+    const workspacePath = "/Users/michael/Projects/omnyo";
+
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-env-path-1",
       projectId: "proj-1",
@@ -917,6 +1094,7 @@ describe("bb thread spawn command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -957,8 +1135,8 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn rejects invalid non-path --environment IDs", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
+  it("omnyo thread spawn rejects invalid non-path --environment IDs", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
     const post = vi.fn();
     stubServerApi({ "v1.threads.$post": post });
 
@@ -988,8 +1166,9 @@ describe("bb thread spawn command output", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it("bb thread spawn forwards --new-environment", async () => {
-    vi.stubEnv("BB_PROJECT_ID", "proj-1");
+  it("omnyo thread spawn forwards --new-environment", async () => {
+    vi.stubEnv("OMNYO_PROJECT_ID", "proj-1");
+
     const thread: domain.Thread = fixtures.makeThread({
       id: "thread-env-1",
       projectId: "proj-1",
@@ -999,6 +1178,7 @@ describe("bb thread spawn command output", () => {
       createdAt: 1,
       updatedAt: 1,
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({ "v1.threads.$post": post });
 
@@ -1032,6 +1212,7 @@ describe("bb thread spawn command output", () => {
         environment: {
           type: "host",
           hostId: "host-test-001",
+          machineChoice: "default",
           workspace: {
             type: "managed-worktree",
             baseBranch: { kind: "default" },
@@ -1041,12 +1222,13 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn targets an unambiguous machine name", async () => {
+  it("omnyo thread spawn targets an unambiguous machine name", async () => {
     const thread = fixtures.makeThread({
       id: "thread-machine",
       projectId: "proj-1",
       providerId: "codex",
     });
+
     const post = vi.fn(async () => thread);
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [
@@ -1088,7 +1270,7 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn combines --host with an unmanaged path", async () => {
+  it("omnyo thread spawn combines --host with an unmanaged path", async () => {
     const post = vi.fn(async () =>
       fixtures.makeThread({
         id: "thread-machine-path",
@@ -1096,6 +1278,7 @@ describe("bb thread spawn command output", () => {
         providerId: "codex",
       }),
     );
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [
         {
@@ -1137,7 +1320,7 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn creates a managed worktree on the selected machine", async () => {
+  it("omnyo thread spawn creates a managed worktree on the selected machine", async () => {
     const post = vi.fn(async () =>
       fixtures.makeThread({
         id: "thread-machine-worktree",
@@ -1145,6 +1328,7 @@ describe("bb thread spawn command output", () => {
         providerId: "codex",
       }),
     );
+
     stubServerApi({
       "v1.hosts.$get": vi.fn(async () => [
         {
@@ -1182,6 +1366,7 @@ describe("bb thread spawn command output", () => {
         environment: {
           type: "host",
           hostId: "host-remote",
+          machineChoice: "explicit",
           workspace: {
             type: "managed-worktree",
             baseBranch: { kind: "named", name: "main" },
@@ -1191,7 +1376,7 @@ describe("bb thread spawn command output", () => {
     });
   });
 
-  it("bb thread spawn rejects selecting a machine for a reused environment", async () => {
+  it("omnyo thread spawn rejects selecting a machine for a reused environment", async () => {
     const post = vi.fn();
     stubServerApi({ "v1.threads.$post": post });
 
@@ -1298,6 +1483,7 @@ describe("bb thread spawn command output", () => {
           providerId: "codex",
         }),
       );
+
       stubProviders(post);
 
       await runCommand(
@@ -1322,6 +1508,7 @@ describe("bb thread spawn command output", () => {
             type: "provider",
             environmentProviderId: "git-worktree",
             machine: { type: "existing", hostId: "host-test-001" },
+            machineChoice: "default",
             inputs: { branch: { kind: "named", name: "release" } },
           },
         }),
@@ -1336,6 +1523,7 @@ describe("bb thread spawn command output", () => {
           providerId: "codex",
         }),
       );
+
       stubProviders(post);
 
       await runCommand(
@@ -1358,6 +1546,7 @@ describe("bb thread spawn command output", () => {
             type: "provider",
             environmentProviderId: "plain",
             machine: { type: "existing", hostId: "host-test-001" },
+            machineChoice: "default",
             inputs: null,
           },
         }),
@@ -1372,6 +1561,7 @@ describe("bb thread spawn command output", () => {
           providerId: "codex",
         }),
       );
+
       stubProviders(post);
 
       await runCommand(
@@ -1394,6 +1584,7 @@ describe("bb thread spawn command output", () => {
             type: "provider",
             environmentProviderId: "optional",
             machine: { type: "existing", hostId: "host-test-001" },
+            machineChoice: "default",
             inputs: {},
           },
         }),
@@ -1404,7 +1595,7 @@ describe("bb thread spawn command output", () => {
       [
         "a provider with inputs and none given",
         ["--environment-provider", "git-worktree"],
-        "Error: The 'git-worktree' environment provider needs --environment-inputs <json>; `bb environment providers --json` shows its schema.",
+        "Error: The 'git-worktree' environment provider needs --environment-inputs <json>; `omnyo environment providers --json` shows its schema.",
       ],
       [
         "inputs given to a provider without any",

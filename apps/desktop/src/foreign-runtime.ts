@@ -1,11 +1,11 @@
 import {
-  bbAppRuntimeVerifyTokens,
-  clearOwnBbAppRuntimeFile,
-  readBbAppRuntimeFile,
-  type BbAppRuntimeFile,
-} from "@bb/config/app-runtime-file";
-import { stopVerifiedProcess } from "@bb/config/verified-process-stop";
-import type { VerifiedProcessOps } from "@bb/config/verified-process-stop";
+  appRuntimeVerifyTokens,
+  clearOwnAppRuntimeFile,
+  readAppRuntimeFile,
+  type AppRuntimeFile,
+} from "@omnyo/config/app-runtime-file";
+import { stopVerifiedProcess } from "@omnyo/config/verified-process-stop";
+import type { VerifiedProcessOps } from "@omnyo/config/verified-process-stop";
 
 export interface ForeignRuntimeDetails {
   dataDir: string;
@@ -36,7 +36,7 @@ type StopForeignRuntimeResult =
   | { kind: "unverified"; pid: number };
 
 function matchesProbedServer(
-  runtimeFile: BbAppRuntimeFile,
+  runtimeFile: AppRuntimeFile,
   serverUrl: string,
 ): boolean {
   try {
@@ -53,10 +53,12 @@ export async function readForeignRuntimeDetails(
     return null;
   }
 
-  const runtimeFile = await readBbAppRuntimeFile(args.dataDir);
+  const runtimeFile = await readAppRuntimeFile(args.dataDir);
+
   if (runtimeFile === null) {
     return null;
   }
+
   if (!matchesProbedServer(runtimeFile, args.serverUrl)) {
     return null;
   }
@@ -74,7 +76,8 @@ export async function readForeignRuntimeDetails(
 export async function stopForeignRuntime(
   args: StopForeignRuntimeArgs,
 ): Promise<StopForeignRuntimeResult> {
-  const current = await readBbAppRuntimeFile(args.details.dataDir);
+  const current = await readAppRuntimeFile(args.details.dataDir);
+
   if (
     current !== null &&
     (current.pid !== args.details.pid ||
@@ -90,21 +93,25 @@ export async function stopForeignRuntime(
     signal: "SIGTERM",
     startedAt: args.details.startedAt,
     timeoutMs: args.timeoutMs,
-    verifyTokens: bbAppRuntimeVerifyTokens(args.details.entryPath),
+    verifyTokens: appRuntimeVerifyTokens(args.details.entryPath),
   });
 
   if (stopResult.kind === "unverified") {
     return { kind: "unverified", pid: args.details.pid };
   }
+
   if (stopResult.kind === "still-running") {
     return { kind: "still-running", pid: args.details.pid };
   }
+
   if (stopResult.kind === "not-running") {
     return { kind: "not-running" };
   }
-  await clearOwnBbAppRuntimeFile({
+
+  await clearOwnAppRuntimeFile({
     dataDir: args.details.dataDir,
     pid: args.details.pid,
   });
+
   return { kind: "stopped" };
 }

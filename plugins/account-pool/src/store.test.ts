@@ -1,13 +1,14 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import { tmpdir } from "node:os";
-import { mkdtemp } from "node:fs/promises";
 import Database from "better-sqlite3";
-import type { PluginKvStorage } from "@get-bb/plugin-sdk";
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import type { PluginKvStorage } from "@omnyo/plugin-sdk";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Account } from "./contracts.js";
-import { AccountStore, QUOTA_MIGRATIONS, QuotaStore } from "./store.js";
+import {
+  AccountStore,
+  HubTokenStore,
+  QUOTA_MIGRATIONS,
+  QuotaStore,
+} from "./store.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -19,9 +20,11 @@ function delayedAccountReads(kv: PluginKvStorage): PluginKvStorage {
   return {
     async get<T>(key: string): Promise<T | undefined> {
       const value = await kv.get<T>(key);
+
       if (key === "accounts:v1") {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
+
       return value;
     },
     set: (key, value) => kv.set(key, value),
@@ -32,13 +35,14 @@ function delayedAccountReads(kv: PluginKvStorage): PluginKvStorage {
 
 describe("AccountStore", () => {
   it("loads account metadata written before account UUIDs were stored", async () => {
-    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-account-store-"));
-    const host = createFakePluginHost({ pluginId: "account-pool", dataDir });
+    const host = createFakePluginHost({ pluginId: "account-pool" });
+
     const store = new AccountStore(
-      host.bb.storage.kv,
-      path.join(dataDir, "secrets"),
+      host.api.storage.kv,
+      host.api.experimental_secrets,
     );
-    await host.bb.storage.kv.set("accounts:v1", [
+
+    await host.api.storage.kv.set("accounts:v1", [
       {
         id: "11111111-1111-4111-8111-111111111111",
         provider: "claude",
@@ -52,10 +56,7 @@ describe("AccountStore", () => {
         createdAt: 1,
       },
     ]);
-    cleanups.push(async () => {
-      await host.harness.lifecycle.dispose();
-      await fs.rm(dataDir, { recursive: true, force: true });
-    });
+    cleanups.push(() => host.harness.lifecycle.dispose());
 
     expect(await store.list()).toEqual([
       expect.objectContaining({ accountUuid: null }),
@@ -63,18 +64,15 @@ describe("AccountStore", () => {
   });
 
   it("preserves both accounts added concurrently", async () => {
-    const dataDir = await mkdtemp(path.join(tmpdir(), "bb-account-store-"));
-    const host = createFakePluginHost({ pluginId: "account-pool", dataDir });
-    const secretsDir = path.join(dataDir, "secrets");
+    const host = createFakePluginHost({ pluginId: "account-pool" });
+
     const store = new AccountStore(
-      delayedAccountReads(host.bb.storage.kv),
-      secretsDir,
+      delayedAccountReads(host.api.storage.kv),
+      host.api.experimental_secrets,
     );
-    await store.initialize();
-    cleanups.push(async () => {
-      await host.harness.lifecycle.dispose();
-      await fs.rm(dataDir, { recursive: true, force: true });
-    });
+
+    cleanups.push(() => host.harness.lifecycle.dispose());
+
     const account = (
       label: string,
     ): Omit<Account, "id" | "createdAt" | "lastUsedAt" | "lastUsedHostId"> => ({
@@ -98,6 +96,104 @@ describe("AccountStore", () => {
       [first.id, second.id].sort(),
     );
   });
+
+  it("keeps each account's credentials in its own secret and removes them with the account", async () => {
+    const host = createFakePluginHost({ pluginId: "account-pool" });
+    cleanups.push(() => host.harness.lifecycle.dispose());
+    const secrets = host.api.experimental_secrets;
+    const store = new AccountStore(host.api.storage.kv, secrets);
+
+    const account = await store.add(
+      {
+        provider: "claude",
+        kind: "api-key",
+        label: "work",
+        email: null,
+        accountUuid: null,
+        subscriptionType: null,
+        rateLimitTier: null,
+        enabled: true,
+        priority: 100,
+      },
+      { kind: "api-key", apiKey: "sk-work" },
+    );
+
+    const name = `accounts/account-${account.id}.json`;
+    expect(await secrets.get(name)).toBe(
+      `${JSON.stringify({ kind: "api-key", apiKey: "sk-work" })}\n`,
+    );
+    expect(await store.readSecret(account)).toEqual({
+      kind: "api-key",
+      apiKey: "sk-work",
+    });
+
+    await store.writeSecret(account.id, { kind: "api-key", apiKey: "sk-next" });
+    expect(await store.readSecret(account)).toEqual({
+      kind: "api-key",
+      apiKey: "sk-next",
+    });
+
+    expect(await store.remove(account.id)).toBe(true);
+    expect(await secrets.list()).toEqual([]);
+    await expect(store.readSecret(account)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      store.writeSecret(account.id, { kind: "api-key", apiKey: "sk-late" }),
+    ).rejects.toThrow("no longer exists");
+    expect(await secrets.list()).toEqual([]);
+  });
+
+  it("reads a secret left by the earlier file layout under the same name", async () => {
+    const host = createFakePluginHost({ pluginId: "account-pool" });
+    cleanups.push(() => host.harness.lifecycle.dispose());
+    const id = "11111111-1111-4111-8111-111111111111";
+
+    await host.api.experimental_secrets.set(
+      `accounts/account-${id}.json`,
+      `${JSON.stringify({ kind: "api-key", apiKey: "sk-legacy" })}\n`,
+    );
+    await host.api.experimental_secrets.set(
+      "accounts/hub-token-host-one.json",
+      `${JSON.stringify({
+        hostId: "host-one",
+        value: "B".repeat(43),
+        mintedAt: 5,
+        lastUsedAt: null,
+        previous: [],
+      })}\n`,
+    );
+
+    const store = new AccountStore(
+      host.api.storage.kv,
+      host.api.experimental_secrets,
+    );
+
+    const tokens = new HubTokenStore(host.api.experimental_secrets);
+
+    const legacy: Account = {
+      id,
+      provider: "claude",
+      kind: "api-key",
+      label: "Existing API key",
+      email: null,
+      accountUuid: null,
+      subscriptionType: null,
+      rateLimitTier: null,
+      enabled: true,
+      priority: 100,
+      createdAt: 1,
+      lastUsedAt: null,
+      lastUsedHostId: null,
+    };
+
+    expect(await store.readSecret(legacy)).toEqual({
+      kind: "api-key",
+      apiKey: "sk-legacy",
+    });
+    expect(await tokens.authenticate("B".repeat(43))).toBe("host-one");
+    expect(await tokens.forHost("host-one")).toBe("B".repeat(43));
+  });
 });
 
 describe("QuotaStore", () => {
@@ -106,6 +202,7 @@ describe("QuotaStore", () => {
     const initial = QUOTA_MIGRATIONS[0];
     const familyMigration = QUOTA_MIGRATIONS[1];
     const windowMigration = QUOTA_MIGRATIONS[2];
+
     if (
       initial === undefined ||
       familyMigration === undefined ||
@@ -113,6 +210,7 @@ describe("QuotaStore", () => {
     ) {
       throw new Error("Expected quota migrations.");
     }
+
     database.exec(initial);
     database
       .prepare(
@@ -127,6 +225,7 @@ describe("QuotaStore", () => {
       );
     database.exec(familyMigration);
     database.exec(windowMigration);
+
     for (const migration of QUOTA_MIGRATIONS.slice(3)) database.exec(migration);
     const quotas = new QuotaStore(database);
 

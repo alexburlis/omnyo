@@ -1,4 +1,4 @@
-import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
+import { createFakePluginHost } from "@omnyo/plugin-sdk/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type Db,
@@ -7,6 +7,7 @@ import {
   getRun,
   getRunRequired,
   listExpiredTerminalRuns,
+  markNotificationSent,
   migrations,
   ownWorker,
 } from "./data.js";
@@ -14,7 +15,7 @@ import plugin from "./server.js";
 import {
   createWorkflowService,
   formatWorkflowNotification,
-  isRetryableProviderFailure,
+  isTransientRequestFailure,
 } from "./service.js";
 import {
   DEFAULT_WORKFLOW_SETTINGS,
@@ -26,9 +27,11 @@ async function eventually(
   timeoutMs = 4_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+
   while (true) {
     try {
       await assertion();
+
       return;
     } catch (error) {
       if (Date.now() >= deadline) throw error;
@@ -75,7 +78,35 @@ function setup(
   const workers = new Map<string, WorkerState>();
   const archived: string[] = [];
   const archiveFailures = new Set<string>();
-  const { bb, harness } = createFakePluginHost({
+
+  const environments = new Map<string, Record<string, unknown>>([
+    [
+      "environment-1",
+      {
+        id: "environment-1",
+        projectId: "project-test",
+        hostId: "host-1",
+        path: "/workspace",
+        status: "ready",
+        lifecycle: { phase: "active" },
+        hostLifecycle: "active",
+      },
+    ],
+    [
+      "environment-target",
+      {
+        id: "environment-target",
+        projectId: "project-test",
+        hostId: "host-target",
+        path: "C:\\workspace",
+        status: "ready",
+        lifecycle: { phase: "active" },
+        hostLifecycle: "active",
+      },
+    ],
+  ]);
+
+  const { api, harness } = createFakePluginHost({
     pluginId: "workflows",
     sdk: {
       threads: {
@@ -87,6 +118,7 @@ function setup(
                 code: "thread_not_found",
               });
             }
+
             return {
               id: threadId,
               environmentId: "environment-1",
@@ -95,13 +127,16 @@ function setup(
               archivedAt: originArchived ? Date.now() : null,
             } as never;
           }
+
           const worker = workers.get(threadId);
+
           if (worker?.deleted) {
             throw Object.assign(new Error("Thread not found"), {
               status: 404,
               code: "thread_not_found",
             });
           }
+
           return {
             id: threadId,
             environmentId: "environment-1",
@@ -110,6 +145,7 @@ function setup(
           } as never;
         },
         list: async () => [],
+        queue: { list: async () => [] },
         output: async ({ threadId }) => ({
           output: workers.get(threadId)?.output ?? null,
         }),
@@ -125,6 +161,7 @@ function setup(
           childCount += 1;
           const id = `child-${childCount}`;
           workers.set(id, { status: "active", output: null, deleted: false });
+
           return { id } as never;
         },
         send: async () => ({ ok: true }),
@@ -133,7 +170,9 @@ function setup(
           if (archiveFailures.has(threadId)) {
             throw new Error("Host unavailable");
           }
+
           archived.push(threadId);
+
           return { ok: true } as never;
         },
       },
@@ -163,19 +202,22 @@ function setup(
         }),
       },
       environments: {
-        get: async () =>
-          ({
-            id: "environment-1",
-            projectId: "project-test",
-            hostId: "host-1",
-            path: "/workspace",
-          }) as never,
+        get: async ({ environmentId }) => {
+          const environment = environments.get(environmentId);
+
+          if (environment === undefined)
+            throw new Error("Environment not found");
+
+          return environment as never;
+        },
       },
       files: {
         read: async ({ path }) => {
           const content = files[path];
+
           if (content === undefined)
             throw new Error(`Missing test file ${path}`);
+
           return {
             content,
             contentEncoding: "utf8",
@@ -185,9 +227,13 @@ function setup(
       },
     },
   });
-  const db = bb.storage.database();
-  bb.storage.migrate(db, migrations);
-  const service = createWorkflowService(bb, db, settings);
+
+  const db = api.storage.database();
+  api.storage.migrate(db, migrations);
+
+  const service = createWorkflowService(api, db, settings, {
+    failedWorkerCheckDelayMs: 20,
+  });
 
   async function start(workflowSource: string) {
     return service.start({
@@ -200,11 +246,12 @@ function setup(
   }
 
   return {
-    bb,
+    api,
     db,
     harness,
     service,
     workers,
+    environments,
     start,
     archived,
     failArchive: (threadId: string) => archiveFailures.add(threadId),
@@ -261,6 +308,7 @@ function expiredRunWithWorkers(
       finishedAt,
     );
   });
+
   return runId;
 }
 
@@ -272,6 +320,106 @@ describe("workflow service policy integration", () => {
     harnesses.length = 0;
   });
 
+  it.each([
+    { efforts: [], parent: "medium", requested: null, resolved: "medium" },
+    { efforts: [], parent: "high", requested: null, resolved: "medium" },
+    {
+      efforts: ["low", "medium"],
+      parent: "low",
+      requested: null,
+      resolved: "low",
+    },
+    {
+      efforts: ["low", "medium"],
+      parent: "xhigh",
+      requested: null,
+      resolved: "medium",
+    },
+    { efforts: [], parent: "medium", requested: "medium", resolved: "medium" },
+    { efforts: [], parent: "medium", requested: "high", resolved: null },
+    {
+      efforts: ["low", "medium"],
+      parent: "medium",
+      requested: "xhigh",
+      resolved: null,
+    },
+  ] as const)(
+    "resolves reasoning: $efforts parent=$parent requested=$requested",
+    async ({ efforts, parent, requested, resolved }) => {
+      const test = setup();
+      harnesses.push(test.harness);
+      test.harness.sdk.stub("providers.models", async () => ({
+        providers: [],
+        models: [
+          {
+            ...model(),
+            supportedReasoningEfforts: efforts.map((reasoningEffort) => ({
+              reasoningEffort,
+              description: "test",
+            })),
+          },
+        ],
+        selectedOnlyModels: [],
+        modelLoadError: null,
+      }));
+      test.harness.sdk.stub("threads.defaultExecutionOptions", async () => ({
+        model: "gpt-test",
+        reasoningLevel: parent,
+        permissionMode: "full",
+        serviceTier: "default",
+        source: "default",
+      }));
+
+      const run = await test.start(
+        source(
+          requested === null
+            ? 'return await agent("review");'
+            : `return await agent("review", { provider: "codex", model: "gpt-test", reasoningLevel: "${requested}" });`,
+        ),
+      );
+
+      const controller = new AbortController();
+      const worker = test.service.runWorker(controller.signal);
+
+      try {
+        if (resolved === null) {
+          await eventually(() =>
+            expect(getRunRequired(test.db, run.id).status).toBe("failed"),
+          );
+          expect(getRunRequired(test.db, run.id).error).toContain(
+            "not supported",
+          );
+          expect(test.childCount()).toBe(0);
+          expect(getCall(test.db, run.id, 0)).toBeNull();
+
+          return;
+        }
+
+        await eventually(() => {
+          expect(getRunRequired(test.db, run.id).error).toBeNull();
+          expect(test.childCount()).toBe(1);
+        });
+        expect(test.harness.sdk.callsTo("threads.spawn")[0]?.[0]).toMatchObject(
+          {
+            providerId: "codex",
+            model: "gpt-test",
+            reasoningLevel: resolved,
+          },
+        );
+        expect(getCall(test.db, run.id, 0)).toMatchObject({
+          resolvedReasoningLevel: resolved,
+        });
+        test.service.onThreadIdle("child-1", "completed");
+        await eventually(() =>
+          expect(getRunRequired(test.db, run.id).status).toBe("succeeded"),
+        );
+      } finally {
+        controller.abort();
+        await worker;
+      }
+    },
+  );
+
   it("applies live settings to future run snapshots without mutating existing runs", async () => {
     const initial = {
       maxActiveRuns: 1,
@@ -281,7 +429,8 @@ describe("workflow service policy integration", () => {
       retentionDays: 7,
       maxNotificationBytes: 2048,
     };
-    const { bb, harness } = createFakePluginHost({
+
+    const { api, harness } = createFakePluginHost({
       pluginId: "workflows",
       agentSkillIds: ["workflows"],
       settings: initial,
@@ -303,15 +452,17 @@ describe("workflow service policy integration", () => {
         },
       },
     });
+
     harnesses.push(harness);
-    await plugin(bb);
+    await plugin(api);
     expect(harness.registrations.settingsDescriptors).not.toEqual({});
 
     const first = JSON.parse(
-      (await harness.callAgentTool("bb_workflow_run", {
+      (await harness.callAgentTool("omnyo_workflow_run", {
         script: source("return null;", "settings-one"),
       })) as string,
     ) as { runId: string };
+
     const next = {
       maxActiveRuns: 2,
       maxConcurrentAgents: 4,
@@ -320,9 +471,11 @@ describe("workflow service policy integration", () => {
       retentionDays: 14,
       maxNotificationBytes: 4096,
     };
+
     await harness.setSettings(next);
+
     const second = JSON.parse(
-      (await harness.callAgentTool("bb_workflow_run", {
+      (await harness.callAgentTool("omnyo_workflow_run", {
         script: source("return null;", "settings-two"),
       })) as string,
     ) as { runId: string };
@@ -331,22 +484,28 @@ describe("workflow service policy integration", () => {
       threadId: "thread-test",
       projectId: "project-test",
     };
+
     const firstStatusResult = await harness.runCli(
       ["status", first.runId],
       cliContext,
     );
+
     const secondStatusResult = await harness.runCli(
       ["status", second.runId],
       cliContext,
     );
+
     expect(firstStatusResult).toMatchObject({ exitCode: 0 });
     expect(secondStatusResult).toMatchObject({ exitCode: 0 });
+
     const firstStatus = JSON.parse(firstStatusResult.stdout!) as {
       settings: Record<string, number>;
     };
+
     const secondStatus = JSON.parse(secondStatusResult.stdout!) as {
       settings: Record<string, number>;
     };
+
     expect(firstStatus.settings).toEqual(initial);
     expect(secondStatus.settings).toEqual(next);
   });
@@ -354,11 +513,14 @@ describe("workflow service policy integration", () => {
   it("resolves named and path children on the origin host", async () => {
     const named = source("return { kind: 'named', args };", "named-child");
     const path = source("return { kind: 'path', args };", "path-child");
+
     const test = setup(DEFAULT_WORKFLOW_SETTINGS, {
-      "/workspace/.bb/workflows/named-child.js": named,
+      "/workspace/.omnyo/workflows/named-child.js": named,
       "/workspace/child.js": path,
     });
+
     harnesses.push(test.harness);
+
     const run = await test.start(
       source(
         `return [
@@ -368,6 +530,7 @@ describe("workflow service policy integration", () => {
         "nested-source-modes",
       ),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
     await eventually(() =>
@@ -381,7 +544,7 @@ describe("workflow service policy integration", () => {
       [
         {
           hostId: "host-1",
-          path: "/workspace/.bb/workflows/named-child.js",
+          path: "/workspace/.omnyo/workflows/named-child.js",
           rootPath: "/workspace",
         },
       ],
@@ -404,6 +567,7 @@ describe("workflow service policy integration", () => {
     test.deleteOrigin();
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() =>
         expect(getRunRequired(test.db, run.id)).toMatchObject({
@@ -423,30 +587,37 @@ describe("workflow service policy integration", () => {
     harnesses.push(test.harness);
     const reads: string[] = [];
     let releaseFirst: (() => void) | undefined;
+
     const firstGate = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
+
     const children: Record<string, string> = {
-      "/workspace/.bb/workflows/first.js": source(
+      "/workspace/.omnyo/workflows/first.js": source(
         `return await agent("first-agent");`,
         "first",
       ),
-      "/workspace/.bb/workflows/second.js": source(
+      "/workspace/.omnyo/workflows/second.js": source(
         `return await agent("second-agent");`,
         "second",
       ),
     };
+
     test.harness.sdk.stub("files.read", (async ({ path }: { path: string }) => {
       reads.push(path);
+
       if (path.endsWith("/first.js")) await firstGate;
       const content = children[path];
+
       if (content === undefined) throw new Error(`missing ${path}`);
+
       return {
         content,
         contentEncoding: "utf8",
         sizeBytes: Buffer.byteLength(content),
       };
     }) as never);
+
     const run = await test.start(
       source(
         `return await parallel([
@@ -456,6 +627,7 @@ describe("workflow service policy integration", () => {
         "nested-order",
       ),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
     await eventually(() => expect(reads).toHaveLength(1));
@@ -485,18 +657,22 @@ describe("workflow service policy integration", () => {
     harnesses.push(test.harness);
     const reads: string[] = [];
     let releaseMissing: (() => void) | undefined;
+
     const missingGate = new Promise<void>((resolve) => {
       releaseMissing = resolve;
     });
+
     const inline = source(
       `return await agent("inline-agent");`,
       "inline-child",
     );
+
     test.harness.sdk.stub("files.read", (async ({ path }: { path: string }) => {
       reads.push(path);
       await missingGate;
       throw new Error("missing first child");
     }) as never);
+
     const run = await test.start(
       source(
         `return await parallel([
@@ -506,6 +682,7 @@ describe("workflow service policy integration", () => {
         "nested-recovery",
       ),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
     await eventually(() => expect(reads).toHaveLength(1));
@@ -529,8 +706,10 @@ describe("workflow service policy integration", () => {
       maxAgentCalls: 2,
       maxConcurrentAgents: 1,
     });
+
     harnesses.push(test.harness);
     const child = source(`return await agent("child-agent");`, "inline-child");
+
     const run = await test.start(
       source(
         `const parent = await agent("parent-agent");
@@ -541,6 +720,7 @@ describe("workflow service policy integration", () => {
         "nested-shared-budget",
       ),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
     await eventually(() => expect(test.childCount()).toBe(1));
@@ -580,11 +760,14 @@ describe("workflow service policy integration", () => {
       maxActiveRuns: 1,
       maxConcurrentAgents: 1,
     });
+
     harnesses.push(test.harness);
+
     const parallelSource = source(
       `return await Promise.all([agent("first"), agent("second")]);`,
       "bounded-concurrency",
     );
+
     const first = await test.start(parallelSource);
     const second = await test.start(parallelSource);
     const controller = new AbortController();
@@ -612,6 +795,7 @@ describe("workflow service policy integration", () => {
     async (_label, output) => {
       const test = setup();
       harnesses.push(test.harness);
+
       const run = await test.start(
         source(`return await agent("structured", {
           outputSchema: {
@@ -621,8 +805,10 @@ describe("workflow service policy integration", () => {
           }
         });`),
       );
+
       const controller = new AbortController();
       const worker = test.service.runWorker(controller.signal);
+
       try {
         await eventually(() => expect(test.childCount()).toBe(1));
 
@@ -655,6 +841,7 @@ describe("workflow service policy integration", () => {
   ])("does not normalize %s", async (_label, output) => {
     const test = setup();
     harnesses.push(test.harness);
+
     const run = await test.start(
       source(`return await agent("strict-structured", {
         outputSchema: {
@@ -664,8 +851,10 @@ describe("workflow service policy integration", () => {
         }
       });`),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() => expect(test.childCount()).toBe(1));
 
@@ -708,6 +897,7 @@ describe("workflow service policy integration", () => {
   it("keeps an awaited corrective turn alive until its valid retry completes", async () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const run = await test.start(
       source(`return await agent("repair-structured", {
         outputSchema: {
@@ -717,8 +907,10 @@ describe("workflow service policy integration", () => {
         }
       });`),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() => expect(test.childCount()).toBe(1));
 
@@ -767,6 +959,7 @@ describe("workflow service policy integration", () => {
   it("still cancels a genuinely detached call when its parent succeeds", async () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const run = await test.start(
       source(`
         agent("detached");
@@ -774,8 +967,10 @@ describe("workflow service policy integration", () => {
         return result;
       `),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() => expect(test.childCount()).toBe(2));
 
@@ -811,39 +1006,47 @@ describe("workflow service policy integration", () => {
   it("rejects child schema failures and recursive grandchildren", async () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const invalidChild = `export const meta = {
       name: "schema-child",
       description: "schema child",
       inputSchema: { type: "string" },
     }; return null;`;
+
     const invalid = await test.start(
       source(
         `return await workflow({ script: ${JSON.stringify(invalidChild)} }, {});`,
         "invalid-child-input",
       ),
     );
+
     const grandchild = source("return null;", "grandchild");
+
     const child = source(
       `return await workflow({ script: ${JSON.stringify(grandchild)} });`,
       "recursive-child",
     );
+
     const recursive = await test.start(
       source(
         `return await workflow({ script: ${JSON.stringify(child)} });`,
         "recursive-parent",
       ),
     );
+
     const invalidOutputChild = `export const meta = {
       name: "invalid-output-child",
       description: "invalid output child",
       outputSchema: { type: "number" },
     }; return "wrong";`;
+
     const invalidOutput = await test.start(
       source(
         `return await workflow({ script: ${JSON.stringify(invalidOutputChild)} });`,
         "invalid-child-output",
       ),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
     await eventually(() => {
@@ -864,11 +1067,13 @@ describe("workflow service policy integration", () => {
   it("rejects unsafe metadata schemas before queueing top-level or child work", async () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const unsafeInput = `export const meta = {
       name: "unsafe-input",
       description: "unsafe input",
       inputSchema: { type: "string", pattern: "^(a+)+$" },
     }; return null;`;
+
     await expect(test.start(unsafeInput)).rejects.toThrow(
       /meta\.inputSchema\.pattern.*catastrophic backtracking.*Node host.*QuickJS/,
     );
@@ -878,12 +1083,14 @@ describe("workflow service policy integration", () => {
       description: "unsafe child output",
       outputSchema: { type: "array", uniqueItems: true },
     }; return [];`;
+
     const parent = await test.start(
       source(
         `return await workflow({ script: ${JSON.stringify(unsafeChild)} });`,
         "unsafe-child-parent",
       ),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
     await eventually(() => {
@@ -903,12 +1110,14 @@ describe("workflow service policy integration", () => {
     const test = setup();
     harnesses.push(test.harness);
     const child = source(`return await agent("never");`, "cancel-child");
+
     const run = await test.start(
       source(
         `return await workflow({ script: ${JSON.stringify(child)} });`,
         "cancel-parent",
       ),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
     await eventually(() => expect(test.childCount()).toBe(1));
@@ -930,15 +1139,18 @@ describe("workflow service policy integration", () => {
   it("publishes a workflow-runs signal for the origin thread on start, claim, and cancel", async () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const signalsFor = (threadId: string) =>
       test.harness.realtimeSignals.filter(
         (signal) =>
           signal.channel === "workflow-runs" &&
           (signal.payload as { threadId?: unknown }).threadId === threadId,
       );
+
     const run = await test.start(
       source(`return await agent("never");`, "signal-run"),
     );
+
     expect(signalsFor("origin")).toHaveLength(1);
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
@@ -957,15 +1169,18 @@ describe("workflow service policy integration", () => {
   it("publishes a workflow-runs signal for phase and call progress, not only run lifecycle", async () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const signalCount = () =>
       test.harness.realtimeSignals.filter(
         (signal) =>
           signal.channel === "workflow-runs" &&
           (signal.payload as { threadId?: unknown }).threadId === "origin",
       ).length;
+
     const run = await test.start(
       source(`phase("Review"); return await agent("one");`, "progress-run"),
     );
+
     const afterStart = signalCount();
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
@@ -991,11 +1206,14 @@ describe("workflow service policy integration", () => {
     const catalogBlocked = setup();
     harnesses.push(catalogBlocked.harness);
     let releaseCatalog: (() => void) | undefined;
+
     const catalogGate = new Promise<void>((resolve) => {
       releaseCatalog = resolve;
     });
+
     catalogBlocked.harness.sdk.stub("providers.models", (async () => {
       await catalogGate;
+
       return {
         providers: [],
         models: [model()],
@@ -1003,13 +1221,17 @@ describe("workflow service policy integration", () => {
         modelLoadError: null,
       };
     }) as never);
+
     const catalogRun = await catalogBlocked.start(
       source(`return await agent("catalog");`),
     );
+
     const catalogController = new AbortController();
+
     const catalogWorker = catalogBlocked.service.runWorker(
       catalogController.signal,
     );
+
     await eventually(() =>
       expect(
         catalogBlocked.harness.sdk.callsTo("providers.models"),
@@ -1030,13 +1252,17 @@ describe("workflow service policy integration", () => {
     const spawnBlocked = setup();
     harnesses.push(spawnBlocked.harness);
     let releaseSpawn: ((value: { id: string }) => void) | undefined;
+
     const spawnGate = new Promise<{ id: string }>((resolve) => {
       releaseSpawn = resolve;
     });
+
     spawnBlocked.harness.sdk.stub("threads.spawn", (() => spawnGate) as never);
+
     const spawnRun = await spawnBlocked.start(
       source(`return await agent("spawn");`),
     );
+
     const spawnController = new AbortController();
     const spawnWorker = spawnBlocked.service.runWorker(spawnController.signal);
     await eventually(() =>
@@ -1065,6 +1291,7 @@ describe("workflow service policy integration", () => {
   it("lets later parallel siblings execute live after an identity failure", async () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const run = await test.start(
       source(`
         const values = await Promise.all([
@@ -1074,6 +1301,7 @@ describe("workflow service policy integration", () => {
         return values;
       `),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
     await eventually(() => expect(test.childCount()).toBe(1));
@@ -1142,6 +1370,7 @@ describe("workflow service policy integration", () => {
     const controller = new AbortController();
     vi.useFakeTimers();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await vi.waitFor(() => expect(test.childCount()).toBe(1), {
         timeout: 4_000,
@@ -1175,6 +1404,7 @@ describe("workflow service policy integration", () => {
       );
     } finally {
       controller.abort();
+
       try {
         await worker;
       } finally {
@@ -1189,6 +1419,7 @@ describe("workflow service policy integration", () => {
     const run = await test.start(source(`return await agent("work");`));
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() =>
         expect(getCall(test.db, run.id, 0)?.childThreadId).toBe("child-1"),
@@ -1216,11 +1447,14 @@ describe("workflow service policy integration", () => {
     const firstWorker = test.service.runWorker(firstController.signal);
     await eventually(() => expect(test.childCount()).toBe(1));
     let releaseStop: (() => void) | undefined;
+
     const stopGate = new Promise<void>((resolve) => {
       releaseStop = resolve;
     });
+
     test.harness.sdk.stub("threads.stop", (async () => {
       await stopGate;
+
       return { ok: true };
     }) as never);
     firstController.abort();
@@ -1235,7 +1469,7 @@ describe("workflow service policy integration", () => {
     expect(getRunRequired(test.db, run.id).status).toBe("queued");
     expect(test.harness.sdk.callsTo("threads.send")).toHaveLength(0);
 
-    const restarted = createWorkflowService(test.bb, test.db);
+    const restarted = createWorkflowService(test.api, test.db);
     test.harness.sdk.stub("threads.stop", (async () => ({
       ok: true,
     })) as never);
@@ -1255,9 +1489,11 @@ describe("workflow service policy integration", () => {
     harnesses.push(test.harness);
     const run = await test.start(source(`return "done";`, "retry-notice"));
     let attempted: (() => void) | undefined;
+
     const firstAttempt = new Promise<void>((resolve) => {
       attempted = resolve;
     });
+
     test.harness.sdk.stub("threads.send", (() => {
       attempted?.();
       throw new Error("origin temporarily unavailable");
@@ -1281,7 +1517,7 @@ describe("workflow service policy integration", () => {
     test.harness.sdk.stub("threads.send", (async () => ({
       ok: true,
     })) as never);
-    const restarted = createWorkflowService(test.bb, test.db);
+    const restarted = createWorkflowService(test.api, test.db);
     test.db
       .prepare(
         `UPDATE workflow_runs SET notification_next_attempt_at = 0 WHERE id = ?`,
@@ -1312,15 +1548,18 @@ describe("workflow service policy integration", () => {
       test.harness.sdk.stub("threads.get", async ({ threadId }) => {
         if (threadId === "origin") {
           checks++;
+
           if (checks === failingCheck)
             throw Object.assign(new Error("connection reset"), {
               code: "ECONNRESET",
             });
         }
+
         return { id: threadId, archivedAt: null, status: "active" } as never;
       });
       const controller = new AbortController();
       const worker = test.service.runWorker(controller.signal);
+
       try {
         await eventually(() => expect(test.childCount()).toBe(1));
         expect(getRunRequired(test.db, run.id).status).toBe("running");
@@ -1353,6 +1592,7 @@ describe("workflow service policy integration", () => {
     const controller = new AbortController();
     vi.useFakeTimers();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await vi.waitFor(
         () =>
@@ -1372,6 +1612,7 @@ describe("workflow service policy integration", () => {
       expect(getRunRequired(test.db, run.id).notificationSent).toBe(false);
     } finally {
       controller.abort();
+
       try {
         await worker;
       } finally {
@@ -1387,6 +1628,7 @@ describe("workflow service policy integration", () => {
     vi.useFakeTimers();
     const transactions = vi.spyOn(test.db, "transaction");
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await vi.advanceTimersByTimeAsync(0);
       transactions.mockClear();
@@ -1420,6 +1662,7 @@ describe("workflow service policy integration", () => {
       const controller = new AbortController();
       vi.useFakeTimers();
       const worker = test.service.runWorker(controller.signal);
+
       try {
         await vi.waitFor(() => expect(test.childCount()).toBe(1), {
           timeout: 200,
@@ -1427,6 +1670,7 @@ describe("workflow service policy integration", () => {
         });
         await vi.advanceTimersByTimeAsync(100);
         expect(getRunRequired(test.db, second.id).status).toBe("queued");
+
         if (change === "settings") {
           test.service.updateSettings({
             ...DEFAULT_WORKFLOW_SETTINGS,
@@ -1437,6 +1681,7 @@ describe("workflow service policy integration", () => {
         } else {
           await test.service.stop(first.id);
         }
+
         await vi.waitFor(
           () =>
             expect(getRunRequired(test.db, second.id).status).toBe("succeeded"),
@@ -1454,9 +1699,11 @@ describe("workflow service policy integration", () => {
     const test = setup();
     harnesses.push(test.harness);
     const run = await test.start(source(`return await agent("work");`));
+
     const originGets = () =>
       test.harness.sdk.callsTo("threads.get").filter((args) => {
         const first = args[0];
+
         return (
           typeof first === "object" &&
           first !== null &&
@@ -1464,9 +1711,11 @@ describe("workflow service policy integration", () => {
           first.threadId === "origin"
         );
       }).length;
+
     const controller = new AbortController();
     vi.useFakeTimers();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await vi.waitFor(
         () =>
@@ -1479,6 +1728,7 @@ describe("workflow service policy integration", () => {
       expect(originGets() - before).toBeLessThanOrEqual(1);
     } finally {
       controller.abort();
+
       try {
         await worker;
       } finally {
@@ -1496,6 +1746,7 @@ describe("workflow service policy integration", () => {
     });
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() =>
         expect(test.harness.sdk.callsTo("threads.stop").length).toBeGreaterThan(
@@ -1510,10 +1761,12 @@ describe("workflow service policy integration", () => {
       controller.abort();
       await worker;
     }
+
     test.harness.sdk.stub("threads.stop", async () => ({ ok: true }));
-    const restarted = createWorkflowService(test.bb, test.db);
+    const restarted = createWorkflowService(test.api, test.db);
     const restartController = new AbortController();
     const restartWorker = restarted.runWorker(restartController.signal);
+
     try {
       await eventually(() => expect(test.archived).toContain("worker-stop"));
     } finally {
@@ -1522,32 +1775,30 @@ describe("workflow service policy integration", () => {
     }
   });
 
-  it("owns and archives every retry attempt before history expires", async () => {
+  it("fails and archives a worker that provider-retry left failed, without starting a replacement", async () => {
     const test = setup();
     harnesses.push(test.harness);
-    const run = await test.start(source(`return await agent("retry");`));
+    const run = await test.start(source(`return await agent("refused");`));
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() =>
         expect(getCall(test.db, run.id, 0)?.childThreadId).toBe("child-1"),
       );
+      const child = test.workers.get("child-1");
+
+      if (child === undefined) throw new Error("Expected the first worker");
+      child.status = "error";
       test.service.onThreadFailed("child-1", "HTTP 500: Internal server error");
-      await eventually(() =>
-        expect(getCall(test.db, run.id, 0)?.childThreadId).toBe("child-2"),
-      );
-      test.service.onThreadIdle("child-2", "done");
-      await eventually(() =>
-        expect(test.archived).toEqual(
-          expect.arrayContaining(["child-1", "child-2"]),
-        ),
-      );
-      expect(getRunRequired(test.db, run.id).status).toBe("succeeded");
-      expect(
-        test.db
-          .prepare(`SELECT thread_id FROM workflow_workers ORDER BY thread_id`)
-          .all(),
-      ).toEqual([{ thread_id: "child-1" }, { thread_id: "child-2" }]);
+      await eventually(() => expect(test.archived).toContain("child-1"));
+      expect(getRunRequired(test.db, run.id).status).toBe("failed");
+      expect(getCall(test.db, run.id, 0)).toMatchObject({
+        status: "failed",
+        providerRetryAttempts: 0,
+        error: "HTTP 500: Internal server error",
+      });
+      expect(test.childCount()).toBe(1);
     } finally {
       controller.abort();
       await worker;
@@ -1560,6 +1811,7 @@ describe("workflow service policy integration", () => {
     const run = await test.start(source(`return await agent("work");`));
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() =>
         expect(getCall(test.db, run.id, 0)?.childThreadId).toBe("child-1"),
@@ -1582,17 +1834,21 @@ describe("workflow service policy integration", () => {
     const test = setup();
     harnesses.push(test.harness);
     let release = () => {};
+
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+
     let metadata: NonNullable<
-      Parameters<typeof test.bb.sdk.threads.spawn>[0]["pluginMetadata"]
+      Parameters<typeof test.api.sdk.threads.spawn>[0]["pluginMetadata"]
     > = {};
+
     test.harness.sdk.stub(
       "threads.spawn",
-      async (args: Parameters<typeof test.bb.sdk.threads.spawn>[0]) => {
+      async (args: Parameters<typeof test.api.sdk.threads.spawn>[0]) => {
         metadata = args.pluginMetadata!;
         await gate;
+
         return { id: "spawning-worker" } as never;
       },
     );
@@ -1600,11 +1856,14 @@ describe("workflow service policy integration", () => {
       metadata.workflowWorker ? ([{ id: "spawning-worker" }] as never) : [],
     );
     test.harness.sdk.stub("threads.getPluginMetadata", async () => metadata);
+
     const run = await test.start(
       source(`return await agent("pending spawn");`),
     );
+
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() => expect(metadata.workflowWorker).toBe(1));
       expect(
@@ -1634,21 +1893,27 @@ describe("workflow service policy integration", () => {
     const test = setup();
     harnesses.push(test.harness);
     let releaseSpawn = () => {};
+
     const spawnGate = new Promise<void>((resolve) => {
       releaseSpawn = resolve;
     });
+
     let releaseStop = () => {};
+
     const stopGate = new Promise<void>((resolve) => {
       releaseStop = resolve;
     });
+
     let metadata: NonNullable<
-      Parameters<typeof test.bb.sdk.threads.spawn>[0]["pluginMetadata"]
+      Parameters<typeof test.api.sdk.threads.spawn>[0]["pluginMetadata"]
     > = {};
+
     test.harness.sdk.stub(
       "threads.spawn",
-      async (args: Parameters<typeof test.bb.sdk.threads.spawn>[0]) => {
+      async (args: Parameters<typeof test.api.sdk.threads.spawn>[0]) => {
         metadata = args.pluginMetadata!;
         await spawnGate;
+
         return { id: "zz-live-worker" } as never;
       },
     );
@@ -1660,16 +1925,20 @@ describe("workflow service policy integration", () => {
       "threads.stop",
       async ({ threadId }: { threadId: string }) => {
         if (threadId === "aa-retired-worker") await stopGate;
+
         return { ok: true } as never;
       },
     );
+
     const stoppedThreads = () =>
       test.harness.sdk
         .callsTo("threads.stop")
         .map(([args]) => (args as { threadId: string }).threadId);
+
     const run = await test.start(source(`return await agent("live work");`));
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() => expect(metadata.workflowWorker).toBe(1));
       expect(
@@ -1711,13 +1980,16 @@ describe("workflow service policy integration", () => {
     const test = setup();
     harnesses.push(test.harness);
     let releaseStop = () => {};
+
     const stopGate = new Promise<void>((resolve) => {
       releaseStop = resolve;
     });
+
     test.harness.sdk.stub(
       "threads.stop",
       async ({ threadId }: { threadId: string }) => {
         if (threadId === "aa-retired-worker") await stopGate;
+
         return { ok: true } as never;
       },
     );
@@ -1731,6 +2003,7 @@ describe("workflow service policy integration", () => {
     );
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() =>
         expect(
@@ -1758,16 +2031,20 @@ describe("workflow service policy integration", () => {
     const test = setup();
     harnesses.push(test.harness);
     let release = () => {};
+
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+
     test.harness.sdk.stub("threads.spawn", async () => {
       await gate;
+
       return { id: "late-worker" } as never;
     });
     const run = await test.start(source(`return await agent("late");`));
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() =>
         expect(test.harness.sdk.callsTo("threads.spawn")).toHaveLength(1),
@@ -1787,15 +2064,17 @@ describe("workflow service policy integration", () => {
   it("recovers metadata ownership after a spawn response is lost and the service restarts", async () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const metadata = new Map<
       string,
       NonNullable<
-        Parameters<typeof test.bb.sdk.threads.spawn>[0]["pluginMetadata"]
+        Parameters<typeof test.api.sdk.threads.spawn>[0]["pluginMetadata"]
       >
     >();
+
     test.harness.sdk.stub(
       "threads.spawn",
-      async (args: Parameters<typeof test.bb.sdk.threads.spawn>[0]) => {
+      async (args: Parameters<typeof test.api.sdk.threads.spawn>[0]) => {
         metadata.set("lost-worker", args.pluginMetadata!);
         throw new Error("Spawn response lost");
       },
@@ -1803,6 +2082,7 @@ describe("workflow service policy integration", () => {
     const run = await test.start(source(`return await agent("lost");`));
     const controller = new AbortController();
     const worker = test.service.runWorker(controller.signal);
+
     try {
       await eventually(() =>
         expect(getRunRequired(test.db, run.id).status).toBe("failed"),
@@ -1814,6 +2094,7 @@ describe("workflow service policy integration", () => {
       controller.abort();
       await worker;
     }
+
     test.harness.sdk.stub(
       "threads.list",
       async () => [{ id: "lost-worker" }] as never,
@@ -1822,9 +2103,10 @@ describe("workflow service policy integration", () => {
       "threads.getPluginMetadata",
       async ({ threadId }: { threadId: string }) => metadata.get(threadId)!,
     );
-    const restarted = createWorkflowService(test.bb, test.db);
+    const restarted = createWorkflowService(test.api, test.db);
     const restartController = new AbortController();
     const restartWorker = restarted.runWorker(restartController.signal);
+
     try {
       await eventually(() => expect(test.archived).toContain("lost-worker"));
       expect(
@@ -1855,6 +2137,7 @@ describe("workflow service policy integration", () => {
       const run = await test.start(source(`return "done";`));
       const controller = new AbortController();
       const worker = test.service.runWorker(controller.signal);
+
       try {
         await eventually(() =>
           expect(getRunRequired(test.db, run.id)).toMatchObject({
@@ -1904,6 +2187,7 @@ describe("workflow service policy integration", () => {
   it("archives worker threads before it deletes their expired run", async () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const expired = expiredRunWithWorkers(test.db, "sweep-archive", [
       "worker-a",
       "worker-b",
@@ -1923,10 +2207,12 @@ describe("workflow service policy integration", () => {
   it("retains cleanup ownership after expired history is deleted and retries after restart", async () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const expired = expiredRunWithWorkers(test.db, "sweep-retry", [
       "worker-ok",
       "worker-broken",
     ]);
+
     test.failArchive("worker-broken");
 
     const controller = new AbortController();
@@ -1943,9 +2229,10 @@ describe("workflow service policy integration", () => {
         .all(),
     ).toEqual([{ thread_id: "worker-broken" }]);
     test.allowArchive("worker-broken");
-    const restarted = createWorkflowService(test.bb, test.db);
+    const restarted = createWorkflowService(test.api, test.db);
     const restartController = new AbortController();
     const restartWorker = restarted.runWorker(restartController.signal);
+
     try {
       await eventually(() => expect(test.archived).toContain("worker-broken"));
       expect(test.db.prepare(`SELECT * FROM workflow_workers`).all()).toEqual(
@@ -1960,10 +2247,12 @@ describe("workflow service policy integration", () => {
   it("deletes expired resume chains leaf-first across bounded batches", () => {
     const test = setup();
     harnesses.push(test.harness);
+
     const settingsJson = JSON.stringify({
       ...DEFAULT_WORKFLOW_SETTINGS,
       retentionDays: 1,
     });
+
     const insert = test.db.prepare(
       `INSERT INTO workflow_runs (
         id, project_id, origin_thread_id, environment_id, origin_provider,
@@ -1975,6 +2264,7 @@ describe("workflow service policy integration", () => {
         'gpt-test', 'medium', 'full', 'chain', 'source', 'hash', 'null', ?,
         'succeeded', ?, 'null', 1, ?, ?, ?)`,
     );
+
     const old = Date.now() - 3 * 86_400_000;
     test.db.transaction(() => {
       for (let index = 0; index < 150; index += 1) {
@@ -2015,42 +2305,113 @@ describe("workflow service policy integration", () => {
     ).toBe(50);
   });
 
+  it("keeps a resumed run's source while the resumed run's notification is pending", () => {
+    const test = setup();
+    harnesses.push(test.harness);
+
+    const settingsJson = JSON.stringify({
+      ...DEFAULT_WORKFLOW_SETTINGS,
+      retentionDays: 1,
+    });
+
+    const old = Date.now() - 3 * 86_400_000;
+
+    const insertRun = test.db.prepare(
+      `INSERT INTO workflow_runs (
+        id, project_id, origin_thread_id, environment_id, origin_provider,
+        origin_model, origin_reasoning_level, origin_permission_mode,
+        name, source, source_hash, args_json, settings_json, status,
+        resumed_from_run_id, result_json, notification_sent, created_at,
+        started_at, finished_at
+      ) VALUES (?, 'project-test', 'origin', 'environment-1', 'codex',
+        'gpt-test', 'medium', 'full', 'resume', 'source', 'hash', 'null', ?,
+        'succeeded', ?, 'null', ?, ?, ?, ?)`,
+    );
+
+    const insertCall = test.db.prepare(
+      `INSERT INTO workflow_calls (
+        id, run_id, call_index, cache_key, prompt, options_json,
+        resolved_provider, resolved_model, resolved_reasoning_level,
+        resolved_permission_mode, status, result_json, replayed_from_call_id,
+        created_at
+      ) VALUES (?, ?, 0, 'key', 'work', '{}', 'codex', 'gpt-test', 'medium',
+        'full', 'succeeded', 'null', ?, ?)`,
+    );
+
+    insertRun.run("source-run", settingsJson, null, 1, old, old, old);
+    insertCall.run("source-call", "source-run", null, old);
+    insertRun.run(
+      "resumed-run",
+      settingsJson,
+      "source-run",
+      0,
+      old + 1,
+      old + 1,
+      old + 1,
+    );
+    insertCall.run("resumed-call", "resumed-run", "source-call", old + 1);
+    insertRun.run("unrelated-run", settingsJson, null, 1, old, old, old);
+    insertCall.run("unrelated-call", "unrelated-run", null, old);
+
+    const sweep = () =>
+      deleteTerminalRuns(
+        test.db,
+        listExpiredTerminalRuns(test.db, Date.now(), 100).runIds,
+      );
+
+    const remainingCalls = () =>
+      test.db
+        .prepare(`SELECT id FROM workflow_calls ORDER BY id`)
+        .all()
+        .map((row) => (row as { id: string }).id);
+
+    expect(sweep()).toBe(1);
+    expect(remainingCalls()).toEqual(["resumed-call", "source-call"]);
+
+    markNotificationSent(test.db, "resumed-run");
+    expect(sweep()).toBe(2);
+    expect(remainingCalls()).toEqual([]);
+    expect(test.db.pragma("foreign_key_check")).toEqual([]);
+  });
+
   it("bounds UTF-8 notifications while preserving the stable run marker", async () => {
     const test = setup();
     harnesses.push(test.harness);
     const run = await test.start(source("return null;", "unicode-notice"));
+
     const terminal = {
       ...run,
       status: "failed" as const,
       error: "🔥".repeat(2_000),
       finishedAt: Date.now(),
     };
+
     const text = formatWorkflowNotification(terminal, 1_024);
     expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(1_024);
     expect(text).toContain(run.id);
     expect(text).toContain("failed");
     expect(text).toContain("[truncated]");
-    expect(text).toContain(`bb workflows status ${run.id}`);
+    expect(text).toContain(`omnyo workflows status ${run.id}`);
     expect(text).not.toContain("�");
   });
 });
 
-describe("provider retry classification", () => {
-  it("recognizes transient provider and network failures", () => {
+describe("worker start retry classification", () => {
+  it("recognizes transient request and network failures", () => {
     expect(
-      isRetryableProviderFailure(
+      isTransientRequestFailure(
         "Provider command failed: Provider overload, try again later",
       ),
     ).toBe(true);
-    expect(isRetryableProviderFailure("API error 529")).toBe(true);
-    expect(isRetryableProviderFailure("read ECONNRESET")).toBe(true);
+    expect(isTransientRequestFailure("API error 529")).toBe(true);
+    expect(isTransientRequestFailure("read ECONNRESET")).toBe(true);
     expect(
-      isRetryableProviderFailure(
+      isTransientRequestFailure(
         Object.assign(new Error("request failed"), { status: 503 }),
       ),
     ).toBe(true);
     expect(
-      isRetryableProviderFailure(
+      isTransientRequestFailure(
         Object.assign(new Error("opaque provider failure"), {
           retryable: true,
         }),
@@ -2059,10 +2420,203 @@ describe("provider retry classification", () => {
   });
 
   it("does not retry deterministic failures", () => {
-    expect(isRetryableProviderFailure("Authentication failed")).toBe(false);
-    expect(isRetryableProviderFailure("Unknown model configuration")).toBe(
+    expect(isTransientRequestFailure("Authentication failed")).toBe(false);
+    expect(isTransientRequestFailure("Unknown model configuration")).toBe(
       false,
     );
-    expect(isRetryableProviderFailure("Result schema is invalid")).toBe(false);
+    expect(isTransientRequestFailure("Result schema is invalid")).toBe(false);
+  });
+});
+
+describe("workflow environment placement service", () => {
+  const harnesses: ReturnType<typeof setup>["harness"][] = [];
+  afterEach(async () => {
+    await Promise.all(harnesses.splice(0).map((harness) => harness.dispose()));
+  });
+
+  it("uses target catalogs and core reuse admission while retaining the origin owner and callback", async () => {
+    const test = setup();
+    harnesses.push(test.harness);
+
+    const run = await test.start(
+      source(
+        'return await agent("platform check", { environmentId: "environment-target" });',
+      ),
+    );
+
+    const controller = new AbortController();
+    const worker = test.service.runWorker(controller.signal);
+
+    try {
+      await eventually(() => expect(test.childCount()).toBe(1));
+      expect(test.harness.sdk.callsTo("providers.list")[0]?.[0]).toMatchObject({
+        environmentId: "environment-target",
+      });
+      expect(
+        test.harness.sdk.callsTo("providers.models")[0]?.[0],
+      ).toMatchObject({ environmentId: "environment-target" });
+      expect(test.harness.sdk.callsTo("threads.spawn")[0]?.[0]).toMatchObject({
+        environment: { type: "reuse", environmentId: "environment-target" },
+        lifecycleOwnerThreadId: "origin",
+        permissionMode: "full",
+      });
+      expect(test.service.inspect(run.id)?.calls[0]).toMatchObject({
+        requestedEnvironmentId: "environment-target",
+        resolvedEnvironmentId: "environment-target",
+        resolvedHostId: "host-target",
+        resolvedWorkspacePath: "C:\\workspace",
+      });
+      test.service.onThreadIdle("child-1", "done");
+      await eventually(() =>
+        expect(test.service.inspect(run.id)?.status).toBe("succeeded"),
+      );
+      await eventually(() =>
+        expect(
+          test.harness.sdk
+            .callsTo("threads.send")
+            .some(
+              ([input]) =>
+                (input as { threadId: string }).threadId === "origin",
+            ),
+        ).toBe(true),
+      );
+    } finally {
+      controller.abort();
+      await worker;
+    }
+  });
+
+  it("fails a target that changes after catalog validation without spawning elsewhere", async () => {
+    const test = setup();
+    harnesses.push(test.harness);
+    test.harness.sdk.stub("providers.models", async () => {
+      const target = test.environments.get("environment-target");
+
+      if (target === undefined) throw new Error("Missing target fixture");
+      test.environments.set("environment-target", {
+        ...target,
+        lifecycle: { phase: "retiring" },
+      });
+
+      return {
+        providers: [],
+        models: [model()],
+        selectedOnlyModels: [],
+        modelLoadError: null,
+      };
+    });
+
+    const run = await test.start(
+      source(
+        'return await agent("platform check", { environmentId: "environment-target" });',
+      ),
+    );
+
+    const controller = new AbortController();
+    const worker = test.service.runWorker(controller.signal);
+
+    try {
+      await eventually(() =>
+        expect(test.service.inspect(run.id)?.status).toBe("failed"),
+      );
+      expect(test.childCount()).toBe(0);
+      expect(test.service.inspect(run.id)?.error).toContain("not ready");
+      expect(test.service.inspect(run.id)?.calls[0]).toMatchObject({
+        status: "cancelled",
+        childThreadId: null,
+        error: "Parent workflow finished before this call",
+      });
+      expect(test.harness.sdk.callsTo("threads.spawn")).toEqual([]);
+    } finally {
+      controller.abort();
+      await worker;
+    }
+  });
+
+  it("reuses completed origin writer calls when placement becomes explicit", async () => {
+    const test = setup();
+    harnesses.push(test.harness);
+
+    const first = await test.start(
+      source('return await agent("same writer prompt");'),
+    );
+
+    const controller = new AbortController();
+    const worker = test.service.runWorker(controller.signal);
+
+    try {
+      await eventually(() => expect(test.childCount()).toBe(1));
+      test.service.onThreadIdle("child-1", "writer complete");
+      await eventually(() =>
+        expect(test.service.inspect(first.id)?.status).toBe("succeeded"),
+      );
+
+      const resumed = await test.service.start({
+        projectId: "project-test",
+        originThreadId: "origin",
+        source: source(
+          'return await agent("same writer prompt", { environmentId: "environment-1" });',
+        ),
+        args: null,
+        resumedFromRunId: first.id,
+      });
+
+      await eventually(() =>
+        expect(test.service.inspect(resumed.id)?.status).toBe("succeeded"),
+      );
+      expect(test.childCount()).toBe(1);
+      const originalCall = test.service.inspect(first.id)?.calls[0];
+      expect(test.service.inspect(resumed.id)?.calls[0]).toMatchObject({
+        cacheKey: originalCall?.cacheKey,
+        replayedFromCallId: originalCall?.id,
+      });
+    } finally {
+      controller.abort();
+      await worker;
+    }
+  });
+
+  it("revalidates a target that disappears during a provider retry", async () => {
+    const test = setup();
+    harnesses.push(test.harness);
+    let spawnAttempts = 0;
+    test.harness.sdk.stub("threads.spawn", async () => {
+      spawnAttempts += 1;
+      test.environments.delete("environment-target");
+      throw Object.assign(new Error("Provider temporarily unavailable"), {
+        retryable: true,
+      });
+    });
+
+    const run = await test.start(
+      source(
+        'return await agent("retry", { environmentId: "environment-target" });',
+      ),
+    );
+
+    const controller = new AbortController();
+    const worker = test.service.runWorker(controller.signal);
+
+    try {
+      await eventually(() =>
+        expect(test.service.inspect(run.id)?.status).toBe("failed"),
+      );
+      expect(spawnAttempts).toBe(1);
+      expect(test.service.inspect(run.id)?.error).toContain(
+        "Environment not found",
+      );
+      expect(test.service.inspect(run.id)?.calls[0]).toMatchObject({
+        status: "cancelled",
+        childThreadId: null,
+        error: "Parent workflow finished before this call",
+      });
+      expect(test.childCount()).toBe(0);
+      expect(test.harness.sdk.callsTo("threads.spawn")[0]?.[0]).toMatchObject({
+        environment: { type: "reuse", environmentId: "environment-target" },
+      });
+    } finally {
+      controller.abort();
+      await worker;
+    }
   });
 });

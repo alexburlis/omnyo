@@ -10,12 +10,14 @@ export function registerPluginUpdateJobRoutes(
   );
   app.get("/plugins/update-jobs/:jobId", (context) => {
     const job = jobs.get(context.req.param("jobId"));
+
     if (job === undefined) {
       return context.json(
         { error: "unknown update job; the server may have restarted" },
         404,
       );
     }
+
     return context.json({ job });
   });
 }

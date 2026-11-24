@@ -4,8 +4,8 @@ import type {
   WorkspaceCommitSummary,
   WorkspaceFileStatus,
   WorkspaceStatus,
-} from "@bb/domain";
-import { formatDiffStatsText } from "@bb/thread-view";
+} from "@omnyo/domain";
+import { formatDiffStatsText } from "@omnyo/thread-view";
 import { DiffStatsTally } from "@/components/ui/diff-stats-tally.js";
 
 interface ChangeTally {
@@ -17,7 +17,7 @@ interface ChangeTally {
 
 export function toChangeTally(stats: WorkspaceChangeStats): ChangeTally {
   return {
-    filesCount: stats.files.length,
+    filesCount: stats.fileCount,
     insertions: stats.insertions,
     deletions: stats.deletions,
     lineStatsComplete: stats.lineStatsComplete,
@@ -26,6 +26,16 @@ export function toChangeTally(stats: WorkspaceChangeStats): ChangeTally {
 
 function formatWorkspaceChangedFilesLabel(changedFiles: number): string {
   return `${changedFiles} file${changedFiles === 1 ? "" : "s"}`;
+}
+
+export function formatOmittedChangedFilesLabel(
+  stats: Pick<WorkspaceChangeStats, "fileCount" | "files">,
+): string | null {
+  const omittedCount = stats.fileCount - stats.files.length;
+
+  if (omittedCount <= 0) return null;
+
+  return `${omittedCount.toLocaleString()} more ${omittedCount === 1 ? "file" : "files"} not shown`;
 }
 
 function formatChangeSummaryWithoutLineStats(
@@ -38,12 +48,14 @@ function formatChangeSummaryWithoutLineStats(
   ) {
     return "No changes";
   }
+
   if (
     !tally.lineStatsComplete ||
     (tally.insertions === 0 && tally.deletions === 0)
   ) {
     return formatWorkspaceChangedFilesLabel(tally.filesCount);
   }
+
   return null;
 }
 
@@ -97,7 +109,8 @@ export function selectWorkspaceChangedFilesSections(
   if (!workspaceStatus) return [];
   const sections: WorkspaceChangedFilesSection[] = [];
   const workingTree = workspaceStatus.workingTree;
-  if (workingTree.files.length > 0) {
+
+  if (workingTree.fileCount > 0) {
     const isUntrackedOnly = workingTree.state === "untracked";
     sections.push({
       kind: isUntrackedOnly ? "untracked" : "uncommitted",
@@ -107,8 +120,10 @@ export function selectWorkspaceChangedFilesSections(
       stats: workingTree,
     });
   }
+
   const mergeBase = workspaceStatus.mergeBase;
-  if (mergeBase && mergeBase.files.length > 0) {
+
+  if (mergeBase && mergeBase.fileCount > 0) {
     sections.push({
       kind: "committed",
       label: "Committed",
@@ -117,6 +132,7 @@ export function selectWorkspaceChangedFilesSections(
       stats: mergeBase,
     });
   }
+
   return sections;
 }
 
@@ -124,7 +140,9 @@ export function selectWorkspaceAheadCommits(
   workspaceStatus: WorkspaceStatus | undefined,
 ): WorkspaceCommitSummary[] {
   const commits = workspaceStatus?.mergeBase?.commits;
+
   if (!commits || commits.length === 0) return [];
+
   return commits.slice().reverse();
 }
 
@@ -132,6 +150,34 @@ export function selectWorkspaceChangedFilesSection(
   workspaceStatus: WorkspaceStatus | undefined,
 ): WorkspaceChangedFilesSection | null {
   return selectWorkspaceChangedFilesSections(workspaceStatus)[0] ?? null;
+}
+
+export function selectUntrackedWorkspaceFilesSection(
+  workspaceStatus: WorkspaceStatus | undefined,
+): WorkspaceChangedFilesSection | null {
+  const files =
+    workspaceStatus?.workingTree.files.filter((file) => file.status === "??") ??
+    [];
+
+  if (files.length === 0) return null;
+
+  const lineStatsComplete = files.every(
+    (file) => file.insertions !== null && file.deletions !== null,
+  );
+
+  return {
+    kind: "untracked",
+    label: "Untracked",
+    files,
+    mergeBaseRef: null,
+    stats: {
+      fileCount: files.length,
+      files,
+      insertions: files.reduce((sum, file) => sum + (file.insertions ?? 0), 0),
+      deletions: files.reduce((sum, file) => sum + (file.deletions ?? 0), 0),
+      lineStatsComplete,
+    },
+  };
 }
 
 export function formatWorkspaceFileStatus(status: string): string {

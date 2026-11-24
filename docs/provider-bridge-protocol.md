@@ -1,7 +1,7 @@
-# The bb Provider Bridge Protocol
+# The Omnyo Provider Bridge Protocol
 
 The one JSON-RPC contract between the agent runtime and every provider
-bridge process. Message schemas live in `@bb/provider-bridge-protocol` and
+bridge process. Message schemas live in `@omnyo/provider-bridge-protocol` and
 are the source of truth for both sides; this document adds what schemas
 cannot express — the division of labor and the grammar: **the bridge knows
 the dialect, the runtime knows the timeline.** A bridge parses its
@@ -13,7 +13,7 @@ against every bridge in CI.
 
 ## Where a bridge lives
 
-A bridge ships inside its plugin's **`bb.host` artifact** — the same artifact
+A bridge ships inside its plugin's **`omnyo.host` artifact** — the same artifact
 a host RPC entry ships in, and one plugin may carry both. It is an _export_,
 not a program:
 
@@ -25,7 +25,7 @@ export const experimental_providerBridge = experimental_defineProviderBridge({
 });
 ```
 
-`bb plugin build` bundles the artifact to `dist/host.js`; the server records
+`omnyo plugin build` bundles the artifact to `dist/host.js`; the server records
 it content-addressed and hands hosts `{pluginId, digest}`; the daemon
 downloads, verifies, caches and runs it — through a bootstrap that owns
 everything outside the protocol: argv, the plugin-scoped `dataDir`/`tempDir`
@@ -36,17 +36,17 @@ host RPC entry. First-party bridges use exactly this path —
 and `examples/plugins/echo-provider` the smallest.
 
 The bundle is self-contained (only node builtins stay external) and may not
-import bb's private `@bb/*` workspace packages at all — an installed plugin
+import Omnyo's private `@omnyo/*` workspace packages at all — an installed plugin
 cannot resolve them. Everything a bridge compiles against is published at
-**`@get-bb/plugin-sdk/provider-bridge`**: the protocol schemas (including
+**`@omnyo/plugin-sdk/provider-bridge`**: the protocol schemas (including
 the `thread/delta` grammar), the bridge kit (JSON-RPC plumbing, tool-call
 and interaction codecs, visibility, dialect-parsing helpers), and the domain
 vocabulary the params reference, and the testing kit a bridge proves itself
 with — the conformance scenarios, the real delta assembler, the JSON-RPC
 harness and the calibration normalizer — is published beside it as
-**`@get-bb/plugin-sdk/provider-bridge/testing`**. In-repo, those are
-implemented by `@bb/provider-bridge-protocol` (the grammar, the
-`assembler`, `conformance` and `testing` subpaths) and `@bb/domain`.
+**`@omnyo/plugin-sdk/provider-bridge/testing`**. In-repo, those are
+implemented by `@omnyo/provider-bridge-protocol` (the grammar, the
+`assembler`, `conformance` and `testing` subpaths) and `@omnyo/domain`.
 
 ## Transport
 
@@ -99,7 +99,7 @@ widen it.
 The sessionless `provider/health`, `provider/usage`,
 `provider/installation/status`, and `provider/installation/run` methods are
 different: their support is declared by each provider through
-`bb.providers.register`, so the server can skip an
+`api.providers.register`, so the server can skip an
 unsupported host probe and clients can omit providers that never expose usage
 or installation management before a bridge has started. A shared bridge may
 declare health or usage for every provider it owns and still return
@@ -159,20 +159,23 @@ shape, streamed text (`item.textDelta`/`item.textClose`), `usage`,
 `contextWindow`, errors/warnings, `unhandled` diagnostics, session lifecycle
 (`session.reset`, `session.ended`) — never a raw provider event and never a
 finished `ThreadEvent`. The schemas in
-`@bb/provider-bridge-protocol/src/thread-delta.ts` are the source of truth
+`@omnyo/provider-bridge-protocol/src/thread-delta.ts` are the source of truth
 for the grammar.
 
-The runtime's **delta assembler** (`@bb/agent-runtime`, one per bridge
+The runtime's **delta assembler** (`@omnyo/agent-runtime`, one per bridge
 adapter) consumes the deltas and owns every timeline invariant:
 
 - **Id minting.** Turn and item ids are assembler-minted
   (entropy + serial, the #1224 discipline held centrally, reset per
   `session.reset`). Deltas carry provider-native join keys (tool-call ids,
   stream keys, parent refs, optional provider turn ids) and the assembler
-  holds the bidirectional provider↔bb maps — both for scoping incoming
-  deltas and for reverse-mapping bb ids on the command plane
-  (`turn/steer.expectedTurnId`, `thread/stop.activeTurnId`) and on
-  provider-native interaction requests (`providerNativeIds: true`). An
+  holds the bidirectional provider↔Omnyo maps — both for scoping incoming
+  deltas and for reverse-mapping Omnyo ids on the command plane
+  (`turn/steer.expectedTurnId`, `thread/stop.activeTurnId`). Bridges
+  send `interaction/request` and `item/tool/call` with the ids they put
+  on deltas: when the request names its `threadId`, the runtime maps its
+  `turnId`, approval subject `itemId`, and tool `callId` to the Omnyo ids
+  minted for them, and passes through any id the assembler has not seen. An
   `interaction/request` carries an approval, a user question, or a
   plugin-defined request (`"<pluginId>/<name>"`); the resolution pairs with
   the payload kind (docs/provider-plugin-api.md §4).
@@ -180,11 +183,21 @@ adapter) consumes the deltas and owns every timeline invariant:
   (`claimIfIdle`), and accepted-input lifecycle settlement ever open a
   turn; item/stream deltas never do. Accepted input queues until a turn
   opens and drains into it.
+- **Held turns.** A bridge that keeps a logical turn open after the
+  provider's main run ended (Claude Code holds it while background agents
+  or workflows run) sends `turn.mainRun { state: "idle" }`, and
+  `turn.mainRun { state: "running" }` when the main run starts again. The
+  assembler records it as `turn/mainRun/updated` on the open turn. The
+  thread stays active, but the server delivers `queue-if-active` messages
+  into the held turn as steers instead of queueing them until the turn
+  completes.
 - **Item lifecycle.** Delta-first streams get a synthesized `item/started`;
   `item.close` always carries the full terminal item shape and is applied
   uniformly (paired close, reclassifying dual-settle, or bare
   close-without-open); repeated closes for a settled provider-identified
-  key are deduped and an explicit reopen reuses the same bb id.
+  key are deduped and an explicit reopen reuses the same Omnyo id. A failed
+  `fileChange` close keeps its non-blank `resultText` as the item's
+  `error`, which the timeline shows before any proposed diff.
 - **Accumulation.** Streamed text, cumulative output snapshots (diffed into
   deltas/resets), and progress-event throttling.
 - **One streaming dialect.** Every text stream is an item keyed like every
@@ -206,7 +219,45 @@ reasoningSummary | plan, text }` synthesizes the channel's `item/started`
   cumulative totals (codex) sends both as reported, and a provider that
   reports per turn (claude, pi) sums `last` into `total` itself
   (`addTokenUsage` in the bridge kit), resetting where it sends
-  `session.reset`. The context meter is always the separate `contextWindow`
+  `session.reset`. `usage` may also carry `promptCacheTtlMs`, how long the
+  provider keeps the session's prompt cache after a request. A cache hit
+  refreshes entries at the TTL they were written with, so a bridge reports the
+  TTL of its latest observed cache write and repeats it on later `usage`
+  deltas, resetting where it sends `session.reset`; omit it until the provider
+  reports one. Claude derives it from the `cache_creation` of the turn's last
+  main-thread request (a 1h write ⇒ 1h, else 5m), so a turn that crossed into
+  overage after an earlier 1h write reports 5m. Pi derives it from
+  `cacheWrite1h`, which only its Anthropic and Bedrock APIs report; Codex and
+  ACP agents report no retention and omit it.
+
+  Claude Code's SDK result reports zero usage for a standalone `/compact` turn,
+  and its transcript has no line for the summarization request. The Claude
+  bridge therefore takes that turn's usage from Claude Code's OpenTelemetry
+  `claude_code.api_request` log event. Each bridge process runs one OTLP/HTTP
+  JSON log receiver bound to `127.0.0.1` on a random port, which requires a
+  random per-process bearer header. `buildSessionEnv` sets
+  `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_LOGS_EXPORTER=otlp`, and the
+  logs-only `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json`,
+  `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` and `OTEL_EXPORTER_OTLP_LOGS_HEADERS`, plus
+  `OTEL_LOGS_EXPORT_INTERVAL=1000`; it sets `OTEL_METRICS_EXPORTER=none` only
+  when the host defines no metrics exporter, so host metrics, traces and
+  generic `OTEL_EXPORTER_OTLP_*` settings still apply. The receiver keeps only
+  events with `query_source` `compact` and reads only their token counts and
+  session id; it never logs or stores request bodies. A zero-usage `/compact`
+  result still ends its turn at once: the bridge sends the turn boundary and
+  holds back only that turn's `usage` delta, for up to 10 seconds, while it
+  waits for the matching event. The event replaces the zero usage (input, cache
+  read, cache write, output, and a 1h or 5m `promptCacheTtlMs` from the event's
+  cache writes). The Claude bridge opens turns without a `providerTurnId`, so
+  the usage attaches to the last turn; if any update that opens or advances a
+  later turn arrives first, the bridge sends the held zero usage before it and
+  ignores the event. The bridge does not wait when the session's environment
+  no longer points Claude Code at its receiver (for example, a thread
+  environment override sets `CLAUDE_CODE_ENABLE_TELEMETRY=0`). A thread stop,
+  session close or stream end sends the held usage at once. Without the event
+  the server records the compaction's cache-read share as unknown.
+
+  The context meter is always the separate `contextWindow`
   delta, which may name a vouched `providerTurnId` (codex sends one beside
   each `usage`). It may also carry the session's cumulative `cost`
   (`{ amount, currency }`); only the latest measurement is kept, so a bridge
@@ -281,7 +332,7 @@ range is what gates a bridge: every bridge in this repo reports
 - **`presentation`** on `item.open` and `item.close`, the one place it
   travels: `label {pending, completed}`, `icon {glyph}` (a host glyph such
   as `"FileText"`, or one of the emitting plugin's declared icons as
-  `"<pluginId>/<name>"` from `bb.branding.experimental_icons`; the server
+  `"<pluginId>/<name>"` from `omnyo.branding.experimental_icons`; the server
   replaces a namespaced glyph the plugin did not declare with
   `provider/unhandled` at ingest — never a path or bytes), `title?`,
   `detail?` (≤ 280 chars), `suppress?`, `tint?`. The assembler persists it
@@ -291,14 +342,14 @@ range is what gates a bridge: every bridge in this repo reports
   until the v2 paths are deleted; required when the shape is `extension`.
   Conformance rule `presentation/icon-namespaced-declared` checks the
   namespaced form for bridges that opt in with an `icons: { pluginId, names }`
-  fixture field (no result when the field is omitted); a `server: "bb"` tool
+  fixture field (no result when the field is omitted); a `server: "omnyo"` tool
   row is exempt, its glyph being checked against the tool's own plugin.
-- **bb-injected tools carry their presentation.** Every `dynamicTools[]`
+- **Omnyo-injected tools carry their presentation.** Every `dynamicTools[]`
   definition on `thread/start`, `thread/resume` and `thread/fork` carries the
   `presentation` the server resolved for it (from the owning plugin's
-  `presentation`, or a generic label and the plugin's glyph). A bridge stamps that presentation, beside `server: "bb"`,
+  `presentation`, or a generic label and the plugin's glyph). A bridge stamps that presentation, beside `server: "omnyo"`,
   on the `item.open`/`item.close` of every call to the tool, so no tool-name
-  table labels bb tools anywhere downstream. Optional on the wire: a definition recorded before the field existed
+  table labels Omnyo tools anywhere downstream. Optional on the wire: a definition recorded before the field existed
   presents generically, and the committed recordings predate it, so it stays
   optional until those are re-minted.
 - **Extension kinds** `"<pluginId>/<name>"`: the `extension` item shape
@@ -309,40 +360,40 @@ range is what gates a bridge: every bridge in this repo reports
   plugin's declared schemas at ingest, and refuses a kind whose plugin is not
   the one that registered the thread's provider — a bridge emits only its own
   plugin's kinds.
-- **bb thread state kinds** `"bb/<name>"`: two `extension.state` kinds belong
-  to bb, not to a plugin, so any bridge may emit them and the server validates
-  them against bb's own schemas (`packages/domain/src/thread-provider-state.ts`).
-  `bb/provider-commands` carries `{ commands: [{ name, description,
-  inputHint? }] }`, the slash commands the provider offers in this thread right
-  now; the composer's `/` menu and `bb thread commands` read it.
-  `bb/session-options` carries `{ options: [...] }`, the provider's per-session
+- **Omnyo thread state kinds** `"core/<name>"`: two `extension.state` kinds belong
+  to Omnyo, not to a plugin, so any bridge may emit them and the server validates
+  them against Omnyo's own schemas (`packages/domain/src/thread-provider-state.ts`).
+  `core/provider-commands` carries `{ commands: [{ name, description,
+inputHint? }] }`, the slash commands the provider offers in this thread right
+  now; the composer's `/` menu and `omnyo thread commands` read it.
+  `core/session-options` carries `{ options: [...] }`, the provider's per-session
   settings other than the model and reasoning level (each a `select` with
   `value` and `values`, or a `boolean`), with an optional `category` hint such
-  as `mode`; the model picker and `bb thread options` read it, and the `mode`
+  as `mode`; the model picker and `omnyo thread options` read it, and the `mode`
   option shows in the composer footer instead of the picker.
   Latest snapshot wins; a bridge re-emits the whole list when it changes and
-  stays silent when it has not. A third kind, `bb/session-option-selections`,
+  stays silent when it has not. A third kind, `core/session-option-selections`,
   is written only by the server and refused from a bridge: it holds the
   choices a user made that the provider has not applied yet.
 - **Options before a session exists**: each model in a `model/list` result may
-  carry `sessionOptions`, the same option shape as `bb/session-options`, with
+  carry `sessionOptions`, the same option shape as `core/session-options`, with
   `value` as the provider's default. A `select` lists only the values that
   model supports; a `boolean` with `fixed: true` says the model runs only with
-  that value. bb shows the union across models in the new-thread composer's
+  that value. Omnyo shows the union across models in the new-thread composer's
   model picker, disables a model the current choices rule out, moves the
   selection to a model that fits when the selected one does not, and sends the
   choices as `sessionOptions` on the thread's first commands. The server
   applies the same rule to every create: when the caller leaves the model to
-  bb it starts on a model that fits the choices (the default one when it
+  Omnyo it starts on a model that fits the choices (the default one when it
   fits), and when the caller names a model the choices rule out it refuses the
   create and names a model that fits.
 - **`sessionOptions` execution option**: `{ [optionId]: string | boolean }` on
   `thread/start` and `turn/start`. Before the bridge has published any
-  `bb/session-options` state for the thread it carries every choice made at
+  `core/session-options` state for the thread it carries every choice made at
   creation; afterwards it is present only while a user's choice differs from
   the value the bridge last published. The bridge applies each entry before the prompt,
   skips an option or value it does not offer, and publishes the new
-  `bb/session-options` snapshot; that publication is what clears the choice on
+  `core/session-options` snapshot; that publication is what clears the choice on
   the server, so an option the provider later changes on its own is not forced
   back.
 - **Open reasoning ids**: `reasoningLevel` and
@@ -450,21 +501,21 @@ unvalidated.
 
 Three identifier families, three owners:
 
-| Identifier                              | Minted by                   | Notes                                                                                                                                                                                                |
-| --------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `threadId`                              | bb server                   | Opaque to the provider; echoed verbatim.                                                                                                                                                             |
-| `providerThreadId`                      | the provider                | Its session handle (rollout id, session id). Returned on the `thread/start`/`thread/resume`/`thread/fork` result (required) and echoed by `thread/identity`; never used to scope bb events directly. |
-| turn ids and item ids on `ThreadEvent`s | **the runtime's assembler** | Never the provider, never the bridge.                                                                                                                                                                |
+| Identifier                              | Minted by                   | Notes                                                                                                                                                                                                   |
+| --------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `threadId`                              | Omnyo server                | Opaque to the provider; echoed verbatim.                                                                                                                                                                |
+| `providerThreadId`                      | the provider                | Its session handle (rollout id, session id). Returned on the `thread/start`/`thread/resume`/`thread/fork` result (required) and echoed by `thread/identity`; never used to scope Omnyo events directly. |
+| turn ids and item ids on `ThreadEvent`s | **the runtime's assembler** | Never the provider, never the bridge.                                                                                                                                                                   |
 
-A `providerThreadId` is a durable handle: bb persists it and sends it to a new
+A `providerThreadId` is a durable handle: Omnyo persists it and sends it to a new
 bridge process to resume the session after a restart. It must name exactly one
 provider session among all of that provider's sessions on the host, so never
-mint it from a per-process counter. bb refuses to resume a handle that another
+mint it from a per-process counter. Omnyo refuses to resume a handle that another
 thread announced first, or announced in the same millisecond.
 
 The central-minting rule is the #1320 lesson made structural: a provider can
-inject arbitrary identifiers on its own wire, but the ids that reach bb's
-persistence are always minted by bb-owned assembler code. Bridges forward
+inject arbitrary identifiers on its own wire, but the ids that reach Omnyo's
+persistence are always minted by Omnyo-owned assembler code. Bridges forward
 provider-native ids as vouched join keys on deltas; the assembler translates
 in both directions, so a bridge does zero id translation — including for a
 provider that mints its own turn ids (codex).
@@ -522,7 +573,7 @@ it:
    active turn as interrupted (the bridge emits the settling deltas —
    `turn.boundary { interrupted }` plus explicit closes for provider-owned
    open items); `release` detaches an idle session and must not fabricate an
-   interruption (#1584). The bb turn ids these commands carry are
+   interruption (#1584). The Omnyo turn ids these commands carry are
    reverse-mapped to the bridge's provider-native turn ids by the adapter,
    so the bridge compares its own ids.
 6. **After `thread/stop` the bridge holds nothing for the thread.** The
@@ -557,7 +608,7 @@ Assembler-owned invariants over the assembled timeline:
 3. Item ids are unique across the life of a thread, including resumes: the
    assembler's maps survive within a session and `session.reset` (mandatory
    at every provider session construction) starts a fresh provider id space
-   so reused provider-native ids mint fresh bb ids.
+   so reused provider-native ids mint fresh Omnyo ids.
 4. Completion follows content from the bridge's perspective: if the provider
    emits completion before the content it refers to (codex `item.close`
    before the stdout record), the bridge holds the close delta and flushes
@@ -598,7 +649,7 @@ carries the whole item, so refusing it would lose real content.
    a fresh agent session.
 4. Fork: absent `sourceProviderCheckpointId` means fork at the tip. A
    `fork: "tip"` bridge rejects checkpoint forks with
-   `FORK_CHECKPOINT_UNSUPPORTED` rather than cloning history the bb timeline
+   `FORK_CHECKPOINT_UNSUPPORTED` rather than cloning history the Omnyo timeline
    does not show.
 5. Open work is what the timeline says it is. A `backgroundTask` item and a
    `delegation` item that are still pending are live provider work, and the
@@ -625,7 +676,7 @@ Consumers must NOT assume:
 - That a request's response arrives before notifications caused by the
   request (`turn/started` may precede the `turn/start` response).
 - Anything about `provider/raw` — it is droppable at any pressure point and
-  carries no ids the runtime treats as bb identifiers.
+  carries no ids the runtime treats as Omnyo identifiers.
 
 ## Parsing discipline
 
@@ -634,7 +685,7 @@ fields (forward skew between plugin and daemon versions is normal). One
 malformed entry degrades to one missing entry — a bad model in `model/list`
 drops that model, not the listing; a malformed notification is logged and
 dropped without poisoning the stream. But a `thread/delta` payload must be
-a valid delta: what it assembles into enters bb's persistence, so the core
+a valid delta: what it assembles into enters Omnyo's persistence, so the core
 stays strict.
 
 ## Child processes
@@ -651,7 +702,7 @@ must not leak their own inherited env downward (#1366, #1545).
 
 ## Record mode
 
-Set `BB_PROVIDER_BRIDGE_RECORD_DIR` to a directory and every bridge process
+Set `OMNYO_PROVIDER_BRIDGE_RECORD_DIR` to a directory and every bridge process
 tees the lines that cross its two boundaries into NDJSON files. The bootstrap
 (`bridge-worker-entry.ts`) records the runtime wire for every bridge, first-
 or third-party. A bridge that spawns its provider child records the provider
@@ -660,9 +711,11 @@ right after `spawn()`; the call is a no-op when record mode is off. A bridge
 whose provider pipe belongs to an SDK checks
 `experimental_isProviderBridgeRecording()` and takes the spawn over (the
 Claude bridge does this through the Agent SDK's `spawnClaudeCodeProcess`
-seam). The pi bridge also records the bb extension's channel (fd 3 / fd 4)
+seam). The pi bridge also records the Omnyo extension's channel (fd 3 / fd 4)
 on the same two provider lanes, each message wrapped as
-`{ "bbChannel": <message> }`, so a replay can route it back onto the fds.
+`{ "omnyoChannel": <message> }`, so a replay can route it back onto the fds.
+The replay input refuses extra envelope fields and malformed channel objects
+before claiming a segment.
 
 Layout: `<dir>/<threadId>/<direction>.ndjson`, with `_process` for lines that
 belong to no thread (`initialize`, `model/list`, provider health, and the
@@ -677,7 +730,7 @@ answer. Nothing buffers: each line is appended as it crosses.
 The daemon forwards the variable to the bridges it spawns and the runtime
 appends the provider id, so a daemon started with it writes
 `<dir>/<providerId>/<threadId>/…`. `withoutBridgeRuntimeEnv` and the
-`BB_*` allowlist both strip the variable from provider children, so a
+`OMNYO_*` allowlist both strip the variable from provider children, so a
 recorded provider never records itself.
 
 Recordings are the input of the parity harness
@@ -685,7 +738,7 @@ Recordings are the input of the parity harness
 lanes replay into a fake child (`replay-provider-child.mjs`, for which the
 recording is the script), the runtime lanes replay into a bridge, and two
 checkouts are diffed on the assembled events and projected rows with
-`pnpm parity --old <checkout> --new .` (`@bb/provider-parity`). Each leg
+`pnpm parity --old <checkout> --new .` (`@omnyo/provider-parity`). Each leg
 assembles and projects with its own checkout's code. Differences a migration
 PR intends go in `recordings/parity-allowlist.json` with the PR and reason;
 an entry that masks nothing is reported stale and fails the run.
@@ -701,7 +754,7 @@ and `UPDATE_PARITY_ROW_COUNTS=1` rewrites the pins deliberately. Raw
 recordings stay out of git.
 
 A recording is never rewritten. When a bridge change alters what the bridge
-emits for a recording, `pnpm --filter @bb/provider-parity rerecord
+emits for a recording, `pnpm --filter @omnyo/provider-parity rerecord
 [--plan-with <recording-time checkout>]` writes the bridge's current output
 to `bridge→runtime.current.ndjson` beside the recorded lane; the self-suite
 pins and compares against that file when it exists, while `pnpm parity`

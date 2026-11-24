@@ -4,7 +4,7 @@ import { debugSandbox } from "./debug-sandbox.js";
 import { imageDefinition } from "./image-definition.js";
 import { registerRpcAndCli } from "./account.js";
 import { z } from "zod";
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { resolveSettings, SETTING_DESCRIPTORS } from "./configuration.js";
 import {
   createModalSandboxClient,
@@ -33,17 +33,18 @@ export interface ModalSandboxDeps {
 
 export function createModalSandboxPlugin(
   deps: ModalSandboxDeps,
-): (bb: BbPluginApi) => Promise<void> {
-  return async (bb) => {
-    const image = imageDefinition(bb);
-    const launchOptions = modalLaunchOptions(bb, image);
-    const settings = bb.settings.define(SETTING_DESCRIPTORS);
+): (api: PluginApi) => Promise<void> {
+  return async (api) => {
+    const image = imageDefinition(api);
+    const launchOptions = modalLaunchOptions(api, image);
+    const settings = api.settings.define(SETTING_DESCRIPTORS);
 
     async function currentSettings() {
       return resolveSettings(await settings.get());
     }
 
-    const allocations = modalAllocations(bb, deps.now);
+    const allocations = modalAllocations(api, deps.now);
+
     const backend = createModalSandboxBackend({
       clientFactory: (credentials) =>
         allocations.wrap(deps.clientFactory(credentials)),
@@ -53,19 +54,21 @@ export function createModalSandboxPlugin(
       sleep: deps.sleep,
     });
 
-    bb.onDispose(() => backend.close());
+    api.onDispose(() => backend.close());
 
-    const debug = debugSandbox(bb, image, () => backend.debugContext());
+    const debug = debugSandbox(api, image, () => backend.debugContext());
 
     async function inspectMachine({ hostId }: { hostId: string }) {
-      const stored = await bb.experimental_machines.getResource(hostId);
+      const stored = await api.experimental_machines.getResource(hostId);
+
       if (stored === null)
         throw new Error("No provider resource for this machine.");
+
       return backend.inspect(backend.parseResource(stored));
     }
 
     registerRpcAndCli(
-      bb,
+      api,
       image,
       launchOptions,
       () => backend.connectionStatus(),
@@ -74,11 +77,14 @@ export function createModalSandboxPlugin(
     );
 
     const idleKey = (hostId: string) => `idle/${hostId}`;
+
     async function bumpIdle(hostId: string): Promise<void> {
-      await bb.storage.kv.set(idleKey(hostId), deps.now());
+      await api.storage.kv.set(idleKey(hostId), deps.now());
     }
+
     async function bumpOwnedMachine(hostId: string): Promise<void> {
-      const host = await bb.sdk.hosts.get({ hostId });
+      const host = await api.sdk.hosts.get({ hostId });
+
       if (
         host.machineProviderId === backend.definition.id &&
         host.lifecycle.phase === "active"
@@ -86,63 +92,80 @@ export function createModalSandboxPlugin(
         await bumpIdle(hostId);
       }
     }
-    bb.events.on("experimental_thread.events", async ({ thread }) => {
+
+    api.events.on("experimental_thread.events", async ({ thread }) => {
       if (thread.status !== "starting" && thread.status !== "active") return;
+
       if (thread.environmentId === null) {
-        const hosts = await bb.sdk.hosts.list();
+        const hosts = await api.sdk.hosts.list();
+
         for (const host of hosts) {
           if (
             host.machineProviderId !== backend.definition.id ||
             host.lifecycle.phase !== "active"
           )
             continue;
-          const resource = await bb.experimental_machines.getResource(host.id);
+          const resource = await api.experimental_machines.getResource(host.id);
+
           if (
             resource !== null &&
             backend.allocationKey(backend.parseResource(resource)) === thread.id
           ) {
             await bumpIdle(host.id);
+
             return;
           }
         }
+
         return;
       }
-      const environment = await bb.sdk.environments.get({
+
+      const environment = await api.sdk.environments.get({
         environmentId: thread.environmentId,
       });
+
       await bumpOwnedMachine(environment.hostId);
     });
-    bb.events.on("experimental_terminal.input", async ({ terminal }) => {
+    api.events.on("experimental_terminal.input", async ({ terminal }) => {
       await bumpOwnedMachine(terminal.hostId);
     });
-    bb.background.schedule("pause-idle-machines", "* * * * *", async () => {
+    api.background.schedule("pause-idle-machines", "* * * * *", async () => {
       const resolved = await currentSettings();
+
       if (!resolved.ok) return;
       const { client } = await backend.debugContext();
-      await sweepModalAllocations(bb, allocations, client, deps.now());
+      await sweepModalAllocations(api, allocations, client, deps.now());
+
       if (resolved.settings.idleMs === null) return;
-      const hosts = await bb.sdk.hosts.list();
+      const hosts = await api.sdk.hosts.list();
+
       for (const host of hosts) {
         if (
           host.machineProviderId !== backend.definition.id ||
           host.lifecycle.phase !== "active"
         )
           continue;
+
         try {
-          const stored = await bb.storage.kv.get<unknown>(idleKey(host.id));
+          const stored = await api.storage.kv.get<unknown>(idleKey(host.id));
+
           const lastActivity =
             stored === undefined ? null : z.number().finite().parse(stored);
+
           if (lastActivity === null) {
             await bumpIdle(host.id);
             continue;
           }
+
           if (deps.now() < lastActivity + resolved.settings.idleMs) continue;
-          await bb.sdk.hosts.experimental_suspend({ hostId: host.id });
+          await api.sdk.hosts.experimental_suspend({ hostId: host.id });
         } catch (error) {
           if (hasErrorCode(error, "machine_busy")) continue;
-          const current = await bb.sdk.hosts
+
+          const current = await api.sdk.hosts
             .get({ hostId: host.id })
             .catch(() => null);
+
           if (
             current?.lifecycle.phase === "suspending" ||
             current?.lifecycle.phase === "suspended" ||
@@ -150,24 +173,28 @@ export function createModalSandboxPlugin(
           ) {
             continue;
           }
-          bb.log.warn(
+
+          api.log.warn(
             `Idle pause failed for ${host.id}: ${errorMessage(error)}`,
           );
         }
       }
     });
 
-    registerSandboxBackend(bb, backend, {
+    registerSandboxBackend(api, backend, {
       now: deps.now,
       onConnected: bumpIdle,
     });
 
-    for (const host of await bb.sdk.hosts.list()) {
+    for (const host of await api.sdk.hosts.list()) {
       if (host.machineProviderId !== backend.definition.id) continue;
+
       try {
-        const stored = await bb.experimental_machines.getResource(host.id);
+        const stored = await api.experimental_machines.getResource(host.id);
+
         if (stored === null) continue;
         const resource = backend.parseResource(stored);
+
         if (resource.sandboxId !== null)
           await allocations.remember({
             accountIdentity: resource.accountIdentity,
@@ -177,14 +204,15 @@ export function createModalSandboxPlugin(
             expiresAt: deps.now() + SANDBOX_LIFETIME_MS,
           });
       } catch (error) {
-        bb.log.warn(
+        api.log.warn(
           `Modal allocation import failed for ${host.id}: ${errorMessage(error)}`,
         );
       }
     }
 
     const loaded = await currentSettings();
-    if (!loaded.ok) bb.status.needsConfiguration(loaded.message);
+
+    if (!loaded.ok) api.status.needsConfiguration(loaded.message);
   };
 }
 

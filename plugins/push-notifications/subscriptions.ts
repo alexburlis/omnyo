@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import {
   pushSubscriptionSchema,
   type AddPushSubscriptionInput,
@@ -10,14 +10,16 @@ import {
 const SUBSCRIPTION_KEY_PREFIX = "subscription:";
 
 export interface PushSubscriptionStore {
-  add(input: AddPushSubscriptionInput): Promise<{ id: string; created: boolean }>;
+  add(
+    input: AddPushSubscriptionInput,
+  ): Promise<{ id: string; created: boolean }>;
   list(): Promise<PushSubscription[]>;
   listSummaries(): Promise<PushSubscriptionSummary[]>;
   remove(id: string): Promise<boolean>;
 }
 
 export function createPushSubscriptionStore(
-  bb: BbPluginApi,
+  api: PluginApi,
   options: { now?: () => number; createId?: () => string } = {},
 ): PushSubscriptionStore {
   const now = options.now ?? Date.now;
@@ -25,20 +27,24 @@ export function createPushSubscriptionStore(
   let mutationQueue: Promise<void> = Promise.resolve();
 
   async function readAll(): Promise<PushSubscription[]> {
-    const keys = await bb.storage.kv.list(SUBSCRIPTION_KEY_PREFIX);
+    const keys = await api.storage.kv.list(SUBSCRIPTION_KEY_PREFIX);
     const subscriptions: PushSubscription[] = [];
+
     for (const key of keys) {
       const parsed = pushSubscriptionSchema.safeParse(
-        await bb.storage.kv.get<unknown>(key),
+        await api.storage.kv.get<unknown>(key),
       );
+
       if (!parsed.success) {
-        bb.log.warn(
+        api.log.warn(
           `Ignored invalid push subscription row ${key.slice(SUBSCRIPTION_KEY_PREFIX.length)}`,
         );
         continue;
       }
+
       subscriptions.push(parsed.data);
     }
+
     return subscriptions.sort(
       (left, right) =>
         left.createdAt - right.createdAt || left.id.localeCompare(right.id),
@@ -51,6 +57,7 @@ export function createPushSubscriptionStore(
       () => undefined,
       () => undefined,
     );
+
     return result;
   }
 
@@ -58,11 +65,13 @@ export function createPushSubscriptionStore(
     add(input) {
       return mutate(async () => {
         const subscriptions = await readAll();
+
         const existing = subscriptions.find(
-          (subscription) =>
-            subscription.expoPushToken === input.expoPushToken,
+          (subscription) => subscription.expoPushToken === input.expoPushToken,
         );
+
         const timestamp = now();
+
         if (existing) {
           const updated: PushSubscription = {
             ...existing,
@@ -70,13 +79,17 @@ export function createPushSubscriptionStore(
             platform: input.platform,
             lastSeenAt: Math.max(timestamp, existing.lastSeenAt),
           };
-          await bb.storage.kv.set(
+
+          await api.storage.kv.set(
             `${SUBSCRIPTION_KEY_PREFIX}${existing.id}`,
             updated,
           );
+
           return { id: existing.id, created: false };
         }
+
         const id = createId();
+
         const created: PushSubscription = {
           id,
           expoPushToken: input.expoPushToken,
@@ -85,17 +98,21 @@ export function createPushSubscriptionStore(
           createdAt: timestamp,
           lastSeenAt: timestamp,
         };
-        await bb.storage.kv.set(`${SUBSCRIPTION_KEY_PREFIX}${id}`, created);
+
+        await api.storage.kv.set(`${SUBSCRIPTION_KEY_PREFIX}${id}`, created);
+
         return { id, created: true };
       });
     },
     async list() {
       await mutationQueue;
+
       return readAll();
     },
     async listSummaries() {
       await mutationQueue;
       const subscriptions = await readAll();
+
       return subscriptions.map(({ expoPushToken, ...subscription }) => ({
         ...subscription,
         tokenSuffix: expoPushToken.slice(-6),
@@ -106,8 +123,10 @@ export function createPushSubscriptionStore(
         const existing = (await readAll()).some(
           (subscription) => subscription.id === id,
         );
+
         if (!existing) return false;
-        await bb.storage.kv.delete(`${SUBSCRIPTION_KEY_PREFIX}${id}`);
+        await api.storage.kv.delete(`${SUBSCRIPTION_KEY_PREFIX}${id}`);
+
         return true;
       });
     },

@@ -3,8 +3,8 @@ import {
   encodeClientTurnRequestIdNumber,
   threadScope,
   turnScope,
-} from "@bb/domain";
-import type { ClientTurnRequestId, Thread } from "@bb/domain";
+} from "@omnyo/domain";
+import type { ClientTurnRequestId, Thread } from "@omnyo/domain";
 import {
   createConnection,
   createProject,
@@ -13,9 +13,9 @@ import {
   migrate,
   noopNotifier,
   upsertHost,
-} from "@bb/db";
-import type { DbConnection } from "@bb/db";
-import type { TimelineRow } from "@bb/server-contract";
+} from "@omnyo/db";
+import type { DbConnection } from "@omnyo/db";
+import type { TimelineRow } from "@omnyo/server-contract";
 import { buildThreadTimelineWithProfile } from "../../../src/services/threads/timeline.js";
 
 const providerThreadId = "provider-root";
@@ -36,17 +36,21 @@ interface SetupResult {
 function setup(): SetupResult {
   const db = createConnection(":memory:");
   migrate(db);
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     providerId: "claude-code",
   });
+
   return { db, thread };
 }
 
@@ -303,21 +307,26 @@ function nestedRows(row: TimelineRow): readonly TimelineRow[] {
   if (row.kind === "turn") {
     return row.children ?? [];
   }
+
   if (row.kind === "work" && row.workKind === "delegation") {
     return row.childRows ?? [];
   }
+
   return [];
 }
 
 function flattenRows(rows: readonly TimelineRow[]): TimelineRow[] {
   const flattened: TimelineRow[] = [];
+
   const visit = (currentRows: readonly TimelineRow[]): void => {
     for (const row of currentRows) {
       flattened.push(row);
       visit(nestedRows(row));
     }
   };
+
   visit(rows);
+
   return flattened;
 }
 
@@ -337,6 +346,7 @@ describe("thread timeline parented pagination", () => {
       eventBudget: 1_000_000,
       includeClearedContextHistory: false,
       includeDiagnosticOperations: false,
+      compactionOfferEnabled: false,
       includeNestedRows: true,
       maxInlineOutputChars: null,
       maxSeq: 51,
@@ -356,16 +366,19 @@ describe("thread timeline parented pagination", () => {
       eventBudget: 1_000_000,
       includeClearedContextHistory: false,
       includeDiagnosticOperations: false,
+      compactionOfferEnabled: false,
       includeNestedRows: true,
       maxInlineOutputChars: null,
       maxSeq: 51,
       page: { kind: "latest", segmentLimit: 2 },
     }).response;
+
     const timeline = buildThreadTimelineWithProfile(db, thread, {
       completedTurnDisplay: "collapse",
       eventBudget: 1_000_000,
       includeClearedContextHistory: false,
       includeDiagnosticOperations: false,
+      compactionOfferEnabled: false,
       includeNestedRows: true,
       maxInlineOutputChars: null,
       maxSeq: 51,
@@ -375,6 +388,7 @@ describe("thread timeline parented pagination", () => {
         segmentLimit: 1,
       },
     }).response;
+
     const delegation = flattenRows(timeline.rows).find(
       (
         row,

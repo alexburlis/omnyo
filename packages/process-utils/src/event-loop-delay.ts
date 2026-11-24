@@ -6,6 +6,8 @@ interface EventLoopStall {
   meanDelayMs: number;
   p99DelayMs: number;
   resolutionMs: number;
+  sampleGapMs: number;
+  suspensionPossible: boolean;
   thresholdMs: number;
 }
 
@@ -20,9 +22,13 @@ interface EventLoopDelaySampler {
 }
 
 const EVENT_LOOP_STALL_THRESHOLD_MS = 500;
+
 const EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS = 5_000;
+
 const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
-const LIKELY_SYSTEM_SUSPENSION_MIN_DELAY_MS = 60_000;
+
+const LONG_SAMPLE_GAP_MS = 60_000;
+
 const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 
 function nanosecondsToMilliseconds(durationNs: number): number {
@@ -37,16 +43,18 @@ export function isLikelySystemSuspensionDelay(args: {
   gapMs: number;
   intervalMs: number;
 }): boolean {
-  return args.gapMs - args.intervalMs >= LIKELY_SYSTEM_SUSPENSION_MIN_DELAY_MS;
+  return args.gapMs - args.intervalMs >= LONG_SAMPLE_GAP_MS;
 }
 
 export function startEventLoopDelaySampler(
   args: StartEventLoopDelaySamplerArgs,
 ): EventLoopDelaySampler {
   const now = args.now ?? (() => Date.now());
+
   const histogram = monitorEventLoopDelay({
     resolution: EVENT_LOOP_DELAY_RESOLUTION_MS,
   });
+
   histogram.enable();
   let lastSampleAt = now();
 
@@ -55,15 +63,14 @@ export function startEventLoopDelaySampler(
     const gapMs = sampledAt - lastSampleAt;
     lastSampleAt = sampledAt;
     const maxDelayMs = nanosecondsToMilliseconds(histogram.max);
+
     const thresholdMs =
       typeof args.thresholdMs === "function"
         ? args.thresholdMs()
         : (args.thresholdMs ?? EVENT_LOOP_STALL_THRESHOLD_MS);
-    const stalled =
-      !isLikelySystemSuspensionDelay({
-        gapMs,
-        intervalMs: EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS,
-      }) && maxDelayMs >= thresholdMs;
+
+    const stalled = maxDelayMs >= thresholdMs;
+
     args.onSample({
       stall: stalled
         ? {
@@ -76,12 +83,18 @@ export function startEventLoopDelaySampler(
               nanosecondsToMilliseconds(histogram.percentile(99)),
             ),
             resolutionMs: EVENT_LOOP_DELAY_RESOLUTION_MS,
+            sampleGapMs: roundDurationMs(gapMs),
+            suspensionPossible: isLikelySystemSuspensionDelay({
+              gapMs,
+              intervalMs: EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS,
+            }),
             thresholdMs,
           }
         : null,
     });
     histogram.reset();
   }, EVENT_LOOP_DELAY_SAMPLE_INTERVAL_MS);
+
   interval.unref();
 
   return {

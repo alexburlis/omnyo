@@ -2,7 +2,7 @@ import {
   promptInputHasCommandMention,
   type ThreadTimelineActivePromptMode,
   type PromptTextMention,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 interface PromptModeInput {
   mentionRanges: readonly PromptTextMention[];
@@ -47,6 +47,7 @@ export function permissionDisplayForPromptMode(
   if (args.planModeCopy === undefined || !isPlanModePrompt(args)) {
     return undefined;
   }
+
   return planPermissionDisplay(args.planModeCopy);
 }
 
@@ -57,6 +58,7 @@ export function permissionDisplayForActivePromptMode(
   if (activePromptMode?.mode === "plan" && planModeCopy !== undefined) {
     return planPermissionDisplay(planModeCopy);
   }
+
   return undefined;
 }
 

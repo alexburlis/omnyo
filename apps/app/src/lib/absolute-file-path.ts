@@ -5,7 +5,7 @@ import {
   isWindowsHostPath,
   joinHostPath,
   normalizeHostPath,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 interface ResolveAbsoluteFilePathArgs {
   path: string;
@@ -34,6 +34,7 @@ function trimTrailingSlash(path: string): string {
   if (path === "/") {
     return path;
   }
+
   return path.replace(/\/+$/u, "");
 }
 
@@ -72,9 +73,11 @@ export function buildAbsoluteFilePath({
 
   const normalizedRootPath = trimTrailingSlash(rootPath);
   const relativePath = trimLeadingSlash(path);
+
   if (normalizedRootPath === "/") {
     return `/${relativePath}`;
   }
+
   return `${normalizedRootPath}/${relativePath}`;
 }
 
@@ -85,9 +88,11 @@ export function resolveAbsoluteFilePath({
   if (isAbsoluteFilePath(path)) {
     return path;
   }
+
   if (!rootPath) {
     return null;
   }
+
   return buildAbsoluteFilePath({ path, rootPath });
 }
 
@@ -95,7 +100,9 @@ export function getAbsoluteDirname({ path }: GetAbsoluteDirnameArgs): string {
   if (isWindowsHostPath(path)) {
     return getHostPathDirname(path) ?? path;
   }
+
   const trimmed = trimTrailingSlash(path);
   const lastSlashIndex = trimmed.lastIndexOf("/");
+
   return lastSlashIndex <= 0 ? "/" : trimmed.slice(0, lastSlashIndex);
 }

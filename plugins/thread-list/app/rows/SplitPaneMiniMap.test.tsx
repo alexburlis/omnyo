@@ -10,6 +10,7 @@ function visibleBounds(rect: SVGElement) {
   const strokeWidth = Number(rect.getAttribute("stroke-width"));
   const x = Number(rect.getAttribute("x")) - strokeWidth / 2;
   const y = Number(rect.getAttribute("y")) - strokeWidth / 2;
+
   return {
     x,
     y,
@@ -42,6 +43,7 @@ describe("SplitPaneMiniMap", () => {
 
     const miniMap = screen.getByRole("img", { name: "Two-pane split" });
     const [outlined, filled] = miniMap.querySelectorAll("rect");
+
     if (outlined === undefined || filled === undefined) {
       throw new Error("Expected two mini-map slots");
     }

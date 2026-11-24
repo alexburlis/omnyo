@@ -15,11 +15,13 @@ function createMonitorHarness(
   options: { inotifyInstanceWarnThreshold?: number } = {},
 ) {
   const warn = vi.fn();
+
   const timer: CapturedTimer = {
     callback: () => undefined,
     cleared: false,
     unrefed: false,
   };
+
   const monitor = startHostDaemonHealthMonitor({
     logger: { warn },
     getWatchCounts: () => ({ workspaceWatches: 3, threadStorageTargets: 5 }),
@@ -27,6 +29,7 @@ function createMonitorHarness(
     inotifyInstanceWarnThreshold: options.inotifyInstanceWarnThreshold,
     setIntervalFn: (callback) => {
       timer.callback = callback;
+
       return {
         clear: () => {
           timer.cleared = true;
@@ -37,6 +40,7 @@ function createMonitorHarness(
       };
     },
   });
+
   return { warn, timer, monitor };
 }
 
@@ -74,6 +78,7 @@ describe("startHostDaemonHealthMonitor", () => {
       { rssBytes: 1, openFds: 30, inotifyInstances: 2, threads: 11 },
       { inotifyInstanceWarnThreshold: 8 },
     );
+
     healthy.timer.callback();
     expect(healthy.warn).not.toHaveBeenCalled();
 
@@ -83,6 +88,7 @@ describe("startHostDaemonHealthMonitor", () => {
       inotifyInstances: null,
       threads: null,
     });
+
     unavailable.timer.callback();
     expect(unavailable.warn).not.toHaveBeenCalled();
   });
@@ -94,6 +100,7 @@ describe("startHostDaemonHealthMonitor", () => {
       inotifyInstances: 1,
       threads: 1,
     });
+
     expect(timer.unrefed).toBe(true);
     monitor.stop();
     expect(timer.cleared).toBe(true);

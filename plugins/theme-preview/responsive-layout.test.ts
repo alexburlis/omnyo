@@ -39,8 +39,10 @@ describe("Theme Preview responsive layout", () => {
     const splitJoin = SIDEBAR_WIDTH + 2 * THREAD_MIN_WIDTH;
     expect(frameCompositionForWidth(splitJoin - 1).splitColumns).toBe(false);
     expect(frameCompositionForWidth(splitJoin).splitColumns).toBe(true);
+
     const infoJoin =
       SIDEBAR_WIDTH + THREAD_COMFORTABLE_WIDTH + INFO_PANEL_WIDTH;
+
     expect(infoJoin).toBeGreaterThan(splitJoin);
     expect(frameCompositionForWidth(infoJoin - 1).infoPanel).toBe(false);
     expect(frameCompositionForWidth(infoJoin)).toEqual({

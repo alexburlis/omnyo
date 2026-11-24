@@ -10,5 +10,4 @@ export const LazyTimelineFileDiffBlock =
         (module) => module.TimelineFileDiffBlock,
       ),
     loading: () => <TimelineRowBodyPlaceholder />,
-    tier: "intent",
   });

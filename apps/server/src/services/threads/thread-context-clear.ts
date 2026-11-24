@@ -1,12 +1,13 @@
-import { createEventId, getThread } from "@bb/db";
+import { createEventId, getThread } from "@omnyo/db";
 import {
   THREAD_CONTEXT_CLEAR_OPERATION,
   THREAD_CONTEXT_CLEARED_DETAIL,
   threadScope,
   type Environment,
   type Thread,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { ApiError } from "../../errors.js";
+import type { BufferedTransaction } from "../lib/notification-buffer.js";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { withThreadContextClearGuard } from "./thread-context-mutation-guard.js";
 import { appendThreadEvent } from "./thread-events.js";
@@ -17,18 +18,22 @@ import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
 export async function clearThreadContext(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: {
+    beforeCommitInTransaction?: (args: BufferedTransaction) => void;
     environment: Pick<Environment, "hostId" | "id">;
     thread: Thread;
   },
 ): Promise<void> {
   await withThreadContextClearGuard(args.thread.id, async () => {
     const thread = getThread(deps.db, args.thread.id);
+
     if (!thread) {
       throw new ApiError(404, "invalid_request", "Thread not found");
     }
+
     if (thread.archivedAt !== null || thread.deletedAt !== null) {
       throw new ApiError(409, "invalid_request", "Thread is not writable");
     }
+
     if (thread.status !== "idle" && thread.status !== "error") {
       throw new ApiError(
         409,
@@ -36,7 +41,10 @@ export async function clearThreadContext(
         "Context can only be cleared when the thread is idle or failed",
       );
     }
-    if (deps.pendingInteractions.hasTurnBoundPendingThreadInteraction(thread.id)) {
+
+    if (
+      deps.pendingInteractions.hasTurnBoundPendingThreadInteraction(thread.id)
+    ) {
       throw new ApiError(
         409,
         "awaiting_user_interaction",
@@ -44,8 +52,11 @@ export async function clearThreadContext(
       );
     }
 
-    await stopThreadForCurrentState(deps, thread, args.environment);
+    await stopThreadForCurrentState(deps, thread, args.environment, {
+      intent: "context-clear",
+    });
     const releasedThread = getThread(deps.db, thread.id);
+
     if (
       !releasedThread ||
       (releasedThread.status !== "idle" && releasedThread.status !== "error")
@@ -57,18 +68,22 @@ export async function clearThreadContext(
       );
     }
 
-    appendThreadEvent(deps, {
-      threadId: releasedThread.id,
-      environmentId: releasedThread.environmentId,
-      type: "system/operation",
-      scope: threadScope(),
-      data: {
-        operation: THREAD_CONTEXT_CLEAR_OPERATION,
-        operationId: createEventId(),
-        status: "completed",
-        message: THREAD_CONTEXT_CLEARED_DETAIL,
+    appendThreadEvent(
+      deps,
+      {
+        threadId: releasedThread.id,
+        environmentId: releasedThread.environmentId,
+        type: "system/operation",
+        scope: threadScope(),
+        data: {
+          operation: THREAD_CONTEXT_CLEAR_OPERATION,
+          operationId: createEventId(),
+          status: "completed",
+          message: THREAD_CONTEXT_CLEARED_DETAIL,
+        },
       },
-    });
+      args.beforeCommitInTransaction,
+    );
     deps.hub.notifyThread(
       releasedThread.id,
       ["history-rewritten", "status-changed"],

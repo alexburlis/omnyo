@@ -1,6 +1,7 @@
 export type PluginMentionTrigger = "@" | "#" | "$" | "!" | "~";
 
 export const DEFAULT_PLUGIN_MENTION_TRIGGER: PluginMentionTrigger = "@";
+
 export const PLUGIN_MENTION_TRIGGER_VALUES = [
   "@",
   "#",
@@ -30,15 +31,20 @@ export function normalizePluginMentionTriggers(
   if (value === undefined) {
     return [DEFAULT_PLUGIN_MENTION_TRIGGER];
   }
+
   if (!Array.isArray(value) || value.length === 0) {
     return null;
   }
+
   const triggers: PluginMentionTrigger[] = [];
+
   for (const trigger of value) {
     if (!isPluginMentionTrigger(trigger) || triggers.includes(trigger)) {
       return null;
     }
+
     triggers.push(trigger);
   }
+
   return triggers;
 }

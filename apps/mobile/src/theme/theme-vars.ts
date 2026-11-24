@@ -7,6 +7,7 @@ export function tokenKeyToCssVar(key: string): CssVarName {
     .replace(/([A-Z])/g, "-$1")
     .replace(/([a-z])(\d)/g, "$1-$2")
     .toLowerCase();
+
   return `--${kebab}`;
 }
 
@@ -14,8 +15,10 @@ export function buildThemeVars(
   tokens: NativeThemeTokens,
 ): Record<CssVarName, string> {
   const vars: Record<CssVarName, string> = {};
+
   for (const [key, value] of Object.entries(tokens)) {
     vars[tokenKeyToCssVar(key)] = value;
   }
+
   return vars;
 }

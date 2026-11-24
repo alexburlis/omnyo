@@ -7,8 +7,9 @@ import {
 } from "../src/verified-process-stop.js";
 
 it("verifies a real process's command and start time before stopping it", async () => {
-  const token = `bb-process-identity-${crypto.randomUUID()}`;
+  const token = `omnyo-process-identity-${crypto.randomUUID()}`;
   const startedAt = new Date().toISOString();
+
   const child = spawn(
     process.execPath,
     [
@@ -18,13 +19,16 @@ it("verifies a real process's command and start time before stopping it", async 
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
+
   const closed = once(child, "close");
   onTestFinished(async () => {
     child.kill("SIGKILL");
     await closed;
   });
   await once(child.stdout, "data");
+
   if (child.pid === undefined) throw new Error("Child did not start");
+
   const args = {
     pid: child.pid,
     startedAt,
@@ -33,6 +37,7 @@ it("verifies a real process's command and start time before stopping it", async 
     killTimeoutMs: 2_000,
     verifyTokens: [token],
   };
+
   await expect(
     stopVerifiedProcess({ ...args, verifyTokens: ["wrong-token"] }),
   ).resolves.toMatchObject({ kind: "unverified", reason: "command" });

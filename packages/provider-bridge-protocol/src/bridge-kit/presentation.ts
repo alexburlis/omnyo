@@ -1,14 +1,16 @@
-import { THREAD_EVENT_ITEM_PRESENTATION_DETAIL_MAX_LENGTH } from "@bb/domain";
-import { sliceUtf16Head } from "@bb/text-utils";
+import { THREAD_EVENT_ITEM_PRESENTATION_DETAIL_MAX_LENGTH } from "@omnyo/domain";
+import { sliceUtf16Head } from "@omnyo/text-utils";
 import type { DeltaPresentation } from "../thread-delta.js";
 
 export const PRESENTATION_TITLE_MAX_LENGTH = 160;
 
 export function presentationTitle(text: string): string | undefined {
   const firstLine = text.trim().split("\n", 1)[0]?.trim() ?? "";
+
   if (firstLine.length === 0) {
     return undefined;
   }
+
   return firstLine.length > PRESENTATION_TITLE_MAX_LENGTH
     ? `${sliceUtf16Head(firstLine, PRESENTATION_TITLE_MAX_LENGTH - 1)}…`
     : firstLine;
@@ -29,6 +31,7 @@ export function withTitle(
 
 export function presentationFileName(path: string): string {
   const segments = path.split("/").filter((segment) => segment.length > 0);
+
   return segments[segments.length - 1] ?? path;
 }
 
@@ -96,6 +99,7 @@ export function planStepsPresentation(
   steps: readonly { step: string; status?: string }[],
 ): DeltaPresentation {
   const active = steps.find((step) => step.status === "active");
+
   return withTitle(
     {
       label: { pending: "Updating plan", completed: "Updated plan" },

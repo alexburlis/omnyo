@@ -43,13 +43,17 @@ export function normalizeClientServerOrigin(value: string): string {
 export function parseClientConfig(rawConfig: unknown): ClientConfig {
   const parsed = clientConfigFileSchema.parse(rawConfig);
   const config: ClientConfig = { servers: {} };
+
   for (const [rawOrigin, serverConfig] of Object.entries(parsed.servers)) {
     const serverOrigin = normalizeClientServerOrigin(rawOrigin);
+
     if (config.servers[serverOrigin] !== undefined) {
       throw new Error(`Duplicate server origin: ${serverOrigin}`);
     }
+
     config.servers[serverOrigin] = serverConfig;
   }
+
   return config;
 }
 
@@ -58,5 +62,6 @@ export function resolveClientSshAuthority(
   key: ClientSshHostKey,
 ): string | null {
   const serverOrigin = normalizeClientServerOrigin(key.serverOrigin);
+
   return config.servers[serverOrigin]?.hosts[key.hostId]?.sshAuthority ?? null;
 }

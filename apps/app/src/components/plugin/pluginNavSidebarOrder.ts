@@ -6,11 +6,11 @@ interface PluginNavPanelIdentity {
 }
 
 export const BUILT_IN_SIDEBAR_NAVIGATION_KEYS = {
-  newThread: "__bb__/new-thread",
-  searchThreads: "__bb__/search-threads",
-  extensions: "__bb__/extensions",
-  skills: "__bb__/skills",
-  automations: "__bb__/automations",
+  newThread: "__core__/new-thread",
+  searchThreads: "__core__/search-threads",
+  extensions: "__core__/extensions",
+  skills: "__core__/skills",
+  automations: "__core__/automations",
 } as const;
 
 export const DEFAULT_HIDDEN_SIDEBAR_NAVIGATION_KEYS = [
@@ -33,8 +33,10 @@ export function seedSkillsNavigationPreference(
   const pluginsIndex = order.indexOf(extensions);
   const nextOrder = [...order];
   const nextVisibleKeys = visibleKeys === null ? null : [...visibleKeys];
+
   if (pluginsIndex !== -1 && !order.includes(skills)) {
     nextOrder.splice(pluginsIndex + 1, 0, skills);
+
     if (
       nextVisibleKeys?.includes(extensions) &&
       !nextVisibleKeys.includes(skills)
@@ -46,6 +48,7 @@ export function seedSkillsNavigationPreference(
       );
     }
   }
+
   return { order: nextOrder, visibleKeys: nextVisibleKeys };
 }
 
@@ -85,16 +88,20 @@ export function arrangePluginNavPanelPreferences<
     getId: getPluginNavPanelKey,
     storedOrder,
   });
+
   const normalizedVisibleKeys =
     storedVisibleKeys === null
       ? null
       : [...new Set(storedVisibleKeys.filter((key) => key.length > 0))];
+
   const defaultHiddenKeySet = new Set(defaultHiddenKeys);
+
   const visibleKeys =
     normalizedVisibleKeys ??
     ordered
       .map(getPluginNavPanelKey)
       .filter((key) => !defaultHiddenKeySet.has(key));
+
   const visibleSet = new Set(visibleKeys);
 
   return {
@@ -118,8 +125,10 @@ export function togglePluginNavPanelVisibility(
   const normalized = [
     ...new Set(visibleKeys.filter((item) => item.length > 0)),
   ];
+
   if (visible) {
     return normalized.includes(key) ? normalized : [...normalized, key];
   }
+
   return normalized.filter((item) => item !== key);
 }

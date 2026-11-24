@@ -1,5 +1,5 @@
-import type { ThreadRuntimeDisplayStatus } from "@bb/domain";
-import { assertNever } from "@bb/core-ui";
+import type { ThreadRuntimeDisplayStatus } from "@omnyo/domain";
+import { assertNever } from "@omnyo/core-ui";
 
 export function getFollowUpPromptPlaceholder(
   displayStatus: ThreadRuntimeDisplayStatus,
@@ -18,7 +18,7 @@ export function getFollowUpPromptPlaceholder(
     case "pending":
     case "idle":
     case "active":
-      return "Ask for a follow-up. @ to mention files, folders, sections, or threads";
+      return "Ask for a follow-up";
     default:
       return assertNever(displayStatus);
   }

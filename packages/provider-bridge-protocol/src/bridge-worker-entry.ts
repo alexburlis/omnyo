@@ -1,7 +1,6 @@
-import { rmSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createPluginProcessTempDir } from "@bb/process-utils";
+import { createPluginProcessTempAllocation } from "@omnyo/process-utils";
 import { readBoundedLines } from "./bridge-kit/bounded-line-reader.js";
 import {
   createRecordingLineSplitter,
@@ -33,32 +32,28 @@ if (
   );
 }
 
-const tempDir = await createPluginProcessTempDir({
+const { tempDir } = await createPluginProcessTempAllocation({
   pluginId,
-  prefix: "bb-provider-bridge",
+  prefix: "omnyo-provider-bridge",
+  origin: "provider-bridge",
+  owner: "self",
 });
 
-let removedTempDir = false;
-function removeTempDir(): void {
-  if (removedTempDir) return;
-  removedTempDir = true;
-  try {
-    rmSync(tempDir, { recursive: true, force: true });
-  } catch {}
-}
-process.once("exit", removeTempDir);
-
 const recorder = getBridgeRecorder();
+
 if (recorder !== null) {
   const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+
   const outbound = createRecordingLineSplitter((line) =>
     recorder.recordRuntimeLine("bridge→runtime", line),
   );
+
   process.stdout.write = ((
     chunk: string | Uint8Array,
     ...rest: unknown[]
   ): boolean => {
     outbound.push(chunk);
+
     return (originalStdoutWrite as (...args: unknown[]) => boolean)(
       chunk,
       ...rest,
@@ -68,21 +63,24 @@ if (recorder !== null) {
 }
 
 let entry: ProviderBridgeEntry;
+
 try {
   const imported: unknown = await import(pathToFileURL(bridgeModulePath).href);
+
   const parsed = parseProviderBridgeEntry(
     typeof imported === "object" && imported !== null
       ? Reflect.get(imported, PROVIDER_BRIDGE_EXPORT_NAME)
       : undefined,
   );
+
   if (parsed.entry === null) {
     fail(
       `plugin "${pluginId}" cannot run as a provider bridge: its host artifact ${parsed.problem} (${bridgeModulePath})`,
     );
   }
+
   entry = parsed.entry;
 } catch (error) {
-  removeTempDir();
   fail(
     `plugin "${pluginId}" failed to load its provider bridge: ${error instanceof Error ? error.message : String(error)}`,
   );
@@ -93,6 +91,7 @@ entry.start?.({ pluginId, dataDir, tempDir });
 if (entry.onSigterm) {
   process.once("SIGTERM", entry.onSigterm);
 }
+
 if (entry.onSigint) {
   process.once("SIGINT", entry.onSigint);
 }
@@ -112,7 +111,6 @@ readBoundedLines({
     );
   },
   onClose: () => {
-    removeTempDir();
     entry.onClose?.();
   },
 });

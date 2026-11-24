@@ -16,9 +16,11 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup() {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: {
@@ -27,17 +29,20 @@ function setup() {
       path: "/tmp/test-project",
     },
   });
+
   const environment = createEnvironment(db, noopNotifier, {
-      providerOwnsPath: false,
+    providerOwnsPath: false,
     projectId: project.id,
     hostId: host.id,
     status: "ready",
   });
+
   const thread = createThread(db, noopNotifier, {
     projectId: project.id,
     environmentId: environment.id,
     providerId: "codex",
   });
+
   const siblingThread = createThread(db, noopNotifier, {
     projectId: project.id,
     environmentId: environment.id,
@@ -99,6 +104,7 @@ describe("pending interactions", () => {
 
   it("rejects duplicate provider request identities", () => {
     const { db, siblingThread, thread } = setup();
+
     const created = createPendingInteraction(db, {
       threadId: thread.id,
       turnId: "turn-1",
@@ -138,6 +144,7 @@ describe("pending interactions", () => {
       providerRequestId: "request-1",
       payload: commandApprovalPayload("git push", "item-1"),
     });
+
     const newer = createPendingInteraction(db, {
       threadId: thread.id,
       turnId: "turn-2",
@@ -178,6 +185,7 @@ describe("pending interactions", () => {
       providerRequestId: "request-1",
       payload: commandApprovalPayload("git push", "item-1"),
     });
+
     createPendingInteraction(db, {
       threadId: siblingThread.id,
       turnId: "turn-2",
@@ -204,42 +212,40 @@ describe("pending interactions", () => {
     ).toBe("pending");
   });
 
-  it(
-    "chunks provider-thread interrupts to stay under SQLite variable limits",
-    () => {
-      const { db, siblingThread, thread } = setup();
-      const threadIds = Array.from(
-        { length: 1_050 },
-        (_, index) => `thr_missing_batch_${index}`,
-      );
-      threadIds[0] = thread.id;
-      threadIds[1_000] = siblingThread.id;
-      const targetThreadIds = [thread.id, siblingThread.id];
+  it("chunks provider-thread interrupts to stay under SQLite variable limits", () => {
+    const { db, siblingThread, thread } = setup();
 
-      for (const [index, threadId] of targetThreadIds.entries()) {
-        createPendingInteraction(db, {
-          threadId,
-          turnId: `turn-batched-interrupt-provider-${index}`,
-          providerId: "codex",
-          providerThreadId: `provider-thread-batched-interrupt-provider-${index}`,
-          providerRequestId: `request-batched-interrupt-provider-${index}`,
-          payload: commandApprovalPayload(
-            "git push",
-            `item-batched-interrupt-provider-${index}`,
-          ),
-        });
-      }
+    const threadIds = Array.from(
+      { length: 1_050 },
+      (_, index) => `thr_missing_batch_${index}`,
+    );
 
-      expect(
-        new Set(
-          interruptPendingInteractionsForThreads(db, {
-            providerId: "codex",
-            threadIds,
-            statusReason: "Provider exited",
-          }).map((row) => row.threadId),
+    threadIds[0] = thread.id;
+    threadIds[1_000] = siblingThread.id;
+    const targetThreadIds = [thread.id, siblingThread.id];
+
+    for (const [index, threadId] of targetThreadIds.entries()) {
+      createPendingInteraction(db, {
+        threadId,
+        turnId: `turn-batched-interrupt-provider-${index}`,
+        providerId: "codex",
+        providerThreadId: `provider-thread-batched-interrupt-provider-${index}`,
+        providerRequestId: `request-batched-interrupt-provider-${index}`,
+        payload: commandApprovalPayload(
+          "git push",
+          `item-batched-interrupt-provider-${index}`,
         ),
-      ).toEqual(new Set(targetThreadIds));
-    },
-  );
+      });
+    }
 
+    expect(
+      new Set(
+        interruptPendingInteractionsForThreads(db, {
+          providerId: "codex",
+          threadIds,
+          statusReason: "Provider exited",
+        }).map((row) => row.threadId),
+      ),
+    ).toEqual(new Set(targetThreadIds));
+  });
 });

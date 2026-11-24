@@ -5,7 +5,8 @@ import type { Transaction } from "@tiptap/pm/state";
 import { Step, StepMap, StepResult } from "@tiptap/pm/transform";
 import { z } from "zod";
 
-const ATTACHMENT_HISTORY_STEP_ID = "bbAttachmentHistory";
+const ATTACHMENT_HISTORY_STEP_ID = "omnyoAttachmentHistory";
+
 const attachmentHistoryStepSchema = z.object({
   id: z.string(),
   present: z.boolean(),
@@ -45,6 +46,7 @@ export class AttachmentHistoryStep extends Step {
 
   static fromJSON(_schema: unknown, json: unknown): AttachmentHistoryStep {
     const value = attachmentHistoryStepSchema.parse(json);
+
     return new AttachmentHistoryStep(value.id, value.present);
   }
 }
@@ -58,10 +60,12 @@ export const AttachmentHistory = Extension.create<{
   addOptions() {
     return { onChange: () => {} };
   },
-  onTransaction({ transaction }) {
-    for (const step of transaction.steps) {
-      if (step instanceof AttachmentHistoryStep) {
-        this.options.onChange(step.id, step.present);
+  onTransaction({ transaction, appendedTransactions }) {
+    for (const current of [transaction, ...appendedTransactions]) {
+      for (const step of current.steps) {
+        if (step instanceof AttachmentHistoryStep) {
+          this.options.onChange(step.id, step.present);
+        }
       }
     }
   },

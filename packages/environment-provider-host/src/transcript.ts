@@ -59,10 +59,13 @@ export function emitGitOutput(
   result: GitCommandResult,
 ): void {
   const lines = readTerminalOutputLines(result.stdout + result.stderr);
+
   if (lines.length === 0) {
     return;
   }
+
   let index = 0;
+
   for (const line of lines) {
     index += 1;
     emitOutput(onProgress, `${key}-output-${index}`, line);

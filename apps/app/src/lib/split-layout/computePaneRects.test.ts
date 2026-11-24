@@ -32,6 +32,7 @@ describe("computePaneRects", () => {
       sizes: [0.3, 0.7],
       children: [pane("pane-1"), pane("pane-2")],
     };
+
     const rects = computePaneRects(root);
     expectRect(rects.get("pane-1"), { x: 0, y: 0, w: 0.3, h: 1 });
     expectRect(rects.get("pane-2"), { x: 0.3, y: 0, w: 0.7, h: 1 });
@@ -44,6 +45,7 @@ describe("computePaneRects", () => {
       sizes: [0.25, 0.75],
       children: [pane("pane-1"), pane("pane-2")],
     };
+
     const rects = computePaneRects(root);
     expectRect(rects.get("pane-1"), { x: 0, y: 0, w: 1, h: 0.25 });
     expectRect(rects.get("pane-2"), { x: 0, y: 0.25, w: 1, h: 0.75 });
@@ -64,6 +66,7 @@ describe("computePaneRects", () => {
         },
       ],
     };
+
     const rects = computePaneRects(root);
     expectRect(rects.get("pane-1"), { x: 0, y: 0, w: 0.5, h: 1 });
     expectRect(rects.get("pane-2"), { x: 0.5, y: 0, w: 0.5, h: 0.5 });
@@ -90,6 +93,7 @@ describe("computePaneRects", () => {
         },
       ],
     };
+
     const rects = computePaneRects(root);
     const area = [...rects.values()].reduce((sum, r) => sum + r.w * r.h, 0);
     expect(area).toBeCloseTo(1, 6);
@@ -103,6 +107,7 @@ describe("computePaneRects", () => {
       sizes: [0, 0],
       children: [pane("pane-1"), pane("pane-2")],
     };
+
     const rects = computePaneRects(root);
     expectRect(rects.get("pane-1"), { x: 0, y: 0, w: 0.5, h: 1 });
     expectRect(rects.get("pane-2"), { x: 0.5, y: 0, w: 0.5, h: 1 });

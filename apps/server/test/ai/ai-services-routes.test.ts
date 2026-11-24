@@ -1,8 +1,8 @@
-import { getAiServiceSelections, setAiServiceSelection } from "@bb/db";
+import { getAiServiceSelections, setAiServiceSelection } from "@omnyo/db";
 import {
   systemAiServicesResponseSchema,
   testAiServiceResponseSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { describe, expect, it } from "vitest";
 import { registerFakeAiService } from "../helpers/ai-services.js";
 import { readJson } from "../helpers/json.js";
@@ -31,6 +31,7 @@ function registerServices(harness: TestAppHarness) {
     pluginId: "helper-plugin",
     complete: async () => 'Title: "Add a dark mode toggle"',
   });
+
   const voice = registerFakeAiService(harness.deps.aiServices, {
     id: "listener",
     displayName: "Listener",
@@ -38,23 +39,25 @@ function registerServices(harness: TestAppHarness) {
     complete: null,
     transcribe: async () => "hello",
   });
+
   return { text, voice };
 }
 
 describe("AI services routes", () => {
   it("reports Automatic ranks in the same order used by task routing", async () => {
     await withTestHarness({}, async (harness) => {
-      registerServices(harness);
       registerFakeAiService(harness.deps.aiServices, {
-        pluginId: "bb-ai",
-        id: "bb",
-        builtin: true,
+        pluginId: "zeta-plugin",
+        id: "zeta",
       });
+      registerServices(harness);
       const response = await harness.app.request("/api/v1/system/ai-services");
       expect(response.status).toBe(200);
+
       const view = systemAiServicesResponseSchema.parse(
         await readJson(response),
       );
+
       expect(
         view.services.map(({ pluginId, id, automaticRank }) => ({
           pluginId,
@@ -62,17 +65,17 @@ describe("AI services routes", () => {
           automaticRank,
         })),
       ).toEqual([
-        { pluginId: "bb-ai", id: "bb", automaticRank: 0 },
-        { pluginId: "helper-plugin", id: "helper", automaticRank: 1 },
-        { pluginId: "listener-plugin", id: "listener", automaticRank: 2 },
+        { pluginId: "helper-plugin", id: "helper", automaticRank: 0 },
+        { pluginId: "listener-plugin", id: "listener", automaticRank: 1 },
+        { pluginId: "zeta-plugin", id: "zeta", automaticRank: 2 },
       ]);
       const test = await postTest(harness, { task: "thread-title" });
       expect(
         testAiServiceResponseSchema.parse(await readJson(test)),
       ).toMatchObject({
         ok: true,
-        pluginId: "bb-ai",
-        serviceId: "bb",
+        pluginId: "helper-plugin",
+        serviceId: "helper",
       });
     });
   });
@@ -91,9 +94,11 @@ describe("AI services routes", () => {
       });
 
       expect(response.status).toBe(200);
+
       const view = systemAiServicesResponseSchema.parse(
         await readJson(response),
       );
+
       expect(view.selections["thread-title"]).toEqual({
         mode: "service",
         pluginId: "helper-plugin",
@@ -107,6 +112,7 @@ describe("AI services routes", () => {
         task: "thread-title",
         selection: { mode: "off" },
       });
+
       expect(off.status).toBe(200);
       expect(getAiServiceSelections(harness.db)["thread-title"]).toEqual({
         mode: "off",
@@ -170,9 +176,11 @@ describe("AI services routes", () => {
       expect(response.status).toBe(400);
       const error = await readJson(response);
       expect(error).toMatchObject({ code: "invalid_request" });
+
       if (message !== null) {
         expect(error).toMatchObject({ message });
       }
+
       expect(getAiServiceSelections(harness.db)).toEqual({
         "thread-title": { mode: "automatic" },
         "commit-message": { mode: "automatic" },

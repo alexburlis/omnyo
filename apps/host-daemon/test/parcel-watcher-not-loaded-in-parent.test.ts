@@ -7,8 +7,11 @@ import { build } from "esbuild";
 import { afterAll, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
+
 const here = dirname(fileURLToPath(import.meta.url));
+
 const workspaceRoot = resolve(here, "..", "..", "..");
+
 const hostWatcherEntry = resolve(
   workspaceRoot,
   "packages",
@@ -18,8 +21,11 @@ const hostWatcherEntry = resolve(
 );
 
 const packageTmpDir = resolve(here, "..", ".tmp");
+
 await mkdir(packageTmpDir, { recursive: true });
-const outDir = await mkdtemp(join(packageTmpDir, "bb-1873-bundle-"));
+
+const outDir = await mkdtemp(join(packageTmpDir, "omnyo-1873-bundle-"));
+
 const outfile = join(outDir, "host-watcher-bundle.mjs");
 
 afterAll(async () => {
@@ -51,15 +57,18 @@ async function bundleHostWatcherLikeTheDaemon(): Promise<string> {
     sourcemap: false,
     target: "node22",
   });
+
   return readFile(outfile, "utf8");
 }
 
 describe("daemon bundle keeps @parcel/watcher out of the parent process", () => {
   it("does not hoist a static import of @parcel/watcher", async () => {
     const bundle = await bundleHostWatcherLikeTheDaemon();
+
     const staticImports = bundle.match(
       /^import\s+[^;]*?\s+from\s*["']@parcel\/watcher["'];?$/gmu,
     );
+
     expect(
       staticImports,
       `static top-level import(s) of @parcel/watcher found in the bundle; ` +
@@ -84,6 +93,7 @@ describe("daemon bundle keeps @parcel/watcher out of the parent process", () => 
         "",
       ].join("\n"),
     );
+
     const { stdout } = await execFileAsync(
       process.execPath,
       [
@@ -95,10 +105,13 @@ describe("daemon bundle keeps @parcel/watcher out of the parent process", () => 
       ],
       { cwd: workspaceRoot, env: { ...process.env, NODE_PATH: "" } },
     );
+
     expect(stdout).toContain("[imported]");
+
     const loadedAddons = stdout
       .split("\n")
       .filter((line) => line.startsWith("[dlopen] "));
+
     expect(
       loadedAddons.filter((line) => /@parcel[/+\\]watcher/u.test(line)),
       `@parcel/watcher addon loaded on import:\n${loadedAddons.join("\n")}`,

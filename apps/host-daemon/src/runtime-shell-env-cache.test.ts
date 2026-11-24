@@ -1,4 +1,4 @@
-import { createDeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { describe, expect, it, vi } from "vitest";
 import {
   createRuntimeShellEnvCache,
@@ -15,6 +15,7 @@ function createFixture({ resolvedAtMs, startupPath }: CacheFixtureArgs) {
   let appliedEnv: RuntimeShellEnv = { PATH: startupPath };
   const resolveShellEnv = vi.fn<() => Promise<RuntimeShellEnv>>();
   const onRefreshError = vi.fn();
+
   const cache = createRuntimeShellEnvCache({
     applyShellEnv: async (shellEnv) => {
       appliedEnv = shellEnv;
@@ -26,6 +27,7 @@ function createFixture({ resolvedAtMs, startupPath }: CacheFixtureArgs) {
     ttlMs: 100,
     ...(resolvedAtMs === undefined ? {} : { resolvedAtMs }),
   });
+
   return {
     cache,
     onRefreshError,
@@ -42,9 +44,9 @@ describe("createRuntimeShellEnvCache", () => {
     const fixture = createFixture({ startupPath: "/old/bin" });
     fixture.resolveShellEnv.mockResolvedValue({ PATH: "/new/bin" });
 
-    await expect(
-      fixture.cache.refresh({ allowStale: true }),
-    ).resolves.toEqual({ PATH: "/new/bin" });
+    await expect(fixture.cache.refresh({ allowStale: true })).resolves.toEqual({
+      PATH: "/new/bin",
+    });
     expect(fixture.readAppliedPath()).toBe("/new/bin");
   });
 

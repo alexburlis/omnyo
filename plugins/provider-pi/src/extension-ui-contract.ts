@@ -95,16 +95,20 @@ export function resolveExtensionUiResponseFields(
   result: PiExtensionUiResolution,
 ): PiExtensionUiResponseFields {
   const { value } = result;
+
   if (request.method === "confirm") {
     return typeof value === "boolean"
       ? { confirmed: value }
       : { cancelled: true };
   }
+
   if (typeof value !== "string") {
     return { cancelled: true };
   }
+
   if (request.method === "select" && !request.options?.includes(value)) {
     return { cancelled: true };
   }
+
   return { value };
 }

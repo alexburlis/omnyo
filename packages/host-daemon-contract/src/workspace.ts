@@ -8,6 +8,7 @@ export const workspaceResolutionFailureCodeSchema = z.enum([
   "unknown_environment",
   "unknown",
 ]);
+
 export const workspaceResolutionFailureSchema = z
   .object({
     code: workspaceResolutionFailureCodeSchema,
@@ -15,9 +16,11 @@ export const workspaceResolutionFailureSchema = z
     message: z.string().min(1),
   })
   .strict();
+
 export type WorkspaceResolutionFailureCode = z.infer<
   typeof workspaceResolutionFailureCodeSchema
 >;
+
 export type WorkspaceResolutionFailure = z.infer<
   typeof workspaceResolutionFailureSchema
 >;

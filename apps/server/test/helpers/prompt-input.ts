@@ -1,4 +1,4 @@
-import type { PromptInput } from "@bb/domain";
+import type { PromptInput } from "@omnyo/domain";
 
 function textPrompt(text: string): PromptInput {
   return { type: "text", text, mentions: [] };
@@ -10,6 +10,7 @@ export function textInput(text: string): PromptInput[] {
 
 export function skillInput(name: string, rest = ""): PromptInput[] {
   const command = `/${name}`;
+
   return [
     {
       type: "text",

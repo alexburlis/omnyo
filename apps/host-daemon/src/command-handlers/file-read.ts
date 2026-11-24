@@ -6,22 +6,23 @@ import mimeTypes from "mime-types";
 import type {
   HostReadFileIfNoneMatch,
   HostReadFileRelativeDotfilePolicy,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import {
   readGitBlob,
   WorkspaceError,
   type GitProcessOptions,
-} from "@bb/host-workspace";
-import { isPathWithinDirectory } from "@bb/process-utils";
+} from "@omnyo/host-workspace";
+import { isPathWithinDirectory } from "@omnyo/process-utils";
 import {
   CommandDispatchError,
   ExpectedCommandDispatchError,
-} from "../command-dispatch-support.js";
+} from "../command-errors.js";
 import { isFsErrorWithCode } from "../fs-errors.js";
 import { sha256Hex } from "../sha256-hex.js";
 import { resolveNonSymlinkDirectoryPath } from "./root-path.js";
 
 const IMAGE_FILE_SIZE_LIMIT_BYTES = 10 * 1024 * 1024;
+
 export const NON_IMAGE_FILE_SIZE_LIMIT_BYTES = 25 * 1024 * 1024;
 
 type FileContentEncoding = "base64" | "utf8";
@@ -55,6 +56,7 @@ interface ReadFileForTransportArgs {
 }
 
 interface ReadRootRelativeFileForTransportArgs {
+  followRootSymlink: boolean;
   rootPath: string;
   relativePath: string;
   dotfiles: HostReadFileRelativeDotfilePolicy;
@@ -106,6 +108,7 @@ function getContentEncoding(
   if (isUtf8(fileContents)) {
     return "utf8";
   }
+
   return "base64";
 }
 
@@ -121,6 +124,7 @@ function createReadFileForTransportMetadata(
   args: ReadFileBytes,
 ): ReadFileForTransportMetadata {
   const contentEncoding = getContentEncoding(args.contents, args.mimeType);
+
   return {
     contentEncoding,
     ...(args.mimeType ? { mimeType: args.mimeType } : {}),
@@ -150,12 +154,14 @@ function createReadFileForTransportResult(
   args: ReadFileBytes & { ifNoneMatch?: HostReadFileIfNoneMatch },
 ): ReadFileForTransportResult {
   const metadata = createReadFileForTransportMetadata(args);
+
   if (
     args.ifNoneMatch?.kind === "any" ||
     args.ifNoneMatch?.values.includes(metadata.sha256)
   ) {
     return { ...metadata, notModified: true };
   }
+
   return addFileContent(metadata, args.contents);
 }
 
@@ -189,6 +195,7 @@ function validateRootRelativePath(
   }
 
   const segments = args.relativePath.split("/");
+
   if (
     segments.some(
       (segment) => segment.length === 0 || segment === "." || segment === "..",
@@ -222,6 +229,7 @@ async function resolveRootPathOrThrowMissingPath(
     if (isFsErrorWithCode(error, "ENOENT")) {
       throw createMissingTargetError(args.resultPath);
     }
+
     throw error;
   }
 }
@@ -235,6 +243,7 @@ async function throwMissingTargetOrRethrow(
   }
 
   const rootPath = args.rootPath;
+
   if (!rootPath) {
     throw createMissingTargetError(args.resultPath);
   }
@@ -251,6 +260,7 @@ async function resolveReadablePath(
   args: ReadFileForTransportArgs,
 ): Promise<string> {
   const rootPath = args.rootPath;
+
   if (!rootPath) {
     return args.resolvedPath;
   }
@@ -259,9 +269,11 @@ async function resolveReadablePath(
     resultPath: args.resultPath,
     rootPath,
   });
+
   const realResolvedPath = await fs
     .realpath(args.resolvedPath)
     .catch((error: unknown) => throwMissingTargetOrRethrow(args, error));
+
   if (!isPathWithinDirectory(realRootPath, realResolvedPath)) {
     throw new CommandDispatchError(
       "invalid_path",
@@ -278,10 +290,13 @@ export async function readFileFromGitRef(
   if (!path.isAbsolute(args.rootPath)) {
     throw new CommandDispatchError("invalid_path", "rootPath must be absolute");
   }
+
   if (!path.isAbsolute(args.resolvedPath)) {
     throw new CommandDispatchError("invalid_path", "Path must be absolute");
   }
+
   const relativePath = path.relative(args.rootPath, args.resolvedPath);
+
   if (
     relativePath === "" ||
     relativePath.startsWith("..") ||
@@ -292,11 +307,13 @@ export async function readFileFromGitRef(
       `Path "${args.resultPath}" escapes read root`,
     );
   }
+
   const gitRelativePath = relativePath.split(path.sep).join("/");
   const mimeType = mimeTypes.lookup(args.resultPath) || undefined;
   const fileSizeLimitBytes = getFileSizeLimitBytes(mimeType);
 
   let blob;
+
   try {
     blob = await readGitBlob(
       args.rootPath,
@@ -309,6 +326,7 @@ export async function readFileFromGitRef(
     if (error instanceof WorkspaceError && error.code === "blob_too_large") {
       throw new CommandDispatchError("file_too_large", error.message);
     }
+
     throw error;
   }
 
@@ -339,9 +357,11 @@ export async function readFileForTransport(
   args: ReadFileForTransportArgs,
 ): Promise<ReadFileForTransportResult> {
   const readablePath = await resolveReadablePath(args);
+
   const stat = await fs
     .stat(readablePath)
     .catch((error: unknown) => throwMissingTargetOrRethrow(args, error));
+
   if (stat.isDirectory()) {
     throw new CommandDispatchError(
       "invalid_path",
@@ -351,6 +371,7 @@ export async function readFileForTransport(
 
   const mimeType = mimeTypes.lookup(args.resultPath) || undefined;
   const fileSizeLimitBytes = getFileSizeLimitBytes(mimeType);
+
   if (stat.size > fileSizeLimitBytes) {
     throw new CommandDispatchError(
       "file_too_large",
@@ -361,6 +382,7 @@ export async function readFileForTransport(
   const fileContents = await fs
     .readFile(readablePath)
     .catch((error: unknown) => throwMissingTargetOrRethrow(args, error));
+
   return createReadFileForTransportResult({
     contents: fileContents,
     ifNoneMatch: args.ifNoneMatch,
@@ -382,16 +404,31 @@ export async function readRootRelativeFileForTransport(
     relativePath: args.relativePath,
     dotfiles: args.dotfiles,
   });
-  const resolvedPath = path.join(args.rootPath, ...relativePath.segments);
+
+  const rootPath = args.followRootSymlink
+    ? await fs.realpath(args.rootPath).catch((error: unknown) => {
+        if (isFsErrorWithCode(error, "ENOENT")) {
+          throw createMissingTargetError(relativePath.resultPath);
+        }
+
+        throw error;
+      })
+    : args.rootPath;
+
+  const resolvedPath = path.join(rootPath, ...relativePath.segments);
+
   const readArgs: ReadFileForTransportArgs = {
     resolvedPath,
     resultPath: relativePath.resultPath,
-    rootPath: args.rootPath,
+    rootPath,
   };
+
   const readablePath = await resolveReadablePath(readArgs);
+
   const stat = await fs
     .stat(readablePath)
     .catch((error: unknown) => throwMissingTargetOrRethrow(readArgs, error));
+
   if (stat.isDirectory()) {
     throw new CommandDispatchError(
       "invalid_path",
@@ -400,9 +437,11 @@ export async function readRootRelativeFileForTransport(
   }
 
   const mimeType = mimeTypes.lookup(relativePath.resultPath) || undefined;
+
   const fileContents = await fs
     .readFile(readablePath)
     .catch((error: unknown) => throwMissingTargetOrRethrow(readArgs, error));
+
   return createUnconditionalReadFileForTransportResult({
     contents: fileContents,
     mimeType,
@@ -428,37 +467,45 @@ export async function readFileChunkForTransport(
   },
 ) {
   const readablePath = await resolveReadablePath(args);
+
   const file = await fs
     .open(
       readablePath,
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     )
     .catch((error: unknown) => throwMissingTargetOrRethrow(args, error));
+
   try {
     const stat = await file.stat({ bigint: true });
+
     if (!stat.isFile()) {
       throw new CommandDispatchError(
         "invalid_path",
         "Path is not a regular file",
       );
     }
+
     if (stat.size > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new CommandDispatchError(
         "file_too_large",
         "File size exceeds supported byte offsets",
       );
     }
+
     const revision = fileRevision(stat);
+
     if (args.revision !== null && args.revision !== revision) {
       throw new ExpectedCommandDispatchError(
         "file_changed",
         "File changed during read",
       );
     }
+
     const sizeBytes = Number(stat.size);
     const length = Math.min(args.length, Math.max(0, sizeBytes - args.offset));
     const bytes = Buffer.alloc(length);
     let offset = 0;
+
     while (offset < length) {
       const { bytesRead } = await file.read(
         bytes,
@@ -466,9 +513,11 @@ export async function readFileChunkForTransport(
         length - offset,
         args.offset + offset,
       );
+
       if (bytesRead === 0) break;
       offset += bytesRead;
     }
+
     if (
       offset !== length ||
       fileRevision(await file.stat({ bigint: true })) !== revision
@@ -478,6 +527,7 @@ export async function readFileChunkForTransport(
         "File changed during read",
       );
     }
+
     return {
       path: args.resultPath,
       sizeBytes,
@@ -485,7 +535,7 @@ export async function readFileChunkForTransport(
       mimeType: mimeTypes.lookup(args.resultPath) || null,
       revision,
       offset: args.offset,
-      content: bytes.toString("base64"),
+      content: bytes,
     };
   } finally {
     await file.close();

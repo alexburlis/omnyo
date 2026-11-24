@@ -15,25 +15,32 @@ import { registerServerCommands } from "../../commands/server.js";
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "bb-cli-server-export-"));
+  const dir = await mkdtemp(join(tmpdir(), "omnyo-cli-server-export-"));
   tempDirs.push(dir);
+
   return dir;
 }
 
 function streamOf(chunks: readonly Uint8Array[], failure?: Error) {
   let index = 0;
+
   return new ReadableStream<Uint8Array>({
     pull(controller) {
       const chunk = chunks[index];
       index += 1;
+
       if (chunk !== undefined) {
         controller.enqueue(chunk);
+
         return;
       }
+
       if (failure !== undefined) {
         controller.error(failure);
+
         return;
       }
+
       controller.close();
     },
   });
@@ -41,7 +48,9 @@ function streamOf(chunks: readonly Uint8Array[], failure?: Error) {
 
 function sha256Of(chunks: readonly Uint8Array[]): string {
   const hash = createHash("sha256");
+
   for (const chunk of chunks) hash.update(chunk);
+
   return hash.digest("hex");
 }
 
@@ -53,17 +62,17 @@ function exportResponse(
     status: 200,
     headers: {
       "content-disposition":
-        'attachment; filename="bb-server-2026-09-15.tar.gz"',
+        'attachment; filename="omnyo-server-2026-09-15.tar.gz"',
       "content-type": "application/gzip",
-      ...(sha256 === null ? {} : { "x-bb-archive-sha256": sha256 }),
+      ...(sha256 === null ? {} : { "x-omnyo-archive-sha256": sha256 }),
     },
   });
 }
 
 const UNENCRYPTED_EXPORT_WARNING =
-  "This export is not encrypted and holds the server's credentials and plugin secrets. Keep it private; bb wrote it with mode 0600.";
+  "This export is not encrypted and holds the server's credentials and plugin secrets. Keep it private; Omnyo wrote it with mode 0600.";
 
-describe("bb server export", () => {
+describe("omnyo server export", () => {
   setupCommandOutputTestEnvironment();
 
   afterEach(async () => {
@@ -83,14 +92,17 @@ describe("bb server export", () => {
   it("streams the archive to a private file after checking the server's digest", async () => {
     const dir = await makeTempDir();
     const outPath = join(dir, "backup.tar.gz");
+
     const chunks = [
       Buffer.from([0x1f, 0x8b]),
       Buffer.alloc(1024 * 1024 + 512, 7),
       Buffer.from("tail"),
     ];
+
     const exportRoute = vi.fn(async () =>
       exportResponse(streamOf(chunks), sha256Of(chunks)),
     );
+
     stubServerApi({ "v1.server.export.$post": exportRoute });
 
     await runCommand(["server", "export", "--out", outPath], register);
@@ -102,9 +114,11 @@ describe("bb server export", () => {
     const written = await readFile(outPath);
     expect(written.subarray(0, 2)).toEqual(Buffer.from([0x1f, 0x8b]));
     expect(written.length).toBe(2 + 1024 * 1024 + 512 + 4);
+
     if (process.platform !== "win32") {
       expect((await stat(outPath)).mode & 0o777).toBe(0o600);
     }
+
     expect(await readdir(dir)).toEqual(["backup.tar.gz"]);
   });
 
@@ -122,7 +136,7 @@ describe("bb server export", () => {
     await runCommand(["server", "export", "--out", outPath], register);
 
     expect(collectLogPayloads(vi.mocked(console.log))).toEqual([
-      `Exported the bb server to ${outPath} (1.0 MB)`,
+      `Exported the Omnyo server to ${outPath} (1.0 MB)`,
     ]);
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
       UNENCRYPTED_EXPORT_WARNING,
@@ -194,7 +208,7 @@ describe("bb server export", () => {
             JSON.stringify({
               code: "server_move_experiment_disabled",
               message:
-                'Moving the server is off. Turn on the "Server move" experiment in Settings → Experiments, or run bb settings experiment serverMove true, then try again.',
+                "Moving the server is off. Run omnyo settings experiment serverMove true, then try again.",
             }),
             { status: 403, headers: { "Content-Type": "application/json" } },
           ),
@@ -209,7 +223,7 @@ describe("bb server export", () => {
     ).rejects.toThrow("process.exit:1");
 
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
-      'Error: Moving the server is off. Turn on the "Server move" experiment in Settings → Experiments, or run bb settings experiment serverMove true, then try again.',
+      "Error: Moving the server is off. Run omnyo settings experiment serverMove true, then try again.",
     ]);
     expect(await readdir(dir)).toEqual([]);
   });

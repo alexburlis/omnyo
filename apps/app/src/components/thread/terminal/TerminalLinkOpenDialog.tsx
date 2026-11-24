@@ -1,4 +1,4 @@
-import { Button } from "@bb/shared-ui/button";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   Dialog,
   DialogContent,
@@ -6,7 +6,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
+} from "@omnyo/shared-ui/dialog";
 import type { TerminalLinkTarget } from "./terminal-links";
 
 interface TerminalLinkOpenDialogProps {

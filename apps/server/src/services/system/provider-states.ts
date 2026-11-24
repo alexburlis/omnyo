@@ -1,9 +1,10 @@
+import { isDeepStrictEqual } from "node:util";
 import type {
   SystemProviderState,
   SystemProviderStatesResponse,
   SystemProvidersQuery,
-} from "@bb/server-contract";
-import type { ProviderInfo } from "@bb/domain";
+} from "@omnyo/server-contract";
+import type { ProviderInfo } from "@omnyo/domain";
 import type { AppDeps } from "../../types.js";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
 import {
@@ -14,7 +15,10 @@ import {
   requireConnectedHostSession,
   requireEnvironment,
 } from "../lib/entity-lookup.js";
-import { listSystemProviderInfos } from "./execution-options.js";
+import {
+  listSystemProviderInfos,
+  type ProviderDiscoveryHealth,
+} from "./execution-options.js";
 import { resolveSystemLookupHostId } from "./host-lookup.js";
 import { resolveBridgeLaunchForProviderId } from "./provider-bridge-launch.js";
 import { mapProviderMaintenanceRequests } from "./provider-maintenance-concurrency.js";
@@ -43,7 +47,12 @@ function unknownProviderState(
 
 async function getProviderState(
   deps: AppDeps,
-  args: { cwd?: string; hostId: string; provider: ProviderInfo },
+  args: {
+    cwd?: string;
+    hostId: string;
+    provider: ProviderInfo;
+    discoveredHealth: ProviderDiscoveryHealth | undefined;
+  },
 ): Promise<SystemProviderState> {
   if (!args.provider.maintenance.health) {
     return unknownProviderState(
@@ -51,7 +60,9 @@ async function getProviderState(
       "This provider does not report readiness.",
     );
   }
+
   const bridgeLaunch = resolveBridgeLaunchForProviderId(deps, args.provider.id);
+
   if (bridgeLaunch === null) {
     return unknownProviderState(
       args.provider,
@@ -60,36 +71,49 @@ async function getProviderState(
   }
 
   try {
-    const result = await callHostRetryableOnlineRpc(deps, {
-      hostId: args.hostId,
-      timeoutMs: COMMAND_TIMEOUT_MS,
-      command: {
-        type: "provider.health",
-        providerId: args.provider.id,
-        bridgeLaunch,
-        ...(args.cwd === undefined ? {} : { cwd: args.cwd }),
-      },
-    });
+    const discovered = args.discoveredHealth;
+
+    const result =
+      args.cwd === undefined &&
+      discovered?.hostId === args.hostId &&
+      isDeepStrictEqual(discovered.bridgeLaunch, bridgeLaunch)
+        ? discovered.result
+        : await callHostRetryableOnlineRpc(deps, {
+            hostId: args.hostId,
+            timeoutMs: COMMAND_TIMEOUT_MS,
+            command: {
+              type: "provider.health",
+              providerId: args.provider.id,
+              bridgeLaunch,
+              ...(args.cwd === undefined ? {} : { cwd: args.cwd }),
+            },
+          });
+
     if (!result.supported) {
       return unknownProviderState(
         args.provider,
         "Provider readiness was not reported.",
       );
     }
+
     const health = {
       providerId: args.provider.id,
       displayName: args.provider.displayName,
       ...result.health,
       localLoginCommand: result.health.localLoginCommand ?? null,
     };
+
     if (health.status !== "unauthenticated" && health.status !== "expired") {
       return health;
     }
+
     const contributed = await resolvePluginProviderEnvHealth({
       providerId: args.provider.id,
       hostId: args.hostId,
     });
+
     if (contributed === null) return health;
+
     return {
       ...health,
       status: "ready",
@@ -112,31 +136,45 @@ export async function getProviderStates(
   query: SystemProvidersQuery,
 ): Promise<SystemProviderStatesResponse> {
   const hostId = resolveSystemLookupHostId(deps, query);
+
   const cwd =
     query.environmentId === undefined
       ? undefined
       : (requireEnvironment(deps.db, query.environmentId).path ?? undefined);
-  const providers = await listSystemProviderInfos(deps, { hostId });
+
+  const discoveredHealth = new Map<string, ProviderDiscoveryHealth>();
+
+  const providers = await listSystemProviderInfos(deps, {
+    hostId,
+    onHealth: (health) => {
+      discoveredHealth.set(health.providerId, health);
+    },
+  });
+
   try {
     requireConnectedHostSession(deps, hostId);
   } catch (error) {
     if (!isHostUnavailableApiError(error)) {
       throw error;
     }
+
     const statusMessage = isSuspendedHostUnavailableError(error)
       ? "Machine is paused."
       : "Provider readiness could not be checked.";
+
     return {
       providers: providers.map((provider) =>
         unknownProviderState(provider, statusMessage),
       ),
     };
   }
+
   return {
     providers: await mapProviderMaintenanceRequests(providers, (provider) =>
       getProviderState(deps, {
         hostId,
         provider,
+        discoveredHealth: discoveredHealth.get(provider.id),
         ...(cwd === undefined ? {} : { cwd }),
       }),
     ),

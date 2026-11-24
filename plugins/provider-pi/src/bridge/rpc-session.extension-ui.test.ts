@@ -7,8 +7,9 @@ import { PI_BRIDGE_ARGS_ENV, PI_BRIDGE_COMMAND_ENV } from "./rpc-child.js";
 import { PiRpcSession } from "./rpc-session.js";
 
 it("auto-cancels extension dialogs in a helper session without a UI handler", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "bb-pi-helper-ui-"));
+  const dir = mkdtempSync(join(tmpdir(), "omnyo-pi-helper-ui-"));
   const log = join(dir, "responses.jsonl");
+
   const script = `
     const fs = require("node:fs");
     const input = require("node:readline").createInterface({ input: process.stdin });
@@ -28,9 +29,11 @@ it("auto-cancels extension dialogs in a helper session without a UI handler", as
     input.on("close", () => process.exit(0));
     send({ type: "extension_ui_request", id: "ui-helper", method: "confirm", title: "Startup confirmation", message: "Continue?" });
   `;
+
   vi.stubEnv(PI_BRIDGE_COMMAND_ENV, process.execPath);
   vi.stubEnv(PI_BRIDGE_ARGS_ENV, JSON.stringify(["-e", script, "--"]));
-  vi.stubEnv("BB_PI_BRIDGE_READINESS_TIMEOUT_MS", "1000");
+  vi.stubEnv("OMNYO_PI_BRIDGE_READINESS_TIMEOUT_MS", "1000");
+
   const session = new PiRpcSession(
     {
       cwd: dir,
@@ -45,6 +48,7 @@ it("auto-cancels extension dialogs in a helper session without a UI handler", as
     () => undefined,
     () => undefined,
   );
+
   try {
     await session.start();
     expect(JSON.parse(readFileSync(log, "utf8"))).toEqual({

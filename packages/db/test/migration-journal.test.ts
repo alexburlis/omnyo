@@ -8,6 +8,7 @@ import {
 } from "../src/migration-history.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
 const journalPath = resolve(
   __dirname,
   "..",
@@ -15,6 +16,7 @@ const journalPath = resolve(
   "meta",
   "_journal.json",
 );
+
 const latestPublishedMigrationWhen = Math.max(
   ...publishedMigrationWhens.map((entry) => entry.when),
 );
@@ -59,6 +61,7 @@ describe("migration journal integrity", () => {
     const { entries } = readJournal();
 
     const violations: string[] = [];
+
     for (let i = 1; i < entries.length; i++) {
       if (entries[i].when <= entries[i - 1].when) {
         violations.push(
@@ -75,6 +78,7 @@ describe("migration journal integrity", () => {
     const { entries } = readJournal();
 
     const mismatches: string[] = [];
+
     for (let i = 0; i < entries.length; i++) {
       if (entries[i].idx !== i) {
         mismatches.push(
@@ -91,8 +95,10 @@ describe("migration journal integrity", () => {
     const drizzleDir = resolve(__dirname, "..", "drizzle");
 
     const missing: string[] = [];
+
     for (const entry of entries) {
       const sqlPath = resolve(drizzleDir, `${entry.tag}.sql`);
+
       if (!fs.existsSync(sqlPath)) {
         missing.push(entry.tag);
       }
@@ -106,8 +112,10 @@ describe("migration journal integrity", () => {
     const entriesByTag = new Map(entries.map((entry) => [entry.tag, entry]));
 
     const violations: string[] = [];
+
     for (const publishedMigration of publishedMigrationWhens) {
       const entry = entriesByTag.get(publishedMigration.tag);
+
       if (entry === undefined) {
         violations.push(`${publishedMigration.tag} is missing from journal`);
         continue;
@@ -152,8 +160,10 @@ describe("migration journal integrity", () => {
 
     const violations: string[] = [];
     let previousSnapshotId: string | null = null;
+
     for (const entry of entries) {
       const snapshot = readSnapshot(entry.idx);
+
       if (
         previousSnapshotId !== null &&
         snapshot.prevId !== previousSnapshotId
@@ -162,6 +172,7 @@ describe("migration journal integrity", () => {
           `${entry.tag} snapshot prevId=${snapshot.prevId}, expected ${previousSnapshotId}`,
         );
       }
+
       previousSnapshotId = snapshot.id;
     }
 

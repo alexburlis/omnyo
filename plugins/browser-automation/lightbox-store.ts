@@ -8,15 +8,18 @@ export interface LightboxTarget {
 }
 
 let target: LightboxTarget | null = null;
+
 const listeners = new Set<() => void>();
 
 function publish(next: LightboxTarget | null) {
   target = next;
+
   for (const listener of [...listeners]) listener();
 }
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
+
   return () => listeners.delete(listener);
 }
 

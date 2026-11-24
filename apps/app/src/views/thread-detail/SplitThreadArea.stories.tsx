@@ -1,9 +1,10 @@
+import { ActionHistoryProvider } from "@/components/layout/ActionHistoryProvider";
 import { useMemo } from "react";
 import type {
   ThreadResponse,
   ThreadTimelineResponse,
-} from "@bb/server-contract";
-import type { ThreadTimelineGoal } from "@bb/domain";
+} from "@omnyo/server-contract";
+import type { ThreadTimelineGoal } from "@omnyo/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createStore, Provider as JotaiProvider } from "jotai";
 import { makeThread } from "../../../.ladle/story-fixtures";
@@ -27,9 +28,12 @@ export default {
   title: "thread/splits/Split Workspace",
 };
 
-const PROJECT_ID = "proj_bb";
+const PROJECT_ID = "proj_omnyo";
+
 const IDLE_THREAD_ID = "thr_split_idle";
+
 const ACTIVE_THREAD_ID = "thr_split_active";
+
 const MENTIONED_THREAD_ID = "thr_dcwivn5n8w";
 
 function storyThread(id: string, title: string): ThreadResponse {
@@ -46,10 +50,12 @@ function storyThread(id: string, title: string): ThreadResponse {
 }
 
 const idleThread = storyThread(IDLE_THREAD_ID, "Fix Thread Drag Sync");
+
 const activeThread = storyThread(
   ACTIVE_THREAD_ID,
   `Continue from ${MENTIONED_THREAD_ID}`,
 );
+
 const mentionedThread = storyThread(
   MENTIONED_THREAD_ID,
   "Raw thread ID mention target",
@@ -184,6 +190,7 @@ function createStoryQueryClient(): QueryClient {
     queryClient.setQueryData(threadQueryKey(thread.id), thread);
     queryClient.setQueryData(threadTimelineQueryKey(thread.id), timeline);
   }
+
   queryClient.setQueryData(threadQueryKey(mentionedThread.id), mentionedThread);
 
   return queryClient;
@@ -191,29 +198,33 @@ function createStoryQueryClient(): QueryClient {
 
 function SplitWorkspaceStory({ maximized = false }: { maximized?: boolean }) {
   const queryClient = useMemo(() => createStoryQueryClient(), []);
+
   const store = useMemo(() => {
     const nextStore = createStore();
     nextStore.set(splitLayoutAtom, splitLayout);
     nextStore.set(maximizedPaneIdAtom, maximized ? "pane-active" : null);
+
     return nextStore;
   }, [maximized]);
 
   return (
     <QueryClientProvider client={queryClient}>
       <JotaiProvider store={store}>
-        <ThreadActionsProvider>
-          <SidebarProvider>
-            <div className="flex h-screen min-h-[640px] w-full flex-col bg-background p-4 md:p-5">
-              <SplitThreadArea
-                routeContent={{
-                  kind: "thread",
-                  projectId: PROJECT_ID,
-                  threadId: ACTIVE_THREAD_ID,
-                }}
-              />
-            </div>
-          </SidebarProvider>
-        </ThreadActionsProvider>
+        <ActionHistoryProvider>
+          <ThreadActionsProvider>
+            <SidebarProvider>
+              <div className="flex h-screen min-h-[640px] w-full flex-col bg-background p-4 md:p-5">
+                <SplitThreadArea
+                  routeContent={{
+                    kind: "thread",
+                    projectId: PROJECT_ID,
+                    threadId: ACTIVE_THREAD_ID,
+                  }}
+                />
+              </div>
+            </SidebarProvider>
+          </ThreadActionsProvider>
+        </ActionHistoryProvider>
       </JotaiProvider>
     </QueryClientProvider>
   );

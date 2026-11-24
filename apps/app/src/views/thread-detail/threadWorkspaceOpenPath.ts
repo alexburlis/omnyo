@@ -1,10 +1,10 @@
-import type { Environment, WorkspaceFileStatus } from "@bb/domain";
-import type { OpenInTargetContext } from "@bb/host-daemon-contract";
+import type { Environment, WorkspaceFileStatus } from "@omnyo/domain";
+import type { OpenInTargetContext } from "@omnyo/host-daemon-contract";
 import type { WorkspaceChangedFilesSection } from "@/components/workspace/workspace-change-summary";
 import type {
   EnvironmentFilePreviewSource,
   WorkspaceFilePreviewStatusLabel,
-} from "@bb/client-core";
+} from "@omnyo/client-core";
 import { buildAbsoluteFilePath } from "@/lib/absolute-file-path";
 
 interface ResolveThreadWorkspaceOpenPathArgs {
@@ -34,7 +34,9 @@ export function buildOpenInEditorHandler(
   if (!args.rootPath || !args.canOpenPreferredTarget) {
     return undefined;
   }
+
   const rootPath = args.rootPath;
+
   return (relativePath) => {
     void args.openInPreferredTarget({
       lineNumber: null,
@@ -77,6 +79,7 @@ export function resolveWorkspaceChangedFileOpenTarget(
           }
         : { kind: "diff" };
     }
+
     return {
       kind: "preview",
       source: { kind: "head" },
@@ -93,9 +96,11 @@ export function resolveEnvironmentOpenContext(
   if (!args.environment) {
     return null;
   }
+
   if (args.threadEnvironmentIsLocal) {
     return { kind: "local" };
   }
+
   return {
     kind: "remote-ssh",
     serverOrigin: args.serverOrigin,

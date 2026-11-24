@@ -1,12 +1,12 @@
 import { useEffect, useId, useState } from "react";
-import { formatServerDataSize, type Host } from "@bb/domain";
+import { formatServerDataSize, type Host } from "@omnyo/domain";
 import type {
   ServerMoveCheckItem,
   ServerMoveCheckResponse,
   ServerMoveCheckSeverity,
-} from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
-import { Checkbox } from "@bb/shared-ui/checkbox";
+} from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import { Checkbox } from "@omnyo/shared-ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -14,10 +14,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { Input } from "@bb/shared-ui/input";
-import { cn } from "@bb/shared-ui/lib/utils";
+} from "@omnyo/shared-ui/dialog";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { Input } from "@omnyo/shared-ui/input";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   useCheckServerMove,
   useStartServerMove,
@@ -61,6 +61,7 @@ export function MoveServerDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const startMove = useStartServerMove();
+
   const close = () => {
     if (startMove.isPending) return;
     startMove.reset();
@@ -118,6 +119,7 @@ function MoveServerDialogContent({
         onSuccess: (response) => {
           setResult(response);
           setCheckedServerUrl(null);
+
           if (response.requiresServerUrl && response.serverUrl !== null) {
             setAddressDraft(response.serverUrl);
           }
@@ -143,6 +145,7 @@ function MoveServerDialogContent({
           ) {
             setArchiveConfirmed(false);
           }
+
           setResult(response);
           setCheckedServerUrl(serverUrl);
         },
@@ -174,6 +177,7 @@ function MoveServerDialogContent({
         onSuccess: onStarted,
         onError: (error) => {
           const items = serverMoveBlockedItems(error);
+
           if (items !== null) {
             setResult({ ...result, items, canMove: false });
           }
@@ -254,6 +258,7 @@ export function MoveServerDialogView({
 }: MoveServerDialogViewProps) {
   const hasBlockers =
     result?.items.some((item) => item.severity === "blocker") ?? false;
+
   const showCheckAgain =
     !checking && (checkError !== null || hasBlockers) && !showAddress;
 
@@ -358,6 +363,7 @@ function ServerAddressField({
   const inputId = useId();
   const hintId = useId();
   const canCheck = !checking && !disabled && value.trim().length > 0;
+
   return (
     <div className="space-y-2">
       <label
@@ -376,7 +382,7 @@ function ServerAddressField({
           aria-describedby={hintId}
           className="min-w-0 flex-1"
           value={value}
-          placeholder="https://bb.example.com"
+          placeholder="https://omnyo.example.com"
           inputMode="url"
           autoCapitalize="off"
           autoCorrect="off"
@@ -386,6 +392,7 @@ function ServerAddressField({
           onKeyDown={(event) => {
             if (event.key !== "Enter") return;
             event.preventDefault();
+
             if (canCheck) onCheck();
           }}
         />
@@ -410,6 +417,7 @@ export function ServerMoveCheckItems({
   dimmed: boolean;
 }) {
   const groups = groupServerMoveCheckItems(items);
+
   if (items.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -417,12 +425,15 @@ export function ServerMoveCheckItems({
       </p>
     );
   }
+
   return (
     <div className={cn("space-y-3 transition-opacity", dimmed && "opacity-60")}>
       {SERVER_MOVE_SEVERITY_ORDER.map((severity) => {
         const groupItems = groups[severity];
+
         if (groupItems.length === 0) return null;
         const presentation = SEVERITY_PRESENTATION[severity];
+
         return (
           <section
             key={severity}
@@ -490,10 +501,10 @@ function ArchiveExistingDataConfirmation({
       />
       <span className="min-w-0 flex-1">
         <span className="block text-sm break-words text-foreground">
-          Archive the existing bb data at {path}
+          Archive the existing Omnyo data at {path}
         </span>
         <span className="block text-xs text-subtle-foreground">
-          {formatServerDataSize(sizeBytes)}. bb renames it to a backup folder
+          {formatServerDataSize(sizeBytes)}. Omnyo renames it to a backup folder
           next to it and never merges it.
         </span>
       </span>

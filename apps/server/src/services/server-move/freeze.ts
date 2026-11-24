@@ -2,7 +2,9 @@ import type { MiddlewareHandler } from "hono";
 import { serverMovingError } from "./freeze-state.js";
 
 const READ_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD", "OPTIONS"]);
-const SERVER_MOVE_ROUTE_PATTERN = /^\/api\/v1\/server\/move(?:\/|$)/u;
+
+const SERVER_MOVE_ROUTE_PATTERN =
+  /^\/api\/v1\/server\/(?:move|maintenance)(?:\/|$)/u;
 
 export interface ServerMoveFreezeState {
   isFrozen(): boolean;
@@ -25,6 +27,7 @@ export function serverMoveFreezeMiddleware(
     ) {
       throw serverMovingError();
     }
+
     await next();
   };
 }
@@ -36,6 +39,7 @@ export function serverMoveWriteFreezeMiddleware(
     if (state.isFrozen()) {
       throw serverMovingError();
     }
+
     await next();
   };
 }

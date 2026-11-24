@@ -1,15 +1,15 @@
 import { z } from "zod";
-import { defineRpcContract, type PluginRpcHandlers } from "@get-bb/plugin-sdk";
+import { defineRpcContract, type PluginRpcHandlers } from "@omnyo/plugin-sdk";
 import {
   ConnectListError,
   type DesktopSession,
   type ListAccountServersResult,
-} from "@bb/connect-client";
+} from "@omnyo/connect-client";
 import type { ConnectTunnel } from "./tunnel.js";
 import type { ConnectStatus, ShareListing } from "./types.js";
 import { MachineCodeError, type MachineCode } from "./machine-code.js";
 import type { ShareHostResolver } from "./hosts.js";
-import type { HostedConnectApi } from "./hosted.js";
+import { pairedDevicesSchema, type HostedConnectApi } from "./hosted.js";
 
 const portInputSchema = z
   .object({
@@ -17,6 +17,7 @@ const portInputSchema = z
     hostId: z.string().min(1).optional(),
   })
   .strict();
+
 const revokeMachineInputSchema = z.object({ machineId: z.string().min(1) });
 
 const shareListingSchema: z.ZodType<ShareListing> = z
@@ -107,6 +108,7 @@ export const connectRpcContract = defineRpcContract({
     output: z.object({ removed: z.number().int().nonnegative() }).strict(),
   },
   listShares: { input: z.null(), output: z.array(shareListingSchema) },
+  listPairedDevices: { input: z.null(), output: pairedDevicesSchema },
   listAccountServers: {
     input: z.null(),
     output: listAccountServersResultSchema,
@@ -144,16 +146,20 @@ export function createRpcHandlers(args: {
   remoteAccess: RemoteAccessSwitch;
 }): ConnectRpcHandlers {
   const { tunnel, hosted, hostResolver, remoteAccess } = args;
+
   const identity = () => {
     const current = tunnel.getIdentity();
+
     if (current === null) {
       throw new ConnectListError(
         "not_paired",
-        "this bb isn't signed in to a bb account — run `bb account login`",
+        "this Omnyo isn't signed in to an Omnyo account — run `omnyo account login`",
       );
     }
+
     return current;
   };
+
   return {
     async status() {
       return tunnel.refreshStatus();
@@ -166,6 +172,7 @@ export function createRpcHandlers(args: {
         args.hostId === undefined
           ? await hostResolver.serverHost()
           : await hostResolver.byId(args.hostId);
+
       return tunnel.expose(args.port, host);
     },
     async unexpose(args) {
@@ -186,10 +193,21 @@ export function createRpcHandlers(args: {
         (error) => error instanceof ConnectListError,
       );
     },
+    async listPairedDevices() {
+      return rethrowErrorCode(
+        () => {
+          identity();
+
+          return hosted.listPairedDevices();
+        },
+        (error) => error instanceof ConnectListError,
+      );
+    },
     async createDesktopSession() {
       return rethrowErrorCode(
         () => {
           identity();
+
           return hosted.createDesktopSession();
         },
         (error) => error instanceof ConnectListError,
@@ -201,6 +219,7 @@ export function createRpcHandlers(args: {
           if (tunnel.getIdentity() === null) {
             throw new MachineCodeError("not_paired");
           }
+
           return hosted.createMachineCode(AbortSignal.timeout(10_000));
         },
         (error) => error instanceof MachineCodeError,
@@ -209,6 +228,7 @@ export function createRpcHandlers(args: {
     async revokeMachine(args) {
       if (tunnel.getIdentity() === null) throw new Error("not_paired");
       await hosted.revokeMachine(args.machineId);
+
       return { ok: true };
     },
   };

@@ -1,3 +1,4 @@
+import { publicBetaCollectionPlugins } from "./public-beta-collection.mjs";
 import { chmod, cp, readdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { build } from "esbuild";
@@ -12,12 +13,18 @@ const NODE_ESM_REQUIRE_BANNER = [
   "var __dirname = __pathDirname(__filename);",
 ].join("\n");
 
-const NATIVE_EXTERNAL_PACKAGES = [
+export const RUNTIME_NATIVE_MODULES = Object.freeze([
   "@parcel/watcher",
   "better-sqlite3",
+  "fs-native-extensions",
+  "node-pty",
+  "sharp",
+]);
+
+const NATIVE_EXTERNAL_PACKAGES = [
+  ...RUNTIME_NATIVE_MODULES,
   "bufferutil",
   "fsevents",
-  "node-pty",
   "pino",
   "pino-pretty",
   "pino-roll",
@@ -34,6 +41,7 @@ export function externalPackagePatterns(packageNames) {
 
 export function createNativeExternalPatterns({ bundledPackages = [] } = {}) {
   const bundledPackageSet = new Set(bundledPackages);
+
   return externalPackagePatterns(
     NATIVE_EXTERNAL_PACKAGES.filter(
       (packageName) => !bundledPackageSet.has(packageName),
@@ -53,26 +61,10 @@ export async function copyDirectory({ from, to }) {
   await cp(from, to, { recursive: true });
 }
 
-/**
- * Code-split output for an entry that `import()`s parts of itself lazily.
- *
- * A single-file bundle makes every `import()` target an esbuild lazy wrapper
- * inside the one script: V8 still pre-parses all of it on every start, and
- * the wrappers that do run are parsed a second time when first called, so a
- * command that uses most of the bundle gets slower, not faster. With
- * `splitting`, each lazily imported subtree lands in its own chunk file next
- * to the entry and Node reads and compiles only the chunks a command needs.
- *
- * esbuild's split mode writes `<entryNames>.js` into `outdir`. The entry
- * keeps `outfile`'s directory and name; an extensionless `outfile` (the
- * packaged `bb` executable) is renamed into place by
- * {@link finalizeSplitOutput}, which is safe because chunks are imported by
- * a relative path from the same directory. Chunks go under a sibling
- * directory so packaging can list it next to the entry.
- */
 export function splitOutputOptions(outfile) {
   const baseName = path.basename(outfile);
   const entryName = baseName.endsWith(".js") ? baseName.slice(0, -3) : baseName;
+
   return {
     chunkDir: path.join(path.dirname(outfile), `${entryName}-chunks`),
     esbuild: {
@@ -81,45 +73,24 @@ export function splitOutputOptions(outfile) {
       outdir: path.dirname(outfile),
       splitting: true,
     },
-    /** Where esbuild writes the entry; differs from `outfile` only when extensionless. */
+
     writtenEntry: path.join(path.dirname(outfile), `${entryName}.js`),
   };
 }
 
 export async function finalizeSplitOutput(outfile) {
   const { writtenEntry } = splitOutputOptions(outfile);
+
   if (writtenEntry !== outfile) {
     await rename(writtenEntry, outfile);
   }
 }
 
-/**
- * A quoted relative `./x.js` or `../x.js` specifier. esbuild emits every
- * chunk reference this way, minified or not: `from"./chunk-X.js"`,
- * `import("./chunk-X.js")`, `export{}from"./chunk-X.js"`, `import"./chunk-X.js"`.
- */
 const RELATIVE_JS_SPECIFIER = /["'](\.\.?\/[^"']+\.js)["']/g;
 
-/**
- * Delete every file in `chunkDir` that the split bundle rooted at `entry`
- * does not reach through its chunk imports.
- *
- * The build removes the chunk directory before writing a new one, but a
- * turbo cache hit restores `dist/**` over whatever is on disk without
- * clearing it, so build A -> build B -> cache-hit restore of A leaves both
- * generations' content-hashed chunks side by side. The entry only references
- * its own hashes, so the extra files are dead weight, but packaging copies
- * the directory wholesale. bb-app prunes that copy during its build.
- *
- * Refuses (throws) when the entry reaches no chunk at all. Reachability is a
- * regex over quoted `./x.js` specifiers, so a chunk layout it does not
- * recognise (another extension, say) would otherwise look like every chunk
- * is stale and empty the directory with exit code 0.
- *
- * Returns the paths that were removed.
- */
 export async function pruneUnreferencedChunks({ chunkDir, entry }) {
   const resolvedChunkDir = path.resolve(chunkDir);
+
   const chunkFiles = new Set(
     (await readdir(resolvedChunkDir, { withFileTypes: true }))
       .filter((dirent) => dirent.isFile())
@@ -128,17 +99,20 @@ export async function pruneUnreferencedChunks({ chunkDir, entry }) {
 
   const reachable = new Set();
   const queue = [path.resolve(entry)];
+
   while (queue.length > 0) {
     const file = queue.pop();
+
     if (reachable.has(file)) {
       continue;
     }
+
     reachable.add(file);
     const source = await readFile(file, "utf8");
+
     for (const [, specifier] of source.matchAll(RELATIVE_JS_SPECIFIER)) {
-      // Only chunk files are followed; any other quoted `./x.js` literal in
-      // the bundle (a scaffold template, say) resolves outside the set.
       const target = path.resolve(path.dirname(file), specifier);
+
       if (chunkFiles.has(target) && !reachable.has(target)) {
         queue.push(target);
       }
@@ -152,17 +126,20 @@ export async function pruneUnreferencedChunks({ chunkDir, entry }) {
   }
 
   const removed = [];
+
   for (const chunkFile of chunkFiles) {
-    // A sourcemap lives or dies with the chunk it describes.
     const owner = chunkFile.endsWith(".map")
       ? chunkFile.slice(0, -".map".length)
       : chunkFile;
+
     if (reachable.has(owner)) {
       continue;
     }
+
     await rm(chunkFile);
     removed.push(chunkFile);
   }
+
   return removed;
 }
 
@@ -178,13 +155,13 @@ export async function buildNodeEsmEntry({
   target = "node22",
 }) {
   const split = splitting ? splitOutputOptions(outfile) : null;
+
   if (cleanDist) {
     await rm(path.join(packageRoot, "dist"), { force: true, recursive: true });
   } else {
     await removeFileAndMap(outfile);
+
     if (split) {
-      // Chunk names carry content hashes, so a rebuild would otherwise leave
-      // the previous build's chunks behind.
       await rm(split.chunkDir, { force: true, recursive: true });
     }
   }
@@ -200,7 +177,7 @@ export async function buildNodeEsmEntry({
     format: "esm",
     legalComments: "none",
     ...(split ? split.esbuild : { outfile }),
-    plugins: [zodLocaleStubPlugin()],
+    plugins: [zodLocaleStubPlugin(), ...publicBetaCollectionPlugins()],
     platform: "node",
     sourcemap,
     target,
@@ -209,6 +186,7 @@ export async function buildNodeEsmEntry({
   if (split) {
     await finalizeSplitOutput(outfile);
   }
+
   if (executable) {
     await chmod(outfile, 0o755);
   }

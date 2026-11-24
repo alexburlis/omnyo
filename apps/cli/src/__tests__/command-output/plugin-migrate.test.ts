@@ -9,7 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PLUGIN_SDK_VERSION } from "@bb/domain";
+import { PLUGIN_SDK_VERSION } from "@omnyo/domain";
+import {
+  resolvePrivateSdkArtifact,
+  setPluginSdkPin,
+} from "@omnyo/templates/plugin-scaffold";
 import {
   collectLogPayloads,
   readlineMocks,
@@ -25,12 +29,26 @@ const register = (program: Parameters<typeof registerPluginCommands>[0]) => {
 
 setupCommandOutputTestEnvironment();
 
+const SDK_ARTIFACT = await resolvePrivateSdkArtifact({
+  sourceUrl: import.meta.url,
+});
+
+const SDK_PIN = `file:./vendor/${SDK_ARTIFACT.file}`;
+
+const PLUGIN_METADATA = {
+  name: "Fixture plugin",
+  description: "Plugin SDK layout fixture.",
+  branding: { icon: "Zap" },
+  server: "./server.ts",
+};
+
 let rootDir: string;
+
 let toolsDir: string;
 
 beforeEach(async () => {
-  rootDir = await mkdtemp(join(tmpdir(), "bb-cli-migrate-"));
-  toolsDir = await mkdtemp(join(tmpdir(), "bb-cli-migrate-tools-"));
+  rootDir = await mkdtemp(join(tmpdir(), "omnyo-cli-migrate-"));
+  toolsDir = await mkdtemp(join(tmpdir(), "omnyo-cli-migrate-tools-"));
   await installFakeNpm(toolsDir);
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -81,6 +99,7 @@ async function readManifest(): Promise<Record<string, unknown>> {
   const parsed: unknown = JSON.parse(
     await readFile(join(rootDir, "package.json"), "utf8"),
   );
+
   return parsed as Record<string, unknown>;
 }
 
@@ -91,7 +110,7 @@ function setTty(value: boolean): void {
   });
 }
 
-describe("bb plugin migrate", () => {
+describe("omnyo plugin migrate", () => {
   it("prints the plan and changes nothing without --yes on a non-TTY", async () => {
     await writeVendoredPlugin();
     setTty(false);
@@ -103,12 +122,12 @@ describe("bb plugin migrate", () => {
     ).rejects.toThrow("process.exit:1");
 
     const logged = collectLogPayloads(logSpy).join("\n");
+    expect(logged).toContain(`"@omnyo/plugin-sdk": (none) → ${SDK_PIN}`);
     expect(logged).toContain(
-      `"@get-bb/plugin-sdk": (none) → ${PLUGIN_SDK_VERSION}`,
+      "preserve       types/bb-plugin-sdk.d.ts → vendor/legacy-plugin-sdk-v1/",
     );
-    expect(logged).toContain("delete         types/bb-plugin-sdk.d.ts");
     expect(vi.mocked(console.error).mock.calls.flat().join("\n")).toContain(
-      "Refusing to migrate without confirmation",
+      "Re-run with --yes to apply the displayed migration.",
     );
     expect(await readFile(join(rootDir, "package.json"), "utf8")).toBe(before);
     expect(
@@ -116,7 +135,7 @@ describe("bb plugin migrate", () => {
     ).toBe(true);
   });
 
-  it("migrates with --yes and reports the follow-up install", async () => {
+  it("migrates with --yes, preserves declarations and reports the private follow-up install", async () => {
     await writeVendoredPlugin();
     setTty(false);
 
@@ -124,16 +143,25 @@ describe("bb plugin migrate", () => {
 
     const manifest = await readManifest();
     expect(
-      (manifest.devDependencies as Record<string, string>)[
-        "@get-bb/plugin-sdk"
-      ],
-    ).toBe(PLUGIN_SDK_VERSION);
+      (manifest.devDependencies as Record<string, string>)["@omnyo/plugin-sdk"],
+    ).toBe(SDK_PIN);
     await expect(
       stat(join(rootDir, "types", "bb-plugin-sdk.d.ts")),
     ).rejects.toThrow();
+    expect(
+      await readFile(
+        join(rootDir, "vendor", "legacy-plugin-sdk-v1", "bb-plugin-sdk.d.ts"),
+        "utf8",
+      ),
+    ).toBe("// old\n");
+    expect(await readFile(join(rootDir, "vendor", SDK_ARTIFACT.file))).toEqual(
+      await readFile(SDK_ARTIFACT.artifactPath),
+    );
     const logged = collectLogPayloads(vi.mocked(console.log)).join("\n");
-    expect(logged).toContain("Migrated to the @get-bb/plugin-sdk npm package.");
-    expect(logged).toContain("Run `npm install`");
+    expect(logged).toContain(
+      "Migrated to the private Omnyo SDK. Original declaration bytes are retained in vendor/legacy-plugin-sdk-v1/.",
+    );
+    expect(logged).toContain("Run `pnpm install`");
   });
 
   it("plans and applies the pre-rename import rewrite", async () => {
@@ -148,34 +176,59 @@ describe("bb plugin migrate", () => {
 
     const logged = collectLogPayloads(vi.mocked(console.log)).join("\n");
     expect(logged).toContain(
-      'rewrite        server.ts (2 imports of "@bb/plugin-sdk" → "@get-bb/plugin-sdk")',
+      'rewrite        server.ts (3 SDK import/member updates to "@omnyo/plugin-sdk")',
     );
     expect(await readFile(join(rootDir, "server.ts"), "utf8")).toBe(
-      'import type { BbPluginApi } from "@get-bb/plugin-sdk";\nimport "@get-bb/plugin-sdk/testing";\n',
+      'import type { PluginApi as BbPluginApi } from "@omnyo/plugin-sdk";\nimport "@omnyo/plugin-sdk/testing";\n',
     );
   });
 
   it("reports an already-migrated plugin without touching it", async () => {
     await writeManifest({
       name: "bb-plugin-modern",
-      engines: { bbPluginSdk: `>=${PLUGIN_SDK_VERSION}` },
-      bb: { server: "./server.ts" },
-      devDependencies: { "@get-bb/plugin-sdk": PLUGIN_SDK_VERSION },
+      version: "0.1.0",
+      engines: { omnyoPluginSdk: `>=${PLUGIN_SDK_VERSION}` },
+      omnyo: PLUGIN_METADATA,
+      devDependencies: { "@omnyo/plugin-sdk": SDK_PIN },
     });
+    await setPluginSdkPin({ rootDir, sdkArtifact: SDK_ARTIFACT });
     const before = await readFile(join(rootDir, "package.json"), "utf8");
 
     await runCommand(["plugin", "migrate", rootDir], register);
 
     expect(collectLogPayloads(vi.mocked(console.log)).join("\n")).toContain(
-      "Already migrated",
+      "already uses the selected private Omnyo SDK",
     );
     expect(await readFile(join(rootDir, "package.json"), "utf8")).toBe(before);
+  });
+
+  it("migrates a public same-version package instead of treating legacy metadata as current", async () => {
+    await writeManifest({
+      name: "bb-plugin-modern",
+      version: "0.1.0",
+      engines: { bbPluginSdk: `>=${PLUGIN_SDK_VERSION}` },
+      bb: PLUGIN_METADATA,
+      devDependencies: { "@get-bb/plugin-sdk": PLUGIN_SDK_VERSION },
+    });
+    const legacy = await readFile(join(rootDir, "package.json"));
+    await runCommand(["plugin", "migrate", rootDir, "--yes"], register);
+    expect(await readFile(join(rootDir, "package.json"))).not.toEqual(legacy);
+    const manifest = await readManifest();
+    expect(manifest.bb).toBeUndefined();
+    expect(manifest.omnyo).toEqual(PLUGIN_METADATA);
+    expect(
+      (manifest.devDependencies as Record<string, string>)["@omnyo/plugin-sdk"],
+    ).toBe(SDK_PIN);
+    expect(await readFile(join(rootDir, "vendor", SDK_ARTIFACT.file))).toEqual(
+      await readFile(SDK_ARTIFACT.artifactPath),
+    );
   });
 
   it("pins a package-layout plugin that never got the devDependency", async () => {
     await writeManifest({
       name: "bb-plugin-pinless",
-      bb: { server: "./server.ts" },
+      version: "0.1.0",
+      bb: PLUGIN_METADATA,
       devDependencies: { typescript: "^5.7.0" },
     });
     setTty(false);
@@ -184,15 +237,13 @@ describe("bb plugin migrate", () => {
 
     const manifest = await readManifest();
     expect(
-      (manifest.devDependencies as Record<string, string>)[
-        "@get-bb/plugin-sdk"
-      ],
-    ).toBe(PLUGIN_SDK_VERSION);
-    expect((manifest.engines as Record<string, string>).bbPluginSdk).toBe(
+      (manifest.devDependencies as Record<string, string>)["@omnyo/plugin-sdk"],
+    ).toBe(SDK_PIN);
+    expect((manifest.engines as Record<string, string>).omnyoPluginSdk).toBe(
       `>=${PLUGIN_SDK_VERSION}`,
     );
     expect(collectLogPayloads(vi.mocked(console.log)).join("\n")).not.toContain(
-      "Already migrated",
+      "already uses the selected private Omnyo SDK",
     );
   });
 
@@ -204,6 +255,7 @@ describe("bb plugin migrate", () => {
         join(rootDir, "types", "bb-plugin-sdk-app.d.ts"),
         "// appeared mid-prompt\n",
       );
+
       return "y";
     });
     const before = await readFile(join(rootDir, "package.json"), "utf8");
@@ -222,55 +274,73 @@ describe("bb plugin migrate", () => {
   });
 });
 
-describe("bb plugin dev stale-pin warning", () => {
-  function stubEmptyPluginList(): void {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ plugins: [] }), {
-        headers: { "content-type": "application/json" },
-      }),
-    );
-  }
-
-  it("warns when an exact pin differs from this bb's SDK version", async () => {
+describe("private plugin SDK digest checks", () => {
+  it("refuses a public exact pin without changing the legacy manifest", async () => {
     await writeManifest({
       name: "bb-plugin-modern",
-      bb: { server: "./server.ts" },
-      devDependencies: { "@get-bb/plugin-sdk": "0.2.0" },
+      version: "0.1.0",
+      bb: PLUGIN_METADATA,
+      devDependencies: { "@omnyo/plugin-sdk": "0.2.0" },
     });
-    stubEmptyPluginList();
+    const before = await readFile(join(rootDir, "package.json"));
 
     await expect(
-      runCommand(["plugin", "dev", rootDir], register),
+      runCommand(["plugin", "types", rootDir, "--check"], register),
     ).rejects.toThrow("process.exit:1");
-
-    expect(vi.mocked(console.warn).mock.calls.flat().join("\n")).toContain(
-      `This plugin pins @get-bb/plugin-sdk 0.2.0; this bb's SDK is ${PLUGIN_SDK_VERSION}`,
+    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).toContain(
+      "Plugin SDK bytes or declarations differ from this runtime.",
     );
+    expect(await readFile(join(rootDir, "package.json"))).toEqual(before);
+    await expect(stat(join(rootDir, "vendor"))).rejects.toThrow();
   });
 
-  it("stays quiet for a matching pin and for a range", async () => {
+  it("refuses a public same-version pin without mistaking it for verified private bytes", async () => {
     await writeManifest({
       name: "bb-plugin-modern",
-      bb: { server: "./server.ts" },
-      devDependencies: { "@get-bb/plugin-sdk": PLUGIN_SDK_VERSION },
+      version: "0.1.0",
+      bb: PLUGIN_METADATA,
+      devDependencies: { "@omnyo/plugin-sdk": PLUGIN_SDK_VERSION },
     });
-    stubEmptyPluginList();
+    const before = await readFile(join(rootDir, "package.json"));
     await expect(
-      runCommand(["plugin", "dev", rootDir], register),
+      runCommand(["plugin", "types", rootDir, "--check"], register),
     ).rejects.toThrow("process.exit:1");
+    expect(await readFile(join(rootDir, "package.json"))).toEqual(before);
+    await expect(stat(join(rootDir, "vendor"))).rejects.toThrow();
+  });
+
+  it("accepts a matching digest but refuses a public range without writing", async () => {
+    await writeManifest({
+      name: "bb-plugin-modern",
+      version: "0.1.0",
+      omnyo: PLUGIN_METADATA,
+      devDependencies: { "@omnyo/plugin-sdk": SDK_PIN },
+    });
+    await setPluginSdkPin({ rootDir, sdkArtifact: SDK_ARTIFACT });
+    const current = await readFile(join(rootDir, "package.json"));
+    const archive = await readFile(join(rootDir, "vendor", SDK_ARTIFACT.file));
+    await runCommand(["plugin", "types", rootDir, "--check"], register);
+    expect(collectLogPayloads(vi.mocked(console.log)).join("\n")).toContain(
+      `Private @omnyo/plugin-sdk ${PLUGIN_SDK_VERSION} is current.`,
+    );
+    expect(await readFile(join(rootDir, "package.json"))).toEqual(current);
+    expect(await readFile(join(rootDir, "vendor", SDK_ARTIFACT.file))).toEqual(
+      archive,
+    );
 
     await writeManifest({
       name: "bb-plugin-modern",
-      bb: { server: "./server.ts" },
-      devDependencies: { "@get-bb/plugin-sdk": "^0.2.0" },
+      version: "0.1.0",
+      bb: PLUGIN_METADATA,
+      devDependencies: { "@omnyo/plugin-sdk": "^0.2.0" },
     });
-    stubEmptyPluginList();
+    const range = await readFile(join(rootDir, "package.json"));
     await expect(
-      runCommand(["plugin", "dev", rootDir], register),
+      runCommand(["plugin", "types", rootDir, "--check"], register),
     ).rejects.toThrow("process.exit:1");
-
-    expect(vi.mocked(console.warn).mock.calls.flat().join("\n")).not.toContain(
-      "This plugin pins @get-bb/plugin-sdk",
+    expect(await readFile(join(rootDir, "package.json"))).toEqual(range);
+    expect(await readFile(join(rootDir, "vendor", SDK_ARTIFACT.file))).toEqual(
+      archive,
     );
   });
 });
@@ -278,7 +348,7 @@ describe("bb plugin dev stale-pin warning", () => {
 describe("legacy vendored SDK layout", () => {
   const message =
     "This plugin uses the legacy vendored SDK layout. Its SDK types will not be updated.\n" +
-    "Please run `bb plugin migrate` to update to the latest SDK types.";
+    "Please run `omnyo plugin migrate` to update to the latest SDK types.";
 
   it.each([false, true])(
     "requires migration for bb plugin types with check=%s",
@@ -294,12 +364,32 @@ describe("legacy vendored SDK layout", () => {
         ),
       ).rejects.toThrow("process.exit:1");
 
-      expect(vi.mocked(console.error)).toHaveBeenCalledWith(message);
+      expect(vi.mocked(console.error)).toHaveBeenCalledWith(
+        `Error: ${message}`,
+      );
       expect(await readFile(declarationsPath, "utf8")).toBe(before);
     },
   );
 
-  it("warns and continues bb plugin dev", async () => {
+  it("requires migration for a legacy package identity without vendored declarations", async () => {
+    await writeManifest({
+      name: "bb-plugin-modern",
+      version: "0.1.0",
+      bb: PLUGIN_METADATA,
+      devDependencies: { "@get-bb/plugin-sdk": "0.2.0" },
+    });
+    const before = await readFile(join(rootDir, "package.json"));
+
+    await expect(
+      runCommand(["plugin", "types", rootDir], register),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(vi.mocked(console.error)).toHaveBeenCalledWith(`Error: ${message}`);
+    expect(await readFile(join(rootDir, "package.json"))).toEqual(before);
+    await expect(stat(join(rootDir, "vendor"))).rejects.toThrow();
+  });
+
+  it("warns and continues omnyo plugin dev", async () => {
     await writeVendoredPlugin();
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ plugins: [] }), {
@@ -317,7 +407,7 @@ describe("legacy vendored SDK layout", () => {
     );
   });
 
-  it("warns and continues bb plugin build", async () => {
+  it("warns and continues omnyo plugin build", async () => {
     await writeVendoredPlugin();
     await writeFile(join(rootDir, "server.ts"), "export default () => {};\n");
 
@@ -330,36 +420,38 @@ describe("legacy vendored SDK layout", () => {
   });
 });
 
-describe("bb plugin types on a package-layout plugin", () => {
+describe("omnyo plugin types on a package-layout plugin", () => {
   it("repoints an outdated pin to the running host's SDK version", async () => {
     await writeManifest({
       name: "bb-plugin-modern",
+      version: "0.1.0",
       engines: { bbPluginSdk: ">=0.2.0" },
-      bb: { server: "./server.ts" },
-      devDependencies: { "@get-bb/plugin-sdk": "0.2.0" },
+      bb: PLUGIN_METADATA,
+      devDependencies: { "@omnyo/plugin-sdk": "0.2.0" },
     });
 
     await runCommand(["plugin", "types", rootDir], register);
 
     const manifest = await readManifest();
     expect(
-      (manifest.devDependencies as Record<string, string>)[
-        "@get-bb/plugin-sdk"
-      ],
-    ).toBe(PLUGIN_SDK_VERSION);
-    expect((manifest.engines as Record<string, string>).bbPluginSdk).toBe(
+      (manifest.devDependencies as Record<string, string>)["@omnyo/plugin-sdk"],
+    ).toBe(SDK_PIN);
+    expect((manifest.engines as Record<string, string>).omnyoPluginSdk).toBe(
       ">=0.2.0",
     );
     const logged = collectLogPayloads(vi.mocked(console.log)).join("\n");
-    expect(logged).toContain(`0.2.0 → ${PLUGIN_SDK_VERSION}`);
-    expect(logged).toContain("Run `npm install`");
+    expect(logged).toContain(
+      `Private @omnyo/plugin-sdk ${PLUGIN_SDK_VERSION} copied and pinned in vendor/.`,
+    );
+    expect(logged).toContain("Run `pnpm install`");
   });
 
   it("--check reports the mismatch and writes nothing", async () => {
     await writeManifest({
       name: "bb-plugin-modern",
-      bb: { server: "./server.ts" },
-      devDependencies: { "@get-bb/plugin-sdk": "0.2.0" },
+      version: "0.1.0",
+      bb: PLUGIN_METADATA,
+      devDependencies: { "@omnyo/plugin-sdk": "0.2.0" },
     });
     const before = await readFile(join(rootDir, "package.json"), "utf8");
 
@@ -370,19 +462,21 @@ describe("bb plugin types on a package-layout plugin", () => {
     expect(await readFile(join(rootDir, "package.json"), "utf8")).toBe(before);
   });
 
-  it("is a no-op when the pin already matches", async () => {
+  it("is a no-op when the digest pin and actual archive already match", async () => {
     await writeManifest({
       name: "bb-plugin-modern",
-      bb: { server: "./server.ts" },
-      devDependencies: { "@get-bb/plugin-sdk": PLUGIN_SDK_VERSION },
+      version: "0.1.0",
+      omnyo: PLUGIN_METADATA,
+      devDependencies: { "@omnyo/plugin-sdk": SDK_PIN },
     });
+    await setPluginSdkPin({ rootDir, sdkArtifact: SDK_ARTIFACT });
     const before = await readFile(join(rootDir, "package.json"), "utf8");
 
     await runCommand(["plugin", "types", rootDir], register);
 
     expect(await readFile(join(rootDir, "package.json"), "utf8")).toBe(before);
     expect(collectLogPayloads(vi.mocked(console.log)).join("\n")).toContain(
-      `already pinned to ${PLUGIN_SDK_VERSION}`,
+      `Private @omnyo/plugin-sdk ${PLUGIN_SDK_VERSION} copied and pinned in vendor/.`,
     );
   });
 });

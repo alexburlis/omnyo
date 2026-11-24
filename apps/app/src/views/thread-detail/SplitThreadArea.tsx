@@ -1,10 +1,11 @@
+import { useLatestRef } from "@/hooks/useLatestRef";
 import { focusPaneComposer } from "@/lib/pane-composer-focus";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   PANE_DIRECTION_APP_COMMAND_IDS,
   PANE_FOCUS_APP_COMMAND_IDS,
-} from "@bb/domain";
-import { useAtom, useAtomValue, useStore } from "jotai";
+} from "@omnyo/domain";
+import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai";
 import {
   Fragment,
   memo,
@@ -26,9 +27,10 @@ import {
   type ThreadRoutePathArgs,
 } from "@/lib/route-paths";
 import { useIsMutating } from "@tanstack/react-query";
-import { BbHttpError } from "@/lib/sdk";
+import { OmnyoHttpError } from "@/lib/sdk";
 import { useThread } from "@/hooks/queries/thread-queries";
 import { useSplitWorkspaceActive } from "@/hooks/useSplitWorkspaceActive";
+import { visibleChatIdsAtom } from "@/lib/visible-chat-haptics";
 import {
   dimInactiveSplitsAtom,
   maximizedPaneIdAtom,
@@ -38,6 +40,7 @@ import {
   computePaneRects,
   countPanes,
   findPane,
+  isSamePaneContent,
   listPanes,
   movePane,
   removePane,
@@ -74,6 +77,7 @@ import {
   createPaneSecondaryPanelRegistry,
   useOptionalPaneContext,
   type PaneContextValue,
+  type PaneNavigationOptions,
   type PaneSecondaryPanelRegistration,
   type PaneSecondaryPanelRegistry,
 } from "./PaneContext";
@@ -88,13 +92,14 @@ import {
 import { AppBreadcrumbs } from "@/components/layout/AppBreadcrumbs";
 import { resourceRouteLabelAtom } from "@/components/layout/resourceRouteLabelAtom";
 import { resolveAutomationBreadcrumbs } from "@/components/tools/tools-navigation";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
-import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@bb/shared-ui/chrome-style-tokens";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS } from "@omnyo/shared-ui/chrome-style-tokens";
 import { usePluginNavPanelChrome } from "@/lib/plugin-nav-panel-chrome";
 import {
   PluginPanelHeaderActions,
   PluginPanelHeaderCenter,
+  PluginPanelPageHeader,
 } from "@/components/plugin/PluginPanelHeader";
 import { getAdjacentPaneId, getDirectionalPaneId } from "./splitPaneCommands";
 import {
@@ -108,16 +113,16 @@ import {
 } from "./splitThreadNavigation";
 import { ThreadDetailWorkerPoolProvider } from "./ThreadDetailWorkerPoolProvider";
 import {
-  getBbDesktopInfo,
+  getOmnyoDesktopInfo,
   MACOS_WINDOW_NO_DRAG_CLASS,
   shouldUseMacosDesktopChrome,
-} from "@/lib/bb-desktop";
+} from "@/lib/omnyo-desktop";
 import { SplitWorkspaceSecondaryPanelHost } from "./SplitWorkspaceSecondaryPanelHost";
 import { SecondaryPanelHostLayoutContext } from "@/components/secondary-panel/SecondaryPanelHostLayoutContext";
 import {
   CONTEXT_INACTIVE_TEXT_CLASS,
   CONTEXT_SELECTION_SURFACE_CLASS,
-} from "@bb/shared-ui/context-selection";
+} from "@omnyo/shared-ui/context-selection";
 import { PaneMaximizeButton } from "./PaneMaximizeButton";
 import { wsManager } from "@/lib/ws";
 import { useImmediateRouteNavigate } from "@/components/ui/app-route-anchor";
@@ -136,7 +141,6 @@ const LazyPluginPanelRightPanelHost = defineSplit<
       (module) => module.PluginPanelRightPanelHost,
     ),
   loading: () => null,
-  tier: "intent",
 });
 
 function PluginPagePanelHost({
@@ -151,6 +155,7 @@ function PluginPagePanelHost({
   subPath: string;
 }) {
   const pane = useOptionalPaneContext();
+
   return (
     <PluginDetailOpenerBoundary
       key={`${props.pluginId}/${props.panelPath}`}
@@ -177,6 +182,7 @@ type NavigateInPane = (
   paneId: string,
   originContent: PaneContent,
   thread: ThreadRoutePathArgs,
+  options?: PaneNavigationOptions,
 ) => void;
 
 interface SplitThreadAreaProps {
@@ -195,9 +201,11 @@ function usePreservedSplitScrollPositions(maximizedPaneId: string | null) {
 
   const captureVisibleScrollPositions = useCallback(() => {
     const workspace = workspaceRef.current;
+
     if (workspace === null) {
       return;
     }
+
     for (const pane of workspace.querySelectorAll<HTMLElement>(
       `[${SPLIT_PANE_DATA_ATTR}]:not([aria-hidden="true"])`,
     )) {
@@ -206,6 +214,7 @@ function usePreservedSplitScrollPositions(maximizedPaneId: string | null) {
           positionsRef.current.delete(element);
           continue;
         }
+
         positionsRef.current.set(element, {
           left: element.scrollLeft,
           top: element.scrollTop,
@@ -218,32 +227,38 @@ function usePreservedSplitScrollPositions(maximizedPaneId: string | null) {
     if (previousMaximizedPaneIdRef.current === maximizedPaneId) {
       return;
     }
+
     previousMaximizedPaneIdRef.current = maximizedPaneId;
 
     const restore = (): boolean => {
       const workspace = workspaceRef.current;
       let corrected = false;
+
       for (const [element, position] of positionsRef.current) {
         if (workspace === null || !workspace.contains(element)) {
           positionsRef.current.delete(element);
           continue;
         }
+
         if (
           element.scrollLeft === position.left &&
           element.scrollTop === position.top
         ) {
           continue;
         }
+
         element.scrollLeft = position.left;
         element.scrollTop = position.top;
         corrected = true;
       }
+
       return corrected;
     };
 
     restore();
     let frame: number | null = null;
     let framesRemaining = 5;
+
     const restoreUntilSettled = () => {
       const corrected = restore();
       framesRemaining -= 1;
@@ -252,7 +267,9 @@ function usePreservedSplitScrollPositions(maximizedPaneId: string | null) {
           ? window.requestAnimationFrame(restoreUntilSettled)
           : null;
     };
+
     frame = window.requestAnimationFrame(restoreUntilSettled);
+
     return () => {
       if (frame !== null) {
         window.cancelAnimationFrame(frame);
@@ -278,8 +295,10 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   const store = useStore();
   const [storedLayout, setLayout] = useAtom(splitLayoutAtom);
   const dimsInactiveSplits = useAtomValue(dimInactiveSplitsAtom);
+
   const [maximizedPaneId, setMaximizedPaneIdAtom] =
     useAtom(maximizedPaneIdAtom);
+
   const secondaryPanelRegistry = useMemo(
     () => createPaneSecondaryPanelRegistry(),
     [],
@@ -289,6 +308,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     () => (projectId && threadId ? { projectId, threadId } : null),
     [projectId, threadId],
   );
+
   const currentContent = useMemo<PaneContent | null>(
     () => routeContent ?? (routeThread ? threadPaneContent(routeThread) : null),
     [routeContent, routeThread],
@@ -298,6 +318,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     if (currentContent === null) {
       return;
     }
+
     setLayout((previous) =>
       reconcileLayoutForContent(previous, currentContent),
     );
@@ -310,12 +331,19 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
       : currentContent
         ? reconcileLayoutForContent(null, currentContent)
         : null);
-  const panes = layout === null ? [] : listPanes(layout.root);
+
+  const panes = useMemo(
+    () => (layout === null ? [] : listPanes(layout.root)),
+    [layout],
+  );
+
   const isSplitActive = splitWorkspaceActive && panes.length > 1;
+
   const maximizedPane =
     layout !== null && maximizedPaneId !== null
       ? findPane(layout.root, maximizedPaneId)
       : null;
+
   const effectiveMaximizedPaneId =
     layout !== null &&
     countPanes(layout.root) > 1 &&
@@ -323,10 +351,42 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     maximizedPane !== null
       ? maximizedPaneId
       : null;
+
+  const setVisibleChatIds = useSetAtom(visibleChatIdsAtom);
+
+  useLayoutEffect(() => {
+    if (currentContent === null) return;
+
+    const visibleContents = splitWorkspaceActive
+      ? panes
+          .filter(
+            (pane) =>
+              effectiveMaximizedPaneId === null ||
+              pane.paneId === effectiveMaximizedPaneId,
+          )
+          .map((pane) => pane.content)
+      : [currentContent];
+
+    setVisibleChatIds(
+      visibleContents.flatMap((content) =>
+        content.kind === "thread" ? [content.threadId] : [],
+      ),
+    );
+
+    return () => setVisibleChatIds([]);
+  }, [
+    currentContent,
+    effectiveMaximizedPaneId,
+    panes,
+    setVisibleChatIds,
+    splitWorkspaceActive,
+  ]);
+
   const {
     captureVisibleScrollPositions,
     workspaceRef: preservedScrollWorkspaceRef,
   } = usePreservedSplitScrollPositions(effectiveMaximizedPaneId);
+
   const setMaximizedPaneId = useCallback(
     (next: SetStateAction<string | null>) => {
       captureVisibleScrollPositions();
@@ -339,26 +399,33 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     () =>
       wsManager.onThreadPaneAction((signal) => {
         const current = store.get(splitLayoutAtom);
+
         if (current === null) {
           return;
         }
+
         const previousMaximizedPaneId = store.get(maximizedPaneIdAtom);
+
         const next = applyThreadPaneActionToLayout(
           current,
           previousMaximizedPaneId,
           { projectId: signal.projectId, threadId: signal.threadId },
           signal.action,
         );
+
         if (next.layout !== current) {
           store.set(splitLayoutAtom, next.layout);
           const route = focusedPaneRoute(next.layout);
+
           if (route !== null) {
             navigate(route, { replace: true });
           }
         }
+
         if (next.maximizedPaneId !== previousMaximizedPaneId) {
           setMaximizedPaneId(next.maximizedPaneId);
         }
+
         if (next.dimInactiveSplits !== null) {
           store.set(dimInactiveSplitsAtom, next.dimInactiveSplits);
         }
@@ -368,64 +435,86 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
 
   useEffect(() => {
     if (maximizedPaneId === null) return;
+
     if (
       layout === null ||
       countPanes(layout.root) < 2 ||
       maximizedPane === null
     ) {
       setMaximizedPaneId(null);
+
       return;
     }
+
     if (layout.focusedPaneId !== maximizedPaneId) {
       setMaximizedPaneId(layout.focusedPaneId);
     }
   }, [layout, maximizedPane, maximizedPaneId, setMaximizedPaneId]);
 
-  const workspaceMountedRef = useRef(false);
-  useEffect(() => {
-    workspaceMountedRef.current = true;
+  const workspaceLeftRef = useRef(false);
+  useLayoutEffect(() => {
+    workspaceLeftRef.current = false;
+
     return () => {
-      workspaceMountedRef.current = false;
+      workspaceLeftRef.current = true;
     };
   }, []);
 
+  const currentContentRef = useLatestRef(currentContent);
+  const splitWorkspaceActiveRef = useLatestRef(splitWorkspaceActive);
+
   const navigateInPane = useCallback<NavigateInPane>(
-    (paneId, originContent, thread) => {
+    (paneId, originContent, thread, options) => {
       const current = store.get(splitLayoutAtom);
-      if (current === null) return;
-      const next = replaceOriginPaneContent(
-        current,
-        paneId,
-        originContent,
-        threadPaneContent(thread),
-      );
-      if (next === null) return;
-      store.set(splitLayoutAtom, next);
-      if (workspaceMountedRef.current && next.focusedPaneId === paneId) {
-        navigate(getThreadRoutePath(thread));
+
+      const next =
+        current === null
+          ? null
+          : replaceOriginPaneContent(
+              current,
+              paneId,
+              originContent,
+              threadPaneContent(thread),
+            );
+
+      if (next !== null) store.set(splitLayoutAtom, next);
+
+      const showsOrigin =
+        current === null || !splitWorkspaceActiveRef.current
+          ? currentContentRef.current !== null &&
+            isSamePaneContent(currentContentRef.current, originContent)
+          : next?.focusedPaneId === paneId;
+
+      if (showsOrigin && !workspaceLeftRef.current) {
+        navigate(getThreadRoutePath(thread), options);
       }
     },
-    [navigate, store],
+    [currentContentRef, navigate, splitWorkspaceActiveRef, store],
   );
 
   const [keyboardFocusRequest, setKeyboardFocusRequest] = useState<{
     paneId: string;
   } | null>(null);
+
   useEffect(() => {
     if (keyboardFocusRequest === null) return;
     const paneId = keyboardFocusRequest.paneId;
     const pane = layout === null ? null : findPane(layout.root, paneId);
     const workspace = preservedScrollWorkspaceRef.current;
+
     const root = Array.from(
       workspace?.querySelectorAll<HTMLElement>("[data-split-pane-id]") ?? [],
     ).find((element) => element.dataset.splitPaneId === paneId);
+
     if (!root || !pane || layout?.focusedPaneId !== paneId) return;
     let observer: MutationObserver | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+
     const cancel = () => {
       observer?.disconnect();
       clearTimeout(timeout);
     };
+
     const finish = () => {
       cancelAnimationFrame(frame);
       cancel();
@@ -433,37 +522,49 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         current === keyboardFocusRequest ? null : current,
       );
     };
+
     const focus = () => {
       if (!root.isConnected || root.getAttribute("aria-hidden") === "true")
         return false;
+
       const composer = root.querySelector<HTMLElement>(
         "[data-promptbox] [contenteditable='true'], [data-promptbox] textarea:not(:disabled)",
       );
+
       if (composer) {
         focusPaneComposer(composer);
+
         return document.activeElement === composer;
       }
+
       return false;
     };
+
     const frame = requestAnimationFrame(() => {
       if (focus()) {
         finish();
+
         return;
       }
+
       const content =
         root.querySelector<HTMLElement>("[data-pane-content]") ?? root;
+
       const control =
         pane.content.kind === "thread"
           ? null
           : content.querySelector<HTMLElement>(
               "input:not(:disabled), textarea:not(:disabled), [contenteditable='true'], button:not(:disabled), a[href], [tabindex='0']",
             );
+
       (control ?? root).focus({ preventScroll: true });
       observer = new MutationObserver(() => {
         if (document.activeElement !== root) {
           finish();
+
           return;
         }
+
         if (focus()) finish();
       });
       observer.observe(root, {
@@ -474,8 +575,10 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
       });
       timeout = setTimeout(finish, 1000);
     });
+
     document.addEventListener("pointerdown", finish, true);
     document.addEventListener("keydown", finish, true);
+
     return () => {
       cancelAnimationFrame(frame);
       cancel();
@@ -487,14 +590,18 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   const focusPane = useCallback(
     (paneId: string) => {
       const current = store.get(splitLayoutAtom);
+
       if (current === null || current.focusedPaneId === paneId) {
         return;
       }
+
       const pane = findPane(current.root, paneId);
       store.set(splitLayoutAtom, setFocus(current, paneId));
+
       if (store.get(maximizedPaneIdAtom) !== null) {
         setMaximizedPaneId(paneId);
       }
+
       if (pane !== null) {
         navigate(paneContentRoute(pane.content), { replace: true });
       }
@@ -505,11 +612,14 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   const closePane = useCallback(
     (paneId: string) => {
       const current = store.get(splitLayoutAtom);
+
       if (current === null) {
         return;
       }
+
       if (countPanes(current.root) === 1) {
         const pane = findPane(current.root, paneId);
+
         if (pane === null || pane.content.kind === "new-thread") return;
         store.set(
           splitLayoutAtom,
@@ -517,18 +627,25 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         );
         setMaximizedPaneId(null);
         navigate(paneContentRoute({ kind: "new-thread" }), { replace: true });
+
         return;
       }
+
       const next = removePane(current, paneId);
+
       if (next === current) {
         return;
       }
+
       store.set(splitLayoutAtom, next);
+
       if (store.get(maximizedPaneIdAtom) === paneId) {
         setMaximizedPaneId(null);
       }
+
       if (next.focusedPaneId !== current.focusedPaneId) {
         const route = focusedPaneRoute(next);
+
         if (route !== null) {
           navigate(route, { replace: true });
         }
@@ -541,15 +658,19 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     (paneId: string) => {
       const current = store.get(splitLayoutAtom);
       const pane = current === null ? null : findPane(current.root, paneId);
+
       if (current === null || countPanes(current.root) < 2 || pane === null) {
         return;
       }
+
       if (current.focusedPaneId !== paneId) {
         const next = setFocus(current, paneId);
         store.set(splitLayoutAtom, next);
         const route = focusedPaneRoute(next);
+
         if (route !== null) navigate(route, { replace: true });
       }
+
       setMaximizedPaneId((previous) => (previous === paneId ? null : paneId));
     },
     [navigate, setMaximizedPaneId, store],
@@ -558,15 +679,20 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   const movePaneToSide = useCallback(
     (paneId: string, side: SplitSide) => {
       const current = store.get(splitLayoutAtom);
+
       if (current === null || countPanes(current.root) < 2) return;
 
       const rects = computePaneRects(current.root);
+
       const candidates = listPanes(current.root).filter(
         (pane) => pane.paneId !== paneId,
       );
+
       const edgePosition = (candidateId: string) => {
         const rect = rects.get(candidateId);
+
         if (rect === undefined) return 0;
+
         switch (side) {
           case "left":
             return rect.x;
@@ -578,16 +704,20 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
             return -(rect.y + rect.h);
         }
       };
+
       const target = candidates.sort(
         (first, second) =>
           edgePosition(first.paneId) - edgePosition(second.paneId),
       )[0];
+
       if (target === undefined) return;
 
       const next = movePane(current, paneId, target.paneId, side);
+
       if (next === current) return;
       store.set(splitLayoutAtom, next);
       const route = focusedPaneRoute(next);
+
       if (route !== null) navigate(route, { replace: true });
     },
     [navigate, store],
@@ -607,19 +737,26 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   const pruneStalePane = useCallback(
     (paneId: string) => {
       const current = store.get(splitLayoutAtom);
+
       if (current === null) {
         return;
       }
+
       const next = removePane(current, paneId);
+
       if (next === current) {
         return;
       }
+
       store.set(splitLayoutAtom, next);
+
       if (store.get(maximizedPaneIdAtom) === paneId) {
         setMaximizedPaneId(null);
       }
+
       if (next.focusedPaneId !== current.focusedPaneId) {
         const route = focusedPaneRoute(next);
+
         if (route !== null) {
           navigate(route, { replace: true });
         }
@@ -631,17 +768,21 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   const beginPaneDrag = useCallback<BeginPaneDrag>(
     (paneId, event, label) => {
       const startLayout = store.get(splitLayoutAtom);
+
       if (startLayout === null || countPanes(startLayout.root) < 2) {
         return;
       }
+
       const restoreMaximizeAfterDrag =
         store.get(maximizedPaneIdAtom) === paneId;
+
       const sourceEl =
         event.currentTarget instanceof Element
           ? event.currentTarget.closest<HTMLElement>(
               `[${SPLIT_PANE_DATA_ATTR}]`,
             )
           : null;
+
       const startX = event.clientX;
       const startY = event.clientY;
       beginSplitDrag({
@@ -655,6 +796,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         onEnd: restoreMaximizeAfterDrag
           ? () => {
               const current = store.get(splitLayoutAtom);
+
               if (
                 current !== null &&
                 findPane(current.root, current.focusedPaneId) !== null
@@ -667,18 +809,23 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
           decidePaneDrop({ zone, isSelf: targetPaneId === paneId }),
         onDrop: (target) => {
           const current = store.get(splitLayoutAtom);
+
           if (current === null) {
             return;
           }
+
           const next =
             target.zone === "center"
               ? swapPanes(current, paneId, target.paneId)
               : movePane(current, paneId, target.paneId, target.zone);
+
           if (next === current) {
             return;
           }
+
           store.set(splitLayoutAtom, next);
           const route = focusedPaneRoute(next);
+
           if (route !== null) {
             navigate(route, { replace: true });
           }
@@ -689,6 +836,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   );
 
   if (layout === null || currentContent === null) return null;
+
   if (!splitWorkspaceActive) {
     return (
       <StandalonePaneContent
@@ -720,6 +868,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   );
 
   const firstPane = panes[0];
+
   if (panes.length === 1 && firstPane !== undefined) {
     return (
       <>
@@ -806,6 +955,7 @@ function SplitPaneCommandHandlers({
   toggleMaximizePane,
 }: SplitPaneCommandHandlersProps) {
   useAppCommandContext("splitActive", isSplitActive);
+
   const directionalTargets = useMemo(
     () =>
       (["left", "right", "top", "bottom"] as const).map((direction) =>
@@ -815,8 +965,9 @@ function SplitPaneCommandHandlers({
       ),
     [isSplitActive, layout.root, layout.focusedPaneId],
   );
+
   useEffect(() => {
-    getBbDesktopInfo()?.setSplitNavigationEnabled?.(
+    getOmnyoDesktopInfo()?.setSplitNavigationEnabled?.(
       isSplitActive,
       PANE_DIRECTION_APP_COMMAND_IDS.filter(
         (_, index) => directionalTargets[index] !== null,
@@ -825,38 +976,49 @@ function SplitPaneCommandHandlers({
   }, [isSplitActive, directionalTargets]);
   useIndexedAppCommandHandlers(PANE_DIRECTION_APP_COMMAND_IDS, (index) => {
     const paneId = directionalTargets[index];
+
     if (!paneId) return false;
     focusPane(paneId);
+
     return true;
   });
   useAppCommandHandler("pane.focus.previous", () => {
     if (!isSplitActive) return false;
     const paneId = getAdjacentPaneId(panes, layout.focusedPaneId, -1);
+
     if (paneId !== null) focusPane(paneId);
+
     return true;
   });
   useAppCommandHandler("pane.focus.next", () => {
     if (!isSplitActive) return false;
     const paneId = getAdjacentPaneId(panes, layout.focusedPaneId, 1);
+
     if (paneId !== null) focusPane(paneId);
+
     return true;
   });
   useIndexedAppCommandHandlers(PANE_FOCUS_APP_COMMAND_IDS, (index) => {
     if (!isSplitActive) return false;
     const paneId = panes[index]?.paneId ?? null;
+
     if (paneId !== null) focusPane(paneId);
+
     return true;
   });
   useAppCommandHandler("pane.close", () => {
     if (!isSplitActive) return false;
     closePane(layout.focusedPaneId);
+
     return true;
   });
   useAppCommandHandler("pane.maximize.toggle", () => {
     if (!isSplitActive) return false;
     toggleMaximizePane(maximizedPaneId ?? layout.focusedPaneId);
+
     return true;
   });
+
   return null;
 }
 
@@ -892,6 +1054,7 @@ function SplitTree(props: SplitTreeProps) {
     const isFocused = node.paneId === focusedPaneId;
     const isMaximized = node.paneId === props.maximizedPaneId;
     const isHiddenByMaximize = props.maximizedPaneId !== null && !isMaximized;
+
     return (
       <div
         onPointerDown={() => props.onFocusPane(node.paneId)}
@@ -1032,11 +1195,13 @@ const WorkspacePaneContent = memo(function WorkspacePaneContent({
     () => (onClosePane === null ? null : () => onClosePane(paneId)),
     [onClosePane, paneId],
   );
+
   const onToggleMaximize = useMemo(
     () =>
       onToggleMaximizePane === null ? null : () => onToggleMaximizePane(paneId),
     [onToggleMaximizePane, paneId],
   );
+
   const onMoveToSide = useMemo(
     () =>
       onMovePaneToSide === undefined
@@ -1044,10 +1209,13 @@ const WorkspacePaneContent = memo(function WorkspacePaneContent({
         : (side: SplitSide) => onMovePaneToSide(paneId, side),
     [onMovePaneToSide, paneId],
   );
+
   const navigateInPane = useCallback(
-    (thread: ThreadRoutePathArgs) => onNavigateInPane(paneId, content, thread),
+    (thread: ThreadRoutePathArgs, options?: PaneNavigationOptions) =>
+      onNavigateInPane(paneId, content, thread, options),
     [content, onNavigateInPane, paneId],
   );
+
   const beginPaneDrag = useMemo(
     () =>
       onBeginPaneDrag
@@ -1056,6 +1224,7 @@ const WorkspacePaneContent = memo(function WorkspacePaneContent({
         : undefined,
     [onBeginPaneDrag, paneId],
   );
+
   const secondaryPanelHost = useMemo<PaneSecondaryPanelRegistration | null>(
     () =>
       secondaryPanelRegistry === null
@@ -1066,6 +1235,7 @@ const WorkspacePaneContent = memo(function WorkspacePaneContent({
           },
     [paneId, secondaryPanelRegistry],
   );
+
   const value = useMemo<PaneContextValue>(
     () => ({
       paneId,
@@ -1128,6 +1298,20 @@ const WorkspacePaneContent = memo(function WorkspacePaneContent({
   );
 });
 
+function usePluginPanelAutomationBreadcrumbs(
+  content: PaneContent,
+  isFocused: boolean,
+) {
+  const resourceRouteLabel = useAtomValue(resourceRouteLabelAtom);
+
+  return content.kind === "plugin-panel"
+    ? resolveAutomationBreadcrumbs(
+        paneContentRoute(content),
+        isFocused ? resourceRouteLabel : null,
+      )
+    : null;
+}
+
 function StandalonePaneContent({
   content,
   paneId,
@@ -1140,14 +1324,31 @@ function StandalonePaneContent({
   onNavigateInPane: NavigateInPane;
 }) {
   const navPanelChrome = usePluginNavPanelChrome();
+
+  const automationBreadcrumbs = usePluginPanelAutomationBreadcrumbs(
+    content,
+    true,
+  );
+
+  const [desktopInfo] = useState(getOmnyoDesktopInfo);
+  const onRequestCloseRef = useLatestRef(onRequestClose);
+  const canRequestClose = onRequestClose !== null;
+
+  const requestClose = useMemo(
+    () => (canRequestClose ? () => onRequestCloseRef.current?.() : null),
+    [canRequestClose, onRequestCloseRef],
+  );
+
   const navigateInPane = useCallback(
-    (thread: ThreadRoutePathArgs) => onNavigateInPane(paneId, content, thread),
+    (thread: ThreadRoutePathArgs, options?: PaneNavigationOptions) =>
+      onNavigateInPane(paneId, content, thread, options),
     [content, onNavigateInPane, paneId],
   );
+
   if (content.kind === "thread" || content.kind === "new-thread") {
     return (
       <DefaultPaneContextProvider
-        onRequestClose={onRequestClose}
+        onRequestClose={requestClose}
         navigateInPane={navigateInPane}
       >
         {content.kind === "thread" ? (
@@ -1158,16 +1359,20 @@ function StandalonePaneContent({
       </DefaultPaneContextProvider>
     );
   }
+
   if (content.kind === "plugin-detail") {
     return <LazyPluginDetailPaneView pluginId={content.pluginId} />;
   }
+
   const panelEntry = navPanelChrome.find(
     (candidate) =>
       candidate.chrome.pluginId === content.pluginId &&
       candidate.chrome.path === content.panelPath,
   );
+
   const panel = panelEntry?.panel ?? undefined;
   const panelChrome = panelEntry?.chrome;
+
   const body = (
     <PluginPanelView
       pluginId={content.pluginId}
@@ -1175,6 +1380,7 @@ function StandalonePaneContent({
       subPath={content.subPath}
     />
   );
+
   const paneActions = onRequestClose ? (
     <Button
       type="button"
@@ -1190,6 +1396,7 @@ function StandalonePaneContent({
       <Icon name="ClosePluginPane" />
     </Button>
   ) : null;
+
   return (
     <PluginPagePanelHost
       flushPageInsets
@@ -1200,20 +1407,21 @@ function StandalonePaneContent({
     >
       {panelChrome ? (
         <div className="flex h-full min-h-0 flex-col">
-          <AppPageHeader
-            center={<PluginPanelHeaderCenter chrome={panelChrome} />}
-            actions={
-              panel ? (
-                <PluginPanelHeaderActions
-                  panel={panel}
-                  paneId={paneId}
-                  subPath={content.subPath}
-                  paneActions={paneActions}
+          <PluginPanelPageHeader
+            center={
+              automationBreadcrumbs ? (
+                <AppBreadcrumbs
+                  breadcrumbs={automationBreadcrumbs}
+                  usesDesktopChrome={shouldUseMacosDesktopChrome(desktopInfo)}
                 />
               ) : (
-                paneActions
+                <PluginPanelHeaderCenter chrome={panelChrome} />
               )
             }
+            panel={panel}
+            paneId={paneId}
+            subPath={content.subPath}
+            paneActions={paneActions}
           />
           <div className="flex min-h-0 flex-1 flex-col p-4 md:p-5">{body}</div>
         </div>
@@ -1240,16 +1448,18 @@ function NonThreadPaneContent({
   ownsWindowTopLeft: boolean;
 }) {
   const navPanelChrome = usePluginNavPanelChrome();
-  const resourceRouteLabel = useAtomValue(resourceRouteLabelAtom);
   const dimsInactiveSplits = useAtomValue(dimInactiveSplitsAtom);
+
   const { reservesWindowPanelToggle, isFocused } = useOptionalPaneContext() ?? {
     reservesWindowPanelToggle: false,
     isFocused: true,
   };
+
   const hostLayout = useContext(SecondaryPanelHostLayoutContext);
   const showsWindowPanelToggle = hostLayout?.pinsCornerToggle === true;
-  const [desktopInfo] = useState(getBbDesktopInfo);
+  const [desktopInfo] = useState(getOmnyoDesktopInfo);
   const usesDesktopChrome = shouldUseMacosDesktopChrome(desktopInfo);
+
   const panelEntry =
     content.kind === "plugin-panel"
       ? navPanelChrome.find(
@@ -1258,18 +1468,19 @@ function NonThreadPaneContent({
             candidate.chrome.path === content.panelPath,
         )
       : undefined;
+
   const panel = panelEntry?.panel ?? undefined;
   const panelChrome = panelEntry?.chrome;
-  const automationBreadcrumbs =
-    content.kind === "plugin-panel"
-      ? resolveAutomationBreadcrumbs(
-          paneContentRoute(content),
-          isFocused ? resourceRouteLabel : null,
-        )
-      : null;
+
+  const automationBreadcrumbs = usePluginPanelAutomationBreadcrumbs(
+    content,
+    isFocused,
+  );
+
   const label =
     panelChrome?.title ??
     (content.kind === "plugin-detail" ? "Extension" : "New thread");
+
   const handlePointerDown = (event: ReactPointerEvent) => {
     if (
       event.target instanceof Element &&
@@ -1277,8 +1488,10 @@ function NonThreadPaneContent({
     ) {
       return;
     }
+
     if (event.button === 0) beginPaneDrag?.(event, label);
   };
+
   const paneActions = (
     <>
       <PaneMaximizeButton />
@@ -1305,6 +1518,7 @@ function NonThreadPaneContent({
       ) : null}
     </>
   );
+
   const actions = (
     <>
       {panel ? (
@@ -1329,7 +1543,23 @@ function NonThreadPaneContent({
         !isBoundedPane && content.kind === "new-thread" && "-m-4 md:-m-5",
       )}
     >
-      {isBoundedPane || panel ? (
+      {!isBoundedPane && panel ? (
+        <PluginPanelPageHeader
+          center={
+            automationBreadcrumbs ? (
+              <AppBreadcrumbs
+                breadcrumbs={automationBreadcrumbs}
+                usesDesktopChrome={usesDesktopChrome}
+              />
+            ) : panelChrome ? (
+              <PluginPanelHeaderCenter chrome={panelChrome} />
+            ) : null
+          }
+          panel={panel}
+          subPath={content.kind === "plugin-panel" ? content.subPath : ""}
+          paneActions={paneActions}
+        />
+      ) : isBoundedPane ? (
         <AppPageHeader
           isWindowDragRegion={isTopRow}
           ownsWindowTopLeft={ownsWindowTopLeft}
@@ -1431,16 +1661,20 @@ interface FrozenTimelineRow {
 
 function findVerticalScrollViewport(element: HTMLElement): HTMLElement | null {
   let candidate = element.parentElement;
+
   while (candidate !== null) {
     const overflowY = window.getComputedStyle(candidate).overflowY;
+
     if (
       (overflowY === "auto" || overflowY === "scroll") &&
       candidate.scrollHeight > candidate.clientHeight
     ) {
       return candidate;
     }
+
     candidate = candidate.parentElement;
   }
+
   return null;
 }
 
@@ -1452,22 +1686,28 @@ function freezeOffscreenTimelineRows(
     ...previous.querySelectorAll<HTMLElement>("[data-timeline-row-id]"),
     ...next.querySelectorAll<HTMLElement>("[data-timeline-row-id]"),
   ];
+
   const frozenRows: FrozenTimelineRow[] = [];
   const viewportRects = new Map<HTMLElement, DOMRect>();
 
   for (const row of rows) {
     const viewport = findVerticalScrollViewport(row);
+
     if (viewport === null) continue;
     const rowRect = row.getBoundingClientRect();
     let viewportRect = viewportRects.get(viewport);
+
     if (viewportRect === undefined) {
       viewportRect = viewport.getBoundingClientRect();
       viewportRects.set(viewport, viewportRect);
     }
+
     const overscan = viewportRect.height;
+
     const isOffscreen =
       rowRect.bottom < viewportRect.top - overscan ||
       rowRect.top > viewportRect.bottom + overscan;
+
     if (!isOffscreen || rowRect.height <= 0) continue;
     frozenRows.push({
       containIntrinsicBlockSize: row.style.containIntrinsicBlockSize,
@@ -1516,22 +1756,27 @@ function SplitDivider({
       finishResizeRef.current?.();
       const hitTarget = event.currentTarget;
       const divider = hitTarget.parentElement;
+
       if (!(divider instanceof HTMLDivElement)) {
         return;
       }
+
       const previous = divider.previousElementSibling;
       const next = divider.nextElementSibling;
+
       if (
         !(previous instanceof HTMLElement) ||
         !(next instanceof HTMLElement)
       ) {
         return;
       }
+
       const previousRect = previous.getBoundingClientRect();
       const nextRect = next.getBoundingClientRect();
       const start = horizontal ? previousRect.left : previousRect.top;
       const end = horizontal ? nextRect.right : nextRect.bottom;
       const span = end - start;
+
       if (span <= 0) {
         return;
       }
@@ -1539,11 +1784,13 @@ function SplitDivider({
       hitTarget.setPointerCapture(event.pointerId);
       divider.dataset.dragging = "true";
       const pointerId = event.pointerId;
+
       const snapSession = createSplitResizeSnapSession(
         divider,
         horizontal ? "x" : "y",
         { boundaryIndex, childCount },
       );
+
       const pointerDownPosition = horizontal ? event.clientX : event.clientY;
       snapSession.resolve({ end, pointer: pointerDownPosition, start });
 
@@ -1555,15 +1802,18 @@ function SplitDivider({
       const onMove = (moveEvent: PointerEvent) => {
         if (moveEvent.pointerId !== pointerId) return;
         const pointer = horizontal ? moveEvent.clientX : moveEvent.clientY;
+
         const { fraction } = snapSession.resolve({
           end,
           pointer,
           start,
         });
+
         pendingFraction = fraction;
 
         pair.apply(fraction);
       };
+
       const finish = (commit: boolean) => {
         if (finished) return;
         finished = true;
@@ -1573,29 +1823,38 @@ function SplitDivider({
         hitTarget.removeEventListener("pointerup", onUp);
         hitTarget.removeEventListener("pointercancel", onCancel);
         hitTarget.removeEventListener("lostpointercapture", onLostCapture);
+
         if (hitTarget.hasPointerCapture?.(pointerId)) {
           hitTarget.releasePointerCapture(pointerId);
         }
+
         snapSession.clear();
         restoreTimelineRows();
+
         if (commit && pendingFraction !== null) {
           onResize(pendingFraction);
+
           return;
         }
+
         pair.restore();
       };
+
       const onUp = (upEvent: PointerEvent) => {
         if (upEvent.pointerId !== pointerId) return;
         finish(true);
       };
+
       const onCancel = (cancelEvent: PointerEvent) => {
         if (cancelEvent.pointerId !== pointerId) return;
         finish(false);
       };
+
       const onLostCapture = (lostEvent: PointerEvent) => {
         if (lostEvent.pointerId !== pointerId) return;
         finish(false);
       };
+
       hitTarget.addEventListener("pointermove", onMove);
       hitTarget.addEventListener("pointerup", onUp);
       hitTarget.addEventListener("pointercancel", onCancel);
@@ -1642,22 +1901,28 @@ interface PaneStaleWatcherProps {
 function PaneStaleWatcher({ threadId, onStale }: PaneStaleWatcherProps) {
   const { data: thread, isSuccess, isError, error } = useThread(threadId);
   const hasObservedUnarchived = useRef(false);
+
   const unarchivesInFlight = useIsMutating({
     mutationKey: ["unarchive-thread"],
   });
+
   const archivesInFlight = useIsMutating({
     predicate: (mutation) =>
       mutation.options.meta?.lifecycleOperation === "archive_thread",
   });
+
   const isGone =
-    isError && error instanceof BbHttpError && error.status === 404;
+    isError && error instanceof OmnyoHttpError && error.status === 404;
+
   const isDeleted =
     isSuccess && thread !== undefined && thread.deletedAt !== null;
+
   const isConfirmedArchived =
     isSuccess &&
     thread !== undefined &&
     thread.archivedAt !== null &&
     archivesInFlight === 0;
+
   const isUnarchived =
     isSuccess && thread !== undefined && thread.archivedAt === null;
 
@@ -1669,6 +1934,7 @@ function PaneStaleWatcher({ threadId, onStale }: PaneStaleWatcherProps) {
     if (isUnarchived && unarchivesInFlight === 0) {
       hasObservedUnarchived.current = true;
     }
+
     if (
       isGone ||
       isDeleted ||

@@ -14,6 +14,7 @@ export function readThreadCreationPlacement(
   if (typeof state !== "object" || state === null || !("placement" in state))
     return null;
   const value = state.placement;
+
   if (
     typeof value !== "object" ||
     value === null ||
@@ -21,11 +22,14 @@ export function readThreadCreationPlacement(
     !("pinned" in value)
   )
     return null;
+
   if (typeof value.pinned !== "boolean") return null;
+
   if (
     value.sectionId !== null &&
     (typeof value.sectionId !== "string" || value.sectionId.trim().length === 0)
   )
     return null;
+
   return { sectionId: value.sectionId, pinned: value.pinned };
 }

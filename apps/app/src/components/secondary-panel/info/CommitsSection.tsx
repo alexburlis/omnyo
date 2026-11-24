@@ -1,4 +1,4 @@
-import type { WorkspaceStatus } from "@bb/domain";
+import type { WorkspaceStatus } from "@omnyo/domain";
 import type { WorkspaceChangedFileSelection } from "@/components/workspace/workspace-change-summary";
 import { selectWorkspaceAheadCommits } from "@/components/workspace/workspace-change-summary";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
@@ -30,12 +30,16 @@ export function CommitsSection({
   onOpenChangedFile,
 }: CommitsSectionProps) {
   const commits = selectWorkspaceAheadCommits(workspaceStatus);
+
   const committedFiles = selectChangedFilesSection(
     workspaceStatus,
     "committed",
   );
+
   const collapse = useInfoSectionCollapse("commits");
+
   if (commits.length === 0 && committedFiles === undefined) return null;
+
   return (
     <InfoSection label="Commits" count={commits.length} collapse={collapse}>
       <InfoList
@@ -88,7 +92,7 @@ export function CommitsSection({
         <>
           <InfoSubheading
             label="Files changed"
-            count={committedFiles.files.length}
+            count={committedFiles.stats.fileCount}
             trailing={<ChangedFilesTally section={committedFiles} />}
           />
           <ChangedFilesList

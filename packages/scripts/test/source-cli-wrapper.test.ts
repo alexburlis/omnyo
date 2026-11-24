@@ -11,31 +11,38 @@ interface SourceCliResult {
 }
 
 const testDir = dirname(fileURLToPath(import.meta.url));
+
 const repoRoot = resolve(testDir, "..", "..", "..");
+
 const contextEnvKeys: string[] = [
-  "BB_ENVIRONMENT_ID",
-  "BB_PROJECT_ID",
-  "BB_THREAD_ID",
-  "BB_THREAD_STORAGE",
+  "OMNYO_ENVIRONMENT_ID",
+  "OMNYO_PROJECT_ID",
+  "OMNYO_THREAD_ID",
+  "OMNYO_THREAD_STORAGE",
 ];
+
 const spawnedChildren: ChildProcessWithoutNullStreams[] = [];
 
 function buildCleanEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
+
   for (const key of contextEnvKeys) {
     delete env[key];
   }
-  env.BB_SERVER_URL = "http://127.0.0.1:9";
+
+  env.OMNYO_SERVER_URL = "http://127.0.0.1:9";
+
   return env;
 }
 
-function runSourceBb(args: string[]): Promise<SourceCliResult> {
+function runSourceCli(args: string[]): Promise<SourceCliResult> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn("pnpm", ["--silent", "bb", ...args], {
+    const child = spawn("pnpm", ["--silent", "omnyo", ...args], {
       cwd: repoRoot,
       env: buildCleanEnv(),
       shell: process.platform === "win32",
     });
+
     spawnedChildren.push(child);
 
     const stdoutChunks: string[] = [];
@@ -71,7 +78,7 @@ afterEach(() => {
 
 describe("source CLI wrapper", () => {
   it("keeps --json stdout parseable when the prepare build writes progress", async () => {
-    const result = await runSourceBb(["status", "--json"]);
+    const result = await runSourceCli(["status", "--json"]);
 
     if (result.code !== 0 || result.signal !== null) {
       throw new Error(
@@ -84,6 +91,7 @@ describe("source CLI wrapper", () => {
         ].join("\n"),
       );
     }
+
     expect(result.stdout).not.toContain("Packages in scope");
     expect(result.stdout.trimStart().startsWith("{")).toBe(true);
 

@@ -1,100 +1,46 @@
 import { describe, expect, it } from "vitest";
 import {
-  createDesktopUpdateFeedUrl,
+  createDesktopReleaseInfo,
   resolveDesktopUpdateSupport,
 } from "../src/desktop-update-provider.js";
+import { createDesktopReleaseConfig } from "../scripts/desktop-release-channel.mjs";
 
-describe("desktop update feed url", () => {
-  it("gives each platform its own feed file inside one release tag", () => {
-    expect(createDesktopUpdateFeedUrl("macos")).toBe(
-      "https://github.com/get-bb/bb/releases/download/desktop-latest/desktop-version.json",
-    );
-    expect(createDesktopUpdateFeedUrl("linux")).toBe(
-      "https://github.com/get-bb/bb/releases/download/desktop-latest/desktop-version-linux.json",
-    );
-    expect(createDesktopUpdateFeedUrl("windows")).toBe(
-      "https://github.com/get-bb/bb/releases/download/desktop-latest/desktop-version-windows.json",
-    );
-  });
-});
-
-const APP_IMAGE_PATH = "/home/user/Apps/bb-0.37.0-x86_64.AppImage";
-const alwaysReplaceable = () => true;
-const neverReplaceable = () => false;
-
-describe("desktop update support", () => {
-  it("enables both update paths on macOS", () => {
-    expect(
-      resolveDesktopUpdateSupport({
-        canReplaceAppImage: neverReplaceable,
-        env: {},
-        platform: "macos",
-      }),
-    ).toEqual({ autoUpdate: true, versionCheck: true });
-  });
-
-  it("checks for and installs updates on Windows", () => {
-    expect(
-      resolveDesktopUpdateSupport({
-        canReplaceAppImage: alwaysReplaceable,
-        env: { APPIMAGE: APP_IMAGE_PATH },
-        platform: "windows",
-      }),
-    ).toEqual({ autoUpdate: true, versionCheck: true });
-  });
-
-  it("installs updates on Linux only inside an AppImage", () => {
-    expect(
-      resolveDesktopUpdateSupport({
-        canReplaceAppImage: alwaysReplaceable,
-        env: { APPIMAGE: APP_IMAGE_PATH },
-        platform: "linux",
-      }),
-    ).toEqual({ autoUpdate: true, versionCheck: true });
-    expect(
-      resolveDesktopUpdateSupport({
-        canReplaceAppImage: alwaysReplaceable,
-        env: {},
-        platform: "linux",
-      }),
-    ).toEqual({ autoUpdate: false, versionCheck: true });
-    expect(
-      resolveDesktopUpdateSupport({
-        canReplaceAppImage: alwaysReplaceable,
-        env: { APPIMAGE: "  " },
-        platform: "linux",
-      }),
-    ).toEqual({ autoUpdate: false, versionCheck: true });
-  });
-
-  it("refuses to install into an AppImage it cannot replace", () => {
-    const checked: Array<string> = [];
-
-    expect(
-      resolveDesktopUpdateSupport({
-        canReplaceAppImage: (path) => {
-          checked.push(path);
-          return false;
-        },
-        env: { APPIMAGE: APP_IMAGE_PATH },
-        platform: "linux",
-      }),
-    ).toEqual({ autoUpdate: false, versionCheck: true });
-    expect(checked).toEqual([APP_IMAGE_PATH]);
-  });
-
-  it("does not consult the filesystem on macOS", () => {
-    let consulted = false;
-
-    resolveDesktopUpdateSupport({
-      canReplaceAppImage: () => {
-        consulted = true;
-        return true;
-      },
-      env: { APPIMAGE: APP_IMAGE_PATH },
-      platform: "macos",
+describe("private desktop update support", () => {
+  it("disables binary installation and official version checks", () => {
+    expect(resolveDesktopUpdateSupport()).toEqual({
+      autoUpdate: false,
+      versionCheck: false,
     });
+  });
+  it("enables only configured macOS native updates and keeps the JSON version checker disabled", () => {
+    const feedConfig = {
+      provider: "generic" as const,
+      channel: "latest" as const,
+      url: "https://fixture.invalid/",
+    };
 
-    expect(consulted).toBe(false);
+    expect(
+      resolveDesktopUpdateSupport({ feedConfig, platform: "macos" }),
+    ).toEqual({ autoUpdate: true, versionCheck: false });
+    expect(
+      resolveDesktopUpdateSupport({ feedConfig, platform: "linux" }),
+    ).toEqual({ autoUpdate: false, versionCheck: false });
+  });
+  it("shows Omnyo while keeping the existing Omnyo Private profile identity", () => {
+    expect(createDesktopReleaseInfo("latest")).toMatchObject({
+      applicationName: "Omnyo",
+      profileName: "Omnyo Private",
+    });
+    expect(createDesktopReleaseInfo("nightly")).toMatchObject({
+      applicationName: "Omnyo Nightly",
+      profileName: "Omnyo Private Nightly",
+    });
+    expect(createDesktopReleaseConfig("latest", "macos")).toMatchObject({
+      appId: "dev.omnyo.private",
+      applicationName: "Omnyo",
+      profileName: "Omnyo Private",
+      artifactName: "omnyo-private-${version}-${arch}.${ext}",
+      updateMetadataFileNames: { macos: "latest-mac.yml" },
+    });
   });
 });

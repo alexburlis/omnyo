@@ -6,15 +6,18 @@ import {
   type WorkspaceOpenTarget,
   type WorkspaceOpenTargetCapabilities,
   type WorkspaceOpenTargetId,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import { createNullableLocalStorageEnumStorage } from "./browser-storage";
 
-export const WORKSPACE_OPEN_TARGET_STORAGE_KEY = "bb.workspaceOpenTarget";
-export const FILE_OPEN_TARGET_STORAGE_KEY = "bb.fileOpenTarget";
+export const WORKSPACE_OPEN_TARGET_STORAGE_KEY = "omnyo.workspaceOpenTarget";
+
+export const FILE_OPEN_TARGET_STORAGE_KEY = "omnyo.fileOpenTarget";
 
 export type StoredWorkspaceOpenTargetPreference = WorkspaceOpenTargetId | null;
+
 export type WorkspaceOpenTargetCapability =
   keyof WorkspaceOpenTargetCapabilities;
+
 export type WorkspaceOpenTargetContextKind = "local" | "remote-ssh";
 
 const NATIVE_VIEWABLE_FILE_EXTENSIONS = new Set([
@@ -122,9 +125,11 @@ function resolveDefaultAppWorkspaceOpenTarget(
 function getLowercaseFileExtension(path: string): string {
   const lastSegment = path.split(/[\\/]/u).at(-1) ?? path;
   const dotIndex = lastSegment.lastIndexOf(".");
+
   if (dotIndex <= 0 || dotIndex === lastSegment.length - 1) {
     return "";
   }
+
   return lastSegment.slice(dotIndex).toLowerCase();
 }
 
@@ -139,21 +144,30 @@ function rankWorkspaceOpenFileTarget(
 
   if (args.lineNumber !== null) {
     if (kind === "editor") return 0;
+
     if (kind === "terminal") return 1;
+
     return 10;
   }
 
   if (isNativeViewablePath(args.path)) {
     if (kind === "native-app") return 0;
+
     if (kind === "default-app") return 1;
+
     if (kind === "editor") return 5;
+
     if (kind === "terminal") return 10;
+
     return 20;
   }
 
   if (kind === "editor") return 0;
+
   if (kind === "terminal") return 5;
+
   if (kind === "default-app" || kind === "native-app") return 10;
+
   return 20;
 }
 
@@ -173,6 +187,7 @@ function resolveRankedWorkspaceOpenFileFallback(
       target,
     }),
   );
+
   if (candidates.length === 0) {
     return null;
   }
@@ -223,10 +238,12 @@ export function resolvePreferredWorkspaceOpenTarget(
   args: ResolvePreferredWorkspaceOpenTargetArgs,
 ): WorkspaceOpenTarget | null {
   const contextKind = args.contextKind ?? "local";
+
   if (args.preferredTargetId !== null) {
     const preferredTarget = args.targets.find(
       (target) => target.id === args.preferredTargetId,
     );
+
     if (
       preferredTarget &&
       supportsWorkspaceOpenTargetCapability({
@@ -237,12 +254,14 @@ export function resolvePreferredWorkspaceOpenTarget(
     ) {
       return preferredTarget;
     }
+
     if (!preferredTarget) {
       const defaultAppTarget = resolveDefaultAppWorkspaceOpenTarget(
         args.capability,
         contextKind,
         args.targets,
       );
+
       if (defaultAppTarget) {
         return defaultAppTarget;
       }
@@ -260,10 +279,12 @@ export function resolvePreferredWorkspaceOpenFileTarget(
   args: ResolvePreferredWorkspaceOpenFileTargetArgs,
 ): WorkspaceOpenTarget | null {
   const contextKind = args.contextKind ?? "local";
+
   if (args.preferredTargetId !== null) {
     const preferredTarget = args.targets.find(
       (target) => target.id === args.preferredTargetId,
     );
+
     if (
       preferredTarget &&
       supportsWorkspaceOpenTargetCapability({
@@ -274,12 +295,14 @@ export function resolvePreferredWorkspaceOpenFileTarget(
     ) {
       return preferredTarget;
     }
+
     if (!preferredTarget) {
       const defaultAppTarget = resolveDefaultAppWorkspaceOpenTarget(
         "openFile",
         contextKind,
         args.targets,
       );
+
       if (defaultAppTarget) {
         return defaultAppTarget;
       }
@@ -308,6 +331,7 @@ function useOverrideUnknownOpenTargetPreference(
     ) {
       return;
     }
+
     setPreferredTargetId("default-app");
   }, [preferredTargetId, setPreferredTargetId, targets]);
 }
@@ -318,11 +342,13 @@ export function useWorkspaceOpenTargetPreference(
   const [preferredTargetId, setPreferredTargetId] = useAtom(
     workspaceOpenTargetPreferenceAtom,
   );
+
   useOverrideUnknownOpenTargetPreference(
     preferredTargetId,
     setPreferredTargetId,
     targets,
   );
+
   return [preferredTargetId, setPreferredTargetId] as const;
 }
 
@@ -330,10 +356,12 @@ export function useFileOpenTargetPreference(targets?: WorkspaceOpenTarget[]) {
   const [preferredTargetId, setPreferredTargetId] = useAtom(
     fileOpenTargetPreferenceAtom,
   );
+
   useOverrideUnknownOpenTargetPreference(
     preferredTargetId,
     setPreferredTargetId,
     targets,
   );
+
   return [preferredTargetId, setPreferredTargetId] as const;
 }

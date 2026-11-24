@@ -14,6 +14,7 @@ const editorContext = {
 
 function stateFromJson(docJson: unknown, selectionPosition: number) {
   const doc = Node.fromJSON(schema, docJson);
+
   return EditorState.create({
     schema,
     doc,
@@ -35,10 +36,12 @@ describe("createPromptParagraphNewlineTransaction", () => {
       },
       9,
     );
+
     const transaction = createPromptParagraphNewlineTransaction({
       state,
       editor: editorContext,
     });
+
     expect(transaction).not.toBeNull();
     const nextState = state.apply(transaction!);
     expect(promptEditorValueFromDoc(nextState.doc)).toEqual({

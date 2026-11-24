@@ -1,5 +1,5 @@
-import { pendingInteractionSchema, type PendingInteraction } from "@bb/domain";
-import type { PendingInteractionRow } from "@bb/db";
+import { pendingInteractionSchema, type PendingInteraction } from "@omnyo/domain";
+import type { PendingInteractionRow } from "@omnyo/db";
 import { ApiError } from "../../errors.js";
 
 export class PendingInteractionSerializationError extends ApiError {
@@ -22,9 +22,11 @@ function parseStoredPendingInteractionJson(
   field: "payload" | "resolution",
 ): unknown {
   const value = field === "payload" ? row.payload : row.resolution;
+
   if (value === null) {
     throw new PendingInteractionSerializationError(row.id, field);
   }
+
   try {
     return JSON.parse(value);
   } catch {
@@ -36,6 +38,7 @@ export function toPendingInteraction(
   row: PendingInteractionRow,
 ): PendingInteraction {
   const payload = parseStoredPendingInteractionJson(row, "payload");
+
   const resolution =
     row.resolution === null
       ? null

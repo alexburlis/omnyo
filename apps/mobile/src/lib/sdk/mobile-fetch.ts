@@ -27,15 +27,20 @@ export async function readServerMovedResponse(
 ): Promise<ServerMovedResponse | null> {
   if (response.status !== SERVER_MOVED_STATUS) return null;
   let body: unknown;
+
   try {
     body = await response.clone().json();
   } catch {
     return null;
   }
+
   const parsed = serverMovedBodySchema.safeParse(body);
+
   if (!parsed.success) return null;
   const validation = validateDirectServerUrl(parsed.data.details.serverUrl);
+
   if (!validation.ok) return null;
+
   return {
     serverUrl: validation.serverUrl,
     toHostName: parsed.data.details.toHostName,
@@ -53,13 +58,17 @@ export function createMobileFetch(
       MOBILE_APP_SURFACE_HEADER.value,
     );
     const response = await baseFetch(input, { ...init, headers });
+
     if (response.status === 401 || response.status === 403) {
       options.onAuthFailure?.(response.status);
     }
+
     if (options.onServerMoved && response.status === SERVER_MOVED_STATUS) {
       const moved = await readServerMovedResponse(response);
+
       if (moved) options.onServerMoved(moved);
     }
+
     return response;
   };
 }

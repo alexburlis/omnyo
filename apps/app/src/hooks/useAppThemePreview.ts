@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { AppTheme } from "@bb/domain";
+import type { AppTheme } from "@omnyo/domain";
 import { systemThemeQueryOptions } from "@/hooks/queries/system-queries";
 import { refreshThemeColorMeta } from "@/hooks/useTheme";
 import {
@@ -52,10 +52,13 @@ export function useAppThemePreview(): AppThemePreview {
       previewTheme(themeId) {
         requestRef.current += 1;
         const request = requestRef.current;
+
         if (themeId === null) {
           clearPreview();
+
           return;
         }
+
         void queryClient.fetchQuery(systemThemeQueryOptions(themeId)).then(
           (theme) => {
             if (requestRef.current === request) showPreview(theme);

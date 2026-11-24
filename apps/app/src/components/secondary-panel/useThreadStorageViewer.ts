@@ -12,6 +12,7 @@ export function useThreadStorageViewer({
   threadId,
 }: UseThreadStorageViewerParams) {
   const hasThread = Boolean(threadId);
+
   const {
     data: threadStorageFiles,
     isLoading: isThreadStorageFilesLoading,
@@ -23,6 +24,7 @@ export function useThreadStorageViewer({
       enabled: hasThread && fileListEnabled,
     },
   );
+
   return {
     isThreadStorageFilesLoading,
     threadStorageFilesError:
@@ -45,6 +47,7 @@ export function shouldLoadThreadStorageFileList({
   if (!hasThread) {
     return false;
   }
+
   return (
     isSecondaryPanelOpen ||
     secondaryTabs.some((tab) => tab.kind === "thread-storage-file-preview")

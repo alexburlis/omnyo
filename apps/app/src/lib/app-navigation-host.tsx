@@ -1,10 +1,11 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type {
+  experimental_AppNavigate,
   ExperimentalAppPanelSurface,
   ExperimentalFileOpenOptions,
   JsonValue,
-} from "@get-bb/plugin-sdk";
-import type { TerminalSession } from "@bb/server-contract";
+} from "@omnyo/plugin-sdk";
+import type { TerminalSession } from "@omnyo/server-contract";
 import type { FileOpenerOverride } from "@/lib/plugin-slot-resolvers";
 
 interface AppUrlOpenIntent {
@@ -26,7 +27,12 @@ export interface AppFixedTabOpenIntent {
   target?: JsonValue;
 }
 
+type OpenProjectCreator = NonNullable<
+  experimental_AppNavigate["experimental_openProjectCreator"]
+>;
+
 interface AppNavigationHostCapabilities {
+  openProjectCreator?: OpenProjectCreator;
   openFileExternally?: (intent: ExperimentalFileOpenOptions) => boolean;
   openFilePreview?: (intent: AppFilePreviewIntent) => boolean;
   openFixedTab?: (intent: AppFixedTabOpenIntent) => boolean;
@@ -35,6 +41,7 @@ interface AppNavigationHostCapabilities {
 }
 
 interface ResolvedAppNavigationHostCapabilities {
+  openProjectCreator: OpenProjectCreator;
   openFileExternally: (intent: ExperimentalFileOpenOptions) => boolean;
   openFilePreview: (intent: AppFilePreviewIntent) => boolean;
   openFixedTab: (intent: AppFixedTabOpenIntent) => boolean;
@@ -43,7 +50,9 @@ interface ResolvedAppNavigationHostCapabilities {
 }
 
 const rejectNavigationIntent = () => false;
+
 const DEFAULT_APP_NAVIGATION_HOST: ResolvedAppNavigationHostCapabilities = {
+  openProjectCreator: rejectNavigationIntent,
   openFileExternally: rejectNavigationIntent,
   openFilePreview: rejectNavigationIntent,
   openFixedTab: rejectNavigationIntent,
@@ -64,8 +73,11 @@ export function AppNavigationHostProvider({
   children: ReactNode;
 }) {
   const parent = useContext(AppNavigationHostContext);
+
   const value = useMemo<ResolvedAppNavigationHostCapabilities>(
     () => ({
+      openProjectCreator:
+        capabilities.openProjectCreator ?? parent.openProjectCreator,
       openFileExternally:
         capabilities.openFileExternally ?? parent.openFileExternally,
       openFilePreview: capabilities.openFilePreview ?? parent.openFilePreview,
@@ -74,11 +86,13 @@ export function AppNavigationHostProvider({
       openUrl: capabilities.openUrl ?? parent.openUrl,
     }),
     [
+      capabilities.openProjectCreator,
       capabilities.openFileExternally,
       capabilities.openFilePreview,
       capabilities.openFixedTab,
       capabilities.openTerminal,
       capabilities.openUrl,
+      parent.openProjectCreator,
       parent.openFileExternally,
       parent.openFilePreview,
       parent.openFixedTab,
@@ -86,6 +100,7 @@ export function AppNavigationHostProvider({
       parent.openUrl,
     ],
   );
+
   return (
     <AppNavigationHostContext.Provider value={value}>
       {children}

@@ -3,8 +3,8 @@ import {
   FILE_LIST_EXCLUDE_NAME_MAX_LENGTH,
   FILE_LIST_EXCLUDE_NAMES_MAX,
   FILE_LIST_LIMIT_MAX,
-} from "@bb/domain";
-import type { HostDaemonOnlineRpcResultByType } from "@bb/host-daemon-contract";
+} from "@omnyo/domain";
+import type { HostDaemonOnlineRpcResultByType } from "@omnyo/host-daemon-contract";
 
 export const hostFileReadRequestSchema = z
   .object({
@@ -13,6 +13,7 @@ export const hostFileReadRequestSchema = z
     rootPath: z.string().min(1).optional(),
   })
   .strict();
+
 export type HostFileReadRequest = z.infer<typeof hostFileReadRequestSchema>;
 
 export const hostFileWriteRequestSchema = z
@@ -27,6 +28,7 @@ export const hostFileWriteRequestSchema = z
     mode: z.number().int().min(0).max(0o777).optional(),
   })
   .strict();
+
 export type HostFileWriteRequest = z.infer<typeof hostFileWriteRequestSchema>;
 
 const fileListExcludeNamesRequestSchema = z
@@ -36,6 +38,7 @@ const fileListExcludeNamesRequestSchema = z
 
 export const hostFileListRequestSchema = z
   .object({
+    discovery: z.literal("icons").optional(),
     hostId: z.string().min(1).optional(),
     path: z.string().min(1),
     query: z.string().optional(),
@@ -44,6 +47,7 @@ export const hostFileListRequestSchema = z
     excludeNames: fileListExcludeNamesRequestSchema,
   })
   .strict();
+
 export type HostFileListRequest = z.infer<typeof hostFileListRequestSchema>;
 
 export const hostPathListRequestSchema = z
@@ -58,6 +62,7 @@ export const hostPathListRequestSchema = z
     excludeNames: fileListExcludeNamesRequestSchema,
   })
   .strict();
+
 export type HostPathListRequest = z.infer<typeof hostPathListRequestSchema>;
 
 export const hostMkdirRequestSchema = z
@@ -68,6 +73,7 @@ export const hostMkdirRequestSchema = z
     recursive: z.boolean().optional(),
   })
   .strict();
+
 export type HostMkdirRequest = z.infer<typeof hostMkdirRequestSchema>;
 
 export const hostMovePathRequestSchema = z
@@ -78,6 +84,7 @@ export const hostMovePathRequestSchema = z
     rootPath: z.string().min(1).optional(),
   })
   .strict();
+
 export type HostMovePathRequest = z.infer<typeof hostMovePathRequestSchema>;
 
 export const hostRemovePathRequestSchema = z
@@ -88,6 +95,7 @@ export const hostRemovePathRequestSchema = z
     recursive: z.boolean().optional(),
   })
   .strict();
+
 export type HostRemovePathRequest = z.infer<typeof hostRemovePathRequestSchema>;
 
 export const createFilePreviewRequestSchema = z
@@ -97,9 +105,11 @@ export const createFilePreviewRequestSchema = z
     ttlMs: z.number().int().min(60_000).max(3_600_000).optional(),
   })
   .strict();
+
 export type CreateFilePreviewRequest = z.infer<
   typeof createFilePreviewRequestSchema
 >;
+
 export interface CreateFilePreviewResponse {
   baseUrl: string;
   expiresAtMs: number;
@@ -109,14 +119,20 @@ export type HostFileReadResponse = Exclude<
   HostDaemonOnlineRpcResultByType["host.read_file"],
   { notModified: true }
 >;
+
 export type HostFileWriteResponse =
   HostDaemonOnlineRpcResultByType["host.write_file"];
+
 export type HostFileListResponse =
   HostDaemonOnlineRpcResultByType["host.list_files"];
+
 export type HostPathListResponse =
   HostDaemonOnlineRpcResultByType["host.list_paths"];
+
 export type HostMkdirResponse = HostDaemonOnlineRpcResultByType["host.mkdir"];
+
 export type HostMovePathResponse =
   HostDaemonOnlineRpcResultByType["host.move_path"];
+
 export type HostRemovePathResponse =
   HostDaemonOnlineRpcResultByType["host.remove_path"];

@@ -1,19 +1,17 @@
-import { randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { Readable } from "node:stream";
-import { getExperiments } from "@bb/db";
-import type { LastServerMove } from "@bb/domain";
+import { PassThrough, Readable } from "node:stream";
+import { getExperiments } from "@omnyo/db";
+import type { LastServerMove } from "@omnyo/domain";
 import {
   readLastServerMoveFile,
+  type ServerArchiveDigest,
   writeLastServerMoveFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import {
   publicApiRoutes,
   typedRoutes,
   type PublicApiSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { Hono } from "hono";
 import { ApiError } from "../errors.js";
 import {
@@ -29,14 +27,21 @@ import {
   isServerMoveInFlight,
   type ServerMoveCoordinator,
 } from "../services/server-move/coordinator.js";
-import { exportServerArchive } from "../services/server-move/export.js";
+import { streamServerExport } from "../services/server-move/export.js";
+import { SERVER_EXPORT_FREE_SPACE } from "../services/server-move/export-snapshot.js";
 import type { AppDeps } from "../types.js";
 
 const SERVER_EXPORT_WORK_DIR_NAME = "server-export";
+
+const CLIENT_CLOSED_REQUEST_STATUS = 499;
+
 const DELETE_OLD_SERVER_COPY_TIMEOUT_MS = 5 * 60_000;
 
 function assertServerManagementAllowed(context: GateAuthHeaderReader): void {
-  if (getGateAuthKind(context) === "machine") {
+  if (
+    getGateAuthKind(context) === "machine" ||
+    context.req.header("authorization") !== undefined
+  ) {
     throw new ApiError(
       403,
       "machine_host_management_forbidden",
@@ -46,7 +51,7 @@ function assertServerManagementAllowed(context: GateAuthHeaderReader): void {
 }
 
 export const SERVER_MOVE_EXPERIMENT_DISABLED_MESSAGE =
-  'Moving the server is off. Turn on the "Server move" experiment in Settings → Experiments, or run bb settings experiment serverMove true, then try again.';
+  "Moving the server is off. Run omnyo settings experiment serverMove true, then try again.";
 
 function assertServerMoveExperimentEnabled(deps: AppDeps): void {
   if (!getExperiments(deps.db).serverMove) {
@@ -62,15 +67,18 @@ export async function readLastServerMove(
   dataDir: string,
 ): Promise<LastServerMove | null> {
   const file = await readLastServerMoveFile(dataDir);
+
   if (file === null) {
     return null;
   }
+
   const { version: _version, ...lastMove } = file;
+
   return lastMove;
 }
 
 function serverExportFileName(now: Date): string {
-  return `bb-server-${now.toISOString().slice(0, 10)}.tar.gz`;
+  return `omnyo-server-${now.toISOString().slice(0, 10)}.tar.gz`;
 }
 
 export function registerServerMoveRoutes(
@@ -82,36 +90,43 @@ export function registerServerMoveRoutes(
     onValidationError: (message) =>
       new ApiError(400, "invalid_request", message),
   });
+
   const routes = publicApiRoutes.server;
 
   post(routes.checkMove, async (context, payload) => {
     assertServerManagementAllowed(context);
     assertServerMoveExperimentEnabled(deps);
+
     return context.json(await serverMove.check(payload));
   });
 
   post(routes.startMove, async (context, payload) => {
     assertServerManagementAllowed(context);
     assertServerMoveExperimentEnabled(deps);
+
     return context.json(await serverMove.start(payload));
   });
 
   get(routes.moveStatus, async (context) => {
     assertServerManagementAllowed(context);
+
     return context.json({
       move: serverMove.getStatus(),
       lastMove: await readLastServerMove(deps.config.dataDir),
     });
   });
 
-  post(routes.cancelMove, (context) => {
+  post(routes.cancelMove, async (context) => {
     assertServerManagementAllowed(context);
-    return context.json(serverMove.cancel());
+
+    return context.json(await serverMove.cancel());
   });
 
   post(routes.export, async (context) => {
+    const { signal } = context.req.raw;
     assertServerManagementAllowed(context);
     assertServerMoveExperimentEnabled(deps);
+
     if (isServerMoveInFlight(serverMove.getStatus())) {
       throw new ApiError(
         409,
@@ -119,50 +134,62 @@ export function registerServerMoveRoutes(
         "The server can't be exported while it is moving",
       );
     }
+
     const now = new Date();
     const fileName = serverExportFileName(now);
-    const workDir = join(
-      deps.config.dataDir,
-      SERVER_EXPORT_WORK_DIR_NAME,
-      randomUUID(),
-    );
-    const removeWorkDir = () =>
-      rm(workDir, { force: true, recursive: true }).catch((error: unknown) => {
-        deps.logger.warn(
-          { err: error, workDir },
-          "Server export could not remove its work directory",
-        );
-      });
-    let archive: Awaited<ReturnType<typeof exportServerArchive>>;
-    try {
-      archive = await exportServerArchive({
-        appVersion: deps.config.appVersion,
-        dataDir: deps.config.dataDir,
-        db: deps.db,
-        fileName,
-        logger: deps.logger,
-        now: now.getTime(),
-        sourceServerHostId: readPrimaryHostIdFromDataDir({
+    const body = new PassThrough();
+
+    const archive = await new Promise<ServerArchiveDigest | null>(
+      (resolve, reject) => {
+        let measured = false;
+
+        void streamServerExport({
+          appVersion: deps.config.appVersion,
           dataDir: deps.config.dataDir,
-        }),
-        workDir,
-      });
-    } catch (error) {
-      await removeWorkDir();
-      throw error;
+          db: deps.db,
+          freeSpace: SERVER_EXPORT_FREE_SPACE,
+          logger: deps.logger,
+          now: now.getTime(),
+          onMeasured: (digest) => {
+            measured = true;
+            resolve(digest);
+          },
+          output: body,
+          signal,
+          sourceServerHostId: readPrimaryHostIdFromDataDir({
+            dataDir: deps.config.dataDir,
+          }),
+          vault: deps.vault,
+          workDir: join(deps.config.dataDir, SERVER_EXPORT_WORK_DIR_NAME),
+        }).catch((error: unknown) => {
+          body.destroy();
+
+          if (signal.aborted) {
+            resolve(null);
+          } else if (measured) {
+            deps.logger.warn(
+              { err: error },
+              "Server export stopped while it was streaming",
+            );
+          } else {
+            reject(error);
+          }
+        });
+      },
+    );
+
+    if (archive === null) {
+      return new Response(null, { status: CLIENT_CLOSED_REQUEST_STATUS });
     }
-    const stream = createReadStream(archive.path);
-    stream.once("close", () => {
-      void removeWorkDir();
-    });
-    return new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array>, {
+
+    return new Response(Readable.toWeb(body) as ReadableStream<Uint8Array>, {
       status: 200,
       headers: {
         "cache-control": "no-store",
         "content-disposition": `attachment; filename="${fileName}"`,
         "content-length": String(archive.sizeBytes),
         "content-type": "application/gzip",
-        "x-bb-archive-sha256": archive.sha256,
+        "x-omnyo-archive-sha256": archive.sha256,
       },
     });
   });
@@ -173,6 +200,7 @@ export function registerServerMoveRoutes(
     const hostId = context.req.param("id");
     assertUsableHostId(deps, { hostId });
     const lastMove = await readLastServerMoveFile(deps.config.dataDir);
+
     if (lastMove === null || lastMove.fromHostId !== hostId) {
       throw new ApiError(
         404,
@@ -180,18 +208,22 @@ export function registerServerMoveRoutes(
         "This machine doesn't have an old server copy",
       );
     }
+
     const result = await callHostOnlineRpc(deps, {
       hostId,
       timeoutMs: DELETE_OLD_SERVER_COPY_TIMEOUT_MS,
       command: { type: "server_move.delete_old_copy" },
     });
+
     if (lastMove.oldCopyDeletedAt === null) {
       await writeLastServerMoveFile(deps.config.dataDir, {
         ...lastMove,
         oldCopyDeletedAt: Date.now(),
       });
     }
+
     deps.hub.notifySystem(["server-move-changed"]);
+
     return context.json({ deleted: result.deleted });
   });
 }

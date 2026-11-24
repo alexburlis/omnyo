@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getDesktopBrowserApi } from "@/lib/bb-desktop";
+import { getDesktopBrowserApi } from "@/lib/omnyo-desktop";
 import {
   openUrlByPreference,
   useOpenLinksInAppBrowserPreference,
@@ -37,17 +37,20 @@ export function usePanelBrowser({
 }: UsePanelBrowserArgs): PanelBrowser {
   const [addressFocusRequest, setAddressFocusRequest] =
     useState<BrowserAddressFocusRequest | null>(null);
+
   const [openLinksInAppBrowser] = useOpenLinksInAppBrowserPreference();
 
   const openInAppBrowser = useCallback(
     (url = "") => {
       const tab = openTab({ kind: "browser", url });
+
       if (url.length === 0 && tab?.kind === "browser") {
         setAddressFocusRequest((current) => ({
           requestId: (current?.requestId ?? 0) + 1,
           tabId: tab.id,
         }));
       }
+
       reveal();
     },
     [openTab, reveal],
@@ -81,15 +84,20 @@ export function usePanelBrowser({
     () => new Set(browserTabs.map((tab) => tab.id)),
     [browserTabs],
   );
+
   useEffect(() => {
     const browserApi = getDesktopBrowserApi();
+
     if (browserApi === null) return;
+
     if (browserApi.onScopedOpenTab) {
       return browserApi.onScopedOpenTab(({ tabId, url }) => {
         if (browserTabIds.has(tabId)) openUrl(url);
       });
     }
+
     if (!isFocused) return;
+
     return browserApi.onOpenTab(({ url }) => {
       if (!isRoutePath({ path: url })) openUrl(url);
     });

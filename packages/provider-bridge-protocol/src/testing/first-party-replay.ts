@@ -67,22 +67,26 @@ export function resolveReplayProfile(
       dialect: "json-rpc",
       bridgeFamily: "codex",
       env: ({ replayCommand }) => ({
-        BB_CODEX_BRIDGE_APP_SERVER_COMMAND: replayCommand[0],
-        BB_CODEX_BRIDGE_APP_SERVER_ARGS: JSON.stringify(replayCommand.slice(1)),
+        OMNYO_CODEX_BRIDGE_APP_SERVER_COMMAND: replayCommand[0],
+        OMNYO_CODEX_BRIDGE_APP_SERVER_ARGS: JSON.stringify(
+          replayCommand.slice(1),
+        ),
       }),
     };
   }
+
   if (providerId === "claude-code") {
     return {
       dialect: "claude-cli",
       bridgeFamily: "claude-code",
       env: ({ wrapperPath, stateDir }) => ({
-        BB_CLAUDE_CODE_EXECUTABLE: wrapperPath,
+        OMNYO_CLAUDE_CODE_EXECUTABLE: wrapperPath,
         CLAUDE_CONFIG_DIR: claudeConfigDir(stateDir),
       }),
       prepareState: seedClaudeForkTranscripts,
     };
   }
+
   if (providerId.startsWith("acp-")) {
     return {
       dialect: "json-rpc",
@@ -92,18 +96,20 @@ export function resolveReplayProfile(
         rewriteAcpLaunchSpec(line, replayCommand),
     };
   }
+
   if (providerId === "pi") {
     return {
       dialect: "pi-rpc",
       bridgeFamily: "pi",
       env: ({ replayCommand, stateDir }) => ({
-        BB_PI_BRIDGE_COMMAND: replayCommand[0],
-        BB_PI_BRIDGE_ARGS: JSON.stringify(replayCommand.slice(1)),
-        BB_PI_BRIDGE_SESSION_DIR: piSessionDir(stateDir),
+        OMNYO_PI_BRIDGE_COMMAND: replayCommand[0],
+        OMNYO_PI_BRIDGE_ARGS: JSON.stringify(replayCommand.slice(1)),
+        OMNYO_PI_BRIDGE_SESSION_DIR: piSessionDir(stateDir),
       }),
       prepareState: seedPiSessionFiles,
     };
   }
+
   throw new UnreplayableProviderError(providerId, "no replay profile");
 }
 
@@ -119,14 +125,18 @@ function recordedForkRequestParams(
   recording: BridgeRecording,
 ): Record<string, unknown>[] {
   const forkParams: Record<string, unknown>[] = [];
+
   for (const entry of recording.entries) {
     if (entry.dir !== "runtime→bridge") continue;
     const message = parseWire(entry.line);
+
     if (message === null || message.method !== "thread/fork") continue;
     const params = message.params;
+
     if (typeof params !== "object" || params === null) continue;
     forkParams.push(params as Record<string, unknown>);
   }
+
   return forkParams;
 }
 
@@ -136,8 +146,10 @@ function seedPiSessionFiles(args: {
 }): void {
   const sessionDir = piSessionDir(args.stateDir);
   mkdirSync(sessionDir, { recursive: true });
+
   for (const params of recordedForkRequestParams(args.recording)) {
     const sourceThreadId = params.sourceProviderThreadId;
+
     if (typeof sourceThreadId !== "string") continue;
     writeFileSync(
       join(
@@ -163,15 +175,20 @@ function seedClaudeForkTranscripts(args: {
     "projects",
     claudeProjectDirName(args.workspaceDir),
   );
+
   for (const params of recordedForkRequestParams(args.recording)) {
     const sessionId = params.sourceProviderThreadId;
+
     if (typeof sessionId !== "string") continue;
+
     const checkpointId =
       typeof params.sourceProviderCheckpointId === "string"
         ? params.sourceProviderCheckpointId
         : randomUUID();
+
     const userUuid = randomUUID();
     const timestamp = "2026-01-01T00:00:00.000Z";
+
     const transcript = [
       {
         type: "user",
@@ -195,6 +212,7 @@ function seedClaudeForkTranscripts(args: {
         },
       },
     ];
+
     mkdirSync(projectDir, { recursive: true });
     writeFileSync(
       join(projectDir, `${sessionId}.jsonl`),
@@ -205,19 +223,24 @@ function seedClaudeForkTranscripts(args: {
 
 function rewriteAcpLaunchSpec(line: string, replayCommand: string[]): string {
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(line);
   } catch {
     return line;
   }
+
   if (typeof parsed !== "object" || parsed === null) {
     return line;
   }
+
   const message = parsed as {
     params?: { options?: { providerOptions?: Record<string, unknown> } };
   };
+
   const providerOptions = message.params?.options?.providerOptions;
   const spec = providerOptions?.acpLaunchSpec;
+
   if (
     providerOptions === undefined ||
     typeof spec !== "object" ||
@@ -225,6 +248,7 @@ function rewriteAcpLaunchSpec(line: string, replayCommand: string[]): string {
   ) {
     return line;
   }
+
   const { modelCli: _modelCli, ...rest } = spec as Record<string, unknown>;
   providerOptions.acpLaunchSpec = {
     ...rest,
@@ -232,12 +256,14 @@ function rewriteAcpLaunchSpec(line: string, replayCommand: string[]): string {
     args: replayCommand.slice(1),
     env: {},
   };
+
   return JSON.stringify(parsed);
 }
 
 function parseWire(line: string): { method?: string; params?: unknown } | null {
   try {
     const parsed: unknown = JSON.parse(line);
+
     return typeof parsed === "object" && parsed !== null
       ? (parsed as { method?: string; params?: unknown })
       : null;
@@ -258,6 +284,7 @@ export function resolveFirstPartyBridgeModulePath(
       return candidate;
     }
   }
+
   return null;
 }
 
@@ -277,6 +304,7 @@ export function resolveBridgeLaunch(
   const root = resolve(checkoutRoot);
   const profile = resolveReplayProfile(providerId);
   const defaults = FIRST_PARTY_BRIDGE_MODULES[profile.bridgeFamily];
+
   return resolveProviderBridgeLaunch({
     modulePath: join(root, resolveModulePath(root, defaults)),
     pluginId: defaults.pluginId,
@@ -314,6 +342,7 @@ export async function runFirstPartyRecordedConformance(
     cells: RECORDED_CONFORMANCE_CELLS,
     createAssembler: (providerId) => {
       const collector = createBridgeDeltaEventCollector(providerId);
+
       return {
         assembleMessage: (message) => collector.assembleMessage(message),
       };
@@ -324,11 +353,14 @@ export async function runFirstPartyRecordedConformance(
     bridge: (cell) =>
       firstPartyReplayBridge(cell.provider, RECORDINGS_CHECKOUT_ROOT),
   });
+
   const results = replays.flatMap((replay) => checkRecordedCellReplay(replay));
+
   const report = formatConformanceReport({
     results,
     passed: results.every((result) => result.status === "pass"),
   });
+
   return {
     cells: replays.map((replay) => replay.cell).sort(),
     failures: results

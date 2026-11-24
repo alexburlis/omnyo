@@ -2,8 +2,8 @@ import type {
   PromptTextMention,
   SystemMessageKind,
   SystemMessageSubject,
-} from "@bb/domain";
-import type { TimelineRow } from "@bb/server-contract";
+} from "@omnyo/domain";
+import type { TimelineRow } from "@omnyo/server-contract";
 import type { ReactNode } from "react";
 import { ConversationMessageContent } from "@/components/thread/timeline/ConversationMessageContent";
 import { ThreadTimelineRows } from "@/components/thread/timeline";
@@ -14,11 +14,14 @@ export default {
   title: "thread/timeline/Generated Conversation Message",
 };
 
+const STORY_TIMESTAMP = Date.UTC(2026, 8, 30, 16, 5);
+
 function TimelineStage({ children }: { children: ReactNode }) {
   return <div className="w-full max-w-[760px]">{children}</div>;
 }
 
 const acceptedMessage = {
+  clientRequestId: null,
   isGrouped: false,
   kind: "message" as const,
   status: "accepted" as const,
@@ -38,15 +41,17 @@ const CHILD_COMPLETED_BODY = [
   "",
   "All work **complete and committed**. Handed the follow-up to @thread:thr_child2.",
   "",
-  "- Branch: `bb/rebuild-threaded-comments`",
+  "- Branch: `omnyo/rebuild-threaded-comments`",
   "- Ladle stories built and verified",
   "- PR ready to open on your go",
 ].join("\n");
 
 const CHILD_COMPLETED_TOKEN = "@thread:thr_child2";
+
 const CHILD_COMPLETED_TOKEN_START = CHILD_COMPLETED_BODY.indexOf(
   CHILD_COMPLETED_TOKEN,
 );
+
 const CHILD_COMPLETED_MENTIONS: readonly PromptTextMention[] = [
   {
     start: CHILD_COMPLETED_TOKEN_START,
@@ -145,6 +150,9 @@ export function Overview() {
           <TimelineStage>
             <ConversationMessageContent
               role="user"
+              id={`system_${row.systemMessageKind}`}
+              threadId="thr_generated_messages"
+              turnId={null}
               initiator="system"
               senderThreadId={null}
               senderThreadTitle={null}
@@ -152,7 +160,7 @@ export function Overview() {
               systemMessageKind={row.systemMessageKind}
               systemMessageSubject={row.systemMessageSubject}
               text={row.text}
-              timestamp={0}
+              timestamp={STORY_TIMESTAMP}
               attachments={null}
               mentions={row.mentions ?? []}
               projectId="proj_demo"
@@ -168,6 +176,9 @@ export function Overview() {
         <TimelineStage>
           <ConversationMessageContent
             role="user"
+            id="generated_message_2"
+            threadId="thr_generated_messages"
+            turnId={null}
             initiator="agent"
             senderThreadId="thr_worker2"
             senderThreadTitle="Worker 2"
@@ -175,7 +186,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="Can you take the migration step from here? I've finished the schema changes and pushed to the branch."
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             projectId="proj_demo"
@@ -190,6 +201,9 @@ export function Overview() {
         <TimelineStage>
           <ConversationMessageContent
             role="user"
+            id="generated_message_3"
+            threadId="thr_generated_messages"
+            turnId={null}
             initiator="system"
             senderThreadId={null}
             senderThreadTitle={null}
@@ -197,7 +211,7 @@ export function Overview() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="A system message persisted before the taxonomy existed."
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             projectId="proj_demo"
@@ -219,6 +233,9 @@ export function ClippedAgentMessage() {
         <div className="w-full max-w-[560px]">
           <ConversationMessageContent
             role="user"
+            id="generated_message_4"
+            threadId="thr_generated_messages"
+            turnId={null}
             initiator="agent"
             senderThreadId="thr_host_hermes"
             senderThreadTitle="Host Hermes on Flue"
@@ -226,7 +243,7 @@ export function ClippedAgentMessage() {
             systemMessageKind="unlabeled"
             systemMessageSubject={null}
             text="TEST RESULT refines the diagnosis — RULE OUT eviction. A fire-and-forget direct POST with no wait parameter and no client-held stream should still render the complete report after expansion, including the exact follow-up checks the other agent already ran."
-            timestamp={0}
+            timestamp={STORY_TIMESTAMP}
             attachments={null}
             mentions={[]}
             projectId="proj_demo"
@@ -261,7 +278,7 @@ const MARKDOWN_ROWS: readonly {
         "",
         "## PR #467 — threaded comments",
         "",
-        "**Branch:** `bb/rebuild-threaded-comments`",
+        "**Branch:** `omnyo/rebuild-threaded-comments`",
         "",
         "- Ladle stories built and verified",
         "- `migrate(db)` passes on a fresh schema",

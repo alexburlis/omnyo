@@ -17,19 +17,23 @@ const { exports: packageExports } = JSON.parse(
 const entries = runtimeEntries(packageExports);
 
 const stagingDir = await mkdtemp(path.join(packageRoot, ".runtime-build-"));
+
 try {
   for (const entry of entries) {
     const destination = path.join(
       stagingDir,
       path.relative("dist", entry.output),
     );
+
     if (entry.copy !== undefined) {
       await mkdir(path.dirname(destination), { recursive: true });
       await copyFile(path.join(packageRoot, entry.copy), destination);
       continue;
     }
+
     await build(runtimeBuildOptions(packageRoot, entry, destination));
   }
+
   await promoteRuntimeEntries({
     distDir: path.join(packageRoot, "dist"),
     stagingDir,
@@ -42,5 +46,5 @@ try {
 }
 
 process.stdout.write(
-  `Built ${entries.length} @get-bb/plugin-sdk runtime entries.\n`,
+  `Built ${entries.length} @omnyo/plugin-sdk runtime entries.\n`,
 );

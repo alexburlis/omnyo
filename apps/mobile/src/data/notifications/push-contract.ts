@@ -3,6 +3,7 @@ import { z } from "zod";
 export const pushPlatformSchema = z.enum(["ios", "android"]);
 
 const EXPO_PUSH_TOKEN_MAX_LENGTH = 512;
+
 const DEVICE_LABEL_MAX_LENGTH = 120;
 
 export const pushSubscriptionInputSchema = z
@@ -42,9 +43,9 @@ export const pushSubscriptionsRemoveOutputSchema = z
   .strict();
 
 export type PushPlatform = z.infer<typeof pushPlatformSchema>;
-export type PushSubscriptionInput = z.infer<
-  typeof pushSubscriptionInputSchema
->;
+
+export type PushSubscriptionInput = z.infer<typeof pushSubscriptionInputSchema>;
+
 export type PushSubscriptionRecord = z.infer<
   typeof pushSubscriptionRecordSchema
 >;

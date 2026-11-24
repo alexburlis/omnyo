@@ -19,22 +19,23 @@ import {
   upsertHost,
   type DbConnection,
   type ThreadWithPendingInteractionState,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   formatClientTurnRequestIdSuffix,
   threadScope,
   turnScope,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   ClientTurnRequestId,
   PromptInput,
   Thread,
   ThreadRuntimeState,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { HOST_RECONNECT_GRACE_MS } from "../../../src/constants.js";
 import {
   resolveThreadRuntimeState,
   toThreadListEntryResponses,
+  toThreadResponseFromThread,
 } from "../../../src/services/threads/thread-runtime-display.js";
 import { NotificationHub } from "../../../src/ws/hub.js";
 import { createTestProviderRegistry } from "../../helpers/provider-registry.js";
@@ -129,10 +130,12 @@ function setup(): SetupResult {
   const db = createConnection(":memory:");
   migrate(db);
   const hub = new NotificationHub();
+
   const host = upsertHost(db, noopNotifier, {
     id: "host-runtime-display",
     name: "Runtime Display Host",
   });
+
   return { db, hostId: host.id, hub };
 }
 
@@ -187,6 +190,7 @@ function closeTestSession(args: CloseTestSessionArgs): void {
 
 function createThreadWithEnvironment(args: CreateThreadWithEnvironmentArgs) {
   const suffix = randomUUID();
+
   const { project } = createProject(args.db, noopNotifier, {
     name: `Runtime Display Project ${suffix}`,
     source: {
@@ -195,6 +199,7 @@ function createThreadWithEnvironment(args: CreateThreadWithEnvironmentArgs) {
       path: `/tmp/${args.hostId}/project/${suffix}`,
     },
   });
+
   const environment = createEnvironment(args.db, noopNotifier, {
     providerOwnsPath: false,
     hostId: args.hostId,
@@ -213,6 +218,7 @@ function createThreadWithEnvironment(args: CreateThreadWithEnvironmentArgs) {
             },
           },
   });
+
   const thread = createThread(args.db, noopNotifier, {
     projectId: project.id,
     environmentId: environment.id,
@@ -228,9 +234,12 @@ function createThreadListEntry(
 ): ThreadWithPendingInteractionState {
   return {
     ...args.thread,
+    launchedByThreadId: null,
     modelOverride: null,
     reasoningLevelOverride: null,
     storageDeletedAt: null,
+    statusChangedAt: args.thread.updatedAt,
+    shelfSortKey: null,
     environmentBranchName: null,
     environmentPath: null,
     environmentProviderId: null,
@@ -238,8 +247,7 @@ function createThreadListEntry(
     environmentHostId: args.environmentHostId,
     environmentName: null,
     hasPendingInteraction: false,
-    // Only a `pending` thread whose first message queued carries one, and
-    // these fixtures are all threads that already started.
+
     startupContext: null,
   };
 }
@@ -248,11 +256,13 @@ describe("thread runtime display", () => {
   it("keeps active threads active while the host daemon websocket is registered", () => {
     const { db, hostId, hub } = setup();
     const now = 1_000;
+
     const session = openTestSession({
       db,
       hostId,
       leaseExpiresAt: now - 1,
     });
+
     registerTestDaemon(hub, { hostId, sessionId: session.id });
 
     expect(
@@ -402,11 +412,13 @@ describe("thread runtime display", () => {
 
   it("carries the producing environment provider into the list entry", () => {
     const { db, hostId, hub } = setup();
+
     const provided = createThreadWithEnvironment({
       db,
       hostId,
       environmentProviderId: "git-worktree",
     });
+
     const checkout = createThreadWithEnvironment({ db, hostId });
 
     const providerIdByThreadId = new Map(
@@ -430,6 +442,7 @@ describe("thread runtime display", () => {
   it("reports the selected machine before a new thread has an environment", () => {
     const { db, hostId, hub } = setup();
     const { project } = createThreadWithEnvironment({ db, hostId });
+
     const thread = createThread(db, noopNotifier, {
       projectId: project.id,
       environmentId: null,
@@ -466,14 +479,17 @@ describe("thread runtime display", () => {
   it("resolves list entry runtime from daemon registration per host", () => {
     const { db, hostId, hub } = setup();
     const now = 1_000;
+
     const session = openTestSession({
       db,
       hostId,
       leaseExpiresAt: now - 1,
     });
+
     registerTestDaemon(hub, { hostId, sessionId: session.id });
     const first = createThreadWithEnvironment({ db, hostId });
     const second = createThreadWithEnvironment({ db, hostId });
+
     const noHost = createThreadWithEnvironment({
       db,
       hostId,
@@ -520,9 +536,6 @@ describe("thread runtime display", () => {
     const waiting = createThreadWithEnvironment({ db, hostId, status: "idle" });
     const failed = createThreadWithEnvironment({ db, hostId, status: "idle" });
 
-    // The failed thread holds BOTH a healthy row and a failed one, which is the
-    // case the precedence rule exists for: a thread that queued two messages
-    // and only the first one blew up must not read as merely waiting.
     for (const { thread, count } of [
       { thread: waiting.thread, count: 1 },
       { thread: failed.thread, count: 2 },
@@ -542,6 +555,7 @@ describe("thread runtime display", () => {
         });
       }
     }
+
     const failedRow = listQueuedThreadMessages(db, failed.thread.id)[0]!;
     setQueuedThreadMessageFailureReason(db, noopNotifier, {
       id: failedRow.id,
@@ -571,13 +585,72 @@ describe("thread runtime display", () => {
     ]);
   });
 
+  it("keeps thread response counts consistent with active work and queued messages", () => {
+    const { db, hostId, hub } = setup();
+
+    const { thread } = createThreadWithEnvironment({
+      db,
+      hostId,
+      status: "idle",
+    });
+
+    appendStoredThreadEvent(db, noopNotifier, {
+      threadId: thread.id,
+      providerThreadId: "provider-counts",
+      scope: turnScope("turn-counts"),
+      type: "item/started",
+      data: {
+        providerThreadId: "provider-counts",
+        item: {
+          type: "backgroundTask",
+          id: "task-counts",
+          taskType: "local_agent",
+          description: "Background agent",
+          status: "pending",
+          taskStatus: "running",
+          skipTranscript: false,
+        },
+      },
+    });
+    createQueuedThreadMessage(db, noopNotifier, {
+      threadId: thread.id,
+      content: [{ type: "text", text: "queued", mentions: [] }],
+      model: "gpt-5",
+      reasoningLevel: "medium",
+      permissionMode: "auto",
+      serviceTier: "default",
+      waitingOn: { kind: "thread-busy" },
+      sendAt: null,
+      payload: { kind: "inline" },
+      systemNotice: null,
+    });
+
+    const response = toThreadResponseFromThread(
+      { db, hub, providerRegistry },
+      { thread },
+    );
+
+    expect(response.activeBackgroundAgentCount).toBe(1);
+    expect(response.queuedMessageCount).toBe(1);
+    expect(response.work?.activity).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "agent",
+          label: "Background agent running.",
+        }),
+      ]),
+    );
+  });
+
   it("builds active list entries above the SQLite variable limit", () => {
     const { db, hostId, hub } = setup();
     const { thread } = createThreadWithEnvironment({ db, hostId });
+
     const template = createThreadListEntry({
       environmentHostId: null,
       thread,
     });
+
     const threads = Array.from({ length: 32_767 }, (_, index) => ({
       ...template,
       id: `thr_variable_limit_${index}`,
@@ -601,20 +674,25 @@ describe("thread runtime display", () => {
     const activeGoal = createThreadWithEnvironment({ db, hostId });
     const clearedGoal = createThreadWithEnvironment({ db, hostId });
     const concurrentPlanGoal = createThreadWithEnvironment({ db, hostId });
+
     const claudePlan = createThreadWithEnvironment({
       db,
       hostId,
       providerId: "claude-code",
     });
+
     const activePlanRequestId = formatClientTurnRequestIdSuffix({
       suffix: "23456789ab",
     });
+
     const completedPlanRequestId = formatClientTurnRequestIdSuffix({
       suffix: "23456789ac",
     });
+
     const concurrentPlanRequestId = formatClientTurnRequestIdSuffix({
       suffix: "23456789ad",
     });
+
     const claudePlanRequestId = formatClientTurnRequestIdSuffix({
       suffix: "23456789ae",
     });
@@ -704,6 +782,7 @@ describe("thread runtime display", () => {
       type: "thread/goal/cleared",
       data: { providerThreadId: "provider-cleared-goal" },
     });
+
     for (const [target, requestId, turnId, providerThreadId] of [
       [
         concurrentPlanGoal,
@@ -732,6 +811,7 @@ describe("thread runtime display", () => {
         data: { providerThreadId, clientRequestId: requestId },
       });
     }
+
     appendStoredThreadEvent(db, noopNotifier, {
       threadId: concurrentPlanGoal.thread.id,
       scope: threadScope(),
@@ -778,6 +858,7 @@ describe("thread runtime display", () => {
         ],
       },
     );
+
     const activityByThreadId = new Map(
       entries.map((entry) => [entry.id, entry.activity]),
     );

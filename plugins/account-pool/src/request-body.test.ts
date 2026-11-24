@@ -1,9 +1,11 @@
+import { zstdCompressSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { parseCodexRequestBody, parseRequestBody } from "./request-body.js";
 
 const accountUuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const nextAccountUuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
 const sessionId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
 const encode = (value: object) =>
   new TextEncoder().encode(JSON.stringify(value));
 
@@ -22,12 +24,11 @@ describe("Claude request parsing", () => {
           }),
         },
       });
+
       const parsed = parseRequestBody(body);
       expect(parsed.family).toBe("fable");
       expect(parsed.affinityId).toBe(`session:${sessionId}`);
       expect(parsed.parentAffinityId).toBe("session:parent");
-      if (account === "invalid-account-uuid" || account === 123)
-        expect(parsed.forAccount(nextAccountUuid)).toBe(body);
     },
   );
 
@@ -43,36 +44,25 @@ describe("Claude request parsing", () => {
     "a\u007fb",
     "a\u0085b",
     "x".repeat(513),
-  ])(
-    "rejects invalid session %j while preserving it and extra metadata during account rewrite",
-    (session) => {
-      const user = {
-        account_uuid: accountUuid,
-        session_id: session,
-        parent_session_id: sessionId,
-        device_id: sessionId,
-        extension: { keep: true },
-      };
-      const request = {
-        model: "claude-fable-5",
-        metadata: { user_id: JSON.stringify(user), extra: "keep" },
-        messages: [{ role: "user", content: "message" }],
-      };
-      const parsed = parseRequestBody(encode(request));
-      expect(parsed.affinityId).toBeNull();
-      expect(parsed.parentAffinityId).toBeNull();
-      const rewritten = JSON.parse(
-        new TextDecoder().decode(parsed.forAccount(nextAccountUuid)),
-      );
-      expect(rewritten).toEqual({
-        ...request,
-        metadata: {
-          ...request.metadata,
-          user_id: JSON.stringify({ ...user, account_uuid: nextAccountUuid }),
-        },
-      });
-    },
-  );
+  ])("rejects invalid session %j and its parent", (session) => {
+    const user = {
+      account_uuid: accountUuid,
+      session_id: session,
+      parent_session_id: sessionId,
+      device_id: sessionId,
+      extension: { keep: true },
+    };
+
+    const request = {
+      model: "claude-fable-5",
+      metadata: { user_id: JSON.stringify(user), extra: "keep" },
+      messages: [{ role: "user", content: "message" }],
+    };
+
+    const parsed = parseRequestBody(encode(request));
+    expect(parsed.affinityId).toBeNull();
+    expect(parsed.parentAffinityId).toBeNull();
+  });
 
   it.each([
     { parent: "parent", expected: "session:parent" },
@@ -83,62 +73,43 @@ describe("Claude request parsing", () => {
     { parent: "bad\u0085parent", expected: null },
     { parent: "x".repeat(513), expected: null },
     { parent: { invalid: true }, expected: null },
-  ])(
-    "validates parent $parent without losing native metadata",
-    ({ parent, expected }) => {
-      const user = {
-        account_uuid: accountUuid,
-        session_id: sessionId,
-        parent_session_id: parent,
-        extra: { keep: [1, 2] },
-      };
-      const request = {
-        metadata: { user_id: JSON.stringify(user), extra: "keep" },
-        messages: [{ role: "user", content: "unchanged prefix" }],
-      };
-      const body = encode(request);
-      const parsed = parseRequestBody(body);
-      expect(parsed.affinityId).toBe(`session:${sessionId}`);
-      expect(parsed.parentAffinityId).toBe(expected);
-      expect(parsed.forAccount(accountUuid)).toBe(body);
-      expect(
-        JSON.parse(
-          new TextDecoder().decode(parsed.forAccount(nextAccountUuid)),
-        ),
-      ).toEqual({
-        ...request,
-        metadata: {
-          ...request.metadata,
-          user_id: JSON.stringify({ ...user, account_uuid: nextAccountUuid }),
-        },
-      });
-    },
-  );
+  ])("validates parent $parent", ({ parent, expected }) => {
+    const user = {
+      account_uuid: accountUuid,
+      session_id: sessionId,
+      parent_session_id: parent,
+      extra: { keep: [1, 2] },
+    };
 
-  it("accepts a 512-character session and preserves legacy metadata except the account UUID", () => {
+    const request = {
+      metadata: { user_id: JSON.stringify(user), extra: "keep" },
+      messages: [{ role: "user", content: "unchanged prefix" }],
+    };
+
+    const body = encode(request);
+    const parsed = parseRequestBody(body);
+    expect(parsed.affinityId).toBe(`session:${sessionId}`);
+    expect(parsed.parentAffinityId).toBe(expected);
+  });
+
+  it("accepts a 512-character session and reads legacy session metadata", () => {
     const id = "x".repeat(512);
     expect(
       parseRequestBody(
         encode({ metadata: { user_id: JSON.stringify({ session_id: id }) } }),
       ).affinityId,
     ).toBe(`session:${id}`);
+
     const body = encode({
       metadata: {
         user_id: `user_hash_account_${accountUuid}_session_${sessionId}`,
         extra: "keep",
       },
     });
+
     const parsed = parseRequestBody(body);
     expect(parsed.affinityId).toBe(`session:${sessionId}`);
     expect(parsed.parentAffinityId).toBeNull();
-    expect(
-      JSON.parse(new TextDecoder().decode(parsed.forAccount(nextAccountUuid))),
-    ).toEqual({
-      metadata: {
-        user_id: `user_hash_account_${nextAccountUuid}_session_${sessionId}`,
-        extra: "keep",
-      },
-    });
   });
 
   it.each([
@@ -146,15 +117,30 @@ describe("Claude request parsing", () => {
     "[]",
     '{"metadata":{"user_id":"malformed"}}',
     '{"metadata":{"user_id":123}}',
-  ])("leaves malformed request %s unbound and byte-identical", (raw) => {
+  ])("leaves malformed request %s unbound", (raw) => {
     const body = new TextEncoder().encode(raw);
     const parsed = parseRequestBody(body);
     expect(parsed.affinityId).toBeNull();
-    expect(parsed.forAccount(nextAccountUuid)).toBe(body);
   });
 });
 
 describe("Codex request parsing", () => {
+  it("extracts the requested service tier from a compressed request", () => {
+    const body = zstdCompressSync(
+      encode({ model: "gpt-6.2-sol", service_tier: "ultrafast" }),
+    );
+
+    const parsed = parseCodexRequestBody(
+      body,
+      new Headers({ "content-encoding": "zstd" }),
+    );
+
+    expect(parsed).toMatchObject({
+      model: "gpt-6.2-sol",
+      serviceTier: "ultrafast",
+    });
+  });
+
   it.each<{
     headers: Record<string, string>;
     cacheKey: string | null;
@@ -221,10 +207,10 @@ describe("Codex request parsing", () => {
           2,
         ),
       );
+
       const parsed = parseCodexRequestBody(body, new Headers(headers));
       expect(parsed.affinityId).toBe(expected);
       expect(parsed.parentAffinityId).toBeNull();
-      expect(parsed.forAccount(nextAccountUuid)).toBe(body);
     },
   );
 
@@ -381,12 +367,12 @@ describe("Codex request parsing", () => {
         ],
         extra: { keep: true },
       });
+
       const parsed = parseCodexRequestBody(body, new Headers(headers));
       expect(parsed.affinityId).toBe(`session:${own}`);
       expect(parsed.parentAffinityId).toBe(
         parent === null ? null : `session:${parent}`,
       );
-      expect(parsed.forAccount(nextAccountUuid)).toBe(body);
     },
   );
 
@@ -409,19 +395,21 @@ describe("Codex request parsing", () => {
           }),
         },
       });
+
       const parsed = parseCodexRequestBody(body, new Headers());
       expect(parsed.affinityId).toBe("session:child");
       expect(parsed.parentAffinityId).toBe(expected);
-      expect(parsed.forAccount(null)).toBe(body);
     },
   );
 
   it("does not inherit a parent for an anonymous cache-key request", () => {
     const body = encode({ prompt_cache_key: "cache" });
+
     const parsed = parseCodexRequestBody(
       body,
       new Headers({ "x-codex-parent-thread-id": "parent" }),
     );
+
     expect(parsed.affinityId).toBe("cache:cache");
     expect(parsed.parentAffinityId).toBeNull();
   });
@@ -432,7 +420,6 @@ describe("Codex request parsing", () => {
       const body = new TextEncoder().encode(raw);
       const parsed = parseCodexRequestBody(body, new Headers());
       expect(parsed.affinityId).toBeNull();
-      expect(parsed.forAccount(null)).toBe(body);
     },
   );
 });

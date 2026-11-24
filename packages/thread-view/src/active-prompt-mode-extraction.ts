@@ -5,7 +5,7 @@ import {
   type ProviderComposerCommand,
   type Thread,
   type ThreadTimelineActivePromptMode,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { ThreadEventWithMeta } from "./build-event-projection.js";
 import { parsePromptInput } from "./user-message-parsing.js";
 
@@ -33,6 +33,7 @@ function promptTextWithoutPlanCommand(
     request.input,
     planCommand,
   );
+
   return parsePromptInput(cleanedInput)?.text.trim() ?? "";
 }
 
@@ -43,6 +44,7 @@ function extractActiveTurnInputs(
     string,
     Extract<ThreadEventWithMeta["event"], { type: "client/turn/requested" }>
   >();
+
   const completedTurnIds = new Set<string>();
   let latestThreadInterruptionSeq = -1;
 
@@ -51,6 +53,7 @@ function extractActiveTurnInputs(
       requestsById.set(event.requestId, event);
       continue;
     }
+
     if (event.type === "turn/completed") {
       completedTurnIds.add(
         requireThreadEventScopeTurnId({
@@ -60,6 +63,7 @@ function extractActiveTurnInputs(
       );
       continue;
     }
+
     if (event.type === "system/thread/interrupted") {
       latestThreadInterruptionSeq = Math.max(
         latestThreadInterruptionSeq,
@@ -72,17 +76,22 @@ function extractActiveTurnInputs(
     if (event.type !== "turn/input/accepted") {
       return [];
     }
+
     if (meta.seq <= latestThreadInterruptionSeq) {
       return [];
     }
+
     const turnId = requireThreadEventScopeTurnId({
       type: event.type,
       scope: event.scope,
     });
+
     if (completedTurnIds.has(turnId)) {
       return [];
     }
+
     const request = requestsById.get(event.clientRequestId);
+
     return request ? [{ request, seq: meta.seq, turnId }] : [];
   });
 }
@@ -108,10 +117,12 @@ export function extractThreadTimelineActivePlanTurn({
   }
 
   let latestPlanTurn: ActiveTurnInput | null = null;
+
   for (const activeTurn of extractActiveTurnInputs(events)) {
     if (!promptInputHasCommandMention(activeTurn.request.input, planCommand)) {
       continue;
     }
+
     if (!latestPlanTurn || activeTurn.seq > latestPlanTurn.seq) {
       latestPlanTurn = activeTurn;
     }

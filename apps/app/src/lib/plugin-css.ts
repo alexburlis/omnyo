@@ -1,7 +1,18 @@
-import { useInsertionEffect } from "react";
+import {
+  useInsertionEffect,
+  useLayoutEffect,
+  useSyncExternalStore,
+} from "react";
+import { useThreadInitialLoad } from "@/components/thread/ThreadInitialLoad";
+import {
+  dropHostDuplicatePluginRules,
+  normalizePluginStylesheet,
+} from "./plugin-css-selectors";
 
-const CSS_MARKER = "data-bb-plugin-css";
-const CSS_PRELOAD_MARKER = "data-bb-plugin-css-preload";
+const CSS_MARKER = "data-omnyo-plugin-css";
+
+const CSS_PRELOAD_MARKER = "data-omnyo-plugin-css-preload";
+
 const CSS_RELEASE_GRACE_MS = 1_500;
 
 interface PluginCssRecord {
@@ -17,9 +28,32 @@ interface PluginCssRecord {
 
 const recordsByPluginId = new Map<string, PluginCssRecord>();
 
+const settledUrls = new Set<string>();
+
+const listeners = new Set<() => void>();
+
+function notify(): void {
+  for (const listener of listeners) listener();
+}
+
+function settle(url: string): void {
+  settledUrls.add(url);
+  notify();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 function recordFor(pluginId: string): PluginCssRecord {
   const existing = recordsByPluginId.get(pluginId);
+
   if (existing !== undefined) return existing;
+
   const created: PluginCssRecord = {
     consumers: 0,
     cleanupEpoch: 0,
@@ -30,7 +64,9 @@ function recordFor(pluginId: string): PluginCssRecord {
     stylesheet: null,
     url: null,
   };
+
   recordsByPluginId.set(pluginId, created);
+
   return created;
 }
 
@@ -43,7 +79,7 @@ function removeLink(link: HTMLLinkElement | null): void {
 }
 
 function warnLoadFailure(pluginId: string, url: string): void {
-  console.warn(`bb plugin "${pluginId}": failed to load stylesheet ${url}`);
+  console.warn(`Omnyo plugin "${pluginId}": failed to load stylesheet ${url}`);
 }
 
 function startPreload(
@@ -62,17 +98,35 @@ function startPreload(
   record.preload = link;
   link.onload = () => {
     link.remove();
+
     if (record.preload === link) record.preload = null;
+
     if (record.url !== url) return;
     record.loadedUrl = url;
+
     if (record.consumers > 0) activateStylesheet(pluginId, record, url);
+    notify();
   };
+
   link.onerror = () => {
     link.remove();
+
     if (record.preload === link) record.preload = null;
-    if (record.url === url) warnLoadFailure(pluginId, url);
+
+    if (record.url !== url) return;
+    warnLoadFailure(pluginId, url);
+    settle(url);
   };
+
   document.head.appendChild(link);
+}
+
+function hostStylesheets(): CSSStyleSheet[] {
+  return [...document.styleSheets].filter(
+    (sheet) =>
+      !(sheet.ownerNode instanceof Element) ||
+      !sheet.ownerNode.hasAttribute(CSS_MARKER),
+  );
 }
 
 function activateStylesheet(
@@ -81,10 +135,12 @@ function activateStylesheet(
   url: string,
 ): void {
   if (linkUrl(record.pendingStylesheet) === url) return;
+
   if (linkUrl(record.stylesheet) === url) {
     record.loadedUrl = url;
     removeLink(record.preload);
     record.preload = null;
+
     return;
   }
 
@@ -101,19 +157,34 @@ function activateStylesheet(
   link.onload = () => {
     if (record.pendingStylesheet !== link || record.url !== url) {
       link.remove();
+
       if (record.pendingStylesheet === link) record.pendingStylesheet = null;
+
       return;
     }
+
+    if (link.sheet !== null) {
+      normalizePluginStylesheet(link.sheet, pluginId);
+      dropHostDuplicatePluginRules(link.sheet, pluginId, hostStylesheets());
+    }
+
     previous?.remove();
     record.stylesheet = link;
     record.pendingStylesheet = null;
     record.loadedUrl = url;
+    settle(url);
   };
+
   link.onerror = () => {
     link.remove();
+
     if (record.pendingStylesheet === link) record.pendingStylesheet = null;
-    if (record.url === url) warnLoadFailure(pluginId, url);
+
+    if (record.url !== url) return;
+    warnLoadFailure(pluginId, url);
+    settle(url);
   };
+
   document.head.appendChild(link);
 }
 
@@ -126,6 +197,7 @@ function deactivateStylesheet(record: PluginCssRecord): void {
 
 function cancelDeferredDeactivate(record: PluginCssRecord): void {
   record.cleanupEpoch += 1;
+
   if (record.cleanupTimer !== null) {
     clearTimeout(record.cleanupTimer);
     record.cleanupTimer = null;
@@ -140,18 +212,23 @@ function deactivateAfterFinalRelease(
   const cleanupEpoch = record.cleanupEpoch;
   record.cleanupTimer = setTimeout(() => {
     record.cleanupTimer = null;
+
     if (record.cleanupEpoch !== cleanupEpoch || record.consumers > 0) return;
     deactivateStylesheet(record);
+
     if (record.url === null) {
       recordsByPluginId.delete(pluginId);
+
       return;
     }
+
     startPreload(pluginId, record, record.url);
   }, CSS_RELEASE_GRACE_MS);
 }
 
 export function applyPluginCss(pluginId: string, url: string | null): void {
   const record = recordFor(pluginId);
+
   if (url === null) {
     cancelDeferredDeactivate(record);
     record.url = null;
@@ -159,13 +236,17 @@ export function applyPluginCss(pluginId: string, url: string | null): void {
     removeLink(record.preload);
     record.preload = null;
     deactivateStylesheet(record);
+
     if (record.consumers === 0) recordsByPluginId.delete(pluginId);
+    notify();
+
     return;
   }
 
   if (record.url === url) {
     if (record.consumers > 0) activateStylesheet(pluginId, record, url);
     else startPreload(pluginId, record, url);
+
     return;
   }
 
@@ -174,24 +255,30 @@ export function applyPluginCss(pluginId: string, url: string | null): void {
   record.loadedUrl = linkUrl(record.stylesheet) === url ? url : null;
   removeLink(record.preload);
   record.preload = null;
+
   if (record.consumers > 0) {
     activateStylesheet(pluginId, record, url);
-    return;
+  } else {
+    deactivateStylesheet(record);
+    startPreload(pluginId, record, url);
   }
-  deactivateStylesheet(record);
-  startPreload(pluginId, record, url);
+
+  notify();
 }
 
 export function retainPluginCss(pluginId: string): () => void {
   const record = recordFor(pluginId);
   cancelDeferredDeactivate(record);
   record.consumers += 1;
+
   if (record.url !== null) activateStylesheet(pluginId, record, record.url);
   let released = false;
+
   return () => {
     if (released) return;
     released = true;
     record.consumers = Math.max(0, record.consumers - 1);
+
     if (record.consumers === 0) {
       deactivateAfterFinalRelease(pluginId, record);
     }
@@ -199,10 +286,53 @@ export function retainPluginCss(pluginId: string): () => void {
 }
 
 export function usePluginCss(pluginId: string | null): void {
+  const initialLoad = useThreadInitialLoad();
   useInsertionEffect(
     () => (pluginId === null ? undefined : retainPluginCss(pluginId)),
     [pluginId],
   );
+  useLayoutEffect(() => {
+    if (pluginId === null || initialLoad === null) return;
+    const link = recordsByPluginId.get(pluginId)?.pendingStylesheet;
+
+    if (!link) return;
+    const finish = initialLoad.begin();
+    link.addEventListener("load", finish);
+    link.addEventListener("error", finish);
+
+    return () => {
+      link.removeEventListener("load", finish);
+      link.removeEventListener("error", finish);
+      finish();
+    };
+  }, [initialLoad, pluginId]);
+}
+
+function isPluginCssReady(pluginId: string | null): boolean {
+  if (pluginId === null) return true;
+  const record = recordsByPluginId.get(pluginId);
+
+  return (
+    record === undefined ||
+    record.url === null ||
+    record.stylesheet !== null ||
+    settledUrls.has(record.url)
+  );
+}
+
+function isAllPluginCssSettled(): boolean {
+  return [...recordsByPluginId.values()].every(
+    ({ loadedUrl, url }) =>
+      url === null || loadedUrl === url || settledUrls.has(url),
+  );
+}
+
+export function usePluginCssReady(pluginId: string | null): boolean {
+  return useSyncExternalStore(subscribe, () => isPluginCssReady(pluginId));
+}
+
+export function useAllPluginCssSettled(): boolean {
+  return useSyncExternalStore(subscribe, isAllPluginCssSettled);
 }
 
 export function resetPluginCssForTest(): void {
@@ -211,7 +341,10 @@ export function resetPluginCssForTest(): void {
     removeLink(record.preload);
     deactivateStylesheet(record);
   }
+
   recordsByPluginId.clear();
+  settledUrls.clear();
+
   for (const link of document.head.querySelectorAll(
     `link[${CSS_MARKER}], link[${CSS_PRELOAD_MARKER}]`,
   )) {

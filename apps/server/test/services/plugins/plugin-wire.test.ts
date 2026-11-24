@@ -11,10 +11,11 @@ import {
 import { createMockHubSocket } from "../../helpers/mock-hub-socket.js";
 
 const BASE = "http://127.0.0.1:3334";
+
 const EVIL_ORIGIN = "https://evil.example";
 
 const WIRE_SOURCE = `
-  import { defineRpcContract } from "@get-bb/plugin-sdk";
+  import { defineRpcContract } from "@omnyo/plugin-sdk";
   import { z } from "zod";
   const rpcContract = defineRpcContract({
     echo: {
@@ -33,24 +34,24 @@ const WIRE_SOURCE = `
     nonFiniteResult: { input: z.null(), output: z.any() },
     validated: { input: z.object({ value: z.string().min(1) }), output: z.string() },
   });
-  export default function plugin(bb: any) {
-    bb.http.route("GET", "/hello", (c: any) => c.json({ message: "hello v1" }));
-    bb.http.route("POST", "/echo", async (c: any) =>
+  export default function plugin(api: any) {
+    api.http.route("GET", "/hello", (c: any) => c.json({ message: "hello v1" }));
+    api.http.route("POST", "/echo", async (c: any) =>
       c.json({ echoed: await c.req.json() }));
-    bb.http.route("POST", "/socket", async (c: any) =>
+    api.http.route("POST", "/socket", async (c: any) =>
       c.json({ http: await c.req.json() }));
-    bb.http.route("GET", "/guarded", (c: any) => c.json({ guarded: true }), {
+    api.http.route("GET", "/guarded", (c: any) => c.json({ guarded: true }), {
       auth: "token",
     });
-    bb.http.route("GET", "/open", (c: any) => c.json({ open: true }), {
+    api.http.route("GET", "/open", (c: any) => c.json({ open: true }), {
       auth: "none",
     });
-    bb.http.route("GET", "/boom", () => {
+    api.http.route("GET", "/boom", () => {
       throw new Error("route boom");
     });
     // A structurally valid Response whose prototype is not this realm's
     // Response, as a handler running in another realm would return (#1661).
-    bb.http.route("GET", "/foreign", () => {
+    api.http.route("GET", "/foreign", () => {
       const real = new Response(JSON.stringify({ foreign: true }), {
         status: 201,
         statusText: "Created",
@@ -67,7 +68,7 @@ const WIRE_SOURCE = `
     });
     // Streams two chunks; the second is only produced after the test releases
     // it, so buffering the whole body would hang the first read.
-    bb.http.route("GET", "/foreign-stream", () => {
+    api.http.route("GET", "/foreign-stream", () => {
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
         async start(controller) {
@@ -87,8 +88,8 @@ const WIRE_SOURCE = `
         clone: () => real.clone(),
       };
     });
-    bb.http.route("GET", "/not-a-response", () => ({ status: 200 }));
-    bb.http.experimental_websocket("/socket", (context: any) => ({
+    api.http.route("GET", "/not-a-response", () => ({ status: 200 }));
+    api.http.experimental_websocket("/socket", (context: any) => ({
       onOpen(socket: any) {
         socket.send(JSON.stringify({
           marker: context.headers.get("x-test-marker"),
@@ -99,36 +100,36 @@ const WIRE_SOURCE = `
         socket.send(data);
       },
     }));
-    bb.http.experimental_websocket("/guarded-socket", () => ({
+    api.http.experimental_websocket("/guarded-socket", () => ({
       onOpen(socket: any) {
         socket.send("guarded");
       },
     }), { auth: "token" });
-    bb.http.experimental_websocket("/open-socket", () => ({
+    api.http.experimental_websocket("/open-socket", () => ({
       onOpen(socket: any) {
         socket.send("open");
       },
     }), { auth: "none" });
-    bb.http.experimental_websocket("/boom-socket", () => {
+    api.http.experimental_websocket("/boom-socket", () => {
       throw new Error("socket factory boom");
     }, { auth: "none" });
-    bb.http.experimental_websocket("/event-boom", () => ({
+    api.http.experimental_websocket("/event-boom", () => ({
       onMessage(socket: any, data: any) {
         if (data === "boom") throw new Error("socket message boom");
         socket.send(data);
       },
     }), { auth: "none" });
-    bb.rpc.register(rpcContract, {
+    api.rpc.register(rpcContract, {
       echo: async (input: any) => ({ echoed: input }),
       boom: async () => {
         throw new Error("rpc boom");
       },
       publish: async (input: any) => {
-        bb.realtime.publish(input.channel, input.payload);
+        api.realtime.publish(input.channel, input.payload);
         return "published";
       },
       publishBad: async () => {
-        bb.realtime.publish("bad", { n: BigInt(1) });
+        api.realtime.publish("bad", { n: BigInt(1) });
       },
       invalidOutput: () => 42,
       bigintResult: () => BigInt(1),
@@ -157,7 +158,7 @@ async function writePlugin(
     JSON.stringify({
       name: options.name,
       version: "0.1.0",
-      bb: {
+      omnyo: {
         name: "Wire fixture",
         description: "Plugin wire fixture.",
         branding: { icon: "Zap" },
@@ -166,6 +167,7 @@ async function writePlugin(
     }),
   );
   await writeFile(join(rootDir, "server.ts"), options.serverSource);
+
   return rootDir;
 }
 
@@ -176,10 +178,14 @@ async function rpc(
   init: { origin?: string; contentType?: string | null } = {},
 ): Promise<Response> {
   const headers: Record<string, string> = {};
+
   const contentType =
     init.contentType === undefined ? "application/json" : init.contentType;
+
   if (contentType !== null) headers["content-type"] = contentType;
+
   if (init.origin !== undefined) headers.origin = init.origin;
+
   return await harness.app.request(
     `${BASE}/api/v1/plugins/wire/rpc/${method}`,
     {
@@ -197,11 +203,11 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
   beforeEach(async () => {
     harness = await createTestAppHarness({ devAppPort: 5173 });
     rootDir = await writePlugin(join(harness.config.dataDir, "fixtures"), {
-      name: "bb-plugin-wire",
+      name: "omnyo-plugin-wire",
       serverSource: WIRE_SOURCE,
     });
     const entry = await harness.pluginService.installPath(rootDir);
-    expect(entry.status).toBe("running");
+    expect(entry.status, entry.statusDetail ?? undefined).toBe("running");
   });
 
   afterEach(async () => {
@@ -213,6 +219,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     const bare = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/hello`,
     );
+
     expect(bare.status).toBe(200);
     expect(await bare.json()).toEqual({ message: "hello v1" });
 
@@ -220,12 +227,14 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
       `${BASE}/api/v1/plugins/wire/http/hello`,
       { headers: { origin: BASE } },
     );
+
     expect(sameOrigin.status).toBe(200);
 
     const appOrigin = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/hello`,
-      { headers: { origin: "https://bb.example.test" } },
+      { headers: { origin: "https://omnyo.example.test" } },
     );
+
     expect(appOrigin.status).toBe(200);
   });
 
@@ -234,34 +243,39 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
       `${BASE}/api/v1/plugins/wire/http/hello`,
       { headers: { origin: EVIL_ORIGIN } },
     );
+
     expect(foreignOrigin.status).toBe(403);
     expect(await foreignOrigin.json()).toMatchObject({
       ok: false,
-      error: expect.stringContaining("not a local BB app origin"),
+      error: expect.stringContaining("not a local Omnyo app origin"),
     });
 
     const copiedPort = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/hello`,
       { headers: { origin: "http://evil.example:3334" } },
     );
+
     expect(copiedPort.status).toBe(403);
 
     const sameOriginLan = await harness.app.request(
       "http://100.64.158.8:3334/api/v1/plugins/wire/http/hello",
       { headers: { origin: "http://100.64.158.8:3334" } },
     );
+
     expect(sameOriginLan.status).toBe(200);
 
     const sameOriginReverseProxy = await harness.app.request(
-      "https://bb.example.test/api/v1/plugins/wire/http/hello",
-      { headers: { origin: "https://bb.example.test" } },
+      "https://omnyo.example.test/api/v1/plugins/wire/http/hello",
+      { headers: { origin: "https://omnyo.example.test" } },
     );
+
     expect(sameOriginReverseProxy.status).toBe(200);
 
     const directDev = await harness.app.request(
       "http://100.64.158.8:3334/api/v1/plugins/wire/http/hello",
       { headers: { origin: "http://100.64.158.8:5173" } },
     );
+
     expect(directDev.status).toBe(200);
 
     const proxiedDev = await harness.app.request(
@@ -273,6 +287,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
         },
       },
     );
+
     expect(proxiedDev.status).toBe(200);
   });
 
@@ -281,6 +296,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
       `${BASE}/api/v1/plugins/wire/http/echo`,
       { method: "POST", body: JSON.stringify({ a: 1 }) },
     );
+
     expect(noContentType.status).toBe(415);
 
     const json = await harness.app.request(
@@ -291,6 +307,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
         body: JSON.stringify({ a: 1 }),
       },
     );
+
     expect(json.status).toBe(200);
     expect(await json.json()).toEqual({ echoed: { a: 1 } });
   });
@@ -299,6 +316,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     const install = vi
       .spyOn(harness.pluginService, "install")
       .mockRejectedValue(new Error("install sentinel"));
+
     const body = JSON.stringify({ source: "npm:attacker-plugin@1.0.0" });
 
     const hostile = await harness.app.request(
@@ -312,6 +330,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
         body,
       },
     );
+
     expect(hostile.status).toBe(403);
     expect(install).not.toHaveBeenCalled();
 
@@ -323,6 +342,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
         body,
       },
     );
+
     expect(simpleRequest.status).toBe(415);
     expect(install).not.toHaveBeenCalled();
 
@@ -334,6 +354,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
         body,
       },
     );
+
     expect(nodeClient.status).toBe(422);
     expect(await nodeClient.json()).toEqual({
       ok: false,
@@ -346,12 +367,14 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     const unauthorized = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/guarded`,
     );
+
     expect(unauthorized.status).toBe(401);
 
     const issued = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/token`,
       { method: "POST" },
     );
+
     expect(issued.status).toBe(200);
     const { token } = (await issued.json()) as { token: string };
     expect(token).toMatch(/^[0-9a-f]{64}$/);
@@ -364,18 +387,21 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
         body: "{",
       },
     );
+
     expect(malformed.status).toBe(400);
 
     const viaHeader = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/guarded`,
-      { headers: { "x-bb-plugin-token": token, origin: EVIL_ORIGIN } },
+      { headers: { "x-omnyo-plugin-token": token, origin: EVIL_ORIGIN } },
     );
+
     expect(viaHeader.status).toBe(200);
     expect(await viaHeader.json()).toEqual({ guarded: true });
 
     const viaQuery = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/guarded?token=${token}`,
     );
+
     expect(viaQuery.status).toBe(200);
 
     const rotated = await harness.app.request(
@@ -386,25 +412,29 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
         body: JSON.stringify({ rotate: true }),
       },
     );
+
     const { token: nextToken } = (await rotated.json()) as { token: string };
     expect(nextToken).not.toBe(token);
 
     const staleToken = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/guarded`,
-      { headers: { "x-bb-plugin-token": token } },
+      { headers: { "x-omnyo-plugin-token": token } },
     );
+
     expect(staleToken.status).toBe(401);
 
     const freshToken = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/guarded`,
-      { headers: { "x-bb-plugin-token": nextToken } },
+      { headers: { "x-omnyo-plugin-token": nextToken } },
     );
+
     expect(freshToken.status).toBe(200);
 
     const unknownPlugin = await harness.app.request(
       `${BASE}/api/v1/plugins/ghost/token`,
       { method: "POST" },
     );
+
     expect(unknownPlugin.status).toBe(404);
   });
 
@@ -413,6 +443,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
       `${BASE}/api/v1/plugins/wire/http/open`,
       { headers: { origin: EVIL_ORIGIN } },
     );
+
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ open: true });
   });
@@ -421,20 +452,24 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     const unknownRoute = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/nope`,
     );
+
     expect(unknownRoute.status).toBe(404);
 
     const unknownPlugin = await harness.app.request(
       `${BASE}/api/v1/plugins/ghost/http/hello`,
     );
+
     expect(unknownPlugin.status).toBe(404);
     expect(await unknownPlugin.json()).toMatchObject({
       error: 'unknown plugin "ghost"',
     });
 
     await harness.pluginService.setEnabled("wire", false);
+
     const notRunning = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/hello`,
     );
+
     expect(notRunning.status).toBe(503);
     expect(await notRunning.json()).toMatchObject({
       ok: false,
@@ -446,6 +481,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/boom`,
     );
+
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({
       ok: false,
@@ -460,6 +496,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/foreign`,
     );
+
     expect(response).toBeInstanceOf(Response);
     expect(response.status).toBe(201);
     expect(response.headers.get("x-foreign")).toBe("yes");
@@ -473,10 +510,12 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     (globalThis as any).__releaseSecondChunk = new Promise<void>((resolve) => {
       release = resolve;
     });
+
     try {
       const response = await harness.app.request(
         `${BASE}/api/v1/plugins/wire/http/foreign-stream`,
       );
+
       expect(response.status).toBe(200);
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
@@ -484,11 +523,14 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
       expect(decoder.decode(first.value)).toBe("first;");
       release();
       let rest = "";
+
       for (;;) {
         const chunk = await reader.read();
+
         if (chunk.done) break;
         rest += decoder.decode(chunk.value, { stream: true });
       }
+
       expect(rest).toBe("second");
     } finally {
       release();
@@ -500,6 +542,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     const response = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/not-a-response`,
     );
+
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({
       ok: false,
@@ -513,8 +556,8 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     await writeFile(
       join(rootDir, "server.ts"),
       `
-        export default function plugin(bb: any) {
-          bb.http.route("GET", "/hello", (c: any) => c.json({ message: "hello v2" }));
+        export default function plugin(api: any) {
+          api.http.route("GET", "/hello", (c: any) => c.json({ message: "hello v2" }));
         }
       `,
     );
@@ -523,6 +566,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     const swapped = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/hello`,
     );
+
     expect(await swapped.json()).toEqual({ message: "hello v2" });
 
     const staleRpc = await rpc(harness, "echo", { x: 1 });
@@ -534,10 +578,10 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     await writeFile(
       join(rootDir, "server.ts"),
       `
-        export default function plugin(bb: any) {
+        export default function plugin(api: any) {
           const schema = { "~standard": { version: 1, vendor: "test", validate: (value: any) => ({ value }) } };
-          bb.http.route("GET", "/candidate", (c: any) => c.json({ candidate: true }));
-          bb.rpc.register({ candidate: { input: schema, output: schema } }, { candidate: () => ({ candidate: true }) });
+          api.http.route("GET", "/candidate", (c: any) => c.json({ candidate: true }));
+          api.rpc.register({ candidate: { input: schema, output: schema } }, { candidate: () => ({ candidate: true }) });
           throw new Error("candidate failed");
         }
       `,
@@ -546,18 +590,22 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     await harness.pluginService.reload("wire");
 
     expect(harness.pluginService.getApi("wire")).toBe(previousApi);
+
     const oldRoute = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/hello`,
     );
+
     expect(await oldRoute.json()).toEqual({ message: "hello v1" });
     const oldRpc = await rpc(harness, "echo", { kept: true });
     expect(await oldRpc.json()).toEqual({
       ok: true,
       result: { echoed: { kept: true } },
     });
+
     const candidateRoute = await harness.app.request(
       `${BASE}/api/v1/plugins/wire/http/candidate`,
     );
+
     expect(candidateRoute.status).toBe(404);
     const candidateRpc = await rpc(harness, "candidate", {});
     expect(candidateRpc.status).toBe(404);
@@ -639,6 +687,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
       { x: 1 },
       { origin: EVIL_ORIGIN },
     );
+
     expect(foreign.status).toBe(403);
 
     const notJson = await rpc(harness, "echo", { x: 1 }, { contentType: null });
@@ -652,6 +701,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
         body: "not json",
       },
     );
+
     expect(badBody.status).toBe(400);
     expect(await badBody.json()).toMatchObject({
       ok: false,
@@ -659,7 +709,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     });
   });
 
-  it("bb.realtime.publish broadcasts a plugin-signal WS frame to connected clients", async () => {
+  it("api.realtime.publish broadcasts a plugin-signal WS frame to connected clients", async () => {
     const systemSocket = createMockHubSocket();
     const threadSocket = createMockHubSocket();
     harness.hub.subscribe(systemSocket, { kind: "system" });
@@ -672,6 +722,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
       channel: "issues-updated",
       payload: { count: 42 },
     });
+
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, result: "published" });
 
@@ -686,7 +737,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
     }
   });
 
-  it("bb.realtime.publish rejects payloads that do not survive JSON", async () => {
+  it("api.realtime.publish rejects payloads that do not survive JSON", async () => {
     const response = await rpc(harness, "publishBad", {});
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({
@@ -700,28 +751,32 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
 
   it("rpc resolves the handler after the body arrives, so a reload during the body read never runs a stale handler", async () => {
     const genDir = await writePlugin(join(harness.config.dataDir, "fixtures"), {
-      name: "bb-plugin-gen",
+      name: "omnyo-plugin-gen",
       serverSource: `
-        import { defineRpcContract } from "@get-bb/plugin-sdk";
+        import { defineRpcContract } from "@omnyo/plugin-sdk";
         import { z } from "zod";
         const rpcContract = defineRpcContract({ gen: { input: z.record(z.string(), z.unknown()), output: z.object({ gen: z.number() }) } });
-        export default function plugin(bb: any) {
+        export default function plugin(api: any) {
           const g = globalThis as any;
           g.__wireGen = (g.__wireGen ?? 0) + 1;
           const gen = g.__wireGen;
-          bb.rpc.register(rpcContract, { gen: async () => ({ gen }) });
+          api.rpc.register(rpcContract, { gen: async () => ({ gen }) });
         }
       `,
     });
+
     const installed = await harness.pluginService.installPath(genDir);
     expect(installed.status).toBe("running");
+
     const firstGen = (globalThis as Record<string, unknown>)
       .__wireGen as number;
 
     let releaseBody!: () => void;
+
     const gate = new Promise<void>((resolveGate) => {
       releaseBody = resolveGate;
     });
+
     const body = new ReadableStream<Uint8Array>({
       async start(controller) {
         await gate;
@@ -729,6 +784,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
         controller.close();
       },
     });
+
     const responsePromise = harness.app.request(
       `${BASE}/api/v1/plugins/gen/rpc/gen`,
       {
@@ -738,6 +794,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
         duplex: "half",
       } as RequestInit,
     );
+
     await new Promise((resolveTick) => setTimeout(resolveTick, 25));
     await harness.pluginService.reload("gen");
     releaseBody();
@@ -753,6 +810,7 @@ describe("plugin wire surfaces (http/rpc dispatcher + realtime)", () => {
 function pluginWebSocketUrl(baseUrl: string, path: string): string {
   const url = new URL(`/api/v1/plugins/wire/http${path}`, baseUrl);
   url.protocol = "ws:";
+
   return url.href;
 }
 
@@ -789,6 +847,7 @@ async function openPluginWebSocketWithFirstMessage(
     socket.once("open", resolve);
     socket.once("error", reject);
   });
+
   return { socket, firstMessage };
 }
 
@@ -805,10 +864,13 @@ function rejectedPluginWebSocketStatus(
     socket.once("unexpected-response", (_request, response) => {
       const status = response.statusCode;
       response.resume();
+
       if (status === undefined) {
         reject(new Error("WebSocket rejection omitted an HTTP status"));
+
         return;
       }
+
       resolve(status);
     });
     socket.once("error", () => {});
@@ -817,7 +879,9 @@ function rejectedPluginWebSocketStatus(
 
 function webSocketBytes(data: RawData): Uint8Array {
   if (Array.isArray(data)) return new Uint8Array(Buffer.concat(data));
+
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
+
   return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }
 
@@ -829,11 +893,11 @@ describe("plugin WebSocket routes", () => {
   beforeEach(async () => {
     server = await startTestServer({ devAppPort: 5173 });
     rootDir = await writePlugin(join(server.config.dataDir, "fixtures"), {
-      name: "bb-plugin-wire",
+      name: "omnyo-plugin-wire",
       serverSource: WIRE_SOURCE,
     });
     const entry = await server.pluginService.installPath(rootDir);
-    expect(entry.status).toBe("running");
+    expect(entry.status, entry.statusDetail ?? undefined).toBe("running");
   });
 
   afterEach(async () => {
@@ -847,10 +911,13 @@ describe("plugin WebSocket routes", () => {
     const plainGet = await fetch(
       `${server.baseUrl}/api/v1/plugins/wire/http/socket`,
     );
+
     expect(plainGet.status).toBe(404);
+
     const plainThrowingGet = await fetch(
       `${server.baseUrl}/api/v1/plugins/wire/http/boom-socket`,
     );
+
     expect(plainThrowingGet.status).toBe(404);
 
     const post = await fetch(
@@ -861,12 +928,14 @@ describe("plugin WebSocket routes", () => {
         body: JSON.stringify({ value: 42 }),
       },
     );
+
     expect(await post.json()).toEqual({ http: { value: 42 } });
 
     const connection = await openPluginWebSocketWithFirstMessage(
       pluginWebSocketUrl(server.baseUrl, "/socket"),
       { headers: { "x-test-marker": "connected" } },
     );
+
     const { socket } = connection;
     sockets.add(socket);
     const opened = await connection.firstMessage;
@@ -899,12 +968,14 @@ describe("plugin WebSocket routes", () => {
     await expect(rejectedPluginWebSocketStatus(guardedUrl)).resolves.toBe(401);
     const token = await server.pluginService.httpToken("wire");
     expect(token).toBeDefined();
+
     const guardedConnection = await openPluginWebSocketWithFirstMessage(
       guardedUrl,
       {
-        headers: { "x-bb-plugin-token": token ?? "" },
+        headers: { "x-omnyo-plugin-token": token ?? "" },
       },
     );
+
     const { socket: guarded } = guardedConnection;
     sockets.add(guarded);
     expect(String((await guardedConnection.firstMessage).data)).toBe("guarded");
@@ -912,6 +983,7 @@ describe("plugin WebSocket routes", () => {
     const queryConnection = await openPluginWebSocketWithFirstMessage(
       `${guardedUrl}?token=${encodeURIComponent(token ?? "")}`,
     );
+
     const { socket: queryAuthenticated } = queryConnection;
     sockets.add(queryAuthenticated);
     expect(String((await queryConnection.firstMessage).data)).toBe("guarded");
@@ -920,6 +992,7 @@ describe("plugin WebSocket routes", () => {
       pluginWebSocketUrl(server.baseUrl, "/open-socket"),
       { origin: EVIL_ORIGIN },
     );
+
     const { socket: open } = openConnection;
     sockets.add(open);
     expect(String((await openConnection.firstMessage).data)).toBe("open");
@@ -935,6 +1008,7 @@ describe("plugin WebSocket routes", () => {
     const socket = await openPluginWebSocket(
       pluginWebSocketUrl(server.baseUrl, "/event-boom"),
     );
+
     sockets.add(socket);
     socket.send("boom");
     await vi.waitFor(() => {
@@ -953,14 +1027,17 @@ describe("plugin WebSocket routes", () => {
     const connection = await openPluginWebSocketWithFirstMessage(
       pluginWebSocketUrl(server.baseUrl, "/socket"),
     );
+
     const { socket } = connection;
     sockets.add(socket);
     await connection.firstMessage;
+
     const closed = new Promise<{ code: number; reason: string }>((resolve) => {
       socket.once("close", (code, reason) =>
         resolve({ code, reason: reason.toString() }),
       );
     });
+
     await writeFile(
       join(rootDir, "server.ts"),
       `export default function plugin() {}`,

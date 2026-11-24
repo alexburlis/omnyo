@@ -1,15 +1,20 @@
 const page = await browser.getPage("main");
+
 if (!page.url().includes("plugins--composer-actions--narrow-usage-actions")) {
   throw new Error("Open the Narrow usage actions story in preview mode first");
 }
+
 await page.waitForSelector("[data-plugin-composer-action]");
+
 await page.evaluate(() => document.fonts.ready);
+
 let sent = Number(
   await page.$eval(
     '[aria-label="Sent messages"]',
     (element) => element.textContent,
   ),
 );
+
 for (const variant of ["standard", "wide", "none"]) {
   await page.select('[aria-label="Plugin action fixture"]', variant);
   await page.waitForFunction(
@@ -19,6 +24,7 @@ for (const variant of ["standard", "wide", "none"]) {
     {},
     variant === "standard" ? 3 : variant === "wide" ? 1 : 0,
   );
+
   for (const [width, height] of [
     [320, 740],
     [360, 740],
@@ -40,17 +46,21 @@ for (const variant of ["standard", "wide", "none"]) {
           requestAnimationFrame(() => requestAnimationFrame(resolve)),
         ),
     );
+
     const geometry = await page.evaluate(() => {
       const row = document.querySelector("[data-promptbox-action-row]");
       const send = document.querySelector("[data-promptbox-submit-action]");
+
       const controls = [
         ...document.querySelectorAll(
           "[data-promptbox-action-row] button, [data-plugin-composer-action]",
         ),
       ];
+
       if (!row || !send) throw new Error("Missing composer controls");
       const rowRect = row.getBoundingClientRect();
       const sendRect = send.getBoundingClientRect();
+
       return {
         row: rowRect.toJSON(),
         send: sendRect.toJSON(),
@@ -66,7 +76,9 @@ for (const variant of ["standard", "wide", "none"]) {
         ),
       };
     });
+
     console.log(JSON.stringify({ variant, width, height, ...geometry }));
+
     for (const control of geometry.controls) {
       if (
         control.rect.width <= 0 ||
@@ -79,6 +91,7 @@ for (const variant of ["standard", "wide", "none"]) {
         );
       }
     }
+
     for (const [index, control] of geometry.controls.entries()) {
       for (const other of geometry.controls.slice(index + 1)) {
         if (
@@ -93,6 +106,7 @@ for (const variant of ["standard", "wide", "none"]) {
         }
       }
     }
+
     if (!geometry.hit)
       throw new Error(`${width}x${height}: Send is not tappable`);
     await page.touchscreen.tap(
@@ -110,6 +124,7 @@ for (const variant of ["standard", "wide", "none"]) {
     );
   }
 }
+
 console.log(
   "PASS: composer controls stay contained, non-overlapping and tappable",
 );

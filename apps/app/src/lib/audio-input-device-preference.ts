@@ -2,7 +2,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { createLocalStorageSyncStorage } from "./browser-storage";
 
-const AUDIO_INPUT_DEVICE_STORAGE_KEY = "bb.voiceInput.audioInputDeviceId";
+const AUDIO_INPUT_DEVICE_STORAGE_KEY = "omnyo.voiceInput.audioInputDeviceId";
 
 export type PreferredAudioInputDeviceId = string | null;
 
@@ -23,6 +23,7 @@ export function parsePreferredAudioInputDeviceId(
   if (storedValue === null) {
     return initialValue;
   }
+
   return isStoredAudioInputDeviceId(storedValue) ? storedValue : initialValue;
 }
 
@@ -72,8 +73,10 @@ export async function requestAudioInputStream(
   preferredDeviceId: PreferredAudioInputDeviceId,
 ): Promise<MediaStream> {
   let lastError: unknown;
+
   const candidates =
     preferredDeviceId === null ? [null] : [preferredDeviceId, null];
+
   for (const deviceId of candidates) {
     try {
       return await mediaDevices.getUserMedia(
@@ -84,11 +87,14 @@ export async function requestAudioInputStream(
       lastError = error;
     }
   }
+
   const devices = await mediaDevices.enumerateDevices();
   const tried = new Set([preferredDeviceId, "default", ""]);
+
   for (const device of devices) {
     if (device.kind !== "audioinput" || tried.has(device.deviceId)) continue;
     tried.add(device.deviceId);
+
     try {
       return await mediaDevices.getUserMedia(
         buildAudioInputConstraints(device.deviceId),
@@ -98,6 +104,7 @@ export async function requestAudioInputStream(
       lastError = error;
     }
   }
+
   throw lastError;
 }
 

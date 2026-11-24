@@ -7,22 +7,22 @@ import {
 import {
   COARSE_POINTER_HEADER_ICON_BUTTON_CLASS,
   COARSE_POINTER_HEADER_REDUCED_GLYPH_ICON_BUTTON_CLASS,
-} from "@bb/shared-ui/coarse-pointer-sizing";
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+} from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import {
   BROWSER_COLLAPSED_HEADER_RESERVE_CLASS,
   CHROME_ROW_CLASS,
   CHROME_ROW_HEIGHT_CLASS,
-  getBbDesktopInfo,
+  getOmnyoDesktopInfo,
   MACOS_CHROME_CONTROL_AXIS_CLASS,
   MACOS_COLLAPSED_TOP_LEFT_RESERVE_CLASS,
   MACOS_WINDOW_DRAG_CLASS,
   MACOS_WINDOW_NO_DRAG_CLASS,
   shouldReserveMacosTrafficLights,
   shouldUseMacosDesktopChrome,
-} from "@/lib/bb-desktop";
+} from "@/lib/omnyo-desktop";
 import { useDesktopWindowState } from "@/hooks/useDesktopWindowState";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { scrollPageToTop } from "@/lib/page-scroll-to-top";
 
 export const HEADER_ICON_BUTTON_CLASS = COARSE_POINTER_HEADER_ICON_BUTTON_CLASS;
@@ -56,16 +56,20 @@ export function AppPageHeader({
   const isCompactViewport = useIsCompactViewport();
   const localHeaderRef = useRef<HTMLElement>(null);
   const composedHeaderRef = useComposedRefs(headerRef, localHeaderRef);
+
   const handleScrollToTop = () => {
     if (localHeaderRef.current) scrollPageToTop(localHeaderRef.current);
   };
-  const [desktopInfo] = useState(getBbDesktopInfo);
+
+  const [desktopInfo] = useState(getOmnyoDesktopInfo);
   const desktopWindowState = useDesktopWindowState();
   const usesDesktopChrome = shouldUseMacosDesktopChrome(desktopInfo);
+
   const reserveMacosTrafficLights = shouldReserveMacosTrafficLights({
     desktopInfo,
     windowState: desktopWindowState,
   });
+
   const windowTopLeftReserveClassName =
     ownsWindowTopLeft && (isCompactViewport || !isSidebarShowing)
       ? !sidebarKeepsCollapsedRail &&
@@ -73,9 +77,11 @@ export function AppPageHeader({
           ? MACOS_COLLAPSED_TOP_LEFT_RESERVE_CLASS
           : BROWSER_COLLAPSED_HEADER_RESERVE_CLASS)
       : false;
+
   return (
     <header
       ref={composedHeaderRef}
+      data-app-page-header=""
       onClick={
         isCompactViewport
           ? (event) => {
@@ -88,6 +94,7 @@ export function AppPageHeader({
               ) {
                 return;
               }
+
               handleScrollToTop();
             }
           : undefined
@@ -116,12 +123,14 @@ export function AppPageHeader({
           "relative z-10 gap-1 md:gap-2",
           isCompactViewport && "pointer-events-none",
           usesDesktopChrome && MACOS_CHROME_CONTROL_AXIS_CLASS,
-          "transition-[padding] duration-200 ease-linear",
           windowTopLeftReserveClassName,
         )}
       >
         {center ? (
-          <div className="flex min-w-0 flex-1 items-center">
+          <div
+            data-app-page-header-center=""
+            className="-my-1 -ml-2 flex min-w-16 flex-1 items-center overflow-hidden py-1 pl-2 pr-1"
+          >
             <div className="pointer-events-auto flex min-w-0 max-w-full items-center gap-2">
               {center}
             </div>
@@ -132,7 +141,7 @@ export function AppPageHeader({
         {actions ? (
           <div
             className={cn(
-              "pointer-events-auto flex shrink-0 items-center gap-1",
+              "pointer-events-auto flex min-w-0 shrink items-center gap-1",
               usesDesktopChrome && MACOS_WINDOW_NO_DRAG_CLASS,
             )}
           >

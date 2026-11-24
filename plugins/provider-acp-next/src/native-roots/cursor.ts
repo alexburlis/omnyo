@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   experimental_resolveVendorPluginRoots,
   type ExperimentalVendorPlugin,
-} from "@get-bb/plugin-sdk/host";
+} from "@omnyo/plugin-sdk/host";
 import { z } from "zod";
 import type { AcpNativeRootsResolver } from "./resolver.js";
 import { readJsonFile } from "./shared.js";
@@ -37,10 +37,12 @@ async function readCursorPluginManifest(
       path.join(pluginRootPath, relativePath),
       cursorPluginManifestSchema,
     );
+
     if (manifest !== null) {
       return manifest;
     }
   }
+
   return null;
 }
 
@@ -78,20 +80,26 @@ async function resolveLocalCursorPlugins(
   const entries = await readDirectoryEntries(localPluginsPath);
 
   const plugins: ExperimentalVendorPlugin[] = [];
+
   for (const entry of entries.sort((left, right) =>
     left.name.localeCompare(right.name),
   )) {
     const pluginRootPath = path.join(localPluginsPath, entry.name);
     const stat = await fs.stat(pluginRootPath).catch(() => null);
+
     if (stat === null || !stat.isDirectory()) {
       continue;
     }
+
     const manifest = await readCursorPluginManifest(pluginRootPath);
+
     if (manifest === null) {
       continue;
     }
+
     plugins.push(cursorVendorPlugin(pluginRootPath, manifest));
   }
+
   return plugins;
 }
 
@@ -100,44 +108,55 @@ async function resolveMarketplaceCursorPlugins(
 ): Promise<ExperimentalVendorPlugin[]> {
   const cachePath = path.join(homeDir, ".cursor", "plugins", "cache");
   const plugins: ExperimentalVendorPlugin[] = [];
+
   for (const marketplace of sortedDirectoryEntries(
     await readDirectoryEntries(cachePath),
   )) {
     const marketplacePath = path.join(cachePath, marketplace.name);
+
     for (const pluginEntry of sortedDirectoryEntries(
       await readDirectoryEntries(marketplacePath),
     )) {
       const pluginPath = path.join(marketplacePath, pluginEntry.name);
       const candidates: CursorPluginCandidate[] = [];
+
       for (const version of sortedDirectoryEntries(
         await readDirectoryEntries(pluginPath),
       )) {
         const pluginRootPath = path.join(pluginPath, version.name);
+
         const completion = await fs
           .lstat(path.join(pluginRootPath, ".cache-complete"))
           .catch(() => null);
+
         if (completion === null || !completion.isFile()) {
           continue;
         }
+
         const manifest = await readCursorPluginManifest(pluginRootPath);
+
         if (manifest === null) {
           continue;
         }
+
         candidates.push({
           completedAtMs: completion.mtimeMs,
           plugin: cursorVendorPlugin(pluginRootPath, manifest),
         });
       }
+
       const latest = candidates.sort(
         (left, right) =>
           right.completedAtMs - left.completedAtMs ||
           right.plugin.rootPath.localeCompare(left.plugin.rootPath),
       )[0];
+
       if (latest !== undefined) {
         plugins.push(latest.plugin);
       }
     }
   }
+
   return plugins;
 }
 
@@ -146,14 +165,18 @@ async function deduplicateCursorPlugins(
 ): Promise<ExperimentalVendorPlugin[]> {
   const uniquePlugins: ExperimentalVendorPlugin[] = [];
   const seen = new Set<string>();
+
   for (const plugin of plugins) {
     const key = await fs.realpath(plugin.rootPath).catch(() => plugin.rootPath);
+
     if (seen.has(key)) {
       continue;
     }
+
     seen.add(key);
     uniquePlugins.push(plugin);
   }
+
   return uniquePlugins;
 }
 
@@ -164,6 +187,7 @@ export const resolveCursorNativeRoots: AcpNativeRootsResolver = async (
     ...(await resolveLocalCursorPlugins(args.homeDir)),
     ...(await resolveMarketplaceCursorPlugins(args.homeDir)),
   ]);
+
   return experimental_resolveVendorPluginRoots({
     plugins,
     layout: "claude",

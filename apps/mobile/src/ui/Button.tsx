@@ -6,6 +6,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 import type { NativeThemeTokens } from "@/theme/theme.native";
 import { cn } from "./cn";
 import { Icon, type IconName } from "./Icon";
+import { MOBILE_PRESS_OPACITY } from "./motion";
 import { Spinner } from "./Spinner";
 import { Text } from "./Text";
 
@@ -55,6 +56,7 @@ const androidTextVariants = cva("font-medium", {
 export type ButtonVariant = NonNullable<
   VariantProps<typeof androidButtonVariants>["variant"]
 >;
+
 export type ButtonSize = NonNullable<
   VariantProps<typeof androidButtonVariants>["size"]
 >;
@@ -143,7 +145,6 @@ const IOS_ICON_SIZE: Record<ButtonSize, number> = {
 };
 
 const TINT_ALPHA = 0.15;
-const PRESS_OPACITY = 0.6;
 
 export function Button({
   variant: variantProp,
@@ -166,9 +167,11 @@ export function Button({
   const [pressing, setPressing] = useState(false);
   const isDisabled = disabled || loading;
   const appearance = IOS_APPEARANCE[variant];
+
   const contentColor = IS_IOS
     ? tokens[IOS_TEXT_TOKEN[appearance]]
     : tokens[ANDROID_TEXT_TOKEN[variant]];
+
   const glyph = loading ? (
     <Spinner size="small" color={contentColor} />
   ) : icon ? (
@@ -185,7 +188,7 @@ export function Button({
         appearance === "tinted"
           ? { backgroundColor: withAlpha(tokens.primary, TINT_ALPHA) }
           : null,
-        pressing ? { opacity: PRESS_OPACITY } : null,
+        pressing ? { opacity: MOBILE_PRESS_OPACITY } : null,
       ]
     : undefined;
 

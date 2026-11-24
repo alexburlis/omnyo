@@ -12,6 +12,7 @@ import { useAppNavigationHost } from "@/lib/app-navigation-host";
 import { AppFileExternalNavigationHost } from "./AppFileExternalNavigationHost";
 
 const openPreferred = vi.hoisted(() => vi.fn());
+
 const recordAccepted = vi.fn();
 
 vi.mock("@/hooks/useResolvedLiveFileTarget", () => ({
@@ -32,6 +33,7 @@ vi.mock("@/hooks/useLocalOpenTargets", () => ({
 
 function Probe() {
   const navigation = useAppNavigationHost();
+
   return (
     <>
       <button
@@ -60,6 +62,7 @@ function Probe() {
             },
             location: { kind: "line", line: 10, column: 2 },
           });
+
           const secondAccepted = navigation.openFileExternally({
             target: {
               kind: "workspace",
@@ -68,6 +71,7 @@ function Probe() {
             },
             location: { kind: "line", line: 20, column: 4 },
           });
+
           recordAccepted(firstAccepted, secondAccepted);
         }}
       >

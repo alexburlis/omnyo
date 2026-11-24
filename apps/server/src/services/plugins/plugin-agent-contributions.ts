@@ -1,6 +1,6 @@
-import type { ToolCallResponse } from "@bb/domain";
-import type { HostDaemonContributedEnvEntry } from "@bb/host-daemon-contract";
-import type { ExperimentalPluginProviderEnvContext } from "@get-bb/plugin-sdk";
+import type { ToolCallResponse } from "@omnyo/domain";
+import type { HostDaemonContributedEnvEntry } from "@omnyo/host-daemon-contract";
+import type { ExperimentalPluginProviderEnvContext } from "@omnyo/plugin-sdk";
 import type {
   PluginAgentConfigurationContext,
   PluginAgentToolContext,
@@ -28,6 +28,7 @@ type PluginAgentContributions = Pick<
       | "resolveAgentConfiguration"
       | "resolveProviderEnv"
       | "resolveProviderEnvHealth"
+      | "resolveProviderModelNotice"
     >
   >;
 
@@ -52,6 +53,7 @@ export async function resolvePluginAgentConfiguration(args: {
   skillIdsByPlugin: ReadonlyMap<string, readonly string[]>;
 }) {
   const active = contributions;
+
   if (!active?.resolveAgentConfiguration) {
     return {
       tools: active?.listAgentTools() ?? [],
@@ -59,6 +61,7 @@ export async function resolvePluginAgentConfiguration(args: {
       dynamicInstructions: [] as Array<{ pluginId: string; text: string }>,
     };
   }
+
   return active.resolveAgentConfiguration(args);
 }
 
@@ -74,7 +77,9 @@ export async function resolvePluginProviderEnv(args: {
   context: ExperimentalPluginProviderEnvContext;
 }): Promise<HostDaemonContributedEnvEntry[]> {
   const active = contributions;
+
   if (!active?.resolveProviderEnv) return [];
+
   return (await active.resolveProviderEnv(args)).entries.map((entry) => ({
     name: entry.name,
     value: entry.value,
@@ -88,8 +93,26 @@ export async function resolvePluginProviderEnvHealth(args: {
   hostId: string;
 }) {
   const active = contributions;
+
   if (!active?.resolveProviderEnvHealth) return null;
+
   return active.resolveProviderEnvHealth({
+    providerId: args.providerId,
+    context: {
+      hostId: args.hostId,
+    },
+  });
+}
+
+export async function resolvePluginProviderModelNotice(args: {
+  providerId: string;
+  hostId: string;
+}) {
+  const active = contributions;
+
+  if (!active?.resolveProviderModelNotice) return null;
+
+  return active.resolveProviderModelNotice({
     providerId: args.providerId,
     context: {
       hostId: args.hostId,
@@ -108,12 +131,14 @@ export async function resolvePluginMention(args: {
   itemId: string;
 }): Promise<PluginMentionResolveResult> {
   const active = contributions;
+
   if (!active) {
     return {
       ok: false,
       error: "plugin mention resolution is unavailable on this server",
     };
   }
+
   return active.resolveMention(args);
 }
 
@@ -122,6 +147,7 @@ export async function invokePluginAgentTool(
   args: { input: unknown; ctx: PluginAgentToolContext },
 ): Promise<ToolCallResponse> {
   const active = contributions;
+
   if (!active) {
     return {
       success: false,
@@ -130,6 +156,7 @@ export async function invokePluginAgentTool(
       ],
     };
   }
+
   return active.invokeAgentTool({
     pluginId: tool.pluginId,
     record: tool.record,

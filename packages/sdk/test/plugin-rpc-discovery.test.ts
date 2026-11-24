@@ -1,17 +1,19 @@
 import { expect, it } from "vitest";
 import { z } from "zod";
-import { createBbSdk } from "../src/core.js";
+import { createOmnyoSdk } from "../src/core.js";
 import { createHttpTransport } from "../src/transport-http.js";
 
 it("discovers published methods with filters and calls using a copied response schema", async () => {
   const requests: string[] = [];
-  const sdk = createBbSdk({
+
+  const sdk = createOmnyoSdk({
     transport: createHttpTransport({
-      baseUrl: "http://bb.test",
+      baseUrl: "http://omnyo.test",
       runtime: "node",
       fetch: async (input) => {
         const url = String(input);
         requests.push(url);
+
         return Response.json(
           url.includes("/rpc?")
             ? [
@@ -30,10 +32,12 @@ it("discovers published methods with filters and calls using a copied response s
       },
     }),
   });
+
   const [source] = await sdk.plugins.experimental_discoverRpc({
     pluginId: "pool",
     method: "usage.v1.get",
   });
+
   expect(source?.registrationDescription).toBe("Shared accounts");
   expect(requests[0]).toContain("pluginId=pool&method=usage.v1.get");
   await expect(
@@ -56,16 +60,19 @@ it("discovers published methods with filters and calls using a copied response s
 
 it("omits absent and explicitly undefined discovery filters", async () => {
   const urls: URL[] = [];
-  const sdk = createBbSdk({
+
+  const sdk = createOmnyoSdk({
     transport: createHttpTransport({
-      baseUrl: "http://bb.test",
+      baseUrl: "http://omnyo.test",
       runtime: "node",
       fetch: async (input) => {
         urls.push(new URL(String(input)));
+
         return Response.json([]);
       },
     }),
   });
+
   await sdk.plugins.experimental_discoverRpc();
   await sdk.plugins.experimental_discoverRpc({
     method: undefined,
@@ -83,9 +90,9 @@ it("omits absent and explicitly undefined discovery filters", async () => {
 });
 
 it("cancels an in-flight discovery request when its signal aborts", async () => {
-  const sdk = createBbSdk({
+  const sdk = createOmnyoSdk({
     transport: createHttpTransport({
-      baseUrl: "http://bb.test",
+      baseUrl: "http://omnyo.test",
       runtime: "node",
       fetch: (_input, init) =>
         new Promise<Response>((_resolve, reject) => {
@@ -95,11 +102,14 @@ it("cancels an in-flight discovery request when its signal aborts", async () => 
         }),
     }),
   });
+
   const controller = new AbortController();
+
   const discovery = sdk.plugins.experimental_discoverRpc({
     method: "usage.v1.get",
     signal: controller.signal,
   });
+
   controller.abort(new Error("unmounted"));
   await expect(discovery).rejects.toThrow("unmounted");
 });

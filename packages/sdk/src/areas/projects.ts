@@ -3,9 +3,12 @@ import type {
   MachineEnvironmentSet,
   ProjectMachineEnvironmentList,
   CommandListResponse,
+  CommandCatalogResponse,
   CopyProjectAttachmentsRequest,
+  RetainProjectAttachmentsRequest,
   CreateProjectRequest,
   CreateProjectSourceRequest,
+  ProjectAttachmentContentQuery,
   ProjectBranchesResponse,
   ProjectBranchesQuery,
   ProjectCommandsQuery,
@@ -23,9 +26,13 @@ import type {
   UploadedPromptAttachment,
   WorkspacePathListResponse,
   WorkspaceFileListResponse,
-} from "@bb/server-contract";
-import { uploadedPromptAttachmentSchema } from "@bb/server-contract";
-import type { ProjectExecutionDefaults, ProjectSource } from "@bb/domain";
+} from "@omnyo/server-contract";
+import { uploadedPromptAttachmentSchema } from "@omnyo/server-contract";
+import {
+  PROMPT_ATTACHMENT_MAX_BYTES,
+  type ProjectExecutionDefaults,
+  type ProjectSource,
+} from "@omnyo/domain";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 export interface ProjectListArgs {
@@ -104,6 +111,7 @@ export interface ProjectSidebarBootstrapArgs {
 export interface ProjectAttachmentFileLike {
   arrayBuffer(): Promise<ArrayBuffer>;
   readonly name: string;
+  readonly size?: number;
   readonly type?: string;
 }
 
@@ -114,6 +122,7 @@ export type ProjectAttachmentUploadFile =
   | Uint8Array;
 
 interface ProjectAttachmentUploadArgsBase {
+  signal?: AbortSignal;
   mimeType?: string;
   projectId: string;
 }
@@ -130,14 +139,18 @@ export type ProjectAttachmentUploadArgs = ProjectAttachmentUploadArgsBase &
       }
   );
 
-export interface ProjectAttachmentReadArgs {
-  path: string;
+export interface ProjectAttachmentReadArgs extends ProjectAttachmentContentQuery {
   projectId: string;
   signal?: AbortSignal;
 }
 
 export interface ProjectAttachmentCopyArgs extends CopyProjectAttachmentsRequest {
   projectId: string;
+}
+
+export interface ProjectAttachmentRetainArgs extends RetainProjectAttachmentsRequest {
+  projectId: string;
+  signal?: AbortSignal;
 }
 
 export type ProjectSourceAddArgs = CreateProjectSourceRequest & {
@@ -155,34 +168,54 @@ export interface ProjectSourceDeleteArgs {
 }
 
 export type ProjectBranchesResult = ProjectBranchesResponse;
+
 export interface ProjectAttachmentReadResult {
   bytes: Uint8Array;
   mimeType: string;
   sizeBytes: number;
 }
+
 export type ProjectAttachmentUploadResult = UploadedPromptAttachment;
+
 export type ProjectCommandsResult = CommandListResponse;
+
+export type ProjectCommandCatalogResult = CommandCatalogResponse;
+
 export type ProjectCreateResult = ProjectResponse;
+
 export type ProjectDefaultExecutionOptionsResult = ProjectExecutionDefaults | null;
+
 export type ProjectDeleteResult = { ok: true };
+
 export interface ProjectFileContentResult {
   content: string;
   contentEncoding: "utf8" | "base64";
   mimeType: string;
   sizeBytes: number;
 }
+
 export type ProjectFilesResult = WorkspaceFileListResponse;
+
 export type ProjectGetResult = ProjectResponse;
+
 export type ProjectListResult =
   | ProjectResponse[]
   | ProjectWithThreadsResponse[];
+
 export type ProjectPathsResult = WorkspacePathListResponse;
+
 export type ProjectPromptHistoryResult = PromptHistoryResponse;
+
 export type ProjectReorderResult = ProjectResponse[];
+
 export type ProjectSidebarBootstrapResult = SidebarBootstrapResponse;
+
 export type ProjectSourceAddResult = ProjectSource;
+
 export type ProjectSourceDeleteResult = { ok: true };
+
 export type ProjectSourceUpdateResult = ProjectSource;
+
 export type ProjectUpdateResult = ProjectResponse;
 
 export interface ProjectSourcesArea {
@@ -193,6 +226,7 @@ export interface ProjectSourcesArea {
 
 export interface ProjectAttachmentsArea {
   copy(args: ProjectAttachmentCopyArgs): Promise<void>;
+  experimental_retain(args: ProjectAttachmentRetainArgs): Promise<void>;
   read(args: ProjectAttachmentReadArgs): Promise<ProjectAttachmentReadResult>;
   upload(
     args: ProjectAttachmentUploadArgs,
@@ -216,6 +250,9 @@ export interface ProjectsArea {
   attachments: ProjectAttachmentsArea;
   branches(args: ProjectBranchesArgs): Promise<ProjectBranchesResult>;
   commands(args: ProjectCommandsArgs): Promise<ProjectCommandsResult>;
+  commandCatalog(
+    args: ProjectCommandsArgs,
+  ): Promise<ProjectCommandCatalogResult>;
   create(args: ProjectCreateArgs): Promise<ProjectCreateResult>;
   defaultExecutionOptions(
     args: ProjectDefaultExecutionOptionsArgs,
@@ -240,6 +277,7 @@ export interface ProjectsArea {
 function projectUpdateJson(args: ProjectUpdateArgs): UpdateProjectRequest {
   return {
     name: args.name,
+    customIcon: args.customIcon,
   };
 }
 
@@ -249,6 +287,7 @@ function projectSourceAddJson(
   if (args.type === "local_path") {
     return { hostId: args.hostId, path: args.path, type: args.type };
   }
+
   return {
     hostId: args.hostId,
     type: args.type,
@@ -273,6 +312,7 @@ function embeddedAttachmentFilename(
   if ("name" in clientFile && typeof clientFile.name === "string") {
     return clientFile.name;
   }
+
   return undefined;
 }
 
@@ -291,6 +331,7 @@ function embeddedAttachmentMimeType(
   if ("type" in clientFile && typeof clientFile.type === "string") {
     return clientFile.type;
   }
+
   return undefined;
 }
 
@@ -306,23 +347,28 @@ async function attachmentBytes(
   if (hasAttachmentArrayBuffer(clientFile)) {
     return clientFile.arrayBuffer();
   }
+
   if (ArrayBuffer.isView(clientFile)) {
     return Uint8Array.from(clientFile).buffer;
   }
+
   return clientFile.slice(0);
 }
 
 function resolveAttachmentFilename(input: ProjectAttachmentUploadArgs): string {
   const filename =
     input.filename ?? embeddedAttachmentFilename(input.clientFile);
+
   if (!filename || filename.trim().length === 0) {
     throw new Error("Project attachment filename must not be empty");
   }
+
   return filename;
 }
 
 function encodeProjectFilePath(path: string): string {
   const segments = path.split("/");
+
   if (
     path.includes("\0") ||
     path.includes("\\") ||
@@ -332,6 +378,7 @@ function encodeProjectFilePath(path: string): string {
   ) {
     throw new Error(`Invalid file path: ${path}`);
   }
+
   return segments.map(encodeURIComponent).join("/");
 }
 
@@ -339,8 +386,10 @@ function isUtf8FileContent(bytes: Uint8Array, mimeType: string): boolean {
   if (mimeType.startsWith("image/") && !mimeType.startsWith("image/svg+xml")) {
     return false;
   }
+
   try {
     new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+
     return true;
   } catch {
     return false;
@@ -352,24 +401,38 @@ const BASE64_ALPHABET =
 
 function encodeBase64(bytes: Uint8Array): string {
   let encoded = "";
+
   for (let index = 0; index < bytes.length; index += 3) {
     const first = bytes[index] ?? 0;
     const second = bytes[index + 1];
     const third = bytes[index + 2];
+
     const block =
       (first << 16) | ((second ?? 0) << 8) | (third === undefined ? 0 : third);
+
     encoded += BASE64_ALPHABET.charAt((block >> 18) & 63);
     encoded += BASE64_ALPHABET.charAt((block >> 12) & 63);
     encoded +=
       second === undefined ? "=" : BASE64_ALPHABET.charAt((block >> 6) & 63);
     encoded += third === undefined ? "=" : BASE64_ALPHABET.charAt(block & 63);
   }
+
   return encoded;
 }
 
 export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
   const { transport } = args;
+
   const attachments: ProjectAttachmentsArea = {
+    async experimental_retain(input) {
+      const { projectId, signal, ...json } = input;
+      await transport.readVoid(
+        transport.api.v1.projects[":id"].attachments.retain.$post(
+          { param: { id: projectId }, json },
+          ...signalRequestArgs(signal),
+        ),
+      );
+    },
     async copy(input) {
       const { projectId, ...json } = input;
       await transport.readVoid(
@@ -384,12 +447,14 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
         transport.api.v1.projects[":id"].attachments.content.$get(
           {
             param: { id: input.projectId },
-            query: { path: input.path },
+            query: { path: input.path, thumbnailWidth: input.thumbnailWidth },
           },
           ...signalRequestArgs(input.signal),
         ),
       );
+
       const bytes = new Uint8Array(await response.arrayBuffer());
+
       return {
         bytes,
         mimeType:
@@ -399,29 +464,52 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
     },
     async upload(input) {
       const filename = resolveAttachmentFilename(input);
+      input.signal?.throwIfAborted();
+
+      const declaredSize =
+        "size" in input.clientFile
+          ? input.clientFile.size
+          : "byteLength" in input.clientFile
+            ? input.clientFile.byteLength
+            : undefined;
+
+      const requireUploadSize = (size: number | undefined) => {
+        if (size === 0) throw new RangeError(`${filename} is empty`);
+
+        if (size !== undefined && size > PROMPT_ATTACHMENT_MAX_BYTES)
+          throw new RangeError(`${filename} is over the 35MB attachment limit`);
+      };
+
+      requireUploadSize(declaredSize);
+
       const mimeType =
         input.mimeType ?? embeddedAttachmentMimeType(input.clientFile) ?? "";
-      const file =
-        input.clientFile instanceof Blob && input.clientFile.type === mimeType
-          ? input.clientFile
-          : new Blob([await attachmentBytes(input.clientFile)], {
-              type: mimeType,
-            });
+
+      const file = new Blob([await attachmentBytes(input.clientFile)], {
+        type: mimeType,
+      });
+
+      requireUploadSize(file.size);
+      input.signal?.throwIfAborted();
       const form = new FormData();
       form.set("file", file, filename);
       const baseUrl = transport.baseUrl.replace(/\/$/u, "");
+
       const response = await transport.resolve(
         transport.fetch(
           `${baseUrl}/api/v1/projects/${encodeURIComponent(input.projectId)}/attachments`,
           {
             body: form,
             method: "POST",
+            signal: input.signal,
           },
         ),
       );
+
       return uploadedPromptAttachmentSchema.parse(await response.json());
     },
   };
+
   const sources: ProjectSourcesArea = {
     async add(input) {
       return transport.readJson(
@@ -437,6 +525,7 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
           param: { id: input.projectId, sourceId: input.sourceId },
         }),
       );
+
       return { ok: true };
     },
     async update(input) {
@@ -453,6 +542,7 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
     attachments,
     async branches(input) {
       const { projectId, signal, ...query } = input;
+
       return transport.readJson(
         transport.api.v1.projects[":id"].branches.$get(
           {
@@ -465,12 +555,23 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
     },
     async commands(input) {
       const { projectId, signal, ...query } = input;
+
       return transport.readJson(
         transport.api.v1.projects[":id"].commands.$get(
           {
             param: { id: projectId },
             query,
           },
+          ...signalRequestArgs(signal),
+        ),
+      );
+    },
+    async commandCatalog(input) {
+      const { projectId, signal, ...query } = input;
+
+      return transport.readJson(
+        transport.api.v1.projects[":id"]["command-catalog"].$get(
+          { param: { id: projectId }, query },
           ...signalRequestArgs(signal),
         ),
       );
@@ -488,6 +589,7 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
           param: { id: input.projectId },
         }),
       );
+
       return { ok: true };
     },
     async defaultExecutionOptions(input) {
@@ -504,24 +606,30 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
     async fileContent(input) {
       const { projectId, path, signal, environmentId, hostId } = input;
       const filePath = encodeProjectFilePath(path);
+
       const routePath =
         environmentId !== undefined
           ? `/environments/${encodeURIComponent(environmentId)}/files/${filePath}`
           : hostId !== undefined
             ? `/projects/${encodeURIComponent(projectId)}/hosts/${encodeURIComponent(hostId)}/files/${filePath}`
             : `/projects/${encodeURIComponent(projectId)}/files/${filePath}`;
+
       const response = await transport.resolve(
         transport.fetch(
           `${transport.baseUrl.replace(/\/+$/u, "")}/api/v1${routePath}`,
           signal === undefined ? undefined : { signal },
         ),
       );
+
       const bytes = new Uint8Array(await response.arrayBuffer());
+
       const mimeType =
         response.headers.get("content-type") ?? "application/octet-stream";
+
       const contentEncoding = isUtf8FileContent(bytes, mimeType)
         ? "utf8"
         : "base64";
+
       return {
         content:
           contentEncoding === "utf8"
@@ -534,6 +642,7 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
     },
     async files(input) {
       const { projectId, signal, ...query } = input;
+
       return transport.readJson(
         transport.api.v1.projects[":id"].files.$get(
           {
@@ -587,6 +696,7 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
     },
     async list(input = {}) {
       const { signal, ...query } = input;
+
       return transport.readJson(
         transport.api.v1.projects.$get(
           {
@@ -598,6 +708,7 @@ export function createProjectsArea(args: CreateSdkAreaArgs): ProjectsArea {
     },
     async paths(input) {
       const { projectId, signal, ...query } = input;
+
       return transport.readJson(
         transport.api.v1.projects[":id"].paths.$get(
           {

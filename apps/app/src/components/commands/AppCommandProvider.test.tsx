@@ -10,7 +10,7 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultAppSettings, type AppCommandId } from "@bb/domain";
+import { defaultAppSettings, type AppCommandId } from "@omnyo/domain";
 import {
   AppCommandProvider,
   useAppCommandContext,
@@ -210,8 +210,8 @@ vi.mock("@/hooks/queries/system-queries", () => ({
   }),
 }));
 
-vi.mock("@/lib/bb-desktop", () => ({
-  getBbDesktopInfo: () => null,
+vi.mock("@/lib/omnyo-desktop", () => ({
+  getOmnyoDesktopInfo: () => null,
 }));
 
 interface HandlerProps {
@@ -233,16 +233,19 @@ function Handler({
     command,
     () => {
       testState.calls.push(name);
+
       return result;
     },
     priority,
     enabled,
   );
+
   return null;
 }
 
 function QuestionContext() {
   useAppCommandContext("questionOpen", true);
+
   return <Handler command="question.select.1" name="question" result={true} />;
 }
 
@@ -254,9 +257,12 @@ function FocusScopedHandler({ name }: { name: string }) {
     ) {
       return false;
     }
+
     testState.calls.push(name);
+
     return true;
   });
+
   return (
     <div data-command-scope={name}>
       <button type="button">{name}</button>
@@ -266,11 +272,13 @@ function FocusScopedHandler({ name }: { name: string }) {
 
 function ShortcutLabel({ command }: { command: AppCommandId }) {
   const shortcut = useAppCommandShortcut(command);
+
   return <span>{shortcut?.label}</span>;
 }
 
 function ModifierState() {
   const held = useIsAppCommandModifierHeld();
+
   return <span>{held ? "held" : "released"}</span>;
 }
 
@@ -289,7 +297,9 @@ function dispatchShortcut(): KeyboardEvent {
     ctrlKey: true,
     key: "k",
   });
+
   window.dispatchEvent(event);
+
   return event;
 }
 
@@ -449,6 +459,7 @@ describe("AppCommandProvider", () => {
       ctrlKey: true,
       key: "1",
     });
+
     window.dispatchEvent(nativeTabShortcut);
     expect(nativeTabShortcut.defaultPrevented).toBe(false);
     expect(testState.calls).toEqual([]);
@@ -460,6 +471,7 @@ describe("AppCommandProvider", () => {
       key: "!",
       shiftKey: true,
     });
+
     window.dispatchEvent(webChatShortcut);
     expect(webChatShortcut.defaultPrevented).toBe(true);
     expect(testState.calls).toEqual(["thread"]);
@@ -475,12 +487,14 @@ describe("AppCommandProvider", () => {
     );
 
     expect(screen.getByText("⌃ 1")).toBeDefined();
+
     const webChatShortcut = new KeyboardEvent("keydown", {
       bubbles: true,
       cancelable: true,
       ctrlKey: true,
       key: "1",
     });
+
     window.dispatchEvent(webChatShortcut);
     expect(webChatShortcut.defaultPrevented).toBe(true);
     expect(testState.calls).toEqual(["thread"]);
@@ -491,6 +505,7 @@ describe("AppCommandProvider", () => {
       key: "1",
       metaKey: true,
     });
+
     window.dispatchEvent(nativeTabShortcut);
     expect(nativeTabShortcut.defaultPrevented).toBe(false);
   });
@@ -510,6 +525,7 @@ describe("AppCommandProvider", () => {
       );
       const composer = screen.getByLabelText("Composer");
       composer.focus();
+
       const event = new KeyboardEvent("keydown", {
         bubbles: true,
         cancelable: true,
@@ -576,9 +592,11 @@ describe("AppCommandProvider", () => {
         <FocusScopedHandler name="side" />
       </>,
     );
+
     const mainButton = document.querySelector<HTMLButtonElement>(
       '[data-command-scope="main"] button',
     );
+
     expect(mainButton).not.toBeNull();
     mainButton?.focus();
 
@@ -588,6 +606,7 @@ describe("AppCommandProvider", () => {
       ctrlKey: true,
       key: "k",
     });
+
     mainButton?.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
@@ -605,9 +624,11 @@ describe("AppCommandProvider", () => {
       </>,
     );
     const outside = document.querySelector<HTMLButtonElement>("button");
+
     const inside = document.querySelector<HTMLButtonElement>(
       "[data-app-browser] button",
     );
+
     const dispatchReload = (target: HTMLButtonElement | null) => {
       const event = new KeyboardEvent("keydown", {
         bubbles: true,
@@ -615,7 +636,9 @@ describe("AppCommandProvider", () => {
         ctrlKey: true,
         key: "r",
       });
+
       target?.dispatchEvent(event);
+
       return event;
     };
 
@@ -643,6 +666,7 @@ describe("AppCommandProvider", () => {
           <div contentEditable data-testid="composer" />
         </>,
       );
+
       const dispatchChord = (target: Element | null) => {
         const event = new KeyboardEvent("keydown", {
           bubbles: true,
@@ -651,7 +675,9 @@ describe("AppCommandProvider", () => {
           key,
           shiftKey,
         });
+
         target?.dispatchEvent(event);
+
         return event;
       };
 
@@ -676,6 +702,7 @@ describe("AppCommandProvider", () => {
         </div>
       </>,
     );
+
     const event = new KeyboardEvent("keydown", {
       bubbles: true,
       cancelable: true,
@@ -683,6 +710,7 @@ describe("AppCommandProvider", () => {
       key: "o",
       shiftKey: true,
     });
+
     screen.getByText("Drawer entry").dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);

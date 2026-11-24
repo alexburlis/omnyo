@@ -26,16 +26,18 @@ afterEach(() => {
 
 function renderPermissionModePreference() {
   const store = createStore();
+
   const wrapper = ({ children }: { children: ReactNode }) => (
     <Provider store={store}>{children}</Provider>
   );
+
   return renderHook(() => usePromptBoxPermissionModePreference(), { wrapper });
 }
 
 describe("usePromptBoxPermissionModePreference", () => {
   it("migrates a stored legacy workspace-write preference to accept-edits", () => {
     window.localStorage.setItem(
-      "bb.promptbox.permission-mode",
+      "omnyo.promptbox.permission-mode",
       "workspace-write",
     );
     const { result } = renderPermissionModePreference();
@@ -43,13 +45,13 @@ describe("usePromptBoxPermissionModePreference", () => {
   });
 
   it("drops a stored legacy readonly preference instead of widening it", () => {
-    window.localStorage.setItem("bb.promptbox.permission-mode", "readonly");
+    window.localStorage.setItem("omnyo.promptbox.permission-mode", "readonly");
     const { result } = renderPermissionModePreference();
     expect(result.current.value).toBe("");
   });
 
   it("keeps a stored current preset", () => {
-    window.localStorage.setItem("bb.promptbox.permission-mode", "auto");
+    window.localStorage.setItem("omnyo.promptbox.permission-mode", "auto");
     const { result } = renderPermissionModePreference();
     expect(result.current.value).toBe("auto");
   });
@@ -57,12 +59,15 @@ describe("usePromptBoxPermissionModePreference", () => {
 
 function renderSelections(projectId = "project-a") {
   const store = createStore();
+
   const wrapper = ({ children }: { children: ReactNode }) => (
     <Provider store={store}>{children}</Provider>
   );
+
   return renderHook(
     ({ projectId }) => {
       const provider = usePromptBoxProviderPreference();
+
       return {
         provider,
         model: usePromptBoxModelPreference(provider.value),
@@ -80,43 +85,43 @@ function renderSelections(projectId = "project-a") {
 const selections = [
   {
     field: "machine",
-    key: "bb.promptbox.machine-project-a-1",
+    key: "omnyo.promptbox.machine-project-a-1",
     initial: "host-a",
     remote: "host-b",
   },
   {
     field: "provider",
-    key: "bb.promptbox.provider",
+    key: "omnyo.promptbox.provider",
     initial: "codex",
     remote: "claude-code",
   },
   {
     field: "model",
-    key: "bb.promptbox.model-codex-1",
+    key: "omnyo.promptbox.model-codex-1",
     initial: "model-a",
     remote: "model-b",
   },
   {
     field: "reasoning",
-    key: "bb.promptbox.reasoning-codex-1",
+    key: "omnyo.promptbox.reasoning-codex-1",
     initial: "high",
     remote: "low",
   },
   {
     field: "serviceTier",
-    key: "bb.promptbox.service-tier",
+    key: "omnyo.promptbox.service-tier",
     initial: "fast",
     remote: "default",
   },
   {
     field: "permission",
-    key: "bb.promptbox.permission-mode",
+    key: "omnyo.promptbox.permission-mode",
     initial: "auto",
     remote: "accept-edits",
   },
   {
     field: "environment",
-    key: "bb.promptbox.environment-project-a-1",
+    key: "omnyo.promptbox.environment-project-a-1",
     initial: "provider:project-checkout",
     remote: "provider:git-worktree",
   },
@@ -173,10 +178,13 @@ describe("tab-local composer selections", () => {
     act(() => {
       result.current.environment.setValue("provider:git-worktree");
       result.current.machine.setValue("host-b");
-      window.localStorage.setItem("bb.promptbox.model-codex-1", "remote-model");
-      window.localStorage.setItem("bb.promptbox.reasoning-codex-1", "low");
       window.localStorage.setItem(
-        "bb.promptbox.environment-project-a-1",
+        "omnyo.promptbox.model-codex-1",
+        "remote-model",
+      );
+      window.localStorage.setItem("omnyo.promptbox.reasoning-codex-1", "low");
+      window.localStorage.setItem(
+        "omnyo.promptbox.environment-project-a-1",
         "provider:git-worktree",
       );
       result.current.provider.setValue("codex");

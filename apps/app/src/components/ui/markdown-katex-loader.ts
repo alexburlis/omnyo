@@ -9,7 +9,9 @@ export function markdownMayContainMath(content: string): boolean {
 }
 
 let loadedRehypeKatex: RehypeKatex | null = null;
+
 let rehypeKatexImportPromise: Promise<RehypeKatex> | null = null;
+
 const listeners = new Set<() => void>();
 
 function loadRehypeKatex(): Promise<RehypeKatex> {
@@ -17,7 +19,9 @@ function loadRehypeKatex(): Promise<RehypeKatex> {
     rehypeKatexImportPromise = import("./markdown-katex.js").then(
       (katexModule) => {
         loadedRehypeKatex = katexModule.default;
+
         for (const listener of listeners) listener();
+
         return katexModule.default;
       },
       (error: unknown) => {
@@ -26,11 +30,13 @@ function loadRehypeKatex(): Promise<RehypeKatex> {
       },
     );
   }
+
   return rehypeKatexImportPromise;
 }
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };
@@ -46,5 +52,6 @@ export function useRehypeKatex(mayContainMath: boolean): RehypeKatex | null {
     if (!mayContainMath || rehypeKatex !== null) return;
     loadRehypeKatex().catch(() => {});
   }, [mayContainMath, rehypeKatex]);
+
   return rehypeKatex;
 }

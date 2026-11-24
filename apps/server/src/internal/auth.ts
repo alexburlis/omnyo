@@ -31,6 +31,7 @@ export function requireBearerToken(
   }
 
   const token = authorizationHeader.slice("Bearer ".length).trim();
+
   if (token.length === 0) {
     throw new ApiError(401, "unauthorized", "Unauthorized");
   }
@@ -44,6 +45,7 @@ export async function verifyAuthenticatedDaemon(
 ): Promise<AuthenticatedDaemon> {
   const token = requireBearerToken(authorizationHeader);
   const verified = await deps.machineAuth.verifyDaemonHostKey(token);
+
   if (!verified) {
     throw new ApiError(401, "unauthorized", "Unauthorized");
   }
@@ -65,6 +67,7 @@ export function getAuthenticatedDaemon(
   context: DaemonAuthContext,
 ): AuthenticatedDaemon {
   const daemon = context.get("authenticatedDaemon");
+
   if (!isAuthenticatedDaemon(daemon)) {
     throw new ApiError(
       500,
@@ -72,6 +75,7 @@ export function getAuthenticatedDaemon(
       "Daemon authentication context missing",
     );
   }
+
   return daemon;
 }
 

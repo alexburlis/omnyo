@@ -1,3 +1,8 @@
+import {
+  MOTION_DURATION_MS,
+  MOTION_EASE,
+  prefersReducedMotion,
+} from "@omnyo/shared-ui/motion";
 import { pickZone, zoneBox, type SplitZone, type ZoneDecision } from "./zones";
 
 export const SPLIT_PANE_DATA_ATTR = "data-split-pane-id";
@@ -50,35 +55,45 @@ export function beginSplitDrag(config: SplitDragConfig): void {
   const preventNativeDrag = (event: DragEvent): void => {
     event.preventDefault();
   };
+
   window.addEventListener("dragstart", preventNativeDrag);
 
   const engage = (): void => {
     engaged = true;
+
     if (config.cancelSidebarReorderOnEngage) {
       cancelingSidebarReorder = true;
+
       try {
-        document.dispatchEvent(
-          new KeyboardEvent("keydown", {
-            key: "Escape",
-            code: "Escape",
-            bubbles: true,
-          }),
-        );
+        const cancelReorder = new KeyboardEvent("keydown", {
+          key: "Escape",
+          code: "Escape",
+          bubbles: true,
+          cancelable: true,
+        });
+
+        cancelReorder.preventDefault();
+        document.dispatchEvent(cancelReorder);
       } finally {
         cancelingSidebarReorder = false;
       }
     }
+
     ghostEl =
       config.renderGhost === false ? null : createGhost(config.ghostLabel);
     overlayEl = createOverlay();
+
     if (ghostEl) {
       document.body.append(ghostEl);
     }
+
     document.body.append(overlayEl);
     document.body.style.cursor = "grabbing";
+
     if (config.sourceEl && config.fadeSourceOnEngage !== false) {
       config.sourceEl.style.opacity = "0.45";
     }
+
     config.onEngage?.();
   };
 
@@ -88,6 +103,7 @@ export function beginSplitDrag(config: SplitDragConfig): void {
   ): ResolvedTarget | null => {
     const paneEl = paneElementAt(clientX, clientY);
     const paneId = paneEl?.getAttribute(SPLIT_PANE_DATA_ATTR) ?? null;
+
     if (
       paneEl &&
       paneId !== null &&
@@ -95,7 +111,9 @@ export function beginSplitDrag(config: SplitDragConfig): void {
     ) {
       return { paneId, rect: paneEl.getBoundingClientRect() };
     }
+
     const fallback = config.fallback;
+
     if (
       fallback &&
       fallback.container &&
@@ -103,6 +121,7 @@ export function beginSplitDrag(config: SplitDragConfig): void {
         config.targetBoundary.contains(fallback.container))
     ) {
       const rect = fallback.container.getBoundingClientRect();
+
       if (
         clientX >= rect.left &&
         clientX <= rect.right &&
@@ -112,6 +131,7 @@ export function beginSplitDrag(config: SplitDragConfig): void {
         return { paneId: fallback.paneId, rect };
       }
     }
+
     return null;
   };
 
@@ -120,9 +140,12 @@ export function beginSplitDrag(config: SplitDragConfig): void {
       if (!config.shouldEngage(event.clientX, event.clientY)) {
         return;
       }
+
       engage();
     }
+
     event.preventDefault();
+
     if (ghostEl) {
       ghostEl.style.left = `${event.clientX + 12}px`;
       ghostEl.style.top = `${event.clientY + 8}px`;
@@ -131,18 +154,23 @@ export function beginSplitDrag(config: SplitDragConfig): void {
     target = null;
     auxiliaryTarget =
       config.resolveAuxiliaryTarget?.(event.clientX, event.clientY) ?? null;
+
     if (auxiliaryTarget && overlayEl) {
       positionOverlay(
         overlayEl,
         auxiliaryTarget.element.getBoundingClientRect(),
         auxiliaryTarget.label,
       );
+
       return;
     }
+
     const resolved = resolveTarget(event.clientX, event.clientY);
+
     if (resolved && overlayEl) {
       const zone = pickZone(resolved.rect, event.clientX, event.clientY);
       const decision = config.decide(resolved.paneId, zone);
+
       if (decision) {
         target = { paneId: resolved.paneId, zone: decision.zone };
         positionOverlay(
@@ -151,10 +179,10 @@ export function beginSplitDrag(config: SplitDragConfig): void {
           decision.label,
         );
       } else {
-        overlayEl.style.display = "none";
+        hideOverlay(overlayEl);
       }
     } else if (overlayEl) {
-      overlayEl.style.display = "none";
+      hideOverlay(overlayEl);
     }
   };
 
@@ -165,8 +193,13 @@ export function beginSplitDrag(config: SplitDragConfig): void {
     window.removeEventListener("keydown", handleKeyDown, true);
     window.removeEventListener("dragstart", preventNativeDrag);
     ghostEl?.remove();
-    overlayEl?.remove();
+
+    if (overlayEl) {
+      removeOverlay(overlayEl);
+    }
+
     document.body.style.cursor = "";
+
     if (config.sourceEl && config.fadeSourceOnEngage !== false) {
       config.sourceEl.style.opacity = "";
     }
@@ -177,13 +210,17 @@ export function beginSplitDrag(config: SplitDragConfig): void {
     const dropTarget = engaged ? target : null;
     const auxiliaryDrop = engaged ? auxiliaryTarget : null;
     teardown();
+
     if (wasEngaged) {
       swallowNextClick();
     }
+
     if (auxiliaryDrop) auxiliaryDrop.drop();
+
     if (dropTarget) {
       config.onDrop(dropTarget);
     }
+
     if (wasEngaged) {
       config.onEnd?.({
         dropped: dropTarget !== null || auxiliaryDrop !== null,
@@ -194,6 +231,7 @@ export function beginSplitDrag(config: SplitDragConfig): void {
   function handleCancel(): void {
     const wasEngaged = engaged;
     teardown();
+
     if (wasEngaged) {
       swallowNextClick();
       config.onEnd?.({ dropped: false });
@@ -218,6 +256,7 @@ function swallowNextClick(): void {
     event.preventDefault();
     window.removeEventListener("click", swallow, true);
   };
+
   window.addEventListener("click", swallow, true);
   window.setTimeout(
     () => window.removeEventListener("click", swallow, true),
@@ -231,10 +270,12 @@ function paneElementAt(clientX: number, clientY: number): HTMLElement | null {
       element instanceof HTMLElement
         ? element.closest<HTMLElement>(`[${SPLIT_PANE_DATA_ATTR}]`)
         : null;
+
     if (pane) {
       return pane;
     }
   }
+
   return null;
 }
 
@@ -260,8 +301,19 @@ function createGhost(label: string): HTMLElement {
     border: "1px solid var(--border)",
     boxShadow: "0 6px 20px color-mix(in oklab, var(--ink) 22%, transparent)",
   } satisfies Partial<CSSStyleDeclaration>);
+
   return ghost;
 }
+
+const DROP_OVERLAY_GEOMETRY_TIMING = `${MOTION_DURATION_MS.fast}ms ${MOTION_EASE.smooth}`;
+
+const DROP_OVERLAY_FADE_TIMING = `${MOTION_DURATION_MS.fast}ms ${MOTION_EASE.standard}`;
+
+const DROP_OVERLAY_SHOW_TRANSITION = `opacity ${DROP_OVERLAY_FADE_TIMING}`;
+
+const DROP_OVERLAY_MOVE_TRANSITION = `opacity ${DROP_OVERLAY_FADE_TIMING}, left ${DROP_OVERLAY_GEOMETRY_TIMING}, top ${DROP_OVERLAY_GEOMETRY_TIMING}, width ${DROP_OVERLAY_GEOMETRY_TIMING}, height ${DROP_OVERLAY_GEOMETRY_TIMING}`;
+
+const DROP_OVERLAY_HIDE_TRANSITION = `opacity ${DROP_OVERLAY_FADE_TIMING}, visibility 0s linear ${MOTION_DURATION_MS.fast}ms`;
 
 function createOverlay(): HTMLElement {
   const overlay = document.createElement("div");
@@ -281,14 +333,15 @@ function createOverlay(): HTMLElement {
   Object.assign(overlay.style, {
     position: "fixed",
     zIndex: "90",
-    display: "none",
+    display: "block",
+    visibility: "hidden",
+    opacity: "0",
     pointerEvents: "none",
     borderRadius: "12px",
     background: "color-mix(in oklab, var(--primary) 12%, transparent)",
     border: "2px solid color-mix(in oklab, var(--primary) 55%, transparent)",
-    transition:
-      "left 0.09s ease-out, top 0.09s ease-out, width 0.09s ease-out, height 0.09s ease-out",
   } satisfies Partial<CSSStyleDeclaration>);
+
   return overlay;
 }
 
@@ -297,13 +350,61 @@ function positionOverlay(
   box: { left: number; top: number; width: number; height: number },
   label: string,
 ): void {
-  overlay.style.display = "block";
+  const reducedMotion = prefersReducedMotion();
+  const wasHidden = overlay.dataset.splitDragOverlayVisible !== "true";
+
+  if (wasHidden) {
+    overlay.style.transition = reducedMotion
+      ? "none"
+      : DROP_OVERLAY_SHOW_TRANSITION;
+  } else {
+    overlay.style.transition = reducedMotion
+      ? "none"
+      : DROP_OVERLAY_MOVE_TRANSITION;
+  }
+
   overlay.style.left = `${box.left}px`;
   overlay.style.top = `${box.top}px`;
   overlay.style.width = `${box.width}px`;
   overlay.style.height = `${box.height}px`;
+
+  if (wasHidden) {
+    overlay.getBoundingClientRect();
+    overlay.dataset.splitDragOverlayVisible = "true";
+    overlay.style.visibility = "visible";
+    overlay.style.opacity = "1";
+  }
+
   const labelEl = overlay.querySelector<HTMLElement>("[data-split-drag-label]");
+
   if (labelEl) {
     labelEl.textContent = label;
   }
+}
+
+function hideOverlay(overlay: HTMLElement): void {
+  if (overlay.dataset.splitDragOverlayVisible !== "true") {
+    return;
+  }
+
+  overlay.dataset.splitDragOverlayVisible = "false";
+  overlay.style.transition = prefersReducedMotion()
+    ? "none"
+    : DROP_OVERLAY_HIDE_TRANSITION;
+  overlay.style.opacity = "0";
+  overlay.style.visibility = "hidden";
+}
+
+function removeOverlay(overlay: HTMLElement): void {
+  if (
+    overlay.dataset.splitDragOverlayVisible !== "true" ||
+    prefersReducedMotion()
+  ) {
+    overlay.remove();
+
+    return;
+  }
+
+  hideOverlay(overlay);
+  window.setTimeout(() => overlay.remove(), MOTION_DURATION_MS.fast);
 }

@@ -10,11 +10,13 @@ import {
 } from "../src/index.js";
 
 it("backfills only non-local hosts, preserves all other columns and is idempotent", () => {
-  const directory = mkdtempSync(join(tmpdir(), "bb-manual-migration-"));
+  const directory = mkdtempSync(join(tmpdir(), "omnyo-manual-migration-"));
   writeFileSync(join(directory, "host-id"), "local-host\n");
-  const db = createConnection(join(directory, "bb.db"));
+  const db = createConnection(join(directory, "app.db"));
+
   try {
     migrate(db);
+
     for (const id of ["local-host", "enrolled-a", "enrolled-b", "managed-host"])
       upsertHost(db, noopNotifier, { id, name: id });
     db.$client
@@ -23,18 +25,21 @@ it("backfills only non-local hosts, preserves all other columns and is idempoten
       )
       .run("digitalocean", JSON.stringify({ dropletId: 123 }), "managed-host");
     const before = db.$client.prepare("SELECT * FROM hosts ORDER BY id").all();
+
     const sql = readFileSync(
       new URL("../drizzle/0117_machine_providers.sql", import.meta.url),
       "utf8",
     )
       .split("--> statement-breakpoint")
       .find((statement) => statement.includes("UPDATE hosts"));
+
     if (sql === undefined) throw new Error("Missing manual machine backfill");
     db.$client.exec(sql);
     const after = db.$client.prepare("SELECT * FROM hosts ORDER BY id").all();
     expect(after).toEqual(
       before.map((row) => {
         const parsed = hostRow(row);
+
         return parsed.id === "local-host" || parsed.machine_provider_id !== null
           ? row
           : {
@@ -64,5 +69,6 @@ function hostRow(value: unknown): Record<string, unknown> & { id: string } {
     typeof value.id !== "string"
   )
     throw new Error("Invalid host row");
+
   return { ...value, id: value.id };
 }

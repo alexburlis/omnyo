@@ -1,12 +1,12 @@
 import { useCallback, useMemo } from "react";
-import type { PromptTextMention } from "@bb/domain";
+import type { PromptTextMention } from "@omnyo/domain";
 import {
   usePromptDraftStorage,
   type PromptDraftScope,
 } from "@/hooks/usePromptDraftStorage";
-import { promptDraftToInput } from "@bb/client-core";
-import type { PromptDraftAttachment, PromptDraftState } from "@bb/client-core";
-import type { PromptInput } from "@bb/domain";
+import { promptDraftToInput } from "@omnyo/client-core";
+import type { PromptDraftAttachment, PromptDraftState } from "@omnyo/client-core";
+import type { PromptInput } from "@omnyo/domain";
 
 export interface InlineComposerDraftSession {
   editSessionId: number;
@@ -40,19 +40,15 @@ export function useActiveComposerDraft({
   const setStoredPromptTextAndMentions = promptDraft.setTextAndMentions;
   const updateStoredPromptAttachments = promptDraft.updateAttachments;
 
-  const currentPromptDraft = useMemo(
-    () => ({
-      text: promptDraft.text,
-      mentions: promptDraft.mentions,
-      attachments: promptDraft.attachments,
-    }),
-    [promptDraft.attachments, promptDraft.mentions, promptDraft.text],
-  );
+  const currentPromptDraft = promptDraft.draft;
+
   const currentPromptDraftInput = useMemo(
     () => promptDraftToInput(currentPromptDraft),
     [currentPromptDraft],
   );
+
   const activeComposerDraft = inlineDraft ?? currentPromptDraft;
+
   const activeComposerDraftInput = useMemo(
     () => promptDraftToInput(activeComposerDraft),
     [activeComposerDraft],
@@ -61,26 +57,33 @@ export function useActiveComposerDraft({
   const handleChangeMessage = useCallback(
     (text: string, mentions: PromptTextMention[]) => {
       const current = inlineSessionRef.current;
+
       if (current) {
         current.setDraft((draft) => ({ ...draft, mentions, text }));
+
         return;
       }
+
       setStoredPromptTextAndMentions(text, mentions);
     },
     [inlineSessionRef, setStoredPromptTextAndMentions],
   );
+
   const updateActiveComposerAttachments = useCallback(
     (
       update: (attachments: PromptDraftAttachment[]) => PromptDraftAttachment[],
     ) => {
       const current = inlineSessionRef.current;
+
       if (current) {
         current.setDraft((draft) => ({
           ...draft,
           attachments: update(draft.attachments),
         }));
+
         return;
       }
+
       updateStoredPromptAttachments(update);
     },
     [inlineSessionRef, updateStoredPromptAttachments],

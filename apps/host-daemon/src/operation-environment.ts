@@ -1,5 +1,5 @@
-import { sanitizeInheritedChildProcessEnv } from "@bb/process-utils";
-import type { HostDaemonContributedEnvEntry } from "@bb/host-daemon-contract";
+import { sanitizeInheritedChildProcessEnv } from "@omnyo/process-utils";
+import type { HostDaemonContributedEnvEntry } from "@omnyo/host-daemon-contract";
 
 export function operationEnvironment(
   entries: readonly HostDaemonContributedEnvEntry[],
@@ -9,13 +9,15 @@ export function operationEnvironment(
   const env = inherited
     ? sanitizeInheritedChildProcessEnv({ env: base })
     : { ...base };
+
   for (const entry of entries) {
     if (typeof entry.value === "string") env[entry.name] = entry.value;
     else {
-      if (!base.BB_SERVER_URL)
-        throw new Error("Host environment requires BB_SERVER_URL");
-      env[entry.name] = `${base.BB_SERVER_URL}${entry.value.serverPath}`;
+      if (!base.OMNYO_SERVER_URL)
+        throw new Error("Host environment requires OMNYO_SERVER_URL");
+      env[entry.name] = `${base.OMNYO_SERVER_URL}${entry.value.serverPath}`;
     }
   }
+
   return env;
 }

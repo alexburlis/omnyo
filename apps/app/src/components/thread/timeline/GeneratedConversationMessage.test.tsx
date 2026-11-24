@@ -8,15 +8,16 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
-import type { PromptTextMention, ThreadListEntry } from "@bb/domain";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import type { PromptTextMention, ThreadListEntry } from "@omnyo/domain";
 import { ConversationMessageContent } from "./ConversationMessageContent";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import type { TimelineTitleActionResolver } from "./TimelineTitleView";
+import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
-import { makeThreadListEntry as makeThreadListEntryFixture } from "@bb/test-helpers/domain-fixtures";
-import { GENERATED_MESSAGE_COLLAPSED_PREVIEW_CHAR_CAP } from "@bb/client-core";
+import { makeThreadListEntry as makeThreadListEntryFixture } from "@omnyo/test-helpers/domain-fixtures";
+import { GENERATED_MESSAGE_COLLAPSED_PREVIEW_CHAR_CAP } from "@omnyo/client-core";
 import { generatedConversationCollapsedPreview } from "./GeneratedConversationMessage";
 
 const MARKDOWN_BODY = [
@@ -31,6 +32,7 @@ const MARKDOWN_BODY = [
 function renderChildCompleted(text = MARKDOWN_BODY) {
   const token = "@thread:thr_child";
   const start = text.indexOf(token);
+
   const mentions: readonly PromptTextMention[] =
     start < 0
       ? []
@@ -46,11 +48,14 @@ function renderChildCompleted(text = MARKDOWN_BODY) {
             },
           },
         ];
+
   return render(
     <MemoryRouter>
       <RouteNavigationProvider>
         <ConversationMessageContent
           role="user"
+          id="generated_message_1"
+          turnId={null}
           initiator="system"
           senderThreadId={null}
           senderThreadTitle={null}
@@ -80,6 +85,102 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("Script Inbox chat links", () => {
+  it.each([
+    {
+      name: "new",
+      text: "Deliver your result to @thread:thr_waiter. If you can't deliver it, explain why.",
+      readsCurrentWaits: false,
+    },
+    {
+      name: "existing",
+      text: "1 chat waits on your result; deliver it or explain why not.",
+      readsCurrentWaits: true,
+    },
+  ])(
+    "opens the waiting chat from a $name notice",
+    async ({ text, readsCurrentWaits }) => {
+      const { wrapper: Wrapper } = createQueryClientTestHarness();
+
+      const waits = vi
+        .spyOn(sdk.experimental_inbox, "waits")
+        .mockResolvedValue({
+          waitingChatIds: ["thr_waiter"],
+          waits: [],
+        });
+
+      vi.spyOn(sdk.experimental_inbox, "snapshot").mockReturnValue(
+        new Promise(() => {}),
+      );
+
+      function Location() {
+        return <output>{useLocation().pathname}</output>;
+      }
+
+      render(
+        <Wrapper>
+          <MemoryRouter>
+            <RouteNavigationProvider>
+              <ThreadTitleMentionResourcesProvider
+                sectionNamesById={new Map()}
+                projectNamesById={new Map()}
+                threadById={
+                  new Map([
+                    [
+                      "thr_waiter",
+                      threadListEntry({
+                        id: "thr_waiter",
+                        projectId: "proj_other",
+                        title: "Waiting chat",
+                      }),
+                    ],
+                  ])
+                }
+              >
+                <ConversationMessageContent
+                  role="user"
+                  id="generated_message_1"
+                  turnId={null}
+                  initiator="system"
+                  senderThreadId={null}
+                  senderThreadTitle={null}
+                  systemMessageKind="external-message"
+                  systemMessageSubject={{
+                    kind: "message-source",
+                    source: { kind: "script", label: "Inbox" },
+                  }}
+                  attachments={null}
+                  mentions={[]}
+                  text={text}
+                  timestamp={0}
+                  threadId="thr_source"
+                  turnRequest={{ kind: "message", status: "accepted" }}
+                  projectId="proj_demo"
+                />
+                <Location />
+              </ThreadTitleMentionResourcesProvider>
+            </RouteNavigationProvider>
+          </MemoryRouter>
+        </Wrapper>,
+      );
+
+      const link = await screen.findByRole("link", { name: "Waiting chat" });
+      fireEvent.click(link);
+      expect(
+        await screen.findByText("/projects/proj_other/threads/thr_waiter"),
+      ).toBeTruthy();
+
+      if (readsCurrentWaits) {
+        expect(waits).toHaveBeenCalledWith(
+          expect.objectContaining({ threadId: "thr_source" }),
+        );
+      } else {
+        expect(waits).not.toHaveBeenCalled();
+      }
+    },
+  );
+});
+
 describe("GeneratedConversationMessage images", () => {
   it("routes images in generated system messages through the current thread", () => {
     renderChildCompleted("![report](reports/result.png)");
@@ -93,11 +194,16 @@ describe("GeneratedConversationMessage images", () => {
 });
 
 const AGENT_BODY = "# notes\nedited path:src/app.ts here";
+
 const AGENT_PATH_TOKEN = "path:src/app.ts";
+
 const AGENT_PATH_START = AGENT_BODY.indexOf(AGENT_PATH_TOKEN);
+
 const OVERFLOWING_ONE_LINE_AGENT_BODY =
   "TEST RESULT refines the diagnosis — RULE OUT eviction. A fire-and-forget direct POST with no wait parameter and no client-held stream should still render the complete report after expansion.";
+
 const RAW_THREAD_ID = "thr_dcwivn5n8w";
+
 const RAW_THREAD_BODY = `Continue in ${RAW_THREAD_ID}; exact code reference \`${RAW_THREAD_ID}\`.\nMore details.`;
 
 function threadListEntry(
@@ -121,6 +227,7 @@ function renderAgentMessage(
   {
     senderIsPluginSideChat = false,
     senderThreadTitle = "Worker",
+    initiator = "agent",
     onTitleAction,
     mentions: suppliedMentions,
   }: {
@@ -128,6 +235,7 @@ function renderAgentMessage(
     onTitleAction?: TimelineTitleActionResolver;
     senderIsPluginSideChat?: boolean;
     senderThreadTitle?: string;
+    initiator?: "user" | "agent" | "system";
   } = {},
 ) {
   const mentions =
@@ -154,6 +262,7 @@ function renderAgentMessage(
     title: "Raw agent mention target",
     titleFallback: "Raw agent mention target",
   });
+
   const { wrapper } = createQueryClientTestHarness();
 
   return render(
@@ -166,7 +275,10 @@ function renderAgentMessage(
         >
           <ConversationMessageContent
             role="user"
-            initiator="agent"
+            id="generated_message_2"
+            threadId="thr_generated_messages"
+            turnId={null}
+            initiator={initiator}
             senderThreadId="thr_agent"
             senderThreadTitle={senderThreadTitle}
             senderIsPluginSideChat={senderIsPluginSideChat}
@@ -216,6 +328,7 @@ function mockResizeObserverDeliveries(): () => void {
   }
 
   vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+
   return () => {
     act(() => {
       for (const { callback, instance, targets } of observers) {
@@ -244,6 +357,7 @@ function mockInnerPreviewTextOverflow(text: string): () => void {
         : 100;
     },
   );
+
   return notifyResize;
 }
 
@@ -254,8 +368,9 @@ function mockContinuationSensitiveOverflow(): () => void {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
     function clientWidth(this: HTMLElement) {
       const continuation = Array.from(this.parentElement?.children ?? []).find(
-        (child) => child.textContent === "...",
+        (child) => child.textContent === "…",
       );
+
       return continuation ? 90 : 100;
     },
   );
@@ -274,6 +389,7 @@ describe("GeneratedConversationMessage markdown body", () => {
     const sourcePill = container.querySelector(
       '[data-prompt-mention-serialized-text="@thread:thr_agent"]',
     );
+
     expect(sourcePill).not.toBeNull();
     expect(sourcePill?.textContent).toBe(
       "Ask thr_target. Review foo.test.ts. Keep @owner/repo literal",
@@ -297,6 +413,7 @@ describe("GeneratedConversationMessage markdown body", () => {
 
   it("renders prose and exact inline-code raw ids as linked pills when collapsed and expanded", () => {
     const { container } = renderAgentMessage(RAW_THREAD_BODY);
+
     const toggle = screen.getByRole("button", {
       name: /Message from Worker/u,
     });
@@ -304,6 +421,7 @@ describe("GeneratedConversationMessage markdown body", () => {
     const collapsedLinks = screen.getAllByRole("link", {
       name: "Raw agent mention target",
     });
+
     expect(collapsedLinks).toHaveLength(2);
     expect(
       collapsedLinks.every(
@@ -319,6 +437,7 @@ describe("GeneratedConversationMessage markdown body", () => {
     const expandedLinks = screen.getAllByRole("link", {
       name: "Raw agent mention target",
     });
+
     expect(expandedLinks).toHaveLength(2);
     expect(
       expandedLinks.every(
@@ -333,6 +452,7 @@ describe("GeneratedConversationMessage markdown body", () => {
   it("bounds a long single-line preview and reveals the complete body after expansion", () => {
     const visiblePrefix = "VISIBLE_GENERATED_PREFIX";
     const hiddenTail = "FULL_GENERATED_MESSAGE_TAIL";
+
     const text = `${visiblePrefix} ${"x".repeat(
       GENERATED_MESSAGE_COLLAPSED_PREVIEW_CHAR_CAP,
     )} ${hiddenTail}`;
@@ -389,11 +509,14 @@ describe("GeneratedConversationMessage markdown body", () => {
 
   it("omits an offset mention crossing the collapsed cap and restores it after expansion", () => {
     const crossingToken = "path:src/crossing-boundary.ts";
+
     const prefix = "x ".repeat(
       (GENERATED_MESSAGE_COLLAPSED_PREVIEW_CHAR_CAP - 6) / 2,
     );
+
     const text = `${prefix}${crossingToken} after`;
     const mentionStart = text.indexOf(crossingToken);
+
     const { container } = renderAgentMessage(text, {
       mentions: [
         {
@@ -454,6 +577,7 @@ describe("GeneratedConversationMessage markdown body", () => {
     const prefix = "x".repeat(
       GENERATED_MESSAGE_COLLAPSED_PREVIEW_CHAR_CAP - RAW_THREAD_ID.length - 1,
     );
+
     const text = `${prefix}\`${RAW_THREAD_ID} remains mixed\` tail`;
     const { container } = renderAgentMessage(text);
 
@@ -527,6 +651,7 @@ describe("GeneratedConversationMessage markdown body", () => {
       'service tracker(image: "https://example.com/private.png")',
       "```",
     ].join("\n");
+
     const { container } = renderAgentMessage(source);
 
     fireEvent.click(
@@ -545,18 +670,30 @@ describe("GeneratedConversationMessage markdown body", () => {
     const notifyResize = mockInnerPreviewTextOverflow(
       OVERFLOWING_ONE_LINE_AGENT_BODY,
     );
+
     renderAgentMessage(OVERFLOWING_ONE_LINE_AGENT_BODY);
     notifyResize();
 
     const toggle = screen.getByRole("button", { name: /Message from Worker/u });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.getByText("...").className).toContain("invisible");
+    expect(screen.getByText("…").className).toContain("invisible");
 
     fireEvent.click(toggle);
 
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText(OVERFLOWING_ONE_LINE_AGENT_BODY)).toBeTruthy();
   });
+
+  it.each(["user", "system"] as const)(
+    "shows the source chat for a %s message with a recorded sender",
+    (initiator) => {
+      renderAgentMessage("Review finished", { initiator });
+      expect(
+        screen.getByText("Worker").closest(".prompt-mention-pill"),
+      ).not.toBeNull();
+      expect(screen.getByText("Message from")).toBeTruthy();
+    },
+  );
 
   it("renders side-chat handoffs as markdown", () => {
     renderAgentMessage("**Ready** to merge.\n\n- checks passed", {
@@ -567,8 +704,9 @@ describe("GeneratedConversationMessage markdown body", () => {
     expect(screen.queryByText("**Ready** to merge.")).toBeNull();
 
     const toggle = screen.getByRole("button", {
-      name: /Message from side chat/u,
+      name: /Message from Worker/u,
     });
+
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.click(toggle);
@@ -587,7 +725,7 @@ describe("GeneratedConversationMessage markdown body", () => {
     ).not.toBeNull();
 
     fireEvent.click(
-      screen.getByRole("button", { name: /Message from side chat/u }),
+      screen.getByRole("button", { name: /Message from Worker/u }),
     );
 
     expect(
@@ -597,6 +735,7 @@ describe("GeneratedConversationMessage markdown body", () => {
 
   it("opens a side-chat sender in the plugin panel instead of linking it", () => {
     const openPanel = vi.fn();
+
     const { container } = renderAgentMessage("Handed back.", {
       senderIsPluginSideChat: true,
       onTitleAction: (action) =>
@@ -606,6 +745,7 @@ describe("GeneratedConversationMessage markdown body", () => {
     const sourcePill = container.querySelector(
       '[data-prompt-mention-serialized-text="@thread:thr_agent"]',
     );
+
     expect(sourcePill?.tagName).not.toBe("A");
     fireEvent.click(sourcePill as Element);
     expect(openPanel).toHaveBeenCalledOnce();
@@ -618,13 +758,13 @@ describe("GeneratedConversationMessage markdown body (system)", () => {
     renderChildCompleted();
     notifyResize();
 
-    const continuation = screen.getByText("...");
+    const continuation = screen.getByText("…");
     expect(continuation.className).toContain("invisible");
 
     notifyResize();
     notifyResize();
 
-    expect(screen.getByText("...")).toBe(continuation);
+    expect(screen.getByText("…")).toBe(continuation);
     expect(continuation.className).toContain("invisible");
   });
 

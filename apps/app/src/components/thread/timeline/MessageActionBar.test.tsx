@@ -13,13 +13,16 @@ import {
   resetPluginLogoStoreForTest,
   setPluginLogoUrls,
 } from "@/lib/plugin-logos";
-import { COMPACT_VIEWPORT_QUERY } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { POINTER_COARSE_QUERY } from "@bb/shared-ui/hooks/use-pointer-coarse";
+import { COMPACT_VIEWPORT_QUERY } from "@omnyo/shared-ui/hooks/use-compact-viewport";
+import { POINTER_COARSE_QUERY } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import {
   computeMessageActionRowLayout,
   findMessageActionTooltipCollisionBoundary,
+  formatShortMessageTime,
   MessageActionBar,
 } from "./MessageActionBar";
+import { TimelineStepRailContext } from "./timeline-step-rail";
+import { buildMessageActions } from "./message-actions";
 
 const TIMESTAMP = Date.UTC(2026, 8, 30, 16, 5);
 
@@ -33,6 +36,7 @@ afterEach(() => {
 function installControlledResizeObserver() {
   const observations: { callback: ResizeObserverCallback; node: Element }[] =
     [];
+
   class ControlledResizeObserver {
     readonly #callback: ResizeObserverCallback;
     constructor(callback: ResizeObserverCallback) {
@@ -44,7 +48,9 @@ function installControlledResizeObserver() {
     unobserve() {}
     disconnect() {}
   }
+
   vi.stubGlobal("ResizeObserver", ControlledResizeObserver);
+
   return {
     reportWidth(width: number) {
       act(() => {
@@ -81,10 +87,100 @@ function openDesktopMenu() {
   fireEvent.pointerDown(
     screen.getByRole("button", { name: "Message actions" }),
   );
+
   return screen.getByRole("menu");
 }
 
 describe("MessageActionBar", () => {
+  it("shows the send time beside the actions without adding a row", () => {
+    vi.useFakeTimers({ now: TIMESTAMP + 60_000, toFake: ["Date"] });
+
+    try {
+      const { container } = render(
+        <MessageActionBar
+          timestamp={TIMESTAMP}
+          alignment="end"
+          actions={buildMessageActions({ messageText: "Hi." })}
+        />,
+      );
+
+      const time = container.querySelector("time[data-message-time]");
+      const row = time?.parentElement?.parentElement;
+      expect(time?.getAttribute("dateTime")).toBe(
+        new Date(TIMESTAMP).toISOString(),
+      );
+      expect(time?.textContent).toBe("1m ago");
+      expect(row?.lastElementChild).toBe(time?.parentElement);
+      expect(row?.parentElement?.className).toContain("h-5");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("floats a step message's actions over its work line instead of adding a row", () => {
+    const { container } = render(
+      <TimelineStepRailContext.Provider
+        value={{
+          role: "head",
+          line: "none",
+          startsRun: true,
+          hasWork: true,
+          state: "idle",
+        }}
+      >
+        <MessageActionBar
+          timestamp={TIMESTAMP}
+          showTimestamp={false}
+          alignment="start"
+          actions={buildMessageActions({ messageText: "Saved." })}
+        />
+      </TimelineStepRailContext.Provider>,
+    );
+
+    const slot = container.firstElementChild;
+    expect(slot?.className).toContain("h-0");
+    expect(slot?.className).not.toContain("h-5");
+    expect(slot?.firstElementChild?.className).toContain("right-0");
+    expect(slot?.firstElementChild?.className).not.toContain("left-0");
+  });
+
+  it("keeps a floating step message's time at the right edge, after its actions", () => {
+    render(
+      <TimelineStepRailContext.Provider
+        value={{
+          role: "head",
+          line: "none",
+          startsRun: true,
+          hasWork: true,
+          state: "idle",
+        }}
+      >
+        <MessageActionBar
+          timestamp={TIMESTAMP}
+          alignment="start"
+          actions={buildMessageActions({ messageText: "Saved." })}
+        />
+      </TimelineStepRailContext.Provider>,
+    );
+
+    const timeButton = screen.getByRole("button", { name: /^Sent / });
+    expect(timeButton.parentElement?.lastElementChild).toBe(timeButton);
+  });
+
+  it("omits every timestamp while the message is unfinished", () => {
+    const { container } = render(
+      <MessageActionBar
+        timestamp={TIMESTAMP}
+        showTimestamp={false}
+        alignment="start"
+        actions={buildMessageActions({ messageText: "Working" })}
+      />,
+    );
+
+    expect(container.querySelector("time")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Sent / })).toBeNull();
+  });
+
   it("uses the nearest thread window as the tooltip collision boundary", () => {
     const threadWindow = document.createElement("div");
     threadWindow.setAttribute("data-thread-window", "");
@@ -101,7 +197,7 @@ describe("MessageActionBar", () => {
     ).toBeUndefined();
   });
 
-  it("keeps candidates inline in priority order and reserves the menu for trailing actions", () => {
+  it("exposes message actions directly when the row has space", () => {
     const resizeObserver = installControlledResizeObserver();
     setPluginLogoUrls(
       new Map([
@@ -120,34 +216,46 @@ describe("MessageActionBar", () => {
     );
     const onPluginSelect = vi.fn();
     const onCopyLink = vi.fn();
+
     const { container } = render(
       <MessageActionBar
         timestamp={TIMESTAMP}
-        messageText="An answer."
         alignment="start"
-        mobileActionDisplay="inline"
-        onEdit={vi.fn()}
-        onCopyLink={onCopyLink}
-        onAddToChat={vi.fn()}
-        onFork={vi.fn()}
-        pluginActions={[
-          {
-            key: "demo/summarize/1",
-            pluginId: "demo",
-            icon: "Zap",
-            label: "Summarize",
-            onSelect: onPluginSelect,
-          },
-        ]}
+        actions={buildMessageActions({
+          messageText: "An answer.",
+          onEdit: vi.fn(),
+          onCopyLink,
+          onAddToChat: vi.fn(),
+          onFork: vi.fn(),
+          pluginActions: [
+            {
+              key: "demo/summarize/1",
+              pluginId: "demo",
+              icon: "Zap",
+              label: "Summarize",
+              onSelect: onPluginSelect,
+            },
+          ],
+        })}
       />,
     );
-    resizeObserver.reportWidth(100);
+
+    resizeObserver.reportWidth(320);
 
     expect(
       [...container.querySelectorAll<HTMLButtonElement>("button[aria-label]")]
         .map((button) => button.getAttribute("aria-label"))
-        .filter((label) => label !== "Message actions"),
-    ).toEqual(["Copy message", "Edit message", "Summarize"]);
+        .filter(
+          (label) => label !== "Message actions" && !label?.startsWith("Sent "),
+        ),
+    ).toEqual([
+      "Copy message",
+      "Edit message",
+      "Copy link",
+      "Add to chat",
+      "Fork into new thread",
+      "Summarize",
+    ]);
     expect(
       screen
         .getByRole("button", { name: "Summarize" })
@@ -156,16 +264,10 @@ describe("MessageActionBar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
     expect(onPluginSelect).toHaveBeenCalledTimes(1);
 
-    const menu = openDesktopMenu();
     expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((item) => item.textContent),
-    ).toEqual(["Copy link", "Add to chat", "Fork into new thread"]);
-    expect(menu.getAttribute("data-side")).toBe("bottom");
-    fireEvent.click(
-      within(menu).getByRole("menuitem", { name: "Copy link" }),
-    );
+      screen.queryByRole("button", { name: "Message actions" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
     expect(onCopyLink).toHaveBeenCalledTimes(1);
   });
 
@@ -174,29 +276,30 @@ describe("MessageActionBar", () => {
     render(
       <MessageActionBar
         timestamp={TIMESTAMP}
-        messageText="An answer."
         alignment="end"
-        mobileActionDisplay="inline"
-        onEdit={vi.fn()}
-        onCopyLink={vi.fn()}
-        onAddToChat={vi.fn()}
-        onFork={vi.fn()}
-        pluginActions={[
-          {
-            key: "demo/summarize/1",
-            pluginId: null,
-            icon: "Zap",
-            label: "Summarize",
-            onSelect: vi.fn(),
-          },
-          {
-            key: "demo/translate/1",
-            pluginId: null,
-            icon: "Languages",
-            label: "Translate",
-            onSelect: vi.fn(),
-          },
-        ]}
+        actions={buildMessageActions({
+          messageText: "An answer.",
+          onEdit: vi.fn(),
+          onCopyLink: vi.fn(),
+          onAddToChat: vi.fn(),
+          onFork: vi.fn(),
+          pluginActions: [
+            {
+              key: "demo/summarize/1",
+              pluginId: null,
+              icon: "Zap",
+              label: "Summarize",
+              onSelect: vi.fn(),
+            },
+            {
+              key: "demo/translate/1",
+              pluginId: null,
+              icon: "Languages",
+              label: "Translate",
+              onSelect: vi.fn(),
+            },
+          ],
+        })}
       />,
     );
     resizeObserver.reportWidth(72);
@@ -211,10 +314,10 @@ describe("MessageActionBar", () => {
         .map((item) => item.textContent),
     ).toEqual([
       "Copy link",
-      "Summarize",
-      "Translate",
       "Add to chat",
       "Fork into new thread",
+      "Summarize",
+      "Translate",
     ]);
   });
 
@@ -223,12 +326,13 @@ describe("MessageActionBar", () => {
     render(
       <MessageActionBar
         timestamp={TIMESTAMP}
-        messageText="An answer."
         alignment="end"
-        mobileActionDisplay="inline"
-        onEdit={vi.fn()}
-        onAddToChat={vi.fn()}
-        onFork={vi.fn()}
+        actions={buildMessageActions({
+          messageText: "An answer.",
+          onEdit: vi.fn(),
+          onAddToChat: vi.fn(),
+          onFork: vi.fn(),
+        })}
       />,
     );
     resizeObserver.reportWidth(30);
@@ -246,157 +350,147 @@ describe("MessageActionBar", () => {
     ]);
   });
 
-  it("shows a timestamp-only footer in the menu", () => {
+  it("opens the exact sent time from the timestamp", () => {
     render(
       <MessageActionBar
         timestamp={TIMESTAMP}
-        messageText="An answer."
         alignment="start"
-        mobileActionDisplay="inline"
+        actions={buildMessageActions({ messageText: "An answer." })}
       />,
     );
-
-    const menu = openDesktopMenu();
-    const metadata = menu.querySelector<HTMLElement>("[data-message-metadata]");
-    const time = within(metadata!).getByRole("time");
-    expect(time.getAttribute("datetime")).toBe("2026-09-30T16:05:00.000Z");
-    expect(time.textContent).not.toBe("");
-    expect(metadata?.textContent).not.toMatch(/model|reasoning/i);
+    fireEvent.click(screen.getByRole("button", { name: /^Sent / }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain(
+      new Date(TIMESTAMP).toLocaleString(undefined, {
+        dateStyle: "full",
+        timeStyle: "long",
+      }),
+    );
   });
 
-  it("lists every action in the latest touch message drawer even when actions fit inline", async () => {
+  it("renders no action buttons and no menu trigger on touch", () => {
     mockMobileCoarsePointer();
     const resizeObserver = installControlledResizeObserver();
-    const onFork = vi.fn();
-    const onPluginSelect = vi.fn();
-    render(
-      <main data-testid="app-root">
-        <MessageActionBar
-          timestamp={TIMESTAMP}
-          messageText="An answer."
-          alignment="start"
-          mobileActionDisplay="inline"
-          onEdit={vi.fn()}
-          onAddToChat={vi.fn()}
-          onFork={onFork}
-          pluginActions={[
-            {
-              key: "demo/summarize/1",
-              pluginId: null,
-              icon: "Zap",
-              label: "Summarize",
-              onSelect: onPluginSelect,
-            },
-          ]}
-        />
-      </main>,
-    );
-    resizeObserver.reportWidth(200);
 
-    expect(screen.getByRole("button", { name: "Copy message" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Edit message" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Summarize" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
-
-    const drawer = await screen.findByRole("dialog", {
-      name: "Message actions",
-    });
-    const menuItems = await within(drawer).findAllByRole("menuitem");
-    expect(menuItems.map((item) => item.textContent)).toEqual([
-      "Copy message",
-      "Edit message",
-      "Summarize",
-      "Add to chat",
-      "Fork into new thread",
-    ]);
-    resizeObserver.reportWidth(60);
-    expect(screen.queryByRole("button", { name: "Summarize" })).toBeNull();
-    expect(
-      within(drawer)
-        .getAllByRole("menuitem")
-        .map((item) => item.textContent),
-    ).toEqual([
-      "Copy message",
-      "Edit message",
-      "Summarize",
-      "Add to chat",
-      "Fork into new thread",
-    ]);
-    expect(document.body.querySelector('[data-side="top"]')).toBeNull();
-    expect(screen.getByTestId("app-root").hasAttribute("inert")).toBe(false);
-    expect(screen.getByTestId("app-root").hasAttribute("aria-hidden")).toBe(
-      false,
-    );
-    fireEvent.click(
-      within(drawer).getByRole("menuitem", { name: "Fork into new thread" }),
-    );
-    expect(onFork).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
-    fireEvent.click(
-      await within(drawer).findByRole("menuitem", { name: "Summarize" }),
-    );
-    expect(onPluginSelect).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows only the menu trigger on older touch messages", async () => {
-    mockMobileCoarsePointer();
-    const onCopyLink = vi.fn();
-    render(
+    const { container } = render(
       <MessageActionBar
         timestamp={TIMESTAMP}
-        messageText="An earlier answer."
         alignment="start"
-        mobileActionDisplay="overflow"
-        onEdit={vi.fn()}
-        onCopyLink={onCopyLink}
-        onAddToChat={vi.fn()}
-        onFork={vi.fn()}
+        actions={buildMessageActions({
+          messageText: "An answer.",
+          onEdit: vi.fn(),
+          onCopyLink: vi.fn(),
+          onAddToChat: vi.fn(),
+          onFork: vi.fn(),
+        })}
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+    resizeObserver.reportWidth(60);
 
-    const drawer = await screen.findByRole("dialog", {
-      name: "Message actions",
-    });
-    const menuItems = await within(drawer).findAllByRole("menuitem");
-    expect(menuItems.map((item) => item.textContent)).toEqual([
-      "Copy link",
-      "Copy message",
-      "Edit message",
-      "Add to chat",
-      "Fork into new thread",
-    ]);
-    fireEvent.click(
-      within(drawer).getByRole("menuitem", { name: "Copy link" }),
+    expect(
+      [...container.querySelectorAll("button")].map((button) =>
+        button.getAttribute("aria-label"),
+      ),
+    ).toEqual([expect.stringMatching(/^Sent /)]);
+    expect(container.firstElementChild?.className).toContain("h-5");
+    expect(container.firstElementChild?.className).not.toContain(
+      "pointer-coarse:h-7",
     );
-    expect(onCopyLink).toHaveBeenCalledTimes(1);
+  });
+
+  it("reserves no slot on touch when only actions would show", () => {
+    mockMobileCoarsePointer();
+
+    const { container } = render(
+      <TimelineStepRailContext.Provider
+        value={{
+          role: "head",
+          line: "none",
+          startsRun: true,
+          hasWork: true,
+          state: "idle",
+        }}
+      >
+        <MessageActionBar
+          timestamp={TIMESTAMP}
+          showTimestamp={false}
+          alignment="start"
+          actions={buildMessageActions({
+            messageText: "Checking the updater.",
+            onCopyLink: vi.fn(),
+            onFork: vi.fn(),
+          })}
+        />
+      </TimelineStepRailContext.Provider>,
+    );
+
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("keeps a hidden slot on touch while the timestamp is hidden", () => {
+    mockMobileCoarsePointer();
+
+    const { container } = render(
+      <MessageActionBar
+        timestamp={TIMESTAMP}
+        showTimestamp={false}
+        alignment="start"
+        actions={buildMessageActions({ messageText: "Streaming." })}
+      />,
+    );
+
+    const slot = container.firstElementChild;
+    expect(slot?.className).toContain("h-5");
+    expect(slot?.getAttribute("aria-hidden")).toBe("true");
+    expect(slot?.childElementCount).toBe(0);
+  });
+
+  it("reveals desktop actions on hover or keyboard focus only", () => {
+    render(
+      <MessageActionBar
+        timestamp={TIMESTAMP}
+        alignment="start"
+        actions={buildMessageActions({ messageText: "An answer." })}
+      />,
+    );
+
+    const className = screen.getByRole("button", {
+      name: "Copy message",
+    }).className;
+
+    expect(className).toContain("opacity-0");
+    expect(className).toContain("group-hover/message:opacity-100");
+    expect(className).toContain(
+      "group-has-[:focus-visible]/message:opacity-100",
+    );
+    expect(className).not.toContain("group-focus-within/message");
+    expect(className).not.toContain("hover:none");
   });
 
   it("passes message text and attachments from Add to chat", () => {
     const onAddToChat = vi.fn();
+
     const attachment = {
       type: "localFile" as const,
       path: "uploads/spec.md",
       name: "spec.md",
       sizeBytes: 0,
     };
+
     render(
       <MessageActionBar
         timestamp={TIMESTAMP}
-        messageText="Quote this message."
         alignment="end"
-        mobileActionDisplay="inline"
-        addToChatAttachments={[attachment]}
-        onAddToChat={onAddToChat}
+        actions={buildMessageActions({
+          messageText: "Quote this message.",
+          addToChatAttachments: [attachment],
+          onAddToChat,
+        })}
       />,
     );
 
-    fireEvent.click(
-      within(openDesktopMenu()).getByRole("menuitem", { name: "Add to chat" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
     expect(onAddToChat).toHaveBeenCalledWith("Quote this message.", [
       attachment,
     ]);
@@ -404,26 +498,27 @@ describe("MessageActionBar", () => {
 
   it("offers Add to chat for attachment-only messages", () => {
     const onAddToChat = vi.fn();
+
     const attachment = {
       type: "localImage" as const,
       path: "uploads/screenshot.png",
       name: "screenshot.png",
       sizeBytes: 0,
     };
+
     render(
       <MessageActionBar
         timestamp={TIMESTAMP}
-        messageText=""
         alignment="end"
-        mobileActionDisplay="inline"
-        addToChatAttachments={[attachment]}
-        onAddToChat={onAddToChat}
+        actions={buildMessageActions({
+          messageText: "",
+          addToChatAttachments: [attachment],
+          onAddToChat,
+        })}
       />,
     );
 
-    fireEvent.click(
-      within(openDesktopMenu()).getByRole("menuitem", { name: "Add to chat" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Add to chat" }));
     expect(onAddToChat).toHaveBeenCalledWith("", [attachment]);
   });
 
@@ -431,10 +526,11 @@ describe("MessageActionBar", () => {
     render(
       <MessageActionBar
         timestamp={TIMESTAMP}
-        messageText=""
-        copyImageUrl="/attachments/screenshot.png"
         alignment="end"
-        mobileActionDisplay="inline"
+        actions={buildMessageActions({
+          messageText: "",
+          copyImageUrl: "/attachments/screenshot.png",
+        })}
       />,
     );
 
@@ -442,14 +538,15 @@ describe("MessageActionBar", () => {
   });
 
   it("marks the action row while the menu is open", () => {
+    const resizeObserver = installControlledResizeObserver();
     render(
       <MessageActionBar
         timestamp={TIMESTAMP}
-        messageText="An answer."
         alignment="end"
-        mobileActionDisplay="inline"
+        actions={buildMessageActions({ messageText: "An answer." })}
       />,
     );
+    resizeObserver.reportWidth(30);
     const trigger = screen.getByRole("button", { name: "Message actions" });
     const row = trigger.parentElement;
 
@@ -526,5 +623,34 @@ describe("computeMessageActionRowLayout", () => {
         ...metrics,
       }),
     ).toEqual({ inlineCount: 0, overflowCount: 0 });
+  });
+});
+
+describe("formatShortMessageTime", () => {
+  const now = new Date(2026, 9, 26, 15, 13);
+  it.each([
+    [0, "now"],
+    [60_000, "1m ago"],
+    [52 * 60_000, "52m ago"],
+    [5 * 3_600_000, "5h ago"],
+  ])("formats %d milliseconds ago as %s", (elapsed, expected) => {
+    expect(formatShortMessageTime(now.getTime() - elapsed, now)).toBe(expected);
+  });
+
+  it("adds the clock after yesterday and older calendar dates", () => {
+    const yesterday = new Date(2026, 9, 25, 13, 13);
+    const older = new Date(2026, 9, 20, 13, 13);
+
+    const clock = yesterday.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+
+    expect(formatShortMessageTime(yesterday.getTime(), now)).toBe(
+      `Yesterday - ${clock}`,
+    );
+    expect(formatShortMessageTime(older.getTime(), now)).toBe(
+      `${older.toLocaleDateString(undefined, { month: "short", day: "numeric" })} - ${clock}`,
+    );
   });
 });

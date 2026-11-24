@@ -3,7 +3,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { useQuery } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import { sdk } from "@/lib/sdk";
 import {
   makeSidebarBootstrapResponse,
@@ -37,31 +37,38 @@ it.each(
   "preserves sidebar refreshes when marking $mode (fails=$fails, refreshing=$refreshing)",
   async ({ mode, fails, refreshing }) => {
     const harness = createQueryClientTestHarness();
+
     const parent = makeThreadListEntry({
       id: "parent",
       projectId: "project",
       lastReadAt: null,
     });
+
     const child = makeThreadListEntry({
       id: "child",
       projectId: "project",
       parentThreadId: parent.id,
     });
+
     const bootstrap = (threads: (typeof parent)[]) =>
       makeSidebarBootstrapResponse({
         projects: [makeProjectWithThreadsResponse({ id: "project", threads })],
       });
+
     harness.queryClient.setQueryData(
       sidebarNavigationQueryKey(),
       bootstrap([parent]),
     );
     const signals: AbortSignal[] = [];
+
     const fetchSidebar = vi.fn(({ signal }: { signal: AbortSignal }) => {
       signals.push(signal);
+
       return signals.length === 1
         ? new Promise<ReturnType<typeof bootstrap>>(() => {})
         : Promise.resolve(bootstrap([parent, child]));
     });
+
     vi.mocked(sdk.threads.markRead).mockResolvedValue(
       makeThreadResponse({ id: parent.id, projectId: parent.projectId }),
     );
@@ -73,10 +80,12 @@ it.each(
       }),
     );
     const failure = new Error("Read state request failed");
+
     if (fails) {
       vi.mocked(sdk.threads.markRead).mockRejectedValue(failure);
       vi.mocked(sdk.threads.markUnread).mockRejectedValue(failure);
     }
+
     const { result } = renderHook(
       () => {
         const sidebar = useQuery({
@@ -84,15 +93,19 @@ it.each(
           queryFn: fetchSidebar,
           staleTime: Infinity,
         });
+
         const read = useMarkThreadRead();
         const unread = useMarkThreadUnread();
+
         return { sidebar, mutation: mode === "read" ? read : unread };
       },
       { wrapper: harness.wrapper },
     );
+
     const effects = createRealtimeCacheEffects({
       queryClient: harness.queryClient,
     });
+
     try {
       if (refreshing) {
         act(() =>
@@ -106,13 +119,16 @@ it.each(
         );
         await waitFor(() => expect(fetchSidebar).toHaveBeenCalledTimes(1));
       }
+
       await act(async () => {
         const mutation = result.current.mutation.mutateAsync({
           threadId: parent.id,
         });
+
         if (fails) await expect(mutation).rejects.toBe(failure);
         else await mutation;
       });
+
       if (refreshing) expect(signals[0]?.aborted).toBe(true);
       await waitFor(() =>
         expect(

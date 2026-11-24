@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
-import { parseNamespacedGlyph } from "@bb/domain";
+import { parseNamespacedGlyph } from "@omnyo/domain";
 
 export interface PluginLogoUrls {
   displayName: string | null;
@@ -11,17 +11,20 @@ export interface PluginLogoUrls {
 }
 
 let logoUrls: ReadonlyMap<string, PluginLogoUrls> = new Map();
+
 const listeners = new Set<() => void>();
 
 export function setPluginLogoUrls(
   next: ReadonlyMap<string, PluginLogoUrls>,
 ): void {
   logoUrls = next;
+
   for (const listener of listeners) listener();
 }
 
 function subscribePluginLogos(listener: () => void): () => void {
   listeners.add(listener);
+
   return () => {
     listeners.delete(listener);
   };
@@ -43,7 +46,9 @@ export function usePluginCompactBranding(
     getPluginLogoUrls,
     getPluginLogoUrls,
   );
+
   const branding = entries.get(pluginId);
+
   return branding === undefined
     ? null
     : { icon: branding.icon, compactIconUrl: branding.compactIconUrl };
@@ -55,6 +60,7 @@ export function usePluginDisplayName(pluginId: string): string {
     getPluginLogoUrls,
     getPluginLogoUrls,
   );
+
   return entries.get(pluginId)?.displayName ?? pluginId;
 }
 
@@ -65,6 +71,7 @@ export function usePluginIconUrl(
     () => resolvePluginIconUrl(getPluginLogoUrls(), glyph),
     [glyph],
   );
+
   return useSyncExternalStore(subscribePluginLogos, getSnapshot, getSnapshot);
 }
 
@@ -73,9 +80,11 @@ export function resolvePluginIconUrl(
   glyph: string | undefined,
 ): string | undefined {
   const parsed = glyph === undefined ? null : parseNamespacedGlyph(glyph);
+
   if (parsed === null) {
     return undefined;
   }
+
   return entries.get(parsed.pluginId)?.icons.get(parsed.name);
 }
 

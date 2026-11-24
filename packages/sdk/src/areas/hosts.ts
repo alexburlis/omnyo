@@ -1,5 +1,5 @@
-import { hostProviderCliInstallEventSchema } from "@bb/server-contract";
-import type { Host, HostType } from "@bb/domain";
+import { hostProviderCliInstallEventSchema } from "@omnyo/server-contract";
+import type { Host, HostType } from "@omnyo/domain";
 import type {
   CreateHostJoinCodeResponse,
   CreateMachineRequest,
@@ -9,6 +9,8 @@ import type {
   HostCloneDefaultPathResponse,
   HostDirectoryListing,
   HostDirectoryQuery,
+  HostGetResponse,
+  HostHousekeepingResponse,
   HostDiscoveredReposResponse,
   HostActionResponse,
   HostPathsExistRequest,
@@ -21,8 +23,9 @@ import type {
   HostRetryUpdateResponse,
   DeleteOldServerCopyResponse,
   UpdateHostRequest,
+  UpdateHostAvailabilityRequest,
   SystemMachineProvider,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 
 export interface HostGetArgs {
@@ -35,6 +38,10 @@ export interface HostDeleteArgs {
 }
 
 export interface HostUpdateArgs extends UpdateHostRequest {
+  hostId: string;
+}
+
+export interface HostSetAvailabilityArgs extends UpdateHostAvailabilityRequest {
   hostId: string;
 }
 
@@ -77,6 +84,7 @@ export interface HostPickFolderArgs extends HostPickFolderRequest {
 
 export interface HostProviderCliInstallArgs extends HostProviderCliInstallRequest {
   hostId: string;
+  onEvent?: (event: HostProviderCliInstallEvent) => void;
 }
 
 export interface HostListArgs {
@@ -95,27 +103,48 @@ export interface MachineProviderListArgs {
 }
 
 export type HostCreateJoinCodeResult = CreateHostJoinCodeResponse;
+
 export type HostDeleteResult = { ok: true };
+
 export type HostDirectoryResult = HostDirectoryListing;
+
 export type HostDiscoverReposResult = HostDiscoveredReposResponse;
-export type HostGetResult = Host & {
-  connectMachineId: string | null;
-  threadStorageRootPath: string | null;
-};
+
+export type HostGetResult = HostGetResponse;
+
 export type HostEnrollmentCommandResult = HostEnrollmentCommandResponse;
+
 export type HostReconnectResult = HostReconnectResponse;
+
 export type HostCloneDefaultPathResult = HostCloneDefaultPathResponse;
+
 export type HostProviderCliInstallResult = HostProviderCliInstallEvent[];
+
 export type HostListResult = Host[];
+
 export type HostPathsExistResult = HostPathsExistResponse;
+
 export type HostPickFolderResult = HostPickFolderResponse;
+
 export type HostProviderCliStatusResult = HostProviderCliStatusResponse;
+
 export type HostRetryUpdateResult = HostRetryUpdateResponse;
+
 export type HostActionResult = HostActionResponse;
+
 export type HostUpdateResult = Host;
+
 export type MachineProviderListResult = SystemMachineProvider[];
 
 export interface HostsArea {
+  experimental_housekeeping(
+    args: HostGetArgs,
+  ): Promise<HostHousekeepingResponse>;
+  convertToDirect(hostId: string): Promise<{
+    hostId: string;
+    providerId: "direct";
+    retirementPending: boolean;
+  }>;
   experimental_create(args: MachineCreateArgs): Promise<Host>;
   experimental_getEnrollmentCommand(
     args: HostGetArgs,
@@ -148,6 +177,7 @@ export interface HostsArea {
   experimental_resume(args: HostActionArgs): Promise<Host>;
   experimental_retryCleanup(args: HostActionArgs): Promise<HostActionResult>;
   retryUpdate(args: HostRetryUpdateArgs): Promise<HostRetryUpdateResult>;
+  experimental_setAvailability(args: HostSetAvailabilityArgs): Promise<Host>;
   experimental_suspend(args: HostActionArgs): Promise<Host>;
   experimental_reconcile(args: HostActionArgs): Promise<Host>;
   update(args: HostUpdateArgs): Promise<HostUpdateResult>;
@@ -155,7 +185,21 @@ export interface HostsArea {
 
 export function createHostsArea(args: CreateSdkAreaArgs): HostsArea {
   const { transport } = args;
+
   return {
+    experimental_housekeeping: (input) =>
+      transport.readJson(
+        transport.api.v1.hosts[":id"].housekeeping.$get(
+          { param: { id: input.hostId } },
+          ...signalRequestArgs(input.signal),
+        ),
+      ),
+    convertToDirect: (hostId) =>
+      transport.readJson(
+        transport.api.v1.hosts[":id"]["direct-access"].$post({
+          param: { id: hostId },
+        }),
+      ),
     async experimental_create(input) {
       let host = await transport.readJson(
         transport.api.v1.hosts.$post(
@@ -169,10 +213,14 @@ export function createHostsArea(args: CreateSdkAreaArgs): HostsArea {
           ...signalRequestArgs(input.signal),
         ),
       );
+
       if (input.wait === false) return host;
+
       for (;;) {
         input.signal?.throwIfAborted();
+
         if (host.lifecycle.phase === "active") return host;
+
         if (
           host.lifecycle.phase === "removing" ||
           host.lifecycle.phase === "destroyed"
@@ -215,6 +263,7 @@ export function createHostsArea(args: CreateSdkAreaArgs): HostsArea {
           param: { id: input.hostId },
         }),
       );
+
       return { ok: true };
     },
     async experimental_deleteOldServerCopy(input) {
@@ -271,16 +320,57 @@ export function createHostsArea(args: CreateSdkAreaArgs): HostsArea {
           json: {
             provider: input.provider,
             actionKind: input.actionKind,
+            ...(input.confirmInterruptingThreads === undefined
+              ? {}
+              : {
+                  confirmInterruptingThreads: input.confirmInterruptingThreads,
+                }),
           },
         }),
       );
-      const text: string = await response.text();
-      return text
-        .split(/\r?\n/u)
-        .filter((line) => line.trim().length > 0)
-        .map((line) =>
-          hostProviderCliInstallEventSchema.parse(JSON.parse(line)),
-        );
+
+      const events: HostProviderCliInstallEvent[] = [];
+
+      const consumeLine = (line: string) => {
+        if (line.trim().length === 0) return;
+        const event = hostProviderCliInstallEventSchema.parse(JSON.parse(line));
+        events.push(event);
+        input.onEvent?.(event);
+      };
+
+      const reader = response.body?.getReader();
+
+      if (reader === undefined) {
+        const text: string = await response.text();
+
+        for (const line of text.split(/\r?\n/u)) {
+          consumeLine(line);
+        }
+
+        return events;
+      }
+
+      const decoder = new TextDecoder();
+      let pending = "";
+
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          pending += decoder.decode(chunk.value, { stream: !chunk.done });
+          const lines = pending.split(/\r?\n/u);
+          pending = lines.pop() ?? "";
+
+          for (const line of lines) consumeLine(line);
+
+          if (chunk.done) break;
+        }
+
+        consumeLine(pending);
+      } finally {
+        reader.releaseLock();
+      }
+
+      return events;
     },
     async list(input) {
       return transport.readJson(
@@ -306,6 +396,7 @@ export function createHostsArea(args: CreateSdkAreaArgs): HostsArea {
           ...signalRequestArgs(input?.signal),
         ),
       );
+
       return response.providers;
     },
     async pathsExist(input) {
@@ -365,6 +456,14 @@ export function createHostsArea(args: CreateSdkAreaArgs): HostsArea {
       return transport.readJson(
         transport.api.v1.hosts[":id"].reconcile.$post({
           param: { id: input.hostId },
+        }),
+      );
+    },
+    async experimental_setAvailability(input) {
+      return transport.readJson(
+        transport.api.v1.hosts[":id"].availability.$patch({
+          param: { id: input.hostId },
+          json: { availability: input.availability },
         }),
       );
     },

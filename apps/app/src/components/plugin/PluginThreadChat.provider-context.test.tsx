@@ -8,18 +8,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import {
-  beforeAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
-import type { PluginTimelineRendererProps } from "@get-bb/plugin-sdk";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PluginTimelineRendererProps } from "@omnyo/plugin-sdk";
 import { sdk } from "@/lib/sdk";
-import { makeProviderInfo } from "@bb/test-helpers/domain-fixtures";
+import { makeProviderInfo } from "@omnyo/test-helpers/domain-fixtures";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { pluginSdkAppImplementation } from "@/lib/plugin-sdk-app-impl";
 import { toolRow } from "@/test/fixtures/thread-timeline-rows";
@@ -38,19 +30,25 @@ import {
   makeThreadTimelineResponse,
 } from "@/test/fixtures/thread-responses";
 
-beforeAll(() => LazyPluginThreadChat.preload());
+await LazyPluginThreadChat.preload();
 
 vi.mock("@/lib/sdk", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/lib/sdk")>();
+
   return {
     ...mod,
     sdk: {
       ...mod.sdk,
+      server: {
+        ...mod.sdk.server,
+        runtimeIdentity: vi.fn(),
+      },
       providers: { ...mod.sdk.providers, list: vi.fn() },
       threads: { ...mod.sdk.threads, get: vi.fn(), timeline: vi.fn() },
     },
   };
 });
+
 vi.mock("@/hooks/useRealtimeSubscription", () => ({
   useThreadDetailRealtimeSubscription: vi.fn(),
   useThreadListRealtimeSubscription: vi.fn(),
@@ -61,6 +59,7 @@ vi.mock("@/hooks/useRealtimeSubscription", () => ({
   useHostListRealtimeSubscription: vi.fn(),
   useSystemRealtimeSubscription: vi.fn(),
 }));
+
 vi.mock("@/hooks/useHostDaemon", () => ({
   useHostDaemon: () => ({ isLocalDaemonHost: () => true }),
   useLocalHostDaemonAccess: () => ({ isLocalDaemonHost: () => true }),
@@ -77,6 +76,7 @@ const THREAD_B = {
   environment: null,
   host: null,
 };
+
 const ROW_B = toolRow({
   id: "thr_b:tool:1",
   threadId: "thr_b",
@@ -84,10 +84,13 @@ const ROW_B = toolRow({
   toolArgs: { q: 1 },
   output: "out",
 });
+
 const TIMELINE_B = makeThreadTimelineResponse({
+  runtimeId: "runtime-provider-context",
   rows: [ROW_B],
   maxSeq: 10,
 });
+
 const PROVIDERS = [
   makeProviderInfo({
     id: "agent-b",
@@ -98,11 +101,13 @@ const PROVIDERS = [
 
 function PluginPanelPage({ threadId }: { threadId: string }) {
   const ThreadChat = pluginSdkAppImplementation.ThreadChat;
+
   return <ThreadChat threadId={threadId} variant="timeline" />;
 }
 
 function renderUnderThreadA(ui: React.ReactElement) {
   const { wrapper: Wrapper } = createQueryClientTestHarness();
+
   return render(
     <Wrapper>
       <MemoryRouter>
@@ -128,6 +133,7 @@ async function expandAllRows() {
       document.querySelectorAll('[aria-expanded="false"]').length,
     ).toBeGreaterThan(0);
   });
+
   for (const element of Array.from(
     document.querySelectorAll('[aria-expanded="false"]'),
   )) {
@@ -141,7 +147,11 @@ afterEach(() => {
   resetPluginSlotStoreForTest();
   resetAllCrashedPluginSlotsForTest();
 });
+
 beforeEach(() => {
+  vi.mocked(sdk.server.runtimeIdentity).mockResolvedValue({
+    runtimeId: "runtime-provider-context",
+  });
   vi.mocked(sdk.threads.get).mockResolvedValue(THREAD_B);
   vi.mocked(sdk.threads.timeline).mockResolvedValue(TIMELINE_B);
   vi.mocked(sdk.providers.list).mockResolvedValue(PROVIDERS);
@@ -150,17 +160,21 @@ beforeEach(() => {
 describe("PluginThreadChat provider context", () => {
   it("scopes the embedded thread's tool rows to its own provider plugin", async () => {
     const seen: PluginTimelineRendererProps["thread"][] = [];
+
     function ToolRendererA({ row }: PluginTimelineRendererProps) {
       return <div data-testid="tool-renderer-a">{row.toolName}</div>;
     }
+
     function ToolRendererB({ row, thread }: PluginTimelineRendererProps) {
       seen.push(thread);
+
       return (
         <div data-testid="tool-renderer-b">
           {row.toolName}:{thread.id}:{thread.providerId}
         </div>
       );
     }
+
     setPluginSlotRegistrations(
       "plugin-a",
       registrationSet({
@@ -192,6 +206,7 @@ describe("PluginThreadChat provider context", () => {
     function ToolRendererA({ row }: PluginTimelineRendererProps) {
       return <div data-testid="tool-renderer-a">{row.toolName}</div>;
     }
+
     setPluginSlotRegistrations(
       "plugin-a",
       registrationSet({

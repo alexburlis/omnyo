@@ -1,4 +1,4 @@
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import type { GithubCheckStatus } from "@/lib/pull-request-display";
 
 const GITHUB_MARK_PATH =
@@ -35,6 +35,7 @@ export function GithubFaviconIcon({
   className?: string;
 }) {
   const paths = status === null ? null : GITHUB_STATUS_PATHS[status];
+
   return (
     <svg
       viewBox="0 0 32 32"

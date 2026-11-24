@@ -39,10 +39,13 @@ export function renderLifecycleMermaid(
   args: RenderLifecycleMermaidArgs,
 ): string {
   const lines = ["flowchart LR", "    __start((start))"];
+
   for (const status of Object.keys(args.table)) {
     lines.push(`    ${status}["${status}"]`);
   }
+
   lines.push(`    __start --> ${args.initial}`);
+
   for (const group of createLifecycleDiagramTransitionGroups(args)) {
     lines.push(
       `    ${group.from} -->|${quoteMermaidEdgeLabel(
@@ -50,6 +53,7 @@ export function renderLifecycleMermaid(
       )}| ${group.to}`,
     );
   }
+
   return `${lines.join("\n")}\n`;
 }
 
@@ -61,14 +65,18 @@ function createLifecycleDiagramTransitionGroups(
   args: RenderLifecycleMermaidArgs,
 ): LifecycleDiagramTransitionGroup[] {
   const groups: LifecycleDiagramTransitionGroup[] = [];
+
   for (const [from, row] of Object.entries(args.table)) {
     for (const [event, to] of Object.entries(row)) {
       if (to === undefined) {
         continue;
       }
+
       const predicates = args.predicateNames[event] ?? [];
+
       const label =
         predicates.length > 0 ? `${event} ⟨${predicates.join(", ")}⟩` : event;
+
       if (typeof to === "string") {
         appendLifecycleDiagramTransitionGroup({
           groups,
@@ -99,6 +107,7 @@ function createLifecycleDiagramTransitionGroups(
       }
     }
   }
+
   return groups;
 }
 
@@ -114,10 +123,13 @@ function appendLifecycleDiagramTransitionGroup({
   const existingGroup = groups.find(
     (group) => group.from === transition.from && group.to === transition.to,
   );
+
   if (existingGroup) {
     existingGroup.labels.push(transition.label);
+
     return;
   }
+
   groups.push({
     from: transition.from,
     labels: [transition.label],

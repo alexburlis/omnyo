@@ -2,21 +2,21 @@ import {
   EMPTY_PROVIDER_NATIVE_ROOTS,
   isNamespacedGlyph,
   isPluginOwnedIconPath,
-} from "@bb/domain";
-import type { NormalizedPluginProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/domain";
+import type { NormalizedPluginProviderDeclaration } from "@omnyo/plugin-sdk/internal/host-policy";
 import type {
   AvailableModel,
   ProviderComposerAction,
   ProviderExtensionKinds,
   ProviderInfo,
   ProviderOptionDescriptor,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   PluginProviderDeclaration,
   PluginProviderOptionDescriptor,
   PluginProviderOptionsContext,
-} from "@get-bb/plugin-sdk";
-import { deriveValidatedProviderOptions } from "@get-bb/plugin-sdk/internal/host-policy";
+} from "@omnyo/plugin-sdk";
+import { deriveValidatedProviderOptions } from "@omnyo/plugin-sdk/internal/host-policy";
 import type {
   ProviderRegistration,
   ProviderServerCapabilities,
@@ -27,7 +27,7 @@ const REASONING_LEVEL_LABELS: Readonly<Record<string, string>> = {
   low: "Low",
   medium: "Medium",
   high: "High",
-  xhigh: "Extra High",
+  xhigh: "xHigh",
   ultracode: "Ultracode",
   max: "Max",
   ultra: "Ultra",
@@ -56,6 +56,7 @@ function projectReasoningLevels(
   if (declaration.reasoningLevels !== undefined) {
     return toOptionDescriptors(declaration.reasoningLevels);
   }
+
   return declaration.capabilities.reasoningLevels.map((level) => ({
     id: level,
     label: REASONING_LEVEL_LABELS[level] ?? level,
@@ -68,6 +69,7 @@ function projectServiceTiers(
   if (declaration.serviceTiers !== undefined) {
     return toOptionDescriptors(declaration.serviceTiers);
   }
+
   return declaration.capabilities.supportsServiceTier
     ? [...DEFAULT_SERVICE_TIERS]
     : undefined;
@@ -78,14 +80,17 @@ function projectExtensionKinds(
   declaration: PluginProviderDeclaration,
 ): ProviderExtensionKinds | undefined {
   const declared = declaration.extensionKinds;
+
   if (declared === undefined) return undefined;
   const kinds: ProviderExtensionKinds = {};
+
   for (const [name, kind] of Object.entries(declared)) {
     kinds[`${pluginId}/${name}`] = {
       item: kind.item !== undefined,
       state: kind.state !== undefined,
     };
   }
+
   return kinds;
 }
 
@@ -93,6 +98,7 @@ export function projectFallbackModels(
   declaration: PluginProviderDeclaration,
 ): AvailableModel[] {
   const fallback = declaration.models?.fallback ?? [];
+
   return fallback.map((model) => ({
     id: model.id,
     model: model.id,
@@ -114,6 +120,7 @@ function buildProviderLogoUrl(
   iconHash: string | null,
 ): string {
   const path = `/api/v1/system/providers/${providerId}/logo`;
+
   return iconHash === null ? path : `${path}?h=${iconHash}`;
 }
 
@@ -126,6 +133,7 @@ export function buildPluginProviderRegistration(args: {
 }): Omit<ProviderRegistration, "pluginId" | "iconNames"> {
   const { declaration } = args;
   const { capabilities } = declaration;
+
   const {
     supportsThreadArchive,
     supportsThreadRename,
@@ -138,6 +146,7 @@ export function buildPluginProviderRegistration(args: {
     { kind: "skills", trigger: "/" },
     { kind: "skills", trigger: "$" },
   ];
+
   for (const action of declaration.composerActions) {
     composerActions.push(
       action === "plan"

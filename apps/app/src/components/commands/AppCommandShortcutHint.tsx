@@ -1,5 +1,6 @@
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import type { AppShortcutPresentation } from "@/lib/app-keybindings";
+import { APP_COMMAND_INLINE_HINT_ATTRIBUTE } from "@/lib/app-command-targets";
 import { useIsAppCommandModifierHeld } from "./AppCommandProvider";
 
 interface AppCommandShortcutHintProps {
@@ -9,6 +10,7 @@ interface AppCommandShortcutHintProps {
 
 interface AppCommandShortcutPillProps {
   ariaHidden?: boolean;
+  inlineHint?: boolean;
   shortcut: Pick<AppShortcutPresentation, "label">;
   className?: string;
 }
@@ -18,12 +20,14 @@ const APP_COMMAND_SHORTCUT_HINT_CLASS =
 
 export function AppCommandShortcutPill({
   ariaHidden = true,
+  inlineHint = false,
   shortcut,
   className,
 }: AppCommandShortcutPillProps) {
   return (
     <kbd
       aria-hidden={ariaHidden}
+      {...(inlineHint ? { [APP_COMMAND_INLINE_HINT_ATTRIBUTE]: "" } : {})}
       className={cn(APP_COMMAND_SHORTCUT_HINT_CLASS, className)}
     >
       {shortcut.label}
@@ -36,7 +40,17 @@ export function AppCommandShortcutHint({
   className,
 }: AppCommandShortcutHintProps) {
   const isPrimaryModifierHeld = useIsAppCommandModifierHeld();
+
   if (!isPrimaryModifierHeld || !shortcut) return null;
 
-  return <AppCommandShortcutPill shortcut={shortcut} className={className} />;
+  return (
+    <AppCommandShortcutPill
+      inlineHint
+      shortcut={shortcut}
+      className={cn(
+        "animate-in fade-in-0 duration-(--motion-duration-fast)",
+        className,
+      )}
+    />
+  );
 }

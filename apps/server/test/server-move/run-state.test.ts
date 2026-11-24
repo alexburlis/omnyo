@@ -2,14 +2,14 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { upsertHost } from "@bb/db";
-import { SERVER_MOVE_STEP_IDS, type ServerMoveStepId } from "@bb/domain";
-import type { HostDaemonOnlineRpcRequestMessage } from "@bb/host-daemon-contract";
-import { writeServerMovedFile } from "@bb/server-archive";
+import { upsertHost } from "@omnyo/db";
+import { SERVER_MOVE_STEP_IDS, type ServerMoveStepId } from "@omnyo/domain";
+import type { HostDaemonOnlineRpcRequestMessage } from "@omnyo/host-daemon-contract";
+import { writeServerMovedFile } from "@omnyo/server-archive";
 import type {
   ServerMoveStatus,
   ServerMoveStepStatus,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { afterEach, describe, expect, it } from "vitest";
 import { createServerMoveCoordinator } from "../../src/services/server-move/coordinator.js";
 import {
@@ -40,16 +40,24 @@ import {
 } from "../helpers/test-app.js";
 
 const OLD = "host-old";
+
 const NEW = "host-new";
+
 const WORKER = "host-worker";
+
 const MOVE_ID = "move-boot-1";
+
 const DIRECT_URL = "https://desktop.example.test";
+
 const BOOT_NOW = 9_000;
+
 const BOOT_TIMINGS = {
   ...TEST_SERVER_MOVE_TIMINGS,
   recoveryProbeIntervalMs: 20,
 };
-const ORIGINAL_CONFIG = '{"config":{"BB_LOG_LEVEL":"info"}}\n';
+
+const ORIGINAL_CONFIG = '{"config":{"OMNYO_LOG_LEVEL":"info"}}\n';
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -69,8 +77,9 @@ function targetReply(
     case "server_move.inspect":
       return ok(inspectResult());
     case "server_move.activate":
-    case "server_move.abort":
       return ok({ ok: true });
+    case "server_move.abort":
+      return ok({ ok: true, moveId: request.command.moveId, fenced: true });
     default:
       throw new Error(`Unexpected target command ${request.command.type}`);
   }
@@ -131,6 +140,7 @@ function runFile(
     movedAt: null,
     activationRequestedAt: null,
     activationConfirmedAt: null,
+    prepareDispatchedAt: null,
     ...overrides,
   };
 }
@@ -146,7 +156,7 @@ async function lockDataDir(harness: TestAppHarness): Promise<void> {
     serverUrl: DIRECT_URL,
     mode: "direct",
     connectHandle: null,
-    oldCopyEntries: ["bb.db"],
+    oldCopyEntries: ["app.db"],
   });
 }
 
@@ -154,8 +164,9 @@ async function writeMovedConfig(harness: TestAppHarness): Promise<string> {
   const path = join(harness.config.dataDir, "config.json");
   await writeFile(
     path,
-    `${JSON.stringify({ config: { BB_LOG_LEVEL: "info" }, serverUrl: DIRECT_URL })}\n`,
+    `${JSON.stringify({ config: { OMNYO_LOG_LEVEL: "info" }, serverUrl: DIRECT_URL })}\n`,
   );
+
   return path;
 }
 
@@ -175,6 +186,7 @@ function requireRestored(
   if (restored === null) {
     throw new Error("Expected a restored server move");
   }
+
   return restored;
 }
 
@@ -183,66 +195,62 @@ function runFileExists(harness: TestAppHarness): boolean {
 }
 
 describe("server move boot reconciliation", () => {
-  it("abandons a run that restarted before the switch, publishes failed at its step, and aborts the target once it connects", () =>
+  it("retains an ambiguous restarted preparation until management proves the target fence", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
-      const run = runFile(harness, "preparing", {
-        "stop-work": "done",
-        "update-target": "skipped",
-        export: "done",
-        transfer: "running",
-      });
+
+      const run = runFile(
+        harness,
+        "preparing",
+        {
+          "stop-work": "done",
+          "update-target": "done",
+          export: "done",
+          transfer: "running",
+        },
+        { prepareDispatchedAt: 1000 },
+      );
+
       await mkdir(run.workDir, { recursive: true });
       await writeFile(join(run.workDir, "server.bbsa"), "archive");
       await writeServerMoveRunFile(harness.config.dataDir, run);
-
       const restored = requireRestored(await reconcile(harness));
+      expect(restored.kind).toBe("recovery_required");
+      expect(existsSync(run.workDir)).toBe(true);
 
-      expect(restored.kind).toBe("ended");
-      expect(existsSync(run.workDir)).toBe(false);
       const { environment, events, plugins } = createTestServerMoveEnvironment(
         harness,
         { timings: BOOT_TIMINGS },
       );
+
       const coordinator = createServerMoveCoordinator(environment);
+
       try {
         coordinator.restore(restored);
-
         expect(coordinator.getStatus()).toMatchObject({
           moveId: MOVE_ID,
-          state: "failed",
-          cancellable: false,
-          finishedAt: BOOT_NOW,
-          error: {
-            step: "transfer",
-            message:
-              "The server restarted before the move finished, so nothing switched over",
-          },
+          state: "recovery_required",
+          cancellable: true,
+          finishedAt: null,
         });
-        expect(coordinator.getStatus()?.steps[3]).toMatchObject({
-          id: "transfer",
-          status: "failed",
-        });
-        expect(coordinator.isFrozen()).toBe(false);
-        expect(isServerMoveFrozen(harness.db)).toBe(false);
-        expect(coordinator.movedTo()).toBeNull();
-        expect(plugins.paused).toBe(false);
-
+        expect(coordinator.isFrozen()).toBe(true);
+        expect(plugins.paused).toBe(true);
+        expect((await coordinator.cancel()).state).toBe("recovery_required");
         registerFakeDaemon(harness, {
           events,
           hostId: NEW,
           handle: targetReply,
         });
-        await expect
-          .poll(() => events.includes(`${NEW}:server_move.abort`))
-          .toBe(true);
+        expect((await coordinator.cancel()).state).toBe("cancelled");
+        expect(events).toContain(`${NEW}:server_move.abort`);
+        expect(coordinator.isFrozen()).toBe(false);
         await expect.poll(() => runFileExists(harness)).toBe(false);
       } finally {
         coordinator.dispose();
       }
     }));
 
-  it("restores config.json from the recorded backup when a switch-phase run has no lock", () =>
+  it("retains rewritten config until the ambiguous switch target is positively fenced", () =>
     withTestHarness(async (harness) => {
       seedTopology(harness);
       const configPath = await writeMovedConfig(harness);
@@ -257,14 +265,31 @@ describe("server move boot reconciliation", () => {
 
       const restored = requireRestored(await reconcile(harness));
 
-      expect(restored.kind).toBe("ended");
-      expect(restored.run.status).toMatchObject({
-        state: "failed",
-        error: { step: "switch" },
-      });
-      expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual(
+      expect(restored.kind).toBe("recovery_required");
+      expect(JSON.parse(await readFile(configPath, "utf8"))).not.toEqual(
         JSON.parse(ORIGINAL_CONFIG),
       );
+
+      const { environment, events } = createTestServerMoveEnvironment(harness, {
+        timings: BOOT_TIMINGS,
+      });
+
+      const coordinator = createServerMoveCoordinator(environment);
+
+      try {
+        coordinator.restore(restored);
+        registerFakeDaemon(harness, {
+          events,
+          hostId: NEW,
+          handle: targetReply,
+        });
+        await coordinator.cancel();
+        expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual(
+          JSON.parse(ORIGINAL_CONFIG),
+        );
+      } finally {
+        coordinator.dispose();
+      }
     }));
 
   it("brings back an unconfirmed locked run as recovery_required and finishes once the destination is ready", () =>
@@ -281,8 +306,10 @@ describe("server move boot reconciliation", () => {
         }),
       );
       const destination: { state: "pending" | "ready" } = { state: "pending" };
+
       const { environment, events, plugins, retired } =
         createTestServerMoveEnvironment(harness, { timings: BOOT_TIMINGS });
+
       registerFakeDaemon(harness, {
         events,
         hostId: OLD,
@@ -300,6 +327,7 @@ describe("server move boot reconciliation", () => {
       const restored = requireRestored(await reconcile(harness));
       expect(restored.kind).toBe("recovery_required");
       const coordinator = createServerMoveCoordinator(environment);
+
       try {
         coordinator.restore(restored);
 
@@ -349,6 +377,7 @@ describe("server move boot reconciliation", () => {
       expect(restored.kind).toBe("completed");
       const { environment, retired } = createTestServerMoveEnvironment(harness);
       const coordinator = createServerMoveCoordinator(environment);
+
       try {
         coordinator.restore(restored);
 
@@ -389,7 +418,7 @@ describe("server move boot reconciliation", () => {
         runFile(harness, "switching", ALL_THROUGH_SWITCH, {
           configBackup: {
             path: configPath,
-            originalText: '{"config":{"BB_LOG_LEVEL":"debug"}}\n',
+            originalText: '{"config":{"OMNYO_LOG_LEVEL":"debug"}}\n',
           },
           movedAt: 5_000,
           activationRequestedAt: 5_100,
@@ -405,7 +434,10 @@ describe("server move boot reconciliation", () => {
 
   it("never deletes a recorded work directory outside the data directory's move directory", () =>
     withTestHarness(async (harness) => {
-      const outside = await mkdtemp(join(tmpdir(), "bb-server-move-outside-"));
+      const outside = await mkdtemp(
+        join(tmpdir(), "omnyo-server-move-outside-"),
+      );
+
       tempDirs.push(outside);
       await writeFile(join(outside, "keep.txt"), "keep");
       await writeServerMoveRunFile(
@@ -424,13 +456,13 @@ describe("server move boot reconciliation", () => {
       expect(existsSync(join(outside, "keep.txt"))).toBe(true);
     }));
 
-  it("ignores an unreadable run file instead of failing boot", () =>
+  it("fails boot visibly for an unreadable run file", () =>
     withTestHarness(async (harness) => {
       await writeFile(
         join(harness.config.dataDir, SERVER_MOVE_RUN_FILE_NAME),
         "{not json",
       );
 
-      expect(await reconcile(harness)).toBeNull();
+      await expect(reconcile(harness)).rejects.toThrow();
     }));
 });

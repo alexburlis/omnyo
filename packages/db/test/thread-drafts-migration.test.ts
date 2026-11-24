@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
-import { PERSONAL_PROJECT_ID, type PromptInput } from "@bb/domain";
+import { PERSONAL_PROJECT_ID, type PromptInput } from "@omnyo/domain";
 import {
   createConnection,
   createQueuedThreadMessage,
@@ -18,6 +18,7 @@ import {
 } from "./helpers/rewind.js";
 
 const THREAD_DRAFTS_MIGRATION_TIMESTAMP = 1790322211064;
+
 const originalMigration = readFileSync(
   new URL("./fixtures/0132_thread_drafts_original.sql", import.meta.url),
   "utf8",
@@ -31,18 +32,22 @@ it.each([false, true])(
   "removes the native draft schema without moving queue data (original migration applied: %s)",
   (alreadyMigrated) => {
     const db = createConnection(":memory:");
+
     try {
       migrate(db);
+
       const draftThread = createThread(db, noopNotifier, {
         projectId: PERSONAL_PROJECT_ID,
         providerId: "test-provider",
         status: "pending",
       });
+
       const followUpThread = createThread(db, noopNotifier, {
         projectId: PERSONAL_PROJECT_ID,
         providerId: "test-provider",
         status: "idle",
       });
+
       const queue = (
         threadId: string,
         content: PromptInput[],
@@ -63,6 +68,7 @@ it.each([false, true])(
           payload: { kind: "inline" },
           systemNotice: null,
         });
+
       queue(draftThread.id, [text("First draft")], "drafts");
       queue(followUpThread.id, [text("Draft one")], "drafts");
       queue(
@@ -103,12 +109,15 @@ it.each([false, true])(
       const queueBefore = db.$client
         .prepare("SELECT * FROM queued_thread_messages ORDER BY id")
         .all();
+
       const pluginsBefore = db.$client
         .prepare("SELECT * FROM plugins ORDER BY id")
         .all();
+
       const threadsBefore = db.$client
         .prepare("SELECT id, status FROM threads ORDER BY id")
         .all();
+
       expect(queueBefore).toHaveLength(alreadyMigrated ? 2 : 5);
 
       dropIdleLifecycleIndexes(db);

@@ -1,4 +1,4 @@
-import type { ThreadListEntry } from "@bb/domain";
+import type { ThreadListEntry } from "@omnyo/domain";
 
 interface PinnedSidebarState {
   effectivePinnedThreadIds: Set<string>;
@@ -17,6 +17,7 @@ function addDescendantThreadIds({
   if (visitedThreadIds.has(parentThreadId)) return;
 
   visitedThreadIds.add(parentThreadId);
+
   for (const child of childrenByParentId.get(parentThreadId) ?? []) {
     effectivePinnedThreadIds.add(child.id);
     addDescendantThreadIds({
@@ -41,12 +42,14 @@ export function buildPinnedSidebarState({
   const explicitlyPinnedThreads = threads.filter(
     (thread) => thread.pinnedAt !== null,
   );
+
   const childrenByParentId = new Map<string, ThreadListEntry[]>();
 
   for (const thread of threads) {
     if (thread.parentThreadId === null) continue;
 
     const children = childrenByParentId.get(thread.parentThreadId);
+
     if (children) {
       children.push(thread);
     } else {
@@ -57,6 +60,7 @@ export function buildPinnedSidebarState({
   const effectivePinnedThreadIds = new Set(
     explicitlyPinnedThreads.map((thread) => thread.id),
   );
+
   for (const thread of explicitlyPinnedThreads) {
     addDescendantThreadIds({
       childrenByParentId,

@@ -51,6 +51,7 @@ describe("normalizeAcpLaunchSpec", () => {
       permissionCli: { full: ["--force"] },
       nativeSkillRoots: { user: [".cursor/skills"], project: [] },
     });
+
     const normalized = normalizeAcpLaunchSpec(spec);
     expect(normalized).toEqual(spec);
     expect(normalizeAcpLaunchSpec(normalized)).toEqual(normalized);

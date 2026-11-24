@@ -4,15 +4,34 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { findMachineServiceFile } from "../src/machine-service.js";
 
+interface InstallerGeneration {
+  dataDirEnvName: string;
+  launchdPrefix: string;
+  name: string;
+  npmPrefixEnvName: string;
+  runtime: string;
+  systemdPrefix: string;
+}
+
+const currentInstaller: InstallerGeneration = {
+  dataDirEnvName: "OMNYO_DATA_DIR",
+  launchdPrefix: "app.omnyo.host-daemon.",
+  name: "the current installer",
+  npmPrefixEnvName: "OMNYO_APP_NPM_PREFIX",
+  runtime: "/opt/omnyo-app",
+  systemdPrefix: "omnyo-host-daemon-",
+};
+
 const tempDirs: string[] = [];
 
 async function createRoot(): Promise<{ dataDir: string; homeDir: string }> {
-  const root = await mkdtemp(join(tmpdir(), "bb-machine-service-"));
+  const root = await mkdtemp(join(tmpdir(), "omnyo-machine-service-"));
   tempDirs.push(root);
   const homeDir = join(root, "home");
   const dataDir = join(root, "data & more");
   await mkdir(homeDir, { recursive: true });
   await mkdir(dataDir, { recursive: true });
+
   return { dataDir, homeDir };
 }
 
@@ -34,6 +53,7 @@ function systemdEscape(value: string): string {
 
 async function writeLaunchAgent(args: {
   dataDir: string;
+  generation: InstallerGeneration;
   homeDir: string;
   name: string;
 }): Promise<string> {
@@ -46,19 +66,21 @@ async function writeLaunchAgent(args: {
 <dict>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>BB_APP_NPM_PREFIX</key><string>${xmlEscape(args.dataDir)}/npm</string>
-    <key>BB_DATA_DIR</key><string>${xmlEscape(args.dataDir)}</string>
+    <key>${args.generation.npmPrefixEnvName}</key><string>${xmlEscape(args.dataDir)}/npm</string>
+    <key>${args.generation.dataDirEnvName}</key><string>${xmlEscape(args.dataDir)}</string>
   </dict>
 </dict>
 </plist>
 `,
   );
+
   return path;
 }
 
 async function writeSystemdUnit(args: {
   dataDir: string;
   directory: string;
+  generation: InstallerGeneration;
   name: string;
 }): Promise<string> {
   await mkdir(args.directory, { recursive: true });
@@ -66,11 +88,12 @@ async function writeSystemdUnit(args: {
   await writeFile(
     path,
     `[Service]
-ExecStart="/usr/bin/node" "/opt/bb-app" host-daemon --auto-update
-Environment="BB_APP_NPM_PREFIX=${systemdEscape(args.dataDir)}/npm"
-Environment="BB_DATA_DIR=${systemdEscape(args.dataDir)}"
+ExecStart="/usr/bin/node" "${args.generation.runtime}" host-daemon --auto-update
+Environment="${args.generation.npmPrefixEnvName}=${systemdEscape(args.dataDir)}/npm"
+Environment="${args.generation.dataDirEnvName}=${systemdEscape(args.dataDir)}"
 `,
   );
+
   return path;
 }
 
@@ -80,93 +103,110 @@ afterEach(async () => {
   }
 });
 
-describe("findMachineServiceFile", () => {
-  it("finds the launch agent that runs a daemon for the data directory", async () => {
-    const { dataDir, homeDir } = await createRoot();
-    await writeLaunchAgent({
-      dataDir: join(dataDir, "..", "other"),
-      homeDir,
-      name: "app.getbb.host-daemon.a-other.plist",
-    });
-    const expected = await writeLaunchAgent({
-      dataDir,
-      homeDir,
-      name: "app.getbb.host-daemon.b-machine.plist",
-    });
-    await writeLaunchAgent({
-      dataDir,
-      homeDir,
-      name: "com.example.unrelated.plist",
-    });
-
-    await expect(
-      findMachineServiceFile({ dataDir, homeDir, platform: "darwin" }),
-    ).resolves.toBe(expected);
-  });
-
-  it("matches a service that names the data directory through a symlink", async () => {
-    const { dataDir, homeDir } = await createRoot();
-    const linkedDataDir = join(homeDir, "linked-data");
-    await symlink(dataDir, linkedDataDir);
-    const expected = await writeLaunchAgent({
-      dataDir: linkedDataDir,
-      homeDir,
-      name: "app.getbb.host-daemon.machine.plist",
-    });
-
-    await expect(
-      findMachineServiceFile({ dataDir, homeDir, platform: "darwin" }),
-    ).resolves.toBe(expected);
-  });
-
-  it("finds systemd user and system units that run a daemon for the data directory", async () => {
-    const { dataDir, homeDir } = await createRoot();
-    const escapedDataDir = join(
-      dataDir,
-      process.platform === "win32"
-        ? "with 'quotes' 100%"
-        : 'with "quotes" 100%',
-    );
-    await mkdir(escapedDataDir, { recursive: true });
-    const userUnit = await writeSystemdUnit({
-      dataDir: escapedDataDir,
-      directory: join(homeDir, ".config", "systemd", "user"),
-      name: "bb-host-daemon-machine.service",
-    });
-    const systemUnit = await writeSystemdUnit({
-      dataDir,
-      directory: join(dataDir, "systemd"),
-      name: "bb-host-daemon-machine.service",
-    });
-
-    await expect(
-      findMachineServiceFile({
-        dataDir: escapedDataDir,
+describe.each([currentInstaller])(
+  "findMachineServiceFile with services from $name",
+  (generation) => {
+    it("finds the launch agent that runs a daemon for the data directory", async () => {
+      const { dataDir, homeDir } = await createRoot();
+      await writeLaunchAgent({
+        dataDir: join(dataDir, "..", "other"),
+        generation,
         homeDir,
-        platform: "linux",
-      }),
-    ).resolves.toBe(userUnit);
-    await expect(
-      findMachineServiceFile({ dataDir, homeDir, platform: "linux" }),
-    ).resolves.toBe(systemUnit);
-  });
+        name: `${generation.launchdPrefix}a-other.plist`,
+      });
 
-  it("returns null when no service runs a daemon for the data directory", async () => {
-    const { dataDir, homeDir } = await createRoot();
+      const expected = await writeLaunchAgent({
+        dataDir,
+        generation,
+        homeDir,
+        name: `${generation.launchdPrefix}b-machine.plist`,
+      });
 
-    await expect(
-      findMachineServiceFile({ dataDir, homeDir, platform: "darwin" }),
-    ).resolves.toBeNull();
-    await writeLaunchAgent({
-      dataDir: join(homeDir, "elsewhere"),
-      homeDir,
-      name: "app.getbb.host-daemon.elsewhere.plist",
+      await writeLaunchAgent({
+        dataDir,
+        generation,
+        homeDir,
+        name: "com.example.unrelated.plist",
+      });
+
+      await expect(
+        findMachineServiceFile({ dataDir, homeDir, platform: "darwin" }),
+      ).resolves.toBe(expected);
     });
-    await expect(
-      findMachineServiceFile({ dataDir, homeDir, platform: "darwin" }),
-    ).resolves.toBeNull();
-    await expect(
-      findMachineServiceFile({ dataDir, homeDir, platform: "win32" }),
-    ).resolves.toBeNull();
-  });
-});
+
+    it("matches a service that names the data directory through a symlink", async () => {
+      const { dataDir, homeDir } = await createRoot();
+      const linkedDataDir = join(homeDir, "linked-data");
+      await symlink(dataDir, linkedDataDir);
+
+      const expected = await writeLaunchAgent({
+        dataDir: linkedDataDir,
+        generation,
+        homeDir,
+        name: `${generation.launchdPrefix}machine.plist`,
+      });
+
+      await expect(
+        findMachineServiceFile({ dataDir, homeDir, platform: "darwin" }),
+      ).resolves.toBe(expected);
+    });
+
+    it("finds systemd user and system units that run a daemon for the data directory", async () => {
+      const { dataDir, homeDir } = await createRoot();
+
+      const escapedDataDir = join(
+        dataDir,
+        process.platform === "win32"
+          ? "with 'quotes' 100%"
+          : 'with "quotes" 100%',
+      );
+
+      await mkdir(escapedDataDir, { recursive: true });
+
+      const userUnit = await writeSystemdUnit({
+        dataDir: escapedDataDir,
+        directory: join(homeDir, ".config", "systemd", "user"),
+        generation,
+        name: `${generation.systemdPrefix}machine.service`,
+      });
+
+      const systemUnit = await writeSystemdUnit({
+        dataDir,
+        directory: join(dataDir, "systemd"),
+        generation,
+        name: `${generation.systemdPrefix}machine.service`,
+      });
+
+      await expect(
+        findMachineServiceFile({
+          dataDir: escapedDataDir,
+          homeDir,
+          platform: "linux",
+        }),
+      ).resolves.toBe(userUnit);
+      await expect(
+        findMachineServiceFile({ dataDir, homeDir, platform: "linux" }),
+      ).resolves.toBe(systemUnit);
+    });
+
+    it("returns null when no service runs a daemon for the data directory", async () => {
+      const { dataDir, homeDir } = await createRoot();
+
+      await expect(
+        findMachineServiceFile({ dataDir, homeDir, platform: "darwin" }),
+      ).resolves.toBeNull();
+      await writeLaunchAgent({
+        dataDir: join(homeDir, "elsewhere"),
+        generation,
+        homeDir,
+        name: `${generation.launchdPrefix}elsewhere.plist`,
+      });
+      await expect(
+        findMachineServiceFile({ dataDir, homeDir, platform: "darwin" }),
+      ).resolves.toBeNull();
+      await expect(
+        findMachineServiceFile({ dataDir, homeDir, platform: "win32" }),
+      ).resolves.toBeNull();
+    });
+  },
+);

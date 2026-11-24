@@ -3,12 +3,12 @@ import {
   parseUiPreferenceValue,
   UI_PREFERENCE_KEYS,
   type UiPreferenceKey,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   publicApiRoutes,
   typedRoutes,
   type PublicApiSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import type { Hono } from "hono";
 import { ApiError } from "../errors.js";
 import {
@@ -32,6 +32,7 @@ export function registerUiPreferenceRoutes(app: Hono, deps: AppDeps): void {
     onValidationError: (message) =>
       new ApiError(400, "invalid_request", message),
   });
+
   const routes = publicApiRoutes.system;
 
   get(routes.uiPreferences, (context) =>
@@ -41,6 +42,7 @@ export function registerUiPreferenceRoutes(app: Hono, deps: AppDeps): void {
   put(routes.updateUiPreference, (context, payload) => {
     const key = requireUiPreferenceKey(context.req.param("key"));
     const parsed = parseUiPreferenceValue(key, payload.value);
+
     if (!parsed.success) {
       throw new ApiError(
         400,
@@ -48,11 +50,13 @@ export function registerUiPreferenceRoutes(app: Hono, deps: AppDeps): void {
         `Invalid value for UI preference '${key}': ${parsed.message}`,
       );
     }
+
     const result = writeUiPreference(deps, {
       expectedRevision: payload.expectedRevision,
       key,
       value: parsed.value,
     });
+
     if (result.outcome === "conflict") {
       throw new ApiError(
         409,
@@ -61,11 +65,13 @@ export function registerUiPreferenceRoutes(app: Hono, deps: AppDeps): void {
         { details: { currentRevision: result.revision } },
       );
     }
+
     return context.json({ key, ...result.entry });
   });
 
   del(routes.resetUiPreference, (context) => {
     const key = requireUiPreferenceKey(context.req.param("key"));
+
     return context.json({ key, ...resetUiPreference(deps, key) });
   });
 }

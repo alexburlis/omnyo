@@ -7,14 +7,16 @@ export function ThreadOpenSignalHandler() {
   const { connection } = useProfiles();
   const router = useRouter();
   const pathname = usePathname();
-  const realtime = connection?.client.realtime ?? null;
+  const realtime = connection?.client?.realtime ?? null;
   useEffect(() => {
     if (!realtime) return;
+
     return realtime.onThreadOpen((signal) => {
       if (pathnameIsThread(pathname, signal.threadId)) return;
       router.push(webViewShellHref({ path: `/threads/${signal.threadId}` }));
     });
   }, [realtime, router, pathname]);
+
   return null;
 }
 

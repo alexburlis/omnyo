@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   validatePluginProviderDeclaration,
   type NormalizedPluginProviderDeclaration,
-} from "@get-bb/plugin-sdk/internal/host-policy";
-import type { PluginProviderDeclaration } from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk/internal/host-policy";
+import type { PluginProviderDeclaration } from "@omnyo/plugin-sdk";
 import { buildPluginProviderRegistration } from "../../src/services/providers/plugin-provider-registration.js";
 import { loadFirstPartyProviderDeclarations } from "../helpers/provider-registry.js";
 
@@ -37,6 +37,7 @@ const NO_SETTINGS = () => ({});
 describe("buildPluginProviderRegistration", () => {
   it("maps a declaration onto the single ProviderInfo and server capabilities", () => {
     const normalized = declaration();
+
     const registration = buildPluginProviderRegistration({
       available: true,
       pluginId: "acme-agent",
@@ -183,7 +184,7 @@ describe("buildPluginProviderRegistration", () => {
             },
           ],
         },
-        env: { passthrough: ["BB_MY_AGENT_EXECUTABLE"] },
+        env: { passthrough: ["OMNYO_MY_AGENT_EXECUTABLE"] },
         deriveProviderOptions: (context) => ({
           memory: context.settings.memoryEnabled !== false,
           plan: context.promptMode === "plan",
@@ -203,7 +204,7 @@ describe("buildPluginProviderRegistration", () => {
       }),
     ).toStrictEqual({ memory: false, plan: true, thread: "thr_1" });
     expect(registration.envPassthrough).toStrictEqual([
-      "BB_MY_AGENT_EXECUTABLE",
+      "OMNYO_MY_AGENT_EXECUTABLE",
     ]);
     expect(registration.fallbackModels).toStrictEqual([
       {
@@ -233,6 +234,7 @@ describe("buildPluginProviderRegistration", () => {
       }),
       readSettings: NO_SETTINGS,
     });
+
     expect(() =>
       registration.deriveProviderOptions({
         threadId: "thr_1",
@@ -254,11 +256,13 @@ describe("buildPluginProviderRegistration", () => {
         }),
         readSettings: NO_SETTINGS,
       }).info;
+
       return {
         supportsFork: capabilities.supportsFork,
         supportsSessionRewind: capabilities.supportsSessionRewind,
       };
     };
+
     expect(projection("none")).toStrictEqual({
       supportsFork: false,
       supportsSessionRewind: false,
@@ -307,6 +311,7 @@ describe("buildPluginProviderRegistration", () => {
       iconHash: null,
       readSettings: NO_SETTINGS,
     });
+
     expect(glyph.info.icon).toStrictEqual({ glyph: "Zap" });
     expect(glyph.info.logoUrl).toBeNull();
 
@@ -317,6 +322,7 @@ describe("buildPluginProviderRegistration", () => {
       iconHash: null,
       readSettings: NO_SETTINGS,
     });
+
     expect(path.info.icon).toBeUndefined();
     expect(path.info.logoUrl).toBe(
       "/api/v1/system/providers/my-remote-agent/logo",
@@ -325,6 +331,7 @@ describe("buildPluginProviderRegistration", () => {
 
   it("keeps Claude Code's finished turns flat and collapses every other first-party provider", async () => {
     const declarations = await loadFirstPartyProviderDeclarations();
+
     const projected = [...declarations.entries()].flatMap(([pluginId, list]) =>
       list.map((declared) => {
         const { info } = buildPluginProviderRegistration({
@@ -334,9 +341,11 @@ describe("buildPluginProviderRegistration", () => {
           iconHash: null,
           readSettings: NO_SETTINGS,
         });
+
         return [info.id, info.completedTurnDisplay];
       }),
     );
+
     expect(Object.fromEntries(projected)).toStrictEqual({
       codex: "collapse",
       "claude-code": "flat",

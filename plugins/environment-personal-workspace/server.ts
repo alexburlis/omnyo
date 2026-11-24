@@ -1,15 +1,15 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { personalWorkspaceHostContract } from "./contract.js";
 import { PERSONAL_WORKSPACE_ENVIRONMENT_PROVIDER_ID } from "./provider-id.js";
 
 export default async function personalWorkspacePlugin(
-  bb: BbPluginApi,
+  api: PluginApi,
 ): Promise<void> {
-  const host = bb.hosts.experimental_client({
+  const host = api.hosts.experimental_client({
     contract: personalWorkspaceHostContract,
   });
 
-  bb.experimental_environments.register({
+  api.experimental_environments.register({
     id: PERSONAL_WORKSPACE_ENVIRONMENT_PROVIDER_ID,
     displayName: "Personal workspace",
     description: "Create a personal directory without a project.",
@@ -17,12 +17,14 @@ export default async function personalWorkspacePlugin(
     requires: { projectless: true },
     async create({ host: machine, pathKey, report, signal }) {
       report.step("Preparing personal workspace…");
+
       try {
         const created = await host.call(
           "createWorkspace",
           { pathKey },
           { hostId: machine.id, signal },
         );
+
         return {
           status: "created",
           ownsPath: true,
@@ -30,6 +32,7 @@ export default async function personalWorkspacePlugin(
         };
       } catch (error) {
         if (signal.aborted) throw error;
+
         return {
           status: "failed",
 
@@ -44,15 +47,18 @@ export default async function personalWorkspacePlugin(
           message: "The personal workspace machine is unknown",
         };
       }
+
       try {
         await host.call(
           "removeWorkspace",
           { pathKey, path },
           { hostId, signal },
         );
+
         return { status: "removed" };
       } catch (error) {
         if (signal.aborted) throw error;
+
         return {
           status: "failed",
           message: error instanceof Error ? error.message : String(error),

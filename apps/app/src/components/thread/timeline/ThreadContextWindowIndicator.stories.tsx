@@ -1,5 +1,5 @@
-import type { ContextSnapshot } from "@bb/domain";
-import type { ThreadContextWindowUsage } from "@bb/server-contract";
+import type { ContextSnapshot } from "@omnyo/domain";
+import type { ThreadContextWindowUsage } from "@omnyo/server-contract";
 import { StoryCard, StoryRow } from "../../../../.ladle/story-card";
 import {
   ThreadContextWindowCard,
@@ -20,9 +20,13 @@ function usage(
 }
 
 const low = usage(36_000);
+
 const moderate = usage(110_000);
+
 const approachingLimit = usage(166_000);
+
 const critical = usage(192_000);
+
 const estimated = usage(150_000, true);
 
 function UsageCardRow({
@@ -107,12 +111,20 @@ const claudeSnapshot: ContextSnapshot = {
       kind: "used",
       entries: [
         {
-          id: "bb · thread_inspect",
-          label: "bb · thread_inspect",
+          id: "omnyo · thread_inspect",
+          label: "omnyo · thread_inspect",
           tokens: 1_460,
         },
-        { id: "bb · thread_list", label: "bb · thread_list", tokens: 980 },
-        { id: "bb · read_skill", label: "bb · read_skill", tokens: 1_240 },
+        {
+          id: "omnyo · thread_list",
+          label: "omnyo · thread_list",
+          tokens: 980,
+        },
+        {
+          id: "omnyo · read_skill",
+          label: "omnyo · read_skill",
+          tokens: 1_240,
+        },
       ],
     },
     {
@@ -140,7 +152,7 @@ const claudeSnapshot: ContextSnapshot = {
       tokens: 1_250,
       kind: "used",
       entries: [
-        { id: "verify-bb", label: "verify-bb", tokens: 540 },
+        { id: "verify-omnyo", label: "verify-omnyo", tokens: 540 },
         { id: "repo-research", label: "repo-research", tokens: 420 },
         { id: "deslop", label: "deslop", tokens: 290 },
       ],

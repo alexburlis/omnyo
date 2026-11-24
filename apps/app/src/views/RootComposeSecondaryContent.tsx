@@ -1,7 +1,7 @@
 import { useState, type ComponentProps, type ReactNode } from "react";
-import { Skeleton } from "@bb/shared-ui/skeleton";
-import { COARSE_POINTER_HEADER_ICON_BUTTON_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
+import { COARSE_POINTER_HEADER_ICON_BUTTON_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { PluginHomepageSections } from "@/components/plugin/PluginHomepageSections";
 import { usePluginComposerHost } from "@/components/plugin/plugin-composer-host";
 import { SecondaryPanelLayout } from "@/components/secondary-panel/SecondaryPanelLayout";
@@ -9,11 +9,11 @@ import { LazyThreadSecondaryPanel } from "@/components/secondary-panel/lazySecon
 import { PAGE_SHELL_CONTENT_STYLE } from "@/components/ui/page-shell-content-style.js";
 import {
   CHROME_ROW_HEIGHT_CLASS,
-  getBbDesktopInfo,
+  getOmnyoDesktopInfo,
   MACOS_APP_REGION_NO_DRAG_CLASS,
   MACOS_WINDOW_DRAG_CLASS,
   shouldUseMacosDesktopChrome,
-} from "@/lib/bb-desktop";
+} from "@/lib/omnyo-desktop";
 import { RootComposeCompactHome } from "./RootComposeCompactHome";
 import { useOptionalPaneContext } from "./thread-detail/PaneContext";
 
@@ -41,8 +41,8 @@ type RootSecondaryPanelProps = Omit<
 
 interface RootComposeSecondaryContentProps {
   children: ReactNode;
-  compactScrollContent: ReactNode;
   isCompactHomeLayout: boolean;
+  compactHomeIntro?: ReactNode;
   contentClassName?: string;
   isSecondaryPanelOpen: boolean;
   onToggleSecondaryPanel: () => void;
@@ -64,8 +64,8 @@ function DrawerPanelLoadingSkeleton() {
 
 export function RootComposeSecondaryContent({
   children,
-  compactScrollContent,
   isCompactHomeLayout,
+  compactHomeIntro,
   contentClassName,
   isSecondaryPanelOpen,
   onToggleSecondaryPanel,
@@ -74,10 +74,12 @@ export function RootComposeSecondaryContent({
   const paneContext = useOptionalPaneContext();
   const secondaryPanelHost = paneContext?.secondaryPanelHost ?? null;
   const composerHost = usePluginComposerHost();
-  const [desktopInfo] = useState(getBbDesktopInfo);
+  const [desktopInfo] = useState(getOmnyoDesktopInfo);
   const usesDesktopChrome = shouldUseMacosDesktopChrome(desktopInfo);
+
   const rendersWindowDragStrip =
     usesDesktopChrome && paneContext?.isTopRow !== false;
+
   const { renderBrowserDeck, ...threadSecondaryPanelProps } = secondaryPanel;
 
   const mainContent = (
@@ -111,8 +113,8 @@ export function RootComposeSecondaryContent({
           style={PAGE_SHELL_CONTENT_STYLE}
         >
           <RootComposeCompactHome composer={children}>
-            {compactScrollContent}
             <PluginHomepageSections />
+            {compactHomeIntro}
           </RootComposeCompactHome>
         </div>
       ) : (
@@ -126,7 +128,6 @@ export function RootComposeSecondaryContent({
             style={PAGE_SHELL_CONTENT_STYLE}
           >
             {children}
-            {compactScrollContent}
             <PluginHomepageSections />
           </div>
         </div>

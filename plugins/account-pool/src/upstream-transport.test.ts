@@ -10,9 +10,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   createUpstreamTransport,
   transportErrorCode,
+  observeUpstreamResponse,
 } from "./upstream-transport.js";
 
 const cleanups: Array<() => Promise<void>> = [];
+
 const nativeFetch = globalThis.fetch;
 
 beforeEach(() => {
@@ -23,17 +25,21 @@ beforeEach(() => {
 afterEach(async () => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+
   while (cleanups.length > 0) await cleanups.pop()?.();
 });
 
 async function upstream() {
   let requests = 0;
+
   const server = http.createServer(async (request, response) => {
     for await (const _chunk of request) {
     }
+
     requests++;
     response.end("OK");
   });
+
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   cleanups.push(async () => {
@@ -41,8 +47,10 @@ async function upstream() {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
   const address = server.address();
+
   if (address === null || typeof address === "string")
     throw new Error("No port");
+
   return { url: `http://127.0.0.1:${address.port}`, requests: () => requests };
 }
 
@@ -50,6 +58,7 @@ it("uses an independent transport when the default dispatcher retains a destroye
   const cause = Object.assign(new Error("The session has been destroyed"), {
     code: "ERR_HTTP2_INVALID_SESSION",
   });
+
   const brokenDefault = async (
     input: Parameters<typeof fetch>[0],
     init?: RequestInit & { dispatcher?: Dispatcher },
@@ -57,8 +66,10 @@ it("uses an independent transport when the default dispatcher retains a destroye
     if (init?.dispatcher === undefined) {
       throw new TypeError("fetch failed", { cause });
     }
+
     return nativeFetch(input, init);
   };
+
   vi.stubGlobal("fetch", brokenDefault);
   const target = await upstream();
   await expect(fetch(target.url)).rejects.toMatchObject({
@@ -70,24 +81,29 @@ it("uses an independent transport when the default dispatcher retains a destroye
   expect(target.requests()).toBe(0);
   const transport = createUpstreamTransport();
   cleanups.push(transport.destroy);
+
   for (let i = 0; i < 2; i++) {
     const response = await transport.fetch(target.url, {
       method: "POST",
       body: "hello",
     });
+
     expect(await response.text()).toBe("OK");
   }
+
   expect(target.requests()).toBe(2);
 });
 
 it("negotiates HTTP/1.1 when the upstream also offers HTTP/2", async () => {
   const cert = new URL("./fixtures/localhost-cert.pem", import.meta.url);
   const key = new URL("./fixtures/localhost-key.pem", import.meta.url);
+
   const server = http2.createSecureServer({
     cert: await readFile(cert),
     key: await readFile(key),
     allowHTTP1: true,
   });
+
   let alpn: string | false | undefined;
   server.on("secureConnection", (socket) => {
     alpn = socket.alpnProtocol;
@@ -101,9 +117,11 @@ it("negotiates HTTP/1.1 when the upstream also offers HTTP/2", async () => {
     () => new Promise<void>((resolve) => server.close(() => resolve())),
   );
   const address = server.address();
+
   if (address === null || typeof address === "string")
     throw new Error("No port");
   const moduleUrl = new URL("./upstream-transport.ts", import.meta.url);
+
   const { stdout } = await promisify(execFile)(
     process.execPath,
     [
@@ -127,6 +145,7 @@ it("negotiates HTTP/1.1 when the upstream also offers HTTP/2", async () => {
       timeout: 10_000,
     },
   );
+
   expect(JSON.parse(stdout)).toEqual({ httpVersion: "1.1", alpn: "http/1.1" });
 }, 15_000);
 
@@ -154,12 +173,15 @@ it("preserves cancellation without sending a request", async () => {
 
 it("does not replay an accepted POST whose response connection fails", async () => {
   let requests = 0;
+
   const server = http.createServer(async (request) => {
     for await (const _chunk of request) {
     }
+
     requests++;
     request.socket.destroy();
   });
+
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   cleanups.push(async () => {
@@ -167,6 +189,7 @@ it("does not replay an accepted POST whose response connection fails", async () 
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
   const address = server.address();
+
   if (address === null || typeof address === "string")
     throw new Error("No port");
   const transport = createUpstreamTransport();
@@ -184,7 +207,146 @@ it("does not expose arbitrary error messages or unrecognized codes", () => {
   const error = Object.assign(new Error("secret-token"), {
     code: "SECRET_TOKEN",
   });
+
   expect(transportErrorCode(error)).toBe("unclassified transport error");
   error.cause = error;
   expect(transportErrorCode(error)).toBe("unclassified transport error");
+});
+
+it("preserves an upstream error body and records only bounded recognized diagnostics", async () => {
+  const observations: unknown[] = [];
+
+  const body = JSON.stringify({
+    error: {
+      code: "unsupported_parameter",
+      param: "service_tier",
+      message: "private-prompt-marker",
+    },
+  });
+
+  const original = new Response(body, {
+    status: 400,
+    headers: { "x-request-id": "req_abcdefgh12345678" },
+  });
+
+  const response = observeUpstreamResponse(
+    original,
+    {
+      operationId: "12345678-1234-4234-8234-123456789abc",
+      endpoint: "responses",
+      attempt: 2,
+      startedAt: performance.now(),
+    },
+    (diagnostic) => observations.push(diagnostic),
+  );
+
+  expect(await response.text()).toBe(body);
+  expect(observations).toHaveLength(2);
+  expect(observations[1]).toMatchObject({
+    httpStatus: 400,
+    requestId: "req_abcdefgh12345678",
+    providerCode: "unsupported_parameter",
+    rejectedParameter: "service-tier",
+    attempt: 2,
+  });
+  expect(JSON.stringify(observations)).not.toContain("private-prompt-marker");
+});
+
+it("does not inspect successful streams or guess details for oversized error bodies", async () => {
+  const observations: unknown[] = [];
+
+  const context = {
+    operationId: "12345678-1234-4234-8234-123456789abc",
+    endpoint: "responses" as const,
+    attempt: 1,
+    startedAt: performance.now(),
+  };
+
+  const success = new Response("success");
+  expect(
+    observeUpstreamResponse(success, context, (d) => observations.push(d)),
+  ).toBe(success);
+
+  const body = JSON.stringify({
+    error: {
+      code: "unsupported_parameter",
+      param: "service_tier",
+      message: "x".repeat(9000),
+    },
+  });
+
+  const response = observeUpstreamResponse(
+    new Response(body, {
+      status: 400,
+      headers: { "request-id": "private-value" },
+    }),
+    context,
+    (d) => observations.push(d),
+  );
+
+  expect(await response.text()).toBe(body);
+  expect(observations).toHaveLength(1);
+  expect(observations[0]).toMatchObject({
+    providerCode: null,
+    rejectedParameter: null,
+    requestId: null,
+  });
+});
+
+it("passes streamed errors and cancellation through without consuming a second body", async () => {
+  let pulled = 0;
+  const cancelled = vi.fn();
+
+  const source = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        pulled++;
+        controller.enqueue(new TextEncoder().encode("body-part"));
+      },
+      cancel: cancelled,
+    },
+    { highWaterMark: 0 },
+  );
+
+  const observations: unknown[] = [];
+
+  const response = observeUpstreamResponse(
+    new Response(source, { status: 502 }),
+    {
+      operationId: "12345678-1234-4234-8234-123456789abc",
+      endpoint: "responses",
+      attempt: 1,
+      startedAt: performance.now(),
+    },
+    (d) => observations.push(d),
+  );
+
+  const reader = response.body!.getReader();
+  expect(new TextDecoder().decode((await reader.read()).value)).toBe(
+    "body-part",
+  );
+  await reader.cancel("caller-cancelled");
+  expect(cancelled).toHaveBeenCalledWith("caller-cancelled");
+  expect(pulled).toBeLessThanOrEqual(2);
+  expect(observations).toHaveLength(1);
+});
+
+it("keeps diagnostic callback failures from changing the upstream response", async () => {
+  const body = JSON.stringify({ error: { code: "rate_limit_exceeded" } });
+
+  const response = observeUpstreamResponse(
+    new Response(body, { status: 429 }),
+    {
+      operationId: "12345678-1234-4234-8234-123456789abc",
+      endpoint: "responses",
+      attempt: 1,
+      startedAt: performance.now(),
+    },
+    () => {
+      throw new Error("local diagnostics unavailable");
+    },
+  );
+
+  expect(response.status).toBe(429);
+  expect(await response.text()).toBe(body);
 });

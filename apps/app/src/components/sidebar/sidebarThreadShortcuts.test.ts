@@ -9,10 +9,13 @@ import {
 function appendShortcutTarget(root: HTMLElement, threadId?: string) {
   const target = document.createElement("a");
   target.dataset.sidebarThreadShortcutTarget = "";
+
   if (threadId) {
     target.dataset.sidebarThreadId = threadId;
   }
+
   root.append(target);
+
   return target;
 }
 
@@ -70,6 +73,7 @@ describe("sidebar thread shortcuts", () => {
   it("assigns 1 through 9 in rendered row order", () => {
     const root = document.createElement("aside");
     appendShortcutTarget(root);
+
     const elements = Array.from({ length: 10 }, (_, index) =>
       appendShortcutTarget(root, `thr_${index + 1}`),
     );

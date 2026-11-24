@@ -22,6 +22,7 @@ import {
   sidebarGroupThreadsByEnvironmentAtom,
   sidebarEnvironmentGroupingAtom,
   sidebarGroupByReadStatusAtom,
+  sidebarShowEmptyProjectsAtom,
   sidebarShowProviderIconsAtom,
 } from "../preferences/atoms.js";
 
@@ -71,6 +72,7 @@ export function SidebarHeaderMenuContents({
       </>
     );
   }
+
   return (
     <>
       <DropdownMenuItem
@@ -140,19 +142,28 @@ function SidebarViewItems({ page }: { page: SidebarViewPage }) {
   const [savedDirection, setDirection] = useAtom(sidebarSortDirectionAtom);
   const setEnvironmentGrouping = useSetAtom(sidebarEnvironmentGroupingAtom);
   const groupByEnvironment = useAtomValue(sidebarGroupThreadsByEnvironmentAtom);
+
   const [groupByReadStatus, setGroupByReadStatus] = useAtom(
     sidebarGroupByReadStatusAtom,
   );
+
   const [showProviderIcons, setShowProviderIcons] = useAtom(
     sidebarShowProviderIconsAtom,
   );
+
+  const [showEmptyProjects, setShowEmptyProjects] = useAtom(
+    sidebarShowEmptyProjectsAtom,
+  );
+
   const selectedSort = sort === "none" ? "updated" : sort;
+
   if (page === "filter") {
     return (
       <DropdownMenuGroup aria-label="Filter">
         {(["active", "archived"] as const).map((lifecycle) => {
           const checked = lifecycles.includes(lifecycle);
           const required = checked && lifecycles.length === 1;
+
           return (
             <DropdownMenuItem
               key={lifecycle}
@@ -161,6 +172,7 @@ function SidebarViewItems({ page }: { page: SidebarViewPage }) {
               title={required ? "Keep at least one filter selected" : undefined}
               onSelect={(event) => {
                 event.preventDefault();
+
                 if (required) return;
                 setLifecycles(
                   checked
@@ -176,9 +188,25 @@ function SidebarViewItems({ page }: { page: SidebarViewPage }) {
             </DropdownMenuItem>
           );
         })}
+        {organization === "project" && (
+          <DropdownMenuItem
+            role="menuitemcheckbox"
+            aria-checked={showEmptyProjects}
+            onSelect={(event) => {
+              event.preventDefault();
+              setShowEmptyProjects(!showEmptyProjects);
+            }}
+          >
+            Empty projects
+            <span className="ml-auto inline-flex size-4 items-center justify-center">
+              {showEmptyProjects && <Icon name="Check" className="size-4" />}
+            </span>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuGroup>
     );
   }
+
   if (page === "organize") {
     return (
       <>
@@ -212,6 +240,7 @@ function SidebarViewItems({ page }: { page: SidebarViewPage }) {
             onSelect={(event) => {
               event.preventDefault();
               setEnvironmentGrouping(!groupByEnvironment);
+
               if (!groupByEnvironment) setGroupByReadStatus(false);
             }}
           >
@@ -254,17 +283,21 @@ function SidebarViewItems({ page }: { page: SidebarViewPage }) {
       </>
     );
   }
+
   return (
     <DropdownMenuGroup aria-label="Sort">
       {SIDEBAR_SORT_OPTIONS.map((option) => {
         const selected = selectedSort === option.sort;
+
         const direction =
           savedDirection === "default" ? option.direction : savedDirection;
+
         const nextDirection = selected
           ? direction === "ascending"
             ? "descending"
             : "ascending"
           : option.direction;
+
         return (
           <DropdownMenuItem
             key={option.sort}

@@ -1,4 +1,4 @@
-import type { PluginProviderDeclaration } from "@get-bb/plugin-sdk";
+import type { PluginProviderDeclaration } from "@omnyo/plugin-sdk";
 import { PI_NATIVE_ROOTS_DECLARATION } from "./native-roots.js";
 
 export function piProviderDeclaration(): PluginProviderDeclaration {
@@ -13,7 +13,7 @@ export function piProviderDeclaration(): PluginProviderDeclaration {
       iconTint: { light: "#6D5DFB", dark: "#6D5DFB" },
     },
     maintenance: { health: true, usage: false, installation: true },
-    env: { passthrough: ["BB_PI_BRIDGE_COMMAND", "BB_PI_BRIDGE_ARGS"] },
+    env: { passthrough: ["OMNYO_PI_BRIDGE_COMMAND", "OMNYO_PI_BRIDGE_ARGS"] },
     capabilities: {
       supportsServiceTier: false,
       supportsNativeUserQuestion: false,
@@ -29,7 +29,7 @@ export function piProviderDeclaration(): PluginProviderDeclaration {
       { id: "low", label: "Low" },
       { id: "medium", label: "Medium" },
       { id: "high", label: "High" },
-      { id: "xhigh", label: "Extra High" },
+      { id: "xhigh", label: "xHigh" },
       { id: "max", label: "Max" },
     ],
     ...PI_NATIVE_ROOTS_DECLARATION,

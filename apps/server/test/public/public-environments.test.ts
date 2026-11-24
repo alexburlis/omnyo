@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getEnvironment } from "@bb/db";
+import { getEnvironment } from "@omnyo/db";
 import {
   registerTestHostRpcCapture,
   reportQueuedCommandError,
@@ -21,14 +21,17 @@ describe("public environments", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-environment-branch-options",
       });
+
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
         sessionId: session.id,
         queueBranchOptions: true,
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -39,10 +42,12 @@ describe("public environments", () => {
       const responsePromise = harness.app.request(
         `/api/v1/environments/${environment.id}/diff/branches?query=feature&selectedBranch=origin%2Fmain&limit=10`,
       );
+
       const branchOptionsCommand = await waitForQueuedCommand(
         harness,
         ({ command }) => command.type === "host.list_branch_options",
       );
+
       expect(branchOptionsCommand.command).toEqual({
         type: "host.list_branch_options",
         path: "/tmp/branch-options-env",
@@ -76,9 +81,11 @@ describe("public environments", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-environment-truncated-diff",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -89,12 +96,14 @@ describe("public environments", () => {
       const responsePromise = harness.app.request(
         `/api/v1/environments/${environment.id}/diff/files?target=uncommitted`,
       );
+
       const diffFilesCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "workspace.diffFiles" &&
           command.environmentId === environment.id,
       );
+
       expect(diffFilesCommand.command).toMatchObject({ maxFiles: 500 });
       await reportQueuedCommandSuccess(harness, diffFilesCommand, {
         outcome: "available",
@@ -135,9 +144,11 @@ describe("public environments", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-environment-diff-file-enoent",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -148,10 +159,12 @@ describe("public environments", () => {
       const responsePromise = harness.app.request(
         `/api/v1/environments/${environment.id}/diff/file?target=uncommitted&side=new&path=missing.md`,
       );
+
       const readCommand = await waitForQueuedCommand(
         harness,
         ({ command }) => command.type === "host.read_file",
       );
+
       expect(readCommand.command).toMatchObject({
         path: "/tmp/diff-file-env/missing.md",
         rootPath: "/tmp/diff-file-env",
@@ -174,9 +187,11 @@ describe("public environments", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-environment-diff-file-too-large",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -187,10 +202,12 @@ describe("public environments", () => {
       const responsePromise = harness.app.request(
         `/api/v1/environments/${environment.id}/diff/file?target=uncommitted&side=new&path=huge.bin`,
       );
+
       const readCommand = await waitForQueuedCommand(
         harness,
         ({ command }) => command.type === "host.read_file",
       );
+
       await reportQueuedCommandError(harness, readCommand, {
         errorCode: "file_too_large",
         errorMessage: "File is too large to read",
@@ -206,13 +223,15 @@ describe("public environments", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-environment-current-branch",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
-        branchName: "bb/stale",
+        branchName: "omnyo/stale",
         defaultBranch: "main",
         path: "/tmp/current-branch-env",
         environmentProviderId: "git-worktree",
@@ -221,12 +240,14 @@ describe("public environments", () => {
       const statusPromise = harness.app.request(
         `/api/v1/environments/${environment.id}/status`,
       );
+
       const statusCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "workspace.status" &&
           command.environmentId === environment.id,
       );
+
       expect(statusCommand.command).toMatchObject({
         maxUntrackedLineStatFiles: 50,
         maxUntrackedLineStatBytes: 8 * 1024 * 1024,
@@ -238,6 +259,7 @@ describe("public environments", () => {
             insertions: 0,
             deletions: 0,
             lineStatsComplete: true,
+            fileCount: 0,
             files: [],
             hasUncommittedChanges: false,
             state: "clean",
@@ -278,13 +300,15 @@ describe("public environments", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-environment-detached-branch",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
-        branchName: "bb/stale",
+        branchName: "omnyo/stale",
         defaultBranch: "main",
         path: "/tmp/detached-branch-env",
         environmentProviderId: "git-worktree",
@@ -293,12 +317,14 @@ describe("public environments", () => {
       const statusPromise = harness.app.request(
         `/api/v1/environments/${environment.id}/status`,
       );
+
       const statusCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "workspace.status" &&
           command.environmentId === environment.id,
       );
+
       await reportQueuedCommandSuccess(harness, statusCommand, {
         outcome: "available",
         workspaceStatus: {
@@ -306,6 +332,7 @@ describe("public environments", () => {
             insertions: 0,
             deletions: 0,
             lineStatsComplete: true,
+            fileCount: 0,
             files: [],
             hasUncommittedChanges: false,
             state: "clean",
@@ -336,9 +363,11 @@ describe("public environments", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-environment-rename",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -385,9 +414,11 @@ describe("public environments", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-environment-paths",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -399,12 +430,14 @@ describe("public environments", () => {
       const pathsPromise = harness.app.request(
         `/api/v1/environments/${environment.id}/paths?query=app&includeFiles=true&includeDirectories=false`,
       );
+
       const pathsCommand = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "host.list_paths" &&
           command.path === "/tmp/personal-workspace",
       );
+
       expect(pathsCommand.command).toMatchObject({
         path: "/tmp/personal-workspace",
         query: "app",
@@ -460,9 +493,11 @@ describe("public environments", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-environment-paths-pending",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -482,18 +517,22 @@ describe("environment list and delete", () => {
   it("lists non-destroyed environments, scoped to a project", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, { id: "host-env-list" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const { project: other } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
         path: "/tmp/env-list-other",
       });
+
       const mine = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/env-list-a",
       });
+
       seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: other.id,
@@ -505,11 +544,13 @@ describe("environment list and delete", () => {
           `/api/v1/environments?projectId=${project.id}`,
         ),
       )) as Array<{ id: string }>;
+
       expect(scoped.map((environment) => environment.id)).toEqual([mine.id]);
 
       const everything = (await readJson(
         await harness.app.request("/api/v1/environments"),
       )) as Array<{ id: string }>;
+
       expect(everything.length).toBeGreaterThanOrEqual(2);
     });
   });
@@ -517,9 +558,11 @@ describe("environment list and delete", () => {
   it("pages the list with limit and offset", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, { id: "host-env-page" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const ids = ["a", "b", "c"].map(
         (suffix) =>
           seedEnvironment(harness.deps, {
@@ -534,6 +577,7 @@ describe("environment list and delete", () => {
           `/api/v1/environments?projectId=${project.id}&limit=2`,
         ),
       )) as Array<{ id: string }>;
+
       expect(firstPage).toHaveLength(2);
 
       const secondPage = (await readJson(
@@ -541,6 +585,7 @@ describe("environment list and delete", () => {
           `/api/v1/environments?projectId=${project.id}&limit=2&offset=2`,
         ),
       )) as Array<{ id: string }>;
+
       expect(secondPage).toHaveLength(1);
       expect([...firstPage, ...secondPage].map((row) => row.id).sort()).toEqual(
         [...ids].sort(),
@@ -549,6 +594,7 @@ describe("environment list and delete", () => {
       const rejected = await harness.app.request(
         `/api/v1/environments?projectId=${project.id}&limit=0`,
       );
+
       expect(rejected.status).toBe(400);
     });
   });
@@ -556,18 +602,22 @@ describe("environment list and delete", () => {
   it("narrows the list by provider, machine and status in one query", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, { id: "host-env-filter" });
+
       const { host: otherHost } = seedHostSession(harness.deps, {
         id: "host-env-filter-other",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const worktree = seedEnvironment(harness.deps, {
         environmentProviderId: "git-worktree",
         hostId: host.id,
         path: "/tmp/env-filter-worktree",
         projectId: project.id,
       });
+
       seedEnvironment(harness.deps, {
         environmentProviderId: "git-worktree",
         hostId: otherHost.id,
@@ -580,6 +630,7 @@ describe("environment list and delete", () => {
         path: "/tmp/env-filter-personal",
         projectId: project.id,
       });
+
       const broken = seedEnvironment(harness.deps, {
         environmentProviderId: "git-worktree",
         hostId: host.id,
@@ -593,6 +644,7 @@ describe("environment list and delete", () => {
           `/api/v1/environments?environmentProviderId=git-worktree&hostId=${host.id}`,
         ),
       )) as Array<{ id: string }>;
+
       expect(
         byProviderAndHost.map((environment) => environment.id).sort(),
       ).toEqual([broken.id, worktree.id].sort());
@@ -602,6 +654,7 @@ describe("environment list and delete", () => {
           `/api/v1/environments?environmentProviderId=git-worktree&status=error`,
         ),
       )) as Array<{ id: string }>;
+
       expect(byStatus.map((environment) => environment.id)).toEqual([
         broken.id,
       ]);
@@ -613,9 +666,11 @@ describe("environment list and delete", () => {
       const { host } = seedHostSession(harness.deps, {
         id: "host-env-destroyed",
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const gone = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: null,
@@ -630,11 +685,13 @@ describe("environment list and delete", () => {
           ),
         )) as unknown[],
       ).toEqual([]);
+
       const destroyed = (await readJson(
         await harness.app.request(
           `/api/v1/environments?projectId=${project.id}&status=destroyed`,
         ),
       )) as Array<{ id: string }>;
+
       expect(destroyed.map((environment) => environment.id)).toEqual([gone.id]);
     });
   });
@@ -642,9 +699,11 @@ describe("environment list and delete", () => {
   it("records a deleted environment as destroyed and hides it from the list", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, { id: "host-env-del" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -655,6 +714,7 @@ describe("environment list and delete", () => {
         `/api/v1/environments/${environment.id}`,
         { method: "DELETE" },
       );
+
       expect(response.status).toBe(200);
       const after = getEnvironment(harness.db, environment.id);
       expect(after?.status).toBe("destroyed");
@@ -665,6 +725,7 @@ describe("environment list and delete", () => {
           `/api/v1/environments?projectId=${project.id}`,
         ),
       )) as Array<{ id: string }>;
+
       expect(listed).toEqual([]);
     });
   });
@@ -688,13 +749,16 @@ describe("environment list and delete", () => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-env-release",
       });
+
       registerTestHostRpcCapture(harness, {
         hostId: host.id,
         sessionId: session.id,
       });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
@@ -706,6 +770,7 @@ describe("environment list and delete", () => {
         `/api/v1/environments/${environment.id}`,
         { method: "DELETE" },
       );
+
       expect(response.status).toBe(200);
       expect(getEnvironment(harness.db, environment.id)).toMatchObject({
         status: "ready",
@@ -719,14 +784,17 @@ describe("environment list and delete", () => {
   it("refuses to delete an environment with live threads", async () => {
     await withTestHarness(async (harness) => {
       const { host } = seedHostSession(harness.deps, { id: "host-env-live" });
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
         path: "/tmp/env-delete-live",
       });
+
       seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
@@ -736,6 +804,7 @@ describe("environment list and delete", () => {
         `/api/v1/environments/${environment.id}`,
         { method: "DELETE" },
       );
+
       expect(response.status).toBe(409);
       expect(getEnvironment(harness.db, environment.id)?.status).not.toBe(
         "destroyed",

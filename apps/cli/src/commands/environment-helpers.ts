@@ -2,8 +2,8 @@ import {
   type EnvironmentDisplayInfo,
   type EnvironmentDisplayProviderLookup,
   formatEnvironmentDisplay,
-} from "@bb/core-ui";
-import type { BbSdk } from "@bb/sdk";
+} from "@omnyo/core-ui";
+import type { OmnyoSdk } from "@omnyo/sdk";
 
 export interface ThreadEnvironmentInfo {
   display: EnvironmentDisplayInfo;
@@ -12,15 +12,18 @@ export interface ThreadEnvironmentInfo {
 
 async function resolveEnvironmentProvider(args: {
   environmentProviderId: string | null;
-  sdk: BbSdk;
+  sdk: OmnyoSdk;
 }): Promise<EnvironmentDisplayProviderLookup> {
   if (args.environmentProviderId === null) {
     return { status: "loaded", provider: null };
   }
+
   const providers = await args.sdk.environments.listProviders();
+
   const provider = providers.find(
     (candidate) => candidate.id === args.environmentProviderId,
   );
+
   return {
     status: "loaded",
     provider:
@@ -36,12 +39,13 @@ async function resolveEnvironmentProvider(args: {
 
 export async function fetchEnvironmentInfo(args: {
   environmentId: string;
-  sdk: BbSdk;
+  sdk: OmnyoSdk;
 }): Promise<ThreadEnvironmentInfo | null> {
   try {
     const env = await args.sdk.environments.get({
       environmentId: args.environmentId,
     });
+
     return {
       display: formatEnvironmentDisplay({
         environment: env,

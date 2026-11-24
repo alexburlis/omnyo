@@ -1,12 +1,12 @@
 import {
   definePluginApp,
-  useBbNavigate,
+  experimental_useAppNavigate,
   useRealtime,
   useRpc,
-} from "@get-bb/plugin-sdk/app";
-import { Badge as BbBadge } from "@/components/ui/badge";
-import { Button as BbButton } from "@/components/ui/button";
-import { Checkbox as BbCheckbox } from "@/components/ui/checkbox";
+} from "@omnyo/plugin-sdk/app";
+import { Badge as OmnyoBadge } from "@/components/ui/badge";
+import { Button as OmnyoButton } from "@/components/ui/button";
+import { Checkbox as OmnyoCheckbox } from "@/components/ui/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
@@ -44,7 +44,7 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import { Icon, type IconName } from "@/components/ui/icon";
-import { Input as BbInput } from "@/components/ui/input";
+import { Input as OmnyoInput } from "@/components/ui/input";
 import { PluginCompactIconMask } from "@/components/ui/plugin-icon";
 import {
   Popover,
@@ -58,7 +58,8 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select";
-import { Switch as BbSwitch } from "@/components/ui/switch";
+import { DISCLOSURE_CHEVRON_TRANSITION } from "@/components/ui/motion";
+import { Switch as OmnyoSwitch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
@@ -102,28 +103,40 @@ import {
 
 const v = (name: string, fallback?: string): string =>
   fallback === undefined ? `var(--${name})` : `var(--${name}, ${fallback})`;
+
 const SANS = v("font-sans", "ui-sans-serif, system-ui, sans-serif");
+
 const MONO = v("font-mono", "ui-monospace, SFMono-Regular, Menlo, monospace");
+
 const space = (units: number): string =>
   `calc(var(--spacing, 0.25rem) * ${units})`;
+
 const RADIUS_MD = v("radius-md", "calc(var(--radius, 0.5rem) - 2px)");
+
 const RADIUS_LG = v("radius-lg", v("radius", "0.5rem"));
 
 const R_BUBBLE = 16;
+
 const R_BLOCK = 10;
 
 const VIEWS = MOCK_VIEWS.map((view) => view.id);
+
 type View = (typeof MOCK_VIEWS)[number]["id"];
+
 const VIEW_LABEL = Object.fromEntries(
   MOCK_VIEWS.map((view) => [view.id, view.label]),
 ) as Record<View, string>;
+
 const STUDIO_MAX_WIDTH = 1600;
+
 const MOCK_PROVIDER_ICON_URL =
   "/api/v1/plugins/provider-claude-code/assets/icon";
+
 const CLIENT_RPC_TIMEOUT_MS = 20_000;
 
 function withRpcTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
+
   const deadline = new Promise<never>((_resolve, reject) => {
     timeout = setTimeout(
       () =>
@@ -135,12 +148,14 @@ function withRpcTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
       CLIENT_RPC_TIMEOUT_MS,
     );
   });
+
   return Promise.race([operation, deadline]).finally(() => {
     if (timeout !== undefined) clearTimeout(timeout);
   });
 }
 
 type Mode = "light" | "dark";
+
 type ThemeSelection = { themeId: string; mode: Mode };
 
 function Dot({ color, size = 6 }: { color: string; size?: number }) {
@@ -189,6 +204,7 @@ type Tone =
   | "warning"
   | "destructive"
   | "merged";
+
 function Badge({
   children,
   tone = "outline",
@@ -205,8 +221,9 @@ function Badge({
     destructive: "border-transparent bg-destructive/15 text-destructive-text",
     merged: "border-transparent bg-pr-merged/15 text-pr-merged",
   };
+
   return (
-    <BbBadge
+    <OmnyoBadge
       variant="outline"
       className={cn(
         "h-5 gap-1 whitespace-nowrap px-1.5 py-0 text-[11px] font-medium",
@@ -214,7 +231,7 @@ function Badge({
       )}
     >
       {children}
-    </BbBadge>
+    </OmnyoBadge>
   );
 }
 
@@ -225,6 +242,7 @@ const sidebarScope: CSSProperties = {
 };
 
 type RowState = "rest" | "hover" | "selected" | "split";
+
 const MOCK_SIDEBAR_ROW_CLASS = cn(
   COARSE_POINTER_ROW_HEIGHT_CLASS,
   "w-full min-w-0 justify-start gap-2 overflow-hidden rounded-md px-2 text-sm font-normal text-sidebar-foreground/85 ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 dark:text-sidebar-foreground",
@@ -315,16 +333,18 @@ function MockSidebarRow({
       ) : null}
     </>
   );
+
   const className = cn(
     MOCK_SIDEBAR_ROW_CLASS,
     state === "hover" && "bg-sidebar-accent text-sidebar-accent-foreground",
     state === "selected" &&
-      "bb-sidebar-selected-row bg-state-active text-sidebar-foreground",
-    state === "split" && "bb-sidebar-open-in-split-row",
+      "omnyo-sidebar-selected-row bg-state-active text-sidebar-foreground",
+    state === "split" && "omnyo-sidebar-open-in-split-row",
   );
+
   if (interactive) {
     return (
-      <BbButton
+      <OmnyoButton
         type="button"
         size="sm"
         variant="ghost"
@@ -334,11 +354,12 @@ function MockSidebarRow({
         className={className}
       >
         {content}
-      </BbButton>
+      </OmnyoButton>
     );
   }
+
   return (
-    <BbButton
+    <OmnyoButton
       asChild
       size="sm"
       variant="ghost"
@@ -347,7 +368,7 @@ function MockSidebarRow({
       <div data-tp-sidebar-row="" data-tp-sidebar-state={state}>
         {content}
       </div>
-    </BbButton>
+    </OmnyoButton>
   );
 }
 
@@ -367,7 +388,7 @@ function Sidebar({
       <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
         {mobile ? null : (
           <div className="flex h-8 items-center px-2 text-sm font-semibold">
-            bb-plugins
+            omnyo-plugins
           </div>
         )}
         <MockSidebarRow label="New thread" />
@@ -430,6 +451,7 @@ function CodeBlock() {
       {text}
     </div>
   );
+
   return (
     <div
       style={{
@@ -510,17 +532,263 @@ function Composer({
         <Icon name="Mic" className="size-4 shrink-0" />
         <div
           style={{
-            width: mobile ? 36 : 26,
-            height: mobile ? 36 : 26,
-            borderRadius: 8,
+            width: mobile ? 36 : 30,
+            height: mobile ? 36 : 30,
+            borderRadius: "50%",
             background: v("muted"),
             color: v("muted-foreground"),
             display: "grid",
             placeItems: "center",
           }}
         >
-          <Icon name="CornerDownLeft" className="size-4" />
+          <Icon name="ArrowUp" className="size-4" />
         </div>
+      </div>
+    </div>
+  );
+}
+
+const LAUNCHER_PROJECTS = ["omnyo", "glassy", "mailwerk", "sledge"] as const;
+
+const LAUNCHER_FAVORITES = [
+  { model: "Fable 5", picks: ["High", "Max"], current: "High" },
+  { model: "Opus 5.5", picks: ["High"], current: null },
+] as const;
+
+function LauncherPanel({ focused = false }: { focused?: boolean }) {
+  return (
+    <div
+      data-tp-new-chat-launcher=""
+      style={{
+        width: "100%",
+        maxWidth: 620,
+        margin: "0 auto",
+        borderRadius: R_BUBBLE,
+        background: v("material-raised", v("background", v("canvas"))),
+        boxShadow: v(
+          "material-shadow-raised",
+          `inset 0 0 0 0.5px ${v("border")}`,
+        ),
+        padding: 8,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <div
+        style={{
+          borderRadius: R_BUBBLE,
+          padding: "12px 12px 10px",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+          boxShadow: focused
+            ? `inset 0 0 0 1px ${v("ring")}, 0 0 0 3px color-mix(in srgb, ${v("ring")} 25%, transparent)`
+            : "none",
+        }}
+      >
+        <span
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: 6,
+            flex: "none",
+            background: v("file-accent", v("muted")),
+          }}
+        />
+        <div
+          className="text-sm"
+          style={{ flex: 1, minHeight: 44, color: v("muted-foreground") }}
+        >
+          Ask anything…
+        </div>
+        <div
+          style={{
+            alignSelf: "flex-end",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <Icon name="Mic" className="size-4 shrink-0" />
+          <div
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: "50%",
+              background: v("muted"),
+              color: v("muted-foreground"),
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
+            <Icon name="ArrowUp" className="size-4" />
+          </div>
+        </div>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          gap: 4,
+          padding: "12px 14px 6px",
+        }}
+      >
+        {LAUNCHER_PROJECTS.map((name, index) => (
+          <div
+            key={name}
+            className="text-2xs"
+            style={{
+              width: "calc((100% - 1.25rem) / 6)",
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 6,
+              borderRadius: 12,
+              padding: "8px 2px 6px",
+              background: index === 0 ? v("state-active") : "transparent",
+              color: index === 0 ? v("foreground") : v("muted-foreground"),
+            }}
+          >
+            <span
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                display: "grid",
+                placeItems: "center",
+                background: v("surface-recessed", v("muted")),
+                color: v("foreground"),
+                fontWeight: 600,
+              }}
+            >
+              {name.slice(0, 1).toUpperCase()}
+            </span>
+            {name}
+          </div>
+        ))}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          padding: "6px 14px 8px",
+        }}
+      >
+        <div
+          style={{
+            position: "relative",
+            display: "inline-flex",
+            alignItems: "flex-end",
+            padding: "0 4px",
+          }}
+        >
+          <span
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 36,
+              borderRadius: 8,
+              background: v("muted"),
+            }}
+          />
+          {LAUNCHER_FAVORITES.map((group, groupIndex) => (
+            <div
+              key={group.model}
+              style={{
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                marginLeft: groupIndex === 0 ? 0 : 8,
+              }}
+            >
+              <span
+                className="text-2xs"
+                style={{
+                  padding: "0 10px 2px",
+                  fontWeight: 500,
+                  color:
+                    group.current === null
+                      ? v("subtle-foreground")
+                      : v("foreground"),
+                }}
+              >
+                {group.model}
+              </span>
+              <div
+                style={{
+                  height: 36,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                }}
+              >
+                {group.picks.map((pick) => (
+                  <span
+                    key={pick}
+                    className="text-xs"
+                    style={{
+                      height: 28,
+                      display: "grid",
+                      placeItems: "center",
+                      padding: "0 10px",
+                      borderRadius: 6,
+                      ...(pick === group.current
+                        ? {
+                            background: v("background"),
+                            color: v("foreground"),
+                            fontWeight: 500,
+                            boxShadow: v(
+                              "shadow-xs",
+                              "0 1px 2px rgba(0,0,0,.08)",
+                            ),
+                          }
+                        : { color: v("muted-foreground") }),
+                    }}
+                  >
+                    {pick}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div
+        className="text-xs"
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          gap: 2,
+          padding: "0 14px 12px",
+          color: v("muted-foreground"),
+        }}
+      >
+        {(
+          [
+            ["Laptop", "Mac Pro"],
+            ["GitBranch", "main"],
+            ["Plus", "New worktree"],
+          ] as const
+        ).map(([icon, label]) => (
+          <span
+            key={label}
+            style={{
+              height: 30,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "0 10px",
+              borderRadius: 8,
+            }}
+          >
+            <Icon name={icon} className="size-3.5" />
+            {label}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -532,6 +800,7 @@ function VerificationCard() {
     ["Base contrast", "AA passed", "success"],
     ["Reference sheet", "Updated", "secondary"],
   ];
+
   return (
     <div
       style={{
@@ -580,6 +849,7 @@ function ThreadTocFixture() {
   const [tab, setTab] = useState<keyof typeof TOC_MESSAGES>("you");
   const [active, setActive] = useState(0);
   const messages = TOC_MESSAGES[tab];
+
   return (
     <aside
       data-tp-thread-toc=""
@@ -641,7 +911,7 @@ function ThreadTocFixture() {
             }}
           >
             {messages.map((message, index) => (
-              <BbButton
+              <OmnyoButton
                 key={message}
                 variant="ghost"
                 size="sm"
@@ -662,7 +932,7 @@ function ThreadTocFixture() {
                 >
                   {message}
                 </span>
-              </BbButton>
+              </OmnyoButton>
             ))}
           </TabsContent>
         </Tabs>
@@ -718,6 +988,7 @@ function Thread({
 }) {
   const pad = mobile ? 16 : narrow ? 20 : 30;
   const canvasColor = v("canvas", v("background"));
+
   return (
     <div
       style={{
@@ -740,10 +1011,10 @@ function Thread({
             width: "100%",
             maxWidth: 760,
             margin: "0 auto",
-            padding: `56px ${pad}px 16px`,
+            padding: `16vh ${pad}px 16px`,
           }}
         >
-          <Composer focused={active} empty />
+          <LauncherPanel focused={active} />
         </div>
       ) : (
         <>
@@ -774,7 +1045,7 @@ function Thread({
                 <Dot color={v("success")} size={6} /> Running
               </Badge>
               {narrow ? null : (
-                <Badge tone="outline">bb/endless-theme-plugin</Badge>
+                <Badge tone="outline">omnyo/endless-theme-plugin</Badge>
               )}
             </div>
           )}
@@ -1041,6 +1312,7 @@ function InfoPanel({ mobile = false }: { mobile?: boolean }) {
       </span>
     </div>
   );
+
   return (
     <MockSidebarPanel
       side="right"
@@ -1070,12 +1342,14 @@ function InfoPanel({ mobile = false }: { mobile?: boolean }) {
             {kv("Environment", "Worktree")}
             {kv(
               "Directory",
-              <span style={{ fontFamily: MONO, fontSize: 12 }}>~/Code/bb</span>,
+              <span style={{ fontFamily: MONO, fontSize: 12 }}>
+                ~/Code/omnyo
+              </span>,
             )}
             {kv(
               "Branch",
               <span style={{ fontFamily: MONO, fontSize: 12 }}>
-                bb/endless-theme
+                omnyo/endless-theme
               </span>,
             )}
             {kv(
@@ -1134,7 +1408,7 @@ function SettingsPage({
   mode: Mode;
 }) {
   const control = (label: string, value: ReactNode) => (
-    <BbButton
+    <OmnyoButton
       type="button"
       variant="outline"
       size="sm"
@@ -1158,8 +1432,9 @@ function SettingsPage({
         name="ChevronDown"
         className="size-3.5 shrink-0 text-muted-foreground"
       />
-    </BbButton>
+    </OmnyoButton>
   );
+
   const row = (label: string, description: string | null, child: ReactNode) => (
     <div
       key={label}
@@ -1201,6 +1476,7 @@ function SettingsPage({
       </div>
     </div>
   );
+
   return (
     <div
       data-tp-settings-content="appearance"
@@ -1250,7 +1526,7 @@ function SettingsPage({
               )}
               {row(
                 "Palette",
-                "Palettes change bb's colors, including syntax colors in diffs and file previews. Choose a built-in palette or create one from a prompt.",
+                "Palettes change Omnyo's colors, including syntax colors in diffs and file previews. Choose a built-in palette or create one from a prompt.",
                 control("Palette", themeName),
               )}
               {row(
@@ -1277,7 +1553,7 @@ function SettingsPage({
               {row(
                 "Fade inactive splits",
                 "Fade out splits that do not have focus.",
-                <BbSwitch checked aria-label="Fade inactive splits" />,
+                <OmnyoSwitch checked aria-label="Fade inactive splits" />,
               )}
             </div>
           </div>
@@ -1370,6 +1646,7 @@ function FrameView({
   mode: Mode;
 }) {
   const { sidebar, infoPanel, splitColumns, narrow } = composition;
+
   switch (view) {
     case "thread":
       return (
@@ -1448,12 +1725,14 @@ function MobileFrame({
   const [surface, setSurface] = useState<
     "conversation" | "navigation" | "panel"
   >("conversation");
+
   const title =
     view === "settings"
       ? "Settings"
       : view === "new"
         ? "New thread"
         : "Endless theme family";
+
   const navigation = surface === "navigation";
   const panel = surface === "panel";
   const headerButton = "size-9 shrink-0 p-0 [&_[data-icon-root]]:size-5";
@@ -1471,15 +1750,15 @@ function MobileFrame({
           className="absolute inset-y-0 left-0 flex w-[76%] max-w-80 flex-col bg-sidebar [&>aside]:w-full!"
         >
           <div className="flex h-12 shrink-0 items-center justify-between px-3 text-sm text-sidebar-foreground">
-            <span className="font-semibold">bb-plugins</span>
-            <BbButton
+            <span className="font-semibold">omnyo-plugins</span>
+            <OmnyoButton
               variant="ghost"
               className={headerButton}
               aria-label="Close navigation preview"
               onClick={() => setSurface("conversation")}
             >
               <Icon name="PanelLeft" />
-            </BbButton>
+            </OmnyoButton>
           </div>
           {view === "settings" ? (
             <SettingsSidebarFixture />
@@ -1499,7 +1778,7 @@ function MobileFrame({
         }}
       >
         <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border-seam bg-surface-scrim px-2 text-sm">
-          <BbButton
+          <OmnyoButton
             variant="ghost"
             className={headerButton}
             aria-label="Show navigation preview"
@@ -1508,17 +1787,17 @@ function MobileFrame({
             }
           >
             <Icon name="PanelLeft" />
-          </BbButton>
+          </OmnyoButton>
           <span className="min-w-0 flex-1 truncate">{title}</span>
           <Icon name="MoreHorizontal" className="size-5 shrink-0" />
-          <BbButton
+          <OmnyoButton
             variant="ghost"
             className={headerButton}
             aria-label="Show right panel preview"
             onClick={() => setSurface(panel ? "conversation" : "panel")}
           >
             <Icon name="PanelRight" />
-          </BbButton>
+          </OmnyoButton>
         </div>
         {view === "settings" ? (
           <SettingsPage narrow themeName={themeName} mode={mode} />
@@ -1566,14 +1845,14 @@ function MobileFrame({
             <Icon name="Info" className="size-5" />
             <Icon name="FileDiff" className="size-5" />
             <span className="min-w-0 flex-1 truncate text-sm">Info</span>
-            <BbButton
+            <OmnyoButton
               variant="ghost"
               className={headerButton}
               aria-label="Close right panel preview"
               onClick={() => setSurface("conversation")}
             >
               <Icon name="PanelRight" />
-            </BbButton>
+            </OmnyoButton>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto [&>aside]:w-full! [&>aside]:border-0 [&>aside]:bg-background">
             <InfoPanel mobile />
@@ -1599,13 +1878,16 @@ function Frame({
   const [width, setWidth] = useState(0);
   useLayoutEffect(() => {
     const el = hostRef.current;
+
     if (!el) return;
     const measure = () => setWidth(el.clientWidth);
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+
     return () => ro.disconnect();
   }, []);
+
   return (
     <div ref={hostRef} style={{ minWidth: 0 }}>
       {width > 0 ? (
@@ -1651,7 +1933,7 @@ const ALL_TOKENS = [
   "text-sm--line-height",
   "spacing",
   "tracking-normal",
-  "bb-sidebar-row-height",
+  "omnyo-sidebar-row-height",
   "icon-stroke-width",
   "radius",
   "radius-sm",
@@ -1674,6 +1956,7 @@ type ContrastSpec = {
   washToken: string;
   washAlpha: number;
 };
+
 const STATUS_CONTRAST: Record<string, ContrastSpec> = {
   success: { fgToken: "success", washToken: "success", washAlpha: 0.15 },
   warning: {
@@ -1708,7 +1991,9 @@ const STATUS_CONTRAST: Record<string, ContrastSpec> = {
 
 function atAlpha(rgb: string, alpha: number): string {
   const match = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb);
+
   if (!match) return rgb;
+
   return `rgba(${match[1]}, ${match[2]}, ${match[3]}, ${alpha})`;
 }
 
@@ -1721,6 +2006,7 @@ function resolveColor(color: string): { rgb: string; hex: string } {
   const match = /rgba?\(([^)]+)\)/.exec(color);
   const hexMatch = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(color.trim());
   let channels: readonly number[] | null = null;
+
   if (match) {
     channels = match[1]
       .split(",")
@@ -1737,6 +2023,7 @@ function resolveColor(color: string): { rgb: string; hex: string } {
     canvas.width = 1;
     canvas.height = 1;
     const context = canvas.getContext("2d", { willReadFrequently: true });
+
     if (context) {
       context.clearRect(0, 0, 1, 1);
       context.fillStyle = color;
@@ -1745,6 +2032,7 @@ function resolveColor(color: string): { rgb: string; hex: string } {
       channels = [r, g, b, a / 255];
     }
   }
+
   if (
     !channels ||
     channels.length < 3 ||
@@ -1755,6 +2043,7 @@ function resolveColor(color: string): { rgb: string; hex: string } {
   const rounded = [r, g, b].map((channel) => Math.round(channel));
   const baseHex = `#${rounded.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
   const alpha = a === undefined ? 1 : a;
+
   return {
     rgb:
       alpha < 1
@@ -1775,24 +2064,32 @@ function useComputedTokens(
     const deadline = Date.now() + 4_000;
     let candidateFingerprint: string | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
+
     const read = () => {
       const rootStyle = getComputedStyle(document.documentElement);
+
       const values = names.map((name) =>
         rootStyle.getPropertyValue(`--${name}`).trim(),
       );
+
       const fingerprint = values.join("\u0001");
+
       if (previousFingerprint !== null && Date.now() < deadline) {
         if (fingerprint === previousFingerprint) {
           candidateFingerprint = null;
           timer = setTimeout(read, 100);
+
           return;
         }
+
         if (candidateFingerprint !== fingerprint) {
           candidateFingerprint = fingerprint;
           timer = setTimeout(read, 100);
+
           return;
         }
       }
+
       const probe = document.createElement("div");
       probe.className = "fixed bg-sidebar";
       probe.style.cssText =
@@ -1804,17 +2101,21 @@ function useComputedTokens(
         "position:fixed;left:-9999px;top:-9999px;width:1px;height:1px";
       document.body.appendChild(swatch);
       const next: Computed = {};
+
       for (const [index, name] of names.entries()) {
         const value = values[index] ?? "";
         const scoped = sidebarStyle.getPropertyValue(`--${name}`).trim();
         swatch.style.backgroundColor = "";
         swatch.style.backgroundColor = `var(--${name})`;
         const painted = getComputedStyle(swatch).backgroundColor;
+
         const authoredColor = value
           ? resolveColor(value)
           : { rgb: "", hex: "—" };
+
         const resolved =
           value && !authoredColor.rgb ? resolveColor(painted) : authoredColor;
+
         next[name] = {
           value,
           hex: resolved.hex,
@@ -1822,16 +2123,20 @@ function useComputedTokens(
           sidebar: scoped && scoped !== value ? scoped : null,
         };
       }
+
       probe.remove();
       swatch.remove();
       acceptedFingerprint.current = fingerprint;
       setOut(next);
     };
+
     timer = setTimeout(read, previousFingerprint === null ? 350 : 0);
+
     return () => {
       if (timer !== undefined) clearTimeout(timer);
     };
   }, [names, revision]);
+
   return out;
 }
 
@@ -1844,6 +2149,7 @@ function useResolvedRadii(revision: string): Record<string, string> {
         "position:fixed;left:-9999px;top:-9999px;width:10px;height:10px;pointer-events:none";
       document.body.appendChild(probe);
       const next: Record<string, string> = {};
+
       for (const specimen of RADIUS_SPECIMENS) {
         probe.style.borderTopLeftRadius = "";
         probe.style.borderTopLeftRadius = specimen.source;
@@ -1852,11 +2158,14 @@ function useResolvedRadii(revision: string): Record<string, string> {
           ? `${Math.round(Number.parseFloat(resolved))}`
           : "";
       }
+
       probe.remove();
       setOut(next);
     }, 350);
+
     return () => clearTimeout(timer);
   }, [revision]);
+
   return out;
 }
 
@@ -1868,6 +2177,7 @@ const TEXT_SECTION: CSSProperties = {
   letterSpacing: "-0.01em",
   color: v("foreground"),
 };
+
 const TEXT_CATEGORY: CSSProperties = {
   margin: 0,
   fontSize: 10.5,
@@ -1877,12 +2187,14 @@ const TEXT_CATEGORY: CSSProperties = {
   textTransform: "uppercase",
   color: v("foreground"),
 };
+
 const TEXT_LABEL: CSSProperties = {
   fontSize: 12.5,
   lineHeight: "18px",
   fontWeight: 550,
   color: v("foreground"),
 };
+
 const TEXT_VALUE: CSSProperties = {
   fontFamily: MONO,
   fontSize: 11.5,
@@ -1890,6 +2202,7 @@ const TEXT_VALUE: CSSProperties = {
   fontVariantNumeric: "tabular-nums",
   color: v("readback-foreground", v("muted-foreground")),
 };
+
 const SHEET_SPACE = {
   block: 6,
   inline: 10,
@@ -1911,6 +2224,7 @@ function PreviewSection({
 }) {
   const [expanded, setExpanded] = useState<boolean | null>(null);
   const open = expanded ?? !collapsedByDefault;
+
   return (
     <Collapsible open={open} onOpenChange={setExpanded} asChild>
       <section
@@ -1926,8 +2240,12 @@ function PreviewSection({
           <CollapsibleTrigger className="flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             {AREA_TITLES[area]}
             <Icon
-              name={open ? "ChevronDown" : "ChevronRight"}
-              className="size-4 shrink-0 text-muted-foreground"
+              name="ChevronRight"
+              className={cn(
+                "size-4 shrink-0 text-muted-foreground",
+                DISCLOSURE_CHEVRON_TRANSITION,
+                open && "rotate-90",
+              )}
             />
           </CollapsibleTrigger>
         </h2>
@@ -1945,6 +2263,7 @@ function PreviewSection({
 
 function firstFamily(value: string | undefined): string {
   if (!value) return "";
+
   return (
     value
       .split(",")[0]
@@ -1956,26 +2275,33 @@ function firstFamily(value: string | undefined): string {
 function formatValue(value: string | undefined, suffix = ""): string {
   if (!value) return "—";
   const trimmed = value.trim();
+
   if (!/^-?(?:\d+|\d*\.\d+)$/.test(trimmed)) return trimmed;
   const number = Number.parseFloat(trimmed);
+
   if (!Number.isFinite(number)) return value;
+
   return `${Number(number.toFixed(2))}${suffix}`;
 }
 
 function formatLineHeight(value: string | undefined): string {
   if (!value) return "—";
+
   const division = /^calc\(\s*([\d.]+)\s*\/\s*([\d.]+)\s*\)$/.exec(
     value.trim(),
   );
+
   if (!division) return formatValue(value);
   const numerator = Number.parseFloat(division[1]);
   const denominator = Number.parseFloat(division[2]);
+
   if (
     !Number.isFinite(numerator) ||
     !Number.isFinite(denominator) ||
     denominator === 0
   )
     return value;
+
   return `${Number((numerator / denominator).toFixed(2))}`;
 }
 
@@ -1985,27 +2311,36 @@ function colorRatio(
   computed: Computed,
 ): number | null {
   const color = computed[name];
+
   if (policy === "vs-surface") {
     const surface = name === "sidebar-foreground" ? "sidebar" : "canvas";
+
     if (!color?.rgb || !computed[surface]?.rgb) return null;
+
     return contrastRatio(
       color.rgb,
       computed[surface].rgb,
       surface === "canvas" ? undefined : computed.canvas?.rgb,
     );
   }
+
   if (policy === "as-painted") {
     const spec = STATUS_CONTRAST[name];
+
     if (!spec) return null;
+
     const foreground =
       computed[spec.fgToken]?.rgb ||
       (spec.fgFallbackToken ? computed[spec.fgFallbackToken]?.rgb : "");
+
     const wash = computed[spec.washToken]?.rgb;
     const canvas = computed.canvas?.rgb;
+
     return foreground && wash && canvas
       ? contrastRatio(foreground, atAlpha(wash, spec.washAlpha), canvas)
       : null;
   }
+
   return null;
 }
 
@@ -2042,6 +2377,7 @@ function StyleSegment({
 }: StyleSegmentProps) {
   const hasLeading = leading !== undefined || reserveLeading;
   const columns = styleSegmentColumns(hasLeading, trailing !== undefined);
+
   return (
     <div
       data-tp-style-segment=""
@@ -2131,10 +2467,13 @@ function ColorSegment({
   const color = computed[name];
   const hasContrast = policy !== "none";
   const ratio = hasContrast ? colorRatio(name, policy, computed) : null;
+
   const title = color?.sidebar
     ? `${color.value}\nSidebar override: ${color.sidebar}`
     : color?.value;
+
   const ratioLabel = ratio === null ? "—" : `${ratio.toFixed(2)}:1`;
+
   return (
     <StyleSegment
       specimen={`color:${name}`}
@@ -2181,6 +2520,7 @@ function SystemBlock({
   children: ReactNode;
 }) {
   const hasTrailingLabel = trailingLabel !== undefined;
+
   return (
     <div
       data-tp-block={id}
@@ -2253,6 +2593,7 @@ function TypographySheet({ computed }: { computed: Computed }) {
     "text-scale": computed["text-sm"]?.value ?? "—",
     "line-height": formatLineHeight(computed["text-sm--line-height"]?.value),
   };
+
   return (
     <SystemBlock id="typography" title="Typography">
       {TYPE_SPECIMENS.map((specimen) => (
@@ -2324,14 +2665,17 @@ function RadiusSheet({ resolved }: { resolved: Record<string, string> }) {
 
 function ShadowSheet({ computed }: { computed: Computed }) {
   const managedShadowColor = computed["tp-shadow-color"];
+
   const shadowColor = managedShadowColor?.rgb
     ? managedShadowColor
     : computed["shadow-color"];
+
   const opacity = computed["tp-shadow-opacity-percent"]?.value
     ? `${formatValue(computed["tp-shadow-opacity-percent"]?.value)}%`
     : computed["shadow-opacity"]?.value
       ? `${Math.round(Number.parseFloat(computed["shadow-opacity"].value) * 100)}%`
       : "—";
+
   const values: Record<string, string> = {
     y: formatValue(computed["shadow-y"]?.value, "px"),
     blur: formatValue(computed["shadow-blur"]?.value, "px"),
@@ -2340,6 +2684,7 @@ function ShadowSheet({ computed }: { computed: Computed }) {
     color: shadowColor?.hex ?? "—",
     opacity,
   };
+
   return (
     <SystemBlock id="shadow" title="Shadow">
       <div
@@ -2405,9 +2750,11 @@ function StyleSheetSection({
   const paletteGroups = COLOR_GROUPS.filter(
     (group) => group.band === "palette",
   );
+
   const foundationGroups = COLOR_GROUPS.filter(
     (group) => group.band === "foundation",
   );
+
   return (
     <div data-tp-style-readonly="">
       <div
@@ -2474,7 +2821,9 @@ function StyleSheetSection({
     </div>
   );
 }
+
 const HOVER_OPEN_DELAY_MS = 300;
+
 const HOVER_CLOSE_DELAY_MS = 150;
 
 const OVERLAY_TRIGGER_CLASS =
@@ -2503,13 +2852,16 @@ const TOOLTIP_DISMISS_DELAY_MS = 700;
 function useDelayedTooltip() {
   const [open, setOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
   const clear = () => {
     if (timer.current !== undefined) {
       clearTimeout(timer.current);
       timer.current = undefined;
     }
   };
+
   useEffect(() => clear, []);
+
   return {
     open,
     show: () => {
@@ -2534,11 +2886,13 @@ function useDelayedTooltip() {
 function OverlaySpecimens() {
   const tooltip = useDelayedTooltip();
   const [hoverCardOpen, setHoverCardOpen] = useState(false);
+
   const openClass = (open: boolean) =>
     cn(
       OVERLAY_TRIGGER_CLASS,
       open && "border-ring bg-accent text-accent-foreground",
     );
+
   return (
     <div
       data-tp-overlay-launchers=""
@@ -2550,13 +2904,13 @@ function OverlaySpecimens() {
     >
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <BbButton
+          <OmnyoButton
             variant="outline"
             size="sm"
             className={OVERLAY_TRIGGER_CLASS}
           >
             <OverlayTriggerLabel>Menu</OverlayTriggerLabel>
-          </BbButton>
+          </OmnyoButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
           <DropdownMenuLabel>Thread</DropdownMenuLabel>
@@ -2571,13 +2925,13 @@ function OverlaySpecimens() {
       </DropdownMenu>
       <Dialog>
         <DialogTrigger asChild>
-          <BbButton
+          <OmnyoButton
             variant="outline"
             size="sm"
             className={OVERLAY_TRIGGER_CLASS}
           >
             <OverlayTriggerLabel>Dialog</OverlayTriggerLabel>
-          </BbButton>
+          </OmnyoButton>
         </DialogTrigger>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -2589,25 +2943,25 @@ function OverlaySpecimens() {
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild>
-              <BbButton variant="outline" size="sm">
+              <OmnyoButton variant="outline" size="sm">
                 Cancel
-              </BbButton>
+              </OmnyoButton>
             </DialogClose>
             <DialogClose asChild>
-              <BbButton size="sm">Archive</BbButton>
+              <OmnyoButton size="sm">Archive</OmnyoButton>
             </DialogClose>
           </DialogFooter>
         </DialogContent>
       </Dialog>
       <Popover>
         <PopoverTrigger asChild>
-          <BbButton
+          <OmnyoButton
             variant="outline"
             size="sm"
             className={OVERLAY_TRIGGER_CLASS}
           >
             <OverlayTriggerLabel>Popover</OverlayTriggerLabel>
-          </BbButton>
+          </OmnyoButton>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-56 p-1">
           <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
@@ -2633,7 +2987,7 @@ function OverlaySpecimens() {
       <TooltipProvider delayDuration={HOVER_OPEN_DELAY_MS}>
         <Tooltip open={tooltip.open} onOpenChange={tooltip.setOpen}>
           <TooltipTrigger asChild>
-            <BbButton
+            <OmnyoButton
               variant="outline"
               size="sm"
               data-tp-tooltip-trigger=""
@@ -2648,7 +3002,7 @@ function OverlaySpecimens() {
               }}
             >
               <OverlayTriggerLabel>Tooltip</OverlayTriggerLabel>
-            </BbButton>
+            </OmnyoButton>
           </TooltipTrigger>
           <TooltipContent
             data-tp-tooltip-content=""
@@ -2666,7 +3020,7 @@ function OverlaySpecimens() {
         closeDelay={HOVER_CLOSE_DELAY_MS}
       >
         <HoverCardTrigger asChild>
-          <BbButton
+          <OmnyoButton
             variant="outline"
             size="sm"
             data-tp-hovercard-trigger=""
@@ -2674,7 +3028,7 @@ function OverlaySpecimens() {
             onClick={() => setHoverCardOpen((open) => !open)}
           >
             <OverlayTriggerLabel>Hover card</OverlayTriggerLabel>
-          </BbButton>
+          </OmnyoButton>
         </HoverCardTrigger>
         <HoverCardContent
           data-tp-hovercard-content=""
@@ -2700,7 +3054,7 @@ function OverlaySpecimens() {
               color: v("muted-foreground"),
             }}
           >
-            bb/endless-theme
+            omnyo/endless-theme
           </div>
           <div
             style={{
@@ -2714,23 +3068,23 @@ function OverlaySpecimens() {
             .20.
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-            <BbButton
+            <OmnyoButton
               variant="outline"
               size="sm"
               className="h-7 flex-1 cursor-pointer px-2 text-xs"
             >
               Copy branch
-            </BbButton>
-            <BbButton
+            </OmnyoButton>
+            <OmnyoButton
               size="sm"
               className="h-7 flex-1 cursor-pointer px-2 text-xs"
             >
               Open in split
-            </BbButton>
+            </OmnyoButton>
           </div>
         </HoverCardContent>
       </HoverCard>
-      <BbButton
+      <OmnyoButton
         variant="outline"
         size="sm"
         className={OVERLAY_TRIGGER_CLASS}
@@ -2741,7 +3095,7 @@ function OverlaySpecimens() {
         }
       >
         <OverlayTriggerLabel>Toast</OverlayTriggerLabel>
-      </BbButton>
+      </OmnyoButton>
     </div>
   );
 }
@@ -2752,25 +3106,30 @@ function ComponentsSection({ stacked = false }: { stacked?: boolean }) {
   const [compact, setCompact] = useState(false);
   const [checked, setChecked] = useState(true);
   const [agreed, setAgreed] = useState(false);
+
   const compactBlock = (wide = false): CSSProperties => ({
     minWidth: 0,
     gridColumn: wide ? "1 / -1" : undefined,
   });
+
   const toggleBlock: CSSProperties = {
     ...compactBlock(),
     paddingBlock: space(3),
   };
+
   const toggleControls: CSSProperties = {
     display: "flex",
     flexDirection: "column",
     gap: 8,
   };
+
   const compactLabel: CSSProperties = {
     ...TEXT_LABEL,
     minWidth: 0,
     fontSize: 11.5,
     lineHeight: "16px",
   };
+
   return (
     <div
       data-tp-components=""
@@ -2799,48 +3158,48 @@ function ComponentsSection({ stacked = false }: { stacked?: boolean }) {
             gap: 6,
           }}
         >
-          <BbButton
+          <OmnyoButton
             size="sm"
             className="h-7 min-w-0 cursor-pointer px-2 text-xs"
           >
             Default
-          </BbButton>
-          <BbButton
+          </OmnyoButton>
+          <OmnyoButton
             size="sm"
             variant="secondary"
             className="h-7 min-w-0 cursor-pointer px-2 text-xs"
           >
             Secondary
-          </BbButton>
-          <BbButton
+          </OmnyoButton>
+          <OmnyoButton
             size="sm"
             variant="outline"
             className="h-7 min-w-0 cursor-pointer px-2 text-xs"
           >
             Outline
-          </BbButton>
-          <BbButton
+          </OmnyoButton>
+          <OmnyoButton
             size="sm"
             variant="ghost"
             className="h-7 min-w-0 cursor-pointer px-2 text-xs"
           >
             Ghost
-          </BbButton>
-          <BbButton
+          </OmnyoButton>
+          <OmnyoButton
             size="sm"
             variant="destructive"
             className="h-7 min-w-0 cursor-pointer px-2 text-xs"
           >
             Delete
-          </BbButton>
-          <BbButton
+          </OmnyoButton>
+          <OmnyoButton
             size="sm"
             variant="outline"
             className="h-7 min-w-0 px-2 text-xs"
             disabled
           >
             Disabled
-          </BbButton>
+          </OmnyoButton>
         </div>
       </div>
       <div data-tp-block="badges" style={compactBlock(true)}>
@@ -2876,14 +3235,14 @@ function ComponentsSection({ stacked = false }: { stacked?: boolean }) {
           Inputs
         </h3>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <BbInput
+          <OmnyoInput
             className="h-7 px-2 text-xs"
             aria-label="Search threads"
             placeholder="Search threads…"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          <BbInput
+          <OmnyoInput
             className="h-7 px-2 text-xs"
             aria-label="Disabled input"
             value="Disabled"
@@ -2909,7 +3268,7 @@ function ComponentsSection({ stacked = false }: { stacked?: boolean }) {
               ...compactLabel,
             }}
           >
-            <BbSwitch
+            <OmnyoSwitch
               checked={notify}
               onCheckedChange={setNotify}
               className="cursor-pointer"
@@ -2925,7 +3284,7 @@ function ComponentsSection({ stacked = false }: { stacked?: boolean }) {
               ...compactLabel,
             }}
           >
-            <BbSwitch
+            <OmnyoSwitch
               checked={compact}
               onCheckedChange={setCompact}
               className="cursor-pointer"
@@ -2941,7 +3300,7 @@ function ComponentsSection({ stacked = false }: { stacked?: boolean }) {
               color: v("muted-foreground"),
             }}
           >
-            <BbSwitch checked disabled /> Disabled
+            <OmnyoSwitch checked disabled /> Disabled
           </label>
         </div>
       </div>
@@ -2962,7 +3321,7 @@ function ComponentsSection({ stacked = false }: { stacked?: boolean }) {
               ...compactLabel,
             }}
           >
-            <BbCheckbox
+            <OmnyoCheckbox
               checked={checked}
               onCheckedChange={(next) => setChecked(next === true)}
               className="cursor-pointer"
@@ -2978,7 +3337,7 @@ function ComponentsSection({ stacked = false }: { stacked?: boolean }) {
               ...compactLabel,
             }}
           >
-            <BbCheckbox
+            <OmnyoCheckbox
               checked={agreed}
               onCheckedChange={(next) => setAgreed(next === true)}
               className="cursor-pointer"
@@ -2994,7 +3353,7 @@ function ComponentsSection({ stacked = false }: { stacked?: boolean }) {
               color: v("muted-foreground"),
             }}
           >
-            <BbCheckbox checked disabled /> Disabled
+            <OmnyoCheckbox checked disabled /> Disabled
           </label>
         </div>
       </div>
@@ -3035,12 +3394,14 @@ type Swatch = {
   fontSans: string | null;
   fontMono: string | null;
 };
+
 type ThemeEntry = {
   id: string;
   name: string;
   light: Swatch | null;
   dark: Swatch | null;
 };
+
 type Catalog = {
   activeThemeId: string | null;
   themes: ThemeEntry[];
@@ -3048,6 +3409,7 @@ type Catalog = {
 };
 
 const EMPTY_CATALOG: Catalog = { activeThemeId: null, themes: [], revision: 0 };
+
 let catalogSnapshot: Catalog = EMPTY_CATALOG;
 
 function commitCatalog(
@@ -3092,6 +3454,7 @@ function Chips({
 
 function ThemeOption({ entry, mode }: { entry: ThemeEntry; mode: Mode }) {
   const swatch = mode === "dark" ? entry.dark : entry.light;
+
   return (
     <span
       style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}
@@ -3140,6 +3503,7 @@ function ModeSwitch({
     >
       {(["light", "dark"] as const).map((option) => {
         const active = mode === option;
+
         return (
           <button
             key={option}
@@ -3191,15 +3555,19 @@ function ThemePicker({
 }) {
   const displayThemeId = pendingSelection?.themeId ?? catalog.activeThemeId;
   const displayMode = pendingSelection?.mode ?? mode;
+
   const current =
     catalog.themes.find((theme) => theme.id === displayThemeId) ??
     catalog.themes[0];
+
   const diskSwatch = current
     ? displayMode === "dark"
       ? current.dark
       : current.light
     : null;
+
   const measured = (name: string): string | null => computed[name]?.rgb || null;
+
   const currentSwatch: Swatch | null =
     pendingSelection === null && current?.id === catalog.activeThemeId
       ? {
@@ -3213,9 +3581,11 @@ function ThemePicker({
           fontMono: diskSwatch?.fontMono ?? null,
         }
       : diskSwatch;
+
   const pending = pendingSelection !== null;
   const unavailable = pending;
   const loading = catalog.themes.length === 0;
+
   const accessibleName = loading
     ? "Loading themes"
     : pending
@@ -3346,13 +3716,14 @@ function ThemePicker({
   );
 }
 
-const MODE_KEY = "bb.theme";
+const MODE_KEY = "omnyo.theme";
 
 function useColorMode(): [Mode, (next: Mode) => void] {
   const read = () =>
     (document.documentElement.classList.contains("dark")
       ? "dark"
       : "light") as Mode;
+
   const [mode, setMode] = useState<Mode>(read);
   useEffect(() => {
     const mo = new MutationObserver(() => setMode(read()));
@@ -3360,8 +3731,10 @@ function useColorMode(): [Mode, (next: Mode) => void] {
       attributes: true,
       attributeFilter: ["class"],
     });
+
     return () => mo.disconnect();
   }, []);
+
   const set = (next: Mode) => {
     const previous = localStorage.getItem(MODE_KEY);
     localStorage.setItem(MODE_KEY, next);
@@ -3376,27 +3749,33 @@ function useColorMode(): [Mode, (next: Mode) => void] {
     document.documentElement.classList.toggle("dark", next === "dark");
     setMode(next);
   };
+
   return [mode, set];
 }
 
 function PreviewPage({ subPath }: { subPath: string }) {
   const rpc = useRpc<typeof rpcContract>();
   const [mode, setMode] = useColorMode();
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
+
   const [layout, setLayout] = useState<{ band: LayoutBand; width: number }>({
     band: "mobile",
     width: 0,
   });
+
   const [catalog, setCatalog] = useState<Catalog>(() => catalogSnapshot);
   const [error, setError] = useState<string | null>(null);
+
   const [pendingSelection, setPendingSelection] =
     useState<ThemeSelection | null>(null);
+
   const [failedSelection, setFailedSelection] = useState<ThemeSelection | null>(
     null,
   );
+
   const [selectionSlow, setSelectionSlow] = useState(false);
   const catalogRequests = useRef(new LatestRequest());
   const selectionPending = useRef(false);
@@ -3405,6 +3784,7 @@ function PreviewPage({ subPath }: { subPath: string }) {
 
   const requestedView = useMemo<View>(() => {
     const first = subPath.split("/").filter(Boolean)[0] ?? "";
+
     return (VIEWS as readonly string[]).includes(first)
       ? (first as View)
       : "thread";
@@ -3413,11 +3793,14 @@ function PreviewPage({ subPath }: { subPath: string }) {
   const loadRef = useRef<() => void>(() => {});
   useEffect(() => {
     let cancelled = false;
+
     const load = () => {
       if (selectionPending.current || catalogLoadPending.current) {
         catalogLoadQueued.current = true;
+
         return;
       }
+
       catalogLoadQueued.current = false;
       catalogLoadPending.current = true;
       const request = catalogRequests.current.begin();
@@ -3443,12 +3826,15 @@ function PreviewPage({ subPath }: { subPath: string }) {
         })
         .finally(() => {
           catalogLoadPending.current = false;
+
           if (!cancelled && catalogLoadQueued.current) load();
         });
     };
+
     loadRef.current = load;
     load();
     const timer = setInterval(load, 8000);
+
     return () => {
       cancelled = true;
       clearInterval(timer);
@@ -3459,25 +3845,32 @@ function PreviewPage({ subPath }: { subPath: string }) {
   useEffect(() => {
     if (!pendingSelection) {
       setSelectionSlow(false);
+
       return;
     }
+
     const timer = setTimeout(() => setSelectionSlow(true), 5_000);
+
     return () => clearTimeout(timer);
   }, [pendingSelection]);
 
   useLayoutEffect(() => {
     const header = headerRef.current;
+
     if (!header) return;
     const measure = () => setHeaderHeight(header.offsetHeight);
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(header);
+
     return () => ro.disconnect();
   }, []);
 
   useLayoutEffect(() => {
     const el = rootRef.current;
+
     if (!el) return;
+
     const measure = () => {
       const width = el.clientWidth;
       const band = layoutBandForWidth(width);
@@ -3487,10 +3880,12 @@ function PreviewPage({ subPath }: { subPath: string }) {
           : { band, width },
       );
     };
+
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     window.addEventListener("resize", measure);
+
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", measure);
@@ -3523,12 +3918,15 @@ function PreviewPage({ subPath }: { subPath: string }) {
         if (catalogRequests.current.isLatest(request)) {
           selectionPending.current = false;
           setPendingSelection(null);
+
           if (catalogLoadQueued.current) loadRef.current();
         }
       });
   };
+
   const pick = (themeId: string, nextMode: Mode) =>
     applySelection({ themeId, mode: nextMode });
+
   const retrySelection = () => {
     if (failedSelection) applySelection(failedSelection);
   };
@@ -3540,14 +3938,19 @@ function PreviewPage({ subPath }: { subPath: string }) {
   const railWidth = SURFACE_RAIL_WIDTH;
   const showRail = layout.band === "desktop";
   const contentInset = contentInsetForWidth(layout.width);
+
   const frameWidth =
     Math.min(layout.width, STUDIO_MAX_WIDTH) -
     (showRail ? railWidth : 0) -
     contentInset * 2;
+
   const mobilePreview = frameWidth < 768;
+
   const view =
     mobilePreview && requestedView === "split" ? "thread" : requestedView;
+
   const displayThemeId = pendingSelection?.themeId ?? catalog.activeThemeId;
+
   const displayThemeName =
     catalog.themes.find((theme) => theme.id === displayThemeId)?.name ??
     "Current theme";

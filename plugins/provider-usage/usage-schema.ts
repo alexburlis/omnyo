@@ -1,6 +1,7 @@
 import { z } from "zod/mini";
 
 const nonemptyStringSchema = z.string().check(z.minLength(1));
+
 const costSchema = z.strictObject({
   usedUsdCents: z.number().check(z.nonnegative()),
   limitUsdCents: z.number().check(z.positive()),
@@ -65,20 +66,27 @@ export const usageRpcSuccessSchema = z.strictObject({
 });
 
 export type ProviderUsage = z.infer<typeof providerUsageSchema>;
+
 export type UsageWindow = z.infer<typeof usageWindowSchema>;
+
 export type UsageProvider = z.infer<typeof usageProviderSchema>;
+
 export type UsageMachine = z.infer<typeof usageMachineSchema>;
+
 export type UsageSnapshot = z.infer<typeof usageSnapshotSchema>;
 
 export function providerUsageTone(
   provider: UsageProvider,
 ): "warning" | "critical" | null {
   if (provider.usage?.status !== "ok") return null;
+
   const usedPercent = Math.max(
     0,
     ...provider.usage.windows.map((window) => window.usedPercent),
   );
+
   if (usedPercent >= 95) return "critical";
+
   return usedPercent >= 80 ? "warning" : null;
 }
 

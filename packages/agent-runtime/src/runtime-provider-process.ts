@@ -5,9 +5,10 @@ import {
   sanitizeInheritedChildProcessEnv,
   spawnManagedProcess,
   type ManagedProcess,
-} from "@bb/process-utils";
+} from "@omnyo/process-utils";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
 import type { CreateBridgeAdapterOptions } from "./provider-adapter.js";
+import { bridgeLaunchProcessKey } from "./bridge-launch-process-key.js";
 import { createProviderForId } from "./provider-registry.js";
 import {
   ignoredJsonRpcResultSchema,
@@ -15,7 +16,7 @@ import {
   readBoundedLines,
   type PendingJsonRpcRequest,
   sendJsonRpcRequest,
-} from "@bb/provider-bridge-protocol/bridge-kit";
+} from "@omnyo/provider-bridge-protocol/bridge-kit";
 import type { RuntimeProviderIdentityState } from "./runtime-thread-identity.js";
 import type {
   AgentRuntimeBridgeLaunch,
@@ -26,6 +27,7 @@ import type {
 
 export interface RuntimeProviderProcess extends ManagedProcess {
   adapter: BridgeProtocolAdapter;
+  bridgeLaunchKey: string;
   expectedShutdownExpectations: number;
   exitFinalized: Promise<void>;
   identity: RuntimeProviderIdentityState;
@@ -42,6 +44,11 @@ interface RuntimeProviderProcessLineArgs {
   providerProcess: RuntimeProviderProcess;
 }
 
+export interface RuntimeProviderThreadDetachment {
+  reason: "provider-exited" | "runtime-shutdown";
+  threadId: string;
+}
+
 interface RuntimeProviderProcessManagerArgs {
   additionalWorkspaceWriteRoots: readonly string[];
   createAdapter?: (
@@ -54,6 +61,7 @@ interface RuntimeProviderProcessManagerArgs {
   captureThreadExitState: (
     threadId: string,
   ) => AgentRuntimeProcessExitThreadState;
+  containProviderProcess: AgentRuntimeOptions["containProviderProcess"];
   createProviderIdentityState: (
     providerId: string,
   ) => RuntimeProviderIdentityState;
@@ -61,7 +69,7 @@ interface RuntimeProviderProcessManagerArgs {
   getNextRequestId: () => number;
   handleStdoutLine: (args: RuntimeProviderProcessLineArgs) => void;
   onProcessExit: AgentRuntimeOptions["onProcessExit"];
-  onProviderThreadDetached: (threadId: string) => void;
+  onProviderThreadDetached: (args: RuntimeProviderThreadDetachment) => void;
   onStderr: AgentRuntimeOptions["onStderr"];
   skillRoots: readonly AgentRuntimeSkillRoot[];
   workspacePath: string;
@@ -99,6 +107,7 @@ interface TerminateProviderProcessArgs {
 
 interface SpawnProviderArgs {
   adapter: BridgeProtocolAdapter;
+  bridgeLaunchKey: string;
   processKey: string;
   providerId: string;
 }
@@ -115,9 +124,12 @@ interface ProviderProcessExitedErrorArgs {
 }
 
 const PROVIDER_STDERR_TAIL_MAX_BYTES = 4_000;
+
 const PROVIDER_PROCESS_CLOSE_GRACE_MS = 1_000;
 
 class ProviderProcessExitedError extends Error {
+  readonly code = "provider_process_exited";
+
   constructor(args: ProviderProcessExitedErrorArgs) {
     const stderr = formatProviderStderr(args.stderrTail);
     super(
@@ -143,44 +155,68 @@ export class RuntimeProviderProcessManager {
   async ensureProvider(args: EnsureRuntimeProviderArgs): Promise<void> {
     if (this.shuttingDown) return;
     const retirement = this.providerRetiring.get(args.processKey);
+
     if (retirement !== undefined) {
       await retirement;
+
       if (this.shuttingDown) return;
     }
 
     const existing = this.providerStarting.get(args.processKey);
+
     if (existing) {
       await existing;
+
       return;
     }
 
     const existingProcess = this.processes.get(args.processKey);
+
     if (existingProcess !== undefined) {
       if (!hasChildProcessExited(existingProcess.child)) return;
       await existingProcess.exitFinalized;
+
       if (this.shuttingDown) return;
 
       const concurrentStart = this.providerStarting.get(args.processKey);
+
       if (concurrentStart !== undefined) {
         await concurrentStart;
+
         return;
       }
+
       if (this.processes.has(args.processKey)) return;
     }
 
     const startPromise = (async () => {
       const adapter = this.getAdapter(args.providerId, args.bridgeLaunch);
+
       const providerProcess = this.spawnProvider({
         adapter,
+        bridgeLaunchKey: bridgeLaunchProcessKey(args.bridgeLaunch),
         processKey: args.processKey,
         providerId: args.providerId,
       });
 
       try {
+        const { pid } = providerProcess.child;
+
+        if (this.args.containProviderProcess !== undefined) {
+          if (pid === undefined) {
+            throw new Error(
+              `Provider "${args.providerId}" has no process id to contain`,
+            );
+          }
+
+          await this.args.containProviderProcess(pid);
+        }
+
         if (hasChildProcessExited(providerProcess.child)) {
           const stderr = formatProviderStderr(
             providerProcess.stderrTail,
           )?.slice(0, 500);
+
           throw new Error(
             `Provider "${args.providerId}" exited during startup with ${formatChildProcessExitStatus(providerProcess.child)}` +
               (stderr ? `\nstderr: ${stderr}` : ""),
@@ -196,19 +232,23 @@ export class RuntimeProviderProcessManager {
               getNextId: this.args.getNextRequestId,
               resultSchema: ignoredJsonRpcResultSchema,
             });
+
             request.onResult(result);
           } catch (error) {
             if (this.shuttingDown) return;
+
             if (request.required) throw error;
           }
         }
 
         const skillRoots = args.skillRoots ?? this.args.skillRoots;
+
         if (skillRoots.length > 0) {
           const skillRootsCmd = adapter.buildCommandPlan({
             type: "skills/configure",
             skillRoots,
           });
+
           if (skillRootsCmd.kind === "request") {
             await sendJsonRpcRequest({
               child: providerProcess.child,
@@ -235,6 +275,7 @@ export class RuntimeProviderProcessManager {
     })();
 
     this.providerStarting.set(args.processKey, startPromise);
+
     try {
       await startPromise;
     } finally {
@@ -242,6 +283,7 @@ export class RuntimeProviderProcessManager {
         this.providerStarting.delete(args.processKey);
       }
     }
+
     await this.retireStaleBridgeProcesses(args);
   }
 
@@ -249,11 +291,14 @@ export class RuntimeProviderProcessManager {
     args: EnsureRuntimeProviderArgs,
   ): Promise<void> {
     this.currentProcessKeyByProviderId.set(args.providerId, args.processKey);
+    const bridgeLaunchKey = bridgeLaunchProcessKey(args.bridgeLaunch);
+
     const staleKeys = [...this.processes.entries()]
       .filter(
         ([processKey, providerProcess]) =>
           processKey !== args.processKey &&
           providerProcess.providerId === args.providerId &&
+          providerProcess.bridgeLaunchKey !== bridgeLaunchKey &&
           providerProcess.identity.threadIds.size === 0,
       )
       .map(([processKey]) => processKey);
@@ -267,14 +312,17 @@ export class RuntimeProviderProcessManager {
     args: RequireRuntimeProviderProcessArgs,
   ): RuntimeProviderProcess {
     const providerProcess = this.processes.get(args.processKey);
+
     if (!providerProcess) {
       throw new Error(`Provider "${args.providerId}" is not running`);
     }
+
     if (hasChildProcessExited(providerProcess.child)) {
       throw new Error(
         `Provider "${args.providerId}" has exited (${formatChildProcessExitStatus(providerProcess.child)})`,
       );
     }
+
     return providerProcess;
   }
 
@@ -290,19 +338,23 @@ export class RuntimeProviderProcessManager {
 
   async shutdownProvider(args: ShutdownRuntimeProviderArgs): Promise<void> {
     const existingRetirement = this.providerRetiring.get(args.processKey);
+
     if (existingRetirement !== undefined) return existingRetirement;
 
     const providerProcess = this.processes.get(args.processKey);
+
     if (!providerProcess) {
       return;
     }
 
     if (hasChildProcessExited(providerProcess.child)) {
       await providerProcess.exitFinalized;
+
       return;
     }
 
     providerProcess.expectedShutdownExpectations += 1;
+
     const retirement = this.terminateProviderProcess({
       providerProcess,
       timeoutMs: args.timeoutMs,
@@ -311,6 +363,7 @@ export class RuntimeProviderProcessManager {
         await providerProcess.exitFinalized;
       }
     });
+
     this.providerRetiring.set(args.processKey, retirement);
     await retirement.finally(() => {
       if (this.providerRetiring.get(args.processKey) === retirement) {
@@ -325,14 +378,20 @@ export class RuntimeProviderProcessManager {
 
     for (const [processKey, providerProcess] of this.processes) {
       shutdownPromises.push(this.terminateProviderProcess({ providerProcess }));
+
       for (const [, pending] of providerProcess.pending) {
         pending.reject(new Error("Runtime shutting down"));
       }
+
       providerProcess.pending.clear();
 
       for (const threadId of providerProcess.identity.threadIds) {
-        this.args.onProviderThreadDetached(threadId);
+        this.args.onProviderThreadDetached({
+          reason: "runtime-shutdown",
+          threadId,
+        });
       }
+
       this.processes.delete(processKey);
     }
 
@@ -363,12 +422,15 @@ export class RuntimeProviderProcessManager {
 
   private spawnProvider(args: SpawnProviderArgs): RuntimeProviderProcess {
     const processConfig = args.adapter.process;
+
     const env: NodeJS.ProcessEnv = {
       ...sanitizeInheritedChildProcessEnv({ env: process.env }),
       ...this.args.env,
       ...processConfig.env,
     };
+
     const recordRoot = env[PROVIDER_BRIDGE_RECORD_DIR_ENV];
+
     if (recordRoot !== undefined && recordRoot !== "") {
       env[PROVIDER_BRIDGE_RECORD_DIR_ENV] = join(recordRoot, args.providerId);
     }
@@ -379,8 +441,10 @@ export class RuntimeProviderProcessManager {
       cwd: this.args.workspacePath,
       env,
     });
+
     const { child } = managed;
     let finalizeExit: () => void = () => undefined;
+
     const exitFinalized = new Promise<void>((resolve) => {
       finalizeExit = resolve;
     });
@@ -388,6 +452,7 @@ export class RuntimeProviderProcessManager {
     const providerProcess: RuntimeProviderProcess = {
       ...managed,
       adapter: args.adapter,
+      bridgeLaunchKey: args.bridgeLaunchKey,
       expectedShutdownExpectations: 0,
       exitFinalized,
       interactiveRequestScope: randomUUID(),
@@ -408,6 +473,7 @@ export class RuntimeProviderProcessManager {
         ) {
           return;
         }
+
         this.args.handleStdoutLine({
           line,
           providerProcess,
@@ -427,6 +493,7 @@ export class RuntimeProviderProcessManager {
       ) {
         return;
       }
+
       consumeProviderStderrChunk({
         chunk,
         onLine: this.args.onStderr,
@@ -441,6 +508,7 @@ export class RuntimeProviderProcessManager {
       ) {
         return;
       }
+
       this.args.onStderr?.(decodeStderrLine(providerProcess.stderrLineTail));
       providerProcess.stderrLineTail = Buffer.alloc(0);
     });
@@ -455,12 +523,15 @@ export class RuntimeProviderProcessManager {
     let exitStatus: ProviderProcessExitStatus | null = null;
     let closeGraceTimer: NodeJS.Timeout | null = null;
     let exitHandled = false;
+
     const handleExit = (status: ProviderProcessExitStatus): void => {
       if (exitHandled) return;
       exitHandled = true;
+
       if (closeGraceTimer !== null) {
         clearTimeout(closeGraceTimer);
       }
+
       try {
         this.handleProviderProcessExit({
           code: status.code,
@@ -478,6 +549,7 @@ export class RuntimeProviderProcessManager {
         code: code ?? null,
         signal: signal ?? null,
       };
+
       exitStatus = status;
       closeGraceTimer = setTimeout(() => {
         child.stdout.destroy();
@@ -496,6 +568,7 @@ export class RuntimeProviderProcessManager {
     });
 
     this.processes.set(args.processKey, providerProcess);
+
     return providerProcess;
   }
 
@@ -508,9 +581,11 @@ export class RuntimeProviderProcessManager {
 
     this.processes.delete(args.processKey);
     args.providerProcess.expectedShutdownExpectations += 1;
+
     for (const [, pending] of args.providerProcess.pending) {
       pending.reject(args.startupError);
     }
+
     args.providerProcess.pending.clear();
 
     await this.terminateProviderProcess({
@@ -524,6 +599,7 @@ export class RuntimeProviderProcessManager {
     const result = await args.providerProcess.stop({
       gracePeriodMs: args.timeoutMs ?? 5000,
     });
+
     if (result.treeTermination === "unverified") {
       this.args.onStderr?.(
         "Provider process exited, but descendant cleanup could not be confirmed",
@@ -533,17 +609,22 @@ export class RuntimeProviderProcessManager {
 
   private handleProviderProcessError(args: ProviderProcessErrorArgs): void {
     if (this.shuttingDown) return;
+
     if (!this.isCurrentProviderProcess(args)) return;
+
     const expected = consumeExpectedProviderProcessShutdown(
       args.providerProcess,
     );
+
     this.processes.delete(args.providerProcess.processKey);
     const message = args.err.message;
+
     for (const [, pending] of args.providerProcess.pending) {
       pending.reject(
         new Error(`Provider "${args.providerId}" failed to start: ${message}`),
       );
     }
+
     args.providerProcess.pending.clear();
 
     this.args.onProcessExit?.({
@@ -560,11 +641,15 @@ export class RuntimeProviderProcessManager {
 
   private handleProviderProcessExit(args: ProviderProcessExitArgs): void {
     if (this.shuttingDown) return;
+
     if (!this.isCurrentProviderProcess(args)) return;
+
     const expected = consumeExpectedProviderProcessShutdown(
       args.providerProcess,
     );
+
     this.processes.delete(args.providerProcess.processKey);
+
     if (!expected) {
       void this.terminateProviderProcess({
         providerProcess: args.providerProcess,
@@ -574,13 +659,20 @@ export class RuntimeProviderProcessManager {
         );
       });
     }
+
     const threadIds = [...args.providerProcess.identity.threadIds];
+
     const threads = threadIds.map((threadId) =>
       this.args.captureThreadExitState(threadId),
     );
+
     for (const threadId of threadIds) {
-      this.args.onProviderThreadDetached(threadId);
+      this.args.onProviderThreadDetached({
+        reason: "provider-exited",
+        threadId,
+      });
     }
+
     for (const [, pending] of args.providerProcess.pending) {
       pending.reject(
         new ProviderProcessExitedError({
@@ -590,6 +682,7 @@ export class RuntimeProviderProcessManager {
         }),
       );
     }
+
     args.providerProcess.pending.clear();
 
     this.args.onProcessExit?.({
@@ -632,17 +725,21 @@ function formatProviderProcessExitStatus(
   if (status.code !== null) {
     return `code ${status.code}`;
   }
+
   if (status.signal !== null) {
     return `signal ${status.signal}`;
   }
+
   return "unknown status";
 }
 
 function formatProviderStderr(stderrTail: Buffer): string | null {
   const stderr = stderrTail.toString("utf8").trim();
+
   if (stderr.length === 0) {
     return null;
   }
+
   return stderr;
 }
 
@@ -652,10 +749,12 @@ function appendBoundedStderrBytes(current: Buffer, chunk: Buffer): Buffer {
       chunk.subarray(chunk.length - PROVIDER_STDERR_TAIL_MAX_BYTES),
     );
   }
+
   const currentBytesToKeep = Math.min(
     current.length,
     PROVIDER_STDERR_TAIL_MAX_BYTES - chunk.length,
   );
+
   return Buffer.concat([
     current.subarray(current.length - currentBytesToKeep),
     chunk,
@@ -664,6 +763,7 @@ function appendBoundedStderrBytes(current: Buffer, chunk: Buffer): Buffer {
 
 function decodeStderrLine(line: Buffer): string {
   const end = line.at(-1) === 0x0d ? line.length - 1 : line.length;
+
   return line.toString("utf8", 0, end);
 }
 
@@ -679,6 +779,7 @@ function consumeProviderStderrChunk(args: {
 
   let offset = 0;
   let newline = args.chunk.indexOf(0x0a, offset);
+
   while (newline !== -1) {
     args.providerProcess.stderrLineTail = appendBoundedStderrBytes(
       args.providerProcess.stderrLineTail,
@@ -703,6 +804,7 @@ function consumeExpectedProviderProcessShutdown(
 ): boolean {
   const expected = providerProcess.expectedShutdownExpectations > 0;
   providerProcess.expectedShutdownExpectations = 0;
+
   return expected;
 }
 

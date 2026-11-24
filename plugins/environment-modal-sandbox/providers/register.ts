@@ -1,5 +1,5 @@
-import type { BbPluginApi, MachineBootstrapRequest } from "@get-bb/plugin-sdk";
-import type { PluginMachineProviderResource } from "@get-bb/plugin-sdk/machine-provider";
+import type { PluginApi, MachineBootstrapRequest } from "@omnyo/plugin-sdk";
+import type { PluginMachineProviderResource } from "@omnyo/plugin-sdk/machine-provider";
 import { errorMessage } from "../error-message.js";
 import type { SandboxBackend } from "./sandbox-backend.js";
 
@@ -7,7 +7,7 @@ export function registerSandboxBackend<
   Inputs,
   Resource extends PluginMachineProviderResource,
 >(
-  bb: BbPluginApi,
+  api: PluginApi,
   backend: SandboxBackend<Inputs, Resource>,
   options: {
     now: () => number;
@@ -20,14 +20,15 @@ export function registerSandboxBackend<
     request: MachineBootstrapRequest,
   ): Promise<{ hostId: string }> {
     const connectStartedAt = options.now();
-    const result = await bb.experimental_machines.bootstrap(request);
+    const result = await api.experimental_machines.bootstrap(request);
     request.report.log(
       `${definition.runtimeName} daemon connected in ${options.now() - connectStartedAt} ms\n`,
     );
+
     return result;
   }
 
-  bb.experimental_environments.register({
+  api.experimental_environments.register({
     id: definition.id,
     displayName: definition.displayName,
     description: definition.environmentDescription,
@@ -36,7 +37,7 @@ export function registerSandboxBackend<
     environmentProviderId: "project-checkout",
   });
 
-  bb.experimental_machines.register({
+  api.experimental_machines.register({
     id: definition.id,
     displayName: definition.displayName,
     description: definition.description,
@@ -55,15 +56,19 @@ export function registerSandboxBackend<
           ...context,
           inputs: backend.parseInputs(context.inputs),
         });
+
         context.signal.throwIfAborted();
+
         const { hostId } = await bootstrap({
           key: context.key,
           executor: created.executor,
           report: context.report,
           signal: context.signal,
         });
+
         context.signal.throwIfAborted();
         await options.onConnected(hostId);
+
         return {
           status: "created",
           name: backend.displayName({ hostId, resource: created.resource }),
@@ -71,15 +76,18 @@ export function registerSandboxBackend<
         };
       } catch (error) {
         context.signal.throwIfAborted();
+
         return { status: "failed", message: errorMessage(error) };
       }
     },
     async reconcileCleanup(context) {
       try {
         await backend.reconcileCleanup(context);
+
         return { status: "removed" };
       } catch (error) {
         context.signal.throwIfAborted();
+
         return { status: "failed", message: errorMessage(error) };
       }
     },
@@ -96,6 +104,7 @@ export function registerSandboxBackend<
         ...context,
         resource: backend.parseResource(context.resource),
       });
+
       await bootstrap({
         key: backend.allocationKey(resumed.resource),
         executor: resumed.executor,
@@ -103,6 +112,7 @@ export function registerSandboxBackend<
         signal: context.signal,
       });
       await options.onConnected(context.hostId);
+
       return { resource: resumed.resource };
     },
     async remove(context) {
@@ -111,9 +121,11 @@ export function registerSandboxBackend<
           ...context,
           resource: backend.parseResource(context.resource),
         });
+
         return { status: "removed" };
       } catch (error) {
         context.signal.throwIfAborted();
+
         return { status: "failed", message: errorMessage(error) };
       }
     },

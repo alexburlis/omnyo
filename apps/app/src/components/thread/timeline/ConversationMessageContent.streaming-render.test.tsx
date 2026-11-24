@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PluginMessageDirectiveProps } from "@get-bb/plugin-sdk";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import type { PluginMessageDirectiveProps } from "@omnyo/plugin-sdk";
 import { MemoryRouter } from "react-router-dom";
 import { RouteNavigationProvider } from "@/components/ui/app-route-anchor";
 import {
@@ -16,9 +20,10 @@ import {
   MessageDirectiveRegistryProvider,
 } from "@/components/ui/markdown-message-directives";
 import { ThreadTitleMentionResourcesProvider } from "@/components/thread/ThreadTitleMentions";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import { makeThreadListEntry } from "@omnyo/test-helpers/domain-fixtures";
 import type { ThreadTimelineLocalFileLinkHandler } from "./types";
 import { ConversationMessageContent } from "./ConversationMessageContent";
+import type { MarkdownParseRequest } from "@/components/ui/markdown-parse-protocol";
 
 const mentionedThread = makeThreadListEntry({
   id: "thr_mentioned",
@@ -56,13 +61,13 @@ function assistant(
           <MessageDirectiveRegistryProvider registry={registry}>
             <ConversationMessageContent
               role="assistant"
+              turnGit={null}
               attachments={null}
               id="msg_stream"
               threadId="thr_stream"
               turnId="turn_stream"
               streaming={streaming}
               showActions={showActions}
-              mobileActionDisplay="inline"
               onOpenLocalFileLink={onOpenLocalFileLink}
               text={text}
               timestamp={0}
@@ -80,7 +85,116 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function enteringBlocks(container: HTMLElement): string[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>("[data-streaming-block-enter]"),
+    (node) => node.textContent ?? "",
+  );
+}
+
 describe("assistant streaming Markdown rendering", () => {
+  it("marks only blocks that appear after mount and never re-marks blocks that settle", () => {
+    const view = render(assistant("Para one.\n\nPara tw"));
+    expect(enteringBlocks(view.container)).toEqual([]);
+
+    view.rerender(assistant("Para one.\n\nPara two.\n\nPara th"));
+    expect(enteringBlocks(view.container)).toEqual(["Para th"]);
+
+    view.rerender(assistant("Para one.\n\nPara two.\n\nPara three."));
+    expect(enteringBlocks(view.container)).toEqual(["Para three."]);
+
+    view.rerender(
+      assistant("Para one.\n\nPara two.\n\nPara three.\n\nPara four.\n\n"),
+    );
+    expect(enteringBlocks(view.container)).toEqual(["Para four."]);
+
+    view.rerender(
+      assistant("Para one.\n\nPara two.\n\nPara three.\n\nPara four.\n\nFi"),
+    );
+    expect(enteringBlocks(view.container)).toEqual(["Para four.", "Fi"]);
+
+    view.rerender(
+      assistant(
+        "Para one.\n\nPara two.\n\nPara three.\n\nPara four.\n\nFive.",
+        false,
+      ),
+    );
+    expect(enteringBlocks(view.container)).toEqual([]);
+  });
+
+  it("does not mark history or blocks already present when a streaming message mounts", () => {
+    const history = render(assistant("Para one.\n\nPara two.", false));
+    expect(enteringBlocks(history.container)).toEqual([]);
+    cleanup();
+
+    const view = render(assistant("Para one.\n\nPara two.\n\nPara th"));
+    expect(enteringBlocks(view.container)).toEqual([]);
+
+    view.rerender(assistant("Para one.\n\nPara two.\n\nPara three.\n\n"));
+    expect(enteringBlocks(view.container)).toEqual([]);
+  });
+
+  it("offloads large live and completed bodies while keeping settled pieces and small history synchronous", async () => {
+    const workers: WaitingWorker[] = [];
+
+    class WaitingWorker extends EventTarget {
+      requests: MarkdownParseRequest[] = [];
+      terminated = false;
+
+      constructor() {
+        super();
+        workers.push(this);
+      }
+
+      postMessage(request: MarkdownParseRequest) {
+        this.requests.push(request);
+      }
+
+      reply() {
+        const request = this.requests.at(-1);
+
+        if (!request) throw new Error("Markdown parse request missing");
+        const tree = unified().use(remarkParse).parse(request.source);
+        this.dispatchEvent(
+          new MessageEvent("message", { data: { ...request, tree } }),
+        );
+      }
+
+      terminate() {
+        this.terminated = true;
+      }
+    }
+
+    vi.stubGlobal("Worker", WaitingWorker);
+    const tail = "**Live** " + "plain ".repeat(18_000) + "\n";
+    const source = "```ts\nconst settled = 1;\n```\n\n" + tail;
+    const view = render(assistant(source));
+    expect(workers).toHaveLength(1);
+    expect(workers[0]?.requests).toHaveLength(1);
+    expect(workers[0]?.requests[0]?.source).toBe(tail);
+    expect(
+      view.container.querySelector("pre code span.sh__line")?.textContent,
+    ).toContain("const settled = 1;");
+    expect(
+      within(view.container).getByRole("status", { hidden: true }),
+    ).toBeDefined();
+    view.rerender(assistant(source, false));
+    expect(workers[0]?.terminated).toBe(true);
+    expect(workers).toHaveLength(2);
+    expect(workers[1]?.requests).toHaveLength(1);
+    expect(workers[1]?.requests[0]?.source).toBe(source);
+    expect(view.container.querySelector("strong")).toBeNull();
+    expect(within(view.container).getByRole("status")).toBeDefined();
+    await act(async () => workers[1]?.reply());
+    expect(view.container.querySelector("strong")?.textContent).toBe("Live");
+    expect(within(view.container).queryByRole("status")).toBeNull();
+    view.rerender(assistant("**Settled** history.", false));
+    expect(workers).toHaveLength(2);
+    expect(workers[1]?.terminated).toBe(true);
+    expect(view.container.querySelector("strong")?.textContent).toBe("Settled");
+    expect(within(view.container).queryByRole("status")).toBeNull();
+  });
+
   it.each([
     ["**Live bold and `live code", ["strong"]],
     ["__Live bold and `live code", ["strong"]],
@@ -91,11 +205,13 @@ describe("assistant streaming Markdown rendering", () => {
     "keeps repaired inline code inside outer emphasis: %s",
     (source, outer) => {
       const view = render(assistant(source));
+
       for (const selector of outer) {
         expect(
           view.container.querySelector(`${selector} code`)?.textContent,
         ).toBe("live code");
       }
+
       expect(view.container.textContent).not.toMatch(/[*_]/u);
     },
   );
@@ -179,18 +295,22 @@ describe("assistant streaming Markdown rendering", () => {
   it("settled code block DOM survives boundary advances", () => {
     const source = "Intro.\n\n```ts\nconst a = 1;\n```\n\nA.\n\nB";
     const view = render(assistant(source));
+
     const markdownPreviewParagraphs = () =>
       Array.from(
         view.container.querySelectorAll("[data-markdown-preview]"),
         (preview) =>
           Array.from(preview.querySelectorAll("p"), (p) => p.textContent),
       );
+
     expect(markdownPreviewParagraphs()).toEqual([["Intro."], ["A.", "B"]]);
     const line = view.container.querySelector("pre code span.sh__line");
     const code = line?.closest("code");
+
     if (!line || !code) {
       throw new Error("Expected a highlighted settled code block");
     }
+
     const observer = new MutationObserver(() => {});
     observer.observe(code, {
       characterData: true,

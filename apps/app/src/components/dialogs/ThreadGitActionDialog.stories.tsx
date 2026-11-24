@@ -1,4 +1,4 @@
-import type { WorkspaceFileStatus } from "@bb/domain";
+import type { WorkspaceFileStatus } from "@omnyo/domain";
 import { ThreadGitActionDialogContent } from "./ThreadGitActionDialog";
 import type { ThreadGitStatusDisplay } from "@/components/workspace/workspace-status";
 import type { WorkspaceChangedFilesSection } from "@/components/workspace/workspace-change-summary";
@@ -11,6 +11,7 @@ export default {
 };
 
 const noop = () => {};
+
 const asyncNoop = async () => {};
 
 const stageClassName =
@@ -47,6 +48,7 @@ const changedFilesSection: WorkspaceChangedFilesSection = {
     insertions: 106,
     deletions: 17,
     lineStatsComplete: true,
+    fileCount: changedFiles.length,
   },
 };
 

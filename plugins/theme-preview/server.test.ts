@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import plugin, {
   buildCatalog,
   classifySelector,
@@ -49,6 +49,7 @@ describe("parseThemeSwatches", () => {
       .dark { --canvas: #222222; }
       :root:not(.dark), .light:not(.dark) { --canvas: #fefefe; }
     `);
+
     expect(parsed.light?.canvas).toBe("#fefefe");
     expect(parsed.dark?.canvas).toBe("#222222");
   });
@@ -71,11 +72,12 @@ describe("parseThemeSwatches", () => {
       :root:not(.dark) { --canvas: #fefefe; }
       .dark { --brand: #abcdef; --file-accent: var(--missing, var(--brand)); }
     `);
+
     expect(parsed.light?.primary).toBe("#456789");
     expect(parsed.light?.canvas).toBe("#fefefe");
     expect(parsed.dark?.primary).toBe("#abcdef");
     expect(parsed.dark?.accent).toBe("#abcdef");
-    expect(parsed.dark?.canvas).toBe("oklch(0.195 0 0)");
+    expect(parsed.dark?.canvas).toBe("oklch(0.178 0.011 268)");
   });
 });
 
@@ -83,24 +85,27 @@ describe("createCatalogLoader", () => {
   it("shares one catalog refresh across overlapping callers", async () => {
     let catalogCalls = 0;
     let releaseCatalog!: () => void;
+
     const catalogBlocked = new Promise<void>((resolve) => {
       releaseCatalog = resolve;
     });
-    const bb = {
+
+    const api = {
       sdk: {
         theme: {
           catalog: async () => {
             catalogCalls += 1;
             await catalogBlocked;
+
             return { active: { themeId: "default" }, custom: [], dir: null };
           },
         },
         plugins: { list: async () => ({ plugins: [] }) },
       },
       log: { info() {}, warn() {} },
-    } as unknown as BbPluginApi;
+    } as unknown as PluginApi;
 
-    const catalogLoader = createCatalogLoader(bb);
+    const catalogLoader = createCatalogLoader(api);
     const first = catalogLoader.catalog();
     const second = catalogLoader.catalog();
 
@@ -111,19 +116,24 @@ describe("createCatalogLoader", () => {
 
   it("times out a stuck catalog request, aborts it, and allows a healthy retry", async () => {
     vi.useFakeTimers();
+
     try {
       let catalogCalls = 0;
       let firstSignal: AbortSignal | undefined;
       const warn = vi.fn();
-      const bb = {
+
+      const api = {
         sdk: {
           theme: {
             catalog: ({ signal }: { signal?: AbortSignal } = {}) => {
               catalogCalls += 1;
+
               if (catalogCalls === 1) {
                 firstSignal = signal;
+
                 return new Promise(() => undefined);
               }
+
               return Promise.resolve({
                 active: { themeId: "default" },
                 custom: [],
@@ -134,9 +144,9 @@ describe("createCatalogLoader", () => {
           plugins: { list: async () => ({ plugins: [] }) },
         },
         log: { info() {}, warn },
-      } as unknown as BbPluginApi;
+      } as unknown as PluginApi;
 
-      const catalogLoader = createCatalogLoader(bb);
+      const catalogLoader = createCatalogLoader(api);
       const failed = catalogLoader.catalog().catch((error: unknown) => error);
       await vi.advanceTimersByTimeAsync(5_000);
 
@@ -162,11 +172,13 @@ describe("createCatalogLoader", () => {
 
   it("bounds a stuck plugin list without poisoning the next catalog refresh", async () => {
     vi.useFakeTimers();
+
     try {
       let pluginListCalls = 0;
       let firstSignal: AbortSignal | undefined;
       const warn = vi.fn();
-      const bb = {
+
+      const api = {
         sdk: {
           theme: {
             catalog: async () => ({
@@ -178,18 +190,21 @@ describe("createCatalogLoader", () => {
           plugins: {
             list: ({ signal }: { signal?: AbortSignal } = {}) => {
               pluginListCalls += 1;
+
               if (pluginListCalls === 1) {
                 firstSignal = signal;
+
                 return new Promise(() => undefined);
               }
+
               return Promise.resolve({ plugins: [] });
             },
           },
         },
         log: { info() {}, warn },
-      } as unknown as BbPluginApi;
+      } as unknown as PluginApi;
 
-      const catalogLoader = createCatalogLoader(bb);
+      const catalogLoader = createCatalogLoader(api);
       const degraded = catalogLoader.catalog();
       await vi.advanceTimersByTimeAsync(5_000);
       expect(warn).toHaveBeenCalledWith(
@@ -217,10 +232,12 @@ describe("createCatalogLoader", () => {
     let activeThemeId = "theme-a";
     let blockPluginList = false;
     let releasePluginList!: () => void;
+
     const pluginListBlocked = new Promise<void>((resolve) => {
       releasePluginList = resolve;
     });
-    const bb = {
+
+    const api = {
       sdk: {
         theme: {
           catalog: async () => ({
@@ -235,18 +252,20 @@ describe("createCatalogLoader", () => {
         plugins: {
           list: async () => {
             if (blockPluginList) await pluginListBlocked;
+
             return { plugins: [] };
           },
         },
       },
       log: { info() {}, warn() {} },
-    } as unknown as BbPluginApi;
+    } as unknown as PluginApi;
 
-    const catalogLoader = createCatalogLoader(bb);
+    const catalogLoader = createCatalogLoader(api);
     await catalogLoader.catalog();
     blockPluginList = true;
 
     const selection = catalogLoader.setTheme("theme-b");
+
     const outcome = await Promise.race([
       selection.then((catalog) => ({ status: "resolved" as const, catalog })),
       new Promise<{ status: "pending" }>((resolve) =>
@@ -257,6 +276,7 @@ describe("createCatalogLoader", () => {
     releasePluginList();
     await selection;
     expect(outcome.status).toBe("resolved");
+
     if (outcome.status === "resolved")
       expect(outcome.catalog.activeThemeId).toBe("theme-b");
   });
@@ -266,13 +286,16 @@ describe("createCatalogLoader", () => {
     const setCalls: string[] = [];
     let releaseFirst!: () => void;
     let markFirstStarted!: () => void;
+
     const firstBlocked = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
+
     const firstStarted = new Promise<void>((resolve) => {
       markFirstStarted = resolve;
     });
-    const bb = {
+
+    const api = {
       sdk: {
         theme: {
           catalog: async () => ({
@@ -282,19 +305,21 @@ describe("createCatalogLoader", () => {
           }),
           set: async (themeId: string) => {
             setCalls.push(themeId);
+
             if (themeId === "theme-a") {
               markFirstStarted();
               await firstBlocked;
             }
+
             activeThemeId = themeId;
           },
         },
         plugins: { list: async () => ({ plugins: [] }) },
       },
       log: { info() {}, warn() {} },
-    } as unknown as BbPluginApi;
+    } as unknown as PluginApi;
 
-    const catalogLoader = createCatalogLoader(bb);
+    const catalogLoader = createCatalogLoader(api);
     const first = catalogLoader.setTheme("theme-a");
     await firstStarted;
     const second = catalogLoader.setTheme("theme-b");
@@ -309,6 +334,7 @@ describe("createCatalogLoader", () => {
 
   it("does not let a stale request reapply a theme selected by a newer request", async () => {
     const directory = await mkdtemp(join(tmpdir(), "theme-preview-catalog-"));
+
     for (const id of ["theme-a", "theme-b"]) {
       await mkdir(join(directory, id));
       await writeFile(
@@ -320,11 +346,14 @@ describe("createCatalogLoader", () => {
     let activeThemeId = "theme-a";
     let pluginListCalls = 0;
     let resumeFirstPluginList!: () => void;
+
     const firstPluginList = new Promise<void>((resolve) => {
       resumeFirstPluginList = resolve;
     });
+
     const setCalls: string[] = [];
-    const bb = {
+
+    const api = {
       sdk: {
         theme: {
           catalog: async () => ({
@@ -340,15 +369,17 @@ describe("createCatalogLoader", () => {
         plugins: {
           list: async () => {
             pluginListCalls += 1;
+
             if (pluginListCalls === 1) await firstPluginList;
+
             return { plugins: [] };
           },
         },
       },
       log: { info() {}, warn() {} },
-    } as unknown as BbPluginApi;
+    } as unknown as PluginApi;
 
-    const catalogLoader = createCatalogLoader(bb);
+    const catalogLoader = createCatalogLoader(api);
     const stale = catalogLoader.catalog();
     const latest = await catalogLoader.setTheme("theme-b");
     expect(latest.activeThemeId).toBe("theme-b");
@@ -368,7 +399,8 @@ describe("createCatalogLoader", () => {
     await mkdir(themeDirectory);
     await writeFile(filePath, ":root { --canvas: #ffffff; }");
     const setCalls: string[] = [];
-    const bb = {
+
+    const api = {
       sdk: {
         theme: {
           catalog: async () => ({
@@ -383,10 +415,10 @@ describe("createCatalogLoader", () => {
         plugins: { list: async () => ({ plugins: [] }) },
       },
       log: { info() {}, warn() {} },
-    } as unknown as BbPluginApi;
+    } as unknown as PluginApi;
 
     try {
-      const loader = createCatalogLoader(bb);
+      const loader = createCatalogLoader(api);
       expect((await loader.catalog()).revision).toBe(0);
 
       await writeFile(
@@ -401,15 +433,159 @@ describe("createCatalogLoader", () => {
   });
 });
 
+describe("installed plugin manifest continuity", () => {
+  const themeId = "plugin:fixture:theme-a";
+
+  const metadata = {
+    name: "Theme fixture",
+    description: "Installed plugin manifest continuity.",
+    branding: { icon: "Palette" },
+    server: "./server.ts",
+    themes: [{ id: "theme-a", name: "Theme A", css: "./theme.css" }],
+  };
+
+  async function fixture(fields: Record<string, unknown>) {
+    const directory = await mkdtemp(join(tmpdir(), "omnyo-plugin-theme-"));
+    const packagePath = join(directory, "package.json");
+    const cssPath = join(directory, "theme.css");
+
+    const raw = JSON.stringify({
+      name: "omnyo-plugin-theme-fixture",
+      version: "1.0.0",
+      ...fields,
+    });
+
+    await writeFile(packagePath, raw);
+    await writeFile(cssPath, ":root { --canvas: #ffffff; }");
+    const setCalls: string[] = [];
+    const warnings: string[] = [];
+
+    const api = {
+      sdk: {
+        theme: {
+          catalog: async () => ({
+            active: { themeId },
+            custom: [],
+            plugins: [{ id: themeId, name: "Theme A" }],
+            dir: directory,
+          }),
+          set: async (id: string) => {
+            setCalls.push(id);
+          },
+        },
+        plugins: {
+          list: async () => ({
+            plugins: [{ id: "fixture", rootDir: directory }],
+          }),
+        },
+      },
+      log: {
+        info() {},
+        warn(message: string) {
+          warnings.push(message);
+        },
+      },
+    } as unknown as PluginApi;
+
+    return {
+      directory,
+      packagePath,
+      cssPath,
+      raw,
+      setCalls,
+      warnings,
+      loader: createCatalogLoader(api),
+    };
+  }
+
+  it.each(["canonical", "original V1", "equal dual"] as const)(
+    "reads %s plugin CSS and retains active-file change tracking",
+    async (representation) => {
+      const fields =
+        representation === "canonical"
+          ? { omnyo: metadata }
+          : representation === "original V1"
+            ? { bb: metadata }
+            : { omnyo: metadata, bb: metadata };
+
+      const test = await fixture(fields);
+
+      try {
+        const initial = await test.loader.catalog();
+        expect(
+          initial.themes.find((theme) => theme.id === themeId)?.light?.canvas,
+        ).toBe("#ffffff");
+        expect(initial.revision).toBe(0);
+        expect(await readFile(test.packagePath, "utf8")).toBe(test.raw);
+
+        await writeFile(
+          test.cssPath,
+          ":root { --canvas: #dddddd; --primary: #123456; }",
+        );
+        const refreshed = await test.loader.catalog();
+        expect(
+          refreshed.themes.find((theme) => theme.id === themeId)?.light?.canvas,
+        ).toBe("#dddddd");
+        expect(refreshed.revision).toBe(1);
+        expect(test.setCalls).toEqual([themeId]);
+        expect(await readFile(test.packagePath, "utf8")).toBe(test.raw);
+      } finally {
+        await rm(test.directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    {
+      name: "conflicting namespaces",
+      fields: { omnyo: metadata, bb: { ...metadata, server: "./other.ts" } },
+    },
+    {
+      name: "malformed canonical metadata",
+      fields: {
+        omnyo: { ...metadata, themes: [{ ...metadata.themes[0], css: null }] },
+      },
+    },
+    { name: "malformed original metadata", fields: { bb: null } },
+  ])(
+    "refuses $name with unavailable swatches and no reapplication",
+    async ({ fields }) => {
+      const test = await fixture(fields);
+
+      try {
+        const initial = await test.loader.catalog();
+        expect(
+          initial.themes.find((theme) => theme.id === themeId)?.light,
+        ).toBeNull();
+        expect(
+          test.warnings.some((message) => message.includes("could not read")),
+        ).toBe(true);
+        await writeFile(
+          test.cssPath,
+          ":root { --canvas: #dddddd; --primary: #123456; }",
+        );
+        expect((await test.loader.catalog()).revision).toBe(0);
+        expect(test.setCalls).toEqual([]);
+        expect(await readFile(test.packagePath, "utf8")).toBe(test.raw);
+      } finally {
+        await rm(test.directory, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
 describe("theme watcher", () => {
   it("stops promptly when aborted during the initial catalog request", async () => {
     let start!: (signal: AbortSignal) => Promise<void>;
     let markCatalogStarted!: () => void;
+
     const catalogStarted = new Promise<void>((resolve) => {
       markCatalogStarted = resolve;
     });
+
     let catalogSignal: AbortSignal | undefined;
-    const bb = {
+
+    const api = {
       background: {
         service(
           _name: string,
@@ -423,6 +599,7 @@ describe("theme watcher", () => {
           catalog: ({ signal }: { signal?: AbortSignal } = {}) => {
             catalogSignal = signal;
             markCatalogStarted();
+
             return new Promise((_resolve, reject) => {
               signal?.addEventListener("abort", () => reject(signal.reason), {
                 once: true,
@@ -433,9 +610,9 @@ describe("theme watcher", () => {
       },
       rpc: { register() {} },
       log: { info() {}, warn() {} },
-    } as unknown as BbPluginApi;
+    } as unknown as PluginApi;
 
-    await plugin(bb);
+    await plugin(api);
     const controller = new AbortController();
     const running = start(controller.signal);
     await catalogStarted;
@@ -465,6 +642,7 @@ describe("buildCatalog", () => {
       },
       async (id) => (id === "endless" ? ":root { --canvas: #f4f4f4; }" : null),
     );
+
     expect(out.activeThemeId).toBe("default");
     expect(out.themes.map((t) => t.id).slice(0, 3)).toEqual([
       "endless",

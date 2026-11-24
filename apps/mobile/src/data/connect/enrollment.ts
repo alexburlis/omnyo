@@ -3,7 +3,7 @@ import {
   ConnectMachineRedeemError,
   redeemMachineCredential,
   type ConnectCredential,
-} from "@bb/connect-client";
+} from "@omnyo/connect-client";
 import {
   PROFILE_LABEL_MAX_LENGTH,
   type NewServerProfile,
@@ -33,7 +33,7 @@ export function describeEnrollmentError(error: unknown): EnrollmentFailure {
           code: "invalid_code",
           title: "Code not recognized",
           message:
-            "Check the pairing code and the bb connect address. Codes come from bb Settings → Mobile or `bb connect machine-code`.",
+            "Check the pairing code and the Omnyo connect address. Codes come from Omnyo Settings → Mobile or `omnyo connect machine-code`.",
         };
       case "expired":
         return {
@@ -54,46 +54,51 @@ export function describeEnrollmentError(error: unknown): EnrollmentFailure {
           code: "machine_limit",
           title: "Device limit reached",
           message:
-            "This account already has the maximum number of paired devices (20). Revoke one you no longer use in the getbb.app dashboard under Machines, then pair again.",
+            "This account already has the maximum number of paired devices (20). Revoke one you no longer use in the Omnyo connect dashboard under Machines, then pair again.",
         };
       case "network":
         return {
           code: "network",
-          title: "Could not reach bb connect",
+          title: "Could not reach Omnyo connect",
           message: `Check your connection and try again. (${error.message})`,
         };
       case "invalid_response":
         return {
           code: "invalid_response",
-          title: "Unexpected answer from bb connect",
+          title: "Unexpected answer from Omnyo connect",
           message: error.message,
         };
     }
   }
+
   if (error instanceof ConnectListError) {
     if (error.code === "unauthorized") {
       return {
         code: "unauthorized",
         title: "Device not authorized",
         message:
-          "bb connect rejected this device's credential. It may have been revoked in the dashboard; pair again with a fresh code.",
+          "Omnyo connect rejected this device's credential. It may have been revoked in the dashboard; pair again with a fresh code.",
       };
     }
+
     return {
       code: "network",
-      title: "Could not reach bb connect",
+      title: "Could not reach Omnyo connect",
       message: `Check your connection and try again. (${error.message})`,
     };
   }
+
   const kind = mapAuthError(error);
   const detail = describeError(error);
+
   if (kind === "network") {
     return {
       code: "network",
-      title: "Could not reach bb connect",
+      title: "Could not reach Omnyo connect",
       message: `Check your connection and try again. (${detail})`,
     };
   }
+
   return { code: "unknown", title: "Pairing failed", message: detail };
 }
 
@@ -110,10 +115,12 @@ export async function redeemEnrollment(
     { apexUrl: args.apexUrl, code: args.code, deviceName: args.deviceName },
     fetchImpl,
   );
+
   const label = (args.label?.trim() || credential.handle).slice(
     0,
     PROFILE_LABEL_MAX_LENGTH,
   );
+
   return {
     credential,
     profile: {

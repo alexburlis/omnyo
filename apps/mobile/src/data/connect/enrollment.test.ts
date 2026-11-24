@@ -1,4 +1,4 @@
-import { ConnectMachineRedeemError } from "@bb/connect-client";
+import { ConnectMachineRedeemError } from "@omnyo/connect-client";
 import { describe, expect, it, vi } from "vitest";
 import {
   accountServerProfile,
@@ -20,19 +20,21 @@ describe("redeemEnrollment", () => {
         credential: "bbcm_secret",
         machineId: "m1",
         handle: "account",
-        serverUrl: "https://bee.getbb.app",
+        serverUrl: "https://bee.example.test",
       }),
     );
+
     const result = await redeemEnrollment(
       {
-        apexUrl: "https://getbb.app",
+        apexUrl: "https://example.test",
         code: "ABCD-EFGH",
         deviceName: "Pixel 9 Pro",
       },
       fetchImpl,
     );
+
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://getbb.app/api/connect/redeem-machine",
+      "https://example.test/api/connect/redeem-machine",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ code: "ABCD-EFGH", deviceName: "Pixel 9 Pro" }),
@@ -40,7 +42,7 @@ describe("redeemEnrollment", () => {
     );
     expect(result.profile).toEqual({
       mode: "connect",
-      serverUrl: "https://bee.getbb.app",
+      serverUrl: "https://bee.example.test",
       handle: "bee",
       credential: "bbcm_secret",
       label: "bee",
@@ -54,20 +56,27 @@ describe("redeemEnrollment", () => {
       .mockImplementation(async () =>
         jsonResponse(409, { error: "machine-limit" }),
       );
+
     await expect(
       redeemEnrollment(
         {
-          apexUrl: "https://getbb.app",
+          apexUrl: "https://example.test",
           code: "X-1",
           deviceName: "Pixel 9 Pro",
         },
         limit,
       ),
     ).rejects.toBeInstanceOf(ConnectMachineRedeemError);
+
     const failure = await redeemEnrollment(
-      { apexUrl: "https://getbb.app", code: "X-1", deviceName: "Pixel 9 Pro" },
+      {
+        apexUrl: "https://example.test",
+        code: "X-1",
+        deviceName: "Pixel 9 Pro",
+      },
       limit,
     ).catch((error: unknown) => describeEnrollmentError(error));
+
     expect(failure).toMatchObject({ code: "machine_limit" });
     expect(failure).toHaveProperty("message", expect.stringContaining("20"));
 
@@ -78,7 +87,7 @@ describe("redeemEnrollment", () => {
     ] as const) {
       const failed = await redeemEnrollment(
         {
-          apexUrl: "https://getbb.app",
+          apexUrl: "https://example.test",
           code: "X-1",
           deviceName: "Pixel 9 Pro",
         },
@@ -86,8 +95,10 @@ describe("redeemEnrollment", () => {
           .fn<typeof fetch>()
           .mockResolvedValue(jsonResponse(status, { error: wire })),
       ).catch((error: unknown) => describeEnrollmentError(error));
+
       expect(failed).toMatchObject({ code });
     }
+
     expect(
       describeEnrollmentError(new TypeError("Network request failed")),
     ).toMatchObject({ code: "network" });
@@ -99,15 +110,15 @@ describe("accountServerProfile", () => {
     expect(
       accountServerProfile(
         {
-          serverUrl: "https://bee.getbb.app",
+          serverUrl: "https://bee.example.test",
           handle: "bee",
           credential: "bbcm_1",
         },
-        { handle: "lab", name: "  ", url: "https://lab.getbb.app" },
+        { handle: "lab", name: "  ", url: "https://lab.example.test" },
       ),
     ).toEqual({
       mode: "connect",
-      serverUrl: "https://lab.getbb.app",
+      serverUrl: "https://lab.example.test",
       handle: "lab",
       credential: "bbcm_1",
       label: "lab",

@@ -15,8 +15,8 @@ import {
   upsertHost,
   upsertInstalledPlugin,
   type DbConnection,
-} from "@bb/db";
-import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
+} from "@omnyo/db";
+import { HOST_DAEMON_PROTOCOL_VERSION } from "@omnyo/host-daemon-contract";
 import {
   readLastServerMoveFile,
   readServerImportFile,
@@ -25,7 +25,7 @@ import {
   writeLastServerMoveFile,
   writeServerImportFile,
   type ServerImportFile,
-} from "@bb/server-archive";
+} from "@omnyo/server-archive";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initDb } from "../../src/db.js";
 import { createApp } from "../../src/server.js";
@@ -43,14 +43,18 @@ import {
   testLogger,
   withTestHarness,
 } from "../helpers/test-app.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
-const SOURCE_DATA_DIR = "/home/old/.bb";
+const SOURCE_DATA_DIR = "/home/old/.omnyo";
+
 const DIRECT_URL = "https://desktop.example.test";
+
 const tempDirs: string[] = [];
 
 async function makeDataDir(): Promise<string> {
-  const dataDir = await mkdtemp(join(tmpdir(), "bb-server-import-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "omnyo-server-import-"));
   tempDirs.push(dataDir);
+
   return dataDir;
 }
 
@@ -72,7 +76,7 @@ function moveMarker(
     sourceServerHostId: "host-old",
     targetHostId: "host-new",
     serverUrl: DIRECT_URL,
-    importedEntries: ["bb.db", "plugins/npm"],
+    importedEntries: ["app.db", "plugins/npm"],
     createdAt: 1_000,
     fixupsAppliedAt: null,
     ...overrides,
@@ -81,7 +85,7 @@ function moveMarker(
 
 async function openImportedDataDir() {
   const dataDir = await makeDataDir();
-  const db = initDb(join(dataDir, "bb.db"));
+  const db = initDb(join(dataDir, "app.db"));
   upsertHost(db, noopNotifier, { id: "host-old", name: "Laptop" });
   upsertHost(db, noopNotifier, { id: "host-new", name: "Desktop" });
   updateHost(db, noopNotifier, "host-new", {
@@ -90,11 +94,11 @@ async function openImportedDataDir() {
   });
   upsertInstalledPlugin(db, {
     id: "tasks",
-    source: "npm:bb-plugin-tasks",
+    source: "npm:omnyo-plugin-tasks",
     provenance: { kind: "direct" },
     sourceIntent: {
       kind: "npm",
-      packageName: "bb-plugin-tasks",
+      packageName: "omnyo-plugin-tasks",
       registry: "https://registry.npmjs.org",
       requestedSpec: "1.0.0",
       specKind: "exact",
@@ -123,6 +127,7 @@ async function openImportedDataDir() {
       sourcePath: "/home/me/code/tasks",
     }),
   );
+
   return { dataDir, db, registrationPath };
 }
 
@@ -153,11 +158,13 @@ describe("imported server boot", () => {
       "server moves only target macOS and Linux",
     );
     const { dataDir, db, registrationPath } = await openImportedDataDir();
+
     try {
       await writeServerImportFile(dataDir, moveMarker());
 
       const boot = await applyServerImportAtBoot({
         dataDir,
+        vault: await openSecretVault(dataDir),
         db,
         logger: testLogger,
         now: 5_000,
@@ -201,6 +208,7 @@ describe("imported server boot", () => {
       updateHost(db, noopNotifier, "host-new", { machineProviderId: "manual" });
       await applyServerImportAtBoot({
         dataDir,
+        vault: await openSecretVault(dataDir),
         db,
         logger: testLogger,
         now: 9_000,
@@ -213,9 +221,12 @@ describe("imported server boot", () => {
 
       const rerun = await applyServerImportFixups({
         dataDir,
+        vault: await openSecretVault(dataDir),
         db,
+        logger: testLogger,
         marker: moveMarker(),
       });
+
       expect(rerun).toEqual({
         machineServerUrlSet: false,
         managedAddresses: [],
@@ -232,27 +243,29 @@ describe("imported server boot", () => {
     }
   });
 
-  it("leaves machineServerUrl alone for bb connect moves when bb account holds the pairing", async () => {
+  it("leaves machineServerUrl alone for Omnyo connect moves when Omnyo account holds the pairing", async () => {
     const { dataDir, db } = await openImportedDataDir();
+
     try {
       setPluginKvValue(
         db,
         "bb-account",
         "credential",
         JSON.stringify({
-          baseUrl: "https://getbb.test",
-          serverUrl: "https://laptop.getbb.test",
+          baseUrl: "https://example.test",
+          serverUrl: "https://laptop.example.test",
           serverId: "srv_1",
           credential: "bbcred_secret",
         }),
       );
       await writeServerImportFile(
         dataDir,
-        moveMarker({ serverUrl: "https://laptop.getbb.test/" }),
+        moveMarker({ serverUrl: "https://laptop.example.test/" }),
       );
 
       await applyServerImportAtBoot({
         dataDir,
+        vault: await openSecretVault(dataDir),
         db,
         logger: testLogger,
         now: 1,
@@ -264,26 +277,28 @@ describe("imported server boot", () => {
     }
   });
 
-  it("leaves machineServerUrl alone for bb connect moves", async () => {
+  it("leaves machineServerUrl alone for Omnyo connect moves", async () => {
     const { dataDir, db } = await openImportedDataDir();
+
     try {
       setPluginKvValue(
         db,
         "connect",
         "credential",
         JSON.stringify({
-          serverUrl: "https://laptop.getbb.test",
+          serverUrl: "https://laptop.example.test",
           handle: "laptop",
           credential: "bbcs_secret",
         }),
       );
       await writeServerImportFile(
         dataDir,
-        moveMarker({ serverUrl: "https://laptop.getbb.test/" }),
+        moveMarker({ serverUrl: "https://laptop.example.test/" }),
       );
 
       await applyServerImportAtBoot({
         dataDir,
+        vault: await openSecretVault(dataDir),
         db,
         logger: testLogger,
         now: 1,
@@ -303,6 +318,7 @@ describe("imported server boot", () => {
       "server moves only target macOS and Linux",
     );
     const { dataDir, db } = await openImportedDataDir();
+
     try {
       await writeFile(join(dataDir, "host-id"), "host-new\n");
       await writeServerImportFile(dataDir, manualMarker());
@@ -310,6 +326,7 @@ describe("imported server boot", () => {
       expect(
         await applyServerImportAtBoot({
           dataDir,
+          vault: await openSecretVault(dataDir),
           db,
           logger: testLogger,
           now: 1,
@@ -338,12 +355,14 @@ describe("imported server boot", () => {
       "server moves only target macOS and Linux",
     );
     const { dataDir, db } = await openImportedDataDir();
+
     try {
       await writeServerImportFile(dataDir, manualMarker());
 
       expect(
         await applyServerImportAtBoot({
           dataDir,
+          vault: await openSecretVault(dataDir),
           db,
           logger: testLogger,
           now: 1_000,
@@ -365,6 +384,7 @@ describe("imported server boot", () => {
       expect(
         await applyServerImportAtBoot({
           dataDir,
+          vault: await openSecretVault(dataDir),
           db,
           logger: testLogger,
           now: 2_000,
@@ -385,10 +405,12 @@ describe("imported server boot", () => {
 
   it("finishes a pending manual import when the local daemon's session opens", async () => {
     const { dataDir, db } = await openImportedDataDir();
+
     try {
       await writeServerImportFile(dataDir, manualMarker());
       await applyServerImportAtBoot({
         dataDir,
+        vault: await openSecretVault(dataDir),
         db,
         logger: testLogger,
         now: 1,
@@ -443,6 +465,7 @@ describe("imported server boot", () => {
 
   it("points config.json and env.json addresses that used the old server's address at the new one", async () => {
     const { dataDir, db } = await openImportedDataDir();
+
     try {
       setAppSettings(db, {
         ...getAppSettings(db),
@@ -452,8 +475,8 @@ describe("imported server boot", () => {
         join(dataDir, "config.json"),
         JSON.stringify({
           config: {
-            BB_APP_URL: "http://laptop.example.test:38887/app",
-            BB_LOG_LEVEL: "debug",
+            OMNYO_APP_URL: "http://laptop.example.test:38887/app",
+            OMNYO_LOG_LEVEL: "debug",
           },
           serverUrl: "http://127.0.0.1:38887",
         }),
@@ -462,7 +485,7 @@ describe("imported server boot", () => {
         join(dataDir, "env.json"),
         JSON.stringify({
           env: {
-            BB_EXTERNAL_URL: "http://laptop.example.test:5173",
+            OMNYO_EXTERNAL_URL: "http://laptop.example.test:5173",
             OTHER: "kept",
           },
         }),
@@ -471,6 +494,7 @@ describe("imported server boot", () => {
 
       await applyServerImportAtBoot({
         dataDir,
+        vault: await openSecretVault(dataDir),
         db,
         logger: testLogger,
         now: 1,
@@ -479,14 +503,14 @@ describe("imported server boot", () => {
       expect(
         JSON.parse(await readFile(join(dataDir, "config.json"), "utf8")),
       ).toEqual({
-        config: { BB_APP_URL: DIRECT_URL, BB_LOG_LEVEL: "debug" },
+        config: { OMNYO_APP_URL: DIRECT_URL, OMNYO_LOG_LEVEL: "debug" },
         serverUrl: "http://127.0.0.1:38887",
       });
       expect(
         JSON.parse(await readFile(join(dataDir, "env.json"), "utf8")),
       ).toEqual({
         env: {
-          BB_EXTERNAL_URL: "http://laptop.example.test:5173",
+          OMNYO_EXTERNAL_URL: "http://laptop.example.test:5173",
           OTHER: "kept",
         },
       });
@@ -496,19 +520,21 @@ describe("imported server boot", () => {
     }
   });
 
-  it("rewrites env.json BB_EXTERNAL_URL when it was the old server's address", async () => {
+  it("rewrites env.json OMNYO_EXTERNAL_URL when it was the old server's address", async () => {
     const { dataDir, db } = await openImportedDataDir();
+
     try {
       await writeFile(
         join(dataDir, "env.json"),
         JSON.stringify({
-          env: { BB_EXTERNAL_URL: "https://laptop.example.test" },
+          env: { OMNYO_EXTERNAL_URL: "https://laptop.example.test" },
         }),
       );
       await writeServerImportFile(dataDir, moveMarker());
 
       const boot = await applyServerImportAtBoot({
         dataDir,
+        vault: await openSecretVault(dataDir),
         db,
         logger: testLogger,
         now: 1,
@@ -517,7 +543,7 @@ describe("imported server boot", () => {
       expect(boot.pendingMove?.moveId).toBe("move-1");
       expect(
         JSON.parse(await readFile(join(dataDir, "env.json"), "utf8")),
-      ).toEqual({ env: { BB_EXTERNAL_URL: DIRECT_URL } });
+      ).toEqual({ env: { OMNYO_EXTERNAL_URL: DIRECT_URL } });
     } finally {
       db.$client.close();
     }
@@ -525,10 +551,12 @@ describe("imported server boot", () => {
 
   it("boots normally without a marker and reports missing host rows as unverified", async () => {
     const { dataDir, db } = await openImportedDataDir();
+
     try {
       expect(
         await applyServerImportAtBoot({
           dataDir,
+          vault: await openSecretVault(dataDir),
           db,
           logger: testLogger,
           now: 1,
@@ -571,7 +599,7 @@ function sessionOpenRequest(hostId: string, hostName: string) {
       hostName,
       hasMachineCredential: false,
       platform: "linux",
-      dataDir: "/home/me/.bb",
+      dataDir: "/home/me/.omnyo",
       localApiPort: 38_888,
       protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
       activeThreads: [],
@@ -590,17 +618,17 @@ describe("interrupted server import at boot", () => {
 
   it("refuses to boot on an import that server-import.json never recorded and logs how to roll it back", async () => {
     const dataDir = await makeDataDir();
-    await writeFile(join(dataDir, "bb.db"), "partial database");
-    await writeJournal(dataDir, ["plugins/npm", "bb.db"]);
+    await writeFile(join(dataDir, "app.db"), "partial database");
+    await writeJournal(dataDir, ["plugins/npm", "app.db"]);
     const logger = { error: vi.fn() };
-    const message = `bb server import into ${dataDir} was interrupted, so this server won't start on partial data. Run bb server import <file> --data-dir ${dataDir} again; it rolls back the interrupted import first.`;
+    const message = `omnyo server import into ${dataDir} was interrupted, so this server won't start on partial data. Run omnyo server import <file> --data-dir ${dataDir} again; it rolls back the interrupted import first.`;
 
     await expect(
       refuseInterruptedServerImport({ dataDir, logger }),
     ).rejects.toThrow(message);
 
     expect(logger.error).toHaveBeenCalledWith({ dataDir }, message);
-    expect(await readFile(join(dataDir, "bb.db"), "utf8")).toBe(
+    expect(await readFile(join(dataDir, "app.db"), "utf8")).toBe(
       "partial database",
     );
   });
@@ -612,7 +640,7 @@ describe("interrupted server import at boot", () => {
     await expect(
       refuseInterruptedServerImport({ dataDir, logger }),
     ).resolves.toBeUndefined();
-    await writeJournal(dataDir, ["plugins/npm", "bb.db"]);
+    await writeJournal(dataDir, ["plugins/npm", "app.db"]);
     await writeServerImportFile(dataDir, manualMarker());
     await expect(
       refuseInterruptedServerImport({ dataDir, logger }),
@@ -626,6 +654,7 @@ describe("interrupted server import at boot", () => {
       fileURLToPath(new URL("../../src/start-server.ts", import.meta.url)),
       "utf8",
     );
+
     const refusal = source.indexOf("await refuseInterruptedServerImport({");
 
     expect(refusal).toBeGreaterThanOrEqual(0);
@@ -636,6 +665,7 @@ describe("interrupted server import at boot", () => {
 describe("last server move repair", () => {
   it("restores the old server machine's name after a self-activation wrote its id", async () => {
     const { dataDir, db } = await openImportedDataDir();
+
     try {
       const lastMove = {
         version: 1 as const,
@@ -647,6 +677,7 @@ describe("last server move repair", () => {
         completedAt: 1_000,
         oldCopyDeletedAt: null,
       };
+
       await writeLastServerMoveFile(dataDir, lastMove);
 
       expect(
@@ -695,6 +726,7 @@ describe("manual import completion", () => {
         ...manualMarker(),
         fixupsAppliedAt: 1,
       });
+
       const app = createApp(harness.deps, {
         serverMove: {
           appSurface: "web",
@@ -710,16 +742,19 @@ describe("manual import completion", () => {
         "/internal/session/open",
         sessionOpenRequest("host-other", "Other"),
       );
+
       expect(other.status).toBe(201);
       expect(
         existsSync(join(harness.config.dataDir, SERVER_IMPORT_FILE_NAME)),
       ).toBe(true);
 
       await writeFile(join(harness.config.dataDir, "host-id"), "host-new\n");
+
       const local = await app.request(
         "/internal/session/open",
         sessionOpenRequest("host-new", "Desktop"),
       );
+
       expect(local.status).toBe(201);
       expect(
         existsSync(join(harness.config.dataDir, SERVER_IMPORT_FILE_NAME)),
@@ -734,6 +769,7 @@ describe("pending server mode", () => {
     withTestHarness(async (harness) => {
       upsertHost(harness.db, harness.hub, { id: "host-old", name: "Laptop" });
       upsertHost(harness.db, harness.hub, { id: "host-new", name: "Desktop" });
+
       const pendingApp = createApp(harness.deps, {
         serverMove: {
           appSurface: "web",
@@ -769,13 +805,14 @@ describe("pending server mode", () => {
           hostName: "Desktop",
           hasMachineCredential: false,
           platform: "linux",
-          dataDir: "/home/me/.bb-machines/laptop",
+          dataDir: "/home/me/.omnyo-machines/laptop",
           localApiPort: 38_888,
           protocolVersion: HOST_DAEMON_PROTOCOL_VERSION,
           activeThreads: [],
           loadedEnvironments: [],
         }),
       });
+
       expect(sessionOpen.status).toBe(503);
       expect(await readJson(sessionOpen)).toMatchObject({
         code: "server_move_pending",
@@ -787,10 +824,11 @@ describe("pending server mode", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: "Blocked" }),
       });
+
       expect(write.status).toBe(503);
       expect(await readJson(write)).toMatchObject({
         code: "server_moving",
-        retryable: false,
+        retryable: true,
       });
 
       const remote = await pendingApp.request("/internal/server-move/pending");
@@ -799,33 +837,41 @@ describe("pending server mode", () => {
 
       const servers = [pendingApp, harness.app].map((app) => {
         let address: AddressInfo | null = null;
+
         const server = serve(
           { fetch: app.fetch, hostname: "127.0.0.1", port: 0 },
           (info) => {
             address = info;
           },
         );
+
         return { server, address: () => address };
       });
+
       try {
         await expect
           .poll(() => servers.every((entry) => entry.address() !== null))
           .toBe(true);
+
         const [pendingServer, normalServer] = servers.map(
           (entry) => `http://127.0.0.1:${entry.address()!.port}`,
         );
+
         const pending = await fetch(
           `${pendingServer}/internal/server-move/pending`,
         );
+
         expect(pending.status).toBe(200);
         expect(await pending.json()).toEqual({
           moveId: "move-1",
           verified: true,
           message: null,
         });
+
         const normal = await fetch(
           `${normalServer}/internal/server-move/pending`,
         );
+
         expect(normal.status).toBe(404);
         expect(await normal.json()).toMatchObject({
           code: "server_move_not_pending",
@@ -858,6 +904,7 @@ describe("pending server mode", () => {
           retireProcess() {},
         },
       }).app;
+
       const foreignOrigin = { origin: "https://desk.example.test" };
 
       expect(await readJson(await pendingApp.request("/health"))).toEqual({
@@ -882,14 +929,17 @@ describe("pending server mode", () => {
       const ready = await harness.app.request("/health", {
         headers: foreignOrigin,
       });
+
       expect(await readJson(ready)).toEqual({
         ok: true,
         serverMove: { moveId: "move-1", state: "ready" },
       });
       expect(ready.headers.get("access-control-allow-origin")).toBe("*");
+
       const api = await harness.app.request("/api/v1/hosts", {
         headers: foreignOrigin,
       });
+
       expect(api.headers.get("access-control-allow-origin")).toBeNull();
 
       await writeFile(

@@ -4,11 +4,11 @@ import {
   experimental_useAppPanel,
   experimental_useFixedTabTarget,
   ThreadChat,
-  useBbContext,
-  useBbNavigate,
+  experimental_useAppContext,
+  experimental_useAppNavigate,
   type PluginFixedTabRegistration,
   type JsonValue,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 
 type DemoThreadTarget = { kind: "thread"; threadId: string };
 
@@ -25,12 +25,13 @@ function isDemoThreadTarget(value: JsonValue): value is DemoThreadTarget {
 }
 
 function ThreadChatDemoPanel({ subPath }: { subPath: string }) {
-  const { threadId: routeThreadId } = useBbContext();
+  const { threadId: routeThreadId } = experimental_useAppContext();
   const [threadId, setThreadId] = useState(subPath);
   const [focusRequest, setFocusRequest] = useState(0);
   const activeThreadId = threadId || routeThreadId || "";
   const panel = experimental_useAppPanel();
-  const navigate = useBbNavigate();
+  const navigate = experimental_useAppNavigate();
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b p-2">
@@ -93,6 +94,7 @@ function ThreadChatDemoPanel({ subPath }: { subPath: string }) {
 
 function DemoThreadFixedTab() {
   const targetState = experimental_useFixedTabTarget(demoThreadFixedTab);
+
   return targetState === null ? (
     <p className="p-4 text-sm text-muted-foreground">
       Choose “Open compact tab” from the demo page.
@@ -125,6 +127,7 @@ interface DemoPanelParams {
 function readDemoPanelParams(params: unknown): DemoPanelParams {
   if (typeof params !== "object" || params === null) return {};
   const record = params as Record<string, unknown>;
+
   return {
     anchorText:
       typeof record.anchorText === "string" ? record.anchorText : undefined,
@@ -141,6 +144,7 @@ function MessageAnchoredPanel({
   params: unknown;
 }) {
   const { anchorText, selectedText } = readDemoPanelParams(params);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {anchorText ? (
@@ -188,6 +192,7 @@ export default definePluginApp((app) => {
             : {}),
         },
       });
+
       if (!opened) {
         console.warn(
           "thread-chat-demo: this surface has no thread side panel to open",

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CLAUDE_API_KEY_PROXY_HEADER,
   PARENT_TOKEN_ENV,
   PARENT_URL_ENV,
   ParentAvailability,
@@ -8,6 +9,7 @@ import {
 } from "./parent-pool.js";
 
 const TOKEN = "vqMIj4xUiI3PyvKS2SllSKHsOfxLF_sAZwzNAAvV9TQ";
+
 const BASE_URL = "http://127.0.0.1:38886/api/v1/plugins/account-pool/http";
 
 function env(overrides: Record<string, string>): NodeJS.ProcessEnv {
@@ -44,7 +46,9 @@ describe("readParentPool", () => {
   it.each(rejected)(
     "rejects a $label rather than half configuring proxying",
     (args) => {
-      expect(readParentPool(env(args.overrides))).toBeNull();
+      expect(() => readParentPool(env(args.overrides))).toThrow(
+        "Invalid parent pool environment",
+      );
     },
   );
 
@@ -59,13 +63,14 @@ describe("parentRequestHeaders", () => {
       new Headers({
         authorization: "Bearer child-token",
         "x-api-key": "child-key",
-        "x-bb-account-pool-token": "child-hub-token",
+        "x-omnyo-account-pool-token": "child-hub-token",
         "content-type": "application/json",
         "anthropic-version": "2023-06-01",
       }),
       TOKEN,
     );
-    expect(headers.get("x-bb-account-pool-token")).toBe(TOKEN);
+
+    expect(headers.get("x-omnyo-account-pool-token")).toBe(TOKEN);
     expect(headers.get("authorization")).toBeNull();
     expect(headers.get("x-api-key")).toBeNull();
     expect(headers.get("content-type")).toBe("application/json");
@@ -88,8 +93,12 @@ describe("ParentAvailability", () => {
 
   it("reads the parent booleans and presents the hub token", async () => {
     const fetchImpl = vi.fn(async () =>
-      Response.json({ claude: true, codex: false }),
+      Response.json(
+        { claude: true, codex: false },
+        { headers: { [CLAUDE_API_KEY_PROXY_HEADER]: "1" } },
+      ),
     ) as unknown as typeof fetch;
+
     await expect(availability({ fetchImpl }).get()).resolves.toEqual({
       claude: true,
       codex: false,
@@ -99,12 +108,23 @@ describe("ParentAvailability", () => {
     );
     const init = vi.mocked(fetchImpl).mock.calls[0]?.[1];
     expect(
-      (init?.headers as Record<string, string>)["x-bb-account-pool-token"],
+      (init?.headers as Record<string, string>)["x-omnyo-account-pool-token"],
     ).toBe(TOKEN);
+  });
+
+  it("rejects Claude proxy availability from an older parent while keeping Codex", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      Response.json({ claude: true, codex: true });
+
+    await expect(availability({ fetchImpl }).get()).resolves.toEqual({
+      claude: false,
+      codex: true,
+    });
   });
 
   it("fails closed when the parent is unreachable", async () => {
     const onError = vi.fn();
+
     const client = new ParentAvailability({
       parent: { baseUrl: BASE_URL, token: TOKEN },
       fetch: (async () => {
@@ -113,6 +133,7 @@ describe("ParentAvailability", () => {
       now: () => 0,
       onError,
     });
+
     await expect(client.get()).resolves.toEqual({
       claude: false,
       codex: false,
@@ -124,6 +145,7 @@ describe("ParentAvailability", () => {
     const fetchImpl = vi.fn(
       async () => new Response(null, { status: 401 }),
     ) as unknown as typeof fetch;
+
     await expect(availability({ fetchImpl }).get()).resolves.toEqual({
       claude: false,
       codex: false,
@@ -134,6 +156,7 @@ describe("ParentAvailability", () => {
     const fetchImpl = vi.fn(async () =>
       Response.json({ claude: "yes" }),
     ) as unknown as typeof fetch;
+
     await expect(availability({ fetchImpl }).get()).resolves.toEqual({
       claude: false,
       codex: false,
@@ -144,6 +167,7 @@ describe("ParentAvailability", () => {
     const fetchImpl = vi.fn(async () =>
       Response.json({ claude: true, codex: true }),
     ) as unknown as typeof fetch;
+
     let clock = 0;
     const client = availability({ fetchImpl, now: () => clock });
     await client.get();

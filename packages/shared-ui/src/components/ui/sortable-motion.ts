@@ -5,11 +5,7 @@ import type {
 } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-
-const SIDEBAR_SORTABLE_TRANSITION = {
-  duration: 160,
-  easing: "cubic-bezier(0.2, 0, 0, 1)",
-};
+import { getSortableTransition, usePrefersReducedMotion } from "./motion";
 
 export interface SidebarSortableDragBindings {
   attributes: DraggableAttributes;
@@ -46,8 +42,14 @@ export function useSidebarSortable({
     setNodeRef,
     transform,
     transition,
-  } = useSortable({ id, disabled, transition: SIDEBAR_SORTABLE_TRANSITION });
+  } = useSortable({
+    id,
+    disabled,
+    transition: getSortableTransition(usePrefersReducedMotion()),
+  });
+
   const lifted = displace && isDragging;
+
   const style = useMemo<CSSProperties>(
     () => ({
       transform: displace ? CSS.Translate.toString(transform) : undefined,
@@ -58,8 +60,15 @@ export function useSidebarSortable({
     }),
     [displace, isDragging, lifted, transform, transition],
   );
+
   const dragBindings = useMemo<SidebarSortableDragBindings>(
-    () => ({ attributes, disabled, isDragging, listeners, setActivatorNodeRef }),
+    () => ({
+      attributes,
+      disabled,
+      isDragging,
+      listeners,
+      setActivatorNodeRef,
+    }),
     [attributes, disabled, isDragging, listeners, setActivatorNodeRef],
   );
 

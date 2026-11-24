@@ -1,12 +1,13 @@
 import type {
   ThreadResponse,
   ThreadTimelineResponse,
-} from "@bb/server-contract";
-import { makeThreadWithRuntime } from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/server-contract";
+import { makeThreadWithRuntime } from "@omnyo/test-helpers/domain-fixtures";
 
 type ThreadResponseOverrides = Omit<Partial<ThreadResponse>, "runtime"> & {
   runtime?: Partial<ThreadResponse["runtime"]>;
 };
+
 type ThreadTimelineResponseOverrides = Omit<
   Partial<ThreadTimelineResponse>,
   "timelinePage"
@@ -18,8 +19,10 @@ export function makeThreadResponse(
   overrides: ThreadResponseOverrides = {},
 ): ThreadResponse {
   const thread = makeThreadWithRuntime({ runtime: overrides.runtime });
+
   return {
     ...thread,
+    work: null,
     activeBackgroundAgentCount: 0,
     canRestoreEnvironment: false,
     canSpawnChild: true,
@@ -54,6 +57,7 @@ export function makeThreadTimelineResponse(
       olderCursor: null,
     },
   };
+
   return {
     ...response,
     ...overrides,

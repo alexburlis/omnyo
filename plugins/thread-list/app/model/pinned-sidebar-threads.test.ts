@@ -187,6 +187,7 @@ describe("buildPinnedSidebarState", () => {
       isWorktree: true,
       name: "Reviewer worktree group",
     });
+
     const threads = [
       createThread({ id: "first", pinnedAt: 2_000, environment }),
       createThread({ id: "second", pinnedAt: 1_000, environment }),
@@ -196,6 +197,7 @@ describe("buildPinnedSidebarState", () => {
       groupEnvironmentThreads: true,
       threads,
     });
+
     const flat = buildPinnedSidebarState({
       groupEnvironmentThreads: false,
       threads,

@@ -1,16 +1,26 @@
-import { extractThreadContextWindowUsage } from "@bb/thread-view";
+import {
+  buildThreadTimelinePage,
+  buildThreadConversationOutlinePage,
+  invalidateThreadHistoryBuilders,
+  loadThreadEventListBody,
+  loadTimelineTurnSummaryDetails,
+} from "../../services/threads/timeline-page-builder.js";
+import {
+  purgeHistoryCacheThread,
+  touchHistoryCache,
+} from "../../services/threads/history-cache-writer.js";
+import { TIMELINE_PROJECTION_FORMAT_VERSION } from "../../services/threads/timeline-root-cache.js";
+import { randomUUID } from "node:crypto";
 import { clearTimelineOrderingContextCache } from "../../services/threads/timeline-context-order.js";
 import {
   getAppSettings,
-  getDatabaseDataVersion,
   getThreadPluginMetadata,
   patchThreadPluginMetadata,
-  getLatestCompletedThreadContextClearSequence,
-  listContextWindowUsageRows,
   getLatestThreadSequence,
-  getLatestStoredConversationOutlineSequence,
+  getThreadHistoryEpoch,
+  getThreadHistoryState,
   listQueuedThreadMessages,
-} from "@bb/db";
+} from "@omnyo/db";
 import type { Hono } from "hono";
 import {
   DEFAULT_COMPLETED_TURN_DISPLAY,
@@ -20,15 +30,15 @@ import {
   type CompletedTurnDisplay,
   type Thread,
   type ThreadEventType,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   publicApiRoutes,
   THREAD_EVENT_LIST_PAGE_SIZE,
   typedRoutes,
   type PublicApiSchema,
-  type ThreadConversationOutlineResponse,
   type ThreadTimelineQuery,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
+import type { ServerMaintenance } from "../../services/maintenance/server-maintenance.js";
 import type { AppDeps } from "../../types.js";
 import { COMMAND_TIMEOUT_MS } from "../../constants.js";
 import { ApiError } from "../../errors.js";
@@ -37,12 +47,26 @@ import { callHostRetryableOnlineRpc } from "../../services/hosts/online-rpc.js";
 import { requireThreadStorageTarget } from "../../services/threads/thread-storage.js";
 import { toThreadQueuedMessage } from "../../services/threads/thread-queued-messages.js";
 import {
-  toThreadEventWithMeta,
+  isCompactionOfferEnabled,
+  withCompactionOffer,
+} from "../../services/threads/compaction-offer.js";
+import {
+  getAutoCompactionState,
+  withAutoCompactionAt,
+} from "../../services/threads/auto-compaction.js";
+import { readThreadContextWindowUsage } from "../../services/threads/context-window-usage.js";
+import {
+  readAutoCompactionMetadata,
+  writeAutoCompactionMetadata,
+} from "../../services/threads/maintenance-run.js";
+import {
   buildThreadConversationOutlineProjectionKey,
+  resolveConversationHistorySequenceStart,
   getThreadMessage,
-  buildThreadTimelineWithProfile,
-  buildTimelineTurnSummaryDetails,
-  loadThreadConversationOutline,
+  buildThreadConversationPage,
+  getThreadTimelineSnapshot,
+  threadTimelineBuildIdentity,
+  type BuildThreadTimelineOptions,
   THREAD_TIMELINE_DEFAULT_SEGMENT_LIMIT,
   THREAD_TIMELINE_SEGMENT_LIMIT_MAX,
 } from "../../services/threads/timeline.js";
@@ -52,22 +76,21 @@ import type {
 } from "../../services/threads/timeline-pagination.js";
 import { createSlowThreadTimelineBuildLogger } from "../../services/threads/timeline-build-log.js";
 import {
-  buildThreadTimelineCacheKey,
   buildThreadTimelineParamsKey,
   createThreadTimelineCache,
 } from "../../services/threads/timeline-cache.js";
 import { createTimelineLatestRowsCache } from "../../services/threads/timeline-latest-rows-cache.js";
-import {
-  DEFAULT_MAX_INLINE_OUTPUT_CHARS,
-  truncateTimelineResponseOutputs,
-} from "../../services/threads/timeline-output-truncation.js";
-import { previewTimelineResponseOutputs } from "../../services/threads/timeline-output-preview.js";
-import { computeTimelineRowDelta } from "@bb/server-contract";
+import { DEFAULT_MAX_INLINE_OUTPUT_CHARS } from "../../services/threads/timeline-output-truncation.js";
+import { computeTimelineRowDelta } from "@omnyo/server-contract";
 import {
   findThreadEvent,
   getLastThreadOutput,
   listThreadEventRows,
 } from "../../services/threads/thread-data.js";
+import {
+  redactThreadHistory,
+  redactThreadHistoryEvent,
+} from "../../services/threads/thread-history-redaction.js";
 import { listThreadPromptHistory } from "../../services/prompt-history.js";
 import { tryResolveExistingThreadExecutionPlan } from "../../services/threads/thread-execution-plan.js";
 import {
@@ -106,11 +129,14 @@ function parseThreadEventTypes(
   value: string | undefined,
 ): ThreadEventType[] | undefined {
   if (value === undefined) return undefined;
+
   return value.split(",").map((type) => {
     const parsed = threadEventTypeSchema.safeParse(type);
+
     if (!parsed.success) {
       throw new ApiError(400, "invalid_request", "Invalid event type");
     }
+
     return parsed.data;
   });
 }
@@ -120,6 +146,7 @@ function parseThreadTimelineSegmentLimit(
   rawLimit: string | undefined,
 ): number {
   const limit = parseOptionalInteger(rawLimit, "segmentLimit") ?? defaultLimit;
+
   if (limit <= 0) {
     throw new ApiError(
       400,
@@ -127,6 +154,7 @@ function parseThreadTimelineSegmentLimit(
       "segmentLimit must be a positive integer",
     );
   }
+
   if (limit > THREAD_TIMELINE_SEGMENT_LIMIT_MAX) {
     throw new ApiError(
       400,
@@ -134,6 +162,7 @@ function parseThreadTimelineSegmentLimit(
       `segmentLimit must be less than or equal to ${THREAD_TIMELINE_SEGMENT_LIMIT_MAX}`,
     );
   }
+
   return limit;
 }
 
@@ -142,6 +171,7 @@ function parseThreadTimelinePage(
 ): ThreadTimelinePageRequest {
   const hasBeforeAnchorSeq = query.beforeAnchorSeq !== undefined;
   const kind: ThreadTimelinePageKind = hasBeforeAnchorSeq ? "older" : "latest";
+
   const segmentLimit = parseThreadTimelineSegmentLimit(
     THREAD_TIMELINE_DEFAULT_SEGMENT_LIMIT,
     query.segmentLimit,
@@ -175,10 +205,15 @@ function parseThreadTimelinePage(
   };
 }
 
-export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
-  const { get, patch } = typedRoutes<PublicApiSchema>(app, {
+export function registerThreadDataRoutes(
+  app: Hono,
+  deps: AppDeps,
+  maintenance: Pick<ServerMaintenance, "getRuntimeId">,
+): void {
+  const { get, patch, put } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
+
   const routes = publicApiRoutes.threads;
   const timelineCache = createThreadTimelineCache();
   const timelineLatestRowsCache = createTimelineLatestRowsCache();
@@ -187,17 +222,40 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
     if (message.entity !== "thread") {
       return;
     }
+
     if (message.changes.includes("thread-deleted")) {
+      invalidateThreadHistoryBuilders(deps.db, message.id);
+      void purgeHistoryCacheThread(deps.db, message.id).catch((error) =>
+        deps.logger.error(
+          { error, threadId: message.id },
+          "History cache deletion failed",
+        ),
+      );
       timelineDeltaFloorByThreadId.delete(message.id);
+      timelineCache.invalidateThread(message.id);
+      timelineLatestRowsCache.invalidateThread(message.id);
+
       return;
     }
+
     const rewritten = message.changes.includes("history-rewritten");
+
     if (!rewritten && !message.changes.includes("history-compacted")) {
       return;
     }
+
     if (rewritten) {
       clearTimelineOrderingContextCache(deps.db);
     }
+
+    invalidateThreadHistoryBuilders(deps.db, message.id);
+    void purgeHistoryCacheThread(deps.db, message.id).catch((error) =>
+      deps.logger.error(
+        { error, threadId: message.id },
+        "History cache invalidation failed",
+      ),
+    );
+
     timelineCache.invalidateThread(message.id);
     timelineLatestRowsCache.invalidateThread(message.id);
     timelineDeltaFloorByThreadId.set(
@@ -205,20 +263,32 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       getLatestThreadSequence(deps.db, { threadId: message.id }),
     );
   });
+
   const slowTimelineBuildLogger = createSlowThreadTimelineBuildLogger({
     logger: deps.logger,
   });
-  const conversationOutlineCache = new Map<
-    string,
-    ThreadConversationOutlineResponse["items"]
-  >();
-  const CONVERSATION_OUTLINE_CACHE_MAX_ENTRIES = 128;
+
+  const touchReadHistory = (
+    threadId: string,
+    keys: readonly string[] | undefined,
+  ) => {
+    if (keys === undefined || keys.length === 0) return;
+    void touchHistoryCache(deps.db, keys).catch((error) =>
+      deps.logger.warn(
+        { error, threadId },
+        "History cache access update failed",
+      ),
+    );
+  };
+
   const resolveConversationRowsOptions = (thread: Thread) => {
     const providerDisplayName = resolveThreadProviderDisplayName(
       deps,
       thread.providerId,
     );
+
     const settings = getAppSettings(deps.db);
+
     return {
       completedTurnDisplay: resolveThreadCompletedTurnDisplay(
         deps,
@@ -233,27 +303,32 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
 
   get(routes.pluginMetadata.get, (context, query) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
+
     const { metadata, corrupt } = getThreadPluginMetadata(
       deps.db,
       thread.id,
       query.pluginId,
     );
+
     if (corrupt) {
       deps.logger.warn(
         `Ignoring corrupt plugin metadata for thread ${thread.id}, plugin ${query.pluginId}`,
       );
     }
+
     return context.json(metadata);
   });
 
   patch(routes.pluginMetadata.update, (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
+
     const result = patchThreadPluginMetadata(deps.db, {
       threadId: thread.id,
       pluginId: payload.pluginId,
       set: payload.set ?? {},
       remove: payload.remove ?? [],
     });
+
     if (!result.ok) {
       throw new ApiError(
         413,
@@ -261,174 +336,385 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
         "pluginMetadata exceeds 256 KiB",
       );
     }
+
     if (result.replacedCorrupt) {
       deps.logger.warn(
         `Replaced corrupt plugin metadata for thread ${thread.id}, plugin ${payload.pluginId}`,
       );
     }
+
     return context.json(result.metadata);
   });
 
   get(routes.context, (context) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
-    const sequenceStart =
-      getLatestCompletedThreadContextClearSequence(deps.db, {
-        threadId: thread.id,
-      }) ?? 0;
-    const rows = listContextWindowUsageRows(deps.db, {
-      threadId: thread.id,
-      sequenceStart,
-    });
+
+    const now = Date.now();
+
+    const { sequenceStart, usage } = readThreadContextWindowUsage(
+      deps.db,
+      thread.id,
+    );
+
     return context.json({
-      usage: extractThreadContextWindowUsage(rows.map(toThreadEventWithMeta)),
+      usage:
+        usage === null
+          ? null
+          : withAutoCompactionAt(deps, {
+              thread,
+              usage: withCompactionOffer(deps.db, {
+                enabled: isCompactionOfferEnabled(deps, thread.providerId),
+                sequenceStart,
+                threadId: thread.id,
+                usage,
+              }),
+              sequenceStart,
+              now,
+            }),
+      autoCompaction: getAutoCompactionState(deps, thread, now),
     });
   });
 
-  get(routes.timeline, (context, query) => {
+  put(routes.updateAutoCompaction, (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
+
+    deps.db.transaction(
+      (tx) => {
+        writeAutoCompactionMetadata(tx, thread.id, {
+          ...readAutoCompactionMetadata(tx, thread.id),
+          disabled: !payload.enabled,
+        });
+      },
+      { behavior: "immediate" },
+    );
+
+    return context.json({ enabled: payload.enabled });
+  });
+
+  get(routes.timeline, async (context, query) => {
+    let thread = requirePublicThread(deps.db, context.req.param("id"));
+
+    const runtimeId =
+      query.runtimeIdentity === "server-v1"
+        ? maintenance.getRuntimeId()
+        : undefined;
+
     const page = parseThreadTimelinePage(query);
     const includeNestedRows = query.includeNestedRows === "true";
     const deferContent = query.deferContent === "true";
     const summaryOnly = query.summaryOnly === "true";
-
-    const providerDisplayName = resolveThreadProviderDisplayName(
-      deps,
-      thread.providerId,
-    );
-    const settings = getAppSettings(deps.db);
-    const includeDiagnosticOperations = settings.showDiagnosticEvents;
-    const includeClearedContextHistory = settings.keepHistoryAfterContextClear;
-    const completedTurnDisplay = resolveThreadCompletedTurnDisplay(
-      deps,
-      settings,
-      thread.providerId,
-    );
-    const maxSeq = getLatestThreadSequence(deps.db, {
-      threadId: thread.id,
-    });
     const eventBudget = deps.config.featureFlags.timelineWindowEventBudget;
-    const keyArgs = {
-      threadId: thread.id,
-      status: thread.status,
-      environmentId: thread.environmentId,
-      providerDisplayName,
-      page,
-      includeNestedRows,
-      deferContent,
-      summaryOnly,
-      includeClearedContextHistory,
-      includeDiagnosticOperations,
-      completedTurnDisplay,
+
+    const resolveOptions = (current: Thread): BuildThreadTimelineOptions => {
+      const settings = getAppSettings(deps.db);
+
+      return {
+        compactionOfferEnabled: isCompactionOfferEnabled(
+          deps,
+          current.providerId,
+        ),
+        completedTurnDisplay: resolveThreadCompletedTurnDisplay(
+          deps,
+          settings,
+          current.providerId,
+        ),
+        deferContent,
+        eventBudget,
+        includeClearedContextHistory: settings.keepHistoryAfterContextClear,
+        includeDiagnosticOperations: settings.showDiagnosticEvents,
+        includeNestedRows,
+        maxInlineOutputChars: DEFAULT_MAX_INLINE_OUTPUT_CHARS,
+        page,
+        summaryOnly,
+        providerDisplayName: resolveThreadProviderDisplayName(
+          deps,
+          current.providerId,
+        ),
+        planCommand: resolveProviderPlanCommand(
+          deps.providerRegistry,
+          current.providerId,
+        ),
+      };
     };
-    const full = timelineCache.getOrBuild(
-      thread.id,
-      buildThreadTimelineCacheKey({ ...keyArgs, maxSeq }),
-      () => {
-        const { profile, response } = buildThreadTimelineWithProfile(
-          deps.db,
-          thread,
-          {
-            completedTurnDisplay,
-            deferContent,
-            eventBudget,
-            includeClearedContextHistory,
-            includeDiagnosticOperations,
-            includeNestedRows,
-            maxInlineOutputChars: DEFAULT_MAX_INLINE_OUTPUT_CHARS,
-            maxSeq,
-            page,
-            providerDisplayName,
-            planCommand: resolveProviderPlanCommand(
-              deps.providerRegistry,
-              thread.providerId,
-            ),
-            summaryOnly,
-          },
+
+    const paramsFor = (
+      current: Thread,
+      options: BuildThreadTimelineOptions,
+      snapshot: ReturnType<typeof getThreadTimelineSnapshot>,
+    ) => {
+      const identity = threadTimelineBuildIdentity(
+        deps.db,
+        { ...current, status: snapshot.status },
+        options,
+      );
+
+      return `${TIMELINE_PROJECTION_FORMAT_VERSION}:${options.eventBudget}:${snapshot.historyEpoch}:${identity}:${buildThreadTimelineParamsKey(
+        {
+          threadId: current.id,
+          status: snapshot.status,
+          environmentId: current.environmentId,
+          providerDisplayName: options.providerDisplayName,
+          page,
+          includeNestedRows,
+          deferContent,
+          summaryOnly,
+          includeClearedContextHistory: options.includeClearedContextHistory,
+          includeDiagnosticOperations: options.includeDiagnosticOperations,
+          completedTurnDisplay: options.completedTurnDisplay,
+        },
+      )}:${getThreadHistoryState(deps.db, current.id).rewriteEpoch}`;
+    };
+
+    let selected:
+      | {
+          response: Awaited<
+            ReturnType<typeof buildThreadTimelinePage>
+          >["response"];
+          paramsKey: string;
+        }
+      | undefined;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      thread = requirePublicThread(deps.db, thread.id);
+      const options = resolveOptions(thread);
+      const snapshot = getThreadTimelineSnapshot(deps.db, thread, options);
+      const paramsKey = paramsFor(thread, options, snapshot);
+
+      const cached = timelineCache.get(
+        thread.id,
+        `${snapshot.maxSeq}|${paramsKey}`,
+      );
+
+      if (cached !== undefined) {
+        selected = { response: cached, paramsKey };
+        break;
+      }
+
+      const built = await buildThreadTimelinePage(deps.db, {
+        threadId: thread.id,
+        options,
+        signal: context.req.raw.signal,
+        priority: query.priority === "background" ? "background" : "foreground",
+      });
+
+      touchReadHistory(thread.id, built.cacheTouches);
+
+      const current = () => {
+        if (context.req.raw.signal.aborted)
+          throw new DOMException("Loading canceled", "AbortError");
+        const fresh = requirePublicThread(deps.db, thread.id);
+
+        return (
+          built.historyEpoch === getThreadHistoryEpoch(deps.db, thread.id) &&
+          built.threadIdentity ===
+            threadTimelineBuildIdentity(
+              deps.db,
+              fresh,
+              resolveOptions(fresh),
+            ) &&
+          (built.expiresAt === null || built.expiresAt > Date.now())
         );
-        slowTimelineBuildLogger.log({ profile, threadId: thread.id });
-        const truncated = truncateTimelineResponseOutputs(
-          response,
-          DEFAULT_MAX_INLINE_OUTPUT_CHARS,
+      };
+
+      if (!current()) continue;
+
+      if (!built.fromCache)
+        slowTimelineBuildLogger.log({
+          profile: built.profile,
+          threadId: thread.id,
+        });
+
+      if (
+        !built.fromCache &&
+        built.queries !== undefined &&
+        built.queries.length > 0
+      )
+        deps.logger.info(
+          { threadId: thread.id, queries: built.queries },
+          "Slow timeline worker SQL",
         );
-        return includeNestedRows
-          ? truncated
-          : previewTimelineResponseOutputs(truncated);
-      },
-    );
+
+      if (!current()) continue;
+      selected = {
+        response: timelineCache.getOrBuild(
+          thread.id,
+          `${built.response.maxSeq}|${paramsKey}`,
+          () => built.response,
+          paramsKey,
+          built.expiresAt,
+        ),
+        paramsKey,
+      };
+      break;
+    }
+
+    if (selected === undefined)
+      throw new ApiError(
+        409,
+        "timeline_changed",
+        "Chat changed while loading. Try again.",
+        true,
+      );
+
+    const { response: full, paramsKey } = selected;
 
     const afterSequence = parseOptionalInteger(
       query.afterSequence,
       "afterSequence",
     );
-    const paramsKey = buildThreadTimelineParamsKey(keyArgs);
+
     const deltaFloor = timelineDeltaFloorByThreadId.get(thread.id);
+    const appendMode = query.deltaFormat === "assistant-text-append-v1";
+
+    const snapshotKey = appendMode
+      ? `${paramsKey}:assistant-text-append-v1`
+      : paramsKey;
+
     const previous =
       afterSequence === undefined ||
+      (runtimeId !== undefined && query.afterRuntimeId !== runtimeId) ||
+      (appendMode && query.afterRevision === undefined) ||
       (deltaFloor !== undefined && afterSequence <= deltaFloor)
         ? undefined
-        : timelineLatestRowsCache.get(thread.id, paramsKey, afterSequence);
+        : timelineLatestRowsCache.get(
+            thread.id,
+            snapshotKey,
+            afterSequence,
+            appendMode ? query.afterRevision : undefined,
+          );
+
     const delta =
       previous === undefined
         ? undefined
-        : computeTimelineRowDelta(previous.rows, full.rows);
-    timelineLatestRowsCache.set(thread.id, paramsKey, {
-      maxSeq,
-      rows: full.rows,
-    });
+        : computeTimelineRowDelta(
+            previous.rows,
+            full.rows,
+            appendMode && previous.revision !== undefined
+              ? { baseRevision: previous.revision }
+              : undefined,
+          );
+
+    const revision = appendMode ? randomUUID() : undefined;
+    const snapshot = { maxSeq: full.maxSeq, rows: full.rows, revision };
+    timelineLatestRowsCache.set(thread.id, snapshotKey, snapshot);
+
+    const scheduled =
+      full.contextWindowUsage === undefined
+        ? full
+        : {
+            ...full,
+            contextWindowUsage: withAutoCompactionAt(deps, {
+              thread,
+              usage: full.contextWindowUsage,
+              sequenceStart: full.contextBoundarySeq ?? 0,
+              now: Date.now(),
+            }),
+          };
+
+    const response =
+      delta === undefined ? scheduled : { ...scheduled, rows: [], delta };
+
+    const versioned = appendMode ? { ...response, revision } : response;
 
     return context.json(
-      delta === undefined ? full : { ...full, rows: [], delta },
+      runtimeId === undefined ? versioned : { ...versioned, runtimeId },
     );
   });
 
-  get(routes.conversationOutline, (context, query) => {
+  get(routes.conversation, (context, query) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
-    const selectItems = (items: ThreadConversationOutlineResponse["items"]) =>
-      query.role === undefined
-        ? items
-        : items.filter((item) => item.role === query.role);
+    const options = resolveConversationRowsOptions(thread);
+    const afterSeq = parseOptionalInteger(query.afterSeq, "afterSeq") ?? 0;
+    const throughSeq = parseOptionalInteger(query.throughSeq, "throughSeq");
 
-    const outlineSequence = getLatestStoredConversationOutlineSequence(
-      deps.db,
-      { threadId: thread.id },
-    );
-    const outlineOptions = resolveConversationRowsOptions(thread);
-    const { maxSeq } = outlineOptions;
-    const cacheKey = JSON.stringify([
-      thread.id,
-      getDatabaseDataVersion(deps.db),
-      buildThreadConversationOutlineProjectionKey(
-        thread,
-        outlineSequence,
-        outlineOptions,
+    if (throughSeq !== undefined && throughSeq < afterSeq) {
+      throw new ApiError(
+        400,
+        "invalid_request",
+        "throughSeq cannot precede afterSeq",
+      );
+    }
+
+    return context.json(
+      redactThreadHistory(
+        deps.db,
+        thread.id,
+        buildThreadConversationPage(deps.db, thread, {
+          ...options,
+          maxSeq: Math.min(options.maxSeq, throughSeq ?? options.maxSeq),
+          afterSeq,
+          limit: parseBoundedPositiveOptionalInteger({
+            defaultValue: 20,
+            max: 100,
+            name: "limit",
+            value: query.limit,
+          }),
+        }),
       ),
-    ]);
-    const cached = conversationOutlineCache.get(cacheKey);
-    if (cached !== undefined) {
-      conversationOutlineCache.delete(cacheKey);
-      conversationOutlineCache.set(cacheKey, cached);
-      return context.json({ items: selectItems(cached), maxSeq });
+    );
+  });
+
+  get(routes.conversationOutline, async (context, query) => {
+    const id = context.req.param("id");
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const thread = requirePublicThread(deps.db, id);
+
+      const options = {
+        ...resolveConversationRowsOptions(thread),
+        role: query.role,
+      };
+
+      const built = await buildThreadConversationOutlinePage(deps.db, {
+        threadId: thread.id,
+        options,
+        signal: context.req.raw.signal,
+      });
+
+      touchReadHistory(thread.id, built.cacheTouches);
+
+      if (context.req.raw.signal.aborted)
+        throw new DOMException("Loading canceled", "AbortError");
+      const fresh = requirePublicThread(deps.db, id);
+      const freshOptions = resolveConversationRowsOptions(fresh);
+
+      if (
+        built.maxSeq > freshOptions.maxSeq ||
+        built.historyEpoch !== getThreadHistoryEpoch(deps.db, id) ||
+        built.historySequenceStart !==
+          resolveConversationHistorySequenceStart(
+            deps.db,
+            fresh,
+            freshOptions,
+          ) ||
+        built.threadIdentity !==
+          buildThreadConversationOutlineProjectionKey(fresh, 0, freshOptions)
+      )
+        continue;
+
+      if (built.queries !== undefined && built.queries.length > 0)
+        deps.logger.info(
+          { threadId: id, queries: built.queries },
+          "Slow outline worker SQL",
+        );
+
+      return context.body(built.body, 200, {
+        "Content-Type": "application/json; charset=UTF-8",
+      });
     }
-    const response = loadThreadConversationOutline(deps.db, thread, {
-      ...outlineOptions,
-      outlineSequence,
-    });
-    conversationOutlineCache.set(cacheKey, response.items);
-    while (
-      conversationOutlineCache.size > CONVERSATION_OUTLINE_CACHE_MAX_ENTRIES
-    ) {
-      const oldest = conversationOutlineCache.keys().next().value;
-      if (oldest === undefined) {
-        break;
-      }
-      conversationOutlineCache.delete(oldest);
-    }
-    return context.json({ ...response, items: selectItems(response.items) });
+
+    throw new ApiError(
+      409,
+      "timeline_changed",
+      "Chat changed while loading. Try again.",
+      true,
+    );
   });
 
   get(routes.message, (context, query) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     const seq = context.req.param("seq");
+
     if (!/^\d+$/.test(seq)) {
       throw new ApiError(
         400,
@@ -436,21 +722,29 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
         "Message seq must be a non-negative integer",
       );
     }
+
     return context.json(
-      getThreadMessage(deps.db, thread, {
-        ...resolveConversationRowsOptions(thread),
-        seq: parseInteger(seq, "seq"),
-        before: parseOptionalInteger(query.before, "before") ?? 0,
-        after: parseOptionalInteger(query.after, "after") ?? 0,
-      }),
+      redactThreadHistory(
+        deps.db,
+        thread.id,
+        getThreadMessage(deps.db, thread, {
+          ...resolveConversationRowsOptions(thread),
+          seq: parseInteger(seq, "seq"),
+          before: parseOptionalInteger(query.before, "before") ?? 0,
+          after: parseOptionalInteger(query.after, "after") ?? 0,
+        }),
+      ),
     );
   });
 
-  get(routes.timelineTurnSummaryDetails, (context, query) => {
+  get(routes.timelineTurnSummaryDetails, async (context, query) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     const settings = getAppSettings(deps.db);
-    return context.json(
-      buildTimelineTurnSummaryDetails(deps.db, thread, {
+
+    const built = await loadTimelineTurnSummaryDetails(deps.db, {
+      threadId: thread.id,
+      signal: context.req.raw.signal,
+      options: {
         beforeCursor: query.beforeCursor,
         deferContent: query.deferContent === "true",
         itemId: query.itemId ?? null,
@@ -467,28 +761,49 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
         turnId: query.turnId,
         sourceSeqStart: parseInteger(query.sourceSeqStart, "sourceSeqStart"),
         sourceSeqEnd: parseInteger(query.sourceSeqEnd, "sourceSeqEnd"),
-      }),
-    );
+      },
+    });
+
+    if (built.queries !== undefined && built.queries.length > 0)
+      deps.logger.info(
+        { threadId: thread.id, queries: built.queries },
+        "Slow turn summary worker SQL",
+      );
+
+    return context.body(built.body, 200, {
+      "Content-Type": "application/json; charset=UTF-8",
+    });
   });
 
   get(routes.output, (context) => {
     requirePublicThread(deps.db, context.req.param("id"));
-    return context.json({
-      output: getLastThreadOutput(deps.db, context.req.param("id")),
-    });
+
+    return context.json(
+      redactThreadHistory(deps.db, context.req.param("id"), {
+        output: getLastThreadOutput(deps.db, context.req.param("id")),
+      }),
+    );
   });
 
   get(routes.queuedMessages, (context) => {
     const threadId = context.req.param("id");
     requirePublicThread(deps.db, threadId);
+
     return context.json(
-      listQueuedThreadMessages(deps.db, threadId).map(toThreadQueuedMessage),
+      redactThreadHistory(
+        deps.db,
+        threadId,
+        listQueuedThreadMessages(deps.db, threadId, {
+          includeClaimed: true,
+        }).map(toThreadQueuedMessage),
+      ),
     );
   });
 
   get(routes.promptHistory, (context, query) => {
     const threadId = context.req.param("id");
     requirePublicThread(deps.db, threadId);
+
     const limit = parseBoundedPositiveOptionalInteger({
       defaultValue: PROMPT_HISTORY_ENTRY_LIMIT,
       max: PROMPT_HISTORY_ENTRY_LIMIT,
@@ -497,30 +812,55 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
     });
 
     return context.json(
-      listThreadPromptHistory(deps, {
+      redactThreadHistory(
+        deps.db,
         threadId,
-        limit,
-      }),
+        listThreadPromptHistory(deps, {
+          threadId,
+          limit,
+        }),
+      ),
     );
   });
 
-  get(routes.events, (context, query) => {
-    requirePublicThread(deps.db, context.req.param("id"));
-    return context.json(
-      listThreadEventRows(deps.db, {
-        threadId: context.req.param("id"),
-        afterSeq: parseOptionalInteger(query.afterSeq, "afterSeq"),
-        beforeSeq: parseOptionalInteger(query.beforeSeq, "beforeSeq"),
-        limit: parseBoundedPositiveOptionalInteger({
-          defaultValue: THREAD_EVENT_LIST_PAGE_SIZE,
-          max: THREAD_EVENT_LIST_PAGE_SIZE,
-          name: "limit",
-          value: query.limit,
-        }),
-        order: query.order,
-        types: parseThreadEventTypes(query.types),
+  get(routes.events, async (context, query) => {
+    const threadId = context.req.param("id");
+    requirePublicThread(deps.db, threadId);
+
+    const options = {
+      afterSeq: parseOptionalInteger(query.afterSeq, "afterSeq"),
+      beforeSeq: parseOptionalInteger(query.beforeSeq, "beforeSeq"),
+      limit: parseBoundedPositiveOptionalInteger({
+        defaultValue: THREAD_EVENT_LIST_PAGE_SIZE,
+        max: THREAD_EVENT_LIST_PAGE_SIZE,
+        name: "limit",
+        value: query.limit,
       }),
-    );
+      order: query.order,
+      types: parseThreadEventTypes(query.types),
+    };
+
+    if (options.limit === 1)
+      return context.json(
+        redactThreadHistory(
+          deps.db,
+          threadId,
+          listThreadEventRows(deps.db, { threadId, ...options }).map(
+            redactThreadHistoryEvent,
+          ),
+          { invalidJsonText: "withhold" },
+        ),
+      );
+
+    const built = await loadThreadEventListBody(deps.db, {
+      threadId,
+      options,
+      signal: context.req.raw.signal,
+    });
+
+    return context.body(built.body, 200, {
+      "Content-Type": "application/json; charset=UTF-8",
+    });
   });
 
   get(routes.eventWait, async (context, query) => {
@@ -528,14 +868,18 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
     requirePublicThread(deps.db, threadId);
 
     const afterSeq = parseOptionalInteger(query.afterSeq, "afterSeq");
+
     const waitMs = Math.min(
       parseOptionalInteger(query.waitMs, "waitMs") ?? 30_000,
       60_000,
     );
+
     const parsedEventType = threadEventTypeSchema.safeParse(query.type);
+
     if (!parsedEventType.success) {
       throw new ApiError(400, "invalid_request", "Invalid event type");
     }
+
     const eventType = parsedEventType.data;
 
     const findMatch = () =>
@@ -543,15 +887,19 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
 
     const deadline = Date.now() + waitMs;
     let match = findMatch();
+
     while (!match) {
       const remaining = deadline - Date.now();
+
       if (remaining <= 0) break;
       const waiter = deps.hub.registerThreadEventWaiter(threadId, remaining);
       match = findMatch();
+
       if (match) {
         waiter.cancel();
         break;
       }
+
       await waiter.promise;
       match = findMatch();
     }
@@ -560,12 +908,15 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       return new Response(null, { status: 204 });
     }
 
-    return context.json(match);
+    return context.json(
+      redactThreadHistory(deps.db, threadId, redactThreadHistoryEvent(match)),
+    );
   });
 
   get(routes.defaultExecutionOptions, async (context) => {
     const threadId = context.req.param("id");
     requirePublicThread(deps.db, threadId);
+
     return context.json(
       (
         await tryResolveExistingThreadExecutionPlan(deps, {
@@ -582,6 +933,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       deps,
       context.req.param("id"),
     );
+
     const limit = parseFileListLimit(query.limit);
 
     try {
@@ -590,6 +942,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
         timeoutMs: COMMAND_TIMEOUT_MS,
         command: {
           type: "host.list_files",
+          followRootSymlink: false,
           path: target.storagePath,
           ...(query.query ? { query: query.query } : {}),
           limit,
@@ -598,6 +951,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
           excludeNames: [...DEFAULT_PATH_LIST_EXCLUDE_NAMES],
         },
       });
+
       return context.json({
         files: result.files,
         truncated: result.truncated,
@@ -611,6 +965,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
           storageRootPath: target.storagePath,
         });
       }
+
       throw error;
     }
   });
@@ -620,6 +975,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       deps,
       context.req.param("id"),
     );
+
     return context.json({
       hostId: target.hostId,
       storageRootPath: target.storagePath,
@@ -631,7 +987,9 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
       deps,
       context.req.param("id"),
     );
+
     const limit = parseFileListLimit(query.limit);
+
     const inclusion = parsePathKindInclusion({
       includeFiles: query.includeFiles,
       includeDirectories: query.includeDirectories,
@@ -653,6 +1011,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
           excludeNames: [...DEFAULT_PATH_LIST_EXCLUDE_NAMES],
         },
       });
+
       return context.json({
         paths: result.paths,
         truncated: result.truncated,
@@ -666,6 +1025,7 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
           storageRootPath: target.storagePath,
         });
       }
+
       throw error;
     }
   });

@@ -8,11 +8,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   installTestPluginRuntime,
   renderSlot,
-} from "@get-bb/plugin-sdk/testing/app";
+} from "@omnyo/plugin-sdk/testing/app";
 import {
   makePluginProject,
   makeSidebarThread,
   sdkResult,
+  withDisabledWorkflowsSdk,
 } from "../model/fixtures.js";
 import { preferencesReadyAtom } from "../preferences/preferences-sync.js";
 import {
@@ -21,7 +22,9 @@ import {
 } from "../preferences/atoms.js";
 
 installTestPluginRuntime();
+
 const { ProjectList } = await import("./ProjectList.js");
+
 const { resetSidebarDataCacheForTest } =
   await import("../model/use-sidebar-data.js");
 
@@ -52,9 +55,13 @@ function renderCustomSections(pinned = false) {
   const store = createStore();
   store.set(preferencesReadyAtom(), true);
   store.set(sidebarOrganizationModeAtom, "chronological");
+
   const rendered = renderSlot(
     { component: Harness },
-    { children: <ProjectList activeThreadId={null} />, store },
+    {
+      children: <ProjectList activeThreadId={null} scopeProjectId={null} />,
+      store,
+    },
     {
       sidebarThreads: {
         threads: [
@@ -67,16 +74,17 @@ function renderCustomSections(pinned = false) {
         projects: [makePluginProject()],
         sections: [makeSection("sec_a", "Alpha"), makeSection("sec_b", "Beta")],
       },
-      sdk: {
+      sdk: withDisabledWorkflowsSdk({
         threads: {
           update: sdkResult({ ok: true }),
         },
         threadSections: {
           create: sdkResult(makeSection("sec_created", "Gamma")),
         },
-      },
+      }),
     },
   );
+
   return { ...rendered, store };
 }
 
@@ -129,9 +137,11 @@ describe("creating a sidebar section", () => {
       await screen.findByRole("button", { name: "Threads actions" }),
       { button: 0 },
     );
+
     const menu = screen
       .getByRole("menuitem", { name: "Hide from list" })
       .closest('[role="menu"]');
+
     expect(menu?.querySelectorAll('[role="separator"]')).toHaveLength(2);
   });
 
@@ -145,6 +155,7 @@ describe("creating a sidebar section", () => {
         "section:sec_created",
         "section:sec_b",
         "threads",
+        "shelf",
       ]),
     );
   });
@@ -159,6 +170,7 @@ describe("creating a sidebar section", () => {
         "section:sec_b",
         "threads",
         "section:sec_created",
+        "shelf",
       ]),
     );
   });

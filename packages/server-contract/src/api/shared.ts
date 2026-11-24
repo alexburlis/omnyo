@@ -9,13 +9,13 @@ import {
   threadUsageCostSchema,
   gitBranchSelectionSchema,
   jsonValueSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 export {
   BRANCH_LIST_LIMIT_MAX,
   FILE_LIST_LIMIT_MAX,
   FILE_LIST_QUERY_MAX_LENGTH,
-} from "@bb/domain";
+} from "@omnyo/domain";
 
 interface IncludeQueryValidationArgs {
   allowedValues: readonly string[];
@@ -26,6 +26,7 @@ export function isCommaSeparatedIncludeQueryValue(
   args: IncludeQueryValidationArgs,
 ): boolean {
   const requestedValues = args.value.split(",");
+
   return requestedValues.every(
     (value) => value.length > 0 && args.allowedValues.includes(value),
   );
@@ -37,15 +38,68 @@ export const threadContextWindowUsageSchema = z.object({
   modelContextWindow: z.number(),
   estimated: z.boolean(),
   cost: threadUsageCostSchema.optional(),
+
+  compactionOfferAt: z.iso.datetime().optional(),
+
+  autoCompactionAt: z.iso.datetime().optional(),
+
+  autoCompactionOptedOut: z.literal(true).optional(),
 });
+
 export type ThreadContextWindowUsage = z.infer<
   typeof threadContextWindowUsageSchema
 >;
 
+export const threadAutoCompactionStateValues = [
+  "scheduled",
+  "skipped",
+  "disabled",
+  "done",
+  "failed",
+  "stopped",
+] as const;
+
+export const threadAutoCompactionStateSchema = z.enum(
+  threadAutoCompactionStateValues,
+);
+
+export type ThreadAutoCompactionStateKind = z.infer<
+  typeof threadAutoCompactionStateSchema
+>;
+
+export const threadAutoCompactionSchema = z.object({
+  state: threadAutoCompactionStateSchema,
+  at: z.iso.datetime().nullable(),
+  reason: z.string().nullable(),
+  cacheReadShare: z.number().min(0).max(1).nullable(),
+});
+
+export type ThreadAutoCompaction = z.infer<typeof threadAutoCompactionSchema>;
+
 export const threadContextResponseSchema = z.object({
   usage: threadContextWindowUsageSchema.nullable(),
+  autoCompaction: threadAutoCompactionSchema,
 });
+
 export type ThreadContextResponse = z.infer<typeof threadContextResponseSchema>;
+
+export const updateThreadAutoCompactionRequestSchema = z
+  .object({
+    enabled: z.boolean(),
+  })
+  .strict();
+
+export type UpdateThreadAutoCompactionRequest = z.infer<
+  typeof updateThreadAutoCompactionRequestSchema
+>;
+
+export const threadAutoCompactionSettingResponseSchema = z.object({
+  enabled: z.boolean(),
+});
+
+export type ThreadAutoCompactionSettingResponse = z.infer<
+  typeof threadAutoCompactionSettingResponseSchema
+>;
 
 export { gitBranchNameSchema };
 
@@ -60,6 +114,7 @@ export const unmanagedBranchSpecSchema = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("new"), baseBranch: gitBranchNameSchema })
     .strict(),
 ]);
+
 export type UnmanagedBranchSpec = z.infer<typeof unmanagedBranchSpecSchema>;
 
 export const unmanagedWorkspaceSchema = z.object({
@@ -82,6 +137,7 @@ export const workspaceArgsSchema = z.discriminatedUnion("type", [
   managedWorktreeWorkspaceSchema,
   personalWorkspaceSchema,
 ]);
+
 export type WorkspaceArgs = z.infer<typeof workspaceArgsSchema>;
 
 export const reuseEnvironmentSchema = z.object({
@@ -89,11 +145,16 @@ export const reuseEnvironmentSchema = z.object({
   environmentId: z.string().min(1),
 });
 
+export const machineChoiceSchema = z.enum(["explicit", "default"]);
+
+export type MachineChoice = z.infer<typeof machineChoiceSchema>;
+
 export const hostEnvironmentSchema = z
   .object({
     type: z.literal("host"),
     hostId: z.string().min(1).optional(),
     workspace: workspaceArgsSchema,
+    machineChoice: machineChoiceSchema.optional(),
   })
   .superRefine((value, ctx) => {
     if (value.workspace.type !== "personal" && value.hostId === undefined) {
@@ -109,6 +170,7 @@ export const environmentArgsSchema = z.discriminatedUnion("type", [
   reuseEnvironmentSchema,
   hostEnvironmentSchema,
 ]);
+
 export type EnvironmentArgs = z.infer<typeof environmentArgsSchema>;
 
 export const projectDefaultEnvironmentSchema = z.object({
@@ -129,7 +191,9 @@ export const providerEnvironmentSchema = z.object({
     ])
     .optional(),
   inputs: jsonValueSchema.nullable().default(null),
+  machineChoice: machineChoiceSchema.optional(),
 });
+
 export type ProviderEnvironmentArgs = z.infer<typeof providerEnvironmentSchema>;
 
 export const environmentProviderInstanceKeySchema = z.string().min(1).max(128);
@@ -144,6 +208,7 @@ export const providerReadyEnvironmentSchema = z.discriminatedUnion("type", [
     ownsPath: z.boolean().default(true),
   }),
 ]);
+
 export type ProviderReadyEnvironmentInput = z.input<
   typeof providerReadyEnvironmentSchema
 >;
@@ -154,11 +219,13 @@ export const createThreadEnvironmentArgsSchema = z.discriminatedUnion("type", [
   projectDefaultEnvironmentSchema,
   providerEnvironmentSchema,
 ]);
+
 export type CreateThreadEnvironmentArgs = z.infer<
   typeof createThreadEnvironmentArgsSchema
 >;
 
 export const pathListIncludeQueryValueSchema = z.enum(["true", "false"]);
+
 export type PathListIncludeQueryValue = z.infer<
   typeof pathListIncludeQueryValueSchema
 >;
@@ -180,6 +247,7 @@ export const pluginSignalSchema = z
     payload: z.unknown(),
   })
   .strict();
+
 export type PluginSignal = z.infer<typeof pluginSignalSchema>;
 
 export const pluginSignalLenientSchema = z.object({
@@ -193,6 +261,7 @@ export const workspaceFileSchema = z.object({
   path: z.string(),
   name: z.string(),
 });
+
 export type WorkspaceFile = z.infer<typeof workspaceFileSchema>;
 
 export const workspacePathEntryKindSchema = z.enum(["file", "directory"]);
@@ -204,12 +273,14 @@ export const workspacePathEntrySchema = z.object({
   score: z.number(),
   positions: z.array(z.number().int().nonnegative()),
 });
+
 export type WorkspacePathEntry = z.infer<typeof workspacePathEntrySchema>;
 
 export const workspaceFileListResponseSchema = z.object({
   files: z.array(workspaceFileSchema),
   truncated: z.boolean(),
 });
+
 export type WorkspaceFileListResponse = z.infer<
   typeof workspaceFileListResponseSchema
 >;
@@ -218,6 +289,7 @@ export const workspacePathListResponseSchema = z.object({
   paths: z.array(workspacePathEntrySchema),
   truncated: z.boolean(),
 });
+
 export type WorkspacePathListResponse = z.infer<
   typeof workspacePathListResponseSchema
 >;

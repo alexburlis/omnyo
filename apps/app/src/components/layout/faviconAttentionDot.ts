@@ -1,11 +1,15 @@
-import type { ThreadListEntry } from "@bb/domain";
-import { isSidebarProjectThread } from "@bb/client-core";
-import { isThreadRead, type ThreadReadState } from "@bb/client-core";
+import type { ThreadListEntry } from "@omnyo/domain";
+import { isSidebarProjectThread } from "@omnyo/client-core";
+import {
+  isThreadUnreadForAttention,
+  type ThreadUnreadAttentionState,
+} from "@/lib/thread-unread-attention";
 
-type FaviconSidebarThread = ThreadReadState &
+type FaviconSidebarThread = ThreadUnreadAttentionState &
   Pick<
     ThreadListEntry,
     | "hasPendingInteraction"
+    | "attention"
     | "id"
     | "originKind"
     | "parentThreadId"
@@ -17,25 +21,21 @@ interface ShouldShowFaviconAttentionDotArgs {
   currentThreadId?: string | null;
   isThreadView: boolean;
   sidebarThreads: readonly FaviconSidebarThread[];
-  thread: ThreadReadState | null | undefined;
+  thread: ThreadUnreadAttentionState | null | undefined;
 }
 
 function isUnreadSidebarThread(thread: FaviconSidebarThread): boolean {
-  return isSidebarProjectThread(thread) && !isThreadRead(thread);
+  return isSidebarProjectThread(thread) && isThreadUnreadForAttention(thread);
 }
 
 function isPendingSidebarThread(thread: FaviconSidebarThread): boolean {
-  return isSidebarProjectThread(thread) && thread.hasPendingInteraction;
-}
-
-function isPendingDelegatedChildOfCurrentThread(
-  thread: FaviconSidebarThread,
-  currentThreadId: string,
-): boolean {
   return (
-    thread.parentThreadId === currentThreadId &&
-    thread.originKind === null &&
-    thread.hasPendingInteraction
+    isSidebarProjectThread(thread) &&
+    (thread.hasPendingInteraction ||
+      thread.attention?.kind === "required-answer" ||
+      thread.attention?.kind === "optional-input" ||
+      (thread.attention?.requiredCount ?? 0) > 0 ||
+      (thread.attention?.optionalCount ?? 0) > 0)
   );
 }
 
@@ -47,15 +47,13 @@ export function shouldShowFaviconAttentionDot({
   thread,
 }: ShouldShowFaviconAttentionDotArgs): boolean {
   if (isThreadView) {
-    const childNeedsAttention =
-      currentThreadId != null &&
-      sidebarThreads.some((candidate) =>
-        isPendingDelegatedChildOfCurrentThread(candidate, currentThreadId),
-      );
     return (
       currentThreadHasPendingInteraction ||
-      childNeedsAttention ||
-      Boolean(thread && !isThreadRead(thread))
+      sidebarThreads.some(
+        (candidate) =>
+          candidate.id === currentThreadId && isPendingSidebarThread(candidate),
+      ) ||
+      Boolean(thread && isThreadUnreadForAttention(thread))
     );
   }
 

@@ -18,6 +18,7 @@ function catalog(
   overrides: Partial<WorkflowCatalogDependencies> = {},
 ): WorkflowCatalogDependencies {
   return {
+    validateEnvironment: async () => undefined,
     listProviders: async () => [{ id: "codex", available: true }],
     loadModels: async () => ({
       modelLoadError: null,
@@ -26,6 +27,7 @@ function catalog(
         {
           id: "gpt-test",
           model: "gpt-test",
+          defaultReasoningEffort: "medium",
           supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
         },
       ],
@@ -35,6 +37,42 @@ function catalog(
 }
 
 describe("workflow validation", () => {
+  it.each([
+    { requested: "medium", accepted: true },
+    { requested: "high", accepted: false },
+  ] as const)(
+    "accepts only the default for a model without reasoning levels: $requested",
+    async ({ requested, accepted }) => {
+      const validation = validateWorkflowSource(
+        SOURCE.replace(
+          'reasoningLevel: "medium"',
+          `reasoningLevel: "${requested}"`,
+        ),
+        "env-1",
+        catalog({
+          loadModels: async () => ({
+            modelLoadError: null,
+            selectedOnlyModels: [],
+            models: [
+              {
+                id: "gpt-test",
+                model: "gpt-test",
+                supportedReasoningEfforts: [],
+                defaultReasoningEffort: "medium",
+              },
+            ],
+          }),
+        }),
+      );
+
+      if (accepted) {
+        await expect(validation).resolves.toMatchObject({ valid: true });
+      } else {
+        await expect(validation).rejects.toThrow("Unsupported reasoning level");
+      }
+    },
+  );
+
   it("validates every safely discoverable literal tuple", async () => {
     await expect(
       validateWorkflowSource(SOURCE, "env-1", catalog()),
@@ -132,6 +170,7 @@ describe("workflow validation", () => {
               {
                 id: "gpt-test",
                 model: "gpt-test",
+                defaultReasoningEffort: "high",
                 supportedReasoningEfforts: [{ reasoningEffort: "high" }],
               },
             ],
@@ -153,6 +192,7 @@ describe("workflow validation", () => {
               {
                 id: "gpt-test",
                 model: "gpt-test",
+                defaultReasoningEffort: "medium",
                 supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
               },
             ],
@@ -162,4 +202,98 @@ describe("workflow validation", () => {
       ),
     ).rejects.toThrow("Model mismatch");
   });
+});
+
+it("validates literal model selections against their target environments without catalog collisions", async () => {
+  const events: string[] = [];
+
+  const source =
+    SOURCE.replace("return agent", "await agent") +
+    `
+    return agent("other", { environmentId: "env-target", provider: "codex", model: "target-model", reasoningLevel: "medium" });`;
+
+  await expect(
+    validateWorkflowSource(
+      source,
+      "env-origin",
+      catalog({
+        validateEnvironment: async (id) => {
+          events.push(`environment:${id}`);
+        },
+        listProviders: async (id) => {
+          events.push(`providers:${id}`);
+
+          return [{ id: "codex", available: true }];
+        },
+        loadModels: async (id) => ({
+          models: [
+            {
+              id: id === "env-target" ? "target-model" : "gpt-test",
+              model: id === "env-target" ? "target-model" : "gpt-test",
+              defaultReasoningEffort: "medium",
+              supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+            },
+          ],
+          selectedOnlyModels: [],
+          modelLoadError: null,
+        }),
+      }),
+    ),
+  ).resolves.toMatchObject({ valid: true });
+  expect(events).toEqual([
+    "environment:env-target",
+    "providers:env-origin",
+    "providers:env-target",
+  ]);
+});
+
+it("defers dynamic targets instead of validating their model against the origin", async () => {
+  const events: string[] = [];
+
+  const source = SOURCE.replace(
+    'provider: "codex",',
+    'environmentId: args.environmentId, provider: "codex",',
+  );
+
+  await expect(
+    validateWorkflowSource(
+      source,
+      "env-origin",
+      catalog({
+        listProviders: async (id) => {
+          events.push(id);
+
+          return [];
+        },
+      }),
+    ),
+  ).resolves.toMatchObject({ valid: true });
+  expect(events).toEqual([]);
+});
+
+it("rejects an ineligible literal target before loading any model catalog", async () => {
+  const events: string[] = [];
+
+  const source = SOURCE.replace(
+    'provider: "codex",',
+    'environmentId: "wrong-project", provider: "codex",',
+  );
+
+  await expect(
+    validateWorkflowSource(
+      source,
+      "env-origin",
+      catalog({
+        validateEnvironment: async () => {
+          throw new Error("different project");
+        },
+        listProviders: async (id) => {
+          events.push(id);
+
+          return [];
+        },
+      }),
+    ),
+  ).rejects.toThrow("different project");
+  expect(events).toEqual([]);
 });

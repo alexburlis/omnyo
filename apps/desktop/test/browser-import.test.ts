@@ -1,3 +1,4 @@
+import { deferred } from "./fixtures/deferred.js";
 import { createCipheriv, createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
@@ -6,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createBrowserImportService,
+  importBlockedWhileRunning,
   writeCookies,
 } from "../src/browser-import/browser-import.js";
 import {
@@ -35,6 +37,7 @@ import {
   isSourceRunning,
   listSourceProfiles,
   parseChromiumLocalStateProfiles,
+  parseFirefoxDefaultProfile,
   parseFirefoxProfiles,
 } from "../src/browser-import/sources.js";
 
@@ -42,6 +45,7 @@ const fixtureBrowserStorageNames = async () =>
   new Set(["unlisted", "direct", "broken", "lookalike"]);
 
 const AES_CBC_IV = Buffer.alloc(16, 0x20);
+
 const WEBKIT_EPOCH_OFFSET_SECONDS = 11_644_473_600;
 
 function encryptChromium(
@@ -51,6 +55,7 @@ function encryptChromium(
   hostKey?: string,
 ): Buffer {
   const cipher = createCipheriv("aes-128-cbc", key, AES_CBC_IV);
+
   const bound =
     hostKey === undefined
       ? Buffer.from(plaintext)
@@ -58,6 +63,7 @@ function encryptChromium(
           createHash("sha256").update(hostKey).digest(),
           Buffer.from(plaintext),
         ]);
+
   return Buffer.concat([
     Buffer.from(prefix, "latin1"),
     cipher.update(bound),
@@ -93,9 +99,11 @@ function createChromiumCookieDatabase(
   database
     .prepare("insert into meta (key, value) values ('version', ?)")
     .run(String(schemaVersion));
+
   const insert = database.prepare(
     "insert into cookies values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
+
   for (const row of rows) {
     insert.run(
       row.host,
@@ -112,6 +120,7 @@ function createChromiumCookieDatabase(
       row.topFrameSiteKey ?? "",
     );
   }
+
   database.close();
 }
 
@@ -138,9 +147,11 @@ function createFirefoxCookieDatabase(
     );
   `);
   database.exec(`pragma user_version = ${userVersion}`);
+
   const insert = database.prepare(
     "insert into moz_cookies values (?, ?, ?, '/', ?, ?, 0, ?, ?, ?)",
   );
+
   for (const row of rows) {
     insert.run(
       row.host,
@@ -153,6 +164,7 @@ function createFirefoxCookieDatabase(
       row.originAttributes ?? "",
     );
   }
+
   database.close();
 }
 
@@ -170,11 +182,14 @@ function buildBinaryCookies(
     const strings = [cookie.domain, cookie.name, cookie.path, cookie.value];
     const header = Buffer.alloc(56);
     let offset = 56;
+
     const offsets = strings.map((text) => {
       const current = offset;
       offset += Buffer.byteLength(text) + 1;
+
       return current;
     });
+
     header.writeUInt32LE(offset, 0);
     header.writeUInt32LE(cookie.flags ?? 0, 8);
     header.writeUInt32LE(offsets[0], 16);
@@ -182,11 +197,13 @@ function buildBinaryCookies(
     header.writeUInt32LE(offsets[2], 24);
     header.writeUInt32LE(offsets[3], 28);
     header.writeDoubleLE(cookie.expiry ?? 0, 40);
+
     return Buffer.concat([
       header,
       ...strings.map((text) => Buffer.from(`${text}\0`)),
     ]);
   });
+
   const pageHeader = Buffer.alloc(12 + records.length * 4);
   pageHeader.writeUInt32BE(0x00000100, 0);
   pageHeader.writeUInt32LE(records.length, 4);
@@ -200,6 +217,7 @@ function buildBinaryCookies(
   fileHeader.write("cook", 0, "latin1");
   fileHeader.writeUInt32BE(1, 4);
   fileHeader.writeUInt32BE(page.length, 8);
+
   return Buffer.concat([fileHeader, page, Buffer.alloc(8)]);
 }
 
@@ -208,6 +226,7 @@ function fakeSecretRunner(
 ) {
   return vi.fn(async (file: string) => {
     const result = results[file];
+
     if (!result)
       return {
         stdout: "",
@@ -215,6 +234,7 @@ function fakeSecretRunner(
         exitCode: null,
         spawnError: Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
       };
+
     return { stdout: "", stderr: "", exitCode: 0, ...result };
   });
 }
@@ -269,6 +289,7 @@ describe("resolveChromiumKeys", () => {
     const run = fakeSecretRunner({
       "/usr/bin/security": { stdout: "secret\n", exitCode: 0 },
     });
+
     const keys = await resolveChromiumKeys(
       {
         platform: "darwin",
@@ -278,6 +299,7 @@ describe("resolveChromiumKeys", () => {
       },
       run,
     );
+
     expect(keys.cbcV10).toEqual(deriveChromiumKey("secret", 1003));
     await expect(
       resolveChromiumKeys(
@@ -306,6 +328,7 @@ describe("resolveChromiumKeys", () => {
       },
       fakeSecretRunner({}),
     );
+
     expect(keys.cbcV10).toEqual(deriveChromiumKey("peanuts", 1));
     expect(keys.cbcV11).toBeUndefined();
     expect(keys.cbcV11Error?.reason).toBe("keychainUnavailable");
@@ -328,7 +351,7 @@ describe("resolveChromiumKeys", () => {
 describe("browser cookie readers", () => {
   let directory: string;
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), "bb-browser-import-"));
+    directory = await mkdtemp(join(tmpdir(), "omnyo-browser-import-"));
   });
   afterEach(async () => {
     await rm(directory, { recursive: true, force: true });
@@ -341,6 +364,7 @@ describe("browser cookie readers", () => {
       join(applications, "Unlisted.desktop"),
       "[Desktop Entry]\nType=Application\nName=Unlisted\nCategories=Network;WebBrowser;\nMimeType=x-scheme-handler/http;x-scheme-handler/https;\nExec=unlisted %u\n",
     );
+
     for (const name of ["Unlisted", "ElectronNotes"]) {
       const root = join(directory, ".config", name);
       await mkdir(join(root, "Default"), { recursive: true });
@@ -352,6 +376,7 @@ describe("browser cookie readers", () => {
       );
       createChromiumCookieDatabase(join(root, "Default", "Cookies"), 24, []);
     }
+
     const mail = join(directory, ".mail", "main");
     await mkdir(mail, { recursive: true });
     await writeFile(
@@ -359,15 +384,20 @@ describe("browser cookie readers", () => {
       "[Profile0]\nName=Mail\nIsRelative=1\nPath=main\n",
     );
     createFirefoxCookieDatabase(join(mail, "cookies.sqlite"), 16, []);
+
     const service = createBrowserImportService({
+      shellPathReady: Promise.resolve(),
       context: { platform: "linux", home: directory },
     });
+
     const found = (await service.listSources()).filter((source) =>
       source.id.startsWith("storage-"),
     );
+
     expect(found.map((source) => source.name)).toEqual(["Unlisted (Chromium)"]);
     await rm(join(applications, "Unlisted.desktop"));
     const source = found[0];
+
     if (!source) throw new Error("missing discovered browser");
     expect(
       await service.importCookies(
@@ -381,12 +411,15 @@ describe("browser cookie readers", () => {
     const root = join(directory, ".config", "google-chrome", "Default");
     await mkdir(root, { recursive: true });
     createChromiumCookieDatabase(join(root, "Cookies"), 24, []);
+
     const service = createBrowserImportService({
+      shellPathReady: Promise.resolve(),
       context: { platform: "linux", home: directory },
       listBrowserStorageNames: async () => {
         throw new Error("unavailable");
       },
     });
+
     const sources = await service.listSources();
     expect(sources.find((source) => source.id === "chrome")).toMatchObject({
       profiles: [{ directory: "Default", cookieCount: 0 }],
@@ -406,12 +439,15 @@ describe("browser cookie readers", () => {
               "User Data",
             )
           : join(directory, ".config", "Unlisted");
+
       await mkdir(join(root, "Default", "Network"), { recursive: true });
       await mkdir(join(root, "Profile 1"), { recursive: true });
+
       const key = deriveChromiumKey(
         "test-key",
         platform === "darwin" ? 1003 : 1,
       );
+
       createChromiumCookieDatabase(
         join(root, "Default", "Network", "Cookies"),
         24,
@@ -441,19 +477,25 @@ describe("browser cookie readers", () => {
           },
         }),
       );
+
       const run = fakeSecretRunner({
         "/usr/bin/security": { stdout: "test-key\n" },
         "secret-tool": { stdout: "test-key\n" },
       });
+
       const context = { platform, home: directory };
+
       const service = createBrowserImportService({
+        shellPathReady: Promise.resolve(),
         listBrowserStorageNames: fixtureBrowserStorageNames,
         context,
         runSecretCommand: run,
       });
+
       const source = (await service.listSources()).find((s) =>
         s.id.startsWith("storage-"),
       );
+
       expect(source).toMatchObject({
         name: "Unlisted (Chromium)",
         profiles: [
@@ -461,12 +503,15 @@ describe("browser cookie readers", () => {
           { directory: "Profile 1", name: "Work", cookieCount: 1 },
         ],
       });
+
       if (!source) throw new Error("store not discovered");
       expect(run).not.toHaveBeenCalled();
       const set = vi.fn(async () => undefined);
+
       const session = {
         cookies: { set, flushStore: vi.fn(async () => undefined) },
       };
+
       expect(
         await service.importCookies(
           { sourceId: source.id, sourceProfileDirectory: "../escape" },
@@ -497,10 +542,13 @@ describe("browser cookie readers", () => {
             ]
           : ["secret-tool", ["lookup", "application", "Unlisted"]]),
       );
+
       const refreshed = await createBrowserImportService({
+        shellPathReady: Promise.resolve(),
         listBrowserStorageNames: fixtureBrowserStorageNames,
         context,
       }).listSources();
+
       expect(refreshed.some((s) => s.id === source.id)).toBe(true);
       await rm(root, { recursive: true });
       expect(
@@ -536,16 +584,21 @@ describe("browser cookie readers", () => {
         },
       ]);
       const run = fakeSecretRunner({});
+
       const service = createBrowserImportService({
+        shellPathReady: Promise.resolve(),
         listBrowserStorageNames: fixtureBrowserStorageNames,
         context: { platform: "linux", home: directory },
         runSecretCommand: run,
       });
+
       const discovered = (await service.listSources()).filter((s) =>
         s.id.startsWith("storage-"),
       );
+
       expect(discovered).toHaveLength(1);
       const source = discovered[0];
+
       if (!source) throw new Error("store not discovered");
       expect(source).toMatchObject({
         name: "unlisted (Firefox)",
@@ -565,31 +618,39 @@ describe("browser cookie readers", () => {
     },
   );
 
-  it("keeps known encryption metadata, deduplicates stores, and excludes the BB profile", async () => {
+  it("keeps known encryption metadata, deduplicates stores, and excludes the Omnyo profile", async () => {
     const support = join(directory, "Library", "Application Support");
     const helium = join(support, "net.imput.helium");
     const extra = join(support, "Custom", "Unlisted");
-    const bb = join(support, "bb");
-    for (const root of [helium, extra, bb]) {
+    const api = join(support, "Omnyo");
+
+    for (const root of [helium, extra, api]) {
       await mkdir(join(root, "Default"), { recursive: true });
       createChromiumCookieDatabase(join(root, "Default", "Cookies"), 24, []);
     }
+
     await symlink(extra, join(support, "Alias"));
+
     const context = {
       platform: "darwin" as const,
       home: directory,
-      excludedDirectories: [bb],
+      excludedDirectories: [api],
     };
+
     const discovered = await discoverBrowserImportSources(
       context,
       fixtureBrowserStorageNames,
     );
+
     expect(discovered).toHaveLength(1);
     expect(discovered[0]?.name).toBe("Unlisted (Chromium)");
+
     const sources = await createBrowserImportService({
+      shellPathReady: Promise.resolve(),
       listBrowserStorageNames: fixtureBrowserStorageNames,
       context,
     }).listSources();
+
     expect(sources.filter((s) => s.name === "Helium")).toHaveLength(1);
     expect(sources.find((s) => s.id === "helium")?.unavailable).toBeUndefined();
   });
@@ -604,8 +665,10 @@ describe("browser cookie readers", () => {
       "BraveSoftware",
       "Brave-Browser",
     );
+
     await mkdir(join(root, "Default"), { recursive: true });
     createChromiumCookieDatabase(join(root, "Default", "Cookies"), 24, []);
+
     const sources = await discoverBrowserImportSources(
       {
         platform: "linux",
@@ -613,6 +676,7 @@ describe("browser cookie readers", () => {
       },
       fixtureBrowserStorageNames,
     );
+
     expect(sources).toHaveLength(1);
     expect(sources[0]).toMatchObject({
       name: "Brave (Chromium)",
@@ -622,6 +686,7 @@ describe("browser cookie readers", () => {
 
   it("ignores corrupt databases and lookalike tables while finding direct and XDG stores", async () => {
     const configHome = join(directory, "custom-config");
+
     for (const name of ["Broken", "Lookalike", "Direct"])
       await mkdir(join(configHome, name), { recursive: true });
     await writeFile(join(configHome, "Broken", "Cookies"), "not sqlite");
@@ -635,16 +700,21 @@ describe("browser cookie readers", () => {
       { host: ".direct.test", name: "session", value: "plain" },
     ]);
     const run = fakeSecretRunner({});
+
     const service = createBrowserImportService({
+      shellPathReady: Promise.resolve(),
       listBrowserStorageNames: fixtureBrowserStorageNames,
       context: { platform: "linux", home: directory, configHome },
       runSecretCommand: run,
     });
+
     const sources = (await service.listSources()).filter((s) =>
       s.id.startsWith("storage-"),
     );
+
     expect(sources).toHaveLength(1);
     const source = sources[0];
+
     if (!source) throw new Error("missing direct store");
     expect(source).toMatchObject({
       name: "Direct (Chromium)",
@@ -670,9 +740,11 @@ describe("browser cookie readers", () => {
     createChromiumCookieDatabase(join(root, "Default", "Cookies"), 24, []);
     await symlink(`${hostname()}-42`, join(root, "SingletonLock"));
     const context = { platform: "linux" as const, home: directory };
+
     const source = (
       await discoverBrowserImportSources(context, fixtureBrowserStorageNames)
     )[0];
+
     if (!source) throw new Error("missing source");
     expect(
       await isSourceRunning(source, context, async () => "/opt/custom-binary"),
@@ -686,10 +758,13 @@ describe("browser cookie readers", () => {
     const root = join(directory, ".config", "opera");
     await mkdir(root, { recursive: true });
     createChromiumCookieDatabase(join(root, "Cookies"), 24, []);
+
     const service = createBrowserImportService({
+      shellPathReady: Promise.resolve(),
       listBrowserStorageNames: fixtureBrowserStorageNames,
       context: { platform: "linux", home: directory },
     });
+
     const sources = await service.listSources();
     expect(sources.find((source) => source.id === "opera")).toMatchObject({
       profiles: [{ directory: ".", cookieCount: 0 }],
@@ -725,6 +800,7 @@ describe("browser cookie readers", () => {
         encrypted: encryptChromium("v11", key, "nope", ".keyring.test"),
       },
     ]);
+
     const result = await readChromiumCookies(
       {
         cookieDatabasePath: path,
@@ -735,6 +811,7 @@ describe("browser cookie readers", () => {
       },
       fakeSecretRunner({}),
     );
+
     expect(result.cookies).toEqual([
       {
         url: "https://example.com/",
@@ -861,6 +938,7 @@ describe("browser cookie readers", () => {
       },
       { domain: "host.test", name: "h", path: "", value: "" },
     ]);
+
     expect(parseBinaryCookies(buffer)).toEqual([
       {
         url: "https://apple.com/",
@@ -894,6 +972,7 @@ describe("browser cookie readers", () => {
 
   it("lists Chromium profiles from Local State and rejects traversal entries", async () => {
     const chrome = findBrowserImportSource("chrome");
+
     if (!chrome) throw new Error("chrome source missing");
     const context = { platform: "linux" as const, home: directory };
     const root = join(directory, ".config", "google-chrome");
@@ -989,14 +1068,18 @@ describe("browser cookie readers", () => {
           },
         }),
       );
+
       const run = fakeSecretRunner({
         "/usr/bin/security": { stdout: "test-secret\n", exitCode: 0 },
       });
+
       const service = createBrowserImportService({
+        shellPathReady: Promise.resolve(),
         listBrowserStorageNames: fixtureBrowserStorageNames,
         context: { platform: "darwin", home: directory },
         runSecretCommand: run,
       });
+
       expect(
         (await service.listSources()).find((source) => source.id === id),
       ).toMatchObject({
@@ -1038,6 +1121,7 @@ describe("browser cookie readers", () => {
         platform === "darwin"
           ? join(directory, "Library", "Application Support", "zen")
           : join(directory, ".zen");
+
       const profile = platform === "darwin" ? "Profiles/work" : "work";
       const profilePath = join(root, profile);
       await mkdir(profilePath, { recursive: true });
@@ -1046,6 +1130,7 @@ describe("browser cookie readers", () => {
         `[Profile0]\nName=Work\nIsRelative=1\nPath=${profile}\n`,
       );
       createFirefoxCookieDatabase(join(profilePath, "cookies.sqlite"), 14, []);
+
       const snapRoot = join(
         directory,
         "snap",
@@ -1054,6 +1139,7 @@ describe("browser cookie readers", () => {
         ".mozilla",
         "firefox",
       );
+
       await mkdir(join(snapRoot, "other"), { recursive: true });
       await writeFile(
         join(snapRoot, "profiles.ini"),
@@ -1065,10 +1151,13 @@ describe("browser cookie readers", () => {
         [],
       );
       const context = { platform, home: directory };
+
       const service = createBrowserImportService({
+        shellPathReady: Promise.resolve(),
         listBrowserStorageNames: fixtureBrowserStorageNames,
         context,
       });
+
       expect(
         (await service.listSources()).find((source) => source.id === "zen"),
       ).toMatchObject({
@@ -1083,8 +1172,10 @@ describe("browser cookie readers", () => {
     const names = ["Google Chrome", "chrome"];
     const dead = async () => null;
     const unknown = async () => "";
+
     const chrome = async () =>
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
     expect(
       await chromiumSingletonLockIsHeld("other-12", "me", names, chrome),
     ).toBe(true);
@@ -1151,10 +1242,68 @@ describe("browser cookie readers", () => {
       ].join("\n"),
       "/home/u/.mozilla/firefox",
     );
+
     expect(profiles).toEqual([
       { directory: normalize("Profiles/abc.default"), name: "default" },
       { directory: normalize("/custom/profile"), name: "absolute" },
     ]);
+  });
+
+  it("waits for the shared shell PATH before discovery and encrypted browser import", async () => {
+    const root = join(directory, ".config", "google-chrome", "Default");
+    await mkdir(root, { recursive: true });
+    const key = deriveChromiumKey("fixture-only-key", 1);
+    createChromiumCookieDatabase(join(root, "Cookies"), 24, [
+      {
+        host: ".fixture.test",
+        name: "sample",
+        encrypted: encryptChromium(
+          "v11",
+          key,
+          "fixture-value",
+          ".fixture.test",
+        ),
+      },
+    ]);
+    const shell = deferred();
+    const listStorage = vi.fn(async () => new Set<string>());
+
+    const run = fakeSecretRunner({
+      "secret-tool": { stdout: "fixture-only-key\n" },
+    });
+
+    const set = vi.fn(async () => undefined);
+    const flushStore = vi.fn(async () => undefined);
+
+    const service = createBrowserImportService({
+      shellPathReady: shell.promise,
+      context: { platform: "linux", home: directory },
+      listBrowserStorageNames: listStorage,
+      runSecretCommand: run,
+    });
+
+    const sources = service.listSources();
+
+    const imported = service.importCookies(
+      { sourceId: "chrome", sourceProfileDirectory: "Default" },
+      { cookies: { set, flushStore } },
+    );
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(listStorage).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+      expect(set).not.toHaveBeenCalled();
+    } finally {
+      shell.resolve();
+    }
+
+    expect(
+      (await sources).find((source) => source.id === "chrome")?.unavailable,
+    ).toBeUndefined();
+    expect(await imported).toMatchObject({ ok: true, imported: 1 });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(set).toHaveBeenCalledTimes(1);
   });
 
   it("imports through the service into a session and reports rejected writes", async () => {
@@ -1169,10 +1318,13 @@ describe("browser cookie readers", () => {
       { host: ".ok.test", name: "a", value: "1", expiry: 0, sameSite: null },
       { host: "reject.test", name: "b", value: "2", expiry: 0, sameSite: null },
     ]);
+
     const service = createBrowserImportService({
+      shellPathReady: Promise.resolve(),
       listBrowserStorageNames: fixtureBrowserStorageNames,
       context,
     });
+
     const sources = await service.listSources();
     expect(sources.find((source) => source.id === "firefox")).toEqual({
       id: "firefox",
@@ -1187,9 +1339,11 @@ describe("browser cookie readers", () => {
     expect(sources.find((source) => source.id === "chrome")?.unavailable).toBe(
       "notInstalled",
     );
+
     const set = vi.fn(async (details: { url: string }) => {
       if (details.url.includes("reject")) throw new Error("rejected");
     });
+
     const flushStore = vi.fn(async () => undefined);
     const session = { cookies: { set, flushStore } };
     await expect(
@@ -1204,10 +1358,12 @@ describe("browser cookie readers", () => {
         session,
       ),
     ).resolves.toEqual({ ok: false, reason: "notInstalled" });
+
     const outcome = await service.importCookies(
       { sourceId: "firefox", sourceProfileDirectory: normalize("Profiles/p1") },
       session,
     );
+
     expect(outcome).toEqual({
       ok: true,
       imported: 1,
@@ -1233,6 +1389,7 @@ describe("browser cookie readers", () => {
   it("skips expired cookies so they cannot overwrite live sessions", async () => {
     const set = vi.fn(async () => undefined);
     const nowSeconds = Math.floor(Date.now() / 1000);
+
     const outcome = await writeCookies(
       { cookies: { set, flushStore: vi.fn(async () => undefined) } },
       {
@@ -1264,6 +1421,7 @@ describe("browser cookie readers", () => {
         undecryptableHosts: [],
       },
     );
+
     expect(outcome).toEqual({
       ok: true,
       imported: 1,
@@ -1277,7 +1435,8 @@ describe("browser cookie readers", () => {
   });
 
   it("detects a running Firefox through the parentlock owner", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bb-ff-lock-"));
+    const directory = await mkdtemp(join(tmpdir(), "omnyo-ff-lock-"));
+
     try {
       const lock = join(directory, ".parentlock");
       await writeFile(lock, "");
@@ -1319,12 +1478,30 @@ describe("browser cookie readers", () => {
     }
   });
 
+  it("lets running Chromium browsers import on macOS only", () => {
+    const dia = findBrowserImportSource("dia");
+    const firefox = findBrowserImportSource("firefox");
+    const safari = findBrowserImportSource("safari");
+    const chrome = findBrowserImportSource("chrome");
+
+    if (!dia || !firefox || !safari || !chrome)
+      throw new Error("missing known browser definitions");
+
+    expect(importBlockedWhileRunning(dia, "darwin")).toBe(false);
+    expect(importBlockedWhileRunning(chrome, "darwin")).toBe(false);
+    expect(importBlockedWhileRunning(chrome, "linux")).toBe(true);
+    expect(importBlockedWhileRunning(firefox, "darwin")).toBe(true);
+    expect(importBlockedWhileRunning(safari, "darwin")).toBe(true);
+  });
+
   it("does not flush when nothing was written", async () => {
     const flushStore = vi.fn(async () => undefined);
+
     const outcome = await writeCookies(
       { cookies: { set: vi.fn(async () => undefined), flushStore } },
       { cookies: [], undecryptable: 3, undecryptableHosts: ["a", "b"] },
     );
+
     expect(outcome).toEqual({
       ok: true,
       imported: 0,
@@ -1353,7 +1530,8 @@ describe("macOS app icons", () => {
   });
 
   it("converts the bundle icon with sips and returns a PNG data URL", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "bb-icon-"));
+    const directory = await mkdtemp(join(tmpdir(), "omnyo-icon-"));
+
     try {
       const appPath = join(directory, "Arc.app");
       await mkdir(join(appPath, "Contents", "Resources"), { recursive: true });
@@ -1361,13 +1539,16 @@ describe("macOS app icons", () => {
         join(appPath, "Contents", "Resources", "Arc.icns"),
         "icns",
       );
+
       const run = vi.fn(async (file: string, args: string[]) => {
         if (file === "plutil")
           return { ok: true, stdout: '{"CFBundleIconFile":"Arc"}' };
         const out = args[args.indexOf("--out") + 1];
         await writeFile(out, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
         return { ok: true, stdout: "" };
       });
+
       const icon = await readMacAppIcon(appPath, 64, run);
       expect(icon).toBe("data:image/png;base64,iVBORw==");
       expect(run).toHaveBeenLastCalledWith(
@@ -1388,5 +1569,148 @@ describe("macOS app icons", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("default browser recommendation", () => {
+  let directory: string;
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), "omnyo-default-browser-"));
+  });
+  afterEach(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  async function writeDiaProfiles(lastUsed?: string) {
+    const root = join(
+      directory,
+      "Library",
+      "Application Support",
+      "Dia",
+      "User Data",
+    );
+
+    for (const [profile, count] of [
+      ["Default", 3],
+      ["Profile 7", 1],
+    ] as const) {
+      await mkdir(join(root, profile), { recursive: true });
+      createChromiumCookieDatabase(
+        join(root, profile, "Cookies"),
+        24,
+        Array.from({ length: count }, (_, index) => ({
+          host: `site-${index}.test`,
+          name: "session",
+          value: "value",
+        })),
+      );
+    }
+
+    await writeFile(
+      join(root, "Local State"),
+      JSON.stringify({
+        profile: {
+          ...(lastUsed === undefined ? {} : { last_used: lastUsed }),
+          info_cache: {
+            Default: { name: "Personal" },
+            "Profile 7": { name: "Work" },
+          },
+        },
+      }),
+    );
+  }
+
+  function service(resolveDefaultBrowserApp: () => Promise<string>) {
+    const log = vi.fn();
+
+    return {
+      log,
+      service: createBrowserImportService({
+        shellPathReady: Promise.resolve(),
+        listBrowserStorageNames: async () => new Set(),
+        context: { platform: "darwin", home: directory },
+        resolveDefaultBrowserApp,
+        log,
+      }),
+    };
+  }
+
+  it("recommends the default browser's last-used profile", async () => {
+    await writeDiaProfiles("Profile 7");
+
+    const { service: importService } = service(
+      async () => "/Applications/Dia.app",
+    );
+
+    await expect(importService.listImportSources()).resolves.toMatchObject({
+      recommended: { sourceId: "dia", sourceProfileDirectory: "Profile 7" },
+    });
+  });
+
+  it("recommends the profile with the most cookies when the browser records no last-used profile", async () => {
+    await writeDiaProfiles();
+
+    const { service: importService } = service(
+      async () => "/Users/someone/Applications/Dia.app",
+    );
+
+    await expect(importService.listImportSources()).resolves.toMatchObject({
+      recommended: { sourceId: "dia", sourceProfileDirectory: "Default" },
+    });
+  });
+
+  it("recommends nothing when the default browser is unsupported or cannot be read", async () => {
+    await writeDiaProfiles("Profile 7");
+
+    const unsupported = service(async () => "/Applications/Omnyo.app");
+
+    const unreadable = service(async () => {
+      throw new Error("no https handler");
+    });
+
+    const [fromUnsupported, fromUnreadable] = await Promise.all([
+      unsupported.service.listImportSources(),
+      unreadable.service.listImportSources(),
+    ]);
+
+    expect(fromUnsupported.recommended).toBeUndefined();
+    expect(fromUnreadable.recommended).toBeUndefined();
+    expect(fromUnreadable.sources.some((source) => source.id === "dia")).toBe(
+      true,
+    );
+    expect(unreadable.log).toHaveBeenCalledWith(
+      "Could not read the default browser",
+      { error: "no https handler" },
+    );
+  });
+});
+
+describe("parseFirefoxDefaultProfile", () => {
+  it("prefers the installation's default profile over the profile marked default", () => {
+    expect(
+      parseFirefoxDefaultProfile(
+        [
+          "[Profile1]",
+          "Name=old",
+          "Path=Profiles/old.default",
+          "Default=1",
+          "",
+          "[Install4F96D1932A9F858E]",
+          "Default=Profiles/new.default-release",
+          "Locked=1",
+        ].join("\n"),
+      ),
+    ).toBe(normalize("Profiles/new.default-release"));
+  });
+
+  it("falls back to the profile marked default and reports none otherwise", () => {
+    expect(
+      parseFirefoxDefaultProfile(
+        "[Profile0]\nPath=Profiles/a.default\nDefault=1\n[Profile1]\nPath=Profiles/b\n",
+      ),
+    ).toBe(normalize("Profiles/a.default"));
+    expect(
+      parseFirefoxDefaultProfile("[Profile0]\nPath=Profiles/a.default\n"),
+    ).toBeUndefined();
   });
 });

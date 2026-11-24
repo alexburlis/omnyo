@@ -17,25 +17,31 @@ import { createMigratedConnection } from "../helpers/migrated-connection.js";
 
 function setup() {
   const db = createMigratedConnection();
+
   const host = upsertHost(db, noopNotifier, {
     name: "test-host",
   });
+
   const { project } = createProject(db, noopNotifier, {
     name: "test-project",
     source: { type: "local_path", hostId: host.id, path: "/tmp/test" },
   });
+
   return { db, host, project };
 }
 
 describe("project-sources", () => {
   it("lists sources across project ids", () => {
     const { db, host, project } = setup();
+
     const host2 = upsertHost(db, noopNotifier, {
       name: "project-host-2",
     });
+
     const host3 = upsertHost(db, noopNotifier, {
       name: "project-host-3",
     });
+
     const { project: otherProject } = createProject(db, noopNotifier, {
       name: "other-project",
       source: {
@@ -44,6 +50,7 @@ describe("project-sources", () => {
         path: "/tmp/other-project",
       },
     });
+
     createProjectSource(db, noopNotifier, {
       projectId: project.id,
       type: "local_path",
@@ -65,12 +72,15 @@ describe("project-sources", () => {
 
   it("returns the default source and preserves it when adding more sources", () => {
     const { db, project } = setup();
+
     const secondaryHost = upsertHost(db, noopNotifier, {
       name: "secondary-host",
     });
+
     const initialDefault = listProjectSourcesByProjectIds(db, [
       project.id,
     ]).find((source) => source.isDefault);
+
     const source = createProjectSource(db, noopNotifier, {
       projectId: project.id,
       type: "local_path",
@@ -91,9 +101,11 @@ describe("project-sources", () => {
 
   it("returns the source for a specific host", () => {
     const { db, project } = setup();
+
     const secondaryHost = upsertHost(db, noopNotifier, {
       name: "test-host-2",
     });
+
     const secondarySource = createProjectSource(db, noopNotifier, {
       projectId: project.id,
       type: "local_path",
@@ -108,6 +120,7 @@ describe("project-sources", () => {
 
   it("returns null when a host has no source", () => {
     const { db, project } = setup();
+
     const missingHost = upsertHost(db, noopNotifier, {
       name: "missing-host",
     });
@@ -117,9 +130,11 @@ describe("project-sources", () => {
 
   it("gets project sources by id, by project, and by count", () => {
     const { db, project } = setup();
+
     const secondaryHost = upsertHost(db, noopNotifier, {
       name: "source-id-host",
     });
+
     const source = createProjectSource(db, noopNotifier, {
       projectId: project.id,
       type: "local_path",
@@ -158,9 +173,11 @@ describe("project-sources", () => {
 
   it("enforces one default source per project at the database boundary", () => {
     const { db, project } = setup();
+
     const conflictHost = upsertHost(db, noopNotifier, {
       name: "default-conflict-host",
     });
+
     const now = Date.now();
 
     expect(() =>
@@ -188,9 +205,11 @@ describe("project-sources", () => {
 
   it("updates a project source", () => {
     const { db, project } = setup();
+
     const updateHost = upsertHost(db, noopNotifier, {
       name: "update-test-host",
     });
+
     const source = createProjectSource(db, noopNotifier, {
       projectId: project.id,
       type: "local_path",
@@ -201,19 +220,23 @@ describe("project-sources", () => {
     const updated = updateProjectSource(db, noopNotifier, source.id, {
       path: "/tmp/renamed",
     });
+
     if (!updated || updated.type !== "local_path") {
       throw new Error(
         `Expected local_path source, got ${updated?.type ?? "none"}`,
       );
     }
+
     expect(updated.path).toBe("/tmp/renamed");
   });
 
   it("deletes a project source", () => {
     const { db, project } = setup();
+
     const deleteHost = upsertHost(db, noopNotifier, {
       name: "delete-test-host",
     });
+
     const source = createProjectSource(db, noopNotifier, {
       projectId: project.id,
       type: "local_path",
@@ -228,9 +251,11 @@ describe("project-sources", () => {
 
   it("promotes another source when deleting the default", () => {
     const { db, project } = setup();
+
     const host2 = upsertHost(db, noopNotifier, {
       name: "test-host-2",
     });
+
     const second = createProjectSource(db, noopNotifier, {
       projectId: project.id,
       type: "local_path",
@@ -241,6 +266,7 @@ describe("project-sources", () => {
     const initialDefault = listProjectSourcesByProjectIds(db, [
       project.id,
     ]).find((source) => source.isDefault)!;
+
     expect(deleteProjectSource(db, noopNotifier, initialDefault.id)).toBe(true);
     expect(
       listProjectSourcesByProjectIds(db, [project.id]).find(

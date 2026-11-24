@@ -2,7 +2,7 @@
 
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { POINTER_COARSE_QUERY } from "@bb/shared-ui/hooks/use-pointer-coarse";
+import { POINTER_COARSE_QUERY } from "@omnyo/shared-ui/hooks/use-pointer-coarse";
 import { NewTabFileSearch } from "./NewTabFileSearch";
 
 vi.mock("@/hooks/useFileSearchSuggestions", () => ({
@@ -17,6 +17,7 @@ vi.mock("@/hooks/useFileSearchSuggestions", () => ({
 
 vi.mock("./threadRecentItems", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./threadRecentItems")>();
+
   return {
     ...actual,
     useThreadRecentItems: () => [],
@@ -64,6 +65,7 @@ function renderFileSearch({
 describe("NewTabFileSearch", () => {
   it("does not autofocus when passively remounted", () => {
     mockPointerCoarse(false);
+
     const focusSpy = vi
       .spyOn(HTMLInputElement.prototype, "focus")
       .mockImplementation(() => {});
@@ -75,9 +77,11 @@ describe("NewTabFileSearch", () => {
 
   it("consumes an explicit request without focusing on coarse pointers", () => {
     mockPointerCoarse(true);
+
     const focusSpy = vi
       .spyOn(HTMLInputElement.prototype, "focus")
       .mockImplementation(() => {});
+
     const onAutoFocusHandled = vi.fn();
 
     renderFileSearch({ autoFocus: true, onAutoFocusHandled });
@@ -88,13 +92,16 @@ describe("NewTabFileSearch", () => {
 
   it("autofocuses for an explicit request and consumes it", () => {
     mockPointerCoarse(false);
+
     const focusSpy = vi
       .spyOn(HTMLInputElement.prototype, "focus")
       .mockImplementation(() => {});
+
     const onAutoFocusHandled = vi.fn();
     let nextFrame: FrameRequestCallback | undefined;
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       nextFrame = callback;
+
       return 1;
     });
 

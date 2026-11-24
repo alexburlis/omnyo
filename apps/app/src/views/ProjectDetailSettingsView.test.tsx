@@ -7,13 +7,17 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { Host, ProjectExecutionDefaults } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import type { Host, ProjectExecutionDefaults } from "@omnyo/domain";
+import {
+  makeHost,
+  makeThreadListEntry,
+} from "@omnyo/test-helpers/domain-fixtures";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { makeSystemConfig } from "@/test/fixtures/system-config";
+import { makeSidebarBootstrapResponse } from "@/test/fixtures/projects";
 import { SETTINGS_PROJECT_ROUTE_PATH } from "@/lib/route-paths";
 import { ProjectDetailSettingsView } from "./ProjectDetailSettingsView";
 
@@ -57,7 +61,9 @@ function host(overrides: Partial<Host> & Pick<Host, "id" | "name">): Host {
 }
 
 const primaryHost = host({ id: "host_primary", name: "MacBook Pro" });
+
 const remoteHost = host({ id: "host_remote", name: "dev-vm" });
+
 const offlineHost = host({
   id: "host_offline",
   name: "old-laptop",
@@ -73,47 +79,49 @@ function stubSidebarBootstrapFetch(
   sources: SourceFixture[],
   options: { status?: number; projectId?: string } = {},
 ): void {
-  const projectId = options.projectId ?? "proj_bb";
+  const projectId = options.projectId ?? "proj_omnyo";
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          sections: [],
-          projects: [
-            {
-              id: projectId,
-              kind: "standard",
-              name: "bb",
-              gitRemoteUrl: "git@github.com:get-bb/bb.git",
-              createdAt: NOW - 86_400_000,
-              updatedAt: NOW,
-              sources: sources.map((source, index) => ({
-                id: `src_${index}`,
-                projectId,
-                type: "local_path",
-                hostId: source.hostId,
-                path: source.path,
-                isDefault: index === 0,
-                createdAt: NOW,
+        JSON.stringify(
+          makeSidebarBootstrapResponse({
+            sections: [],
+            projects: [
+              {
+                id: projectId,
+                kind: "standard",
+                name: "Omnyo",
+                gitRemoteUrl: "git@github.com:get-bb/bb.git",
+                createdAt: NOW - 86_400_000,
                 updatedAt: NOW,
-              })),
+                sources: sources.map((source, index) => ({
+                  id: `src_${index}`,
+                  projectId,
+                  type: "local_path",
+                  hostId: source.hostId,
+                  path: source.path,
+                  isDefault: index === 0,
+                  createdAt: NOW,
+                  updatedAt: NOW,
+                })),
+                defaultExecutionOptions: null,
+                threads: [makeThreadListEntry({ id: "thr_1", projectId })],
+              },
+            ],
+            personalProject: {
+              id: "proj_personal",
+              kind: "personal",
+              name: "Personal",
+              gitRemoteUrl: null,
+              createdAt: NOW,
+              updatedAt: NOW,
+              sources: [],
               defaultExecutionOptions: null,
-              threads: [{ id: "thr_1", projectId }],
+              threads: [],
             },
-          ],
-          personalProject: {
-            id: "proj_personal",
-            kind: "personal",
-            name: "Personal",
-            gitRemoteUrl: null,
-            createdAt: NOW,
-            updatedAt: NOW,
-            sources: [],
-            defaultExecutionOptions: null,
-            threads: [],
-          },
-        }),
+          }),
+        ),
         {
           status: options.status ?? 200,
           headers: { "content-type": "application/json" },
@@ -123,8 +131,9 @@ function stubSidebarBootstrapFetch(
   );
 }
 
-function renderView(projectId = "proj_bb") {
+function renderView(projectId = "proj_omnyo") {
   const { wrapper } = createQueryClientTestHarness();
+
   return render(
     <MemoryRouter initialEntries={[`/settings/projects/${projectId}`]}>
       <Routes>
@@ -153,7 +162,7 @@ beforeEach(() => {
   ]);
   vi.mocked(sdk.hosts.pathsExist).mockResolvedValue({ existence: {} });
   vi.mocked(sdk.hosts.cloneDefaultPath).mockResolvedValue({
-    path: "/home/me/bb",
+    path: "/home/me/omnyo",
   });
   vi.mocked(sdk.projects.defaultExecutionOptions).mockResolvedValue(null);
 });
@@ -171,6 +180,7 @@ describe("ProjectDetailSettingsView", () => {
       name: "Sandbox",
       type: "ephemeral",
     });
+
     vi.mocked(sdk.hosts.list).mockResolvedValue([
       primaryHost,
       remoteHost,
@@ -183,7 +193,7 @@ describe("ProjectDetailSettingsView", () => {
       })),
     );
     renderView();
-    await screen.findByRole("heading", { name: "bb" });
+    await screen.findByRole("heading", { name: "Omnyo" });
     expect(screen.getByText(/2 of 2 machines/)).toBeDefined();
     expect(screen.queryByRole("link", { name: sandbox.name })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show all machines" }));
@@ -198,13 +208,13 @@ describe("ProjectDetailSettingsView", () => {
 
   it("lists every paired machine with its checkout or a set-up action", async () => {
     stubSidebarBootstrapFetch([
-      { hostId: "host_primary", path: "/Users/me/bb" },
+      { hostId: "host_primary", path: "/Users/me/omnyo" },
     ]);
 
     renderView();
 
-    expect(await screen.findByRole("heading", { name: "bb" })).toBeDefined();
-    expect(screen.getByText("/Users/me/bb")).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Omnyo" })).toBeDefined();
+    expect(screen.getByText("/Users/me/omnyo")).toBeDefined();
     expect(
       screen.getByText("github.com/get-bb/bb · 1 of 3 machines · 1 thread"),
     ).toBeDefined();
@@ -220,17 +230,19 @@ describe("ProjectDetailSettingsView", () => {
 
   it("opens the machine setup dialog for a remote machine", async () => {
     stubSidebarBootstrapFetch([
-      { hostId: "host_primary", path: "/Users/me/bb" },
+      { hostId: "host_primary", path: "/Users/me/omnyo" },
     ]);
 
     renderView();
     fireEvent.click(await screen.findByRole("button", { name: "Set up" }));
 
-    expect(await screen.findByText("Set up bb on dev-vm")).toBeDefined();
+    expect(await screen.findByText("Set up Omnyo on dev-vm")).toBeDefined();
   });
 
   it("opens the path dialog when the local machine has no checkout", async () => {
-    stubSidebarBootstrapFetch([{ hostId: "host_remote", path: "/home/me/bb" }]);
+    stubSidebarBootstrapFetch([
+      { hostId: "host_remote", path: "/home/me/omnyo" },
+    ]);
 
     renderView();
     fireEvent.click(await screen.findByRole("button", { name: "Set up" }));
@@ -240,8 +252,8 @@ describe("ProjectDetailSettingsView", () => {
 
   it("refuses to remove the last checkout but removes an extra one", async () => {
     stubSidebarBootstrapFetch([
-      { hostId: "host_primary", path: "/Users/me/bb" },
-      { hostId: "host_remote", path: "/home/me/bb" },
+      { hostId: "host_primary", path: "/Users/me/omnyo" },
+      { hostId: "host_remote", path: "/home/me/omnyo" },
     ]);
     vi.mocked(sdk.projects.sources.delete).mockResolvedValue({ ok: true });
 
@@ -257,7 +269,7 @@ describe("ProjectDetailSettingsView", () => {
 
     await waitFor(() =>
       expect(sdk.projects.sources.delete).toHaveBeenCalledWith({
-        projectId: "proj_bb",
+        projectId: "proj_omnyo",
         sourceId: "src_1",
       }),
     );
@@ -265,7 +277,7 @@ describe("ProjectDetailSettingsView", () => {
 
   it("disables removal when the project has a single checkout", async () => {
     stubSidebarBootstrapFetch([
-      { hostId: "host_primary", path: "/Users/me/bb" },
+      { hostId: "host_primary", path: "/Users/me/omnyo" },
     ]);
 
     renderView();
@@ -279,13 +291,15 @@ describe("ProjectDetailSettingsView", () => {
     const remove = await screen.findByRole("menuitem", {
       name: "Remove checkout",
     });
+
     expect(remove.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("shows derived thread defaults when the project has run threads", async () => {
     stubSidebarBootstrapFetch([
-      { hostId: "host_primary", path: "/Users/me/bb" },
+      { hostId: "host_primary", path: "/Users/me/omnyo" },
     ]);
+
     const defaults: ProjectExecutionDefaults = {
       providerId: "codex",
       model: "gpt-6-astra",
@@ -293,6 +307,7 @@ describe("ProjectDetailSettingsView", () => {
       reasoningLevel: "medium",
       permissionMode: "auto",
     };
+
     vi.mocked(sdk.projects.defaultExecutionOptions).mockResolvedValue(defaults);
 
     renderView();
@@ -304,7 +319,7 @@ describe("ProjectDetailSettingsView", () => {
 
   it("distinguishes a failed defaults load from an empty one", async () => {
     stubSidebarBootstrapFetch([
-      { hostId: "host_primary", path: "/Users/me/bb" },
+      { hostId: "host_primary", path: "/Users/me/omnyo" },
     ]);
     vi.mocked(sdk.projects.defaultExecutionOptions).mockRejectedValue(
       new Error("boom"),
@@ -320,7 +335,7 @@ describe("ProjectDetailSettingsView", () => {
 
   it("deletes the project and returns to the list", async () => {
     stubSidebarBootstrapFetch([
-      { hostId: "host_primary", path: "/Users/me/bb" },
+      { hostId: "host_primary", path: "/Users/me/omnyo" },
     ]);
     vi.mocked(sdk.projects.delete).mockResolvedValue({ ok: true });
 
@@ -334,7 +349,7 @@ describe("ProjectDetailSettingsView", () => {
 
     await waitFor(() =>
       expect(sdk.projects.delete).toHaveBeenCalledWith({
-        projectId: "proj_bb",
+        projectId: "proj_omnyo",
       }),
     );
     expect(await screen.findByText("Projects list")).toBeDefined();

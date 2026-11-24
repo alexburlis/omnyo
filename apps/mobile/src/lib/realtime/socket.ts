@@ -19,11 +19,13 @@ export type RealtimeSocketFactory = (url: string) => RealtimeSocketLike;
 function socketErrorMessage(event: unknown): string | null {
   if (typeof event !== "object" || event === null) return null;
   const message = (event as { message?: unknown }).message;
+
   return typeof message === "string" && message.length > 0 ? message : null;
 }
 
 export const defaultRealtimeSocketFactory: RealtimeSocketFactory = (url) => {
   const socket = new WebSocket(url);
+
   const adapter: RealtimeSocketLike = {
     onclose: null,
     onerror: null,
@@ -35,11 +37,13 @@ export const defaultRealtimeSocketFactory: RealtimeSocketFactory = (url) => {
     send: (data) => socket.send(data),
     close: (code, reason) => socket.close(code, reason),
   };
+
   socket.onopen = () => adapter.onopen?.();
   socket.onmessage = (event) => adapter.onmessage?.({ data: event.data });
   socket.onclose = (event) =>
     adapter.onclose?.({ code: event.code, reason: event.reason });
   socket.onerror = (event) =>
     adapter.onerror?.({ message: socketErrorMessage(event) });
+
   return adapter;
 };

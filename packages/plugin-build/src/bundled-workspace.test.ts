@@ -7,7 +7,8 @@ import { expect, it } from "vitest";
 const repositoryRoot = resolve(import.meta.dirname, "../../..");
 
 it("keeps bundled stages out of discovery without hiding real plugin packages", async () => {
-  const root = await mkdtemp(join(tmpdir(), "bb-bundled-workspace-"));
+  const root = await mkdtemp(join(tmpdir(), "omnyo-bundled-workspace-"));
+
   const graph = () =>
     spawnSync(
       process.execPath,
@@ -19,6 +20,7 @@ it("keeps bundled stages out of discovery without hiding real plugin packages", 
       ],
       { cwd: root, encoding: "utf8", timeout: 15_000 },
     );
+
   const writePackage = async (directory: string, name: string) => {
     await mkdir(join(root, directory), { recursive: true });
     await writeFile(
@@ -30,6 +32,7 @@ it("keeps bundled stages out of discovery without hiding real plugin packages", 
       }),
     );
   };
+
   const expectPackages = () => {
     const result = graph();
     expect(result.status, result.stderr).toBe(0);
@@ -37,6 +40,7 @@ it("keeps bundled stages out of discovery without hiding real plugin packages", 
       packages: ["bundled-plugin", "example-plugin"],
     });
   };
+
   try {
     await cp(
       join(repositoryRoot, "pnpm-workspace.yaml"),
@@ -57,6 +61,7 @@ it("keeps bundled stages out of discovery without hiding real plugin packages", 
     await writePackage("plugins/real", "bundled-plugin");
     await writePackage("examples/plugins/real", "example-plugin");
     expectPackages();
+
     for (const parent of ["plugins", "examples/plugins"]) {
       await cp(
         join(root, parent, "real"),
@@ -64,10 +69,13 @@ it("keeps bundled stages out of discovery without hiding real plugin packages", 
         { recursive: true },
       );
     }
+
     expectPackages();
+
     for (const parent of ["plugins", "examples/plugins"]) {
       await rm(join(root, parent, ".bundled-stage-owned"), { recursive: true });
     }
+
     expectPackages();
     await writePackage("plugins/duplicate", "bundled-plugin");
     const duplicate = graph();

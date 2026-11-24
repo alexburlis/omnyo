@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState, type ComponentProps } from "react";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Button } from "@bb/shared-ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@bb/shared-ui/tooltip";
-import { Icon } from "@bb/shared-ui/icon";
-import { Popover, PopoverAnchor } from "@bb/shared-ui/popover";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@omnyo/shared-ui/tooltip";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { Popover, PopoverAnchor } from "@omnyo/shared-ui/popover";
 import { MicrophonePreferencesSplit } from "./MicrophonePreferencesSplit";
 import { MicrophonePreferencesPopoverContent } from "./MicrophonePreferencesPopoverContent";
 
@@ -16,10 +16,12 @@ export function VoiceInputButton({
   const [open, setOpen] = useState(false);
   const [recoveredWarning, setRecoveredWarning] = useState<string | null>(null);
   const visibleWarning = recoveredWarning === warning ? null : warning;
+
   const handleCaptureReady = useCallback(
     () => setRecoveredWarning(warning),
     [warning],
   );
+
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   return (
@@ -55,6 +57,7 @@ export function VoiceInputButton({
                 }}
                 onKeyDown={(event) => {
                   props.onKeyDown?.(event);
+
                   if (
                     event.key === "ContextMenu" ||
                     (event.shiftKey && event.key === "F10")

@@ -1,19 +1,22 @@
+import { messageSourceFromNotice } from "./message-source.js";
 import {
   promptInputSchema,
+  queuedMessageSystemNoticeSchema,
   queuedMessageWaitingOnSchema,
   threadQueuedMessageSchema,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   PermissionMode,
   PromptInput,
   QueuedMessagePayload,
   QueuedMessagePayloadKind,
+  QueuedMessageSystemNotice,
   QueuedMessageWaitingOn,
   StartedOnBehalfOf,
   StartedOnBehalfOfInitiator,
   ThreadQueuedMessage,
   ThreadCreateOrigin,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { z } from "zod";
 import { ApiError } from "../../errors.js";
 import { resolveDispatchAuthor } from "./dispatch-author.js";
@@ -49,6 +52,7 @@ function parseStoredQueuedThreadMessageContent(
   row: Pick<StoredQueuedThreadMessageRow, "content" | "id" | "threadId">,
 ): PromptInput[] {
   let content: unknown;
+
   try {
     content = JSON.parse(row.content);
   } catch {
@@ -59,7 +63,8 @@ function parseStoredQueuedThreadMessageContent(
     );
   }
 
-  const parsed = z.array(promptInputSchema).min(1).safeParse(content);
+  const parsed = z.array(promptInputSchema).safeParse(content);
+
   if (!parsed.success) {
     throw new ApiError(
       500,
@@ -77,6 +82,7 @@ export function parseStoredQueuedThreadMessageWaitingOn(
   if (row.waitingOn === null) return null;
 
   let waitingOn: unknown;
+
   try {
     waitingOn = JSON.parse(row.waitingOn);
   } catch {
@@ -88,6 +94,7 @@ export function parseStoredQueuedThreadMessageWaitingOn(
   }
 
   const parsed = queuedMessageWaitingOnSchema.safeParse(waitingOn);
+
   if (!parsed.success) {
     throw new ApiError(
       500,
@@ -95,15 +102,35 @@ export function parseStoredQueuedThreadMessageWaitingOn(
       `Stored queued message ${row.id} for thread ${row.threadId} has a malformed wait`,
     );
   }
+
   return parsed.data;
 }
 
-/**
- * The requester a queued dispatch was written with, so a drained re-attempt
- * resolves the same author its first attempt did. The two columns are written
- * together; half a pair would silently demote an agent's dispatch to a user's,
- * so it fails rather than degrading to null.
- */
+export function parseStoredQueuedThreadMessageSystemNotice(
+  row: Pick<StoredQueuedThreadMessageRow, "id" | "systemNotice" | "threadId">,
+): QueuedMessageSystemNotice | null {
+  if (row.systemNotice === null) return null;
+  let notice: unknown;
+
+  try {
+    notice = JSON.parse(row.systemNotice);
+  } catch {
+    notice = null;
+  }
+
+  const parsed = queuedMessageSystemNoticeSchema.safeParse(notice);
+
+  if (!parsed.success) {
+    throw new ApiError(
+      500,
+      "internal_error",
+      `Stored queued message ${row.id} for thread ${row.threadId} has a malformed system notice`,
+    );
+  }
+
+  return parsed.data;
+}
+
 export function storedQueuedThreadMessageRequestedBy(
   row: Pick<
     StoredQueuedThreadMessageRow,
@@ -113,6 +140,7 @@ export function storedQueuedThreadMessageRequestedBy(
   if (row.requestedByInitiator === null && row.requestedByThreadId === null) {
     return null;
   }
+
   if (row.requestedByInitiator === null || row.requestedByThreadId === null) {
     throw new ApiError(
       500,
@@ -120,23 +148,24 @@ export function storedQueuedThreadMessageRequestedBy(
       `Stored queued message ${row.id} for thread ${row.threadId} has half a requester`,
     );
   }
+
   return {
     initiator: row.requestedByInitiator,
     senderThreadId: row.requestedByThreadId,
   };
 }
 
-/**
- * Assemble the row's retry columns into the payload union. A `retry` row that
- * is missing either column is a write-side bug, not a shape a reader should
- * paper over, so it fails loudly rather than degrading to `inline`.
- */
 function toQueuedMessagePayload(
   row: StoredQueuedThreadMessageRow,
 ): QueuedMessagePayload {
   if (row.payloadKind === "inline") {
     return { kind: "inline" };
   }
+
+  if (row.payloadKind === "continuation") {
+    return { kind: "continuation" };
+  }
+
   if (
     row.retryOfTurnRequestId === null ||
     row.retryAttempt === null ||
@@ -148,6 +177,7 @@ function toQueuedMessagePayload(
       `Stored queued message ${row.id} for thread ${row.threadId} is a retry with no original request`,
     );
   }
+
   return {
     kind: "retry",
     retryOfTurnRequestId: row.retryOfTurnRequestId,
@@ -159,16 +189,27 @@ function toQueuedMessagePayload(
 export function toThreadQueuedMessage(
   row: StoredQueuedThreadMessageRow,
 ): ThreadQueuedMessage {
+  const systemNotice =
+    row.systemNotice === null
+      ? null
+      : queuedMessageSystemNoticeSchema.parse(JSON.parse(row.systemNotice));
+
+  const messageSource = messageSourceFromNotice(systemNotice);
+
   const author =
-    row.systemNotice !== null
+    systemNotice !== null && messageSource === undefined
       ? { initiator: "system" as const, senderThreadId: null }
       : resolveDispatchAuthor({
-          retrying: row.payloadKind === "retry",
+          systemNotice: false,
+          retrying:
+            row.payloadKind === "retry" || row.payloadKind === "continuation",
           senderThreadId: row.senderThreadId,
           startedOnBehalfOf: storedQueuedThreadMessageRequestedBy(row),
         });
+
   return threadQueuedMessageSchema.parse({
     id: row.id,
+    messageSource,
     origin: row.origin,
     originPluginId: row.originPluginId,
     initiator: author.initiator,
@@ -184,8 +225,7 @@ export function toThreadQueuedMessage(
     waitingOn: parseStoredQueuedThreadMessageWaitingOn(row),
     failureReason: row.failureReason,
     payload: toQueuedMessagePayload(row),
-    // An `inline` draft stops being editable the moment the drain claims it:
-    // the row is on its way to a provider and a rewrite would be lost.
+
     editable: row.payloadKind === "inline" && row.claimedAt === null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

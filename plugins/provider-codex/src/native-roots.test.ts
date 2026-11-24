@@ -8,7 +8,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { experimental_nativeRootsResolveOutputSchema } from "@get-bb/plugin-sdk/host";
+import { experimental_nativeRootsResolveOutputSchema } from "@omnyo/plugin-sdk/host";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   readCodexEnabledPluginSettingsFromToml,
@@ -17,7 +17,9 @@ import {
 } from "./native-roots.js";
 
 let tempRoot: string;
+
 let homeDir: string;
+
 let codexHome: string;
 
 beforeEach(async () => {
@@ -43,9 +45,10 @@ async function writeFileEnsuringDir(
 async function writePluginManifest(
   pluginRoot: string,
   manifest: unknown,
+  relativePath = ".codex-plugin/plugin.json",
 ): Promise<void> {
   await writeFileEnsuringDir(
-    path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+    path.join(pluginRoot, relativePath),
     JSON.stringify(manifest, null, 2),
   );
 }
@@ -66,6 +69,7 @@ async function resolveSkills(
   expect(
     experimental_nativeRootsResolveOutputSchema.safeParse(answer).success,
   ).toBe(true);
+
   return answer.skills ?? [];
 }
 
@@ -90,9 +94,22 @@ describe("resolveCodexNativeRoots", () => {
   });
 
   it("follows a moved CODEX_HOME and normalizes its dot segments", async () => {
+    expect(
+      (
+        await resolveCodexNativeRoots({
+          homeDir,
+          env: { CODEX_HOME: codexHome },
+        })
+      ).watchPaths,
+    ).toEqual([
+      path.join(codexHome, "config.toml"),
+      path.join(codexHome, "plugins", "cache"),
+    ]);
     expect(await resolveSkills()).toEqual(homeRoots(codexHome));
+
     const dotted =
       path.join(tempRoot, "elsewhere", "..", "codex-home") + path.sep;
+
     expect(await resolveSkills({ CODEX_HOME: dotted })).toEqual(
       homeRoots(codexHome),
     );
@@ -152,6 +169,7 @@ describe("resolveCodexNativeRoots", () => {
       tempRoot,
       "codex-linked-plugin-skill.md",
     );
+
     await writeFileEnsuringDir(
       linkedSkillTarget,
       "---\nname: linked-file-skill\ndescription: Linked Codex file skill\n---\n",
@@ -166,6 +184,7 @@ describe("resolveCodexNativeRoots", () => {
       tempRoot,
       "codex-linked-plugin-skills",
     );
+
     await writeFileEnsuringDir(
       path.join(linkedSkillsTarget, "nested-skill", "SKILL.md"),
       "---\ndescription: Linked Codex directory skill\n---\n",
@@ -177,6 +196,7 @@ describe("resolveCodexNativeRoots", () => {
       "disabled-plugin",
       "1.0.0",
     );
+
     await writePluginManifest(disabledPluginRoot, { name: "disabled-plugin" });
     await writeFileEnsuringDir(
       path.join(disabledPluginRoot, "skills", "hidden", "SKILL.md"),
@@ -247,18 +267,196 @@ describe("resolveCodexNativeRoots", () => {
     ]);
   });
 
+  it.each([".claude-plugin", ".cursor-plugin"])(
+    "discovers a native-compatible %s manifest without modifying the plugin",
+    async (manifestDirectory) => {
+      const pluginRoot = cachedPluginRoot(
+        "cursor-plugins",
+        "pstack",
+        "0.15.30",
+      );
+
+      await writePluginManifest(
+        pluginRoot,
+        { name: "pstack" },
+        `${manifestDirectory}/plugin.json`,
+      );
+      await mkdir(path.join(pluginRoot, "skills"), { recursive: true });
+
+      expect((await resolveSkills()).slice(2)).toEqual([
+        {
+          path: path.join(pluginRoot, "skills"),
+          origin: "user",
+          namePrefix: "pstack:",
+          shape: "skills",
+        },
+      ]);
+    },
+  );
+
+  it("uses the root Agent Plugins name and conventional skills before legacy metadata", async () => {
+    const pluginRoot = cachedPluginRoot("cursor-plugins", "pstack", "0.15.30");
+    await writePluginManifest(pluginRoot, { name: "legacy", skills: "custom" });
+    await writePluginManifest(
+      pluginRoot,
+      {
+        $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+        name: "pstack",
+        skills: "custom",
+      },
+      "plugin.json",
+    );
+    await mkdir(path.join(pluginRoot, "skills"), { recursive: true });
+    await mkdir(path.join(pluginRoot, "custom"), { recursive: true });
+
+    expect((await resolveSkills()).slice(2)).toEqual([
+      {
+        path: path.join(pluginRoot, "skills"),
+        origin: "user",
+        namePrefix: "pstack:",
+        shape: "skills",
+      },
+    ]);
+  });
+
+  it("retains native disabled-plugin settings for Agent Plugins packages", async () => {
+    const pluginRoot = cachedPluginRoot("cursor-plugins", "pstack", "0.15.30");
+    await writePluginManifest(
+      pluginRoot,
+      {
+        $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+        name: "pstack",
+      },
+      "plugin.json",
+    );
+    await mkdir(path.join(pluginRoot, "skills"), { recursive: true });
+    await writeFileEnsuringDir(
+      path.join(codexHome, "config.toml"),
+      '[plugins."pstack@cursor-plugins"]\nenabled = false\n',
+    );
+
+    expect(await resolveSkills()).toEqual(homeRoots(codexHome));
+  });
+
+  it("ignores an unrelated root JSON file and retains native legacy precedence", async () => {
+    const pluginRoot = cachedPluginRoot("market", "compatible", "1.0.0");
+    await writePluginManifest(pluginRoot, { name: "unrelated" }, "plugin.json");
+
+    for (const directory of [
+      ".cursor-plugin",
+      ".claude-plugin",
+      ".codex-plugin",
+    ]) {
+      await writePluginManifest(
+        pluginRoot,
+        { name: directory.slice(1) },
+        `${directory}/plugin.json`,
+      );
+    }
+
+    await mkdir(path.join(pluginRoot, "skills"), { recursive: true });
+
+    expect(
+      (await resolveSkills()).slice(2).map((root) => root.namePrefix),
+    ).toEqual(["codex-plugin:"]);
+    await rm(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    expect(
+      (await resolveSkills()).slice(2).map((root) => root.namePrefix),
+    ).toEqual(["claude-plugin:"]);
+  });
+
+  it("continues from an empty Codex manifest directory to the Claude manifest", async () => {
+    const pluginRoot = cachedPluginRoot(
+      "market",
+      "empty-codex-directory",
+      "1.0.0",
+    );
+
+    await mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    await writePluginManifest(
+      pluginRoot,
+      { name: "compatible" },
+      ".claude-plugin/plugin.json",
+    );
+    await mkdir(path.join(pluginRoot, "skills"), { recursive: true });
+
+    expect(
+      (await resolveSkills()).slice(2).map((root) => root.namePrefix),
+    ).toEqual(["compatible:"]);
+  });
+
+  it("does not fall through an unsupported Agent Plugins schema to legacy metadata", async () => {
+    const pluginRoot = cachedPluginRoot("market", "unsupported", "1.0.0");
+    await writePluginManifest(pluginRoot, { name: "legacy" });
+    await writePluginManifest(
+      pluginRoot,
+      {
+        $schema: "https://agent-plugins.org/schemas/2.0.0/plugin.schema.json",
+        name: "future",
+      },
+      "plugin.json",
+    );
+    await mkdir(path.join(pluginRoot, "skills"), { recursive: true });
+
+    expect(await resolveSkills()).toEqual(homeRoots(codexHome));
+  });
+
+  it("does not fall through malformed selected legacy metadata", async () => {
+    const pluginRoot = cachedPluginRoot("market", "malformed", "1.0.0");
+    await writeFileEnsuringDir(
+      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+      "{ invalid",
+    );
+    await writePluginManifest(
+      pluginRoot,
+      { name: "legacy" },
+      ".claude-plugin/plugin.json",
+    );
+    await mkdir(path.join(pluginRoot, "skills"), { recursive: true });
+
+    expect(await resolveSkills()).toEqual(homeRoots(codexHome));
+  });
+
+  it.each(["plugin.json", ".codex-plugin", ".codex-plugin/plugin.json"])(
+    "does not bypass a nonregular manifest boundary at %s",
+    async (relativePath) => {
+      const pluginRoot = cachedPluginRoot("market", "nonregular", "1.0.0");
+
+      if (relativePath === ".codex-plugin") {
+        await writeFileEnsuringDir(
+          path.join(pluginRoot, relativePath),
+          "not a directory",
+        );
+      } else {
+        await mkdir(path.join(pluginRoot, relativePath), { recursive: true });
+      }
+
+      await writePluginManifest(
+        pluginRoot,
+        { name: "legacy" },
+        ".claude-plugin/plugin.json",
+      );
+      await mkdir(path.join(pluginRoot, "skills"), { recursive: true });
+
+      expect(await resolveSkills()).toEqual(homeRoots(codexHome));
+    },
+  );
+
   it("reads the most recently modified cached install that has a manifest", async () => {
     const olderRoot = cachedPluginRoot("market", "versioned", "1.0.0");
     const newerRoot = cachedPluginRoot("market", "versioned", "1.1.0");
+
     const newestWithoutManifest = cachedPluginRoot(
       "market",
       "versioned",
       "2.0.0",
     );
+
     for (const root of [olderRoot, newerRoot]) {
       await writePluginManifest(root, { name: "versioned" });
       await mkdir(path.join(root, "skills"), { recursive: true });
     }
+
     await mkdir(path.join(newestWithoutManifest, "skills"), {
       recursive: true,
     });
@@ -283,6 +481,7 @@ describe("resolveCodexNativeRoots", () => {
       await writePluginManifest(root, { name: plugin });
       await mkdir(path.join(root, "skills"), { recursive: true });
     }
+
     await writeFileEnsuringDir(
       path.join(codexHome, "plugins", "cache", "README.md"),
       "",
@@ -331,6 +530,7 @@ describe("readCodexEnabledPluginSettingsFromToml", () => {
         "enabled = false",
       ].join("\n"),
     );
+
     expect([...enabled.entries()]).toEqual([
       ["bare@market", false],
       ["quoted plugin@market", true],
@@ -352,6 +552,7 @@ describe("readCodexEnabledPluginSettingsFromToml", () => {
         "enabled = maybe",
       ].join("\r\n"),
     );
+
     expect([...enabled.entries()]).toEqual([["first@market", true]]);
   });
 });
@@ -363,6 +564,7 @@ describe("resolveCodexNativeRoots contract filtering", () => {
 
   it("drops only the roots of a plugin whose name cannot be a name prefix", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
     const plugins: [directory: string, manifest: Record<string, unknown>][] = [
       ["good-a", { name: "good-a" }],
       ["good-b", { name: "good-b" }],
@@ -371,6 +573,7 @@ describe("resolveCodexNativeRoots contract filtering", () => {
       ["long", { name: "a".repeat(70) }],
       [".hidden", {}],
     ];
+
     for (const [directory, manifest] of plugins) {
       const root = cachedPluginRoot("test-market", directory, "1.0.0");
       await writePluginManifest(root, manifest);
@@ -402,11 +605,13 @@ describe("resolveCodexNativeRoots contract filtering", () => {
     ]);
     expect(warn).toHaveBeenCalledTimes(4);
     const messages = warn.mock.calls.map(([message]) => String(message));
+
     for (const directory of ["spaced", "scoped", "long", ".hidden"]) {
       const dropped = path.join(
         cachedPluginRoot("test-market", directory, "1.0.0"),
         "skills",
       );
+
       expect(messages.some((message) => message.includes(`"${dropped}"`))).toBe(
         true,
       );

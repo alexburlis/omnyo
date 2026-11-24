@@ -1,5 +1,5 @@
-import { renderTemplate } from "@bb/templates";
-import { truncateToWidthAtWordBoundary } from "@bb/text-utils";
+import { renderTemplate } from "@omnyo/templates";
+import { truncateToWidthAtWordBoundary } from "@omnyo/text-utils";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { runTextAiTask } from "./ai-tasks.js";
 
@@ -28,6 +28,7 @@ export function sanitizeGeneratedCommitMessage(value: string): string | null {
     value.replace(/\s+/gu, " ").trim(),
     MAX_COMMIT_SUBJECT_WIDTH,
   ).trim();
+
   return message.length > 0 ? message : null;
 }
 
@@ -40,5 +41,6 @@ export async function generateCommitMessage(
     label: "Commit message generation",
     prompt: buildCommitMessagePrompt(args),
   });
+
   return outcome.ok ? sanitizeGeneratedCommitMessage(outcome.value) : null;
 }

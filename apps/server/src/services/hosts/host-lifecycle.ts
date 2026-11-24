@@ -1,5 +1,5 @@
 import { assertMachineLifecycleAdmission } from "../machines/lifecycle.js";
-import { getHost } from "@bb/db";
+import { getHost } from "@omnyo/db";
 import type { WorkSessionDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import { requireConnectedHostSession } from "../lib/entity-lookup.js";
@@ -13,6 +13,7 @@ export async function ensureHostSessionReadyForWork(
   args: { hostId: string },
 ) {
   const host = getHost(deps.db, args.hostId);
+
   if (!host || host.destroyedAt !== null) {
     throw new ApiError(404, "host_not_found", "Host not found");
   }
@@ -29,6 +30,7 @@ export async function ensureHostSessionReadyForWork(
   await resumeMachine(deps, host.id);
   assertMachineLifecycleAdmission(deps, host.id);
   const current = getHost(deps.db, host.id);
+
   if (current?.phase === "removing") {
     throw new ApiError(
       409,

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   markPluginFrontendBootStarted,
   markPluginFrontendSettleFloorReached,
@@ -41,6 +41,7 @@ const TASKS = {
   title: "Tasks",
   icon: "ListTodo",
 };
+
 const DOCS = {
   pluginId: "docs",
   id: "docs",
@@ -50,6 +51,7 @@ const DOCS = {
 };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   resetPluginSlotStoreForTest();
   resetPluginFrontendBootStateForTest();

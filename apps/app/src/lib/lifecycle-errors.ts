@@ -1,12 +1,13 @@
-import { assertNever } from "@bb/core-ui";
-import { BbHttpError } from "@bb/sdk/browser";
+import { assertNever } from "@omnyo/core-ui";
+import { OmnyoHttpError } from "@omnyo/sdk/browser";
 import {
   lifecycleApiErrorSchema,
   type LifecycleApiError,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { HttpError } from "./api";
 
 type LifecycleErrorSeverity = "info" | "warning" | "error";
+
 export type LifecycleErrorOperation =
   | "archive_thread"
   | "commit"
@@ -173,6 +174,7 @@ function describeEnvironmentNotReady({
   operation,
 }: EnvironmentNotReadyDescriptionArgs): LifecycleErrorDescription {
   const { details } = error;
+
   switch (details.environmentStatus) {
     case "creating":
     case "provisioning":
@@ -209,6 +211,7 @@ function describeThreadEnvironmentUnavailable({
   operation,
 }: ThreadEnvironmentUnavailableDescriptionArgs): LifecycleErrorDescription {
   const { details } = error;
+
   switch (details.reason) {
     case "never_attached":
       return info({
@@ -244,6 +247,7 @@ function describeThreadNotWritable({
   operation,
 }: ThreadNotWritableDescriptionArgs): LifecycleErrorDescription {
   const { details } = error;
+
   switch (details.reason) {
     case "archived":
       return info({
@@ -303,6 +307,7 @@ function describeHostUnavailable({
   operation,
 }: HostUnavailableDescriptionArgs): LifecycleErrorDescription {
   const { details } = error;
+
   switch (details.reason) {
     case "suspended":
       return warning({
@@ -354,6 +359,7 @@ function describeParentThreadInvalid({
   operation,
 }: ParentThreadInvalidDescriptionArgs): LifecycleErrorDescription {
   const isSenderThread = error.details.subject === "sender";
+
   const title = isSenderThread
     ? "Sender thread unavailable"
     : "Parent thread unavailable";
@@ -423,6 +429,7 @@ function describeDispatchHookFailed({
 }: DispatchHookFailedDescriptionArgs): LifecycleErrorDescription {
   const reason = error.message.trim();
   const sentence = reason.endsWith(".") ? reason : `${reason}.`;
+
   return errorDescription({
     operation,
     title: "Plugin dispatch hook failed",
@@ -431,16 +438,18 @@ function describeDispatchHookFailed({
 }
 
 export function parseLifecycleError(error: unknown): LifecycleApiError | null {
-  if (!(error instanceof HttpError) && !(error instanceof BbHttpError)) {
+  if (!(error instanceof HttpError) && !(error instanceof OmnyoHttpError)) {
     return null;
   }
 
   const result = lifecycleApiErrorSchema.safeParse(error.body);
+
   return result.success ? result.data : null;
 }
 
 export function isHostDisconnectedError(error: unknown): boolean {
   const lifecycleError = parseLifecycleError(error);
+
   return (
     lifecycleError?.code === "host_unavailable" &&
     lifecycleError.details.reason === "disconnected"
@@ -458,6 +467,7 @@ export function describeLifecycleError({
   operation,
 }: DescribeLifecycleErrorOptions): LifecycleErrorDescription | null {
   const lifecycleError = parseLifecycleError(error);
+
   if (!lifecycleError) {
     return null;
   }

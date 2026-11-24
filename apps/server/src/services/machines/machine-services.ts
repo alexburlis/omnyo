@@ -1,4 +1,4 @@
-import type { DbConnection } from "@bb/db";
+import type { DbConnection } from "@omnyo/db";
 import type { AppDeps } from "../../types.js";
 import { createMachineEnrollmentService } from "./enrollments.js";
 import { serverAccess } from "./server-access.js";
@@ -13,6 +13,7 @@ export function getMachineEnrollmentService(
   deps: Pick<AppDeps, "db" | "machineAuth" | "hub" | "logger">,
 ): MachineEnrollmentService {
   let service = services.get(deps.db);
+
   if (!service) {
     service = createMachineEnrollmentService({
       db: deps.db,
@@ -24,5 +25,6 @@ export function getMachineEnrollmentService(
     });
     services.set(deps.db, service);
   }
+
   return service;
 }

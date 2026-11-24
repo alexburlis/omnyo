@@ -1,4 +1,4 @@
-import { createDeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { describe, expect, it, vi } from "vitest";
 import { createProviderRegistryService } from "../../src/services/providers/provider-registry.js";
 import { minimalProviderRegistration } from "../helpers/provider-registry.js";
@@ -87,6 +87,7 @@ describe("provider registry policy accessors", () => {
 
   it("stops claiming capabilities for a provider whose plugin is gone", () => {
     const registry = createProviderRegistryService();
+
     const handle = registry.register(
       minimalProviderRegistration({
         pluginId: "provider-codex",
@@ -97,6 +98,7 @@ describe("provider registry policy accessors", () => {
         },
       }),
     );
+
     expect(registry.supportsManualCompaction("codex")).toBe(true);
 
     handle.dispose();
@@ -156,10 +158,12 @@ describe("provider registry ordering", () => {
       bundledIndex: 0,
       installedAt: 0,
     });
+
     const pi = registerProvider(registry, "pi", "provider-pi", {
       bundledIndex: 1,
       installedAt: 0,
     });
+
     registerProvider(registry, "acp-cursor", "provider-acp", {
       bundledIndex: 2,
       installedAt: 0,
@@ -187,9 +191,11 @@ describe("provider registry ordering", () => {
       providerOrder: ["acp-cursor", "ghost", "pi"],
       defaultProviderId: "ghost" as string | null,
     };
+
     const registry = createProviderRegistryService({
       readUserProviderPreferences: () => preferences,
     });
+
     registerProvider(registry, "codex", "provider-codex", {
       bundledIndex: 0,
       installedAt: 0,
@@ -227,6 +233,7 @@ describe("provider registry", () => {
 
   it("frees an id the moment its registration is disposed", () => {
     const registry = createProviderRegistryService();
+
     for (const providerId of ["codex", "pi", "acp-cursor", "acp-anything"]) {
       const handle = registerProvider(registry, providerId, "first-plugin");
       expect(() =>
@@ -239,6 +246,7 @@ describe("provider registry", () => {
 
   it("adds and disposes plugin registrations", () => {
     const registry = createProviderRegistryService();
+
     const handle = registry.register(
       minimalProviderRegistration({
         pluginId: "some-plugin",
@@ -246,6 +254,7 @@ describe("provider registry", () => {
         serverCapabilities: MINIMAL_SERVER_CAPABILITIES,
       }),
     );
+
     expect(registry.get("plugin-provider")).toMatchObject({
       pluginId: "some-plugin",
     });
@@ -262,6 +271,7 @@ describe("provider registry", () => {
         serverCapabilities: MINIMAL_SERVER_CAPABILITIES,
       }),
     );
+
     handle.dispose();
     expect(registry.get("plugin-provider")).toMatchObject({
       pluginId: "other-plugin",
@@ -273,11 +283,14 @@ describe("provider registry", () => {
     const registry = createProviderRegistryService({
       deferRegistrationsSettled: true,
     });
+
     let requestedProviderReady = false;
     let unrelatedProviderReady = false;
+
     const requestedWait = registry.whenProviderRegistered("codex").then(() => {
       requestedProviderReady = true;
     });
+
     const unrelatedWait = registry
       .whenProviderRegistered("claude-code")
       .then(() => {
@@ -299,7 +312,9 @@ describe("provider registry", () => {
     const registry = createProviderRegistryService({
       deferRegistrationsSettled: true,
     });
+
     let released = false;
+
     const ready = registry.whenProviderRegistered("acp-opencode").then(() => {
       released = true;
     });
@@ -318,6 +333,7 @@ describe("installed-state cache", () => {
   it("serves a remembered answer and dedupes concurrent probes", async () => {
     const registry = createProviderRegistryService({});
     registerProvider(registry, "codex", "provider-codex");
+
     const key = {
       hostId: "host_1",
       providerId: "codex",
@@ -326,10 +342,13 @@ describe("installed-state cache", () => {
     expect(registry.lookupInstalled(key)).toBeUndefined();
 
     let probes = 0;
+
     const probe = () => {
       probes += 1;
+
       return Promise.resolve(true);
     };
+
     const inFlight = probe();
     registry.rememberInstalled(key, inFlight);
 
@@ -341,10 +360,12 @@ describe("installed-state cache", () => {
   it("serves the answer when the registration revision moves and replaces it after exactly one revalidation", async () => {
     const registry = createProviderRegistryService({});
     registerProvider(registry, "codex", "provider-codex");
+
     const key = {
       hostId: "host_1",
       providerId: "codex",
     };
+
     registry.rememberInstalled(key, Promise.resolve(true));
     const held = createDeferredPromise<boolean>();
     const probe = vi.fn(() => held.promise);
@@ -366,6 +387,7 @@ describe("installed-state cache", () => {
 
   it("drops an expired answer when its revalidation fails and never writes a revalidation over a newer answer", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
+
     try {
       vi.setSystemTime(1_800_000_000_000);
       const registry = createProviderRegistryService({});
@@ -381,10 +403,12 @@ describe("installed-state cache", () => {
       expect(registry.lookupInstalled(failing)).toBeUndefined();
 
       const held = createDeferredPromise<boolean>();
+
       const revalidation = registry.revalidateInstalled(
         replaced,
         () => held.promise,
       );
+
       registry.forgetAllInstalled();
       registry.rememberInstalled(replaced, Promise.resolve(true));
       held.resolve(false);
@@ -398,18 +422,22 @@ describe("installed-state cache", () => {
   it("forgets one host-provider answer or all answers", async () => {
     const registry = createProviderRegistryService({});
     registerProvider(registry, "codex", "provider-codex");
+
     const hostOneCodex = {
       hostId: "host_1",
       providerId: "codex",
     };
+
     const hostTwoCodex = {
       hostId: "host_2",
       providerId: "codex",
     };
+
     const hostOnePi = {
       hostId: "host_1",
       providerId: "pi",
     };
+
     registry.rememberInstalled(hostOneCodex, Promise.resolve(true));
     registry.rememberInstalled(hostTwoCodex, Promise.resolve(false));
     registry.rememberInstalled(hostOnePi, Promise.resolve(false));

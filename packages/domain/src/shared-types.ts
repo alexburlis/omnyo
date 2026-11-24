@@ -11,8 +11,11 @@ export const reasoningLevelValues = [
   "max",
   "ultra",
 ] as const;
+
 export type StandardReasoningLevel = (typeof reasoningLevelValues)[number];
+
 export const reasoningLevelSchema = z.string().min(1);
+
 export type ReasoningLevel = z.infer<typeof reasoningLevelSchema>;
 
 export function isStandardReasoningLevel(
@@ -25,6 +28,7 @@ export function standardReasoningLevelRank(
   level: ReasoningLevel,
 ): number | null {
   const rank = (reasoningLevelValues as readonly string[]).indexOf(level);
+
   return rank === -1 ? null : rank;
 }
 
@@ -34,22 +38,30 @@ export function compareReasoningLevels(
 ): number {
   const aRank = standardReasoningLevelRank(a);
   const bRank = standardReasoningLevelRank(b);
+
   if (aRank === null || bRank === null) {
     return aRank === bRank ? 0 : aRank === null ? 1 : -1;
   }
+
   return aRank - bRank;
 }
 
 export const DEFAULT_SERVICE_TIER = "default";
+
 export const serviceTierSchema = z.string().min(1);
+
 export type ServiceTier = z.infer<typeof serviceTierSchema>;
 
 export const instructionModeValues = ["append", "replace"] as const;
+
 export const instructionModeSchema = z.enum(instructionModeValues);
+
 export type InstructionMode = z.infer<typeof instructionModeSchema>;
 
 export const permissionModeValues = ["accept-edits", "auto", "full"] as const;
+
 export const permissionModeSchema = z.enum(permissionModeValues);
+
 export type PermissionMode = z.infer<typeof permissionModeSchema>;
 
 export function permissionModeRank(permissionMode: PermissionMode): number {
@@ -62,15 +74,19 @@ export function clampPermissionModeToCeiling(args: {
   permissionModes?: readonly PermissionMode[];
 }): PermissionMode | null {
   const ceilingRank = permissionModeRank(args.ceiling);
+
   if (permissionModeRank(args.permissionMode) <= ceilingRank) {
     return args.permissionMode;
   }
+
   const supported = args.permissionModes ?? permissionModeValues;
+
   const allowed = supported
     .filter((mode) => permissionModeRank(mode) <= ceilingRank)
     .sort(
       (left, right) => permissionModeRank(right) - permissionModeRank(left),
     );
+
   return allowed[0] ?? null;
 }
 
@@ -84,19 +100,24 @@ const legacyRecordedPermissionModeValues = [
   "workspace-write",
   "readonly",
 ] as const;
+
 const recordedPermissionModeSchema = z.enum([
   ...permissionModeValues,
   ...legacyRecordedPermissionModeValues,
 ]);
+
 export type RecordedPermissionMode = z.infer<
   typeof recordedPermissionModeSchema
 >;
 
 export const permissionEscalationValues = ["ask", "deny"] as const;
+
 const permissionEscalationSchema = z.enum(permissionEscalationValues);
+
 export type PermissionEscalation = z.infer<typeof permissionEscalationSchema>;
 
 const promptInputVisibilityValues = ["agent-only"] as const;
+
 const promptInputVisibilitySchema = z.enum(promptInputVisibilityValues);
 
 const promptInputVisibilityFields = {
@@ -104,22 +125,27 @@ const promptInputVisibilityFields = {
 };
 
 const promptMentionPathSourceValues = ["workspace", "thread-storage"] as const;
+
 const promptMentionPathSourceSchema = z.enum(promptMentionPathSourceValues);
 
 const promptMentionPathEntryKindValues = ["file", "directory"] as const;
+
 const promptMentionPathEntryKindSchema = z.enum(
   promptMentionPathEntryKindValues,
 );
 
 export const promptMentionCommandTriggerValues = ["/", "$"] as const;
+
 export const promptMentionCommandTriggerSchema = z.enum(
   promptMentionCommandTriggerValues,
 );
+
 export type PromptMentionCommandTrigger = z.infer<
   typeof promptMentionCommandTriggerSchema
 >;
 
 const promptMentionCommandSourceValues = ["skill", "command"] as const;
+
 const promptMentionCommandSourceSchema = z.enum(
   promptMentionCommandSourceValues,
 );
@@ -129,9 +155,11 @@ const promptMentionCommandOriginValues = [
   "project",
   "user",
 ] as const;
+
 const promptMentionCommandOriginSchema = z.enum(
   promptMentionCommandOriginValues,
 );
+
 export type PromptMentionCommandOrigin = z.infer<
   typeof promptMentionCommandOriginSchema
 >;
@@ -189,11 +217,13 @@ function normalizeLegacyPromptMentionResource(value: unknown): unknown {
   }
 
   const record = value as Record<string, unknown>;
+
   if (record.kind !== "folder" || typeof record.folderId !== "string") {
     return value;
   }
 
   const { folderId, ...rest } = record;
+
   return { ...rest, kind: "section", sectionId: folderId };
 }
 
@@ -201,6 +231,7 @@ export const promptMentionResourceSchema = z.preprocess(
   normalizeLegacyPromptMentionResource,
   canonicalPromptMentionResourceSchema,
 );
+
 export type PromptMentionResource = z.infer<typeof promptMentionResourceSchema>;
 
 export const promptTextMentionSchema = z.object({
@@ -208,6 +239,7 @@ export const promptTextMentionSchema = z.object({
   end: z.number().int().nonnegative(),
   resource: promptMentionResourceSchema,
 });
+
 export type PromptTextMention = z.infer<typeof promptTextMentionSchema>;
 
 export const promptInputSchema = z.discriminatedUnion("type", [
@@ -240,6 +272,7 @@ export const promptInputSchema = z.discriminatedUnion("type", [
     ...promptInputVisibilityFields,
   }),
 ]);
+
 export type PromptInput = z.infer<typeof promptInputSchema>;
 
 export function flattenPromptInputGroups(
@@ -280,6 +313,7 @@ function isStandaloneBuiltinCommand(
   name: string,
 ): boolean {
   const selector = { trigger: "/" as const, name };
+
   const selected = input.flatMap((item) =>
     item.type === "text"
       ? item.mentions
@@ -289,7 +323,9 @@ function isStandaloneBuiltinCommand(
           .map((mention) => ({ mention, text: item.text }))
       : [],
   );
+
   const standalone = selected[0];
+
   if (
     selected.length !== 1 ||
     !standalone ||
@@ -297,7 +333,9 @@ function isStandaloneBuiltinCommand(
   ) {
     return false;
   }
+
   const { mention, text } = standalone;
+
   if (
     mention.resource.kind !== "command" ||
     mention.resource.source !== "command" ||
@@ -306,6 +344,7 @@ function isStandaloneBuiltinCommand(
   ) {
     return false;
   }
+
   return removeCommandMentionsFromPromptInput(input, selector).every(
     (item) => item.type === "text" && item.text.trim() === "",
   );
@@ -410,11 +449,13 @@ function removedBefore(
   position: number,
 ): number {
   let removed = 0;
+
   for (const range of ranges) {
     if (range.end <= position) {
       removed += range.end - range.start;
     }
   }
+
   return removed;
 }
 
@@ -432,16 +473,19 @@ function removeCommandMentionsFromTextInput(
   selector: PromptCommandSelector,
 ): TextPromptInput {
   const ranges = commandRemovalRanges(input, selector);
+
   if (ranges.length === 0) {
     return input;
   }
 
   let text = "";
   let cursor = 0;
+
   for (const range of ranges) {
     text += input.text.slice(cursor, range.start);
     cursor = range.end;
   }
+
   text += input.text.slice(cursor);
 
   return {
@@ -456,6 +500,7 @@ function removeCommandMentionsFromTextInput(
       .map((mention) => {
         const start = mention.start - removedBefore(ranges, mention.start);
         const end = mention.end - removedBefore(ranges, mention.end);
+
         return { ...mention, start, end };
       }),
   };
@@ -477,21 +522,18 @@ const threadExecutionSourceSchema = z.enum([
   "client/turn/requested",
   "client/turn/start",
 ]);
+
 export type ThreadExecutionSource = z.infer<typeof threadExecutionSourceSchema>;
 
-/**
- * Where a caller-supplied execution value came from. `explicit` is a user
- * choice and `client-preference` is a remembered client-side default. Only
- * `explicit` is a user decision, so only `explicit` shapes project execution
- * defaults.
- */
 const callerExecutionInputSourceValues = [
   "explicit",
   "client-preference",
 ] as const;
+
 export const callerExecutionInputSourceSchema = z.enum(
   callerExecutionInputSourceValues,
 );
+
 export type CallerExecutionInputSource = z.infer<
   typeof callerExecutionInputSourceSchema
 >;
@@ -504,6 +546,7 @@ const threadExecutionOptionsSchema = z.object({
   source: threadExecutionSourceSchema.optional(),
   seq: z.number().int().optional(),
 });
+
 export type ThreadExecutionOptions = z.infer<
   typeof threadExecutionOptionsSchema
 >;
@@ -516,6 +559,7 @@ export const resolvedThreadExecutionOptionsSchema =
     permissionMode: permissionModeSchema,
     source: threadExecutionSourceSchema,
   });
+
 export type ResolvedThreadExecutionOptions = z.infer<
   typeof resolvedThreadExecutionOptionsSchema
 >;
@@ -524,12 +568,15 @@ export const recordedThreadExecutionOptionsSchema =
   resolvedThreadExecutionOptionsSchema.extend({
     permissionMode: recordedPermissionModeSchema,
   });
+
 export type RecordedThreadExecutionOptions = z.infer<
   typeof recordedThreadExecutionOptionsSchema
 >;
 
 export const runtimePermissionScopeValues = ["workspace", "full"] as const;
+
 const runtimePermissionScopeSchema = z.enum(runtimePermissionScopeValues);
+
 export type RuntimePermissionScope = z.infer<
   typeof runtimePermissionScopeSchema
 >;
@@ -557,20 +604,24 @@ export const runtimePermissionPolicySchema = z.discriminatedUnion(
     }),
   ],
 );
+
 export type RuntimePermissionPolicy = z.infer<
   typeof runtimePermissionPolicySchema
 >;
 
 export const promptModeSchema = z.literal("plan");
+
 export type PromptMode = z.infer<typeof promptModeSchema>;
 
 export const sessionOptionValueSchema = z.union([z.string(), z.boolean()]);
+
 export type SessionOptionValue = z.infer<typeof sessionOptionValueSchema>;
 
 export const sessionOptionSelectionsSchema = z.record(
   z.string().min(1),
   sessionOptionValueSchema,
 );
+
 export type SessionOptionSelections = z.infer<
   typeof sessionOptionSelectionsSchema
 >;
@@ -586,6 +637,7 @@ const runtimeThreadExecutionBaseOptionsSchema = z.object({
 
 export const runtimeThreadExecutionOptionsSchema =
   runtimeThreadExecutionBaseOptionsSchema.and(runtimePermissionPolicySchema);
+
 export type RuntimeThreadExecutionOptions = z.infer<
   typeof runtimeThreadExecutionOptionsSchema
 >;
@@ -597,6 +649,7 @@ export const projectExecutionDefaultsSchema = z.object({
   reasoningLevel: reasoningLevelSchema,
   permissionMode: permissionModeSchema,
 });
+
 export type ProjectExecutionDefaults = z.infer<
   typeof projectExecutionDefaultsSchema
 >;

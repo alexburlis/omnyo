@@ -1,5 +1,5 @@
-import type { PluginFileOpenerProps } from "@get-bb/plugin-sdk";
-import type { ThreadTabFileOpenerOwner } from "@bb/server-contract";
+import type { PluginFileOpenerProps } from "@omnyo/plugin-sdk";
+import type { ThreadTabFileOpenerOwner } from "@omnyo/server-contract";
 import {
   createPluginPanelFixedPanelTab,
   type PluginPanelFixedPanelTab,
@@ -54,15 +54,20 @@ export function parseFileOpenerParams(
 ): PluginFileOpenerFile | null {
   if (paramsJson === null) return null;
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(paramsJson);
   } catch {
     return null;
   }
+
   if (typeof parsed !== "object" || parsed === null) return null;
   const { path, source } = parsed as { path?: unknown; source?: unknown };
+
   if (typeof path !== "string" || path.length === 0) return null;
+
   if (typeof source !== "object" || source === null) return null;
+
   const { kind, threadId, environmentId, projectId, experimental_hostId } =
     source as {
       kind?: unknown;
@@ -71,9 +76,11 @@ export function parseFileOpenerParams(
       projectId?: unknown;
       experimental_hostId?: unknown;
     };
+
   if (kind !== "workspace" && kind !== "host" && kind !== "thread-storage") {
     return null;
   }
+
   return {
     path,
     source: {
@@ -93,9 +100,11 @@ export function createFileOpenerOriginalTab(
 ): FileOpenerOriginalTab | null {
   const owner = tab.fileOpenerOwner;
   const file = parseFileOpenerParams(tab.paramsJson);
+
   if (owner === undefined || file === null) return null;
 
   const id = `${tab.id}:file-opener-original`;
+
   if (
     owner.kind === "workspace-file-preview" &&
     file.source.kind === "workspace"
@@ -109,6 +118,7 @@ export function createFileOpenerOriginalTab(
       projectId: file.source.projectId,
     };
   }
+
   if (owner.kind === "host-file-preview" && file.source.kind === "host") {
     return {
       ...owner.tab,
@@ -120,6 +130,7 @@ export function createFileOpenerOriginalTab(
       threadId: file.source.threadId,
     };
   }
+
   if (
     owner.kind === "thread-storage-file-preview" &&
     file.source.kind === "thread-storage"
@@ -134,6 +145,7 @@ export function createFileOpenerOriginalTab(
       threadId: file.source.threadId,
     };
   }
+
   return null;
 }
 
@@ -164,8 +176,10 @@ export function createFileOpenerTabForRequest({
     resolvedEnvironmentId,
     threadId,
   });
+
   if (owner === null) return null;
   const file = fileForOwnerRequest(owner);
+
   const routedFile: PluginFileOpenerFile =
     file.source.kind === "workspace" &&
     file.source.environmentId === null &&
@@ -179,12 +193,14 @@ export function createFileOpenerTabForRequest({
           },
         }
       : file;
+
   const resolved = resolveFileOpenerReplacement({
     registrations: fileOpeners,
     preference,
     path: routedFile.path,
     ...(viewer !== undefined ? { override: viewer } : {}),
   });
+
   return resolved.kind === "plugin"
     ? buildFileOpenerPanelTab(resolved.registration, routedFile, owner)
     : null;
@@ -207,10 +223,14 @@ function ownerRequestForOpenRequest({
       ) {
         return null;
       }
+
       if (request.tab.source.kind !== "working-tree") return null;
+
       if (request.tab.statusLabel === "deleted") return null;
+
       const environmentId =
         request.environmentId ?? resolvedEnvironmentId ?? null;
+
       return {
         kind: request.kind,
         environmentId,
@@ -219,6 +239,7 @@ function ownerRequestForOpenRequest({
         threadId: threadId ?? null,
       };
     }
+
     case "host-file-preview": {
       if (request.hostId !== undefined) {
         return {
@@ -229,7 +250,9 @@ function ownerRequestForOpenRequest({
           threadId: null,
         };
       }
+
       if (!threadId || !resolvedEnvironmentId) return null;
+
       return {
         kind: request.kind,
         environmentId: resolvedEnvironmentId,
@@ -238,9 +261,12 @@ function ownerRequestForOpenRequest({
         threadId,
       };
     }
+
     case "thread-storage-file-preview": {
       const storageThreadId = request.threadId ?? threadId;
+
       if (!storageThreadId) return null;
+
       return {
         kind: request.kind,
         environmentId: resolvedEnvironmentId ?? null,
@@ -248,6 +274,7 @@ function ownerRequestForOpenRequest({
         threadId: storageThreadId,
       };
     }
+
     default:
       return null;
   }

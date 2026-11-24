@@ -6,7 +6,10 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { getBbDesktopInfo, isDesktopBrowserAvailable } from "@/lib/bb-desktop";
+import {
+  getOmnyoDesktopInfo,
+  isDesktopBrowserAvailable,
+} from "@/lib/omnyo-desktop";
 import { shellOpenExternal } from "@/lib/native-shell";
 import {
   openUrlByPreference,
@@ -30,12 +33,16 @@ const InAppBrowserUrlOpenContext = createContext<OpenInAppBrowserUrl | null>(
 );
 
 export function openUrlInExternalBrowser(url: string): void {
-  const desktopInfo = getBbDesktopInfo();
+  const desktopInfo = getOmnyoDesktopInfo();
+
   if (desktopInfo !== null) {
     desktopInfo.openExternalUrl(url);
+
     return;
   }
+
   if (shellOpenExternal(url)) return;
+
   if (typeof window !== "undefined") {
     window.open(url, "_blank", "noopener,noreferrer");
   }
@@ -54,10 +61,12 @@ export function UrlOpenRoutingProvider({
 
 export function AppNavigationUrlHost({ children }: { children: ReactNode }) {
   const openUrl = useOpenUrlByPreference();
+
   const capabilities = useMemo(
     () => ({ openUrl: ({ url }: { url: string }) => openUrl(url) }),
     [openUrl],
   );
+
   return (
     <AppNavigationHostProvider capabilities={capabilities}>
       {children}
@@ -68,6 +77,7 @@ export function AppNavigationUrlHost({ children }: { children: ReactNode }) {
 function useOpenUrlByPreference(): (url: string) => boolean {
   const openInAppBrowser = useContext(InAppBrowserUrlOpenContext);
   const [openLinksInAppBrowser] = useOpenLinksInAppBrowserPreference();
+
   const desktopBrowserAvailable =
     openInAppBrowser !== null && isDesktopBrowserAvailable();
 
@@ -94,9 +104,11 @@ export function useUrlAnchorClickHandler(
       if (event.defaultPrevented || event.button !== 0 || url === undefined) {
         return;
       }
+
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
         return;
       }
+
       if (openUrl(url)) {
         event.preventDefault();
       }

@@ -14,10 +14,12 @@ export const DESKTOP_BROWSER_IMPORT_SOURCE_IDS = [
   "zen",
   "safari",
 ] as const;
+
 export const desktopBrowserImportSourceIdSchema = z.union([
   z.enum(DESKTOP_BROWSER_IMPORT_SOURCE_IDS),
   z.string().regex(/^storage-[a-f0-9]{64}$/),
 ]);
+
 export type DesktopBrowserImportSourceId = z.infer<
   typeof desktopBrowserImportSourceIdSchema
 >;
@@ -30,6 +32,7 @@ export const desktopBrowserImportUnavailableReasonSchema = z.enum([
   "browserRunning",
   "unsupportedPlatform",
 ]);
+
 export type DesktopBrowserImportUnavailableReason = z.infer<
   typeof desktopBrowserImportUnavailableReasonSchema
 >;
@@ -41,6 +44,7 @@ export const desktopBrowserImportFailureReasonSchema = z.enum([
   "unknownSourceProfile",
   "readFailed",
 ]);
+
 export type DesktopBrowserImportFailureReason = z.infer<
   typeof desktopBrowserImportFailureReasonSchema
 >;
@@ -54,6 +58,7 @@ export const desktopBrowserImportSourceProfileSchema = z
     cookieCount: z.number().int().nonnegative().optional(),
   })
   .strict();
+
 export type DesktopBrowserImportSourceProfile = z.infer<
   typeof desktopBrowserImportSourceProfileSchema
 >;
@@ -71,6 +76,7 @@ export const desktopBrowserImportSourceSchema = z
       .optional(),
   })
   .strict();
+
 export type DesktopBrowserImportSource = z.infer<
   typeof desktopBrowserImportSourceSchema
 >;
@@ -79,6 +85,7 @@ export const desktopBrowserImportSelectionSchema = z.object({
   sourceId: desktopBrowserImportSourceIdSchema,
   sourceProfileDirectory: profileDirectory,
 });
+
 export type DesktopBrowserImportSelection = z.infer<
   typeof desktopBrowserImportSelectionSchema
 >;
@@ -100,6 +107,7 @@ export const desktopBrowserImportOutcomeSchema = z.discriminatedUnion("ok", [
     })
     .strict(),
 ]);
+
 export type DesktopBrowserImportOutcome = z.infer<
   typeof desktopBrowserImportOutcomeSchema
 >;
@@ -113,7 +121,7 @@ const UNAVAILABLE_COPY: Readonly<
   keychainItemMissing:
     "No matching encryption key was found in your Keychain. Open and sign in to the source browser, then try again. Browsers with custom key names may need additional support.",
   needsFullDiskAccess:
-    "Give BB Full Disk Access in System Settings → Privacy & Security, then try again.",
+    "Give Omnyo Full Disk Access in System Settings → Privacy & Security, then try again.",
   browserRunning: "Quit the browser first so its cookie database can be read.",
   unsupportedPlatform:
     "Importing from this browser isn't possible on this platform.",

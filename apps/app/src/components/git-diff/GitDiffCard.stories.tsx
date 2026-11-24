@@ -3,10 +3,11 @@ import {
   builtInThemes,
   defaultAppTheme,
   type BuiltInThemeId,
-} from "@bb/domain";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { Button } from "@bb/shared-ui/button";
+} from "@omnyo/domain";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { Button } from "@omnyo/shared-ui/button";
 import { resolveAppThemeCss } from "@/lib/themes";
+import { PreferredThemeOverride } from "@/hooks/useTheme";
 import { GitDiffCard } from "@/components/git-diff/GitDiffCard";
 import type { DiffPresentation } from "@/components/code/code-rendering";
 import { parseGitDiffFiles } from "@/components/git-diff/git-diff-parsing";
@@ -55,11 +56,13 @@ function usePaletteCss(themeId: BuiltInThemeId) {
     let el = document.getElementById(
       STORY_THEME_STYLE_ID,
     ) as HTMLStyleElement | null;
+
     if (!el) {
       el = document.createElement("style");
       el.id = STORY_THEME_STYLE_ID;
       document.head.appendChild(el);
     }
+
     el.textContent = resolveAppThemeCss({
       ...defaultAppTheme,
       themeId,
@@ -79,6 +82,7 @@ const DIFF_PRESENTATION: DiffPresentation = {
 
 function DiffStack() {
   const files = useMemo(() => parseGitDiffFiles(SAMPLE_DIFF), []);
+
   return (
     <div className="flex flex-col gap-3">
       {files.map((file, index) => (
@@ -100,10 +104,10 @@ function ModePane({ mode }: { mode: "light" | "dark" }) {
         "flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-background p-3",
       )}
     >
-      <span className="text-[11px] font-medium text-muted-foreground">
-        {mode}
-      </span>
-      <DiffStack />
+      <span className="text-2xs font-medium text-muted-foreground">{mode}</span>
+      <PreferredThemeOverride value={mode}>
+        <DiffStack />
+      </PreferredThemeOverride>
     </div>
   );
 }

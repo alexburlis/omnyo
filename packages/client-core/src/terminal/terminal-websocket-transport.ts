@@ -1,15 +1,21 @@
-import { getTerminalBase64DecodedByteLength } from "@bb/domain";
+import { getTerminalBase64DecodedByteLength } from "@omnyo/domain";
 import {
   terminalServerMessageSchema,
   type TerminalServerMessage,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 
 const SOCKET_OPEN = 1;
+
 const DEFAULT_INPUT_QUEUE_MAX_BYTES = 1024 * 1024;
+
 const DEFAULT_SOCKET_HIGH_WATER_BYTES = 1024 * 1024;
+
 const DEFAULT_DRAIN_POLL_MS = 10;
+
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 45_000;
+
 const DEFAULT_RECONNECT_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
 
 export type TerminalSocketConnectionState =
@@ -41,6 +47,7 @@ function terminalSocketUrl(url: string, sinceSeq: number): string {
   const parsed = new URL(url);
   parsed.searchParams.set("sinceSeq", String(sinceSeq));
   parsed.searchParams.set("outputAcks", "1");
+
   return parsed.toString();
 }
 
@@ -111,6 +118,7 @@ export class TerminalWebSocketTransport {
     if (this.disposed || this.socket !== null) {
       return;
     }
+
     this.connect("connecting");
   }
 
@@ -118,12 +126,14 @@ export class TerminalWebSocketTransport {
     if (this.disposed) {
       return;
     }
+
     this.disposed = true;
     this.clearReconnectTimeout();
     this.clearDrainTimeout();
     this.stopHeartbeat();
     const socket = this.socket;
     this.socket = null;
+
     if (socket !== null) {
       socket.onclose = null;
       socket.onerror = null;
@@ -131,6 +141,7 @@ export class TerminalWebSocketTransport {
       socket.onopen = null;
       socket.close();
     }
+
     this.options.onConnectionState?.("closed");
   }
 
@@ -142,7 +153,9 @@ export class TerminalWebSocketTransport {
         dataBase64,
       }),
     };
+
     const socket = this.socket;
+
     if (
       socket !== null &&
       socket.readyState === SOCKET_OPEN &&
@@ -153,6 +166,7 @@ export class TerminalWebSocketTransport {
         return true;
       }
     }
+
     return this.enqueueInput(pending);
   }
 
@@ -163,15 +177,19 @@ export class TerminalWebSocketTransport {
     ) {
       return;
     }
+
     const scheduled = this.pendingOutputAckNextSeq !== null;
     this.pendingOutputAckNextSeq = nextSeq;
+
     if (scheduled) {
       return;
     }
+
     queueMicrotask(() => {
       const ackNextSeq = this.pendingOutputAckNextSeq;
       this.pendingOutputAckNextSeq = null;
       const socket = this.socket;
+
       if (
         ackNextSeq === null ||
         socket === null ||
@@ -179,6 +197,7 @@ export class TerminalWebSocketTransport {
       ) {
         return;
       }
+
       this.trySend(
         socket,
         JSON.stringify({ type: "ack", nextSeq: ackNextSeq }),
@@ -190,8 +209,10 @@ export class TerminalWebSocketTransport {
     if (this.visible === visible) {
       return;
     }
+
     this.visible = visible;
     const socket = this.socket;
+
     if (socket !== null && socket.readyState === SOCKET_OPEN) {
       this.trySend(socket, JSON.stringify({ type: "visibility", visible }));
     }
@@ -201,11 +222,14 @@ export class TerminalWebSocketTransport {
     if (this.lastResize?.cols === cols && this.lastResize.rows === rows) {
       return;
     }
+
     this.lastResize = { cols, rows };
     const socket = this.socket;
+
     if (socket === null || socket.readyState !== SOCKET_OPEN) {
       return;
     }
+
     this.trySend(
       socket,
       JSON.stringify({
@@ -220,16 +244,20 @@ export class TerminalWebSocketTransport {
     if (this.disposed || this.terminalEnded) {
       return;
     }
+
     this.options.onConnectionState?.(state);
     let socket: TerminalBrowserSocket;
+
     try {
       socket = this.createSocket(
         terminalSocketUrl(this.options.url, this.nextOutputSeq),
       );
     } catch {
       this.scheduleReconnect();
+
       return;
     }
+
     this.socket = socket;
     socket.onopen = () => this.handleOpen(socket);
     socket.onmessage = (event) => this.handleMessage(socket, event.data);
@@ -241,20 +269,24 @@ export class TerminalWebSocketTransport {
     if (this.disposed || this.socket !== socket) {
       return;
     }
+
     this.lastPongAt = this.now();
     this.startHeartbeat(socket);
+
     if (this.lastResize !== null) {
       this.trySend(
         socket,
         JSON.stringify({ type: "resize", ...this.lastResize }),
       );
     }
+
     if (!this.visible) {
       this.trySend(
         socket,
         JSON.stringify({ type: "visibility", visible: false }),
       );
     }
+
     this.flushInputs();
   }
 
@@ -262,26 +294,36 @@ export class TerminalWebSocketTransport {
     if (this.disposed || this.socket !== socket || typeof raw !== "string") {
       return;
     }
+
     let decoded: unknown;
+
     try {
       decoded = JSON.parse(raw);
     } catch {
       this.options.onInvalidMessage?.();
+
       return;
     }
+
     const parsed = terminalServerMessageSchema.safeParse(decoded);
+
     if (!parsed.success) {
       this.options.onInvalidMessage?.();
+
       return;
     }
+
     const message = parsed.data;
+
     if (message.type === "pong") {
       this.lastPongAt = this.now();
     }
+
     if (message.type === "attached") {
       this.reconnectAttempt = 0;
       this.options.onConnectionState?.("attached");
     }
+
     if (
       message.type === "attached" &&
       message.replayStartSeq > this.nextOutputSeq
@@ -289,19 +331,24 @@ export class TerminalWebSocketTransport {
       this.options.onSequenceGap?.(this.nextOutputSeq, message.replayStartSeq);
       this.nextOutputSeq = message.replayStartSeq;
     }
+
     if (message.type === "output") {
       if (message.chunk.seq < this.nextOutputSeq) {
         return;
       }
+
       if (message.chunk.seq > this.nextOutputSeq) {
         this.options.onSequenceGap?.(this.nextOutputSeq, message.chunk.seq);
       }
+
       this.nextOutputSeq = message.chunk.seq + 1;
     }
+
     if (message.type === "exited") {
       this.terminalEnded = true;
       this.clearReconnectTimeout();
     }
+
     if (
       message.type === "error" &&
       [
@@ -313,6 +360,7 @@ export class TerminalWebSocketTransport {
       this.terminalEnded = true;
       this.clearReconnectTimeout();
     }
+
     this.options.onMessage(message);
   }
 
@@ -320,17 +368,21 @@ export class TerminalWebSocketTransport {
     if (this.socket !== socket) {
       return;
     }
+
     this.socket = null;
     this.stopHeartbeat();
     this.clearDrainTimeout();
+
     if (
       this.disposed ||
       this.terminalEnded ||
       !this.options.shouldReconnect()
     ) {
       this.options.onConnectionState?.("closed");
+
       return;
     }
+
     this.scheduleReconnect();
   }
 
@@ -343,11 +395,14 @@ export class TerminalWebSocketTransport {
     ) {
       return;
     }
+
     this.options.onConnectionState?.("reconnecting");
+
     const delayIndex = Math.min(
       this.reconnectAttempt,
       this.reconnectDelaysMs.length - 1,
     );
+
     const delay = this.reconnectDelaysMs[delayIndex] ?? 0;
     this.reconnectAttempt += 1;
     this.reconnectTimeout = setTimeout(() => {
@@ -359,31 +414,39 @@ export class TerminalWebSocketTransport {
   private enqueueInput(pending: PendingTerminalInput): boolean {
     if (this.pendingInputBytes + pending.bytes > this.inputQueueMaxBytes) {
       this.options.onInputOverflow?.(this.inputQueueMaxBytes);
+
       return false;
     }
+
     this.pendingInputs.push(pending);
     this.pendingInputBytes += pending.bytes;
     this.scheduleDrain();
+
     return true;
   }
 
   private flushInputs(): void {
     this.clearDrainTimeout();
     const socket = this.socket;
+
     if (socket === null || socket.readyState !== SOCKET_OPEN) {
       return;
     }
+
     while (
       this.pendingInputs.length > 0 &&
       socketBufferedAmount(socket) <= this.socketHighWaterBytes
     ) {
       const pending = this.pendingInputs[0];
+
       if (!pending || !this.trySend(socket, pending.payload)) {
         break;
       }
+
       this.pendingInputs.shift();
       this.pendingInputBytes -= pending.bytes;
     }
+
     if (this.pendingInputs.length > 0) {
       this.scheduleDrain();
     }
@@ -393,8 +456,10 @@ export class TerminalWebSocketTransport {
     if (socket.readyState !== SOCKET_OPEN) {
       return false;
     }
+
     try {
       socket.send(payload);
+
       return true;
     } catch {
       try {
@@ -402,6 +467,7 @@ export class TerminalWebSocketTransport {
       } catch {
         this.handleClose(socket);
       }
+
       return false;
     }
   }
@@ -410,6 +476,7 @@ export class TerminalWebSocketTransport {
     if (this.drainTimeout !== null || this.socket?.readyState !== SOCKET_OPEN) {
       return;
     }
+
     this.drainTimeout = setTimeout(() => {
       this.drainTimeout = null;
       this.flushInputs();
@@ -420,6 +487,7 @@ export class TerminalWebSocketTransport {
     if (this.drainTimeout === null) {
       return;
     }
+
     clearTimeout(this.drainTimeout);
     this.drainTimeout = null;
   }
@@ -428,6 +496,7 @@ export class TerminalWebSocketTransport {
     if (this.reconnectTimeout === null) {
       return;
     }
+
     clearTimeout(this.reconnectTimeout);
     this.reconnectTimeout = null;
   }
@@ -438,10 +507,13 @@ export class TerminalWebSocketTransport {
       if (this.socket !== socket || socket.readyState !== SOCKET_OPEN) {
         return;
       }
+
       if (this.now() - this.lastPongAt > this.heartbeatTimeoutMs) {
         socket.close(4000, "heartbeat-timeout");
+
         return;
       }
+
       this.trySend(socket, JSON.stringify({ type: "ping" }));
     }, this.heartbeatIntervalMs);
   }
@@ -450,6 +522,7 @@ export class TerminalWebSocketTransport {
     if (this.heartbeatInterval === null) {
       return;
     }
+
     clearInterval(this.heartbeatInterval);
     this.heartbeatInterval = null;
   }

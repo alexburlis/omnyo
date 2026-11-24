@@ -3,7 +3,7 @@ import os from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HOST_DAEMON_PROTOCOL_VERSION } from "@bb/host-daemon-contract";
+import { HOST_DAEMON_PROTOCOL_VERSION } from "@omnyo/host-daemon-contract";
 import {
   parseTarget,
   readRunningSupervisorPid,
@@ -20,12 +20,15 @@ import {
 } from "./dev-instance-expectations.js";
 
 const tempDirs: string[] = [];
+
 const testDir = dirname(fileURLToPath(import.meta.url));
+
 const repoRoot = resolve(testDir, "..", "..", "..");
 
 async function makeTempDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(join(os.tmpdir(), prefix));
   tempDirs.push(dir);
+
   return dir;
 }
 
@@ -47,7 +50,7 @@ describe("request-dev-restart", () => {
   });
 
   it("reads a valid running supervisor pid", async () => {
-    const dataDir = await makeTempDir("bb-request-restart-");
+    const dataDir = await makeTempDir("omnyo-request-restart-");
     const serviceDir = join(dataDir, "dev-supervisors");
     const pidPath = join(serviceDir, "server.pid");
     await fs.mkdir(serviceDir, { recursive: true });
@@ -59,8 +62,9 @@ describe("request-dev-restart", () => {
   });
 
   it("resolves restart supervisor files from the current checkout data dir", () => {
-    vi.stubEnv("BB_DATA_DIR", "/tmp/wrong-bb-data");
-    vi.stubEnv("BB_HOST_DAEMON_PORT", "1234");
+    vi.stubEnv("OMNYO_DATA_DIR", "/tmp/wrong-omnyo-data");
+    vi.stubEnv("OMNYO_HOST_DAEMON_PORT", "1234");
+
     const expectedDataDir = expectedDevDataDir({
       homeDir: os.homedir(),
       repoRoot,
@@ -77,6 +81,7 @@ describe("request-dev-restart", () => {
 
   it("keeps server-only restarts when the running host-daemon protocol matches", async () => {
     const output = { write: vi.fn() };
+
     const fetchFn = vi.fn<typeof fetch>(async () =>
       Response.json({
         hostId: "host-1",
@@ -101,6 +106,7 @@ describe("request-dev-restart", () => {
 
   it("expands server restarts when the running host-daemon protocol is stale", async () => {
     const output = { write: vi.fn() };
+
     const fetchFn = vi.fn<typeof fetch>(async () =>
       Response.json({
         hostId: "host-1",
@@ -126,6 +132,7 @@ describe("request-dev-restart", () => {
 
   it("expands server restarts for pre-protocol-status host-daemons", async () => {
     const output = { write: vi.fn() };
+
     const fetchFn = vi.fn<typeof fetch>(async () =>
       Response.json({
         hostId: "host-1",
@@ -147,6 +154,7 @@ describe("request-dev-restart", () => {
 
   it("keeps server-only restarts when host-daemon status is unavailable", async () => {
     const output = { write: vi.fn() };
+
     const fetchFn = vi.fn<typeof fetch>(async () => {
       throw new Error("offline");
     });
@@ -162,7 +170,7 @@ describe("request-dev-restart", () => {
   });
 
   it("removes stale pid files", async () => {
-    const dataDir = await makeTempDir("bb-request-restart-");
+    const dataDir = await makeTempDir("omnyo-request-restart-");
     const serviceDir = join(dataDir, "dev-supervisors");
     const pidPath = join(serviceDir, "server.pid");
     await fs.mkdir(serviceDir, { recursive: true });
@@ -174,6 +182,7 @@ describe("request-dev-restart", () => {
         Object.defineProperty(error, "code", { value: "ESRCH" });
         throw error;
       }
+
       return true;
     });
 

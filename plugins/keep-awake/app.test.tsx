@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
+import { loadPluginApp, renderSlot } from "@omnyo/plugin-sdk/testing/app";
 
 const app = await loadPluginApp(() => import("./app"));
 
@@ -16,8 +16,10 @@ function response(configuration: unknown) {
   if (typeof configuration !== "object" || configuration === null) {
     throw new Error("Expected a Keep Awake configuration");
   }
+
   const enabled = Reflect.get(configuration, "enabled");
   const selection = Reflect.get(configuration, "selection");
+
   if (
     typeof enabled !== "boolean" ||
     typeof selection !== "object" ||
@@ -25,12 +27,17 @@ function response(configuration: unknown) {
   ) {
     throw new Error("Expected a Keep Awake configuration");
   }
+
   const mode = Reflect.get(selection, "mode");
+
   if (mode === "all") {
     const allSelection: { mode: "all" } = { mode };
+
     return { enabled, selection: allSelection, hosts };
   }
+
   const hostIds = Reflect.get(selection, "hostIds");
+
   if (
     mode !== "selected" ||
     !Array.isArray(hostIds) ||
@@ -38,14 +45,17 @@ function response(configuration: unknown) {
   ) {
     throw new Error("Expected a Keep Awake configuration");
   }
+
   return { enabled, selection: { mode, hostIds }, hosts };
 }
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
   });
+
   return { promise, resolve };
 }
 
@@ -66,8 +76,8 @@ describe("Keep Awake settings", () => {
     const enabled = await slot.findByRole("switch", { name: "Keep Awake" });
     expect(enabled.getAttribute("aria-checked")).toBe("false");
     expect(slot.queryByRole("button", { name: /save/u })).toBeNull();
-    expect(slot.queryByText("Hosts")).toBeNull();
-    expect(slot.queryByRole("radio", { name: "All hosts" })).toBeNull();
+    expect(slot.queryByText("Machines")).toBeNull();
+    expect(slot.queryByRole("radio", { name: "All machines" })).toBeNull();
     expect(slot.queryByText("Offline")).toBeNull();
     expect(slot.queryByRole("checkbox", { name: "Laptop" })).toBeNull();
 
@@ -78,10 +88,10 @@ describe("Keep Awake settings", () => {
         input: { enabled: true, selection: { mode: "all" } },
       }),
     );
-    expect(slot.getByText("Hosts")).toBeTruthy();
-    expect(slot.getByText("Choose which Macs to keep awake.")).toBeTruthy();
+    expect(slot.getByText("Machines")).toBeTruthy();
+    expect(slot.getByText("Choose which machines to keep awake.")).toBeTruthy();
 
-    fireEvent.click(slot.getByRole("radio", { name: "Specific hosts" }));
+    fireEvent.click(slot.getByRole("radio", { name: "Specific machines" }));
     await waitFor(() =>
       expect(slot.rpcCalls).toContainEqual({
         method: "setConfiguration",
@@ -130,13 +140,14 @@ describe("Keep Awake settings", () => {
     const alert = await slot.findByRole("alert");
     expect(alert.textContent).toContain("Could not save configuration");
     expect(enabled.getAttribute("aria-checked")).toBe("false");
-    expect(slot.queryByRole("radio", { name: "All hosts" })).toBeNull();
+    expect(slot.queryByRole("radio", { name: "All machines" })).toBeNull();
   });
 
   it("serializes rapid autosaves so an older response cannot win", async () => {
     const first = deferred<ReturnType<typeof response>>();
     const second = deferred<ReturnType<typeof response>>();
     let saveCount = 0;
+
     const slot = renderSlot(
       app.settingsSections[0]!,
       {},
@@ -146,6 +157,7 @@ describe("Keep Awake settings", () => {
             response({ enabled: false, selection: { mode: "all" } }),
           setConfiguration: () => {
             saveCount += 1;
+
             return saveCount === 1 ? first.promise : second.promise;
           },
         },
@@ -153,7 +165,7 @@ describe("Keep Awake settings", () => {
     );
 
     fireEvent.click(await slot.findByRole("switch", { name: "Keep Awake" }));
-    fireEvent.click(slot.getByRole("radio", { name: "Specific hosts" }));
+    fireEvent.click(slot.getByRole("radio", { name: "Specific machines" }));
 
     await waitFor(() => expect(saveCount).toBe(1));
     await act(async () => {
@@ -180,7 +192,7 @@ describe("Keep Awake settings", () => {
     expect(
       (
         slot.getByRole("radio", {
-          name: "Specific hosts",
+          name: "Specific machines",
         }) as HTMLButtonElement
       ).getAttribute("data-state"),
     ).toBe("checked");

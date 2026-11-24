@@ -1,9 +1,26 @@
+import type { AgentProcessContainment } from "./agent-process-containment.js";
+import type { IsolatedFilesystemMutator } from "./workspace-read-client.js";
+import type { WorkspaceReadCoalescer } from "./workspace-read-coalescer.js";
+import type { CommandMetadataCatalog } from "./command-metadata.js";
+import {
+  CommandDispatchError,
+  ExpectedCommandDispatchError,
+} from "./command-errors.js";
+
+export {
+  CommandDispatchError,
+  ExpectedCommandDispatchError,
+} from "./command-errors.js";
+
 import type { DesktopBrowserBroker } from "./desktop-browser-broker.js";
+import type { ManagedPreviewManager } from "./previews/managed-preview-manager.js";
+import type { PreviewHostTransport } from "./previews/preview-transport.js";
+import type { TerminalManager } from "./terminals/terminal-manager.js";
 import {
   CompetingTurnError,
   type AgentRuntimeBridgeLaunch,
-} from "@bb/agent-runtime";
-import type { AvailableModel } from "@bb/domain";
+} from "@omnyo/agent-runtime";
+import type { AvailableModel } from "@omnyo/domain";
 import type { EventSink } from "./event-sink.js";
 import {
   COMPETING_TURN_ERROR_CODE,
@@ -12,20 +29,21 @@ import {
   type ProviderHealthResult,
   type ProviderUsageResult,
   type HostDaemonBridgeLaunch,
+  type HostDaemonContributedEnvEntry,
   type HostDaemonInjectedSkillSource,
   type HostDaemonOnlineRpcCommand,
   type HostDaemonConnectTunnelIdentity,
   type WorkspaceContext,
-} from "@bb/host-daemon-contract";
-import { BRIDGE_JSON_RPC_ERRORS } from "@bb/provider-bridge-protocol";
+} from "@omnyo/host-daemon-contract";
+import { BRIDGE_JSON_RPC_ERRORS } from "@omnyo/provider-bridge-protocol";
 import type {
   ProviderInstallationCommand,
   ProviderInstallationRunResult,
   ProviderInstallationStatus,
-} from "@bb/provider-bridge-protocol";
-import { ensurePluginProcessDataDir } from "@bb/process-utils";
+} from "@omnyo/provider-bridge-protocol";
+import { ensurePluginProcessDataDir } from "@omnyo/process-utils";
 import type { InteractiveResolveCommandInput } from "./interactive-request-registry.js";
-import { RuntimeManager, type RuntimeEntry } from "./runtime-manager.js";
+import type { RuntimeManager, RuntimeEntry } from "./runtime-manager.js";
 import type { FetchProjectAttachment } from "./project-attachments.js";
 import type { FetchSkillTree } from "./skill-trees.js";
 import type { HostDaemonLogger } from "./logger.js";
@@ -43,6 +61,15 @@ export type CommandOf<TType extends DispatchCommand["type"]> = Extract<
 >;
 
 export interface CommandDispatchOptions {
+  managedPreviews?: ManagedPreviewManager;
+  terminals?: Pick<TerminalManager, "foreground">;
+  previewTransport?: PreviewHostTransport;
+  agentProcessContainment?: AgentProcessContainment;
+  commandMetadata?: Pick<CommandMetadataCatalog, "list">;
+  filesystemMutator?: Pick<
+    IsolatedFilesystemMutator,
+    "execute" | "replaceDirectory"
+  >;
   emitEnvironmentHookProgress?: (
     message: EnvironmentHookProgressMessage,
   ) => void;
@@ -53,11 +80,13 @@ export interface CommandDispatchOptions {
   fetchSkillTree?: FetchSkillTree;
   fetchPluginHostArtifact?: FetchPluginHostArtifact;
   runtimeManager: RuntimeManager;
+  workspaceReads: WorkspaceReadCoalescer;
   eventSink: Pick<EventSink, "emit" | "flush">;
   listModels: (args: {
     providerId: string;
     bridgeLaunch: AgentRuntimeBridgeLaunch;
     cwd?: string;
+    contributedEnv: readonly HostDaemonContributedEnvEntry[];
   }) => Promise<{
     models: AvailableModel[];
     selectedOnlyModels: AvailableModel[];
@@ -96,24 +125,12 @@ export interface CommandDispatchOptions {
   ) => Promise<void>;
   ensureConnectTunnelIdentity?: () => Promise<HostDaemonConnectTunnelIdentity>;
   serverMove?: ServerMoveService;
+  runtimeUpdateOwnCommands?: number;
+  runtimeUpdatePluginBlockers?: () => string[];
+  closeRuntimeUpdatePluginLeases?: (
+    pluginIds: readonly string[],
+  ) => Promise<string[]>;
   threadStorageRootPath: string;
-}
-
-export class CommandDispatchError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "CommandDispatchError";
-  }
-}
-
-export class ExpectedCommandDispatchError extends CommandDispatchError {
-  constructor(code: string, message: string) {
-    super(code, message);
-    this.name = "ExpectedCommandDispatchError";
-  }
 }
 
 export function isExpectedCommandDispatchError(
@@ -135,6 +152,7 @@ export function isExpectedOnlineRpcFailureError(error: unknown): boolean {
 }
 
 const MISSING_EXECUTABLE_PATTERN = /\bENOENT\b/;
+
 const SPAWN_PATTERN = /\bspawn\b/;
 
 export async function resolveRuntimeBridgeLaunch(
@@ -148,19 +166,23 @@ export async function resolveRuntimeBridgeLaunch(
     ...bridgeLaunch.capabilities,
     permissionModes: [...bridgeLaunch.capabilities.permissionModes],
   };
+
   const providerOptions = { ...bridgeLaunch.providerOptions };
   const envPassthrough = [...bridgeLaunch.envPassthrough];
+
   const dataDir = await ensurePluginProcessDataDir({
     daemonDataDir: options.dataDir,
     pluginId: bridgeLaunch.pluginId,
     kind: "bridge-data",
   });
+
   if (options.fetchPluginHostArtifact === undefined) {
     throw new CommandDispatchError(
       "provider_bridge_unavailable",
       "This daemon has no plugin host artifact fetcher configured",
     );
   }
+
   const artifactPath = await ensureCachedPluginHostArtifact({
     dataDir: options.dataDir,
     pluginId: bridgeLaunch.pluginId,
@@ -169,6 +191,7 @@ export async function resolveRuntimeBridgeLaunch(
     byteLength: bridgeLaunch.source.byteLength,
     logger: options.logger,
   });
+
   return {
     pluginId: bridgeLaunch.pluginId,
     dataDir,
@@ -187,15 +210,19 @@ export function getErrorCode(error: unknown): string {
   if (error instanceof CommandDispatchError) {
     return error.code;
   }
+
   if (error instanceof CompetingTurnError) {
     return COMPETING_TURN_ERROR_CODE;
   }
+
   if (isBridgeMissingExecutableError(error)) {
     return "missing_executable";
   }
+
   if (isStructuredSpawnMissingExecutableError(error)) {
     return "missing_executable";
   }
+
   if (
     error instanceof Error &&
     "code" in error &&
@@ -203,9 +230,11 @@ export function getErrorCode(error: unknown): string {
   ) {
     return error.code;
   }
+
   if (isMessageOnlySpawnMissingExecutableError(error)) {
     return "missing_executable";
   }
+
   return "command_failed";
 }
 
@@ -252,6 +281,7 @@ export async function requireWorkspaceEnvironment(
   runtimeManager: RuntimeManager,
 ): Promise<RuntimeEntry> {
   const existing = await runtimeManager.getOrAwait(args.environmentId);
+
   if (existing) {
     if (existing.path !== args.workspaceContext.workspacePath) {
       await runtimeManager.forgetEnvironment(args.environmentId);

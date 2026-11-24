@@ -8,8 +8,8 @@ import {
   threadPullRequestSchema,
   workspaceDiffTargetSchema,
   workspaceStatusSchema,
-} from "@bb/domain";
-import { workspaceResolutionFailureSchema } from "@bb/host-daemon-contract/workspace";
+} from "@omnyo/domain";
+import { workspaceResolutionFailureSchema } from "@omnyo/host-daemon-contract/workspace";
 import { apiErrorSchema } from "../errors.js";
 import {
   branchListQuerySchema,
@@ -29,8 +29,17 @@ export const updateEnvironmentRequestSchema = z
     (value) => value.mergeBaseBranch !== undefined || value.name !== undefined,
     "At least one field must be provided",
   );
+
 export type UpdateEnvironmentRequest = z.infer<
   typeof updateEnvironmentRequestSchema
+>;
+
+export const cleanupEnvironmentQuerySchema = z
+  .object({ hookStopped: z.literal("true").optional() })
+  .transform((query) => ({ hookStopped: query.hookStopped === "true" }));
+
+export type CleanupEnvironmentQuery = z.input<
+  typeof cleanupEnvironmentQuerySchema
 >;
 
 export const listEnvironmentsQuerySchema = z.object({
@@ -43,6 +52,7 @@ export const listEnvironmentsQuerySchema = z.object({
   limit: z.string().regex(/^\d+$/).optional(),
   offset: z.string().regex(/^\d+$/).optional(),
 });
+
 export type ListEnvironmentsQuery = z.infer<typeof listEnvironmentsQuerySchema>;
 
 export const environmentPathsQuerySchema = z.object({
@@ -51,16 +61,19 @@ export const environmentPathsQuerySchema = z.object({
   includeFiles: pathListIncludeQueryValueSchema,
   includeDirectories: pathListIncludeQueryValueSchema,
 });
+
 export type EnvironmentPathsQuery = z.infer<typeof environmentPathsQuerySchema>;
 
 export const environmentDiffBranchesQuerySchema = branchListQuerySchema.extend({
   selectedBranch: gitBranchNameSchema.optional(),
 });
+
 export type EnvironmentDiffBranchesQuery = z.infer<
   typeof environmentDiffBranchesQuerySchema
 >;
 
 export const environmentDiffBranchesResponseSchema = gitBranchOptionsSchema;
+
 export type EnvironmentDiffBranchesResponse = z.infer<
   typeof environmentDiffBranchesResponseSchema
 >;
@@ -72,6 +85,7 @@ const mergeBaseBranchQuerySchema = z
 export const environmentStatusQuerySchema = z.object({
   mergeBaseBranch: mergeBaseBranchQuerySchema.optional(),
 });
+
 export type EnvironmentStatusQuery = z.infer<
   typeof environmentStatusQuerySchema
 >;
@@ -93,6 +107,7 @@ export const environmentDiffQuerySchema = z.discriminatedUnion("target", [
     sha: z.string().regex(/^[0-9a-f]{4,40}$/iu),
   }),
 ]);
+
 export type EnvironmentDiffQuery = z.infer<typeof environmentDiffQuerySchema>;
 
 const diffFileSideSchema = z.enum(["old", "new"]);
@@ -124,6 +139,7 @@ export const environmentDiffFileQuerySchema = z.discriminatedUnion("target", [
     side: diffFileSideSchema,
   }),
 ]);
+
 export type EnvironmentDiffFileQuery = z.infer<
   typeof environmentDiffFileQuerySchema
 >;
@@ -135,6 +151,7 @@ export const environmentDiffFileResponseSchema = z.object({
   mimeType: z.string().optional(),
   sizeBytes: z.number().int().nonnegative(),
 });
+
 export type EnvironmentDiffFileResponse = z.infer<
   typeof environmentDiffFileResponseSchema
 >;
@@ -143,6 +160,7 @@ export const environmentArchiveThreadsResponseSchema = z.object({
   ok: z.literal(true),
   archivedThreadIds: z.array(z.string().min(1)),
 });
+
 export type EnvironmentArchiveThreadsResponse = z.infer<
   typeof environmentArchiveThreadsResponseSchema
 >;
@@ -152,6 +170,7 @@ export const pullRequestMergeMethodSchema = z.enum([
   "squash",
   "rebase",
 ]);
+
 export type PullRequestMergeMethod = z.infer<
   typeof pullRequestMergeMethodSchema
 >;
@@ -185,6 +204,7 @@ export const environmentActionRequestSchema = z.discriminatedUnion("action", [
     })
     .strict(),
 ]);
+
 export type EnvironmentActionRequest = z.infer<
   typeof environmentActionRequestSchema
 >;
@@ -196,6 +216,7 @@ export const commitActionResponseSchema = z.object({
   commitSha: z.string().min(1),
   commitSubject: z.string().min(1),
 });
+
 export type CommitActionResponse = z.infer<typeof commitActionResponseSchema>;
 
 export const pullRequestReadyActionResponseSchema = z.object({
@@ -203,6 +224,7 @@ export const pullRequestReadyActionResponseSchema = z.object({
   action: z.literal("pull_request_ready"),
   message: z.string().min(1),
 });
+
 export type PullRequestReadyActionResponse = z.infer<
   typeof pullRequestReadyActionResponseSchema
 >;
@@ -213,6 +235,7 @@ export const pullRequestMergeActionResponseSchema = z.object({
   method: pullRequestMergeMethodSchema,
   message: z.string().min(1),
 });
+
 export type PullRequestMergeActionResponse = z.infer<
   typeof pullRequestMergeActionResponseSchema
 >;
@@ -222,6 +245,7 @@ export const pullRequestDraftActionResponseSchema = z.object({
   action: z.literal("pull_request_draft"),
   message: z.string().min(1),
 });
+
 export type PullRequestDraftActionResponse = z.infer<
   typeof pullRequestDraftActionResponseSchema
 >;
@@ -232,6 +256,7 @@ export const environmentActionResponseSchema = z.discriminatedUnion("action", [
   pullRequestMergeActionResponseSchema,
   pullRequestDraftActionResponseSchema,
 ]);
+
 export type EnvironmentActionResponse = z.infer<
   typeof environmentActionResponseSchema
 >;
@@ -244,6 +269,7 @@ export const environmentActionFailureDetailsSchema = z.object({
 export const environmentActionApiErrorSchema = apiErrorSchema.extend({
   details: environmentActionFailureDetailsSchema.optional(),
 });
+
 export type EnvironmentActionApiError = z.infer<
   typeof environmentActionApiErrorSchema
 >;
@@ -294,6 +320,7 @@ export const environmentPullRequestResponseSchema = z.discriminatedUnion(
       .strict(),
   ],
 );
+
 export type EnvironmentPullRequestResponse = z.infer<
   typeof environmentPullRequestResponseSchema
 >;
@@ -313,6 +340,7 @@ export const environmentDiffResponseSchema = z.discriminatedUnion("outcome", [
     })
     .strict(),
 ]);
+
 export type EnvironmentDiffResponse = z.infer<
   typeof environmentDiffResponseSchema
 >;
@@ -325,6 +353,7 @@ export const gitDiffFileChangeKindSchema = z.enum([
   "copied",
   "type_changed",
 ]);
+
 export type GitDiffFileChangeKind = z.infer<typeof gitDiffFileChangeKindSchema>;
 
 export function letterToChangeKind({
@@ -362,6 +391,7 @@ export const diffFileEntrySchema = z.object({
   origin: z.enum(["tracked", "untracked"]),
   loadMode: z.enum(["auto", "on_demand", "too_large"]),
 });
+
 export type DiffFileEntry = z.infer<typeof diffFileEntrySchema>;
 
 export const diffPatchEntrySchema = z.object({
@@ -369,6 +399,7 @@ export const diffPatchEntrySchema = z.object({
   patch: z.string(),
   truncated: z.boolean(),
 });
+
 export type DiffPatchEntry = z.infer<typeof diffPatchEntrySchema>;
 
 export const environmentDiffFilesResponseSchema = z.discriminatedUnion(
@@ -393,6 +424,7 @@ export const environmentDiffFilesResponseSchema = z.discriminatedUnion(
       .strict(),
   ],
 );
+
 export type EnvironmentDiffFilesResponse = z.infer<
   typeof environmentDiffFilesResponseSchema
 >;
@@ -415,6 +447,7 @@ export const environmentDiffPatchResponseSchema = z.discriminatedUnion(
       .strict(),
   ],
 );
+
 export type EnvironmentDiffPatchResponse = z.infer<
   typeof environmentDiffPatchResponseSchema
 >;
@@ -428,6 +461,7 @@ export const environmentDiffPatchRequestSchema = z
       .max(DIFF_PATCH_MAX_PATHS_PER_REQUEST),
   })
   .strict();
+
 export type EnvironmentDiffPatchRequest = z.infer<
   typeof environmentDiffPatchRequestSchema
 >;

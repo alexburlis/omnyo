@@ -92,6 +92,7 @@ vi.mock("@/components/commands/AppCommandProvider", () => ({
 type PanelContentProps = ComponentProps<typeof RootComposePanelTabContent>;
 
 const noop = () => {};
+
 const baseProps = {
   activeTabId: null,
   canCreateTerminal: true,
@@ -136,6 +137,7 @@ describe("RootComposePanelTabContent", () => {
         statusLabel: null,
       },
     });
+
     const secondTab = createWorkspaceFilePreviewFixedPanelTab({
       environmentId: "env-second",
       projectId: "project-current",
@@ -177,6 +179,7 @@ describe("RootComposePanelTabContent", () => {
 
   it("binds each split terminal body to its own terminal id", () => {
     const firstTab = createTerminalFixedPanelTab({ terminalId: "term-first" });
+
     const secondTab = createTerminalFixedPanelTab({
       terminalId: "term-second",
     });

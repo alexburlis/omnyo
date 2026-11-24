@@ -6,9 +6,11 @@ import {
 } from "./provider-event.js";
 import {
   threadActivityStateSchema,
+  threadListEntrySchema,
   threadRuntimeStateSchema,
   threadStatusSchema,
 } from "./thread.js";
+import { threadAttentionSnapshotSchema } from "./thread-attention.js";
 
 export const THREAD_CHANGE_KINDS = [
   "thread-created",
@@ -19,15 +21,19 @@ export const THREAD_CHANGE_KINDS = [
   "interactions-changed",
   "status-changed",
   "title-changed",
+  "execution-changed",
   "queue-changed",
+  "work-changed",
   "archived-changed",
   "pin-state-changed",
+  "shelf-state-changed",
   "parent-changed",
   "environment-changed",
   "read-state-changed",
   "tabs-changed",
   "terminals-changed",
 ] as const;
+
 export type ThreadChangeKind = (typeof THREAD_CHANGE_KINDS)[number];
 
 export const PROJECT_CHANGE_KINDS = [
@@ -38,6 +44,7 @@ export const PROJECT_CHANGE_KINDS = [
   "threads-changed",
   "project-order-changed",
 ] as const;
+
 export type ProjectChangeKind = (typeof PROJECT_CHANGE_KINDS)[number];
 
 export const ENVIRONMENT_CHANGE_KINDS = [
@@ -49,6 +56,7 @@ export const ENVIRONMENT_CHANGE_KINDS = [
   "git-refs-changed",
   "thread-storage-changed",
 ] as const;
+
 export type EnvironmentChangeKind = (typeof ENVIRONMENT_CHANGE_KINDS)[number];
 
 export const HOST_CHANGE_KINDS = [
@@ -56,9 +64,11 @@ export const HOST_CHANGE_KINDS = [
   "host-disconnected",
   "provider-model-catalog-changed",
 ] as const;
+
 export type HostChangeKind = (typeof HOST_CHANGE_KINDS)[number];
 
 export const SYSTEM_CHANGE_KINDS = [
+  "command-catalog-changed",
   "config-changed",
   "plugins-changed",
   "plugin-install-jobs-changed",
@@ -68,13 +78,19 @@ export const SYSTEM_CHANGE_KINDS = [
   "environment-availability-changed",
   "server-move-changed",
   "app-update-changed",
+  "web-generation-changed",
 ] as const;
+
 export type SystemChangeKind = (typeof SYSTEM_CHANGE_KINDS)[number];
 
 export const threadChangeKindSchema = z.enum(THREAD_CHANGE_KINDS);
+
 export const projectChangeKindSchema = z.enum(PROJECT_CHANGE_KINDS);
+
 export const environmentChangeKindSchema = z.enum(ENVIRONMENT_CHANGE_KINDS);
+
 export const hostChangeKindSchema = z.enum(HOST_CHANGE_KINDS);
+
 export const systemChangeKindSchema = z.enum(SYSTEM_CHANGE_KINDS);
 
 export const realtimeSubscriptionTargetSchema = z.discriminatedUnion("kind", [
@@ -128,6 +144,7 @@ export const realtimeSubscriptionTargetSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
 export type RealtimeSubscriptionTarget = z.infer<
   typeof realtimeSubscriptionTargetSchema
 >;
@@ -151,6 +168,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   unsubscribeMessageSchema,
   pingMessageSchema,
 ]);
+
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 
 export const pongMessageSchema = z
@@ -158,6 +176,7 @@ export const pongMessageSchema = z
     type: z.literal("pong"),
   })
   .strict();
+
 export type PongMessage = z.infer<typeof pongMessageSchema>;
 
 export const pongMessageLenientSchema = z.object({
@@ -201,9 +220,11 @@ export const threadStatusChangeMetadataSchema = z
     runtime: threadRuntimeStateSchema,
     activity: threadActivityStateSchema,
     latestAttentionAt: z.number(),
+    lastMessageAt: z.number().nullable(),
     updatedAt: z.number(),
   })
   .strict();
+
 export type ThreadStatusChangeMetadata = z.infer<
   typeof threadStatusChangeMetadataSchema
 >;
@@ -213,11 +234,21 @@ export const threadChangeMetadataSchema = z
     backgroundActivityChanged: z.boolean().optional(),
     eventTypes: z.array(threadEventTypeSchema).readonly().optional(),
     timelineSequence: z.number().int().nonnegative().optional(),
+    eventSequenceRange: z
+      .object({
+        from: z.number().int().nonnegative(),
+        to: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
     hasPendingInteraction: z.boolean().optional(),
     projectId: z.string().optional(),
     statusChange: threadStatusChangeMetadataSchema.optional(),
+    listEntry: threadListEntrySchema.optional(),
+    attentionItems: threadAttentionSnapshotSchema.optional(),
   })
   .strict();
+
 export type ThreadChangeMetadata = z.infer<typeof threadChangeMetadataSchema>;
 
 export const threadChangedMessageSchema = z
@@ -229,6 +260,7 @@ export const threadChangedMessageSchema = z
     changes: z.array(threadChangeKindSchema).readonly(),
   })
   .strict();
+
 export type ThreadChangedMessage = z.infer<typeof threadChangedMessageSchema>;
 
 export const projectChangedMessageSchema = z
@@ -239,6 +271,7 @@ export const projectChangedMessageSchema = z
     changes: z.array(projectChangeKindSchema).readonly(),
   })
   .strict();
+
 export type ProjectChangedMessage = z.infer<typeof projectChangedMessageSchema>;
 
 export const environmentChangedMessageSchema = z
@@ -249,6 +282,7 @@ export const environmentChangedMessageSchema = z
     changes: z.array(environmentChangeKindSchema).readonly(),
   })
   .strict();
+
 export type EnvironmentChangedMessage = z.infer<
   typeof environmentChangedMessageSchema
 >;
@@ -277,10 +311,12 @@ export const changedMessageSchema = z.discriminatedUnion("entity", [
   hostChangedMessageSchema,
   systemChangedMessageSchema,
 ]);
+
 export type ChangedMessage = z.infer<typeof changedMessageSchema>;
 
 function lenientKinds<TKind extends string>(kinds: readonly TKind[]) {
   const known: ReadonlySet<string> = new Set(kinds);
+
   return z
     .array(z.string())
     .transform((values) =>
@@ -294,6 +330,13 @@ const knownThreadEventTypes: ReadonlySet<string> = new Set(
 
 const threadChangeMetadataLenientSchema = z.object({
   timelineSequence: z.number().int().nonnegative().optional(),
+  eventSequenceRange: z
+    .object({
+      from: z.number().int().nonnegative(),
+      to: z.number().int().nonnegative(),
+    })
+    .optional()
+    .catch(undefined),
   backgroundActivityChanged: z.boolean().optional(),
   eventTypes: z
     .array(z.string())
@@ -306,6 +349,8 @@ const threadChangeMetadataLenientSchema = z.object({
   hasPendingInteraction: z.boolean().optional(),
   projectId: z.string().optional(),
   statusChange: threadStatusChangeMetadataSchema.optional().catch(undefined),
+  listEntry: threadListEntrySchema.optional().catch(undefined),
+  attentionItems: threadAttentionSnapshotSchema.optional().catch(undefined),
 });
 
 const threadChangedMessageLenientSchema = z.object({

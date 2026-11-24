@@ -17,10 +17,23 @@ import {
 } from "./window-state.js";
 import { resolveDesktopExternalUrl } from "./desktop-external-url.js";
 import type { DesktopContextMenuWebContents } from "./desktop-context-menu.js";
+import {
+  createDesktopWindowNavigation,
+  type DesktopWindowNavigationEvents,
+} from "./desktop-window-navigation.js";
+
+type DesktopWindowEvents = DesktopWindowNavigationEvents & {
+  "context-menu": Parameters<
+    Parameters<DesktopContextMenuWebContents["on"]>[1]
+  >;
+  "did-change-theme-color": [event: Event, color: string | null];
+  "did-finish-load": [];
+};
 
 type DesktopWindowIcon = BrowserWindowConstructorOptions["icon"];
 
 const MACOS_TRAFFIC_LIGHT_DIAGONAL_INSET = 18;
+
 const MACOS_TRAFFIC_LIGHT_POSITION = {
   x: MACOS_TRAFFIC_LIGHT_DIAGONAL_INSET,
   y: MACOS_TRAFFIC_LIGHT_DIAGONAL_INSET,
@@ -44,10 +57,14 @@ export interface DesktopWindowOpenDevToolsOptions {
 
 export interface DesktopWindowWebContents extends DesktopContextMenuWebContents {
   id: number;
-  on(...args: Parameters<DesktopContextMenuWebContents["on"]>): void;
-  on(
-    eventName: "did-change-theme-color",
-    listener: (event: Event, color: string | null) => void,
+  getURL(): string;
+  on<K extends keyof DesktopWindowEvents>(
+    eventName: K,
+    listener: (...args: DesktopWindowEvents[K]) => void,
+  ): void;
+  removeListener<K extends keyof DesktopWindowNavigationEvents>(
+    eventName: K,
+    listener: (...args: DesktopWindowNavigationEvents[K]) => void,
   ): void;
   openDevTools(options: DesktopWindowOpenDevToolsOptions): void;
   setWindowOpenHandler(handler: DesktopWindowOpenHandler): void;
@@ -89,10 +106,21 @@ interface CreateDesktopWindowFactoryArgs {
   isMac: boolean;
   isLinuxFrameless: boolean;
   isQuitting(): boolean;
+  getServerTargetGeneration(): number;
+  logWarning(message: string): void;
   shouldUseDarkColors(): boolean;
   openExternalUrl(args: OpenExternalUrlArgs): void;
   preloadPath: string;
   userDataPath: string;
+  resolveInitialUrl?(args: {
+    stateKey: WindowStateKey;
+    initialUrl: string | null;
+  }): string | null;
+  onNavigation?(args: {
+    stateKey: WindowStateKey;
+    url: string;
+    webContentsId: number;
+  }): void;
 }
 
 interface CreateDesktopWindowArgs {
@@ -120,16 +148,16 @@ export interface DesktopWindowFactory {
   ): Promise<DesktopBrowserWindow[]>;
 }
 
+interface DesktopWindowEntry {
+  browserWindow: DesktopBrowserWindow;
+  navigation: ReturnType<typeof createDesktopWindowNavigation>;
+}
+
 interface ResolveWindowStateKeyArgs {
-  activeWindows: Map<WindowStateKey, DesktopBrowserWindow>;
+  activeWindows: Map<WindowStateKey, DesktopWindowEntry>;
   createWindowStateKey(): WindowStateKey;
   pendingStateKeys: Set<WindowStateKey>;
   requestedStateKey: WindowStateKey | null;
-}
-
-interface LoadUrlIntoWindowArgs {
-  browserWindow: DesktopBrowserWindow;
-  url: string;
 }
 
 interface CreateWindowOptionsArgs {
@@ -148,6 +176,7 @@ function resolveWindowStateKey(
   if (args.requestedStateKey !== null) {
     return args.requestedStateKey;
   }
+
   if (
     !args.activeWindows.has(PRIMARY_WINDOW_STATE_KEY) &&
     !args.pendingStateKeys.has(PRIMARY_WINDOW_STATE_KEY)
@@ -156,12 +185,14 @@ function resolveWindowStateKey(
   }
 
   let stateKey = args.createWindowStateKey();
+
   while (
     args.activeWindows.has(stateKey) ||
     args.pendingStateKeys.has(stateKey)
   ) {
     stateKey = args.createWindowStateKey();
   }
+
   return stateKey;
 }
 
@@ -186,7 +217,7 @@ function createWindowOptions(
     minHeight: MIN_WINDOW_HEIGHT,
     minWidth: MIN_WINDOW_WIDTH,
     show: false,
-    title: "bb",
+    title: "Omnyo",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -200,23 +231,10 @@ function createWindowOptions(
   };
 }
 
-async function loadUrlIntoWindow(args: LoadUrlIntoWindowArgs): Promise<void> {
-  args.browserWindow.webContents.setZoomFactor(1);
-  try {
-    await args.browserWindow.loadURL(args.url);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("ERR_ABORTED")) {
-      return;
-    }
-    throw error;
-  }
-}
-
 export function createDesktopWindowFactory(
   args: CreateDesktopWindowFactoryArgs,
 ): DesktopWindowFactory {
-  const activeWindows = new Map<WindowStateKey, DesktopBrowserWindow>();
+  const activeWindows = new Map<WindowStateKey, DesktopWindowEntry>();
   const pendingStateKeys = new Set<WindowStateKey>();
 
   async function createWindow(
@@ -228,6 +246,7 @@ export function createDesktopWindowFactory(
       pendingStateKeys,
       requestedStateKey: createArgs.stateKey,
     });
+
     pendingStateKeys.add(stateKey);
 
     try {
@@ -236,6 +255,7 @@ export function createDesktopWindowFactory(
         stateKey,
         userDataPath: args.userDataPath,
       });
+
       const browserWindow = args.browserWindowCreator.create(
         createWindowOptions({
           backgroundColor: args.shouldUseDarkColors() ? "#151515" : "#ffffff",
@@ -247,6 +267,7 @@ export function createDesktopWindowFactory(
           preloadPath: args.preloadPath,
         }),
       );
+
       if (!args.isLinuxTransparent) {
         browserWindow.webContents.on(
           "did-change-theme-color",
@@ -257,13 +278,29 @@ export function createDesktopWindowFactory(
           },
         );
       }
+
       browserWindow.webContents.session.setSpellCheckerEnabled(true);
 
-      activeWindows.set(stateKey, browserWindow);
+      const navigation = createDesktopWindowNavigation({
+        browserWindow,
+        getServerTargetGeneration: args.getServerTargetGeneration,
+        isQuitting: args.isQuitting,
+        logWarning: args.logWarning,
+      });
+
+      activeWindows.set(stateKey, { browserWindow, navigation });
+      browserWindow.webContents.on("did-finish-load", () => {
+        args.onNavigation?.({
+          stateKey,
+          url: browserWindow.webContents.getURL(),
+          webContentsId: browserWindow.webContents.id,
+        });
+      });
 
       if (restoredState.isMaximized) {
         browserWindow.maximize();
       }
+
       if (restoredState.isFullScreen) {
         browserWindow.setFullScreen(true);
       }
@@ -272,7 +309,9 @@ export function createDesktopWindowFactory(
         browserWindow.show();
       });
       browserWindow.on("closed", () => {
+        navigation.stop();
         activeWindows.delete(stateKey);
+
         if (!args.isQuitting()) {
           void removePersistedWindowState({
             stateKey,
@@ -282,17 +321,25 @@ export function createDesktopWindowFactory(
       });
       browserWindow.webContents.setWindowOpenHandler((details) => {
         const url = resolveDesktopExternalUrl(details.url);
+
         if (url !== null) {
           args.openExternalUrl({ url });
         }
+
         return { action: "deny" };
       });
 
-      if (createArgs.initialUrl !== null) {
-        await loadUrlIntoWindow({
-          browserWindow,
-          url: createArgs.initialUrl,
-        });
+      const initialUrl =
+        args.resolveInitialUrl === undefined
+          ? createArgs.initialUrl
+          : args.resolveInitialUrl({
+              stateKey,
+              initialUrl: createArgs.initialUrl,
+            });
+
+      if (initialUrl !== null) {
+        browserWindow.webContents.setZoomFactor(1);
+        await navigation.load(initialUrl);
       }
 
       return browserWindow;
@@ -307,6 +354,7 @@ export function createDesktopWindowFactory(
     const entries = await readPersistedWindowStateEntries({
       userDataPath: args.userDataPath,
     });
+
     if (entries.length === 0) {
       return [
         await createWindow({
@@ -317,6 +365,7 @@ export function createDesktopWindowFactory(
     }
 
     const restoredWindows: DesktopBrowserWindow[] = [];
+
     for (const entry of entries) {
       restoredWindows.push(
         await createWindow({
@@ -325,42 +374,45 @@ export function createDesktopWindowFactory(
         }),
       );
     }
+
     return restoredWindows;
   }
 
   async function loadUrl(args: LoadDesktopWindowsUrlArgs): Promise<void> {
     const loadPromises: Promise<void>[] = [];
-    for (const browserWindow of activeWindows.values()) {
-      loadPromises.push(
-        loadUrlIntoWindow({
-          browserWindow,
-          url: args.url,
-        }),
-      );
+
+    for (const { browserWindow, navigation } of activeWindows.values()) {
+      browserWindow.webContents.setZoomFactor(1);
+      loadPromises.push(navigation.load(args.url).then(() => undefined));
     }
+
     await Promise.all(loadPromises);
   }
 
   function focusFirstWindow(): boolean {
-    for (const browserWindow of activeWindows.values()) {
+    for (const { browserWindow } of activeWindows.values()) {
       if (browserWindow.isMinimized()) {
         browserWindow.restore();
       }
+
       browserWindow.focus();
+
       return true;
     }
+
     return false;
   }
 
   function openDevTools(): void {
-    for (const browserWindow of activeWindows.values()) {
+    for (const { browserWindow } of activeWindows.values()) {
       browserWindow.webContents.openDevTools({ mode: "detach" });
     }
   }
 
   async function persistOpenWindows(): Promise<void> {
     const snapshots: PersistBrowserWindowStateSnapshot[] = [];
-    for (const [stateKey, browserWindow] of activeWindows.entries()) {
+
+    for (const [stateKey, { browserWindow }] of activeWindows.entries()) {
       snapshots.push({ browserWindow, stateKey });
     }
 

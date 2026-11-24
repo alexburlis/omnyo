@@ -3,11 +3,11 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import type { Thread } from "@bb/domain";
+import type { Thread } from "@omnyo/domain";
 import {
   makeProviderInfo,
   makeThread as makeThreadFixture,
-} from "@bb/test-helpers/domain-fixtures";
+} from "@omnyo/test-helpers/domain-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SYSTEM_EXECUTION_OPTIONS_QUERY_KEY } from "@/hooks/queries/query-keys";
 import { makeThreadResponse } from "@/test/fixtures/thread-responses";
@@ -80,6 +80,7 @@ describe("useForkThreadFromMessage", () => {
       }),
     );
     const navigateInPane = vi.fn();
+
     const { result } = renderHook(
       () =>
         useForkThreadFromMessage({
@@ -120,6 +121,7 @@ describe("useForkThreadFromMessage", () => {
   it("stays on the source thread when the fork is rejected", async () => {
     mocks.spawn.mockRejectedValue(new Error("fork_source_session_unavailable"));
     const navigateInPane = vi.fn();
+
     const { result } = renderHook(
       () =>
         useForkThreadFromMessage({
@@ -140,11 +142,13 @@ describe("useForkThreadFromMessage", () => {
   it("keeps one handler identity across thread refetches and forks the latest thread", async () => {
     mocks.spawn.mockResolvedValue(makeThreadResponse({ id: "thr_fork" }));
     const navigateInPane = vi.fn();
+
     const { result, rerender } = renderHook(
       ({ sourceThread }: { sourceThread: Thread | null }) =>
         useForkThreadFromMessage({ navigateInPane, sourceThread }),
       { initialProps: { sourceThread: makeThread() }, wrapper: Wrapper },
     );
+
     const first = result.current;
 
     rerender({ sourceThread: makeThread({ sectionId: "sec_moved" }) });

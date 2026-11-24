@@ -40,6 +40,7 @@ describe("AttachmentsGrid layout", () => {
         onError={vi.fn()}
       />,
     );
+
     const fileCard = screen.getByText("notes.md");
     const image = screen.getAllByAltText("diagram.png")[0]!;
     expect(

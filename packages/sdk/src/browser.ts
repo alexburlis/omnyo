@@ -1,32 +1,32 @@
 import {
-  createBbSdk,
+  createOmnyoSdk,
   createBuiltinPlanCommandTextInput,
-  type BbSdk,
-  type BbSdkAreas,
+  type OmnyoSdk,
+  type OmnyoSdkAreas,
 } from "./core.js";
 import { createHttpTransport } from "./transport-http.js";
 import type {
-  BbRealtimeSocketFactory,
-  BbSdkContext,
-  BbSdkTransport,
+  OmnyoRealtimeSocketFactory,
+  OmnyoSdkContext,
+  OmnyoSdkTransport,
 } from "./transport.js";
 
 export interface CreateBrowserTransportArgs {
   baseUrl?: string;
   fetch?: typeof fetch;
   realtimeUrl?: string;
-  websocket?: BbRealtimeSocketFactory;
+  websocket?: OmnyoRealtimeSocketFactory;
 }
 
-export interface CreateBrowserBbSdkArgs extends CreateBrowserTransportArgs {
-  context?: BbSdkContext;
+export interface CreateBrowserOmnyoSdkArgs extends CreateBrowserTransportArgs {
+  context?: OmnyoSdkContext;
 }
 
-export type BrowserBbSdk = BbSdkAreas;
+export type BrowserOmnyoSdk = OmnyoSdkAreas;
 
 export function createBrowserTransport(
   args: CreateBrowserTransportArgs = {},
-): BbSdkTransport {
+): OmnyoSdkTransport {
   return createHttpTransport({
     baseUrl: args.baseUrl,
     fetch: args.fetch,
@@ -36,18 +36,23 @@ export function createBrowserTransport(
   });
 }
 
-export function createBrowserBbSdk(
-  args: CreateBrowserBbSdkArgs = {},
-): BrowserBbSdk {
-  return createBbSdk({
+export function createBrowserOmnyoSdk(
+  args: CreateBrowserOmnyoSdkArgs = {},
+): BrowserOmnyoSdk {
+  return createOmnyoSdk({
     context: args.context,
     transport: createBrowserTransport(args),
   });
 }
 
-export { BbHttpError, BbRequestTimeoutError } from "./response.js";
-export type { BbHttpErrorArgs } from "./response.js";
-export { createBbSdk, createBuiltinPlanCommandTextInput, createHttpTransport };
-export type { BbSdk, BbSdkAreas, BbSdkContext, BbSdkTransport };
+export { OmnyoHttpError, OmnyoRequestTimeoutError } from "./response.js";
+
+export type { OmnyoHttpErrorArgs } from "./response.js";
+
+export { createOmnyoSdk, createBuiltinPlanCommandTextInput, createHttpTransport };
+
+export type { OmnyoSdk, OmnyoSdkAreas, OmnyoSdkContext, OmnyoSdkTransport };
+
 export type * from "./areas/skills.js";
+
 export type * from "./public-types.js";

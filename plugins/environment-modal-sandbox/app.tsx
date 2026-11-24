@@ -4,7 +4,7 @@ import {
   useRpc,
   type JsonValue,
   type PluginMachineProviderInputsProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
@@ -43,7 +43,9 @@ function selectedName(
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
+
   const selected = value[key];
+
   return typeof selected === "string" ? selected : undefined;
 }
 
@@ -110,22 +112,27 @@ function ModalMachineInputsControl({
         if (active) setOptions(null);
       },
     );
+
     return () => {
       active = false;
     };
   }, [rpc]);
+
   if (
     options === null ||
     (options.presets.length <= 1 && options.images.length <= 1)
   ) {
     return null;
   }
+
   const presetName =
     options.presets.find((entry) => entry.name === selectedPresetName)?.name ??
     options.presets[0]?.name;
+
   const imageName =
     options.images.find((entry) => entry.name === selectedImageName)?.name ??
     options.images[0]?.name;
+
   const labels = [
     ...(options.presets.length > 1 && presetName !== undefined
       ? [presetName]
@@ -134,9 +141,11 @@ function ModalMachineInputsControl({
       ? [imageName]
       : []),
   ];
+
   const choose = (preset: string | undefined, image: string | undefined) => {
     onChange({ status: "ready", value: machineInputs(preset, image) });
   };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -207,8 +216,10 @@ function nextName(
   const taken = new Set(
     existing.map((entry) => entry.name.trim().toLocaleLowerCase()),
   );
+
   for (let candidate = existing.length + 1; ; candidate += 1) {
     const name = `${prefix} ${candidate}`;
+
     if (!taken.has(name.toLocaleLowerCase())) return name;
   }
 }
@@ -238,14 +249,17 @@ function LaunchOptionsSettings() {
         }
       },
     );
+
     return () => {
       active = false;
     };
   }, [rpc]);
+
   const save = async () => {
     if (draft === null) return;
     setSaving(true);
     setError(null);
+
     try {
       const result = await rpc.call("launch.options.set", draft);
       setSaved(result);
@@ -256,6 +270,7 @@ function LaunchOptionsSettings() {
       setSaving(false);
     }
   };
+
   if (draft === null) {
     return error === null ? (
       <p className="text-sm text-muted-foreground" role="status">
@@ -267,12 +282,15 @@ function LaunchOptionsSettings() {
       </p>
     );
   }
+
   const updatePreset = (index: number, preset: SandboxPreset) => {
     setDraft({ ...draft, presets: replaceAt(draft.presets, index, preset) });
   };
+
   const updateImage = (index: number, image: ModalImage) => {
     setDraft({ ...draft, images: replaceAt(draft.images, index, image) });
   };
+
   return (
     <div className="w-full min-w-0 space-y-5">
       <section>
@@ -391,9 +409,11 @@ function LaunchOptionsSettings() {
         {(() => {
           const index = Math.min(selectedImage, draft.images.length - 1);
           const image = draft.images[index];
+
           if (image === undefined) return null;
           const label = image.name || `Image ${index + 1}`;
           const bundled = index === 0;
+
           return (
             <div className="mt-3 space-y-2">
               <div className="flex flex-wrap items-center gap-3">

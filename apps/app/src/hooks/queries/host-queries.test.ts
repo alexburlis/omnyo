@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Host } from "@bb/domain";
-import { makeHost } from "@bb/test-helpers/domain-fixtures";
+import type { Host } from "@omnyo/domain";
+import { makeHost } from "@omnyo/test-helpers/domain-fixtures";
 import { selectHosts, selectPrimaryHost } from "./host-queries";
 
 function host(overrides: Partial<Host> & Pick<Host, "id">): Host {
@@ -28,6 +28,7 @@ describe("selectPrimaryHost", () => {
       host({ id: "host_stale", status: "disconnected" }),
       host({ id: "host_live" }),
     ];
+
     expect(selectPrimaryHost(hosts, null)?.id).toBe("host_live");
     expect(selectPrimaryHost([hosts[0]], null)?.id).toBe("host_stale");
   });
@@ -37,6 +38,7 @@ describe("selectPrimaryHost", () => {
       id: "host_modal",
       machineProviderId: "modal-sandbox",
     });
+
     const laptop = host({ id: "host_laptop", status: "disconnected" });
     expect(selectPrimaryHost([sandbox], null)?.id).toBe(sandbox.id);
     expect(selectPrimaryHost([sandbox], sandbox.id)?.id).toBe(sandbox.id);

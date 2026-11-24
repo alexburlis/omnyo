@@ -6,10 +6,10 @@ import {
   type ReactNode,
   useContext,
 } from "react";
-import type { BbNavigate } from "@get-bb/plugin-sdk";
+import type { experimental_AppNavigate } from "@omnyo/plugin-sdk";
 
 export type PluginThreadPanelOpenHandler = (
-  options: Parameters<BbNavigate["openThreadPanel"]>[0] & {
+  options: Parameters<experimental_AppNavigate["openThreadPanel"]>[0] & {
     pluginId: string;
   },
 ) => boolean;
@@ -49,8 +49,10 @@ export function usePublishThreadPanelOpener(
   tokenRef.current ??= Symbol("thread-panel-opener");
   useEffect(() => {
     const token = tokenRef.current;
+
     if (token === null || !isActive) return;
     focusedOpeners.set(token, (options) => handlerRef.current(options));
+
     return () => {
       focusedOpeners.delete(token);
     };
@@ -59,7 +61,9 @@ export function usePublishThreadPanelOpener(
 
 export function getActiveThreadPanelOpener(): PluginThreadPanelOpenHandler | null {
   let active: PluginThreadPanelOpenHandler | null = null;
+
   for (const opener of focusedOpeners.values()) active = opener;
+
   return active;
 }
 

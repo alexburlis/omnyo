@@ -3,7 +3,7 @@ import { and, asc, eq, isNull, lt, notExists, sql } from "drizzle-orm";
 import {
   ProjectAttachmentError,
   type ProjectAttachmentOwnershipMode,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { DbConnection, DbQueryConnection } from "../connection.js";
 import {
   projectAttachments,
@@ -13,8 +13,15 @@ import {
 } from "../schema.js";
 
 export const PROJECT_ATTACHMENT_GRACE_MS = 7 * 24 * 60 * 60_000;
+
 export const PROJECT_ATTACHMENT_BATCH_SIZE = 32;
+
 export type ProjectAttachmentRow = typeof projectAttachments.$inferSelect;
+
+export interface ProjectAttachmentReference {
+  projectId: string;
+  path: string;
+}
 
 export function getProjectAttachment(
   db: DbQueryConnection,
@@ -50,11 +57,12 @@ export function recordProjectAttachment(
     })
     .run();
   const row = getProjectAttachment(db, input.projectId, input.storedPath);
+
   if (!row || row.deletionClaimedAt !== null)
     throw attachmentUnavailable(input.storedPath);
+
   return row;
 }
-
 
 export function acquireProjectAttachmentOwnership(
   db: DbQueryConnection,
@@ -63,24 +71,55 @@ export function acquireProjectAttachmentOwnership(
   mode: ProjectAttachmentOwnershipMode = "required",
 ): void {
   if (paths.length === 0) return;
+
+  const thread = db
+    .select({ projectId: threads.projectId })
+    .from(threads)
+    .where(eq(threads.id, threadId))
+    .get();
+
+  if (!thread) throw new Error(`Thread ${threadId} does not exist`);
+  acquireProjectAttachmentReferences(
+    db,
+    threadId,
+    paths.map((path) => ({ projectId: thread.projectId, path })),
+    mode,
+  );
+}
+
+export function acquireProjectAttachmentReferences(
+  db: DbQueryConnection,
+  threadId: string,
+  references: readonly ProjectAttachmentReference[],
+  mode: ProjectAttachmentOwnershipMode = "required",
+): void {
+  if (references.length === 0) return;
   db.transaction(
     (tx) => {
       const thread = tx
-        .select({ projectId: threads.projectId })
+        .select({ id: threads.id })
         .from(threads)
         .where(eq(threads.id, threadId))
         .get();
+
       if (!thread) throw new Error(`Thread ${threadId} does not exist`);
-      for (const path of paths) {
-        const attachment = getProjectAttachment(tx, thread.projectId, path);
+
+      for (const reference of references) {
+        const attachment = getProjectAttachment(
+          tx,
+          reference.projectId,
+          reference.path,
+        );
+
         if (
           !attachment ||
           attachment.readyAt === null ||
           attachment.deletionClaimedAt !== null
         ) {
           if (mode === "best-effort") continue;
-          throw attachmentUnavailable(path);
+          throw attachmentUnavailable(reference.path);
         }
+
         tx.insert(projectAttachmentThreads)
           .values({ attachmentId: attachment.id, threadId })
           .onConflictDoNothing()
@@ -101,11 +140,13 @@ export function copyProjectAttachmentOwnership(
     .from(threads)
     .where(eq(threads.id, sourceThreadId))
     .get();
+
   const target = db
     .select({ projectId: threads.projectId })
     .from(threads)
     .where(eq(threads.id, targetThreadId))
     .get();
+
   if (!source || !target || source.projectId !== target.projectId)
     throw new Error(
       "Attachment ownership requires threads in the same project",
@@ -131,7 +172,9 @@ export function claimProjectAttachments(
           ),
         )
         .get();
+
       if (!ready) return [];
+
       const unowned = notExists(
         tx
           .select({ id: projectAttachmentThreads.threadId })
@@ -140,6 +183,7 @@ export function claimProjectAttachments(
             eq(projectAttachmentThreads.attachmentId, projectAttachments.id),
           ),
       );
+
       const eligible = tx
         .select()
         .from(projectAttachments)
@@ -154,11 +198,13 @@ export function claimProjectAttachments(
         .orderBy(asc(projectAttachments.createdAt))
         .limit(PROJECT_ATTACHMENT_BATCH_SIZE)
         .all();
+
       for (const row of eligible)
         tx.update(projectAttachments)
           .set({ deletionClaimedAt: now })
           .where(eq(projectAttachments.id, row.id))
           .run();
+
       const claimed = tx
         .select()
         .from(projectAttachments)
@@ -174,11 +220,13 @@ export function claimProjectAttachments(
         )
         .limit(PROJECT_ATTACHMENT_BATCH_SIZE)
         .all();
+
       for (const row of claimed)
         tx.update(projectAttachments)
           .set({ deletionClaimedAt: now })
           .where(eq(projectAttachments.id, row.id))
           .run();
+
       return claimed;
     },
     { behavior: "immediate" },

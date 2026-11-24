@@ -29,8 +29,12 @@ import {
 const tempDirs: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "bb-server-journal-"));
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), "omnyo-server-journal-"),
+  );
+
   tempDirs.push(tempDir);
+
   return tempDir;
 }
 
@@ -62,13 +66,15 @@ const PLANNED_ENTRIES = [
   "skills/review/SKILL.md",
   "config.json",
   "env.json",
-  "bb.db",
+  "app.db",
 ];
+
 const PREEXISTING_ENTRIES = [
   "skills/review/SKILL.md",
   "config.json",
   "env.json",
 ];
+
 const TARGET_ENTRIES = [
   "config.json",
   "env.json",
@@ -82,11 +88,11 @@ async function stageImport(): Promise<{
   manifest: ServerArchiveManifest;
 }> {
   const sourceDataDir = await makeTempDir();
-  await writeDataFile(sourceDataDir, "bb.db", "server database");
+  await writeDataFile(sourceDataDir, "app.db", "server database");
   await writeDataFile(
     sourceDataDir,
     "config.json",
-    JSON.stringify({ config: { BB_LOG_LEVEL: "info" } }),
+    JSON.stringify({ config: { OMNYO_LOG_LEVEL: "info" } }),
   );
   await writeDataFile(
     sourceDataDir,
@@ -113,7 +119,7 @@ async function stageImport(): Promise<{
       })),
     manifest: {
       createdAt: 1,
-      bbVersion: "0.43.1",
+      appVersion: "0.43.1",
       protocolVersion: 209,
       migrationCount: 142,
       sourceDataDir,
@@ -122,10 +128,12 @@ async function stageImport(): Promise<{
     },
   });
   const stagingDir = path.join(workDir, "staging");
+
   const manifest = await extractServerArchive({
     archivePath,
     destinationDir: stagingDir,
   });
+
   return { stagingDir, manifest };
 }
 
@@ -135,7 +143,7 @@ function manualImportMarker(importedEntries: string[]): ServerImportFile {
     kind: "manual",
     moveId: null,
     activationToken: null,
-    sourceDataDir: "/home/old/.bb",
+    sourceDataDir: "/home/old/.omnyo",
     sourceServerHostId: "host-old",
     targetHostId: null,
     serverUrl: null,
@@ -160,6 +168,7 @@ async function createTargetDataDir(): Promise<string> {
   );
   await writeDataFile(dataDir, "skills/review/SKILL.md", "target skill");
   await writeDataFile(dataDir, "thread-storage/thr_1/notes.md", "notes");
+
   return dataDir;
 }
 
@@ -194,7 +203,7 @@ describe("server import journal", () => {
       manifest,
       localServerUrl: "http://127.0.0.1:39886",
     });
-    await writeDataFile(dataDir, "bb.db-wal", "pending server wal");
+    await writeDataFile(dataDir, "app.db-wal", "pending server wal");
 
     const rolledBack = await rollBackServerImport(dataDir);
 
@@ -214,12 +223,14 @@ describe("server import journal", () => {
   it("keeps an import that server-import.json recorded and removes only the leftover journal", async () => {
     const { stagingDir, manifest } = await stageImport();
     const dataDir = await createTargetDataDir();
+
     const installed = await installImportedServerFiles({
       stagingDir,
       dataDir,
       manifest,
       localServerUrl: null,
     });
+
     await writeServerImportFile(
       dataDir,
       manualImportMarker(installed.importedEntries),
@@ -228,7 +239,7 @@ describe("server import journal", () => {
     expect(await rollBackServerImport(dataDir)).toBeNull();
 
     expect(await readServerImportJournalFile(dataDir)).toBeNull();
-    expect(await readDataFile(dataDir, "bb.db")).toBe("server database");
+    expect(await readDataFile(dataDir, "app.db")).toBe("server database");
     expect(await readDataFile(dataDir, "auth-secret")).toBe("secret");
     expect(await readDataFile(dataDir, "skills/review/SKILL.md")).toBe(
       "imported skill",
@@ -241,16 +252,18 @@ describe("server import journal", () => {
   it("rolls back an install whose server-import.json doesn't record every journaled entry", async () => {
     const { stagingDir, manifest } = await stageImport();
     const dataDir = await createTargetDataDir();
+
     const installed = await installImportedServerFiles({
       stagingDir,
       dataDir,
       manifest,
       localServerUrl: null,
     });
+
     await writeServerImportFile(
       dataDir,
       manualImportMarker(
-        installed.importedEntries.filter((entry) => entry !== "bb.db"),
+        installed.importedEntries.filter((entry) => entry !== "app.db"),
       ),
     );
 
@@ -258,7 +271,7 @@ describe("server import journal", () => {
       PLANNED_ENTRIES,
     );
 
-    expect(await readdir(dataDir)).not.toContain("bb.db");
+    expect(await readdir(dataDir)).not.toContain("app.db");
     expect(await readDataFile(dataDir, "skills/review/SKILL.md")).toBe(
       "target skill",
     );
@@ -280,7 +293,7 @@ describe("server import journal", () => {
     expect((await rollBackServerImport(dataDir))?.entries).toEqual(
       PLANNED_ENTRIES,
     );
-    expect(await readdir(dataDir)).not.toContain("bb.db");
+    expect(await readdir(dataDir)).not.toContain("app.db");
   });
 
   it("rolls back an install interrupted partway without touching entries it never reached", async () => {
@@ -339,7 +352,7 @@ describe("server import journal", () => {
       SERVER_IMPORT_JOURNAL_FILE_NAME,
       JSON.stringify({
         version: 1,
-        entries: ["bb.db"],
+        entries: ["app.db"],
         preexistingEntries: [],
       }),
     );
@@ -358,7 +371,7 @@ describe("server import journal", () => {
     expect(error instanceof ServerArchiveError ? error.code : null).toBe(
       "server_data_exists",
     );
-    expect(await readdir(dataDir)).not.toContain("bb.db");
+    expect(await readdir(dataDir)).not.toContain("app.db");
     expect(await readdir(dataDir)).not.toContain(SERVER_IMPORT_BACKUP_DIR_NAME);
   });
 });

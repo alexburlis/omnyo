@@ -1,18 +1,18 @@
 import { Command } from "commander";
-import type { CommitActionResponse } from "@bb/server-contract";
+import type { CommitActionResponse } from "@omnyo/server-contract";
 import type {
   EnvironmentDiffArgs,
   EnvironmentDiffFileArgs,
   EnvironmentDiffPatchArgs,
   EnvironmentUpdateArgs,
-} from "@bb/sdk";
+} from "@omnyo/sdk";
 import {
   environmentStatusSchema,
   environmentStatusValues,
   type EnvironmentStatus,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import { action } from "../action.js";
-import { createCliBbSdk } from "../client.js";
+import { createCliOmnyoSdk } from "../client.js";
 import { resolveMachineHostId, resolveMachineTargetOption } from "./machine.js";
 import { collectOption, outputJson, prependErrorContext } from "./helpers.js";
 
@@ -101,11 +101,13 @@ interface BuildEnvironmentUpdateArgsInput {
 
 function parseEnvironmentStatus(value: string): EnvironmentStatus {
   const parsed = environmentStatusSchema.safeParse(value);
+
   if (!parsed.success) {
     throw new Error(
       `--status must be one of ${environmentStatusValues.join(", ")}.`,
     );
   }
+
   return parsed.data;
 }
 
@@ -120,13 +122,17 @@ function parseNonNegativeIntegerOption(
   optionName: "--limit" | "--offset",
 ): number | undefined {
   if (value === undefined) return undefined;
+
   if (!/^\d+$/u.test(value)) {
     throw new Error(`${optionName} must be a non-negative integer.`);
   }
+
   const parsed = Number(value);
+
   if (!Number.isSafeInteger(parsed)) {
     throw new Error(`${optionName} must be a non-negative integer.`);
   }
+
   return parsed;
 }
 
@@ -156,6 +162,7 @@ function buildEnvironmentDiffArgs(
           "--target uncommitted cannot be combined with --merge-base-branch or --sha.",
         );
       }
+
       return { environmentId: id, target: "uncommitted" };
     case "branch_committed":
     case "all":
@@ -164,11 +171,13 @@ function buildEnvironmentDiffArgs(
           `--merge-base-branch is required when --target ${opts.target} is used.`,
         );
       }
+
       if (opts.sha !== undefined) {
         throw new Error(
           `--target ${opts.target} cannot be combined with --sha.`,
         );
       }
+
       return {
         environmentId: id,
         target: opts.target,
@@ -178,11 +187,13 @@ function buildEnvironmentDiffArgs(
       if (!opts.sha) {
         throw new Error("--sha is required when --target commit is used.");
       }
+
       if (opts.mergeBaseBranch !== undefined) {
         throw new Error(
           "--target commit cannot be combined with --merge-base-branch.",
         );
       }
+
       return { environmentId: id, target: "commit", sha: opts.sha };
     default:
       throw new Error(
@@ -196,11 +207,13 @@ function buildEnvironmentDiffFileArgs(
   opts: EnvironmentDiffFileCommandOptions,
 ): EnvironmentDiffFileArgs {
   const side = parseDiffFileSide(opts.side);
+
   const common = {
     environmentId: id,
     path: opts.path,
     side,
   };
+
   switch (opts.target) {
     case "uncommitted":
       if (opts.mergeBaseRef !== undefined || opts.sha !== undefined) {
@@ -208,6 +221,7 @@ function buildEnvironmentDiffFileArgs(
           "--target uncommitted cannot be combined with --merge-base-ref or --sha.",
         );
       }
+
       return { ...common, target: "uncommitted" };
     case "branch_committed":
     case "all":
@@ -216,11 +230,13 @@ function buildEnvironmentDiffFileArgs(
           `--merge-base-ref is required when --target ${opts.target} is used.`,
         );
       }
+
       if (opts.sha !== undefined) {
         throw new Error(
           `--target ${opts.target} cannot be combined with --sha.`,
         );
       }
+
       return {
         ...common,
         target: opts.target,
@@ -230,11 +246,13 @@ function buildEnvironmentDiffFileArgs(
       if (!opts.sha) {
         throw new Error("--sha is required when --target commit is used.");
       }
+
       if (opts.mergeBaseRef !== undefined) {
         throw new Error(
           "--target commit cannot be combined with --merge-base-ref.",
         );
       }
+
       return { ...common, target: "commit", sha: opts.sha };
     default:
       throw new Error(
@@ -260,7 +278,9 @@ function buildEnvironmentDiffPatchArgs(
   if (opts.path.length === 0) {
     throw new Error("Provide at least one --path.");
   }
+
   const diffArgs = buildEnvironmentDiffArgs(id, opts);
+
   switch (diffArgs.target) {
     case "uncommitted":
       return {
@@ -295,20 +315,25 @@ function buildEnvironmentUpdateArgs({
     if (opts.clearName === true) {
       return { environmentId: id, mergeBaseBranch: null, name: null };
     }
+
     if (opts.name !== undefined) {
       return { environmentId: id, mergeBaseBranch: null, name: opts.name };
     }
+
     return { environmentId: id, mergeBaseBranch: null };
   }
 
   if (opts.mergeBaseBranch !== undefined) {
     const mergeBaseBranch = opts.mergeBaseBranch;
+
     if (opts.clearName === true) {
       return { environmentId: id, mergeBaseBranch, name: null };
     }
+
     if (opts.name !== undefined) {
       return { environmentId: id, mergeBaseBranch, name: opts.name };
     }
+
     return { environmentId: id, mergeBaseBranch };
   }
 
@@ -336,15 +361,25 @@ export function registerEnvironmentCommands(
   environment
     .command("cleanup <id>")
     .description("Clean up an unused provider-managed environment")
+    .option(
+      "--hook-stopped",
+      "After inspecting the workspace, confirm that no interrupted environment hook is still running; Omnyo then finishes removal without rerunning it",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
-      action(async (id: string, opts: { json?: boolean }) => {
-        const result = await createCliBbSdk(
-          getUrl(),
-        ).environments.experimental_cleanup({ environmentId: id });
-        if (!outputJson(opts, result))
-          console.log("Environment cleanup requested.");
-      }),
+      action(
+        async (id: string, opts: { hookStopped?: boolean; json?: boolean }) => {
+          const result = await createCliOmnyoSdk(
+            getUrl(),
+          ).environments.experimental_cleanup({
+            environmentId: id,
+            hookStopped: opts.hookStopped === true,
+          });
+
+          if (!outputJson(opts, result))
+            console.log("Environment cleanup requested.");
+        },
+      ),
     );
 
   environment
@@ -360,9 +395,11 @@ export function registerEnvironmentCommands(
     .action(
       action(async (opts: EnvironmentProvidersCommandOptions) => {
         const machineTarget = resolveMachineTargetOption(opts);
+
         if (machineTarget !== undefined && opts.project === undefined) {
           throw new Error("--machine or --host requires --project <id>.");
         }
+
         const hostId =
           machineTarget === undefined
             ? undefined
@@ -370,24 +407,31 @@ export function registerEnvironmentCommands(
                 serverUrl: getUrl(),
                 target: machineTarget,
               });
-        const providers = await createCliBbSdk(
+
+        const providers = await createCliOmnyoSdk(
           getUrl(),
         ).environments.listProviders({
           ...(opts.project === undefined ? {} : { projectId: opts.project }),
           ...(hostId === undefined ? {} : { hostId }),
         });
+
         if (outputJson(opts, providers)) return;
+
         if (providers.length === 0) {
           console.log("No environment providers available");
+
           return;
         }
+
         for (const provider of providers) {
           const requirements = Object.entries(provider.requires)
             .filter(([, required]) => required)
             .map(([name]) => name)
             .join(", ");
+
           const inputs =
             provider.inputs === null ? "" : "  takes --environment-inputs";
+
           const availability =
             hostId === undefined
               ? ""
@@ -396,6 +440,7 @@ export function registerEnvironmentCommands(
                 : provider.availability.status === "available"
                   ? "  availability: available"
                   : `  availability: ${provider.availability.status} (${provider.availability.message})`;
+
           console.log(
             `${provider.id}  ${provider.displayName}  ${requirements || "-"}${inputs}${availability}`,
           );
@@ -427,7 +472,8 @@ export function registerEnvironmentCommands(
       action(async (opts: EnvironmentListCommandOptions) => {
         const limit = parseNonNegativeIntegerOption(opts.limit, "--limit");
         const offset = parseNonNegativeIntegerOption(opts.offset, "--offset");
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const hostId =
           opts.host === undefined
             ? undefined
@@ -435,6 +481,7 @@ export function registerEnvironmentCommands(
                 serverUrl: getUrl(),
                 target: opts.host,
               });
+
         const rows = await sdk.environments.list({
           ...(opts.project ? { projectId: opts.project } : {}),
           ...(opts.provider ? { environmentProviderId: opts.provider } : {}),
@@ -446,7 +493,9 @@ export function registerEnvironmentCommands(
           ...(limit === undefined ? {} : { limit }),
           ...(offset === undefined ? {} : { offset }),
         });
+
         if (outputJson(opts, rows)) return;
+
         for (const env of rows) {
           console.log(
             `${env.id}  ${env.status}  ${env.environmentProviderId ?? "-"}  ${env.path ?? "-"}`,
@@ -463,8 +512,9 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: { json?: boolean }) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const result = await sdk.environments.delete({ environmentId: id });
+
         if (outputJson(opts, result)) return;
         const environment = await sdk.environments.get({ environmentId: id });
         console.log(`Cleanup requested for environment ${id}.`);
@@ -479,44 +529,55 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentShowCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         const env = await sdk.environments.get({ environmentId: id });
+
         if (outputJson(opts, env)) return;
         console.log(`Environment: ${env.id}`);
         console.log(`  Project: ${env.projectId}`);
         console.log(`  Status: ${env.status}`);
         console.log(`  Lifecycle: ${env.lifecycle.phase}`);
+
         if (env.lifecycle.retireAt !== null)
           console.log(
             `  Retire at: ${new Date(env.lifecycle.retireAt).toISOString()}`,
           );
+
         if (env.lifecycle.teardown !== null) {
           console.log(
             `  Teardown: ${env.lifecycle.teardown.status} (attempt ${env.lifecycle.teardown.attempt})`,
           );
+
           if (env.lifecycle.teardown.message !== undefined)
             console.log(
               `  Teardown message: ${env.lifecycle.teardown.message}`,
             );
         }
+
         if (env.path) {
           console.log(`  Path: ${env.path}`);
         }
+
         if (env.name) {
           console.log(`  Name: ${env.name}`);
         }
+
         console.log(
           `  Provider: ${env.environmentProviderId ?? "none (attached directory)"}`,
         );
+
         if (env.branchName) {
           console.log(`  Branch: ${env.branchName}`);
         }
+
         if (env.defaultBranch) {
           console.log(`  Default branch: ${env.defaultBranch}`);
         }
+
         if (env.mergeBaseBranch) {
           console.log(`  Merge base: ${env.mergeBaseBranch}`);
         }
+
         console.log(`  Git repo: ${env.isGitRepo}`);
         console.log(`  Created: ${new Date(env.createdAt).toLocaleString()}`);
         console.log(`  Updated: ${new Date(env.updatedAt).toLocaleString()}`);
@@ -530,34 +591,49 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentStatusCommandOptions) => {
-        const result = await createCliBbSdk(getUrl()).environments.status({
+        const result = await createCliOmnyoSdk(getUrl()).environments.status({
           environmentId: id,
           ...(opts.mergeBaseBranch !== undefined
             ? { mergeBaseBranch: opts.mergeBaseBranch }
             : {}),
         });
+
         if (outputJson(opts, result)) return;
+
         if (result.outcome === "not_applicable") {
           console.log(`Status unavailable: ${result.message}`);
+
           return;
         }
+
         if (result.outcome === "unavailable") {
           console.log(`Status unavailable: ${result.failure.message}`);
+
           return;
         }
+
         const status = result.workspace;
         console.log(`State: ${status.workingTree.state}`);
         console.log(`Branch: ${status.branch.currentBranch ?? "(detached)"}`);
         console.log(`Default branch: ${status.branch.defaultBranch}`);
-        console.log(`Changed files: ${status.workingTree.files.length}`);
+        console.log(`Changed files: ${status.workingTree.fileCount}`);
+
         if (status.workingTree.lineStatsComplete) {
           console.log(`Insertions: +${status.workingTree.insertions}`);
           console.log(`Deletions: -${status.workingTree.deletions}`);
         } else {
           console.log("Line stats: unavailable for untracked files");
         }
+
         if (status.mergeBase) {
           console.log(`Merge base: ${status.mergeBase.mergeBaseBranch}`);
+
+          if (!status.mergeBase.squashMergeCheckComplete) {
+            console.log(
+              "Squash-merge check incomplete; counts may include already-merged commits.",
+            );
+          }
+
           console.log(`Ahead: ${status.mergeBase.aheadCount}`);
           console.log(`Behind: ${status.mergeBase.behindCount}`);
         }
@@ -573,21 +649,29 @@ export function registerEnvironmentCommands(
     .action(
       action(async (id: string, opts: EnvironmentBranchesCommandOptions) => {
         validateLimit(opts.limit);
-        const result = await createCliBbSdk(getUrl()).environments.diffBranches(
-          {
-            environmentId: id,
-            ...(opts.query !== undefined ? { query: opts.query } : {}),
-            ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
-          },
-        );
+
+        const result = await createCliOmnyoSdk(
+          getUrl(),
+        ).environments.diffBranches({
+          environmentId: id,
+          ...(opts.query !== undefined ? { query: opts.query } : {}),
+          ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+        });
+
         if (outputJson(opts, result)) return;
         console.log("Local branches:");
+
         for (const branch of result.branches) console.log(`  ${branch}`);
+
         if (result.branches.length === 0) console.log("  (none)");
+
         if (result.branchesTruncated) console.log("  (truncated)");
         console.log("Remote branches:");
+
         for (const branch of result.remoteBranches) console.log(`  ${branch}`);
+
         if (result.remoteBranches.length === 0) console.log("  (none)");
+
         if (result.remoteBranchesTruncated) console.log("  (truncated)");
       }),
     );
@@ -604,19 +688,24 @@ export function registerEnvironmentCommands(
       action(async (id: string, opts: EnvironmentPathsCommandOptions) => {
         validateLimit(opts.limit);
         const includeFiles = opts.files === true || opts.directories !== true;
+
         const includeDirectories =
           opts.directories === true || opts.files !== true;
-        const result = await createCliBbSdk(getUrl()).environments.paths({
+
+        const result = await createCliOmnyoSdk(getUrl()).environments.paths({
           environmentId: id,
           includeFiles: booleanQueryValue(includeFiles),
           includeDirectories: booleanQueryValue(includeDirectories),
           ...(opts.query !== undefined ? { query: opts.query } : {}),
           ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
         });
+
         if (outputJson(opts, result)) return;
+
         for (const entry of result.paths) {
           console.log(`${entry.kind}\t${entry.path}`);
         }
+
         if (result.truncated) console.log("(results truncated)");
       }),
     );
@@ -629,27 +718,36 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentDiffCommandOptions) => {
-        const result = await createCliBbSdk(getUrl()).environments.diff(
+        const result = await createCliOmnyoSdk(getUrl()).environments.diff(
           buildEnvironmentDiffArgs(id, opts),
         );
+
         if (outputJson(opts, result)) return;
+
         if (result.outcome === "not_applicable") {
           console.log(`Diff unavailable: ${result.message}`);
+
           return;
         }
+
         if (result.outcome === "unavailable") {
           console.log(`Diff unavailable: ${result.failure.message}`);
+
           return;
         }
+
         if (result.diff.files.trim().length > 0) {
           console.log(result.diff.files.trimEnd());
         }
+
         if (result.diff.shortstat.trim().length > 0) {
           console.log(result.diff.shortstat.trim());
         }
+
         if (result.diff.diff.length > 0) {
           console.log(result.diff.diff);
         }
+
         if (result.diff.truncated) console.log("(diff truncated)");
       }),
     );
@@ -662,32 +760,42 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentDiffCommandOptions) => {
-        const result = await createCliBbSdk(getUrl()).environments.diffFiles(
+        const result = await createCliOmnyoSdk(getUrl()).environments.diffFiles(
           buildEnvironmentDiffArgs(id, opts),
         );
+
         if (outputJson(opts, result)) return;
+
         if (result.outcome === "not_applicable") {
           console.log(`Diff files unavailable: ${result.message}`);
+
           return;
         }
+
         if (result.outcome === "unavailable") {
           console.log(`Diff files unavailable: ${result.failure.message}`);
+
           return;
         }
+
         for (const file of result.files) {
           const path = file.previousPath
             ? `${file.previousPath} -> ${file.path}`
             : file.path;
+
           const stats = file.binary
             ? "binary"
             : `+${file.additions} -${file.deletions}`;
+
           console.log(
             `${file.changeKind}\t${stats}\t${file.origin}\t${file.loadMode}\t${path}`,
           );
         }
+
         if (result.shortstat.trim().length > 0) {
           console.log(result.shortstat.trim());
         }
+
         if (result.truncated) {
           console.log("(additional changed files omitted)");
         }
@@ -708,18 +816,23 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentDiffFileCommandOptions) => {
-        const result = await createCliBbSdk(getUrl()).environments.diffFile(
+        const result = await createCliOmnyoSdk(getUrl()).environments.diffFile(
           buildEnvironmentDiffFileArgs(id, opts),
         );
+
         if (outputJson(opts, result)) return;
+
         if (result.contentEncoding === "base64") {
           console.log(`Binary file: ${result.path}`);
           console.log(`Encoding: ${result.contentEncoding}`);
           console.log(`Size: ${result.sizeBytes} bytes`);
+
           if (result.mimeType) console.log(`MIME type: ${result.mimeType}`);
           console.log(result.content);
+
           return;
         }
+
         console.log(result.content);
       }),
     );
@@ -742,21 +855,28 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentDiffPatchCommandOptions) => {
-        const result = await createCliBbSdk(getUrl()).environments.diffPatch(
+        const result = await createCliOmnyoSdk(getUrl()).environments.diffPatch(
           buildEnvironmentDiffPatchArgs(id, opts),
         );
+
         if (outputJson(opts, result)) return;
+
         if (result.outcome === "not_applicable") {
           console.log(`Diff patches unavailable: ${result.message}`);
+
           return;
         }
+
         if (result.outcome === "unavailable") {
           console.log(`Diff patches unavailable: ${result.failure.message}`);
+
           return;
         }
+
         for (const patch of result.patches) {
           console.log(`File: ${patch.path}`);
           console.log(patch.patch);
+
           if (patch.truncated) console.log("(patch truncated)");
         }
       }),
@@ -785,12 +905,15 @@ export function registerEnvironmentCommands(
             "Cannot combine --merge-base-branch with --clear-merge-base-branch.",
           );
         }
+
         if (hasName && hasClearName) {
           throw new Error("Cannot combine --name with --clear-name.");
         }
+
         if (opts.name !== undefined && opts.name.trim().length === 0) {
           throw new Error("Environment name cannot be empty.");
         }
+
         if (
           !hasMergeBaseBranch &&
           !hasClearMergeBaseBranch &&
@@ -802,13 +925,15 @@ export function registerEnvironmentCommands(
           );
         }
 
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
+
         const environment = await sdk.environments.update(
           buildEnvironmentUpdateArgs({ id, opts }),
         );
 
         if (outputJson(opts, environment)) return;
         console.log(`Environment ${environment.id} updated`);
+
         if (hasClearMergeBaseBranch || hasMergeBaseBranch) {
           console.log(
             environment.mergeBaseBranch
@@ -816,6 +941,7 @@ export function registerEnvironmentCommands(
               : "Merge base branch cleared",
           );
         }
+
         if (hasClearName || hasName) {
           console.log(
             environment.name ? `Name: ${environment.name}` : "Name cleared",
@@ -830,8 +956,9 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentCommitCommandOptions) => {
-        const sdk = createCliBbSdk(getUrl());
+        const sdk = createCliOmnyoSdk(getUrl());
         let result: CommitActionResponse;
+
         try {
           result = await sdk.environments.commit({ environmentId: id });
         } catch (err: unknown) {
@@ -840,6 +967,7 @@ export function registerEnvironmentCommands(
             err,
           );
         }
+
         if (outputJson(opts, result)) return;
         console.log(`${result.message} [committed]`);
       }),
@@ -851,11 +979,12 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentCommitCommandOptions) => {
-        const result = await createCliBbSdk(
+        const result = await createCliOmnyoSdk(
           getUrl(),
         ).environments.archiveThreads({
           environmentId: id,
         });
+
         if (outputJson(opts, result)) return;
         console.log(
           `Archived ${result.archivedThreadIds.length} thread(s) in environment ${id}`,
@@ -873,18 +1002,26 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentPullRequestCommandOptions) => {
-        const result = await createCliBbSdk(getUrl()).environments.pullRequest({
+        const result = await createCliOmnyoSdk(
+          getUrl(),
+        ).environments.pullRequest({
           environmentId: id,
         });
+
         if (outputJson(opts, result)) return;
+
         if (result.outcome === "unavailable") {
           console.log(`Pull request lookup unavailable: ${result.message}`);
+
           return;
         }
+
         if (result.outcome === "absent") {
           console.log("No pull request found");
+
           return;
         }
+
         const pr = result.pullRequest;
         console.log(`Pull request: #${pr.number} ${pr.state} - ${pr.title}`);
         console.log(`URL: ${pr.url}`);
@@ -912,9 +1049,10 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentPullRequestCommandOptions) => {
-        const result = await createCliBbSdk(
+        const result = await createCliOmnyoSdk(
           getUrl(),
         ).environments.markPullRequestReady({ environmentId: id });
+
         if (outputJson(opts, result)) return;
         console.log(result.message);
       }),
@@ -926,9 +1064,10 @@ export function registerEnvironmentCommands(
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(async (id: string, opts: EnvironmentPullRequestCommandOptions) => {
-        const result = await createCliBbSdk(
+        const result = await createCliOmnyoSdk(
           getUrl(),
         ).environments.markPullRequestDraft({ environmentId: id });
+
         if (outputJson(opts, result)) return;
         console.log(result.message);
       }),
@@ -952,12 +1091,14 @@ export function registerEnvironmentCommands(
         ) {
           throw new Error("--method must be merge, squash, or rebase.");
         }
-        const result = await createCliBbSdk(
+
+        const result = await createCliOmnyoSdk(
           getUrl(),
         ).environments.mergePullRequest({
           environmentId: id,
           method: opts.method,
         });
+
         if (outputJson(opts, result)) return;
         console.log(result.message);
       }),

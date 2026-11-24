@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ThreadEvent } from "@bb/domain";
+import type { ThreadEvent } from "@omnyo/domain";
 import { AgentRuntimeRecoveryError } from "./runtime.js";
 import {
   createScriptedEchoLaunch,
@@ -41,7 +41,7 @@ describe("runtime recovery hints", () => {
   const runtimes: AgentRuntime[] = [];
 
   beforeEach(() => {
-    workspacePath = mkdtempSync(join(tmpdir(), "bb-runtime-recovery-"));
+    workspacePath = mkdtempSync(join(tmpdir(), "omnyo-runtime-recovery-"));
   });
 
   afterEach(async () => {
@@ -58,6 +58,7 @@ describe("runtime recovery hints", () => {
     const stderr: string[] = [];
     const record = createScriptedEchoRequestRecord();
     const processLog = createScriptedEchoProcessLog();
+
     const runtime = createScriptedEchoRuntime({
       runtime: {
         workspacePath,
@@ -69,11 +70,12 @@ describe("runtime recovery hints", () => {
         onEvent: (event) => events.push(event),
         onProviderRecovery: (hint) => hints.push(hint),
         onStderr: (line) => stderr.push(line),
-        rateLimitRetry: { delaysMs: [20, 40] },
       },
       launch: { scripted },
     });
+
     runtimes.push(runtime);
+
     return { events, hints, processLog, record, runtime, stderr };
   }
 
@@ -99,6 +101,7 @@ describe("runtime recovery hints", () => {
       threadId,
       options: fullRuntimeOptions,
     });
+
     return providerThreadId;
   }
 
@@ -113,6 +116,7 @@ describe("runtime recovery hints", () => {
     const { events, record, runtime } = createRecoveryRuntime({
       archivedSession: true,
     });
+
     const providerThreadId = await startThread(runtime, "t-archived");
 
     await runtime.runTurn({
@@ -146,6 +150,7 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
+
     await expect(
       runtime.resumeThread({
         environmentId: "env-1",
@@ -169,7 +174,9 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
+
     let caught: unknown;
+
     try {
       await runtime.resumeThread({
         environmentId: "env-1",
@@ -182,6 +189,7 @@ describe("runtime recovery hints", () => {
     } catch (error) {
       caught = error;
     }
+
     expect(caught).toBeInstanceOf(AgentRuntimeRecoveryError);
     const recoveryError = caught as AgentRuntimeRecoveryError;
     expect(recoveryError.code).toBe("auth_required");
@@ -202,58 +210,9 @@ describe("runtime recovery hints", () => {
     );
   });
 
-  it("authRequired at the end of a rateLimited ladder: typed auth_required and forwarded", async () => {
-    const { hints, record, runtime } = createRecoveryRuntime({
-      failMethods: [
-        {
-          method: "turn/start",
-          message: "slow down",
-          times: 1,
-          recovery: { kind: "rateLimited", retryable: true },
-        },
-        {
-          method: "turn/start",
-          message: "session expired, sign in again",
-          recovery: { kind: "authRequired", retryable: false },
-        },
-      ],
-    });
-    await startThread(runtime, "t-ladder-auth");
-    let caught: unknown;
-    try {
-      await runtime.runTurn({
-        clientRequestId: "creq_rcvrhint2f",
-        input: [promptTextInput({ text: "never" })],
-        options: fullRuntimeOptions,
-        threadId: "t-ladder-auth",
-      });
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(AgentRuntimeRecoveryError);
-    expect((caught as AgentRuntimeRecoveryError).code).toBe("auth_required");
-    expect((caught as AgentRuntimeRecoveryError).message).toBe(
-      "session expired, sign in again",
-    );
-    expect(countRequests(record, "turn/start")).toBe(2);
-    expect(hints).toContainEqual(
-      expect.objectContaining({
-        kind: "authRequired",
-        providerId: PROVIDER_ID,
-        threadId: "t-ladder-auth",
-      }),
-    );
-  });
-
-  it("sessionArchived at the end of a rateLimited ladder: unarchives and retries", async () => {
+  it("sessionArchived on thread/resume: unarchives the session and resumes it", async () => {
     const { record, runtime } = createRecoveryRuntime({
       failMethods: [
-        {
-          method: "thread/resume",
-          message: "slow down",
-          times: 1,
-          recovery: { kind: "rateLimited", retryable: true },
-        },
         {
           method: "thread/resume",
           message: "session is archived",
@@ -262,8 +221,9 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
-    const providerThreadId = await startThread(runtime, "t-ladder-archived");
-    await runtime.stopThread({ threadId: "t-ladder-archived" });
+
+    const providerThreadId = await startThread(runtime, "t-resume-archived");
+    await runtime.stopThread({ threadId: "t-resume-archived" });
 
     await expect(
       runtime.resumeThread({
@@ -271,27 +231,21 @@ describe("runtime recovery hints", () => {
         projectId: "p1",
         providerId: PROVIDER_ID,
         providerThreadId,
-        threadId: "t-ladder-archived",
+        threadId: "t-resume-archived",
         options: fullRuntimeOptions,
       }),
     ).resolves.toEqual({ providerThreadId });
     expect(record.read()).toContainEqual({
       method: "thread/unarchive",
-      params: { threadId: "t-ladder-archived", providerThreadId },
+      params: { threadId: "t-resume-archived", providerThreadId },
     });
-    expect(countRequests(record, "thread/resume")).toBe(3);
-    expect(runtime.hasThread("t-ladder-archived")).toBe(true);
+    expect(countRequests(record, "thread/resume")).toBe(2);
+    expect(runtime.hasThread("t-resume-archived")).toBe(true);
   });
 
-  it("staleTurn at the end of a rateLimited ladder: the steer is dropped as stale", async () => {
+  it("staleTurn: a steer the provider rejects as stale is dropped", async () => {
     const { events, runtime } = createRecoveryRuntime({
       failMethods: [
-        {
-          method: "turn/steer",
-          message: "slow down",
-          times: 1,
-          recovery: { kind: "rateLimited", retryable: true },
-        },
         {
           method: "turn/steer",
           message: "the turn already ended",
@@ -300,18 +254,20 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
-    await startThread(runtime, "t-ladder-stale");
+
+    await startThread(runtime, "t-steer-stale");
     await runtime.runTurn({
       clientRequestId: "creq_rcvrrungab",
       input: [promptTextInput({ text: "hold_turn" })],
       options: fullRuntimeOptions,
-      threadId: "t-ladder-stale",
+      threadId: "t-steer-stale",
     });
+
     const { turnId } = await waitForThreadTurnStarted({
       events,
       providerId: PROVIDER_ID,
       runtime,
-      threadId: "t-ladder-stale",
+      threadId: "t-steer-stale",
     });
 
     const result = await runtime.steerTurn({
@@ -319,23 +275,17 @@ describe("runtime recovery hints", () => {
       expectedTurnId: turnId,
       input: [promptTextInput({ text: "too late" })],
       options: fullRuntimeOptions,
-      threadId: "t-ladder-stale",
+      threadId: "t-steer-stale",
     });
 
     expect(result).toEqual({ status: "stale", activeTurnId: null });
-    expect(runtime.getActiveTurnId("t-ladder-stale")).toBeNull();
+    expect(runtime.getActiveTurnId("t-steer-stale")).toBeNull();
   });
 
-  it("restartRecommended at the end of a rateLimited ladder: the hint is forwarded and the thread restarts before its next turn", async () => {
+  it("restartRecommended on a rejected steer: the hint is forwarded and the thread restarts before its next turn", async () => {
     const { events, hints, processLog, record, runtime } =
       createRecoveryRuntime({
         failMethods: [
-          {
-            method: "turn/steer",
-            message: "slow down",
-            times: 1,
-            recovery: { kind: "rateLimited", retryable: true },
-          },
           {
             method: "turn/steer",
             message: "the agent wedged itself; restart me",
@@ -344,50 +294,54 @@ describe("runtime recovery hints", () => {
           },
         ],
       });
-    const providerThreadId = await startThread(runtime, "t-ladder-restart");
+
+    const providerThreadId = await startThread(runtime, "t-steer-restart");
     await runtime.runTurn({
       clientRequestId: "creq_rcvrrungad",
       input: [promptTextInput({ text: "delay:800" })],
       options: fullRuntimeOptions,
-      threadId: "t-ladder-restart",
+      threadId: "t-steer-restart",
     });
+
     const { turnId } = await waitForThreadTurnStarted({
       events,
       providerId: PROVIDER_ID,
       runtime,
-      threadId: "t-ladder-restart",
+      threadId: "t-steer-restart",
     });
 
     let caught: unknown;
+
     try {
       await runtime.steerTurn({
         clientRequestId: "creq_rcvrrungaf",
         expectedTurnId: turnId,
         input: [promptTextInput({ text: "never" })],
         options: fullRuntimeOptions,
-        threadId: "t-ladder-restart",
+        threadId: "t-steer-restart",
       });
     } catch (error) {
       caught = error;
     }
+
     expect(caught).toBeInstanceOf(Error);
     expect(caught).not.toBeInstanceOf(AgentRuntimeRecoveryError);
     expect((caught as Error).message).toBe(
       "the agent wedged itself; restart me",
     );
-    expect(countRequests(record, "turn/steer")).toBe(2);
+    expect(countRequests(record, "turn/steer")).toBe(1);
     expect(hints).toEqual([
       expect.objectContaining({
         kind: "restartRecommended",
         providerId: PROVIDER_ID,
-        threadId: "t-ladder-restart",
+        threadId: "t-steer-restart",
       }),
     ]);
     await waitForThreadTurnCompleted({
       events,
       providerId: PROVIDER_ID,
       runtime,
-      threadId: "t-ladder-restart",
+      threadId: "t-steer-restart",
       timeoutMs: 5_000,
     });
     expect(countSpawns(processLog)).toBe(1);
@@ -397,18 +351,18 @@ describe("runtime recovery hints", () => {
       clientRequestId: "creq_rcvrrungae",
       input: [promptTextInput({ text: "after restart" })],
       options: fullRuntimeOptions,
-      threadId: "t-ladder-restart",
+      threadId: "t-steer-restart",
     });
     await waitForThreadAgentMessageText({
       events,
       providerId: PROVIDER_ID,
       runtime,
       text: "after restart",
-      threadId: "t-ladder-restart",
+      threadId: "t-steer-restart",
     });
     expect(countSpawns(processLog)).toBe(2);
     expect(record.last("thread/resume")?.params).toMatchObject({
-      threadId: "t-ladder-restart",
+      threadId: "t-steer-restart",
       providerThreadId,
     });
   });
@@ -430,10 +384,12 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
+
     const providerThreadId = await startThread(runtime, "t-unarchive-auth");
     await runtime.stopThread({ threadId: "t-unarchive-auth" });
 
     let caught: unknown;
+
     try {
       await runtime.resumeThread({
         environmentId: "env-1",
@@ -446,6 +402,7 @@ describe("runtime recovery hints", () => {
     } catch (error) {
       caught = error;
     }
+
     expect(caught).toBeInstanceOf(AgentRuntimeRecoveryError);
     expect((caught as AgentRuntimeRecoveryError).code).toBe("auth_required");
     expect((caught as AgentRuntimeRecoveryError).message).toBe(
@@ -462,7 +419,7 @@ describe("runtime recovery hints", () => {
     );
   });
 
-  it("rateLimited on the retry after an unarchive: retried on the ladder and then succeeds", async () => {
+  it("rateLimited on the retry after an unarchive: typed rate_limited and forwarded", async () => {
     const { hints, record, runtime } = createRecoveryRuntime({
       failMethods: [
         {
@@ -479,22 +436,36 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
+
     const providerThreadId = await startThread(runtime, "t-unarchive-rate");
     await runtime.stopThread({ threadId: "t-unarchive-rate" });
 
-    await expect(
-      runtime.resumeThread({
+    let caught: unknown;
+
+    try {
+      await runtime.resumeThread({
         environmentId: "env-1",
         projectId: "p1",
         providerId: PROVIDER_ID,
         providerThreadId,
         threadId: "t-unarchive-rate",
         options: fullRuntimeOptions,
-      }),
-    ).resolves.toEqual({ providerThreadId });
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(AgentRuntimeRecoveryError);
+    expect((caught as AgentRuntimeRecoveryError).code).toBe("rate_limited");
     expect(countRequests(record, "thread/unarchive")).toBe(1);
-    expect(countRequests(record, "thread/resume")).toBe(3);
-    expect(hints.some((hint) => hint.kind === "rateLimited")).toBe(false);
+    expect(countRequests(record, "thread/resume")).toBe(2);
+    expect(hints).toContainEqual(
+      expect.objectContaining({
+        kind: "rateLimited",
+        providerId: PROVIDER_ID,
+        threadId: "t-unarchive-rate",
+      }),
+    );
   });
 
   it("restartRecommended on the retry after an unarchive: forwarded, and the thread restarts before its next turn", async () => {
@@ -515,6 +486,7 @@ describe("runtime recovery hints", () => {
           },
         ],
       });
+
     const providerThreadId = await startThread(runtime, "t-unarchive-restart");
     await runtime.runTurn({
       clientRequestId: "creq_rcvrunarab",
@@ -522,6 +494,7 @@ describe("runtime recovery hints", () => {
       options: fullRuntimeOptions,
       threadId: "t-unarchive-restart",
     });
+
     const { turnId } = await waitForThreadTurnStarted({
       events,
       providerId: PROVIDER_ID,
@@ -588,6 +561,7 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
+
     const providerThreadId = await startThread(runtime, "t-unarchive-twice");
     await runtime.stopThread({ threadId: "t-unarchive-twice" });
 
@@ -618,12 +592,15 @@ describe("runtime recovery hints", () => {
         ],
       },
     );
+
     let caught: unknown;
+
     try {
       await runtime.listModels({ providerId: PROVIDER_ID });
     } catch (error) {
       caught = error;
     }
+
     expect(caught).toBeInstanceOf(AgentRuntimeRecoveryError);
     expect((caught as AgentRuntimeRecoveryError).code).toBe("auth_required");
     expect(hints).toContainEqual(
@@ -644,12 +621,15 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
+
     let caught: unknown;
+
     try {
       await startThread(runtime, "t-start-auth");
     } catch (error) {
       caught = error;
     }
+
     expect(caught).toBeInstanceOf(AgentRuntimeRecoveryError);
     expect((caught as AgentRuntimeRecoveryError).code).toBe("auth_required");
     expect((caught as AgentRuntimeRecoveryError).message).toBe(
@@ -664,37 +644,7 @@ describe("runtime recovery hints", () => {
     expect(runtime.hasThread("t-start-auth")).toBe(false);
   });
 
-  it("rateLimited: a retryable rejection is retried on the ladder and then succeeds", async () => {
-    const { events, record, runtime } = createRecoveryRuntime({
-      failMethods: [
-        {
-          method: "turn/start",
-          message: "slow down",
-          times: 1,
-          recovery: { kind: "rateLimited", retryable: true },
-        },
-      ],
-    });
-    await startThread(runtime, "t-rate");
-
-    await runtime.runTurn({
-      clientRequestId: "creq_rcvrhint24",
-      input: [promptTextInput({ text: "after the wait" })],
-      options: fullRuntimeOptions,
-      threadId: "t-rate",
-    });
-
-    expect(countRequests(record, "turn/start")).toBe(2);
-    await waitForThreadAgentMessageText({
-      events,
-      providerId: PROVIDER_ID,
-      runtime,
-      text: "after the wait",
-      threadId: "t-rate",
-    });
-  });
-
-  it("rateLimited: the failure after the last rung surfaces as a typed error and is forwarded", async () => {
+  it("rateLimited: a rejection marked retryable is not retried here; it surfaces as a typed error and is forwarded", async () => {
     const { hints, record, runtime } = createRecoveryRuntime({
       failMethods: [
         {
@@ -704,28 +654,31 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
-    await startThread(runtime, "t-rate-exhausted");
+
+    await startThread(runtime, "t-rate-retryable");
 
     let caught: unknown;
+
     try {
       await runtime.runTurn({
         clientRequestId: "creq_rcvrhint25",
         input: [promptTextInput({ text: "never" })],
         options: fullRuntimeOptions,
-        threadId: "t-rate-exhausted",
+        threadId: "t-rate-retryable",
       });
     } catch (error) {
       caught = error;
     }
+
     expect(caught).toBeInstanceOf(AgentRuntimeRecoveryError);
     expect((caught as AgentRuntimeRecoveryError).code).toBe("rate_limited");
-    expect(countRequests(record, "turn/start")).toBe(3);
-    expect(runtime.getActiveTurnId("t-rate-exhausted")).toBeNull();
+    expect(countRequests(record, "turn/start")).toBe(1);
+    expect(runtime.getActiveTurnId("t-rate-retryable")).toBeNull();
     expect(hints).toEqual([
       {
         kind: "rateLimited",
         providerId: PROVIDER_ID,
-        threadId: "t-rate-exhausted",
+        threadId: "t-rate-retryable",
         retryable: true,
         message: expect.any(String),
       },
@@ -742,8 +695,10 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
+
     await startThread(runtime, "t-quota");
     let caught: unknown;
+
     try {
       await runtime.runTurn({
         clientRequestId: "creq_rcvrhint26",
@@ -754,6 +709,7 @@ describe("runtime recovery hints", () => {
     } catch (error) {
       caught = error;
     }
+
     expect(caught).toBeInstanceOf(AgentRuntimeRecoveryError);
     expect((caught as AgentRuntimeRecoveryError).code).toBe("rate_limited");
     expect(countRequests(record, "turn/start")).toBe(1);
@@ -770,6 +726,7 @@ describe("runtime recovery hints", () => {
   it("restartRecommended: an idle thread is moved to a fresh bridge process right away", async () => {
     const { events, hints, processLog, record, runtime } =
       createRecoveryRuntime();
+
     const providerThreadId = await startThread(runtime, "t-restart");
 
     await runtime.runTurn({
@@ -832,6 +789,7 @@ describe("runtime recovery hints", () => {
   it("restartRecommended: a thread with an active turn restarts before its next turn", async () => {
     const { events, hints, processLog, record, runtime } =
       createRecoveryRuntime();
+
     await startThread(runtime, "t-restart-later");
 
     await runtime.runTurn({
@@ -894,6 +852,7 @@ describe("runtime recovery hints", () => {
           },
         ],
       });
+
     const providerThreadId = await startThread(runtime, "t-restart-rejected");
 
     await expect(
@@ -938,6 +897,7 @@ describe("runtime recovery hints", () => {
     const { events, processLog, record, runtime } = createRecoveryRuntime({
       startDelayMs: 300,
     });
+
     await startThread(runtime, "t-restart-a");
     const providerThreadIdB = await startThread(runtime, "t-restart-b");
     expect(countSpawns(processLog)).toBe(1);
@@ -969,6 +929,7 @@ describe("runtime recovery hints", () => {
       options: fullRuntimeOptions,
       threadId: "t-restart-b",
     });
+
     const { turnId } = await waitForThreadTurnStarted({
       events,
       threadId: "t-restart-b",
@@ -1002,6 +963,7 @@ describe("runtime recovery hints", () => {
   it("restartRecommended read while its turn/start is still in flight restarts once the turn settles", async () => {
     const { events, processLog, record, runtime, stderr } =
       createRecoveryRuntime();
+
     await startThread(runtime, "t-batch");
 
     await runtime.runTurn({
@@ -1037,6 +999,7 @@ describe("runtime recovery hints", () => {
   it("restartRecommended: defers while a sibling on the process holds open background work", async () => {
     const { events, processLog, record, runtime, stderr } =
       createRecoveryRuntime();
+
     await startThread(runtime, "t-bg-a");
     await startThread(runtime, "t-bg-b");
 
@@ -1105,6 +1068,7 @@ describe("runtime recovery hints", () => {
   it("drops an unsolicited hint that names a thread the emitting process does not host", async () => {
     const { events, hints, processLog, record, runtime, stderr } =
       createRecoveryRuntime();
+
     await startThread(runtime, "t-victim");
     await runtime.startThread({
       bridgeLaunch: createScriptedEchoLaunch({
@@ -1159,6 +1123,7 @@ describe("runtime recovery hints", () => {
   it("unsolicited authRequired and rateLimited hints are forwarded and take no action", async () => {
     const { events, hints, processLog, record, runtime } =
       createRecoveryRuntime();
+
     await startThread(runtime, "t-forward");
     await runtime.runTurn({
       clientRequestId: "creq_rcvrhint2d",
@@ -1199,9 +1164,9 @@ describe("runtime recovery hints", () => {
       failMethods: [
         {
           method: "turn/start",
-          message: "slow down",
+          message: "session is archived",
           times: 1,
-          recovery: { kind: "rateLimited", retryable: true },
+          recovery: { kind: "sessionArchived", retryable: true },
         },
         {
           method: "thread/name/set",
@@ -1210,6 +1175,7 @@ describe("runtime recovery hints", () => {
         },
       ],
     });
+
     await startThread(runtime, "t-two");
 
     const turn = runtime.runTurn({
@@ -1218,6 +1184,7 @@ describe("runtime recovery hints", () => {
       options: fullRuntimeOptions,
       threadId: "t-two",
     });
+
     const rename = runtime.renameThread({ threadId: "t-two", title: "x" });
 
     await expect(rename).rejects.toMatchObject({
@@ -1230,7 +1197,8 @@ describe("runtime recovery hints", () => {
     expect(hints).toContainEqual(
       expect.objectContaining({ kind: "authRequired", threadId: "t-two" }),
     );
-    expect(hints.some((hint) => hint.kind === "rateLimited")).toBe(false);
+    expect(countRequests(record, "thread/unarchive")).toBe(1);
+    expect(hints.some((hint) => hint.kind === "sessionArchived")).toBe(false);
     await waitForThreadAgentMessageText({
       events,
       providerId: PROVIDER_ID,
@@ -1244,6 +1212,7 @@ describe("runtime recovery hints", () => {
     const { record, runtime } = createRecoveryRuntime({
       archivedSession: true,
     });
+
     const result = await runtime.prepareThreadRewind({
       environmentId: "env-1",
       threadId: "t-rewind",
@@ -1255,6 +1224,7 @@ describe("runtime recovery hints", () => {
       options: fullRuntimeOptions,
       instructionMode: "append",
     });
+
     expect(result.providerThreadId).toEqual(expect.any(String));
     expect(record.read()).toContainEqual({
       method: "thread/unarchive",
@@ -1271,6 +1241,7 @@ describe("runtime recovery hints", () => {
     const { events, record, runtime } = createRecoveryRuntime({
       archivedSession: true,
     });
+
     await runtime.startThread({
       environmentId: "env-1",
       projectId: "p1",
@@ -1299,11 +1270,37 @@ describe("runtime recovery hints", () => {
     });
   });
 
+  it("leaves an archived fork source archived when the fork must not restore it", async () => {
+    const { record, runtime } = createRecoveryRuntime({
+      archivedSession: true,
+    });
+
+    await expect(
+      runtime.startThread({
+        environmentId: "env-1",
+        projectId: "p1",
+        providerId: PROVIDER_ID,
+        threadId: "t-imported",
+        fork: {
+          sourceProviderThreadId: "prov-native",
+          restoreArchivedSource: false,
+        },
+        options: fullRuntimeOptions,
+      }),
+    ).rejects.toThrow(
+      "The original chat is archived in its agent. Unarchive it there, then send your message again.",
+    );
+    expect(record.last("thread/unarchive")).toBeUndefined();
+    expect(countRequests(record, "thread/fork")).toBe(1);
+  });
+
   it("treats a bridge exit as a plain rejection with no recovery", async () => {
     const { record, runtime } = createRecoveryRuntime({
       crashOn: "thread/resume",
     });
+
     let caught: unknown;
+
     try {
       await runtime.resumeThread({
         environmentId: "env-1",
@@ -1316,6 +1313,7 @@ describe("runtime recovery hints", () => {
     } catch (error) {
       caught = error;
     }
+
     expect(caught).toBeInstanceOf(Error);
     expect(caught).not.toBeInstanceOf(AgentRuntimeRecoveryError);
     expect(record.last("thread/unarchive")).toBeUndefined();

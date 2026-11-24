@@ -2,10 +2,11 @@ import { sleep, waitForChildExit } from "./child-process-helpers.mjs";
 import { appendOutput, formatProcessOutput } from "./smoke-output.mjs";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import {
   createDesktopReleaseConfig,
   resolveDesktopBuildPlatform,
@@ -16,14 +17,26 @@ import { resolvePackagedAppBinary } from "./packaged-app-paths.mjs";
 import { smokePackagedNpm } from "./smoke-packaged-npm.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+
 const desktopPackageRoot = resolve(scriptDirectory, "..");
+
 const releaseDir = join(desktopPackageRoot, "release");
+
 const releaseChannel = resolveDesktopReleaseChannel(process.env);
-const releaseConfig = createDesktopReleaseConfig(releaseChannel);
+
+const releaseConfig = createDesktopReleaseConfig(
+  releaseChannel,
+  resolveDesktopBuildPlatform(process.platform),
+);
+
 const startupTimeoutMs = 20_000;
+
 const exitTimeoutMs = 5_000;
+
 const outputFlushTimeoutMs = 2_000;
+
 const postReadySettleMs = 300;
+
 function writeJson(response, body) {
   response.writeHead(200, {
     "content-type": "application/json",
@@ -48,23 +61,22 @@ function writeNotFound(response) {
 function createDesktopVersionFeed(platform, version) {
   return {
     schemaVersion: 1,
-    // The app rejects a feed whose channel is not its own, so a nightly
-    // packaged build must be smoked against a nightly feed.
+
     channel: releaseChannel,
     platform,
     version,
     releaseDate: new Date(0).toISOString(),
-    releaseName: `bb desktop ${version}`,
+    releaseName: `Omnyo desktop ${version}`,
     releaseNotes: null,
     minimumSystemVersion: null,
     files: [
       {
-        url: "https://example.invalid/bb.zip",
+        url: "https://example.invalid/omnyo.zip",
         sha512: "smoke",
         size: 0,
       },
     ],
-    path: "bb.zip",
+    path: "omnyo.zip",
     sha512: "smoke",
     stagingPercentage: null,
   };
@@ -73,24 +85,24 @@ function createDesktopVersionFeed(platform, version) {
 function renderSmokePage(expectedDesktopPlatform, expectedDesktopVersion) {
   return `<!doctype html>
 <meta charset="utf-8">
-<title>bb packaged desktop smoke</title>
+<title>Omnyo packaged desktop smoke</title>
 <main>packaged desktop smoke</main>
 <script>
 (async () => {
   let ok = false;
   let reason = "";
   try {
-    if (typeof window.bbDesktop !== "object" || window.bbDesktop === null) {
-      reason = "missing window.bbDesktop";
-    } else if (typeof window.bbDesktop.getInfo !== "function") {
-      reason = "missing window.bbDesktop.getInfo";
+    if (typeof window.omnyoDesktop !== "object" || window.omnyoDesktop === null) {
+      reason = "missing window.omnyoDesktop";
+    } else if (typeof window.omnyoDesktop.getInfo !== "function") {
+      reason = "missing window.omnyoDesktop.getInfo";
     } else {
-      const info = await window.bbDesktop.getInfo();
+      const info = await window.omnyoDesktop.getInfo();
       const expectedPlatform = ${JSON.stringify(expectedDesktopPlatform)};
       const expectedVersion = ${JSON.stringify(expectedDesktopVersion)};
       ok =
-        window.bbDesktop.platform === expectedPlatform &&
-        window.bbDesktop.version === expectedVersion &&
+        window.omnyoDesktop.platform === expectedPlatform &&
+        window.omnyoDesktop.version === expectedVersion &&
         info.version === expectedVersion;
       reason = ok ? "" : "unexpected desktop bridge info";
     }
@@ -111,15 +123,11 @@ async function readDesktopPackageVersion() {
     join(desktopPackageRoot, "package.json"),
     "utf8",
   );
-  const packageJson = JSON.parse(packageJsonText);
-  if (
-    typeof packageJson !== "object" ||
-    packageJson === null ||
-    typeof packageJson.version !== "string" ||
-    packageJson.version.length === 0
-  ) {
-    throw new Error("apps/desktop/package.json must define a version");
-  }
+
+  const packageJson = z
+    .object({ version: z.string().min(1) })
+    .parse(JSON.parse(packageJsonText));
+
   return packageJson.version;
 }
 
@@ -129,12 +137,15 @@ async function startSmokeServer({
   expectedDesktopVersion,
 }) {
   let resolvePreloadReady = () => {};
+
   const preloadReady = new Promise((resolvePromise) => {
     resolvePreloadReady = resolvePromise;
   });
+
   const server = createServer((request, response) => {
     if (request.url === "/health") {
       writeJson(response, { ok: true });
+
       return;
     }
 
@@ -156,6 +167,7 @@ async function startSmokeServer({
         primaryHostPlatform: null,
         voiceTranscriptionEnabled: false,
       });
+
       return;
     }
 
@@ -167,6 +179,7 @@ async function startSmokeServer({
           expectedDesktopVersion,
         ),
       );
+
       return;
     }
 
@@ -175,6 +188,7 @@ async function startSmokeServer({
         response,
         renderSmokePage(expectedDesktopPlatform, expectedDesktopVersion),
       );
+
       return;
     }
 
@@ -186,6 +200,7 @@ async function startSmokeServer({
       });
       response.writeHead(204);
       response.end();
+
       return;
     }
 
@@ -195,10 +210,10 @@ async function startSmokeServer({
   await new Promise((resolvePromise) => {
     server.listen(0, "127.0.0.1", resolvePromise);
   });
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("Expected desktop smoke server to listen on a TCP port");
-  }
+
+  const address = z
+    .object({ port: z.number().int().positive() })
+    .parse(server.address());
 
   return {
     close: async () => {
@@ -206,8 +221,10 @@ async function startSmokeServer({
         server.close((error) => {
           if (error) {
             rejectPromise(error);
+
             return;
           }
+
           resolvePromise();
         });
       });
@@ -229,6 +246,7 @@ async function waitForOutputFlush(child) {
 async function waitForPreloadReady({ child, preloadReady, stdout, stderr }) {
   return await new Promise((resolvePromise, rejectPromise) => {
     let exited = false;
+
     const timeout = setTimeout(() => {
       cleanup();
       rejectPromise(
@@ -256,6 +274,7 @@ async function waitForPreloadReady({ child, preloadReady, stdout, stderr }) {
         );
       });
     };
+
     const handleError = (error) => {
       cleanup();
       rejectPromise(
@@ -296,6 +315,7 @@ async function stopPackagedApp(child) {
   }
 
   child.kill("SIGTERM");
+
   if (await waitForChildExit(child, exitTimeoutMs)) {
     return;
   }
@@ -307,37 +327,50 @@ async function stopPackagedApp(child) {
 async function smokePackagedApp() {
   const desktopVersion = await readDesktopPackageVersion();
   const desktopPlatform = resolveDesktopBuildPlatform(process.platform);
+
   const appBinary = await resolvePackagedAppBinary({
     executableName: releaseConfig.linuxExecutableName,
     platform: process.platform,
     productName: releaseConfig.applicationName,
     releaseDir,
   });
+
   await smokePackagedNpm(appBinary);
-  const smokeRoot = await mkdtemp(join(tmpdir(), "bb-desktop-packaged-smoke-"));
+
+  const smokeRoot = await mkdtemp(
+    join(tmpdir(), "omnyo-desktop-packaged-smoke-"),
+  );
+
   const dataDir = join(smokeRoot, "data");
   const userDataDir = join(smokeRoot, "user-data");
+  await mkdir(userDataDir, { recursive: true });
+  await writeFile(
+    join(userDataDir, "private-updates.json"),
+    JSON.stringify({ schema: 1, enabled: false }),
+  );
+
   const smokeServer = await startSmokeServer({
     dataDir,
     expectedDesktopPlatform: desktopPlatform,
     expectedDesktopVersion: desktopVersion,
   });
+
   const serverUrl = `http://127.0.0.1:${smokeServer.port}`;
   const stdout = [];
   const stderr = [];
+
   const childEnv = {
     ...process.env,
-    BB_DATA_DIR: dataDir,
-    // The smoke server answers the bb probe, so a packaged build treats it as a
-    // foreign bb and asks before attaching. No one is here to click, so opt out
-    // and keep exercising the real attach path.
-    BB_DESKTOP_ATTACH_WITHOUT_PROMPT: "1",
-    BB_DESKTOP_OPEN_DEVTOOLS: "0",
-    BB_DESKTOP_VERSION_FEED_URL: `${serverUrl}/desktop-version.json`,
-    BB_SERVER_PORT: String(smokeServer.port),
+    OMNYO_DATA_DIR: dataDir,
+
+    OMNYO_DESKTOP_ATTACH_WITHOUT_PROMPT: "1",
+    OMNYO_DESKTOP_OPEN_DEVTOOLS: "0",
+    OMNYO_DESKTOP_VERSION_FEED_URL: `${serverUrl}/desktop-version.json`,
+    OMNYO_SERVER_PORT: String(smokeServer.port),
   };
-  delete childEnv.BB_DESKTOP_APP_URL;
-  delete childEnv.BB_DESKTOP_NODE_EXEC_PATH;
+
+  delete childEnv.OMNYO_DESKTOP_APP_URL;
+  delete childEnv.OMNYO_DESKTOP_NODE_EXEC_PATH;
   delete childEnv.ELECTRON_RUN_AS_NODE;
 
   const child = spawn(
@@ -350,6 +383,7 @@ async function smokePackagedApp() {
       env: childEnv,
     },
   );
+
   child.stdout.on("data", (chunk) => {
     appendOutput(stdout, chunk);
   });
@@ -364,6 +398,7 @@ async function smokePackagedApp() {
       stdout,
       stderr,
     });
+
     if (!preloadReady.ok) {
       throw new Error(
         `Packaged desktop preload bridge did not become ready: ${preloadReady.reason}`,
@@ -371,6 +406,7 @@ async function smokePackagedApp() {
     }
 
     await sleep(postReadySettleMs);
+
     if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error(
         `Packaged Electron app exited after startup: code=${String(
@@ -398,6 +434,7 @@ async function smokePackagedApp() {
 await smokePackagedApp().catch((error) => {
   const message =
     error instanceof Error ? (error.stack ?? error.message) : error;
+
   console.error(message);
   process.exitCode = 1;
 });

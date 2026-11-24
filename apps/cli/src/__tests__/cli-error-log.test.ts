@@ -34,7 +34,7 @@ describe("cli error log", () => {
   let dataDir: string;
 
   beforeEach(() => {
-    dataDir = mkdtempSync(join(tmpdir(), "bb-cli-error-log-"));
+    dataDir = mkdtempSync(join(tmpdir(), "omnyo-cli-error-log-"));
   });
 
   afterEach(() => {
@@ -42,13 +42,14 @@ describe("cli error log", () => {
   });
 
   it("appends one JSON line per failure under the data dir", () => {
-    const env = { BB_DATA_DIR: dataDir };
+    const env = { OMNYO_DATA_DIR: dataDir };
     appendCliErrorLogEntry(entry({}), env);
     appendCliErrorLogEntry(entry({ token: "--tail" }), env);
 
     const lines = readFileSync(formatCliErrorLogPath({ dataDir }), "utf8")
       .trim()
       .split("\n");
+
     expect(lines.map((line) => JSON.parse(line).token)).toEqual([
       "--lines",
       "--tail",
@@ -57,8 +58,8 @@ describe("cli error log", () => {
 
   it("writes nothing when recording is switched off", () => {
     appendCliErrorLogEntry(entry({}), {
-      BB_DATA_DIR: dataDir,
-      BB_CLI_ERROR_LOG: "0",
+      OMNYO_DATA_DIR: dataDir,
+      OMNYO_CLI_ERROR_LOG: "0",
     });
     expect(readCliErrorLogEntries({ dataDir })).toEqual([]);
   });
@@ -72,13 +73,17 @@ describe("cli error log", () => {
       old.repeat(Math.ceil((2 * 1024 * 1024) / old.length)),
     );
 
-    appendCliErrorLogEntry(entry({ token: "--new" }), { BB_DATA_DIR: dataDir });
+    appendCliErrorLogEntry(entry({ token: "--new" }), {
+      OMNYO_DATA_DIR: dataDir,
+    });
 
     expect(statSync(`${logPath}.1`).size).toBeGreaterThan(2 * 1024 * 1024 - 1);
     expect(readFileSync(logPath, "utf8").trim().split("\n")).toHaveLength(1);
+
     const tokens = new Set(
       readCliErrorLogEntries({ dataDir }).map((row) => row.token),
     );
+
     expect(tokens).toEqual(new Set(["--old", "--new"]));
   });
 
@@ -101,7 +106,7 @@ describe("cli error log", () => {
     const blocked = join(dataDir, "file");
     writeFileSync(blocked, "");
     expect(() =>
-      appendCliErrorLogEntry(entry({}), { BB_DATA_DIR: blocked }),
+      appendCliErrorLogEntry(entry({}), { OMNYO_DATA_DIR: blocked }),
     ).not.toThrow();
   });
 });
@@ -114,6 +119,7 @@ describe("tallyCliErrors", () => {
       entry({ command: "thread", code: "unknown_command", token: "get" }),
       entry({ token: "--tail", at: "2026-09-18T00:00:02.000Z" }),
     ]);
+
     expect(rows[0]).toEqual({
       code: "unknown_option",
       command: "terminal output",

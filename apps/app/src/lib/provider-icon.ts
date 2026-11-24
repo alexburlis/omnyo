@@ -1,7 +1,7 @@
-import type { PluginProviderIconRegistration } from "@get-bb/plugin-sdk/app";
+import type { PluginProviderIconRegistration } from "@omnyo/plugin-sdk/app";
 import type { CSSProperties, ComponentType } from "react";
 import { createElement } from "react";
-import { isPresentationTintColor, type ProviderInfo } from "@bb/domain";
+import { isPresentationTintColor, type ProviderInfo } from "@omnyo/domain";
 import { ProviderIcon } from "@/components/plugin/ProviderIcon";
 
 interface ProviderIconInfo {
@@ -29,7 +29,9 @@ export function getProviderIconInfo(
     source?.logoUrl,
     source?.icon?.glyph,
   ]);
+
   let icon = providerIcons.get(cacheKey);
+
   if (icon === undefined) {
     const ResolvedProviderIcon: ComponentType<{ className?: string }> = ({
       className,
@@ -43,9 +45,11 @@ export function getProviderIconInfo(
         },
         className,
       });
+
     icon = ResolvedProviderIcon;
     providerIcons.set(cacheKey, icon);
   }
+
   return {
     icon,
     ariaLabel:
@@ -58,6 +62,7 @@ export function getProviderIconTintStyle(
   provider: Pick<ProviderInfo, "strings"> | undefined,
 ): CSSProperties | undefined {
   const tint = provider?.strings?.iconTint;
+
   if (
     tint === undefined ||
     !isPresentationTintColor(tint.light) ||
@@ -65,5 +70,6 @@ export function getProviderIconTintStyle(
   ) {
     return undefined;
   }
+
   return { color: `light-dark(${tint.light.trim()}, ${tint.dark.trim()})` };
 }

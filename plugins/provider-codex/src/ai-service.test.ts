@@ -1,7 +1,7 @@
 import {
   createFakePluginHost,
   type ExperimentalFakeHostRpcCall,
-} from "@get-bb/plugin-sdk/testing";
+} from "@omnyo/plugin-sdk/testing";
 import { describe, expect, it } from "vitest";
 import { registerCodexAiService } from "./ai-service.js";
 import type { CodexAiTextResult } from "./ai/host-contract.js";
@@ -9,15 +9,18 @@ import type { CodexAiTextResult } from "./ai/host-contract.js";
 function setup(
   answer: (call: ExperimentalFakeHostRpcCall) => CodexAiTextResult,
 ) {
-  const { bb, harness } = createFakePluginHost({
+  const { api, harness } = createFakePluginHost({
     sdk: { system: { config: async () => ({ primaryHostId: "host-1" }) } },
     experimental_callHostRpc: answer,
   });
-  registerCodexAiService(bb);
+
+  registerCodexAiService(api);
   const [service] = harness.registrations.aiServiceRegistrations;
+
   if (service?.complete === undefined || service.transcribe === undefined) {
     throw new Error("Codex did not register a complete and transcribe service");
   }
+
   return {
     complete: service.complete,
     transcribe: service.transcribe,
@@ -36,6 +39,7 @@ describe("Codex AI service", () => {
         ? { ok: false, code: "rate_limited", message: "Slow down" }
         : { ok: true, text: "Fix login bug" },
     );
+
     const signal = new AbortController().signal;
 
     await expect(codex.complete("Write a title", { signal })).resolves.toBe(
@@ -64,10 +68,12 @@ describe("Codex AI service", () => {
     expect(codex.calls).toHaveLength(1);
   });
 
-  it("does not try the next model once bb has cancelled", async () => {
+  it("does not try the next model once Omnyo has cancelled", async () => {
     const controller = new AbortController();
+
     const codex = setup(() => {
       controller.abort();
+
       return { ok: false, code: "service_unavailable", message: "Overloaded" };
     });
 
@@ -79,6 +85,7 @@ describe("Codex AI service", () => {
 
   it("refuses a recording over 20 MB before calling the host", async () => {
     const codex = setup(() => ({ ok: true, text: "unused" }));
+
     const audio = new File(
       [new Uint8Array(20 * 1024 * 1024 + 1)],
       "long.webm",
@@ -94,8 +101,9 @@ describe("Codex AI service", () => {
     expect(codex.calls).toEqual([]);
   });
 
-  it("sends a recording within the limit with bb's voice budget", async () => {
+  it("sends a recording within the limit with Omnyo's voice budget", async () => {
     const codex = setup(() => ({ ok: true, text: "hello" }));
+
     const audio = new File([new Uint8Array([1, 2, 3])], "clip.webm", {
       type: "audio/webm",
     });
@@ -103,14 +111,14 @@ describe("Codex AI service", () => {
     await expect(
       codex.transcribe(audio, {
         signal: new AbortController().signal,
-        hint: "bb",
+        hint: "omnyo",
       }),
     ).resolves.toBe("hello");
     expect(codex.calls[0]?.input).toMatchObject({
       model: "gpt-transcribe",
       mimeType: "audio/webm",
       filename: "clip.webm",
-      hint: "bb",
+      hint: "omnyo",
       timeoutMs: 65_000,
     });
   });

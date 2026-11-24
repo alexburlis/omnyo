@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { TimelineRow } from "@bb/server-contract";
-import { Switch } from "@bb/shared-ui/switch";
+import type { TimelineRow } from "@omnyo/server-contract";
+import { Switch } from "@omnyo/shared-ui/switch";
 import { FollowUpPromptBox } from "@/components/promptbox/FollowUpPromptBox";
 import type { ExecutionPermissionConfig } from "@/components/promptbox/ExecutionControls";
 import { ThreadTimelinePane } from "@/views/thread-detail/ThreadTimelinePane";
@@ -15,6 +15,7 @@ export default {
 };
 
 const THREAD_ID = "thr_catch_up_story";
+
 const now = 1_800_000_000_000;
 
 function conversationRow(index: number): TimelineRow {
@@ -30,6 +31,7 @@ function conversationRow(index: number): TimelineRow {
     kind: "conversation" as const,
     attachments: null,
   };
+
   if (index % 2 === 0) {
     return {
       ...base,
@@ -39,15 +41,22 @@ function conversationRow(index: number): TimelineRow {
       senderThreadId: null,
       systemMessageKind: "unlabeled",
       systemMessageSubject: null,
-      turnRequest: { isGrouped: false, kind: "message", status: "accepted" },
+      turnRequest: {
+        clientRequestId: null,
+        isGrouped: false,
+        kind: "message",
+        status: "accepted",
+      },
       mentions: [],
     };
   }
+
   return {
     ...base,
     text: `Reply ${(index + 1) / 2}: the query uses the covering index and the flag defaults to off.`,
     role: "assistant",
     turnRequest: null,
+    turnGit: null,
   };
 }
 
@@ -119,7 +128,9 @@ export function Overview() {
           footer={
             <FollowUpPromptBox
               attachments={attachments}
+              attention={null}
               stack={null}
+              queuedMessageCount={0}
               composer={{
                 history: {
                   currentDraft: {
@@ -145,7 +156,6 @@ export function Overview() {
                   : { kind: "ready" },
                 threadRuntimeDisplayStatus,
               }}
-              environmentSummary={null}
               contextWindowUsage={null}
               execution={execution}
               permission={permission}

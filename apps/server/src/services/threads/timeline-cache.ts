@@ -1,64 +1,135 @@
-import type { ThreadTimelineResponse } from "@bb/server-contract";
-import type { CompletedTurnDisplay, ThreadStatus } from "@bb/domain";
+import type { ThreadTimelineResponse } from "@omnyo/server-contract";
+import type { CompletedTurnDisplay, ThreadStatus } from "@omnyo/domain";
 import type { ThreadTimelinePageRequest } from "./timeline-pagination.js";
+import { timelineRowsEnvelopeByteLength } from "./timeline-row-bytes.js";
 
 const DEFAULT_MAX_ENTRIES = 128;
-const DEFAULT_MAX_CACHEABLE_ROWS = 200;
+
+const DEFAULT_MAX_ENTRY_BYTES = 1024 * 1024;
+
+const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
 
 interface ThreadTimelineCacheOptions {
   maxEntries?: number;
-  maxCacheableRows?: number;
+  maxEntryBytes?: number;
+  maxBytes?: number;
 }
 
 interface ThreadTimelineCache {
+  get(threadId: string, key: string): ThreadTimelineResponse | undefined;
   getOrBuild(
     threadId: string,
     key: string,
     build: () => ThreadTimelineResponse,
+    paramsKey?: string,
+    expiresAt?: number | null,
   ): ThreadTimelineResponse;
   invalidateThread(threadId: string): void;
   readonly size: number;
 }
 
 interface ThreadTimelineCacheEntry {
+  createdAt: number;
+  expiresAt: number | null;
+  paramsKey: string;
   response: ThreadTimelineResponse;
   threadId: string;
+  weight: number;
 }
 
 export function createThreadTimelineCache(
   options: ThreadTimelineCacheOptions = {},
 ): ThreadTimelineCache {
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
-  const maxCacheableRows =
-    options.maxCacheableRows ?? DEFAULT_MAX_CACHEABLE_ROWS;
-  const entries = new Map<string, ThreadTimelineCacheEntry>();
+  const maxEntryBytes = options.maxEntryBytes ?? DEFAULT_MAX_ENTRY_BYTES;
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
 
-  return {
-    getOrBuild(threadId, key, build) {
-      const cached = entries.get(key);
-      if (cached !== undefined) {
+  const entries = new Map<string, ThreadTimelineCacheEntry>();
+  let retainedBytes = 0;
+
+  function removeEntry(key: string): void {
+    const entry = entries.get(key);
+
+    if (entry === undefined) {
+      return;
+    }
+
+    entries.delete(key);
+    retainedBytes -= entry.weight;
+  }
+
+  function retain(key: string, entry: ThreadTimelineCacheEntry): void {
+    removeEntry(key);
+
+    if (entry.weight > maxEntryBytes || entry.weight > maxBytes) return;
+    entries.set(key, entry);
+    retainedBytes += entry.weight;
+
+    while (entries.size > maxEntries || retainedBytes > maxBytes) {
+      const oldest = entries.keys().next().value;
+
+      if (oldest === undefined) break;
+      removeEntry(oldest);
+    }
+  }
+
+  function get(
+    threadId: string,
+    key: string,
+  ): ThreadTimelineResponse | undefined {
+    const now = Date.now();
+    const cached = entries.get(key);
+
+    if (cached !== undefined) {
+      if (cached.threadId !== threadId) return undefined;
+
+      if (
+        cached.createdAt <= now &&
+        (cached.expiresAt === null || cached.expiresAt > now)
+      ) {
         entries.delete(key);
         entries.set(key, cached);
+
         return cached.response;
       }
 
+      removeEntry(key);
+    }
+
+    return undefined;
+  }
+
+  return {
+    get,
+    getOrBuild(threadId, key, build, paramsKey = key, expiresAt = null) {
+      const cached = get(threadId, key);
+
+      if (cached !== undefined) return cached;
       const value = build();
-      if (value.rows.length <= maxCacheableRows) {
-        entries.set(key, { response: value, threadId });
-        while (entries.size > maxEntries) {
-          const oldest = entries.keys().next().value;
-          if (oldest === undefined) {
-            break;
-          }
-          entries.delete(oldest);
-        }
+      const weight = timelineRowsEnvelopeByteLength(value);
+      const createdAt = Date.now();
+
+      for (const [previousKey, entry] of entries) {
+        if (entry.threadId === threadId && entry.paramsKey === paramsKey)
+          removeEntry(previousKey);
       }
+
+      if (expiresAt !== null && expiresAt <= createdAt) return value;
+      retain(key, {
+        response: value,
+        threadId,
+        paramsKey,
+        weight,
+        createdAt,
+        expiresAt,
+      });
+
       return value;
     },
     invalidateThread(threadId) {
       for (const [key, entry] of entries) {
         if (entry.threadId === threadId) {
-          entries.delete(key);
+          removeEntry(key);
         }
       }
     },

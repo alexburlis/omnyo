@@ -8,5 +8,7 @@ export function getSidebarItemKey(item: ProjectThreadItem): string {
       return `env:${item.group.environmentId}`;
     case "section":
       return `section:${item.group.key}`;
+    case "chatGroup":
+      return `chat-group:${item.group.id}`;
   }
 }

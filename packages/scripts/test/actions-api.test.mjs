@@ -21,13 +21,18 @@ it.each([
   "bounds recovery for %s without retrying permanent failures or mutations",
   async (scenario) => {
     let requests = 0;
+
     const server = createServer((_request, response) => {
       requests++;
+
       if (scenario === "timeout" && requests === 1) return;
+
       if (scenario === "disconnect" && requests === 1) {
         response.destroy();
+
         return;
       }
+
       const status =
         scenario === "forbidden"
           ? 403
@@ -38,12 +43,14 @@ it.each([
                 ? 429
                 : 503
               : 200;
+
       response.writeHead(status, {
         "content-type": "application/json",
         ...(status === 429 ? { "retry-after": "0" } : {}),
       });
       response.end(JSON.stringify({ recovered: true }));
     });
+
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     onTestFinished(
       () =>
@@ -51,10 +58,12 @@ it.each([
           server.close((error) => (error ? reject(error) : resolve())),
         ),
     );
+
     const apiUrl = new URL(
       "../../../scripts/lib/actions-cache.mjs",
       import.meta.url,
     ).href;
+
     const child = execute(
       process.execPath,
       [
@@ -71,6 +80,7 @@ it.each([
         },
       },
     );
+
     if (["forbidden", "delete", "exhausted"].includes(scenario)) {
       await expect(child).rejects.toThrow("HTTP");
       expect(requests).toBe(scenario === "exhausted" ? 3 : 1);
@@ -83,11 +93,13 @@ it.each([
 );
 
 it("publishes incomplete diagnostics and fails the report when one job inventory remains unavailable", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "bb-ci-report-"));
+  const cwd = await mkdtemp(join(tmpdir(), "omnyo-ci-report-"));
   onTestFinished(() => rm(cwd, { recursive: true, force: true }));
   const timestamp = new Date().toISOString();
+
   const server = createServer((request, response) => {
     response.setHeader("content-type", "application/json");
+
     if (request.url.includes("workflows/ci.yml/runs")) {
       response.end(
         JSON.stringify({
@@ -123,6 +135,7 @@ it("publishes incomplete diagnostics and fails the report when one job inventory
       );
     }
   });
+
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   onTestFinished(
     () =>
@@ -150,9 +163,11 @@ it("publishes incomplete diagnostics and fails the report when one job inventory
       },
     ),
   ).rejects.toMatchObject({ code: 1 });
+
   const report = JSON.parse(
     await readFile(join(cwd, ".ci-health/report.json"), "utf8"),
   );
+
   expect(report).toMatchObject({
     runs: 2,
     incompleteRuns: 1,

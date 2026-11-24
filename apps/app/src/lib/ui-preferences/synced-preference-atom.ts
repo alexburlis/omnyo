@@ -3,9 +3,10 @@ import {
   getUiPreferenceDefault,
   type UiPreferenceKey,
   type UiPreferenceValue,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   registerSyncedUiPreference,
+  importUiPreferenceValueV1,
   scheduleUiPreferenceWrite,
 } from "./ui-preferences-sync";
 
@@ -20,12 +21,23 @@ export function createSyncedPreferenceAtom<Key extends UiPreferenceKey>(
 ): SyncedPreferenceAtom<Key> {
   const valueAtom = atom<UiPreferenceValue<Key>>(getUiPreferenceDefault(key));
   registerSyncedUiPreference(key, { valueAtom });
+
   return atom(
     (get) => get(valueAtom),
     (get, set, update: SetStateAction<UiPreferenceValue<Key>>) => {
       const previous = get(valueAtom);
-      set(valueAtom, typeof update === "function" ? update(previous) : update);
-      scheduleUiPreferenceWrite(key, update);
+
+      const projected =
+        typeof update === "function"
+          ? (value: UiPreferenceValue<Key>) =>
+              importUiPreferenceValueV1(key, update(value))
+          : importUiPreferenceValueV1(key, update);
+
+      set(
+        valueAtom,
+        typeof projected === "function" ? projected(previous) : projected,
+      );
+      scheduleUiPreferenceWrite(key, projected);
     },
   );
 }

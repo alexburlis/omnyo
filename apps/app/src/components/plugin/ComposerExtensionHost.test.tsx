@@ -26,6 +26,7 @@ function RendererProbe() {
   const host = usePluginComposerHost();
   const hostDraft = usePluginComposerHostDraft(host);
   const view = useOptionalPluginComposerView();
+
   return (
     <div
       data-testid="renderer"
@@ -47,6 +48,7 @@ function Harness({ hasHost = true }: { hasHost?: boolean }) {
     }),
     [],
   );
+
   const view = useMemo(
     () => ({
       scope: host.scope,
@@ -56,12 +58,14 @@ function Harness({ hasHost = true }: { hasHost?: boolean }) {
     }),
     [host.scope],
   );
+
   const controller = useComposerExtensionController({
     host: hasHost ? host : null,
     view,
     collapseIfFocused: mocks.collapseIfFocused,
     focusDefault: mocks.focusDefault,
   });
+
   return (
     <>
       <button type="button" onClick={controller.focus}>

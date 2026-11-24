@@ -1,16 +1,24 @@
 import * as React from "react";
 
+import {
+  getDragSettleMs,
+  MOTION_DURATION_MS,
+  prefersReducedMotion,
+} from "@omnyo/shared-ui/motion";
 import { useLatestRef } from "@/hooks/useLatestRef";
 import {
   findTouchById,
   hasTextSelectionWithin,
   isHorizontallyScrollableElement,
+  listenToGesture,
 } from "./gesture-dom";
 
 const DRAG_INTENT_PX = 12;
-const DRAG_SETTLE_MS = 220;
+
 const DRAG_CLICK_SUPPRESSION_MS = 400;
+
 const BROWSER_NAVIGATION_EDGE_PX = 24;
+
 const IGNORED_TARGET_SELECTOR =
   'input, textarea, select, [contenteditable="true"], [role="slider"], [data-vaul-no-drag], [data-no-sidebar-swipe], [data-no-secondary-panel-swipe]';
 
@@ -31,9 +39,10 @@ type DragSession = {
   boundary: Element;
 };
 
-type DragProgress = {
+export type DragProgress = {
   progress: number;
   settling: boolean;
+  settleMs: number;
   width: number;
 };
 
@@ -58,11 +67,14 @@ function isTouchEvent(event: Event): event is TouchEvent {
 function trackedPoint(event: Event, session: DragSession): Point | null {
   if (session.input === "touch") {
     if (!isTouchEvent(event)) return null;
+
     const touch =
       findTouchById(event.touches, session.id) ??
       findTouchById(event.changedTouches, session.id);
+
     return touch === null ? null : { x: touch.clientX, y: touch.clientY };
   }
+
   if (
     !("pointerId" in event) ||
     event.pointerId !== session.id ||
@@ -73,16 +85,20 @@ function trackedPoint(event: Event, session: DragSession): Point | null {
   ) {
     return null;
   }
+
   return { x: event.clientX, y: event.clientY };
 }
 
 function startsInHorizontalScroller(session: DragSession): boolean {
   let element = session.target;
+
   while (element !== null) {
     if (isHorizontallyScrollableElement(element)) return true;
+
     if (element === session.boundary) return false;
     element = element.parentElement;
   }
+
   return false;
 }
 
@@ -91,11 +107,13 @@ function suppressNextClick() {
     window.removeEventListener("click", suppress, { capture: true });
     window.clearTimeout(timeout);
   };
+
   const suppress = (event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
     cleanup();
   };
+
   const timeout = window.setTimeout(cleanup, DRAG_CLICK_SUPPRESSION_MS);
   window.addEventListener("click", suppress, { capture: true, once: true });
 }
@@ -122,18 +140,33 @@ export function useHorizontalDismissDrag(options: Options) {
     (progress: number, session: DragSession, dismiss: boolean) => {
       clearSettle();
       const current = optionsRef.current;
-      current.onProgress({ progress, settling: true, width: session.width });
+
+      const settleMs = getDragSettleMs(
+        Math.abs(progress - session.progress),
+        prefersReducedMotion(),
+        MOTION_DURATION_MS.drawer,
+      );
+
+      current.onProgress({
+        progress,
+        settling: true,
+        settleMs,
+        width: session.width,
+      });
+
       if (dismiss && current.dismissTiming === "immediate") {
         current.onDismiss();
       }
+
       settleTimeoutRef.current = window.setTimeout(() => {
         settleTimeoutRef.current = null;
+
         if (dismiss && current.dismissTiming === "settled") {
           optionsRef.current.onDismiss();
         } else {
           optionsRef.current.onClear();
         }
-      }, DRAG_SETTLE_MS);
+      }, settleMs);
     },
     [clearSettle, optionsRef],
   );
@@ -141,44 +174,61 @@ export function useHorizontalDismissDrag(options: Options) {
   const move = React.useCallback(
     (event: Event) => {
       const session = sessionRef.current;
+
       if (session === null) return;
       const point = trackedPoint(event, session);
+
       if (point === null) return;
-      if (!session.dragging && hasTextSelectionWithin(session.boundary)) {
+
+      if (
+        !session.dragging &&
+        (event.defaultPrevented || hasTextSelectionWithin(session.boundary))
+      ) {
         clearSession();
+
         return;
       }
+
       const direction = optionsRef.current.direction === "left" ? -1 : 1;
       const deltaX = point.x - session.startX;
       const deltaY = point.y - session.startY;
       const absX = Math.abs(deltaX);
       const absY = Math.abs(deltaY);
+
       if (!session.dragging) {
         if (absY > DRAG_INTENT_PX && absY > absX * 1.15) {
           clearSession();
+
           return;
         }
+
         if (deltaX * direction < DRAG_INTENT_PX || absX <= absY * 1.25) {
           return;
         }
+
         if (
           session.target !== null &&
           (!session.target.isConnected || startsInHorizontalScroller(session))
         ) {
           clearSession();
+
           return;
         }
+
         session.dragging = true;
         clearSettle();
       }
+
       if (event.cancelable) event.preventDefault();
       const now = Date.now();
       const elapsed = now - session.lastTime;
+
       if (elapsed > 0) {
         session.velocityX = ((point.x - session.lastX) / elapsed) * 1000;
         session.lastX = point.x;
         session.lastTime = now;
       }
+
       session.progress = Math.min(
         1,
         Math.max(0, 1 - (deltaX * direction) / session.width),
@@ -186,6 +236,7 @@ export function useHorizontalDismissDrag(options: Options) {
       optionsRef.current.onProgress({
         progress: session.progress,
         settling: false,
+        settleMs: 0,
         width: session.width,
       });
     },
@@ -195,15 +246,21 @@ export function useHorizontalDismissDrag(options: Options) {
   const finish = React.useCallback(
     (event: Event) => {
       const session = sessionRef.current;
+
       if (session === null || trackedPoint(event, session) === null) return;
       clearSession();
+
       if (!session.dragging) return;
+
       if (event.cancelable) event.preventDefault();
+
       if (optionsRef.current.suppressClick) suppressNextClick();
       const direction = optionsRef.current.direction === "left" ? -1 : 1;
+
       const dismiss =
         session.progress <= 0.75 ||
         (session.progress <= 0.88 && session.velocityX * direction >= 450);
+
       settle(dismiss ? 0 : 1, session, dismiss);
     },
     [clearSession, optionsRef, settle],
@@ -212,8 +269,10 @@ export function useHorizontalDismissDrag(options: Options) {
   const cancel = React.useCallback(
     (event: Event) => {
       const session = sessionRef.current;
+
       if (session === null || trackedPoint(event, session) === null) return;
       clearSession();
+
       if (session.dragging) settle(1, session, false);
     },
     [clearSession, settle],
@@ -221,19 +280,24 @@ export function useHorizontalDismissDrag(options: Options) {
 
   const listen = React.useCallback(
     (session: DragSession) => {
-      const prefix = session.input;
-      const moveType = `${prefix}move`;
-      const endType = prefix === "pointer" ? "pointerup" : "touchend";
-      const cancelType = `${prefix}cancel`;
-      const remove = () => {
-        window.removeEventListener(moveType, move);
-        window.removeEventListener(endType, finish);
-        window.removeEventListener(cancelType, cancel);
+      const origin = session.target;
+
+      const removers =
+        session.input === "pointer"
+          ? [
+              listenToGesture(origin, "pointermove", move, { passive: false }),
+              listenToGesture(origin, "pointerup", finish),
+              listenToGesture(origin, "pointercancel", cancel),
+            ]
+          : [
+              listenToGesture(origin, "touchmove", move, { passive: false }),
+              listenToGesture(origin, "touchend", finish),
+              listenToGesture(origin, "touchcancel", cancel),
+            ];
+
+      removeListenersRef.current = () => {
+        for (const remove of removers) remove();
       };
-      window.addEventListener(moveType, move, { passive: false });
-      window.addEventListener(endType, finish);
-      window.addEventListener(cancelType, cancel);
-      removeListenersRef.current = remove;
     },
     [cancel, finish, move],
   );
@@ -249,6 +313,7 @@ export function useHorizontalDismissDrag(options: Options) {
     ) => {
       if (hasTextSelectionWithin(boundary)) return;
       const view = boundary.ownerDocument.defaultView;
+
       if (
         (optionsRef.current.direction === "left" &&
           view !== null &&
@@ -258,6 +323,7 @@ export function useHorizontalDismissDrag(options: Options) {
       ) {
         return;
       }
+
       const session: DragSession = {
         input,
         id,
@@ -272,6 +338,7 @@ export function useHorizontalDismissDrag(options: Options) {
         target: target instanceof Element ? target : null,
         boundary,
       };
+
       sessionRef.current = session;
       listen(session);
     },
@@ -293,6 +360,7 @@ export function useHorizontalDismissDrag(options: Options) {
       ) {
         return;
       }
+
       start(
         "pointer",
         event.pointerId,
@@ -318,11 +386,14 @@ export function useHorizontalDismissDrag(options: Options) {
       ) {
         return;
       }
+
       if (sessionRef.current !== null) {
         if (sessionRef.current.input !== "pointer") return;
         clearSession();
       }
+
       const touch = event.touches.item(0);
+
       if (touch === null) return;
       start(
         "touch",

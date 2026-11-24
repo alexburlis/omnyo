@@ -11,7 +11,9 @@ const MAX_FALLBACK_LABEL_WIDTH = 80;
 
 function fallbackCallLabel(prompt: string, index: number): string {
   const normalized = prompt.replace(/\s+/g, " ").trim();
+
   if (normalized.length === 0) return `Agent ${index + 1}`;
+
   return displayWidth(normalized) <= MAX_FALLBACK_LABEL_WIDTH
     ? normalized
     : `${truncateToWidth(normalized, MAX_FALLBACK_LABEL_WIDTH - 1)}…`;
@@ -26,6 +28,9 @@ function callView(
     label: call.options.title ?? fallbackCallLabel(call.prompt, call.callIndex),
     phase: call.options.phase,
     status: call.status,
+    environmentId: call.resolvedEnvironmentId,
+    hostId: call.resolvedHostId,
+    workspacePath: call.resolvedWorkspacePath,
     provider: call.execution.provider,
     model: call.execution.model,
     reasoningLevel: call.execution.reasoningLevel,
@@ -45,11 +50,14 @@ export function buildWorkflowRunView(
 ): WorkflowRunView {
   const metadata = parseWorkflowSource(run.source).metadata;
   const calls = run.calls.map(callView);
+
   const declaredPhaseTitles = new Set(
     metadata.phases.map((phase) => phase.title),
   );
+
   const undeclaredPhaseTitles: string[] = [];
   const seenUndeclaredPhaseTitles = new Set<string>();
+
   for (const call of calls) {
     if (
       call.phase !== null &&
@@ -60,6 +68,7 @@ export function buildWorkflowRunView(
       undeclaredPhaseTitles.push(call.phase);
     }
   }
+
   if (
     run.phase !== null &&
     !declaredPhaseTitles.has(run.phase) &&
@@ -67,6 +76,7 @@ export function buildWorkflowRunView(
   ) {
     undeclaredPhaseTitles.push(run.phase);
   }
+
   const phases: WorkflowPhaseView[] = [
     ...metadata.phases.map((phase) => ({
       title: phase.title,

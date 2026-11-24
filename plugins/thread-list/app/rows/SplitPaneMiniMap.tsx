@@ -1,9 +1,12 @@
 import { cn } from "@/lib/utils";
-import type { PluginSidebarSplitPane } from "@get-bb/plugin-sdk/app";
+import type { PluginSidebarSplitPane } from "@omnyo/plugin-sdk/app";
 
 const GLYPH_SIZE = 14;
+
 const GLYPH_PADDING = 1;
+
 const INNER = GLYPH_SIZE - 2 * GLYPH_PADDING;
+
 const OUTLINE_WIDTH = 1;
 
 interface SplitPaneMiniMapProps {
@@ -49,6 +52,7 @@ export function SplitPaneMiniMap({
     >
       {slots.map((slot) => {
         const inset = outlineInset(slot.isMe);
+
         return (
           <rect
             key={slot.paneId}

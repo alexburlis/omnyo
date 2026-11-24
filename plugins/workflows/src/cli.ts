@@ -2,10 +2,10 @@ import {
   PluginCliError,
   cliCommand,
   defineCli,
-  type BbPluginApi,
+  type PluginApi,
   type PluginCliContext,
   type PluginCliResult,
-} from "@get-bb/plugin-sdk";
+} from "@omnyo/plugin-sdk";
 import type { JsonValue } from "./types.js";
 import type {
   WorkflowCallInspection,
@@ -19,13 +19,21 @@ import { utf8Prefix } from "./utf8.js";
 import { prepareWorkflowSource } from "./workflow-input.js";
 
 const STATUS_INLINE_RESULT_MAX_BYTES = 8 * 1024;
+
 const STATUS_DISPLAY_TEXT_MAX_BYTES = 1_024;
+
 const STATUS_ERROR_MAX_BYTES = 4 * 1_024;
+
 const LIST_DISPLAY_TEXT_MAX_BYTES = 128;
+
 const LIST_ERROR_MAX_BYTES = 256;
+
 const DEFAULT_HISTORY_LIMIT = 10;
+
 const MAX_HISTORY_LIMIT = 100;
+
 const DEFAULT_LIST_LIMIT = 20;
+
 const MAX_LIST_LIMIT = 50;
 
 function success(value: unknown): PluginCliResult {
@@ -57,8 +65,9 @@ function requireContext(ctx: PluginCliContext): {
   threadId: string;
 } {
   if (ctx.projectId === undefined || ctx.threadId === undefined) {
-    throw new Error("This command must run inside a BB project thread");
+    throw new Error("This command must run inside an Omnyo project thread");
   }
+
   return { projectId: ctx.projectId, threadId: ctx.threadId };
 }
 
@@ -80,6 +89,7 @@ function sourceInput(
 
 function parseJsonOption(value: string | undefined): JsonValue {
   if (value === undefined) return null;
+
   try {
     return JSON.parse(value) as JsonValue;
   } catch (error) {
@@ -119,12 +129,14 @@ function inlineRunResult(run: WorkflowRunRow): {
   if (run.resultJson === null) {
     return { available: false, omitted: false, value: null };
   }
+
   if (
     new TextEncoder().encode(run.resultJson).byteLength >
     STATUS_INLINE_RESULT_MAX_BYTES
   ) {
     return { available: true, omitted: true, value: null };
   }
+
   return {
     available: true,
     omitted: false,
@@ -137,27 +149,34 @@ function statusSummary(page: WorkflowRunInspectionPage) {
   const result = inlineRunResult(run);
   const name = boundedText(run.name, STATUS_DISPLAY_TEXT_MAX_BYTES);
   const phase = boundedText(run.phase, STATUS_DISPLAY_TEXT_MAX_BYTES);
+
   const originProvider = boundedText(
     run.originProvider,
     STATUS_DISPLAY_TEXT_MAX_BYTES,
   );
+
   const originModel = boundedText(
     run.originModel,
     STATUS_DISPLAY_TEXT_MAX_BYTES,
   );
+
   const originReasoningLevel = boundedText(
     run.originReasoningLevel,
     STATUS_DISPLAY_TEXT_MAX_BYTES,
   );
+
   const originPermissionMode = boundedText(
     run.originPermissionMode,
     STATUS_DISPLAY_TEXT_MAX_BYTES,
   );
+
   const error = boundedText(run.error, STATUS_ERROR_MAX_BYTES);
+
   const notificationError = boundedText(
     run.notificationError,
     STATUS_ERROR_MAX_BYTES,
   );
+
   return {
     id: run.id,
     projectId: run.projectId,
@@ -200,8 +219,8 @@ function statusSummary(page: WorkflowRunInspectionPage) {
     finishedAt: run.finishedAt,
     history: {
       format: "jsonl",
-      pageUsage: `bb workflows history ${run.id} --cursor 0 --limit ${DEFAULT_HISTORY_LIMIT}`,
-      fileUsage: `mkdir -p "$BB_THREAD_STORAGE/workflows" && bb workflows history ${run.id} --cursor 0 --limit ${DEFAULT_HISTORY_LIMIT} > "$BB_THREAD_STORAGE/workflows/${run.id}.jsonl"`,
+      pageUsage: `omnyo workflows history ${run.id} --cursor 0 --limit ${DEFAULT_HISTORY_LIMIT}`,
+      fileUsage: `mkdir -p "$OMNYO_THREAD_STORAGE/workflows" && omnyo workflows history ${run.id} --cursor 0 --limit ${DEFAULT_HISTORY_LIMIT} > "$OMNYO_THREAD_STORAGE/workflows/${run.id}.jsonl"`,
     },
   };
 }
@@ -210,6 +229,7 @@ function listRunSummary(run: WorkflowRunRow) {
   const name = boundedText(run.name, LIST_DISPLAY_TEXT_MAX_BYTES);
   const phase = boundedText(run.phase, LIST_DISPLAY_TEXT_MAX_BYTES);
   const error = boundedText(run.error, LIST_ERROR_MAX_BYTES);
+
   return {
     id: run.id,
     originThreadId: run.originThreadId,
@@ -232,6 +252,7 @@ function listRunSummary(run: WorkflowRunRow) {
 
 function runLogRecord(run: WorkflowRunRow, exportedAt: number) {
   const { argsJson, settingsJson, resultJson, ...fields } = run;
+
   return {
     type: "run",
     logVersion: 1,
@@ -264,6 +285,7 @@ function runReferenceLogRecord(run: WorkflowRunRow, exportedAt: number) {
 function callLogRecord(call: WorkflowCallInspection, exportedAt: number) {
   const { optionsJson, resultJson, ...fields } = call;
   void optionsJson;
+
   return {
     type: "call",
     logVersion: 1,
@@ -281,11 +303,13 @@ function callLogRecord(call: WorkflowCallInspection, exportedAt: number) {
 
 const JSON_OPTION_DESCRIPTION =
   "Report failures as a JSON envelope on stdout; command output is always JSON";
+
 const RUN_ID_POSITIONAL = {
   name: "run-id",
-  description: "Workflow run ID returned by bb workflows run",
+  description: "Workflow run ID returned by omnyo workflows run",
   required: true,
 } as const;
+
 const SOURCE_OPTIONS = {
   script: {
     type: "string",
@@ -306,22 +330,23 @@ const SOURCE_OPTIONS = {
     placeholder: "name",
     aliases: ["workflow"],
     description:
-      "Named workflow under .bb/workflows/<name>.js; lowercase kebab-case, at most 64 characters",
+      "Named workflow under .omnyo/workflows/<name>.js; lowercase kebab-case, at most 64 characters",
   },
 } as const;
+
 const SOURCE_CONSTRAINT = {
   kind: "exactly-one",
   options: ["script", "file", "name"],
 } as const;
 
 export function registerWorkflowCli(
-  bb: BbPluginApi,
+  api: PluginApi,
   service: WorkflowService,
 ): void {
-  bb.cli.register(
+  api.cli.register(
     defineCli({
       name: "workflows",
-      summary: "Run and inspect durable BB workflows",
+      summary: "Run and inspect durable Omnyo workflows",
       description:
         "Workflows run in the background: start one, then poll the compact status summary and read bounded JSONL history pages.",
       commands: {
@@ -347,11 +372,13 @@ export function registerWorkflowCli(
           run(input, ctx) {
             return guarded(async () => {
               const context = requireContext(ctx);
+
               const prepared = await prepareWorkflowSource(
-                bb,
+                api,
                 context,
                 sourceInput(input.options, ctx.cwd),
               );
+
               const run = await service.start({
                 projectId: context.projectId,
                 originThreadId: context.threadId,
@@ -359,6 +386,7 @@ export function registerWorkflowCli(
                 args: parseJsonOption(input.options.args),
                 resumedFromRunId: input.options.resume ?? null,
               });
+
               return success({
                 runId: run.id,
                 name: run.name,
@@ -377,11 +405,13 @@ export function registerWorkflowCli(
           run(input, ctx) {
             return guarded(async () => {
               const context = requireContext(ctx);
+
               const prepared = await prepareWorkflowSource(
-                bb,
+                api,
                 context,
                 sourceInput(input.options, ctx.cwd),
               );
+
               return success({
                 ...prepared.validation,
                 origin: prepared.origin,
@@ -400,9 +430,11 @@ export function registerWorkflowCli(
               const context = requireContext(ctx);
               const runId = input.positionals["run-id"];
               const page = service.inspectPage(runId, -1, 1);
+
               if (page === null || page.run.projectId !== context.projectId) {
                 throw new Error(`Unknown workflow run ${runId}`);
               }
+
               return success(statusSummary(page));
             });
           },
@@ -435,13 +467,16 @@ export function registerWorkflowCli(
               const { cursor, limit } = input.options;
               const context = requireContext(ctx);
               const page = service.inspectPage(runId, cursor - 1, limit + 1);
+
               if (page === null || page.run.projectId !== context.projectId) {
                 throw new Error(`Unknown workflow run ${runId}`);
               }
+
               const exportedAt = Date.now();
               const calls = page.calls.slice(0, limit);
               const hasMore = page.calls.length > limit;
               const nextCursor = hasMore ? calls.at(-1)!.callIndex + 1 : null;
+
               return jsonLines([
                 cursor === 0
                   ? runLogRecord(page.run, exportedAt)
@@ -478,6 +513,7 @@ export function registerWorkflowCli(
           run(input, ctx) {
             return guarded(async () => {
               const context = requireContext(ctx);
+
               return success(
                 service
                   .list(context.projectId, input.options.limit)
@@ -497,9 +533,11 @@ export function registerWorkflowCli(
               const context = requireContext(ctx);
               const runId = input.positionals["run-id"];
               const run = service.get(runId);
+
               if (run === null || run.projectId !== context.projectId) {
                 throw new Error(`Unknown workflow run ${runId}`);
               }
+
               return success({ runId, stopped: await service.stop(runId) });
             });
           },

@@ -1,13 +1,15 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { lastServerMoveSchema } from "@bb/domain";
-import { serverMoveBindHostSchema } from "@bb/host-daemon-contract";
+import { lastServerMoveSchema } from "@omnyo/domain";
+import { serverMoveBindHostSchema } from "@omnyo/host-daemon-contract";
 import { z } from "zod";
 import { ExpectedCommandDispatchError } from "../command-dispatch-support.js";
 import { isFileNotFoundError, writeFileAtomically } from "./fs.js";
 
 export const SERVER_MOVE_INCOMING_DIR_NAME = "server-move-incoming";
+
 const INCOMING_MOVE_STATE_FILE_NAME = "state.json";
+
 const MOVE_ID_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
 
 export const activationPlanKindSchema = z.enum([
@@ -15,6 +17,7 @@ export const activationPlanKindSchema = z.enum([
   "service",
   "replacement",
 ]);
+
 export type ActivationPlanKind = z.infer<typeof activationPlanKindSchema>;
 
 const incomingMoveStateSchema = z
@@ -36,9 +39,28 @@ const incomingMoveStateSchema = z
       .object({
         pid: z.number().int().positive(),
         localServerUrl: z.string().min(1),
+        startedAt: z.number().nonnegative().nullable().optional(),
       })
       .strict()
       .nullable(),
+    pendingLaunch: z
+      .object({
+        launchId: z.string().min(1),
+        localServerUrl: z.string().min(1),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+    runtime: z
+      .object({
+        root: z.string().min(1),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+        version: z.string().min(1),
+      })
+      .strict()
+      .nullable()
+      .optional()
+      .default(null),
     preparedAt: z.number().int().nonnegative().nullable(),
     activation: z
       .object({
@@ -60,6 +82,7 @@ export function requireMoveIdSegment(moveId: string): string {
       `Invalid server move id: ${JSON.stringify(moveId)}`,
     );
   }
+
   return moveId;
 }
 
@@ -76,6 +99,7 @@ export async function readIncomingMoveState(
   moveId: string,
 ): Promise<IncomingMoveState | null> {
   let raw: string;
+
   try {
     raw = await readFile(
       join(incomingMoveDir(dataDir, moveId), INCOMING_MOVE_STATE_FILE_NAME),
@@ -85,8 +109,10 @@ export async function readIncomingMoveState(
     if (isFileNotFoundError(error)) {
       return null;
     }
+
     throw error;
   }
+
   return incomingMoveStateSchema.parse(JSON.parse(raw));
 }
 
@@ -109,6 +135,7 @@ export async function listIncomingMoveIds(dataDir: string): Promise<string[]> {
     const entries = await readdir(incomingMovesRoot(dataDir), {
       withFileTypes: true,
     });
+
     return entries
       .filter(
         (entry) =>
@@ -120,6 +147,7 @@ export async function listIncomingMoveIds(dataDir: string): Promise<string[]> {
     if (isFileNotFoundError(error)) {
       return [];
     }
+
     throw error;
   }
 }

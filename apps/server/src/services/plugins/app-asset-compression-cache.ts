@@ -1,3 +1,5 @@
+const PLUGIN_APP_ASSET_CACHE_CAPACITY = 256;
+
 interface CachedAppAssetEncodings {
   hash: string;
   variants: Map<string, Promise<Buffer>>;
@@ -12,6 +14,10 @@ export interface AppAssetCompressionCache {
   }): Promise<Buffer>;
 }
 
+export function createPluginAppAssetCompressionCache(): AppAssetCompressionCache {
+  return createAppAssetCompressionCache(PLUGIN_APP_ASSET_CACHE_CAPACITY);
+}
+
 export function createAppAssetCompressionCache(
   maxEntries: number,
 ): AppAssetCompressionCache {
@@ -20,6 +26,7 @@ export function createAppAssetCompressionCache(
   return {
     getOrCreate(args) {
       let entry = entries.get(args.assetKey);
+
       if (entry === undefined || entry.hash !== args.hash) {
         entry = { hash: args.hash, variants: new Map() };
         entries.set(args.assetKey, entry);
@@ -29,6 +36,7 @@ export function createAppAssetCompressionCache(
       }
 
       const cached = entry.variants.get(args.encoding);
+
       if (cached !== undefined) {
         return cached;
       }
@@ -38,17 +46,21 @@ export function createAppAssetCompressionCache(
         if (entry.variants.get(args.encoding) === compression) {
           entry.variants.delete(args.encoding);
         }
+
         throw error;
       });
       entry.variants.set(args.encoding, compression);
 
       while (entries.size > maxEntries) {
         const oldestKey = entries.keys().next().value;
+
         if (oldestKey === undefined) {
           break;
         }
+
         entries.delete(oldestKey);
       }
+
       return compression;
     },
   };

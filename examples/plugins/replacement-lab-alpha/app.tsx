@@ -3,7 +3,7 @@ import {
   definePluginApp,
   type PluginFileOpenerProps,
   type PluginThreadListProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 
 const LABEL = "Alpha";
 
@@ -13,6 +13,7 @@ function AlphaThreadList({
   searchQuery,
 }: PluginThreadListProps) {
   const [shouldCrash, setShouldCrash] = useState(false);
+
   if (shouldCrash) throw new Error("Alpha thread-list test crash");
 
   return (
@@ -41,6 +42,7 @@ function AlphaThreadList({
 function AlphaFileOpener({ Original, path, source }: PluginFileOpenerProps) {
   const [embedOriginal, setEmbedOriginal] = useState(false);
   const [shouldCrash, setShouldCrash] = useState(false);
+
   if (shouldCrash) throw new Error("Alpha file-opener test crash");
 
   return (
@@ -96,7 +98,7 @@ function LabHeader({
             checked={embedOriginal ?? false}
             onChange={(event) => onEmbedOriginalChange(event.target.checked)}
           />
-          Embed BB original
+          Embed Omnyo original
         </label>
       )}
       <button

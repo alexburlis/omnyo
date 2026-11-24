@@ -1,56 +1,66 @@
 import { z } from "zod";
 import {
   desktopBrowserImportSelectionSchema,
+  type DesktopBrowserCookieSyncSource,
+  type DesktopBrowserCookieSyncStatus,
   type DesktopBrowserImportOutcome,
+  type DesktopBrowserImportSelection,
   type DesktopBrowserImportSource,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 
-export const BB_DESKTOP_BROWSER_MAX_URL_LENGTH = 4096;
-export const BB_DESKTOP_BROWSER_MAX_TITLE_LENGTH = 1024;
+export const OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH = 4096;
 
-export const bbDesktopBrowserTargetSchema = z
+export const OMNYO_DESKTOP_BROWSER_MAX_TITLE_LENGTH = 1024;
+
+export const omnyoDesktopBrowserTargetSchema = z
   .object({
     hostId: z.string().min(1),
     instanceId: z.string().min(1),
     generation: z.string().min(1),
   })
   .strict();
-export type BbDesktopBrowserTarget = z.infer<
-  typeof bbDesktopBrowserTargetSchema
+
+export type OmnyoDesktopBrowserTarget = z.infer<
+  typeof omnyoDesktopBrowserTargetSchema
 >;
 
-export const bbDesktopBrowserControlSchema = z
+export const omnyoDesktopBrowserControlSchema = z
   .object({
     leaseId: z.string().min(1),
     controllerLabel: z.string().min(1),
     expiresAt: z.number().int().positive(),
   })
   .strict();
-export type BbDesktopBrowserControl = z.infer<
-  typeof bbDesktopBrowserControlSchema
->;
-export const bbDesktopBrowserControlStateSchema = z
-  .object({
-    tabId: z.string().min(1),
-    threadId: z.string().min(1),
-    control: bbDesktopBrowserControlSchema.nullable(),
-  })
-  .strict();
-export type BbDesktopBrowserControlState = z.infer<
-  typeof bbDesktopBrowserControlStateSchema
->;
-export const bbDesktopBrowserRevealRequestSchema = z
-  .object({
-    tabId: z.string().min(1),
-    threadId: z.string().min(1),
-    desktopTarget: bbDesktopBrowserTargetSchema,
-  })
-  .strict();
-export type BbDesktopBrowserRevealRequest = z.infer<
-  typeof bbDesktopBrowserRevealRequestSchema
+
+export type OmnyoDesktopBrowserControl = z.infer<
+  typeof omnyoDesktopBrowserControlSchema
 >;
 
-const bbDesktopBrowserViewBoundsSchema = z
+export const omnyoDesktopBrowserControlStateSchema = z
+  .object({
+    tabId: z.string().min(1),
+    threadId: z.string().min(1),
+    control: omnyoDesktopBrowserControlSchema.nullable(),
+  })
+  .strict();
+
+export type OmnyoDesktopBrowserControlState = z.infer<
+  typeof omnyoDesktopBrowserControlStateSchema
+>;
+
+export const omnyoDesktopBrowserRevealRequestSchema = z
+  .object({
+    tabId: z.string().min(1),
+    threadId: z.string().min(1),
+    desktopTarget: omnyoDesktopBrowserTargetSchema,
+  })
+  .strict();
+
+export type OmnyoDesktopBrowserRevealRequest = z.infer<
+  typeof omnyoDesktopBrowserRevealRequestSchema
+>;
+
+const omnyoDesktopBrowserViewBoundsSchema = z
   .object({
     x: z.number().int(),
     y: z.number().int(),
@@ -58,11 +68,12 @@ const bbDesktopBrowserViewBoundsSchema = z
     height: z.number().int().nonnegative(),
   })
   .strict();
-export type BbDesktopBrowserViewBounds = z.infer<
-  typeof bbDesktopBrowserViewBoundsSchema
+
+export type OmnyoDesktopBrowserViewBounds = z.infer<
+  typeof omnyoDesktopBrowserViewBoundsSchema
 >;
 
-export interface BbDesktopBrowserViewportBounds {
+export interface OmnyoDesktopBrowserViewportBounds {
   width: number;
   height: number;
 }
@@ -73,35 +84,39 @@ interface ClampIntegerToRangeArgs {
   value: number;
 }
 
-interface ClampBbDesktopBrowserViewBoundsArgs {
-  bounds: BbDesktopBrowserViewBounds;
-  viewport: BbDesktopBrowserViewportBounds;
+interface ClampOmnyoDesktopBrowserViewBoundsArgs {
+  bounds: OmnyoDesktopBrowserViewBounds;
+  viewport: OmnyoDesktopBrowserViewportBounds;
 }
 
 function clampIntegerToRange(args: ClampIntegerToRangeArgs): number {
   return Math.min(Math.max(args.value, args.min), args.max);
 }
 
-export function clampBbDesktopBrowserViewBounds(
-  args: ClampBbDesktopBrowserViewBoundsArgs,
-): BbDesktopBrowserViewBounds {
+export function clampOmnyoDesktopBrowserViewBounds(
+  args: ClampOmnyoDesktopBrowserViewBoundsArgs,
+): OmnyoDesktopBrowserViewBounds {
   const viewportRight = Math.max(0, Math.round(args.viewport.width));
   const viewportBottom = Math.max(0, Math.round(args.viewport.height));
+
   const x = clampIntegerToRange({
     value: args.bounds.x,
     min: 0,
     max: viewportRight,
   });
+
   const y = clampIntegerToRange({
     value: args.bounds.y,
     min: 0,
     max: viewportBottom,
   });
+
   const right = clampIntegerToRange({
     value: args.bounds.x + args.bounds.width,
     min: x,
     max: viewportRight,
   });
+
   const bottom = clampIntegerToRange({
     value: args.bounds.y + args.bounds.height,
     min: y,
@@ -116,131 +131,153 @@ export function clampBbDesktopBrowserViewBounds(
   };
 }
 
-export const bbDesktopBrowserAttachRequestSchema = z
+export const omnyoDesktopBrowserAttachRequestSchema = z
   .object({
     tabId: z.string().min(1),
     threadId: z.string().min(1),
-    url: z.string().max(BB_DESKTOP_BROWSER_MAX_URL_LENGTH),
+    url: z.string().max(OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH),
     existingOnly: z.literal(true).optional(),
-    bounds: bbDesktopBrowserViewBoundsSchema,
+    bounds: omnyoDesktopBrowserViewBoundsSchema,
     visible: z.boolean(),
   })
   .strict();
-export type BbDesktopBrowserAttachRequest = z.infer<
-  typeof bbDesktopBrowserAttachRequestSchema
+
+export type OmnyoDesktopBrowserAttachRequest = z.infer<
+  typeof omnyoDesktopBrowserAttachRequestSchema
 >;
 
-export const bbDesktopBrowserNavigateRequestSchema = z
+export const omnyoDesktopBrowserNavigateRequestSchema = z
   .object({
     tabId: z.string().min(1),
-    url: z.string().min(1).max(BB_DESKTOP_BROWSER_MAX_URL_LENGTH),
+    url: z.string().min(1).max(OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH),
   })
   .strict();
-export type BbDesktopBrowserNavigateRequest = z.infer<
-  typeof bbDesktopBrowserNavigateRequestSchema
+
+export type OmnyoDesktopBrowserNavigateRequest = z.infer<
+  typeof omnyoDesktopBrowserNavigateRequestSchema
 >;
 
-export const bbDesktopBrowserSetBoundsRequestSchema = z
+export const omnyoDesktopBrowserSetBoundsRequestSchema = z
   .object({
     tabId: z.string().min(1),
-    bounds: bbDesktopBrowserViewBoundsSchema,
+    bounds: omnyoDesktopBrowserViewBoundsSchema,
   })
   .strict();
-export type BbDesktopBrowserSetBoundsRequest = z.infer<
-  typeof bbDesktopBrowserSetBoundsRequestSchema
+
+export type OmnyoDesktopBrowserSetBoundsRequest = z.infer<
+  typeof omnyoDesktopBrowserSetBoundsRequestSchema
 >;
 
-export const bbDesktopBrowserSetVisibleRequestSchema = z
+export const omnyoDesktopBrowserSetVisibleRequestSchema = z
   .object({
     tabId: z.string().min(1),
     visible: z.boolean(),
   })
   .strict();
-export type BbDesktopBrowserSetVisibleRequest = z.infer<
-  typeof bbDesktopBrowserSetVisibleRequestSchema
+
+export type OmnyoDesktopBrowserSetVisibleRequest = z.infer<
+  typeof omnyoDesktopBrowserSetVisibleRequestSchema
 >;
 
-export const bbDesktopBrowserTabRefSchema = z
+export const omnyoDesktopBrowserTabRefSchema = z
   .object({
     tabId: z.string().min(1),
   })
   .strict();
-export type BbDesktopBrowserTabRef = z.infer<
-  typeof bbDesktopBrowserTabRefSchema
+
+export const omnyoDesktopBrowserHostFocusRequestSchema = z
+  .object({
+    tabId: z.string().min(1).nullable(),
+  })
+  .strict();
+
+export type OmnyoDesktopBrowserTabRef = z.infer<
+  typeof omnyoDesktopBrowserTabRefSchema
 >;
 
-export const bbDesktopBrowserStateSchema = z
+export const omnyoDesktopBrowserStateSchema = z
   .object({
     tabId: z.string().min(1),
-    url: z.string().max(BB_DESKTOP_BROWSER_MAX_URL_LENGTH),
-    title: z.string().max(BB_DESKTOP_BROWSER_MAX_TITLE_LENGTH).nullable(),
+    url: z.string().max(OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH),
+    title: z.string().max(OMNYO_DESKTOP_BROWSER_MAX_TITLE_LENGTH).nullable(),
     isLoading: z.boolean(),
     canGoBack: z.boolean(),
     canGoForward: z.boolean(),
-    errorText: z.string().max(BB_DESKTOP_BROWSER_MAX_TITLE_LENGTH).nullable(),
+    errorText: z
+      .string()
+      .max(OMNYO_DESKTOP_BROWSER_MAX_TITLE_LENGTH)
+      .nullable(),
   })
   .strict();
-export type BbDesktopBrowserState = z.infer<typeof bbDesktopBrowserStateSchema>;
 
-export const bbDesktopBrowserOpenTabRequestSchema = z
-  .object({
-    url: z.string().min(1).max(BB_DESKTOP_BROWSER_MAX_URL_LENGTH),
-  })
-  .strict();
-export type BbDesktopBrowserOpenTabRequest = z.infer<
-  typeof bbDesktopBrowserOpenTabRequestSchema
+export type OmnyoDesktopBrowserState = z.infer<
+  typeof omnyoDesktopBrowserStateSchema
 >;
 
-export const bbDesktopBrowserScopedOpenTabRequestSchema = z
+export const omnyoDesktopBrowserOpenTabRequestSchema = z
+  .object({
+    url: z.string().min(1).max(OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH),
+  })
+  .strict();
+
+export type OmnyoDesktopBrowserOpenTabRequest = z.infer<
+  typeof omnyoDesktopBrowserOpenTabRequestSchema
+>;
+
+export const omnyoDesktopBrowserScopedOpenTabRequestSchema = z
   .object({
     tabId: z.string().min(1),
-    url: z.string().min(1).max(BB_DESKTOP_BROWSER_MAX_URL_LENGTH),
+    url: z.string().min(1).max(OMNYO_DESKTOP_BROWSER_MAX_URL_LENGTH),
   })
   .strict();
-export type BbDesktopBrowserScopedOpenTabRequest = z.infer<
-  typeof bbDesktopBrowserScopedOpenTabRequestSchema
+
+export type OmnyoDesktopBrowserScopedOpenTabRequest = z.infer<
+  typeof omnyoDesktopBrowserScopedOpenTabRequestSchema
 >;
 
-const BB_DESKTOP_BROWSER_MAX_SNAPSHOT_DATA_URL_LENGTH = 8_388_608;
+const OMNYO_DESKTOP_BROWSER_MAX_SNAPSHOT_DATA_URL_LENGTH = 8_388_608;
 
-export const bbDesktopBrowserSnapshotSchema = z
+export const omnyoDesktopBrowserSnapshotSchema = z
   .object({
     tabId: z.string().min(1),
     dataUrl: z
       .string()
-      .max(BB_DESKTOP_BROWSER_MAX_SNAPSHOT_DATA_URL_LENGTH)
+      .max(OMNYO_DESKTOP_BROWSER_MAX_SNAPSHOT_DATA_URL_LENGTH)
       .nullable(),
   })
   .strict();
-export type BbDesktopBrowserSnapshot = z.infer<
-  typeof bbDesktopBrowserSnapshotSchema
+
+export type OmnyoDesktopBrowserSnapshot = z.infer<
+  typeof omnyoDesktopBrowserSnapshotSchema
 >;
 
-export const BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH = 1024;
+export const OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH = 1024;
 
-export const bbDesktopBrowserFindInPageRequestSchema = z
+export const omnyoDesktopBrowserFindInPageRequestSchema = z
   .object({
     tabId: z.string().min(1),
-    text: z.string().min(1).max(BB_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH),
+    text: z.string().min(1).max(OMNYO_DESKTOP_BROWSER_MAX_FIND_TEXT_LENGTH),
     forward: z.boolean(),
     newSession: z.boolean(),
   })
   .strict();
-export type BbDesktopBrowserFindInPageRequest = z.infer<
-  typeof bbDesktopBrowserFindInPageRequestSchema
+
+export type OmnyoDesktopBrowserFindInPageRequest = z.infer<
+  typeof omnyoDesktopBrowserFindInPageRequestSchema
 >;
 
-export const bbDesktopBrowserStopFindInPageRequestSchema = z
+export const omnyoDesktopBrowserStopFindInPageRequestSchema = z
   .object({
     tabId: z.string().min(1),
     action: z.enum(["clearSelection", "keepSelection", "activateSelection"]),
   })
   .strict();
-export type BbDesktopBrowserStopFindInPageRequest = z.infer<
-  typeof bbDesktopBrowserStopFindInPageRequestSchema
+
+export type OmnyoDesktopBrowserStopFindInPageRequest = z.infer<
+  typeof omnyoDesktopBrowserStopFindInPageRequestSchema
 >;
 
-export const bbDesktopBrowserFindResultSchema = z
+export const omnyoDesktopBrowserFindResultSchema = z
   .object({
     tabId: z.string().min(1),
     requestId: z.number().int(),
@@ -249,126 +286,162 @@ export const bbDesktopBrowserFindResultSchema = z
     finalUpdate: z.boolean(),
   })
   .strict();
-export type BbDesktopBrowserFindResult = z.infer<
-  typeof bbDesktopBrowserFindResultSchema
+
+export type OmnyoDesktopBrowserFindResult = z.infer<
+  typeof omnyoDesktopBrowserFindResultSchema
 >;
 
-export const BB_DESKTOP_BROWSER_MAX_PAGE_EXPRESSION_LENGTH = 4_000_000;
-export const BB_DESKTOP_BROWSER_MAX_PAGE_CHANNEL_LENGTH = 256;
+export const OMNYO_DESKTOP_BROWSER_MAX_PAGE_EXPRESSION_LENGTH = 4_000_000;
 
-export const bbDesktopBrowserPageWorldSchema = z.enum(["main", "isolated"]);
+export const OMNYO_DESKTOP_BROWSER_MAX_PAGE_CHANNEL_LENGTH = 256;
 
-export const bbDesktopBrowserEvaluateRequestSchema = z
+export const omnyoDesktopBrowserPageWorldSchema = z.enum(["main", "isolated"]);
+
+export const omnyoDesktopBrowserEvaluateRequestSchema = z
   .object({
     tabId: z.string().min(1),
     expression: z
       .string()
       .min(1)
-      .max(BB_DESKTOP_BROWSER_MAX_PAGE_EXPRESSION_LENGTH),
-    world: bbDesktopBrowserPageWorldSchema,
-    channel: z.string().min(1).max(BB_DESKTOP_BROWSER_MAX_PAGE_CHANNEL_LENGTH),
+      .max(OMNYO_DESKTOP_BROWSER_MAX_PAGE_EXPRESSION_LENGTH),
+    world: omnyoDesktopBrowserPageWorldSchema,
+    channel: z
+      .string()
+      .min(1)
+      .max(OMNYO_DESKTOP_BROWSER_MAX_PAGE_CHANNEL_LENGTH),
   })
   .strict();
-export type BbDesktopBrowserEvaluateRequest = z.infer<
-  typeof bbDesktopBrowserEvaluateRequestSchema
+
+export type OmnyoDesktopBrowserEvaluateRequest = z.infer<
+  typeof omnyoDesktopBrowserEvaluateRequestSchema
 >;
 
-export const bbDesktopBrowserEvaluateResultSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), value: z.json() }).strict(),
-  z.object({ ok: z.literal(false), error: z.string() }).strict(),
-]);
-export type BbDesktopBrowserEvaluateResult = z.infer<
-  typeof bbDesktopBrowserEvaluateResultSchema
+export const omnyoDesktopBrowserEvaluateResultSchema = z.discriminatedUnion(
+  "ok",
+  [
+    z.object({ ok: z.literal(true), value: z.json() }).strict(),
+    z.object({ ok: z.literal(false), error: z.string() }).strict(),
+  ],
+);
+
+export type OmnyoDesktopBrowserEvaluateResult = z.infer<
+  typeof omnyoDesktopBrowserEvaluateResultSchema
 >;
 
-export const bbDesktopBrowserPageMessageSchema = z
+export const omnyoDesktopBrowserPageMessageSchema = z
   .object({
     tabId: z.string().min(1),
-    channel: z.string().min(1).max(BB_DESKTOP_BROWSER_MAX_PAGE_CHANNEL_LENGTH),
+    channel: z
+      .string()
+      .min(1)
+      .max(OMNYO_DESKTOP_BROWSER_MAX_PAGE_CHANNEL_LENGTH),
     data: z.json(),
   })
   .strict();
-export type BbDesktopBrowserPageMessage = z.infer<
-  typeof bbDesktopBrowserPageMessageSchema
+
+export type OmnyoDesktopBrowserPageMessage = z.infer<
+  typeof omnyoDesktopBrowserPageMessageSchema
 >;
-export type BbDesktopBrowserPageMessageHandler = (
-  message: BbDesktopBrowserPageMessage,
+
+export type OmnyoDesktopBrowserPageMessageHandler = (
+  message: OmnyoDesktopBrowserPageMessage,
 ) => void;
 
-export type BbDesktopBrowserStateHandler = (
-  state: BbDesktopBrowserState,
+export type OmnyoDesktopBrowserStateHandler = (
+  state: OmnyoDesktopBrowserState,
 ) => void;
-export type BbDesktopBrowserOpenTabHandler = (
-  request: BbDesktopBrowserOpenTabRequest,
-) => void;
-export type BbDesktopBrowserScopedOpenTabHandler = (
-  request: BbDesktopBrowserScopedOpenTabRequest,
-) => void;
-export type BbDesktopBrowserSnapshotHandler = (
-  snapshot: BbDesktopBrowserSnapshot,
-) => void;
-export type BbDesktopBrowserFocusHandler = (tabId: string) => void;
-export type BbDesktopBrowserFindResultHandler = (
-  result: BbDesktopBrowserFindResult,
-) => void;
-export type BbDesktopBrowserUnsubscribe = () => void;
 
-export const bbDesktopBrowserImportCookiesRequestSchema =
+export type OmnyoDesktopBrowserOpenTabHandler = (
+  request: OmnyoDesktopBrowserOpenTabRequest,
+) => void;
+
+export type OmnyoDesktopBrowserScopedOpenTabHandler = (
+  request: OmnyoDesktopBrowserScopedOpenTabRequest,
+) => void;
+
+export type OmnyoDesktopBrowserSnapshotHandler = (
+  snapshot: OmnyoDesktopBrowserSnapshot,
+) => void;
+
+export type OmnyoDesktopBrowserFocusHandler = (tabId: string) => void;
+
+export type OmnyoDesktopBrowserFindResultHandler = (
+  result: OmnyoDesktopBrowserFindResult,
+) => void;
+
+export type OmnyoDesktopBrowserUnsubscribe = () => void;
+
+export const omnyoDesktopBrowserImportCookiesRequestSchema =
   desktopBrowserImportSelectionSchema;
-export type BbDesktopBrowserImportCookiesRequest = z.infer<
-  typeof bbDesktopBrowserImportCookiesRequestSchema
->;
-export type BbDesktopBrowserImportSourcesResult = {
-  sources: DesktopBrowserImportSource[];
-};
-export type BbDesktopBrowserImportCookiesResult = DesktopBrowserImportOutcome;
 
-export interface BbDesktopBrowserApi {
-  listImportSources?(): Promise<BbDesktopBrowserImportSourcesResult>;
+export type OmnyoDesktopBrowserImportCookiesRequest = z.infer<
+  typeof omnyoDesktopBrowserImportCookiesRequestSchema
+>;
+
+export type OmnyoDesktopBrowserImportSourcesResult = {
+  sources: DesktopBrowserImportSource[];
+  recommended?: DesktopBrowserImportSelection;
+};
+
+export type OmnyoDesktopBrowserImportCookiesResult =
+  DesktopBrowserImportOutcome;
+
+export interface OmnyoDesktopBrowserApi {
+  listImportSources?(): Promise<OmnyoDesktopBrowserImportSourcesResult>;
   importCookies?(
-    request: BbDesktopBrowserImportCookiesRequest,
-  ): Promise<BbDesktopBrowserImportCookiesResult>;
+    request: OmnyoDesktopBrowserImportCookiesRequest,
+  ): Promise<OmnyoDesktopBrowserImportCookiesResult>;
   openFullDiskAccessSettings?(): void;
-  getTarget?(): Promise<BbDesktopBrowserTarget | null>;
-  getControl?(tabId: string): Promise<BbDesktopBrowserControlState | null>;
+  cookieSyncStatus?(): Promise<DesktopBrowserCookieSyncStatus>;
+  configureCookieSync?(
+    source: DesktopBrowserCookieSyncSource | null,
+  ): Promise<DesktopBrowserCookieSyncStatus>;
+  runCookieSync?(): Promise<DesktopBrowserCookieSyncStatus>;
+  getTarget?(): Promise<OmnyoDesktopBrowserTarget | null>;
+  getControl?(tabId: string): Promise<OmnyoDesktopBrowserControlState | null>;
   releaseControl?(tabId: string): void;
   onControl?(
-    listener: (state: BbDesktopBrowserControlState) => void,
-  ): BbDesktopBrowserUnsubscribe;
+    listener: (state: OmnyoDesktopBrowserControlState) => void,
+  ): OmnyoDesktopBrowserUnsubscribe;
   onReveal?(
-    listener: (request: BbDesktopBrowserRevealRequest) => void,
-  ): BbDesktopBrowserUnsubscribe;
-  attach(request: BbDesktopBrowserAttachRequest): void;
+    listener: (request: OmnyoDesktopBrowserRevealRequest) => void,
+  ): OmnyoDesktopBrowserUnsubscribe;
+  attach(request: OmnyoDesktopBrowserAttachRequest): void;
   detach(tabId: string): void;
-  navigate(request: BbDesktopBrowserNavigateRequest): void;
+  navigate(request: OmnyoDesktopBrowserNavigateRequest): void;
   goBack(tabId: string): void;
   goForward(tabId: string): void;
   reload(tabId: string): void;
   stop(tabId: string): void;
   focus?(tabId: string): void;
-  setBounds(request: BbDesktopBrowserSetBoundsRequest): void;
-  setVisible(request: BbDesktopBrowserSetVisibleRequest): void;
-  setVisibleWithoutFocus?(request: BbDesktopBrowserSetVisibleRequest): void;
-  onState(listener: BbDesktopBrowserStateHandler): BbDesktopBrowserUnsubscribe;
+  setHostFocus?(tabId: string | null): void;
+  setBounds(request: OmnyoDesktopBrowserSetBoundsRequest): void;
+  setVisible(request: OmnyoDesktopBrowserSetVisibleRequest): void;
+  setVisibleWithoutFocus?(request: OmnyoDesktopBrowserSetVisibleRequest): void;
+  onState(
+    listener: OmnyoDesktopBrowserStateHandler,
+  ): OmnyoDesktopBrowserUnsubscribe;
   onOpenTab(
-    listener: BbDesktopBrowserOpenTabHandler,
-  ): BbDesktopBrowserUnsubscribe;
+    listener: OmnyoDesktopBrowserOpenTabHandler,
+  ): OmnyoDesktopBrowserUnsubscribe;
   onScopedOpenTab?(
-    listener: BbDesktopBrowserScopedOpenTabHandler,
-  ): BbDesktopBrowserUnsubscribe;
-  onFocus?(listener: BbDesktopBrowserFocusHandler): BbDesktopBrowserUnsubscribe;
+    listener: OmnyoDesktopBrowserScopedOpenTabHandler,
+  ): OmnyoDesktopBrowserUnsubscribe;
+  onFocus?(
+    listener: OmnyoDesktopBrowserFocusHandler,
+  ): OmnyoDesktopBrowserUnsubscribe;
   onSnapshot?(
-    listener: BbDesktopBrowserSnapshotHandler,
-  ): BbDesktopBrowserUnsubscribe;
-  findInPage?(request: BbDesktopBrowserFindInPageRequest): void;
-  stopFindInPage?(request: BbDesktopBrowserStopFindInPageRequest): void;
+    listener: OmnyoDesktopBrowserSnapshotHandler,
+  ): OmnyoDesktopBrowserUnsubscribe;
+  findInPage?(request: OmnyoDesktopBrowserFindInPageRequest): void;
+  stopFindInPage?(request: OmnyoDesktopBrowserStopFindInPageRequest): void;
   onFindResult?(
-    listener: BbDesktopBrowserFindResultHandler,
-  ): BbDesktopBrowserUnsubscribe;
+    listener: OmnyoDesktopBrowserFindResultHandler,
+  ): OmnyoDesktopBrowserUnsubscribe;
   evaluate?(
-    request: BbDesktopBrowserEvaluateRequest,
-  ): Promise<BbDesktopBrowserEvaluateResult>;
+    request: OmnyoDesktopBrowserEvaluateRequest,
+  ): Promise<OmnyoDesktopBrowserEvaluateResult>;
   onPageMessage?(
-    listener: BbDesktopBrowserPageMessageHandler,
-  ): BbDesktopBrowserUnsubscribe;
+    listener: OmnyoDesktopBrowserPageMessageHandler,
+  ): OmnyoDesktopBrowserUnsubscribe;
 }

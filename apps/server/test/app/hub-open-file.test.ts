@@ -23,6 +23,7 @@ describe("NotificationHub.notifyThreadOpen", () => {
     );
 
     expect(delivered).toBe(2);
+
     for (const socket of [viewing, other]) {
       expect(socket.messages).toHaveLength(1);
       expect(JSON.parse(socket.messages[0])).toEqual({
@@ -52,6 +53,7 @@ describe("NotificationHub.notifyThreadOpen", () => {
         "clear-spotlight",
       ),
     ).toBe(2);
+
     for (const socket of [first, second]) {
       expect(JSON.parse(socket.messages[0]!)).toEqual({
         type: "thread-pane-action",

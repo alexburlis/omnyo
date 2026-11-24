@@ -14,6 +14,7 @@ export {
   type ExperimentalHostWatchSubscription,
   type ExperimentalHostWorkerLease,
 } from "./host-contract.js";
+
 export {
   experimental_filterResolvedNativeRoots,
   experimental_nativeRootsHostContract,
@@ -26,6 +27,7 @@ export {
   type ExperimentalNativeRootsResolveInput,
   type ExperimentalNativeRootsResolveOutput,
 } from "./native-roots-contract.js";
+
 export {
   experimental_resolveClaudePluginRoots,
   experimental_resolveVendorPluginRoots,
@@ -37,6 +39,26 @@ export {
 } from "./vendor-plugin-roots.js";
 
 export { experimental_killProcessesWithCwdUnder } from "./kill-processes.js";
+
+export {
+  experimental_assertStorageAdmission,
+  type ExperimentalStorageAdmission,
+  type ExperimentalStorageAdmissionRequest,
+} from "./storage-admission.js";
+
+export {
+  experimental_inspectProcessPrivateTemps,
+  experimental_recoverProcessPrivateTemps,
+  type ExperimentalProcessPrivateTempInspection,
+  type ExperimentalProcessPrivateTempInspectOptions,
+  type ExperimentalProcessPrivateTempRecoveryOptions,
+} from "./process-private-temp.js";
+
+export {
+  inspectDirectoryProcesses as experimental_inspectDirectoryProcesses,
+  type DirectoryProcessInspection as ExperimentalDirectoryProcessInspection,
+  type DirectoryProcessInspector as ExperimentalDirectoryProcessInspector,
+} from "@omnyo/process-utils";
 
 export {
   experimental_readProcessIdentity,
@@ -51,5 +73,13 @@ export {
 export {
   sanitizeInheritedChildProcessEnv as experimental_sanitizeInheritedChildProcessEnv,
   spawnPortableOutputProcess as experimental_spawnPortableOutputProcess,
-} from "@bb/process-utils";
-export type { SanitizeInheritedChildProcessEnvArgs as ExperimentalSanitizeInheritedChildProcessEnvArgs } from "@bb/process-utils";
+} from "@omnyo/process-utils";
+
+export type { SanitizeInheritedChildProcessEnvArgs as ExperimentalSanitizeInheritedChildProcessEnvArgs } from "@omnyo/process-utils";
+
+export { runVcsProcess as experimental_runVcsProcess } from "@omnyo/process-utils";
+
+export type {
+  VcsProcessOptions as ExperimentalVcsProcessOptions,
+  VcsProcessPriority as ExperimentalVcsProcessPriority,
+} from "@omnyo/process-utils";

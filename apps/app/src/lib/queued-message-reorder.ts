@@ -1,5 +1,5 @@
-import { applyNeighborReorder } from "@bb/client-core";
-import type { ThreadQueuedMessage } from "@bb/domain";
+import { applyNeighborReorder } from "@omnyo/client-core";
+import type { ThreadQueuedMessage } from "@omnyo/domain";
 
 interface QueuedMessageReorderItem {
   id: string;
@@ -34,10 +34,13 @@ export function collectLeadQueuedMessageGroupIds(
   queuedMessages: readonly ThreadQueuedMessage[],
 ): string[] {
   const ids: string[] = [];
+
   for (const queuedMessage of queuedMessages) {
     ids.push(queuedMessage.id);
+
     if (!queuedMessage.groupWithNext) break;
   }
+
   return ids;
 }
 
@@ -56,6 +59,7 @@ export function preserveLeadQueuedMessageGroupAfterReorder({
   }
 
   const originalLeadGroupIdSet = new Set(originalLeadGroupIds);
+
   const preservesLeadGroup = queuedMessages
     .slice(0, originalLeadGroupIds.length)
     .every((queuedMessage) => originalLeadGroupIdSet.has(queuedMessage.id));

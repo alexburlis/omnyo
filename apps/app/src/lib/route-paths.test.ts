@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PERSONAL_PROJECT_ID } from "@bb/domain";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
 import {
   getPluginConfigurationRoutePath,
   getPluginDetailRoutePath,
@@ -18,6 +18,7 @@ import {
   isToolsRoutePath,
   LEGACY_AUTOMATION_DETAIL_ROUTE_PATH,
   LEGACY_AUTOMATIONS_ROUTE_PATH,
+  isWorkspaceRoutePath,
   resolveRouteHref,
 } from "./route-paths";
 
@@ -28,8 +29,8 @@ describe("route path helpers", () => {
       const suffix = "?from=bookmark#checkouts";
       expect(
         resolveRouteHref({
-          currentOrigin: "https://bb.example",
-          href: `https://bb.example${path}${suffix}`,
+          currentOrigin: "https://omnyo.example",
+          href: `https://omnyo.example${path}${suffix}`,
         }),
       ).toEqual({ path: `${path}${suffix}` });
     },
@@ -75,6 +76,30 @@ describe("route path helpers", () => {
     expect(isRoutePath({ path: "/settings" })).toBe(true);
   });
 
+  it.each([
+    ["/", true],
+    ["/projects/proj_standard", true],
+    ["/threads/thr_standard?panel=files#row-1", true],
+    ["/projects/proj_standard/threads/thr_standard", true],
+    ["/plugins/github/panel", true],
+    ["/plugins/github/panel/work/today.md", true],
+    ["/plugins/automations/automations", true],
+    ["/unknown-route", true],
+    ["/settings", false],
+    ["/settings/machines/host_1", false],
+    ["/settings/plugins/github", false],
+    ["/extensions/plugins", false],
+    ["/tools/automations", false],
+    ["/archived", false],
+    ["/projects/proj_standard/archived", false],
+    ["/projects/proj_standard/settings", false],
+    ["/plugins", false],
+    ["/plugins/github", false],
+    ["/auth/callback", false],
+  ])("classifies %s for workspace loading as %s", (path, workspace) => {
+    expect(isWorkspaceRoutePath(path)).toBe(workspace);
+  });
+
   it("builds and recognizes canonical Plugins and Skills routes", () => {
     expect(getSkillsRoutePath()).toBe("/skills");
     expect(
@@ -104,6 +129,7 @@ describe("route path helpers", () => {
     expect(isSkillsRoutePath("/skills/library/skill_abc123")).toBe(true);
     expect(isSkillsRoutePath("/extensions/skills")).toBe(false);
     expect(isSkillsRoutePath("/plugins")).toBe(false);
+
     for (const path of [
       "/plugins",
       "/plugins/github",
@@ -192,8 +218,8 @@ describe("route path helpers", () => {
   it("resolves same-origin hrefs to router paths", () => {
     expect(
       resolveRouteHref({
-        currentOrigin: "https://bb.local",
-        href: "https://bb.local/projects/proj_standard/threads/thr_standard?q=1",
+        currentOrigin: "https://omnyo.local",
+        href: "https://omnyo.local/projects/proj_standard/threads/thr_standard?q=1",
       }),
     ).toEqual({
       path: "/projects/proj_standard/threads/thr_standard?q=1",
@@ -203,13 +229,13 @@ describe("route path helpers", () => {
   it("rejects external and protocol-relative route-shaped hrefs", () => {
     expect(
       resolveRouteHref({
-        currentOrigin: "https://bb.local",
+        currentOrigin: "https://omnyo.local",
         href: "https://example.test/projects/proj_standard/threads/thr_standard",
       }),
     ).toBeNull();
     expect(
       resolveRouteHref({
-        currentOrigin: "https://bb.local",
+        currentOrigin: "https://omnyo.local",
         href: "//example.test/projects/proj_standard/threads/thr_standard",
       }),
     ).toBeNull();
@@ -218,13 +244,13 @@ describe("route path helpers", () => {
   it("rejects fragment-only and query-only hrefs", () => {
     expect(
       resolveRouteHref({
-        currentOrigin: "https://bb.local",
+        currentOrigin: "https://omnyo.local",
         href: "#timeline-row",
       }),
     ).toBeNull();
     expect(
       resolveRouteHref({
-        currentOrigin: "https://bb.local",
+        currentOrigin: "https://omnyo.local",
         href: "?panel=files",
       }),
     ).toBeNull();

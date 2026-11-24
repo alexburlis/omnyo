@@ -17,7 +17,9 @@ function subscribe<T>(
   const listener = (_event: IpcRendererEvent, payload: T): void => {
     handler(payload);
   };
+
   ipcRenderer.on(channel, listener);
+
   return () => {
     ipcRenderer.removeListener(channel, listener);
   };
@@ -38,4 +40,4 @@ const logViewerApi: LogViewerApi = {
   },
 };
 
-contextBridge.exposeInMainWorld("bbLogViewer", logViewerApi);
+contextBridge.exposeInMainWorld("omnyoLogViewer", logViewerApi);

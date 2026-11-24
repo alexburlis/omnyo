@@ -37,13 +37,17 @@ interface StatusGroup {
 
 export function groupTasksByStatus(tasks: readonly Task[]): StatusGroup[] {
   const byStatus = new Map<TaskStatus, Task[]>();
+
   for (const task of tasks) {
     const bucket = byStatus.get(task.status);
+
     if (bucket) bucket.push(task);
     else byStatus.set(task.status, [task]);
   }
+
   return TASK_STATUSES.flatMap((status) => {
     const bucket = byStatus.get(status);
+
     return bucket ? [{ status, tasks: bucket }] : [];
   });
 }
@@ -58,8 +62,10 @@ export function labelFilterOptions(
   labels: readonly Label[],
 ): LabelFilterOption[] {
   const byName = new Map<string, LabelFilterOption>();
+
   for (const label of labels) {
     const existing = byName.get(label.name);
+
     if (existing) existing.labelIds.push(label.id);
     else
       byName.set(label.name, {
@@ -68,6 +74,7 @@ export function labelFilterOptions(
         labelIds: [label.id],
       });
   }
+
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -76,6 +83,7 @@ export function selectedLabelIds(
   selectedNames: readonly string[],
 ): string[] {
   const selected = new Set(selectedNames);
+
   return options
     .filter((option) => selected.has(option.name))
     .flatMap((option) => option.labelIds);
@@ -83,11 +91,29 @@ export function selectedLabelIds(
 
 export function formatDueDate(dueDate: string, today = new Date()): string {
   const date = new Date(`${dueDate}T00:00:00`);
+
   return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     ...(date.getFullYear() === today.getFullYear() ? {} : { year: "numeric" }),
   });
+}
+
+export type DueUrgency = "overdue" | "today" | "upcoming";
+
+export function dueUrgency(
+  dueDate: string,
+  status: TaskStatus,
+  today = new Date(),
+): DueUrgency {
+  if (status === "done" || status === "canceled") return "upcoming";
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  const todayIso = `${today.getFullYear()}-${month}-${day}`;
+
+  if (dueDate < todayIso) return "overdue";
+
+  return dueDate === todayIso ? "today" : "upcoming";
 }
 
 export function activeWorkLabel(
@@ -98,6 +124,7 @@ export function activeWorkLabel(
       ? "Agent starting"
       : "Agent working";
   }
+
   return `${threads.length} agents working`;
 }
 
@@ -113,6 +140,7 @@ export function partitionLabels(
   if (labels.length <= maxVisible) {
     return { visible: [...labels], hidden: [] };
   }
+
   return {
     visible: labels.slice(0, maxVisible),
     hidden: labels.slice(maxVisible),
@@ -124,6 +152,7 @@ export function localIsoDate(daysFromNow: number): string {
   date.setDate(date.getDate() + daysFromNow);
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
+
   return `${date.getFullYear()}-${month}-${day}`;
 }
 

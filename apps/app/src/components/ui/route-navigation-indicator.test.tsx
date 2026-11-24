@@ -15,6 +15,7 @@ afterEach(() => {
 
 function Probe({ busy }: { busy: boolean }) {
   const visible = useDelayedBusyIndicator(busy);
+
   return <div data-testid="probe">{visible ? "visible" : "hidden"}</div>;
 }
 

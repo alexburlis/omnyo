@@ -1,16 +1,18 @@
+import { getSettingsRouteIntent } from "@/views/settings-view-split";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { arrayMove } from "@dnd-kit/sortable";
-import type { Host } from "@bb/domain";
-import type { ProjectWithThreadsResponse } from "@bb/server-contract";
-import { Button } from "@bb/shared-ui/button";
-import "@bb/shared-ui/icon-extended";
-import { Icon } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import type { Host } from "@omnyo/domain";
+import type { ProjectWithThreadsResponse } from "@omnyo/server-contract";
+import { Button } from "@omnyo/shared-ui/button";
+import "@omnyo/shared-ui/icon-extended";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { LIST_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import {
   ResourceOverflowMenu,
   ResourceRowDetailChevron,
-} from "@bb/shared-ui/resource-list";
+} from "@omnyo/shared-ui/resource-list";
 import { ProjectPathDialog } from "@/components/dialogs/ProjectPathDialog";
 import {
   ProjectDeleteDialog,
@@ -40,20 +42,23 @@ import {
 } from "./sortable-settings-rows";
 
 const PROJECTS_SECTION_DESCRIPTION =
-  "Repositories bb can work in. Drag to change the order projects appear in the sidebar.";
+  "Repositories Omnyo can work in. Drag to change the order projects appear in the sidebar.";
 
 export function formatGitRemote(url: string): string {
   const sshMatch = /^[^@]+@([^:]+):(.+?)(?:\.git)?$/.exec(url);
+
   if (sshMatch) return `${sshMatch[1]}/${sshMatch[2]}`;
+
   try {
     const parsed = new URL(url);
+
     return `${parsed.host}${parsed.pathname.replace(/\.git$/, "")}`;
   } catch {
     return url;
   }
 }
 
-export interface ProjectReorderRequest {
+interface ProjectReorderRequest {
   order: string[];
   previousProjectId: string | null;
   nextProjectId: string | null;
@@ -67,8 +72,10 @@ export function buildProjectReorderRequest(
   if (activeId === overId) return null;
   const from = ids.indexOf(activeId);
   const to = ids.indexOf(overId);
+
   if (from === -1 || to === -1) return null;
   const order = arrayMove([...ids], from, to);
+
   return {
     order,
     previousProjectId: order[to - 1] ?? null,
@@ -92,14 +99,18 @@ function summarizeMachines(
 ): ProjectSummary {
   let configuredMachineCount = 0;
   let onlineMachineCount = 0;
+
   for (const hostId of new Set(
     project.sources.map((source) => source.hostId),
   )) {
     const host = hostById.get(hostId);
+
     if (!host) continue;
     configuredMachineCount += 1;
+
     if (host.status === "connected") onlineMachineCount += 1;
   }
+
   return {
     configuredMachineCount,
     onlineMachineCount,
@@ -109,7 +120,9 @@ function summarizeMachines(
 
 function machineLabel(summary: ProjectSummary): string {
   if (summary.configuredMachineCount === 0) return "Not set up on any machine";
+
   if (summary.totalMachineCount <= 1) return "1 machine";
+
   return `${summary.configuredMachineCount} of ${summary.totalMachineCount} machines`;
 }
 
@@ -128,17 +141,21 @@ function SortableProjectRow({
   onRename,
   onDelete,
 }: SortableProjectRowProps) {
-  const { setNodeRef, style, isDragging, handle } = useSortableSettingsRow({
+  const { setNodeRef, style, handle, liftClassName } = useSortableSettingsRow({
     id: project.id,
     disabled: dragDisabled,
     label: project.name,
   });
+
   const detailPath = getSettingsProjectRoutePath(project.id);
+
   const remoteLabel =
     project.gitRemoteUrl === null
       ? null
       : formatGitRemote(project.gitRemoteUrl);
+
   const needsSetup = summary.configuredMachineCount === 0;
+
   const allOffline =
     summary.configuredMachineCount > 0 && summary.onlineMachineCount === 0;
 
@@ -146,18 +163,19 @@ function SortableProjectRow({
     <SettingsRow
       ref={setNodeRef}
       style={style}
-      className={cn(
-        "items-start",
-        isDragging && "relative z-10 rounded-md bg-card opacity-90 shadow-lift",
-      )}
+      className={cn("items-start", liftClassName)}
     >
       {handle}
       <div
         data-project-row
-        className="group -mx-2 flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-state-hover focus-within:bg-state-hover"
+        className={cn(
+          "group -mx-2 flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-1.5 hover:bg-state-hover focus-within:bg-state-hover",
+          LIST_HOVER_TRANSITION,
+        )}
       >
         <Link
           to={detailPath}
+          {...getSettingsRouteIntent(detailPath)}
           aria-label={`Open ${project.name} settings`}
           className="min-w-0 flex-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -173,7 +191,7 @@ function SortableProjectRow({
               {needsSetup ? <SettingsBadge>needs setup</SettingsBadge> : null}
               {allOffline ? <SettingsBadge>offline</SettingsBadge> : null}
             </div>
-            <div className="min-w-0 space-y-0.5 text-xs text-subtle-foreground/75">
+            <div className="min-w-0 space-y-0.5 text-xs text-subtle-foreground">
               {remoteLabel === null ? (
                 <div className="italic">No git remote</div>
               ) : (
@@ -219,35 +237,44 @@ export function ProjectsSettingsSection() {
   const deleteProject = useDeleteProject();
   const reorderProject = useReorderProject();
   const quickCreateProject = useQuickCreateProject();
+
   const [renameTarget, setRenameTarget] =
     useState<ProjectRenameDialogTarget | null>(null);
+
   const [deleteTarget, setDeleteTarget] =
     useState<ProjectDeleteDialogTarget | null>(null);
+
   const [optimisticOrder, setOptimisticOrder] = useState<string[] | null>(null);
 
   const serverProjects = sidebarNavigationQuery.data?.projects;
   useEffect(() => {
     setOptimisticOrder(null);
   }, [serverProjects]);
+
   const projects = useMemo(() => {
     if (!serverProjects) return undefined;
+
     if (!optimisticOrder) return serverProjects;
     const byId = new Map(serverProjects.map((entry) => [entry.id, entry]));
     const ordered = optimisticOrder.flatMap((id) => byId.get(id) ?? []);
     const seen = new Set(optimisticOrder);
+
     return [
       ...ordered,
       ...serverProjects.filter((entry) => !seen.has(entry.id)),
     ];
   }, [optimisticOrder, serverProjects]);
+
   const projectIds = useMemo(
     () => projects?.map((project) => project.id) ?? [],
     [projects],
   );
+
   const hosts = useMemo(
     () => selectHosts(hostsQuery.data, "persistent"),
     [hostsQuery.data],
   );
+
   const hostById = useMemo(
     () => new Map<string, Host>(hosts.map((host) => [host.id, host])),
     [hosts],
@@ -257,6 +284,7 @@ export function ProjectsSettingsSection() {
 
   const handleReorder = (activeId: string, overId: string): void => {
     const request = buildProjectReorderRequest(projectIds, activeId, overId);
+
     if (request === null) return;
     setOptimisticOrder(request.order);
     reorderProject.mutate(

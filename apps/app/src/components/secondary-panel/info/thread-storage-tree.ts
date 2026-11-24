@@ -1,4 +1,4 @@
-import type { WorkspaceFile } from "@bb/server-contract";
+import type { WorkspaceFile } from "@omnyo/server-contract";
 
 export interface ThreadStorageFolderNode {
   kind: "folder";
@@ -52,7 +52,9 @@ function finalizeChildren(folder: MutableFolder): ThreadStorageTreeNode[] {
   const folders = [...folder.folders.values()]
     .map(finalizeFolder)
     .sort(compareNames);
+
   const files = [...folder.files].sort(compareNames);
+
   return [...folders, ...files];
 }
 
@@ -60,13 +62,16 @@ function finalizeFolder(folder: MutableFolder): ThreadStorageFolderNode {
   let current = folder;
   let name = folder.name;
   const chainPaths = [folder.path];
+
   while (current.files.length === 0 && current.folders.size === 1) {
     const [onlyChild] = current.folders.values();
+
     if (!onlyChild) break;
     current = onlyChild;
     name = `${name}/${onlyChild.name}`;
     chainPaths.push(current.path);
   }
+
   return {
     kind: "folder",
     path: current.path,
@@ -85,13 +90,17 @@ export function buildThreadStorageTree(
     folders: new Map(),
     files: [],
   };
+
   for (const file of files) {
     const segments = file.path.split("/").filter((segment) => segment !== "");
     const fileName = segments.pop();
+
     if (fileName === undefined) continue;
     let folder = root;
+
     for (const segment of segments) {
       let child = folder.folders.get(segment);
+
       if (!child) {
         child = {
           path: folder.path === "" ? segment : `${folder.path}/${segment}`,
@@ -101,15 +110,19 @@ export function buildThreadStorageTree(
         };
         folder.folders.set(segment, child);
       }
+
       folder = child;
     }
+
     folder.files.push({ kind: "file", path: file.path, name: fileName });
   }
+
   return finalizeChildren(root);
 }
 
 export function threadStorageAncestorPaths(path: string): string[] {
   const segments = path.split("/").filter((segment) => segment !== "");
+
   return segments
     .slice(0, -1)
     .map((_, index) => segments.slice(0, index + 1).join("/"));
@@ -121,17 +134,22 @@ export function flattenThreadStorageNode(
   depth = 0,
 ): ThreadStorageTreeRow[] {
   const rows: ThreadStorageTreeRow[] = [{ kind: "node", node, depth }];
+
   if (node.kind !== "folder" || !options.isExpanded(node.path)) return rows;
   const { children } = node;
+
   const capped =
     children.length > options.childLimit + 1 &&
     !options.showsAllChildren(node.path);
+
   const visibleChildren = capped
     ? children.slice(0, options.childLimit)
     : children;
+
   for (const child of visibleChildren) {
     rows.push(...flattenThreadStorageNode(child, options, depth + 1));
   }
+
   if (capped) {
     rows.push({
       kind: "more",
@@ -140,5 +158,6 @@ export function flattenThreadStorageNode(
       depth: depth + 1,
     });
   }
+
   return rows;
 }

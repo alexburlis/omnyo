@@ -55,10 +55,12 @@ describe("PluginOverviewMarkdown", () => {
       "https://example.com/docs",
       "https://example.com/auto",
     ]);
+
     for (const link of links) {
       expect(link.getAttribute("target")).toBe("_blank");
       expect(link.getAttribute("rel")).toBe("noopener noreferrer");
     }
+
     expect(container.textContent).toContain("plain");
     expect(container.textContent).toContain("script");
     expect(container.textContent).toContain("relative");

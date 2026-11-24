@@ -1,7 +1,7 @@
 import type {
   PluginCatalogResolvedSource,
   PluginInstallJob,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import {
   queryOptions,
   useMutation,
@@ -58,6 +58,7 @@ export function startCatalogPluginInstall(
 
 export function useCancelPluginInstallJob() {
   const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: (jobId: string) =>
       createPluginsClient(fetch).installJobs.cancel({ jobId }),
@@ -81,6 +82,7 @@ export function useCatalogEntryInstallJob(entry: {
             job.target.entryId === entry.entryId,
         ) ?? null,
   });
+
   return data ?? null;
 }
 
@@ -90,5 +92,6 @@ export function usePluginInstallJob(jobId: string | null) {
     enabled: jobId !== null,
     select: (jobs) => jobs.find((job) => job.id === jobId) ?? null,
   });
+
   return data ?? null;
 }

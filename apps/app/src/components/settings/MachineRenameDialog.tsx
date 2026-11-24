@@ -1,14 +1,14 @@
 import { useState, type FormEvent, type RefObject } from "react";
-import type { Host } from "@bb/domain";
-import { Button } from "@bb/shared-ui/button";
+import type { Host } from "@omnyo/domain";
+import { Button } from "@omnyo/shared-ui/button";
 import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@bb/shared-ui/dialog";
-import { Input } from "@bb/shared-ui/input";
-import { RenameDialog } from "@bb/shared-ui/rename-dialog";
+} from "@omnyo/shared-ui/dialog";
+import { Input } from "@omnyo/shared-ui/input";
+import { RenameDialog } from "@omnyo/shared-ui/rename-dialog";
 
 const HOST_NAME_MAX_LENGTH = 100;
 
@@ -62,8 +62,10 @@ function MachineRenameDialogContent({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
     if (pending) return;
     const trimmed = nextName.trim();
+
     if (trimmed.length === 0) return;
     onRename(target, trimmed);
   };

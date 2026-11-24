@@ -97,4 +97,38 @@ describe("provider event schema", () => {
       parentToolCallId: "tool-call-123",
     });
   });
+
+  it("accepts token usage across protocol 243 daemons and servers", () => {
+    const breakdown = {
+      totalTokens: 150_000,
+      inputTokens: 10,
+      cachedInputTokens: 149_990,
+      outputTokens: 0,
+      reasoningOutputTokens: 0,
+    };
+
+    const event = (tokenUsage: Record<string, unknown>) =>
+      threadEventSchema.parse({
+        type: "thread/tokenUsage/updated",
+        threadId: "thr_123",
+        providerThreadId: "provider-thread-123",
+        scope: turnScope("turn_123"),
+        tokenUsage,
+      });
+
+    const usage = {
+      total: breakdown,
+      last: breakdown,
+      modelContextWindow: 200_000,
+    };
+
+    expect(event(usage)).toMatchObject({ tokenUsage: usage });
+    expect(event(usage)).not.toHaveProperty("tokenUsage.promptCacheTtlMs");
+    expect(event({ ...usage, promptCacheTtlMs: 3_600_000 })).toMatchObject({
+      tokenUsage: { promptCacheTtlMs: 3_600_000 },
+    });
+    expect(event({ ...usage, futureField: true })).not.toHaveProperty(
+      "tokenUsage.futureField",
+    );
+  });
 });

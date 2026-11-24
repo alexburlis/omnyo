@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { CompactViewportOverrideProvider } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, expect, it } from "vitest";
@@ -15,6 +15,7 @@ import {
 } from "./useResponsiveGitDiffPanelDisplay";
 
 const NARROW_WIDTH_PX = 500;
+
 const WIDE_WIDTH_PX = 900;
 
 afterEach(() => {

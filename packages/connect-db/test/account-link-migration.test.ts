@@ -26,6 +26,7 @@ function freshDb() {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
   migrate(sqlite, connectDbMigrationFiles());
+
   return { sqlite, db: drizzle(sqlite, { schema }) };
 }
 
@@ -47,6 +48,7 @@ describe("0006 account link and AI usage", () => {
   it("keeps existing connect codes while making the owner nullable", () => {
     const sqlite = new Database(":memory:");
     sqlite.pragma("foreign_keys = ON");
+
     try {
       const files = connectDbMigrationFiles();
       migrate(
@@ -104,8 +106,10 @@ describe("0006 account link and AI usage", () => {
 
   it("stores unowned server-link rows and rejects duplicate device codes", () => {
     const { sqlite, db } = freshDb();
+
     try {
       const now = new Date();
+
       const row = {
         purpose: "server-link" as const,
         deviceCodeHash: "hash-1",
@@ -113,6 +117,7 @@ describe("0006 account link and AI usage", () => {
         expiresAt: now,
         createdAt: now,
       };
+
       db.insert(connectCode)
         .values({ code: "AAAA-AAAA", ...row })
         .run();
@@ -136,6 +141,7 @@ describe("0006 account link and AI usage", () => {
 
   it("keys per-user usage by user and UTC day and cascades with the user", () => {
     const { sqlite, db } = freshDb();
+
     try {
       seedUser(db, "u1");
       db.insert(aiUsageDay).values({ userId: "u1", day: "2026-09-22" }).run();
@@ -166,12 +172,14 @@ describe("0006 account link and AI usage", () => {
 
   it("never stores prompt or completion text columns", () => {
     const { sqlite } = freshDb();
+
     try {
       const columns = (
         sqlite.prepare("PRAGMA table_info(ai_request_log)").all() as {
           name: string;
         }[]
       ).map((column) => column.name);
+
       expect(columns).toEqual([
         "id",
         "user_id",
@@ -193,6 +201,7 @@ describe("0006 account link and AI usage", () => {
 describe("resolveServerCredential", () => {
   it("resolves live credentials and rejects revoked or unknown ones", async () => {
     const { sqlite, db } = freshDb();
+
     try {
       seedUser(db, "u1");
       const now = new Date();
@@ -244,14 +253,14 @@ describe("serverCredentialFromHeaders", () => {
     ).toBe("bbcred_a");
     expect(
       serverCredentialFromHeaders(
-        new Headers({ "x-bb-connect-machine": "bbcred_b" }),
+        new Headers({ "x-omnyo-connect-machine": "bbcred_b" }),
       ),
     ).toBe("bbcred_b");
     expect(
       serverCredentialFromHeaders(
         new Headers({
           authorization: "Bearer bbcred_a",
-          "x-bb-connect-machine": "bbcred_a",
+          "x-omnyo-connect-machine": "bbcred_a",
         }),
       ),
     ).toBe("bbcred_a");

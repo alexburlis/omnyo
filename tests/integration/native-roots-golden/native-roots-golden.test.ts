@@ -7,6 +7,7 @@ const applyStubbedEnv: ApplyEnv = (env) => {
   for (const [key, value] of Object.entries(env)) {
     vi.stubEnv(key, value);
   }
+
   return () => vi.unstubAllEnvs();
 };
 

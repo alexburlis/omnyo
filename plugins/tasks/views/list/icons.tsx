@@ -28,7 +28,9 @@ export function StatusIcon({
       {...(dashed ? { strokeDasharray: "1.8 2" } : {})}
     />
   );
+
   const disc = <circle cx="7" cy="7" r="6" fill="currentColor" />;
+
   return (
     <svg
       viewBox="0 0 14 14"
@@ -117,12 +119,15 @@ export function PriorityIcon({
       </svg>
     );
   }
+
   const active = ACTIVE_BARS[priority];
+
   const bars = [
     { x: 1.5, y: 8, height: 5 },
     { x: 5.5, y: 5, height: 8 },
     { x: 9.5, y: 2, height: 11 },
   ];
+
   return (
     <svg
       viewBox="0 0 14 14"

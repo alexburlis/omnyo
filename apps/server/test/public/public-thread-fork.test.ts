@@ -6,10 +6,11 @@ import {
   getEnvironment,
   getThread,
   listEvents,
+  listQueuedThreadMessagesForApi,
   projectAttachmentThreads,
   threads,
   setQueuedThreadMessageGroupBoundary,
-} from "@bb/db";
+} from "@omnyo/db";
 import {
   PERSONAL_PROJECT_ID,
   encodeClientTurnRequestIdNumber,
@@ -19,14 +20,15 @@ import {
   type ClientTurnRequestId,
   type EnvironmentProviderSelection,
   type PromptInput,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import {
   threadResponseSchema,
   threadTimelineResponseSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { eq } from "drizzle-orm";
-import { createDeferredPromise } from "@bb/test-helpers";
+import { createDeferredPromise } from "@omnyo/test-helpers";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { storeAttachment } from "../../src/services/projects/attachments.js";
 import * as placement from "../../src/services/threads/thread-environment-placement.js";
 import { appendClientTurnEventInTransaction } from "../../src/services/threads/thread-events.js";
@@ -54,7 +56,11 @@ import {
   seedThreadRuntimeState,
   seedTurnStarted,
 } from "../helpers/seed.js";
-import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
+import {
+  startTestServer,
+  withTestHarness,
+  type TestAppHarness,
+} from "../helpers/test-app.js";
 
 function seedForkSource(
   harness: TestAppHarness,
@@ -73,10 +79,12 @@ function seedForkSource(
   } = {},
 ) {
   const { host } = seedHostSession(harness.deps);
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: "/tmp/public-thread-fork",
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
@@ -91,6 +99,7 @@ function seedForkSource(
             args.environmentProvider(host).selection,
         }),
   });
+
   const sourceThread = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
@@ -99,6 +108,7 @@ function seedForkSource(
       ? {}
       : { titleFallback: args.titleFallback }),
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     ...(args.model === undefined ? {} : { model: args.model }),
@@ -119,21 +129,25 @@ function seedForkSource(
     threadId: sourceThread.id,
     turnId: "turn-fork-source",
   });
+
   return { environment, host, project, sourceThread };
 }
 
 function seedPersonalDirectoryForkSource(harness: TestAppHarness) {
   const { host } = seedHostSession(harness.deps);
   ensurePersonalProject(harness.db);
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     path: "/tmp/personal-switched-directory",
     projectId: PERSONAL_PROJECT_ID,
   });
+
   const sourceThread = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: PERSONAL_PROJECT_ID,
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     permissionMode: "full",
@@ -147,6 +161,7 @@ function seedPersonalDirectoryForkSource(harness: TestAppHarness) {
     threadId: sourceThread.id,
     turnId: "turn-personal-directory-source",
   });
+
   return { environment, sourceThread };
 }
 
@@ -169,31 +184,39 @@ async function createIdleSeededFork(
   },
 ) {
   const { sourceThread } = seedForkSource(harness);
+
   const response = await postFork(harness, {
     sourceThreadId: sourceThread.id,
     agentContextSeed: [args.seed],
   });
+
   expect(response.status).toBe(201);
   const fork = threadResponseSchema.parse(await readJson(response));
+
   const start = await waitForQueuedCommand(
     harness,
     ({ command }) =>
       command.type === "thread.start" && command.threadId === fork.id,
   );
+
   if (start.command.type !== "thread.start") {
     throw new Error("Expected thread.start");
   }
+
   expect(start.command.input).toEqual([]);
   await reportQueuedCommandSuccess(harness, start, {
     providerThreadId: args.providerThreadId,
   });
   const thread = getThread(harness.db, fork.id);
+
   const environment = thread?.environmentId
     ? getEnvironment(harness.db, thread.environmentId)
     : null;
+
   if (!thread || !environment) {
     throw new Error("Expected fork environment");
   }
+
   return { environment, fork, sourceThread, start, thread };
 }
 
@@ -206,21 +229,26 @@ describe("public thread fork route", () => {
         const entered = createDeferredPromise<void>();
         const release = createDeferredPromise<void>();
         const resolvePlacement = placement.resolveThreadEnvironmentPlacement;
+
         const spy = vi
           .spyOn(placement, "resolveThreadEnvironmentPlacement")
           .mockImplementationOnce(async (...args) => {
             const result = await resolvePlacement(...args);
             entered.resolve();
             await release.promise;
+
             return result;
           });
+
         try {
           const pending = postFork(harness, {
             sourceThreadId: sourceThread.id,
             visibility: "hidden",
             input: textInput("Side chat started while source was live"),
           });
+
           await entered.promise;
+
           const response = await harness.app.request(
             `/api/v1/threads/${sourceThread.id}${action === "archive" ? "/archive-all" : ""}`,
             {
@@ -229,6 +257,7 @@ describe("public thread fork route", () => {
               body: JSON.stringify({ childThreadsConfirmed: true }),
             },
           );
+
           expect(response.status).toBe(200);
           release.resolve();
           const result = await pending;
@@ -249,20 +278,25 @@ describe("public thread fork route", () => {
     async (action) => {
       await withTestHarness(async (harness) => {
         const { sourceThread } = seedForkSource(harness);
+
         const owner = seedThread(harness.deps, {
           projectId: sourceThread.projectId,
         });
+
         const entered = createDeferredPromise<void>();
         const release = createDeferredPromise<void>();
         const resolvePlacement = placement.resolveThreadEnvironmentPlacement;
+
         const spy = vi
           .spyOn(placement, "resolveThreadEnvironmentPlacement")
           .mockImplementationOnce(async (...args) => {
             const result = await resolvePlacement(...args);
             entered.resolve();
             await release.promise;
+
             return result;
           });
+
         try {
           const pending = postFork(harness, {
             sourceThreadId: sourceThread.id,
@@ -270,7 +304,9 @@ describe("public thread fork route", () => {
             visibility: "hidden",
             input: textInput("Side chat started while source was live"),
           });
+
           await entered.promise;
+
           const response = await harness.app.request(
             `/api/v1/threads/${owner.id}${action === "archive" ? "/archive-all" : ""}`,
             {
@@ -279,6 +315,7 @@ describe("public thread fork route", () => {
               body: JSON.stringify({ childThreadsConfirmed: true }),
             },
           );
+
           expect(response.status).toBe(200);
           release.resolve();
           const result = await pending;
@@ -321,16 +358,20 @@ describe("public thread fork route", () => {
       expect(getThread(harness.db, fork.id)?.environmentId).toBe(
         environment.id,
       );
+
       const queued = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" && command.threadId === fork.id,
       );
+
       if (queued.command.type !== "thread.start") {
         throw new Error("Expected thread.start");
       }
+
       expect(queued.command.fork).toEqual({
         sourceProviderThreadId: "provider-personal-directory-source",
+        restoreArchivedSource: true,
       });
     });
   });
@@ -338,10 +379,12 @@ describe("public thread fork route", () => {
   it("rejects a new environment on another host before provisioning", async () => {
     await withTestHarness(async (harness) => {
       const { environment, project, sourceThread } = seedForkSource(harness);
+
       const { host: otherHost } = seedHostSession(harness.deps, {
         id: "host-other",
         name: "Other Host",
       });
+
       createProjectSource(harness.db, harness.hub, {
         hostId: otherHost.id,
         path: "/tmp/public-thread-fork-other",
@@ -373,6 +416,7 @@ describe("public thread fork route", () => {
   it("reuses a requested environment on the source host", async () => {
     await withTestHarness(async (harness) => {
       const { host, project, sourceThread } = seedForkSource(harness);
+
       const targetEnvironment = seedEnvironment(harness.deps, {
         hostId: host.id,
         path: "/tmp/public-thread-fork-target",
@@ -398,8 +442,10 @@ describe("public thread fork route", () => {
   it("creates a requested personal environment after a directory switch", async () => {
     await withTestHarness(async (harness) => {
       const workspacePath = "/tmp/personal-isolated-fork-workspace";
+
       const { environment, sourceThread } =
         seedPersonalDirectoryForkSource(harness);
+
       const provider = installFakePersonalWorkspaceProvider(() => ({
         action: "ready",
         environment: {
@@ -433,17 +479,21 @@ describe("public thread fork route", () => {
         ({ command }) =>
           command.type === "thread.start" && command.threadId === fork.id,
       );
+
       if (start.command.type !== "thread.start") {
         throw new Error("Expected thread.start");
       }
+
       const forkEnvironment = getEnvironment(
         harness.db,
         getThread(harness.db, fork.id)?.environmentId ?? "",
       );
+
       expect(forkEnvironment?.path).toBe(workspacePath);
       expect(forkEnvironment?.status).toBe("ready");
       expect(start.command.fork).toEqual({
         sourceProviderThreadId: "provider-personal-directory-source",
+        restoreArchivedSource: true,
       });
     });
   });
@@ -467,17 +517,21 @@ describe("public thread fork route", () => {
           sourceThreadId: sourceThread.id,
           visibility: "visible",
         });
+
         const queued = await waitForQueuedCommand(
           harness,
           ({ command }) =>
             command.type === "thread.start" && command.threadId === fork.id,
         );
+
         if (queued.command.type !== "thread.start") {
           throw new Error("Expected thread.start");
         }
+
         expect(queued.command.input).toEqual([]);
         expect(queued.command.fork).toEqual({
           sourceProviderThreadId: "provider-fork-source",
+          restoreArchivedSource: true,
         });
       });
     },
@@ -539,6 +593,7 @@ describe("public thread fork route", () => {
           }),
         ),
       );
+
       const hidden = threadResponseSchema.parse(
         await readJson(
           await postFork(harness, {
@@ -576,6 +631,7 @@ describe("public thread fork route", () => {
         threadId: sourceThread.id,
         turnId: "turn-later-source",
       });
+
       const input = [
         { type: "text" as const, text: "Continue here", mentions: [] },
       ];
@@ -588,18 +644,22 @@ describe("public thread fork route", () => {
 
       expect(response.status).toBe(201);
       const fork = threadResponseSchema.parse(await readJson(response));
+
       const queued = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" && command.threadId === fork.id,
       );
+
       if (queued.command.type !== "thread.start") {
         throw new Error("Expected thread.start");
       }
+
       expect(queued.command.input).toEqual(input);
       expect(queued.command.fork).toEqual({
         sourceProviderThreadId: "provider-fork-source",
         sourceProviderCheckpointId: "checkpoint-fork-source",
+        restoreArchivedSource: true,
       });
     });
   });
@@ -612,6 +672,7 @@ describe("public thread fork route", () => {
         mentions: [],
         visibility: "agent-only" as const,
       };
+
       const { fork, sourceThread, start } = await createIdleSeededFork(
         harness,
         {
@@ -619,19 +680,24 @@ describe("public thread fork route", () => {
           providerThreadId: "provider-seeded-fork",
         },
       );
+
       const requested = listEvents(harness.db, { threadId: fork.id }).find(
         (event) => event.type === "client/turn/requested",
       );
+
       expect(requested).toBeDefined();
+
       const requestData = turnRequestEventDataSchema.parse(
         JSON.parse(requested?.data ?? "null"),
       );
+
       expect(requestData).toMatchObject({
         initiator: "agent",
         input: [seed],
         senderThreadId: sourceThread.id,
       });
       const firstInput = textInput("Explain the selected message");
+
       const sendResponse = await harness.app.request(
         `/api/v1/threads/${fork.id}/send`,
         {
@@ -644,21 +710,26 @@ describe("public thread fork route", () => {
           }),
         },
       );
+
       expect(sendResponse.status).toBe(200);
+
       const firstTurn = await waitForQueuedCommandAfter(
         harness,
         start.row.cursor,
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === fork.id,
       );
+
       if (firstTurn.command.type !== "turn.submit") {
         throw new Error("Expected turn.submit");
       }
+
       expect(firstTurn.command.input).toEqual([seed, ...firstInput]);
 
       const requests = listEvents(harness.db, { threadId: fork.id }).filter(
         (event) => event.type === "client/turn/requested",
       );
+
       expect(requests).toHaveLength(2);
       expect(
         turnRequestEventDataSchema.parse(
@@ -671,6 +742,7 @@ describe("public thread fork route", () => {
         errorMessage: "First real turn failed",
       });
       const secondInput = textInput("Try again");
+
       const secondResponse = await harness.app.request(
         `/api/v1/threads/${fork.id}/send`,
         {
@@ -683,16 +755,20 @@ describe("public thread fork route", () => {
           }),
         },
       );
+
       expect(secondResponse.status).toBe(200);
+
       const secondTurn = await waitForQueuedCommandAfter(
         harness,
         firstTurn.row.cursor,
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === fork.id,
       );
+
       if (secondTurn.command.type !== "turn.submit") {
         throw new Error("Expected turn.submit");
       }
+
       expect(secondTurn.command.input).toEqual([seed, ...secondInput]);
     });
   });
@@ -705,11 +781,14 @@ describe("public thread fork route", () => {
         mentions: [],
         visibility: "agent-only" as const,
       };
+
       const { fork, start } = await createIdleSeededFork(harness, {
         seed,
         providerThreadId: "provider-started-seeded-fork",
       });
+
       const firstInput = textInput("Explain the selected message");
+
       const firstResponse = await harness.app.request(
         `/api/v1/threads/${fork.id}/send`,
         {
@@ -722,18 +801,23 @@ describe("public thread fork route", () => {
           }),
         },
       );
+
       expect(firstResponse.status).toBe(200);
+
       const firstTurn = await waitForQueuedCommandAfter(
         harness,
         start.row.cursor,
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === fork.id,
       );
+
       if (firstTurn.command.type !== "turn.submit") {
         throw new Error("Expected turn.submit");
       }
+
       const lastSequence =
         listEvents(harness.db, { threadId: fork.id }).at(-1)?.sequence ?? 0;
+
       seedTurnStarted(harness.deps, {
         environmentId: fork.environmentId,
         providerThreadId: "provider-started-seeded-fork",
@@ -742,6 +826,7 @@ describe("public thread fork route", () => {
         turnId: "turn-started-seeded-fork",
       });
       const rapidInput = textInput("Rapid follow-up");
+
       const rapidResponse = await harness.app.request(
         `/api/v1/threads/${fork.id}/send`,
         {
@@ -754,13 +839,16 @@ describe("public thread fork route", () => {
           }),
         },
       );
+
       expect(rapidResponse.status).toBe(200);
+
       const rapidTurn = await waitForQueuedCommandAfter(
         harness,
         firstTurn.row.cursor,
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === fork.id,
       );
+
       expect(rapidTurn.command).toMatchObject({ input: rapidInput });
       await reportQueuedCommandError(harness, firstTurn, {
         errorCode: "provider_error",
@@ -768,6 +856,7 @@ describe("public thread fork route", () => {
       });
 
       const secondInput = textInput("Try again");
+
       const secondResponse = await harness.app.request(
         `/api/v1/threads/${fork.id}/send`,
         {
@@ -780,16 +869,20 @@ describe("public thread fork route", () => {
           }),
         },
       );
+
       expect(secondResponse.status).toBe(200);
+
       const secondTurn = await waitForQueuedCommandAfter(
         harness,
         rapidTurn.row.cursor,
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === fork.id,
       );
+
       if (secondTurn.command.type !== "turn.submit") {
         throw new Error("Expected turn.submit");
       }
+
       expect(secondTurn.command.input).toEqual(secondInput);
     });
   });
@@ -802,6 +895,7 @@ describe("public thread fork route", () => {
         mentions: [],
         visibility: "agent-only" as const,
       };
+
       const { environment, fork, start, thread } = await createIdleSeededFork(
         harness,
         {
@@ -809,6 +903,7 @@ describe("public thread fork route", () => {
           providerThreadId: "provider-grouped-seeded-fork",
         },
       );
+
       const inputGroups = [textInput("First group"), textInput("Second group")];
 
       await sendThreadMessage(harness.deps, {
@@ -829,9 +924,11 @@ describe("public thread fork route", () => {
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === fork.id,
       );
+
       if (turn.command.type !== "turn.submit") {
         throw new Error("Expected turn.submit");
       }
+
       const expectedGroups = [[seed, ...inputGroups[0]!], inputGroups[1]!];
       expect(turn.command.inputGroups).toEqual(expectedGroups);
       expect(turn.command.input).toEqual([
@@ -839,12 +936,15 @@ describe("public thread fork route", () => {
         { type: "text", text: "\n\n", mentions: [] },
         ...expectedGroups[1],
       ]);
+
       const request = listEvents(harness.db, { threadId: fork.id })
         .filter((event) => event.type === "client/turn/requested")
         .at(-1);
+
       const requestData = turnRequestEventDataSchema.parse(
         JSON.parse(request?.data ?? "null"),
       );
+
       expect(requestData.inputGroups).toEqual(expectedGroups);
       expect(requestData.input).toEqual(turn.command.input);
     });
@@ -858,18 +958,22 @@ describe("public thread fork route", () => {
         mentions: [],
         visibility: "agent-only" as const,
       };
+
       const { fork, start } = await createIdleSeededFork(harness, {
         seed,
         providerThreadId: "provider-queued-seeded-fork",
       });
+
       const first = seedQueuedMessage(harness.deps, {
         threadId: fork.id,
         content: textInput("First queued group"),
       });
+
       const second = seedQueuedMessage(harness.deps, {
         threadId: fork.id,
         content: textInput("Second queued group"),
       });
+
       expect(
         setQueuedThreadMessageGroupBoundary({
           db: harness.db,
@@ -897,22 +1001,94 @@ describe("public thread fork route", () => {
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === fork.id,
       );
+
       if (turn.command.type !== "turn.submit") {
         throw new Error("Expected turn.submit");
       }
+
       expect(turn.command.inputGroups?.[0]).toEqual([
         seed,
         ...textInput("First queued group"),
       ]);
       expect(turn.command.input[0]).toEqual(seed);
+
       const request = listEvents(harness.db, { threadId: fork.id })
         .filter((event) => event.type === "client/turn/requested")
         .at(-1);
+
       const requestData = turnRequestEventDataSchema.parse(
         JSON.parse(request?.data ?? "null"),
       );
+
       expect(requestData.input).toEqual(turn.command.input);
       expect(requestData.inputGroups).toEqual(turn.command.inputGroups);
+    });
+  });
+
+  it("sends a message queued while an idle seeded fork was starting", async () => {
+    await withTestHarness(async (harness) => {
+      const { sourceThread } = seedForkSource(harness);
+
+      const seed = {
+        type: "text" as const,
+        text: "Replying to a message sent during startup",
+        mentions: [],
+        visibility: "agent-only" as const,
+      };
+
+      const response = await postFork(harness, {
+        sourceThreadId: sourceThread.id,
+        visibility: "hidden",
+        agentContextSeed: [seed],
+      });
+
+      expect(response.status).toBe(201);
+      const fork = threadResponseSchema.parse(await readJson(response));
+
+      const start = await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "thread.start" && command.threadId === fork.id,
+      );
+
+      const input = textInput("Asked before the fork finished starting");
+
+      const send = await harness.app.request(
+        `/api/v1/threads/${fork.id}/send`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ input, mode: "auto", permissionMode: "full" }),
+        },
+      );
+
+      expect(send.status).toBe(200);
+      expect(
+        listQueuedThreadMessagesForApi(harness.db, { threadId: fork.id }),
+      ).toMatchObject([
+        { waitingOn: JSON.stringify({ kind: "provisioning" }) },
+      ]);
+
+      await new Promise((resolve) => setImmediate(resolve));
+      await reportQueuedCommandSuccess(harness, start, {
+        providerThreadId: "provider-starting-seeded-fork",
+      });
+
+      const turn = await waitForQueuedCommandAfter(
+        harness,
+        start.row.cursor,
+        ({ command }) =>
+          command.type === "turn.submit" && command.threadId === fork.id,
+      );
+
+      if (turn.command.type !== "turn.submit") {
+        throw new Error("Expected turn.submit");
+      }
+
+      expect(turn.command.input).toEqual([seed, ...input]);
+      expect(
+        listQueuedThreadMessagesForApi(harness.db, { threadId: fork.id }),
+      ).toEqual([]);
     });
   });
 
@@ -924,6 +1100,7 @@ describe("public thread fork route", () => {
         mentions: [],
         visibility: "agent-only" as const,
       };
+
       const { environment, fork, thread } = await createIdleSeededFork(
         harness,
         {
@@ -935,24 +1112,27 @@ describe("public thread fork route", () => {
       await expect(
         sendThreadMessage(harness.deps, {
           beforeAppendInTransaction: ({ tx }) => {
-            appendClientTurnEventInTransaction(tx, {
-              environmentId: thread.environmentId,
-              execution: {
-                model: "gpt-5",
-                permissionMode: "full",
-                reasoningLevel: "medium",
-                serviceTier: "default",
-                source: "client/turn/requested",
+            appendClientTurnEventInTransaction(
+              { db: tx, hub: harness.hub },
+              {
+                environmentId: thread.environmentId,
+                execution: {
+                  model: "gpt-5",
+                  permissionMode: "full",
+                  reasoningLevel: "medium",
+                  serviceTier: "default",
+                  source: "client/turn/requested",
+                },
+                initiator: "user",
+                input: textInput("Winning concurrent turn"),
+                requestMethod: "turn/start",
+                senderThreadId: null,
+                source: "tell",
+                target: { kind: "new-turn" },
+                threadId: thread.id,
+                type: "client/turn/requested",
               },
-              initiator: "user",
-              input: textInput("Winning concurrent turn"),
-              requestMethod: "turn/start",
-              senderThreadId: null,
-              source: "tell",
-              target: { kind: "new-turn" },
-              threadId: thread.id,
-              type: "client/turn/requested",
-            });
+            );
           },
           environment,
           payload: {
@@ -982,14 +1162,17 @@ describe("public thread fork route", () => {
 
       expect(response.status).toBe(201);
       const fork = threadResponseSchema.parse(await readJson(response));
+
       const queued = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" && command.threadId === fork.id,
       );
+
       if (queued.command.type !== "thread.start") {
         throw new Error("Expected thread.start");
       }
+
       expect(queued.command.options.permissionMode).toBe("accept-edits");
     });
   });
@@ -1008,14 +1191,17 @@ describe("public thread fork route", () => {
 
       expect(response.status).toBe(201);
       const fork = threadResponseSchema.parse(await readJson(response));
+
       const queued = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" && command.threadId === fork.id,
       );
+
       if (queued.command.type !== "thread.start") {
         throw new Error("Expected thread.start");
       }
+
       expect(queued.command.options).toMatchObject({
         model: "gpt-5-mini",
         reasoningLevel: "high",
@@ -1027,18 +1213,22 @@ describe("public thread fork route", () => {
   it("forks an ACP provider that declares it and uses the returned child session", async () => {
     await withTestHarness({}, async (harness) => {
       const { host } = seedHostSession(harness.deps);
+
       const { project } = seedProjectWithSource(harness.deps, {
         hostId: host.id,
       });
+
       const environment = seedEnvironment(harness.deps, {
         hostId: host.id,
         projectId: project.id,
       });
+
       const sourceThread = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: project.id,
         providerId: "acp-opencode",
       });
+
       seedThreadRuntimeState(harness.deps, {
         environmentId: environment.id,
         model: "acp-default",
@@ -1059,14 +1249,17 @@ describe("public thread fork route", () => {
 
       expect(response.status).toBe(201);
       const fork = threadResponseSchema.parse(await readJson(response));
+
       const start = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "thread.start" && command.threadId === fork.id,
       );
+
       if (start.command.type !== "thread.start") {
         throw new Error("Expected thread.start");
       }
+
       expect(start.command).toMatchObject({
         providerId: "acp-opencode",
         bridgeLaunch: {
@@ -1100,12 +1293,15 @@ describe("public thread fork route", () => {
           }),
         },
       );
+
       expect(sendResponse.status).toBe(200);
+
       const turn = await waitForQueuedCommand(
         harness,
         ({ command }) =>
           command.type === "turn.submit" && command.threadId === fork.id,
       );
+
       expect(turn.command).toMatchObject({
         resumeContext: { providerThreadId: "provider-acp-child" },
       });
@@ -1156,20 +1352,24 @@ function seedConversationForkSource(
   args: { providerId?: string; runningThirdTurn?: boolean } = {},
 ) {
   const { host } = seedHostSession(harness.deps);
+
   const { project } = seedProjectWithSource(harness.deps, {
     hostId: host.id,
     path: "/tmp/public-thread-fork-history",
   });
+
   const environment = seedEnvironment(harness.deps, {
     hostId: host.id,
     projectId: project.id,
     path: "/tmp/public-thread-fork-history",
   });
+
   const sourceThread = seedThread(harness.deps, {
     environmentId: environment.id,
     projectId: project.id,
     ...(args.providerId === undefined ? {} : { providerId: args.providerId }),
   });
+
   seedThreadRuntimeState(harness.deps, {
     environmentId: environment.id,
     inputText: "Reply only with ok.",
@@ -1177,11 +1377,13 @@ function seedConversationForkSource(
     providerThreadId: HISTORY_PROVIDER_THREAD_ID,
     threadId: sourceThread.id,
   });
+
   const base = {
     environmentId: environment.id,
     providerThreadId: HISTORY_PROVIDER_THREAD_ID,
     threadId: sourceThread.id,
   };
+
   const firstRequestId = encodeClientTurnRequestIdNumber({ value: 1 });
   const secondRequestId = encodeClientTurnRequestIdNumber({ value: 2 });
   const thirdRequestId = encodeClientTurnRequestIdNumber({ value: 3 });
@@ -1256,9 +1458,11 @@ function seedConversationForkSource(
       providerCheckpointId: "checkpoint-after-turn-2",
     },
   });
+
   if (args.runningThirdTurn === false) {
     return { environment, sourceThread };
   }
+
   seedHistoryUserRequest(harness, {
     ...base,
     requestId: thirdRequestId,
@@ -1276,6 +1480,7 @@ function seedConversationForkSource(
       clientRequestId: thirdRequestId,
     },
   });
+
   return { environment, sourceThread };
 }
 
@@ -1286,8 +1491,10 @@ async function readConversationTexts(
   const response = await harness.app.request(
     `/api/v1/threads/${threadId}/timeline`,
   );
+
   expect(response.status).toBe(200);
   const timeline = threadTimelineResponseSchema.parse(await readJson(response));
+
   return timeline.rows.flatMap((row) =>
     row.kind === "conversation" ? [row.text] : [],
   );
@@ -1299,9 +1506,11 @@ async function waitForForkStart(harness: TestAppHarness, forkId: string) {
     ({ command }) =>
       command.type === "thread.start" && command.threadId === forkId,
   );
+
   if (queued.command.type !== "thread.start") {
     throw new Error("Expected thread.start");
   }
+
   return queued.command;
 }
 
@@ -1333,18 +1542,21 @@ describe("fork branch point and inherited history", () => {
   it("takes ownership of attachments referenced by imported history", async () => {
     await withTestHarness(async (harness) => {
       const { sourceThread } = seedConversationForkSource(harness);
+
       const attachment = await storeAttachment(
         harness.db,
         harness.config.dataDir,
         sourceThread.projectId,
         new File(["legacy fork attachment"], "legacy.txt"),
       );
+
       referenceAttachmentInHistory(harness, sourceThread.id, attachment.path);
 
       const response = await postFork(harness, {
         sourceThreadId: sourceThread.id,
         sourceSeqEnd: 5,
       });
+
       expect(response.status).toBe(201);
       const fork = threadResponseSchema.parse(await readJson(response));
       await waitForForkStart(harness, fork.id);
@@ -1364,12 +1576,14 @@ describe("fork branch point and inherited history", () => {
   it("forks history whose attachment bytes are gone from disk", async () => {
     await withTestHarness(async (harness) => {
       const { sourceThread } = seedConversationForkSource(harness);
+
       const attachment = await storeAttachment(
         harness.db,
         harness.config.dataDir,
         sourceThread.projectId,
         new File(["deleted fork attachment"], "deleted.txt"),
       );
+
       referenceAttachmentInHistory(harness, sourceThread.id, attachment.path);
       await rm(
         join(
@@ -1384,6 +1598,7 @@ describe("fork branch point and inherited history", () => {
         sourceThreadId: sourceThread.id,
         sourceSeqEnd: 5,
       });
+
       expect(response.status).toBe(201);
       const fork = threadResponseSchema.parse(await readJson(response));
       await waitForForkStart(harness, fork.id);
@@ -1408,6 +1623,7 @@ describe("fork branch point and inherited history", () => {
       expect(start.fork).toEqual({
         sourceProviderThreadId: HISTORY_PROVIDER_THREAD_ID,
         sourceProviderCheckpointId: "checkpoint-after-turn-1",
+        restoreArchivedSource: true,
       });
       expect(await readConversationTexts(harness, fork.id)).toEqual([
         "Reply only with ok.",
@@ -1471,6 +1687,7 @@ describe("fork branch point and inherited history", () => {
       const start = await waitForForkStart(harness, fork.id);
       expect(start.fork).toEqual({
         sourceProviderThreadId: HISTORY_PROVIDER_THREAD_ID,
+        restoreArchivedSource: true,
       });
       expect(await readConversationTexts(harness, fork.id)).toEqual([
         "Reply only with ok.",
@@ -1495,6 +1712,7 @@ describe("fork branch point and inherited history", () => {
       expect(start.fork).toEqual({
         sourceProviderThreadId: HISTORY_PROVIDER_THREAD_ID,
         sourceProviderCheckpointId: "checkpoint-after-turn-2",
+        restoreArchivedSource: true,
       });
       expect(await readConversationTexts(harness, fork.id)).toEqual([
         "Reply only with ok.",
@@ -1526,6 +1744,7 @@ describe("fork branch point and inherited history", () => {
       expect(start.fork).toEqual({
         sourceProviderThreadId: HISTORY_PROVIDER_THREAD_ID,
         sourceProviderCheckpointId: "checkpoint-after-turn-1",
+        restoreArchivedSource: true,
       });
       expect(await readConversationTexts(harness, fork.id)).toEqual([]);
       expect(
@@ -1539,10 +1758,12 @@ describe("fork branch point and inherited history", () => {
   it("refuses to fork a turn recorded under another thread's provider session", async () => {
     await withTestHarness(async (harness) => {
       const { environment, sourceThread } = seedConversationForkSource(harness);
+
       const owner = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: sourceThread.projectId,
       });
+
       seedEvent(harness.deps, {
         threadId: owner.id,
         environmentId: environment.id,
@@ -1558,6 +1779,7 @@ describe("fork branch point and inherited history", () => {
         sourceThreadId: sourceThread.id,
         sourceSeqEnd: 5,
       });
+
       expect(anchored.status).toBe(400);
       expect(await readJson(anchored)).toMatchObject({
         code: "fork_source_session_unavailable",
@@ -1568,6 +1790,7 @@ describe("fork branch point and inherited history", () => {
       const tip = await postFork(harness, {
         sourceThreadId: sourceThread.id,
       });
+
       expect(tip.status).toBe(400);
       expect(await readJson(tip)).toMatchObject({
         code: "fork_source_session_unavailable",
@@ -1581,16 +1804,20 @@ describe("fork branch point and inherited history", () => {
   it("refuses to fork a source whose session another thread announced in the same millisecond", async () => {
     await withTestHarness(async (harness) => {
       const { environment, sourceThread } = seedConversationForkSource(harness);
+
       const sourceIdentity = listEvents(harness.db, {
         threadId: sourceThread.id,
       }).find((event) => event.type === "thread/identity");
+
       if (sourceIdentity === undefined) {
         throw new Error("Expected the source thread's identity event");
       }
+
       const other = seedThread(harness.deps, {
         environmentId: environment.id,
         projectId: sourceThread.projectId,
       });
+
       seedEvent(harness.deps, {
         threadId: other.id,
         environmentId: environment.id,
@@ -1606,6 +1833,7 @@ describe("fork branch point and inherited history", () => {
         sourceThreadId: sourceThread.id,
         sourceSeqEnd: 5,
       });
+
       expect(anchored.status).toBe(400);
       expect(await readJson(anchored)).toMatchObject({
         code: "fork_source_session_unavailable",
@@ -1616,11 +1844,12 @@ describe("fork branch point and inherited history", () => {
       const tip = await postFork(harness, {
         sourceThreadId: sourceThread.id,
       });
+
       expect(tip.status).toBe(400);
       expect(await readJson(tip)).toMatchObject({
         code: "fork_source_session_unavailable",
         message:
-          "Cannot fork: another thread announced the source thread's provider session at the same moment, so bb cannot tell whose it is",
+          "Cannot fork: another thread announced the source thread's provider session at the same moment, so Omnyo cannot tell whose it is",
       });
       expect(listQueuedCommands(harness, "thread.start")).toHaveLength(0);
     });
@@ -1634,9 +1863,10 @@ describe("fork branch point and inherited history", () => {
         sourceThreadId: sourceThread.id,
         sourceSeqEnd: 14,
       });
+
       expect(running.status).toBe(400);
       expect(await readJson(running)).toMatchObject({
-        code: "fork_source_session_unavailable",
+        code: "fork_source_turn_incomplete",
         message:
           "Cannot fork at sequence 14: the turn containing it has not completed",
       });
@@ -1645,6 +1875,7 @@ describe("fork branch point and inherited history", () => {
         sourceThreadId: sourceThread.id,
         sourceSeqEnd: 2,
       });
+
       expect(beforeFirstTurn.status).toBe(400);
       expect(await readJson(beforeFirstTurn)).toMatchObject({
         code: "fork_source_session_unavailable",
@@ -1652,6 +1883,87 @@ describe("fork branch point and inherited history", () => {
           "Cannot fork at sequence 2: no turn has started at or before it",
       });
     });
+  });
+
+  it("refuses a Side chat reply inside a running turn instead of forking an older checkpoint", async () => {
+    const server = await startTestServer();
+
+    try {
+      server.pluginService.bindSdk({ baseUrl: server.baseUrl });
+
+      const entry = await server.pluginService.install("builtin:side-chat", {
+        kind: "root",
+      });
+
+      expect(entry.status, entry.statusDetail ?? undefined).toBe("running");
+      const { environment, sourceThread } = seedConversationForkSource(server);
+
+      const base = {
+        environmentId: environment.id,
+        providerThreadId: HISTORY_PROVIDER_THREAD_ID,
+        threadId: sourceThread.id,
+      };
+
+      const anchorText = "A progress note from the running turn.";
+
+      seedEvent(server.deps, {
+        ...base,
+        sequence: 15,
+        type: "item/completed",
+        scope: turnScope("turn-3"),
+        data: {
+          providerThreadId: HISTORY_PROVIDER_THREAD_ID,
+          item: { type: "agentMessage", id: "msg-3", text: anchorText },
+        },
+      });
+
+      const createSideChat = () =>
+        server.app.request("/api/v1/plugins/side-chat/rpc/createSideChat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sourceThreadId: sourceThread.id,
+            sourceSeqEnd: 15,
+            anchorText,
+          }),
+        });
+
+      const running = await createSideChat();
+      const runningBody = await readJson(running);
+      expect(running.status, JSON.stringify(runningBody)).not.toBe(200);
+      expect(JSON.stringify(runningBody)).toContain(
+        "the turn containing it has not completed",
+      );
+      expect(listQueuedCommands(server, "thread.start")).toHaveLength(0);
+
+      seedEvent(server.deps, {
+        ...base,
+        sequence: 16,
+        type: "turn/completed",
+        scope: turnScope("turn-3"),
+        data: {
+          providerThreadId: HISTORY_PROVIDER_THREAD_ID,
+          status: "completed",
+          providerCheckpointId: "checkpoint-after-turn-3",
+        },
+      });
+
+      const completed = await createSideChat();
+      const completedBody = await readJson(completed);
+      expect(completed.status, JSON.stringify(completedBody)).toBe(200);
+
+      const { result } = z
+        .object({ result: z.object({ threadId: z.string() }) })
+        .parse(completedBody);
+
+      const start = await waitForForkStart(server, result.threadId);
+      expect(start.fork?.sourceProviderCheckpointId).toBe(
+        "checkpoint-after-turn-3",
+      );
+    } finally {
+      await server.pluginService.stop();
+      await server.close();
+    }
   });
 
   const TIP_ONLY_PROVIDER_ID = "acp-opencode";
@@ -1671,6 +1983,7 @@ describe("fork branch point and inherited history", () => {
       const start = await waitForForkStart(harness, fork.id);
       expect(start.fork).toEqual({
         sourceProviderThreadId: HISTORY_PROVIDER_THREAD_ID,
+        restoreArchivedSource: true,
       });
       expect(await readConversationTexts(harness, fork.id)).toEqual([
         "Reply only with ok.",
@@ -1692,6 +2005,7 @@ describe("fork branch point and inherited history", () => {
         sourceThreadId: sourceThread.id,
         sourceSeqEnd: 5,
       });
+
       expect(earlier.status).toBe(400);
       expect(await readJson(earlier)).toMatchObject({
         code: "fork_source_session_unavailable",
@@ -1702,11 +2016,13 @@ describe("fork branch point and inherited history", () => {
         sourceThreadId: sourceThread.id,
         sourceSeqEnd: 10,
       });
+
       expect(tip.status).toBe(201);
       const fork = threadResponseSchema.parse(await readJson(tip));
       const start = await waitForForkStart(harness, fork.id);
       expect(start.fork).toEqual({
         sourceProviderThreadId: HISTORY_PROVIDER_THREAD_ID,
+        restoreArchivedSource: true,
       });
       expect(await readConversationTexts(harness, fork.id)).toEqual([
         "Reply only with ok.",

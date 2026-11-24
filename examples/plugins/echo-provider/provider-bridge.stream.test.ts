@@ -3,18 +3,18 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   BRIDGE_JSON_RPC_ERRORS,
   providerHealthResultSchema,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import {
   experimental_createBridgeDeltaEventCollector as createBridgeDeltaEventCollector,
   experimental_createBridgeJsonRpcTestHarness as createBridgeJsonRpcTestHarness,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 import type {
   BridgeDeltaEventCollector,
   BridgeJsonRpcObject,
   BridgeJsonRpcOutputMessage,
   BridgeJsonRpcTestHarness,
   ThreadEvent,
-} from "@get-bb/plugin-sdk/provider-bridge/testing";
+} from "@omnyo/plugin-sdk/provider-bridge/testing";
 
 import { handleLine } from "./src/provider-bridge.js";
 import {
@@ -33,7 +33,9 @@ type ItemEvent = Extract<
 >;
 
 const THREAD_ID = "thr_echo_stream";
+
 const CWD = "/workspace/echo";
+
 const PROMPT = "hello world";
 
 const STAMP_TOOL_DEFINITION = {
@@ -57,8 +59,11 @@ const FULL_OPTIONS = {
 };
 
 let harness: BridgeJsonRpcTestHarness;
+
 let collector: BridgeDeltaEventCollector;
+
 let requestCounter = 0;
+
 let savedGreeting: string | undefined;
 
 beforeEach(() => {
@@ -70,6 +75,7 @@ beforeEach(() => {
 
 afterEach(() => {
   harness.restore();
+
   if (savedGreeting === undefined) {
     delete process.env[ECHO_GREETING_ENV];
   } else {
@@ -86,6 +92,7 @@ async function request(
   harness.sendRequest(id, method, params);
   const response = await harness.waitForResponse(id);
   expect(response.error, `${method} answered an error`).toBeUndefined();
+
   return response;
 }
 
@@ -109,8 +116,10 @@ async function startSession(args: {
       : { dynamicTools: args.dynamicTools }),
     ...(args.input === undefined ? {} : { input: args.input }),
   });
+
   const result = response.result as { providerThreadId: string };
   expect(typeof result.providerThreadId).toBe("string");
+
   return result.providerThreadId;
 }
 
@@ -124,11 +133,13 @@ function answerToolCall(
   const call = harness.messages.find(
     (message) => message.method === "item/tool/call",
   );
-  expect(call, "the bridge called its bb tool").toBeDefined();
+
+  expect(call, "the bridge called its Omnyo tool").toBeDefined();
   const params = call?.params as Record<string, unknown>;
   handleLine(
     JSON.stringify({ jsonrpc: "2.0", id: call?.id, result: answer(params) }),
   );
+
   return params;
 }
 
@@ -153,7 +164,9 @@ function completedItem<T extends ItemEvent["item"]["type"]>(
     (candidate) =>
       candidate.type === "item/completed" && candidate.item.type === type,
   );
+
   expect(event, `a completed ${type} item`).toBeDefined();
+
   return event?.item as Extract<ItemEvent["item"], { type: T }>;
 }
 
@@ -164,10 +177,12 @@ describe("the echo bridge's grammar v3 stream", () => {
       client: { name: "echo-stream-test", version: "0.0.0" },
       grammarVersions: [3, 3],
     });
+
     const providerThreadId = await startSession({
       dynamicTools: [STAMP_TOOL_DEFINITION],
       providerOptions: { shout: true, model: "echo-1", promptMode: null },
     });
+
     await request("turn/start", {
       threadId: THREAD_ID,
       providerThreadId,
@@ -183,13 +198,13 @@ describe("the echo bridge's grammar v3 stream", () => {
       success: true,
       contentItems: [{ type: "inputText", text: `stamped: ${PROMPT}` }],
     }));
+
     expect(callParams).toMatchObject({
       providerThreadId,
       threadId: THREAD_ID,
       turnId: null,
       tool: ECHO_STAMP_TOOL_NAME,
       arguments: { text: PROMPT },
-      providerNativeIds: true,
     });
 
     const events = assembledEvents();
@@ -209,6 +224,7 @@ describe("the echo bridge's grammar v3 stream", () => {
 
     const items = itemEvents(events);
     expect(items.length).toBeGreaterThanOrEqual(18);
+
     for (const event of items) {
       expect(
         "presentation" in event.item ? event.item.presentation : undefined,
@@ -218,9 +234,11 @@ describe("the echo bridge's grammar v3 stream", () => {
         icon: { glyph: expect.any(String) },
       });
     }
+
     const completedTypes = items
       .filter((event) => event.type === "item/completed")
       .map((event) => event.item.type);
+
     expect(completedTypes).toEqual([
       "commandExecution",
       "fileRead",
@@ -283,19 +301,23 @@ describe("the echo bridge's grammar v3 stream", () => {
         detail: expect.stringContaining("parentRef"),
       },
     });
+
     const childTurn = events.find(
       (event) =>
         event.type === "turn/started" &&
         "parentToolCallId" in event &&
         event.parentToolCallId !== undefined,
     );
+
     expect(childTurn).toMatchObject({ parentToolCallId: delegation.id });
+
     const childMessage = items.find(
       (event) =>
         event.type === "item/completed" &&
         event.item.type === "agentMessage" &&
         event.item.parentToolCallId !== undefined,
     );
+
     expect(childMessage?.item).toMatchObject({
       text: `child echo: ${PROMPT}`,
       parentToolCallId: delegation.id,
@@ -318,6 +340,7 @@ describe("the echo bridge's grammar v3 stream", () => {
           event.type === "item/completed" && event.item.type === "toolCall",
       )
       .map((event) => event.item);
+
     expect(tools[0]).toMatchObject({
       tool: "echo_noop",
       result: "ahem",
@@ -326,14 +349,14 @@ describe("the echo bridge's grammar v3 stream", () => {
     expect(tools[0]).not.toHaveProperty("server");
     expect(tools[1]).toMatchObject({
       tool: ECHO_STAMP_TOOL_NAME,
-      server: "bb",
+      server: "omnyo",
       arguments: { text: PROMPT },
       result: `stamped: ${PROMPT}`,
       status: "completed",
       presentation: ECHO_STAMP_TOOL_PRESENTATION,
     });
     expect(
-      collector.assembler.getBbItemId(THREAD_ID, String(callParams.callId)),
+      collector.assembler.getAppItemId(THREAD_ID, String(callParams.callId)),
     ).toBe(tools[1]?.id);
 
     expect(completedItem(events, "extension")).toMatchObject({
@@ -348,9 +371,11 @@ describe("the echo bridge's grammar v3 stream", () => {
         tint: { light: "#047857", dark: "#6ee7b7" },
       },
     });
+
     const mood = events.find(
       (event) => event.type === "thread/extensionState/updated",
     );
+
     expect(mood).toMatchObject({
       kind: ECHO_MOOD_KIND,
       payload: { mood: "cheerful", turnsEchoed: 1 },
@@ -365,6 +390,7 @@ describe("the echo bridge's grammar v3 stream", () => {
       )
       .map((event) => event.item)
       .at(-1);
+
     expect(message).toMatchObject({
       text: [
         "echo: HELLO WORLD",
@@ -437,11 +463,14 @@ describe("the echo bridge's grammar v3 stream", () => {
     expect(
       harness.messages.some((message) => message.method === "item/tool/call"),
     ).toBe(false);
+
     const tools = itemEvents(events)
       .filter((event) => event.type === "item/completed")
       .map((event) => event.item)
       .filter((item) => item.type === "toolCall");
+
     expect(tools.map((item) => item.tool)).toEqual(["echo_noop"]);
+
     const message = itemEvents(events)
       .filter(
         (event) =>
@@ -450,6 +479,7 @@ describe("the echo bridge's grammar v3 stream", () => {
           event.item.parentToolCallId === undefined,
       )
       .at(-1);
+
     expect(message?.item).toMatchObject({
       text: expect.stringContaining(
         "providerOptions (defaults): shout=false model=echo-1 promptMode=none",
@@ -468,10 +498,12 @@ describe("the echo bridge's provider maintenance", () => {
       client: { name: "echo-stream-test", version: "0.0.0" },
       grammarVersions: [3, 3],
     });
+
     const response = await request("provider/health", {
       providerId: ECHO_PROVIDER_ID,
       cwd: CWD,
     });
+
     const result = providerHealthResultSchema.parse(response.result);
     expect(result).toEqual({
       supported: true,

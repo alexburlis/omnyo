@@ -6,9 +6,9 @@ import {
   listPublicHosts,
   hosts,
   setAppSettings,
-} from "@bb/db";
-import { defaultAppSettings } from "@bb/domain";
-import type { ServerAccessGrant } from "@get-bb/plugin-sdk";
+} from "@omnyo/db";
+import { defaultAppSettings } from "@omnyo/domain";
+import type { ServerAccessGrant } from "@omnyo/plugin-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { getMachineEnrollmentService } from "../../../src/services/machines/machine-services.js";
 import { serverAccess } from "../../../src/services/machines/server-access.js";
@@ -19,15 +19,15 @@ import {
 } from "../../helpers/test-app.js";
 
 async function installPlugin(harness: TestAppHarness, id: string) {
-  const root = join(harness.config.dataDir, `bb-plugin-${id}`);
+  const root = join(harness.config.dataDir, `omnyo-plugin-${id}`);
   await mkdir(root, { recursive: true });
   await writeFile(
     join(root, "package.json"),
     JSON.stringify({
-      name: `bb-plugin-${id}`,
+      name: `omnyo-plugin-${id}`,
       version: "0.1.0",
       type: "module",
-      bb: {
+      omnyo: {
         name: id,
         description: "Machine enrollment regression fixture",
         branding: { icon: "Zap" },
@@ -37,8 +37,8 @@ async function installPlugin(harness: TestAppHarness, id: string) {
   );
   await writeFile(
     join(root, "server.js"),
-    `export default function(bb) {
-    bb.experimental_machines.register({
+    `export default function(api) {
+    api.experimental_machines.register({
       id: "${id}-machine", displayName: "Runtime machine",
       description: "Provision a runtime test machine.", icon: "Terminal",
 
@@ -51,7 +51,9 @@ async function installPlugin(harness: TestAppHarness, id: string) {
   const installed = await harness.pluginService.installPath(root);
   expect(installed.status).toBe("running");
   const api = harness.pluginService.getApi(id);
+
   if (!api) throw new Error("Plugin API was not loaded");
+
   return api;
 }
 
@@ -126,13 +128,16 @@ describe("production machine enrollment wiring", () => {
       });
       const api = await installPlugin(h, "enrollment-runtime");
       launch(h, "runtime-launch", "enrollment-runtime-machine");
+
       const enrollments = getMachineEnrollmentService(h.deps).forOwner(
         "enrollment-runtime",
       );
+
       const enrollment = await enrollments.prepare({
         signal: new AbortController().signal,
         key: "runtime-launch",
       });
+
       expect(
         getNonDestroyedHostByLaunchKey(h.db, "runtime-launch"),
       ).toMatchObject({
@@ -143,23 +148,28 @@ describe("production machine enrollment wiring", () => {
       expect(getMachineEnrollmentService(h.deps)).toBe(
         getMachineEnrollmentService(h.deps),
       );
+
       const reissued = await enrollments.prepare({
         signal: new AbortController().signal,
         key: "runtime-launch",
       });
+
       expect(reissued).toMatchObject({
         id: enrollment.id,
         hostId: enrollment.hostId,
         state: "pending",
       });
+
       if (enrollment.state !== "pending" || reissued.state !== "pending")
         throw new Error("Expected pending enrollment");
       expect(reissued.bootstrap.credential).not.toBe(
         enrollment.bootstrap.credential,
       );
+
       const exec = vi.fn(async ({ stdin }: { stdin?: string }) => {
         if (stdin === undefined) throw new Error("Expected enrollment input");
         const input: unknown = JSON.parse(stdin);
+
         if (
           typeof input !== "object" ||
           input === null ||
@@ -168,6 +178,7 @@ describe("production machine enrollment wiring", () => {
         ) {
           throw new Error("Expected enrollment credential");
         }
+
         expect(
           await h.deps.machineAuth.enrollHost({
             hostId: enrollment.hostId,
@@ -178,8 +189,10 @@ describe("production machine enrollment wiring", () => {
           close() {},
           send() {},
         });
+
         return { exitCode: 0, stdout: "", stderr: "" };
       });
+
       await expect(
         api.experimental_machines.bootstrap({
           key: "runtime-launch",
@@ -225,13 +238,17 @@ describe("production machine enrollment wiring", () => {
     await withTestHarness(async (h) => {
       const api = await installPlugin(h, "enrollment-runtime");
       await installPlugin(h, "enrollment-other");
+
       const enrollments = getMachineEnrollmentService(h.deps).forOwner(
         "enrollment-runtime",
       );
+
       const otherEnrollments = getMachineEnrollmentService(h.deps).forOwner(
         "enrollment-other",
       );
+
       const release = vi.fn(async () => {});
+
       const acquire = vi.fn(
         async ({
           hostId,
@@ -244,6 +261,7 @@ describe("production machine enrollment wiring", () => {
           serverUrl: "https://machine.example.test",
         }),
       );
+
       api.experimental_serverAccess.register({
         id: "runtime-access",
         displayName: "Runtime access",
@@ -281,10 +299,12 @@ describe("production machine enrollment wiring", () => {
           (host) => host.id === reserved?.id,
         )?.statusMessage,
       ).toBe("Cloud device may need dashboard revocation");
+
       const enrollment = await enrollments.prepare({
         signal: new AbortController().signal,
         key: "failure-launch",
       });
+
       expect(enrollment.hostId).toBe(reserved?.id);
       expect(
         listPublicHosts(h.db).some((host) => host.id === reserved?.id),
@@ -319,10 +339,12 @@ it("serves a composition's explicit icon instead of the machine provider's icon"
   await withTestHarness(async (h) => {
     setPluginEnvironmentProviderBridge(h.pluginService.environmentProviders);
     const api = await installPlugin(h, "icon-runtime");
+
     const svg =
       '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1v1z"/></svg>';
+
     await writeFile(
-      join(h.config.dataDir, "bb-plugin-icon-runtime", "composition.svg"),
+      join(h.config.dataDir, "omnyo-plugin-icon-runtime", "composition.svg"),
       svg,
     );
     api.experimental_environments.register({
@@ -343,9 +365,11 @@ it("serves a composition's explicit icon instead of the machine provider's icon"
     });
     const listing = await h.app.request("/api/v1/system/environment-providers");
     const data = await listing.json();
+
     const composition = data.providers.find(
       (entry: { id: string }) => entry.id === "icon-composition",
     );
+
     expect(composition).toMatchObject({
       icon: "./composition.svg",
       logoUrl: expect.stringContaining("environment%3Aicon-composition"),

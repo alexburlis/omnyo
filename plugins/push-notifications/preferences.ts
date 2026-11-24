@@ -1,11 +1,13 @@
-import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import type { PluginApi } from "@omnyo/plugin-sdk";
 import { z } from "zod";
 
 export const notificationLevelSchema = z.enum(["all", "input-only", "muted"]);
+
 export const ownNotificationLevelSchema = z.enum([
   "inherit",
   ...notificationLevelSchema.options,
 ]);
+
 export const notificationSourceSchema = z.enum([
   "self",
   "parent",
@@ -33,11 +35,15 @@ export const threadNotificationsSchema = z
   .strict();
 
 export type NotificationLevel = z.infer<typeof notificationLevelSchema>;
+
 export type OwnNotificationLevel = z.infer<typeof ownNotificationLevelSchema>;
+
 export type NotificationSource = z.infer<typeof notificationSourceSchema>;
+
 export type ThreadNotificationInputs = z.infer<
   typeof threadNotificationInputsSchema
 >;
+
 export type ThreadNotifications = z.infer<typeof threadNotificationsSchema>;
 
 export interface NotificationDefaults {
@@ -57,10 +63,13 @@ export const NOTIFICATION_LEVEL_LABELS: Record<OwnNotificationLevel, string> = {
   muted: "Muted",
 };
 
-export type PushNotificationKind =
-  | "pending-interaction"
-  | "turn-finished"
-  | "thread-error";
+export const pushNotificationKindSchema = z.enum([
+  "pending-interaction",
+  "turn-finished",
+  "thread-error",
+]);
+
+export type PushNotificationKind = z.infer<typeof pushNotificationKindSchema>;
 
 export const NOTIFICATION_KINDS_BY_LEVEL: Record<
   NotificationLevel,
@@ -90,15 +99,18 @@ export function resolveThreadNotifications(
   defaults: NotificationDefaults,
 ): ThreadNotifications {
   const { own, ancestorCap } = stored;
+
   const base: { level: NotificationLevel; source: NotificationSource } =
     own !== "inherit"
       ? { level: own, source: "self" }
       : thread.parentThreadId !== null && defaults.childLevel !== "inherit"
         ? { level: defaults.childLevel, source: "child-default" }
         : { level: defaults.defaultLevel, source: "global" };
+
   if (ancestorCap === null || !isQuieter(ancestorCap.level, base.level)) {
     return { own, effective: base.level, source: base.source };
   }
+
   return {
     own,
     effective: ancestorCap.level,
@@ -109,9 +121,13 @@ export function resolveThreadNotifications(
 
 export function describeNotificationSource(row: ThreadNotifications): string {
   if (row.source === "self") return "set on this thread";
+
   if (row.source === "parent") return "limited by parent";
+
   if (row.source === "ancestor") return "limited by an ancestor";
+
   if (row.source === "child-default") return "child-thread default";
+
   return "default";
 }
 
@@ -123,9 +139,11 @@ const SDK_THREAD_BATCH_MAX_IDS = 200;
 
 function chunk<T>(items: readonly T[]): T[][] {
   const chunks: T[][] = [];
+
   for (let start = 0; start < items.length; start += SDK_THREAD_BATCH_MAX_IDS) {
     chunks.push(items.slice(start, start + SDK_THREAD_BATCH_MAX_IDS));
   }
+
   return chunks;
 }
 
@@ -141,6 +159,7 @@ export function parseStoredNotificationLevel(
   metadata: unknown,
 ): NotificationLevel | null {
   const parsed = storedNotificationsMetadataSchema.safeParse(metadata);
+
   return parsed.success ? parsed.data[NOTIFICATIONS_METADATA_KEY].own : null;
 }
 
@@ -166,26 +185,32 @@ export interface NotificationPreferences {
 }
 
 export function createNotificationPreferences(args: {
-  bb: BbPluginApi;
+  api: PluginApi;
   getDefaults(): Promise<NotificationDefaults>;
   publish(threads: Record<string, ThreadNotificationInputs>): void;
 }): NotificationPreferences {
-  const { bb, getDefaults, publish } = args;
+  const { api, getDefaults, publish } = args;
   let publicationQueue: Promise<void> = Promise.resolve();
 
   async function readOwnLevels(
     threadIds: readonly string[],
   ): Promise<Map<string, NotificationLevel>> {
     const levels = new Map<string, NotificationLevel>();
+
     for (const batch of chunk(threadIds)) {
-      const { threads } = await bb.sdk.threads.experimental_listPluginMetadata({
-        threadIds: batch,
-      });
+      const { threads } = await api.sdk.threads.experimental_listPluginMetadata(
+        {
+          threadIds: batch,
+        },
+      );
+
       for (const { threadId, metadata } of threads) {
         const level = parseStoredNotificationLevel(metadata);
+
         if (level !== null) levels.set(threadId, level);
       }
     }
+
     return levels;
   }
 
@@ -193,12 +218,15 @@ export function createNotificationPreferences(args: {
     threadIds: readonly string[],
   ): Promise<Map<string, ResolvedThreadInputs>> {
     const ancestry: { threadId: string; ancestorIds: string[] }[] = [];
+
     for (const batch of chunk(threadIds)) {
-      const { threads } = await bb.sdk.threads.experimental_listAncestors({
+      const { threads } = await api.sdk.threads.experimental_listAncestors({
         threadIds: batch,
       });
+
       ancestry.push(...threads);
     }
+
     const levels = await readOwnLevels([
       ...new Set(
         ancestry.flatMap(({ threadId, ancestorIds }) => [
@@ -207,11 +235,15 @@ export function createNotificationPreferences(args: {
         ]),
       ),
     ]);
+
     const resolved = new Map<string, ResolvedThreadInputs>();
+
     for (const { threadId, ancestorIds } of ancestry) {
       let ancestorCap: ThreadNotificationInputs["ancestorCap"] = null;
+
       for (const ancestorId of ancestorIds) {
         const level = levels.get(ancestorId);
+
         if (
           level !== undefined &&
           (ancestorCap === null || isQuieter(level, ancestorCap.level))
@@ -219,11 +251,13 @@ export function createNotificationPreferences(args: {
           ancestorCap = { level, threadId: ancestorId };
         }
       }
+
       resolved.set(threadId, {
         inputs: { own: levels.get(threadId) ?? "inherit", ancestorCap },
         parentThreadId: ancestorIds[0] ?? null,
       });
     }
+
     return resolved;
   }
 
@@ -231,7 +265,9 @@ export function createNotificationPreferences(args: {
     threadId: string,
   ): Promise<ResolvedThreadInputs> {
     const resolved = (await resolveInputs([threadId])).get(threadId);
+
     if (resolved === undefined) throw new Error("Thread not found");
+
     return resolved;
   }
 
@@ -239,33 +275,40 @@ export function createNotificationPreferences(args: {
     threadId: string,
   ): Promise<Map<string, ResolvedThreadInputs>> {
     const result = publicationQueue.then(async () => {
-      const { threads } = await bb.sdk.threads.experimental_listDescendants({
+      const { threads } = await api.sdk.threads.experimental_listDescendants({
         threadIds: [threadId],
       });
+
       const resolved = await resolveInputs([
         threadId,
         ...(threads[0]?.descendantIds ?? []),
       ]);
+
       for (const batch of chunk([...resolved])) {
         publish(
           Object.fromEntries(batch.map(([id, { inputs }]) => [id, inputs])),
         );
       }
+
       return resolved;
     });
+
     publicationQueue = result.then(
       () => undefined,
       () => undefined,
     );
+
     return result;
   }
 
   return {
     async list(threadIds) {
       const result: Record<string, ThreadNotificationInputs> = {};
+
       for (const [threadId, { inputs }] of await resolveInputs(threadIds)) {
         if (!isUnset(inputs)) result[threadId] = inputs;
       }
+
       return result;
     },
     async get(threadId) {
@@ -273,17 +316,20 @@ export function createNotificationPreferences(args: {
         requireInputs(threadId),
         getDefaults(),
       ]);
+
       return resolveThreadNotifications(inputs, { parentThreadId }, defaults);
     },
     async set(threadId, level) {
       await requireInputs(threadId);
-      await bb.sdk.threads.updatePluginMetadata(
+      await api.sdk.threads.updatePluginMetadata(
         level === "inherit"
           ? { threadId, remove: [NOTIFICATIONS_METADATA_KEY] }
           : { threadId, set: { [NOTIFICATIONS_METADATA_KEY]: { own: level } } },
       );
       const resolved = (await publishSubtree(threadId)).get(threadId);
+
       if (resolved === undefined) throw new Error("Thread not found");
+
       return resolved.inputs;
     },
     async effectiveLevel(thread) {
@@ -291,6 +337,7 @@ export function createNotificationPreferences(args: {
         resolveInputs([thread.id]),
         getDefaults(),
       ]);
+
       return resolveThreadNotifications(
         resolved.get(thread.id)?.inputs ?? UNSET_THREAD_NOTIFICATIONS,
         { parentThreadId: thread.parentThreadId },

@@ -8,6 +8,7 @@ export async function hasMachineSuspensionMarker(
 ): Promise<boolean> {
   try {
     await access(join(dataDir, MACHINE_SUSPENSION_MARKER));
+
     return true;
   } catch {
     return false;

@@ -2,13 +2,13 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import type { BbDesktopServerChoice } from "@bb/desktop-contract";
-import { createBbDesktopApi } from "../test/bb-desktop-test-utils";
+import type { OmnyoDesktopServerChoice } from "@omnyo/desktop-contract";
+import { createOmnyoDesktopApi } from "../test/omnyo-desktop-test-utils";
 import { getServerChoices } from "./server-choices";
 import { useServerChoices } from "../hooks/useServerChoices";
 
 function createDesktopApi() {
-  return createBbDesktopApi({
+  return createOmnyoDesktopApi({
     lastCheckedAt: null,
     latestVersion: null,
     pendingVersion: null,
@@ -21,21 +21,22 @@ function createDesktopApi() {
 
 afterEach(() => {
   cleanup();
-  Reflect.deleteProperty(window, "bbDesktop");
+  Reflect.deleteProperty(window, "omnyoDesktop");
 });
 
 describe("desktop server choices", () => {
   it.each(["browser", "older-desktop"])("omits switching on %s", (client) => {
-    if (client === "older-desktop") window.bbDesktop = createDesktopApi();
+    if (client === "older-desktop") window.omnyoDesktop = createDesktopApi();
     expect(getServerChoices()).toBeNull();
   });
 
   it("keeps a newer subscription update when an older list response arrives", async () => {
-    let resolveList: (choices: BbDesktopServerChoice[]) => void = () => {
+    let resolveList: (choices: OmnyoDesktopServerChoice[]) => void = () => {
       throw new Error("List was not requested");
     };
-    const listeners = new Set<(choices: BbDesktopServerChoice[]) => void>();
-    window.bbDesktop = {
+
+    const listeners = new Set<(choices: OmnyoDesktopServerChoice[]) => void>();
+    window.omnyoDesktop = {
       ...createDesktopApi(),
       getServerChoices: () =>
         new Promise((resolve) => {
@@ -43,6 +44,7 @@ describe("desktop server choices", () => {
         }),
       onServerChoicesChange: (listener) => {
         listeners.add(listener);
+
         return () => {
           listeners.delete(listener);
         };

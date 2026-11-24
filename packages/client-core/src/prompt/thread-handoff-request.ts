@@ -3,7 +3,7 @@ import type {
   PromptTextMention,
   ReasoningLevel,
   ServiceTier,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type { AppCreateThreadRequest } from "../api-types.js";
 import { promptDraftToInput, type PromptDraftState } from "./prompt-draft.js";
 
@@ -20,6 +20,7 @@ export function buildThreadHandoffPromptDraft(
   const prefix = "Continue from ";
   const mentionText = `@thread:${seed.sourceThreadId}`;
   const text = `${prefix}${mentionText}`;
+
   const mention: PromptTextMention = {
     start: prefix.length,
     end: prefix.length + mentionText.length,
@@ -58,6 +59,7 @@ function threadHandoffPrefixLength(
 ): number | null {
   const handoff = buildThreadHandoffPromptDraft(seed);
   const [handoffMention] = handoff.mentions;
+
   const hasHandoffMention =
     handoffMention !== undefined &&
     draft.mentions.some(
@@ -67,16 +69,21 @@ function threadHandoffPrefixLength(
         mention.resource.kind === "thread" &&
         mention.resource.threadId === seed.sourceThreadId,
     );
+
   if (!hasHandoffMention || !draft.text.startsWith(handoff.text)) {
     return null;
   }
+
   let prefixLength = handoff.text.length;
+
   if (prefixLength < draft.text.length && draft.text[prefixLength] !== "\n") {
     return null;
   }
+
   while (draft.text[prefixLength] === "\n") {
     prefixLength += 1;
   }
+
   return prefixLength;
 }
 
@@ -87,9 +94,12 @@ export function buildThreadHandoffFollowUpDraft(
   if (threadHandoffPrefixLength(seed, draft) !== null) {
     return draft;
   }
+
   const handoff = buildThreadHandoffPromptDraft(seed);
+
   const offset =
     handoff.text.length + THREAD_HANDOFF_FOLLOW_UP_SEPARATOR.length;
+
   return {
     text: `${handoff.text}${THREAD_HANDOFF_FOLLOW_UP_SEPARATOR}${draft.text}`,
     mentions: [
@@ -109,9 +119,11 @@ export function stripThreadHandoffPrefix(
   draft: PromptDraftState,
 ): PromptDraftState | null {
   const prefixLength = threadHandoffPrefixLength(seed, draft);
+
   if (prefixLength === null) {
     return null;
   }
+
   return {
     text: draft.text.slice(prefixLength),
     mentions: draft.mentions
@@ -132,6 +144,7 @@ export function buildThreadHandoffCreateRequest({
   sendAt,
 }: BuildThreadHandoffCreateRequestArgs): AppCreateThreadRequest | null {
   const input = promptDraftToInput(draft);
+
   if (execution.model.length === 0 || input.length === 0) {
     return null;
   }
@@ -152,6 +165,7 @@ export function buildThreadHandoffCreateRequest({
     },
     input,
     model: execution.model,
+    originKind: "handoff",
     permissionMode: execution.permissionMode,
     projectId: seed.projectId,
     providerId: execution.providerId,
@@ -160,6 +174,7 @@ export function buildThreadHandoffCreateRequest({
       ? { serviceTier: execution.serviceTier }
       : {}),
     ...(sendAt === undefined ? {} : { sendAt }),
+    sourceThreadId: seed.sourceThreadId,
     startedOnBehalfOf: null,
   };
 }

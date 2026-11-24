@@ -26,5 +26,6 @@ export function rpcInput(input: unknown): Record<string, unknown> {
       `expected an RPC input object, got ${JSON.stringify(input)}`,
     );
   }
+
   return Object.fromEntries(Object.entries(input));
 }

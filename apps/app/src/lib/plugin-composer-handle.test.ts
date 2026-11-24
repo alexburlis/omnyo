@@ -1,15 +1,15 @@
-import { appendQuoteAndAttachmentsToDraft } from "@bb/client-core";
+import { appendQuoteAndAttachmentsToDraft } from "@omnyo/client-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PromptTextMention } from "@bb/domain";
-import type { PromptDraftState } from "@bb/client-core";
-import type { ComposerEditorState } from "@get-bb/plugin-sdk/internal/composer-handle";
+import type { PromptTextMention } from "@omnyo/domain";
+import type { PromptDraftState } from "@omnyo/client-core";
+import type { ComposerEditorState } from "@omnyo/plugin-sdk/internal/composer-handle";
 import {
   clearComposerEditorBridge,
   publishComposerEditorBridge,
   type ComposerEditorBridge,
 } from "./composer-editor-registry";
-import { createComposerHandleBinding } from "@get-bb/plugin-sdk/internal/composer-handle";
-import type { PluginComposerScope } from "@get-bb/plugin-sdk";
+import { createComposerHandleBinding } from "@omnyo/plugin-sdk/internal/composer-handle";
+import type { PluginComposerScope } from "@omnyo/plugin-sdk";
 import {
   notifyComposerSubmitted,
   subscribeComposerSubmitted,
@@ -55,8 +55,10 @@ function publishEditor(
     state: { ...READY, ...state },
     insertAtCursor,
   };
+
   publishComposerEditorBridge(KEY, bridge);
   published.push(bridge);
+
   return bridge;
 }
 
@@ -64,6 +66,7 @@ afterEach(() => {
   for (const bridge of published.splice(0)) {
     clearComposerEditorBridge(KEY, bridge);
   }
+
   vi.restoreAllMocks();
 });
 
@@ -129,6 +132,7 @@ function makeTarget(
   overrides: Partial<ComposerSource> = {},
 ) {
   let draft = initial;
+
   const target: ComposerSource = {
     textEffectKey: KEY,
     scope: { kind: "thread", threadId: "thr_1" },
@@ -140,6 +144,7 @@ function makeTarget(
     focus: () => {},
     ...overrides,
   };
+
   return { target, current: () => draft };
 }
 
@@ -149,6 +154,7 @@ function makeHandle(target: ComposerSource, pluginId = "demo") {
     composerHandleController(pluginId, target, {
       setTextEffect: () => {},
       setInputLock: () => {},
+      setSuggestion: () => {},
       onSubmitted: () => () => {},
     }),
   );
@@ -167,6 +173,7 @@ describe("composer handle", () => {
       mentions: MENTIONS,
       attachments: [],
     });
+
     const mentions = makeHandle(source.target).handle.draft.mentions;
     expect(mentions.map((mention) => mention.kind)).toEqual([
       "thread",
@@ -228,6 +235,7 @@ describe("composer handle", () => {
 
   it("appends a cursor insert while the mounted editor is still initializing", () => {
     publishEditor({}, () => false);
+
     const { target, current } = makeTarget({
       text: "Hi",
       mentions: [],
@@ -240,6 +248,7 @@ describe("composer handle", () => {
 
   it("removes only its own mentions, rebases the rest, and keeps attachments", () => {
     const attachments: PromptDraftState["attachments"] = [];
+
     const pill = (pluginId: string, start: number): PromptTextMention => ({
       start,
       end: start + 4,
@@ -251,6 +260,7 @@ describe("composer handle", () => {
         icon: null,
       },
     });
+
     const { target, current } = makeTarget({
       text: "same same tail",
       mentions: [pill("annotations", 0), pill("other", 5)],
@@ -272,11 +282,13 @@ describe("composer handle", () => {
       start: 0,
       end: 13,
     };
+
     const { target, current } = makeTarget({
       text: "@thread:thr_1  \n",
       mentions: [threadMention],
       attachments: [],
     });
+
     const { handle } = makeHandle(target);
 
     handle.insert("Summary", { at: "end", block: true });
@@ -293,10 +305,12 @@ describe("composer handle", () => {
 
   it("waits for uploads before submitting and rejects when one fails", async () => {
     const submit = vi.fn(async () => {});
+
     const { target } = makeTarget(
       { text: "ship it", mentions: [], attachments: [] },
       { submit },
     );
+
     const { handle } = makeHandle(target);
 
     publishEditor({
@@ -347,10 +361,12 @@ describe("composer handle", () => {
   it("drops old-method writes with a warning and throws from new methods once the draft is gone", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     let available = true;
+
     const { target, current } = makeTarget(
       { text: "keep", mentions: [], attachments: [] },
       { isAvailable: () => available, submit: async () => {} },
     );
+
     const { handle } = makeHandle(target);
 
     available = false;
@@ -377,10 +393,12 @@ describe("composer handle", () => {
         {
           setTextEffect: () => {},
           setInputLock: () => {},
+          setSuggestion: () => {},
           onSubmitted: (listener) =>
             subscribeComposerSubmitted(scope, listener),
         },
       );
+
     const first: PluginComposerScope = { kind: "new-thread", projectId: "a" };
     const second: PluginComposerScope = { kind: "new-thread", projectId: "b" };
     const binding = createComposerHandleBinding(KEY, controllerFor(first));
@@ -410,6 +428,7 @@ describe("composer handle", () => {
       composerHandleController("demo", second.target, {
         setTextEffect: () => {},
         setInputLock: () => {},
+        setSuggestion: () => {},
         onSubmitted: () => () => {},
       }),
     );
@@ -429,6 +448,7 @@ describe.each(["core", "plugin"] as const)(
       caller === "core"
         ? createCoreComposerActions(source)
         : makeHandle(source).handle;
+
     const quote = (
       actions: ReturnType<typeof actionsFor>,
       text: string,
@@ -439,6 +459,7 @@ describe.each(["core", "plugin"] as const)(
       );
       actions.focus();
     };
+
     const attachment = {
       type: "localFile",
       path: "attachments/spec.txt",
@@ -453,12 +474,15 @@ describe.each(["core", "plugin"] as const)(
         mentions: MENTIONS,
         attachments: [attachment],
       };
+
       const stored = makeTarget({
         text: "newer draft",
         mentions: [],
         attachments: [],
       });
+
       const observations: PromptDraftState[] = [];
+
       const actions = actionsFor({
         ...stored.target,
         setDraft(next) {
@@ -466,6 +490,7 @@ describe.each(["core", "plugin"] as const)(
           observations.push(stored.current());
         },
       });
+
       actions.replace(composerDraftFromPromptDraft(history));
       expect(observations).toEqual([history]);
       expect(actions.draft.attachments).toEqual([attachment]);
@@ -491,6 +516,7 @@ describe.each(["core", "plugin"] as const)(
         mentions: [],
         attachments: [],
       });
+
       const actions = actionsFor(stored.target);
       const snapshot = actions.draft;
       expect(actions.draft).toBe(snapshot);
@@ -522,6 +548,7 @@ describe.each(["core", "plugin"] as const)(
         mentions: MENTIONS,
         attachments: [attachment],
       });
+
       const actions = actionsFor(stored.target);
       const original = stored.current();
       expect(() =>
@@ -535,12 +562,14 @@ describe.each(["core", "plugin"] as const)(
       expect(() =>
         actions.replace((current) => {
           current.mentions[0]!.label = "mutated";
+
           return current;
         }),
       ).toThrow();
       expect(() =>
         actions.replace((current) => {
           current.attachments[0]!.path = "changed";
+
           return current;
         }),
       ).toThrow();
@@ -555,9 +584,11 @@ describe.each(["core", "plugin"] as const)(
         mentions: MENTIONS,
         attachments: [attachment],
       };
+
       const stored = makeTarget(initial);
       const observations: PromptDraftState[] = [];
       const focused: PromptDraftState[] = [];
+
       const actions = actionsFor({
         ...stored.target,
         setDraft(next) {
@@ -566,12 +597,14 @@ describe.each(["core", "plugin"] as const)(
         },
         focus: () => focused.push(stored.current()),
       });
+
       const image = {
         type: "localImage",
         path: "attachments/screen.png",
         name: "screen.png",
         sizeBytes: 24,
       } as const;
+
       quote(actions, "first\r\nsecond", [attachment, image, image]);
       expect(observations).toEqual([
         {
@@ -620,6 +653,7 @@ describe.each(["core", "plugin"] as const)(
           text: "keep me",
           attachments: [attachment],
         });
+
         const before = stored.current();
         const actions = actionsFor(stored.target);
         expect(() =>

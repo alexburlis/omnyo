@@ -1,7 +1,7 @@
-import type { TimelineConversationTurnRequest } from "@bb/server-contract";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
-import { turnRequestLabel } from "@bb/client-core";
+import type { TimelineConversationTurnRequest } from "@omnyo/server-contract";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { turnRequestLabel } from "@omnyo/client-core";
 
 interface TurnRequestLabelProps {
   turnRequest: TimelineConversationTurnRequest;
@@ -13,11 +13,14 @@ export function TurnRequestLabel({
   icon = "CornerDownRight",
 }: TurnRequestLabelProps) {
   const label = turnRequestLabel(turnRequest);
+
   if (label === null) {
     return null;
   }
+
   const isPendingSteer =
     turnRequest.kind === "steer" && turnRequest.status === "pending";
+
   return (
     <span
       className={cn(

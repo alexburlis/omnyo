@@ -8,15 +8,23 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { Host, ProjectSource, PromptTextMention } from "@bb/domain";
+import type { Host, ProjectSource, PromptTextMention } from "@omnyo/domain";
 import type {
   SystemEnvironmentProvider,
   SystemMachineProvider,
-} from "@bb/server-contract";
-import type { ComposerView } from "@get-bb/plugin-sdk";
+} from "@omnyo/server-contract";
+import type { ComposerView } from "@omnyo/plugin-sdk";
 import type { ComposerTextEffectSource } from "@/lib/composer-text-effects";
 import { ComposerBannersSlot } from "@/components/plugin/PluginComposerBanners";
 import { PROMPT_STACK_TRACK_CLASS } from "@/components/promptbox/banner/PromptStackCard";
+import {
+  NewChatDock,
+  NewChatStageDock,
+} from "@/components/promptbox/dock/NewChatDock";
+import type { NewChatDockConfig } from "@/components/promptbox/dock/new-chat-where";
+import { ProjectIcon } from "@/components/sidebar/ProjectFace";
+import { PERSONAL_PROJECT_ID } from "@omnyo/domain";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import {
   type PluginComposerHost,
   usePluginComposerViewModel,
@@ -70,6 +78,17 @@ import { useHostDaemon } from "@/hooks/useHostDaemon";
 
 const NEW_THREAD_PROMPT_BOX_MIN_HEIGHT = 80;
 
+const STAGE_PROMPT_BOX_MIN_HEIGHT = 56;
+
+const STAGE_INPUT_CLASS = [
+  "[&_[data-promptbox-editor-scroll]]:text-lead",
+  "[&_[data-promptbox-editor-scroll]]:leading-(--text-lead--line-height)",
+  "[&_[data-promptbox-editor-scroll]_.ProseMirror]:leading-(--text-lead--line-height)",
+  "[&_[data-promptbox-suggestion]]:leading-(--text-lead--line-height)",
+].join(" ");
+
+export type NewThreadDockLayout = "launcher" | "stage";
+
 export interface NewThreadEnvironmentConfig {
   value: string;
   sources: readonly ProjectSource[];
@@ -99,7 +118,7 @@ export interface NewThreadWorktreeConfig {
 export interface NewThreadProjectConfig {
   projects: readonly ProjectSelectorOption[];
   value: string | null;
-  onChange: (projectId: string | null) => void;
+  onChange: (projectId: string | null) => void | Promise<void>;
   allowNoProject?: boolean;
   createProject?: ProjectSelectorCreateProjectConfig;
   disabled?: boolean;
@@ -144,12 +163,14 @@ interface NewThreadPromptBoxUIProps {
 
   project?: NewThreadProjectConfig;
   execution: ExecutionControlsProps;
+  dock?: NewChatDockConfig;
+  dockLayout?: NewThreadDockLayout;
+  projectShelf?: HTMLElement | null;
+  promptBoxRef?: RefObject<PromptBoxHandle | null>;
 }
 
 function getNewThreadPromptPlaceholder(isProjectless: boolean): string {
-  return isProjectless
-    ? "Ask anything."
-    : "Ask anything. @ to mention files, folders, or sections";
+  return isProjectless ? "Ask anything" : "Start a conversation";
 }
 
 export const NewThreadPromptBoxUI = memo(function NewThreadPromptBoxUI({
@@ -174,20 +195,31 @@ export const NewThreadPromptBoxUI = memo(function NewThreadPromptBoxUI({
   modeConfig,
   project,
   execution,
+  dock,
+  dockLayout,
+  projectShelf,
+  promptBoxRef: externalPromptBoxRef,
 }: NewThreadPromptBoxUIProps) {
-  const promptBoxRef = useRef<PromptBoxHandle>(null);
+  const localPromptBoxRef = useRef<PromptBoxHandle>(null);
+  const promptBoxRef = externalPromptBoxRef ?? localPromptBoxRef;
+
   useEffect(() => {
     if (focusRequest === undefined) return;
     promptBoxRef.current?.focusEnd();
-  }, [focusRequest]);
+  }, [focusRequest, promptBoxRef]);
+
   const focusDefault = useCallback(() => {
     promptBoxRef.current?.focusEnd();
+
     return promptBoxRef.current !== null;
-  }, []);
+  }, [promptBoxRef]);
+
   const voice = usePromptVoice(promptBoxRef, pluginComposerHost ?? undefined);
   const attachmentCount = attachments.items?.length ?? 0;
+
   const [composerLayout, setComposerLayout] =
     useState<ComposerView["layout"]>("expanded");
+
   const composerView = usePluginComposerViewModel({
     scope: pluginComposerHost?.scope ?? DEFAULT_COMPOSER_SCOPE,
     layout: composerLayout,
@@ -196,6 +228,7 @@ export const NewThreadPromptBoxUI = memo(function NewThreadPromptBoxUI({
     isRunning: false,
     isSubmitting,
   });
+
   const controller = useComposerExtensionController({
     host: pluginComposerHost ?? null,
     view: composerView,
@@ -227,6 +260,9 @@ export const NewThreadPromptBoxUI = memo(function NewThreadPromptBoxUI({
           modeConfig={modeConfig}
           project={project}
           execution={execution}
+          dock={dock}
+          dockLayout={dockLayout}
+          projectShelf={projectShelf}
           voice={voice}
           onComposerLayoutChange={setComposerLayout}
           onFocusCommand={controller.focus}
@@ -267,13 +303,20 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
   modeConfig,
   project,
   execution,
+  dock,
+  dockLayout = "launcher",
+  projectShelf = null,
   voice,
   onComposerLayoutChange,
   onFocusCommand,
 }: DefaultNewThreadComposerProps) {
   const isProjectlessPrompt = project?.value === null;
+  const docked = dock !== undefined && project !== undefined;
+  const staged = docked && dockLayout === "stage";
+
   const placeholder =
     placeholderOverride ?? getNewThreadPromptPlaceholder(isProjectlessPrompt);
+
   const { permissionDisplayOverride, permissionPickerDisabledByPlanMode } =
     usePromptModePermissionDisplay({
       execution,
@@ -281,18 +324,64 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
       mentionRanges,
       activePromptMode: null,
     });
+
   const submitTitle = isSubmitting
     ? "Submitting..."
     : execution.model.isLoading
       ? "Loading models..."
       : "Submit (Enter)";
 
+  const approvals =
+    modeConfig.permission.supported &&
+    modeConfig.permission.value !== undefined &&
+    !permissionPickerDisabledByPlanMode
+      ? {
+          value: modeConfig.permission.value,
+          options: modeConfig.permission.options,
+          onChange: modeConfig.permission.onChange,
+        }
+      : null;
+
+  const stageDock =
+    staged && dock !== undefined && project !== undefined ? (
+      <NewChatStageDock
+        dock={dock}
+        project={project}
+        environment={modeConfig.environment}
+        worktree={modeConfig.worktree}
+        model={<ExecutionControls {...execution} favoriteChips={false} />}
+        approvals={approvals}
+        sessionOptionsControl={modeConfig.sessionOptionsControl}
+        environmentProviderInputsSlot={modeConfig.environmentProviderInputsSlot}
+        machineProviderInputsSlot={modeConfig.machineProviderInputsSlot}
+        promptActions={promptActions}
+        canAttach={attachments.onAttachFiles !== undefined}
+        promptBoxRef={promptBoxRef}
+        shelf={projectShelf}
+      />
+    ) : null;
+
+  const permissionControls = (
+    <div className="flex shrink-0 items-center gap-2">
+      {modeConfig.sessionOptionsControl}
+      <PermissionModePicker
+        value={modeConfig.permission.value}
+        options={modeConfig.permission.options}
+        onChange={modeConfig.permission.onChange}
+        supported={modeConfig.permission.supported}
+        disabled={permissionPickerDisabledByPlanMode}
+        showChevronWhenDisabled={permissionPickerDisabledByPlanMode}
+        displayOverride={permissionDisplayOverride}
+      />
+    </div>
+  );
+
   return (
     <div
       data-app-composer=""
       data-app-composer-role="primary"
       data-promptbox-shell=""
-      className="w-full"
+      className={cn("w-full", staged && STAGE_INPUT_CLASS)}
     >
       <div
         className={`mb-2 hidden gap-2 has-[>:not(:empty)]:grid ${PROMPT_STACK_TRACK_CLASS}`}
@@ -313,7 +402,7 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
         history={history}
         typeahead={typeahead}
         mentionMenuPlacement={mentionMenuPlacement}
-        attachments={attachments}
+        attachments={{ ...attachments, acceptWhileUploading: true }}
         promptActions={promptActions}
         voice={voice}
         submission={{
@@ -325,52 +414,80 @@ const DefaultNewThreadComposer = memo(function DefaultNewThreadComposer({
         autoFocus={autoFocus}
         onFocusCommand={onFocusCommand}
         editorLayout="root-compose"
-        minHeight={NEW_THREAD_PROMPT_BOX_MIN_HEIGHT}
+        surface={docked ? "flat" : "raised"}
+        minHeight={
+          staged
+            ? STAGE_PROMPT_BOX_MIN_HEIGHT
+            : NEW_THREAD_PROMPT_BOX_MIN_HEIGHT
+        }
         placeholder={placeholder}
         header={modeConfig.header}
-        footerStart={<ExecutionControls {...execution} />}
-      />
-      <div
-        data-new-thread-footer=""
-        className="mt-1 flex select-none items-center justify-between gap-2 px-3.5 max-md:mt-0 max-md:gap-1 max-md:px-1"
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-1">
-          {project ? (
-            <ProjectSelector
-              projects={project.projects}
-              value={project.value}
-              onChange={project.onChange}
-              allowNoProject={project.allowNoProject ?? false}
-              createProject={project.createProject}
-              disabled={project.disabled}
-              isLoading={project.isLoading}
-              showChevronWhenDisabled={project.showChevronWhenDisabled}
-              className="shrink-0"
+        leading={
+          docked && !staged ? (
+            <ProjectIcon
+              projectId={project?.value ?? PERSONAL_PROJECT_ID}
+              className="size-5.5 rounded-md"
             />
-          ) : null}
-          <EnvironmentSlot
-            projectless={project?.value === null}
-            environment={modeConfig.environment}
-            worktree={modeConfig.worktree}
-            environmentProviderInputsSlot={
-              modeConfig.environmentProviderInputsSlot
-            }
-            machineProviderInputsSlot={modeConfig.machineProviderInputsSlot}
-          />
+          ) : undefined
+        }
+        plusMenu={docked ? "none" : "inline"}
+        footerStart={
+          staged ? (
+            stageDock
+          ) : docked ? undefined : (
+            <ExecutionControls {...execution} />
+          )
+        }
+      />
+      {staged ? null : dock !== undefined && project !== undefined ? (
+        <NewChatDock
+          dock={dock}
+          project={project}
+          environment={modeConfig.environment}
+          worktree={modeConfig.worktree}
+          favorites={<ExecutionControls {...execution} presentation="bar" />}
+          approvals={approvals}
+          sessionOptionsControl={modeConfig.sessionOptionsControl}
+          environmentProviderInputsSlot={
+            modeConfig.environmentProviderInputsSlot
+          }
+          machineProviderInputsSlot={modeConfig.machineProviderInputsSlot}
+          promptActions={promptActions}
+          canAttach={attachments.onAttachFiles !== undefined}
+          promptBoxRef={promptBoxRef}
+        />
+      ) : (
+        <div
+          data-new-thread-footer=""
+          className="mt-1 flex select-none items-center justify-between gap-2 px-3.5 max-md:mt-0 max-md:gap-1 max-md:px-1"
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            {project ? (
+              <ProjectSelector
+                projects={project.projects}
+                value={project.value}
+                onChange={project.onChange}
+                allowNoProject={project.allowNoProject ?? false}
+                createProject={project.createProject}
+                disabled={project.disabled}
+                isLoading={project.isLoading}
+                showChevronWhenDisabled={project.showChevronWhenDisabled}
+                className="shrink-0"
+              />
+            ) : null}
+            <EnvironmentSlot
+              projectless={project?.value === null}
+              environment={modeConfig.environment}
+              worktree={modeConfig.worktree}
+              environmentProviderInputsSlot={
+                modeConfig.environmentProviderInputsSlot
+              }
+              machineProviderInputsSlot={modeConfig.machineProviderInputsSlot}
+            />
+          </div>
+          {permissionControls}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {modeConfig.sessionOptionsControl}
-          <PermissionModePicker
-            value={modeConfig.permission.value}
-            options={modeConfig.permission.options}
-            onChange={modeConfig.permission.onChange}
-            supported={modeConfig.permission.supported}
-            disabled={permissionPickerDisabledByPlanMode}
-            showChevronWhenDisabled={permissionPickerDisabledByPlanMode}
-            displayOverride={permissionDisplayOverride}
-          />
-        </div>
-      </div>
+      )}
     </div>
   );
 });
@@ -393,18 +510,22 @@ export function EnvironmentSlot({
   const providers = (environment.providers ?? []).filter(
     (provider) => provider.requires.projectless === projectless,
   );
+
   const parsedEnvironment = useMemo(
     () => parseEnvironmentValue(environment.value),
     [environment.value],
   );
+
   const selectedProvider =
     parsedEnvironment?.type === "provider"
       ? providers.find(
           (provider) => provider.id === parsedEnvironment.environmentProviderId,
         )
       : undefined;
+
   const showReuseEnvironmentPicker = parsedEnvironment?.type === "reuse";
   const [environmentPickerOpen, setEnvironmentPickerOpen] = useState(false);
+
   const showEnvironmentPicker =
     !projectless ||
     environment.isLoading ||
@@ -412,6 +533,7 @@ export function EnvironmentSlot({
     showReuseEnvironmentPicker ||
     selectedProvider?.machineInputs != null ||
     environmentPickerOpen;
+
   if (!showEnvironmentPicker) {
     return <ProjectlessMachineSlot environment={environment} />;
   }
@@ -471,27 +593,34 @@ export function ProjectlessMachineSlot({
 }: ProjectlessMachineSlotProps) {
   const machines = environment.machines ?? null;
   const selectedProviderHostId = environment.selectedProviderHostId ?? null;
+
   const availableHosts = useMemo(() => {
     const selectable = selectHosts(machines?.hosts, "persistent");
+
     const selected = machines?.hosts.find(
       (candidate) => candidate.id === selectedProviderHostId,
     );
+
     return selected === undefined ||
       selectable.some((candidate) => candidate.id === selected.id)
       ? selectable
       : [...selectable, selected];
   }, [machines?.hosts, selectedProviderHostId]);
+
   const parsedEnvironment = useMemo(
     () => parseEnvironmentValue(environment.value),
     [environment.value],
   );
+
   const selectedProvider =
     parsedEnvironment?.type === "provider"
       ? environment.providers?.find(
           (provider) => provider.id === parsedEnvironment.environmentProviderId,
         )
       : undefined;
+
   const handleSelectProvider = environment.onSelectProvider;
+
   const handleMachineChange = useCallback(
     (hostId: string) => {
       if (
@@ -503,13 +632,15 @@ export function ProjectlessMachineSlot({
     },
     [handleSelectProvider, selectedProvider],
   );
+
   if (
     selectedProvider?.machineProviderId ||
     !machines ||
-    availableHosts.length <= 1
+    availableHosts.length === 0
   ) {
     return null;
   }
+
   return (
     <MachinePickerUI
       hosts={availableHosts}
@@ -553,29 +684,36 @@ export function NewThreadPromptBox({
   const systemConfigQuery = useSystemConfig();
   const { providers: machineProviders } = useSystemMachineProviders();
   const primaryHostId = systemConfigQuery.data?.primaryHostId ?? null;
+
   const availableHosts = useMemo(
     () => selectHosts(hosts, "persistent"),
     [hosts],
   );
+
   const primaryHost = useMemo(
     () => selectPrimaryHost(availableHosts, primaryHostId),
     [availableHosts, primaryHostId],
   );
+
   const { isLocalDaemonHost, localDaemonHostId } = useHostDaemon();
 
   const parsedEnvironment = parseEnvironmentValue(
     threadConfig.environment.value,
   );
+
   const selectedEnvironmentHostId =
     parsedEnvironment?.type === "provider"
       ? (threadConfig.environment.selectedProviderHostId ?? null)
       : null;
+
   const selectedHost =
     selectedEnvironmentHostId !== null
       ? (availableHosts.find((host) => host.id === selectedEnvironmentHostId) ??
         primaryHost)
       : primaryHost;
+
   const isLocalHost = selectedHost ? isLocalDaemonHost(selectedHost.id) : false;
+
   const machines = useMemo<EnvironmentPickerMachines | null>(
     () =>
       hosts
@@ -601,6 +739,7 @@ export function NewThreadPromptBox({
       machines,
     ],
   );
+
   return (
     <NewThreadPromptBoxUI
       {...rest}

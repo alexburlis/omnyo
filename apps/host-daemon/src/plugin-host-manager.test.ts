@@ -10,13 +10,20 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { HostDaemonOnlineRpcCommand } from "@bb/host-daemon-contract";
-import type { WatchPathRootArgs } from "@bb/host-watcher";
+import type { HostDaemonOnlineRpcCommand } from "@omnyo/host-daemon-contract";
+import type { WatchPathRootArgs } from "@omnyo/host-watcher";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PluginHostManager } from "./plugin-host-manager.js";
+import {
+  createFixture,
+  registerServerMoveFixtureCleanup,
+} from "./server-move/test-fixture.js";
+
+registerServerMoveFixtureCleanup();
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
+
   return { ...actual, rm: vi.fn(actual.rm) };
 });
 
@@ -139,6 +146,7 @@ export default {
 function callCommand(overrides: Partial<PluginCall> = {}): PluginCall {
   return {
     type: "plugin.host.call",
+    replacementKey: null,
     contributedEnv: [],
     pluginId: "fixture",
     generation: "generation-1",
@@ -181,17 +189,165 @@ describe("PluginHostManager", () => {
   async function createManagerFixture(
     overrides: Partial<ConstructorParameters<typeof PluginHostManager>[0]> = {},
   ): Promise<{ dataDir: string; manager: PluginHostManager }> {
-    const dataDir = await mkdtemp(join(tmpdir(), "bb-plugin-host-test-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-host-test-"));
     tempDirs.push(dataDir);
+
     const manager = new PluginHostManager({
       dataDir,
       logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
       fetchArtifact: vi.fn(async () => artifactSource),
       ...overrides,
     });
+
     managers.push(manager);
+
     return { dataDir, manager };
   }
+
+  it("admits updates with a cached worker but retains calls, leases, watches and disposal", async () => {
+    let watcher: WatchPathRootArgs | undefined;
+
+    const manager = await createManager({
+      hostWatcher: {
+        watchPathRoot(args) {
+          watcher = args;
+
+          return async () => undefined;
+        },
+      },
+    });
+
+    const fixture = await createFixture();
+
+    const counts = (pluginHosts: number) => ({
+      commands: 0,
+      runtimes: 0,
+      terminals: 0,
+      pluginHosts,
+      interactions: 0,
+    });
+
+    const service = fixture.createService({
+      getDirectAccessActivity: () =>
+        counts(manager.getDirectAccessActivityCount()),
+      getRuntimeUpdateActivity: () =>
+        counts(manager.getRuntimeUpdateActivityCount()),
+    });
+
+    const expectIdleAdmission = () => {
+      expect(service.tryAcquireRuntimeUpdateHold()).toBe(true);
+      service.releaseRuntimeUpdateHold();
+    };
+
+    const startup = manager.call(callCommand());
+    expect(service.tryAcquireRuntimeUpdateHold()).toBe(false);
+    expect(manager.getRuntimeUpdateBlockers()).toEqual([
+      {
+        pluginId: "fixture",
+        generation: null,
+        activeCallCount: 1,
+        pendingCallCount: 0,
+        retainedLeaseCount: 0,
+        watchCount: 0,
+        mutationPending: true,
+        starting: false,
+        disposing: false,
+      },
+    ]);
+    const first = await startup;
+    expectIdleAdmission();
+    expect(manager.getRuntimeUpdateBlockers()).toEqual([]);
+    const reused = await manager.call(callCommand());
+    expect(Reflect.get(Object(reused.output), "pid")).toBe(
+      Reflect.get(Object(first.output), "pid"),
+    );
+
+    const waitingCommand = callCommand({ method: "wait" });
+    const waiting = manager.call(waitingCommand);
+    expect(service.tryAcquireRuntimeUpdateHold()).toBe(false);
+    await vi.waitFor(() =>
+      expect(manager.getRuntimeUpdateBlockers()).toEqual([
+        {
+          pluginId: "fixture",
+          generation: "generation-1",
+          activeCallCount: 1,
+          pendingCallCount: 1,
+          retainedLeaseCount: 0,
+          watchCount: 0,
+          mutationPending: false,
+          starting: false,
+          disposing: false,
+        },
+      ]),
+    );
+    manager.cancel({
+      type: "plugin.host.cancel",
+      pluginId: waitingCommand.pluginId,
+      generation: waitingCommand.generation,
+      callId: waitingCommand.callId,
+    });
+    await expect(waiting).rejects.toThrow("cancel");
+    expectIdleAdmission();
+
+    await manager.call(
+      callCommand({ method: "retain", input: { enabled: true } }),
+    );
+    expect(service.tryAcquireRuntimeUpdateHold()).toBe(false);
+    expect(manager.getRuntimeUpdateBlockers()).toEqual([
+      {
+        pluginId: "fixture",
+        generation: "generation-1",
+        activeCallCount: 0,
+        pendingCallCount: 0,
+        retainedLeaseCount: 1,
+        watchCount: 0,
+        mutationPending: false,
+        starting: false,
+        disposing: false,
+      },
+    ]);
+    await manager.call(
+      callCommand({ method: "retain", input: { enabled: false } }),
+    );
+    expectIdleAdmission();
+
+    const watch = manager.call(
+      callCommand({ method: "watch", input: { rootPath: "/tmp/workspace" } }),
+    );
+
+    await vi.waitFor(() => expect(watcher).toBeDefined());
+    watcher?.onReady();
+    await watch;
+    expect(service.tryAcquireRuntimeUpdateHold()).toBe(false);
+    expect(manager.getRuntimeUpdateBlockers()).toEqual([
+      {
+        pluginId: "fixture",
+        generation: "generation-1",
+        activeCallCount: 0,
+        pendingCallCount: 0,
+        retainedLeaseCount: 0,
+        watchCount: 1,
+        mutationPending: false,
+        starting: false,
+        disposing: false,
+      },
+    ]);
+
+    const disposal = manager.dispose({
+      type: "plugin.host.dispose",
+      includeRetained: false,
+      pluginId: "fixture",
+      generation: "generation-1",
+    });
+
+    expect(service.tryAcquireRuntimeUpdateHold()).toBe(false);
+    expect(manager.getRuntimeUpdateBlockers()).toEqual([
+      expect.objectContaining({ pluginId: "fixture", mutationPending: true }),
+    ]);
+    await disposal;
+    expectIdleAdmission();
+    expect(manager.getRuntimeUpdateBlockers()).toEqual([]);
+  });
 
   it("verifies, caches, and reuses one worker for an artifact generation", async () => {
     const fetchArtifact = vi.fn(async () => artifactSource);
@@ -213,6 +369,7 @@ describe("PluginHostManager", () => {
     const manager = await createManager({
       shellEnv: () => ({ npm_config_user_agent: "test" }),
     });
+
     const contribution = (value: string) => [
       {
         name: "GATE_VALUE",
@@ -227,6 +384,7 @@ describe("PluginHostManager", () => {
         source: { core: "machine-git" as const },
       },
     ];
+
     const [first, rotated] = [
       await manager.call(
         callCommand({
@@ -243,6 +401,7 @@ describe("PluginHostManager", () => {
         }),
       ),
     ];
+
     expect(first.output).toEqual({
       before: "first",
       after: "first",
@@ -261,6 +420,7 @@ describe("PluginHostManager", () => {
 
   it("accepts a base64-encoded 20MB recording without daemon changes", async () => {
     const manager = await createManager({ shellEnv: () => ({}) });
+
     const result = await manager.call(
       callCommand({
         method: "environment",
@@ -269,6 +429,7 @@ describe("PluginHostManager", () => {
         },
       }),
     );
+
     expect(result.output).toEqual({ before: null, after: null, token: null });
   });
 
@@ -276,11 +437,13 @@ describe("PluginHostManager", () => {
     async function fixture() {
       const onSignal = vi.fn();
       const onWorkerExit = vi.fn();
+
       const manager = await createManager({
         shellEnv: () => ({ GATE_VALUE: "base" }),
         onSignal,
         onWorkerExit,
       });
+
       const command = (id: string, value: string, delay = 0) =>
         callCommand({
           callId: id,
@@ -296,6 +459,7 @@ describe("PluginHostManager", () => {
             },
           ],
         });
+
       const cancel = (callId: string) =>
         manager.cancel({
           type: "plugin.host.cancel",
@@ -303,12 +467,17 @@ describe("PluginHostManager", () => {
           generation: "generation-1",
           callId,
         });
+
       const started = (id: string) =>
         expect.objectContaining({
           payload: expect.objectContaining({ id }),
         });
+
       const waitForStart = (id: string) =>
-        vi.waitFor(() => expect(onSignal).toHaveBeenCalledWith(started(id)));
+        vi.waitFor(() => expect(onSignal).toHaveBeenCalledWith(started(id)), {
+          timeout: 5_000,
+        });
+
       return {
         manager,
         command,
@@ -332,28 +501,37 @@ describe("PluginHostManager", () => {
           onSignal,
           onWorkerExit,
         } = await fixture();
+
         const initial = await manager.call(callCommand());
+
         const running = Promise.allSettled([
           manager.call(command("a", "first", 6500)),
         ]);
+
         await waitForStart("a");
+
         const b = command(
           "b",
           mode === "same-value" ? "first" : "second",
           10_000,
         );
+
         const cancelled = manager
           .call({
             ...b,
             timeoutMs: mode === "deadline" ? 200 : b.timeoutMs,
           })
           .catch((error: unknown) => error);
+
         await waitForStart("b");
+
         if (mode !== "deadline") {
           expect(cancel("b")).toEqual({ cancelled: true });
           cancel("b");
         }
+
         const error = await cancelled;
+
         if (mode === "deadline")
           expect(error).toMatchObject({
             message: expect.stringMatching(/deadline/u),
@@ -385,13 +563,17 @@ describe("PluginHostManager", () => {
 
     it("keeps the first values until every overlapping call finishes", async () => {
       const { manager, command, cancel, waitForStart } = await fixture();
+
       const a = manager
         .call(command("a", "first", 10_000))
         .catch((error: unknown) => error);
+
       await waitForStart("a");
+
       const b = manager
         .call(command("b", "second", 10_000))
         .catch((error: unknown) => error);
+
       await waitForStart("b");
       cancel("a");
       await expect(a).resolves.toMatchObject({ name: "AbortError" });
@@ -409,16 +591,21 @@ describe("PluginHostManager", () => {
 
     it("disposes with overlapping calls and starts a fresh generation", async () => {
       const { manager, command, waitForStart } = await fixture();
+
       const a = manager
         .call(command("a", "first", 10_000))
         .catch((error: unknown) => error);
+
       await waitForStart("a");
+
       const b = manager
         .call(command("b", "second", 10_000))
         .catch((error: unknown) => error);
+
       await waitForStart("b");
       await manager.dispose({
         type: "plugin.host.dispose",
+        includeRetained: false,
         pluginId: "fixture",
         generation: "generation-1",
       });
@@ -432,18 +619,53 @@ describe("PluginHostManager", () => {
     it("still force-kills a started handler that ignores cancellation", async () => {
       const { manager, command, cancel, waitForStart, onWorkerExit } =
         await fixture();
+
       const initial = await manager.call(callCommand());
+
       const hung = manager
         .call({
           ...command("hung", "first"),
           input: { id: "hung", hang: true },
         })
         .catch((error: unknown) => error);
+
       await waitForStart("hung");
       cancel("hung");
       await expect(hung).resolves.toMatchObject({ name: "AbortError" });
       expect(onWorkerExit).toHaveBeenCalledOnce();
       expect((await manager.call(callCommand())).output).not.toEqual(
+        initial.output,
+      );
+    });
+
+    it("abandons a handler that ignores cancellation without killing other calls or pinning its environment", async () => {
+      const { manager, command, cancel, waitForStart, onWorkerExit } =
+        await fixture();
+
+      const initial = await manager.call(callCommand());
+      const running = manager.call(command("a", "first", 6500));
+      await waitForStart("a");
+
+      const hung = manager
+        .call({
+          ...command("hung", "first"),
+          input: { id: "hung", hang: true },
+        })
+        .catch((error) => error);
+
+      await waitForStart("hung");
+      cancel("hung");
+      await expect(hung).resolves.toMatchObject({ name: "AbortError" });
+      await expect(running).resolves.toMatchObject({
+        output: { before: "first", after: "first" },
+      });
+      await expect(
+        manager.call(command("rotated", "rotated")),
+      ).resolves.toMatchObject({
+        output: { before: "rotated", after: "rotated" },
+      });
+      expect(onWorkerExit).not.toHaveBeenCalled();
+      expect((await manager.call(callCommand())).output).toEqual(
         initial.output,
       );
     });
@@ -454,6 +676,7 @@ describe("PluginHostManager", () => {
     async (secret) => {
       const onSignal = vi.fn();
       const manager = await createManager({ onSignal });
+
       const command = callCommand({
         callId: secret,
         method: "secretProbe",
@@ -467,12 +690,14 @@ describe("PluginHostManager", () => {
           },
         ],
       });
+
       const payload = {
         type: secret,
         true: true,
         ok: true,
         nested: [{ text: secret }],
       };
+
       expect(await manager.call(command)).toEqual({ output: payload });
       expect(onSignal).toHaveBeenCalledWith({
         pluginId: "fixture",
@@ -492,9 +717,11 @@ describe("PluginHostManager", () => {
     "π-first\nsecond-line",
   ])("frames worker stderr as-is across byte chunks: %j", async (secret) => {
     const warn = vi.fn();
+
     const manager = await createManager({
       logger: { debug: vi.fn(), info: vi.fn(), warn },
     });
+
     const command = callCommand({
       method: "secretProbe",
       input: {},
@@ -507,10 +734,13 @@ describe("PluginHostManager", () => {
         },
       ],
     });
+
     await manager.call(command);
+
     const bytes = Buffer.from(
       secret.replaceAll("\r\n", "\n").replaceAll("\n", "\r\n") + "\n",
     );
+
     await manager.call({
       ...command,
       contributedEnv: [],
@@ -533,9 +763,11 @@ describe("PluginHostManager", () => {
       input: { chunks: [[...pendingPrefix]] },
     });
     await manager.shutdown();
+
     const records = warn.mock.calls.filter(
       ([, message]) => message === "Host plugin stderr",
     );
+
     expect(records.map(([record]) => record.stderr)).toEqual([
       ...secret.replaceAll("\r\n", "\n").split("\n"),
       secret.slice(0, 5),
@@ -548,6 +780,7 @@ describe("PluginHostManager", () => {
       info: vi.fn(),
       warn: vi.fn(),
     };
+
     const { dataDir, manager } = await createManagerFixture({ logger });
     await writeFile(join(dataDir, "package.json"), '{"private":true}\n');
     const command = callCommand();
@@ -568,6 +801,7 @@ describe("PluginHostManager", () => {
 
     await manager.dispose({
       type: "plugin.host.dispose",
+      includeRetained: false,
       pluginId: command.pluginId,
       generation: command.generation,
     });
@@ -589,20 +823,25 @@ describe("PluginHostManager", () => {
 
   it("bounds call count and input bytes while worker startup is pending", async () => {
     let resolveCountFetch!: (bytes: Uint8Array) => void;
+
     const countFetch = vi.fn(
       () =>
         new Promise<Uint8Array>((resolve) => {
           resolveCountFetch = resolve;
         }),
     );
+
     const countManager = await createManager({
       fetchArtifact: countFetch,
       maxActiveCallsPerPlugin: 1,
     });
+
     const firstCountCall = countManager.call(callCommand({ timeoutMs: 20 }));
+
     const firstDeadline = expect(firstCountCall).rejects.toThrow(
       /deadline before dispatch/u,
     );
+
     await vi.waitFor(() => expect(countFetch).toHaveBeenCalledOnce());
     await firstDeadline;
     await expect(countManager.call(callCommand())).rejects.toThrow(
@@ -613,17 +852,20 @@ describe("PluginHostManager", () => {
     const input = { value: "1234567890" };
     const inputByteLength = Buffer.byteLength(JSON.stringify(input));
     let resolveByteFetch!: (bytes: Uint8Array) => void;
+
     const byteFetch = vi.fn(
       () =>
         new Promise<Uint8Array>((resolve) => {
           resolveByteFetch = resolve;
         }),
     );
+
     const byteManager = await createManager({
       fetchArtifact: byteFetch,
       maxActiveCallsPerPlugin: 2,
       maxActiveCallInputBytesPerPlugin: inputByteLength * 2 - 1,
     });
+
     const firstByteCall = byteManager.call(callCommand({ input }));
     await vi.waitFor(() => expect(byteFetch).toHaveBeenCalledOnce());
     await expect(byteManager.call(callCommand({ input }))).rejects.toThrow(
@@ -636,21 +878,26 @@ describe("PluginHostManager", () => {
   it("keeps only the active artifact digest in each plugin cache", async () => {
     const versionedArtifact = (index: number): Buffer =>
       Buffer.concat([artifactSource, Buffer.from(`\n// version ${index}\n`)]);
+
     const sources = [
       versionedArtifact(1),
       versionedArtifact(2),
       versionedArtifact(3),
     ] satisfies [Buffer, Buffer, Buffer];
+
     const sourceByDigest = new Map(
       sources.map((source) => [
         createHash("sha256").update(source).digest("hex"),
         source,
       ]),
     );
+
     const { dataDir, manager } = await createManagerFixture({
       fetchArtifact: vi.fn(async ({ digest }) => {
         const source = sourceByDigest.get(digest);
+
         if (source === undefined) throw new Error("unexpected artifact digest");
+
         return source;
       }),
     });
@@ -675,16 +922,19 @@ describe("PluginHostManager", () => {
 
   it("evicts an idle worker and starts it again without reporting a crash", async () => {
     const onWorkerExit = vi.fn();
+
     const logger = {
       debug: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
     };
+
     const manager = await createManager({
       logger,
       onWorkerExit,
       workerIdleTimeoutMs: 20,
     });
+
     const first = await manager.call(callCommand());
     const firstPid = Reflect.get(Object(first.output), "pid");
 
@@ -716,10 +966,13 @@ describe("PluginHostManager", () => {
       info: vi.fn(),
       warn: vi.fn(),
     };
+
     const manager = await createManager({ logger, workerIdleTimeoutMs: 20 });
+
     const retained = await manager.call(
       callCommand({ method: "retain", input: { enabled: true } }),
     );
+
     const retainedPid = Reflect.get(Object(retained.output), "pid");
 
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -744,19 +997,21 @@ describe("PluginHostManager", () => {
     const restarted = await manager.call(callCommand());
     expect(Reflect.get(Object(restarted.output), "pid")).not.toBe(retainedPid);
   });
-
   it("rejects unverified or invalid artifacts", async () => {
     const tampered = await createManager({
       fetchArtifact: async () => Buffer.from("tampered"),
     });
+
     await expect(tampered.call(callCommand())).rejects.toThrow(
       /failed verification after retry/u,
     );
 
     const invalidArtifact = Buffer.from("export default {};\n");
+
     const invalid = await createManager({
       fetchArtifact: async () => invalidArtifact,
     });
+
     await expect(
       invalid.call(
         callCommand({
@@ -789,6 +1044,7 @@ describe("PluginHostManager", () => {
       const manager = await createManager();
       await manager.call(callCommand());
       const dateNow = vi.spyOn(Date, "now").mockReturnValue(wallClockMs);
+
       try {
         await expect(
           manager.call(callCommand({ method: "wait", timeoutMs: 20 })),
@@ -808,6 +1064,7 @@ describe("PluginHostManager", () => {
     await expect(
       manager.dispose({
         type: "plugin.host.dispose",
+        includeRetained: false,
         pluginId: command.pluginId,
         generation: command.generation,
       }),
@@ -820,19 +1077,25 @@ describe("PluginHostManager", () => {
     const command = callCommand({ method: "pathsAndSignal" });
     const result = await manager.call(command);
     const tempDir = Reflect.get(Object(result.output), "tempDir");
+
     const { rm: remove } =
       await vi.importActual<typeof import("node:fs/promises")>(
         "node:fs/promises",
       );
+
     let removalStarted = false;
     let releaseRemoval!: () => void;
+
     const removalGate = new Promise<void>((resolve) => {
       releaseRemoval = resolve;
     });
+
     let notifyRemoval!: () => void;
+
     const started = new Promise<void>((resolve) => {
       notifyRemoval = resolve;
     });
+
     const rmSpy = vi
       .spyOn(fs, "rm")
       .mockImplementation(async (path, options) => {
@@ -846,19 +1109,24 @@ describe("PluginHostManager", () => {
               },
             );
           }
+
           removalStarted = true;
           notifyRemoval();
           await removalGate;
         }
+
         await remove(path, options);
       });
+
     const disposed = Promise.allSettled([
       manager.dispose({
         type: "plugin.host.dispose",
+        includeRetained: false,
         pluginId: command.pluginId,
         generation: command.generation,
       }),
     ]);
+
     try {
       await started;
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -880,15 +1148,18 @@ describe("PluginHostManager", () => {
       info: vi.fn(),
       warn: vi.fn(),
     };
+
     const manager = await createManager({
       logger,
       workerStopGraceMs: 20,
     });
+
     const command = callCommand({ method: "hangDispose" });
     await manager.call(command);
 
     await manager.dispose({
       type: "plugin.host.dispose",
+      includeRetained: false,
       pluginId: command.pluginId,
       generation: command.generation,
     });
@@ -925,6 +1196,7 @@ describe("PluginHostManager", () => {
     });
     await manager.dispose({
       type: "plugin.host.dispose",
+      includeRetained: false,
       pluginId: command.pluginId,
       generation: command.generation,
     });
@@ -938,20 +1210,24 @@ describe("PluginHostManager", () => {
     const onSignal = vi.fn();
     const stop = vi.fn(async () => undefined);
     let watcher: WatchPathRootArgs | undefined;
+
     const manager = await createManager({
       onSignal,
       workerIdleTimeoutMs: 20,
       hostWatcher: {
         watchPathRoot(args) {
           watcher = args;
+
           return stop;
         },
       },
     });
+
     const command = callCommand({
       method: "watch",
       input: { rootPath: "/tmp/workspace", listenerDelayMs: 100 },
     });
+
     const call = manager.call(command);
     await vi.waitFor(() => expect(watcher).toBeDefined(), { timeout: 5_000 });
     watcher?.onReady();
@@ -977,6 +1253,7 @@ describe("PluginHostManager", () => {
 
     await manager.dispose({
       type: "plugin.host.dispose",
+      includeRetained: false,
       pluginId: command.pluginId,
       generation: command.generation,
     });
@@ -985,11 +1262,13 @@ describe("PluginHostManager", () => {
 
   it("recovers after a crash and retires stale generations", async () => {
     const onWorkerExit = vi.fn();
+
     const logger = {
       debug: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
     };
+
     const manager = await createManager({ logger, onWorkerExit });
     const first = await manager.call(callCommand());
     const firstPid = Reflect.get(Object(first.output), "pid");

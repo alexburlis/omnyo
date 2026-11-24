@@ -1,5 +1,5 @@
-import { pluginCommandId } from "@bb/domain";
-import type { PluginComposerApi } from "@get-bb/plugin-sdk";
+import { pluginCommandId } from "@omnyo/domain";
+import type { PluginComposerApi } from "@omnyo/plugin-sdk";
 import { useComposerCommand } from "@/components/promptbox/composer-commands";
 import { useComposer } from "@/lib/plugin-sdk-hooks";
 import {
@@ -15,6 +15,7 @@ type ComposerCommandSlot = Extract<
 
 export function PluginComposerCommands() {
   const { commandPaletteActions } = usePluginSlots();
+
   return commandPaletteActions.map((command) =>
     command.target === "composer" ? (
       <PluginSlotMount
@@ -39,8 +40,10 @@ function runComposerCommand(
       `[plugin:${command.pluginId}] composer command "${command.id}" failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   };
+
   try {
     const result = command.run({ composer });
+
     if (result instanceof Promise) result.catch(warn);
   } catch (error) {
     warn(error);
@@ -56,5 +59,6 @@ function PluginComposerCommandHandler({
   useComposerCommand(pluginCommandId(command.pluginId, command.id), () =>
     runComposerCommand(command, composer),
   );
+
   return null;
 }

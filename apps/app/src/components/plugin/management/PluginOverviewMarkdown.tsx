@@ -41,7 +41,9 @@ const overviewUrlTransform: UrlTransform = (url) => httpsOnly(url) ?? "";
 
 function OverviewLink({ children, href }: ComponentPropsWithoutRef<"a">) {
   const safeHref = href === undefined ? null : httpsOnly(href);
+
   if (safeHref === null) return <span>{children}</span>;
+
   return (
     <a
       href={safeHref}
@@ -62,6 +64,7 @@ function OverviewHeading({
   minor?: boolean;
 }) {
   const Tag = minor ? "h4" : "h3";
+
   return (
     <Tag
       className={

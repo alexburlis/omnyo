@@ -11,6 +11,7 @@ export function encodeTerminalArrow(
 
 export function applyTerminalControl(data: string): string {
   if (data.length !== 1 || !/^[a-zA-Z@\[\]\\^_?]$/u.test(data)) return data;
+
   return data === "?"
     ? "\x7f"
     : String.fromCharCode(data.toUpperCase().charCodeAt(0) & 0x1f);

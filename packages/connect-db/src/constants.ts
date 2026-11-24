@@ -1,6 +1,7 @@
 const HANDLE_REGEX = /^[a-z0-9][a-z0-9-]{2,29}$/;
 
 const HANDLE_MIN_LENGTH = 3;
+
 export const HANDLE_MAX_LENGTH = 30;
 
 export const RESERVED_HANDLES: ReadonlySet<string> = new Set([
@@ -106,6 +107,7 @@ export const CONNECT_CODE_TTL_MS = 10 * 60 * 1000;
 export const SERVER_OFFLINE_AFTER_MS = 90 * 1000;
 
 export const CONNECT_SESSION_EXPIRES_IN_SECONDS = 7 * 24 * 60 * 60;
+
 export const CONNECT_SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
 
 export type HandleValidationError =
@@ -116,10 +118,15 @@ export type HandleValidationError =
 
 export function validateLabel(label: string): HandleValidationError | null {
   if (label.length < HANDLE_MIN_LENGTH) return "too-short";
+
   if (label.length > HANDLE_MAX_LENGTH) return "too-long";
+
   if (label.includes("--")) return "invalid-format";
+
   if (!HANDLE_REGEX.test(label)) return "invalid-format";
+
   if (RESERVED_HANDLES.has(label)) return "reserved";
+
   return null;
 }
 
@@ -128,6 +135,7 @@ const SHARE_PORT_TARGET = /^[1-9]\d{0,4}$/;
 function isValidShareTarget(target: string): boolean {
   if (!SHARE_PORT_TARGET.test(target)) return false;
   const port = Number(target);
+
   return port >= 1 && port <= 65535;
 }
 
@@ -141,17 +149,22 @@ export function parseVisitorHost(
   baseDomain: string,
 ): VisitorHost | null {
   const suffix = `.${baseDomain}`;
+
   if (!host.endsWith(suffix)) return null;
   const label = host.slice(0, -suffix.length);
+
   if (!label || label.includes(".")) return null;
 
   const sep = label.indexOf("--");
+
   if (sep === -1) {
     return { handle: label.toLowerCase(), target: null };
   }
 
   const handle = label.slice(0, sep).toLowerCase();
   const target = label.slice(sep + 2);
+
   if (!handle || !isValidShareTarget(target)) return null;
+
   return { handle, target };
 }

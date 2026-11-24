@@ -96,10 +96,13 @@ export function SidebarMore({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [page, setPage] = useState<CompactOverflowPage | null>(null);
   const compact = useIsCompactViewport();
+
   const changeOpen = useCallback((open: boolean) => {
     setIsMenuOpen(open);
+
     if (open) setPage(null);
   }, []);
+
   const close = useCallback(() => changeOpen(false), [changeOpen]);
 
   return (
@@ -236,6 +239,7 @@ export function SidebarOverflowItem({
 }) {
   const compact = useIsCompactViewport();
   const compactOverflow = useContext(CompactOverflowContext);
+
   const content = (close: () => void) => (
     <div data-sidebar-overflow="true" className="flex min-h-0 flex-col">
       {empty ? (
@@ -282,6 +286,7 @@ export function SidebarOverflowItem({
       </Button>
     </div>
   );
+
   const label = (
     <>
       <span className="flex min-w-0 flex-1 items-center gap-1 text-left">
@@ -304,9 +309,11 @@ export function SidebarOverflowItem({
     ) {
       return null;
     }
+
     if (compactOverflow.page) {
       return content(onClose);
     }
+
     return (
       <Button
         variant="ghost"

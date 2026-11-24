@@ -1,5 +1,5 @@
 import { describeError } from "@/lib/describe-error";
-import type { PushPlatform } from "./push-contract";
+import type { PushPlatform, PushSubscriptionRecord } from "./push-contract";
 import type { PushRegistrationRecord, PushStore } from "./push-store";
 import {
   PUSH_NOTIFICATIONS_PLUGIN_DISABLED_STATUS,
@@ -33,7 +33,7 @@ export type PushSyncOutcome =
   | { action: "skipped"; reason: PushSkipReason }
   | {
       action: "failed";
-      step: "token" | "register" | "unregister";
+      step: "token" | "verify" | "register" | "unregister";
       error: string;
     };
 
@@ -58,8 +58,10 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 export function isPushRegistrationAllowed(profile: PushSyncProfile): boolean {
   if (profile.mode === "connect") return true;
+
   try {
     const url = new URL(profile.serverUrl);
+
     return url.protocol !== "http:" || LOOPBACK_HOSTS.has(url.hostname);
   } catch {
     return false;
@@ -82,17 +84,21 @@ export function decidePushSync(input: {
       ? { action: "unregister" }
       : { action: "skip", reason: "disabled" };
   }
+
   if (input.projectId === null) {
     return { action: "skip", reason: "no-project-id" };
   }
+
   if (input.permission === "denied") {
     return input.existing
       ? { action: "unregister" }
       : { action: "skip", reason: "permission-denied" };
   }
+
   if (input.permission === "undetermined") {
     return { action: "skip", reason: "permission-undetermined" };
   }
+
   return { action: "fetch-token" };
 }
 
@@ -105,10 +111,15 @@ export function shouldReregister(input: {
   refreshAfterMs: number;
 }): boolean {
   const { existing } = input;
+
   if (!existing) return true;
+
   if (existing.expoPushToken !== input.expoPushToken) return true;
+
   if (existing.platform !== input.platform) return true;
+
   if (existing.serverUrl !== input.serverUrl) return true;
+
   return input.now - existing.registeredAt >= input.refreshAfterMs;
 }
 
@@ -120,24 +131,30 @@ export async function syncPushRegistration(
   const refreshAfterMs = deps.refreshAfterMs ?? PUSH_REGISTRATION_REFRESH_MS;
   const { notifications, api, store } = deps;
   const existing = store.getRegistration(profile.id);
+
   if (!isPushRegistrationAllowed(profile)) {
     if (existing) return unregisterPushRegistration(deps, profile.id);
+
     return { action: "skipped", reason: "insecure-http" };
   }
+
   const decision = decidePushSync({
     enabled: store.isEnabled(profile.id),
     projectId: notifications.projectId,
     permission: await notifications.getPermission(),
     existing,
   });
+
   if (decision.action === "skip") {
     return { action: "skipped", reason: decision.reason };
   }
+
   if (decision.action === "unregister") {
     return unregisterPushRegistration(deps, profile.id);
   }
 
   let expoPushToken: string;
+
   try {
     expoPushToken = await notifications.getExpoPushToken(
       notifications.projectId ?? "",
@@ -145,8 +162,11 @@ export async function syncPushRegistration(
   } catch (error) {
     return { action: "failed", step: "token", error: describeError(error) };
   }
+
   const platform = notifications.platform;
+
   if (
+    existing !== null &&
     !shouldReregister({
       existing,
       expoPushToken,
@@ -156,8 +176,24 @@ export async function syncPushRegistration(
       refreshAfterMs,
     })
   ) {
-    return { action: "skipped", reason: "up-to-date" };
+    let rows: PushSubscriptionRecord[];
+
+    try {
+      rows = await api.list(profile.serverUrl);
+    } catch (error) {
+      return { action: "failed", step: "verify", error: describeError(error) };
+    }
+
+    if (
+      rows.some((row) =>
+        existing.subscriptionId === null
+          ? row.tokenSuffix === existing.tokenSuffix
+          : row.id === existing.subscriptionId,
+      )
+    )
+      return { action: "skipped", reason: "up-to-date" };
   }
+
   if (
     existing &&
     (existing.expoPushToken !== expoPushToken ||
@@ -167,7 +203,9 @@ export async function syncPushRegistration(
       await api.unregister(existing.serverUrl, existing);
     } catch {}
   }
+
   let subscriptionId: string;
+
   try {
     ({ subscriptionId } = await api.register(profile.serverUrl, {
       expoPushToken,
@@ -177,6 +215,7 @@ export async function syncPushRegistration(
   } catch (error) {
     return { action: "failed", step: "register", error: describeError(error) };
   }
+
   store.setRegistration(profile.id, {
     subscriptionId,
     expoPushToken,
@@ -185,6 +224,7 @@ export async function syncPushRegistration(
     serverUrl: profile.serverUrl,
     registeredAt: now(),
   });
+
   return { action: "registered", expoPushToken };
 }
 
@@ -193,7 +233,9 @@ export async function unregisterPushRegistration(
   profileId: string,
 ): Promise<PushSyncOutcome> {
   const existing = deps.store.getRegistration(profileId);
+
   if (!existing) return { action: "skipped", reason: "disabled" };
+
   try {
     await deps.api.unregister(existing.serverUrl, existing);
   } catch (error) {
@@ -203,21 +245,79 @@ export async function unregisterPushRegistration(
       error: describeError(error),
     };
   }
+
   deps.store.setRegistration(profileId, null);
+
   return { action: "unregistered" };
+}
+
+async function askForPushPermission(
+  deps: Pick<PushSyncDeps, "notifications" | "store">,
+): Promise<PushPermissionState> {
+  let permission = await deps.notifications.getPermission();
+
+  if (permission === "undetermined") {
+    permission = await deps.notifications.requestPermission();
+  }
+
+  deps.store.markPrompted();
+
+  return permission;
 }
 
 export async function enablePushForProfile(
   deps: Pick<PushSyncDeps, "notifications" | "store">,
   profileId: string,
 ): Promise<PushPermissionState> {
-  let permission = await deps.notifications.getPermission();
-  if (permission === "undetermined") {
-    permission = await deps.notifications.requestPermission();
-  }
-  deps.store.markPrompted();
+  const permission = await askForPushPermission(deps);
   deps.store.setEnabled(profileId, permission === "granted");
+
   return permission;
+}
+
+export async function enablePushForFirstServer(
+  deps: Pick<PushSyncDeps, "notifications" | "store">,
+): Promise<PushPermissionState> {
+  const permission = await askForPushPermission(deps);
+  deps.store.setEnableFirstServer(permission === "granted");
+
+  return permission;
+}
+
+export async function adoptFirstServer(
+  deps: Pick<PushSyncDeps, "notifications" | "store">,
+  profile: PushSyncProfile,
+): Promise<void> {
+  if (
+    !deps.store.getSnapshot().enableFirstServer ||
+    !isPushRegistrationAllowed(profile)
+  )
+    return;
+  deps.store.setEnableFirstServer(false);
+
+  if ((await deps.notifications.getPermission()) === "granted")
+    deps.store.setEnabled(profile.id, true);
+}
+
+export function shouldShowPushPrompt(input: {
+  revealed: boolean;
+  available: boolean;
+  prompted: boolean;
+  presented: boolean;
+  serversLoaded: boolean;
+  hasServers: boolean;
+  serverConnected: boolean;
+}): boolean {
+  if (
+    !input.revealed ||
+    !input.available ||
+    input.prompted ||
+    input.presented ||
+    !input.serversLoaded
+  )
+    return false;
+
+  return !input.hasServers || input.serverConnected;
 }
 
 export function shouldOfferPushPrompt(input: {
@@ -236,22 +336,30 @@ export function describePushStatus(input: {
   lastOutcome: PushSyncOutcome | null;
 }): string {
   if (!isPushRegistrationAllowed(input.profile)) {
-    return "Push needs HTTPS or bb connect";
+    return "Push needs HTTPS or Omnyo connect";
   }
+
   if (input.projectId === null) {
     return "Push unavailable until the app is built with EAS";
   }
+
   if (!input.enabled) return "Off";
+
   if (input.permission === "denied") {
     return "Notifications are blocked in system settings";
   }
+
   if (input.lastOutcome?.action === "failed") {
     if (input.lastOutcome.error === PUSH_NOTIFICATIONS_PLUGIN_DISABLED_STATUS) {
       return PUSH_NOTIFICATIONS_PLUGIN_DISABLED_STATUS;
     }
+
     return `Could not register: ${input.lastOutcome.error}`;
   }
+
   if (input.registration) return "On · registered with this server";
+
   if (input.permission === "undetermined") return "Waiting for permission";
+
   return "Registering…";
 }

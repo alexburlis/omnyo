@@ -49,15 +49,18 @@ export function syncBufferedTextMessage(
   args: SyncBufferedTextMessageArgs,
 ): void {
   const text = getVisibleTextBufferText(args.buffer);
+
   if (!text) {
     if (args.status === "completed") {
       args.message.status = "completed";
     }
+
     return;
   }
 
   args.message.text = text;
   args.message.status = args.status;
+
   if (args.visibleKeys.has(args.messageKey)) {
     return;
   }
@@ -79,6 +82,7 @@ function flushBufferedTextMessages(args: FlushBufferedTextMessagesArgs): void {
 
   for (const [messageKey, message] of pendingMessages) {
     const buffer = args.buffers.get(messageKey);
+
     if (buffer) {
       flushVisibleTextBuffer(buffer);
       syncBufferedTextMessage({
@@ -92,6 +96,7 @@ function flushBufferedTextMessages(args: FlushBufferedTextMessagesArgs): void {
     } else {
       message.status = "completed";
     }
+
     args.finalizedKeys.add(messageKey);
     args.openMessages.delete(messageKey);
     args.buffers.delete(messageKey);

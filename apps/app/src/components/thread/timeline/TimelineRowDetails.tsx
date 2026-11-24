@@ -3,12 +3,17 @@ import {
   assertNever,
   fileNameFromPath,
   type TimelineViewWorkRow,
-} from "@bb/thread-view";
-import { Button } from "@bb/shared-ui/button";
-import { Icon } from "@bb/shared-ui/icon";
+} from "@omnyo/thread-view";
+import { Button } from "@omnyo/shared-ui/button";
+import { Icon } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import {
+  CONTROL_PRESS_FEEDBACK,
+  CONTROL_PRESS_TRANSITION,
+} from "@omnyo/shared-ui/motion";
 import { EventCodeBlock } from "../../ui/event-code-block.js";
 import { ImageLightbox } from "../../ui/image-lightbox.js";
-import { EmptyStatePanel } from "@bb/shared-ui/empty-state";
+import { EmptyStatePanel } from "@omnyo/shared-ui/empty-state";
 import { LazyTerminalOutputBlock } from "./LazyTerminalOutputBlock.js";
 import { TimelineDetailScroll } from "./TimelineDetailScroll.js";
 import { LazyTimelineFileDiffBlock } from "./LazyTimelineFileDiffBlock.js";
@@ -67,22 +72,36 @@ interface ResolveImageViewSourceArgs {
   row: ImageWorkRow;
 }
 
-function resolveImageViewSource({
+function resolveImageViewSources({
   resolveImageViewSrc,
   row,
-}: ResolveImageViewSourceArgs): string | null {
+}: ResolveImageViewSourceArgs): { original: string; preview: string } | null {
   if (!row.path || (row.workKind === "image-generation" && row.error)) {
     return null;
   }
-  return resolveImageViewSrc
-    ? resolveImageViewSrc({ path: row.path, threadId: row.threadId })
-    : buildThreadHostFileContentUrl(row.threadId, row.path);
+
+  if (resolveImageViewSrc) {
+    const src = resolveImageViewSrc({ path: row.path, threadId: row.threadId });
+
+    return { original: src, preview: src };
+  }
+
+  const original = buildThreadHostFileContentUrl(row.threadId, row.path);
+
+  return {
+    original,
+    preview:
+      row.workKind === "image-view"
+        ? buildThreadHostFileContentUrl(row.threadId, row.path, "960")
+        : original,
+  };
 }
 
 function ImageWorkRowBody({ resolveImageViewSrc, row }: ImageWorkRowBodyProps) {
   const [loadError, setLoadError] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const imageSrc = resolveImageViewSource({ resolveImageViewSrc, row });
+  const sources = resolveImageViewSources({ resolveImageViewSrc, row });
+  const imageSrc = sources?.original ?? null;
   const imageName = row.path ? fileNameFromPath(row.path) : "";
   const imageAlt = `${row.workKind === "image-generation" ? "Generated" : "Viewed"} image: ${imageName}`;
 
@@ -91,7 +110,7 @@ function ImageWorkRowBody({ resolveImageViewSrc, row }: ImageWorkRowBodyProps) {
     setLightboxOpen(false);
   }, [imageSrc, row.completedAt, row.status]);
 
-  if (loadError || !imageSrc) {
+  if (loadError || !sources) {
     return (
       <EmptyStatePanel className="rounded-lg">
         <div className="whitespace-pre-wrap break-words">
@@ -108,12 +127,16 @@ function ImageWorkRowBody({ resolveImageViewSrc, row }: ImageWorkRowBodyProps) {
     <>
       <button
         type="button"
-        className="block w-full max-w-80 cursor-zoom-in overflow-hidden rounded-lg border border-border bg-surface-recessed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:max-w-96"
+        className={cn(
+          "block w-full max-w-80 cursor-zoom-in overflow-hidden rounded-lg border border-border bg-surface-recessed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:max-w-96",
+          CONTROL_PRESS_TRANSITION,
+          CONTROL_PRESS_FEEDBACK,
+        )}
         onClick={() => setLightboxOpen(true)}
         aria-label={`Open image preview: ${imageName}`}
       >
         <img
-          src={imageSrc}
+          src={sources.preview}
           alt=""
           className="block h-auto w-full object-contain"
           loading="lazy"
@@ -123,7 +146,7 @@ function ImageWorkRowBody({ resolveImageViewSrc, row }: ImageWorkRowBodyProps) {
       </button>
       <ImageLightbox
         imageAlt={imageAlt}
-        imageSrc={lightboxOpen ? imageSrc : null}
+        imageSrc={lightboxOpen ? sources.original : null}
         onClose={() => setLightboxOpen(false)}
         title={imageAlt}
       />
@@ -136,6 +159,7 @@ function outputPreviewNoteText({
   totalChars,
 }: OutputPreviewNoteArgs): string | null {
   const total = `${totalChars.toLocaleString()} characters`;
+
   switch (state) {
     case "streaming-preview":
       return `Preview of ${total}. The full output loads when this finishes.`;
@@ -159,13 +183,16 @@ function OutputPreviewNote({ fullOutput, row }: OutputPreviewNoteProps) {
   if (row.outputPreview === undefined) {
     return null;
   }
+
   const text = outputPreviewNoteText({
     state: fullOutput.state,
     totalChars: row.outputPreview.totalChars,
   });
+
   if (text === null) {
     return null;
   }
+
   return (
     <div
       className="flex items-center gap-2 text-xs text-muted-foreground"
@@ -190,6 +217,7 @@ function OutputPreviewNote({ fullOutput, row }: OutputPreviewNoteProps) {
 
 function CommandWorkRowBody({ row }: CommandWorkRowBodyProps) {
   const fullOutput = useTimelineWorkRowFullOutput(row);
+
   return (
     <div className="space-y-1">
       <LazyTerminalOutputBlock
@@ -206,6 +234,7 @@ function CommandWorkRowBody({ row }: CommandWorkRowBodyProps) {
 
 function ToolWorkRowBody({ row }: ToolWorkRowBodyProps) {
   const fullOutput = useTimelineWorkRowFullOutput(row);
+
   return (
     <div className="space-y-1">
       <PresentationDetail presentation={row.presentation} />
@@ -233,10 +262,6 @@ export function WorkRowBody({
     case "file-change":
       return (
         <div className="space-y-2">
-          <LazyTimelineFileDiffBlock
-            change={row.change}
-            workspaceRootPath={workspaceRootPath}
-          />
           {row.stderr ? (
             <TimelineDetailScroll
               size="base"
@@ -251,6 +276,12 @@ export function WorkRowBody({
               </EventCodeBlock>
             </TimelineDetailScroll>
           ) : null}
+          {row.stderr && !row.change.diff?.trim() ? null : (
+            <LazyTimelineFileDiffBlock
+              change={row.change}
+              workspaceRootPath={workspaceRootPath}
+            />
+          )}
         </div>
       );
     case "delegation":

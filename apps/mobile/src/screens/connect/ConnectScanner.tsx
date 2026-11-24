@@ -26,6 +26,7 @@ export function ConnectScanner({ onScanned, active }: ConnectScannerProps) {
   }, [active]);
 
   if (!permission) return null;
+
   if (!permission.granted) {
     return (
       <View
@@ -35,7 +36,7 @@ export function ConnectScanner({ onScanned, active }: ConnectScannerProps) {
       >
         <Icon name="Camera" size={32} />
         <Text variant="bodyLarge" className="text-center">
-          bb needs the camera to scan the pairing QR code.
+          Omnyo needs the camera to scan the pairing QR code.
         </Text>
         {permission.canAskAgain ? (
           <Button onPress={() => void requestPermission()}>Allow camera</Button>
@@ -68,10 +69,13 @@ export function ConnectScanner({ onScanned, active }: ConnectScannerProps) {
               ? ({ data }) => {
                   if (handledRef.current) return;
                   const parsed = parseConnectPairingPayload(data);
+
                   if (!parsed) {
                     setLastIgnored(data.slice(0, 40));
+
                     return;
                   }
+
                   handledRef.current = true;
                   setLastIgnored(null);
                   onScanned(parsed);
@@ -82,8 +86,8 @@ export function ConnectScanner({ onScanned, active }: ConnectScannerProps) {
       </View>
       <Text variant="footnote" tone="muted" className="px-4">
         {lastIgnored
-          ? `Not a bb pairing code: ${lastIgnored}`
-          : "Point the camera at the QR code from bb Settings → Mobile → Add mobile device."}
+          ? `Not an Omnyo pairing code: ${lastIgnored}`
+          : "Point the camera at the QR code from Omnyo Settings → Mobile → Add mobile device."}
       </Text>
     </View>
   );

@@ -5,6 +5,7 @@ const threadTimelinePendingTodoItemStatusSchema = z.enum([
   "in_progress",
   "completed",
 ]);
+
 export type ThreadTimelinePendingTodoItemStatus = z.infer<
   typeof threadTimelinePendingTodoItemStatusSchema
 >;
@@ -14,6 +15,7 @@ const threadTimelinePendingTodoItemSchema = z.object({
   text: z.string(),
   status: threadTimelinePendingTodoItemStatusSchema,
 });
+
 export type ThreadTimelinePendingTodoItem = z.infer<
   typeof threadTimelinePendingTodoItemSchema
 >;
@@ -23,6 +25,7 @@ export const threadTimelinePendingTodosSchema = z.object({
   updatedAt: z.number(),
   items: z.array(threadTimelinePendingTodoItemSchema),
 });
+
 export type ThreadTimelinePendingTodos = z.infer<
   typeof threadTimelinePendingTodosSchema
 >;

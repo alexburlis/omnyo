@@ -4,7 +4,7 @@ import { join } from "node:path";
 import {
   turnStartParamsSchema,
   type PromptInput,
-} from "@get-bb/plugin-sdk/provider-bridge";
+} from "@omnyo/plugin-sdk/provider-bridge";
 import { expect, it } from "vitest";
 import { extractPiPromptInput } from "./turn-input.js";
 
@@ -36,6 +36,7 @@ function extractText(input: PromptInput[]): string | undefined {
 it("preserves local file paths with and without text", () => {
   const path = "/workspace/notes.md";
   const marker = `[Attached file "notes.md": ${path}]`;
+
   const file = {
     type: "localFile" as const,
     path,
@@ -52,6 +53,43 @@ it("preserves local file paths with and without text", () => {
   ).toBe(`Read this file.\n${marker}`);
   expect(extractText([file])).toBe(marker);
 });
+
+it.each(["URL", "unreadable local"] as const)(
+  "preserves %s image attachments as text notes",
+  (kind) => {
+    const workspaceDir = mkdtempSync(
+      join(tmpdir(), "omnyo-pi-image-fallback-"),
+    );
+
+    try {
+      const location =
+        kind === "URL"
+          ? "https://example.com/screenshot.png"
+          : join(workspaceDir, "missing.png");
+
+      const input: PromptInput =
+        kind === "URL"
+          ? { type: "image", url: location }
+          : { type: "localImage", path: location };
+
+      const note = `[Attached image: ${location}]`;
+
+      expect(extractPiPromptInput([input])).toEqual({
+        text: note,
+        images: [],
+      });
+      expect(
+        extractPiPromptInput([
+          { type: "text", text: "Before", mentions: [] },
+          input,
+          { type: "text", text: "After", mentions: [] },
+        ]),
+      ).toEqual({ text: `Before\n${note}\nAfter`, images: [] });
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  },
+);
 
 it("invokes a selected skill through Pi's native command", () => {
   expect(
@@ -114,11 +152,13 @@ it("preserves argument boundary whitespace", () => {
 });
 
 it("preserves text chunks, local files, and local images", () => {
-  const workspaceDir = mkdtempSync(join(tmpdir(), "bb-pi-turn-input-"));
+  const workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-pi-turn-input-"));
+
   try {
     const imagePath = join(workspaceDir, "screenshot.png");
     const filePath = join(workspaceDir, "context.txt");
     writeFileSync(imagePath, Buffer.from("fake png data"));
+
     const extracted = extractPiPromptInput([
       { type: "text", text: "Before", mentions: [] },
       { type: "localFile", path: filePath },
@@ -146,7 +186,8 @@ it("preserves text chunks, local files, and local images", () => {
 });
 
 it("distinguishes an image-only prompt from empty input", () => {
-  const workspaceDir = mkdtempSync(join(tmpdir(), "bb-pi-image-input-"));
+  const workspaceDir = mkdtempSync(join(tmpdir(), "omnyo-pi-image-input-"));
+
   try {
     const imagePath = join(workspaceDir, "screenshot.png");
     writeFileSync(imagePath, Buffer.from("fake png data"));
@@ -223,6 +264,7 @@ it("keeps selected provider commands and unselected slash text unchanged", () =>
 
 it("rejects invalid skill mentions at the protocol boundary", () => {
   const validMention = selectedSkillMention("inspect", 0);
+
   const invalidInputs = [
     {
       type: "text",

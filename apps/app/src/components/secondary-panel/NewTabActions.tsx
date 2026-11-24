@@ -5,18 +5,20 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { COARSE_POINTER_COMPACT_ICON_SIZE_CLASS } from "@bb/shared-ui/coarse-pointer-sizing";
-import { Icon, type IconName } from "@bb/shared-ui/icon";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { COARSE_POINTER_COMPACT_ICON_SIZE_CLASS } from "@omnyo/shared-ui/coarse-pointer-sizing";
+import { Icon, type IconName } from "@omnyo/shared-ui/icon";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { AppCommandShortcutHint } from "@/components/commands/AppCommandShortcutHint";
 import { useAppCommandShortcut } from "@/components/commands/AppCommandProvider";
 import { PluginItemIcon } from "@/components/plugin/PluginIcon";
 import type { PluginPanelActionEntry } from "@/components/plugin/PluginPanelActions";
-import { useSidebarSortable } from "@bb/shared-ui/sortable-motion";
-import { useReorderDnd } from "@bb/shared-ui/use-reorder-dnd";
-import { isDesktopBrowserAvailable } from "@/lib/bb-desktop";
+import { useSidebarSortable } from "@omnyo/shared-ui/sortable-motion";
+import { useReorderDnd } from "@omnyo/shared-ui/use-reorder-dnd";
+import { isDesktopBrowserAvailable } from "@/lib/omnyo-desktop";
 import { arrangeByStoredOrder, reorderStoredOrder } from "@/lib/stored-order";
+import { appCommandTarget } from "@/lib/app-command-targets";
 import type { AppShortcutPresentation } from "@/lib/app-keybindings";
+import type { KeyboardCommandId } from "@omnyo/domain";
 import {
   LAUNCHER_ACTION_ROW_BASE_CLASS,
   LAUNCHER_ROW_ICON_CLASS,
@@ -25,6 +27,7 @@ import {
 import { newTabActionOrderAtom } from "./newTabActionsAtoms";
 
 export type OpenBrowserHandler = () => void;
+
 export type StartTerminalHandler = () => void;
 
 export interface UseNewTabActionsArgs {
@@ -45,6 +48,7 @@ export interface NewTabAction {
   label: string;
   disabled: boolean;
   shortcut: AppShortcutPresentation | null;
+  command?: KeyboardCommandId;
   trailing: ReactNode;
   onSelect: () => void;
 }
@@ -69,9 +73,12 @@ interface NewTabActionRowProps {
 }
 
 const ACTIONS_SECTION_LABEL = "Actions";
+
 const NEW_TAB_ACTION_DRAG_HANDLE_CLASS =
-  "cursor-grab touch-none opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:cursor-grabbing group-hover:opacity-100 [@media(hover:none)]:opacity-100";
+  "cursor-grab touch-none opacity-0 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:cursor-grabbing group-hover:opacity-100 [@media(hover:none)]:opacity-100";
+
 const OPEN_BROWSER_ACTION_ID = "file-search-result-open-browser";
+
 const START_TERMINAL_ACTION_ID = "file-search-result-start-terminal";
 
 function actionIcon(iconName: IconName): ReactNode {
@@ -93,10 +100,12 @@ export function useNewTabActions({
 }: UseNewTabActionsArgs): NewTabAction[] {
   const storedOrder = useAtomValue(newTabActionOrderAtom);
   const terminalShortcut = useAppCommandShortcut("terminal.open");
+
   const showOpenBrowser =
     onOpenBrowser !== undefined && isDesktopBrowserAvailable();
 
   const actions: NewTabAction[] = [];
+
   if (showOpenBrowser) {
     actions.push({
       id: OPEN_BROWSER_ACTION_ID,
@@ -108,6 +117,7 @@ export function useNewTabActions({
       onSelect: () => onOpenBrowser?.(),
     });
   }
+
   if (onStartTerminal !== undefined) {
     actions.push({
       id: START_TERMINAL_ACTION_ID,
@@ -115,10 +125,12 @@ export function useNewTabActions({
       label: "Start terminal",
       disabled: startTerminalDisabled,
       shortcut: terminalShortcut,
+      command: "terminal.open",
       trailing: startTerminalTrailing ?? null,
       onSelect: () => onStartTerminal(),
     });
   }
+
   for (const action of pluginActions ?? []) {
     actions.push({
       id: action.id,
@@ -156,11 +168,14 @@ export function matchNewTabActions(
   query: string,
 ): NewTabAction[] {
   const queryWords = toSearchWords(query);
+
   if (queryWords.length === 0) {
     return [];
   }
+
   return actions.filter((action) => {
     const words = toSearchWords(action.label);
+
     return queryWords.every((queryWord) =>
       words.some((word) => word.startsWith(queryWord)),
     );
@@ -184,6 +199,7 @@ export function NewTabActions({ actions }: NewTabActionsProps) {
 
 function NewTabActionList({ actions }: NewTabActionListProps) {
   const [storedOrder, setStoredOrder] = useAtom(newTabActionOrderAtom);
+
   const { normalizedOrder } = useMemo(
     () =>
       arrangeByStoredOrder({
@@ -222,6 +238,7 @@ function ReorderableNewTabActionList({
     () => actions.map((action) => action.id),
     [actions],
   );
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       if (
@@ -231,16 +248,19 @@ function ReorderableNewTabActionList({
       ) {
         return;
       }
+
       const nextOrder = reorderStoredOrder({
         activeId: event.active.id,
         overId: event.over.id,
         order: normalizedOrder,
         visibleIds: orderedIds,
       });
+
       if (nextOrder) onOrderChange(nextOrder);
     },
     [normalizedOrder, onOrderChange, orderedIds],
   );
+
   const { dndContextProps, onClickCapture } = useReorderDnd({
     onDragEnd: handleDragEnd,
   });
@@ -266,6 +286,7 @@ function SortableNewTabActionRow({ action }: SortableNewTabActionRowProps) {
     id: action.id,
     disabled: false,
   });
+
   const { attributes, listeners, setActivatorNodeRef } = dragBindings;
 
   return (
@@ -309,6 +330,7 @@ function NewTabActionRow({ action, dragHandle }: NewTabActionRowProps) {
         type="button"
         id={action.id}
         data-panel-new-tab-item=""
+        {...(action.command ? appCommandTarget(action.command) : {})}
         aria-keyshortcuts={action.shortcut?.ariaKeyshortcuts}
         disabled={action.disabled}
         onClick={action.onSelect}

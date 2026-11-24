@@ -6,25 +6,29 @@ import {
   experimental_Icon,
   experimental_usePluginId,
   experimental_useQuestionFormHost,
-  useBbContext,
+  experimental_useAppContext,
+  experimental_useVisibleAppContext,
 } from "../../app.js";
 import { installTestPluginRuntime, loadPluginApp, renderSlot } from "../app.js";
 
 interface RuntimeHost {
-  __bbPluginRuntime?: unknown;
+  __omnyoPluginRuntime?: unknown;
 }
 
 const host = globalThis as RuntimeHost;
-const runtimeAtImport = host.__bbPluginRuntime;
+
+const runtimeAtImport = host.__omnyoPluginRuntime;
+
 const Icon = experimental_Icon;
 
 afterEach(() => {
   cleanup();
-  host.__bbPluginRuntime = runtimeAtImport;
+  host.__omnyoPluginRuntime = runtimeAtImport;
 });
 
 function ContextProbe() {
-  const context = useBbContext();
+  const context = experimental_useAppContext();
+
   return (
     <p>
       <Icon name="Folder" aria-label="folder" />
@@ -33,7 +37,7 @@ function ContextProbe() {
   );
 }
 
-describe("@get-bb/plugin-sdk/app without a runtime at import time", () => {
+describe("@omnyo/plugin-sdk/app without a runtime at import time", () => {
   it("loaded before any runtime was installed", () => {
     expect(runtimeAtImport).toBeUndefined();
   });
@@ -47,7 +51,7 @@ describe("@get-bb/plugin-sdk/app without a runtime at import time", () => {
       });
     });
 
-    expect(definition.__bbPluginApp).toBe(true);
+    expect(definition.__omnyoPluginApp).toBe(true);
     const app = await loadPluginApp(definition);
     expect(app.homepageSections.map((section) => section.id)).toEqual([
       "probe",
@@ -67,10 +71,33 @@ describe("@get-bb/plugin-sdk/app without a runtime at import time", () => {
     );
   });
 
+  it("forwards the semantic visible context from the test runtime", () => {
+    function VisibleContextProbe() {
+      return (
+        <output>{JSON.stringify(experimental_useVisibleAppContext())}</output>
+      );
+    }
+
+    const context = {
+      view: "settings",
+      projectId: null,
+      threadId: null,
+      panel: null,
+    } as const;
+
+    const slot = renderSlot(
+      { component: VisibleContextProbe },
+      {},
+      { visibleContext: context },
+    );
+
+    expect(slot.getByRole("status").textContent).toBe(JSON.stringify(context));
+  });
+
   it("names the missing runtime when a hook runs without one", () => {
-    host.__bbPluginRuntime = undefined;
+    host.__omnyoPluginRuntime = undefined;
     expect(() => render(<ContextProbe />)).toThrow(
-      /useBbContext needs the bb app's plugin runtime/,
+      /experimental_useAppContext needs the Omnyo app's plugin runtime/,
     );
   });
 
@@ -93,12 +120,15 @@ describe("@get-bb/plugin-sdk/app without a runtime at import time", () => {
 
   it("gives a form rendered outside a pending interaction no answer shortcuts", () => {
     const chosen: number[] = [];
+
     function QuestionShortcutProbe() {
       const host = experimental_useQuestionFormHost();
       host.registerChoiceHandler((index) => {
         chosen.push(index);
+
         return true;
       })();
+
       return <p>{`${host.shortcuts.size} shortcuts`}</p>;
     }
 

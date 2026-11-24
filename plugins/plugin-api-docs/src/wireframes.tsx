@@ -3,12 +3,14 @@ import {
   Fragment,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { experimental_ResponsiveDrawerShell as ResponsiveDrawerShell } from "@omnyo/plugin-sdk/app";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { Switch } from "@/components/ui/switch";
 
@@ -38,14 +40,17 @@ export const SurfaceMapContext = createContext<SurfaceMapState | null>(null);
 
 export function useSurfaceMap(): SurfaceMapState {
   const state = useContext(SurfaceMapContext);
+
   if (!state) {
     throw new Error("useSurfaceMap must be used inside a SurfaceMapContext");
   }
+
   return state;
 }
 
 function useEngagement(id: string) {
   const { activeId, expandedId } = useSurfaceMap();
+
   return {
     active: activeId === id || expandedId === id,
     outlined: activeId !== null ? activeId === id : expandedId === id,
@@ -54,6 +59,7 @@ function useEngagement(id: string) {
 
 function useAnnotationHover(id: string) {
   const { setActiveId } = useSurfaceMap();
+
   return {
     onMouseEnter: () => setActiveId(id),
     onMouseLeave: () => setActiveId(null),
@@ -69,6 +75,7 @@ function selectAnnotation(
   onActivate: (() => void) | undefined,
 ) {
   onActivate?.();
+
   if (!onSelect) return;
   event.preventDefault();
   event.stopPropagation();
@@ -85,6 +92,7 @@ function PlacedChip({
   chip: AnnotationChipPlacement;
 }) {
   const { numberOf } = useSurfaceMap();
+
   return (
     <span
       aria-hidden
@@ -127,6 +135,7 @@ function Mark({
   const { onSelect } = useSurfaceMap();
   const { active, outlined } = useEngagement(id);
   const hover = useAnnotationHover(id);
+
   return (
     <a
       data-guide-region={id}
@@ -136,7 +145,7 @@ function Mark({
       onClick={(event) => selectAnnotation(event, id, onSelect, onActivate)}
       {...hover}
       className={cn(
-        "relative rounded-md ring-1 ring-inset transition-all",
+        "relative rounded-md ring-1 ring-inset transition-[background-color,box-shadow]",
         FOCUS_RING_CLASS,
         outlined
           ? "bg-surface-selected ring-surface-selected-border"
@@ -171,7 +180,7 @@ function CommandPaletteActionMark({ onRun }: { onRun: () => void }) {
       {...hover}
       data-guide-fixture="command-palette-action"
       className={cn(
-        "flex w-full cursor-pointer items-center gap-1.5 rounded bg-state-hover px-2 py-1.5 text-left text-foreground ring-1 ring-inset transition-all",
+        "flex w-full cursor-pointer items-center gap-1.5 rounded bg-state-hover px-2 py-1.5 text-left text-foreground ring-1 ring-inset transition-shadow",
         outlined ? "ring-surface-selected-border" : "ring-transparent",
       )}
     >
@@ -216,7 +225,7 @@ function RegionMark({
         }
         {...hover}
         className={cn(
-          "absolute inset-0 z-[1] rounded-md ring-1 ring-inset transition-all",
+          "absolute inset-0 z-[1] rounded-md ring-1 ring-inset transition-[background-color,box-shadow]",
           FOCUS_RING_CLASS,
           outlined
             ? "bg-surface-selected/30 ring-surface-selected-border"
@@ -234,6 +243,7 @@ export const useBrowserLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 const CHIP_SIZE = 20;
+
 const CHIP_GAP = 8;
 
 function MeasuredBadge({
@@ -257,6 +267,7 @@ function MeasuredBadge({
   const { active } = useEngagement(id);
   const hover = useAnnotationHover(id);
   const ref = useRef<HTMLAnchorElement>(null);
+
   const [position, setPosition] = useState<{
     left: number;
     top: number;
@@ -265,76 +276,99 @@ function MeasuredBadge({
   useBrowserLayoutEffect(() => {
     const element = ref.current;
     const container = element?.offsetParent;
+
     if (!element || !(container instanceof HTMLElement)) return;
+
     const scope =
       container.closest<HTMLElement>("[data-map-section]") ?? container;
+
     const target = scope.querySelector<HTMLElement>(anchor);
+
     if (!target) return;
 
     const layoutOrigin = (element: HTMLElement) => {
       let x = 0;
       let y = 0;
       let node: HTMLElement | null = element;
+
       while (node) {
         x += node.offsetLeft;
         y += node.offsetTop;
         node =
           node.offsetParent instanceof HTMLElement ? node.offsetParent : null;
       }
+
       node = element.parentElement;
+
       while (node) {
         x -= node.scrollLeft;
         y -= node.scrollTop;
         node = node.parentElement;
       }
+
       return { x, y };
     };
+
     const measure = () => {
       const strategy = container.closest<HTMLElement>(
         "[data-guide-responsive-strategy]",
       );
+
       const counterScale = annotationChipCounterScale(
         Number(strategy?.dataset.guideScale ?? "1"),
       );
+
       const chipBox = CHIP_SIZE * counterScale;
+
       const edgeGap = flush
         ? parseFloat(getComputedStyle(container).borderLeftWidth || "0")
         : CHIP_GAP;
+
       const chipGap = edgeGap * counterScale;
       const chipTuck = 4 * counterScale;
       const recenter = (chipBox - CHIP_SIZE) / 2;
       const containerOrigin = layoutOrigin(container);
       const targetOrigin = layoutOrigin(target);
+
       const local = {
         left: targetOrigin.x - containerOrigin.x,
         top: targetOrigin.y - containerOrigin.y,
         width: target.offsetWidth,
         height: target.offsetHeight,
       };
+
       const clip = clipTo ? scope.querySelector<HTMLElement>(clipTo) : null;
+
       if (clip) {
         const clipOrigin = layoutOrigin(clip);
         const left = targetOrigin.x - clipOrigin.x;
+
         if (left < 0 || left + target.offsetWidth > clip.clientWidth) {
           setPosition(null);
+
           return;
         }
       }
+
       const centerY = local.top + local.height / 2 - chipBox / 2;
+
       const anchoredY =
         align === "start"
           ? local.top
           : align === "end"
             ? local.top + local.height - chipBox
             : centerY;
+
       const frame = container.querySelector<HTMLElement>("[data-guide-frame]");
       const frameOrigin = frame ? layoutOrigin(frame) : containerOrigin;
       const frameWidth = frame ? frame.offsetWidth : container.offsetWidth;
+
       const frameLocal = {
         left: frameOrigin.x - containerOrigin.x,
         right: frameOrigin.x - containerOrigin.x + frameWidth,
         top: frameOrigin.y - containerOrigin.y,
       };
+
       const next =
         at === "start"
           ? { left: frameLocal.left - chipBox - chipGap, top: anchoredY }
@@ -349,10 +383,13 @@ function MeasuredBadge({
                   left: local.left + local.width / 2 - chipBox / 2,
                   top: Math.max(0, (frameLocal.top - chipBox) / 2),
                 };
+
       const clamp = (value: number, extent: number) =>
         Math.max(0, Math.min(value, Math.max(0, extent - chipBox)));
+
       const clippingFrame =
         container.closest<HTMLElement>("[data-guide-frame]");
+
       if (clippingFrame) {
         const clipOrigin = layoutOrigin(clippingFrame);
         const clipLeft = clipOrigin.x - containerOrigin.x;
@@ -361,9 +398,11 @@ function MeasuredBadge({
           clipLeft + clippingFrame.offsetWidth - chipBox - chipTuck,
         );
       }
+
       if (!flush) {
         next.left = clamp(next.left, container.offsetWidth);
       }
+
       next.top = clamp(next.top, container.offsetHeight);
       next.left += recenter;
       next.top += recenter;
@@ -380,11 +419,14 @@ function MeasuredBadge({
     const observer = new ResizeObserver(measure);
     observer.observe(container);
     observer.observe(target);
+
     const scaleWrapper = container.closest<HTMLElement>(
       "[data-guide-responsive-strategy]",
     );
+
     if (scaleWrapper) observer.observe(scaleWrapper);
     scope.addEventListener("scroll", measure, true);
+
     return () => {
       observer.disconnect();
       scope.removeEventListener("scroll", measure, true);
@@ -434,8 +476,9 @@ function PluginGlyph({ className }: { className?: string }) {
 
 function ProviderGlyph() {
   const { renderPluginIcon } = useSurfaceMap();
+
   return (
-    renderPluginIcon?.("Claude Code provider") ?? (
+    renderPluginIcon?.("Claude Code Provider") ?? (
       <Icon name="Code" className="size-3.5" />
     )
   );
@@ -490,7 +533,6 @@ const FOOTER_ITEM_RENDERERS: Record<string, () => ReactNode> = {
       </span>
     </span>
   ),
-  "bug-report": () => <MiniIcon icon="Bug" className="size-4" />,
 };
 
 const RAIL_BUTTON_CLASS = "flex size-7 items-center justify-center rounded-md";
@@ -530,6 +572,20 @@ function SidebarRail() {
   );
 }
 
+function SidebarEntryRow() {
+  return (
+    <Mark
+      id="sidebar-entry"
+      label="A plugin's labeled row under New thread"
+      className="mx-1.5 flex h-8 items-center gap-2 px-2 text-sm"
+    >
+      <PluginGlyph className="size-3.5" />
+      <span className="min-w-0 flex-1 truncate">Your page</span>
+      <span aria-hidden className="size-2 rounded-full bg-warning" />
+    </Mark>
+  );
+}
+
 const SIDEBAR_SECTION_RENDERERS: Record<string, () => ReactNode> = {
   "top-reserve": () => (
     <div
@@ -547,7 +603,7 @@ const SIDEBAR_SECTION_RENDERERS: Record<string, () => ReactNode> = {
       className="mx-1.5 flex-1 px-1.5 py-1.5"
       showChip={false}
     >
-      <span className="block px-2 pb-1 pt-1.5 text-xs text-subtle-foreground/75">
+      <span className="block px-2 pb-1 pt-1.5 text-xs text-subtle-foreground">
         Pinned
       </span>
       {SIDEBAR_THREADS.map((thread) => (
@@ -572,7 +628,7 @@ const SIDEBAR_SECTION_RENDERERS: Record<string, () => ReactNode> = {
           ) : null}
         </span>
       ))}
-      <span className="block px-2 pb-1 pt-2 text-xs text-subtle-foreground/75">
+      <span className="block px-2 pb-1 pt-2 text-xs text-subtle-foreground">
         Projects
       </span>
       {["acme-app", "dotfiles"].map((project) => (
@@ -587,37 +643,50 @@ const SIDEBAR_SECTION_RENDERERS: Record<string, () => ReactNode> = {
     </RegionMark>
   ),
   footer: () => (
-    <Mark
-      id="sidebar-footer"
-      label="Plugin footer items can run actions or reveal content"
-      className="mx-1.5 mb-1.5 flex w-44 flex-col gap-1.5 p-1.5"
-    >
-      <span className="block w-full overflow-hidden rounded-md border border-border bg-surface-raised-solid">
-        <span className="flex h-6 items-center gap-1 border-b border-border px-1.5">
-          <span className="flex size-4 items-center justify-center rounded bg-state-hover text-2xs text-foreground">
-            A
-          </span>
-          <span className="flex size-4 items-center justify-center rounded text-2xs">
-            B
-          </span>
-          <span className="ml-auto text-2xs">×</span>
+    <>
+      <Mark
+        id="sidebar-footer-card"
+        label="A persistent plugin card above the sidebar controls"
+        className="mx-3 mb-3 flex flex-col gap-1.5 rounded-md border border-border bg-surface-raised-solid p-2"
+      >
+        <span className="flex items-center gap-1.5 text-2xs text-foreground">
+          <PluginGlyph className="size-3.5" />
+          Sync status
         </span>
-        <span className="block space-y-1.5 p-2">
-          <span className="flex items-center justify-between text-2xs">
-            <span>5-hour limit</span>
-            <span className="text-warning">18% left</span>
+        <span className="text-2xs">2 jobs running</span>
+      </Mark>
+      <Mark
+        id="sidebar-footer"
+        label="Plugin footer items can run actions or reveal content"
+        className="mx-1.5 mb-1.5 flex w-44 flex-col gap-1.5 p-1.5"
+      >
+        <span className="block w-full overflow-hidden rounded-md border border-border bg-surface-raised-solid">
+          <span className="flex h-6 items-center gap-1 border-b border-border px-1.5">
+            <span className="flex size-4 items-center justify-center rounded bg-state-hover text-2xs text-foreground">
+              A
+            </span>
+            <span className="flex size-4 items-center justify-center rounded text-2xs">
+              B
+            </span>
+            <span className="ml-auto text-2xs">×</span>
           </span>
-          <span className="block h-1 overflow-hidden rounded-full bg-muted">
-            <span className="block h-full w-4/5 rounded-full bg-warning" />
+          <span className="block space-y-1.5 p-2">
+            <span className="flex items-center justify-between text-2xs">
+              <span>5-hour limit</span>
+              <span className="text-warning">18% left</span>
+            </span>
+            <span className="block h-1 overflow-hidden rounded-full bg-muted">
+              <span className="block h-full w-4/5 rounded-full bg-warning" />
+            </span>
           </span>
         </span>
-      </span>
-      <span className="flex w-full items-center gap-2 px-1 py-0.5">
-        {anatomy.sidebarFooter.map((key) => (
-          <Fragment key={key}>{FOOTER_ITEM_RENDERERS[key]?.()}</Fragment>
-        ))}
-      </span>
-    </Mark>
+        <span className="flex w-full items-center gap-2 px-1 py-0.5">
+          {anatomy.sidebarFooter.map((key) => (
+            <Fragment key={key}>{FOOTER_ITEM_RENDERERS[key]?.()}</Fragment>
+          ))}
+        </span>
+      </Mark>
+    </>
   ),
 };
 
@@ -625,7 +694,6 @@ const MESSAGE_ACTION_RENDERERS: Record<string, () => ReactNode> = {
   copy: () => <MiniIcon icon="Copy" className="size-3.5" />,
   edit: () => <MiniIcon icon="Edit" className="size-3.5" />,
   "plugin-actions": () => <PluginGlyph className="size-3.5" />,
-  "message-menu": () => <MiniIcon icon="MoreHorizontal" className="size-3.5" />,
 };
 
 export const ANATOMY_RENDERER_KEYS = {
@@ -641,12 +709,15 @@ export type AppShellRightPanelTab =
   | "code-renderers";
 
 function RightPanelTabLaneBadges({ mobile }: { mobile: boolean }) {
-  const clipTo = mobile ? '[data-guide-fixture="right-panel-tab-strip"]' : undefined;
+  const clipTo = mobile
+    ? '[data-guide-fixture="right-panel-tab-strip"]'
+    : undefined;
+
   return (
     <>
       <MeasuredBadge
         id="code-renderers"
-        label="Plugin code and diff renderers on bb's Diff tab"
+        label="Plugin code and diff renderers on Omnyo's Diff tab"
         anchor='[data-guide-region="code-renderers"]'
         clipTo={clipTo}
         at="lane"
@@ -686,6 +757,7 @@ export function CommandPaletteWireframe({
   const restoreTimer = useRef<number | undefined>(undefined);
 
   const openPalette = () => setPaletteOpen(true);
+
   const runReleaseChecklist = () => {
     setPaletteOpen(false);
     setReleasePanelOpen(true);
@@ -695,6 +767,7 @@ export function CommandPaletteWireframe({
       RELEASE_DEMO_MS,
     );
   };
+
   useEffect(() => () => window.clearTimeout(restoreTimer.current), []);
 
   return (
@@ -704,9 +777,15 @@ export function CommandPaletteWireframe({
       className={cn("relative pb-2 pt-4", mobile ? "px-6" : "px-7")}
     >
       <WindowFrame
-        className={mobile ? cn("flex flex-col", MOBILE_SCREEN_CLASS) : undefined}
+        className={
+          mobile ? cn("flex flex-col", MOBILE_SCREEN_CLASS) : undefined
+        }
       >
-        <div className={mobile ? "relative min-h-0 flex-1" : "relative min-h-[500px]"}>
+        <div
+          className={
+            mobile ? "relative min-h-0 flex-1" : "relative min-h-[500px]"
+          }
+        >
           <div
             data-guide-fixture="command-palette-thread"
             className={cn(
@@ -869,7 +948,10 @@ export function CommandPaletteWireframe({
                 )}
               >
                 {mobile ? (
-                  <span aria-hidden className="flex h-6 items-center justify-center">
+                  <span
+                    aria-hidden
+                    className="flex h-6 items-center justify-center"
+                  >
                     <span className="h-1 w-10 rounded-full bg-muted-foreground/20" />
                   </span>
                 ) : null}
@@ -907,7 +989,7 @@ export function CommandPaletteWireframe({
                 {mobile ? null : (
                   <MeasuredBadge
                     id="command-palette-actions"
-                    label="Plugin actions in bb's quick command palette"
+                    label="Plugin actions in Omnyo's quick command palette"
                     anchor='[data-guide-region="command-palette-actions"]'
                     at="start"
                     flush
@@ -921,11 +1003,105 @@ export function CommandPaletteWireframe({
       {mobile && paletteOpen ? (
         <MeasuredBadge
           id="command-palette-actions"
-          label="Plugin actions in bb's quick command palette"
+          label="Plugin actions in Omnyo's quick command palette"
           anchor='[data-guide-region="command-palette-actions"]'
           at="start"
         />
       ) : null}
+    </div>
+  );
+}
+
+export function ResponsiveDrawerWireframe({
+  mobile = false,
+}: {
+  mobile?: boolean;
+}) {
+  const [state, setState] = useState<"closed" | "open" | "retained">("closed");
+  const descriptionId = useId();
+
+  return (
+    <div
+      data-guide-fixture="responsive-drawer-flow"
+      data-guide-state={state}
+      className={cn("relative pb-2 pt-4", mobile ? "px-6" : "px-7")}
+    >
+      <WindowFrame
+        className={cn(
+          "flex flex-col bg-background",
+          mobile ? MOBILE_SCREEN_CLASS : "min-h-[500px]",
+        )}
+      >
+        <div className="flex h-12 items-center gap-2 border-b border-border-hairline px-4 text-foreground">
+          <MiniIcon icon="Layers" className="size-4" />
+          Plugin workspace
+        </div>
+        <div className="flex flex-1 items-center justify-center p-8">
+          <div className="w-full max-w-sm space-y-4 rounded-lg border border-border bg-card p-5">
+            <Mark
+              id="responsive-drawer"
+              label="Omnyo's shared compact drawer"
+              className="inline-flex items-center gap-2 py-1 pl-2 pr-6 text-sm font-medium text-foreground"
+              chip="corner"
+            >
+              <MiniIcon icon="PanelBottom" className="size-4" />
+              Compact drawers
+            </Mark>
+            <p className="text-sm text-muted-foreground">
+              Edit a note in the drawer, then close and reopen it to continue.
+            </p>
+            <button
+              type="button"
+              data-guide-fixture="responsive-drawer-open"
+              className={cn(
+                "rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground",
+                FOCUS_RING_CLASS,
+              )}
+              onClick={() => setState("open")}
+            >
+              {state === "retained" ? "Reopen drawer" : "Open drawer"}
+            </button>
+            {state === "retained" ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                Drawer closed. Reopen it to continue your draft.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </WindowFrame>
+      <ResponsiveDrawerShell
+        open={state === "open"}
+        onOpenChange={(open) => setState(open ? "open" : "retained")}
+        srLabel="Plugin drawer"
+        describedBy={descriptionId}
+        contentClassName="p-5"
+      >
+        <div
+          data-guide-fixture="responsive-drawer-content"
+          className="space-y-4"
+        >
+          <p id={descriptionId} className="text-sm text-muted-foreground">
+            Your draft stays here when you close this drawer.
+          </p>
+          <label className="block space-y-2 text-sm text-foreground">
+            <span>Draft note</span>
+            <input
+              defaultValue="Review the change"
+              className="w-full rounded-md border border-input bg-background px-3 py-2"
+            />
+          </label>
+          <button
+            type="button"
+            className={cn(
+              "rounded-md border border-border px-3 py-2 text-sm text-foreground",
+              FOCUS_RING_CLASS,
+            )}
+            onClick={() => setState("retained")}
+          >
+            Close drawer
+          </button>
+        </div>
+      </ResponsiveDrawerShell>
     </div>
   );
 }
@@ -939,6 +1115,7 @@ export function AppShellWireframe({
 }) {
   const [rightPanelTab, setRightPanelTab] =
     useState<AppShellRightPanelTab>("browser-toolbar");
+
   const { expandedId } = useSurfaceMap();
 
   useEffect(() => {
@@ -973,10 +1150,32 @@ export function AppShellWireframe({
             at="start"
           />
           <MeasuredBadge
+            id="sidebar-entry"
+            label="A plugin's labeled row under New thread"
+            anchor='[data-guide-region="sidebar-entry"]'
+            at="start"
+          />
+          <MeasuredBadge
             id="thread-list"
             label="The thread list, replaceable by one plugin"
             anchor='[data-guide-region="thread-list"]'
             at="start"
+          />
+        </>
+      ) : null}
+      {scene === "desktop" ? (
+        <>
+          <MeasuredBadge
+            id="title-bar-center"
+            label="Plugin content in the center of the window's top bar"
+            anchor='[data-guide-region="title-bar-center"]'
+            at="above"
+          />
+          <MeasuredBadge
+            id="thread-companion"
+            label="A plugin's thread companion, folded into the top bar"
+            anchor='[data-guide-region="thread-companion"]'
+            at="above"
           />
         </>
       ) : null}
@@ -995,6 +1194,13 @@ export function AppShellWireframe({
             at="above"
           />
           <MeasuredBadge
+            id="thread-view"
+            label="Plugin-owned main pane below the thread header"
+            anchor='[data-guide-target="thread-view"]'
+            at="start"
+            align="start"
+          />
+          <MeasuredBadge
             id="content-scripts"
             label="App-wide plugin scripts, running in the whole window"
             anchor="[data-guide-frame]"
@@ -1004,10 +1210,7 @@ export function AppShellWireframe({
         </>
       ) : null}
       {scene === "desktop" || scene === "panel" ? (
-        <RightPanelTabLaneBadges
-          key={rightPanelTab}
-          mobile={mobile}
-        />
+        <RightPanelTabLaneBadges key={rightPanelTab} mobile={mobile} />
       ) : null}
       <AppShellWireframeBody
         scene={scene}
@@ -1030,9 +1233,11 @@ function AppShellWireframeBody({
   const { expandedId } = useSurfaceMap();
   const [assistantMessageHovered, setAssistantMessageHovered] = useState(false);
   const contentScripts = useEngagement("content-scripts");
+  const threadView = useEngagement("thread-view");
   const messageActionsSelected = expandedId === "message-actions";
+
   const messageActionRowVisible =
-    scene === "conversation" || assistantMessageHovered || messageActionsSelected;
+    assistantMessageHovered || messageActionsSelected;
 
   if (scene === "navigation") {
     return (
@@ -1044,11 +1249,13 @@ function AppShellWireframeBody({
               <MiniIcon icon="MessageSquarePlus" />
               New thread
             </div>
+            <SidebarEntryRow />
             {anatomy.appSidebar
               .filter((key) => key !== "top-reserve")
               .map((key) => (
                 <Fragment key={key}>
                   {SIDEBAR_SECTION_RENDERERS[key]?.()}
+                  {key === "top-reserve" ? <SidebarEntryRow /> : null}
                 </Fragment>
               ))}
           </div>
@@ -1056,6 +1263,7 @@ function AppShellWireframeBody({
       </WindowFrame>
     );
   }
+
   if (scene === "panel") {
     return (
       <WindowFrame className={cn("flex flex-col", MOBILE_SCREEN_CLASS)}>
@@ -1067,7 +1275,9 @@ function AppShellWireframeBody({
       </WindowFrame>
     );
   }
+
   const mobile = scene === "conversation";
+
   return (
     <WindowFrame
       className={
@@ -1107,6 +1317,7 @@ function AppShellWireframeBody({
               {anatomy.appSidebar.map((key) => (
                 <Fragment key={key}>
                   {SIDEBAR_SECTION_RENDERERS[key]?.()}
+                  {key === "top-reserve" ? <SidebarEntryRow /> : null}
                 </Fragment>
               ))}
             </div>
@@ -1115,9 +1326,7 @@ function AppShellWireframeBody({
 
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-12 items-center gap-2 border-b border-border-hairline px-4">
-            {mobile ? (
-              <MiniIcon icon="PanelLeft" className="size-5" />
-            ) : null}
+            {mobile ? <MiniIcon icon="PanelLeft" className="size-5" /> : null}
             <span className="truncate text-foreground">
               Fix flaky checkout tests
             </span>
@@ -1130,6 +1339,28 @@ function AppShellWireframeBody({
               <MiniIcon icon="MoreHorizontal" className="size-3.5" />
             </Mark>
             <span className="flex-1" />
+            {mobile ? null : (
+              <>
+                <Mark
+                  id="thread-companion"
+                  label="A plugin's thread companion, folded into the top bar"
+                  className="flex h-6.5 items-center gap-1.5 rounded-md border border-border-hairline px-2 text-2xs text-foreground"
+                  showChip={false}
+                >
+                  <PluginGlyph className="size-3.5" />
+                  Tests pass
+                </Mark>
+                <Mark
+                  id="title-bar-center"
+                  label="Plugin content in the center of the window's top bar"
+                  className="flex h-6.5 items-center gap-1.5 rounded-full border border-border bg-surface-raised-solid px-2.5 text-2xs text-foreground"
+                  showChip={false}
+                >
+                  <PluginGlyph className="size-3.5" />2 agents running
+                </Mark>
+                <span className="flex-1" />
+              </>
+            )}
             <Mark
               id="thread-header"
               label="Plugin thread-header control, left end of the action row"
@@ -1138,163 +1369,172 @@ function AppShellWireframeBody({
             >
               <PluginGlyph className="size-3.5" />
             </Mark>
-            {mobile ? (
-              <MiniIcon icon="PanelRight" className="size-5" />
-            ) : null}
+            {mobile ? <MiniIcon icon="PanelRight" className="size-5" /> : null}
           </div>
 
           <div
-            data-guide-fixture="app-window-timeline"
-            className={
-              mobile
-                ? "flex min-h-0 flex-1 flex-col justify-end gap-5 overflow-hidden px-4 py-4 text-sm leading-relaxed"
-                : "min-h-[510px] flex-1 space-y-7 overflow-hidden px-5 py-6"
-            }
+            data-guide-target="thread-view"
+            className={cn(
+              "flex min-h-0 flex-1 flex-col",
+              engagedRingClass(threadView.outlined),
+            )}
           >
-            <div className="flex justify-end">
-              <span className="max-w-[70%] rounded-xl border border-border-seam bg-surface-recessed px-2.5 py-2 leading-snug text-foreground">
-                Fix the flaky checkout tests
-              </span>
-            </div>
-
-            <div className="w-[78%] space-y-1">
-              <span className="flex items-center gap-1.5 text-foreground">
-                <PluginGlyph className="size-3.5" />
-                Re-ran checkout suite
-                <span className="text-subtle-foreground">Completed</span>
-              </span>
-              <RegionMark
-                id="timeline-renderers"
-                label="Plugin-owned content inside a timeline entry"
-                className="ml-5 block space-y-1 px-2.5 py-2"
-                chip="side"
-              >
-                <div className="flex items-center gap-2" aria-hidden>
-                  <span className="h-1.5 w-2/3 rounded-sm bg-muted/60" />
-                  <span className="h-1.5 w-12 rounded-sm bg-foreground/40" />
-                </div>
-              </RegionMark>
-            </div>
-
             <div
-              data-guide-fixture="assistant-message"
-              onMouseEnter={() => setAssistantMessageHovered(true)}
-              onMouseLeave={() => setAssistantMessageHovered(false)}
-              onFocusCapture={() => setAssistantMessageHovered(true)}
-              onBlurCapture={() => setAssistantMessageHovered(false)}
-              className="w-[88%] space-y-2"
+              data-guide-fixture="app-window-timeline"
+              className={
+                mobile
+                  ? "flex min-h-0 flex-1 flex-col justify-end gap-5 overflow-hidden px-4 py-4 text-sm leading-relaxed"
+                  : "min-h-[510px] flex-1 space-y-7 overflow-hidden px-5 py-6"
+              }
             >
-              <p className="leading-relaxed">
-                The retries cluster in two suites. Failure rate by suite:
-              </p>
-              <Mark
-                id="message-directives"
-                label="A plugin component rendered inline by a message directive"
-                className="block w-3/5 px-2.5 py-2.5"
-              >
-                <span className="flex items-end gap-1.5" aria-hidden>
-                  <span className="h-4 w-3.5 rounded-sm bg-muted" />
-                  <span className="h-8 w-3.5 rounded-sm bg-foreground/40" />
-                  <span className="h-2.5 w-3.5 rounded-sm bg-muted" />
-                  <span className="h-6 w-3.5 rounded-sm bg-muted" />
-                  <span className="h-2 w-3.5 rounded-sm bg-muted" />
+              <div className="flex justify-end">
+                <span className="max-w-[70%] rounded-xl border border-border-seam bg-surface-recessed px-2.5 py-2 leading-snug text-foreground">
+                  Fix the flaky checkout tests
                 </span>
-                <span className="mt-1.5 flex items-center gap-1.5">
-                  <PluginGlyph className="size-3.5" />
-                  ::your-directive
-                </span>
-              </Mark>
-              <Mark
-                id="code-fence-renderers"
-                label="A plugin component rendering a fenced code block"
-                className="block w-3/5 px-2.5 py-2.5"
-              >
-                <span className="flex gap-1.5" aria-hidden>
-                  <span className="h-5 w-12 rounded-sm bg-muted" />
-                  <span className="h-5 w-8 rounded-sm bg-foreground/40" />
-                </span>
-                <span className="mt-1.5 flex items-center gap-1.5">
-                  <PluginGlyph className="size-3.5" />
-                  ```ui
-                </span>
-              </Mark>
-              <div className="space-y-1.5">
-                {messageActionsSelected ? (
-                  <div
-                    aria-hidden
-                    data-guide-fixture="message-action-selection-toolbar"
-                    className="inline-flex items-center gap-0.5 rounded-md border border-border bg-popover p-0.5 text-2xs text-foreground shadow-md"
-                  >
-                    <span className="flex items-center gap-1 rounded px-1.5 py-0.5">
-                      <MiniIcon icon="MessageSquarePlus" className="size-3.5" />
-                      Add to chat
-                    </span>
-                    <span className="mx-0.5 h-4 w-px bg-border" />
-                    <span className="flex items-center gap-1 rounded bg-state-hover px-1.5 py-0.5">
-                      <PluginGlyph className="size-3.5" />
-                      Your action
-                    </span>
-                  </div>
-                ) : null}
-                <p className="leading-relaxed">
-                  Fixed by isolating the{" "}
-                  <span
-                    data-guide-fixture="message-action-selected-text"
-                    className={cn(
-                      "rounded-sm px-0.5",
-                      messageActionsSelected &&
-                        "bg-file-accent/25 text-foreground",
-                    )}
-                  >
-                    Stripe mock
-                  </span>{" "}
-                  per test.
-                </p>
               </div>
-              <div className="flex h-7 items-start">
-                <Mark
-                  id="message-actions"
-                  label="Plugin message actions fit inline before overflowing into the menu"
-                  className="inline-flex items-center px-2 py-1.5"
+
+              <div className="w-[78%] space-y-1">
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <PluginGlyph className="size-3.5" />
+                  Re-ran checkout suite
+                  <span className="text-subtle-foreground">Completed</span>
+                </span>
+                <RegionMark
+                  id="timeline-renderers"
+                  label="Plugin-owned content inside a timeline entry"
+                  className="ml-5 block space-y-1 px-2.5 py-2"
+                  chip="side"
                 >
-                  <span
-                    data-guide-fixture="message-action-hover-row"
-                    className={cn(
-                      "inline-flex items-center gap-2 transition-opacity",
-                      messageActionRowVisible ? "opacity-100" : "opacity-0",
-                    )}
-                  >
-                    {anatomy.messageActionBar.map((key) => (
-                      <Fragment key={key}>
-                        {MESSAGE_ACTION_RENDERERS[key]?.()}
-                      </Fragment>
-                    ))}
+                  <div className="flex items-center gap-2" aria-hidden>
+                    <span className="h-1.5 w-2/3 rounded-sm bg-muted/60" />
+                    <span className="h-1.5 w-12 rounded-sm bg-foreground/40" />
+                  </div>
+                </RegionMark>
+              </div>
+
+              <div
+                data-guide-fixture="assistant-message"
+                onMouseEnter={() => setAssistantMessageHovered(true)}
+                onMouseLeave={() => setAssistantMessageHovered(false)}
+                onFocusCapture={() => setAssistantMessageHovered(true)}
+                onBlurCapture={() => setAssistantMessageHovered(false)}
+                className="w-[88%] space-y-2"
+              >
+                <p className="leading-relaxed">
+                  The retries cluster in two suites. Failure rate by suite:
+                </p>
+                <Mark
+                  id="message-directives"
+                  label="A plugin component rendered inline by a message directive"
+                  className="block w-3/5 px-2.5 py-2.5"
+                >
+                  <span className="flex items-end gap-1.5" aria-hidden>
+                    <span className="h-4 w-3.5 rounded-sm bg-muted" />
+                    <span className="h-8 w-3.5 rounded-sm bg-foreground/40" />
+                    <span className="h-2.5 w-3.5 rounded-sm bg-muted" />
+                    <span className="h-6 w-3.5 rounded-sm bg-muted" />
+                    <span className="h-2 w-3.5 rounded-sm bg-muted" />
+                  </span>
+                  <span className="mt-1.5 flex items-center gap-1.5">
+                    <PluginGlyph className="size-3.5" />
+                    ::your-directive
                   </span>
                 </Mark>
+                <Mark
+                  id="code-fence-renderers"
+                  label="A plugin component rendering a fenced code block"
+                  className="block w-3/5 px-2.5 py-2.5"
+                >
+                  <span className="flex gap-1.5" aria-hidden>
+                    <span className="h-5 w-12 rounded-sm bg-muted" />
+                    <span className="h-5 w-8 rounded-sm bg-foreground/40" />
+                  </span>
+                  <span className="mt-1.5 flex items-center gap-1.5">
+                    <PluginGlyph className="size-3.5" />
+                    ```ui
+                  </span>
+                </Mark>
+                <div className="space-y-1.5">
+                  {messageActionsSelected ? (
+                    <div
+                      aria-hidden
+                      data-guide-fixture="message-action-selection-toolbar"
+                      className="inline-flex items-center gap-0.5 rounded-md border border-border bg-popover p-0.5 text-2xs text-foreground shadow-md"
+                    >
+                      <span className="flex items-center gap-1 rounded px-1.5 py-0.5">
+                        <MiniIcon
+                          icon="MessageSquarePlus"
+                          className="size-3.5"
+                        />
+                        Add to chat
+                      </span>
+                      <span className="mx-0.5 h-4 w-px bg-border" />
+                      <span className="flex items-center gap-1 rounded bg-state-hover px-1.5 py-0.5">
+                        <PluginGlyph className="size-3.5" />
+                        Your action
+                      </span>
+                    </div>
+                  ) : null}
+                  <p className="leading-relaxed">
+                    Fixed by isolating the{" "}
+                    <span
+                      data-guide-fixture="message-action-selected-text"
+                      className={cn(
+                        "rounded-sm px-0.5",
+                        messageActionsSelected &&
+                          "bg-file-accent/25 text-foreground",
+                      )}
+                    >
+                      Stripe mock
+                    </span>{" "}
+                    per test.
+                  </p>
+                </div>
+                <div className="flex h-7 items-start">
+                  <Mark
+                    id="message-actions"
+                    label="Plugin message actions join the hover row on desktop and the long-press sheet on touch"
+                    className="inline-flex items-center px-2 py-1.5"
+                  >
+                    <span
+                      data-guide-fixture="message-action-hover-row"
+                      className={cn(
+                        "inline-flex items-center gap-2 transition-opacity",
+                        messageActionRowVisible ? "opacity-100" : "opacity-0",
+                      )}
+                    >
+                      {anatomy.messageActionBar.map((key) => (
+                        <Fragment key={key}>
+                          {MESSAGE_ACTION_RENDERERS[key]?.()}
+                        </Fragment>
+                      ))}
+                    </span>
+                  </Mark>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="space-y-2 border-t border-border-hairline p-4">
-            <Mark
-              id="pending-interaction"
-              label="A plugin ask-the-user form, shown in place of the composer"
-              className="block border border-border bg-card p-3"
-            >
-              <span className="flex items-center gap-1.5 text-foreground">
-                <PluginGlyph className="size-3.5" />
-                Pick a release channel
-              </span>
-              <span className="mt-2 flex gap-1.5" aria-hidden>
-                <span className="h-5.5 flex-1 rounded-md border border-border" />
-                <span className="flex h-5.5 items-center rounded-md border border-border px-2">
-                  Cancel
+            <div className="space-y-2 border-t border-border-hairline p-4">
+              <Mark
+                id="pending-interaction"
+                label="A plugin ask-the-user form, shown in place of the composer"
+                className="block border border-border bg-card p-3"
+              >
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <PluginGlyph className="size-3.5" />
+                  Pick a release channel
                 </span>
-                <span className="flex h-5.5 items-center rounded-md bg-foreground px-2 text-background">
-                  Submit
+                <span className="mt-2 flex gap-1.5" aria-hidden>
+                  <span className="h-5.5 flex-1 rounded-md border border-border" />
+                  <span className="flex h-5.5 items-center rounded-md border border-border px-2">
+                    Cancel
+                  </span>
+                  <span className="flex h-5.5 items-center rounded-md bg-foreground px-2 text-background">
+                    Submit
+                  </span>
                 </span>
-              </span>
-            </Mark>
+              </Mark>
+            </div>
           </div>
         </div>
 
@@ -1341,13 +1581,17 @@ export function AppShellRightPanel({
   useBrowserLayoutEffect(() => {
     if (!compact) return;
     const strip = tabStripRef.current;
+
     const label = strip?.querySelector<HTMLElement>(
       `[data-guide-tab="${activeTab}"]`,
     );
+
     const tab = label?.closest<HTMLElement>("a, button");
+
     if (!strip || !tab) return;
     const stripBounds = strip.getBoundingClientRect();
     const tabBounds = tab.getBoundingClientRect();
+
     if (tabBounds.left < stripBounds.left) {
       strip.scrollLeft += tabBounds.left - stripBounds.left - 12;
     } else if (tabBounds.right > stripBounds.right) {
@@ -1390,7 +1634,7 @@ export function AppShellRightPanel({
           </span>
           <Mark
             id="code-renderers"
-            label="Plugin code and diff renderers on bb's Diff tab"
+            label="Plugin code and diff renderers on Omnyo's Diff tab"
             className={cn(
               tabClass("code-renderers"),
               "gap-1.5 whitespace-nowrap pl-1.5 pr-2",
@@ -1583,6 +1827,7 @@ export function RealComposerAnnotated({
   mobile?: boolean;
 }) {
   const banners = useEngagement("composer-banners");
+
   return (
     <div className={cn("relative pb-2 pt-4", mobile ? "px-6" : "px-7")}>
       <div className="relative w-full select-none text-xs leading-none text-muted-foreground">
@@ -1622,7 +1867,9 @@ export function RealComposerAnnotated({
           />
         </div>
         <WindowFrame
-          className={mobile ? cn("flex flex-col", MOBILE_SCREEN_CLASS) : undefined}
+          className={
+            mobile ? cn("flex flex-col", MOBILE_SCREEN_CLASS) : undefined
+          }
         >
           <div
             className={cn(
@@ -1685,6 +1932,7 @@ function StaticEmbeddedComposer({ mobile = false }: { mobile?: boolean }) {
   const plus = useEngagement("composer-plus-menu");
   const picker = useEngagement("provider-picker");
   const actions = useEngagement("composer-actions");
+
   return (
     <div data-guide-fixture="embedded-composer" className="space-y-2">
       <div
@@ -1693,7 +1941,6 @@ function StaticEmbeddedComposer({ mobile = false }: { mobile?: boolean }) {
           mobile ? "min-h-48 gap-7" : "h-36",
         )}
       >
-
         <div
           className={cn(
             "mx-2 flex items-center rounded-md text-sm leading-none text-foreground",
@@ -1842,6 +2089,9 @@ function StaticEmbeddedComposer({ mobile = false }: { mobile?: boolean }) {
             </Mark>
           </span>
           <span className="flex size-9 items-center justify-center">
+            <MiniIcon icon="ShieldOff" className="size-4" />
+          </span>
+          <span className="flex size-9 items-center justify-center">
             <MiniIcon icon="Mic" className="size-4" />
           </span>
           <span
@@ -1854,13 +2104,6 @@ function StaticEmbeddedComposer({ mobile = false }: { mobile?: boolean }) {
             />
           </span>
         </div>
-      </div>
-      <div className="flex items-center justify-between px-2.5" aria-hidden>
-        <span className="flex items-center gap-1.5">
-          <MiniIcon icon="Folder" className="size-3.5" />
-          acme-app · worktree
-        </span>
-        <span>Full Access</span>
       </div>
     </div>
   );
@@ -1931,6 +2174,7 @@ export function ComposeScreenWireframe({
       </div>
     );
   }
+
   return (
     <div className="relative px-7 pb-2 pt-4">
       <MeasuredBadge
@@ -1975,7 +2219,7 @@ export function ComposeScreenWireframe({
             </div>
 
             <div className="w-[210px] shrink-0 border-l border-border-seam bg-sidebar p-2">
-              <span className="block px-1.5 pb-1.5 pt-1 text-xs text-subtle-foreground/75">
+              <span className="block px-1.5 pb-1.5 pt-1 text-xs text-subtle-foreground">
                 Actions
               </span>
               <span className="flex h-6.5 items-center gap-2 rounded-md px-2">
@@ -2051,7 +2295,7 @@ export function SettingsWireframe({ mobile = false }: { mobile?: boolean }) {
           <span className="block text-subtle-foreground">Configuration</span>
           <Mark
             id="declarative-settings"
-            label="The form bb generates from the fields you declare"
+            label="The form Omnyo generates from the fields you declare"
             className="block bg-surface-recessed-solid p-3"
           >
             <span
@@ -2075,7 +2319,7 @@ export function SettingsWireframe({ mobile = false }: { mobile?: boolean }) {
                 aria-hidden
                 className="flex h-6 w-32 shrink-0 items-center rounded-md border border-border bg-card px-2 text-xs text-subtle-foreground"
               >
-                [set]
+                Saved · type to replace
               </span>
             </span>
             <span
@@ -2101,37 +2345,41 @@ export function SettingsWireframe({ mobile = false }: { mobile?: boolean }) {
             </span>
             {mobile ? null : (
               <>
-            <span
-              className={cn(
-                "flex items-start justify-between gap-3 py-1.5",
-                mobile && "flex-wrap",
-              )}
-            >
-              <span className="min-w-0">
-                <span className="block text-foreground">Retry attempts</span>
-                <span className="block pt-1 leading-relaxed">
-                  Maximum retries before stopping.
+                <span
+                  className={cn(
+                    "flex items-start justify-between gap-3 py-1.5",
+                    mobile && "flex-wrap",
+                  )}
+                >
+                  <span className="min-w-0">
+                    <span className="block text-foreground">
+                      Retry attempts
+                    </span>
+                    <span className="block pt-1 leading-relaxed">
+                      Maximum retries before stopping.
+                    </span>
+                  </span>
+                  <span
+                    aria-hidden
+                    className="flex h-6 w-32 shrink-0 items-center rounded-md border border-border bg-card px-2 text-xs text-foreground"
+                  >
+                    3
+                  </span>
                 </span>
-              </span>
-              <span
-                aria-hidden
-                className="flex h-6 w-32 shrink-0 items-center rounded-md border border-border bg-card px-2 text-xs text-foreground"
-              >
-                3
-              </span>
-            </span>
-            <span className="block py-1.5">
-              <span className="block text-foreground">Custom instructions</span>
-              <span className="block pt-1 leading-relaxed">
-                Added to every agent task on this host.
-              </span>
-              <span
-                aria-hidden
-                className="mt-2 block h-12 rounded-md border border-border bg-card px-2 py-1.5 text-subtle-foreground"
-              >
-                Keep answers concise and run focused tests.
-              </span>
-            </span>
+                <span className="block py-1.5">
+                  <span className="block text-foreground">
+                    Custom instructions
+                  </span>
+                  <span className="block pt-1 leading-relaxed">
+                    Added to every agent task on this host.
+                  </span>
+                  <span
+                    aria-hidden
+                    className="mt-2 block h-12 rounded-md border border-border bg-card px-2 py-1.5 text-subtle-foreground"
+                  >
+                    Keep answers concise and run focused tests.
+                  </span>
+                </span>
               </>
             )}
           </Mark>
@@ -2162,6 +2410,7 @@ export function SettingsWireframe({ mobile = false }: { mobile?: boolean }) {
       </div>
     </WindowFrame>
   );
+
   return mobile ? <div className="px-6 pt-4">{frame}</div> : frame;
 }
 
@@ -2190,7 +2439,7 @@ export function ExtensionsPluginPageWireframe({
       >
         <Mark
           id="plugin-status"
-          label="The needs-configuration banner bb shows for a plugin that reports it"
+          label="The needs-configuration banner Omnyo shows for a plugin that reports it"
           className="flex items-center gap-2 border-b border-border bg-surface-recessed/55 px-5 py-1.5 text-xs"
           chip="corner-inset"
         >
@@ -2209,7 +2458,7 @@ export function ExtensionsPluginPageWireframe({
             <PluginGlyph className="size-4" />
             <span className="text-sm font-semibold text-foreground">Hello</span>
             <span className="rounded border border-border px-1.5 py-0.5 text-xs">
-              BB Official
+              Omnyo Official
             </span>
             <span className="flex-1" />
             <MiniIcon icon="Settings" className="size-3.5" />
@@ -2222,7 +2471,7 @@ export function ExtensionsPluginPageWireframe({
             <MiniIcon icon="MoreHorizontal" className="size-3.5" />
           </div>
           <span className="block font-mono text-xs text-subtle-foreground">
-            ~/.bb/plugins/hello
+            ~/.omnyo/plugins/hello
           </span>
 
           <div className="space-y-1.5 border-t border-border-hairline pt-3">
@@ -2235,7 +2484,7 @@ export function ExtensionsPluginPageWireframe({
             <span className="block text-subtle-foreground">Details</span>
             <span className="block divide-y divide-border-hairline rounded-md border border-border-hairline">
               {[
-                ["Delivery", "Updates with bb"],
+                ["Delivery", "Updates with Omnyo"],
                 ["Version", "0.1.0"],
               ].map(([label, value]) => (
                 <span
@@ -2257,7 +2506,7 @@ export function ExtensionsPluginPageWireframe({
             >
               {[
                 ["Settings", "API key, Case-sensitive search"],
-                ["bb hello", "Say hello from the terminal"],
+                ["omnyo hello", "Say hello from the terminal"],
               ].map(([name, what]) => (
                 <span
                   key={name}
@@ -2273,6 +2522,7 @@ export function ExtensionsPluginPageWireframe({
       </div>
     </WindowFrame>
   );
+
   return mobile ? <div className="px-6 pt-4">{frame}</div> : frame;
 }
 

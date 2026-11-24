@@ -3,11 +3,12 @@ import type { SessionState } from "../session/session-scheduler";
 export type ShellLoadPhase =
   | { kind: "loading" }
   | { kind: "ready" }
-  | { kind: "failed"; detail: string }
+  | { kind: "failed"; detail: string; code: number | null }
   | { kind: "http-error"; status: number };
 
 export type ShellScreenState =
   | { kind: "loading"; message: string }
+  | { kind: "reconnecting"; message: string }
   | { kind: "no-profile" }
   | { kind: "webview"; serverErrorStatus: number | null }
   | {
@@ -26,25 +27,32 @@ interface ShellScreenInput {
   load: ShellLoadPhase;
 }
 
+const TRANSIENT_NETWORK_ERRORS = new Set([
+  -1001, -1003, -1004, -1005, -1006, -1009,
+]);
+
 export function resolveShellScreenState(
   input: ShellScreenInput,
 ): ShellScreenState {
   if (!input.storeReady) {
     return { kind: "loading", message: "Opening server" };
   }
+
   if (!input.hasAnyProfile) {
     return { kind: "no-profile" };
   }
+
   if (!input.hasProfile) {
     return { kind: "loading", message: "Opening server" };
   }
+
   switch (input.session.status) {
     case "auth-required":
       return {
         kind: "error",
         title: "Could not sign in",
         detail:
-          "bb connect could not renew this phone’s sign-in. Pair again to reconnect.",
+          "Omnyo connect could not renew this phone’s sign-in. Pair again to reconnect.",
         action: "re-pair",
       };
     case "error":
@@ -60,10 +68,23 @@ export function resolveShellScreenState(
       if (input.requiresSession) {
         return { kind: "loading", message: "Signing in" };
       }
+
       break;
     case "authenticated":
       break;
   }
+
+  if (
+    (input.load.kind === "http-error" &&
+      input.load.status >= 500 &&
+      input.load.status < 600) ||
+    (input.load.kind === "failed" &&
+      input.load.code !== null &&
+      TRANSIENT_NETWORK_ERRORS.has(input.load.code))
+  ) {
+    return { kind: "reconnecting", message: "Reconnecting to server" };
+  }
+
   switch (input.load.kind) {
     case "failed":
       return {
@@ -84,10 +105,12 @@ export function revealsShellFailure(
   screen: ShellScreenState,
   requiresSession: boolean,
 ): boolean {
-  if (screen.kind === "error") return true;
+  if (screen.kind === "error" || screen.kind === "reconnecting") return true;
+
   if (screen.kind !== "webview" || screen.serverErrorStatus === null) {
     return false;
   }
+
   return !(
     requiresSession &&
     (screen.serverErrorStatus === 401 || screen.serverErrorStatus === 403)
@@ -99,9 +122,11 @@ export function resolveShellLoadPath(input: {
   requestedPath: string | undefined;
 }): string {
   if (input.visitedPath !== null) return input.visitedPath;
+
   if (input.requestedPath !== undefined && input.requestedPath.length > 0) {
     return input.requestedPath;
   }
+
   return "/";
 }
 

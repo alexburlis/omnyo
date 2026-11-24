@@ -17,10 +17,12 @@ describe("discoverRepos", () => {
     await mkdir(gitDir, { recursive: true });
     const headPath = join(gitDir, "HEAD");
     await writeFile(headPath, "ref: refs/heads/main\n");
+
     if (options.headAgeDays !== undefined) {
       const at = new Date(Date.now() - options.headAgeDays * DAY_MS);
       await utimes(headPath, at, at);
     }
+
     if (options.origin !== undefined) {
       await writeFile(
         join(gitDir, "config"),
@@ -30,7 +32,7 @@ describe("discoverRepos", () => {
   };
 
   beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), "bb-discover-"));
+    home = await mkdtemp(join(tmpdir(), "omnyo-discover-"));
   });
 
   afterEach(async () => {
@@ -91,6 +93,23 @@ describe("discoverRepos", () => {
 
     const { repos } = await run();
 
+    expect(repos.map((repo) => repo.name).sort()).toEqual(["app", "site"]);
+  });
+
+  it("keeps looking below a folder whose .git directory is not a repo", async () => {
+    await mkdir(join(home, "projects/.git/claude/branches/detached"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(home, "projects/.git/claude/branches/detached/attempts.jsonl"),
+      "",
+    );
+    await makeRepo("projects/app");
+    await makeRepo("projects/site");
+
+    const { repos, truncated } = await run();
+
+    expect(truncated).toBe(false);
     expect(repos.map((repo) => repo.name).sort()).toEqual(["app", "site"]);
   });
 

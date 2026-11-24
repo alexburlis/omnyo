@@ -9,11 +9,13 @@ export function fileNameFromPath(path: string): string {
   const normalizedPath = path.replaceAll("\\", "/");
   const segments = normalizedPath.split("/");
   const candidate = segments[segments.length - 1];
+
   return candidate && candidate.length > 0 ? candidate : path;
 }
 
 export function directoryFromPath(path: string): string {
   const lastSlash = path.lastIndexOf("/");
+
   return lastSlash === -1 ? "" : path.slice(0, lastSlash);
 }
 

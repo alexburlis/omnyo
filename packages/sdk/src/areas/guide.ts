@@ -1,4 +1,4 @@
-import { templateDefinitions, type TemplateId } from "@bb/templates/generated";
+import { templateDefinitions, type TemplateId } from "@omnyo/templates/generated";
 
 export interface GuideRenderArgs {
   chapter?: string;
@@ -14,18 +14,18 @@ export interface GuideArea {
 }
 
 const guideChapters: Record<string, TemplateId> = {
-  threads: "bbGuideThreads",
-  environments: "bbGuideEnvironments",
-  "agent-configuration": "bbGuideAgentConfiguration",
-  providers: "bbGuideProviders",
-  projects: "bbGuideProjects",
-  machines: "bbGuideMachines",
-  terminals: "bbGuideTerminals",
-  browser: "bbGuideBrowser",
-  customization: "bbGuideCustomization",
-  plugins: "bbGuidePlugins",
-  automations: "bbGuideAutomations",
-  json: "bbGuideJson",
+  threads: "omnyoGuideThreads",
+  environments: "omnyoGuideEnvironments",
+  "agent-configuration": "omnyoGuideAgentConfiguration",
+  providers: "omnyoGuideProviders",
+  projects: "omnyoGuideProjects",
+  machines: "omnyoGuideMachines",
+  terminals: "omnyoGuideTerminals",
+  browser: "omnyoGuideBrowser",
+  customization: "omnyoGuideCustomization",
+  plugins: "omnyoGuidePlugins",
+  automations: "omnyoGuideAutomations",
+  json: "omnyoGuideJson",
 };
 
 const guideChapterAliases: Record<string, string> = {
@@ -54,6 +54,8 @@ const guideChapterAliases: Record<string, string> = {
   hosts: "machines",
   server: "machines",
   terminal: "terminals",
+  preview: "terminals",
+  previews: "terminals",
   theme: "customization",
   settings: "customization",
   plugin: "plugins",
@@ -66,6 +68,7 @@ const guideChapterAliases: Record<string, string> = {
 
 function resolveGuideChapter(chapter: string): string {
   const normalized = chapter.trim().toLowerCase();
+
   return guideChapterAliases[normalized] ?? normalized;
 }
 
@@ -75,9 +78,11 @@ const templateBodyById = new Map(
 
 function renderStaticTemplate(templateId: TemplateId): string {
   const body = templateBodyById.get(templateId);
+
   if (body === undefined) {
     throw new Error(`Template '${templateId}' is unavailable.`);
   }
+
   return body;
 }
 
@@ -85,16 +90,19 @@ export function createGuideArea(): GuideArea {
   return {
     render(input = {}) {
       if (!input.chapter) {
-        return { content: renderStaticTemplate("bbGuideOverview") };
+        return { content: renderStaticTemplate("omnyoGuideOverview") };
       }
+
       const chapter = resolveGuideChapter(input.chapter);
       const templateId = guideChapters[chapter];
+
       if (!templateId) {
         const available = Object.keys(guideChapters).join(", ");
         throw new Error(
-          `Unknown guide chapter '${input.chapter}'. Available: ${available}. Commands contributed by plugins document themselves: run \`bb <command> --help\`.`,
+          `Unknown guide chapter '${input.chapter}'. Available: ${available}. Commands contributed by plugins document themselves: run \`omnyo <command> --help\`.`,
         );
       }
+
       return {
         chapter,
         content: renderStaticTemplate(templateId),

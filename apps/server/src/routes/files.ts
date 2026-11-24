@@ -5,18 +5,19 @@ import {
   publicApiRoutes,
   typedRoutes,
   type PublicApiSchema,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { COMMAND_TIMEOUT_MS } from "../constants.js";
 import { ApiError } from "../errors.js";
 import { browserRequestProblem } from "../browser-request-guard.js";
 import type { AppDeps } from "../types.js";
-import type { HostDaemonRpcCommand } from "@bb/host-daemon-contract";
+import type { HostDaemonRpcCommand } from "@omnyo/host-daemon-contract";
 import {
   callHostOnlineRpcForWork,
   callHostRetryableOnlineRpc,
 } from "../services/hosts/online-rpc.js";
 import {
   createDaemonFileContentResponse,
+  parseDaemonIfNoneMatch,
   requireDaemonFileContentResult,
   remapDaemonFileRouteError,
 } from "../services/hosts/daemon-file-response.js";
@@ -43,7 +44,9 @@ import {
 const HOST_FILE_LIST_LIMIT_DEFAULT = 1000;
 
 const FILE_PREVIEW_TTL_MS = 10 * 60 * 1000;
+
 const REVISION_REF_PATTERN = /^(?:HEAD|[0-9a-f]{4,40})$/iu;
+
 const WINDOWS_DRIVE_SEGMENT_PATTERN = /^[A-Za-z]:$/u;
 
 interface FilePreviewLease {
@@ -78,6 +81,7 @@ function requireAbsoluteHostRoot(rootPath: string): string {
   if (!isAbsoluteHostPath(rootPath)) {
     throw new ApiError(400, "invalid_path", "rootPath must be absolute", false);
   }
+
   return normalizeHostPath(rootPath);
 }
 
@@ -88,6 +92,7 @@ function createInvalidFilePathError(): ApiError {
 function parseRelativeFileSegments(rawPath: string): string[] {
   const normalizedPath = rawPath.replace(/\\/g, "/");
   const segments = normalizedPath.split("/");
+
   if (
     normalizedPath.startsWith("/") ||
     normalizedPath.includes("\0") ||
@@ -97,6 +102,7 @@ function parseRelativeFileSegments(rawPath: string): string[] {
   ) {
     throw createInvalidFilePathError();
   }
+
   return segments;
 }
 
@@ -106,15 +112,18 @@ function parseAbsoluteHostFile(rawPath: string): {
 } {
   const segments = parseRelativeFileSegments(rawPath);
   const [firstSegment, ...rest] = segments;
+
   if (
     firstSegment === undefined ||
     !WINDOWS_DRIVE_SEGMENT_PATTERN.test(firstSegment)
   ) {
     return { rootPath: "/", segments };
   }
+
   if (rest.length === 0) {
     throw createInvalidFilePathError();
   }
+
   return { rootPath: `${firstSegment}\\`, segments: rest };
 }
 
@@ -122,6 +131,7 @@ function parseRevisionRef(ref: string): string {
   if (!REVISION_REF_PATTERN.test(ref)) {
     throw new ApiError(400, "invalid_ref", "Invalid revision", false);
   }
+
   return ref;
 }
 
@@ -130,16 +140,23 @@ async function serveRootedFile(
   request: Request,
   root: FileRoot,
   segments: string[],
+  thumbnailWidth: number | null,
 ): Promise<Response> {
   const filePath = joinHostPath(root.rootPath, segments);
+
   if (root.ref === null) {
     return serveDaemonFileStream(
       deps,
       { hostId: root.hostId, path: filePath, rootPath: root.rootPath },
       request,
       createRawFileHeaders,
+      thumbnailWidth,
     );
   }
+
+  const ifNoneMatch = request.headers.get("if-none-match") ?? undefined;
+  const daemonIfNoneMatch = parseDaemonIfNoneMatch(ifNoneMatch);
+
   const result = await callHostRetryableOnlineRpc(deps, {
     hostId: root.hostId,
     timeoutMs: COMMAND_TIMEOUT_MS,
@@ -148,12 +165,15 @@ async function serveRootedFile(
       path: filePath,
       rootPath: root.rootPath,
       ref: root.ref,
+      ...(daemonIfNoneMatch !== undefined
+        ? { ifNoneMatch: daemonIfNoneMatch }
+        : {}),
     },
   }).catch(remapDaemonFileRouteError);
-  const content = requireDaemonFileContentResult(result);
-  return createDaemonFileContentResponse(content, {
-    headers: createRawFileHeaders(content),
-    ifNoneMatch: request.headers.get("if-none-match") ?? undefined,
+
+  return createDaemonFileContentResponse(result, {
+    headers: createRawFileHeaders(result),
+    ifNoneMatch,
   });
 }
 
@@ -161,6 +181,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
   const { get, post } = typedRoutes<PublicApiSchema>(app, {
     onValidationError: (msg) => new ApiError(400, "invalid_request", msg),
   });
+
   const fileRoutes = publicApiRoutes.files;
   const previewRoutes = publicApiRoutes.filePreviews;
   const threadRoutes = publicApiRoutes.threads;
@@ -171,6 +192,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
   const resolveHostId = (hostId: string | undefined): string => {
     const resolved = hostId ?? requirePrimaryHostId(deps);
     assertUsableHostId(deps, { hostId: resolved });
+
     return resolved;
   };
 
@@ -180,9 +202,11 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     const problem = browserRequestProblem(context, deps, {
       requireJsonForMutation: true,
     });
+
     if (problem === null) {
       return;
     }
+
     throw new ApiError(
       problem.status,
       problem.status === 403 ? "forbidden_origin" : "unsupported_media_type",
@@ -231,6 +255,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     run: (hostId: string) => Promise<T>,
   ): Promise<T> => {
     const hostId = resolveHostId(hostIdInput);
+
     try {
       return await run(hostId);
     } catch (error) {
@@ -251,6 +276,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
             : {}),
         },
       });
+
       return context.json(requireDaemonFileContentResult(result));
     }),
   );
@@ -271,6 +297,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
           : {}),
         ...(payload.mode !== undefined ? { mode: payload.mode } : {}),
       });
+
       return context.json(result);
     }),
   );
@@ -282,6 +309,8 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
         timeoutMs: COMMAND_TIMEOUT_MS,
         command: {
           type: "host.list_files",
+          discovery: payload.discovery,
+          followRootSymlink: false,
           path: payload.path,
           limit: payload.limit ?? HOST_FILE_LIST_LIMIT_DEFAULT,
           includeHidden:
@@ -293,6 +322,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
           ...(payload.query !== undefined ? { query: payload.query } : {}),
         },
       });
+
       return context.json(result);
     }),
   );
@@ -317,6 +347,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
           ...(payload.query !== undefined ? { query: payload.query } : {}),
         },
       });
+
       return context.json(result);
     }),
   );
@@ -331,6 +362,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
           ? { rootPath: payload.rootPath }
           : {}),
       });
+
       return context.json(result);
     }),
   );
@@ -345,6 +377,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
           ? { rootPath: payload.rootPath }
           : {}),
       });
+
       return context.json(result);
     }),
   );
@@ -359,6 +392,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
           ? { rootPath: payload.rootPath }
           : {}),
       });
+
       return context.json(result);
     }),
   );
@@ -367,12 +401,15 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     const hostId = resolveHostId(payload.hostId);
     const rootPath = requireAbsoluteHostRoot(payload.rootPath);
     const now = Date.now();
+
     for (const [id, lease] of previewLeases) {
       if (lease.expiresAtMs <= now) previewLeases.delete(id);
     }
+
     const id = randomUUID();
     const expiresAtMs = now + (payload.ttlMs ?? FILE_PREVIEW_TTL_MS);
     previewLeases.set(id, { hostId, rootPath, expiresAtMs });
+
     return context.json({
       baseUrl: `/api/v1/file-previews/${encodeURIComponent(id)}`,
       expiresAtMs,
@@ -382,15 +419,18 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
   get(previewRoutes.content, async (context) => {
     const id = context.req.param("id");
     const lease = previewLeases.get(id);
+
     if (!lease || lease.expiresAtMs <= Date.now()) {
       previewLeases.delete(id);
       throw new ApiError(404, "not_found", "File preview expired", false);
     }
+
     return serveRootedFile(
       deps,
       context.req.raw,
       { hostId: lease.hostId, rootPath: lease.rootPath, ref: null },
       parseRelativeFileSegments(context.req.param("filePath")),
+      null,
     );
   });
 
@@ -399,25 +439,30 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
       deps,
       context.req.param("id"),
     );
+
     return serveRootedFile(
       deps,
       context.req.raw,
       { hostId: target.hostId, rootPath: target.storagePath, ref: null },
       parseRelativeFileSegments(context.req.param("filePath")),
+      null,
     );
   });
 
-  get(threadRoutes.hostFile, async (context) => {
+  get(threadRoutes.hostFile, async (context, query) => {
     const hostId = requireThreadEnvironmentHostId(
       deps,
       context.req.param("id"),
     );
+
     const file = parseAbsoluteHostFile(context.req.param("filePath"));
+
     return serveRootedFile(
       deps,
       context.req.raw,
       { hostId, rootPath: file.rootPath, ref: null },
       file.segments,
+      query.thumbnailWidth === undefined ? null : Number(query.thumbnailWidth),
     );
   });
 
@@ -425,11 +470,13 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     const hostId = context.req.param("id");
     assertUsableHostId(deps, { hostId });
     const file = parseAbsoluteHostFile(context.req.param("filePath"));
+
     return serveRootedFile(
       deps,
       context.req.raw,
       { hostId, rootPath: file.rootPath, ref: null },
       file.segments,
+      null,
     );
   });
 
@@ -438,11 +485,13 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
       deps.db,
       context.req.param("id"),
     );
+
     return serveRootedFile(
       deps,
       context.req.raw,
       { hostId: environment.hostId, rootPath: environment.path, ref: null },
       parseRelativeFileSegments(context.req.param("filePath")),
+      null,
     );
   });
 
@@ -451,6 +500,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
       deps.db,
       context.req.param("id"),
     );
+
     return serveRootedFile(
       deps,
       context.req.raw,
@@ -460,6 +510,7 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
         ref: parseRevisionRef(context.req.param("ref")),
       },
       parseRelativeFileSegments(context.req.param("filePath")),
+      null,
     );
   });
 
@@ -470,15 +521,18 @@ export function registerFileRoutes(app: Hono, deps: AppDeps): void {
     filePath: string,
   ): Promise<Response> => {
     requirePublicProject(deps.db, projectId);
+
     const target = resolveProjectWorkspaceTarget(deps, {
       projectId,
       ...(hostId !== undefined ? { hostId } : {}),
     });
+
     return serveRootedFile(
       deps,
       request,
       { hostId: target.hostId, rootPath: target.path, ref: null },
       parseRelativeFileSegments(filePath),
+      null,
     );
   };
 

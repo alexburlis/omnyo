@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
-import type { SystemEnvironmentProvider } from "@bb/server-contract";
+import type { SystemEnvironmentProvider } from "@omnyo/server-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
@@ -51,6 +51,7 @@ describe("useSystemEnvironmentProviders", () => {
     vi.mocked(sdk.environments.listProviders).mockResolvedValue([
       WORKTREE_PROVIDER,
     ]);
+
     const { result } = renderHook(
       () =>
         useSystemEnvironmentProviders({
@@ -75,18 +76,22 @@ describe("useSystemEnvironmentProviders", () => {
     vi.mocked(sdk.environments.listProviders).mockResolvedValue([
       WORKTREE_PROVIDER,
     ]);
+
     const first = renderHook(
       () => useSystemEnvironmentProviders({ projectId: "project-1" }),
       { wrapper: createQueryClientTestHarness().wrapper },
     );
+
     expect(first.result.current.providers).toBeUndefined();
     await waitFor(() =>
       expect(first.result.current.providers).toEqual([WORKTREE_PROVIDER]),
     );
+
     const cacheKey = environmentProviderListCacheKey({
       projectId: "project-1",
       hostId: null,
     });
+
     expect(readCachedEnvironmentProviderList(cacheKey)).toEqual([
       WORKTREE_PROVIDER,
     ]);
@@ -94,10 +99,12 @@ describe("useSystemEnvironmentProviders", () => {
     vi.mocked(sdk.environments.listProviders).mockImplementation(
       pendingForever,
     );
+
     const second = renderHook(
       () => useSystemEnvironmentProviders({ projectId: "project-1" }),
       { wrapper: createQueryClientTestHarness().wrapper },
     );
+
     expect(second.result.current.providers).toEqual([WORKTREE_PROVIDER]);
   });
 
@@ -105,16 +112,20 @@ describe("useSystemEnvironmentProviders", () => {
     vi.mocked(sdk.environments.listProviders).mockImplementation(
       pendingForever,
     );
+
     const cacheKey = environmentProviderListCacheKey({
       projectId: "project-1",
       hostId: null,
     });
+
     writeCachedEnvironmentProviderList(cacheKey, [WORKTREE_PROVIDER]);
     window.localStorage.setItem(cacheKey, JSON.stringify([{ id: 1 }]));
+
     const { result } = renderHook(
       () => useSystemEnvironmentProviders({ projectId: "project-1" }),
       { wrapper: createQueryClientTestHarness().wrapper },
     );
+
     expect(result.current.providers).toBeUndefined();
   });
 });

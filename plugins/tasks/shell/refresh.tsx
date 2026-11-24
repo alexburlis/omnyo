@@ -7,7 +7,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { useRealtimeConnectionState } from "@get-bb/plugin-sdk/app";
+import { useRealtimeConnectionState } from "@omnyo/plugin-sdk/app";
 
 interface TasksRefreshState {
   generation: number;
@@ -28,10 +28,15 @@ let sharedSnapshot: SharedRefreshSnapshot = {
   generation: 0,
   isRefreshing: false,
 };
+
 let pendingGenerationWork = 0;
+
 const refreshListeners = new Set<() => void>();
+
 const connectionStates = new Map<symbol, string>();
+
 let aggregateConnectionState: string | null = null;
+
 let hasEstablishedConnection = false;
 
 function emitRefreshChange() {
@@ -45,6 +50,7 @@ function updateSharedSnapshot(next: SharedRefreshSnapshot) {
   ) {
     return;
   }
+
   sharedSnapshot = next;
   emitRefreshChange();
 }
@@ -56,6 +62,7 @@ function beginGenerationWork() {
 
 function endGenerationWork() {
   pendingGenerationWork = Math.max(0, pendingGenerationWork - 1);
+
   if (pendingGenerationWork === 0) {
     updateSharedSnapshot({ ...sharedSnapshot, isRefreshing: false });
   }
@@ -77,9 +84,13 @@ function requestRefresh() {
 
 function aggregateConnection(): string | null {
   const states = [...connectionStates.values()];
+
   if (states.length === 0) return null;
+
   if (states.every((state) => state === "connected")) return "connected";
+
   if (states.some((state) => state === "reconnecting")) return "reconnecting";
+
   return "connecting";
 }
 
@@ -89,11 +100,15 @@ function updateConnectionState(registrationId: symbol, state: string) {
   const next = aggregateConnection();
   const previous = aggregateConnectionState;
   aggregateConnectionState = next;
+
   if (wasUninitialized) {
     hasEstablishedConnection = state !== "connecting";
+
     return;
   }
+
   if (next === "reconnecting") hasEstablishedConnection = true;
+
   if (next === "connected" && previous !== "connected") {
     if (hasEstablishedConnection) requestRefresh();
     hasEstablishedConnection = true;
@@ -103,6 +118,7 @@ function updateConnectionState(registrationId: symbol, state: string) {
 function removeConnectionState(registrationId: symbol) {
   connectionStates.delete(registrationId);
   aggregateConnectionState = aggregateConnection();
+
   if (aggregateConnectionState === null) {
     hasEstablishedConnection = false;
     pendingGenerationWork = 0;
@@ -113,9 +129,11 @@ function removeConnectionState(registrationId: symbol) {
 export function TasksRefreshProvider({ children }: { children: ReactNode }) {
   const connectionState = useRealtimeConnectionState();
   const registrationId = useMemo(() => Symbol("tasks-refresh-provider"), []);
+
   const snapshot = useSyncExternalStore(
     useCallback((listener) => {
       refreshListeners.add(listener);
+
       return () => refreshListeners.delete(listener);
     }, []),
     () => sharedSnapshot,
@@ -140,6 +158,7 @@ export function TasksRefreshProvider({ children }: { children: ReactNode }) {
     }),
     [snapshot],
   );
+
   return (
     <TasksRefreshContext.Provider value={value}>
       {children}
@@ -149,8 +168,10 @@ export function TasksRefreshProvider({ children }: { children: ReactNode }) {
 
 export function useTasksRefresh(): TasksRefreshState {
   const state = useContext(TasksRefreshContext);
+
   if (state === null) {
     throw new Error("useTasksRefresh must be used within TasksRefreshProvider");
   }
+
   return state;
 }

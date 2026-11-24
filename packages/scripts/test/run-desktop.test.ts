@@ -1,6 +1,6 @@
 import { join, resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveDevInstanceConfig } from "@bb/config/runtime";
+import { resolveDevInstanceConfig } from "@omnyo/config/runtime";
 import {
   createDesktopPackageCommand,
   createDesktopRunCommand,
@@ -12,7 +12,7 @@ import {
 
 const config = resolveDevInstanceConfig({
   homeDir: "/Users/tester",
-  repoRoot: "/Users/tester/checkouts/bb",
+  repoRoot: "/Users/tester/checkouts/omnyo",
 });
 
 describe("desktop launch mode", () => {
@@ -37,7 +37,7 @@ describe("desktop packaging task", () => {
       /supported on macOS, Linux, and Windows/u,
     );
     expect(createDesktopPackageCommand("darwin").args).toEqual(
-      expect.arrayContaining(["run", "package", "--filter=@bb/desktop"]),
+      expect.arrayContaining(["run", "package", "--filter=@omnyo/desktop"]),
     );
   });
 
@@ -56,9 +56,10 @@ describe("desktop launch environment", () => {
   it("isolates the worktree launch onto this checkout's data directory and ports", () => {
     const env = toDesktopLaunchProcessEnv({
       baseEnv: {
-        BB_DATA_DIR: "/Users/tester/.bb",
-        BB_DEV_APP_PORT: "5173",
-        BB_TELEMETRY: "true",
+        OMNYO_DATA_DIR: "/Users/tester/.omnyo",
+        OMNYO_DEV_APP_PORT: "5173",
+        OMNYO_SENTRY_DSN: "https://public@sentry.example.test/1",
+        OMNYO_TELEMETRY: "true",
         NODE_ENV: "development",
         OPENAI_API_KEY: "test-key",
       },
@@ -67,32 +68,34 @@ describe("desktop launch environment", () => {
     });
 
     expect(env).toMatchObject({
-      BB_DATA_DIR: config.dataDir,
-      BB_DESKTOP_OPEN_DEVTOOLS: "0",
-      BB_DESKTOP_USER_DATA_DIR: join(config.dataDir, "desktop"),
-      BB_HOST_DAEMON_PORT: String(config.ports.hostDaemonPort),
-      BB_SERVER_PORT: String(config.ports.serverPort),
-      BB_TELEMETRY: "false",
+      OMNYO_DATA_DIR: config.dataDir,
+      OMNYO_DESKTOP_OPEN_DEVTOOLS: "0",
+      OMNYO_DESKTOP_USER_DATA_DIR: join(config.dataDir, "desktop"),
+      OMNYO_HOST_DAEMON_PORT: String(config.ports.hostDaemonPort),
+      OMNYO_SENTRY_DSN: "",
+      OMNYO_SERVER_PORT: String(config.ports.serverPort),
+      OMNYO_TELEMETRY: "false",
       NODE_ENV: "production",
       OPENAI_API_KEY: "test-key",
     });
-    expect(env.BB_DATA_DIR).not.toBe("/Users/tester/.bb");
-    expect(env.BB_SERVER_PORT).not.toBe("38886");
-    expect(env.BB_DEV_APP_PORT).toBeUndefined();
+    expect(env.OMNYO_DATA_DIR).not.toBe("/Users/tester/.omnyo");
+    expect(env.OMNYO_SERVER_PORT).not.toBe("38886");
+    expect(env.OMNYO_DEV_APP_PORT).toBeUndefined();
   });
 
   it("preserves an explicit Electron user data directory", () => {
-    const userDataDir = "/tmp/bb-desktop-profile";
+    const userDataDir = "/tmp/omnyo-desktop-profile";
+
     const env = toDesktopLaunchProcessEnv({
-      baseEnv: { BB_DESKTOP_USER_DATA_DIR: ` ${userDataDir} ` },
+      baseEnv: { OMNYO_DESKTOP_USER_DATA_DIR: ` ${userDataDir} ` },
       config,
       mode: "worktree",
     });
 
-    expect(env.BB_DESKTOP_USER_DATA_DIR).toBe(resolve(userDataDir));
+    expect(env.OMNYO_DESKTOP_USER_DATA_DIR).toBe(resolve(userDataDir));
     expect(
       resolveDesktopUserDataDir(
-        { BB_DESKTOP_USER_DATA_DIR: "relative-profile" },
+        { OMNYO_DESKTOP_USER_DATA_DIR: "relative-profile" },
         config,
       ),
     ).toBe(join(process.cwd(), "relative-profile"));
@@ -100,13 +103,32 @@ describe("desktop launch environment", () => {
 
   it("lets an explicit devtools choice survive the worktree default", () => {
     const env = toDesktopLaunchProcessEnv({
-      baseEnv: { BB_DESKTOP_OPEN_DEVTOOLS: "1" },
+      baseEnv: { OMNYO_DESKTOP_OPEN_DEVTOOLS: "1" },
       config,
       mode: "worktree",
     });
 
-    expect(env.BB_DESKTOP_OPEN_DEVTOOLS).toBe("1");
+    expect(env.OMNYO_DESKTOP_OPEN_DEVTOOLS).toBe("1");
   });
+
+  it.each(["prod", "worktree"] as const)(
+    "keeps desktop choices in %s mode",
+    (mode) => {
+      const userDataDir = "/tmp/omnyo-desktop-profile";
+
+      const child = toDesktopLaunchProcessEnv({
+        baseEnv: {
+          OMNYO_DESKTOP_OPEN_DEVTOOLS: "1",
+          OMNYO_DESKTOP_USER_DATA_DIR: userDataDir,
+        },
+        config,
+        mode,
+      });
+
+      expect(child.OMNYO_DESKTOP_OPEN_DEVTOOLS).toBe("1");
+      expect(child.OMNYO_DESKTOP_USER_DATA_DIR).toBe(resolve(userDataDir));
+    },
+  );
 
   it("leaves the installed data directory and ports alone without --worktree", () => {
     const env = toDesktopLaunchProcessEnv({
@@ -115,12 +137,12 @@ describe("desktop launch environment", () => {
       mode: "prod",
     });
 
-    expect(env.BB_DATA_DIR).toBeUndefined();
-    expect(env.BB_SERVER_PORT).toBeUndefined();
-    expect(env.BB_HOST_DAEMON_PORT).toBeUndefined();
-    expect(env.BB_DESKTOP_USER_DATA_DIR).toBeUndefined();
+    expect(env.OMNYO_DATA_DIR).toBeUndefined();
+    expect(env.OMNYO_SERVER_PORT).toBeUndefined();
+    expect(env.OMNYO_HOST_DAEMON_PORT).toBeUndefined();
+    expect(env.OMNYO_DESKTOP_USER_DATA_DIR).toBeUndefined();
     expect(env).toMatchObject({
-      BB_DESKTOP_OPEN_DEVTOOLS: "0",
+      OMNYO_DESKTOP_OPEN_DEVTOOLS: "0",
       NODE_ENV: "production",
       OPENAI_API_KEY: "test-key",
     });

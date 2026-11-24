@@ -3,7 +3,7 @@ import {
   isBackgroundAgentTaskType,
   isBackgroundCommandTaskType,
   isSettledWorkflowAgentState,
-} from "@bb/domain";
+} from "@omnyo/domain";
 import type {
   TimelineActivityIntent,
   TimelineApprovalStatus,
@@ -14,6 +14,7 @@ import type {
   TimelineFileReadWorkRow,
   TimelineImageGenerationWorkRow,
   TimelineImageViewWorkRow,
+  TimelineActivityRef,
   TimelineParentChangeSystemRow,
   TimelinePlanStepsWorkRow,
   TimelineRowPresentation,
@@ -22,8 +23,9 @@ import type {
   TimelineToolWorkRow,
   TimelineWebFetchWorkRow,
   TimelineWebSearchWorkRow,
-} from "@bb/server-contract";
+} from "@omnyo/server-contract";
 import { assertNever } from "./assert-never.js";
+import { userMessageSourceLabel } from "./user-message-source.js";
 import { OWNERSHIP_CHANGE_VERBS } from "./family-a-verbs.js";
 import {
   formatFileChangePath,
@@ -48,6 +50,11 @@ import {
   formatTimelinePath,
 } from "./timeline-path-display.js";
 import {
+  childActivityVerb,
+  isTimelineActivityRow,
+  previewActivityDisplayUrl,
+} from "./timeline-activity.js";
+import {
   buildTimelineWorkSummaryLabelParts,
   type ThreadTimelineViewRow,
   type TimelineWorkSummaryRow,
@@ -59,6 +66,7 @@ import {
 } from "./timeline-view.js";
 
 export type TimelineTitleTone = "default" | "summary";
+
 type TimelineStatusDecorationStatus = "denied" | "error" | "interrupted";
 
 export type TimelineTitleLink = { kind: "thread"; threadId: string };
@@ -146,23 +154,29 @@ interface DisplayStatusArgs {
 }
 
 type TimelineExecutionWorkRow = TimelineCommandWorkRow | TimelineToolWorkRow;
+
 type TimelineApprovalWorkRow = Extract<
   TimelineViewWorkRow,
   { workKind: "approval" }
 >;
+
 type TimelineFormViewWorkRow = Extract<
   TimelineViewWorkRow,
   { workKind: "form" }
 >;
+
 type TimelineFileEditApprovalWorkRow = Extract<
   TimelineApprovalWorkRow,
   { approvalKind: "file-edit" }
 >;
+
 type TimelinePermissionGrantApprovalWorkRow = Extract<
   TimelineApprovalWorkRow,
   { approvalKind: "permission-grant" }
 >;
+
 type TimelineSystemViewRow = Extract<ThreadTimelineViewRow, { kind: "system" }>;
+
 type TimelineConversationViewRow = Extract<
   ThreadTimelineViewRow,
   { kind: "conversation" }
@@ -213,8 +227,10 @@ function durationDecoration(
 ): TimelineTitleDecoration | null {
   if (completedAt !== null) {
     const finalMs = completedAt - startedAt;
+
     if (visibleDurationMs(finalMs) === null) return null;
   }
+
   return {
     kind: "duration",
     startedAt,
@@ -228,6 +244,7 @@ function completedTurnDurationDecoration(
   completedAt: number | null,
 ): TimelineTitleDecoration | null {
   if (completedAt === null) return null;
+
   return {
     kind: "duration",
     startedAt,
@@ -240,9 +257,11 @@ function badgeDecorations(row: {
   presentation?: TimelineRowPresentation;
 }): TimelineTitleDecoration[] {
   const badge = row.presentation?.badge;
+
   if (badge === undefined) {
     return [];
   }
+
   return [
     {
       kind: "badge",
@@ -272,13 +291,17 @@ function summaryStatusDecoration(
 ): TimelineTitleDecoration | null {
   let errorCount = 0;
   let interruptedCount = 0;
+
   for (const child of row.children) {
     if (child.status === "error") errorCount += 1;
+
     if (child.status === "interrupted") interruptedCount += 1;
   }
+
   if (errorCount === 0 && interruptedCount === 0) {
     return null;
   }
+
   return { kind: "summary-status", errorCount, interruptedCount };
 }
 
@@ -286,9 +309,11 @@ function diffStatsDecoration(
   change: TimelineFileChange,
 ): TimelineTitleDecoration | null {
   const { added, removed } = change.diffStats;
+
   if (added === 0 && removed === 0) {
     return null;
   }
+
   return { kind: "diff-stats", added, removed };
 }
 
@@ -298,22 +323,28 @@ export function formatTimelineDecorationText(
   switch (d.kind) {
     case "duration": {
       if (d.completedAt === null) return "";
+
       return `(${durationToCompactString(d.completedAt - d.startedAt)})`;
     }
+
     case "status":
       return d.durationMs !== null
         ? `(${durationToCompactString(d.durationMs)}, ${d.status})`
         : `(${d.status})`;
     case "summary-status": {
       const parts: string[] = [];
+
       if (d.errorCount > 0) {
         parts.push(`${d.errorCount} error${d.errorCount > 1 ? "s" : ""}`);
       }
+
       if (d.interruptedCount > 0) {
         parts.push(`${d.interruptedCount} interrupted`);
       }
+
       return parts.length === 0 ? "" : `(${parts.join(", ")})`;
     }
+
     case "diff-stats":
       return formatDiffStatsText({
         added: d.added,
@@ -335,12 +366,16 @@ function renderTitlePlain(
     .map((s) => s.plainText ?? s.text)
     .filter((t) => t.length > 0)
     .join(" ");
+
   const decorationsText = decorations
     .map(formatTimelineDecorationText)
     .filter((t) => t.length > 0)
     .join(" ");
+
   if (decorationsText.length === 0) return segmentsText;
+
   if (segmentsText.length === 0) return decorationsText;
+
   return `${segmentsText} ${decorationsText}`;
 }
 
@@ -373,9 +408,11 @@ function displayStatus({
   if (approvalStatus === "waiting_for_approval") {
     return "waiting";
   }
+
   if (approvalStatus === "denied") {
     return "denied";
   }
+
   return status;
 }
 
@@ -408,12 +445,14 @@ function presentedTitle({
   em = true,
 }: PresentedTitleArgs): TimelineTitle {
   const resolvedContent = content === undefined ? presentation.title : content;
+
   const segments: TimelineTitleSegment[] = [
     segment(presentationLabel(presentation, status), {
       shimmer: status === "pending",
       truncate: resolvedContent ? false : true,
     }),
   ];
+
   if (resolvedContent) {
     segments.push(
       segment(resolvedContent, {
@@ -423,7 +462,9 @@ function presentedTitle({
       }),
     );
   }
+
   const durationMs = completedAt !== null ? completedAt - startedAt : null;
+
   const decorations: TimelineTitleDecoration[] = [
     ...badgeDecorations({ presentation }),
     ...(status === "error"
@@ -432,6 +473,7 @@ function presentedTitle({
         ? [statusDecoration("interrupted", durationMs)]
         : filterNull([durationDecoration(startedAt, completedAt)])),
   ];
+
   return makeTitle({ segments, decorations });
 }
 
@@ -440,7 +482,9 @@ function mapExecutionTitle(row: TimelineExecutionWorkRow): TimelineTitle {
     approvalStatus: row.approvalStatus,
     status: row.status,
   });
+
   const isCommand = row.workKind === "command";
+
   if (
     row.presentation &&
     status !== "waiting" &&
@@ -454,15 +498,20 @@ function mapExecutionTitle(row: TimelineExecutionWorkRow): TimelineTitle {
       completedAt: row.completedAt,
     });
   }
+
   const content = isCommand
     ? row.command
     : formatToolCallCommand(row.toolName, row.toolArgs);
+
   const explorationTitle =
     row.workKind === "command" ? mapSingleExplorationIntentTitle(row) : null;
+
   if (explorationTitle !== null) {
     return explorationTitle;
   }
+
   const badges = badgeDecorations(row);
+
   switch (status) {
     case "waiting":
       return makeTitle({
@@ -545,26 +594,34 @@ function mapSingleExplorationIntentTitle(
   if (!hasTimelineExplorationIntent(row)) {
     return null;
   }
+
   const knownIntents = timelineRowActivityIntents(row).filter(
     (intent) => intent.type !== "unknown",
   );
+
   if (knownIntents.length !== 1) {
     return null;
   }
+
   const intent = knownIntents[0];
+
   if (!intent) {
     return null;
   }
+
   const status = displayStatus({
     approvalStatus: row.workKind === "command" ? row.approvalStatus : null,
     status: row.status,
   });
+
   const pending = status === "pending";
+
   const detail = formatTimelineActivityIntentDetailParts({
     intent,
     pathMode: "compact",
     pending,
   });
+
   const plainDetail = formatTimelineActivityIntentDetailParts({
     intent,
     pathMode: "full",
@@ -572,13 +629,16 @@ function mapSingleExplorationIntentTitle(
   });
 
   const badges = badgeDecorations(row);
+
   if (status === "denied") {
     const verbContent = detail.prefix
       ? `${detail.prefix} ${detail.content}`
       : detail.content;
+
     const plainVerbContent = plainDetail.prefix
       ? `${plainDetail.prefix} ${plainDetail.content}`
       : plainDetail.content;
+
     return makeTitle({
       segments: [
         segment("Permission denied:"),
@@ -591,13 +651,16 @@ function mapSingleExplorationIntentTitle(
       decorations: badges,
     });
   }
+
   if (status === "waiting") {
     const verbContent = detail.prefix
       ? `${detail.prefix} ${detail.content}`
       : detail.content;
+
     const plainVerbContent = plainDetail.prefix
       ? `${plainDetail.prefix} ${plainDetail.content}`
       : plainDetail.content;
+
     return makeTitle({
       segments: [
         segment("Waiting for approval", { shimmer: true }),
@@ -613,9 +676,11 @@ function mapSingleExplorationIntentTitle(
   }
 
   const segments: TimelineTitleSegment[] = [];
+
   if (detail.prefix) {
     segments.push(segment(detail.prefix, { shimmer: pending }));
   }
+
   segments.push(
     segment(detail.content, {
       em: false,
@@ -641,16 +706,21 @@ function mapFileChangeTitle(row: TimelineFileChangeWorkRow): TimelineTitle {
     approvalStatus: row.approvalStatus,
     status: row.status,
   });
+
   const action = getFileChangeAction(row.change);
+
   const compactPath = formatFileChangePath({
     change: row.change,
     mode: "compact",
   });
+
   const fullPath = formatFileChangePath({ change: row.change, mode: "full" });
+
   const titleAction: TimelineTitleAction = {
     kind: "open-file-diff",
     path: row.change.movePath ?? row.change.path,
   };
+
   const pathSegment = segment(compactPath, {
     em: true,
     truncate: true,
@@ -725,11 +795,14 @@ function mapWebSearchTitle(row: TimelineWebSearchWorkRow): TimelineTitle {
       em: false,
     });
   }
+
   const query = row.queries.join(", ") || "web search";
+
   const querySegment = segment(query, {
     em: false,
     truncate: true,
   });
+
   switch (row.status) {
     case "pending":
       return makeTitle({
@@ -781,7 +854,9 @@ function mapWebFetchTitle(row: TimelineWebFetchWorkRow): TimelineTitle {
       em: false,
     });
   }
+
   const urlSegment = segment(row.url, { em: false, truncate: true });
+
   switch (row.status) {
     case "pending":
       return makeTitle({
@@ -830,11 +905,13 @@ function mapImageViewTitle(row: TimelineImageViewWorkRow): TimelineTitle {
       plainContent: row.path,
     });
   }
+
   const pathSegment = segment(fileNameFromPath(row.path), {
     em: false,
     plainText: row.path,
     truncate: true,
   });
+
   switch (row.status) {
     case "pending":
       return makeTitle({
@@ -883,6 +960,7 @@ function mapImageGenerationTitle(
       completedAt: row.completedAt,
     });
   }
+
   const label = (() => {
     switch (row.status) {
       case "pending":
@@ -897,6 +975,7 @@ function mapImageGenerationTitle(
         return assertNever(row.status);
     }
   })();
+
   return makeTitle({
     segments: [segment(label, { shimmer: row.status === "pending" })],
     decorations:
@@ -928,6 +1007,7 @@ function delegationVerbForStatus(status: TimelineRowStatus): {
 
 function mapDelegationTitle(row: TimelineViewDelegationWorkRow): TimelineTitle {
   const description = row.description ?? (row.output.trim() || row.toolName);
+
   if (row.presentation) {
     return presentedTitle({
       presentation: row.presentation,
@@ -937,16 +1017,20 @@ function mapDelegationTitle(row: TimelineViewDelegationWorkRow): TimelineTitle {
       content: row.presentation.title ?? description,
     });
   }
+
   const verb = delegationVerbForStatus(row.status);
+
   const segments: TimelineTitleSegment[] = [
     segment(verb.text, { shimmer: verb.shimmer }),
     segment(description, { em: true, truncate: true }),
   ];
+
   if (row.subagentType) {
     segments.push(
       segment(`(${row.subagentType})`, { em: false, truncate: true }),
     );
   }
+
   return makeTitle({
     segments,
     decorations: filterNull([
@@ -977,12 +1061,15 @@ function formatWorkflowAgentProgress(
   row: TimelineViewWorkflowWorkRow,
 ): string | null {
   const agents = row.workflow?.agents ?? [];
+
   if (agents.length === 0) {
     return null;
   }
+
   const done = agents.filter((agent) =>
     isSettledWorkflowAgentState(agent.state),
   ).length;
+
   return `(${done}/${agents.length} agents)`;
 }
 
@@ -1026,6 +1113,7 @@ function mapBackgroundCommandTitle(
   row: TimelineViewWorkflowWorkRow,
 ): TimelineTitle {
   const verb = backgroundCommandVerbForStatus(row.status);
+
   return makeTitle({
     segments: [
       segment(verb.text, { shimmer: verb.shimmer }),
@@ -1041,6 +1129,7 @@ function mapBackgroundAgentTitle(
   row: TimelineViewWorkflowWorkRow,
 ): TimelineTitle {
   const verb = backgroundAgentVerbForStatus(row.status);
+
   return makeTitle({
     segments: [
       segment(verb.text, { shimmer: verb.shimmer }),
@@ -1056,19 +1145,25 @@ function mapWorkflowTitle(row: TimelineViewWorkflowWorkRow): TimelineTitle {
   if (isBackgroundCommandTaskType(row.taskType)) {
     return mapBackgroundCommandTitle(row);
   }
+
   if (isBackgroundAgentTaskType(row.taskType)) {
     return mapBackgroundAgentTitle(row);
   }
+
   const verb = workflowVerbForStatus(row.status);
   const name = row.workflowName ?? row.description;
+
   const segments: TimelineTitleSegment[] = [
     segment(verb.text, { shimmer: verb.shimmer }),
     segment(name, { em: true, truncate: true }),
   ];
+
   const agentProgress = formatWorkflowAgentProgress(row);
+
   if (agentProgress) {
     segments.push(segment(agentProgress, { em: false }));
   }
+
   return makeTitle({
     segments,
     decorations: filterNull([
@@ -1104,12 +1199,15 @@ function mapPermissionGrantApprovalTitle(
   row: TimelinePermissionGrantApprovalWorkRow,
 ): TimelineTitle {
   const toolName = row.target.toolName;
+
   const reason =
     row.statusReason !== null && row.statusReason.trim().length > 0
       ? row.statusReason.trim()
       : null;
+
   const reasonSegment =
     reason !== null ? segment(`(${reason})`, { truncate: true }) : null;
+
   switch (row.lifecycle) {
     case "pending": {
       const segments =
@@ -1120,10 +1218,12 @@ function mapPermissionGrantApprovalTitle(
               segment(toolName, { em: true, truncate: true }),
             ]
           : [segment("Waiting for permissions", { shimmer: true })];
+
       return makeTitle({
         segments,
       });
     }
+
     case "resolving": {
       const segments =
         toolName !== null
@@ -1133,10 +1233,12 @@ function mapPermissionGrantApprovalTitle(
               segment(toolName, { em: true, truncate: true }),
             ]
           : [segment("Delivering permissions", { shimmer: true })];
+
       return makeTitle({
         segments,
       });
     }
+
     case "granted": {
       const scopeText =
         row.grantScope === "turn"
@@ -1144,10 +1246,12 @@ function mapPermissionGrantApprovalTitle(
           : row.grantScope === "session"
             ? "for this session"
             : null;
+
       const prefix =
         scopeText !== null
           ? `Permission granted ${scopeText}:`
           : "Permission granted:";
+
       const segments =
         toolName !== null
           ? [segment(prefix), segment(toolName, { em: true, truncate: true })]
@@ -1158,10 +1262,12 @@ function mapPermissionGrantApprovalTitle(
                   : "Permission granted",
               ),
             ];
+
       return makeTitle({
         segments,
       });
     }
+
     case "denied":
       return makeTitle({
         segments:
@@ -1211,24 +1317,31 @@ function singleQuestionAnswerSummary(
   question: TimelineQuestionViewWorkRow["questions"][number],
 ): string | null {
   const answer = row.answers?.[question.id];
+
   if (!answer) {
     return null;
   }
+
   const parts = answer.selected.map((value) => {
     const option = question.options?.find(
       (candidate) => candidate.value === value,
     );
+
     return option?.label ?? value;
   });
+
   if (answer.freeText) {
     parts.push(answer.freeText);
   }
+
   const text = parts.join(", ");
+
   return text.length > 0 ? text : null;
 }
 
 function mapQuestionTitle(row: TimelineQuestionViewWorkRow): TimelineTitle {
   const question = singleQuestion(row);
+
   const subject = question
     ? segment(question.prompt, { em: true, truncate: true })
     : segment(`${row.questions.length} questions`, { em: true });
@@ -1256,6 +1369,7 @@ function mapQuestionTitle(row: TimelineQuestionViewWorkRow): TimelineTitle {
       const answerSummary = question
         ? singleQuestionAnswerSummary(row, question)
         : null;
+
       return makeTitle({
         segments: filterNull([
           segment("Answered"),
@@ -1266,6 +1380,7 @@ function mapQuestionTitle(row: TimelineQuestionViewWorkRow): TimelineTitle {
         ]),
       });
     }
+
     case "interrupted":
       return makeTitle({
         segments: [segment("Asked"), subject],
@@ -1278,6 +1393,7 @@ function mapQuestionTitle(row: TimelineQuestionViewWorkRow): TimelineTitle {
 
 function mapFormTitle(row: TimelineFormViewWorkRow): TimelineTitle {
   const { presentation } = row;
+
   switch (row.lifecycle) {
     case "pending":
       return makeTitle({
@@ -1312,6 +1428,7 @@ function mapFileReadTitle(row: TimelineFileReadWorkRow): TimelineTitle {
       plainContent: row.path,
     });
   }
+
   return (
     mapSingleExplorationIntentTitle(row) ??
     makeTitle({
@@ -1327,6 +1444,7 @@ function mapFileReadTitle(row: TimelineFileReadWorkRow): TimelineTitle {
 
 function searchContent(row: TimelineSearchWorkRow): string {
   const root = row.path ? ` in ${row.path}` : "";
+
   switch (row.mode) {
     case "content":
       return `for ${row.query}${root}`;
@@ -1354,6 +1472,7 @@ function mapSearchTitle(row: TimelineSearchWorkRow): TimelineTitle {
       em: false,
     });
   }
+
   return (
     mapSingleExplorationIntentTitle(row) ??
     makeTitle({
@@ -1369,11 +1488,13 @@ function mapSearchTitle(row: TimelineSearchWorkRow): TimelineTitle {
 
 function activePlanStep(row: TimelinePlanStepsWorkRow): string | null {
   const active = row.steps.find((step) => step.status === "active");
+
   return active?.step ?? row.explanation;
 }
 
 function mapPlanStepsTitle(row: TimelinePlanStepsWorkRow): TimelineTitle {
   const content = activePlanStep(row);
+
   if (row.presentation) {
     return presentedTitle({
       presentation: row.presentation,
@@ -1384,9 +1505,11 @@ function mapPlanStepsTitle(row: TimelinePlanStepsWorkRow): TimelineTitle {
       em: false,
     });
   }
+
   const completedSteps = row.steps.filter(
     (step) => step.status === "completed",
   ).length;
+
   return makeTitle({
     segments: [
       segment(row.status === "pending" ? "Updating plan" : "Updated plan", {
@@ -1453,9 +1576,11 @@ function mapWorkTitle(
         return assertNever(row);
     }
   })();
+
   if (options.workStyle === "default") {
     return title;
   }
+
   return {
     ...title,
     tone: "summary",
@@ -1468,31 +1593,39 @@ function mapWorkSummaryTitle(
 ): TimelineTitle {
   const isActive =
     row.kind === "bundle-summary" && options.isActiveLatestBundle === true;
+
   const { verb, rest } = buildTimelineWorkSummaryLabelParts(row, {
     active: isActive,
   });
+
   const decorations = filterNull([summaryStatusDecoration(row)]);
+
   if (options.summaryStyle === "background") {
     const labelText = rest.length === 0 ? verb : `${verb} ${rest}`;
+
     return makeTitle({
       segments: [segment(labelText, { em: false, truncate: true })],
       decorations,
       tone: "summary",
     });
   }
+
   const settledAccent: TimelineTitleSegmentAccent | undefined = isActive
     ? undefined
     : "subtle";
+
   const verbSegment = segment(verb, {
     shimmer: isActive,
     accent: settledAccent,
   });
+
   if (rest.length === 0) {
     return makeTitle({
       segments: [{ ...verbSegment, truncate: true }],
       decorations,
     });
   }
+
   return makeTitle({
     segments: [
       verbSegment,
@@ -1504,17 +1637,21 @@ function mapWorkSummaryTitle(
 
 function mapTurnTitle(row: TimelineViewTurnRow): TimelineTitle {
   const isPending = row.status === "pending";
+
   const durationDeco = isPending
     ? durationDecoration(row.startedAt, row.completedAt, { em: true })
     : completedTurnDurationDecoration(row.startedAt, row.completedAt);
+
   const hasCapturedDuration =
     !isPending && row.completedAt !== null && durationDeco !== null;
+
   if (hasCapturedDuration) {
     return makeTitle({
       segments: [segment("Worked for", { shimmer: false, accent: "subtle" })],
       decorations: [durationDeco],
     });
   }
+
   return makeTitle({
     segments: [
       segment(isPending ? "Working" : "Worked", {
@@ -1548,6 +1685,7 @@ function parentChangeParentSegment(
   if (threadId === null) {
     return segment("parent");
   }
+
   return segment(title ?? threadId, {
     em: true,
     truncate: true,
@@ -1557,18 +1695,23 @@ function parentChangeParentSegment(
 
 function parentChangeThreadName(row: TimelineParentChangeSystemRow): string {
   const verb = OWNERSHIP_CHANGE_VERBS[row.parentChange.action];
+
   const parentTitle =
     row.parentChange.action === "release"
       ? row.parentChange.previousParentThreadTitle
       : row.parentChange.nextParentThreadTitle;
+
   const parent =
     parentTitle !== null && parentTitle.trim().length > 0
       ? parentTitle.trim()
       : "parent";
+
   const suffix = ` ${verb} ${parent}`;
+
   if (row.title.endsWith(suffix) && row.title.length > suffix.length) {
     return row.title.slice(0, row.title.length - suffix.length);
   }
+
   return row.threadId;
 }
 
@@ -1578,11 +1721,13 @@ function mapParentChangeSystemTitle(
   const assignment = row.parentChange;
   const shimmer = row.status === "pending";
   const verb = OWNERSHIP_CHANGE_VERBS[assignment.action];
+
   const threadSegment = parentChangeThreadSegment(
     row,
     parentChangeThreadName(row),
     shimmer,
   );
+
   const parentSegment =
     assignment.action === "release"
       ? parentChangeParentSegment(
@@ -1620,15 +1765,52 @@ function mapParentChangeSystemTitle(
   });
 }
 
+function mapActivitySystemTitle(
+  activityRef: TimelineActivityRef,
+): TimelineTitle {
+  switch (activityRef.kind) {
+    case "preview":
+      return makeTitle({
+        segments: [
+          segment("Started"),
+          segment(previewActivityDisplayUrl(activityRef.url), {
+            truncate: true,
+          }),
+        ],
+      });
+    case "child":
+      return makeTitle({
+        segments: [
+          segment(activityRef.title, {
+            em: true,
+            truncate: true,
+            link: { kind: "thread", threadId: activityRef.threadId },
+          }),
+          segment(childActivityVerb(activityRef.state)),
+        ],
+      });
+    default:
+      return assertNever(activityRef);
+  }
+}
+
 function mapSystemTitle(row: TimelineSystemViewRow): TimelineTitle {
   const hasError = row.systemKind === "error" || row.status === "error";
+
   if (row.systemKind === "operation" && row.operationKind === "parent-change") {
     return mapParentChangeSystemTitle(row);
   }
+
+  if (isTimelineActivityRow(row)) {
+    return mapActivitySystemTitle(row.activityRef);
+  }
+
   const isReasoning =
     row.systemKind === "operation" && row.operationKind === "reasoning";
+
   const isCompaction =
     row.systemKind === "operation" && row.operationKind === "compaction";
+
   const titleText = isReasoning
     ? row.status === "pending"
       ? "Thinking…"
@@ -1636,6 +1818,7 @@ function mapSystemTitle(row: TimelineSystemViewRow): TimelineTitle {
     : isCompaction && row.status === "pending"
       ? `${row.title}…`
       : row.title;
+
   const decorations: TimelineTitleDecoration[] = hasError
     ? [statusDecoration("error", null, { emphasis: true })]
     : isReasoning ||
@@ -1643,7 +1826,9 @@ function mapSystemTitle(row: TimelineSystemViewRow): TimelineTitle {
           (row.status === "pending" || row.status === "completed"))
       ? filterNull([durationDecoration(row.startedAt, row.completedAt)])
       : [];
+
   const shimmer = row.status === "pending";
+
   return makeTitle({
     segments: [segment(titleText, { shimmer, truncate: true })],
     decorations,
@@ -1653,7 +1838,9 @@ function mapSystemTitle(row: TimelineSystemViewRow): TimelineTitle {
 function mapConversationTitle(row: TimelineConversationViewRow): TimelineTitle {
   return makeTitle({
     segments: [
-      segment(row.role === "user" ? "User" : "Assistant", { em: false }),
+      segment(row.role === "user" ? userMessageSourceLabel(row) : "Assistant", {
+        em: false,
+      }),
     ],
   });
 }
@@ -1669,15 +1856,19 @@ function mapTimelineActivityIntentTitle({
     pathMode: "compact",
     pending,
   });
+
   const plainDetail = formatTimelineActivityIntentDetailParts({
     intent,
     pathMode: "full",
     pending,
   });
+
   const segments: TimelineTitleSegment[] = [];
+
   if (detail.prefix) {
     segments.push(segment(detail.prefix, { shimmer: pending }));
   }
+
   segments.push(
     segment(detail.content, {
       em: false,
@@ -1685,10 +1876,12 @@ function mapTimelineActivityIntentTitle({
       plainText: plainDetail.content,
     }),
   );
+
   const decorations = [
     ...badges,
     ...(failureStatus ? [statusDecoration(failureStatus, null)] : []),
   ];
+
   return makeTitle({ segments, decorations });
 }
 
@@ -1702,6 +1895,7 @@ export function buildTimelineActivityIntentTitles(
   let lastEmittedKey: string | null = null;
   const titles: TimelineActivityIntentTitle[] = [];
   const badges = badgeDecorations(row);
+
   const failureStatus =
     row.status === "error"
       ? "error"
@@ -1713,10 +1907,13 @@ export function buildTimelineActivityIntentTitles(
     if (intent.type === "unknown") {
       return;
     }
+
     const dedupeKey = getTimelineActivityIntentDetailDedupeKey(intent);
+
     if (dedupeKey !== null && dedupeKey === lastEmittedKey) {
       return;
     }
+
     titles.push({
       id: `${row.id}:activity-intent:${index}`,
       intent,
@@ -1743,10 +1940,14 @@ export function findTimelineFrontierRow(
 ): ThreadTimelineViewRow | null {
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const row = rows[i];
+
     if (!row) continue;
+
     if (isUserConversationRow(row)) continue;
+
     return row;
   }
+
   return null;
 }
 
@@ -1754,6 +1955,7 @@ export function findActiveLatestBundleId(
   rows: readonly ThreadTimelineViewRow[],
 ): string | null {
   const frontier = findTimelineFrontierRow(rows);
+
   return frontier?.kind === "bundle-summary" ? frontier.id : null;
 }
 

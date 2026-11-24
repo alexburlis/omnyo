@@ -6,10 +6,12 @@ import {
 } from "@/components/promptbox/mentions/prompt-mention-display";
 import { PromptMentionIcon } from "@/components/promptbox/mentions/PromptMentionIcon";
 import { promptMentionClipboardDataAttributes } from "@/components/promptbox/mentions/prompt-mention-clipboard";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { PromptMentionLinkContext } from "./prompt-mention-link";
 import { parsePromptEditorMentionAttrs } from "./prompt-editor-serialization";
 import { useThreadTitleDisplayText } from "@/components/thread/ThreadTitleMentions";
+import { promptImageAnchorFromAttrs } from "./prompt-image-anchor";
+import { PromptImageAnchorPill } from "./PromptImageAnchorPill";
 
 const EDITOR_MENTION_PILL_CLASS = cn(
   "group",
@@ -23,17 +25,28 @@ export function PromptMentionPillNodeView({
 }: NodeViewProps) {
   const resolveLink = useContext(PromptMentionLinkContext);
   const attrs = parsePromptEditorMentionAttrs(node.attrs);
+
   const threadDisplayLabel = useThreadTitleDisplayText(
     attrs?.resource.kind === "thread" ? attrs.resource.label : "",
   );
+
   const fallbackSerializedText =
     typeof node.attrs.serializedText === "string"
       ? node.attrs.serializedText
       : undefined;
+
   const isSelected = decorations.some(
     (decoration) => decoration.spec?.mentionSelected === true,
   );
+
   const selectedClass = isSelected ? "prompt-mention-pill--selected" : null;
+  const imageAnchor = promptImageAnchorFromAttrs(node.attrs);
+
+  if (imageAnchor) {
+    return (
+      <PromptImageAnchorPill anchor={imageAnchor} isSelected={isSelected} />
+    );
+  }
 
   if (!attrs) {
     return (
@@ -51,9 +64,11 @@ export function PromptMentionPillNodeView({
     attrs.resource.kind === "thread"
       ? { ...attrs.resource, label: threadDisplayLabel }
       : attrs.resource;
+
   const activate = resolveLink?.(resource) ?? null;
   const title = promptMentionTooltipLabel(resource);
   const activationLabel = activate ? `Open ${title}` : undefined;
+
   const handleClick = activate
     ? (event: MouseEvent<HTMLElement>) => {
         if (
@@ -65,20 +80,25 @@ export function PromptMentionPillNodeView({
         ) {
           return;
         }
+
         const selection = window.getSelection();
+
         if (selection && !selection.isCollapsed) {
           return;
         }
+
         event.preventDefault();
         event.stopPropagation();
         activate();
       }
     : undefined;
+
   const handleKeyDown = activate
     ? (event: KeyboardEvent<HTMLElement>) => {
         if (event.key !== "Enter" && event.key !== " ") {
           return;
         }
+
         event.preventDefault();
         event.stopPropagation();
         activate();

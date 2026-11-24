@@ -1,5 +1,5 @@
 import { registerPluginUpdateJobRoutes } from "../../../src/routes/plugin-update-jobs.js";
-import { pluginUpdateJobResponseSchema } from "@bb/server-contract";
+import { pluginUpdateJobResponseSchema } from "@omnyo/server-contract";
 import { createPluginUpdateJobs } from "../../../src/services/plugins/plugin-update-jobs.js";
 import { execFile } from "node:child_process";
 import {
@@ -32,8 +32,8 @@ import {
   upsertInstalledPlugin,
   upsertPluginMarketplace,
   type DbConnection,
-} from "@bb/db";
-import type { Logger } from "@bb/logger";
+} from "@omnyo/db";
+import type { Logger } from "@omnyo/logger";
 import { registerPluginRoutes } from "../../../src/routes/plugins.js";
 import { createPluginInstallJobs } from "../../../src/services/plugins/plugin-install-jobs.js";
 import { createPluginCatalogService } from "../../../src/services/plugin-catalog/plugin-catalog-service.js";
@@ -48,8 +48,10 @@ import {
   SERVER_MOVE_FROZEN_RETRY_MS,
   setServerMoveFrozen,
 } from "../../../src/services/server-move/freeze-state.js";
+import { openSecretVault } from "@omnyo/secret-storage";
 
 const logger = testLogger as unknown as Logger;
+
 const run = promisify(execFile);
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -59,17 +61,17 @@ async function git(cwd: string, args: string[]): Promise<string> {
 async function commitPlugin(
   repo: string,
   version: string,
-  engines?: { bb?: string; bbPluginSdk?: string },
+  engines?: { omnyo?: string; omnyoPluginSdk?: string },
   serverSource?: string,
 ): Promise<string> {
   await mkdir(repo, { recursive: true });
   await writeFile(
     join(repo, "package.json"),
     JSON.stringify({
-      name: "bb-plugin-updater",
+      name: "omnyo-plugin-updater",
       version,
       ...(engines ? { engines } : {}),
-      bb: {
+      omnyo: {
         name: "Updater fixture",
         description: "Plugin update fixture.",
         branding: { icon: "Zap" },
@@ -80,10 +82,11 @@ async function commitPlugin(
   await writeFile(
     join(repo, "server.ts"),
     serverSource ??
-      `export default function plugin(bb: any) { bb.log.info(${JSON.stringify(version)}); }`,
+      `export default function plugin(api: any) { api.log.info(${JSON.stringify(version)}); }`,
   );
   await git(repo, ["add", "-A"]);
   await git(repo, ["commit", "-qm", version]);
+
   return git(repo, ["rev-parse", "HEAD"]);
 }
 
@@ -93,6 +96,7 @@ describe("plugin update scheduling", () => {
     const emptyDb = createConnection(":memory:");
     migrate(emptyDb);
     const scheduled: number[] = [];
+
     const emptyService = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -103,11 +107,15 @@ describe("plugin update scheduling", () => {
         notifySystem: () => {},
       },
       logger,
-      dataDir: join(tmpdir(), "bb-plugin-update-empty-test"),
+      dataDir: join(tmpdir(), "omnyo-plugin-update-empty-test"),
+      vault: await openSecretVault(
+        join(tmpdir(), "omnyo-plugin-update-empty-test"),
+      ),
       appVersion: "1.0.0",
       stabilizationWindowMs: 0,
       scheduleUpdateCheck: (delayMs) => {
         scheduled.push(delayMs);
+
         return () => {};
       },
     });
@@ -127,6 +135,7 @@ describe("plugin update scheduling", () => {
     migrate(frozenDb);
     const scheduled: { delayMs: number; onElapsed: () => Promise<void> }[] = [];
     const notifySystem = vi.fn();
+
     const frozenService = createPluginService({
       aiServices: createAiServiceRegistry(),
       telemetry: createNoopTelemetryService(),
@@ -137,17 +146,24 @@ describe("plugin update scheduling", () => {
         notifySystem,
       },
       logger,
-      dataDir: join(tmpdir(), "bb-plugin-update-frozen-test"),
+      dataDir: join(tmpdir(), "omnyo-plugin-update-frozen-test"),
+      vault: await openSecretVault(
+        join(tmpdir(), "omnyo-plugin-update-frozen-test"),
+      ),
       appVersion: "1.0.0",
       stabilizationWindowMs: 0,
       scheduleUpdateCheck: (delayMs, onElapsed) => {
         scheduled.push({ delayMs, onElapsed });
+
         return () => {};
       },
     });
+
     const takeScheduled = () => {
       const entry = scheduled.shift();
+
       if (entry === undefined) throw new Error("missing scheduled check");
+
       return entry;
     };
 
@@ -175,20 +191,26 @@ describe("plugin update scheduling", () => {
     const HOUR = 60 * 60 * 1_000;
     const schedulingDb = createConnection(":memory:");
     migrate(schedulingDb);
+
     const schedulingWorkDir = await mkdtemp(
-      join(tmpdir(), "bb-plugin-update-scheduling-"),
+      join(tmpdir(), "omnyo-plugin-update-scheduling-"),
     );
+
     let clock = Date.now();
     let service: PluginService | undefined;
+
     let scheduled: Array<{
       delayMs: number;
       onElapsed: () => Promise<void>;
     }> = [];
+
     let firstFetch = true;
     let resolveFirstFetch!: (response: Response) => void;
+
     const deferredFetch = new Promise<Response>((resolve) => {
       resolveFirstFetch = resolve;
     });
+
     const packumentResponse = () =>
       new Response(
         JSON.stringify({
@@ -206,14 +228,16 @@ describe("plugin update scheduling", () => {
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
+
     vi.stubGlobal("fetch", () => {
       if (!firstFetch) return Promise.resolve(packumentResponse());
       firstFetch = false;
+
       return deferredFetch;
     });
 
     const upsertNpmRow = (id: string) => {
-      const packageName = `bb-plugin-${id}`;
+      const packageName = `omnyo-plugin-${id}`;
       upsertInstalledPlugin(schedulingDb, {
         id,
         source: `npm:${packageName}`,
@@ -243,6 +267,7 @@ describe("plugin update scheduling", () => {
         enabledFollowsDefault: false,
       });
     };
+
     const restartWithScheduler = async () => {
       await service?.stop();
       scheduled = [];
@@ -257,6 +282,7 @@ describe("plugin update scheduling", () => {
         },
         logger,
         dataDir: join(schedulingWorkDir, "data"),
+        vault: await openSecretVault(join(schedulingWorkDir, "data")),
         appVersion: "1.0.0",
         bundledPlugins: [],
         stabilizationWindowMs: 0,
@@ -264,8 +290,10 @@ describe("plugin update scheduling", () => {
         scheduleUpdateCheck: (delayMs, onElapsed) => {
           const entry = { delayMs, onElapsed };
           scheduled.push(entry);
+
           return () => {
             const index = scheduled.indexOf(entry);
+
             if (index !== -1) scheduled.splice(index, 1);
           };
         },
@@ -279,6 +307,7 @@ describe("plugin update scheduling", () => {
       service?.startPeriodicUpdateChecks();
       expect(scheduled.map((entry) => entry.delayMs)).toEqual([0]);
       const initial = scheduled.shift();
+
       if (initial === undefined)
         throw new Error("missing initial update check");
       const sweep = initial.onElapsed();
@@ -325,6 +354,7 @@ describe("plugin update service and routes", () => {
   let service: PluginService;
   let app: Hono;
   let materializationCount: number;
+
   let afterArtifactPromoted:
     | ((args: {
         pluginId: string;
@@ -336,7 +366,7 @@ describe("plugin update service and routes", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    workDir = await mkdtemp(join(tmpdir(), "bb-plugin-update-"));
+    workDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-update-"));
     repo = join(workDir, "repo");
     await mkdir(repo, { recursive: true });
     await git(repo, ["init", "-q", "-b", "main"]);
@@ -356,6 +386,7 @@ describe("plugin update service and routes", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "1.0.0",
       loadTimeoutMs: 2000,
       stabilizationWindowMs: 0,
@@ -370,7 +401,7 @@ describe("plugin update service and routes", () => {
     registerPluginUpdateJobRoutes(app, updateJobs);
     registerPluginRoutes(
       app,
-      { config: { serverPort: 3334 }, db },
+      { config: { serverPort: 3334 }, db, hub: { notifyThread: () => {} } },
       service,
       createPluginInstallJobs({ notifyChanged: () => {} }),
       updateJobs,
@@ -384,6 +415,80 @@ describe("plugin update service and routes", () => {
     await rm(workDir, { recursive: true, force: true });
   });
 
+  it.each(["main", "semver:^1.0.0"])(
+    "keeps healthy plugin results when the git remote for %s is unavailable",
+    async (selector) => {
+      const tagged = await taggedRepo();
+      await service.install(`git:${tagged}@${selector}`, { kind: "root" });
+      const offline = join(workDir, "offline");
+      await rename(tagged, offline);
+
+      const response = await app.request("/plugins/updates/check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+
+      expect({
+        status: response.status,
+        ...(await response.json()),
+      }).toMatchObject({
+        status: 200,
+        results: [
+          {
+            id: "tagged",
+            outcome: "unavailable",
+            detail: expect.stringContaining("git ls-remote failed"),
+          },
+          { id: "updater", outcome: "current" },
+        ],
+      });
+      expect(service.listUpdateResults()).toMatchObject([
+        { id: "tagged", outcome: "unavailable" },
+        { id: "updater", outcome: "current" },
+      ]);
+
+      await rename(offline, tagged);
+      await expect(service.checkForUpdates("tagged")).resolves.toMatchObject([
+        { id: "tagged", outcome: "current" },
+      ]);
+    },
+  );
+
+  it("propagates source classification database failures during update checks", async () => {
+    db.$client
+      .prepare("UPDATE plugins SET source_git_ref_kind = NULL WHERE id = ?")
+      .run("updater");
+    await restorePhaseOneCloneHistory("updater", repo);
+    db.$client.exec(`
+      CREATE TEMP TRIGGER reject_plugin_source_classification
+      BEFORE UPDATE OF source_git_ref_kind ON plugins
+      WHEN OLD.id = 'updater'
+      BEGIN
+        SELECT RAISE(ABORT, 'classification write failed');
+      END;
+    `);
+
+    const response = await app.request("/plugins/updates/check", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "updater" }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: expect.any(String),
+    });
+    expect(getInstalledPluginRegistration(db, "updater")).toMatchObject({
+      sourceGitRefKind: null,
+    });
+
+    db.$client.exec("DROP TRIGGER reject_plugin_source_classification");
+    await expect(service.checkForUpdates("updater")).resolves.toMatchObject([
+      { id: "updater", outcome: "current" },
+    ]);
+  });
+
   it("keeps a multi-plugin check usable when one npm registry is offline", async () => {
     const updateState = {
       lastCheckAt: null,
@@ -391,11 +496,12 @@ describe("plugin update service and routes", () => {
       newestIncompatibleVersion: null,
       statusDetail: null,
     };
+
     for (const packageName of [
-      "bb-plugin-offline-registry",
-      "bb-plugin-healthy-registry",
+      "omnyo-plugin-offline-registry",
+      "omnyo-plugin-healthy-registry",
     ]) {
-      const id = packageName.replace("bb-plugin-", "");
+      const id = packageName.replace("omnyo-plugin-", "");
       upsertInstalledPlugin(db, {
         id,
         source: `npm:${packageName}`,
@@ -420,13 +526,16 @@ describe("plugin update service and routes", () => {
         enabledFollowsDefault: false,
       });
     }
+
     vi.stubGlobal(
       "fetch",
       async (input: string | URL | Request): Promise<Response> => {
         const url = String(input);
+
         if (url.startsWith("https://offline-registry.test/")) {
           throw new TypeError("network unreachable");
         }
+
         if (url.startsWith("https://healthy-registry.test/")) {
           return new Response(
             JSON.stringify({
@@ -445,6 +554,7 @@ describe("plugin update service and routes", () => {
             { status: 200, headers: { "content-type": "application/json" } },
           );
         }
+
         throw new Error(`unexpected registry request: ${url}`);
       },
     );
@@ -478,62 +588,12 @@ describe("plugin update service and routes", () => {
     );
   });
 
-  it("reports legacy retired-marketplace installs as unavailable without fetching", async () => {
-    upsertInstalledPlugin(db, {
-      id: "legacy-marketplace",
-      source: "npm:bb-plugin-legacy-marketplace@^0.2.0",
-      provenance: {
-        kind: "catalog",
-        marketplace: "bb-community",
-        entryId: "legacy-marketplace",
-      },
-      sourceIntent: {
-        kind: "npm",
-        packageName: "bb-plugin-legacy-marketplace",
-        registry:
-          "https://api.github.com/repos/ymichael/bb/releases?bb-source=github-release&tag-template=plugin-legacy-v%7Bversion%7D&asset-template=bb-plugin-legacy-%7Bversion%7D.tgz",
-        requestedSpec: "^0.2.0",
-        specKind: "range",
-      },
-      exactResolution: {
-        kind: "npm",
-        version: "0.2.0",
-        integrity: "sha256-legacy",
-      },
-      updateState: {
-        lastCheckAt: null,
-        availableCompatibleVersion: null,
-        newestIncompatibleVersion: null,
-        statusDetail: null,
-      },
-      activeArtifactId: null,
-      rootDir: join(workDir, "legacy-marketplace"),
-      version: "0.2.0",
-      enabled: false,
-      enabledFollowsDefault: false,
-    });
-    const fetched: string[] = [];
-    vi.stubGlobal("fetch", async (input: string | URL | Request) => {
-      fetched.push(String(input));
-      throw new Error(`unexpected fetch ${String(input)}`);
-    });
-
-    const results = await service.checkForUpdates("legacy-marketplace");
-    expect(results).toEqual([
-      expect.objectContaining({
-        id: "legacy-marketplace",
-        outcome: "unavailable",
-        detail: expect.stringContaining("retired remote marketplace"),
-      }),
-    ]);
-    expect(fetched.filter((url) => url.includes("api.github.com"))).toEqual([]);
-  });
-
   async function restorePhaseOneCloneHistory(
     pluginId: string,
     sourceRepo: string,
   ): Promise<void> {
     const rootDir = getInstalledPlugin(db, pluginId)?.rootDir;
+
     if (rootDir === undefined) throw new Error(`missing ${pluginId}`);
     const clone = join(workDir, `phase-one-clone-${pluginId}`);
     await run("git", ["clone", "--quiet", "--no-checkout", sourceRepo, clone]);
@@ -543,16 +603,21 @@ describe("plugin update service and routes", () => {
   it("accepts an update before activation finishes and exposes its result after reconnect", async () => {
     const nextCommit = await commitPlugin(repo, "1.1.0");
     let release = () => {};
+
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+
     afterArtifactPromoted = async () => gate;
+
     const pending = app.request("/plugins/updater/update", {
       method: "POST",
       headers: { "content-type": "application/json", prefer: "respond-async" },
       body: "{}",
     });
+
     let response: Response | undefined;
+
     try {
       response = await Promise.race([
         pending,
@@ -563,6 +628,7 @@ describe("plugin update service and routes", () => {
       release();
       await pending;
     }
+
     if (response === undefined) return;
     const { job } = pluginUpdateJobResponseSchema.parse(await response.json());
     await vi.waitFor(
@@ -591,11 +657,13 @@ describe("plugin update service and routes", () => {
       .run("updater");
     await restorePhaseOneCloneHistory("updater", repo);
     const nextCommit = await commitPlugin(repo, "1.1.0");
+
     const checkedResponse = await app.request("/plugins/updates/check", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
     });
+
     expect(checkedResponse.status).toBe(200);
     const checked: unknown = await checkedResponse.json();
     expect(checked).toMatchObject({
@@ -621,6 +689,7 @@ describe("plugin update service and routes", () => {
       headers: { "content-type": "application/json" },
       body: "{}",
     });
+
     expect(updateResponse.status).toBe(200);
     expect(await updateResponse.json()).toMatchObject({
       applied: true,
@@ -645,7 +714,7 @@ describe("plugin update service and routes", () => {
       repo,
       "1.2.0",
       undefined,
-      "export default function plugin(bb: any) { this is not valid typescript",
+      "export default function plugin(api: any) { this is not valid typescript",
     );
 
     const results = await service.checkForUpdates("updater");
@@ -678,7 +747,6 @@ describe("plugin update service and routes", () => {
       sourceGitRef: null,
       sourceGitSubdirectory: null,
       sourceGitCommit: null,
-      statsJson: null,
       manifestJson: JSON.stringify({
         schemaVersion: 1,
         name: "acme-plugins",
@@ -691,13 +759,14 @@ describe("plugin update service and routes", () => {
       lastAttemptedRefreshAt: Date.now(),
       lastError: null,
     });
+
     const catalog = createPluginCatalogService({
       db,
       appVersion: "1.0.0",
-      marketplaceUrl: "https://marketplace.test/marketplace.json",
       dataDir: join(workDir, "data"),
       plugins: service,
     });
+
     const candidate = await commitPlugin(repo, "1.1.0");
 
     const removed = await catalog.removeMarketplace("acme-plugins");
@@ -719,14 +788,17 @@ describe("plugin update service and routes", () => {
 
   it("returns an actionable 422 and keeps the installed commit for an incompatible candidate", async () => {
     const installedCommit = await git(repo, ["rev-parse", "HEAD"]);
+
     const incompatibleCommit = await commitPlugin(repo, "2.0.0", {
-      bb: ">=99.0.0",
+      omnyo: ">=99.0.0",
     });
+
     const checkResponse = await app.request("/plugins/updates/check", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: "updater" }),
     });
+
     expect(checkResponse.status).toBe(200);
     expect(await checkResponse.json()).toMatchObject({
       results: [
@@ -734,7 +806,7 @@ describe("plugin update service and routes", () => {
           outcome: "incompatible",
           blocked: {
             version: incompatibleCommit,
-            reasons: [expect.stringContaining("requires bb >=99.0.0")],
+            reasons: [expect.stringContaining("requires Omnyo >=99.0.0")],
           },
         },
       ],
@@ -745,6 +817,7 @@ describe("plugin update service and routes", () => {
       headers: { "content-type": "application/json" },
       body: "{}",
     });
+
     expect(updateResponse.status).toBe(422);
     expect(await updateResponse.json()).toMatchObject({
       error: expect.stringContaining("is incompatible"),
@@ -762,9 +835,11 @@ describe("plugin update service and routes", () => {
 
   it("serializes two updates for one plugin so only one applies", async () => {
     const before = getInstalledPluginRegistration(db, "updater");
+
     if (before === undefined) throw new Error("missing installed updater");
     const oldRoot = before.rootDir;
     const nextCommit = await commitPlugin(repo, "1.1.0");
+
     const results = await Promise.all([
       service.applyUpdate("updater"),
       service.applyUpdate("updater"),
@@ -809,14 +884,18 @@ describe("plugin update service and routes", () => {
       db,
       "updater",
     )?.gitResolvedCommit;
+
     if (installedCommit === null || installedCommit === undefined) {
       throw new Error("missing installed commit");
     }
+
     let rejectService!: (error: Error) => void;
+
     const serviceCrash = new Promise<void>((_resolve, reject) => {
       rejectService = reject;
     });
-    vi.stubGlobal("__bbPluginStabilizationCrash", serviceCrash);
+
+    vi.stubGlobal("__omnyoPluginStabilizationCrash", serviceCrash);
     await service.stop();
     service = createPluginService({
       aiServices: createAiServiceRegistry(),
@@ -829,26 +908,30 @@ describe("plugin update service and routes", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "1.0.0",
       loadTimeoutMs: 2000,
       stabilizationWindowMs: 1,
       serviceRestartBaseMs: 1000,
       scheduleStabilizationWindow: () => {
         rejectService(new Error("service exploded"));
+
         return () => {};
       },
     });
     await service.start();
+
     const candidateCommit = await commitPlugin(
       repo,
       "1.1.0",
       undefined,
-      `export default function plugin(bb: any) {
-        bb.background.service("unstable", { async start() {
-          await (globalThis as any).__bbPluginStabilizationCrash;
+      `export default function plugin(api: any) {
+        api.background.service("unstable", { async start() {
+          await (globalThis as any).__omnyoPluginStabilizationCrash;
         }});
       }`,
     );
+
     await expect(service.applyUpdate("updater")).resolves.toMatchObject({
       ok: true,
       result: {
@@ -882,17 +965,21 @@ describe("plugin update service and routes", () => {
     const databasePath = join(pluginDir, "data.db");
     const secretPath = join(pluginDir, "secrets", "token");
     const oldRegistration = getInstalledPluginRegistration(db, "updater");
+
     if (
       oldRegistration?.activeArtifactId === null ||
       oldRegistration === undefined
     ) {
       throw new Error("missing old registration");
     }
+
     const oldArtifact = listPluginArtifacts(db, "updater").find(
       (artifact) => artifact.id === oldRegistration.activeArtifactId,
     );
+
     if (oldArtifact === undefined) throw new Error("missing old artifact");
     const api = service.getApi("updater");
+
     if (api === undefined) throw new Error("updater did not load");
     const pluginDb = api.storage.database();
     pluginDb.exec("CREATE TABLE restart_state (value TEXT NOT NULL)");
@@ -910,10 +997,10 @@ describe("plugin update service and routes", () => {
       undefined,
       `
         import { writeFileSync } from "node:fs";
-        export default async function plugin(bb: any) {
-          const database = bb.storage.database();
+        export default async function plugin(api: any) {
+          const database = api.storage.database();
           database.prepare("UPDATE restart_state SET value = ?").run("new-db");
-          await bb.storage.kv.set("restart-cursor", "new-kv");
+          await api.storage.kv.set("restart-cursor", "new-kv");
           writeFileSync(${JSON.stringify(secretPath)}, "changed-secret");
           throw new Error("restart rollback candidate failed");
         }
@@ -931,6 +1018,7 @@ describe("plugin update service and routes", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "1.0.0",
       stabilizationWindowMs: 0,
       afterPluginRollbackStateRestored: async () => {
@@ -969,6 +1057,7 @@ describe("plugin update service and routes", () => {
       },
       logger,
       dataDir: join(workDir, "data"),
+      vault: await openSecretVault(join(workDir, "data")),
       appVersion: "1.0.0",
       stabilizationWindowMs: 0,
     });
@@ -1012,7 +1101,7 @@ describe("plugin update service and routes", () => {
       kind: "direct",
     },
   ): void {
-    const packageName = `bb-plugin-${id}`;
+    const packageName = `omnyo-plugin-${id}`;
     upsertInstalledPlugin(db, {
       id,
       source: `npm:${packageName}`,
@@ -1053,12 +1142,14 @@ describe("plugin update service and routes", () => {
   it("keeps the guarded registry policy for catalog installs during a check", async () => {
     upsertNpmRow("listed", "https://127.0.0.1", {
       kind: "catalog",
-      marketplace: "bb-community",
+      marketplace: "acme-plugins",
       entryId: "listed",
     });
+
     const fetchMock = vi.fn(async () => {
       throw new Error("unexpected unguarded fetch");
     });
+
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(service.checkForUpdates("listed")).resolves.toEqual([
@@ -1074,7 +1165,8 @@ describe("plugin update service and routes", () => {
   it("deletes the replaced version once the update settles and keeps rollback state through the grace period", async () => {
     await service.stop();
     let clock = Date.now();
-    const makeService = () =>
+
+    const makeService = async () =>
       createPluginService({
         aiServices: createAiServiceRegistry(),
         telemetry: createNoopTelemetryService(),
@@ -1086,18 +1178,22 @@ describe("plugin update service and routes", () => {
         },
         logger,
         dataDir: join(workDir, "data"),
+        vault: await openSecretVault(join(workDir, "data")),
         appVersion: "1.0.0",
         stabilizationWindowMs: 0,
         artifactRetentionMs: 50,
         now: () => clock,
       });
-    service = makeService();
+
+    service = await makeService();
     await service.start();
+
     const oldArtifact = listPluginArtifacts(db, "updater").find(
       (artifact) =>
         artifact.id ===
         getInstalledPluginRegistration(db, "updater")?.activeArtifactId,
     );
+
     if (oldArtifact === undefined) throw new Error("missing old artifact");
     await commitPlugin(repo, "1.1.0");
     await expect(service.applyUpdate("updater")).resolves.toMatchObject({
@@ -1117,7 +1213,7 @@ describe("plugin update service and routes", () => {
 
     clock += 51;
     await service.stop();
-    service = makeService();
+    service = await makeService();
     await service.start();
     expect(listPluginStateSnapshots(db, "updater")).toHaveLength(0);
     expect(listPluginArtifacts(db, "updater")).toEqual(remaining);
@@ -1127,12 +1223,15 @@ describe("plugin update service and routes", () => {
     await commitPlugin(repo, "1.1.0");
     let releasePromotion: (() => void) | undefined;
     let reportPromotion: (() => void) | undefined;
+
     const promotionReached = new Promise<void>((resolvePromise) => {
       reportPromotion = resolvePromise;
     });
+
     const holdPromotion = new Promise<void>((resolvePromise) => {
       releasePromotion = resolvePromise;
     });
+
     afterArtifactPromoted = async () => {
       reportPromotion?.();
       await holdPromotion;
@@ -1155,12 +1254,15 @@ describe("plugin update service and routes", () => {
     await commitPlugin(repo, "1.1.0");
     let releasePromotion: (() => void) | undefined;
     let reportPromotion: (() => void) | undefined;
+
     const promotionReached = new Promise<void>((resolvePromise) => {
       reportPromotion = resolvePromise;
     });
+
     const holdPromotion = new Promise<void>((resolvePromise) => {
       releasePromotion = resolvePromise;
     });
+
     afterArtifactPromoted = async () => {
       reportPromotion?.();
       await holdPromotion;
@@ -1184,6 +1286,7 @@ describe("plugin update service and routes", () => {
 
   it("uses isolated staging directories for concurrent check and update", async () => {
     const nextCommit = await commitPlugin(repo, "1.1.0");
+
     const [checked, applied] = await Promise.all([
       service.checkForUpdates("updater"),
       service.applyUpdate("updater"),
@@ -1200,6 +1303,7 @@ describe("plugin update service and routes", () => {
   it("checks, updates, and rolls back a nested git plugin", async () => {
     await service.remove("updater");
     const nestedRoot = join(repo, "plugins", "nested");
+
     const commitNested = async (
       version: string,
       serverSource?: string,
@@ -1208,9 +1312,9 @@ describe("plugin update service and routes", () => {
       await writeFile(
         join(nestedRoot, "package.json"),
         JSON.stringify({
-          name: "bb-plugin-nested-updater",
+          name: "omnyo-plugin-nested-updater",
           version,
-          bb: {
+          omnyo: {
             name: "Nested updater fixture",
             description: "Nested plugin update fixture.",
             branding: { icon: "Zap" },
@@ -1221,10 +1325,11 @@ describe("plugin update service and routes", () => {
       await writeFile(
         join(nestedRoot, "server.ts"),
         serverSource ??
-          `export default function plugin(bb: any) { bb.log.info(${JSON.stringify(version)}); }`,
+          `export default function plugin(api: any) { api.log.info(${JSON.stringify(version)}); }`,
       );
       await git(repo, ["add", "-A"]);
       await git(repo, ["commit", "-qm", `nested ${version}`]);
+
       return git(repo, ["rev-parse", "HEAD"]);
     };
 
@@ -1273,11 +1378,13 @@ describe("plugin update service and routes", () => {
     await service.remove("updater");
     await git(repo, ["tag", "v1"]);
     await service.install(`git:${repo}@v1`, { kind: "root" });
+
     const response = await app.request("/plugins/updater/update", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
     });
+
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({
       error:
@@ -1287,6 +1394,7 @@ describe("plugin update service and routes", () => {
 
   it("loads a legacy-layout plugin unchanged, then migrates lazily on update", async () => {
     await service.remove("updater");
+
     const legacyRoot = join(
       workDir,
       "data",
@@ -1294,6 +1402,7 @@ describe("plugin update service and routes", () => {
       "git",
       "legacy-updater",
     );
+
     await run("git", ["clone", "--quiet", repo, legacyRoot]);
     const currentCommit = await git(repo, ["rev-parse", "HEAD"]);
     upsertInstalledPlugin(db, {
@@ -1337,6 +1446,7 @@ describe("plugin update service and routes", () => {
     });
     await stat(join(legacyRoot, "package.json"));
   });
+
   async function taggedRepo(): Promise<string> {
     const tagged = join(workDir, "tagged");
     await mkdir(tagged, { recursive: true });
@@ -1346,9 +1456,9 @@ describe("plugin update service and routes", () => {
     await writeFile(
       join(tagged, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-tagged",
+        name: "omnyo-plugin-tagged",
         version: "1.0.0",
-        bb: {
+        omnyo: {
           name: "Tagged fixture",
           description: "Tagged release fixture.",
           branding: { icon: "Zap" },
@@ -1358,11 +1468,12 @@ describe("plugin update service and routes", () => {
     );
     await writeFile(
       join(tagged, "server.ts"),
-      `export default function plugin(bb: any) { bb.log.info("tagged"); }`,
+      `export default function plugin(api: any) { api.log.info("tagged"); }`,
     );
     await git(tagged, ["add", "-A"]);
     await git(tagged, ["commit", "-qm", "1.0.0"]);
     await git(tagged, ["tag", "v1.0.0"]);
+
     return tagged;
   }
 
@@ -1371,6 +1482,7 @@ describe("plugin update service and routes", () => {
     await git(repoDir, ["add", "-A"]);
     await git(repoDir, ["commit", "-qm", tag]);
     await git(repoDir, ["tag", tag]);
+
     return git(repoDir, ["rev-parse", "HEAD"]);
   }
 
@@ -1524,10 +1636,10 @@ describe("plugin update service and routes", () => {
     await writeFile(
       join(tagged, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-tagged",
+        name: "omnyo-plugin-tagged",
         version: "1.2.0",
-        engines: { bb: ">=99.0.0" },
-        bb: {
+        engines: { omnyo: ">=99.0.0" },
+        omnyo: {
           name: "Tagged fixture",
           description: "Tagged release fixture.",
           branding: { icon: "Zap" },
@@ -1568,10 +1680,10 @@ describe("plugin update service and routes", () => {
     await writeFile(
       join(tagged, "package.json"),
       JSON.stringify({
-        name: "bb-plugin-tagged",
+        name: "omnyo-plugin-tagged",
         version: "1.1.0",
-        engines: { bb: ">=99.0.0" },
-        bb: {
+        engines: { omnyo: ">=99.0.0" },
+        omnyo: {
           name: "Tagged fixture",
           description: "Tagged release fixture.",
           branding: { icon: "Zap" },

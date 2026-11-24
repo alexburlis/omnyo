@@ -1,9 +1,10 @@
-import type { DbNotifier, DbTransaction } from "@bb/db";
+import type { ProviderFailureMetadata } from "@omnyo/domain";
+import type { DbNotifier, DbTransaction } from "@omnyo/db";
 import type {
   HostDaemonCommand,
   HostDaemonCommandResult,
   HostDaemonSettledCommandType,
-} from "@bb/host-daemon-contract";
+} from "@omnyo/host-daemon-contract";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../types.js";
 
 export type CommandResultSideEffectsDeps =
@@ -38,12 +39,13 @@ export type LiveHostCommandSuccessResultReportForType<
 
 export type LiveHostCommandFailureResultReportForType<
   TType extends HostDaemonSettledCommandType,
-> = LiveHostCommandResultReportBase & {
-  type: TType;
-  ok: false;
-  errorCode: string;
-  errorMessage: string;
-};
+> = LiveHostCommandResultReportBase &
+  ProviderFailureMetadata & {
+    type: TType;
+    ok: false;
+    errorCode: string;
+    errorMessage: string;
+  };
 
 export type HostDaemonCommandForType<
   TType extends HostDaemonSettledCommandType,

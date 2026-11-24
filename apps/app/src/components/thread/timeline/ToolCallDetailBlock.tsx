@@ -1,10 +1,17 @@
-import { Fragment, useRef, useState } from "react";
-import type { TimelineToolArgs } from "@bb/server-contract";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Fragment, useMemo, useRef, useState } from "react";
+import type { TimelineToolArgs } from "@omnyo/server-contract";
+import { cn } from "@omnyo/shared-ui/lib/utils";
+import { CONTROL_HOVER_TRANSITION } from "@omnyo/shared-ui/motion";
 import {
   ConversationMessageInlineOverflowToggle,
   useIsOverflowing,
 } from "./conversation-message-overflow.js";
+import {
+  TimelineCodeBlock,
+  TimelineDetailHeader,
+  TimelineRunningIndicator,
+  structuredOutputLanguage,
+} from "./TimelineCodeBlock.js";
 import { TimelineDetailScroll } from "./TimelineDetailScroll.js";
 
 interface ToolCallDetailBlockProps {
@@ -16,10 +23,13 @@ interface ToolCallDetailBlockProps {
 
 function formatArgValue(value: unknown): string {
   if (typeof value === "string") return value;
+
   if (value === null) return "null";
+
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
+
   return JSON.stringify(value, null, 2);
 }
 
@@ -31,6 +41,7 @@ interface CollapsibleHeaderProps {
 function CollapsibleHeader({ toolName, argEntries }: CollapsibleHeaderProps) {
   const [expanded, setExpanded] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
   const overflows = useIsOverflowing({
     elementRef: ref,
     enabled: !expanded,
@@ -42,7 +53,7 @@ function CollapsibleHeader({ toolName, argEntries }: CollapsibleHeaderProps) {
       <div
         ref={ref}
         className={cn(
-          "relative whitespace-pre-wrap break-words leading-tight",
+          "relative whitespace-pre-wrap break-words leading-relaxed",
           expanded ? null : "line-clamp-3",
         )}
       >
@@ -50,14 +61,18 @@ function CollapsibleHeader({ toolName, argEntries }: CollapsibleHeaderProps) {
         {argEntries.map(([key, value]) => (
           <Fragment key={key}>
             {"\n"}
-            <span className="text-muted-foreground">{key}: </span>
-            <span>{formatArgValue(value)}</span>
+            <span className="text-timeline-accent">{key}: </span>
+            {typeof value === "object" && value !== null ? (
+              <TimelineCodeBlock code={formatArgValue(value)} language="json" />
+            ) : (
+              <span>{formatArgValue(value)}</span>
+            )}
           </Fragment>
         ))}
         {overflows && !expanded ? (
           <ConversationMessageInlineOverflowToggle
-            buttonBackgroundClassName="bg-card"
-            fadeFromClassName="from-card"
+            buttonBackgroundClassName="bg-surface-recessed-solid"
+            fadeFromClassName="from-surface-recessed-solid"
             label="Show more"
             onToggle={() => setExpanded(true)}
           />
@@ -68,7 +83,10 @@ function CollapsibleHeader({ toolName, argEntries }: CollapsibleHeaderProps) {
           <button
             type="button"
             onClick={() => setExpanded(false)}
-            className="text-muted-foreground hover:text-foreground"
+            className={cn(
+              "cursor-pointer rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              CONTROL_HOVER_TRANSITION,
+            )}
             aria-expanded={true}
           >
             Show less
@@ -88,24 +106,43 @@ export function ToolCallDetailBlock({
   const argEntries = args ? Object.entries(args) : [];
   const hasOutput = output.trim().length > 0;
 
+  const outputLanguage = useMemo(
+    () => structuredOutputLanguage(output),
+    [output],
+  );
+
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <TimelineDetailScroll
-        size="base"
-        overflowX="hidden"
-        streaming={streaming}
-        contentKey={output}
-        scrollClassName="px-4 py-3 font-mono text-xs leading-tight text-foreground opacity-70"
-      >
-        <CollapsibleHeader toolName={toolName} argEntries={argEntries} />
-        {hasOutput ? (
-          <div className="mt-2 border-t border-border pt-2">
-            <pre className="m-0 min-w-0 overflow-x-auto whitespace-pre">
-              {output}
-            </pre>
-          </div>
-        ) : null}
-      </TimelineDetailScroll>
+      <div className="border-b border-border-hairline bg-surface-recessed">
+        <TimelineDetailHeader
+          label="Input"
+          copyText={JSON.stringify(args, null, 2)}
+        >
+          {streaming ? <TimelineRunningIndicator /> : null}
+        </TimelineDetailHeader>
+        <div className="px-3 pb-2 font-mono text-xs leading-relaxed text-foreground">
+          <CollapsibleHeader toolName={toolName} argEntries={argEntries} />
+        </div>
+      </div>
+      <TimelineDetailHeader label="Output" copyText={output} />
+      {hasOutput ? (
+        <TimelineDetailScroll
+          size="base"
+          streaming={streaming}
+          contentKey={output}
+          scrollClassName="px-3 pb-2 font-mono text-xs leading-relaxed text-muted-foreground"
+        >
+          {outputLanguage === null ? (
+            <pre className="m-0 min-w-0 whitespace-pre">{output}</pre>
+          ) : (
+            <TimelineCodeBlock code={output} language={outputLanguage} />
+          )}
+        </TimelineDetailScroll>
+      ) : (
+        <div className="px-3 pb-2 text-xs text-subtle-foreground">
+          {streaming ? "Waiting for output…" : "No output"}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { PendingInteraction } from "@bb/domain";
+import type { PendingInteraction } from "@omnyo/domain";
 import { describe, expect, it } from "vitest";
 import { buildChildThreadBlockerSummary } from "../../src/internal/interactive-requests.js";
 
@@ -14,11 +14,13 @@ function interaction(
     createdAt: 1,
     resolvedAt: null,
   };
+
   switch (payload.kind) {
     case "plugin":
       if (origin === undefined || origin.kind !== "plugin") {
         throw new Error("a plugin payload takes a plugin origin");
       }
+
       return { ...base, turnId: null, origin, payload, resolution: null };
     case "approval":
     case "user_question":
@@ -31,6 +33,7 @@ function interaction(
         providerRequestId: "req_1",
         resolution: null,
       };
+
       return payload.kind === "approval"
         ? { ...provider, payload }
         : payload.kind === "user_question"

@@ -32,15 +32,19 @@ export class PendingRpcRegistry<TKey extends PendingRpcKey, TResult> {
 
   claim(key: TKey): PendingRpcClaim<TResult> {
     const existing = this.entries.get(key.rpcKey);
+
     if (existing) {
       return { created: false, promise: existing.promise };
     }
+
     let resolveResult: (result: TResult) => void = () => undefined;
     let rejectResult: (error: Error) => void = () => undefined;
+
     const promise = new Promise<TResult>((resolve, reject) => {
       resolveResult = resolve;
       rejectResult = reject;
     });
+
     const entry: PendingRpcEntry<TKey, TResult> = {
       key,
       promise,
@@ -48,7 +52,9 @@ export class PendingRpcRegistry<TKey extends PendingRpcKey, TResult> {
       resolve: resolveResult,
       timeout: null,
     };
+
     const timeout = this.options;
+
     if (timeout.timeoutMs !== null) {
       entry.timeout = setTimeout(() => {
         if (this.entries.get(key.rpcKey) !== entry) return;
@@ -58,23 +64,33 @@ export class PendingRpcRegistry<TKey extends PendingRpcKey, TResult> {
         entry.reject(error);
       }, timeout.timeoutMs);
     }
+
     this.entries.set(key.rpcKey, entry);
+
     return { created: true, promise };
+  }
+
+  key(rpcKey: string): TKey | undefined {
+    return this.entries.get(rpcKey)?.key;
   }
 
   settle(rpcKey: string, result: TResult): boolean {
     const entry = this.take(rpcKey);
+
     if (!entry) return false;
     this.options.onSettle?.(entry.key, result);
     entry.resolve(result);
+
     return true;
   }
 
   fail(rpcKey: string, error: Error): boolean {
     const entry = this.take(rpcKey);
+
     if (!entry) return false;
     this.options.onFail?.(entry.key, error);
     entry.reject(error);
+
     return true;
   }
 
@@ -87,6 +103,7 @@ export class PendingRpcRegistry<TKey extends PendingRpcKey, TResult> {
     error: Error | ((key: TKey) => Error),
   ): number {
     let failed = 0;
+
     for (const entry of [...this.entries.values()]) {
       if (!matches(entry.key)) continue;
       this.clear(entry);
@@ -95,13 +112,16 @@ export class PendingRpcRegistry<TKey extends PendingRpcKey, TResult> {
       entry.reject(failure);
       failed += 1;
     }
+
     return failed;
   }
 
   private take(rpcKey: string): PendingRpcEntry<TKey, TResult> | null {
     const entry = this.entries.get(rpcKey);
+
     if (!entry) return null;
     this.clear(entry);
+
     return entry;
   }
 

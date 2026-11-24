@@ -13,6 +13,7 @@ const vendor = vi.hoisted(() => ({
   publish: vi.fn(),
   close: vi.fn(),
 }));
+
 vi.mock("modal", () => ({
   NotFoundError: class extends Error {},
   ModalClient: class {
@@ -24,8 +25,11 @@ vi.mock("modal", () => ({
     close = vendor.close;
   },
 }));
+
 import { NotFoundError, type ModalClient } from "modal";
+
 const credentials = { tokenId: "test-id", tokenSecret: "test-secret" };
+
 const request = () => ({
   appName: "test-app",
   displayName: "Image 2",
@@ -52,7 +56,7 @@ beforeEach(() => {
 it("builds and publishes the bundled tools image without daemon or credentials", async () => {
   const definition = await readStandardImage();
   expect(definition.reference).toMatch(
-    /^node:22\.19\.0-bookworm-slim@sha256:[a-f0-9]{64}$/,
+    /^node:22\.23\.5-bookworm-slim@sha256:[a-f0-9]{64}$/,
   );
   expect(definition.commands).toContain("USER node");
   expect(definition.commands.join("\n")).toContain("bubblewrap");
@@ -64,7 +68,7 @@ it("builds and publishes the bundled tools image without daemon or credentials",
     "@anthropic-ai/claude-code@",
   );
   expect(definition.commands.join("\n")).not.toMatch(
-    /bb-app|machine enroll|daemon|token|secret|COPY/i,
+    /omnyo-app|machine enroll|daemon|token|secret|COPY/i,
   );
   expect(await ensureModalImage(credentials, request())).toBe("im-standard");
   expect(vendor.registry).toHaveBeenCalledWith(definition.reference);
@@ -116,6 +120,7 @@ it("does not start cancelled builds and saves a completed shared image when canc
   const duringBuild = new AbortController();
   vendor.build.mockImplementationOnce(async () => {
     duringBuild.abort(new Error("cancelled"));
+
     return { imageId: "im-standard", publish: vendor.publish };
   });
   await expect(
@@ -131,9 +136,12 @@ it("does not start cancelled builds and saves a completed shared image when canc
 it("captures build output without swallowing unary API responses", async () => {
   const input = request();
   await ensureModalImage(credentials, input);
+
   const options: NonNullable<ConstructorParameters<typeof ModalClient>[0]> =
     vendor.options.mock.calls[0]![0];
+
   const middleware = options.grpcMiddleware![0]!;
+
   const unary = middleware(
     {
       method: {
@@ -151,8 +159,10 @@ it("captures build output without swallowing unary API responses", async () => {
     },
     {},
   );
+
   expect(await unary.next()).toEqual({ done: true, value: { appId: "app-1" } });
   const output = { taskLogs: [{ data: "RUN diagnostic\n" }] };
+
   const stream = middleware(
     {
       method: {
@@ -170,6 +180,7 @@ it("captures build output without swallowing unary API responses", async () => {
     },
     {},
   );
+
   expect(await stream.next()).toEqual({ done: false, value: output });
   expect(input.report.log).toHaveBeenCalledWith("RUN diagnostic\n");
   expect(await stream.next()).toEqual({ done: true, value: undefined });

@@ -10,8 +10,9 @@ import {
   type PluginSourceCodeRendererSlot,
 } from "@/lib/plugin-slots";
 
-const SOURCE_CODE_RENDERER_STORAGE_KEY = "bb.appearance.sourceCodeRenderer";
-const DIFF_RENDERER_STORAGE_KEY = "bb.appearance.diffRenderer";
+const SOURCE_CODE_RENDERER_STORAGE_KEY = "omnyo.appearance.sourceCodeRenderer";
+
+const DIFF_RENDERER_STORAGE_KEY = "omnyo.appearance.diffRenderer";
 
 export const sourceCodeRendererProviderAtom = createReplacementPreferenceAtom(
   SOURCE_CODE_RENDERER_STORAGE_KEY,
@@ -24,11 +25,13 @@ export const diffRendererProviderAtom = createReplacementPreferenceAtom(
 export function useSourceCodeRendererReplacement(): ResolvedReplacement<PluginSourceCodeRendererSlot> {
   const { sourceCodeRenderers } = usePluginSlots();
   const preference = useAtomValue(sourceCodeRendererProviderAtom);
+
   return resolvePreferredReplacement(sourceCodeRenderers, preference);
 }
 
 export function useDiffRendererReplacement(): ResolvedReplacement<PluginDiffRendererSlot> {
   const { diffRenderers } = usePluginSlots();
   const preference = useAtomValue(diffRendererProviderAtom);
+
   return resolvePreferredReplacement(diffRenderers, preference);
 }

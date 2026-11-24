@@ -1,47 +1,77 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter } from "react-router-dom";
-import { App } from "./App";
-import { AppErrorBoundary } from "./components/AppErrorBoundary";
-import { AppToaster } from "./components/AppToaster";
-import { registerProviderCliInstallQueryClient } from "./components/provider-cli/provider-cli-install-store";
-import { initializePreferredTheme } from "./hooks/useTheme";
-import { initializeFavicon } from "./lib/favicon-color-preference";
-import { installForeignDomMutationGuard } from "./lib/foreign-dom-mutation-guard";
-import { installAppQueryClientBrowserEvents } from "./lib/query-client";
-import { appQueryClient } from "./lib/app-query-client";
-import { applyCachedAppThemeCss } from "./lib/themes";
+import { restoreNativeOriginSessionV1 } from "./lib/origin-native-session-restore-v1";
+import { assertBrowserStorageMigrationV1 } from "./lib/legacy-browser-storage-v1";
+import { importLegacyBrowserPreferences } from "./lib/legacy-browser-preferences";
 import "./app.css";
 
-installForeignDomMutationGuard();
+function showStartupError(headingText: string, detailText: string): void {
+  const root = document.getElementById("root");
 
-Error.stackTraceLimit = 50;
+  if (!root) return;
+  const screen = document.createElement("main");
+  screen.setAttribute("role", "alert");
+  const heading = document.createElement("h1");
+  heading.textContent = headingText;
+  const detail = document.createElement("p");
+  detail.textContent = detailText;
+  const reload = document.createElement("button");
+  reload.type = "button";
+  reload.textContent = "Reload";
+  reload.addEventListener("click", () => window.location.reload());
+  screen.append(heading, detail, reload);
+  root.replaceChildren(screen);
+}
 
-installAppQueryClientBrowserEvents(appQueryClient);
-registerProviderCliInstallQueryClient(appQueryClient);
+async function startApp(): Promise<void> {
+  let confirmNativeEntry: (() => Promise<void>) | null = null;
 
-initializePreferredTheme();
-applyCachedAppThemeCss();
-initializeFavicon();
+  try {
+    const nativeRestore = Reflect.get(window, "__omnyoOriginSessionRestoreV1");
 
-createRoot(document.getElementById("root")!, {
-  onUncaughtError: (error, errorInfo) => {
-    console.error(
-      "[bb] uncaught render error — the app root was torn down",
-      error,
-      errorInfo.componentStack,
+    if (nativeRestore !== undefined) {
+      confirmNativeEntry = await restoreNativeOriginSessionV1(nativeRestore, {
+        currentOrigin: location.origin,
+        local: localStorage,
+        session: sessionStorage,
+        nativeOwner: Reflect.get(window, "__omnyoNativeFirstEntryV1"),
+      });
+
+      const begin = Reflect.get(
+        window,
+        "__omnyoBeginBrowserStorageAdmissionV1",
+      );
+
+      if (typeof begin !== "function")
+        throw new Error("Native browser admission owner is unavailable");
+      Reflect.apply(begin, window, []);
+    }
+
+    const admission = Reflect.get(window, "__omnyoBrowserStorageAdmission");
+
+    if (!(admission instanceof Promise))
+      throw new Error("Browser storage admission is unavailable");
+    await admission;
+    assertBrowserStorageMigrationV1();
+  } catch {
+    showStartupError(
+      "Saved browser data needs review",
+      "The migration stopped and preserved your saved copies. Reload to try again.",
     );
-  },
-}).render(
-  <StrictMode>
-    <AppErrorBoundary>
-      <QueryClientProvider client={appQueryClient}>
-        <BrowserRouter>
-          <App />
-          <AppToaster />
-        </BrowserRouter>
-      </QueryClientProvider>
-    </AppErrorBoundary>
-  </StrictMode>,
-);
+
+    return;
+  }
+
+  importLegacyBrowserPreferences();
+
+  try {
+    await import("./app-entry");
+
+    if (confirmNativeEntry)
+      void confirmNativeEntry().catch(() => {
+        console.warn("Native first-entry confirmation remains pending");
+      });
+  } catch {
+    showStartupError("Could not start the app", "Reload to try again.");
+  }
+}
+
+void startApp();

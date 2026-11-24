@@ -1,15 +1,17 @@
-declare const __BB_PLUGIN_ID__: string | undefined;
+declare const __OMNYO_PLUGIN_ID__: string | undefined;
 
-export function usePortalScopeProps(): {
-  "data-bb-portaled-overlay": "";
-  "data-bb-plugin-root"?: "";
-  "data-bb-plugin"?: string;
+export function usePortalScopeProps(ownerPluginId?: string): {
+  "data-omnyo-portaled-overlay": "";
+  "data-omnyo-plugin-root"?: "";
+  "data-omnyo-plugin"?: string;
 } {
   const pluginId =
-    typeof __BB_PLUGIN_ID__ === "string" ? __BB_PLUGIN_ID__ : undefined;
+    ownerPluginId ??
+    (typeof __OMNYO_PLUGIN_ID__ === "string" ? __OMNYO_PLUGIN_ID__ : undefined);
+
   return {
-    "data-bb-portaled-overlay": "",
-    "data-bb-plugin-root": "",
-    ...(pluginId !== undefined ? { "data-bb-plugin": pluginId } : {}),
+    "data-omnyo-portaled-overlay": "",
+    "data-omnyo-plugin-root": "",
+    ...(pluginId !== undefined ? { "data-omnyo-plugin": pluginId } : {}),
   };
 }

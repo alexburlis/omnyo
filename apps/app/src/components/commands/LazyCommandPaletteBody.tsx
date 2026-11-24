@@ -1,7 +1,7 @@
-import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { useIsCompactViewport } from "@omnyo/shared-ui/hooks/use-compact-viewport";
 import { useId } from "react";
-import { Skeleton } from "@bb/shared-ui/skeleton";
-import { cn } from "@bb/shared-ui/lib/utils";
+import { Skeleton } from "@omnyo/shared-ui/skeleton";
+import { cn } from "@omnyo/shared-ui/lib/utils";
 import { defineSplit, SplitLoadFailure } from "@/lib/define-split";
 import type { CommandPaletteBodyProps } from "./CommandPaletteBody";
 import {
@@ -32,6 +32,7 @@ function CommandPaletteBodyPlaceholder({
 }: CommandPaletteBodyProps & { retry?: () => void }) {
   const descriptionId = useId();
   const isCompact = useIsCompactViewport();
+
   return (
     <>
       <PaletteInputBand>
@@ -77,5 +78,4 @@ export const LazyCommandPaletteBody = defineSplit<CommandPaletteBodyProps>({
     import("./CommandPaletteBody").then((module) => module.CommandPaletteBody),
   loading: CommandPaletteBodyPlaceholder,
   error: CommandPaletteBodyPlaceholder,
-  tier: "preload",
 });

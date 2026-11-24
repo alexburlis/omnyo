@@ -1,4 +1,4 @@
-import type { Environment, Host, Thread, ThreadStatus } from "@bb/domain";
+import type { Environment, Host, Thread, ThreadStatus } from "@omnyo/domain";
 import type {
   EnvironmentNotReadyErrorDetails,
   HostUnavailableErrorDetails,
@@ -9,8 +9,8 @@ import type {
   ThreadEnvironmentUnavailableErrorDetails,
   ThreadNotWritableErrorDetails,
   ThreadNotWritableReason,
-} from "@bb/server-contract";
-import { hostUnavailableErrorDetailsSchema } from "@bb/server-contract";
+} from "@omnyo/server-contract";
+import { hostUnavailableErrorDetailsSchema } from "@omnyo/server-contract";
 import { ApiError } from "../../errors.js";
 
 type EnvironmentReadinessFields = Pick<Environment, "path" | "status">;
@@ -58,6 +58,7 @@ export function destroyedThreadEnvironmentDetails(
   if (environment.status !== "destroyed") {
     return null;
   }
+
   return threadEnvironmentUnavailableDetails("destroyed", environment.status);
 }
 
@@ -67,6 +68,7 @@ export function goneThreadEnvironmentDetails(
   if (environment.status !== "destroyed") {
     return null;
   }
+
   return threadEnvironmentUnavailableDetails(
     environment.status,
     environment.status,
@@ -99,11 +101,6 @@ export function threadNotWritableReasonForStatus(
   status: ThreadStatus,
 ): ThreadNotWritableReason {
   switch (status) {
-    // A pending thread has never dispatched, so "not started" is literally
-    // what it is. It reuses `starting`'s reason rather than earning its own:
-    // the caller's remedy is identical (wait for the first dispatch to clear),
-    // and a distinct reason would only be worth its fan-out once a surface
-    // renders pending differently.
     case "pending":
     case "starting":
       return "not_started";
@@ -138,6 +135,7 @@ export function inactiveHostUnavailableDetails(
       lifecycle.phase === "suspended" ||
       lifecycle.phase === "resuming" ||
       lifecycle.suspendedAt !== null);
+
   return {
     reason: suspended ? "suspended" : "disconnected",
     hostStatus,
@@ -150,9 +148,11 @@ export function isSuspendedHostUnavailableError(error: unknown): boolean {
   if (!(error instanceof ApiError) || error.body.code !== "host_unavailable") {
     return false;
   }
+
   const details = hostUnavailableErrorDetailsSchema.safeParse(
     error.body.details,
   );
+
   return details.success && details.data.reason === "suspended";
 }
 

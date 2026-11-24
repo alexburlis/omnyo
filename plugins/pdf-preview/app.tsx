@@ -3,7 +3,7 @@ import {
   definePluginApp,
   experimental_Icon as Icon,
   type PluginFileOpenerProps,
-} from "@get-bb/plugin-sdk/app";
+} from "@omnyo/plugin-sdk/app";
 import { loadPdfBlob, resolvePdfUrl } from "./pdf-source.js";
 
 type PreviewState =
@@ -14,6 +14,7 @@ type PreviewState =
 function PdfFileOpener({ path, source, Original }: PluginFileOpenerProps) {
   const [reloadNonce, setReloadNonce] = useState(0);
   const [state, setState] = useState<PreviewState>({ status: "loading" });
+
   const url = useMemo(
     () => resolvePdfUrl(path, source),
     // oxlint-disable-next-line react/exhaustive-deps
@@ -49,6 +50,7 @@ function PdfFileOpener({ path, source, Original }: PluginFileOpenerProps) {
 
     return () => {
       controller.abort();
+
       if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
     };
   }, [reloadNonce, url]);
@@ -58,16 +60,28 @@ function PdfFileOpener({ path, source, Original }: PluginFileOpenerProps) {
   if (state.status === "error") {
     return (
       <div className="flex h-full min-h-0 items-center justify-center p-6">
-        <div className="max-w-md space-y-3 text-center" role="alert">
-          <p className="text-sm text-destructive">
-            Failed to load PDF: {state.message}
-          </p>
+        <div
+          className="flex max-w-sm flex-col items-center gap-3 text-center"
+          role="alert"
+        >
+          <span className="grid size-11 place-items-center rounded-full bg-surface-destructive text-destructive-text ring-1 ring-surface-destructive-border">
+            <Icon name="FileText" className="size-5" aria-hidden />
+          </span>
+          <div className="flex flex-col gap-1">
+            <p className="text-base font-semibold text-foreground">
+              Couldn’t open this PDF
+            </p>
+            <p className="text-sm leading-relaxed break-words text-muted-foreground">
+              {state.message}
+            </p>
+          </div>
           <button
             type="button"
-            className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-state-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="mt-1 inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-control-primary px-3 text-xs font-medium text-control-primary-foreground shadow-control-primary hover:bg-control-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             onClick={() => setReloadNonce((current) => current + 1)}
           >
-            Retry
+            <Icon name="RotateCcw" className="size-3.5" aria-hidden />
+            Try again
           </button>
         </div>
       </div>

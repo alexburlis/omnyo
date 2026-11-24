@@ -28,9 +28,11 @@ describe("SplitDimmingSetting", () => {
     expect(
       screen.getByText("Fade out splits that do not have focus."),
     ).not.toBeNull();
+
     const toggle = screen.getByRole("switch", {
       name: SPLIT_DIMMING_SETTING_LABEL,
     });
+
     expect(toggle.getAttribute("data-state")).toBe("checked");
 
     fireEvent.click(toggle);

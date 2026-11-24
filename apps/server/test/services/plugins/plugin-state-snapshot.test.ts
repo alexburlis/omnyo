@@ -23,7 +23,7 @@ import {
   setPluginStateSnapshotStatus,
   upsertInstalledPlugin,
   type DbConnection,
-} from "@bb/db";
+} from "@omnyo/db";
 import { garbageCollectPluginArtifacts } from "../../../src/services/plugins/plugin-artifact-gc.js";
 import {
   createPluginStateSnapshotOnDisk,
@@ -38,7 +38,7 @@ describe("plugin activation snapshots and garbage collection", () => {
   beforeEach(async () => {
     db = createConnection(":memory:");
     migrate(db);
-    dataDir = await mkdtemp(join(tmpdir(), "bb-plugin-snapshot-"));
+    dataDir = await mkdtemp(join(tmpdir(), "omnyo-plugin-snapshot-"));
   });
 
   afterEach(async () => {
@@ -76,9 +76,11 @@ describe("plugin activation snapshots and garbage collection", () => {
       enabledFollowsDefault: false,
     });
     const previousRegistration = getInstalledPlugin(db, "snapshot-test");
+
     if (previousRegistration === undefined) {
       throw new Error("missing snapshot-test registration");
     }
+
     const snapshot = await createPluginStateSnapshotOnDisk({
       db,
       dataDir,
@@ -102,6 +104,7 @@ describe("plugin activation snapshots and garbage collection", () => {
       );
       await writeFile(secretPath, "changed-secret");
     };
+
     await mutate();
     await restorePluginStateSnapshot({
       db,
@@ -134,11 +137,11 @@ describe("plugin activation snapshots and garbage collection", () => {
     await mkdir(pluginDir, { recursive: true });
     upsertInstalledPlugin(db, {
       id: "pre-default-tracking",
-      source: "npm:bb-plugin-pre-default-tracking@1.0.0",
+      source: "npm:omnyo-plugin-pre-default-tracking@1.0.0",
       provenance: { kind: "direct" },
       sourceIntent: {
         kind: "npm",
-        packageName: "bb-plugin-pre-default-tracking",
+        packageName: "omnyo-plugin-pre-default-tracking",
         registry: "https://registry.npmjs.org",
         requestedSpec: "1.0.0",
         specKind: "exact",
@@ -161,7 +164,9 @@ describe("plugin activation snapshots and garbage collection", () => {
       enabledFollowsDefault: false,
     });
     const registration = getInstalledPlugin(db, "pre-default-tracking");
+
     if (registration === undefined) throw new Error("missing registration");
+
     const snapshot = await createPluginStateSnapshotOnDisk({
       db,
       dataDir,
@@ -172,11 +177,14 @@ describe("plugin activation snapshots and garbage collection", () => {
       retainedUntil: 200,
       previousRegistration: registration,
     });
+
     if (snapshot.registrationPath === null) {
       throw new Error("missing snapshot registration path");
     }
+
     const { enabledFollowsDefault: _enabledFollowsDefault, ...preTracking } =
       registration;
+
     await writeFile(snapshot.registrationPath, JSON.stringify(preTracking));
 
     await expect(
@@ -192,7 +200,7 @@ describe("plugin activation snapshots and garbage collection", () => {
       source: "npm:bb-plugin-legacy@^1.0.0",
       provenance: {
         kind: "catalog",
-        marketplace: "bb-community",
+        marketplace: "acme-plugins",
         entryId: "legacy-entry",
       },
       sourceIntent: {
@@ -220,7 +228,9 @@ describe("plugin activation snapshots and garbage collection", () => {
       enabledFollowsDefault: false,
     });
     const registration = getInstalledPlugin(db, "legacy-snapshot");
+
     if (registration === undefined) throw new Error("missing registration");
+
     const snapshot = await createPluginStateSnapshotOnDisk({
       db,
       dataDir,
@@ -231,18 +241,22 @@ describe("plugin activation snapshots and garbage collection", () => {
       retainedUntil: 200,
       previousRegistration: registration,
     });
+
     if (snapshot.registrationPath === null) {
       throw new Error("missing snapshot registration path");
     }
+
     const {
       catalogEntryId: _catalogEntryId,
       catalogMarketplaceName: _catalogMarketplaceName,
       ...legacyRegistration
     } = registration;
+
     const {
       catalogMarketplaceName: _preNamedMarketplace,
       ...preNamedMarketplaceRegistration
     } = registration;
+
     await writeFile(
       snapshot.registrationPath,
       JSON.stringify(preNamedMarketplaceRegistration),
@@ -250,8 +264,8 @@ describe("plugin activation snapshots and garbage collection", () => {
     await expect(
       readPluginSnapshotRegistration({ db, snapshotId: snapshot.id }),
     ).resolves.toMatchObject({
-      provenance: "catalog",
-      catalogEntryId: "legacy-entry",
+      provenance: "direct",
+      catalogEntryId: null,
       catalogMarketplaceName: null,
       sourceNpmRequestedSpec: "^1.0.0",
       npmResolvedVersion: "1.2.0",
@@ -269,8 +283,8 @@ describe("plugin activation snapshots and garbage collection", () => {
     await expect(
       readPluginSnapshotRegistration({ db, snapshotId: snapshot.id }),
     ).resolves.toMatchObject({
-      provenance: "catalog",
-      catalogEntryId: "legacy-entry",
+      provenance: "direct",
+      catalogEntryId: null,
       sourceNpmRequestedSpec: "^1.0.0",
       npmResolvedVersion: "1.2.0",
     });
@@ -319,6 +333,7 @@ describe("plugin activation snapshots and garbage collection", () => {
 
   it("keeps a shared checkout while a nested plugin still lives in it", async () => {
     const commit = "a".repeat(40);
+
     const checkout = join(
       dataDir,
       "plugins",
@@ -328,9 +343,11 @@ describe("plugin activation snapshots and garbage collection", () => {
       "repo",
       commit,
     );
+
     const nestedPath = join(checkout, "plugins", "nested");
     await mkdir(nestedPath, { recursive: true });
     await writeFile(join(nestedPath, "sentinel"), "keep");
+
     const makeArtifact = (id: string, pluginId: string, path: string) =>
       createPluginArtifact(db, {
         id,
@@ -345,6 +362,7 @@ describe("plugin activation snapshots and garbage collection", () => {
         validationResult: "valid",
         validatedAt: 1,
       });
+
     makeArtifact("root", "gc-root", checkout);
     makeArtifact("nested", "gc-nested", nestedPath);
     upsertInstalledPlugin(db, {
@@ -387,6 +405,7 @@ describe("plugin activation snapshots and garbage collection", () => {
 
   it("keeps a nested directory while a root plugin still owns it", async () => {
     const commit = "c".repeat(40);
+
     const checkout = join(
       dataDir,
       "plugins",
@@ -396,9 +415,11 @@ describe("plugin activation snapshots and garbage collection", () => {
       "repo",
       commit,
     );
+
     const nestedPath = join(checkout, "plugins", "nested");
     await mkdir(nestedPath, { recursive: true });
     await writeFile(join(nestedPath, "sentinel"), "keep");
+
     const makeArtifact = (id: string, pluginId: string, path: string) =>
       createPluginArtifact(db, {
         id,
@@ -413,6 +434,7 @@ describe("plugin activation snapshots and garbage collection", () => {
         validationResult: "valid",
         validatedAt: 1,
       });
+
     makeArtifact("active-root", "gc-active-root", checkout);
     makeArtifact("nested-old", "gc-nested-old", nestedPath);
     upsertInstalledPlugin(db, {
@@ -455,6 +477,7 @@ describe("plugin activation snapshots and garbage collection", () => {
 
   it("keeps a nested directory that carries the commit name", async () => {
     const commit = "d".repeat(40);
+
     const checkout = join(
       dataDir,
       "plugins",
@@ -464,9 +487,11 @@ describe("plugin activation snapshots and garbage collection", () => {
       "repo",
       commit,
     );
+
     const nestedPath = join(checkout, "vendor", commit);
     await mkdir(nestedPath, { recursive: true });
     await writeFile(join(nestedPath, "sentinel"), "keep");
+
     const makeArtifact = (id: string, pluginId: string, path: string) =>
       createPluginArtifact(db, {
         id,
@@ -481,6 +506,7 @@ describe("plugin activation snapshots and garbage collection", () => {
         validationResult: "valid",
         validatedAt: 1,
       });
+
     makeArtifact("collision-root", "gc-collision-root", checkout);
     makeArtifact("collision-nested", "gc-collision-nested", nestedPath);
     upsertInstalledPlugin(db, {
@@ -523,6 +549,7 @@ describe("plugin activation snapshots and garbage collection", () => {
 
   it("collects the shared checkout after its last nested plugin", async () => {
     const commit = "b".repeat(40);
+
     const checkout = join(
       dataDir,
       "plugins",
@@ -532,6 +559,7 @@ describe("plugin activation snapshots and garbage collection", () => {
       "repo",
       commit,
     );
+
     const nestedPath = join(checkout, "plugins", "nested");
     await mkdir(nestedPath, { recursive: true });
     await writeFile(join(checkout, "repository-file"), "remove");
@@ -574,6 +602,7 @@ describe("plugin activation snapshots and garbage collection", () => {
         await writeFile(join(path, "sentinel"), "keep");
       }),
     );
+
     const makeArtifact = (id: string, path: string, commit: string) =>
       createPluginArtifact(db, {
         id,
@@ -588,6 +617,7 @@ describe("plugin activation snapshots and garbage collection", () => {
         validationResult: "valid",
         validatedAt: 1,
       });
+
     makeArtifact("active", activePath, "active");
     makeArtifact("retained", retainedPath, "retained");
     makeArtifact("unmanaged", localPath, "user-plugin");
@@ -614,6 +644,7 @@ describe("plugin activation snapshots and garbage collection", () => {
       enabled: true,
       enabledFollowsDefault: false,
     });
+
     const snapshotPath = join(
       dataDir,
       "plugins",
@@ -621,6 +652,7 @@ describe("plugin activation snapshots and garbage collection", () => {
       "gc-test",
       "one",
     );
+
     await mkdir(snapshotPath, { recursive: true });
     createPluginStateSnapshot(db, {
       id: "snapshot",
@@ -635,7 +667,7 @@ describe("plugin activation snapshots and garbage collection", () => {
       status: "rollback-pending",
       rollbackCandidateVersion: "candidate",
       rollbackSourceFingerprint: "source",
-      rollbackBbVersion: "1.0.0",
+      rollbackCoreVersion: "1.0.0",
       rollbackSdkVersion: "0.2.0",
       rollbackDetail: "failed",
       createdAt: 1,

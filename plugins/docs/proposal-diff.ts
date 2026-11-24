@@ -9,7 +9,9 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { diffArrays } from "diff";
 
 type DiffState = { decorations: DecorationSet; beforeDeletion: number | null };
+
 type Part<T> = { value: T[]; added?: boolean; removed?: boolean };
+
 type Token = { key: string; from: number; to: number };
 
 export const proposalDiffKey = new PluginKey<DiffState>("docsProposalDiff");
@@ -21,6 +23,7 @@ function changes<T>(
   deadline: number,
 ): Part<T>[] {
   const remaining = deadline - Date.now();
+
   const result =
     remaining > 0
       ? diffArrays(left, right, {
@@ -29,19 +32,23 @@ function changes<T>(
           maxEditLength: 512,
         })
       : undefined;
+
   if (result) return result;
   let start = 0;
+
   while (
     start < Math.min(left.length, right.length) &&
     equal(left[start]!, right[start]!)
   )
     start++;
   let end = 0;
+
   while (
     end < Math.min(left.length, right.length) - start &&
     equal(left[left.length - end - 1]!, right[right.length - end - 1]!)
   )
     end++;
+
   return [
     { value: right.slice(0, start) },
     { value: left.slice(start, left.length - end), removed: true },
@@ -56,6 +63,7 @@ function tokens(node: ProseMirrorNode): Token[] {
     if (child.isText) {
       const marks = JSON.stringify(child.marks.map((mark) => mark.toJSON()));
       let position = offset;
+
       for (const word of child.text?.match(/\s+|\S+\s*/gu) ?? []) {
         result.push({
           key: `${marks}:${word}`,
@@ -71,6 +79,7 @@ function tokens(node: ProseMirrorNode): Token[] {
         to: offset + child.nodeSize,
       });
   });
+
   return result;
 }
 
@@ -85,6 +94,7 @@ function buildDecorations(
   const deadline = Date.now() + 40;
   const added = "rounded-sm bg-diff-added/10 text-diff-added";
   const removed = "rounded-sm bg-diff-removed/10 text-diff-removed select-none";
+
   const addNode = (node: ProseMirrorNode, position: number) =>
     result.push(
       Decoration.node(position, position + node.nodeSize, {
@@ -92,6 +102,7 @@ function buildDecorations(
         "data-proposal-added": "true",
       }),
     );
+
   const children = (node: ProseMirrorNode) => {
     const result: { node: ProseMirrorNode; offset: number; key: string }[] = [];
     node.forEach((child, offset) =>
@@ -101,8 +112,10 @@ function buildDecorations(
         key: JSON.stringify(child.toJSON()),
       }),
     );
+
     return result;
   };
+
   const widget = (
     position: number,
     fragment: Fragment,
@@ -116,29 +129,36 @@ function buildDecorations(
         (view) => {
           const document = view.dom.ownerDocument;
           const Element = document.defaultView?.HTMLElement;
+
           const serialized =
             block && fragment.childCount === 1
               ? serializer.serializeNode(fragment.firstChild!, { document })
               : null;
+
           const element =
             Element && serialized instanceof Element
               ? serialized
               : document.createElement(block ? "div" : "del");
+
           element.classList.add(...removed.split(" "));
           element.contentEditable = "false";
           element.dataset.proposalRemoved = "true";
           element.setAttribute("aria-label", "Proposed deletion");
+
           if (block) element.style.textDecoration = "line-through";
+
           if (element !== serialized)
             element.append(
               serializer.serializeFragment(fragment, { document }),
             );
+
           return element;
         },
         { side, key: `${key}:${side}`, ignoreSelection: true },
       ),
     );
   };
+
   const compare = (
     oldNode: ProseMirrorNode,
     node: ProseMirrorNode,
@@ -146,7 +166,9 @@ function buildDecorations(
     oldPosition: number,
   ) => {
     if (oldNode.eq(node)) return;
+
     if (position >= 0 && !oldNode.sameMarkup(node)) addNode(node, position);
+
     if (oldNode.isTextblock && node.isTextblock) {
       const parts = changes(
         tokens(oldNode),
@@ -154,11 +176,15 @@ function buildDecorations(
         (a, b) => a.key === b.key,
         deadline,
       );
+
       let cursor = 0;
+
       for (const part of parts) {
         const first = part.value[0];
         const last = part.value.at(-1);
+
         if (!first || !last) continue;
+
         if (part.removed)
           widget(
             position + 1 + cursor,
@@ -178,24 +204,31 @@ function buildDecorations(
           cursor = last.to;
         }
       }
+
       return;
     }
+
     const parts = changes(
       children(oldNode),
       children(node),
       (a, b) => a.key === b.key,
       deadline,
     );
+
     let cursor = 0;
+
     for (let index = 0; index < parts.length; index++) {
       const part = parts[index]!;
+
       if (part.removed) {
         const next = parts[index + 1];
         const replacements = next?.added ? next.value : [];
         const count = Math.max(part.value.length, replacements.length);
+
         for (let item = 0; item < count; item++) {
           const previous = part.value[item];
           const replacement = replacements[item];
+
           if (
             previous &&
             replacement &&
@@ -216,12 +249,15 @@ function buildDecorations(
                 `block:${oldPosition + 1 + previous.offset}`,
                 true,
               );
+
             if (replacement)
               addNode(replacement.node, position + 1 + replacement.offset);
           }
+
           if (replacement)
             cursor = replacement.offset + replacement.node.nodeSize;
         }
+
         if (next?.added) index++;
       } else {
         for (const child of part.value) {
@@ -231,7 +267,9 @@ function buildDecorations(
       }
     }
   };
+
   compare(base, state.doc, -1, -1);
+
   return DecorationSet.create(state.doc, result);
 }
 
@@ -255,20 +293,24 @@ export function createProposalDiff({
               const metadata:
                 | { beforeDeletion?: number | null; refresh?: boolean }
                 | undefined = transaction.getMeta(proposalDiffKey);
+
               let beforeDeletion =
                 previous.beforeDeletion === null
                   ? null
                   : transaction.mapping.map(previous.beforeDeletion);
+
               if (metadata?.beforeDeletion !== undefined)
                 beforeDeletion = metadata.beforeDeletion;
               else if (transaction.selectionSet && !transaction.docChanged)
                 beforeDeletion = null;
+
               if (
                 !transaction.docChanged &&
                 !metadata?.refresh &&
                 beforeDeletion === previous.beforeDeletion
               )
                 return previous;
+
               return {
                 decorations: buildDecorations(
                   state,
@@ -294,17 +336,21 @@ export function createProposalDiff({
                 return false;
               const position = view.state.selection.from;
               const selection = view.dom.ownerDocument.getSelection();
+
               if (!selection?.isCollapsed || !selection.rangeCount)
                 return false;
+
               const deleted = Array.from(
                 view.dom.querySelectorAll<HTMLElement>(
                   "[data-proposal-removed]",
                 ),
               ).find((element) => view.posAtDOM(element, 0) === position);
+
               if (!deleted) return false;
               const end = view.dom.ownerDocument.createRange();
               end.setStartAfter(deleted);
               end.collapse(true);
+
               if (selection.getRangeAt(0).compareBoundaryPoints(0, end) < 0)
                 return false;
               view.dispatch(
@@ -314,6 +360,7 @@ export function createProposalDiff({
               );
               const before = view.domAtPos(position, -1);
               selection.collapse(before.node, before.offset);
+
               return true;
             },
             handleDOMEvents: {
@@ -326,6 +373,7 @@ export function createProposalDiff({
                       beforeDeletion: null,
                     }),
                   );
+
                 return false;
               },
             },

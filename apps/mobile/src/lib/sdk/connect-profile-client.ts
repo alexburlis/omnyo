@@ -10,6 +10,7 @@ export function connectProfileClient(
 ): () => void {
   client.realtime.connect();
   const unbind = bindRealtimeToAppState(client.realtime, appState);
+
   return () => {
     unbind();
     client.realtime.disconnect();
